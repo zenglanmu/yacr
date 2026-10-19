@@ -8,7 +8,10 @@
 use cad_db::MeasurementRecord;
 use cad_domain::*;
 
-use crate::draw_tool::{DrawIntent, DrawPreview, DrawTool, DrawToolKind, DEFAULT_POLYGON_SIDES};
+use crate::draw_tool::{
+    DrawIntent, DrawPreview, DrawTool, DrawToolKind, ToolParameter, ToolParameterStore, ToolValue,
+    DEFAULT_POLYGON_SIDES,
+};
 use crate::layers::LayerOverrideSet;
 use crate::measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
 use crate::selection::SelectionSet;
@@ -47,17 +50,18 @@ pub struct SessionState {
     /// required to have; a create naming a layer the database does not contain
     /// is an explicit `InvalidInput` rather than a silent fallback.
     pub active_layer: LayerId,
-    /// The session POLYGON side count (ADR 0015 decision C).
+    /// The session-scoped typed tool parameters (ADR 0016 decision A).
     ///
-    /// Session/display state only — **never** a persisted config. The default is
-    /// **4**, matching AutoCAD's `POLYSIDES` initial value, and it is set only
-    /// through the typed `SetPolygonSides` request (range
-    /// [`crate::draw_tool::MIN_POLYGON_SIDES`]`..=`[`crate::draw_tool::MAX_POLYGON_SIDES`],
-    /// out of range is an explicit refusal, never a silent clamp). It survives a
-    /// tool switch and a cancel (sysvar semantics), is **not** reset by a
-    /// document edit, and returns to 4 only when the session is rebuilt (a new
-    /// blank document or a document replacement).
-    polygon_sides: u32,
+    /// Session/display state only — **never** a persisted config. The general
+    /// channel replaces ADR 0015 decision C's narrow `polygon_sides` sysvar: every
+    /// parameter starts at its documented default ([`ToolParameter::default_value`],
+    /// e.g. `PolygonSides` = 4, AutoCAD's `POLYSIDES` initial value) and is set
+    /// only through the typed `SetToolParameter` request (per-parameter range/kind
+    /// validation, out of range is an explicit refusal, never a silent clamp). The
+    /// values survive a tool switch and a cancel (sysvar semantics), are **not**
+    /// reset by a document edit, and return to the defaults only when the session
+    /// is rebuilt (a new blank document or a document replacement).
+    tool_parameters: ToolParameterStore,
     /// Whether object snapping is active for this session (ADR 0014).
     ///
     /// Session state only: toggling it writes no database and creates no
@@ -129,7 +133,7 @@ impl SessionState {
             generation: 0,
             backend: BackendChoice::Auto,
             active_layer: LayerId(0),
-            polygon_sides: DEFAULT_POLYGON_SIDES,
+            tool_parameters: ToolParameterStore::defaults(),
             snap_enabled: true,
             hover_preview: true,
             hover_dwell_ms: 20,
@@ -170,36 +174,63 @@ impl SessionState {
         self.hover_preview
     }
 
-    /// The session POLYGON side count (ADR 0015 decision C).
+    /// The current value of one session tool parameter (ADR 0016 decision A).
+    ///
+    /// Session/display state only; the store is initialised to each parameter's
+    /// documented default.
+    pub fn tool_parameter(&self, parameter: ToolParameter) -> ToolValue {
+        self.tool_parameters.get(parameter)
+    }
+
+    /// The session POLYGON side count (ADR 0015 decision C, now carried by the
+    /// general channel as [`ToolParameter::PolygonSides`]).
     ///
     /// Session/display state only; the default is [`DEFAULT_POLYGON_SIDES`] (4,
     /// AutoCAD's `POLYSIDES` initial value).
     pub fn polygon_sides(&self) -> u32 {
-        self.polygon_sides
+        match self.tool_parameter(ToolParameter::PolygonSides) {
+            ToolValue::Number(sides) => sides as u32,
+            // The store validates on write, so `PolygonSides` is always a number;
+            // the flag arm is unreachable and falls back to the documented default.
+            ToolValue::Flag(_) => DEFAULT_POLYGON_SIDES,
+        }
+    }
+
+    /// Set one session tool parameter through the single general channel.
+    ///
+    /// Authorizes the parameter's own create/edit command (all Work-only, so a
+    /// Viewer-mode set is an explicit `PermissionDenied`), then validates the
+    /// value against the parameter's kind and range with
+    /// [`ToolParameter::validate`] — an out-of-range or wrong-kind value is an
+    /// explicit `InvalidInput`, never a silent clamp, and never mutates the store.
+    /// The value is session state: a tool switch, a cancel and a document edit
+    /// leave it untouched; only a session rebuild resets it to the default.
+    pub fn set_tool_parameter(
+        &mut self,
+        parameter: ToolParameter,
+        value: ToolValue,
+    ) -> CadResult<()> {
+        self.authorize(authorizing_command(parameter))?;
+        parameter.validate(value)?;
+        self.tool_parameters.set(parameter, value);
+        Ok(())
     }
 
     /// Set the session POLYGON side count, refusing out-of-range input.
     ///
-    /// The range is [`crate::draw_tool::MIN_POLYGON_SIDES`]`..=`[`crate::draw_tool::MAX_POLYGON_SIDES`]
+    /// A thin convenience over [`SessionState::set_tool_parameter`] — the general
+    /// store is the single authority for validation and storage (this is **not** a
+    /// second entrance: the wire request, the IPC and the session channel are all
+    /// the general one). The range is
+    /// [`crate::draw_tool::MIN_POLYGON_SIDES`]`..=`[`crate::draw_tool::MAX_POLYGON_SIDES`]
     /// (AutoCAD's `POLYSIDES` legal range); an out-of-range value is an explicit
     /// `InvalidInput`, never a silent clamp. Work-only: the create commands (and
-    /// therefore this parameter) are refused in Viewer mode, matching
-    /// [`SessionState::begin_draw`]. The value is session state: a tool switch, a
-    /// cancel and a document edit leave it untouched; only a session rebuild
-    /// resets it to the default.
+    /// therefore this parameter) are refused in Viewer mode.
     pub fn set_polygon_sides(&mut self, sides: u32) -> CadResult<()> {
-        self.authorize(CommandId::CreatePolygon)?;
-        if !(crate::draw_tool::MIN_POLYGON_SIDES..=crate::draw_tool::MAX_POLYGON_SIDES)
-            .contains(&sides)
-        {
-            return Err(CadError::InvalidInput(format!(
-                "POLYGON side count must be between {} and {}, got {sides}",
-                crate::draw_tool::MIN_POLYGON_SIDES,
-                crate::draw_tool::MAX_POLYGON_SIDES
-            )));
-        }
-        self.polygon_sides = sides;
-        Ok(())
+        self.set_tool_parameter(
+            ToolParameter::PolygonSides,
+            ToolValue::Number(f64::from(sides)),
+        )
     }
 
     /// Enable or disable the idle hover entity preview for this session.
@@ -434,7 +465,7 @@ impl SessionState {
     /// none.
     fn annotate_draw_preview(&self, mut preview: DrawPreview) -> DrawPreview {
         preview.polygon_sides =
-            (preview.kind == DrawToolKind::Polygon).then_some(self.polygon_sides);
+            (preview.kind == DrawToolKind::Polygon).then_some(self.polygon_sides());
         preview
     }
 
@@ -517,5 +548,20 @@ impl SessionState {
                 "no measurement tool is active".into(),
             )),
         }
+    }
+}
+
+/// The Work-only command a [`ToolParameter`] is authorized against.
+///
+/// `PolygonSides` keeps its original authorization (`CreatePolygon`) exactly as
+/// before the migration. The other parameters belong to the edit commands of ADR
+/// 0016 (FILLET/CHAMFER/ARRAY/ALIGN), which do not exist yet (P4b–P4d); until they
+/// land, the channel is gated on an existing Work-only edit command so every
+/// parameter is refused in Viewer exactly like the create commands. This is a
+/// documented placeholder for the future commands, not a second authority.
+fn authorizing_command(parameter: ToolParameter) -> CommandId {
+    match parameter {
+        ToolParameter::PolygonSides => CommandId::CreatePolygon,
+        _ => CommandId::MoveEntities,
     }
 }

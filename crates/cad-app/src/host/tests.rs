@@ -13,4 +13,5 @@ mod polygon;
 mod snap;
 mod status;
 mod toggles;
+mod tool_parameter;
 mod tools;

@@ -90,16 +90,16 @@ impl HostCore {
                     .set_measurement_kind(kind)?;
                 InteractionOutcome::SelectionKindChanged
             }
-            // A retained session parameter changed (the POLYGON side count). The
-            // session validates the range and refuses out of range; the outcome
-            // reuses `SelectionKindChanged` — the existing "a retained
-            // tool/parameter choice changed" result — rather than widening the
-            // frozen `InteractionOutcome` enum for one parameter.
-            InteractionRequest::SetPolygonSides { sides } => {
+            // A retained session tool parameter changed (ADR 0016 decision A). The
+            // session validates the parameter's own range/kind and refuses out of
+            // range; the outcome reuses `SelectionKindChanged` — the existing "a
+            // retained tool/parameter choice changed" result — rather than widening
+            // the frozen `InteractionOutcome` enum for one parameter.
+            InteractionRequest::SetToolParameter { parameter, value } => {
                 self.controller
                     .borrow_mut()
                     .session
-                    .set_polygon_sides(sides)?;
+                    .set_tool_parameter(parameter, value)?;
                 InteractionOutcome::SelectionKindChanged
             }
             InteractionRequest::BeginPan => {

@@ -25,7 +25,8 @@ pub(super) use cad_app::interaction::{
 };
 #[allow(unused_imports)]
 pub(super) use cad_app::{
-    BackFacePolicy, Camera, CommandId, ImportProgressSnapshot, ImportTerminal,
+    BackFacePolicy, Camera, CommandId, ImportProgressSnapshot, ImportTerminal, ToolParameter,
+    ToolValue,
 };
 #[allow(unused_imports)]
 pub(super) use cad_domain::{

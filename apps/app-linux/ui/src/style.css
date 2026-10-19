@@ -453,9 +453,9 @@ button, input, select { font: inherit; color: inherit; }
 .status-toggle:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .status-toggle.is-on { background: var(--on); border-color: var(--on); color: #fff; }
 .status-toggle.is-disabled, .status-toggle:disabled { color: var(--text-disabled); cursor: not-allowed; }
-/* POLYGON side-count stepper: the same chip surface as .status-toggle, with an
-   inline label, a live value and two square step buttons. Present only while
-   POLYGON is the active tool. */
+/* Active-tool parameter stepper: the same chip surface as .status-toggle, with
+   an inline label, a live value and two square step buttons. Present only for a
+   parameter of the active tool whose value the host projects. */
 .status-stepper {
   display: inline-flex; align-items: center; gap: 3px;
   height: 20px; padding: 0 4px 0 7px;

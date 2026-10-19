@@ -640,6 +640,10 @@ fn distance(a: Point3, b: Point3) -> f64 {
     (a.x - b.x).hypot(a.y - b.y).hypot(a.z - b.z)
 }
 mod geometry;
+mod parameter;
+// The general typed tool-parameter model (ADR 0016 decision A); re-exported so
+// `crate::draw_tool::<name>` and the public `cad_app::<name>` paths resolve.
+pub use parameter::{ToolParameter, ToolParameterStore, ToolValue, ToolValueKind};
 // Re-exported so the historical `crate::draw_tool::<name>` paths and the public
 // `cad_app::circle_radius` (via `lib.rs`) stay valid for the callers that used the
 // pre-split module layout.

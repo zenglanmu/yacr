@@ -787,13 +787,15 @@ fn cad_tool_params_report_the_polygon_side_count_only_for_polygon() {
 }
 
 #[test]
-fn set_polygon_sides_accepts_the_range_refuses_out_of_range_and_is_visible_while_polygon_is_active()
-{
-    // ADR 0015 decision C: the session setter routes the typed
-    // `SetPolygonSides` request (one path only — no direct state write), so the
-    // host validates the 3..=1024 range and refuses out of range explicitly (no
-    // clamp) and refuses in Viewer mode (create commands are Work-only). A
-    // success is visible through the frozen `CadTool.params.sides`.
+fn set_tool_parameter_replaces_polygon_sides_on_one_wire_path() {
+    // ADR 0016 decision A: the narrow `SetPolygonSides` request is **gone**
+    // (compile-level — the old request no longer exists) and the side count now
+    // travels the one general `SetToolParameter` channel. The session routes the
+    // typed request (one path only — no direct state write), so the host validates
+    // the parameter's range/kind and refuses out of range explicitly (no clamp),
+    // refuses the fractional 4.5 (integer rule), and refuses in Viewer mode (the
+    // channel authorizes Work-only commands). A success is visible through the
+    // frozen `CadTool.params.sides`.
     let session = fresh_session();
     let sides_now = |session: &CadSession| {
         session
@@ -803,6 +805,9 @@ fn set_polygon_sides_accepts_the_range_refuses_out_of_range_and_is_visible_while
             .params
             .sides
     };
+    let set_sides = |session: &CadSession, sides: f64| {
+        session.set_tool_parameter(ToolParameter::PolygonSides, ToolValue::Number(sides))
+    };
 
     // No active tool carries no `params` block at all; the sysvar only surfaces
     // while POLYGON is the active capture.
@@ -811,24 +816,21 @@ fn set_polygon_sides_accepts_the_range_refuses_out_of_range_and_is_visible_while
     session.command("POLYGON").expect("POLYGON is admitted");
     assert_eq!(sides_now(&session), Some(4), "the default is 4");
 
-    // The whole accepted range round-trips through the typed request.
-    for accepted in [3u32, 4, 1024] {
-        session
-            .set_polygon_sides(accepted)
-            .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
+    // The whole accepted range round-trips through the one general request.
+    for accepted in [3.0, 4.0, 1024.0] {
+        set_sides(&session, accepted).unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
         assert_eq!(
             sides_now(&session),
-            Some(accepted),
+            Some(accepted as u32),
             "the setter is visible through CadTool.params.sides"
         );
     }
 
-    // Out of range is an explicit refusal with the value unchanged (never a
-    // silent clamp).
-    for refused in [2u32, 1025] {
-        let error = session
-            .set_polygon_sides(refused)
-            .expect_err("out-of-range must be refused, not clamped");
+    // The fractional 4.5 is refused (the integer rule, never rounded), and every
+    // out-of-range value is an explicit refusal with the value unchanged.
+    for refused in [4.5, 2.0, 1025.0] {
+        let error = set_sides(&session, refused)
+            .expect_err("a fractional or out-of-range value must be refused, not clamped");
         assert!(!error.is_empty(), "an explicit refusal, not empty success");
         assert_eq!(
             sides_now(&session),
@@ -852,13 +854,16 @@ fn set_polygon_sides_accepts_the_range_refuses_out_of_range_and_is_visible_while
         .borrow_mut()
         .set_mode(cad_app::AppMode::Viewer)
         .expect("switch to Viewer");
-    let error = session
-        .set_polygon_sides(5)
-        .expect_err("Viewer mode must refuse the create parameter");
+    let error = set_sides(&session, 5.0).expect_err("Viewer mode must refuse the create parameter");
     assert!(!error.is_empty(), "an explicit refusal, not empty success");
     assert_eq!(
-        session.core.controller.borrow().session.polygon_sides(),
-        1024,
+        session
+            .core
+            .controller
+            .borrow()
+            .session
+            .tool_parameter(ToolParameter::PolygonSides),
+        ToolValue::Number(1024.0),
         "a Viewer refusal leaves the value unchanged"
     );
 }

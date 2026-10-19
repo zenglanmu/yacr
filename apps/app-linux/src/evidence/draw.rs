@@ -13,11 +13,11 @@
 //!    must rise by exactly one and `tool` must return to `null`. This is
 //!    multi-point capture plus the Enter-terminated commit on the real host.
 //! 2. **POLYGON with a changed side count**: call the real IPC
-//!    `cad_set_polygon_sides` with a non-default value (6), start `POLYGON`,
-//!    click centre + radius, `CONFIRM`, and read `entityCount` +1 and `tool`
-//!    `null`. Separately it asserts the side count is visible while the tool is
-//!    active (`tool.params.sides == 6`), and that an out-of-range value (2) is
-//!    **refused** with the real error text and leaves the visible value
+//!    `cad_set_tool_parameter` with a non-default value (6) for `polygonSides`,
+//!    start `POLYGON`, click centre + radius, `CONFIRM`, and read `entityCount` +1
+//!    and `tool` `null`. Separately it asserts the side count is visible while the
+//!    tool is active (`tool.params.sides == 6`), and that an out-of-range value (2)
+//!    is **refused** with the real error text and leaves the visible value
 //!    unchanged.
 //! 3. **POINT visibility**: start `POINT`, click one point, `CONFIRM`, read
 //!    `entityCount` +1, and leave the created POINT on screen so an external
@@ -60,7 +60,7 @@ pub fn draw_evidence_enabled() -> bool {
 /// spawn failure (a failed spawn is logged; the run continues unchanged).
 ///
 /// The thread only dispatches `Webview::eval` scripts that call the public
-/// `cad_status`/`cad_command`/`cad_set_polygon_sides` commands and dispatch
+/// `cad_status`/`cad_command`/`cad_set_tool_parameter` commands and dispatch
 /// synthetic DOM pointer events. No command/session logic is changed and no GPU
 /// state is touched.
 ///
@@ -94,11 +94,12 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
 /// * **PLINE**: t=12s start `PLINE`; t=13s read (capture `draw.polyline`);
 ///   t=14/15/16s click three world points; t=17s read (`points` = 3); t=18s
 ///   `CONFIRM`; t=19s read (`entityCount` +1, `tool` `null`);
-/// * **POLYGON**: t=21s `cad_set_polygon_sides` 6; t=22s start `POLYGON`; t=23s
-///   read (`tool.params.sides` = 6); t=24s `cad_set_polygon_sides` 2 (out of
-///   range); t=25s read (refusal in `error`, `sides` still 6); t=26/27s click
-///   centre + radius; t=28s read (`points` = 2); t=29s `CONFIRM`; t=30s read
-///   (`entityCount` +1, `tool` `null`);
+/// * **POLYGON**: t=21s `cad_set_tool_parameter polygonSides=6`; t=22s start
+///   `POLYGON`; t=23s read (`tool.params.sides` = 6); t=24s
+///   `cad_set_tool_parameter polygonSides=2` (out of range); t=25s read (refusal
+///   in `error`, `sides` still 6); t=26/27s click centre + radius; t=28s read
+///   (`points` = 2); t=29s `CONFIRM`; t=30s read (`entityCount` +1, `tool`
+///   `null`);
 /// * **POINT**: t=32s start `POINT`; t=33s click one world point; t=34s read
 ///   (`points` = 1); t=35s `CONFIRM`; t=36s read (`entityCount` +1, `tool`
 ///   `null`) — the POINT is now on screen for an external `--capture-at 37`;
@@ -148,8 +149,8 @@ fn run_draw_evidence(webview: tauri::Webview) {
 
     // POLYGON: set a non-default side count, prove it is visible, prove an
     // out-of-range value is refused without changing it, then commit.
-    schedule_draw(&start, 21, "cad_set_polygon_sides sides=6", || {
-        webview.eval(draw_set_sides_js(6))
+    schedule_draw(&start, 21, "cad_set_tool_parameter polygonSides=6", || {
+        webview.eval(draw_set_parameter_number_js("polygonSides", 6.0, "sides_6"))
     });
     schedule_draw(&start, 22, "cad_command POLYGON", || {
         webview.eval(draw_start_js("POLYGON"))
@@ -163,8 +164,8 @@ fn run_draw_evidence(webview: tauri::Webview) {
     schedule_draw(
         &start,
         24,
-        "cad_set_polygon_sides sides=2 (out of range)",
-        || webview.eval(draw_set_sides_js(2)),
+        "cad_set_tool_parameter polygonSides=2 (out of range)",
+        || webview.eval(draw_set_parameter_number_js("polygonSides", 2.0, "sides_2")),
     );
     schedule_draw(
         &start,
@@ -292,9 +293,15 @@ fn draw_start_js(tool: &str) -> String {
     DRAW_START_TEMPLATE.replace("__TOOL__", tool)
 }
 
-/// Build the `cad_set_polygon_sides` script for one typed side count.
-fn draw_set_sides_js(sides: u32) -> String {
-    DRAW_SET_SIDES_TEMPLATE.replace("__SIDES__", &sides.to_string())
+/// Build the `cad_set_tool_parameter` script for one numeric parameter value.
+///
+/// `__PARAM__` is the parameter's stable machine key (e.g. `polygonSides`),
+/// `__NUMBER__` the numeric value and `__LABEL__` the report slot name.
+fn draw_set_parameter_number_js(parameter: &str, value: f64, label: &str) -> String {
+    DRAW_SET_PARAMETER_TEMPLATE
+        .replace("__PARAM__", parameter)
+        .replace("__NUMBER__", &value.to_string())
+        .replace("__LABEL__", label)
 }
 
 /// Build one synthetic click at a **world** point: the script reads the real
@@ -369,28 +376,32 @@ const DRAW_START_TEMPLATE: &str = r#"
 })()
 "#;
 
-/// Call the real `cad_set_polygon_sides` IPC with one typed value (`__SIDES__`).
+/// Call the real `cad_set_tool_parameter` IPC with one numeric value.
 ///
-/// This deliberately bypasses the frontend range guard and reaches the host:
-/// the host admits it into the bounded queue and the owner tick applies
-/// `CadSession::set_polygon_sides`, whose authoritative range check refuses an
-/// out-of-range value explicitly (never a silent clamp). `{accepted:true}` is
-/// queue admission only; the real outcome surfaces through `cad_status.error`.
-const DRAW_SET_SIDES_TEMPLATE: &str = r#"
+/// `__PARAM__` is the parameter's stable machine key (`polygonSides` here),
+/// `__NUMBER__` the numeric value, `__LABEL__` the report slot name (e.g.
+/// `sides_6`). This deliberately bypasses the frontend range guard and reaches the
+/// host: the host admits it into the bounded queue and the owner tick applies
+/// `CadSession::set_tool_parameter`, whose authoritative per-parameter check
+/// refuses an out-of-range value explicitly (never a silent clamp).
+/// `{accepted:true}` is queue admission only; the real outcome surfaces through
+/// `cad_status.error`.
+const DRAW_SET_PARAMETER_TEMPLATE: &str = r#"
 (function () {
   var d = window.__yacr_draw = window.__yacr_draw || {};
+  var label = '__LABEL__';
   try {
     var internals = window.__TAURI_INTERNALS__;
     if (!internals || typeof internals.invoke !== 'function') {
       d.sides_failed = 'no-tauri-internals';
       return 'no-tauri-internals';
     }
-    internals.invoke('cad_set_polygon_sides', { sides: __SIDES__ }).then(function (ack) {
-      d['sides_' + __SIDES__ + '_ack'] = (ack && typeof ack.accepted !== 'undefined')
+    internals.invoke('cad_set_tool_parameter', { parameter: '__PARAM__', number: __NUMBER__ }).then(function (ack) {
+      d[label + '_ack'] = (ack && typeof ack.accepted !== 'undefined')
         ? 'accepted=' + ack.accepted
         : String(JSON.stringify(ack));
-    }).catch(function (err) { d['sides_' + __SIDES__ + '_failed'] = String(err); });
-    return 'set-sides-dispatched';
+    }).catch(function (err) { d[label + '_failed'] = String(err); });
+    return 'set-parameter-dispatched';
   } catch (err) {
     try { d.sides_failed = 'fatal:' + err; } catch (_) {}
     return 'error:' + err;

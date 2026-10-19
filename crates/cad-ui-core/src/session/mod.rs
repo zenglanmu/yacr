@@ -30,7 +30,9 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
 use cad_app::input::CanvasMetrics;
-use cad_app::{CommandPayload, DrawToolKind, MeasurementToolKind, ToolSnapshot};
+use cad_app::{
+    CommandPayload, DrawToolKind, MeasurementToolKind, ToolParameter, ToolSnapshot, ToolValue,
+};
 use cad_domain::{CadResult, DocumentIdentity};
 use cad_engine::protocol::{EngineClient, EngineRequest, RequestError, RequestId, StatusMessage};
 use cad_engine::render::RenderSessionHandle;
@@ -296,21 +298,29 @@ impl CadSession {
         }
     }
 
-    /// Set the session POLYGON side count (ADR 0015 decision C) through the
-    /// single typed interaction path.
+    /// Set one session tool parameter (ADR 0016 decision A) through the single
+    /// typed interaction path.
     ///
-    /// The value travels as [`InteractionRequest::SetPolygonSides`] — the same
+    /// The value travels as [`InteractionRequest::SetToolParameter`] — the same
     /// engine queue, admission and completion discipline every other interaction
-    /// uses — so this session never writes the authoritative parameter itself:
-    /// the host (`cad-app`) owns it, exactly one path in. The host validates the
-    /// range (`cad_app::draw_tool::MIN_POLYGON_SIDES`..=`MAX_POLYGON_SIDES`,
-    /// 3..=1024) and refuses out of range **explicitly** (never a silent clamp),
-    /// and it refuses in **Viewer** mode because setting the parameter authorizes
-    /// `CommandId::CreatePolygon` (Work-only). Either refusal is returned here as
-    /// the real completion error, never a silent no-op; on success the value is
-    /// visible through [`CadToolParams::sides`] while POLYGON is active.
-    pub fn set_polygon_sides(&self, sides: u32) -> Result<(), String> {
-        self.submit_interactions(vec![InteractionRequest::SetPolygonSides { sides }])
+    /// uses — so this session never writes the authoritative parameter itself: the
+    /// host (`cad-app`) owns it, exactly one path in. The host validates the
+    /// parameter's own kind and range (e.g. `PolygonSides`
+    /// `cad_app::draw_tool::MIN_POLYGON_SIDES`..=`MAX_POLYGON_SIDES`, 3..=1024, an
+    /// integer) and refuses a bad value **explicitly** (never a silent clamp), and
+    /// it refuses in **Viewer** mode because the parameter channel authorizes
+    /// Work-only create/edit commands. Either refusal is returned here as the real
+    /// completion error, never a silent no-op; on success the value is visible
+    /// through [`CadToolParams::sides`] while POLYGON is active.
+    pub fn set_tool_parameter(
+        &self,
+        parameter: ToolParameter,
+        value: ToolValue,
+    ) -> Result<(), String> {
+        self.submit_interactions(vec![InteractionRequest::SetToolParameter {
+            parameter,
+            value,
+        }])
     }
 
     /// Apply a fixed zoom step about the **viewport centre**.

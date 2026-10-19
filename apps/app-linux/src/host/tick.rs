@@ -412,15 +412,15 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
     let mut last_input_seq: Option<u64> = None;
     let mut input_age_us: Option<u128> = None;
     if cad_mode {
-        let (commands, polygon_sides, inputs) = {
+        let (commands, tool_parameters, inputs) = {
             let mut state = lock(shared);
             (
                 std::mem::take(&mut state.shell.cad_commands),
-                std::mem::take(&mut state.cad_polygon_sides),
+                std::mem::take(&mut state.cad_tool_parameters),
                 std::mem::take(&mut state.shell.cad_inputs),
             )
         };
-        let queued = commands.len() + polygon_sides.len() + inputs.len();
+        let queued = commands.len() + tool_parameters.len() + inputs.len();
         last_input_seq = inputs.last().map(|input| input.sequence);
         input_age_us = last_input_seq.and_then(|sequence| {
             let state = lock(shared);
@@ -444,14 +444,14 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                             eprintln!("[probe] cad command rejected: {error}");
                         }
                     }
-                    // Typed POLYGON side-count requests: routed through the one
+                    // Typed tool-parameter requests: routed through the one
                     // session path, applied before this batch's inputs so a
                     // stepper change takes effect on the same batch. A refusal
-                    // (out of range / Viewer mode) is the session's real error,
-                    // surfaced through `cad_status.error`.
-                    for sides in &polygon_sides {
-                        if let Err(error) = session.set_polygon_sides(*sides) {
-                            eprintln!("[probe] cad polygon sides rejected: {error}");
+                    // (out of range / wrong kind / Viewer mode) is the session's
+                    // real error, surfaced through `cad_status.error`.
+                    for (parameter, value) in &tool_parameters {
+                        if let Err(error) = session.set_tool_parameter(*parameter, *value) {
+                            eprintln!("[probe] cad tool parameter rejected: {error}");
                         }
                     }
                     for input in &inputs {

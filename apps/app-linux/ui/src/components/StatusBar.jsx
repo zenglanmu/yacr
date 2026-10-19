@@ -5,7 +5,7 @@ import React from 'react';
 import { Icon } from '../icons.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { commandById, toolLabelKey } from '../commands.mjs';
-import { dispatchHoverPreview, dispatchObjectSnap, hoverPreviewToggle, importProgressView, objectSnapToggle, polygonSidesView, snapKindLabelKey } from '../cad.mjs';
+import { dispatchHoverPreview, dispatchObjectSnap, hoverPreviewToggle, importProgressView, objectSnapToggle, snapKindLabelKey, toolParameterViews } from '../cad.mjs';
 
 // The drafting aids this build still has only as placeholders. OSNAP is a real
 // toggle (ADR 0014 A.4) and is rendered separately below.
@@ -26,49 +26,67 @@ function Toggle({ label, on, onClick, title, disabled }) {
   );
 }
 
-// The POLYGON side-count stepper. It is a pure view over the host value (no
-// local mirror): the rendered number is always the one the last `cad_status`
-// carried, and a step only dispatches the change. The effective target — the
-// status value plus the bounded pending delta of steps the host has not echoed
-// back yet — drives the `-`/`+` targets and the disabled state, so rapid clicks
-// compose and the buttons stop at the 3..=1024 bounds and the pending cap while
-// the host is not admitting commands. Rendered only while POLYGON is the active
-// tool with a real value — nothing at all otherwise.
-function PolygonSides({ view, onStep }) {
+// The bounded numeric stepper for one active-tool parameter. It is a pure view
+// over the host value (no local mirror): the rendered number is always the one
+// the last `cad_status` carried, and a step only dispatches the change. The
+// effective target — the status value plus the bounded pending delta of steps
+// the host has not echoed back yet — drives the `-`/`+` targets and the disabled
+// state, so rapid clicks compose and the buttons stop at the parameter's own
+// bounds (and the pending cap) while the host is not admitting commands. Rendered
+// only while the owning tool is active with a real projected value — nothing at
+// all otherwise.
+function ParameterStepper({ view, onStep }) {
   const { t } = useI18n();
+  const name = t(view.labelKey);
   const stepDown = view.disabled || !view.canDecrement;
   const stepUp = view.disabled || !view.canIncrement;
   return (
     <span
       className={['status-stepper', view.disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')}
       role="group"
-      aria-label={t('status.polygon_sides')}
-      title={t('status.polygon_sides.hint')}
+      aria-label={name}
+      title={t(view.hintKey)}
     >
-      <Icon name="polygon" size={12} />
-      <span className="status-stepper__label" aria-hidden="true">{t('status.polygon_sides')}</span>
+      {view.icon ? <Icon name={view.icon} size={12} /> : null}
+      <span className="status-stepper__label" aria-hidden="true">{name}</span>
       <button
         type="button"
         className="status-stepper__button"
-        aria-label={t('status.polygon_sides.decrease')}
-        title={t('status.polygon_sides.decrease')}
+        aria-label={t('status.tool_parameter.decrease', { name })}
+        title={t('status.tool_parameter.decrease', { name })}
         disabled={stepDown}
-        onClick={stepDown ? undefined : () => onStep(view.decrement)}
+        onClick={stepDown ? undefined : () => onStep(view.key, view.decrement)}
       >
         <Icon name="minus" size={11} />
       </button>
-      <span className="status-stepper__value mono">{view.sides}</span>
+      <span className="status-stepper__value mono">{view.text}</span>
       <button
         type="button"
         className="status-stepper__button"
-        aria-label={t('status.polygon_sides.increase')}
-        title={t('status.polygon_sides.increase')}
+        aria-label={t('status.tool_parameter.increase', { name })}
+        title={t('status.tool_parameter.increase', { name })}
         disabled={stepUp}
-        onClick={stepUp ? undefined : () => onStep(view.increment)}
+        onClick={stepUp ? undefined : () => onStep(view.key, view.increment)}
       >
         <Icon name="plus" size={11} />
       </button>
     </span>
+  );
+}
+
+// The toggle chip for one active-tool flag parameter, using the same status-bar
+// chip vocabulary as OSNAP / hover preview. It dispatches the *opposite* of the
+// value the last `cad_status` carried — never a fabricated one.
+function ParameterFlag({ view, onToggle }) {
+  const { t } = useI18n();
+  return (
+    <Toggle
+      label={t(view.labelKey)}
+      on={view.value}
+      disabled={view.disabled}
+      title={t(view.hintKey)}
+      onClick={() => onToggle(view.key, view.next)}
+    />
   );
 }
 
@@ -100,12 +118,12 @@ export function StatusBar() {
   // (`status.snapKind`). Without a candidate the key is null, so nothing extra
   // is rendered — never a placeholder chip.
   const snapKindKey = snapKindLabelKey(shell.status);
-  // The POLYGON side count is a real tool parameter (`status.tool.params.sides`),
-  // never a local mirror. It exists only while POLYGON is the active tool with a
-  // real in-range value; any other tool or a missing/`null` field renders nothing
-  // at all. Admission mirrors the toggle chips (`canCommand`). The bounded
-  // pending delta composes rapid steps without moving the displayed number.
-  const polygonSides = polygonSidesView(shell.status, shell.canCommand('POLYGON'), shell.polygonSidesPending);
+  // The active tool's typed parameters (`status.tool.params`), never a local
+  // mirror: only the ones with a real projected value render, so a tool that
+  // projects none shows no control at all. Admission mirrors the toggle chips
+  // (`canCommand` on the owning tool's command). The bounded pending delta
+  // composes rapid numeric steps without moving the displayed number.
+  const toolParameters = toolParameterViews(shell.status, shell.canCommand, shell.toolParameterPending);
   // Announce only the phase here (rare changes); the steadily-incrementing
   // count/bytes stay in the document-tab bar, so a polite live region never
   // chatters on every tick.
@@ -140,9 +158,9 @@ export function StatusBar() {
         </span>
       ) : null}
 
-      {polygonSides ? (
-        <PolygonSides view={polygonSides} onStep={target => shell.stepPolygonSides(target)} />
-      ) : null}
+      {toolParameters.map(view => (view.kind === 'flag'
+        ? <ParameterFlag key={view.key} view={view} onToggle={shell.toggleToolParameter} />
+        : <ParameterStepper key={view.key} view={view} onStep={shell.stepToolParameter} />))}
 
       <div className="statusbar__group" role="group" aria-label={t('status.drafting')}>
         {DRAFTING.map(id => {

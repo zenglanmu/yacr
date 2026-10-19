@@ -1,5 +1,5 @@
 use super::admission::{cad_present_admission, layout_needs_revalidate, CadPresentAdmission};
-use super::commands::{admit_polygon_sides, CAD_POLYGON_SIDES_CAP};
+use super::commands::{admit_tool_parameter, parse_tool_parameter, CAD_TOOL_PARAMETER_CAP};
 use super::options::{start_maximized, LaunchOptions};
 use super::postload::{
     label_file_name, pan_report_matches_run, parse_pan_report, parse_pan_run_id,
@@ -189,34 +189,109 @@ fn start_maximized_defaults_true_and_opts_out_explicitly() {
 }
 
 #[test]
-fn polygon_sides_admission_is_typed_bounded_and_refuses_probe_mode() {
-    // The `cad_set_polygon_sides` ack path: the value is only *queued* for the
+fn tool_parameter_admission_is_typed_bounded_and_refuses_probe_mode() {
+    // The `cad_set_tool_parameter` ack path: the value is only *queued* for the
     // owner thread (never applied off the main thread), refused while the CAD
-    // session is disabled (probe mode), and bounded. Range/Viewer validation is
-    // the session's authority, applied on drain, not here.
-    let mut queue: Vec<u32> = Vec::new();
+    // session is disabled (probe mode), and bounded. Range/kind/Viewer validation
+    // is the session's authority, applied on drain, not here.
+    use cad_app::{ToolParameter, ToolValue};
+    let mut queue: Vec<(ToolParameter, ToolValue)> = Vec::new();
     assert_eq!(
-        admit_polygon_sides(&mut queue, false, 4).unwrap_err(),
+        admit_tool_parameter(
+            &mut queue,
+            false,
+            ToolParameter::PolygonSides,
+            ToolValue::Number(4.0)
+        )
+        .unwrap_err(),
         "CAD is disabled in probe mode"
     );
     assert!(queue.is_empty(), "a probe-mode refusal queues nothing");
 
-    // Accepted values are queued verbatim — no clamp, no range check here.
-    for sides in [3u32, 4, 1024] {
-        admit_polygon_sides(&mut queue, true, sides).expect("accepted");
-    }
-    assert_eq!(queue, vec![3, 4, 1024]);
+    // Accepted values are queued verbatim — no clamp, no range/kind check here.
+    admit_tool_parameter(
+        &mut queue,
+        true,
+        ToolParameter::PolygonSides,
+        ToolValue::Number(3.0),
+    )
+    .expect("accepted");
+    admit_tool_parameter(
+        &mut queue,
+        true,
+        ToolParameter::PolygonSides,
+        ToolValue::Number(4.0),
+    )
+    .expect("accepted");
+    // A kind-mismatched value is *also* admitted verbatim here: the session
+    // refuses it on drain, exactly like an out-of-range number.
+    admit_tool_parameter(
+        &mut queue,
+        true,
+        ToolParameter::PolygonSides,
+        ToolValue::Flag(true),
+    )
+    .expect("accepted verbatim; the session refuses the mismatch on drain");
+    assert_eq!(
+        queue,
+        vec![
+            (ToolParameter::PolygonSides, ToolValue::Number(3.0)),
+            (ToolParameter::PolygonSides, ToolValue::Number(4.0)),
+            (ToolParameter::PolygonSides, ToolValue::Flag(true)),
+        ]
+    );
 
     // Bounded: filling to capacity then one more is an explicit refusal.
     queue.clear();
-    for _ in 0..CAD_POLYGON_SIDES_CAP {
-        admit_polygon_sides(&mut queue, true, 6).expect("within capacity");
+    for _ in 0..CAD_TOOL_PARAMETER_CAP {
+        admit_tool_parameter(
+            &mut queue,
+            true,
+            ToolParameter::PolygonSides,
+            ToolValue::Number(6.0),
+        )
+        .expect("within capacity");
     }
-    assert_eq!(queue.len(), CAD_POLYGON_SIDES_CAP);
+    assert_eq!(queue.len(), CAD_TOOL_PARAMETER_CAP);
     assert_eq!(
-        admit_polygon_sides(&mut queue, true, 6).unwrap_err(),
-        "CAD polygon-sides queue is full"
+        admit_tool_parameter(
+            &mut queue,
+            true,
+            ToolParameter::PolygonSides,
+            ToolValue::Number(6.0)
+        )
+        .unwrap_err(),
+        "CAD tool-parameter queue is full"
     );
+}
+
+#[test]
+fn tool_parameter_wire_shape_parses_the_key_and_exactly_one_value() {
+    // The exact `cad_set_tool_parameter` wire shape: a stable machine-key string
+    // plus exactly one of `number`/`flag`. An unknown key or a malformed value
+    // pairing is refused before anything is queued.
+    use cad_app::{ToolParameter, ToolValue};
+
+    assert_eq!(
+        parse_tool_parameter("polygonSides", Some(6.0), None).unwrap(),
+        (ToolParameter::PolygonSides, ToolValue::Number(6.0))
+    );
+    assert_eq!(
+        parse_tool_parameter("alignScale", None, Some(true)).unwrap(),
+        (ToolParameter::AlignScale, ToolValue::Flag(true))
+    );
+    assert_eq!(
+        parse_tool_parameter("arrayFillAngle", Some(90.0), None).unwrap(),
+        (ToolParameter::ArrayFillAngle, ToolValue::Number(90.0))
+    );
+
+    // An unknown key is refused with the key named.
+    assert!(parse_tool_parameter("nope", Some(1.0), None)
+        .unwrap_err()
+        .contains("nope"));
+    // Neither value, or both, is refused.
+    assert!(parse_tool_parameter("polygonSides", None, None).is_err());
+    assert!(parse_tool_parameter("polygonSides", Some(1.0), Some(true)).is_err());
 }
 
 #[test]

@@ -39,47 +39,84 @@ pub fn cad_command(
     Ok(CadCommandAck { accepted: true })
 }
 
-/// Bounded capacity of the typed POLYGON side-count queue. It reuses the CAD
-/// command queue's capacity so both admissions share one bound.
-pub const CAD_POLYGON_SIDES_CAP: usize = cad_ui_core::shell::CAD_COMMAND_CAP;
+/// Bounded capacity of the typed tool-parameter queue. It reuses the CAD command
+/// queue's capacity so both admissions share one bound.
+pub const CAD_TOOL_PARAMETER_CAP: usize = cad_ui_core::shell::CAD_COMMAND_CAP;
 
-/// Admit one typed POLYGON side count into the bounded main-thread queue.
+/// Parse the wire form of a `cad_set_tool_parameter` request into the typed pair.
+///
+/// The wire carries the parameter's **stable machine key** (camelCase, e.g.
+/// `"polygonSides"`) plus **exactly one** of `number`/`flag`. An unknown key, or
+/// neither/both value fields, is an explicit refusal (a malformed request never
+/// reaches the queue). The parameter's own range/kind is **not** checked here:
+/// that is the host session's authority (`CadSession::set_tool_parameter`), applied
+/// on the owner thread when the tick drains the queue.
+pub fn parse_tool_parameter(
+    parameter: &str,
+    number: Option<f64>,
+    flag: Option<bool>,
+) -> Result<(cad_app::ToolParameter, cad_app::ToolValue), String> {
+    let parameter = cad_app::ToolParameter::from_key(parameter)
+        .ok_or_else(|| format!("unknown tool parameter '{parameter}'"))?;
+    match (number, flag) {
+        (Some(number), None) => Ok((parameter, cad_app::ToolValue::Number(number))),
+        (None, Some(flag)) => Ok((parameter, cad_app::ToolValue::Flag(flag))),
+        (None, None) => Err("cad_set_tool_parameter needs exactly one of number/flag".into()),
+        (Some(_), Some(_)) => {
+            Err("cad_set_tool_parameter takes exactly one of number/flag, not both".into())
+        }
+    }
+}
+
+/// Admit one typed tool parameter into the bounded main-thread queue.
 ///
 /// Pure and toolkit-free so the admission discipline (disabled CAD session,
 /// bounded queue) is directly testable. The value is deliberately **not**
-/// validated or clamped here: the 3..=1024 range and the Viewer-mode refusal are
-/// the host session's authority (`CadSession::set_polygon_sides`), applied on the
-/// owner thread when the tick drains this queue, and the real outcome surfaces
-/// through `cad_status.error` — exactly like `cad_command`.
-pub fn admit_polygon_sides(queue: &mut Vec<u32>, cad_mode: bool, sides: u32) -> Result<(), String> {
+/// validated or clamped here: the parameter's own range/kind and the Viewer-mode
+/// refusal are the host session's authority (`CadSession::set_tool_parameter`),
+/// applied on the owner thread when the tick drains this queue, and the real
+/// outcome surfaces through `cad_status.error` — exactly like `cad_command`.
+pub fn admit_tool_parameter(
+    queue: &mut Vec<(cad_app::ToolParameter, cad_app::ToolValue)>,
+    cad_mode: bool,
+    parameter: cad_app::ToolParameter,
+    value: cad_app::ToolValue,
+) -> Result<(), String> {
     if !cad_mode {
         return Err("CAD is disabled in probe mode".into());
     }
-    if queue.len() >= CAD_POLYGON_SIDES_CAP {
-        return Err("CAD polygon-sides queue is full".into());
+    if queue.len() >= CAD_TOOL_PARAMETER_CAP {
+        return Err("CAD tool-parameter queue is full".into());
     }
-    queue.push(sides);
+    queue.push((parameter, value));
     Ok(())
 }
 
-/// `cad_set_polygon_sides` command: admit one typed POLYGON side count into the
-/// bounded main-thread queue (ADR 0015 decision C).
+/// `cad_set_tool_parameter` command: admit one typed tool parameter into the
+/// bounded main-thread queue (ADR 0016 decision A).
 ///
-/// This is a **narrow typed** entry point, deliberately not an argument added to
-/// `cad_command` (command-line text-payload parsing was rejected in an earlier
-/// phase). No session state is touched off the main thread: the value is queued
-/// and the owner tick routes it through `CadSession::set_polygon_sides`, whose
-/// authoritative host validates the range and Viewer mode. `{accepted:true}`
-/// means **queued**, not completed; the real outcome (including an explicit
-/// refusal) surfaces through `cad_status.error`.
+/// This is the **single** general parameter entry point that replaces ADR 0015
+/// decision C's `cad_set_polygon_sides`. It is a typed IPC, deliberately not an
+/// argument added to `cad_command` (command-line text-payload parsing was rejected
+/// in an earlier phase). The wire shape is `{ parameter: <key>, number?: <f64>,
+/// flag?: <bool> }` with exactly one of `number`/`flag`; a malformed request (an
+/// unknown key, or neither/both value fields) is refused immediately. No session
+/// state is touched off the main thread: the value is queued and the owner tick
+/// routes it through `CadSession::set_tool_parameter`, whose authoritative host
+/// validates the parameter's range/kind and Viewer mode. `{accepted:true}` means
+/// **queued**, not completed; the real outcome (including an explicit refusal)
+/// surfaces through `cad_status.error`.
 #[tauri::command]
-pub fn cad_set_polygon_sides(
+pub fn cad_set_tool_parameter(
     shared: tauri::State<'_, ProbeShared>,
-    sides: u32,
+    parameter: String,
+    number: Option<f64>,
+    flag: Option<bool>,
 ) -> Result<CadCommandAck, String> {
+    let (parameter, value) = parse_tool_parameter(&parameter, number, flag)?;
     let mut state = lock(&shared.0);
     let cad_mode = state.shell.cad_mode;
-    admit_polygon_sides(&mut state.cad_polygon_sides, cad_mode, sides)?;
+    admit_tool_parameter(&mut state.cad_tool_parameters, cad_mode, parameter, value)?;
     Ok(CadCommandAck { accepted: true })
 }
 

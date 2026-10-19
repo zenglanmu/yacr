@@ -134,131 +134,318 @@ export function dispatchObjectSnap(runCommand) {
   runCommand(OBJECT_SNAP_COMMAND);
 }
 
-/** The single IPC that sets the POLYGON tool's side count. */
-export const POLYGON_SIDES_COMMAND = 'cad_set_polygon_sides';
-
-// AutoCAD's `POLYSIDES` range. The host refuses a value outside it explicitly
-// (never clamping), so the stepper only ever offers values inside it.
-export const POLYGON_SIDES_MIN = 3;
-export const POLYGON_SIDES_MAX = 1024;
-
 /**
- * Status-bar view for the POLYGON side-count control.
+ * The one general typed tool-parameter IPC (ADR 0016 decision A). It replaces
+ * the removed narrow, polygon-only side-count IPC: every parameter now travels
+ * this channel, carrying its stable machine key plus exactly one of
+ * `number`/`flag`.
  *
- * The host publishes the live value at `status.tool.params.sides` while POLYGON
- * is the active tool (`status.tool.key === 'draw.polygon'`); for every other
- * tool that field is `null`. Nothing is rendered unless POLYGON is active with a
- * real integer in the supported `3..=1024` range, so a missing/`null`/malformed
- * or out-of-range value yields `null` rather than an invented default.
- *
- * `admitted` is the shell's normal command admission (`canCommand`), which
- * already accounts for a pending command and a loading/unavailable host or an
- * unloaded vocabulary — the same gate the toggle chips use.
- *
- * `sides` (the *rendered* number) is always the real status value and is never
- * optimistically advanced. `pending` is the bounded delta of steps the host has
- * not echoed back yet (see [`stepPolygonPending`]): it only shifts the effective
- * target the next step builds on and the button bounds, so a rapid double-click
- * composes into `sides + 2` while the displayed number still follows the status.
+ * `{accepted:true}` means **queued**, exactly like `cad_command` — never
+ * completed. A malformed request (an unknown key, or neither/both value fields)
+ * rejects with a string; the per-parameter range/kind and Viewer-mode refusals
+ * surface later through `cad_status.error`.
  */
-export function polygonSidesView(status, admitted, pending = null) {
-  const tool = status?.tool;
-  if (!tool || typeof tool !== 'object' || tool.key !== 'draw.polygon') return null;
-  const sides = tool.params?.sides;
-  if (!Number.isSafeInteger(sides) || sides < POLYGON_SIDES_MIN || sides > POLYGON_SIDES_MAX) return null;
-  const delta = pending && pending.key === tool.key && pending.base === sides ? pending.delta : 0;
-  const effective = sides + delta;
-  return {
-    sides,
-    delta,
-    effective,
-    disabled: admitted !== true,
-    // A step is offered only while the *effective* target stays inside the range
-    // and the pending magnitude is under the cap: it is disabled, never clamped
-    // into a different value.
-    canDecrement: effective > POLYGON_SIDES_MIN && delta > -POLYGON_SIDES_PENDING_CAP,
-    canIncrement: effective < POLYGON_SIDES_MAX && delta < POLYGON_SIDES_PENDING_CAP,
-    decrement: effective - 1,
-    increment: effective + 1,
-  };
-}
+export const TOOL_PARAMETER_COMMAND = 'cad_set_tool_parameter';
 
-// Cap on the pending delta magnitude. 10 keeps a stuck queue from accumulating
+// Cap on the pending delta magnitude, shared by every numeric parameter (it
+// replaces the POLYGON-only cap). 10 keeps a stuck queue from accumulating
 // unbounded intent — at most ten un-echoed steps, i.e. a ~2.5 s burst at the
 // 250 ms poll — while staying well above a normal click cadence, so the host
 // virtually always catches up before the cap is ever felt.
-export const POLYGON_SIDES_PENDING_CAP = 10;
+export const TOOL_PARAMETER_PENDING_CAP = 10;
+
+// The host's own per-parameter value predicates (`cad_app::ToolParameter::validate`,
+// ADR 0016 decision A), mirrored here so the UI never offers a value the host
+// will refuse. The host refuses explicitly and never clamps, so an unoffered
+// value is simply not shown as a step (and never silently rewritten).
+const integerInRange = (min, max) => value => Number.isSafeInteger(value) && value >= min && value <= max;
+const integerAtLeast = min => value => Number.isSafeInteger(value) && value >= min;
+const finiteAtLeast = min => value => Number.isFinite(value) && value >= min;
+const finiteAny = () => value => Number.isFinite(value);
+// Finite, non-zero and not a full turn (no implicit wrap): 0 and ±360/±720/… are
+// refused, so a fill angle is always a partial, explicitly-bounded sweep.
+const partialTurn = () => value => Number.isFinite(value) && value !== 0 && value % 360 !== 0;
+
+/**
+ * The per-parameter control spec, mirrored from the frozen host table
+ * (`cad_app::draw_tool::parameter`, ADR 0016 decision A).
+ *
+ * - `kind`      — `'number'` (bounded stepper) or `'flag'` (toggle);
+ * - `statusKey` — the field of `cad_status.tool.params` that projects the live
+ *   value (POLYGON's legacy `sides`; later phases project each parameter under
+ *   its own machine key);
+ * - `step`      — the increment a numeric stepper offers (integer parameters step
+ *   by 1; the fill angle steps by 15°, which never lands on a full turn from a
+ *   multiple of 15);
+ * - `offered`   — the host's own predicate: whether the host would **accept** a
+ *   value as a target (the stepper never offers a value this rejects);
+ * - `projectable` — whether a value from `cad_status` may be **rendered**. It
+ *   defaults to `offered` (an out-of-range projection is a contract violation and
+ *   renders nothing), and is overridden only for the fill angle: its documented
+ *   default is the full-circle **360**, which is the one value the channel cannot
+ *   re-set, so the projection must still be displayable even though it is not an
+ *   offered target;
+ * - `labelKey` / `hintKey` — catalog keys (present in both catalogs);
+ * - `icon`      — an optional status-bar icon, present only where one exists.
+ */
+export const TOOL_PARAMETER_SPECS = Object.freeze({
+  polygonSides: {
+    kind: 'number', statusKey: 'sides', step: 1, icon: 'polygon',
+    offered: integerInRange(3, 1024),
+    labelKey: 'status.tool_parameter.polygon_sides',
+    hintKey: 'status.tool_parameter.polygon_sides.hint',
+  },
+  filletRadius: {
+    kind: 'number', statusKey: 'filletRadius', step: 1,
+    offered: finiteAtLeast(0),
+    labelKey: 'status.tool_parameter.fillet_radius',
+    hintKey: 'status.tool_parameter.fillet_radius.hint',
+  },
+  chamferDistanceA: {
+    kind: 'number', statusKey: 'chamferDistanceA', step: 1,
+    offered: finiteAtLeast(0),
+    labelKey: 'status.tool_parameter.chamfer_distance_a',
+    hintKey: 'status.tool_parameter.chamfer_distance_a.hint',
+  },
+  chamferDistanceB: {
+    kind: 'number', statusKey: 'chamferDistanceB', step: 1,
+    offered: finiteAtLeast(0),
+    labelKey: 'status.tool_parameter.chamfer_distance_b',
+    hintKey: 'status.tool_parameter.chamfer_distance_b.hint',
+  },
+  alignScale: {
+    kind: 'flag', statusKey: 'alignScale',
+    labelKey: 'status.tool_parameter.align_scale',
+    hintKey: 'status.tool_parameter.align_scale.hint',
+  },
+  arrayRows: {
+    kind: 'number', statusKey: 'arrayRows', step: 1,
+    offered: integerAtLeast(1),
+    labelKey: 'status.tool_parameter.array_rows',
+    hintKey: 'status.tool_parameter.array_rows.hint',
+  },
+  arrayColumns: {
+    kind: 'number', statusKey: 'arrayColumns', step: 1,
+    offered: integerAtLeast(1),
+    labelKey: 'status.tool_parameter.array_columns',
+    hintKey: 'status.tool_parameter.array_columns.hint',
+  },
+  arrayRowSpacing: {
+    kind: 'number', statusKey: 'arrayRowSpacing', step: 1,
+    offered: finiteAny(),
+    labelKey: 'status.tool_parameter.array_row_spacing',
+    hintKey: 'status.tool_parameter.array_row_spacing.hint',
+  },
+  arrayColumnSpacing: {
+    kind: 'number', statusKey: 'arrayColumnSpacing', step: 1,
+    offered: finiteAny(),
+    labelKey: 'status.tool_parameter.array_column_spacing',
+    hintKey: 'status.tool_parameter.array_column_spacing.hint',
+  },
+  arrayItems: {
+    kind: 'number', statusKey: 'arrayItems', step: 1,
+    offered: integerAtLeast(1),
+    labelKey: 'status.tool_parameter.array_items',
+    hintKey: 'status.tool_parameter.array_items.hint',
+  },
+  arrayFillAngle: {
+    kind: 'number', statusKey: 'arrayFillAngle', step: 15,
+    offered: partialTurn(), projectable: finiteAny(),
+    labelKey: 'status.tool_parameter.array_fill_angle',
+    hintKey: 'status.tool_parameter.array_fill_angle.hint',
+  },
+  arrayRotateItems: {
+    kind: 'flag', statusKey: 'arrayRotateItems',
+    labelKey: 'status.tool_parameter.array_rotate_items',
+    hintKey: 'status.tool_parameter.array_rotate_items.hint',
+  },
+});
+
+/**
+ * Which parameters belong to which active tool (`cad_status.tool.key`), and the
+ * command whose admission gates the control (`shell.canCommand`).
+ *
+ * Only `draw.polygon` is reachable today — the other tools are not implemented
+ * and the host projects no value for their parameters, so nothing renders for
+ * them (a control appears only when the tool is active **and** its value is
+ * projected). A later phase makes a tool live by adding one row here (and, in
+ * the host, projecting its values). The non-POLYGON tool keys are the anticipated
+ * `draw.<kind>` form of the frozen `CadTool.key` convention (ADR 0016 decisions
+ * B–E); the host must use the same key for the row to light up.
+ */
+export const TOOL_PARAMETERS = Object.freeze({
+  'draw.polygon': { command: 'POLYGON', keys: ['polygonSides'] },
+  'draw.fillet': { command: 'FILLET', keys: ['filletRadius'] },
+  'draw.chamfer': { command: 'CHAMFER', keys: ['chamferDistanceA', 'chamferDistanceB'] },
+  'draw.align': { command: 'ALIGN', keys: ['alignScale'] },
+  'draw.arrayrect': { command: 'ARRAYRECT', keys: ['arrayRows', 'arrayColumns', 'arrayRowSpacing', 'arrayColumnSpacing'] },
+  'draw.arraypolar': { command: 'ARRAYPOLAR', keys: ['arrayItems', 'arrayFillAngle', 'arrayRotateItems'] },
+});
+
+/** The live value of `spec` from the active tool, or `null` when absent/invalid. */
+function projectedValue(spec, tool) {
+  const raw = tool?.params?.[spec.statusKey];
+  if (spec.kind === 'flag') return typeof raw === 'boolean' ? raw : null;
+  const projectable = spec.projectable ?? spec.offered;
+  return typeof raw === 'number' && projectable(raw) ? raw : null;
+}
+
+/**
+ * The status-bar views for every parameter of the currently active tool.
+ *
+ * Returns `[]` unless a tool is active with a map entry; each parameter yields a
+ * numeric stepper view or a flag view, and a parameter whose value is absent (not
+ * projected, `null`, or malformed/out of range) yields nothing at all — never an
+ * invented default. `admitted(command)` is the shell's normal command admission
+ * (`canCommand`), which already accounts for a pending command and a
+ * loading/unavailable host or an unloaded vocabulary — the same gate the toggle
+ * chips use.
+ *
+ * A numeric view's `value` (the *rendered* number) is always the real status
+ * value and is never optimistically advanced. `effective` is `value + delta`,
+ * where `delta` is the bounded pending magnitude the host has not echoed back yet
+ * (see [`stepToolParameterPending`]); it only shifts the target the next step
+ * builds on and the button bounds, so a rapid double-click composes into
+ * `value + 2·step` while the displayed number still follows the status.
+ */
+export function toolParameterViews(status, admitted, pending = null) {
+  const tool = status?.tool;
+  if (!tool || typeof tool !== 'object' || typeof tool.key !== 'string') return [];
+  const entry = TOOL_PARAMETERS[tool.key];
+  if (!entry) return [];
+  const disabled = !(typeof admitted === 'function' ? admitted(entry.command) : admitted === true);
+  const views = [];
+  for (const key of entry.keys) {
+    const spec = TOOL_PARAMETER_SPECS[key];
+    if (!spec) continue;
+    const view = parameterView(key, spec, tool, disabled, pending);
+    if (view) views.push(view);
+  }
+  return views;
+}
+
+function parameterView(key, spec, tool, disabled, pending) {
+  const value = projectedValue(spec, tool);
+  if (value === null) return null;
+  if (spec.kind === 'flag') {
+    return {
+      kind: 'flag', key, value, next: !value,
+      labelKey: spec.labelKey, hintKey: spec.hintKey, icon: spec.icon, disabled,
+    };
+  }
+  const delta = pending && pending.key === key && pending.base === value ? pending.delta : 0;
+  const effective = value + delta;
+  return {
+    kind: 'number', key, value, delta, effective, text: String(value),
+    labelKey: spec.labelKey, hintKey: spec.hintKey, icon: spec.icon, disabled,
+    decrement: effective - spec.step,
+    increment: effective + spec.step,
+    // A step is offered only while the *effective* target is a value the host
+    // accepts and the pending magnitude is under the cap: it is disabled, never
+    // clamped into a different value.
+    canDecrement: spec.offered(effective - spec.step) && delta > -TOOL_PARAMETER_PENDING_CAP,
+    canIncrement: spec.offered(effective + spec.step) && delta < TOOL_PARAMETER_PENDING_CAP,
+  };
+}
 
 /**
  * Reconcile the bounded pending delta against the latest real status.
  *
  * Returns the same `pending` while the host has not yet caught up (the status
  * value still equals the value the delta is measured against, `base`), and
- * `null` — dropping the delta — as soon as the status value changes, the tool
- * switches/cancels, the tool key changes, the value becomes absent/`null`/
- * out-of-range, or the status carries an `error`. The error rule matters because
- * an in-queue host refusal (queue full, Viewer edge) surfaces through
+ * `null` — dropping the delta — as soon as the value changes, the tool
+ * switches/cancels, the parameter leaves the active tool's map, the value becomes
+ * absent/`null`/invalid, or the status carries an `error`. The error rule matters
+ * because an in-queue host refusal (queue full, Viewer edge) surfaces through
  * `status.error` **without** changing the value: without it the delta would stay
  * stuck at its `base` and the next click would compose an absolute target up to
  * the cap away from the real value. Returning the same reference on an unchanged
  * poll lets the caller `setState` without triggering a re-render.
  */
-export function reconcilePolygonPending(pending, status) {
+export function reconcileToolParameterPending(pending, status) {
+  if (!pending || typeof pending !== 'object') return null;
   const tool = status?.tool;
-  const sides = tool?.params?.sides;
-  const active = tool && typeof tool === 'object' && tool.key === 'draw.polygon'
-    && Number.isSafeInteger(sides) && sides >= POLYGON_SIDES_MIN && sides <= POLYGON_SIDES_MAX;
-  if (!active) return null;
+  if (!tool || typeof tool !== 'object' || typeof tool.key !== 'string') return null;
   // A real host error (never an empty/absent string) drops the in-flight delta,
   // so the next step builds on the value the host actually holds.
   if (status?.error) return null;
-  if (!pending || pending.key !== tool.key || pending.base !== sides) return null;
+  const entry = TOOL_PARAMETERS[tool.key];
+  if (!entry || !entry.keys.includes(pending.key)) return null;
+  const spec = TOOL_PARAMETER_SPECS[pending.key];
+  if (!spec || spec.kind !== 'number') return null;
+  const value = projectedValue(spec, tool);
+  if (value === null || value !== pending.base) return null;
   return pending;
 }
 
 /**
  * Fold one step into the pending delta, or `null` when there is nothing to track.
  *
- * `target` is the value a step dispatches (`effective ± 1` from the view); the
- * new delta is `target - sides`, measured against the current status value. A
- * zero delta (a step that lands back on the status value) and any delta beyond
- * [`POLYGON_SIDES_PENDING_CAP`] collapse to `null`, so the cap can never be
+ * `target` is the value a step dispatches (`effective ± step` from the view); the
+ * new delta is `target - base`, measured against the current status value. A zero
+ * delta (a step that lands back on the status value) and any delta beyond
+ * [`TOOL_PARAMETER_PENDING_CAP`] collapse to `null`, so the cap can never be
  * exceeded even if a caller bypasses the view's disabled buttons.
  *
- * `pending` is the in-flight delta the caller's `target` was built on. Folding
- * is only meaningful onto the same tool and the same `base` value: a mismatch
+ * `pending` is the in-flight delta the caller's `target` was built on. Folding is
+ * only meaningful onto the same parameter and the same `base` value: a mismatch
  * means the caller stepped off a stale target (the same class of drift the
  * reconcile guards against), so the step is refused rather than composed into an
  * absolute target the host never saw.
  */
-export function stepPolygonPending(pending, status, target) {
+export function stepToolParameterPending(pending, status, key, target) {
   const tool = status?.tool;
-  const sides = tool?.params?.sides;
-  if (!tool || typeof tool !== 'object' || !Number.isSafeInteger(sides)) return null;
-  if (pending && (pending.key !== tool.key || pending.base !== sides)) return null;
-  const delta = target - sides;
-  if (!Number.isSafeInteger(delta) || delta === 0 || Math.abs(delta) > POLYGON_SIDES_PENDING_CAP) return null;
-  return { key: tool.key, base: sides, delta };
+  if (!tool || typeof tool !== 'object' || typeof tool.key !== 'string') return null;
+  const entry = TOOL_PARAMETERS[tool.key];
+  if (!entry || !entry.keys.includes(key)) return null;
+  const spec = TOOL_PARAMETER_SPECS[key];
+  if (!spec || spec.kind !== 'number') return null;
+  const base = projectedValue(spec, tool);
+  if (base === null) return null;
+  if (pending && (pending.key !== key || pending.base !== base)) return null;
+  const delta = target - base;
+  if (!Number.isFinite(delta) || delta === 0 || Math.abs(delta) > TOOL_PARAMETER_PENDING_CAP) return null;
+  return { key, base, delta };
 }
 
 /**
- * Ask the host to set the POLYGON side count.
+ * Ask the host to set one numeric tool parameter.
  *
- * `cad_set_polygon_sides` is the one IPC for this parameter. A
+ * `cad_set_tool_parameter` is the one IPC for every parameter. A
  * `{accepted:true}` result is **queue admission**, exactly like `cad_command`:
  * the next real `cad_status` carries the new value, so the caller must not
- * optimistically mirror it. A value outside the supported range is refused here
- * before IPC (the host refuses it too rather than clamping); a pre-queue refusal
- * rejects with a string, returned as an explicit `failed` — never a silent
- * success or a fabricated local value.
+ * optimistically mirror it. A value the host would refuse is refused here before
+ * IPC (the host refuses it too rather than clamping); a pre-queue refusal rejects
+ * with a string, returned as an explicit `failed` — never a silent success or a
+ * fabricated local value.
  */
-export async function setPolygonSides(invoke, sides) {
-  if (!Number.isSafeInteger(sides) || sides < POLYGON_SIDES_MIN || sides > POLYGON_SIDES_MAX) {
-    return { kind: 'refused', error: 'CAD_POLYGON_SIDES_OUT_OF_RANGE' };
+export async function setToolParameterNumber(invoke, key, number) {
+  const spec = TOOL_PARAMETER_SPECS[key];
+  if (!spec || spec.kind !== 'number' || !spec.offered(number)) {
+    return { kind: 'refused', error: 'CAD_TOOL_PARAMETER_OUT_OF_RANGE' };
   }
   try {
-    const response = await invoke(POLYGON_SIDES_COMMAND, { sides });
-    if (!response || response.accepted !== true) throw Error('CAD_POLYGON_SIDES_NOT_ACCEPTED');
+    const response = await invoke(TOOL_PARAMETER_COMMAND, { parameter: key, number });
+    if (!response || response.accepted !== true) throw Error('CAD_TOOL_PARAMETER_NOT_ACCEPTED');
+    return { kind: 'accepted' };
+  } catch (error) { return { kind: 'failed', error: String(error) }; }
+}
+
+/**
+ * Ask the host to set one flag tool parameter.
+ *
+ * The caller passes the **opposite** of the value it read from the status (never
+ * a fabricated one). Admission semantics match [`setToolParameterNumber`]: the
+ * result is queue admission, and a refusal is explicit.
+ */
+export async function setToolParameterFlag(invoke, key, flag) {
+  const spec = TOOL_PARAMETER_SPECS[key];
+  if (!spec || spec.kind !== 'flag' || typeof flag !== 'boolean') {
+    return { kind: 'refused', error: 'CAD_TOOL_PARAMETER_KIND' };
+  }
+  try {
+    const response = await invoke(TOOL_PARAMETER_COMMAND, { parameter: key, flag });
+    if (!response || response.accepted !== true) throw Error('CAD_TOOL_PARAMETER_NOT_ACCEPTED');
     return { kind: 'accepted' };
   } catch (error) { return { kind: 'failed', error: String(error) }; }
 }

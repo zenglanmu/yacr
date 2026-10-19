@@ -5,6 +5,8 @@
 
 use cad_domain::{CadError, CadResult, Point3};
 
+use crate::draw_tool::{ToolParameter, ToolValue};
+
 pub use crate::{DrawToolKind, MeasurementToolKind};
 
 /// A point supplied either in world coordinates or in logical canvas space.
@@ -140,15 +142,16 @@ pub enum InteractionRequest {
     BeginMeasurement(MeasurementToolKind),
     /// Change the retained measurement algorithm choice without starting capture.
     SetMeasurementKind(MeasurementToolKind),
-    /// Set the session POLYGON side count (ADR 0015 decision C).
+    /// Set one session-scoped tool parameter (ADR 0016 decision A).
     ///
-    /// A **narrow**, single-purpose typed request — deliberately not a generic
-    /// `SetToolParameter` bus (one consumer does not justify a bus; the
-    /// `SetMeasurementKind` request above is the same-shaped precedent). The
-    /// session validates the range (`3..=1024`) and refuses an out-of-range value
-    /// explicitly, never a silent clamp; the request itself carries no behaviour.
-    SetPolygonSides {
-        sides: u32,
+    /// This is the **single** general channel that replaces ADR 0015 decision C's
+    /// narrow `SetPolygonSides` request (which is gone — one parameter has exactly
+    /// one entrance). The session validates the parameter's own range and kind and
+    /// refuses explicitly, never a silent clamp; the request itself carries no
+    /// behaviour.
+    SetToolParameter {
+        parameter: ToolParameter,
+        value: ToolValue,
     },
     /// Replace any current capture with navigation pan mode; no zero-delta pan is emitted.
     BeginPan,

@@ -45,8 +45,8 @@ pub use camera::{
 };
 pub use command_id::*;
 pub use draw_tool::{
-    circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity,
-    DEFAULT_POLYGON_SIDES,
+    circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity, ToolParameter,
+    ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES,
 };
 pub use input::{
     apply_canvas_metrics, classify_key, escape_action, CancelReason, CanvasMetrics,
