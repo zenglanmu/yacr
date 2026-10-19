@@ -12,6 +12,83 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## 人工复测修复：视口十字光标 + 对象捕捉标记（2026-10-19，**非** ADR-0017 范围）
+
+**来源**：用户人工复测报告两处缺陷（视口是系统默认箭头、捕捉标记过小且形状不辨）。**不是** ADR-0017 的一部分，属交互/overlay 修复。
+
+**根因（三层，逐条有据）**：
+1. **光标从未被设置**——仓库无 GTK cursor 代码、视口无 cursor CSS 规则；
+2. **捕捉标记尺寸是世界单位且宿主从未覆盖**——`PreviewOptions::marker_size` 文档为 "in world units"，三处构造均用 `PreviewOptions::default()`（`render_scene/mod.rs:360/367/385`）⇒ 屏幕尺寸随缩放漂移；
+3. **字形与 AutoCAD 对调**（中点/象限）+ **标记与拾取框同级重叠且拾取框绘制在其上** ⇒ 独立像素判读全帧只找到一个闭合轮廓（拾取框），形状无从分辨。
+
+**落地**：
+- **十字光标 + 拾取框**走 renderer overlay（新模块 `overlay/cursor.rs`，`CURSOR_DRAW_ORDER = 2_500_000`）；拾取框半边长 = `pickbox_logical_pixels`(3) × 视图比例（**与点击拾取同一常量**，故框的内接圆恰是一次点击能命中的范围）。颜色 `[0.72,0.75,0.80]`（**偏离 AutoCAD 的白**——白在默认纯白几何上不可见）。
+- **系统光标只在宿主确实在画十字时置空**：新增诚实的 `cad_status.crosshair: bool`（取自 `overlays().cursor.is_some()`），React 侧加 `.is-crosshair`；缺失字段保留箭头。**3D 永远保留箭头**（overlay 纯世界空间，3D 无有效视口矩形）。**已记录局限**：随 ~250 ms 轮询，进入 2D 时箭头最多滞留一个周期。
+- **捕捉标记改为像素尺寸**（`SNAP_MARKER_HALF_EXTENT_PIXELS = 9.0` ⇒ 18 px；拾取框 6 px ⇒ **3:1**），**层级提到十字之上**（3 000 000 > 2 500 000；十字仍在工具预览 2 000 000 之上）。**字形按 AutoCAD 约定**：端点=方块、**中点=三角**、圆心=圆、**象限=菱形**、**垂足=⊥**、交点=X；`snap_marker_glyphs_match_autocad_per_kind` 钉住每种类型的**精确线段集合**。
+
+**修掉一个本轮引入的回归**：3D 下光标曾被置空却无十字 ⇒ **3D 完全没有指针**（比修复前更糟）。现由上述 `crosshair` 标志控制。
+
+**真机证据（X11 / Quadro P620 / Vulkan；合成 DOM 指针事件、**非**真实鼠标）**：指针在捕捉点上 → `snapKind:"endpoint"` ×26，**琥珀方块 19×24 px** 与 **6×7 px 拾取框同心且可分辨**；偏离 10 px → 两者**并排**仍可分辨；**中点** → **三角形**（与端点方块明显不同）。十字真机帧：贯穿视口的横线 x 0→959、竖线 y 0→438，交点与光标位置吻合；拾取框跨度与 `pickbox_logical_pixels` × 视图比例一致。
+**诚实边界**：① 夹具只有直线 ⇒ 只拍到端点与中点两种字形，⊥/菱形/圆/X **未拍照**（测试钉住）；② 截图仅含应用窗口自身；③ `cad_status` 无几何通道 ⇒ 只证"计数 + 内容存在"；④ 像素判读发现**正方形标记渲染为 19×24 px**——那是**并行的既有拉伸缺陷**（见下），不是尺寸 bug。
+
+**已记录的偏离**：十字颜色非白；拾取框按**半径**语义（框边 = 2×PICKBOX 逻辑像素）；捕捉标记尺寸与层级是**我们的选择**（AutoCAD 未给出数值）。
+
+## 既有缺陷立项：视图纵向拉伸 ≈1.24×（2026-10-19 发现，**非**本轮引入）
+
+**现象**（三条独立证据）：夹具 1 世界单位横向 **205.7 px** / 纵向 **251–256 px**；**正方形拾取框渲染为 13×17 px**；橡皮筋屏幕斜率反推 **1.24**。
+
+**根因（@oracle 只读诊断，定论级）**：**两个从未互相校验的尺寸来源**——① 投影/相机拟合/**全部指针输入**用 **React DOM 的 CAD 矩形**（`shell.input.last_rect()` → `cad-engine` → `render-wgpu`，纹理内部各向同性）；② **GTK 表面**用**绘图区分配尺寸**（失败运行中恒为 **960×439**，来自 `gtk_bridge/owner.rs:52-53` 的**硬编码安装期边距** `set_margin_top(101)`/`bottom(60)`）。拉伸发生在最后一步：`present_texture` 用**全屏三角形**把纹理贴满表面，**无纵横比校正**，且**从不校验纹理尺寸与表面配置尺寸** ⇒ 因子 `(960/926, 439/341) = (1.037, 1.287)`，各向异性 **1.241 = 实测斜率 1.24**。**"持久双源错配，其对自身对齐是竞态的"**：设计意图是用边距把绘图区恰好对齐 DOM 矩形，但重分配异步不可靠——某次运行**整轮未落上**（全程拉伸），另一次最终落上 `resize configure 926x341`（不拉伸，**这解释了更早法兰帧里圆是圆的**）。
+
+**输入受影响**：输入/拾取/捕捉与投影**共用同一 DOM 尺寸**故**彼此一致**（驱动的合成点击确实落在其意图的世界目标上），但**与显示像素不一致**（差贴图变换**外加原点偏移**：表面原点 (0,101) vs DOM 矩形 (0,175)）⇒ **人眼可见的"指针与所指特征"对应关系是坏的**。**这直接影响本轮的光标修复**：十字画在模型空间，会跟着几何一起被拉伸并偏移，于是出现在"应用以为指针在的地方"而非"指针真正在的地方"。
+
+**修法（oracle 指定）**：① **真修**——`apps/app-linux/src/gtk_bridge/owner.rs` 让布局的 inset **真正落到绘图区分配**（今日安装期边距获胜、`set_margin_*` 不可靠地产生 size-allocate；须强制布局并通过并**断言** `drawing_area == dom rect` 而非照样呈现）；② **守卫**（纵深防御，铁律 2）——`crates/cad-render-wgpu/src/native_presenter/presenter.rs:538` 的 `present_texture` **拒绝**纹理尺寸 ≠ 表面配置尺寸，**显式报错**；**不得**改成"按表面尺寸渲染"（那样图像方了但**输入错位**，因为输入走 DOM 矩形）。
+
+**修复结果（2026-10-19，已落地）**：根因比初诊更精确——`reparent_webview` 把绘图区从 `GtkOverlay` 的**主 child** 移成 **overlay child** 后，GTK 把位置放在一个**中间原生窗口**里；`set_margin_*` 只**排入一个宿主从不排空的 resize**，而 **GtkOverlay 对 overlay child 忽略位置边距** ⇒ 安装期边距 101/60 **永久生效**。修法：`apply_layout` 显式驱动布局（沿祖先链 `queue_resize` + `GtkWindow::check_resize()`，**同步**完成尺寸协商），`tick` 在呈现前**校验** `drawing_area == dom rect`（±1 逻辑像素、`None` 永不算匹配），不一致先驱动一次，**仍不一致则显式报错**而不是画出去；`present_texture` 对尺寸不匹配返回 `ProbeError::TextureInvalid`。
+**验证（竞态缺陷，故多次运行）**：修前基线比例 **1.174**（横 304.0 / 纵 259.0 px/单位，表面 960×439 vs 纹理 626×341）；**修后 4 次运行全部 0.987**（1166×541，横 198.0 / 纵 200.7 px/单位），拾取框 **8×8 px、纵横比 1.000**（修前 13×17），零 `does not match the DOM` / `refusing to stretch` / 呈现错误，每次尺寸变化都触发 `resize configure`。**这是既有缺陷**（2026-10-18 的运行里同样可见），修好后此前"圆是圆的"那次只是**恰好对齐**。
+
+## P5d：`DIMRADIUS` + `DIMDIAMETER` + `DIMCENTER`（ADR-0017 决策 C，2026-10-19）
+
+
+
+**范围**：`crates/cad-app`（`command_id.rs` 三个变体 + `app_drawing/dimension.rs` 命令体与纯辅助 + `draw_tool/{kind,mod}.rs`
+工具种类、`picked_step_count` 与 `DrawIntent` + `app_drawing/trim_extend.rs` 的**批量漏斗** `commit_new_entities` +
+`host/draw_intent_map.rs` 映射 + 契约测试）、`crates/cad-ui-core`（选择子 + `BeginDraw` 映射 +
+`EXPECTED_COMMAND_COUNT` **62→65** + i18n **+9** 键）。**未**改 acadrust/架构边界；创建命令**非关联**；**未**碰 React UI
+（`apps/app-linux/ui/**` 由 designer lane 落地）。
+
+- **命令面**：`CommandId::{DimRadius,DimDiameter,DimCenter}`（`requires_work_mode()`）；选择子
+  `("DIMRADIUS", …)`/`("DIMDIAMETER", …)`/`("DIMCENTER", …)`；`EXPECTED_COMMAND_COUNT` **62 → 65**。
+- **绘制工具**：`DrawToolKind::{DimRadius,DimDiameter,DimCenter}`（`ALL` **28** 种）；radial 对 `Exact(2)`、
+  `DimCenter` `Exact(1)`；机器键 `"dimradius"`/`"dimdiameter"`/`"dimcenter"`。
+- **混合拾取（新机制）**：`DrawToolKind::picked_step_count()`（前导实体拾取步数；radial 族 = 1）；`needs_picked_entities()`
+  改为 `picked_step_count() > 0`；`push_point`/`push_pick`/`requires_entity_pick`/`is_ready`/`intent` 改读它 ⇒ radial 首击经
+  宿主 `capture_tool_point` 的 `draw_requires_entity_pick` 路由为**实体拾取**，次击为自由点。
+- **`DrawIntent` 变体**：`DimRadius{target,location}`/`DimDiameter{…}`/`DimCenter{target}`；宿主映射为**新增** payload
+  `DimRadial(Box<RadialDimensionCommand>)` / `DimCenter(SelectionRef)`。
+- **命令实现**（`app_drawing/dimension.rs`）：radial 对解析 `Arc`/`Circle` → 位置拾取定方向 → 组 15 = 圆上点、组 10 =
+  圆心（半径）或对径点（直径）、组 40 = 0.0 → 共享合成（`Standard` 快照）→ `commit_new_entity` 插入**一个** `AcDbDimension`。
+  `DIMCENTER` 经**批量漏斗** `commit_new_entities` 插入**普通 LINE**（`AcDbLine`，**非** Dimension）。
+- **声明的决策（逐条写入 ADR-0017 P5d「声明的决策」与 `docs/compatibility.md`）**：① 位置拾取**只定方向**，文字由合成放在
+  引线中点（"位置定文字位置"未实现，声明）；② `Arc` 引线点落在**该弧的圆**上、**不钳制**扫掠（我们的读法）；③ 组 40 写 `0.0`
+  （引线延长未建模）；④ `DIMCEN` 读数：`>0` 十字标记（臂 `|DIMCEN|`）/`<0` 十字中心线（达 `radius+|DIMCEN|`）/`0` 无——
+  **近似声明**：AutoCAD 负值"中心标记 + 带缺口中心线"变体**未建模**（普通十字，同径向合成 P5b 偏离 3），ADR 述"LINE/ARC"
+  而**我们只产 LINE**；⑤ `DIMCENTER` 十字对齐**世界 X/Y 轴**；⑥ `DIMCEN=0` 产 0 实体 + 显式诊断 + **无事务**（同 ARRAY 1×1）；
+  ⑦ 平面外拒绝 = ADR D.6（法向含 X/Y 分量即拒；`−Z` 接受；位置 `z` 须共面）；⑧ **退化半径**经校验数据库**不可达**
+  （`cad-db` validate 已拒），故在**纯辅助单测**上按名钉住，命令层为防御性；⑨ `DIMCENTER` 按**绘图辅助**记录（D.7）；
+  ⑩ 沿用 P5c：**无真正标注预览**。
+- **门禁（本 lane 复跑，2026-10-19）**：`cargo check --workspace --all-targets --locked` 通过；
+  `cargo test -p cad-app -p cad-ui-core -p cad-domain -p cad-db -p cad-import-acadrust --locked` 全通过
+  （cad-app **663**、cad-ui-core **140**、cad-domain **53**、cad-db **84**、cad-import-acadrust **195**）；
+  clippy(workspace `-D warnings`)、fmt、architecture(27)、file-size(**673** 文件)、i18n(**507** 键，P5d **+9**) 通过；
+  wasm lib check 通过（含 1 条**既有** `cad-engine` dead-code 警告）；`apps/app-linux/ui && npm test` **133/133**。
+- **受影响 crate 契约测试**：见 `crates/cad-app/src/tests/drawing/dimension_radial.rs`、
+  `crates/cad-app/src/draw_tool/tests/dimension.rs`、`crates/cad-app/src/host/tests/dimension.rs`、
+  `crates/cad-app/src/app_drawing/dimension.rs`（纯辅助单测）、`crates/cad-ui-core/.../command_vocabulary.rs`、
+  `crates/cad-ui-core/.../tests_tools.rs`。
+- **NOT RUN / 未证**：**真机证据**（本 lane 未跑；`cad_status` 无几何通道，沿用 P4/P5c 边界）；全量
+  `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；**第三方读取器验证**（本机无 `ezdxf`/`dwgread`/`dxfgrabber`）。
+- **待办**：P5e（`DIMANGULAR`+`DIMORDINATE`）；P5f 已降级 NOT IMPLEMENTED；**React 标注面板/每步提示**（P5d 命令由 designer lane 接线）。
+
 ## P5c：`DIMLINEAR` + `DIMALIGNED` 创建命令（ADR-0017 决策 C，2026-10-19）
 
 **范围**：`crates/cad-app`（`command_id.rs` 两个变体 + `app_drawing/dimension.rs` 命令体 + `draw_tool/{kind,mod}.rs`

@@ -3,7 +3,17 @@ use super::*;
 
 impl HostCore {
     pub(crate) fn sync_render(&self) -> CadResult<()> {
-        let (drawing, view, layers, selection, measurement, preview, snap_hints) = {
+        let (
+            drawing,
+            view,
+            layers,
+            selection,
+            measurement,
+            preview,
+            snap_hints,
+            cursor,
+            view_scale,
+        ) = {
             let c = self.controller.borrow();
             let viewport = c
                 .application
@@ -29,6 +39,21 @@ impl HostCore {
                 },
                 canvas_size: viewport.logical_size,
             };
+            // The pointer-cursor overlay input: the cursor's world point on the
+            // work plane plus the view scale (world units per logical pixel),
+            // both only for a 2D view with a cursor present. A 3D view has no
+            // planar cursor and no view rectangle, and an absent cursor is an
+            // explicit empty overlay rather than a fabricated one.
+            let two_d = viewport.view_mode.kind() == cad_app::ProjectionKind::TwoD;
+            let (cursor, view_scale) = match (two_d, self.cursor_logical.get()) {
+                (true, Some(logical)) => {
+                    match viewport.screen_to_world(logical, viewport.logical_size) {
+                        Some(world) => (Some(world), Some(viewport.world_per_px())),
+                        None => (None, None),
+                    }
+                }
+                _ => (None, None),
+            };
             (
                 c.drawing(),
                 view,
@@ -37,6 +62,8 @@ impl HostCore {
                 c.measurement_preview(),
                 c.session.draw_preview(),
                 c.snap_hints_near_cursor()?,
+                cursor,
+                view_scale,
             )
         };
         self.render.sync_drawing(drawing);
@@ -107,6 +134,11 @@ impl HostCore {
             // Visible POINT markers are derived by the scene assembly from the
             // drawing being displayed, so the host feeds none itself.
             point_markers: Vec::new(),
+            // Screen-space sizing for the transient overlays (snap markers, the
+            // cursor crosshair/pickbox): world units per logical pixel of the 2D
+            // view, and the cursor's world point.
+            view_scale,
+            cursor,
         };
         self.render.set_overlays(overlays);
         let _ = self.render.request_preparation()?;

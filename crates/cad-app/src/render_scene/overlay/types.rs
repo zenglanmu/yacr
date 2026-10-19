@@ -33,12 +33,36 @@ pub const GRID_COLOR: [f32; 3] = [0.42, 0.45, 0.50];
 /// as two axis-aligned segments of length `2 * marker_size` per point.
 pub const DEFAULT_PREVIEW_MARKER_SIZE: f64 = 0.5;
 
+/// Half-extent, in **logical pixels**, of an object-snap marker glyph.
+///
+/// A snap marker is a fixed **screen** affordance: its shape (square, triangle,
+/// circle, diamond, perpendicular, diagonal X — see `push_snap_hint`) must read
+/// the same at any zoom. The glyph spans twice this value (**18** logical px).
+///
+/// The size is deliberately the **dominant** shape at the snap point: the pickbox
+/// is only `2 × TolerancePolicy::pickbox_logical_pixels` = **6** logical px across
+/// (it marks what a click can hit, so it stays at the pick tolerance), giving a
+/// **3 : 1** marker-to-pickbox ratio — the same order as AutoCAD, where the osnap
+/// marker reads as the large glyph and the pickbox is a small square inside it.
+/// At the previous 10 px the marker and the pickbox were the same order of size
+/// and a reader could not tell the snap type from the frame.
+///
+/// The world-space half-extent handed to the overlay is this pixel size times the
+/// current view scale (see [`PreviewOptions::for_view_scale`]), so the marker does
+/// not drift with zoom the way a fixed world size does.
+pub const SNAP_MARKER_HALF_EXTENT_PIXELS: f64 = 9.0;
+
 /// `draw_order` of the object-snap hint markers.
 ///
-/// Above the selection highlight (`900_000`), so a snapped point is never
-/// hidden, but below the tool preview ([`PREVIEW_DRAW_ORDER`], `2_000_000`)
-/// because the live rubber-band feedback the user is acting on must stay on top.
-pub const SNAP_HINT_DRAW_ORDER: i64 = 1_500_000;
+/// **Above every other overlay**, including the pointer cursor crosshair and its
+/// pickbox ([`CURSOR_DRAW_ORDER`], `2_500_000`) and the tool preview
+/// ([`PREVIEW_DRAW_ORDER`], `2_000_000`). The snap marker is what the user
+/// actually reads at the snap point: it must never be painted over by the
+/// crosshair's pickbox (which sits at the pointer, i.e. on the same point when
+/// the pointer is on the snap target) nor by the rubber band the marker anchors.
+/// This is the AutoCAD behaviour — the osnap glyph is the dominant shape at the
+/// snap point — and it is what makes the snap *type* legible at a glance.
+pub const SNAP_HINT_DRAW_ORDER: i64 = 3_000_000;
 
 /// Colour of the object-snap hint markers: a warm amber, distinct from the
 /// selection highlight tint and from both preview colours.
@@ -113,6 +137,35 @@ impl Default for PreviewOptions {
     }
 }
 
+impl PreviewOptions {
+    /// Preview options whose marker half-extent is a fixed **screen** size.
+    ///
+    /// `view_scale` is the current view scale in world units per logical pixel
+    /// (the same quantity `Viewport::world_per_px` reports). The world-space
+    /// half-extent is [`SNAP_MARKER_HALF_EXTENT_PIXELS`] logical pixels times
+    /// that scale, so every marker glyph keeps a constant on-screen size under
+    /// any zoom (`marker_size` is documented as world units).
+    ///
+    /// A missing (`None`) or degenerate (non-finite, non-positive) scale cannot
+    /// define a screen-relative size, so the documented world default
+    /// ([`DEFAULT_PREVIEW_MARKER_SIZE`]) is used rather than producing a
+    /// zero/NaN size; a positive scale whose product would underflow to zero is
+    /// floored at the smallest positive `f64`. The result is therefore always
+    /// finite and strictly positive.
+    pub fn for_view_scale(view_scale: Option<f64>) -> Self {
+        let marker_size = match view_scale {
+            Some(scale) if scale.is_finite() && scale > 0.0 => {
+                (SNAP_MARKER_HALF_EXTENT_PIXELS * scale).max(f64::MIN_POSITIVE)
+            }
+            _ => DEFAULT_PREVIEW_MARKER_SIZE,
+        };
+        PreviewOptions {
+            draw_order: PREVIEW_DRAW_ORDER,
+            marker_size,
+        }
+    }
+}
+
 /// The transient highlight / preview overlay inputs a host supplies.
 ///
 /// All fields are pure session state; none of them writes the database. An
@@ -168,12 +221,32 @@ pub struct OverlayInputs {
     /// rebuilds the transient overlay, and the marker size is derived from
     /// [`Self::viewport_bounds`] (see `point_marker_overlay`). Empty by default.
     pub point_markers: Vec<Point3>,
+    /// Current view scale in **world units per logical pixel** of the active 2D
+    /// view (the same quantity `Viewport::world_per_px` reports), used to size
+    /// the screen-relative overlays — the object-snap markers
+    /// ([`PreviewOptions::for_view_scale`]) and the pointer cursor crosshair and
+    /// pickbox (`cursor_overlay`) — from a fixed logical-pixel size. `None` in a
+    /// 3D view or with no valid view, so a screen-relative size has no domain.
+    ///
+    /// It is derived from the camera, so it changes exactly when
+    /// [`Self::viewport_bounds`] does; it is therefore deliberately **not** part
+    /// of [`overlay_fingerprint`] (the bounds already track a camera change, so
+    /// the overlay still rebuilds on zoom without adding a second camera signal).
+    pub view_scale: Option<f64>,
+    /// The pointer cursor's world position on the work plane, or `None` when
+    /// there is no cursor (the pointer is not on the surface, or the view is 3D
+    /// and has no planar cursor). Drawn as a viewport-spanning crosshair with a
+    /// square pickbox at this point (see `cursor_overlay`); `None` produces no
+    /// cursor batch — an explicit empty overlay, never a fabricated one. It is
+    /// part of [`overlay_fingerprint`], so a moved cursor rebuilds the transient
+    /// overlay so the crosshair follows it.
+    pub cursor: Option<Point3>,
 }
 
 impl OverlayInputs {
     /// Whether every overlay input is empty (no highlight, no hover/hidden
     /// flags, no preview, no box selection, no resolved snap hints, no visible
-    /// POINT markers).
+    /// POINT markers, no pointer cursor).
     pub fn is_empty(&self) -> bool {
         self.selection.is_empty()
             && self.hovered.is_empty()
@@ -183,6 +256,7 @@ impl OverlayInputs {
             && self.selection_box.is_none()
             && self.snap_hints_input.is_empty()
             && self.point_markers.is_empty()
+            && self.cursor.is_none()
     }
 }
 

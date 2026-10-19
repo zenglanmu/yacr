@@ -44,7 +44,10 @@ fn required_points_and_selection_are_explicit_per_kind() {
             | DrawToolKind::DimLinear
             | DrawToolKind::DimAligned => 3,
             DrawToolKind::Spline | DrawToolKind::Align | DrawToolKind::Stretch => 4,
-            DrawToolKind::Offset | DrawToolKind::Point | DrawToolKind::ArrayPolar => 1,
+            DrawToolKind::Offset
+            | DrawToolKind::Point
+            | DrawToolKind::ArrayPolar
+            | DrawToolKind::DimCenter => 1,
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot.
             DrawToolKind::ArrayRect => 0,
@@ -88,35 +91,6 @@ fn required_points_and_selection_are_explicit_per_kind() {
     assert_eq!(DrawToolKind::Stretch.arity(), PointArity::Exact(4));
     assert!(!DrawToolKind::Stretch.requires_selection());
     assert!(!DrawToolKind::Stretch.needs_picked_entities());
-}
-
-#[test]
-fn dimension_tools_capture_three_points_and_produce_their_intent() {
-    for kind in [DrawToolKind::DimLinear, DrawToolKind::DimAligned] {
-        let mut tool = DrawTool::new(kind, 0);
-        assert_eq!(tool.remaining(), Some(3), "{kind:?}");
-        assert!(!kind.requires_selection(), "{kind:?}");
-        assert!(!kind.needs_picked_entities(), "{kind:?}");
-        tool.push_point(p(0.0, 0.0)).unwrap();
-        tool.push_point(p(10.0, 0.0)).unwrap();
-        assert!(!tool.is_ready(), "{kind:?} still needs the location pick");
-        tool.push_point(p(5.0, 4.0)).unwrap();
-        assert!(tool.is_ready(), "{kind:?}");
-        assert_eq!(tool.remaining(), Some(0));
-        let expected = match kind {
-            DrawToolKind::DimLinear => DrawIntent::DimLinear {
-                first: p(0.0, 0.0),
-                second: p(10.0, 0.0),
-                location: p(5.0, 4.0),
-            },
-            _ => DrawIntent::DimAligned {
-                first: p(0.0, 0.0),
-                second: p(10.0, 0.0),
-                location: p(5.0, 4.0),
-            },
-        };
-        assert_eq!(tool.intent().unwrap(), expected);
-    }
 }
 
 #[test]
@@ -599,9 +573,10 @@ fn a_click_after_both_pick_steps_is_refused_as_ready_not_as_a_free_point() {
 #[test]
 fn fixed_arity_still_refuses_the_n_plus_one_point_and_ready_exactly_at_n() {
     // Byte-identical contract for every fixed kind: ready exactly at n, and the
-    // (n + 1)-th point is refused without capturing. The entity-picking kinds
-    // (TRIM/EXTEND) take entity picks, so their capture goes through
-    // `push_pick` (the point and the resolved ref together).
+    // (n + 1)-th point is refused without capturing. The entity-picking steps
+    // (TRIM/EXTEND/CHAMFER/FILLET, and the leading step of the radial family)
+    // capture through `push_pick` (the point and the resolved ref together); any
+    // later step of a mixed capture is a free point.
     for kind in DrawToolKind::ALL {
         if matches!(kind, DrawToolKind::Polyline | DrawToolKind::Spline) {
             continue;
@@ -611,7 +586,7 @@ fn fixed_arity_still_refuses_the_n_plus_one_point_and_ready_exactly_at_n() {
         // for the point-complement refusal this test pins.
         let mut tool = DrawTool::new(kind, 1);
         let capture = |tool: &mut DrawTool, i: usize, point: Point3| {
-            if kind.needs_picked_entities() {
+            if i < kind.picked_step_count() {
                 tool.push_pick(point, pick(i as u128 + 100))
             } else {
                 tool.push_point(point)
@@ -909,6 +884,7 @@ fn polygon_intent_carries_the_two_picks_exactly_and_is_ready_at_two() {
 }
 
 mod array;
+mod dimension;
 mod point_spline;
 
 #[test]

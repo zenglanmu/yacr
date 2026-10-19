@@ -115,7 +115,14 @@ pub fn draw_preview_overlay(
         // (no new overlay channel — the visible dimension affordance is the
         // command's, not a preview overlay).
         | DrawToolKind::DimLinear
-        | DrawToolKind::DimAligned => {
+        | DrawToolKind::DimAligned
+        // DIMRADIUS/DIMDIAMETER capture an entity pick plus a location point;
+        // DIMCENTER captures one entity pick. Their live preview is the existing
+        // cursor/chain (no new overlay channel; the picked entity is shown by the
+        // host's capture tint, and the dimension affordance is the command's).
+        | DrawToolKind::DimRadius
+        | DrawToolKind::DimDiameter
+        | DrawToolKind::DimCenter => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }
@@ -357,8 +364,10 @@ fn spline_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3
 /// [`SnapHintKind`]**, so a user can tell an endpoint snap from a midpoint or
 /// centre snap at a glance (the run-time distinction [`SnapKind::as_str`]
 /// exposes in diagnostics). The whole set is a single bounded `Lines` batch at
-/// [`SNAP_HINT_DRAW_ORDER`], below the live tool preview so the rubber band the
-/// user is acting on stays on top.
+/// [`SNAP_HINT_DRAW_ORDER`], drawn **above** every other overlay — including the
+/// pointer cursor crosshair and its pickbox and the live tool preview — because
+/// the marker is what the user reads at the snap point and the pickbox would
+/// otherwise paint over it.
 ///
 /// This is separate from the axis-aligned pointer-cursor crosses that
 /// [`preview_overlay`] gates on the same `view.overlays.snapHints` flag: those
@@ -446,9 +455,24 @@ fn snap_hint_segment_count() -> usize {
 /// Append one snap marker's segment endpoints to `points`.
 ///
 /// `LineList` topology pairs consecutive vertices, so every shape is emitted as
-/// explicit, closed segment pairs and shapes are independent of each other.
-/// Shape by kind: endpoint → square, midpoint → diamond, center → circle,
-/// quadrant → triangle, perpendicular → plus, local intersection → diagonal X.
+/// explicit segment pairs and shapes are independent of each other.
+///
+/// The glyph per kind follows **AutoCAD's object-snap marker convention**, so a
+/// user who knows AutoCAD reads the same kind from the same shape:
+///
+/// | kind | AutoCAD marker | glyph here |
+/// |---|---|---|
+/// | `Endpoint` | square | axis-aligned square |
+/// | `Midpoint` | triangle | upward triangle |
+/// | `Center` | circle | tessellated circle |
+/// | `Quadrant` | diamond | axis-aligned diamond |
+/// | `Perpendicular` | perpendicular (⊥) | vertical stem on a bottom bar |
+/// | `LocalIntersection` | X | diagonal cross |
+///
+/// `Midpoint`/`Quadrant` used to be swapped relative to AutoCAD (midpoint was a
+/// diamond, quadrant a triangle); they are corrected here. The `Perpendicular`
+/// marker is AutoCAD's ⊥ rather than a plain plus, which also keeps it distinct
+/// from the `LocalIntersection` X.
 fn push_snap_hint(points: &mut Vec<Point3>, kind: SnapHintKind, center: Point3, size: f64) {
     let offset = |dx: f64, dy: f64| Point3 {
         x: center.x + dx,
@@ -468,14 +492,12 @@ fn push_snap_hint(points: &mut Vec<Point3>, kind: SnapHintKind, center: Point3, 
             push_segment(points, d, a);
         }
         SnapKind::Midpoint => {
-            // Diamond (square rotated 45°).
+            // Upward triangle (AutoCAD's MID marker).
             let top = offset(0.0, size);
-            let right = offset(size, 0.0);
-            let bottom = offset(0.0, -size);
-            let left = offset(-size, 0.0);
+            let right = offset(size, -size * 0.8);
+            let left = offset(-size, -size * 0.8);
             push_segment(points, top, right);
-            push_segment(points, right, bottom);
-            push_segment(points, bottom, left);
+            push_segment(points, right, left);
             push_segment(points, left, top);
         }
         SnapKind::Center => {
@@ -499,18 +521,22 @@ fn push_snap_hint(points: &mut Vec<Point3>, kind: SnapHintKind, center: Point3, 
             }
         }
         SnapKind::Quadrant => {
-            // Upward triangle.
+            // Diamond (square rotated 45°; AutoCAD's QUA marker).
             let top = offset(0.0, size);
-            let right = offset(size, -size * 0.8);
-            let left = offset(-size, -size * 0.8);
+            let right = offset(size, 0.0);
+            let bottom = offset(0.0, -size);
+            let left = offset(-size, 0.0);
             push_segment(points, top, right);
-            push_segment(points, right, left);
+            push_segment(points, right, bottom);
+            push_segment(points, bottom, left);
             push_segment(points, left, top);
         }
         SnapKind::Perpendicular => {
-            // Axis-aligned plus.
-            push_segment(points, offset(-size, 0.0), offset(size, 0.0));
+            // Perpendicular symbol (AutoCAD's PER marker): a vertical stem rising
+            // from a horizontal base bar. Distinct from the `LocalIntersection` X
+            // and from the `Midpoint` triangle at the ~10 px marker size.
             push_segment(points, offset(0.0, -size), offset(0.0, size));
+            push_segment(points, offset(-size, -size), offset(size, -size));
         }
         SnapKind::LocalIntersection => {
             // Diagonal cross (X), visually distinct from the plus.

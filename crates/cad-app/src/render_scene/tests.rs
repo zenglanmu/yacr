@@ -623,8 +623,8 @@ fn snap_hints_draw_only_when_enabled_and_keep_the_base() {
         crate::render_scene::SNAP_HINT_DRAW_ORDER
     );
     assert!(
-        after.highlight.added[0].draw_order > 900_000
-            && after.highlight.added[0].draw_order < crate::render_scene::PREVIEW_DRAW_ORDER
+        after.highlight.added[0].draw_order > crate::render_scene::CURSOR_DRAW_ORDER,
+        "the snap marker draws above the pointer cursor so the pickbox cannot hide it"
     );
 
     // Clearing the hints removes the batch but keeps the base.
@@ -772,4 +772,181 @@ fn axes_without_bounds_report_a_diagnostic_instead_of_pretending() {
         ready.highlight_completeness,
         cad_domain::Completeness::Partial(_)
     ));
+}
+
+/// The world-space half-extent of the largest X/Y span of a batch, independent
+/// of where it sits (a marker glyph's half-size).
+fn batch_half_extent(batch: &cad_scene::RenderBatch) -> f64 {
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for vertex in &batch.vertices {
+        let x = batch.local_origin.x + f64::from(vertex[0]);
+        let y = batch.local_origin.y + f64::from(vertex[1]);
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+    (max_x - min_x).max(max_y - min_y) * 0.5
+}
+
+/// The object-snap marker's world size is a fixed **screen** size: the same pixel
+/// size at a larger view scale must produce a proportionally larger world size,
+/// so the glyph stays legible under any zoom (defect #2).
+#[test]
+fn snap_marker_size_is_a_fixed_screen_size_through_the_scene_assembly() {
+    use cad_domain::Point3;
+    let db = db_with_line();
+    let layers = LayerOverrideSet::new();
+    let hint = snap_hint(
+        cad_measure::SnapKind::Endpoint,
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    );
+    let build = |scale: f64| {
+        let overlays = OverlayInputs {
+            snap_hints_input: vec![hint.clone()],
+            view_scale: Some(scale),
+            visibility: OverlayVisibility {
+                axes: false,
+                grid: false,
+                snap_hints: true,
+                selection_highlight: false,
+            },
+            ..OverlayInputs::default()
+        };
+        let mut controller = CadSceneController::default();
+        controller
+            .prepare_with_overlays(
+                Some(&db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                &overlays,
+            )
+            .unwrap();
+        let batch = controller
+            .ready
+            .as_ref()
+            .unwrap()
+            .highlight
+            .added
+            .iter()
+            .find(|batch| batch.draw_order == crate::render_scene::SNAP_HINT_DRAW_ORDER)
+            .expect("a snap-hint batch");
+        batch_half_extent(batch)
+    };
+    let small = build(0.1);
+    let large = build(0.4);
+    assert!(
+        (small - crate::render_scene::SNAP_MARKER_HALF_EXTENT_PIXELS * 0.1).abs() < 1e-6,
+        "half-extent = marker pixels × scale: {small}"
+    );
+    assert!(
+        (large / small - 4.0).abs() < 1e-6,
+        "the same pixel size at 4× the scale is 4× the world size: {large} vs {small}"
+    );
+}
+
+/// The pointer cursor crosshair + pickbox is built by the scene assembly from the
+/// cursor world point and the view scale, at the highest draw order, and is
+/// absent when either is missing (defect #1).
+#[test]
+fn the_cursor_overlay_is_built_from_the_cursor_and_the_view() {
+    use cad_domain::Point3;
+    let db = db_with_line();
+    let layers = LayerOverrideSet::new();
+    let bounds = Some((
+        Point3 {
+            x: -10.0,
+            y: -5.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 10.0,
+            y: 5.0,
+            z: 0.0,
+        },
+    ));
+    let cursor = Point3 {
+        x: 1.0,
+        y: 2.0,
+        z: 0.0,
+    };
+    let build = |cursor: Option<Point3>, view_scale: Option<f64>| {
+        let overlays = OverlayInputs {
+            viewport_bounds: bounds,
+            view_scale,
+            cursor,
+            visibility: OverlayVisibility {
+                axes: false,
+                grid: false,
+                ..OverlayVisibility::default()
+            },
+            ..OverlayInputs::default()
+        };
+        let mut controller = CadSceneController::default();
+        controller
+            .prepare_with_overlays(
+                Some(&db),
+                DocumentId(73),
+                None,
+                &layers,
+                SpaceSelection::Model,
+                &overlays,
+            )
+            .unwrap();
+        let ready = controller.ready.as_ref().unwrap().clone();
+        ready
+            .highlight
+            .added
+            .iter()
+            .filter(|batch| batch.draw_order == crate::render_scene::CURSOR_DRAW_ORDER)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
+    let batches = build(Some(cursor), Some(0.25));
+    assert_eq!(batches.len(), 1, "one bounded cursor batch");
+    // Crosshair (2 segments = 4 vertices) + pickbox (4 segments = 8 vertices).
+    assert_eq!(batches[0].vertices.len(), 12);
+    assert_eq!(batches[0].color, crate::render_scene::CURSOR_COLOR);
+    assert!(
+        batches[0].draw_order > crate::render_scene::PREVIEW_DRAW_ORDER,
+        "the cursor draws above every other overlay"
+    );
+    // The pickbox half-side is the pick tolerance × the view scale.
+    let half = {
+        let tail = &batches[0].vertices[batches[0].vertices.len() - 8..];
+        let xs: Vec<f64> = tail
+            .iter()
+            .map(|v| batches[0].local_origin.x + f64::from(v[0]))
+            .collect();
+        (xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+            - xs.iter().cloned().fold(f64::INFINITY, f64::min))
+            * 0.5
+    };
+    let expected = cad_domain::TolerancePolicy::default().pickbox_logical_pixels * 0.25;
+    assert!(
+        (half - expected).abs() < 1e-6,
+        "pickbox half-side must be PICKBOX × scale: {half} vs {expected}"
+    );
+
+    // No cursor position produces no cursor batch; a missing view scale still
+    // draws the crosshair but omits the pickbox (a screen-relative size has no
+    // domain), never a fabricated box.
+    assert!(build(None, Some(0.25)).is_empty());
+    let no_scale = build(Some(cursor), None);
+    assert_eq!(no_scale.len(), 1);
+    assert_eq!(
+        no_scale[0].vertices.len(),
+        4,
+        "crosshair only, no pickbox, when the view scale is missing"
+    );
 }

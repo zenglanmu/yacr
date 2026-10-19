@@ -276,6 +276,16 @@ pub struct CadStatus {
     /// snapping disabled). A `null` is never a swallowed error: a resolution
     /// failure leaves this `null` and surfaces through [`CadStatus::error`].
     pub snap_kind: Option<String>,
+    /// Whether the host is currently drawing its **own pointer crosshair** over
+    /// the CAD partition: a 2D view with a pointer position on the surface.
+    ///
+    /// The frontend hides the system cursor over the CAD partition exactly when
+    /// this is `true`, so the system arrow never sits on top of the drawn
+    /// crosshair — and, just as important, a **3D view keeps the system arrow**
+    /// (the crosshair is 2D-only, so blanking it there would leave no pointer at
+    /// all). Derived from the same overlay input the renderer draws from, never
+    /// from a guess about the view mode.
+    pub crosshair: bool,
     /// Count of verified successful authoritative document transitions caused by
     /// an import. It is **not** a parsed-entity count and must not be read as
     /// proof that no reparse happened.
@@ -305,6 +315,9 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         hover_preview: false,
         snap_enabled: false,
         snap_kind: None,
+        // No CAD session draws no crosshair, so the system cursor is never
+        // hidden: nothing is left pointerless.
+        crosshair: false,
         import_count: 0,
         frame_count: 0,
     }
@@ -459,6 +472,7 @@ pub(super) fn assemble_status(
     hover_preview: bool,
     snap_enabled: bool,
     snap_kind: Option<String>,
+    crosshair: bool,
 ) -> CadStatus {
     CadStatus {
         document_label: has_document.then_some(label),
@@ -476,6 +490,7 @@ pub(super) fn assemble_status(
         hover_preview,
         snap_enabled,
         snap_kind,
+        crosshair,
         import_count,
         frame_count,
     }

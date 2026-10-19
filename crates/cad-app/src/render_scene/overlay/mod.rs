@@ -29,17 +29,22 @@
 //! | world axes/grid ([`AXES_GRID_DRAW_ORDER`]) | `800_000` |
 //! | POINT markers ([`POINT_MARKER_DRAW_ORDER`]) | `850_000` |
 //! | selection highlight (`HIGHLIGHT_DRAW_ORDER`) | `900_000` |
-//! | object-snap hints ([`SNAP_HINT_DRAW_ORDER`]) | `1_500_000` |
 //! | box-selection rubber band ([`BOX_SELECT_DRAW_ORDER`]) | `1_750_000` |
 //! | tool preview ([`PREVIEW_DRAW_ORDER`]) | `2_000_000` |
+//! | pointer cursor crosshair + pickbox ([`CURSOR_DRAW_ORDER`]) | `2_500_000` |
+//! | object-snap hints ([`SNAP_HINT_DRAW_ORDER`]) | `3_000_000` |
 //!
 //! A selection is a transient decoration; a tool preview is the live feedback
-//! the user is acting on, so it draws above everything. Visible POINT markers
-//! are real drawing content, so they draw above the reference axes/grid but
-//! below all transient chrome. Object-snap hints sit below the live preview
-//! rubber band and below the box-selection rubber band, so the snap marker the
-//! user aims at stays visible while both the draw preview and the selection
-//! rectangle draw above it.
+//! the user is acting on, so it draws above everything it does not anchor.
+//! Visible POINT markers are real drawing content, so they draw above the
+//! reference axes/grid but below all transient chrome. The box-selection
+//! rubber band sits below the live tool preview. The pointer cursor crosshair
+//! and its pickbox are the pointer itself, so they draw above the preview — the
+//! rubber band the user is dragging must never hide the pointer it is anchored
+//! to. The object-snap hints draw **above the crosshair**: the snap marker is
+//! what the user reads at the snap point, and when the pointer sits on the snap
+//! target the crosshair's pickbox would otherwise be painted over it, hiding the
+//! snap type exactly when it matters.
 //!
 //! The implementation is split across the submodules of this directory; every
 //! moved item is re-exported here under its original name, so the module path
@@ -64,6 +69,7 @@ use crate::selection::SelectionSet;
 use crate::viewer_config::OverlayVisibility;
 
 mod axes_grid;
+mod cursor;
 mod fingerprint;
 mod point_markers;
 mod preview;
@@ -74,6 +80,7 @@ mod types;
 mod tests;
 
 pub use axes_grid::*;
+pub use cursor::*;
 pub use fingerprint::*;
 pub use point_markers::*;
 pub use preview::*;

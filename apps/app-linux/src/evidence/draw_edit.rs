@@ -427,12 +427,14 @@ pub(super) fn schedule_draw_edit_phases(webview: &tauri::Webview, start: &Instan
 
 /// Schedule the combined single-line report relative to the driver start.
 ///
-/// It lands after every phase (default t=146 s), so the arrays, the EXPLODE
-/// result and the P5c dimensions (DIMLINEAR/DIMALIGNED, [`super::draw_dimension`],
-/// which end at t=144.5 s) are already committed; the report carries the real
-/// before/after reads and the real refusals.
+/// It lands after every phase (default t=165 s), so the arrays, the EXPLODE
+/// result, the P5c dimensions (DIMLINEAR/DIMALIGNED, [`super::draw_dimension`],
+/// which end at t=144.5 s) and the P5d radial dimensions (DIMRADIUS/DIMDIAMETER/
+/// DIMCENTER, [`super::draw_dimension_radial`], which end at t=163 s) are already
+/// committed; the report carries the real before/after reads and the real
+/// refusals.
 pub(super) fn schedule_draw_report(webview: &tauri::Webview, start: &Instant) {
-    schedule_draw_ms(start, 146_000, "draw evidence report", || {
+    schedule_draw_ms(start, 165_000, "draw evidence report", || {
         webview.eval_with_callback(DRAW_REPORT_JS, |payload| {
             eprintln!(
                 "[probe] draw evidence report: {}",
@@ -477,6 +479,17 @@ fn decode_draw_report(payload: &str) -> String {
 /// honest statement that `cad_status` exposes no per-entity geometry, so the
 /// created dimension's real geometry is pinned by the `cad-app` contract tests,
 /// not by this channel.
+///
+/// The P5d radial-dimension fields ([`super::draw_dimension_radial`]) follow the
+/// same discipline: `dimradius_delta` / `dimdiameter_delta` are the real
+/// `entityCount` deltas (expected `+1` each) and `dimcenter_delta` is the **real**
+/// delta of DIMCENTER, whose output is plain line geometry (never a `DIMENSION`)
+/// and whose committed line count follows the drawing's active `Standard`
+/// `DIMCEN` (not exposed by `cad_status`, so the report states the number it
+/// read, it never asserts one). Every `*_pick_frac`/`*_loc_frac` is the real rect
+/// fraction the synthetic click dispatched at;
+/// `radial_dimension_geometry_channel=none_...` restates that no per-entity
+/// geometry is observable here.
 const DRAW_REPORT_JS: &str = r#"
 (function () {
   var d = window.__yacr_draw || {};
@@ -517,13 +530,21 @@ const DRAW_REPORT_JS: &str = r#"
     d.s_explode_src_after_failed || d.s_explode_select_failed || d.s_explode_after_failed ||
     d.s_dimlinear_active_failed || d.s_dimlinear_points_failed || d.s_dimlinear_after_failed ||
     d.s_dimaligned_active_failed || d.s_dimaligned_points_failed || d.s_dimaligned_after_failed ||
+    d.s_rad_circle_after_failed || d.s_dimradius_active_failed || d.s_dimradius_pick_failed ||
+    d.s_dimradius_points_failed || d.s_dimradius_after_failed ||
+    d.s_dia_circle_after_failed || d.s_dimdiameter_active_failed || d.s_dimdiameter_pick_failed ||
+    d.s_dimdiameter_points_failed || d.s_dimdiameter_after_failed ||
+    d.s_center_circle_after_failed || d.s_dimcenter_active_failed || d.s_dimcenter_pick_failed ||
+    d.s_dimcenter_after_failed ||
     d.confirm_a_h_failed || d.confirm_a_v_failed || d.confirm_fillet_failed ||
     d.confirm_b_h_failed || d.confirm_b_v_failed || d.confirm_chamfer_failed ||
     d.confirm_pline_failed || d.confirm_polygon_failed || d.confirm_point_failed ||
     d.confirm_rectang_failed || d.confirm_arr_src_failed || d.confirm_arrayrect_failed ||
     d.confirm_pol_src_failed || d.confirm_arraypolar_failed || d.confirm_align_src_failed ||
     d.confirm_align_failed || d.confirm_stretch_src_failed || d.confirm_stretch_failed ||
-    d.confirm_explode_rect_failed || d.confirm_dimlinear_failed || d.confirm_dimaligned_failed;
+    d.confirm_explode_rect_failed || d.confirm_dimlinear_failed || d.confirm_dimaligned_failed ||
+    d.confirm_rad_circle_failed || d.confirm_dimradius_failed || d.confirm_dia_circle_failed ||
+    d.confirm_dimdiameter_failed || d.confirm_center_circle_failed || d.confirm_dimcenter_failed;
   var text = 'draw_synthetic=1_not_a_real_mouse' +
     ' baseline_count=' + v(d.s_base_count) +
     ' geom_a_before_count=' + v(d.s_base_count) +
@@ -670,6 +691,54 @@ const DRAW_REPORT_JS: &str = r#"
     ' dimaligned_delta=' + delta(d.s_dimlinear_after_count, d.s_dimaligned_after_count) +
     ' dimaligned_after_tool=' + v(d.s_dimaligned_after_tool) +
     ' dimaligned_after_error=' + v(d.s_dimaligned_after_error) +
+    ' dimradius_circle_ack=' + v(d['rad_circle_ack']) +
+    ' dimradius_start_ack=' + v(d['dimradius_ack']) +
+    ' dimradius_active_tool=' + v(d.s_dimradius_active_tool) +
+    ' dimradius_active_points=' + v(d.s_dimradius_active_points) +
+    ' dimradius_pick_points=' + v(d.s_dimradius_pick_points) +
+    ' dimradius_pick_ready=' + v(d.s_dimradius_pick_ready) +
+    ' dimradius_points=' + v(d.s_dimradius_points_points) +
+    ' dimradius_points_ready=' + v(d.s_dimradius_points_ready) +
+    ' dimradius_confirm_ack=' + v(d.confirm_dimradius_ack) +
+    ' dimradius_before_count=' + v(d.s_rad_circle_after_count) +
+    ' dimradius_after_count=' + v(d.s_dimradius_after_count) +
+    ' dimradius_delta=' + delta(d.s_rad_circle_after_count, d.s_dimradius_after_count) +
+    ' dimradius_after_tool=' + v(d.s_dimradius_after_tool) +
+    ' dimradius_after_error=' + v(d.s_dimradius_after_error) +
+    ' dimdiameter_circle_ack=' + v(d['dia_circle_ack']) +
+    ' dimdiameter_start_ack=' + v(d['dimdiameter_ack']) +
+    ' dimdiameter_active_tool=' + v(d.s_dimdiameter_active_tool) +
+    ' dimdiameter_active_points=' + v(d.s_dimdiameter_active_points) +
+    ' dimdiameter_pick_points=' + v(d.s_dimdiameter_pick_points) +
+    ' dimdiameter_pick_ready=' + v(d.s_dimdiameter_pick_ready) +
+    ' dimdiameter_points=' + v(d.s_dimdiameter_points_points) +
+    ' dimdiameter_points_ready=' + v(d.s_dimdiameter_points_ready) +
+    ' dimdiameter_confirm_ack=' + v(d.confirm_dimdiameter_ack) +
+    ' dimdiameter_before_count=' + v(d.s_dia_circle_after_count) +
+    ' dimdiameter_after_count=' + v(d.s_dimdiameter_after_count) +
+    ' dimdiameter_delta=' + delta(d.s_dia_circle_after_count, d.s_dimdiameter_after_count) +
+    ' dimdiameter_after_tool=' + v(d.s_dimdiameter_after_tool) +
+    ' dimdiameter_after_error=' + v(d.s_dimdiameter_after_error) +
+    ' dimcenter_circle_ack=' + v(d['center_circle_ack']) +
+    ' dimcenter_start_ack=' + v(d['dimcenter_ack']) +
+    ' dimcenter_active_tool=' + v(d.s_dimcenter_active_tool) +
+    ' dimcenter_active_points=' + v(d.s_dimcenter_active_points) +
+    ' dimcenter_pick_points=' + v(d.s_dimcenter_pick_points) +
+    ' dimcenter_pick_ready=' + v(d.s_dimcenter_pick_ready) +
+    ' dimcenter_confirm_ack=' + v(d.confirm_dimcenter_ack) +
+    ' dimcenter_before_count=' + v(d.s_center_circle_after_count) +
+    ' dimcenter_after_count=' + v(d.s_dimcenter_after_count) +
+    ' dimcenter_delta=' + delta(d.s_center_circle_after_count, d.s_dimcenter_after_count) +
+    ' dimcenter_after_tool=' + v(d.s_dimcenter_after_tool) +
+    ' dimcenter_after_error=' + v(d.s_dimcenter_after_error) +
+    ' dimcenter_output=plain_line_geometry_not_a_dimension' +
+    ' dimcenter_dimstyle_channel=none_cad_status_has_no_dimstyle_channel' +
+    ' dimradius_pick_frac=' + arr(d.dimradius_pick_frac) +
+    ' dimradius_loc_frac=' + arr(d.dimradius_loc_frac) +
+    ' dimdiameter_pick_frac=' + arr(d.dimdiameter_pick_frac) +
+    ' dimdiameter_loc_frac=' + arr(d.dimdiameter_loc_frac) +
+    ' dimcenter_pick_frac=' + arr(d.dimcenter_pick_frac) +
+    ' radial_dimension_geometry_channel=none_cad_status_has_no_entity_geometry' +
     ' dimlinear_loc_frac=' + arr(d.dimlinear_loc_frac) +
     ' dimaligned_loc_frac=' + arr(d.dimaligned_loc_frac) +
     ' vertex_count_channel=none_cad_status_has_no_vertex_or_entity_geometry' +
@@ -754,7 +823,24 @@ const DRAW_REPORT_JS: &str = r#"
     ' dimaligned_failed=' + v(d.dimaligned_failed) +
     ' dimaligned_o1_failed=' + v(d.dimaligned_o1_failed) +
     ' dimaligned_o2_failed=' + v(d.dimaligned_o2_failed) +
-    ' dimaligned_loc_failed=' + v(d.dimaligned_loc_failed);
+    ' dimaligned_loc_failed=' + v(d.dimaligned_loc_failed) +
+    ' dimradius_failed=' + v(d.dimradius_failed) +
+    ' rad_circle_failed=' + v(d.rad_circle_failed) +
+    ' rad_circle_center_failed=' + v(d.rad_circle_center_failed) +
+    ' rad_circle_radius_failed=' + v(d.rad_circle_radius_failed) +
+    ' dimradius_pick_failed=' + v(d.dimradius_pick_failed) +
+    ' dimradius_loc_failed=' + v(d.dimradius_loc_failed) +
+    ' dimdiameter_failed=' + v(d.dimdiameter_failed) +
+    ' dia_circle_failed=' + v(d.dia_circle_failed) +
+    ' dia_circle_center_failed=' + v(d.dia_circle_center_failed) +
+    ' dia_circle_radius_failed=' + v(d.dia_circle_radius_failed) +
+    ' dimdiameter_pick_failed=' + v(d.dimdiameter_pick_failed) +
+    ' dimdiameter_loc_failed=' + v(d.dimdiameter_loc_failed) +
+    ' dimcenter_failed=' + v(d.dimcenter_failed) +
+    ' center_circle_failed=' + v(d.center_circle_failed) +
+    ' center_circle_center_failed=' + v(d.center_circle_center_failed) +
+    ' center_circle_radius_failed=' + v(d.center_circle_radius_failed) +
+    ' dimcenter_pick_failed=' + v(d.dimcenter_pick_failed);
   try { console.log('[probe] draw evidence report: ' + text); } catch (err) {}
   return text;
 })()

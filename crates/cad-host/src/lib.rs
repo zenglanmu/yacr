@@ -172,6 +172,7 @@ impl HostCore {
             async_report_attempt: Rc::new(Cell::new(None)),
             navigation: Rc::new(NavInner::default()),
             hover: Rc::new(HoverState::default()),
+            cursor_logical: Rc::new(Cell::new(None)),
             hover_now: Rc::new(std::time::Instant::now),
             startup_diagnostics: Rc::new(RefCell::new(Vec::new())),
             queue: Rc::new(RequestQueue::new()),

@@ -629,7 +629,7 @@ fn empty_snap_hints_yield_no_batch() {
 }
 
 #[test]
-fn snap_hint_overlay_is_one_bounded_batch_below_the_preview() {
+fn snap_hint_overlay_is_one_bounded_batch_above_the_cursor() {
     let hints = [
         hint(SnapKind::Endpoint, p(0.0, 0.0)),
         hint(SnapKind::Center, p(5.0, 0.0)),
@@ -640,7 +640,9 @@ fn snap_hint_overlay_is_one_bounded_batch_below_the_preview() {
     assert_eq!(batch.topology, RenderTopology::Lines);
     assert_eq!(batch.color, SNAP_HINT_COLOR);
     assert_eq!(batch.draw_order, SNAP_HINT_DRAW_ORDER);
-    assert!(batch.draw_order > 900_000 && batch.draw_order < PREVIEW_DRAW_ORDER);
+    // Above the pointer cursor so the pickbox can never paint over the marker.
+    assert!(batch.draw_order > CURSOR_DRAW_ORDER);
+    assert!(batch.draw_order > PREVIEW_DRAW_ORDER);
     // LineList: segment pairs are explicit; the count is even.
     assert_eq!(batch.vertices.len() % 2, 0);
     // Endpoint square (4) + center circle (12) segments.
@@ -875,7 +877,10 @@ fn window_box_is_one_blue_batch_at_the_box_selection_draw_order() {
         selection.segments.len() * 2,
         "no point markers are invented"
     );
-    assert!(batch.draw_order > SNAP_HINT_DRAW_ORDER && batch.draw_order < PREVIEW_DRAW_ORDER);
+    assert!(
+        batch.draw_order > cad_scene::HIGHLIGHT_DRAW_ORDER && batch.draw_order < PREVIEW_DRAW_ORDER,
+        "the box band sits above the highlight and below the live preview"
+    );
 }
 
 #[test]
@@ -954,6 +959,8 @@ fn entity_flags_fingerprint_ignores_the_box_selection() {
 }
 
 mod ellipse_preview;
+mod marker_sizing;
 mod polygon_preview;
 mod rectang_preview;
+mod snap_glyphs;
 mod spline_preview;

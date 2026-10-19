@@ -397,12 +397,36 @@ impl Application {
         )
     }
 
+    /// Shared insert path for a **batch** of new entities on the active layer in
+    /// model space (DIMCENTER inserts several plain LINEs in one transaction /
+    /// one undo step).
+    ///
+    /// Same single funnel as [`Self::commit_new_entity`]: the layer must exist (a
+    /// missing layer is an explicit error), every entity lands in one transaction
+    /// and one undo step, and the whole batch is all-or-nothing. An empty batch is
+    /// an explicit refusal, never a silent empty success.
+    pub(super) fn commit_new_entities(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        geometries: Vec<SemanticGeometry>,
+        label: &str,
+    ) -> CadResult<CommandOutcome> {
+        self.commit_new_entities_in(
+            command,
+            geometries,
+            session.active_layer,
+            SpaceId::Model,
+            None,
+            label,
+        )
+    }
+
     /// Insert a new entity into `layer`/`space`, optionally carrying a captured
     /// display state (render attributes + dynamic-visibility membership).
     ///
-    /// The layer must exist: a missing layer is an explicit error, never a silent
-    /// fallback. A captured display state is restored after commit and recorded on
-    /// the patch's `after_state` so a redo re-applies it.
+    /// A thin wrapper over [`Self::commit_new_entities_in`] for the single-entity
+    /// callers; the display state (used by OFFSET) applies to that one entity.
     fn commit_new_entity_in(
         &mut self,
         command: &Command,
@@ -412,6 +436,29 @@ impl Application {
         display: Option<cad_db::EntityDisplayState>,
         label: &str,
     ) -> CadResult<CommandOutcome> {
+        self.commit_new_entities_in(command, vec![geometry], layer, space, display, label)
+    }
+
+    /// Insert a batch of new entities into `layer`/`space` in one transaction.
+    ///
+    /// The layer must exist: a missing layer is an explicit error, never a silent
+    /// fallback. A captured display state (single-entity OFFSET only) is restored
+    /// on the **first** inserted entity after commit and recorded on its patch's
+    /// `after_state` so a redo re-applies it; a batch (DIMCENTER) passes `None`.
+    fn commit_new_entities_in(
+        &mut self,
+        command: &Command,
+        geometries: Vec<SemanticGeometry>,
+        layer: LayerId,
+        space: SpaceId,
+        display: Option<cad_db::EntityDisplayState>,
+        label: &str,
+    ) -> CadResult<CommandOutcome> {
+        if geometries.is_empty() {
+            return Err(CadError::InvalidInput(format!(
+                "{label} needs at least one entity to insert"
+            )));
+        }
         let document_id = command.document;
         let document = self
             .workspace
@@ -427,56 +474,73 @@ impl Application {
                 layer.0
             )));
         }
-        let draw_order = drawing
+        let base_order = drawing
             .model_space()
             .iter()
             .map(|e| e.draw_order)
             .max()
             .map(|m| m.saturating_add(1))
             .unwrap_or(0);
-        let entity_id = drawing.allocate_entity_id();
-        let entity = DbEntity {
-            object: cad_db::DbObject {
-                id: ObjectId(entity_id.0),
-                type_key: class_name(&geometry).to_string(),
-                revision: Revision(0),
-                source_handle: None,
-            },
-            id: entity_id,
-            layer,
-            space,
-            geometry,
-            draw_order,
-        };
+        let mut entities: Vec<DbEntity> = Vec::with_capacity(geometries.len());
+        for (index, geometry) in geometries.into_iter().enumerate() {
+            let entity_id = drawing.allocate_entity_id();
+            entities.push(DbEntity {
+                object: cad_db::DbObject {
+                    id: ObjectId(entity_id.0),
+                    type_key: class_name(&geometry).to_string(),
+                    revision: Revision(0),
+                    source_handle: None,
+                },
+                id: entity_id,
+                layer,
+                space: space.clone(),
+                geometry,
+                draw_order: base_order + index as i64,
+            });
+        }
 
         let transaction = next_transaction_id();
         let change_set = {
             let mut staged = drawing.begin_drawing_transaction(label, transaction)?;
-            staged.insert_entity(entity.clone())?;
+            for entity in &entities {
+                staged.insert_entity(entity.clone())?;
+            }
             staged.commit()?
         };
         if let Some(display) = &display {
-            drawing.restore_entity_display_state(entity_id, display);
+            if let Some(entity) = entities.first() {
+                drawing.restore_entity_display_state(entity.id, display);
+            }
         }
+        let patches: Vec<DrawingPatch> = entities
+            .iter()
+            .enumerate()
+            .map(|(index, entity)| DrawingPatch {
+                id: entity.id,
+                before: None,
+                after: Some(entity.clone()),
+                before_state: None,
+                // The captured display state applies only to the first (single)
+                // entity; a batch records none.
+                after_state: if index == 0 { display.clone() } else { None },
+            })
+            .collect();
         self.publish_candidate(
             document_id,
             candidate,
             DrawingUndoRecord {
                 transaction: change_set.transaction,
                 label: label.to_string(),
-                patches: vec![DrawingPatch {
-                    id: entity_id,
-                    before: None,
-                    after: Some(entity),
-                    before_state: None,
-                    after_state: display,
-                }],
+                patches,
                 merge_key: None,
             },
         )?;
 
         Ok(CommandOutcome {
-            objects: vec![ObjectId(entity_id.0)],
+            objects: entities
+                .iter()
+                .map(|entity| ObjectId(entity.id.0))
+                .collect(),
             changes: Some(Arc::new(change_set)),
             diagnostics: Vec::new(),
             measurement: None,

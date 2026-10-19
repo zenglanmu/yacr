@@ -335,6 +335,9 @@ impl SessionState {
             DrawToolKind::Stretch => CommandId::StretchEntities,
             DrawToolKind::DimLinear => CommandId::DimLinear,
             DrawToolKind::DimAligned => CommandId::DimAligned,
+            DrawToolKind::DimRadius => CommandId::DimRadius,
+            DrawToolKind::DimDiameter => CommandId::DimDiameter,
+            DrawToolKind::DimCenter => CommandId::DimCenter,
         })?;
         let selection = self.selection.refs().to_vec();
         let tool = DrawTool::new(kind, selection.len());

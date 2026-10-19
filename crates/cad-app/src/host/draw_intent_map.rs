@@ -242,6 +242,30 @@ impl HostController {
                 crate::CommandId::DimAligned,
                 crate::CommandPayload::Points(vec![first, second, location]),
             ),
+            // DIMRADIUS/DIMDIAMETER: the picked ref and the location point travel
+            // on the boxed `DimRadial` payload; the handler resolves the entity and
+            // builds the dimension. The radius/diameter choice comes from the
+            // command id, so the payload carries no kind.
+            DrawIntent::DimRadius { target, location } => (
+                crate::CommandId::DimRadius,
+                crate::CommandPayload::DimRadial(Box::new(crate::RadialDimensionCommand {
+                    target,
+                    location,
+                })),
+            ),
+            DrawIntent::DimDiameter { target, location } => (
+                crate::CommandId::DimDiameter,
+                crate::CommandPayload::DimRadial(Box::new(crate::RadialDimensionCommand {
+                    target,
+                    location,
+                })),
+            ),
+            // DIMCENTER: the picked ref travels on the payload; the handler reads
+            // the resolved `DIMCEN` and inserts plain geometry.
+            DrawIntent::DimCenter { target } => (
+                crate::CommandId::DimCenter,
+                crate::CommandPayload::DimCenter(target),
+            ),
         };
         Ok(Command {
             schema_version: 1,

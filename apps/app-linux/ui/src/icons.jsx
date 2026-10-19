@@ -45,6 +45,15 @@ const P = {
   // rotated 45°, so the pair reads as one dimension family in two orientations.
   dimlinear: <><path d="M5 5v14M19 5v14" /><path d="M5 12h14" /><path d="M8.5 9.5 5 12l3.5 2.5M15.5 9.5 19 12l-3.5 2.5" /></>,
   dimaligned: <g transform="rotate(-45 12 12)"><path d="M5 5v14M19 5v14" /><path d="M5 12h14" /><path d="M8.5 9.5 5 12l3.5 2.5M15.5 9.5 19 12l-3.5 2.5" /></g>,
+  // Radial dimension family: the arc/circle target drawn with the linear pair's
+  // dimension vocabulary (a dimension line plus outward arrowheads), so the whole
+  // dimension set reads as one. Radius = a leader from the centre to the arc with
+  // one arrowhead; diameter = a through-centre dimension line with an arrowhead at
+  // each end. The centre mark is plain geometry, not a dimension, so it carries no
+  // dimension line or arrowheads — just the crossed mark at the circle's centre.
+  dimradius: <><circle cx="12" cy="12" r="7" /><path d="M12 12 17 7" /><path d="M16.4 9.6 17 7 14.4 7.6" /></>,
+  dimdiameter: <><circle cx="12" cy="12" r="7" /><path d="M5 12h14" /><path d="M8.5 9.5 5 12l3.5 2.5M15.5 9.5 19 12l-3.5 2.5" /></>,
+  dimcenter: <><circle cx="12" cy="12" r="7" /><path d="M12 8.5v7M8.5 12h7" /></>,
   polyline: <><path d="M4 18 9 8l5 6 6-10" /><circle cx="4" cy="18" r="1.5" /><circle cx="9" cy="8" r="1.5" /><circle cx="20" cy="4" r="1.5" /></>,
   rectang: <><rect x="4" y="6" width="16" height="12" /><circle cx="4" cy="6" r="1.5" /><circle cx="20" cy="18" r="1.5" /></>,
   ellipse: <><ellipse cx="12" cy="12" rx="9" ry="5.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="3" cy="12" r="1.4" /><circle cx="21" cy="12" r="1.4" /></>,

@@ -242,6 +242,11 @@ pub struct HostCore {
     pub(crate) navigation: Rc<NavInner>,
     /// Transient hover state feeding `OverlayInputs::hovered` (ADR-0012 §10 S2).
     pub(crate) hover: Rc<HoverState>,
+    /// The last pointer position in canvas-local logical pixels, feeding the
+    /// renderer's pointer-cursor overlay (the crosshair + pickbox). `None` until
+    /// the pointer is on the surface and after it leaves or cancels; it is pure
+    /// session state and never touches the database, the revision or the history.
+    pub(crate) cursor_logical: Rc<Cell<Option<[f64; 2]>>>,
     /// The monotonic clock the hover dwell is measured against. Defaults to
     /// `Instant::now` on every target; host tests install a fake to drive the
     /// dwell deterministically (no timer thread exists).

@@ -67,6 +67,7 @@ fn blank_status_reports_no_document_capabilities() {
         false,
         false,
         None,
+        false,
     );
     assert_eq!(status.document_label, None);
     assert_eq!(status.entity_count, None);
@@ -109,6 +110,7 @@ fn document_status_reports_counts_and_camera() {
         true,
         true,
         None,
+        true,
     );
     assert_eq!(status.document_label.as_deref(), Some("fixture.dwg"));
     assert_eq!(status.entity_count, Some(3));
@@ -121,6 +123,10 @@ fn document_status_reports_counts_and_camera() {
     assert!(
         status.snap_enabled,
         "the status projects the session's object-snap flag"
+    );
+    assert!(
+        status.crosshair,
+        "the status carries the crosshair flag it was given (the 3D pointer gate)"
     );
 }
 

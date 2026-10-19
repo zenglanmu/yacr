@@ -308,6 +308,13 @@ button, input, select { font: inherit; color: inherit; }
 .workspace__canvas { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; }
 /* The host composites the native CAD surface here. Keep it empty. */
 .native-input { position: absolute; inset: 0; background: transparent; touch-action: none; user-select: none; }
+/* The system arrow is hidden over the CAD partition only while the host is
+   actually drawing its own crosshair (`status.crosshair`, a 2D view with a
+   pointer on the surface). The native surface is input-transparent, so this DOM
+   element is what shows the pointer, and the arrow would otherwise sit on top of
+   the drawn crosshair. In a 3D view the host draws no crosshair, so the class is
+   absent and the system arrow stays: the pointer is never left invisible. */
+.native-input.is-crosshair { cursor: none; }
 
 .palette { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--line); }
 .palette__head {

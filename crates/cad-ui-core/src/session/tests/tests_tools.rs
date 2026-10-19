@@ -3,7 +3,9 @@
 use super::super::*;
 use super::test_support::*;
 
-/// The 23 draw selectors mapped to their `cad-app` machine keys.
+/// The draw selectors mapped to their `cad-app` machine keys.
+///
+/// ALIGN/STRETCH have their own dedicated tests; this table covers the rest.
 const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("LINE", "draw.line"),
     ("CIRCLE", "draw.circle"),
@@ -28,6 +30,9 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("ARRAYPOLAR", "draw.arraypolar"),
     ("DIMLINEAR", "draw.dimlinear"),
     ("DIMALIGNED", "draw.dimaligned"),
+    ("DIMRADIUS", "draw.dimradius"),
+    ("DIMDIAMETER", "draw.dimdiameter"),
+    ("DIMCENTER", "draw.dimcenter"),
 ];
 
 fn fresh_session() -> CadSession {

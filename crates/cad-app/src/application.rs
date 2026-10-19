@@ -234,6 +234,9 @@ impl Application {
             | CommandId::CreateSpline
             | CommandId::DimLinear
             | CommandId::DimAligned
+            | CommandId::DimRadius
+            | CommandId::DimDiameter
+            | CommandId::DimCenter
             | CommandId::MoveEntities
             | CommandId::TrimEntity
             | CommandId::ExtendEntity

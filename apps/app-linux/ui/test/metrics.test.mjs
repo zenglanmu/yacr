@@ -54,7 +54,8 @@ test('the CAD partition paints nothing and holds no DOM children', async () => {
   const css = await readCss();
   assert.match(css, /\.native-input\s*\{[^}]*background:\s*transparent/);
   const app = await readAppSource();
-  assert.match(app, /<div\s+ref=\{shell\.surfaceRef\}\s+className="native-input"[^>]*\/>/);
+  assert.match(app, /ref=\{shell\.surfaceRef\}/);
+  assert.ok(app.includes("'native-input'"));
   assert.ok(!app.includes('<canvas'));
   assert.ok(!app.includes('position:absolute;inset:0;z-index'));
 });

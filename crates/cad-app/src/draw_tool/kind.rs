@@ -321,13 +321,66 @@ pub enum DrawToolKind {
     /// variant, a text override, associativity (`DIMASSOC=2`), and the
     /// object-selection prompts.
     DimAligned,
+    /// DIMRADIUS: a radius dimension whose **only** entry point is an entity
+    /// pick of an arc or circle, followed by the dimension-line location
+    /// (`Exact(2)`, ADR 0017 decision C, P5d).
+    ///
+    /// Autodesk documents "Select arc or circle" as the sole entry point, so —
+    /// unlike DIMLINEAR/DIMALIGNED — this kind **starts with an entity pick**
+    /// ([`Self::picked_step_count`] is `1`): the first step resolves an existing
+    /// arc/circle ref through the same pick path TRIM/EXTEND use, and the second
+    /// is a free point giving the leader/dimension-line direction. A **fillet
+    /// counts**: FILLET commits an `Arc`, so a filleted corner is a legal pick.
+    ///
+    /// The location pick determines the **direction** from the circle centre; the
+    /// leader's point on the arc is the centre plus the radius along that
+    /// direction. The command layer builds the definition (group 15 = that point,
+    /// group 10 = the centre for a radius), the measurement (the radius) and every
+    /// refusal (a non-arc/circle pick, an off-plane entity or location, a
+    /// degenerate radius, a location at the centre, a missing active layer).
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): the object-selection variant
+    /// is **not** applicable (this command *is* the object pick), a `Text`/`Mtext`
+    /// override, associativity (`DIMASSOC=2`), and clamping the leader point to an
+    /// **arc's own sweep** (the point lies on the arc's circle in the picked
+    /// direction; a direction outside the sweep is not clamped — our declared
+    /// reading).
+    DimRadius,
+    /// DIMDIAMETER: a diameter dimension whose only entry point is an entity pick
+    /// of an arc or circle, followed by the dimension-line location (`Exact(2)`,
+    /// ADR 0017 decision C, P5d).
+    ///
+    /// Same two-step capture as [`Self::DimRadius`] (an entity pick then a free
+    /// location point). The definition's group-10 slot is the **opposite chord
+    /// point** (centre minus the radius along the picked direction) rather than
+    /// the centre, and the measurement is the **diameter** (ADR 0017 A.3). Every
+    /// refusal matches DIMRADIUS.
+    DimDiameter,
+    /// DIMCENTER: create the **non-associative centre mark or centrelines** of a
+    /// picked arc/circle as **plain geometry** (`Exact(1)`, ADR 0017 decision C,
+    /// P5d).
+    ///
+    /// Autodesk documents DIMCENTER as creating a "non-associative center mark or
+    /// centerlines", i.e. ordinary LINE geometry — **not** a `DIMENSION` entity
+    /// (ADR 0017 decision D.7). The one step is an entity pick of an arc/circle.
+    /// The `DIMCEN` value drives the result (pinned sign reading): `> 0` a centre
+    /// mark (a crossed pair of LINEs), `< 0` centrelines (a crossed pair reaching
+    /// past the circle), `0` **nothing** — an explicit diagnostic with **no
+    /// transaction**, never a silent empty success. The command layer owns every
+    /// refusal (a non-arc/circle pick, an off-plane entity, a degenerate radius, a
+    /// missing active layer).
+    ///
+    /// Declared approximation: AutoCAD's negative-`DIMCEN` centrelines are a centre
+    /// mark plus **gapped** centrelines; we draw a plain cross, the same declared
+    /// approximation as the radial synthesis (ADR 0017 P5b deviation 3).
+    DimCenter,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 25] = [
+    pub const ALL: [DrawToolKind; 28] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -353,6 +406,9 @@ impl DrawToolKind {
         DrawToolKind::Stretch,
         DrawToolKind::DimLinear,
         DrawToolKind::DimAligned,
+        DrawToolKind::DimRadius,
+        DrawToolKind::DimDiameter,
+        DrawToolKind::DimCenter,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -383,6 +439,9 @@ impl DrawToolKind {
             Self::Stretch => "stretch",
             Self::DimLinear => "dimlinear",
             Self::DimAligned => "dimaligned",
+            Self::DimRadius => "dimradius",
+            Self::DimDiameter => "dimdiameter",
+            Self::DimCenter => "dimcenter",
         }
     }
 
@@ -415,6 +474,9 @@ impl DrawToolKind {
             "stretch" => Some(Self::Stretch),
             "dimlinear" => Some(Self::DimLinear),
             "dimaligned" => Some(Self::DimAligned),
+            "dimradius" => Some(Self::DimRadius),
+            "dimdiameter" => Some(Self::DimDiameter),
+            "dimcenter" => Some(Self::DimCenter),
             _ => None,
         }
     }
@@ -491,6 +553,13 @@ impl DrawToolKind {
             // substitutes the catalog label for chrome anyway.
             Self::DimLinear => "DIMLINEAR",
             Self::DimAligned => "DIMALIGNED",
+            // DIMRADIUS/DIMDIAMETER/DIMCENTER use locale-neutral ASCII fallback
+            // labels, exactly like the other post-ADR-0015 kinds: the ADR fence
+            // forbids new CJK literals on the Rust side and the shell substitutes
+            // the catalog label for chrome anyway.
+            Self::DimRadius => "DIMRADIUS",
+            Self::DimDiameter => "DIMDIAMETER",
+            Self::DimCenter => "DIMCENTER",
         }
     }
 
@@ -513,9 +582,9 @@ impl DrawToolKind {
             // two opposite corners of the crossing window, then the base point and
             // the displacement point (ADR 0016 decision E).
             Self::Align | Self::Stretch => PointArity::Exact(4),
-            // One side/distance point, one point placement, or the ARRAYPOLAR
-            // centre.
-            Self::Offset | Self::Point | Self::ArrayPolar => PointArity::Exact(1),
+            // One side/distance point, one point placement, the ARRAYPOLAR
+            // centre, or the single arc/circle pick of DIMCENTER.
+            Self::Offset | Self::Point | Self::ArrayPolar | Self::DimCenter => PointArity::Exact(1),
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot, so its complement is
             // the zero-point exact arity (ready as soon as the selection is
@@ -535,7 +604,11 @@ impl DrawToolKind {
             | Self::Rotate
             | Self::Mirror
             | Self::Chamfer
-            | Self::Fillet => PointArity::Exact(2),
+            | Self::Fillet
+            // DIMRADIUS/DIMDIAMETER: the entity pick plus the dimension-line
+            // location.
+            | Self::DimRadius
+            | Self::DimDiameter => PointArity::Exact(2),
         }
     }
 
@@ -569,21 +642,40 @@ impl DrawToolKind {
         )
     }
 
-    /// Whether each capture step of this operation picks an **existing entity**
-    /// rather than a free point.
+    /// How many **leading** capture steps pick an existing entity rather than a
+    /// free point.
     ///
-    /// TRIM and EXTEND are the two AutoCAD commands whose arguments are object
+    /// TRIM/EXTEND and CHAMFER/FILLET pick an entity at **every** step, so this is
+    /// the whole complement. DIMRADIUS/DIMDIAMETER/DIMCENTER pick one entity first
+    /// and (for the radial pair) then take a free location point, so this is `1`.
+    /// Every other kind captures free points only (`0`).
+    ///
+    /// The capture state machine reads this to route each step: a click is an
+    /// entity pick while `points.len() < picked_step_count()`, and a free point
+    /// after it. It replaces the old "all steps are picks" boolean, which could not
+    /// express a mixed capture.
+    pub fn picked_step_count(self) -> usize {
+        match self {
+            Self::Trim | Self::Extend | Self::Chamfer | Self::Fillet => self.required_points(),
+            Self::DimRadius | Self::DimDiameter | Self::DimCenter => 1,
+            _ => 0,
+        }
+    }
+
+    /// Whether this operation captures **any** existing entity (an entity pick) as
+    /// a step.
+    ///
+    /// TRIM/EXTEND are the two AutoCAD commands whose arguments are object
     /// selections, not arbitrary coordinates: the click is an entity pick, and
     /// an empty-space click is refused instead of being accepted as a point and
-    /// resolved later. These kinds therefore resolve their refs at capture time
-    /// and are only ready once both steps have a real entity behind them.
+    /// resolved later. CHAMFER/FILLET share that shape (each step picks a straight
+    /// line). DIMRADIUS/DIMDIAMETER/DIMCENTER add the radial family, whose **only**
+    /// entry point is an arc/circle pick (ADR 0017 decision C): their first step is
+    /// an entity pick even though a later step may be a free point.
     ///
-    /// CHAMFER and FILLET share that shape: each of their two steps picks an
-    /// existing straight line, so they are entity pickers too.
+    /// These kinds resolve their refs at capture time, so they are only ready once
+    /// every entity-pick step has a real entity behind it.
     pub fn needs_picked_entities(self) -> bool {
-        matches!(
-            self,
-            Self::Trim | Self::Extend | Self::Chamfer | Self::Fillet
-        )
+        self.picked_step_count() > 0
     }
 }

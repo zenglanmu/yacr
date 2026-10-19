@@ -20,6 +20,11 @@ export function Workspace() {
   // geometry is unchanged until the user opens it.
   const showProperties = shell.propertiesOpen && !showStart;
   const leftOpen = showStart || showProperties || shell.diagnosticsOpen;
+  // The host hides the system cursor over the CAD partition only while it is
+  // drawing its own crosshair (a 2D view with a pointer on the surface). A 3D
+  // view reports `false`, so the system arrow stays and the pointer is never
+  // invisible. Missing field (older host): the arrow stays, never a guess.
+  const crosshair = shell.status?.crosshair === true;
   return (
     <div className="region region--workspace workspace app-region">
       <div className={['workspace__left', leftOpen ? 'is-open' : ''].filter(Boolean).join(' ')}>
@@ -29,7 +34,11 @@ export function Workspace() {
       </div>
       <div className="workspace__canvas">
         {/* The native CAD partition. Keep this node childless. */}
-        <div ref={shell.surfaceRef} className="native-input" aria-label={t('a11y.canvas_label')} />
+        <div
+          ref={shell.surfaceRef}
+          className={['native-input', crosshair ? 'is-crosshair' : ''].filter(Boolean).join(' ')}
+          aria-label={t('a11y.canvas_label')}
+        />
       </div>
       <NavRail />
     </div>

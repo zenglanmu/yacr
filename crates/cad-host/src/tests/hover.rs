@@ -899,3 +899,41 @@ fn clear_hover_drops_the_pending_dwell_as_well_as_the_applied_tint() {
     assert!(hovered_refs(&core).is_empty());
     assert!(core.hover.pending.borrow().is_none());
 }
+
+// --- pointer cursor overlay input (crosshair + pickbox) ----------------------
+
+#[test]
+fn an_idle_move_publishes_the_pointer_cursor_overlay_input() {
+    let core = hover_core();
+    core.controller.borrow_mut().fit().expect("the demo fits");
+    let pixel = [200.0, 150.0];
+    assert!(
+        core.render.overlays().cursor.is_none(),
+        "no cursor overlay before any move"
+    );
+
+    dispatch_pointer(&core, hover_cursor(&core, pixel));
+
+    let overlays = core.render.overlays();
+    let cursor = overlays
+        .cursor
+        .expect("a move publishes the cursor world point");
+    let scale = overlays
+        .view_scale
+        .expect("a 2D view publishes the view scale");
+    assert!(scale.is_finite() && scale > 0.0);
+    // The world point is the viewport's own screen_to_world of the pixel.
+    let expected = {
+        let c = core.controller.borrow();
+        let viewport = &c.application.workspace.viewports[&c.viewport_id];
+        viewport
+            .screen_to_world(pixel, viewport.logical_size)
+            .expect("the 2D plan view projects the pixel")
+    };
+    assert!((cursor.x - expected.x).abs() < 1e-9);
+    assert!((cursor.y - expected.y).abs() < 1e-9);
+
+    // Leaving the surface clears the cursor overlay input (never a stale one).
+    dispatch_pointer(&core, InteractionRequest::ClearCursor);
+    assert!(core.render.overlays().cursor.is_none());
+}

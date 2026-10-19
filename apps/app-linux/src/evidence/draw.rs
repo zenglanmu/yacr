@@ -58,10 +58,23 @@
 //!     dimension-line location), `CONFIRM`, and read `entityCount` **+1** and
 //!     `tool` `null`.
 //! 14. **DIMALIGNED** (P5c): the same three-pick funnel ⇒ `entityCount` **+1**.
+//! 15. **DIMRADIUS** (P5d): create a `CIRCLE`, start the real `DIMRADIUS`
+//!     selector, click the circle's **edge** (the leading entity pick), click the
+//!     dimension-line location, `CONFIRM`, and read `entityCount` **+1** (the new
+//!     `AcDbDimension`) and `tool` `null`.
+//! 16. **DIMDIAMETER** (P5d): the same pick-then-location funnel ⇒ `entityCount`
+//!     **+1**.
+//! 17. **DIMCENTER** (P5d): create a `CIRCLE`, start the real `DIMCENTER`
+//!     selector, click the circle's edge (its single pick), `CONFIRM`, and read
+//!     the **real** `entityCount` delta. Its output is plain line geometry, not a
+//!     `DIMENSION`; the committed line count follows the drawing's active
+//!     `Standard` `DIMCEN`, which `cad_status` does **not** expose, so the report
+//!     states the real delta and never asserts a count it cannot read.
 //!
-//! The P4 edit-command phases (8–12) live in [`super::draw_edit`] and the P5c
-//! dimension-creation phases (13–14) in [`super::draw_dimension`] (this file was
-//! split at the 1000-line code-file gate).
+//! The P4 edit-command phases (8–12) live in [`super::draw_edit`], the P5c
+//! dimension-creation phases (13–14) in [`super::draw_dimension`], and the P5d
+//! radial-dimension phases (15–17) in [`super::draw_dimension_radial`] (this file
+//! was split at the 1000-line code-file gate).
 //!
 //! Synthetic input, **not a real mouse**: the events are dispatched on
 //! `.native-input` and never touch the kernel/evdev/XInput path. Every reported
@@ -121,7 +134,8 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
          phases: LINE pair + FILLET(radius, deliberate miss) + LINE pair + CHAMFER(a/b) + PLINE(3pt+CONFIRM) \
          POLYGON(sides=6, out-of-range=2) POINT(visible) RECTANG + P4 edit commands \
          ARRAYRECT(rows=2,cols=3) ARRAYPOLAR(items=4) ALIGN(4pt) STRETCH(4pt) EXPLODE \
-         + P5c dimensions DIMLINEAR(3pt) DIMALIGNED(3pt)"
+         + P5c dimensions DIMLINEAR(3pt) DIMALIGNED(3pt) \
+         + P5d radial dimensions DIMRADIUS(circle+pick+loc) DIMDIAMETER(circle+pick+loc) DIMCENTER(circle+pick)"
     );
     let webview = webview.clone();
     if let Err(error) = std::thread::Builder::new()
@@ -170,12 +184,14 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
 /// * then the **P4 edit-command phases** (ARRAYRECT / ARRAYPOLAR / ALIGN /
 ///   STRETCH / EXPLODE) run on a sub-second step (t=100s..135.5s), the **P5c
 ///   dimension-creation phases** (DIMLINEAR / DIMALIGNED, [`super::draw_dimension`])
-///   at t=137s..144.5s, and the combined single-line report lands at t=146s — the
-///   P4 phases and report in [`super::draw_edit`], which documents the per-step
-///   timeline. An external `--capture-at` should land **after** the dimension
-///   phases commit (≈ driver t=145s.., i.e. a launch delay of ≈ 155s) so a
-///   reviewer sees the arrays, the EXPLODE result **and** the new dimensions on
-///   screen.
+///   at t=137s..144.5s, the **P5d radial-dimension phases** (DIMRADIUS /
+///   DIMDIAMETER / DIMCENTER, [`super::draw_dimension_radial`]) at
+///   t=145s..163s, and the combined single-line report lands at t=165s — the P4
+///   phases and report in [`super::draw_edit`], which documents the per-step
+///   timeline. An external `--capture-at` should land **after** every P5d command
+///   commits (≈ driver t=163s.., i.e. a launch delay of ≈ 170s) so a reviewer sees
+///   the arrays, the EXPLODE result, the P5c dimensions **and** the P5d circles +
+///   radial dimensions on screen.
 ///
 /// Every step is a dispatch only; the **real** outcome is the `cad_status`
 /// snapshot read from the host, never a value synthesized here. Pointer
@@ -528,12 +544,14 @@ fn run_draw_evidence(webview: tauri::Webview) {
 
     // P4 edit-command phases (ARRAYRECT / ARRAYPOLAR / ALIGN / STRETCH / EXPLODE)
     // run after the drawing phases above, then the P5c dimension-creation phases
-    // (DIMLINEAR / DIMALIGNED), followed by the single-line report. They are
+    // (DIMLINEAR / DIMALIGNED) and the P5d radial-dimension phases (DIMRADIUS /
+    // DIMDIAMETER / DIMCENTER), followed by the single-line report. They are
     // sub-second-stepped (`schedule_draw_ms`) so the whole pass finishes inside
-    // the bounded evidence timeout; see [`super::draw_edit`] and
-    // [`super::draw_dimension`].
+    // the bounded evidence timeout; see [`super::draw_edit`],
+    // [`super::draw_dimension`] and [`super::draw_dimension_radial`].
     super::draw_edit::schedule_draw_edit_phases(&webview, &start);
     super::draw_dimension::schedule_dimension_phases(&webview, &start);
+    super::draw_dimension_radial::schedule_radial_dimension_phases(&webview, &start);
     super::draw_edit::schedule_draw_report(&webview, &start);
 }
 

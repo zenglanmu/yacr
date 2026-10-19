@@ -187,12 +187,25 @@ export const RIBBON_TABS = Object.freeze([
         titleKey: 'ribbon.panel.annotation',
         items: [
           // Dimension creation leads the annotate panel, the way AutoCAD's
-          // Annotate tab puts its Dimensions panel first. Both are three-pick
-          // captures (two extension-line origins, then the dimension-line
-          // location); the linear/aligned pair stays together and in a fixed
-          // order so the panel never reorders between sessions.
+          // Annotate tab puts its Dimensions panel first. The linear/aligned pair
+          // are three-pick captures (two extension-line origins, then the
+          // dimension-line location); the radial pair are two-pick captures (an
+          // arc/circle entity pick, then the dimension-line location) and the
+          // centre mark is a single arc/circle pick producing plain geometry.
+          // The whole family stays together in one fixed order — linear, aligned,
+          // radius, diameter, centre mark — so the panel never reorders between
+          // sessions and the radial pair sits right next to the linear pair.
+          //
+          // Each command carries its own glyph in the shared 24px stroke language
+          // (`dimlinear`/`dimaligned`/`dimradius`/`dimdiameter`/`dimcenter`), so
+          // the family reads as one set: the radial pair draws its arc/circle
+          // target with the linear pair's dimension-line + arrowhead vocabulary,
+          // and the centre mark shows the crossed mark at the circle's centre.
           { id: 'DIMLINEAR', labelKey: 'draw.kind.dimlinear', icon: 'dimlinear', command: 'DIMLINEAR', large: true },
           { id: 'DIMALIGNED', labelKey: 'draw.kind.dimaligned', icon: 'dimaligned', command: 'DIMALIGNED', large: true },
+          { id: 'DIMRADIUS', labelKey: 'draw.kind.dimradius', icon: 'dimradius', command: 'DIMRADIUS', large: true },
+          { id: 'DIMDIAMETER', labelKey: 'draw.kind.dimdiameter', icon: 'dimdiameter', command: 'DIMDIAMETER', large: true },
+          { id: 'DIMCENTER', labelKey: 'draw.kind.dimcenter', icon: 'dimcenter', command: 'DIMCENTER', large: true },
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', command: 'PROPERTIES', large: true },
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
           { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', command: 'SELECTALL' },

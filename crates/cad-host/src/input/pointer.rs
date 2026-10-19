@@ -27,6 +27,12 @@ impl HostCore {
         modifiers: Modifiers,
     ) -> CadResult<()> {
         let point = self.pointer_logical(position)?;
+        // The renderer's cursor crosshair follows the pointer: remember its
+        // logical position on every real phase. A cancel carries no coordinates
+        // (the typed request zero-fills them), so it never sets a position.
+        if !matches!(phase, PointerPhase::Cancel) {
+            self.cursor_logical.set(Some(point));
+        }
         match phase {
             PointerPhase::Down => self.pointer_down(id, button, point, modifiers),
             PointerPhase::Move => self.pointer_move(id, button, point),
@@ -251,6 +257,9 @@ impl HostCore {
         // gesture and no rubber band may remain.
         self.clear_hover();
         self.clear_box_gesture();
+        // The pointer is gone (a cancel/blur carries no position): drop the
+        // cursor overlay too rather than leaving the crosshair at a stale spot.
+        self.cursor_logical.set(None);
         let mut active = self.navigation.active.borrow_mut();
         active.retain(|active| active != &id);
         let empty = active.is_empty();

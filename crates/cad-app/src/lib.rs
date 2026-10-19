@@ -310,6 +310,18 @@ pub struct TwoLineCommand {
     pub pick_second: Point3,
 }
 
+/// The input of a DIMRADIUS/DIMDIAMETER command (ADR 0017 decision C, P5d): the
+/// picked arc/circle ref and the dimension-line location.
+///
+/// Boxed inside [`CommandPayload::DimRadial`] so the command enum stays small (the
+/// same reason [`TwoLineCommand`] is boxed). Which of the two commands it is comes
+/// from the [`CommandId`], so the payload carries no kind field (a second source
+/// of truth).
+pub struct RadialDimensionCommand {
+    pub target: SelectionRef,
+    pub location: Point3,
+}
+
 pub enum CommandPayload {
     None,
     Points(Vec<Point3>),
@@ -480,6 +492,17 @@ pub enum CommandPayload {
     },
     /// Set the session's active layer for new entities. Session state only.
     ActiveLayer(LayerId),
+    /// DIMRADIUS/DIMDIAMETER: the picked arc/circle (`target`) plus the
+    /// dimension-line location (`location`, ADR 0017 decision C, P5d). The kind
+    /// (radius vs diameter) comes from the [`CommandId`]; the handler resolves the
+    /// entity, builds the definition through the shared synthesis and inserts one
+    /// `AcDbDimension`.
+    DimRadial(Box<RadialDimensionCommand>),
+    /// DIMCENTER: the picked arc/circle (`target`) for the non-associative centre
+    /// mark/centrelines (ADR 0017 decision C/D.7, P5d). The handler resolves the
+    /// entity, reads the resolved `DIMCEN` and inserts ordinary LINE geometry
+    /// (never a `DIMENSION`); `DIMCEN = 0` inserts nothing and reports it.
+    DimCenter(SelectionRef),
     /// A fully formed semantic geometry, used by `CreateLine` as the
     /// programmatic alternative to a point list.
     Geometry(Box<SemanticGeometry>),

@@ -25,6 +25,7 @@ mod p4_origin_dispatch;
 mod p4_trace;
 mod queue;
 mod select;
+mod snap_marker;
 
 // --- synthetic platform contracts -------------------------------------------
 

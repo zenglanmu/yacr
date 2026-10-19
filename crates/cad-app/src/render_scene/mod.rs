@@ -309,6 +309,12 @@ impl CadSceneController {
 
         let (visual_delta, visual_diagnostics, visual_completeness) =
             if visual_changed || self.visual_overlay.is_none() {
+                // Screen-space marker sizing: every preview/snap marker's world
+                // half-extent is a fixed pixel size times the current view scale,
+                // so the per-kind glyphs stay legible under any zoom instead of
+                // drifting with a fixed world size. A missing/degenerate scale
+                // falls back to the documented world default (never zero/NaN).
+                let preview_options = PreviewOptions::for_view_scale(overlays.view_scale);
                 let mut overlay = VisualOverlay::default();
                 if let Some(db) = doc {
                     // Reference overlays first, so the selection and previews
@@ -357,14 +363,14 @@ impl CadSceneController {
                         overlays.measurement.as_ref(),
                         document,
                         overlays.visibility.snap_hints,
-                        &PreviewOptions::default(),
+                        &preview_options,
                     ));
                     if let Some(preview) = overlays.draw_preview.as_ref() {
                         overlay.merge(draw_preview_overlay(
                             preview,
                             document,
                             overlays.visibility.snap_hints,
-                            &PreviewOptions::default(),
+                            &preview_options,
                         ));
                     }
                     // The live box-selection rubber band is gesture feedback, not
@@ -382,9 +388,20 @@ impl CadSceneController {
                         overlay.merge(snap_hint_overlay(
                             &overlays.snap_hints_input,
                             document,
-                            &PreviewOptions::default(),
+                            &preview_options,
                         ));
                     }
+                    // The pointer cursor crosshair + pickbox (renderer-only; the
+                    // CAD partition has no DOM overlay). Drawn last, at the
+                    // highest `draw_order`, so it is never occluded by geometry
+                    // or the transient chrome above. An absent cursor or a 3D
+                    // view yields no batch (an explicit empty overlay).
+                    overlay.merge(cursor_overlay(
+                        overlays.cursor,
+                        overlays.viewport_bounds,
+                        overlays.view_scale,
+                        document,
+                    ));
                 }
                 let delta = Arc::new(SceneDelta {
                     stamp: stamp.clone(),

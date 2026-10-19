@@ -192,6 +192,7 @@ impl CadSession {
     /// | `POINT` | `BeginDraw(Point)` |
     /// | `SPLINE` | `BeginDraw(Spline)` |
     /// | `DIMLINEAR` / `DIMALIGNED` | `BeginDraw(DimLinear)` / `BeginDraw(DimAligned)` |
+    /// | `DIMRADIUS` / `DIMDIAMETER` / `DIMCENTER` | `BeginDraw(DimRadius)` / `BeginDraw(DimDiameter)` / `BeginDraw(DimCenter)` |
     /// | `ARRAYRECT` / `ARRAYPOLAR` | `BeginDraw(ArrayRect)` / `BeginDraw(ArrayPolar)` |
     /// | `ALIGN` | `BeginDraw(Align)` |
     /// | `STRETCH` | `BeginDraw(Stretch)` |
@@ -262,6 +263,11 @@ impl CadSession {
             CommandId::CreateSpline => Some(InteractionRequest::BeginDraw(DrawToolKind::Spline)),
             CommandId::DimLinear => Some(InteractionRequest::BeginDraw(DrawToolKind::DimLinear)),
             CommandId::DimAligned => Some(InteractionRequest::BeginDraw(DrawToolKind::DimAligned)),
+            CommandId::DimRadius => Some(InteractionRequest::BeginDraw(DrawToolKind::DimRadius)),
+            CommandId::DimDiameter => {
+                Some(InteractionRequest::BeginDraw(DrawToolKind::DimDiameter))
+            }
+            CommandId::DimCenter => Some(InteractionRequest::BeginDraw(DrawToolKind::DimCenter)),
             CommandId::MoveEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Move)),
             CommandId::CopyEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Copy)),
             CommandId::RotateEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Rotate)),
@@ -560,6 +566,14 @@ impl CadSession {
             Ok(kind) => (kind.map(str::to_string), None),
             Err(error) => (None, Some(cad_error_text(&error))),
         };
+        // Whether the host is drawing its own pointer crosshair right now: a 2D
+        // view with a pointer position on the surface. The frontend hides the
+        // system cursor exactly when this is true, so a 3D view (which draws no
+        // crosshair) keeps the system arrow instead of being left pointerless.
+        // Read from the same overlay input the renderer draws the crosshair from
+        // (`HostCore::sync_render` only publishes it for a valid 2D view), never
+        // from a guess about the view mode.
+        let crosshair = self.core.render.overlays().cursor.is_some();
         // Technical error sources, in priority order: a host status failure
         // (command/open/resource-install), a projected partial-resource report,
         // the last recorded operation/completion failure, the render session's
@@ -597,6 +611,7 @@ impl CadSession {
             self.core.controller.borrow().hover_preview_enabled(),
             self.core.controller.borrow().snap_enabled(),
             snap_kind,
+            crosshair,
         );
         // Real live open progress (running only) from the host snapshot, so the
         // chrome can show a determinate/indeterminate bar without inventing data.

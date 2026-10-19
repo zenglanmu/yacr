@@ -84,6 +84,12 @@ export function parseCadStatus(value) {
   if (value.snapKind !== undefined && value.snapKind !== null && typeof value.snapKind !== 'string') {
     throw Error('CAD_STATUS_INVALID');
   }
+  // The pointer-crosshair gate is optional for older hosts, but a present flag
+  // must be a real boolean: a truthy non-boolean would hide the system cursor
+  // over a view that draws no crosshair, leaving the pointer invisible.
+  if (value.crosshair !== undefined && typeof value.crosshair !== 'boolean') {
+    throw Error('CAD_STATUS_INVALID');
+  }
   return value;
 }
 
@@ -448,18 +454,29 @@ export async function setToolParameterFlag(invoke, key, flag) {
 }
 
 /**
- * Per-step capture prompts for tools whose picks have names (ADR 0017 P5c).
+ * Per-step capture prompts for tools whose picks have names (ADR 0017 P5c/P5d).
  *
- * The dimension commands are three-pick captures — two extension-line origins,
- * then the dimension-line location — and a bare point count ("1 point") does not
- * tell the user *what* to pick next. This table names each pick; the step is
- * derived from the host's real `tool.key` and `tool.points` (the captured count),
- * never inferred from the pointer stream. Every other tool has no entry, so it
- * renders no prompt at all and its chip is unchanged.
+ * The dimension commands capture named picks — the linear/aligned pair three
+ * (two extension-line origins, then the dimension-line location), the radial
+ * pair two (an arc/circle entity pick, then the dimension-line location) and
+ * DIMCENTER one (an arc/circle entity pick) — and a bare point count ("1 point")
+ * does not tell the user *what* to pick next. This table names each pick; the
+ * step is derived from the host's real `tool.key` and `tool.points` (the captured
+ * count), never inferred from the pointer stream. Every other tool has no entry,
+ * so it renders no prompt at all and its chip is unchanged.
  *
  * `location_linear` vs `location_aligned` differ on purpose: for DIMLINEAR the
  * location pick also decides horizontal vs vertical, which the user must know
  * before clicking.
+ *
+ * The radial pair's second pick is deliberately **not** described as positioning
+ * the text: the location pick only sets the leader's direction from the centre,
+ * and the synthesis derives the text placement itself. Its prompt asks only for
+ * the "dimension location" so it never claims the user places the text.
+ *
+ * Only the **named picks** live here, as an ordered list (a step is chosen by the
+ * captured count). A completed capture's ready prompt is not positional, so it is
+ * resolved from [`TOOL_READY_PROMPTS`] below.
  */
 export const TOOL_STEP_PROMPTS = Object.freeze({
   'draw.dimlinear': [
@@ -472,7 +489,38 @@ export const TOOL_STEP_PROMPTS = Object.freeze({
     'tool.prompt.dim.origin_second',
     'tool.prompt.dim.location_aligned',
   ],
+  'draw.dimradius': [
+    'tool.prompt.dim.select_arc',
+    'tool.prompt.dim.location_radius',
+  ],
+  'draw.dimdiameter': [
+    'tool.prompt.dim.select_arc',
+    'tool.prompt.dim.location_diameter',
+  ],
+  'draw.dimcenter': [
+    'tool.prompt.dim.select_arc',
+  ],
 });
+
+/**
+ * Per-tool "ready" prompt override, keyed by the active tool key (ADR 0017 P5d).
+ *
+ * The named-pick table above must stay an **ordered list** (a step is chosen by
+ * the captured count), so the ready prompt — which is not positional — lives in
+ * this parallel table. Once the exact complement is captured the tool is ready
+ * and waits for Enter; the shared default `tool.prompt.dim.ready` says a
+ * **dimension** is defined, which is correct for the real dimension commands.
+ * DIMCENTER is the one exception: it emits plain line geometry (a centre mark or
+ * centrelines), not a dimension entity, so it must not claim a dimension was
+ * defined and gets `tool.prompt.dim.center_ready` instead. A tool not listed
+ * here falls back to the shared dimension ready prompt.
+ */
+export const TOOL_READY_PROMPTS = Object.freeze({
+  'draw.dimcenter': 'tool.prompt.dim.center_ready',
+});
+
+/** The shared ready prompt for a capture that produced a dimension entity. */
+const DEFAULT_READY_PROMPT = 'tool.prompt.dim.ready';
 
 /**
  * The catalog key for the next expected pick of the active `tool`, or `null`.
@@ -480,15 +528,18 @@ export const TOOL_STEP_PROMPTS = Object.freeze({
  * `null` for a tool with no named steps (every existing tool) so the chip stays
  * exactly as it was. Once the exact complement is captured the capture is ready
  * and waits for Enter, so the ready prompt names that instead of repeating the
- * last pick. The point count is read as the host's real value; a malformed one
- * is treated as "no points yet" rather than a fabricated later step.
+ * last pick (a per-tool override from [`TOOL_READY_PROMPTS`], else the shared
+ * dimension ready prompt). The point count is read as the host's real value; a
+ * malformed one is treated as "no points yet" rather than a fabricated later
+ * step.
  */
 export function toolStepPromptKey(tool) {
   if (!tool || typeof tool !== 'object' || typeof tool.key !== 'string') return null;
   const steps = TOOL_STEP_PROMPTS[tool.key];
   if (!steps) return null;
   const points = Number.isSafeInteger(tool.points) && tool.points >= 0 ? tool.points : 0;
-  return points < steps.length ? steps[points] : 'tool.prompt.dim.ready';
+  if (points < steps.length) return steps[points];
+  return TOOL_READY_PROMPTS[tool.key] ?? DEFAULT_READY_PROMPT;
 }
 
 // The snap engine's stable machine keys (`cad_measure::SnapKind::as_str`) and

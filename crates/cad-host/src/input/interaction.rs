@@ -48,6 +48,43 @@ impl HostCore {
         }
     }
 
+    /// Resolve a cursor-bearing request to canvas-local logical coordinates, for
+    /// the pointer-cursor overlay input.
+    ///
+    /// Mirrors `world_point`/`hover_logical`: a canvas-local point is used as-is
+    /// after its metrics revision is validated, and a world point is projected
+    /// through the active camera. Only used to remember where the pointer is for
+    /// the crosshair; the interaction itself still runs its own resolution.
+    fn cursor_logical_of(&self, input: PointInput) -> CadResult<[f64; 2]> {
+        match input.validate()? {
+            PointInput::CanvasLocal {
+                logical_position,
+                metrics_revision,
+            } => {
+                self.metrics()?;
+                if metrics_revision != self.metrics_revision.get() {
+                    return Err(CadError::InvalidInput(
+                        "stale canvas metrics revision".into(),
+                    ));
+                }
+                Ok(logical_position)
+            }
+            PointInput::World(point) => {
+                let c = self.controller.borrow();
+                let viewport = c
+                    .application
+                    .workspace
+                    .viewports
+                    .get(&c.viewport_id)
+                    .ok_or(CadError::Cancelled)?;
+                viewport
+                    .camera
+                    .world_to_screen(point, viewport.logical_size)
+                    .ok_or_else(|| CadError::InvalidInput("world point cannot be projected".into()))
+            }
+        }
+    }
+
     pub(crate) fn dispatch_interaction(
         &self,
         request: InteractionRequest,
@@ -111,6 +148,9 @@ impl HostCore {
             }
             InteractionRequest::ClearCursor => {
                 self.controller.borrow_mut().session.clear_cursor();
+                // The pointer is off the surface: forget its position so the
+                // crosshair overlay is not left at a stale spot.
+                self.cursor_logical.set(None);
                 // The UI reports "no cursor on the surface" through this request:
                 // the hover it produced must not survive it, and neither may the
                 // capture candidate resolved at that departed cursor position
@@ -141,6 +181,11 @@ impl HostCore {
                 InteractionOutcome::PointCaptured
             }
             InteractionRequest::MoveCursor(point) => {
+                // Remember where the pointer is for the renderer's cursor
+                // crosshair overlay (both the capture and the hover branch below
+                // keep the same logical position). Best-effort: the interaction
+                // still runs its own resolution and reports its own error.
+                let logical = self.cursor_logical_of(point).ok();
                 if self.capturing() {
                     // A draw/measurement capture owns the cursor: this is the
                     // tool preview cursor, unchanged.
@@ -153,6 +198,9 @@ impl HostCore {
                     // (ADR-0012 §10 S2): it only refreshes the flags overlay.
                     scope = DirtyScope::Overlay;
                     self.resolve_hover(point)?;
+                }
+                if let Some(logical) = logical {
+                    self.cursor_logical.set(Some(logical));
                 }
                 InteractionOutcome::CursorMoved
             }

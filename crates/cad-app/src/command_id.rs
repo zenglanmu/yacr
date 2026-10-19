@@ -129,6 +129,32 @@ pub enum CommandId {
     /// and a zero measurement. Same single-entity / one-transaction / active-layer
     /// funnel as [`CommandId::DimLinear`]. Non-associative. Work-only.
     DimAligned,
+    /// DIMRADIUS: draw a **radius** dimension for a picked arc/circle (ADR 0017
+    /// decision C, P5d). The **only** entry point is an entity pick of an arc or
+    /// circle (a fillet arc counts), followed by the dimension-line location.
+    /// Payload is `DimRadial { target, location }`. The handler resolves the
+    /// entity, places the leader point on the circle along the location pick's
+    /// direction, stores the centre in the group-10 slot, and refuses a
+    /// non-arc/circle pick, an off-plane entity or location, a degenerate radius
+    /// and a location at the centre. Built through the shared synthesis from the
+    /// resolved current style (`Standard`) and inserted on the active layer in one
+    /// transaction / one undo step. Non-associative. Work-only.
+    DimRadius,
+    /// DIMDIAMETER: draw a **diameter** dimension for a picked arc/circle (ADR
+    /// 0017 decision C, P5d). Same two-step capture as [`CommandId::DimRadius`];
+    /// the group-10 slot is the **opposite chord point** and the measurement is the
+    /// diameter. Same single-entity / one-transaction / active-layer funnel.
+    /// Non-associative. Work-only.
+    DimDiameter,
+    /// DIMCENTER: create the **non-associative centre mark or centrelines** of a
+    /// picked arc/circle as **plain geometry** (ADR 0017 decision C/D.7, P5d) —
+    /// ordinary LINE entities, **not** a `DIMENSION`. Payload is
+    /// `DimCenter(target)`. The resolved `DIMCEN` drives the result: `> 0` a centre
+    /// mark, `< 0` centrelines, `0` nothing (an explicit diagnostic with no
+    /// transaction). One transaction / one undo step on the active layer; refuses a
+    /// non-arc/circle pick, an off-plane entity, a degenerate radius and a missing
+    /// active layer. Work-only.
+    DimCenter,
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
     MoveEntities,
@@ -274,6 +300,9 @@ impl CommandId {
                 | Self::CreateSpline
                 | Self::DimLinear
                 | Self::DimAligned
+                | Self::DimRadius
+                | Self::DimDiameter
+                | Self::DimCenter
                 | Self::MoveEntities
                 | Self::TrimEntity
                 | Self::ExtendEntity

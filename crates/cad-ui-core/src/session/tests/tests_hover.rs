@@ -503,3 +503,67 @@ fn a_stale_hover_cursor_is_refused_and_never_tints() {
         "a refused hover must not tint anything"
     );
 }
+
+// --- pointer-crosshair status flag (the 3D pointer decision) ----------------
+
+fn fresh_session() -> CadSession {
+    session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }))
+}
+
+/// The frontend hides the system cursor over the CAD partition only while the
+/// host is actually drawing its own crosshair: a 2D view with a pointer on the
+/// surface. Without a pointer (and after leaving) the system cursor must stay.
+#[test]
+fn the_crosshair_flag_follows_the_drawn_crosshair() {
+    let session = fresh_session();
+    assert!(
+        !session.snapshot(None, None, 0).crosshair,
+        "no pointer on the surface: the host draws no crosshair, so the system cursor stays"
+    );
+
+    session
+        .handle_input(&move_input(200.0, 150.0))
+        .expect("the 2D move is admitted");
+    assert!(
+        session.snapshot(None, None, 0).crosshair,
+        "a 2D pointer move publishes the cursor overlay input: the host draws the crosshair"
+    );
+
+    session
+        .handle_input(&probe(InputKind::PointerLeave))
+        .expect("the leave is admitted");
+    assert!(
+        !session.snapshot(None, None, 0).crosshair,
+        "leaving the surface clears the crosshair, so the system cursor returns"
+    );
+}
+
+/// A 3D view is **never left pointerless**: the crosshair is 2D-only, so the
+/// flag must stay `false` there and the frontend keeps the system arrow.
+#[test]
+fn a_3d_view_keeps_the_system_cursor() {
+    let session = fresh_session();
+    {
+        let mut c = session.core.controller.borrow_mut();
+        let id = c.viewport_id;
+        let viewport = c
+            .application
+            .workspace
+            .viewports
+            .get_mut(&id)
+            .expect("an active viewport");
+        let saved = viewport.view_mode.saved_2d_camera();
+        viewport
+            .set_view_mode(cad_app::ViewMode2d3d::ThreeD { saved_2d: saved })
+            .expect("the 3D switch is admitted");
+    }
+    session
+        .handle_input(&move_input(200.0, 150.0))
+        .expect("the move is admitted");
+    assert!(
+        !session.snapshot(None, None, 0).crosshair,
+        "a 3D view draws no crosshair (no planar view rectangle), so the system cursor must stay"
+    );
+}

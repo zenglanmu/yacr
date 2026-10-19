@@ -19,10 +19,11 @@ use cad_representation::SpaceSelection;
 /// Real drawing content, so it draws above the reference axes/grid
 /// ([`AXES_GRID_DRAW_ORDER`], `800_000`) and above the base drawing (`0`), but
 /// below every transient chrome overlay — the selection highlight (`900_000`),
-/// the object-snap hints ([`SNAP_HINT_DRAW_ORDER`], `1_500_000`), the
-/// box-selection band ([`BOX_SELECT_DRAW_ORDER`], `1_750_000`) and the tool
-/// preview ([`PREVIEW_DRAW_ORDER`], `2_000_000`) — so the live feedback the user
-/// is acting on is never occluded by a marker.
+/// the box-selection band ([`BOX_SELECT_DRAW_ORDER`], `1_750_000`), the tool
+/// preview ([`PREVIEW_DRAW_ORDER`], `2_000_000`), the pointer cursor
+/// ([`CURSOR_DRAW_ORDER`], `2_500_000`) and the object-snap hints
+/// ([`SNAP_HINT_DRAW_ORDER`], `3_000_000`) — so the live feedback the user is
+/// acting on is never occluded by a marker.
 ///
 /// **Deliberate deviation (ADR 0015 decision E):** markers draw in overlay order,
 /// i.e. always on top of base-scene entities, so a POINT is never hidden behind

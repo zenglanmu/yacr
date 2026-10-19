@@ -346,6 +346,38 @@ pub enum DrawIntent {
         second: Point3,
         location: Point3,
     },
+    /// DIMRADIUS: insert a radius dimension for the picked arc/circle `target`,
+    /// with the leader/dimension-line direction set by the `location` pick, on the
+    /// active layer (ADR 0017 decision C, P5d).
+    ///
+    /// `target` is the ref resolved at capture time (the **only** entry point);
+    /// `location` is the second pick, a free point whose direction from the circle
+    /// centre sets where the leader meets the circle. The command layer resolves
+    /// the entity, builds the definition and owns every refusal (a non-arc/circle
+    /// pick, an off-plane entity/location, a degenerate radius, a location at the
+    /// centre), so the tool never invents a radius or a direction.
+    DimRadius {
+        target: SelectionRef,
+        location: Point3,
+    },
+    /// DIMDIAMETER: insert a diameter dimension for the picked arc/circle
+    /// `target`, same two-step capture as [`DrawIntent::DimRadius`] (ADR 0017
+    /// decision C, P5d).
+    ///
+    /// The command layer stores the **opposite chord point** in the group-10 slot
+    /// and measures the diameter; every refusal matches DIMRADIUS.
+    DimDiameter {
+        target: SelectionRef,
+        location: Point3,
+    },
+    /// DIMCENTER: create the non-associative centre mark/centrelines of the picked
+    /// arc/circle `target` as **plain geometry** (ADR 0017 decision C/D.7, P5d).
+    ///
+    /// `target` is the ref resolved at capture time; the command layer resolves the
+    /// entity, reads the resolved `DIMCEN`, produces ordinary LINE geometry (or,
+    /// with `DIMCEN = 0`, nothing plus a diagnostic and no transaction) and owns
+    /// every refusal. This is **not** a `DIMENSION` entity.
+    DimCenter { target: SelectionRef },
 }
 
 /// Drawing/editing capture state machine.
@@ -424,47 +456,54 @@ impl DrawTool {
         self.candidate = candidate;
     }
 
-    /// Whether the pending step is an entity pick (TRIM/EXTEND with a step left).
+    /// Whether the pending step is an entity pick (TRIM/EXTEND, CHAMFER/FILLET,
+    /// or the leading arc/circle pick of DIMRADIUS/DIMDIAMETER/DIMCENTER).
     pub fn requires_entity_pick(&self) -> bool {
-        self.kind.needs_picked_entities() && self.points.len() < self.kind.required_points()
+        self.points.len() < self.kind.picked_step_count()
     }
 
     /// Capture one free point, refusing non-finite input and overflow past the
     /// exact complement (or the open-ended hard cap) rather than silently
     /// resetting or dropping it.
     ///
-    /// The entity-picking kinds refuse here: their steps are entity picks, so a
-    /// blind point that cannot carry an entity must never be captured as one
-    /// ([`Self::push_pick`] is the only path for them). Once both TRIM/EXTEND
-    /// steps are resolved the tool is ready and waiting for confirmation, so a
-    /// further click is refused with **that** reason instead of the misleading
-    /// "captures entity picks, not free points" (which describes a step that is
-    /// still un-captured). The refusal is a machine reason, never a silent drop.
+    /// For a **pending entity-pick step** this refuses: a blind point that cannot
+    /// carry an entity must never be captured as one ([`Self::push_pick`] is the
+    /// only path for those steps). Once every entity-pick step is resolved the tool
+    /// is ready and waiting for confirmation, so a further click is refused with
+    /// **that** reason instead of the misleading "captures entity picks, not free
+    /// points" (which describes a step that is still un-captured). A kind whose
+    /// leading steps are picks but whose later steps are free points (the radial
+    /// pair) accepts the free point once the pick is behind it. The refusal is a
+    /// machine reason, never a silent drop.
     pub fn push_point(&mut self, point: Point3) -> CadResult<()> {
-        if self.kind.needs_picked_entities() {
+        if self.kind.picked_step_count() > 0 {
             if self.points.len() >= self.kind.required_points() {
                 return Err(CadError::InvalidInput(format!(
                     "draw kind '{}' is ready; press Enter to confirm",
                     self.kind.key()
                 )));
             }
-            return Err(CadError::InvalidInput(format!(
-                "draw kind '{}' captures entity picks, not free points",
-                self.kind.key()
-            )));
+            if self.points.len() < self.kind.picked_step_count() {
+                return Err(CadError::InvalidInput(format!(
+                    "draw kind '{}' captures entity picks, not free points",
+                    self.kind.key()
+                )));
+            }
         }
         self.push_point_checked(point)
     }
 
     /// Capture one entity pick: the raw point and the ref resolved for it.
     ///
-    /// This is the atomic capture for the entity-picking kinds — the point and
-    /// the entity it was resolved against are stored together, so the two can
-    /// never drift. Free-point kinds refuse it.
+    /// This is the atomic capture for an entity-pick step — the point and the
+    /// entity it was resolved against are stored together, so the two can never
+    /// drift. A kind that does not take an entity pick for the **pending** step
+    /// (every free-point kind, or a radial capture whose pick is already behind it)
+    /// refuses it.
     pub fn push_pick(&mut self, point: Point3, reference: SelectionRef) -> CadResult<()> {
-        if !self.kind.needs_picked_entities() {
+        if self.points.len() >= self.kind.picked_step_count() {
             return Err(CadError::InvalidInput(format!(
-                "draw kind '{}' does not take entity picks",
+                "draw kind '{}' does not take an entity pick for this step",
                 self.kind.key()
             )));
         }
@@ -530,12 +569,12 @@ impl DrawTool {
     /// Whether the captured parameters define the operation.
     ///
     /// The entity-picking kinds additionally require a resolved ref for **every**
-    /// step, so two raw points with a missed pick are never confirmable.
+    /// entity-pick step, so a radial capture with its pick missed is never
+    /// confirmable even once the location point is captured.
     pub fn is_ready(&self) -> bool {
         self.points.len() >= self.kind.required_points()
             && (!self.kind.requires_selection() || self.selection_count > 0)
-            && (!self.kind.needs_picked_entities()
-                || self.picks.len() >= self.kind.required_points())
+            && self.picks.len() >= self.kind.picked_step_count()
     }
 
     pub fn preview(&self) -> DrawPreview {
@@ -573,11 +612,11 @@ impl DrawTool {
                 self.points.len()
             )));
         }
-        if self.kind.needs_picked_entities() && self.picks.len() < self.kind.required_points() {
+        if self.picks.len() < self.kind.picked_step_count() {
             return Err(CadError::InvalidInput(format!(
                 "draw kind '{}' needs {} resolved entity pick(s), has {}",
                 self.kind.key(),
-                self.kind.required_points(),
+                self.kind.picked_step_count(),
                 self.picks.len()
             )));
         }
@@ -767,6 +806,24 @@ impl DrawTool {
                 first: a,
                 second: b,
                 location: self.points[2],
+            },
+            // DIMRADIUS/DIMDIAMETER: the ref resolved at capture time for the
+            // arc/circle pick plus the free location point. The definition
+            // construction (group 10 centre vs opposite chord point), the
+            // measurement and every refusal live in the command layer, so the
+            // capture never invents a radius or a direction.
+            DrawToolKind::DimRadius => DrawIntent::DimRadius {
+                target: self.picks[0].clone(),
+                location: b,
+            },
+            DrawToolKind::DimDiameter => DrawIntent::DimDiameter {
+                target: self.picks[0].clone(),
+                location: b,
+            },
+            // DIMCENTER: the ref resolved at capture time; the command layer reads
+            // the resolved `DIMCEN` and produces plain geometry (or nothing).
+            DrawToolKind::DimCenter => DrawIntent::DimCenter {
+                target: self.picks[0].clone(),
             },
         })
     }

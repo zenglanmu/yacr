@@ -163,6 +163,11 @@ impl RenderSessionHandle {
         let bounds_only = {
             let mut probe = previous.clone();
             probe.viewport_bounds = overlays.viewport_bounds;
+            // `view_scale` is camera-derived exactly like the bounds, so it is
+            // re-scoped with them: a zoom must re-size the screen-relative
+            // overlay batches (snap markers, cursor pickbox) through the cheap
+            // content path, not through a full input advance.
+            probe.view_scale = overlays.view_scale;
             probe == overlays
         };
         // `overlay_fingerprint` covers every overlay-**batch** input (including

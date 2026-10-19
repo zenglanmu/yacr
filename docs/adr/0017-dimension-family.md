@@ -599,18 +599,102 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
    `crates/cad-app/src/tests/cjk_baseline.rs` 守护一份记录的 CJK 基线，仅在**增长**时失败。P5c **未新增**任何
    CJK。记为**已基线化的债务**，不是新的违规。
 
-#### 真机证据（占位，由证据 lane 填写）
+#### 真机证据（2026-10-19）
 
-- **真机证据：待填（运行目录 / 计数增量 / 截图）**——数字来自**证据 lane**（`scripts/collect-evidence.sh`
-  扩展 `YACR_PROBE_DRAW_EVIDENCE` 的标注相位：合成 DOM 指针事件、**非真实鼠标**），本文件 lane **未**运行、
-  **不**臆造数字。诚实边界沿用 P4：`cad_status` **无几何通道** ⇒ 真机只证"提交成功 + 计数 + 内容存在"，
-  **几何正确性一律由契约测试钉住**。
+- **真机证据（2026-10-19）**：真实硬件 GPU（Vulkan / **Quadro P620** / `device_type=discrete_gpu`）+ X11；驱动扩展
+  `YACR_PROBE_DRAW_EVIDENCE` 的标注相位（合成 DOM 指针事件、**非真实鼠标**）：派发选择子 → 三次合成点击 → CONFIRM。
+  **`DIMLINEAR` 30→31（+1）、`DIMALIGNED` 31→32（+1）**，`after_tool` 为 `null`（工具清空）、`after_error` 为 `-`、
+  无任何 `*_failed`；总点击 50。运行目录 `/tmp/opencode/yacr-evidence-20261019T111646Z`（verdict `PLANNED_TIMEOUT` /
+  exit 143 属预期，截图 `captured`）。**像素判据**：墨迹恰在两条标注的世界区域（0.1003 / 0.0405，对比此前无标注帧的
+  0.0015 / 0.0017）；`DIMLINEAR` 尺寸线横跨 cols 839–944，**两端有箭头**（端点带墨迹 0.42 / 0.40）。
+  **诚实边界**：① 输入是 Rust 经 `webview.eval` 派发的**合成 DOM 指针事件**（不经 evdev/XTest）；② `cad_status`
+  **无几何通道** ⇒ 真机只证"提交成功 + 计数 + 无错误 + 内容存在"，**几何正确性由契约测试钉住**；③ 截图仅含
+  **应用窗口自身**；④ 对比基线帧**窗口尺寸不同**（926×341 vs 960×439）⇒ **世界区域对齐**比较，非像素相同。
 
-#### 门禁（数字待编排者填）
+#### 门禁（编排者复跑，2026-10-19）
 
-- **门禁：待填**（编排者复跑）；受影响 crate 契约测试见 `crates/cad-app/src/tests/drawing/dimension.rs`、
-  `crates/cad-app/src/draw_tool/tests.rs`、`crates/cad-app/src/host/tests/dimension.rs`、
-  `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs`、React
+- **门禁（编排者复跑，2026-10-19）**：受影响 crate **1814 通过 / 0 失败**（`cad-app` 595、`cad-ui-core` 140）；
+  workspace check(all-targets)、wasm lib、clippy(workspace `-D warnings`)、fmt、architecture(27)、i18n(**498**，P5c **+9**)、
+  fixture(22)、file-size(**668**)、workflow、UI **133/133** + build 全通过。
+- **受影响 crate 契约测试**：见 `crates/cad-app/src/tests/drawing/dimension.rs`、`crates/cad-app/src/draw_tool/tests.rs`、
+  `crates/cad-app/src/host/tests/dimension.rs`、`crates/cad-ui-core/.../command_vocabulary.rs`、React
   `apps/app-linux/ui/test/{dimension-tools,commands,i18n}.test.mjs`。
-- **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；本文件 lane 未独立复跑门禁；
-  跨平台；**第三方读取器验证**（本机无 `ezdxf`/`dwgread`/`dxfgrabber`）。
+- **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；
+  **第三方读取器验证**（本机无 `ezdxf`/`dwgread`/`dxfgrabber`）。
+
+### P5d（`DIMRADIUS` + `DIMDIAMETER` + `DIMCENTER`；**首批需要实体拾取的创建命令**）
+
+- **命令面**：`CommandId::{DimRadius,DimDiameter,DimCenter}` 贯通命令面——`crates/cad-app/src/command_id.rs`
+  新增变体（`requires_work_mode()`）、`crates/cad-ui-core` 的选择子表（`commands.rs`：
+  `("DIMRADIUS", …)`/`("DIMDIAMETER", …)`/`("DIMCENTER", …)`）与 `session/mod.rs` 的
+  `InteractionRequest::BeginDraw(DrawToolKind::{DimRadius,DimDiameter,DimCenter})` 映射；
+  `EXPECTED_COMMAND_COUNT` **62 → 65** 断言与选择子契约同步更新。
+- **绘制工具种类**：`DrawToolKind::{DimRadius,DimDiameter,DimCenter}`（`ALL` 共 28 种）；
+  DimRadius/DimDiameter `arity = PointArity::Exact(2)`（实体拾取 + 尺寸线位置），DimCenter `Exact(1)`（一次实体拾取）；
+  机器键 `"dimradius"`/`"dimdiameter"`/`"dimcenter"`（永不翻译），标签走 i18n。
+- **混合拾取（新机制）**：新增 `DrawToolKind::picked_step_count()`——**前导实体拾取步数**
+  （TRIM/EXTEND/CHAMFER/FILLET = 全部步；radial 族 = 1；其余 0）。`needs_picked_entities()` 改为
+  `picked_step_count() > 0`；`push_point`/`push_pick`/`requires_entity_pick`/`is_ready`/`intent` 改读它。
+  故 radial 捕获：首击经 `push_pick`（宿主 `capture_tool_point` 的 `draw_requires_entity_pick` 路由），次击为自由点。
+- **`DrawIntent` 变体**：`DimRadius{target,location}`/`DimDiameter{…}`/`DimCenter{target}`；宿主
+  `draw_intent_map.rs` 映射为**新增**的 `CommandPayload::DimRadial(Box<RadialDimensionCommand>)`（radial 对）
+  与 `CommandPayload::DimCenter(SelectionRef)`。
+- **命令实现**（`crates/cad-app/src/app_drawing/dimension.rs`）：解析实体（`Arc`/`Circle`）→ 由位置拾取定方向 →
+  构造 `DimensionDefinition`（组 15 = 圆上点；组 10 = 圆心（半径）或对径点（直径）；组 40 = 0.0；组 11/53 零哨兵）→
+  经共享合成 `DimensionGeometry::synthesized`（`Standard` 快照）→ 经单一漏斗 `commit_new_entity` 插入**一个**
+  `AcDbDimension`。`DIMCENTER` 经**新增**的 `commit_new_entities`（批量单一漏斗，一条事务/一步撤销）插入**普通 LINE**。
+- **i18n 新增 9 键**：`tool.prompt.dim.{select_arc,location_radius,location_diameter}`、
+  `tool.draw.{dimradius,dimdiameter,dimcenter}`、`draw.kind.{dimradius,dimdiameter,dimcenter}`（两目录键集一致）。
+
+#### 声明的决策（实现者逐条标记，未静默选择）
+
+1. **radial 的位置拾取只定方向**：`point_on_arc` = 圆心 + `半径·单位(位置−圆心)`；组 11/53 保持零哨兵，文字由合成放在
+   引线中点。**"位置拾取定文字位置"未实现**——合成（P5a）把文字放在引线中点，不消费位置拾取。**声明**。
+2. **`Arc` 不钳制扫掠**：引线点落在**该弧的圆**上（方向由拾取定），**不**钳制到弧的扫掠范围；方向落在弧外时引线仍指向圆。
+   **我们的读法**（ADR 未述）。
+3. **组 40（引线长）写 `0.0`**：合成不消费它、不画引线延长；`0.0` 是 AutoCAD 中性值。**声明**（非"符合规范"）。
+4. **`DIMCEN` 符号读数**：`> 0` 中心标记（十字 LINE 对，臂 `|DIMCEN|`）；`< 0` 中心线（十字 LINE 对，达 `radius+|DIMCEN|`）；
+   `0` 无。**近似（声明）**：AutoCAD 的负值"中心标记 + **带缺口**中心线"变体**未建模**（我们画普通十字，与径向合成
+   P5b 偏离 3 同一声明）；ADR 决策 C/E 述"LINE/ARC"，**我们只产 LINE**（ARC 变体未建模）。
+5. **`DIMCENTER` 十字对齐世界 X/Y 轴**（无径向拾取，故用世界轴；与 radial 合成的"沿引线方向"取向不同，**声明**）。
+6. **`DIMCEN = 0`**：产出 0 实体 + 显式诊断 + **无事务**（同 ARRAY 1×1），**绝不静默空成功**。
+7. **平面外拒绝**实现为 ADR **D.6**：实体法向含 X/Y 分量即拒（`−Z` 法向**接受**——仍与 XY 平行、径向合成不读法向）；
+   位置拾取的 `z` 必须与圆心共面。
+8. **退化半径**：命令层按名拒绝，但**经校验的数据库不可达**（`cad-db` validate 已拒非正/非有限半径）⇒ 该拒绝在
+   **纯辅助函数**上以单测钉住（同一谓词、同名），命令层为**防御性**。
+9. **`DIMCENTER` 不是标注**：能力表按**绘图辅助**而非 DIMENSION 记录（决策 D.7）；测试断言产出为 `AcDbLine`、**非** `Dimension`。
+10. **无真正标注预览**（沿用 P5c 声明）：radial/DIMCENTER 的实时预览是后端橡皮筋链；React 宿主经每步提示。
+
+#### 真机证据（2026-10-19）
+
+- **真机证据（2026-10-19）**：真实硬件 GPU（Vulkan / **Quadro P620**）+ X11；驱动新增 P5d 相位（每相先 `CIRCLE` 造圆 →
+  在圆周上**实体拾取** → radial 再点定位 → CONFIRM；合成 DOM 指针事件、**非真实鼠标**）。
+  **`DIMRADIUS` 33→34（+1）、`DIMDIAMETER` 35→36（+1）、`DIMCENTER` 37→39（+2）**，三者 `after_tool` 为 `null`
+  （工具清空）、`after_error` 为 `-`、所有 `*_failed` 为 `-`。运行目录
+  `/tmp/opencode/yacr-evidence-20261019T132645Z`（verdict `PLANNED_TIMEOUT` / exit 143 属预期，截图 `captured`）。
+  **`DIMCENTER` 的 +2 是正确值**（产出**普通 LINE 对**而非标注）；报告带
+  `dimcenter_output=plain_line_geometry_not_a_dimension`。**像素判据**：三个目标圆的环 ≈**100%** 命中、半径引线 100%、
+  中心标记十字臂 100%、文字框 33–38%（文字稀疏）；空对照区 0.000。
+- **一处更正（证据 lane 自查并重跑）**：`DIMCENTER` 的增量**不是 0**——夹具自带 `Standard` DIMSTYLE 且
+  `DIMCEN = 0.09`（acadrust `DimStyle::new`），故**导入路径从源样式解析**，钉住的 0.0 默认只到达手工构造的库；
+  与该 lane 先前"假设 `DIMCEN=0`"的注释矛盾，已删除该字段并重跑。**`cad_status` 无 DIMSTYLE 通道** ⇒ 有效 `DIMCEN`
+  是由增量**推断**的，不是读到的。
+- **诚实边界**：① 输入是 Rust 经 `webview.eval` 派发的**合成 DOM 指针事件**（不经 evdev/XTest）；② `cad_status`
+  **无几何通道** ⇒ 真机只证"提交成功 + 计数 + 工具清空 + 无错误 + 内容存在"，**几何正确性由契约测试钉住**；
+  ③ 截图仅含**应用窗口自身**（X11 `XGetImage`），非合成器帧、不含视觉正确性/vendor 结论；④ 抓帧里另有两条横/竖
+  覆盖线（最后一次合成光标位置与世界原点），非驱动命令所产，已排除在存在性测量外；⑤ radial 的**位置拾取只定引线方向**，
+  文字位置由合成推导——此处**不**暗示用户定位了文字。
+
+#### 门禁（编排者复跑，2026-10-19）
+
+- **门禁（编排者复跑，2026-10-19）**：受影响 crate 全绿（`cad-app` **663**、`cad-ui-core` **140**、`cad-host` **143**、
+  `cad-domain` **53**、`cad-db` **84**、`cad-import-acadrust` **195**，合计 **1832 通过 / 0 失败**）；
+  workspace check(all-targets)、wasm lib、clippy(workspace `-D warnings`)、fmt、architecture(27)、i18n(**508**，P5d **+9**、
+  后续字形/文案修正 **+1**)、fixture(22)、file-size(**673**)、workflow、UI **145/145** + build 全通过。
+- **受影响 crate 契约测试**：见 `crates/cad-app/src/tests/drawing/dimension_radial.rs`、
+  `crates/cad-app/src/draw_tool/tests/dimension.rs`、`crates/cad-app/src/host/tests/dimension.rs`、
+  `crates/cad-app/src/app_drawing/dimension.rs`（纯辅助单测）、
+  `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs`、React
+  `apps/app-linux/ui/test/{dimension-tools,dimension-radial-tools,commands,i18n}.test.mjs`（**React 面由 designer lane 落地**）。
+- **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；
+  **第三方读取器验证**（本机无 `ezdxf`/`dwgread`/`dxfgrabber`）。

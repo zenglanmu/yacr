@@ -94,5 +94,5 @@ test('the properties palette is docked in the workspace and toggled from the sta
   assert.ok(workspace.includes('shell.propertiesOpen'));
   assert.ok(statusbar.includes('shell.setPropertiesOpen'));
   // The native CAD partition stays a childless node whose CSS we do not change.
-  assert.ok(workspace.includes('className="native-input"'));
+  assert.ok(workspace.includes("'native-input'"));
 });
