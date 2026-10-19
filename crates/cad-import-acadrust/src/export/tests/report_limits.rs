@@ -50,8 +50,11 @@ fn committed_fixtures_report_their_expected_losses() {
             // content-block members, recorded once through the dimension).
             "fixtures/dxf/qcad-flange/flange.dxf",
             &[
-                "export.converted.compound",
+                // HATCH is now a first-class variant; the export slice that
+                // writes a real HATCH follows, so this slice still flattens its
+                // display and reports `export.converted.hatch` (was `compound`).
                 "export.converted.dimension",
+                "export.converted.hatch",
                 "export.dropped.paper_space",
                 "export.dropped.unreferenced_block",
                 "export.note.bylayer_flattened",
@@ -185,4 +188,28 @@ fn limits_are_enforced_explicitly() {
 #[test]
 fn export_counts_default_is_zero() {
     assert_eq!(ExportCounts::default().bytes, 0);
+}
+
+#[test]
+fn first_class_hatch_kind_name_is_hatch() {
+    // The diagnostic variant name follows the other arms ("Line", "Dimension",
+    // ...); the stored type key is asserted through `cad-app`'s `class_name`.
+    let hatch = cad_domain::HatchGeometry::new(
+        vec![cad_domain::HatchLoop::new(
+            vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            Vec::new(),
+            cad_domain::HatchLoopFlags::default(),
+        )],
+        cad_domain::HatchPlane::default(),
+        cad_domain::HatchStyle::Normal,
+        cad_domain::HatchFill::Solid,
+        Vec::new(),
+        None,
+        cad_domain::HatchPatternType::UserDefined,
+    )
+    .expect("valid hatch");
+    assert_eq!(
+        crate::export::entity::kind_name(&SemanticGeometry::Hatch(Box::new(hatch))),
+        "Hatch"
+    );
 }

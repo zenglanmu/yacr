@@ -693,6 +693,9 @@ export function propertyRowLabel(t, key) {
     case 'subtype': return t('properties.row.subtype');
     case 'measurement': return t('properties.row.measurement');
     case 'display': return t('properties.row.display');
+    case 'loops': return t('properties.row.loops');
+    case 'style': return t('properties.row.style');
+    case 'fill': return t('properties.row.fill');
     // An unknown machine key is shown by its raw key, never fabricated.
     default: return key;
   }

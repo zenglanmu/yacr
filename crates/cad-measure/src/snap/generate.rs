@@ -78,6 +78,14 @@ pub(super) fn generate(
                 generate(child, probe, out, &format!("{prefix}child:{i}:"));
             }
         }
+        // A hatch's boundary polylines (and pattern lines) are real snap
+        // vertices, exactly like a compound (ADR 0018 E); this is what keeps
+        // boundary vertices snappable after the migration.
+        G::Hatch(hatch) => {
+            for (i, child) in hatch.display().iter().enumerate() {
+                generate(child, probe, out, &format!("{prefix}child:{i}:"));
+            }
+        }
         G::Mesh(_)
         | G::Insert { .. }
         | G::Text { .. }

@@ -4,6 +4,8 @@ use std::fmt;
 mod dimension;
 mod dimension_synthesis;
 pub mod hatch;
+pub mod hatch_entity;
+pub use hatch_entity::*;
 
 #[cfg(test)]
 mod dimension_tests;
@@ -14,6 +16,14 @@ pub use dimension_synthesis::{
     angular_lines_synthesis, angular_synthesis, arrowhead, format_measurement, line_between,
     linear_synthesis, ordinate_synthesis, perpendicular, project_onto_line, radial_synthesis,
     readable_angle, resolve_measurement_text, SynthesizedDimension,
+};
+/// The ADR's `BoundaryEdge`, re-exported under a qualifying name so the
+/// importer's acadrust `BoundaryEdge` stays unambiguous; the unaliased type is
+/// [`hatch_entity::BoundaryEdge`].
+pub use hatch_entity::BoundaryEdge as HatchBoundaryEdge;
+pub use hatch_entity::{
+    HatchFill, HatchGeometry, HatchGradient, HatchLoop, HatchLoopFlags, HatchPattern,
+    HatchPatternLine, HatchPatternType, HatchPlane, HatchStyle,
 };
 macro_rules! ids {
     ($($name:ident),*) => {$(
@@ -385,8 +395,8 @@ pub enum SemanticGeometry {
     },
     /// Sub-geometries belonging to a single source entity, rendered in order.
     ///
-    /// Used where one imported entity yields several primitives (for example a
-    /// HATCH's boundary loops plus its fill or pattern). Consumers recurse.
+    /// Used where one imported entity yields several primitives. Consumers
+    /// recurse. (HATCH is a first-class variant, not a compound.)
     Compound(Vec<SemanticGeometry>),
     /// A DIMENSION: subtype, definition points, style snapshot and derived
     /// display geometry (ADR 0017). Consumers recurse into
@@ -396,6 +406,12 @@ pub enum SemanticGeometry {
     /// `SemanticGeometry` small (the repo runs clippy with `-D warnings` and no
     /// `large_enum_variant` exemption).
     Dimension(Box<DimensionGeometry>),
+    /// A HATCH (ADR 0018): boundary loops in hatch-plane 2D plus the pattern /
+    /// gradient definition, with a derived `display` (every boundary loop plus
+    /// the style-filtered fill mesh / pattern polylines / gradient mesh).
+    ///
+    /// Boxed for the same reason as `Dimension`.
+    Hatch(Box<HatchGeometry>),
     /// A raster image (DXF `IMAGE` / `AcDbRasterImage`).
     ///
     /// The image is placed by `origin` and two edge vectors: `u` and `v` span

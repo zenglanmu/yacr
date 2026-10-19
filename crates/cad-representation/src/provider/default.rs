@@ -232,6 +232,7 @@ impl DefaultRepresentationProvider {
         let grouped: Option<&[SemanticGeometry]> = match geometry {
             SemanticGeometry::Compound(children) => Some(children),
             SemanticGeometry::Dimension(dimension) => Some(dimension.display()),
+            SemanticGeometry::Hatch(hatch) => Some(hatch.display()),
             _ => None,
         };
         if let Some(children) = grouped {

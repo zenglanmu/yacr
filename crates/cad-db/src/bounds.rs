@@ -163,6 +163,13 @@ impl BoundsAccumulator {
                     self.add_geometry_transformed(child, transform);
                 }
             }
+            // A hatch's extent is the extent of its derived display children
+            // (boundary polylines plus the fill), exactly like a compound.
+            SemanticGeometry::Hatch(hatch) => {
+                for child in hatch.display() {
+                    self.add_geometry_transformed(child, transform);
+                }
+            }
         }
     }
 

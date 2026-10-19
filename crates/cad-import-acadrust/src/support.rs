@@ -60,7 +60,50 @@ pub(crate) fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, Su
             }
             (render, pick)
         }
+        // A hatch mirrors the compound recursion, and additionally refuses to
+        // claim `Verified` when its display lost the fill/pattern (boundary-only
+        // because the fill failed, the gradient kind is unsupported or a pattern
+        // had no families). The wildcard arm used to report every hatch as
+        // `Verified` (ADR 0018 E).
+        SemanticGeometry::Hatch(hatch) => {
+            let mut render = SupportStatus::Verified;
+            let mut pick = SupportStatus::Verified;
+            for child in hatch.display() {
+                let (r, p) = display_support(child);
+                render = weaker(render, r);
+                pick = weaker(pick, p);
+            }
+            if !hatch_display_is_complete(hatch) {
+                render = weaker(render, SupportStatus::Partial);
+                pick = weaker(pick, SupportStatus::Partial);
+            }
+            (render, pick)
+        }
         _ => (SupportStatus::Verified, SupportStatus::Verified),
+    }
+}
+
+/// Whether a hatch's derived display carries the fill/pattern its definition
+/// asks for.
+///
+/// A solid/gradient hatch whose fill failed (or whose gradient kind is outside
+/// the implemented subset) shows boundaries only; a pattern hatch whose families
+/// are empty has nothing but its boundary loops. Both are lossy and must not be
+/// reported `Verified`.
+fn hatch_display_is_complete(hatch: &HatchGeometry) -> bool {
+    match hatch.fill() {
+        HatchFill::Solid | HatchFill::Gradient(_) => hatch
+            .display()
+            .iter()
+            .any(|geometry| matches!(geometry, SemanticGeometry::Mesh(_))),
+        HatchFill::Pattern(_) => {
+            let polylines = hatch
+                .display()
+                .iter()
+                .filter(|geometry| matches!(geometry, SemanticGeometry::Polyline { .. }))
+                .count();
+            polylines > hatch.loops().len()
+        }
     }
 }
 /// Whether a proxy cache may contribute geometry for this entity.
@@ -304,5 +347,58 @@ mod dimension_support_tests {
         let (render, pick) = display_support(&SemanticGeometry::Dimension(Box::new(dimension)));
         assert_eq!(render, SupportStatus::Unverified);
         assert_eq!(pick, SupportStatus::Unverified);
+    }
+}
+
+#[cfg(test)]
+mod hatch_support_tests {
+    use super::*;
+
+    fn rect_path() -> acadrust::entities::BoundaryPath {
+        let corners = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        let mut path = acadrust::entities::BoundaryPath::new();
+        for i in 0..4 {
+            let a = corners[i];
+            let b = corners[(i + 1) % 4];
+            path.add_edge(BoundaryEdge::Line(acadrust::entities::LineEdge {
+                start: acadrust::types::Vector2::new(a.0, a.1),
+                end: acadrust::types::Vector2::new(b.0, b.1),
+            }));
+        }
+        path
+    }
+
+    fn solid_hatch() -> SemanticGeometry {
+        let mut hatch = acadrust::entities::Hatch::new();
+        hatch.is_solid = true;
+        hatch.paths = vec![rect_path()];
+        ImporterBuilder::hatch_geometry(&hatch).0
+    }
+
+    fn boundary_only_pattern() -> SemanticGeometry {
+        // A user-defined pattern with zero spacing cannot be synthesized, so the
+        // display is boundary-only; reporting it `Verified` would over-claim.
+        let mut hatch = acadrust::entities::Hatch::new();
+        hatch.is_solid = false;
+        hatch.pattern_type = acadrust::entities::HatchPatternType::UserDefined;
+        hatch.pattern.name = "USER".into();
+        hatch.pattern_scale = 0.0;
+        hatch.paths = vec![rect_path()];
+        ImporterBuilder::hatch_geometry(&hatch).0
+    }
+
+    #[test]
+    fn complete_hatch_display_is_verified() {
+        assert_eq!(
+            display_support(&solid_hatch()),
+            (SupportStatus::Verified, SupportStatus::Verified)
+        );
+    }
+
+    #[test]
+    fn boundary_only_hatch_is_not_reported_verified() {
+        let (render, pick) = display_support(&boundary_only_pattern());
+        assert_eq!(render, SupportStatus::Partial);
+        assert_eq!(pick, SupportStatus::Partial);
     }
 }

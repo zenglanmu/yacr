@@ -393,6 +393,11 @@ pub(crate) fn referenced_blocks(geometry: &SemanticGeometry) -> Vec<BlockId> {
             .iter()
             .flat_map(referenced_blocks)
             .collect(),
+        // A hatch renders its derived display children, exactly like a compound
+        // (ADR 0018 E).
+        SemanticGeometry::Hatch(hatch) => {
+            hatch.display().iter().flat_map(referenced_blocks).collect()
+        }
         _ => Vec::new(),
     }
 }

@@ -462,3 +462,23 @@ fn huge_mesh_preserves_barycentric_slack_outside_tolerance_bounds() {
         PickOutcome::Hit(_)
     ));
 }
+
+#[test]
+fn hatch_local_pick_bounds_are_the_boundary_vertices() {
+    // ADR 0018 A.2/E: the hatch keeps its precise local bound rather than
+    // degrading to the item AABB (the previous wildcard returned `None`).
+    let hatch = hatch_semantics();
+    let (min, max) = local_pick_bounds(&hatch).expect("precise hatch bounds");
+    assert!((min.x).abs() < 1e-9 && (min.y).abs() < 1e-9, "{min:?}");
+    assert!((max.x - 10.0).abs() < 1e-9, "{max:?}");
+    assert!((max.y - 10.0).abs() < 1e-9, "{max:?}");
+}
+
+#[test]
+fn hatch_cached_pick_bounds_match_the_precise_leaf_bound() {
+    let hatch = hatch_semantics();
+    let precise = local_pick_bounds(&hatch).expect("precise hatch bounds");
+    let mut cache = PickBoundsCache::new();
+    let cached = cached_local_pick_bounds(&hatch, &mut cache).expect("cached hatch bounds");
+    assert_eq!(cached, precise);
+}

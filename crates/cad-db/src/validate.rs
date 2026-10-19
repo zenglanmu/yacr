@@ -263,6 +263,46 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
                 validate_geometry(child)?;
             }
         }
+        SemanticGeometry::Hatch(hatch) => {
+            // A hatch must have at least one loop with three finite vertices;
+            // bulges and seeds are finite; the derived display is validated like
+            // a compound. An empty display is legal only when every loop is
+            // still drawn (the boundary loops are always part of it).
+            let plane = hatch.plane();
+            if !finite(plane.normal) || !plane.elevation.is_finite() {
+                return Err(degenerate("hatch plane is non-finite"));
+            }
+            if hatch.loops().is_empty() {
+                return Err(degenerate("hatch has no boundary loops"));
+            }
+            for loop_ in hatch.loops() {
+                if loop_.points.len() < 3 {
+                    return Err(degenerate(
+                        "hatch boundary loop has fewer than three vertices",
+                    ));
+                }
+                if !loop_
+                    .points
+                    .iter()
+                    .all(|p| p[0].is_finite() && p[1].is_finite())
+                {
+                    return Err(degenerate("hatch boundary loop has a non-finite point"));
+                }
+                if !loop_.bulges.iter().all(|b| b.is_finite()) {
+                    return Err(degenerate("hatch boundary loop has a non-finite bulge"));
+                }
+            }
+            if !hatch
+                .seeds()
+                .iter()
+                .all(|p| p[0].is_finite() && p[1].is_finite())
+            {
+                return Err(degenerate("hatch seed point is non-finite"));
+            }
+            for child in hatch.display() {
+                validate_geometry(child)?;
+            }
+        }
     }
     Ok(())
 }

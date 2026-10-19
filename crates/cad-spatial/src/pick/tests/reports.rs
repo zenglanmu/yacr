@@ -239,3 +239,24 @@ fn circle_is_tessellated_and_marked_approximate() {
         other => panic!("expected a hit, got {other:?}"),
     }
 }
+
+#[test]
+fn hatch_picks_inside_its_fill_like_the_equivalent_compound() {
+    // ADR 0018 A.2/E: the derived display contains the fill mesh, so clicking
+    // inside the fill still selects the hatch (the pre-P6a `Compound` parity).
+    let hatch = hatch_semantics();
+    let SemanticGeometry::Hatch(geometry) = &hatch else {
+        unreachable!("helper returns a hatch");
+    };
+    let compound = SemanticGeometry::Compound(geometry.display().to_vec());
+    let ray = Ray3 {
+        origin: p(5.0, 5.0, 10.0),
+        direction: p(0.0, 0.0, -1.0),
+    };
+    let options = PickOptions::new(0.1).unwrap();
+    for geometry in [hatch, compound] {
+        let outcome = pick_closest(&ray, &[item(1, geometry)], &options).unwrap();
+        let hit = outcome.hit.expect("the fill interior must be pickable");
+        assert_eq!(hit.source.entity, EntityId(1));
+    }
+}

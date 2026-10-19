@@ -593,3 +593,99 @@ fn dimension_definition() -> DimensionDefinition {
         normal: p3(0.0, 0.0, 1.0),
     }
 }
+
+/// A first-class solid HATCH over a 4x4 square (boundary + fill mesh).
+fn hatch_geometry() -> SemanticGeometry {
+    let hatch = HatchGeometry::new(
+        vec![HatchLoop::new(
+            vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]],
+            vec![0.0; 4],
+            HatchLoopFlags::default(),
+        )],
+        HatchPlane::default(),
+        HatchStyle::Normal,
+        HatchFill::Solid,
+        Vec::new(),
+        None,
+        HatchPatternType::UserDefined,
+    )
+    .expect("valid hatch");
+    SemanticGeometry::Hatch(Box::new(hatch))
+}
+
+#[test]
+fn explode_first_class_hatch_keeps_boundary_and_fill() {
+    // ADR 0018 E: EXPLODE keeps today's decomposition (boundary polylines plus
+    // the fill mesh), exactly what the old `Compound` hatch produced.
+    let (mut app, mut session) = single_app(hatch_geometry(), "AcDbHatch");
+    assert_eq!(
+        crate::app_drawing::class_name(&hatch_geometry()),
+        "AcDbHatch"
+    );
+    select_one(&mut app, &mut session, 1);
+    let outcome = explode(&mut app, &mut session).unwrap();
+    assert_eq!(outcome.objects.len(), 2, "boundary + fill mesh");
+    let produced = model_geometry(&app);
+    assert_eq!(produced.len(), 2);
+    assert_eq!(
+        produced
+            .iter()
+            .filter(|(_, geometry)| matches!(geometry, SemanticGeometry::Polyline { .. }))
+            .count(),
+        1,
+        "the boundary loop is produced"
+    );
+    assert_eq!(
+        produced
+            .iter()
+            .filter(|(_, geometry)| matches!(geometry, SemanticGeometry::Mesh(_)))
+            .count(),
+        1,
+        "the fill mesh is produced"
+    );
+}
+
+#[test]
+fn explode_insert_with_a_hatch_member_keeps_the_in_block_refusal() {
+    // Before P6a a hatch inside a block was a `Compound` and `push_produced`
+    // refused it; the first-class variant must keep that refusal.
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_block(BlockDefinition {
+        id: cad_domain::BlockId(1),
+        entities: vec![EntityId(100)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    b.insert_entity(part(
+        100,
+        hatch_geometry(),
+        LayerId(0),
+        SpaceId::Block(cad_domain::BlockId(1)),
+        "AcDbHatch",
+        0,
+    ))
+    .unwrap();
+    b.insert_entity(part(
+        1,
+        insert(1, Transform3::translation(p3(5.0, 0.0, 0.0))),
+        LayerId(0),
+        SpaceId::Model,
+        "AcDbBlockReference",
+        1,
+    ))
+    .unwrap();
+    let (mut app, mut session) = app_from(b.finish().unwrap());
+    let before = revision(&app);
+    select_one(&mut app, &mut session, 1);
+    let error = explode(&mut app, &mut session).expect_err("the hatch member is refused");
+    assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
+    assert_eq!(revision(&app), before, "nothing is written");
+    assert_eq!(entity_count(&app), 2);
+    assert_eq!(undo_depth(&app), 0);
+}

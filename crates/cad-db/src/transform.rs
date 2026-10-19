@@ -256,6 +256,12 @@ pub fn transform_geometry(
         SemanticGeometry::Dimension(dimension) => {
             SemanticGeometry::Dimension(Box::new(dimension.transformed(transform)?))
         }
+        // A hatch transforms its loops, plane, seeds and pattern definition and
+        // rebuilds its display; a non-similarity is refused for the whole
+        // entity (ADR 0018 E).
+        SemanticGeometry::Hatch(hatch) => {
+            SemanticGeometry::Hatch(Box::new(hatch.transformed(transform)?))
+        }
     };
     Ok(out)
 }
@@ -434,6 +440,73 @@ mod dimension_transform_tests {
         matrix[1][1] = 3.0;
         assert!(matches!(
             transform_geometry(&dimension(), &Transform3 { matrix }),
+            Err(CadError::Unsupported(_))
+        ));
+    }
+}
+
+#[cfg(test)]
+mod hatch_transform_tests {
+    use super::*;
+    use cad_domain::{
+        HatchFill, HatchGeometry, HatchLoop, HatchLoopFlags, HatchPatternType, HatchPlane,
+        HatchStyle,
+    };
+
+    fn square(size: f64) -> HatchLoop {
+        HatchLoop::new(
+            vec![[0.0, 0.0], [size, 0.0], [size, size], [0.0, size]],
+            Vec::new(),
+            HatchLoopFlags::default(),
+        )
+    }
+
+    fn hatch() -> SemanticGeometry {
+        let geometry = HatchGeometry::new(
+            vec![square(10.0)],
+            HatchPlane::default(),
+            HatchStyle::Normal,
+            HatchFill::Solid,
+            Vec::new(),
+            None,
+            HatchPatternType::UserDefined,
+        )
+        .expect("valid hatch");
+        SemanticGeometry::Hatch(Box::new(geometry))
+    }
+
+    /// ADR 0018 E: a MOVE transforms the loops/plane and rebuilds the display.
+    #[test]
+    fn hatch_translates_loops_plane_and_display() {
+        let moved = transform_geometry(
+            &hatch(),
+            &Transform3::translation(Point3 {
+                x: 10.0,
+                y: -2.0,
+                z: 1.5,
+            }),
+        )
+        .expect("hatch transforms");
+        let SemanticGeometry::Hatch(moved) = moved else {
+            panic!("expected a hatch");
+        };
+        assert!((moved.plane().elevation - 1.5).abs() < 1e-9);
+        let SemanticGeometry::Polyline { points, .. } = &moved.display()[0] else {
+            panic!("expected a boundary polyline");
+        };
+        assert!((points[0].x - 10.0).abs() < 1e-9, "{:?}", points[0]);
+        assert!((points[0].y + 2.0).abs() < 1e-9, "{:?}", points[0]);
+        assert!((points[0].z - 1.5).abs() < 1e-9, "{:?}", points[0]);
+    }
+
+    /// ADR 0018 E: a non-uniform scale refuses the whole entity.
+    #[test]
+    fn hatch_refuses_a_non_uniform_transform() {
+        let mut matrix = Transform3::identity().matrix;
+        matrix[0][0] = 2.0;
+        matrix[1][1] = 0.5;
+        assert!(matches!(
+            transform_geometry(&hatch(), &Transform3 { matrix }),
             Err(CadError::Unsupported(_))
         ));
     }

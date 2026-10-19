@@ -258,6 +258,10 @@ impl<'a> ImporterBuilder<'a> {
             // A dimension is not a MEASURE target (ADR 0017 A.8); reporting it
             // as measurable would be a silent over-claim.
             SemanticGeometry::Dimension(_) => SupportStatus::Unsupported,
+            // A hatch has no MEASURE target either: area/loop measurement is not
+            // implemented, so claiming the completeness-derived status would
+            // over-claim (ADR 0018 E).
+            SemanticGeometry::Hatch(_) => SupportStatus::Unsupported,
             _ => semantic,
         };
         let entry = self

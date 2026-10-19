@@ -108,6 +108,15 @@ pub(super) fn local_pick_bounds(geometry: &SemanticGeometry) -> Option<(Point3, 
                 });
             }
         }
+        // A hatch keeps its precise boundary bound (ADR 0018 A.2): the union of
+        // all loop vertices in the hatch plane. This is tighter than the
+        // display-children union (whose fill mesh has no provable leaf bound)
+        // and never falls back to the item AABB. A bulged loop returns `None`
+        // rather than a non-conservative chord bound.
+        SemanticGeometry::Hatch(hatch) => {
+            let (min, max) = hatch.local_bounds()?;
+            bounds = Some((min, max));
+        }
         // Rational splines can leave the control-point hull for invalid or
         // non-positive weights; text bounds depend on shaping/font metrics.
         // Bulged polylines likewise need their true arc extrema.
@@ -399,6 +408,12 @@ fn index_local_bounds(geometry: &SemanticGeometry) -> Option<(Point3, Point3)> {
                     return None;
                 }
             }
+        }
+        // A hatch keeps its precise boundary bound (ADR 0018 A.2), never the
+        // coarse item AABB.
+        SemanticGeometry::Hatch(hatch) => {
+            let (min, max) = hatch.local_bounds()?;
+            bounds = Some((min, max));
         }
         SemanticGeometry::Mesh(mesh) => {
             if mesh.vertices.is_empty() {

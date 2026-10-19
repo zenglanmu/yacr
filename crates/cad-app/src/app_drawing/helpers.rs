@@ -29,6 +29,9 @@ pub(crate) fn class_name(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Mask { .. } => "AcDbWipeout",
         SemanticGeometry::Opaque { .. } => "AcDbUnknown",
         SemanticGeometry::Compound(_) => "AcDbCompound",
+        // A hatch keeps its source type key so EXPLODE's `type_key` refusal and
+        // the importer's `AcDbHatch` agree (ADR 0018 D/E).
+        SemanticGeometry::Hatch(_) => "AcDbHatch",
         // A dimension keeps its source type key so EXPLODE's `type_key` refusal
         // and the importer's `AcDbDimension` agree (ADR 0017 A.8).
         SemanticGeometry::Dimension(_) => "AcDbDimension",

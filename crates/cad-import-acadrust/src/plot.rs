@@ -44,10 +44,10 @@ pub(crate) struct ImportedPlotSettings {
 
 /// A plot feature read from the file that this build cannot honour.
 ///
-/// Mirrors the crate's other explicit-unsupported modelling (for example
-/// `hatch::GradientTranslation::Unsupported`): a stable diagnostic code plus the
-/// offending value, carried out of the reader so the caller emits a real
-/// finding instead of reporting silent success.
+/// Mirrors the crate's other explicit-unsupported modelling (for example the
+/// `gradient_kind_not_supported` reason a HATCH reports): a stable diagnostic
+/// code plus the offending value, carried out of the reader so the caller emits
+/// a real finding instead of reporting silent success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UnsupportedPlotFeature {
     /// Stable `import.*` diagnostic code.

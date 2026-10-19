@@ -24,6 +24,10 @@ fn is_intersectable(geometry: &SemanticGeometry) -> bool {
         // A dimension is intersectable through its display children, exactly
         // like a compound (ADR 0017 A.8).
         G::Dimension(dimension) => dimension.display().iter().any(is_intersectable),
+        // A hatch is intersectable through its display children (boundary and
+        // pattern polylines), so it does not silently lose intersection snaps
+        // (ADR 0018 E).
+        G::Hatch(hatch) => hatch.display().iter().any(is_intersectable),
         _ => false,
     }
 }

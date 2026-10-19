@@ -19,7 +19,7 @@ use cad_db::{
     EntityLineType, EntityLineWeight, EntityRenderAttributes, EntityTransparency, Layer, Layout,
     LineType as DbLineType, LinetypePattern, PaperViewport, Style,
 };
-use cad_domain::hatch::{GradientDef, GradientKind, GradientStop, PatternLine};
+use cad_domain::hatch::GradientStop;
 use cad_domain::*;
 use cad_geometry::{arbitrary_axis, tessellate_bspline, TessellationParams};
 use cad_proxy::{DecodeLimits, ProxyPlayer, ProxySource};

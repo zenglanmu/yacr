@@ -267,6 +267,13 @@ impl Application {
                         diagnostics.push(stretch_unchanged_diagnostic(owner, "dimension"));
                         plan.push((owner, StretchAction::Unchanged));
                     }
+                    // A hatch follows `compatibility.md`'s existing rule: a
+                    // partial enclosure leaves it unchanged with a diagnostic,
+                    // a full enclosure moves it as a whole (ADR 0018 E).
+                    SemanticGeometry::Hatch(_) => {
+                        diagnostics.push(stretch_unchanged_diagnostic(owner, "hatch"));
+                        plan.push((owner, StretchAction::Unchanged));
+                    }
                     // A kind with no per-vertex edit and no declared move-only
                     // rule fails the whole command (refusal granularity).
                     other => {

@@ -756,5 +756,6 @@ fn child_kind(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Image { .. } => "Image",
         SemanticGeometry::Mask { .. } => "Mask",
         SemanticGeometry::Dimension(_) => "Dimension",
+        SemanticGeometry::Hatch(_) => "Hatch",
     }
 }

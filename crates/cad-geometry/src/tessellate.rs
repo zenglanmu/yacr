@@ -134,6 +134,16 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
             }
             out
         }
+        // A hatch is drawn from its derived display children (boundary loops
+        // plus the fill), one primitive at a time, exactly like a compound for
+        // this consumer.
+        G::Hatch(hatch) => {
+            let mut out = Vec::new();
+            for child in hatch.display() {
+                out.extend(tessellate_geometry(child, params));
+            }
+            out
+        }
         G::Compound(children) => {
             let mut out = Vec::new();
             for child in children {

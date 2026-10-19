@@ -152,6 +152,20 @@ fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             }
             Ok(())
         }
+        // A hatch is validated through its display children (boundary loops plus
+        // the fill), exactly like a compound (ADR 0018 E); the previous
+        // wildcard silently skipped this check.
+        SemanticGeometry::Hatch(hatch) => {
+            for child in hatch.display() {
+                validate_geometry(child)?;
+            }
+            if hatch.display().is_empty() {
+                return Err(CadError::Unsupported(
+                    "SelectAll cannot pick a hatch with no display geometry".into(),
+                ));
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
 }

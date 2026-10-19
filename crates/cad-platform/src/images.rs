@@ -104,6 +104,12 @@ fn collect_images(geometry: &SemanticGeometry, out: &mut Vec<String>) {
                 collect_images(part, out);
             }
         }
+        // A hatch is traversed like a compound (ADR 0018 E).
+        SemanticGeometry::Hatch(hatch) => {
+            for part in hatch.display() {
+                collect_images(part, out);
+            }
+        }
         _ => {}
     }
 }

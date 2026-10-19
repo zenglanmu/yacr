@@ -48,6 +48,8 @@ fn geometry_has_text(geometry: &SemanticGeometry) -> bool {
         // A dimension's measurement text is a display child (same traversal as
         // `collect_fonts`).
         SemanticGeometry::Dimension(dimension) => dimension.display().iter().any(geometry_has_text),
+        // A hatch is traversed like a compound (ADR 0018 E).
+        SemanticGeometry::Hatch(hatch) => hatch.display().iter().any(geometry_has_text),
         _ => false,
     }
 }
@@ -76,6 +78,12 @@ pub(crate) fn collect_fonts(
         // (ADR 0017 A.8).
         SemanticGeometry::Dimension(dimension) => {
             for part in dimension.display() {
+                collect_fonts(database, part, out);
+            }
+        }
+        // A hatch is traversed like a compound (ADR 0018 E).
+        SemanticGeometry::Hatch(hatch) => {
+            for part in hatch.display() {
                 collect_fonts(database, part, out);
             }
         }

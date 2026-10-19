@@ -1,4 +1,4 @@
-//! HATCH boundary tessellation and pattern extraction.
+//! HATCH boundary tessellation, pattern/gradient translation and source edges.
 
 use super::*;
 
@@ -274,51 +274,87 @@ pub(crate) fn arc_steps(sweep: f64) -> usize {
     ((sweep.abs() / 0.05).ceil() as usize).clamp(2, 4096)
 }
 
-/// The outcome of translating a HATCH's gradient pattern.
-///
-/// `Unsupported` carries a stable reason code so the importer can report an
-/// explicit `Partial` for a gradient it will not approximate, rather than
-/// silently drawing the boundary or a solid fill.
-pub(crate) enum GradientTranslation {
-    /// No gradient is enabled on the hatch.
-    Disabled,
-    /// A supported gradient, ready to bake into per-vertex colours.
-    Supported(GradientDef),
-    /// A gradient kind outside the implemented subset.
-    Unsupported(&'static str),
+// ---------------------------------------------------------------------------
+// Style / fill translation (ADR 0018 B).
+// ---------------------------------------------------------------------------
+
+pub(crate) fn hatch_style(style: acadrust::entities::HatchStyleType) -> HatchStyle {
+    use acadrust::entities::HatchStyleType as S;
+    match style {
+        S::Normal => HatchStyle::Normal,
+        S::Outer => HatchStyle::Outer,
+        S::Ignore => HatchStyle::Ignore,
+    }
 }
 
-/// Translate acadrust's `HatchGradientPattern` into the geometry-level model.
+pub(crate) fn hatch_pattern_type(
+    pattern_type: acadrust::entities::HatchPatternType,
+) -> HatchPatternType {
+    use acadrust::entities::HatchPatternType as P;
+    match pattern_type {
+        P::UserDefined => HatchPatternType::UserDefined,
+        P::Predefined => HatchPatternType::Predefined,
+        P::Custom => HatchPatternType::Custom,
+    }
+}
+
+/// Translate the pattern definition, including the **user-defined synthesis**.
 ///
-/// Supported kinds are the parametric ones whose value is a function of a
-/// single projection/radius: `LINEAR` and `SPHERICAL` (and its `CYLINDER`
-/// alias, which is the same radial ramp in the hatch plane). Every other DXF
-/// gradient kind is curved or piecewise and is reported unsupported rather than
-/// approximated as a straight ramp.
-pub(crate) fn translate_gradient(h: &Hatch) -> GradientTranslation {
+/// A `76=0` hatch does not have to carry definition rows: the file may store
+/// only angle (`52`), spacing (`41`) and double (`77`). When `78 == 0` this
+/// synthesizes one family at offset `(0, 1)` in pattern space, so the hatch-level
+/// scale is exactly the spacing; the double flag adds the perpendicular family
+/// in [`HatchPattern::families`]. The generated geometry is **our
+/// implementation** (ADR U-1/N4), not a documented AutoCAD formula. A file that
+/// carries rows is replayed as-is even for `76=0` (ADR U-11: the priority is
+/// unverified, and this keeps the committed `flange.dxf` result).
+pub(crate) fn import_pattern(h: &Hatch) -> HatchPattern {
+    let mut lines: Vec<HatchPatternLine> = h
+        .pattern
+        .lines
+        .iter()
+        .map(|line| HatchPatternLine {
+            angle: line.angle,
+            base_x: line.base_point.x,
+            base_y: line.base_point.y,
+            offset_x: line.offset.x,
+            offset_y: line.offset.y,
+            dashes: line.dash_lengths.clone(),
+        })
+        .collect();
+    if lines.is_empty()
+        && h.pattern_type == acadrust::entities::HatchPatternType::UserDefined
+        && h.pattern_scale.is_finite()
+        && h.pattern_scale > 0.0
+    {
+        lines.push(HatchPatternLine {
+            angle: 0.0,
+            base_x: 0.0,
+            base_y: 0.0,
+            offset_x: 0.0,
+            offset_y: 1.0,
+            dashes: Vec::new(),
+        });
+    }
+    HatchPattern {
+        name: h.pattern.name.clone(),
+        angle: h.pattern_angle,
+        scale: h.pattern_scale,
+        double: h.is_double,
+        lines,
+    }
+}
+
+/// Translate the gradient block into the domain model.
+///
+/// `None` means no gradient is enabled. Every other gradient is stored verbatim
+/// (including a kind this build cannot bake), so the definition round-trips; the
+/// display builder reports the unsupported kind and draws the boundary only.
+pub(crate) fn import_gradient(h: &Hatch) -> Option<HatchGradient> {
     let g = &h.gradient_color;
     if !g.is_enabled() {
-        return GradientTranslation::Disabled;
+        return None;
     }
-    let name = g.name.trim().to_ascii_uppercase();
-    let kind = match name.as_str() {
-        "LINEAR" => GradientKind::Linear,
-        "SPHERICAL" | "CYLINDER" => GradientKind::Spherical,
-        // Curved / inversion gradients are not a single radial ramp; refuse
-        // them explicitly instead of substituting an approximation.
-        "HEMISPHERICAL" | "CURVED" | "INVSPHERICAL" | "INVCYLINDER" => {
-            return GradientTranslation::Unsupported("gradient_kind_not_supported");
-        }
-        "" => {
-            // A missing name is ambiguous; fall back to LINEAR only when the
-            // file actually carried stops, otherwise report it.
-            if g.colors.is_empty() {
-                return GradientTranslation::Unsupported("gradient_name_missing");
-            }
-            GradientKind::Linear
-        }
-        _ => return GradientTranslation::Unsupported("gradient_kind_not_supported"),
-    };
     let stops: Vec<GradientStop> = g
         .colors
         .iter()
@@ -329,56 +365,75 @@ pub(crate) fn translate_gradient(h: &Hatch) -> GradientTranslation {
             rgb: concrete_rgb(entry.color).unwrap_or([255, 255, 255]),
         })
         .collect();
-    let def = GradientDef {
-        kind,
-        angle: g.angle,
-        shift: g.shift,
-        single_color: g.is_single_color,
-        tint: g.color_tint,
-        stops,
-    };
-    if def.is_usable() {
-        GradientTranslation::Supported(def)
+    let name = g.name.clone();
+    let reserved = g.reserved;
+    let angle_raw = g.angle;
+    let shift = g.shift;
+    Some(if g.is_single_color {
+        HatchGradient::SingleColor {
+            name,
+            reserved,
+            angle_raw,
+            shift,
+            tint: g.color_tint,
+            stops,
+        }
     } else {
-        GradientTranslation::Unsupported("gradient_definition_unusable")
-    }
+        HatchGradient::TwoColor {
+            name,
+            reserved,
+            angle_raw,
+            shift,
+            stops,
+        }
+    })
 }
 
-/// Build the (possibly doubled) pattern line families, applying the hatch's
-/// pattern angle and scale.
-pub(crate) fn pattern_families(h: &Hatch) -> Vec<PatternLine> {
-    let (sin, cos) = h.pattern_angle.sin_cos();
-    let mut families = Vec::new();
-    for line in &h.pattern.lines {
-        let base_raw = [line.base_point.x, line.base_point.y];
-        let base = [
-            cos * base_raw[0] - sin * base_raw[1],
-            sin * base_raw[0] + cos * base_raw[1],
-        ];
-        let offset = [
-            line.offset.x * h.pattern_scale,
-            line.offset.y * h.pattern_scale,
-        ];
-        let dashes = line
-            .dash_lengths
-            .iter()
-            .map(|d| d * h.pattern_scale)
-            .collect::<Vec<_>>();
-        let angle = line.angle + h.pattern_angle;
-        families.push(PatternLine {
-            angle,
-            base,
-            offset,
-            dashes: dashes.clone(),
+/// Keep the analytic source edges of a boundary path for export (ADR B4).
+///
+/// Returns `None` when the path is a DXF polyline edge (or carries any
+/// non-analytic edge): the loop's sampled points/bulges are then the only
+/// boundary representation, and an export degrades to a sampled polyline path.
+/// This loss is declared, never silent.
+pub(crate) fn import_source_edges(
+    path: &acadrust::entities::BoundaryPath,
+) -> Option<Vec<cad_domain::hatch_entity::BoundaryEdge>> {
+    use acadrust::entities::BoundaryEdge as AcEdge;
+    use cad_domain::hatch_entity::BoundaryEdge as Edge;
+    let mut out = Vec::new();
+    for edge in &path.edges {
+        out.push(match edge {
+            AcEdge::Line(l) => Edge::Line {
+                start: [l.start.x, l.start.y],
+                end: [l.end.x, l.end.y],
+            },
+            AcEdge::CircularArc(a) => Edge::CircularArc {
+                center: [a.center.x, a.center.y],
+                radius: a.radius,
+                start_angle: a.start_angle,
+                end_angle: a.end_angle,
+                ccw: a.counter_clockwise,
+            },
+            AcEdge::EllipticArc(a) => Edge::EllipticArc {
+                center: [a.center.x, a.center.y],
+                major_axis: [a.major_axis_endpoint.x, a.major_axis_endpoint.y],
+                ratio: a.minor_axis_ratio,
+                start_angle: a.start_angle,
+                end_angle: a.end_angle,
+                ccw: a.counter_clockwise,
+            },
+            AcEdge::Spline(s) => Edge::Spline {
+                degree: s.degree.max(0) as u32,
+                rational: s.rational,
+                periodic: s.periodic,
+                knots: s.knots.clone(),
+                control_points: s.control_points.iter().map(|p| [p.x, p.y, p.z]).collect(),
+                fit_points: s.fit_points.iter().map(|p| [p.x, p.y]).collect(),
+                start_tangent: [s.start_tangent.x, s.start_tangent.y],
+                end_tangent: [s.end_tangent.x, s.end_tangent.y],
+            },
+            AcEdge::Polyline(_) => return None,
         });
-        if h.is_double {
-            families.push(PatternLine {
-                angle: angle + std::f64::consts::FRAC_PI_2,
-                base,
-                offset: [-offset[1], offset[0]],
-                dashes,
-            });
-        }
     }
-    families
+    (!out.is_empty()).then_some(out)
 }

@@ -577,3 +577,102 @@ fn crossing_a_bulge_polyline_or_spline_falls_back_to_aabb() {
         "a spline crossing must be reported aabb"
     );
 }
+
+fn hatch_geometry() -> SemanticGeometry {
+    let hatch = HatchGeometry::new(
+        vec![HatchLoop::new(
+            vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]],
+            vec![0.0; 4],
+            HatchLoopFlags::default(),
+        )],
+        HatchPlane::default(),
+        HatchStyle::Normal,
+        HatchFill::Solid,
+        Vec::new(),
+        None,
+        HatchPatternType::UserDefined,
+    )
+    .expect("valid hatch");
+    SemanticGeometry::Hatch(Box::new(hatch))
+}
+
+/// An app/session with one model-space entity (id 1) holding `geometry`.
+fn single_entity_app(geometry: SemanticGeometry) -> (Application, SessionState) {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "AcDbHatch".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry,
+            draw_order: 0,
+        })
+        .unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DOC,
+        Document {
+            id: DOC,
+            drawing: Arc::new(builder.finish().unwrap()),
+            identity: DocumentIdentity::Temporary(1),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace
+        .viewports
+        .insert(VIEWPORT, Viewport::new(VIEWPORT, DOC, [800.0, 600.0]));
+    (app, SessionState::new(DOC, AppMode::Work))
+}
+
+#[test]
+fn hatch_box_select_matches_an_equivalent_compound() {
+    // ADR 0018 E: a first-class hatch classifies exactly like the compound of
+    // its display children (the previous wildcard degraded it to the item AABB).
+    let hatch = hatch_geometry();
+    let SemanticGeometry::Hatch(geometry) = &hatch else {
+        unreachable!("helper returns a hatch");
+    };
+    let compound = SemanticGeometry::Compound(geometry.display().to_vec());
+    let mut results = Vec::new();
+    for geometry in [hatch, compound] {
+        let (mut app, mut session) = single_entity_app(geometry);
+        for crossing in [false, true] {
+            let outcome = app
+                .execute(
+                    &mut session,
+                    box_command(
+                        logical_rect((-1.0, -1.0), (5.0, 5.0)),
+                        crossing,
+                        SelectionMode::Replace,
+                    ),
+                )
+                .unwrap();
+            results.push((
+                count(&outcome),
+                precision(&outcome),
+                session.selection.clone(),
+            ));
+        }
+    }
+    assert_eq!(results[0], results[2], "window: hatch vs compound differ");
+    assert_eq!(results[1], results[3], "crossing: hatch vs compound differ");
+    assert_eq!(results[0].0, 1, "the hatch window-selects");
+    assert_eq!(
+        results[0].2,
+        SelectionSet::from_refs([reference(EntityId(1))])
+    );
+}

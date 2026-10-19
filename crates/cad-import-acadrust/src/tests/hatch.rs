@@ -46,11 +46,16 @@ fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> BoundaryPath {
     path
 }
 
-fn mesh_area(geometry: &SemanticGeometry) -> Option<f64> {
-    let SemanticGeometry::Compound(children) = geometry else {
-        return None;
+fn hatch_of(geometry: &SemanticGeometry) -> &HatchGeometry {
+    let SemanticGeometry::Hatch(hatch) = geometry else {
+        panic!("expected a first-class hatch, got {geometry:?}");
     };
-    children.iter().find_map(|child| match child {
+    hatch
+}
+
+fn mesh_area(geometry: &SemanticGeometry) -> Option<f64> {
+    let hatch = hatch_of(geometry);
+    hatch.display().iter().find_map(|child| match child {
         SemanticGeometry::Mesh(m) => Some(
             m.triangles
                 .iter()
@@ -94,13 +99,13 @@ fn solid_hatch_with_a_hole_fills_the_solid_band_only() {
 }
 
 fn mesh_of(geometry: &SemanticGeometry) -> Option<&Mesh> {
-    let SemanticGeometry::Compound(children) = geometry else {
-        return None;
-    };
-    children.iter().find_map(|child| match child {
-        SemanticGeometry::Mesh(m) => Some(m),
-        _ => None,
-    })
+    hatch_of(geometry)
+        .display()
+        .iter()
+        .find_map(|child| match child {
+            SemanticGeometry::Mesh(m) => Some(m),
+            _ => None,
+        })
 }
 
 fn gradient_hatch(name: &str, stops: &[(f64, (u8, u8, u8))]) -> acadrust::entities::Hatch {
@@ -300,4 +305,116 @@ fn degenerate_hatch_normal_reports_partial_boundary_only() {
         }
         other => panic!("expected Partial, got {other:?}"),
     }
+}
+
+#[test]
+fn import_preserves_style_pattern_seeds_pixel_size_flags_and_source_edges() {
+    let mut hatch = acadrust::entities::Hatch::new();
+    hatch.is_solid = false;
+    hatch.style = acadrust::entities::HatchStyleType::Outer;
+    hatch.pattern_type = acadrust::entities::HatchPatternType::Custom;
+    hatch.pattern.name = "ANSI31".into();
+    hatch.pattern_angle = 0.25;
+    hatch.pattern_scale = 2.0;
+    hatch.is_double = true;
+    hatch
+        .pattern
+        .add_line(acadrust::entities::HatchPatternLine {
+            angle: std::f64::consts::FRAC_PI_4,
+            base_point: acadrust::types::Vector2::new(0.5, 0.25),
+            offset: acadrust::types::Vector2::new(0.0, 1.0),
+            dash_lengths: vec![0.5, -0.25],
+        });
+    hatch.seed_points = vec![acadrust::types::Vector2::new(1.5, 2.5)];
+    hatch.pixel_size = 0.125;
+    let mut path = rect_path(0.0, 0.0, 10.0, 10.0);
+    path.flags.set_external(true);
+    hatch.paths = vec![path];
+    let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+    assert_eq!(completeness, Completeness::Complete, "{completeness:?}");
+    let imported = hatch_of(&geometry);
+    assert_eq!(imported.style(), HatchStyle::Outer);
+    assert_eq!(imported.pattern_type(), HatchPatternType::Custom);
+    assert_eq!(imported.seeds(), &[[1.5, 2.5]]);
+    assert_eq!(imported.pixel_size(), Some(0.125));
+    let loop_ = &imported.loops()[0];
+    assert_eq!(loop_.flags.bits(), HatchLoopFlags::EXTERNAL);
+    assert!(
+        matches!(&imported.fill(), HatchFill::Pattern(_)),
+        "{:?}",
+        imported.fill()
+    );
+    let source_edges = loop_.source_edges.as_ref().expect("analytic line edges");
+    assert_eq!(source_edges.len(), 4);
+    assert!(matches!(
+        source_edges[0],
+        cad_domain::hatch_entity::BoundaryEdge::Line { .. }
+    ));
+}
+
+#[test]
+fn user_defined_pattern_without_families_is_synthesized() {
+    // ADR U-1/N4: `76=0` with no definition rows (`78=0`) is synthesized from
+    // angle/spacing/double instead of degrading to "no line families".
+    let mut hatch = acadrust::entities::Hatch::new();
+    hatch.is_solid = false;
+    hatch.pattern_type = acadrust::entities::HatchPatternType::UserDefined;
+    hatch.pattern.name = "USER".into();
+    hatch.pattern_angle = 0.0;
+    hatch.pattern_scale = 2.0;
+    hatch.is_double = false;
+    assert!(hatch.pattern.lines.is_empty());
+    hatch.paths = vec![rect_path(0.0, 1.0, 10.0, 11.0)];
+    let (geometry, completeness) = ImporterBuilder::hatch_geometry(&hatch);
+    assert_eq!(completeness, Completeness::Complete, "{completeness:?}");
+    let imported = hatch_of(&geometry);
+    let looplets = imported.loops().len();
+    let pattern_lines = imported
+        .display()
+        .iter()
+        .skip(looplets)
+        .filter(|geometry| matches!(geometry, SemanticGeometry::Polyline { .. }))
+        .count();
+    // Spacing 2 across a 10-unit high rectangle -> five horizontal lines.
+    assert_eq!(pattern_lines, 5, "{:?}", imported.display());
+}
+
+#[test]
+fn pattern_families_rotate_the_offset_with_the_pattern_angle() {
+    // Values from the committed `isometric_grid.dxf`: pattern angle 75 degrees,
+    // scale 0.5, a line at 120 degrees with a 1.5875 perpendicular offset. Before
+    // P6a the offset was not rotated, so it stopped being perpendicular to the
+    // final line direction (ADR U-7).
+    let mut hatch = acadrust::entities::Hatch::new();
+    hatch.pattern_angle = 75.0f64.to_radians();
+    hatch.pattern_scale = 0.5;
+    hatch
+        .pattern
+        .add_line(acadrust::entities::HatchPatternLine {
+            angle: 120.0f64.to_radians(),
+            base_point: acadrust::types::Vector2::new(0.5, 0.0),
+            offset: acadrust::types::Vector2::new(-1.374_815_328_507_796, -0.793_75),
+            dash_lengths: Vec::new(),
+        });
+    let pattern = import_pattern(&hatch);
+    let families = pattern.families();
+    let family = &families[0];
+    let expected_angle = (120.0f64 + 75.0).to_radians();
+    assert!((family.angle - expected_angle).abs() < 1e-12);
+    let direction = [family.angle.cos(), family.angle.sin()];
+    let perpendicular = family.offset[0] * direction[0] + family.offset[1] * direction[1];
+    assert!(
+        perpendicular.abs() < 1e-9,
+        "offset must stay perpendicular: {perpendicular} ({:?})",
+        family.offset
+    );
+    let magnitude =
+        (family.offset[0] * family.offset[0] + family.offset[1] * family.offset[1]).sqrt();
+    assert!((magnitude - 0.793_75).abs() < 1e-9, "{magnitude}");
+    // The base point is scaled and rotated as well (pattern space -> hatch
+    // space): scale 0.5 then +75 degrees.
+    let base_x = 0.25 * 75.0f64.to_radians().cos();
+    let base_y = 0.25 * 75.0f64.to_radians().sin();
+    assert!((family.base[0] - base_x).abs() < 1e-9, "{:?}", family.base);
+    assert!((family.base[1] - base_y).abs() < 1e-9, "{:?}", family.base);
 }

@@ -687,3 +687,51 @@ fn unknown_units_display_drawing_units_and_record_the_source() {
     assert_eq!(record.units.source, Unit::Millimeter);
     assert_eq!(record.units.label(), "in");
 }
+
+#[test]
+fn hatch_boundary_vertices_remain_snap_points() {
+    // ADR 0018 E: the boundary loops are part of the hatch display, so a snap
+    // target built from the first-class variant still yields the corner as an
+    // endpoint candidate (the pre-P6a `Compound` parity).
+    let hatch = HatchGeometry::new(
+        vec![HatchLoop::new(
+            vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            Vec::new(),
+            HatchLoopFlags::default(),
+        )],
+        HatchPlane::default(),
+        HatchStyle::Normal,
+        HatchFill::Solid,
+        Vec::new(),
+        None,
+        HatchPatternType::UserDefined,
+    )
+    .expect("valid hatch");
+    let target = SnapTarget::new(
+        SemanticGeometry::Hatch(Box::new(hatch)),
+        selection(),
+        SpaceId::Model,
+        Precision::Analytic,
+    );
+    let ray = Ray3 {
+        origin: p(0.02, 0.01, 10.0),
+        direction: p(0.0, 0.0, -1.0),
+    };
+    let candidates = collect_candidates(
+        &[target],
+        &ray,
+        None,
+        1.0,
+        Some(&SpaceId::Model),
+        &TolerancePolicy::default(),
+    )
+    .expect("snap candidates");
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.kind == SnapKind::Endpoint
+                && candidate.point.x.abs() < 1e-9
+                && candidate.point.y.abs() < 1e-9),
+        "{candidates:?}"
+    );
+}

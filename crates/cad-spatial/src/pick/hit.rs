@@ -122,6 +122,10 @@ fn geometry_family(geometry: &SemanticGeometry) -> usize {
         // A dimension is picked like a compound: recurse into its display
         // children (ADR 0017 A.8).
         SemanticGeometry::Dimension(_) => FAMILY_COMPOUND,
+        // A hatch is picked like a compound: its display holds the boundary
+        // polylines and the fill mesh, so clicking inside the fill hits the
+        // mesh (ADR 0018 A.2/E).
+        SemanticGeometry::Hatch(_) => FAMILY_COMPOUND,
         SemanticGeometry::Text { .. } => FAMILY_TEXT,
         SemanticGeometry::Shape { .. } => FAMILY_SHAPE,
         SemanticGeometry::Mask { .. } => FAMILY_MASK,
@@ -371,6 +375,44 @@ fn hit_validated(
                     ..hit
                 }),
                 None if unsupported.is_some() => PickOutcome::Unsupported("dimension-unsupported"),
+                None => PickOutcome::Miss,
+            }
+        }
+        // A hatch picks through its display children exactly like a compound,
+        // so the fill mesh (and therefore the interior) stays selectable
+        // (ADR 0018 E).
+        SemanticGeometry::Hatch(hatch) => {
+            let mut best: Option<GeometryHit> = None;
+            let mut unsupported: Option<&'static str> = None;
+            for child in hatch.display() {
+                match hit_validated(
+                    ray,
+                    child,
+                    transform,
+                    options,
+                    params,
+                    profile.as_deref_mut(),
+                    bounds_cache,
+                )? {
+                    PickOutcome::Hit(hit) => {
+                        let better = best
+                            .as_ref()
+                            .map(|b| (hit.distance, hit.offset) < (b.distance, b.offset))
+                            .unwrap_or(true);
+                        if better {
+                            best = Some(hit);
+                        }
+                    }
+                    PickOutcome::Miss => {}
+                    PickOutcome::Unsupported(reason) => unsupported = Some(reason),
+                }
+            }
+            match best {
+                Some(hit) => PickOutcome::Hit(GeometryHit {
+                    geometry_source: GeometrySource::Analytic,
+                    ..hit
+                }),
+                None if unsupported.is_some() => PickOutcome::Unsupported("hatch-unsupported"),
                 None => PickOutcome::Miss,
             }
         }

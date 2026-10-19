@@ -265,6 +265,17 @@ fn explode_source(
             refuse_compound_type_key(source)?;
             Err(policy_refusal("DIMENSION"))
         }
+        // A HATCH keeps today's decomposition: its derived display is the
+        // boundary loops plus the fill mesh and pattern polylines, exactly the
+        // children the old `Compound` produced (ADR 0018 E). The `type_key`
+        // guard still refuses it inside a block.
+        SemanticGeometry::Hatch(hatch) => {
+            refuse_compound_type_key(source)?;
+            for child in hatch.display() {
+                push_produced(source.layer, source.space.clone(), child.clone(), out)?;
+            }
+            Ok(())
+        }
         other => Err(CadError::Unsupported(format!(
             "EXPLODE cannot explode {}: only LWPOLYLINE, INSERT and Compound are \
              decomposable",
@@ -415,7 +426,8 @@ fn push_produced(
         | SemanticGeometry::Shape { .. }
         | SemanticGeometry::Opaque { .. }
         | SemanticGeometry::Dimension(_)
-        | SemanticGeometry::Compound(_) => Err(child_refusal(&geometry)),
+        | SemanticGeometry::Compound(_)
+        | SemanticGeometry::Hatch(_) => Err(child_refusal(&geometry)),
         _ => {
             let type_key = class_name(&geometry).to_string();
             out.push(Produced {

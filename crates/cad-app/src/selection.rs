@@ -12,7 +12,9 @@
 //! unsupported geometry yields an explicit row rather than invented values.
 
 use cad_db::{DbEntity, DrawingDatabase};
-use cad_domain::{EntityId, InstancePath, Point3, SelectionRef, SemanticGeometry, SpaceId};
+use cad_domain::{
+    EntityId, HatchFill, InstancePath, Point3, SelectionRef, SemanticGeometry, SpaceId,
+};
 use std::collections::BTreeSet;
 
 /// One read-only property row for the properties panel.
@@ -424,6 +426,19 @@ fn geometry_property_rows(geometry: &SemanticGeometry) -> Vec<PropertyRow> {
             PropertyRow::new("measurement", format!("{:.6}", dimension.measurement())),
             PropertyRow::new("display", dimension.display().len().to_string()),
         ],
+        SemanticGeometry::Hatch(hatch) => {
+            let fill = match hatch.fill() {
+                HatchFill::Solid => "solid".to_string(),
+                HatchFill::Pattern(pattern) => format!("pattern {}", pattern.name),
+                HatchFill::Gradient(gradient) => format!("gradient {}", gradient.name()),
+            };
+            vec![
+                PropertyRow::new("loops", hatch.loops().len().to_string()),
+                PropertyRow::new("style", format!("{:?}", hatch.style())),
+                PropertyRow::new("fill", fill),
+                PropertyRow::new("display", hatch.display().len().to_string()),
+            ]
+        }
     }
 }
 

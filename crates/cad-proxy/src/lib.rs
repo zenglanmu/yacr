@@ -501,6 +501,13 @@ fn vertex_count(g: &SemanticGeometry) -> usize {
             .map(vertex_count)
             .sum::<usize>()
             .max(1),
+        // A hatch estimates its display children (boundary plus fill/pattern).
+        SemanticGeometry::Hatch(hatch) => hatch
+            .display()
+            .iter()
+            .map(vertex_count)
+            .sum::<usize>()
+            .max(1),
         _ => 4,
     }
 }

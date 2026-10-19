@@ -58,3 +58,22 @@ pub(super) fn two_face_mesh() -> Mesh {
         colors: Vec::new(),
     }
 }
+
+/// A first-class solid HATCH over a 10x10 square in the world plane.
+pub(super) fn hatch_semantics() -> SemanticGeometry {
+    let hatch = HatchGeometry::new(
+        vec![HatchLoop::new(
+            vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            Vec::new(),
+            HatchLoopFlags::default(),
+        )],
+        HatchPlane::default(),
+        HatchStyle::Normal,
+        HatchFill::Solid,
+        Vec::new(),
+        None,
+        HatchPatternType::UserDefined,
+    )
+    .expect("valid hatch");
+    SemanticGeometry::Hatch(Box::new(hatch))
+}

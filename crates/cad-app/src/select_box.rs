@@ -377,6 +377,14 @@ fn classify_world(geometry: &SemanticGeometry, rect: Rect) -> Option<MatchPath> 
             .iter()
             .filter_map(|child| classify_world(child, rect))
             .min_by_key(|path| path.rank()),
+        // A hatch classifies exactly like the equivalent compound, so a box
+        // selection keeps precise per-child matching instead of degrading to the
+        // item AABB (ADR 0018 E).
+        SemanticGeometry::Hatch(hatch) => hatch
+            .display()
+            .iter()
+            .filter_map(|child| classify_world(child, rect))
+            .min_by_key(|path| path.rank()),
         // Splines have no rectangle tessellator reachable from this crate
         // without a Cargo dependency (frozen for this change); the honest path
         // is the conservative AABB with an `aabb` report.

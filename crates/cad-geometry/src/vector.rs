@@ -169,5 +169,25 @@ pub fn geometry_is_finite(geometry: &SemanticGeometry) -> bool {
                 && dimension.measurement().is_finite()
                 && dimension.display().iter().all(geometry_is_finite)
         }
+        // A hatch is finite when its plane, every loop vertex/bulge, every seed
+        // and every display child are finite (the display alone would miss a
+        // poisoned loop the next transform/export reads).
+        G::Hatch(hatch) => {
+            let plane = hatch.plane();
+            finite(plane.normal)
+                && plane.elevation.is_finite()
+                && hatch.loops().iter().all(|loop_| {
+                    loop_
+                        .points
+                        .iter()
+                        .all(|p| p[0].is_finite() && p[1].is_finite())
+                        && loop_.bulges.iter().all(|b| b.is_finite())
+                })
+                && hatch
+                    .seeds()
+                    .iter()
+                    .all(|p| p[0].is_finite() && p[1].is_finite())
+                && hatch.display().iter().all(geometry_is_finite)
+        }
     }
 }

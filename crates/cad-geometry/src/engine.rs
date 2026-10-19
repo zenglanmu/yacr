@@ -447,6 +447,10 @@ impl GeometryEngine for DefaultGeometryEngine {
             // surface (the snap path); `cad-db::transform_geometry` is the other
             // and both delegate to the same domain method.
             G::Dimension(dimension) => G::Dimension(Box::new(dimension.transformed(t)?)),
+            // A hatch delegates to its domain transform: loops, plane, seeds and
+            // the pattern definition move together and the display is rebuilt
+            // (ADR 0018 E). Both transform surfaces share that method.
+            G::Hatch(hatch) => G::Hatch(Box::new(hatch.transformed(t)?)),
         };
         // A transform that maps a finite source to a non-finite point is not a
         // usable result; report it instead of returning poisoned geometry

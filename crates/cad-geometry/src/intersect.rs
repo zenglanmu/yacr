@@ -197,6 +197,11 @@ pub(crate) fn conic_of(geometry: &SemanticGeometry) -> Option<Conic> {
             start: *start,
             sweep: *sweep,
         }),
+        // A HATCH is not one conic primitive: the sampled fallback in
+        // `intersect_local` handles it (it flattens the derived display). This
+        // explicit arm records that decision instead of relying on the
+        // wildcard (ADR 0018 E).
+        SemanticGeometry::Hatch(_) => None,
         _ => None,
     }
 }
