@@ -201,3 +201,34 @@ fn a_drawing_without_text_still_installs_no_font_engine() {
         "no text and no named font must not load a font"
     );
 }
+
+/// P5 gate F3: the post-commit font install is not limited to the draw confirm.
+///
+/// A text-introducing commit that reaches the general commit funnel — here a
+/// dimension created by its own command instead of the interactive confirm path,
+/// which is the same shape as a pasted Dimension/Text or an undone erase — must
+/// install the shaping engine too, or the new text stays unshaped in a drawing
+/// that was opened text-less.
+#[test]
+fn a_committed_dimension_command_installs_fonts_without_the_draw_confirm() {
+    let core = core_with_desktop_resources();
+    install_drawing(&core, Arc::new(line_drawing()));
+    core.install_fonts().expect("font installation");
+    assert!(core.render.fonts().is_none(), "no text at open");
+
+    core.command(
+        CommandId::DimAligned,
+        CommandPayload::Points(vec![p(0.0, 0.0), p(3.0, 4.0), p(-2.0, 2.0)]),
+    )
+    .expect("the dimension commits");
+
+    let drawing = core.controller.borrow().drawing().expect("a drawing");
+    assert!(
+        cad_platform::fonts::needs_text_shaping(drawing.as_ref()),
+        "the commit introduced the drawing's first text"
+    );
+    assert!(
+        core.render.fonts().is_some(),
+        "the general commit funnel must install the engine the open funnel could not"
+    );
+}

@@ -566,7 +566,7 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
   （`requires_work_mode()`）、`crates/cad-ui-core` 的选择子表（`commands.rs`：`("DIMLINEAR", …)`/`("DIMALIGNED", …)`）
   与 `session/mod.rs` 的 `InteractionRequest::BeginDraw(DrawToolKind::{DimLinear,DimAligned})` 映射；
   `EXPECTED_COMMAND_COUNT` **60 → 62** 断言与选择子契约（每个变体在 `COMMAND_TABLE` 恰出现一次）同步更新。
-- **绘制工具种类**：`DrawToolKind::{DimLinear,DimAligned}`（`ALL` 共 25 种），`arity = PointArity::Exact(3)`
+- **绘制工具种类**：`DrawToolKind::{DimLinear,DimAligned}`（`ALL` 当时 25 种；**当前 30 种**，以 `kind.rs` 为准），`arity = PointArity::Exact(3)`
   （两次尺寸界线原点 + 尺寸线位置）；机器键 `"dimlinear"`/`"dimaligned"`（永不翻译），标签走 i18n。
 - **`DrawIntent` 变体**：`DrawIntent::DimLinear{first,second,location}` / `DrawIntent::DimAligned{…}`；宿主
   `draw_intent_map.rs` 把两者映射为 `CommandPayload::Points([first, second, location])`（**复用**既有 payload，
@@ -638,7 +638,7 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
   `("DIMRADIUS", …)`/`("DIMDIAMETER", …)`/`("DIMCENTER", …)`）与 `session/mod.rs` 的
   `InteractionRequest::BeginDraw(DrawToolKind::{DimRadius,DimDiameter,DimCenter})` 映射；
   `EXPECTED_COMMAND_COUNT` **62 → 65** 断言与选择子契约同步更新。
-- **绘制工具种类**：`DrawToolKind::{DimRadius,DimDiameter,DimCenter}`（`ALL` 共 28 种）；
+- **绘制工具种类**：`DrawToolKind::{DimRadius,DimDiameter,DimCenter}`（`ALL` 当时 28 种；**当前 30 种**，以 `kind.rs` 为准）；
   DimRadius/DimDiameter `arity = PointArity::Exact(2)`（实体拾取 + 尺寸线位置），DimCenter `Exact(1)`（一次实体拾取）；
   机器键 `"dimradius"`/`"dimdiameter"`/`"dimcenter"`（永不翻译），标签走 i18n。
 - **混合拾取（新机制）**：新增 `DrawToolKind::picked_step_count()`——**前导实体拾取步数**
@@ -674,6 +674,14 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
 9. **`DIMCENTER` 不是标注**：能力表按**绘图辅助**而非 DIMENSION 记录（决策 D.7）；测试断言产出为 `AcDbLine`、**非** `Dimension`。
 10. **无真正标注预览**（沿用 P5c 声明）：radial/DIMCENTER 的实时预览是后端橡皮筋链；React 宿主经每步提示。
 
+#### P5 阶段门禁后的更正（F1：Diameter 组 10/15 曾写反）
+
+- **事实**：Diameter 的导出曾把 `definition_point`（→ 组 10）填成**圆上点**、`angle_vertex`（→ 组 15）填成**对径点**，
+  与 acadrust 读取器的约定（"组 15 = 第一弦点、组 10 = 其对径点"）及本 ADR A.3 **相反**。因为 radial 合成对
+  `from`/`to` **对称**、且导入侧**镜像了同一个反向**，往返自洽、显示不受影响 ⇒ **无测试抓到**（这是"自洽 ≠ 正确"的
+  典型案例）。**已改代码对齐约定**（导出与导入两向各交换 Diameter 的两个赋值），并新增 **Radius 与 Diameter 的
+  组 10/15 逐值断言**（此前组码往返只覆盖 Aligned）。**不是**改文档迁就缺陷。
+
 #### 真机证据（2026-10-19）
 
 - **真机证据（2026-10-19）**：真实硬件 GPU（Vulkan / **Quadro P620**）+ X11；驱动新增 P5d 相位（每相先 `CIRCLE` 造圆 →
@@ -698,7 +706,7 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
 
 - **门禁（编排者复跑，2026-10-19）**：受影响 crate 全绿（`cad-app` **663**、`cad-ui-core` **140**、`cad-host` **143**、
   `cad-domain` **53**、`cad-db` **84**、`cad-import-acadrust` **195**，合计 **1832 通过 / 0 失败**）；
-  workspace check(all-targets)、wasm lib、clippy(workspace `-D warnings`)、fmt、architecture(27)、i18n(**508**，P5d **+9**、
+  workspace check(all-targets)、wasm lib、clippy(workspace `-D warnings`)、fmt、architecture(27)、i18n(**P5d 时点 508**：P5d **+9**，P5e 后为 **517**、
   后续字形/文案修正 **+1**)、fixture(22)、file-size(**673**)、workflow、UI **145/145** + build 全通过。
 - **受影响 crate 契约测试**：见 `crates/cad-app/src/tests/drawing/dimension_radial.rs`、
   `crates/cad-app/src/draw_tool/tests/dimension.rs`、`crates/cad-app/src/host/tests/dimension.rs`、
@@ -784,11 +792,11 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
 #### 门禁（编排者复跑，2026-10-19）
 
 - **门禁（编排者复跑，2026-10-19）**：受影响 crate 全绿（`cad-app`、`cad-ui-core`、`cad-domain`、`cad-db`、
-  `cad-import-acadrust`，合计 **1850 通过 / 0 失败**）；workspace check(all-targets)、wasm lib、
+  `cad-import-acadrust`，**P5d 时点**合计 **1850 通过 / 0 失败**（P5e 之后为 1881，见下）；workspace check(all-targets)、wasm lib、
   clippy(workspace `-D warnings`)、fmt、architecture(27)、i18n(**517**，P5e **+9**、文案补正 **0 新键**)、
   fixture(22)、file-size(**682**)、workflow、UI **154/154** + build。
 - **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；第三方读取器验证；
-  **标注文字渲染**（见上，独立判读中）。
+  **标注文字渲染**已修并复验（见本节上方的"三道闸"与差分证据）；仅 `DIMANGULAR` 的完整字形因**驱动固定放置被画布顶边裁切**而未测量。
 
 ---
 
@@ -837,3 +845,28 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
 - `GradientColorEntry` 新增 `color_name`/`book_name`（颜色簿名）：测试构造用 `..Default::default()`（不伪造来源）。
 - **未**新增/删除依赖；`Cargo.lock` 由 `cargo update -p acadrust --precise 0.6.5` 生成（传递新增
   `oem_cp 2.1.2` 及其 `phf 0.11.3`/`phf_shared 0.11.3` 依赖，用于 0.6.4 的旧代码页精确解码）。
+
+## P5 阶段门禁结论（Oracle，2026-10-20）：**CLOSED**
+
+- **门禁判定**：`closed-with-fixes`（1 个阻塞项 F1 + 文档腐化 F4 + 两条非阻塞 F2/F3）⇒ 全部修复后
+  **P5 关闭**。门禁自行重跑了受影响套件与全部卫生门禁，并**用程序比对** `COMMAND_TABLE`(67) 与
+  `EXPECTED_COMMAND_COUNT`(67) **完全一致**。
+- **F1（阻塞，已修）**：Diameter 的组 10/15 **曾写反**（详见 P5d 小节的更正记录）。已**改代码对齐约定**
+  （导出与导入双向），新增 **Radius/Diameter 的组 10/15 逐值断言** + **手工约定 DXF 的导入方向测试**；
+  显示不变（radial 合成对称）。**回归证明**：临时回退改动后新测试**失败**，恢复后通过。
+- **F2（已修）**：presenter 的尺寸守卫改为**有界等待**（`ProbeError::TextureNotReady` 前 2 个连续 tick，
+  第 3 个才 `TextureInvalid`），`frame_cad` 把 not-ready 映射为 `Ok(None)`（等同"本帧无帧"），**绝不拉伸**。
+  **残留（门禁已指出、实现者如实上报未扩大范围）**：tick 的另一处守卫 `drawing_area_matches_dom`
+  （原点+尺寸超 ±1 逻辑像素）仍可能在中途 resize 的 tick 上给出 `cad present failed`；那是**一次性布局不变量检查**，
+  不是 F2 指的宽高比守卫，扩宽它需要 per-tick 宿主状态并改动刻意的布局不变量 ⇒ **记录为已知残留**。
+- **F3（已修）**：`ensure_fonts_for_text` 现在也挂在**所有编辑请求都经过的漏斗** `HostCore::execute_engine_request`
+  上（以"确有事务提交"为门槛，只读请求不付代价）；测试证明**非 confirm 的提交**（同 paste/undo 形态）也会安装引擎。
+  **仍未覆盖（声明）**：宿主自有的 Open/New/Plot/Save 漏斗（Open 自装）、以及不经 `HostCore` 直接使用 `cad-app`
+  的场景（无渲染句柄可装）。
+- **F4（文档腐化，已改）**：P5e 的 NOT RUN 列表不再说"独立判读中"（已改为"已修并复验，仅 `DIMANGULAR`
+  被画布裁切未测量"）；handoff 的 P5a 偏离 ⑪ 加"**此句已被 P5b 作废**"行内标记；能力表 `P5c/P5d` → `P5d`；
+  ADR 的 `ALL` 种类数标为"当时 28 / **当前 30**，以 `kind.rs` 为准"；门禁数字标注为 **P5d 时点** 并与 P5e 后区分。
+- **P6 可否开工**：**可以**。可复用的机制（编译强制的命令词表、单一创建漏斗、共享合成 + 私有字段、声明账本）
+  均健全；**必须带入 P6 的显式债务**：① **无真正的创建预览**（仅橡皮筋链；React 宿主无法修，ADR-0002）——
+  HATCH 会遇到同一堵墙；② 样式快照**不追溯**；③ `DIMPOST="."` 会渲染成 `42.5.`；④ DIMSD 的断口是**文字中点**近似；
+  ⑤ F2 的**布局守卫残留**；⑥ F3 的**未覆盖路径**。

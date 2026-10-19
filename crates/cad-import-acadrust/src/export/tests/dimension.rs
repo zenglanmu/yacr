@@ -8,7 +8,7 @@ fn fixture_bytes(path: &str) -> Arc<[u8]> {
     Arc::from(bytes.into_boxed_slice())
 }
 
-fn dimensions(db: &DrawingDatabase) -> Vec<DimensionGeometry> {
+pub(super) fn dimensions(db: &DrawingDatabase) -> Vec<DimensionGeometry> {
     db.entities()
         .filter_map(|e| match &e.geometry {
             SemanticGeometry::Dimension(d) => Some((**d).clone()),
@@ -17,7 +17,7 @@ fn dimensions(db: &DrawingDatabase) -> Vec<DimensionGeometry> {
         .collect()
 }
 
-fn style_values() -> DimensionStyleValues {
+pub(super) fn style_values() -> DimensionStyleValues {
     DimensionStyleValues {
         arrow_size: 2.5,
         ext_offset: 0.625,

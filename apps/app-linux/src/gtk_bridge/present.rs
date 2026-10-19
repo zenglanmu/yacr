@@ -2,7 +2,7 @@
 //! [`GtkOverlayOwner`], plus its `Drop`.
 
 use cad_engine::render::RenderSessionHandle;
-use cad_render_wgpu::{NativeTextureKey, ProbeFrameStats};
+use cad_render_wgpu::{NativeTextureKey, ProbeError, ProbeFrameStats};
 use gtk::prelude::*;
 
 use super::native::{
@@ -207,6 +207,16 @@ impl GtkOverlayOwner {
                         });
                         Ok(Some(stats))
                     }
+                    // A **bounded** size disagreement: the presenter refuses to
+                    // stretch a mismatched texture but treats the first few
+                    // consecutive ticks as a transient (a mid-resize frame, or a
+                    // DOM-derived size rounded one pixel off the integer
+                    // allocation). This tick simply waits — the same explicit
+                    // "not ready" as the engine's no-frame path, with no error
+                    // surfaced. A disagreement that persists is a
+                    // `TextureInvalid` and falls through to the error below, so a
+                    // genuine drawing-area defect still fails loudly.
+                    Err(ProbeError::TextureNotReady(_)) => Ok(None),
                     Err(error) => {
                         self.clear_presenter_cache();
                         Err(format!("present_texture failed: {error}"))

@@ -219,6 +219,20 @@ impl HostCore {
                 });
             }
         }
+        // A committed edit can introduce the drawing's **first** text after the
+        // open funnel already ran its install (a pasted Dimension/Text, an undone
+        // erase, a command-built dimension): the file was opened text-less, so no
+        // shaping engine exists and the new text would stay unshaped. This is the
+        // one funnel every edit passes through — command, interaction and API
+        // request alike — so the install belongs here, not only on the draw
+        // confirm. `seen` non-empty means at least one real transaction committed;
+        // a read-only request (zoom, select, diagnostics) keeps the open funnel's
+        // result. The call is cheap when an engine is already installed.
+        if !seen.is_empty() {
+            if let Err(error) = self.ensure_fonts_for_text() {
+                self.note_post_commit_error(&error);
+            }
+        }
         events.extend(self.changed_events());
         let post = self.trace_state();
         EngineExecution {

@@ -373,6 +373,16 @@ fn present_native_texture_checkerboard() {
         texture_revision: 1,
         size: (64, 64),
     };
+    // The first disagreements are a bounded wait ("not ready yet"), so a
+    // transient resize frame does not surface an error; the guard itself is
+    // unchanged and the disagreement that persists becomes the explicit
+    // `TextureInvalid` that refuses to stretch the texture.
+    for _ in 0..(SIZE_MISMATCH_WAIT_TICKS - 1) {
+        assert!(matches!(
+            presenter.present_texture(&small, mismatched_surface),
+            Err(ProbeError::TextureNotReady(_))
+        ));
+    }
     assert!(matches!(
         presenter.present_texture(&small, mismatched_surface),
         Err(ProbeError::TextureInvalid(_))

@@ -39,6 +39,10 @@ pub struct SurfaceProbePresenter {
     /// Measurement-only feature negotiation (ADR 0013 class 1): what the opt-in
     /// requested, what the device granted, and the explicit state.
     gpu_time: crate::gpu_time::GpuTimeReport,
+    /// Consecutive native-texture/surface size disagreements. A transient (a
+    /// mid-resize tick or a one-pixel DOM rounding) waits; a persistent one is
+    /// the explicit size-guard error.
+    size_mismatch: SizeMismatchWait,
 }
 
 impl SurfaceProbePresenter {
@@ -343,6 +347,7 @@ impl SurfaceProbePresenter {
             texture_bind: None,
             device_limits: negotiated.limits,
             gpu_time: negotiated.gpu_time,
+            size_mismatch: SizeMismatchWait::default(),
         })
     }
 
@@ -547,6 +552,15 @@ impl SurfaceProbePresenter {
         // DOM CAD rect). Reject it explicitly instead of presenting a distorted
         // frame.
         //
+        // A disagreement is not necessarily a defect: the texture size is
+        // DOM-derived and rounded while the surface size is allocation-derived
+        // and integral, so a mid-resize tick (or a fractional DOM rect at
+        // `scale >= 2`) can disagree for a frame or two. The wait tolerates the
+        // first `SIZE_MISMATCH_WAIT_TICKS - 1` consecutive disagreements, reported
+        // as `TextureNotReady` (the caller waits, exactly like the "no frame"
+        // path); the disagreement that reaches the limit is the explicit error
+        // below. The texture is never presented either way.
+        //
         // Do NOT "fix" this by rendering the texture at the surface size: that
         // keeps the image square but misaligns every pointer event, which maps
         // through the DOM CAD rect, not the native surface. The correct remedy
@@ -554,12 +568,18 @@ impl SurfaceProbePresenter {
         // layout does that); this guard only turns a residual disagreement into
         // an explicit error rather than a silent stretch.
         if key.size != self.size {
-            return Err(ProbeError::TextureInvalid(format!(
+            let message = format!(
                 "native texture {}x{} does not match the {}x{} surface; refusing to stretch it \
                  (the native drawing area must match the DOM CAD rect)",
                 key.size.0, key.size.1, self.size.0, self.size.1
-            )));
+            );
+            return Err(if self.size_mismatch.record_mismatch() {
+                ProbeError::TextureNotReady(message)
+            } else {
+                ProbeError::TextureInvalid(message)
+            });
         }
+        self.size_mismatch.record_match();
         let mut timings = ProbeStageTimings::default();
 
         let stage = std::time::Instant::now();

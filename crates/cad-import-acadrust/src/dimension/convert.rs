@@ -451,8 +451,13 @@ fn dimension_definition(d: &Dimension) -> Option<DimensionDefinition> {
         Dimension::Diameter(dd) => DimensionDefinition {
             kind: DimensionKind::Diameter,
             points: DimensionPoints::Radial {
-                center: p3(dd.angle_vertex),
-                point_on_arc: p3(dd.definition_point),
+                // ADR 0017 A.3 group order: acadrust's reader fills
+                // `definition_point` from group 10 (the chord point's
+                // **opposite**) and `angle_vertex` from group 15 (the first
+                // chord point), so the domain's group-10 slot (`center`) takes
+                // `definition_point` and `point_on_arc` takes `angle_vertex`.
+                center: p3(dd.definition_point),
+                point_on_arc: p3(dd.angle_vertex),
                 leader_length: dd.leader_length,
             },
             text_middle,

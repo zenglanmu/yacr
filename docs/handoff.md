@@ -1,3 +1,20 @@
+## P5 阶段关闭（Oracle 门禁，2026-10-20）
+
+- **门禁**：`closed-with-fixes` → F1/F2/F3 修复 + F4 文档更正后 **P5 CLOSED**。门禁自跑受影响套件与全部卫生门禁，
+  并程序比对 `COMMAND_TABLE`(67) == `EXPECTED_COMMAND_COUNT`(67)。
+- **F1（阻塞）**：Diameter 组 10/15 曾写反（自洽但非约定，且**无测试**能抓到）⇒ 改代码双向对齐 + 组值断言 +
+  导入方向测试；**回退验证**证明新测试在旧代码上失败。
+- **F2**：presenter 尺寸守卫改为**有界等待**（2 tick 后仍不符才报错），绝不拉伸；**残留**：tick 的布局守卫
+  仍可能在中途 resize 上报错（已记录，未扩宽）。
+- **F3**：`ensure_fonts_for_text` 移到 `execute_engine_request`（所有编辑请求的漏斗），非 confirm 提交也装引擎；
+  未覆盖：宿主 Open/New/Plot/Save 漏斗与直接用 `cad-app` 的场景。
+- **F4**：四处文档腐化已就地更正（P5e NOT RUN、P5a 偏离 ⑪、`P5c/P5d`→`P5d`、`ALL` 28→30）；门禁数字标注时点。
+- **门禁（编排者复跑）**：受影响 crate **1885 通过 / 0 失败** + `cad-render-wgpu` **202**；workspace check(all-targets)、
+  clippy(`-D warnings`)、fmt、architecture(27)、i18n(**517**)、file-size(**689**)、UI **154/154**。
+  **NOT RUN**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；第三方读取器验证。
+- **带入 P6 的显式债务**：无真正创建预览（React 宿主无法修，ADR-0002）；样式快照不追溯；`DIMPOST="."` 渲染为
+  `42.5.`；DIMSD 断口为文字中点近似；F2 布局守卫残留；F3 未覆盖路径。
+
 # 后续 agent 接手入口
 
 > **当前状态横幅（2026-10-16）**
@@ -298,7 +315,8 @@ B.2(a) 全集 + 合成/格式化消费 + `transformed` 缩放快照）、`crates
   （**比 P5a 前更严**）；⑧ picture 分支 measurement/文字**冻结**（残差：均匀缩放后画面数字不匹配被缩放几何）；
   ⑨ ordinate 改**基准相对**（基准非原点者渲染**正确性修复**；导入侧**从不做 datum 重基**，旧值是绝对值；
   取**投影绝对值**——带符号 ordinate 坐标**未建模**，代价已声明）；⑩ 导入摊平加**块栈**护栏（此前无此递归，故无护栏）；
-  ⑪ 样式只带**合成消费子集**（其余 (a)+(b) 是 P5b；DIMTAD 2/3/4 导入塌缩为 1）；⑫ 组 70 的 32 位不写、
+  ⑪ 样式只带**合成消费子集**（其余 (a)+(b) 是 P5b；DIMTAD 2/3/4 导入塌缩为 1——**此句已被 P5b 作废**：
+  P5b 真正实现了 DIMTAD 2/3/4，见下方 P5b 条目与 ADR P5b 偏离 13）；⑫ 组 70 的 32 位不写、
   0x80 从不置位（导入曾置位者丢失，**声明丢弃**）；⑬ 组 210 不写（−Z 角度标注仍按源法向渲染，但导出丢 210）；
   ⑭ `DIMLFAC ≠ 1` 测试**已落地**；只有 `DIMLUNIT≠2` 诚实测试**结构性推迟 P5b**（`DimensionStyleValues`
   根本没有该字段）；⑮ **A.3 修订项**：`DimensionDefinition` 新增 `normal` 字段（A.3 点表原无此项，

@@ -260,8 +260,17 @@ fn build_dimension(definition: &DimensionDefinition, base: DimensionBase) -> Cad
             },
         ) => Dimension::Diameter(DimensionDiameter {
             base,
-            angle_vertex: v3(*center),
-            definition_point: v3(*point_on_arc),
+            // ADR 0017 A.3 group order: for a Diameter the radial `center` slot
+            // holds the **opposite chord point** (group 10) and `point_on_arc`
+            // the first chord point (group 15). acadrust's writer maps
+            // `definition_point` -> group 10 and `angle_vertex` -> group 15
+            // (`write_dimension_diameter`), and its reader documents the same
+            // convention ("Group 15 is the first chord; group 10 is its
+            // opposite"), so the opposite point is written through
+            // `definition_point`. The radial synthesis is symmetric in the two
+            // points, so this group order does not change the display.
+            angle_vertex: v3(*point_on_arc),
+            definition_point: v3(*center),
             leader_length: *leader_length,
         }),
         (

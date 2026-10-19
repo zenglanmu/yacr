@@ -20,6 +20,7 @@ use super::{export, ExportRequest};
 use crate::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 mod dimension;
+mod dimension_radial;
 mod entities;
 mod report_limits;
 mod writer;

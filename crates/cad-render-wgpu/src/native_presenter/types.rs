@@ -92,6 +92,50 @@ pub struct NativeTextureKey {
     pub size: (u32, u32),
 }
 
+/// How many consecutive native-texture/surface size disagreements are treated
+/// as a transient "not ready yet" before the guard surfaces the explicit error.
+///
+/// Three ticks is ~50 ms at 60 Hz: longer than a mid-resize frame or a
+/// one-pixel DOM rounding transient, short enough that a genuine drawing-area
+/// mismatch still fails loudly within a few frames.
+pub const SIZE_MISMATCH_WAIT_TICKS: u32 = 3;
+
+/// Bounded wait for a native-texture/surface size disagreement.
+///
+/// The blit stretches the texture across the whole surface (no aspect
+/// correction) and pointer input maps through the DOM CAD rect, so a
+/// disagreeing texture must never be presented. It can still be a **transient**:
+/// a mid-resize frame, or a fractional DOM rect whose rounding lands one pixel
+/// off the integer allocation-derived surface size (more likely at `scale >= 2`).
+/// This latch keeps the "never stretch" rule and turns those first few ticks into
+/// a wait ([`ProbeError::TextureNotReady`]) instead of a user-visible failure: it
+/// waits the first `SIZE_MISMATCH_WAIT_TICKS - 1` consecutive disagreements, and
+/// only the disagreement that reaches the limit becomes the explicit
+/// [`ProbeError::TextureInvalid`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct SizeMismatchWait {
+    consecutive: u32,
+}
+
+impl SizeMismatchWait {
+    /// Record one disagreement: `true` means "wait this frame", `false` means the
+    /// disagreement has persisted and must be surfaced as an explicit error.
+    pub fn record_mismatch(&mut self) -> bool {
+        self.consecutive = self.consecutive.saturating_add(1);
+        self.consecutive < SIZE_MISMATCH_WAIT_TICKS
+    }
+
+    /// Record a matching presentation: the disagreement did not persist.
+    pub fn record_match(&mut self) {
+        self.consecutive = 0;
+    }
+
+    /// Consecutive disagreements recorded so far.
+    pub fn consecutive(&self) -> u32 {
+        self.consecutive
+    }
+}
+
 /// Validate a texture key against the adapter's maximum texture dimension.
 pub(crate) fn validate_texture_key(
     key: &NativeTextureKey,
@@ -165,6 +209,14 @@ pub enum ProbeError {
     Stopped,
     /// A native texture passed to `present_texture` failed validation.
     TextureInvalid(String),
+    /// The native texture's size disagrees with the surface's **for a bounded
+    /// number of consecutive frames**: a not-ready-yet transient (a mid-resize
+    /// tick, or a DOM-derived size whose rounding is one pixel off) rather than
+    /// the persistent defect [`ProbeError::TextureInvalid`] reports. The texture
+    /// is still never presented (no stretch); the caller waits, exactly like the
+    /// "no frame" path. If the disagreement persists, the same guard becomes an
+    /// explicit [`ProbeError::TextureInvalid`].
+    TextureNotReady(String),
 }
 
 impl std::fmt::Display for ProbeError {
@@ -202,6 +254,9 @@ impl std::fmt::Display for ProbeError {
             ProbeError::Stopped => write!(f, "probe presenter is stopped"),
             ProbeError::TextureInvalid(message) => {
                 write!(f, "native texture rejected: {message}")
+            }
+            ProbeError::TextureNotReady(message) => {
+                write!(f, "native texture not ready yet: {message}")
             }
         }
     }

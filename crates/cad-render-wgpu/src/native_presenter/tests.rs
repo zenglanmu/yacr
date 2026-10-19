@@ -316,3 +316,63 @@ fn sanitize_marker_wraps_into_unit_range() {
     assert_eq!(sanitize_marker(-0.25), Ok(0.75));
     assert_eq!(sanitize_marker(0.0), Ok(0.0));
 }
+
+/// P5 gate F2 (transient): a native-texture/surface size disagreement that
+/// clears within a couple of ticks is a wait, not an error — so a mid-resize
+/// frame (or a DOM-derived size rounded one pixel off the integer allocation)
+/// never surfaces a user-visible "present failed".
+#[test]
+fn a_transient_size_disagreement_waits_instead_of_erroring() {
+    let mut wait = SizeMismatchWait::default();
+    assert!(
+        wait.record_mismatch(),
+        "the first disagreeing tick must wait (not ready yet)"
+    );
+    assert_eq!(wait.consecutive(), 1);
+    assert!(
+        wait.record_mismatch(),
+        "the second disagreeing tick must still wait"
+    );
+    assert_eq!(wait.consecutive(), 2);
+
+    // The resize settles: the next present matches, so the wait is over and a
+    // later transient starts its own bounded budget.
+    wait.record_match();
+    assert_eq!(wait.consecutive(), 0);
+    assert!(
+        wait.record_mismatch(),
+        "a fresh transient after a matching present must wait again"
+    );
+}
+
+/// P5 gate F2 (persistent): a disagreement that does not clear stops being a
+/// wait; the guard surfaces the explicit error it exists for, so a genuine
+/// drawing-area/surface mismatch still fails loudly.
+#[test]
+fn a_persistent_size_disagreement_becomes_an_explicit_error() {
+    let mut wait = SizeMismatchWait::default();
+    let mut waited = 0;
+    let mut errored = false;
+    for _ in 0..SIZE_MISMATCH_WAIT_TICKS {
+        if wait.record_mismatch() {
+            waited += 1;
+        } else {
+            errored = true;
+        }
+    }
+    assert_eq!(
+        waited,
+        SIZE_MISMATCH_WAIT_TICKS - 1,
+        "the wait is bounded (it does not swallow a persistent mismatch)"
+    );
+    assert!(
+        errored,
+        "the persistent mismatch is an explicit error on the {}th tick",
+        SIZE_MISMATCH_WAIT_TICKS
+    );
+    assert!(
+        !wait.record_mismatch(),
+        "it stays an error while it persists"
+    );
+    assert_eq!(wait.consecutive(), SIZE_MISMATCH_WAIT_TICKS + 1);
+}
