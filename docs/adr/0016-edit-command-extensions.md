@@ -14,7 +14,8 @@
 
 - **P4a 完成（2026-10-19，提交 c739558）**：类型化参数通道落地（`ToolValue::{Number,Flag}` + 12 个参数成员 +
   单一请求 `SetToolParameter`），**`SetPolygonSides` 及其 IPC/队列/注册全部删除**（每参数仅一个线上入口）；
-  各参数自带范围与显式拒绝（边数整型 3–1024、半径/距离 ≥0、计数 ≥1、填充角非零且非整圈、Flag 布尔）；
+  各参数自带范围与显式拒绝（边数整型 3–1024、半径/距离 ≥0、计数 ≥1、**填充角 `0 < |angle| ≤ 360`**（P4c 已更正，
+  见下）、Flag 布尔）；
   `params.sides` 线上字段**冻结不变**；React 侧边数控件泛化为"活动工具参数组"（数值步进 + 布尔开关），
   并加测试断言 `cad_set_polygon_sides` 在 UI 源码中彻底消失。
 - **P4b 完成（2026-10-19）**：`CHAMFER`/`FILLET`（两条独立直线）落地，含几何前置：
@@ -42,7 +43,21 @@
   复合进去）、二次 EXPLODE 才展开；导出层的循环栈/深度上限**整段删除**（一层走查下不可达，保留即等于假装加固），
   ADR 的"与导出层的关系"也改为明确写"导出=摊平到叶子、EXPLODE=一次一层，**刻意不同**；要摊平是另一个命令"。
   另将 `polyline_plane_normal` 升 `pub`（EXPLODE 需在与 tessellator 同一平面内还原 bulge 弧，避免重推导 Newell 法向）。
-- **待办**：P4 阶段门禁（Oracle）；真机证据（`ARRAYRECT`/`ARRAYPOLAR`/`ALIGN`/`STRETCH`/`EXPLODE` 本轮正在采集）。
+- **P4 阶段门禁（Oracle，2026-10-19）= ACCEPT-WITH-FIXES（无阻塞）**：门禁自行重跑门禁与测试并逐条核对两轮真机日志，
+  数字全部吻合；要求修的是**一条未声明的规则 + 文档精度 + 测试覆盖缺口**：① 极坐标角度步长 `i·fillAngle/items`
+  此前**未声明**（且与 AutoCAD 的部分填充规则不同）⇒ 已写入决策 D、能力表并加测试；② 实施状态两行陈旧（证据
+  已落地、P4a 的填充角简写为**修正前**规则）⇒ 已改；③ 两处证据表述超出工件（像素判据**未落盘**、FILLET 半径
+  7.5% 差距不得称"相符"）⇒ 已收紧；④ `SessionState::set_polygon_sides` 作为**薄委托**保留（见下）⇒ 已记录；
+  ⑤ 若干卫生项（CHAMFER 行补图层规则、`polyline_plane_normal` 的"单一实现"限定为**新消费者**、STRETCH 的
+  `validate_branch` 为**文档级过严拒绝**）⇒ 已记录。门禁另点名的四条补测见下。
+- **保留的薄委托**：`SessionState::set_polygon_sides` 仍在，但它是 `set_tool_parameter` 的**单行委托**（不是第二处
+  校验/存储真相；仅测试调用者使用）。线上入口（请求/IPC/队列）确已全部删除，UI 侧有测试断言旧 IPC 名不存在。
+- **STRETCH 的过严拒绝（已记录）**：`validate_branch` 预检会在**整篇文档**内遇到不可枚举的树时拒绝命令，
+  而不只是窗口内的实体——这是**刻意的保守过严**（宁可拒绝也不静默漏改），比决策 E 写的拒绝面更严。
+- **`polyline_plane_normal` 的"单一实现"范围**：升 `pub` 后它是**新消费者**（EXPLODE）的唯一实现，
+  但 `cad-spatial/src/pick/bounds.rs` 与 `cad-measure/src/snap/generate.rs` 里**既有**的同义实现仍保留（未在本轮收敛）。
+- **待办**：P5（DIM 族）及以后见排期；真机证据已落地（提交 `42dccd9`，运行目录 `/tmp/opencode/yacr-evidence-20261019T051921Z`
+  与 `…T033454Z`）。
 
 ## 背景（勘察事实，2026-10-19；已按 SG-P4 逐条核对更正）
 
@@ -146,7 +161,11 @@ P3 的"只做 `SetPolygonSides`、不建通用总线"以"单一消费者"为前�
   **副本数 = 项数 − 1**（同理：`items` 是含原对象的**总数**，原对象位于其自身方向、不额外复制）；
   **放置数学（须显式声明）**：`rotate = true` ⇒ 每个副本绕中心旋转（顶点整体旋转）；
   `rotate = false` ⇒ **仅平移**到各角度位置、不旋转自身（"基点"取选择包围盒左下角）。
-  该规则**AutoCAD 未查证**，标注为我们的选择并加测试。
+  **角度步长 = `i·fillAngle/items`**（**我们的规则**）。**刻意偏离并标注**：AutoCAD 对**部分填充**是让首尾项
+  跨满填充角（`fillAngle/(items−1)`），故 `fill=180, items=3` 时 AutoCAD 为 0°/90°/180° 而**我们为 0°/60°/120°**；
+  整圈（`fill=360`）两者一致。该差异**AutoCAD 未查证到明文**，属我们的选择，能力表标注并由测试钉住
+  （`array_polar_partial_fill_angle_pins_the_declared_step_rule`）。
+  该规则整体**AutoCAD 未查证**，标注为我们的选择并加测试。
 - **存储**：**独立副本实体**，经既有 N 副本一次事务路径（`copy_entities`/`mirror_selection` 形状）。
   **有意偏离**：AutoCAD 默认**关联**（`ARRAYASSOCIATIVITY`：阵列是"类似块的单一对象"、可 grips/`ARRAYEDIT` 编辑、
   可 `EXPLODE` 打散）；本栈**没有任何关联对象/grip 机制**，发明它会把 P4 整个拖大 ⇒ 我们存副本，

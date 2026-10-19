@@ -515,6 +515,100 @@ fn array_polar_with_item_rotation_rotates_each_copy_about_the_centre() {
     );
 }
 
+/// Our declared, **unverified** ARRAYPOLAR step rule (ADR 0016 decision D): item
+/// `i` (`i` in `0..items`) sits at `i * fillAngle / items` from the base point's
+/// direction — the fill is divided into `items` **steps**, not `items - 1`.
+///
+/// This **diverges** from AutoCAD, which spans a partial fill between the first
+/// and last item (`fill / (items - 1)`); AutoCAD's exact rule is unverified, so
+/// the divergence is a **declared choice**, not an oversight. It is pinned here
+/// numerically so a reader sees the choice.
+#[test]
+fn array_polar_partial_fill_angle_pins_the_declared_step_rule() {
+    // Base point = bounding-box lower-left (0,0); centre (-10,0) => base direction
+    // +x, radius 10. The copies are translate-only (rotateItems defaults off).
+    //
+    // items = 3, fillAngle = 180:
+    //   ours    (180 / 3): offsets 0°, 60°, 120°
+    //   AutoCAD (180 / 2): offsets 0°, 90°, 180°
+    let (mut app, mut session) = one_line_app();
+    set_number(&mut session, ToolParameter::ArrayItems, 3.0);
+    set_number(&mut session, ToolParameter::ArrayFillAngle, 180.0);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::ArrayPolar,
+        array_polar_payload(vec![ref_of(1)], point(-10.0, 0.0)),
+    )
+    .unwrap();
+
+    // A translate-only copy at `degrees` from +x: its start is the target point and
+    // its end is the same shifted by the source's (2,0) extent.
+    let copy = |degrees: f64| {
+        let angle = degrees.to_radians();
+        let start = point(-10.0 + 10.0 * angle.cos(), 10.0 * angle.sin());
+        line_at(start, point(start.x + 2.0, start.y))
+    };
+    let expected = {
+        let mut lines = vec![
+            line_at(point(0.0, 0.0), point(2.0, 0.0)), // retained source (item 0)
+            copy(60.0),                                // item 1: 1 * 180 / 3
+            copy(120.0),                               // item 2: 2 * 180 / 3
+        ];
+        lines.sort_by(|a, b| {
+            (a.0.x, a.0.y, a.1.x, a.1.y)
+                .partial_cmp(&(b.0.x, b.0.y, b.1.x, b.1.y))
+                .unwrap()
+        });
+        lines
+    };
+    assert!(
+        lines_near(&all_lines(&app), &expected),
+        "our rule divides the fill by items (0°/60°/120°): {:?}",
+        all_lines(&app)
+    );
+    // The divergence, made explicit: no copy sits at 90° (AutoCAD's span rule would
+    // place item 1 at (-10, 10)).
+    assert!(
+        !all_lines(&app)
+            .iter()
+            .any(|(s, _)| (s.x + 10.0).abs() < 1e-9 && (s.y - 10.0).abs() < 1e-9),
+        "no copy at 90°: the fill is divided by items, not items - 1"
+    );
+
+    // Full-circle case (the declared default): fillAngle = 360, items = 4 =>
+    // 0°, 90°, 180°, 270° (360 / 4).
+    let (mut app, mut session) = one_line_app();
+    set_number(&mut session, ToolParameter::ArrayItems, 4.0);
+    set_number(&mut session, ToolParameter::ArrayFillAngle, 360.0);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::ArrayPolar,
+        array_polar_payload(vec![ref_of(1)], point(-10.0, 0.0)),
+    )
+    .unwrap();
+    let expected = {
+        let mut lines = vec![
+            line_at(point(0.0, 0.0), point(2.0, 0.0)), // item 0
+            copy(90.0),
+            copy(180.0),
+            copy(270.0),
+        ];
+        lines.sort_by(|a, b| {
+            (a.0.x, a.0.y, a.1.x, a.1.y)
+                .partial_cmp(&(b.0.x, b.0.y, b.1.x, b.1.y))
+                .unwrap()
+        });
+        lines
+    };
+    assert!(
+        lines_near(&all_lines(&app), &expected),
+        "full circle: 0°/90°/180°/270° (360/4): {:?}",
+        all_lines(&app)
+    );
+}
+
 #[test]
 fn array_polar_single_item_produces_no_copies_with_an_explicit_diagnostic() {
     // `items` counts the source object, so a 1-item array inserts nothing and

@@ -322,6 +322,83 @@ fn fillet_picks_choose_the_corner_and_the_arc_centre_lies_on_the_pick_side() {
     }
 }
 
+/// The pick-side rule (ADR 0016 decision B): each pick selects the arm of its
+/// line nearest the pick, and the tangent-arc centre lies in the wedge on that
+/// side. The existing coverage exercises two quadrant combinations; this pins all
+/// four sign combinations of (first pick, second pick) against a fixed crossing
+/// pair.
+#[test]
+fn fillet_pick_side_matrix_pins_the_centre_and_trim_points_in_all_four_quadrants() {
+    // Fixed crossing pair: L1 the full x-axis, L2 the full y-axis, corner (0,0).
+    // R = 2 and the arms are perpendicular, so the tangent distance is
+    // R/tan(45°) = 2: the trim points are (sign(pick1.x)*2, 0) on L1 and
+    // (0, sign(pick2.y)*2) on L2, and the centre is (sign1*2, sign2*2).
+    let cases: [(&str, Point3, Point3, Point3); 4] = [
+        ("+x / +y", point(8.0, 0.0), point(0.0, 8.0), point(2.0, 2.0)),
+        (
+            "-x / +y",
+            point(-8.0, 0.0),
+            point(0.0, 8.0),
+            point(-2.0, 2.0),
+        ),
+        (
+            "-x / -y",
+            point(-8.0, 0.0),
+            point(0.0, -8.0),
+            point(-2.0, -2.0),
+        ),
+        (
+            "+x / -y",
+            point(8.0, 0.0),
+            point(0.0, -8.0),
+            point(2.0, -2.0),
+        ),
+    ];
+    for (label, pick1, pick2, centre) in cases {
+        let (mut app, mut session) = two_line_app(
+            (point(-10.0, 0.0), point(10.0, 0.0)),
+            (point(0.0, -10.0), point(0.0, 10.0)),
+        );
+        set_number(&mut session, ToolParameter::FilletRadius, 2.0);
+        let outcome = execute(
+            &mut app,
+            &mut session,
+            CommandId::FilletLines,
+            fillet(1, 2, pick1, pick2),
+        )
+        .unwrap_or_else(|error| panic!("{label}: fillet refused: {error}"));
+
+        let sign1 = pick1.x.signum();
+        let sign2 = pick2.y.signum();
+        assert!(
+            line_is(&app, 1, point(sign1 * 2.0, 0.0), point(sign1 * 10.0, 0.0)),
+            "{label}: L1 trim: {:?}",
+            line_ends(&app, 1)
+        );
+        assert!(
+            line_is(&app, 2, point(0.0, sign2 * 2.0), point(0.0, sign2 * 10.0)),
+            "{label}: L2 trim: {:?}",
+            line_ends(&app, 2)
+        );
+        let arc_id = outcome.objects[2];
+        match &app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(arc_id.0))
+            .unwrap()
+            .geometry
+        {
+            SemanticGeometry::Arc { center, radius, .. } => {
+                assert!(
+                    (center.x - centre.x).abs() < 1e-9 && (center.y - centre.y).abs() < 1e-9,
+                    "{label}: arc centre {center:?} must lie in the picked wedge"
+                );
+                assert!((radius - 2.0).abs() < 1e-9, "{label}: radius {radius}");
+            }
+            other => panic!("{label}: expected the tangent ARC, got {other:?}"),
+        }
+    }
+}
+
 #[test]
 fn fillet_zero_radius_trims_met_lines_and_extends_unmet_lines_to_the_corner() {
     // Met lines (both reach the corner): trimmed to the corner.

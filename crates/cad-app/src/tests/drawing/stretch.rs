@@ -333,6 +333,82 @@ fn stretch_moves_a_bulge_polyline_vertex_and_preserves_the_bulge_value() {
     assert!(!closed);
 }
 
+/// The STRETCH "fully enclosed" rule is **two-way** (ADR 0016 decision E): a
+/// straight LINE or a straight-segment LWPOLYLINE is fully enclosed iff every
+/// vertex is inside the window, but a polyline **with a bulge segment** uses the
+/// conservative world AABB (which includes the arc's sagitta). A bulge arc can
+/// bow out of the window while both its endpoints are inside; that boundary case
+/// is our declared (conservative) choice.
+///
+/// This test pins the observable consequence: a third vertex just outside the
+/// window stays put when the entity is only partially enclosed (per-vertex
+/// stretch) and moves when the entity is fully enclosed (whole-entity move).
+///
+/// **Observability note**: when *every* vertex is inside the window but the arc
+/// bows outside, the conservative AABB classifies the entity as partial whereas
+/// the straight-polyline vertex rule would call it fully enclosed — but because
+/// every vertex is inside, per-vertex stretch and whole-entity move are
+/// numerically identical for a translation, so that specific divergence is not
+/// observable in the stored coordinates. The cases below therefore keep an
+/// out-of-window vertex so partial vs full is visible.
+#[test]
+fn stretch_bulge_polyline_conservative_bounds_rule_pins_partial_and_full() {
+    // Polyline (0,0)-(2,0)-(5,0) with bulge 1 on the first segment: the
+    // (0,0)-(2,0) chord bulges to y = -1 (sagitta |1| * 2 / 2 = 1), so the
+    // conservative AABB is x in [0, 5], y in [-1, 0].
+    let polyline = || SemanticGeometry::Polyline {
+        points: vec![point(0.0, 0.0), point(2.0, 0.0), point(5.0, 0.0)],
+        bulges: vec![1.0, 0.0, 0.0],
+        closed: false,
+    };
+
+    // (a) Both bulge endpoints are inside the window, but the arc bows outside it
+    // (and the third vertex is outside too): the conservative AABB is not
+    // contained => **partial** => per-vertex. Only the two in-window vertices move;
+    // the bulge value is preserved.
+    let (mut app, mut session) = build(vec![ent(1, polyline(), 0)], Vec::new());
+    let outcome = stretch(
+        &mut app,
+        &mut session,
+        window(point(-0.5, -0.1), point(3.0, 0.5)),
+        point(0.0, 0.0),
+        point(0.0, 3.0),
+    )
+    .unwrap();
+    assert!(
+        outcome.changes.is_some(),
+        "a partial stretch still changes the polyline"
+    );
+    let (points, bulges, closed) = polyline_of(&app, 1);
+    assert_eq!(
+        points,
+        vec![point(0.0, 3.0), point(2.0, 3.0), point(5.0, 0.0)],
+        "partial: only the in-window vertices move; the outside vertex is put"
+    );
+    assert_eq!(bulges, vec![1.0, 0.0, 0.0], "the bulge value is preserved");
+    assert!(!closed);
+
+    // (b) The converse: the window contains every vertex AND the arc's bulge
+    // (AABB y in [-1, 0]), so the entity is **fully enclosed** => whole move:
+    // every vertex, including the one left put in (a), moves.
+    let (mut app, mut session) = build(vec![ent(1, polyline(), 0)], Vec::new());
+    stretch(
+        &mut app,
+        &mut session,
+        window(point(-1.0, -2.0), point(6.0, 1.0)),
+        point(0.0, 0.0),
+        point(0.0, 3.0),
+    )
+    .unwrap();
+    let (points, bulges, _) = polyline_of(&app, 1);
+    assert_eq!(
+        points,
+        vec![point(0.0, 3.0), point(2.0, 3.0), point(5.0, 3.0)],
+        "fully enclosed: the whole entity is moved"
+    );
+    assert_eq!(bulges, vec![1.0, 0.0, 0.0], "the bulge value is preserved");
+}
+
 #[test]
 fn stretch_fully_enclosed_circle_is_moved_and_partially_enclosed_circle_is_unchanged() {
     let circle = || SemanticGeometry::Circle {
