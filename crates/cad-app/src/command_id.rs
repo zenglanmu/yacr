@@ -156,6 +156,18 @@ pub enum CommandId {
     /// is our declared (unverified) choice. One transaction and one undo step;
     /// associativity is **NOT IMPLEMENTED**. Work-only.
     ArrayPolar,
+    /// ALIGN the current selection from two point pairs (ADR 0016 decision F).
+    /// Payload is `Align { refs, source1, dest1, source2, dest2 }`; the
+    /// `AlignScale` flag is the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::AlignScale`]). The transform translates
+    /// `source1 → dest1`, rotates by the angle between the two source/destination
+    /// directions, and (only when the flag is true) applies a uniform scale of
+    /// `|dest2 − dest1| / |source2 − source1|` about `source1`; it is applied to
+    /// the whole selection **in place** in one transaction / one undo step. A
+    /// non-finite point, a degenerate source or destination pair, an empty
+    /// selection or untransformable geometry is an explicit refusal that changes
+    /// nothing. Work-only.
+    AlignEntities,
     /// Delete every entity in the current selection in one transaction. An
     /// empty selection is an explicit refusal. Work-only.
     EraseEntities,
@@ -226,6 +238,7 @@ impl CommandId {
                 | Self::FilletLines
                 | Self::ArrayRectangular
                 | Self::ArrayPolar
+                | Self::AlignEntities
                 | Self::EraseEntities
                 | Self::CopyEntities
                 | Self::RotateEntities

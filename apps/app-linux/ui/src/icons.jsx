@@ -35,6 +35,7 @@ const P = {
   fillet: <><path d="M4 20V10" /><path d="M10 4h10" /><path d="M4 10a6 6 0 0 1 6-6" /></>,
   arrayrect: <><rect x="3.5" y="3.5" width="6" height="6" /><rect x="14.5" y="3.5" width="6" height="6" /><rect x="3.5" y="14.5" width="6" height="6" /><rect x="14.5" y="14.5" width="6" height="6" /></>,
   arraypolar: <><circle cx="12" cy="12" r="2" /><circle cx="12" cy="3.5" r="1.6" /><circle cx="19.4" cy="16" r="1.6" /><circle cx="4.6" cy="16" r="1.6" /><path d="M12 5.1V10M18 15.2l-4.4-1.7M6 15.2l4.4-1.7" /></>,
+  align: <><circle cx="4.5" cy="18" r="1.7" /><circle cx="10.5" cy="18" r="1.7" /><circle cx="13.5" cy="6" r="1.7" /><circle cx="19.5" cy="6" r="1.7" /><path d="M4.5 18 13.5 6M10.5 18 19.5 6" /></>,
   erase: <><path d="M9 20.5H6.9l-3.3-3.3a1.8 1.8 0 0 1 0-2.5l8.9-8.9a1.8 1.8 0 0 1 2.5 0l3.3 3.3a1.8 1.8 0 0 1 0 2.5L11.5 20.5z" /><path d="M7.2 13.8 12.2 18.8" /><path d="M4 20.5h16" /></>,
   distance: <><path d="M4 8v8M20 8v8M4 12h16" /><path d="M7 9 4 12l3 3M17 9l3 3-3 3" /></>,
   polyline: <><path d="M4 18 9 8l5 6 6-10" /><circle cx="4" cy="18" r="1.5" /><circle cx="9" cy="8" r="1.5" /><circle cx="20" cy="4" r="1.5" /></>,

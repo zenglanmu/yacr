@@ -295,6 +295,20 @@ pub enum DrawIntent {
     /// `center` is the one captured point; the item count, fill angle and
     /// rotate-items flag are the session typed channel, read by the command layer.
     ArrayPolar { center: Point3 },
+    /// ALIGN the current selection from two point pairs (ADR 0016 decision F).
+    ///
+    /// The four points are exactly the four clicks in AutoCAD's capture order
+    /// (`source1`, `dest1`, then `source2`, `dest2`); the `AlignScale` flag is the
+    /// session typed channel ([`ToolParameter::AlignScale`]) read by the command
+    /// layer, so it never rides the intent. The selection refs travel separately
+    /// (the caller supplies the snapshot), and the composed transform is applied
+    /// **in place** — no copies.
+    Align {
+        source1: Point3,
+        dest1: Point3,
+        source2: Point3,
+        dest2: Point3,
+    },
 }
 
 /// Drawing/editing capture state machine.
@@ -682,6 +696,17 @@ impl DrawTool {
             // count, fill angle and rotate-items flag are the session typed channel,
             // read by the command layer.
             DrawToolKind::ArrayPolar => DrawIntent::ArrayPolar { center: a },
+            // ALIGN: the four captured points in AutoCAD's order (source1, dest1,
+            // source2, dest2). The `AlignScale` flag is the session typed channel
+            // read by the command layer, so the intent stays the pure description
+            // of what the user clicked; the degeneracy refusals live in the command
+            // layer too (the transform is built there).
+            DrawToolKind::Align => DrawIntent::Align {
+                source1: self.points[0],
+                dest1: self.points[1],
+                source2: self.points[2],
+                dest2: self.points[3],
+            },
         })
     }
 }

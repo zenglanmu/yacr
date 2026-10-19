@@ -160,13 +160,13 @@ impl CadSelection {
 }
 
 /// The typed tool-parameter block of [`CadTool`] (ADR 0015 decision C, extended
-/// by ADR 0016 decision A/B/C).
+/// by ADR 0016 decisions A/B/C/D/F).
 ///
 /// A frozen frontend shape. Each field is `null` whenever the active tool does not
 /// own that parameter (and the whole `tool` is `null` when no tool is active), so a
 /// UI control's enablement can be derived from `tool.key` and never from a stale
 /// local value. The legacy `sides` field keeps its exact name and meaning; the
-/// FILLET/CHAMFER/ARRAY parameters are added alongside it.
+/// FILLET/CHAMFER/ARRAY/ALIGN parameters are added alongside it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadToolParams {
@@ -192,6 +192,8 @@ pub struct CadToolParams {
     pub array_fill_angle: Option<f64>,
     /// The ARRAYPOLAR rotate-items flag, or `null` for every other tool.
     pub array_rotate_items: Option<bool>,
+    /// The ALIGN scale flag, or `null` for every other tool.
+    pub align_scale: Option<bool>,
 }
 
 /// The active interactive tool, projected from `cad_app`'s real capture state.
@@ -400,6 +402,12 @@ pub(super) fn cad_tool(
                     ToolParameter::ArrayRotateItems,
                     preview.kind == DrawToolKind::ArrayPolar,
                 ),
+                // The ALIGN scale flag is present **only** while an ALIGN capture
+                // is active (ADR 0016 decision F); it defaults to false.
+                align_scale: flag(
+                    ToolParameter::AlignScale,
+                    preview.kind == DrawToolKind::Align,
+                ),
             },
         }),
         ToolSnapshot::Measuring(preview) => Some(CadTool {
@@ -421,6 +429,7 @@ pub(super) fn cad_tool(
                 array_items: None,
                 array_fill_angle: None,
                 array_rotate_items: None,
+                align_scale: None,
             },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,

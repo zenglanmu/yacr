@@ -331,6 +331,7 @@ impl SessionState {
             DrawToolKind::Fillet => CommandId::FilletLines,
             DrawToolKind::ArrayRect => CommandId::ArrayRectangular,
             DrawToolKind::ArrayPolar => CommandId::ArrayPolar,
+            DrawToolKind::Align => CommandId::AlignEntities,
         })?;
         let selection = self.selection.refs().to_vec();
         let tool = DrawTool::new(kind, selection.len());
@@ -577,10 +578,8 @@ fn authorizing_command(parameter: ToolParameter) -> CommandId {
         ToolParameter::ArrayItems
         | ToolParameter::ArrayFillAngle
         | ToolParameter::ArrayRotateItems => CommandId::ArrayPolar,
-        // ALIGN (P4d) is not implemented yet; `AlignScale` stays gated on an
-        // existing Work-only edit command so it is refused in Viewer exactly like
-        // the create commands. This is a documented placeholder for the future
-        // command, not a second authority.
-        ToolParameter::AlignScale => CommandId::MoveEntities,
+        // ALIGN (P4d): `AlignScale` is authorized against the ALIGN edit command,
+        // so a Viewer-mode set is refused exactly like the other edit parameters.
+        ToolParameter::AlignScale => CommandId::AlignEntities,
     }
 }

@@ -443,6 +443,21 @@ pub enum CommandPayload {
         refs: Vec<SelectionRef>,
         center: Point3,
     },
+    /// ALIGN the selected refs from two point pairs (ADR 0016 decision F).
+    ///
+    /// `refs` is the selection snapshot; the four points are the captured
+    /// `source1`/`dest1`/`source2`/`dest2` (AutoCAD's capture order). The
+    /// `AlignScale` flag is the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::AlignScale`]), read by the handler so
+    /// the session stays the single authority for it. The composed transform is
+    /// applied **in place** (no copies) in one transaction / one undo step.
+    Align {
+        refs: Vec<SelectionRef>,
+        source1: Point3,
+        dest1: Point3,
+        source2: Point3,
+        dest2: Point3,
+    },
     /// Set the session's active layer for new entities. Session state only.
     ActiveLayer(LayerId),
     /// A fully formed semantic geometry, used by `CreateLine` as the

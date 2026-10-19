@@ -190,6 +190,24 @@ impl HostController {
                     center,
                 },
             ),
+            // ALIGN: the selection snapshot plus the four captured points travel
+            // on the payload; the `AlignScale` flag is the session typed channel
+            // the command layer reads, so it never rides the payload.
+            DrawIntent::Align {
+                source1,
+                dest1,
+                source2,
+                dest2,
+            } => (
+                crate::CommandId::AlignEntities,
+                crate::CommandPayload::Align {
+                    refs: selection.to_vec(),
+                    source1,
+                    dest1,
+                    source2,
+                    dest2,
+                },
+            ),
         };
         Ok(Command {
             schema_version: 1,

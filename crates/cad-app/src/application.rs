@@ -239,6 +239,7 @@ impl Application {
             | CommandId::FilletLines
             | CommandId::ArrayRectangular
             | CommandId::ArrayPolar
+            | CommandId::AlignEntities
             | CommandId::EraseEntities
             | CommandId::CopyEntities
             | CommandId::RotateEntities

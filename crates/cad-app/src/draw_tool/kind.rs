@@ -243,13 +243,32 @@ pub enum DrawToolKind {
     /// `ARRAYEDIT` / grips, `Path` arrays, `Levels`, `Total` and angle-interval
     /// inputs, a configurable `MAXARRAY`, and 3D.
     ArrayPolar,
+    /// ALIGN: two pairs of points (`Exact(4)`) that move+rotate the selection
+    /// (ADR 0016 decision F).
+    ///
+    /// Capture order follows AutoCAD: the first **source** point, its
+    /// **destination**, then the second source point and its destination. The
+    /// transform translates `source1 → dest1`, rotates by the angle between the
+    /// two source/destination directions, and (only when the session
+    /// [`super::ToolParameter::AlignScale`] flag is true) applies a **uniform**
+    /// scale of `|dest2 − dest1| / |source2 − source1|` about `source1`. The
+    /// command layer builds and applies the composed transform to the whole
+    /// selection **in place** (no copies) in one transaction / one undo step; the
+    /// flag is the session typed channel, read by the command layer — never a
+    /// payload field.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): three-pair 3D alignment,
+    /// **non-uniform** scaling, and the one-pair "move only" case (its effect is
+    /// exactly MOVE, and the `PointArity` model cannot express AutoCAD's
+    /// even-point "2 or 4 points" prompt — see ADR 0016 decision F).
+    Align,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 21] = [
+    pub const ALL: [DrawToolKind; 22] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -271,6 +290,7 @@ impl DrawToolKind {
         DrawToolKind::Fillet,
         DrawToolKind::ArrayRect,
         DrawToolKind::ArrayPolar,
+        DrawToolKind::Align,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -297,6 +317,7 @@ impl DrawToolKind {
             Self::Fillet => "fillet",
             Self::ArrayRect => "arrayrect",
             Self::ArrayPolar => "arraypolar",
+            Self::Align => "align",
         }
     }
 
@@ -325,6 +346,7 @@ impl DrawToolKind {
             "fillet" => Some(Self::Fillet),
             "arrayrect" => Some(Self::ArrayRect),
             "arraypolar" => Some(Self::ArrayPolar),
+            "align" => Some(Self::Align),
             _ => None,
         }
     }
@@ -385,6 +407,11 @@ impl DrawToolKind {
             // label for chrome anyway.
             Self::ArrayRect => "ARRAYRECT",
             Self::ArrayPolar => "ARRAYPOLAR",
+            // ALIGN uses a locale-neutral ASCII fallback label, exactly like
+            // POINT/SPLINE/CHAMFER/FILLET/ARRAY*: the ADR fence forbids new CJK
+            // literals on the Rust side and the shell substitutes the catalog label
+            // for chrome anyway.
+            Self::Align => "ALIGN",
         }
     }
 
@@ -399,6 +426,9 @@ impl DrawToolKind {
             // Start, a point on the arc, end; two axis endpoints plus the
             // other-axis distance; or base, reference, target.
             Self::Arc | Self::Ellipse | Self::Scale => PointArity::Exact(3),
+            // ALIGN: the first source point, its destination, then the second
+            // source point and its destination (ADR 0016 decision F).
+            Self::Align => PointArity::Exact(4),
             // One side/distance point, one point placement, or the ARRAYPOLAR
             // centre.
             Self::Offset | Self::Point | Self::ArrayPolar => PointArity::Exact(1),
@@ -451,6 +481,7 @@ impl DrawToolKind {
                 | Self::Offset
                 | Self::ArrayRect
                 | Self::ArrayPolar
+                | Self::Align
         )
     }
 

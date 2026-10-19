@@ -270,6 +270,7 @@ fn line_and_opaque_app() -> Application {
     app
 }
 
+mod align;
 mod arc_extend;
 mod array;
 mod chamfer_fillet;
