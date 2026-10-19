@@ -22,6 +22,8 @@ impl Application {
             CommandId::ExtendEntity => self.extend_entity(command),
             CommandId::ChamferLines => self.chamfer_lines(session, command),
             CommandId::FilletLines => self.fillet_lines(session, command),
+            CommandId::ArrayRectangular => self.array_rect(session, command),
+            CommandId::ArrayPolar => self.array_polar(session, command),
             CommandId::EraseEntities => self.erase_entities(session, command),
             CommandId::CopyEntities => self.copy_entities(command),
             CommandId::RotateEntities => self.rotate_entities(command),

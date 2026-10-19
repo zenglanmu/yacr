@@ -148,6 +148,8 @@ export const COMMAND_CATALOG = Object.freeze([
   { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', group: 'modify' },
   { id: 'CHAMFER', labelKey: 'draw.kind.chamfer', icon: 'chamfer', group: 'modify' },
   { id: 'FILLET', labelKey: 'draw.kind.fillet', icon: 'fillet', group: 'modify' },
+  { id: 'ARRAYRECT', labelKey: 'draw.kind.arrayrect', icon: 'arrayrect', group: 'modify' },
+  { id: 'ARRAYPOLAR', labelKey: 'draw.kind.arraypolar', icon: 'arraypolar', group: 'modify' },
   { id: 'ERASE', labelKey: 'draw.kind.erase', icon: 'erase', group: 'modify' },
   { id: 'DIST', labelKey: 'measure.kind.distance', icon: 'distance', group: 'measure' },
   { id: 'MEASUREPOLYLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', group: 'measure' },

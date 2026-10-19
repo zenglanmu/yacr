@@ -329,6 +329,8 @@ impl SessionState {
             DrawToolKind::Offset => CommandId::OffsetEntity,
             DrawToolKind::Chamfer => CommandId::ChamferLines,
             DrawToolKind::Fillet => CommandId::FilletLines,
+            DrawToolKind::ArrayRect => CommandId::ArrayRectangular,
+            DrawToolKind::ArrayPolar => CommandId::ArrayPolar,
         })?;
         let selection = self.selection.refs().to_vec();
         let tool = DrawTool::new(kind, selection.len());
@@ -557,12 +559,10 @@ impl SessionState {
 ///
 /// `PolygonSides` keeps its original authorization (`CreatePolygon`) exactly as
 /// before the migration. `FilletRadius` and the two `ChamferDistance`s belong to
-/// the FILLET/CHAMFER edit commands (ADR 0016 decisions B/C), which now exist, so
-/// each parameter is authorized against its own command. The remaining parameters
-/// belong to ARRAY/ALIGN (P4c–P4d), which do not exist yet; until they land, the
-/// channel is gated on an existing Work-only edit command so every parameter is
-/// refused in Viewer exactly like the create commands. This is a documented
-/// placeholder for the future commands, not a second authority.
+/// the FILLET/CHAMFER edit commands (ADR 0016 decisions B/C); the array
+/// parameters belong to the ARRAYRECT/ARRAYPOLAR edit commands (ADR 0016 decision
+/// D). Each parameter is authorized against its own command, so a Viewer-mode set
+/// is refused exactly like the create commands.
 fn authorizing_command(parameter: ToolParameter) -> CommandId {
     match parameter {
         ToolParameter::PolygonSides => CommandId::CreatePolygon,
@@ -570,6 +570,17 @@ fn authorizing_command(parameter: ToolParameter) -> CommandId {
         ToolParameter::ChamferDistanceA | ToolParameter::ChamferDistanceB => {
             CommandId::ChamferLines
         }
-        _ => CommandId::MoveEntities,
+        ToolParameter::ArrayRows
+        | ToolParameter::ArrayColumns
+        | ToolParameter::ArrayRowSpacing
+        | ToolParameter::ArrayColumnSpacing => CommandId::ArrayRectangular,
+        ToolParameter::ArrayItems
+        | ToolParameter::ArrayFillAngle
+        | ToolParameter::ArrayRotateItems => CommandId::ArrayPolar,
+        // ALIGN (P4d) is not implemented yet; `AlignScale` stays gated on an
+        // existing Work-only edit command so it is refused in Viewer exactly like
+        // the create commands. This is a documented placeholder for the future
+        // command, not a second authority.
+        ToolParameter::AlignScale => CommandId::MoveEntities,
     }
 }

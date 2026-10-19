@@ -40,7 +40,10 @@ fn required_points_and_selection_are_explicit_per_kind() {
         let expected = match kind {
             DrawToolKind::Arc | DrawToolKind::Ellipse | DrawToolKind::Scale => 3,
             DrawToolKind::Spline => 4,
-            DrawToolKind::Offset | DrawToolKind::Point => 1,
+            DrawToolKind::Offset | DrawToolKind::Point | DrawToolKind::ArrayPolar => 1,
+            // ARRAYRECT captures no points: it is defined entirely by the session
+            // typed parameters plus the selection snapshot.
+            DrawToolKind::ArrayRect => 0,
             _ => 2,
         };
         assert_eq!(kind.required_points(), expected, "{kind:?}");
@@ -868,6 +871,7 @@ fn polygon_intent_carries_the_two_picks_exactly_and_is_ready_at_two() {
     assert_eq!(tool.preview().polygon_sides, None);
 }
 
+mod array;
 mod point_spline;
 
 #[test]

@@ -97,7 +97,13 @@ pub fn draw_preview_overlay(
         // CHAMFER/FILLET are entity picks with two raw pick points; the live
         // preview is the existing cursor/chain (no new overlay channel).
         | DrawToolKind::Chamfer
-        | DrawToolKind::Fillet => {
+        | DrawToolKind::Fillet
+        // ARRAYPOLAR captures one point (the centre); the live cursor is the
+        // existing chain. ARRAYRECT captures no points at all, so `preview_chain`
+        // yields nothing for it (no fabricated preview) — the array result depends
+        // on the session parameters plus the selection, not on the cursor.
+        | DrawToolKind::ArrayRect
+        | DrawToolKind::ArrayPolar => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }

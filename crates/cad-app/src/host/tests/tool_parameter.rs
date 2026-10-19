@@ -91,8 +91,16 @@ fn set_tool_parameter_lifecycle_and_validation_for_a_general_parameter() {
         .unwrap_err();
     assert!(matches!(error, CadError::InvalidInput(_)));
 
-    // The fill angle refuses 0 and a full turn (no implicit wrap).
-    for bad in [0.0, 360.0, -360.0] {
+    // The fill angle accepts 0 < |angle| <= 360 (so the full-circle default 360 is
+    // re-settable) and refuses 0 or anything beyond a single turn (no implicit
+    // wrap).
+    for good in [90.0, 360.0, -360.0] {
+        controller
+            .session
+            .set_tool_parameter(ToolParameter::ArrayFillAngle, ToolValue::Number(good))
+            .unwrap_or_else(|error| panic!("angle={good} refused: {error}"));
+    }
+    for bad in [0.0, 360.5, 720.0, -720.0] {
         let error = controller
             .session
             .set_tool_parameter(ToolParameter::ArrayFillAngle, ToolValue::Number(bad))

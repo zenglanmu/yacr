@@ -173,6 +173,23 @@ impl HostController {
                     pick_second,
                 })),
             ),
+            // ARRAYRECT/ARRAYPOLAR: the selection snapshot travels as the refs;
+            // the row/column/item parameters and the fill angle are the session
+            // typed channel the command layer reads, so they never ride the
+            // payload. ARRAYPOLAR additionally carries the one captured centre.
+            DrawIntent::ArrayRect => (
+                crate::CommandId::ArrayRectangular,
+                crate::CommandPayload::ArrayRect {
+                    refs: selection.to_vec(),
+                },
+            ),
+            DrawIntent::ArrayPolar { center } => (
+                crate::CommandId::ArrayPolar,
+                crate::CommandPayload::ArrayPolar {
+                    refs: selection.to_vec(),
+                    center,
+                },
+            ),
         };
         Ok(Command {
             schema_version: 1,

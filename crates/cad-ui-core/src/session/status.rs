@@ -166,7 +166,7 @@ impl CadSelection {
 /// own that parameter (and the whole `tool` is `null` when no tool is active), so a
 /// UI control's enablement can be derived from `tool.key` and never from a stale
 /// local value. The legacy `sides` field keeps its exact name and meaning; the
-/// FILLET/CHAMFER parameters are added alongside it.
+/// FILLET/CHAMFER/ARRAY parameters are added alongside it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadToolParams {
@@ -178,6 +178,20 @@ pub struct CadToolParams {
     pub chamfer_distance_a: Option<f64>,
     /// The CHAMFER second distance, or `null` for every other tool.
     pub chamfer_distance_b: Option<f64>,
+    /// The ARRAYRECT row count, or `null` for every other tool.
+    pub array_rows: Option<f64>,
+    /// The ARRAYRECT column count, or `null` for every other tool.
+    pub array_columns: Option<f64>,
+    /// The ARRAYRECT row spacing, or `null` for every other tool.
+    pub array_row_spacing: Option<f64>,
+    /// The ARRAYRECT column spacing, or `null` for every other tool.
+    pub array_column_spacing: Option<f64>,
+    /// The ARRAYPOLAR item count, or `null` for every other tool.
+    pub array_items: Option<f64>,
+    /// The ARRAYPOLAR fill angle (degrees), or `null` for every other tool.
+    pub array_fill_angle: Option<f64>,
+    /// The ARRAYPOLAR rotate-items flag, or `null` for every other tool.
+    pub array_rotate_items: Option<bool>,
 }
 
 /// The active interactive tool, projected from `cad_app`'s real capture state.
@@ -303,9 +317,10 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
 ///
 /// `session` is the authoritative session whose typed parameter store supplies the
 /// projected values (POLYGON's `sides`, FILLET's `filletRadius`, CHAMFER's
-/// `chamferDistanceA`/`B`); each is present **only** while its own tool is active,
-/// so a control's enablement is derived from `tool.key` and never from a stale
-/// local value. No value is fabricated for an inactive tool.
+/// `chamferDistanceA`/`B`, ARRAYRECT's four grid parameters, ARRAYPOLAR's item
+/// count / fill angle / rotate flag); each is present **only** while its own tool is
+/// active, so a control's enablement is derived from `tool.key` and never from a
+/// stale local value. No value is fabricated for an inactive tool.
 pub(super) fn cad_tool(
     snapshot: &ToolSnapshot,
     session: &cad_app::SessionState,
@@ -315,6 +330,11 @@ pub(super) fn cad_tool(
     let number = |parameter: ToolParameter, active: bool| {
         active
             .then(|| session.tool_parameter(parameter).number())
+            .flatten()
+    };
+    let flag = |parameter: ToolParameter, active: bool| {
+        active
+            .then(|| session.tool_parameter(parameter).flag())
             .flatten()
     };
     match snapshot {
@@ -348,6 +368,38 @@ pub(super) fn cad_tool(
                     ToolParameter::ChamferDistanceB,
                     preview.kind == DrawToolKind::Chamfer,
                 ),
+                // The four ARRAYRECT parameters are present **only** while an
+                // ARRAYRECT capture is active.
+                array_rows: number(
+                    ToolParameter::ArrayRows,
+                    preview.kind == DrawToolKind::ArrayRect,
+                ),
+                array_columns: number(
+                    ToolParameter::ArrayColumns,
+                    preview.kind == DrawToolKind::ArrayRect,
+                ),
+                array_row_spacing: number(
+                    ToolParameter::ArrayRowSpacing,
+                    preview.kind == DrawToolKind::ArrayRect,
+                ),
+                array_column_spacing: number(
+                    ToolParameter::ArrayColumnSpacing,
+                    preview.kind == DrawToolKind::ArrayRect,
+                ),
+                // The three ARRAYPOLAR parameters are present **only** while an
+                // ARRAYPOLAR capture is active.
+                array_items: number(
+                    ToolParameter::ArrayItems,
+                    preview.kind == DrawToolKind::ArrayPolar,
+                ),
+                array_fill_angle: number(
+                    ToolParameter::ArrayFillAngle,
+                    preview.kind == DrawToolKind::ArrayPolar,
+                ),
+                array_rotate_items: flag(
+                    ToolParameter::ArrayRotateItems,
+                    preview.kind == DrawToolKind::ArrayPolar,
+                ),
             },
         }),
         ToolSnapshot::Measuring(preview) => Some(CadTool {
@@ -362,6 +414,13 @@ pub(super) fn cad_tool(
                 fillet_radius: None,
                 chamfer_distance_a: None,
                 chamfer_distance_b: None,
+                array_rows: None,
+                array_columns: None,
+                array_row_spacing: None,
+                array_column_spacing: None,
+                array_items: None,
+                array_fill_angle: None,
+                array_rotate_items: None,
             },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,

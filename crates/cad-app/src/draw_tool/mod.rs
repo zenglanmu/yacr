@@ -282,6 +282,19 @@ pub enum DrawIntent {
         pick_first: Point3,
         pick_second: Point3,
     },
+    /// ARRAYRECT the current selection on a rectangular grid (ADR 0016 decision D).
+    ///
+    /// Carries no field: the grid is defined entirely by the session typed
+    /// parameters ([`ToolParameter::ArrayRows`] … `ArrayColumnSpacing`) and the
+    /// selection snapshot the caller supplies, so the intent stays the pure
+    /// description of what the user asked for (the source's bounding-box
+    /// lower-left base point is derived in the command layer).
+    ArrayRect,
+    /// ARRAYPOLAR the current selection around `center` (ADR 0016 decision D).
+    ///
+    /// `center` is the one captured point; the item count, fill angle and
+    /// rotate-items flag are the session typed channel, read by the command layer.
+    ArrayPolar { center: Point3 },
 }
 
 /// Drawing/editing capture state machine.
@@ -517,9 +530,17 @@ impl DrawTool {
                 self.picks.len()
             )));
         }
+        // ARRAYRECT captures no points: its grid is defined entirely by the typed
+        // session parameters plus the selection snapshot, so it is ready as soon as
+        // the selection is non-empty. It must return **before** the `points[0]`
+        // index below, which the zero-point arity model has nothing to supply.
+        if self.kind == DrawToolKind::ArrayRect {
+            return Ok(DrawIntent::ArrayRect);
+        }
         let a = self.points[0];
-        // One-point tools (OFFSET) never index a second point; `unwrap_or(a)` is a
-        // harmless placeholder only ever used when a kind's arm does not read `b`.
+        // One-point tools (OFFSET, ARRAYPOLAR) never index a second point;
+        // `unwrap_or(a)` is a harmless placeholder only ever used when a kind's arm
+        // does not read `b`.
         let b = self.points.get(1).copied().unwrap_or(a);
         Ok(match self.kind {
             DrawToolKind::Line => DrawIntent::Line { start: a, end: b },
@@ -654,6 +675,13 @@ impl DrawTool {
                 pick_first: a,
                 pick_second: b,
             },
+            // ARRAYRECT: handled by the early return above (zero captured points).
+            // The arm is unreachable here but keeps the match exhaustive over kinds.
+            DrawToolKind::ArrayRect => DrawIntent::ArrayRect,
+            // ARRAYPOLAR: the single captured point is the array centre; the item
+            // count, fill angle and rotate-items flag are the session typed channel,
+            // read by the command layer.
+            DrawToolKind::ArrayPolar => DrawIntent::ArrayPolar { center: a },
         })
     }
 }

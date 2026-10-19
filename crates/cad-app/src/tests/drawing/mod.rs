@@ -271,6 +271,7 @@ fn line_and_opaque_app() -> Application {
 }
 
 mod arc_extend;
+mod array;
 mod chamfer_fillet;
 mod clipboard;
 mod create_polyline;

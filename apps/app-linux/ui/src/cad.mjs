@@ -162,9 +162,10 @@ const integerInRange = (min, max) => value => Number.isSafeInteger(value) && val
 const integerAtLeast = min => value => Number.isSafeInteger(value) && value >= min;
 const finiteAtLeast = min => value => Number.isFinite(value) && value >= min;
 const finiteAny = () => value => Number.isFinite(value);
-// Finite, non-zero and not a full turn (no implicit wrap): 0 and ±360/±720/… are
-// refused, so a fill angle is always a partial, explicitly-bounded sweep.
-const partialTurn = () => value => Number.isFinite(value) && value !== 0 && value % 360 !== 0;
+// Finite, non-zero and within a single turn (0 < |angle| <= 360): 360/-360 (the
+// full-circle default) ARE offered targets, while 0 and anything beyond a turn
+// (±720, …) are refused — a fill angle is always an explicitly-bounded sweep.
+const partialTurn = () => value => Number.isFinite(value) && value !== 0 && Math.abs(value) <= 360;
 
 /**
  * The per-parameter control spec, mirrored from the frozen host table
@@ -175,16 +176,12 @@ const partialTurn = () => value => Number.isFinite(value) && value !== 0 && valu
  *   value (POLYGON's legacy `sides`; later phases project each parameter under
  *   its own machine key);
  * - `step`      — the increment a numeric stepper offers (integer parameters step
- *   by 1; the fill angle steps by 15°, which never lands on a full turn from a
- *   multiple of 15);
+ *   by 1; the fill angle steps by 15°);
  * - `offered`   — the host's own predicate: whether the host would **accept** a
  *   value as a target (the stepper never offers a value this rejects);
  * - `projectable` — whether a value from `cad_status` may be **rendered**. It
  *   defaults to `offered` (an out-of-range projection is a contract violation and
- *   renders nothing), and is overridden only for the fill angle: its documented
- *   default is the full-circle **360**, which is the one value the channel cannot
- *   re-set, so the projection must still be displayable even though it is not an
- *   offered target;
+ *   renders nothing), so no parameter currently overrides it;
  * - `labelKey` / `hintKey` — catalog keys (present in both catalogs);
  * - `icon`      — an optional status-bar icon, present only where one exists.
  */
@@ -250,7 +247,7 @@ export const TOOL_PARAMETER_SPECS = Object.freeze({
   },
   arrayFillAngle: {
     kind: 'number', statusKey: 'arrayFillAngle', step: 15,
-    offered: partialTurn(), projectable: finiteAny(),
+    offered: partialTurn(),
     labelKey: 'status.tool_parameter.array_fill_angle',
     hintKey: 'status.tool_parameter.array_fill_angle.hint',
   },

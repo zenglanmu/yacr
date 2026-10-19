@@ -52,6 +52,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("EXTEND", CommandId::ExtendEntity),
     ("CHAMFER", CommandId::ChamferLines),
     ("FILLET", CommandId::FilletLines),
+    ("ARRAYRECT", CommandId::ArrayRectangular),
+    ("ARRAYPOLAR", CommandId::ArrayPolar),
     ("ERASE", CommandId::EraseEntities),
     ("COPY", CommandId::CopyEntities),
     ("ROTATE", CommandId::RotateEntities),

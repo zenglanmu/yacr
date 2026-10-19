@@ -175,11 +175,10 @@ impl ToolParameter {
     /// * `ArrayFillAngle` **360** — AutoCAD's full-circle ARRAYPOLAR default.
     /// * `ArrayRotateItems` **false**.
     ///
-    /// Note the deliberate asymmetry the ADR specifies for `ArrayFillAngle`: the
-    /// default is the full-circle **360**, while the setter **refuses** `0` and
-    /// `±360` (no implicit wrap). The default is therefore the one value the
-    /// channel cannot re-set — it is the honest "unset/full turn" starting point,
-    /// and any explicit request must be a partial, non-wrapping angle.
+    /// Note the fill-angle range (ADR 0016 decision A): the legal values are
+    /// `0 < |angle| <= 360`, so the full-circle **default 360 is re-settable** (a
+    /// user who steps away from it can return to it), while `0` and any value
+    /// beyond a single turn (`±720`, …) are refused with no implicit wrap.
     pub fn default_value(self) -> ToolValue {
         match self {
             Self::PolygonSides => ToolValue::Number(4.0),
@@ -282,18 +281,20 @@ fn finite(parameter: ToolParameter, number: f64) -> CadResult<()> {
     }
 }
 
-/// A finite, non-zero angle that is **not** a full turn (no implicit wrap).
+/// A finite, non-zero angle no larger than one full turn (no implicit wrap).
 ///
-/// `0` and every exact multiple of a full turn (`±360`, `±720`, …) are refused,
-/// so the caller can never ask for a wrap-around fill; the fill angle is always a
-/// partial, explicitly-bounded sweep.
+/// The legal range is `0 < |angle| <= 360`: `360`/`-360` (a full turn) **are**
+/// accepted — the documented default is the full-circle `360`, so it must be
+/// re-settable — while `0`, `|angle| > 360` (`±720`, …) and non-finite values are
+/// refused. The fill angle is always an explicitly-bounded sweep, never a
+/// silently wrapped one.
 fn fill_angle(parameter: ToolParameter, number: f64) -> CadResult<()> {
-    if number.is_finite() && number != 0.0 && (number % 360.0) != 0.0 {
+    if number.is_finite() && number != 0.0 && number.abs() <= 360.0 {
         Ok(())
     } else {
         Err(CadError::InvalidInput(format!(
-            "tool parameter '{}' must be finite and non-zero and must not be a full turn \
-             (0, ±360, …), got {number}",
+            "tool parameter '{}' must be finite, non-zero and within a single turn \
+             (0 < |angle| <= 360), got {number}",
             parameter.key()
         )))
     }
@@ -538,14 +539,18 @@ mod tests {
     }
 
     #[test]
-    fn array_fill_angle_accepts_partial_turns_and_refuses_zero_and_full_turns() {
-        for accepted in [90.0, 180.0, 359.0, -90.0, 0.5] {
+    fn array_fill_angle_accepts_within_a_turn_including_the_full_circle_and_refuses_zero_and_beyond(
+    ) {
+        // The legal range is `0 < |angle| <= 360`: the full-circle default 360 is
+        // re-settable (and -360 too), so a user who steps away can return to it.
+        for accepted in [90.0, 180.0, 359.0, -90.0, 0.5, 360.0, -360.0] {
             ToolParameter::ArrayFillAngle
                 .validate(ToolValue::Number(accepted))
                 .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
         }
-        // 0 and every full-turn multiple are refused (no implicit wrap).
-        for refused in [0.0, 360.0, -360.0, 720.0, f64::NAN, f64::INFINITY] {
+        // 0, anything beyond a single turn, and non-finite values are refused
+        // (no implicit wrap).
+        for refused in [0.0, 360.5, 720.0, -720.0, -360.5, f64::NAN, f64::INFINITY] {
             assert_refusal_names_parameter(
                 ToolParameter::ArrayFillAngle
                     .validate(ToolValue::Number(refused))

@@ -237,6 +237,8 @@ impl Application {
             | CommandId::ExtendEntity
             | CommandId::ChamferLines
             | CommandId::FilletLines
+            | CommandId::ArrayRectangular
+            | CommandId::ArrayPolar
             | CommandId::EraseEntities
             | CommandId::CopyEntities
             | CommandId::RotateEntities

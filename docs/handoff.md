@@ -12,6 +12,46 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## P4：编辑命令扩展（ADR-0016，2026-10-19）
+
+**范围**：`crates/cad-app`（命令/工具/几何构造/宿主映射）、`crates/cad-geometry`（两处辅助）、
+`crates/cad-ui-core`（选择子、**类型化参数通道**、状态投影、i18n）、React 宿主 UI。**未**改 acadrust/wgpu/架构边界。
+
+- **设计先行**：ADR-0016 经 Oracle 设计门禁 **SG-P4 attempt 1 = APPROVE-WITH-FIXES / attempt 2 = ACCEPT-WITH-FIXES**
+  → 修正后转 **Accepted**。7 项阻塞全是**事实/设计**纠正，其中 3 条直接推翻了我的前提（旋转构造器**已存在**、
+  `Image`/`Mask` **可变换**、MINSERT **已建模为 `Compound(Insert…)`**），另 4 条是设计缺口（`ToolParameter`
+  装不下布尔/多参数、ALIGN 的"成对确认"现有 arity 表达不了、STRETCH 自相矛盾、hatch 分解只取环会**静默丢失**）。
+  复核阶段又抓出 T1（Dimension 实为 `Compound`/`AcDbDimension`，按新规则**会被**分解 ⇒ 改为按 `type_key` 显式拒绝）
+  与 T2（STRETCH 的"完全包围"口径对无顶点几何未定义 ⇒ 按几何类型分两种口径）。
+- **P4a（提交 c739558）**：类型化参数通道取代 P3 的"单用途"结论——`ToolValue::{Number,Flag}` + 12 个参数成员 +
+  单一请求 `SetToolParameter`；**`SetPolygonSides` 及其 IPC/队列/注册全部删除**（每参数仅一个线上入口）；
+  各参数自带范围与显式拒绝（**不 clamp**）；`params.sides` 线上字段冻结；React 侧泛化为"活动工具参数组"，
+  并有测试断言旧 IPC 名在 UI 源码中彻底消失。
+- **P4b（提交 f82c348）**：`CHAMFER`/`FILLET`（两条独立直线）。几何前置：`bulge_arc_geometry` 升 `pub`（单一实现）、
+  新增 `infinite_line_intersection`（`Point`/`Parallel`/`Collinear` 三态）。CHAMFER 两距离**按拾取顺序**、
+  `0/0` 与 `FILLET R=0` 有**等价性对照测试**；FILLET 相切弧**圆心构造标注 UNVERIFIED（几何推论）**；
+  新实体在**活动图层**（我们的选择）；拒绝面含平行/共线、同实体两次、跨文档、非直线段、点在角点、距离过长、缺层、Viewer。
+  **两处实现偏离已记录**：`DrawPreview` 未扩展（`cad-host` 冻结 ⇒ 由 `cad-ui-core` 读会话存储投影，线上结果相同）；
+  载荷 boxed（避免 clippy `large_enum_variant` 触发对冻结 `cad-engine` 的告警）。
+- **真实 GPU 证据（Vulkan / Quadro P620 / X11；`YACR_PROBE_DRAW_EVIDENCE`，输入为合成 DOM 指针事件、非真实鼠标）**：
+  用**绘图命令现场造**两对相交直线（各 `+2`），经**通用参数通道**设半径/距离，FILLET 中一次**故意点空被当场拒绝**
+  且不推进，两次提交各 `entityCount +1` 且无错误；POLYGON 阶段用**新通道**重跑成功（越界拒绝消息含参数名）。
+  **observer 独立判读**同一截图：FILLET 处为**真圆弧**（最小二乘 r≈22.1 px ≈ 0.111 世界单位，与设定 0.12 相符；
+  残差 21.8–22.5 px 排除折线），与两线**相切**、两线止于切点；CHAMFER 处两线分别修剪 8.5/9.5 px（≈0.043/0.048，
+  与 0.05 相符）并由 12.4 px 的 45° 段连接；窗口内无错误/告警样式。
+  **诚实边界**：`cad_status` 无几何/顶点通道，故真机只证"提交成功 + 计数 +1 + 像素存在"，
+  弧的半径/相切与修剪距离由 crate 契约测试数值钉住（不在真机证据内）。
+- **门禁**：cad-app 516 / cad-ui-core 131 / cad-representation 188 / cad-host 143 / cad-geometry 79 / cad-spatial 47 /
+  cad-engine 104 / cad-measure 52；clippy(workspace)、fmt、check(workspace+all-targets)、wasm、architecture、
+  i18n 477、fixture、file-size 639、workflow、UI 122。
+- **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超 10 分钟被杀）；真机**几何精度**
+  （无观测通道）；跨平台。
+- **进行中/待办**：P4c（`ARRAYRECT`/`ARRAYPOLAR`）→ P4d（`ALIGN`）→ P4e（`STRETCH`）→ P4f（`EXPLODE`）→ P4 阶段门禁。
+- **开放项（本轮新增）**：UI 的 `draw.fillet/chamfer/arrayrect/arraypolar/align` 工具行是**前瞻性占位**
+  （`tool.key` 若与假设不符需改行）；`statusKey` 假设等于机器键（仅 `polygonSides→sides` 是历史例外）；
+  填充角 `projectable` 放宽以显示默认 360；Flag 参数无待发累积；证据工具链的 README 模板仍会列出未产出的
+  wayland 工件、像素判据输出未落盘。
+
 ## P3：六个新绘图命令（ADR-0015，2026-10-19）
 
 **范围**：`crates/cad-app`（工具状态机/几何构造/命令/宿主映射）、`crates/cad-ui-core`（选择子、状态投影、

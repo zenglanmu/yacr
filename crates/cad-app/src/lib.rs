@@ -422,6 +422,27 @@ pub enum CommandPayload {
     /// [`CommandPayload::Chamfer`]; the radius is the session typed channel
     /// ([`crate::draw_tool::ToolParameter::FilletRadius`]).
     Fillet(Box<TwoLineCommand>),
+    /// ARRAYRECT the selected refs on a rectangular grid (ADR 0016 decision D).
+    ///
+    /// The row/column counts and spacings are the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::ArrayRows`] … `ArrayColumnSpacing`),
+    /// read by the handler so the session stays the single authority for them.
+    /// The source refs are retained; every copy is a fresh entity in one
+    /// transaction. Associativity is NOT IMPLEMENTED.
+    ArrayRect {
+        refs: Vec<SelectionRef>,
+    },
+    /// ARRAYPOLAR the selected refs around `center` (ADR 0016 decision D).
+    ///
+    /// `center` is the captured array centre; the item count, fill angle and
+    /// rotate-items flag are the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::ArrayItems`] … `ArrayRotateItems`).
+    /// The source refs are retained; every copy is a fresh entity in one
+    /// transaction. Associativity is NOT IMPLEMENTED.
+    ArrayPolar {
+        refs: Vec<SelectionRef>,
+        center: Point3,
+    },
     /// Set the session's active layer for new entities. Session state only.
     ActiveLayer(LayerId),
     /// A fully formed semantic geometry, used by `CreateLine` as the

@@ -191,6 +191,7 @@ impl CadSession {
     /// | `POLYGON` | `BeginDraw(Polygon)` |
     /// | `POINT` | `BeginDraw(Point)` |
     /// | `SPLINE` | `BeginDraw(Spline)` |
+    /// | `ARRAYRECT` / `ARRAYPOLAR` | `BeginDraw(ArrayRect)` / `BeginDraw(ArrayPolar)` |
     /// | `MEASURE` / `DIST` | `BeginMeasurement(Distance)` |
     /// | `MEASUREPOLYLINE` | `BeginMeasurement(PolylineLength)` |
     /// | `MEASUREANGLE` | `BeginMeasurement(Angle)` |
@@ -266,6 +267,10 @@ impl CadSession {
             CommandId::ExtendEntity => Some(InteractionRequest::BeginDraw(DrawToolKind::Extend)),
             CommandId::ChamferLines => Some(InteractionRequest::BeginDraw(DrawToolKind::Chamfer)),
             CommandId::FilletLines => Some(InteractionRequest::BeginDraw(DrawToolKind::Fillet)),
+            CommandId::ArrayRectangular => {
+                Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayRect))
+            }
+            CommandId::ArrayPolar => Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayPolar)),
             CommandId::Measure => Some(InteractionRequest::BeginMeasurement(
                 MeasurementToolKind::Distance,
             )),

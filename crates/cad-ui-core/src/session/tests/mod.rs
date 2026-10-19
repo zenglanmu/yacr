@@ -6,6 +6,7 @@
 //! fixtures through `super::test_support::*`.
 
 mod test_support;
+mod tests_array;
 mod tests_commands;
 mod tests_hover;
 mod tests_input;

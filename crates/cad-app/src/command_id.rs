@@ -136,6 +136,26 @@ pub enum CommandId {
     /// ([`crate::draw_tool::ToolParameter::FilletRadius`]). One transaction and one
     /// undo step. Work-only.
     FilletLines,
+    /// ARRAYRECT: insert **independent** copies of the current selection on a
+    /// rectangular grid, growing up and to the right (ADR 0016 decision D).
+    /// Payload is `ArrayRect { refs }`; the row/column counts and spacings are the
+    /// session typed channel
+    /// ([`crate::draw_tool::ToolParameter::ArrayRows`] … `ArrayColumnSpacing`).
+    /// The source objects are **retained** and the base point is the selection's
+    /// bounding-box lower-left. Every copy is inserted in one transaction and one
+    /// undo step; a total above the explicit cap
+    /// ([`crate::app_drawing::MAX_ARRAY_ENTITIES`]) is refused, never truncated.
+    /// Associativity is **NOT IMPLEMENTED**. Work-only.
+    ArrayRectangular,
+    /// ARRAYPOLAR: insert **independent** copies of the current selection around a
+    /// captured centre point (ADR 0016 decision D). Payload is
+    /// `ArrayPolar { refs, center }`; the item count, fill angle and rotate-items
+    /// flag are the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::ArrayItems`] … `ArrayRotateItems`). The
+    /// base point is the selection's bounding-box lower-left; the placement rule
+    /// is our declared (unverified) choice. One transaction and one undo step;
+    /// associativity is **NOT IMPLEMENTED**. Work-only.
+    ArrayPolar,
     /// Delete every entity in the current selection in one transaction. An
     /// empty selection is an explicit refusal. Work-only.
     EraseEntities,
@@ -204,6 +224,8 @@ impl CommandId {
                 | Self::ExtendEntity
                 | Self::ChamferLines
                 | Self::FilletLines
+                | Self::ArrayRectangular
+                | Self::ArrayPolar
                 | Self::EraseEntities
                 | Self::CopyEntities
                 | Self::RotateEntities

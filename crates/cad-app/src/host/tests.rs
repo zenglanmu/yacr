@@ -7,6 +7,7 @@
 use super::databases::{p, snap_target_build_count};
 use super::*;
 
+mod array;
 mod chamfer_fillet;
 mod document;
 mod draw_pick;

@@ -156,22 +156,32 @@ test('numeric bounds are enforced per parameter and a step is disabled, never cl
   assert.equal(rowsOne.canIncrement, true);
 });
 
-test('the fill-angle stepper never offers 0 or a full-turn multiple', () => {
-  // 345 + 15 = 360 is a full turn: the `+` step is disabled (raw target kept).
+test('the fill-angle stepper offers the full-circle default and never offers 0 or beyond a turn', () => {
+  // 345 + 15 = 360 is a full turn and IS an offered target (0 < |angle| <= 360):
+  // the `+` step is enabled so a user can land back on the default.
   const nearTop = first(fillAngle(345));
-  assert.equal(nearTop.canIncrement, false);
+  assert.equal(nearTop.canIncrement, true);
   assert.equal(nearTop.increment, 360);
   assert.equal(nearTop.canDecrement, true);
-  // 15 - 15 = 0 is refused: the `-` step is disabled.
+  // 15 - 15 = 0 is refused: the `-` step is disabled (raw target kept, never
+  // silently rewritten).
   const nearZero = first(fillAngle(15));
   assert.equal(nearZero.canDecrement, false);
   assert.equal(nearZero.decrement, 0);
   assert.equal(nearZero.canIncrement, true);
-  // The documented default (a full turn) is still displayable and steps away.
+  // The documented default (a full turn) is renderable and can step back down; a
+  // step past +360 is out of range and disabled.
   const full = first(fillAngle(360));
   assert.equal(full.value, 360);
   assert.equal(full.canDecrement, true);
-  assert.equal(full.canIncrement, true);
+  assert.equal(full.increment, 375);
+  assert.equal(full.canIncrement, false, 'a target beyond +360 is not offered');
+  // -360 is also an offered target (the reversed full circle).
+  const negativeFull = first(fillAngle(-360));
+  assert.equal(negativeFull.value, -360);
+  assert.equal(negativeFull.decrement, -375);
+  assert.equal(negativeFull.canDecrement, false, 'a target beyond -360 is not offered');
+  assert.equal(negativeFull.canIncrement, true);
   // A partial turn steps normally in both directions.
   const partial = first(fillAngle(90));
   assert.equal(partial.increment, 105);

@@ -188,13 +188,68 @@ pub enum DrawToolKind {
     /// parallel-line radius adjustment (we refuse parallel lines explicitly),
     /// Circle/Arc targets, 3D, and hatch associativity.
     Fillet,
+    /// ARRAYRECT: insert independent copies of the selection on a rectangular
+    /// grid (ADR 0016 decision D).
+    ///
+    /// This kind captures **no points**: the array is defined entirely by the
+    /// session typed parameters ([`super::ToolParameter::ArrayRows`],
+    /// `ArrayColumns`, `ArrayRowSpacing`, `ArrayColumnSpacing`) plus the selection
+    /// snapshot taken at tool start. It is therefore ready as soon as the
+    /// selection is non-empty — its arity is the zero-point complement
+    /// ([`PointArity::Exact`]`(0)`), and the state machine never reads a point for
+    /// it.
+    ///
+    /// Our declared geometry rule (AutoCAD's exact base-point rule is unverified):
+    /// the base point is the selection's **bounding-box lower-left**, cell
+    /// `(row, column)` translates the source by `(column·columnSpacing,
+    /// row·rowSpacing)`, and the array grows **up and to the right**. Spacing is
+    /// the distance between base points.
+    ///
+    /// `rows × columns` is the **total including the source object**, which stays
+    /// where it is and is not duplicated, so the array inserts `rows × columns − 1`
+    /// independent copies; the source's own cell `(0, 0)` is skipped and a 1×1
+    /// array produces **0 copies** (an explicit diagnostic, never a silent
+    /// success). The source objects are **retained** (AutoCAD's `DELOBJ` gating is
+    /// not modelled).
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): associativity /
+    /// `ARRAYEDIT` / grips, `Path` arrays, `Levels`, `Total` and angle-interval
+    /// inputs, a configurable `MAXARRAY`, 3D, and the negative-spacing reversal
+    /// (a negative spacing is refused rather than inverted).
+    ArrayRect,
+    /// ARRAYPOLAR: insert independent copies of the selection around a captured
+    /// centre (ADR 0016 decision D).
+    ///
+    /// This kind captures exactly **one point** (the array centre); the item
+    /// count, fill angle and rotate-items flag are the session typed parameters
+    /// ([`super::ToolParameter::ArrayItems`], `ArrayFillAngle`,
+    /// `ArrayRotateItems`).
+    ///
+    /// Our declared, **unverified** placement rule (the command layer builds it and
+    /// the contract tests pin it): item `i` (`i` in `0..items`) is placed at angle
+    /// `i·fillAngle / items`, measured counter-clockwise from the base point's
+    /// direction. With `rotateItems = true` each copy is **rotated about the
+    /// centre** by that angle; with `false` each copy is **translated only** to its
+    /// angular position (its own orientation unchanged), using the selection's
+    /// bounding-box lower-left as the base point.
+    ///
+    /// `items` is the **total including the source object**, which sits at its own
+    /// direction and is not duplicated, so the array inserts `items − 1`
+    /// independent copies; the item whose angle offset is 0 (item 0) is skipped and
+    /// a 1-item array produces **0 copies** (an explicit diagnostic, never a silent
+    /// success). The source objects are **retained**.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): associativity /
+    /// `ARRAYEDIT` / grips, `Path` arrays, `Levels`, `Total` and angle-interval
+    /// inputs, a configurable `MAXARRAY`, and 3D.
+    ArrayPolar,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 19] = [
+    pub const ALL: [DrawToolKind; 21] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -214,6 +269,8 @@ impl DrawToolKind {
         DrawToolKind::Offset,
         DrawToolKind::Chamfer,
         DrawToolKind::Fillet,
+        DrawToolKind::ArrayRect,
+        DrawToolKind::ArrayPolar,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -238,6 +295,8 @@ impl DrawToolKind {
             Self::Offset => "offset",
             Self::Chamfer => "chamfer",
             Self::Fillet => "fillet",
+            Self::ArrayRect => "arrayrect",
+            Self::ArrayPolar => "arraypolar",
         }
     }
 
@@ -264,6 +323,8 @@ impl DrawToolKind {
             "offset" => Some(Self::Offset),
             "chamfer" => Some(Self::Chamfer),
             "fillet" => Some(Self::Fillet),
+            "arrayrect" => Some(Self::ArrayRect),
+            "arraypolar" => Some(Self::ArrayPolar),
             _ => None,
         }
     }
@@ -318,6 +379,12 @@ impl DrawToolKind {
             // and the shell substitutes the catalog label for chrome anyway.
             Self::Chamfer => "CHAMFER",
             Self::Fillet => "FILLET",
+            // ARRAYRECT/ARRAYPOLAR use locale-neutral ASCII fallback labels,
+            // exactly like POINT/SPLINE/CHAMFER/FILLET: the ADR fence forbids new
+            // CJK literals on the Rust side and the shell substitutes the catalog
+            // label for chrome anyway.
+            Self::ArrayRect => "ARRAYRECT",
+            Self::ArrayPolar => "ARRAYPOLAR",
         }
     }
 
@@ -332,8 +399,14 @@ impl DrawToolKind {
             // Start, a point on the arc, end; two axis endpoints plus the
             // other-axis distance; or base, reference, target.
             Self::Arc | Self::Ellipse | Self::Scale => PointArity::Exact(3),
-            // One side/distance point, or one point placement.
-            Self::Offset | Self::Point => PointArity::Exact(1),
+            // One side/distance point, one point placement, or the ARRAYPOLAR
+            // centre.
+            Self::Offset | Self::Point | Self::ArrayPolar => PointArity::Exact(1),
+            // ARRAYRECT captures no points: it is defined entirely by the session
+            // typed parameters plus the selection snapshot, so its complement is
+            // the zero-point exact arity (ready as soon as the selection is
+            // non-empty).
+            Self::ArrayRect => PointArity::Exact(0),
             // Two endpoints, centre+radius point, two opposite rectangle
             // corners, a move/copy delta, target+boundary, or a rotate angle /
             // mirror axis.
@@ -370,7 +443,14 @@ impl DrawToolKind {
     pub fn requires_selection(self) -> bool {
         matches!(
             self,
-            Self::Move | Self::Copy | Self::Rotate | Self::Scale | Self::Mirror | Self::Offset
+            Self::Move
+                | Self::Copy
+                | Self::Rotate
+                | Self::Scale
+                | Self::Mirror
+                | Self::Offset
+                | Self::ArrayRect
+                | Self::ArrayPolar
         )
     }
 

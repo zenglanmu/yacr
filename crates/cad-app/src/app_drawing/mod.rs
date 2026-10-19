@@ -27,6 +27,7 @@ use super::*;
 use cad_db::{transform_geometry, DbEntity};
 use cad_history::{drawing_patch, drawing_patch_deleted, DrawingPatch, DrawingUndoRecord};
 
+mod array;
 mod chamfer_fillet;
 mod clipboard;
 mod drawing_create;
@@ -36,6 +37,11 @@ mod helpers;
 mod trim_extend;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};
+// The explicit ARRAY entity cap (ADR 0016 decision D); re-exported so the
+// command docs (`crate::app_drawing::MAX_ARRAY_ENTITIES`) resolve. It is a doc
+// anchor only — the value is used inside the `array` module.
+#[allow(unused_imports)]
+pub use array::MAX_ARRAY_ENTITIES;
 
 use helpers::{
     collect_boundary_segments, distance, geometry_kind, is_finite_point, offset_circle,
