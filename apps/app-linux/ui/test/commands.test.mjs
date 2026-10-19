@@ -31,7 +31,7 @@ const HOST_NAMES = [
   'OPEN', 'NEW', 'PLOT', 'SAVE', 'CANCEL', 'PAN', 'ZOOM', 'FIT', 'RESETVIEW', 'TOGGLELAYER',
   'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'SELECT', 'SELECTALL', 'MEASURE', 'CONFIRM',
   'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
-  'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'MOVE', 'TRIM',
+  'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'MOVE', 'TRIM',
   'EXTEND', 'ERASE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
   'OFFSET', 'SETACTIVELAYER', 'HOVERPREVIEW', 'OSNAP',
   // Interaction-only selectors: one per measurement kind, plus fixed zoom steps.
@@ -280,6 +280,117 @@ test('ELLIPSE is a draw affordance in the ribbon and catalog, enabled only by ro
     ribbon.includes('if (item.command) return shell.runCommand(item.command);'),
     'ribbon items dispatch through shell.runCommand, never an action',
   );
+});
+
+test('POLYGON is a draw affordance in the ribbon and catalog, enabled only by router admission', async () => {
+  const { readModule } = await import('./helpers.mjs');
+  // The catalog entry mirrors the neighbouring draw commands (`draw.kind.*`).
+  const entry = COMMAND_CATALOG.find(command => command.id === 'POLYGON');
+  assert.ok(entry, 'POLYGON must be in the command catalog');
+  assert.equal(entry.labelKey, 'draw.kind.polygon');
+  assert.equal(entry.icon, 'polygon');
+  assert.equal(entry.group, 'draw');
+  // Placed with the other draw actions on the Home and Draw tabs, wired as a
+  // router command (no local shell action).
+  for (const tabId of ['home', 'draw']) {
+    const draw = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+    assert.ok(draw, `${tabId} must keep its draw panel`);
+    const item = draw.items.find(candidate => candidate.id === 'POLYGON');
+    assert.ok(item, `${tabId}/draw must carry the POLYGON affordance`);
+    assert.equal(item.command, 'POLYGON');
+    assert.equal(item.labelKey, 'draw.kind.polygon');
+    assert.equal(item.action, undefined, 'POLYGON must not be a local shell action');
+  }
+  // The measurement panel never dispatches `POLYGON`: it is a draw command only.
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  assert.equal(measurePanel.items.some(item => item.command === 'POLYGON'), false);
+  // Router admission is the single enable gate: admitted when the host vocabulary
+  // carries POLYGON, unsupported (never locally enabled) when it does not.
+  assert.equal(isSupportedCommand('POLYGON'), true);
+  assert.equal(admitCommandText('POLYGON', { status: loaded }).kind, 'admitted');
+  setCommandCatalog([]);
+  assert.equal(isSupportedCommand('POLYGON'), false);
+  assert.equal(admitCommandText('POLYGON', { status: loaded }).kind, 'unsupported');
+  setCommandCatalog(HOST_NAMES);
+  // The label keys resolve in both catalogs (the ribbon/list name source).
+  const { readCatalog } = await import('./helpers.mjs');
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  assert.equal(typeof zh['draw.kind.polygon'], 'string');
+  assert.equal(typeof en['draw.kind.polygon'], 'string');
+  assert.equal(typeof zh['tool.draw.polygon'], 'string');
+  assert.equal(typeof en['tool.draw.polygon'], 'string');
+  assert.equal(toolLabelKey('draw.polygon'), 'tool.draw.polygon');
+  // The renderer dispatches the POLYGON selector through the normal command funnel.
+  const ribbon = await readModule('components/Ribbon.jsx');
+  assert.ok(
+    ribbon.includes('if (item.command) return shell.runCommand(item.command);'),
+    'ribbon items dispatch through shell.runCommand, never an action',
+  );
+});
+
+test('POINT is a draw affordance in the ribbon and catalog, enabled only by router admission', async () => {
+  const entry = COMMAND_CATALOG.find(command => command.id === 'POINT');
+  assert.ok(entry, 'POINT must be in the command catalog');
+  assert.equal(entry.labelKey, 'draw.kind.point');
+  assert.equal(entry.icon, 'point');
+  assert.equal(entry.group, 'draw');
+  for (const tabId of ['home', 'draw']) {
+    const draw = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+    const item = draw.items.find(candidate => candidate.id === 'POINT');
+    assert.ok(item, `${tabId}/draw must carry the POINT affordance`);
+    assert.equal(item.command, 'POINT');
+    assert.equal(item.labelKey, 'draw.kind.point');
+    assert.equal(item.action, undefined, 'POINT must not be a local shell action');
+  }
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  assert.equal(measurePanel.items.some(item => item.command === 'POINT'), false);
+  assert.equal(isSupportedCommand('POINT'), true);
+  assert.equal(admitCommandText('POINT', { status: loaded }).kind, 'admitted');
+  setCommandCatalog([]);
+  assert.equal(isSupportedCommand('POINT'), false);
+  assert.equal(admitCommandText('POINT', { status: loaded }).kind, 'unsupported');
+  setCommandCatalog(HOST_NAMES);
+  const { readCatalog } = await import('./helpers.mjs');
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  assert.equal(typeof zh['draw.kind.point'], 'string');
+  assert.equal(typeof en['draw.kind.point'], 'string');
+  assert.equal(typeof zh['tool.draw.point'], 'string');
+  assert.equal(typeof en['tool.draw.point'], 'string');
+  assert.equal(toolLabelKey('draw.point'), 'tool.draw.point');
+});
+
+test('SPLINE is a draw affordance in the ribbon and catalog, enabled only by router admission', async () => {
+  const entry = COMMAND_CATALOG.find(command => command.id === 'SPLINE');
+  assert.ok(entry, 'SPLINE must be in the command catalog');
+  assert.equal(entry.labelKey, 'draw.kind.spline');
+  assert.equal(entry.icon, 'spline');
+  assert.equal(entry.group, 'draw');
+  for (const tabId of ['home', 'draw']) {
+    const draw = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+    const item = draw.items.find(candidate => candidate.id === 'SPLINE');
+    assert.ok(item, `${tabId}/draw must carry the SPLINE affordance`);
+    assert.equal(item.command, 'SPLINE');
+    assert.equal(item.labelKey, 'draw.kind.spline');
+    assert.equal(item.action, undefined, 'SPLINE must not be a local shell action');
+  }
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  assert.equal(measurePanel.items.some(item => item.command === 'SPLINE'), false);
+  assert.equal(isSupportedCommand('SPLINE'), true);
+  assert.equal(admitCommandText('SPLINE', { status: loaded }).kind, 'admitted');
+  setCommandCatalog([]);
+  assert.equal(isSupportedCommand('SPLINE'), false);
+  assert.equal(admitCommandText('SPLINE', { status: loaded }).kind, 'unsupported');
+  setCommandCatalog(HOST_NAMES);
+  const { readCatalog } = await import('./helpers.mjs');
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  assert.equal(typeof zh['draw.kind.spline'], 'string');
+  assert.equal(typeof en['draw.kind.spline'], 'string');
+  assert.equal(typeof zh['tool.draw.spline'], 'string');
+  assert.equal(typeof en['tool.draw.spline'], 'string');
+  assert.equal(toolLabelKey('draw.spline'), 'tool.draw.spline');
 });
 
 // Chrome catalog entries the router does not accept: they stay **visible but

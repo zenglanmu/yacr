@@ -118,6 +118,48 @@ pub enum DrawToolKind {
     ///   subset, so a non-coplanar (`+Z`) triple is an explicit refusal rather
     ///   than a silent projection.
     Ellipse,
+    /// POLYGON: the side count (a session sysvar, ADR 0015 decision C) plus the
+    /// centre and a radius point, committed as one **closed** LWPOLYLINE whose
+    /// `n` vertices are **inscribed** in the circle through the two picks.
+    ///
+    /// The two captured points are the centre (pick 1) and the radius point
+    /// (pick 2); the geometry-side construction ([`polygon_vertices`]) and every
+    /// degeneracy refusal live in the pure helper, so the tool never invents a
+    /// vertex or a rotation.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now, so the honest union of
+    /// supported options stays explicit):
+    /// * no `Edge` branch — only the centre+radius construction is offered;
+    /// * no **Circumscribed** (tangent) mode — the polygon is always inscribed
+    ///   (AutoCAD's default), never silently circumscribed;
+    /// * no numeric-radius orientation — a typed radius would rotate the first
+    ///   edge to the snap rotation angle, which is not modelled; the pointer's
+    ///   direction sets the rotation;
+    /// * no persisted side count — the count is session/display state only;
+    /// * no 3D / OCS input — like LINE/CIRCLE/ARC this is the flat work-plane
+    ///   subset, so a radius point off the centre's `+Z` plane is an explicit
+    ///   refusal rather than a silent projection.
+    Polygon,
+    /// POINT: a single placement of one point at the clicked position.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): the `PDMODE`/`PDSIZE` point
+    /// styles are not modelled (the overlay draws a fixed cross marker), and
+    /// AutoCAD's repeat-until-Enter placement is **not** implemented — the ADR
+    /// records that the POINT page documents only a single `Specify a point` and
+    /// that repetition is unverified, so it is not guessed. The point carries the
+    /// `+Z` the picker produced and is never silently reprojected.
+    Point,
+    /// SPLINE: a fit-point spline (at least four fit points, then Enter), stored
+    /// as a degree-3 clamped chord interpolating B-spline.
+    ///
+    /// The interpolation itself lives in the pure geometry core
+    /// ([`cad_geometry::spline::fit_points_to_cubic_spline`]); the tool only
+    /// captures the ordered fit points. Deliberate subset (NOT IMPLEMENTED for
+    /// now): the `CV` method, the `Knots`/`Degree`/`Start`/`End Tangency`/
+    /// `Tolerance` options, `Close` and `Object` conversion; the 2–3 fit-point
+    /// small-sample inputs (unverified) are explicitly refused, and fit-point data
+    /// does not round-trip (the domain stores only knots/control points/weights).
+    Spline,
     /// MOVE: requires a selection, then a two-point delta.
     Move,
     /// TRIM: a target pick plus a boundary pick.
@@ -140,13 +182,16 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 14] = [
+    pub const ALL: [DrawToolKind; 17] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
         DrawToolKind::Polyline,
         DrawToolKind::Rectang,
         DrawToolKind::Ellipse,
+        DrawToolKind::Polygon,
+        DrawToolKind::Point,
+        DrawToolKind::Spline,
         DrawToolKind::Move,
         DrawToolKind::Trim,
         DrawToolKind::Copy,
@@ -166,6 +211,9 @@ impl DrawToolKind {
             Self::Polyline => "polyline",
             Self::Rectang => "rectang",
             Self::Ellipse => "ellipse",
+            Self::Polygon => "polygon",
+            Self::Point => "point",
+            Self::Spline => "spline",
             Self::Move => "move",
             Self::Trim => "trim",
             Self::Copy => "copy",
@@ -187,6 +235,9 @@ impl DrawToolKind {
             "polyline" => Some(Self::Polyline),
             "rectang" => Some(Self::Rectang),
             "ellipse" => Some(Self::Ellipse),
+            "polygon" => Some(Self::Polygon),
+            "point" => Some(Self::Point),
+            "spline" => Some(Self::Spline),
             "move" => Some(Self::Move),
             "trim" => Some(Self::Trim),
             "copy" => Some(Self::Copy),
@@ -229,6 +280,13 @@ impl DrawToolKind {
             Self::Polyline => "多段线",
             Self::Rectang => "矩形",
             Self::Ellipse => "椭圆",
+            Self::Polygon => "正多边形",
+            // POINT/SPLINE deliberately use locale-neutral ASCII fallback labels:
+            // the ADR fence forbids new CJK literals on the Rust side, and the
+            // shell substitutes the catalog label for chrome anyway, so `label()`
+            // stays a non-chrome fallback here (see the CJK baseline test).
+            Self::Point => "POINT",
+            Self::Spline => "SPLINE",
             Self::Move => "移动",
             Self::Trim => "修剪",
             Self::Copy => "复制",
@@ -243,20 +301,23 @@ impl DrawToolKind {
     /// The capture arity: an exact complement, or an open-ended minimum.
     pub fn arity(self) -> PointArity {
         match self {
-            // PLINE is the one open-ended capture: at least two vertices, more
-            // accepted, finished with Enter.
+            // PLINE and SPLINE are the two open-ended captures: at least two
+            // vertices (PLINE) / four fit points (SPLINE), more accepted,
+            // finished with Enter.
             Self::Polyline => PointArity::AtLeast(2),
+            Self::Spline => PointArity::AtLeast(4),
             // Start, a point on the arc, end; two axis endpoints plus the
             // other-axis distance; or base, reference, target.
             Self::Arc | Self::Ellipse | Self::Scale => PointArity::Exact(3),
-            // One side/distance point.
-            Self::Offset => PointArity::Exact(1),
+            // One side/distance point, or one point placement.
+            Self::Offset | Self::Point => PointArity::Exact(1),
             // Two endpoints, centre+radius point, two opposite rectangle
             // corners, a move/copy delta, target+boundary, or a rotate angle /
             // mirror axis.
             Self::Line
             | Self::Circle
             | Self::Rectang
+            | Self::Polygon
             | Self::Move
             | Self::Trim
             | Self::Copy
@@ -268,9 +329,9 @@ impl DrawToolKind {
 
     /// Minimum number of points this operation needs to be defined.
     ///
-    /// For a fixed-arity (`Exact`) kind this is the exact complement; for the
-    /// open-ended (`AtLeast`) PLINE it is the minimum needed to confirm, with
-    /// more points still accepted.
+    /// For a fixed-arity (`Exact`) kind this is the exact complement; for an
+    /// open-ended (`AtLeast`) kind (PLINE, SPLINE) it is the minimum needed to
+    /// confirm, with more points still accepted.
     pub fn required_points(self) -> usize {
         self.arity().minimum()
     }
@@ -336,6 +397,15 @@ pub struct DrawPreview {
     pub selection_count: usize,
     /// Whether the operation can be committed right now.
     pub ready: bool,
+    /// The POLYGON side count for a live POLYGON capture, or `None` for every
+    /// other kind.
+    ///
+    /// The count is the session sysvar (ADR 0015 decision C), injected by the
+    /// session when it builds the preview so the outline tracks the *current*
+    /// value even if it changes mid-capture. It is `None` whenever the active
+    /// tool is not POLYGON, which is the same rule the frozen frontend
+    /// `CadTool.params.sides` projection uses.
+    pub polygon_sides: Option<u32>,
 }
 
 impl DrawPreview {
@@ -471,6 +541,35 @@ pub enum DrawIntent {
     /// construction (`ellipse_parameters`), the axis swap and every degeneracy
     /// refusal live in the command layer.
     Ellipse { p1: Point3, p2: Point3, p3: Point3 },
+    /// Insert a closed regular polygon **inscribed** in the circle through
+    /// `center` (pick 1) and `radius_point` (pick 2), on the active layer.
+    ///
+    /// The side count is the session sysvar (ADR 0015 decision C), not a field
+    /// of this intent: the command layer reads it from the session so the intent
+    /// stays the pure description of what the user clicked. The two points are
+    /// exactly the two clicks, in order; the geometry-side construction
+    /// ([`polygon_vertices`]) and every degeneracy refusal live in the command
+    /// layer. Always `closed == true` with one zero bulge per vertex.
+    Polygon {
+        center: Point3,
+        radius_point: Point3,
+    },
+    /// Place a single POINT at `position` on the active layer.
+    ///
+    /// `position` is the one click, exactly as captured; the command layer stores
+    /// `SemanticGeometry::Point(position)` and refuses a non-finite position. A
+    /// single point has no coplanarity constraint, so there is no `+Z` refusal
+    /// here. AutoCAD's repeat-until-Enter placement is NOT IMPLEMENTED.
+    Point { position: Point3 },
+    /// Insert a fit-point SPLINE through `fit_points` (at least four), on the
+    /// active layer.
+    ///
+    /// `fit_points` are the captured fit points in click order; the interpolation
+    /// (degree 3, clamped chord knots, one control point per fit point) and every
+    /// degeneracy refusal live in the command layer
+    /// ([`crate::draw_tool::spline_control_points`]), so the tool never invents a
+    /// control point or a knot.
+    Spline { fit_points: Vec<Point3> },
     /// Translate the current selection by `delta`.
     Move { delta: Point3 },
     /// Duplicate the current selection translated by `delta`.
@@ -705,6 +804,9 @@ impl DrawTool {
             remaining: self.remaining().unwrap_or(0),
             selection_count: self.selection_count,
             ready: self.is_ready(),
+            // The pure tool never invents a sysvar: the session injects the
+            // POLYGON side count when it builds the preview/tool snapshot.
+            polygon_sides: None,
         }
     }
 
@@ -764,6 +866,22 @@ impl DrawTool {
                 p1: a,
                 p2: b,
                 p3: self.points[2],
+            },
+            // POLYGON: the centre and radius point exactly as clicked; the side
+            // count is the session sysvar read by the command layer, so the
+            // capture never invents a vertex count.
+            DrawToolKind::Polygon => DrawIntent::Polygon {
+                center: a,
+                radius_point: b,
+            },
+            // POINT: the single captured click. A single point has no coplanarity
+            // constraint, so the intent carries no plane.
+            DrawToolKind::Point => DrawIntent::Point { position: a },
+            // SPLINE: every captured fit point, in order. The open-ended capture is
+            // refused above while below the four-point minimum, so the command
+            // layer always receives at least four fit points.
+            DrawToolKind::Spline => DrawIntent::Spline {
+                fit_points: self.points.clone(),
             },
             DrawToolKind::Move => DrawIntent::Move {
                 delta: Point3 {
@@ -864,7 +982,8 @@ mod geometry;
 // `cad_app::circle_radius` (via `lib.rs`) stay valid for the callers that used the
 // pre-split module layout.
 pub use geometry::{
-    arc_parameters, circle_radius, ellipse_parameters, ArcParameters, EllipseParameters,
+    arc_parameters, circle_radius, ellipse_parameters, polygon_vertices, spline_control_points,
+    ArcParameters, EllipseParameters, DEFAULT_POLYGON_SIDES, MAX_POLYGON_SIDES, MIN_POLYGON_SIDES,
 };
 pub(crate) use geometry::{mirror_transform, rotation_transform, scale_transform};
 

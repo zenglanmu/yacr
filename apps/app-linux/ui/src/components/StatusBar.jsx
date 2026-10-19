@@ -5,7 +5,7 @@ import React from 'react';
 import { Icon } from '../icons.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { commandById, toolLabelKey } from '../commands.mjs';
-import { dispatchHoverPreview, dispatchObjectSnap, hoverPreviewToggle, importProgressView, objectSnapToggle, snapKindLabelKey } from '../cad.mjs';
+import { dispatchHoverPreview, dispatchObjectSnap, hoverPreviewToggle, importProgressView, objectSnapToggle, polygonSidesView, snapKindLabelKey } from '../cad.mjs';
 
 // The drafting aids this build still has only as placeholders. OSNAP is a real
 // toggle (ADR 0014 A.4) and is rendered separately below.
@@ -23,6 +23,52 @@ function Toggle({ label, on, onClick, title, disabled }) {
     >
       {label}
     </button>
+  );
+}
+
+// The POLYGON side-count stepper. It is a pure view over the host value (no
+// local mirror): the rendered number is always the one the last `cad_status`
+// carried, and a step only dispatches the change. The effective target — the
+// status value plus the bounded pending delta of steps the host has not echoed
+// back yet — drives the `-`/`+` targets and the disabled state, so rapid clicks
+// compose and the buttons stop at the 3..=1024 bounds and the pending cap while
+// the host is not admitting commands. Rendered only while POLYGON is the active
+// tool with a real value — nothing at all otherwise.
+function PolygonSides({ view, onStep }) {
+  const { t } = useI18n();
+  const stepDown = view.disabled || !view.canDecrement;
+  const stepUp = view.disabled || !view.canIncrement;
+  return (
+    <span
+      className={['status-stepper', view.disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')}
+      role="group"
+      aria-label={t('status.polygon_sides')}
+      title={t('status.polygon_sides.hint')}
+    >
+      <Icon name="polygon" size={12} />
+      <span className="status-stepper__label" aria-hidden="true">{t('status.polygon_sides')}</span>
+      <button
+        type="button"
+        className="status-stepper__button"
+        aria-label={t('status.polygon_sides.decrease')}
+        title={t('status.polygon_sides.decrease')}
+        disabled={stepDown}
+        onClick={stepDown ? undefined : () => onStep(view.decrement)}
+      >
+        <Icon name="minus" size={11} />
+      </button>
+      <span className="status-stepper__value mono">{view.sides}</span>
+      <button
+        type="button"
+        className="status-stepper__button"
+        aria-label={t('status.polygon_sides.increase')}
+        title={t('status.polygon_sides.increase')}
+        disabled={stepUp}
+        onClick={stepUp ? undefined : () => onStep(view.increment)}
+      >
+        <Icon name="plus" size={11} />
+      </button>
+    </span>
   );
 }
 
@@ -49,6 +95,12 @@ export function StatusBar() {
   // (`status.snapKind`). Without a candidate the key is null, so nothing extra
   // is rendered — never a placeholder chip.
   const snapKindKey = snapKindLabelKey(shell.status);
+  // The POLYGON side count is a real tool parameter (`status.tool.params.sides`),
+  // never a local mirror. It exists only while POLYGON is the active tool with a
+  // real in-range value; any other tool or a missing/`null` field renders nothing
+  // at all. Admission mirrors the toggle chips (`canCommand`). The bounded
+  // pending delta composes rapid steps without moving the displayed number.
+  const polygonSides = polygonSidesView(shell.status, shell.canCommand('POLYGON'), shell.polygonSidesPending);
   // Announce only the phase here (rare changes); the steadily-incrementing
   // count/bytes stay in the document-tab bar, so a polite live region never
   // chatters on every tick.
@@ -79,6 +131,10 @@ export function StatusBar() {
           {t(toolNameKey)}
           <span className="mono">{t('tool.points', { count: toolPoints })}</span>
         </span>
+      ) : null}
+
+      {polygonSides ? (
+        <PolygonSides view={polygonSides} onStep={target => shell.stepPolygonSides(target)} />
       ) : null}
 
       <div className="statusbar__group" role="group" aria-label={t('status.drafting')}>

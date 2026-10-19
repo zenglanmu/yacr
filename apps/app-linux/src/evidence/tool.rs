@@ -39,6 +39,10 @@ pub fn maybe_spawn_tool_evidence(webview: Option<&tauri::Webview>) {
     // point so the evidence subsystem stays self-contained (no file outside
     // `src/evidence/` is touched except the module declaration).
     crate::evidence::maybe_spawn_edit_evidence(webview);
+    // The new drawing-command driver (`YACR_PROBE_DRAW_EVIDENCE`) is likewise
+    // independent: its own env var, default OFF, spawned from this same entry
+    // point so the evidence subsystem stays self-contained.
+    crate::evidence::maybe_spawn_draw_evidence(webview);
     if !tool_evidence_enabled() {
         return;
     }

@@ -134,6 +134,121 @@ export function dispatchObjectSnap(runCommand) {
   runCommand(OBJECT_SNAP_COMMAND);
 }
 
+/** The single IPC that sets the POLYGON tool's side count. */
+export const POLYGON_SIDES_COMMAND = 'cad_set_polygon_sides';
+
+// AutoCAD's `POLYSIDES` range. The host refuses a value outside it explicitly
+// (never clamping), so the stepper only ever offers values inside it.
+export const POLYGON_SIDES_MIN = 3;
+export const POLYGON_SIDES_MAX = 1024;
+
+/**
+ * Status-bar view for the POLYGON side-count control.
+ *
+ * The host publishes the live value at `status.tool.params.sides` while POLYGON
+ * is the active tool (`status.tool.key === 'draw.polygon'`); for every other
+ * tool that field is `null`. Nothing is rendered unless POLYGON is active with a
+ * real integer in the supported `3..=1024` range, so a missing/`null`/malformed
+ * or out-of-range value yields `null` rather than an invented default.
+ *
+ * `admitted` is the shell's normal command admission (`canCommand`), which
+ * already accounts for a pending command and a loading/unavailable host or an
+ * unloaded vocabulary — the same gate the toggle chips use.
+ *
+ * `sides` (the *rendered* number) is always the real status value and is never
+ * optimistically advanced. `pending` is the bounded delta of steps the host has
+ * not echoed back yet (see [`stepPolygonPending`]): it only shifts the effective
+ * target the next step builds on and the button bounds, so a rapid double-click
+ * composes into `sides + 2` while the displayed number still follows the status.
+ */
+export function polygonSidesView(status, admitted, pending = null) {
+  const tool = status?.tool;
+  if (!tool || typeof tool !== 'object' || tool.key !== 'draw.polygon') return null;
+  const sides = tool.params?.sides;
+  if (!Number.isSafeInteger(sides) || sides < POLYGON_SIDES_MIN || sides > POLYGON_SIDES_MAX) return null;
+  const delta = pending && pending.key === tool.key && pending.base === sides ? pending.delta : 0;
+  const effective = sides + delta;
+  return {
+    sides,
+    delta,
+    effective,
+    disabled: admitted !== true,
+    // A step is offered only while the *effective* target stays inside the range
+    // and the pending magnitude is under the cap: it is disabled, never clamped
+    // into a different value.
+    canDecrement: effective > POLYGON_SIDES_MIN && delta > -POLYGON_SIDES_PENDING_CAP,
+    canIncrement: effective < POLYGON_SIDES_MAX && delta < POLYGON_SIDES_PENDING_CAP,
+    decrement: effective - 1,
+    increment: effective + 1,
+  };
+}
+
+// Cap on the pending delta magnitude. 10 keeps a stuck queue from accumulating
+// unbounded intent — at most ten un-echoed steps, i.e. a ~2.5 s burst at the
+// 250 ms poll — while staying well above a normal click cadence, so the host
+// virtually always catches up before the cap is ever felt.
+export const POLYGON_SIDES_PENDING_CAP = 10;
+
+/**
+ * Reconcile the bounded pending delta against the latest real status.
+ *
+ * Returns the same `pending` while the host has not yet caught up (the status
+ * value still equals the value the delta is measured against, `base`), and
+ * `null` — dropping the delta — as soon as the status value changes, the tool
+ * switches/cancels, the tool key changes, or the value becomes absent/`null`/
+ * out-of-range. Returning the same reference on an unchanged poll lets the
+ * caller `setState` without triggering a re-render.
+ */
+export function reconcilePolygonPending(pending, status) {
+  const tool = status?.tool;
+  const sides = tool?.params?.sides;
+  const active = tool && typeof tool === 'object' && tool.key === 'draw.polygon'
+    && Number.isSafeInteger(sides) && sides >= POLYGON_SIDES_MIN && sides <= POLYGON_SIDES_MAX;
+  if (!active) return null;
+  if (!pending || pending.key !== tool.key || pending.base !== sides) return null;
+  return pending;
+}
+
+/**
+ * Fold one step into the pending delta, or `null` when there is nothing to track.
+ *
+ * `target` is the value a step dispatches (`effective ± 1` from the view); the
+ * new delta is `target - sides`, measured against the current status value. A
+ * zero delta (a step that lands back on the status value) and any delta beyond
+ * [`POLYGON_SIDES_PENDING_CAP`] collapse to `null`, so the cap can never be
+ * exceeded even if a caller bypasses the view's disabled buttons.
+ */
+export function stepPolygonPending(pending, status, target) {
+  const tool = status?.tool;
+  const sides = tool?.params?.sides;
+  if (!tool || typeof tool !== 'object' || !Number.isSafeInteger(sides)) return null;
+  const delta = target - sides;
+  if (!Number.isSafeInteger(delta) || delta === 0 || Math.abs(delta) > POLYGON_SIDES_PENDING_CAP) return null;
+  return { key: tool.key, base: sides, delta };
+}
+
+/**
+ * Ask the host to set the POLYGON side count.
+ *
+ * `cad_set_polygon_sides` is the one IPC for this parameter. A
+ * `{accepted:true}` result is **queue admission**, exactly like `cad_command`:
+ * the next real `cad_status` carries the new value, so the caller must not
+ * optimistically mirror it. A value outside the supported range is refused here
+ * before IPC (the host refuses it too rather than clamping); a pre-queue refusal
+ * rejects with a string, returned as an explicit `failed` — never a silent
+ * success or a fabricated local value.
+ */
+export async function setPolygonSides(invoke, sides) {
+  if (!Number.isSafeInteger(sides) || sides < POLYGON_SIDES_MIN || sides > POLYGON_SIDES_MAX) {
+    return { kind: 'refused', error: 'CAD_POLYGON_SIDES_OUT_OF_RANGE' };
+  }
+  try {
+    const response = await invoke(POLYGON_SIDES_COMMAND, { sides });
+    if (!response || response.accepted !== true) throw Error('CAD_POLYGON_SIDES_NOT_ACCEPTED');
+    return { kind: 'accepted' };
+  } catch (error) { return { kind: 'failed', error: String(error) }; }
+}
+
 // The snap engine's stable machine keys (`cad_measure::SnapKind::as_str`) and
 // their catalog labels. A key outside this set is rendered as nothing rather
 // than a guessed label.

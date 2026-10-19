@@ -330,6 +330,122 @@ pub fn ellipse_parameters(p1: Point3, p2: Point3, p3: Point3) -> CadResult<Ellip
     })
 }
 
+/// The lower bound of the POLYGON side count (AutoCAD `POLYSIDES` legal range).
+pub const MIN_POLYGON_SIDES: u32 = 3;
+
+/// The upper bound of the POLYGON side count (AutoCAD `POLYSIDES` legal range).
+pub const MAX_POLYGON_SIDES: u32 = 1024;
+
+/// The initial POLYGON side count (AutoCAD `POLYSIDES` initial value).
+///
+/// The session sysvar starts here and returns here only when the session is
+/// rebuilt (ADR 0015 decision C); it is never persisted.
+pub const DEFAULT_POLYGON_SIDES: u32 = 4;
+
+/// The smallest radius (world units) for a POLYGON to have a real vertex ring.
+///
+/// A capture whose radius point coincides with the centre collapses the ring to
+/// a point; like the other world epsilons this is a tiny relative-free constant,
+/// so an exactly-degenerate click is refused while any real radius is accepted.
+const MIN_POLYGON_RADIUS: f64 = 1e-12;
+
+/// The `n` vertices of a regular polygon **inscribed in a circle**, in order.
+///
+/// ADR 0015 decision A: POLYGON is AutoCAD's default **inscribed** construction.
+/// `center` is the first pick; the **first vertex** lies on the ray from `center`
+/// through `radius_point` at the exact distance `|radius_point − center|`, so the
+/// pointer-specified radius also fixes the rotation (exactly how AutoCAD's
+/// pointer behaves; the "numeric radius ⇒ snap-rotation-angle" nuance is NOT
+/// IMPLEMENTED per the ADR). The remaining `n − 1` vertices step by `2π/n` about
+/// `+Z`. The returned list does **not** repeat the first vertex: the caller
+/// stores it as a `closed` polyline (and the preview closes it for drawing).
+///
+/// Explicit refusals (never a fabricated ring): a non-finite pick; an
+/// out-of-range side count (`MIN_POLYGON_SIDES..=MAX_POLYGON_SIDES` — the
+/// defensive guard against a corrupted stored sysvar, so a nonsense polygon is
+/// refused rather than drawn); a zero radius (`≤ MIN_POLYGON_RADIUS`); and a
+/// non-coplanar `+Z` pick (the flat work-plane subset, ADR 0015 "NOT
+/// IMPLEMENTED: non-planar input").
+pub fn polygon_vertices(
+    center: Point3,
+    radius_point: Point3,
+    sides: u32,
+) -> CadResult<Vec<Point3>> {
+    if !finite(center) || !finite(radius_point) {
+        return Err(CadError::InvalidInput(
+            "polygon picks must be finite".into(),
+        ));
+    }
+    if !(MIN_POLYGON_SIDES..=MAX_POLYGON_SIDES).contains(&sides) {
+        return Err(CadError::InvalidInput(format!(
+            "polygon side count must be between {MIN_POLYGON_SIDES} and {MAX_POLYGON_SIDES}, got {sides}"
+        )));
+    }
+    // Flat `+Z` subset: a centre plus a radius point is a planar construction, so
+    // a pick off the centre's plane is refused rather than silently projected.
+    let z_tol = 1e-9 * (1.0 + center.z.abs() + radius_point.z.abs());
+    if (radius_point.z - center.z).abs() > z_tol {
+        return Err(CadError::InvalidInput(
+            "polygon picks must lie in one +Z plane".into(),
+        ));
+    }
+    let dx = radius_point.x - center.x;
+    let dy = radius_point.y - center.y;
+    let radius = dx.hypot(dy);
+    if !radius.is_finite() || radius <= MIN_POLYGON_RADIUS {
+        return Err(CadError::InvalidInput(
+            "polygon radius must be positive".into(),
+        ));
+    }
+    let start = dy.atan2(dx);
+    let step = std::f64::consts::TAU / f64::from(sides);
+    let mut points = Vec::with_capacity(sides as usize);
+    for i in 0..sides {
+        let angle = start + step * f64::from(i);
+        let (sin, cos) = angle.sin_cos();
+        points.push(Point3 {
+            x: center.x + radius * cos,
+            y: center.y + radius * sin,
+            z: center.z,
+        });
+    }
+    Ok(points)
+}
+
 fn finite(p: Point3) -> bool {
     p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
+}
+
+/// The clamped chord knot vector and control points of a fit-point SPLINE.
+///
+/// The single construction/validation point shared by the SPLINE command and its
+/// live preview. It applies the flat work-plane subset (the fit points must be
+/// finite and lie in one `+Z` plane — ADR 0015 "NOT IMPLEMENTED: non-planar
+/// input") and then delegates the interpolation to the pure geometry core
+/// ([`cad_geometry::spline::fit_points_to_cubic_spline`]): degree 3, clamped
+/// chord knots, one control point per fit point. The interpolation is never
+/// reimplemented here. The core's own explicit refusals (fewer than
+/// [`cad_geometry::MIN_FIT_POINTS_FOR_CUBIC_SPLINE`] fit points, an all-coincident
+/// run, a duplicate or near-coincident chord, a numerically singular system)
+/// propagate unchanged rather than being swallowed into a silent approximation.
+pub fn spline_control_points(fit_points: &[Point3]) -> CadResult<(Vec<f64>, Vec<Point3>)> {
+    if !fit_points.iter().all(|point| finite(*point)) {
+        return Err(CadError::InvalidInput(
+            "spline fit points must be finite".into(),
+        ));
+    }
+    // Flat `+Z` subset: the fit-interpolated spline is a planar construction, so a
+    // fit set spanning several planes is refused rather than silently projected.
+    if let Some(first) = fit_points.first().copied() {
+        let z_tol = 1e-9 * (1.0 + fit_points.iter().map(|point| point.z.abs()).sum::<f64>());
+        if fit_points
+            .iter()
+            .any(|point| (point.z - first.z).abs() > z_tol)
+        {
+            return Err(CadError::InvalidInput(
+                "spline fit points must lie in one +Z plane".into(),
+            ));
+        }
+    }
+    cad_geometry::spline::fit_points_to_cubic_spline(fit_points)
 }

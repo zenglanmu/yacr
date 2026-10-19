@@ -86,6 +86,31 @@ pub enum CommandId {
     /// (coincident endpoints / third point on the first axis) or non-coplanar
     /// triple. The centre method is not implemented. Work-only.
     CreateEllipse,
+    /// Draw a closed regular POLYGON **inscribed** in the circle through a centre
+    /// pick and a radius point. Payload is `Points([center, radius_point])` in
+    /// click order; the side count is the session sysvar
+    /// ([`crate::SessionState::polygon_sides`], default 4, range 3..=1024), not a
+    /// payload field. The handler builds the closed `n`-vertex
+    /// `SemanticGeometry::Polyline` (one zero bulge per vertex) and refuses a
+    /// non-finite, zero-radius, non-coplanar or out-of-range input. Work-only.
+    CreatePolygon,
+    /// Place a single POINT at the payload position. Payload is
+    /// `Points([position])` in click order; the handler stores
+    /// `SemanticGeometry::Point` and refuses a non-finite position, a
+    /// mismatched payload (a `Geometry` or a non-singleton point list) and a
+    /// missing active layer. A single point has no coplanarity constraint (it is
+    /// trivially coplanar), so the `+Z` refusal is vacuous. AutoCAD documents one
+    /// `Specify a point`; **repeat-until-Enter placement is NOT IMPLEMENTED**
+    /// (unverified). Work-only.
+    CreatePoint,
+    /// Draw a fit-point SPLINE through the payload fit points (at least four,
+    /// degree 3, clamped chord knots) as one `SemanticGeometry::Spline`. The
+    /// handler delegates the interpolation to
+    /// `cad_geometry::spline::fit_points_to_cubic_spline` and refuses fewer than
+    /// four fit points, non-finite or non-coplanar `+Z` points, a mismatched
+    /// payload, a missing active layer, and every degenerate-chord / numerically
+    /// singular input the geometry core raises. Work-only.
+    CreateSpline,
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
     MoveEntities,
@@ -157,6 +182,9 @@ impl CommandId {
                 | Self::CreatePolyline
                 | Self::CreateRectangle
                 | Self::CreateEllipse
+                | Self::CreatePolygon
+                | Self::CreatePoint
+                | Self::CreateSpline
                 | Self::MoveEntities
                 | Self::TrimEntity
                 | Self::ExtendEntity

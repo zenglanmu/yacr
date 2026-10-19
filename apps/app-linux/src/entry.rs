@@ -64,7 +64,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             crate::host::probe_input,
             crate::host::cad_command,
             crate::host::cad_status,
-            crate::host::cad_commands
+            crate::host::cad_commands,
+            crate::host::cad_set_polygon_sides
         ])
         .setup(move |app| {
             crate::host::init(app, &setup_shared)?;

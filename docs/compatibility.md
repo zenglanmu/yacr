@@ -105,9 +105,9 @@
 | `PLINE` | **实现** | 开放 LWPOLYLINE（每顶点 bulge=0） | 弧段/`Angle`/`Center`/`Direction`/`Radius`/`Second pt`/`Halfwidth`/`Width`/`Close`/`Length`/顶点 `Undo`；3D/OCS |
 | `RECTANG` | **实现** | 闭合 LWPOLYLINE（4 顶点，bulge=0） | `Chamfer`/`Fillet`/`Thickness`/`Elevation`/`Width`/`Area`/`Dimensions`/`Rotation`（含圆角会话内持久怪癖）；3D/OCS |
 | `ELLIPSE` | **实现** | 单个 `Ellipse`（`center`、`+Z`、中心相对 `major_axis`、`ratio = 短/长 ≤ 1`、`start=0`、`sweep=2π`） | 轴端点法；`Center` 法/`Arc`/`Rotation`/`Isocircle`/`PELLIPSE`；**长短轴重排为未对齐假设**：本仓库把较长者存为长轴以保证 DXF 组 40 ≤ 1，AutoCAD 确切重排规则**未查证**；预览为有界弦近似（16–128 段），存储实体精确 |
-| `POLYGON` | 未实现（P3b 排期） | — | 计划：边数（会话参数，默认 4）+ 中心 + 半径 → 闭合折线（**内接**）；`Edge` 分支与**外切**模式不做；边数不跨会话持久化 |
-| `POINT` | 未实现（P3c 排期） | — | 计划：单次放置；`PDMODE`/`PDSIZE`/点样式、Multiple Points 重复放置、**3D 视图中的点标记**均不做 |
-| `SPLINE` | 未实现（P3d 排期；`cad-geometry` 插值纯函数已落地） | — | 计划：fit 点法、**≥4 fit 点**、三次/clamped/chord 插值 → NURBS；CV 法/节点类型/阶数/切向/公差/`Close`/`Object` 不做；**fit 点数据不参与往返** |
+| `POLYGON` | **实现** | 单个闭合 `Polyline`（n 顶点、bulge=0、`+Z`），**内接于圆**；第一顶点在"中心→半径点"射线上（指针方向决定旋转） | `Edge` 分支与**外切**模式；"数值半径 ⇒ 底边对齐捕捉旋转角"；边数**不跨会话持久化**（会话参数，默认 4，范围 3–1024，越界显式拒绝） |
+| `POINT` | **实现** | 单个 `Point`（`+Z` 平面）；**单次放置**（AutoCAD 是否重复放置**未查证** ⇒ 不按猜测实现）；显示走 overlay 十字标记（见上方 POINT 绘制列） | `PDMODE`/`PDSIZE`/点样式、Multiple Points 重复放置、**3D 视图中的点标记** |
+| `SPLINE` | **实现** | fit 点法（**≥4** fit 点）→ 三次/clamped/chord **插值** NURBS（`degree=3`、`weights=1`）；预览为 ≤256 段有界弦近似 | `Method(CV)`/`Knots`/`Degree`/`Start-End Tangency`/`Tolerance`/`Close`/`Object` 转换；**2–3 个 fit 点**；**fit 点数据不参与 SAVE→OPEN 往返**（domain 无该字段） |
 
 - 创建命令均为 **Work 模式**（Viewer 显式拒绝）、**模型空间**（插入漏斗固定 `SpaceId::Model`）、
   **一次事务 + 一步撤销**；未支持选项一律显式拒绝，不用近似静默顶替。

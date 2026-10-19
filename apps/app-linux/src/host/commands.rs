@@ -39,6 +39,50 @@ pub fn cad_command(
     Ok(CadCommandAck { accepted: true })
 }
 
+/// Bounded capacity of the typed POLYGON side-count queue. It reuses the CAD
+/// command queue's capacity so both admissions share one bound.
+pub const CAD_POLYGON_SIDES_CAP: usize = cad_ui_core::shell::CAD_COMMAND_CAP;
+
+/// Admit one typed POLYGON side count into the bounded main-thread queue.
+///
+/// Pure and toolkit-free so the admission discipline (disabled CAD session,
+/// bounded queue) is directly testable. The value is deliberately **not**
+/// validated or clamped here: the 3..=1024 range and the Viewer-mode refusal are
+/// the host session's authority (`CadSession::set_polygon_sides`), applied on the
+/// owner thread when the tick drains this queue, and the real outcome surfaces
+/// through `cad_status.error` — exactly like `cad_command`.
+pub fn admit_polygon_sides(queue: &mut Vec<u32>, cad_mode: bool, sides: u32) -> Result<(), String> {
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if queue.len() >= CAD_POLYGON_SIDES_CAP {
+        return Err("CAD polygon-sides queue is full".into());
+    }
+    queue.push(sides);
+    Ok(())
+}
+
+/// `cad_set_polygon_sides` command: admit one typed POLYGON side count into the
+/// bounded main-thread queue (ADR 0015 decision C).
+///
+/// This is a **narrow typed** entry point, deliberately not an argument added to
+/// `cad_command` (command-line text-payload parsing was rejected in an earlier
+/// phase). No session state is touched off the main thread: the value is queued
+/// and the owner tick routes it through `CadSession::set_polygon_sides`, whose
+/// authoritative host validates the range and Viewer mode. `{accepted:true}`
+/// means **queued**, not completed; the real outcome (including an explicit
+/// refusal) surfaces through `cad_status.error`.
+#[tauri::command]
+pub fn cad_set_polygon_sides(
+    shared: tauri::State<'_, ProbeShared>,
+    sides: u32,
+) -> Result<CadCommandAck, String> {
+    let mut state = lock(&shared.0);
+    let cad_mode = state.shell.cad_mode;
+    admit_polygon_sides(&mut state.cad_polygon_sides, cad_mode, sides)?;
+    Ok(CadCommandAck { accepted: true })
+}
+
 /// `cad_status` command: the latest main-thread CAD snapshot, with the host-side
 /// (transport) error merged in.
 ///

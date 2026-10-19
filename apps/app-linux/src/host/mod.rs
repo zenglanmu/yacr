@@ -48,7 +48,8 @@ mod tests;
 
 // Public host API (unchanged external surface; `crate::host::…` still resolves).
 pub use commands::{
-    cad_command, cad_commands, cad_status, probe_input, probe_status, CadCommandAck,
+    cad_command, cad_commands, cad_set_polygon_sides, cad_status, probe_input, probe_status,
+    CadCommandAck,
 };
 pub use init::init;
 pub use options::{
@@ -62,8 +63,9 @@ pub(crate) use postload::resolve_process_exit;
 // re-export them alongside the command functions so `generate_handler!` (which
 // resolves them at `crate::host::…`) keeps working after the split.
 pub(crate) use commands::{
-    __cmd__cad_command, __cmd__cad_commands, __cmd__cad_status, __cmd__probe_input,
-    __cmd__probe_status, __tauri_command_name_cad_command, __tauri_command_name_cad_commands,
+    __cmd__cad_command, __cmd__cad_commands, __cmd__cad_set_polygon_sides, __cmd__cad_status,
+    __cmd__probe_input, __cmd__probe_status, __tauri_command_name_cad_command,
+    __tauri_command_name_cad_commands, __tauri_command_name_cad_set_polygon_sides,
     __tauri_command_name_cad_status, __tauri_command_name_probe_input,
     __tauri_command_name_probe_status,
 };
@@ -158,6 +160,12 @@ pub struct Shared {
     postload_pan_exit: Option<i32>,
     /// Startup/CLI options (drawing, font/image dirs, size, probe mode).
     pub launch: LaunchOptions,
+    /// Bounded main-thread queue of typed POLYGON side-count requests (ADR 0015
+    /// decision C): admitted by the `cad_set_polygon_sides` IPC command and
+    /// drained by the owner tick into `CadSession::set_polygon_sides`. Typed and
+    /// separate from `shell.cad_commands` (name-only) so the rejected command-line
+    /// text-payload path is never reintroduced.
+    pub cad_polygon_sides: Vec<u32>,
 }
 
 /// Managed Tauri state: a shared handle to [`Shared`].
@@ -188,6 +196,7 @@ pub fn new_shared(launch: LaunchOptions) -> Arc<Mutex<Shared>> {
         app_handle: None,
         postload_pan_exit: None,
         launch,
+        cad_polygon_sides: Vec::new(),
     }))
 }
 

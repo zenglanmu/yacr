@@ -251,6 +251,28 @@ impl HostController {
                 crate::CommandId::CreateEllipse,
                 crate::CommandPayload::Points(vec![p1, p2, p3]),
             ),
+            // POLYGON: the centre and radius point travel as `Points` (the
+            // construction input the create path already reads); the side count
+            // is the session sysvar the handler reads, so it never rides the
+            // payload.
+            DrawIntent::Polygon {
+                center,
+                radius_point,
+            } => (
+                crate::CommandId::CreatePolygon,
+                crate::CommandPayload::Points(vec![center, radius_point]),
+            ),
+            // POINT: the single captured position travels as `Points`.
+            DrawIntent::Point { position } => (
+                crate::CommandId::CreatePoint,
+                crate::CommandPayload::Points(vec![position]),
+            ),
+            // SPLINE: the captured fit points travel as `Points`; the handler runs
+            // the interpolation and stores one Spline entity.
+            DrawIntent::Spline { fit_points } => (
+                crate::CommandId::CreateSpline,
+                crate::CommandPayload::Points(fit_points),
+            ),
             DrawIntent::Move { delta } => (
                 crate::CommandId::MoveEntities,
                 crate::CommandPayload::Move {

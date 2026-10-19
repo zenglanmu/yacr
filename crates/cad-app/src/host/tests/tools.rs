@@ -692,3 +692,287 @@ fn exported_ellipse_round_trips_idempotently() {
     assert_eq!(bytes, again, "re-export is byte-identical");
     assert_eq!(report.counts.dropped, again_report.counts.dropped);
 }
+
+#[test]
+fn polygon_round_trips_through_the_dxf_export_as_a_closed_lwpolyline() {
+    // `HostController::export_dxf` is the production Save path, so the polygon is
+    // round-tripped here without touching the frozen `cad-import-acadrust` crate:
+    // the emitted DXF must contain exactly one closed (`70` bit 1) `n`-vertex
+    // LWPOLYLINE (one vertex per side).
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_snap_enabled(false);
+    controller.new_blank_document().unwrap();
+    controller.session.set_polygon_sides(6).unwrap();
+    controller.create_polygon(p(0.0, 0.0), p(4.0, 0.0)).unwrap();
+
+    let (bytes, report) = controller.export_dxf().unwrap();
+    assert_eq!(report.counts.dropped, 0, "nothing may be dropped");
+    let text = String::from_utf8(bytes).expect("DXF text is UTF-8");
+    let pairs = dxf_pairs(&text);
+    let polylines = dxf_entities(&pairs, "LWPOLYLINE");
+    assert_eq!(polylines.len(), 1, "exactly one LWPOLYLINE for one polygon");
+    let record = &polylines[0];
+    let flag = record
+        .iter()
+        .find(|(code, _)| *code == 70)
+        .map(|(_, value)| value.parse::<i32>().expect("a numeric 70 flag"))
+        .expect("an LWPOLYLINE writes a 70 flag");
+    assert_eq!(flag, 1, "POLYGON exports a closed LWPOLYLINE (70 bit 1)");
+    let vertex_count = record.iter().filter(|(code, _)| *code == 10).count();
+    assert_eq!(
+        vertex_count, 6,
+        "one LWPOLYLINE vertex per polygon side (the session side count)"
+    );
+}
+
+#[test]
+fn point_capture_confirms_one_entity_and_maps_the_exact_position() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_snap_enabled(false);
+    let count = controller.drawing().unwrap().entity_count();
+
+    controller.begin_draw_tool(DrawToolKind::Point).unwrap();
+    // POINT is exact arity 1: not confirmable before the click.
+    let preview = controller.session.draw_preview().unwrap();
+    assert!(!preview.can_confirm());
+    assert_eq!(preview.remaining_points(), Some(1));
+    assert!(!preview.is_open_ended());
+    assert!(controller.confirm_draw().is_err(), "no point captured yet");
+
+    let position = p(12.0, 7.0);
+    controller.capture_tool_point(position).unwrap();
+    let preview = controller.session.draw_preview().unwrap();
+    assert!(preview.can_confirm());
+    assert_eq!(preview.points, vec![position]);
+    assert_eq!(preview.remaining_points(), Some(0));
+
+    // The DrawIntent carries the single captured position and maps to exactly
+    // that point on the command payload.
+    let intent = controller.session.draw_intent().unwrap();
+    assert_eq!(intent, crate::DrawIntent::Point { position });
+    let selection = controller
+        .session
+        .draw_selection_snapshot()
+        .unwrap()
+        .to_vec();
+    let command = controller
+        .command_for_draw_intent(intent, &selection)
+        .unwrap();
+    assert_eq!(command.id, crate::CommandId::CreatePoint);
+    match command.payload {
+        crate::CommandPayload::Points(points) => {
+            assert_eq!(points, vec![position], "payload matches capture exactly")
+        }
+        _ => panic!("expected a Points payload"),
+    }
+
+    let outcome = controller.confirm_draw().unwrap();
+    assert_eq!(outcome.objects.len(), 1);
+    let after = controller.drawing().unwrap();
+    assert_eq!(after.entity_count(), count + 1);
+    let model = after.model_space();
+    let entity = model.last().unwrap();
+    match &entity.geometry {
+        SemanticGeometry::Point(stored) => assert_eq!(*stored, position),
+        other => panic!("expected a point, got {other:?}"),
+    }
+    assert!(matches!(controller.session.tool, crate::ToolState::Idle));
+}
+
+#[test]
+fn spline_capture_confirms_one_entity_and_maps_the_exact_fit_points() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_snap_enabled(false);
+    let count = controller.drawing().unwrap().entity_count();
+
+    controller.begin_draw_tool(DrawToolKind::Spline).unwrap();
+    let captured = [
+        p(0.0, 0.0),
+        p(1.0, 2.0),
+        p(2.5, 2.5),
+        p(4.0, 1.0),
+        p(5.5, -1.0),
+    ];
+    for point in captured {
+        controller.capture_tool_point(point).unwrap();
+    }
+    // The open-ended capture is confirmable at/above its four-point minimum, and
+    // its preview reports no fixed remainder (never a fabricated 0).
+    let preview = controller.session.draw_preview().unwrap();
+    assert!(preview.can_confirm());
+    assert!(preview.is_open_ended());
+    assert_eq!(preview.remaining_points(), None);
+
+    let intent = controller.session.draw_intent().unwrap();
+    assert_eq!(
+        intent,
+        crate::DrawIntent::Spline {
+            fit_points: captured.to_vec()
+        }
+    );
+    let selection = controller
+        .session
+        .draw_selection_snapshot()
+        .unwrap()
+        .to_vec();
+    let command = controller
+        .command_for_draw_intent(intent, &selection)
+        .unwrap();
+    assert_eq!(command.id, crate::CommandId::CreateSpline);
+    match command.payload {
+        crate::CommandPayload::Points(points) => {
+            assert_eq!(points, captured.to_vec(), "payload matches capture exactly")
+        }
+        _ => panic!("expected a Points payload"),
+    }
+
+    let outcome = controller.confirm_draw().unwrap();
+    assert_eq!(outcome.objects.len(), 1);
+    let after = controller.drawing().unwrap();
+    assert_eq!(after.entity_count(), count + 1);
+    let model = after.model_space();
+    let entity = model.last().unwrap();
+    match &entity.geometry {
+        SemanticGeometry::Spline {
+            degree,
+            control_points,
+            weights,
+            ..
+        } => {
+            assert_eq!(*degree, 3);
+            assert_eq!(control_points.len(), captured.len());
+            assert_eq!(weights, &vec![1.0; captured.len()]);
+        }
+        other => panic!("expected a spline, got {other:?}"),
+    }
+    assert!(matches!(controller.session.tool, crate::ToolState::Idle));
+}
+
+#[test]
+fn spline_open_capture_never_auto_confirms_and_confirm_at_four_commits() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_snap_enabled(false);
+    let revision = controller.drawing().unwrap().revision();
+    controller.begin_draw_tool(DrawToolKind::Spline).unwrap();
+
+    // Below the four-point minimum the capture is not confirmable, and a confirm
+    // is refused without a write while the capture survives.
+    for point in [p(0.0, 0.0), p(1.0, 1.0), p(2.0, 0.0)] {
+        controller.capture_tool_point(point).unwrap();
+    }
+    assert!(!controller.session.draw_preview().unwrap().can_confirm());
+    assert!(controller.confirm_draw().is_err());
+    assert_eq!(controller.drawing().unwrap().revision(), revision);
+    assert!(controller.session.draw_preview().is_some());
+
+    // At the minimum the capture is ready but does **not** auto-commit; a further
+    // click only adds a fit point.
+    controller.capture_tool_point(p(3.0, 1.0)).unwrap();
+    assert!(controller.session.draw_preview().unwrap().can_confirm());
+    assert_eq!(
+        controller.drawing().unwrap().revision(),
+        revision,
+        "an open capture never auto-commits"
+    );
+    controller.capture_tool_point(p(4.0, 0.5)).unwrap();
+    assert_eq!(controller.session.draw_preview().unwrap().points.len(), 5);
+    assert_eq!(controller.drawing().unwrap().revision(), revision);
+
+    // The confirm path (the Enter affordance) commits exactly one entity.
+    let outcome = controller.confirm_draw().unwrap();
+    assert_eq!(outcome.objects.len(), 1);
+    assert_ne!(controller.drawing().unwrap().revision(), revision);
+    assert!(matches!(controller.session.tool, crate::ToolState::Idle));
+}
+
+#[test]
+fn point_round_trips_through_the_dxf_export_as_one_point() {
+    // `HostController::export_dxf` is the production Save path, so the point is
+    // round-tripped here without touching the frozen `cad-import-acadrust` crate:
+    // the emitted DXF must contain exactly one POINT at the captured location, and
+    // the report records it as an exact mapping (nothing converted or dropped).
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_snap_enabled(false);
+    controller.new_blank_document().unwrap();
+    controller.create_point(p(3.0, 4.0)).unwrap();
+
+    let (bytes, report) = controller.export_dxf().unwrap();
+    assert_eq!(report.counts.dropped, 0, "nothing may be dropped");
+    assert_eq!(report.counts.converted, 0, "POINT is an exact mapping");
+    assert_eq!(report.counts.exact, 1, "one exact geometry");
+    let text = String::from_utf8(bytes).expect("DXF text is UTF-8");
+    let pairs = dxf_pairs(&text);
+    let points = dxf_entities(&pairs, "POINT");
+    assert_eq!(points.len(), 1, "exactly one POINT for one point");
+    let record = &points[0];
+    assert!((group(record, 10) - 3.0).abs() < 1e-9, "x");
+    assert!((group(record, 20) - 4.0).abs() < 1e-9, "y");
+    assert!(group(record, 30).abs() < 1e-9, "z");
+}
+
+#[test]
+fn spline_round_trips_through_the_dxf_export_as_converted() {
+    // ADR 0015 decision F: SPLINE is recorded as `Converted` (the domain has no
+    // closed/periodic flags, so they are written false), **not** `Exact`. The
+    // geometry itself is preserved: the exported SPLINE carries the stored degree,
+    // control points and unit weights.
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_snap_enabled(false);
+    controller.new_blank_document().unwrap();
+    let fit = vec![
+        p(1.0, 1.0),
+        p(2.0, 3.0),
+        p(3.5, 3.5),
+        p(5.0, 2.0),
+        p(6.5, 0.0),
+    ];
+    controller.create_spline(fit.clone()).unwrap();
+
+    let (bytes, report) = controller.export_dxf().unwrap();
+    assert_eq!(report.counts.dropped, 0, "nothing may be dropped");
+    assert_eq!(
+        report.counts.converted, 1,
+        "SPLINE is a recorded conversion, not an exact copy"
+    );
+    assert_eq!(report.counts.exact, 0);
+    assert!(
+        report
+            .entries
+            .iter()
+            .any(|entry| entry.message.contains("closed/periodic")),
+        "the conversion reason names the dropped closed/periodic flags: {:?}",
+        report.entries
+    );
+
+    let text = String::from_utf8(bytes).expect("DXF text is UTF-8");
+    let pairs = dxf_pairs(&text);
+    let splines = dxf_entities(&pairs, "SPLINE");
+    assert_eq!(splines.len(), 1, "exactly one SPLINE for one capture");
+    let record = &splines[0];
+    assert_eq!(group(record, 71) as i64, 3, "degree 3");
+    assert_eq!(
+        group(record, 73) as i64,
+        fit.len() as i64,
+        "one control point per fit point"
+    );
+    assert_eq!(group(record, 74) as i64, 0, "fit points are not carried");
+    assert_eq!(
+        group(record, 70) as i64,
+        0,
+        "closed/periodic flags are false"
+    );
+    // The geometry is preserved: a clamped interpolant starts exactly at the first
+    // fit point, so the first exported control point equals it.
+    let control_x = record
+        .iter()
+        .find(|(code, _)| *code == 10)
+        .map(|(_, value)| value.parse::<f64>().expect("numeric control x"))
+        .expect("a SPLINE writes control-point x groups");
+    let control_y = record
+        .iter()
+        .find(|(code, _)| *code == 20)
+        .map(|(_, value)| value.parse::<f64>().expect("numeric control y"))
+        .expect("a SPLINE writes control-point y groups");
+    assert!((control_x - fit[0].x).abs() < 1e-9, "first control x");
+    assert!((control_y - fit[0].y).abs() < 1e-9, "first control y");
+}

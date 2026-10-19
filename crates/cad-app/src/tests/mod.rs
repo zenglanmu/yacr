@@ -117,6 +117,7 @@ fn application_with_layouts() -> (Application, SessionState) {
     (app, session)
 }
 
+mod cjk_baseline;
 mod commands;
 mod drawing;
 mod drawing_space;

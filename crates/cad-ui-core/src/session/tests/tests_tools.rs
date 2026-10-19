@@ -3,7 +3,7 @@
 use super::super::*;
 use super::test_support::*;
 
-/// The 14 draw selectors mapped to their `cad-app` machine keys.
+/// The 17 draw selectors mapped to their `cad-app` machine keys.
 const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("LINE", "draw.line"),
     ("CIRCLE", "draw.circle"),
@@ -11,6 +11,9 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("PLINE", "draw.polyline"),
     ("RECTANG", "draw.rectang"),
     ("ELLIPSE", "draw.ellipse"),
+    ("POLYGON", "draw.polygon"),
+    ("POINT", "draw.point"),
+    ("SPLINE", "draw.spline"),
     ("MOVE", "draw.move"),
     ("TRIM", "draw.trim"),
     ("COPY", "draw.copy"),
@@ -140,6 +143,168 @@ fn ellipse_selector_is_admitted_and_starts_the_ellipse_kind() {
     assert_eq!(tool.key, "draw.ellipse");
     assert_eq!(tool.points, 3);
     assert!(tool.ready, "three picks define an ellipse");
+}
+
+#[test]
+fn polygon_selector_is_admitted_and_starts_the_polygon_kind() {
+    // ADR 0015 P3b: POLYGON is a real `COMMAND_TABLE` draw selector that routes to
+    // `BeginDraw(Polygon)`, and it is disjoint from the interaction-only selector
+    // families (a measurement/zoom name would otherwise silently win the lookup).
+    assert!(admissible_names().contains(&"POLYGON"));
+    assert_eq!(canonical_command_name("POLYGON"), Some("POLYGON"));
+    assert_eq!(normalize_command("polygon"), Some(CommandId::CreatePolygon));
+    assert_eq!(measurement_selector_kind("POLYGON"), None);
+    assert!(zoom_step_factor("POLYGON").is_none());
+    assert!(
+        !COMMAND_ALIASES.iter().any(|(alias, _)| *alias == "POLYGON"),
+        "POLYGON must not be an alias"
+    );
+    // Admitted exactly once in the canonical vocabulary.
+    assert_eq!(
+        COMMAND_TABLE
+            .iter()
+            .filter(|(name, _)| *name == "POLYGON")
+            .count(),
+        1
+    );
+
+    // The session really starts the polygon kind (the typed request reaches the
+    // host), with no captured point and not ready.
+    let session = fresh_session();
+    session.command("POLYGON").expect("POLYGON is admitted");
+    let tool = session
+        .snapshot(None, None, 0)
+        .tool
+        .expect("POLYGON starts a tool");
+    assert_eq!(tool.key, "draw.polygon");
+    assert_eq!(tool.points, 0);
+    assert!(!tool.ready);
+
+    // Two clicks make it ready: the router-started tool is the real arity-2
+    // centre+radius capture.
+    let capture = |pixel: [f64; 2], sequence: u64| {
+        session
+            .handle_input(&pointer_at(InputKind::PointerDown, sequence, pixel, None))
+            .expect("the press is admitted");
+        session
+            .handle_input(&pointer_at(InputKind::PointerUp, sequence + 1, pixel, None))
+            .expect("the release is admitted");
+    };
+    capture([400.0, 300.0], 1);
+    assert_eq!(session.snapshot(None, None, 0).tool.unwrap().points, 1);
+    capture([460.0, 300.0], 3);
+    let tool = session.snapshot(None, None, 0).tool.unwrap();
+    assert_eq!(tool.key, "draw.polygon");
+    assert_eq!(tool.points, 2);
+    assert!(tool.ready, "a centre and a radius point define a polygon");
+}
+
+#[test]
+fn point_selector_is_admitted_and_starts_the_point_kind() {
+    // ADR 0015 P3c: POINT is a real `COMMAND_TABLE` draw selector that routes to
+    // `BeginDraw(Point)`, and it is disjoint from the interaction-only selector
+    // families (a measurement/zoom name would otherwise silently win the lookup).
+    assert!(admissible_names().contains(&"POINT"));
+    assert_eq!(canonical_command_name("POINT"), Some("POINT"));
+    assert_eq!(normalize_command("point"), Some(CommandId::CreatePoint));
+    assert_eq!(measurement_selector_kind("POINT"), None);
+    assert!(zoom_step_factor("POINT").is_none());
+    assert!(
+        !COMMAND_ALIASES.iter().any(|(alias, _)| *alias == "POINT"),
+        "POINT must not be an alias"
+    );
+    assert_eq!(
+        COMMAND_TABLE
+            .iter()
+            .filter(|(name, _)| *name == "POINT")
+            .count(),
+        1
+    );
+
+    // The session really starts the point kind, with no captured point and not
+    // ready; a single click makes it ready (exact arity 1, single placement).
+    let session = fresh_session();
+    session.command("POINT").expect("POINT is admitted");
+    let tool = session
+        .snapshot(None, None, 0)
+        .tool
+        .expect("POINT starts a tool");
+    assert_eq!(tool.key, "draw.point");
+    assert_eq!(tool.points, 0);
+    assert!(!tool.ready);
+
+    let capture = |pixel: [f64; 2], sequence: u64| {
+        session
+            .handle_input(&pointer_at(InputKind::PointerDown, sequence, pixel, None))
+            .expect("the press is admitted");
+        session
+            .handle_input(&pointer_at(InputKind::PointerUp, sequence + 1, pixel, None))
+            .expect("the release is admitted");
+    };
+    capture([400.0, 300.0], 1);
+    let tool = session.snapshot(None, None, 0).tool.unwrap();
+    assert_eq!(tool.key, "draw.point");
+    assert_eq!(tool.points, 1);
+    assert!(tool.ready, "one click places a point");
+}
+
+#[test]
+fn spline_selector_is_admitted_and_starts_the_spline_kind() {
+    // ADR 0015 P3d: SPLINE is a real `COMMAND_TABLE` draw selector that routes to
+    // `BeginDraw(Spline)`, and it is disjoint from the interaction-only selector
+    // families (a measurement/zoom name would otherwise silently win the lookup).
+    assert!(admissible_names().contains(&"SPLINE"));
+    assert_eq!(canonical_command_name("SPLINE"), Some("SPLINE"));
+    assert_eq!(normalize_command("spline"), Some(CommandId::CreateSpline));
+    assert_eq!(measurement_selector_kind("SPLINE"), None);
+    assert!(zoom_step_factor("SPLINE").is_none());
+    assert!(
+        !COMMAND_ALIASES.iter().any(|(alias, _)| *alias == "SPLINE"),
+        "SPLINE must not be an alias"
+    );
+    assert_eq!(
+        COMMAND_TABLE
+            .iter()
+            .filter(|(name, _)| *name == "SPLINE")
+            .count(),
+        1
+    );
+
+    // The session really starts the spline kind, with no captured fit point and
+    // not ready; it is open-ended (at least four fit points) and never ready
+    // below four.
+    let session = fresh_session();
+    session.command("SPLINE").expect("SPLINE is admitted");
+    let tool = session
+        .snapshot(None, None, 0)
+        .tool
+        .expect("SPLINE starts a tool");
+    assert_eq!(tool.key, "draw.spline");
+    assert_eq!(tool.points, 0);
+    assert!(!tool.ready);
+
+    let capture = |pixel: [f64; 2], sequence: u64| {
+        session
+            .handle_input(&pointer_at(InputKind::PointerDown, sequence, pixel, None))
+            .expect("the press is admitted");
+        session
+            .handle_input(&pointer_at(InputKind::PointerUp, sequence + 1, pixel, None))
+            .expect("the release is admitted");
+    };
+    capture([400.0, 300.0], 1);
+    capture([460.0, 260.0], 3);
+    capture([520.0, 320.0], 5);
+    let tool = session.snapshot(None, None, 0).tool.unwrap();
+    assert_eq!(tool.points, 3);
+    assert!(
+        !tool.ready,
+        "three fit points are below the degree-3 minimum"
+    );
+    capture([580.0, 280.0], 7);
+    let tool = session.snapshot(None, None, 0).tool.unwrap();
+    assert_eq!(tool.key, "draw.spline");
+    assert_eq!(tool.points, 4);
+    assert!(tool.ready, "four fit points confirm a degree-3 fit spline");
 }
 
 #[test]
@@ -514,4 +679,129 @@ fn handle_input_captures_points_while_a_tool_is_active_and_status_reports_them()
         .expect("LINE is active");
     assert_eq!(tool.points, 2, "a second click captures the end point");
     assert!(tool.ready, "two points define a LINE");
+}
+
+#[test]
+fn cad_tool_params_report_the_polygon_side_count_only_for_polygon() {
+    // ADR 0015 decision C (frozen frontend wire shape): `CadTool.params.sides` is
+    // present **only** for a POLYGON capture (the session sysvar, default 4) and
+    // is `null` for every other active tool, so a stepper's enablement is derived
+    // from `tool.key` and never from a stale local value.
+    let idle = fresh_session();
+    assert_eq!(
+        idle.snapshot(None, None, 0).tool,
+        None,
+        "no active tool carries no `tool`/`params` block at all"
+    );
+
+    let polygon = fresh_session();
+    polygon.command("POLYGON").expect("POLYGON is admitted");
+    let tool = polygon
+        .snapshot(None, None, 0)
+        .tool
+        .expect("POLYGON is active");
+    assert_eq!(tool.key, "draw.polygon");
+    assert_eq!(tool.points, 0);
+    assert!(!tool.ready);
+    assert_eq!(
+        tool.params.sides,
+        Some(4),
+        "the POLYGON capture reports the session side count (default 4)"
+    );
+
+    // A different active tool reports `null`, never a carried-over value.
+    let line = fresh_session();
+    line.command("LINE").expect("LINE is admitted");
+    let tool = line.snapshot(None, None, 0).tool.expect("LINE is active");
+    assert_eq!(tool.key, "draw.line");
+    assert_eq!(
+        tool.params.sides, None,
+        "a non-POLYGON draw tool reports null sides"
+    );
+
+    // A measurement tool reports `null` as well.
+    let measure = fresh_session();
+    measure.command("MEASURE").expect("MEASURE is admitted");
+    let tool = measure
+        .snapshot(None, None, 0)
+        .tool
+        .expect("MEASURE is active");
+    assert_eq!(tool.params.sides, None);
+}
+
+#[test]
+fn set_polygon_sides_accepts_the_range_refuses_out_of_range_and_is_visible_while_polygon_is_active()
+{
+    // ADR 0015 decision C: the session setter routes the typed
+    // `SetPolygonSides` request (one path only — no direct state write), so the
+    // host validates the 3..=1024 range and refuses out of range explicitly (no
+    // clamp) and refuses in Viewer mode (create commands are Work-only). A
+    // success is visible through the frozen `CadTool.params.sides`.
+    let session = fresh_session();
+    let sides_now = |session: &CadSession| {
+        session
+            .snapshot(None, None, 0)
+            .tool
+            .expect("POLYGON is active")
+            .params
+            .sides
+    };
+
+    // No active tool carries no `params` block at all; the sysvar only surfaces
+    // while POLYGON is the active capture.
+    assert_eq!(session.snapshot(None, None, 0).tool, None);
+
+    session.command("POLYGON").expect("POLYGON is admitted");
+    assert_eq!(sides_now(&session), Some(4), "the default is 4");
+
+    // The whole accepted range round-trips through the typed request.
+    for accepted in [3u32, 4, 1024] {
+        session
+            .set_polygon_sides(accepted)
+            .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
+        assert_eq!(
+            sides_now(&session),
+            Some(accepted),
+            "the setter is visible through CadTool.params.sides"
+        );
+    }
+
+    // Out of range is an explicit refusal with the value unchanged (never a
+    // silent clamp).
+    for refused in [2u32, 1025] {
+        let error = session
+            .set_polygon_sides(refused)
+            .expect_err("out-of-range must be refused, not clamped");
+        assert!(!error.is_empty(), "an explicit refusal, not empty success");
+        assert_eq!(
+            sides_now(&session),
+            Some(1024),
+            "a refused value leaves the side count unchanged"
+        );
+    }
+
+    // Sysvar semantics: the value survives a tool switch and a cancel.
+    session.command("LINE").expect("LINE is admitted");
+    session.command("CANCEL").expect("CANCEL is admitted");
+    session
+        .command("POLYGON")
+        .expect("POLYGON is admitted again");
+    assert_eq!(sides_now(&session), Some(1024));
+
+    // Viewer mode refuses the parameter and leaves the value unchanged.
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .set_mode(cad_app::AppMode::Viewer)
+        .expect("switch to Viewer");
+    let error = session
+        .set_polygon_sides(5)
+        .expect_err("Viewer mode must refuse the create parameter");
+    assert!(!error.is_empty(), "an explicit refusal, not empty success");
+    assert_eq!(
+        session.core.controller.borrow().session.polygon_sides(),
+        1024,
+        "a Viewer refusal leaves the value unchanged"
+    );
 }

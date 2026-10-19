@@ -420,6 +420,7 @@ fn a_candidate_only_tint_is_flags_only_while_the_preview_cursor_is_visual() {
             remaining: 2,
             selection_count: 0,
             ready: false,
+            polygon_sides: None,
         }),
         ..OverlayInputs::default()
     };

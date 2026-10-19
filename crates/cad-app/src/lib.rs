@@ -44,7 +44,10 @@ pub use camera::{
     ProjectionKind, StandardView, ViewBasis,
 };
 pub use command_id::*;
-pub use draw_tool::{circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity};
+pub use draw_tool::{
+    circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity,
+    DEFAULT_POLYGON_SIDES,
+};
 pub use input::{
     apply_canvas_metrics, classify_key, escape_action, CancelReason, CanvasMetrics,
     DiagnosticsDrawer, EscapeAction, InputOutcome, InputPolicy, KeyAction, LoadingState,
@@ -107,6 +110,17 @@ pub struct SessionState {
     /// required to have; a create naming a layer the database does not contain
     /// is an explicit `InvalidInput` rather than a silent fallback.
     pub active_layer: LayerId,
+    /// The session POLYGON side count (ADR 0015 decision C).
+    ///
+    /// Session/display state only — **never** a persisted config. The default is
+    /// **4**, matching AutoCAD's `POLYSIDES` initial value, and it is set only
+    /// through the typed `SetPolygonSides` request (range
+    /// [`crate::draw_tool::MIN_POLYGON_SIDES`]`..=`[`crate::draw_tool::MAX_POLYGON_SIDES`],
+    /// out of range is an explicit refusal, never a silent clamp). It survives a
+    /// tool switch and a cancel (sysvar semantics), is **not** reset by a
+    /// document edit, and returns to 4 only when the session is rebuilt (a new
+    /// blank document or a document replacement).
+    polygon_sides: u32,
     /// Whether object snapping is active for this session (ADR 0014).
     ///
     /// Session state only: toggling it writes no database and creates no
@@ -178,6 +192,7 @@ impl SessionState {
             generation: 0,
             backend: BackendChoice::Auto,
             active_layer: LayerId(0),
+            polygon_sides: DEFAULT_POLYGON_SIDES,
             snap_enabled: true,
             hover_preview: true,
             hover_dwell_ms: 20,
@@ -216,6 +231,38 @@ impl SessionState {
     /// See [`SessionState::set_hover_preview`] for the AutoCAD-matching default.
     pub fn hover_preview(&self) -> bool {
         self.hover_preview
+    }
+
+    /// The session POLYGON side count (ADR 0015 decision C).
+    ///
+    /// Session/display state only; the default is [`DEFAULT_POLYGON_SIDES`] (4,
+    /// AutoCAD's `POLYSIDES` initial value).
+    pub fn polygon_sides(&self) -> u32 {
+        self.polygon_sides
+    }
+
+    /// Set the session POLYGON side count, refusing out-of-range input.
+    ///
+    /// The range is [`crate::draw_tool::MIN_POLYGON_SIDES`]`..=`[`crate::draw_tool::MAX_POLYGON_SIDES`]
+    /// (AutoCAD's `POLYSIDES` legal range); an out-of-range value is an explicit
+    /// `InvalidInput`, never a silent clamp. Work-only: the create commands (and
+    /// therefore this parameter) are refused in Viewer mode, matching
+    /// [`SessionState::begin_draw`]. The value is session state: a tool switch, a
+    /// cancel and a document edit leave it untouched; only a session rebuild
+    /// resets it to the default.
+    pub fn set_polygon_sides(&mut self, sides: u32) -> CadResult<()> {
+        self.authorize(CommandId::CreatePolygon)?;
+        if !(crate::draw_tool::MIN_POLYGON_SIDES..=crate::draw_tool::MAX_POLYGON_SIDES)
+            .contains(&sides)
+        {
+            return Err(CadError::InvalidInput(format!(
+                "POLYGON side count must be between {} and {}, got {sides}",
+                crate::draw_tool::MIN_POLYGON_SIDES,
+                crate::draw_tool::MAX_POLYGON_SIDES
+            )));
+        }
+        self.polygon_sides = sides;
+        Ok(())
     }
 
     /// Enable or disable the idle hover entity preview for this session.
@@ -301,6 +348,9 @@ impl SessionState {
             DrawToolKind::Polyline => CommandId::CreatePolyline,
             DrawToolKind::Rectang => CommandId::CreateRectangle,
             DrawToolKind::Ellipse => CommandId::CreateEllipse,
+            DrawToolKind::Polygon => CommandId::CreatePolygon,
+            DrawToolKind::Point => CommandId::CreatePoint,
+            DrawToolKind::Spline => CommandId::CreateSpline,
             DrawToolKind::Move => CommandId::MoveEntities,
             DrawToolKind::Trim => CommandId::TrimEntity,
             DrawToolKind::Copy => CommandId::CopyEntities,
@@ -434,9 +484,21 @@ impl SessionState {
 
     pub fn draw_preview(&self) -> Option<DrawPreview> {
         match &self.tool {
-            ToolState::Drawing(capture) => Some(capture.tool.preview()),
+            ToolState::Drawing(capture) => Some(self.annotate_draw_preview(capture.tool.preview())),
             _ => None,
         }
+    }
+
+    /// Annotate a pure tool preview with the session parameters it needs.
+    ///
+    /// Only the POLYGON preview carries a session sysvar (the side count); the
+    /// field is `None` for every other kind, so the frozen frontend projection
+    /// (`CadTool.params.sides`) can never report a side count for a tool that has
+    /// none.
+    fn annotate_draw_preview(&self, mut preview: DrawPreview) -> DrawPreview {
+        preview.polygon_sides =
+            (preview.kind == DrawToolKind::Polygon).then_some(self.polygon_sides);
+        preview
     }
 
     pub fn draw_intent(&self) -> CadResult<DrawIntent> {
@@ -457,7 +519,9 @@ impl SessionState {
         match &self.tool {
             ToolState::Idle => ToolSnapshot::Idle,
             ToolState::Selecting => ToolSnapshot::Selecting,
-            ToolState::Drawing(capture) => ToolSnapshot::Drawing(capture.tool.preview()),
+            ToolState::Drawing(capture) => {
+                ToolSnapshot::Drawing(self.annotate_draw_preview(capture.tool.preview()))
+            }
             ToolState::Measuring(tool) => ToolSnapshot::Measuring(tool.preview()),
             ToolState::Panning => ToolSnapshot::Panning,
         }

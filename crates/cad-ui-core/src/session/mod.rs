@@ -60,7 +60,7 @@ pub use self::commands::{
 };
 pub use self::status::{
     unsupported_status, CadCamera, CadImportProgress, CadSelection, CadSelectionRow, CadStatus,
-    CadTool,
+    CadTool, CadToolParams,
 };
 
 /// Completions drained per poll. The queue's absolute capacity is 256, so this
@@ -186,6 +186,9 @@ impl CadSession {
     /// | `LINE`..`EXTEND` | `BeginDraw(<kind>)` |
     /// | `RECTANG` | `BeginDraw(Rectang)` |
     /// | `ELLIPSE` | `BeginDraw(Ellipse)` |
+    /// | `POLYGON` | `BeginDraw(Polygon)` |
+    /// | `POINT` | `BeginDraw(Point)` |
+    /// | `SPLINE` | `BeginDraw(Spline)` |
     /// | `MEASURE` / `DIST` | `BeginMeasurement(Distance)` |
     /// | `MEASUREPOLYLINE` | `BeginMeasurement(PolylineLength)` |
     /// | `MEASUREANGLE` | `BeginMeasurement(Angle)` |
@@ -248,6 +251,9 @@ impl CadSession {
                 Some(InteractionRequest::BeginDraw(DrawToolKind::Rectang))
             }
             CommandId::CreateEllipse => Some(InteractionRequest::BeginDraw(DrawToolKind::Ellipse)),
+            CommandId::CreatePolygon => Some(InteractionRequest::BeginDraw(DrawToolKind::Polygon)),
+            CommandId::CreatePoint => Some(InteractionRequest::BeginDraw(DrawToolKind::Point)),
+            CommandId::CreateSpline => Some(InteractionRequest::BeginDraw(DrawToolKind::Spline)),
             CommandId::MoveEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Move)),
             CommandId::CopyEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Copy)),
             CommandId::RotateEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Rotate)),
@@ -288,6 +294,23 @@ impl CadSession {
             }
             None => self.dispatch_command(id),
         }
+    }
+
+    /// Set the session POLYGON side count (ADR 0015 decision C) through the
+    /// single typed interaction path.
+    ///
+    /// The value travels as [`InteractionRequest::SetPolygonSides`] — the same
+    /// engine queue, admission and completion discipline every other interaction
+    /// uses — so this session never writes the authoritative parameter itself:
+    /// the host (`cad-app`) owns it, exactly one path in. The host validates the
+    /// range (`cad_app::draw_tool::MIN_POLYGON_SIDES`..=`MAX_POLYGON_SIDES`,
+    /// 3..=1024) and refuses out of range **explicitly** (never a silent clamp),
+    /// and it refuses in **Viewer** mode because setting the parameter authorizes
+    /// `CommandId::CreatePolygon` (Work-only). Either refusal is returned here as
+    /// the real completion error, never a silent no-op; on success the value is
+    /// visible through [`CadToolParams::sides`] while POLYGON is active.
+    pub fn set_polygon_sides(&self, sides: u32) -> Result<(), String> {
+        self.submit_interactions(vec![InteractionRequest::SetPolygonSides { sides }])
     }
 
     /// Apply a fixed zoom step about the **viewport centre**.

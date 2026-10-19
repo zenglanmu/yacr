@@ -453,6 +453,27 @@ button, input, select { font: inherit; color: inherit; }
 .status-toggle:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .status-toggle.is-on { background: var(--on); border-color: var(--on); color: #fff; }
 .status-toggle.is-disabled, .status-toggle:disabled { color: var(--text-disabled); cursor: not-allowed; }
+/* POLYGON side-count stepper: the same chip surface as .status-toggle, with an
+   inline label, a live value and two square step buttons. Present only while
+   POLYGON is the active tool. */
+.status-stepper {
+  display: inline-flex; align-items: center; gap: 3px;
+  height: 20px; padding: 0 4px 0 7px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  background: var(--field); color: var(--text-dim);
+}
+.status-stepper__label { color: var(--text-muted); }
+.status-stepper__button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0;
+  border: none; border-radius: 3px;
+  background: transparent; color: var(--text-dim); cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.status-stepper__button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.status-stepper__button:disabled { color: var(--text-disabled); cursor: not-allowed; }
+.status-stepper__value { min-width: 26px; text-align: center; color: var(--text); }
+.status-stepper.is-disabled, .status-stepper.is-disabled .status-stepper__value { color: var(--text-disabled); }
 .statusbar__workspace {
   display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 9px;
   border: 1px solid transparent; border-radius: var(--radius);

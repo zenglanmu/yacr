@@ -1,4 +1,5 @@
 use super::admission::{cad_present_admission, layout_needs_revalidate, CadPresentAdmission};
+use super::commands::{admit_polygon_sides, CAD_POLYGON_SIDES_CAP};
 use super::options::{start_maximized, LaunchOptions};
 use super::postload::{
     label_file_name, pan_report_matches_run, parse_pan_report, parse_pan_run_id,
@@ -184,6 +185,37 @@ fn start_maximized_defaults_true_and_opts_out_explicitly() {
     assert!(
         !start_maximized(true),
         "the acceptance-only env opts out of maximize"
+    );
+}
+
+#[test]
+fn polygon_sides_admission_is_typed_bounded_and_refuses_probe_mode() {
+    // The `cad_set_polygon_sides` ack path: the value is only *queued* for the
+    // owner thread (never applied off the main thread), refused while the CAD
+    // session is disabled (probe mode), and bounded. Range/Viewer validation is
+    // the session's authority, applied on drain, not here.
+    let mut queue: Vec<u32> = Vec::new();
+    assert_eq!(
+        admit_polygon_sides(&mut queue, false, 4).unwrap_err(),
+        "CAD is disabled in probe mode"
+    );
+    assert!(queue.is_empty(), "a probe-mode refusal queues nothing");
+
+    // Accepted values are queued verbatim — no clamp, no range check here.
+    for sides in [3u32, 4, 1024] {
+        admit_polygon_sides(&mut queue, true, sides).expect("accepted");
+    }
+    assert_eq!(queue, vec![3, 4, 1024]);
+
+    // Bounded: filling to capacity then one more is an explicit refusal.
+    queue.clear();
+    for _ in 0..CAD_POLYGON_SIDES_CAP {
+        admit_polygon_sides(&mut queue, true, 6).expect("within capacity");
+    }
+    assert_eq!(queue.len(), CAD_POLYGON_SIDES_CAP);
+    assert_eq!(
+        admit_polygon_sides(&mut queue, true, 6).unwrap_err(),
+        "CAD polygon-sides queue is full"
     );
 }
 

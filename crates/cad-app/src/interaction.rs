@@ -140,6 +140,16 @@ pub enum InteractionRequest {
     BeginMeasurement(MeasurementToolKind),
     /// Change the retained measurement algorithm choice without starting capture.
     SetMeasurementKind(MeasurementToolKind),
+    /// Set the session POLYGON side count (ADR 0015 decision C).
+    ///
+    /// A **narrow**, single-purpose typed request — deliberately not a generic
+    /// `SetToolParameter` bus (one consumer does not justify a bus; the
+    /// `SetMeasurementKind` request above is the same-shaped precedent). The
+    /// session validates the range (`3..=1024`) and refuses an out-of-range value
+    /// explicitly, never a silent clamp; the request itself carries no behaviour.
+    SetPolygonSides {
+        sides: u32,
+    },
     /// Replace any current capture with navigation pan mode; no zero-delta pan is emitted.
     BeginPan,
     /// Clear only the live cursor marker, preserving captured points and tool lifecycle.

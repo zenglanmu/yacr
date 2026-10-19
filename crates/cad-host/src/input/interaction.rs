@@ -90,6 +90,18 @@ impl HostCore {
                     .set_measurement_kind(kind)?;
                 InteractionOutcome::SelectionKindChanged
             }
+            // A retained session parameter changed (the POLYGON side count). The
+            // session validates the range and refuses out of range; the outcome
+            // reuses `SelectionKindChanged` — the existing "a retained
+            // tool/parameter choice changed" result — rather than widening the
+            // frozen `InteractionOutcome` enum for one parameter.
+            InteractionRequest::SetPolygonSides { sides } => {
+                self.controller
+                    .borrow_mut()
+                    .session
+                    .set_polygon_sides(sides)?;
+                InteractionOutcome::SelectionKindChanged
+            }
             InteractionRequest::BeginPan => {
                 self.controller.borrow_mut().session.begin_pan();
                 // A modal pan owns the pointer: end any live box gesture.

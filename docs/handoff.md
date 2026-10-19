@@ -12,6 +12,55 @@
 > 旧脚本命令等均属**当时事实**，多数已退役；请不要据旧小节推断当前可用能力。历史验证证据见
 > `docs/validation*.md`，不得把旧 Slint 或软件渲染 PASS 当作 React 宿主/真实 GPU 结论。
 
+## P3：六个新绘图命令（ADR-0015，2026-10-19）
+
+**范围**：`crates/cad-app`（工具状态机/几何构造/命令/宿主映射）、`crates/cad-ui-core`（选择子、状态投影、
+i18n）、`crates/cad-geometry`（SPLINE 插值纯函数）、`crates/cad-representation` + `cad-app` 渲染层
+（POINT 标记）、`apps/app-linux`（专用 IPC、证据驱动）、React 宿主 UI。**未**改 acadrust/wgpu/架构边界。
+
+- **设计先行**：ADR-0015 经 Oracle 设计门禁 **SG-P3 attempt 1 = APPROVE-WITH-FIXES / attempt 2 = ACCEPT**。
+  四项阻塞项都源于真实源码事实，值得留档：① `cad-db` 要求 `Spline.control_points ≥ degree+1` ⇒ 三次插值
+  **2–3 个 fit 点根本存不进去**（改为显式拒绝 <4）；② §3.2 要求的**能力表**此前既缺更新、又含一条**假声明**
+  （POINT 绘制"实现"，实际退化为零长线段）；③ POLYGON 参数缺范围/生命周期，且 `CadTool` 是**冻结的前端线格式**；
+  ④ POINT 上限语义含糊、曾误用 `SELECTIONPREVIEWLIMIT` 为 2 万量级背书、且 **3D 下 `viewport_bounds` 为 `None`**。
+- **交互形状对齐 AutoCAD 文档**（librarian 查证）：`ELLIPSE` 默认是**轴端点法**（不是中心法）、`POLYGON` 默认
+  **内接**且边数默认 4、`SPLINE` 默认 fit/degree 3/chord、`POINT` **是否重复放置 Autodesk 未记载**（故只做
+  单次放置，不猜）。
+- **六个命令**：`PLINE`（变长、Enter 结束、开放折线）、`RECTANG`（两对角点 → 规范化逆时针闭合折线，两种对角
+  点击**同一实体**）、`ELLIPSE`（轴端点法；**长轴存较长者**以保证 DXF 组 40 ≤ 1——**未查证假设**，能力表记为
+  未对齐；预览 16–128 段有界弦近似）、`POLYGON`（内接；第一顶点在半径射线上）、`POINT`（单次放置）、
+  `SPLINE`（≥4 fit 点 → 三次/clamped/chord 插值 NURBS）。全部经唯一插入漏斗 `commit_new_entity`
+  （一次事务 + 一步撤销），且导出经**生产 save 路径**断言。
+- **变长捕获机制**：`PointArity::{Exact,AtLeast}`、`remaining() -> Option<usize>`（开放工具**不谎报** 0）、
+  上限 1024 显式拒绝、Enter 复用既有 `CONFIRM`（补测了"不自动确认"）。
+- **POINT 渲染（本轮修掉的真缺口）**：基础场景加**显式 `Point =>` 跳过**（**不碰共享 `tessellate`**，因为拾取/
+  包围盒/几何引擎仍依赖 `[p,p]`），可视标记走 overlay（draw_order 850 000，在网格之上、选中与实时反馈之下），
+  尺寸 = 视口高的 5%（`PDSIZE=0` 式屏幕相关语义），**覆盖导入的 POINT**，上限 4000 且**只发一条诊断**，
+  **3D 显式不画**；相机变化只重算标记不重建底图；实测上限规模构建 ≈71 µs。`PDMODE`/`PDSIZE`/点样式
+  声明未实现（有意偏离）。
+- **参数通道（POLYGON 边数）**：会话参数（默认 4、范围 3–1024、越界**显式拒绝不 clamp**、切工具/取消保持、
+  文档编辑不重置、重建/新建回 4、Viewer 拒绝）+ 收窄的 `InteractionRequest::SetPolygonSides` +
+  `CadTool.params.sides` 线格式契约测试；因 UI 只有"命令名"通道，另加**专用 IPC**
+  `cad_set_polygon_sides(sides)`（同一有界主线程队列、ack 语义与 `cad_command` 一致），以及状态栏**步进控件**
+  （仅 POLYGON 激活时出现、值只读真实状态、**不做乐观更新**、有界待发累积上限 10 使快速连点正确合成）。
+- **CJK 基线诚实测试**：`cad_app_adds_no_new_cjk_literals_outside_the_recorded_baseline`（记录 76 个既有
+  字面量，新增即失败并提示必须**显式**改基线；同时检测基线陈旧）。
+- **真实 GPU 证据（Vulkan / Quadro P620 / X11，`YACR_PROBE_DRAW_EVIDENCE`；输入为合成 DOM 指针事件、
+  **非真实鼠标**）**：`PLINE` 三点+Enter → `entityCount 4→5`；`POLYGON` 经真实 IPC 设 6 → 状态可见
+  `params.sides=6`、提交后 `+1`，**越界 2 被宿主真实拒绝**（`POLYGON side count must be between 3 and 1024, got 2`）
+  且可见值不变；`POINT` → `+1` 且截图含 **126 个标记像素、单个连通块**，其中心与点击位置吻合；`RECTANG` → `+1`。
+  像素判据脚本 `apps/app-linux/scripts/check-point-pixels.py`（容差 0.03，脚本内说明了为何比带判据的 0.06 更严：
+  0.06 会被 CAD 网格灰主导）。**诚实限制**：`cad_status` **无顶点数通道**，故**不**声称多边形实体是 6 边。
+- **门禁**：cad-app 481 / cad-representation 187 / cad-host 143 / cad-ui-core 128 / cad-engine 104 /
+  cad-geometry 77 / cad-measure 52；clippy(workspace)、fmt、check(workspace+all-targets)、wasm、architecture、
+  i18n 450、fixture、file-size 612、workflow、UI 114。
+- **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超 10 分钟被杀）；POLYGON 实体的**顶点数**
+  （无观测通道）；`SPLINE` 的真实 GPU 端到端（本轮证据覆盖 PLINE/POLYGON/POINT/RECTANG）；跨平台。
+- **开放项**：PLINE 弧段/Close/Width/Undo；RECTANG 圆角/倒角等选项；ELLIPSE 中心法/椭圆弧/`PELLIPSE`；
+  POLYGON `Edge`/外切/边数跨会话持久化；POINT `PDMODE`/`PDSIZE`/重复放置/3D 标记；SPLINE CV 法/节点/阶数/
+  切向/公差/`Close`/2–3 点小样本/fit 点往返；六者的 3D/OCS 与纸空间造形；**文件行数已逼近门禁**
+  （`lib.rs` 996、`tests_commands.rs` 996、`host/mod.rs` 992、`draw_tool/mod.rs` 991）⇒ 下一阶段先拆再改。
+
 ## P2：编辑工作流接线 + TRIM/EXTEND 取点 + chrome 死入口（2026-10-19）
 
 **范围**：`crates/cad-app`（取点即解算实体、`DrawPreview.picks/candidate`、选择/`importCount` 一致性）、

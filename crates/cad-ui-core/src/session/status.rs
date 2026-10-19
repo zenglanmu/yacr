@@ -159,6 +159,18 @@ impl CadSelection {
     }
 }
 
+/// The typed tool-parameter block of [`CadTool`] (ADR 0015 decision C).
+///
+/// A narrow, frozen frontend shape: today it carries only the POLYGON side count.
+/// `sides` is `null` whenever the active tool is not POLYGON (and the whole
+/// `tool` is `null` when no tool is active), so a UI stepper's enablement can be
+/// derived from `tool.key` and never from a stale local value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CadToolParams {
+    /// The POLYGON side count, or `null` for every other tool.
+    pub sides: Option<u32>,
+}
+
 /// The active interactive tool, projected from `cad_app`'s real capture state.
 ///
 /// Present only while a draw or measurement capture is active: an idle,
@@ -175,6 +187,9 @@ pub struct CadTool {
     /// readiness ([`cad_app::DrawPreview::can_confirm`] /
     /// [`cad_app::MeasurementPreview::can_confirm`]).
     pub ready: bool,
+    /// Typed tool parameters (see [`CadToolParams`]); always present, with `null`
+    /// fields for a tool that has no such parameter.
+    pub params: CadToolParams,
 }
 
 /// The `cad_status` snapshot consumed by the frontend.
@@ -272,11 +287,22 @@ pub(super) fn cad_tool(snapshot: &ToolSnapshot) -> Option<CadTool> {
             key: format!("draw.{}", preview.kind.key()),
             points: preview.points.len(),
             ready: preview.can_confirm(),
+            // The side count is present **only** for a POLYGON capture; every
+            // other draw tool reports `null`, and the session already clears the
+            // field for a non-POLYGON kind.
+            params: CadToolParams {
+                sides: if preview.kind == cad_app::DrawToolKind::Polygon {
+                    preview.polygon_sides
+                } else {
+                    None
+                },
+            },
         }),
         ToolSnapshot::Measuring(preview) => Some(CadTool {
             key: format!("measure.{}", preview.kind.key()),
             points: preview.points.len(),
             ready: preview.can_confirm(),
+            params: CadToolParams { sides: None },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,
     }

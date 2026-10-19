@@ -61,6 +61,9 @@ command_selector_contract! {
     CreatePolyline => "PLINE",
     CreateRectangle => "RECTANG",
     CreateEllipse => "ELLIPSE",
+    CreatePolygon => "POLYGON",
+    CreatePoint => "POINT",
+    CreateSpline => "SPLINE",
     MoveEntities => "MOVE",
     TrimEntity => "TRIM",
     ExtendEntity => "EXTEND",
@@ -116,7 +119,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 50,
+        EXPECTED_COMMAND_COUNT, 53,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

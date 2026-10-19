@@ -22,8 +22,23 @@
 - **P3d 数学前置完成**：`cad-geometry/src/spline.rs`（`fit_points_to_cubic_spline`、`chord_parameters`、
   `cubic_spline_control_point_count`）= 三次/clamped/chord/**插值**、`knots.len()==n+4`、≥4 fit 点、
   重复与 1e-9 级近重合**显式拒绝**、10 条数值测试（含 chord≠uniform 判别、C2、共线、簇不误拒）。
-- **待办**：P3b（`POLYGON` + `SetPolygonSides`）、P3c（`POINT` 命令；渲染标记进行中）、P3d（`SPLINE` 命令）、
-  以及 ADR 验收里点名的 `cad_app_adds_no_new_cjk_literals_outside_the_recorded_baseline`（尚未建立基线）。
+- **待办**：P3 阶段门禁（Oracle）+ 真实 GPU 绘制证据；P4 及以后见排期。
+- **P3c/P3d 命令完成（2026-10-19）**：`POINT`（单次放置，`SemanticGeometry::Point`，渲染标记此前已落地）与
+  `SPLINE`（`AtLeast(4)` 开放捕获、调用 `cad_geometry::spline::fit_points_to_cubic_spline`、几何核心的
+  重复/近重合/奇异错误**如实上抛**、预览为 ≤256 段插值曲线弦近似）端到端落地；选择子 53 个。
+  另补 ADR 点名的 **CJK 基线诚实测试**（`cad_app_adds_no_new_cjk_literals_outside_the_recorded_baseline`，
+  记录 76 个既有字面量，新增即失败并提示必须显式改基线）。
+  **依赖说明**：为调用插值核心，`cad-app` 增加工作区内依赖 `cad-geometry`（非外部 crate、非 patch；
+  `check-architecture.py` 通过）。**文件已逼近 1000 行门禁**（`lib.rs` 996、`tests_commands.rs` 996、
+  `host/mod.rs` 992、`draw_tool/mod.rs` 991）⇒ 下一阶段开始前应先按模块拆分，而不是等门禁报错。
+- **P3b 完成（2026-10-19）**：`POLYGON`（内接、第一顶点在半径射线上、闭合 n 边形）+ **参数通道**：
+  `SessionState.polygon_sides`（默认 4、范围 3–1024、越界显式拒绝不 clamp、切工具/取消保持、文档编辑不重置、
+  重建/新建回 4、Viewer 拒绝）+ `InteractionRequest::SetPolygonSides` + `CadTool.params.sides` 线格式契约测试；
+  因 UI 只有"命令名"通道，另加**专用 IPC** `cad_set_polygon_sides(sides)`（同一有界主线程队列，ack 语义与
+  `cad_command` 一致），以及状态栏**边数步进控件**（仅 POLYGON 激活时出现、值只读真实状态、不做乐观更新、
+  有界待发累积上限 10 以便快速连点正确合成）。
+- **P3c 渲染完成（2026-10-19）**：基础场景显式跳过 POINT + 2D overlay 十字标记（详见上文实施状态）。
+- **P3d 数学前置完成（2026-10-19）**：`cad-geometry/src/spline.rs`（详见上文实施状态）。
 
 ## 背景（勘察事实，2026-10-19；已按 SG-P3 核对更正）
 

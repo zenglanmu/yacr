@@ -10,7 +10,7 @@ import en from '@i18n/en.json';
 import { createTranslator, DEFAULT_LOCALE, LOCALES, localeTag } from './i18n.mjs';
 import { bindProbeInput, createInputLane } from './input.mjs';
 import { pointerPosition } from './metrics.mjs';
-import { queueCadCommand, requestImportCancel, startCadPolling } from './cad.mjs';
+import { queueCadCommand, reconcilePolygonPending, requestImportCancel, setPolygonSides as applyPolygonSides, startCadPolling, stepPolygonPending } from './cad.mjs';
 import { createFpsSampler } from './fps.mjs';
 import { admitCommandText, commandCatalog, pushHistory, setCommandCatalog, toolCommandForKey, unavailableReasonKey } from './commands.mjs';
 import { I18nContext, ShellContext } from './context.mjs';
@@ -48,6 +48,10 @@ export function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [cursor, setCursor] = useState(null);
   const [surfaceNode, setSurfaceNode] = useState(null);
+  // The POLYGON stepper's bounded pending delta (`{key, base, delta} | null`):
+  // the steps the host has queued but not yet echoed. It composes rapid clicks
+  // without ever touching the displayed number.
+  const [polygonPending, setPolygonPending] = useState(null);
   // The host command vocabulary (names the Rust router accepts). Empty until
   // `cad_commands` answers; the state exists so the chrome re-renders once it does.
   const [catalogNames, setCatalogNames] = useState(commandCatalog);
@@ -138,6 +142,15 @@ export function App() {
     });
     return () => { cancelled = true; };
   }, []);
+
+  // Reconcile the POLYGON stepper's pending delta against every fresh status: it
+  // resets the moment the host has caught up (the value changed), the tool
+  // switches/cancels, the tool key changes, or the value becomes absent/`null`/
+  // out-of-range. An unchanged poll returns the same reference, so `setState`
+  // bails out without a re-render.
+  useEffect(() => {
+    setPolygonPending(prev => reconcilePolygonPending(prev, status));
+  }, [status]);
 
   const documentLabel = status?.documentLabel ?? null;
   const documentOpen = documentLabel !== null;
@@ -250,6 +263,23 @@ export function App() {
     canCommand,
     runCommand: id => { void submitCommand(id); },
     cancelImport: () => { void requestImportCancel(invoke, status); },
+    // The POLYGON side-count stepper's bounded pending delta (see the reconcile
+    // effect above). The view reads it; the stepper's action updates it.
+    polygonSidesPending: polygonPending,
+    // One POLYGON step. The pending delta is folded in first so the *next* step
+    // composes (`sides + delta + 1`), then the one IPC is queued. The displayed
+    // number is never touched here: it still comes from the next real
+    // `cad_status`. A refusal drops the pending delta and reaches the error
+    // banner — no fake success and no invented value.
+    stepPolygonSides: target => {
+      setPolygonPending(prev => stepPolygonPending(prev, status, target));
+      void applyPolygonSides(invoke, target).then(result => {
+        if (result.kind !== 'accepted') {
+          setPolygonPending(null);
+          setError(t('status.polygon_sides.failed', { error: result.error }));
+        }
+      });
+    },
     runAction: action => {
       if (action === 'diagnostics') setDiagnosticsOpen(value => !value);
       else if (action === 'cleanScreen') setCleanScreen(value => !value);

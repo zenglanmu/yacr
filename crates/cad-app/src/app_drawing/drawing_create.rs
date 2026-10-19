@@ -14,6 +14,9 @@ impl Application {
             CommandId::CreatePolyline => self.create_polyline(session, command),
             CommandId::CreateRectangle => self.create_rectangle(session, command),
             CommandId::CreateEllipse => self.create_ellipse(session, command),
+            CommandId::CreatePolygon => self.create_polygon(session, command),
+            CommandId::CreatePoint => self.create_point(session, command),
+            CommandId::CreateSpline => self.create_spline(session, command),
             CommandId::MoveEntities => self.move_entities(command),
             CommandId::TrimEntity => self.trim_entity(command),
             CommandId::ExtendEntity => self.extend_entity(command),
@@ -350,6 +353,131 @@ impl Application {
             sweep: std::f64::consts::TAU,
         };
         self.commit_new_entity(session, command, geometry, "create ellipse")
+    }
+
+    /// Insert a closed regular POLYGON inscribed in the circle through the two
+    /// picks, as one entity.
+    ///
+    /// Payload choice: `Points([center, radius_point])` — the centre and a point
+    /// on the circumscribed circle, exactly as clicked (the construction input,
+    /// like `CreateCircle`/`CreateRectangle`). The **side count** is the session
+    /// sysvar ([`SessionState::polygon_sides`], ADR 0015 decision C), read here
+    /// rather than carried on the payload, so the session is the single authority
+    /// for the count and the payload stays the raw click pair.
+    ///
+    /// The geometry is built by [`crate::draw_tool::polygon_vertices`] — the
+    /// single construction/validation point shared with the preview — which
+    /// places the first vertex on the centre→radius ray and steps the rest by
+    /// `2π/n` about `+Z`, and refuses a non-finite, zero-radius, non-coplanar or
+    /// out-of-range input. The polygon is committed through the shared
+    /// [`Self::commit_new_entity`] funnel, so it is one entity, one transaction
+    /// and one undo step, with the active-layer check intact. Only the inscribed
+    /// (AutoCAD default) construction is authored; the `Edge` branch and the
+    /// circumscribed mode are NOT IMPLEMENTED.
+    pub(crate) fn create_polygon(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::Points(points) = &command.payload else {
+            return Err(CadError::InvalidInput(
+                "CreatePolygon needs a Points([center, radius_point]) payload".into(),
+            ));
+        };
+        let center = *points
+            .first()
+            .ok_or_else(|| CadError::InvalidInput("CreatePolygon needs a center point".into()))?;
+        let radius_point = *points
+            .get(1)
+            .ok_or_else(|| CadError::InvalidInput("CreatePolygon needs a radius point".into()))?;
+        let vertices =
+            crate::draw_tool::polygon_vertices(center, radius_point, session.polygon_sides())?;
+        let geometry = SemanticGeometry::Polyline {
+            bulges: vec![0.0; vertices.len()],
+            points: vertices,
+            closed: true,
+        };
+        self.commit_new_entity(session, command, geometry, "create polygon")
+    }
+
+    /// Place a single POINT into model space on the session's active layer.
+    ///
+    /// Payload choice: `Points([position])` — the construction input, exactly as
+    /// clicked (like `CreateCircle`/`CreateRectangle`/`CreatePolygon`). Only a
+    /// single point is accepted; a `Geometry` payload or a point list of any other
+    /// length is an explicit refusal that changes nothing. The point is committed
+    /// through the shared [`Self::commit_new_entity`] funnel, so it is one entity,
+    /// one transaction and one undo step, with the active-layer check intact.
+    ///
+    /// A single point has **no** coplanarity constraint — it is trivially coplanar
+    /// on the `+Z` plane through itself — so the ADR's "non-coplanar `+Z`" refusal
+    /// is vacuous here rather than a fabricated constraint. AutoCAD documents one
+    /// `Specify a point`; repeat-until-Enter placement is NOT IMPLEMENTED (its
+    /// behaviour is unverified).
+    pub(crate) fn create_point(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::Points(points) = &command.payload else {
+            return Err(CadError::InvalidInput(
+                "CreatePoint needs a Points([position]) payload".into(),
+            ));
+        };
+        if points.len() != 1 {
+            return Err(CadError::InvalidInput(format!(
+                "CreatePoint places exactly one point, got {}",
+                points.len()
+            )));
+        }
+        let position = points[0];
+        if !is_finite_point(position) {
+            return Err(CadError::InvalidInput(
+                "CreatePoint position must be finite".into(),
+            ));
+        }
+        self.commit_new_entity(
+            session,
+            command,
+            SemanticGeometry::Point(position),
+            "create point",
+        )
+    }
+
+    /// Draw a fit-point SPLINE as one `SemanticGeometry::Spline` entity.
+    ///
+    /// Payload choice: `Points(fit_points)` — the ordered fit points the user
+    /// clicked (the construction input, like `CreateCircle`/`CreatePolygon`; a
+    /// pre-built `Spline` geometry would be a second source of truth for a caller
+    /// who already holds the geometry). The interpolation is delegated to
+    /// [`crate::draw_tool::spline_control_points`], the pure geometry core, so the
+    /// handler never reimplements it: fewer than four fit points, a non-finite or
+    /// non-coplanar `+Z` point, a mismatched payload, and every degenerate-chord /
+    /// numerically singular input the core raises are explicit refusals that
+    /// create nothing. The stored spline is degree 3 with clamped chord knots and
+    /// unit weights (fit points do **not** round-trip: the domain has no fit-point
+    /// field). It is committed through the shared [`Self::commit_new_entity`]
+    /// funnel: one entity, one transaction, one undo step, active-layer check
+    /// intact.
+    pub(crate) fn create_spline(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::Points(fit_points) = &command.payload else {
+            return Err(CadError::InvalidInput(
+                "CreateSpline needs a Points(fit_points) payload".into(),
+            ));
+        };
+        let (knots, control_points) = crate::draw_tool::spline_control_points(fit_points)?;
+        let weights = vec![1.0; control_points.len()];
+        let geometry = SemanticGeometry::Spline {
+            degree: cad_geometry::FIT_SPLINE_DEGREE,
+            knots,
+            control_points,
+            weights,
+        };
+        self.commit_new_entity(session, command, geometry, "create spline")
     }
 }
 

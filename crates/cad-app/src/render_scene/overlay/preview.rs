@@ -61,7 +61,30 @@ pub fn draw_preview_overlay(
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }),
-        DrawToolKind::Line
+        // POLYGON: the closed `n`-vertex outline (n = the current session side
+        // count carried on the preview) between the captured centre and the live
+        // cursor as the radius point. It falls back to the rubber-band chain
+        // while the radius is degenerate or the side count is unknown, so a
+        // nonsense ring is never fabricated.
+        DrawToolKind::Polygon => {
+            polygon_points(&preview.points, preview.cursor, preview.polygon_sides).or_else(|| {
+                let chain = preview_chain(&preview.points, preview.cursor);
+                (chain.len() >= 2).then_some(chain)
+            })
+        }
+        // SPLINE: a bounded chord approximation of the exact interpolated curve
+        // the commit stores, through the captured fit points plus the live cursor.
+        // It falls back to the rubber-band chain while fewer than four fit points
+        // are known or the interpolation refuses (a degenerate chord, a
+        // near-coincident cursor, a non-coplanar set), never a fabricated curve.
+        DrawToolKind::Spline => spline_points(&preview.points, preview.cursor).or_else(|| {
+            let chain = preview_chain(&preview.points, preview.cursor);
+            (chain.len() >= 2).then_some(chain)
+        }),
+        // POINT: a single placement; the live preview is the existing
+        // cursor/chain (no new overlay channel).
+        DrawToolKind::Point
+        | DrawToolKind::Line
         | DrawToolKind::Polyline
         | DrawToolKind::Move
         | DrawToolKind::Trim
@@ -231,6 +254,77 @@ fn ellipse_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point
             y: frame.center.y + major.y * cos + minor.y * sin,
             z: frame.center.z + major.z * cos + minor.z * sin,
         });
+    }
+    Some(out)
+}
+
+/// The closed outline for a POLYGON preview: the captured centre plus the live
+/// cursor (or second pick) as the radius point, closed back onto the first
+/// vertex.
+///
+/// Uses the **current** session side count carried on the preview
+/// ([`DrawPreview::polygon_sides`]) and the same pure [`polygon_vertices`] the
+/// commit uses, so the preview is the exact ring the command will store (the
+/// closing vertex repeats the first so the `Lines` batch draws `n` segments).
+/// `None` (so the caller falls back to the rubber-band chain) while fewer than
+/// two picks are known, the side count is unknown, or the capture is degenerate
+/// (non-finite, non-coplanar, zero radius, out-of-range count), never a
+/// fabricated ring.
+fn polygon_points(
+    points: &[Point3],
+    cursor: Option<Point3>,
+    sides: Option<u32>,
+) -> Option<Vec<Point3>> {
+    let center = *points.first()?;
+    let radius_point = points.get(1).copied().or(cursor)?;
+    let mut outline = crate::draw_tool::polygon_vertices(center, radius_point, sides?).ok()?;
+    if let Some(first) = outline.first().copied() {
+        outline.push(first);
+    }
+    Some(outline)
+}
+
+/// Bounds on the SPLINE preview chord approximation segment count.
+///
+/// The stored entity is the exact interpolated spline; the preview is a bounded
+/// chord approximation, so its cost stays bounded no matter how many fit points
+/// are captured. The count grows with the fit-point count and is clamped into
+/// `[MIN, MAX]`.
+const MIN_SPLINE_PREVIEW_SEGMENTS: usize = 16;
+const MAX_SPLINE_PREVIEW_SEGMENTS: usize = 256;
+
+/// The bounded chord approximation of a fit-point SPLINE preview.
+///
+/// The captured fit points plus the live cursor (as the next tentative fit point)
+/// are interpolated by the same pure helper the commit uses
+/// ([`crate::draw_tool::spline_control_points`]), and the resulting degree-3
+/// NURBS is sampled at a bounded number of uniform parameters — the **same curve**
+/// the commit stores, drawn as a chord approximation. `None` (so the caller falls
+/// back to the rubber-band chain) while fewer than four fit points are known or
+/// the interpolation refuses (a degenerate chord, a near-coincident cursor, a
+/// non-coplanar set), so a degenerate capture is never previewed as a curve.
+fn spline_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3>> {
+    let mut fit = points.to_vec();
+    if let Some(cursor) = cursor {
+        if fit.last() != Some(&cursor) {
+            fit.push(cursor);
+        }
+    }
+    let (knots, control_points) = crate::draw_tool::spline_control_points(&fit).ok()?;
+    let weights = vec![1.0; control_points.len()];
+    let curve = cad_geometry::NurbsCurve::new(
+        cad_geometry::FIT_SPLINE_DEGREE as usize,
+        control_points,
+        knots,
+        weights,
+    )
+    .ok()?;
+    let (t_min, t_max) = curve.domain();
+    let segments = (fit.len() * 16).clamp(MIN_SPLINE_PREVIEW_SEGMENTS, MAX_SPLINE_PREVIEW_SEGMENTS);
+    let mut out = Vec::with_capacity(segments + 1);
+    for i in 0..=segments {
+        let t = t_min + (t_max - t_min) * (i as f64) / (segments as f64);
+        out.push(curve.evaluate(t));
     }
     Some(out)
 }

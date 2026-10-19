@@ -571,6 +571,7 @@ dependencies = [
  "cad-dependencies",
  "cad-diagnostics",
  "cad-domain",
+ "cad-geometry",
  "cad-history",
  "cad-import-acadrust",
  "cad-measure",
