@@ -60,8 +60,14 @@
   按 `type_key` 显式拒绝；`IMAGE`/`MASK` 按**策略**拒绝（它们**可变换**，不得假称被变换拒绝）。
 - **真实 GPU 证据（Vulkan / Quadro P620 / X11；`YACR_PROBE_DRAW_EVIDENCE`，44 次合成 DOM 指针事件、非真实鼠标）**：
   `ARRAYRECT`（2×3）`entityCount` **+5**、`ARRAYPOLAR`（4 项）**+3**、`EXPLODE`（闭合矩形→四段线）**+3**；
-  `ALIGN` 与 `STRETCH` 为**原位**变换故计数**不变**且无错误（诚实：`cad_status` 无几何通道，故真机只证"提交成功 + 计数 +
-  像素存在"，几何正确性由 crate 契约测试数值钉住）。像素判据显示数组与分解后的矩形确实出现在预期投影位置。
+  `ALIGN` 与 `STRETCH` 为**原位**变换故计数**不变**且无错误。**observer 独立判读**同一截图：
+  矩形阵列为 2 行×3 列**相邻副本**（行距 49.5 px ≈ 0.25、列距 59.5 px ≈ 0.30，与设定一致）；
+  极坐标阵列为 **4 个副本按 90° 等角、半径 ≈60 px（0.30）**，**但副本自身未旋转**——这正是 `arrayRotateItems`
+  默认 **false**（仅平移）的路径，**旋转路径只有契约测试覆盖**；圆角处为**真圆弧**（拟合 r ≈ 17 px ≈ 0.085–0.09，
+  与设定 0.12 同量级）、切角处为 **45° 直切**（≈9 px ≈ 0.045）。
+  **两条诚实的像素边界**：① `EXPLODE` 的"已分解"**在像素上不可分辨**（四段相邻线段与闭合折线视觉相同），
+  故分解仅由**计数 +3** 证明，不由像素证明；② `cad_status` 无几何/顶点通道，故真机只证"提交成功 + 计数 +
+  内容存在"，各命令的**几何正确性由 crate 契约测试数值钉住**（不在真机证据内）。
 - **门禁**：cad-app 578 / cad-ui-core 140 / cad-representation 188 / cad-host 143 / cad-geometry 79 / cad-spatial 47 /
   cad-engine 104 / cad-measure 52；clippy(workspace)、fmt、check(workspace+all-targets)、wasm、architecture、
   i18n 486、fixture 22、file-size 659、workflow、UI 126。
