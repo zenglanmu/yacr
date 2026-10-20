@@ -16,6 +16,7 @@ mod annotative;
 mod attributes;
 mod basic;
 mod blocks;
+mod bulge_arcs;
 mod conic;
 mod dynamic_block;
 mod image;

@@ -56,7 +56,8 @@ impl<'a> ImporterBuilder<'a> {
                     pl.elevation,
                     pl.vertices.iter().map(|v| (v.location.x, v.location.y)),
                 );
-                let bulges: Vec<f64> = pl.vertices.iter().map(|v| v.bulge).collect();
+                let raw_bulges: Vec<f64> = pl.vertices.iter().map(|v| v.bulge).collect();
+                let bulges = polyline_ocs_bulges(normal, &raw_bulges);
                 let completeness = polyline_completeness(normal, pl.vertices.len(), &bulges);
                 (
                     SemanticGeometry::Polyline {
@@ -74,7 +75,8 @@ impl<'a> ImporterBuilder<'a> {
                     pl.elevation,
                     pl.vertices.iter().map(|v| (v.location.x, v.location.y)),
                 );
-                let bulges: Vec<f64> = pl.vertices.iter().map(|v| v.bulge).collect();
+                let raw_bulges: Vec<f64> = pl.vertices.iter().map(|v| v.bulge).collect();
+                let bulges = polyline_ocs_bulges(normal, &raw_bulges);
                 let closed = pl.flags.bits() & 1 != 0;
                 let completeness = polyline_completeness(normal, pl.vertices.len(), &bulges);
                 (
@@ -110,13 +112,17 @@ impl<'a> ImporterBuilder<'a> {
                 } else {
                     t.insertion_point
                 };
+                // TEXT stores its alignment point and rotation in OCS; a `-Z`
+                // extrusion mirrors both (see `text_ocs_placement`).
+                let (position, rotation) =
+                    text_ocs_placement(p3(t.normal), p3(position), t.rotation);
                 (
                     SemanticGeometry::Text {
                         text: t.value.clone(),
-                        position: p3(position),
+                        position,
                         style: self.style_id(&t.style),
                         height: t.height,
-                        rotation: t.rotation,
+                        rotation,
                         font: self.style_font(&t.style),
                         h_align,
                         v_align,
@@ -181,27 +187,27 @@ impl<'a> ImporterBuilder<'a> {
                 } else {
                     a.default_value.clone()
                 };
+                let (position, rotation) =
+                    text_ocs_placement(p3(a.normal), p3(a.insertion_point), a.rotation);
+                (
+                    self.attribute_text(&a.text_style, text, position, a.height, rotation),
+                    Completeness::Complete,
+                )
+            }
+            EntityType::AttributeEntity(a) => {
+                let (position, rotation) =
+                    text_ocs_placement(p3(a.normal), p3(a.insertion_point), a.rotation);
                 (
                     self.attribute_text(
                         &a.text_style,
-                        text,
-                        p3(a.insertion_point),
+                        a.value.clone(),
+                        position,
                         a.height,
-                        a.rotation,
+                        rotation,
                     ),
                     Completeness::Complete,
                 )
             }
-            EntityType::AttributeEntity(a) => (
-                self.attribute_text(
-                    &a.text_style,
-                    a.value.clone(),
-                    p3(a.insertion_point),
-                    a.height,
-                    a.rotation,
-                ),
-                Completeness::Complete,
-            ),
             EntityType::Mesh(m) => (subd_mesh_semantics(m), Completeness::Complete),
             EntityType::PolyfaceMesh(m) => (polyface_mesh_semantics(m), Completeness::Complete),
             EntityType::PolygonMesh(m) => (polygon_mesh_semantics(m), Completeness::Complete),

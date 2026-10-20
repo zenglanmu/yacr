@@ -711,7 +711,7 @@ fn tessellate_arc(
     pts
 }
 
-fn tessellate_bulge(start: [f64; 2], end: [f64; 2], bulge: f64) -> Vec<[f64; 2]> {
+pub(crate) fn tessellate_bulge(start: [f64; 2], end: [f64; 2], bulge: f64) -> Vec<[f64; 2]> {
     let dx = end[0] - start[0];
     let dy = end[1] - start[1];
     let chord = (dx * dx + dy * dy).sqrt();

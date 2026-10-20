@@ -1,6 +1,6 @@
 //! Solid HATCH fill: ear-clipping triangulation and even-odd ring filling.
 
-use super::common::{collect_segments, EPS};
+use super::common::{collect_segments, ring_depths, EPS};
 use super::Loop;
 
 /// Upper bound on polygon vertices before ear clipping is refused (its worst
@@ -305,37 +305,6 @@ fn clean_ring(ring: &[[f64; 2]]) -> Loop {
     } else {
         out
     }
-}
-
-/// Even-odd nesting depth of each ring: how many other rings contain it.
-fn ring_depths(rings: &[Loop]) -> Vec<usize> {
-    let mut depths = vec![0usize; rings.len()];
-    for (i, ring) in rings.iter().enumerate() {
-        let probe = ring[0];
-        for (j, other) in rings.iter().enumerate() {
-            if i != j && point_in_ring(probe, other) {
-                depths[i] += 1;
-            }
-        }
-    }
-    depths
-}
-
-/// Even-odd point-in-polygon test.
-fn point_in_ring(p: [f64; 2], ring: &[[f64; 2]]) -> bool {
-    let n = ring.len();
-    let mut inside = false;
-    for i in 0..n {
-        let a = ring[i];
-        let b = ring[(i + 1) % n];
-        if (a[1] > p[1]) != (b[1] > p[1]) {
-            let x = a[0] + (p[1] - a[1]) * (b[0] - a[0]) / (b[1] - a[1]);
-            if p[0] < x {
-                inside = !inside;
-            }
-        }
-    }
-    inside
 }
 
 fn x_at_y(a: [f64; 2], b: [f64; 2], y: f64) -> f64 {

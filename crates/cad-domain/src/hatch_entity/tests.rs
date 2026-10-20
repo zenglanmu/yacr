@@ -1,6 +1,7 @@
 //! HATCH entity contract tests (ADR 0018 G.1): style dispatch by loop-set
 //! filtering, the pattern/gradient regions per style, and the transform rules.
 
+use super::geometry::push_bulge_points;
 use super::*;
 use crate::hatch::GradientStop;
 
@@ -688,5 +689,36 @@ fn bulged_hatch_loop_samples_follow_the_bulge_sign_not_the_winding() {
                 );
             }
         }
+    }
+}
+
+#[path = "../../../cad-domain/tests/support/bulge_cases.rs"]
+mod bulge_cases;
+
+/// Regression guard for the hatch **fill** sampler (`geometry::push_bulge_points`):
+/// the loop samples must lie on the analytic circle and bow to the side the
+/// signed bulge encodes. The mirrored centre this guards against mirrored every
+/// fill edge, while the semicircle-only tests used before were invariant.
+#[test]
+fn hatch_fill_bulge_samples_match_the_analytic_arc() {
+    bulge_cases::assert_table_is_hand_computed();
+    for case in bulge_cases::table() {
+        let mut out: Vec<[f64; 2]> = Vec::new();
+        push_bulge_points(&mut out, case.p0, case.p1, case.bulge);
+        bulge_cases::assert_samples(
+            "cad-domain hatch fill (push_bulge_points)",
+            &case,
+            &out,
+            1e-9 * (1.0 + case.radius),
+        );
+        // The sampler caps its angular step at 0.05 rad with at least 2 steps.
+        let steps = ((case.included_angle.abs() / 0.05).ceil() as usize).clamp(2, 4096);
+        let half_step = 0.5 * case.included_angle.abs() / steps as f64;
+        bulge_cases::assert_apex(
+            "cad-domain hatch fill (push_bulge_points)",
+            &case,
+            &out,
+            2.0 * case.radius * (1.0 - half_step.cos()) + 1e-9,
+        );
     }
 }

@@ -37,7 +37,7 @@ pub(super) fn sample_loop(loop_: &HatchLoop) -> Vec<[f64; 2]> {
 
 /// Sample one bulged segment, mirroring the importer's arc sampling so a loop
 /// stored with bulges tessellates like the source it came from.
-fn push_bulge_points(out: &mut Vec<[f64; 2]>, p0: [f64; 2], p1: [f64; 2], bulge: f64) {
+pub(super) fn push_bulge_points(out: &mut Vec<[f64; 2]>, p0: [f64; 2], p1: [f64; 2], bulge: f64) {
     push_unique_point(out, p0);
     let dx = p1[0] - p0[0];
     let dy = p1[1] - p0[1];

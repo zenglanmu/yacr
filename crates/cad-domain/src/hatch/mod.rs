@@ -17,6 +17,8 @@ mod gradient;
 mod pattern;
 mod simplify;
 
+pub(crate) use common::{point_in_ring, ring_is_inside};
+
 /// A closed polygon in hatch-plane coordinates.
 pub type Loop = Vec<[f64; 2]>;
 

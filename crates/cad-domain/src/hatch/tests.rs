@@ -160,6 +160,24 @@ fn fill_rings_donut_excludes_the_hole() {
 }
 
 #[test]
+fn fill_rings_tangential_hole_keeps_its_depth() {
+    // An imported boundary set may keep a ring that touches another ring
+    // (ADR B6: import never rejects). Here the inner ring's first vertex sits
+    // exactly on the outer square's right edge, where a single-vertex
+    // containment probe reads "outside" and would promote the hole to a
+    // second outlying solid. The majority probe must still classify it as a
+    // hole: 10x10 outer minus a triangle of area 12 = 88.
+    let outer = rect(0.0, 0.0, 10.0, 10.0);
+    let tangent_hole = vec![[10.0, 5.0], [6.0, 2.0], [6.0, 8.0]];
+    let mesh = fill_rings(&[outer, tangent_hole]).expect("tangential hole still fills");
+    assert!(
+        (mesh.area() - 88.0).abs() < 1e-6,
+        "tangential donut area {}",
+        mesh.area()
+    );
+}
+
+#[test]
 fn fill_rings_nested_island_is_solid_again() {
     // Even-odd: 10x10 - 6x6 hole + 2x2 island = 100 - 36 + 4 = 68.
     let mesh = fill_rings(&[

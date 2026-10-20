@@ -418,3 +418,36 @@ fn pattern_families_rotate_the_offset_with_the_pattern_angle() {
     assert!((family.base[0] - base_x).abs() < 1e-9, "{:?}", family.base);
     assert!((family.base[1] - base_y).abs() < 1e-9, "{:?}", family.base);
 }
+
+#[path = "../../../cad-domain/tests/support/bulge_cases.rs"]
+mod bulge_cases;
+
+/// Regression guard for the importer's own bulge expansion
+/// (`hatch::push_bulge_segment`): the hatch boundary sampler must place the arc
+/// on the side the signed bulge encodes, exactly like the display/fill/snap
+/// copies. The old mirrored centre mirrored every boundary arc, and semicircles
+/// (the only shapes the older tests used) could not see it.
+#[test]
+fn hatch_boundary_bulge_samples_match_the_analytic_arc() {
+    bulge_cases::assert_table_is_hand_computed();
+    for case in bulge_cases::table() {
+        let mut out: Vec<[f64; 2]> = Vec::new();
+        push_bulge_segment(&mut out, case.p0, case.p1, case.bulge);
+        bulge_cases::assert_samples(
+            "cad-import-acadrust hatch boundary (push_bulge_segment)",
+            &case,
+            &out,
+            1e-9 * (1.0 + case.radius),
+        );
+        // `arc_steps` caps the angular step at 0.05 rad with at least 2 steps,
+        // so the extreme sample can be half a step short of the apex.
+        let steps = ((case.included_angle.abs() / 0.05).ceil() as usize).clamp(2, 4096);
+        let half_step = 0.5 * case.included_angle.abs() / steps as f64;
+        bulge_cases::assert_apex(
+            "cad-import-acadrust hatch boundary (push_bulge_segment)",
+            &case,
+            &out,
+            2.0 * case.radius * (1.0 - half_step.cos()) + 1e-9,
+        );
+    }
+}

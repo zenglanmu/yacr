@@ -2,10 +2,15 @@
 
 use cad_domain::*;
 
-use super::super::bounds::{cached_local_pick_bounds, local_pick_bounds, PickBoundsCache};
+use super::super::bounds::{
+    cached_local_pick_bounds, local_pick_bounds, pick_world_bounds, PickBoundsCache,
+};
 use super::super::math::{is_finite_point, length3};
 use super::super::*;
 use super::common::*;
+
+#[path = "../../../../cad-domain/tests/support/bulge_cases.rs"]
+mod bulge_cases;
 
 fn local_pick_bounds_reference(geometry: &SemanticGeometry) -> Option<(Point3, Point3)> {
     let mut points = Vec::new();
@@ -496,4 +501,37 @@ fn hatch_cached_pick_bounds_are_reused_like_a_compound() {
     assert_eq!(cache.len(), 1, "the hatch is cached on its own key");
     PICK_BOUNDS_COMPUTED
         .with(|count| assert_eq!(count.get(), 1, "a repeated hatch reuses its cached bound"));
+}
+
+/// Regression guard for `bulge_arc_bounds`: the arc's centre (and therefore the
+/// bound) must be on the side the signed bulge encodes. The old mirrored centre
+/// put the centre on the apex side, which move the box by a full diameter for
+/// every non-semicircle arc — and went unnoticed because semicircles are
+/// invariant. Cases come from the shared table in
+/// `cad-domain/tests/support/bulge_cases.rs`.
+#[test]
+fn bulge_pick_bounds_use_the_analytic_centre_side() {
+    bulge_cases::assert_table_is_hand_computed();
+    for case in bulge_cases::table() {
+        let geometry = SemanticGeometry::Polyline {
+            points: vec![
+                p(case.p0[0], case.p0[1], 0.0),
+                p(case.p1[0], case.p1[1], 0.0),
+            ],
+            bulges: vec![case.bulge],
+            closed: false,
+        };
+        let (min, max) = pick_world_bounds(&geometry, &Transform3::default())
+            .expect("a bulged polyline has a conservative bound");
+        // The broad-phase box adds a relative 1e-9 slack; the tolerance covers
+        // it with room to spare at the tiny bulge's ~1e3 radius.
+        let tol = 1e-6 * (1.0 + case.radius + case.center[0].abs() + case.center[1].abs());
+        bulge_cases::assert_bounds(
+            "cad-spatial pick bounds (bulge_arc_bounds)",
+            &case,
+            [min.x, min.y],
+            [max.x, max.y],
+            tol,
+        );
+    }
 }

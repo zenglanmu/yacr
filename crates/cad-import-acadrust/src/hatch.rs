@@ -194,7 +194,7 @@ fn append_polyline_edge(pl: &acadrust::entities::PolylineEdge, out: &mut Vec<[f6
 /// `bulge` is the DXF bulge (`tan(included_angle / 4)`); a zero, degenerate or
 /// non-finite bulge falls back to the straight chord. The arc is sampled
 /// adaptively with the same angular step as the other boundary arcs.
-fn push_bulge_segment(out: &mut Vec<[f64; 2]>, p0: [f64; 2], p1: [f64; 2], bulge: f64) {
+pub(crate) fn push_bulge_segment(out: &mut Vec<[f64; 2]>, p0: [f64; 2], p1: [f64; 2], bulge: f64) {
     push_hatch_point(out, p0);
     let dx = p1[0] - p0[0];
     let dy = p1[1] - p0[1];

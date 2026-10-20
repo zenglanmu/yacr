@@ -8,6 +8,7 @@ use crate::CadResult;
 
 use super::geometry::{finite_point, length3};
 use super::{HatchLoop, HatchPlane};
+use crate::hatch::{point_in_ring, ring_is_inside};
 
 pub(super) fn validate_creation(loops: &[HatchLoop], plane: &HatchPlane) -> CadResult<()> {
     if !plane_is_usable(plane) {
@@ -167,37 +168,19 @@ fn on_segment(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> bool {
         && p[1] <= a[1].max(b[1]) + 1e-12
 }
 
-fn point_in_ring(p: [f64; 2], ring: &[[f64; 2]]) -> bool {
-    let n = ring.len();
-    let mut inside = false;
-    for i in 0..n {
-        let a = ring[i];
-        let b = ring[(i + 1) % n];
-        if (a[1] > p[1]) != (b[1] > p[1]) {
-            let x = a[0] + (p[1] - a[1]) * (b[0] - a[0]) / (b[1] - a[1]);
-            if p[0] < x {
-                inside = !inside;
-            }
-        }
-    }
-    inside
-}
-
-/// How many vertices of a loop the containment probe samples.
-const DEPTH_PROBES: usize = 8;
-
 /// Containment count of each loop (0-based; 1-based depth = count + 1).
 ///
-/// A loop is counted inside another one when the majority of [`probe_points`]
-/// lies inside it. One probe (the first vertex) is exact for a boundary set
-/// that reached the creation path, because the creation path rejects touching,
-/// crossing and duplicate rings; the import path keeps such sets (ADR B6), and
-/// there the first vertex of a loop can sit exactly on another loop's boundary,
-/// where the even-odd crossing test is arbitrary. Sampling several vertices
-/// spread around the loop keeps one unlucky boundary vertex from flipping an
-/// imported loop's depth and mis-filtering it as `Outer`/`Ignore`.
+/// A loop is counted inside another one when the majority of the shared probe
+/// vertices lies inside it. One probe (the first vertex) is exact for a
+/// boundary set that reached the creation path, because the creation path
+/// rejects touching, crossing and duplicate rings; the import path keeps such
+/// sets (ADR B6), and there the first vertex of a loop can sit exactly on
+/// another loop's boundary, where the even-odd crossing test is arbitrary.
+/// Sampling several vertices spread around the loop keeps one unlucky boundary
+/// vertex from flipping an imported loop's depth and mis-filtering it as
+/// `Outer`/`Ignore`.
 ///
-/// A ring whose probes split evenly (a partial overlap, which the import path
+/// A loop whose probes split evenly (a partial overlap, which the import path
 /// also keeps) has no single containment answer; the first vertex decides so the
 /// result stays deterministic. This is a display-filter heuristic on the import
 /// path only, not a validity claim.
@@ -211,28 +194,4 @@ pub(super) fn loop_depths(loops: &[HatchLoop]) -> Vec<usize> {
         }
     }
     depths
-}
-
-/// Up to [`DEPTH_PROBES`] vertices evenly spread around the ring, starting at
-/// index 0 (so the first vertex is always probed).
-fn probe_points(ring: &[[f64; 2]]) -> Vec<[f64; 2]> {
-    let len = ring.len();
-    let count = len.min(DEPTH_PROBES);
-    (0..count).map(|k| ring[k * len / count]).collect()
-}
-
-fn ring_is_inside(ring: &[[f64; 2]], container: &[[f64; 2]]) -> bool {
-    let Some(&first) = ring.first() else {
-        return false;
-    };
-    let probes = probe_points(ring);
-    let inside = probes
-        .iter()
-        .filter(|p| point_in_ring(**p, container))
-        .count();
-    if probes.is_empty() || inside * 2 == probes.len() {
-        point_in_ring(first, container)
-    } else {
-        inside * 2 > probes.len()
-    }
 }

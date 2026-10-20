@@ -125,6 +125,16 @@ pub(crate) fn is_world_z(normal: Point3) -> bool {
     n.x.abs() <= 1e-9 && n.y.abs() <= 1e-9
 }
 
+/// True when the extrusion is the world Z axis pointing *down*.
+///
+/// The OCS that `(0, 0, -1)` defines is the x-mirror of world XY: the
+/// arbitrary-axis frame is `ax = -X`, `ay = +Y`, `az = -Z`, so an OCS point
+/// `(x, y)` at elevation `e` lands at `(-x, y, -e)`. The identity fast path is
+/// therefore only valid for `+Z`.
+pub(crate) fn is_negative_world_z(normal: Point3) -> bool {
+    is_world_z(normal) && cad_geometry::normalize(normal).z < 0.0
+}
+
 /// Map a 2D OCS (object coordinate system) point to WCS.
 ///
 /// A 2D polyline's vertices live in the plane defined by its extrusion
@@ -146,7 +156,7 @@ pub(crate) fn polyline_ocs_points(
     elevation: f64,
     vertices: impl IntoIterator<Item = (f64, f64)>,
 ) -> Vec<Point3> {
-    if is_world_z(normal) {
+    if is_world_z(normal) && !is_negative_world_z(normal) {
         // Fast/identity path: the common drawing keeps `z = elevation` exactly.
         return vertices
             .into_iter()
@@ -157,6 +167,40 @@ pub(crate) fn polyline_ocs_points(
         .into_iter()
         .map(|(x, y)| ocs_to_wcs(normal, elevation, x, y))
         .collect()
+}
+
+/// Bulges matching the vertices returned by [`polyline_ocs_points`].
+///
+/// A `-Z` extrusion mirrors the OCS plane, and a mirror reverses the direction
+/// of every arc: with the vertices already mirrored, each bulge's sign must
+/// flip as well, or the arc bows to the side the unmirrored file used.
+pub(crate) fn polyline_ocs_bulges(normal: Point3, bulges: &[f64]) -> Vec<f64> {
+    if is_negative_world_z(normal) {
+        bulges.iter().map(|b| -b).collect()
+    } else {
+        bulges.to_vec()
+    }
+}
+
+/// Map a TEXT-family insertion point and rotation from its OCS to world XY.
+///
+/// A single-line TEXT stores its alignment point in OCS (DXF group 10) and its
+/// rotation in the OCS plane; `+Z` is already world XY. A `-Z` extrusion
+/// mirrors that plane, so the world point mirrors `x`/`z` and the baseline
+/// angle becomes `PI - rotation` (the mirror of a direction).
+///
+/// The planar text domain stores no extrusion normal, so a tilted (non-Z)
+/// extrusion is left untouched here: representing it would need a domain
+/// change, not an import-only mapping.
+pub(crate) fn text_ocs_placement(normal: Point3, position: Point3, rotation: f64) -> (Point3, f64) {
+    if is_negative_world_z(normal) {
+        (
+            ocs_to_wcs(normal, position.z, position.x, position.y),
+            std::f64::consts::PI - rotation,
+        )
+    } else {
+        (position, rotation)
+    }
 }
 
 /// Completeness of a 2D polyline whose vertices were mapped to WCS.
@@ -191,7 +235,10 @@ pub(crate) fn ellipse_semantics(
     e: &acadrust::entities::Ellipse,
 ) -> (SemanticGeometry, Completeness) {
     let normal = p3(e.normal);
-    let normal = if is_world_z(normal) || cad_geometry::length(normal) < 1e-24 {
+    // Preserve a `-Z` extrusion: it is the x-mirror of `+Z`, and coercing it
+    // to `+Z` would flip the minor axis (and the parameter sweep) instead.
+    // Only a degenerate (absent) normal defaults to world Z.
+    let normal = if cad_geometry::length(normal) < 1e-24 {
         Point3 {
             x: 0.0,
             y: 0.0,

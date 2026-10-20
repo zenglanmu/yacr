@@ -6,6 +6,12 @@
 //! SPLINE, DIMENSION, ARC, CIRCLE, POINT, ELLIPSE, HATCH, LEADER, SOLID).
 //! It does not render (that needs a GPU adapter) and does not claim vendor
 //! compatibility. Provenance: `fixtures/dxf/qcad-examples/SOURCE.md`.
+//!
+//! These checks are **structural** (import + non-empty representation). The
+//! geometric shape of every non-zero bulge in the same corpus — apex side,
+//! analytic circle, angular span — is asserted by
+//! `cad-import-acadrust/tests/dxf_bulge_corpus.rs`, which can reach both the
+//! importer and the tessellator; a mirrored arc expansion passed this file.
 
 use std::path::PathBuf;
 use std::process::Command;
