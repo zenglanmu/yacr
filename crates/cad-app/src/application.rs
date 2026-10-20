@@ -261,6 +261,7 @@ impl Application {
             | CommandId::OffsetEntity
             | CommandId::SetActiveLayer
             | CommandId::CreateText
+            | CommandId::MLeader
             | CommandId::TextEdit => {
                 // Every edit runs through one funnel so the session selection is
                 // reconciled against the authoritative drawing afterwards: an

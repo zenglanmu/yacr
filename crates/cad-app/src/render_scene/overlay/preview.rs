@@ -87,6 +87,11 @@ pub fn draw_preview_overlay(
         // geometry preview), so it also uses the cursor/chain.
         DrawToolKind::Point
         | DrawToolKind::Text
+        // MLEADER captures the arrow position and the landing point; its live
+        // preview is the existing cursor/chain (the typed text is a prompt, not a
+        // geometry preview, and the dogleg is derived at commit from the style
+        // table, so no style-dependent outline is fabricated here).
+        | DrawToolKind::MLeader
         // TEXTEDIT's step is an entity pick; its only live affordance is the
         // host's capture tint plus the cursor/chain, never a fabricated geometry.
         | DrawToolKind::TextEdit

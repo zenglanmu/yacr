@@ -101,10 +101,11 @@ function drawPanel(tabId) {
 test('HATCH closes the draw command group on both draw panels, as a router command', async () => {
   for (const tabId of ['home', 'draw']) {
     const panel = drawPanel(tabId);
-    // HATCH still closes the draw group. TEXT (ADR 0019) is appended after the
-    // OFFSET item that already sat at the panel tail, so HATCH stays last and no
-    // shipped button moves.
-    assert.deepEqual(panel.items.slice(-3).map(item => item.id), ['OFFSET', 'TEXT', 'HATCH'], tabId);
+    // HATCH still closes the draw group. MLEADER (ADR 0019 P7c) is appended
+    // after TEXT — its annotation neighbour — so it joins the tail without moving
+    // HATCH: `OFFSET` → `TEXT` → `MLEADER` → `HATCH` is the fixed order, and
+    // HATCH stays last.
+    assert.deepEqual(panel.items.slice(-4).map(item => item.id), ['OFFSET', 'TEXT', 'MLEADER', 'HATCH'], tabId);
     const item = panel.items.at(-1);
     assert.equal(item.command, 'HATCH');
     assert.equal(item.labelKey, HATCH.labelKey);

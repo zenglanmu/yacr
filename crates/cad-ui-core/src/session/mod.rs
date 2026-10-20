@@ -268,6 +268,9 @@ impl CadSession {
             // `cad_set_tool_text` channel (ADR 0019 decision A.1) — never through
             // this command line, which carries a command name only.
             CommandId::CreateText => Some(InteractionRequest::BeginDraw(DrawToolKind::Text)),
+            // MLEADER starts the leader tool: two points (arrow, landing) then the
+            // same terminal text channel TEXT uses (ADR 0019 decision F.2).
+            CommandId::MLeader => Some(InteractionRequest::BeginDraw(DrawToolKind::MLeader)),
             // TEXTEDIT starts the edit tool: an entity pick of the text to edit,
             // then the same terminal text channel (ADR 0020 amendment A).
             CommandId::TextEdit => Some(InteractionRequest::BeginDraw(DrawToolKind::TextEdit)),

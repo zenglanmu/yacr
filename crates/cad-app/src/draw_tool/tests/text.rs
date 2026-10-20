@@ -30,12 +30,20 @@ fn the_text_kind_metadata_is_explicit() {
     assert_eq!(DrawToolKind::Text.picked_step_count(), 0);
     assert!(!DrawToolKind::Text.arity().is_open_ended());
     assert!(DrawToolKind::Text.requires_text());
-    // `requires_text()` is the single authority: exactly the two text kinds.
+    // `requires_text()` is the single authority: exactly the text kinds (TEXT,
+    // TEXTEDIT and the MLEADER whose last step is the same terminal text step).
     let text_kinds: Vec<DrawToolKind> = DrawToolKind::ALL
         .into_iter()
         .filter(|kind| kind.requires_text())
         .collect();
-    assert_eq!(text_kinds, vec![DrawToolKind::Text, DrawToolKind::TextEdit]);
+    assert_eq!(
+        text_kinds,
+        vec![
+            DrawToolKind::Text,
+            DrawToolKind::TextEdit,
+            DrawToolKind::MLeader
+        ]
+    );
 }
 
 #[test]

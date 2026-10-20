@@ -71,6 +71,15 @@ export const RIBBON_TABS = Object.freeze([
           // and it has no variant popover — the command itself opens the
           // command-line text step (there is no in-place canvas editor here).
           { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', command: 'TEXT' },
+          // MLEADER (ADR 0019 decision F.2) is the other text-carrying
+          // annotation tool, so it sits directly beside TEXT and before HATCH. It
+          // captures exactly two points — the arrowhead position, then the
+          // landing point — and then the same terminal text step TEXT uses. It is
+          // a small button with **no variant popover on purpose**: no `Options`
+          // sub-prompt exists (leader type / content type / max points / angular
+          // constraint), and a caret here would imply choices the command does
+          // not have.
+          { id: 'MLEADER', labelKey: 'draw.kind.mleader', icon: 'mleader', command: 'MLEADER' },
           // HATCH closes the draw group, the way AutoCAD's Draw panel puts Hatch
           // at its end. It is a small button: unlike LINE/CIRCLE it is not a
           // primary creation tool, and it has no variant popover (the unimplemented
@@ -145,9 +154,10 @@ export const RIBBON_TABS = Object.freeze([
           { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', command: 'POINT' },
           { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', command: 'SPLINE' },
           { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', command: 'OFFSET' },
-          // Same draw-group tail on the Draw tab: TEXT then Hatch stay the last
-          // draw commands, and the small-button decision matches the Home panel.
+          // Same draw-group tail on the Draw tab: TEXT, then MLEADER next to it,
+          // then Hatch last — the small-button decisions match the Home panel.
           { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', command: 'TEXT' },
+          { id: 'MLEADER', labelKey: 'draw.kind.mleader', icon: 'mleader', command: 'MLEADER' },
           { id: 'HATCH', labelKey: 'draw.kind.hatch', icon: 'hatch', command: 'HATCH' },
         ],
       },

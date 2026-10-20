@@ -564,6 +564,12 @@ export async function setToolParameterFlag(invoke, key, flag) {
  * declared choice of Y). The prompts name the two points only, so they promise no
  * axis control the tool does not offer.
  *
+ * MLEADER's two steps are free points too — the arrowhead position, then the
+ * landing point — followed by the same terminal text step TEXT uses. Its prompts
+ * name those two picks and nothing else: the command has **no `Options`
+ * sub-prompt** (leader type, content type, max points, angular constraint), so no
+ * step copy or control may imply one.
+ *
  * Only the **named picks** live here, as an ordered list (a step is chosen by the
  * captured count). A completed capture's ready prompt is not positional, so it is
  * resolved from [`TOOL_READY_PROMPTS`] below.
@@ -607,6 +613,17 @@ export const TOOL_STEP_PROMPTS = Object.freeze({
   'draw.text': [
     TEXT_PICK_PROMPT_KEY,
   ],
+  // MLEADER (ADR 0019 decision F.2) captures exactly two points — the arrowhead
+  // position, then the landing point — and then the **same** terminal text step
+  // TEXT uses. Only those two picks belong here: the text step is named from the
+  // host's `awaiting_text` flag by [`toolStepPromptKey`], never from a point
+  // count, so this list must stay at two entries. The two names are
+  // MLEADER-specific because a leader's first pick is its arrowhead, not a
+  // generic "point", and its second is the landing the text hangs from.
+  'draw.mleader': [
+    'tool.prompt.mleader.arrow',
+    'tool.prompt.mleader.landing',
+  ],
 });
 
 /**
@@ -635,6 +652,14 @@ export const TOOL_READY_PROMPTS = Object.freeze({
   // the point is counted but the flag has not arrived yet never opens the text
   // field — it only names what comes next.
   'draw.text': TEXT_STEP_PROMPT_KEY,
+  // MLEADER's complement is its two points plus its text. Once the landing pick
+  // is captured the capture is complete but the host may not have raised
+  // `awaiting_text` yet, and the shared dimension copy ("Dimension defined") would
+  // be false for a leader. This names the step that really comes next — the text
+  // — without opening it: the **input mode** still comes from the host flag alone
+  // (see [`toolStepPromptKey`]), so the field never appears before the host says
+  // so.
+  'draw.mleader': 'tool.prompt.mleader.type_text',
 });
 
 /**

@@ -5,6 +5,7 @@ use cad_domain::*;
 use super::DrawingDatabase;
 use crate::dim_style::DimStyle;
 use crate::entity::{DbEntity, EntityRenderAttributes};
+use crate::mleader_style::{MLeaderStyle, MLeaderStyleResolution};
 use crate::tables::{
     ActiveAnnotationScale, BlockDefinition, DynamicBlockVisibility, Layer, Layout, LineType,
     PlotMargins, PlotPaperUnits, PlotProvenance, PlotRotation, PlotSettingsRecord, PlotType, Scale,
@@ -332,6 +333,48 @@ impl DrawingDatabase {
     /// ADR 0017 D.2).
     pub fn resolve_dim_style(&self, name: &str) -> Option<DimensionStyleValues> {
         let style = self.dim_style_by_name(name)?;
+        let text_style_name = style.text_style_name.clone();
+        let resolved = self.style_by_name(&text_style_name);
+        let text_style = resolved.map(|s| s.id).unwrap_or(StyleId(0));
+        let text_font = resolved.and_then(|s| s.resource_keys.first().cloned());
+        Some(style.resolved(text_style_name, text_style, text_font))
+    }
+
+    /// MLEADERSTYLE table entries (ADR 0019 decision D, P7c).
+    pub fn mleader_styles(&self) -> impl Iterator<Item = &MLeaderStyle> {
+        self.mleader_styles.values()
+    }
+
+    /// A MLEADERSTYLE table entry by identity.
+    pub fn mleader_style(&self, id: MLeaderStyleId) -> Option<&MLeaderStyle> {
+        self.mleader_styles.get(&id)
+    }
+
+    /// A MLEADERSTYLE table entry by name, matched exactly then
+    /// case-insensitively (the [`Self::dim_style_by_name`] rule).
+    pub fn mleader_style_by_name(&self, name: &str) -> Option<&MLeaderStyle> {
+        if let Some(id) = self.mleader_style_ids_by_name.get(name) {
+            return self.mleader_styles.get(id);
+        }
+        self.mleader_styles
+            .values()
+            .find(|style| style.name.trim() == name.trim())
+            .or_else(|| {
+                self.mleader_styles
+                    .values()
+                    .find(|style| style.name.eq_ignore_ascii_case(name.trim()))
+            })
+    }
+
+    /// Resolve a named MLEADERSTYLE into the creation snapshot the `MLEADER`
+    /// command stores (ADR 0019 decision D/F.2, P7c).
+    ///
+    /// The text style is resolved by name (exact then case-insensitive); its
+    /// font key is the first resource key. When the text style is absent the
+    /// snapshot falls back to `StyleId(0)` with no font, mirroring
+    /// [`Self::resolve_dim_style`] — the leader text is still drawn.
+    pub fn resolve_mleader_style(&self, name: &str) -> Option<MLeaderStyleResolution> {
+        let style = self.mleader_style_by_name(name)?;
         let text_style_name = style.text_style_name.clone();
         let resolved = self.style_by_name(&text_style_name);
         let text_style = resolved.map(|s| s.id).unwrap_or(StyleId(0));

@@ -1,3 +1,29 @@
+## P7c：`MLeaderStyle` 表 + `MLEADER` 创建（ADR-0019 决策 D/F.2/F.3，2026-10-20）
+
+**范围**：`cad-db`（新表）、`cad-import-acadrust`（`MLEADERSTYLE` 喂表 + 创建往返测试）、`cad-app`（命令/工具/创建）、
+`cad-ui-core`（选择子/计数/5 个 i18n 键）、`apps/app-linux/ui`（ribbon 入口 + 字形 + 三段提示）。
+
+- **表**：`MLeaderStyle`（`standard_metric()` + 按名解析，先精确后忽略大小写），`finish()` **始终 pin `Standard`**；
+  默认值是**常量**（狗腿 `0.36`、缺口 `0.09`、箭头 `0.18`、字高 `0.18` 等）——**不是 vendor 验证过的样式表**，
+  与 `TEXT` 的 2.5 同类债务；样式表**未建模字段具名不存**。
+- **`MLEADERSTYLE` 导入现已喂表**（此前只按实体临时解析后丢弃）。
+- **创建**：箭头 → 落点 → 文本；`Exact(2)` + 文本；单簇/单线/2 顶点/仅直线；**一个** `AcDbMultiLeader`、
+  一条事务/一步撤销/活动图层、掩码 `0`、`AcDbMultiLeader`。**无内容不创建**（仅导入/显示/导出）。
+- **精确几何（钉住）**：箭头 `(0,0,0)` + 落点 `(10,2,0)` ⇒ 顶点 `[(0,0,0),(9.64,2,0)]`、狗腿线 `(9.64,2)→(9.91,2)`
+  （`0.36 − 0.09`）、文字在落点、高 `0.18`、附着点 `2`（**居中**——样式记录**没有水平附着侧**，声明）。
+- **修复既有潜伏 bug**：`MultiLeaderGeometry::new` **实际不可达**（对 `from_import` 的任何理由都判失败，而
+  `build_display` 总返回信息性的"颜色/线宽未应用"）⇒ 现只校验**结构性**缺陷；`from_import` 未改。
+- **拒绝面**：`mleader.payload`、`tool.text_empty`、`tool.text_too_long`、`tool.text_points_incomplete`、
+  `tool.text_not_awaiting`、`tool.text_required`、`mleader.style_missing`、`mleader.text_required`、
+  `mleader.content_unsupported`、`mleader.path_type`、`mleader.points_not_finite`、`mleader.plane`、
+  `mleader.landing_too_close`、`mleader.leader_degenerate`、`mleader.style_invalid`、缺活动图层、Viewer。
+- **UI**：`OFFSET → TEXT → MLEADER → HATCH`（HATCH 仍收尾）；MLEADER 按钮**无 caret / 无 variants**（不暗示 `Options`）；
+  点 0 → arrow、点 1 → landing；落点后的"待文本"窗口用 `TOOL_READY_PROMPTS`（否则会错误落到"标注已定义"）。
+- **门禁（编排者复跑）**：crate **2215/0**、UI **208/208（0 跳过）**、clippy/fmt/architecture(27)/i18n(**558**)/
+  file-size(**734**)/manifest(**23**)。
+- **NOT RUN**：全量 workspace、跨平台、**真机像素判据**（ADR J 对 P7c 的要求，留作独立一步）、真实 MULTILEADER 夹具。
+- **下一步**：**P7 阶段门禁**（含真机证据），然后弹窗层第 1 步（管线骨架）按用户确认。
+
 ## P7b-2：真 `MULTILEADER` 导出（`MLEADERSTYLE` 去重 + `CLASSES`，ADR-0019 决策 E，2026-10-20）
 
 **范围**：`crates/cad-import-acadrust/src/export/{multileader.rs(新), entity.rs, mod.rs}` 与测试。

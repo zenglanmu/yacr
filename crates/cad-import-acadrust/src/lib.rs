@@ -427,6 +427,7 @@ mod dynamic;
 mod entity;
 mod geometry;
 mod hatch;
+mod mleader_style;
 mod plot;
 mod primitives;
 mod style;
@@ -456,6 +457,8 @@ mod tests_display_mline_tolerance;
 mod tests_display_multileader;
 #[cfg(test)]
 mod tests_display_table_extended;
+#[cfg(test)]
+mod tests_multileader_created;
 #[cfg(test)]
 mod tests_multileader_export;
 #[cfg(test)]

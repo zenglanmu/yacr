@@ -551,5 +551,10 @@
   "draw.kind.textedit": "编辑文字",
   "tool.prompt.textedit.select_entity": "选择要编辑的文字对象",
   "properties.row.roots": "引线簇",
-  "properties.row.lines": "引线数"
+  "properties.row.lines": "引线数",
+  "draw.kind.mleader": "多重引线",
+  "tool.draw.mleader": "多重引线",
+  "tool.prompt.mleader.arrow": "指定箭头位置",
+  "tool.prompt.mleader.landing": "指定落点（引线终点）",
+  "tool.prompt.mleader.type_text": "输入注释文字，按回车提交"
 }

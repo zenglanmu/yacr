@@ -342,6 +342,7 @@ impl SessionState {
             DrawToolKind::DimOrdinate => CommandId::DimOrdinate,
             DrawToolKind::Hatch => CommandId::Hatch,
             DrawToolKind::Text => CommandId::CreateText,
+            DrawToolKind::MLeader => CommandId::MLeader,
             DrawToolKind::TextEdit => CommandId::TextEdit,
         })?;
         let selection = self.selection.refs().to_vec();

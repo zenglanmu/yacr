@@ -450,6 +450,30 @@ pub enum DrawToolKind {
     /// MTEXT's columns/background/line-spacing style/drawing direction are
     /// likewise not modelled (ADR 0019 decision H).
     Text,
+    /// MLEADER: the arrow position, then the landing point, then the text
+    /// (ADR 0019 decision F.2, P7c).
+    ///
+    /// Two free points ([`PointArity::Exact(2)`]) and no entity picks
+    /// ([`Self::picked_step_count`] is `0`), followed by the **same** terminal
+    /// typed-text step [`Self::Text`] uses ([`Self::requires_text`]); submitting
+    /// the text completes the command. The commit is one root, one line and
+    /// **two vertices** with a straight path — the dogleg start is derived from
+    /// the landing point and the style's dogleg length by the command layer
+    /// (`MultiLeaderGeometry::created`), never captured.
+    ///
+    /// Every style value (dogleg length, landing gap, arrowhead size, text
+    /// height, text style, vertical attachment) comes from the drawing's
+    /// `MLeaderStyle` table. Text is **required**: content-less MULTILEADER is
+    /// import/display/export only, so an empty text is refused and `Confirm`
+    /// while the text prompt is open is refused by name.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED): **no `Options` sub-prompt** — no
+    /// leader type (straight/spline), no content type (block/tolerance), no
+    /// maximum-points/angular-constraint option and no per-invocation dogleg or
+    /// attachment prompt; the UI must not imply them. Multi-column text,
+    /// background masks, per-line overrides, associativity and editing an
+    /// existing leader are likewise not offered.
+    MLeader,
     /// TEXTEDIT: pick **one existing single-line `Text`** entity, then replace its
     /// string (ADR 0020 amendment options A+B).
     ///
@@ -479,7 +503,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 33] = [
+    pub const ALL: [DrawToolKind; 34] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -515,6 +539,7 @@ impl DrawToolKind {
         // this order rather than keeping a second list).
         DrawToolKind::Text,
         DrawToolKind::TextEdit,
+        DrawToolKind::MLeader,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -553,6 +578,7 @@ impl DrawToolKind {
             Self::Hatch => "hatch",
             Self::Text => "text",
             Self::TextEdit => "textedit",
+            Self::MLeader => "mleader",
         }
     }
 
@@ -593,6 +619,7 @@ impl DrawToolKind {
             "hatch" => Some(Self::Hatch),
             "text" => Some(Self::Text),
             "textedit" => Some(Self::TextEdit),
+            "mleader" => Some(Self::MLeader),
             _ => None,
         }
     }
@@ -697,6 +724,10 @@ impl DrawToolKind {
             // literals on the Rust side and the shell substitutes the catalog
             // label for chrome anyway.
             Self::TextEdit => "TEXTEDIT",
+            // MLEADER uses a locale-neutral ASCII fallback label, exactly like the
+            // other post-ADR-0015 kinds: the ADR fence forbids new CJK literals on
+            // the Rust side and the shell substitutes the catalog label anyway.
+            Self::MLeader => "MLEADER",
         }
     }
 
@@ -760,7 +791,10 @@ impl DrawToolKind {
             | Self::DimRadius
             | Self::DimDiameter
             // DIMORDINATE: the feature point and the leader endpoint.
-            | Self::DimOrdinate => PointArity::Exact(2),
+            | Self::DimOrdinate
+            // MLEADER: the arrow position and the landing point; its text is the
+            // terminal typed step, not a point.
+            | Self::MLeader => PointArity::Exact(2),
         }
     }
 
@@ -847,6 +881,6 @@ impl DrawToolKind {
     /// count, because `ready` alone cannot tell "missing points" from "missing
     /// text".
     pub fn requires_text(self) -> bool {
-        matches!(self, Self::Text | Self::TextEdit)
+        matches!(self, Self::Text | Self::TextEdit | Self::MLeader)
     }
 }

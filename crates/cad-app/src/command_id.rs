@@ -133,6 +133,36 @@ pub enum CommandId {
     /// spacing or background, and MTEXT's columns/background/line-spacing
     /// style/drawing direction are **not** modelled (decision H). Work-only.
     CreateText,
+    /// MLEADER: insert one straight-line multileader with text content from a
+    /// two-point capture — the arrow position, then the landing point — followed
+    /// by the terminal text step (ADR 0019 decision F.2, P7c).
+    ///
+    /// Payload is `MLeader { arrow, landing, text }`. The dogleg length, landing
+    /// gap, arrowhead size, text height, text style, vertical text attachment,
+    /// path type and content kind are **resolved from the drawing's
+    /// `MLeaderStyle` table** (`Standard`), never from the payload or a session
+    /// parameter: the created entity stores that resolution as its one snapshot
+    /// (P7b-1's resolved effective values), so there is no second source.
+    ///
+    /// The result is **one** `AcDbMultiLeader` — one root, one line, two
+    /// vertices, straight, MText content — inserted through the shared create
+    /// funnel in one transaction / one undo step on the active layer. The
+    /// interactive tool captures the two points and then the typed text through
+    /// `cad_set_tool_text` (terminal: submitting it completes the command; no
+    /// second Confirm).
+    ///
+    /// There is **no `Options` sub-prompt** (leader type, content type, maximum
+    /// points, angular constraint) and therefore no payload field for any of
+    /// them. Text is **required**: there is no path to a content-less
+    /// MULTILEADER — content-less leaders are import/display/export only.
+    ///
+    /// Refusals (nothing written, no transaction): empty/whitespace-only or
+    /// over-1024-character text, a non-finite or non-`+Z`-coplanar point pair, a
+    /// landing point no farther than the resolved dogleg length, a resolved style
+    /// whose path type is not straight (spline/invisible), whose content kind is
+    /// block/tolerance, or whose sizes are unusable, a missing `Standard` style,
+    /// a missing active layer, and Viewer mode. Work-only.
+    MLeader,
     /// TEXTEDIT: replace the text string of an **existing single-line `Text`**
     /// entity (ADR 0020 amendment options A+B, reused by the panel edit path).
     ///
@@ -396,6 +426,7 @@ impl CommandId {
                 | Self::CreatePoint
                 | Self::CreateSpline
                 | Self::CreateText
+                | Self::MLeader
                 | Self::TextEdit
                 | Self::DimLinear
                 | Self::DimAligned

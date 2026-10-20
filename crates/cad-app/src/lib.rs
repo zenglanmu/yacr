@@ -598,6 +598,24 @@ pub enum CommandPayload {
         text: String,
         height: f64,
     },
+    /// MLEADER: one straight-line multileader with text content (ADR 0019
+    /// decision F.2, P7c).
+    ///
+    /// `arrow` is the captured arrow position (the first leader vertex `10`),
+    /// `landing` the captured landing/content-connection point (the root's
+    /// `LEADER{}` group `10`), and `text` the terminal typed string
+    /// (non-empty, at most [`crate::draw_tool::MAX_TOOL_TEXT_CHARS`] characters —
+    /// re-validated here so a programmatic caller cannot bypass the capture).
+    ///
+    /// Every style value (dogleg length, landing gap, arrowhead size, text
+    /// height, text style, vertical attachment, path type, content kind) is read
+    /// from the drawing's `MLeaderStyle` table, so none of them is a payload
+    /// field: a caller cannot smuggle a second, contradictory style source in.
+    MLeader {
+        arrow: Point3,
+        landing: Point3,
+        text: String,
+    },
     /// TEXTEDIT: replace the string of an existing single-line `Text` (ADR 0020
     /// amendment A/B).
     ///

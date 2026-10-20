@@ -158,6 +158,20 @@ impl DrawPreview {
                     format!("{}: pick a text entity to edit", self.kind.key())
                 };
             }
+            if self.kind == DrawToolKind::MLeader {
+                return if self.awaiting_text {
+                    format!(
+                        "{}: arrow and landing captured ({}), type the text",
+                        self.kind.key(),
+                        self.points.len()
+                    )
+                } else {
+                    format!(
+                        "{}: specify the arrow position and the landing point",
+                        self.kind.key()
+                    )
+                };
+            }
             return if self.awaiting_text {
                 format!(
                     "{}: insertion point captured ({}), type the text",
@@ -553,6 +567,19 @@ impl DrawTool {
                 text: self.text.clone().ok_or_else(|| {
                     CadError::InvalidInput(
                         "tool.text_required: TEXT needs its text before commit".into(),
+                    )
+                })?,
+            },
+            // MLEADER: the two captured points (arrow, landing) plus the
+            // submitted text. Every style value is resolved by the command layer
+            // from the drawing's `MLeaderStyle` table, so nothing style-shaped
+            // rides the intent.
+            DrawToolKind::MLeader => DrawIntent::MLeader {
+                arrow: a,
+                landing: b,
+                text: self.text.clone().ok_or_else(|| {
+                    CadError::InvalidInput(
+                        "tool.text_required: MLEADER needs its text before commit".into(),
                     )
                 })?,
             },

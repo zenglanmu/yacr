@@ -5,10 +5,11 @@
 //! [`MultiLeaderGeometry`] is the single builder of a multileader's display: it
 //! is derived from `style + text + roots + lines` by
 //! [`MultiLeaderGeometry::build_display`], and the only writers are
-//! [`MultiLeaderGeometry::new`] (creation path), [`MultiLeaderGeometry::from_import`]
-//! (import path, which degrades honestly and never rejects) and
-//! [`MultiLeaderGeometry::transformed`]. This mirrors `HatchGeometry`, so a
-//! caller cannot store a display that disagrees with the definition.
+//! [`MultiLeaderGeometry::new`] / [`MultiLeaderGeometry::created`] (creation
+//! path), [`MultiLeaderGeometry::from_import`] (import path, which degrades
+//! honestly and never rejects) and [`MultiLeaderGeometry::transformed`]. This
+//! mirrors `HatchGeometry`, so a caller cannot store a display that disagrees
+//! with the definition.
 //!
 //! The display derivation is a **verbatim move** of the pre-P7b importer's
 //! `cad-import-acadrust::dimension::multileader` synthesis: the same leader
@@ -333,6 +334,17 @@ pub struct MultiLeaderGeometry {
     display: Vec<SemanticGeometry>,
 }
 
+/// The text attachment point a **created** multileader stores (DXF group `1`:
+/// centre).
+///
+/// A `MLEADERSTYLE` record has no horizontal attachment *side* — it carries the
+/// left/right vertical attachments (174/178) only — so creation centres the text
+/// on the landing point, which needs no side decision and therefore no second,
+/// side-dependent attachment field. The crash bar is declared: a created leader
+/// has **one** attachment pair (centre / the style's left attachment), never a
+/// per-side pair, and this constant is the single source for the horizontal one.
+pub const CREATED_TEXT_ATTACHMENT_POINT: i16 = 2;
+
 /// The parts accepted by [`MultiLeaderGeometry::from_import`].
 ///
 /// A named struct keeps the import call readable without a twelve-argument
@@ -351,19 +363,214 @@ pub struct MultiLeaderParts {
 }
 
 impl MultiLeaderGeometry {
-    /// Build a multileader on the creation path (P7c), rejecting a display that
-    /// cannot be derived.
+    /// Build a multileader on the creation path (P7c), rejecting a definition
+    /// whose display cannot be derived.
     ///
     /// The import path uses [`Self::from_import`] instead, which keeps today's
-    /// honest degradation instead of rejecting.
+    /// honest degradation instead of rejecting. `new` refuses only **structural**
+    /// defects (no root, a line with fewer than two points, a non-finite point,
+    /// an empty text string with `MText` content, an empty derived display). The
+    /// representation-level notes `from_import` returns (for example "colour /
+    /// lineweight overrides are resolved but not applied") are **informational** —
+    /// they describe the representation, not this entity — so they do not fail the
+    /// creation path.
     pub fn new(parts: MultiLeaderParts) -> CadResult<Self> {
-        let (geometry, reasons) = Self::from_import(parts);
-        if let Some(reason) = reasons.first() {
-            return Err(CadError::InvalidInput(format!(
-                "cannot build the multileader display: {reason}"
-            )));
+        if parts.roots.is_empty() {
+            return Err(CadError::InvalidInput(
+                "mleader.structure: a multileader needs at least one leader root".into(),
+            ));
+        }
+        if parts.lines.is_empty() {
+            return Err(CadError::InvalidInput(
+                "mleader.structure: a multileader needs at least one leader line".into(),
+            ));
+        }
+        for line in &parts.lines {
+            if line.points.len() < 2 {
+                return Err(CadError::InvalidInput(format!(
+                    "mleader.structure: leader line {} of root {} needs at least two vertices, \
+                     got {}",
+                    line.index,
+                    line.root_index,
+                    line.points.len()
+                )));
+            }
+            if !line.points.iter().all(|point| is_finite_point(*point)) {
+                return Err(CadError::InvalidInput(
+                    "mleader.structure: leader line vertices must be finite".into(),
+                ));
+            }
+        }
+        for root in &parts.roots {
+            if !is_finite_point(root.landing_point) || !is_finite_point(root.dogleg_vector) {
+                return Err(CadError::InvalidInput(
+                    "mleader.structure: leader root points must be finite".into(),
+                ));
+            }
+        }
+        if parts.content == MLeaderContent::Text && parts.text.string.trim().is_empty() {
+            return Err(CadError::InvalidInput(
+                "mleader.text_required: a created multileader needs a non-empty text".into(),
+            ));
+        }
+        let (geometry, _reasons) = Self::from_import(parts);
+        if geometry.display.is_empty() {
+            return Err(CadError::InvalidInput(
+                "mleader.structure: the definition yields an empty display".into(),
+            ));
         }
         Ok(geometry)
+    }
+
+    /// Build a multileader from a **creation** capture: the arrow position, the
+    /// landing point (the content connection point) and the annotation text
+    /// (ADR 0019 decision F.2, P7c).
+    ///
+    /// The definition is one root, one line and **two vertices**, joined straight:
+    ///
+    /// * vertex 1 is the captured arrow position;
+    /// * vertex 2 is the **dogleg start**, derived from the captured landing point
+    ///   and the style's dogleg length: the dogleg runs horizontally toward the
+    ///   text (the side the landing point lies on) for `dogleg_length`, so the
+    ///   second vertex is `landing - (dogleg_length · side)` and the display's
+    ///   dogleg (which starts at the last vertex and stops `landing_gap` short of
+    ///   the connection point) is exactly that segment minus the gap;
+    /// * the text sits at the landing point with the style's height and the
+    ///   style's vertical attachment, centred horizontally (see
+    ///   [`CREATED_TEXT_ATTACHMENT_POINT`]).
+    ///
+    /// Nothing is invented beyond those derivations: the typeface, sizes, gap,
+    /// dogleg length and path type all come from the caller's resolved style
+    /// snapshot (the `MLeaderStyle` table), and `override_mask` stays `0` because
+    /// a created leader overrides none of its style's values.
+    ///
+    /// Refusals (each changes nothing; the caller opens no transaction):
+    /// non-finite points, a pair that is not coplanar on one `+Z` plane, an empty
+    /// text, a non-straight path type, a non-positive or non-finite style size,
+    /// a landing point no farther than the style's dogleg length, and a
+    /// degenerate leader segment.
+    pub fn created(
+        style: MLeaderStyleValues,
+        style_name: String,
+        left_attachment: i16,
+        arrow: Point3,
+        landing: Point3,
+        text: String,
+    ) -> CadResult<Self> {
+        if !is_finite_point(arrow) || !is_finite_point(landing) {
+            return Err(CadError::InvalidInput(
+                "mleader.points_not_finite: the arrow and landing points must be finite".into(),
+            ));
+        }
+        let z_tolerance = 1e-9 * (1.0 + arrow.z.abs() + landing.z.abs());
+        if (landing.z - arrow.z).abs() > z_tolerance {
+            return Err(CadError::InvalidInput(
+                "mleader.plane: the arrow and landing points must lie in one +Z plane".into(),
+            ));
+        }
+        if text.trim().is_empty() {
+            return Err(CadError::InvalidInput(
+                "mleader.text_required: a created multileader needs a non-empty text".into(),
+            ));
+        }
+        if style.path_type != MLeaderPathType::StraightLineSegments {
+            return Err(CadError::Unsupported(
+                "mleader.path_type: only straight-line leaders can be created; the resolved \
+                 style is spline or invisible"
+                    .into(),
+            ));
+        }
+        let dogleg_length = style.landing_distance;
+        if !dogleg_length.is_finite() || dogleg_length <= 0.0 {
+            return Err(CadError::InvalidInput(format!(
+                "mleader.style_invalid: the dogleg length must be finite and positive, got \
+                 {dogleg_length}"
+            )));
+        }
+        if !style.text_height.is_finite() || style.text_height <= 0.0 {
+            return Err(CadError::InvalidInput(format!(
+                "mleader.style_invalid: the text height must be finite and positive, got {}",
+                style.text_height
+            )));
+        }
+        if !style.arrowhead_size.is_finite() || style.arrowhead_size <= 0.0 {
+            return Err(CadError::InvalidInput(format!(
+                "mleader.style_invalid: the arrowhead size must be finite and positive, got {}",
+                style.arrowhead_size
+            )));
+        }
+        if !style.landing_gap.is_finite() || style.landing_gap < 0.0 {
+            return Err(CadError::InvalidInput(format!(
+                "mleader.style_invalid: the landing gap must be finite and non-negative, got {}",
+                style.landing_gap
+            )));
+        }
+        // The text side: the dogleg points from the leader toward the landing
+        // point along +X when the text is to the right, -X when it is to the
+        // left. An exactly vertical leader (equal X) takes +X, the reading
+        // direction, rather than inventing a side from the Y delta.
+        let side = if landing.x < arrow.x { -1.0 } else { 1.0 };
+        let dogleg_start = Point3 {
+            x: landing.x - side * dogleg_length,
+            y: landing.y,
+            z: landing.z,
+        };
+        let span = length3(sub(arrow, landing));
+        if span <= dogleg_length {
+            return Err(CadError::InvalidInput(format!(
+                "mleader.landing_too_close: the landing point must be farther from the arrow \
+                 position than the style dogleg length {dogleg_length}, got {span}"
+            )));
+        }
+        if length3(sub(arrow, dogleg_start)) <= 1e-12 {
+            return Err(CadError::InvalidInput(
+                "mleader.leader_degenerate: the arrow position and the derived dogleg start \
+                 coincide"
+                    .into(),
+            ));
+        }
+        let height = style.text_height;
+        let parts = MultiLeaderParts {
+            style: style.clone(),
+            style_name,
+            override_mask: 0,
+            content: MLeaderContent::Text,
+            text: MLeaderText {
+                string: text,
+                location: landing,
+                rotation: 0.0,
+                height,
+                width: 0.0,
+                attachment_point: CREATED_TEXT_ATTACHMENT_POINT,
+                left_attachment,
+            },
+            roots: vec![MLeaderRoot {
+                leader_index: 0,
+                landing_point: landing,
+                // The dogleg's own direction (start -> connection point); the
+                // exporter writes it verbatim as LEADER group 11 and the import
+                // reads it verbatim, so it is not re-derived on reload.
+                dogleg_vector: Point3 {
+                    x: side,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                dogleg_length,
+            }],
+            lines: vec![MLeaderLine {
+                root_index: 0,
+                index: 0,
+                points: vec![arrow, dogleg_start],
+                path_type: MLeaderPathType::StraightLineSegments,
+                // No per-line overrides: the root/style values apply.
+                override_flags: 0,
+                arrowhead_size: style.arrowhead_size,
+                arrowhead_handle: None,
+            }],
+            reserved: MLeaderReserved::default(),
+            plane: PlaneFrame::default(),
+        };
+        Self::new(parts)
     }
 
     /// Build a multileader from imported data, degrading honestly.

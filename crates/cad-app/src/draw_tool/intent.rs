@@ -263,6 +263,20 @@ pub enum DrawIntent {
     /// text is always a non-empty, at most
     /// [`super::MAX_TOOL_TEXT_CHARS`]-character string validated at capture time.
     Text { position: Point3, text: String },
+    /// MLEADER: place `text` on a straight-line leader from `arrow` to the
+    /// `landing` content-connection point (ADR 0019 decision F.2, P7c).
+    ///
+    /// The two points are exactly the two clicks, in order; the dogleg start, the
+    /// dogleg/arrow/text sizes and the attachments are the command layer's
+    /// derivation from the resolved `MLeaderStyle` table (`MultiLeaderGeometry::created`),
+    /// so the intent never carries a style value and cannot contradict the table.
+    /// The text is validated at capture time (non-empty, at most
+    /// [`super::MAX_TOOL_TEXT_CHARS`] characters) and re-validated by the command.
+    MLeader {
+        arrow: Point3,
+        landing: Point3,
+        text: String,
+    },
     /// TEXTEDIT: replace the stored string of `target` with `text` (ADR 0020
     /// amendment A).
     ///

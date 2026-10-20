@@ -894,6 +894,7 @@ fn polygon_intent_carries_the_two_picks_exactly_and_is_ready_at_two() {
 mod array;
 mod dimension;
 mod hatch;
+mod mleader;
 mod point_spline;
 mod text;
 

@@ -37,6 +37,9 @@ const HOST_NAMES = [
   // TEXT (ADR 0019 P7a): the single-line text command whose text step travels on
   // `cad_set_tool_text`. Its own suite lives in `text-tool.test.mjs`.
   'TEXT',
+  // MLEADER (ADR 0019 P7c): the two-point leader whose text step uses the same
+  // channel. Its own suite lives in `mleader-tool.test.mjs`.
+  'MLEADER',
   // Interaction-only selectors: one per measurement kind, plus fixed zoom steps.
   'DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ZOOMIN', 'ZOOMOUT',
   // Full-word aliases.

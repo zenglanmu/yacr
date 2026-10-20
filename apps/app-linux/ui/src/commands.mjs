@@ -141,6 +141,12 @@ export const COMMAND_CATALOG = Object.freeze([
   // Single-line TEXT (ADR 0019 decision A): a point and then its text, which is
   // the command's terminal step and travels on `cad_set_tool_text`.
   { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', group: 'draw' },
+  // MLEADER (ADR 0019 decision F.2): two points — the arrowhead position, then
+  // the landing point — and then that same terminal text step. It carries no
+  // variant entry because the command has no `Options` sub-prompt (leader type /
+  // content type / max points / angular constraint), and nothing here may imply
+  // one.
+  { id: 'MLEADER', labelKey: 'draw.kind.mleader', icon: 'mleader', group: 'draw' },
   { id: 'HATCH', labelKey: 'draw.kind.hatch', icon: 'hatch', group: 'draw' },
   { id: 'MOVE', labelKey: 'draw.kind.move', icon: 'move', group: 'modify' },
   { id: 'COPY', labelKey: 'draw.kind.copy', icon: 'copy', group: 'modify' },

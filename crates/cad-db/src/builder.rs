@@ -7,6 +7,7 @@ use cad_domain::*;
 use crate::dim_style::DimStyle;
 use crate::drawing::DrawingDatabase;
 use crate::entity::{DbEntity, EntityRenderAttributes};
+use crate::mleader_style::MLeaderStyle;
 use crate::tables::{
     ActiveAnnotationScale, BlockDefinition, DynamicBlockVisibility, Layer, Layout, LineType,
     PlotSettingsRecord, Scale, Style,
@@ -39,6 +40,8 @@ impl DrawingDatabaseBuilder {
                 scales: BTreeMap::new(),
                 dim_styles: BTreeMap::new(),
                 dim_style_ids_by_name: BTreeMap::new(),
+                mleader_styles: BTreeMap::new(),
+                mleader_style_ids_by_name: BTreeMap::new(),
                 active_annotation_scale: None,
                 next_entity_id: 1,
                 bounds_cache: Default::default(),
@@ -181,6 +184,40 @@ impl DrawingDatabaseBuilder {
         Ok(())
     }
 
+    /// Insert a MLEADERSTYLE table entry (ADR 0019 decision D, P7c).
+    ///
+    /// Same name/id rules as [`Self::insert_dim_style`]: an empty name is
+    /// rejected (it could never resolve), a source row whose name already exists
+    /// replaces the earlier entry in place (keeping the first id), and an id
+    /// already owned by a **different** name is rejected rather than orphaning
+    /// the old name's index entry.
+    pub fn insert_mleader_style(&mut self, style: MLeaderStyle) -> CadResult<()> {
+        if style.name.trim().is_empty() {
+            return Err(CadError::InvalidInput(
+                "multileader style name is empty".into(),
+            ));
+        }
+        if let Some(existing) = self.database.mleader_style_ids_by_name.get(&style.name) {
+            let mut replaced = style;
+            replaced.id = *existing;
+            self.database.mleader_styles.insert(*existing, replaced);
+            return Ok(());
+        }
+        if let Some(existing) = self.database.mleader_styles.get(&style.id) {
+            if existing.name != style.name {
+                return Err(CadError::InvalidInput(format!(
+                    "multileader style id {:?} is already owned by '{}'; it cannot also own '{}'",
+                    style.id, existing.name, style.name
+                )));
+            }
+        }
+        self.database
+            .mleader_style_ids_by_name
+            .insert(style.name.clone(), style.id);
+        self.database.mleader_styles.insert(style.id, style);
+        Ok(())
+    }
+
     /// Set the drawing's active annotation scale (`CANNOSCALE`).
     ///
     /// `value` is the raw paper/drawing ratio from the header. An empty name is
@@ -258,6 +295,30 @@ impl DrawingDatabaseBuilder {
                 .dim_style_ids_by_name
                 .insert(style.name.clone(), id);
             self.database.dim_styles.insert(id, style);
+        }
+        // A MLEADERSTYLE table always carries a `Standard` (ADR 0019 D/P7c),
+        // exactly like DIMSTYLE: a hand-built database, or a source drawing that
+        // had none, gets the pinned constant row; an imported `Standard` is left
+        // as read.
+        if !self
+            .database
+            .mleader_style_ids_by_name
+            .contains_key(MLeaderStyle::STANDARD_NAME)
+        {
+            let next = self
+                .database
+                .mleader_styles
+                .keys()
+                .map(|id| id.0)
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1);
+            let id = MLeaderStyleId(next);
+            let style = MLeaderStyle::standard_metric(id);
+            self.database
+                .mleader_style_ids_by_name
+                .insert(style.name.clone(), id);
+            self.database.mleader_styles.insert(id, style);
         }
         // Every entity's layer must exist.
         for entity in self.database.entities.values() {

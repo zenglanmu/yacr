@@ -98,6 +98,21 @@ impl HostController {
                 crate::CommandId::TextEdit,
                 crate::CommandPayload::TextEdit { target, text },
             ),
+            // MLEADER: the two captured points and the terminal text. The style
+            // values are resolved by the command from the drawing's
+            // `MLeaderStyle` table, so nothing style-shaped travels here.
+            DrawIntent::MLeader {
+                arrow,
+                landing,
+                text,
+            } => (
+                crate::CommandId::MLeader,
+                crate::CommandPayload::MLeader {
+                    arrow,
+                    landing,
+                    text,
+                },
+            ),
             DrawIntent::Move { delta } => (
                 crate::CommandId::MoveEntities,
                 crate::CommandPayload::Move {

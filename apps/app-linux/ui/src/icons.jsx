@@ -84,6 +84,13 @@ const P = {
   // glyph (extension lines with a dimension line, ticks or arrowheads) even at
   // 16 px, where only the A's two legs and the baseline survive.
   text: <><path d="M8 14.5 12 4.5l4 10" /><path d="M9.6 11h4.8" /><path d="M4 19.5h16" /></>,
+  // Multileader: an arrowhead at the measured feature, a straight leader running
+  // up to its landing and two text lines waiting above that landing — the picture
+  // of a leader annotation. The barbs use the dimension family's two-wing
+  // arrowhead, so the mark reads as an annotation arrow rather than a
+  // `dimordinate` leader (a circled feature with a landing tick), and the two
+  // text strokes above the landing keep it apart from `text` (an A on a baseline).
+  mleader: <><path d="M7.9 18.7 4.4 19.6 5.3 16.1" /><path d="M4.4 19.6 12.6 11.4h7.4" /><path d="M13.8 7.6h5.6M13.8 4.4h3.4" /></>,
   point: <><circle cx="12" cy="12" r="2.2" /><path d="M12 4v4M12 16v4M4 12h4M16 12h4" /></>,
   spline: <><path d="M3 16c3-7 6 7 9 0s6-7 9 0" /><circle cx="3" cy="16" r="1.4" /><circle cx="12" cy="16" r="1.4" /><circle cx="21" cy="16" r="1.4" /></>,
   angle: <><path d="M4 19h16M4 19 16 5" /><path d="M12 19a8 8 0 0 0-2-5.3" /></>,

@@ -551,5 +551,10 @@
   "draw.kind.textedit": "Edit Text",
   "tool.prompt.textedit.select_entity": "Select a text object to edit",
   "properties.row.roots": "Leader roots",
-  "properties.row.lines": "Leader lines"
+  "properties.row.lines": "Leader lines",
+  "draw.kind.mleader": "Multileader",
+  "tool.draw.mleader": "Multileader",
+  "tool.prompt.mleader.arrow": "Specify the arrowhead position",
+  "tool.prompt.mleader.landing": "Specify the landing point (leader endpoint)",
+  "tool.prompt.mleader.type_text": "Enter the annotation text and press Enter"
 }

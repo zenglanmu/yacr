@@ -11,6 +11,7 @@ use cad_domain::*;
 
 use crate::dim_style::DimStyle;
 use crate::entity::{DbEntity, EntityRenderAttributes};
+use crate::mleader_style::MLeaderStyle;
 use crate::tables::{
     ActiveAnnotationScale, BlockDefinition, Layer, Layout, LineType, PlotSettingsRecord, Scale,
     Style,
@@ -63,6 +64,14 @@ pub struct DrawingDatabase {
     /// Name index over [`Self::dim_styles`] so a style resolves by name without
     /// scanning the table.
     pub(crate) dim_style_ids_by_name: BTreeMap<String, DimStyleId>,
+    /// MLEADERSTYLE table entries (ADR 0019 decision D, P7c). Always contains a
+    /// `Standard` (the pinned constant row for a hand-built database, or the
+    /// source `Standard` when one was imported). Read-only after import: there is
+    /// no style-edit command.
+    pub(crate) mleader_styles: BTreeMap<MLeaderStyleId, MLeaderStyle>,
+    /// Name index over [`Self::mleader_styles`] so a style resolves by name
+    /// without scanning the table.
+    pub(crate) mleader_style_ids_by_name: BTreeMap<String, MLeaderStyleId>,
     /// Drawing-global active annotation scale (`CANNOSCALE`), when set.
     pub(crate) active_annotation_scale: Option<ActiveAnnotationScale>,
     /// Next entity id to hand out. Monotonic and never reset when entities are

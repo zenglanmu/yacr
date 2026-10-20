@@ -378,3 +378,36 @@ P7c：`draw.kind.mleader`、`tool.draw.mleader`、`tool.prompt.mleader.{arrow,la
   architecture(27)、i18n(**553**)、file-size(**732**)、fixture-manifest(**23**)。**NOT RUN**：全量
   `cargo test --workspace`；跨平台；真机/像素；**无真实 MULTILEADER 夹具**（全合成），**未在 AutoCAD 打开验证**
   ⇒ U-4（最小有效文件）与 U-5（AutoCAD 是否接受）**仍是推断**。
+
+### P7c（`MLeaderStyle` 表 + `MLEADER` 创建，2026-10-20）
+
+- **`cad-db` 的 `MLeaderStyle` 表**（照 `DimStyle` 的 `standard_metric()` + `resolve` 先例）：
+  `MLeaderStyle { id, name, path_type, content_type, text_height, arrowhead_size, landing_gap, dogleg_length, text_style_name, left_attachment }`；
+  `finish()` **始终 pin 一个 `Standard`**；按名解析**先精确、后忽略大小写**。
+  **如实声明**：默认值是**常量**（`dogleg 0.36` / `landing gap 0.09` / `arrow 0.18` / `text height 0.18` / `Standard` 文本样式 /
+  左附着 `1` / 直线路 / 内容 `MTEXT`），与 P7b-2 写入器的基础值一致，但**不是**真实/vendor 验证过的样式表
+  （与 `TEXT` 的 2.5 同一类债务）；样式表里**未建模**的字段（颜色/线型/线宽、箭头块、块内容、绘制顺序、flags）**具名不存**。
+- **`MLEADERSTYLE` 导入现已喂表**：`read_mleader_styles()` 遍历源 `MLEADERSTYLE` 对象并插入（id 按源顺序、同名 `Standard`
+  覆盖 pin 行、文本样式 `342` 经 `TEXTSTYLE` 解析）。**此前只按实体临时解析并丢弃**——这是本轮补上的真实缺口。
+- **`MLEADER` 创建**：**箭头位置 → 落点 → 文本**；`Exact(2)` + `requires_text`；**单簇 / 单引线 / 2 顶点 / 仅直线**；
+  经 `MultiLeaderGeometry::created(style, …)` 单一漏斗插入**一个** `AcDbMultiLeader`，一条事务 / 一步撤销 / 活动图层，
+  `type_key`/`class_name` = `AcDbMultiLeader`，掩码 `0`。
+- **精确几何（已钉）**：箭头 `(0,0,0)`、落点 `(10,2,0)`、`Standard` 行 ⇒ 根 `landing (10,2,0)`、狗腿向量 `(1,0,0)`、长度 `0.36`；
+  顶点 `[(0,0,0), (9.64,2,0)]`；狗腿线 `(9.64,2)→(9.91,2)`（`0.36 − 0.09` 缺口）；文字在落点、高度 `0.18`、
+  附着点 **`2`（居中）**、左附着 `1`。
+- **`CREATED_TEXT_ATTACHMENT_POINT = 2` 的理由（声明）**：`MLEADERSTYLE` 记录**没有水平附着侧**，只能在"左/中/右"里
+  选一个确定值；取**居中**，不假装样式给了我们侧向信息。
+- **修复一处既有潜伏 bug**：`MultiLeaderGeometry::new` 在 P7b-1 中**实际不可达**——它对 `from_import` 的**任何**
+  理由都判失败，而 `build_display` **总是**返回"颜色/线宽覆盖未应用"这条**信息性**说明 ⇒ 创建路径永远失败。
+  现在 `new` 只校验**结构性**缺陷（根/线/顶点/文本/空显示），`from_import` 语义**未改**。
+- **拒绝面（具名、不写、不开事务）**：`mleader.payload`、`tool.text_empty`、`tool.text_too_long`（1024 `chars()`）、
+  `tool.text_points_incomplete`、`tool.text_not_awaiting`、`tool.text_required`（待文本期间提交）、`mleader.style_missing`、
+  `mleader.text_required`（无内容样式）、`mleader.content_unsupported`（块/公差/未知内容）、`mleader.path_type`
+  （样条/不可见）、`mleader.points_not_finite`、`mleader.plane`（非 `+Z`）、`mleader.landing_too_close`（跨度 ≤ 狗腿长）、
+  `mleader.leader_degenerate`、`mleader.style_invalid`、缺活动图层、Viewer、以及变体既有的缩放/镜像/非均匀。
+- **无 `Options` 子提示**（引线类型/内容类型/最多点数/角度约束）：**UI 不得暗示**（P7c UI lane 已按此实现，
+  MLEADER 按钮**无 caret、无 variants**）。
+- **创建必须有文本**：无内容 MULTILEADER 仅**导入/显示/导出**，**不创建**。
+- **门禁（编排者复跑）**：受影响 crate **2215 通过 / 0 失败**；UI **208/208（0 跳过）**；clippy(`-D warnings`)、fmt、
+  architecture(27)、i18n(**558**)、file-size(**734**)、manifest(**23**)。**NOT RUN**：全量 `cargo test --workspace`；
+  跨平台；**真机像素判据**（ADR J 对 P7c 的要求）——留作独立一步；**无真实 MULTILEADER 夹具**。
