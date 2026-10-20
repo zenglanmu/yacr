@@ -25,7 +25,12 @@ Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + �
 
 代码标识、注释、测试名、commit message 用英文；`docs/`、`AGENTS.md` 用中文。
 用户可见文案只能来自**唯一权威目录** `crates/cad-ui-core/i18n/{zh-CN,en}.json`（键集必须一致，
-见 `scripts/check-i18n.py`），不得在 React JSX/JS 或 Rust UI 里硬编码中文（脚本会拒绝硬编码 CJK）。
+见 `scripts/check-i18n.py`），不得在 React JSX/JS 或 Rust UI 里硬编码中文。
+**该门禁的实际范围（2026-10-20 更正，勿按过度承诺理解）**：`check-i18n.py` 只扫
+`crates/cad-ui-core/src`、`apps/app-linux/src`（Rust）与 `apps/app-linux/ui/src`（JS/JSX）并拒绝其中的**硬编码 CJK**；
+**`crates/cad-app` 仍含用户可见中文字面量**（如 `measure_tool.rs` 的提示文案），它们由
+`crates/cad-app/src/tests/cjk_baseline.rs` **冻结**——只**禁止增长**，不是"已合规"。这是**已知债务**，
+新代码**不得**沿用该做法。
 
 ## 仓库结构
 
