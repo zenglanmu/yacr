@@ -42,8 +42,9 @@
 - **D4 文字弹窗编辑（原 C）重新纳入**：ADR-0020 已加局部修正说明——A/B 不变，**C 以模态窗口形式**用于
   多行/MTEXT/长文本/MLEADER（P7b 后）。
 - **D5 冻结帧就地编辑不采用**：4K 一帧 ≈33 MB（base64 ≈44 MB）过 IPC + 编辑期渲染冻结 + 需新建 GPU 回读路径。
-- **D6 现存隐患（需审计）**：chrome 内**向下溢出到 CAD 矩形**的浮层（ribbon 下拉、autocomplete、tooltip、toast）
-  今天就会被遮；规则是**约束在 chrome 矩形内**（翻转/裁剪/内部滚动），越界改走 D1。
+- **D6 chrome 浮层：已审计，**规则本来就在代码里**（**纠正初稿误判**）：唯一绝对定位浮层是 ribbon 变体下拉，
+  已是 **in-band popover**（限制在 `.ribbon-panel__body` 内 + `max-height:100%` + 内部滚动），**不会**越到 CAD 矩形；
+  约束注释见 `ui/src/style.css:243-247`。其余（completions/history-panel/palette）在文档流内，改变的是布局而非遮挡。
 - **关键反证（已入 ADR）**：GTK3 `GtkPopover` 在 Wayland 上是 **`wl_subsurface` 而非 `xdg_popup`**，
   `gdk_window_wayland_raise()` **是空函数**、z 序只按创建顺序 ⇒ **CAD 子表面会永远盖住 popover**，
   且其 modal 只是进程内 grab，不拦原生表面；WebView-in-popover 无官方支持、键盘/IME **依赖合成器**。

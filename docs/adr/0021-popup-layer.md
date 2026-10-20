@@ -91,11 +91,18 @@ CAD 绘图区是**不可被 DOM 覆盖**的原生表面。那么后续必然出�
   需新建 GPU 回读路径；`map/unmap` 与逐帧"绘图区必须匹配 DOM 矩形"的守卫互相牵制。
 - 只有"必须**在图纸原位**编辑"时（而非"以图纸为背景"）才值得；当前瓶颈不在这里。
 
-### D6 chrome 内浮层的遮挡风险（**现存**，需审计）
+### D6 chrome 内浮层：**已审计，规则已在代码里**
 
-- 任何**向下溢出到 CAD 矩形**的 DOM 浮层（下拉、autocomplete、tooltip、toast）今天就会被原生表面盖住。
-  ribbon 位于 CAD 之上，其**下拉是首要嫌疑**。
-- 规则：chrome 浮层**必须**约束在 chrome 矩形内（向上翻转 / 裁剪 / 内部滚动）；越界者一律改走 D1 的窗口。
+- **审计结论（2026-10-20，纠正本文初稿的猜测）**：唯一的绝对定位浮层是 ribbon 的**变体下拉**
+  （`.ribbon-panel__menu`），它**已经**是 **in-band popover**：定位在 `.ribbon-panel__body`（`position: relative`）
+  之内，`max-height: 100%` + 内部滚动 ⇒ **不会画到 ribbon 带之外**，因此**不会**被 CAD 原生表面遮挡。
+  该约束**已有源码注释**（`apps/app-linux/ui/src/style.css:243-247`：「nothing paints below the ribbon (which would be
+  hidden behind the native CAD surface) … it cannot extend past the body rectangle」）——即**本项目早就知道并处理了**，
+  本文初稿把它列为"现存隐患/首要嫌疑"是**误判**。
+- 其余候选（命令行的 `completions`、`history-panel`、palette）**不是绝对定位**，在文档流内 ⇒ 它们改变的是
+  chrome 布局（CAD 矩形随之重算并触发原生表面 resize），**不是遮住**。
+- **规则（对未来的浮层）**：chrome 内浮层**必须**约束在自身 chrome 矩形内（in-band / 内部滚动 / 向上翻转）；
+  **需要更多空间或需要锚定到 CAD 区**的，走 D1 的窗口或 D3 的原生菜单。
 
 ## 后果
 
