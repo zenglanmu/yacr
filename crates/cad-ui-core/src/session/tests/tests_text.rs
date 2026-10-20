@@ -207,3 +207,129 @@ fn the_text_height_parameter_is_present_only_for_the_text_tool() {
         .set_tool_parameter(ToolParameter::TextHeight, ToolValue::Number(0.0))
         .is_err());
 }
+
+/// The single selected `Text` of the demo session, once the test created one.
+fn the_created_text(session: &CadSession) -> SelectionRef {
+    let controller = session.core.controller.borrow();
+    let drawing = controller.drawing().expect("a document");
+    let entity = drawing
+        .model_space()
+        .iter()
+        .find(|entity| matches!(entity.geometry, SemanticGeometry::Text { .. }))
+        .map(|entity| entity.id)
+        .expect("a text entity");
+    SelectionRef {
+        document: controller.document_id,
+        entity,
+        instance: InstancePath::default(),
+        sub_element: None,
+    }
+}
+
+#[test]
+fn textedit_selector_starts_the_edit_tool_with_no_prefill() {
+    let session = fresh_session();
+    session.command("TEXTEDIT").expect("TEXTEDIT is admitted");
+    let tool = session.snapshot(None, None, 0).tool.expect("the tool");
+    assert_eq!(tool.key, "draw.textedit");
+    assert_eq!(tool.points, 0);
+    assert!(!tool.awaiting_text);
+    assert_eq!(
+        tool.text_prefill, None,
+        "nothing is prefilled before the entity pick resolves"
+    );
+}
+
+#[test]
+fn the_panel_channel_reports_the_round_trippable_text_and_edits_the_selection() {
+    let session = fresh_session();
+    // Create the entity under test through the ordinary TEXT channel.
+    session.command("TEXT").expect("TEXT is admitted");
+    click(&session, [400.0, 300.0], 1);
+    session.set_tool_text("OLD").expect("the text");
+    let reference = the_created_text(&session);
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .set_selection(vec![reference])
+        .expect("the selection");
+
+    // `selection.text` is the round-trippable string, not a display row.
+    let status = session.snapshot(None, None, 0);
+    assert_eq!(status.selection.count, 1);
+    assert_eq!(status.selection.text.as_deref(), Some("OLD"));
+
+    // The panel channel replaces it and the next status carries the new string.
+    session.set_selected_text("NEW").expect("the edit");
+    let status = session.snapshot(None, None, 0);
+    assert_eq!(status.selection.text.as_deref(), Some("NEW"));
+    let controller = session.core.controller.borrow();
+    let drawing = controller.drawing().expect("a document");
+    let texts: Vec<String> = drawing
+        .model_space()
+        .iter()
+        .filter_map(|entity| match &entity.geometry {
+            SemanticGeometry::Text { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts, vec!["NEW".to_string()], "one edited entity");
+}
+
+#[test]
+fn the_panel_channel_refuses_an_empty_or_multi_selection_by_name() {
+    // Nothing selected.
+    let session = fresh_session();
+    let error = session.set_selected_text("X").unwrap_err();
+    assert!(error.contains("textedit.selection_empty"), "{error}");
+
+    // Two selected entities (the created text plus an existing demo entity).
+    let session = fresh_session();
+    session.command("TEXT").expect("TEXT is admitted");
+    click(&session, [400.0, 300.0], 1);
+    session.set_tool_text("OLD").expect("the text");
+    let text = the_created_text(&session);
+    let other = {
+        let controller = session.core.controller.borrow();
+        let drawing = controller.drawing().expect("a document");
+        drawing
+            .model_space()
+            .iter()
+            .find(|entity| entity.id != text.entity)
+            .map(|entity| SelectionRef {
+                document: controller.document_id,
+                entity: entity.id,
+                instance: InstancePath::default(),
+                sub_element: None,
+            })
+            .expect("another entity")
+    };
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .set_selection(vec![text, other])
+        .expect("the selection");
+    let error = session.set_selected_text("X").unwrap_err();
+    assert!(error.contains("textedit.selection_multiple"), "{error}");
+}
+
+#[test]
+fn the_status_selection_block_projects_text_only_for_a_single_text() {
+    let row = |text: Option<&str>, count: usize| {
+        CadSelection::from_properties(&cad_app::SelectionProperties {
+            count,
+            rows: Vec::new(),
+            mixed_keys: Vec::new(),
+            text: text.map(str::to_string),
+            empty: count == 0,
+        })
+        .text
+    };
+    assert_eq!(row(Some("Hello"), 1).as_deref(), Some("Hello"));
+    // A count mismatch (multi-selection) never carries a single object's text.
+    assert_eq!(row(Some("Hello"), 2), None);
+    assert_eq!(row(None, 1), None);
+    assert_eq!(row(None, 0), None);
+}

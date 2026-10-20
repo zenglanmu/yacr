@@ -420,16 +420,21 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
     let mut last_input_seq: Option<u64> = None;
     let mut input_age_us: Option<u128> = None;
     if cad_mode {
-        let (commands, tool_parameters, tool_texts, inputs) = {
+        let (commands, tool_parameters, tool_texts, selected_texts, inputs) = {
             let mut state = lock(shared);
             (
                 std::mem::take(&mut state.shell.cad_commands),
                 std::mem::take(&mut state.cad_tool_parameters),
                 std::mem::take(&mut state.cad_tool_texts),
+                std::mem::take(&mut state.cad_selected_texts),
                 std::mem::take(&mut state.shell.cad_inputs),
             )
         };
-        let queued = commands.len() + tool_parameters.len() + tool_texts.len() + inputs.len();
+        let queued = commands.len()
+            + tool_parameters.len()
+            + tool_texts.len()
+            + selected_texts.len()
+            + inputs.len();
         last_input_seq = inputs.last().map(|input| input.sequence);
         input_age_us = last_input_seq.and_then(|sequence| {
             let state = lock(shared);
@@ -477,6 +482,15 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                     for text in &tool_texts {
                         if let Err(error) = session.set_tool_text(text) {
                             eprintln!("[probe] cad tool text rejected: {error}");
+                        }
+                    }
+                    // Panel text edits (ADR 0020 amendment B): each one targets
+                    // the session's **current** selection, resolved on the owner
+                    // thread at apply time (no id travelled). A refusal is named
+                    // and surfaces through `cad_status.error`.
+                    for text in &selected_texts {
+                        if let Err(error) = session.set_selected_text(text) {
+                            eprintln!("[probe] cad selected text rejected: {error}");
                         }
                     }
                 }

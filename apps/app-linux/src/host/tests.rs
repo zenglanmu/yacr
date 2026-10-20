@@ -1,7 +1,7 @@
 use super::admission::{cad_present_admission, layout_needs_revalidate, CadPresentAdmission};
 use super::commands::{
-    admit_tool_parameter, admit_tool_text, parse_tool_parameter, CAD_TOOL_PARAMETER_CAP,
-    CAD_TOOL_TEXT_CAP,
+    admit_selected_text, admit_tool_parameter, admit_tool_text, parse_tool_parameter,
+    CAD_SELECTED_TEXT_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
 };
 use super::options::{start_maximized, LaunchOptions};
 use super::postload::{
@@ -316,6 +316,54 @@ fn tool_text_admission_is_bounded_and_refuses_probe_mode_and_static_content() {
 }
 
 #[test]
+fn selected_text_admission_is_bounded_and_refuses_probe_mode_and_static_content() {
+    // The `cad_set_selected_text` ack path (ADR 0020 amendment B): the text is
+    // only *queued* for the owner thread, the static content rules are refused
+    // before the queue, and whether the current selection is one editable `Text`
+    // is the session's authority on drain — this admission knows no selection.
+    let mut queue: Vec<String> = Vec::new();
+    assert_eq!(
+        admit_selected_text(&mut queue, false, "Hello".into()).unwrap_err(),
+        "CAD is disabled in probe mode"
+    );
+    assert!(queue.is_empty(), "a probe-mode refusal queues nothing");
+    assert_eq!(
+        admit_selected_text(&mut queue, true, String::new()).unwrap_err(),
+        "tool.text_empty: cad_set_selected_text needs a non-empty text"
+    );
+    assert_eq!(
+        admit_selected_text(&mut queue, true, "  \t".into()).unwrap_err(),
+        "tool.text_empty: cad_set_selected_text needs a non-empty text"
+    );
+    let over_long = "a".repeat(cad_app::MAX_TOOL_TEXT_CHARS + 1);
+    let refusal = admit_selected_text(&mut queue, true, over_long).unwrap_err();
+    assert!(refusal.contains("tool.text_too_long"), "{refusal}");
+    assert!(refusal.contains("cad_set_selected_text"), "{refusal}");
+    assert!(
+        queue.is_empty(),
+        "content refusals queue nothing: {queue:?}"
+    );
+
+    // Exactly at the bound is accepted verbatim; the queue holds the text only
+    // (no entity id — the host resolves the current selection).
+    let at_bound = "b".repeat(cad_app::MAX_TOOL_TEXT_CHARS);
+    admit_selected_text(&mut queue, true, at_bound.clone()).expect("the bound is accepted");
+    admit_selected_text(&mut queue, true, "  padded  ".into()).expect("accepted verbatim");
+    assert_eq!(queue, vec![at_bound, "  padded  ".to_string()]);
+
+    // Bounded: filling to capacity then one more is an explicit refusal.
+    queue.clear();
+    for _ in 0..CAD_SELECTED_TEXT_CAP {
+        admit_selected_text(&mut queue, true, "x".into()).expect("within capacity");
+    }
+    assert_eq!(queue.len(), CAD_SELECTED_TEXT_CAP);
+    assert_eq!(
+        admit_selected_text(&mut queue, true, "x".into()).unwrap_err(),
+        "CAD selected-text queue is full"
+    );
+}
+
+#[test]
 fn tool_parameter_wire_shape_parses_the_key_and_exactly_one_value() {
     // The exact `cad_set_tool_parameter` wire shape: a stable machine-key string
     // plus exactly one of `number`/`flag`. An unknown key or a malformed value
@@ -357,6 +405,7 @@ fn the_tool_status_projects_awaiting_text_on_the_wire_for_the_react_contract() {
         ready: false,
         open_ended: false,
         awaiting_text: true,
+        text_prefill: Some("current".into()),
         params: CadToolParams {
             sides: None,
             fillet_radius: None,
@@ -386,6 +435,16 @@ fn the_tool_status_projects_awaiting_text_on_the_wire_for_the_react_contract() {
     );
     assert!(
         value.get("awaitingText").is_none(),
+        "the camelCase spelling must not be emitted: {value}"
+    );
+    // The TEXTEDIT prefill uses the same snake_case wire convention.
+    assert_eq!(
+        value.get("text_prefill").and_then(|text| text.as_str()),
+        Some("current"),
+        "the wire carries `text_prefill`: {value}"
+    );
+    assert!(
+        value.get("textPrefill").is_none(),
         "the camelCase spelling must not be emitted: {value}"
     );
     assert_eq!(

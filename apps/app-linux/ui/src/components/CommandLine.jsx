@@ -23,6 +23,7 @@ import {
   awaitingToolText,
   textDraftState,
   textEscapeAction,
+  toolTextPrefill,
 } from '../text.mjs';
 
 export function CommandLine() {
@@ -40,6 +41,9 @@ export function CommandLine() {
   const tool = shell.status?.tool ?? null;
   const toolKey = typeof tool?.key === 'string' ? tool.key : null;
   const textMode = awaitingToolText(shell.status);
+  // The host's prefill for this text step: `TEXTEDIT` sends the selected text so
+  // the user edits it instead of retyping; a fresh `TEXT` sends nothing.
+  const prefill = textMode ? toolTextPrefill(tool) : null;
 
   const suggestions = useMemo(
     () => (textMode ? [] : filterCommandSuggestions(shell.command, { history: shell.history })),
@@ -62,15 +66,27 @@ export function CommandLine() {
     setTextMessage(null);
   }, [textMode]);
 
-  // A new text step starts empty and focuses the field so typing can begin
-  // immediately. Escape's first press gives the keyboard back and is never
-  // re-grabbed while the same tool still awaits its text.
+  // A new text step starts with the host's prefill — `TEXTEDIT` puts the current
+  // string in the field so the user edits, a fresh `TEXT` starts empty — and
+  // focuses the field so typing can begin immediately. Escape's first press gives
+  // the keyboard back and is never re-grabbed while the same tool still awaits
+  // its text.
   useEffect(() => {
     if (!textMode) return;
-    setTextDraft('');
+    setTextDraft(toolTextPrefill(tool) ?? '');
     setTextMessage(null);
     inputRef.current?.focus();
+    // Read on the step transition only: a later poll never re-seeds, so it can
+    // never overwrite what the user has typed.
   }, [textMode, toolKey]);
+
+  // A prefill that lands after the step opened (a separate status payload) fills
+  // the field only while it is still empty. It is idempotent and one-way: an
+  // empty draft is exactly the state in which nothing can be lost.
+  useEffect(() => {
+    if (!textMode || !prefill) return;
+    setTextDraft(current => (current === '' ? prefill : current));
+  }, [textMode, prefill]);
 
   const effectiveText = () => {
     if (highlight >= 0 && suggestions[highlight] && shell.command.trim()) return suggestions[highlight].id;

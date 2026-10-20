@@ -148,7 +148,17 @@ impl HostController {
         let point = self.resolve_snap(point)?.map_or(point, |snap| snap.point);
         if self.session.draw_requires_entity_pick() {
             let reference = self.resolve_draw_pick(point)?;
-            self.session.capture_draw_pick(point, reference)?;
+            // TEXTEDIT's pick must resolve to a single, directly addressable
+            // `Text` **before** the step is consumed: a wrong object is refused
+            // by name at capture time (never captured and refused later), and a
+            // valid one carries its current string as the UI prefill.
+            if self.session.draw_kind() == Some(DrawToolKind::TextEdit) {
+                let prefill = self.text_edit_prefill(&reference)?;
+                self.session.capture_draw_pick(point, reference)?;
+                self.session.set_draw_text_prefill(Some(prefill));
+            } else {
+                self.session.capture_draw_pick(point, reference)?;
+            }
             return Ok(false);
         }
         self.session.capture_point(point)
@@ -482,6 +492,30 @@ impl HostController {
             payload: crate::CommandPayload::ActiveLayer(layer),
         })?;
         Ok(())
+    }
+
+    /// Resolve the `TEXTEDIT` prefill: the picked entity's current string.
+    ///
+    /// Uses the same [`crate::app_drawing::resolve_text_edit_target`] validator
+    /// the command applies at commit time, so the pick-time refusal and the
+    /// apply-time refusal name the same cases. Nothing is stored on a refusal.
+    fn text_edit_prefill(&self, reference: &SelectionRef) -> CadResult<String> {
+        let document = self
+            .application
+            .workspace
+            .documents
+            .get(&self.document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let entity =
+            crate::app_drawing::resolve_text_edit_target(document.drawing.as_ref(), reference)?;
+        match entity.geometry {
+            SemanticGeometry::Text { text, .. } => Ok(text),
+            // Unreachable: the resolver already rejected every other kind.
+            other => Err(CadError::Unsupported(format!(
+                "textedit.target_not_text: {} is not a TEXT entity",
+                crate::app_drawing::class_name(&other)
+            ))),
+        }
     }
 
     /// Move a set of selected refs by a world delta in one transaction.
@@ -827,6 +861,47 @@ impl HostController {
     /// The current selection set (read-only view).
     pub fn selection(&self) -> &crate::SelectionSet {
         &self.session.selection
+    }
+
+    /// Replace the text of the **current single selection** (ADR 0020 amendment
+    /// B: the docked panel's editable field).
+    ///
+    /// The caller never supplies an entity id: the host resolves the current
+    /// selection itself, so a stale UI cannot retarget another object. Only
+    /// exactly one selected ref is accepted; the command then re-validates that
+    /// it is a directly addressable `Text` (a block-instance member, compound
+    /// child, sub-element or any other geometry is refused by name). One
+    /// transaction / one undo step; nothing is written on a refusal.
+    ///
+    /// Named refusals: `textedit.selection_empty`, `textedit.selection_multiple`
+    /// (with the real count), and the command's `textedit.target_missing` /
+    /// `textedit.target_not_text`; the text bound/emptiness refusals come from
+    /// the same command.
+    pub fn set_selected_text(&mut self, text: &str) -> CadResult<CommandOutcome> {
+        let target = match self.session.selection.refs() {
+            [] => {
+                return Err(CadError::InvalidInput(
+                    "textedit.selection_empty: select exactly one TEXT entity to edit".into(),
+                ))
+            }
+            [only] => only.clone(),
+            refs => {
+                return Err(CadError::InvalidInput(format!(
+                    "textedit.selection_multiple: TEXTEDIT edits one TEXT entity, {} are selected",
+                    refs.len()
+                )))
+            }
+        };
+        self.execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::TextEdit,
+            document: self.document_id,
+            viewport: self.viewport_id,
+            payload: crate::CommandPayload::TextEdit {
+                target,
+                text: text.to_string(),
+            },
+        })
     }
 
     /// Replace the selection through the command path. Read-only: never writes

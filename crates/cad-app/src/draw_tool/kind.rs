@@ -450,13 +450,36 @@ pub enum DrawToolKind {
     /// MTEXT's columns/background/line-spacing style/drawing direction are
     /// likewise not modelled (ADR 0019 decision H).
     Text,
+    /// TEXTEDIT: pick **one existing single-line `Text`** entity, then replace its
+    /// string (ADR 0020 amendment options A+B).
+    ///
+    /// The first step is an **entity pick** ([`Self::picked_step_count`] is `1`,
+    /// exactly like [`Self::DimRadius`]); the host resolves the pick through the
+    /// normal pick path and refuses anything that is not a single, directly
+    /// addressable `Text` entity (a line, a hatch, a dimension, a compound, a
+    /// block-instance member) **at capture time**, so the step is never consumed
+    /// by a wrong object. When the pick resolves, the host fills
+    /// [`DrawPreview::text_prefill`] with the entity's **current** string so the UI
+    /// can show it for editing.
+    ///
+    /// The second and terminal step is the same typed-text channel as [`Self::Text`]
+    /// ([`Self::requires_text`], `SetToolText`). On submit the host re-reads the
+    /// picked entity inside the command and replaces only its text; if the entity
+    /// was deleted or replaced since the pick, the command refuses by name and
+    /// opens no transaction.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED): whole-string replacement only — there
+    /// is no cursor-level/inline editor, no MTEXT markup parsing or re-flow, and
+    /// no editing of MLEADER/compound children or block-internal members (they
+    /// have no addressable identity; ADR 0020 postpones MLEADER editing to P7b).
+    TextEdit,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 32] = [
+    pub const ALL: [DrawToolKind; 33] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -491,6 +514,7 @@ impl DrawToolKind {
         // Appended last so every pre-existing index stays stable (the UI mirrors
         // this order rather than keeping a second list).
         DrawToolKind::Text,
+        DrawToolKind::TextEdit,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -528,6 +552,7 @@ impl DrawToolKind {
             Self::DimOrdinate => "dimordinate",
             Self::Hatch => "hatch",
             Self::Text => "text",
+            Self::TextEdit => "textedit",
         }
     }
 
@@ -567,6 +592,7 @@ impl DrawToolKind {
             "dimordinate" => Some(Self::DimOrdinate),
             "hatch" => Some(Self::Hatch),
             "text" => Some(Self::Text),
+            "textedit" => Some(Self::TextEdit),
             _ => None,
         }
     }
@@ -666,6 +692,11 @@ impl DrawToolKind {
             // the Rust side and the shell substitutes the catalog label for chrome
             // anyway.
             Self::Text => "TEXT",
+            // TEXTEDIT uses a locale-neutral ASCII fallback label, exactly like
+            // the other post-ADR-0015 kinds: the ADR fence forbids new CJK
+            // literals on the Rust side and the shell substitutes the catalog
+            // label for chrome anyway.
+            Self::TextEdit => "TEXTEDIT",
         }
     }
 
@@ -699,7 +730,9 @@ impl DrawToolKind {
             | Self::Point
             | Self::ArrayPolar
             | Self::DimCenter
-            | Self::Text => PointArity::Exact(1),
+            | Self::Text
+            // TEXTEDIT's single captured step is its entity pick.
+            | Self::TextEdit => PointArity::Exact(1),
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot, so its complement is
             // the zero-point exact arity (ready as soon as the selection is
@@ -779,6 +812,8 @@ impl DrawToolKind {
         match self {
             Self::Trim | Self::Extend | Self::Chamfer | Self::Fillet => self.required_points(),
             Self::DimRadius | Self::DimDiameter | Self::DimCenter => 1,
+            // TEXTEDIT picks the text entity it will edit as its only step.
+            Self::TextEdit => 1,
             // DIMANGULAR's two-line form picks both lines; its third step is the
             // free dimension-arc location.
             Self::DimAngular => 2,
@@ -812,6 +847,6 @@ impl DrawToolKind {
     /// count, because `ready` alone cannot tell "missing points" from "missing
     /// text".
     pub fn requires_text(self) -> bool {
-        matches!(self, Self::Text)
+        matches!(self, Self::Text | Self::TextEdit)
     }
 }

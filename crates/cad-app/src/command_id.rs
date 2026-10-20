@@ -133,6 +133,22 @@ pub enum CommandId {
     /// spacing or background, and MTEXT's columns/background/line-spacing
     /// style/drawing direction are **not** modelled (decision H). Work-only.
     CreateText,
+    /// TEXTEDIT: replace the text string of an **existing single-line `Text`**
+    /// entity (ADR 0020 amendment options A+B, reused by the panel edit path).
+    ///
+    /// Payload is `TextEdit { target, text }`: the ref resolved at pick time (or
+    /// the current single selection for the panel path) plus the replacement
+    /// string. The handler re-reads the entity at apply time and refuses by name
+    /// when it is gone or no longer a single `Text`, so a stale pick can never be
+    /// retargeted. Only the `text` field changes — style, height, rotation,
+    /// position and alignment are preserved byte-for-byte — through
+    /// `update_entity` in **one** transaction / one undo step. Compound children
+    /// and block-instance members are **not** addressable: a ref with an instance
+    /// path or sub-element is refused instead of being reached into. Text
+    /// validation matches the `TEXT` channel (empty/whitespace-only and more than
+    /// [`crate::draw_tool::MAX_TOOL_TEXT_CHARS`] characters are refusals that
+    /// write nothing). Work-only.
+    TextEdit,
     /// DIMLINEAR: draw a **horizontal or vertical** linear dimension through two
     /// extension-line origins and a dimension-line location (ADR 0017 decision C,
     /// P5c). Payload is `Points([first, second, location])` in click order. The
@@ -380,6 +396,7 @@ impl CommandId {
                 | Self::CreatePoint
                 | Self::CreateSpline
                 | Self::CreateText
+                | Self::TextEdit
                 | Self::DimLinear
                 | Self::DimAligned
                 | Self::DimRadius

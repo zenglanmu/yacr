@@ -91,6 +91,13 @@ impl HostController {
                         .unwrap_or(crate::draw_tool::TEXT_DEFAULT_HEIGHT),
                 },
             ),
+            // TEXTEDIT: the pick resolved at capture time plus the replacement
+            // text. The command re-reads the entity at apply time (never a stale
+            // retarget) and preserves every field but the string.
+            DrawIntent::TextEdit { target, text } => (
+                crate::CommandId::TextEdit,
+                crate::CommandPayload::TextEdit { target, text },
+            ),
             DrawIntent::Move { delta } => (
                 crate::CommandId::MoveEntities,
                 crate::CommandPayload::Move {

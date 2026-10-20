@@ -184,8 +184,73 @@ pub fn cad_set_tool_text(
     Ok(CadCommandAck { accepted: true })
 }
 
-/// `cad_status` command: the latest main-thread CAD snapshot, with the host-side
-/// (transport) error merged in.
+/// Bounded capacity of the dedicated selected-text queue (ADR 0020 amendment B).
+///
+/// It reuses the CAD command queue's capacity so every admission shares one bound.
+pub const CAD_SELECTED_TEXT_CAP: usize = cad_ui_core::shell::CAD_COMMAND_CAP;
+
+/// Admit one replacement text for the **current single selection** into the
+/// bounded main-thread queue.
+///
+/// Modelled exactly on [`admit_tool_text`]: a disabled CAD session, a full queue
+/// and the two **static** content refusals (empty/whitespace-only, more than
+/// [`cad_app::MAX_TOOL_TEXT_CHARS`] characters) are refused *before* the queue.
+/// Whether the current selection is exactly one directly addressable `Text` is
+/// live session state and therefore the host session's authority
+/// (`CadSession::set_selected_text` → the `TextEdit` command) applied on the
+/// owner thread; this function deliberately knows no session state.
+pub fn admit_selected_text(
+    queue: &mut Vec<String>,
+    cad_mode: bool,
+    text: String,
+) -> Result<(), String> {
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if queue.len() >= CAD_SELECTED_TEXT_CAP {
+        return Err("CAD selected-text queue is full".into());
+    }
+    if text.trim().is_empty() {
+        return Err("tool.text_empty: cad_set_selected_text needs a non-empty text".into());
+    }
+    let characters = text.chars().count();
+    if characters > cad_app::MAX_TOOL_TEXT_CHARS {
+        return Err(format!(
+            "tool.text_too_long: cad_set_selected_text allows at most {} characters, got \
+             {characters}",
+            cad_app::MAX_TOOL_TEXT_CHARS
+        ));
+    }
+    queue.push(text);
+    Ok(())
+}
+
+/// `cad_set_selected_text` command: admit one replacement text for the current
+/// single selection into the bounded main-thread queue (ADR 0020 amendment B).
+///
+/// The wire shape is `{ text: <string> }` and deliberately carries **no entity
+/// id**: the host resolves and validates its own current selection at apply
+/// time, so a UI can never retarget another object with a stale id. The field is
+/// refused with `textedit.selection_empty` / `textedit.selection_multiple` /
+/// `textedit.target_not_text` when the selection is not exactly one directly
+/// addressable `Text`; empty/over-long drafts are refused here with the same
+/// `tool.text_empty` / `tool.text_too_long` names the text step uses.
+///
+/// `{accepted:true}` means **queued**, not completed: the owner tick routes it
+/// through `CadSession::set_selected_text`, and the real outcome (including any
+/// refusal) surfaces through `cad_status.error` / the next `selection.text`.
+#[tauri::command]
+pub fn cad_set_selected_text(
+    shared: tauri::State<'_, ProbeShared>,
+    text: String,
+) -> Result<CadCommandAck, String> {
+    let mut state = lock(&shared.0);
+    let cad_mode = state.shell.cad_mode;
+    admit_selected_text(&mut state.cad_selected_texts, cad_mode, text)?;
+    Ok(CadCommandAck { accepted: true })
+}
+
+/// `cad_status` command: the latest main-thread CAD snapshot, with the host-side/// (transport) error merged in.
 ///
 /// Before a session exists (or in probe mode) the snapshot is explicit (no
 /// fabricated document/count/camera). A host bind/present/tick error is shown

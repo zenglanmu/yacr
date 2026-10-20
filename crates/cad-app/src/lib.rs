@@ -598,6 +598,19 @@ pub enum CommandPayload {
         text: String,
         height: f64,
     },
+    /// TEXTEDIT: replace the string of an existing single-line `Text` (ADR 0020
+    /// amendment A/B).
+    ///
+    /// `target` is the ref resolved at pick time (interactive path) or the
+    /// current single selection (panel path). The handler re-reads it and refuses
+    /// by name when it is gone or not a single, directly addressable `Text`;
+    /// only the `text` field changes, through `update_entity` in one transaction
+    /// / one undo step. Compound children and block-instance members are not
+    /// editable (a ref with an instance path or sub-element is refused).
+    TextEdit {
+        target: SelectionRef,
+        text: String,
+    },
 }
 
 pub struct Command {

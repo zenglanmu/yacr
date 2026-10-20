@@ -260,7 +260,8 @@ impl Application {
             | CommandId::PasteFromClipboard
             | CommandId::OffsetEntity
             | CommandId::SetActiveLayer
-            | CommandId::CreateText => {
+            | CommandId::CreateText
+            | CommandId::TextEdit => {
                 // Every edit runs through one funnel so the session selection is
                 // reconciled against the authoritative drawing afterwards: an
                 // edit that removed entities (ERASE, a deleting TRIM, CUT) leaves

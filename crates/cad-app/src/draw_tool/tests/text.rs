@@ -30,12 +30,72 @@ fn the_text_kind_metadata_is_explicit() {
     assert_eq!(DrawToolKind::Text.picked_step_count(), 0);
     assert!(!DrawToolKind::Text.arity().is_open_ended());
     assert!(DrawToolKind::Text.requires_text());
-    // `requires_text()` is the single authority: exactly one kind takes text.
+    // `requires_text()` is the single authority: exactly the two text kinds.
     let text_kinds: Vec<DrawToolKind> = DrawToolKind::ALL
         .into_iter()
         .filter(|kind| kind.requires_text())
         .collect();
-    assert_eq!(text_kinds, vec![DrawToolKind::Text]);
+    assert_eq!(text_kinds, vec![DrawToolKind::Text, DrawToolKind::TextEdit]);
+}
+
+#[test]
+fn the_textedit_kind_metadata_is_explicit() {
+    assert_eq!(DrawToolKind::TextEdit.key(), "textedit");
+    assert_eq!(
+        DrawToolKind::from_key("textedit"),
+        Some(DrawToolKind::TextEdit)
+    );
+    assert_eq!(
+        DrawToolKind::from_label("TEXTEDIT"),
+        Some(DrawToolKind::TextEdit)
+    );
+    assert_eq!(DrawToolKind::TextEdit.label(), "TEXTEDIT");
+    // One entity pick (`DIMRADIUS` precedent), then the terminal text step.
+    assert_eq!(DrawToolKind::TextEdit.arity(), PointArity::Exact(1));
+    assert_eq!(DrawToolKind::TextEdit.required_points(), 1);
+    assert_eq!(DrawToolKind::TextEdit.picked_step_count(), 1);
+    assert!(DrawToolKind::TextEdit.needs_picked_entities());
+    assert!(!DrawToolKind::TextEdit.requires_selection());
+    assert!(DrawToolKind::TextEdit.requires_text());
+}
+
+#[test]
+fn textedit_captures_its_pick_then_awaits_the_replacement_text() {
+    let mut tool = DrawTool::new(DrawToolKind::TextEdit, 0);
+    assert!(!tool.awaiting_text(), "no entity pick yet");
+    // A free point can never stand in for the entity pick.
+    let error = refusal_code(tool.push_point(p(0.0, 0.0)).expect_err("pick required"));
+    assert!(error.contains("captures entity picks"), "{error}");
+    // The prefill starts empty: there is nothing to edit before the pick.
+    assert_eq!(tool.preview().text_prefill, None);
+
+    tool.push_pick(p(1.0, 2.0), pick(7)).expect("the text pick");
+    assert!(tool.awaiting_text());
+    assert!(tool.is_ready());
+    assert!(!tool.preview().can_confirm(), "text is terminal");
+    let line = tool.preview().status_line();
+    assert!(line.is_ascii(), "no CJK in the Rust fallback line: {line}");
+    assert!(line.contains("type the replacement"), "{line}");
+
+    // The host fills the prefill after resolving the pick; it is projected.
+    tool.set_text_prefill(Some("current".into()));
+    assert_eq!(tool.preview().text_prefill.as_deref(), Some("current"));
+    assert_eq!(tool.text_prefill(), Some("current"));
+
+    // No intent before the replacement text.
+    let error = refusal_code(tool.intent().expect_err("text missing"));
+    assert!(error.contains("tool.text_required"), "{error}");
+
+    tool.set_text("replacement").expect("the replacement");
+    assert_eq!(
+        tool.intent().expect("the commit intent"),
+        DrawIntent::TextEdit {
+            target: pick(7),
+            text: "replacement".to_string(),
+        }
+    );
+    // The prefill is never the submitted text: the command re-reads the entity.
+    assert_eq!(tool.preview().text_prefill.as_deref(), Some("current"));
 }
 
 #[test]

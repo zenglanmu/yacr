@@ -18,6 +18,22 @@ impl DrawTool {
         self.text.as_deref()
     }
 
+    /// The current string of the `TEXTEDIT` target, or `None` when there is no
+    /// prefill (every non-`TEXTEDIT` kind and a `TEXTEDIT` before its pick).
+    ///
+    /// Set by the host after the entity pick resolved to a single `Text`. It is
+    /// presentation only — the edit command re-reads the entity and never trusts
+    /// this value.
+    pub fn text_prefill(&self) -> Option<&str> {
+        self.text_prefill.as_deref()
+    }
+
+    /// Record (or clear) the `TEXTEDIT` prefill. The host sets it right after the
+    /// pick resolves; a fresh tool starts without one.
+    pub fn set_text_prefill(&mut self, prefill: Option<String>) {
+        self.text_prefill = prefill;
+    }
+
     /// Whether the tool's last step is typed text that has **not** been supplied
     /// yet, with its point complement already complete.
     ///

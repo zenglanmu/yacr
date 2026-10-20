@@ -87,6 +87,9 @@ pub fn draw_preview_overlay(
         // geometry preview), so it also uses the cursor/chain.
         DrawToolKind::Point
         | DrawToolKind::Text
+        // TEXTEDIT's step is an entity pick; its only live affordance is the
+        // host's capture tint plus the cursor/chain, never a fabricated geometry.
+        | DrawToolKind::TextEdit
         | DrawToolKind::Line
         | DrawToolKind::Polyline
         | DrawToolKind::Move

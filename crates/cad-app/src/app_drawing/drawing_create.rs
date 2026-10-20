@@ -18,6 +18,7 @@ impl Application {
             CommandId::CreatePoint => self.create_point(session, command),
             CommandId::CreateSpline => self.create_spline(session, command),
             CommandId::CreateText => self.create_text(session, command),
+            CommandId::TextEdit => self.edit_text(command),
             CommandId::DimLinear => self.dim_linear(session, command),
             CommandId::DimAligned => self.dim_aligned(session, command),
             CommandId::DimRadius => self.dim_radius(session, command),

@@ -158,6 +158,16 @@ pub struct SelectionProperties {
     pub rows: Vec<PropertyRow>,
     /// Keys whose values differ across the selection (multi-select).
     pub mixed_keys: Vec<&'static str>,
+    /// The **round-trippable** current string of a single selected, directly
+    /// addressable `Text` entity (ADR 0020 amendment B), or `None` for every
+    /// other selection.
+    ///
+    /// This is deliberately **not** one of the display [`PropertyRow`]s: those
+    /// values are formatted for presentation and cannot be written back. An empty
+    /// selection, a multi-selection, a non-text entity, a block-instance member
+    /// (instance path) and a sub-element all report `None` — text editing is
+    /// addressed by entity identity only and never reaches into block internals.
+    pub text: Option<String>,
     /// `true` when the selection is empty, so the UI shows an explicit empty
     /// state instead of fabricated rows.
     pub empty: bool,
@@ -178,23 +188,31 @@ impl SelectionProperties {
                 count: 0,
                 rows: Vec::new(),
                 mixed_keys: Vec::new(),
+                text: None,
                 empty: true,
             };
         }
 
         if selection.len() == 1 {
             let reference = &selection.refs()[0];
-            let rows = match database.entity(reference.entity) {
-                Some(entity) => entity_property_rows(database, reference, entity),
-                None => vec![
-                    PropertyRow::new("id", reference.entity.0.to_string()),
-                    PropertyRow::new("status", "unresolved"),
-                ],
+            let (rows, text) = match database.entity(reference.entity) {
+                Some(entity) => (
+                    entity_property_rows(database, reference, entity),
+                    editable_text(reference, entity),
+                ),
+                None => (
+                    vec![
+                        PropertyRow::new("id", reference.entity.0.to_string()),
+                        PropertyRow::new("status", "unresolved"),
+                    ],
+                    None,
+                ),
             };
             return SelectionProperties {
                 count: 1,
                 rows,
                 mixed_keys: Vec::new(),
+                text,
                 empty: false,
             };
         }
@@ -229,8 +247,25 @@ impl SelectionProperties {
             count: selection.len(),
             rows: Vec::new(),
             mixed_keys: mixed.into_iter().collect(),
+            text: None,
             empty: false,
         }
+    }
+}
+
+/// The round-trippable text of one selected entity, or `None`.
+///
+/// Only a directly addressed single-line `Text` qualifies: `TEXTEDIT` replaces
+/// the string of an **entity**, so a block-instance member (an instance path) or
+/// a sub-element is not editable here (ADR 0020 amendment B). The value is the
+/// stored string verbatim, never a formatted display row.
+fn editable_text(reference: &SelectionRef, entity: &DbEntity) -> Option<String> {
+    if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
+        return None;
+    }
+    match &entity.geometry {
+        SemanticGeometry::Text { text, .. } => Some(text.clone()),
+        _ => None,
     }
 }
 

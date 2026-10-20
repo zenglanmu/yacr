@@ -422,6 +422,7 @@ fn a_candidate_only_tint_is_flags_only_while_the_preview_cursor_is_visual() {
             ready: false,
             polygon_sides: None,
             awaiting_text: false,
+            text_prefill: None,
         }),
         ..OverlayInputs::default()
     };

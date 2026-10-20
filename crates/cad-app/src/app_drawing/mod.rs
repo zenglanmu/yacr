@@ -41,9 +41,11 @@ mod explode;
 mod hatch;
 mod helpers;
 mod stretch;
+mod text_edit;
 mod trim_extend;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};
+pub(crate) use text_edit::resolve_text_edit_target;
 // The explicit ARRAY entity cap (ADR 0016 decision D); re-exported so the
 // command docs (`crate::app_drawing::MAX_ARRAY_ENTITIES`) resolve. It is a doc
 // anchor only — the value is used inside the `array` module.

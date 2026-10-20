@@ -168,6 +168,20 @@ pub enum InteractionRequest {
     SetToolText {
         text: String,
     },
+    /// Replace the text of the **current single selection** (ADR 0020 amendment
+    /// B: the docked properties panel's editable field).
+    ///
+    /// This is the second string channel. It deliberately carries **no entity
+    /// id**: the host resolves and validates its own current selection at apply
+    /// time, so a UI cannot retarget a different object with a stale id. It is
+    /// accepted only when the selection is exactly one **directly addressable**
+    /// `Text` entity; nothing selected, a multi-selection and any non-text
+    /// selection are named refusals (`textedit.selection_empty`,
+    /// `textedit.selection_multiple`, `textedit.target_not_text`) that open no
+    /// transaction. Whole-string replacement only (no cursor-level editor).
+    SetSelectedText {
+        text: String,
+    },
     /// Acknowledge the UI-local dismissal of the open text prompt (the first
     /// `Esc`, ADR 0019 decision A.1).
     ///

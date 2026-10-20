@@ -18,6 +18,7 @@ mod polygon;
 mod snap;
 mod status;
 mod stretch;
+mod text_edit;
 mod toggles;
 mod tool_parameter;
 mod tools;

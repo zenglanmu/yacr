@@ -569,6 +569,7 @@ export async function setToolParameterFlag(invoke, key, flag) {
  * resolved from [`TOOL_READY_PROMPTS`] below.
  */
 export const TOOL_STEP_PROMPTS = Object.freeze({
+  'draw.textedit': ['tool.prompt.textedit.select_entity'],
   'draw.dimlinear': [
     'tool.prompt.dim.origin_first',
     'tool.prompt.dim.origin_second',

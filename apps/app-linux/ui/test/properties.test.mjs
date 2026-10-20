@@ -81,10 +81,15 @@ test('the properties palette renders the three states from the real status block
   assert.ok(source.includes("view.kind === 'single'"));
   assert.ok(source.includes("view.kind === 'multi'"));
   assert.ok(source.includes('row.label'));
-  // Read-only: selection is a host operation, so no editing or clear affordance.
+  // The property rows are read-only: selection is a host operation, so there is
+  // no editing or clear affordance for them. The one editable control is the
+  // text-content editor, a separate component (ADR 0020 addendum B) — it is
+  // mounted here, not inlined, so the row table stays a plain `<dl>`.
   assert.ok(!source.includes('properties.clear_selection'));
   assert.ok(!source.includes('<input'));
   assert.ok(!source.includes('<textarea'));
+  assert.ok(source.includes('<SelectionTextEditor />'));
+  assert.ok(!source.includes("invoke('cad_set_selected_text'"), 'the palette itself never sends the edit IPC');
 });
 
 test('the properties palette is docked in the workspace and toggled from the status bar', async () => {

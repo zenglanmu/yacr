@@ -79,6 +79,16 @@ pub struct DrawPreview {
     /// distinguish "missing points" from "missing text". While this is `true` no
     /// `Confirm` can complete the command — `SetToolText` is the terminal step.
     pub awaiting_text: bool,
+    /// The **round-trippable current string** of the entity a text tool will
+    /// edit, or `None` (ADR 0020 amendment A).
+    ///
+    /// Only `TEXTEDIT` fills this, and only once its entity pick resolved to a
+    /// single `Text`: it is that entity's stored string, sent so the UI can show
+    /// it for editing instead of making the user retype it. A fresh `TEXT` never
+    /// has a prefill (there is nothing to edit yet), and no non-text tool
+    /// projects one. It is **not** a display row: it is the exact value
+    /// `TEXTEDIT` will replace.
+    pub text_prefill: Option<String>,
 }
 
 impl DrawPreview {
@@ -133,9 +143,21 @@ impl DrawPreview {
     /// hardcoded copy, so this change does not widen that deviation.
     pub fn status_line(&self) -> String {
         if self.kind.requires_text() {
-            // TEXT (ADR 0019 decision A): locale-neutral ASCII only — the catalog
-            // (`tool.prompt.text.*`, `status.tool_text.*`) is the chrome source,
-            // and this frozen line must not add CJK literals on the Rust side.
+            // TEXT/TEXTEDIT (ADR 0019 decision A, ADR 0020 amendment A):
+            // locale-neutral ASCII only — the catalog (`tool.prompt.text.*`,
+            // `status.tool_text.*`) is the chrome source, and this frozen line
+            // must not add CJK literals on the Rust side.
+            if self.kind == DrawToolKind::TextEdit {
+                return if self.awaiting_text {
+                    format!(
+                        "{}: text picked ({}), type the replacement",
+                        self.kind.key(),
+                        self.picks.len()
+                    )
+                } else {
+                    format!("{}: pick a text entity to edit", self.kind.key())
+                };
+            }
             return if self.awaiting_text {
                 format!(
                     "{}: insertion point captured ({}), type the text",
@@ -213,6 +235,11 @@ pub struct DrawTool {
     /// the command immediately, so this is only ever `Some` between the
     /// submission and the command's completion.
     text: Option<String>,
+    /// The current string of the `TEXTEDIT` target, filled by the host when the
+    /// entity pick resolves (ADR 0020 amendment A). `None` for every other kind
+    /// and before the pick. It is only a projection for the UI: the command
+    /// re-reads the entity and never trusts this value.
+    text_prefill: Option<String>,
 }
 
 impl DrawTool {
@@ -230,6 +257,7 @@ impl DrawTool {
             candidate: None,
             selection_count,
             text: None,
+            text_prefill: None,
         }
     }
 
@@ -279,7 +307,8 @@ impl DrawTool {
     }
 
     /// Whether the pending step is an entity pick (TRIM/EXTEND, CHAMFER/FILLET,
-    /// or the leading arc/circle pick of DIMRADIUS/DIMDIAMETER/DIMCENTER).
+    /// the leading arc/circle pick of DIMRADIUS/DIMDIAMETER/DIMCENTER, or
+    /// TEXTEDIT's leading text pick).
     pub fn requires_entity_pick(&self) -> bool {
         self.points.len() < self.kind.picked_step_count()
     }
@@ -415,6 +444,13 @@ impl DrawTool {
             // POLYGON side count when it builds the preview/tool snapshot.
             polygon_sides: None,
             awaiting_text: self.awaiting_text(),
+            // Only a text tool can carry a prefill; every other kind reports
+            // `None` even if a stale value were ever set.
+            text_prefill: if self.kind.requires_text() {
+                self.text_prefill.clone()
+            } else {
+                None
+            },
         }
     }
 
@@ -517,6 +553,18 @@ impl DrawTool {
                 text: self.text.clone().ok_or_else(|| {
                     CadError::InvalidInput(
                         "tool.text_required: TEXT needs its text before commit".into(),
+                    )
+                })?,
+            },
+            // TEXTEDIT: the ref resolved at pick time plus the replacement text.
+            // The command re-reads the entity at apply time, so a stale pick is
+            // refused there instead of being silently retargeted.
+            DrawToolKind::TextEdit => DrawIntent::TextEdit {
+                target: self.picks[0].clone(),
+                text: self.text.clone().ok_or_else(|| {
+                    CadError::InvalidInput(
+                        "tool.text_required: TEXTEDIT needs its replacement text before commit"
+                            .into(),
                     )
                 })?,
             },

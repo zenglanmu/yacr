@@ -263,4 +263,15 @@ pub enum DrawIntent {
     /// text is always a non-empty, at most
     /// [`super::MAX_TOOL_TEXT_CHARS`]-character string validated at capture time.
     Text { position: Point3, text: String },
+    /// TEXTEDIT: replace the stored string of `target` with `text` (ADR 0020
+    /// amendment A).
+    ///
+    /// `target` is the ref resolved **at capture time** (never re-picked at
+    /// confirm). The command re-reads that entity and refuses by name when it is
+    /// gone or no longer a single, directly addressable `Text`; it replaces only
+    /// the string, leaving style/height/rotation/position/alignment untouched.
+    /// The text is validated at capture time (non-empty, at most
+    /// [`super::MAX_TOOL_TEXT_CHARS`] characters) and re-validated by the
+    /// command.
+    TextEdit { target: SelectionRef, text: String },
 }

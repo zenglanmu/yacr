@@ -1,3 +1,33 @@
+## P7a-3/4：编辑现有文本（`TEXTEDIT` + 属性面板可编辑字段，ADR-0020 增补，2026-10-20）
+
+**范围**：`crates/cad-app`（命令/工具/应用层/拒绝面）、`crates/cad-ui-core`（请求与状态投影）、
+`crates/cad-host`（请求派发）、`apps/app-linux`（新 IPC）、React 属性面板；另含 9 个 i18n 键。
+
+- **A：`TEXTEDIT`**：`CommandId::TextEdit`（选择子 `TEXTEDIT`，`EXPECTED_COMMAND_COUNT` 69 → 70）；
+  `DrawToolKind::TextEdit`（`Exact(1)`、`picked_step_count = 1`、`requires_text`）。**拾取一个 `Text` → 预填当前串
+  （`text_prefill`）→ 终端文本提交 → `update_entity`**：**只替换字符串**，样式/高度/旋转/位置/font/对齐**保留**，
+  **一条事务/一步撤销**（撤销标签 `edit text`）。**无 ribbon 入口**（打字命令；有选择时面板编辑器即主入口）。
+- **B：面板编辑**：`InteractionRequest::SetSelectedText { text }` + Tauri `cad_set_selected_text { text }`
+  （有界准入、`CadCommandAck { accepted: true }`）。**payload 不含实体 id**——宿主解析**当前单选**并在应用时
+  **重新校验**，UI 不伪造身份。`CadSelection.text` 携带**可往返**的当前字符串（**与展示用 `PropertyRow` 分离**）。
+- **UI**：属性面板（**chrome、在 CAD 矩形之外**）内 `textarea`（`input` 会吞换行 ⇒ 破坏逐字往返）；逐字显示/回传；
+  **选择变化时草稿保留为 detached**（Apply 停用 + 说明如何恢复，**绝不**应用到别的对象）；空文本**可点但具名拒绝**；
+  超限显示 `{used} / {max}` 且**不截断**；`Ctrl/Cmd+Enter` 提交、**普通 Enter 是换行**；IME 双信号不提交；
+  异步失败**回滚到图纸实际值**（宿主权威）。
+- **契约核对**：`text_prefill` 用 **snake_case**（`CadTool` 是 camelCase 重命名，漏写会被**静默忽略**）；
+  `cad_set_tool_text` 与 `cad_set_selected_text` **都**返回 `CadCommandAck { accepted: true }`（与前端判定一致）。
+- **拒绝面（具名、不开事务）**：`textedit.target_not_text`/`target_missing`（含**块内成员与子元素**）、
+  `tool.text_empty`、`tool.text_too_long`（1024 `chars()`）、`tool.text_not_awaiting`、`tool.text_points_incomplete`、
+  `textedit.selection_empty`/`selection_multiple`。
+- **门禁（编排者复跑）**：受影响 crate **2157 通过 / 0 失败**；UI **200/200（0 跳过）**；clippy(`-D warnings`)、
+  fmt、architecture(27)、i18n(**551**)、file-size(**722**)。**NOT RUN**：全量 `cargo test --workspace`；跨平台；
+  真机（本片未新增渲染几何；**编辑链路无真机证据**）。
+- **如实记录的缺口**：① `status.tool_parameter.text_height` 的 UI 步进器**未接线**（默认 2.5）；
+  ② **i18n 门禁盲区**：`check-i18n.py` 只扫**静态字面量**，而 UI 侧键经**导出常量**引用（`TEXT_EDIT_KEYS`）⇒
+  键缺失可**绕过门禁**（本次靠 UI 测试具名报告才发现）；③ 拒绝码（`textedit.*`、`tool.text_empty` 等）是
+  **机器码**、按既有惯例**原样**进入 `CadStatus.error`，不属目录键。
+- **MLEADER 文本编辑仍等 P7b**（其文字今天是 `Compound` 子项、无可寻址身份）。
+
 ## P7a：文本通道 + `TEXT` 创建 + `Text` 变换 + MTEXT 诚实性（ADR-0019 决策 A/B/F.1/H，2026-10-20）
 
 **范围**：`crates/cad-ui-core`（wire/状态/选择子/i18n）、`crates/cad-app`（`SetToolText`/`TEXT`/变换/拒绝面）、

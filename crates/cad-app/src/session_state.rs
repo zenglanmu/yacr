@@ -342,10 +342,11 @@ impl SessionState {
             DrawToolKind::DimOrdinate => CommandId::DimOrdinate,
             DrawToolKind::Hatch => CommandId::Hatch,
             DrawToolKind::Text => CommandId::CreateText,
+            DrawToolKind::TextEdit => CommandId::TextEdit,
         })?;
         let selection = self.selection.refs().to_vec();
         let tool = DrawTool::new(kind, selection.len());
-        self.tool = ToolState::Drawing(DrawCapture { tool, selection });
+        self.tool = ToolState::Drawing(Box::new(DrawCapture { tool, selection }));
         self.bump_tool_generation();
         Ok(())
     }
@@ -417,7 +418,8 @@ impl SessionState {
         }
     }
 
-    /// Capture one TRIM/EXTEND entity pick: the raw point and the resolved ref.
+    /// Capture one entity pick (TRIM/EXTEND, CHAMFER/FILLET, the DIM* radial
+    /// family and TEXTEDIT): the raw point and the resolved ref.
     ///
     /// The ref is resolved by the host **at capture time** through the one pick
     /// path; this method only stores the pair atomically, so the entity the user
@@ -440,6 +442,26 @@ impl SessionState {
             &self.tool,
             ToolState::Drawing(capture) if capture.tool.requires_entity_pick()
         )
+    }
+
+    /// The active drawing tool's kind, or `None` when no drawing capture is
+    /// active. The host reads it to apply kind-specific pick rules (TEXTEDIT
+    /// validates its pick and records the current string).
+    pub fn draw_kind(&self) -> Option<DrawToolKind> {
+        match &self.tool {
+            ToolState::Drawing(capture) => Some(capture.tool.kind()),
+            _ => None,
+        }
+    }
+
+    /// Record the `TEXTEDIT` prefill (the picked entity's current string).
+    ///
+    /// Presentation only: the edit command re-reads the entity at apply time.
+    /// A no-op for any non-drawing tool.
+    pub fn set_draw_text_prefill(&mut self, prefill: Option<String>) {
+        if let ToolState::Drawing(capture) = &mut self.tool {
+            capture.tool.set_text_prefill(prefill);
+        }
     }
 
     /// Record the entity under the cursor for the pending pick step.

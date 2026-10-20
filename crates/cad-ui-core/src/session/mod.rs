@@ -268,6 +268,9 @@ impl CadSession {
             // `cad_set_tool_text` channel (ADR 0019 decision A.1) — never through
             // this command line, which carries a command name only.
             CommandId::CreateText => Some(InteractionRequest::BeginDraw(DrawToolKind::Text)),
+            // TEXTEDIT starts the edit tool: an entity pick of the text to edit,
+            // then the same terminal text channel (ADR 0020 amendment A).
+            CommandId::TextEdit => Some(InteractionRequest::BeginDraw(DrawToolKind::TextEdit)),
             CommandId::DimLinear => Some(InteractionRequest::BeginDraw(DrawToolKind::DimLinear)),
             CommandId::DimAligned => Some(InteractionRequest::BeginDraw(DrawToolKind::DimAligned)),
             CommandId::DimRadius => Some(InteractionRequest::BeginDraw(DrawToolKind::DimRadius)),
@@ -373,6 +376,20 @@ impl CadSession {
     /// error and opens no transaction.
     pub fn set_tool_text(&self, text: &str) -> Result<(), String> {
         self.submit_interactions(vec![InteractionRequest::SetToolText {
+            text: text.to_string(),
+        }])
+    }
+
+    /// Replace the text of the **current single selection** (ADR 0020 amendment
+    /// B), reached from the dedicated `cad_set_selected_text` IPC.
+    ///
+    /// No entity id travels: the host resolves its own current selection and
+    /// validates it at apply time (exactly one directly addressable `Text`
+    /// entity; nothing selected, a multi-selection and a non-text selection are
+    /// named refusals). The edit is one transaction / one undo step, and the next
+    /// `cad_status` carries the new `selection.text`.
+    pub fn set_selected_text(&self, text: &str) -> Result<(), String> {
+        self.submit_interactions(vec![InteractionRequest::SetSelectedText {
             text: text.to_string(),
         }])
     }

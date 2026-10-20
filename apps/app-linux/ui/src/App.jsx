@@ -12,6 +12,7 @@ import { bindProbeInput, createInputLane } from './input.mjs';
 import { pointerPosition } from './metrics.mjs';
 import { queueCadCommand, reconcileToolParameterPending, requestImportCancel, setToolParameterFlag, setToolParameterNumber, startCadPolling, stepToolParameterPending } from './cad.mjs';
 import { setToolText } from './text.mjs';
+import { setSelectedText } from './textedit.mjs';
 import { createFpsSampler } from './fps.mjs';
 import { bindBrowserDefaults } from './defaults.mjs';
 import { admitCommandText, commandCatalog, pushHistory, setCommandCatalog, toolCommandForKey, unavailableReasonKey } from './commands.mjs';
@@ -63,6 +64,9 @@ export function App() {
   // command (or be blocked by one), and a second Enter while the first is still
   // queued must not send the same text twice.
   const submittingText = useRef(false);
+  // The inspector's text edit has its own guard for the same reason: the field
+  // must stay focused and editable while one edit is queued.
+  const submittingSelectedText = useRef(false);
   const laneRef = useRef(null);
   const bindingRef = useRef(null);
   // Latest host status for the CAD shortcut-menu hook, so the webview-default
@@ -201,6 +205,21 @@ export function App() {
     }
   }, []);
 
+  // The inspector's text edit (ADR 0020 addendum B): one
+  // `cad_set_selected_text`, which targets whatever single text entity the host
+  // has selected — the payload carries no id, and this app never changes the
+  // selection to make an edit fit. Same admission rules as the text step, and no
+  // `pending`: a disabled field would drop focus mid-edit.
+  const applySelectedText = useCallback(async text => {
+    if (submittingSelectedText.current) return { kind: 'busy' };
+    submittingSelectedText.current = true;
+    try {
+      return await setSelectedText(invoke, text);
+    } finally {
+      submittingSelectedText.current = false;
+    }
+  }, []);
+
   // Global shortcuts: Ctrl+0 clean screen, Ctrl+9 command line, F2 history, Esc.
   // While a CAD tool is active (and the keyboard is not in a field) Enter/Escape
   // are the tool's confirm/cancel instead.
@@ -308,6 +327,8 @@ export function App() {
     // (`accepted` / `refused` / `failed` / `busy`) so the command line can keep
     // the draft and show the honest outcome.
     submitToolText,
+    // The inspector's text edit; same result shape as `submitToolText`.
+    applySelectedText,
     historyOpen,
     setHistoryOpen,
     clearHistory: () => setHistory([]),

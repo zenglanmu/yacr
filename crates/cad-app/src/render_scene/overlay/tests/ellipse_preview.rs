@@ -25,6 +25,7 @@ fn ellipse_preview_draws_a_closed_bounded_tessellated_curve() {
         ready: false,
         polygon_sides: None,
         awaiting_text: false,
+        text_prefill: None,
     };
     let overlay = draw_preview_overlay(&preview, DocumentId(1), false, &PreviewOptions::default());
     assert_eq!(overlay.drawn(), 1);

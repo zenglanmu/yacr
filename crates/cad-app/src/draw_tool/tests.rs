@@ -50,8 +50,10 @@ fn required_points_and_selection_are_explicit_per_kind() {
             | DrawToolKind::ArrayPolar
             | DrawToolKind::DimCenter
             // TEXT captures one insertion point; its text is a typed string, not a
-            // point (ADR 0019 decision A.1).
-            | DrawToolKind::Text => 1,
+            // point (ADR 0019 decision A.1). TEXTEDIT's one step is its entity
+            // pick (ADR 0020 amendment A).
+            | DrawToolKind::Text
+            | DrawToolKind::TextEdit => 1,
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot. HATCH has the same
             // pre-selection shape: the selected entities are the boundary and the

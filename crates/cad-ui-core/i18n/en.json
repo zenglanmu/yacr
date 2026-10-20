@@ -540,5 +540,14 @@
   "diagnostics.section.document": "Drawing",
   "toolbar.zoom_window": "Zoom window",
   "toolbar.zoom_extents": "Zoom extents",
-  "doctabs.start": "Start"
+  "doctabs.start": "Start",
+  "properties.text.field": "Text content",
+  "properties.text.apply": "Apply",
+  "properties.text.count": "{used} / {max} characters",
+  "properties.text.empty": "The text is empty: a text object needs at least one visible character",
+  "properties.text.detached": "The selection changed, so this draft is not attached to an object. Apply is disabled — select the same text object again to keep editing.",
+  "properties.text.failed": "The drawing refused the text: {error}",
+  "tool.draw.textedit": "Edit Text",
+  "draw.kind.textedit": "Edit Text",
+  "tool.prompt.textedit.select_entity": "Select a text object to edit"
 }

@@ -93,6 +93,16 @@ pub struct CadSelection {
     /// Machine keys whose values differ across a multi-selection; empty for any
     /// other count.
     pub mixed_keys: Vec<String>,
+    /// The **round-trippable** current text of a single selected `Text` entity
+    /// (ADR 0020 amendment B), or `null`.
+    ///
+    /// Distinct from [`Self::rows`]: those values are display-formatted, while
+    /// this is the exact string the edit channel
+    /// ([`cad_app::interaction::InteractionRequest::SetSelectedText`]) replaces.
+    /// Empty for every other selection — nothing selected, a multi-selection, a
+    /// non-text entity, and a block-instance member or sub-element (text editing
+    /// never reaches into block internals).
+    pub text: Option<String>,
 }
 
 impl CadSelection {
@@ -103,6 +113,7 @@ impl CadSelection {
             empty: true,
             rows: Vec::new(),
             mixed_keys: Vec::new(),
+            text: None,
         }
     }
 
@@ -118,6 +129,8 @@ impl CadSelection {
             empty: count == 0,
             rows: Vec::new(),
             mixed_keys: Vec::new(),
+            // No authoritative document means no editable string, never a guess.
+            text: None,
         }
     }
 
@@ -155,6 +168,13 @@ impl CadSelection {
             empty: count == 0,
             rows,
             mixed_keys,
+            // Only a single resolved `Text` carries a write-back string; the
+            // application leaves it `None` for every other selection.
+            text: if count == 1 {
+                properties.text.clone()
+            } else {
+                None
+            },
         }
     }
 }
@@ -255,6 +275,20 @@ pub struct CadTool {
     /// never open the text prompt.
     #[serde(rename = "awaiting_text")]
     pub awaiting_text: bool,
+    /// The current string of the entity a `TEXTEDIT` capture will replace
+    /// (ADR 0020 amendment A), or `null`.
+    ///
+    /// Present **only** while a text tool is active and only once `TEXTEDIT`'s
+    /// entity pick resolved to a single `Text`: it is that entity's stored
+    /// string, so the UI can show it for editing instead of making the user
+    /// retype it. A fresh `TEXT` never carries one, nor does any non-text tool
+    /// or a measurement capture. It is not a display row and is never
+    /// fabricated.
+    ///
+    /// Wire name: **`text_prefill`** (like [`Self::awaiting_text`], it keeps the
+    /// snake_case name the React contract reads: `tool.text_prefill`).
+    #[serde(rename = "text_prefill")]
+    pub text_prefill: Option<String>,
     /// Typed tool parameters (see [`CadToolParams`]); always present, with `null`
     /// fields for a tool that has no such parameter.
     pub params: CadToolParams,
@@ -398,6 +432,9 @@ pub(super) fn cad_tool(
             // The real text prompt phase (ADR 0019 decision A.2), read from
             // `cad-app`'s own capture state — never inferred from `key`/`points`.
             awaiting_text: preview.awaiting_text,
+            // The TEXTEDIT prefill, straight from the capture state: `None` for
+            // every other kind and before the pick resolves.
+            text_prefill: preview.text_prefill.clone(),
             params: CadToolParams {
                 // The side count is present **only** for a POLYGON capture; every
                 // other draw tool reports `null`, and the session already clears
@@ -498,6 +535,8 @@ pub(super) fn cad_tool(
             open_ended: false,
             // A measurement never awaits text.
             awaiting_text: false,
+            // …and never carries a text prefill.
+            text_prefill: None,
             params: CadToolParams {
                 sides: None,
                 fillet_radius: None,

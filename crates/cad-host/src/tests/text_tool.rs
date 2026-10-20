@@ -208,3 +208,113 @@ fn the_esc_action_policy_still_resolves_text_focus_before_the_tool() {
         cad_app::input::EscapeAction::CancelTool
     );
 }
+
+// --- ADR 0020 amendment B: the panel edit channel -------------------------
+
+fn the_text_id(core: &HostCore) -> cad_domain::EntityId {
+    let controller = core.controller.borrow();
+    let drawing = controller.drawing().expect("a document");
+    drawing
+        .model_space()
+        .iter()
+        .find(|entity| matches!(entity.geometry, cad_domain::SemanticGeometry::Text { .. }))
+        .map(|entity| entity.id)
+        .expect("a text entity")
+}
+
+fn dispatch_selected_text(core: &HostCore, text: &str) -> Result<(), RequestError> {
+    EngineClient::dispatch(
+        core,
+        EngineRequest::Interaction(InteractionRequest::SetSelectedText { text: text.into() }),
+    )
+    .map(|_| ())
+}
+
+#[test]
+fn set_selected_text_edits_the_current_single_selection() {
+    let core = core();
+    begin_text(&core);
+    capture_world(&core, 10.0, 20.0);
+    EngineClient::dispatch(
+        &core,
+        EngineRequest::Interaction(InteractionRequest::SetToolText { text: "OLD".into() }),
+    )
+    .expect("the created text");
+    let entity = the_text_id(&core);
+    select_entity(&core, entity);
+
+    dispatch_selected_text(&core, "NEW").expect("the panel edit runs");
+    let texts = text_entities(&core);
+    assert_eq!(texts.len(), 1, "editing never creates a second entity");
+    assert_eq!(texts[0].0, "NEW");
+    // The very next `cad_status`-style projection carries the new string.
+    let properties = core
+        .controller
+        .borrow()
+        .selection_properties()
+        .expect("properties");
+    assert_eq!(properties.text.as_deref(), Some("NEW"));
+    let controller = core.controller.borrow();
+    assert!(controller.application.can_undo(&controller.document_id));
+}
+
+#[test]
+fn set_selected_text_refusals_are_named_and_leave_no_transaction() {
+    let core = core();
+    // Nothing selected.
+    let error = dispatch_selected_text(&core, "NEW").expect_err("nothing is selected");
+    match error {
+        RequestError::Execution(CadError::InvalidInput(reason)) => {
+            assert!(reason.contains("textedit.selection_empty"), "{reason}");
+        }
+        other => panic!("expected a named refusal, got {other:?}"),
+    }
+
+    // A non-text single selection (the demo drawing's first line).
+    select_entity(&core, cad_domain::EntityId(1));
+    let error = dispatch_selected_text(&core, "NEW").expect_err("a line is not text");
+    match error {
+        RequestError::Execution(CadError::Unsupported(reason)) => {
+            assert!(reason.contains("textedit.target_not_text"), "{reason}");
+        }
+        other => panic!("expected a named refusal, got {other:?}"),
+    }
+
+    // A multi-selection.
+    let document = core.controller.borrow().document_id;
+    core.controller.borrow_mut().session.selection.replace([
+        cad_app::selection::model_ref(document, cad_domain::EntityId(1)),
+        cad_app::selection::model_ref(document, cad_domain::EntityId(2)),
+    ]);
+    let error = dispatch_selected_text(&core, "NEW").expect_err("two objects");
+    match error {
+        RequestError::Execution(CadError::InvalidInput(reason)) => {
+            assert!(reason.contains("textedit.selection_multiple"), "{reason}");
+        }
+        other => panic!("expected a named refusal, got {other:?}"),
+    }
+
+    // Empty text on a valid single text selection.
+    begin_text(&core);
+    capture_world(&core, 30.0, 40.0);
+    EngineClient::dispatch(
+        &core,
+        EngineRequest::Interaction(InteractionRequest::SetToolText { text: "OLD".into() }),
+    )
+    .expect("the created text");
+    let entity = the_text_id(&core);
+    select_entity(&core, entity);
+    let revision = core.controller.borrow().drawing().unwrap().revision();
+    let error = dispatch_selected_text(&core, "   ").expect_err("empty text");
+    match error {
+        RequestError::Execution(CadError::InvalidInput(reason)) => {
+            assert!(reason.contains("tool.text_empty"), "{reason}");
+        }
+        other => panic!("expected a named refusal, got {other:?}"),
+    }
+    assert_eq!(
+        core.controller.borrow().drawing().unwrap().revision(),
+        revision,
+        "every refusal wrote nothing"
+    );
+}

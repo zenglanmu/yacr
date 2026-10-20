@@ -24,6 +24,7 @@ fn spline_preview_draws_a_bounded_chord_approximation_of_the_curve() {
         ready: true,
         polygon_sides: None,
         awaiting_text: false,
+        text_prefill: None,
     };
     let overlay = draw_preview_overlay(&preview, DocumentId(1), false, &PreviewOptions::default());
     assert_eq!(overlay.drawn(), 1);

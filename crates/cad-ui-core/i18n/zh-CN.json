@@ -540,5 +540,14 @@
   "diagnostics.section.document": "图纸",
   "toolbar.zoom_window": "窗口缩放",
   "toolbar.zoom_extents": "范围缩放",
-  "doctabs.start": "开始"
+  "doctabs.start": "开始",
+  "properties.text.field": "文字内容",
+  "properties.text.apply": "应用",
+  "properties.text.count": "{used} / {max} 个字符",
+  "properties.text.empty": "文字为空：文字对象至少需要一个可见字符",
+  "properties.text.detached": "选择已改变，此草稿已不对应任何对象，应用已停用——请重新选中同一文字对象后继续编辑。",
+  "properties.text.failed": "图纸拒绝了该文字：{error}",
+  "tool.draw.textedit": "编辑文字",
+  "draw.kind.textedit": "编辑文字",
+  "tool.prompt.textedit.select_entity": "选择要编辑的文字对象"
 }

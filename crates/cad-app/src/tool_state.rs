@@ -14,7 +14,11 @@ pub struct DrawCapture {
 pub enum ToolState {
     Idle,
     Selecting,
-    Drawing(DrawCapture),
+    /// Boxed so the enum stays small: the draw capture owns the point/pick
+    /// buffers and the tool's text fields, while every other variant is `Idle`/
+    /// `Selecting`/`Panning` or a compact measurement tool. The box is an
+    /// internal layout detail; pattern matches keep reading `capture.tool`.
+    Drawing(Box<DrawCapture>),
     Measuring(MeasurementTool),
     Panning,
 }

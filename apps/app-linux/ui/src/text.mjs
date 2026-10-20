@@ -58,6 +58,20 @@ export function awaitingToolText(status) {
   return toolAwaitingText(status?.tool);
 }
 
+/**
+ * The host's prefill for the current text step (`tool.text_prefill`), or `null`.
+ *
+ * `TEXTEDIT` pre-fills the terminal text step with the selected entity's current
+ * string so the user edits instead of retyping; a fresh `TEXT` sends none. Read
+ * defensively like [`toolAwaitingText`]: an older host without the field, or a
+ * value that is not a string, means "no prefill" — never a fabricated one, and
+ * never an excuse to start the step differently.
+ */
+export function toolTextPrefill(tool) {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return null;
+  return typeof tool.text_prefill === 'string' ? tool.text_prefill : null;
+}
+
 /** The length of `text` in characters (Unicode scalar values), like the host. */
 export function textLength(text) {
   return typeof text === 'string' ? [...text].length : 0;

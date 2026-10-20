@@ -148,6 +148,15 @@ impl HostCore {
                 self.controller.borrow_mut().session.set_tool_text(&text)?;
                 return self.confirm_tool();
             }
+            // The panel edit path (ADR 0020 amendment B): the host resolves the
+            // **current single selection** itself (no id travels) and validates
+            // it at apply time. Refusals are named and open no transaction; a
+            // successful edit is one transaction / one undo step, and the tail
+            // below republishes the derived state (including `selection.text`).
+            InteractionRequest::SetSelectedText { text } => {
+                self.controller.borrow_mut().set_selected_text(&text)?;
+                InteractionOutcome::Confirmed
+            }
             // The first `Esc`: a focus-only change that never cancels the tool
             // (ADR 0019 decision A.1). `Cancel` remains the second `Esc` and is
             // the only request that resets the tool.
