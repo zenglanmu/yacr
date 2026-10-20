@@ -15,6 +15,7 @@ import { Button, IconButton } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { handleCommandKey } from '../cad.mjs';
 import { defaultSuggestionIndex, filterCommandSuggestions, historyText, stepHistoryCursor, unavailableReasonKey } from '../commands.mjs';
+import { releaseFocusOnOutsidePress } from '../focus-release.mjs';
 import {
   TEXT_PROMPT_KEY,
   TEXT_STEP_PROMPT_KEY,
@@ -30,6 +31,7 @@ export function CommandLine() {
   const { t } = useI18n();
   const shell = useShell();
   const inputRef = useRef(null);
+  const rootRef = useRef(null);
   const [focused, setFocused] = useState(false);
   const [highlight, setHighlight] = useState(-1);
   const [cursor, setCursor] = useState(null);
@@ -52,6 +54,20 @@ export function CommandLine() {
   // Suggestions appear once the user starts typing; with an empty line the
   // Up/Down keys step through command history instead.
   const listOpen = !textMode && focused && shell.command.trim().length > 0 && !shell.historyOpen;
+
+  // A click that returns focus must also act. The browser changes focus as the
+  // press's *default action*, after the event has been dispatched — too late for
+  // the lane's `pointerdown`, which a still-suspended lane drops. This
+  // capture-phase listener blurs the field before the press reaches
+  // `.native-input`, so `onBlur` re-enables the lane for that very same event. It
+  // never prevents or stops the press, and it exists only while the field is
+  // focused; `focused` is the sole dependency, so a re-render never duplicates
+  // it and unmount (or blur) removes it.
+  useEffect(() => {
+    if (!focused) return undefined;
+    const input = inputRef.current;
+    return releaseFocusOnOutsidePress(rootRef.current, () => input?.blur());
+  }, [focused]);
 
   useEffect(() => {
     if (textMode) return;
@@ -152,7 +168,7 @@ export function CommandLine() {
   const activeOptionId = listOpen && suggestions[highlight] ? `completion-${suggestions[highlight].id}` : undefined;
 
   return (
-    <div className="region region--cmdline commandline app-region">
+    <div ref={rootRef} className="region region--cmdline commandline app-region">
       <div className="commandline__row">
         <Icon name={textMode ? 'text' : 'terminal'} size={15} className="commandline__prompt" />
         <label className="sr-only" htmlFor="cad-command">{textMode ? t(TEXT_STEP_PROMPT_KEY) : t('command.title')}</label>

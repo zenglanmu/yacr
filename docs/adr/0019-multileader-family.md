@@ -395,8 +395,11 @@ P7c：`draw.kind.mleader`、`tool.draw.mleader`、`tool.prompt.mleader.{arrow,la
 - **精确几何（已钉）**：箭头 `(0,0,0)`、落点 `(10,2,0)`、`Standard` 行 ⇒ 根 `landing (10,2,0)`、狗腿向量 `(1,0,0)`、长度 `0.36`；
   顶点 `[(0,0,0), (9.64,2,0)]`；狗腿线 `(9.64,2)→(9.91,2)`（`0.36 − 0.09` 缺口）；文字在落点、高度 `0.18`、
   附着点 **`2`（居中）**、左附着 `1`。
-- **`CREATED_TEXT_ATTACHMENT_POINT = 2` 的理由（声明）**：`MLEADERSTYLE` 记录**没有水平附着侧**，只能在"左/中/右"里
-  选一个确定值；取**居中**，不假装样式给了我们侧向信息。
+- **`CREATED_TEXT_ATTACHMENT_POINT = 2` 的真实语义（实施更正）**：它只是**水平**附着 ⇒ `TextAlignH::Center`；
+  **垂直**来自所解析样式的 `left_attachment`（`Standard` 行 = `1`）⇒ `TextAlignV::Top`，
+  `cad-representation::finalize_text` 对 `Top` 施加**一个字高的基线上移** ⇒ 文字渲染在**落点上方**（实测 37 px ≈ 1 字高）。
+  即**复合锚是 top-centre，不是 middle-centre**（此前报告里的"居中"是错的，已更正）。
+  与 AutoCAD 的复合附着码（U-3）**仍未验证**；若将来要中间锚，需要独立决定而不是改这一个常量。
 - **修复一处既有潜伏 bug**：`MultiLeaderGeometry::new` 在 P7b-1 中**实际不可达**——它对 `from_import` 的**任何**
   理由都判失败，而 `build_display` **总是**返回"颜色/线宽覆盖未应用"这条**信息性**说明 ⇒ 创建路径永远失败。
   现在 `new` 只校验**结构性**缺陷（根/线/顶点/文本/空显示），`from_import` 语义**未改**。
@@ -411,3 +414,22 @@ P7c：`draw.kind.mleader`、`tool.draw.mleader`、`tool.prompt.mleader.{arrow,la
 - **门禁（编排者复跑）**：受影响 crate **2215 通过 / 0 失败**；UI **208/208（0 跳过）**；clippy(`-D warnings`)、fmt、
   architecture(27)、i18n(**558**)、file-size(**734**)、manifest(**23**)。**NOT RUN**：全量 `cargo test --workspace`；
   跨平台；**真机像素判据**（ADR J 对 P7c 的要求）——留作独立一步；**无真实 MULTILEADER 夹具**。
+
+### P7c 真机证据（真实 GPU + X11/XWayland，2026-10-20）
+
+- **环境**：GNOME/Mutter + Quadro P620（Vulkan）+ `GDK_BACKEND=x11`、`scale=1`、分区 926×341。**有界本地**证据。
+- **命令**：`YACR_PROBE_DRAW_EVIDENCE=1 scripts/collect-evidence.sh --backend x11 --lifecycle 0 --capture-at 225 --timeout 300`。
+  **注意 `--lifecycle 0` 才是"关闭"**：`--lifecycle exit` 会启用生命周期驱动并**提前 `app.exit(0)`**，首轮因此无截图（`NATURAL_EXIT`）。
+- **硬指标**：`mleader_pass=1`、`delta=1`、`after_tool=-`、`after_awaiting=false`、`after_error=-`；`select_count=1`，
+  选择行 `type:AcDbMultiLeader, layer:0_(0), space:model, style:Standard, roots:1, lines:1, display:4`。
+- **像素判读（逐像素测量，observer）**：箭头尖 (269.5,240)（拾取 270,240，差 0.5 px）、实心三角 13×36 px、与引线夹角 0.2°；
+  引线直线度最大残差 0.46 px、倾角 20.6°；**狗腿肘部可见**（y=89–90，x 272–326，斜接无过冲，末端距落点 17 px = 一个 landing gap）；
+  文字 `LEAD` bbox 215–295 × 28–53（预期 214–296 × 29–54，逐边 ≤1 px），水平中心 x=255 与落点**精确对齐**、位于上方 37 px。
+  **零碰撞**（最紧 13 px）。**结论：ACCEPT**。
+- **证据边界**：像素只证"四个部分被画出"，**不**证实体类型；类型由同轮 `select_rows` 钉住（两者互补，不得单独引用）。
+  单合成器/单卡/`scale=1`，**不**推广为其它合成器、DPI、vendor 或真机结论；**无真实 MULTILEADER 夹具**。
+- **首轮失败的教训（已修）**：证据点原本选在既有一笔之上且两次拾取同 y ⇒ 引线**压在既有线上**、狗腿**与引线共线**，
+  视觉不可判读，且点选命中 2 个实体。已重定位到空白走廊并使引线**倾斜**。
+- **同时修掉的真实交互缺陷**：**在命令行打字后，点画布的第一下被静默吞掉**——`onFocus` 挂起指针通道，
+  而真实 `pointerdown` **先于**焦点转移派发 ⇒ 必然被丢。现以 window **捕获阶段** `pointerdown` 先 `blur()`（解除挂起）
+  再让**同一个**事件送达 `.native-input`（不取消事件、不影响命令行内部点击）。UI 测试 208 → **212**。

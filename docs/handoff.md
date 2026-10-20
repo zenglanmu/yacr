@@ -1,3 +1,22 @@
+## P7c 真机证据 + 一个真实交互缺陷的修复（2026-10-20）
+
+- **证据**（GNOME/Mutter + Quadro P620 Vulkan + `GDK_BACKEND=x11` + `scale=1`，分区 926×341）：
+  `mleader_pass=1`、`delta=1`、工具收尾、无错误；`select_count=1`，选择行
+  `type:AcDbMultiLeader, layer:0_(0), space:model, style:Standard, roots:1, lines:1, display:4`。
+  **像素判读 ACCEPT**：箭头尖 (269.5,240)、实心三角 13×36、引线倾角 20.6° 直线度残差 0.46 px、
+  **狗腿肘部可见**（y=89–90，x 272–326，末端距落点 17 px = 一个 landing gap）、`LEAD` 文字 bbox 逐边 ≤1 px 且水平中心与落点精确对齐、**零碰撞**（最紧 13 px）。
+- **证据边界**：像素不证实体类型，类型由同一轮 `select_rows` 钉住（两者互补）；单合成器/单卡/`scale=1`；
+  **无真实 MULTILEADER 夹具**；**未在 AutoCAD 打开**。
+- **`--lifecycle 0` 才是关闭**：`--lifecycle exit` 会启用生命周期驱动并**提前 `app.exit(0)`** ⇒ 首轮 `NATURAL_EXIT`、无截图。
+- **首轮失败的原因（已修证据选点）**：点选落在既有一笔之上 + 两次拾取同 y ⇒ 引线压在既有线上、狗腿与引线共线，
+  不可判读且命中 2 个实体。已移到空白走廊并令引线倾斜。
+- **同时修掉的真实交互缺陷**：**命令行打完字后点画布的第一下被静默吞掉**。根因：`onFocus` → `suspendPointer(true)`，
+  `input.mjs` 的 `down` 在 `!accepting` 时 return，而真实 `pointerdown` **先于**焦点转移（blur）派发。
+  修复：命令行聚焦期间用 **window 捕获阶段** `pointerdown`，外部目标先 `blur()` 再让**同一个**事件送达 `.native-input`；
+  不 `preventDefault`/不 `stopPropagation`；命令行内部点击不受影响；聚焦结束/卸载即移除。UI **208 → 212**。
+- **附着语义更正**：`attachment 2` 只是**水平**居中；**垂直**取样式 `left_attachment=1` ⇒ `Top` ⇒ 文字在落点**上方一个字高**
+  （实测 37 px）。复合锚是 **top-centre**，此前报的"居中"是错的；与 AutoCAD 复合码的对应（U-3）仍未验证。
+
 ## P7c：`MLeaderStyle` 表 + `MLEADER` 创建（ADR-0019 决策 D/F.2/F.3，2026-10-20）
 
 **范围**：`cad-db`（新表）、`cad-import-acadrust`（`MLEADERSTYLE` 喂表 + 创建往返测试）、`cad-app`（命令/工具/创建）、

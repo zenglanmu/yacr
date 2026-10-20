@@ -31,6 +31,9 @@
 //!   dimension-creation phases (DIMRADIUS/DIMDIAMETER/DIMCENTER);
 //! - [`draw_dimension_angular_ordinate`]: the `YACR_PROBE_DRAW_EVIDENCE` P5e
 //!   two-line angular + ordinate dimension phases (DIMANGULAR/DIMORDINATE);
+//! - [`draw_mleader`]: the `YACR_PROBE_DRAW_EVIDENCE` P7c `MLEADER`
+//!   creation phase (arrow + landing picks, then the real `cad_set_tool_text`
+//!   admission; the pixel criterion ADR 0019 decision J owes for P7c);
 //! - [`hover`]: the `YACR_PROBE_HOVER` hover-cost driver;
 //! - [`box_select`]: the `YACR_PROBE_BOX_EVIDENCE` box-selection driver.
 
@@ -43,6 +46,7 @@ mod draw_dimension_angular_ordinate;
 mod draw_dimension_radial;
 mod draw_edit;
 mod draw_hatch;
+mod draw_mleader;
 mod edit;
 mod hover;
 mod input;
