@@ -458,6 +458,8 @@ mod tests_display_multileader;
 #[cfg(test)]
 mod tests_display_table_extended;
 #[cfg(test)]
+mod tests_multileader_adversarial;
+#[cfg(test)]
 mod tests_multileader_created;
 #[cfg(test)]
 mod tests_multileader_export;

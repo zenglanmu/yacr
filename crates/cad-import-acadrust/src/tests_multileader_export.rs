@@ -23,7 +23,7 @@ use crate::tests_multileader_fixtures::*;
 // ---------------------------------------------------------------------------
 
 /// Parse the ASCII DXF into `(group code, value)` pairs.
-fn pairs(bytes: &[u8]) -> Vec<(i32, String)> {
+pub(crate) fn pairs(bytes: &[u8]) -> Vec<(i32, String)> {
     let text = String::from_utf8(bytes.to_vec()).expect("ASCII DXF");
     let mut lines = text.split("\r\n");
     let mut out = Vec::new();
@@ -44,7 +44,7 @@ fn pairs(bytes: &[u8]) -> Vec<(i32, String)> {
 }
 
 /// Group the pairs into records at every `0` marker.
-fn records(pairs: &[(i32, String)]) -> Vec<(String, Vec<(i32, String)>)> {
+pub(crate) fn records(pairs: &[(i32, String)]) -> Vec<(String, Vec<(i32, String)>)> {
     let mut out: Vec<(String, Vec<(i32, String)>)> = Vec::new();
     for (code, value) in pairs {
         if *code == 0 {
@@ -56,7 +56,7 @@ fn records(pairs: &[(i32, String)]) -> Vec<(String, Vec<(i32, String)>)> {
     out
 }
 
-fn bodies<'a>(
+pub(crate) fn bodies<'a>(
     records: &'a [(String, Vec<(i32, String)>)],
     name: &str,
 ) -> Vec<&'a Vec<(i32, String)>> {
@@ -67,7 +67,7 @@ fn bodies<'a>(
         .collect()
 }
 
-fn value(body: &[(i32, String)], code: i32) -> Option<&str> {
+pub(crate) fn value(body: &[(i32, String)], code: i32) -> Option<&str> {
     body.iter()
         .find(|(candidate, _)| *candidate == code)
         // Numeric groups are right-aligned in a six-character field; string
@@ -75,7 +75,7 @@ fn value(body: &[(i32, String)], code: i32) -> Option<&str> {
         .map(|(_, value)| value.trim())
 }
 
-fn values(body: &[(i32, String)], code: i32) -> Vec<&str> {
+pub(crate) fn values(body: &[(i32, String)], code: i32) -> Vec<&str> {
     body.iter()
         .filter(|(candidate, _)| *candidate == code)
         .map(|(_, value)| value.trim())
@@ -83,7 +83,7 @@ fn values(body: &[(i32, String)], code: i32) -> Vec<&str> {
 }
 
 /// The entity tail: everything after the `CONTEXT_DATA` closing marker.
-fn tail(body: &[(i32, String)]) -> &[(i32, String)] {
+pub(crate) fn tail(body: &[(i32, String)]) -> &[(i32, String)] {
     let end = body
         .iter()
         .position(|pair| pair == &(301, "}".to_string()))
@@ -96,7 +96,7 @@ fn hex(body: &[(i32, String)], code: i32) -> u64 {
 }
 
 /// The nested `LEADER_LINE{ … }` bodies, in written order.
-fn leader_lines(body: &[(i32, String)]) -> Vec<Vec<(i32, String)>> {
+pub(crate) fn leader_lines(body: &[(i32, String)]) -> Vec<Vec<(i32, String)>> {
     let mut out = Vec::new();
     let mut current: Option<Vec<(i32, String)>> = None;
     for pair in body {
@@ -114,7 +114,7 @@ fn leader_lines(body: &[(i32, String)]) -> Vec<Vec<(i32, String)>> {
 }
 
 /// The nested `LEADER{ … }` bodies (leader-line content excluded), in order.
-fn leader_roots(body: &[(i32, String)]) -> Vec<Vec<(i32, String)>> {
+pub(crate) fn leader_roots(body: &[(i32, String)]) -> Vec<Vec<(i32, String)>> {
     let mut out = Vec::new();
     let mut current: Option<Vec<(i32, String)>> = None;
     let mut in_line = false;
