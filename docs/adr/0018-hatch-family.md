@@ -361,7 +361,6 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
   一条事务/一步撤销/活动图层。
 
 #### 与决策 D 的**更正**（实施中发现，必须写明）
-
 1. **圆的环是 4 段精确圆弧，不是 ADR 原写的"两点带 bulge"**。原因：**已提交的校验器**要求环 **≥3 个顶点**、
    且 `ring_degenerate` 按**弦**测面积 ⇒ 两点环必然被判退化。故圆用**四个象限顶点 + `bulge = tan(π/8)`**（四段精确
    四分之一弧），**仍是精确圆**、**仍导出为精确的 bulge 折线边界**；`source_edges = None`。
@@ -374,3 +373,12 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
    **真正的填充预览**（`preview.rs` 对 `Hatch` 明确返回无预览链）。
 7. **i18n**：P6b **+14 键**（`draw.kind.hatch`、`tool.draw.hatch`、`tool.prompt.hatch.{select_boundary,ready}`、
    `status.tool_parameter.hatch_{pattern_type,spacing,angle,double,style}` + `.hint`），两目录一致；总数 **534**。
+
+#### 证据暴露并修复的一处**跨实体**缺陷（非 P6 设计项）
+
+- P6b 的真机像素判读发现创建出的**圆形**填充周围有"四段大弧 + 四段过冲"，矩形填充没有 ⇒ 追到
+  `append_bulge_arc` 把**弧心放在弦的顶侧**（应为另一侧，`u` 已含 bulge 符号）：**每条 bulge 弧被沿弦镜像**，
+  半圆因 `cos(θ/2)=0` 而**恰好不变**，故既有测试全过。共同错误还在 **EXPLODE 弧恢复 / 拾取包围盒 / 对象捕捉**。
+  另修"平面法向符号取自绕向"⇒ **XY 平行折线一律 `+Z`**。
+- **影响所有 bulge 折线，含导入图纸**（法兰 6 处、`entities` 3 处，位移达弧半径 397% / 156 单位）⇒
+  **渲染变化声明**见 `docs/compatibility.md` 的「bulge 弧显示」行与 `docs/handoff.md` 的专节。修复提交 `b52066e`。
