@@ -151,3 +151,45 @@ CAD 绘图区是**不可被 DOM 覆盖**的原生表面。那么后续必然出�
   未知 kind 的文案复用 `status.toggle_unsupported`（**当前不可达**，宿主允许清单挡在前面）。
 - **未做**：D3 右键菜单（用户暂缓）；D4 的"文字弹窗编辑"（后端 `SetSelectedText` 已就绪，只差把对话框接上）；
   D5 冻结帧（明确不采用）。
+
+### D4 实施（P8）：文本弹窗编辑（TEXT / MTEXT / MLEADER）
+
+**范围**：把 ADR-0020 增补的入口 **C** 接到本 ADR 的管线上；A（`TEXTEDIT`）与 B（面板内联字段）不变。
+
+#### 事实前提（已勘察，附出处）
+
+1. **字符串是原始 DXF 内容**：TEXT 与 MTEXT 折叠后都存 `t.value`（`cad-import-acadrust/src/entity/convert.rs:135,166`），
+   MTEXT 的 `\P`、`{`/`}`、`\W…;` **原样**保留；渲染器 `parse_mtext` 才解释它们
+   （`cad-representation/src/text/mtext.rs:141-144,242-248,284-286`）。
+2. **换行在视口里本来就生效**：`\P` → 段落（`mtext.rs:247`），`\n` → 段落（`mtext.rs:141-144`），
+   每段一行（`layout.rs:43`），行距 `1.2×height`（`finalize.rs:122`）。
+3. **来源可判**：`DbEntity.object.type_key` 保留源类名（`AcDbText` / `AcDbMText`）。
+4. **`MLeaderText.width`（组 43）存在但**从不参与排版**（`cad-domain/src/multileader.rs:812-822`）⇒ 改字串**不会重排/重适配**。
+5. **MultiLeader 无原位文本更新 API**：字段私有、无 setter；`update_entity` 只换 `DbEntity` 而**不重建 `display`**
+   （`cad-db/src/drawing/transaction.rs:76-82`），`validate_geometry` 只查已存 `display` 的有限性、**不查它与 `text` 一致**
+   （`validate.rs:266-307`）⇒ **必须在域层提供"改文本并重建 display"的构造**，否则会出现"文字改了、屏幕没变"的隐形不一致。
+
+#### 决策
+
+- **`\P` ↔ `\n` 双向映射，按来源分档**（渲染器已支持，故弹窗与视口一致）：
+  - **`AcDbMText`（MTEXT / MLEADER 文本）**：多行；提交时 `\r\n`/`\r`/`\n` → `\P`，打开时 `\P` → `\n`（**只做这一种映射**）。
+  - **`AcDbText`**：**单行**；文本含换行 ⇒ **具名拒绝** `textedit.newline_text`。理由：AutoCAD 的 TEXT **不解释** `\P`，
+    写进去会造成"我们两行、AutoCAD 一行"的**跨应用不一致**。
+  - 转换与拒绝都在**宿主**做（唯一权威），UI 不得自行转换。
+- **其余控制码透传**：`{`/`}`、`\f`、`\H`、`\W`、`\Q`、`\~`、`\S` 等**原样显示、原样写回**；编辑器**不解析、不校验、不美化**。
+  **声明**：编辑的是**原始串**，用户会看到这些码；这不是富文本编辑器。
+- **载荷由宿主生成，UI 不得提供内容**：`cad_open_popup { kind: "textEdit" }` ⇒ 宿主读**当前单选**并注入
+  `payload { text, multiline, label }`；不是可编辑的单一文本实体 ⇒ 拒绝 `popup.no_text_selection`（**不开窗**）。
+  这样可以做到"UI 拿不到内容也就无法写错内容"，且模态 gate 期间选择不可能漂移。
+- **应用仍走既有命令**：`cad_set_selected_text { text }`（不新增 IPC）。
+- **`SetSelectedText` / `TEXTEDIT` 泛化**：接受 `Text` 与**带文本的 `MultiLeader`**；拒绝：无内容/块/公差内容的
+  `MultiLeader`、块内成员、子元素、多选、非文本。MultiLeader 目标经**新的域层构造**替换文本并**重建 `display`**，
+  一条事务/一步撤销；`override_mask`、样式快照、`width`、附着等**不变**。
+- **弹窗尺寸按 kind**：文本编辑窗口比 `about` 高（不需要 520×360 的小卡片），仍不可缩放；Wayland 不承诺定位。
+- **`MLeaderText.width` 不参与排版**：编辑后**不重排、不重适配**（`width` 原样保留）。这是既有缺口，**声明**，不在本批修。
+
+#### 待办（本批不做）
+
+- MTEXT 富文本/格式化编辑（只编辑原始串）。
+- `MLeaderText.width` 的换行/适配语义。
+- 右键菜单（D3，用户暂缓）。
