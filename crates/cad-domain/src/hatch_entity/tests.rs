@@ -637,3 +637,55 @@ fn import_depth_probes_several_vertices_when_the_first_touches_a_boundary() {
     // triangle (24) that is nested inside it.
     assert!((display_area(&hatch) - 100.0).abs() < 1e-6);
 }
+
+// TEMPORARY measurement (to be deleted).
+#[test]
+fn tmp_measure_fill_sampler() {
+    let radius = 10.0;
+    let b = std::f64::consts::FRAC_PI_8.tan();
+    let pts: Vec<[f64; 2]> = (0..4)
+        .map(|i| {
+            let a = i as f64 * std::f64::consts::FRAC_PI_2;
+            [radius * a.cos(), radius * a.sin()]
+        })
+        .collect();
+    for (label, bulges) in [
+        ("CCW +b", vec![b; 4]),
+        ("CCW -b", vec![-b; 4]),
+    ] {
+        let lp = HatchLoop::new(pts.clone(), bulges, HatchLoopFlags::default());
+        let ring = sample_loop(&lp);
+        let max = ring
+            .iter()
+            .map(|q| (q[0].hypot(q[1]) - radius).abs())
+            .fold(0.0f64, f64::max);
+        let maxr = ring
+            .iter()
+            .map(|q| q[0].hypot(q[1]))
+            .fold(0.0f64, f64::max);
+        println!("fill {label}: n={} max dev={max:.9} max radius={maxr:.9}", ring.len());
+    }
+    // Also measure via the display mesh (fill) for a solid hatch.
+    let solids: Vec<_> = (0..4).map(|_| 0.0).collect();
+    let lp = HatchLoop::new(pts.clone(), vec![b; 4], HatchLoopFlags::default());
+    let hatch = HatchGeometry::new(
+        vec![lp],
+        HatchPlane::default(),
+        HatchStyle::Normal,
+        HatchFill::Solid,
+        Vec::new(),
+        None,
+        HatchPatternType::UserDefined,
+    )
+    .unwrap();
+    println!("solid segments={}", solids.len());
+    let mut worst = 0.0f64;
+    for g in hatch.display() {
+        if let SemanticGeometry::Mesh(m) = g {
+            for v in &m.vertices {
+                worst = worst.max((v.x.hypot(v.y) - radius).abs());
+            }
+        }
+    }
+    println!("fill mesh worst radial dev = {worst:.9}");
+}
