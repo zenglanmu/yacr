@@ -1,78 +1,80 @@
 # ADR 0019：引线标注族（MULTILEADER）——文本输入通道、一等表示、真实导出与创建子集（P7）
 
-- 状态：**提案（Proposed）**，待设计门禁（Oracle SG-P7 attempt 1）。
-- 范围：`crates/cad-ui-core`（wire protocol / 文本输入 / 命令选择子 / i18n）、`crates/cad-app`（TEXT 与 MLEADER 命令、
-  工具、文本状态）、`crates/cad-domain`（MultiLeader 变体；`Text` 变换）、`crates/cad-db`（MLeaderStyle 表）、
-  `crates/cad-import-acadrust`（导入迁移 + 导出）、`crates/cad-representation`（显示）、React 宿主 UI。
-- **不**覆盖：样条引线、块内容 / 公差内容、多引线簇与 `MLEADERCOLLECT`/`MLEADERALIGN`/`MLEADEREDIT`、
-  注释性缩放的**应用**、背景遮罩、分栏、引线打断（break）、`QLEADER`/`LEADER`/`TOLERANCE` 命令、
-  关联性、画布内**就地文字编辑器**。
-- 相关：`CAD_IMPLEMENTATION_SPEC.md` §3.2；ADR-0017（一等实体 + 声明账本）、ADR-0018（同名纪律 + 匹配点清单）、
-  ADR-0002（React 宿主无法绘制原生 overlay）；`docs/compatibility.md`；`docs/dxf-entity-coverage.md:32,72`。
+- 状态：**提案（Proposed）**，设计门禁 **SG-P7 attempt 1 = APPROVE-WITH-FIXES**（B1–B5 与全部非阻塞项已并入本修订；
+  待 attempt 2 复核）。本文件是 P7 的**唯一设计权威**；实施进度另起小节追加，**不改写决策文本**。
+- 范围：`crates/cad-ui-core`（wire protocol / 文本通道 / 命令选择子 / 状态 / i18n）、`crates/cad-app`（TEXT 与
+  MLEADER 命令、工具、文本状态、input policy）、`crates/cad-domain`（MultiLeader 变体；`Text` 变换）、
+  `crates/cad-geometry`（`engine.rs` 的 Text 面与 `transform_geometry` 对齐）、`crates/cad-db`（Text 变换校验）、
+  `crates/cad-import-acadrust`（导入迁移 + 导出）、`crates/cad-representation`、React 宿主 UI。
+- **不**覆盖：样条引线、块 / 公差内容引线的**变体化**（见决策 C.3）、多引线簇/`MLEADERCOLLECT`/`MLEADERALIGN`/
+  `MLEADEREDIT`、注释性缩放的**应用**、背景遮罩、分栏、引线打断、`QLEADER`/`LEADER`/`TOLERANCE`、
+  关联性、**画布内就地文字编辑器**、`-MLEADER`（**该命令不存在**，U-10）。
+- 相关：`CAD_IMPLEMENTATION_SPEC.md` §3.2；ADR-0017 / ADR-0018（一等实体 + 真实导出 + 声明账本 + 匹配点清单）；
+  ADR-0002（React 宿主无法绘制原生 overlay）；`docs/compatibility.md`（**当前无 MULTILEADER 行**为已知欠账）。
 
 ---
 
-## 0. 事实与约束（勘察结论，决定本 ADR 的形状）
+## 0. 事实与约束（勘察 + 门禁核实）
 
-1. **没有任何字符串通道**。`ToolValue` 只有 `Number|Flag`；`InputKind` 只有指针/滚轮/尺寸；`InteractionRequest`
-   无字符串；`CadToolParams` 全是数字/布尔；唯一字符串入口 `cad_command(String)` **只收命令名**（归一化 + 白名单）。
-   ⇒ "让用户输入文字"本身是**平台级新增**，不是某个命令的细节。
-2. **MULTILEADER 不是一等实体**：导入展平为 `Compound([引线折线, 箭头 Mesh, 狗腿 Line, Text, …])`。
-   而**导出把 `Compound` 摊平** ⇒ 创建出的引线标注存盘会变成散线 + 文字，**实体类别与语义全丢**。
-   这是 P5a（标注）、P6a（填充）之后**同一教训的第三次**。
-3. **`Text` 不可变换**（`cad-domain`/`cad-db` 的 transform 拒绝 Text）⇒ 文字一旦能创建，`MOVE`/`COPY`/`ROTATE`
-   立刻失败。**必须一并解决**，否则交付的是"画得上、动不了"的东西。
-4. **`MTEXT` 被折叠成 `Text` 且未报告**：列、背景填充、行距样式、绘制方向被静默丢弃
-   （`entity/convert.rs` 报 `Completeness::Complete`）⇒ **既有诚实性缺口**，与本 ADR 的"声明账本"标准不符。
-5. **无 MLEADERSTYLE 表**：`cad-db` 只有 `DimStyle`（P5b 先例）与文本 `Style`；导入只在内存里临时读 acadrust 的
-   `MultiLeaderStyle`，**不存储**。创建需要一个可解析的默认样式。
-6. **DXF 结构复杂且官方文档薄**：嵌套段语法（`300 CONTEXT_DATA{ … 302 LEADER{ … 304 LEADER_LINE{ … 305 } 303 } 301 }`）
-   **不在 DXF 参考里**（仅实现共识）；`90` 是**属性覆盖掩码**（写 0 会让实体值被样式默认值取代）；
-   `MLEADERSTYLE` 是**符号表记录**，`MLEADER`/`MLEADERSTYLE` 还需 `CLASSES` 条目。
-7. **acadrust 0.6.5 写入器可用**（已核实源码）：`write_multileader` 写嵌套段、`write_multileader_style` 写样式记录、
-   **`90` 掩码会写出**（`property_override_flags.bits()`）；`CLASSES` 由 `document.classes` 生成且**默认为空**
-   ⇒ 我们必须自行插入两个 `DxfClass`。
-8. **无 MULTILEADER 夹具**：现有测试全是内存构造的合成实体；`compatibility.md` **没有 MULTILEADER 行**。
+1. **没有字符串通道**：`ToolValue` 只有 `Number|Flag`；`InputKind` 只有指针/滚轮/尺寸；`InteractionRequest` 无字符串；
+   `CadToolParams` 全数字/布尔；`cad_command(String)` 只收**命令名**（归一化 + 白名单）。
+   **且 `apps/app-linux/src/host/commands.rs` 已明确记录"拒绝从命令行载荷解析文本"** ⇒ 必须新增**专用 IPC**。
+2. **MULTILEADER 非一等**：导入展平为 `Compound`；导出把 `Compound` 摊平 ⇒ 创建的引线标注存盘会失去实体类别
+   （P5a、P6a 之后第三次）。
+3. **`Text` 不可变换**，但 `engine.rs` 的**捕捉面**已经变换 Text（`height × s`、`rotation + Δ`、对齐不变）**且无镜像/
+   非均匀守卫** ⇒ 两个变换面语义不一致（ADR-0017 A.5 的教训）。
+4. **两块既有行为建立在"Text 不可变换"之上**：`compatibility.md` 的 **STRETCH 整命令拒绝 TEXT**、
+   **EXPLODE of INSERT 含 Text 成员整命令失败**。Text 一可变，两者都会**静默改变**，必须更新文档并加钉。
+5. **`MTEXT` 折叠成 `Text` 且报 `Complete`**，而列/背景/行距样式/绘制方向被静默丢弃 ⇒ 既有诚实性缺口。
+6. **无 MLEADERSTYLE 表**；导入仅在内存临时读 acadrust `MultiLeaderStyle`。
+7. **DXF 结构官方文档薄**：嵌套段语法不在 DXF 参考；`90` 是**属性覆盖掩码**；`MLEADERSTYLE` 是符号表记录；
+   `MLEADER`/`MLEADERSTYLE` 需 `CLASSES` 条目（真实文件 group 1 为 **`MULTILEADER`**，非 `MLEADER`）。
+8. **acadrust 0.6.5 写入器可用**（已核实）：`write_multileader`（含嵌套段）、`write_multileader_style`、
+   **`90` 掩码会写**；`CLASSES` 由 `document.classes` 生成且**默认空**；`DxfClass::new_entity` /
+   `DxfClassCollection::add_or_update` **是公开 API** ⇒ 可插入两条 class 而**不改 acadrust**。
+9. **无 MULTILEADER 夹具**；现有测试全为内存构造的合成实体。
 
 ---
 
-## 决策 A：文本输入通道（P7a，**新增平台能力**）
+## 决策 A：文本输入通道（P7a）
 
-### A.1 形态
+### A.1 形态（**终端语义**，门禁建议）
 
-- **`DrawToolKind::requires_text() -> bool`**：为 `true` 的工具在**点捕获完成后**进入"待文本"状态。
-- **新增 `InteractionRequest::SetToolText { text: String }`**：把文本放进工具状态（与 `push_point` 同级），
-  **不是** `ToolValue` 的第四种（参数是数值/闭集，文本是**内容**）。
-- **`InputKind` 不变**：文本不是指针事件；宿主在用户提交时发 `SetToolText`。
-- **载荷**：`CommandPayload::{Text, MLeader}` 各带 `String`（`text`）；点部分沿用 `Points`。
-- **就绪条件**：`is_ready()` 对需要文本的工具要求"点数齐 **且** 文本非空"。
+- **`DrawToolKind::requires_text() -> bool`**；**`InteractionRequest::SetToolText { text }`**。
+- **`SetToolText` 是终端的**：文本是**最后一步**。宿主提交文本后，若 `is_ready()`（点数已齐）则**立即完成命令**，
+  **不再要求第二次 Confirm**。这样从根上消除"设两次文本""两次 Enter"的歧义：
+  - 文本在**未待文本**状态到达 ⇒ **按名拒绝**（不缓存）；
+  - 点未齐时到达 ⇒ 拒绝（F.3）；
+  - 提交空/纯空白 ⇒ 拒绝；
+  - **Esc 一次** = `DismissTextFocus`（仅失焦，工具仍待文本）；**Esc 两次** = `Cancel`（重置工具）。
+- **专用 IPC**：新增 **`cad_set_tool_text`**，与 `cad_set_tool_parameter` **同型**（有界队列准入、未知/越界拒绝），
+  **绝不复用 `cad_command`**。
+- **长度上限**：**1024 字符**（有限且声明；超出按名拒绝）。
 
-### A.2 UI（**诚实声明**：不是 AutoCAD 的就地编辑器）
+### A.2 状态投影
 
-- AutoCAD 在**画布内**开 MTEXT 就地编辑器；本仓库的 React 宿主**无法在原生 CAD 分区上绘制/嵌入 DOM 编辑器**
-  （ADR-0002：原生分区无子窗口、DOM 不得浮于其上）。因此采用**状态栏/命令行文本输入**：
-  复用既有 `CommandLine.jsx`，在"待文本"时切换为**文本提示模式**，Enter 提交并 `SetToolText`。
-- **必须遵守既有规则**：`isTyping(event.target)` 的标记、`InputPolicy::shortcuts_suppressed`、
-  `EscapeAction::DismissTextFocus`（输入框聚焦时画布快捷键不得触发）；IME `composing` 期间不得提交。
-- **声明**：无画布内就地编辑；文字在提交后**一次性**出现，**无实时排版预览**（与 P5/P6 的"无真正预览"同源）。
+- `CadToolStatus` 新增 **`awaiting_text: bool`**（或等价的 `prompt_phase`）。**不得**让 React 从 `key` + 点数**推断**
+  ——`ready` 目前把"缺点"与"缺文本"混为一谈，推断会与 Rust 的 `requires_text()` 漂移。
 
-### A.3 拒绝面
+### A.3 UI（**诚实声明**）
 
-空/纯空白文本 ⇒ 按名拒绝；超长文本（上限待定，须有限且声明）；宿主在工具未处于"待文本"时发 `SetToolText`
-⇒ 拒绝（不得静默缓存）。
+- AutoCAD 在**画布内**开就地编辑器；本仓库 React 宿主**无法**在原生 CAD 分区上绘制/嵌入 DOM 编辑器（ADR-0002）。
+  采用**命令行/状态栏文本输入**：待文本时 `CommandLine.jsx` 切为文本模式，Enter 提交并 `SetToolText`。
+  这是**传统 `-TEXT` 工作流**，可用但**不是** AutoCAD 的就地编辑。
+- 必须遵守既有规则：`isTyping(event.target)`、`InputPolicy::shortcuts_suppressed`、`EscapeAction::DismissTextFocus`；
+  IME `composing` 期间不提交。**声明**：无实时排版预览。
 
 ---
 
-## 决策 B：`Text` 的变换语义（P7a 一并修）
+## 决策 B：`Text` 的变换语义（P7a，**两个变换面一起对齐**）
 
-`SemanticGeometry::Text` 当前被 `transform_geometry` 拒绝 ⇒ 创建的文字无法 MOVE/COPY/ROTATE。改为：
-
-- **平移**：位置。
-- **旋转**：位置 + `rotation` 叠加。
-- **均匀缩放**：位置 + `height × s` + `rotation` 不变。
-- **非均匀缩放 / 镜像**：**整实体拒绝**（`Unsupported` + 诊断）——理由同 Dimension A.5：字形本身会被拉伸/镜像，
-  而平面文字域无法表达真反射（与 P6b 的 `-Z` 文字结论一致）。
-- **对齐**在旋转/缩放下保持不变（不重排）；声明。
+- **平移**：位置。**旋转**：位置 + `rotation` 叠加。**均匀缩放**：位置 + `height × s`。
+- **非均匀缩放 / 镜像**：**整实体拒绝**（`Unsupported` + 诊断）——平面文字域无法表达真反射与拉伸字形。
+- **两面对齐（门禁点名）**：`engine.rs` 的捕捉面**也必须**加上同样的镜像/非均匀拒绝，否则两个变换面对同一输入
+  给出不同结果。**ADR-0017 A.5 的"两变换面语义一致"在此照搬**，并有**跨面一致性测试**（同一变换分别经
+  `engine.rs` 与 `transform_geometry`，结果必须相同）。
+- **文档与行为同步**：`compatibility.md` 的 **STRETCH（TEXT）** 与 **EXPLODE of INSERT（含 Text）** 两行必须更新，
+  并由测试钉住新行为（门禁 B-non-blocking）。
 
 ---
 
@@ -81,139 +83,195 @@
 ```rust
 SemanticGeometry::MultiLeader(Box<MultiLeaderGeometry>)
 
-pub struct MultiLeaderGeometry {       // 字段私有；写入路径 new / from_import / transformed
-    style: MLeaderStyleValues,         // 解析后的快照（见决策 D），`text_style: StyleId`
-    style_name: String,                // 源样式名（往返）
-    override_mask: u32,                // DXF 90；**必须原样保留**（见 §0.6）
-    content_type: MLeaderContentType,  // MText | None（Block/Tolerance ⇒ Unsupported）
-    text: MLeaderText,                 // string / location / rotation / height / width / attachment
-    roots: Vec<MLeaderRoot>,           // ≤2 簇；每簇：landing point、dogleg vector、dogleg length
-    lines: Vec<MLeaderLine>,           // 每条：vertices（箭头…朝内容）、path_type、索引
-    plane: PlaneFrame,                 // 110/111/112 + 297
-    display: Vec<SemanticGeometry>,    // 派生：引线折线 + 箭头 Mesh + 狗腿 Line + Text
+pub struct MultiLeaderGeometry {          // 字段私有；写入路径 new / from_import / transformed
+    style: MLeaderStyleValues,            // 解析快照（含 text_style: StyleId）
+    style_name: String,                   // 往返；导出按名去重生成 MLEADERSTYLE
+    override_mask: u32,                   // DXF 90，**原样保存**
+    content: MLeaderContent,              // **只有 Text**（见 C.3）
+    text: MLeaderText,                    // string / location / rotation / height / width / attachment
+    roots: Vec<MLeaderRoot>,              // **不限 2 簇**（门禁）；创建恒为 1
+    lines: Vec<MLeaderLine>,              // 每条：vertices（箭头…朝内容）、path_type、index、
+                                          //   **per-line override_flags / arrowhead_size / arrowhead_handle**
+    reserved: MLeaderReserved,            // **不透明往返袋**（见 C.2）：breaks、background/columns、
+                                          //   未建模的 per-line 覆盖位
+    plane: PlaneFrame,                    // 110/111/112 + 297
+    display: Vec<SemanticGeometry>,       // 派生
 }
 ```
 
-- **必须保留的已解析量**（`§C.2` 的"不得省略"）：**引线顶点**、**落点**、**狗腿方向 + 长度**、
-  **文本内容/位置/高度/样式/附着**、**箭头尺寸**、**landing gap**、**`90` 掩码**、**`172` 内容类型**。
-- **显示**由唯一构造器派生（`display`）：引线 → `Polyline`；箭头 → 实心三角 `Mesh`（复用
-  `dimension_synthesis` 的箭头构造，尺寸来自样式）；狗腿 → `Line`；文字 → `Text`（经 `text_style` 解析）。
-  **狗腿端点 = 落点 + 长度 × 方向**（GDAL 逆推公式，标 **U-1 未查证**）。
-- **变换**：与 Dimension 同构（平移/旋转/均匀缩放全部几何与定义点 + 重建 `display`；非均匀/镜像拒绝）。
+### C.1 必须保留（"不得省略"）
+
+引线**顶点**、**落点**、**狗腿方向 + 长度**、**文本内容/位置/高度/样式/附着**、**箭头尺寸**、**landing gap**、
+**`90` 掩码原样**、**`172` 内容类型**、**每簇 `leader_index`(90) 与每线 `index`(91)**。
+
+### C.2 "保留存储"必须真的存（门禁 B1）
+
+决策 E 承诺"块内容/打断/背景/分栏/覆盖位**保留存储并声明**"——那就必须有字段。**用不透明 `reserved` 袋**
+（ADR-0018 渐变 `reserved`/`angle_raw` 的先例）承载：引线打断点、背景与分栏参数、未建模的 per-line 覆盖位。
+**不允许**"声称保留但无字段"。
+
+### C.3 块 / 公差内容：**不迁移**（门禁 B2 —— 避免静默渲染回归）
+
+今日**块内容引线会作为 `Insert` 子项渲染**（`dimension/multileader.rs` 的 block 分支）。若把整类迁入变体并标
+`Unsupported`，就是**静默的渲染回归**。因此：
+
+- **只有 MText 内容（`172 = 2`）与无内容（`172 = 0`）迁入 `MultiLeader` 变体**；
+- **块 / 公差内容保持今日的 `Compound` 展平路径**（`Partial`，原因具名），**不变**；
+- **声明**：这些实体仍**不能**以 `MULTILEADER` 往返（导出仍摊平）——**与今日相同**，不是新损失；
+  变体化为未来工作（需 `MLeaderContent::Block{ insert }` + 块句柄导出）。
+
+### C.4 显示派生与狗腿公式（门禁 B4 —— 以**代码现状**为准）
+
+- **狗腿端点采用今日实现的公式**（`multileader.rs`）：`reach = (landing_distance − landing_gap).max(0)`，
+  `end = 最后引线顶点 + 方向 × reach`；**即 landing gap 会缩短狗腿，基点是最后顶点而非落点**。
+  ⇒ **迁移不改渲染**（这是本决策的最大价值：P7b **不产生像素变化**）。
+- **U-1 重新归因**：`落点 + 长度 × 方向` 是 **GDAL 逆推**（**第三方证据**），与本实现不同；记为
+  **U-1'（第三方证据 vs 我们的实现，冲突未解，需真实夹具）**。
+- **U-2 措辞更正**：landing gap 在本实现中**缩短狗腿**；"推开文字"是**第三方推断**，不采用。
+- 显示 = 引线 `Polyline` + 箭头实心 `Mesh`（尺寸来自样式）+ 狗腿 `Line` + `Text`，由**唯一构造器**派生。
+
+### C.5 变换（门禁 B3 —— 避免掩码与几何自相矛盾）
+
+- **平移 / 旋转**：全部几何 + 定义点 + `display` 重建。
+- **缩放（含均匀）/ 镜像 / 非均匀**：**整实体拒绝**（`Unsupported` + 诊断）。
+  **理由**：均匀缩放会改文字高度/箭头尺寸/狗腿长度，而 `90` 掩码若**未置**对应位，AutoCAD 加载时会从样式
+  **重新解析**这些值 ⇒ 重开后的实体与我们显示的不一致。拒绝缩放**彻底规避**该陷阱，并**显式声明**。
 
 ---
 
-## 决策 D：MLeaderStyle 表（P7b，`cad-db`）
+## 决策 D：样式（P7b 最小化，P7c 再建表）
 
-- 新增 `MLeaderStyle` 表与 `standard_metric()` 默认（**先例 = P5b 的 `DimStyle`**），字段取 DXF MLEADERSTYLE 子集：
-  引线类型（直/样条）、箭头尺寸、landing gap、dogleg 开关与长度、内容类型、文字样式、文字高度、文字颜色、
-  附着（左/右 = 0–10 的子集）、最大引线点数、`Scale`。
-- **创建从存储样式解析快照**（与 `resolve_dim_style` 同构），**不接受**隐式常量散布。
-- **只实现"直引线"**：样条样式**可存储但创建拒绝**（显示/导入仍支持）。
+- **P7b 只做**：每个实体携带 `MLeaderStyleValues` 快照 + 导出时按 `style_name` **去重生成** `MLEADERSTYLE` 记录
+  （先例 = DIMSTYLE 的 `add_or_replace`），`Standard` 为首个。
+- **P7c 再建 `cad-db` 的 `MLeaderStyle` 表**（`standard_metric()` + `resolve` 先例 = `DimStyle`），供创建解析默认；
+  `resolve_dim_style` 的对称物。**P7b 不引入表**，避免无消费者。
 
 ---
 
 ## 决策 E：导出（P7b）
 
-- 用 acadrust 的 `EntityType::MultiLeader` + `ObjectType::MultiLeaderStyle`：
-  - 写 `CONTEXT_DATA`（内容基点、文本高度、箭头尺寸、landing gap、文本串、文本样式 handle、文本位置/方向/旋转/
-    宽度/行距、颜色、附着、flow direction、plane）。
-  - 写 `LEADER{}`（落点、狗腿向量、**每簇狗腿长度**）与 `LEADER_LINE{}`（**顶点逐点**）。
-  - 写实体尾部：`340` 样式 handle、**`90` 掩码（原样）**、`170` 引线类型、`290/291`、`41`/`42`/`43`、`172` 内容类型、
-    `343` 文字样式、`173`/`95`/`174`/`175`、`92`、`292`、`45`、`271`–`273`。
-- **`CLASSES` 必须插入两条 `DxfClass`**（`MLEADER`/`AcDbMLeader`/`ACDB_MLEADER_CLASS` 与
-  `MLEADERSTYLE`/`AcDbMLeaderStyle`/`ACDB_MLEADERSTYLE_CLASS`）——`document.classes` 默认空，
-  **不插则实体可能被当成 proxy 或丢弃**（U-5，推断）。
-- **`ExportReport` 逐条声明**：样式快照、`90` 掩码原样、含未建模属性时 `Converted`；
-  块/公差内容、多簇/多样条、打断、背景/分栏 → 若源文件有则**保留存储并声明**，不静默丢。
+- 用 acadrust `EntityType::MultiLeader` + `ObjectType::MultiLeaderStyle` 写：`CONTEXT_DATA`（内容基点、文字高度、
+  箭头尺寸、landing gap、文本串、文本样式 handle、文本位置/方向/旋转/宽度/行距、颜色、附着、flow direction、plane）、
+  `LEADER{}`（落点、狗腿向量、**每簇狗腿长度**、`leader_index`）、`LEADER_LINE{}`（**顶点逐点**、`index`、per-line
+  覆盖位/箭头）、实体尾部（`340`、**`90` 掩码原样**、`170`、`290/291`、`41/42/43`、`172`、`343`、`173/95/174/175`、
+  `92`、`292`、`45`（**尾部语义 = scale_factor**）、`271`–`273`）。
+- **`CLASSES` 必须插入两条 `DxfClass`**：group 1 = **`MULTILEADER`**（`AcDbMLeader` / `ACDB_MLEADER_CLASS`，
+  `is_an_entity = 1`）与 **`MLEADERSTYLE`**（`AcDbMLeaderStyle` / `ACDB_MLEADERSTYLE_CLASS`，`is_an_entity = 0`）；
+  `ProxyFlags` 与 `instance_count`/`was_zombie` 的取值由**测试**钉住（U-5）。
+- **具名导出偏差**：`91/341/171`（引线颜色/线型/线宽）写默认值（导入解析但未应用）⇒ `ExportReport` 声明；
+  `271`–`273` 在 **context 与尾部两处都写**（与 acadrust 一致）；`90` 掩码原样、**不擅自置位**（因为缩放已拒绝，
+  见 C.5）。
 - **不写**"计算后的文字排版"（AutoCAD 打开时重算，与 HATCH 同一原则）。
 
 ---
 
-## 决策 F：创建命令（P7c）
+## 决策 F：创建命令（P7a / P7c）
 
-### F.1 `TEXT`（P7a，最小消费者）
+### F.1 `TEXT`（P7a）
 
-- 流程：**插入点 → （高度参数，缺省取样式）→ 文本**；`PointArity::Exact(1)` + `requires_text`。
-- 插入 `SemanticGeometry::Text`（`style` = 当前文本样式，`h_align/v_align` 取样式默认），经单一漏斗、
-  一条事务/一步撤销/活动图层；`type_key`/`class_name` = **`AcDbText`**。
-- **声明**：无宽度因子/倾斜/字距/背景；单行；`MTEXT` 的列/背景/行距仍不支持（见决策 H）。
+- 流程：**插入点 → （高度参数，缺省取样式）→ 文本**；`PointArity::Exact(1)` + `requires_text`；`SetToolText` 终端完成。
+- 插入 `SemanticGeometry::Text`（`style` = 当前文本样式、对齐全取样式默认），单一漏斗、一条事务/一步撤销/活动图层；
+  `type_key`/`class_name` = **`AcDbText`**。
+- **声明**：单行、无宽度因子/倾斜/字距/背景；MTEXT 的列/背景/行距不支持（决策 H）。
 
 ### F.2 `MLEADER`（P7c）
 
-- 流程：**箭头位置 → 落点 → 文本**（`Exact(2)` + `requires_text`）；**直引线、单簇、单引线、2 顶点**。
-- 狗腿/落点间隙/箭头尺寸/文字高度**全部来自存储样式**（决策 D）；`content_type = MText`。
-- **不提供** `Options` 子提示（引线类型/内容类型/最大点数/角度约束）——**声明**为未实现，
-  且 UI 不得暗示可切换。
-- 经单一漏斗插入**一个** `AcDbMultiLeader`；一条事务/一步撤销/活动图层。
-- **无就地编辑器、无实时预览**（决策 A.2）。
+- 流程：**箭头位置 → 落点 → 文本**；`Exact(2)` + `requires_text`；**直引线、单簇、单引线、2 顶点**。
+- 狗腿/landing gap/箭头尺寸/文字高度全取样式（决策 D 的表）；`content = Text`。
+- **无 `Options` 子提示**（引线类型/内容类型/最大点数/角度约束）⇒ **声明**，UI 不得暗示。
+- 单一漏斗插入**一个** `AcDbMultiLeader`；一条事务/一步撤销/活动图层。
 
 ### F.3 拒绝面（全部具名、且不开事务）
 
-空/空白文本、超长文本、样条样式、块/公差内容、非 `+Z` 平面、缺活动图层、Viewer、
-`SetToolText` 在非待文本状态下到达、点捕获未完成即提交文本。
+空/纯空白/超 1024 字符文本、`SetToolText` 在非待文本状态、点未齐即提交文本、样条样式、块/公差内容、
+非 `+Z` 平面、缺活动图层、Viewer、MultiLeader 的缩放/镜像/非均匀变换。
 
 ---
 
 ## 决策 G：匹配点清单（照 ADR-0017 A.8 / ADR-0018 决策 E）
 
-**通配符臂**（不补就静默错）：`cad-import-acadrust/src/support.rs`、`cad-spatial/src/pick/{hit,bounds}.rs`、
+**通配符臂**：`cad-import-acadrust/src/{support,geometry,entity/push}.rs`、`cad-spatial/src/pick/{hit,bounds}.rs`、
 `cad-app/src/{select_box,select_all,selection}.rs`、`cad-measure/src/snap/{generate,resolve}.rs`、
-`cad-platform/src/{font_keys,images}.rs`、`cad-import-acadrust/src/{geometry,entity/push}.rs`、
-`cad-proxy/src/lib.rs`、`cad-geometry/src/intersect.rs`、`cad-app/src/app_drawing/explode.rs`
-（**块内 MultiLeader 的拒绝必须保持**，顶层 EXPLODE 按现有 `Compound` 口径**分解**）。
+`cad-platform/src/{font_keys,images}.rs`、`cad-proxy/src/lib.rs`、`cad-geometry/src/intersect.rs`、
+`cad-app/src/app_drawing/explode.rs`。
 
 **穷尽臂**：`cad-db/src/{bounds,transform,validate}.rs`、`cad-geometry/src/{tessellate,vector,engine}.rs`、
 `export/entity.rs`（`kind_name`）、`app_drawing/helpers.rs`（`class_name` = `"AcDbMultiLeader"`）、
 `cad-representation/provider/default.rs`。
 
-**必须决定的行为**：`transform_geometry`（同 Dimension）；`EXPLODE`（分解，非拒绝）；`STRETCH`
-（沿用 `compatibility.md` 既有口径：部分包围不动 + 诊断、完全包围整移）；捕捉（引线顶点是捕捉点）；
-拾取（引线/箭头/文字任一被点中即选中整个实体）。
+**必须决定的行为**：
+- **EXPLODE（门禁 B5）**：今日**顶层拒绝** `AcDbMultiLeader`（`refuse_compound_type_key`）⇒ **保持拒绝**（**不是**
+  改成分解，那会是行为变更），且**块内**拒绝改为**显式按 `type_key` 拒绝**（不能再依赖 `transform_geometry` 的
+  Compound 拒绝——MultiLeader 一旦有 `transformed` 臂，该依赖就消失）。`compatibility.md` 的 EXPLODE 行相应说明。
+- **STRETCH**：沿用 `compatibility.md` 既有口径（部分包围不动 + 诊断、完全包围整移）。
+- **变换**：见 C.5。**捕捉**：引线顶点/落点/狗腿端点是捕捉点。**拾取**：引线/箭头/文字任一命中即选中整个实体。
 
 ---
 
-## 决策 H：既有诚实性缺口（P7a 一并修）
+## 决策 H：既有诚实性缺口（P7a，**仅诚实性**）
 
-`MTEXT` 被折叠为 `Text` 且报 `Complete`，但**列、背景填充、行距样式、绘制方向被静默丢弃** ⇒ 改为：
-能保留的**保留**（行距因子、绘制方向若域可承载），不能保留的**显式 `Partial` + 具名原因**。
-**不得**再把"丢了一半"报成 `Complete`。
+`MTEXT → Text` 今日报 `Complete`，但列/背景填充/行距样式/绘制方向被静默丢弃。P7a **只做**：改为 **`Partial` +
+具名原因**（`text.background_unsupported`、`text.columns_unsupported`、`text.line_spacing_style_unsupported`、
+`text.drawing_direction_unsupported`）。**不**新增域字段（域内 `Text` 无这些字段）——字段化留给未来。
+任何测试**不得**再断言 `Complete`。
 
 ---
 
 ## 决策 I：未查证 / UNVERIFIED（能力表逐条标注）
 
-- **U-1 狗腿端点公式**：`端点 = 落点 + `长度` × 方向`（GDAL 逆推），Autodesk **未给几何定义**。
-- **U-2 landing gap 的作用方式**：推断为**推开文字**而非**缩短引线**；未述。
-- **U-3 文字附着 0–10 → 我们的 3×3 对齐映射**：ObjectARX 枚举可查，但**与 MTEXT 附着的对应**无官方文档。
-- **U-4 最小有效 MULTILEADER**：本 ADR 与规格研究给的是**推断**，**未在 AutoCAD 中打开验证**。
-- **U-5 `CLASSES` 条目是否强制**：缺失后果（proxy / 丢弃 / audit 修复）**未验证**；按"必须写"处理。
-- **U-6 `Maxpoints` 与"最后拾取点 → 落点"的对应**：未述。我们**只产 2 点**，规避该歧义。
-- **U-7 `142`/`45`/`40` 的 scale 语义**：按**普通乘数**建模并声明。
-- **U-8 `MLEADERSTYLE` 记录是否必需**：按"必需"处理（真实文件都有 `Standard`）。
-- **U-9 `170`/`172` 在实体尾部 vs 样式记录的含义**：Autodesk 两张表**互相矛盾**；按**实体表（与真实文件一致）**实现。
-- **U-10 `-MLEADER` 不存在**（无官方页 + 命令词典无此项）⇒ **不实现**该别名。
+- **U-1' 狗腿端点**：GDAL 逆推公式（**第三方证据**）与**本实现**（`reach = (landing_distance − landing_gap)`，
+  基点为最后顶点）**冲突未解** ⇒ 需真实夹具；本相**以现状为准**（不改渲染）。
+- **U-2 landing gap 的作用**：本实现**缩短狗腿**；"推开文字"仅为第三方推断。
+- **U-3 文字附着 0–10 → 3×3 映射**：ObjectARX 枚举可查，与 MTEXT 附着的对应**无官方文档**。
+- **U-4 最小有效 MULTILEADER**：**推断**，**未在 AutoCAD 打开验证**。
+- **U-5 `CLASSES` 是否强制** 与 `ProxyFlags`/`instance_count` 取值：**未验证**；按"必须写"处理，取值由测试钉住。
+- **U-6 `Maxpoints` 与"最后拾取点 → 落点"对应**：未述；我们只产 2 点以规避。
+- **U-7 `142`/`45`/`40` 的 scale 语义**：按普通乘数建模（尾部 `45` = scale_factor）。
+- **U-8 `MLEADERSTYLE` 记录是否必需**：按必需处理。
+- **U-9 `170`/`172` 尾部含义**：Autodesk 两张表**互相矛盾**；按**实体表**实现（acadrust 注释称已对 R2018 样本验证，
+  但**非我们独立验证**）。
+- **U-10 `-MLEADER` 不存在**（无官方页 + 命令词典无此项）⇒ 不实现。
+- **U-11（新）掩码 vs 样式优先级**：AutoCAD 加载/编辑时是否用样式**重解析**掩码未置位的属性 —— **未验证**；
+  这正是决策 C.5 **拒绝缩放**的理由。
+- **U-12（新）`CONTEXT_DATA` 41/140/145 与样式的关系**：是否以 context 为准 —— 未验证。
+- **U-13（新）`271`–`273` 在 context 与尾部两处的优先级**：未验证；**两处都写**以规避。
 
 ---
 
-## 决策 J：分阶段与验收
+## 决策 J：分阶段、验收、文档债与文件计划
 
 | 子阶段 | 内容 | 验收 |
 |---|---|---|
-| **P7a** | 文本通道（`SetToolText` + UI 文本提示模式 + IME/快捷键规则）+ `Text` 变换 + `TEXT` 创建 + MTEXT 诚实性修复 | 通道契约测试（含 IME/快捷键不改行为）、`Text` 变换四情形、TEXT 创建数值 + 拒绝面 + 导出往返、MTEXT `Partial` 原因。**真机**：输入文本 → 文字出现 → MOVE 后仍在正确位置 |
-| **P7b** | MultiLeader 一等表示 + 导入迁移 + `MLeaderStyle` 表 + **真导出**（含 `CLASSES`） | 往返保全（顶点/落点/狗腿/文本/附着/掩码）、导出组码断言（含 `90` 掩码、`CLASSES` 两条）、显示等价、匹配点清单回归 |
-| **P7c** | `MLEADER` 创建（2 点 + 文本，直引线/单簇/2 顶点） | 数值几何 + 拒绝面 + 导出往返（**首次检验"创建的"引线标注**）+ 真机像素判据 |
+| **P7a** | 文本通道（`cad_set_tool_text` + `awaiting_text` + 终端语义 + UI 文本模式）+ `Text` 变换（两面对齐）+ `TEXT` 创建 + MTEXT 诚实性 | 通道拒绝面与幂等矩阵；IME/快捷键**行为不变**；Text 变换四情形 + **跨面一致性**；TEXT 创建数值 + 导出往返；MTEXT `Partial` 具名原因；**STRETCH/EXPLODE 两行文档更新并加钉** |
+| **P7b** | MultiLeader 变体（仅 MText/无内容）+ 导入迁移 + 不透明 `reserved` + **真导出**（含 `CLASSES`）+ 样式记录去重 | **往返同一性**（顶点/落点/狗腿/文本/附着/**掩码原始位**）；**自洽断言**：掩码**未置**的位，实体值 == 写出的样式记录值；**`CLASSES` 两条精确字符串**；**显示等价**（迁移前后 bbox 相同 ⇒ 证明未改渲染） |
+| **P7c** | `cad-db` `MLeaderStyle` 表 + `MLEADER` 创建（2 点 + 文本，直引线/单簇/2 顶点） | 数值几何 + 拒绝面 + **导出往返（首次检验"创建的"引线标注）** + 真机像素判据 |
+
+### 文档更正清单（门禁 e —— 本 ADR 必须自带）
+
+`docs/compatibility.md`：**新增 MULTILEADER 行**（读取/显示/创建/导出 + 声明损失）；`:39` TEXT/MTEXT（MTEXT 的
+`Partial` 原因）；`:214` STRETCH（TEXT）；`:215` EXPLODE（MultiLeader 拒绝为显式）。`docs/dxf-entity-coverage.md:32,72`
+的 `Partial` 原因随变体化更新。
+
+### 文件计划（门禁更正）
+
+`cad-domain/src/multileader.rs`（新，**`lib.rs` 已 948 行** ⇒ 变体 + 匹配臂预算约 30 行，实现全部放新文件）、
+`cad-app/src/app_drawing/{text,mleader}.rs`（新；**`lib.rs` 672 行**，安全）、`cad-import-acadrust/src/export/multileader.rs`
+（新）、`cad-ui-core/src/protocol.rs`（**801 行**，`SetToolText` + 测试需谨慎）、`session/status.rs`（`awaiting_text`）、
+`cad-db/src/transform.rs`（Text 臂）、`cad-geometry/src/engine.rs`（守卫对齐）。
+
+### i18n
+
+P7a：`draw.kind.text`、`tool.draw.text`、`tool.prompt.text.{pick_point,type_text}`、`status.tool_text.prompt`、
+`status.tool_text.too_long`，以及**高度参数标签**（若 F.1 的高度走 `ToolParameter`：`status.tool_parameter.text_height`）。
+P7c：`draw.kind.mleader`、`tool.draw.mleader`、`tool.prompt.mleader.{arrow,landing,type_text}`。两目录键集一致；
+`cad-app` **不得**新增 CJK 字面量（基线只禁增长）。
 
 ### 证据边界
 
-沿用既有：合成 DOM 指针事件（**非真实鼠标**）+ **本次新增的合成文本事件**（经 `SetToolText`，**非真实键盘/IME**）；
-`cad_status` **无几何通道** ⇒ 真机只证"提交成功 + 计数 + 内容存在"；几何正确性由契约测试与本 ADR 的数值断言钉住；
-截图仅含应用窗口自身；单次有界本地运行。
+合成 DOM 指针事件 **+ 合成文本事件**（经 `cad_set_tool_text`，**非真实键盘/IME**）；`cad_status` 无几何通道 ⇒
+真机只证"提交 + 计数 + 内容存在"；几何由本 ADR 的数值断言钉住；截图仅含应用窗口自身；单次有界本地运行。
 
-### 文件计划与 i18n
+### 已知欠账（门禁点名）
 
-`cad-domain/src/multileader.rs`（新）、`cad-db/src/mleader_style.rs`（新）、`cad-app/src/app_drawing/{text,mleader}.rs`（新）、
-`cad-import-acadrust/src/export/multileader.rs`（新）；`cad-ui-core/src/session/{commands,status}.rs`、
-`protocol.rs` 增量。`cad-app/src/lib.rs` 变体增加（注意 `lib.rs` 已接近 1000 行）。
-i18n：P7a 需 `draw.kind.text`/`tool.draw.text`/`tool.prompt.text.{pick_point,type_text}`/`status.tool_text` 等；
-P7c 需 `draw.kind.mleader`/`tool.draw.mleader`/`tool.prompt.mleader.{arrow,landing,type_text}`。
+**没有真实 MULTILEADER 夹具**：U-1'/U-2/U-4/U-9 只能靠更多合成用例逼近，**不能**替代真实样本；
+需要一份**授权可分发**的样本并记入 `fixtures/manifest`（provenance + SHA-256）。
