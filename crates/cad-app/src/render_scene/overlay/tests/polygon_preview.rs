@@ -21,6 +21,7 @@ fn polygon_preview(sides: Option<u32>) -> DrawPreview {
         selection_count: 0,
         ready: false,
         polygon_sides: sides,
+        awaiting_text: false,
     }
 }
 

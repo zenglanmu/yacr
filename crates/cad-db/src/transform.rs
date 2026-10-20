@@ -24,8 +24,15 @@
 //! - `Image` transforms its placement (`origin` as a point, `u`/`v` as vectors)
 //!   and keeps the pixel size, resource key, clip and visibility unchanged.
 //! - `Mask` transforms every boundary point as a point and keeps `inverted`.
-//! - `Text`, `Spline`, `Opaque` and `Compound` are not baked: they return
-//!   `Unsupported` so a caller cannot believe a move happened when it did not.
+//! - `Text` accepts a **positive-determinant similarity** (ADR 0019 decision B):
+//!   `position` moves as a point, `rotation` accumulates the in-plane rotation
+//!   and `height` scales uniformly; the string, style, font and alignment are
+//!   preserved. A non-uniform scale (stretched glyphs) or a mirror (reflected
+//!   glyphs) cannot be represented by the flat-text domain, so both are refused
+//!   explicitly with [`CadError::Unsupported`]. `cad-geometry`'s snap face
+//!   applies the same guards.
+//! - `Spline`, `Opaque` and `Compound` are not baked: they return `Unsupported`
+//!   so a caller cannot believe a move happened when it did not.
 //!
 //! Every accepted result is re-validated by [`crate::validate_geometry`], so a
 //! singular or collapsing transform is rejected before it reaches the store.
@@ -34,7 +41,7 @@ use cad_domain::*;
 
 use crate::math::{
     add, apply_vector, arbitrary_axis, dot, ellipse_minor_dir, length, normalize, plane_angle,
-    scale, sub, transform_is_finite,
+    rotation_of, scale, sub, transform_is_finite,
 };
 
 /// Similarity judgement tolerance for `Transform3::is_uniform_scale`.
@@ -223,10 +230,35 @@ pub fn transform_geometry(
             boundary: boundary.iter().map(|p| transform.apply_point(*p)).collect(),
             inverted: *inverted,
         },
-        SemanticGeometry::Text { .. } => {
-            return Err(CadError::Unsupported(
-                "transform of Text entities is not supported".to_string(),
-            ));
+        // A standalone TEXT is a similarity-only entity (ADR 0019 decision B):
+        // translation moves `position`, rotation accumulates into `rotation` and a
+        // uniform scale multiplies `height`. A non-uniform scale would stretch the
+        // glyphs into a shape the flat-text domain cannot express, and a mirror
+        // would reflect them, so **both refuse the whole entity** with a named
+        // `Unsupported` diagnostic. `cad-geometry`'s snap face applies exactly the
+        // same guards so the two transform surfaces cannot disagree.
+        SemanticGeometry::Text {
+            text,
+            position,
+            style,
+            height,
+            rotation,
+            font,
+            h_align,
+            v_align,
+        } => {
+            require_similarity(transform, "text")?;
+            require_orientation_preserving(transform, "text")?;
+            SemanticGeometry::Text {
+                text: text.clone(),
+                position: transform.apply_point(*position),
+                style: *style,
+                height: height * uniform_scale(transform),
+                rotation: rotation + rotation_of(transform),
+                font: font.clone(),
+                h_align: *h_align,
+                v_align: *v_align,
+            }
         }
         SemanticGeometry::Spline { .. } => {
             return Err(CadError::Unsupported(
@@ -279,7 +311,9 @@ fn require_similarity(transform: &Transform3, what: &str) -> CadResult<()> {
 /// Reject a reflection for a kind whose parameterisation would reverse.
 ///
 /// The requirement is that a flip is either represented honestly or refused;
-/// for `Arc`/`Ellipse` this build refuses rather than risk an inverted sweep.
+/// for `Arc`/`Ellipse`/`Text` this build refuses rather than risk an inverted
+/// sweep or a silently unreflected text run (ADR 0019 decision B: the flat-text
+/// domain has no reflection).
 fn require_orientation_preserving(transform: &Transform3, what: &str) -> CadResult<()> {
     if transform.determinant() < 0.0 {
         return Err(CadError::Unsupported(format!(

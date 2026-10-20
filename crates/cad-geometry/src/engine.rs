@@ -388,16 +388,39 @@ impl GeometryEngine for DefaultGeometryEngine {
                 font,
                 h_align,
                 v_align,
-            } => G::Text {
-                text: text.clone(),
-                position: tp(*position),
-                style: *style,
-                height: height * uniform_scale(t),
-                rotation: rotation + rotation_of(t),
-                font: font.clone(),
-                h_align: *h_align,
-                v_align: *v_align,
-            },
+            } => {
+                // ADR 0019 decision B: this is the **second** transform surface
+                // (the snap path); `cad-db::transform_geometry` is the other. Both
+                // must apply the same guards, or one input would produce two
+                // different `Text` results. A non-uniform scale/shear would
+                // stretch the glyphs and a mirror would reflect them; neither is
+                // representable by the flat-text domain, so each is refused
+                // explicitly instead of silently returning skewed text.
+                if !is_uniform(t) {
+                    return Err(CadError::Unsupported(
+                        "transform of Text requires a rotation + uniform scale; \
+                         non-uniform scale or shear cannot be represented exactly"
+                            .to_string(),
+                    ));
+                }
+                if t.determinant() < 0.0 {
+                    return Err(CadError::Unsupported(
+                        "transform of Text would mirror it; a reflected text is not \
+                         represented by this build and is refused rather than dropped"
+                            .to_string(),
+                    ));
+                }
+                G::Text {
+                    text: text.clone(),
+                    position: tp(*position),
+                    style: *style,
+                    height: height * uniform_scale(t),
+                    rotation: rotation + rotation_of(t),
+                    font: font.clone(),
+                    h_align: *h_align,
+                    v_align: *v_align,
+                }
+            }
             G::Shape {
                 shape_name,
                 code,

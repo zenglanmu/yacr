@@ -263,6 +263,11 @@ impl CadSession {
             CommandId::CreatePolygon => Some(InteractionRequest::BeginDraw(DrawToolKind::Polygon)),
             CommandId::CreatePoint => Some(InteractionRequest::BeginDraw(DrawToolKind::Point)),
             CommandId::CreateSpline => Some(InteractionRequest::BeginDraw(DrawToolKind::Spline)),
+            // TEXT starts the text tool: its point complement is one insertion
+            // point, then the terminal text arrives through the dedicated
+            // `cad_set_tool_text` channel (ADR 0019 decision A.1) — never through
+            // this command line, which carries a command name only.
+            CommandId::CreateText => Some(InteractionRequest::BeginDraw(DrawToolKind::Text)),
             CommandId::DimLinear => Some(InteractionRequest::BeginDraw(DrawToolKind::DimLinear)),
             CommandId::DimAligned => Some(InteractionRequest::BeginDraw(DrawToolKind::DimAligned)),
             CommandId::DimRadius => Some(InteractionRequest::BeginDraw(DrawToolKind::DimRadius)),
@@ -352,6 +357,33 @@ impl CadSession {
             parameter,
             value,
         }])
+    }
+
+    /// Submit the **terminal** text of a text tool (ADR 0019 decision A.1).
+    ///
+    /// This is the single string entrance, reached from the dedicated
+    /// `cad_set_tool_text` IPC — never from `cad_command` (which accepts a command
+    /// name only; parsing a payload out of command-line text was rejected).
+    ///
+    /// The request is terminal: the host stores the text and, because the point
+    /// complement is already complete, **completes the command immediately** in
+    /// the same queue pass — there is no second `Confirm`. A refusal
+    /// (`tool.text_not_awaiting`, `tool.text_points_incomplete`,
+    /// `tool.text_empty`, `tool.text_too_long`) is returned as the real completion
+    /// error and opens no transaction.
+    pub fn set_tool_text(&self, text: &str) -> Result<(), String> {
+        self.submit_interactions(vec![InteractionRequest::SetToolText {
+            text: text.to_string(),
+        }])
+    }
+
+    /// Acknowledge the first `Esc`'s text-focus dismissal.
+    ///
+    /// The tool stays active and still awaits text, so this is not a cancel; the
+    /// second `Esc` is the ordinary `CANCEL` selector (the same `Cancel` request
+    /// every other tool uses). Refused explicitly when no text prompt is open.
+    pub fn dismiss_text_focus(&self) -> Result<(), String> {
+        self.submit_interactions(vec![InteractionRequest::DismissTextFocus])
     }
 
     /// Apply a fixed zoom step about the **viewport centre**.

@@ -16,8 +16,13 @@
 //! * `CIRCLE`/`ELLIPSE`/`INSERT`/`ARC` cannot be stretched (Autodesk documents
 //!   the first three): fully enclosed ⇒ move, partially enclosed ⇒ unchanged
 //!   plus an explicit diagnostic;
-//! * `TEXT` fails the **whole** command (Autodesk does not document its
-//!   behaviour and the transform surface already refuses text);
+//! * `TEXT` fails the **whole** command. This is a deliberate, tested choice
+//!   that is **unchanged** by ADR 0019 decision B: text now accepts a
+//!   similarity transform, but STRETCH's per-vertex semantics have no meaning for
+//!   a text run (Autodesk does not document its behaviour), so the command still
+//!   refuses it rather than silently resolving it into a translation. The reason
+//!   is the restricted similarity-only transform surface, **not** "text cannot be
+//!   transformed";
 //! * an entity that crosses the window with no vertex inside is unchanged plus
 //!   an explicit diagnostic (never silent).
 //!
@@ -232,13 +237,17 @@ impl Application {
             if enclosure == Enclosure::Outside {
                 continue;
             }
-            // TEXT: Autodesk does not document STRETCH's behaviour on text and the
-            // transform surface already refuses it — the whole command fails
-            // rather than guessing.
+            // TEXT: the whole command still fails (ADR 0019 decision B keeps this
+            // behaviour). The reason is NOT "text cannot be transformed" any more
+            // — text accepts a similarity — but that STRETCH's per-vertex
+            // semantics have no meaning for a text run, and Autodesk does not
+            // document STRETCH's behaviour on text, so resolving it into a
+            // translation would be a guess.
             if matches!(&owner_entity.geometry, SemanticGeometry::Text { .. }) {
                 return Err(CadError::Unsupported(
-                    "STRETCH cannot handle TEXT (behaviour is undocumented and the transform \
-                     surface refuses text)"
+                    "STRETCH cannot handle TEXT: its similarity-only transform (ADR 0019 B) has \
+                     no per-vertex stretch semantics, and Autodesk does not document STRETCH's \
+                     text behaviour, so the whole command is refused rather than guessed"
                         .into(),
                 ));
             }

@@ -14,4 +14,5 @@ mod tests_hatch;
 mod tests_hover;
 mod tests_input;
 mod tests_stretch;
+mod tests_text;
 mod tests_tools;

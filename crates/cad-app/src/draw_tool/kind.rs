@@ -427,13 +427,36 @@ pub enum DrawToolKind {
     /// semantics, and a live hatch preview (the React host cannot paint an
     /// overlay above the native CAD partition).
     Hatch,
+    /// TEXT: one insertion point, then the text itself (ADR 0019 decision A/F.1).
+    ///
+    /// This is the **first** tool whose capture is not defined by points alone:
+    /// the kind [`Self::requires_text`] and its last step is a typed string
+    /// submitted through the dedicated `cad_set_tool_text` channel
+    /// ([`crate::interaction::InteractionRequest::SetToolText`]). That request is
+    /// **terminal**: once the point complement is complete, the submitted text
+    /// completes the command immediately (no second `Confirm`).
+    ///
+    /// The height is the session typed parameter
+    /// [`super::ToolParameter::TextHeight`] (finite, `> 0`, default `2.5` — the
+    /// documented constant, because the drawing's `Style` table carries no
+    /// height), so the capture never invents one.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED for now): a per-invocation height /
+    /// rotation prompt, the `Justify` / `Style` / `Align` / `Fit` / `Center` /
+    /// `Middle` / `Right` / `TL` sub-prompts (the stored alignment is always the
+    /// style default, left/baseline), width factor, oblique angle, character
+    /// spacing, background/mask and any in-canvas in-place editor (the React
+    /// host cannot draw a DOM editor over the native CAD partition — ADR 0002).
+    /// MTEXT's columns/background/line-spacing style/drawing direction are
+    /// likewise not modelled (ADR 0019 decision H).
+    Text,
 }
 
 impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 31] = [
+    pub const ALL: [DrawToolKind; 32] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -465,6 +488,9 @@ impl DrawToolKind {
         DrawToolKind::DimAngular,
         DrawToolKind::DimOrdinate,
         DrawToolKind::Hatch,
+        // Appended last so every pre-existing index stays stable (the UI mirrors
+        // this order rather than keeping a second list).
+        DrawToolKind::Text,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -501,6 +527,7 @@ impl DrawToolKind {
             Self::DimAngular => "dimangular",
             Self::DimOrdinate => "dimordinate",
             Self::Hatch => "hatch",
+            Self::Text => "text",
         }
     }
 
@@ -539,6 +566,7 @@ impl DrawToolKind {
             "dimangular" => Some(Self::DimAngular),
             "dimordinate" => Some(Self::DimOrdinate),
             "hatch" => Some(Self::Hatch),
+            "text" => Some(Self::Text),
             _ => None,
         }
     }
@@ -633,6 +661,11 @@ impl DrawToolKind {
             // the Rust side and the shell substitutes the catalog label for chrome
             // anyway.
             Self::Hatch => "HATCH",
+            // TEXT uses a locale-neutral ASCII fallback label, exactly like the
+            // other post-ADR-0015 kinds: the ADR fence forbids new CJK literals on
+            // the Rust side and the shell substitutes the catalog label for chrome
+            // anyway.
+            Self::Text => "TEXT",
         }
     }
 
@@ -660,8 +693,13 @@ impl DrawToolKind {
             // the displacement point (ADR 0016 decision E).
             Self::Align | Self::Stretch => PointArity::Exact(4),
             // One side/distance point, one point placement, the ARRAYPOLAR
-            // centre, or the single arc/circle pick of DIMCENTER.
-            Self::Offset | Self::Point | Self::ArrayPolar | Self::DimCenter => PointArity::Exact(1),
+            // centre, the single arc/circle pick of DIMCENTER, or TEXT's single
+            // insertion point (its text is a typed string, not a point).
+            Self::Offset
+            | Self::Point
+            | Self::ArrayPolar
+            | Self::DimCenter
+            | Self::Text => PointArity::Exact(1),
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot, so its complement is
             // the zero-point exact arity (ready as soon as the selection is
@@ -763,5 +801,17 @@ impl DrawToolKind {
     /// every entity-pick step has a real entity behind it.
     pub fn needs_picked_entities(self) -> bool {
         self.picked_step_count() > 0
+    }
+
+    /// Whether this operation's **last** step is a typed string rather than a
+    /// point (ADR 0019 decision A.1).
+    ///
+    /// Only TEXT is a text tool today. This is the single authority the capture
+    /// state machine, the status projection (`awaiting_text`) and the UI prompt
+    /// phase read; a UI must never infer "needs text" from `key` plus the point
+    /// count, because `ready` alone cannot tell "missing points" from "missing
+    /// text".
+    pub fn requires_text(self) -> bool {
+        matches!(self, Self::Text)
     }
 }

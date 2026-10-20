@@ -5,6 +5,20 @@
 
 use super::*;
 
+/// The named, per-entity reasons an `MTEXT → Text` fold is `Partial` (ADR 0019
+/// decision H).
+///
+/// The domain `Text` variant has no columns, background fill, line-spacing style
+/// or drawing direction, so those source properties are dropped. The old
+/// `Complete` claim was false; these four stable machine keys are the honest
+/// reasons, and the same set feeds a deduplicated import diagnostic.
+pub(crate) const MTEXT_UNMODELLED: [&str; 4] = [
+    "text.background_unsupported",
+    "text.columns_unsupported",
+    "text.line_spacing_style_unsupported",
+    "text.drawing_direction_unsupported",
+];
+
 impl<'a> ImporterBuilder<'a> {
     pub(crate) fn convert(
         &mut self,
@@ -132,6 +146,21 @@ impl<'a> ImporterBuilder<'a> {
             }
             EntityType::MText(t) => {
                 let (h_align, v_align) = attach_align(t.attachment_point);
+                // ADR 0019 decision H: the domain `Text` variant has no columns,
+                // background fill, line-spacing style or drawing direction, so
+                // folding MTEXT into it is lossy. Report `Partial` with the named
+                // reasons instead of the old (false) `Complete`; no domain field is
+                // added in this phase. Each reason is reported once per import so a
+                // text-heavy drawing does not bury the report in duplicates.
+                for reason in MTEXT_UNMODELLED {
+                    if self.reported_reasons.insert(reason.to_string()) {
+                        self.diagnostics.push(Diagnostic {
+                            object: None,
+                            code: "import.text_partial".into(),
+                            message: reason.to_string(),
+                        });
+                    }
+                }
                 (
                     SemanticGeometry::Text {
                         text: t.value.clone(),
@@ -143,7 +172,9 @@ impl<'a> ImporterBuilder<'a> {
                         h_align,
                         v_align,
                     },
-                    Completeness::Complete,
+                    Completeness::Partial(
+                        MTEXT_UNMODELLED.iter().map(|r| (*r).to_string()).collect(),
+                    ),
                 )
             }
             EntityType::Spline(s) => spline_semantics(s),

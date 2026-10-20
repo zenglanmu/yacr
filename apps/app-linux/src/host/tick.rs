@@ -420,15 +420,16 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
     let mut last_input_seq: Option<u64> = None;
     let mut input_age_us: Option<u128> = None;
     if cad_mode {
-        let (commands, tool_parameters, inputs) = {
+        let (commands, tool_parameters, tool_texts, inputs) = {
             let mut state = lock(shared);
             (
                 std::mem::take(&mut state.shell.cad_commands),
                 std::mem::take(&mut state.cad_tool_parameters),
+                std::mem::take(&mut state.cad_tool_texts),
                 std::mem::take(&mut state.shell.cad_inputs),
             )
         };
-        let queued = commands.len() + tool_parameters.len() + inputs.len();
+        let queued = commands.len() + tool_parameters.len() + tool_texts.len() + inputs.len();
         last_input_seq = inputs.last().map(|input| input.sequence);
         input_age_us = last_input_seq.and_then(|sequence| {
             let state = lock(shared);
@@ -465,6 +466,17 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                     for input in &inputs {
                         if let Err(error) = session.handle_input(input) {
                             eprintln!("[probe] cad input rejected: {error}");
+                        }
+                    }
+                    // Terminal tool texts (ADR 0019 decision A.1): applied after
+                    // this batch's inputs, because the last point of a text tool
+                    // may arrive in the same tick and the text is only valid once
+                    // the point complement is complete. The text completes the
+                    // command on its own (no second confirm); a refusal is named
+                    // and surfaces through `cad_status.error`.
+                    for text in &tool_texts {
+                        if let Err(error) = session.set_tool_text(text) {
+                            eprintln!("[probe] cad tool text rejected: {error}");
                         }
                     }
                 }

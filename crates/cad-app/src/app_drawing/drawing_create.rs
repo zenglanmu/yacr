@@ -17,6 +17,7 @@ impl Application {
             CommandId::CreatePolygon => self.create_polygon(session, command),
             CommandId::CreatePoint => self.create_point(session, command),
             CommandId::CreateSpline => self.create_spline(session, command),
+            CommandId::CreateText => self.create_text(session, command),
             CommandId::DimLinear => self.dim_linear(session, command),
             CommandId::DimAligned => self.dim_aligned(session, command),
             CommandId::DimRadius => self.dim_radius(session, command),
@@ -494,7 +495,109 @@ impl Application {
         };
         self.commit_new_entity(session, command, geometry, "create spline")
     }
+
+    /// Insert one single-line TEXT into model space on the session's active layer
+    /// (ADR 0019 decision F.1, P7a).
+    ///
+    /// The payload is the **construction input** — the captured insertion point,
+    /// the typed text and the height — exactly like `CreateCircle`/`CreatePoint`,
+    /// so a caller never has to pre-build a `SemanticGeometry::Text` to run the
+    /// command. Every refusal changes nothing:
+    ///
+    /// * an empty or whitespace-only text (`tool.text_empty` semantics);
+    /// * more than [`MAX_TOOL_TEXT_CHARS`] characters, counted in **characters**
+    ///   (not bytes), matching the capture bound;
+    /// * a non-finite position, or a non-finite/non-positive height;
+    /// * a missing active layer (the shared create funnel).
+    ///
+    /// The **style** is the drawing's `Standard` text style (the `StyleId(0)`
+    /// entry as the documented fallback) and its first resource key becomes the
+    /// font key, so the stored text is drawn with the style's face. The
+    /// **alignment** is the style default (left/baseline): the `Style` table
+    /// carries no alignment and TEXT creation has no justify prompt, so a
+    /// per-invocation alignment would be an invented value. A single-line text is
+    /// always on the `+Z` plane through its insertion point — there is no plane
+    /// input to be non-`+Z` and nothing is projected.
+    ///
+    /// The entity goes through the shared [`Self::commit_new_entity`] funnel: one
+    /// `AcDbText` entity, one transaction, one undo step, active-layer check
+    /// intact.
+    pub(crate) fn create_text(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::Text {
+            position,
+            text,
+            height,
+        } = &command.payload
+        else {
+            return Err(CadError::InvalidInput(
+                "CreateText needs a Text { position, text, height } payload".into(),
+            ));
+        };
+        if !is_finite_point(*position) {
+            return Err(CadError::InvalidInput(
+                "CreateText position must be finite".into(),
+            ));
+        }
+        if text.trim().is_empty() {
+            return Err(CadError::InvalidInput(
+                "tool.text_empty: CreateText needs a non-empty, non-whitespace text".into(),
+            ));
+        }
+        let characters = text.chars().count();
+        if characters > MAX_TOOL_TEXT_CHARS {
+            return Err(CadError::InvalidInput(format!(
+                "tool.text_too_long: CreateText allows at most {MAX_TOOL_TEXT_CHARS} characters, \
+                 got {characters}"
+            )));
+        }
+        if !height.is_finite() || *height <= 0.0 {
+            return Err(CadError::InvalidInput(format!(
+                "CreateText height must be finite and positive, got {height}"
+            )));
+        }
+        // The style is resolved from the authoritative drawing, never fabricated:
+        // `Standard` by name, else the documented `StyleId(0)` fallback, else no
+        // style at all (the import path's own convention).
+        let (style, font) = {
+            let document = self
+                .workspace
+                .documents
+                .get(&command.document)
+                .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+            let drawing = document.drawing.as_ref();
+            let resolved = drawing
+                .style_by_name(TEXT_STYLE_NAME)
+                .or_else(|| drawing.style(StyleId(0)));
+            (
+                resolved.map(|style| style.id).unwrap_or(StyleId(0)),
+                resolved.and_then(|style| style.resource_keys.first().cloned()),
+            )
+        };
+        let geometry = SemanticGeometry::Text {
+            text: text.clone(),
+            position: *position,
+            style,
+            height: *height,
+            // No rotation prompt: the documented subset is unrotated text, and the
+            // style table carries no rotation to defer to.
+            rotation: 0.0,
+            font,
+            // Style defaults: the `Style` table has no alignment column and TEXT
+            // creation has no justify prompt.
+            h_align: TextAlignH::Left,
+            v_align: TextAlignV::Baseline,
+        };
+        self.commit_new_entity(session, command, geometry, "create text")
+    }
 }
+
+/// The text style `TEXT` creation resolves by name before falling back to the
+/// documented `StyleId(0)` entry (ADR 0019 F.1).
+const TEXT_STYLE_NAME: &str = "Standard";
 
 /// The minimum separation (world units) for two polyline vertices to count as
 /// distinct. Below this a capture is a repeated single point and has no segment.

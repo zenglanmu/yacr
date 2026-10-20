@@ -8,6 +8,7 @@ mod builder;
 mod drawing;
 mod plot;
 mod scale;
+mod text_transform;
 mod visibility;
 
 fn point(x: f64, y: f64) -> Point3 {

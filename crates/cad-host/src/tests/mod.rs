@@ -27,6 +27,7 @@ mod p4_trace;
 mod queue;
 mod select;
 mod snap_marker;
+mod text_tool;
 
 // --- synthetic platform contracts -------------------------------------------
 

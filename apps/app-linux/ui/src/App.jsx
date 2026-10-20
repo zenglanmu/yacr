@@ -13,6 +13,7 @@ import { pointerPosition } from './metrics.mjs';
 import { queueCadCommand, reconcileToolParameterPending, requestImportCancel, setToolParameterFlag, setToolParameterNumber, startCadPolling, stepToolParameterPending } from './cad.mjs';
 import { setToolText } from './text.mjs';
 import { createFpsSampler } from './fps.mjs';
+import { bindBrowserDefaults } from './defaults.mjs';
 import { admitCommandText, commandCatalog, pushHistory, setCommandCatalog, toolCommandForKey, unavailableReasonKey } from './commands.mjs';
 import { I18nContext, ShellContext } from './context.mjs';
 import { TitleBar } from './components/TitleBar.jsx';
@@ -64,6 +65,9 @@ export function App() {
   const submittingText = useRef(false);
   const laneRef = useRef(null);
   const bindingRef = useRef(null);
+  // Latest host status for the CAD shortcut-menu hook, so the webview-default
+  // guards are installed once and never re-bound by a status poll.
+  const statusRef = useRef(null);
   const surfaceRef = useCallback(node => setSurfaceNode(node), []);
 
   const t = useMemo(() => createTranslator(CATALOGS, locale), [locale]);
@@ -204,6 +208,16 @@ export function App() {
     const isTyping = target => target instanceof HTMLElement
       && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName);
     const onKeyDown = event => {
+      // Ctrl+0 is both the app's clean-screen toggle and WebKit's zoom reset.
+      // Handle it before the `defaultPrevented` check: the webview-default guard
+      // also prevents the browser action, and listener order between the two
+      // must not decide whether clean screen works. The guard never swallows an
+      // ordinary key, so this does not widen what the app intercepts.
+      if (event.ctrlKey && !event.metaKey && !event.altKey && event.key === '0') {
+        event.preventDefault();
+        setCleanScreen(value => !value);
+        return;
+      }
       if (event.defaultPrevented || event.metaKey || event.altKey) return;
       // An active tool owns Enter/Escape: Enter confirms, Escape cancels, and
       // that Escape does not also close a panel. With no tool active the
@@ -219,7 +233,6 @@ export function App() {
         void submitCommand(toolCommand);
         return;
       }
-      if (event.ctrlKey && event.key === '0') { event.preventDefault(); setCleanScreen(value => !value); return; }
       if (event.ctrlKey && event.key === '9') { event.preventDefault(); setCommandLineOpen(value => !value); return; }
       if (event.key === 'F2') { event.preventDefault(); setHistoryOpen(value => !value); return; }
       // F3 flips the object-snap master switch (ADR 0014 A.4) through the same
@@ -237,6 +250,32 @@ export function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [submitCommand, toolActive]);
+
+  // Feed the reserved CAD shortcut-menu hook the selection/tool slices the
+  // chrome already has. It is a ref, not a dependency, so polling never
+  // re-installs the guards below.
+  useEffect(() => { statusRef.current = status; }, [status]);
+
+  // Keep WebKitGTK's own commands out of the session. The native CAD surface is
+  // input-transparent, so right-clicks and accelerators reach this DOM; the
+  // webview menu's Reload would remount the UI while Rust and the native surface
+  // keep running, and page zoom would desync the rect the host composites at.
+  // Declared after the shortcut handler above (both listen on `window` in the
+  // bubble phase). Ctrl+0 is the only overlap, and the shortcut handler owns it
+  // before its `defaultPrevented` check, so clean screen keeps working whichever
+  // listener runs first while the browser zoom reset is still suppressed. The
+  // guard suppresses every browser command even in a focused text field; the
+  // native menu stays in text fields, and a CAD right-click calls the one inert
+  // hook.
+  useEffect(() => {
+    const guard = bindBrowserDefaults(window, {
+      context: () => {
+        const current = statusRef.current;
+        return { selection: current?.selection ?? null, tool: current?.tool ?? null };
+      },
+    });
+    return () => guard.dispose();
+  }, []);
 
   // Admission recomputes when the loaded host vocabulary changes, so the chrome
   // enables exactly the tools the router really accepts.

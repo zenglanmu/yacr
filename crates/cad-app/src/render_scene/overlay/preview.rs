@@ -82,8 +82,11 @@ pub fn draw_preview_overlay(
             (chain.len() >= 2).then_some(chain)
         }),
         // POINT: a single placement; the live preview is the existing
-        // cursor/chain (no new overlay channel).
+        // cursor/chain (no new overlay channel). TEXT captures its single
+        // insertion point the same way (the typed text is a prompt, not a
+        // geometry preview), so it also uses the cursor/chain.
         DrawToolKind::Point
+        | DrawToolKind::Text
         | DrawToolKind::Line
         | DrawToolKind::Polyline
         | DrawToolKind::Move

@@ -139,6 +139,22 @@ impl HostCore {
                     .set_tool_parameter(parameter, value)?;
                 InteractionOutcome::SelectionKindChanged
             }
+            // The terminal text of a text tool (ADR 0019 decision A.1). It is
+            // stored first (the session validates state/emptiness/length and
+            // refuses by name), then the command is completed **immediately**:
+            // text is the last step, so a second `Confirm` would be ambiguous and
+            // is refused while the prompt is open.
+            InteractionRequest::SetToolText { text } => {
+                self.controller.borrow_mut().session.set_tool_text(&text)?;
+                return self.confirm_tool();
+            }
+            // The first `Esc`: a focus-only change that never cancels the tool
+            // (ADR 0019 decision A.1). `Cancel` remains the second `Esc` and is
+            // the only request that resets the tool.
+            InteractionRequest::DismissTextFocus => {
+                self.controller.borrow().session.dismiss_text_focus()?;
+                InteractionOutcome::TextFocusDismissed
+            }
             InteractionRequest::BeginPan => {
                 self.controller.borrow_mut().session.begin_pan();
                 // A modal pan owns the pointer: end any live box gesture.
@@ -204,7 +220,19 @@ impl HostCore {
                 }
                 InteractionOutcome::CursorMoved
             }
-            InteractionRequest::Confirm => return self.confirm_tool(),
+            InteractionRequest::Confirm => {
+                // ADR 0019 decision A.1/F.3: while a text tool's prompt is open,
+                // `Confirm` must never complete the command without text — the
+                // terminal step is `SetToolText`. A named refusal, no transaction.
+                if self.controller.borrow().session.draw_awaiting_text() {
+                    return Err(CadError::InvalidInput(
+                        "tool.awaiting_text: the active tool needs its text; type it and press \
+                         Enter to submit (Esc dismisses the prompt, Esc again cancels)"
+                            .into(),
+                    ));
+                }
+                return self.confirm_tool();
+            }
             InteractionRequest::Cancel => {
                 self.controller.borrow_mut().cancel_tool()?;
                 self.render.set_draw_preview(None);

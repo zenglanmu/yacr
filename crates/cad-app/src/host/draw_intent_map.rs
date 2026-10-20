@@ -73,6 +73,24 @@ impl HostController {
                 crate::CommandId::CreateSpline,
                 crate::CommandPayload::Points(fit_points),
             ),
+            // TEXT: the insertion point and the terminal text travel on the
+            // payload; the height is the session typed channel
+            // (`ToolParameter::TextHeight`), read here so the intent never carries
+            // a session value of its own. The text was validated at capture time
+            // (non-empty, at most `MAX_TOOL_TEXT_CHARS` characters) and is
+            // re-validated by the command.
+            DrawIntent::Text { position, text } => (
+                crate::CommandId::CreateText,
+                crate::CommandPayload::Text {
+                    position,
+                    text,
+                    height: self
+                        .session
+                        .tool_parameter(crate::ToolParameter::TextHeight)
+                        .number()
+                        .unwrap_or(crate::draw_tool::TEXT_DEFAULT_HEIGHT),
+                },
+            ),
             DrawIntent::Move { delta } => (
                 crate::CommandId::MoveEntities,
                 crate::CommandPayload::Move {

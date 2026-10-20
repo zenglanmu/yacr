@@ -1,5 +1,8 @@
 use super::admission::{cad_present_admission, layout_needs_revalidate, CadPresentAdmission};
-use super::commands::{admit_tool_parameter, parse_tool_parameter, CAD_TOOL_PARAMETER_CAP};
+use super::commands::{
+    admit_tool_parameter, admit_tool_text, parse_tool_parameter, CAD_TOOL_PARAMETER_CAP,
+    CAD_TOOL_TEXT_CAP,
+};
 use super::options::{start_maximized, LaunchOptions};
 use super::postload::{
     label_file_name, pan_report_matches_run, parse_pan_report, parse_pan_run_id,
@@ -266,6 +269,53 @@ fn tool_parameter_admission_is_typed_bounded_and_refuses_probe_mode() {
 }
 
 #[test]
+fn tool_text_admission_is_bounded_and_refuses_probe_mode_and_static_content() {
+    // The `cad_set_tool_text` ack path (ADR 0019 decision A.1): the text is only
+    // *queued* for the owner thread, the static content rules (non-empty, at most
+    // 1024 characters) are refused before the queue, and the live state
+    // (is a tool awaiting text? are its points complete?) is the session's
+    // authority on drain — this admission deliberately knows no session state.
+    let mut queue: Vec<String> = Vec::new();
+    assert_eq!(
+        admit_tool_text(&mut queue, false, "Hello".into()).unwrap_err(),
+        "CAD is disabled in probe mode"
+    );
+    assert!(queue.is_empty(), "a probe-mode refusal queues nothing");
+    assert_eq!(
+        admit_tool_text(&mut queue, true, String::new()).unwrap_err(),
+        "tool.text_empty: cad_set_tool_text needs a non-empty text"
+    );
+    assert_eq!(
+        admit_tool_text(&mut queue, true, "  \t".into()).unwrap_err(),
+        "tool.text_empty: cad_set_tool_text needs a non-empty text"
+    );
+    let over_long = "a".repeat(cad_app::MAX_TOOL_TEXT_CHARS + 1);
+    let refusal = admit_tool_text(&mut queue, true, over_long).unwrap_err();
+    assert!(refusal.contains("tool.text_too_long"), "{refusal}");
+    assert!(
+        queue.is_empty(),
+        "content refusals queue nothing: {queue:?}"
+    );
+
+    // Exactly at the bound is accepted, verbatim (no trimming, no truncation).
+    let at_bound = "b".repeat(cad_app::MAX_TOOL_TEXT_CHARS);
+    admit_tool_text(&mut queue, true, at_bound.clone()).expect("the bound is accepted");
+    admit_tool_text(&mut queue, true, "  padded  ".into()).expect("accepted verbatim");
+    assert_eq!(queue, vec![at_bound, "  padded  ".to_string()]);
+
+    // Bounded: filling to capacity then one more is an explicit refusal.
+    queue.clear();
+    for _ in 0..CAD_TOOL_TEXT_CAP {
+        admit_tool_text(&mut queue, true, "x".into()).expect("within capacity");
+    }
+    assert_eq!(queue.len(), CAD_TOOL_TEXT_CAP);
+    assert_eq!(
+        admit_tool_text(&mut queue, true, "x".into()).unwrap_err(),
+        "CAD tool-text queue is full"
+    );
+}
+
+#[test]
 fn tool_parameter_wire_shape_parses_the_key_and_exactly_one_value() {
     // The exact `cad_set_tool_parameter` wire shape: a stable machine-key string
     // plus exactly one of `number`/`flag`. An unknown key or a malformed value
@@ -292,6 +342,60 @@ fn tool_parameter_wire_shape_parses_the_key_and_exactly_one_value() {
     // Neither value, or both, is refused.
     assert!(parse_tool_parameter("polygonSides", None, None).is_err());
     assert!(parse_tool_parameter("polygonSides", Some(1.0), Some(true)).is_err());
+}
+
+#[test]
+fn the_tool_status_projects_awaiting_text_on_the_wire_for_the_react_contract() {
+    // The committed React lane reads `tool.awaiting_text` (`ui/src/text.mjs`,
+    // `ui/src/cad.mjs`) — the exact snake_case wire name, not `awaitingText`.
+    // This pins the real serialized payload, because a rename here would silently
+    // never open the text prompt.
+    use cad_ui_core::session::{CadTool, CadToolParams};
+    let tool = CadTool {
+        key: "draw.text".into(),
+        points: 1,
+        ready: false,
+        open_ended: false,
+        awaiting_text: true,
+        params: CadToolParams {
+            sides: None,
+            fillet_radius: None,
+            chamfer_distance_a: None,
+            chamfer_distance_b: None,
+            array_rows: None,
+            array_columns: None,
+            array_row_spacing: None,
+            array_column_spacing: None,
+            array_items: None,
+            array_fill_angle: None,
+            array_rotate_items: None,
+            align_scale: None,
+            hatch_pattern_type: None,
+            hatch_spacing: None,
+            hatch_angle: None,
+            hatch_double: None,
+            hatch_style: None,
+            text_height: Some(2.5),
+        },
+    };
+    let value = serde_json::to_value(&tool).expect("the tool serializes");
+    assert_eq!(
+        value.get("awaiting_text").and_then(|flag| flag.as_bool()),
+        Some(true),
+        "the wire carries `awaiting_text`: {value}"
+    );
+    assert!(
+        value.get("awaitingText").is_none(),
+        "the camelCase spelling must not be emitted: {value}"
+    );
+    assert_eq!(
+        value
+            .get("params")
+            .and_then(|params| params.get("textHeight"))
+            .and_then(|height| height.as_f64()),
+        Some(2.5),
+        "the TEXT height uses the params block's camelCase convention: {value}"
+    );
 }
 
 #[test]

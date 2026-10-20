@@ -434,3 +434,90 @@ fn fallback_extent_follows_a_hatch_like_the_compound_it_replaced() {
         "the hatch extent must set the chord, not the tolerance floor"
     );
 }
+
+#[test]
+fn text_transform_is_a_similarity_and_refuses_stretch_and_mirror() {
+    // ADR 0019 decision B: the snap face must apply the same guards as
+    // `cad-db::transform_geometry`, or the same input would produce two answers.
+    let text = SemanticGeometry::Text {
+        text: "AB".into(),
+        position: Point3 {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        },
+        style: StyleId(4),
+        height: 2.0,
+        rotation: 0.5,
+        font: Some("arial.ttf".into()),
+        h_align: TextAlignH::Center,
+        v_align: TextAlignV::Middle,
+    };
+    // A translation + quarter turn + uniform scale keeps every Text field.
+    let transform = Transform3 {
+        matrix: [
+            [0.0, -2.0, 0.0, 10.0],
+            [2.0, 0.0, 0.0, -5.0],
+            [0.0, 0.0, 2.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    };
+    let transformed = DefaultGeometryEngine
+        .transform(&text, &transform)
+        .expect("a similarity transforms text");
+    match transformed {
+        SemanticGeometry::Text {
+            text: value,
+            position,
+            style,
+            height,
+            rotation,
+            font,
+            h_align,
+            v_align,
+        } => {
+            assert_eq!(value, "AB");
+            assert_eq!(style, StyleId(4));
+            assert!((height - 4.0).abs() < 1e-12, "height × 2: {height}");
+            assert!(
+                (rotation - (0.5 + std::f64::consts::FRAC_PI_2)).abs() < 1e-12,
+                "the rotation accumulates: {rotation}"
+            );
+            assert_eq!(font.as_deref(), Some("arial.ttf"));
+            assert_eq!(h_align, TextAlignH::Center);
+            assert_eq!(v_align, TextAlignV::Middle);
+            assert!(
+                (position.x - 6.0).abs() < 1e-12
+                    && (position.y + 3.0).abs() < 1e-12
+                    && (position.z - 7.0).abs() < 1e-12,
+                "the position follows the linear part + translation: {position:?}"
+            );
+        }
+        other => panic!("expected text, got {other:?}"),
+    }
+
+    // A non-uniform scale would stretch the glyphs; a mirror would reflect them.
+    let mut non_uniform = Transform3::identity().matrix;
+    non_uniform[0][0] = 3.0;
+    non_uniform[1][1] = 0.5;
+    for (label, transform) in [
+        (
+            "non-uniform",
+            Transform3 {
+                matrix: non_uniform,
+            },
+        ),
+        ("mirror", Transform3::scale(-1.0)),
+    ] {
+        let error = DefaultGeometryEngine
+            .transform(&text, &transform)
+            .expect_err(label);
+        match error {
+            CadError::Unsupported(reason) => assert!(
+                reason.contains("Text"),
+                "{label}: the refusal must name the kind: {reason}"
+            ),
+            other => panic!("{label}: expected Unsupported, got {other:?}"),
+        }
+    }
+}

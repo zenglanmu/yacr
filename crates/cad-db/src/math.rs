@@ -162,3 +162,14 @@ pub(crate) fn transform_scale(t: &Transform3) -> f64 {
     }
     sum.sqrt().max(1e-12)
 }
+
+/// Rotation about world +Z, in radians, from the transformed X axis.
+///
+/// This is the **same** formula the snap face uses
+/// (`cad-geometry`'s `transform::rotation_of`), so a rotation applied through
+/// either transform surface accumulates identically on a `Text` (ADR 0019 B).
+/// It is meaningful only after a similarity check: a shear has no single
+/// rotation and is refused before this is read.
+pub(crate) fn rotation_of(t: &Transform3) -> f64 {
+    t.matrix[1][0].atan2(t.matrix[0][0])
+}

@@ -153,6 +153,28 @@ pub enum InteractionRequest {
         parameter: ToolParameter,
         value: ToolValue,
     },
+    /// Submit the **terminal** text of a text tool (ADR 0019 decision A.1).
+    ///
+    /// This is the only string channel. It is deliberately its own request (a
+    /// dedicated `cad_set_tool_text` IPC admits it) instead of an argument of
+    /// `cad_command`: the command line accepts a *command name* only, and parsing
+    /// a payload out of it was rejected earlier.
+    ///
+    /// Semantics are **terminal**: when the active tool requires text and its
+    /// point complement is complete, the host completes the command immediately
+    /// after storing the text — there is no second `Confirm`. Every refusal is
+    /// named (`tool.text_not_awaiting`, `tool.text_points_incomplete`,
+    /// `tool.text_empty`, `tool.text_too_long`) and opens no transaction.
+    SetToolText {
+        text: String,
+    },
+    /// Acknowledge the UI-local dismissal of the open text prompt (the first
+    /// `Esc`, ADR 0019 decision A.1).
+    ///
+    /// This is **not** a cancel: the tool stays active and still awaits text, so
+    /// the text may still be submitted. It is refused explicitly when no text
+    /// prompt is open. The second `Esc` is the ordinary [`Self::Cancel`].
+    DismissTextFocus,
     /// Replace any current capture with navigation pan mode; no zero-delta pan is emitted.
     BeginPan,
     /// Clear only the live cursor marker, preserving captured points and tool lifecycle.

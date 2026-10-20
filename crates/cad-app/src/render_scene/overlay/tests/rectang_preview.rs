@@ -21,6 +21,7 @@ fn rectang_preview_draws_the_closed_outline_between_the_two_corners() {
         selection_count: 0,
         ready: false,
         polygon_sides: None,
+        awaiting_text: false,
     };
     let overlay = draw_preview_overlay(&preview, DocumentId(1), false, &PreviewOptions::default());
     assert_eq!(overlay.drawn(), 1);

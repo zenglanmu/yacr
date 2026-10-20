@@ -48,7 +48,10 @@ fn required_points_and_selection_are_explicit_per_kind() {
             DrawToolKind::Offset
             | DrawToolKind::Point
             | DrawToolKind::ArrayPolar
-            | DrawToolKind::DimCenter => 1,
+            | DrawToolKind::DimCenter
+            // TEXT captures one insertion point; its text is a typed string, not a
+            // point (ADR 0019 decision A.1).
+            | DrawToolKind::Text => 1,
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot. HATCH has the same
             // pre-selection shape: the selected entities are the boundary and the
@@ -890,6 +893,7 @@ mod array;
 mod dimension;
 mod hatch;
 mod point_spline;
+mod text;
 
 #[test]
 fn polygon_vertices_are_inscribed_with_the_first_on_the_radius_ray() {

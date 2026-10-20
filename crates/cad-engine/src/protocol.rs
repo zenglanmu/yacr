@@ -106,6 +106,9 @@ pub enum InteractionOutcome {
     CursorCleared,
     PointCaptured,
     CursorMoved,
+    /// The open text prompt's focus was dismissed (the first `Esc`); the tool
+    /// stays active and still awaits its terminal text (ADR 0019 decision A.1).
+    TextFocusDismissed,
     Confirmed,
     Cancelled,
     SelectionUpdated,

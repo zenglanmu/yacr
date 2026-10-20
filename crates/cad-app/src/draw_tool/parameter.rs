@@ -82,6 +82,15 @@ pub const HATCH_STYLE_OUTER: f64 = 1.0;
 /// The `Ignore` style code (see [`HATCH_STYLE_NORMAL`]).
 pub const HATCH_STYLE_IGNORE: f64 = 2.0;
 
+/// The documented default TEXT height, in world units (ADR 0019 decision F.1).
+///
+/// The drawing's `Style` table carries no height, so there is no style value to
+/// defer to; `2.5` is stated as our default (it also matches the DIMSTYLE text
+/// height default) instead of inventing one per invocation. It is a **valid**
+/// value for [`ToolParameter::TextHeight`], so the default can never limp into a
+/// forced refusal at commit.
+pub const TEXT_DEFAULT_HEIGHT: f64 = 2.5;
+
 /// A session-scoped tool parameter with a stable machine key (ADR 0016 decision A).
 ///
 /// The member set and the machine keys are the frozen channel vocabulary: the
@@ -118,11 +127,16 @@ pub enum ToolParameter {
     /// HATCH style: a **closed set** — `0` Normal, `1` Outer, `2` Ignore
     /// (ADR 0018 A.3).
     HatchStyle,
+    /// TEXT glyph height in world units (ADR 0019 decision F.1): finite and
+    /// **strictly positive**. There is no style-table height, so the session
+    /// parameter is the single source and its default is the documented
+    /// [`TEXT_DEFAULT_HEIGHT`] constant.
+    TextHeight,
 }
 
 impl ToolParameter {
     /// Every member, in a fixed order (the key round-trip uses it).
-    pub const ALL: [ToolParameter; 17] = [
+    pub const ALL: [ToolParameter; 18] = [
         ToolParameter::PolygonSides,
         ToolParameter::FilletRadius,
         ToolParameter::ChamferDistanceA,
@@ -140,10 +154,11 @@ impl ToolParameter {
         ToolParameter::HatchAngle,
         ToolParameter::HatchDouble,
         ToolParameter::HatchStyle,
+        ToolParameter::TextHeight,
     ];
 
     /// Number of members (the store's fixed width).
-    pub const COUNT: usize = 17;
+    pub const COUNT: usize = 18;
 
     /// The dense index of this member in [`Self::ALL`] (the store's slot).
     pub fn index(self) -> usize {
@@ -165,6 +180,7 @@ impl ToolParameter {
             Self::HatchAngle => 14,
             Self::HatchDouble => 15,
             Self::HatchStyle => 16,
+            Self::TextHeight => 17,
         }
     }
 
@@ -192,6 +208,7 @@ impl ToolParameter {
             Self::HatchAngle => "hatchAngle",
             Self::HatchDouble => "hatchDouble",
             Self::HatchStyle => "hatchStyle",
+            Self::TextHeight => "textHeight",
         }
     }
 
@@ -229,6 +246,10 @@ impl ToolParameter {
     /// * `HatchAngle` **0** degrees.
     /// * `HatchDouble` **false** — `HPDOUBLE` initial 0.
     /// * `HatchStyle` **0 (Normal)** — DXF `75=0`, the odd-parity area.
+    /// * `TextHeight` **2.5** — [`TEXT_DEFAULT_HEIGHT`], the documented project
+    ///   constant (the drawing's `Style` table carries no height, so there is no
+    ///   style value to defer to and the default is stated rather than invented
+    ///   per invocation). 2.5 matches the dimension text height default.
     ///
     /// Note the fill-angle range (ADR 0016 decision A): the legal values are
     /// `0 < |angle| <= 360`, so the full-circle **default 360 is re-settable** (a
@@ -253,6 +274,7 @@ impl ToolParameter {
             Self::HatchAngle => ToolValue::Number(0.0),
             Self::HatchDouble => ToolValue::Flag(false),
             Self::HatchStyle => ToolValue::Number(HATCH_STYLE_NORMAL),
+            Self::TextHeight => ToolValue::Number(TEXT_DEFAULT_HEIGHT),
         }
     }
 
@@ -294,6 +316,7 @@ impl ToolParameter {
                 &[HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER, HATCH_STYLE_IGNORE],
                 "0 (Normal), 1 (Outer) or 2 (Ignore)",
             ),
+            (Self::TextHeight, ToolValue::Number(number)) => finite_greater_than(self, number, 0.0),
             (Self::AlignScale, ToolValue::Flag(_))
             | (Self::ArrayRotateItems, ToolValue::Flag(_))
             | (Self::HatchDouble, ToolValue::Flag(_)) => Ok(()),

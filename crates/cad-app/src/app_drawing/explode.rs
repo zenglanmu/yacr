@@ -45,9 +45,12 @@
 //!   decomposable kind (only LWPOLYLINE / INSERT / Compound are) — an explicit
 //!   refusal, never a silent success.
 //! * `TEXT` / `SPLINE` / `SHAPE` / `OPAQUE` and mirrored `Arc`/`Ellipse`
-//!   children, via the existing `transform_geometry` refusal surface. A
-//!   `Compound` member of an INSERT (for example an in-block MINSERT or hatch) is
-//!   likewise untransformable and fails the whole command.
+//!   children are refused **explicitly by kind** (`push_produced` /
+//!   `child_refusal`). `Text` used to be refused as a side effect of the
+//!   transform surface; ADR 0019 decision B made text transformable, so the
+//!   refusal is now its own named reason and this command's behaviour is
+//!   unchanged (TEXT still is not exploded). A `Compound` member of an INSERT
+//!   (for example an in-block MINSERT or hatch) is likewise refused explicitly.
 //! * `IMAGE` / `MASK` by **policy**: AutoCAD does not explode raster images (its
 //!   wording is **unverified**). `Image`/`Mask` **are** transformable, so this is
 //!   a policy refusal, **not** the transform layer.
@@ -343,9 +346,10 @@ fn explode_polyline(
 /// which flattens a block reference to leaf geometry.)
 ///
 /// Members keep their own block-definition layer; the placement is baked through
-/// the existing [`transform_geometry`] surface, so a member that the surface
-/// cannot place (a `Text`/`Spline`/`Shape`/`Opaque`/`Compound` member, e.g. an
-/// in-block MINSERT/hatch) fails the whole command.
+/// the existing [`transform_geometry`] surface. A member this build cannot place
+/// (a `Spline`/`Shape`/`Opaque`/`Compound` member, e.g. an in-block
+/// MINSERT/hatch) or cannot decompose (`Text`, refused explicitly by
+/// [`push_produced`]) fails the whole command.
 fn explode_insert(
     drawing: &DrawingDatabase,
     space: &SpaceId,
@@ -409,9 +413,10 @@ fn explode_insert(
 /// Validate and append one produced child geometry.
 ///
 /// `Image`/`Mask` are refused by **policy** (they are transformable, so this is
-/// deliberately not the transform layer); a `Text`/`Spline`/`Shape`/`Opaque`/
-/// `Compound` child is refused through the existing transform surface, reusing
-/// its exact reason.
+/// deliberately not the transform layer); every other non-decomposable child is
+/// refused by an **explicit named reason** in [`child_refusal`] — including
+/// `Text`, whose transform is now supported (ADR 0019 decision B) and therefore
+/// can no longer be refused as a side effect of `transform_geometry`.
 fn push_produced(
     layer: LayerId,
     space: SpaceId,
@@ -453,22 +458,45 @@ fn policy_refusal(kind: &str) -> CadError {
     ))
 }
 
-/// Refuse a produced child through the existing transform surface, reusing its
-/// exact reason so the EXPLODE refusal never invents a different one.
+/// Refuse a produced child with its **own named reason** (never a transform
+/// side effect).
+///
+/// ADR 0019 decision B changed the old mechanism: `Text` used to be refused by
+/// `transform_geometry`, so an INSERT with a Text member failed implicitly. Text
+/// is now transformable, so the refusal is made explicit here — the command still
+/// fails as a whole (the behaviour is unchanged), but for a stated reason.
 fn child_refusal(geometry: &SemanticGeometry) -> CadError {
-    match transform_geometry(geometry, &Transform3::identity()) {
-        Err(CadError::Unsupported(reason)) => CadError::Unsupported(format!(
-            "EXPLODE cannot explode {}: {reason}",
-            geometry_kind(geometry)
-        )),
-        Err(other) => other,
-        // Defensive: the matched kinds are all transform-refused, so a success
-        // here is unreachable. Fall back to a stable, honest message.
-        Ok(_) => CadError::Unsupported(format!(
-            "EXPLODE cannot explode {}",
-            geometry_kind(geometry)
-        )),
-    }
+    let reason = match geometry {
+        SemanticGeometry::Text { .. } => {
+            "EXPLODE does not decompose TEXT: a text run is one atomic glyph layout and \
+             AutoCAD does not document it as an exploding kind"
+        }
+        SemanticGeometry::Spline { .. } => {
+            "EXPLODE does not decompose SPLINE: the domain keeps control points/knots only, \
+             so the exploded segments would not be the source curve"
+        }
+        SemanticGeometry::Shape { .. } => {
+            "EXPLODE does not decompose a SHAPE: its glyph needs the compiled shape file"
+        }
+        SemanticGeometry::Opaque { .. } => {
+            "EXPLODE does not decompose opaque/proxy geometry: it has no semantic form"
+        }
+        SemanticGeometry::Dimension(_) => {
+            "EXPLODE does not decompose a DIMENSION compound in this build"
+        }
+        SemanticGeometry::Compound(_) => {
+            "EXPLODE does not decompose a nested Compound member (for example an in-block \
+             MINSERT or hatch) in this build"
+        }
+        SemanticGeometry::Hatch(_) => {
+            "EXPLODE does not decompose a HATCH member inside a compound in this build"
+        }
+        _ => "EXPLODE does not decompose this kind",
+    };
+    CadError::Unsupported(format!(
+        "EXPLODE cannot explode {}: {reason}",
+        geometry_kind(geometry)
+    ))
 }
 
 /// Refuse a `Dimension`/`MTable`/`MLeader`-like compound by its stored
@@ -478,9 +506,9 @@ fn child_refusal(geometry: &SemanticGeometry) -> CadError {
 /// `AcDbTable` / `AcDbMultiLeader`), so the general "Compound → all children"
 /// rule would otherwise decompose them. The project does not model the
 /// dimension-explosion semantics (associativity loss + 2D solid/text output), and
-/// their children usually include `Text` (which the transform surface would
-/// refuse anyway), so an explicit `type_key` refusal is clearer than the generic
-/// failure.
+/// their children usually include `Text` (which EXPLODE refuses by its own named
+/// reason, never from the transform surface), so an explicit `type_key` refusal
+/// is clearer than the generic failure.
 fn refuse_compound_type_key(source: &DbEntity) -> CadResult<()> {
     match source.object.type_key.as_str() {
         "AcDbDimension" | "AcDbTable" | "AcDbMultiLeader" => Err(CadError::Unsupported(format!(

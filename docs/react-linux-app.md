@@ -126,7 +126,18 @@ GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open /abs/drawing.dwg
 宿主把原生 CAD surface 合成在 GTK `GtkOverlay` 内的中央分区上，React `WebView` 作为透明 sibling
 呈现 chrome，二者 **co-visible**。
 
-**堆叠顺序（勿弄反）**：CAD 绘图区被**重新 `add_overlay` 到最后**，因此是 overlay 的**最上层** child，其原生表面（X11 子窗口 / Wayland 子表面）在该矩形内**盖住 WebView**；只有**输入**经空 input shape/region 穿透。⇒ **DOM 无法浮在 CAD 分区之上**（ADR-0010 `:26-27`、ADR-0020）。CAD 分区的原生表面**按后端不同**：
+**堆叠顺序（勿弄反）**：CAD 绘图区被**重新 `add_overlay` 到最后**，因此是 overlay 的**最上层** child，其原生表面（X11 子窗口 / Wayland 子表面）在该矩形内**盖住 WebView**；只有**输入**经空 input shape/region 穿透。⇒ **DOM 无法浮在 CAD 分区之上**（ADR-0010 `:26-27`、ADR-0020）。
+
+**输入路由的实际后果（2026-10-20 记录）**：CAD 原生表面**只负责显示**——它把 OS 输入全部让给下面的 DOM
+（`gtk_bridge/native.rs` 的 `apply_input_passthrough`），由 `.native-input` 把 `pointerdown/move/up`（含
+`button: 0/1/2`）与 `wheel` 经 `probe_input` 转发给会话。因此中键平移是 `button=1` 的 DOM 事件；
+**右键也落在 WebView 上**，若不处理就会弹出 WebKitGTK 默认菜单（含 Reload —— 会重新挂载 UI 而 Rust 会话与
+原生表面仍在，属**状态分叉风险**）。现已：外壳范围抑制 `contextmenu`（**输入框内保留**，命令行仍可复制粘贴）；
+拦掉 `Ctrl+R`/`Ctrl+Shift+R`/`F5`、`Ctrl±`/`Ctrl+0`、`Ctrl+P`、**`Ctrl`+滚轮**（页面缩放会改变 DOM 矩形与比例，
+与每帧"绘图区必须匹配 DOM 矩形"的守卫冲突）。**CAD 区右键目前无动作**，只经单一调用点发出
+`cadContextMenuRequest({point, selection, tool})` 作为**未来随手菜单的钩子**（今天不产生任何可见行为）。
+**注意**：这不是"测试用了合成输入"的取巧——**CAD 表面从不接收真实 OS 输入**；指针捕获、手写笔、双击时序
+全都经过 DOM。要改变这一点属于架构级变更（需单独 ADR）。CAD 分区的原生表面**按后端不同**：
 
 - **X11/XWayland**：`GtkDrawingArea` 获得自己的**原生 X child 窗口**，渲染器用其 Xlib XID/display。
 - **原生 Wayland**：`GtkDrawingArea` 保持**非 native**（**不** `gdk_window_ensure_native`），宿主自建

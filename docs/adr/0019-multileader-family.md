@@ -290,3 +290,29 @@ P7c：`draw.kind.mleader`、`tool.draw.mleader`、`tool.prompt.mleader.{arrow,la
 
 **没有真实 MULTILEADER 夹具**：U-1'/U-2/U-4/U-9 只能靠更多合成用例逼近，**不能**替代真实样本；
 需要一份**授权可分发**的样本并记入 `fixtures/manifest`（provenance + SHA-256）。
+
+---
+
+## 实施状态（追加，不改写决策文本）
+
+### P7a（文本通道 + `TEXT` + `Text` 变换 + MTEXT 诚实性，2026-10-20）
+
+- **文本通道**：`SetToolText` **终端语义**（提交即完成，`ready && !awaiting_text`）；**专用 IPC
+  `cad_set_tool_text`**（与 `cad_set_tool_parameter` 同型，**不走 `cad_command`**）；`awaiting_text` 用
+  **专用 wire 名**；**1024 字符**上限（按 `chars()`）；拒绝面五类（空/超长/非待文本/点未齐/**待文本期间 Confirm**），
+  全部具名且**不开事务**。
+- **`Text` 可变换**：平移/旋转/均匀缩放；**镜像与非均匀拒绝**；**域侧与捕捉面同规则**
+  （`cad-db/src/transform.rs` 与 `cad-geometry/src/engine.rs`），**跨面一致性有测试**。
+- **决策 B.2 落实**：`STRETCH` 选中 TEXT 仍整命令拒绝、`EXPLODE` 含 Text 成员的 INSERT 仍整命令失败，
+  **理由已更正**并有测试钉住（**无行为变更**）。
+- **`TEXT` 创建**：`Exact(1)` + `requires_text` + `textHeight`；`AcDbText`；一条事务/一步撤销/活动图层。
+- **MTEXT**：`Partial` + **四条具名原因**（列/背景/行距样式/绘制方向），不再误报 `Complete`。
+- **UI**：命令行文本模式（1024 按 Unicode 标量值、IME 双信号、Esc 两步、`TEXT` 面板入口与字形）。
+- **宿主默认行为**：CAD 表面**按设计对输入透明** ⇒ 右键落 WebView 并弹 WebKit 菜单（Reload 属状态分叉风险）；
+  已抑制 `contextmenu`（输入框内保留）并拦掉 reload/zoom/print/`Ctrl`+wheel；**右键无动作**，只留
+  `cadContextMenuRequest` 钩子（见 ADR-0020）。
+- **文件规模**：`draw_tool/mod.rs` 曾 1079 行 ⇒ `DrawIntent` 迁至 `draw_tool/intent.rs`（266 行），`mod.rs` 744 行，
+  **公开路径不变**。
+- **门禁**：受影响 crate **2060 通过 / 0 失败**；clippy/fmt/architecture(27)/i18n(**542**)/file-size(**711**)；
+  UI **185/185**。**NOT RUN**：全量 `cargo test --workspace`；跨平台；真机（本片未新增渲染几何）。
+- **待办**：A+B 编辑入口（`TEXTEDIT` + 面板可编辑字段）、`textHeight` 的 UI 步进器、P7b。

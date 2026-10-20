@@ -178,9 +178,12 @@ fn explode_refuses_a_non_uniformly_scaled_insert() {
     assert_eq!(undo_depth(&app), 0);
 }
 #[test]
-fn explode_insert_with_an_untransformable_member_fails_the_whole_command() {
-    // Block 1 has a LINE member and a TEXT member; the TEXT member cannot have the
-    // placement baked in, so the whole command fails and nothing is written.
+fn explode_insert_with_a_text_member_still_fails_the_whole_command() {
+    // Block 1 has a LINE member and a TEXT member. ADR 0019 decision B made Text
+    // transformable, so the placement bakes fine; the EXPLODE of the member is
+    // then refused by its **explicit** kind reason (`child_refusal`) instead of a
+    // transform side effect. The behaviour is unchanged: the whole command fails
+    // and nothing is written.
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -224,8 +227,16 @@ fn explode_insert_with_an_untransformable_member_fails_the_whole_command() {
     let (mut app, mut session) = app_from(b.finish().unwrap());
     let before = revision(&app);
     select_one(&mut app, &mut session, 1);
-    let error = explode(&mut app, &mut session).expect_err("an untransformable member fails");
-    assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
+    let error = explode(&mut app, &mut session).expect_err("an undecomposable member fails");
+    match error {
+        CadError::Unsupported(reason) => {
+            assert!(
+                reason.contains("EXPLODE does not decompose TEXT"),
+                "the TEXT member is refused explicitly: {reason}"
+            );
+        }
+        other => panic!("expected an Unsupported refusal, got {other:?}"),
+    }
     assert_eq!(revision(&app), before, "nothing is written");
     assert_eq!(entity_count(&app), 3, "both members and the INSERT remain");
     assert_eq!(undo_depth(&app), 0);

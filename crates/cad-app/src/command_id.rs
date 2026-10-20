@@ -111,6 +111,28 @@ pub enum CommandId {
     /// payload, a missing active layer, and every degenerate-chord / numerically
     /// singular input the geometry core raises. Work-only.
     CreateSpline,
+    /// TEXT: insert one single-line `SemanticGeometry::Text` at the payload
+    /// position with the payload's text and height (ADR 0019 F.1, P7a).
+    ///
+    /// Payload is `Text { position, text, height }`. The interactive tool captures
+    /// one insertion point and then the **typed text** through the dedicated
+    /// `cad_set_tool_text` channel (text is terminal: submitting it completes the
+    /// command, no second Confirm). The height comes from the session typed
+    /// parameter ([`crate::draw_tool::ToolParameter::TextHeight`], default
+    /// [`crate::draw_tool::TEXT_DEFAULT_HEIGHT`] = 2.5 because the drawing's
+    /// `Style` table carries no height), so the capture never invents one.
+    ///
+    /// The style is the drawing's `Standard` text style (the `StyleId(0)` entry as
+    /// the documented fallback, with its first resource key as the font) and the
+    /// alignment is the style default (left/baseline). One entity
+    /// (`type_key`/`class_name` = `AcDbText`) is inserted through the shared create
+    /// funnel in one transaction / one undo step on the active layer, and the
+    /// command refuses an empty/whitespace-only text, an over-1024-character text,
+    /// a non-finite position or height, a non-positive height and a missing active
+    /// layer. A single-line text has no width factor, oblique angle, character
+    /// spacing or background, and MTEXT's columns/background/line-spacing
+    /// style/drawing direction are **not** modelled (decision H). Work-only.
+    CreateText,
     /// DIMLINEAR: draw a **horizontal or vertical** linear dimension through two
     /// extension-line origins and a dimension-line location (ADR 0017 decision C,
     /// P5c). Payload is `Points([first, second, location])` in click order. The
@@ -357,6 +379,7 @@ impl CommandId {
                 | Self::CreatePolygon
                 | Self::CreatePoint
                 | Self::CreateSpline
+                | Self::CreateText
                 | Self::DimLinear
                 | Self::DimAligned
                 | Self::DimRadius

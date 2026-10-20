@@ -341,6 +341,7 @@ impl SessionState {
             DrawToolKind::DimAngular => CommandId::DimAngular,
             DrawToolKind::DimOrdinate => CommandId::DimOrdinate,
             DrawToolKind::Hatch => CommandId::Hatch,
+            DrawToolKind::Text => CommandId::CreateText,
         })?;
         let selection = self.selection.refs().to_vec();
         let tool = DrawTool::new(kind, selection.len());
@@ -490,6 +491,41 @@ impl SessionState {
         }
     }
 
+    /// Submit the terminal text of a text tool (ADR 0019 decision A.1).
+    ///
+    /// The authoritative validation lives in [`DrawTool::set_text`] (state,
+    /// emptiness, the 1024-character bound), so this is the single entrance used
+    /// by the host after `cad_set_tool_text`. A refusal names its reason and
+    /// touches nothing; on success the stored text makes the pending command
+    /// complete on the next confirmation — the host calls
+    /// [`HostController::confirm_draw_traced`] immediately (text is terminal).
+    pub fn set_tool_text(&mut self, text: &str) -> CadResult<()> {
+        match &mut self.tool {
+            ToolState::Drawing(capture) => capture.tool.set_text(text),
+            _ => Err(CadError::InvalidInput(
+                "tool.text_not_awaiting: no drawing tool is active".into(),
+            )),
+        }
+    }
+
+    /// The first `Esc` while a text prompt is open (ADR 0019 decision A.1).
+    ///
+    /// Pure focus validation: the tool stays active and still awaits text. A
+    /// second `Esc` is the ordinary cancel ([`Self::cancel_tool`]).
+    pub fn dismiss_text_focus(&self) -> CadResult<()> {
+        match &self.tool {
+            ToolState::Drawing(capture) => capture.tool.dismiss_text_focus(),
+            _ => Err(CadError::InvalidInput(
+                "tool.text_not_awaiting: no drawing tool is active".into(),
+            )),
+        }
+    }
+
+    /// Whether the active tool awaits its terminal text.
+    pub fn draw_awaiting_text(&self) -> bool {
+        matches!(&self.tool, ToolState::Drawing(capture) if capture.tool.awaiting_text())
+    }
+
     pub fn draw_selection_snapshot(&self) -> Option<&[SelectionRef]> {
         match &self.tool {
             ToolState::Drawing(capture) => Some(&capture.selection),
@@ -598,5 +634,9 @@ fn authorizing_command(parameter: ToolParameter) -> CommandId {
         | ToolParameter::HatchAngle
         | ToolParameter::HatchDouble
         | ToolParameter::HatchStyle => CommandId::Hatch,
+        // TEXT (P7a): the glyph height is authorized against the TEXT create
+        // command, so a Viewer-mode set is refused exactly like the other create
+        // parameters.
+        ToolParameter::TextHeight => CommandId::CreateText,
     }
 }

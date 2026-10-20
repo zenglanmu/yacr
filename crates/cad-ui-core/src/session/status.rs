@@ -206,6 +206,8 @@ pub struct CadToolParams {
     /// The HATCH style (`0` Normal, `1` Outer, `2` Ignore), or `null` for every
     /// other tool.
     pub hatch_style: Option<f64>,
+    /// The TEXT glyph height, or `null` for every other tool (ADR 0019 F.1).
+    pub text_height: Option<f64>,
 }
 
 /// The active interactive tool, projected from `cad_app`'s real capture state.
@@ -234,6 +236,25 @@ pub struct CadTool {
     /// draw kind and **every** measurement tool reports `false` — never a
     /// fabricated open-ness.
     pub open_ended: bool,
+    /// Whether the active tool is a text tool whose point complement is complete
+    /// and whose text has not been submitted yet (ADR 0019 decision A.2).
+    ///
+    /// This is the **only** honest source for the text prompt phase; a UI must
+    /// never infer it from `key` + `points`/`ready`, because `ready` alone cannot
+    /// tell "missing points" from "missing text" and such an inference would
+    /// drift from `cad_app`'s `requires_text()`. While it is `true` the UI enters
+    /// its text-entry mode and `Confirm` is refused (the terminal step is
+    /// `cad_set_tool_text`).
+    ///
+    /// Always `false` for a measurement capture and for `tool: null`.
+    ///
+    /// Wire name: **`awaiting_text`**. This field deliberately overrides the
+    /// block's camelCase convention because it is the name the committed React
+    /// contract reads (`apps/app-linux/ui/src/text.mjs` / `cad.mjs` validate and
+    /// consume `tool.awaiting_text`); emitting `awaitingText` would silently
+    /// never open the text prompt.
+    #[serde(rename = "awaiting_text")]
+    pub awaiting_text: bool,
     /// Typed tool parameters (see [`CadToolParams`]); always present, with `null`
     /// fields for a tool that has no such parameter.
     pub params: CadToolParams,
@@ -374,6 +395,9 @@ pub(super) fn cad_tool(
             // for a capture that still accepts points. Never inferred from the
             // captured count.
             open_ended: preview.is_open_ended(),
+            // The real text prompt phase (ADR 0019 decision A.2), read from
+            // `cad-app`'s own capture state — never inferred from `key`/`points`.
+            awaiting_text: preview.awaiting_text,
             params: CadToolParams {
                 // The side count is present **only** for a POLYGON capture; every
                 // other draw tool reports `null`, and the session already clears
@@ -456,6 +480,13 @@ pub(super) fn cad_tool(
                     ToolParameter::HatchStyle,
                     preview.kind == DrawToolKind::Hatch,
                 ),
+                // The TEXT height is present **only** while a TEXT capture is
+                // active (ADR 0019 decision F.1): it is that tool's whole numeric
+                // definition.
+                text_height: number(
+                    ToolParameter::TextHeight,
+                    preview.kind == DrawToolKind::Text,
+                ),
             },
         }),
         ToolSnapshot::Measuring(preview) => Some(CadTool {
@@ -465,6 +496,8 @@ pub(super) fn cad_tool(
             // A measurement capture is never open-ended; report the honest
             // `false` rather than a fabricated `true`.
             open_ended: false,
+            // A measurement never awaits text.
+            awaiting_text: false,
             params: CadToolParams {
                 sides: None,
                 fillet_radius: None,
@@ -483,6 +516,7 @@ pub(super) fn cad_tool(
                 hatch_angle: None,
                 hatch_double: None,
                 hatch_style: None,
+                text_height: None,
             },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,

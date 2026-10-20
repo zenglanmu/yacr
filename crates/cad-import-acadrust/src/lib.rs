@@ -372,6 +372,10 @@ struct ImporterBuilder<'a> {
     /// Source scale handle value -> name, for resolving an annotative entity's
     /// per-scale context leaves (`ACDB_ANNOTATIONSCALES` list).
     scale_names: ScaleNames,
+    /// Reasons already pushed as import diagnostics, so a per-entity loss is
+    /// reported once per import rather than once per entity (ADR 0019 decision H
+    /// uses it for the four MTEXT reasons).
+    reported_reasons: BTreeSet<String>,
     block_ids: HashMap<String, BlockId>,
     /// Block name -> the block's insertion base point. An INSERT maps the
     /// block's base point onto its insertion point, so expansion subtracts it

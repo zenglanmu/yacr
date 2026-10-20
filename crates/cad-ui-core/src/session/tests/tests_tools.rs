@@ -16,6 +16,7 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("POLYGON", "draw.polygon"),
     ("POINT", "draw.point"),
     ("SPLINE", "draw.spline"),
+    ("TEXT", "draw.text"),
     ("MOVE", "draw.move"),
     ("TRIM", "draw.trim"),
     ("COPY", "draw.copy"),

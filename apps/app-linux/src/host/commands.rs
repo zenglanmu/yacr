@@ -120,6 +120,70 @@ pub fn cad_set_tool_parameter(
     Ok(CadCommandAck { accepted: true })
 }
 
+/// Bounded capacity of the dedicated tool-text queue (ADR 0019 decision A.1).
+///
+/// It reuses the CAD command queue's capacity so every admission shares one bound.
+pub const CAD_TOOL_TEXT_CAP: usize = cad_ui_core::shell::CAD_COMMAND_CAP;
+
+/// Admit one terminal tool text into the bounded main-thread queue.
+///
+/// Modelled exactly on [`admit_tool_parameter`]: disabled CAD sessions, a full
+/// queue and the two **static** content refusals (empty/whitespace-only, more
+/// than [`cad_app::MAX_TOOL_TEXT_CHARS`] characters) are refused *before* the
+/// queue.
+/// Everything that needs live session state — whether a tool is awaiting text,
+/// whether its points are complete — is the host session's authority
+/// (`CadSession::set_tool_text`) applied on the owner thread, so this function
+/// deliberately knows no session state.
+pub fn admit_tool_text(
+    queue: &mut Vec<String>,
+    cad_mode: bool,
+    text: String,
+) -> Result<(), String> {
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if queue.len() >= CAD_TOOL_TEXT_CAP {
+        return Err("CAD tool-text queue is full".into());
+    }
+    if text.trim().is_empty() {
+        return Err("tool.text_empty: cad_set_tool_text needs a non-empty text".into());
+    }
+    let characters = text.chars().count();
+    if characters > cad_app::MAX_TOOL_TEXT_CHARS {
+        return Err(format!(
+            "tool.text_too_long: cad_set_tool_text allows at most {} characters, got {characters}",
+            cad_app::MAX_TOOL_TEXT_CHARS
+        ));
+    }
+    queue.push(text);
+    Ok(())
+}
+
+/// `cad_set_tool_text` command: admit one **terminal** text into the bounded
+/// main-thread queue (ADR 0019 decision A.1).
+///
+/// This is the only string channel into the CAD session. It is a dedicated typed
+/// IPC and deliberately **not** an argument of `cad_command`: that funnel accepts
+/// a command *name* only, and parsing a text payload out of the command line was
+/// rejected earlier. The wire shape is `{ text: <string> }`.
+///
+/// `{accepted:true}` means **queued**, not completed: the owner tick routes it
+/// through `CadSession::set_tool_text`, which validates the live state and
+/// completes the command immediately (text is terminal). Any refusal
+/// (`tool.text_not_awaiting`, `tool.text_points_incomplete`, `tool.text_empty`,
+/// `tool.text_too_long`) surfaces through `cad_status.error`.
+#[tauri::command]
+pub fn cad_set_tool_text(
+    shared: tauri::State<'_, ProbeShared>,
+    text: String,
+) -> Result<CadCommandAck, String> {
+    let mut state = lock(&shared.0);
+    let cad_mode = state.shell.cad_mode;
+    admit_tool_text(&mut state.cad_tool_texts, cad_mode, text)?;
+    Ok(CadCommandAck { accepted: true })
+}
+
 /// `cad_status` command: the latest main-thread CAD snapshot, with the host-side
 /// (transport) error merged in.
 ///

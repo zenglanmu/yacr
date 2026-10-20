@@ -43,6 +43,7 @@ impl<'a> ImporterBuilder<'a> {
             style_fonts: HashMap::new(),
             dxf_style_fonts: dxf_style_xdata_fonts(request.bytes.as_ref()),
             scale_names: HashMap::new(),
+            reported_reasons: BTreeSet::new(),
             block_ids: HashMap::new(),
             block_base_points: HashMap::new(),
             block_member_ids: HashMap::new(),

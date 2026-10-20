@@ -293,4 +293,5 @@ mod reports;
 mod selection_reconcile;
 mod spline;
 mod stretch;
+mod text;
 mod transform;

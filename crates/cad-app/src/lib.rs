@@ -48,6 +48,7 @@ pub use draw_tool::{
     circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity, ToolParameter,
     ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES, HATCH_PATTERN_TYPE_SOLID,
     HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
+    MAX_TOOL_TEXT_CHARS,
 };
 pub use input::{
     apply_canvas_metrics, classify_key, escape_action, CancelReason, CanvasMetrics,
@@ -581,6 +582,22 @@ pub enum CommandPayload {
     /// A fully formed semantic geometry, used by `CreateLine` as the
     /// programmatic alternative to a point list.
     Geometry(Box<SemanticGeometry>),
+    /// TEXT: one single-line text entity (ADR 0019 F.1, P7a).
+    ///
+    /// `position` is the captured insertion point, `text` the typed string
+    /// (non-empty, at most [`crate::draw_tool::MAX_TOOL_TEXT_CHARS`] characters —
+    /// re-validated here so a programmatic caller cannot bypass the capture), and
+    /// `height` its glyph height in world units (finite, `> 0`). The capture reads
+    /// the height from [`crate::draw_tool::ToolParameter::TextHeight`]; it is a
+    /// payload field because the command is the single construction point and the
+    /// value must travel with it (never re-read from a session the caller does not
+    /// own). The style is the drawing's `Standard` text style with the style
+    /// default alignment (left/baseline).
+    Text {
+        position: Point3,
+        text: String,
+        height: f64,
+    },
 }
 
 pub struct Command {

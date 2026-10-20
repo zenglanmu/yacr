@@ -1,3 +1,45 @@
+## P7a：文本通道 + `TEXT` 创建 + `Text` 变换 + MTEXT 诚实性（ADR-0019 决策 A/B/F.1/H，2026-10-20）
+
+**范围**：`crates/cad-ui-core`（wire/状态/选择子/i18n）、`crates/cad-app`（`SetToolText`/`TEXT`/变换/拒绝面）、
+`crates/cad-db`（Text 变换）、`crates/cad-geometry`（捕捉面同规则）、`crates/cad-import-acadrust`（MTEXT `Partial`）、
+React 宿主 UI（命令行文本模式 + 浏览器默认行为抑制）；另含 ADR-0020 的就地编辑否决与编辑入口决策。
+
+- **文本通道（新平台能力）**：`InteractionRequest::SetToolText` **终端语义**——文本是最后一步，**提交即完成**
+  （`ready && !awaiting_text`），**无需第二次 Confirm**。**专用 IPC `cad_set_tool_text`**（与
+  `cad_set_tool_parameter` 同型，**不走 `cad_command`**）；`CadToolStatus.awaiting_text` 有**专用 wire 名**
+  （`#[serde(rename = "awaiting_text")]`，避免 camelCase 漂移）。
+  **拒绝面**：空/纯空白、**超 1024 字符**（按 `chars()` 计）、非待文本状态、点未齐、**待文本期间 `Confirm`**
+  （否则会从后门完成成无文本）；全部具名且**不开事务**。
+- **`Text` 可变换**：平移/旋转/**均匀缩放**；**镜像与非均匀缩放拒绝**。**两个变换面一起改**：
+  `cad-db/src/transform.rs` 与**捕捉面** `cad-geometry/src/engine.rs`（后者注释明确"两面必须给出相同 Text 结果"），
+  并有**跨面一致性测试**。
+- **既有行为保持（ADR-0019 决策 B.2）**：`STRETCH` 选中 TEXT **仍整命令拒绝**、`EXPLODE` 含 Text 成员的 INSERT
+  **仍整命令失败**——但两者的**理由已更正**（不再依赖"变换面拒绝 Text"这一副作用），并有测试钉住。
+- **`TEXT` 创建**：`CommandId::Text`（选择子 `"TEXT"`，`EXPECTED_COMMAND_COUNT` 68 → 69）、
+  `PointArity::Exact(1)` + `requires_text`、`textHeight` 参数（>0，默认 2.5——**`Style` 表无高度字段**，常量即债务）、
+  单一漏斗、一条事务/一步撤销/活动图层、`type_key`/`class_name` = **`AcDbText`**。
+- **MTEXT 诚实性**：`MTEXT → Text` 此前报 `Complete` 而**静默丢**列/背景/行距样式/绘制方向；
+  现为 **`Partial` + 四条具名原因**（`text.{background,columns,line_spacing_style,drawing_direction}_unsupported`）。
+- **UI**：命令行**文本模式**（同一输入元素切换，不跳位）；`Enter → cad_set_tool_text`；**1024 按 Unicode 标量值**
+  计数（与 Rust `chars().count()` 对齐）；**超限不截断**、如实显示；IME（`isComposing` + `keyCode 229`）不提交；
+  **Esc 两次**（失焦 → 取消）；`TEXT` 进 draw 面板（OFFSET 与 HATCH 之间，HATCH 仍收尾）+ 独立字形。
+- **宿主默认行为（用户报告）**：CAD 原生表面**按设计对输入透明**（X11 空 input shape / Wayland 子表面空 input region）
+  ⇒ **所有** CAD 输入经 DOM 合成，右键**落到 WebView** 并弹出 WebKit 默认菜单（含 Reload，属**状态分叉风险**）。
+  已修：`contextmenu` 外壳抑制（**输入框内保留**，命令行仍可复制粘贴）；`Ctrl+R`/`Ctrl+Shift+R`/`F5`、
+  `Ctrl±`/`Ctrl+0`、`Ctrl+P`、**`Ctrl`+滚轮**全部拦掉（即使焦点在文本框）。**为未来留钩子**：
+  `cadContextMenuRequest({point, selection, tool})` **单一调用点、今天不产生任何可见行为**（不伪造菜单）。
+  **devtools 如实报告**：`tauri.conf.json` 表达不了（`"windows": []`、无 `devtools` 字段），release 默认不启用
+  但**非本仓库固定**；抑制右键菜单后"Inspect"入口已消失。
+- **文件规模**：`draw_tool/mod.rs` 曾达 1079 行（超 1000 硬上限）⇒ `DrawIntent` 文档重枚举迁至
+  `draw_tool/intent.rs`，`mod.rs` **744** 行、`intent.rs` 266 行，**公开路径不变**（`pub use`）。
+- **门禁（编排者复跑）**：受影响 crate **2060 通过 / 0 失败**；clippy(`-D warnings`)、fmt、architecture(27)、
+  i18n(**542**，P7a +8)、file-size(**711**)、UI **185/185**（含 +14 文本模式、+8 浏览器默认行为）。
+  **NOT RUN**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；**真机证据**（本片未新增渲染几何，
+  文本渲染路径已由 P5e 的字体设施覆盖；P7a 的真机走查留待与 P7b 合并）。
+- **待办**：**A+B 编辑入口**（ADR-0020 增补）：`TEXTEDIT` 命令 + 属性面板可编辑字段（需"实体身份 + 可回填文本"的
+  新状态字段，**不得**复用 `PropertyRow` 展示串）；`status.tool_parameter.text_height` 的 UI 步进器未接线；
+  MLEADER 文本编辑等 P7b。
+
 ## 技术债清偿：环深度探测、`-Z` 挤出导入、bulge 展开等价性与语料不变量（2026-10-20，P6 门禁点名）
 
 **提交**：`102bb1c`。**范围**：`cad-domain`（`hatch/common.rs` 共享助手 + `fill.rs` + `hatch_entity`）、

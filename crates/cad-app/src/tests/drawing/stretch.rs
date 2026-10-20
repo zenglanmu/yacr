@@ -582,8 +582,11 @@ fn stretch_fails_the_whole_command_for_text_in_the_window_and_writes_nothing() {
         h_align: Default::default(),
         v_align: Default::default(),
     };
-    // A fully enclosed TEXT still fails the whole command (Autodesk does not
-    // document STRETCH's text behaviour and the transform surface refuses text).
+    // A fully enclosed TEXT still fails the whole command. ADR 0019 decision B
+    // keeps this behaviour: TEXT accepts a similarity transform now, but STRETCH's
+    // per-vertex semantics do not apply to a text run and Autodesk does not
+    // document its behaviour, so the refusal is the restricted transform, not
+    // "text cannot be transformed".
     let (mut app, mut session) = build(vec![ent(1, text, 0)], Vec::new());
     let before = revision(&app);
     let error = stretch(
@@ -594,7 +597,19 @@ fn stretch_fails_the_whole_command_for_text_in_the_window_and_writes_nothing() {
         point(1.0, 1.0),
     )
     .unwrap_err();
-    assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
+    match error {
+        CadError::Unsupported(reason) => {
+            assert!(
+                reason.contains("similarity-only transform"),
+                "the reason must state the restricted transform: {reason}"
+            );
+            assert!(
+                !reason.contains("transform surface refuses"),
+                "the stale reason must be gone: {reason}"
+            );
+        }
+        other => panic!("expected Unsupported, got {other:?}"),
+    }
     assert_eq!(revision(&app), before, "a refusal changes nothing");
     assert_eq!(entity_count(&app), 1);
     assert_eq!(undo_depth(&app), 0);

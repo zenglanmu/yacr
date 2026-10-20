@@ -48,8 +48,8 @@ mod tests;
 
 // Public host API (unchanged external surface; `crate::host::…` still resolves).
 pub use commands::{
-    cad_command, cad_commands, cad_set_tool_parameter, cad_status, probe_input, probe_status,
-    CadCommandAck,
+    cad_command, cad_commands, cad_set_tool_parameter, cad_set_tool_text, cad_status, probe_input,
+    probe_status, CadCommandAck,
 };
 pub use init::init;
 pub use options::{
@@ -63,9 +63,10 @@ pub(crate) use postload::resolve_process_exit;
 // re-export them alongside the command functions so `generate_handler!` (which
 // resolves them at `crate::host::…`) keeps working after the split.
 pub(crate) use commands::{
-    __cmd__cad_command, __cmd__cad_commands, __cmd__cad_set_tool_parameter, __cmd__cad_status,
-    __cmd__probe_input, __cmd__probe_status, __tauri_command_name_cad_command,
-    __tauri_command_name_cad_commands, __tauri_command_name_cad_set_tool_parameter,
+    __cmd__cad_command, __cmd__cad_commands, __cmd__cad_set_tool_parameter,
+    __cmd__cad_set_tool_text, __cmd__cad_status, __cmd__probe_input, __cmd__probe_status,
+    __tauri_command_name_cad_command, __tauri_command_name_cad_commands,
+    __tauri_command_name_cad_set_tool_parameter, __tauri_command_name_cad_set_tool_text,
     __tauri_command_name_cad_status, __tauri_command_name_probe_input,
     __tauri_command_name_probe_status,
 };
@@ -166,6 +167,12 @@ pub struct Shared {
     /// separate from `shell.cad_commands` (name-only) so the rejected command-line
     /// text-payload path is never reintroduced.
     pub cad_tool_parameters: Vec<(cad_app::ToolParameter, cad_app::ToolValue)>,
+    /// Bounded main-thread queue of terminal tool texts (ADR 0019 decision A.1):
+    /// admitted by the dedicated `cad_set_tool_text` IPC and drained by the owner
+    /// tick into `CadSession::set_tool_text`, which completes the command
+    /// immediately. Typed and separate from `shell.cad_commands` (name-only) so
+    /// the rejected command-line text-payload path is never reintroduced.
+    pub cad_tool_texts: Vec<String>,
 }
 
 /// Managed Tauri state: a shared handle to [`Shared`].
@@ -197,6 +204,7 @@ pub fn new_shared(launch: LaunchOptions) -> Arc<Mutex<Shared>> {
         postload_pan_exit: None,
         launch,
         cad_tool_parameters: Vec::new(),
+        cad_tool_texts: Vec::new(),
     }))
 }
 

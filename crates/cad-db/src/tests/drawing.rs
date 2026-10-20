@@ -273,30 +273,26 @@ fn drawing_transform_emits_transform_and_geometry_and_bakes_the_move() {
 #[test]
 fn drawing_transform_unsupported_kind_is_rejected_and_stops_nothing() {
     let mut db = writable_db();
-    // Text is not baked by this build.
-    let text = DbEntity {
+    // Opaque/proxy geometry has no transform in this build (Text does, ADR 0019
+    // decision B; its transform is covered by `tests::text_transform`).
+    let opaque = DbEntity {
         object: DbObject {
             id: ObjectId(1),
-            type_key: "AcDbText".into(),
+            type_key: "ACAD_PROXY_ENTITY".into(),
             revision: Revision(0),
             source_handle: None,
         },
         id: EntityId(1),
         layer: LayerId(0),
         space: SpaceId::Model,
-        geometry: SemanticGeometry::Text {
-            text: "hi".into(),
-            position: point(0.0, 0.0),
-            style: StyleId(0),
-            height: 2.5,
-            rotation: 0.0,
-            font: None,
-            h_align: TextAlignH::Left,
-            v_align: TextAlignV::Baseline,
+        geometry: SemanticGeometry::Opaque {
+            type_key: "ACAD_PROXY_ENTITY".into(),
+            version: 1,
+            payload: vec![1, 2, 3],
         },
         draw_order: 1,
     };
-    db.apply_drawing_changes("seed", TransactionId(1), vec![(EntityId(1), Some(text))])
+    db.apply_drawing_changes("seed", TransactionId(1), vec![(EntityId(1), Some(opaque))])
         .unwrap();
     let mut tx = db
         .begin_drawing_transaction("move", TransactionId(2))

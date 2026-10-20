@@ -427,9 +427,11 @@ fn explode_refuses_a_selection_with_nothing_decomposable_and_writes_nothing() {
 }
 
 #[test]
-fn explode_refuses_an_untransformable_child_through_the_transform_surface() {
+fn explode_refuses_a_non_decomposable_child_explicitly_by_kind() {
     // A Compound whose child is Text (only reachable via a compound in this
-    // build): the transform surface refuses it, so the whole command fails.
+    // build). ADR 0019 decision B made Text transformable, so the refusal is now
+    // its **own named reason** (`push_produced`/`child_refusal`), not a transform
+    // side effect — and the behaviour (whole command fails) is unchanged.
     for geometry in [
         text_geometry(),
         SemanticGeometry::Spline {
@@ -457,12 +459,25 @@ fn explode_refuses_an_untransformable_child_through_the_transform_surface() {
             payload: vec![1, 2, 3],
         },
     ] {
+        let kind = crate::app_drawing::class_name(&geometry);
         let compound = SemanticGeometry::Compound(vec![line(0.0, 0.0, 1.0, 0.0), geometry]);
         let (mut app, mut session) = single_app(compound, "AcDbCompound");
         let before = revision(&app);
         select_one(&mut app, &mut session, 1);
-        let error = explode(&mut app, &mut session).expect_err("untransformable child");
-        assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
+        let error = explode(&mut app, &mut session).expect_err("non-decomposable child");
+        match error {
+            CadError::Unsupported(reason) => {
+                assert!(
+                    reason.contains(kind),
+                    "the refusal must name {kind}: {reason}"
+                );
+                assert!(
+                    reason.contains("EXPLODE does not decompose"),
+                    "the refusal must be the explicit kind refusal: {reason}"
+                );
+            }
+            other => panic!("expected an Unsupported refusal, got {other:?}"),
+        }
         assert_eq!(revision(&app), before, "a refusal changes nothing");
         assert_eq!(entity_count(&app), 1);
         assert_eq!(undo_depth(&app), 0);
