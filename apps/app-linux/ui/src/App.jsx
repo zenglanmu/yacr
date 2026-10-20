@@ -25,6 +25,7 @@ import { CommandLine } from './components/CommandLine.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
 import { PopupRoot } from './components/PopupRoot.jsx';
 import { openPopup, popupBoot } from './popup.mjs';
+import { textEditOpenError } from './popup-textedit.mjs';
 
 /**
  * Boot switch between the two documents this bundle can be.
@@ -373,6 +374,18 @@ function Shell() {
     submitToolText,
     // The inspector's text edit; same result shape as `submitToolText`.
     applySelectedText,
+    // The slow path of the same edit: a host-opened dialog that shows the raw
+    // string. The host derives the payload from the current single selection and
+    // refuses a non-text selection with `popup.no_text_selection` **without
+    // opening a window**, so that refusal is translated into the error banner
+    // here rather than left as a machine name. `existing: true` (the dialog is
+    // already open) is a success: the host focuses that window.
+    openTextEditPopup: () => {
+      void openPopup(invoke, 'textEdit').then(result => {
+        const failure = textEditOpenError(result, t);
+        if (failure) setError(failure);
+      });
+    },
     historyOpen,
     setHistoryOpen,
     clearHistory: () => setHistory([]),

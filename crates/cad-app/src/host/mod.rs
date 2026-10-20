@@ -508,14 +508,16 @@ impl HostController {
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
         let entity =
             crate::app_drawing::resolve_text_edit_target(document.drawing.as_ref(), reference)?;
-        match entity.geometry {
-            SemanticGeometry::Text { text, .. } => Ok(text),
-            // Unreachable: the resolver already rejected every other kind.
-            other => Err(CadError::Unsupported(format!(
-                "textedit.target_not_text: {} is not a TEXT entity",
-                crate::app_drawing::class_name(&other)
-            ))),
-        }
+        // The resolver guarantees a text-bearing entity; the raw stored string
+        // is the prefill (no `\P` interpretation in the quick line-edit path).
+        crate::selection::editable_text_source(&entity)
+            .map(|(text, _)| text.to_string())
+            .ok_or_else(|| {
+                CadError::Unsupported(format!(
+                    "textedit.target_not_text: {} is not a text entity",
+                    crate::app_drawing::class_name(&entity.geometry)
+                ))
+            })
     }
 
     /// Move a set of selected refs by a world delta in one transaction.
@@ -869,14 +871,18 @@ impl HostController {
     /// The caller never supplies an entity id: the host resolves the current
     /// selection itself, so a stale UI cannot retarget another object. Only
     /// exactly one selected ref is accepted; the command then re-validates that
-    /// it is a directly addressable `Text` (a block-instance member, compound
-    /// child, sub-element or any other geometry is refused by name). One
-    /// transaction / one undo step; nothing is written on a refusal.
+    /// it is a directly addressable text entity (TEXT, MTEXT or MULTILEADER
+    /// text; a block-instance member, compound child, sub-element or any other
+    /// geometry is refused by name). One transaction / one undo step; nothing is
+    /// written on a refusal. Newlines are converted to `\P` for MTEXT /
+    /// MULTILEADER and refused for `AcDbText` (ADR-0021 D4), so the docked panel
+    /// and the popup obey the same policy.
     ///
     /// Named refusals: `textedit.selection_empty`, `textedit.selection_multiple`
-    /// (with the real count), and the command's `textedit.target_missing` /
-    /// `textedit.target_not_text`; the text bound/emptiness refusals come from
-    /// the same command.
+    /// (with the real count), the command's `textedit.target_missing` /
+    /// `textedit.target_not_text` / `textedit.mleader_content_not_text` /
+    /// `textedit.newline_text`; the text bound/emptiness refusals come from the
+    /// same command.
     pub fn set_selected_text(&mut self, text: &str) -> CadResult<CommandOutcome> {
         let target = match self.session.selection.refs() {
             [] => {
@@ -924,5 +930,33 @@ impl HostController {
             drawing,
             &self.session.selection,
         ))
+    }
+
+    /// The host-derived target of the popup text editor (ADR-0021 D4).
+    ///
+    /// Returns the **raw stored string** of the current single selection and
+    /// whether its source class treats a line break as a paragraph break
+    /// (`AcDbMText` and MULTILEADER text: `true`; `AcDbText`: `false`), or `None`
+    /// when the selection is not exactly one directly addressable text-bearing
+    /// entity. The popup payload is built from this — the UI never supplies
+    /// content, so it cannot write a different object or a different string.
+    ///
+    /// No content is interpreted here: `\P` is still `\P` and the caller decides
+    /// how to present it. A content-less MULTILEADER, a compound (block /
+    /// tolerance content), a multi-selection, an instance path and a sub-element
+    /// all report `None`.
+    pub fn selected_text_edit(&self) -> CadResult<Option<(String, bool)>> {
+        let [only] = self.session.selection.refs() else {
+            return Ok(None);
+        };
+        if !only.instance.0.is_empty() || only.sub_element.is_some() {
+            return Ok(None);
+        }
+        let drawing = self.drawing_required()?;
+        let Some(entity) = drawing.entity(only.entity) else {
+            return Ok(None);
+        };
+        Ok(crate::selection::editable_text_source(entity)
+            .map(|(text, multiline)| (text.to_string(), multiline)))
     }
 }

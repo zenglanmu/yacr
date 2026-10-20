@@ -35,6 +35,16 @@
 //!   **accept**, which proves the gate is released rather than merely reported as
 //!   released.
 //! * `t=3+hold+4`: one summary line.
+//! * from `YACR_PROBE_POPUP_TEXTEDIT_AT` (default `220`) onwards: the
+//!   **text-edit** phase ([`super::popup_textedit`]), gated by this same variable
+//!   but with its own start second and grab hold (the modal gate refuses CAD input
+//!   while a popup is open, so stretching this phase's hold to reach the draw
+//!   driver's selection would block that driver): precondition on the real
+//!   selection, `textEdit` open with the host-derived payload, a replacement
+//!   admitted through the real `cad_set_selected_text` queue and drained by the
+//!   owner tick, a status verification (stored `\P` form, multiline, entity
+//!   count, tool/error), close, and gate re-admission. It has its own
+//!   `[probe] popup textedit evidence:` summary line.
 //!
 //! ## Honest limits
 //!
@@ -147,12 +157,28 @@ pub fn maybe_spawn_popup_evidence(app: &tauri::AppHandle) {
         return;
     }
     let hold = hold_seconds();
+    let textedit_start = super::popup_textedit::start_seconds(OPEN_AT + hold);
+    let textedit_hold = super::popup_textedit::hold_seconds();
+    let textedit = super::popup_textedit::PhaseTimes::at(textedit_start, textedit_hold);
     eprintln!(
         "[probe] popup evidence: enabled (YACR_PROBE_POPUP_EVIDENCE); open kind={POPUP_KIND} at \
          t={OPEN_AT}s, gate proof at t={GATE_AT}s, close at t={}s, re-admission at t={}s; \
          popup trigger is the probe driver, NOT a real click",
         OPEN_AT + hold,
         OPEN_AT + hold + 3
+    );
+    eprintln!(
+        "[probe] popup textedit evidence: scheduled (same YACR_PROBE_POPUP_EVIDENCE) after the \
+         about phase: precondition t={}s, open t={}s, apply t={}s, verify t={}s, close t={}s, \
+         summary t={}s; hold={}s (YACR_PROBE_POPUP_TEXTEDIT_HOLD); it needs the selection left by \
+         the earlier draw phases (MLEADER at t≈212s) and skips, never passes, without one",
+        textedit.precondition,
+        textedit.open,
+        textedit.apply,
+        textedit.verify,
+        textedit.close,
+        textedit.summary,
+        textedit_hold,
     );
     let app = app.clone();
     if let Err(error) = std::thread::Builder::new()
@@ -252,6 +278,15 @@ fn run_popup_evidence(app: tauri::AppHandle, hold: u64) {
             })
         });
     }
+
+    // ---- Phase 2: the text-edit popup (`textEdit`), after the `about` phase.
+    //      Same env gate, but its own start second and grab hold: the modal gate
+    //      refuses CAD input while a popup is open, so stretching the `about`
+    //      hold to reach the draw driver's selection would block that driver. ----
+    let textedit_start = super::popup_textedit::start_seconds(close_at);
+    let textedit_hold = super::popup_textedit::hold_seconds();
+    let textedit = super::popup_textedit::PhaseTimes::at(textedit_start, textedit_hold);
+    super::popup_textedit::schedule_textedit_phase(&app, &start, textedit, textedit_hold);
 }
 
 /// Step 1–3: status before, open through the host path, status while open, and
@@ -330,7 +365,7 @@ fn gate_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<PopupEvidence>>) {
         return;
     }
     let shared = app.state::<ProbeShared>().0.clone();
-    let input = probe_pointer_move();
+    let input = probe_pointer_move(PROBE_INPUT_SEQUENCE);
 
     let (input_result, inputs_before, inputs_after) = {
         let mut state = lock_shared(&shared);
@@ -474,7 +509,7 @@ fn readmit_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<PopupEvidence>>) {
         return;
     }
     let shared = app.state::<ProbeShared>().0.clone();
-    let input = probe_pointer_move();
+    let input = probe_pointer_move(PROBE_INPUT_SEQUENCE);
 
     let input_result = {
         let mut state = lock_shared(&shared);
@@ -545,9 +580,12 @@ fn readmit_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<PopupEvidence>>) {
 }
 
 /// The harmless pointer payload used for both input admissions.
-fn probe_pointer_move() -> ProbeInput {
+///
+/// `pub(super)`: the text-edit phase in [`super::popup_textedit`] reuses the same
+/// payload with its own sequence, so the two admissions can never be confused.
+pub(super) fn probe_pointer_move(sequence: u64) -> ProbeInput {
     ProbeInput {
-        sequence: PROBE_INPUT_SEQUENCE,
+        sequence,
         kind: InputKind::PointerMove,
         x: Some(PROBE_SURFACE_WIDTH / 2.0),
         y: Some(PROBE_SURFACE_HEIGHT / 2.0),
@@ -571,7 +609,12 @@ fn probe_pointer_move() -> ProbeInput {
 /// `[probe] popup evidence: window xid=0x…`. On native Wayland there is no XID
 /// (the compositor owns the toplevel), so the `wl_surface` pointer is logged and
 /// no X11 grab is claimed.
-fn log_popup_native_handle(window: &tauri::Window) -> Option<(&'static str, Option<String>)> {
+///
+/// `pub(super)`: the text-edit phase in [`super::popup_textedit`] logs the same
+/// line for its own window.
+pub(super) fn log_popup_native_handle(
+    window: &tauri::Window,
+) -> Option<(&'static str, Option<String>)> {
     let handle = match window.window_handle() {
         Ok(handle) => handle,
         Err(error) => {
@@ -605,7 +648,7 @@ fn log_popup_native_handle(window: &tauri::Window) -> Option<(&'static str, Opti
 }
 
 /// `cad_status.popup` as `kind:label:modal`, or `-` when it is `null`.
-fn describe_status_popup(status: &CadStatus) -> String {
+pub(super) fn describe_status_popup(status: &CadStatus) -> String {
     status
         .popup
         .as_ref()

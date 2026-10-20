@@ -14,6 +14,9 @@
 //     webview commands.
 //
 // The dialog's only inputs are Escape, its Close buttons and the window manager.
+// The text editor adds its own field and Apply, which reach exactly one IPC
+// (`cad_set_selected_text`, through `TextEditDialog`) — still no polling and no
+// global shortcut.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { CATALOGS } from '../catalogs.mjs';
@@ -22,8 +25,10 @@ import { I18nContext, useI18n } from '../context.mjs';
 import { Icon } from '../icons.jsx';
 import { Button, IconButton } from './primitives.jsx';
 import { closePopup, POPUP_KEYS, popupView } from '../popup.mjs';
+import { POPUP_TEXT_KEYS } from '../popup-textedit.mjs';
 import { DIALOG_BODY, DIALOG_CARD, DIALOG_CONTENT, DIALOG_FOOT, DIALOG_HEAD, DIALOG_TITLE } from '../popup-layout.mjs';
 import { AboutDialog } from './AboutDialog.jsx';
+import { TextEditDialog } from './TextEditDialog.jsx';
 
 function Failure({ text }) {
   if (!text) return null;
@@ -81,6 +86,14 @@ export function PopupRoot({ boot }) {
   const [failure, setFailure] = useState('');
   const t = useMemo(() => createTranslator(CATALOGS, locale), [locale]);
   const view = useMemo(() => popupView(boot), [boot]);
+  // The window title and the dialog's accessible name are the same line: the
+  // kind's catalog title, or the requested kind itself when this bundle does not
+  // implement it.
+  const dialogTitle = view.kind === 'about'
+    ? t(POPUP_KEYS.title)
+    : view.kind === 'textEdit'
+      ? t(POPUP_TEXT_KEYS.title)
+      : String(view.requestedKind ?? '');
 
   // Every close path funnels here. The host owns the window: an accepted close
   // tears it down, so nothing local is hidden. A failure is reported in place
@@ -95,14 +108,17 @@ export function PopupRoot({ boot }) {
 
   useEffect(() => {
     document.documentElement.lang = localeTag(locale);
-    document.title = view.kind === 'about' ? t(POPUP_KEYS.title) : String(view.requestedKind ?? '');
-  }, [locale, t, view]);
+    document.title = dialogTitle;
+  }, [locale, t, view, dialogTitle]);
 
   // The one key this document owns. Every other accelerator belongs to the main
-  // window and is left alone here.
+  // window and is left alone here. An IME composition owns its own keys, so the
+  // Escape that cancels a composition never closes the window (and never costs a
+  // draft half-way through a CJK sentence).
   useEffect(() => {
     const onKeyDown = event => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (event.isComposing || event.keyCode === 229) return;
       event.preventDefault();
       requestClose();
     };
@@ -111,7 +127,7 @@ export function PopupRoot({ boot }) {
   }, [requestClose]);
 
   const i18n = useMemo(() => ({ t, locale, locales: LOCALES }), [t, locale]);
-  const label = view.kind === 'about' ? t(POPUP_KEYS.title) : (view.requestedKind ?? undefined);
+  const label = dialogTitle || undefined;
 
   return (
     <I18nContext.Provider value={i18n}>
@@ -124,7 +140,9 @@ export function PopupRoot({ boot }) {
       >
         {view.kind === 'about'
           ? <AboutDialog view={view} onClose={requestClose} failure={failure} />
-          : <UnknownDialog kind={view.requestedKind} onClose={requestClose} failure={failure} />}
+          : view.kind === 'textEdit'
+            ? <TextEditDialog view={view} onClose={requestClose} closeFailure={failure} />
+            : <UnknownDialog kind={view.requestedKind} onClose={requestClose} failure={failure} />}
       </main>
     </I18nContext.Provider>
   );

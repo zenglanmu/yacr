@@ -103,6 +103,21 @@ pub struct CadSelection {
     /// non-text entity, and a block-instance member or sub-element (text editing
     /// never reaches into block internals).
     pub text: Option<String>,
+    /// Whether [`Self::text`] is a **multi-line** text target: the editable
+    /// string comes from `AcDbMText` or from a `MultiLeader` with text content.
+    ///
+    /// Always present, never `null`; `false` for an `AcDbText` and **always
+    /// `false` whenever [`Self::text`] is `None`** (nothing editable). It is a
+    /// **capability of the current text target**, not a display property: the
+    /// docked panel and the popup apply one rule from this field instead of
+    /// reading a display row such as `type`.
+    ///
+    /// Wire name: **`text_multiline`**. Like [`CadTool::awaiting_text`] it
+    /// deliberately overrides the block's camelCase convention because that is
+    /// the name the UI lane reads; emitting `textMultiline` would silently make
+    /// the panel and the popup disagree.
+    #[serde(rename = "text_multiline")]
+    pub text_multiline: bool,
 }
 
 impl CadSelection {
@@ -114,6 +129,8 @@ impl CadSelection {
             rows: Vec::new(),
             mixed_keys: Vec::new(),
             text: None,
+            // Nothing editable: no text capability.
+            text_multiline: false,
         }
     }
 
@@ -131,6 +148,7 @@ impl CadSelection {
             mixed_keys: Vec::new(),
             // No authoritative document means no editable string, never a guess.
             text: None,
+            text_multiline: false,
         }
     }
 
@@ -163,18 +181,25 @@ impl CadSelection {
         } else {
             Vec::new()
         };
+        // Only a single resolved text-bearing entity (TEXT / MTEXT /
+        // MULTILEADER text) carries a write-back string; the application
+        // leaves it `None` for every other selection.
+        let text = if count == 1 {
+            properties.text.clone()
+        } else {
+            None
+        };
+        // The multiline capability is meaningless without an editable string, so
+        // it is forced `false` whenever `text` is absent — even if a caller
+        // handed a stale flag in.
+        let text_multiline = text.is_some() && properties.text_multiline;
         Self {
             count,
             empty: count == 0,
             rows,
             mixed_keys,
-            // Only a single resolved `Text` carries a write-back string; the
-            // application leaves it `None` for every other selection.
-            text: if count == 1 {
-                properties.text.clone()
-            } else {
-                None
-            },
+            text,
+            text_multiline,
         }
     }
 }

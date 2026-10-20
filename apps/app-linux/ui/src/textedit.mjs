@@ -69,6 +69,30 @@ export function selectedTextOf(selection) {
 }
 
 /**
+ * The source class's line-break policy, as the host reports it — or `null` when
+ * the host does not tell us.
+ *
+ * `CadSelection.text_multiline` (wire `text_multiline`) is the one honest source
+ * for this: `true` for the multi-line source classes (MTEXT markup and leader
+ * text), `false` for TEXT, which the host refuses a newline for by name. The
+ * mode is **never** inferred from a display row's `type`: those values are
+ * formatted for reading, and behaviour must not hang off display copy. The
+ * reader is deliberately tolerant in one direction only — a missing or
+ * non-boolean field is `null` ("unknown"), never a guess, so the field can keep
+ * its previous behaviour on a build that predates the field instead of
+ * inventing a mode.
+ *
+ * Only a single selected object with a real string has an editable mode; a
+ * mode without text would describe something the panel does not edit.
+ */
+export function selectedTextMultilineOf(selection) {
+  if (!selection || typeof selection !== 'object' || Array.isArray(selection)) return null;
+  if (selection.count !== 1) return null;
+  if (typeof selection.text !== 'string') return null;
+  return typeof selection.text_multiline === 'boolean' ? selection.text_multiline : null;
+}
+
+/**
  * Whether `text` would be admitted by the host, and why not when it would not.
  *
  * Identical rules to the text step ([`checkToolText`]): the host counts Unicode
@@ -171,17 +195,37 @@ export function textEditView(state) {
 }
 
 /**
- * What a key press in the editor means.
+ * What a key press in the editor means, per line-break mode.
  *
- * `Enter` alone is a **line break** (the field is multi-line and the text is
- * edited verbatim, so a text block keeps its lines); the submit is the explicit
- * `Ctrl+Enter`/`Cmd+Enter`. An IME composition owns every key it reports —
- * including the Enter that ends a composition, and the legacy `keyCode === 229`
- * signal some IMEs send without `isComposing` — so composing never submits.
+ * The map is the text-edit popup's (`popup-textedit.mjs`), applied to the docked
+ * field so the two editors cannot promise different keys for the same entity:
+ *
+ * - **single-line** (`text_multiline === false`, TEXT): `Enter` **applies**,
+ *   mirroring the command line and the popup. `Shift+Enter`/`Alt+Enter` are
+ *   `'block'` — they insert nothing and send nothing, because the host refuses a
+ *   newline for TEXT by name (`textedit.newline_text`) and offering the break
+ *   here would only earn that refusal after the fact.
+ * - **multi-line** (`text_multiline === true`, MTEXT and leader text): unchanged —
+ *   `Enter` stays a line break (`'none'` lets the textarea insert it) and the
+ *   submit is the explicit `Ctrl+Enter`/`Cmd+Enter`.
+ * - **unknown** (`null`/absent, an older host that does not send the field):
+ *   the pre-`text_multiline` behaviour, kept deliberately — `Enter` is a line
+ *   break and `Ctrl+Enter` applies. Guessing a mode here could either swallow a
+ *   legitimate line break or send half an edit, so the field waits for the host
+ *   to say which it is.
+ * - An IME composition owns every key it reports — including the Enter that ends
+ *   a composition, and the legacy `keyCode === 229` signal some IMEs send
+ *   without `isComposing` — so composing never submits, in any mode.
+ * - A held `Enter` is one action, not a burst (`repeat` is ignored).
  */
-export function textEditKeyAction(event = {}) {
+export function textEditKeyAction(event = {}, multiline = null) {
   if (!event || typeof event !== 'object') return 'none';
   if (event.isComposing || event.keyCode === 229) return 'none';
   if (event.key !== 'Enter' || event.repeat) return 'none';
-  return event.ctrlKey || event.metaKey ? 'submit' : 'none';
+  if (event.ctrlKey || event.metaKey) return 'submit';
+  if (multiline === true) return 'none';
+  if (multiline === false) return event.shiftKey || event.altKey ? 'block' : 'submit';
+  // Unknown mode: the behaviour before `text_multiline` existed (line break,
+  // explicit Ctrl/Cmd+Enter to apply).
+  return 'none';
 }

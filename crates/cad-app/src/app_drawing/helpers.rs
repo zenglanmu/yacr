@@ -47,6 +47,16 @@ pub(super) fn geometry_kind(geometry: &SemanticGeometry) -> &'static str {
     class_name(geometry)
 }
 
+/// Whether a stored `Text` entity came from MTEXT (`AcDbMText`).
+///
+/// The string is the **raw** DXF content: only `AcDbMText` interprets `\P` (and
+/// accepts line breaks) in the viewport, so the text-edit channels convert
+/// newlines to `\P` only for that source class and refuse them for `AcDbText`
+/// (ADR-0021 D4).
+pub(super) fn is_multiline_text_source(entity: &DbEntity) -> bool {
+    entity.object.type_key == "AcDbMText"
+}
+
 pub(super) fn distance(a: Point3, b: Point3) -> f64 {
     let dx = a.x - b.x;
     let dy = a.y - b.y;

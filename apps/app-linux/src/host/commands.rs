@@ -258,9 +258,12 @@ pub fn cad_set_selected_text(
 /// already open (ADR-0021 D1/D2).
 ///
 /// The wire carries a **kind key only** (`{ kind: String }`): a caller can never
-/// choose a window label, URL or script. `"about"` is the only allowlisted kind;
-/// anything else is refused with `popup.unknown_kind: …` before any window or
-/// gate change. While the popup is open the host refuses CAD input
+/// choose a window label, URL or script. `"about"` and `"textEdit"` are the
+/// allowlisted kinds; anything else is refused with `popup.unknown_kind: …`
+/// before any window or gate change. `textEdit` derives its payload from the
+/// host's current single selection (never from the caller); a selection that is
+/// not exactly one editable text is refused with `popup.no_text_selection: …`
+/// and no window is created. While the popup is open the host refuses CAD input
 /// (`popup.modal_open`), independently of the UI's own pointer suspension.
 #[tauri::command]
 pub fn cad_open_popup(
@@ -268,8 +271,15 @@ pub fn cad_open_popup(
     shared: tauri::State<'_, ProbeShared>,
     kind: String,
 ) -> Result<PopupAck, String> {
-    let ops = TauriPopupOps::new(app, shared.0.clone());
-    popup::open_popup(&shared.0, &kind, &ops)
+    // The CAD session and the native window are main-thread state; the whole
+    // open runs there (see `popup::on_main_thread`).
+    let shared = shared.0.clone();
+    let task_shared = shared.clone();
+    let task_app = app.clone();
+    popup::on_main_thread(&app, move || {
+        let ops = TauriPopupOps::new(task_app, task_shared.clone());
+        popup::open_popup(&task_shared, &kind, &ops)
+    })
 }
 
 /// `cad_close_popup` command: close the open modal popup (ADR-0021 D1/D2).

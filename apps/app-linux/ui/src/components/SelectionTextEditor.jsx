@@ -1,5 +1,7 @@
 // The one editable control of the inspector: the text content of the single
-// selected text entity (ADR 0020 addendum B, option B).
+// selected text entity (ADR 0020 addendum B, option B). Its slower sibling —
+// the host-window editor with room for long text and raw markup — is opened
+// from the action row below (ADR 0021 D4); this field stays the fast path.
 //
 // It lives in the docked properties palette — chrome, outside the CAD rectangle
 // — because the CAD surface is native and input-transparent: nothing in this
@@ -12,6 +14,12 @@
 // state machine that keeps a draft honest through selection changes lives in
 // `textedit.mjs`; this file is layout plus the two event paths (type, apply).
 //
+// The keys follow the entity's line-break mode, which the host reports as
+// `text_multiline` (`selectedTextMultilineOf`): `Enter` applies for TEXT and
+// stays a line break for the multi-line source classes, exactly like the popup
+// window. A host that does not send the field yet reads as "unknown" and keeps
+// the old keys — the mode is never guessed from a display row.
+//
 // Styling note: `style.css` belongs to another lane in this slice, so the shared
 // field surface (`.commandline__input`) supplies the tokens and only the
 // palette-specific box is set inline. Moving those three objects into
@@ -21,10 +29,12 @@ import { Icon } from '../icons.jsx';
 import { Button } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { TEXT_TOO_LONG_KEY } from '../text.mjs';
+import { POPUP_TEXT_KEYS, canOpenTextEditPopup } from '../popup-textedit.mjs';
 import {
   SELECTED_TEXT_MAX_LENGTH,
   TEXT_EDIT_INITIAL,
   TEXT_EDIT_KEYS,
+  selectedTextMultilineOf,
   selectedTextOf,
   textEditApplied,
   textEditDraftChanged,
@@ -34,7 +44,11 @@ import {
 } from '../textedit.mjs';
 
 const EDITOR_STYLE = { display: 'flex', flexDirection: 'column', gap: '4px' };
-const LABEL_STYLE = { display: 'inline-flex', alignItems: 'center', gap: '5px' };
+// The section label and the window entry share one row: the entry is an action
+// *about* this editor, so it belongs with its heading rather than crowding the
+// Apply/count row at the palette's 300px width.
+const LABEL_ROW_STYLE = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between', gap: '8px', margin: '10px 0 4px' };
+const LABEL_STYLE = { display: 'inline-flex', alignItems: 'center', gap: '5px', margin: 0, whiteSpace: 'nowrap' };
 const FIELD_STYLE = {
   width: '100%',
   height: 'auto',
@@ -44,6 +58,8 @@ const FIELD_STYLE = {
   resize: 'vertical',
 };
 const ACTION_ROW_STYLE = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' };
+const COUNT_STYLE = { textAlign: 'right' };
+const HINT_STYLE = { margin: 0, color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.4 };
 const FIELD_ID = 'cad-selection-text';
 
 export function SelectionTextEditor() {
@@ -56,6 +72,12 @@ export function SelectionTextEditor() {
   // field really shows instead of a render behind.
   const draftRef = useRef('');
   const host = selectedTextOf(shell.status?.selection ?? null);
+  const canOpenInWindow = canOpenTextEditPopup(shell.status?.selection ?? null);
+  // The entity's line-break policy, straight from the host's `text_multiline`.
+  // `null` means "the host does not say" (a build that predates the field) and
+  // the field keeps its previous keys; it is never derived from a display row's
+  // `type`, because those values are copy, not behaviour.
+  const multiline = selectedTextMultilineOf(shell.status?.selection ?? null);
   const view = textEditView(state);
 
   // Follow the host selection (including the value the palette was opened with,
@@ -72,7 +94,7 @@ export function SelectionTextEditor() {
   function apply() {
     // Detached (no single text selection) or over the bound: the field already
     // says why, and nothing is sent. The button is disabled for the same reason;
-    // this guard covers the `Ctrl+Enter` path.
+    // this guard covers the keyboard path.
     if (!view.canApply) return;
     const sending = draftRef.current;
     void shell.applySelectedText(sending).then(result => {
@@ -104,15 +126,46 @@ export function SelectionTextEditor() {
   const notice = tooLongText ?? message;
   const detachedText = view.detached ? t(TEXT_EDIT_KEYS.detached) : null;
   const applyLabel = t(TEXT_EDIT_KEYS.apply);
-  const describedBy = [detachedText ? `${FIELD_ID}-detached` : null, notice ? `${FIELD_ID}-notice` : null]
-    .filter(Boolean).join(' ');
+  // Single-line only: the new Enter binding needs one line of explanation, and
+  // the popup already words it ("line breaks are not allowed") — reusing that
+  // key keeps the two editors saying the same thing. Multi-line and unknown keep
+  // the old affordance untouched.
+  const hint = multiline === false ? t(POPUP_TEXT_KEYS.hintSingle) : null;
+  const hintId = `${FIELD_ID}-hint`;
+  // The accelerator promised on the button matches the keys above: `Enter`
+  // applies for single-line text (Ctrl+Enter still works), while a multi-line or
+  // unknown draft applies on the explicit Ctrl/Cmd+Enter chord.
+  const applyTitle = multiline === false ? `${applyLabel} (Enter)` : `${applyLabel} (Ctrl+Enter)`;
+  const describedBy = [
+    hint ? hintId : null,
+    detachedText ? `${FIELD_ID}-detached` : null,
+    notice ? `${FIELD_ID}-notice` : null,
+  ].filter(Boolean).join(' ');
 
   return (
     <div className="properties__text" style={EDITOR_STYLE}>
-      <label className="palette__section" style={LABEL_STYLE} htmlFor={FIELD_ID}>
-        <Icon name="text" size={13} />
-        {t(TEXT_EDIT_KEYS.field)}
-      </label>
+      <div style={LABEL_ROW_STYLE}>
+        <label className="palette__section" style={LABEL_STYLE} htmlFor={FIELD_ID}>
+          <Icon name="text" size={13} />
+          {t(TEXT_EDIT_KEYS.field)}
+        </label>
+        {/* The slow path to the same edit: a host window with room for long
+            text and for the raw markup. Enabled only when `selection.text` is a
+            real string — the host derives the payload from that selection and
+            refuses anything else with `popup.no_text_selection`, so an entry
+            without text could only produce a refusal. The inline field and
+            TEXTEDIT stay exactly as they are: this is an extra affordance, not
+            a replacement. */}
+        <Button
+          variant="ghost"
+          size="xs"
+          style={{ marginLeft: 'auto' }}
+          disabled={!canOpenInWindow}
+          onClick={() => shell.openTextEditPopup()}
+        >
+          {t(POPUP_TEXT_KEYS.entry)}
+        </Button>
+      </div>
       <textarea
         id={FIELD_ID}
         className="commandline__input"
@@ -129,10 +182,15 @@ export function SelectionTextEditor() {
           setMessage(null);
         }}
         onKeyDown={event => {
-          // A plain Enter is a line break; an IME composition owns its own keys.
-          if (textEditKeyAction(event) !== 'submit') return;
+          // The popup's key map, in the docked field: single-line text applies on
+          // Enter and does nothing on Shift/Alt+Enter; multi-line keeps Enter as
+          // a line break and applies on Ctrl/Cmd+Enter; an IME composition owns
+          // its own keys in both modes. `block` still prevents the default, so a
+          // Shift+Enter inserts no break the host would refuse.
+          const action = textEditKeyAction(event, multiline);
+          if (action === 'none') return;
           event.preventDefault();
-          apply();
+          if (action === 'submit') apply();
         }}
       />
       <div style={ACTION_ROW_STYLE}>
@@ -142,18 +200,19 @@ export function SelectionTextEditor() {
           icon="check"
           iconSize={14}
           disabled={!view.canApply}
-          title={`${applyLabel} (Ctrl+Enter)`}
+          title={applyTitle}
           onClick={apply}
         >
           {applyLabel}
         </Button>
         <span
           className="properties__mixed mono"
-          style={view.tooLong ? { color: 'var(--danger)' } : undefined}
+          style={view.tooLong ? { ...COUNT_STYLE, color: 'var(--danger)' } : COUNT_STYLE}
         >
           {t(TEXT_EDIT_KEYS.count, { used: view.length, max: view.max })}
         </span>
       </div>
+      {hint ? <p id={hintId} style={HINT_STYLE}>{hint}</p> : null}
       {detachedText ? <p id={`${FIELD_ID}-detached`} className="palette__error" role="status">{detachedText}</p> : null}
       {notice ? <p id={`${FIELD_ID}-notice`} className="palette__error" role="alert">{notice}</p> : null}
     </div>

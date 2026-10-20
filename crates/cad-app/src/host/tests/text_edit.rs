@@ -311,3 +311,261 @@ fn the_status_selection_block_carries_the_round_trippable_text() {
     controller.set_selection(Vec::new()).unwrap();
     assert_eq!(controller.selection_properties().unwrap().text, None);
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0021 D4: the popup payload comes from the real selection, and both
+// entry paths share the newline policy.
+// ---------------------------------------------------------------------------
+
+fn mtext_geometry(text: &str) -> SemanticGeometry {
+    SemanticGeometry::Text {
+        text: text.into(),
+        position: p(100.0, 0.0),
+        style: StyleId(0),
+        height: 20.0,
+        rotation: 0.0,
+        font: Some("arial.ttf".into()),
+        h_align: TextAlignH::Left,
+        v_align: TextAlignV::Baseline,
+    }
+}
+
+fn leader_geometry(text: Option<&str>) -> SemanticGeometry {
+    let content = if text.is_some() {
+        MLeaderContent::Text
+    } else {
+        MLeaderContent::None
+    };
+    let (geometry, _) = MultiLeaderGeometry::from_import(MultiLeaderParts {
+        style: MLeaderStyleValues {
+            path_type: MLeaderPathType::StraightLineSegments,
+            enable_landing: true,
+            enable_dogleg: true,
+            landing_distance: 2.0,
+            landing_gap: 0.1,
+            arrowhead_size: 0.5,
+            text_height: 0.2,
+            text_style: StyleId(0),
+            text_style_name: "Standard".into(),
+            text_font: None,
+            scale_factor: 1.0,
+        },
+        style_name: "Standard".into(),
+        override_mask: 0,
+        content,
+        text: MLeaderText {
+            string: text.unwrap_or_default().into(),
+            location: p(300.0, 0.0),
+            rotation: 0.0,
+            height: 0.2,
+            width: 0.0,
+            attachment_point: 2,
+            left_attachment: 2,
+        },
+        roots: vec![MLeaderRoot {
+            leader_index: 0,
+            landing_point: p(300.0, 0.0),
+            dogleg_vector: p(1.0, 0.0),
+            dogleg_length: 2.0,
+        }],
+        lines: vec![MLeaderLine {
+            root_index: 0,
+            index: 0,
+            points: vec![p(280.0, -20.0), p(298.0, 0.0)],
+            path_type: MLeaderPathType::StraightLineSegments,
+            override_flags: 0,
+            arrowhead_size: 0.5,
+            arrowhead_handle: None,
+        }],
+        reserved: MLeaderReserved::default(),
+        plane: PlaneFrame::default(),
+    });
+    SemanticGeometry::MultiLeader(Box::new(geometry))
+}
+
+fn entity(id: u128, type_key: &str, geometry: SemanticGeometry, order: i64) -> DbEntity {
+    DbEntity {
+        object: DbObject {
+            id: ObjectId(id),
+            type_key: type_key.into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(id),
+        layer: LayerId(0),
+        space: SpaceId::Model,
+        geometry,
+        draw_order: order,
+    }
+}
+
+fn single_ref(controller: &HostController, id: u128) -> SelectionRef {
+    SelectionRef {
+        document: controller.document_id,
+        entity: EntityId(id),
+        instance: InstancePath::default(),
+        sub_element: None,
+    }
+}
+
+/// A drawing with one of each editable kind plus the refusal cases:
+/// 201 MTEXT, 202 LINE, 203 MULTILEADER text, 204 content-less leader,
+/// 205 TEXT.
+fn mixed_text_fixture() -> HostController {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_entity(entity(201, "AcDbMText", mtext_geometry("LINE1\\PLINE2"), 0))
+        .unwrap();
+    b.insert_entity(entity(
+        202,
+        "AcDbLine",
+        SemanticGeometry::Line {
+            start: p(-200.0, -100.0),
+            end: p(-100.0, -100.0),
+        },
+        1,
+    ))
+    .unwrap();
+    b.insert_entity(entity(
+        203,
+        "AcDbMultiLeader",
+        leader_geometry(Some("LEADER\\PNOTE")),
+        2,
+    ))
+    .unwrap();
+    b.insert_entity(entity(204, "AcDbMultiLeader", leader_geometry(None), 3))
+        .unwrap();
+    b.insert_entity(entity(
+        205,
+        "AcDbText",
+        SemanticGeometry::Text {
+            text: "SINGLE".into(),
+            position: p(-400.0, 0.0),
+            style: StyleId(0),
+            height: 20.0,
+            rotation: 0.0,
+            font: Some("arial.ttf".into()),
+            h_align: TextAlignH::Left,
+            v_align: TextAlignV::Baseline,
+        },
+        4,
+    ))
+    .unwrap();
+    fixture_with(b.finish().unwrap())
+}
+
+fn stored_string(controller: &HostController, id: u128) -> String {
+    let drawing = controller.drawing().expect("a document");
+    let entity = drawing.entity(EntityId(id)).expect("the entity");
+    crate::selection::editable_text_source(entity)
+        .map(|(text, _)| text.to_string())
+        .unwrap_or_default()
+}
+
+#[test]
+fn selected_text_edit_derives_the_payload_from_the_real_selection() {
+    let mut controller = mixed_text_fixture();
+
+    // TEXT: single-line.
+    controller
+        .set_selection(vec![single_ref(&controller, 205)])
+        .unwrap();
+    assert_eq!(
+        controller.selected_text_edit().unwrap(),
+        Some(("SINGLE".to_string(), false))
+    );
+
+    // MTEXT: multiline, raw `\P` preserved (the popup maps it at display time).
+    controller
+        .set_selection(vec![single_ref(&controller, 201)])
+        .unwrap();
+    assert_eq!(
+        controller.selected_text_edit().unwrap(),
+        Some(("LINE1\\PLINE2".to_string(), true))
+    );
+
+    // MULTILEADER text: multiline.
+    controller
+        .set_selection(vec![single_ref(&controller, 203)])
+        .unwrap();
+    assert_eq!(
+        controller.selected_text_edit().unwrap(),
+        Some(("LEADER\\PNOTE".to_string(), true))
+    );
+
+    // Content-less leader, non-text, multi-selection: no payload.
+    for selection in [
+        vec![single_ref(&controller, 204)],
+        vec![single_ref(&controller, 202)],
+        vec![single_ref(&controller, 201), single_ref(&controller, 203)],
+    ] {
+        controller.set_selection(selection).unwrap();
+        assert_eq!(controller.selected_text_edit().unwrap(), None);
+    }
+
+    // A block-instance member / sub-element is never reached into.
+    controller
+        .set_selection(vec![SelectionRef {
+            instance: InstancePath(vec![EntityId(202)]),
+            ..single_ref(&controller, 201)
+        }])
+        .unwrap();
+    assert_eq!(controller.selected_text_edit().unwrap(), None);
+    controller
+        .set_selection(vec![SelectionRef {
+            sub_element: Some(cad_domain::SubElementId {
+                source_key: "face0".into(),
+                topology_revision: Revision(0),
+            }),
+            ..single_ref(&controller, 201)
+        }])
+        .unwrap();
+    assert_eq!(controller.selected_text_edit().unwrap(), None);
+
+    // Empty selection and a missing document are no payload, not a fake one.
+    controller.set_selection(Vec::new()).unwrap();
+    assert_eq!(controller.selected_text_edit().unwrap(), None);
+}
+
+#[test]
+fn both_entry_paths_apply_the_same_newline_policy() {
+    let mut controller = mixed_text_fixture();
+
+    // Panel path (`SetSelectedText`) on MTEXT: convert, one transaction.
+    controller
+        .set_selection(vec![single_ref(&controller, 201)])
+        .unwrap();
+    controller.set_selected_text("A\r\nB\rC\nD").unwrap();
+    assert_eq!(stored_string(&controller, 201), "A\\PB\\PC\\PD");
+
+    // Panel path on TEXT: refused by name, nothing written.
+    controller
+        .set_selection(vec![single_ref(&controller, 205)])
+        .unwrap();
+    let rev = controller.drawing().unwrap().revision();
+    let error = controller.set_selected_text("A\nB").unwrap_err();
+    assert!(
+        format!("{error:?}").contains("textedit.newline_text"),
+        "{error:?}"
+    );
+    assert_eq!(stored_string(&controller, 205), "SINGLE");
+    assert_eq!(controller.drawing().unwrap().revision(), rev);
+
+    // Interactive path (`TEXTEDIT` pick + terminal text): same command, same
+    // policy, and the leader prefill is the stored raw string.
+    controller
+        .set_selection(vec![single_ref(&controller, 203)])
+        .unwrap();
+    controller.begin_draw_tool(DrawToolKind::TextEdit).unwrap();
+    controller.capture_tool_point(p(300.0, 0.0)).unwrap();
+    let preview = controller.session.draw_preview().expect("the tool");
+    assert_eq!(preview.text_prefill.as_deref(), Some("LEADER\\PNOTE"));
+    controller.session.set_tool_text("X\nY").unwrap();
+    controller.confirm_draw().unwrap();
+    assert_eq!(stored_string(&controller, 203), "X\\PY");
+}

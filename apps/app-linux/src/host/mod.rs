@@ -60,8 +60,16 @@ pub use options::{
 };
 pub use popup::PopupAck;
 // Evidence-only accessors (`YACR_PROBE_POPUP_EVIDENCE`): the host-side
-// open/close functions and the live popup window. Never used by the command path.
-pub(crate) use popup::{close_popup_for_probe, open_popup_for_probe, popup_window_for_probe};
+// open/close functions, the live popup window and the `textEdit` payload
+// derivation. Never used by the command path.
+pub(crate) use popup::{
+    close_popup_for_probe, open_popup_for_probe, popup_window_for_probe,
+    text_edit_payload_for_probe,
+};
+// Evidence-only: the **same** selected-text admission `cad_set_selected_text`
+// runs, so the text-edit popup phase queues through the real path instead of
+// calling `CadSession::set_selected_text` directly.
+pub(crate) use commands::admit_selected_text;
 pub use postload::requested_exit_code;
 pub(crate) use postload::resolve_process_exit;
 

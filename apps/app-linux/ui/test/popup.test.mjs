@@ -126,7 +126,8 @@ test('an unknown-but-well-formed kind is a shell boot, while the envelope stays 
   assert.deepEqual(readPopupBoot(unknown), {
     kind: 'future', modal: true, label: 'popup-1', payload: { version: '0.1.2', build: 'release' },
   });
-  assert.deepEqual(POPUP_KINDS, ['about']);
+  // The implemented set grows only by contract: `about` and the text editor.
+  assert.deepEqual(POPUP_KINDS, ['about', 'textEdit']);
 });
 
 test('a well-formed about literal is accepted and frozen, extra fields ignored', () => {

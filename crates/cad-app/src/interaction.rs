@@ -175,10 +175,14 @@ pub enum InteractionRequest {
     /// id**: the host resolves and validates its own current selection at apply
     /// time, so a UI cannot retarget a different object with a stale id. It is
     /// accepted only when the selection is exactly one **directly addressable**
-    /// `Text` entity; nothing selected, a multi-selection and any non-text
-    /// selection are named refusals (`textedit.selection_empty`,
-    /// `textedit.selection_multiple`, `textedit.target_not_text`) that open no
-    /// transaction. Whole-string replacement only (no cursor-level editor).
+    /// text entity (TEXT, MTEXT or MULTILEADER text; ADR-0021 D4); nothing
+    /// selected, a multi-selection and any non-text selection are named refusals
+    /// (`textedit.selection_empty`, `textedit.selection_multiple`,
+    /// `textedit.target_not_text`, `textedit.mleader_content_not_text`) that open
+    /// no transaction. Whole-string replacement only (no cursor-level editor).
+    /// Newlines are stored as `\P` for MTEXT / MULTILEADER and refused for
+    /// `AcDbText` (`textedit.newline_text`), so the panel's textarea and the
+    /// popup share one policy.
     SetSelectedText {
         text: String,
     },

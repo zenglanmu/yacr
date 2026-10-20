@@ -21,6 +21,7 @@ import {
   TEXT_EDIT_INITIAL,
   TEXT_EDIT_KEYS,
   checkSelectedText,
+  selectedTextMultilineOf,
   selectedTextOf,
   setSelectedText,
   textEditApplied,
@@ -29,6 +30,7 @@ import {
   textEditKeyAction,
   textEditView,
 } from '../src/textedit.mjs';
+import { POPUP_TEXT_KEYS, textEditKeyAction as popupTextEditKeyAction } from '../src/popup-textedit.mjs';
 import { TEXT_TOO_LONG_KEY, TOOL_TEXT_MAX_LENGTH, toolTextPrefill } from '../src/text.mjs';
 import { createTranslator } from '../src/i18n.mjs';
 import { readCatalog, readModule } from './helpers.mjs';
@@ -223,29 +225,162 @@ test('an accepted edit becomes the new baseline so the host echo does not park t
   assert.deepEqual(textEditHostChanged(applied, 'A replacement!'), { base: 'A replacement!', draft: 'A replacement!', detached: false });
 });
 
-test('an IME composition never applies the edit, and Enter is a line break', () => {
-  // The two IME signals: a standard `isComposing` and the legacy `keyCode` 229
-  // that some IMEs send for the Enter that commits the composition.
-  assert.equal(textEditKeyAction({ key: 'Enter', ctrlKey: true, isComposing: true }), 'none');
-  assert.equal(textEditKeyAction({ key: 'Enter', ctrlKey: true, keyCode: 229 }), 'none');
-  assert.equal(textEditKeyAction({ key: 'Enter', metaKey: true, isComposing: true }), 'none');
-  // The submit is the explicit accelerator, once per press.
+/** A single selected text entity whose host reports a line-break mode. */
+const textWithMode = (text, multiline) => ({ ...singleText(text), text_multiline: multiline });
+
+/**
+ * Feed keydowns through the editor's key map, sending only on `'submit'`.
+ *
+ * The component does exactly this: `'none'` is left to the textarea (which
+ * inserts a line break), `'block'` calls `preventDefault()` so neither a break
+ * nor a send happens, and `'submit'` calls `apply()` once.
+ */
+async function pressKeys(keys, multiline, text = 'Ground floor') {
+  const calls = [];
+  const invoke = async (command, payload) => { calls.push([command, payload]); return { accepted: true }; };
+  for (const key of keys) {
+    if (textEditKeyAction(key, multiline) === 'submit') await setSelectedText(invoke, text);
+  }
+  return calls;
+}
+
+test('a single-line entity applies on Enter, and Shift/Alt+Enter neither send nor break', async () => {
+  // TEXT: the host refuses a newline by name, so offering the break here would
+  // only earn that refusal on Apply. Enter applies, like the command line.
+  assert.equal(selectedTextMultilineOf(textWithMode('Ground floor', false)), false);
+  assert.equal(textEditKeyAction({ key: 'Enter' }, false), 'submit');
+  assert.equal(textEditKeyAction({ key: 'Enter', ctrlKey: true }, false), 'submit');
+  assert.equal(textEditKeyAction({ key: 'Enter', metaKey: true }, false), 'submit');
+  // `block` (not `none`): the component still prevents the default, so the
+  // textarea inserts nothing at all.
+  assert.equal(textEditKeyAction({ key: 'Enter', shiftKey: true }, false), 'block');
+  assert.equal(textEditKeyAction({ key: 'Enter', altKey: true }, false), 'block');
+  // One press, one send — a held key repeats but applies once.
+  const one = await pressKeys([{ key: 'Enter' }, { key: 'Enter', repeat: true }, { key: 'Enter', repeat: true }], false);
+  assert.deepEqual(one, [['cad_set_selected_text', { text: 'Ground floor' }]]);
+  // Shift/Alt+Enter send nothing, and the block is what stops the line break.
+  assert.deepEqual(await pressKeys([
+    { key: 'Enter', shiftKey: true },
+    { key: 'Enter', altKey: true },
+  ], false), []);
+});
+
+test('the single-line affordance promises Enter and explains the no-break rule', async () => {
+  const editor = await readModule('components/SelectionTextEditor.jsx');
+  // The button title follows the mode: `(Enter)` where Enter applies, the
+  // Ctrl+Enter chord elsewhere (multi-line and unknown, unchanged).
+  assert.ok(editor.includes('`${applyLabel} (Enter)`'));
+  assert.ok(editor.includes('`${applyLabel} (Ctrl+Enter)`'));
+  // The hint is the popup's single-line line, so both editors word the same
+  // rule the same way; it is announced with the field and only shown for TEXT.
+  assert.ok(editor.includes('t(POPUP_TEXT_KEYS.hintSingle)'));
+  assert.ok(editor.includes('hint ? hintId : null'));
+  assert.ok(t(POPUP_TEXT_KEYS.hintSingle).length > 0);
+  assert.ok(te(POPUP_TEXT_KEYS.hintSingle).length > 0);
+});
+
+test('a multi-line entity keeps Enter as a line break and never sends it', async () => {
+  assert.equal(selectedTextMultilineOf(textWithMode('Line one\\PLine two', true)), true);
+  // `none` lets the textarea insert the break; it is data, not a confirmation.
+  assert.equal(textEditKeyAction({ key: 'Enter' }, true), 'none');
+  assert.equal(textEditKeyAction({ key: 'Enter', shiftKey: true }, true), 'none');
+  assert.deepEqual(await pressKeys([{ key: 'Enter' }, { key: 'Enter', shiftKey: true }], true), []);
+  // The explicit accelerator still applies here too.
+  assert.equal(textEditKeyAction({ key: 'Enter', ctrlKey: true }, true), 'submit');
+  assert.equal(textEditKeyAction({ key: 'Enter', metaKey: true }, true), 'submit');
+});
+
+test('without `text_multiline` the keys stay exactly as they were', async () => {
+  // An older host does not send the field. Nothing is guessed: Enter is a line
+  // break and Ctrl/Cmd+Enter applies, which is the pre-`text_multiline` contract.
+  assert.equal(selectedTextMultilineOf(singleText('Ground floor')), null);
+  assert.equal(textEditKeyAction({ key: 'Enter' }), 'none');
+  assert.equal(textEditKeyAction({ key: 'Enter' }, null), 'none');
+  assert.equal(textEditKeyAction({ key: 'Enter', shiftKey: true }), 'none');
+  assert.equal(textEditKeyAction({ key: 'Enter', altKey: true }), 'none');
+  assert.deepEqual(await pressKeys([{ key: 'Enter' }, { key: 'Enter', shiftKey: true }], null), []);
   assert.equal(textEditKeyAction({ key: 'Enter', ctrlKey: true }), 'submit');
   assert.equal(textEditKeyAction({ key: 'Enter', metaKey: true }), 'submit');
+  // A held accelerator is still one action.
   assert.equal(textEditKeyAction({ key: 'Enter', ctrlKey: true, repeat: true }), 'none');
-  // A plain Enter stays a newline: the text is edited verbatim, so a block keeps
-  // its lines and Enter must not commit half an edit.
-  assert.equal(textEditKeyAction({ key: 'Enter' }), 'none');
   for (const key of ['a', ' ', 'Escape', 'Tab', 'ArrowDown']) assert.equal(textEditKeyAction({ key }), 'none', key);
   assert.equal(textEditKeyAction(), 'none');
+});
+
+test('an IME composition never applies the edit, in either mode', () => {
+  // The two IME signals: a standard `isComposing` and the legacy `keyCode` 229
+  // that some IMEs send for the Enter that commits the composition.
+  for (const mode of [true, false, null]) {
+    assert.equal(textEditKeyAction({ key: 'Enter', isComposing: true }, mode), 'none', `isComposing mode=${mode}`);
+    assert.equal(textEditKeyAction({ key: 'Enter', ctrlKey: true, isComposing: true }, mode), 'none', `ctrl+compose mode=${mode}`);
+    assert.equal(textEditKeyAction({ key: 'Enter', keyCode: 229 }, mode), 'none', `keyCode 229 mode=${mode}`);
+    assert.equal(textEditKeyAction({ key: 'Enter', metaKey: true, isComposing: true }, mode), 'none', `meta+compose mode=${mode}`);
+    assert.equal(textEditKeyAction({ key: 'Enter', repeat: true, ctrlKey: true }, mode), 'none', `repeated chord mode=${mode}`);
+  }
+});
+
+test('the docked field and the popup agree on every key, in both known modes', () => {
+  // The panel must mirror the popup exactly; only the unknown mode is its own
+  // (legacy) contract, because the popup always receives an explicit boolean.
+  const keys = [
+    { key: 'Enter' },
+    { key: 'Enter', shiftKey: true },
+    { key: 'Enter', altKey: true },
+    { key: 'Enter', ctrlKey: true },
+    { key: 'Enter', metaKey: true },
+    { key: 'Enter', ctrlKey: true, shiftKey: true },
+    { key: 'Enter', repeat: true },
+    { key: 'Enter', isComposing: true },
+    { key: 'Enter', keyCode: 229 },
+    { key: 'a' },
+    { key: 'Escape' },
+  ];
+  for (const mode of [true, false]) {
+    for (const event of keys) {
+      assert.equal(
+        textEditKeyAction(event, mode),
+        popupTextEditKeyAction(event, mode),
+        `${JSON.stringify(event)} mode=${mode}`,
+      );
+    }
+  }
+});
+
+test('the edit mode comes from `text_multiline`, never from a display row type', async () => {
+  // The display row is deliberately misleading: the mode must ignore it.
+  const asMtextRow = {
+    count: 1, empty: false, mixedKeys: [], text: 'A', text_multiline: true,
+    rows: [{ key: 'type', value: 'TEXT' }],
+  };
+  assert.equal(selectedTextMultilineOf(asMtextRow), true);
+  const asTextRow = { ...asMtextRow, text_multiline: false, rows: [{ key: 'type', value: 'MTEXT' }] };
+  assert.equal(selectedTextMultilineOf(asTextRow), false);
+  // The field is absent: unknown, however suggestive the row is.
+  const { text_multiline: _omitted, ...olderHost } = asMtextRow;
+  assert.equal(selectedTextMultilineOf(olderHost), null);
+  // A non-boolean value is never coerced into a mode.
+  for (const value of ['true', 1, 0, {}, [], null]) {
+    assert.equal(selectedTextMultilineOf({ ...asMtextRow, text_multiline: value }), null, String(value));
+  }
+  // Only a single selection with real text has an editable mode.
+  assert.equal(selectedTextMultilineOf({ ...asMtextRow, count: 2 }), null);
+  assert.equal(selectedTextMultilineOf({ ...asMtextRow, text: null }), null);
+  for (const malformed of [null, undefined, [], 'A']) assert.equal(selectedTextMultilineOf(malformed), null, String(malformed));
+  // The component binds the keys to that reader — no row value reaches them.
+  const editor = await readModule('components/SelectionTextEditor.jsx');
+  assert.ok(editor.includes('const multiline = selectedTextMultilineOf(shell.status?.selection ?? null);'));
+  assert.ok(editor.includes('const action = textEditKeyAction(event, multiline);'));
+  assert.ok(!/\.type\b|\[['"]type['"]\]/.test(editor), 'the keys never read a display type');
 });
 
 test('the editor routes its keys and Apply through the shell, never through IPC or the canvas', async () => {
   const editor = await readModule('components/SelectionTextEditor.jsx');
   const app = await readModule('App.jsx');
   const palette = await readModule('components/PropertiesPalette.jsx');
-  // IME-safe key path.
-  assert.ok(editor.includes('if (textEditKeyAction(event) !== \'submit\') return;'));
+  // IME-safe, mode-aware key path: a `block` still prevents the default, and
+  // only `submit` applies.
+  assert.ok(editor.includes('const action = textEditKeyAction(event, multiline);'));
+  assert.ok(editor.includes("if (action === 'submit') apply();"));
   assert.ok(editor.includes('event.preventDefault();'));
   // The text always comes from the field as it last reported it, so a click that
   // lands with an IME compositionend in the same task sends the real value.
@@ -271,7 +406,9 @@ test('the editor routes its keys and Apply through the shell, never through IPC 
   const calls = [...editor.matchAll(/\bt\(([^,)]*)/g)].map(match => match[1].trim());
   assert.ok(calls.length >= 5, `expected the editor to translate its copy, saw ${calls.length}`);
   for (const source of calls) {
-    assert.ok(source.startsWith('TEXT_EDIT_KEYS.') || source === 'TEXT_TOO_LONG_KEY',
+    // The popup entry's label is popup copy (`POPUP_TEXT_KEYS.entry`), mounted
+    // here because this is where the field it extends lives.
+    assert.ok(source.startsWith('TEXT_EDIT_KEYS.') || source.startsWith('POPUP_TEXT_KEYS.') || source === 'TEXT_TOO_LONG_KEY',
       `unexpected copy source: t(${source}`);
   }
   assert.ok(!/[\u4e00-\u9fff]/.test(editor), 'no hardcoded CJK');

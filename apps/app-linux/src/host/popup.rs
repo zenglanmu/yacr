@@ -1,4 +1,5 @@
-//! Generic modal-popup layer (ADR-0021 D1/D2), proven with the `about` dialog.
+//! Generic modal-popup layer (ADR-0021 D1/D2): the `about` dialog and the text
+//! editor (`textEdit`, D4).
 //!
 //! The CAD partition is an **opaque native child** stacked above the WebView
 //! (`gtk_bridge::native`), so a popup can never be a DOM overlay: it is a
@@ -33,10 +34,16 @@ use super::{lock, Shared};
 pub const POPUP_LABEL: &str = "popup-1";
 /// Label of the popup's child webview.
 pub const POPUP_WEBVIEW_LABEL: &str = "popup-1-webview";
-/// Popup width in logical pixels.
+/// Popup width in logical pixels (`about`).
 pub const POPUP_WIDTH: f64 = 520.0;
-/// Popup height in logical pixels.
+/// Popup height in logical pixels (`about`).
 pub const POPUP_HEIGHT: f64 = 360.0;
+/// Text-edit popup width in logical pixels: wide enough for a full annotation
+/// line without wrapping every few words.
+pub const TEXT_EDIT_WIDTH: f64 = 640.0;
+/// Text-edit popup height in logical pixels: the `about` card is far too short
+/// for a multi-line MTEXT / MULTILEADER annotation.
+pub const TEXT_EDIT_HEIGHT: f64 = 480.0;
 
 /// The popup kinds the host will build.
 ///
@@ -46,6 +53,9 @@ pub const POPUP_HEIGHT: f64 = 360.0;
 pub enum PopupKind {
     /// The trivial "About" dialog that proves the pipeline.
     About,
+    /// Edit the current single selection's text (ADR-0021 D4). The **host**
+    /// derives the payload from the selection; the caller supplies no content.
+    TextEdit,
 }
 
 impl PopupKind {
@@ -56,6 +66,7 @@ impl PopupKind {
     pub fn from_key(key: &str) -> Result<Self, String> {
         match key {
             "about" => Ok(Self::About),
+            "textEdit" => Ok(Self::TextEdit),
             other => Err(format!("popup.unknown_kind: {other:?}")),
         }
     }
@@ -64,8 +75,30 @@ impl PopupKind {
     pub fn key(self) -> &'static str {
         match self {
             Self::About => "about",
+            Self::TextEdit => "textEdit",
         }
     }
+
+    /// The logical window size of this kind. Every popup is non-resizable; the
+    /// text editor simply needs more room than the `about` card.
+    pub fn size(self) -> (f64, f64) {
+        match self {
+            Self::About => (POPUP_WIDTH, POPUP_HEIGHT),
+            Self::TextEdit => (TEXT_EDIT_WIDTH, TEXT_EDIT_HEIGHT),
+        }
+    }
+}
+
+/// The host-derived payload of the `textEdit` kind (ADR-0021 D4).
+///
+/// Both fields are always present in the boot payload. `text` is the raw stored
+/// string with only `\P` shown as `\n` (the one mapping the ADR allows, so the
+/// dialog displays natural line breaks); `multiline` is `true` for `AcDbMText`
+/// and MULTILEADER text, `false` for `AcDbText`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextEditPayload {
+    pub text: String,
+    pub multiline: bool,
 }
 
 /// The `cad_open_popup` acknowledgement (frozen wire shape).
@@ -85,14 +118,21 @@ pub struct PopupAck {
 /// machine is testable without a display).
 pub(super) trait PopupOps {
     /// Build the single popup window for `kind` (and register its `Destroyed`
-    /// handler in the production implementation).
-    fn create(&self, kind: PopupKind) -> Result<(), String>;
+    /// handler in the production implementation). `payload` is the host-derived
+    /// text payload, present exactly for [`PopupKind::TextEdit`].
+    fn create(&self, kind: PopupKind, payload: Option<&TextEditPayload>) -> Result<(), String>;
     /// Focus an existing popup window.
     fn focus(&self, label: &str) -> Result<(), String>;
     /// Ask an existing popup window to close. A missing window is not an error.
     fn close(&self, label: &str) -> Result<(), String>;
     /// Whether the window currently exists (stale-state reconciliation).
     fn exists(&self, label: &str) -> bool;
+    /// Derive the `textEdit` payload from the **current** CAD selection.
+    ///
+    /// A caller can never supply content; a selection that is not exactly one
+    /// editable text is refused with `popup.no_text_selection: …` **before** any
+    /// window exists.
+    fn text_edit_payload(&self) -> Result<TextEditPayload, String>;
 }
 
 /// The literal boot payload injected with `initialization_script`.
@@ -100,17 +140,60 @@ pub(super) trait PopupOps {
 /// It must be a JSON literal so the popup UI can read `window.__YACR_POPUP__` at
 /// mount with no fetch and no race. The values are static host facts; serde_json
 /// performs the escaping (a caller never supplies any of them).
-pub(super) fn boot_payload_script(kind: PopupKind) -> String {
-    let payload = serde_json::json!({
+pub(super) fn boot_payload_script(
+    kind: PopupKind,
+    text: Option<&TextEditPayload>,
+) -> Result<String, String> {
+    let payload = match kind {
+        PopupKind::About => serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "build": if cfg!(debug_assertions) { "debug" } else { "release" },
+        }),
+        PopupKind::TextEdit => {
+            let text = text.ok_or_else(|| {
+                "popup.payload_missing: textEdit needs a host-derived text payload".to_string()
+            })?;
+            serde_json::json!({
+                "text": text.text,
+                "multiline": text.multiline,
+            })
+        }
+    };
+    let boot = serde_json::json!({
         "kind": kind.key(),
         "modal": true,
         "label": POPUP_LABEL,
-        "payload": {
-            "version": env!("CARGO_PKG_VERSION"),
-            "build": if cfg!(debug_assertions) { "debug" } else { "release" },
-        },
+        "payload": payload,
     });
-    format!("window.__YACR_POPUP__ = {payload};")
+    Ok(format!("window.__YACR_POPUP__ = {boot};"))
+}
+
+/// Show the ADR's one allowed opening mapping: an **unescaped** `\P` becomes a
+/// newline, so the dialog edits natural line breaks.
+///
+/// Only `\P` is touched. `\\P` (an escaped backslash followed by `P`), `{`, `}`,
+/// `\f…;`, `\W…;` and every other code pass through byte-identically — this is
+/// not a rich-text parser.
+pub(super) fn paragraph_breaks_to_newlines(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('P') => out.push('\n'),
+            // Keep the escape pair verbatim: `\\` is a literal backslash, and
+            // `\X` is some other code that this dialog must not interpret.
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 /// Open the allowlisted popup (or focus the existing single instance).
@@ -142,7 +225,14 @@ pub(super) fn open_popup(
             })
         }
         None => {
-            ops.create(kind)?;
+            // The payload is derived **before** the window exists: a refusal
+            // (`popup.no_text_selection`) leaves nothing to undo and creates no
+            // window/gate.
+            let payload = match kind {
+                PopupKind::About => None,
+                PopupKind::TextEdit => Some(ops.text_edit_payload()?),
+            };
+            ops.create(kind, payload.as_ref())?;
             let open = cad_ui_core::session::CadPopup {
                 kind: kind.key().to_string(),
                 label: POPUP_LABEL.to_string(),
@@ -176,6 +266,32 @@ pub(super) fn close_popup(shared: &Arc<Mutex<Shared>>, ops: &dyn PopupOps) -> Re
     }
 }
 
+/// Run one popup task on the GTK **main thread**.
+///
+/// The CAD session is a main-thread-local `!Send` value and the popup is a
+/// native GTK window, so the payload derivation and the window build must both
+/// happen there. On this host Tauri delivers commands on the GTK main thread, so
+/// the task runs inline; the guard keeps the path correct if that ever changes
+/// (an off-main-thread caller is marshalled instead of silently reading an empty
+/// thread-local and refusing with `popup.no_text_selection`).
+pub(super) fn on_main_thread<T, F>(app: &tauri::AppHandle, task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    if gtk::is_initialized_main_thread() {
+        return task();
+    }
+    let (sender, receiver) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = sender.send(task());
+    })
+    .map_err(|error| format!("popup.main_thread_failed: {error}"))?;
+    receiver
+        .recv()
+        .map_err(|_| "popup.main_thread_failed: the main thread dropped the request".to_string())?
+}
+
 /// Evidence-only accessor: the live popup window, if the host created one.
 ///
 /// This changes no state and never synthesises a window: it reads the same
@@ -205,6 +321,23 @@ pub(crate) fn close_popup_for_probe(app: &tauri::AppHandle) -> Result<(), String
     let shared = app.state::<super::ProbeShared>().0.clone();
     let ops = TauriPopupOps::new(app.clone(), shared.clone());
     close_popup(&shared, &ops)
+}
+
+/// Evidence-only accessor: the **same** `textEdit` payload derivation the open
+/// path runs (ADR-0021 D4).
+///
+/// It is the identical [`PopupOps::text_edit_payload`] call, on the same
+/// main-thread session state, and it changes nothing. Used by the
+/// `YACR_PROBE_POPUP_EVIDENCE` text-edit phase to report the derived payload
+/// length/fingerprint: the popup's boot script is injected into the child webview
+/// and is not readable back, so the derivation is read immediately before the
+/// open and the summary states that source explicitly. Must be called on the GTK
+/// main thread, like every other CAD-session read.
+pub(crate) fn text_edit_payload_for_probe(
+    app: &tauri::AppHandle,
+) -> Result<TextEditPayload, String> {
+    let shared = app.state::<super::ProbeShared>().0.clone();
+    TauriPopupOps::new(app.clone(), shared).text_edit_payload()
 }
 
 /// Clear the modal input gate after the popup window is destroyed.
@@ -258,8 +391,8 @@ impl TauriPopupOps {
 }
 
 impl PopupOps for TauriPopupOps {
-    fn create(&self, kind: PopupKind) -> Result<(), String> {
-        let window = create_popup_window(&self.app, kind)?;
+    fn create(&self, kind: PopupKind, payload: Option<&TextEditPayload>) -> Result<(), String> {
+        let window = create_popup_window(&self.app, kind, payload)?;
         // The **only** authoritative gate clear: any destroy path lands here.
         let events_shared = self.shared.clone();
         window.on_window_event(move |event| {
@@ -292,15 +425,48 @@ impl PopupOps for TauriPopupOps {
     fn exists(&self, label: &str) -> bool {
         self.app.get_window(label).is_some()
     }
+
+    fn text_edit_payload(&self) -> Result<TextEditPayload, String> {
+        // `open_popup` marshals the whole open onto the GTK main thread, where
+        // the CAD session (main-thread-local) holds the authoritative selection.
+        let selected = super::CAD.with(|cad| {
+            let cad = cad.borrow();
+            cad.as_ref()
+                .and_then(|session| session.selected_text_edit().ok().flatten())
+        });
+        let Some((text, multiline)) = selected else {
+            return Err(
+                "popup.no_text_selection: select exactly one TEXT, MTEXT or MULTILEADER text to \
+                 edit"
+                    .into(),
+            );
+        };
+        Ok(TextEditPayload {
+            // Opening shows `\P` as a newline (the one ADR-permitted mapping);
+            // single-line TEXT has no such code and is passed through.
+            text: if multiline {
+                paragraph_breaks_to_newlines(&text)
+            } else {
+                text
+            },
+            multiline,
+        })
+    }
 }
 
 /// Build the popup window and its child webview, mirroring `host::init`.
 ///
 /// Returns the native window handle; the caller registers the lifecycle hook.
-fn create_popup_window(app: &tauri::AppHandle, kind: PopupKind) -> Result<tauri::Window, String> {
+fn create_popup_window(
+    app: &tauri::AppHandle,
+    kind: PopupKind,
+    payload: Option<&TextEditPayload>,
+) -> Result<tauri::Window, String> {
     let parent = app
         .get_window(WINDOW_LABEL)
         .ok_or_else(|| "popup.main_window_missing".to_string())?;
+    let (width, height) = kind.size();
+    let script = boot_payload_script(kind, payload)?;
 
     // Transparency is only safe on a composited screen; a non-compositing X11
     // session would otherwise get black corners. This is audited against the
@@ -314,7 +480,7 @@ fn create_popup_window(app: &tauri::AppHandle, kind: PopupKind) -> Result<tauri:
 
     let window = tauri::window::WindowBuilder::new(app, POPUP_LABEL)
         .title("Yacr")
-        .inner_size(POPUP_WIDTH, POPUP_HEIGHT)
+        .inner_size(width, height)
         .resizable(false)
         .decorations(false)
         .focused(true)
@@ -342,7 +508,7 @@ fn create_popup_window(app: &tauri::AppHandle, kind: PopupKind) -> Result<tauri:
 
     let size = window
         .inner_size()
-        .unwrap_or_else(|_| tauri::PhysicalSize::new(POPUP_WIDTH as u32, POPUP_HEIGHT as u32));
+        .unwrap_or_else(|_| tauri::PhysicalSize::new(width as u32, height as u32));
     let webview = tauri::webview::WebviewBuilder::new(
         POPUP_WEBVIEW_LABEL,
         tauri::WebviewUrl::App("index.html".into()),
@@ -350,7 +516,7 @@ fn create_popup_window(app: &tauri::AppHandle, kind: PopupKind) -> Result<tauri:
     .transparent(composited)
     .auto_resize()
     // Literal boot payload, read at mount with no race.
-    .initialization_script(boot_payload_script(kind));
+    .initialization_script(script);
     window
         .add_child(
             webview,
@@ -386,11 +552,30 @@ mod tests {
         closes: Cell<u32>,
         live: Cell<bool>,
         fail_create: Cell<bool>,
+        /// The payload `text_edit_payload` returns (`None` = no live selection).
+        payload: std::cell::RefCell<Option<TextEditPayload>>,
+        /// Records the payload `create` actually received.
+        created: std::cell::RefCell<Option<Option<TextEditPayload>>>,
+        /// Records the kind `create` actually received.
+        created_kind: Cell<Option<PopupKind>>,
+    }
+
+    impl FakeOps {
+        fn with_payload(text: &str, multiline: bool) -> Self {
+            let ops = Self::default();
+            *ops.payload.borrow_mut() = Some(TextEditPayload {
+                text: text.into(),
+                multiline,
+            });
+            ops
+        }
     }
 
     impl PopupOps for FakeOps {
-        fn create(&self, _kind: PopupKind) -> Result<(), String> {
+        fn create(&self, kind: PopupKind, payload: Option<&TextEditPayload>) -> Result<(), String> {
             self.creates.set(self.creates.get() + 1);
+            self.created_kind.set(Some(kind));
+            *self.created.borrow_mut() = Some(payload.cloned());
             if self.fail_create.get() {
                 return Err("popup.build_failed: test".into());
             }
@@ -411,6 +596,12 @@ mod tests {
 
         fn exists(&self, _label: &str) -> bool {
             self.live.get()
+        }
+
+        fn text_edit_payload(&self) -> Result<TextEditPayload, String> {
+            self.payload.borrow().clone().ok_or_else(|| {
+                "popup.no_text_selection: no single editable text is selected".to_string()
+            })
         }
     }
 
@@ -595,7 +786,7 @@ mod tests {
 
     #[test]
     fn boot_payload_is_a_literal_with_the_host_facts() {
-        let script = boot_payload_script(PopupKind::About);
+        let script = boot_payload_script(PopupKind::About, None).expect("about has no payload");
         let prefix = "window.__YACR_POPUP__ = ";
         assert!(script.starts_with(prefix), "{script}");
         let json = script[prefix.len()..]
@@ -613,5 +804,116 @@ mod tests {
             build == "debug" || build == "release",
             "unexpected build label: {build}"
         );
+        // `about` never carries the text-edit fields.
+        assert!(value["payload"].get("text").is_none());
+        assert!(value["payload"].get("multiline").is_none());
+    }
+
+    #[test]
+    fn text_edit_payload_has_the_selection_text_and_multiline_flag() {
+        let payload = TextEditPayload {
+            text: "line one\nline two".into(),
+            multiline: true,
+        };
+        let script =
+            boot_payload_script(PopupKind::TextEdit, Some(&payload)).expect("the text payload");
+        let prefix = "window.__YACR_POPUP__ = ";
+        let json = script[prefix.len()..]
+            .strip_suffix(';')
+            .expect("the assignment is terminated");
+        let value: serde_json::Value = serde_json::from_str(json).expect("the payload is JSON");
+        assert_eq!(value["kind"], "textEdit");
+        assert_eq!(value["modal"], true);
+        assert_eq!(value["label"], POPUP_LABEL);
+        assert_eq!(value["payload"]["text"], "line one\nline two");
+        assert_eq!(value["payload"]["multiline"], true);
+        // A single-line payload is present too, never omitted.
+        let single = TextEditPayload {
+            text: "one line".into(),
+            multiline: false,
+        };
+        let script = boot_payload_script(PopupKind::TextEdit, Some(&single)).expect("single line");
+        let json = script[prefix.len()..]
+            .strip_suffix(';')
+            .expect("the assignment is terminated");
+        let value: serde_json::Value = serde_json::from_str(json).expect("the payload is JSON");
+        assert_eq!(value["payload"]["text"], "one line");
+        assert_eq!(value["payload"]["multiline"], false);
+
+        // A textEdit boot without a payload is refused, never an empty editor.
+        let error = boot_payload_script(PopupKind::TextEdit, None).unwrap_err();
+        assert!(error.starts_with("popup.payload_missing"), "{error}");
+    }
+
+    #[test]
+    fn popup_sizes_are_per_kind_and_the_text_editor_is_larger() {
+        assert_eq!(PopupKind::About.size(), (520.0, 360.0));
+        assert_eq!(PopupKind::TextEdit.size(), (640.0, 480.0));
+        assert_eq!(PopupKind::from_key("textEdit"), Ok(PopupKind::TextEdit));
+        assert_eq!(PopupKind::TextEdit.key(), "textEdit");
+    }
+
+    #[test]
+    fn text_edit_opens_with_the_host_payload_and_about_stays_unchanged() {
+        let shared = new_shared(LaunchOptions::default());
+        let ops = FakeOps::with_payload("hello", false);
+        let ack = open_popup(&shared, "textEdit", &ops).expect("textEdit opens");
+        assert_eq!(
+            ack,
+            PopupAck {
+                accepted: true,
+                kind: "textEdit".into(),
+                popup_label: POPUP_LABEL.into(),
+                existing: false,
+            }
+        );
+        assert_eq!(ops.created_kind.get(), Some(PopupKind::TextEdit));
+        assert_eq!(
+            ops.created.borrow().clone().flatten(),
+            Some(TextEditPayload {
+                text: "hello".into(),
+                multiline: false,
+            })
+        );
+        assert!(modal_gate_open(&lock(&shared).shell));
+
+        // `about` still carries no text payload and the same ack shape.
+        let about = new_shared(LaunchOptions::default());
+        let ops = FakeOps::with_payload("ignored", true);
+        let ack = open_popup(&about, "about", &ops).expect("about opens");
+        assert_eq!(ack.kind, "about");
+        assert_eq!(ops.created.borrow().clone(), Some(None));
+    }
+
+    #[test]
+    fn text_edit_without_a_text_selection_creates_no_window_and_no_gate() {
+        let shared = new_shared(LaunchOptions::default());
+        let ops = FakeOps::default();
+        let error = open_popup(&shared, "textEdit", &ops).unwrap_err();
+        assert!(
+            error.starts_with("popup.no_text_selection"),
+            "the refusal must be named: {error}"
+        );
+        assert_eq!(ops.creates.get(), 0, "no window is built");
+        assert!(lock(&shared).shell.popup.is_none(), "no modal gate is set");
+    }
+
+    #[test]
+    fn only_unescaped_paragraph_breaks_become_newlines() {
+        assert_eq!(paragraph_breaks_to_newlines("a\\Pb"), "a\nb");
+        assert_eq!(paragraph_breaks_to_newlines("a\\P\\Pb"), "a\n\nb");
+        // An escaped backslash is a literal character, not a code.
+        assert_eq!(paragraph_breaks_to_newlines("a\\\\Pb"), "a\\\\Pb");
+        // Every other code passes through byte-identically.
+        for unchanged in [
+            "{\\fArial;text}",
+            "\\W0.8;wide",
+            "a\\~b",
+            "a\\Hb2;b",
+            "100%",
+        ] {
+            assert_eq!(paragraph_breaks_to_newlines(unchanged), unchanged);
+        }
+        assert_eq!(paragraph_breaks_to_newlines("trailing\\"), "trailing\\");
     }
 }

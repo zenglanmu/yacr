@@ -7,9 +7,10 @@
 //! [`MultiLeaderGeometry::build_display`], and the only writers are
 //! [`MultiLeaderGeometry::new`] / [`MultiLeaderGeometry::created`] (creation
 //! path), [`MultiLeaderGeometry::from_import`] (import path, which degrades
-//! honestly and never rejects) and [`MultiLeaderGeometry::transformed`]. This
-//! mirrors `HatchGeometry`, so a caller cannot store a display that disagrees
-//! with the definition.
+//! honestly and never rejects), [`MultiLeaderGeometry::transformed`] and
+//! [`MultiLeaderGeometry::with_text`] (in-place annotation-text replacement for
+//! the text-edit channels). This mirrors `HatchGeometry`, so a caller cannot
+//! store a display that disagrees with the definition.
 //!
 //! The display derivation is a **verbatim move** of the pre-P7b importer's
 //! `cad-import-acadrust::dimension::multileader` synthesis: the same leader
@@ -670,6 +671,45 @@ impl MultiLeaderGeometry {
         // Degradations that already existed before the transform are not new and
         // must not make the transform fail; rebuild the geometry exactly like
         // the constructor's and discard the repeated reasons.
+        geometry.display = geometry.build_display().0;
+        Ok(geometry)
+    }
+
+    /// Replace the annotation string and **rebuild the derived display**
+    /// (ADR-0021 D4 text editing; ADR-0020 A/B).
+    ///
+    /// This is the only way to change a stored multileader's text: the fields
+    /// are private, and the database's `update_entity` replaces the entity
+    /// without re-deriving `display`, so a caller that mutated the string alone
+    /// would leave a display that still shows the old text. Everything except
+    /// `text.string` — `override_mask`, the style snapshot, `MLeaderText`'s
+    /// width/location/rotation/height/attachment, roots, lines, `reserved` and
+    /// the plane frame — is carried over unchanged. `MLeaderText.width` is
+    /// preserved but does not participate in layout (ADR-0021 D4 declares that
+    /// gap), so the text is not re-wrapped.
+    ///
+    /// Refusals (the receiver is unchanged; the caller opens no transaction):
+    ///
+    /// * `mleader.content_not_text` — the leader has no text content to replace
+    ///   (this build models only [`MLeaderContent::Text`] and
+    ///   [`MLeaderContent::None`]; block/tolerance content stays on the
+    ///   `Compound` path and never reaches this type);
+    /// * `mleader.text_required` — the replacement is empty or whitespace-only,
+    ///   the same rule [`Self::new`] applies to created leaders.
+    pub fn with_text(&self, string: &str) -> CadResult<Self> {
+        if self.content != MLeaderContent::Text {
+            return Err(CadError::Unsupported(
+                "mleader.content_not_text: this multileader carries no text content to replace"
+                    .into(),
+            ));
+        }
+        if string.trim().is_empty() {
+            return Err(CadError::InvalidInput(
+                "mleader.text_required: a multileader needs a non-empty text".into(),
+            ));
+        }
+        let mut geometry = self.clone();
+        geometry.text.string = string.to_string();
         geometry.display = geometry.build_display().0;
         Ok(geometry)
     }

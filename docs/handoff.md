@@ -1,3 +1,34 @@
+## P8：文字弹窗编辑（TEXT / MTEXT / MLEADER，ADR-0021 D4，2026-10-20/21）
+
+**范围**：`cad-domain`（`with_text`）、`cad-app`（目标解析/换行权威/选择投影/宿主载荷）、`cad-ui-core`（新状态字段）、
+`apps/app-linux`（`textEdit` kind、尺寸、主线程编组）、React（对话框、面板入口、键位）、证据驱动。
+
+- **域层**：`MultiLeaderGeometry::with_text(&self, &str)` —— 换字符串并**重建 `display`**（关键：`update_entity` **不重建**，
+  `validate_geometry` **只查 display 有限性、不查与 text 一致** ⇒ 不重建就会"文字改了、屏幕没变"）；拒绝
+  `mleader.content_not_text`、`mleader.text_required`；`override_mask`/样式/`width`/附着**不变**。
+- **换行权威（唯一实现，两条入口共用）**：`AcDbMText` 与 `MultiLeader(Text)`：`\r\n`/`\r`/`\n` → `\P`；
+  `AcDbText`：含换行 ⇒ **`textedit.newline_text`**（消息写明理由：AutoCAD 的 TEXT 不解释 `\P`，否则**跨应用不一致**）。
+  其余控制码（`{}`/`\f…;`/`\W…;`/`\Q…;`/`\~`）**逐字透传**，编辑器不解析不美化。
+- **打开侧**：`\P` → `\n` **只对未转义**的 `\P`（`\\P` 逐字保留，否则会吃字符）；其余逐字。
+- **载荷宿主生成**：`cad_open_popup{kind:"textEdit"}` ⇒ 宿主读**当前单选**注入 `{text, multiline}`；不可编辑 ⇒
+  `popup.no_text_selection`、**不开窗**。`cad_open_popup` **整体编组到 GTK 主线程**（会话主线程本地，异步读会拿到陈旧选择）。
+- **应用**仍走 `cad_set_selected_text`（不新增 IPC）；`TEXTEDIT` 与面板内联**不变**（A/B 保留）。
+- **状态**：`CadSelection.text_multiline`（线名 snake_case，**真实字段**）—— `false` 当 `text` 为 `null`；
+  MTEXT/带文本 MLEADER 为 `true`；TEXT 为 `false`。**禁止**从展示行 `type` 推断。
+- **UI**：`textEdit` 640×480；邮箱式防御解析（缺 `text`/`multiline` 或类型不对 ⇒ **回落普通外壳**）；
+  多行 `Enter` 换行/`Ctrl+Enter` 应用，单行 `Enter` 应用、`Shift+Enter` **既不换行也不提交**；IME 组合期间**永不提交**；
+  本地/宿主拒绝都**保草稿**，**成功是唯一关窗路径**；面板与弹窗**共用同一个键位判定函数**（parity 有测试）。
+- **证据（真实显示，有界）**：draw 阶段建并选中 MULTILEADER（`mleader_pass=1`）→ `textEdit` 打开（`textEdit:popup-1:true`）、
+  载荷 `LEAD`/`multiline=1` → 经**真实准入队列**应用 `EVIDENCE\nEDIT` → 存成 **`EVIDENCE\PEDIT`**、实体数 **52→52**、
+  `tool=-`、`error=-`、关闭后 **gate 已释放**、`te_pass=1`。弹窗自身窗口被抓（640×480）并像素判读。
+- **像素判读（两轮）**：第一轮 **accept-with-fixes**（提示缺"怎么提交"、无焦点环/光标、元信息对比度、头部失衡）；
+  已修：**提示补 `Ctrl+Enter`**、**焦点环 `#7DB8FF`**、头部 16/14、元信息 `#C3CCDA`（6.9:1）、字段内边距。
+  第二轮判读**四项 fixed**，并**驳回上一轮一条误判**（标题一直是 13px/粗体，与 11px 提示不同级）。
+- **证据缺口（如实记录）**：单帧**不能**证明光标存在与多行内容（当时字段里是单行 `LEAD`）⇒ 需再抓一次"编辑后的两行 + 光标"。
+- **既有缺口（声明不修）**：`MLeaderText.width`（组 43）**不参与排版** ⇒ 改字串**不重排/不重适配**；忙碌文案复用 `linux.busy`；
+  未知 kind 文案复用既有键。
+- **门禁**：crate **2262/0**、UI **280/280（0 跳过）**、clippy、fmt、architecture(27)、i18n **571**、file-size **755**。
+
 ## 弹窗管线第 1 步 + N7 对抗性夹具（2026-10-20）
 
 ### 弹窗层（ADR-0021 D1/D2，已实施并验证）

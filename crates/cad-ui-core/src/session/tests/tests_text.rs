@@ -316,20 +316,283 @@ fn the_panel_channel_refuses_an_empty_or_multi_selection_by_name() {
 }
 
 #[test]
+fn selected_text_edit_reports_only_a_single_editable_text_selection() {
+    let session = fresh_session();
+    // Nothing selected: no popup payload (the popup host names the refusal).
+    assert_eq!(
+        session.selected_text_edit().expect("no document error"),
+        None
+    );
+
+    session.command("TEXT").expect("TEXT is admitted");
+    click(&session, [400.0, 300.0], 1);
+    session.set_tool_text("OLD").expect("the text");
+    let reference = the_created_text(&session);
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .set_selection(vec![reference])
+        .expect("the selection");
+
+    // The host-derived payload: the raw string plus the source class's
+    // multiline flag (TEXT is single-line).
+    assert_eq!(
+        session.selected_text_edit().expect("the selection reads"),
+        Some(("OLD".to_string(), false))
+    );
+}
+
+#[test]
 fn the_status_selection_block_projects_text_only_for_a_single_text() {
-    let row = |text: Option<&str>, count: usize| {
-        CadSelection::from_properties(&cad_app::SelectionProperties {
+    let row = |text: Option<&str>, multiline: bool, count: usize| {
+        let selection = CadSelection::from_properties(&cad_app::SelectionProperties {
             count,
             rows: Vec::new(),
             mixed_keys: Vec::new(),
             text: text.map(str::to_string),
+            text_multiline: multiline,
             empty: count == 0,
-        })
-        .text
+        });
+        (selection.text, selection.text_multiline)
     };
-    assert_eq!(row(Some("Hello"), 1).as_deref(), Some("Hello"));
-    // A count mismatch (multi-selection) never carries a single object's text.
-    assert_eq!(row(Some("Hello"), 2), None);
-    assert_eq!(row(None, 1), None);
-    assert_eq!(row(None, 0), None);
+    assert_eq!(row(Some("Hello"), false, 1), (Some("Hello".into()), false));
+    assert_eq!(row(Some("A\nB"), true, 1), (Some("A\nB".into()), true));
+    // A count mismatch (multi-selection) never carries a single object's text,
+    // so it never carries a text capability either — even a stale flag is dropped.
+    assert_eq!(row(Some("A\nB"), true, 2), (None, false));
+    assert_eq!(row(None, false, 1), (None, false));
+    assert_eq!(row(None, false, 0), (None, false));
+    // `text: null` always forces `text_multiline: false`.
+    assert_eq!(row(None, true, 1), (None, false));
+}
+
+/// Collect the top-level wire field names a `Serialize` impl emits.
+///
+/// `cad-ui-core` deliberately carries no `serde_json`; this recorder only needs
+/// the struct's field names (each value is skipped), which is exactly what
+/// proves that a `serde(rename)` reached the wire rather than the camelCase
+/// convention silently winning.
+fn wire_field_names<T: serde::Serialize>(value: &T) -> Vec<String> {
+    use serde::ser::{Impossible, SerializeStruct, Serializer};
+
+    #[derive(Debug)]
+    struct WireError;
+
+    impl std::fmt::Display for WireError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("wire field recorder: unsupported value")
+        }
+    }
+    impl std::error::Error for WireError {}
+    impl serde::ser::Error for WireError {
+        fn custom<T: std::fmt::Display>(_message: T) -> Self {
+            WireError
+        }
+    }
+
+    struct Recorder(Vec<String>);
+    struct Fields<'a>(&'a mut Recorder);
+
+    impl SerializeStruct for Fields<'_> {
+        type Ok = ();
+        type Error = WireError;
+
+        fn serialize_field<T: ?Sized + serde::Serialize>(
+            &mut self,
+            key: &'static str,
+            _value: &T,
+        ) -> Result<(), WireError> {
+            self.0 .0.push(key.to_string());
+            Ok(())
+        }
+
+        fn end(self) -> Result<(), WireError> {
+            Ok(())
+        }
+    }
+
+    fn unsupported<T>() -> Result<T, WireError> {
+        Err(WireError)
+    }
+
+    impl<'a> Serializer for &'a mut Recorder {
+        type Ok = ();
+        type Error = WireError;
+        type SerializeSeq = Impossible<(), WireError>;
+        type SerializeTuple = Impossible<(), WireError>;
+        type SerializeTupleStruct = Impossible<(), WireError>;
+        type SerializeTupleVariant = Impossible<(), WireError>;
+        type SerializeMap = Impossible<(), WireError>;
+        type SerializeStruct = Fields<'a>;
+        type SerializeStructVariant = Impossible<(), WireError>;
+
+        fn serialize_bool(self, _value: bool) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_i8(self, _value: i8) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_i16(self, _value: i16) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_i32(self, _value: i32) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_i64(self, _value: i64) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_i128(self, _value: i128) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_u8(self, _value: u8) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_u16(self, _value: u16) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_u32(self, _value: u32) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_u64(self, _value: u64) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_u128(self, _value: u128) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_f32(self, _value: f32) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_f64(self, _value: f64) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_char(self, _value: char) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_str(self, _value: &str) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_bytes(self, _value: &[u8]) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_none(self) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_some<T: ?Sized + serde::Serialize>(self, _value: &T) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_unit(self) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_unit_struct(self, _name: &'static str) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_unit_variant(
+            self,
+            _name: &'static str,
+            _variant_index: u32,
+            _variant: &'static str,
+        ) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_newtype_struct<T: ?Sized + serde::Serialize>(
+            self,
+            _name: &'static str,
+            _value: &T,
+        ) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_newtype_variant<T: ?Sized + serde::Serialize>(
+            self,
+            _name: &'static str,
+            _variant_index: u32,
+            _variant: &'static str,
+            _value: &T,
+        ) -> Result<(), WireError> {
+            unsupported()
+        }
+        fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, WireError> {
+            unsupported()
+        }
+        fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, WireError> {
+            unsupported()
+        }
+        fn serialize_tuple_struct(
+            self,
+            _name: &'static str,
+            _len: usize,
+        ) -> Result<Self::SerializeTupleStruct, WireError> {
+            unsupported()
+        }
+        fn serialize_tuple_variant(
+            self,
+            _name: &'static str,
+            _variant_index: u32,
+            _variant: &'static str,
+            _len: usize,
+        ) -> Result<Self::SerializeTupleVariant, WireError> {
+            unsupported()
+        }
+        fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, WireError> {
+            unsupported()
+        }
+        fn serialize_struct(
+            self,
+            _name: &'static str,
+            _len: usize,
+        ) -> Result<Self::SerializeStruct, WireError> {
+            Ok(Fields(self))
+        }
+        fn serialize_struct_variant(
+            self,
+            _name: &'static str,
+            _variant_index: u32,
+            _variant: &'static str,
+            _len: usize,
+        ) -> Result<Self::SerializeStructVariant, WireError> {
+            unsupported()
+        }
+    }
+
+    let mut recorder = Recorder(Vec::new());
+    value
+        .serialize(&mut recorder)
+        .expect("the selection block serializes as a struct");
+    recorder.0
+}
+
+#[test]
+fn the_selection_wire_name_is_text_multiline_not_camel_case() {
+    let selection = CadSelection::from_properties(&cad_app::SelectionProperties {
+        count: 1,
+        rows: Vec::new(),
+        mixed_keys: Vec::new(),
+        text: Some("Hello".into()),
+        text_multiline: true,
+        empty: false,
+    });
+    assert!(selection.text_multiline);
+
+    let names = wire_field_names(&selection);
+    assert!(
+        names.iter().any(|name| name == "text_multiline"),
+        "the wire name must stay snake_case: {names:?}"
+    );
+    assert!(
+        !names.iter().any(|name| name == "textMultiline"),
+        "a silent camelCase rename would make the panel misbehave: {names:?}"
+    );
+    // Every pre-existing key keeps its documented wire name.
+    assert!(names.iter().any(|name| name == "text"), "{names:?}");
+    assert!(names.iter().any(|name| name == "mixedKeys"), "{names:?}");
+
+    // The honest empty block advertises the same key with `false`.
+    let empty = CadSelection::empty();
+    assert!(!empty.text_multiline);
+    let names = wire_field_names(&empty);
+    assert!(
+        names.iter().any(|name| name == "text_multiline"),
+        "{names:?}"
+    );
+    assert!(names.iter().any(|name| name == "text"), "{names:?}");
 }

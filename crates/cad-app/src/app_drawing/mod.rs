@@ -54,6 +54,6 @@ pub(crate) use text_edit::resolve_text_edit_target;
 pub use array::MAX_ARRAY_ENTITIES;
 
 use helpers::{
-    collect_boundary_segments, distance, geometry_kind, is_finite_point, offset_circle,
-    offset_line, plan_extend, plan_trim, TrimPlan,
+    collect_boundary_segments, distance, geometry_kind, is_finite_point, is_multiline_text_source,
+    offset_circle, offset_line, plan_extend, plan_trim, TrimPlan,
 };

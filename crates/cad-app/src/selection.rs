@@ -13,7 +13,8 @@
 
 use cad_db::{DbEntity, DrawingDatabase};
 use cad_domain::{
-    EntityId, HatchFill, InstancePath, Point3, SelectionRef, SemanticGeometry, SpaceId,
+    EntityId, HatchFill, InstancePath, MLeaderContent, Point3, SelectionRef, SemanticGeometry,
+    SpaceId,
 };
 use std::collections::BTreeSet;
 
@@ -159,15 +160,28 @@ pub struct SelectionProperties {
     /// Keys whose values differ across the selection (multi-select).
     pub mixed_keys: Vec<&'static str>,
     /// The **round-trippable** current string of a single selected, directly
-    /// addressable `Text` entity (ADR 0020 amendment B), or `None` for every
-    /// other selection.
+    /// addressable text entity (ADR 0020 amendment B; ADR-0021 D4 extends it to
+    /// TEXT, MTEXT and MULTILEADER text), or `None` for every other selection.
     ///
     /// This is deliberately **not** one of the display [`PropertyRow`]s: those
     /// values are formatted for presentation and cannot be written back. An empty
-    /// selection, a multi-selection, a non-text entity, a block-instance member
-    /// (instance path) and a sub-element all report `None` — text editing is
-    /// addressed by entity identity only and never reaches into block internals.
+    /// selection, a multi-selection, a non-text entity, a content-less
+    /// MULTILEADER, a block-instance member (instance path) and a sub-element all
+    /// report `None` — text editing is addressed by entity identity only and
+    /// never reaches into block internals. The value is the stored **raw**
+    /// string: `\P` is not interpreted here.
     pub text: Option<String>,
+    /// Whether [`Self::text`] is a **multi-line** text target: its source class
+    /// (`AcDbMText`, or a `MultiLeader` with text content) treats a line break
+    /// as a paragraph break. `false` for `AcDbText`, and always `false` whenever
+    /// [`Self::text`] is `None` (multi-selection, empty selection, unresolved
+    /// entity, instance path, sub-element, content-less leader, non-text).
+    ///
+    /// This is a **capability of the current text target**, not a display
+    /// property: the docked panel and the popup must apply the same rule from
+    /// this single derived value (and from the corresponding status field)
+    /// instead of inspecting a display row such as `type`.
+    pub text_multiline: bool,
     /// `true` when the selection is empty, so the UI shows an explicit empty
     /// state instead of fabricated rows.
     pub empty: bool,
@@ -189,23 +203,30 @@ impl SelectionProperties {
                 rows: Vec::new(),
                 mixed_keys: Vec::new(),
                 text: None,
+                // Nothing editable means no text capability at all.
+                text_multiline: false,
                 empty: true,
             };
         }
 
         if selection.len() == 1 {
             let reference = &selection.refs()[0];
-            let (rows, text) = match database.entity(reference.entity) {
-                Some(entity) => (
-                    entity_property_rows(database, reference, entity),
-                    editable_text(reference, entity),
-                ),
+            let (rows, text, text_multiline) = match database.entity(reference.entity) {
+                Some(entity) => {
+                    let rows = entity_property_rows(database, reference, entity);
+                    match editable_text(reference, entity) {
+                        Some((text, multiline)) => (rows, Some(text), multiline),
+                        None => (rows, None, false),
+                    }
+                }
                 None => (
                     vec![
                         PropertyRow::new("id", reference.entity.0.to_string()),
                         PropertyRow::new("status", "unresolved"),
                     ],
                     None,
+                    // An unresolved entity has no text capability to report.
+                    false,
                 ),
             };
             return SelectionProperties {
@@ -213,6 +234,7 @@ impl SelectionProperties {
                 rows,
                 mixed_keys: Vec::new(),
                 text,
+                text_multiline,
                 empty: false,
             };
         }
@@ -248,23 +270,45 @@ impl SelectionProperties {
             rows: Vec::new(),
             mixed_keys: mixed.into_iter().collect(),
             text: None,
+            // A multi-selection has no single text target, so no capability.
+            text_multiline: false,
             empty: false,
         }
     }
 }
 
-/// The round-trippable text of one selected entity, or `None`.
+/// The round-trippable text of one selected entity and whether its source class
+/// is multiline, or `None`.
 ///
-/// Only a directly addressed single-line `Text` qualifies: `TEXTEDIT` replaces
+/// Only a directly addressed text-bearing entity qualifies: `TEXTEDIT` replaces
 /// the string of an **entity**, so a block-instance member (an instance path) or
 /// a sub-element is not editable here (ADR 0020 amendment B). The value is the
 /// stored string verbatim, never a formatted display row.
-fn editable_text(reference: &SelectionRef, entity: &DbEntity) -> Option<String> {
+fn editable_text(reference: &SelectionRef, entity: &DbEntity) -> Option<(String, bool)> {
     if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
         return None;
     }
+    editable_text_source(entity).map(|(text, multiline)| (text.to_string(), multiline))
+}
+
+/// The raw, writable string of one directly addressable text-bearing entity and
+/// whether its source class treats a line break as a paragraph break (ADR-0021
+/// D4).
+///
+/// Qualifying kinds are a [`SemanticGeometry::Text`] (`AcDbText`: single-line;
+/// `AcDbMText`: multiline) and a [`SemanticGeometry::MultiLeader`] whose content
+/// is [`MLeaderContent::Text`] (always multiline). A content-less leader has no
+/// string to replace, and block/tolerance content never reaches the first-class
+/// leader at all, so both report `None`. Instance paths and sub-elements are the
+/// caller's check: this helper looks at the entity only.
+pub(crate) fn editable_text_source(entity: &DbEntity) -> Option<(&str, bool)> {
     match &entity.geometry {
-        SemanticGeometry::Text { text, .. } => Some(text.clone()),
+        SemanticGeometry::Text { text, .. } => {
+            Some((text.as_str(), entity.object.type_key == "AcDbMText"))
+        }
+        SemanticGeometry::MultiLeader(leader) if leader.content() == MLeaderContent::Text => {
+            Some((leader.text().string.as_str(), true))
+        }
         _ => None,
     }
 }
@@ -507,313 +551,5 @@ pub fn model_ref(document: cad_domain::DocumentId, entity: EntityId) -> Selectio
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
-    use cad_domain::{
-        BlockId, DatabaseId, DocumentId, EntityId, InstancePath, LayerId, ObjectId, Revision,
-        StyleId, Transform3,
-    };
-
-    fn entity(id: u128, geometry: SemanticGeometry, layer: LayerId) -> DbEntity {
-        DbEntity {
-            object: DbObject {
-                id: ObjectId(id),
-                type_key: "AcDbEntity".into(),
-                revision: Revision(0),
-                source_handle: Some(format!("{id:X}")),
-            },
-            id: EntityId(id),
-            layer,
-            space: SpaceId::Model,
-            geometry,
-            draw_order: id as i64,
-        }
-    }
-
-    fn point(x: f64, y: f64) -> Point3 {
-        Point3 { x, y, z: 0.0 }
-    }
-
-    fn database() -> DrawingDatabase {
-        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
-        b.insert_layer(Layer {
-            id: LayerId(0),
-            name: "0".into(),
-            visible: true,
-        })
-        .unwrap();
-        b.insert_block(BlockDefinition {
-            id: BlockId(0),
-            entities: vec![EntityId(20)],
-            dynamic_visibility: None,
-        })
-        .unwrap();
-        b.insert_entity(entity(
-            20,
-            SemanticGeometry::Line {
-                start: point(0.0, 0.0),
-                end: point(1.0, 0.0),
-            },
-            LayerId(0),
-        ))
-        .unwrap();
-        b.insert_entity(entity(
-            1,
-            SemanticGeometry::Line {
-                start: point(0.0, 0.0),
-                end: point(3.0, 4.0),
-            },
-            LayerId(0),
-        ))
-        .unwrap();
-        b.insert_entity(entity(
-            2,
-            SemanticGeometry::Circle {
-                center: point(1.0, 2.0),
-                normal: Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
-                },
-                radius: 2.5,
-            },
-            LayerId(0),
-        ))
-        .unwrap();
-        b.insert_entity(entity(
-            3,
-            SemanticGeometry::Insert {
-                block: BlockId(0),
-                transform: Transform3::translation(point(10.0, 0.0)),
-            },
-            LayerId(0),
-        ))
-        .unwrap();
-        b.finish().unwrap()
-    }
-
-    fn ref_of(document: DocumentId, entity: EntityId) -> SelectionRef {
-        model_ref(document, entity)
-    }
-
-    #[test]
-    fn selection_distinguishes_insert_instances_via_instance_path() {
-        let doc = DocumentId(1);
-        // Same block entity reached through two different placements.
-        let a = SelectionRef {
-            document: doc,
-            entity: EntityId(20),
-            instance: InstancePath(vec![EntityId(3)]),
-            sub_element: None,
-        };
-        let b = SelectionRef {
-            document: doc,
-            entity: EntityId(20),
-            instance: InstancePath(vec![EntityId(4)]),
-            sub_element: None,
-        };
-        let mut set = SelectionSet::new();
-        assert!(set.insert(a.clone()));
-        assert!(set.insert(b.clone()));
-        assert_eq!(set.len(), 2, "different instances are separate objects");
-
-        // The identical instance is a duplicate.
-        assert!(!set.insert(a.clone()));
-        assert_eq!(set.len(), 2);
-
-        // Identity labels differ.
-        assert_ne!(
-            SelectionSet::identity_label(&a),
-            SelectionSet::identity_label(&b)
-        );
-
-        // A sub-element of the same instance is again distinct.
-        let sub = SelectionRef {
-            document: doc,
-            entity: EntityId(20),
-            instance: InstancePath(vec![EntityId(3)]),
-            sub_element: Some(cad_domain::SubElementId {
-                source_key: "face0".into(),
-                topology_revision: Revision(0),
-            }),
-        };
-        assert!(set.insert(sub));
-        assert_eq!(set.len(), 3);
-    }
-
-    #[test]
-    fn toggle_and_remove_are_identity_exact() {
-        let doc = DocumentId(1);
-        let a = ref_of(doc, EntityId(1));
-        let mut set = SelectionSet::new();
-        set.toggle(a.clone());
-        assert!(set.contains(&a));
-        set.toggle(a.clone());
-        assert!(!set.contains(&a));
-        set.insert(a.clone());
-        assert!(set.remove(&a));
-        assert!(!set.remove(&a));
-    }
-
-    #[test]
-    fn empty_selection_is_explicitly_empty() {
-        let db = database();
-        let props = SelectionProperties::extract(&db, &SelectionSet::new());
-        assert!(props.empty);
-        assert_eq!(props.count, 0);
-        assert!(props.rows.is_empty());
-    }
-
-    #[test]
-    fn single_line_selection_reports_identity_and_geometry() {
-        let db = database();
-        let set = SelectionSet::from_refs([ref_of(DocumentId(1), EntityId(1))]);
-        let props = SelectionProperties::extract(&db, &set);
-        assert!(!props.empty);
-        assert_eq!(props.count, 1);
-        let row = |key: &str| {
-            props
-                .rows
-                .iter()
-                .find(|r| r.key == key)
-                .map(|r| r.value.clone())
-        };
-        assert_eq!(row("id").as_deref(), Some("1"));
-        assert_eq!(row("handle").as_deref(), Some("1"));
-        assert_eq!(row("type").as_deref(), Some("AcDbEntity"));
-        assert_eq!(row("layer").as_deref(), Some("0 (0)"));
-        assert_eq!(row("space").as_deref(), Some("model"));
-        // Line length 3-4-5.
-        assert_eq!(row("length").as_deref(), Some("5.000000"));
-    }
-
-    #[test]
-    fn circle_and_insert_report_geometry_specific_rows() {
-        let db = database();
-        let circle = SelectionProperties::extract(
-            &db,
-            &SelectionSet::from_refs([ref_of(DocumentId(1), EntityId(2))]),
-        );
-        let radius = circle
-            .rows
-            .iter()
-            .find(|r| r.key == "radius")
-            .unwrap()
-            .value
-            .clone();
-        assert_eq!(radius, "2.500000");
-
-        let insert = SelectionProperties::extract(
-            &db,
-            &SelectionSet::from_refs([ref_of(DocumentId(1), EntityId(3))]),
-        );
-        let block = insert
-            .rows
-            .iter()
-            .find(|r| r.key == "block")
-            .unwrap()
-            .value
-            .clone();
-        assert_eq!(block, "0");
-    }
-
-    #[test]
-    fn multi_select_reports_mixed_keys_instead_of_a_single_value() {
-        let db = database();
-        let set = SelectionSet::from_refs([
-            ref_of(DocumentId(1), EntityId(1)), // Line
-            ref_of(DocumentId(1), EntityId(2)), // Circle
-        ]);
-        let props = SelectionProperties::extract(&db, &set);
-        assert_eq!(props.count, 2);
-        assert!(props.rows.is_empty());
-        // Geometry keys differ (line has `length`, circle has `radius`).
-        assert!(props.mixed_keys.contains(&"length"));
-        assert!(props.mixed_keys.contains(&"radius"));
-        // Shared identity keys are not "mixed" when values agree; ids differ.
-        assert!(props.mixed_keys.contains(&"id"));
-    }
-
-    #[test]
-    fn unresolved_entity_is_reported_honestly() {
-        let db = database();
-        let set = SelectionSet::from_refs([ref_of(DocumentId(1), EntityId(999))]);
-        let props = SelectionProperties::extract(&db, &set);
-        assert_eq!(props.count, 1);
-        let status = props
-            .rows
-            .iter()
-            .find(|r| r.key == "status")
-            .map(|r| r.value.clone());
-        assert_eq!(status.as_deref(), Some("unresolved"));
-    }
-
-    #[test]
-    fn text_without_font_is_explicitly_unknown() {
-        let mut b = DrawingDatabaseBuilder::new(DatabaseId(2));
-        b.insert_layer(Layer {
-            id: LayerId(0),
-            name: "0".into(),
-            visible: true,
-        })
-        .unwrap();
-        b.insert_entity(entity(
-            7,
-            SemanticGeometry::Text {
-                text: "标注".into(),
-                position: point(0.0, 0.0),
-                style: StyleId(0),
-                height: 2.5,
-                rotation: 0.0,
-                font: None,
-                h_align: cad_domain::TextAlignH::Left,
-                v_align: cad_domain::TextAlignV::Baseline,
-            },
-            LayerId(0),
-        ))
-        .unwrap();
-        let db = b.finish().unwrap();
-        let props = SelectionProperties::extract(
-            &db,
-            &SelectionSet::from_refs([ref_of(DocumentId(2), EntityId(7))]),
-        );
-        let font = props
-            .rows
-            .iter()
-            .find(|r| r.key == "font")
-            .map(|r| r.value.clone());
-        assert_eq!(font.as_deref(), Some("unknown"));
-    }
-
-    #[test]
-    fn image_and_mask_report_only_stored_metadata() {
-        let rows = geometry_property_rows(&SemanticGeometry::Image {
-            origin: point(1.0, 2.0),
-            u: point(0.5, 0.0),
-            v: point(0.0, 0.25),
-            pixels: [640.0, 480.0],
-            file: Some("logo.png".into()),
-            clip: None,
-            visible: true,
-        });
-        let value = |key: &str| rows.iter().find(|r| r.key == key).map(|r| r.value.clone());
-        assert_eq!(value("pixels").as_deref(), Some("640 x 480"));
-        assert_eq!(value("file").as_deref(), Some("logo.png"));
-        assert_eq!(value("visible").as_deref(), Some("true"));
-        assert_eq!(value("length"), None);
-
-        let mask_rows = geometry_property_rows(&SemanticGeometry::Mask {
-            boundary: vec![point(0.0, 0.0), point(1.0, 0.0), point(1.0, 1.0)],
-            inverted: true,
-        });
-        let value = |key: &str| {
-            mask_rows
-                .iter()
-                .find(|r| r.key == key)
-                .map(|r| r.value.clone())
-        };
-        assert_eq!(value("boundary").as_deref(), Some("3"));
-        assert_eq!(value("inverted").as_deref(), Some("true"));
-    }
-}
+#[path = "tests/selection_tests.rs"]
+mod tests;

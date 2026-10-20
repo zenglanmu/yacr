@@ -8,6 +8,15 @@
 //     payload: { version: "0.1.2", build: "release" },
 //   }
 //
+// `textEdit` is the second implemented kind (ADR 0021 D4). Its payload is
+// derived by the host from the current single selection — the UI never sends
+// content, and `text` is shown and returned verbatim:
+//
+//   window.__YACR_POPUP__ = {
+//     kind: "textEdit", modal: true, label: "popup-2",
+//     payload: { text: "…", multiline: true },
+//   }
+//
 // The main window never sets that global, so its absence is the *only* switch
 // between "normal shell" and "this document is a dialog". Every field is read
 // defensively: a missing, malformed or unexpected literal must fall back to the
@@ -27,8 +36,14 @@ export const POPUP_CLOSE_COMMAND = 'cad_close_popup';
 /** The boot literal the host injects before page load. */
 export const POPUP_GLOBAL = '__YACR_POPUP__';
 
-/** Dialog kinds this bundle implements. An unknown kind is not a shell boot. */
-export const POPUP_KINDS = Object.freeze(['about']);
+/**
+ * Dialog kinds this bundle implements. An unknown kind is not a shell boot.
+ *
+ * `textEdit` is the modal editor for one text entity's raw DXF string
+ * (ADR 0021 D4). Its payload is *derived by the host* from the current single
+ * selection, so the UI can never supply content it should not control.
+ */
+export const POPUP_KINDS = Object.freeze(['about', 'textEdit']);
 
 /** Every catalog key the popup layer renders. Nothing else may be invented. */
 export const POPUP_KEYS = Object.freeze({
@@ -98,10 +113,16 @@ export function readPopupBoot(scope) {
  * global must never replace the whole main window with a dialog. The popup
  * window's own "unknown dialog" state (see [`popupView`]) covers the opposite
  * direction — a host that opens a kind a future bundle stops shipping.
+ *
+ * A kind's payload is validated here too, so a dialog is never half-rendered:
+ * `textEdit` additionally requires the exact `{text, multiline}` shape of
+ * [`textEditPayload`]. A missing/non-string `text` or a missing/non-boolean
+ * `multiline` is therefore a **normal shell boot**, not an empty editor.
  */
 export function popupBoot(scope) {
   const boot = readPopupBoot(scope);
   if (!boot || !POPUP_KINDS.includes(boot.kind)) return null;
+  if (boot.kind === 'textEdit' && !textEditPayload(boot.payload)) return null;
   return boot;
 }
 
@@ -112,12 +133,42 @@ function payloadString(payload, field) {
 }
 
 /**
+ * The `textEdit` payload, or `null` when it is not exactly what the host
+ * promises: `{ text: string, multiline: boolean }`, both always present.
+ *
+ * The rejection rules are deliberate and narrow, because a half-understood
+ * text editor is worse than no editor at all:
+ *
+ * 1. `text` must be a **string** — not missing, not `null`, not a number. It is
+ *    returned **verbatim**: an empty string is legal data (nothing to guess, no
+ *    trim, no `\P`/`\n` mapping, no MTEXT markup interpretation);
+ * 2. `multiline` must be a real **boolean** — a truthy string or number means
+ *    the host and this bundle disagree about the source class, and guessing
+ *    would offer (or forbid) line breaks for the wrong entity.
+ *
+ * Extra payload fields are ignored, like extra envelope fields.
+ */
+export function textEditPayload(payload) {
+  if (!isRecord(payload)) return null;
+  const { text, multiline } = payload;
+  if (typeof text !== 'string') return null;
+  if (typeof multiline !== 'boolean') return null;
+  return Object.freeze({ text, multiline });
+}
+
+/**
  * The dialog view for a validated boot descriptor.
  *
  * `kind: 'about'` carries the two payload strings the catalog template
  * consumes: `version` and `build`. Each is `null` when absent/blank/non-string;
  * nothing is guessed. [`aboutVersionText`] is the only place they are turned
  * into copy.
+ *
+ * `kind: 'textEdit'` carries the entity's **raw** string verbatim and the
+ * source class's line rule: `text` (never trimmed or converted) and
+ * `multiline`. If the payload is not the exact shape [`popupBoot`] admits, the
+ * view degrades to the explicit unknown state rather than to an editor with
+ * invented content.
  *
  * Any other kind yields `{ kind: 'unknown', requestedKind }`, which the popup
  * root renders as an explicit state with a Close action rather than a blank
@@ -135,6 +186,17 @@ export function popupView(boot) {
       modal: boot.modal === true,
       version: payloadString(boot.payload, 'version'),
       build: payloadString(boot.payload, 'build'),
+    };
+  }
+  if (requestedKind === 'textEdit') {
+    const content = textEditPayload(boot.payload);
+    if (!content) return { kind: 'unknown', requestedKind };
+    return {
+      kind: 'textEdit',
+      requestedKind,
+      modal: boot.modal === true,
+      text: content.text,
+      multiline: content.multiline,
     };
   }
   return { kind: 'unknown', requestedKind };

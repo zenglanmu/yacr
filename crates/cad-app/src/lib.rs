@@ -616,15 +616,20 @@ pub enum CommandPayload {
         landing: Point3,
         text: String,
     },
-    /// TEXTEDIT: replace the string of an existing single-line `Text` (ADR 0020
-    /// amendment A/B).
+    /// TEXTEDIT: replace the string of an existing text-bearing entity (ADR 0020
+    /// amendment A/B; ADR-0021 D4 generalises it to MTEXT and MULTILEADER text).
     ///
     /// `target` is the ref resolved at pick time (interactive path) or the
     /// current single selection (panel path). The handler re-reads it and refuses
-    /// by name when it is gone or not a single, directly addressable `Text`;
-    /// only the `text` field changes, through `update_entity` in one transaction
-    /// / one undo step. Compound children and block-instance members are not
-    /// editable (a ref with an instance path or sub-element is refused).
+    /// by name when it is gone or not a directly addressable text entity; only
+    /// the `text` field changes, through `update_entity` in one transaction /
+    /// one undo step. A MULTILEADER is replaced through
+    /// `MultiLeaderGeometry::with_text`, which also rebuilds its derived display.
+    /// Compound children and block-instance members are not editable (a ref with
+    /// an instance path or sub-element is refused). Newline policy (ADR-0021
+    /// D4): `AcDbMText` / MULTILEADER drafts store `\r\n`, `\r`, `\n` as `\P`;
+    /// an `AcDbText` draft containing them is refused (`textedit.newline_text`).
+    /// Every other code passes through verbatim.
     TextEdit {
         target: SelectionRef,
         text: String,

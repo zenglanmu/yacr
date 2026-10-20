@@ -37,7 +37,12 @@
 //! - [`hover`]: the `YACR_PROBE_HOVER` hover-cost driver;
 //! - [`box_select`]: the `YACR_PROBE_BOX_EVIDENCE` box-selection driver;
 //! - [`popup`]: the `YACR_PROBE_POPUP_EVIDENCE` modal-popup pipeline driver
-//!   (open → real gate refusal → close → real gate release).
+//!   (open → real gate refusal → close → real gate release);
+//! - [`popup_textedit`]: the same driver's `textEdit` phase (host-derived payload
+//!   → real `cad_set_selected_text` queue + tick drain → status verification →
+//!   close → gate release), scheduled after the `about` phase;
+//! - [`popup_textedit_summary`]: that phase's recorded reads and single-line
+//!   summary (split at the 1000-line code-file gate).
 
 use std::time::{Duration, Instant};
 
@@ -55,6 +60,8 @@ mod input;
 mod lifecycle;
 mod pan;
 mod popup;
+mod popup_textedit;
+mod popup_textedit_summary;
 mod tool;
 
 pub use box_select::{box_evidence_enabled, maybe_spawn_box_evidence};

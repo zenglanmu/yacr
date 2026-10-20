@@ -397,6 +397,21 @@ impl CadSession {
         }])
     }
 
+    /// The host-derived target of the popup text editor (ADR-0021 D4).
+    ///
+    /// `Some((raw string, multiline))` only when the current selection is exactly
+    /// one directly addressable TEXT / MTEXT / MULTILEADER text; every other
+    /// selection, and a host without a document, report `None` (the popup host
+    /// turns that into its own `popup.no_text_selection` refusal). The string is
+    /// the stored raw value — `\P` is not interpreted here.
+    pub fn selected_text_edit(&self) -> Result<Option<(String, bool)>, String> {
+        self.core
+            .controller
+            .borrow()
+            .selected_text_edit()
+            .map_err(|error| cad_error_text(&error))
+    }
+
     /// Acknowledge the first `Esc`'s text-focus dismissal.
     ///
     /// The tool stays active and still awaits text, so this is not a cancel; the
