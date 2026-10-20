@@ -1,3 +1,28 @@
+## 显示保真切片 B：ACIS 假声明改为真话（2026-10-21）
+
+**结论：不接线，只修文档。** 闸门（"有界才实现，否则说实话"）判定**不可有界**，依据三条：
+
+1. **数据在导入时就没了**：`acis_semantics` 发出 `SemanticGeometry::Opaque { type_key, version, payload }`，
+   `payload` 只是**原始 SAT/SAB 字节**，不含 shells/faces/loops，也没有 `BrepData`。要把字节变成 `BrepData`
+   必须经 **acadrust 的 `AcisData::parse()`/`SatDocument`**，而它只在 `cad-import-acadrust/src/solid.rs` 可达。
+2. **分层禁止"顺手调用"**：`check-architecture.py:174-175` 断言**除 `cad-import-acadrust` 外任何包不得依赖 acadrust**
+   （"parser escaped importer"）。`cad-representation` 在导入层**之下**，在那里拉 acadrust 会**反转层序**。
+   正确做法是让**导入**把 `SolidExchange::Brep` 持久化到域模型 ⇒ `cad-domain` + 导入 + 表示 + 下游消费者，
+   **是跨 crate 重设计，不是 ≤4 文件**。
+3. **没有显示级预算/缓存**：场景装配确实在后台 `LatestTask` 里（不阻塞 UI 帧），但每次内容 revision 都会重建，
+   显示路径没有 tessellation 缓存/容差/预算策略。
+
+**保持不变的诚实状态**：`Opaque` ⇒ `Completeness::Missing("no display representation in this build")` + `representation.opaque`；
+`DisplayRepresentation::from_tessellation`、`solid_exchange_from_entity`、`sat_to_brep` **只有测试调用者**。
+
+**已更正的文档**（把"已实现"改成"渲染为空 + 存在但未接线 + 阻塞点"）：
+`compatibility.md`（ACIS 行 + 新增「ACIS 实体显示状态」小节 + 两处三维/不可实现段落）、
+`dxf-entity-coverage.md`（新增 ACIS 缺口行；§6"所有可绘制 EntityType 均已接线"补**显式例外**）、
+`architecture.md`（ACIS 一行）、`kernel-acis.md`（`Unchecked` → `Unsupported`/`Missing` + 未接线说明）。
+
+**这一片没有改变任何像素**——它去掉的是一个**假声明**。若要真的画出 ACIS，需要的是**域模型持久化 B-rep**
+（另一项特性），不是接线。
+
 ## 显示保真切片 A：MESH 族停止谎报 + 渐变单位/旋转（2026-10-21）
 
 **范围**：`cad-import-acadrust`（三种 mesh 的完整性判定）、`cad-domain`（渐变旋转）、文档。

@@ -134,9 +134,9 @@ TessellationOutcome::Failed     { diagnostics }
   `Brep(SolidExchange)`；解析失败保留原始 `Sat`/`Sab` 字节。
 * `acis_exchange(&AcisData) -> SolidExchange`、`sat_to_brep(&SatDocument)`、
   `sab_to_brep(&[u8])` 为可单测的底层入口。
-* 导入时实体的 `SemanticGeometry::Opaque.payload` 现在保留原始 SAT/SAB 字节
-  （version 1 = SAT，2 = SAB）作为溯源；显示支持状态仍为 `Unchecked`，
-  除非显式走上表 §3 的 `BrepTessellator`。
+* 导入时实体的 `SemanticGeometry::Opaque.payload` 保留原始 SAT/SAB 字节
+  （version 1 = SAT，2 = SAB）作为溯源；**显示支持是 `Unsupported`/`Missing`
+  （渲染为空），不是"未检查"**，见 `docs/compatibility.md`「ACIS 实体显示状态」。
 
 acadrust API 使用：`entities::acis::{SatDocument, SabReader, SatFace, SatLoop,
 SatCoedge, SatEdge, SatVertex, SatPoint, SatPlaneSurface, SatConeSurface,
@@ -146,7 +146,14 @@ SatSphereSurface, SatTorusSurface, SatEllipseCurve, Sense}`，以及
 
 ## 8. 显示路径
 
-`cad-representation::DisplayRepresentation::from_tessellation(result, source,
+**当前未接线**：`cad-representation::DisplayRepresentation::from_tessellation` 只有测试调用者
+（`crates/cad-representation/src/tests/kernel_mesh.rs`），`cad-import-acadrust` 没有生产调用
+`solid_exchange_from_entity`；因此 3DSOLID/BODY/REGION/SURFACE **渲染为空**
+（`cad-representation/src/provider/default.rs:533-541`）。阻塞点：`Opaque` 只带原始字节，
+SAT/SAB → `BrepData` 的解析器只在导入侧（acadrust 依赖边界，见
+`scripts/check-architecture.py:174-175`），域模型也没有 `BrepData` 载体。
+
+转换器本身的行为（供接线时使用）：`DisplayRepresentation::from_tessellation(result, source,
 alpha)` 把 `TessellationResult` 转为显示图元：
 
 * 有网格 → `DisplayPrimitive::Mesh`，`GeometrySource::KernelMesh`，
