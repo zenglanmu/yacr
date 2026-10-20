@@ -78,6 +78,12 @@ const P = {
   // loop, and there is no dimension line, tick or arrowhead, so it cannot be
   // mistaken for a dimension glyph.
   hatch: <><rect x="4" y="4" width="16" height="16" rx="1.5" /><path d="M4 10 10 4" /><path d="M4 18 18 4" /><path d="M10 20 20 10" /></>,
+  // Single-line text: a capital A standing on a baseline. The baseline is what
+  // says "text on a line" rather than a generic letterform, and it keeps the
+  // glyph apart from `hatch` (a loop with diagonals) and from every dimension
+  // glyph (extension lines with a dimension line, ticks or arrowheads) even at
+  // 16 px, where only the A's two legs and the baseline survive.
+  text: <><path d="M8 14.5 12 4.5l4 10" /><path d="M9.6 11h4.8" /><path d="M4 19.5h16" /></>,
   point: <><circle cx="12" cy="12" r="2.2" /><path d="M12 4v4M12 16v4M4 12h4M16 12h4" /></>,
   spline: <><path d="M3 16c3-7 6 7 9 0s6-7 9 0" /><circle cx="3" cy="16" r="1.4" /><circle cx="12" cy="16" r="1.4" /><circle cx="21" cy="16" r="1.4" /></>,
   angle: <><path d="M4 19h16M4 19 16 5" /><path d="M12 19a8 8 0 0 0-2-5.3" /></>,

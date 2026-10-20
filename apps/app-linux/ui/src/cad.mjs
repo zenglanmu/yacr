@@ -1,4 +1,5 @@
 import { admitCommandText } from './commands.mjs';
+import { TEXT_PICK_PROMPT_KEY, TEXT_STEP_PROMPT_KEY, toolAwaitingText } from './text.mjs';
 
 // Phase keys the backend reports (`cad_app::import_phase_key`). A phase outside
 // this set is a contract violation, not a runtime surprise.
@@ -88,6 +89,19 @@ export function parseCadStatus(value) {
   // must be a real boolean: a truthy non-boolean would hide the system cursor
   // over a view that draws no crosshair, leaving the pointer invisible.
   if (value.crosshair !== undefined && typeof value.crosshair !== 'boolean') {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  // The active-tool block is `null`/absent when no tool runs, and an object when
+  // one does. Its text-step flag (ADR 0019 A.2) is optional for older hosts, but
+  // a present value must be a real boolean: a truthy non-boolean must never open
+  // the text prompt, and the field — not the tool key or point count — is what
+  // decides that mode.
+  if (value.tool !== undefined && value.tool !== null
+    && (typeof value.tool !== 'object' || Array.isArray(value.tool))) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  if (value.tool && value.tool.awaiting_text !== undefined
+    && typeof value.tool.awaiting_text !== 'boolean') {
     throw Error('CAD_STATUS_INVALID');
   }
   return value;
@@ -585,6 +599,13 @@ export const TOOL_STEP_PROMPTS = Object.freeze({
     'tool.prompt.dim.feature',
     'tool.prompt.dim.leader_endpoint',
   ],
+  // TEXT captures one point (its insertion point) and then takes its text. Only
+  // the point is a **named pick** here; the text step is not positional (it has
+  // no captured count of its own) and is named from the host's `awaiting_text`
+  // flag by [`toolStepPromptKey`] — never by counting points.
+  'draw.text': [
+    TEXT_PICK_PROMPT_KEY,
+  ],
 });
 
 /**
@@ -605,6 +626,14 @@ export const TOOL_STEP_PROMPTS = Object.freeze({
  */
 export const TOOL_READY_PROMPTS = Object.freeze({
   'draw.dimcenter': 'tool.prompt.dim.center_ready',
+  // TEXT's complement is its point plus its text, so "ready" is only reached
+  // between the two states: the shared dimension copy ("Dimension defined; press
+  // Enter to confirm") would be false for a text command, and the next step is
+  // always the text. This names that step; the **input mode** still comes from
+  // the host's `awaiting_text` alone (see [`toolStepPromptKey`]), so a race where
+  // the point is counted but the flag has not arrived yet never opens the text
+  // field — it only names what comes next.
+  'draw.text': TEXT_STEP_PROMPT_KEY,
 });
 
 /**
@@ -635,6 +664,10 @@ const DEFAULT_READY_PROMPT = 'tool.prompt.dim.ready';
 /**
  * The catalog key for the next expected pick of the active `tool`, or `null`.
  *
+ * A tool the host reports as `awaiting_text` names its **text step** first — that
+ * step is terminal and is not a pick, so no point count can express it; the flag
+ * is the single source of truth ([`toolAwaitingText`]).
+ *
  * A pre-selection tool (see [`PRESELECT_PROMPTS`]) captures no picks at all, so
  * its chip is chosen by the host's readiness instead: the "select the boundary
  * objects first" copy while it waits for a selection, the "boundary ready" copy
@@ -651,6 +684,10 @@ const DEFAULT_READY_PROMPT = 'tool.prompt.dim.ready';
  */
 export function toolStepPromptKey(tool) {
   if (!tool || typeof tool !== 'object' || typeof tool.key !== 'string') return null;
+  // The host's `awaiting_text` names the text step outright (ADR 0019 A.2). It is
+  // checked before any count-derived step: the text step is not a pick, and the
+  // flag is the only source of truth for it.
+  if (toolAwaitingText(tool)) return TEXT_STEP_PROMPT_KEY;
   const preselect = PRESELECT_PROMPTS[tool.key];
   if (preselect) return tool.ready === true ? preselect.ready : preselect.idle;
   const steps = TOOL_STEP_PROMPTS[tool.key];
@@ -882,7 +919,11 @@ export async function queueCadCommand(invoke, text, status, pending) {
 }
 
 export function handleCommandKey(event, submit) {
-  if (event.key !== 'Enter' || event.isComposing || event.repeat) return;
+  // `isComposing` covers the standard IME report; `keyCode === 229` is the
+  // legacy signal some IMEs send for the Enter that ends/commits composition.
+  // Either way the press belongs to the IME, so Enter must not submit — for a
+  // command *and* for a tool's text step.
+  if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229 || event.repeat) return;
   event.preventDefault();
   void submit();
 }

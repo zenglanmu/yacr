@@ -124,7 +124,9 @@ GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open /abs/drawing.dwg
 ## 原生 GTK/wgpu 分区与合成约束
 
 宿主把原生 CAD surface 合成在 GTK `GtkOverlay` 内的中央分区上，React `WebView` 作为透明 sibling
-呈现 chrome，二者 **co-visible**。CAD 分区的原生表面**按后端不同**：
+呈现 chrome，二者 **co-visible**。
+
+**堆叠顺序（勿弄反）**：CAD 绘图区被**重新 `add_overlay` 到最后**，因此是 overlay 的**最上层** child，其原生表面（X11 子窗口 / Wayland 子表面）在该矩形内**盖住 WebView**；只有**输入**经空 input shape/region 穿透。⇒ **DOM 无法浮在 CAD 分区之上**（ADR-0010 `:26-27`、ADR-0020）。CAD 分区的原生表面**按后端不同**：
 
 - **X11/XWayland**：`GtkDrawingArea` 获得自己的**原生 X child 窗口**，渲染器用其 Xlib XID/display。
 - **原生 Wayland**：`GtkDrawingArea` 保持**非 native**（**不** `gdk_window_ensure_native`），宿主自建

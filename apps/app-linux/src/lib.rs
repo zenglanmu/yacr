@@ -3,7 +3,8 @@
 //! The host is a **React (Vite) chrome in a Tauri 2 webview** composited over a
 //! native GTK/wgpu CAD surface: the single Tauri event loop drives
 //! `cad-render-wgpu::SurfaceProbePresenter` on a windowed `GtkDrawingArea` inside
-//! a `GtkOverlay` (the webview is a transparent sibling on top), and exposes a
+//! a `GtkOverlay` (the webview is a transparent sibling **underneath** the CAD
+//! area, which is the topmost overlay child; input passes through the CAD rect), and exposes a
 //! small status/input protocol to the frontend.
 //!
 //! The platform-independent half (wire protocol, logical layout, CAD session,

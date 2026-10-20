@@ -138,6 +138,9 @@ export const COMMAND_CATALOG = Object.freeze([
   { id: 'POLYGON', labelKey: 'draw.kind.polygon', icon: 'polygon', group: 'draw' },
   { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', group: 'draw' },
   { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', group: 'draw' },
+  // Single-line TEXT (ADR 0019 decision A): a point and then its text, which is
+  // the command's terminal step and travels on `cad_set_tool_text`.
+  { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', group: 'draw' },
   { id: 'HATCH', labelKey: 'draw.kind.hatch', icon: 'hatch', group: 'draw' },
   { id: 'MOVE', labelKey: 'draw.kind.move', icon: 'move', group: 'modify' },
   { id: 'COPY', labelKey: 'draw.kind.copy', icon: 'copy', group: 'modify' },

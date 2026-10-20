@@ -3,8 +3,12 @@
 //! **Root cause this solves:** creating the wgpu Vulkan surface on the Tauri/GTK
 //! **top-level** window makes the Vulkan swapchain cover the React webview. Here
 //! the probe surface instead gets its own dedicated native region inside a
-//! `GtkOverlay`, with the React webview reparented as a transparent sibling on
-//! top. There is **no top-level fallback**.
+//! `GtkOverlay`, with the React webview reparented as a transparent sibling
+//! **below** the CAD area`: the drawing area is re-added last so it stays the
+//! **topmost** overlay child, and its native surface covers the webview inside
+//! that rect. Only **input** passes through (empty input shape/region), so DOM
+//! can never paint over the CAD partition (ADR-0010, ADR-0020).
+//! There is **no top-level fallback**.
 //!
 //! Two backend-specific native paths sit behind the same owner:
 //! - **X11** (`classify_native`): a windowed `GtkDrawingArea` with its own native

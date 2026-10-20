@@ -215,7 +215,10 @@ test('status polling is bounded, nonoverlapping, explicit on error and stops cle
 test('React command copy is narrow and only accepted input is cleared', async () => {
   const source = await readAppSource();
   assert.ok(source.includes("result.kind === 'accepted' && options.fromInput"));
-  assert.ok(source.includes("placeholder={t('command.placeholder')}"));
+  // The field's placeholder is catalog copy in both modes: the command prompt,
+  // or the text step's own prompt (`text-tool.test.mjs` pins that one).
+  assert.ok(source.includes("t('command.placeholder')"));
+  assert.ok(source.includes("t(TEXT_PROMPT_KEY)"));
   assert.ok(!source.includes("t('command.completed')"));
   assert.ok(!source.includes("t('command.prompt')"));
   assert.ok(!source.includes("t('status.scaffold')"));

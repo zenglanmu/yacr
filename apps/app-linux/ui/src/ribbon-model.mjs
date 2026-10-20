@@ -66,6 +66,11 @@ export const RIBBON_TABS = Object.freeze([
           { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', command: 'POINT' },
           { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', command: 'SPLINE' },
           { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', command: 'OFFSET' },
+          // Single-line TEXT (ADR 0019 decision A). It is a small button next to
+          // OFFSET, before HATCH: like HATCH it is not a primary creation tool,
+          // and it has no variant popover — the command itself opens the
+          // command-line text step (there is no in-place canvas editor here).
+          { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', command: 'TEXT' },
           // HATCH closes the draw group, the way AutoCAD's Draw panel puts Hatch
           // at its end. It is a small button: unlike LINE/CIRCLE it is not a
           // primary creation tool, and it has no variant popover (the unimplemented
@@ -140,8 +145,9 @@ export const RIBBON_TABS = Object.freeze([
           { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', command: 'POINT' },
           { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', command: 'SPLINE' },
           { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', command: 'OFFSET' },
-          // Same draw-group tail on the Draw tab: Hatch stays the last draw
-          // command, and the small-button decision matches the Home panel.
+          // Same draw-group tail on the Draw tab: TEXT then Hatch stay the last
+          // draw commands, and the small-button decision matches the Home panel.
+          { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', command: 'TEXT' },
           { id: 'HATCH', labelKey: 'draw.kind.hatch', icon: 'hatch', command: 'HATCH' },
         ],
       },

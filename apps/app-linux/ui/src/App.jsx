@@ -11,6 +11,7 @@ import { createTranslator, DEFAULT_LOCALE, LOCALES, localeTag } from './i18n.mjs
 import { bindProbeInput, createInputLane } from './input.mjs';
 import { pointerPosition } from './metrics.mjs';
 import { queueCadCommand, reconcileToolParameterPending, requestImportCancel, setToolParameterFlag, setToolParameterNumber, startCadPolling, stepToolParameterPending } from './cad.mjs';
+import { setToolText } from './text.mjs';
 import { createFpsSampler } from './fps.mjs';
 import { admitCommandText, commandCatalog, pushHistory, setCommandCatalog, toolCommandForKey, unavailableReasonKey } from './commands.mjs';
 import { I18nContext, ShellContext } from './context.mjs';
@@ -57,6 +58,10 @@ export function App() {
   const [catalogNames, setCatalogNames] = useState(commandCatalog);
 
   const submitting = useRef(false);
+  // The text-step submit has its own in-flight guard: it must not block a
+  // command (or be blocked by one), and a second Enter while the first is still
+  // queued must not send the same text twice.
+  const submittingText = useRef(false);
   const laneRef = useRef(null);
   const bindingRef = useRef(null);
   const surfaceRef = useCallback(node => setSurfaceNode(node), []);
@@ -176,6 +181,22 @@ export function App() {
     }
   }, [status]);
 
+  // The terminal text step (ADR 0019 A.1): one `cad_set_tool_text`, never a
+  // `cad_command`. The result is returned to the command line so the draft can
+  // stay visible with its refusal message. `pending` is deliberately not set:
+  // it disables the field, and losing focus mid-edit would break the two-step
+  // Escape and the user's text. A re-entrant submit reports `busy` — an explicit
+  // non-answer, never a fabricated acceptance.
+  const submitToolText = useCallback(async text => {
+    if (submittingText.current) return { kind: 'busy' };
+    submittingText.current = true;
+    try {
+      return await setToolText(invoke, text);
+    } finally {
+      submittingText.current = false;
+    }
+  }, []);
+
   // Global shortcuts: Ctrl+0 clean screen, Ctrl+9 command line, F2 history, Esc.
   // While a CAD tool is active (and the keyboard is not in a field) Enter/Escape
   // are the tool's confirm/cancel instead.
@@ -244,6 +265,10 @@ export function App() {
     commandResult,
     commandMessage,
     submitCommand: (text, options) => submitCommand(text, { fromInput: true, ...options }),
+    // The text step of a text-carrying tool; resolves with the admission result
+    // (`accepted` / `refused` / `failed` / `busy`) so the command line can keep
+    // the draft and show the honest outcome.
+    submitToolText,
     historyOpen,
     setHistoryOpen,
     clearHistory: () => setHistory([]),

@@ -34,6 +34,9 @@ const HOST_NAMES = [
   'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'DIMLINEAR', 'DIMALIGNED', 'DIMRADIUS', 'DIMDIAMETER', 'DIMCENTER', 'DIMANGULAR', 'DIMORDINATE', 'MOVE', 'TRIM',
   'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'STRETCH', 'ERASE', 'EXPLODE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
   'OFFSET', 'SETACTIVELAYER', 'HOVERPREVIEW', 'OSNAP', 'HATCH',
+  // TEXT (ADR 0019 P7a): the single-line text command whose text step travels on
+  // `cad_set_tool_text`. Its own suite lives in `text-tool.test.mjs`.
+  'TEXT',
   // Interaction-only selectors: one per measurement kind, plus fixed zoom steps.
   'DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ZOOMIN', 'ZOOMOUT',
   // Full-word aliases.
