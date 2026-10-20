@@ -253,9 +253,11 @@ pub fn bulge_arc_geometry(
         [-left2[0], -left2[1]]
     };
     let mid2 = [d2[0] * 0.5, d2[1] * 0.5];
+    // The centre is on the side opposite the apex: `+u2 * radius * cos(theta/2)`
+    // (`u2` already carries the bulge's sign). See `tessellate::append_bulge_arc`.
     let center2 = [
-        mid2[0] - u2[0] * radius_abs * half.cos(),
-        mid2[1] - u2[1] * radius_abs * half.cos(),
+        mid2[0] + u2[0] * radius_abs * half.cos(),
+        mid2[1] + u2[1] * radius_abs * half.cos(),
     ];
     let start_angle = (-center2[1]).atan2(-center2[0]);
     let center = add(a, add(scale(ax, center2[0]), scale(ay, center2[1])));

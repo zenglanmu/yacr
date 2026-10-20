@@ -243,9 +243,33 @@ pub fn polyline_plane_normal(points: &[Point3]) -> Point3 {
     }
     if length(acc) < 1e-12 {
         world_z
+    } else if is_xy_parallel(points) {
+        // 2D data: a polyline in a plane parallel to world XY carries bulges in
+        // the DXF OCS sense, whose normal is `+Z`. Taking the Newell sign from
+        // the winding would mirror every arc of a clockwise-wound loop, so the
+        // display would disagree with the import/fill samplers (`+Z` frame).
+        world_z
     } else {
         normalize(acc)
     }
+}
+
+/// Whether a polyline lies in a plane parallel to world XY.
+///
+/// Such a polyline is 2D data, so its bulge signs are defined against a `+Z`
+/// normal rather than against the vertex winding. Public so the pick/bounds and
+/// object-snap code can interpret a bulge in the very frame the tessellator draws
+/// it in.
+pub fn is_xy_parallel(points: &[Point3]) -> bool {
+    let Some(first) = points.first() else {
+        return true;
+    };
+    let magnitude = points.iter().fold(1.0f64, |m, p| {
+        m.max(p.x.abs()).max(p.y.abs()).max(p.z.abs())
+    });
+    points
+        .iter()
+        .all(|p| (p.z - first.z).abs() <= 1e-9 * magnitude)
 }
 
 /// Append the arc described by a bulge (`bulge = tan(theta/4)`).
@@ -302,11 +326,16 @@ pub(crate) fn append_bulge_arc(
         [-left2[0], -left2[1]]
     };
     let mid2 = [d2[0] * 0.5, d2[1] * 0.5];
+    // The centre lies on the side *opposite* the apex: `u2` points from the
+    // chord towards the centre for a positive bulge and away for a negative
+    // one, so the signed offset is `+u2 * radius * cos(theta/2)`. (For a
+    // semicircle `cos(theta/2) = 0`, which is why a sign error here is
+    // invisible to a semicircle test.)
     let center2 = [
-        mid2[0] - u2[0] * radius_abs * half.cos(),
-        mid2[1] - u2[1] * radius_abs * half.cos(),
+        mid2[0] + u2[0] * radius_abs * half.cos(),
+        mid2[1] + u2[1] * radius_abs * half.cos(),
     ];
-    // `a` is the origin, so its angle is measured against the reflected centre.
+    // `a` is the origin, so its angle is measured against the centre.
     let start_angle = (-center2[1]).atan2(-center2[0]);
     let n = arc_segments_for_tolerance(radius_abs, theta, params);
     if !ends_at(out, a) {

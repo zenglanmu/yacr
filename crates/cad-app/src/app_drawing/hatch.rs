@@ -517,6 +517,16 @@ fn newell_normal(points: &[Point3]) -> Option<Point3> {
     if !length.is_finite() || !span.is_finite() || length <= 1e-12 * (span * span).max(1e-24) {
         return None;
     }
+    // A polyline in a plane parallel to world XY is 2D data: its bulges follow
+    // the DXF OCS convention with a `+Z` normal, not the vertex winding (the
+    // display and the fill sampler must agree for either winding).
+    if cad_geometry::is_xy_parallel(points) {
+        return Some(Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        });
+    }
     unit(normal)
 }
 

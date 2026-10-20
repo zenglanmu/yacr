@@ -2,8 +2,8 @@
 
 use cad_domain::*;
 use cad_geometry::{
-    add, arbitrary_axis, distance, dot, length, normalize, scale, sub, tessellate_spline,
-    TessellationParams,
+    add, arbitrary_axis, distance, dot, is_xy_parallel, length, normalize, scale, sub,
+    tessellate_spline, TessellationParams,
 };
 
 use super::{Raw, SnapKind, EPS, FRAC_PI_2, TAU};
@@ -603,6 +603,9 @@ fn polyline_plane_normal(points: &[Point3]) -> Point3 {
     }
     if length(acc) < EPS {
         world_z
+    } else if is_xy_parallel(points) {
+        // 2D data: `+Z`, never the winding (see `cad_geometry::is_xy_parallel`).
+        world_z
     } else {
         normalize(acc)
     }
@@ -676,9 +679,10 @@ fn bulge_arc_params(a: Point3, b: Point3, bulge: f64, plane_normal: Point3) -> O
         [-left2[0], -left2[1]]
     };
     let mid2 = [d2[0] * 0.5, d2[1] * 0.5];
+    // Same construction as the polyline tessellator: `+u2 * r * cos(theta/2)`.
     let center2 = [
-        mid2[0] - u2[0] * radius * half.cos(),
-        mid2[1] - u2[1] * radius * half.cos(),
+        mid2[0] + u2[0] * radius * half.cos(),
+        mid2[1] + u2[1] * radius * half.cos(),
     ];
     let center = add(a, add(scale(ax, center2[0]), scale(ay, center2[1])));
     let start = (-center2[1]).atan2(-center2[0]);

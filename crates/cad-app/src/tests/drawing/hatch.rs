@@ -258,6 +258,29 @@ fn a_selected_circle_becomes_one_exact_arc_loop_and_a_solid_fill() {
         "solid circle area {area} vs {expected}"
     );
 
+    // The **displayed** boundary is the same circle. The arc construction used to
+    // place each quarter arc's centre on the apex side, mirroring the arc across
+    // its chord: the loop still sampled to its vertices, but the drawn polyline
+    // overshot to 2.195*r with straight jumps at every vertex.
+    let mut boundary_samples = 0;
+    for geometry in hatch.display() {
+        let SemanticGeometry::Polyline { closed, .. } = geometry else {
+            continue;
+        };
+        assert!(*closed);
+        for point in
+            cad_geometry::tessellate_geometry(geometry, cad_geometry::TessellationParams::default())
+        {
+            let radial = point.x.hypot(point.y) - 5.0;
+            assert!(
+                radial.abs() < 1e-9,
+                "the displayed boundary leaves the circle by {radial}: {point:?}"
+            );
+            boundary_samples += 1;
+        }
+    }
+    assert!(boundary_samples > 8, "the boundary was not tessellated");
+
     // The selected boundary entity is retained (no associativity, no deletion).
     assert_eq!(entity_count(&app), 2);
 }
@@ -720,4 +743,61 @@ fn a_created_user_defined_hatch_exports_and_reimports_as_a_hatch() {
     assert!((pattern.angle - 30.0f64.to_radians()).abs() < 1e-9);
     assert!(pattern.double);
     assert_eq!(pattern.lines.len(), 1, "the synthesized row round-trips");
+}
+
+/// A polyline boundary in a plane parallel to world XY is 2D data: its winding
+/// must not flip the hatch plane. The plane used to be derived from the Newell
+/// normal's sign, so a clockwise-wound loop produced a `-Z` normal and every
+/// bulge was then read in a mirrored frame — the created loop (and its fill)
+/// silently described the inward scallop instead of the outward arcs.
+#[test]
+fn a_clockwise_z_flat_polyline_keeps_the_plane_and_the_bulge_side() {
+    let radius = 5.0;
+    let bulge = std::f64::consts::FRAC_PI_8.tan();
+    // Clockwise around +Z, so the outward quarter arcs carry `-tan(pi/8)`.
+    let mut points: Vec<Point3> = (0..4)
+        .map(|index| {
+            let angle = index as f64 * std::f64::consts::FRAC_PI_2;
+            let (sin, cos) = angle.sin_cos();
+            p3(radius * cos, radius * sin, 5.0)
+        })
+        .collect();
+    points.reverse();
+    let boundary = SemanticGeometry::Polyline {
+        points,
+        bulges: vec![-bulge; 4],
+        closed: true,
+    };
+    let (mut app, mut session) = hatch_app(vec![(1, boundary)]);
+    run(&mut app, &mut session, &[1]).expect("HATCH succeeds");
+    let hatch = the_hatch(&app);
+    assert_eq!(
+        hatch.plane().normal.z,
+        1.0,
+        "the normal is +Z, not the winding"
+    );
+    assert_eq!(hatch.plane().elevation, 5.0);
+    assert_eq!(hatch.loops()[0].bulges, vec![-bulge; 4]);
+
+    // The displayed boundary is the radius-5 circle in the z = 5 plane.
+    let mut samples = 0;
+    for geometry in hatch.display() {
+        if !matches!(geometry, SemanticGeometry::Polyline { .. }) {
+            continue;
+        }
+        for point in
+            cad_geometry::tessellate_geometry(geometry, cad_geometry::TessellationParams::default())
+        {
+            assert!(
+                (point.z - 5.0).abs() < 1e-9,
+                "boundary left the plane: {point:?}"
+            );
+            assert!(
+                (point.x.hypot(point.y) - radius).abs() < 1e-9,
+                "boundary left the circle: {point:?}"
+            );
+            samples += 1;
+        }
+    }
+    assert!(samples > 8, "the boundary was not tessellated");
 }

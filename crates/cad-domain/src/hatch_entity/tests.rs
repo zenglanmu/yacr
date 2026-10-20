@@ -638,54 +638,55 @@ fn import_depth_probes_several_vertices_when_the_first_touches_a_boundary() {
     assert!((display_area(&hatch) - 100.0).abs() < 1e-6);
 }
 
-// TEMPORARY measurement (to be deleted).
+/// Fill-level guard for `sample_loop`: a four-quadrant loop whose bulges match
+/// the arc side samples onto the analytic circle, and one whose bulges do not
+/// samples the inward scallop — in both vertex orders and both bulge signs.
+///
+/// The equivalent **display**-level assertions live in
+/// `cad-geometry/tests/bulge_display.rs`; the two must never diverge again (the
+/// display used to mirror every arc across its chord while the fill did not).
 #[test]
-fn tmp_measure_fill_sampler() {
+fn bulged_hatch_loop_samples_follow_the_bulge_sign_not_the_winding() {
     let radius = 10.0;
-    let b = std::f64::consts::FRAC_PI_8.tan();
-    let pts: Vec<[f64; 2]> = (0..4)
-        .map(|i| {
-            let a = i as f64 * std::f64::consts::FRAC_PI_2;
-            [radius * a.cos(), radius * a.sin()]
+    let bulge = std::f64::consts::FRAC_PI_8.tan();
+    let mut ccw_points: Vec<[f64; 2]> = (0..4)
+        .map(|index| {
+            let angle = index as f64 * std::f64::consts::FRAC_PI_2;
+            let (sin, cos) = angle.sin_cos();
+            [radius * cos, radius * sin]
         })
         .collect();
-    for (label, bulges) in [
-        ("CCW +b", vec![b; 4]),
-        ("CCW -b", vec![-b; 4]),
-    ] {
-        let lp = HatchLoop::new(pts.clone(), bulges, HatchLoopFlags::default());
-        let ring = sample_loop(&lp);
-        let max = ring
-            .iter()
-            .map(|q| (q[0].hypot(q[1]) - radius).abs())
-            .fold(0.0f64, f64::max);
-        let maxr = ring
-            .iter()
-            .map(|q| q[0].hypot(q[1]))
-            .fold(0.0f64, f64::max);
-        println!("fill {label}: n={} max dev={max:.9} max radius={maxr:.9}", ring.len());
-    }
-    // Also measure via the display mesh (fill) for a solid hatch.
-    let solids: Vec<_> = (0..4).map(|_| 0.0).collect();
-    let lp = HatchLoop::new(pts.clone(), vec![b; 4], HatchLoopFlags::default());
-    let hatch = HatchGeometry::new(
-        vec![lp],
-        HatchPlane::default(),
-        HatchStyle::Normal,
-        HatchFill::Solid,
-        Vec::new(),
-        None,
-        HatchPatternType::UserDefined,
-    )
-    .unwrap();
-    println!("solid segments={}", solids.len());
-    let mut worst = 0.0f64;
-    for g in hatch.display() {
-        if let SemanticGeometry::Mesh(m) = g {
-            for v in &m.vertices {
-                worst = worst.max((v.x.hypot(v.y) - radius).abs());
+    let scallop = radius * (std::f64::consts::SQRT_2 - 1.0);
+    for ccw in [true, false] {
+        if !ccw {
+            ccw_points.reverse();
+        }
+        for sign in [1.0, -1.0] {
+            let loop_ = HatchLoop::new(
+                ccw_points.clone(),
+                vec![sign * bulge; 4],
+                HatchLoopFlags::default(),
+            );
+            let ring = sample_loop(&loop_);
+            let (min, max) = ring.iter().fold((f64::INFINITY, 0.0f64), |acc, q| {
+                let r = q[0].hypot(q[1]);
+                (acc.0.min(r), acc.1.max(r))
+            });
+            assert!(
+                max <= radius + 1e-9,
+                "ccw={ccw} sign={sign}: a fill sample overshoots the circle (max {max})"
+            );
+            if ccw == (sign > 0.0) {
+                assert!(
+                    (min - radius).abs() < 1e-9,
+                    "ccw={ccw} sign={sign}: expected the analytic circle, min {min}"
+                );
+            } else {
+                assert!(
+                    (min - scallop).abs() < 1e-9,
+                    "ccw={ccw} sign={sign}: expected the scallop apex {scallop}, min {min}"
+                );
             }
         }
     }
-    println!("fill mesh worst radial dev = {worst:.9}");
 }

@@ -609,6 +609,9 @@ fn polyline_plane_normal(points: &[Point3]) -> Point3 {
     }
     if length3(acc) < 1e-12 {
         world_z
+    } else if cad_geometry::is_xy_parallel(points) {
+        // 2D data: `+Z`, never the winding (see `cad_geometry::is_xy_parallel`).
+        world_z
     } else {
         scale3(acc, 1.0 / length3(acc))
     }
@@ -660,9 +663,10 @@ fn bulge_arc_bounds(
         [-left2[0], -left2[1]]
     };
     let mid2 = [d2[0] * 0.5, d2[1] * 0.5];
+    // Same construction as `cad_geometry`'s tessellator: `+u2 * r * cos(theta/2)`.
     let center2 = [
-        mid2[0] - u2[0] * radius_abs * half.cos(),
-        mid2[1] - u2[1] * radius_abs * half.cos(),
+        mid2[0] + u2[0] * radius_abs * half.cos(),
+        mid2[1] + u2[1] * radius_abs * half.cos(),
     ];
     let center3 = add(a, add(scale3(ax, center2[0]), scale3(ay, center2[1])));
     if !is_finite_point(center3) {
