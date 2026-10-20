@@ -42,6 +42,7 @@ mod draw_dimension;
 mod draw_dimension_angular_ordinate;
 mod draw_dimension_radial;
 mod draw_edit;
+mod draw_hatch;
 mod edit;
 mod hover;
 mod input;

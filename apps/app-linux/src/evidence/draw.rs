@@ -77,13 +77,18 @@
 //!     `tool` `null`.
 //! 19. **DIMORDINATE** (P5e): feature point, leader endpoint, `CONFIRM` ⇒
 //!     `entityCount` **+1**.
+//! 20. **HATCH** (P6b, pre-selection): draw two concentric `CIRCLE`s, window-box
+//!     select both, `HATCH` (solid, `Normal`), `CONFIRM` ⇒ `entityCount` **+1**;
+//!     then a `RECTANG` with a user-defined pattern (spacing 0.05, angle 30) ⇒
+//!     **+1**; then the same two circles again with style `2` (`Ignore`) ⇒
+//!     **+1**. Each phase reads the real `cad_status` before/after.
 //!
 //! The P4 edit-command phases (8–12) live in [`super::draw_edit`], the P5c
 //! dimension-creation phases (13–14) in [`super::draw_dimension`], the P5d
-//! radial-dimension phases (15–17) in [`super::draw_dimension_radial`] and the
-//! P5e angular/ordinate phases (18–19) in
-//! [`super::draw_dimension_angular_ordinate`] (this file was split at the
-//! 1000-line code-file gate).
+//! radial-dimension phases (15–17) in [`super::draw_dimension_radial`], the P5e
+//! angular/ordinate phases (18–19) in
+//! [`super::draw_dimension_angular_ordinate`] and the P6b hatch phases (20) in
+//! [`super::draw_hatch`] (this file was split at the 1000-line code-file gate).
 //!
 //! Synthetic input, **not a real mouse**: the events are dispatched on
 //! `.native-input` and never touch the kernel/evdev/XInput path. Every reported
@@ -145,7 +150,9 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
          ARRAYRECT(rows=2,cols=3) ARRAYPOLAR(items=4) ALIGN(4pt) STRETCH(4pt) EXPLODE \
          + P5c dimensions DIMLINEAR(3pt) DIMALIGNED(3pt) \
          + P5d radial dimensions DIMRADIUS(circle+pick+loc) DIMDIAMETER(circle+pick+loc) DIMCENTER(circle+pick) \
-         + P5e dimensions DIMANGULAR(2 lines+2 picks+arc loc) DIMORDINATE(feature+leader)"
+         + P5e dimensions DIMANGULAR(2 lines+2 picks+arc loc) DIMORDINATE(feature+leader) \
+         + P6b hatch: 2 pan drags, HATCH(solid annulus), HATCH(user-defined pattern), \
+         HATCH(style 2 Ignore annulus)"
     );
     let webview = webview.clone();
     if let Err(error) = std::thread::Builder::new()
@@ -198,12 +205,14 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
 ///   DIMDIAMETER / DIMCENTER, [`super::draw_dimension_radial`]) at
 ///   t=145s..163s, the **P5e angular/ordinate phases** (DIMANGULAR /
 ///   DIMORDINATE, [`super::draw_dimension_angular_ordinate`]) at
-///   t=163.5s..177.5s, and the combined single-line report lands at t=180s — the
+///   t=163.5s..177.5s, the **P6b hatch phases** (HATCH, [`super::draw_hatch`]) at
+///   t=178s..204.5s, and the combined single-line report lands at t=205s — the
 ///   P4 phases and report in [`super::draw_edit`], which documents the per-step
-///   timeline. An external `--capture-at` should land **after** every P5e command
-///   commits (≈ driver t=177.5s, i.e. a launch delay of ≈ 185s) so a reviewer
-///   sees the arrays, the EXPLODE result, the P5c dimensions, the P5d circles +
-///   radial dimensions **and** the P5e angular/ordinate dimensions on screen.
+///   timeline. An external `--capture-at` should land **after** every hatch phase
+///   commits and the cursor is parked (≈ driver t=204s, i.e. a launch delay of
+///   ≈ 212s) so a reviewer sees the arrays, the EXPLODE result, the P5c
+///   dimensions, the P5d circles + radial dimensions, the P5e angular/ordinate
+///   dimensions **and** the three hatch frames on screen.
 ///
 /// Every step is a dispatch only; the **real** outcome is the `cad_status`
 /// snapshot read from the host, never a value synthesized here. Pointer
@@ -565,6 +574,7 @@ fn run_draw_evidence(webview: tauri::Webview) {
     super::draw_dimension::schedule_dimension_phases(&webview, &start);
     super::draw_dimension_radial::schedule_radial_dimension_phases(&webview, &start);
     super::draw_dimension_angular_ordinate::schedule_angular_ordinate_phases(&webview, &start);
+    super::draw_hatch::schedule_hatch_phases(&webview, &start);
     super::draw_edit::schedule_draw_report(&webview, &start);
 }
 
@@ -704,8 +714,13 @@ const DRAW_STATUS_TEMPLATE: &str = r#"
       d[name + '_align_scale'] = (params && typeof params.alignScale !== 'undefined') ? params.alignScale : null;
       d[name + '_selection'] = s.selection ? s.selection.count : null;
       d[name + '_error'] = s.error;
+      d[name + '_hatch_pattern_type'] = (params && typeof params.hatchPatternType !== 'undefined') ? params.hatchPatternType : null;
+      d[name + '_hatch_spacing'] = (params && typeof params.hatchSpacing !== 'undefined') ? params.hatchSpacing : null;
+      d[name + '_hatch_angle'] = (params && typeof params.hatchAngle !== 'undefined') ? params.hatchAngle : null;
+      d[name + '_hatch_style'] = (params && typeof params.hatchStyle !== 'undefined') ? params.hatchStyle : null;
       if (s.camera && s.camera.center && s.camera.center.length === 2) {
         d.camera = [s.camera.center[0], s.camera.center[1], s.camera.scale];
+        d[name + '_camera'] = [s.camera.center[0], s.camera.center[1], s.camera.scale];
       }
     }).catch(function (err) { d[name + '_failed'] = String(err); });
     return name + '-dispatched';

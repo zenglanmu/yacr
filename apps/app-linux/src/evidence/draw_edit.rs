@@ -427,16 +427,18 @@ pub(super) fn schedule_draw_edit_phases(webview: &tauri::Webview, start: &Instan
 
 /// Schedule the combined single-line report relative to the driver start.
 ///
-/// It lands after every phase (default t=180 s), so the arrays, the EXPLODE
+/// It lands after every phase (default t=205 s), so the arrays, the EXPLODE
 /// result, the P5c dimensions (DIMLINEAR/DIMALIGNED, [`super::draw_dimension`],
 /// which end at t=144.5 s), the P5d radial dimensions (DIMRADIUS/DIMDIAMETER/
-/// DIMCENTER, [`super::draw_dimension_radial`], which end at t=163 s) and the P5e
+/// DIMCENTER, [`super::draw_dimension_radial`], which end at t=163 s), the P5e
 /// angular/ordinate dimensions (DIMANGULAR/DIMORDINATE,
-/// [`super::draw_dimension_angular_ordinate`], which end at t=177.5 s) are already
+/// [`super::draw_dimension_angular_ordinate`], which end at t=177.5 s) and the
+/// P6b `HATCH` phases ([`super::draw_hatch`], which end at t=204.5 s) are already
 /// committed; the report carries the real before/after reads and the real
-/// refusals.
+/// refusals, and it appends the `hatch_*` fragment [`super::draw_hatch`] builds
+/// into `window.__yacr_hatch_summary` so the whole pass stays one line.
 pub(super) fn schedule_draw_report(webview: &tauri::Webview, start: &Instant) {
-    schedule_draw_ms(start, 180_000, "draw evidence report", || {
+    schedule_draw_ms(start, 205_000, "draw evidence report", || {
         webview.eval_with_callback(DRAW_REPORT_JS, |payload| {
             eprintln!(
                 "[probe] draw evidence report: {}",
@@ -910,7 +912,8 @@ const DRAW_REPORT_JS: &str = r#"
     ' dimordinate_failed=' + v(d.dimordinate_failed) +
     ' dimordinate_feature_failed=' + v(d.dimordinate_feature_failed) +
     ' dimordinate_leader_failed=' + v(d.dimordinate_leader_failed) +
-    ' dim_park_failed=' + v(d.dim_park_failed);
+    ' dim_park_failed=' + v(d.dim_park_failed) +
+    (window.__yacr_hatch_summary || ' hatch_summary=missing');
   try { console.log('[probe] draw evidence report: ' + text); } catch (err) {}
   return text;
 })()
