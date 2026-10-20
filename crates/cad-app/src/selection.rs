@@ -474,6 +474,13 @@ fn geometry_property_rows(geometry: &SemanticGeometry) -> Vec<PropertyRow> {
                 PropertyRow::new("display", hatch.display().len().to_string()),
             ]
         }
+        // Stored metadata only: the derived display is not re-described here.
+        SemanticGeometry::MultiLeader(multileader) => vec![
+            PropertyRow::new("style", multileader.style_name().to_string()),
+            PropertyRow::new("roots", multileader.roots().len().to_string()),
+            PropertyRow::new("lines", multileader.lines().len().to_string()),
+            PropertyRow::new("display", multileader.display().len().to_string()),
+        ],
     }
 }
 

@@ -1,3 +1,34 @@
+## P7b-1：MultiLeader 一等表示 + 导入迁移 + 匹配点清单 + **显示等价**（ADR-0019 决策 C/G，2026-10-20）
+
+**范围**：`crates/cad-domain`（新 `multileader.rs`）、`crates/cad-import-acadrust`（迁移 + 临时导出）、
+以及 `cad-db`/`cad-geometry`/`cad-spatial`/`cad-app`/`cad-measure`/`cad-platform`/`cad-proxy`/`cad-representation`
+的匹配点。**未**实现 DXF 写入（P7b-2）。
+
+- **变体**：`SemanticGeometry::MultiLeader(Box<MultiLeaderGeometry>)`，私有字段 + `new`/`from_import`/`transformed`；
+  `override_mask` **原样**；`reserved` **仅逐字源数据**（打断、背景/分栏、未建模 per-line 位；**每个源组码只导一次**，有测试）；
+  保留每簇/每线索引与 per-line 覆盖位、箭头字段、`plane`。
+- **显示等价（本片验收核心，已钉）**：派生显示是旧合成的**逐字搬迁**——同一 `Polyline`、同一 `Spline`
+  （degree `3.min(n-1).max(1)`、空 knots/weights）、同一箭头 `Mesh`、同一狗腿公式、同一 `Text`
+  ⇒ **迁移不改变渲染**（测试对比迁移前的捕获数值）。
+- **导入**：**仅 MText 与无内容**迁入变体；**块/公差内容保持旧 `Compound` 路径**（**渲染不变**，`Partial` + 具名原因）。
+  变体路径恒 **`Partial` + 具名原因**（颜色/线宽覆盖、背景、分栏、打断、自定义箭头、非默认平面）——**不报 `Complete`**。
+- **变换**：平移/旋转（重建 `display`）；**缩放（含均匀）/镜像/非均匀 ⇒ 整选择 `Unsupported`**。
+- **匹配点**：`EXPLODE` **顶层与块内均显式按 `type_key` 拒绝**（不写任何东西，不依赖已失效的变换副作用）；
+  `STRETCH` 显式整命令拒绝；`class_name = "AcDbMultiLeader"`、`kind_name = "MultiLeader"`；
+  pick/bounds/snap 与等价 `Compound` 平价（有测试）。
+- **导出（临时）**：`export/entity.rs` 按旧 `Compound` 方式摊平 `display()`，记录 `export.converted.multileader`
+  并注明由 P7b-2 替换；**尚未写 `MULTILEADER`**。
+- **两处如实记录的偏离**（已写入 ADR 实施小节）：
+  1. **样式是"解析后的有效值"快照**，不是原始 MLEADERSTYLE 记录 ⇒ 掩码**未置位**而实体值与样式不同的**原始值未保留**
+     ⇒ **P7b-2 不得声称这些字段逐字往返**；往返验收比**有效值**，且"自洽断言"在此为**构造性成立**。
+  2. **狗腿起点**按代码取"**第一条有末顶点的引线**"（非 ADR 原措辞"最后一条"）——为显示等价以**代码为准**，ADR 已更正。
+- **门禁（编排者复跑）**：受影响 crate **2177 通过 / 0 失败**；UI **200/200**；clippy(`-D warnings`)、fmt、
+  architecture(27)、i18n(**553**)、file-size(**728**)。**NOT RUN**：全量 `cargo test --workspace`；跨平台；
+  **无真实 MULTILEADER 夹具**（全部合成）；真机/像素（本片未新增渲染几何，但要证"没变"只能靠合成数值对比）。
+- **顺带修掉的复发问题（第三次）**：`selection.rs` 新增 `PropertyRow` 键（`roots`/`lines`）缺目录与 switch ⇒
+  已在 **AGENTS.md 写入机械规则**（新增属性行必须同时补两目录 + `cad.mjs` 的 `propertyRowLabel`）。
+- **待办**：P7b-2（真 `MULTILEADER` 写入 + `MLEADERSTYLE` 去重 + `CLASSES` 两条 + 往返同一性）、P7c（创建）。
+
 ## P7a-3/4：编辑现有文本（`TEXTEDIT` + 属性面板可编辑字段，ADR-0020 增补，2026-10-20）
 
 **范围**：`crates/cad-app`（命令/工具/应用层/拒绝面）、`crates/cad-ui-core`（请求与状态投影）、

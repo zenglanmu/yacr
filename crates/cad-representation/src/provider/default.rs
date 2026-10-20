@@ -233,6 +233,9 @@ impl DefaultRepresentationProvider {
             SemanticGeometry::Compound(children) => Some(children),
             SemanticGeometry::Dimension(dimension) => Some(dimension.display()),
             SemanticGeometry::Hatch(hatch) => Some(hatch.display()),
+            // A multileader renders its display children, exactly like the
+            // compound it used to be (ADR 0019 decision G).
+            SemanticGeometry::MultiLeader(multileader) => Some(multileader.display()),
             _ => None,
         };
         if let Some(children) = grouped {

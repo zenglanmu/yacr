@@ -28,6 +28,10 @@ fn is_intersectable(geometry: &SemanticGeometry) -> bool {
         // pattern polylines), so it does not silently lose intersection snaps
         // (ADR 0018 E).
         G::Hatch(hatch) => hatch.display().iter().any(is_intersectable),
+        // A multileader is intersectable through its display children (leader
+        // paths and doglegs), exactly like the compound it used to be
+        // (ADR 0019 decision G).
+        G::MultiLeader(multileader) => multileader.display().iter().any(is_intersectable),
         _ => false,
     }
 }

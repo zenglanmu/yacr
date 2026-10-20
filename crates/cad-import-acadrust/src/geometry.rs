@@ -445,6 +445,13 @@ pub(crate) fn referenced_blocks(geometry: &SemanticGeometry) -> Vec<BlockId> {
         SemanticGeometry::Hatch(hatch) => {
             hatch.display().iter().flat_map(referenced_blocks).collect()
         }
+        // A multileader is traversed like the compound it used to be
+        // (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(multileader) => multileader
+            .display()
+            .iter()
+            .flat_map(referenced_blocks)
+            .collect(),
         _ => Vec::new(),
     }
 }

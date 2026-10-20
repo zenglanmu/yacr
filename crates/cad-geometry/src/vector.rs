@@ -158,6 +158,36 @@ pub fn geometry_is_finite(geometry: &SemanticGeometry) -> bool {
         } => finite(*origin) && finite(*u) && finite(*v) && pixels.iter().all(|p| p.is_finite()),
         G::Mask { boundary, .. } => all_points(boundary),
         G::Compound(children) => children.iter().all(geometry_is_finite),
+        // A multileader is finite when its style snapshot, text, roots, lines,
+        // plane and every display child are finite; the display alone would miss
+        // a poisoned vertex the next transform/export reads (ADR 0019 C).
+        G::MultiLeader(multileader) => {
+            let style = multileader.style();
+            let text = multileader.text();
+            let plane = multileader.plane();
+            style.landing_distance.is_finite()
+                && style.landing_gap.is_finite()
+                && style.arrowhead_size.is_finite()
+                && style.text_height.is_finite()
+                && style.scale_factor.is_finite()
+                && finite(text.location)
+                && text.rotation.is_finite()
+                && text.height.is_finite()
+                && text.width.is_finite()
+                && multileader.roots().iter().all(|root| {
+                    finite(root.landing_point)
+                        && finite(root.dogleg_vector)
+                        && root.dogleg_length.is_finite()
+                })
+                && multileader
+                    .lines()
+                    .iter()
+                    .all(|line| all_points(&line.points) && line.arrowhead_size.is_finite())
+                && finite(plane.origin)
+                && finite(plane.u)
+                && finite(plane.v)
+                && multileader.display().iter().all(geometry_is_finite)
+        }
         // A dimension is only finite when its definition points, its measurement
         // and every display child are finite; checking the display alone would
         // miss a poisoned definition point that the next transform/export reads

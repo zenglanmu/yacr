@@ -508,6 +508,14 @@ fn vertex_count(g: &SemanticGeometry) -> usize {
             .map(vertex_count)
             .sum::<usize>()
             .max(1),
+        // A multileader estimates its display children, exactly like the compound
+        // it used to be (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(multileader) => multileader
+            .display()
+            .iter()
+            .map(vertex_count)
+            .sum::<usize>()
+            .max(1),
         _ => 4,
     }
 }

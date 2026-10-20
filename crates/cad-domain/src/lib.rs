@@ -5,7 +5,9 @@ mod dimension;
 mod dimension_synthesis;
 pub mod hatch;
 pub mod hatch_entity;
+mod multileader;
 pub use hatch_entity::*;
+pub use multileader::*;
 
 #[cfg(test)]
 mod dimension_tests;
@@ -412,6 +414,12 @@ pub enum SemanticGeometry {
     ///
     /// Boxed for the same reason as `Dimension`.
     Hatch(Box<HatchGeometry>),
+    /// A MULTILEADER (ADR 0019 decision C): resolved style snapshot, annotation
+    /// text, leader roots/lines, the opaque `reserved` bag, plane frame and a
+    /// derived `display` (leader paths, arrowheads, doglegs and text).
+    ///
+    /// Boxed for the same reason as `Dimension`.
+    MultiLeader(Box<MultiLeaderGeometry>),
     /// A raster image (DXF `IMAGE` / `AcDbRasterImage`).
     ///
     /// The image is placed by `origin` and two edge vectors: `u` and `v` span

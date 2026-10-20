@@ -8,6 +8,10 @@
 
 mod dimension;
 mod entity;
+
+// The P7b-1 interim-export contract test asserts the variant name.
+#[cfg(test)]
+pub(crate) use entity::kind_name;
 mod hatch;
 mod report;
 mod tables;

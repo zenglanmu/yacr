@@ -238,6 +238,21 @@ pub(super) fn emit(
             );
             Ok(())
         }
+        // Interim export (P7b-1): a migrated MULTILEADER is flattened into its
+        // derived display, exactly the primitives the pre-P7b `Compound`
+        // produced. The real MULTILEADER writer (with `CLASSES` and
+        // `MLEADERSTYLE` records) is P7b-2; until then this is a declared
+        // stopgap, not a first-class round-trip.
+        SemanticGeometry::MultiLeader(multileader) => emit_multileader(
+            doc,
+            entity,
+            multileader.display(),
+            transform,
+            depth,
+            ctx,
+            acc,
+            stack,
+        ),
         leaf => {
             let owned;
             let placed: &SemanticGeometry = if transform == &Transform3::identity() {
@@ -264,6 +279,45 @@ pub(super) fn emit(
             emit_leaf(doc, entity, placed, ctx, acc)
         }
     }
+}
+
+/// Interim MULTILEADER export (P7b-1 stopgap).
+///
+/// Flattens the derived display into separate output entities, exactly as the
+/// pre-P7b `Compound` arm did, and records the conversion. This is **not** the
+/// real MULTILEADER writer (P7b-2); the entity's first-class identity is lost on
+/// save today, and the record says so.
+#[allow(clippy::too_many_arguments)]
+fn emit_multileader(
+    doc: &mut CadDocument,
+    entity: &DbEntity,
+    display: &[SemanticGeometry],
+    transform: &Transform3,
+    depth: usize,
+    ctx: &EntityContext,
+    acc: &mut ExportAccumulator,
+    stack: &mut Vec<BlockId>,
+) -> CadResult<()> {
+    let object = Some(entity.object.id);
+    for child in display {
+        // The display children inherit the source entity's identity and
+        // placement, exactly like the old compound flattening.
+        let child_entity = DbEntity {
+            geometry: child.clone(),
+            ..entity.clone()
+        };
+        emit(doc, &child_entity, transform, depth, ctx, acc, stack)?;
+    }
+    acc.record(
+        object,
+        "multileader",
+        MappingOutcome::Converted(vec![
+            "MULTILEADER flattened into its display primitives; the first-class MULTILEADER \
+             writer is P7b-2 (interim stopgap, no round-trip identity yet)"
+                .into(),
+        ]),
+    );
+    Ok(())
 }
 
 fn emit_leaf(
@@ -533,6 +587,18 @@ fn emit_leaf(
         SemanticGeometry::Hatch(hatch) => {
             super::hatch::emit_hatch(doc, entity, hatch, ctx, acc)?;
         }
+        // The real MULTILEADER writer does not exist yet (P7b-2); `emit` flattens
+        // the display before this point. Reaching here is a programming error.
+        SemanticGeometry::MultiLeader(_) => {
+            acc.record(
+                object,
+                "internal",
+                MappingOutcome::Dropped(vec![
+                    "multileader reached the leaf mapper; its display should have been flattened"
+                        .into(),
+                ]),
+            );
+        }
         // Insert and Compound are handled before this point; a leaf here would be
         // a programming error, and must not be silently dropped.
         SemanticGeometry::Insert { .. } | SemanticGeometry::Compound(_) => {
@@ -768,6 +834,7 @@ pub(crate) fn kind_name(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Compound(_) => "Compound",
         SemanticGeometry::Dimension(_) => "Dimension",
         SemanticGeometry::Hatch(_) => "Hatch",
+        SemanticGeometry::MultiLeader(_) => "MultiLeader",
         SemanticGeometry::Image { .. } => "Image",
         SemanticGeometry::Mask { .. } => "Mask",
     }

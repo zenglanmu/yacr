@@ -1,25 +1,31 @@
 //! MULTILEADER path, arrowhead, dogleg and annotation-text synthesis.
 //!
 //! Submodule of [`crate::dimension`].
+//!
+//! P7b-1 (ADR 0019 decision C) migrates **MText content and content-less
+//! leaders** to the first-class [`SemanticGeometry::MultiLeader`] variant. Block
+//! and tolerance content deliberately stay on the pre-P7b `Compound` path
+//! (decision C.3) so their rendering does not regress; the variant's owner-
+//! derived display is a verbatim move of that synthesis (`cad-domain`'s
+//! `multileader` module).
 
 use super::*;
 use acadrust::entities::{
-    LeaderLinePropertyOverrideFlags, MultiLeaderPathType, MultiLeaderPropertyOverrideFlags,
-    TextAttachmentPointType, TextAttachmentType,
+    LeaderLinePropertyOverrideFlags, MultiLeaderPathType as AcadPathType,
+    MultiLeaderPropertyOverrideFlags, TextAttachmentPointType, TextAttachmentType,
 };
 
-/// Build a MULTILEADER leader path honoring its `path_type`.
+/// Build a MULTILEADER leader path honoring its `path_type` (pre-P7b helper,
+/// kept for the block/tolerance `Compound` path only).
 ///
 /// `Invisible` draws nothing, `StraightLineSegments` a polyline, and `Spline` a
 /// smooth B-spline through the same points (tessellated by the representation
 /// layer), never a straight polyline.
-fn multileader_path(points: &[Point3], path_type: MultiLeaderPathType) -> Option<SemanticGeometry> {
+fn multileader_path(points: &[Point3], path_type: AcadPathType) -> Option<SemanticGeometry> {
     match path_type {
-        MultiLeaderPathType::Invisible => None,
-        MultiLeaderPathType::StraightLineSegments => {
-            Some(polyline_semantics(points.to_vec(), false))
-        }
-        MultiLeaderPathType::Spline => {
+        AcadPathType::Invisible => None,
+        AcadPathType::StraightLineSegments => Some(polyline_semantics(points.to_vec(), false)),
+        AcadPathType::Spline => {
             let degree = 3.min(points.len().saturating_sub(1).max(1)) as u32;
             Some(SemanticGeometry::Spline {
                 degree,
@@ -68,7 +74,8 @@ fn is_identity_transform(matrix: &[f64; 16]) -> bool {
         .all(|(value, expected)| (value - expected).abs() < 1e-12)
 }
 
-/// The dogleg / landing segment at the content end of a leader root.
+/// The dogleg / landing segment at the content end of a leader root (pre-P7b
+/// helper, kept for the block/tolerance `Compound` path only).
 ///
 /// It starts at the last leader-line vertex and runs toward the root's content
 /// connection point for `landing_distance` (falling back to the entity/style
@@ -117,32 +124,129 @@ fn multileader_dogleg(
     line_between(start, end)
 }
 
+/// The effective style object, if the entity references a resolvable
+/// `MultiLeaderStyle` object.
+fn style_object<'a>(
+    acad: &'a acadrust::CadDocument,
+    ml: &acadrust::entities::MultiLeader,
+) -> Option<&'a acadrust::objects::MultiLeaderStyle> {
+    // MLEADER styles live in the document's object map, not a typed table.
+    let handle = ml.style_handle?;
+    if handle.is_null() {
+        return None;
+    }
+    match acad.objects.get(&handle) {
+        Some(acadrust::objects::ObjectType::MultiLeaderStyle(style)) => Some(style),
+        _ => None,
+    }
+}
+
+/// The domain path-type mirror of the acadrust entity enum.
+fn domain_path_type(path_type: AcadPathType) -> MLeaderPathType {
+    match path_type {
+        AcadPathType::Invisible => MLeaderPathType::Invisible,
+        AcadPathType::StraightLineSegments => MLeaderPathType::StraightLineSegments,
+        AcadPathType::Spline => MLeaderPathType::Spline,
+    }
+}
+
+/// A source colour as the domain's raw CCR/CMC pair.
+fn domain_color(color: acadrust::types::Color) -> MLeaderColor {
+    MLeaderColor {
+        index: color.index(),
+        true_color: color.to_true_color_value(),
+    }
+}
+
+/// A non-null source handle as its raw value.
+fn handle_value(handle: Option<acadrust::types::Handle>) -> Option<u64> {
+    handle
+        .filter(|handle| !handle.is_null())
+        .map(|handle| handle.value())
+}
+
+/// Map source break pairs into the domain's verbatim record.
+fn domain_breaks(points: &[acadrust::entities::StartEndPointPair]) -> Vec<MLeaderBreak> {
+    points
+        .iter()
+        .map(|pair| MLeaderBreak {
+            start: p3(pair.start_point),
+            end: p3(pair.end_point),
+        })
+        .collect()
+}
+
+/// Background-fill parameters, when the source carried any non-default value.
+///
+/// The `reserved` partition rule forbids synthesised entries, so an entirely
+/// default background is reported as absent. acadrust's defaults are
+/// indistinguishable from a source that set the same values.
+fn background_params(
+    context: &acadrust::entities::MultiLeaderAnnotContext,
+) -> Option<MLeaderBackground> {
+    let defaults = acadrust::entities::MultiLeaderAnnotContext::new();
+    let touched = context.background_fill_enabled
+        || context.background_mask_fill_on
+        || context.background_fill_color != defaults.background_fill_color
+        || context.background_scale_factor != defaults.background_scale_factor
+        || context.background_transparency != defaults.background_transparency;
+    touched.then(|| MLeaderBackground {
+        fill_enabled: context.background_fill_enabled,
+        mask_fill_on: context.background_mask_fill_on,
+        fill_color: domain_color(context.background_fill_color),
+        scale_factor: context.background_scale_factor,
+        transparency: context.background_transparency,
+    })
+}
+
+/// Column-layout parameters, when the source carried any non-default value.
+fn column_params(context: &acadrust::entities::MultiLeaderAnnotContext) -> Option<MLeaderColumns> {
+    let touched = context.column_type != 0
+        || context.column_width != 0.0
+        || context.column_gutter != 0.0
+        || context.column_flow_reversed
+        || !context.column_sizes.is_empty();
+    touched.then(|| MLeaderColumns {
+        column_type: context.column_type,
+        width: context.column_width,
+        gutter: context.column_gutter,
+        flow_reversed: context.column_flow_reversed,
+        sizes: context.column_sizes.clone(),
+    })
+}
+
 impl ImporterBuilder<'_> {
     /// Convert a MULTILEADER: its leader-root paths (honoring `path_type`),
     /// arrowheads, dogleg/landing and annotation text.
     ///
-    /// The MLEADERSTYLE object (reached through `ml.style_handle`, since styles
-    /// are not in a typed table) supplies the defaults for path type, arrowhead
-    /// size and the dogleg/landing; per-entity and per-line override flags win.
-    /// The result stays `Partial`: the representation carries one colour per
-    /// entity, so line colour/lineweight/linetype and property overrides are
-    /// resolved but not applied, and background fill, columns, block attributes
-    /// and the transform matrix are enumerated rather than faked.
+    /// ADR 0019 C.3 migrates only MText content and content-less leaders into
+    /// the first-class [`SemanticGeometry::MultiLeader`] variant. Block and
+    /// tolerance content stay on the pre-P7b `Compound` synthesis so their
+    /// rendering does not regress.
     pub(crate) fn multileader_semantics(
         &self,
         ml: &acadrust::entities::MultiLeader,
     ) -> (SemanticGeometry, Completeness) {
+        let is_block_or_tolerance = matches!(
+            ml.content_type,
+            acadrust::entities::LeaderContentType::Block
+                | acadrust::entities::LeaderContentType::Tolerance
+        ) || ml.context.has_block_contents;
+        if is_block_or_tolerance {
+            return self.multileader_compound_semantics(ml);
+        }
+        self.multileader_variant_semantics(ml)
+    }
+
+    /// The pre-P7b `Compound` synthesis, kept **unchanged** for block and
+    /// tolerance content (ADR 0019 C.3): those entities still render exactly as
+    /// before and still cannot round-trip as MULTILEADER (same loss as today).
+    fn multileader_compound_semantics(
+        &self,
+        ml: &acadrust::entities::MultiLeader,
+    ) -> (SemanticGeometry, Completeness) {
         let context = &ml.context;
-        // MLEADER styles live in the document's object map, not a typed table.
-        let style = ml.style_handle.and_then(|handle| {
-            if handle.is_null() {
-                return None;
-            }
-            match self.acad.objects.get(&handle) {
-                Some(acadrust::objects::ObjectType::MultiLeaderStyle(style)) => Some(style),
-                _ => None,
-            }
-        });
+        let style = style_object(self.acad, ml);
 
         // Effective defaults: a set override flag wins over the style, which
         // wins over the entity's own stored value.
@@ -155,7 +259,7 @@ impl ImporterBuilder<'_> {
             match style {
                 // The style object's path type is a distinct enum; convert by
                 // its repr value.
-                Some(style) => MultiLeaderPathType::from(style.path_type as i16),
+                Some(style) => AcadPathType::from(style.path_type as i16),
                 None => ml.path_type,
             }
         };
@@ -213,7 +317,7 @@ impl ImporterBuilder<'_> {
                 if let Some(path) = multileader_path(&points, path_type) {
                     children.push(path);
                 }
-                if path_type == MultiLeaderPathType::Invisible {
+                if path_type == AcadPathType::Invisible {
                     continue;
                 }
                 if line
@@ -340,6 +444,222 @@ impl ImporterBuilder<'_> {
         }
         (
             SemanticGeometry::Compound(children),
+            Completeness::Partial(reasons),
+        )
+    }
+
+    /// Migrate an MText/content-less MULTILEADER into the first-class variant
+    /// (ADR 0019 decision C).
+    ///
+    /// Every modelled field keeps its verbatim source value; unmodelled source
+    /// data (breaks, background/column parameters, per-line colour/linetype/
+    /// lineweight) goes into the opaque `reserved` bag exactly once. The derived
+    /// display is built by `cad-domain` and is pixel-identical to the pre-P7b
+    /// `Compound` synthesis.
+    fn multileader_variant_semantics(
+        &self,
+        ml: &acadrust::entities::MultiLeader,
+    ) -> (SemanticGeometry, Completeness) {
+        let context = &ml.context;
+        let style = style_object(self.acad, ml);
+        let mask = ml.property_override_flags.bits();
+
+        let entity_path_type = if ml
+            .property_override_flags
+            .contains(MultiLeaderPropertyOverrideFlags::PATH_TYPE)
+        {
+            ml.path_type
+        } else {
+            match style {
+                Some(style) => AcadPathType::from(style.path_type as i16),
+                None => ml.path_type,
+            }
+        };
+        let enable_landing = if ml
+            .property_override_flags
+            .contains(MultiLeaderPropertyOverrideFlags::ENABLE_LANDING)
+        {
+            ml.enable_landing
+        } else {
+            style.map(|s| s.enable_landing).unwrap_or(ml.enable_landing)
+        };
+        let enable_dogleg = if ml
+            .property_override_flags
+            .contains(MultiLeaderPropertyOverrideFlags::ENABLE_DOGLEG)
+        {
+            ml.enable_dogleg
+        } else {
+            style.map(|s| s.enable_dogleg).unwrap_or(ml.enable_dogleg)
+        };
+        let default_dogleg_length = if ml
+            .property_override_flags
+            .contains(MultiLeaderPropertyOverrideFlags::LANDING_DISTANCE)
+        {
+            ml.dogleg_length
+        } else {
+            style
+                .map(|s| s.landing_distance)
+                .unwrap_or(ml.dogleg_length)
+        };
+        let landing_gap = if ml
+            .property_override_flags
+            .contains(MultiLeaderPropertyOverrideFlags::LANDING_GAP)
+        {
+            context.landing_gap
+        } else {
+            style.map(|s| s.landing_gap).unwrap_or(context.landing_gap)
+        };
+        let arrowhead_size = if ml
+            .property_override_flags
+            .contains(MultiLeaderPropertyOverrideFlags::ARROWHEAD_SIZE)
+        {
+            ml.arrowhead_size
+        } else {
+            style.map(|s| s.arrowhead_size).unwrap_or(ml.arrowhead_size)
+        };
+        let style_name = style
+            .map(|style| style.name.clone())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "Standard".to_string());
+        let text_style_name = context
+            .text_style_handle
+            .and_then(|handle| self.text_style_name_for_handle(handle))
+            .unwrap_or_else(|| "Standard".to_string());
+        let text_height = if context.text_height.is_finite() && context.text_height > 0.0 {
+            context.text_height
+        } else {
+            ml.text_height
+        };
+        let attachment_point = if ml.text_attachment_point != TextAttachmentPointType::default() {
+            ml.text_attachment_point
+        } else {
+            context.text_attachment_point
+        };
+        let left_attachment = if ml.text_left_attachment != TextAttachmentType::default() {
+            ml.text_left_attachment
+        } else {
+            context.text_left_attachment
+        };
+
+        let mut roots = Vec::with_capacity(context.leader_roots.len());
+        let mut lines = Vec::new();
+        let mut root_extras = Vec::with_capacity(context.leader_roots.len());
+        let mut line_extras = Vec::new();
+        for (root_index, root) in context.leader_roots.iter().enumerate() {
+            roots.push(MLeaderRoot {
+                leader_index: root.leader_index,
+                landing_point: p3(root.connection_point),
+                dogleg_vector: p3(root.direction),
+                dogleg_length: root.landing_distance,
+            });
+            // The root's own unmodelled flags and break pairs (ADR 0019 C.2).
+            root_extras.push(MLeaderRootExtras {
+                root_index,
+                content_valid: root.content_valid,
+                unknown: root.unknown,
+                text_attachment_direction: root.text_attachment_direction as i16,
+                breaks: domain_breaks(&root.break_points),
+            });
+            for line in &root.lines {
+                let line_index = lines.len();
+                lines.push(MLeaderLine {
+                    root_index,
+                    index: line.index,
+                    points: line.points.iter().map(|point| p3(*point)).collect(),
+                    path_type: domain_path_type(line.path_type),
+                    override_flags: line.override_flags.bits(),
+                    arrowhead_size: line.arrowhead_size,
+                    arrowhead_handle: handle_value(line.arrowhead_handle),
+                });
+                let breaks: Vec<MLeaderLineBreak> = line
+                    .break_infos
+                    .iter()
+                    .map(|info| MLeaderLineBreak {
+                        segment_index: info.segment_index,
+                        points: domain_breaks(&info.break_points),
+                    })
+                    .collect();
+                // The legacy mirrors are derived from `break_infos`; store them
+                // only when the complete records are absent, so no source pair is
+                // written twice (ADR 0019 C.2).
+                let legacy_breaks = if breaks.is_empty() {
+                    domain_breaks(&line.break_points)
+                } else {
+                    Vec::new()
+                };
+                line_extras.push(MLeaderLineExtras {
+                    root_index,
+                    line_index,
+                    segment_index: line.segment_index,
+                    breaks,
+                    break_info_count: line.break_info_count,
+                    legacy_breaks,
+                    line_color: domain_color(line.line_color),
+                    line_type_handle: handle_value(line.line_type_handle),
+                    line_weight: line.line_weight.value(),
+                });
+            }
+        }
+        let reserved = MLeaderReserved {
+            roots: root_extras,
+            lines: line_extras,
+            background: background_params(context),
+            columns: column_params(context),
+        };
+
+        let parts = MultiLeaderParts {
+            style: MLeaderStyleValues {
+                path_type: domain_path_type(entity_path_type),
+                enable_landing,
+                enable_dogleg,
+                landing_distance: default_dogleg_length,
+                landing_gap,
+                arrowhead_size,
+                text_height,
+                text_style: self.style_id(&text_style_name),
+                text_style_name: text_style_name.clone(),
+                text_font: self.style_font(&text_style_name),
+                scale_factor: ml.scale_factor,
+            },
+            style_name,
+            override_mask: mask,
+            content: if context.has_text_contents && !context.text_string.is_empty() {
+                MLeaderContent::Text
+            } else {
+                MLeaderContent::None
+            },
+            text: MLeaderText {
+                string: context.text_string.clone(),
+                location: p3(context.text_location),
+                rotation: context.text_rotation,
+                height: text_height,
+                width: context.text_width,
+                attachment_point: attachment_point as i16,
+                left_attachment: left_attachment as i16,
+            },
+            roots,
+            lines,
+            reserved,
+            plane: PlaneFrame {
+                origin: p3(context.base_point),
+                u: p3(context.base_direction),
+                v: p3(context.base_vertical),
+                normal_reversed: context.normal_reversed,
+            },
+        };
+        let (geometry, reasons) = MultiLeaderGeometry::from_import(parts);
+        if geometry.display().is_empty() {
+            return (
+                SemanticGeometry::Opaque {
+                    type_key: "AcDbMultiLeader".into(),
+                    version: 1,
+                    payload: Vec::new(),
+                },
+                Completeness::Partial(vec!["multileader has no leader lines or text".into()]),
+            );
+        }
+        (
+            SemanticGeometry::MultiLeader(Box::new(geometry)),
             Completeness::Partial(reasons),
         )
     }

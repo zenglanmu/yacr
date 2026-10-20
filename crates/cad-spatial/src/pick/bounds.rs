@@ -117,6 +117,32 @@ pub(super) fn local_pick_bounds(geometry: &SemanticGeometry) -> Option<(Point3, 
             let (min, max) = hatch.local_bounds()?;
             bounds = Some((min, max));
         }
+        // A multileader bounds like the compound it used to be: the union of its
+        // display children, so an unbounded child (text) makes it unbounded
+        // rather than falling back to the item AABB (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(multileader) => {
+            if multileader.display().is_empty() {
+                return None;
+            }
+            for child in multileader.display() {
+                let (child_min, child_max) = local_pick_bounds(child)?;
+                bounds = Some(match bounds {
+                    Some((min, max)) => (
+                        Point3 {
+                            x: min.x.min(child_min.x),
+                            y: min.y.min(child_min.y),
+                            z: min.z.min(child_min.z),
+                        },
+                        Point3 {
+                            x: max.x.max(child_max.x),
+                            y: max.y.max(child_max.y),
+                            z: max.z.max(child_max.z),
+                        },
+                    ),
+                    None => (child_min, child_max),
+                });
+            }
+        }
         // Rational splines can leave the control-point hull for invalid or
         // non-positive weights; text bounds depend on shaping/font metrics.
         // Bulged polylines likewise need their true arc extrema.
@@ -183,6 +209,9 @@ pub(super) fn cached_local_pick_bounds(
     let children: &[SemanticGeometry] = match geometry {
         SemanticGeometry::Compound(children) => children,
         SemanticGeometry::Dimension(dimension) => dimension.display(),
+        // A multileader aggregates its display children exactly like the
+        // compound it used to be (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(multileader) => multileader.display(),
         // Leaf bounds are cheap and common. Avoid hashing and inserting millions
         // of one-shot leaf pointers; only reusable aggregates (compound,
         // dimension, hatch) belong in the query cache.
@@ -517,6 +546,31 @@ fn index_local_bounds(geometry: &SemanticGeometry) -> Option<(Point3, Point3)> {
                 return None;
             }
             for child in dimension.display() {
+                let child = index_local_bounds(child)?;
+                bounds = Some(match bounds {
+                    Some((min, max)) => (
+                        Point3 {
+                            x: min.x.min(child.0.x),
+                            y: min.y.min(child.0.y),
+                            z: min.z.min(child.0.z),
+                        },
+                        Point3 {
+                            x: max.x.max(child.1.x),
+                            y: max.y.max(child.1.y),
+                            z: max.z.max(child.1.z),
+                        },
+                    ),
+                    None => child,
+                });
+            }
+        }
+        // A multileader's conservative bound is the union of its display
+        // children, matching the compound rule (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(multileader) => {
+            if multileader.display().is_empty() {
+                return None;
+            }
+            for child in multileader.display() {
                 let child = index_local_bounds(child)?;
                 bounds = Some(match bounds {
                     Some((min, max)) => (

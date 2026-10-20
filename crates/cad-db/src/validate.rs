@@ -263,6 +263,49 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
                 validate_geometry(child)?;
             }
         }
+        SemanticGeometry::MultiLeader(multileader) => {
+            // The style snapshot, text, roots, lines and plane must be finite; a
+            // leader line needs at least one vertex (a source line with fewer is
+            // legal only because it draws nothing, so it is not rejected). The
+            // derived display is validated like a compound (ADR 0019 C/G).
+            let style = multileader.style();
+            if !style.landing_distance.is_finite()
+                || !style.landing_gap.is_finite()
+                || !style.arrowhead_size.is_finite()
+                || !style.text_height.is_finite()
+                || !style.scale_factor.is_finite()
+            {
+                return Err(degenerate("multileader style snapshot is non-finite"));
+            }
+            let text = multileader.text();
+            if !finite(text.location)
+                || !text.rotation.is_finite()
+                || !text.height.is_finite()
+                || !text.width.is_finite()
+            {
+                return Err(degenerate("multileader text is non-finite"));
+            }
+            for root in multileader.roots() {
+                if !finite(root.landing_point)
+                    || !finite(root.dogleg_vector)
+                    || !root.dogleg_length.is_finite()
+                {
+                    return Err(degenerate("multileader root is non-finite"));
+                }
+            }
+            for line in multileader.lines() {
+                if !line.points.iter().all(|p| finite(*p)) || !line.arrowhead_size.is_finite() {
+                    return Err(degenerate("multileader leader line is non-finite"));
+                }
+            }
+            let plane = multileader.plane();
+            if !finite(plane.origin) || !finite(plane.u) || !finite(plane.v) {
+                return Err(degenerate("multileader plane frame is non-finite"));
+            }
+            for child in multileader.display() {
+                validate_geometry(child)?;
+            }
+        }
         SemanticGeometry::Hatch(hatch) => {
             // A hatch must have at least one loop with three finite vertices;
             // bulges and seeds are finite; the derived display is validated like

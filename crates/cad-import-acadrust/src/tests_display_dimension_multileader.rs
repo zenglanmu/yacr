@@ -2,7 +2,7 @@
 
 use super::*;
 
-fn request() -> ImportRequest {
+pub(crate) fn request() -> ImportRequest {
     ImportRequest {
         document: DocumentId(1),
         database: DatabaseId(1),
@@ -22,38 +22,51 @@ fn count_lines(geometry: &SemanticGeometry) -> usize {
     match geometry {
         SemanticGeometry::Line { .. } => 1,
         SemanticGeometry::Compound(children) => children.iter().map(count_lines).sum(),
+        SemanticGeometry::MultiLeader(multileader) => {
+            multileader.display().iter().map(count_lines).sum()
+        }
         _ => 0,
     }
 }
 
-fn count_meshes(geometry: &SemanticGeometry) -> usize {
+pub(crate) fn count_meshes(geometry: &SemanticGeometry) -> usize {
     match geometry {
         SemanticGeometry::Mesh(_) => 1,
         SemanticGeometry::Compound(children) => children.iter().map(count_meshes).sum(),
+        SemanticGeometry::MultiLeader(multileader) => {
+            multileader.display().iter().map(count_meshes).sum()
+        }
         _ => 0,
     }
 }
 
-fn has_polyline(geometry: &SemanticGeometry) -> bool {
+pub(crate) fn has_polyline(geometry: &SemanticGeometry) -> bool {
     match geometry {
         SemanticGeometry::Polyline { .. } => true,
         SemanticGeometry::Compound(children) => children.iter().any(has_polyline),
+        SemanticGeometry::MultiLeader(multileader) => {
+            multileader.display().iter().any(has_polyline)
+        }
         _ => false,
     }
 }
 
-fn has_spline(geometry: &SemanticGeometry) -> bool {
+pub(crate) fn has_spline(geometry: &SemanticGeometry) -> bool {
     match geometry {
         SemanticGeometry::Spline { .. } => true,
         SemanticGeometry::Compound(children) => children.iter().any(has_spline),
+        SemanticGeometry::MultiLeader(multileader) => multileader.display().iter().any(has_spline),
         _ => false,
     }
 }
 
-fn find_text(geometry: &SemanticGeometry) -> Option<&SemanticGeometry> {
+pub(crate) fn find_text(geometry: &SemanticGeometry) -> Option<&SemanticGeometry> {
     match geometry {
         SemanticGeometry::Text { .. } => Some(geometry),
         SemanticGeometry::Compound(children) => children.iter().find_map(find_text),
+        SemanticGeometry::MultiLeader(multileader) => {
+            multileader.display().iter().find_map(find_text)
+        }
         _ => None,
     }
 }
@@ -276,7 +289,7 @@ fn picture_dimension_with_a_lossy_member_is_not_reported_complete() {
 /// A document carrying one `MultiLeaderStyle` in its object map, plus a
 /// MULTILEADER that references it. Entity values are deliberately set to the
 /// opposite of the style so style resolution is observable.
-fn mleader_with_style() -> (acadrust::CadDocument, acadrust::entities::MultiLeader) {
+pub(crate) fn mleader_with_style() -> (acadrust::CadDocument, acadrust::entities::MultiLeader) {
     let mut doc = acadrust::CadDocument::new();
     let handle = doc.allocate_handle();
     let mut style = acadrust::objects::MultiLeaderStyle::new("Test");

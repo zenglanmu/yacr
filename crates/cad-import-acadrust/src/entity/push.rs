@@ -262,6 +262,9 @@ impl<'a> ImporterBuilder<'a> {
             // implemented, so claiming the completeness-derived status would
             // over-claim (ADR 0018 E).
             SemanticGeometry::Hatch(_) => SupportStatus::Unsupported,
+            // A multileader has no MEASURE target: it is an annotation, not a
+            // measurable curve (ADR 0019 decision G).
+            SemanticGeometry::MultiLeader(_) => SupportStatus::Unsupported,
             _ => semantic,
         };
         let entry = self

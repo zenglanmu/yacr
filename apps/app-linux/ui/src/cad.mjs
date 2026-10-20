@@ -823,6 +823,8 @@ export function propertyRowLabel(t, key) {
     case 'loops': return t('properties.row.loops');
     case 'style': return t('properties.row.style');
     case 'fill': return t('properties.row.fill');
+    case 'roots': return t('properties.row.roots');
+    case 'lines': return t('properties.row.lines');
     // An unknown machine key is shown by its raw key, never fabricated.
     default: return key;
   }

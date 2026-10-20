@@ -202,6 +202,10 @@ pub(crate) fn conic_of(geometry: &SemanticGeometry) -> Option<Conic> {
         // explicit arm records that decision instead of relying on the
         // wildcard (ADR 0018 E).
         SemanticGeometry::Hatch(_) => None,
+        // A MULTILEADER is not one conic primitive either: its display is
+        // leader paths/arrowheads/doglegs/text, so the sampled fallback in
+        // `intersect_local` flattens the display (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(_) => None,
         _ => None,
     }
 }

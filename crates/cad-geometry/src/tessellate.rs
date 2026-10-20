@@ -144,6 +144,15 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
             }
             out
         }
+        // A multileader is drawn from its derived display children, exactly like
+        // the pre-P7b compound (ADR 0019 decision G).
+        G::MultiLeader(multileader) => {
+            let mut out = Vec::new();
+            for child in multileader.display() {
+                out.extend(tessellate_geometry(child, params));
+            }
+            out
+        }
         G::Compound(children) => {
             let mut out = Vec::new();
             for child in children {

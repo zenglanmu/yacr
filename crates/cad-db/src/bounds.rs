@@ -170,6 +170,14 @@ impl BoundsAccumulator {
                     self.add_geometry_transformed(child, transform);
                 }
             }
+            // A multileader's extent is the extent of its derived display
+            // children (leader paths, arrowheads, doglegs, text), exactly like
+            // the pre-P7b compound (ADR 0019 decision G).
+            SemanticGeometry::MultiLeader(multileader) => {
+                for child in multileader.display() {
+                    self.add_geometry_transformed(child, transform);
+                }
+            }
         }
     }
 

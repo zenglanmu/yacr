@@ -110,6 +110,13 @@ fn collect_images(geometry: &SemanticGeometry, out: &mut Vec<String>) {
                 collect_images(part, out);
             }
         }
+        // A multileader is traversed like the compound it used to be
+        // (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(multileader) => {
+            for part in multileader.display() {
+                collect_images(part, out);
+            }
+        }
         _ => {}
     }
 }

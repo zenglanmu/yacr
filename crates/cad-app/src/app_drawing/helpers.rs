@@ -35,6 +35,10 @@ pub(crate) fn class_name(geometry: &SemanticGeometry) -> &'static str {
         // A dimension keeps its source type key so EXPLODE's `type_key` refusal
         // and the importer's `AcDbDimension` agree (ADR 0017 A.8).
         SemanticGeometry::Dimension(_) => "AcDbDimension",
+        // A multileader keeps its source type key so EXPLODE's explicit
+        // `type_key` refusal and the importer's `AcDbMultiLeader` agree
+        // (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(_) => "AcDbMultiLeader",
     }
 }
 

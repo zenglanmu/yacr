@@ -549,5 +549,7 @@
   "properties.text.failed": "图纸拒绝了该文字：{error}",
   "tool.draw.textedit": "编辑文字",
   "draw.kind.textedit": "编辑文字",
-  "tool.prompt.textedit.select_entity": "选择要编辑的文字对象"
+  "tool.prompt.textedit.select_entity": "选择要编辑的文字对象",
+  "properties.row.roots": "引线簇",
+  "properties.row.lines": "引线数"
 }

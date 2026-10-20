@@ -133,7 +133,7 @@ pub struct MultiLeaderGeometry {          // 字段私有；写入路径 new / f
 ### C.4 显示派生与狗腿公式（门禁 B4 —— 以**代码现状**为准）
 
 - **狗腿端点采用今日实现的公式**（`multileader.rs`）：`reach = (landing_distance − landing_gap).max(0)`，
-  `end = 最后引线顶点 + 方向 × reach`；**即 landing gap 会缩短狗腿，基点是最后顶点而非落点**。
+  `end = <该引线的最后顶点> + 方向 × reach`；**即 landing gap 会缩短狗腿，基点是引线顶点而非落点**。（**实施更正**：代码用 `find_map` 取**第一条有末顶点的引线**，而非"最后一条"引线；以**代码现状**为准以满足显示等价。）
   **并须连同这些细节一起照搬（attempt 2 的 F8）**：`landing_distance` 缺省时走 `default_length` 回退链，且 **`reach < 1e-9` 时完全不画狗腿**。
   ⇒ **迁移不改渲染**（这是本决策的最大价值：P7b **不产生像素变化**）。
 - **U-1 重新归因**：`落点 + 长度 × 方向` 是 **GDAL 逆推**（**第三方证据**），与本实现不同；记为
@@ -316,3 +316,26 @@ P7c：`draw.kind.mleader`、`tool.draw.mleader`、`tool.prompt.mleader.{arrow,la
 - **门禁**：受影响 crate **2060 通过 / 0 失败**；clippy/fmt/architecture(27)/i18n(**542**)/file-size(**711**)；
   UI **185/185**。**NOT RUN**：全量 `cargo test --workspace`；跨平台；真机（本片未新增渲染几何）。
 - **待办**：A+B 编辑入口（`TEXTEDIT` + 面板可编辑字段）、`textHeight` 的 UI 步进器、P7b。
+
+### P7b-1（MultiLeader 一等表示 + 导入迁移 + 匹配点清单 + 显示等价，2026-10-20）
+
+- **变体**：`SemanticGeometry::MultiLeader(Box<MultiLeaderGeometry>)`（`cad-domain/src/multileader.rs`），
+  私有字段 + `new`/`from_import`/`transformed`；`override_mask` 原样、`reserved` 仅存**逐字源数据**
+  （每个源组码只导一次，有测试）、环/线索引与 per-line 覆盖位保留。
+- **显示等价（本片验收核心）**：派生显示是旧导入合成的**逐字搬迁**（同一 `Polyline`/`Spline`
+  （degree `3.min(n-1).max(1)`、空 knots/weights）、同一箭头 Mesh、同一狗腿公式与 `Text`）⇒ **迁移不改变渲染**。
+- **导入**：**仅 MText 与无内容**迁入变体；**块/公差内容仍走旧 `Compound`**（渲染不变，`Partial` + 具名原因）。
+  变体路径的 `Completeness` 为 **`Partial` + 具名原因**（颜色/线宽覆盖、背景、分栏、打断、自定义箭头、非默认平面）。
+- **变换**：平移/旋转；**缩放（含均匀）/镜像/非均匀 ⇒ 整选择 `Unsupported`**。
+- **匹配点**：`EXPLODE` 顶层与**块内**均**显式按 `type_key` 拒绝**（不写任何东西）；`STRETCH` 显式整命令拒绝；
+  `class_name = "AcDbMultiLeader"`、`kind_name = "MultiLeader"`；pick/bounds/snap 与等价 `Compound` 平价。
+- **导出（临时）**：`export/entity.rs` 按旧 `Compound` 方式摊平 `display()`，记录 `export.converted.multileader`
+  并注明由 P7b-2 替换；**尚未写 `MULTILEADER`**。
+- **两处如实记录的偏离**：
+  1. **`MLeaderStyleValues` 存的是"解析后的有效值"快照**，**不是**原始 MLEADERSTYLE 记录 ⇒ 掩码**未置**位但实体值
+     与样式不同的原始值**未单独保留**。⇒ **P7b-2 不得声称这些字段逐字往返**；往返验收须比较**有效值**，
+     且"自洽断言"在此语义下是**构造性成立**，不能证明原始字节相等。
+  2. **狗腿起点**按代码取"**第一条有末顶点的引线**"（非 ADR 措辞的"最后一条"）——为满足显示等价以代码为准，
+     ADR 正文已更正。
+- **门禁**：受影响 crate **2177 通过 / 0 失败**；UI **200/200**；clippy/fmt/architecture(27)/i18n(**553**)/file-size(**728**)。
+  **NOT RUN**：全量 `cargo test --workspace`；**无真实 MULTILEADER 夹具**（全部为合成）；真机/像素。

@@ -79,6 +79,19 @@ pub(crate) fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, Su
             }
             (render, pick)
         }
+        // A multileader inherits the weakest status of its display children, so
+        // one with a `Text` child is `Unverified` rather than the false
+        // `Verified` the wildcard arm would give it (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(multileader) => {
+            let mut render = SupportStatus::Verified;
+            let mut pick = SupportStatus::Verified;
+            for child in multileader.display() {
+                let (r, p) = display_support(child);
+                render = weaker(render, r);
+                pick = weaker(pick, p);
+            }
+            (render, pick)
+        }
         _ => (SupportStatus::Verified, SupportStatus::Verified),
     }
 }

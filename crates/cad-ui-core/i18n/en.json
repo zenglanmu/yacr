@@ -549,5 +549,7 @@
   "properties.text.failed": "The drawing refused the text: {error}",
   "tool.draw.textedit": "Edit Text",
   "draw.kind.textedit": "Edit Text",
-  "tool.prompt.textedit.select_entity": "Select a text object to edit"
+  "tool.prompt.textedit.select_entity": "Select a text object to edit",
+  "properties.row.roots": "Leader roots",
+  "properties.row.lines": "Leader lines"
 }

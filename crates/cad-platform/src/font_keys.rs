@@ -50,6 +50,10 @@ fn geometry_has_text(geometry: &SemanticGeometry) -> bool {
         SemanticGeometry::Dimension(dimension) => dimension.display().iter().any(geometry_has_text),
         // A hatch is traversed like a compound (ADR 0018 E).
         SemanticGeometry::Hatch(hatch) => hatch.display().iter().any(geometry_has_text),
+        // A multileader's annotation text is a display child (ADR 0019 G).
+        SemanticGeometry::MultiLeader(multileader) => {
+            multileader.display().iter().any(geometry_has_text)
+        }
         _ => false,
     }
 }
@@ -84,6 +88,14 @@ pub(crate) fn collect_fonts(
         // A hatch is traversed like a compound (ADR 0018 E).
         SemanticGeometry::Hatch(hatch) => {
             for part in hatch.display() {
+                collect_fonts(database, part, out);
+            }
+        }
+        // A multileader's annotation text is a display child; without this arm its
+        // font is never registered and the text is silently not drawn
+        // (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(multileader) => {
+            for part in multileader.display() {
                 collect_fonts(database, part, out);
             }
         }

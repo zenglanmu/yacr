@@ -385,6 +385,13 @@ fn classify_world(geometry: &SemanticGeometry, rect: Rect) -> Option<MatchPath> 
             .iter()
             .filter_map(|child| classify_world(child, rect))
             .min_by_key(|path| path.rank()),
+        // A multileader classifies exactly like the compound it used to be, so
+        // a box selection keeps precise per-child matching (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(multileader) => multileader
+            .display()
+            .iter()
+            .filter_map(|child| classify_world(child, rect))
+            .min_by_key(|path| path.rank()),
         // Splines have no rectangle tessellator reachable from this crate
         // without a Cargo dependency (frozen for this change); the honest path
         // is the conservative AABB with an `aabb` report.

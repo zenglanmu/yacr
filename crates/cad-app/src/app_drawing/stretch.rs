@@ -251,6 +251,20 @@ impl Application {
                         .into(),
                 ));
             }
+            // MULTILEADER: the whole command still fails, exactly as the pre-P7b
+            // `Compound` did (both partial and full enclosure). It is refused
+            // explicitly by type now that the variant has its own transform arm;
+            // no `Unchanged` arm is added, so STRETCH does not fork by content
+            // type (ADR 0019 decision G).
+            if matches!(&owner_entity.geometry, SemanticGeometry::MultiLeader(_)) {
+                return Err(CadError::Unsupported(
+                    "STRETCH cannot handle MULTILEADER: its display combines leader paths, \
+                     arrowheads, a dogleg and text, so a per-vertex stretch has no defined \
+                     semantics; the whole command is refused (the pre-P7b compound behaviour is \
+                     preserved)"
+                        .into(),
+                ));
+            }
             match enclosure {
                 Enclosure::Full => plan.push((owner, StretchAction::Move)),
                 Enclosure::Partial => match &owner_entity.geometry {

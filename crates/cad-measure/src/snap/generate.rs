@@ -86,6 +86,14 @@ pub(super) fn generate(
                 generate(child, probe, out, &format!("{prefix}child:{i}:"));
             }
         }
+        // A multileader's display children (leader vertices, dogleg endpoints)
+        // are real snap vertices, exactly like the compound it used to be
+        // (ADR 0019 decision G).
+        G::MultiLeader(multileader) => {
+            for (i, child) in multileader.display().iter().enumerate() {
+                generate(child, probe, out, &format!("{prefix}child:{i}:"));
+            }
+        }
         G::Mesh(_)
         | G::Insert { .. }
         | G::Text { .. }

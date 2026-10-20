@@ -31,6 +31,7 @@ Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + �
 **`crates/cad-app` 仍含用户可见中文字面量**（如 `measure_tool.rs` 的提示文案），它们由
 `crates/cad-app/src/tests/cjk_baseline.rs` **冻结**——只**禁止增长**，不是"已合规"。这是**已知债务**，
 新代码**不得**沿用该做法。
+**机械规则（已发生三次，务必照做）**：在 `crates/cad-app/src/selection.rs` 新增 `PropertyRow::new("<key>")` 时，**必须同时**补两个 i18n 目录的 `properties.row.<key>` **与** `apps/app-linux/ui/src/cad.mjs` 的 `propertyRowLabel` switch 分支；`apps/app-linux/ui/test/properties.test.mjs` 会扫源码字面量并要求两处齐全，否则失败。
 
 ## 仓库结构
 

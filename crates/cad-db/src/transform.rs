@@ -31,6 +31,11 @@
 //!   glyphs) cannot be represented by the flat-text domain, so both are refused
 //!   explicitly with [`CadError::Unsupported`]. `cad-geometry`'s snap face
 //!   applies the same guards.
+//! - `MultiLeader` accepts a **translation + rotation only** (ADR 0019 C.5):
+//!   its roots, lines, text and plane frame move together and the display is
+//!   rebuilt. A scale (even uniform) or a mirror is refused for the whole
+//!   entity, because it would change text height/arrowhead size/dogleg length
+//!   while the raw `90` override mask keeps its bits.
 //! - `Spline`, `Opaque` and `Compound` are not baked: they return `Unsupported`
 //!   so a caller cannot believe a move happened when it did not.
 //!
@@ -293,6 +298,14 @@ pub fn transform_geometry(
         // entity (ADR 0018 E).
         SemanticGeometry::Hatch(hatch) => {
             SemanticGeometry::Hatch(Box::new(hatch.transformed(transform)?))
+        }
+        // A multileader transforms its roots, lines, text and plane frame and
+        // rebuilds its display. Only a translation + rotation is accepted: a
+        // scale (even uniform) or a mirror is refused for the whole entity,
+        // because it would change text height/arrowhead size/dogleg length while
+        // the raw `90` override mask keeps its bits (ADR 0019 C.5).
+        SemanticGeometry::MultiLeader(multileader) => {
+            SemanticGeometry::MultiLeader(Box::new(multileader.transformed(transform)?))
         }
     };
     Ok(out)

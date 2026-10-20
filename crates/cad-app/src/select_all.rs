@@ -166,6 +166,19 @@ fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             }
             Ok(())
         }
+        // A multileader is validated through its display children, exactly like
+        // the compound it used to be (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(multileader) => {
+            for child in multileader.display() {
+                validate_geometry(child)?;
+            }
+            if multileader.display().is_empty() {
+                return Err(CadError::Unsupported(
+                    "SelectAll cannot pick a multileader with no display geometry".into(),
+                ));
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
 }

@@ -164,6 +164,13 @@ pub(crate) fn fallback_scale(geometry: &SemanticGeometry) -> f64 {
             .iter()
             .map(fallback_scale)
             .fold(0.0f64, f64::max),
+        // A multileader is the same shape (ADR 0019 decision G): before P7b-1 it
+        // was a `Compound`, so the fallback extent was the children's maximum.
+        G::MultiLeader(multileader) => multileader
+            .display()
+            .iter()
+            .map(fallback_scale)
+            .fold(0.0f64, f64::max),
         // Point/Text have no closed extent, and Mesh/Insert/Opaque/Shape/Image
         // do not tessellate to a polyline here (see `tessellate_geometry`), so
         // the fallback yields nothing for them anyway.
@@ -486,6 +493,12 @@ impl GeometryEngine for DefaultGeometryEngine {
             // the pattern definition move together and the display is rebuilt
             // (ADR 0018 E). Both transform surfaces share that method.
             G::Hatch(hatch) => G::Hatch(Box::new(hatch.transformed(t)?)),
+            // A multileader delegates to its domain transform: leader roots,
+            // lines, text and plane move together and the display is rebuilt. It
+            // accepts a translation + rotation only; uniform/non-uniform scale
+            // and mirroring are refused (ADR 0019 C.5). Both transform surfaces
+            // share that method.
+            G::MultiLeader(multileader) => G::MultiLeader(Box::new(multileader.transformed(t)?)),
         };
         // A transform that maps a finite source to a non-finite point is not a
         // usable result; report it instead of returning poisoned geometry

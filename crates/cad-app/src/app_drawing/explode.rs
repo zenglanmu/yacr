@@ -279,6 +279,13 @@ fn explode_source(
             }
             Ok(())
         }
+        // A MULTILEADER keeps the pre-P7b refusal, now explicit by type key: it
+        // is not decomposed (that would be a behaviour change), and its
+        // children include `Text` (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(_) => {
+            refuse_compound_type_key(source)?;
+            Err(policy_refusal("MULTILEADER"))
+        }
         other => Err(CadError::Unsupported(format!(
             "EXPLODE cannot explode {}: only LWPOLYLINE, INSERT and Compound are \
              decomposable",
@@ -382,6 +389,17 @@ fn explode_insert(
                 member.0
             ))
         })?;
+        // An in-block MULTILEADER is refused explicitly by its stored type key,
+        // not as a side effect of `transform_geometry`: the variant now has a
+        // transform arm, so relying on that refusal would silently change the
+        // behaviour (ADR 0019 decision G).
+        if child.object.type_key == "AcDbMultiLeader" {
+            return Err(CadError::Unsupported(format!(
+                "EXPLODE refuses the in-block {} by type_key: this project does not model the \
+                 mleader explosion semantics (and its display contains text)",
+                child.object.type_key
+            )));
+        }
         match &child.geometry {
             // A nested block reference stays a reference: only the placement is
             // composed into its transform, and its contents await another EXPLODE.
@@ -432,7 +450,8 @@ fn push_produced(
         | SemanticGeometry::Opaque { .. }
         | SemanticGeometry::Dimension(_)
         | SemanticGeometry::Compound(_)
-        | SemanticGeometry::Hatch(_) => Err(child_refusal(&geometry)),
+        | SemanticGeometry::Hatch(_)
+        | SemanticGeometry::MultiLeader(_) => Err(child_refusal(&geometry)),
         _ => {
             let type_key = class_name(&geometry).to_string();
             out.push(Produced {
@@ -491,6 +510,10 @@ fn child_refusal(geometry: &SemanticGeometry) -> CadError {
         SemanticGeometry::Hatch(_) => {
             "EXPLODE does not decompose a HATCH member inside a compound in this build"
         }
+        SemanticGeometry::MultiLeader(_) => {
+            "EXPLODE does not decompose a MULTILEADER: this project does not model the \
+             mleader explosion semantics, and its display contains text"
+        }
         _ => "EXPLODE does not decompose this kind",
     };
     CadError::Unsupported(format!(
@@ -499,16 +522,16 @@ fn child_refusal(geometry: &SemanticGeometry) -> CadError {
     ))
 }
 
-/// Refuse a `Dimension`/`MTable`/`MLeader`-like compound by its stored
-/// `type_key`.
+/// Refuse a `Dimension`/`MTable`-like compound by its stored `type_key`.
 ///
 /// These import as a `Compound` (their `type_key` is `AcDbDimension` /
-/// `AcDbTable` / `AcDbMultiLeader`), so the general "Compound → all children"
-/// rule would otherwise decompose them. The project does not model the
-/// dimension-explosion semantics (associativity loss + 2D solid/text output), and
-/// their children usually include `Text` (which EXPLODE refuses by its own named
-/// reason, never from the transform surface), so an explicit `type_key` refusal
-/// is clearer than the generic failure.
+/// `AcDbTable`), so the general "Compound → all children" rule would otherwise
+/// decompose them. `AcDbMultiLeader` is also listed for the merged MULTILEADER
+/// variant and for any legacy compound still carrying that key. The project does
+/// not model the dimension-explosion semantics (associativity loss + 2D
+/// solid/text output), and their children usually include `Text` (which EXPLODE
+/// refuses by its own named reason, never from the transform surface), so an
+/// explicit `type_key` refusal is clearer than the generic failure.
 fn refuse_compound_type_key(source: &DbEntity) -> CadResult<()> {
     match source.object.type_key.as_str() {
         "AcDbDimension" | "AcDbTable" | "AcDbMultiLeader" => Err(CadError::Unsupported(format!(

@@ -126,6 +126,10 @@ fn geometry_family(geometry: &SemanticGeometry) -> usize {
         // polylines and the fill mesh, so clicking inside the fill hits the
         // mesh (ADR 0018 A.2/E).
         SemanticGeometry::Hatch(_) => FAMILY_COMPOUND,
+        // A multileader is picked like the compound it used to be: any leader
+        // path, arrowhead, dogleg or text hit selects the whole entity
+        // (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(_) => FAMILY_COMPOUND,
         SemanticGeometry::Text { .. } => FAMILY_TEXT,
         SemanticGeometry::Shape { .. } => FAMILY_SHAPE,
         SemanticGeometry::Mask { .. } => FAMILY_MASK,
@@ -413,6 +417,46 @@ fn hit_validated(
                     ..hit
                 }),
                 None if unsupported.is_some() => PickOutcome::Unsupported("hatch-unsupported"),
+                None => PickOutcome::Miss,
+            }
+        }
+        // A multileader picks through its display children exactly like the
+        // compound it used to be, so any leader path/arrowhead/dogleg/text hit
+        // selects the whole entity (ADR 0019 decision G).
+        SemanticGeometry::MultiLeader(multileader) => {
+            let mut best: Option<GeometryHit> = None;
+            let mut unsupported: Option<&'static str> = None;
+            for child in multileader.display() {
+                match hit_validated(
+                    ray,
+                    child,
+                    transform,
+                    options,
+                    params,
+                    profile.as_deref_mut(),
+                    bounds_cache,
+                )? {
+                    PickOutcome::Hit(hit) => {
+                        let better = best
+                            .as_ref()
+                            .map(|b| (hit.distance, hit.offset) < (b.distance, b.offset))
+                            .unwrap_or(true);
+                        if better {
+                            best = Some(hit);
+                        }
+                    }
+                    PickOutcome::Miss => {}
+                    PickOutcome::Unsupported(reason) => unsupported = Some(reason),
+                }
+            }
+            match best {
+                Some(hit) => PickOutcome::Hit(GeometryHit {
+                    geometry_source: GeometrySource::Analytic,
+                    ..hit
+                }),
+                None if unsupported.is_some() => {
+                    PickOutcome::Unsupported("multileader-unsupported")
+                }
                 None => PickOutcome::Miss,
             }
         }
