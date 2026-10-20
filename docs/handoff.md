@@ -1,3 +1,33 @@
+## 技术债清偿：环深度探测、`-Z` 挤出导入、bulge 展开等价性与语料不变量（2026-10-20，P6 门禁点名）
+
+**提交**：`102bb1c`。**范围**：`cad-domain`（`hatch/common.rs` 共享助手 + `fill.rs` + `hatch_entity`）、
+`cad-import-acadrust`（`geometry.rs`/`entity/convert.rs`）、以及 `cad-geometry`/`cad-spatial`/`cad-measure`/
+`cad-representation`/`cad-cli-tools` 的**测试**。
+
+- **① `fill::ring_depths` 只看首顶点（**未声明的孪生**，已修）**：它驱动**奇偶配平**（谁算孔洞）⇒
+  **相切导入环**可能被错填；实测旧代码常直接退化为 `Degenerate`（面积自检 **112** vs 几何 **88**）。
+  现与 `loop_depths` **共享同一"最多 8 点多数 + 确定性回退"助手**（挪进 `hatch/common.rs`，不再各存一份）。
+  **非相切输入不变**（各探测点一致）；**创建路径不受影响**（先拒绝相切）。新测试在旧代码上**失败**、现在通过。
+- **② `-Z` 挤出导入（正确性修复，用户可见）**：真正的快速路径是 **`polyline_ocs_points`**（`ocs_to_wcs` 本就精确），
+  它把**任何 Z 平行法向**当 `+Z`，而 `-Z` 的 OCS 是 **x 镜像** ⇒ 折线顶点、**bulge 方向**、TEXT/ATTDEF/ATTRIB 的
+  **位置与旋转**、ELLIPSE 的**法向**均未镜像。现 `+Z` 恒等、`-Z` 镜像：点 `(-x, y, -elevation)`、**bulge 取反**、
+  文字旋转 `π − θ`、椭圆**保留 `-Z`**。**审计确认 CIRCLE/ARC/INSERT 本就正确**（`arbitrary_axis` 的 −Z 帧）⇒
+  **无双重纠正**；MTEXT 按 DXF 本就 WCS。四项 `minus_z_*` 测试中三项**在旧代码上失败**，一项是已正确路径的回归钉。
+  **残余**：**倾斜**挤出的 TEXT/ATTRIB 仍按原始 OCS 放置（域内 `Text` 无挤出法向，需域变更）；**文字字形不镜像**
+  （平面文字域无法表达真反射）。
+- **③ bulge 展开**七份实现**统一钉在手工计算的解析期望**上（四分弧 / 半圆 / **优弧** / 负 bulge / 极小 bulge /
+  **非轴对齐弦**，centre/radius/included-angle/apex 皆独立推导）：显示三角化、EXPLODE 弧恢复、拾取包围盒、
+  对象捕捉、导入器边界展开、填充采样、**SHX 字形弧**。**回退任一份的符号都会让测试失败**（已实测）。
+  生产改动仅为**可见性**（3 处 `fn` → `pub(..) fn`），无逻辑改动。
+- **④ 语料几何不变量（替代"只断言非空"）**：对**每条非零 bulge 段**断言"采样顶点在弦的 `sgn(bulge)` 侧 +
+  采样落在解析圆上"，**输出计数**：**11 个夹具 / 9 段**（法兰 6、`entities` 3），跳过项也计数
+  ⇒ 语料静默变化会体现为计数变化，而不是"静默通过"。这正是此前**六个法兰 + 三个 entities** 弧被镜像而
+  夹具测试全绿的原因。
+- **门禁（编排者复跑）**：受影响 crate **2026 通过 / 0 失败**；clippy(workspace `-D warnings`)、fmt、
+  architecture(27)、i18n(**534**)、fixture(**23**)、file-size(**704**)、UI **163/163**。
+  **NOT RUN**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；**真机证据**（本片未新增渲染路径改动，
+  故未重跑；前一轮 P6 的像素判据仍为其自身结论的边界）。
+
 ## P6b：`HATCH` 创建（预选闭合实体）+ 真机像素判据（ADR-0018，2026-10-20）
 
 **范围**：`crates/cad-app`（命令/工具/参数/边界/拒绝面）、`crates/cad-ui-core`（选择子/参数投影/i18n）、
