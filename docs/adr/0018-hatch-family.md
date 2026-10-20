@@ -88,6 +88,8 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
   **渐变角 `460` 例外（attempt 2 更正）**：写入器**原样写**、读取器**原样存**，而结构注释声称弧度 ⇒ **单位未验证**
   ⇒ `HatchGradient.angle_raw` **按不透明往返数据保存**（U-13），**不**在导入时转换；现有 `gradient.rs` 把该值直接
   喂给弧度 ramp ⇒ 方向可能已错，且**没有渐变夹具**能发现。
+  （**2026-10-21 更新：U-13 已解决**——组 `460` 确为**弧度**，证据与残余见决策 F 的 U-13 条目；`angle_raw` 仍按
+  原值往返、不做单位换算，且旋转时随几何同向旋转 `angle_raw += delta`。）
 - **`flags: u32` 原始位**（N3）：`BoundaryPathFlags` 实为 9 位（external/polyline/derived/textbox/outermost/
   not-closed/self-intersecting/text-island/duplicate），写入器**逐位照发**；用 5 个布尔会**静默归一化**掉 4 位。
   只对**承重位**给访问器（`derived` 决定组 47；`textbox` 保留但不解释 = U-5）。
@@ -149,8 +151,9 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
   **采样后的折线路径**而非解析边。**选择**：`HatchLoop.source_edges: Option<Vec<BoundaryEdge>>` 保留**源解析边**
   供导出使用；缺失时（如新建环）退回采样，并**在报告与能力表声明**"解析边界在无源边时降级为采样折线"。
   **便宜收益**：创建的 `Circle` 环可直接写成**两点带 bulge 的折线路径**（bulge 精确表示圆）或整圆 `CircularArc` 边。
-- **渐变**：保持导入支持（LINEAR/CYLINDER/SPHERICAL 的**方向**依赖未经核实的 `460` 单位 ⇒ 只能声明为"按原值烘焙"，
-  其余 `Partial`），并**往返**（B3 字段 + `reserved`/`angle_raw`/色标保留，`color_name`/`book_name` **导入即丢**）。
+- **渐变**：保持导入支持（LINEAR/CYLINDER/SPHERICAL 的**方向**依赖 `460` 单位 ⇒ 只能声明为"按原值烘焙"，
+  其余 `Partial`；**U-13 已解决：`460` 为弧度**，见决策 F），并**往返**（B3 字段 + `reserved`/`angle_raw`/色标保留，
+  `color_name`/`book_name` **导入即丢**）。
 - 无可用边界 ⇒ `Opaque{"AcDbHatch"}` + `Partial`（沿用）。
 
 ---
@@ -235,6 +238,12 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
 - **U-12（新）渐变不可往返项**：`color_name`/`book_name` 写入器不写 ⇒ 声明损失。
 - **U-13（新，attempt 2）渐变角 `460` 的单位**：写入器**原样写**、读取器**原样存**，结构注释称弧度但**无实证**；
   且没有任何渐变夹具 ⇒ 按**不透明往返**处理，`gradient.rs` 的烘焙方向**可能已错**，声明为未验证。
+  **已解决（2026-10-21）**：单位为**弧度**。证据：① DXF 参考组 `460` 为弧度；② acadrust 字段文档
+  `entities/hatch.rs` `HatchGradientPattern.angle` = "Gradient angle in radians"；③ 本仓方向回读测试
+  `gradient_angle_is_stored_in_radians_not_degrees`（存 `FRAC_PI_6` ⇒ 烘焙斜坡 30°）与
+  `transform_rotates_the_gradient_ramp_with_the_geometry`（+30° 旋转 ⇒ 斜坡 +30°）。**残余**：仍**无**
+  vendor 产出的非零角度渐变夹具 ⇒ 结论是"参考文档 + 合成测试"，不是真实文件往返证据；`angle_raw` 继续
+  原值往返、不做单位换算。
 
 ---
 
@@ -349,6 +358,8 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
   `Normal` 与所有已提交夹具不受影响）。**列为待办**（修它需改填充配平语义 + 声明渲染变化）。
   另：**无渐变夹具** ⇒ `460` 单位（U-13）与渐变方向**无回归覆盖**；**无图形层面的图案保真判据** ⇒
   图案复合只能由上述不变量与合成测试守住。
+  （**2026-10-21 更正**：U-13 **已解决**，`460` 单位为弧度，已由 `cad-domain` 的方向回读测试覆盖
+  “单位”与“随几何旋转”两项；**仍无 vendor 渐变夹具**，故不宣称真实文件往返。）
 
 ### P6b（`HATCH` 创建：预选闭合实体，提交 6dbf536）
 

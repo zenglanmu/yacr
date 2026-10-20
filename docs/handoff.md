@@ -1,3 +1,25 @@
+## 显示保真切片 A：MESH 族停止谎报 + 渐变单位/旋转（2026-10-21）
+
+**范围**：`cad-import-acadrust`（三种 mesh 的完整性判定）、`cad-domain`（渐变旋转）、文档。
+
+- **两处假声明中的第一处已修**：`SUBD MESH` / `POLYFACE MESH` / `POLYGON MESH` 三种此前报 **`Completeness::Complete`**，
+  实际丢掉了：**细分级别**（画的是基础笼而非光滑面）、**面边可见性**（负索引标记的隐藏边被 `unsigned_abs()` 抹掉后照画）、
+  面颜色、闭合标志、`smooth_type`/密度、`elevation`/`normal`、`blend_crease`、per-vertex bulge/宽度/id。
+  现全部改为 **`Partial` + 逐类具名理由**（`import.{subd,polyface,polygon}_mesh_partial`，按 `reported_reasons` **每次导入只报一次**），
+  **几何逐字未变**（三角化不变，仅判定与理由变）。
+  **值得记的事实**：**没有任何测试曾钉住那个 `Complete`** —— 假声明只活在 `entity/convert.rs:242-244` 三个分派分支里，
+  而 `compatibility.md` 的 MESH 行**本来就写"部分"**，即代码与文档当时互相矛盾。
+- **渐变组 460 = 弧度（已核实，U-13 关闭）**：DXF 参考、acadrust 字段文档（`Gradient angle in radians`）、
+  以及新增的**方向回读测试**三方一致（30° 输入回读 30°±1°；若按度误解会得到 ≈0.52°）。截断保留：
+  **仍无 vendor 产出的非零角度渐变文件往返证据**。
+- **修掉一个真缺陷**：旋转渐变填充时**图案角度跟着转、渐变方向不转**（几何转了、色带没转）。
+  现 `angle_raw += delta`（与图案角度同一约定：相似变换把平面内方向 `φ→φ+delta`）。
+  测试**已验证是真钉**：临时回退修复 ⇒ 方向断言在 0° 失败；错号会得 150°。
+  顺带覆盖 `SingleColor` 模式，防止该分支悄悄滞后。
+- **文档纠错**：`hatch-gradient.md` 组号表（`460` 角度 / `452` 单色 / `462` 着色 / `470` 名称）与
+  `GradientDef` 路径（`cad-geometry` → `cad-domain/src/hatch/gradient.rs`）已更正。
+- **门禁**：crate 子集 **1716+** 通过 / 0 失败、clippy、fmt、architecture(27)、i18n 578、file-size 770。
+
 ## 夹具 `Standard` DIMSTYLE 更正（2026-10-21，尺寸类视觉证据的前提）
 
 - **问题**：`fixtures/dwg/synthetic-four-lines.dwg` 的 `Standard` DIMSTYLE **量级自相矛盾**

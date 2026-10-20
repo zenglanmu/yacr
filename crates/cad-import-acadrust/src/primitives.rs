@@ -51,6 +51,22 @@ fn polyface_index(raw: i16, len: usize) -> Option<usize> {
     (index < len).then_some(index)
 }
 
+/// The named reasons a POLYFACE MESH is only `Partial`.
+///
+/// The display keeps only the vertex positions and the face topology. Face
+/// colour, the polyline flags / surface smoothing / extrusion, and the
+/// per-vertex curve-fitting data have no home in [`SemanticGeometry::Mesh`];
+/// worse, [`polyface_index`] takes `unsigned_abs`, so the negative-index
+/// "invisible edge" flag is erased and an edge the drawing marks hidden is
+/// still drawn. The dispatch site reports each reason once per import.
+pub(crate) const POLYFACE_MESH_UNMODELLED: [&str; 4] = [
+    "polyface mesh: face-edge visibility (a negative face index marks an invisible \
+     edge) is not honoured, so hidden edges are drawn",
+    "polyface mesh: per-face colour is not applied",
+    "polyface mesh: flags, smooth_surface, normal, elevation and thickness are not applied",
+    "polyface mesh: per-vertex bulge, start/end width and id are ignored",
+];
+
 pub(crate) fn polyface_mesh_semantics(m: &acadrust::entities::PolyfaceMesh) -> SemanticGeometry {
     let vertices: Vec<Point3> = m.vertices.iter().map(|v| p3(v.location)).collect();
     let len = vertices.len();
@@ -66,6 +82,20 @@ pub(crate) fn polyface_mesh_semantics(m: &acadrust::entities::PolyfaceMesh) -> S
         .collect();
     triangle_mesh(vertices, &faces)
 }
+
+/// The named reasons a POLYGON MESH is only `Partial`.
+///
+/// The M x N grid is triangulated from the stored vertices, so a mesh closed in
+/// M or N is left open, and the surface-smoothing definition (which would
+/// displace the grid) is not evaluated. Elevation/normal are dropped too. The
+/// dispatch site reports each reason once per import.
+pub(crate) const POLYGON_MESH_UNMODELLED: [&str; 3] = [
+    "polygon mesh: CLOSED_M/CLOSED_N are ignored, so a mesh closed in M or N is not \
+     stitched closed",
+    "polygon mesh: smooth_type and m_smooth_density/n_smooth_density are ignored, so a \
+     smoothed mesh is drawn as the flat M x N grid",
+    "polygon mesh: elevation and normal are not applied",
+];
 
 pub(crate) fn polygon_mesh_semantics(
     m: &acadrust::entities::PolygonMeshEntity,
@@ -87,6 +117,21 @@ pub(crate) fn polygon_mesh_semantics(
     }
     triangle_mesh(vertices, &faces)
 }
+
+/// The named reasons a SUBD MESH is only `Partial`.
+///
+/// The base control cage is triangulated; `subdivision_level` is ignored, so a
+/// smoothed subdivision surface is drawn as its unsmoothed cage. Crease levels
+/// (entity `blend_crease` plus per-edge `edges[].crease`) and the version /
+/// override bookkeeping are dropped as well. The dispatch site reports each
+/// reason once per import.
+pub(crate) const SUBD_MESH_UNMODELLED: [&str; 3] = [
+    "subd mesh: subdivision_level is ignored, so the base cage is drawn rather than the \
+     smoothed subdivision surface",
+    "subd mesh: blend_crease and the per-edge edges[].crease values are ignored, so \
+     creases are not honoured",
+    "subd mesh: version and override_option are not applied",
+];
 
 pub(crate) fn subd_mesh_semantics(m: &acadrust::entities::Mesh) -> SemanticGeometry {
     let vertices: Vec<Point3> = m.vertices.iter().map(|v| p3(*v)).collect();

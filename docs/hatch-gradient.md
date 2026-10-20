@@ -30,16 +30,32 @@ render exactly as before.
 
 ## 2. Data model
 
-`cad_geometry::GradientDef` (in `crates/cad-geometry/src/hatch.rs`):
+`cad_geometry::GradientDef` (in `crates/cad-domain/src/hatch/gradient.rs`):
 
 | field | meaning | DXF source |
 | --- | --- | --- |
-| `kind` | `Linear` or `Spherical` | group 450 name |
-| `angle` | ramp direction (radians) | group 452 |
-| `shift` | offset along the ramp, clamped at the ends | group 453 |
-| `single_color` | DXF single-colour flag | group 451 |
-| `tint` | single-colour tint in `-1..=1` | group 460 |
+| `kind` | `Linear` or `Spherical` | group 470 name (450 marks the gradient fill) |
+| `angle` | ramp direction, **radians** | group 460 |
+| `shift` | offset along the ramp, clamped at the ends | group 461 |
+| `single_color` | DXF single-colour flag | group 452 |
+| `tint` | single-colour tint in `-1..=1` | group 462 |
 | `stops` | `{ value: 0..=1, rgb }` entries | groups 463 / 421 |
+
+**The angle is in radians, and must stay so.** Group 460 carries the gradient
+angle in radians (`acadrust-0.6.5/src/entities/hatch.rs` documents the field as
+"Gradient angle in radians"; the DXF reference agrees, and an earlier version of
+this table had the group numbers swapped). `cad-domain`'s
+`gradient_angle_is_stored_in_radians_not_degrees` test pins it end to end: a
+stored `FRAC_PI_6` bakes a 30° ramp. Do **not** "correct" it into degrees: the
+raw value is passed through and interpreted as radians everywhere.
+
+For the record, the neighbouring gradient codes are 451 (reserved), 453 (colour
+count), 470 (name) and 463/63/421 (stop value / ACI / true colour).
+
+A similarity transform rotates `angle_raw` by the same in-plane `delta` the
+pattern angle uses (`angle_raw += delta`), so a rotated gradient hatch turns its
+ramp with the geometry instead of keeping the pre-rotation direction. Group 460
+stays a plain radian value; nothing here converts it to degrees.
 
 `GradientDef::is_usable()` requires a finite angle/shift and at least one stop
 with a finite `value` in `0..=1`. Unusable definitions are reported, never drawn

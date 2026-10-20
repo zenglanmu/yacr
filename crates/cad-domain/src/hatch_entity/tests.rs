@@ -269,6 +269,103 @@ fn pattern_and_gradient_styles_on_two_disjoint_outer_loops() {
 }
 
 // ---------------------------------------------------------------------------
+// Gradient angle unit (DXF group 460) and the baked ramp direction.
+// ---------------------------------------------------------------------------
+
+/// A LINEAR two-colour gradient at `angle` radians: red at stop 0, blue at 1.
+fn linear_two_color(angle: f64) -> HatchFill {
+    HatchFill::Gradient(HatchGradient::TwoColor {
+        name: "LINEAR".into(),
+        reserved: 0,
+        angle_raw: angle,
+        shift: 0.0,
+        stops: vec![
+            GradientStop {
+                value: 0.0,
+                rgb: [255, 0, 0],
+            },
+            GradientStop {
+                value: 1.0,
+                rgb: [0, 0, 255],
+            },
+        ],
+    })
+}
+
+/// The baked gradient mesh a hatch's display carries.
+fn gradient_mesh(hatch: &HatchGeometry) -> &Mesh {
+    hatch
+        .display()
+        .iter()
+        .find_map(|geometry| match geometry {
+            SemanticGeometry::Mesh(mesh) => Some(mesh),
+            _ => None,
+        })
+        .expect("gradient mesh")
+}
+
+/// Recover the baked linear ramp direction (degrees in `0..180`) from the
+/// per-vertex colours instead of comparing pixels.
+///
+/// Stop 0 is pure red and stop 1 pure blue, so the ramp parameter is
+/// `t = 1 - red/255`, and a linear ramp makes it affine in the hatch plane:
+/// `t = a + u*x + v*y`, with `atan2(v, u)` the ramp direction (the positive
+/// projection scale cancels out of the angle). `mesh` must be expressed in the
+/// hatch plane's own coordinates.
+fn baked_ramp_direction(mesh: &Mesh) -> f64 {
+    assert_eq!(
+        mesh.colors.len(),
+        mesh.vertices.len(),
+        "every vertex must be baked"
+    );
+    let samples: Vec<([f64; 2], f64)> = mesh
+        .vertices
+        .iter()
+        .zip(&mesh.colors)
+        .map(|(p, color)| ([p.x, p.y], 1.0 - color[0] as f64 / 255.0))
+        .collect();
+    let count = samples.len() as f64;
+    let mean_x = samples.iter().map(|(p, _)| p[0]).sum::<f64>() / count;
+    let mean_y = samples.iter().map(|(p, _)| p[1]).sum::<f64>() / count;
+    let mean_t = samples.iter().map(|(_, t)| *t).sum::<f64>() / count;
+    let (mut sxx, mut syy, mut sxy, mut sxt, mut syt) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    for ([x, y], t) in &samples {
+        let (dx, dy, dt) = (x - mean_x, y - mean_y, t - mean_t);
+        sxx += dx * dx;
+        syy += dy * dy;
+        sxy += dx * dy;
+        sxt += dx * dt;
+        syt += dy * dt;
+    }
+    let determinant = sxx * syy - sxy * sxy;
+    assert!(
+        determinant > 1e-12,
+        "the fill must span two dimensions to recover a direction"
+    );
+    let u = (sxt * syy - syt * sxy) / determinant;
+    let v = (syt * sxx - sxt * sxy) / determinant;
+    v.atan2(u).to_degrees().rem_euclid(180.0)
+}
+
+#[test]
+fn gradient_angle_is_stored_in_radians_not_degrees() {
+    // Group 460 is the gradient angle **in radians** (acadrust's field doc and
+    // the DXF reference). A hatch storing 30 degrees as `FRAC_PI_6` must bake a
+    // ramp whose direction is 30 degrees; reading the same number as degrees
+    // would put the ramp at ~0.52 degrees instead, so this pins the unit.
+    let hatch = build(
+        vec![rect(0.0, 0.0, 1.0, 1.0)],
+        HatchStyle::Normal,
+        linear_two_color(std::f64::consts::FRAC_PI_6),
+    );
+    let direction = baked_ramp_direction(gradient_mesh(&hatch));
+    assert!(
+        (direction - 30.0).abs() < 1.0,
+        "a stored FRAC_PI_6 must bake a 30 degree ramp, got {direction} degrees"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Pattern definition composite (ADR U-1/U-7 fix).
 // ---------------------------------------------------------------------------
 
@@ -456,6 +553,99 @@ fn transform_rotates_loops_and_pattern_direction() {
         "pattern angle must follow the in-plane rotation: {}",
         pattern.angle
     );
+}
+
+#[test]
+fn transform_rotates_the_gradient_ramp_with_the_geometry() {
+    // A gradient hatch starts at angle 0 (ramp along +X) and is rotated +30°
+    // about Z. The ramp must follow the loops. Pre-fix this test recovered 0°
+    // (the geometry turned, the ramp stayed behind); rotating by `-delta`
+    // instead would recover -30° (i.e. 150° after `rem_euclid(180)`), and doing
+    // nothing would recover 0°, so the 30° assertion fails both wrong signs.
+    let hatch = build(
+        vec![rect(0.0, 0.0, 1.0, 1.0)],
+        HatchStyle::Normal,
+        linear_two_color(0.0),
+    );
+    let before = baked_ramp_direction(gradient_mesh(&hatch));
+    assert!((before - 0.0).abs() < 1.0, "unrotated ramp: {before}°");
+
+    let rotated = hatch
+        .transformed(&rotation_z(std::f64::consts::FRAC_PI_6))
+        .expect("rotate");
+    let HatchFill::Gradient(gradient) = rotated.fill() else {
+        panic!("gradient fill expected");
+    };
+    let angle_raw = match gradient {
+        HatchGradient::TwoColor { angle_raw, .. }
+        | HatchGradient::SingleColor { angle_raw, .. } => *angle_raw,
+    };
+    assert!(
+        (angle_raw - std::f64::consts::FRAC_PI_6).abs() < 1e-9,
+        "the stored angle must follow the +30° in-plane rotation: {angle_raw}"
+    );
+
+    // ...and the bake agrees. A Z rotation keeps the hatch plane equal to world
+    // XY, so the display vertices are already the plane coordinates.
+    let after = baked_ramp_direction(gradient_mesh(&rotated));
+    assert!(
+        (after - 30.0).abs() < 1.0,
+        "a +30° hatch rotation must move the baked ramp to 30°, got {after}°"
+    );
+}
+
+#[test]
+fn gradient_rotation_applies_to_both_colour_modes() {
+    // `rotated` has one arm per DXF colour mode; a copy-paste slip in either
+    // would leave that mode's ramp behind on a rotated hatch.
+    let delta = std::f64::consts::FRAC_PI_3;
+    let stops = vec![GradientStop {
+        value: 0.0,
+        rgb: [1, 2, 3],
+    }];
+    let two = HatchGradient::TwoColor {
+        name: "LINEAR".into(),
+        reserved: 7,
+        angle_raw: 0.25,
+        shift: 0.5,
+        stops: stops.clone(),
+    };
+    let single = HatchGradient::SingleColor {
+        name: "LINEAR".into(),
+        reserved: 7,
+        angle_raw: 0.25,
+        shift: 0.5,
+        tint: -0.5,
+        stops,
+    };
+
+    let HatchGradient::TwoColor {
+        angle_raw,
+        shift,
+        reserved,
+        ..
+    } = two.rotated(delta)
+    else {
+        panic!("two-colour gradient expected");
+    };
+    assert!((angle_raw - (0.25 + delta)).abs() < 1e-12, "{angle_raw}");
+    assert_eq!(shift, 0.5);
+    assert_eq!(reserved, 7);
+
+    let HatchGradient::SingleColor {
+        angle_raw,
+        shift,
+        reserved,
+        tint,
+        ..
+    } = single.rotated(delta)
+    else {
+        panic!("single-colour gradient expected");
+    };
+    assert!((angle_raw - (0.25 + delta)).abs() < 1e-12, "{angle_raw}");
+    assert_eq!(shift, 0.5);
+    assert_eq!(reserved, 7);
+    assert_eq!(tint, -0.5);
 }
 
 #[test]

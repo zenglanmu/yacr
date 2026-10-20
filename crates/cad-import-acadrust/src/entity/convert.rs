@@ -239,9 +239,27 @@ impl<'a> ImporterBuilder<'a> {
                     Completeness::Complete,
                 )
             }
-            EntityType::Mesh(m) => (subd_mesh_semantics(m), Completeness::Complete),
-            EntityType::PolyfaceMesh(m) => (polyface_mesh_semantics(m), Completeness::Complete),
-            EntityType::PolygonMesh(m) => (polygon_mesh_semantics(m), Completeness::Complete),
+            // The three mesh kinds keep only vertices and face topology, so
+            // `Complete` was a false claim. Each dropped *class* of data is a
+            // named reason, reported once per import like the MTEXT fold.
+            //
+            // A SUBD MESH draws its base control cage: `subdivision_level` is
+            // ignored, so the smoothed surface is not what appears on screen.
+            EntityType::Mesh(m) => (
+                subd_mesh_semantics(m),
+                self.mesh_partial("import.subd_mesh_partial", &SUBD_MESH_UNMODELLED),
+            ),
+            // A POLYFACE MESH erases the negative-index invisible-edge flag.
+            EntityType::PolyfaceMesh(m) => (
+                polyface_mesh_semantics(m),
+                self.mesh_partial("import.polyface_mesh_partial", &POLYFACE_MESH_UNMODELLED),
+            ),
+            // A POLYGON MESH is the flat M x N grid: closed/smoothed forms are
+            // not stitched or smoothed.
+            EntityType::PolygonMesh(m) => (
+                polygon_mesh_semantics(m),
+                self.mesh_partial("import.polygon_mesh_partial", &POLYGON_MESH_UNMODELLED),
+            ),
             EntityType::Wipeout(w) => wipeout_semantics(w),
             EntityType::Helix(h) => spline_semantics(&h.spline),
             EntityType::Viewport(v) => (viewport_semantics(v), Completeness::Complete),
@@ -315,6 +333,25 @@ impl<'a> ImporterBuilder<'a> {
                 Completeness::Unverified,
             ),
         }
+    }
+
+    /// Record each named `Partial` reason as one import diagnostic and return
+    /// the verdict that carries them.
+    ///
+    /// Mirrors the MTEXT fold: `reported_reasons` keeps a mesh-heavy drawing
+    /// from burying the report in thousands of identical diagnostics, while
+    /// every entity still declares its own `Partial` reasons.
+    fn mesh_partial(&mut self, code: &str, reasons: &[&str]) -> Completeness {
+        for reason in reasons {
+            if self.reported_reasons.insert((*reason).to_string()) {
+                self.diagnostics.push(Diagnostic {
+                    object: None,
+                    code: code.into(),
+                    message: (*reason).to_string(),
+                });
+            }
+        }
+        Completeness::Partial(reasons.iter().map(|r| (*r).to_string()).collect())
     }
 
     pub(crate) fn proxy_geometry(

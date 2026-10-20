@@ -35,8 +35,8 @@ pub enum GradientKind {
 
 /// A resolved gradient definition in hatch-plane coordinates.
 ///
-/// `angle` is the gradient direction in radians (DXF group 452), `shift` the
-/// normalised start offset in `0.0..=1.0` (DXF group 453), and `stops` the
+/// `angle` is the gradient direction in radians (DXF group 460), `shift` the
+/// normalised start offset in `0.0..=1.0` (DXF group 461), and `stops` the
 /// colour entries (DXF group 463/421). `single_color` records the DXF
 /// single-colour flag; when set, `stops` is expected to hold one entry and the
 /// ramp blends that colour towards `tint` (positive → white, negative → black).

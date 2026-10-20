@@ -294,10 +294,13 @@ impl HatchPattern {
 /// A gradient fill (ADR A.1/B3).
 ///
 /// The variant is the DXF colour mode; `name` carries the gradient kind
-/// (`LINEAR`, `SPHERICAL`, ...). Group 460 (`angle_raw`) is kept **opaque**: the
-/// writer and reader pass it through unchanged while the structure comment
-/// claims radians, so its unit is unverified (ADR U-13) and it is never
-/// converted here.
+/// (`LINEAR`, `SPHERICAL`, ...). Group 460 (`angle_raw`) is the gradient angle
+/// **in radians** per the DXF reference and acadrust's own field documentation;
+/// it is stored verbatim and never converted, and the bake
+/// ([`GradientDef::angle`]) interprets it as radians — pinned by
+/// `gradient_angle_is_stored_in_radians_not_degrees`. Do not convert it to or
+/// from degrees. Neither the writer nor the reader rewrites the value, so this
+/// is a documented-unit claim, not a vendor-file round-trip.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HatchGradient {
     TwoColor {
@@ -321,6 +324,48 @@ impl HatchGradient {
     pub fn name(&self) -> &str {
         match self {
             HatchGradient::TwoColor { name, .. } | HatchGradient::SingleColor { name, .. } => name,
+        }
+    }
+
+    /// Rotate the ramp direction by `delta` radians about the plane normal.
+    ///
+    /// Sign convention: **`angle_raw += delta`**, the same `+ delta` that
+    /// [`HatchPattern::transformed`] applies to the pattern angle. `angle_raw`
+    /// is consumed as the direction `(cos angle, sin angle)` in the hatch-plane
+    /// frame (`crate::hatch::gradient`), and a similarity whose induced in-plane
+    /// rotation is `delta` maps every direction `phi` in that frame to
+    /// `phi + delta` — the loops turn one way, so the ramp must turn the same
+    /// way. Without this the geometry rotates but the gradient stays behind.
+    fn rotated(&self, delta: f64) -> Self {
+        match self {
+            HatchGradient::TwoColor {
+                name,
+                reserved,
+                angle_raw,
+                shift,
+                stops,
+            } => HatchGradient::TwoColor {
+                name: name.clone(),
+                reserved: *reserved,
+                angle_raw: angle_raw + delta,
+                shift: *shift,
+                stops: stops.clone(),
+            },
+            HatchGradient::SingleColor {
+                name,
+                reserved,
+                angle_raw,
+                shift,
+                tint,
+                stops,
+            } => HatchGradient::SingleColor {
+                name: name.clone(),
+                reserved: *reserved,
+                angle_raw: angle_raw + delta,
+                shift: *shift,
+                tint: *tint,
+                stops: stops.clone(),
+            },
         }
     }
 
@@ -541,10 +586,11 @@ impl HatchGeometry {
         let fill = match &self.fill {
             HatchFill::Solid => HatchFill::Solid,
             HatchFill::Pattern(pattern) => HatchFill::Pattern(pattern.transformed(delta, scale)),
-            // `angle_raw` is opaque (ADR U-13): converting it would invent a
-            // unit; the data is preserved verbatim and the bake direction is
-            // declared unverified.
-            HatchFill::Gradient(gradient) => HatchFill::Gradient(gradient.clone()),
+            // `angle_raw` is a stored radian value (group 460) and a direction in
+            // this plane, so it follows the same `delta` as the pattern angle:
+            // the hatch turns and the ramp turns with it. It is never converted
+            // to/from degrees.
+            HatchFill::Gradient(gradient) => HatchFill::Gradient(gradient.rotated(delta)),
         };
         let mut hatch = HatchGeometry {
             loops,
