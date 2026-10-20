@@ -204,5 +204,5 @@ portal/ScreenCast 权限、不装包、不起虚拟/无头显示**；无真实�
 `docs/architecture.md`（边界与不变量）、`docs/react-linux-app.md`（当前桌面宿主）、
 `docs/build.md`（构建与退役入口）、`docs/ci.md`（CI 分层与 NOT RUN）、`docs/validation*.md`
 （历史执行证据，含 NOT RUN 边界）、`docs/compatibility.md`（能力表）、`docs/handoff.md`
-（逐轮交接）、`docs/adr/`（含 ADR 0010）、`docs/testing-dwg.md`、`docs/app-icon.md`、
+（逐轮交接）、`docs/adr/`（含 ADR 0010、0019–0021；0021 = 弹窗层：模态窗口 + 原生锚定菜单）、`docs/testing-dwg.md`、`docs/app-icon.md`、
 `fixtures/manifest`。

@@ -1,3 +1,30 @@
+## 弹窗层决策：居中模态窗口 + 原生锚定菜单（ADR-0021，2026-10-20）
+
+**纯文档**（未改代码）。起因：用户问"后续 DOM 弹窗（选项菜单、右键菜单、text 图元弹窗编辑）怎么处理"，
+并明确 **除右键菜单外，弹窗居中即可、与 wgpu CAD 层位置无关**。
+
+- **约束回到事实**：CAD 分区是 overlay **最上层**、**不透明**原生表面（X11 X child / Wayland `wl_subsurface`），
+  WebView 在其**下面**；输入穿透只让**输入**过去，**像素不过去** ⇒ **CAD 矩形内的 DOM 看不见但收得到事件**。
+- **D1 居中模态 = 第二个 Tauri webview 窗口**：`parent(&main)`（= `gtk_window_set_transient_for`）、
+  `decorations(false)`、`transparent(true)`、`.focused(true)` + GTK 层 `set_modal(true)`（Tauri 2.11.6 **无** `modal()`）；
+  同一 bundle/`tauri://` origin 复用 React 与 i18n；**capabilities 必须加该 label**（否则新窗口**无 IPC 权限**）；
+  **Wayland 下不承诺像素定位**（toplevel 无位置请求）；**必须用户手势打开**（`xdg_activation` 禁止自激活）。
+- **D2 模态由我们在输入漏斗里强制**：`probe_input` 转发与除 Esc 外的全局快捷键暂停 + **host 侧二次拒绝**；
+  关闭后**重新校验工具相位**。本项目 CAD 输入只有一个漏斗 ⇒ 成本低。
+- **D3 右键菜单 = 原生 `GtkMenu`**（`gtk_menu_popup_at_pointer`，**无需绝对坐标**故 Wayland 可用；真 seat grab、
+  外部点击关闭、键盘导航、a11y）；文案只从 `cad-ui-core/i18n` 读；`GtkCssProvider` 近似 chrome；
+  **声明偏离：原生外观 ≠ React chrome**。触发链：`cadContextMenuRequest` 钩子 → **新 IPC `cad_open_context_menu`**。
+- **D4 文字弹窗编辑（原 C）重新纳入**：ADR-0020 已加局部修正说明——A/B 不变，**C 以模态窗口形式**用于
+  多行/MTEXT/长文本/MLEADER（P7b 后）。
+- **D5 冻结帧就地编辑不采用**：4K 一帧 ≈33 MB（base64 ≈44 MB）过 IPC + 编辑期渲染冻结 + 需新建 GPU 回读路径。
+- **D6 现存隐患（需审计）**：chrome 内**向下溢出到 CAD 矩形**的浮层（ribbon 下拉、autocomplete、tooltip、toast）
+  今天就会被遮；规则是**约束在 chrome 矩形内**（翻转/裁剪/内部滚动），越界改走 D1。
+- **关键反证（已入 ADR）**：GTK3 `GtkPopover` 在 Wayland 上是 **`wl_subsurface` 而非 `xdg_popup`**，
+  `gdk_window_wayland_raise()` **是空函数**、z 序只按创建顺序 ⇒ **CAD 子表面会永远盖住 popover**，
+  且其 modal 只是进程内 grab，不拦原生表面；WebView-in-popover 无官方支持、键盘/IME **依赖合成器**。
+- **未决（需用户定）**：① 右键菜单是否接受**原生外观**（否则只能 X11 DOM + Wayland 原生 ⇒ **后端分叉**）；
+  ② C 的排期（紧跟 A/B 还是等 P7b 后一次做全）。
+
 ## P7b-1：MultiLeader 一等表示 + 导入迁移 + 匹配点清单 + **显示等价**（ADR-0019 决策 C/G，2026-10-20）
 
 **范围**：`crates/cad-domain`（新 `multileader.rs`）、`crates/cad-import-acadrust`（迁移 + 临时导出）、
