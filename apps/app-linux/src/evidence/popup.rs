@@ -35,7 +35,7 @@
 //!   **accept**, which proves the gate is released rather than merely reported as
 //!   released.
 //! * `t=3+hold+4`: one summary line.
-//! * from `YACR_PROBE_POPUP_TEXTEDIT_AT` (default `220`) onwards: the
+//! * from `YACR_PROBE_POPUP_TEXTEDIT_AT` (default `238`) onwards: the
 //!   **text-edit** phase ([`super::popup_textedit`]), gated by this same variable
 //!   but with its own start second and grab hold (the modal gate refuses CAD input
 //!   while a popup is open, so stretching this phase's hold to reach the draw

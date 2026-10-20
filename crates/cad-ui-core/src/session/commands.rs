@@ -57,6 +57,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("DIMCENTER", CommandId::DimCenter),
     ("DIMANGULAR", CommandId::DimAngular),
     ("DIMORDINATE", CommandId::DimOrdinate),
+    ("DIMBASELINE", CommandId::DimBaseline),
+    ("DIMCONTINUE", CommandId::DimContinue),
     ("HATCH", CommandId::Hatch),
     ("MOVE", CommandId::MoveEntities),
     ("TRIM", CommandId::TrimEntity),
@@ -166,6 +168,13 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("QSAVE", "SAVE"),
     ("ZOOM EXTENTS", "FIT"),
     ("ENTER", "CONFIRM"),
+    // `DBA`/`DCO` are the conventional AutoCAD abbreviations of the baseline and
+    // continue dimension pair. Admitting them is our declared convenience (the
+    // AutoCAD command reference documents the full names, not these shorthand
+    // forms), and an alias never changes behaviour: it only normalizes a typed
+    // name onto the canonical selector (ADR 0017 decision C, P5f).
+    ("DBA", "DIMBASELINE"),
+    ("DCO", "DIMCONTINUE"),
 ];
 
 /// The canonical, stable uppercase selector a command name resolves to, or

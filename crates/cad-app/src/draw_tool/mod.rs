@@ -184,6 +184,23 @@ impl DrawPreview {
         }
         if self.kind.arity().is_open_ended() {
             let minimum = self.kind.required_points();
+            // DIMBASELINE/DIMCONTINUE: the first capture step is the base
+            // dimension pick, so the measured count excludes it (locale-neutral
+            // ASCII, like the other open-ended lines below).
+            if matches!(
+                self.kind,
+                DrawToolKind::DimBaseline | DrawToolKind::DimContinue
+            ) {
+                return if self.picks.is_empty() {
+                    format!("{}: pick a linear dimension as the base", self.kind.key())
+                } else {
+                    format!(
+                        "{}: {} point(s) after the base, press Enter to finish",
+                        self.kind.key(),
+                        self.points.len().saturating_sub(1)
+                    )
+                };
+            }
             if self.points.len() < minimum {
                 return format!(
                     "{}: {} point(s) captured, at least {} needed",
@@ -342,7 +359,12 @@ impl DrawTool {
     /// machine reason, never a silent drop.
     pub fn push_point(&mut self, point: Point3) -> CadResult<()> {
         if self.kind.picked_step_count() > 0 {
-            if self.points.len() >= self.kind.required_points() {
+            // Only a **fixed-arity** kind can be past its complement: an
+            // open-ended kind with a leading pick (DIMBASELINE/DIMCONTINUE) keeps
+            // accepting measured points after the pick, up to the shared cap.
+            if !self.kind.arity().is_open_ended()
+                && self.points.len() >= self.kind.required_points()
+            {
                 return Err(CadError::InvalidInput(format!(
                     "draw kind '{}' is ready; press Enter to confirm",
                     self.kind.key()
@@ -763,6 +785,18 @@ impl DrawTool {
             DrawToolKind::DimOrdinate => DrawIntent::DimOrdinate {
                 feature: a,
                 leader: b,
+            },
+            // DIMBASELINE/DIMCONTINUE: the base ref resolved at capture time plus
+            // every **measured** point — the capture point `points[0]` belongs to
+            // the base pick, so it is not a row. The command re-reads the base and
+            // owns the row/segment construction and every refusal.
+            DrawToolKind::DimBaseline => DrawIntent::DimBaseline {
+                base: self.picks[0].clone(),
+                points: self.points[1..].to_vec(),
+            },
+            DrawToolKind::DimContinue => DrawIntent::DimContinue {
+                base: self.picks[0].clone(),
+                points: self.points[1..].to_vec(),
             },
             // HATCH: handled by the early return above (zero captured points). The
             // arm is unreachable here but keeps the match exhaustive over kinds.

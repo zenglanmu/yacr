@@ -34,6 +34,9 @@
 //! - [`draw_mleader`]: the `YACR_PROBE_DRAW_EVIDENCE` P7c `MLEADER`
 //!   creation phase (arrow + landing picks, then the real `cad_set_tool_text`
 //!   admission; the pixel criterion ADR 0019 decision J owes for P7c);
+//! - [`draw_baseline_continue`]: the `YACR_PROBE_DRAW_EVIDENCE` P5f
+//!   `DIMBASELINE`/`DIMCONTINUE` phases (create a linear base, pick it, then
+//!   three measured/chained points; `entityCount` +3 each);
 //! - [`hover`]: the `YACR_PROBE_HOVER` hover-cost driver;
 //! - [`box_select`]: the `YACR_PROBE_BOX_EVIDENCE` box-selection driver;
 //! - [`popup`]: the `YACR_PROBE_POPUP_EVIDENCE` modal-popup pipeline driver
@@ -50,6 +53,8 @@ use std::time::{Duration, Instant};
 
 mod box_select;
 mod draw;
+mod draw_baseline_continue;
+mod draw_baseline_continue_js;
 mod draw_dimension;
 mod draw_dimension_angular_ordinate;
 mod draw_dimension_radial;

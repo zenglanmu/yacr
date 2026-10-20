@@ -305,6 +305,16 @@ pub struct DimensionStyleValues {
     /// `DIMCEN`: centre mark/line size. `> 0` draws a centre mark, `< 0` a
     /// centre line (the cross extends past the circle), `0` draws nothing.
     pub center_mark: f64,
+    /// `DIMDLI`: baseline dimension row spacing (DXF group 43, default `3.75`).
+    ///
+    /// **Creation-only, one declared deviation (ADR 0017 decision C, P5f).** This
+    /// value is read by `DIMBASELINE` alone, as the distance between consecutive
+    /// stacked dimension lines. The synthesis **ignores it**: it never changes a
+    /// dimension's display geometry, which is why a stored dimension's rendered
+    /// output is identical whether or not the style carries a non-default value.
+    /// It is resolved (and `DIMSCALE`-scaled) like the other sizes so the row
+    /// spacing tracks the drawing's dimension scale.
+    pub dim_line_increment: f64,
     /// `DIMTAD`: vertical text position, `0` centred / `1` above / `2` outside
     /// (far side) / `3` JIS / `4` below. Any other code is treated as `1`.
     ///

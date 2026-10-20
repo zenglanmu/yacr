@@ -340,6 +340,8 @@ impl SessionState {
             DrawToolKind::DimCenter => CommandId::DimCenter,
             DrawToolKind::DimAngular => CommandId::DimAngular,
             DrawToolKind::DimOrdinate => CommandId::DimOrdinate,
+            DrawToolKind::DimBaseline => CommandId::DimBaseline,
+            DrawToolKind::DimContinue => CommandId::DimContinue,
             DrawToolKind::Hatch => CommandId::Hatch,
             DrawToolKind::Text => CommandId::CreateText,
             DrawToolKind::MLeader => CommandId::MLeader,

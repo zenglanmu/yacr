@@ -377,6 +377,25 @@ pub struct OrdinateDimensionCommand {
     pub axis: Option<OrdinateAxis>,
 }
 
+/// The input of a DIMBASELINE/DIMCONTINUE command (ADR 0017 decision C, P5f):
+/// the picked linear base dimension plus the N picked points, in pick order.
+///
+/// Boxed inside [`CommandPayload::DimChain`] so the command enum stays small (the
+/// same reason [`TwoLineCommand`] is boxed). Which of the two commands it is comes
+/// from the [`CommandId`], so the payload carries no kind field (a second source
+/// of truth).
+///
+/// The base is the ref resolved **at pick time**; the command re-reads it, so a
+/// base that was deleted (or replaced) since the pick is refused by name and
+/// nothing is written. The entity stores **no** base identity and no row index
+/// (the ADR's non-associative boundary): each created dimension is an ordinary,
+/// independent `DIMENSION`.
+pub struct DimensionChainCommand {
+    pub base: SelectionRef,
+    /// The picked points in pick order; the command refuses an empty list.
+    pub points: Vec<Point3>,
+}
+
 pub enum CommandPayload {
     None,
     Points(Vec<Point3>),
@@ -568,6 +587,13 @@ pub enum CommandPayload {
     /// (world-origin-relative) X or Y coordinate magnitude, matching P5b's
     /// ordinate semantics and the acadrust writer's group 42.
     DimOrdinate(Box<OrdinateDimensionCommand>),
+    /// DIMBASELINE/DIMCONTINUE: the picked linear base dimension plus the N
+    /// picked points, in pick order (ADR 0017 decision C, P5f). The handler
+    /// resolves the base, builds one `AcDbDimension` per point through the shared
+    /// synthesis and inserts them all in one transaction / one undo step on the
+    /// active layer. The kind (baseline stacking vs continuous chain) comes from
+    /// the [`CommandId`].
+    DimChain(Box<DimensionChainCommand>),
     /// HATCH the pre-selected boundary entities (ADR 0018 decision D, P6b).
     ///
     /// `refs` is the selection snapshot the tool started with (the tool captures

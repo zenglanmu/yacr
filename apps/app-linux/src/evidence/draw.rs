@@ -153,7 +153,8 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
          + P5e dimensions DIMANGULAR(2 lines+2 picks+arc loc) DIMORDINATE(feature+leader) \
          + P6b hatch: 2 pan drags, HATCH(solid annulus), HATCH(user-defined pattern), \
          HATCH(style 2 Ignore annulus) \
-         + P7c MLEADER(arrow+landing picks, text through cad_set_tool_text, select)"
+         + P7c MLEADER(arrow+landing picks, text through cad_set_tool_text, select) \
+         + P5f dimensions DIMBASELINE(base pick+3pt) DIMCONTINUE(same base+3pt)"
     );
     let webview = webview.clone();
     if let Err(error) = std::thread::Builder::new()
@@ -207,16 +208,16 @@ pub fn maybe_spawn_draw_evidence(webview: Option<&tauri::Webview>) {
 ///   t=145s..163s, the **P5e angular/ordinate phases** (DIMANGULAR /
 ///   DIMORDINATE, [`super::draw_dimension_angular_ordinate`]) at
 ///   t=163.5s..177.5s, the **P6b hatch phases** (HATCH, [`super::draw_hatch`]) at
-///   t=178s..204.5s, the **P7c `MLEADER` phase** (arrow + landing picks, then
-///   the real `cad_set_tool_text` admission and a select of the new leader,
-///   [`super::draw_mleader`]) at t=206s..212.4s, and the combined single-line
-///   report lands at t=213s — the P4 phases and report in [`super::draw_edit`],
-///   which documents the per-step timeline. An external `--capture-at` should
-///   land **after** every phase commits and the cursor is parked (≈ driver
-///   t=212s, i.e. a launch delay of ≈ 220s) so a reviewer sees the arrays, the
-///   EXPLODE result, the P5c dimensions, the P5d circles + radial dimensions, the
-///   P5e angular/ordinate dimensions, the three hatch frames **and** the new
-///   multileader on screen.
+///   t=178s..204.5s, the **P7c `MLEADER` phase** (arrow + landing picks, the real
+///   `cad_set_tool_text` admission, select; [`super::draw_mleader`]) at
+///   t=206s..212.4s, the **P5f `DIMBASELINE`/`DIMCONTINUE` phases** (linear base,
+///   base pick on its dimension line, then 3 measured/chained points,
+///   [`super::draw_baseline_continue`]) at t=213.2s..235.2s, and the combined
+///   report lands at t=236s (P4 phases + report in [`super::draw_edit`], which
+///   documents the per-step timeline). An external `--capture-at` should land
+///   after the park (≈ driver t=235s, i.e. a launch delay of ≈ 243s) so a
+///   reviewer sees the arrays, the EXPLODE result, the P5c/P5d/P5e dimensions,
+///   the hatch frames, the multileader **and** the P5f chain dimensions.
 ///
 /// Every step is a dispatch only; the **real** outcome is the `cad_status`
 /// snapshot read from the host, never a value synthesized here. Pointer
@@ -571,17 +572,19 @@ fn run_draw_evidence(webview: tauri::Webview) {
     // run after the drawing phases above, then the P5c dimension-creation phases
     // (DIMLINEAR / DIMALIGNED), the P5d radial-dimension phases (DIMRADIUS /
     // DIMDIAMETER / DIMCENTER), the P5e angular/ordinate phases, the P6b hatch
-    // phases and the P7c MLEADER phase, followed by the single-line report. They
-    // are sub-second-stepped (`schedule_draw_ms`) so the whole pass finishes
-    // inside the bounded evidence timeout; see [`super::draw_edit`],
-    // [`super::draw_dimension`], [`super::draw_dimension_radial`],
-    // [`super::draw_hatch`] and [`super::draw_mleader`].
+    // phases, the P7c MLEADER phase and the P5f DIMBASELINE/DIMCONTINUE phases,
+    // followed by the single-line report. They are sub-second-stepped
+    // (`schedule_draw_ms`) so the whole pass finishes inside the bounded evidence
+    // timeout; see [`super::draw_edit`], [`super::draw_dimension`],
+    // [`super::draw_dimension_radial`], [`super::draw_hatch`],
+    // [`super::draw_mleader`] and [`super::draw_baseline_continue`].
     super::draw_edit::schedule_draw_edit_phases(&webview, &start);
     super::draw_dimension::schedule_dimension_phases(&webview, &start);
     super::draw_dimension_radial::schedule_radial_dimension_phases(&webview, &start);
     super::draw_dimension_angular_ordinate::schedule_angular_ordinate_phases(&webview, &start);
     super::draw_hatch::schedule_hatch_phases(&webview, &start);
     super::draw_mleader::schedule_mleader_phases(&webview, &start);
+    super::draw_baseline_continue::schedule_baseline_continue_phases(&webview, &start);
     super::draw_edit::schedule_draw_report(&webview, &start);
 }
 

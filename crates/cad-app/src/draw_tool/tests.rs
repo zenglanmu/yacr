@@ -63,13 +63,14 @@ fn required_points_and_selection_are_explicit_per_kind() {
         };
         assert_eq!(kind.required_points(), expected, "{kind:?}");
     }
-    // The arity model: PLINE and SPLINE are the open-ended kinds; every other kind
-    // keeps its exact complement (byte-identical to the pre-arity state machine).
+    // The arity model: PLINE/SPLINE and the baseline/continue pair are open-ended.
     assert_eq!(DrawToolKind::Polyline.arity(), PointArity::AtLeast(2));
     assert_eq!(DrawToolKind::Spline.arity(), PointArity::AtLeast(4));
+    assert_eq!(DrawToolKind::DimBaseline.arity(), PointArity::AtLeast(2));
+    assert_eq!(DrawToolKind::DimContinue.arity(), PointArity::AtLeast(2));
     assert_eq!(DrawToolKind::Point.arity(), PointArity::Exact(1));
     for kind in DrawToolKind::ALL {
-        if matches!(kind, DrawToolKind::Polyline | DrawToolKind::Spline) {
+        if kind.arity().is_open_ended() {
             continue;
         }
         assert_eq!(
@@ -586,7 +587,7 @@ fn fixed_arity_still_refuses_the_n_plus_one_point_and_ready_exactly_at_n() {
     // capture through `push_pick` (the point and the resolved ref together); any
     // later step of a mixed capture is a free point.
     for kind in DrawToolKind::ALL {
-        if matches!(kind, DrawToolKind::Polyline | DrawToolKind::Spline) {
+        if kind.arity().is_open_ended() {
             continue;
         }
         let n = kind.required_points();

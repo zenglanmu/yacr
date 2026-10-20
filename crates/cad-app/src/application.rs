@@ -239,6 +239,8 @@ impl Application {
             | CommandId::DimCenter
             | CommandId::DimAngular
             | CommandId::DimOrdinate
+            | CommandId::DimBaseline
+            | CommandId::DimContinue
             | CommandId::Hatch
             | CommandId::MoveEntities
             | CommandId::TrimEntity

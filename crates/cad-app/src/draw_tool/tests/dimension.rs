@@ -141,3 +141,74 @@ fn dimordinate_captures_the_feature_point_and_leader_endpoint() {
         }
     );
 }
+
+#[test]
+fn baseline_and_continue_pick_the_base_then_take_open_ended_points() {
+    for kind in [DrawToolKind::DimBaseline, DrawToolKind::DimContinue] {
+        // The base pick is a captured step, so the arity minimum is the pick
+        // **plus one measured point**: a base pick alone must never be
+        // confirmable (ADR 0017 decision C, P5f).
+        assert_eq!(kind.arity(), PointArity::AtLeast(2), "{kind:?}");
+        assert!(kind.needs_picked_entities(), "{kind:?}");
+        assert_eq!(kind.picked_step_count(), 1, "{kind:?}");
+        assert!(!kind.requires_selection(), "{kind:?}");
+        assert!(!kind.requires_text(), "{kind:?}");
+        assert_eq!(kind.required_points(), 2, "{kind:?}");
+
+        let mut tool = DrawTool::new(kind, 0);
+        assert!(tool.requires_entity_pick(), "{kind:?}");
+        // The base step is an entity pick: a blind free point is refused.
+        assert!(tool.push_point(p(5.0, -10.0)).is_err(), "{kind:?}");
+        assert!(tool.points().is_empty(), "{kind:?}");
+        // An incomplete capture refuses to produce an intent.
+        assert!(tool.intent().is_err(), "{kind:?}");
+
+        tool.push_pick(p(5.0, -10.0), pick(31)).unwrap();
+        assert!(!tool.requires_entity_pick(), "{kind:?}");
+        assert!(
+            !tool.is_ready(),
+            "{kind:?} needs at least one measured point"
+        );
+        assert_eq!(tool.remaining(), Some(1), "{kind:?}");
+        assert!(
+            tool.preview().status_line().contains("after the base"),
+            "{}",
+            tool.preview().status_line()
+        );
+        // A second entity pick is refused: the pending step is a free point.
+        assert!(tool.push_pick(p(0.0, 0.0), pick(32)).is_err(), "{kind:?}");
+
+        tool.push_point(p(10.0, 0.0)).unwrap();
+        assert!(tool.is_ready(), "{kind:?}");
+        assert!(tool.preview().is_open_ended(), "{kind:?}");
+        assert_eq!(tool.preview().remaining_points(), None, "{kind:?}");
+        // More points are accepted; the capture is finished with Enter.
+        tool.push_point(p(20.0, 0.0)).unwrap();
+        assert!(tool.is_ready(), "{kind:?}");
+
+        let points = vec![p(10.0, 0.0), p(20.0, 0.0)];
+        let expected = if kind == DrawToolKind::DimBaseline {
+            DrawIntent::DimBaseline {
+                base: pick(31),
+                points,
+            }
+        } else {
+            DrawIntent::DimContinue {
+                base: pick(31),
+                points,
+            }
+        };
+        assert_eq!(tool.intent().unwrap(), expected, "{kind:?}");
+        // A non-finite measured point is refused without disturbing the capture.
+        assert!(tool.push_point(p(f64::NAN, 0.0)).is_err(), "{kind:?}");
+        assert_eq!(tool.points().len(), 3, "{kind:?}");
+    }
+
+    // Without the base pick there is no intent at all: the base is required, and
+    // it is never carried over from a previous command.
+    for kind in [DrawToolKind::DimBaseline, DrawToolKind::DimContinue] {
+        let mut bare = DrawTool::new(kind, 0);
+        assert!(bare.push_point(p(10.0, 0.0)).is_err(), "{kind:?}");
+        assert!(bare.intent().is_err(), "{kind:?}");
+    }
+}

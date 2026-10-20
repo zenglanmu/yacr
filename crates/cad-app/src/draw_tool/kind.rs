@@ -402,6 +402,36 @@ pub enum DrawToolKind {
     /// payload override forces one. The text override prompt and the object
     /// selection variant are NOT IMPLEMENTED.
     DimOrdinate,
+    /// DIMBASELINE: pick **one existing linear dimension** as the base, then N
+    /// points; Enter confirms N stacked dimensions (ADR 0017 decision C, P5f).
+    ///
+    /// The base is an **explicit pick inside this invocation**
+    /// ([`Self::picked_step_count`] is `1`), never a remembered "last dimension",
+    /// so the tool holds no cross-command state and undo/erase/document switches
+    /// cannot leave a dangling base. The base pick is stored as a capture point
+    /// too, so the arity is [`PointArity::AtLeast`]`(2)` — the pick **plus at
+    /// least one measured point**; a base pick alone is never confirmable. More
+    /// points are accepted up to the shared cap and Enter finishes the capture.
+    ///
+    /// The row construction (base rotation, `first = base.first`,
+    /// `dimension_line = base.location + n̂ · (i · DIMDLI)`), the normal selection
+    /// and every refusal live in the command layer
+    /// (`crate::app_drawing::dimension_chain`), so the capture never invents a
+    /// stacking direction.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED): bases other than a linear dimension
+    /// (aligned/angular/radial/ordinate are named refusals), the repeat-until-Esc
+    /// loop, per-point undo, associativity and a text override.
+    DimBaseline,
+    /// DIMCONTINUE: pick one existing linear dimension as the base, then N points
+    /// forming a chain from the base's second origin (ADR 0017 decision C, P5f).
+    ///
+    /// Same capture shape as [`Self::DimBaseline`] (one leading entity pick, then
+    /// an open-ended point run). The chain geometry — segment 1 `base.second →
+    /// P_1`, segment `i` `P_{i−1} → P_i`, all on `base.location`, no stacking, and
+    /// the named refusal of a segment that does not advance — lives in the command
+    /// layer.
+    DimContinue,
     /// HATCH: fill the **pre-selection** (ADR 0018 decision D, P6b).
     ///
     /// This kind captures **no points** — its arity is the zero-point exact
@@ -503,7 +533,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 34] = [
+    pub const ALL: [DrawToolKind; 36] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -540,6 +570,9 @@ impl DrawToolKind {
         DrawToolKind::Text,
         DrawToolKind::TextEdit,
         DrawToolKind::MLeader,
+        // P5f's pair is appended too, for the same index-stability reason.
+        DrawToolKind::DimBaseline,
+        DrawToolKind::DimContinue,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -575,6 +608,8 @@ impl DrawToolKind {
             Self::DimCenter => "dimcenter",
             Self::DimAngular => "dimangular",
             Self::DimOrdinate => "dimordinate",
+            Self::DimBaseline => "dimbaseline",
+            Self::DimContinue => "dimcontinue",
             Self::Hatch => "hatch",
             Self::Text => "text",
             Self::TextEdit => "textedit",
@@ -616,6 +651,8 @@ impl DrawToolKind {
             "dimcenter" => Some(Self::DimCenter),
             "dimangular" => Some(Self::DimAngular),
             "dimordinate" => Some(Self::DimOrdinate),
+            "dimbaseline" => Some(Self::DimBaseline),
+            "dimcontinue" => Some(Self::DimContinue),
             "hatch" => Some(Self::Hatch),
             "text" => Some(Self::Text),
             "textedit" => Some(Self::TextEdit),
@@ -709,6 +746,10 @@ impl DrawToolKind {
             // catalog label for chrome anyway.
             Self::DimAngular => "DIMANGULAR",
             Self::DimOrdinate => "DIMORDINATE",
+            // DIMBASELINE/DIMCONTINUE use locale-neutral ASCII fallback labels,
+            // exactly like the other dimension kinds.
+            Self::DimBaseline => "DIMBASELINE",
+            Self::DimContinue => "DIMCONTINUE",
             // HATCH uses a locale-neutral ASCII fallback label, exactly like the
             // other post-ADR-0015 kinds: the ADR fence forbids new CJK literals on
             // the Rust side and the shell substitutes the catalog label for chrome
@@ -739,6 +780,11 @@ impl DrawToolKind {
             // finished with Enter.
             Self::Polyline => PointArity::AtLeast(2),
             Self::Spline => PointArity::AtLeast(4),
+            // DIMBASELINE/DIMCONTINUE: the base **pick** consumes the first
+            // capture step (it is stored as a point too), so the minimum is the
+            // pick plus **one measured point** — a base pick alone must never be
+            // confirmable. More points are accepted; Enter finishes the capture.
+            Self::DimBaseline | Self::DimContinue => PointArity::AtLeast(2),
             // Start, a point on the arc, end; two axis endpoints plus the
             // other-axis distance; base, reference, target; or the two dimension
             // origins plus the dimension-line location.
@@ -845,7 +891,13 @@ impl DrawToolKind {
     pub fn picked_step_count(self) -> usize {
         match self {
             Self::Trim | Self::Extend | Self::Chamfer | Self::Fillet => self.required_points(),
-            Self::DimRadius | Self::DimDiameter | Self::DimCenter => 1,
+            // DIMBASELINE/DIMCONTINUE pick the base dimension they extend (ADR
+            // 0017 decision C, P5f) before any free point.
+            Self::DimRadius
+            | Self::DimDiameter
+            | Self::DimCenter
+            | Self::DimBaseline
+            | Self::DimContinue => 1,
             // TEXTEDIT picks the text entity it will edit as its only step.
             Self::TextEdit => 1,
             // DIMANGULAR's two-line form picks both lines; its third step is the

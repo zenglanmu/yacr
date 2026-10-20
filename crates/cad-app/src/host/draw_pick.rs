@@ -11,7 +11,7 @@
 use cad_domain::{CadError, CadResult, Point3, SelectionRef, TolerancePolicy};
 
 use crate::picking::pick_at_screen_with_visibility;
-use crate::BackFacePolicy;
+use crate::{BackFacePolicy, DrawToolKind};
 
 use super::HostController;
 
@@ -70,5 +70,28 @@ impl HostController {
         self.draw_pick_ref(world)?.ok_or_else(|| {
             CadError::InvalidInput("draw pick did not hit supported geometry".into())
         })
+    }
+
+    /// Strict capture-time validation for a DIMBASELINE/DIMCONTINUE base pick.
+    ///
+    /// The ref must resolve to a directly addressable `DimensionKind::Linear`
+    /// dimension: a block-instance member / sub-element ref, every other dimension
+    /// kind (aligned, angular, radial, ordinate) and every non-dimension geometry
+    /// are refused **by name before the step is consumed**, so the capture can
+    /// never be completed with a base the command would later reject. The command
+    /// re-runs the same resolution at apply time, so a base deleted or replaced
+    /// between the pick and the Confirm is still refused there.
+    pub(super) fn check_dimension_chain_base(&self, reference: SelectionRef) -> CadResult<()> {
+        let command = match self.session.draw_kind() {
+            Some(DrawToolKind::DimContinue) => "DIMCONTINUE",
+            _ => "DIMBASELINE",
+        };
+        let document = self
+            .application
+            .workspace
+            .documents
+            .get(&self.document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        crate::app_drawing::ensure_chain_base(document.drawing.as_ref(), &reference, command)
     }
 }

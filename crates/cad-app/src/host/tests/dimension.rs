@@ -372,3 +372,143 @@ fn dimcenter_capture_picks_the_circle_and_commits_plain_lines() {
         );
     }
 }
+
+/// Replace the controller's drawing with one linear base dimension (its
+/// dimension line 10 units below the measured segment) plus a plain line, for the
+/// DIMBASELINE/DIMCONTINUE capture path.
+fn chain_base_fixture() -> HostController {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    let style = cad_db::DimStyle::standard_metric(cad_domain::DimStyleId(0)).resolved(
+        "Standard".to_string(),
+        cad_domain::StyleId(0),
+        None,
+    );
+    let dimension = cad_domain::DimensionGeometry::synthesized(
+        cad_domain::DimensionDefinition {
+            kind: cad_domain::DimensionKind::Linear { rotation: 0.0 },
+            points: cad_domain::DimensionPoints::Linear {
+                first: p(0.0, 0.0),
+                second: p(10.0, 0.0),
+                dimension_line: p(5.0, -10.0),
+            },
+            text_middle: p(0.0, 0.0),
+            text_rotation: 0.0,
+            normal: z_up(),
+        },
+        "Standard".to_string(),
+        style,
+        None,
+    )
+    .expect("the base dimension synthesizes");
+    builder
+        .insert_entity(host_entity(
+            501,
+            SemanticGeometry::Dimension(Box::new(dimension)),
+            0,
+        ))
+        .unwrap();
+    builder
+        .insert_entity(host_entity(
+            502,
+            SemanticGeometry::Line {
+                start: p(0.0, 50.0),
+                end: p(10.0, 50.0),
+            },
+            1,
+        ))
+        .unwrap();
+    builder
+        .insert_dim_style(cad_db::DimStyle::standard_metric(cad_domain::DimStyleId(0)))
+        .unwrap();
+    controller
+        .application
+        .workspace
+        .documents
+        .get_mut(&controller.document_id)
+        .unwrap()
+        .drawing = Arc::new(builder.finish().unwrap());
+    controller.set_snap_enabled(false);
+    controller
+}
+
+#[test]
+fn dimbaseline_capture_picks_the_base_then_measures_points_and_commits_the_batch() {
+    // The host path end to end: the first click is an **entity pick** of the base
+    // dimension (resolved and validated through the same pick path TRIM/EXTEND
+    // use), the rest are free points, and Confirm commits one entity per point.
+    for kind in [DrawToolKind::DimBaseline, DrawToolKind::DimContinue] {
+        let mut controller = chain_base_fixture();
+        let count = controller.drawing().unwrap().entity_count();
+
+        controller.begin_draw_tool(kind).unwrap();
+        // A non-dimension object is refused **at capture time** and consumes no
+        // step, so the user can simply pick again.
+        let error = controller.capture_tool_point(p(5.0, 50.0)).unwrap_err();
+        assert!(
+            format!("{error:?}").contains("must be a linear dimension"),
+            "{error:?}"
+        );
+        assert_eq!(controller.session.draw_preview().unwrap().picks.len(), 0);
+
+        // The base dimension is picked on its own dimension line.
+        controller.capture_tool_point(p(5.0, -10.0)).unwrap();
+        let preview = controller.session.draw_preview().unwrap();
+        assert_eq!(preview.picks.len(), 1);
+        assert_eq!(preview.picks[0].entity, cad_domain::EntityId(501));
+        assert!(
+            !preview.can_confirm(),
+            "the base pick alone is not a dimension batch"
+        );
+        assert_eq!(preview.remaining_points(), Some(1));
+
+        controller.capture_tool_point(p(20.0, 0.0)).unwrap();
+        controller.capture_tool_point(p(30.0, 0.0)).unwrap();
+        let preview = controller.session.draw_preview().unwrap();
+        assert!(preview.can_confirm());
+        assert!(preview.is_open_ended(), "Enter finishes the batch");
+
+        let intent = controller.session.draw_intent().unwrap();
+        let command = controller.command_for_draw_intent(intent, &[]).unwrap();
+        assert_eq!(
+            command.id,
+            match kind {
+                DrawToolKind::DimBaseline => crate::CommandId::DimBaseline,
+                _ => crate::CommandId::DimContinue,
+            }
+        );
+        match command.payload {
+            crate::CommandPayload::DimChain(input) => {
+                assert_eq!(input.base.entity, cad_domain::EntityId(501));
+                assert_eq!(
+                    input.points,
+                    vec![p(20.0, 0.0), p(30.0, 0.0)],
+                    "the base pick is not a measured point"
+                );
+            }
+            _ => panic!("expected a DimChain payload"),
+        }
+
+        let outcome = controller.confirm_draw().unwrap();
+        assert_eq!(outcome.objects.len(), 2, "one dimension per measured point");
+        assert_eq!(controller.drawing().unwrap().entity_count(), count + 2);
+        for object in &outcome.objects {
+            let entity = controller
+                .drawing()
+                .unwrap()
+                .entity(cad_domain::EntityId(object.0))
+                .cloned()
+                .expect("the created dimension");
+            assert_eq!(entity.object.type_key, "AcDbDimension");
+        }
+        // The capture is complete after a successful commit.
+        assert!(controller.session.draw_preview().is_none());
+    }
+}

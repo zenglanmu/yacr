@@ -163,7 +163,7 @@ const ML_TEXT: &str = "LEAD";
 ///
 /// It starts at driver t=206 s (after the P6b hatch phases, which end at
 /// t=204.5 s) and steps every 400–600 ms; the combined report is scheduled after
-/// it at t=213 s (see [`super::draw_edit::schedule_draw_report`]). Every step
+/// it at t=236 s (see [`super::draw_edit::schedule_draw_report`]). Every step
 /// reads the real `cad_status`; a dispatch that merely posts is not a pass.
 ///
 /// The timeline:

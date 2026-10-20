@@ -246,6 +246,30 @@ pub enum DrawIntent {
     /// The axis follows the command layer's auto rule (the interactive form never
     /// forces one); every refusal lives there.
     DimOrdinate { feature: Point3, leader: Point3 },
+    /// DIMBASELINE: stack one linear dimension per picked point off the base
+    /// dimension `base` (ADR 0017 decision C, P5f).
+    ///
+    /// `base` is the ref resolved at pick time (never a remembered "last
+    /// dimension"); `points` are the captured points in pick order, i.e. every
+    /// capture point **after** the base pick. The row construction (rotation,
+    /// stacking normal, `i · DIMDLI` offsets) and every refusal live in the
+    /// command layer, so the capture never invents a stacking direction. All N
+    /// created dimensions commit in one transaction / one undo step.
+    DimBaseline {
+        base: SelectionRef,
+        points: Vec<Point3>,
+    },
+    /// DIMCONTINUE: chain one linear dimension per picked point from the base
+    /// dimension `base` (ADR 0017 decision C, P5f).
+    ///
+    /// Same shape as [`DrawIntent::DimBaseline`]; the chain construction (segment
+    /// 1 starts at the base's second origin, every segment stays on the base's
+    /// dimension line, a non-advancing segment is refused) lives in the command
+    /// layer.
+    DimContinue {
+        base: SelectionRef,
+        points: Vec<Point3>,
+    },
     /// HATCH the current selection (ADR 0018 decision D, P6b).
     ///
     /// Carries no field: the boundary is the selection snapshot the caller

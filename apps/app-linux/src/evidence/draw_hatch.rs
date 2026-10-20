@@ -125,7 +125,7 @@ const P3_CENTER: (f64, f64) = (790.0, 180.0);
 ///
 /// They start at driver t=178 s (after the P5e phases, which end at t=177.5 s)
 /// and step every 500 ms; the combined single-line report is scheduled after
-/// them at t=213 s (see [`super::draw_edit::schedule_draw_report`]). Each phase
+/// them at t=236 s (see [`super::draw_edit::schedule_draw_report`]). Each phase
 /// reads the real `cad_status` before and after its commit; a dispatch that
 /// merely posts is not a pass.
 ///

@@ -1,5 +1,6 @@
 import { admitCommandText } from './commands.mjs';
 import { TEXT_PICK_PROMPT_KEY, TEXT_STEP_PROMPT_KEY, toolAwaitingText } from './text.mjs';
+import { OPEN_ENDED_PROMPTS } from './tool-open-ended.mjs';
 
 // Phase keys the backend reports (`cad_app::import_phase_key`). A phase outside
 // this set is a contract violation, not a runtime surprise.
@@ -684,6 +685,10 @@ export const PRESELECT_PROMPTS = Object.freeze({
   }),
 });
 
+// Every prompt table stays reachable from this module; the open-ended one lives
+// in `tool-open-ended.mjs` because this file is at the size ceiling.
+export { OPEN_ENDED_PROMPTS };
+
 /** The shared ready prompt for a capture that produced a dimension entity. */
 const DEFAULT_READY_PROMPT = 'tool.prompt.dim.ready';
 
@@ -707,6 +712,14 @@ const DEFAULT_READY_PROMPT = 'tool.prompt.dim.ready';
  * [`TOOL_READY_PROMPTS`], else the shared dimension ready prompt). The point
  * count is read as the host's real value; a malformed one is treated as "no
  * points yet" rather than a fabricated later step.
+ *
+ * An open-ended tool ([`OPEN_ENDED_PROMPTS`]) has no fixed complement, so the
+ * count only distinguishes "base dimension still missing" from "capturing
+ * points". The base pick is the tool's first captured step — the same shape
+ * DIMRADIUS/DIMCENTER already have — and the command refuses a capture with zero
+ * measured points, so `points <= 1` always names the point step and the host's
+ * `ready` is what turns the chip into the ready copy. No step count is ever
+ * assumed: the point prompt repeats for as many points as the user picks.
  */
 export function toolStepPromptKey(tool) {
   if (!tool || typeof tool !== 'object' || typeof tool.key !== 'string') return null;
@@ -716,9 +729,17 @@ export function toolStepPromptKey(tool) {
   if (toolAwaitingText(tool)) return TEXT_STEP_PROMPT_KEY;
   const preselect = PRESELECT_PROMPTS[tool.key];
   if (preselect) return tool.ready === true ? preselect.ready : preselect.idle;
+  const points = Number.isSafeInteger(tool.points) && tool.points >= 0 ? tool.points : 0;
+  const openEnded = OPEN_ENDED_PROMPTS[tool.key];
+  if (openEnded) {
+    if (points === 0) return openEnded.select;
+    // Readiness never wins without a measured point: a capture with only the base
+    // pick is refused by the command, so claiming "ready" there would be false.
+    if (points > 1 && tool.ready === true) return DEFAULT_READY_PROMPT;
+    return openEnded.point;
+  }
   const steps = TOOL_STEP_PROMPTS[tool.key];
   if (!steps) return null;
-  const points = Number.isSafeInteger(tool.points) && tool.points >= 0 ? tool.points : 0;
   if (points < steps.length) return steps[points];
   return TOOL_READY_PROMPTS[tool.key] ?? DEFAULT_READY_PROMPT;
 }

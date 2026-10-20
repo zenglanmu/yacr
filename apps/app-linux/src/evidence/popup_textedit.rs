@@ -15,7 +15,7 @@
 //!
 //! ## Timeline (seconds after the shared driver start)
 //!
-//! The phase starts at `START` (`YACR_PROBE_POPUP_TEXTEDIT_AT`, default **220**,
+//! The phase starts at `START` (`YACR_PROBE_POPUP_TEXTEDIT_AT`, default **238**,
 //! never earlier than the `about` phase's summary) and holds for
 //! `hold` (`YACR_PROBE_POPUP_TEXTEDIT_HOLD`, default **20**, floored at 5) — a
 //! separate knob from the `about` hold, because the modal gate refuses CAD input
@@ -78,7 +78,7 @@
 //!
 //! **Schedule dependency**: the draw evidence driver (`YACR_PROBE_DRAW_EVIDENCE`)
 //! leaves the MULTILEADER selected only at `t≈212 s`, so this phase defaults to
-//! `START=220`. Without that driver (or before its `MLEADER` phase) there is no
+//! `START=238`. Without that driver (or before its `MLEADER` phase) there is no
 //! editable multi-line selection and the phase honestly skips — it never waits,
 //! retries or fabricates a target.
 //!
@@ -133,12 +133,13 @@ pub(super) const EXPECTED_REOPEN_LINES: usize = 2;
 pub(super) const MIN_START_AFTER_ABOUT_CLOSE: u64 = 6;
 /// Default start second (`YACR_PROBE_POPUP_TEXTEDIT_AT`).
 ///
-/// The draw evidence driver commits its `MLEADER` at `t≈212 s` and prints its
-/// report at `t=213 s`; this phase needs that selection, so its default start is
-/// after it. It is a **separate** knob from the `about` hold on purpose: the modal
+/// The draw evidence driver commits its `MLEADER` at `t≈212 s`, runs its P5f
+/// `DIMBASELINE`/`DIMCONTINUE` phases to `t≈235 s` and prints its report at
+/// `t=236 s`; this phase needs that selection, so its default start is after it.
+/// It is a **separate** knob from the `about` hold on purpose: the modal
 /// gate refuses CAD input while any popup is open, so lengthening the `about` hold
 /// to reach this point would block the draw driver's own synthetic input.
-const DEFAULT_START_SECONDS: u64 = 220;
+const DEFAULT_START_SECONDS: u64 = 238;
 /// Default grab hold for this phase (`YACR_PROBE_POPUP_TEXTEDIT_HOLD`).
 ///
 /// Deliberately shorter than the `about` hold: it only has to cover one external
@@ -868,7 +869,7 @@ mod tests {
         }
         const {
             assert!(
-                DEFAULT_START_SECONDS > 213,
+                DEFAULT_START_SECONDS > 236,
                 "after the draw driver's report"
             );
         }

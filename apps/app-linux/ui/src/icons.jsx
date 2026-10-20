@@ -67,6 +67,19 @@ const P = {
   // straight landing echoes the linear pair's extension lines, so the family reads
   // as one vocabulary.
   dimordinate: <><circle cx="5.2" cy="18.2" r="1.7" /><path d="M6.6 16.9 12.9 10.6 19.5 10.6" /><path d="M19.5 8.2v4.8" /></>,
+  // Baseline dimension: every row shares the base dimension's first extension
+  // line, so the glyph draws **one** tall extension line at the left and two
+  // dimension rows leaving it at different lengths, each with the family's
+  // arrowhead pointing back into that shared line. Two rows is the cue that
+  // survives 16 px and keeps it apart from `dimlinear` (one row, arrowheads at
+  // both ends of a single span).
+  dimbaseline: <><path d="M4 4.5v15" /><path d="M4 9h11M4 16h15" /><path d="M7 6.7 4 9 7 11.3" /><path d="M7 13.7 4 16 7 18.3" /></>,
+  // Continue dimension: one row cut into chained segments by the shared
+  // extension lines, with the joint's extension line running past the two outer
+  // ends — the picture of two dimensions meeting on a common boundary, each with
+  // its outward arrowhead. The collinear row (never stacked like `dimbaseline`)
+  // and the three extension lines keep it apart from `dimlinear`'s single span.
+  dimcontinue: <><path d="M4 7v10M11 4.5v15M20 7v10" /><path d="M4 12h16" /><path d="M7 9.7 4 12l3 2.3" /><path d="M17 9.7 20 12l-3 2.3" /></>,
   polyline: <><path d="M4 18 9 8l5 6 6-10" /><circle cx="4" cy="18" r="1.5" /><circle cx="9" cy="8" r="1.5" /><circle cx="20" cy="4" r="1.5" /></>,
   rectang: <><rect x="4" y="6" width="16" height="12" /><circle cx="4" cy="6" r="1.5" /><circle cx="20" cy="18" r="1.5" /></>,
   ellipse: <><ellipse cx="12" cy="12" rx="9" ry="5.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="3" cy="12" r="1.4" /><circle cx="21" cy="12" r="1.4" /></>,

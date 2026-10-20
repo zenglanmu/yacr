@@ -181,6 +181,11 @@ impl DimStyle {
             } else {
                 0.0
             },
+            // DIMDLI: the baseline row spacing. Scaled by DIMSCALE like the other
+            // distance variables (AutoCAD lists DIMDLI among them), and a
+            // non-positive/non-finite table value falls back to the documented
+            // 3.75 default rather than producing a zero-spacing stack.
+            dim_line_increment: positive(self.dim_line_increment, 3.75) * scale,
             text_vertical: self.text_vertical,
             text_vertical_position: if self.text_vertical_position.is_finite() {
                 self.text_vertical_position
@@ -282,6 +287,51 @@ mod tests {
                 .center_mark,
             -2.5
         ));
+    }
+
+    #[test]
+    fn resolved_carries_the_creation_only_dline_increment() {
+        // DIMDLI is the DIMBASELINE row spacing (ADR 0017 decision C, P5f): it is
+        // resolved like the other distance variables (DIMSCALE-scaled) and its
+        // documented default is 3.75.
+        let standard = DimStyle::standard_metric(DimStyleId(0));
+        assert!(approx(
+            standard
+                .resolved("Standard".to_string(), StyleId(0), None)
+                .dim_line_increment,
+            3.75
+        ));
+        let mut wide = DimStyle::standard_metric(DimStyleId(0));
+        wide.dim_line_increment = 7.5;
+        assert!(approx(
+            wide.resolved("Standard".to_string(), StyleId(0), None)
+                .dim_line_increment,
+            7.5
+        ));
+        // DIMSCALE scales it (it is a distance variable), and a non-positive or
+        // non-finite table value falls back to the documented default instead of
+        // collapsing the stack to zero spacing.
+        let mut scaled = DimStyle::standard_metric(DimStyleId(0));
+        scaled.scale = 2.0;
+        assert!(approx(
+            scaled
+                .resolved("Standard".to_string(), StyleId(0), None)
+                .dim_line_increment,
+            7.5
+        ));
+        for bad in [0.0, -5.0, f64::NAN, f64::INFINITY] {
+            let mut broken = DimStyle::standard_metric(DimStyleId(0));
+            broken.dim_line_increment = bad;
+            assert!(
+                approx(
+                    broken
+                        .resolved("Standard".to_string(), StyleId(0), None)
+                        .dim_line_increment,
+                    3.75
+                ),
+                "DIMDLI {bad} must fall back to 3.75"
+            );
+        }
     }
 
     #[test]

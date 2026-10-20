@@ -142,7 +142,13 @@ pub fn draw_preview_overlay(
         // existing cursor/chain preview (no new overlay channel; the picked lines
         // are shown by the host's capture tint).
         | DrawToolKind::DimAngular
-        | DrawToolKind::DimOrdinate => {
+        | DrawToolKind::DimOrdinate
+        // DIMBASELINE/DIMCONTINUE pick a base dimension and then capture an
+        // open-ended run of free points; the live preview is the existing
+        // cursor/chain (the stacking normal and the chain geometry belong to the
+        // command, not to a preview overlay).
+        | DrawToolKind::DimBaseline
+        | DrawToolKind::DimContinue => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }

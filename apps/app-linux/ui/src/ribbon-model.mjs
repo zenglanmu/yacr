@@ -239,12 +239,13 @@ export const RIBBON_TABS = Object.freeze([
           //
           // Each command carries its own glyph in the shared 24px stroke language
           // (`dimlinear`/`dimaligned`/`dimradius`/`dimdiameter`/`dimcenter`/
-          // `dimangular`/`dimordinate`), so the family reads as one set: the radial
-          // pair draws its arc/circle target with the linear pair's dimension-line
-          // + arrowhead vocabulary, the centre mark shows the crossed mark at the
-          // circle's centre, the angular glyph adds dimension arrowheads to the
-          // measure-angle rays-plus-arc, and the ordinate glyph is a feature point
-          // whose leader ends in a dimension tick.
+          // `dimangular`/`dimordinate`/`dimbaseline`/`dimcontinue`), so the family
+          // reads as one set: the radial pair draws its arc/circle target with the
+          // linear pair's dimension-line + arrowhead vocabulary, the centre mark
+          // shows the crossed mark at the circle's centre, the angular glyph adds
+          // dimension arrowheads to the measure-angle rays-plus-arc, and the
+          // ordinate glyph is a feature point whose leader ends in a dimension
+          // tick.
           { id: 'DIMLINEAR', labelKey: 'draw.kind.dimlinear', icon: 'dimlinear', command: 'DIMLINEAR', large: true },
           { id: 'DIMALIGNED', labelKey: 'draw.kind.dimaligned', icon: 'dimaligned', command: 'DIMALIGNED', large: true },
           { id: 'DIMRADIUS', labelKey: 'draw.kind.dimradius', icon: 'dimradius', command: 'DIMRADIUS', large: true },
@@ -252,6 +253,14 @@ export const RIBBON_TABS = Object.freeze([
           { id: 'DIMCENTER', labelKey: 'draw.kind.dimcenter', icon: 'dimcenter', command: 'DIMCENTER', large: true },
           { id: 'DIMANGULAR', labelKey: 'draw.kind.dimangular', icon: 'dimangular', command: 'DIMANGULAR', large: true },
           { id: 'DIMORDINATE', labelKey: 'draw.kind.dimordinate', icon: 'dimordinate', command: 'DIMORDINATE', large: true },
+          // Baseline/continue (ADR 0017 decision C, P5f) close the family. Both
+          // start by picking an **existing** linear dimension as their base, then
+          // take any number of points and commit with Enter, so they are appended
+          // after the seven creation commands (no shipped button moves) and last
+          // in the family: they consume a dimension that already exists instead of
+          // creating the first one.
+          { id: 'DIMBASELINE', labelKey: 'draw.kind.dimbaseline', icon: 'dimbaseline', command: 'DIMBASELINE', large: true },
+          { id: 'DIMCONTINUE', labelKey: 'draw.kind.dimcontinue', icon: 'dimcontinue', command: 'DIMCONTINUE', large: true },
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', command: 'PROPERTIES', large: true },
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
           { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', command: 'SELECTALL' },

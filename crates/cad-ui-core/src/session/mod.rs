@@ -194,6 +194,7 @@ impl CadSession {
     /// | `DIMLINEAR` / `DIMALIGNED` | `BeginDraw(DimLinear)` / `BeginDraw(DimAligned)` |
     /// | `DIMRADIUS` / `DIMDIAMETER` / `DIMCENTER` | `BeginDraw(DimRadius)` / `BeginDraw(DimDiameter)` / `BeginDraw(DimCenter)` |
     /// | `DIMANGULAR` / `DIMORDINATE` | `BeginDraw(DimAngular)` / `BeginDraw(DimOrdinate)` |
+    /// | `DIMBASELINE` / `DIMCONTINUE` | `BeginDraw(DimBaseline)` / `BeginDraw(DimContinue)` |
     /// | `ARRAYRECT` / `ARRAYPOLAR` | `BeginDraw(ArrayRect)` / `BeginDraw(ArrayPolar)` |
     /// | `HATCH` | `BeginDraw(Hatch)` (boundary = the current selection) |
     /// | `ALIGN` | `BeginDraw(Align)` |
@@ -284,6 +285,12 @@ impl CadSession {
             CommandId::DimAngular => Some(InteractionRequest::BeginDraw(DrawToolKind::DimAngular)),
             CommandId::DimOrdinate => {
                 Some(InteractionRequest::BeginDraw(DrawToolKind::DimOrdinate))
+            }
+            CommandId::DimBaseline => {
+                Some(InteractionRequest::BeginDraw(DrawToolKind::DimBaseline))
+            }
+            CommandId::DimContinue => {
+                Some(InteractionRequest::BeginDraw(DrawToolKind::DimContinue))
             }
             CommandId::MoveEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Move)),
             CommandId::CopyEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Copy)),

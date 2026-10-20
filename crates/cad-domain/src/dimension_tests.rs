@@ -13,6 +13,7 @@ fn style() -> DimensionStyleValues {
         text_height: 2.5,
         text_gap: 0.625,
         center_mark: 0.0,
+        dim_line_increment: 3.75,
         text_vertical: 1,
         text_vertical_position: 0.0,
         suppress_ext1: false,

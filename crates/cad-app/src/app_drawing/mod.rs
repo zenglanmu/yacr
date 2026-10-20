@@ -33,6 +33,7 @@ mod chamfer_fillet;
 mod clipboard;
 mod dimension;
 mod dimension_angular;
+mod dimension_chain;
 mod dimension_ordinate;
 mod drawing_create;
 mod drawing_edit;
@@ -46,6 +47,10 @@ mod text_edit;
 mod trim_extend;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};
+// The single base-dimension resolution the DIMBASELINE/DIMCONTINUE capture check
+// and the command both use, so a wrong pick is refused with the same reason at
+// capture time and at apply time (ADR 0017 decision C, P5f).
+pub(crate) use dimension_chain::ensure_chain_base;
 pub(crate) use text_edit::resolve_text_edit_target;
 // The explicit ARRAY entity cap (ADR 0016 decision D); re-exported so the
 // command docs (`crate::app_drawing::MAX_ARRAY_ENTITIES`) resolve. It is a doc

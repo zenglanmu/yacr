@@ -156,6 +156,16 @@ impl HostController {
                 let prefill = self.text_edit_prefill(&reference)?;
                 self.session.capture_draw_pick(point, reference)?;
                 self.session.set_draw_text_prefill(Some(prefill));
+            } else if matches!(
+                self.session.draw_kind(),
+                Some(DrawToolKind::DimBaseline | DrawToolKind::DimContinue)
+            ) {
+                // DIMBASELINE/DIMCONTINUE's pick must resolve to a directly
+                // addressable **linear** dimension before the step is consumed:
+                // a wrong object is refused by name at capture time (ADR 0017
+                // decision C, P5f), so it can never be captured and refused later.
+                self.check_dimension_chain_base(reference.clone())?;
+                self.session.capture_draw_pick(point, reference)?;
             } else {
                 self.session.capture_draw_pick(point, reference)?;
             }

@@ -333,6 +333,25 @@ impl HostController {
                     axis: None,
                 })),
             ),
+            // DIMBASELINE/DIMCONTINUE: the base ref resolved at pick time plus the
+            // measured points travel on the boxed `DimChain` payload; the handler
+            // resolves the base again and builds one dimension per point. The
+            // baseline/continue choice comes from the command id, so the payload
+            // carries no kind.
+            DrawIntent::DimBaseline { base, points } => (
+                crate::CommandId::DimBaseline,
+                crate::CommandPayload::DimChain(Box::new(crate::DimensionChainCommand {
+                    base,
+                    points,
+                })),
+            ),
+            DrawIntent::DimContinue { base, points } => (
+                crate::CommandId::DimContinue,
+                crate::CommandPayload::DimChain(Box::new(crate::DimensionChainCommand {
+                    base,
+                    points,
+                })),
+            ),
             // HATCH: the selection snapshot is the boundary (the tool captures no
             // points); the pattern type/spacing/angle/double/style are the session
             // typed channel the command layer reads, so they never ride the

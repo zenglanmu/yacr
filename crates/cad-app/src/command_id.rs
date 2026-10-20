@@ -254,6 +254,39 @@ pub enum CommandId {
     /// One transaction / one undo step on the active layer. Non-associative.
     /// Work-only.
     DimOrdinate,
+    /// DIMBASELINE: stack **N** linear dimensions off one picked **linear** base
+    /// dimension (ADR 0017 decision C, P5f).
+    ///
+    /// Payload is `DimChain { base, points }`: the base dimension ref resolved at
+    /// pick time plus the N picked points in pick order. Row `i` (`i = 1..=N`):
+    /// `first = base.first`, `second = P_i`, `rotation = base.rotation`,
+    /// `dimension_line = base.location + n̂ · (i · DIMDLI)` where `n̂ = ±rot90(dir)`
+    /// is the normal **away from that row's measured geometry** (the sign that
+    /// makes `dot(base.location − midpoint(first, second), n̂) > 0`).
+    ///
+    /// Refusals (named, nothing written, no transaction): a base that is missing,
+    /// from another document, an instance-path/sub-element ref, or not a
+    /// `DimensionKind::Linear` dimension (aligned/angular/radial/ordinate are
+    /// refused by name), zero picked points, a non-finite point, an off-`+Z`-plane
+    /// input, a row that measures zero, an undecidable stacking normal (the base
+    /// dimension line lies on the measured points — the side is never guessed), a
+    /// non-positive row spacing, a missing active layer and Viewer mode.
+    ///
+    /// All N dimensions are built through the shared synthesis and inserted in
+    /// **one transaction / one undo step** on the active layer. Non-associative.
+    /// Work-only.
+    DimBaseline,
+    /// DIMCONTINUE: chain **N** linear dimensions from one picked **linear** base
+    /// dimension (ADR 0017 decision C, P5f).
+    ///
+    /// Payload is `DimChain { base, points }`. Segment 1 is `base.second → P_1`,
+    /// segment `i > 1` is `P_{i−1} → P_i`, and every segment keeps
+    /// `dimension_line = base.location` (a chain does **not** stack). The pick
+    /// order defines the chain direction: a segment whose projection along
+    /// `base`'s direction is `<= 0` is refused by name (no folding back). Every
+    /// other refusal matches [`CommandId::DimBaseline`], and the N segments are
+    /// inserted in one transaction / one undo step. Non-associative. Work-only.
+    DimContinue,
     /// HATCH: fill the **pre-selected** boundary entities (ADR 0018 decision D,
     /// P6b). Payload is `Hatch { refs }` — the selection snapshot taken when the
     /// tool started; the tool itself captures **no points** (its arity is the
@@ -440,6 +473,8 @@ impl CommandId {
                 | Self::DimCenter
                 | Self::DimAngular
                 | Self::DimOrdinate
+                | Self::DimBaseline
+                | Self::DimContinue
                 | Self::Hatch
                 | Self::MoveEntities
                 | Self::TrimEntity
