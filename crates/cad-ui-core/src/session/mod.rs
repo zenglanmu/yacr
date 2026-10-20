@@ -61,8 +61,8 @@ pub use self::commands::{
     MEASUREMENT_SELECTORS, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
 pub use self::status::{
-    unsupported_status, CadCamera, CadImportProgress, CadSelection, CadSelectionRow, CadStatus,
-    CadTool, CadToolParams,
+    unsupported_status, CadCamera, CadImportProgress, CadPopup, CadSelection, CadSelectionRow,
+    CadStatus, CadTool, CadToolParams,
 };
 
 /// Completions drained per poll. The queue's absolute capacity is 256, so this

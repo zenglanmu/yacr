@@ -294,6 +294,22 @@ pub struct CadTool {
     pub params: CadToolParams,
 }
 
+/// The open modal popup of the host (ADR-0021 D1/D2).
+///
+/// Wire shape: `{ kind, label, modal }`. It is the host's real window state, not
+/// a UI guess: `kind` is the allowlisted popup kind key, `label` the native
+/// window label the host built, and `modal` whether the host applied its input
+/// gate for it. The block is `null` while no popup exists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CadPopup {
+    /// Stable popup kind key (currently only `"about"`).
+    pub kind: String,
+    /// Native window label the host created for this popup.
+    pub label: String,
+    /// Whether the host holds the modal input gate for this popup.
+    pub modal: bool,
+}
+
 /// The `cad_status` snapshot consumed by the frontend.
 ///
 /// The field set is the frozen frontend contract: every key is always present,
@@ -301,8 +317,9 @@ pub struct CadTool {
 /// technical, locale-neutral string from the real host state (a command/
 /// completion failure, a resource diagnostic or a render diagnostic); it is
 /// never a localized UI label. `import_progress` carries the real, live open
-/// progress while one is running (see [`CadImportProgress`]) and `selection`
-/// the real current selection (see [`CadSelection`]).
+/// progress while one is running (see [`CadImportProgress`]), `selection`
+/// the real current selection (see [`CadSelection`]) and `popup` the host's open
+/// modal popup (see [`CadPopup`]).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadStatus {
@@ -358,6 +375,12 @@ pub struct CadStatus {
     /// proof that no reparse happened.
     pub import_count: u64,
     pub frame_count: u64,
+    /// The open modal popup (ADR-0021 D1/D2), or `null` while none is open.
+    ///
+    /// Additive wire field: every other key is unchanged. The host projects its
+    /// own live popup state here (see `cad_ui_core::shell::projected_popup`), so
+    /// the main UI can reflect/test the real state instead of inferring it.
+    pub popup: Option<CadPopup>,
 }
 
 /// A `cad_status` snapshot that advertises no CAD capability (probe mode or a
@@ -387,6 +410,9 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         crosshair: false,
         import_count: 0,
         frame_count: 0,
+        // No host builds a popup for an unsupported/probe snapshot; the host
+        // projection fills the real value when one is open.
+        popup: None,
     }
 }
 
@@ -606,5 +632,8 @@ pub(super) fn assemble_status(
         crosshair,
         import_count,
         frame_count,
+        // The session owns no window: the host projects its live popup state
+        // onto the snapshot it returns (never inferred here).
+        popup: None,
     }
 }

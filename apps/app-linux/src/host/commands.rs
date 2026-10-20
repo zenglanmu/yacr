@@ -4,9 +4,13 @@
 use cad_render_wgpu::PulledState;
 use cad_ui_core::protocol::{InputKind, ProbeInput, ProbeInputAck, ProbeStatus};
 use cad_ui_core::session::CadStatus;
-use cad_ui_core::shell::{admit_command, projected_status, queue_cad_input};
+use cad_ui_core::shell::{
+    admit_command, modal_gate_open, projected_popup, projected_status, queue_cad_input,
+    POPUP_MODAL_OPEN,
+};
 use cad_ui_core::unsupported_status;
 
+use super::popup::{self, PopupAck, TauriPopupOps};
 use super::postload::PostloadPanPhase;
 use super::{lock, ProbeShared};
 
@@ -250,6 +254,39 @@ pub fn cad_set_selected_text(
     Ok(CadCommandAck { accepted: true })
 }
 
+/// `cad_open_popup` command: open the allowlisted modal popup, or focus the one
+/// already open (ADR-0021 D1/D2).
+///
+/// The wire carries a **kind key only** (`{ kind: String }`): a caller can never
+/// choose a window label, URL or script. `"about"` is the only allowlisted kind;
+/// anything else is refused with `popup.unknown_kind: …` before any window or
+/// gate change. While the popup is open the host refuses CAD input
+/// (`popup.modal_open`), independently of the UI's own pointer suspension.
+#[tauri::command]
+pub fn cad_open_popup(
+    app: tauri::AppHandle,
+    shared: tauri::State<'_, ProbeShared>,
+    kind: String,
+) -> Result<PopupAck, String> {
+    let ops = TauriPopupOps::new(app, shared.0.clone());
+    popup::open_popup(&shared.0, &kind, &ops)
+}
+
+/// `cad_close_popup` command: close the open modal popup (ADR-0021 D1/D2).
+///
+/// Closing when nothing is open is an **idempotent success**, not an error. The
+/// modal gate itself is cleared by the popup window's `Destroyed` event, which
+/// also covers Esc in the popup UI and a window-manager close.
+#[tauri::command]
+pub fn cad_close_popup(
+    app: tauri::AppHandle,
+    shared: tauri::State<'_, ProbeShared>,
+) -> Result<CadCommandAck, String> {
+    let ops = TauriPopupOps::new(app, shared.0.clone());
+    popup::close_popup(&shared.0, &ops)?;
+    Ok(CadCommandAck { accepted: true })
+}
+
 /// `cad_status` command: the latest main-thread CAD snapshot, with the host-side/// (transport) error merged in.
 ///
 /// Before a session exists (or in probe mode) the snapshot is explicit (no
@@ -258,18 +295,22 @@ pub fn cad_set_selected_text(
 /// error is preserved when the host error clears.
 #[tauri::command]
 pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> CadStatus {
-    let status = {
+    let (status, popup) = {
         let state = lock(&shared.0);
         let host_error = state
             .shell
             .cad_host_error
             .as_ref()
             .map(|error| error.text.as_str());
-        match state.shell.cad_status.clone() {
+        let status = match state.shell.cad_status.clone() {
             Some(snapshot) => projected_status(snapshot, host_error),
             None => unsupported_status(None),
-        }
+        };
+        // The session never owns a window: project the host's live popup state
+        // (ADR-0021 D1/D2) onto every snapshot, including the unsupported one.
+        (status, state.shell.popup.clone())
     };
+    let status = projected_popup(status, popup.as_ref());
     // Env-gated, evidence-only JSON dump of the exact payload the frontend
     // receives. No behavior change: disabled unless `YACR_PROBE_CAD_LOG` is set.
     // The pulled organisation state is appended as a separate token (the JSON is
@@ -312,6 +353,30 @@ pub fn cad_commands() -> Vec<&'static str> {
 pub fn probe_input(shared: tauri::State<'_, ProbeShared>, input: ProbeInput) -> ProbeInputAck {
     let kind = input.kind;
     let sequence = input.sequence;
+    // Modal popup gate (ADR-0021 D2): while a popup is open, every interaction
+    // input is refused by name before the tracker sees it. `resize` still passes
+    // because it carries no CAD intent and keeps the layout truthful while the
+    // modal is up. This gate is host-owned, so the command line's blur path can
+    // never release it.
+    if !matches!(kind, InputKind::Resize) {
+        let refused = {
+            let state = lock(&shared.0);
+            modal_gate_open(&state.shell).then(|| state.shell.input.marker_offset())
+        };
+        if let Some(marker_offset) = refused {
+            eprintln!(
+                "[probe] input kind={} seq={sequence} accepted=false reason={POPUP_MODAL_OPEN}",
+                kind.as_str()
+            );
+            return ProbeInputAck {
+                accepted: false,
+                sequence,
+                marker_offset,
+                terminal: kind.is_terminal(),
+                reason: Some(POPUP_MODAL_OPEN.to_string()),
+            };
+        }
+    }
     let ack = lock(&shared.0).shell.input.apply(&input);
     // Evidence line: shows the real IPC path (invoke -> command -> tracker).
     // x/y/dx/dy/width are logged so the accepted input can be tied to real OS

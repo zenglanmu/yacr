@@ -67,7 +67,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             crate::host::cad_commands,
             crate::host::cad_set_tool_parameter,
             crate::host::cad_set_tool_text,
-            crate::host::cad_set_selected_text
+            crate::host::cad_set_selected_text,
+            crate::host::cad_open_popup,
+            crate::host::cad_close_popup
         ])
         .setup(move |app| {
             crate::host::init(app, &setup_shared)?;

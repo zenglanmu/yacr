@@ -55,6 +55,48 @@ export function createInputLane(send, onError, capacity = 64) {
 }
 
 /**
+ * Two-reason suspension gate for the CAD pointer lane (N5).
+ *
+ * `textFocus` — the command line owns the keyboard;
+ * `popupOpen`  — the host has a modal dialog open.
+ *
+ * The lane stays suspended while **either** reason holds, and each owner may
+ * clear only its own. Before this gate the command line's unconditional
+ * `onBlur` (any outside press blurs it) resumed the lane underneath an open
+ * popup, so forwarded-but-refused events surfaced as error banners on the main
+ * window while the user was looking at the dialog.
+ *
+ * `apply(suspended)` runs on every real state change, and [`sync`] re-asserts
+ * the current state onto a freshly bound lane (a remount must not resume while
+ * a reason still holds). `set` reports whether the reason actually changed, so
+ * a status poll with the same popup state applies nothing.
+ */
+export function createSuspendGate(apply = () => {}) {
+  const reasons = { textFocus: false, popupOpen: false };
+  const suspended = () => reasons.textFocus || reasons.popupOpen;
+  return {
+    set(reason, value) {
+      if (!Object.prototype.hasOwnProperty.call(reasons, reason)) return false;
+      // Only a real boolean participates: a truthy/falsy non-boolean is a
+      // caller bug, and "not true" must never be read as "release the lane".
+      if (typeof value !== 'boolean') return false;
+      if (reasons[reason] === value) return false;
+      reasons[reason] = value;
+      apply(suspended());
+      return true;
+    },
+    /** Re-assert the current state onto a freshly bound lane. */
+    sync() {
+      const value = suspended();
+      apply(value);
+      return value;
+    },
+    isSuspended: suspended,
+    reasons: () => ({ ...reasons }),
+  };
+}
+
+/**
  * The Shift modifier field of a pointer press/release.
  *
  * Only `shift` travels as a modifier this round (ADR 0014 B.4: the first UI

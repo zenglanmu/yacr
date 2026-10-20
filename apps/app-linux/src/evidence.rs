@@ -35,7 +35,9 @@
 //!   creation phase (arrow + landing picks, then the real `cad_set_tool_text`
 //!   admission; the pixel criterion ADR 0019 decision J owes for P7c);
 //! - [`hover`]: the `YACR_PROBE_HOVER` hover-cost driver;
-//! - [`box_select`]: the `YACR_PROBE_BOX_EVIDENCE` box-selection driver.
+//! - [`box_select`]: the `YACR_PROBE_BOX_EVIDENCE` box-selection driver;
+//! - [`popup`]: the `YACR_PROBE_POPUP_EVIDENCE` modal-popup pipeline driver
+//!   (open → real gate refusal → close → real gate release).
 
 use std::time::{Duration, Instant};
 
@@ -52,6 +54,7 @@ mod hover;
 mod input;
 mod lifecycle;
 mod pan;
+mod popup;
 mod tool;
 
 pub use box_select::{box_evidence_enabled, maybe_spawn_box_evidence};
@@ -61,6 +64,7 @@ pub use hover::{hover_evidence_enabled, maybe_spawn_hover_evidence};
 pub use input::{enabled, maybe_spawn};
 pub use lifecycle::maybe_spawn_lifecycle;
 pub use pan::{postload_pan_enabled, POSTLOAD_PAN_JS, POSTLOAD_PAN_REPORT_JS};
+pub use popup::{maybe_spawn_popup_evidence, popup_evidence_enabled};
 pub use tool::{maybe_spawn_tool_evidence, tool_evidence_enabled};
 
 /// Sleep until `seconds` after `start`, then run `action` and log the result.

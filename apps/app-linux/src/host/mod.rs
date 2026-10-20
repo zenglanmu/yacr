@@ -38,6 +38,7 @@ mod commands;
 mod dom;
 mod init;
 mod options;
+mod popup;
 mod postload;
 mod presenter;
 mod telemetry;
@@ -48,14 +49,19 @@ mod tests;
 
 // Public host API (unchanged external surface; `crate::host::…` still resolves).
 pub use commands::{
-    cad_command, cad_commands, cad_set_selected_text, cad_set_tool_parameter, cad_set_tool_text,
-    cad_status, probe_input, probe_status, CadCommandAck,
+    cad_close_popup, cad_command, cad_commands, cad_open_popup, cad_set_selected_text,
+    cad_set_tool_parameter, cad_set_tool_text, cad_status, probe_input, probe_status,
+    CadCommandAck,
 };
 pub use init::init;
 pub use options::{
     LaunchOptions, ANIMATION_STEP, FRAME_INTERVAL, INITIAL_HEIGHT, INITIAL_WIDTH, WEBVIEW_LABEL,
     WINDOW_LABEL,
 };
+pub use popup::PopupAck;
+// Evidence-only accessors (`YACR_PROBE_POPUP_EVIDENCE`): the host-side
+// open/close functions and the live popup window. Never used by the command path.
+pub(crate) use popup::{close_popup_for_probe, open_popup_for_probe, popup_window_for_probe};
 pub use postload::requested_exit_code;
 pub(crate) use postload::resolve_process_exit;
 
@@ -63,9 +69,11 @@ pub(crate) use postload::resolve_process_exit;
 // re-export them alongside the command functions so `generate_handler!` (which
 // resolves them at `crate::host::…`) keeps working after the split.
 pub(crate) use commands::{
-    __cmd__cad_command, __cmd__cad_commands, __cmd__cad_set_selected_text,
-    __cmd__cad_set_tool_parameter, __cmd__cad_set_tool_text, __cmd__cad_status, __cmd__probe_input,
-    __cmd__probe_status, __tauri_command_name_cad_command, __tauri_command_name_cad_commands,
+    __cmd__cad_close_popup, __cmd__cad_command, __cmd__cad_commands, __cmd__cad_open_popup,
+    __cmd__cad_set_selected_text, __cmd__cad_set_tool_parameter, __cmd__cad_set_tool_text,
+    __cmd__cad_status, __cmd__probe_input, __cmd__probe_status,
+    __tauri_command_name_cad_close_popup, __tauri_command_name_cad_command,
+    __tauri_command_name_cad_commands, __tauri_command_name_cad_open_popup,
     __tauri_command_name_cad_set_selected_text, __tauri_command_name_cad_set_tool_parameter,
     __tauri_command_name_cad_set_tool_text, __tauri_command_name_cad_status,
     __tauri_command_name_probe_input, __tauri_command_name_probe_status,

@@ -1,6 +1,6 @@
 # ADR 0021：弹窗层——居中模态窗口与锚定菜单
 
-- 状态：**Proposed**（机制已按 GTK 3.24 / WebKitGTK / Tauri 2.11.6 源码与文档核验；**右键菜单的原生外观待用户定**）。
+- 状态：**Accepted**（2026-10-20：D1/D2 已实施并经真实显示验证；**D3 右键菜单**用户决定"后面再考虑实现形式"，钩子保留、形式待定）。
 - 日期：2026-10-20。
 - 相关：[ADR-0010](0010-react-linux-host-replaces-slint.md)（DOM chrome + 原生 CAD 分区的组合方式，`:26-27`）、
   [ADR-0011](0011-native-wayland-subsurface.md)（原生 Wayland 子表面）、
@@ -128,3 +128,26 @@ CAD 绘图区是**不可被 DOM 覆盖**的原生表面。那么后续必然出�
 - **右键菜单是否接受原生外观**（D3）。若不接受，唯一"观感一致"的方案是 X11 用 DOM 窗口 + Wayland 用原生菜单
   ⇒ **后端分叉**；本 ADR 建议**接受原生**（一致性 > 像素一致）。
 - **C（文字弹窗编辑）的排期**：紧跟 A/B，还是等 P7b（MultiLeader）之后一次做全。
+
+## 实施状态（2026-10-20，第 1 步：管线骨架 + `about`）
+
+- **窗口**：`apps/app-linux/src/host/popup.rs`；`WindowBuilder` + `add_child(WebviewBuilder)`（与主窗同构，**不用** `WebviewWindowBuilder`），
+  `popup-1` / `popup-1-webview`、520×360、无边框、不可缩放、`parent(main)` + GTK `set_modal(true)` + `CenterOnParent`（Wayland 忽略）。
+- **透明**：`Screen::is_composited()` **实测**决定，日志写 `composited=true transparent=true`；不按后端名推断。
+- **载荷**：`initialization_script` 注入 JSON 字面量 `window.__YACR_POPUP__ = {kind,modal,label,payload:{version,build}}` ⇒ 无竞态；
+  UI 侧缺省/畸形/未知 kind **一律回落普通外壳**。
+- **IPC**：`cad_open_popup{kind}`（**允许清单**，未知 ⇒ `popup.unknown_kind`）、`cad_close_popup`（**幂等**）。
+- **capability：不需要**。仓库无 app ACL manifest ⇒ 本地 origin 的应用命令对所有窗口可用（核实过，不是猜）。
+- **gate（D2 落地）**：`ShellState.popup`（UI 工具包无关）为权威；**只在窗口 `Destroyed` 清除** ⇒ IPC/Esc/窗管关闭**同一条路径**；
+  开窗前对账陈旧记录，**漏事件不会把 CAD 输入卡死**；`probe_input`（除 `resize`）与 `cad_command` 拒绝 `popup.modal_open`。
+- **UI 侧独立开关（N5 落地）**：挂起有两个独立理由 `textFocus` / `popupOpen`，命令行 `onBlur` **只能清自己的**；
+  有回归测试证明"弹窗开着 + 命令行失焦 ⇒ 仍然挂起"。
+- **状态**：`cad_status.popup`（`null` | `{kind,label,modal}`），始终存在。
+- **证据（真实显示，有界）**：`popup_pass=1`；`status_before=-`、`status_open=about:popup-1:true`、`status_after=-`；
+  `input_refused=popup.modal_open`、`command_refused=popup.modal_open`；关后 `input_admitted=1`、`command_admitted=1`。
+  弹窗自身窗口被 `x11-window-grab <xid>` 抓到（520×360），像素判读**接受**：无模板占位符泄漏、无缺字、tokens 正确、圆角/边框正确；
+  **四处布局缺陷（中部 195px 空洞、内边距不一致、关闭图标不对称、标头字重偏弱）已修并复判为 fixed**。
+- **已知小瑕疵（未修，不阻塞）**：版本行 `版本 0.1.2（release）` 中全角括号左侧字面留白偏大，**读起来像多了一个空格**；
+  未知 kind 的文案复用 `status.toggle_unsupported`（**当前不可达**，宿主允许清单挡在前面）。
+- **未做**：D3 右键菜单（用户暂缓）；D4 的"文字弹窗编辑"（后端 `SetSelectedText` 已就绪，只差把对话框接上）；
+  D5 冻结帧（明确不采用）。

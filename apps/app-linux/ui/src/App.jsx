@@ -5,10 +5,9 @@
 // Visual work lives in the region components.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import zh from '@i18n/zh-CN.json';
-import en from '@i18n/en.json';
-import { createTranslator, DEFAULT_LOCALE, LOCALES, localeTag } from './i18n.mjs';
-import { bindProbeInput, createInputLane } from './input.mjs';
+import { CATALOGS } from './catalogs.mjs';
+import { createTranslator, initialLocale, LOCALES, localeTag, storeLocale } from './i18n.mjs';
+import { bindProbeInput, createInputLane, createSuspendGate } from './input.mjs';
 import { pointerPosition } from './metrics.mjs';
 import { queueCadCommand, reconcileToolParameterPending, requestImportCancel, setToolParameterFlag, setToolParameterNumber, startCadPolling, stepToolParameterPending } from './cad.mjs';
 import { setToolText } from './text.mjs';
@@ -24,15 +23,28 @@ import { Workspace } from './components/Workspace.jsx';
 import { LayoutTabs } from './components/LayoutTabs.jsx';
 import { CommandLine } from './components/CommandLine.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
+import { PopupRoot } from './components/PopupRoot.jsx';
+import { openPopup, popupBoot } from './popup.mjs';
 
-const CATALOGS = { 'zh-CN': zh, en };
-
-function initialLocale() {
-  const stored = typeof document !== 'undefined' ? document.documentElement.lang : '';
-  return LOCALES.includes(stored) ? stored : DEFAULT_LOCALE;
+/**
+ * Boot switch between the two documents this bundle can be.
+ *
+ * The host opens dialogs as separate native windows loading the same bundle and
+ * injects `window.__YACR_POPUP__` before page load (ADR 0021 D1). The main
+ * window never sets it, so `popupBoot` returning `null` is the normal shell.
+ *
+ * The literal is fixed for the document's lifetime, so it is read once. The
+ * branch matters: `Shell` owns every shell effect (status polling, shortcuts,
+ * the webview-default guards, the input lane). Returning `PopupRoot` instead of
+ * mounting `Shell` is what guarantees none of them start in a dialog window.
+ */
+export function App() {
+  const boot = useMemo(() => popupBoot(typeof window === 'undefined' ? null : window), []);
+  return boot ? <PopupRoot boot={boot} /> : <Shell />;
 }
 
-export function App() {
+/** The main window: the full chrome plus the one CAD session it drives. */
+function Shell() {
   const [locale, setLocale] = useState(initialLocale);
   const [status, setStatus] = useState(null);
   const [pollError, setPollError] = useState('');
@@ -59,6 +71,11 @@ export function App() {
   // `cad_commands` answers; the state exists so the chrome re-renders once it does.
   const [catalogNames, setCatalogNames] = useState(commandCatalog);
 
+  // The host's live dialog (`cad_status.popup`, ADR 0021 D1/D2): non-null while
+  // one exists. The host applies the modal input gate; the chrome mirrors it as
+  // one of the pointer lane's suspension reasons plus the pressed About button.
+  const popupOpen = status?.popup != null;
+
   const submitting = useRef(false);
   // The text-step submit has its own in-flight guard: it must not block a
   // command (or be blocked by one), and a second Enter while the first is still
@@ -69,6 +86,15 @@ export function App() {
   const submittingSelectedText = useRef(false);
   const laneRef = useRef(null);
   const bindingRef = useRef(null);
+  // The CAD pointer lane has two *independent* suspension reasons (N5): the
+  // command line owns the keyboard, or a host dialog is open. The lane is
+  // suspended while either holds, and each owner may only clear its own reason
+  // — the command line's unconditional `onBlur` (any outside press triggers it)
+  // must never resume the lane underneath a modal popup.
+  const suspendGate = useRef(null);
+  if (!suspendGate.current) {
+    suspendGate.current = createSuspendGate(value => bindingRef.current?.suspend(value));
+  }
   // Latest host status for the CAD shortcut-menu hook, so the webview-default
   // guards are installed once and never re-bound by a status poll.
   const statusRef = useRef(null);
@@ -86,6 +112,9 @@ export function App() {
   useEffect(() => {
     document.documentElement.lang = localeTag(locale);
     document.title = t('app.title');
+    // Behaviour change: the chosen language is persisted (same origin as a
+    // popup window) and now survives a restart. A blocked storage is a no-op.
+    storeLocale(locale);
   }, [locale, t]);
 
   // One ordered IPC lane for the whole session: sequence stays monotonic even
@@ -103,6 +132,9 @@ export function App() {
     if (!surfaceNode || !laneRef.current) return undefined;
     const binding = bindProbeInput(surfaceNode, laneRef.current);
     bindingRef.current = binding;
+    // A fresh binding starts accepting: re-assert the reasons that still hold
+    // (a remount must not silently resume while text focus or a popup does).
+    suspendGate.current.sync();
     return () => { binding.dispose(); if (bindingRef.current === binding) bindingRef.current = null; };
   }, [surfaceNode]);
 
@@ -164,6 +196,13 @@ export function App() {
   useEffect(() => {
     setToolParameterPending(prev => reconcileToolParameterPending(prev, status));
   }, [status]);
+
+  // Mirror an open host dialog as the lane's second suspension reason (N5). The
+  // gate dedupes, so an unchanged poll re-applies nothing; closing the dialog
+  // clears only this reason (text focus, if held, keeps the lane suspended).
+  useEffect(() => {
+    suspendGate.current.set('popupOpen', popupOpen);
+  }, [popupOpen]);
 
   const documentLabel = status?.documentLabel ?? null;
   const documentOpen = documentLabel !== null;
@@ -311,6 +350,11 @@ export function App() {
     cadReady,
     documentLabel,
     documentOpen,
+    // True while the host reports a live dialog (`cad_status.popup`). The main
+    // window keeps working — the host refuses CAD input itself — but the About
+    // affordance reads as pressed, and clicking it again asks the host to focus
+    // the open window rather than create a duplicate.
+    popupOpen,
     fpsText: fps === null || displayError ? t('render.fps.unavailable') : fps < 10 ? fps.toFixed(1) : String(Math.round(fps)),
     displayedError: displayError,
     errorText: displayError,
@@ -380,9 +424,20 @@ export function App() {
       else if (action === 'cleanScreen') setCleanScreen(value => !value);
       else if (action === 'commandLine') setCommandLineOpen(value => !value);
       else if (action === 'language') setLocale(value => (value === 'zh-CN' ? 'en' : 'zh-CN'));
+      // Dialogs are host windows (ADR 0021 D1), never DOM overlays: the host
+      // places them beside the native CAD surface. `existing: true` means the
+      // dialog is already open and the host focuses that window, so there is
+      // nothing to do here — it is not a failure and never a second window.
+      else if (action === 'about') {
+        void openPopup(invoke, 'about').then(result => {
+          if (result.kind !== 'accepted') setError(result.error);
+        });
+      }
     },
     // Suspend the CAD pointer lane while chrome (command line) owns the keyboard.
-    suspendPointer: value => bindingRef.current?.suspend(value),
+    // This is the **textFocus** reason only: a blur clears it and leaves a
+    // popup's suspension intact (N5).
+    suspendPointer: value => suspendGate.current.set('textFocus', value),
   };
   const i18n = useMemo(() => ({ t, locale, setLocale, locales: LOCALES }), [t, locale]);
 

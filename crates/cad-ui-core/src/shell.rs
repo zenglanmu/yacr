@@ -16,13 +16,19 @@ use std::time::Instant;
 
 use crate::protocol::{InputTracker, ProbeInput, ProbeStatus};
 use crate::session::{
-    canonical_command_name, unsupported_command_reason, unsupported_status, CadStatus,
+    canonical_command_name, unsupported_command_reason, unsupported_status, CadPopup, CadStatus,
 };
 
 /// Bounded main-thread CAD command queue capacity (admission only, not completion).
 pub const CAD_COMMAND_CAP: usize = 256;
 /// Bounded ordered main-thread CAD input queue capacity.
 pub const CAD_INPUT_CAP: usize = 512;
+
+/// Stable refusal reason while a modal popup holds the host input gate
+/// (ADR-0021 D2). The gate is host-owned: it is **not** the UI's
+/// `suspendPointer`, so an external click that releases that suspension can
+/// never un-gate CAD input.
+pub const POPUP_MODAL_OPEN: &str = "popup.modal_open";
 
 /// The kind of a host-side (transport) CAD error.
 ///
@@ -86,6 +92,15 @@ pub struct ShellState {
     /// **once** per generation: until the generation changes (a new device) no
     /// further attempt is made, so there is no per-tick initialization loop.
     pub cad_bind_failed_generation: Option<u64>,
+    /// The open modal popup, or `None` while none is open (ADR-0021 D1/D2).
+    ///
+    /// This is the host's **input gate** as well as the value projected onto
+    /// `cad_status.popup`: while it is `Some`, [`admit_command`] and
+    /// [`queue_cad_input`] refuse with [`POPUP_MODAL_OPEN`]. The host sets it
+    /// only after a popup window was built and clears it from that window's
+    /// `Destroyed` event, so it is independent of any UI-side pointer
+    /// suspension.
+    pub popup: Option<CadPopup>,
 }
 
 impl ShellState {
@@ -116,6 +131,7 @@ impl ShellState {
             },
             cad_host_error: None,
             cad_bind_failed_generation: None,
+            popup: None,
         }
     }
 }
@@ -151,6 +167,25 @@ pub fn projected_status(mut snapshot: CadStatus, host_error: Option<&str>) -> Ca
     snapshot
 }
 
+/// Project the host's live modal-popup state onto a status snapshot.
+///
+/// The session never owns a window, so `popup` is `None` in every snapshot it
+/// assembles; the host applies its real value here when it answers
+/// `cad_status` (ADR-0021 D1/D2). Passing `None` clears the block, so a closed
+/// popup is never reported as still open.
+pub fn projected_popup(mut snapshot: CadStatus, popup: Option<&CadPopup>) -> CadStatus {
+    snapshot.popup = popup.cloned();
+    snapshot
+}
+
+/// Whether the host's modal input gate is set (ADR-0021 D2).
+///
+/// Independent from any UI-side pointer suspension: it is cleared only by the
+/// popup window lifecycle, never by a DOM `blur`.
+pub fn modal_gate_open(state: &ShellState) -> bool {
+    state.popup.is_some()
+}
+
 /// Whether a bind may be attempted: never once ready, and never again for the
 /// generation that already failed (fail-stop until the generation changes).
 pub fn bind_allowed(ready: bool, failed_generation: Option<u64>, owner_generation: u64) -> bool {
@@ -164,6 +199,12 @@ pub fn bind_allowed(ready: bool, failed_generation: Option<u64>, owner_generatio
 /// explicitly. The canonical selector is stored, so the queue never carries an
 /// alias.
 pub fn admit_command(state: &mut ShellState, command: &str) -> Result<(), String> {
+    // The modal gate comes first: while a popup owns input, *every* CAD command
+    // is refused by name (even one the router would otherwise reject), and the
+    // refusal never depends on the UI having stopped forwarding.
+    if modal_gate_open(state) {
+        return Err(POPUP_MODAL_OPEN.into());
+    }
     let Some(normalized) = canonical_command_name(command) else {
         return Err(unsupported_command_reason(command));
     };
@@ -179,6 +220,12 @@ pub fn admit_command(state: &mut ShellState, command: &str) -> Result<(), String
 
 /// Queue one ordered CAD input, or refuse explicitly (not ready / full).
 pub fn queue_cad_input(state: &mut ShellState, input: &ProbeInput) -> Result<(), String> {
+    // Host-side second refusal while a modal popup owns input (ADR-0021 D2):
+    // this does not rely on the UI's own suspend switch, which a blur can
+    // release at any time.
+    if modal_gate_open(state) {
+        return Err(POPUP_MODAL_OPEN.into());
+    }
     if !state.cad_mode {
         // Probe marker path keeps the tracker semantics.
         return Ok(());
@@ -240,6 +287,7 @@ mod tests {
             crosshair: false,
             import_count: 0,
             frame_count: 0,
+            popup: None,
         }
     }
 
@@ -287,6 +335,64 @@ mod tests {
             admit_command(&mut state, "FIT").is_err(),
             "the command queue is bounded at {CAD_COMMAND_CAP}"
         );
+    }
+
+    fn about_popup() -> CadPopup {
+        CadPopup {
+            kind: "about".into(),
+            label: "popup-1".into(),
+            modal: true,
+        }
+    }
+
+    #[test]
+    fn modal_popup_refuses_commands_and_input_until_cleared() {
+        let mut state = ShellState::new(true);
+        state.cad_ready = true;
+        // No popup: the normal admission path applies.
+        assert!(admit_command(&mut state, "OPEN").is_ok());
+        assert!(queue_cad_input(&mut state, &input(InputKind::PointerDown)).is_ok());
+        assert!(!modal_gate_open(&state));
+
+        state.popup = Some(about_popup());
+        assert!(modal_gate_open(&state));
+        // Every command/input is refused by the named modal reason — including
+        // an unknown command, which never reaches the router behind the gate.
+        assert_eq!(
+            admit_command(&mut state, "BOGUS").unwrap_err(),
+            POPUP_MODAL_OPEN
+        );
+        assert_eq!(
+            admit_command(&mut state, "OPEN").unwrap_err(),
+            POPUP_MODAL_OPEN
+        );
+        assert_eq!(
+            queue_cad_input(&mut state, &input(InputKind::PointerDown)).unwrap_err(),
+            POPUP_MODAL_OPEN
+        );
+        assert_eq!(state.cad_commands, vec!["OPEN".to_string()]);
+        assert_eq!(state.cad_inputs.len(), 1);
+
+        // Clearing the host gate (the popup window's Destroyed event) admits
+        // both paths again without any UI-side action.
+        state.popup = None;
+        assert!(!modal_gate_open(&state));
+        assert!(admit_command(&mut state, "FIT").is_ok());
+        assert!(queue_cad_input(&mut state, &input(InputKind::PointerDown)).is_ok());
+    }
+
+    #[test]
+    fn projected_popup_reports_the_real_state_and_clears_it() {
+        let status = projected_popup(unsupported_status(None), None);
+        assert_eq!(status.popup, None);
+
+        let popup = about_popup();
+        let status = projected_popup(unsupported_status(None), Some(&popup));
+        assert_eq!(status.popup, Some(popup.clone()));
+
+        // After a close the block is `null` again, never a stale popup.
+        let status = projected_popup(status, None);
+        assert_eq!(status.popup, None);
     }
 
     #[test]

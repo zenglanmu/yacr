@@ -30,10 +30,14 @@ function ItemButton({ item }) {
   const { t } = useI18n();
   const shell = useShell();
   const enabled = item.action ? true : item.command ? shell.canCommand(item.command) : false;
+  // The About dialog is a host window, so `cad_status.popup` is the only honest
+  // "open" signal. The button reads pressed while it is open and stays
+  // clickable: the host answers `existing: true` and focuses the live window.
+  const active = item.action === 'about' ? Boolean(shell.popupOpen) : false;
   if (!enabled) {
     return <RibbonButton icon={item.icon} label={t(item.labelKey)} disabled hint={unavailable(t, item)} />;
   }
-  return <RibbonButton icon={item.icon} label={t(item.labelKey)} onClick={() => runItem(shell, item)} />;
+  return <RibbonButton icon={item.icon} label={t(item.labelKey)} active={active} onClick={() => runItem(shell, item)} />;
 }
 
 function PanelItem({ item, openMenu, setOpenMenu }) {

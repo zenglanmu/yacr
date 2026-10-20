@@ -194,5 +194,9 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
     crate::evidence::maybe_spawn_box_evidence(child.as_ref());
     crate::evidence::maybe_spawn_hover_evidence(child.as_ref());
     crate::evidence::maybe_spawn_lifecycle(&evidence_window, app.handle());
+    // Env-gated, evidence-only modal-popup pipeline driver: opens, proves the host
+    // gate refuses input/commands, closes and proves the gate releases. No effect
+    // on a normal run (`YACR_PROBE_POPUP_EVIDENCE` is unset).
+    crate::evidence::maybe_spawn_popup_evidence(app.handle());
     Ok(())
 }

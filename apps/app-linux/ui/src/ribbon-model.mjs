@@ -3,6 +3,7 @@
 // `cad_command`) or an `action` token (a DOM-only shell action); items with
 // neither are labelled but disabled, which is the honest state for a command
 // the host does not wire yet.
+import { POPUP_KEYS } from './popup.mjs';
 
 /** Shell actions that never touch the CAD protocol. */
 export const SHELL_ACTIONS = Object.freeze({
@@ -10,6 +11,7 @@ export const SHELL_ACTIONS = Object.freeze({
   cleanScreen: 'cleanScreen',
   commandLine: 'commandLine',
   language: 'language',
+  about: 'about',
 });
 
 export const RIBBON_TABS = Object.freeze([
@@ -34,6 +36,11 @@ export const RIBBON_TABS = Object.freeze([
           { id: 'diagnostics', labelKey: 'diagnostics.title', icon: 'diagnostics', action: 'diagnostics' },
           { id: 'clean', labelKey: 'status.clean_screen', icon: 'cleanScreen', action: 'cleanScreen' },
           { id: 'cmdline', labelKey: 'status.command_line', icon: 'terminal', action: 'commandLine' },
+          // About opens a host-owned dialog window (ADR 0021 D1), so it is an
+          // `action` token, not a router command: nothing about it goes through
+          // `cad_command`. It closes the File tab's utility cluster, where the
+          // other chrome-level affordances live.
+          { id: 'about', labelKey: POPUP_KEYS.ribbonEntry, icon: 'app', action: 'about' },
         ],
       },
     ],

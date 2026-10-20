@@ -137,7 +137,13 @@ GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open /abs/drawing.dwg
 与每帧"绘图区必须匹配 DOM 矩形"的守卫冲突）。**CAD 区右键目前无动作**，只经单一调用点发出
 `cadContextMenuRequest({point, selection, tool})` 作为**未来随手菜单的钩子**（今天不产生任何可见行为）。
 **注意**：这不是"测试用了合成输入"的取巧——**CAD 表面从不接收真实 OS 输入**；指针捕获、手写笔、双击时序
-全都经过 DOM。要改变这一点属于架构级变更（需单独 ADR）。CAD 分区的原生表面**按后端不同**：
+全都经过 DOM。要改变这一点属于架构级变更（需单独 ADR）。
+
+**弹窗层（ADR-0021，2026-10-20 落地第 1 步）**：模态/对话框一律是**独立原生窗口 + 自己的 child webview**
+（`host/popup.rs`：`WindowBuilder` + `add_child(WebviewBuilder)`，与主窗同构），**不是** DOM 浮层也不是 `GtkPopover`；
+载荷经 `initialization_script` 注入 `window.__YACR_POPUP__` 字面量。模态期间 `ShellState.popup` 是**权威 gate**
+（`probe_input` 除 `resize` 外与 `cad_command` 均拒绝 `popup.modal_open`），且**只在窗口 `Destroyed` 清除**；
+UI 侧另有两个**独立**挂起理由（`textFocus` / `popupOpen`），命令行失焦**不能**解除弹窗的挂起。CAD 分区的原生表面**按后端不同**：
 
 - **X11/XWayland**：`GtkDrawingArea` 获得自己的**原生 X child 窗口**，渲染器用其 Xlib XID/display。
 - **原生 Wayland**：`GtkDrawingArea` 保持**非 native**（**不** `gdk_window_ensure_native`），宿主自建
