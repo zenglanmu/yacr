@@ -68,6 +68,8 @@ impl Renderer {
         // re-uploads its images after a reset (the texture cache is left to be
         // pruned on the next `upload_images`).
         self.images.clear();
+        self.masks.clear();
+        self.mask_skips.clear();
         self.rebuild_lineweight_cache();
         // An explicit full teardown is a document switch/close, not a transient
         // empty resident set: the retained entity-flag request belongs to the

@@ -331,6 +331,14 @@ impl CadRenderRuntime {
                 image_diagnostic = Some(format!("{}: {keys}", reason.code));
             }
         }
+        // Wipeout masks are a separate resident set, exactly like images
+        // (ADR 0022): a base change re-uploads the whole mask set from the same
+        // scene. The renderer's final mask pass paints them last. A boundary it
+        // could not fill is observable through `Renderer::mask_skips()`, never
+        // silently dropped.
+        if pending.base_changed {
+            renderer.upload_masks(&ready.base.masks)?;
+        }
         // Push the entity-level flags for the freshly committed scene, **after**
         // any base/image re-upload. A base change (re)allocates pick keys —
         // including the image keys, which `upload_images` assigns fresh per call —

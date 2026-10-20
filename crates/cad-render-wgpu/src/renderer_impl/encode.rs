@@ -32,6 +32,7 @@ impl Renderer {
         stream_slots: &[u32],
         chunk_slots: &[u32],
         arc_slots: &[u32],
+        mask_slots: &[u32],
         line_pipeline: &wgpu::RenderPipeline,
         line_instanced_pipeline: &wgpu::RenderPipeline,
         arc_pipeline: &wgpu::RenderPipeline,
@@ -663,6 +664,30 @@ impl Renderer {
                     offset,
                     image_pipeline,
                 );
+            }
+            // Pass 4 — wipeout masks, the frame's final pass (ADR 0022 C1).
+            //
+            // This is why a mask needs its own pass rather than a background
+            // coloured mesh: in the shared pass a filled quad drawn later at the
+            // same world z is rejected by the depth test (meshes `Less` + write,
+            // lines `LessEqual` + write). `depth_compare: Always` with no depth
+            // write (pipeline state, see `initialize_with_device`) makes every
+            // mask fragment land on top of everything already painted, and the
+            // fragment colour is the renderer's clear colour.
+            //
+            // Masks paint after images and after both geometry passes; masks do
+            // not interleave with higher/lower `draw_order` geometry (ADR 0022
+            // D2 subset). Under progressive accumulation they paint on every
+            // page, so the last page still ends with every mask on top.
+            if !self.masks.is_empty() {
+                if let Some(mask_pipeline) = self.mask_pipeline.as_ref() {
+                    for (index, mask) in self.masks.iter().enumerate() {
+                        let (bind_group, offset) =
+                            self.uniforms.binding(mask_slots[index] as usize);
+                        encode_state.set_pipeline(&mut pass, mask_pipeline);
+                        masks::draw_mask(&mut pass, &mut encode_state, mask, bind_group, offset);
+                    }
+                }
             }
         }
         let encode_ms = encode_started.elapsed().as_secs_f64() * 1000.0;

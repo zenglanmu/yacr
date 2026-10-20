@@ -441,10 +441,14 @@ pub enum SemanticGeometry {
     /// An erasing mask (DXF `WIPEOUT`).
     ///
     /// `boundary` is a closed world-space polygon; `inverted` corresponds to
-    /// clip_mode Inside (mask the outside). The renderer floods it with the
-    /// viewport background colour, so it carries no colour of its own and the
-    /// representation layer maps it to a mask primitive rather than a coloured
-    /// mesh.
+    /// clip_mode Inside (mask the outside). The renderer floods the polygon with
+    /// the viewport background colour in a final pass, so it carries no colour of
+    /// its own and the representation layer maps it to a colourless mask
+    /// primitive rather than a coloured mesh.
+    ///
+    /// Implemented for the **non-inverted** case only (`docs/adr/0022`): an
+    /// `inverted` mask is still drawn as its boundary alone, and
+    /// `cad-representation` reports `MASK_INVERTED_NOT_RENDERED` for it.
     Mask {
         boundary: Vec<Point3>,
         inverted: bool,

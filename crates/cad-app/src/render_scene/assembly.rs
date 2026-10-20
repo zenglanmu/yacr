@@ -140,6 +140,7 @@ pub fn build_scene_stats(
         added: Vec::new(),
         removed_chunks: Vec::new(),
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let mut stats = SceneAssemblyStats::default();
     match space {
@@ -148,9 +149,10 @@ pub fn build_scene_stats(
                 let representation = registry.build_expanded(database, entity, &context)?;
                 stats.fragments_in += representation.fragments.len();
                 let delta = cache.build_compact(&representation, stamp.clone())?;
-                stats.batches_out += delta.added.len() + delta.images.len();
+                stats.batches_out += delta.added.len() + delta.images.len() + delta.masks.len();
                 combined.added.extend(delta.added);
                 combined.images.extend(delta.images);
+                combined.masks.extend(delta.masks);
             }
         }
         SpaceSelection::Paper(layout) => {
@@ -159,9 +161,10 @@ pub fn build_scene_stats(
                 build_paper_space(&registry, database, layout, &context, &visible)?;
             stats.fragments_in += representation.fragments.len();
             let delta = cache.build_compact(&representation, stamp.clone())?;
-            stats.batches_out += delta.added.len() + delta.images.len();
+            stats.batches_out += delta.added.len() + delta.images.len() + delta.masks.len();
             combined.added.extend(delta.added);
             combined.images.extend(delta.images);
+            combined.masks.extend(delta.masks);
         }
     }
     tally_adjacent_merge_candidates(&combined.added, &mut stats);

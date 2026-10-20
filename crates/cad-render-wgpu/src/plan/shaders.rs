@@ -37,6 +37,11 @@ pub(crate) const IMAGE_SHADER: &str = include_str!("../../shaders/image.wgsl");
 // the signed distance (see `docs/adr/0008-sdf-conic-rendering.md`).
 pub(crate) const ARC_SHADER: &str = include_str!("../../shaders/arc.wgsl");
 
+// Wipeout mask shader (ADR 0022 C1). The final pass: `depth_compare: Always`,
+// no depth write, fragment output = the renderer's clear colour. Geometry is the
+// concave-safe even-odd fill of the mask boundary.
+pub(crate) const MASK_SHADER: &str = include_str!("../../shaders/mask.wgsl");
+
 // ---------------------------------------------------------------------------
 // Instanced line stream ("entity = data", first slice)
 // ---------------------------------------------------------------------------

@@ -18,6 +18,9 @@ pub(crate) struct FragmentHistogram {
     pub(crate) texts: usize,
     pub(crate) instances: usize,
     pub(crate) images: usize,
+    /// WIPEOUT mask fragments (ADR 0022): carried as mask draw items, not
+    /// geometry batches, so they are counted only here.
+    pub(crate) masks: usize,
 }
 
 impl FragmentHistogram {
@@ -48,12 +51,22 @@ impl FragmentHistogram {
                 DisplayPrimitive::Text { .. } => self.texts += 1,
                 DisplayPrimitive::Instance { .. } => self.instances += 1,
                 DisplayPrimitive::Image { .. } => self.images += 1,
+                DisplayPrimitive::Mask(boundary) => {
+                    self.masks += 1;
+                    self.line_vertices += boundary.len();
+                }
             }
         }
     }
 
     pub(crate) fn total(&self) -> usize {
-        self.lines + self.meshes + self.glyph_meshes + self.texts + self.instances + self.images
+        self.lines
+            + self.meshes
+            + self.glyph_meshes
+            + self.texts
+            + self.instances
+            + self.images
+            + self.masks
     }
 }
 

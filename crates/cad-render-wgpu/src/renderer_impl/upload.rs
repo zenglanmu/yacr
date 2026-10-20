@@ -7,7 +7,11 @@ impl Renderer {
     // batches keep the position-only layout.
     pub fn upload(&mut self, delta: &SceneDelta) -> CadResult<()> {
         let prepared = self.prepare_upload(delta)?;
-        self.commit_upload(prepared, self.batches.len())
+        self.commit_upload(prepared, self.batches.len())?;
+        // Wipeout masks are a separate resident set, exactly like images: a full
+        // scene upload replaces them wholesale (ADR 0022). Hosts that stage and
+        // commit geometry themselves call `upload_masks` on their base change.
+        self.upload_masks(&delta.masks)
     }
 
     /// Build resources without changing the active scene. Synchronous input and

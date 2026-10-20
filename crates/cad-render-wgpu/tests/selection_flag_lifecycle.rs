@@ -83,6 +83,7 @@ fn scene(batches: Vec<RenderBatch>) -> SceneDelta {
         added: batches,
         removed_chunks: Vec::new(),
         images: Vec::new(),
+        masks: Vec::new(),
     }
 }
 

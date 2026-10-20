@@ -43,6 +43,7 @@ fn scene(batches: usize) -> SceneDelta {
         added,
         removed_chunks: Vec::new(),
         images: Vec::new(),
+        masks: Vec::new(),
     }
 }
 

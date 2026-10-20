@@ -1,3 +1,21 @@
+## 显示保真切片 C1：WIPEOUT 真遮罩（ADR-0022，2026-10-21）
+
+**范围**：`cad-representation`（新图元/提供者/矢量出图跳过）、`cad-scene`（mask 批次）、
+`cad-render-wgpu`（新 pass + 着色器 + 填充）、`cad-engine`/`cad-app`/`cad-cli-tools`（接线）。
+
+- **为什么需要新 pass**：单 pass 深度测试下"后画一个背景色填充"会被**深度拒绝**（mesh `Less` 写深度、线 `LessEqual` 写深度）。
+  故遮罩走**独立末 pass**：`depth_compare: Always`、不写深度、用 **clear 颜色**，必然盖住此前像素。
+- **无颜色图元**：`DisplayPrimitive::Mask(Arc<[Point3]>)` 只带世界边界，**背景色留在渲染器**（表示层保持 GPU 无关）。
+- **凹形正确**：复用 HATCH 的 **even-odd `fill_rings`**，不用三角扇（L 形缺口不泄漏）。
+- **真实设备像素证据**（Vulkan Quadro P620，discrete，**非软件后端**）：矩形遮罩内像素 = **clear 颜色**、外不变；
+  **L 形缺口内线存活**；`mask_draws == 1`。
+  **反例对照**：临时禁用该 pass ⇒ **两条测试都失败**；恢复后通过。
+- **`inverted` 未做（C2）**：保持边界折线 + `Partial(MASK_INVERTED_NOT_RENDERED)` + `representation.mask_inverted`，
+  **明确未渲染**，不假装。
+- **其它已声明**：矢量出图**跳过并具名** `vector.mask_unsupported`；不与更高 `draw_order` 交错（遮罩恒最后）；
+  纸张空间视口裁剪保留并报 `UNSUPPORTED_PRIMITIVE`（不伪造裁剪）；遮罩**不可拾取**（未变）；无模板、无 scissor、无异步改造。
+- **门禁**：crate 子集通过 / 0 失败（含 `--test-threads=1` 的 GPU 套件）、clippy、fmt、architecture(27)、i18n 578、file-size 771。
+
 ## 显示保真切片 B：ACIS 假声明改为真话（2026-10-21）
 
 **结论：不接线，只修文档。** 闸门（"有界才实现，否则说实话"）判定**不可有界**，依据三条：

@@ -551,7 +551,8 @@ impl Renderer {
             + draw_images.len()
             + stream_slot_count
             + chunk_slot_count
-            + arc_slot_count;
+            + arc_slot_count
+            + self.masks.len();
         self.uniforms.ensure_slots(max_slots, device, layout);
 
         // Write only this page's uniforms. Rewriting every batch for every
@@ -683,6 +684,29 @@ impl Renderer {
             self.uniforms.write_slot(next_slot, &uniform);
             next_slot += 1;
         }
+        // Wipeout mask uniforms: one slot per resident mask, carrying the mask's
+        // `f64` origin through the same camera-relative subtraction as a batch.
+        // The tint IS the renderer's clear colour: the mask pass paints the
+        // background, so the representation layer never names a colour (ADR 0022
+        // D1). `key_flags` is zero: a mask carries no pick key.
+        let mut mask_slots: Vec<u32> = Vec::with_capacity(self.masks.len());
+        let clear_color = crate::CAD_CLEAR_COLOR;
+        for mask in &self.masks {
+            mask_slots.push(next_slot as u32);
+            let matrix = projection.batch_matrix_f64(mask.origin);
+            let uniform = uniform_bytes(
+                &matrix,
+                [
+                    clear_color.r as f32,
+                    clear_color.g as f32,
+                    clear_color.b as f32,
+                    clear_color.a as f32,
+                ],
+                [0, 0, 0, 0],
+            );
+            self.uniforms.write_slot(next_slot, &uniform);
+            next_slot += 1;
+        }
         // One `Queue::write_buffer` per page (vs. one per batch), reported as
         // `FrameStats::uniform_writes`. Only the compacted slot count is flushed.
         let total_slots = next_slot;
@@ -748,6 +772,7 @@ impl Renderer {
             &stream_slots,
             &chunk_slots,
             &arc_slots,
+            &mask_slots,
             line_pipeline,
             line_instanced_pipeline,
             arc_pipeline,
@@ -769,12 +794,16 @@ impl Renderer {
         // instanced draws and/or merged mesh draws instead (a batch over a cap
         // contributes one draw per run). Everything else stays one draw per batch.
         let legacy_opaque = opaque_batches.saturating_sub(converted_batches);
+        // Every resident mask is one draw in the frame's final pass, whatever the
+        // page, so the count is included in `draw_calls`.
+        let mask_draws = self.masks.len() as u64;
         let draw_calls = (legacy_opaque
             + instanced_draws as usize
             + mesh_draws as usize
             + arc_draws as usize
             + transparent_batches
-            + draw_images.len()) as u64;
+            + draw_images.len()
+            + mask_draws as usize) as u64;
 
         let submit_started = Instant::now();
         // Measurement-only: close the bracket, resolve the two queries and copy
@@ -874,6 +903,7 @@ impl Renderer {
             transparent_batches,
             invisible_batches,
             image_batches: draw_images.len(),
+            mask_draws,
             cull_chunks_total: cull.total() as u64,
             cull_chunks_kept: cull.kept(),
             lineweight_not_drawn: lineweight_not_drawn.clone(),

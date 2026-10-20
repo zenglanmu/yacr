@@ -356,6 +356,35 @@ pub fn sanitize_lineweight(mm: f32) -> f32 {
     }
 }
 
+/// A WIPEOUT mask carried separately from geometry batches.
+///
+/// A mask is not triangle/line geometry the frame plan orders: it must paint
+/// **last**, with `depth_compare: Always` and no depth write, in the renderer's
+/// clear colour (ADR 0022 D1). The scene therefore carries the world-space
+/// boundary polygon and lets the renderer tessellate it (even-odd, concave-safe)
+/// and issue its own final pass.
+///
+/// The polygon is preserved exactly as the representation produced it (no
+/// fan-triangulation here, which would leak a concave boundary), and the
+/// draw-order interleaving promised by ADR 0022 D2 is **not** implemented: masks
+/// always paint after every other class, and `draw_order` is recorded only so a
+/// later slice can segment the pass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaskBatch {
+    /// Closed world-space boundary polygon (three or more vertices).
+    pub polygon: Arc<[Point3]>,
+    pub draw_order: i64,
+    pub sources: Vec<SelectionRef>,
+}
+
+impl MaskBatch {
+    /// CPU bytes this mask holds in the scene cache.
+    pub fn approx_bytes(&self) -> usize {
+        self.polygon.len() * std::mem::size_of::<Point3>()
+            + self.sources.len() * std::mem::size_of::<SelectionRef>()
+    }
+}
+
 /// A GPU-ready image draw item, carried separately from [`RenderBatch`].
 ///
 /// Raster images are not triangle/line geometry: the renderer must bind a

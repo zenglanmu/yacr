@@ -40,6 +40,7 @@ pub(crate) fn run_benchmark(
         added: Vec::new(),
         removed_chunks: Vec::new(),
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let build_start = std::time::Instant::now();
     let mut primitives = 0usize;
@@ -51,6 +52,7 @@ pub(crate) fn run_benchmark(
                 let built = cache.build(&representation, context.stamp.clone())?;
                 delta.added.extend(built.added);
                 delta.images.extend(built.images);
+                delta.masks.extend(built.masks);
             }
             Err(error) => failures.push(serde_json::json!({
                 "entity": entity.id.0.to_string(),

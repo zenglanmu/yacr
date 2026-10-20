@@ -21,6 +21,7 @@ use cad_scene::{ImageBatch, RenderBatch, RenderTopology, SceneDelta};
 use std::sync::Arc;
 
 mod images_and_culling;
+mod masks;
 mod render_basics;
 fn source() -> SelectionRef {
     SelectionRef {
@@ -117,6 +118,7 @@ fn scene(batches: Vec<RenderBatch>) -> SceneDelta {
         added: batches,
         removed_chunks: Vec::new(),
         images: Vec::new(),
+        masks: Vec::new(),
     }
 }
 

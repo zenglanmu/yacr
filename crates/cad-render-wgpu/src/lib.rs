@@ -55,7 +55,7 @@ use cad_diagnostics::codes;
 use cad_diagnostics::{DiagnosticParameter, DiagnosticReason};
 use cad_domain::*;
 use cad_resources::{DecodedImage, DecodedImageCache, ResourceKey};
-use cad_scene::{FrameBudget, ImageBatch, RenderTopology, SceneDelta};
+use cad_scene::{FrameBudget, ImageBatch, MaskBatch, RenderTopology, SceneDelta};
 use geometry::OverBudget;
 pub use geometry::{
     clamp_alpha, classify_alpha, plan_draw_order, AlphaClass, BatchOrderEntry, DrawOrderCache,
@@ -267,6 +267,21 @@ pub(crate) struct ArcStream {
     base: u32,
 }
 
+/// One resident WIPEOUT mask: a tessellated boundary polygon plus the `f64`
+/// reference origin its stored positions are measured from.
+///
+/// A mask is **not** a [`GpuBatch`]: it is painted by the frame's final pass with
+/// `depth_compare: Always`, no depth write, and the clear colour (ADR 0022 D1),
+/// so it must never enter the ordered geometry plan. The polygon is tessellated
+/// at upload with the same even-odd fill solid HATCH uses
+/// (`cad_domain::hatch::fill_rings`), so a concave boundary does not leak.
+pub(crate) struct GpuMask {
+    /// Triangle list positions, relative to [`GpuMask::origin`].
+    vertices: wgpu::Buffer,
+    vertex_count: u32,
+    origin: [f64; 3],
+}
+
 /// One accelerated line storage segment: a bind group over a
 /// `VERTEX | STORAGE` buffer holding the [`PulledLine`] records of a run of
 /// whole instance streams. A real scene can exceed
@@ -458,6 +473,10 @@ pub struct Renderer {
     mesh_pipeline_merged_mirrored: Option<wgpu::RenderPipeline>,
     /// Textured-quad pipeline for raster images (group 2 = texture + sampler).
     image_pipeline: Option<wgpu::RenderPipeline>,
+    /// Wipeout mask pipeline: triangle list, `depth_compare = Always`, no depth
+    /// write, fragment output = the clear colour (ADR 0022 C1). Drawn in the
+    /// frame's final pass.
+    mask_pipeline: Option<wgpu::RenderPipeline>,
     /// Bind-group layout for group 2 of the image pipeline.
     image_texture_layout: Option<wgpu::BindGroupLayout>,
     /// Shared linear, clamp-to-edge sampler for every uploaded image.
@@ -567,6 +586,13 @@ pub struct Renderer {
     mesh_pulled_mirrored_pipeline: Option<wgpu::RenderPipeline>,
     /// Resident image quads uploaded by [`Renderer::upload_images`].
     images: Vec<GpuImage>,
+    /// Resident WIPEOUT masks uploaded by [`Renderer::upload_masks`]. Painted by
+    /// the frame's final pass, in this order (insertion = scene build order).
+    masks: Vec<GpuMask>,
+    /// Mask boundaries of the last [`Renderer::upload_masks`] call that could not
+    /// be tessellated, with the named reason. Never silent: a non-empty list means
+    /// a mask was not drawn.
+    mask_skips: Vec<String>,
     /// One GPU texture per resolved [`ResourceKey`], shared by every resident
     /// image quad that references it. Bounded to the keys of the current image
     /// set (unreferenced entries are pruned on upload).

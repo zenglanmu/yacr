@@ -22,6 +22,7 @@ mod dynamic_block;
 mod image;
 mod kernel_mesh;
 mod linetype;
+mod mask;
 
 fn entity(id: u128, geometry: SemanticGeometry) -> DbEntity {
     DbEntity {

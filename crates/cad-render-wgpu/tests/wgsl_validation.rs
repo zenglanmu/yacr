@@ -88,6 +88,12 @@ fn pulled_shaders_are_valid_wgsl() {
 }
 
 #[test]
+fn mask_shader_is_valid_wgsl() {
+    validate_wgsl("mask.wgsl", include_str!("../shaders/mask.wgsl"))
+        .expect("wipeout mask shader must validate");
+}
+
+#[test]
 fn image_shader_is_valid_wgsl() {
     validate_wgsl("image.wgsl", include_str!("../shaders/image.wgsl"))
         .expect("image shader must validate");
@@ -135,6 +141,7 @@ fn color_shaders_back_translate_to_glsl_es_300() {
             include_str!("../shaders/mesh_merged.wgsl"),
         ),
         ("image.wgsl", include_str!("../shaders/image.wgsl")),
+        ("mask.wgsl", include_str!("../shaders/mask.wgsl")),
     ];
     for (name, source) in shaders {
         let module = naga::front::wgsl::parse_str(source)

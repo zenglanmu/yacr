@@ -72,6 +72,17 @@ pub fn build_vector_document(
                         .to_string(),
                 );
             }
+            // A mask has no path representation: it erases in the raster frame by
+            // flooding the background. Vector output therefore skips it and names
+            // the omission (ADR 0022 D4), never silently.
+            DisplayPrimitive::Mask(_) => {
+                document.report(
+                    object,
+                    vector_diagnostic::MASK_UNSUPPORTED,
+                    "wipeout mask is skipped in vector output: there is no background flood in a path writer"
+                        .to_string(),
+                );
+            }
         }
     }
     Ok(document)

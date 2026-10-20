@@ -301,6 +301,7 @@ impl CadSceneController {
                     added: vec![],
                     removed_chunks: vec![],
                     images: vec![],
+                    masks: vec![],
                 },
             })
         } else {
@@ -408,6 +409,7 @@ impl CadSceneController {
                     added: overlay.batches,
                     removed_chunks: vec![],
                     images: vec![],
+                    masks: vec![],
                 });
                 (delta, overlay.diagnostics, overlay.completeness)
             } else {
@@ -558,6 +560,7 @@ impl CadSceneController {
                     added: Vec::new(),
                     removed_chunks: Vec::new(),
                     images: Vec::new(),
+                    masks: Vec::new(),
                 }),
                 Vec::new(),
                 cad_domain::Completeness::Complete,

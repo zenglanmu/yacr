@@ -145,3 +145,128 @@ fn eligible_circle_fragment_becomes_a_conic_batch_and_merges() {
     assert!(batch.conics[0].full);
     assert_eq!(batch.local_origin.x, 0.0);
 }
+
+/// A WIPEOUT mask is carried as its own draw item with the **world** boundary
+/// polygon, not as a geometry batch (ADR 0022): the frame plan must never order
+/// it with the geometry, and `cad-scene` must not fan-triangulate a concave
+/// boundary here.
+#[test]
+fn mask_fragment_becomes_a_mask_draw_item_with_its_polygon() {
+    let polygon: Vec<Point3> = vec![
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 10.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 10.0,
+            y: 4.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 4.0,
+            y: 4.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 4.0,
+            y: 8.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 0.0,
+            y: 8.0,
+            z: 0.0,
+        },
+    ];
+    let mut rep = line_representation(5, Vec::new());
+    rep.fragments[0].primitive = DisplayPrimitive::Mask(polygon.clone().into());
+
+    let mut cache = SceneCache::default();
+    let delta = cache.build(&rep, stamp()).unwrap();
+    assert!(delta.added.is_empty(), "a mask is not a geometry batch");
+    assert!(delta.images.is_empty());
+    assert_eq!(delta.masks.len(), 1);
+    assert_eq!(
+        delta.masks[0].polygon.as_ref(),
+        polygon.as_slice(),
+        "the world boundary polygon is preserved verbatim"
+    );
+    assert_eq!(delta.masks[0].draw_order, SCENE_DRAW_ORDER);
+    assert_eq!(delta.masks[0].sources.len(), 1);
+
+    cache.publish(delta, &stamp()).unwrap();
+    assert_eq!(cache.mask_count(), 1);
+    assert_eq!(cache.mask_batches()[0].polygon.len(), polygon.len());
+}
+
+#[test]
+fn mask_without_three_vertices_is_an_explicit_error() {
+    let mut rep = line_representation(6, Vec::new());
+    rep.fragments[0].primitive = DisplayPrimitive::Mask(
+        vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        ]
+        .into(),
+    );
+    let mut cache = SceneCache::default();
+    assert!(cache.build(&rep, stamp()).is_err());
+}
+
+/// A change to the mask's entity invalidates the cached mask, exactly like an
+/// image or a chunk.
+#[test]
+fn mask_is_invalidated_by_its_entity_change() {
+    let mut rep = line_representation(9, Vec::new());
+    rep.fragments[0].primitive = DisplayPrimitive::Mask(
+        vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 2.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 2.0,
+                y: 2.0,
+                z: 0.0,
+            },
+        ]
+        .into(),
+    );
+    let mut cache = SceneCache::default();
+    let delta = cache.build(&rep, stamp()).unwrap();
+    cache.publish(delta, &stamp()).unwrap();
+    assert_eq!(cache.mask_count(), 1);
+    let changes = ChangeSet {
+        database: DatabaseId(1),
+        before: Revision(0),
+        after: Revision(1),
+        transaction: TransactionId(1),
+        reason: "mask edit".into(),
+        changes: vec![ObjectChange::Update(
+            ObjectId(9),
+            cad_db::ChangeMask::GEOMETRY,
+        )],
+    };
+    cache.apply_changes(&changes).unwrap();
+    assert_eq!(cache.mask_count(), 0);
+}

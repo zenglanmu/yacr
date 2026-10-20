@@ -26,6 +26,9 @@ pub struct SceneCache {
     /// under [`SceneBudget::image_bytes`]. This makes the eviction observable
     /// instead of a silent drop; it only ever increases.
     image_evictions: u64,
+    /// WIPEOUT mask draw items, in insertion order. Masks are painted last by the
+    /// renderer (ADR 0022), so the order here is the order among masks only.
+    masks: Vec<MaskBatch>,
 }
 
 impl Default for SceneCache {
@@ -44,6 +47,7 @@ impl SceneCache {
             images: Vec::new(),
             images_used_bytes: 0,
             image_evictions: 0,
+            masks: Vec::new(),
         }
     }
 
@@ -62,6 +66,19 @@ impl SceneCache {
     /// The cached image draw items, in insertion order.
     pub fn image_batches(&self) -> &[ImageBatch] {
         &self.images
+    }
+
+    /// The cached WIPEOUT mask draw items, in insertion order.
+    ///
+    /// A host re-uploads these to the renderer exactly like images: they are
+    /// resident scene data, not part of the ordered geometry batch set.
+    pub fn mask_batches(&self) -> &[MaskBatch] {
+        &self.masks
+    }
+
+    /// Number of cached mask draw items.
+    pub fn mask_count(&self) -> usize {
+        self.masks.len()
     }
 
     /// Number of cached image draw items.
@@ -122,6 +139,13 @@ impl SceneCache {
             keep
         });
         self.images_used_bytes = self.images_used_bytes.saturating_sub(image_bytes_removed);
+        // Mask draw items are invalidated by the same dirty set.
+        self.masks.retain(|mask| {
+            !mask
+                .sources
+                .iter()
+                .any(|source| dirty.contains(&source.entity))
+        });
         Ok(())
     }
 
@@ -169,6 +193,7 @@ impl SceneCache {
             added: Vec::new(),
             removed_chunks: Vec::new(),
             images: Vec::new(),
+            masks: Vec::new(),
         };
         let mut previous_was_lines = false;
         let mut previous_was_conic = false;
@@ -225,6 +250,25 @@ impl SceneCache {
                     clip: clip.clone(),
                     alpha: sanitize_alpha(fragment.alpha),
                     draw_order: 0,
+                    sources: vec![fragment.source.clone()],
+                });
+                previous_was_lines = false;
+                previous_was_conic = false;
+                continue;
+            }
+            if let DisplayPrimitive::Mask(boundary) = &fragment.primitive {
+                // A WIPEOUT mask is not geometry the frame plan orders: it paints
+                // last, with `depth_compare: Always`, in the renderer's clear
+                // colour (ADR 0022). It is carried with its **world boundary**
+                // polygon so the renderer can tessellate it concave-safely.
+                if boundary.len() < 3 {
+                    return Err(CadError::InvalidInput(
+                        "mask boundary requires at least three vertices".into(),
+                    ));
+                }
+                delta.masks.push(MaskBatch {
+                    polygon: boundary.clone(),
+                    draw_order: SCENE_DRAW_ORDER,
                     sources: vec![fragment.source.clone()],
                 });
                 previous_was_lines = false;
@@ -438,7 +482,8 @@ impl SceneCache {
                     // arm is unreachable for them but keeps the match exhaustive.
                     DisplayPrimitive::Text { .. }
                     | DisplayPrimitive::Instance { .. }
-                    | DisplayPrimitive::Image { .. } => {
+                    | DisplayPrimitive::Image { .. }
+                    | DisplayPrimitive::Mask(_) => {
                         continue;
                     }
                 };
@@ -489,6 +534,7 @@ impl SceneCache {
             self.images_used_bytes += image.approx_bytes();
             self.images.push(image);
         }
+        self.masks.extend(delta.masks);
         // Maintenance eviction after publishing: keep the CPU/image caches under
         // budget. Image evictions are recorded in `image_evictions()` so the
         // drop is observable rather than silent.

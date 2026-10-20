@@ -143,11 +143,17 @@ pub(crate) fn subd_mesh_semantics(m: &acadrust::entities::Mesh) -> SemanticGeome
 ///
 /// `boundary` is the world-space closed loop (the same construction as before:
 /// `insertion + u*x + v*y` from the clip vertices, else the size corners) and
-/// `inverted` mirrors the DXF clip mode. Only the boundary is drawn: the fill is
-/// **not** rendered, because `cad-representation` has no `Mask` arm and the
-/// boundary falls through to its tessellate catch-all. `inverted` is carried on
-/// the semantic for a future mask primitive. The brightness/contrast/fade and
-/// clipping flags are not applied either, so this stays `Partial`.
+/// `inverted` mirrors the DXF clip mode.
+///
+/// The **non-inverted** mask fill is rendered: `cad-representation` maps it to
+/// its colourless `Mask` primitive and the renderer fills it in a final pass with
+/// the clear colour (ADR 0022 C1). An **`inverted`** mask (clip mode Inside) is
+/// still boundary-only, because its fill needs a viewport-relative complement
+/// polygon; that gap is named in the completeness report and by
+/// `MASK_INVERTED_NOT_RENDERED` in `cad-representation`, never hidden.
+///
+/// The brightness/contrast/fade and clipping flags are not applied either, so
+/// this stays `Partial`.
 pub(crate) fn wipeout_semantics(
     w: &acadrust::entities::Wipeout,
 ) -> (SemanticGeometry, Completeness) {
@@ -179,13 +185,18 @@ pub(crate) fn wipeout_semantics(
         ];
     }
     let inverted = w.clip_mode == acadrust::entities::WipeoutClipMode::Inside;
+    // The non-inverted fill is rendered (ADR 0022 C1), so the only remaining
+    // gap for it is the unapplied WIPEOUT display attributes. The inverted fill
+    // is genuinely not rendered yet and is named as such.
+    let reason = if inverted {
+        "wipeout mask: the inverted fill is not rendered; brightness/contrast/fade \
+         and clipping_enabled are ignored"
+    } else {
+        "wipeout mask: brightness/contrast/fade and clipping_enabled are ignored"
+    };
     (
         SemanticGeometry::Mask { boundary, inverted },
-        Completeness::Partial(vec![
-            "wipeout mask boundary only; the mask fill is not rendered and \
-             brightness/contrast/fade and clipping_enabled are ignored"
-                .into(),
-        ]),
+        Completeness::Partial(vec![reason.into()]),
     )
 }
 

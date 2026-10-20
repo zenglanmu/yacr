@@ -65,6 +65,7 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
         added: Vec::new(),
         removed_chunks: Vec::new(),
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let mut batches: u64 = 0;
     let mut vertices: u64 = 0;
@@ -87,6 +88,7 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
         enforce_scene_budget(batches, vertices, invocation)?;
         delta.added.extend(built.added);
         delta.images.extend(built.images);
+        delta.masks.extend(built.masks);
     }
 
     // Fit to what is actually drawn, not `drawing.bounds()`: the database
@@ -416,6 +418,7 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
         added: Vec::new(),
         removed_chunks: Vec::new(),
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let mut batches: u64 = 0;
     let mut vertices: u64 = 0;
@@ -451,6 +454,7 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
         enforce_scene_budget(batches, vertices, invocation)?;
         delta.added.extend(built.added);
         delta.images.extend(built.images);
+        delta.masks.extend(built.masks);
     }
 
     let width = page.width;

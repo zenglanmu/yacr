@@ -385,10 +385,16 @@ pub struct FrameStats {
     pub invisible_batches: usize,
     /// Raster image quads submitted this frame, after opaque geometry.
     ///
-    /// Full draw-order interleaving with geometry batches and WIPEOUT-style
-    /// masking are **not** implemented; images are drawn last, in ascending
-    /// `draw_order` among themselves (see [`Renderer::upload_images`]).
+    /// Full draw-order interleaving with geometry batches is **not**
+    /// implemented; images are drawn last, in ascending `draw_order` among
+    /// themselves (see [`Renderer::upload_images`]).
     pub image_batches: usize,
+    /// Wipeout masks submitted this frame by the final mask pass.
+    ///
+    /// The mask pass runs after images with `depth_compare: Always`, no depth
+    /// write and the clear colour (ADR 0022 C1). Masks do not interleave with
+    /// geometry draw order in this slice.
+    pub mask_draws: u64,
     /// Chunks (instance streams + merged mesh chunks + SDF conic streams) tested
     /// by this frame's view cull. `0` when the scene has no chunked geometry.
     /// Reporting only; `kept + culled == total`.

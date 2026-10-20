@@ -164,6 +164,7 @@ pub(crate) fn run_fixture(
         added: Vec::new(),
         removed_chunks: Vec::new(),
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let mut fragments = FragmentHistogram::default();
     for entity in drawing.model_space() {

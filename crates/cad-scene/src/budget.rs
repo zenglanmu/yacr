@@ -11,11 +11,18 @@ pub struct SceneDelta {
     /// Image draw items added by this delta; published into their own cache list
     /// with the same stale-stamp validation as `added`.
     pub images: Vec<ImageBatch>,
+    /// WIPEOUT masks added by this delta; published into their own cache list.
+    /// A mask is a boundary polygon the renderer fills in its final pass, not a
+    /// geometry batch (ADR 0022).
+    pub masks: Vec<MaskBatch>,
 }
 
 impl SceneDelta {
     pub fn is_empty(&self) -> bool {
-        self.added.is_empty() && self.removed_chunks.is_empty() && self.images.is_empty()
+        self.added.is_empty()
+            && self.removed_chunks.is_empty()
+            && self.images.is_empty()
+            && self.masks.is_empty()
     }
 }
 

@@ -1,6 +1,6 @@
 # ADR 0022：WIPEOUT 遮罩的渲染方式（绘制顺序 vs 深度）
 
-- 状态：**Proposed**（设计已按现有渲染管线事实推导；未实施）。
+- 状态：**Partially implemented**（C1 非 `inverted` 已落地并取得真实设备像素证据；**C2 `inverted` 补集未做**，当前只画边界并具名声明）。
 - 日期：2026-10-21。
 - 相关：[ADR-0002](0002-gpu-ui-composition.md)（已退役）、`docs/architecture.md`（渲染器边界）、
   [ADR-0018](0018-hatch-family.md)（填充/渐变）、`docs/compatibility.md`（WIPEOUT 行）。
@@ -90,3 +90,31 @@
 3. **真机截图**：与读回二选一或并用；记录合成器/GPU/scale 边界，不推广。
 4. **反例保留**：把"后画 mesh 被深度拒绝"的对照写进测试注释，防止有人把它"简化"成背景色 mesh
    而再次得到不遮罩的结果。
+
+## 实施记录（2026-10-21）
+
+### C1（非 `inverted`）— 已落地
+
+- **图元**：`DisplayPrimitive::Mask(Arc<[Point3]>)`，**无颜色**、只带世界坐标闭合边界；`transformed()` 逐顶点映射。
+- **表示层**：`SemanticGeometry::Mask` 非 `inverted` 且 ≥3 点 ⇒ 一个 `Mask` 片段，`Complete`；
+  `inverted` ⇒ **保持今天的边界折线** + `Partial(MASK_INVERTED_NOT_RENDERED)` + `representation.mask_inverted`
+  （**不假装**）；退化边界 ⇒ 折线 + 具名 `Partial`。
+- **矢量出图**：遮罩**跳过**并具名 `vector.mask_unsupported`（ADR D4，不静默）。
+- **场景**：`MaskBatch`（保留世界多边形），`SceneDelta.masks`，按源变更失效；<3 点**报错**而不是静默丢弃。
+- **渲染器**：新增 **pass 4**（在图像与两个几何 pass 之后）：`mask_pipeline` = triangle list、
+  `cull_mode: None`、`depth_write_enabled: false`、**`depth_compare: Always`**、`ALPHA_BLENDING` over，
+  颜色取自共享相机 uniform 的 **clear 颜色**；**凹多边形复用 HATCH 的 even-odd `fill_rings`**（不使用三角扇）。
+- **真实设备像素证据**（Vulkan `Quadro P620`，discrete，驱动 `NVIDIA 580.178.04`，**非 lavapipe**）：
+  64×64、2 世界单位；一条 `y=0` 的线画在 31/32 行。矩形遮罩：外部 `[187,187,187,255]`、内部 **`[0,0,0,255]` = clear 颜色**；
+  **凹形 L**：左竖条被抹 `[0,0,0,255]`、**缺口 `[187,187,187,255]`（线存活，无三角扇泄漏）**、外部不变。
+  `stats.mask_draws == 1`。
+- **反例对照（关键）**：把 pass 临时改成 `if false && ...` 后**两条像素测试都失败**
+  （"mask interior must equal the clear colour … got [187,187,187,255]"），恢复后通过 ⇒ 测试测的是真东西。
+- **仍然声明不做**：`inverted` 填充（C2）；与更高 `draw_order` 的交错（D2 子集，遮罩恒最后）；
+  矢量出图（跳过并具名）；纸张空间视口裁剪（保留并报 `UNSUPPORTED_PRIMITIVE`，不伪造裁剪）；
+  遮罩不可拾取（未变，无 pick key）；不引入模板、不引入 scissor、无异步改造。
+
+### C2（`inverted`）— 未做
+
+补集多边形（视口矩形减边界）仍需在"表示层世界坐标"与"渲染器屏幕坐标"之间选一处实现
+（ADR D5 已把该点留给实施时决定）；当前 `inverted` **明确未渲染**。

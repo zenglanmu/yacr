@@ -174,7 +174,8 @@ pub(crate) fn run_build_representation(
         .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
     let registry = cad_representation::ProviderRegistry::with_default_provider();
     let context = representation_context(controller, fonts);
-    let (mut lines, mut meshes, mut texts, mut instances, mut images) = (0usize, 0, 0, 0, 0);
+    let (mut lines, mut meshes, mut texts, mut instances, mut images, mut masks) =
+        (0usize, 0, 0, 0, 0, 0);
     let mut vertices = 0usize;
     let mut failures: Vec<serde_json::Value> = Vec::new();
     for entity in document.drawing.model_space() {
@@ -200,6 +201,10 @@ pub(crate) fn run_build_representation(
                         cad_representation::DisplayPrimitive::Text { .. } => texts += 1,
                         cad_representation::DisplayPrimitive::Instance { .. } => instances += 1,
                         cad_representation::DisplayPrimitive::Image { .. } => images += 1,
+                        cad_representation::DisplayPrimitive::Mask(boundary) => {
+                            masks += 1;
+                            vertices += boundary.len();
+                        }
                     }
                 }
             }
@@ -209,7 +214,7 @@ pub(crate) fn run_build_representation(
             })),
         }
     }
-    let primitives = lines + meshes + texts + instances + images;
+    let primitives = lines + meshes + texts + instances + images + masks;
     Ok(serde_json::json!({
         "schema_version": CLI_SCHEMA_VERSION,
         "operation": CliOperation::BuildRepresentation.as_str(),
@@ -221,6 +226,7 @@ pub(crate) fn run_build_representation(
             "texts": texts,
             "instances": instances,
             "images": images,
+            "masks": masks,
         },
         "failures": failures,
     }))

@@ -69,6 +69,9 @@ pub mod vector_diagnostic {
     pub const IMAGE_UNSUPPORTED: &str = "vector.image_unsupported";
     /// An INSERT instance reached the vector stage unexpanded.
     pub const UNEXPANDED_INSTANCE: &str = "vector.unexpanded_instance";
+    /// A WIPEOUT mask is deliberately skipped: vector output has no background
+    /// flood, and ADR 0022 D4 does not cover masks in plot output. Never silent.
+    pub const MASK_UNSUPPORTED: &str = "vector.mask_unsupported";
 }
 
 #[cfg(test)]
