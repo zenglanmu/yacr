@@ -10,7 +10,7 @@
   `MLEADEREDIT`、注释性缩放的**应用**、背景遮罩、分栏、引线打断、`QLEADER`/`LEADER`/`TOLERANCE`、
   关联性、**画布内就地文字编辑器**、`-MLEADER`（**该命令不存在**，U-10）。
 - 相关：`CAD_IMPLEMENTATION_SPEC.md` §3.2；ADR-0017 / ADR-0018（一等实体 + 真实导出 + 声明账本 + 匹配点清单）；
-  ADR-0002（React 宿主无法绘制原生 overlay）；`docs/compatibility.md`（**当前无 MULTILEADER 行**为已知欠账）。
+  ADR-0010 `:27`（**不允许跨 CAD 分区的 DOM 浮层**）；`docs/compatibility.md`（**当前无 MULTILEADER 行**为已知欠账）。
 
 ---
 
@@ -58,7 +58,7 @@
 
 ### A.3 UI（**诚实声明**）
 
-- AutoCAD 在**画布内**开就地编辑器；本仓库 React 宿主**无法**在原生 CAD 分区上绘制/嵌入 DOM 编辑器（ADR-0002）。
+- AutoCAD 在**画布内**开就地编辑器；本仓库 React 宿主**无法**在原生 CAD 分区上嵌入 **DOM** 编辑器（ADR-0010 `:27`）——是否改用**原生 GTK** 就地编辑器，另见 P7 的增补决策。
   采用**命令行/状态栏文本输入**：待文本时 `CommandLine.jsx` 切为文本模式，Enter 提交并 `SetToolText`。
   这是**传统 `-TEXT` 工作流**，可用但**不是** AutoCAD 的就地编辑。
 - 必须遵守既有规则：`isTyping(event.target)`、`InputPolicy::shortcuts_suppressed`、`EscapeAction::DismissTextFocus`；

@@ -176,7 +176,7 @@ bulge 环仍**歧义**（好在此刻显示/拾取/捕捉/填充**彼此一致**
 - **门禁（编排者复跑）**：受影响 crate **1885 通过 / 0 失败** + `cad-render-wgpu` **202**；workspace check(all-targets)、
   clippy(`-D warnings`)、fmt、architecture(27)、i18n(**517**)、file-size(**689**)、UI **154/154**。
   **NOT RUN**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；第三方读取器验证。
-- **带入 P6 的显式债务**：无真正创建预览（React 宿主无法修，ADR-0002）；样式快照不追溯；`DIMPOST="."` 渲染为
+- **带入 P6 的显式债务**：无真正创建预览（DOM 不得跨 CAD 分区浮动，ADR-0010 `:27`）；样式快照不追溯；`DIMPOST="."` 渲染为
   `42.5.`；DIMSD 断口为文字中点近似；F2 布局守卫残留；F3 未覆盖路径。
 
 # 后续 agent 接手入口
@@ -375,7 +375,7 @@ i18n、file-size、fixture、workflow **全部通过**。**NOT RUN**：真实 GP
 - **声明缺口（必须记）**：放置期间**没有真正的标注预览**——实时预览是后端**橡皮筋链**
   （`render_scene/overlay/preview.rs` 把两种 kind 路由到 `preview_chain`），用户看到已捕获原点 + 到光标的链，
   **看不到**合成标注（尺寸线/尺寸界线/箭头/测量文字）。真预览需**后端 overlay 分支**；React UI **无法**绘制
-  overlay（原生 CAD 分区无子窗口、DOM 不得浮于其上——ADR-0002）。React 宿主因此**改为每步提示**。**不**当作已完成。
+  overlay（原生 CAD 分区是 X11 子窗口 / Wayland 子表面，DOM 不得浮于其上——ADR-0010 `:27`）。React 宿主因此**改为每步提示**。**不**当作已完成。
 - **真机证据（2026-10-19）**：真实硬件 GPU（Vulkan / **Quadro P620** / `device_type=discrete_gpu`）+ X11；驱动扩展
   `YACR_PROBE_DRAW_EVIDENCE` 的标注相位（合成 DOM 指针事件、**非真实鼠标**）：派发选择子 → **三次合成点击** → CONFIRM。
   **`DIMLINEAR` `entityCount` 30→31（+1）、`DIMALIGNED` 31→32（+1）**，两者 `after_tool` 为 `null`（工具清空）、

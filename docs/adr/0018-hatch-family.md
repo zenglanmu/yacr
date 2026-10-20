@@ -5,7 +5,7 @@
   **P6 阶段门禁 = closed-with-fixes**（无代码阻塞，文档更正已落）。本文件是 P6 的**唯一设计权威**；
   实施进度另起小节追加，**不改写决策文本**。
 - **开篇即声明（N8）**：**本相不提供真正的填充预览**。实时预览只有后端橡皮筋链；完整的填充/图案预览需要一个
-  **渲染 overlay 分支**，而 **React 宿主无法绘制 overlay**（原生 CAD 分区无子窗口、DOM 不得浮于其上——ADR-0002）。
+  **渲染 overlay 分支**，而 **React 宿主无法绘制 overlay**（原生 CAD 分区是 X11 子窗口 / Wayland 子表面，DOM 不得浮于其上——ADR-0010 `:27`）。
   这一点在 P5 已发生一次，此处**前置声明**，不在实施中重复发现。
 - 范围：`crates/cad-domain`（新域变体 + 迁入的填充几何）、`crates/cad-geometry`（迁出 hatch 模块）、
   `crates/cad-import-acadrust`（导入迁移 + 导出）、`crates/cad-app`（创建命令/工具/参数）、`crates/cad-ui-core`
