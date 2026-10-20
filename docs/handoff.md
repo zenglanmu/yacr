@@ -1,3 +1,20 @@
+## P5f：`DIMBASELINE` / `DIMCONTINUE`（ADR-0017 决策 C 解禁，2026-10-21）
+
+**范围**：`cad-domain`（`dim_line_increment`）、`cad-db`（解析）、`cad-app`（命令/工具/创建）、
+`cad-ui-core`（路由/计数）、React（ribbon/图标/提示）。
+
+- **解禁理由被正面对待**：原降级原因是**会话级 `last_dimension` 生命周期风险** ⇒ 改为**显式拾取基准标注**，
+  跨命令**零状态**，撤销/删除后下次自然要求重拾；实体里**不存**基准身份或行号（非关联边界不变）。
+- **交互**：拾基准 → N 点 → 回车；`AtLeast(2)`（**实施更正**：`push_pick` 把基准也存为点，写 `AtLeast(1)` 会零测量点即 ready）。
+- **几何**：基线 `first = base.first`、`second = P_i`、`dimension_line = base.location + n̂_i·(i·DIMDLI)`，
+  `n̂` **背离被测几何**、点积 0 **具名拒绝**；连续 `first = prev`、`second = P_i`、**同偏移**，投影 ≤ 0 拒绝（不折返）。
+- **提交**：`commit_new_entities_in` ⇒ 一条事务、**一个** `DrawingUndoRecord`、一次 revision，N 实体全有或全无。
+- **`DIMDLI` 一次性偏差（已声明）**：进解析快照、**按 DIMSCALE 缩放**、**只用于基线行距**、**显示仍忽略**。
+- **修的共享缺陷**：`push_point` 的"就绪后拒加点"规则此前**对开放式工具也生效**；`PLINE` 无前导拾取未触发，P5f 暴露 ⇒ 现按固定/开放式分派。
+- **v1 范围**：仅线性基准；无 `DIMCONTINUEMODE`、非关联、无文字覆盖、无每点撤销、无"重复到 Esc"。
+- **门禁**：crate **2283/0**、UI **286/286（0 跳过）**、clippy、fmt、architecture(27)、i18n **578**（**无重复键**）、file-size **763**、manifest 23。
+- **证据**：见随后的真机证据条目（基线 3 行 + 连续 3 段）。
+
 ## P8：文字弹窗编辑（TEXT / MTEXT / MLEADER，ADR-0021 D4，2026-10-20/21）
 
 **范围**：`cad-domain`（`with_text`）、`cad-app`（目标解析/换行权威/选择投影/宿主载荷）、`cad-ui-core`（新状态字段）、

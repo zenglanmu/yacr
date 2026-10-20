@@ -930,3 +930,23 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
 - **`AtLeast(2)` 的由来**：基准拾取计入 `points`（`push_pick` 的既有语义），因此"基准 + 至少一个测量点"= 2；
   UI 的提示表据此在 `points <= 1` 时**永不**显示可确认。
 - **i18n 键**由 UI lane 先行落地（7 个，两目录一致）；Rust lane 不得重复插入，措辞如需改则保留**一套**。
+
+### 实施（2026-10-21，已落地）
+
+- **入口**：`CommandId::DimBaseline/DimContinue`（`EXPECTED_COMMAND_COUNT` 71→73）、`DrawToolKind` 键
+  `"dimbaseline"/"dimcontinue"`、`AtLeast(2)` + `picked_step_count = 1`；路由别名 `DBA`/`DCO`（**声明的便利别名，不改行为**）。
+- **载荷**：`CommandPayload::DimChain(DimensionChainCommand { base: SelectionRef, points: Vec<Point3> })`；
+  `points` **不含**基准拾取（拾取是单独的一次）。
+- **几何**：`d = (cos r, sin r, 0)`，`n = rot90(d)`；基线行 `i`：`s_i = dot(base.location − mid_i, n)`，
+  `n̂_i = s_i > 0 ? n : −n`，`dimension_line_i = base.location + n̂_i·(i·DIMDLI)`；连续段 `i`：
+  `advance_i = dot(P_i − prev, d)`，`dimension_line = base.location`。
+- **`DIMDLI`**：`DimensionStyleValues.dim_line_increment`，来自 `DimStyle` 且**按 DIMSCALE 缩放**（与其他距离变量一致），
+  非正/非有限回落 `3.75`；**只用于基线行距，显示仍忽略**。
+- **提交**：`commit_new_entities_in` —— 一条 `begin_drawing_transaction`、**一个** `DrawingUndoRecord`（每实体一个 patch、同一事务 id），
+  一次 revision 递增，全有或全无。
+- **修的共享缺陷**：`push_point` 的"就绪后拒绝继续加点"规则**此前对开放式工具也生效**；`PLINE` 无前导拾取所以从未触发，
+  P5f 一撞即暴露（拾取后点立即被拒）。现按**固定/开放式**分派，开放式继续接收点。
+- **拒绝面 14 条**（全部具名、开事务前）：跨文档基准、块内成员/子元素、缺失、非 `Dimension`、非 `Linear`（含逐类命名）、
+  载荷缺失、零测量点、非有限点、缺 `Standard` 样式、`+Z` 平面（点与基准各自一条）、`DIMDLI` 非正非有限、
+  基线行退化、**法向不可定**、连续不前进。
+- **门禁**：crate **2283/0**、UI **286/286**、clippy/fmt/architecture(27)、i18n **578**（**无重复键**）、file-size **763**、manifest 23。
