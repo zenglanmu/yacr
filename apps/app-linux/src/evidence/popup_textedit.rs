@@ -7,9 +7,11 @@
 //!
 //! The phase proves, against the real host, that the popup payload is derived
 //! from the current selection, that a replacement string admitted through the
-//! real `cad_set_selected_text` queue is applied by the owner tick, and that
+//! real `cad_set_selected_text` queue is applied by the owner tick, that
 //! `cad_status` is consistent afterwards (stored `\P` form, multiline flag, same
 //! entity count, no tool, no error), before the modal gate is released again.
+//! It then **reopens** the dialog so the stored result is visible in the field
+//! (two lines, focused) for an external grab, and closes it again.
 //!
 //! ## Timeline (seconds after the shared driver start)
 //!
@@ -43,7 +45,21 @@
 //!   the popup window's `Destroyed` event latency).
 //! * `START+7+hold`: re-admission — a harmless input must be **accepted** again,
 //!   and is removed from the queue again before the owner tick can drain it.
-//! * `START+8+hold`: one greppable summary line
+//! * `START+8+hold`: **reopen** — open `textEdit` again through the same host
+//!   path. The selection still holds the applied text, so the host-derived
+//!   payload must now contain exactly one `\n`
+//!   ([`EXPECTED_REOPEN_LINES`] lines, `EVIDENCE` / `EDIT`), which proves the
+//!   stored `\P` is mapped back on open. The step logs the ack, the payload
+//!   length/newline/line count, the `popup` block and a **distinct** handle line
+//!   `[probe] popup textedit evidence: reopen window xid=0x…` for an external
+//!   grab of the stored result (a focused field also makes a caret/multi-line
+//!   frame possible).
+//! * `START+8+hold+reopen_hold`: close the reopened dialog through the same host
+//!   path, then `+1`/`+2`: `cad_status.popup` must be `null` again (one retry).
+//!   `reopen_hold` is `YACR_PROBE_POPUP_TEXTEDIT_REOPEN_HOLD` (default **20**,
+//!   floored at 5) so several grabs can be taken a few hundred milliseconds
+//!   apart (the caret blinks).
+//! * `START+11+hold+reopen_hold`: one greppable summary line
 //!   `[probe] popup textedit evidence: …`, plus a failure list.
 //!
 //! ## Honest limits
@@ -53,10 +69,12 @@
 //! not a real click on the palette's "edit in window" entry. Everything
 //! downstream of the trigger (payload derivation, window, gate, queue, tick
 //! drain, status projection, close) is the production path. The payload is read
-//! through the same host derivation the open path calls, immediately before the
+//! through the same host derivation the open path calls, immediately before each
 //! open (the window's boot script is not readable back); the summary says so with
 //! `te_payload_source=host_derivation_before_open`. A screenshot is only the
-//! dialog's own pixels, not a visual-correctness claim.
+//! dialog's own pixels, not a visual-correctness claim; the **reopen** frame
+//! exists so a reviewer can *see* the two stored lines and the focused field —
+//! the data proof stays `te_text`/`te_reopen_*`, not the pixels.
 //!
 //! **Schedule dependency**: the draw evidence driver (`YACR_PROBE_DRAW_EVIDENCE`)
 //! leaves the MULTILEADER selected only at `t≈212 s`, so this phase defaults to
@@ -69,7 +87,10 @@
 //! A step that fails its expectation logs
 //! `[probe] popup textedit evidence: <step> FAILED: …` at once and later steps
 //! log `skipped` instead of running as if the earlier one had worked. The summary
-//! always prints, with `popup_textedit_pass=0` and the failed step named.
+//! always prints, with `popup_textedit_pass=0` and the failed step named. The
+//! reopen steps use `reopen_*` step names (`reopen_payload`, `reopen_newline`,
+//! `reopen_lines`, `reopen_open`, `reopen_status_open`,
+//! `reopen_window_handle`, `reopen_close`, `reopen_status_after`).
 //!
 //! The recorded reads and the summary formatting live in
 //! [`super::popup_textedit_summary`] (split at the 1000-line code-file gate).
@@ -83,6 +104,7 @@ use tauri::Manager;
 use crate::host::{admit_selected_text, text_edit_payload_for_probe, ProbeShared, Shared};
 
 use super::popup::{describe_status_popup, log_popup_native_handle, probe_pointer_move};
+use super::popup_textedit_reopen::{reopen_close_step, reopen_open_step, reopen_status_after_step};
 use super::popup_textedit_summary::{
     bool_token, char_count, fingerprint, flat, lock_evidence, optional_count, row_keys, short_flat,
     summary_line, TextEditEvidence,
@@ -90,7 +112,7 @@ use super::popup_textedit_summary::{
 use super::schedule;
 
 /// The allowlisted popup kind this phase drives.
-const TEXT_EDIT_KIND: &str = "textEdit";
+pub(super) const TEXT_EDIT_KIND: &str = "textEdit";
 /// The replacement string admitted through the real `cad_set_selected_text`
 /// queue. It contains a newline so the MTEXT/MULTILEADER `\P` mapping is
 /// exercised rather than assumed.
@@ -102,6 +124,9 @@ pub(super) const PATCH_LOG: &str = "EVIDENCE\\nEDIT";
 pub(super) const EXPECTED_STORED: &str = "EVIDENCE\\PEDIT";
 /// The admission ack recorded when the patch was queued (accept = queued).
 pub(super) const APPLY_ACK: &str = "accepted=true_queued=1";
+/// Lines the **reopened** payload must show: the stored `\P` is mapped back to a
+/// newline, so `EVIDENCE\PEDIT` renders as `EVIDENCE` / `EDIT`.
+pub(super) const EXPECTED_REOPEN_LINES: usize = 2;
 /// Seconds after the `about` phase's close before this phase may start. The
 /// `about` phase prints its summary at `close + 4`, so this keeps the two
 /// timelines from ever overlapping.
@@ -121,12 +146,21 @@ const DEFAULT_START_SECONDS: u64 = 220;
 const DEFAULT_HOLD_SECONDS: u64 = 20;
 /// Floor for this phase's grab hold: below this an external grab is unreliable.
 const MIN_HOLD_SECONDS: u64 = 5;
+/// Default hold for the **reopen** frame
+/// (`YACR_PROBE_POPUP_TEXTEDIT_REOPEN_HOLD`).
+///
+/// The reopened dialog shows the stored result with a focused field, so the hold
+/// is deliberately long enough for several grabs a few hundred milliseconds apart
+/// (the caret blinks; one frame can miss it).
+const DEFAULT_REOPEN_HOLD_SECONDS: u64 = 20;
+/// Floor for the reopen hold: below this several grabs cannot be taken.
+const MIN_REOPEN_HOLD_SECONDS: u64 = 5;
 /// Sequence of the harmless re-admission pointer payload. Distinct from the
 /// `about` phase's `9_000_001` so the two can never be confused.
 const READMIT_INPUT_SEQUENCE: u64 = 9_000_002;
 
 /// The absolute (driver-start relative) second of every step, derived once from
-/// the phase start and hold so the schedule and its startup log cannot disagree.
+/// the phase start and holds so the schedule and its startup log cannot disagree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct PhaseTimes {
     pub precondition: u64,
@@ -134,20 +168,24 @@ pub(super) struct PhaseTimes {
     pub apply: u64,
     pub verify: u64,
     pub close: u64,
+    pub reopen: u64,
+    pub reopen_close: u64,
     pub summary: u64,
 }
 
 impl PhaseTimes {
-    /// `start` is the precondition second; every other step follows from it and
-    /// the phase's own grab `hold`.
-    pub(super) fn at(start: u64, hold: u64) -> Self {
+    /// `start` is the precondition second; every other step follows from it, the
+    /// phase's grab `hold` and the reopen `reopen_hold`.
+    pub(super) fn at(start: u64, hold: u64, reopen_hold: u64) -> Self {
         Self {
             precondition: start,
             open: start + 1,
             apply: start + 1 + hold,
             verify: start + 3 + hold,
             close: start + 4 + hold,
-            summary: start + 8 + hold,
+            reopen: start + 8 + hold,
+            reopen_close: start + 8 + hold + reopen_hold,
+            summary: start + 11 + hold + reopen_hold,
         }
     }
 }
@@ -188,25 +226,47 @@ pub(super) fn start_seconds(about_close: u64) -> u64 {
 /// default [`DEFAULT_HOLD_SECONDS`]), floored at [`MIN_HOLD_SECONDS`]. An
 /// unparseable value is logged and replaced by the default.
 pub(super) fn hold_seconds() -> u64 {
-    let configured = match std::env::var("YACR_PROBE_POPUP_TEXTEDIT_HOLD") {
+    hold_from_env(
+        "YACR_PROBE_POPUP_TEXTEDIT_HOLD",
+        DEFAULT_HOLD_SECONDS,
+        MIN_HOLD_SECONDS,
+    )
+}
+
+/// The configured **reopen** hold (`YACR_PROBE_POPUP_TEXTEDIT_REOPEN_HOLD`,
+/// default [`DEFAULT_REOPEN_HOLD_SECONDS`]), floored at
+/// [`MIN_REOPEN_HOLD_SECONDS`]. An unparseable value is logged and replaced by the
+/// default.
+pub(super) fn reopen_hold_seconds() -> u64 {
+    hold_from_env(
+        "YACR_PROBE_POPUP_TEXTEDIT_REOPEN_HOLD",
+        DEFAULT_REOPEN_HOLD_SECONDS,
+        MIN_REOPEN_HOLD_SECONDS,
+    )
+}
+
+/// Read one hold from `name`, defaulting on absence/unparseable input and
+/// flooring at `floor`. Every correction is logged, never silently applied.
+fn hold_from_env(name: &str, default: u64, floor: u64) -> u64 {
+    let configured = match std::env::var(name) {
         Ok(raw) => match raw.trim().parse::<u64>() {
             Ok(seconds) => seconds,
             Err(_) => {
                 eprintln!(
-                    "[probe] popup textedit evidence: YACR_PROBE_POPUP_TEXTEDIT_HOLD={raw:?} is not \
-                     an integer number of seconds; using {DEFAULT_HOLD_SECONDS}"
+                    "[probe] popup textedit evidence: {name}={raw:?} is not an integer number of \
+                     seconds; using {default}"
                 );
-                DEFAULT_HOLD_SECONDS
+                default
             }
         },
-        Err(_) => DEFAULT_HOLD_SECONDS,
+        Err(_) => default,
     };
-    if configured < MIN_HOLD_SECONDS {
+    if configured < floor {
         eprintln!(
-            "[probe] popup textedit evidence: hold {configured}s is below the {MIN_HOLD_SECONDS}s \
-             floor (the external grab needs the dialog open); using {MIN_HOLD_SECONDS}s"
+            "[probe] popup textedit evidence: hold {configured}s from {name} is below the {floor}s \
+             floor (the external grab needs the dialog open); using {floor}s"
         );
-        MIN_HOLD_SECONDS
+        floor
     } else {
         configured
     }
@@ -220,6 +280,7 @@ pub(super) fn schedule_textedit_phase(
     start: &Instant,
     times: PhaseTimes,
     hold: u64,
+    reopen_hold: u64,
 ) {
     let evidence = Arc::new(Mutex::new(TextEditEvidence::default()));
 
@@ -309,7 +370,49 @@ pub(super) fn schedule_textedit_phase(
         );
     }
 
-    // ---- One summary line, queued after the re-admission step ----
+    // ---- Reopen: show the **stored** result in the dialog for an external grab.
+    //      Runs after the gate-release proof (a new open must not race it). ----
+    {
+        let step_app = app.clone();
+        let evidence = evidence.clone();
+        schedule(start, times.reopen, "textedit popup reopen", move || {
+            let main_app = step_app.clone();
+            step_app.run_on_main_thread(move || reopen_open_step(&main_app, &evidence))
+        });
+    }
+
+    // ---- Close the reopened dialog through the host path ----
+    {
+        let step_app = app.clone();
+        let evidence = evidence.clone();
+        schedule(
+            start,
+            times.reopen_close,
+            "textedit popup reopen close",
+            move || {
+                let main_app = step_app.clone();
+                step_app.run_on_main_thread(move || reopen_close_step(&main_app, &evidence))
+            },
+        );
+    }
+
+    for attempt in 1..=2u32 {
+        let step_app = app.clone();
+        let evidence = evidence.clone();
+        schedule(
+            start,
+            times.reopen_close + u64::from(attempt),
+            "textedit popup reopen status after close",
+            move || {
+                let main_app = step_app.clone();
+                step_app.run_on_main_thread(move || {
+                    reopen_status_after_step(&main_app, &evidence, attempt)
+                })
+            },
+        );
+    }
+
+    // ---- One summary line, queued after the reopen status reads ----
     {
         let step_app = app.clone();
         let evidence = evidence.clone();
@@ -318,7 +421,7 @@ pub(super) fn schedule_textedit_phase(
                 let evidence = lock_evidence(&evidence);
                 eprintln!(
                     "[probe] popup textedit evidence: {}",
-                    summary_line(&evidence, hold)
+                    summary_line(&evidence, hold, reopen_hold)
                 );
             })
         });
@@ -743,17 +846,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn phase_times_follow_the_explicit_start_and_hold() {
-        let times = PhaseTimes::at(220, 20);
+    fn phase_times_follow_the_explicit_start_and_holds() {
+        let times = PhaseTimes::at(220, 20, 20);
         assert_eq!(times.precondition, 220);
         assert_eq!(times.open, 221);
         assert_eq!(times.apply, 241);
         assert_eq!(times.verify, 243);
         assert_eq!(times.close, 244);
-        assert_eq!(times.summary, 248);
+        assert_eq!(times.reopen, 248);
+        assert_eq!(times.reopen_close, 268);
+        assert_eq!(times.summary, 271);
+        // The reopen runs after the gate-release proof, and the summary after the
+        // reopen close's two status reads.
+        assert!(times.reopen > times.close + 3);
+        assert!(times.summary > times.reopen_close + 2);
         // The phase start floor is after the about phase's summary (close + 4);
-        // the default start is after the draw driver's report; and the default
-        // hold is never below its floor. Checked at compile time.
+        // the default start is after the draw driver's report; and the defaults
+        // are never below their floors. Checked at compile time.
         const {
             assert!(MIN_START_AFTER_ABOUT_CLOSE >= 5);
         }
@@ -766,5 +875,17 @@ mod tests {
         const {
             assert!(DEFAULT_HOLD_SECONDS >= MIN_HOLD_SECONDS);
         }
+        const {
+            assert!(DEFAULT_REOPEN_HOLD_SECONDS >= MIN_REOPEN_HOLD_SECONDS);
+        }
+    }
+
+    #[test]
+    fn the_applied_patch_is_the_reopened_two_line_payload() {
+        // The reopen proof is the round trip: the stored `\P` maps back to a
+        // newline, so the payload is exactly the applied draft again.
+        assert_eq!(PATCH.matches('\n').count(), 1);
+        assert_eq!(PATCH.split('\n').count(), EXPECTED_REOPEN_LINES);
+        assert_eq!(PATCH.split('\n').collect::<Vec<_>>(), ["EVIDENCE", "EDIT"]);
     }
 }

@@ -43,8 +43,10 @@
 //!   selection, `textEdit` open with the host-derived payload, a replacement
 //!   admitted through the real `cad_set_selected_text` queue and drained by the
 //!   owner tick, a status verification (stored `\P` form, multiline, entity
-//!   count, tool/error), close, and gate re-admission. It has its own
-//!   `[probe] popup textedit evidence:` summary line.
+//!   count, tool/error), close, gate re-admission, then a **reopen** of the same
+//!   dialog to show the stored result (two lines, focused) for an external grab
+//!   and a final close. It has its own `[probe] popup textedit evidence:` summary
+//!   line.
 //!
 //! ## Honest limits
 //!
@@ -159,7 +161,9 @@ pub fn maybe_spawn_popup_evidence(app: &tauri::AppHandle) {
     let hold = hold_seconds();
     let textedit_start = super::popup_textedit::start_seconds(OPEN_AT + hold);
     let textedit_hold = super::popup_textedit::hold_seconds();
-    let textedit = super::popup_textedit::PhaseTimes::at(textedit_start, textedit_hold);
+    let textedit_reopen_hold = super::popup_textedit::reopen_hold_seconds();
+    let textedit =
+        super::popup_textedit::PhaseTimes::at(textedit_start, textedit_hold, textedit_reopen_hold);
     eprintln!(
         "[probe] popup evidence: enabled (YACR_PROBE_POPUP_EVIDENCE); open kind={POPUP_KIND} at \
          t={OPEN_AT}s, gate proof at t={GATE_AT}s, close at t={}s, re-admission at t={}s; \
@@ -170,15 +174,20 @@ pub fn maybe_spawn_popup_evidence(app: &tauri::AppHandle) {
     eprintln!(
         "[probe] popup textedit evidence: scheduled (same YACR_PROBE_POPUP_EVIDENCE) after the \
          about phase: precondition t={}s, open t={}s, apply t={}s, verify t={}s, close t={}s, \
-         summary t={}s; hold={}s (YACR_PROBE_POPUP_TEXTEDIT_HOLD); it needs the selection left by \
-         the earlier draw phases (MLEADER at t≈212s) and skips, never passes, without one",
+         reopen t={}s, reopen close t={}s, summary t={}s; holds={}s \
+         (YACR_PROBE_POPUP_TEXTEDIT_HOLD) and {}s (YACR_PROBE_POPUP_TEXTEDIT_REOPEN_HOLD); it \
+         needs the selection left by the earlier draw phases (MLEADER at t≈212s) and skips, never \
+         passes, without one",
         textedit.precondition,
         textedit.open,
         textedit.apply,
         textedit.verify,
         textedit.close,
+        textedit.reopen,
+        textedit.reopen_close,
         textedit.summary,
         textedit_hold,
+        textedit_reopen_hold,
     );
     let app = app.clone();
     if let Err(error) = std::thread::Builder::new()
@@ -285,8 +294,16 @@ fn run_popup_evidence(app: tauri::AppHandle, hold: u64) {
     //      hold to reach the draw driver's selection would block that driver. ----
     let textedit_start = super::popup_textedit::start_seconds(close_at);
     let textedit_hold = super::popup_textedit::hold_seconds();
-    let textedit = super::popup_textedit::PhaseTimes::at(textedit_start, textedit_hold);
-    super::popup_textedit::schedule_textedit_phase(&app, &start, textedit, textedit_hold);
+    let textedit_reopen_hold = super::popup_textedit::reopen_hold_seconds();
+    let textedit =
+        super::popup_textedit::PhaseTimes::at(textedit_start, textedit_hold, textedit_reopen_hold);
+    super::popup_textedit::schedule_textedit_phase(
+        &app,
+        &start,
+        textedit,
+        textedit_hold,
+        textedit_reopen_hold,
+    );
 }
 
 /// Step 1–3: status before, open through the host path, status while open, and

@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use cad_ui_core::session::CadStatus;
 
-use super::popup_textedit::{APPLY_ACK, EXPECTED_STORED, PATCH_LOG};
+use super::popup_textedit::{APPLY_ACK, EXPECTED_REOPEN_LINES, EXPECTED_STORED, PATCH_LOG};
 
 /// The driver's accumulated reads; all values are real host/`cad_status` reads.
 #[derive(Default)]
@@ -42,6 +42,16 @@ pub(super) struct TextEditEvidence {
     pub(super) status_after: Option<String>,
     pub(super) closed_confirmed: bool,
     pub(super) gate_released: Option<bool>,
+    pub(super) reopen_ack: Option<String>,
+    pub(super) reopen_status_open: Option<String>,
+    pub(super) reopen_payload_len: Option<usize>,
+    pub(super) reopen_has_newline: Option<bool>,
+    pub(super) reopen_lines: Option<usize>,
+    pub(super) reopen_xid: Option<String>,
+    pub(super) reopen_handle: Option<&'static str>,
+    pub(super) reopen_close_ack: Option<String>,
+    pub(super) reopen_status_after: Option<String>,
+    pub(super) reopen_closed_confirmed: bool,
     pub(super) failed: Vec<String>,
     pub(super) aborted: Option<String>,
 }
@@ -87,7 +97,7 @@ impl TextEditEvidence {
 ///
 /// `-` means "absent / never read"; `popup_textedit_pass` is derived from the
 /// reads and is `0` whenever any step is missing, wrong, skipped or failed.
-pub(super) fn summary_line(evidence: &TextEditEvidence, hold: u64) -> String {
+pub(super) fn summary_line(evidence: &TextEditEvidence, hold: u64, reopen_hold: u64) -> String {
     let text = |value: &Option<String>| {
         value
             .as_deref()
@@ -125,6 +135,22 @@ pub(super) fn summary_line(evidence: &TextEditEvidence, hold: u64) -> String {
         None => "-",
     };
     let entities_same = u8::from(entities_same_token == "1");
+    let reopen_opened = u8::from(
+        evidence.reopen_ack.is_some()
+            && evidence
+                .reopen_status_open
+                .as_deref()
+                .is_some_and(|value| value != "-")
+            && evidence.reopen_handle.is_some(),
+    );
+    let reopen_closed = u8::from(
+        evidence.reopen_close_ack.is_some()
+            && evidence.reopen_status_after.as_deref() == Some("-")
+            && evidence.reopen_closed_confirmed,
+    );
+    let reopen_payload_ok = evidence.reopen_payload_len.is_some_and(|len| len > 0)
+        && evidence.reopen_has_newline == Some(true)
+        && evidence.reopen_lines == Some(EXPECTED_REOPEN_LINES);
     let pass = u8::from(
         evidence.aborted.is_none()
             && evidence.skipped.is_none()
@@ -136,7 +162,10 @@ pub(super) fn summary_line(evidence: &TextEditEvidence, hold: u64) -> String {
             && evidence.tool_after.as_deref() == Some("-")
             && evidence.error_after.as_deref() == Some("-")
             && closed == 1
-            && evidence.gate_released == Some(true),
+            && evidence.gate_released == Some(true)
+            && reopen_opened == 1
+            && reopen_payload_ok
+            && reopen_closed == 1,
     );
     let failed = if evidence.failed.is_empty() {
         "-".to_string()
@@ -160,7 +189,10 @@ pub(super) fn summary_line(evidence: &TextEditEvidence, hold: u64) -> String {
          te_patch={PATCH_LOG} te_admission={} te_applied={applied} te_text={} \
          te_expected={EXPECTED_STORED} te_text_ok={text_ok} te_multiline_after={multiline} \
          te_selection_rows_after={} te_row_keys_after={} te_tool={} te_error={} te_closed={closed} \
-         te_status_after={} te_gate_released={} te_hold_s={hold} te_step_failed={failed} \
+         te_status_after={} te_gate_released={} te_reopen_opened={reopen_opened} \
+         te_reopen_payload_len={} te_reopen_has_newline={} te_reopen_lines={} \
+         te_reopen_xid={} te_reopen_closed={reopen_closed} te_reopen_hold_s={reopen_hold} \
+         te_hold_s={hold} te_step_failed={failed} \
          te_aborted_at={aborted} \
          te_display_channel=none_cad_status_exposes_no_entity_display_or_root_count \
          te_trigger=probe_driver_not_a_real_click \
@@ -188,6 +220,10 @@ pub(super) fn summary_line(evidence: &TextEditEvidence, hold: u64) -> String {
         text(&evidence.error_after),
         text(&evidence.status_after),
         flag(evidence.gate_released),
+        number(evidence.reopen_payload_len),
+        flag(evidence.reopen_has_newline),
+        number(evidence.reopen_lines),
+        text(&evidence.reopen_xid),
     )
 }
 
@@ -316,6 +352,16 @@ mod tests {
             status_after: Some("-".into()),
             closed_confirmed: true,
             gate_released: Some(true),
+            reopen_ack: Some("accepted=true_existing=false".into()),
+            reopen_status_open: Some("textEdit:popup-1:true".into()),
+            reopen_payload_len: Some(13),
+            reopen_has_newline: Some(true),
+            reopen_lines: Some(2),
+            reopen_xid: Some("0x2b".into()),
+            reopen_handle: Some("x11_xid"),
+            reopen_close_ack: Some("accepted=true".into()),
+            reopen_status_after: Some("-".into()),
+            reopen_closed_confirmed: true,
             failed: Vec::new(),
             aborted: None,
         }
@@ -323,7 +369,7 @@ mod tests {
 
     #[test]
     fn summary_is_one_line_with_the_required_fields_on_a_clean_run() {
-        let line = summary_line(&passing(), 30);
+        let line = summary_line(&passing(), 30, 20);
         assert!(!line.contains('\n'), "one summary line: {line}");
         for expected in [
             "popup_textedit_skipped=-",
@@ -345,6 +391,13 @@ mod tests {
             "te_error=-",
             "te_closed=1",
             "te_gate_released=1",
+            "te_reopen_opened=1",
+            "te_reopen_payload_len=13",
+            "te_reopen_has_newline=1",
+            "te_reopen_lines=2",
+            "te_reopen_xid=0x2b",
+            "te_reopen_closed=1",
+            "te_reopen_hold_s=20",
             "te_patch=EVIDENCE\\nEDIT",
             "te_hold_s=30",
             "te_step_failed=-",
@@ -358,7 +411,7 @@ mod tests {
         let mut skipped = passing();
         skipped.skipped = Some("no_text_selection".into());
         skipped.text_ok = None;
-        let line = summary_line(&skipped, 30);
+        let line = summary_line(&skipped, 30, 20);
         assert!(
             line.contains("popup_textedit_skipped=no_text_selection"),
             "{line}"
@@ -372,38 +425,87 @@ mod tests {
         let mut wrong_text = passing();
         wrong_text.text_ok = Some(false);
         wrong_text.text_after = Some("EVIDENCE_EDIT".into());
-        assert!(summary_line(&wrong_text, 30).contains("popup_textedit_pass=0"));
+        assert!(summary_line(&wrong_text, 30, 20).contains("popup_textedit_pass=0"));
 
         let mut count_changed = passing();
         count_changed.entities_after = Some(43);
-        let line = summary_line(&count_changed, 30);
+        let line = summary_line(&count_changed, 30, 20);
         assert!(line.contains("te_entities_same=0"), "{line}");
         assert!(line.contains("popup_textedit_pass=0"), "{line}");
 
         let mut tool_active = passing();
         tool_active.tool_after = Some("TEXT".into());
-        assert!(summary_line(&tool_active, 30).contains("popup_textedit_pass=0"));
+        assert!(summary_line(&tool_active, 30, 20).contains("popup_textedit_pass=0"));
 
         let mut error_set = passing();
         error_set.error_after = Some("textedit.target_not_text".into());
-        assert!(summary_line(&error_set, 30).contains("popup_textedit_pass=0"));
+        assert!(summary_line(&error_set, 30, 20).contains("popup_textedit_pass=0"));
 
         let mut still_open = passing();
         still_open.status_after = Some("textEdit:popup-1:true".into());
-        assert!(summary_line(&still_open, 30).contains("popup_textedit_pass=0"));
+        assert!(summary_line(&still_open, 30, 20).contains("popup_textedit_pass=0"));
 
         let mut gate_refused = passing();
         gate_refused.gate_released = Some(false);
-        assert!(summary_line(&gate_refused, 30).contains("popup_textedit_pass=0"));
+        assert!(summary_line(&gate_refused, 30, 20).contains("popup_textedit_pass=0"));
 
         let mut aborted = passing();
         aborted.aborted = Some("verify_text".into());
-        assert!(summary_line(&aborted, 30).contains("popup_textedit_pass=0"));
+        assert!(summary_line(&aborted, 30, 20).contains("popup_textedit_pass=0"));
 
         let mut unread_entities = passing();
         unread_entities.entities_before = None;
-        let line = summary_line(&unread_entities, 30);
+        let line = summary_line(&unread_entities, 30, 20);
         assert!(line.contains("te_entities_same=-"), "{line}");
+        assert!(line.contains("popup_textedit_pass=0"), "{line}");
+    }
+
+    #[test]
+    fn a_missing_or_wrong_reopen_clears_the_pass_flag() {
+        // The reopen is part of the pass: no reopen reads at all cannot pass.
+        let mut never_reopened = passing();
+        never_reopened.reopen_ack = None;
+        never_reopened.reopen_status_open = None;
+        never_reopened.reopen_xid = None;
+        never_reopened.reopen_handle = None;
+        never_reopened.reopen_payload_len = None;
+        never_reopened.reopen_has_newline = None;
+        never_reopened.reopen_lines = None;
+        never_reopened.reopen_close_ack = None;
+        never_reopened.reopen_status_after = None;
+        never_reopened.reopen_closed_confirmed = false;
+        let line = summary_line(&never_reopened, 30, 20);
+        assert!(line.contains("te_reopen_opened=0"), "{line}");
+        assert!(line.contains("te_reopen_payload_len=-"), "{line}");
+        assert!(line.contains("te_reopen_has_newline=-"), "{line}");
+        assert!(line.contains("te_reopen_lines=-"), "{line}");
+        assert!(line.contains("te_reopen_xid=-"), "{line}");
+        assert!(line.contains("te_reopen_closed=0"), "{line}");
+        assert!(line.contains("popup_textedit_pass=0"), "{line}");
+        assert!(line.contains("te_pass=0"), "{line}");
+
+        // One line instead of two (the `\P` round trip did not happen).
+        let mut one_line = passing();
+        one_line.reopen_has_newline = Some(false);
+        one_line.reopen_lines = Some(1);
+        let line = summary_line(&one_line, 30, 20);
+        assert!(line.contains("te_reopen_has_newline=0"), "{line}");
+        assert!(line.contains("te_reopen_lines=1"), "{line}");
+        assert!(line.contains("popup_textedit_pass=0"), "{line}");
+
+        // The reopened dialog never closed.
+        let mut still_open = passing();
+        still_open.reopen_status_after = Some("textEdit:popup-1:true".into());
+        still_open.reopen_closed_confirmed = false;
+        let line = summary_line(&still_open, 30, 20);
+        assert!(line.contains("te_reopen_closed=0"), "{line}");
+        assert!(line.contains("popup_textedit_pass=0"), "{line}");
+
+        // A failed reopen step aborts the phase like any other step.
+        let mut aborted = passing();
+        aborted.aborted = Some("reopen_lines".into());
+        let line = summary_line(&aborted, 30, 20);
+        assert!(line.contains("te_aborted_at=reopen_lines"), "{line}");
         assert!(line.contains("popup_textedit_pass=0"), "{line}");
     }
 

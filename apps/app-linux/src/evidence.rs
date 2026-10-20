@@ -41,8 +41,10 @@
 //! - [`popup_textedit`]: the same driver's `textEdit` phase (host-derived payload
 //!   → real `cad_set_selected_text` queue + tick drain → status verification →
 //!   close → gate release), scheduled after the `about` phase;
+//! - [`popup_textedit_reopen`]: that phase's reopen steps (stored result visible
+//!   in the dialog for an external grab, then closed again);
 //! - [`popup_textedit_summary`]: that phase's recorded reads and single-line
-//!   summary (split at the 1000-line code-file gate).
+//!   summary (both split at the 1000-line code-file gate).
 
 use std::time::{Duration, Instant};
 
@@ -61,6 +63,7 @@ mod lifecycle;
 mod pan;
 mod popup;
 mod popup_textedit;
+mod popup_textedit_reopen;
 mod popup_textedit_summary;
 mod tool;
 
