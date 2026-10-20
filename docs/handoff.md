@@ -1,3 +1,22 @@
+## 夹具 `Standard` DIMSTYLE 更正（2026-10-21，尺寸类视觉证据的前提）
+
+- **问题**：`fixtures/dwg/synthetic-four-lines.dwg` 的 `Standard` DIMSTYLE **量级自相矛盾**
+  （`DIMTXT/DIMASZ = 0.18` 英制量级配 `DIMGAP/DIMEXO/DIMEXE = 0.625/1.25` 公制量级，而几何仅 ~1 单位）。
+  后果：标注文字浮在尺寸线上方 160 px、延伸线被推到线上方 102/248 px、`DIMDLI=3.75`≈745 px ⇒ 基线行**必然出画布**。
+  `DIMLINEAR` 与 P5f 共用同一样式解析路径，故**全部尺寸创建**都受影响（既有问题）。
+- **修法**：新增**可复现生成器** `crates/cad-import-acadrust/tests/fixtures_generate.rs`（`#[ignore]`、幂等、
+  只改 DIMSTYLE、**几何不一致则拒绝覆盖**、跨 DWG 读写迭代到字节固定点）：
+  `cargo test -p cad-import-acadrust --test fixtures_generate -- --ignored`。
+- **改动值**：`DIMGAP 0.625→0.06`、`DIMEXO 0.625→0.06`、`DIMEXE 1.25→0.12`、`DIMDLI 3.75→0.5`；其余不变；
+  **四条 `LINE` 坐标/数量逐字不变**（生成器三次断言）。新 SHA-256 已入 `fixtures/manifest`。
+- **如实记录的副作用**（与内容无关、稳定后幂等）：首次往返把 `CLASSES` 按哈希序重排、丢弃一个 DWG 写入器不持久化的
+  TABLESTYLE 行抑制标志（组 71）；已写入 `known_limits`。
+- **复跑证据**：文字偏移 **160→49 px**；**三行基线首次在画面上**（y=215/116/16.5、共左端 x=249、间距 99 px、
+  长度 201/281/361 px、各带外向箭头）；连续仍为背对背链式。
+  **仍不完美并归因证据版式**：最高一行文字被画面上缘裁掉（→ **三行渲染、两行带标注**）；标注与夹具家具交叠；
+  外侧延伸线因共享原点须贯穿整叠而被裁切。**要更干净的截图应换更稀疏图纸或调点击位置，不是产品缺陷。**
+- **教训（写死）**：**尺寸/标注类的视觉证据必须使用单位量级自洽的图纸**；本夹具已自洽，但家具仍密。
+
 ## P5f：`DIMBASELINE` / `DIMCONTINUE`（ADR-0017 决策 C 解禁，2026-10-21）
 
 **范围**：`cad-domain`（`dim_line_increment`）、`cad-db`（解析）、`cad-app`（命令/工具/创建）、
