@@ -29,7 +29,7 @@ DXF 图元与 `../opencadstudio` 当前支持的图元，并要求“务必实�
 | VIEWPORT | ✅ | `viewport_semantics`：纸空间视口边框矩形（模型内容由 plot 装配） |
 | TOLERANCE | ⚠️ Partial | 公差框 + 文字；框高按 `text_lines()` 行数，**框宽仍按字符数估计**，显式 `Partial` |
 | MLINE | ⚠️ Partial | `ImporterBuilder::mline_semantics`：从 `doc.objects` 的 `MLinestyle` 解析元素偏移/线型/`flags`，画 justification/scale 基准下的逐元素平行线、方/圆 caps 与 joins；精确 miter、`CLOSED`、cap 角度、`start_point`、`FILL_ON`、元素颜色/线型未应用，显式 `Partial` |
-| MULTILEADER | ⚠️ Partial | `multileader_semantics`：`MLeaderStyle` 解析、箭头三角、`path_type`（Straight/Spline/Invisible）、dogleg/landing、文本附着枚举；颜色/线宽/背景填充/列/块属性/自定义箭头/transform 未应用，显式 `Partial` |
+| MULTILEADER | ⚠️ Partial | `multileader_semantics`：`MLeaderStyle` 解析、箭头三角、`path_type`（Straight/Spline/Invisible）、dogleg/landing、文本附着枚举；颜色/线宽/背景填充/列/打断/自定义箭头（含**实体级 `342`**）/非默认平面 未应用，显式 `Partial`；**块/公差内容仍走 `Compound`**（渲染不变） |
 | RAY / XLINE | ✅ | `ray_semantics`：按运行中模型 bounds 裁剪到 XY 盒；无范围时默认盒并 `Partial` |
 | SHAPE | ✅ | SHX 字形：`FontEngine::shape_glyph` 经 SHX `glyph_by_code` 生成折线；缺字体/按名引用显式 `Partial` |
 | TABLE | ⚠️ Partial | 单元格网格 + 文字 + 合并单元格跨格；**按 `CellStyle`/`CellBorder` 逐边绘制**（`invisible` 跳过、`double_spacing` 双线、合并抑制内边）；逐边颜色/线宽、`override_flags`、`border_type`、`additional_borders` 未应用 |
@@ -69,7 +69,7 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）�
 
 | 图元 / 能力 | opencadstudio | 本项目 | 原因与状态 |
 |---|---|---|---|
-| MULTILEADER | ✅ | ⚠️ Partial | 引线折线+文字+箭头+样式/path type/dogleg/对齐已画；颜色/线宽/背景填充/列/块属性/自定义箭头未应用 |
+| MULTILEADER | ✅ | ⚠️ Partial | 引线折线+文字+箭头+样式/path type/dogleg/对齐已画；颜色/线宽/背景填充/列/打断/自定义箭头（含实体级 `342`）/非默认平面未应用；块/公差内容仍走 `Compound` |
 | MLINE | ✅ | ⚠️ Partial | 逐元素偏移+caps+joins+justification/scale 已画；精确 miter、CLOSED、cap 角度、start_point、FILL_ON、元素颜色/线型未应用 |
 | TOLERANCE | ✅ | ⚠️ Partial | 框+文字已画；框高按行数、框宽按字符数估计，符号字形依赖字体 |
 | SHAPE | ✅ | ✅ | SHX 字形已接线；按名引用（无 shape code）仍 `Partial` |

@@ -215,6 +215,59 @@ fn column_params(context: &acadrust::entities::MultiLeaderAnnotContext) -> Optio
     })
 }
 
+/// Named deviation reused verbatim from the pre-P7b `Compound` path: a custom
+/// arrowhead block is not expanded.
+const CUSTOM_ARROWHEAD_REASON: &str = "custom multileader arrowhead blocks are not expanded";
+
+/// The variant path's named deviations for custom arrowhead blocks.
+///
+/// The source carries a custom arrowhead block handle at two levels: the
+/// entity-level handle (entity-tail `342`) and the per-line handles (`341`).
+/// The display honours neither as a block — it always draws the built-in
+/// arrowhead mesh — but only the per-line handles reach the model
+/// ([`MLeaderLine::arrowhead_handle`]). The entity-level handle has no model
+/// home yet, and the pre-P7b `Compound` path named exactly that loss, so the
+/// variant reports it too instead of dropping it silently. When per-line
+/// handles disagree with the entity-level one, both are named rather than
+/// silently picking one.
+fn custom_arrowhead_reasons(ml: &acadrust::entities::MultiLeader) -> Vec<String> {
+    let Some(entity_handle) = handle_value(ml.arrowhead_handle) else {
+        return Vec::new();
+    };
+    let mut line_handles: Vec<u64> = ml
+        .context
+        .leader_roots
+        .iter()
+        .flat_map(|root| root.lines.iter())
+        .filter_map(|line| handle_value(line.arrowhead_handle))
+        .collect();
+    line_handles.sort_unstable();
+    line_handles.dedup();
+
+    let mut reasons = vec![format!(
+        "{CUSTOM_ARROWHEAD_REASON}: the entity-level arrowhead block handle {entity_handle:X} \
+         (entity-tail 342) is not modelled, so the built-in default arrowhead is rendered \
+         instead"
+    )];
+    let disagreeing: Vec<u64> = line_handles
+        .into_iter()
+        .filter(|handle| *handle != entity_handle)
+        .collect();
+    if !disagreeing.is_empty() {
+        let listed = disagreeing
+            .iter()
+            .map(|handle| format!("{handle:X}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        reasons.push(format!(
+            "entity-level arrowhead block handle {entity_handle:X} and per-line arrowhead block \
+             handle(s) {listed} disagree; the per-line handles are preserved verbatim and the \
+             entity-level handle is not modelled, so the built-in default arrowhead is rendered"
+        ));
+    }
+    reasons
+}
+
 impl ImporterBuilder<'_> {
     /// Convert a MULTILEADER: its leader-root paths (honoring `path_type`),
     /// arrowheads, dogleg/landing and annotation text.
@@ -455,7 +508,10 @@ impl ImporterBuilder<'_> {
     /// data (breaks, background/column parameters, per-line colour/linetype/
     /// lineweight) goes into the opaque `reserved` bag exactly once. The derived
     /// display is built by `cad-domain` and is pixel-identical to the pre-P7b
-    /// `Compound` synthesis.
+    /// `Compound` synthesis. The entity-level custom arrowhead handle
+    /// (entity-tail `342`) has no model home yet, so it is not retained — it is
+    /// reported as a named completeness reason instead (see
+    /// [`custom_arrowhead_reasons`]).
     fn multileader_variant_semantics(
         &self,
         ml: &acadrust::entities::MultiLeader,
@@ -648,14 +704,17 @@ impl ImporterBuilder<'_> {
             },
         };
         let (geometry, reasons) = MultiLeaderGeometry::from_import(parts);
+        let mut reasons = reasons;
+        reasons.extend(custom_arrowhead_reasons(ml));
         if geometry.display().is_empty() {
+            reasons.push("multileader has no leader lines or text".into());
             return (
                 SemanticGeometry::Opaque {
                     type_key: "AcDbMultiLeader".into(),
                     version: 1,
                     payload: Vec::new(),
                 },
-                Completeness::Partial(vec!["multileader has no leader lines or text".into()]),
+                Completeness::Partial(reasons),
             );
         }
         (

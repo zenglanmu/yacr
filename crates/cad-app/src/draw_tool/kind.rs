@@ -875,7 +875,7 @@ impl DrawToolKind {
     /// Whether this operation's **last** step is a typed string rather than a
     /// point (ADR 0019 decision A.1).
     ///
-    /// Only TEXT is a text tool today. This is the single authority the capture
+    /// TEXT, TEXTEDIT and MLEADER carry the text step today. This is the single authority the capture
     /// state machine, the status projection (`awaiting_text`) and the UI prompt
     /// phase read; a UI must never infer "needs text" from `key` plus the point
     /// count, because `ready` alone cannot tell "missing points" from "missing

@@ -434,7 +434,7 @@ fn conflicting_shared_style_names_keep_the_first_and_say_so() {
 }
 
 // ---------------------------------------------------------------------------
-// Report: named deviations, never silent loss.
+// Report: named deviations for everything the writer can observe.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -480,6 +480,44 @@ fn the_report_names_every_multileader_deviation() {
         "{:?}",
         report.entries
     );
+}
+
+/// B2: the parsed source groups the model never reads are a standing named
+/// deviation — the writer cannot detect them per entity, so it declares them on
+/// every MULTILEADER it converts.
+#[test]
+fn the_report_names_the_parsed_groups_the_model_never_reads() {
+    let (_, report) = export_one(SemanticGeometry::MultiLeader(Box::new(rich_multileader())));
+    let messages: Vec<&str> = report
+        .entries
+        .iter()
+        .filter(|entry| entry.code == "export.converted.multileader")
+        .map(|entry| entry.message.as_str())
+        .collect();
+
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("written as acadrust defaults")
+                && message.contains("not round-tripped")),
+        "{messages:?}"
+    );
+    for expected in [
+        "text frame (292)",
+        "annotation scale (293)",
+        "text direction negative (294)",
+        "text angle type (174)",
+        "text align in IPE (178)",
+        "extend leader to text (295)",
+        "text boundary height (44)",
+        "text height automatic (293)",
+        "word break (295)",
+    ] {
+        assert!(
+            messages.iter().any(|message| message.contains(expected)),
+            "missing '{expected}' in {messages:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

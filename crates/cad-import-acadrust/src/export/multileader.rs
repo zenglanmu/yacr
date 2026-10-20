@@ -17,17 +17,33 @@
 //!   snapshot (P7b-1 deviation 1), not the source record, so a field the `90`
 //!   mask suppresses is not a verbatim round-trip — its value re-resolves from
 //!   that snapshot on load.
+//! * The parsed source groups with no model field — entity-tail text frame
+//!   (`292`), annotation scale (`293`), text direction negative (`294`), text
+//!   angle type (`174`), text align in IPE (`178`), extend leader to text
+//!   (`295`) and context text boundary height (`44`), text height automatic
+//!   (`293`) and word break (`295`) — are **normalised to acadrust defaults by
+//!   design** and are not round-tripped. The report names them unconditionally
+//!   because the writer never reads them and so cannot tell whether a source
+//!   file set them.
 //!
-//! What acadrust cannot express is reported too: MULTILEADER seed values
-//! (`MLEADERSTYLE` default text `300`, the block-content transform matrix `47`)
-//! are not modelled and are written empty/identity; a raw per-line
-//! arrowhead/linetype handle is written verbatim even though the handle is not
-//! remapped to an exported object; and `CONTEXT_DATA`'s text colour, flow
-//! direction, alignment and line spacing have no model field, so they are
-//! written from defaults. acadrust's `MLEADERSTYLE` writer also emits no
-//! style-level attachment direction/top/bottom (`271`–`273`), which this build
-//! never modelled anyway. The text normal and direction are derived from the
-//! plane frame and the rotation because the model stores neither.
+//! These named deviations are **exhaustive for what the writer knows about**,
+//! not a claim that the file loses nothing: the writer can only report what the
+//! domain model retains. The entity-level custom arrowhead block handle
+//! (entity-tail `342`) is exactly such a case — the domain model never reads
+//! it, so the writer cannot see it; the importer names that loss in the
+//! migrated entity's `Completeness` instead. (Preserving `342` in `reserved` is
+//! a declared follow-up, not a current capability.)
+//!
+//! Further reported deviations: MULTILEADER seed values (`MLEADERSTYLE` default
+//! text `300`, the block-content transform matrix `47`) are not modelled and
+//! are written empty/identity; a raw per-line arrowhead/linetype handle is
+//! written verbatim even though the handle is not remapped to an exported
+//! object; and `CONTEXT_DATA`'s text colour, flow direction, alignment and line
+//! spacing have no model field, so they are written from defaults. acadrust's
+//! `MLEADERSTYLE` writer also emits no style-level attachment
+//! direction/top/bottom (`271`–`273`), which this build never modelled anyway.
+//! The text normal and direction are derived from the plane frame and the
+//! rotation because the model stores neither.
 //!
 //! "Never write computed text layout" (decision E) holds by construction: only
 //! the string, its placement, the width boundary and the height are written.
@@ -97,6 +113,13 @@ const REASON_SEEDS: &str =
 const REASON_CONTEXT_DEFAULTS: &str =
     "CONTEXT_DATA text colour, flow direction, alignment, line spacing and the text \
      normal/direction are not modelled; they are written from defaults or derived values";
+/// Standing named deviation: parsed source groups the model never reads.
+const REASON_UNMODELLED_GROUPS: &str =
+    "these parsed MULTILEADER groups have no model field, so they are written as acadrust \
+     defaults and are not round-tripped: entity-tail text frame (292), annotation scale (293), \
+     text direction negative (294), text angle type (174), text align in IPE (178) and extend \
+     leader to text (295), plus context text boundary height (44), text height automatic (293) \
+     and word break (295)";
 
 /// Write one MULTILEADER entity plus the style record and class entries it
 /// needs (ADR 0019 decision E).
@@ -167,6 +190,7 @@ pub(super) fn emit_multileader(
         REASON_EFFECTIVE_STYLE.to_string(),
         REASON_SEEDS.to_string(),
         REASON_CONTEXT_DEFAULTS.to_string(),
+        REASON_UNMODELLED_GROUPS.to_string(),
     ];
     let (style_name, name_reasons) = resolve_style_name(geometry);
     reasons.extend(name_reasons);

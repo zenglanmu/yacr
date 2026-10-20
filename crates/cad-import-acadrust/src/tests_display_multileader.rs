@@ -656,3 +656,57 @@ fn block_and_tolerance_content_stay_on_the_compound_path() {
         other => panic!("expected Partial, got {other:?}"),
     }
 }
+
+/// B2: the variant path used to lose the entity-level custom arrowhead handle
+/// (entity-tail `342`) silently. It now reports the pre-P7b reason and names the
+/// dropped handle.
+#[test]
+fn entity_level_custom_arrowhead_is_a_named_deviation() {
+    let (doc, mut ml) = mleader_with_style();
+    ml.arrowhead_handle = Some(acadrust::types::Handle::new(0x2A));
+    let req = request();
+    let builder = ImporterBuilder::new(&req, &doc, ReadStats::default(), compute_identity(&[]));
+    let (geometry, completeness) = builder.multileader_semantics(&ml);
+    assert!(
+        matches!(geometry, SemanticGeometry::MultiLeader(_)),
+        "MText content stays on the variant path: {geometry:?}"
+    );
+
+    let Completeness::Partial(reasons) = completeness else {
+        panic!("expected Partial, got {completeness:?}");
+    };
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason.contains("custom multileader arrowhead blocks are not expanded")),
+        "{reasons:?}"
+    );
+    assert!(
+        reasons.iter().any(|reason| reason.contains("2A")
+            && reason.contains("entity-tail 342")
+            && reason.contains("default arrowhead")),
+        "{reasons:?}"
+    );
+}
+
+/// B2: when the entity-level and per-line arrowhead handles disagree, both are
+/// named; neither is silently chosen.
+#[test]
+fn entity_and_per_line_arrowhead_handles_that_disagree_are_both_named() {
+    let (doc, mut ml) = mleader_with_style();
+    ml.arrowhead_handle = Some(acadrust::types::Handle::new(0x2A));
+    ml.context.leader_roots[0].lines[0].arrowhead_handle = Some(acadrust::types::Handle::new(0x2B));
+    let req = request();
+    let builder = ImporterBuilder::new(&req, &doc, ReadStats::default(), compute_identity(&[]));
+    let (_, completeness) = builder.multileader_semantics(&ml);
+
+    let Completeness::Partial(reasons) = completeness else {
+        panic!("expected Partial, got {completeness:?}");
+    };
+    assert!(
+        reasons.iter().any(|reason| reason.contains("handle 2A")
+            && reason.contains("handle(s) 2B")
+            && reason.contains("disagree")),
+        "{reasons:?}"
+    );
+}

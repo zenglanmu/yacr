@@ -362,7 +362,7 @@ P7c：`draw.kind.mleader`、`tool.draw.mleader`、`tool.prompt.mleader.{arrow,la
   摊平复用与 `Compound` **同一个** `flatten_children`，每个子项记录**自己的**结果——例如镜像实例下的 `Text` 子项
   按域规则**单独**拒绝（`export.dropped.transform`，消息点名 `Text`），父项仍是 `Converted`。
   （**修正过的第一版曾整条 `Dropped`**，那会让缩放块内的标注从导出结果里**消失**，与其它图元类别不一致。）
-- **具名导出偏差（`ExportReport` 全部声明，无静默丢失）**：
+- **具名导出偏差（`ExportReport` 全部声明）**——**声明范围只限"写入器能观察到的内容"，本文不再宣称"零丢失"**：
   1. `91/341/171`（引线颜色/线型/线宽）写默认——导入**解析但未应用**；
   2. **样式记录是"解析后的有效值"快照**（P7b-1 偏离 1）⇒ **掩码抑制的字段不是逐字往返**；
   3. 未建模的上下文取显式默认（文本色 ByBlock、flow Horizontal、对齐 Left、附着 Middle/Center、
@@ -371,7 +371,14 @@ P7c：`draw.kind.mleader`、`tool.draw.mleader`、`tool.prompt.mleader.{arrow,la
   5. **seeds** 未建模（`300` 空、`47` identity），且 **acadrust 读回把 `300` 映射进 `description`**（写读不对称）
      ⇒ 即便写也无法往返；
   6. per-line 箭头/线型 **handle 逐字写**，但**被引用对象未导出** ⇒ **悬空**（无对象可重映射，不伪造）；
-  7. `271–273` 的**样式级**在 acadrust 中**无法表达**（只在实体主体写）。
+  7. `271–273` 的**样式级**在 acadrust 中**无法表达**（只在实体主体写）；
+  8. **解析但未建模的组被归一化为默认值**（**常设具名偏差**，`REASON_UNMODELLED_GROUPS`）：实体尾 `292` 文字框、
+     `293` 标注比例、`294` 文字方向取负、`174` 文字角度类型、`178` IPE 内对齐、`295` 引线延伸到文字；
+     上下文 `44` 文字边界高、`293` 自动字高、`295` 断词；
+  9. **实体级 `342`（自定义箭头块）在导入侧具名**（**恢复 P7b 前的理由**）：
+     `custom multileader arrowhead blocks are not expanded: the entity-level arrowhead block handle … (entity-tail 342) …`；
+     与逐线 `341` **不一致**时**另加**一条具名理由（两种句柄都点名，**不静默择一**）。把 `342` 存进 `reserved` 是**后续**项；
+  10. **尾部 `271` 由 root 0 的保留值派生**（源实体级 `text_attachment_direction` 未读）⇒ 源中两者不一致时会被归一化（已声明）。
 - **往返验收**：合成 → 导出 → **acadrust 读回** → 再导入，比较**有效值**（掩码位、根/落点/狗腿/索引、
   per-line 覆盖、文本/附着/高度/位置、平面）；**不**断言掩码抑制字段的字节相等（数据不存在）。
 - **门禁（编排者复跑）**：受影响 crate **2191 通过 / 0 失败**；UI **200/200**；clippy(`-D warnings`)、fmt、
