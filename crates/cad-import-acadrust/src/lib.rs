@@ -458,3 +458,5 @@ mod tests_display_multileader;
 mod tests_display_table_extended;
 #[cfg(test)]
 mod tests_multileader_export;
+#[cfg(test)]
+mod tests_multileader_fixtures;

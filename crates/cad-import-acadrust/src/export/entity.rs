@@ -10,7 +10,7 @@
 //! names, spline closed/periodic flags), and a `Spline` is therefore reported as
 //! `Converted`, never `Exact`.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use acadrust::entities::{
     Arc as DxfArc, AttachmentPoint, Circle as DxfCircle, Ellipse as DxfEllipse, EntityCommon,
@@ -53,6 +53,10 @@ pub(crate) struct ExportAccumulator {
     /// a dimension's content-block members without counting each one as a
     /// separate source geometry (the dimension itself is one outcome).
     pub suppress_records: bool,
+    /// MULTILEADER style records written so far, keyed by the lower-cased style
+    /// name: one `MLEADERSTYLE` object per distinct name, first snapshot wins
+    /// (ADR 0019 decision D).
+    pub mleader_styles: BTreeMap<String, (String, MLeaderStyleValues)>,
 }
 
 impl ExportAccumulator {
@@ -65,6 +69,7 @@ impl ExportAccumulator {
             expanded_blocks: BTreeSet::new(),
             dim_block_counter: 0,
             suppress_records: false,
+            mleader_styles: BTreeMap::new(),
         }
     }
 
@@ -220,15 +225,7 @@ pub(super) fn emit(
         }
         SemanticGeometry::Compound(children) => {
             let object = Some(entity.object.id);
-            for child in children {
-                // A compound is a single source entity; its children inherit the
-                // entity's identity and placement.
-                let child_entity = DbEntity {
-                    geometry: child.clone(),
-                    ..entity.clone()
-                };
-                emit(doc, &child_entity, transform, depth, ctx, acc, stack)?;
-            }
+            flatten_children(doc, entity, children, transform, depth, ctx, acc, stack)?;
             acc.record(
                 object,
                 "compound",
@@ -238,15 +235,14 @@ pub(super) fn emit(
             );
             Ok(())
         }
-        // Interim export (P7b-1): a migrated MULTILEADER is flattened into its
-        // derived display, exactly the primitives the pre-P7b `Compound`
-        // produced. The real MULTILEADER writer (with `CLASSES` and
-        // `MLEADERSTYLE` records) is P7b-2; until then this is a declared
-        // stopgap, not a first-class round-trip.
-        SemanticGeometry::MultiLeader(multileader) => emit_multileader(
+        // A first-class MULTILEADER is written as a real `MULTILEADER` entity
+        // plus its `MLEADERSTYLE` record and `CLASSES` entries (ADR 0019
+        // decision E). The derived display is never written as the entity: it
+        // is our rendering, and AutoCAD recomputes it.
+        SemanticGeometry::MultiLeader(multileader) => super::multileader::emit_multileader(
             doc,
             entity,
-            multileader.display(),
+            multileader,
             transform,
             depth,
             ctx,
@@ -281,42 +277,31 @@ pub(super) fn emit(
     }
 }
 
-/// Interim MULTILEADER export (P7b-1 stopgap).
+/// Emit each child of a flattened parent as its own entity, with the parent's
+/// identity and the accumulated placement.
 ///
-/// Flattens the derived display into separate output entities, exactly as the
-/// pre-P7b `Compound` arm did, and records the conversion. This is **not** the
-/// real MULTILEADER writer (P7b-2); the entity's first-class identity is lost on
-/// save today, and the record says so.
+/// Shared by the `Compound` arm and a MULTILEADER that cannot be written as an
+/// entity (a scaling/mirroring insert placement, ADR 0019 C.5), so a child
+/// records **its own** outcome — including its own named refusal, such as a
+/// `Text` child under a mirror.
 #[allow(clippy::too_many_arguments)]
-fn emit_multileader(
+pub(super) fn flatten_children(
     doc: &mut CadDocument,
     entity: &DbEntity,
-    display: &[SemanticGeometry],
+    children: &[SemanticGeometry],
     transform: &Transform3,
     depth: usize,
     ctx: &EntityContext,
     acc: &mut ExportAccumulator,
     stack: &mut Vec<BlockId>,
 ) -> CadResult<()> {
-    let object = Some(entity.object.id);
-    for child in display {
-        // The display children inherit the source entity's identity and
-        // placement, exactly like the old compound flattening.
+    for child in children {
         let child_entity = DbEntity {
             geometry: child.clone(),
             ..entity.clone()
         };
         emit(doc, &child_entity, transform, depth, ctx, acc, stack)?;
     }
-    acc.record(
-        object,
-        "multileader",
-        MappingOutcome::Converted(vec![
-            "MULTILEADER flattened into its display primitives; the first-class MULTILEADER \
-             writer is P7b-2 (interim stopgap, no round-trip identity yet)"
-                .into(),
-        ]),
-    );
     Ok(())
 }
 
@@ -587,14 +572,15 @@ fn emit_leaf(
         SemanticGeometry::Hatch(hatch) => {
             super::hatch::emit_hatch(doc, entity, hatch, ctx, acc)?;
         }
-        // The real MULTILEADER writer does not exist yet (P7b-2); `emit` flattens
-        // the display before this point. Reaching here is a programming error.
+        // A MULTILEADER is written by the dedicated entity writer before this
+        // point; reaching here is a programming error, not a silent drop.
         SemanticGeometry::MultiLeader(_) => {
             acc.record(
                 object,
                 "internal",
                 MappingOutcome::Dropped(vec![
-                    "multileader reached the leaf mapper; its display should have been flattened"
+                    "multileader reached the leaf mapper; it is written by the dedicated \
+                     MULTILEADER writer"
                         .into(),
                 ]),
             );

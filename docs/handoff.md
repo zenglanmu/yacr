@@ -1,3 +1,28 @@
+## P7b-2：真 `MULTILEADER` 导出（`MLEADERSTYLE` 去重 + `CLASSES`，ADR-0019 决策 E，2026-10-20）
+
+**范围**：`crates/cad-import-acadrust/src/export/{multileader.rs(新), entity.rs, mod.rs}` 与测试。
+
+- **从域定义写，不写派生显示**：`CONTEXT_DATA` / `LEADER{}`（落点、狗腿向量、每簇长度、`leader_index`、附着方向、打断）/
+  `LEADER_LINE{}`（顶点逐点、`index`、覆盖位、箭头尺寸/handle、颜色/线型/线宽、打断）/ 尾部（`340`、**`90` 逐字**、
+  `170`、`172`、`343`、`173/95/174/175`、`92`、`292`、`45`、`271–273`）。**不写计算后的文字排版**。
+- **U-5 勘误（推翻 ADR 原前提）**：`CadDocument::new()` **已预注册约 260 条**，含
+  `("MULTILEADER","AcDbMLeader",1025,"ACDB_MLEADER_CLASS",true)`（`acadrust-0.6.5/src/classes/mod.rs:338`）与
+  `MLEADERSTYLE` 对应项 ⇒ 原"`CLASSES` 默认空、必须插入两条"**错误**。实现改为**缺失才补**，且**仍断言**写出的
+  精确字符串/flags；**group 1 从不写 `MLEADER`**。
+- **`MLEADERSTYLE`** 按名去重（`Standard` 优先），同名不同快照**取首个 + 报告冲突**。
+- **块内放置与 `Compound` 对齐（修正了一次内容丢失）**：刚性 ⇒ 真实体；**缩放/镜像 ⇒ `Converted` 摊平**
+  （`export.converted.multileader_flattened`，复用同一个 `flatten_children`），每个子项记自己的结果
+  （镜像时 `Text` 子项按域规则单独拒绝）。**第一版整条 `Dropped` 会让缩放块内的标注从导出里消失**，与其它图元不一致，已改。
+- **具名偏差（全部进 `ExportReport`）**：`91/341/171` 写默认；样式是**有效值快照**（掩码抑制字段**非逐字往返**）；
+  未建模上下文取显式默认、`text_normal/direction` 派生、`content_base_point = text.location`；seeds 未建模
+  （且 acadrust 读回把 `300` 映进 `description` ⇒ **写读不对称**）；per-line 箭头/线型 handle **悬空**；
+  `271–273` 样式级 **acadrust 无法表达**。
+- **往返**：合成 → 导出 → **acadrust 读回** → 再导入，比**有效值**；**不**断言掩码抑制字段字节相等。
+- **门禁（编排者复跑）**：受影响 crate **2191 通过 / 0 失败**；UI **200/200**；clippy/fmt/architecture(27)/
+  i18n(**553**)/file-size(**732**)/manifest(**23**)。**NOT RUN**：全量 workspace、跨平台、真机/像素；
+  **无真实 MULTILEADER 夹具，未在 AutoCAD 打开验证** ⇒ U-4/U-5 仍为推断。
+- **下一步**：P7c（`MLEADER` 创建：2 点 + 文本、直引线、单簇、2 顶点）→ **P7 阶段门禁**。
+
 ## 弹窗层决策：居中模态窗口 + 原生锚定菜单（ADR-0021，2026-10-20）
 
 **纯文档**（未改代码）。起因：用户问"后续 DOM 弹窗（选项菜单、右键菜单、text 图元弹窗编辑）怎么处理"，

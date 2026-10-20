@@ -30,7 +30,9 @@
 7. **DXF 结构官方文档薄**：嵌套段语法不在 DXF 参考；`90` 是**属性覆盖掩码**；`MLEADERSTYLE` 是符号表记录；
    `MLEADER`/`MLEADERSTYLE` 需 `CLASSES` 条目（真实文件 group 1 为 **`MULTILEADER`**，非 `MLEADER`）。
 8. **acadrust 0.6.5 写入器可用**（已核实）：`write_multileader`（含嵌套段）、`write_multileader_style`、
-   **`90` 掩码会写**；`CLASSES` 由 `document.classes` 生成且**默认空**；`DxfClass::new_entity` /
+   **`90` 掩码会写**；`CLASSES` 由 `document.classes` 生成——**2026-10-20 更正：并非默认空**，
+   `CadDocument::new()` 已预注册约 260 条，**含本族**（见下方 P7b-2 实施小节对 U-5 的勘误）；
+   `DxfClass::new_entity` /
    `DxfClassCollection::add_or_update` **是公开 API** ⇒ 可插入两条 class 而**不改 acadrust**。
 9. **无 MULTILEADER 夹具**；现有测试全为内存构造的合成实体。
 
@@ -169,9 +171,10 @@ pub struct MultiLeaderGeometry {          // 字段私有；写入路径 new / f
   `LEADER{}`（落点、狗腿向量、**每簇狗腿长度**、`leader_index`）、`LEADER_LINE{}`（**顶点逐点**、`index`、per-line
   覆盖位/箭头）、实体尾部（`340`、**`90` 掩码原样**、`170`、`290/291`、`41/42/43`、`172`、`343`、`173/95/174/175`、
   `92`、`292`、`45`（**尾部语义 = scale_factor**）、`271`–`273`）。
-- **`CLASSES` 必须插入两条 `DxfClass`**：group 1 = **`MULTILEADER`**（`AcDbMLeader` / `ACDB_MLEADER_CLASS`，
-  `is_an_entity = 1`）与 **`MLEADERSTYLE`**（`AcDbMLeaderStyle` / `ACDB_MLEADERSTYLE_CLASS`，`is_an_entity = 0`）；
-  `ProxyFlags` 与 `instance_count`/`was_zombie` 的取值由**测试**钉住（U-5）。
+- **`CLASSES`：由 acadrust 的默认注册保证（U-5 已勘误）**。`acadrust-0.6.5/src/classes/mod.rs:338` 的默认表
+  已含 `("MULTILEADER", "AcDbMLeader", 1025, "ACDB_MLEADER_CLASS", true)` 与 `MLEADERSTYLE` 对应项，
+  写 `CLASSES` 段时自动带上。写入器**只在缺失时补**（防御路径用同一组取值）；group 1 **从不**是 `MLEADER`；
+  写出的精确字符串与 flags **由测试钉住**（不依赖"上游默认"这一事实而不加断言）。
 - **具名导出偏差**：`91/341/171`（引线颜色/线型/线宽）写默认值（导入解析但未应用）⇒ `ExportReport` 声明；
   `271`–`273` 在 **context 与尾部两处都写**（与 acadrust 一致）；`90` 掩码原样、**不擅自置位**（因为缩放已拒绝，
   见 C.5）。
@@ -240,7 +243,9 @@ pub struct MultiLeaderGeometry {          // 字段私有；写入路径 new / f
 - **U-2 landing gap 的作用**：本实现**缩短狗腿**；"推开文字"仅为第三方推断。
 - **U-3 文字附着 0–10 → 3×3 映射**：ObjectARX 枚举可查，与 MTEXT 附着的对应**无官方文档**。
 - **U-4 最小有效 MULTILEADER**：**推断**，**未在 AutoCAD 打开验证**。
-- **U-5 `CLASSES` 是否强制** 与 `ProxyFlags`/`instance_count` 取值：**未验证**；按"必须写"处理，取值由测试钉住。
+- **U-5 `CLASSES` 是否强制** 与 `ProxyFlags`/`instance_count` 取值：**已勘误（2026-10-20）**——原判断"默认空、必须插入"**错误**；
+  acadrust 0.6.5 的 `CadDocument::new()` **已预注册**（含本族）。剩下的不确定只有"**AutoCAD 是否接受**"，
+  仍**无真实文件/真实 AutoCAD 验证**（见下）。
 - **U-6 `Maxpoints` 与"最后拾取点 → 落点"对应**：未述；我们只产 2 点以规避。
 - **U-7 `142`/`45`/`40` 的 scale 语义**：按普通乘数建模（尾部 `45` = scale_factor）。
 - **U-8 `MLEADERSTYLE` 记录是否必需**：按必需处理。
@@ -339,3 +344,37 @@ P7c：`draw.kind.mleader`、`tool.draw.mleader`、`tool.prompt.mleader.{arrow,la
      ADR 正文已更正。
 - **门禁**：受影响 crate **2177 通过 / 0 失败**；UI **200/200**；clippy/fmt/architecture(27)/i18n(**553**)/file-size(**728**)。
   **NOT RUN**：全量 `cargo test --workspace`；**无真实 MULTILEADER 夹具**（全部为合成）；真机/像素。
+
+### P7b-2（真 `MULTILEADER` 导出 + `MLEADERSTYLE` 去重 + `CLASSES`，2026-10-20）
+
+- **实体从域定义写，不写派生显示**：`export/multileader.rs` 用 `style + text + roots + lines + reserved` 组
+  `CONTEXT_DATA` / `LEADER{}`（落点、狗腿向量、**每簇狗腿长度**、`leader_index`、附着方向、打断）/
+  `LEADER_LINE{}`（**顶点逐点**、`index`、覆盖位、箭头尺寸/handle、颜色/线型/线宽、打断）/ 实体尾部；
+  **`90` 掩码逐字写出**（含**零掩码**用例），**从不**重算。
+- **`MLEADERSTYLE` 按名去重**（`Standard` 优先），同名不同快照时**取首个**并在报告中声明冲突；
+  实体 `340` 指向所写记录。
+- **U-5 勘误（重要）**：`CadDocument::new()` **已预注册** `MULTILEADER`（`AcDbMLeader`、proxy 1025、
+  `ACDB_MLEADER_CLASS`、entity）与 `MLEADERSTYLE`（`AcDbMLeaderStyle`、4095、`ACDB_MLEADERSTYLE_CLASS`、非 entity）；
+  因此 ADR 原文"必须插入两条 / 默认空"**不成立**。实现改为"**缺失才补**"，并且**仍然断言写出的精确字符串与 flags**
+  （不因为上游默认就免于断言）。**group 1 从不写 `MLEADER`**。
+- **块内放置（与 `Compound` 一致，不丢内容）**：刚性（平移/旋转）⇒ 写真 `MULTILEADER`；
+  **缩放/镜像 ⇒ `MappingOutcome::Converted`**（`export.converted.multileader_flattened`）+ 摊平为显示图元。
+  摊平复用与 `Compound` **同一个** `flatten_children`，每个子项记录**自己的**结果——例如镜像实例下的 `Text` 子项
+  按域规则**单独**拒绝（`export.dropped.transform`，消息点名 `Text`），父项仍是 `Converted`。
+  （**修正过的第一版曾整条 `Dropped`**，那会让缩放块内的标注从导出结果里**消失**，与其它图元类别不一致。）
+- **具名导出偏差（`ExportReport` 全部声明，无静默丢失）**：
+  1. `91/341/171`（引线颜色/线型/线宽）写默认——导入**解析但未应用**；
+  2. **样式记录是"解析后的有效值"快照**（P7b-1 偏离 1）⇒ **掩码抑制的字段不是逐字往返**；
+  3. 未建模的上下文取显式默认（文本色 ByBlock、flow Horizontal、对齐 Left、附着 Middle/Center、
+     行距 `1.0`/`AtLeast`、样式 `142 = 1.0`）；`text_normal`/`text_direction` 由模型**派生**（`u×v`、`u·cos+v·sin`）；
+  4. `content_base_point = text.location`（模型**无独立基点**）；
+  5. **seeds** 未建模（`300` 空、`47` identity），且 **acadrust 读回把 `300` 映射进 `description`**（写读不对称）
+     ⇒ 即便写也无法往返；
+  6. per-line 箭头/线型 **handle 逐字写**，但**被引用对象未导出** ⇒ **悬空**（无对象可重映射，不伪造）；
+  7. `271–273` 的**样式级**在 acadrust 中**无法表达**（只在实体主体写）。
+- **往返验收**：合成 → 导出 → **acadrust 读回** → 再导入，比较**有效值**（掩码位、根/落点/狗腿/索引、
+  per-line 覆盖、文本/附着/高度/位置、平面）；**不**断言掩码抑制字段的字节相等（数据不存在）。
+- **门禁（编排者复跑）**：受影响 crate **2191 通过 / 0 失败**；UI **200/200**；clippy(`-D warnings`)、fmt、
+  architecture(27)、i18n(**553**)、file-size(**732**)、fixture-manifest(**23**)。**NOT RUN**：全量
+  `cargo test --workspace`；跨平台；真机/像素；**无真实 MULTILEADER 夹具**（全合成），**未在 AutoCAD 打开验证**
+  ⇒ U-4（最小有效文件）与 U-5（AutoCAD 是否接受）**仍是推断**。
