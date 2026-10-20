@@ -73,8 +73,13 @@
 - **两面对齐（门禁点名）**：`engine.rs` 的捕捉面**也必须**加上同样的镜像/非均匀拒绝，否则两个变换面对同一输入
   给出不同结果。**ADR-0017 A.5 的"两变换面语义一致"在此照搬**，并有**跨面一致性测试**（同一变换分别经
   `engine.rs` 与 `transform_geometry`，结果必须相同）。
-- **文档与行为同步**：`compatibility.md` 的 **STRETCH（TEXT）** 与 **EXPLODE of INSERT（含 Text）** 两行必须更新，
-  并由测试钉住新行为（门禁 B-non-blocking）。
+- **B.2 两块依赖"Text 不可变"的既有行为：决定**保持行为不变、只更正理由**（attempt 2 的 F2/F3）：
+  - **STRETCH 选中 TEXT**：**仍然整命令拒绝**（`stretch.rs` 的守卫保留）；但守卫的**理由**不再成立，
+    改为"TEXT 的相似变换语义受限（见 B）"，并**由测试钉死"仍然整命令拒绝"**。
+  - **EXPLODE of INSERT 含 Text 成员**：**仍然整命令失败**，但改为**显式**（`push_produced` / `child_refusal`
+    的具名拒绝），**不再**依赖 `transform_geometry` 拒绝 Text 这一副作用。
+  ⇒ 因此 **§0.4 的措辞更正**：Text 一变，这两处**本来会**静默改变；本 ADR **决定保持二者行为不变**，
+  所以**本相不对这两条产生行为变更**——但必须**显式化理由**并由测试钉住。
 
 ---
 
@@ -108,6 +113,7 @@ pub struct MultiLeaderGeometry {          // 字段私有；写入路径 new / f
 
 决策 E 承诺"块内容/打断/背景/分栏/覆盖位**保留存储并声明**"——那就必须有字段。**用不透明 `reserved` 袋**
 （ADR-0018 渐变 `reserved`/`angle_raw` 的先例）承载：引线打断点、背景与分栏参数、未建模的 per-line 覆盖位。
+**分区规则（attempt 2 的 F5）**：`reserved` **只存源文件的逐字数据**，**不得**存合成值，**不得**与已建模字段重叠；**每个源组码恰好导出一次**（由测试断言"无重复写出"）。`MLeaderLine.override_flags` 是**已建模**字段（逐字保存），因此**不**再进 `reserved`。
 **不允许**"声称保留但无字段"。
 
 ### C.3 块 / 公差内容：**不迁移**（门禁 B2 —— 避免静默渲染回归）
@@ -119,11 +125,16 @@ pub struct MultiLeaderGeometry {          // 字段私有；写入路径 new / f
 - **块 / 公差内容保持今日的 `Compound` 展平路径**（`Partial`，原因具名），**不变**；
 - **声明**：这些实体仍**不能**以 `MULTILEADER` 往返（导出仍摊平）——**与今日相同**，不是新损失；
   变体化为未来工作（需 `MLeaderContent::Block{ insert }` + 块句柄导出）。
+- **按内容类型分叉的**表面（attempt 2 要求逐条列出）：**导出往返**（变体→`MULTILEADER`；块/公差→摊平）、
+  **STRETCH**（两者都整命令拒绝 ⇒ **不分叉**）、**导入 `Completeness`**（见下）。
+- **迁移后变体的导入 `Completeness`**：背景/分栏/打断等**存进 `reserved` 但不渲染** ⇒ 按决策 H 的同一原则报
+  **`Partial` + 具名原因**，**不得**报 `Complete`（否则 MTEXT 的诚实性缺口会在上一层复发）。
 
 ### C.4 显示派生与狗腿公式（门禁 B4 —— 以**代码现状**为准）
 
 - **狗腿端点采用今日实现的公式**（`multileader.rs`）：`reach = (landing_distance − landing_gap).max(0)`，
   `end = 最后引线顶点 + 方向 × reach`；**即 landing gap 会缩短狗腿，基点是最后顶点而非落点**。
+  **并须连同这些细节一起照搬（attempt 2 的 F8）**：`landing_distance` 缺省时走 `default_length` 回退链，且 **`reach < 1e-9` 时完全不画狗腿**。
   ⇒ **迁移不改渲染**（这是本决策的最大价值：P7b **不产生像素变化**）。
 - **U-1 重新归因**：`落点 + 长度 × 方向` 是 **GDAL 逆推**（**第三方证据**），与本实现不同；记为
   **U-1'（第三方证据 vs 我们的实现，冲突未解，需真实夹具）**。
@@ -133,9 +144,12 @@ pub struct MultiLeaderGeometry {          // 字段私有；写入路径 new / f
 ### C.5 变换（门禁 B3 —— 避免掩码与几何自相矛盾）
 
 - **平移 / 旋转**：全部几何 + 定义点 + `display` 重建。
-- **缩放（含均匀）/ 镜像 / 非均匀**：**整实体拒绝**（`Unsupported` + 诊断）。
+- **缩放（含均匀）/ 镜像 / 非均匀**：**拒绝**——注意 `transform_selection` 是**全有或全无**，所以实际表现是**含 MultiLeader 的选择整命令失败**（连其它实体一起）。
   **理由**：均匀缩放会改文字高度/箭头尺寸/狗腿长度，而 `90` 掩码若**未置**对应位，AutoCAD 加载时会从样式
-  **重新解析**这些值 ⇒ 重开后的实体与我们显示的不一致。拒绝缩放**彻底规避**该陷阱，并**显式声明**。
+  **重新解析**这些值 ⇒ 重开后的实体与我们显示的不一致。拒绝缩放**规避**该陷阱，并**显式声明**。
+- **未来路径（attempt 2 的 Q4）**：缩放并非几何上不可行——正确做法是**同时置位**对应覆盖位（`TEXT_HEIGHT`、
+  `ARROWHEAD_SIZE`、`LANDING_DISTANCE`、`LANDING_GAP`）并记入 `ExportReport`；本相**选择拒绝**作为取舍。
+  **注意**：该规避只覆盖**我们施加的**变换；源文件本身在 U-11 下不一致时**仍会**往返进同一陷阱（见 J 的断言作用域）。
 
 ---
 
@@ -180,10 +194,11 @@ pub struct MultiLeaderGeometry {          // 字段私有；写入路径 new / f
 - 狗腿/landing gap/箭头尺寸/文字高度全取样式（决策 D 的表）；`content = Text`。
 - **无 `Options` 子提示**（引线类型/内容类型/最大点数/角度约束）⇒ **声明**，UI 不得暗示。
 - 单一漏斗插入**一个** `AcDbMultiLeader`；一条事务/一步撤销/活动图层。
+- **创建必须有文本**（attempt 2 的 Q3）：AutoCAD 允许"在文本前退出"得到**无内容** MULTILEADER，而本设计**不提供**该路径（空文本拒绝、Esc 两次取消）⇒ 明确声明：**无内容 MULTILEADER 仅导入/显示/导出**，**不创建**。理由：为它引入"无文本"标志会把"无文本确认"的歧义重新带回来，而收益为零。
 
 ### F.3 拒绝面（全部具名、且不开事务）
 
-空/纯空白/超 1024 字符文本、`SetToolText` 在非待文本状态、点未齐即提交文本、样条样式、块/公差内容、
+空/纯空白/超 1024 字符文本、`SetToolText` 在非待文本状态、点未齐即提交文本、**`awaiting_text` 期间收到 `Confirm`（attempt 2 的 F4 —— 否则命令会从后门不带文本完成）**、样条样式、块/公差内容、
 非 `+Z` 平面、缺活动图层、Viewer、MultiLeader 的缩放/镜像/非均匀变换。
 
 ---
@@ -192,8 +207,9 @@ pub struct MultiLeaderGeometry {          // 字段私有；写入路径 new / f
 
 **通配符臂**：`cad-import-acadrust/src/{support,geometry,entity/push}.rs`、`cad-spatial/src/pick/{hit,bounds}.rs`、
 `cad-app/src/{select_box,select_all,selection}.rs`、`cad-measure/src/snap/{generate,resolve}.rs`、
-`cad-platform/src/{font_keys,images}.rs`、`cad-proxy/src/lib.rs`、`cad-geometry/src/intersect.rs`、
-`cad-app/src/app_drawing/explode.rs`。
+`cad-platform/src/{font_keys,images}.rs`、`cad-proxy/src/lib.rs`、`cad-geometry/src/intersect.rs`。
+
+**必须改动（attempt 2 的 F3）**：`cad-app/src/app_drawing/explode.rs`（显式按 `type_key` 拒绝 MultiLeader，顶层与块内都算）与 `cad-app/src/app_drawing/stretch.rs`（显式拒绝 + 更正理由）。这两处**不是**通配符臂。
 
 **穷尽臂**：`cad-db/src/{bounds,transform,validate}.rs`、`cad-geometry/src/{tessellate,vector,engine}.rs`、
 `export/entity.rs`（`kind_name`）、`app_drawing/helpers.rs`（`class_name` = `"AcDbMultiLeader"`）、
@@ -203,7 +219,7 @@ pub struct MultiLeaderGeometry {          // 字段私有；写入路径 new / f
 - **EXPLODE（门禁 B5）**：今日**顶层拒绝** `AcDbMultiLeader`（`refuse_compound_type_key`）⇒ **保持拒绝**（**不是**
   改成分解，那会是行为变更），且**块内**拒绝改为**显式按 `type_key` 拒绝**（不能再依赖 `transform_geometry` 的
   Compound 拒绝——MultiLeader 一旦有 `transformed` 臂，该依赖就消失）。`compatibility.md` 的 EXPLODE 行相应说明。
-- **STRETCH**：沿用 `compatibility.md` 既有口径（部分包围不动 + 诊断、完全包围整移）。
+- **STRETCH（attempt 2 的 F1）**：**整命令拒绝**，即**保持今日行为**——MultiLeader 今日作为 `Compound` 在**部分与完全包围两种情形下都使 STRETCH 失败**，所以"沿用既有口径"是**误述**（`compatibility.md` 的通用规则是**逐顶点移动**，"部分包围不动 + 诊断"只属 SPLINE/ARC/HATCH/INSERT 专条）。**不新增** `Unchanged` 臂，以免 STRETCH 行为**按内容类型分叉**；需在 `stretch.rs` **显式按 `type_key` 拒绝**。
 - **变换**：见 C.5。**捕捉**：引线顶点/落点/狗腿端点是捕捉点。**拾取**：引线/箭头/文字任一命中即选中整个实体。
 
 ---
@@ -243,13 +259,12 @@ pub struct MultiLeaderGeometry {          // 字段私有；写入路径 new / f
 | 子阶段 | 内容 | 验收 |
 |---|---|---|
 | **P7a** | 文本通道（`cad_set_tool_text` + `awaiting_text` + 终端语义 + UI 文本模式）+ `Text` 变换（两面对齐）+ `TEXT` 创建 + MTEXT 诚实性 | 通道拒绝面与幂等矩阵；IME/快捷键**行为不变**；Text 变换四情形 + **跨面一致性**；TEXT 创建数值 + 导出往返；MTEXT `Partial` 具名原因；**STRETCH/EXPLODE 两行文档更新并加钉** |
-| **P7b** | MultiLeader 变体（仅 MText/无内容）+ 导入迁移 + 不透明 `reserved` + **真导出**（含 `CLASSES`）+ 样式记录去重 | **往返同一性**（顶点/落点/狗腿/文本/附着/**掩码原始位**）；**自洽断言**：掩码**未置**的位，实体值 == 写出的样式记录值；**`CLASSES` 两条精确字符串**；**显示等价**（迁移前后 bbox 相同 ⇒ 证明未改渲染） |
+| **P7b** | MultiLeader 变体（仅 MText/无内容）+ 导入迁移 + 不透明 `reserved` + **真导出**（含 `CLASSES`）+ 样式记录去重 | **往返同一性**（顶点/落点/狗腿/文本/附着/**掩码原始位**，**逐字优先**）；**自洽断言只作用于自洽构造**（掩码未置的位，实体值 == 写出的样式记录值）——**不得**为满足自洽而规范化源文件的不一致数据；两个实体共用同名样式且值不一致时，**样式记录取首个**并在报告声明；**`CLASSES` 两条精确字符串**；**显示等价**（迁移前后 bbox 相同 ⇒ 证明未改渲染） |
 | **P7c** | `cad-db` `MLeaderStyle` 表 + `MLEADER` 创建（2 点 + 文本，直引线/单簇/2 顶点） | 数值几何 + 拒绝面 + **导出往返（首次检验"创建的"引线标注）** + 真机像素判据 |
 
 ### 文档更正清单（门禁 e —— 本 ADR 必须自带）
 
-`docs/compatibility.md`：**新增 MULTILEADER 行**（读取/显示/创建/导出 + 声明损失）；`:39` TEXT/MTEXT（MTEXT 的
-`Partial` 原因）；`:214` STRETCH（TEXT）；`:215` EXPLODE（MultiLeader 拒绝为显式）。`docs/dxf-entity-coverage.md:32,72`
+`docs/compatibility.md`：**新增 MULTILEADER 行**（读取/显示/创建/导出 + 声明损失，并写明**含 MultiLeader 的缩放/镜像/ALIGN-scale 选择整命令拒绝**）；`:39` TEXT/MTEXT（MTEXT 的 `Partial` 原因）；`:214` STRETCH（TEXT 仍整命令拒绝，理由更新）；`:215` EXPLODE（MultiLeader 拒绝为显式）；`:178` ROTATE/SCALE 与 ALIGN 行（用户真正会撞到拒绝的地方，attempt 2 的 F6）。`docs/dxf-entity-coverage.md:32,72`
 的 `Partial` 原因随变体化更新。
 
 ### 文件计划（门禁更正）
