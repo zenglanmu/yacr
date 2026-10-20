@@ -729,34 +729,15 @@ impl DefaultRepresentationProvider {
                         .into(),
                 });
             }
-            // A WIPEOUT renders as a colourless mask polygon (ADR 0022 C1): the
+            // A WIPEOUT renders as a colourless mask polygon (ADR 0022): the
             // renderer fills it with its own clear colour in a final
             // `depth_compare: Always` pass, so it really hides what is beneath.
-            // Only the non-`inverted` case is implemented; `inverted` (DXF clip
-            // mode Inside) needs a viewport-relative complement polygon and keeps
-            // today's boundary-only draw, reported by name.
+            // Both clip modes are rendered: a non-`inverted` mask fills the
+            // boundary, an `inverted` one (DXF clip mode Inside) fills the
+            // complement, which the renderer expresses by adding a
+            // viewport-covering ring to the same even-odd fill (no stencil).
             SemanticGeometry::Mask { boundary, inverted } => {
-                if *inverted {
-                    representation.completeness =
-                        representation
-                            .completeness
-                            .combine(Completeness::Partial(vec![
-                                MASK_INVERTED_NOT_RENDERED.into()
-                            ]));
-                    representation.diagnostics.push(Diagnostic {
-                        object: Some(ObjectId(entity.id.0)),
-                        code: "representation.mask_inverted".into(),
-                        message: MASK_INVERTED_NOT_RENDERED.into(),
-                    });
-                    push_chord_fragment(
-                        entity,
-                        geometry,
-                        context,
-                        source,
-                        geometry_source,
-                        &mut representation,
-                    );
-                } else if boundary.len() < 3 {
+                if boundary.len() < 3 {
                     // A boundary with fewer than three vertices has no area, so
                     // there is nothing to fill: keep the polyline and say why.
                     representation.completeness = representation
@@ -788,9 +769,10 @@ impl DefaultRepresentationProvider {
                         linetype: LinetypePattern::continuous(),
                         linetype_unresolved: true,
                         linetype_scale: 1.0,
-                        primitive: DisplayPrimitive::Mask(Arc::from(
-                            boundary.clone().into_boxed_slice(),
-                        )),
+                        primitive: DisplayPrimitive::Mask {
+                            boundary: Arc::from(boundary.clone().into_boxed_slice()),
+                            inverted: *inverted,
+                        },
                     });
                 }
             }

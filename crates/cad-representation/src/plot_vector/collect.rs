@@ -75,7 +75,7 @@ pub fn build_vector_document(
             // A mask has no path representation: it erases in the raster frame by
             // flooding the background. Vector output therefore skips it and names
             // the omission (ADR 0022 D4), never silently.
-            DisplayPrimitive::Mask(_) => {
+            DisplayPrimitive::Mask { .. } => {
                 document.report(
                     object,
                     vector_diagnostic::MASK_UNSUPPORTED,

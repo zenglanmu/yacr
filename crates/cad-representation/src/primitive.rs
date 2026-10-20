@@ -191,35 +191,28 @@ pub enum DisplayPrimitive {
         transform: Transform3,
     },
     /// An erasing mask (DXF `WIPEOUT`): a **colourless** closed world-space
-    /// boundary polygon whose interior hides everything painted beneath it.
+    /// boundary polygon whose interior (or, when `inverted`, exterior) hides
+    /// everything painted beneath it.
     ///
-    /// The polygon is the non-`inverted` fill region; it carries no colour
-    /// because "the background" belongs to the renderer (`cad-representation`
-    /// stays GPU/host independent) and no depth because the mask pass paints
-    /// last with `depth_compare: Always` (see
-    /// `docs/adr/0022-wipeout-mask-rendering.md`). The renderer fills the
-    /// polygon with its own clear colour, tessellating concave boundaries with
-    /// the same even-odd fill solid HATCH uses.
+    /// It carries no colour because "the background" belongs to the renderer
+    /// (`cad-representation` stays GPU/host independent) and no depth because the
+    /// mask pass paints last with `depth_compare: Always` (see
+    /// `docs/adr/0022-wipeout-mask-rendering.md`). The renderer fills the region
+    /// with its own clear colour, tessellating concave boundaries with the same
+    /// even-odd fill solid HATCH uses.
     ///
-    /// An `inverted` WIPEOUT (clip mode Inside) does **not** produce this
-    /// primitive yet: the provider keeps its boundary-only line draw and reports
-    /// [`MASK_INVERTED_NOT_RENDERED`].
-    Mask(Arc<[Point3]>),
+    /// `inverted` mirrors the DXF clip mode (Inside = mask the outside). The
+    /// renderer expresses the complement without a stencil: it adds a
+    /// viewport-covering ring to the same even-odd fill, so points inside
+    /// `boundary` are covered twice and stay visible.
+    Mask {
+        boundary: Arc<[Point3]>,
+        inverted: bool,
+    },
 }
 
-/// The named completeness reason for an `inverted` WIPEOUT whose fill is not
-/// rendered (ADR 0022 C1 scope).
-///
-/// The boundary is still drawn as a polyline, so the entity is visible; what is
-/// missing is the `inverted` (clip-mode Inside) fill, which needs a
-/// viewport-relative complement polygon. Callers and tests must reference this
-/// constant rather than matching the free-form wording.
-pub const MASK_INVERTED_NOT_RENDERED: &str =
-    "inverted wipeout mask: the inverted fill is not rendered in this build; only the \
-     boundary is drawn";
-
-/// The named completeness reason for a non-`inverted` WIPEOUT whose boundary
-/// cannot be filled (fewer than three vertices).
+/// The named completeness reason for a WIPEOUT whose boundary cannot be filled
+/// (fewer than three vertices).
 pub const MASK_BOUNDARY_DEGENERATE: &str =
     "wipeout mask boundary has fewer than three vertices; the mask fill is not drawn";
 
@@ -298,14 +291,17 @@ impl DisplayPrimitive {
             },
             // A mask boundary is a world-space polygon: the affine map is applied
             // per vertex. The fill is derived from these vertices by the
-            // renderer, so no other state changes.
-            DisplayPrimitive::Mask(boundary) => DisplayPrimitive::Mask(Arc::from(
-                boundary
-                    .iter()
-                    .map(|p| transform.apply_point(*p))
-                    .collect::<Vec<Point3>>()
-                    .into_boxed_slice(),
-            )),
+            // renderer, so no other state changes (`inverted` is view-independent).
+            DisplayPrimitive::Mask { boundary, inverted } => DisplayPrimitive::Mask {
+                boundary: Arc::from(
+                    boundary
+                        .iter()
+                        .map(|p| transform.apply_point(*p))
+                        .collect::<Vec<Point3>>()
+                        .into_boxed_slice(),
+                ),
+                inverted: *inverted,
+            },
         }
     }
 }

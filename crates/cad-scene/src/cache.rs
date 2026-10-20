@@ -256,11 +256,12 @@ impl SceneCache {
                 previous_was_conic = false;
                 continue;
             }
-            if let DisplayPrimitive::Mask(boundary) = &fragment.primitive {
+            if let DisplayPrimitive::Mask { boundary, inverted } = &fragment.primitive {
                 // A WIPEOUT mask is not geometry the frame plan orders: it paints
                 // last, with `depth_compare: Always`, in the renderer's clear
                 // colour (ADR 0022). It is carried with its **world boundary**
-                // polygon so the renderer can tessellate it concave-safely.
+                // polygon so the renderer can tessellate it concave-safely, and
+                // with `inverted` so the complement is filled there.
                 if boundary.len() < 3 {
                     return Err(CadError::InvalidInput(
                         "mask boundary requires at least three vertices".into(),
@@ -268,6 +269,7 @@ impl SceneCache {
                 }
                 delta.masks.push(MaskBatch {
                     polygon: boundary.clone(),
+                    inverted: *inverted,
                     draw_order: SCENE_DRAW_ORDER,
                     sources: vec![fragment.source.clone()],
                 });
@@ -483,7 +485,7 @@ impl SceneCache {
                     DisplayPrimitive::Text { .. }
                     | DisplayPrimitive::Instance { .. }
                     | DisplayPrimitive::Image { .. }
-                    | DisplayPrimitive::Mask(_) => {
+                    | DisplayPrimitive::Mask { .. } => {
                         continue;
                     }
                 };

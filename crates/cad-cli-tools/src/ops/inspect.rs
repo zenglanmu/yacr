@@ -201,7 +201,7 @@ pub(crate) fn run_build_representation(
                         cad_representation::DisplayPrimitive::Text { .. } => texts += 1,
                         cad_representation::DisplayPrimitive::Instance { .. } => instances += 1,
                         cad_representation::DisplayPrimitive::Image { .. } => images += 1,
-                        cad_representation::DisplayPrimitive::Mask(boundary) => {
+                        cad_representation::DisplayPrimitive::Mask { boundary, .. } => {
                             masks += 1;
                             vertices += boundary.len();
                         }

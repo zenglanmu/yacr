@@ -1,4 +1,4 @@
-//! Contract tests for the WIPEOUT mask primitive (ADR 0022 C1).
+//! Contract tests for the WIPEOUT mask primitive (ADR 0022 C1/C2).
 //!
 //! These are CPU contracts only: the pixel half of the decision lives in
 //! `cad-render-wgpu`'s headless readback tests.
@@ -38,12 +38,16 @@ fn mask_becomes_a_colourless_mask_primitive_with_the_boundary() {
         "a mask is one colourless primitive, not a polyline"
     );
     match &r.fragments[0].primitive {
-        DisplayPrimitive::Mask(polygon) => {
+        DisplayPrimitive::Mask {
+            boundary: polygon,
+            inverted,
+        } => {
             assert_eq!(
                 polygon.as_ref(),
                 boundary.as_slice(),
                 "the mask carries the boundary polygon unchanged"
             );
+            assert!(!inverted, "clip mode Outside is not inverted");
         }
         other => panic!("expected a Mask primitive, got {}", primitive_kind(other)),
     }
@@ -59,34 +63,42 @@ fn mask_becomes_a_colourless_mask_primitive_with_the_boundary() {
 }
 
 #[test]
-fn inverted_mask_does_not_emit_a_normal_mask_and_names_the_reason() {
+fn inverted_mask_emits_a_mask_primitive_carrying_the_flag() {
     let registry = ProviderRegistry::with_default_provider();
+    let boundary = rectangle();
     let r = registry
-        .build(&mask_entity(2, rectangle(), true), &context())
+        .build(&mask_entity(2, boundary.clone(), true), &context())
         .unwrap();
-    assert!(
-        !r.fragments
-            .iter()
-            .any(|fragment| matches!(fragment.primitive, DisplayPrimitive::Mask(_))),
-        "an inverted mask must not paint the non-inverted region"
+    assert_eq!(
+        r.fragments.len(),
+        1,
+        "the inverted mask is one colourless primitive, not a boundary polyline"
     );
-    assert!(
-        matches!(r.fragments[0].primitive, DisplayPrimitive::Lines(_)),
-        "today's boundary-only draw is kept for the inverted case"
-    );
-    match &r.completeness {
-        Completeness::Partial(reasons) => assert!(
-            reasons
-                .iter()
-                .any(|reason| reason == MASK_INVERTED_NOT_RENDERED),
-            "the named not-rendered reason must be carried verbatim: {reasons:?}"
-        ),
-        other => panic!("inverted mask must be Partial, got {other:?}"),
+    match &r.fragments[0].primitive {
+        DisplayPrimitive::Mask {
+            boundary: polygon,
+            inverted,
+        } => {
+            assert!(*inverted, "clip mode Inside must reach the renderer");
+            assert_eq!(
+                polygon.as_ref(),
+                boundary.as_slice(),
+                "the inverted mask carries the same boundary polygon"
+            );
+        }
+        other => panic!("expected a Mask primitive, got {}", primitive_kind(other)),
     }
-    assert!(r
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "representation.mask_inverted"));
+    assert_eq!(
+        r.completeness,
+        Completeness::Complete,
+        "the inverted fill is rendered too, so nothing is missing"
+    );
+    assert!(
+        r.diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "representation.mask_inverted"),
+        "the former not-rendered diagnostic must be gone"
+    );
 }
 
 #[test]
@@ -101,7 +113,7 @@ fn degenerate_mask_boundary_keeps_the_polyline_and_names_the_reason() {
     assert!(r
         .fragments
         .iter()
-        .all(|fragment| !matches!(fragment.primitive, DisplayPrimitive::Mask(_))));
+        .all(|fragment| !matches!(fragment.primitive, DisplayPrimitive::Mask { .. })));
     match &r.completeness {
         Completeness::Partial(reasons) => assert!(reasons
             .iter()
@@ -136,7 +148,7 @@ fn mask_boundary_transforms_with_an_insert() {
         .fragments
         .iter()
         .filter_map(|fragment| match &fragment.primitive {
-            DisplayPrimitive::Mask(polygon) => Some(polygon),
+            DisplayPrimitive::Mask { boundary, .. } => Some(boundary),
             _ => None,
         })
         .collect();
@@ -162,6 +174,6 @@ fn primitive_kind(primitive: &DisplayPrimitive) -> &'static str {
         DisplayPrimitive::Text { .. } => "Text",
         DisplayPrimitive::Image { .. } => "Image",
         DisplayPrimitive::Instance { .. } => "Instance",
-        DisplayPrimitive::Mask(_) => "Mask",
+        DisplayPrimitive::Mask { .. } => "Mask",
     }
 }

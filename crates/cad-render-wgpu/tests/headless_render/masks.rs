@@ -1,4 +1,4 @@
-//! Wipeout mask rendering (ADR 0022 C1): pixel contracts on a real device.
+//! Wipeout mask rendering (ADR 0022 C1/C2): pixel contracts on a real device.
 //!
 //! Why these tests exist. The renderer is a **single depth-tested pass**: meshes
 //! compare depth `Less` and write it, lines `LessEqual` and write it. A filled
@@ -18,11 +18,42 @@ fn point(x: f64, y: f64) -> Point3 {
 }
 
 fn mask(boundary: Vec<Point3>) -> MaskBatch {
+    mask_with_mode(boundary, false)
+}
+
+/// `inverted` mirrors the DXF clip mode: `true` masks everything *outside* the
+/// boundary.
+fn mask_with_mode(boundary: Vec<Point3>, inverted: bool) -> MaskBatch {
     MaskBatch {
         polygon: boundary.into(),
+        inverted,
         draw_order: 0,
         sources: vec![source()],
     }
+}
+
+/// The mask rectangle used by both crossing-line tests (identical geometry, so
+/// the non-inverted and inverted assertions are mirror images).
+fn mask_rectangle() -> Vec<Point3> {
+    vec![
+        point(-0.5, -0.25),
+        point(0.5, -0.25),
+        point(0.5, 0.25),
+        point(-0.5, 0.25),
+    ]
+}
+
+/// The concave L used by both concave tests: a bottom bar plus a left bar, with
+/// the notch `x in [-0.1, 0.2], y in [-0.1, 0.2]` outside the polygon.
+fn mask_l_shape() -> Vec<Point3> {
+    vec![
+        point(-0.8, -0.8),
+        point(0.2, -0.8),
+        point(0.2, -0.1),
+        point(-0.1, -0.1),
+        point(-0.1, 0.2),
+        point(-0.8, 0.2),
+    ]
 }
 
 /// A scene with both geometry batches and mask draw items.
@@ -62,12 +93,7 @@ fn mask_rectangle_hides_a_crossing_line_and_paints_the_clear_colour() {
     renderer
         .upload(&mask_scene(
             vec![crossing_line()],
-            vec![mask(vec![
-                point(-0.5, -0.25),
-                point(0.5, -0.25),
-                point(0.5, 0.25),
-                point(-0.5, 0.25),
-            ])],
+            vec![mask(mask_rectangle())],
         ))
         .expect("upload line + mask");
     assert_eq!(renderer.mask_count(), 1);
@@ -132,14 +158,7 @@ fn concave_mask_leaves_its_notch_visible() {
     renderer
         .upload(&mask_scene(
             vec![crossing_line()],
-            vec![mask(vec![
-                point(-0.8, -0.8),
-                point(0.2, -0.8),
-                point(0.2, -0.1),
-                point(-0.1, -0.1),
-                point(-0.1, 0.2),
-                point(-0.8, 0.2),
-            ])],
+            vec![mask(mask_l_shape())],
         ))
         .expect("upload line + concave mask");
     assert_eq!(renderer.mask_count(), 1);
@@ -178,5 +197,136 @@ fn concave_mask_leaves_its_notch_visible() {
             "line ink must survive outside the L at column {} row {row}, got {outside:?}",
             column(0.6)
         );
+    }
+}
+
+/// The mirror image of the C1 rectangle assertion: an **inverted** mask wipes
+/// everything *outside* its boundary and leaves the inside untouched.
+///
+/// The complement is produced without a stencil by adding a viewport-covering
+/// ring to the same even-odd fill (ADR 0022 C2). A naive "fill the boundary"
+/// (the non-inverted path) would leave the line visible outside and wipe it
+/// inside, i.e. exactly invert these assertions.
+#[test]
+fn inverted_mask_wipes_outside_and_keeps_the_inside_visible() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer
+        .upload(&mask_scene(
+            vec![crossing_line()],
+            vec![mask_with_mode(mask_rectangle(), true)],
+        ))
+        .expect("upload line + inverted mask");
+    assert_eq!(renderer.mask_count(), 1);
+
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer.render(camera_2d(), &target).expect("render frame");
+    assert_eq!(stats.mask_draws, 1);
+    assert!(
+        renderer.mask_skips().is_empty(),
+        "the inverted mask must tessellate its complement: {:?}",
+        renderer.mask_skips()
+    );
+    assert!(
+        renderer.mask_vertex_count() > 0,
+        "the first frame must build the inverted complement fill"
+    );
+
+    let image = renderer.read_target_rgba().expect("read back frame");
+    let background = image.pixel(0, 0);
+    assert_eq!(background, [0, 0, 0, 255]);
+
+    // Outside the rectangle the line is erased: the region equals the clear
+    // colour, on both rows the stroke painted before the mask pass.
+    for row in LINE_ROWS {
+        for x in [-0.85, 0.6] {
+            let outside = image.pixel(column(x), row);
+            assert_eq!(
+                outside,
+                background,
+                "inverted mask must wipe outside at column {} row {row}, got {outside:?}",
+                column(x)
+            );
+        }
+    }
+
+    // Inside the rectangle the line survives untouched.
+    for row in LINE_ROWS {
+        for x in [-0.4, 0.0, 0.4] {
+            let inside = image.pixel(column(x), row);
+            assert!(
+                !is_clear(inside, background),
+                "the inverted mask must leave its interior visible at column {} row {row}, got {inside:?}",
+                column(x)
+            );
+        }
+    }
+}
+
+/// The concave inverted case. Three distinct regions matter:
+///
+/// * inside the L's bars -> **visible** (inside the polygon: covered twice);
+/// * outside the L entirely -> **wiped**;
+/// * the notch -> **wiped**, because the notch is outside the polygon even
+///   though it sits inside the L's bounding box.
+///
+/// A fan or an axis-aligned bounding-box approximation would get at least one of
+/// these wrong.
+#[test]
+fn inverted_concave_mask_keeps_the_bars_and_wipes_the_notch() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer
+        .upload(&mask_scene(
+            vec![crossing_line()],
+            vec![mask_with_mode(mask_l_shape(), true)],
+        ))
+        .expect("upload line + inverted concave mask");
+    let target = RenderTarget::new(64, 64);
+    let stats = renderer.render(camera_2d(), &target).expect("render frame");
+    assert_eq!(stats.mask_draws, 1);
+    assert!(
+        renderer.mask_skips().is_empty(),
+        "the inverted L must tessellate its complement: {:?}",
+        renderer.mask_skips()
+    );
+
+    let image = renderer.read_target_rgba().expect("read back frame");
+    let background = image.pixel(0, 0);
+
+    // Inside the left bar: visible.
+    for row in LINE_ROWS {
+        let bar = image.pixel(column(-0.5), row);
+        assert!(
+            !is_clear(bar, background),
+            "the L's bar must stay visible at column {} row {row}, got {bar:?}",
+            column(-0.5)
+        );
+    }
+    // The notch is outside the polygon: wiped like the rest of the outside.
+    for row in LINE_ROWS {
+        let notch = image.pixel(column(0.05), row);
+        assert_eq!(
+            notch,
+            background,
+            "the notch is outside the polygon and must be wiped at column {} row {row}, got {notch:?}",
+            column(0.05)
+        );
+    }
+    // Outside the L entirely: wiped.
+    for row in LINE_ROWS {
+        for x in [0.6, -0.85] {
+            let outside = image.pixel(column(x), row);
+            assert_eq!(
+                outside,
+                background,
+                "the inverted L must wipe outside at column {} row {row}, got {outside:?}",
+                column(x)
+            );
+        }
     }
 }

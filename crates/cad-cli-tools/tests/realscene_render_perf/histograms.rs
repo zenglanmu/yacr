@@ -51,7 +51,7 @@ impl FragmentHistogram {
                 DisplayPrimitive::Text { .. } => self.texts += 1,
                 DisplayPrimitive::Instance { .. } => self.instances += 1,
                 DisplayPrimitive::Image { .. } => self.images += 1,
-                DisplayPrimitive::Mask(boundary) => {
+                DisplayPrimitive::Mask { boundary, .. } => {
                     self.masks += 1;
                     self.line_vertices += boundary.len();
                 }

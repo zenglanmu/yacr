@@ -130,6 +130,15 @@ impl Renderer {
             let needed = self.pick_table.max_key() + 1;
             self.ensure_flags(&device, &queue, needed);
         }
+        // Inverted WIPEOUT masks fill the complement of their boundary, which
+        // needs a ring covering this frame's visible world rect (ADR 0022 C2).
+        // The ring is built from the frame's own projection and cached until the
+        // view leaves it, so a steady camera or a small pan never re-tessellates.
+        self.ensure_inverted_mask_fill(masks::mask_view_coverage(
+            projection,
+            self.target_size,
+            camera_position,
+        ));
         // Phase timers below break `cpu_ms` down into plan / uniform / encode /
         // submit; `wait_ms` separately measures the blocking poll (excluded from
         // `cpu_ms`).

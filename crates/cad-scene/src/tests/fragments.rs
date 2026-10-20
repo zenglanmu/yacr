@@ -185,7 +185,10 @@ fn mask_fragment_becomes_a_mask_draw_item_with_its_polygon() {
         },
     ];
     let mut rep = line_representation(5, Vec::new());
-    rep.fragments[0].primitive = DisplayPrimitive::Mask(polygon.clone().into());
+    rep.fragments[0].primitive = DisplayPrimitive::Mask {
+        boundary: polygon.clone().into(),
+        inverted: false,
+    };
 
     let mut cache = SceneCache::default();
     let delta = cache.build(&rep, stamp()).unwrap();
@@ -199,6 +202,10 @@ fn mask_fragment_becomes_a_mask_draw_item_with_its_polygon() {
     );
     assert_eq!(delta.masks[0].draw_order, SCENE_DRAW_ORDER);
     assert_eq!(delta.masks[0].sources.len(), 1);
+    assert!(
+        !delta.masks[0].inverted,
+        "clip mode Outside stays non-inverted"
+    );
 
     cache.publish(delta, &stamp()).unwrap();
     assert_eq!(cache.mask_count(), 1);
@@ -208,8 +215,8 @@ fn mask_fragment_becomes_a_mask_draw_item_with_its_polygon() {
 #[test]
 fn mask_without_three_vertices_is_an_explicit_error() {
     let mut rep = line_representation(6, Vec::new());
-    rep.fragments[0].primitive = DisplayPrimitive::Mask(
-        vec![
+    rep.fragments[0].primitive = DisplayPrimitive::Mask {
+        boundary: vec![
             Point3 {
                 x: 0.0,
                 y: 0.0,
@@ -222,7 +229,8 @@ fn mask_without_three_vertices_is_an_explicit_error() {
             },
         ]
         .into(),
-    );
+        inverted: false,
+    };
     let mut cache = SceneCache::default();
     assert!(cache.build(&rep, stamp()).is_err());
 }
@@ -232,8 +240,8 @@ fn mask_without_three_vertices_is_an_explicit_error() {
 #[test]
 fn mask_is_invalidated_by_its_entity_change() {
     let mut rep = line_representation(9, Vec::new());
-    rep.fragments[0].primitive = DisplayPrimitive::Mask(
-        vec![
+    rep.fragments[0].primitive = DisplayPrimitive::Mask {
+        boundary: vec![
             Point3 {
                 x: 0.0,
                 y: 0.0,
@@ -251,11 +259,17 @@ fn mask_is_invalidated_by_its_entity_change() {
             },
         ]
         .into(),
-    );
+        inverted: true,
+    };
     let mut cache = SceneCache::default();
     let delta = cache.build(&rep, stamp()).unwrap();
+    assert!(
+        delta.masks[0].inverted,
+        "clip mode Inside must reach the renderer through the mask batch"
+    );
     cache.publish(delta, &stamp()).unwrap();
     assert_eq!(cache.mask_count(), 1);
+    assert!(cache.mask_batches()[0].inverted);
     let changes = ChangeSet {
         database: DatabaseId(1),
         before: Revision(0),

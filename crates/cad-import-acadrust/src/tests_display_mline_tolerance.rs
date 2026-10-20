@@ -125,10 +125,8 @@ fn wipeout_emits_mask_with_boundary_and_inverted_flag() {
 
     let reasons = partial_reasons(&completeness);
     assert!(
-        reasons
-            .iter()
-            .any(|r| r.contains("inverted fill is not rendered")),
-        "{reasons:?}"
+        reasons.iter().all(|r| !r.contains("not rendered")),
+        "the inverted fill is rendered now; no not-rendered claim may remain: {reasons:?}"
     );
     assert!(
         reasons

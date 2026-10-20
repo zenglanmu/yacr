@@ -145,15 +145,14 @@ pub(crate) fn subd_mesh_semantics(m: &acadrust::entities::Mesh) -> SemanticGeome
 /// `insertion + u*x + v*y` from the clip vertices, else the size corners) and
 /// `inverted` mirrors the DXF clip mode.
 ///
-/// The **non-inverted** mask fill is rendered: `cad-representation` maps it to
-/// its colourless `Mask` primitive and the renderer fills it in a final pass with
-/// the clear colour (ADR 0022 C1). An **`inverted`** mask (clip mode Inside) is
-/// still boundary-only, because its fill needs a viewport-relative complement
-/// polygon; that gap is named in the completeness report and by
-/// `MASK_INVERTED_NOT_RENDERED` in `cad-representation`, never hidden.
+/// Both fill modes are rendered: `cad-representation` maps the mask to its
+/// colourless `Mask` primitive (carrying `inverted`) and the renderer fills
+/// either the boundary or its complement in a final pass with the clear colour
+/// (ADR 0022 C1/C2). The complement adds a viewport-covering ring to the same
+/// even-odd fill, so it needs no stencil.
 ///
-/// The brightness/contrast/fade and clipping flags are not applied either, so
-/// this stays `Partial`.
+/// The brightness/contrast/fade and clipping flags are still not applied, so this
+/// stays `Partial`.
 pub(crate) fn wipeout_semantics(
     w: &acadrust::entities::Wipeout,
 ) -> (SemanticGeometry, Completeness) {
@@ -185,18 +184,13 @@ pub(crate) fn wipeout_semantics(
         ];
     }
     let inverted = w.clip_mode == acadrust::entities::WipeoutClipMode::Inside;
-    // The non-inverted fill is rendered (ADR 0022 C1), so the only remaining
-    // gap for it is the unapplied WIPEOUT display attributes. The inverted fill
-    // is genuinely not rendered yet and is named as such.
-    let reason = if inverted {
-        "wipeout mask: the inverted fill is not rendered; brightness/contrast/fade \
-         and clipping_enabled are ignored"
-    } else {
-        "wipeout mask: brightness/contrast/fade and clipping_enabled are ignored"
-    };
+    // Both fill modes are rendered (ADR 0022 C1/C2), so the only remaining gap
+    // is the unapplied WIPEOUT display attributes.
     (
         SemanticGeometry::Mask { boundary, inverted },
-        Completeness::Partial(vec![reason.into()]),
+        Completeness::Partial(vec![
+            "wipeout mask: brightness/contrast/fade and clipping_enabled are ignored".into(),
+        ]),
     )
 }
 

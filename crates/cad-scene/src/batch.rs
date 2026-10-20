@@ -369,10 +369,16 @@ pub fn sanitize_lineweight(mm: f32) -> f32 {
 /// draw-order interleaving promised by ADR 0022 D2 is **not** implemented: masks
 /// always paint after every other class, and `draw_order` is recorded only so a
 /// later slice can segment the pass.
+///
+/// `inverted` (DXF clip mode Inside) is carried through unchanged. The renderer
+/// expresses the complement by adding a viewport-covering ring to the same
+/// even-odd fill, so the scene never needs the viewport and stays view-independent.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaskBatch {
     /// Closed world-space boundary polygon (three or more vertices).
     pub polygon: Arc<[Point3]>,
+    /// `true` for clip mode Inside: mask everything *outside* the polygon.
+    pub inverted: bool,
     pub draw_order: i64,
     pub sources: Vec<SelectionRef>,
 }
