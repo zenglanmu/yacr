@@ -17,7 +17,10 @@ import assert from 'node:assert/strict';
 import { readCatalog, readCss, readModule } from './helpers.mjs';
 import { columnMajorCells, pairsShareEdge, ribbonTab } from '../src/ribbon-model.mjs';
 import { STANDARD_VIEW_PAIRS, STANDARD_VIEWS } from '../src/view3d.mjs';
-import { OVERFLOW_EPSILON, ribbonOverflow, ribbonScrollStep, ribbonScrollTarget, sameOverflow } from '../src/ribbon-overflow.mjs';
+import {
+  OVERFLOW_EPSILON, RIBBON_CUE_WIDTH, ribbonBandOverflow, ribbonCueLayout, ribbonCueReserve,
+  ribbonOverflow, ribbonScrollStep, ribbonScrollTarget, sameOverflow,
+} from '../src/ribbon-overflow.mjs';
 
 function block(css, selector) {
   const match = css.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`));
@@ -148,6 +151,20 @@ test('one cue click pages most of a viewport and never past either end', () => {
   assert.equal(ribbonScrollTarget({ ...strip, scrollLeft: 300 }, 'sideways'), 300);
 });
 
+test('the cue is measured against the band, so it cannot latch on', () => {
+  // While the cue is shown the strip is 30px narrower. Measuring inside that
+  // narrowed box would keep reporting overflow after the window grew back,
+  // because clientWidth lost the reserve; the band width is what the reader sees.
+  const content = 950;
+  const band = 960;
+  assert.equal(ribbonOverflow({ scrollWidth: content, clientWidth: band - RIBBON_CUE_WIDTH }).overflowing, true,
+    'the narrowed strip alone would keep the cue alive');
+  assert.equal(ribbonBandOverflow({ scrollWidth: content, bandWidth: band }).overflowing, false,
+    'measured against the band, the content fits and no cue is shown');
+  // Still a real overflow when the content genuinely exceeds the band.
+  assert.equal(ribbonBandOverflow({ scrollWidth: 1200, bandWidth: band }).end, true);
+});
+
 test('an unchanged overflow state reuses the previous object', () => {
   const overflowing = ribbonOverflow({ scrollWidth: 1800, clientWidth: 960, scrollLeft: 0 });
   // A sub-pixel scroll nudge still reports the same three booleans, so the
@@ -171,15 +188,72 @@ test('the overflow cue is an overlay button inside the fixed band', async () => 
   assert.match(cue, /bottom:\s*0/, 'the cue must stay inside the band');
   assert.match(css, /\.ribbon__overflow\.is-start\s*\{[^}]*left:\s*0/, 'start cue hugs the left edge');
   assert.match(css, /\.ribbon__overflow\.is-end\s*\{[^}]*right:\s*0/, 'end cue hugs the right edge');
-  assert.match(css, /\.ribbon__overflow\.is-end\s*\{[^}]*linear-gradient\(to right/, 'the end cue fades the cut edge');
+  // The cue is only as wide as the band the strip gave up for it.
+  assert.match(css, /\.ribbon__overflow\.is-end\s*\{[^}]*width:\s*var\(--ribbon-cue-end/, 'the end cue takes the reserved width');
+  assert.match(css, /\.ribbon__overflow\.is-start\s*\{[^}]*width:\s*var\(--ribbon-cue-start/, 'the start cue takes the reserved width');
+  // Nothing is painted behind or beside the chevron: the old edge fade ghosted
+  // whole items and, over flat band, laid 1-LSB banding columns across the full
+  // band height. The reserve replaced both.
+  assert.doesNotMatch(cue, /gradient/, 'no gradient under the chevron: nothing is behind it');
+  assert.doesNotMatch(css, /\.ribbon__fade/, 'no fade overlay in the band');
   // The idle overlay scrollbar drew nothing here and covered the panel titles
   // when it did; the cue replaces it.
   assert.match(block(css, '\\.ribbon__panels'), /scrollbar-width:\s*none/);
+  assert.match(block(css, '\\.ribbon__panels'), /margin-right:\s*var\(--ribbon-cue-end/, 'the strip gives up the cue width');
 });
+
+test('the cue reserves its own width out of the strip, so it covers no item', () => {
+  const band = { clientWidth: 960, scrollWidth: 1800, scrollLeft: 0 };
+  const layout = ribbonCueLayout(band);
+  assert.equal(layout.reserve.end, RIBBON_CUE_WIDTH, 'the hidden side reserves exactly the cue width');
+  assert.equal(layout.reserve.start, 0, 'a side with no hidden content reserves nothing');
+  // The strip clips at the inner edge of the reserve: the last visible item ends
+  // at or before this edge, so nothing is painted under the cue.
+  assert.equal(layout.strip.right, band.clientWidth - RIBBON_CUE_WIDTH);
+  assert.equal(layout.hit.end.left, layout.strip.right, 'the hit box starts where the strip ends');
+  assert.equal(layout.hit.end.right, band.clientWidth);
+  assert.equal(layout.hit.start.left, layout.hit.start.right, 'no start hit box without start overflow');
+  // Both sides: same contract mirrored.
+  const both = ribbonCueLayout({ clientWidth: 960, scrollWidth: 1800, scrollLeft: 400 });
+  assert.deepEqual(both.reserve, { start: RIBBON_CUE_WIDTH, end: RIBBON_CUE_WIDTH });
+  assert.equal(both.strip.left, RIBBON_CUE_WIDTH);
+  assert.equal(both.strip.right, 960 - RIBBON_CUE_WIDTH);
+  assert.equal(both.hit.start.right, both.strip.left);
+  assert.equal(both.hit.end.left, both.strip.right);
+  // Nothing hidden: full-width strip, no reserve, no hit box anywhere.
+  const idle = ribbonCueLayout({ clientWidth: 1853, scrollWidth: 1853 });
+  assert.deepEqual(idle.reserve, { start: 0, end: 0 });
+  assert.deepEqual(idle.strip, { left: 0, right: 1853, width: 1853 });
+});
+
+test('no cue hit box ever intersects the strip content box', () => {
+  const states = [
+    { clientWidth: 960, scrollWidth: 1800, scrollLeft: 0 },
+    { clientWidth: 960, scrollWidth: 1800, scrollLeft: 400 },
+    { clientWidth: 960, scrollWidth: 1800, scrollLeft: 840 },
+    { clientWidth: 1853, scrollWidth: 1853, scrollLeft: 0 },
+    // Sub-pixel slack: no cue, so nothing is reserved for one.
+    { clientWidth: 900, scrollWidth: 901, scrollLeft: 0 },
+  ];
+  for (const metrics of states) {
+    const layout = ribbonCueLayout(metrics);
+    for (const side of ['start', 'end']) {
+      const box = layout.hit[side];
+      const overlaps = box.right > layout.strip.left && box.left < layout.strip.right;
+      assert.equal(overlaps, false, `${side} cue over the strip for ${JSON.stringify(metrics)}`);
+    }
+    // The reserve is all-or-nothing per side: either the cue's width or nothing.
+    for (const side of ['start', 'end']) {
+      assert.ok([0, RIBBON_CUE_WIDTH].includes(layout.reserve[side]), `${side} reserve must be 0 or the cue width`);
+    }
+  }
+});
+
 
 test('the ribbon binds the cue to a real measurement, not to a fixed state', async () => {
   const source = await readModule('components/Ribbon.jsx');
-  assert.ok(source.includes('ribbonOverflow(node)'), 'the cue state must come from the strip metrics');
+  assert.ok(source.includes('ribbonBandOverflow({'), 'the cue state must come from the strip metrics');
+  assert.ok(source.includes('node.parentElement'), 'the measurement must use the band, not the narrowed strip');
   assert.ok(source.includes("overflow.start ? <OverflowCue side=\"start\""), 'start cue renders conditionally');
   assert.ok(source.includes("overflow.end ? <OverflowCue side=\"end\""), 'end cue renders conditionally');
   assert.ok(source.includes('requestAnimationFrame'), 'late layout (fonts) must be re-measured');

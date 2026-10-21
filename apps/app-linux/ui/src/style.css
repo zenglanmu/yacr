@@ -174,7 +174,9 @@ button, input, select { font: inherit; color: inherit; }
 .ribbon-tab.is-accent.is-active { color: var(--text); }
 .ribbon__tabs-spacer { flex: 1 1 auto; }
 /* The band positions the overflow cues over the panel strip; it adds no height
-   of its own, so the CAD partition rect the host samples is unchanged. */
+   of its own, so the CAD partition rect the host samples is unchanged. The two
+   custom properties are the space the strip gave up for its cues (0 when
+   nothing overflows), written by the renderer from `ribbonCueReserve`. */
 .ribbon__band { position: relative; }
 .ribbon__panels {
   display: flex; align-items: stretch; gap: 0;
@@ -182,29 +184,31 @@ button, input, select { font: inherit; color: inherit; }
      The variant drop-down is an in-band overlay (see below), so it cannot grow
      this band either. */
   height: var(--ribbon-h); padding: 4px 6px 0;
+  /* A margin (not padding) is what narrows the scrollport: the strip's clipping
+     edge moves inward by the cue's width, so the last visible item ends before
+     the cue and nothing is ever painted underneath it. */
+  margin-left: var(--ribbon-cue-start, 0);
+  margin-right: var(--ribbon-cue-end, 0);
   overflow-x: auto; overflow-y: visible;
-  /* The strip scrolls by the edge cues below, not by an idle scrollbar: an
-     overlay scrollbar in this WebView draws nothing until it is hovered, and
-     when it does draw it covers the panel titles. */
+  /* The strip scrolls by the edge cues, not by an idle scrollbar: an overlay
+     scrollbar in this WebView draws nothing until it is hovered, and when it
+     does draw it covers the panel titles. */
   scrollbar-width: none;
 }
 .ribbon__panels::-webkit-scrollbar { width: 0; height: 0; }
-/* Overflow cue: an edge fade plus a chevron that pages the strip. Rendered only
-   for a side that actually hides content (see `ribbon-overflow.mjs`), so a
-   maximised window shows none. The fade is the visual "there is more", the
-   chevron is the way to reach it — inside the existing band, no new height. */
+/* Overflow cue: a chevron button standing on the band the strip gave up, so it
+   is plain band with no item behind it. Rendered only for a side that actually
+   hides content (see `ribbon-overflow.mjs`), so a maximised window shows none. */
 .ribbon__overflow {
-  position: absolute; top: 0; bottom: 0; width: 30px;
+  position: absolute; top: 0; bottom: 0;
   display: flex; align-items: center; justify-content: center;
   padding: 0; border: 0; background: transparent;
   color: var(--text-dim); cursor: pointer;
   transition: color var(--t-fast);
 }
-.ribbon__overflow.is-start { left: 0; background: linear-gradient(to left, transparent, var(--chrome) 58%); }
-.ribbon__overflow.is-end { right: 0; background: linear-gradient(to right, transparent, var(--chrome) 58%); }
+.ribbon__overflow.is-start { left: 0; width: var(--ribbon-cue-start, 0); }
+.ribbon__overflow.is-end { right: 0; width: var(--ribbon-cue-end, 0); }
 .ribbon__overflow:hover { color: var(--text); }
-.ribbon__overflow.is-start:hover { background: linear-gradient(to left, transparent, var(--hover) 58%); }
-.ribbon__overflow.is-end:hover { background: linear-gradient(to right, transparent, var(--hover) 58%); }
 .ribbon__overflow:focus-visible { outline: 1px solid var(--focus); outline-offset: -3px; }
 .ribbon-panel {
   display: flex; flex-direction: column; justify-content: space-between;

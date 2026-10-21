@@ -24,7 +24,7 @@ import { useI18n, useShell } from '../context.mjs';
 import { RIBBON_TABS, ribbonTab } from '../ribbon-model.mjs';
 import { DOCUMENT_SCOPED_COMMANDS, NO_DOCUMENT_KEY, unavailableReasonKey } from '../commands.mjs';
 import { standardViewAvailable, standardViewUnavailableReasonKey } from '../view3d.mjs';
-import { ribbonOverflow, ribbonScrollTarget, sameOverflow } from '../ribbon-overflow.mjs';
+import { ribbonBandOverflow, ribbonCueReserve, ribbonScrollTarget, sameOverflow } from '../ribbon-overflow.mjs';
 
 /** No strip, no overflow: also the answer before the first measurement. */
 const NO_OVERFLOW = Object.freeze({ overflowing: false, start: false, end: false });
@@ -195,7 +195,14 @@ function useRibbonOverflow(panelsRef, resetKey) {
     }
     node.scrollLeft = 0;
     const measure = () => setState(previous => {
-      const next = ribbonOverflow(node);
+      // Measured against the band (the strip's parent), never against the strip's
+      // own narrowed box — see `ribbonBandOverflow`.
+      const band = node.parentElement;
+      const next = ribbonBandOverflow({
+        scrollWidth: node.scrollWidth,
+        bandWidth: band ? band.clientWidth : node.clientWidth,
+        scrollLeft: node.scrollLeft,
+      });
       return sameOverflow(previous, next) ? previous : next;
     });
     measure();
@@ -225,12 +232,15 @@ function pageRibbon(node, direction) {
 }
 
 /**
- * One edge cue: an edge fade plus a chevron that pages the strip.
+ * One edge cue: a chevron that pages the strip, standing on the band width the
+ * strip gave up for it.
  *
  * Rendered only for a side that actually hides content, so a maximised window
  * shows none. It is a real button (focusable, labelled) rather than a decorative
  * gradient, because the reader must be able to *reach* the hidden panels, not
- * just learn that they exist.
+ * just learn that they exist. Its box is the reserved strip only — see
+ * `ribbonCueReserve`, which takes that width out of the scroller — so it can
+ * never sit on top of a live item.
  */
 function OverflowCue({ side, onPage }) {
   const { t } = useI18n();
@@ -257,6 +267,11 @@ export function Ribbon() {
   // A tab switch or a language switch renders different panel widths, so both
   // re-measure (and re-home) the strip.
   const overflow = useRibbonOverflow(panelsRef, `${shell.ribbonTab}/${locale}`);
+  // While a side hides content, the band hands that side's width to the cue: the
+  // strip is narrowed by exactly the cue's width, so the chevron stands on band
+  // that holds no item. Zero when nothing overflows, which is why the maximised
+  // ribbon is untouched.
+  const reserve = ribbonCueReserve(overflow);
   // Dismiss an open variant popover on Escape or a click outside it. The
   // invoking item sits above the menu, so its caret still toggles it closed.
   useEffect(() => {
@@ -295,12 +310,18 @@ export function Ribbon() {
         />
       </div>
       {shell.ribbonCollapsed ? null : (
-        <div className="ribbon__band">
+        <div
+          className="ribbon__band"
+          style={{ '--ribbon-cue-start': `${reserve.start}px`, '--ribbon-cue-end': `${reserve.end}px` }}
+        >
           <div className="ribbon__panels" role="tabpanel" aria-label={t(tab.labelKey)} ref={panelsRef}>
             {tab.panels.map(panel => (
               <Panel key={panel.id} panel={panel} openMenu={openMenu} setOpenMenu={setOpenMenu} />
             ))}
           </div>
+          {/* No fade: the reserve already leaves the cue standing on clean band,
+              and any gradient over the flat band would only add 1-LSB banding
+              columns across its height. */}
           {overflow.start ? <OverflowCue side="start" onPage={() => pageRibbon(panelsRef.current, 'start')} /> : null}
           {overflow.end ? <OverflowCue side="end" onPage={() => pageRibbon(panelsRef.current, 'end')} /> : null}
         </div>
