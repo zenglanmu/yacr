@@ -64,6 +64,25 @@ fn dirty_frame_errors_and_lost_lifecycle_never_mark_clean_or_retry() {
 }
 
 #[test]
+fn a_clear_colour_change_is_a_live_render_input() {
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    let view = ViewSnapshot::default();
+    assert_eq!(view.clear_color, [0.0, 0.0, 0.0, 1.0]);
+    assert!(!session.apply_view_snapshot(view).unwrap());
+
+    // A background-only change is a real view change: it round-trips through the
+    // session's frame input (the value the renderer is handed) and marks the
+    // frame dirty so the next frame repaints without any other input.
+    let recoloured = ViewSnapshot {
+        clear_color: [1.0, 0.0, 0.0, 1.0],
+        ..ViewSnapshot::default()
+    };
+    session.apply_view_snapshot(recoloured.clone()).unwrap();
+    assert_eq!(session.view_snapshot().clear_color, [1.0, 0.0, 0.0, 1.0]);
+    assert!(session.cad_frame_dirty(), "the frame must repaint");
+}
+
+#[test]
 fn drawing_replacement_and_equal_view_are_ui_free_inputs() {
     let session = RenderSessionHandle::new(BackendPreference::Auto);
     let drawing = cad_app::host::HostController::with_demo_document([800.0, 600.0])

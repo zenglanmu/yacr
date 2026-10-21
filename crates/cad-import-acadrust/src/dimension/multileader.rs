@@ -456,6 +456,7 @@ impl ImporterBuilder<'_> {
                 font: self.style_font(&style_name),
                 h_align: multileader_h_align(attachment_point),
                 v_align: multileader_v_align(left_attachment),
+                wrap_width: cad_domain::wrap_width_from_dxf(context.text_width),
             });
         }
         if context.has_block_contents {

@@ -323,6 +323,7 @@ impl DefaultRepresentationProvider {
                 font,
                 h_align,
                 v_align,
+                wrap_width,
             } => {
                 let font_key = font.as_deref();
                 // Annotative TEXT/MTEXT: the active annotation scale factor
@@ -337,6 +338,13 @@ impl DefaultRepresentationProvider {
                         a.rotation.unwrap_or(*rotation),
                     ),
                     None => (*position, height.abs(), *rotation),
+                };
+                // The wrap boundary is a world-space length like the glyph
+                // height, so the annotation scale factor scales it too; leaving
+                // it fixed would re-flow the text at every annotation scale.
+                let eff_wrap_width = match annotative {
+                    Some(a) => wrap_width.map(|width| width * a.factor),
+                    None => *wrap_width,
                 };
                 let mut shaped = false;
                 // A style that names no font still shapes through the engine's
@@ -354,6 +362,7 @@ impl DefaultRepresentationProvider {
                             eff_rotation,
                             *h_align,
                             *v_align,
+                            eff_wrap_width,
                         ),
                         None => engine.shape_unstyled(
                             text,
@@ -362,6 +371,7 @@ impl DefaultRepresentationProvider {
                             eff_rotation,
                             *h_align,
                             *v_align,
+                            eff_wrap_width,
                         ),
                     };
                     match result {

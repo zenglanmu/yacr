@@ -322,6 +322,7 @@ fn text_entity(id: u128, height: f64) -> DbEntity {
             font: None,
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
+            wrap_width: None,
         },
     );
     e.object.type_key = "AcDbText".into();

@@ -10,6 +10,11 @@
 //! `SelectionRef` it produces a small, ordered set of [`PropertyRow`]s
 //! (id/handle/type/layer/space plus geometry-specific basics). Unknown or
 //! unsupported geometry yields an explicit row rather than invented values.
+//!
+//! Multi-selection reports the **intersection** of the row keys: only
+//! properties common to every selected object are listed, each carrying one
+//! value when all refs agree or an explicit mixed marker otherwise. Keys that
+//! exist on only some selected objects are not listed (no fabricated blanks).
 
 use cad_db::{DbEntity, DrawingDatabase};
 use cad_domain::{
@@ -18,6 +23,97 @@ use cad_domain::{
 };
 use std::collections::BTreeSet;
 
+/// Maximum number of `enum` options emitted for one property row.
+///
+/// A drawing can carry thousands of layers or linetypes; the panel is a picker,
+/// not a table dump, so options are capped after sorting. The cap is a hard,
+/// documented bound (not a silent truncation of the wire shape): a consumer
+/// that needs the full table uses the layer/linetype queries instead.
+pub const MAX_ENUM_OPTIONS: usize = 256;
+
+/// The panel group a property row belongs to (stable machine key, never text).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyGroup {
+    /// Object identity and placement: id/handle/type/layer/space/draw order.
+    Entity,
+    /// Per-geometry values (start/end/length/radius/...).
+    Geometry,
+    /// Text-content and text-style values.
+    Text,
+    /// Display attributes and appearance flags.
+    Display,
+}
+
+impl PropertyGroup {
+    /// Stable machine key carried on the wire (`entity`, `geometry`, …).
+    pub const fn key(self) -> &'static str {
+        match self {
+            PropertyGroup::Entity => "entity",
+            PropertyGroup::Geometry => "geometry",
+            PropertyGroup::Text => "text",
+            PropertyGroup::Display => "display",
+        }
+    }
+
+    /// The group for a property key.
+    ///
+    /// This is the single mapping for every key the module emits. `style` is
+    /// text by default (MULTILEADER style names) and is overridden to
+    /// [`PropertyGroup::Display`] for the hatch style row. `color`,
+    /// `linetype`, `lineweight` and `transparency` are display rows once a
+    /// later lane emits them.
+    pub fn for_key(key: &str) -> Self {
+        match key {
+            "id" | "handle" | "type" | "layer" | "space" | "draw_order" | "instance"
+            | "sub_element" | "status" => PropertyGroup::Entity,
+            "text" | "height" | "font" | "shape" | "size" | "style" => PropertyGroup::Text,
+            "fill" | "visible" | "color" | "linetype" | "lineweight" | "transparency" => {
+                PropertyGroup::Display
+            }
+            _ => PropertyGroup::Geometry,
+        }
+    }
+}
+
+/// The editing control a future write path would use for a property row.
+///
+/// This is machine metadata, not display text. It says nothing about whether
+/// the row is **currently** writable — see [`PropertyRow::editable`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyKind {
+    Text,
+    Number,
+    Enum,
+    Bool,
+}
+
+impl PropertyKind {
+    /// Stable machine key carried on the wire (`text`, `number`, …).
+    pub const fn key(self) -> &'static str {
+        match self {
+            PropertyKind::Text => "text",
+            PropertyKind::Number => "number",
+            PropertyKind::Enum => "enum",
+            PropertyKind::Bool => "bool",
+        }
+    }
+
+    /// The control kind for a property key.
+    pub fn for_key(key: &str) -> Self {
+        match key {
+            "closed" | "inverted" | "visible" => PropertyKind::Bool,
+            "draw_order" | "length" | "vertices" | "bulges" | "radius" | "start_angle"
+            | "sweep" | "ratio" | "degree" | "control_points" | "triangles" | "height" | "size"
+            | "opaque_version" | "payload_bytes" | "boundary" | "measurement" | "display"
+            | "loops" | "roots" | "lines" | "children" => PropertyKind::Number,
+            "layer" | "linetype" | "color" | "lineweight" | "transparency" | "space" | "status" => {
+                PropertyKind::Enum
+            }
+            _ => PropertyKind::Text,
+        }
+    }
+}
+
 /// One read-only property row for the properties panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropertyRow {
@@ -25,14 +121,55 @@ pub struct PropertyRow {
     pub key: &'static str,
     /// Human-facing value; numbers are formatted by the caller's unit policy
     /// only where the value is a length, otherwise raw drawing units.
-    pub value: String,
+    ///
+    /// `None` **iff** [`Self::mixed`] is `true`: at least one selected object
+    /// has a different value. There is never a fabricated empty string.
+    pub value: Option<String>,
+    /// Stable panel group machine key (never translated).
+    pub group: PropertyGroup,
+    /// Whether the value differs across a multi-selection (`value` is `None`).
+    pub mixed: bool,
+    /// Whether a future write path can change this value for **this**
+    /// selection. Read-side metadata only: nothing here writes.
+    pub editable: bool,
+    /// The control kind a future editor would use.
+    pub kind: PropertyKind,
+    /// Allowed values for an `enum` row, from the real drawing tables (sorted,
+    /// capped at [`MAX_ENUM_OPTIONS`]). Empty for every other kind.
+    pub options: Vec<String>,
 }
 
 impl PropertyRow {
     pub fn new(key: &'static str, value: impl Into<String>) -> Self {
         PropertyRow {
             key,
-            value: value.into(),
+            value: Some(value.into()),
+            group: PropertyGroup::for_key(key),
+            mixed: false,
+            editable: false,
+            kind: PropertyKind::for_key(key),
+            options: Vec::new(),
+        }
+    }
+
+    /// A row whose value differs across the selection: no value, explicit marker.
+    pub fn mixed(key: &'static str) -> Self {
+        PropertyRow {
+            key,
+            value: None,
+            group: PropertyGroup::for_key(key),
+            mixed: true,
+            editable: false,
+            kind: PropertyKind::for_key(key),
+            options: Vec::new(),
+        }
+    }
+
+    /// A row in an explicit group rather than the key's default group.
+    pub fn in_group(key: &'static str, value: impl Into<String>, group: PropertyGroup) -> Self {
+        PropertyRow {
+            group,
+            ..PropertyRow::new(key, value)
         }
     }
 }
@@ -155,9 +292,15 @@ impl SelectionSet {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SelectionProperties {
     pub count: usize,
-    /// Rows describing the single selected object; empty when `count != 1`.
+    /// Property rows of the selection.
+    ///
+    /// For one selected object this is the full ordered row set. For a
+    /// multi-selection it is the **intersection**: every key present on all
+    /// selected objects, in the first selected object's order, with a shared
+    /// value or an explicit mixed marker. Empty only when nothing is selected.
     pub rows: Vec<PropertyRow>,
-    /// Keys whose values differ across the selection (multi-select).
+    /// Keys whose values differ across the selection (multi-select); exactly
+    /// the keys of rows with [`PropertyRow::mixed`] set, in row order.
     pub mixed_keys: Vec<&'static str>,
     /// The **round-trippable** current string of a single selected, directly
     /// addressable text entity (ADR 0020 amendment B; ADR-0021 D4 extends it to
@@ -194,8 +337,10 @@ impl SelectionProperties {
     /// - exactly one selected entity that exists → full row set;
     /// - single selection that no longer resolves (deleted/foreign) → explicit
     ///   `status = unresolved` row, never a fake entity;
-    /// - multiple selected → `mixed_keys` lists keys whose values differ, and
-    ///   `rows` stays empty (the panel shows "N selected" + mixed keys).
+    /// - multiple selected → the intersection of their row keys; a key whose
+    ///   value differs across refs becomes a mixed row (`value = None`,
+    ///   `mixed = true`) and appears in `mixed_keys`. Keys present on only some
+    ///   refs are not listed — the panel never invents blanks.
     pub fn extract(database: &DrawingDatabase, selection: &SelectionSet) -> Self {
         if selection.is_empty() {
             return SelectionProperties {
@@ -239,7 +384,8 @@ impl SelectionProperties {
             };
         }
 
-        // Multi-select: compare the surface property keys of every member.
+        // Multi-select: keep only the keys every ref reports (intersection),
+        // then collapse equal values and mark the rest as mixed.
         let per_ref: Vec<Vec<PropertyRow>> = selection
             .refs()
             .iter()
@@ -248,27 +394,41 @@ impl SelectionProperties {
                 None => vec![PropertyRow::new("status", "unresolved")],
             })
             .collect();
-        let mut mixed = BTreeSet::new();
-        let mut keys: Vec<&'static str> = Vec::new();
-        for rows in &per_ref {
-            for row in rows {
-                if !keys.contains(&row.key) {
-                    keys.push(row.key);
-                }
-            }
+        let mut rows: Vec<PropertyRow> = Vec::new();
+        for first_row in &per_ref[0] {
+            let key = first_row.key;
+            let Some(members) = per_ref
+                .iter()
+                .map(|rows| rows.iter().find(|row| row.key == key))
+                .collect::<Option<Vec<&PropertyRow>>>()
+            else {
+                // Not on every selected object: the intersection excludes it.
+                continue;
+            };
+            let first_value = members[0].value.clone();
+            let mixed = first_value.is_none() || members.iter().any(|row| row.value != first_value);
+            let mut row = match first_value {
+                Some(value) if !mixed => PropertyRow::new(key, value),
+                _ => PropertyRow::mixed(key),
+            };
+            // Group and kind follow the key's stable mapping (the first ref's
+            // row is authoritative for the per-geometry overrides, e.g. `style`).
+            row.group = first_row.group;
+            row.kind = first_row.kind;
+            row.options = enum_options(database, key);
+            // Editable only when **every** selected ref supports the write path.
+            row.editable = members.iter().all(|row| row.editable);
+            rows.push(row);
         }
-        for key in &keys {
-            let value =
-                |rows: &[PropertyRow]| rows.iter().find(|r| r.key == *key).map(|r| r.value.clone());
-            let first = value(&per_ref[0]);
-            if per_ref.iter().any(|rows| value(rows) != first) {
-                mixed.insert(*key);
-            }
-        }
+        let mixed_keys: Vec<&'static str> = rows
+            .iter()
+            .filter(|row| row.mixed)
+            .map(|row| row.key)
+            .collect();
         SelectionProperties {
             count: selection.len(),
-            rows: Vec::new(),
-            mixed_keys: mixed.into_iter().collect(),
+            rows,
+            mixed_keys,
             text: None,
             // A multi-selection has no single text target, so no capability.
             text_multiline: false,
@@ -336,8 +496,62 @@ pub fn entity_property_rows(
     if let Some(sub) = &reference.sub_element {
         rows.push(PropertyRow::new("sub_element", sub.source_key.clone()));
     }
+    for row in &mut rows {
+        if row.key == "layer" {
+            row.editable = property_row_editable(database, reference, entity, "layer");
+            row.options = enum_options(database, "layer");
+        }
+    }
     rows.extend(geometry_property_rows(&entity.geometry));
     rows
+}
+
+/// The sorted, capped option list for an `enum` property key.
+///
+/// Only real drawing tables are used: `layer` → the drawing's layer names,
+/// `linetype` → its linetype names. Every other key (including `color`,
+/// `lineweight` and `transparency`, which are ACI/value pickers rather than
+/// named tables) reports no options. Names are deduplicated and sorted so the
+/// same drawing always yields the same order.
+pub fn enum_options(database: &DrawingDatabase, key: &str) -> Vec<String> {
+    let names: BTreeSet<&str> = match key {
+        "layer" => database.layers().map(|layer| layer.name.as_str()).collect(),
+        "linetype" => database
+            .linetypes()
+            .map(|linetype| linetype.name.as_str())
+            .collect(),
+        _ => return Vec::new(),
+    };
+    names
+        .into_iter()
+        .take(MAX_ENUM_OPTIONS)
+        .map(str::to_string)
+        .collect()
+}
+
+/// Whether the write path can change `key` for this selected object.
+///
+/// A row is editable when the write target is a directly addressable top-level
+/// entity (the same rule [`editable_text`] uses: no instance path, no
+/// sub-element) **and** the key is one of the five properties
+/// [`crate::property_value::SUPPORTED_KEYS`] accepts: `layer`, `color`,
+/// `linetype`, `lineweight`, `transparency`.
+///
+/// The current value does **not** restrict editability: the write path accepts a
+/// symbolic value (`ByLayer`/`ByBlock`) as well as a concrete one, so a row
+/// whose stored value is symbolic is still writable (and a concrete value can be
+/// switched back to symbolic). Every other key is `false`: text content has its
+/// own edit path (ADR 0020 amendment B) and no other property is writable.
+pub fn property_row_editable(
+    _database: &DrawingDatabase,
+    reference: &SelectionRef,
+    _entity: &DbEntity,
+    key: &str,
+) -> bool {
+    if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
+        return false;
+    }
+    crate::property_value::is_supported_key(key)
 }
 
 /// The stored handle, or an explicit "none" — never a synthesized number.
@@ -513,14 +727,22 @@ fn geometry_property_rows(geometry: &SemanticGeometry) -> Vec<PropertyRow> {
             };
             vec![
                 PropertyRow::new("loops", hatch.loops().len().to_string()),
-                PropertyRow::new("style", format!("{:?}", hatch.style())),
+                PropertyRow::in_group(
+                    "style",
+                    format!("{:?}", hatch.style()),
+                    PropertyGroup::Display,
+                ),
                 PropertyRow::new("fill", fill),
                 PropertyRow::new("display", hatch.display().len().to_string()),
             ]
         }
         // Stored metadata only: the derived display is not re-described here.
         SemanticGeometry::MultiLeader(multileader) => vec![
-            PropertyRow::new("style", multileader.style_name().to_string()),
+            PropertyRow::in_group(
+                "style",
+                multileader.style_name().to_string(),
+                PropertyGroup::Text,
+            ),
             PropertyRow::new("roots", multileader.roots().len().to_string()),
             PropertyRow::new("lines", multileader.lines().len().to_string()),
             PropertyRow::new("display", multileader.display().len().to_string()),

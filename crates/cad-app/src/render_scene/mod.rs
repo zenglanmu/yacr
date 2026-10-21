@@ -401,6 +401,7 @@ impl CadSceneController {
                         overlays.cursor,
                         overlays.viewport_bounds,
                         overlays.view_scale,
+                        overlays.crosshair_percent,
                         document,
                     ));
                 }

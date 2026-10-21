@@ -171,7 +171,7 @@ impl PreviewOptions {
 /// All fields are pure session state; none of them writes the database. An
 /// empty selection and a `None` preview produce no overlay batches, which is
 /// an explicit empty overlay rather than an error.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OverlayInputs {
     pub selection: SelectionSet,
     /// Entity-level hovered refs.
@@ -241,6 +241,32 @@ pub struct OverlayInputs {
     /// part of [`overlay_fingerprint`], so a moved cursor rebuilds the transient
     /// overlay so the crosshair follows it.
     pub cursor: Option<Point3>,
+    /// Crosshair arm length as an integer percentage of each arm's full
+    /// cursor-to-edge span ([`DEFAULT_CROSSHAIR_PERCENT`] is the historical
+    /// full-viewport crosshair). The pickbox is deliberately unaffected: it is
+    /// the pick tolerance, not a display preference. Part of
+    /// [`overlay_fingerprint`], so a resized crosshair rebuilds the overlay.
+    pub crosshair_percent: u32,
+}
+
+impl Default for OverlayInputs {
+    fn default() -> Self {
+        Self {
+            selection: SelectionSet::default(),
+            hovered: SelectionSet::default(),
+            hidden: SelectionSet::default(),
+            measurement: None,
+            draw_preview: None,
+            selection_box: None,
+            snap_hints_input: Vec::new(),
+            visibility: OverlayVisibility::default(),
+            viewport_bounds: None,
+            point_markers: Vec::new(),
+            view_scale: None,
+            cursor: None,
+            crosshair_percent: DEFAULT_CROSSHAIR_PERCENT,
+        }
+    }
 }
 
 impl OverlayInputs {

@@ -24,6 +24,7 @@
 mod commands;
 mod diagnostics;
 mod input;
+mod settings;
 mod status;
 
 use std::cell::{Cell, RefCell};
@@ -57,13 +58,17 @@ use self::input::{cancel_target, plan_input, CancelTarget, PointerPress};
 use self::status::{assemble_status, cad_tool};
 
 pub use self::commands::{
-    admissible_names, canonical_command_name, measurement_selector_kind, normalize_command,
-    unsupported_command_reason, zoom_step_factor, COMMAND_ALIASES, COMMAND_TABLE,
-    MEASUREMENT_SELECTORS, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
+    admissible_names, canonical_command_name, command_name, measurement_selector_kind,
+    normalize_command, unsupported_command_reason, zoom_step_factor, COMMAND_ALIASES,
+    COMMAND_TABLE, MEASUREMENT_SELECTORS, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
+};
+pub use self::settings::{
+    CadSettingKey, CadSettingValue, CadSettings, SETTINGS_INVALID_PLOT_FORMAT,
+    SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
 pub use self::status::{
-    unsupported_status, CadCamera, CadImportProgress, CadPopup, CadSelection, CadSelectionRow,
-    CadStatus, CadTool, CadToolParams,
+    unsupported_status, CadCamera, CadCommandLogEntry, CadCommandLogKind, CadImportProgress,
+    CadMeasurementEcho, CadPopup, CadSelection, CadSelectionRow, CadStatus, CadTool, CadToolParams,
 };
 
 /// Completions drained per poll. The queue's absolute capacity is 256, so this
@@ -237,6 +242,10 @@ impl CadSession {
         let Some(name) = canonical_command_name(text) else {
             return Err(unsupported_command_reason(text));
         };
+        // The router admitted a stable selector: echo it in the command log.
+        // The host appends the `Result`/`Error` entry from the actual outcome;
+        // this records only the selector name (never any typed text).
+        self.core.record_command(name);
         // Interaction-only selectors carry no `CommandId`: dispatch them through
         // the same typed funnel the other tools use, before the `CommandId` path.
         if let Some(kind) = measurement_selector_kind(name) {
@@ -440,6 +449,11 @@ impl CadSession {
     /// completion error and recorded for `cad_status.error`; it is never turned
     /// into an empty success.
     pub fn standard_view(&self, view: StandardView) -> Result<(), String> {
+        // This typed entry bypasses the text selector funnel; echo the same
+        // stable selector name the router uses for `STANDARDVIEW`.
+        if let Some(name) = command_name(CommandId::StandardView) {
+            self.core.record_command(name);
+        }
         self.dispatch_payload(CommandId::StandardView, CommandPayload::StandardView(view))
     }
 
@@ -724,6 +738,14 @@ impl CadSession {
             .import_snapshot()
             .as_ref()
             .and_then(CadImportProgress::from_snapshot);
+        // The real bounded command echo (observational only). Cleared by the host
+        // on a verified document replacement, so this never mixes drawings.
+        status.command_log = self
+            .core
+            .command_log_entries()
+            .iter()
+            .map(CadCommandLogEntry::from_host)
+            .collect();
         status
     }
 

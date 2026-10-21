@@ -27,6 +27,7 @@ use gtk::prelude::*;
 use serde::Serialize;
 use tauri::Manager;
 
+use super::locale::host_locale_script;
 use super::options::WINDOW_LABEL;
 use super::{lock, Shared};
 
@@ -515,6 +516,9 @@ fn create_popup_window(
     )
     .transparent(composited)
     .auto_resize()
+    // Same host-resolved locale as the main window, injected before the document
+    // is parsed, so the dialog's chrome matches its native labels.
+    .initialization_script(host_locale_script())
     // Literal boot payload, read at mount with no race.
     .initialization_script(script);
     window

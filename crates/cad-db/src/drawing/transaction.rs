@@ -6,7 +6,7 @@ use cad_domain::*;
 
 use super::DrawingDatabase;
 use crate::change::{ChangeMask, ChangeSet, ObjectChange};
-use crate::entity::DbEntity;
+use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::transform::transform_geometry;
 
 /// A staged, all-or-nothing drawing write transaction.
@@ -26,6 +26,11 @@ pub struct DrawingTransaction<'a> {
     /// [`ChangeMask::TRANSFORM`] to the resulting update. The shared apply path
     /// cannot infer "move" from the before/after pair alone.
     transformed: BTreeSet<EntityId>,
+    /// Staged per-entity display-attribute replacements, applied after
+    /// [`DrawingDatabase::apply_drawing_changes`] has validated and committed the
+    /// entity rows. They are keyed by id, so a second staging of the same id is
+    /// refused like a duplicate entity update.
+    display: Vec<(EntityId, EntityRenderAttributes)>,
     /// Ids staged so far, for early duplicate rejection.
     seen: BTreeSet<EntityId>,
 }
@@ -49,6 +54,7 @@ impl<'a> DrawingTransaction<'a> {
             transaction,
             staged: Vec::new(),
             transformed: BTreeSet::new(),
+            display: Vec::new(),
             seen: BTreeSet::new(),
         })
     }
@@ -79,6 +85,53 @@ impl<'a> DrawingTransaction<'a> {
             return Err(CadError::Invariant(format!("entity {id:?} does not exist")));
         }
         self.stage(id, Some(entity), false)
+    }
+
+    /// Stage a replacement of the per-entity display attributes the
+    /// representation/renderer reads (colour, linetype, lineweight, opacity).
+    ///
+    /// Those attributes live outside [`DbEntity`], so the shared apply path
+    /// cannot see them. This stages an **unchanged** entity row when the caller
+    /// has not already staged one (the ChangeSet needs an update entry for the
+    /// id), replays the attributes after the validated entity write, and adds
+    /// [`ChangeMask::STYLE`] to the id's update so dependency invalidation
+    /// rebuilds its representation exactly like any other style edit.
+    ///
+    /// At most one display replacement per id per transaction; staging twice is
+    /// a caller bug and is refused. If the caller stages the entity row itself,
+    /// do that **before** this call.
+    pub fn update_entity_display(
+        &mut self,
+        id: EntityId,
+        attributes: EntityRenderAttributes,
+    ) -> CadResult<()> {
+        let unchanged = self
+            .database
+            .entities
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| CadError::Invariant(format!("entity {id:?} does not exist")))?;
+        if self.display.iter().any(|(staged, _)| *staged == id) {
+            return Err(CadError::Invariant(format!(
+                "entity {id:?} has its display attributes modified more than once in one \
+                 transaction"
+            )));
+        }
+        if self
+            .staged
+            .iter()
+            .any(|(staged, change)| *staged == id && change.is_none())
+        {
+            return Err(CadError::Invariant(format!(
+                "entity {id:?} cannot be deleted and have its display attributes replaced in \
+                 one transaction"
+            )));
+        }
+        if !self.seen.contains(&id) {
+            self.stage(id, Some(unchanged), false)?;
+        }
+        self.display.push((id, attributes));
+        Ok(())
     }
 
     /// Stage deletion of an existing entity.
@@ -135,6 +188,7 @@ impl<'a> DrawingTransaction<'a> {
     pub fn commit(mut self) -> CadResult<ChangeSet> {
         let staged = std::mem::take(&mut self.staged);
         let transformed = std::mem::take(&mut self.transformed);
+        let display = std::mem::take(&mut self.display);
         let mut changeset =
             self.database
                 .apply_drawing_changes(&self.reason, self.transaction, staged)?;
@@ -148,6 +202,20 @@ impl<'a> DrawingTransaction<'a> {
                         *mask = mask.union(ChangeMask::TRANSFORM);
                     }
                 }
+            }
+        }
+        // Display attributes are stored beside the entity, so they are replayed
+        // here (after the validated entity write) and their update entries carry
+        // STYLE, the mask that invalidates a representation.
+        for (id, attributes) in display {
+            self.database.render_attributes.insert(id, attributes);
+            match changeset.changes.iter_mut().find(
+                |change| matches!(change, ObjectChange::Update(object, _) if object.0 == id.0),
+            ) {
+                Some(ObjectChange::Update(_, mask)) => *mask = mask.union(ChangeMask::STYLE),
+                _ => changeset
+                    .changes
+                    .push(ObjectChange::Update(ObjectId(id.0), ChangeMask::STYLE)),
             }
         }
         Ok(changeset)

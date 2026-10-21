@@ -140,6 +140,8 @@ impl<'a> ImporterBuilder<'a> {
                         font: self.style_font(&t.style),
                         h_align,
                         v_align,
+                        // DXF TEXT has no width boundary.
+                        wrap_width: None,
                     },
                     Completeness::Complete,
                 )
@@ -171,6 +173,10 @@ impl<'a> ImporterBuilder<'a> {
                         font: self.style_font(&t.style),
                         h_align,
                         v_align,
+                        // MTEXT's reference-rectangle width (group 41) is still
+                        // dropped by this importer; only MLEADER populates the
+                        // wrap boundary for now.
+                        wrap_width: None,
                     },
                     Completeness::Partial(
                         MTEXT_UNMODELLED.iter().map(|r| (*r).to_string()).collect(),

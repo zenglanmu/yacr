@@ -59,13 +59,27 @@ impl CadImportProgress {
 }
 
 /// One row of the [`CadSelection`] block: a value plus its **stable machine
-/// key** (`id`, `handle`, `type`, …).
+/// key** (`id`, `handle`, `type`, …), its panel group and its read-side editing
+/// metadata.
 ///
-/// The key is never translated by the host; the UI maps it to a catalog label.
+/// The key, group and kind are never translated by the host; the UI maps each
+/// to a catalog label. `value` is `null` **iff** `mixed` is `true` (a
+/// multi-selection whose values differ); it is never an empty-string stand-in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CadSelectionRow {
     pub key: String,
-    pub value: String,
+    /// Shared value, or `null` when the values differ across the selection.
+    pub value: Option<String>,
+    /// Stable panel group machine key (`entity`, `geometry`, `text`, `display`).
+    pub group: String,
+    /// Whether the values differ across the selection (`value` is `null`).
+    pub mixed: bool,
+    /// Whether a future write path can change the value for every selected ref.
+    pub editable: bool,
+    /// Stable editing-control machine key (`text`, `number`, `enum`, `bool`).
+    pub kind: String,
+    /// Real named-table values for an `enum` row (sorted, capped by the app).
+    pub options: Vec<String>,
 }
 
 /// The `selection` block of [`CadStatus`] (frozen frontend shape).
@@ -74,10 +88,13 @@ pub struct CadSelectionRow {
 /// describes a real selection instead of a fabricated one:
 ///
 /// * `count >= 0` and `empty == (count == 0)`;
-/// * `rows` is non-empty **only** for a single selected object. A single ref
-///   that no longer resolves still reports its honest `status: "unresolved"`
+/// * `rows` carries property rows for any `count >= 1`. A single object gets its
+///   full row set; a multi-selection gets the intersection of the refs' row
+///   keys, where a differing value is `value: null` with `mixed: true`. A single
+///   ref that no longer resolves still reports its honest `status: "unresolved"`
 ///   row rather than invented geometry;
-/// * `mixedKeys` is non-empty **only** for a multi-object selection.
+/// * `mixedKeys` is exactly the keys of the rows with `mixed: true` (empty for a
+///   single selection).
 ///
 /// A session with no document (or no selection) carries the honest empty block
 /// ([`CadSelection::empty`]).
@@ -88,10 +105,9 @@ pub struct CadSelection {
     pub count: u64,
     /// Whether nothing is selected (`count == 0`).
     pub empty: bool,
-    /// Property rows of a single selection; empty for any other count.
+    /// Property rows of the selection; empty only for an empty selection.
     pub rows: Vec<CadSelectionRow>,
-    /// Machine keys whose values differ across a multi-selection; empty for any
-    /// other count.
+    /// Machine keys of the mixed rows; empty for any single selection.
     pub mixed_keys: Vec<String>,
     /// The **round-trippable** current text of a single selected `Text` entity
     /// (ADR 0020 amendment B), or `null`.
@@ -160,23 +176,25 @@ impl CadSelection {
     /// both from the same selection set, so the two cannot disagree.
     pub(super) fn from_properties(properties: &cad_app::SelectionProperties) -> Self {
         let count = properties.count as u64;
-        let rows = if properties.count == 1 {
-            properties
-                .rows
-                .iter()
-                .map(|row| CadSelectionRow {
-                    key: row.key.to_string(),
-                    value: row.value.clone(),
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let rows: Vec<CadSelectionRow> = properties
+            .rows
+            .iter()
+            .map(|row| CadSelectionRow {
+                key: row.key.to_string(),
+                value: row.value.clone(),
+                group: row.group.key().to_string(),
+                mixed: row.mixed,
+                editable: row.editable,
+                kind: row.kind.key().to_string(),
+                options: row.options.clone(),
+            })
+            .collect();
+        // One source of truth: the wire's `mixedKeys` is derived from the rows
+        // that are actually marked mixed, so the two fields cannot drift.
         let mixed_keys = if properties.count > 1 {
-            properties
-                .mixed_keys
-                .iter()
-                .map(|key| (*key).to_string())
+            rows.iter()
+                .filter(|row| row.mixed)
+                .map(|row| row.key.clone())
                 .collect()
         } else {
             Vec::new()
@@ -335,6 +353,85 @@ pub struct CadPopup {
     pub modal: bool,
 }
 
+/// Which kind of echo a [`CadCommandLogEntry`] is.
+///
+/// Serialized as a lowercase string (`"command"`, `"result"`, `"error"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CadCommandLogKind {
+    /// A named selector was admitted by the router.
+    Command,
+    /// A command produced a typed measurement result.
+    Result,
+    /// A command was refused.
+    Error,
+}
+
+/// Typed measurement echo carried by a `Result` entry.
+///
+/// Every field is a stable machine key or a real measured number: `algorithm`
+/// is one of `distance`/`polyline`/`angle`/`area`, `unit` is a known display
+/// symbol (`mm`/`m`/`in`/`ft`) or `null` for drawing units, and `precision` is
+/// the modelled precision token. There is deliberately **no** text field.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CadMeasurementEcho {
+    /// Stable machine algorithm key (never translated).
+    pub algorithm: String,
+    /// The measured value in the record's own unit context.
+    pub value: f64,
+    /// A known display unit symbol, or `null` for drawing units.
+    pub unit: Option<String>,
+    /// The modelled precision token (`analytic`/`approximate`/`unknown`).
+    pub precision: Option<String>,
+    /// The picked points, in capture order, so the UI can format deltas.
+    pub points: Vec<[f64; 3]>,
+}
+
+/// One entry of the command-window echo (AutoCAD-style command history).
+///
+/// The type has **no** message/text field by construction: the host only ever
+/// supplies stable codes/keys, and `Diagnostic::message` (partly Chinese today)
+/// can never reach the wire. `command` is present only on `Command` entries and
+/// `measurement` only on `Result` entries; an `Error` carries only `code`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CadCommandLogEntry {
+    /// Monotonic sequence, unique for the host log's lifetime.
+    pub sequence: u64,
+    pub kind: CadCommandLogKind,
+    /// Stable selector name (`DIST`, `LINE`, …) for a `Command` entry.
+    pub command: Option<String>,
+    /// Stable diagnostic code for an `Error` entry.
+    pub code: Option<String>,
+    /// Typed measurement echo for a `Result` entry.
+    pub measurement: Option<CadMeasurementEcho>,
+}
+
+impl CadCommandLogEntry {
+    /// Project one host log entry onto the wire shape.
+    pub(super) fn from_host(entry: &cad_host::CommandLogEntry) -> Self {
+        Self {
+            sequence: entry.sequence,
+            kind: match entry.kind {
+                cad_host::CommandLogKind::Command => CadCommandLogKind::Command,
+                cad_host::CommandLogKind::Result => CadCommandLogKind::Result,
+                cad_host::CommandLogKind::Error => CadCommandLogKind::Error,
+            },
+            command: entry.command.clone(),
+            code: entry.code.clone(),
+            measurement: entry
+                .measurement
+                .as_ref()
+                .map(|measurement| CadMeasurementEcho {
+                    algorithm: measurement.algorithm.clone(),
+                    value: measurement.value,
+                    unit: measurement.unit.clone(),
+                    precision: measurement.precision.clone(),
+                    points: measurement.points.clone(),
+                }),
+        }
+    }
+}
+
 /// The `cad_status` snapshot consumed by the frontend.
 ///
 /// The field set is the frozen frontend contract: every key is always present,
@@ -400,6 +497,14 @@ pub struct CadStatus {
     /// proof that no reparse happened.
     pub import_count: u64,
     pub frame_count: u64,
+    /// Typed command-window echo, oldest first; always present, never `null`.
+    ///
+    /// Bounded to [`cad_host::COMMAND_LOG_CAPACITY`] (200) with the oldest entry
+    /// dropped. Cleared when the authoritative document is replaced (open or
+    /// new), so a log from another drawing can never be shown. Observational
+    /// only; no entry feeds an input path, and no entry carries human-readable
+    /// message text.
+    pub command_log: Vec<CadCommandLogEntry>,
     /// The open modal popup (ADR-0021 D1/D2), or `null` while none is open.
     ///
     /// Additive wire field: every other key is unchanged. The host projects its
@@ -435,6 +540,8 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         crosshair: false,
         import_count: 0,
         frame_count: 0,
+        // No host log exists for an unsupported/probe snapshot.
+        command_log: Vec::new(),
         // No host builds a popup for an unsupported/probe snapshot; the host
         // projection fills the real value when one is open.
         popup: None,
@@ -657,6 +764,9 @@ pub(super) fn assemble_status(
         crosshair,
         import_count,
         frame_count,
+        // The session owns no command log: `CadSession::snapshot` projects the
+        // host's real bounded log onto this field (never inferred here).
+        command_log: Vec::new(),
         // The session owns no window: the host projects its live popup state
         // onto the snapshot it returns (never inferred here).
         popup: None,

@@ -27,7 +27,7 @@ fn assert_selection_resolves(app: &Application, session: &SessionState) {
         !properties
             .rows
             .iter()
-            .any(|row| row.key == "status" && row.value == "unresolved"),
+            .any(|row| row.key == "status" && row.value.as_deref() == Some("unresolved")),
         "selection must not report an `unresolved` row: {:?}",
         properties.rows
     );

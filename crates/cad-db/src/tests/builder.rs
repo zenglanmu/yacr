@@ -215,3 +215,42 @@ fn byblock_color_and_lineweight_stay_symbolic() {
     assert_eq!(attributes.color, EntityColor::ByBlock);
     assert_eq!(attributes.lineweight, EntityLineWeight::ByBlock);
 }
+
+#[test]
+fn code_page_is_absent_by_default_and_survives_the_builder() {
+    // A hand-built drawing (or a source with no code page) is `None`: unknown,
+    // never a guessed page.
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    let drawing = b.finish().unwrap();
+    assert_eq!(drawing.code_page(), None);
+
+    // A declared code page survives verbatim; the db does not interpret it.
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.set_code_page(Some("ANSI_936"));
+    let drawing = b.finish().unwrap();
+    assert_eq!(drawing.code_page(), Some("ANSI_936"));
+
+    // Empty/whitespace means "not declared", not a page named "".
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.set_code_page(Some("   "));
+    let drawing = b.finish().unwrap();
+    assert_eq!(drawing.code_page(), None);
+}

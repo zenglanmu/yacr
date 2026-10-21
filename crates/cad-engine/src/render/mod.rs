@@ -75,6 +75,11 @@ pub struct ViewSnapshot {
     pub camera: Camera,
     pub mode: ProjectionKind,
     pub canvas_size: [f64; 2],
+    /// The colour this view's frames clear the canvas to, as linear channel
+    /// values (the renderer's own colour space). It is a display preference the
+    /// host resolves per active space — a plain value, not a configuration
+    /// dependency — and the default is the renderer's documented opaque black.
+    pub clear_color: [f32; 4],
 }
 impl Default for ViewSnapshot {
     fn default() -> Self {
@@ -84,6 +89,7 @@ impl Default for ViewSnapshot {
             camera: Camera::top_view_2d(),
             mode: ProjectionKind::TwoD,
             canvas_size: [1280.0, 800.0],
+            clear_color: [0.0, 0.0, 0.0, 1.0],
         }
     }
 }

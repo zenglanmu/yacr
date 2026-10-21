@@ -35,6 +35,7 @@ fn text_fixture() -> HostController {
             font: Some("arial.ttf".into()),
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
+            wrap_width: None,
         },
         draw_order: 0,
     })
@@ -327,6 +328,7 @@ fn mtext_geometry(text: &str) -> SemanticGeometry {
         font: Some("arial.ttf".into()),
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
+        wrap_width: None,
     }
 }
 
@@ -452,6 +454,7 @@ fn mixed_text_fixture() -> HostController {
             font: Some("arial.ttf".into()),
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
+            wrap_width: None,
         },
         4,
     ))

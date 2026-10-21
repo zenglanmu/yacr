@@ -24,8 +24,10 @@ mod hover;
 mod navigation;
 mod p4_origin_dispatch;
 mod p4_trace;
+mod properties;
 mod queue;
 mod select;
+mod settings;
 mod snap_marker;
 mod text_tool;
 

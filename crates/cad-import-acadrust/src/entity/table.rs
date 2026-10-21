@@ -150,6 +150,9 @@ impl<'a> ImporterBuilder<'a> {
                             font: self.style_font(&content.text_style_name),
                             h_align: TextAlignH::Center,
                             v_align: TextAlignV::Middle,
+                            // Table cell text is placed at a fixed cell centre;
+                            // the cell width is not a text wrap boundary.
+                            wrap_width: None,
                         });
                     }
                 }

@@ -446,6 +446,41 @@ button, input, select { font: inherit; color: inherit; }
 .commandline__input::placeholder { color: var(--text-muted); opacity: 1; }
 .commandline__input:disabled { color: var(--text-disabled); }
 .commandline__message { margin: 5px 0 0 24px; color: var(--danger); }
+/* Command-window echo (scrollback) --------------------------------------- */
+/* Above the input row and bounded to roughly seven lines: the list scrolls
+   itself, so the echo never grows with the log and never reflows the ribbon. The
+   line boxes are the shared mono scale (11px) — no new step is introduced. It is
+   output, not a control: no hover states, no focus ring of its own. */
+.commandlog {
+  max-height: 120px;
+  margin: 0 0 4px;
+  padding: 3px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--chrome-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.commandlog__line { display: flex; align-items: baseline; min-width: 0; }
+/* The label keeps its trailing space (`Command: ` / `Delta X = `), so a wrapped
+   line still reads as label-then-value. */
+.commandlog__label { flex: none; color: var(--text-muted); white-space: pre; }
+.commandlog__text { min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+.commandlog__unit { flex: none; color: var(--text-muted); white-space: pre; }
+.commandlog__line.is-command .commandlog__text { color: var(--text-dim); }
+.commandlog__line.is-delta .commandlog__text { color: var(--text-dim); }
+.commandlog__line.is-error .commandlog__text { color: var(--danger); }
+/* The precision token is meta, never an accuracy claim: the same quiet chip
+   treatment as the ribbon/completion badges, and only for a non-analytic value. */
+.commandlog__meta {
+  flex: none; margin-left: 6px; padding: 0 5px;
+  border: 1px solid var(--line-soft); border-radius: 999px;
+  color: var(--text-muted); font-family: var(--font-ui); font-size: 10px; font-style: normal;
+}
 .completions {
   margin: 5px 0 0 24px; padding: 3px;
   background: var(--chrome-3); border: 1px solid var(--line-soft); border-radius: var(--radius);

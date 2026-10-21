@@ -232,3 +232,196 @@ fn a_committed_dimension_command_installs_fonts_without_the_draw_confirm() {
         "the general commit funnel must install the engine the open funnel could not"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Locale-driven fallback (drawing code page -> text locale)
+// ---------------------------------------------------------------------------
+
+/// A synthetic SHAPES font with one real outline for `A` (code 65).
+fn synthetic_ascii_shx() -> Vec<u8> {
+    let mut bytes = b"AutoCAD-86 shapes 1.0\r\n\x1a".to_vec();
+    let info = b"Synthetic\0\x48\x08\x00\x00";
+    let glyph = b"A\0\x01\x22\x28\x00";
+    for value in [0u16, 0, 2, 0, info.len() as u16, 65, glyph.len() as u16] {
+        bytes.extend(value.to_le_bytes());
+    }
+    bytes.extend(info);
+    bytes.extend(glyph);
+    bytes
+}
+
+/// A synthetic BIGFONT with one glyph: `U+4E2D` in GBK (`0xD6D0`).
+fn synthetic_gbk_bigfont() -> Vec<u8> {
+    let mut bytes = b"AutoCAD-86 bigfont 1.0\r\n\x1a".to_vec();
+    let info = b"Big\0\x48\x08\x00\x00";
+    let glyph = b"G\0\x01\x22\x28\x00";
+    let table_len = 6 + 2 * 8;
+    let info_offset = bytes.len() + table_len;
+    let glyph_offset = info_offset + info.len();
+    bytes.extend(0u16.to_le_bytes());
+    bytes.extend(2u16.to_le_bytes());
+    bytes.extend(0u16.to_le_bytes());
+    bytes.extend(0u16.to_le_bytes());
+    bytes.extend((info.len() as u16).to_le_bytes());
+    bytes.extend((info_offset as u32).to_le_bytes());
+    bytes.extend(0xD6D0u16.to_le_bytes());
+    bytes.extend((glyph.len() as u16).to_le_bytes());
+    bytes.extend((glyph_offset as u32).to_le_bytes());
+    bytes.extend(info);
+    bytes.extend(glyph);
+    bytes
+}
+
+fn locale_font_package(tag: &str, with_cjk: bool) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("yacr-host-locale-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let catalog = if with_cjk {
+        r#"[
+            { "file": "osifont.shx", "name": ["osifont"], "type": "shx" },
+            { "file": "gbcbig.shx", "name": ["gbcbig"], "type": "shx", "encoding": "gbk" }
+        ]"#
+    } else {
+        r#"[{ "file": "osifont.shx", "name": ["osifont"], "type": "shx" }]"#
+    };
+    std::fs::write(dir.join("fonts.json"), catalog.as_bytes()).unwrap();
+    std::fs::write(dir.join("osifont.shx"), synthetic_ascii_shx()).unwrap();
+    if with_cjk {
+        std::fs::write(dir.join("gbcbig.shx"), synthetic_gbk_bigfont()).unwrap();
+    }
+    dir
+}
+
+fn core_with_fonts_dir(dir: &Path) -> HostCore {
+    let mut options = options();
+    options.fonts_dir = Some(dir.to_path_buf());
+    let platform = HostPlatform {
+        files: Rc::new(FakeFiles::default()),
+        config_store: Rc::new(FakeConfig),
+        surface: Rc::new(FakeSurface),
+        resources: Rc::new(DesktopResources),
+        capabilities: capabilities(false),
+    };
+    HostCore::new(options, platform, RenderSessionHandle::default()).unwrap()
+}
+
+/// A text-bearing drawing whose declared code page is `code_page`.
+fn text_drawing(code_page: Option<&str>) -> DrawingDatabase {
+    let mut builder = base_builder();
+    builder.set_code_page(code_page);
+    builder
+        .insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "AcDbText".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Text {
+                text: "A".into(),
+                position: p(0.0, 0.0),
+                style: StyleId(0),
+                height: 2.5,
+                rotation: 0.0,
+                font: Some("osifont.shx".into()),
+                h_align: cad_domain::TextAlignH::Left,
+                v_align: cad_domain::TextAlignV::Baseline,
+                wrap_width: None,
+            },
+            draw_order: 0,
+        })
+        .unwrap();
+    builder.finish().unwrap()
+}
+
+fn empty_import_report() -> cad_app::host::ImportReport {
+    cad_app::host::ImportReport {
+        identity: cad_domain::DocumentIdentity::Temporary(1),
+        capabilities: Vec::new(),
+        completeness: cad_domain::Completeness::Complete,
+        diagnostics: Vec::new(),
+        parse_ms: None,
+    }
+}
+
+#[test]
+fn opening_a_drawing_retargets_the_chain_to_its_own_text_locale() {
+    let dir = locale_font_package("retarget", true);
+    let core = core_with_fonts_dir(&dir);
+
+    install_drawing(&core, Arc::new(text_drawing(Some("ANSI_936"))));
+    core.install_fonts().expect("font installation");
+    let chinese = core.render.fonts().expect("a Chinese document gets fonts");
+    assert_eq!(chinese.locale_tag(), Some("zh-Hans"));
+    let keys = chinese.fallback_keys();
+    let cjk = keys.iter().position(|key| key == "gbcbig.shx");
+    let latin = keys.iter().position(|key| key == "osifont.shx");
+    match (cjk, latin) {
+        (Some(cjk), Some(latin)) => assert!(
+            cjk < latin,
+            "the CJK face must precede the Latin default: {keys:?}"
+        ),
+        other => panic!("expected both gbcbig and osifont, got {other:?} in {keys:?}"),
+    }
+
+    // Opening another Chinese document must reuse the engine, not rebuild it.
+    install_drawing(&core, Arc::new(text_drawing(Some("GB2312"))));
+    core.install_fonts().expect("font reinstallation");
+    let reused = core.render.fonts().expect("reused engine");
+    assert!(
+        Arc::ptr_eq(&chinese, &reused),
+        "the same locale must not rebuild the engine"
+    );
+
+    // A Latin document must not silently keep the Chinese chain.
+    install_drawing(&core, Arc::new(text_drawing(Some("ANSI_1252"))));
+    core.install_fonts().expect("font reinstallation");
+    let latin_engine = core.render.fonts().expect("Latin engine");
+    assert_eq!(latin_engine.locale_tag(), Some("latin"));
+    assert!(
+        !latin_engine.contains("gbcbig.shx"),
+        "a Latin document must not inherit the Chinese chain: {:?}",
+        latin_engine.fallback_keys()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_missing_locale_face_is_one_named_diagnostic_per_document() {
+    let dir = locale_font_package("no-cjk", false);
+    let core = core_with_fonts_dir(&dir);
+    install_drawing(&core, Arc::new(text_drawing(Some("ANSI_936"))));
+    core.controller.borrow_mut().last_import_report = Some(empty_import_report());
+
+    core.install_fonts().expect("font installation");
+    // The post-commit path may run install_fonts again for the same document.
+    core.install_fonts().expect("font reinstallation");
+
+    let report = core
+        .controller
+        .borrow()
+        .last_import_report
+        .clone()
+        .expect("import report");
+    let gaps: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "font.locale_fallback_missing")
+        .collect();
+    assert_eq!(
+        gaps.len(),
+        1,
+        "one gap per document open, not per install/entity"
+    );
+    assert!(gaps[0].message.contains("zh-Hans"));
+    assert!(gaps[0].message.contains("gbcbig"));
+
+    // The drawing is still installed with the Latin fallback: no panic and no
+    // empty engine merely because the CJK face is missing.
+    let engine = core.render.fonts().expect("Latin fallback engine");
+    assert!(engine.contains("osifont.shx"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

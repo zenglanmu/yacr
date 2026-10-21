@@ -738,25 +738,15 @@ impl Renderer {
         }
         // Wipeout mask uniforms: one slot per resident mask, carrying the mask's
         // `f64` origin through the same camera-relative subtraction as a batch.
-        // The tint IS the renderer's clear colour: the mask pass paints the
-        // background, so the representation layer never names a colour (ADR 0022
-        // D1). `key_flags` is zero: a mask carries no pick key.
+        // The tint IS this frame's clear colour, so a mask paints the configured
+        // background (ADR 0022 D1) and the representation layer never names a
+        // colour. `key_flags` is zero: a mask carries no pick key.
         let mut mask_slots: Vec<u32> = Vec::with_capacity(self.masks.len());
-        let clear_color = crate::CAD_CLEAR_COLOR;
+        let clear_color = target.clear_color();
         for mask in &self.masks {
             mask_slots.push(next_slot as u32);
             let matrix = projection.batch_matrix_f64(mask.origin);
-            let uniform = uniform_bytes(
-                &matrix,
-                [
-                    clear_color.r as f32,
-                    clear_color.g as f32,
-                    clear_color.b as f32,
-                    clear_color.a as f32,
-                ],
-                [0, 0, 0, 0],
-                light,
-            );
+            let uniform = uniform_bytes(&matrix, clear_color, [0, 0, 0, 0], light);
             self.uniforms.write_slot(next_slot, &uniform);
             next_slot += 1;
         }
@@ -817,6 +807,7 @@ impl Renderer {
             view,
             depth_view,
             clear,
+            clear_color,
             use_pulled,
             &opaque,
             &transparent,

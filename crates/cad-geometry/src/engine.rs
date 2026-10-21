@@ -395,6 +395,7 @@ impl GeometryEngine for DefaultGeometryEngine {
                 font,
                 h_align,
                 v_align,
+                wrap_width,
             } => {
                 // ADR 0019 decision B: this is the **second** transform surface
                 // (the snap path); `cad-db::transform_geometry` is the other. Both
@@ -426,6 +427,9 @@ impl GeometryEngine for DefaultGeometryEngine {
                     font: font.clone(),
                     h_align: *h_align,
                     v_align: *v_align,
+                    // A world-space boundary scales with the text, exactly like
+                    // `height`; dropping it would silently re-flow the text.
+                    wrap_width: wrap_width.map(|width| width * uniform_scale(t)),
                 }
             }
             G::Shape {

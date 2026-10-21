@@ -161,3 +161,23 @@ fn importer_style_font_chain_is_typed_face_then_group_3_then_scan() {
         Some("Arial")
     );
 }
+
+/// The drawing's own text code page (`$DWGCODEPAGE`) must survive import into
+/// `cad-db`; it is the only authority for the text locale and must not be
+/// dropped or guessed.
+#[test]
+fn dxf_code_page_is_carried_into_the_database() {
+    let bytes = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n9\n$DWGCODEPAGE\n3\nANSI_936\n0\nENDSEC\n\
+0\nSECTION\n2\nENTITIES\n0\nLINE\n5\n10\n8\n0\n10\n1\n20\n2\n30\n0\n11\n4\n21\n6\n31\n0\n0\nENDSEC\n0\nEOF\n";
+    let drawing = AcadrustImporter::default()
+        .import(&request(bytes.to_vec()), &|| false)
+        .unwrap();
+    assert_eq!(drawing.database.code_page(), Some("ANSI_936"));
+
+    // Reload the same bytes again: the value is a stored property, not a
+    // one-shot read of the reader.
+    let reloaded = AcadrustImporter::default()
+        .import(&request(bytes.to_vec()), &|| false)
+        .unwrap();
+    assert_eq!(reloaded.database.code_page(), Some("ANSI_936"));
+}

@@ -28,11 +28,11 @@ test('unknown placeholders are left untouched and null params are not substitute
   assert.equal(formatMessage('no placeholders'), 'no placeholders');
 });
 
-test('catalogFor and localeTag resolve unknown locales to the default', () => {
-  assert.equal(catalogFor('de', { 'zh-CN': zh, en }), zh);
+test('catalogFor and localeTag resolve unknown locales to the English default', () => {
+  assert.equal(catalogFor('de', { 'zh-CN': zh, en }), en);
   assert.equal(catalogFor('en', { 'zh-CN': zh, en }), en);
   assert.deepEqual(LOCALES, ['zh-CN', 'en']);
-  assert.equal(localeTag('de'), 'zh-CN');
+  assert.equal(localeTag('de'), 'en');
   assert.equal(localeTag('en'), 'en');
 });
 

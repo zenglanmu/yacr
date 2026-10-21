@@ -23,6 +23,16 @@ pub(crate) fn drawing_needs_text(controller: &HostController) -> bool {
         .unwrap_or(false)
 }
 
+/// The drawing's text locale, from its own declared code page.
+///
+/// `None` (no code page) is the Latin default, never a guessed CJK page.
+pub(crate) fn drawing_locale(controller: &HostController) -> cad_platform::fonts::TextLocale {
+    controller
+        .drawing()
+        .map(|drawing| cad_platform::fonts::TextLocale::from_code_page(drawing.code_page()))
+        .unwrap_or_default()
+}
+
 /// Load the `--font` entries plus the sibling `fonts/` package into a shaping
 /// engine, if any are needed.
 ///
@@ -35,6 +45,7 @@ pub(crate) fn load_fonts(
     entries: &[(String, PathBuf)],
     requested: &[String],
     text_needed: bool,
+    locale: cad_platform::fonts::TextLocale,
 ) -> CadResult<Option<Arc<cad_representation::FontEngine>>> {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -43,13 +54,15 @@ pub(crate) fn load_fonts(
         }
         let exe = std::env::current_exe().unwrap_or_default();
         let font_dir = cad_platform::fonts::local::resolve_font_dir(None, &exe)?;
-        cad_platform::fonts::local::load_engine(
+        cad_platform::fonts::local::load_engine_report(
             font_dir.as_deref(),
             requested,
             text_needed,
             entries,
             cad_platform::fonts::local::cached_system_default_candidates(),
+            locale,
         )
+        .map(|(engine, _report)| engine)
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -58,6 +71,7 @@ pub(crate) fn load_fonts(
         }
         let _ = requested;
         let _ = text_needed;
+        let _ = locale;
         let mut engine = cad_representation::FontEngine::new();
         let mut keys = Vec::new();
         for (key, path) in entries {

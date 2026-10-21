@@ -43,6 +43,7 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
         &invocation.fonts,
         &fonts_requested(&controller),
         drawing_needs_text(&controller),
+        drawing_locale(&controller),
     )?;
     let requested_images = images_requested(&controller);
     let (image_cache, image_report) = load_images(invocation, &requested_images)?;
@@ -259,6 +260,7 @@ fn run_plot_vector(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
         &invocation.fonts,
         &fonts_requested(&controller),
         drawing_needs_text(&controller),
+        drawing_locale(&controller),
     )?;
     let context = representation_context(&controller, fonts.as_ref());
     let registry = cad_representation::ProviderRegistry::with_default_provider();
@@ -383,6 +385,7 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
         &invocation.fonts,
         &fonts_requested(&controller),
         drawing_needs_text(&controller),
+        drawing_locale(&controller),
     )?;
     let requested_images = images_requested(&controller);
     let (image_cache, image_report) = load_images(invocation, &requested_images)?;

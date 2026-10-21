@@ -6,7 +6,12 @@
 // key resolves to the key itself so a gap is visible instead of silently empty.
 
 export const LOCALES = ['zh-CN', 'en'];
-export const DEFAULT_LOCALE = 'zh-CN';
+/**
+ * Catalog used when no supported locale can be resolved. English, not Chinese:
+ * a system language this build does not ship must not silently land on a
+ * language the user did not ask for.
+ */
+export const DEFAULT_LOCALE = 'en';
 
 /** Pick a catalog for `locale`, falling back to the default locale. */
 export function catalogFor(locale, catalogs) {
@@ -44,23 +49,105 @@ export function localeTag(locale) {
 }
 
 /**
- * The locale the document should start in.
+ * The locale the document should start in, and why it was chosen.
  *
- * Order: the persisted choice, then the document's declared `lang`, then the
- * default. **Behaviour change:** the language choice is now persisted in
- * `localStorage` (key [`LOCALE_STORAGE_KEY`]) and survives a restart. It is the
- * same origin for the shell and for a popup window, so both documents read the
- * same value — that is also what carries a runtime switch into a dialog.
+ * Order (highest first): the persisted explicit choice (`stored`), then the tag
+ * the **host** resolved and injected before page load (`system`), then the
+ * OS/WebView UI language (`system`), then English (`fallback`).
+ *
+ * The host tag is what keeps the chrome and the native dialog labels in the same
+ * language: it is the already-resolved tag Rust uses for those labels, so it is
+ * authoritative over `navigator` even when the two inputs disagree. When it maps
+ * to no catalog (e.g. `zh-TW`, `fr`) the answer is English, not a fall-through
+ * to `navigator` — otherwise a Traditional-Chinese system with a `zh-CN`
+ * `navigator` would show Simplified chrome next to English native labels.
+ *
+ * `document.documentElement.lang` is deliberately **not** a source: it is a
+ * static file value, so reading it would lock the default at build time. The
+ * caller writes it from the resolved locale instead.
+ *
+ * **Behaviour change:** the language choice is persisted in `localStorage`
+ * (key [`LOCALE_STORAGE_KEY`]) and survives a restart. It is the same origin
+ * for the shell and for a popup window, so both documents read the same value —
+ * that is also what carries a runtime switch into a dialog.
  *
  * Storage is only ever a hint: an absent, blocked, throwing or unrecognised
  * value falls through to the next source, so a corrupt entry can never break
  * boot or select an unsupported locale.
  */
-export function initialLocale(doc = typeof document === 'undefined' ? null : document) {
+export function resolveLocale(
+  doc = typeof document === 'undefined' ? null : document,
+  navigatorObject = typeof navigator === 'undefined' ? null : navigator,
+  hostLocale = injectedHostLocale(),
+) {
   const stored = storedLocale(doc);
-  if (stored) return stored;
-  const declared = doc?.documentElement?.lang ?? '';
-  return LOCALES.includes(declared) ? declared : DEFAULT_LOCALE;
+  if (stored) return { locale: stored, source: 'stored' };
+  if (hostLocale !== undefined) {
+    // The host already resolved and normalised this tag. An unmappable value is
+    // English (`en`), never a fall-through to `navigator`.
+    return { locale: systemLocaleFor(hostLocale) ?? DEFAULT_LOCALE, source: 'system' };
+  }
+  for (const tag of systemLanguageTags(navigatorObject)) {
+    const mapped = systemLocaleFor(tag);
+    if (mapped) return { locale: mapped, source: 'system' };
+  }
+  return { locale: DEFAULT_LOCALE, source: 'fallback' };
+}
+
+/**
+ * The locale the document should start in (see [`resolveLocale`]).
+ */
+export function initialLocale(doc, navigatorObject, hostLocale) {
+  return resolveLocale(doc, navigatorObject, hostLocale).locale;
+}
+
+/**
+ * Global the host sets (with an `initialization_script`, before the document is
+ * parsed) to its resolved locale tag. Absent in a plain browser and in tests.
+ */
+export const HOST_LOCALE_GLOBAL = '__YACR_HOST_LOCALE__';
+
+/**
+ * The locale tag the host injected, or `undefined` when this document is not
+ * hosted (no `window`, or the global is not a string).
+ */
+export function injectedHostLocale() {
+  if (typeof window === 'undefined') return undefined;
+  const tag = window[HOST_LOCALE_GLOBAL];
+  return typeof tag === 'string' ? tag : undefined;
+}
+
+/**
+ * Map a system locale tag onto a shipped catalog, or `null` when this build has
+ * none (which resolves to English).
+ *
+ * This is the same table as Rust `cad_ui_core::i18n::supported_locale_for`.
+ * `en`/`en-*` select English; `zh`, `zh-CN`, `zh-Hans` and other
+ * Simplified-Chinese regions select `zh-CN`. A Hant script or a Traditional
+ * region (`zh-TW`, `zh-HK`, `zh-MO`) selects `null`: no Hant catalog exists, so
+ * it is not silently served Simplified. Codeset/modifier suffixes
+ * (`zh_TW.UTF-8`, `sr_RS@latin`) are stripped first.
+ */
+export function systemLocaleFor(tag) {
+  if (typeof tag !== 'string') return null;
+  const base = tag.trim().split(/[.@]/)[0];
+  const parts = base.split(/[-_]/);
+  const primary = (parts[0] ?? '').toLowerCase();
+  if (!/^[a-z]+$/.test(primary)) return null;
+  if (primary === 'en') return 'en';
+  if (primary !== 'zh') return null;
+  const traditional = parts
+    .slice(1)
+    .some(part => ['hant', 'tw', 'hk', 'mo'].includes(part.toLowerCase()));
+  return traditional ? null : 'zh-CN';
+}
+
+/** The OS/WebView UI languages in preference order (`languages`, then `language`). */
+function systemLanguageTags(navigatorObject) {
+  const languages = navigatorObject?.languages;
+  if (Array.isArray(languages) && languages.length > 0) return languages;
+  const language = navigatorObject?.language;
+  return typeof language === 'string' && language ? [language] : [];
 }
 
 /** `localStorage` key holding the chosen locale (same origin for every window). */

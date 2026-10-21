@@ -431,11 +431,20 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
     let mut last_input_seq: Option<u64> = None;
     let mut input_age_us: Option<u128> = None;
     if cad_mode {
-        let (commands, mut standard_views, tool_parameters, tool_texts, selected_texts, inputs) = {
+        let (
+            commands,
+            mut standard_views,
+            setting_writes,
+            tool_parameters,
+            tool_texts,
+            selected_texts,
+            inputs,
+        ) = {
             let mut state = lock(shared);
             (
                 std::mem::take(&mut state.shell.cad_commands),
                 std::mem::take(&mut state.cad_standard_views),
+                std::mem::take(&mut state.cad_setting_writes),
                 std::mem::take(&mut state.cad_tool_parameters),
                 std::mem::take(&mut state.cad_tool_texts),
                 std::mem::take(&mut state.cad_selected_texts),
@@ -444,6 +453,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
         };
         let queued = commands.len()
             + standard_views.len()
+            + setting_writes.len()
             + tool_parameters.len()
             + tool_texts.len()
             + selected_texts.len()
@@ -463,6 +473,15 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
         if queued > 0 {
             CAD.with(|cell| {
                 if let Some(session) = cell.borrow().as_ref() {
+                    // Settings writes apply first: an Options change in this
+                    // batch is visible to the commands/inputs that follow. The
+                    // session validates, persists and applies each one; a
+                    // refusal is its real error (surfaced through cad_status).
+                    for (key, value) in setting_writes {
+                        if let Err(error) = session.apply_setting(key, value) {
+                            eprintln!("[probe] cad setting rejected: {error}");
+                        }
+                    }
                     for command in &commands {
                         // Admission already returned `{accepted:true}`. The real
                         // business outcome is the CadSession snapshot error; it
@@ -735,8 +754,17 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                 .as_ref()
                 .map(|session| session.snapshot(backend, adapter, 0))
         });
-        if let Some(snapshot) = &snapshot {
-            lock(shared).shell.cad_status = Some(snapshot.clone());
+        // Same mirroring discipline as the status: the settings snapshot is
+        // derived on the owner thread and cloned for the worker-thread IPC read.
+        let settings = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.settings()));
+        {
+            let mut state = lock(shared);
+            if let Some(snapshot) = &snapshot {
+                state.shell.cad_status = Some(snapshot.clone());
+            }
+            if let Some(settings) = settings {
+                state.cad_settings = Some(settings);
+            }
         }
         // Bounded CAD stage telemetry (diagnostics only): ONE aggregated line
         // when an upload work unit staged/committed, or the host frame was slow

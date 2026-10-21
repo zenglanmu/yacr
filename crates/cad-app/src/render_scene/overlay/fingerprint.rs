@@ -90,8 +90,10 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
     // The pointer cursor is overlay geometry: a moved cursor must rebuild the
     // transient overlay so the crosshair follows it. `view_scale` is deliberately
     // not hashed: it is camera-derived and changes exactly when the bounds above
-    // do, so the bounds already invalidate the overlay on any zoom.
+    // do, so the bounds already invalidate the overlay on any zoom. The crosshair
+    // percentage **is** hashed: it changes the crosshair's own geometry.
     5u8.hash(&mut hasher);
+    inputs.crosshair_percent.hash(&mut hasher);
     match inputs.cursor {
         Some(point) => {
             1u8.hash(&mut hasher);

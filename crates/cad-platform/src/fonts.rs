@@ -19,11 +19,15 @@ use std::sync::Arc;
 
 use std::collections::HashSet;
 
-use cad_domain::{CadError, CadResult};
+use cad_domain::{CadError, CadResult, Diagnostic};
 use cad_representation::FontEngine;
 use cad_resources::{face_url, plan_fonts, plan_fonts_report, FontCatalog};
 
 use super::{FontLoader, HostFuture};
+
+mod locale;
+
+pub use locale::{locale_gap, LocaleFallbackGap, TextLocale};
 
 /// Reserved engine key for a host-supplied default fallback face.
 ///
@@ -61,6 +65,14 @@ pub struct FontLoadReport {
     /// (catalog name file when available, or [`DEFAULT_FALLBACK_KEY`] for a
     /// host-supplied system default), if any.
     pub default_face: Option<String>,
+    /// The text locale the fallback chain was built for.
+    pub locale: TextLocale,
+    /// Locale-preferred faces registered for this document, in preference order.
+    pub locale_faces: Vec<String>,
+    /// `Some` when the locale prefers a face this font package/system cannot
+    /// supply. Callers surface [`Self::diagnostics`] so a Chinese drawing with no
+    /// CJK face is a named gap, not a silent Latin substitution.
+    pub locale_missing: Option<LocaleFallbackGap>,
 }
 
 impl FontLoadReport {
@@ -69,16 +81,30 @@ impl FontLoadReport {
         self.requested.is_empty() && self.planned.is_empty() && self.registered.is_empty()
     }
 
+    /// Stable diagnostics this load produced (currently the locale gap only).
+    ///
+    /// Emitted once per load/open, never per text entity. The code and its
+    /// payload are ASCII machine detail; the UI localises by code.
+    pub fn diagnostics(&self) -> Vec<Diagnostic> {
+        self.locale_missing
+            .as_ref()
+            .map(LocaleFallbackGap::diagnostic)
+            .into_iter()
+            .collect()
+    }
+
     /// One-line, platform-neutral summary for diagnostics.
     pub fn summary(&self) -> String {
         format!(
-            "catalog={} requested={} planned={} registered={} failed={} unresolved={}",
+            "catalog={} requested={} planned={} registered={} failed={} unresolved={} locale={} locale_faces={}",
             self.catalog_entries,
             self.requested.len(),
             self.planned.len(),
             self.registered.len(),
             self.failed.len(),
             self.unresolved.len(),
+            self.locale.as_str(),
+            self.locale_faces.len(),
         )
     }
 }
@@ -100,11 +126,33 @@ pub use crate::font_keys::{needs_text_shaping, requested_fonts};
 /// Returns the populated engine plus a [`FontLoadReport`]. An empty catalog or
 /// an empty plan is not an error: the caller decides whether an empty engine
 /// should be installed or `clear_fonts` used instead.
+///
+/// This variant assumes [`TextLocale::Latin`] (the historical behaviour); use
+/// [`load_font_engine_for_locale`] for a document whose code page is known.
 pub fn load_font_engine<'a>(
     loader: &'a dyn FontLoader,
     requested: &'a [String],
     text_needed: bool,
     base: &'a str,
+) -> HostFuture<'a, (Arc<FontEngine>, FontLoadReport)> {
+    load_font_engine_for_locale(loader, requested, text_needed, base, TextLocale::Latin)
+}
+
+/// Like [`load_font_engine`], but builds the fallback chain for `locale`.
+///
+/// The drawing's own faces are registered first. A non-Latin locale then
+/// registers its first available preferred face (see
+/// [`TextLocale::preferred_faces`]) and reorders the chain so that face comes
+/// before the Latin defaults. When no preferred face can be registered, the
+/// load still succeeds with the Latin chain and records a
+/// [`LocaleFallbackGap`], surfaced as a `font.locale_fallback_missing`
+/// diagnostic — a missing CJK face is never silently treated as Latin.
+pub fn load_font_engine_for_locale<'a>(
+    loader: &'a dyn FontLoader,
+    requested: &'a [String],
+    text_needed: bool,
+    base: &'a str,
+    locale: TextLocale,
 ) -> HostFuture<'a, (Arc<FontEngine>, FontLoadReport)> {
     Box::pin(async move {
         let catalog_bytes = loader.load_catalog(&catalog_url(base)).await?;
@@ -132,6 +180,7 @@ pub fn load_font_engine<'a>(
                 .iter()
                 .map(|key| format!("{key}: unsupported font technology"))
                 .collect(),
+            locale,
             ..FontLoadReport::default()
         };
         for font in &plan {
@@ -193,9 +242,62 @@ pub fn load_font_engine<'a>(
                 }
             }
         }
+        // Locale-preferred faces: the drawing's own style fonts may all be Latin
+        // even though its text is Chinese. Try the locale's candidates in order,
+        // filtered by what the catalog/package actually offers, and stop at the
+        // first one that registers (so a full CJK package is not fetched whole).
+        // A locale with nothing available is recorded as a named gap.
+        if locale != TextLocale::Latin && text_needed {
+            let mut tried = Vec::new();
+            for name in locale.preferred_faces() {
+                tried.push((*name).to_string());
+                let Some(face) = catalog.get(name) else {
+                    continue;
+                };
+                if let Some(registered) = report
+                    .registered
+                    .iter()
+                    .find(|file| file.as_str() == face.file)
+                    .map(|file| (*file).clone())
+                {
+                    report.locale_faces.push(registered);
+                    break;
+                }
+                if attempted.contains(&face.file) {
+                    // Already planned and either registered above (handled by the
+                    // find) or reported as failed; never fetch it twice.
+                    continue;
+                }
+                match loader.load_font(&face_url(base, face)).await {
+                    Ok(bytes) => {
+                        match engine.register_with_encoding(
+                            &face.file,
+                            bytes,
+                            face.encoding.as_deref(),
+                        ) {
+                            Ok(()) => {
+                                report.registered.push(face.file.clone());
+                                report.locale_faces.push(face.file.clone());
+                                break;
+                            }
+                            Err(e) => report.failed.push(format!("{}: {e}", face.file)),
+                        }
+                    }
+                    Err(e) => report.failed.push(format!("{}: {e}", face.file)),
+                }
+            }
+            if report.locale_faces.is_empty() {
+                report.locale_missing = Some(LocaleFallbackGap {
+                    locale,
+                    candidates: tried,
+                });
+            }
+        }
         // A registered face stands in for any missing one so text is not
-        // silently dropped; the order follows the plan.
-        engine.set_fallback(report.registered.clone());
+        // silently dropped. A non-Latin locale moves its preferred face ahead of
+        // the Latin defaults; Latin keeps the loader's order unchanged.
+        engine.set_fallback(locale.ordered_fallback(&report.registered));
+        engine.set_locale_tag(locale.as_str());
         Ok((Arc::new(engine), report))
     })
 }
@@ -463,6 +565,9 @@ pub mod local {
     /// candidates. A drawing with neither text nor a named font installs nothing;
     /// a text-bearing drawing always gets an engine so its glyphs resolve through
     /// the fallback chain instead of being silently dropped.
+    ///
+    /// This variant assumes [`TextLocale::Latin`]; use [`load_engine_report`]
+    /// with the locale derived from the drawing's code page.
     pub fn load_engine(
         font_dir: Option<&Path>,
         requested: &[String],
@@ -470,21 +575,71 @@ pub mod local {
         explicit: &[(String, PathBuf)],
         system_default: &[Arc<[u8]>],
     ) -> CadResult<Option<Arc<FontEngine>>> {
+        Ok(load_engine_report(
+            font_dir,
+            requested,
+            text_needed,
+            explicit,
+            system_default,
+            TextLocale::Latin,
+        )?
+        .0)
+    }
+
+    /// Like [`load_engine`], but for a document whose text locale is known, and
+    /// with the load report (locale gap included) returned to the caller.
+    ///
+    /// A locale with no preferred face available still installs the Latin chain
+    /// and reports the gap; it never fails the open and never silently pretends
+    /// the locale was satisfied.
+    pub fn load_engine_report(
+        font_dir: Option<&Path>,
+        requested: &[String],
+        text_needed: bool,
+        explicit: &[(String, PathBuf)],
+        system_default: &[Arc<[u8]>],
+        locale: TextLocale,
+    ) -> CadResult<(Option<Arc<FontEngine>>, FontLoadReport)> {
+        let mut report = FontLoadReport {
+            locale,
+            ..FontLoadReport::default()
+        };
         if requested.is_empty() && explicit.is_empty() && !text_needed {
-            return Ok(None);
+            return Ok((None, report));
         }
         let mut engine = match font_dir {
             Some(dir) => {
                 let base = dir.to_string_lossy().to_string();
                 let loader = DirFontLoader::new(dir.to_path_buf());
-                let (loaded, _report) =
-                    block_on(load_font_engine(&loader, requested, text_needed, &base))?;
-                // `load_font_engine` returns a uniquely owned engine; unwrapping it
-                // lets the explicit/system registrations below extend the same set.
+                let (loaded, loaded_report) = block_on(load_font_engine_for_locale(
+                    &loader,
+                    requested,
+                    text_needed,
+                    &base,
+                    locale,
+                ))?;
+                report = loaded_report;
+                // `load_font_engine_for_locale` returns a uniquely owned engine;
+                // unwrapping it lets the explicit/system registrations below
+                // extend the same set.
                 Arc::try_unwrap(loaded)
                     .map_err(|_| CadError::Invariant("font engine unexpectedly shared".into()))?
             }
-            None => FontEngine::new(),
+            None => {
+                // No package to resolve the locale's faces from: the gap is
+                // known here rather than after a fetch attempt.
+                if locale != TextLocale::Latin && text_needed {
+                    report.locale_missing = Some(LocaleFallbackGap {
+                        locale,
+                        candidates: locale
+                            .preferred_faces()
+                            .iter()
+                            .map(|name| (*name).to_string())
+                            .collect(),
+                    });
+                }
+                FontEngine::new()
+            }
         };
         let mut fallback = engine.fallback_keys().to_vec();
         for (name, path) in explicit {
@@ -504,9 +659,20 @@ pub mod local {
             }
         }
         if engine.is_empty() {
-            return Ok(None);
+            return Ok((None, report));
         }
-        Ok(Some(Arc::new(engine)))
+        engine.set_locale_tag(locale.as_str());
+        // An explicit/`--font` CJK face also satisfies the locale; the gap is
+        // only real when the engine truly has none of the preferred faces.
+        if report.locale_missing.is_some()
+            && locale
+                .preferred_faces()
+                .iter()
+                .any(|name| engine.contains(name))
+        {
+            report.locale_missing = None;
+        }
+        Ok((Some(Arc::new(engine)), report))
     }
 
     #[cfg(test)]
@@ -635,338 +801,4 @@ pub mod local {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use cad_db::{DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer, Style};
-    use cad_domain::{
-        CadResult, DatabaseId, EntityId, LayerId, ObjectId, Point3, Revision, SemanticGeometry,
-        SpaceId, StyleId, TextAlignH, TextAlignV,
-    };
-    use std::collections::HashMap;
-    use std::future::Future;
-    use std::sync::Mutex;
-    use std::task::{Context, Poll, Waker};
-
-    fn p(x: f64, y: f64) -> Point3 {
-        Point3 { x, y, z: 0.0 }
-    }
-
-    /// Drive a future to completion on a no-op waker (all steps are ready).
-    fn block_on<F: Future>(future: F) -> F::Output {
-        let mut future = Box::pin(future);
-        let mut cx = Context::from_waker(Waker::noop());
-        loop {
-            match future.as_mut().poll(&mut cx) {
-                Poll::Ready(value) => return value,
-                Poll::Pending => std::thread::yield_now(),
-            }
-        }
-    }
-
-    fn text_entity(id: u128, font: Option<&str>, style: StyleId) -> DbEntity {
-        DbEntity {
-            object: DbObject {
-                id: ObjectId(id),
-                type_key: "AcDbText".into(),
-                revision: Revision(0),
-                source_handle: None,
-            },
-            id: EntityId(id),
-            layer: LayerId(0),
-            space: SpaceId::Model,
-            geometry: SemanticGeometry::Text {
-                text: "hello".into(),
-                position: p(0.0, 0.0),
-                style,
-                height: 2.5,
-                rotation: 0.0,
-                font: font.map(str::to_string),
-                h_align: TextAlignH::Left,
-                v_align: TextAlignV::Baseline,
-            },
-            draw_order: 0,
-        }
-    }
-
-    /// Minimal but parseable compiled SHX shape font bytes.
-    fn synthetic_shx() -> Arc<[u8]> {
-        let mut bytes = b"AutoCAD-86 shapes 1.0\r\n\x1a".to_vec();
-        let info = b"Synthetic\0\x15\x07\x02\0";
-        for value in [0u16, 0, 1, 0, info.len() as u16] {
-            bytes.extend(value.to_le_bytes());
-        }
-        bytes.extend(info);
-        Arc::from(bytes)
-    }
-
-    fn database_with_text() -> DrawingDatabase {
-        let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
-        builder
-            .insert_layer(Layer {
-                id: LayerId(0),
-                name: "0".into(),
-                visible: true,
-            })
-            .unwrap();
-        builder
-            .insert_style(Style {
-                id: StyleId(7),
-                name: "Standard".into(),
-                resource_keys: vec!["bigfont.shx".into()],
-            })
-            .unwrap();
-        builder
-            .insert_entity(text_entity(1, Some("simplex.shx"), StyleId(7)))
-            .unwrap();
-        builder
-            .insert_entity(DbEntity {
-                object: DbObject {
-                    id: ObjectId(2),
-                    type_key: "AcDbLine".into(),
-                    revision: Revision(0),
-                    source_handle: None,
-                },
-                id: EntityId(2),
-                layer: LayerId(0),
-                space: SpaceId::Model,
-                geometry: SemanticGeometry::Line {
-                    start: p(0.0, 0.0),
-                    end: p(1.0, 1.0),
-                },
-                draw_order: 1,
-            })
-            .unwrap();
-        builder.finish().unwrap()
-    }
-
-    #[test]
-    fn collects_font_and_style_resource_keys() {
-        let db = database_with_text();
-        let mut names = requested_fonts(&db);
-        names.sort();
-        assert_eq!(names, vec!["bigfont.shx".to_string(), "simplex.shx".into()]);
-    }
-
-    #[test]
-    fn catalog_url_normalises_trailing_slash() {
-        assert_eq!(catalog_url("https://x/fonts"), "https://x/fonts/fonts.json");
-        assert_eq!(
-            catalog_url("https://x/fonts/"),
-            "https://x/fonts/fonts.json"
-        );
-        assert_eq!(catalog_url("asset://fonts/"), "asset://fonts/fonts.json");
-    }
-
-    /// A loader that serves a canned catalog plus per-URL font bytes.
-    struct FakeLoader {
-        catalog: Arc<[u8]>,
-        files: Mutex<HashMap<String, CadResult<Arc<[u8]>>>>,
-        seen: Mutex<Vec<String>>,
-    }
-
-    impl FontLoader for FakeLoader {
-        fn load_font(&self, url: &str) -> HostFuture<'_, Arc<[u8]>> {
-            self.seen.lock().unwrap().push(url.to_string());
-            let url = url.to_string();
-            if url.ends_with("fonts.json") {
-                let catalog = self.catalog.clone();
-                return Box::pin(async move { Ok(catalog) });
-            }
-            let result = self.files.lock().unwrap().remove(&url);
-            Box::pin(async move {
-                result.unwrap_or_else(|| {
-                    Err(CadError::InvalidInput(format!("no fake bytes for {url}")))
-                })
-            })
-        }
-    }
-
-    #[test]
-    fn loads_catalog_and_reports_registration_failure() {
-        let catalog: Arc<[u8]> = Arc::from(
-            br#"[{ "file": "simplex.shx", "name": ["simplex"], "type": "shx" }]"#
-                .to_vec()
-                .into_boxed_slice(),
-        );
-        // Deliberately invalid font bytes: registration must be reported as a
-        // failure, never silently counted as success.
-        let mut files = HashMap::new();
-        files.insert(
-            "https://example/fonts/simplex.shx".to_string(),
-            Ok(Arc::from(b"not-a-font".to_vec().into_boxed_slice())),
-        );
-        let loader = FakeLoader {
-            catalog,
-            files: Mutex::new(files),
-            seen: Mutex::new(Vec::new()),
-        };
-        let requested = vec!["simplex".to_string()];
-        let (engine, report) = block_on(load_font_engine(
-            &loader,
-            &requested,
-            false,
-            "https://example/fonts",
-        ))
-        .unwrap();
-        assert_eq!(report.catalog_entries, 1);
-        assert_eq!(report.planned, vec!["simplex.shx".to_string()]);
-        assert!(report.registered.is_empty());
-        assert_eq!(report.failed.len(), 1);
-        assert!(engine.is_empty());
-        assert!(report.summary().contains("failed=1"));
-    }
-
-    #[test]
-    fn unknown_names_are_skipped_not_faked() {
-        let catalog: Arc<[u8]> = Arc::from(
-            br#"[{"file":"a.shx","name":["a"],"type":"shx"}]"#
-                .to_vec()
-                .into_boxed_slice(),
-        );
-        let loader = FakeLoader {
-            catalog,
-            files: Mutex::new(HashMap::new()),
-            seen: Mutex::new(Vec::new()),
-        };
-        let requested = vec!["does-not-exist.ttf".to_string()];
-        let (_engine, report) = block_on(load_font_engine(
-            &loader,
-            &requested,
-            false,
-            "https://example/fonts",
-        ))
-        .unwrap();
-        assert!(report.planned.is_empty());
-        assert!(report.registered.is_empty());
-        assert!(report.failed.is_empty());
-        assert_eq!(report.unresolved, requested);
-        // The catalog was fetched (one URL) but no font URL was requested.
-        assert_eq!(loader.seen.lock().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn missing_names_load_explicit_catalog_fallback_without_claiming_resolution() {
-        let loader = FakeLoader {
-            catalog: Arc::from(
-                br#"[{"file":"simplex.shx","name":["simplex"],"type":"shx"}]"#.as_slice(),
-            ),
-            files: Mutex::new(HashMap::from([(
-                "https://example/fonts/simplex.shx".into(),
-                Ok(synthetic_shx()),
-            )])),
-            seen: Mutex::new(Vec::new()),
-        };
-        let requested = vec!["missing-original.shx".into()];
-        let (engine, report) = block_on(load_font_engine(
-            &loader,
-            &requested,
-            false,
-            "https://example/fonts",
-        ))
-        .unwrap();
-        assert_eq!(report.unresolved, requested);
-        assert_eq!(report.registered, vec!["simplex.shx"]);
-        assert!(!engine.contains("missing-original.shx"));
-        assert_eq!(engine.fallback_keys(), &["simplex.shx"]);
-    }
-
-    #[test]
-    fn missing_font_registers_the_default_catalog_face() {
-        // The drawing's font is absent; `osifont` (the committed default) is in
-        // the catalog and must be registered and reported as the default face.
-        let loader = FakeLoader {
-            catalog: Arc::from(
-                br#"[{"file":"simplex.shx","name":["simplex"],"type":"shx"},
-                     {"file":"osifont.ttf","name":["osifont"],"type":"mesh"}]"#
-                    .as_slice(),
-            ),
-            files: Mutex::new(HashMap::from([
-                (
-                    "https://example/fonts/simplex.shx".into(),
-                    Ok(synthetic_shx()),
-                ),
-                (
-                    "https://example/fonts/osifont.ttf".into(),
-                    Ok(synthetic_shx()),
-                ),
-            ])),
-            seen: Mutex::new(Vec::new()),
-        };
-        let requested = vec!["missing.shx".into()];
-        let (engine, report) = block_on(load_font_engine(
-            &loader,
-            &requested,
-            false,
-            "https://example/fonts",
-        ))
-        .unwrap();
-        assert_eq!(report.default_face.as_deref(), Some("osifont.ttf"));
-        assert!(report.registered.contains(&"osifont.ttf".to_string()));
-        assert!(engine.fallback_keys().iter().any(|k| k == "osifont.ttf"));
-    }
-
-    #[test]
-    fn host_default_face_is_prepended_to_the_fallback_chain() {
-        let mut engine = FontEngine::new();
-        engine.register("arial.woff", synthetic_shx()).unwrap();
-        engine.set_fallback(vec!["arial.woff".into()]);
-        register_default_face(&mut engine, synthetic_shx()).unwrap();
-        assert_eq!(
-            engine.fallback_keys().first().map(String::as_str),
-            Some(DEFAULT_FALLBACK_KEY)
-        );
-        assert!(engine.contains(DEFAULT_FALLBACK_KEY));
-        assert!(engine.fallback_keys().contains(&"arial.woff".to_string()));
-    }
-
-    #[test]
-    fn a_resolved_named_font_does_not_fetch_the_unused_default() {
-        // `text_needed` must not turn every text-bearing drawing into an extra
-        // default-font fetch: the default is only for text with no usable named
-        // font.
-        let loader = FakeLoader {
-            catalog: Arc::from(
-                br#"[{"file":"simplex.shx","name":["simplex"],"type":"shx"},
-                     {"file":"osifont.ttf","name":["osifont"],"type":"mesh"}]"#
-                    .as_slice(),
-            ),
-            files: Mutex::new(HashMap::from([(
-                "https://example/fonts/simplex.shx".into(),
-                Ok(synthetic_shx()),
-            )])),
-            seen: Mutex::new(Vec::new()),
-        };
-        let requested = vec!["simplex".to_string()];
-        let (engine, report) = block_on(load_font_engine(
-            &loader,
-            &requested,
-            true,
-            "https://example/fonts",
-        ))
-        .unwrap();
-        assert_eq!(report.registered, vec!["simplex.shx"]);
-        assert_eq!(report.default_face, None);
-        assert!(engine.contains("simplex.shx"));
-        // Catalog + the one font: the unused `osifont` file was never requested.
-        assert_eq!(loader.seen.lock().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn catalog_fetch_error_is_propagated() {
-        struct NoCatalog;
-        impl FontLoader for NoCatalog {
-            fn load_font(&self, url: &str) -> HostFuture<'_, Arc<[u8]>> {
-                let url = url.to_string();
-                Box::pin(async move { Err(CadError::ResourceMissing(format!("offline: {url}"))) })
-            }
-        }
-        let requested = vec!["simplex".to_string()];
-        let result = block_on(load_font_engine(
-            &NoCatalog,
-            &requested,
-            false,
-            "https://example/fonts",
-        ));
-        assert!(matches!(result, Err(CadError::ResourceMissing(_))));
-    }
-}
+mod tests;

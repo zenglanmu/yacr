@@ -37,7 +37,7 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | POINT | 实现 | 实现 | **overlay 屏占比十字标记**（draw_order 850 000，始终在 overlay 层、与基础场景实体遮挡关系不同）；尺寸 = 视口高的 5%；覆盖**顶层**导入 POINT；上限 4000 且只发一条诊断；**3D 不画**（`viewport_bounds` 为 `None`）；`PDMODE`/`PDSIZE`/点样式**未实现**；**块内 POINT 不标记**（限制已记录） | 实现 | 部分 |
 | SOLID / TRACE / 3DFACE | 实现 | 网格(四边形→三角) | 网格 | 实现 | 不支持 |
 | INSERT / 块 | 实现(定义与实例分离) | 实现 | 实例展开块几何(嵌套有界，保留 InstancePath) | 实现 | 不支持 |
-| TEXT / MTEXT | 实现(保留字体名/字高/旋转) | 实现 | 整形为线段：outline(TTF/OTF/WOFF)+SHX(shapes/unifont/bigfont)，缺失字体走回退链。**可变换（P7a）**：平移/旋转/均匀缩放；**镜像与非均匀缩放拒绝**（平面文字无法表达真反射）；捕捉面 `engine.rs` 同规则（跨面一致性有测试）。**P7a 起 `TEXT` 创建实现**：1 点 + 文本（`cad_set_tool_text`，终端语义、1024 字符上限），`AcDbText`，一条事务/一步撤销。**MTEXT 的列/背景填充/行距样式/绘制方向仍不保留**，导入改为 **`Partial` + 四条具名原因**（此前误报 `Complete`）；**编辑现有文本已实现（A+B）**：`TEXTEDIT`（拾取一个 `Text` → **预填当前串** → 终端文本提交 → `update_entity`，**一条事务/一步撤销**，只改字符串，样式/高度/旋转/位置/对齐保留）+ **属性面板可编辑字段**（当前单选，**不暴露实体 id**，宿主自行解析并拒绝）；**整串替换**（无光标级编辑、不解析 MTEXT 标记）；拒绝面：非 `Text`/块内成员/子元素、空、超 1024、非单选、拾取后目标已变。**MLEADER 文本编辑已实现（P8）**：A（`TEXTEDIT`）/B（面板内联）/C（**弹窗**）三条入口；MTEXT 与 MLEADER 文本多行、`\n`↔`\P`；TEXT 单行且**拒绝换行**（AutoCAD 不解释 `\P`）；其余控制码逐字透传；**`MLeaderText.width` 不参与排版**（既有缺口，改字串不重排） | 同上 | 不支持 |
+| TEXT / MTEXT | 实现(保留字体名/字高/旋转) | 实现 | 整形为线段：outline(TTF/OTF/WOFF)+SHX(shapes/unifont/bigfont)，缺失字体走回退链。**可变换（P7a）**：平移/旋转/均匀缩放；**镜像与非均匀缩放拒绝**（平面文字无法表达真反射）；捕捉面 `engine.rs` 同规则（跨面一致性有测试）。**P7a 起 `TEXT` 创建实现**：1 点 + 文本（`cad_set_tool_text`，终端语义、1024 字符上限），`AcDbText`，一条事务/一步撤销。**MTEXT 的列/背景填充/行距样式/绘制方向仍不保留**，导入改为 **`Partial` + 四条具名原因**（此前误报 `Complete`）；**编辑现有文本已实现（A+B）**：`TEXTEDIT`（拾取一个 `Text` → **预填当前串** → 终端文本提交 → `update_entity`，**一条事务/一步撤销**，只改字符串，样式/高度/旋转/位置/对齐保留）+ **属性面板可编辑字段**（当前单选，**不暴露实体 id**，宿主自行解析并拒绝）；**整串替换**（无光标级编辑、不解析 MTEXT 标记）；拒绝面：非 `Text`/块内成员/子元素、空、超 1024、非单选、拾取后目标已变。**MLEADER 文本编辑已实现（P8）**：A（`TEXTEDIT`）/B（面板内联）/C（**弹窗**）三条入口；MTEXT 与 MLEADER 文本多行、`\n`↔`\P`；TEXT 单行且**拒绝换行**（AutoCAD 不解释 `\P`）；其余控制码逐字透传；**`MLeaderText.width` 已参与排版（2026-10-21）**：`MultiLeaderGeometry::text_geometry()` → `SemanticGeometry::Text.wrap_width` → 表示层**贪心换行**（拉丁按词、CJK 按字；`\P` 段落各自独立；超宽不可断词独占一行；对齐按**每行**应用；`None`/`0`/负值/非有限 = 不换行，输出位级不变）。`Partial`：无 UAX #14 断行、无 kinsoku、跨 token 字距不测量、实体包围盒仍用未换行估计；**MTEXT 的 41 组（`rectangle_width`）导入侧仍不保留** | 同上 | 不支持 |
 | HATCH（读取/显示） | 实现 | 部分(椭圆/样条边界近似) | **P6a 起为一级 `Hatch` 实体**：边界环 + **样式感知**填充（`Normal`/`Outer`/`Ignore` 按**环集筛选**，1 基深度）+ 实心/图案/渐变；超预算/坏环降 `Partial`。**渲染变化（P6a 正确性修复）**：① `Outer`/`Ignore` 此前一律按 `Normal` 填（`Outer` **只在 ≥3 层**可见、`Ignore` 有岛屿即不同）；② 图案复合修正（**缩放基点、旋转 offset**；属 **U-1 我们的实现**，**非**外部保真验证）；③ 用户自定义图案（`76=0` 且 `78=0`）此前 `Partial`，现由 `52/41/77` **合成**；④ **环深度探测**此前只看环的**首顶点**（`fill::ring_depths`），**相切导入环**可能被判为退化或错填，现改为**最多 8 点均匀探测 + 确定性回退**（与 `loop_depths` 共享同一助手）；创建路径不受影响（先拒绝相切） | 精确局部包围盒（**bulge 环退回 AABB**，声明） | 不支持 |
 | HATCH（创建） | **实现（P6b，预选闭合实体）** | 部分 | **先选边界对象、再执行 `HATCH`**（与 `ARRAY`/`MOVE` 同型：0 点 arity + `requires_selection`）。接受 `Circle`/完整 `Ellipse`/**闭合** `Polyline`，每个成一环，须**共面**（圆/椭圆另须**法向一致**）。参数：图案类型（`SOLID`/用户自定义）、间距（>0）、角度（**通道度、域弧度**）、双线、样式（`Normal`/`Outer`/`Ignore`）。**圆 = 4 段精确圆弧**（`bulge=tan(π/8)`；**非** ADR 原写的两点环——校验器要求 ≥3 顶点，ADR 已更正）；椭圆按 64/圈**采样**（真椭圆非圆弧，bulge 会是假几何）。**内部点求边界、LINE 拼接、预定义图案名（`ANSI31` 等）、渐变创建、关联性、真正的填充预览均 NOT IMPLEMENTED**。拒绝面：非闭合/开放折线、`Line`/`Arc`、样条、椭圆弧、自交、相切/重复、部分重叠、退化、非共面、非法参数、无活动图层、Viewer。**创建校验基于弦**：两段 bulge 环的**弦间**相切可能漏检（声明） | — | 不支持 |
 | MULTILEADER | 实现（P7b-1 起为一级 `MultiLeader` 实体） | 部分 | 引线（直/样条）+ 箭头三角 + 狗腿 + 文字；**仅 MText 与无内容**迁入变体，**块/公差内容仍为 `Compound`**（渲染不变）；`90` 掩码原样、`reserved` 仅存逐字源数据。**声明**：样式快照是**解析后的有效值**（原始未置位字段不单独保留）；`EXPLODE`/`STRETCH` **显式整命令拒绝**；缩放/镜像/非均匀**整选择拒绝**；导入恒 `Partial`（颜色/线宽覆盖、背景、分栏、打断、自定义箭头、非默认平面）。**导出已实现（P7b-2）**：真 `MULTILEADER` + `MLEADERSTYLE` 按名去重 + `CLASSES`（由 acadrust 默认注册保证，U-5 已勘误）；**`90` 掩码逐字**；**不写**计算后的文字排版。**声明**：`91/341/171` 写默认；样式为**有效值快照**（掩码抑制字段非逐字往返）；未建模上下文取默认、`text_normal/direction` 派生；seeds 未建模（写读不对称）；per-line 箭头/线型 handle **悬空**；`271–273` 样式级 acadrust 无法表达；**解析但未建模的组**（实体尾 `292/293/294/174/178/295`、上下文 `44/293/295`）**归一化为默认值**并作**常设具名偏差**；**实体级 `342`（自定义箭头块）在导入侧具名**（含与逐线 `341` 不一致的情形）；尾部 `271` 由 root 0 派生。**不宣称"零丢失"**。**块内放置**：刚性 ⇒ 真实体；缩放/镜像 ⇒ **声明式摊平**（不丢内容）。**创建已实现（P7c）**：`MLEADER` = **箭头 → 落点 → 文本**，单簇/单线/2 顶点/仅直线，`Exact(2)` + 文本（**无内容不创建**）；狗腿/缺口/箭头/字高/附着取 `MLeaderStyle` 表（`Standard`，**常量为债务**）；`MLEADERSTYLE` 导入**现已喂表**。**无 `Options` 子选项**（引线类型/内容类型/最多点数/角度约束不存在，UI 不暗示）。**真机像素判据已执行（2026-10-20，有界）**：X11/XWayland + Quadro P620(Vulkan) + `scale=1` ⇒ 箭头/斜引线/狗腿/文字四要素齐全，逐边 ≤1 px，零碰撞；同轮选择行钉住 `AcDbMultiLeader`。**未在 AutoCAD 打开验证**；无真实 MULTILEADER 夹具 | 实现（引线/箭头/文字任一命中即选中整个实体） | 不支持 |
@@ -317,12 +317,38 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 ## 已明确的不支持项
 
 字体/图标等资源授权未核查；TTF/OTF/WOFF 与 SHX（shapes/unifont/bigfont）文本已整形为
-线段绘制，缺失字体按回退链替代（源码见 `docs/fonts.md`）；TEXT 对齐、复杂文字整形、
+线段绘制，缺失字体按回退链替代（源码见 `docs/fonts.md`）。**2026-10-21 起回退链按图纸的
+`$DWGCODEPAGE` 选择**（936/GBK→`zh-Hans`、950/Big5→`zh-Hant`、932→`ja`、949→`ko`，其余拉丁）：
+中文候选 `gbcbig/hztxt/chineset/bigfont/simhei/simsun` 置前，拉丁顺序不变；换图时就地重定向。
+**`BigFont` 由 `NotImplemented` 改为 `Partial`**（只有在字体文件存在且声明 `encoding` 时才能作为
+回退面使用；仍无 primary+bigfont 配对、无按代码页选择样式自带的 bigfont）。仓库 `fonts/` **不含
+任何 CJK SHX**，因此本机打开中文图纸会**明确报缺**（每文档一条 `font.locale_fallback_missing`
+并列出候选），CJK 字符按 `text.glyph_missing` 缺字形，**不伪装成渲染成功**；TEXT 对齐、复杂文字整形、
 动态块参数/夹点求值、复杂视口裁剪、代理无缓存几何均按样本标记为未支持或未验证，
 不会报告为完整图纸。出图仅光栅 PNG（无矢量 PDF/HPGL/CTB）；线宽的复杂/嵌入形状段
 仍按显式 `Partial`/未实现报告，不计入完成。动态块**可见性状态**读取/切换与
 **注释性缩放（TEXT/MTEXT）**已实现，但动态块参数/夹点编辑、非文本注释性类型仍为
 显式 `Partial`，且宿主比例切换 UI 未接线。
+
+
+2026-10-21/22 批次新增的**有界**能力（各自带未完成边界，勿扩大解读）：
+**命令行回显** `cad_status.commandLog`（有界 200、`sequence` 单调、换图清空；条目**无任何人类可读
+文本字段**，只有 `command`/`code`/`measurement`，文案全部来自 i18n；回显 UI 以 4 位小数显示
+Distance/Angle/Delta X/Y/Z，点不足两个时只显示距离，`unit:null` 不加单位后缀，无"清空"按钮因为
+宿主没有该 API）；**属性面板读侧**（`group` 分组、多选取**共同键交集**、`mixed`、`editable`、
+`kind`、`options` 取图纸真实图层/线型表名，上限 256）与**写侧** `SETENTITYPROPERTY`（一次事务/
+一步撤销；`layer`、`color`=ByLayer/ByBlock/`aci:0..=256`/`#RRGGBB`、`linetype`、`lineweight`
+= 规范毫米列表、`transparency`=0..90 百分比→不透明度；非直接可寻址引用拒绝；无变化不产生撤销步）；
+**选项设置** 10 个类型化键（grid/axes/selectionHighlight/snapHints/plotFormat/snapEnabled/
+hoverPreview/backgroundModel/backgroundPaper/crosshairSize），持久化到 `preference.json`、
+**实时生效**并在 open/替换后重新播种；**语言默认**按 `显式选择 > 宿主注入 > navigator > 英文`
+（`zh-TW/zh-Hant` 无对应目录 ⇒ **英文**，不静默给简体）；**显示**：模型/图纸背景色 `#rrggbb`
+（sRGB→linear 在配置→渲染器接缝，真机核对 0.5 读回 188、遮罩内部同值）与十字光标 1..100%
+（100% 位级不变），均**即时**生效。
+
+**仍未做（本批次明确不声称）**：属性面板 UI 与 `Ctrl+1`/`PROPERTIES`、属性的 Tauri IPC、选项弹窗
+界面、拾取框大小（仍是常量）、自动保存/.bak/xref/CTB/GPU 选择/快捷键自定义/右键菜单/夹点/极轴/
+动态 UCS（AutoCAD Options 中存在但本仓库**无行为可接**，因此不显示）。
 
 2026-10-10 图元显示补全轮新增边界：**光栅图像** PNG/JPEG 已解码并出纹理，但
 TIFF/CCITT/EPS 等编解码器、亮度/对比/淡出/透明、outside/mask 裁剪显式未支持；

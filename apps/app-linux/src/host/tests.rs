@@ -966,3 +966,6 @@ fn layout_revalidates_when_the_container_bounds_change_without_a_new_sequence() 
     // stale sequence and therefore does not re-apply/re-flood).
     assert!(!layout_needs_revalidate(false, Some(a), a));
 }
+
+#[path = "settings_tests.rs"]
+mod settings_tests;

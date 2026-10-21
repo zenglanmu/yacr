@@ -266,6 +266,7 @@ impl Application {
             | CommandId::PasteFromClipboard
             | CommandId::OffsetEntity
             | CommandId::SetActiveLayer
+            | CommandId::SetEntityProperty
             | CommandId::CreateText
             | CommandId::MLeader
             | CommandId::TextEdit => {

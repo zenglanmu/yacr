@@ -72,6 +72,7 @@ pub(super) fn text_geometry() -> SemanticGeometry {
         font: None,
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
+        wrap_width: None,
     }
 }
 

@@ -264,6 +264,12 @@ pub struct RenderTarget {
     pub premultiplied_alpha: bool,
     pub srgb: bool,
     pub samples: u32,
+    /// The colour the frame clears its colour attachment to, as linear channel
+    /// values in the same space as every other renderer colour. The caller owns
+    /// it (it is a display preference, not geometry); [`RenderTarget::new`]
+    /// supplies [`CAD_CLEAR_COLOR`](crate::CAD_CLEAR_COLOR) — opaque black — so a
+    /// caller that never sets it keeps the documented CAD background.
+    pub clear_color: [f32; 4],
 }
 
 impl RenderTarget {
@@ -276,7 +282,37 @@ impl RenderTarget {
             premultiplied_alpha: true,
             srgb: true,
             samples: 1,
+            // The documented default, in the plain channels this frame input
+            // carries (the renderer's only clear when a caller supplies none).
+            clear_color: [
+                crate::CAD_CLEAR_COLOR.r as f32,
+                crate::CAD_CLEAR_COLOR.g as f32,
+                crate::CAD_CLEAR_COLOR.b as f32,
+                crate::CAD_CLEAR_COLOR.a as f32,
+            ],
         }
+    }
+
+    /// Supply this frame's clear colour (builder form).
+    pub fn with_clear_color(mut self, clear_color: [f32; 4]) -> Self {
+        self.clear_color = clear_color;
+        self
+    }
+
+    /// The sanitised clear colour this frame will use.
+    ///
+    /// A caller-supplied channel is clamped into `0..=1` (a non-finite channel
+    /// becomes `0`) so a bad caller can never poison the clear or the wipeout
+    /// mask tint that shares this value. [`RenderTarget::new`] already supplies
+    /// the documented default, so a caller that never sets it gets opaque black.
+    pub(crate) fn clear_color(&self) -> [f32; 4] {
+        self.clear_color.map(|value| {
+            if value.is_finite() {
+                value.clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        })
     }
 }
 

@@ -15,6 +15,7 @@ mod document;
 mod draw_pick;
 mod explode;
 mod polygon;
+mod properties;
 mod snap;
 mod status;
 mod stretch;

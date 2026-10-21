@@ -452,6 +452,7 @@ fn text_transform_is_a_similarity_and_refuses_stretch_and_mirror() {
         font: Some("arial.ttf".into()),
         h_align: TextAlignH::Center,
         v_align: TextAlignV::Middle,
+        wrap_width: Some(2.0),
     };
     // A translation + quarter turn + uniform scale keeps every Text field.
     let transform = Transform3 {
@@ -475,6 +476,7 @@ fn text_transform_is_a_similarity_and_refuses_stretch_and_mirror() {
             font,
             h_align,
             v_align,
+            wrap_width,
         } => {
             assert_eq!(value, "AB");
             assert_eq!(style, StyleId(4));
@@ -486,6 +488,7 @@ fn text_transform_is_a_similarity_and_refuses_stretch_and_mirror() {
             assert_eq!(font.as_deref(), Some("arial.ttf"));
             assert_eq!(h_align, TextAlignH::Center);
             assert_eq!(v_align, TextAlignV::Middle);
+            assert_eq!(wrap_width, Some(4.0), "the boundary scales with the text");
             assert!(
                 (position.x - 6.0).abs() < 1e-12
                     && (position.y + 3.0).abs() < 1e-12

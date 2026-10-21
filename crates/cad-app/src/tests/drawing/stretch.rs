@@ -581,6 +581,7 @@ fn stretch_fails_the_whole_command_for_text_in_the_window_and_writes_nothing() {
         font: None,
         h_align: Default::default(),
         v_align: Default::default(),
+        wrap_width: None,
     };
     // A fully enclosed TEXT still fails the whole command. ADR 0019 decision B
     // keeps this behaviour: TEXT accepts a similarity transform now, but STRETCH's

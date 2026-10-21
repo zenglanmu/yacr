@@ -1,3 +1,72 @@
+## 2026-10-21/22 批次：回显、属性、选项、语言、MLeader 宽度、字体回退、背景/光标
+
+### 1. 命令行回显（AutoCAD 式执行记录）
+`cad_status.commandLog`：有界 **200** 条、`sequence` 单调、**换图即清空**；条目三类
+`command|result|error`，**结构上没有任何 message/text 字段**——只有稳定键 `command`、错误
+`code`、以及类型化 `measurement{algorithm,value,unit,precision,points}`。`DIST` 是**交互式选择器**
+（无 `CommandId`），稳定名只能在路由层记，故 `CadSession::command` 走 `HostCore::record_command`。
+UI（`command-log.mjs` + `CommandLine.jsx`）：4 位小数；`distance` 用拾取点现算 `Angle`（XY，
+`[0,360)`）与 `Delta X/Y/Z`；点不足两个**只打印距离**（不补造点）；`unit:null` 不加后缀；
+`precision` 仅非 `analytic` 时以淡色小标提示；错误码只进 `title`。**没有"清空"按钮**（宿主无 API）。
+
+### 2. 属性面板后端（读 + 写；UI 未做）
+读：每行 `group`（entity/geometry/text/display）、`mixed`、`editable`、`kind`、`options`
+（`layer`/`linetype` 取图纸真实表名，上限 256）；多选取**共同键的交集**，值全同给值、不同给
+`mixed`（`mixedKeys` 由 mixed 行派生，单一来源）。单选 48 行的顺序/值**钉死不变**。
+写：`CommandId::SetEntityProperty` + `CommandPayload::EntityProperty{key,value}` →
+`SETENTITYPROPERTY`；**一个事务/一步撤销**，全有或全无；同时更新实体行与 `EntityDisplayState`，
+并把 `STYLE` 并入 `ChangeSet` 让依赖失效重建；无变化**不产生撤销步**（`property.unchanged`）；
+实例路径/子元素**拒绝**。值语法：`layer`=表名；`color`=ByLayer/ByBlock/`aci:0..=256`/`#RRGGBB`
+（ACI→规范 sRGB 表，反向取**最小索引**）；`linetype`=表名/ByLayer/ByBlock；`lineweight`=规范毫米
+列表（`0.37` 拒绝、不吸附）；`transparency`=0..90 百分比 → 存不透明度（只换算一次）。
+**未做**：Tauri IPC、面板 UI、`Ctrl+1`、`PROPERTIES` 命令打开面板。
+
+### 3. 选项设置（类型化读写；弹窗 UI 未做）
+`CadSettings` = grid/axes/selectionHighlight/snapHints/plotFormat/snapEnabled/hoverPreview/
+backgroundModel/backgroundPaper/crosshairPercent + 只读 fontsDir；写键是**封闭枚举**，未知键/坏值
+返回稳定码且**不动文件**。持久化走既有 `preference.json`（允许路径只加了这 12 个叶），
+**实时生效**（`sync_render` 重发 `ViewSnapshot`/`OverlayInputs`），并在 `load_startup`/换图后
+**重新播种** `SessionState`。`cad_settings`/`cad_set_setting` **不受模态门禁**——否则选项窗自己
+无法保存。
+**诚实边界**：AutoCAD Options 里自动保存/.bak/xref/CTB/GPU 选择/快捷键自定义/右键/夹点/极轴/
+动态 UCS/口令 **在本仓库没有任何行为可接**，一律**不显示**。
+
+### 4. 语言默认（系统 → 英文）
+顺序：`localStorage.yacr.locale`（合法成员才算）> **宿主注入** `window.__YACR_HOST_LOCALE__` >
+`navigator.languages` > `en`。宿主解析唯一来源：`YACR_LOCALE`，否则 `LC_ALL > LC_MESSAGES >
+LANGUAGE > LANG`；注入用 Tauri `initialization_script`（document-start），主窗口与**弹窗**都注入，
+因此界面与原生对话框标签**不会再分叉**。映射：`zh*/zh-CN/zh-Hans → zh-CN`，`en* → en`，
+**其余（含 `zh-TW`/`zh-Hant`）→ 英文**——仓库没有 Hant 目录，不静默给简体。`index.html` 的静态
+`lang` 改为 `en`，运行时再按解析结果写回。
+
+### 5. `MLeaderText.width` 参与排版
+`width`（DXF 43）此前死在 `text_geometry()`；现在 `SemanticGeometry::Text` 新增
+`wrap_width: Option<f64>`（`wrap_width_from_dxf`：正有限值才 `Some`，0/负/非有限 = `None`），
+表示层 `layout_parsed` 用既有 `measure` 闭包做**贪心换行**：拉丁按词、CJK 按字、`\P` 段落独立、
+超宽不可断词独占一行、对齐按每行、`None` **位级不变**；`WRAP_EPSILON=1e-9` 只吸收浮点松弛。
+复制/变换（db transform、TEXTEDIT、dimension、geometry engine）**保留并按世界长度缩放**。
+`Partial` 声明：无 UAX #14/kinsoku、跨 token 字距不测、MTEXT 41 组仍不导入、包围盒仍用未换行估计。
+
+### 6. 字体回退按图纸代码页
+`$DWGCODEPAGE` → `DrawingDatabase::code_page` → 单一映射表 → 语言候选链（中文
+`gbcbig/hztxt/chineset/bigfont/simhei/simsun` 前置，拉丁三件不变）；同一语言且字体齐全时**复用**
+引擎，换语言就地 `with_fallback` 重定向，否则按新语言重载。缺面时每文档**一条**
+`font.locale_fallback_missing`（带语言与候选），CJK 字符给 `text.glyph_missing`。
+`BigFont` 能力从 `NotImplemented` 改 `Partial`。**本机 `fonts/` 无 CJK SHX ⇒ 真中文图纸会明确报缺**。
+
+### 7. 显示设置（背景色 / 十字光标）
+`view.background.model|paper`（严格 `#rrggbb`）与 `view.crosshair.sizePercent`（1..=100，**拒绝**
+而非截断）；渲染器 `RenderTarget::clear_color` 承接（`CAD_CLEAR_COLOR` 仅作默认），遮罩底色跟随
+背景；sRGB→linear 在配置接缝完成，**真机核对** `0.5` 读回 `188` 且遮罩内部同值；100% 光标**位级
+不变**，50%/1% 有钉死数值。全部**即时生效**（不是下次打开）。
+
+### 8. 验证与证据边界
+已运行：`cargo fmt/clippy/check`（全 workspace，`-D warnings`）、架构/文件大小/i18n/fixture/
+workflows 脚本；Rust 测试 **2144 passed / 0 failed**（CPU crates）+ **550 passed / 0 failed**
+（GPU crates 串行）；UI **334 passed**，`npm run build` OK；i18n **607** 键。
+**未运行**：GUI/真机视觉验收（本批**没有**任何截图或像素判据）、真实 DWG、全 workspace 默认并发的
+GPU 测试（`cargo test -p cad-render-wgpu` 在 lavapipe 下有**既存** SIGSEGV，干净 HEAD 可复现，串行通过）。
+
 ## `draw_order` 贯通到场景批次（2026-10-21，行为中性）
 
 **做了什么**：`DisplayFragment` 新增 `draw_order: i64`，由源 `DbEntity::draw_order` 携带；

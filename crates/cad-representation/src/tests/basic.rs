@@ -129,6 +129,7 @@ fn sfnt_text_provider_emits_meshes_without_outline_lines() {
         font: Some("osifont.ttf".into()),
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
+        wrap_width: None,
     };
     let r = ProviderRegistry::with_default_provider()
         .build(&e, &context().with_fonts(Arc::new(fonts)))
@@ -200,6 +201,7 @@ fn shx_text_provider_keeps_outline_lines_when_font_is_available() {
         font: Some("txt.shx".into()),
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
+        wrap_width: None,
     };
     let r = ProviderRegistry::with_default_provider()
         .build(&e, &context().with_fonts(Arc::new(fonts)))

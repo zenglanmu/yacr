@@ -373,7 +373,7 @@ fn the_status_selection_block_projects_text_only_for_a_single_text() {
 /// the struct's field names (each value is skipped), which is exactly what
 /// proves that a `serde(rename)` reached the wire rather than the camelCase
 /// convention silently winning.
-fn wire_field_names<T: serde::Serialize>(value: &T) -> Vec<String> {
+pub(super) fn wire_field_names<T: serde::Serialize>(value: &T) -> Vec<String> {
     use serde::ser::{Impossible, SerializeStruct, Serializer};
 
     #[derive(Debug)]

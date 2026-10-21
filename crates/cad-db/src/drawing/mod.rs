@@ -74,6 +74,14 @@ pub struct DrawingDatabase {
     pub(crate) mleader_style_ids_by_name: BTreeMap<String, MLeaderStyleId>,
     /// Drawing-global active annotation scale (`CANNOSCALE`), when set.
     pub(crate) active_annotation_scale: Option<ActiveAnnotationScale>,
+    /// The source drawing's declared text code page (`$DWGCODEPAGE` /
+    /// `DOCUMENT.header.code_page`), exactly as the reader reported it.
+    ///
+    /// `None` means the source declared nothing (or an empty string): the text
+    /// locale is then unknown and callers must not guess one. The db deliberately
+    /// stores the raw code page, not a locale, so the platform layer owns the
+    /// single mapping table.
+    pub(crate) code_page: Option<String>,
     /// Next entity id to hand out. Monotonic and never reset when entities are
     /// deleted, so a deleted id is never reused (its `ObjectId` would otherwise
     /// alias a new object). Initialised by the builder from the largest existing

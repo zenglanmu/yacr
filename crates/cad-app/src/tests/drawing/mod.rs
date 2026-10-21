@@ -291,6 +291,7 @@ mod multileader;
 mod offset;
 mod point;
 mod polygon;
+mod properties;
 mod rectangle;
 mod reports;
 mod selection_reconcile;

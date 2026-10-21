@@ -18,8 +18,8 @@ pub mod session;
 pub mod shell;
 
 pub use i18n::{
-    format_message, placeholders, resolve_locale, FallbackReason, Locale, LocaleResolution,
-    Message, MessageCatalog, MessageSource,
+    format_message, locale_from_env, placeholders, resolve_locale, supported_locale_for,
+    FallbackReason, Locale, LocaleResolution, Message, MessageCatalog, MessageSource,
 };
 pub use layout::{
     insets_from, surface_metrics, validate_metrics, CadMetrics, LayoutError, LayoutTracker,
@@ -30,9 +30,11 @@ pub use protocol::{
     BUTTON_SECONDARY,
 };
 pub use session::{
-    canonical_command_name, normalize_command, unsupported_command_reason, unsupported_status,
-    CadCamera, CadSelection, CadSelectionRow, CadSession, CadStatus, COMMAND_ALIASES,
-    COMMAND_TABLE,
+    canonical_command_name, command_name, normalize_command, unsupported_command_reason,
+    unsupported_status, CadCamera, CadCommandLogEntry, CadCommandLogKind, CadMeasurementEcho,
+    CadSelection, CadSelectionRow, CadSession, CadSettingKey, CadSettingValue, CadSettings,
+    CadStatus, COMMAND_ALIASES, COMMAND_TABLE, SETTINGS_INVALID_PLOT_FORMAT,
+    SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
 pub use shell::{
     admit_command, bind_allowed, clear_host_error, note_host_error, projected_status,

@@ -167,7 +167,7 @@ fn single_line_selection_reports_identity_and_geometry() {
             .rows
             .iter()
             .find(|r| r.key == key)
-            .map(|r| r.value.clone())
+            .and_then(|r| r.value.clone())
     };
     assert_eq!(row("id").as_deref(), Some("1"));
     assert_eq!(row("handle").as_deref(), Some("1"));
@@ -192,7 +192,7 @@ fn circle_and_insert_report_geometry_specific_rows() {
         .unwrap()
         .value
         .clone();
-    assert_eq!(radius, "2.500000");
+    assert_eq!(radius.as_deref(), Some("2.500000"));
 
     let insert = SelectionProperties::extract(
         &db,
@@ -205,11 +205,11 @@ fn circle_and_insert_report_geometry_specific_rows() {
         .unwrap()
         .value
         .clone();
-    assert_eq!(block, "0");
+    assert_eq!(block.as_deref(), Some("0"));
 }
 
 #[test]
-fn multi_select_reports_mixed_keys_instead_of_a_single_value() {
+fn multi_select_lists_common_keys_with_mixed_markers() {
     let db = database();
     let set = SelectionSet::from_refs([
         ref_of(DocumentId(1), EntityId(1)), // Line
@@ -217,12 +217,310 @@ fn multi_select_reports_mixed_keys_instead_of_a_single_value() {
     ]);
     let props = SelectionProperties::extract(&db, &set);
     assert_eq!(props.count, 2);
-    assert!(props.rows.is_empty());
-    // Geometry keys differ (line has `length`, circle has `radius`).
-    assert!(props.mixed_keys.contains(&"length"));
-    assert!(props.mixed_keys.contains(&"radius"));
-    // Shared identity keys are not "mixed" when values agree; ids differ.
+
+    // Only the keys common to both entities are listed (the intersection).
+    let keys: Vec<&str> = props.rows.iter().map(|row| row.key).collect();
+    assert_eq!(
+        keys,
+        vec!["id", "handle", "type", "layer", "space", "draw_order"]
+    );
+    assert!(props.rows.iter().all(|row| row.key != "length"));
+    assert!(props.rows.iter().all(|row| row.key != "radius"));
+
+    // Identity values differ → mixed, explicit `None`, never a blank string.
+    let id = props.rows.iter().find(|row| row.key == "id").unwrap();
+    assert!(id.mixed);
+    assert_eq!(id.value, None);
     assert!(props.mixed_keys.contains(&"id"));
+
+    // The shared layer agrees → one real value, not mixed.
+    let layer = props.rows.iter().find(|row| row.key == "layer").unwrap();
+    assert!(!layer.mixed);
+    assert_eq!(layer.value.as_deref(), Some("0 (0)"));
+    assert!(!props.mixed_keys.contains(&"layer"));
+
+    // `mixed_keys` is exactly the keys of the mixed rows, in row order.
+    let mixed: Vec<&str> = props
+        .rows
+        .iter()
+        .filter(|row| row.mixed)
+        .map(|row| row.key)
+        .collect();
+    assert_eq!(props.mixed_keys, mixed);
+}
+
+#[test]
+fn single_selection_rows_order_and_values_are_pinned() {
+    let db = database();
+    let set = SelectionSet::from_refs([ref_of(DocumentId(1), EntityId(1))]);
+    let props = SelectionProperties::extract(&db, &set);
+    let rows: Vec<(&str, Option<&str>)> = props
+        .rows
+        .iter()
+        .map(|row| (row.key, row.value.as_deref()))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("id", Some("1")),
+            ("handle", Some("1")),
+            ("type", Some("AcDbEntity")),
+            ("layer", Some("0 (0)")),
+            ("space", Some("model")),
+            ("draw_order", Some("1")),
+            ("start", Some("0.000000, 0.000000, 0.000000")),
+            ("end", Some("3.000000, 4.000000, 0.000000")),
+            ("length", Some("5.000000")),
+        ]
+    );
+    assert!(props.rows.iter().all(|row| !row.mixed));
+    assert!(props.mixed_keys.is_empty());
+}
+
+#[test]
+fn property_rows_carry_a_stable_group_and_kind() {
+    let db = database();
+    let set = SelectionSet::from_refs([ref_of(DocumentId(1), EntityId(1))]);
+    let props = SelectionProperties::extract(&db, &set);
+    let row = |key: &str| props.rows.iter().find(|row| row.key == key).unwrap();
+    assert_eq!(row("id").group.key(), "entity");
+    assert_eq!(row("layer").group.key(), "entity");
+    assert_eq!(row("length").group.key(), "geometry");
+    assert_eq!(row("length").kind, PropertyKind::Number);
+    assert_eq!(row("layer").kind, PropertyKind::Enum);
+    // Identity/geometry rows have no write path yet.
+    assert!(!row("id").editable && !row("length").editable);
+
+    // Per-geometry overrides: the same `style` key is text for a MULTILEADER
+    // and display for a hatch.
+    let mleader = geometry_property_rows(&leader_geometry(Some("NOTE")));
+    assert_eq!(
+        mleader
+            .iter()
+            .find(|row| row.key == "style")
+            .unwrap()
+            .group
+            .key(),
+        "text"
+    );
+    let hatch_style = PropertyRow::in_group("style", "solid", PropertyGroup::Display);
+    assert_eq!(hatch_style.group.key(), "display");
+    assert_eq!(PropertyGroup::for_key("style").key(), "text");
+    assert_eq!(PropertyGroup::for_key("visible").key(), "display");
+}
+
+#[test]
+fn multi_selection_with_the_same_layer_keeps_one_shared_value() {
+    let db = database();
+    // Entities 1 and 20 are both lines on layer 0; their lengths differ.
+    let set = SelectionSet::from_refs([
+        ref_of(DocumentId(1), EntityId(1)),
+        ref_of(DocumentId(1), EntityId(20)),
+    ]);
+    let props = SelectionProperties::extract(&db, &set);
+    let row = |key: &str| props.rows.iter().find(|row| row.key == key).unwrap();
+
+    let layer = row("layer");
+    assert_eq!(layer.value.as_deref(), Some("0 (0)"));
+    assert!(!layer.mixed);
+    assert!(!props.mixed_keys.contains(&"layer"));
+
+    // Start points agree; end and length differ.
+    assert_eq!(
+        row("start").value.as_deref(),
+        Some("0.000000, 0.000000, 0.000000")
+    );
+    assert!(!row("start").mixed);
+    assert!(row("end").mixed && row("end").value.is_none());
+    assert!(row("length").mixed);
+    assert!(props.mixed_keys.contains(&"end"));
+    assert!(props.mixed_keys.contains(&"length"));
+}
+
+#[test]
+fn multi_selection_with_different_layers_reports_a_mixed_layer() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(4));
+    for (id, name) in [(0, "0"), (1, "WALLS")] {
+        b.insert_layer(Layer {
+            id: LayerId(id),
+            name: name.into(),
+            visible: true,
+        })
+        .unwrap();
+    }
+    b.insert_entity(entity(
+        1,
+        SemanticGeometry::Line {
+            start: point(0.0, 0.0),
+            end: point(1.0, 0.0),
+        },
+        LayerId(0),
+    ))
+    .unwrap();
+    b.insert_entity(entity(
+        2,
+        SemanticGeometry::Line {
+            start: point(0.0, 0.0),
+            end: point(1.0, 0.0),
+        },
+        LayerId(1),
+    ))
+    .unwrap();
+    let db = b.finish().unwrap();
+    let props = SelectionProperties::extract(
+        &db,
+        &SelectionSet::from_refs([
+            ref_of(DocumentId(4), EntityId(1)),
+            ref_of(DocumentId(4), EntityId(2)),
+        ]),
+    );
+
+    let layer = props.rows.iter().find(|row| row.key == "layer").unwrap();
+    assert!(layer.mixed);
+    assert_eq!(layer.value, None);
+    assert!(props.mixed_keys.contains(&"layer"));
+    // The option list is still the drawing's real layer table.
+    assert_eq!(layer.options, vec!["0".to_string(), "WALLS".to_string()]);
+}
+
+#[test]
+fn enum_options_come_from_the_real_tables_sorted() {
+    use cad_db::{LineType, LinetypePattern};
+
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(5));
+    for (id, name) in [(0, "0"), (1, "WALLS"), (2, "DOORS")] {
+        b.insert_layer(Layer {
+            id: LayerId(id),
+            name: name.into(),
+            visible: true,
+        })
+        .unwrap();
+    }
+    for (id, name) in [(0, "DASHDOT"), (1, "CONTINUOUS")] {
+        b.insert_linetype(LineType {
+            id: cad_domain::LinetypeId(id),
+            name: name.into(),
+            pattern: LinetypePattern::continuous(),
+            complex: false,
+        })
+        .unwrap();
+    }
+    b.insert_entity(entity(
+        1,
+        SemanticGeometry::Line {
+            start: point(0.0, 0.0),
+            end: point(1.0, 0.0),
+        },
+        LayerId(1),
+    ))
+    .unwrap();
+    let db = b.finish().unwrap();
+
+    assert_eq!(
+        enum_options(&db, "layer"),
+        vec!["0".to_string(), "DOORS".to_string(), "WALLS".to_string()]
+    );
+    assert_eq!(
+        enum_options(&db, "linetype"),
+        vec!["CONTINUOUS".to_string(), "DASHDOT".to_string()]
+    );
+    // A key with no named table has no fabricated options.
+    assert!(enum_options(&db, "color").is_empty());
+
+    let props = SelectionProperties::extract(
+        &db,
+        &SelectionSet::from_refs([ref_of(DocumentId(5), EntityId(1))]),
+    );
+    let layer = props.rows.iter().find(|row| row.key == "layer").unwrap();
+    assert_eq!(layer.kind, PropertyKind::Enum);
+    assert_eq!(
+        layer.options,
+        vec!["0".to_string(), "DOORS".to_string(), "WALLS".to_string()]
+    );
+}
+
+#[test]
+fn enum_options_are_capped_after_sorting() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(6));
+    let total = MAX_ENUM_OPTIONS + 8;
+    for id in 0..total {
+        b.insert_layer(Layer {
+            id: LayerId(id as u128),
+            name: format!("L{id:04}"),
+            visible: true,
+        })
+        .unwrap();
+    }
+    b.insert_entity(entity(
+        1,
+        SemanticGeometry::Line {
+            start: point(0.0, 0.0),
+            end: point(1.0, 0.0),
+        },
+        LayerId(0),
+    ))
+    .unwrap();
+    let db = b.finish().unwrap();
+    let options = enum_options(&db, "layer");
+    assert_eq!(options.len(), MAX_ENUM_OPTIONS);
+    // Sorted first, then capped: the list stays deterministic.
+    assert_eq!(options[0], format!("L{:04}", 0));
+    assert_eq!(
+        options[MAX_ENUM_OPTIONS - 1],
+        format!("L{:04}", MAX_ENUM_OPTIONS - 1)
+    );
+}
+
+#[test]
+fn layer_is_editable_only_for_a_directly_addressed_entity() {
+    let db = database();
+    let reference = ref_of(DocumentId(1), EntityId(1));
+    let entity = db.entity(EntityId(1)).unwrap();
+    assert!(property_row_editable(&db, &reference, entity, "layer"));
+    // Keys without a write path stay read-only, including text content.
+    for key in ["id", "length", "text", "closed", "font"] {
+        assert!(
+            !property_row_editable(&db, &reference, entity, key),
+            "{key} must stay read-only in this lane"
+        );
+    }
+
+    let props = SelectionProperties::extract(&db, &SelectionSet::from_refs([reference.clone()]));
+    let layer = props.rows.iter().find(|row| row.key == "layer").unwrap();
+    assert!(layer.editable);
+    assert_eq!(layer.options, vec!["0".to_string()]);
+
+    // A block-instance member is not directly addressable: the future write
+    // path addresses top-level entities (same rule as text editing).
+    let instance = SelectionRef {
+        instance: InstancePath(vec![EntityId(3)]),
+        ..reference
+    };
+    let rows = entity_property_rows(&db, &instance, entity);
+    let layer = rows.iter().find(|row| row.key == "layer").unwrap();
+    assert!(!layer.editable);
+}
+
+#[test]
+fn multi_selection_row_is_editable_only_when_every_ref_supports_it() {
+    let db = database();
+    // Entity 1 is a top-level ref; entity 2 is reached through an instance path,
+    // so its layer has no direct write target.
+    let set = SelectionSet::from_refs([
+        ref_of(DocumentId(1), EntityId(1)),
+        SelectionRef {
+            instance: InstancePath(vec![EntityId(3)]),
+            ..ref_of(DocumentId(1), EntityId(2))
+        },
+    ]);
+    let props = SelectionProperties::extract(&db, &set);
+    let layer = props.rows.iter().find(|row| row.key == "layer").unwrap();
+    assert_eq!(layer.value.as_deref(), Some("0 (0)"));
+    assert!(!layer.mixed);
+    assert!(
+        !layer.editable,
+        "one ref cannot write it, so the row is not editable"
+    );
 }
 
 #[test]
@@ -235,7 +533,7 @@ fn unresolved_entity_is_reported_honestly() {
         .rows
         .iter()
         .find(|r| r.key == "status")
-        .map(|r| r.value.clone());
+        .and_then(|r| r.value.clone());
     assert_eq!(status.as_deref(), Some("unresolved"));
 }
 
@@ -259,6 +557,7 @@ fn text_without_font_is_explicitly_unknown() {
             font: None,
             h_align: cad_domain::TextAlignH::Left,
             v_align: cad_domain::TextAlignV::Baseline,
+            wrap_width: None,
         },
         LayerId(0),
     ))
@@ -272,7 +571,7 @@ fn text_without_font_is_explicitly_unknown() {
         .rows
         .iter()
         .find(|r| r.key == "font")
-        .map(|r| r.value.clone());
+        .and_then(|r| r.value.clone());
     assert_eq!(font.as_deref(), Some("unknown"));
 }
 
@@ -287,7 +586,11 @@ fn image_and_mask_report_only_stored_metadata() {
         clip: None,
         visible: true,
     });
-    let value = |key: &str| rows.iter().find(|r| r.key == key).map(|r| r.value.clone());
+    let value = |key: &str| {
+        rows.iter()
+            .find(|r| r.key == key)
+            .and_then(|r| r.value.clone())
+    };
     assert_eq!(value("pixels").as_deref(), Some("640 x 480"));
     assert_eq!(value("file").as_deref(), Some("logo.png"));
     assert_eq!(value("visible").as_deref(), Some("true"));
@@ -301,7 +604,7 @@ fn image_and_mask_report_only_stored_metadata() {
         mask_rows
             .iter()
             .find(|r| r.key == key)
-            .map(|r| r.value.clone())
+            .and_then(|r| r.value.clone())
     };
     assert_eq!(value("boundary").as_deref(), Some("3"));
     assert_eq!(value("inverted").as_deref(), Some("true"));
@@ -450,6 +753,7 @@ fn text_geometry(text: &str) -> SemanticGeometry {
         font: None,
         h_align: cad_domain::TextAlignH::Left,
         v_align: cad_domain::TextAlignV::Baseline,
+        wrap_width: None,
     }
 }
 

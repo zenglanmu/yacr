@@ -521,10 +521,11 @@ fn capability_table_does_not_claim_unsupported_categories() {
             kind.as_str()
         );
     }
-    // The old model implied every kind was supported. Xref and BigFont are
-    // not implemented and must say so; image resolution exists and PNG/JPEG
-    // decode, but only partially (other codecs / fade-brightness-clip are not
-    // done), so it must not claim Verified.
+    // The old model implied every kind was supported. Xref is not implemented
+    // and must say so; a bigfont face parses and can act as a fallback face but
+    // has no primary+bigfont pairing, so it is Partial, never Verified. Image
+    // resolution exists and PNG/JPEG decode, but only partially (other codecs /
+    // fade-brightness-clip are not done), so it must not claim Verified.
     assert_eq!(
         resource_capability(ResourceKind::Image).resolve,
         SupportStatus::Verified
@@ -539,7 +540,15 @@ fn capability_table_does_not_claim_unsupported_categories() {
     );
     assert_eq!(
         resource_capability(ResourceKind::BigFont).decode,
-        SupportStatus::NotImplemented
+        SupportStatus::Partial
+    );
+    assert_eq!(
+        resource_capability(ResourceKind::BigFont).resolve,
+        SupportStatus::Partial
+    );
+    assert_eq!(
+        resource_capability(ResourceKind::FontShx).decode,
+        SupportStatus::Partial
     );
     // Fonts are resolvable but not yet verified as fully decoded.
     assert_ne!(

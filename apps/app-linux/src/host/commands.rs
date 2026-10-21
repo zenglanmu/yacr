@@ -5,7 +5,10 @@ use std::collections::VecDeque;
 
 use cad_render_wgpu::PulledState;
 use cad_ui_core::protocol::{InputKind, ProbeInput, ProbeInputAck, ProbeStatus};
-use cad_ui_core::session::CadStatus;
+use cad_ui_core::session::{
+    CadSettingKey, CadSettingValue, CadSettings, CadStatus, SETTINGS_INVALID_VALUE,
+    SETTINGS_UNKNOWN_KEY,
+};
 use cad_ui_core::shell::{
     admit_command, modal_gate_open, projected_popup, projected_status, queue_cad_input,
     POPUP_MODAL_OPEN,
@@ -408,6 +411,98 @@ pub fn cad_close_popup(
 ) -> Result<CadCommandAck, String> {
     let ops = TauriPopupOps::new(app, shared.0.clone());
     popup::close_popup(&shared.0, &ops)?;
+    Ok(CadCommandAck { accepted: true })
+}
+
+/// Bounded capacity of the typed settings queue.
+///
+/// It reuses the CAD command queue's capacity so every admission shares one bound.
+pub const CAD_SETTING_CAP: usize = cad_ui_core::shell::CAD_COMMAND_CAP;
+
+/// Parse one `cad_set_setting` request into the typed key/value pair.
+///
+/// The wire is `{ key: <stable camelCase key>, value: <bool|string|integer> }`.
+/// An unknown key is refused with `settings.unknown_key`; a wrong value shape is
+/// refused with `settings.invalid_value`; a `plotFormat` other than `svg`/`pdf`
+/// is refused by the key table's own validation, as is a colour that is not
+/// `#rrggbb` and a crosshair percentage outside `1..=100` (the same authority the
+/// owner thread uses). Nothing is coerced and no file is touched here.
+pub fn parse_setting_request(
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<(CadSettingKey, CadSettingValue), String> {
+    let key = CadSettingKey::parse(key).ok_or_else(|| SETTINGS_UNKNOWN_KEY.to_string())?;
+    let value = match value {
+        serde_json::Value::Bool(enabled) => CadSettingValue::Bool(*enabled),
+        serde_json::Value::String(text) => CadSettingValue::Text(text.clone()),
+        // Only a non-negative integer that fits `u32` is a number here; a
+        // negative, fractional or out-of-range JSON number is a wrong shape.
+        serde_json::Value::Number(number) => number
+            .as_u64()
+            .and_then(|number| u32::try_from(number).ok())
+            .map(CadSettingValue::Number)
+            .ok_or_else(|| SETTINGS_INVALID_VALUE.to_string())?,
+        _ => return Err(SETTINGS_INVALID_VALUE.to_string()),
+    };
+    key.validate(&value).map_err(str::to_string)?;
+    Ok((key, value))
+}
+
+/// Admit one typed setting into the bounded main-thread queue.
+///
+/// Deliberately **not** gated by the modal popup gate: the Options dialog runs
+/// in its own window, and persisting a user preference is not CAD input. A
+/// disabled CAD session (probe mode), a full queue and a value outside the
+/// closed key table are refused before the queue.
+pub fn admit_setting(
+    queue: &mut VecDeque<(CadSettingKey, CadSettingValue)>,
+    cad_mode: bool,
+    key: CadSettingKey,
+    value: CadSettingValue,
+) -> Result<(), String> {
+    key.validate(&value).map_err(str::to_string)?;
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if queue.len() >= CAD_SETTING_CAP {
+        return Err("settings queue is full".into());
+    }
+    queue.push_back((key, value));
+    Ok(())
+}
+
+/// `cad_settings` command: the latest effective settings snapshot.
+///
+/// The owner-thread session is `!Send`, so the tick mirrors its
+/// `CadSession::settings()` snapshot into the shared state exactly like
+/// `cad_status`. Before a session exists (or in probe mode) the read is an
+/// explicit `cad_waiting`, never a fabricated default object.
+#[tauri::command]
+pub fn cad_settings(shared: tauri::State<'_, ProbeShared>) -> Result<CadSettings, String> {
+    lock(&shared.0)
+        .cad_settings
+        .clone()
+        .ok_or_else(|| "cad_waiting".to_string())
+}
+
+/// `cad_set_setting` command: admit one typed setting for the owner thread.
+///
+/// `{accepted:true}` means **queued**, not completed: the tick routes it through
+/// `CadSession::apply_setting`, which persists the preference leaf and applies
+/// the change to the live scene/session. A malformed request (unknown key, wrong
+/// type, unsupported plot format) is refused immediately with a stable code and
+/// never reaches the queue. This path is intentionally **not** behind the modal
+/// popup gate, so the Options dialog can write while it is open.
+#[tauri::command]
+pub fn cad_set_setting(
+    shared: tauri::State<'_, ProbeShared>,
+    key: String,
+    value: serde_json::Value,
+) -> Result<CadCommandAck, String> {
+    let (key, value) = parse_setting_request(&key, &value)?;
+    let mut state = lock(&shared.0);
+    let cad_mode = state.shell.cad_mode;
+    admit_setting(&mut state.cad_setting_writes, cad_mode, key, value)?;
     Ok(CadCommandAck { accepted: true })
 }
 

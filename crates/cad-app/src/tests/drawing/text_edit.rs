@@ -23,12 +23,18 @@ fn text_geometry(text: &str) -> SemanticGeometry {
         font: Some("arial.ttf".into()),
         h_align: TextAlignH::Right,
         v_align: TextAlignV::Top,
+        wrap_width: None,
     }
 }
 
 /// A drawing with layer 0, a `Text` entity (id 7), a `Line` (id 8) and a
 /// `Compound` (id 9) — the wrong-type targets.
 fn text_app() -> (Application, SessionState) {
+    text_app_with(text_geometry("OLD"))
+}
+
+/// The same drawing with the addressed text's geometry supplied by the caller.
+fn text_app_with(geometry: SemanticGeometry) -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -36,7 +42,7 @@ fn text_app() -> (Application, SessionState) {
         visible: true,
     })
     .unwrap();
-    b.insert_entity(ent(7, text_geometry("OLD"), 0)).unwrap();
+    b.insert_entity(ent(7, geometry, 0)).unwrap();
     b.insert_entity(ent(
         8,
         SemanticGeometry::Line {
@@ -129,6 +135,7 @@ fn textedit_replaces_only_the_string_in_one_transaction_and_one_undo_step() {
             font,
             h_align,
             v_align,
+            wrap_width,
             ..
         } => {
             assert_eq!(position, p3(1.0, 2.0, 0.0));
@@ -138,6 +145,7 @@ fn textedit_replaces_only_the_string_in_one_transaction_and_one_undo_step() {
             assert_eq!(font.as_deref(), Some("arial.ttf"));
             assert_eq!(h_align, TextAlignH::Right);
             assert_eq!(v_align, TextAlignV::Top);
+            assert_eq!(wrap_width, None, "the boundary is untouched too");
         }
         other => panic!("expected text, got {other:?}"),
     }
@@ -665,4 +673,38 @@ fn text_keeps_other_control_codes_verbatim() {
     )
     .unwrap();
     assert_eq!(text_of(&app, 7), draft);
+}
+
+#[test]
+fn textedit_preserves_the_wrap_boundary() {
+    // A MLEADER-derived text carries a width boundary (group 43). Editing the
+    // string must keep it: dropping it here would silently re-flow the
+    // annotation even though the user only changed the words.
+    let mut wrapped = text_geometry("OLD AND LONG");
+    let SemanticGeometry::Text { wrap_width, .. } = &mut wrapped else {
+        panic!("the fixture is a text");
+    };
+    *wrap_width = Some(4.0);
+    let (mut app, mut session) = text_app_with(wrapped);
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::TextEdit,
+        CommandPayload::TextEdit {
+            target: ref_of(7),
+            text: "NEW".into(),
+        },
+    )
+    .unwrap();
+
+    match stored_entity(&app, 7).geometry {
+        SemanticGeometry::Text {
+            text, wrap_width, ..
+        } => {
+            assert_eq!(text, "NEW");
+            assert_eq!(wrap_width, Some(4.0), "the boundary survives the edit");
+        }
+        other => panic!("expected text, got {other:?}"),
+    }
 }

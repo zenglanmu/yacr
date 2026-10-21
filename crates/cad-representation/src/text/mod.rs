@@ -91,3 +91,5 @@ pub mod text_issue {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wrap_tests;

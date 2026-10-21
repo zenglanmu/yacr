@@ -240,14 +240,19 @@ pub(super) fn apply_preference(
                 }
                 return Ok(());
             }
-            let type_ok = matches!(
-                (&*target, leaf),
-                (Value::Bool(_), Value::Bool(_))
-                    | (Value::String(_), Value::String(_))
-                    | (Value::Number(_), Value::Number(_))
-                    | (Value::Array(_), Value::Array(_))
-                    | (Value::Object(_), Value::Object(_))
-            );
+            // A nullable schema leaf (`interaction.snapEnabled`, an
+            // `Option<bool>`) serializes as `null` when the host set no value;
+            // a null slot means "absent", so an allowed preference may fill it.
+            // Every other target/leaf pairing must keep its type.
+            let type_ok = target.is_null()
+                || matches!(
+                    (&*target, leaf),
+                    (Value::Bool(_), Value::Bool(_))
+                        | (Value::String(_), Value::String(_))
+                        | (Value::Number(_), Value::Number(_))
+                        | (Value::Array(_), Value::Array(_))
+                        | (Value::Object(_), Value::Object(_))
+                );
             if !type_ok {
                 return Err(type_error(path));
             }

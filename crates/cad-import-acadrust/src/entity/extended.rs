@@ -29,6 +29,8 @@ impl<'a> ImporterBuilder<'a> {
                     font: self.style_font(&d.style_name),
                     h_align: TextAlignH::Left,
                     v_align: TextAlignV::Baseline,
+                    // RTEXT carries no width boundary.
+                    wrap_width: None,
                 };
                 let unhandled = rtext_unhandled_flags(d.flags);
                 let normal = p3(d.normal);
@@ -64,6 +66,8 @@ impl<'a> ImporterBuilder<'a> {
                     font: self.style_font(&d.style_name),
                     h_align: TextAlignH::Left,
                     v_align: TextAlignV::Baseline,
+                    // Arc-aligned text carries no width boundary.
+                    wrap_width: None,
                 },
                 Completeness::Partial(vec![
                     "arc-aligned placement approximated as linear text".into()
@@ -97,6 +101,7 @@ impl<'a> ImporterBuilder<'a> {
                         font: None,
                         h_align: TextAlignH::Center,
                         v_align: TextAlignV::Middle,
+                        wrap_width: None,
                     });
                 }
                 if d.mtext_visible {
@@ -111,6 +116,9 @@ impl<'a> ImporterBuilder<'a> {
                             font: self.style_font(&mtext.style),
                             h_align,
                             v_align,
+                            // Embedded MTEXT keeps its width boundary dropped in
+                            // this build; only MLEADER populates it.
+                            wrap_width: None,
                         });
                     }
                 }
@@ -210,6 +218,8 @@ impl<'a> ImporterBuilder<'a> {
             font: self.style_font(style),
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
+            // ATTRIB/ATTDEF text has no width boundary.
+            wrap_width: None,
         }
     }
 }

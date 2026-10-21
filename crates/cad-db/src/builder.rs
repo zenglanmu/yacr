@@ -43,6 +43,7 @@ impl DrawingDatabaseBuilder {
                 mleader_styles: BTreeMap::new(),
                 mleader_style_ids_by_name: BTreeMap::new(),
                 active_annotation_scale: None,
+                code_page: None,
                 next_entity_id: 1,
                 bounds_cache: Default::default(),
             },
@@ -244,6 +245,19 @@ impl DrawingDatabaseBuilder {
             named: self.database.scale_by_name(name).is_some(),
         });
         Ok(())
+    }
+
+    /// Record the drawing's declared text code page (`$DWGCODEPAGE`).
+    ///
+    /// An empty or whitespace-only string means "the source declared nothing"
+    /// and is stored as `None`, never guessed. A non-empty value is stored
+    /// verbatim (case preserved) so the platform locale mapping is the only
+    /// place that interprets it.
+    pub fn set_code_page(&mut self, code_page: Option<&str>) {
+        self.database.code_page = code_page
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
     }
 
     /// Set the drawing-global linetype scale (`$LTSCALE`). A non-finite or

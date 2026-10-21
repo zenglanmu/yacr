@@ -80,6 +80,10 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("PASTECLIP", CommandId::PasteFromClipboard),
     ("OFFSET", CommandId::OffsetEntity),
     ("SETACTIVELAYER", CommandId::SetActiveLayer),
+    // A payload-requiring edit: the selector normalizes, and the application
+    // refuses a bare invocation explicitly (the panel/IPC path supplies the
+    // `EntityProperty { key, value }` payload).
+    ("SETENTITYPROPERTY", CommandId::SetEntityProperty),
     ("HOVERPREVIEW", CommandId::ToggleHoverPreview),
     ("OSNAP", CommandId::ToggleSnap),
 ];
@@ -199,6 +203,20 @@ pub fn canonical_command_name(text: &str) -> Option<&'static str> {
         .iter()
         .find(|(alias, _)| *alias == key)
         .and_then(|(_, canonical)| canonical_command_name(canonical))
+}
+
+/// The canonical selector a [`CommandId`] is named by, if it has one.
+///
+/// This is the reverse of [`COMMAND_TABLE`] and exists for typed entry points
+/// that dispatch a `CommandId` directly without going through a text selector,
+/// so the command echo still records the same stable machine key the router
+/// would. Interaction-only selectors (`DIST`, `ZOOMIN`, …) carry no
+/// `CommandId` and are recorded by the selector path itself.
+pub fn command_name(id: CommandId) -> Option<&'static str> {
+    COMMAND_TABLE
+        .iter()
+        .find(|(_, candidate)| *candidate == id)
+        .map(|(name, _)| *name)
 }
 
 /// The `CommandId` a command name names, if any.

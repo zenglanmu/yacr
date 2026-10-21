@@ -712,6 +712,7 @@ fn drawing_validate_geometry_covers_supported_kinds() {
             font: None,
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
+            wrap_width: None,
         },
         SemanticGeometry::Insert {
             block: BlockId(0),
@@ -828,4 +829,104 @@ fn drawing_transform_bakes_image_placement_and_mask_boundary() {
         }
         other => panic!("expected Mask, got {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Display-attribute staging (the properties write path reads this back)
+// ---------------------------------------------------------------------------
+
+/// Insert entity 1 through the sanctioned path and return the database.
+fn writable_db_with_line() -> DrawingDatabase {
+    let mut db = writable_db();
+    let mut tx = db
+        .begin_drawing_transaction("create line", TransactionId(1))
+        .unwrap();
+    tx.insert_entity(line_entity(1, point(0.0, 0.0), point(1.0, 0.0)))
+        .unwrap();
+    tx.commit().unwrap();
+    db
+}
+
+#[test]
+fn drawing_display_update_is_one_bump_and_a_style_mask() {
+    let mut db = writable_db_with_line();
+    let before = db.revision();
+    let attributes = EntityRenderAttributes {
+        color: EntityColor::Explicit([1, 2, 3]),
+        ..EntityRenderAttributes::default()
+    };
+
+    let mut tx = db
+        .begin_drawing_transaction("set colour", TransactionId(2))
+        .unwrap();
+    tx.update_entity_display(EntityId(1), attributes.clone())
+        .unwrap();
+    let changes = tx.commit().unwrap();
+
+    assert_eq!(db.revision(), Revision(before.0 + 1), "one revision bump");
+    assert_eq!(
+        db.entity_render_attributes(EntityId(1)).color,
+        EntityColor::Explicit([1, 2, 3])
+    );
+    // The entity row itself is unchanged, but the update entry must carry STYLE
+    // so the representation is rebuilt.
+    let mask = changes
+        .changes
+        .iter()
+        .find_map(|change| match change {
+            ObjectChange::Update(object, mask) if object.0 == 1 => Some(*mask),
+            _ => None,
+        })
+        .expect("an update for entity 1");
+    assert!(mask.contains(ChangeMask::STYLE), "got {mask:?}");
+    assert!(mask.invalidates_representation());
+}
+
+#[test]
+fn drawing_display_update_rollback_leaves_the_attributes_untouched() {
+    let mut db = writable_db_with_line();
+    let before = db.entity_render_attributes(EntityId(1));
+    {
+        let mut tx = db
+            .begin_drawing_transaction("set colour", TransactionId(2))
+            .unwrap();
+        tx.update_entity_display(
+            EntityId(1),
+            EntityRenderAttributes {
+                color: EntityColor::Explicit([9, 9, 9]),
+                ..EntityRenderAttributes::default()
+            },
+        )
+        .unwrap();
+        tx.rollback();
+    }
+    assert_eq!(db.entity_render_attributes(EntityId(1)), before);
+    assert_eq!(db.revision(), Revision(1));
+}
+
+#[test]
+fn drawing_display_update_rejects_a_duplicate_stage() {
+    let mut db = writable_db_with_line();
+    let mut tx = db
+        .begin_drawing_transaction("set colour", TransactionId(2))
+        .unwrap();
+    tx.update_entity_display(EntityId(1), EntityRenderAttributes::default())
+        .unwrap();
+    let error = tx
+        .update_entity_display(EntityId(1), EntityRenderAttributes::default())
+        .unwrap_err();
+    assert!(matches!(error, CadError::Invariant(_)), "got {error:?}");
+}
+
+#[test]
+fn drawing_display_update_refuses_a_deleted_entity() {
+    let mut db = writable_db_with_line();
+    let mut tx = db
+        .begin_drawing_transaction("delete and recolour", TransactionId(2))
+        .unwrap();
+    tx.delete_entity(EntityId(1)).unwrap();
+    let error = tx
+        .update_entity_display(EntityId(1), EntityRenderAttributes::default())
+        .unwrap_err();
+    assert!(matches!(error, CadError::Invariant(_)), "got {error:?}");
 }

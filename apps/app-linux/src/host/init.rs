@@ -7,6 +7,7 @@ use cad_platform::ConfigStore;
 use cad_ui_core::unsupported_status;
 
 use super::dom::ERROR_HOOK_JS;
+use super::locale::{host_locale_script, host_locale_tag};
 use super::options::{
     config_paths, start_maximized, INITIAL_HEIGHT, INITIAL_WIDTH, WEBVIEW_LABEL, WINDOW_LABEL,
 };
@@ -57,6 +58,10 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
         // is the real mechanism (window resize/scale events, the overlay's own
         // layout pass and the DOM layout tick).
         .initialization_script(ERROR_HOOK_JS)
+        // The host-resolved locale, handed to the chrome **before** the document
+        // is parsed: this is the single system default both the native dialog
+        // labels and the React UI use (see `host::locale`).
+        .initialization_script(host_locale_script())
         .on_page_load(|_webview, payload| {
             eprintln!(
                 "[probe] page_load url={} event={:?}",
@@ -129,8 +134,9 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
     // ---- CAD platform composition (main thread; `Rc`, kept in a TLS) ----
     let launch = lock(shared).launch.clone();
     if !launch.probe_only {
-        let locale = std::env::var("YACR_LOCALE").unwrap_or_else(|_| "zh-CN".to_string());
-        match crate::platform::ReactFiles::new(&locale) {
+        // Same resolved tag as the injected `window.__YACR_HOST_LOCALE__`:
+        // native labels and chrome cannot pick different languages.
+        match crate::platform::ReactFiles::new(host_locale_tag()) {
             Ok(files) => {
                 let (config, preference) = config_paths();
                 let config_store: std::rc::Rc<dyn ConfigStore> = match (config, preference) {

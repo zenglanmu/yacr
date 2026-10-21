@@ -73,8 +73,9 @@ impl ResourceKind {
 ///
 /// The audit (F10/F11) found the old model implied every [`ResourceKind`] was
 /// supported because the enum existed. This table states the truth: planning a
-/// fetch URL is not decoding, and BigFont/xref remain unimplemented here while
-/// images resolve and decode only partially (PNG/JPEG; see the `image` module).
+/// fetch URL is not decoding; xref remains unimplemented here, BigFont is usable
+/// only as a fallback face (no primary+bigfont pairing), and images resolve and
+/// decode only partially (PNG/JPEG; see the `image` module).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResourceCapability {
     pub kind: ResourceKind,
@@ -101,14 +102,19 @@ pub fn resource_capabilities() -> Vec<ResourceCapability> {
         ResourceCapability {
             kind: ResourceKind::FontShx,
             resolve: SupportStatus::Verified,
-            // SHX shape fonts parse, but bigfont/encoding coverage is untested.
+            // SHX shape fonts parse (shapes/unifont/bigfont) and map Unicode
+            // through a declared encoding, but bigfont/encoding coverage is
+            // untested and a style's primary+bigfont pair is not composed.
             decode: SupportStatus::Partial,
         },
         ResourceCapability {
             kind: ResourceKind::BigFont,
-            resolve: SupportStatus::Unverified,
-            // No dedicated big-font handling exists.
-            decode: SupportStatus::NotImplemented,
+            resolve: SupportStatus::Partial,
+            // A bigfont face parses and can be used **as a fallback face**
+            // (its declared encoding maps Unicode to its glyph codes). What is
+            // missing: pairing a style's own primary face with its bigfont, and
+            // using the drawing code page to select that style's bigfont.
+            decode: SupportStatus::Partial,
         },
         ResourceCapability {
             kind: ResourceKind::Image,
@@ -163,6 +169,11 @@ pub mod codes {
     pub const FONT_UNRESOLVED: &str = "resource.font_unresolved";
     /// A referenced font resolved but its technology is not supported.
     pub const FONT_UNSUPPORTED: &str = "resource.font_unsupported";
+    /// The drawing's text locale has no available locale-preferred fallback
+    /// face (for example a Chinese drawing with no CJK face in the font
+    /// package). The payload names the locale and the candidates tried; Latin
+    /// text still shapes through the remaining fallback chain.
+    pub const FONT_LOCALE_FALLBACK_MISSING: &str = "font.locale_fallback_missing";
     /// Raster image bytes whose container/encoding is not supported (not PNG/JPEG).
     pub const IMAGE_UNSUPPORTED_FORMAT: &str = "resource.image_unsupported_format";
     /// Raster image bytes that are malformed or truncated and cannot be decoded.

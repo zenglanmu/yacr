@@ -29,6 +29,7 @@ fn text() -> SemanticGeometry {
         font: Some("arial.ttf".into()),
         h_align: TextAlignH::Center,
         v_align: TextAlignV::Middle,
+        wrap_width: Some(4.0),
     }
 }
 
@@ -82,6 +83,7 @@ fn translation_rotation_and_uniform_scale_agree_across_both_faces() {
             font: write_font,
             h_align: write_h,
             v_align: write_v,
+            wrap_width: write_wrap,
         } = &write
         else {
             panic!("{label}: the write face must return Text, got {write:?}");
@@ -95,6 +97,7 @@ fn translation_rotation_and_uniform_scale_agree_across_both_faces() {
             font: snap_font,
             h_align: snap_h,
             v_align: snap_v,
+            wrap_width: snap_wrap,
         } = &snap
         else {
             panic!("{label}: the snap face must return Text, got {snap:?}");
@@ -107,6 +110,7 @@ fn translation_rotation_and_uniform_scale_agree_across_both_faces() {
         assert_eq!(write_font, snap_font, "{label}: font");
         assert_eq!(write_h, snap_h, "{label}: horizontal alignment");
         assert_eq!(write_v, snap_v, "{label}: vertical alignment");
+        assert_eq!(write_wrap, snap_wrap, "{label}: wrap boundary");
         // The parity is not vacuous: the source really moved/scaled.
         assert!(
             (*write_height - 2.5 * scale_of(&transform)).abs() < 1e-12,

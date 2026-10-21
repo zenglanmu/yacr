@@ -638,6 +638,8 @@ pub(crate) fn place_text(
         font: style.text_font.clone(),
         h_align: crate::TextAlignH::Center,
         v_align: crate::TextAlignV::Middle,
+        // Dimension text has no source width boundary.
+        wrap_width: None,
     }
 }
 
@@ -729,6 +731,7 @@ fn transform_child(
             font,
             h_align,
             v_align,
+            wrap_width,
         } => SemanticGeometry::Text {
             text: text.clone(),
             position: p(*position),
@@ -738,6 +741,9 @@ fn transform_child(
             font: font.clone(),
             h_align: *h_align,
             v_align: *v_align,
+            // The boundary is a world-space length, like `height`, so a
+            // similarity scales it; nulling it would silently re-flow the text.
+            wrap_width: wrap_width.map(|width| width * scale_factor),
         },
         other => {
             return Err(CadError::Unsupported(format!(

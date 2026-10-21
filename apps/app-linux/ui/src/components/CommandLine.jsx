@@ -14,6 +14,7 @@ import { Icon } from '../icons.jsx';
 import { Button, IconButton } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { handleCommandKey } from '../cad.mjs';
+import { commandLogView } from '../command-log.mjs';
 import { defaultSuggestionIndex, filterCommandSuggestions, historyText, stepHistoryCursor, unavailableReasonKey } from '../commands.mjs';
 import { releaseFocusOnOutsidePress } from '../focus-release.mjs';
 import {
@@ -51,6 +52,21 @@ export function CommandLine() {
     () => (textMode ? [] : filterCommandSuggestions(shell.command, { history: shell.history })),
     [textMode, shell.command, shell.history],
   );
+  // The command-window echo: `status.commandLog`, oldest first, newest at the
+  // bottom. The host log is append-only (sequences are monotonic, a document
+  // replacement clears it, the ring drops from the front at capacity), so the
+  // length plus the newest sequence identifies its content exactly. The rows are
+  // memoized on that signature: the status is a fresh object every poll (4 Hz),
+  // and re-formatting up to 200 entries each time would be wasted work.
+  const logEntries = shell.status?.commandLog ?? [];
+  const logSignature = logEntries.length > 0
+    ? `${logEntries.length}:${logEntries[logEntries.length - 1]?.sequence}`
+    : '';
+  const logRows = useMemo(() => commandLogView(logEntries, t), [logSignature, t]);
+  const logRef = useRef(null);
+  // Whether new echoes should keep the view at the newest line. The user owns the
+  // position once they scroll up, and it is never yanked back.
+  const logStick = useRef(true);
   // Suggestions appear once the user starts typing; with an empty line the
   // Up/Down keys step through command history instead.
   const listOpen = !textMode && focused && shell.command.trim().length > 0 && !shell.historyOpen;
@@ -81,6 +97,15 @@ export function CommandLine() {
     setTextDraft('');
     setTextMessage(null);
   }, [textMode]);
+
+  // Follow the newest echo when (and only when) the view is already at the
+  // bottom. This runs on the log signature, so a poll that repeats the same log
+  // never touches the scroll position.
+  useEffect(() => {
+    const node = logRef.current;
+    if (!node || !logStick.current) return;
+    node.scrollTop = node.scrollHeight;
+  }, [logSignature]);
 
   // A new text step starts with the host's prefill — `TEXTEDIT` puts the current
   // string in the field so the user edits, a fresh `TEXT` starts empty — and
@@ -143,6 +168,11 @@ export function CommandLine() {
   const tooLongText = draft.tooLong ? t(TEXT_TOO_LONG_KEY, { max: TOOL_TEXT_MAX_LENGTH }) : null;
   const textMessageText = textMode ? (tooLongText ?? textMessage?.text ?? null) : null;
 
+  function trackLogScroll(event) {
+    const node = event.currentTarget;
+    logStick.current = node.scrollHeight - node.scrollTop - node.clientHeight <= 4;
+  }
+
   function submitText() {
     if (draft.empty || draft.tooLong) return;
     void shell.submitToolText(textDraft).then(result => {
@@ -169,6 +199,43 @@ export function CommandLine() {
 
   return (
     <div ref={rootRef} className="region region--cmdline commandline app-region">
+      {/* The echo sits above the input row, inside the same region: the region
+          grows upward (the input keeps its distance from the status bar) and the
+          list is bounded with its own scrollbar, so a long log never pushes the
+          ribbon or the drawing area any further. It is output, not a control, so
+          the list is deliberately not focusable and offers no clear affordance
+          (the host exposes no clear API; the F2 history panel above is a
+          different, input-only record). */}
+      {logRows.length > 0 ? (
+        <div
+          ref={logRef}
+          className="commandlog"
+          role="log"
+          aria-label={t('command.log.label')}
+          onScroll={trackLogScroll}
+        >
+          {logRows.map((row, index) => (
+            <div
+              key={row.sequence ?? `entry-${index}`}
+              className={`commandlog__entry is-${row.kind}`}
+              title={row.kind === 'error' ? row.code ?? undefined : undefined}
+            >
+              {row.lines.map((line, lineIndex) => (
+                <div key={lineIndex} className={`commandlog__line is-${line.tone}`}>
+                  {line.label ? (
+                    <span className="commandlog__label">
+                      {line.tone === 'command' ? `${line.label} ` : `${line.label} = `}
+                    </span>
+                  ) : null}
+                  <span className="commandlog__text">{line.text}</span>
+                  {line.unit ? <span className="commandlog__unit">{` ${line.unit}`}</span> : null}
+                  {line.meta ? <span className="commandlog__meta">{line.meta}</span> : null}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="commandline__row">
         <Icon name={textMode ? 'text' : 'terminal'} size={15} className="commandline__prompt" />
         <label className="sr-only" htmlFor="cad-command">{textMode ? t(TEXT_STEP_PROMPT_KEY) : t('command.title')}</label>

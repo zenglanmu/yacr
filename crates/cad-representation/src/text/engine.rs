@@ -37,6 +37,10 @@ enum ResolvedFace<'a> {
 pub struct FontEngine {
     faces: HashMap<String, Arc<FaceData>>,
     fallback: Vec<String>,
+    /// The text locale the current fallback chain was built for, when the host
+    /// recorded one (see [`Self::set_locale_tag`]). `None` for a hand-built
+    /// engine or one whose chain has no locale provenance.
+    locale_tag: Option<String>,
 }
 
 impl FontEngine {
@@ -82,6 +86,36 @@ impl FontEngine {
 
     pub fn fallback_keys(&self) -> &[String] {
         &self.fallback
+    }
+
+    /// The text locale the fallback chain was built for, if a host recorded one.
+    ///
+    /// A desktop host installs one engine at a time and reopens other drawings
+    /// with it. The tag lets the host tell "the chain already suits this
+    /// document's locale" from "the locale changed and the chain must be
+    /// retargeted", instead of silently reusing a chain built for another
+    /// locale.
+    pub fn locale_tag(&self) -> Option<&str> {
+        self.locale_tag.as_deref()
+    }
+
+    /// Record the text locale this fallback chain is for.
+    pub fn set_locale_tag(&mut self, tag: &str) {
+        self.locale_tag = Some(tag.to_string());
+    }
+
+    /// A copy of this engine with a different fallback chain.
+    ///
+    /// Parsed faces are shared (they are already `Arc`s), so retargeting a chain
+    /// costs a map clone, not a re-read or re-parse of the font bytes. Used by
+    /// hosts to switch the fallback order between documents without rebuilding
+    /// the engine.
+    pub fn with_fallback(&self, keys: Vec<String>) -> FontEngine {
+        FontEngine {
+            faces: self.faces.clone(),
+            fallback: keys,
+            locale_tag: self.locale_tag.clone(),
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -176,6 +210,9 @@ impl FontEngine {
     /// `origin` is the alignment/anchor point; `height` is the base em height in
     /// world units; `rotation` is radians about `origin`. When the requested
     /// font is missing the fallback chain is used, resolved per glyph.
+    /// `wrap_width` is an optional width boundary in world units: `Some(w)`
+    /// wraps each `\P` paragraph so no line exceeds `w` (except a single
+    /// unbreakable token); `None` keeps the written line breaks only.
     #[allow(clippy::too_many_arguments)]
     pub fn shape(
         &self,
@@ -186,6 +223,7 @@ impl FontEngine {
         rotation: f64,
         h_align: TextAlignH,
         v_align: TextAlignV,
+        wrap_width: Option<f64>,
     ) -> CadResult<ShapedText> {
         self.shape_with(
             Some(font_key),
@@ -195,6 +233,7 @@ impl FontEngine {
             rotation,
             h_align,
             v_align,
+            wrap_width,
         )
     }
 
@@ -204,7 +243,8 @@ impl FontEngine {
     /// registered fallback chain, exactly like a requested-but-unavailable font
     /// (the sanctioned fallback mechanism). When the chain holds no usable face
     /// the caller gets `ResourceMissing` and keeps the unshaped placeholder
-    /// instead of showing fabricated glyphs.
+    /// instead of showing fabricated glyphs. `wrap_width` behaves as in
+    /// [`shape`](Self::shape).
     #[allow(clippy::too_many_arguments)]
     pub fn shape_unstyled(
         &self,
@@ -214,8 +254,11 @@ impl FontEngine {
         rotation: f64,
         h_align: TextAlignH,
         v_align: TextAlignV,
+        wrap_width: Option<f64>,
     ) -> CadResult<ShapedText> {
-        self.shape_with(None, raw, origin, height, rotation, h_align, v_align)
+        self.shape_with(
+            None, raw, origin, height, rotation, h_align, v_align, wrap_width,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -228,6 +271,7 @@ impl FontEngine {
         rotation: f64,
         h_align: TextAlignH,
         v_align: TextAlignV,
+        wrap_width: Option<f64>,
     ) -> CadResult<ShapedText> {
         let size = height.abs();
         if !size.is_finite() || size <= 0.0 {
@@ -257,7 +301,7 @@ impl FontEngine {
         // reported, not silently dropped; the rest of the text still renders.
         let mut missing_font: Option<String> = None;
         let mut missing_glyphs = Vec::new();
-        let lines = layout_parsed(&parsed, size, |run, text| {
+        let lines = layout_parsed(&parsed, size, wrap_width, |run, text| {
             let key = run.font.as_deref().or(font_key);
             match self.measure_run(key, text, run.effective_height(size)) {
                 Some(shaped) => {
@@ -351,6 +395,9 @@ impl FontEngine {
     /// (primary, then fallbacks in order) that actually contains it, and the pen
     /// advances by that face's advance. When the primary face has every glyph,
     /// the result is byte-for-byte the same as single-face rendering.
+    ///
+    /// This wrapper never wraps: use [`shape`](Self::shape) with a width
+    /// boundary for MTEXT/MLEADER text that must reflow.
     #[allow(clippy::too_many_arguments)]
     pub fn outline(
         &self,
@@ -363,7 +410,9 @@ impl FontEngine {
         v_align: TextAlignV,
     ) -> CadResult<Vec<Vec<Point3>>> {
         Ok(self
-            .shape(font_key, text, origin, height, rotation, h_align, v_align)?
+            .shape(
+                font_key, text, origin, height, rotation, h_align, v_align, None,
+            )?
             .outlines)
     }
 

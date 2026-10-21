@@ -251,6 +251,7 @@ pub fn transform_geometry(
             font,
             h_align,
             v_align,
+            wrap_width,
         } => {
             require_similarity(transform, "text")?;
             require_orientation_preserving(transform, "text")?;
@@ -263,6 +264,9 @@ pub fn transform_geometry(
                 font: font.clone(),
                 h_align: *h_align,
                 v_align: *v_align,
+                // The boundary is a world-space length, so a similarity scales
+                // it with the text instead of dropping it.
+                wrap_width: wrap_width.map(|width| width * uniform_scale(transform)),
             }
         }
         SemanticGeometry::Spline { .. } => {

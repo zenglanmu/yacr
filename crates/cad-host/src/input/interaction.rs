@@ -157,6 +157,17 @@ impl HostCore {
                 self.controller.borrow_mut().set_selected_text(&text)?;
                 InteractionOutcome::Confirmed
             }
+            // The properties-panel write path: like the text field, the host
+            // resolves its own current selection at apply time (no id travels).
+            // Refusals are named and open no transaction; a successful edit is
+            // one transaction / one undo step, and the tail below republishes the
+            // derived state (properties rows, selection, undo availability).
+            InteractionRequest::SetSelectedProperty { key, value } => {
+                self.controller
+                    .borrow_mut()
+                    .set_selection_property(&key, &value)?;
+                InteractionOutcome::Confirmed
+            }
             // The first `Esc`: a focus-only change that never cancels the tool
             // (ADR 0019 decision A.1). `Cancel` remains the second `Esc` and is
             // the only request that resets the tool.

@@ -72,8 +72,10 @@ use std::sync::Arc;
 /// The CAD render-target clear color: **pure black, fully opaque**.
 ///
 /// This is the actual clear of the CAD render target (not a DOM/CSS overlay) and
-/// applies to every space (model and paper). It is the global default; a host
-/// that needs a different background must change it explicitly.
+/// is the default for every space (model and paper): a host that needs a
+/// different background supplies it per frame through
+/// [`RenderTarget::clear_color`](api_types::RenderTarget), and the renderer never
+/// reads a configuration of its own.
 pub(crate) const CAD_CLEAR_COLOR: wgpu::Color = wgpu::Color {
     r: 0.0,
     g: 0.0,

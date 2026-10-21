@@ -11,7 +11,7 @@
 //!
 //! - catalogs are parsed from `include_str!` at startup (no per-frame parsing);
 //! - `en-US`, `en_GB`, `zh-Hans`, … normalise onto the stable locales;
-//! - an unsupported locale falls back to `zh-CN` with a *recorded reason*, not
+//! - an unsupported locale falls back to `en` with a *recorded reason*, not
 //!   silently, and no call ever returns an empty string;
 //! - key/placeholder parity between the two catalogs is enforced by unit tests
 //!   and by `scripts/check-i18n.py` (CI).
@@ -27,8 +27,10 @@ pub const EN_JSON: &str = include_str!("../i18n/en.json");
 pub const ZH_CN_TAG: &str = "zh-CN";
 /// Locale tag used by [`Locale::En`].
 pub const EN_TAG: &str = "en";
-/// Locale used when the request cannot be satisfied.
-pub const DEFAULT_TAG: &str = ZH_CN_TAG;
+/// Locale used when the request cannot be satisfied: English is the shipped
+/// fallback, so a system language this build does not have never lands on a
+/// language the user did not ask for.
+pub const DEFAULT_TAG: &str = EN_TAG;
 
 /// A stable, selectable UI locale.
 ///
@@ -72,7 +74,7 @@ impl Locale {
 pub enum FallbackReason {
     /// The tag carried a region/script (e.g. `en-US`) and was normalised.
     Normalised,
-    /// The primary subtag has no catalog (e.g. `de-DE`).
+    /// The requested language or variant has no catalog (e.g. `de-DE`, `zh-TW`).
     Unsupported,
     /// The tag was empty or malformed (e.g. `""`, `"--"`).
     Malformed,
@@ -92,27 +94,22 @@ pub struct LocaleResolution {
 /// Resolve a requested locale tag to a shipped catalog.
 ///
 /// Accepts `en-US`, `en_US`, `EN-us`, `zh-Hans-CN`, `zh-CN`, … and the default
-/// `zh-CN`. Unsupported or malformed input resolves to [`Locale::ZhCn`] with a
-/// [`FallbackReason`]. This function never fails and never returns "no locale".
+/// `en`. Unsupported or malformed input (including `zz`, `zh-TW`, `zh-Hant`)
+/// resolves to [`Locale::En`] with a [`FallbackReason`]. This function never
+/// fails and never returns "no locale".
 pub fn resolve_locale(requested: &str) -> LocaleResolution {
     let trimmed = requested.trim();
-    let Some(primary) = split_primary(trimmed) else {
+    let malformed = split_primary(trimmed).is_none();
+    let Some(locale) = supported_locale_for(trimmed) else {
         return LocaleResolution {
             requested: trimmed.to_string(),
-            locale: Locale::ZhCn,
-            fallback: Some(FallbackReason::Malformed),
+            locale: Locale::En,
+            fallback: Some(if malformed {
+                FallbackReason::Malformed
+            } else {
+                FallbackReason::Unsupported
+            }),
         };
-    };
-    let locale = match primary.as_str() {
-        "zh" => Locale::ZhCn,
-        "en" => Locale::En,
-        _ => {
-            return LocaleResolution {
-                requested: trimmed.to_string(),
-                locale: Locale::ZhCn,
-                fallback: Some(FallbackReason::Unsupported),
-            };
-        }
     };
     // The canonical, stable tag resolves exactly; anything with a region or
     // script (e.g. `en-US`, `zh-Hans-CN`) is a normalisation, so the host can
@@ -123,6 +120,65 @@ pub fn resolve_locale(requested: &str) -> LocaleResolution {
         locale,
         fallback: (!exact).then_some(FallbackReason::Normalised),
     }
+}
+
+/// Map a POSIX/BCP-47 locale tag to a shipped catalog, or `None` when this
+/// build has none.
+///
+/// This is the single mapping table shared by the React UI (`systemLocaleFor`)
+/// and by [`locale_from_env`]. Codeset and modifier suffixes (`zh_CN.UTF-8`,
+/// `sr_RS@latin`) are stripped first.
+///
+/// `en`/`en-*` select English; `zh`, `zh-CN`, `zh-Hans` and any other
+/// Simplified-Chinese region select `zh-CN`. A Hant script or a Traditional
+/// region (`zh-TW`, `zh-HK`, `zh-MO`) yields `None`: no Hant catalog exists, so
+/// Traditional Chinese is not silently served Simplified.
+pub fn supported_locale_for(tag: &str) -> Option<Locale> {
+    let base = tag.trim().split(['.', '@']).next().unwrap_or("");
+    let mut parts = base.split(['-', '_']);
+    let primary = parts.next()?;
+    if primary.is_empty() || !primary.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    match primary.to_ascii_lowercase().as_str() {
+        "en" => Some(Locale::En),
+        "zh" => {
+            let traditional = parts.any(|part| {
+                let part = part.to_ascii_lowercase();
+                matches!(part.as_str(), "hant" | "tw" | "hk" | "mo")
+            });
+            (!traditional).then_some(Locale::ZhCn)
+        }
+        _ => None,
+    }
+}
+
+/// Environment variables consulted for the system UI language, highest first.
+///
+/// This is the POSIX precedence order; an empty value is treated as unset.
+pub const LOCALE_ENV_VARS: [&str; 4] = ["LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"];
+
+/// The locale a system environment selects, from a variable lookup.
+///
+/// Pure so the host wiring and its tests share one implementation. Only the
+/// **highest-precedence non-empty** variable is consulted: if it names a
+/// language this build does not ship (e.g. `fr_FR.UTF-8`) the answer is English,
+/// it does not silently fall through to a different variable. `LANGUAGE` is a
+/// colon-separated preference list, so its first entry wins. `C`, `POSIX`, an
+/// empty value or a missing variable all resolve to [`Locale::En`].
+pub fn locale_from_env(get: impl Fn(&str) -> Option<String>) -> Locale {
+    for var in LOCALE_ENV_VARS {
+        let Some(raw) = get(var) else { continue };
+        let value = if var == "LANGUAGE" {
+            raw.split(':').map(str::trim).find(|part| !part.is_empty())
+        } else {
+            let trimmed = raw.trim();
+            (!trimmed.is_empty()).then_some(trimmed)
+        };
+        let Some(value) = value else { continue };
+        return supported_locale_for(value).unwrap_or(Locale::En);
+    }
+    Locale::En
 }
 
 /// The exact canonical spelling of a locale tag, compared case-sensitively by
@@ -310,7 +366,7 @@ pub struct MessageSource {
 
 impl Default for MessageSource {
     fn default() -> Self {
-        Self::for_locale(Locale::ZhCn)
+        Self::for_locale(Locale::En)
     }
 }
 
@@ -495,10 +551,12 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_and_malformed_fall_back_to_zh_cn() {
-        for tag in ["de-DE", "fr", "ja-JP", "", "-", "--", "123", "zhx"] {
+    fn unsupported_and_malformed_fall_back_to_en() {
+        for tag in [
+            "de-DE", "fr", "ja-JP", "", "-", "--", "123", "zhx", "zh-TW", "zh-Hant",
+        ] {
             let resolved = resolve_locale(tag);
-            assert_eq!(resolved.locale, Locale::ZhCn, "tag {tag:?}");
+            assert_eq!(resolved.locale, Locale::En, "tag {tag:?}");
             assert!(
                 resolved.fallback.is_some(),
                 "tag {tag:?} must record a fallback reason"
@@ -513,6 +571,89 @@ mod tests {
             resolve_locale("123").fallback,
             Some(FallbackReason::Malformed)
         );
+    }
+
+    #[test]
+    fn system_tag_mapping_is_one_table_for_hosts_and_env() {
+        for tag in [
+            "zh",
+            "zh-CN",
+            "zh_CN",
+            "zh-Hans",
+            "zh-Hans-CN",
+            "zh-SG",
+            "ZH-cn",
+        ] {
+            assert_eq!(supported_locale_for(tag), Some(Locale::ZhCn), "tag {tag:?}");
+        }
+        for tag in ["en", "en-US", "en_GB", "EN-us"] {
+            assert_eq!(supported_locale_for(tag), Some(Locale::En), "tag {tag:?}");
+        }
+        // No Hant catalog exists, so Traditional Chinese is not served Simplified.
+        for tag in ["zh-TW", "zh_TW.UTF-8", "zh-Hant", "zh-HK", "zh-MO"] {
+            assert_eq!(supported_locale_for(tag), None, "tag {tag:?}");
+        }
+        for tag in ["fr", "fr_FR.UTF-8", "de", "ja-JP", "", "C", "POSIX"] {
+            assert_eq!(supported_locale_for(tag), None, "tag {tag:?}");
+        }
+    }
+
+    #[test]
+    fn env_locale_follows_posix_precedence_and_falls_back_to_en() {
+        let env = |pairs: &[(&str, &str)]| {
+            let pairs: Vec<(String, String)> = pairs
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect();
+            move |key: &str| {
+                pairs
+                    .iter()
+                    .find(|(name, _)| name.as_str() == key)
+                    .map(|(_, value)| value.clone())
+            }
+        };
+        // LC_ALL wins over every lower variable.
+        assert_eq!(
+            locale_from_env(env(&[
+                ("LC_ALL", "zh_CN.UTF-8"),
+                ("LC_MESSAGES", "en_US.UTF-8"),
+                ("LANG", "en_US.UTF-8"),
+            ])),
+            Locale::ZhCn
+        );
+        assert_eq!(
+            locale_from_env(env(&[("LC_ALL", "en_US.UTF-8"), ("LANG", "zh_CN.UTF-8"),])),
+            Locale::En
+        );
+        // LC_MESSAGES wins over LANGUAGE and LANG; empty values are unset.
+        assert_eq!(
+            locale_from_env(env(&[
+                ("LC_ALL", ""),
+                ("LC_MESSAGES", "zh_CN.UTF-8"),
+                ("LANGUAGE", "en_US:de_DE"),
+                ("LANG", "en_US.UTF-8"),
+            ])),
+            Locale::ZhCn
+        );
+        // LANGUAGE is a colon-separated preference list: the first entry wins.
+        assert_eq!(
+            locale_from_env(env(&[("LANGUAGE", "zh_CN:en_US"), ("LANG", "en_US.UTF-8")])),
+            Locale::ZhCn
+        );
+        assert_eq!(
+            locale_from_env(env(&[("LANGUAGE", "en_US:zh_CN"), ("LANG", "zh_CN.UTF-8")])),
+            Locale::En
+        );
+        // A set-but-unsupported system language is English, not Chinese: the
+        // higher-precedence variable is authoritative and does not fall through.
+        assert_eq!(
+            locale_from_env(env(&[("LC_ALL", "fr_FR.UTF-8"), ("LANG", "zh_CN.UTF-8"),])),
+            Locale::En
+        );
+        assert_eq!(locale_from_env(env(&[("LANG", "C")])), Locale::En);
+        assert_eq!(locale_from_env(env(&[("LANG", "POSIX")])), Locale::En);
+        assert_eq!(locale_from_env(env(&[])), Locale::En);
+        assert_eq!(locale_from_env(env(&[("LANG", "zh_TW.UTF-8")])), Locale::En);
     }
 
     #[test]
@@ -546,17 +687,20 @@ mod tests {
     #[test]
     fn runtime_switch_changes_language() {
         let mut source = MessageSource::default();
-        assert_eq!(source.locale(), Locale::ZhCn);
-        let resolution = source.set_locale("en-US");
         assert_eq!(source.locale(), Locale::En);
-        assert_eq!(resolution.fallback, Some(FallbackReason::Normalised));
-        let text = source.text("file.open", &[]);
-        assert_eq!(text, "Open drawing");
-        // Switching to an unsupported language reports the fallback.
-        let resolution = source.set_locale("de");
+        let resolution = source.set_locale("zh-Hans-CN");
         assert_eq!(source.locale(), Locale::ZhCn);
-        assert_eq!(resolution.fallback, Some(FallbackReason::Unsupported));
+        assert_eq!(resolution.fallback, Some(FallbackReason::Normalised));
         assert_eq!(source.text("file.open", &[]), "打开图纸");
+        // Switching to an unsupported language reports the fallback (English).
+        let resolution = source.set_locale("de");
+        assert_eq!(source.locale(), Locale::En);
+        assert_eq!(resolution.fallback, Some(FallbackReason::Unsupported));
+        assert_eq!(source.text("file.open", &[]), "Open drawing");
+        // An unshipped Chinese variant is not silently served Simplified.
+        let resolution = source.set_locale("zh-TW");
+        assert_eq!(source.locale(), Locale::En);
+        assert_eq!(resolution.fallback, Some(FallbackReason::Unsupported));
     }
 
     #[test]

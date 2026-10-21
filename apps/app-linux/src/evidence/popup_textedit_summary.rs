@@ -560,7 +560,12 @@ mod tests {
             .rows
             .push(cad_ui_core::session::CadSelectionRow {
                 key: "id".into(),
-                value: "1".into(),
+                value: Some("1".into()),
+                group: "entity".into(),
+                mixed: false,
+                editable: false,
+                kind: "text".into(),
+                options: Vec::new(),
             });
         assert_eq!(row_keys(&status), "id");
     }

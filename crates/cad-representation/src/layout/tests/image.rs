@@ -148,6 +148,7 @@ fn paper_build_keeps_unshaped_text_partial_with_a_precise_reason() {
             font: None,
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
+            wrap_width: None,
         },
         draw_order: 0,
     })

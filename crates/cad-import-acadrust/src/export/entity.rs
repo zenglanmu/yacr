@@ -506,6 +506,7 @@ fn emit_leaf(
             font,
             h_align,
             v_align,
+            wrap_width,
         } => {
             let style_name = ctx
                 .database
@@ -523,6 +524,12 @@ fn emit_leaf(
                 mtext.rotation = *rotation;
                 mtext.style = style_name;
                 mtext.normal = Vector3::UNIT_Z;
+                // The wrap boundary is MTEXT's reference-rectangle width
+                // (group 41); a single-line TEXT has no equivalent, which the
+                // other branch reports.
+                if let Some(width) = wrap_width {
+                    mtext.rectangle_width = *width;
+                }
                 let (attachment, align_reason) = mtext_attachment(*h_align, *v_align);
                 mtext.attachment_point = attachment;
                 if let Some(reason) = align_reason {
@@ -533,6 +540,11 @@ fn emit_leaf(
                 reasons.push("multi-line text written as MTEXT".into());
                 acc.record(object, "text_mtext", MappingOutcome::Converted(reasons));
             } else {
+                if wrap_width.is_some() {
+                    reasons.push(
+                        "single-line TEXT has no wrap boundary; the width is not exported".into(),
+                    );
+                }
                 let mut dxf_text = DxfText::new();
                 dxf_text.value = text.clone();
                 dxf_text.insertion_point = v3(*position);

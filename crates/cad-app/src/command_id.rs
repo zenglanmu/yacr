@@ -444,6 +444,23 @@ pub enum CommandId {
     /// persisted `view.overlays.snapHints` preference, which only gates the hint
     /// overlay. See [`crate::SessionState::snap_enabled`].
     ToggleSnap,
+    /// `SETENTITYPROPERTY`: change one named property on **every** currently
+    /// selected entity, as one transaction / one undo step.
+    ///
+    /// Payload is [`crate::CommandPayload::EntityProperty`] `{ key, value }`:
+    /// `key` is one of [`crate::property_value::SUPPORTED_KEYS`] and `value`
+    /// follows that key's grammar (an existing layer/linetype name, `ByLayer` /
+    /// `ByBlock`, `aci:0..=256` / `#RRGGBB`, a canonical millimetre lineweight,
+    /// or a transparency percentage `0..=90`). The selection is read from the
+    /// session at apply time; a ref with an instance path or sub-element is
+    /// refused (`property.not_addressable`) instead of being reached into, and a
+    /// value that is not in the grammar is refused, never clamped.
+    ///
+    /// Entities that already hold the value are not staged; if nothing changes
+    /// overall the command creates **no** undo entry (`property.unchanged`).
+    /// `text` is not a writable property here (it has its own `TEXTEDIT` path).
+    /// Work-only.
+    SetEntityProperty,
 }
 
 impl CommandId {
@@ -495,6 +512,7 @@ impl CommandId {
                 | Self::PasteFromClipboard
                 | Self::OffsetEntity
                 | Self::SetActiveLayer
+                | Self::SetEntityProperty
         )
     }
 }

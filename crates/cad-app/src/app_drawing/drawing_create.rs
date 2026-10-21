@@ -50,6 +50,7 @@ impl Application {
             CommandId::PasteFromClipboard => self.paste_from_clipboard(session, command),
             CommandId::OffsetEntity => self.offset_entity(command),
             CommandId::SetActiveLayer => self.set_active_layer(session, command),
+            CommandId::SetEntityProperty => self.set_entity_property(session, command),
             _ => Err(CadError::InvalidInput(
                 "not a drawing/edit command".to_string(),
             )),
@@ -594,6 +595,8 @@ impl Application {
             // creation has no justify prompt.
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
+            // Single-line TEXT creation has no width prompt.
+            wrap_width: None,
         };
         self.commit_new_entity(session, command, geometry, "create text")
     }

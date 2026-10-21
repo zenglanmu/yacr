@@ -292,6 +292,8 @@ pub struct HostCore {
     pub(crate) selection_revision: Rc<Cell<u64>>,
     /// Last observed tool generation, for real `ToolChanged` diffs.
     pub(crate) last_tool_generation: Rc<Cell<u64>>,
+    /// Typed, bounded command echo (observational only; never an input path).
+    pub(crate) command_log: Rc<RefCell<crate::command_log::CommandLog>>,
 }
 
 /// RAII flag guard: sets the flag on construction and clears it on drop,

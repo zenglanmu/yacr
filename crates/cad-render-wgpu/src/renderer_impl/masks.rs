@@ -7,8 +7,10 @@
 //!
 //! * `depth_compare: Always`, `depth_write_enabled: false` (see
 //!   `Renderer::initialize_with_device`);
-//! * the fragment colour is the renderer's clear colour
-//!   ([`crate::CAD_CLEAR_COLOR`]), never a colour from the representation layer;
+//! * the fragment colour is the renderer's clear colour for this frame
+//!   ([`RenderTarget::clear_color`](crate::RenderTarget::clear_color), whose
+//!   default is [`crate::CAD_CLEAR_COLOR`]), never a colour from the
+//!   representation layer;
 //! * the polygon is tessellated here with the same even-odd fill solid HATCH
 //!   uses, so a concave boundary is filled exactly and the notch is not wiped.
 //!

@@ -828,7 +828,8 @@ pub(crate) fn apply_drawing_patches(
             )
         })
         .collect();
-    let change_set = drawing.apply_drawing_changes(reason, transaction, changes)?;
+    let mut change_set = drawing.apply_drawing_changes(reason, transaction, changes)?;
+    let mut restored: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
     for patch in patches {
         let (entity, state) = if forward {
             (&patch.after, &patch.after_state)
@@ -838,6 +839,17 @@ pub(crate) fn apply_drawing_patches(
         if entity.is_some() {
             if let Some(state) = state {
                 drawing.restore_entity_display_state(patch.id, state);
+                restored.insert(patch.id);
+            }
+        }
+    }
+    // Restoring display attributes is a style change: without this the
+    // ChangeSet would describe only the entity row and a consumer would not
+    // rebuild the representation (colour/linetype/lineweight/opacity).
+    for change in &mut change_set.changes {
+        if let cad_db::ObjectChange::Update(object, mask) = change {
+            if restored.contains(&EntityId(object.0)) {
+                *mask = mask.union(cad_db::ChangeMask::STYLE);
             }
         }
     }

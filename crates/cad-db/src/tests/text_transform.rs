@@ -35,12 +35,13 @@ fn text_entity(id: u128) -> DbEntity {
             font: Some("arial.ttf".into()),
             h_align: TextAlignH::Center,
             v_align: TextAlignV::Middle,
+            wrap_width: Some(3.0),
         },
         draw_order: 1,
     }
 }
 
-fn stored_text(db: &DrawingDatabase) -> (String, Point3, f64, f64) {
+fn stored_text(db: &DrawingDatabase) -> (String, Point3, f64, f64, Option<f64>) {
     match &db.entity(EntityId(1)).expect("the text entity").geometry {
         SemanticGeometry::Text {
             text,
@@ -51,12 +52,13 @@ fn stored_text(db: &DrawingDatabase) -> (String, Point3, f64, f64) {
             font,
             h_align,
             v_align,
+            wrap_width,
         } => {
             assert_eq!(*style, StyleId(7), "the style identity is preserved");
             assert_eq!(font.as_deref(), Some("arial.ttf"), "the font is preserved");
             assert_eq!(*h_align, TextAlignH::Center, "alignment is preserved");
             assert_eq!(*v_align, TextAlignV::Middle, "alignment is preserved");
-            (text.clone(), *position, *height, *rotation)
+            (text.clone(), *position, *height, *rotation, *wrap_width)
         }
         other => panic!("expected text, got {other:?}"),
     }
@@ -89,8 +91,9 @@ fn text_translation_moves_only_the_position() {
     )
     .expect("text translates");
     tx.commit().unwrap();
-    let (text, position, height, rotation) = stored_text(&db);
+    let (text, position, height, rotation, wrap_width) = stored_text(&db);
     assert_eq!(text, "AB");
+    assert_eq!(wrap_width, Some(3.0), "translation keeps the wrap boundary");
     assert_eq!(
         position,
         Point3 {
@@ -124,7 +127,8 @@ fn text_rotation_accumulates_about_z_and_keeps_the_height() {
     tx.transform_entity(EntityId(1), &quarter)
         .expect("text rotates");
     tx.commit().unwrap();
-    let (_, position, height, rotation) = stored_text(&db);
+    let (_, position, height, rotation, wrap_width) = stored_text(&db);
+    assert_eq!(wrap_width, Some(3.0), "a rotation keeps the wrap boundary");
     assert!(
         (position.x + 2.0).abs() < 1e-12 && (position.y - 1.0).abs() < 1e-12,
         "the position rotates: {position:?}"
@@ -148,9 +152,10 @@ fn text_uniform_scale_multiplies_the_height() {
     tx.transform_entity(EntityId(1), &Transform3::scale(3.0))
         .expect("text scales uniformly");
     tx.commit().unwrap();
-    let (_, position, height, rotation) = stored_text(&db);
+    let (_, position, height, rotation, wrap_width) = stored_text(&db);
     assert!((position.x - 3.0).abs() < 1e-12, "{position:?}");
     assert!((height - 7.5).abs() < 1e-12, "height × 3: {height}");
+    assert_eq!(wrap_width, Some(9.0), "3.0 × 3, like the height");
     assert!(
         (rotation - 0.25).abs() < 1e-12,
         "a uniform scale keeps the rotation"
@@ -191,7 +196,8 @@ fn text_refuses_non_uniform_scale_and_mirror_with_a_named_diagnostic() {
         assert_eq!(tx.staged_len(), 0, "{label}");
         let changes = tx.commit().unwrap();
         assert!(changes.is_empty(), "{label}");
-        let (text, position, height, rotation) = stored_text(&db);
+        let (text, position, height, rotation, wrap_width) = stored_text(&db);
+        assert_eq!(wrap_width, Some(3.0), "{label}: nothing written");
         assert_eq!(text, "AB");
         assert_eq!(position.x, 1.0);
         assert_eq!(position.y, 2.0);

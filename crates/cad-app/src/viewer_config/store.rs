@@ -21,6 +21,15 @@ impl ViewerConfig {
                 "must exceed mobileBelow",
             ));
         }
+        // A crosshair percentage outside 1..=100 is a refusal, never a clamp: the
+        // overlay's own floor is a defence for direct callers, not a policy.
+        let crosshair = self.view.crosshair.size_percent;
+        if !(1..=100).contains(&crosshair) {
+            return Err(ConfigError::new(
+                "view.crosshair.sizePercent",
+                "crosshair size must be an integer percentage from 1 to 100",
+            ));
+        }
         for key in self.ui.command_overrides.keys() {
             if !is_known_command(key) {
                 return Err(ConfigError::new(

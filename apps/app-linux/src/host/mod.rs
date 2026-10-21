@@ -31,13 +31,14 @@ use cad_host::HostOptions;
 use cad_platform::{ConfigStore, PlatformFiles};
 use cad_render_wgpu::{ProbeStageTimings, PulledState};
 use cad_ui_core::layout::LayoutTracker;
-use cad_ui_core::session::CadSession;
+use cad_ui_core::session::{CadSession, CadSettingKey, CadSettingValue, CadSettings};
 use cad_ui_core::shell::ShellState;
 
 mod admission;
 mod commands;
 mod dom;
 mod init;
+mod locale;
 mod options;
 mod popup;
 mod postload;
@@ -51,8 +52,8 @@ mod tests;
 // Public host API (unchanged external surface; `crate::host::…` still resolves).
 pub use commands::{
     cad_close_popup, cad_command, cad_commands, cad_open_popup, cad_set_selected_text,
-    cad_set_tool_parameter, cad_set_tool_text, cad_standard_view, cad_status, probe_input,
-    probe_status, CadCommandAck,
+    cad_set_setting, cad_set_tool_parameter, cad_set_tool_text, cad_settings, cad_standard_view,
+    cad_status, probe_input, probe_status, CadCommandAck,
 };
 pub use init::init;
 pub use options::{
@@ -79,14 +80,15 @@ pub(crate) use postload::resolve_process_exit;
 // resolves them at `crate::host::…`) keeps working after the split.
 pub(crate) use commands::{
     __cmd__cad_close_popup, __cmd__cad_command, __cmd__cad_commands, __cmd__cad_open_popup,
-    __cmd__cad_set_selected_text, __cmd__cad_set_tool_parameter, __cmd__cad_set_tool_text,
-    __cmd__cad_standard_view, __cmd__cad_status, __cmd__probe_input, __cmd__probe_status,
-    __tauri_command_name_cad_close_popup, __tauri_command_name_cad_command,
-    __tauri_command_name_cad_commands, __tauri_command_name_cad_open_popup,
-    __tauri_command_name_cad_set_selected_text, __tauri_command_name_cad_set_tool_parameter,
-    __tauri_command_name_cad_set_tool_text, __tauri_command_name_cad_standard_view,
-    __tauri_command_name_cad_status, __tauri_command_name_probe_input,
-    __tauri_command_name_probe_status,
+    __cmd__cad_set_selected_text, __cmd__cad_set_setting, __cmd__cad_set_tool_parameter,
+    __cmd__cad_set_tool_text, __cmd__cad_settings, __cmd__cad_standard_view, __cmd__cad_status,
+    __cmd__probe_input, __cmd__probe_status, __tauri_command_name_cad_close_popup,
+    __tauri_command_name_cad_command, __tauri_command_name_cad_commands,
+    __tauri_command_name_cad_open_popup, __tauri_command_name_cad_set_selected_text,
+    __tauri_command_name_cad_set_setting, __tauri_command_name_cad_set_tool_parameter,
+    __tauri_command_name_cad_set_tool_text, __tauri_command_name_cad_settings,
+    __tauri_command_name_cad_standard_view, __tauri_command_name_cad_status,
+    __tauri_command_name_probe_input, __tauri_command_name_probe_status,
 };
 pub use presenter::{
     close_presenter, force_realize, force_unrealize, release_presenter, request_stop,
@@ -204,6 +206,16 @@ pub struct Shared {
     /// separate from `shell.cad_commands` (name-only), because the router refuses
     /// a payload-carrying variant on that funnel.
     pub cad_standard_views: VecDeque<cad_app::StandardView>,
+    /// Bounded main-thread queue of typed settings writes: admitted by the
+    /// dedicated `cad_set_setting` IPC and drained by the owner tick into
+    /// `CadSession::apply_setting`, which validates, persists and applies the
+    /// change. Ungated by the modal popup gate (the Options dialog writes from
+    /// its own window).
+    pub cad_setting_writes: VecDeque<(CadSettingKey, CadSettingValue)>,
+    /// Latest effective settings snapshot mirrored from the owner-thread
+    /// session, so the worker-thread `cad_settings` IPC read never touches the
+    /// `!Send` session.
+    pub cad_settings: Option<CadSettings>,
 }
 
 /// Managed Tauri state: a shared handle to [`Shared`].
@@ -238,6 +250,8 @@ pub fn new_shared(launch: LaunchOptions) -> Arc<Mutex<Shared>> {
         cad_tool_texts: Vec::new(),
         cad_selected_texts: Vec::new(),
         cad_standard_views: VecDeque::new(),
+        cad_setting_writes: VecDeque::new(),
+        cad_settings: None,
     }))
 }
 

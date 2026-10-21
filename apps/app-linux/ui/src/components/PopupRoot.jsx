@@ -82,6 +82,9 @@ function UnknownDialog({ kind, onClose, failure }) {
 }
 
 export function PopupRoot({ boot }) {
+  // `initialLocale` reads the host-injected `window.__YACR_HOST_LOCALE__` (this
+  // popup window is loaded with the same value as the main window), so the
+  // dialog's chrome language cannot diverge from the native labels and title.
   const [locale] = useState(initialLocale);
   const [failure, setFailure] = useState('');
   const t = useMemo(() => createTranslator(CATALOGS, locale), [locale]);

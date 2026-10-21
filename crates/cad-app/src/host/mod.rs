@@ -15,7 +15,7 @@ use cad_import_acadrust::export::{
     export, ExportFormat, ExportLimits, ExportReport, ExportRequest, ExportSpace,
 };
 use cad_import_acadrust::{
-    AcadrustImporter, ImportLimits, ImportReport, ImportRequest, ImportedDrawing, Importer,
+    AcadrustImporter, ImportLimits, ImportRequest, ImportedDrawing, Importer,
 };
 use cad_measure::{MeasurementEngine, SnapCandidate, SnapTarget};
 
@@ -27,10 +27,16 @@ mod databases;
 mod draw_create;
 mod draw_intent_map;
 mod draw_pick;
+mod properties;
 
 #[cfg(test)]
 mod tests;
 
+/// The import report type carried by [`HostController::last_import_report`].
+///
+/// Re-exported so host-side code and contract tests can name the report they
+/// read (the type itself lives in the importer and is unchanged here).
+pub use cad_import_acadrust::ImportReport;
 pub use databases::{
     blank_database, demo_database, snap_candidates_near, snap_candidates_near_uncached,
 };

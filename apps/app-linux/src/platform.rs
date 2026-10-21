@@ -44,8 +44,8 @@ const KEY_OPEN_PATH: &str = "linux.open_path";
 
 /// The localized labels the native open dialog and open funnel use.
 ///
-/// Built from the embedded UI catalogue; [`Self::from_locale`] selects English
-/// only for an `en`-prefixed locale and defaults to `zh-CN`.
+/// Built from the embedded UI catalogue; [`Self::from_locale`] selects the
+/// shipped locale for the request and falls back to English for anything else.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UseOpenDialogLabels {
     pub picker_title: String,
@@ -59,7 +59,7 @@ pub struct UseOpenDialogLabels {
 
 impl UseOpenDialogLabels {
     /// Labels for `locale`, resolved through the shared catalog. An unknown
-    /// locale falls back to `zh-CN` (with a recorded reason) rather than showing
+    /// locale falls back to English (with a recorded reason) rather than showing
     /// a wrong language.
     pub fn from_locale(locale: &str) -> CadResult<Self> {
         let source = MessageSource::from_request(locale);
@@ -508,7 +508,7 @@ mod tests {
         let en = UseOpenDialogLabels::from_locale("en").unwrap();
         let other = UseOpenDialogLabels::from_locale("fr").unwrap();
         assert_ne!(zh.picker_title, en.picker_title);
-        assert_eq!(other, zh, "unknown locale defaults to zh-CN");
+        assert_eq!(other, en, "unknown locale defaults to English");
         assert!(zh.picker_title.contains('打') || zh.picker_title.contains('开'));
         assert!(en.picker_title.contains("Open"));
         assert!(zh.picker_failed("boom").contains("boom"));

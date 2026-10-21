@@ -189,6 +189,8 @@ impl ProxyRecordDecoder for KnownOpcodeDecoder {
                     font: None,
                     h_align: TextAlignH::Left,
                     v_align: TextAlignV::Baseline,
+                    // Proxy text records carry no width boundary.
+                    wrap_width: None,
                 }])
             }
             other => Err(CadError::Unsupported(format!(

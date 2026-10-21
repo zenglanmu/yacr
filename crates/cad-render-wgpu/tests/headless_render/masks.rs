@@ -330,3 +330,35 @@ fn inverted_concave_mask_keeps_the_bars_and_wipes_the_notch() {
         }
     }
 }
+
+/// A non-default clear colour is a real frame input: the attachment clears to it
+/// **and** the wipeout mask paints the same colour, so a configured background
+/// never shows a black patch under a mask.
+///
+/// The value is the linear channel a caller supplies, and the target is
+/// `Rgba8UnormSrgb`, so `0.2158` linear reads back as display mid grey (`128`),
+/// which is exactly what `HexColor::to_linear_rgba("#808080")` supplies.
+#[test]
+fn a_configured_background_paints_the_clear_and_the_mask() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer
+        .upload(&mask_scene(Vec::new(), vec![mask(mask_rectangle())]))
+        .expect("upload mask");
+    let target = RenderTarget::new(64, 64).with_clear_color([0.2158, 0.2158, 0.2158, 1.0]);
+    renderer.render(camera_2d(), &target).expect("render frame");
+    let image = renderer.read_target_rgba().expect("read back frame");
+    let background = image.pixel(0, 0);
+    assert_eq!(
+        background,
+        [128, 128, 128, 255],
+        "the configured background is the frame's clear colour"
+    );
+    assert_eq!(
+        image.pixel(32, 32),
+        background,
+        "the wipeout mask paints the same configured background"
+    );
+}

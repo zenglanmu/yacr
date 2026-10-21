@@ -389,6 +389,7 @@ fn picture_branch_freezes_measurement_and_text_under_uniform_scale() {
             font: None,
             h_align: TextAlignH::Center,
             v_align: TextAlignV::Middle,
+            wrap_width: None,
         },
     ];
     let geometry = DimensionGeometry::from_picture(

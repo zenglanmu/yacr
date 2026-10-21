@@ -21,6 +21,7 @@ pub mod interaction;
 pub mod layers;
 pub mod measure_tool;
 pub mod picking;
+pub mod property_value;
 pub mod recovery;
 pub mod render_scene;
 mod select_all;
@@ -61,7 +62,10 @@ pub use picking::{
     pick_ray_exhaustive, pick_ray_with_index, pick_tolerance, PickIndex, PickStats,
 };
 pub use recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
-pub use selection::{entity_property_rows, PropertyRow, SelectionProperties, SelectionSet};
+pub use selection::{
+    entity_property_rows, enum_options, property_row_editable, PropertyGroup, PropertyKind,
+    PropertyRow, SelectionProperties, SelectionSet, MAX_ENUM_OPTIONS,
+};
 pub use space::*;
 pub use tasks::{
     import_phase_key, AsyncOpenPoll, ImportJob, ImportManager, ImportProgressSnapshot,
@@ -659,6 +663,28 @@ pub enum CommandPayload {
     TextEdit {
         target: SelectionRef,
         text: String,
+    },
+    /// `SETENTITYPROPERTY`: write one property value to **every** currently
+    /// selected entity (the properties panel's typed edit surface).
+    ///
+    /// `key` is one of [`crate::property_value::SUPPORTED_KEYS`] (`layer`,
+    /// `color`, `linetype`, `lineweight`, `transparency`); `value` follows that
+    /// key's documented grammar ([`crate::property_value`]). `text` is
+    /// deliberately **not** accepted here — it has its own `TEXTEDIT` path with
+    /// its own newline policy.
+    ///
+    /// The selection itself travels in neither payload field: the command reads
+    /// the session's current selection at apply time, so a stale UI cannot
+    /// retarget another object. Every selected ref must be directly addressable
+    /// (no instance path, no sub-element); one that is not refuses the whole
+    /// command with `property.not_addressable`, and a bad value refuses before
+    /// anything is staged. The whole selection is written in **one transaction
+    /// / one undo step**; entities that already hold the value are not staged,
+    /// and if no entity changes the command records no undo entry at all
+    /// (`property.unchanged`).
+    EntityProperty {
+        key: String,
+        value: String,
     },
 }
 

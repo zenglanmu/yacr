@@ -387,7 +387,7 @@ fn a_synthesized_click_selects_the_picked_entity_and_feeds_the_overlay_flags_pat
         .iter()
         .find(|row| row.key == "id")
         .expect("a single selection reports its identity rows");
-    assert_eq!(id_row.value, expected.entity.0.to_string());
+    assert_eq!(id_row.value, Some(expected.entity.0.to_string()));
 }
 
 #[test]
@@ -532,7 +532,8 @@ fn cad_status_selection_block_is_always_present_and_honest() {
         "a single selection has no mixed keys"
     );
 
-    // Multi: a count plus the mixed machine keys, never rows.
+    // Multi: the intersection of the row keys, with mixed markers where the
+    // values differ and `mixedKeys` derived from exactly those rows.
     session
         .core
         .controller
@@ -543,10 +544,27 @@ fn cad_status_selection_block_is_always_present_and_honest() {
     let multi = session.snapshot(None, None, 0).selection;
     assert_eq!(multi.count, 2);
     assert!(!multi.empty);
-    assert!(multi.rows.is_empty(), "a multi-selection carries no rows");
     assert!(
-        !multi.mixed_keys.is_empty(),
-        "two different entities must report mixed keys"
+        !multi.rows.is_empty(),
+        "a multi-selection lists its common properties"
+    );
+    assert!(
+        multi
+            .rows
+            .iter()
+            .all(|row| row.value.is_none() == row.mixed),
+        "a row has a value exactly when it is not mixed: {:?}",
+        multi.rows
+    );
+    let mixed_keys: Vec<String> = multi
+        .rows
+        .iter()
+        .filter(|row| row.mixed)
+        .map(|row| row.key.clone())
+        .collect();
+    assert_eq!(
+        multi.mixed_keys, mixed_keys,
+        "mixedKeys must equal the keys of the mixed rows"
     );
     assert!(
         multi.mixed_keys.iter().any(|key| key == "id"),
@@ -594,7 +612,7 @@ fn cad_status_selection_block_does_not_fabricate_rows_for_a_foreign_ref() {
         vec!["id", "status"],
         "an unresolvable ref reports identity + status only"
     );
-    assert_eq!(selection.rows[1].value, "unresolved");
+    assert_eq!(selection.rows[1].value.as_deref(), Some("unresolved"));
     for fabricated in ["type", "layer", "length", "radius", "start"] {
         assert!(
             !keys.contains(&fabricated),
@@ -660,4 +678,56 @@ fn a_missing_property_source_never_hides_a_real_selection_behind_a_zero() {
         "no property row may be invented without a property source"
     );
     assert!(status.selection.mixed_keys.is_empty());
+}
+
+#[test]
+fn multi_selection_wire_rows_carry_group_kind_editable_and_options() {
+    let mut layer = cad_app::PropertyRow::new("layer", "WALLS (1)");
+    layer.editable = true;
+    layer.options = vec!["0".to_string(), "WALLS".to_string()];
+    let properties = cad_app::SelectionProperties {
+        count: 2,
+        rows: vec![cad_app::PropertyRow::mixed("id"), layer],
+        mixed_keys: vec!["id"],
+        text: None,
+        text_multiline: false,
+        empty: false,
+    };
+
+    let selection = CadSelection::from_properties(&properties);
+    assert_eq!(selection.count, 2);
+    assert_eq!(selection.rows.len(), 2);
+
+    let id = &selection.rows[0];
+    assert_eq!(id.key, "id");
+    assert_eq!(
+        id.value, None,
+        "a mixed value is null, never an empty string"
+    );
+    assert!(id.mixed);
+    assert_eq!(id.group, "entity");
+    assert_eq!(id.kind, "text");
+    assert!(!id.editable && id.options.is_empty());
+
+    let layer = &selection.rows[1];
+    assert_eq!(layer.value.as_deref(), Some("WALLS (1)"));
+    assert!(!layer.mixed);
+    assert!(layer.editable);
+    assert_eq!(layer.group, "entity");
+    assert_eq!(layer.kind, "enum");
+    assert_eq!(
+        layer.options,
+        vec!["0".to_string(), "WALLS".to_string()],
+        "options are the real table names"
+    );
+
+    // One source of truth: `mixedKeys` is the keys of the mixed rows.
+    let derived: Vec<String> = selection
+        .rows
+        .iter()
+        .filter(|row| row.mixed)
+        .map(|row| row.key.clone())
+        .collect();
+    assert_eq!(selection.mixed_keys, derived);
+    assert_eq!(selection.mixed_keys, vec!["id".to_string()]);
 }

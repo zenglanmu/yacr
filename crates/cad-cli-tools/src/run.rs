@@ -35,6 +35,7 @@ pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
                         &invocation.fonts,
                         &fonts_requested(&controller),
                         drawing_needs_text(&controller),
+                        drawing_locale(&controller),
                     ))?;
                     domain(run_benchmark(&controller, invocation, fonts.as_ref()))?
                 }
@@ -56,7 +57,12 @@ pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
             // system-default face. Otherwise every text run is shaped into line
             // geometry and `kind_counts.texts` is always 0, making the report
             // depend on the host's installed fonts.
-            let fonts = domain(load_fonts(&invocation.fonts, &[], false))?;
+            let fonts = domain(load_fonts(
+                &invocation.fonts,
+                &[],
+                false,
+                cad_platform::fonts::TextLocale::Latin,
+            ))?;
             domain(run_build_representation(&controller, fonts.as_ref()))?
         }
         CliOperation::Benchmark => unreachable!(),

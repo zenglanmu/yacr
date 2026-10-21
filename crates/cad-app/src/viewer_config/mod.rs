@@ -19,6 +19,7 @@ use std::rc::Rc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+mod colour;
 mod commands;
 mod error;
 mod merge;
@@ -28,7 +29,10 @@ mod store;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_display;
 
+pub use colour::*;
 pub use commands::*;
 pub use error::*;
 pub use presentation::*;

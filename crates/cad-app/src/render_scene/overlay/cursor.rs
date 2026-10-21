@@ -7,13 +7,15 @@
 //! previews use. It never writes the database, the revision or the history: a
 //! moved cursor simply republishes the overlay inputs.
 //!
-//! The crosshair spans the whole viewport through the cursor as two world-space
-//! lines (derived from [`OverlayInputs::viewport_bounds`]). The pickbox is a
-//! square centred on the cursor whose **half-side** equals the pick tolerance
-//! ([`cad_domain::TolerancePolicy::pickbox_logical_pixels`] logical pixels, the
-//! AutoCAD `PICKBOX` analogue this project's click predicate uses) converted to
-//! world units by the current view scale, so the box circumscribes the region a
-//! click can actually hit.
+//! The crosshair spans the view through the cursor as two world-space lines
+//! (derived from [`OverlayInputs::viewport_bounds`]): each arm is a configured
+//! percentage of its cursor-to-edge span, so the default 100 % is the historical
+//! full-viewport crosshair and a smaller value draws a shorter cross. The pickbox
+//! is a square centred on the cursor whose **half-side** equals the pick
+//! tolerance ([`cad_domain::TolerancePolicy::pickbox_logical_pixels`] logical
+//! pixels, the AutoCAD `PICKBOX` analogue this project's click predicate uses)
+//! converted to world units by the current view scale, so the box circumscribes
+//! the region a click can actually hit. The crosshair size never changes it.
 //!
 //! The whole overlay is one bounded `Lines` batch: two full-extent crosshair
 //! segments (four vertices) plus, when the view scale is usable, four closed
@@ -45,6 +47,10 @@ pub const CURSOR_DRAW_ORDER: i64 = 2_500_000;
 /// box-selection band.
 pub const CURSOR_COLOR: [f32; 3] = [0.72, 0.75, 0.80];
 
+/// The crosshair percentage that reproduces the historical full-viewport
+/// crosshair: every arm reaches its view rectangle edge.
+pub const DEFAULT_CROSSHAIR_PERCENT: u32 = 100;
+
 /// Build the pointer cursor overlay for `cursor`.
 ///
 /// `viewport_bounds` is the exact world-space view rectangle (the same input the
@@ -54,10 +60,14 @@ pub const CURSOR_COLOR: [f32; 3] = [0.72, 0.75, 0.80];
 /// overlay, never a fabricated one. A degenerate view scale still draws the
 /// crosshair but omits the pickbox, since a screen-relative pickbox size has no
 /// domain.
+///
+/// `crosshair_percent` sizes the crosshair (see [`crosshair_arms`]); the
+/// pickbox is the click tolerance and is deliberately independent of it.
 pub fn cursor_overlay(
     cursor: Option<Point3>,
     viewport_bounds: Option<(Point3, Point3)>,
     view_scale: Option<f64>,
+    crosshair_percent: u32,
     document: DocumentId,
 ) -> VisualOverlay {
     let mut out = VisualOverlay::default();
@@ -74,26 +84,29 @@ pub fn cursor_overlay(
         return out;
     }
     let mut points: Vec<Point3> = Vec::with_capacity(12);
-    // Crosshair: two full-extent lines through the cursor. `Lines` topology pairs
-    // consecutive vertices, so each line is one explicit pair.
+    // Crosshair: two lines through the cursor whose arms are the configured
+    // percentage of the cursor-to-edge span. `Lines` topology pairs consecutive
+    // vertices, so each line is one explicit pair.
+    let (x0, x1) = crosshair_arms(min.x, cursor.x, max.x, crosshair_percent);
+    let (y0, y1) = crosshair_arms(min.y, cursor.y, max.y, crosshair_percent);
     points.push(Point3 {
-        x: min.x,
+        x: x0,
         y: cursor.y,
         z: cursor.z,
     });
     points.push(Point3 {
-        x: max.x,
+        x: x1,
         y: cursor.y,
         z: cursor.z,
     });
     points.push(Point3 {
         x: cursor.x,
-        y: min.y,
+        y: y0,
         z: cursor.z,
     });
     points.push(Point3 {
         x: cursor.x,
-        y: max.y,
+        y: y1,
         z: cursor.z,
     });
     if let Some(half) = pickbox_half_side(view_scale) {
@@ -122,6 +135,31 @@ pub fn cursor_overlay(
         out.batches.push(batch);
     }
     out
+}
+
+/// The two ends of the horizontal (or vertical) crosshair line through `cursor`.
+///
+/// Each arm is `percent` per cent of its own full cursor-to-edge span, so the
+/// two arms are symmetric about the cursor only when the cursor is centred —
+/// which is exactly what keeps `100` identical to the historical
+/// full-viewport line (`min..max`, returned verbatim, not a recomputed
+/// near-equal).
+///
+/// The percentage is authoritative on the configuration side: the schema
+/// (`view.crosshair.sizePercent`) and the host's closed settings table reject
+/// values outside `1..=100` instead of clamping. This pure geometry helper still
+/// floors/ceils a direct caller so it can never emit a zero-length or inverted
+/// line; that defence is not a configuration policy.
+fn crosshair_arms(min: f64, cursor: f64, max: f64, percent: u32) -> (f64, f64) {
+    let percent = percent.clamp(1, 100);
+    if percent == 100 {
+        return (min, max);
+    }
+    let factor = f64::from(percent) / 100.0;
+    (
+        cursor + (min - cursor) * factor,
+        cursor + (max - cursor) * factor,
+    )
 }
 
 /// The pickbox half-side in world units, or `None` when the scale is degenerate.
@@ -172,7 +210,7 @@ mod tests {
 
     #[test]
     fn cursor_overlay_draws_one_crosshair_and_pickbox_batch() {
-        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), DocumentId(1));
+        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), 100, DocumentId(1));
         assert_eq!(overlay.drawn(), 1, "one bounded cursor batch");
         let batch = &overlay.batches[0];
         assert_eq!(batch.topology, RenderTopology::Lines);
@@ -185,7 +223,7 @@ mod tests {
 
     #[test]
     fn the_crosshair_spans_the_view_rectangle_through_the_cursor() {
-        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), DocumentId(1));
+        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), 100, DocumentId(1));
         let batch = &overlay.batches[0];
         let v = |i: usize| {
             [
@@ -202,10 +240,90 @@ mod tests {
     }
 
     #[test]
+    fn a_hundred_percent_crosshair_keeps_the_historical_full_view_extents() {
+        // Pinned: the historical crosshair spanned `min..max` for both axes and
+        // must stay bit-identical at 100 %, independent of the cursor position.
+        for cursor in [p(1.0, 2.0), p(-49.0, 29.0), p(0.0, 0.0)] {
+            let overlay = cursor_overlay(Some(cursor), view(), Some(0.5), 100, DocumentId(1));
+            let batch = &overlay.batches[0];
+            let v = |i: usize| {
+                [
+                    batch.local_origin.x + f64::from(batch.vertices[i][0]),
+                    batch.local_origin.y + f64::from(batch.vertices[i][1]),
+                ]
+            };
+            assert_eq!(v(0), [-50.0, cursor.y]);
+            assert_eq!(v(1), [50.0, cursor.y]);
+            assert_eq!(v(2), [cursor.x, -30.0]);
+            assert_eq!(v(3), [cursor.x, 30.0]);
+        }
+    }
+
+    #[test]
+    fn a_half_crosshair_halves_each_arm_about_the_cursor() {
+        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), 50, DocumentId(1));
+        let batch = &overlay.batches[0];
+        let v = |i: usize| {
+            [
+                batch.local_origin.x + f64::from(batch.vertices[i][0]),
+                batch.local_origin.y + f64::from(batch.vertices[i][1]),
+            ]
+        };
+        // Each arm is half of its cursor-to-edge span: -51..49 becomes
+        // -25.5..24.5 around the cursor's x = 1.
+        assert!((v(0)[0] - -24.5).abs() < 1e-6, "{:?}", v(0));
+        assert!((v(1)[0] - 25.5).abs() < 1e-6, "{:?}", v(1));
+        // -32..28 becomes -16..14 around the cursor's y = 2.
+        assert!((v(2)[1] - -14.0).abs() < 1e-6, "{:?}", v(2));
+        assert!((v(3)[1] - 16.0).abs() < 1e-6, "{:?}", v(3));
+        // The centre is unchanged and the pickbox is untouched.
+        assert!((v(0)[1] - 2.0).abs() < 1e-6 && (v(2)[0] - 1.0).abs() < 1e-6);
+        assert_eq!(batch.vertices.len(), 12);
+    }
+
+    #[test]
+    fn a_one_percent_crosshair_is_a_minimal_centred_cross() {
+        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), 1, DocumentId(1));
+        let batch = &overlay.batches[0];
+        let v = |i: usize| {
+            [
+                batch.local_origin.x + f64::from(batch.vertices[i][0]),
+                batch.local_origin.y + f64::from(batch.vertices[i][1]),
+            ]
+        };
+        assert!((v(0)[0] - 0.49).abs() < 1e-6, "{:?}", v(0));
+        assert!((v(1)[0] - 1.49).abs() < 1e-6, "{:?}", v(1));
+        assert!((v(2)[1] - 1.68).abs() < 1e-6, "{:?}", v(2));
+        assert!((v(3)[1] - 2.28).abs() < 1e-6, "{:?}", v(3));
+        // Still a real cross through the cursor, with the unchanged pickbox.
+        assert!((v(0)[1] - 2.0).abs() < 1e-6 && (v(2)[0] - 1.0).abs() < 1e-6);
+        assert_eq!(batch.vertices.len(), 12);
+    }
+
+    #[test]
+    fn an_out_of_range_percent_is_floored_to_a_visible_cross() {
+        // The configuration/settings layer rejects these; this pure helper only
+        // guarantees it never emits a zero-length or inverted line.
+        for percent in [0, 101, u32::MAX] {
+            let overlay =
+                cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), percent, DocumentId(1));
+            let batch = &overlay.batches[0];
+            let v = |i: usize| {
+                [
+                    batch.local_origin.x + f64::from(batch.vertices[i][0]),
+                    batch.local_origin.y + f64::from(batch.vertices[i][1]),
+                ]
+            };
+            assert!(v(0)[0] < 1.0 && v(1)[0] > 1.0, "{percent}% is a real arm");
+            assert!(v(2)[1] < 2.0 && v(3)[1] > 2.0, "{percent}% is a real arm");
+        }
+    }
+
+    #[test]
     fn the_pickbox_half_side_is_the_pick_tolerance_times_the_scale() {
         let policy = cad_domain::TolerancePolicy::default();
         let scale = 0.5;
-        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(scale), DocumentId(1));
+        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(scale), 100, DocumentId(1));
         let half = pickbox_half_extent(&overlay.batches[0]);
         let expected = policy.pickbox_logical_pixels * scale;
         assert!(
@@ -237,7 +355,7 @@ mod tests {
             Some(f64::NAN),
             Some(f64::INFINITY),
         ] {
-            let overlay = cursor_overlay(Some(p(0.0, 0.0)), view(), scale, DocumentId(1));
+            let overlay = cursor_overlay(Some(p(0.0, 0.0)), view(), scale, 100, DocumentId(1));
             assert_eq!(
                 overlay.drawn(),
                 1,
@@ -254,14 +372,15 @@ mod tests {
     #[test]
     fn cursor_overlay_is_absent_without_a_cursor_or_a_view() {
         // No cursor position: an explicit empty overlay, never a fabricated one.
-        assert!(cursor_overlay(None, view(), Some(0.5), DocumentId(1)).is_empty());
+        assert!(cursor_overlay(None, view(), Some(0.5), 100, DocumentId(1)).is_empty());
         // A 3D view has no planar view rectangle.
-        assert!(cursor_overlay(Some(p(0.0, 0.0)), None, Some(0.5), DocumentId(1)).is_empty());
+        assert!(cursor_overlay(Some(p(0.0, 0.0)), None, Some(0.5), 100, DocumentId(1)).is_empty());
         // A degenerate view rectangle is not a valid view.
         assert!(cursor_overlay(
             Some(p(0.0, 0.0)),
             Some((p(1.0, 0.0), p(1.0, 0.0))),
             Some(0.5),
+            100,
             DocumentId(1)
         )
         .is_empty());
@@ -274,6 +393,7 @@ mod tests {
             }),
             view(),
             Some(0.5),
+            100,
             DocumentId(1)
         )
         .is_empty());

@@ -257,6 +257,7 @@ fn bundled_osifont_sfnt_glyphs_fill_faces_and_preserve_even_odd_holes() {
             0.0,
             TextAlignH::Left,
             TextAlignV::Baseline,
+            None,
         )
         .unwrap();
     assert!(
@@ -320,6 +321,7 @@ fn bundled_osifont_sfnt_glyphs_fill_faces_and_preserve_even_odd_holes() {
             0.0,
             TextAlignH::Center,
             TextAlignV::Middle,
+            None,
         )
         .unwrap();
     assert!(
@@ -432,6 +434,7 @@ fn outlines_a_real_shx_when_provided() {
             0.0,
             TextAlignH::Left,
             TextAlignV::Baseline,
+            None,
         )
         .unwrap();
     let polys = shaped.polylines;
@@ -605,7 +608,7 @@ fn alignment_shifts_the_run_relative_to_its_anchor() {
 /// Deterministic font-independent glyph metrics: each non-space character
 /// is a rectangle `0.5 * height` wide and `height` tall, advancing by its
 /// width. Lets the layout tests assert advances/shear without a font.
-fn mock_measure(run: &TextRun, text: &str) -> Option<(Vec<Vec<[f64; 2]>>, f64)> {
+pub(super) fn mock_measure(run: &TextRun, text: &str) -> Option<(Vec<Vec<[f64; 2]>>, f64)> {
     let height = run.effective_height(1.0);
     let mut polys = Vec::new();
     let mut x = 0.0f64;
@@ -739,7 +742,7 @@ fn parse_mtext_keeps_stacked_fractions_structured_but_flat() {
 fn layout_applies_width_factor_and_oblique_to_advances_and_glyphs() {
     // Width factor scales both the glyph x and the line advance.
     let narrow = parse_mtext("\\W0.5;AB", 10.0);
-    let lines = layout_parsed(&narrow, 10.0, mock_measure);
+    let lines = layout_parsed(&narrow, 10.0, None, mock_measure);
     assert!(
         (lines[0].width - 5.0).abs() < 1e-9,
         "width {}",
@@ -755,7 +758,7 @@ fn layout_applies_width_factor_and_oblique_to_advances_and_glyphs() {
 
     // Oblique shears glyph x by y*tan(angle); the baseline stays put.
     let oblique = parse_mtext("\\Q45;A", 10.0);
-    let lines = layout_parsed(&oblique, 10.0, mock_measure);
+    let lines = layout_parsed(&oblique, 10.0, None, mock_measure);
     let max_x = lines[0]
         .polys
         .iter()
@@ -777,7 +780,7 @@ fn layout_applies_width_factor_and_oblique_to_advances_and_glyphs() {
 #[test]
 fn layout_counts_lines_and_advances_them_by_line_spacing() {
     let parsed = parse_mtext("AB\\PCDE", 10.0);
-    let lines = layout_parsed(&parsed, 10.0, mock_measure);
+    let lines = layout_parsed(&parsed, 10.0, None, mock_measure);
     assert_eq!(lines.len(), 2);
     assert!((lines[0].width - 10.0).abs() < 1e-9, "{}", lines[0].width);
     assert!((lines[1].width - 15.0).abs() < 1e-9, "{}", lines[1].width);
@@ -805,7 +808,7 @@ fn layout_counts_lines_and_advances_them_by_line_spacing() {
 fn layout_applies_per_run_height_to_line_spacing() {
     // A taller run on line 0 pushes line 1 down by the taller height.
     let parsed = parse_mtext("{\\H2x;Big}\\Psmall", 10.0);
-    let lines = layout_parsed(&parsed, 10.0, mock_measure);
+    let lines = layout_parsed(&parsed, 10.0, None, mock_measure);
     assert!((lines[0].height - 20.0).abs() < 1e-9);
     assert!((lines[1].height - 10.0).abs() < 1e-9);
     let out = finalize_lines(
@@ -845,6 +848,7 @@ fn shapes_mtext_runs_and_reports_approximations_when_font_provided() {
             0.0,
             TextAlignH::Left,
             TextAlignV::Baseline,
+            None,
         )
         .unwrap();
     // Two paragraphs plus a stacked-fraction run.
@@ -879,6 +883,7 @@ fn shapes_mtext_runs_and_reports_approximations_when_font_provided() {
             0.0,
             TextAlignH::Left,
             TextAlignV::Baseline,
+            None,
         )
         .unwrap();
     let plain = engine

@@ -1,0 +1,150 @@
+use super::super::*;
+use super::test_support::*;
+
+fn plain_session() -> CadSession {
+    session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }))
+}
+
+#[test]
+fn session_settings_report_the_effective_defaults() {
+    let session = plain_session();
+    let settings = session.settings();
+    assert!(!settings.grid);
+    assert!(settings.axes);
+    assert!(settings.selection_highlight);
+    assert!(settings.snap_hints);
+    assert_eq!(settings.plot_format, "svg");
+    assert!(settings.snap_enabled);
+    assert!(settings.hover_preview);
+    assert_eq!(settings.background_model, "#000000");
+    assert_eq!(settings.background_paper, "#000000");
+    assert_eq!(settings.crosshair_percent, 100);
+    assert_eq!(settings.fonts_dir, None);
+}
+
+#[test]
+fn session_apply_setting_reports_new_values_and_changes_the_live_state() {
+    let session = plain_session();
+
+    let settings = session
+        .apply_setting(CadSettingKey::Grid, CadSettingValue::Bool(true))
+        .expect("an allowed overlay write");
+    assert!(settings.grid);
+    assert!(
+        session.render_session().overlays().visibility.grid,
+        "the render input the host draws from carries the new value"
+    );
+
+    let settings = session
+        .apply_setting(CadSettingKey::SnapEnabled, CadSettingValue::Bool(false))
+        .expect("an allowed interaction write");
+    assert!(!settings.snap_enabled);
+    assert!(!session.snapshot(None, None, 0).snap_enabled);
+
+    let settings = session
+        .apply_setting(
+            CadSettingKey::PlotFormat,
+            CadSettingValue::Text("pdf".to_string()),
+        )
+        .expect("the second supported vector format");
+    assert_eq!(settings.plot_format, "pdf");
+}
+
+#[test]
+fn session_rejects_bad_values_with_stable_codes() {
+    let session = plain_session();
+    let error = session
+        .apply_setting(
+            CadSettingKey::PlotFormat,
+            CadSettingValue::Text("png".to_string()),
+        )
+        .unwrap_err();
+    assert_eq!(error, SETTINGS_INVALID_PLOT_FORMAT);
+
+    let error = session
+        .apply_setting(CadSettingKey::Grid, CadSettingValue::Text("on".to_string()))
+        .unwrap_err();
+    assert_eq!(error, SETTINGS_INVALID_VALUE);
+
+    // The display options use the same stable refusal code, and an out-of-range
+    // percentage is refused rather than clamped.
+    for value in ["red", "#abc", ""] {
+        let error = session
+            .apply_setting(
+                CadSettingKey::BackgroundModel,
+                CadSettingValue::Text(value.to_string()),
+            )
+            .unwrap_err();
+        assert_eq!(error, SETTINGS_INVALID_VALUE);
+    }
+    for percent in [0, 101] {
+        let error = session
+            .apply_setting(
+                CadSettingKey::CrosshairSize,
+                CadSettingValue::Number(percent),
+            )
+            .unwrap_err();
+        assert_eq!(error, SETTINGS_INVALID_VALUE);
+    }
+
+    // Nothing changed: the rejected writes never reached the store.
+    let settings = session.settings();
+    assert!(!settings.grid);
+    assert_eq!(settings.plot_format, "svg");
+    assert_eq!(settings.background_model, "#000000");
+    assert_eq!(settings.crosshair_percent, 100);
+}
+
+#[test]
+fn session_display_settings_reach_the_live_render_inputs() {
+    let session = plain_session();
+
+    let settings = session
+        .apply_setting(
+            CadSettingKey::BackgroundModel,
+            CadSettingValue::Text("#102030".to_string()),
+        )
+        .expect("a valid model background");
+    assert_eq!(settings.background_model, "#102030");
+    assert_eq!(
+        session.render_session().view_snapshot().clear_color,
+        cad_app::viewer_config::HexColor::parse("#102030")
+            .expect("valid hex")
+            .to_linear_rgba(),
+        "the frame input the renderer consumes carries the new background"
+    );
+
+    let settings = session
+        .apply_setting(CadSettingKey::CrosshairSize, CadSettingValue::Number(30))
+        .expect("an in-range crosshair size");
+    assert_eq!(settings.crosshair_percent, 30);
+    assert_eq!(
+        session.render_session().overlays().crosshair_percent,
+        30,
+        "the overlay input the cursor builder consumes carries the new size"
+    );
+}
+
+#[test]
+fn session_startup_preference_seeds_status_and_interaction() {
+    let session = session_with_config(Rc::new(StaticConfig::preference(
+        r#"{"interaction":{"snapEnabled":false,"hoverPreview":false}}"#,
+    )));
+    let status = session.snapshot(None, None, 0);
+    assert!(!status.snap_enabled);
+    assert!(!status.hover_preview);
+    let settings = session.settings();
+    assert!(!settings.snap_enabled && !settings.hover_preview);
+}
+
+#[test]
+fn session_unknown_keys_are_outside_the_closed_table() {
+    assert_eq!(CadSettingKey::parse("bogus"), None);
+    assert_eq!(CadSettingKey::parse("view.overlays.grid"), None);
+    for key in CadSettingKey::ALL {
+        assert_eq!(CadSettingKey::parse(key.key()), Some(key));
+    }
+    assert_eq!(SETTINGS_UNKNOWN_KEY, "settings.unknown_key");
+}

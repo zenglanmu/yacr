@@ -49,6 +49,7 @@ use cad_platform::{
     SurfaceMetrics, SurfaceSource,
 };
 
+mod command_log;
 mod core;
 mod fonts;
 mod input;
@@ -56,7 +57,16 @@ mod open;
 mod p4;
 pub mod policy;
 mod save;
+mod settings;
 mod state;
+
+pub use command_log::{
+    CommandLogEntry, CommandLogKind, CommandLogMeasurement, COMMAND_LOG_CAPACITY,
+};
+pub use settings::{
+    CadSettingKey, CadSettingValue, HostSettings, SETTINGS_INVALID_PLOT_FORMAT,
+    SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
+};
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -71,11 +81,27 @@ pub use core::{HostCore, HostOptions, HostPlatform};
 pub use fonts::DesktopResources;
 pub use fonts::{HostResources, UnsupportedResources};
 
-/// Host policy mirroring the web host: users may toggle the two dock panels'
-/// initial-open flags. A host `config.json` replaces this policy wholesale.
+/// Host policy mirroring the web host: users may persist the two dock panels'
+/// initial-open flags and the Options-dialog settings that have real behavioural
+/// backing (overlay visibility, the plot default, the two interaction switches,
+/// the model/paper backgrounds and the crosshair size). A host `config.json`
+/// replaces this policy wholesale.
+///
+/// The settings leaves are listed individually (never a `view.overlays` prefix)
+/// so no other configuration field becomes user-writable by inheritance.
 pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowedPaths":[
     "ui.components.layerPanel.initiallyOpen",
-    "ui.components.propertiesPanel.initiallyOpen"
+    "ui.components.propertiesPanel.initiallyOpen",
+    "view.overlays.grid",
+    "view.overlays.axes",
+    "view.overlays.selectionHighlight",
+    "view.overlays.snapHints",
+    "view.background.model",
+    "view.background.paper",
+    "view.crosshair.sizePercent",
+    "ui.export.plotFormat",
+    "interaction.snapEnabled",
+    "interaction.hoverPreview"
 ]}}}"#;
 
 /// A user-facing rendering of a command error.
@@ -189,6 +215,7 @@ impl HostCore {
             last_selection: Rc::new(RefCell::new(Vec::new())),
             selection_revision: Rc::new(Cell::new(0)),
             last_tool_generation: Rc::new(Cell::new(0)),
+            command_log: Rc::new(RefCell::new(crate::command_log::CommandLog::default())),
         })
     }
 
@@ -286,6 +313,31 @@ impl HostCore {
         self.clear_hover();
     }
 
+    /// Record an admitted selector in the typed command echo.
+    ///
+    /// The UI layer owns the selector vocabulary (and `DIST`/`AREA`/zoom steps
+    /// carry no `CommandId`), so it records the stable name at admission. This
+    /// is observational only: it never admits, refuses or reorders anything.
+    pub fn record_command(&self, name: &str) {
+        self.command_log.borrow_mut().push_command(name);
+    }
+
+    /// The retained command echo, oldest first (at most
+    /// [`COMMAND_LOG_CAPACITY`] entries).
+    pub fn command_log_entries(&self) -> Vec<CommandLogEntry> {
+        self.command_log.borrow().entries().cloned().collect()
+    }
+
+    pub(crate) fn record_command_result(&self, record: &cad_db::MeasurementRecord) {
+        self.command_log.borrow_mut().push_result(record);
+    }
+
+    pub(crate) fn record_command_error(&self, error: &CadError) {
+        self.command_log
+            .borrow_mut()
+            .push_error(command_log::error_code(error));
+    }
+
     /// Record the authoritative document and bump the host document epoch iff it
     /// was actually replaced.
     ///
@@ -310,6 +362,13 @@ impl HostCore {
                 .set(self.document_epoch.get().saturating_add(1));
             *self.last_document.borrow_mut() = current;
             self.clear_gestures();
+            // The command echo belongs to one drawing: a verified replacement
+            // (open/new) clears it so no entry from another drawing survives.
+            // The sequence counter is kept monotonic across the clear.
+            self.command_log.borrow_mut().clear();
+            // A replacement rebuilds `SessionState`; re-apply the persisted
+            // interaction defaults so an Options choice survives open/new.
+            self.seed_session_interaction();
         }
     }
 
@@ -586,6 +645,18 @@ impl HostCore {
                 traced.result.map(Some)
             }
         };
+        // Typed command echo (observational only): a real measurement result is
+        // echoed as a `Result` entry; a refusal as an `Error` entry carrying only
+        // the stable code. The `Diagnostic::message` strings are never copied.
+        match &result {
+            Ok(Some(outcome)) => {
+                if let Some(record) = &outcome.measurement {
+                    self.record_command_result(record);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => self.record_command_error(error),
+        }
         let open_graded = self.open_status_graded.replace(false);
         // A mode/space switch, or a document content change, invalidates the
         // pending capture candidate/picks even though no cursor move happened:
@@ -757,6 +828,11 @@ impl HostCore {
                 diagnostics.push(format!("preferences {path} unreadable: {reason}"));
             }
         }
+
+        // The loaded preference must actually seed the live session, not just
+        // sit in the config store: `CadStatus.snap_enabled`/`hover_preview` read
+        // `SessionState`, whose constructor defaults both switches on.
+        self.seed_session_interaction();
 
         *self.startup_diagnostics.borrow_mut() = diagnostics.clone();
         diagnostics

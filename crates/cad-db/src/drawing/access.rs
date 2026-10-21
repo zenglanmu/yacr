@@ -52,6 +52,15 @@ impl DrawingDatabase {
         self.revision
     }
 
+    /// The source drawing's declared text code page, if it declared one.
+    ///
+    /// `None` means the drawing did not declare a code page; callers must treat
+    /// the text locale as unknown (the platform maps it to its Latin default),
+    /// never as an implied Chinese/Japanese/Korean page.
+    pub fn code_page(&self) -> Option<&str> {
+        self.code_page.as_deref()
+    }
+
     /// Content identity used to decide whether a render/scene cache is stale.
     ///
     /// A bare `DatabaseId` is not enough: hosts may reuse the same id for a

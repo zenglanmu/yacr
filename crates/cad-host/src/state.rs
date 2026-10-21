@@ -21,6 +21,30 @@ impl HostCore {
                 .viewports
                 .get(&c.viewport_id)
                 .ok_or(CadError::Cancelled)?;
+            let space = match &c.session.active_space {
+                SpaceId::Model => cad_representation::SpaceSelection::Model,
+                SpaceId::Paper(id) => cad_representation::SpaceSelection::Paper(*id),
+                SpaceId::Block(_) => {
+                    return Err(CadError::InvalidInput(
+                        "block space cannot be displayed directly".into(),
+                    ))
+                }
+            };
+            // The frame's background: the active space's configured colour, as
+            // the renderer's linear channels. Model and paper really are
+            // distinguishable here because the clear is per frame and this
+            // snapshot names the frame's space.
+            let clear_color = self
+                .viewer_config
+                .borrow()
+                .effective()
+                .view
+                .background
+                .resolve(matches!(
+                    space,
+                    cad_representation::SpaceSelection::Paper(_)
+                ))
+                .to_linear_rgba();
             let view = ViewSnapshot {
                 document: c.document_id,
                 camera: viewport.camera,
@@ -28,16 +52,9 @@ impl HostCore {
                 // with an orthographic camera must stay `ThreeD`, so this never
                 // guesses from the camera's projection variant.
                 mode: viewport.view_mode.kind(),
-                space: match &c.session.active_space {
-                    SpaceId::Model => cad_representation::SpaceSelection::Model,
-                    SpaceId::Paper(id) => cad_representation::SpaceSelection::Paper(*id),
-                    SpaceId::Block(_) => {
-                        return Err(CadError::InvalidInput(
-                            "block space cannot be displayed directly".into(),
-                        ))
-                    }
-                },
+                space,
                 canvas_size: viewport.logical_size,
+                clear_color,
             };
             // The pointer-cursor overlay input: the cursor's world point on the
             // work plane plus the view scale (world units per logical pixel),
@@ -139,6 +156,13 @@ impl HostCore {
             // view, and the cursor's world point.
             view_scale,
             cursor,
+            crosshair_percent: self
+                .viewer_config
+                .borrow()
+                .effective()
+                .view
+                .crosshair
+                .size_percent,
         };
         self.render.set_overlays(overlays);
         let _ = self.render.request_preparation()?;

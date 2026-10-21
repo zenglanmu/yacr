@@ -24,6 +24,7 @@ impl Renderer {
         view: &wgpu::TextureView,
         depth_view: &wgpu::TextureView,
         clear: bool,
+        clear_color: [f32; 4],
         use_pulled: bool,
         opaque: &[usize],
         transparent: &[usize],
@@ -46,6 +47,15 @@ impl Renderer {
         unit_quad_buffer: &wgpu::Buffer,
     ) -> EncodeOutcome {
         let mut encode_state = EncodeState::new();
+        // The frame's clear colour, in the attachment's linear channel space. It
+        // is the caller's (default [`crate::CAD_CLEAR_COLOR`]); this pass only
+        // converts the plain channels once for `wgpu`.
+        let clear_value = wgpu::Color {
+            r: f64::from(clear_color[0]),
+            g: f64::from(clear_color[1]),
+            b: f64::from(clear_color[2]),
+            a: f64::from(clear_color[3]),
+        };
         // Coalesced-instanced bookkeeping (kept outside the render-pass block).
         let mut instanced_draws = 0u64;
         let mut instanced_batches = 0usize;
@@ -76,7 +86,7 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: if clear {
-                            wgpu::LoadOp::Clear(crate::CAD_CLEAR_COLOR)
+                            wgpu::LoadOp::Clear(clear_value)
                         } else {
                             wgpu::LoadOp::Load
                         },

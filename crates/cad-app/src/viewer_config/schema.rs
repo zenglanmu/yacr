@@ -243,18 +243,68 @@ impl Default for ViewOverlays {
     }
 }
 
+/// Model-space and paper-space canvas backgrounds.
+///
+/// AutoCAD's display colours distinguish model space from paper space, and this
+/// repository can honour that distinction honestly: the renderer clears **one**
+/// target per frame, and the frame's space is already part of the view the host
+/// publishes. The host therefore resolves the active space to one clear colour
+/// per frame, so editing either leaf changes that space's next frame.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct ViewBackground {
+    /// Background while a model-space view is displayed.
+    pub model: HexColor,
+    /// Background while any paper-space layout is displayed.
+    pub paper: HexColor,
+}
+impl Default for ViewBackground {
+    fn default() -> Self {
+        Self {
+            model: HexColor::BLACK,
+            paper: HexColor::BLACK,
+        }
+    }
+}
+
+/// Crosshair sizing for the 2D pointer overlay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct ViewCrosshair {
+    /// Arm length as an integer percentage of the cursor-to-edge distance, so
+    /// `100` is the full-viewport crosshair this repository has always drawn.
+    /// Out-of-range values are rejected by [`ViewerConfig::validate`], never
+    /// clamped.
+    pub size_percent: u32,
+}
+impl Default for ViewCrosshair {
+    fn default() -> Self {
+        Self { size_percent: 100 }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct ViewConfig {
     pub overlays: ViewOverlays,
+    pub background: ViewBackground,
+    pub crosshair: ViewCrosshair,
 }
 
+/// Interaction defaults the Options dialog may persist.
+///
+/// The two optional fields are nullable on purpose: `None` means "no user
+/// preference", so a host that never configured them keeps the live session's
+/// own default (`SessionState` starts snap/hover preview enabled). A persisted
+/// `false` is an explicit user choice and must survive a restart.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct InteractionConfig {
     pub pointer: bool,
     pub touch: bool,
     pub keyboard_shortcuts: bool,
+    pub snap_enabled: Option<bool>,
+    pub hover_preview: Option<bool>,
 }
 impl Default for InteractionConfig {
     fn default() -> Self {
@@ -262,6 +312,8 @@ impl Default for InteractionConfig {
             pointer: true,
             touch: true,
             keyboard_shortcuts: true,
+            snap_enabled: None,
+            hover_preview: None,
         }
     }
 }

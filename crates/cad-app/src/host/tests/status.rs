@@ -87,7 +87,7 @@ fn selection_properties_are_read_only_and_report_demo_geometry() {
             .rows
             .iter()
             .find(|r| r.key == key)
-            .map(|r| r.value.clone())
+            .and_then(|r| r.value.clone())
     };
     assert_eq!(row("id").as_deref(), Some("1"));
     assert_eq!(row("type").as_deref(), Some("AcDbLine"));

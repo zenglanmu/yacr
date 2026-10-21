@@ -42,6 +42,7 @@ mod explode;
 mod hatch;
 mod helpers;
 mod mleader;
+mod properties;
 mod stretch;
 mod text_edit;
 mod trim_extend;

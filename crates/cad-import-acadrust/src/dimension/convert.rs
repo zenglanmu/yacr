@@ -30,6 +30,8 @@ impl ImporterBuilder<'_> {
             font: style.text_font.clone(),
             h_align: TextAlignH::Center,
             v_align: TextAlignV::Middle,
+            // Dimension text has no source width boundary.
+            wrap_width: None,
         }
     }
 
@@ -377,6 +379,7 @@ fn place_dimension_member(
         font,
         h_align,
         v_align,
+        wrap_width,
     } = geometry
     {
         let scale = transform.max_scale();
@@ -398,6 +401,9 @@ fn place_dimension_member(
             font,
             h_align,
             v_align,
+            // Keep the boundary on the same footing as `height`: it is a
+            // world-space length, so the placement scale applies to it.
+            wrap_width: wrap_width.map(|width| width * scale),
         });
     }
     cad_db::transform_geometry(&geometry, transform).ok()

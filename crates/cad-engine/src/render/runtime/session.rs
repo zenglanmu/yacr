@@ -728,7 +728,7 @@ impl CadRenderRuntime {
         // An attachment can change at the same size. Its identity is inspected
         // for presentation even when CAD pixels do not need redrawing.
         if self.dirty.dirty() {
-            let target = RenderTarget::new(size.0, size.1);
+            let target = RenderTarget::new(size.0, size.1).with_clear_color(view.clear_color);
             let stats = match view.mode {
                 ProjectionKind::TwoD => {
                     let params = view

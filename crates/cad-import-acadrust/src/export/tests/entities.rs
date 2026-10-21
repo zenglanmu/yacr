@@ -165,6 +165,7 @@ fn single_line_text_is_exact_and_newline_text_becomes_mtext() {
         font: None,
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
+        wrap_width: None,
     });
     assert!(matches!(&read_entities(&bytes)[0], EntityType::Text(_)));
     assert_eq!(report.counts.exact, 1);
@@ -178,6 +179,7 @@ fn single_line_text_is_exact_and_newline_text_becomes_mtext() {
         font: None,
         h_align: TextAlignH::Left,
         v_align: TextAlignV::Baseline,
+        wrap_width: None,
     });
     assert!(matches!(&read_entities(&bytes)[0], EntityType::MText(_)));
     assert_eq!(report.counts.converted, 1);

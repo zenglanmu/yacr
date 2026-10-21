@@ -317,6 +317,23 @@ pub enum TextAlignV {
     Top,
 }
 
+/// Sanitize a DXF width boundary (MLEADER group 43 equivalent) into the
+/// [`SemanticGeometry::Text::wrap_width`] representation.
+///
+/// Zero, negative and non-finite values carry no usable boundary and become
+/// `None` ("no wrap"); a positive finite value is kept as the boundary in world
+/// units. AutoCAD treats `0` as "no width boundary"; the exact behaviour of
+/// other values (and of negative or non-finite input) is unverified here, so
+/// this rule is a declared approximation. It lives in one place so import and
+/// layout cannot disagree.
+pub fn wrap_width_from_dxf(width: f64) -> Option<f64> {
+    if width.is_finite() && width > 0.0 {
+        Some(width)
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SemanticGeometry {
     Line {
@@ -379,6 +396,14 @@ pub enum SemanticGeometry {
         h_align: TextAlignH,
         /// Vertical placement of the run relative to `position`.
         v_align: TextAlignV,
+        /// Optional wrap boundary in world units (the DXF width boundary, the
+        /// MLEADER group 43 equivalent).
+        ///
+        /// Text layout word-wraps (and character-wraps scripts without spaces)
+        /// so that no line is wider than this boundary. `None` means "no wrap":
+        /// paragraphs are laid out exactly as written. Build it with
+        /// [`wrap_width_from_dxf`] so the sanitization rule stays in one place.
+        wrap_width: Option<f64>,
     },
     /// A SHAPE entity: one glyph of a compiled SHX shape font, referenced by
     /// shape code (or, when `code` is 0, by `shape_name`). `font` is the style's

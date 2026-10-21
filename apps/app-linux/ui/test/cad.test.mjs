@@ -46,8 +46,14 @@ test('import progress is validated and never rendered from a malformed block', (
 });
 
 test('selection block is validated: empty, single, multi are well-formed and a malformed one is rejected', () => {
-  const single = { count: 1, empty: false, rows: [{ key: 'id', value: '1' }, { key: 'length', value: '5.000000' }], mixedKeys: [] };
-  const multi = { count: 3, empty: false, rows: [], mixedKeys: ['id', 'type'] };
+  const row = (key, value, extra = {}) => ({ key, value, group: 'entity', mixed: false, editable: false, kind: 'text', options: [], ...extra });
+  const single = { count: 1, empty: false, rows: [row('id', '1'), row('length', '5.000000', { group: 'geometry', kind: 'number' })], mixedKeys: [] };
+  const multi = {
+    count: 3,
+    empty: false,
+    rows: [row('id', null, { mixed: true }), row('type', null, { mixed: true })],
+    mixedKeys: ['id', 'type'],
+  };
   for (const selection of [empty.selection, single, multi]) {
     const status = { ...empty, selection };
     assert.equal(parseCadStatus(status), status);
@@ -63,12 +69,13 @@ test('selection block is validated: empty, single, multi are well-formed and a m
     { ...empty, selection: { count: 1.5, empty: false, rows: [], mixedKeys: [] } },
     { ...empty, selection: { count: 1, empty: false, rows: null, mixedKeys: [] } },
     { ...empty, selection: { count: 1, empty: false, rows: [], mixedKeys: null } },
-    { ...empty, selection: { count: 1, empty: false, rows: [{ key: '', value: 'x' }], mixedKeys: [] } },
+    { ...empty, selection: { count: 1, empty: false, rows: [{ key: '', value: 'x', group: 'entity', mixed: false, editable: false, kind: 'text', options: [] }], mixedKeys: [] } },
     { ...empty, selection: { count: 1, empty: false, rows: [{ key: 'id' }], mixedKeys: [] } },
-    { ...empty, selection: { count: 1, empty: false, rows: [{ key: 'id', value: 3 }], mixedKeys: [] } },
+    { ...empty, selection: { count: 1, empty: false, rows: [{ key: 'id', value: 3, group: 'entity', mixed: false, editable: false, kind: 'text', options: [] }], mixedKeys: [] } },
     { ...empty, selection: { count: 1, empty: false, rows: ['id'], mixedKeys: [] } },
-    // rows only describe one object: they cannot appear for an empty/multi block.
-    { ...empty, selection: { count: 0, empty: true, rows: [{ key: 'id', value: '1' }], mixedKeys: [] } },
+    // rows without a selection are malformed.
+    { ...empty, selection: { count: 0, empty: true, rows: [{ key: 'id', value: '1', group: 'entity', mixed: false, editable: false, kind: 'text', options: [] }], mixedKeys: [] } },
+    // a multi-selection blindly using untyped rows is rejected.
     { ...empty, selection: { count: 2, empty: false, rows: [{ key: 'id', value: '1' }], mixedKeys: [] } },
     // mixed keys are only meaningful for a real multi-selection.
     { ...empty, selection: { count: 1, empty: false, rows: [], mixedKeys: ['id'] } },
@@ -78,9 +85,10 @@ test('selection block is validated: empty, single, multi are well-formed and a m
 });
 
 test('an unknown row key is tolerated and never coerced to a fabricated state', () => {
+  const row = (key, value) => ({ key, value, group: 'future_group', mixed: false, editable: false, kind: 'text', options: [] });
   const status = {
     ...empty,
-    selection: { count: 1, empty: false, rows: [{ key: 'future_key', value: 'raw' }, { key: 'id', value: '7' }], mixedKeys: [] },
+    selection: { count: 1, empty: false, rows: [row('future_key', 'raw'), row('id', '7')], mixedKeys: [] },
   };
   assert.equal(parseCadStatus(status), status);
 });

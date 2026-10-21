@@ -283,13 +283,38 @@ fn image_quad_uses_the_clip_polygon_instead_of_the_unit_square() {
 #[test]
 fn cad_clear_color_is_pure_black_opaque() {
     // The React host requires the CAD render target to clear to actual pure
-    // black (not a DOM overlay); this is the global default for every space.
+    // black (not a DOM overlay); this is the default for every space.
     let color = CAD_CLEAR_COLOR;
     assert_eq!(
         (color.r, color.g, color.b, color.a),
         (0.0, 0.0, 0.0, 1.0),
         "the CAD render target clears to pure opaque black"
     );
+}
+
+#[test]
+fn the_frame_input_carries_the_clear_colour_the_renderer_uses() {
+    // This is the value `Renderer::render` consumes: `render_with_projection`
+    // reads it for the colour attachment's clear **and** for the wipeout-mask
+    // tint, so nothing else can name a second background.
+    let target = RenderTarget::new(8, 8);
+    assert_eq!(
+        target.clear_color(),
+        [0.0, 0.0, 0.0, 1.0],
+        "a caller that supplies nothing keeps the documented black"
+    );
+
+    let target = RenderTarget::new(8, 8).with_clear_color([1.0, 0.5, 0.25, 1.0]);
+    assert_eq!(
+        target.clear_color(),
+        [1.0, 0.5, 0.25, 1.0],
+        "the supplied colour is the frame's clear, untouched"
+    );
+
+    // A bad caller is clamped/neutralised rather than allowed to poison the
+    // clear with a NaN or an out-of-range channel.
+    let target = RenderTarget::new(8, 8).with_clear_color([f32::NAN, -1.0, 2.0, 0.5]);
+    assert_eq!(target.clear_color(), [0.0, 0.0, 1.0, 0.5]);
 }
 
 #[test]

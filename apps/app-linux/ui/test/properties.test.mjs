@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { propertyRowLabel, selectionView } from '../src/cad.mjs';
+import { parseSelection, propertyGroupLabel, propertyRowLabel, selectionView } from '../src/cad.mjs';
 import { createTranslator } from '../src/i18n.mjs';
 import { readCatalog, readModule } from './helpers.mjs';
 
@@ -56,6 +56,70 @@ test('an unknown machine key is shown by its raw key, never a fabricated label',
     t,
   );
   assert.deepEqual(view.rows, [{ key: 'future_key', label: 'future_key', value: 'raw' }]);
+});
+
+test('property groups have catalog labels and unknown groups stay raw', () => {
+  assert.equal(propertyGroupLabel(t, 'entity'), zh['properties.group.entity']);
+  assert.equal(propertyGroupLabel(t, 'geometry'), zh['properties.group.geometry']);
+  assert.equal(propertyGroupLabel(t, 'text'), zh['properties.group.text']);
+  assert.equal(propertyGroupLabel(t, 'display'), zh['properties.group.display']);
+  assert.equal(propertyGroupLabel(createTranslator({ 'zh-CN': zh, en }, 'en'), 'display'), en['properties.group.display']);
+  assert.equal(propertyGroupLabel(t, 'future_group'), 'future_group');
+});
+
+// The wire block for two selected objects sharing a layer: `id` is mixed (no
+// value), `layer` keeps its one real value and the real layer table as options.
+const twoEntityWire = {
+  count: 2,
+  empty: false,
+  rows: [
+    { key: 'id', value: null, group: 'entity', mixed: true, editable: false, kind: 'text', options: [] },
+    { key: 'layer', value: '0 (0)', group: 'entity', mixed: false, editable: true, kind: 'enum', options: ['0', 'WALLS'] },
+  ],
+  mixedKeys: ['id'],
+  text: null,
+  text_multiline: false,
+};
+
+test('parseSelection accepts a multi-selection wire sample and returns it unchanged', () => {
+  assert.equal(parseSelection(twoEntityWire), twoEntityWire);
+});
+
+test('parseSelection accepts a single-selection row set only with the full metadata', () => {
+  const single = {
+    count: 1,
+    empty: false,
+    rows: [
+      { key: 'id', value: '1', group: 'entity', mixed: false, editable: false, kind: 'text', options: [] },
+      { key: 'layer', value: '0 (0)', group: 'entity', mixed: false, editable: true, kind: 'enum', options: ['0'] },
+    ],
+    mixedKeys: [],
+    text: null,
+    text_multiline: false,
+  };
+  assert.equal(parseSelection(single), single);
+});
+
+test('parseSelection rejects genuinely malformed selection payloads', () => {
+  const clone = value => JSON.parse(JSON.stringify(value));
+  const broken = [
+    // A value and the mixed marker disagree.
+    { ...clone(twoEntityWire), rows: [{ ...clone(twoEntityWire).rows[0], value: '1' }], mixedKeys: ['id'] },
+    // `mixedKeys` drifts from the rows.
+    { ...clone(twoEntityWire), mixedKeys: [] },
+    // A mixed key on a single selection.
+    { ...clone(twoEntityWire), count: 1 },
+    // Rows without a selection.
+    { ...clone(twoEntityWire), count: 0, empty: true },
+    // Unknown editing kind.
+    { ...clone(twoEntityWire), rows: [{ ...clone(twoEntityWire).rows[0], kind: 'color' }] },
+    // Missing group.
+    { ...clone(twoEntityWire), rows: [{ ...clone(twoEntityWire).rows[0], group: '' }] },
+    // Non-string option.
+    { ...clone(twoEntityWire), rows: [{ ...clone(twoEntityWire).rows[1], options: [0] }] },
+  ];
+  for (const value of broken) assert.throws(() => parseSelection(value), /CAD_STATUS_INVALID/);
+  assert.throws(() => parseSelection(null), /CAD_STATUS_INVALID/);
 });
 
 test('every machine key emitted by cad-app::selection has a label in both catalogs', async () => {

@@ -85,6 +85,46 @@ impl ConfigStore for FakeConfig {
     }
 }
 
+/// A config store returning fixed texts, for the startup-seeding contracts.
+pub(super) struct StaticConfig {
+    pub(super) config: ConfigLoad,
+    pub(super) preference: ConfigLoad,
+}
+
+impl StaticConfig {
+    pub(super) fn preference(text: &str) -> Self {
+        Self {
+            config: ConfigLoad::Absent,
+            preference: ConfigLoad::Text {
+                path: "preference.json".to_string(),
+                text: text.to_string(),
+            },
+        }
+    }
+}
+
+impl ConfigStore for StaticConfig {
+    fn load_config(&self) -> ConfigLoad {
+        self.config.clone()
+    }
+    fn load_preference(&self) -> ConfigLoad {
+        self.preference.clone()
+    }
+    fn persist_preference(&self, _text: &str) -> CadResult<()> {
+        Ok(())
+    }
+}
+
+/// Build a session with an injected config store.
+pub(super) fn session_with_config(config: Rc<dyn ConfigStore>) -> CadSession {
+    let mut host_platform = platform(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    host_platform.config_store = config;
+    CadSession::new(options(), host_platform, RenderSessionHandle::default())
+        .expect("session builds")
+}
+
 pub(super) struct FakeSurface;
 impl SurfaceSource for FakeSurface {
     fn surface(&self) -> Option<SurfaceMetrics> {

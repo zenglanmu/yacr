@@ -864,3 +864,35 @@ fn ribbon_command_display_round_trips_and_reaches_the_resolved_model() {
     }))
     .is_err());
 }
+
+/// The nullable interaction leaves (`Option<bool>`) serialize as `null` when
+/// the host set no value; an allowed user preference may fill that slot. This
+/// is what lets `interaction.snapEnabled=false` persist and survive a reload.
+#[test]
+fn allowed_preference_fills_a_nullable_interaction_leaf() {
+    let mut store = ViewerConfigStore::default();
+    store
+        .update_config(json!({
+            "ui": { "userCustomization": { "allowedPaths": [
+                "interaction.snapEnabled",
+                "interaction.hoverPreview"
+            ] } }
+        }))
+        .unwrap();
+    assert_eq!(store.effective().interaction.snap_enabled, None);
+    assert_eq!(store.effective().interaction.hover_preview, None);
+
+    store
+        .apply_user_preference(json!({
+            "interaction": { "snapEnabled": false, "hoverPreview": true }
+        }))
+        .unwrap();
+    assert_eq!(store.effective().interaction.snap_enabled, Some(false));
+    assert_eq!(store.effective().interaction.hover_preview, Some(true));
+
+    // The accumulated preference still projects the two leaves for persistence.
+    let projected: serde_json::Value =
+        serde_json::from_str(&store.projected_user_preference_json()).unwrap();
+    assert_eq!(projected["interaction"]["snapEnabled"], json!(false));
+    assert_eq!(projected["interaction"]["hoverPreview"], json!(true));
+}

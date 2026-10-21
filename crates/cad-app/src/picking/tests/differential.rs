@@ -151,6 +151,7 @@ fn rand_geometry(rng: &mut XorShift, span: f64) -> SemanticGeometry {
             font: None,
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
+            wrap_width: None,
         },
         9 => SemanticGeometry::Shape {
             shape_name: "shape".into(),

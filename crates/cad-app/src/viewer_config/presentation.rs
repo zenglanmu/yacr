@@ -34,6 +34,21 @@ impl From<ViewOverlays> for OverlayVisibility {
     }
 }
 
+impl ViewBackground {
+    /// The background colour of the space being displayed.
+    ///
+    /// Paper space has one colour for every layout (AutoCAD also has a single
+    /// paper background), so the caller only reports whether the frame shows
+    /// paper space rather than naming a layout.
+    pub fn resolve(&self, paper: bool) -> HexColor {
+        if paper {
+            self.paper
+        } else {
+            self.model
+        }
+    }
+}
+
 /// Capability visibility resolved for the shell entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeatureVisibility {

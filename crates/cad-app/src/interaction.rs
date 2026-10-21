@@ -186,6 +186,25 @@ pub enum InteractionRequest {
     SetSelectedText {
         text: String,
     },
+    /// Change one property on **every** currently selected entity (the docked
+    /// properties panel's write path).
+    ///
+    /// Like [`Self::SetSelectedText`] it carries no entity id: the host resolves
+    /// its own current selection at apply time, so a UI cannot retarget a
+    /// different object. `key` and `value` follow the grammar of
+    /// [`crate::property_value`] (`layer`, `color`, `linetype`, `lineweight`,
+    /// `transparency`); `text` is refused here because it has its own path. Every
+    /// refusal is named (`property.selection_empty`, `property.unsupported_key`,
+    /// `property.invalid_value`, `property.unknown_layer`,
+    /// `property.unknown_linetype`, `property.ambiguous_name`,
+    /// `property.not_addressable`, `property.target_missing`) and opens no
+    /// transaction. A successful edit is one transaction / one undo step; a value
+    /// every selected entity already holds changes nothing and records no undo
+    /// entry.
+    SetSelectedProperty {
+        key: String,
+        value: String,
+    },
     /// Acknowledge the UI-local dismissal of the open text prompt (the first
     /// `Esc`, ADR 0019 decision A.1).
     ///

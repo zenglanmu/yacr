@@ -130,6 +130,7 @@ impl<'a> ImporterBuilder<'a> {
         ));
 
         // Capture everything we need before the builder is consumed.
+        self.read_code_page();
         let units = self.read_units();
         let capabilities: Vec<EntityCapability> = {
             let mut v: Vec<_> = std::mem::take(&mut self.capabilities)
@@ -187,6 +188,19 @@ impl<'a> ImporterBuilder<'a> {
                 parse_ms: None,
             },
         })
+    }
+
+    /// Carry the source drawing's declared text code page into the database.
+    ///
+    /// This is the only place the code page is read: acadrust reports it on the
+    /// document header (`$DWGCODEPAGE` / the DWG metadata code page) and the db
+    /// stores it verbatim. No locale is derived here — the platform font layer
+    /// owns that mapping. acadrust always materialises a header value (its
+    /// fallback is `ANSI_1252`), so an empty string is the only "absent" shape;
+    /// it is stored as `None` rather than being guessed.
+    pub(crate) fn read_code_page(&mut self) {
+        self.builder
+            .set_code_page(Some(self.acad.header.code_page.as_str()));
     }
 
     pub(crate) fn read_units(&self) -> UnitContext {

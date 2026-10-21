@@ -50,6 +50,28 @@ fn preview_marker_size_is_finite_and_positive_for_a_degenerate_scale() {
 }
 
 #[test]
+fn overlay_fingerprint_tracks_the_crosshair_percentage() {
+    assert_eq!(
+        OverlayInputs::default().crosshair_percent,
+        DEFAULT_CROSSHAIR_PERCENT,
+        "a host that never sets it keeps the full-viewport crosshair"
+    );
+    let baseline = overlay_fingerprint(&OverlayInputs::default());
+    let shorter = OverlayInputs {
+        crosshair_percent: 50,
+        ..OverlayInputs::default()
+    };
+    assert_ne!(
+        baseline,
+        overlay_fingerprint(&shorter),
+        "a resized crosshair is overlay geometry and must rebuild it"
+    );
+    // The percentage alone does not make an otherwise empty overlay non-empty.
+    assert!(shorter.is_empty());
+    assert_eq!(overlay_fingerprint(&OverlayInputs::default()), baseline);
+}
+
+#[test]
 fn overlay_fingerprint_tracks_the_pointer_cursor_but_not_the_view_scale() {
     let baseline = OverlayInputs::default();
     let with_cursor = OverlayInputs {

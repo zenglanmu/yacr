@@ -180,6 +180,7 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             position,
             height,
             rotation,
+            wrap_width,
             ..
         } => {
             if !finite(*position) {
@@ -190,6 +191,15 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             }
             if !rotation.is_finite() {
                 return Err(degenerate("text rotation is non-finite"));
+            }
+            // A stored boundary must be usable: zero/negative/non-finite would
+            // silently degrade to "no wrap" at layout, so reject it here instead.
+            if let Some(width) = wrap_width {
+                if !width.is_finite() || *width <= 0.0 {
+                    return Err(degenerate(
+                        "text wrap width must be positive and finite when set",
+                    ));
+                }
             }
         }
         SemanticGeometry::Shape {
@@ -474,6 +484,23 @@ mod tests {
             closed: false
         })
         .is_err());
+        // A stored wrap boundary must be usable; `None` means "no wrap".
+        let text = |wrap_width| SemanticGeometry::Text {
+            text: "A".into(),
+            position: p(0.0, 0.0),
+            style: cad_domain::StyleId(0),
+            height: 2.5,
+            rotation: 0.0,
+            font: None,
+            h_align: cad_domain::TextAlignH::Left,
+            v_align: cad_domain::TextAlignV::Baseline,
+            wrap_width,
+        };
+        assert!(validate_geometry(&text(None)).is_ok());
+        assert!(validate_geometry(&text(Some(4.0))).is_ok());
+        assert!(validate_geometry(&text(Some(0.0))).is_err());
+        assert!(validate_geometry(&text(Some(-1.0))).is_err());
+        assert!(validate_geometry(&text(Some(f64::NAN))).is_err());
     }
 
     #[test]

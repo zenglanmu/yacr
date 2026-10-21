@@ -1,6 +1,11 @@
 import { admitCommandText } from './commands.mjs';
+import { propertyRowLabel } from './property-labels.mjs';
+import { parseSelection } from './selection-wire.mjs';
 import { TEXT_PICK_PROMPT_KEY, TEXT_STEP_PROMPT_KEY, toolAwaitingText } from './text.mjs';
 import { OPEN_ENDED_PROMPTS } from './tool-open-ended.mjs';
+
+export { propertyGroupLabel, propertyRowLabel } from './property-labels.mjs';
+export { parseSelection } from './selection-wire.mjs';
 
 // Phase keys the backend reports (`cad_app::import_phase_key`). A phase outside
 // this set is a contract violation, not a runtime surprise.
@@ -19,37 +24,6 @@ function parseImportProgress(value) {
     throw Error('CAD_STATUS_INVALID');
   }
   return value;
-}
-
-// The frozen selection block (`cad-app::selection::SelectionProperties`). It is
-// always present and structurally exact: `empty == (count == 0)`, `rows` only
-// carry the single selected object, and `mixedKeys` are only meaningful for a
-// real multi-selection. A block that breaks any of these invariants is a
-// contract violation, never something to coerce into a fabricated empty state.
-function parseSelection(selection) {
-  if (!selection || typeof selection !== 'object' || Array.isArray(selection)) {
-    throw Error('CAD_STATUS_INVALID');
-  }
-  const { count, empty, rows, mixedKeys } = selection;
-  if (!Number.isSafeInteger(count) || count < 0
-    || typeof empty !== 'boolean' || empty !== (count === 0)
-    || !Array.isArray(rows) || !Array.isArray(mixedKeys)) {
-    throw Error('CAD_STATUS_INVALID');
-  }
-  // Rows describe one object only: a host that ships rows for an empty or
-  // multi-selection is malformed, not a shortcut we may silently truncate.
-  if (rows.length > 0 && count !== 1) throw Error('CAD_STATUS_INVALID');
-  // Row keys are machine keys the catalog may not know; that is tolerated (the
-  // UI shows the raw key). A missing/typed key or a non-string value is not.
-  if (!rows.every(row => row && typeof row === 'object' && !Array.isArray(row)
-    && typeof row.key === 'string' && row.key.length > 0 && typeof row.value === 'string')) {
-    throw Error('CAD_STATUS_INVALID');
-  }
-  if (mixedKeys.length > 0 && count <= 1) throw Error('CAD_STATUS_INVALID');
-  if (!mixedKeys.every(key => typeof key === 'string' && key.length > 0)) {
-    throw Error('CAD_STATUS_INVALID');
-  }
-  return selection;
 }
 
 export function parseCadStatus(value) {
@@ -811,69 +785,6 @@ export function importProgressView(progress, t) {
     determinate,
     cancellable: progress.cancellable,
   };
-}
-
-/**
- * The catalog label for a stable machine property key.
- *
- * Keys come from `cad-app::selection` (`PropertyRow::new`). The set is frozen
- * here so every key has an explicit, reviewed translation; any key the catalog
- * does not know is rendered **as itself** — never a guessed label and never
- * dropped.
- */
-export function propertyRowLabel(t, key) {
-  switch (key) {
-    case 'id': return t('properties.row.id');
-    case 'handle': return t('properties.row.handle');
-    case 'type': return t('properties.row.type');
-    case 'layer': return t('properties.row.layer');
-    case 'space': return t('properties.row.space');
-    case 'draw_order': return t('properties.row.draw_order');
-    case 'instance': return t('properties.row.instance');
-    case 'sub_element': return t('properties.row.sub_element');
-    case 'status': return t('properties.row.status');
-    case 'start': return t('properties.row.start');
-    case 'end': return t('properties.row.end');
-    case 'length': return t('properties.row.length');
-    case 'vertices': return t('properties.row.vertices');
-    case 'closed': return t('properties.row.closed');
-    case 'bulges': return t('properties.row.bulges');
-    case 'center': return t('properties.row.center');
-    case 'normal': return t('properties.row.normal');
-    case 'radius': return t('properties.row.radius');
-    case 'start_angle': return t('properties.row.start_angle');
-    case 'sweep': return t('properties.row.sweep');
-    case 'ratio': return t('properties.row.ratio');
-    case 'degree': return t('properties.row.degree');
-    case 'control_points': return t('properties.row.control_points');
-    case 'position': return t('properties.row.position');
-    case 'triangles': return t('properties.row.triangles');
-    case 'block': return t('properties.row.block');
-    case 'text': return t('properties.row.text');
-    case 'height': return t('properties.row.height');
-    case 'font': return t('properties.row.font');
-    case 'shape': return t('properties.row.shape');
-    case 'size': return t('properties.row.size');
-    case 'opaque_type': return t('properties.row.opaque_type');
-    case 'opaque_version': return t('properties.row.opaque_version');
-    case 'payload_bytes': return t('properties.row.payload_bytes');
-    case 'pixels': return t('properties.row.pixels');
-    case 'file': return t('properties.row.file');
-    case 'visible': return t('properties.row.visible');
-    case 'boundary': return t('properties.row.boundary');
-    case 'inverted': return t('properties.row.inverted');
-    case 'children': return t('properties.row.children');
-    case 'subtype': return t('properties.row.subtype');
-    case 'measurement': return t('properties.row.measurement');
-    case 'display': return t('properties.row.display');
-    case 'loops': return t('properties.row.loops');
-    case 'style': return t('properties.row.style');
-    case 'fill': return t('properties.row.fill');
-    case 'roots': return t('properties.row.roots');
-    case 'lines': return t('properties.row.lines');
-    // An unknown machine key is shown by its raw key, never fabricated.
-    default: return key;
-  }
 }
 
 /**

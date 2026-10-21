@@ -287,6 +287,7 @@ mod tests {
             crosshair: false,
             import_count: 0,
             frame_count: 0,
+            command_log: Vec::new(),
             popup: None,
         }
     }
