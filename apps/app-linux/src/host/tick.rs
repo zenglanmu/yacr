@@ -146,6 +146,16 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
         (size, marker)
     };
 
+    // ---- child webview sizing (main thread, no shared lock held) ----
+    // Unconditional on every frame: this host does not drain GTK's queued
+    // layout by itself, so an event-driven contract (`size-allocate`, window
+    // events) is not available here. The call is idempotent and cheap when the
+    // allocation already matches, and every attempt logs a `skipped=` reason
+    // (deduped per distinct state) so the next run says which branch ran. The
+    // window's inner size is the pre-layout fallback; the container allocation
+    // wins as soon as GTK reports one.
+    crate::gtk_bridge::sync_webview_size((size.width, size.height), "tick");
+
     // ---- deferred bridge GPU init (main thread, no shared lock held) ----
     // `LayoutTracker::confirmed` is the single source of truth for the CAD-rect
     // gate; the bridge keeps no second copy.

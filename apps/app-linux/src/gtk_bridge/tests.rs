@@ -1,8 +1,49 @@
 use super::native::{
     checked_physical_size, drawing_area_matches_dom, init_allowed, panic_payload_message,
     pending_prerequisite, pending_reason_changed, render_error_class, wayland_buffer_scale,
+    webview_target_size, WebviewSkip,
 };
 use super::BridgeState;
+
+#[test]
+fn webview_skip_reasons_are_stable_log_labels() {
+    // `skipped=` is the field a run is diagnosed by; keep the taxonomy fixed so a
+    // regression report ("skipped=same-allocation" vs "unmapped-parent") stays
+    // readable across versions. Exactly one reason means "applied".
+    assert_eq!(WebviewSkip::None.label(), "none");
+    assert_eq!(WebviewSkip::SameAllocation.label(), "same-allocation");
+    assert_eq!(WebviewSkip::NotRegistered.label(), "not-registered");
+    assert_eq!(WebviewSkip::NoParent.label(), "no-parent");
+    assert_eq!(WebviewSkip::UnmappedParent.label(), "unmapped-parent");
+    assert_eq!(WebviewSkip::Nested.label(), "nested");
+}
+
+#[test]
+fn webview_fills_its_container_and_is_never_zero() {
+    // The overlay (the container the React DOM fills) is authoritative: this is
+    // the size the webview widget must occupy, not the Tauri window inner size.
+    assert_eq!(
+        webview_target_size(Some((926, 553)), (960, 600)),
+        (926, 553)
+    );
+    // `1x1` is GTK's unsized requisition, not a viewport: it falls back to the
+    // window inner size instead of leaving the webview at its creation size.
+    assert_eq!(webview_target_size(Some((1, 1)), (960, 600)), (960, 600));
+    assert_eq!(webview_target_size(Some((0, 0)), (960, 600)), (960, 600));
+    assert_eq!(webview_target_size(None, (960, 600)), (960, 600));
+    // A partial (zero-height) allocation is not settled either.
+    assert_eq!(webview_target_size(Some((926, 0)), (960, 600)), (960, 600));
+    // A real, small allocation is still honoured (only the degenerate 1x1 is not).
+    assert_eq!(
+        webview_target_size(Some((320, 240)), (960, 600)),
+        (320, 240)
+    );
+    // No container and no usable fallback: an explicit 1x1 "not sized yet",
+    // never a 0x0 allocation (and the size log reports it as a number).
+    assert_eq!(webview_target_size(None, (0, 0)), (1, 1));
+    assert_eq!(webview_target_size(None, (1, 1)), (1, 1));
+    assert_eq!(webview_target_size(Some((-3, -4)), (0, 0)), (1, 1));
+}
 
 #[test]
 fn drawing_area_matches_dom_within_one_logical_pixel() {

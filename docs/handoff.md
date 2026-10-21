@@ -20,22 +20,36 @@
 并如实指出：**俯视正交下"有面立方体"与"填色方片"像素等价**，因此该帧**不能**证明三维性；
 需要斜视/透视视图才能判 3D 与遮挡。
 
-## ⚠ 开放阻塞：本环境窗口抓图看不到 WebView（2026-10-21，未解决）
+## ✅ 已解决：窗口抓图看不到 WebView（主 WebView 一�"1×1"、chrome 全黑，2026-10-21）
 
-**现象**：`collect-evidence` 的 `shot-top`/`shot-cad` 里**只有 CAD 内容、没有 React chrome**，且 CAD 分区宽度停在
-**626 px**（= 960 − 300 左坞 − 34 导航条，即**启动态布局**）。
+**根因（三条都可引用源码，不是猜）**：
 
-**已测事实（不猜）**：
-- DOM 诊断显示应用**已渲染**（`main` 960×600、73 个按钮、ribbon 19501 字符、`errors: []`）；
-- X 窗口树：`0xc00004 (has no name) 1x1+-1+-1` —— **WebView 的 X 窗口是 1×1**，CAD 子窗口正常 626×341；
-- **换夹具复现**（four-lines 同样 626 + 无 chrome）⇒ 与 ACIS 无关；
-- **`YACR_PROBE_NO_GPU=1`（完全跳过渲染器）仍全黑** ⇒ **与本次深度修复无关**；
-- 无 WebKit/GL 报错；清理残留实例后仍复现；
-- `screencast-capture.py` 被会话策略拒绝（`Session creation inhibited`），**拿不到合成后的真值**。
+1. **`add_child` 的 bounds 在 Linux 被丢弃**：Tauri 走 `WebviewKind::WindowChild` → `build_gtk(window.default_vbox())`；
+   wry 的 `add_to_container` 对 `GtkBox` 只做 `pack_start(...)`，**从不读 `attributes.bounds`**。
+2. **因此 `auto_resize()` 完全无效**：wry 的 `set_bounds` 只在"自有 x11 子窗口"或"`GtkFixed` 父容器"两情形生效，
+   这里两者皆否 ⇒ 恒为 no-op；而 `reparent_webview` 之后 widget 被移出那个 `GtkBox` 变成 overlay child，
+   **再没有任何东西给它定尺寸**。
+3. **repaint 后 widget 从未被 map**：`Container::remove` 会 unmap 但保持 visible，`widget.show()` 对已 visible 的 widget 是空操作
+   ⇒ `GdkWindow` 始终是 `1x1+-1,-1`（与 `xwininfo` 一致），**没有 chrome 像素**；WebKit 还会对未映射视图**节流**，
+   这正是"合成开启时布局也停住（626 启动态）"的原因。
 
-**影响**：**不得**用这些窗口帧主张"UI 正确"或"chrome 正常"；ACIS 的像素结论只限 **CAD 内容**，
-主证据是**真实 GPU 的 headless 像素读回**。
-**下一步**：先判"应用没画"还是"抓取看不到"（需要在能拿到合成真值的条件下复测，或加一个 WebView 自绘的探针）。
+**修法**：`reparent` 前 `unrealize()`（在最终父级重建 `GdkWindow`）→ `map()` → `size_allocate(父分配)`；
+**`reparent` 之后每帧 tick 都做一次幂等同步**（不依赖 GTK 信号是否触发，本宿主不主动 drain 队列布局）；
+目标尺寸规则：**`1×1` 视为"尚未布局"**（回落到窗口内尺寸），真实小尺寸仍尊重，**永不为 0×0**；
+"settled" 判定改为 **`allocation 匹配 && mapped && GdkWindow::is_viewable()`**（GTK mapped 但原生不可见 ⇒ 继续重试，
+那正是黑窗状态）。**不设 `WEBKIT_DISABLE_COMPOSITING_MODE`、不伪造尺寸。**
+
+**验证（真实 X11/XWayland）**：`[probe] webview size (tick): requested=960x600 allocated=960x600 native=960x600
+native_viewable=true native_xid=0xc00021 mapped=true`；`xwininfo` 为 `960x600 IsViewable`；
+窗口抓图 **1965–1992 色**（修复前 5–26 色）；**y<175 无一个纯黑像素**，各带精确平铺、1px 分隔；
+CAD 分区恢复 **926×341**（文档已打开、左坞关闭）。回归守卫是 `grep 'webview size'` 的日志行。
+
+**附带真机结论**：ACIS 立方体在该窗口内为 **326×327 纯白实心方块**、**在视口内居中到像素**
+（窗口中心偏左 17px = 34px 导航条的一半，属正确）；判读**接受**"chrome 正确 + 实体已填充"，
+并如实指出**俯视正交下"有面立方体"与"填色方片"像素等价** ⇒ 三维性仍需斜视图。
+
+**判读附带发现（未修，cosmetic）**：960 宽下 ribbon 的"修改"面板溢出窗口，`镜`/`缩` 两个字被边缘切掉，
+**没有溢出指示（chevron/滚动）**。记为布局缺陷，不属本轮阻塞。
 
 ## 显示保真切片 C2：`inverted` 遮罩补集（ADR-0022，2026-10-21）
 

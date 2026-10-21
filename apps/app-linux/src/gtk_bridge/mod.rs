@@ -52,7 +52,7 @@ mod tests;
 use native::NativeHandles;
 
 // Unchanged external surface (`crate::gtk_bridge::…` still resolves).
-pub use native::reparent_webview;
+pub use native::{reparent_webview, sync_webview_size};
 
 thread_local! {
     /// Overlays keyed by Tauri window label; `with_webview` closures must be
@@ -60,6 +60,20 @@ thread_local! {
     static OVERLAYS: RefCell<HashMap<String, gtk::Overlay>> = RefCell::new(HashMap::new());
     /// Set once the webview has been reparented into the overlay.
     static REPARENT_DONE: Cell<bool> = const { Cell::new(false) };
+    /// The reparented webview widget (weak; main-thread only).
+    ///
+    /// GTK objects are `!Send`, so this lives beside [`OVERLAYS`] instead of in
+    /// the shared host state. A weak reference is used because the widget is
+    /// owned by the Tauri webview: this must never keep a destroyed webview (or
+    /// its WebKit process) alive after the window goes away.
+    static WEBVIEW_WIDGET: RefCell<Option<gtk::glib::WeakRef<gtk::Widget>>> =
+        const { RefCell::new(None) };
+    /// Re-entrancy guard for "overlay size-allocate fills the webview": GTK is
+    /// not re-entrant, and allocating the webview can queue another layout pass.
+    static WEBVIEW_FILL_ACTIVE: Cell<bool> = const { Cell::new(false) };
+    /// The last emitted `webview size` line, so repeated layout passes with the
+    /// same numbers stay silent (a change still logs).
+    static WEBVIEW_SIZE_LOG: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// Main-thread-only owner of the GTK overlay and the GPU presenter.

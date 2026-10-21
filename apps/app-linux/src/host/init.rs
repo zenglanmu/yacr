@@ -49,7 +49,13 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
             tauri::WebviewUrl::App("index.html".into()),
         )
         .transparent(transparent)
-        .auto_resize()
+        // No `.auto_resize()`: it is inert for this webview on Linux. Tauri packs
+        // a child webview into the window's `GtkBox`, so `wry`'s `set_bounds`
+        // matches neither its `GtkFixed` parent branch nor its raw-X11-child
+        // branch and does nothing; the host then reparents the widget into its
+        // own `GtkOverlay`, leaving nothing to size it. `crate::gtk_bridge::sync_webview_size`
+        // is the real mechanism (window resize/scale events, the overlay's own
+        // layout pass and the DOM layout tick).
         .initialization_script(ERROR_HOOK_JS)
         .on_page_load(|_webview, payload| {
             eprintln!(
@@ -77,6 +83,10 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
                 "[probe] WM event: window resized to {}x{}",
                 size.width, size.height
             );
+            // The child webview does not follow the window by itself (see
+            // `sync_webview_size`): apply the new inner size now, alongside the
+            // GTK layout pass the resize already triggered.
+            crate::gtk_bridge::sync_webview_size((size.width, size.height), "window-resize");
         }
         tauri::WindowEvent::Moved(position) => {
             eprintln!(
@@ -84,8 +94,18 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
                 position.x, position.y
             );
         }
-        tauri::WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+        tauri::WindowEvent::ScaleFactorChanged {
+            scale_factor,
+            new_inner_size,
+            ..
+        } => {
             eprintln!("[probe] WM event: scale factor {scale_factor}");
+            // Allocations are logical px: re-apply at the new scale instead of
+            // waiting for the next frame.
+            crate::gtk_bridge::sync_webview_size(
+                (new_inner_size.width, new_inner_size.height),
+                "window-scale",
+            );
         }
         tauri::WindowEvent::Focused(focused) => {
             eprintln!("[probe] WM event: focused={focused}");

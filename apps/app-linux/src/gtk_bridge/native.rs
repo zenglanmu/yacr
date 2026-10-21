@@ -9,12 +9,20 @@ use gtk::prelude::*;
 
 use crate::wayland_surface::is_wayland_display;
 
-use super::{BridgeState, OVERLAYS, REPARENT_DONE};
+use super::{
+    BridgeState, OVERLAYS, REPARENT_DONE, WEBVIEW_FILL_ACTIVE, WEBVIEW_SIZE_LOG, WEBVIEW_WIDGET,
+};
 
 /// Reparent the Tauri webview into the overlay as a transparent sibling.
 ///
 /// Runs on the main thread via `with_webview`; the closure is `Send`, so it looks
 /// the overlay up in the thread-local registry instead of capturing GTK objects.
+///
+/// Unlike a packed child, an overlay child is not laid out by anything after the
+/// reparent, so the host takes over sizing it: the widget is registered in
+/// [`WEBVIEW_WIDGET`], the overlay's `size-allocate` fills it to the overlay
+/// (one signal per GTK layout pass, exactly like the drawing area), and the
+/// current size is applied immediately.
 pub fn reparent_webview(webview: &tauri::Webview, label: &str) -> tauri::Result<()> {
     let label = label.to_string();
     webview.with_webview(move |platform| {
@@ -23,6 +31,16 @@ pub fn reparent_webview(webview: &tauri::Webview, label: &str) -> tauri::Result<
             if let Ok(container) = parent.downcast::<gtk::Container>() {
                 container.remove(&widget);
             }
+        }
+        // Recreate the native window in its **final** parent. GdkWindow caches
+        // its geometry and skips an X configure whose size it already believes
+        // is current, so a window that was created before the reparent can be
+        // left at its 1x1 creation size while every later allocation silently
+        // no-ops (observed: GDK reports 960x600, `xwininfo` reports 1x1, nothing
+        // paints). Unrealizing here makes the widget create a fresh window after
+        // `add_overlay`, so the first allocation is the one that configures it.
+        if widget.is_realized() {
+            widget.unrealize();
         }
         widget.set_hexpand(true);
         widget.set_vexpand(true);
@@ -49,10 +67,309 @@ pub fn reparent_webview(webview: &tauri::Webview, label: &str) -> tauri::Result<
                 }
                 REPARENT_DONE.with(|flag| flag.set(true));
                 eprintln!("[probe] bridge: webview reparented into the overlay");
+                // Host-side sizing (see [`sync_webview_size`]): Tauri's
+                // `auto_resize`/`set_size` never reach this widget on Linux.
+                WEBVIEW_WIDGET.with(|cell| *cell.borrow_mut() = Some(widget.downgrade()));
+                connect_webview_fill(&overlay, &widget);
+                sync_webview_size((0, 0), "reparent");
             }
             None => eprintln!("[probe] bridge: no overlay for label {label}"),
         }
     })
+}
+
+/// Deterministically size the reparented webview to the overlay it lives in.
+///
+/// **Why this exists.** `WebviewBuilder::auto_resize()` and `Webview::set_size()`
+/// are inert for this webview on Linux: Tauri creates a child webview inside the
+/// window's `GtkBox` (`pack_start(expand=true)`), so `wry`'s `set_bounds` finds
+/// neither a `GtkFixed` parent nor its own X11 child window and does nothing
+/// (`wry-0.55.1/src/webkitgtk/mod.rs`: `if self.x11 … / if self.is_in_fixed_parent`).
+/// The host then reparents the widget out of that box into a `GtkOverlay`, so
+/// nothing resizes it at all: it keeps the 1x1 requisition it was created with.
+/// This applies the size directly to the widget — the webview's counterpart of
+/// the drawing-area-vs-DOM layout guard.
+///
+/// **Call it unconditionally from the per-frame tick.** This host does not drain
+/// GTK's queued layout on its own (the drawing area only moves because
+/// `apply_layout` calls `check_resize` explicitly), so an event-driven contract
+/// is not available: correctness must not depend on a `size-allocate` signal. The
+/// call is idempotent and cheap — one allocation compare when nothing changed —
+/// and every attempt logs a `skipped=` reason, deduped per distinct state.
+///
+/// Runs on the GTK main thread. Off the main thread the thread-local widget is
+/// `None` (thread-locals are per thread), so the call only logs
+/// `skipped=not-registered` and returns. `fallback_physical` is the Tauri
+/// window's inner size (physical px), used only while the container has no
+/// settled allocation. Returns the logical target size that was applied (or
+/// would be, when the skip is `unmapped-parent`).
+pub fn sync_webview_size(
+    fallback_physical: (u32, u32),
+    origin: &'static str,
+) -> Option<(i32, i32)> {
+    let Some(widget) =
+        WEBVIEW_WIDGET.with(|cell| cell.borrow().as_ref().and_then(|weak| weak.upgrade()))
+    else {
+        emit_webview_state(
+            origin,
+            format!(
+                "skipped={} window_phys={}x{}",
+                WebviewSkip::NotRegistered.label(),
+                fallback_physical.0,
+                fallback_physical.1,
+            ),
+        );
+        return None;
+    };
+    let Some(parent) = widget.parent() else {
+        emit_webview_state(
+            origin,
+            format!(
+                "skipped={} window_phys={}x{}",
+                WebviewSkip::NoParent.label(),
+                fallback_physical.0,
+                fallback_physical.1,
+            ),
+        );
+        return None;
+    };
+    let scale = widget.scale_factor().max(1);
+    // Physical -> logical, rounded down: GTK allocations are logical px.
+    let fallback = (
+        i32::try_from(fallback_physical.0).unwrap_or(i32::MAX) / scale,
+        i32::try_from(fallback_physical.1).unwrap_or(i32::MAX) / scale,
+    );
+    let container = (parent.allocated_width(), parent.allocated_height());
+    let target = webview_target_size(Some(container), fallback);
+    let skipped = allocate_webview(&widget, &parent, target);
+    log_webview_size(
+        &widget,
+        origin,
+        target,
+        container,
+        fallback_physical,
+        skipped,
+    );
+    Some(target)
+}
+
+/// Why a sync pass did (or did not) apply a new allocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WebviewSkip {
+    /// The allocation (and the map step if it was needed) was applied.
+    None,
+    /// The live allocation matches, the widget is mapped and its native window
+    /// is viewable: nothing to do.
+    SameAllocation,
+    /// The reparent has not registered the widget yet.
+    NotRegistered,
+    /// The widget has no GTK parent (not reparented yet, or being destroyed).
+    NoParent,
+    /// The allocation was stored, but no native window can be configured before
+    /// the container is mapped (window not shown yet).
+    UnmappedParent,
+    /// GTK is already inside a fill pass (not re-entrant): the outer call owns it.
+    Nested,
+}
+
+impl WebviewSkip {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::SameAllocation => "same-allocation",
+            Self::NotRegistered => "not-registered",
+            Self::NoParent => "no-parent",
+            Self::UnmappedParent => "unmapped-parent",
+            Self::Nested => "nested",
+        }
+    }
+}
+
+/// The logical size the webview widget must occupy.
+///
+/// The container (the overlay the React DOM fills) is authoritative once GTK has
+/// allocated it. `1x1` is GTK's *unsized requisition*, not a viewport: it is what
+/// a not-yet-laid-out widget reports, so it counts as unsettled and the caller's
+/// fallback (the window's inner size) is used instead. A widget is never sized
+/// 0x0 either — an unusable size stays an explicit 1x1 "not sized yet", which the
+/// next pass corrects and the size log makes greppable.
+pub(super) fn webview_target_size(
+    container: Option<(i32, i32)>,
+    fallback: (i32, i32),
+) -> (i32, i32) {
+    let (width, height) = match container {
+        Some((width, height)) if width > 1 && height > 1 => (width, height),
+        _ if fallback.0 > 1 && fallback.1 > 1 => fallback,
+        _ => (1, 1),
+    };
+    (width.max(1), height.max(1))
+}
+
+/// The container's current allocation, for logging.
+fn connect_webview_fill(overlay: &gtk::Overlay, widget: &gtk::Widget) {
+    let weak = widget.downgrade();
+    overlay.connect_size_allocate(move |overlay, allocation| {
+        let Some(widget) = weak.upgrade() else {
+            return;
+        };
+        // `size-allocate` hands us the container allocation already applied, so
+        // this is the authoritative target on a GTK-driven layout pass.
+        let target = webview_target_size(
+            Some((allocation.width(), allocation.height())),
+            (overlay.allocated_width(), overlay.allocated_height()),
+        );
+        let skipped = allocate_webview(&widget, overlay.upcast_ref::<gtk::Widget>(), target);
+        let container = (overlay.allocated_width(), overlay.allocated_height());
+        log_webview_size(
+            &widget,
+            "overlay-layout",
+            target,
+            container,
+            (0, 0),
+            skipped,
+        );
+    });
+}
+
+/// Apply `target` to the widget, mapping it first when GTK has not done so.
+///
+/// A reparented widget can be left unmapped even though it is visible (`show()`
+/// is a no-op for an already-visible widget): GTK maps a native window only with
+/// the widget, and an unmapped WebKit view paints nothing. The explicit `map()`
+/// plus `size_allocate` is the pair that actually configures the native window.
+fn allocate_webview(widget: &gtk::Widget, parent: &gtk::Widget, target: (i32, i32)) -> WebviewSkip {
+    if WEBVIEW_FILL_ACTIVE.with(|active| active.replace(true)) {
+        return WebviewSkip::Nested;
+    }
+    let skipped = apply_allocation(widget, parent, target);
+    WEBVIEW_FILL_ACTIVE.with(|active| active.set(false));
+    skipped
+}
+
+fn apply_allocation(widget: &gtk::Widget, parent: &gtk::Widget, target: (i32, i32)) -> WebviewSkip {
+    let allocation = widget.allocation();
+    let same = allocation.x() == 0
+        && allocation.y() == 0
+        && allocation.width() == target.0
+        && allocation.height() == target.1;
+    // A **GTK-mapped** widget is not enough: its `GdkWindow` must be viewable,
+    // otherwise there is no surface on screen (this is exactly the state that
+    // produced a black window: `mapped=true`, native window 1x1 at -1,-1).
+    // Treating it as settled would skip forever, so it is retried instead.
+    let viewable = widget.window().is_none_or(|window| window.is_viewable());
+    if same && widget.is_mapped() && viewable {
+        return WebviewSkip::SameAllocation;
+    }
+    if !widget.is_visible() {
+        widget.show();
+    }
+    if !parent.is_mapped() {
+        // Store it (GTK keeps the allocation), but nothing native can be
+        // configured before the container maps; the next pass retries.
+        widget.size_allocate(&gtk::Allocation::new(0, 0, target.0, target.1));
+        return WebviewSkip::UnmappedParent;
+    }
+    // Map before allocating: GTK configures a widget's `GdkWindow` from
+    // `gtk_widget_size_allocate`, and only once the widget itself is mapped.
+    if widget.is_realized() && !widget.is_mapped() {
+        widget.map();
+    }
+    widget.size_allocate(&gtk::Allocation::new(0, 0, target.0, target.1));
+    if !widget.is_mapped() {
+        return WebviewSkip::UnmappedParent;
+    }
+    WebviewSkip::None
+}
+
+/// The greppable webview-size evidence line: requested target, the widget's
+/// actual allocation, its own native `GdkWindow` extent, the container
+/// allocation (the DOM viewport), the map state and the skip reason. A
+/// regression shows up here as a number instead of a black window.
+#[allow(clippy::too_many_arguments)]
+fn log_webview_size(
+    widget: &gtk::Widget,
+    origin: &'static str,
+    target: (i32, i32),
+    container: (i32, i32),
+    window_physical: (u32, u32),
+    skipped: WebviewSkip,
+) {
+    let allocation = widget.allocation();
+    // `Widget::window()` falls back to the nearest windowed ancestor, so a
+    // non-native webview would report the overlay's window as its own. Report
+    // whether the widget owns a window and, only then, that window's extent.
+    let own_window = widget.has_window();
+    let native = if own_window {
+        widget
+            .window()
+            .map(|window| (window.width(), window.height()))
+    } else {
+        None
+    };
+    // GDK geometry is parent-relative: a size that is right but a position or
+    // stacking that is wrong (or an unmapped window) shows up here.
+    let geometry = widget
+        .window()
+        .map(|window| window.geometry())
+        .map(|(x, y, width, height)| format!("({x},{y},{width}x{height})"))
+        .unwrap_or_else(|| "none".to_string());
+    let viewable = widget
+        .window()
+        .map(|window| window.is_viewable())
+        .unwrap_or(false);
+    // The X11 XID when the widget owns an X11 window (the capture scripts and
+    // `xwininfo -tree` are keyed on it).
+    let xid = widget
+        .window()
+        .and_then(|window| window.downcast::<gdkx11::X11Window>().ok())
+        .map(|window| format!("0x{:x}", window.xid()))
+        .unwrap_or_else(|| "none".to_string());
+    let state = widget
+        .window()
+        .map(|window| format!("{:?}", window.state()))
+        .unwrap_or_else(|| "none".to_string());
+    emit_webview_state(
+        origin,
+        format!(
+        "requested={}x{} allocated={}x{} at=({},{}) own_window={} native={}x{} native_geom={} native_viewable={} native_xid={} native_state={} mapped={} visible={} realizable={} scale={} container={}x{} window_phys={}x{} skipped={}",
+        target.0,
+        target.1,
+        allocation.width(),
+        allocation.height(),
+        allocation.x(),
+        allocation.y(),
+        own_window,
+        native.map(|size| size.0).unwrap_or(0),
+        native.map(|size| size.1).unwrap_or(0),
+        geometry,
+        viewable,
+        xid,
+        state,
+        widget.is_mapped(),
+        widget.is_visible(),
+        widget.is_realized(),
+        widget.scale_factor(),
+        container.0,
+        container.1,
+        window_physical.0,
+        window_physical.1,
+        skipped.label(),
+    ),
+    );
+}
+
+/// Print one webview-size line unless its **state** is identical to the previous
+/// one. Dedup is on the state, not on the whole line, so a `tick` and an
+/// `overlay-layout` pass that observe the same state do not log twice while a
+/// 60 Hz tick cannot spam; a state *change* (size, mapping, container, skip
+/// reason) always logs, with the origin of the pass that saw it.
+fn emit_webview_state(origin: &str, body: String) {
+    let unchanged = WEBVIEW_SIZE_LOG.with(|last| last.borrow().as_deref() == Some(body.as_str()));
+    if unchanged {
+        return;
+    }
+    WEBVIEW_SIZE_LOG.with(|last| *last.borrow_mut() = Some(body.clone()));
+    eprintln!("[probe] webview size ({origin}): {body}");
 }
 
 /// B3: make the native drawing area transparent to input so OS pointer/wheel
