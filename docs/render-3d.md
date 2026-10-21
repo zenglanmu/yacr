@@ -100,7 +100,10 @@ HATCH 的检测需要上游提供 3D 边界。渐变 HATCH 仍只绘制边界。
 - **完整隐藏线算法**：仅背面剔除 + 深度测试，不是 HLR（规范明确允许）。
 - **边线偏移（line offset）**：线框叠加与实体面共面时可能出现 z-fighting；未实现
   深度偏移。
-- **3D 拾取**：GPU 侧无拾取，F14 的“受支持几何可拾取”仍待上层。
+- **3D 拾取**（2026-10-21 更正）：宿主的 hover/点击选择走 **CPU 射线**漏斗
+  （`pick_at_screen_with_visibility` → `Camera::screen_to_ray` → `pick_ray`，透视容差由 depth+FOV 推出），
+  **真机已验证**：3D 点击选中 ACIS 实体（`AcDb3dSolid`，24 顶点/12 三角形），空白处点击清空选择（非残留），
+  2D 对照选中同一实体，`error` 全程 null。GPU ID pass（`docs/picking-gpu-id-pass.md`）是另一条路径，尚未被宿主使用。
 - **Mesh/Polyface 完整适配**：本路径只消费 `DisplayPrimitive::Mesh`；importer 的类型
   适配不在本工作范围内。
 

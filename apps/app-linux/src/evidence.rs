@@ -50,7 +50,9 @@
 //!   summary (both split at the 1000-line code-file gate);
 //! - [`view3d`]: the `YACR_PROBE_VIEW3D` driver that switches the real session
 //!   to the 3D view (`SWITCH2D3D`), orbits it with a synthetic primary drag and
-//!   reports the real `cad_status` reads (2D camera present -> absent).
+//!   reports the real `cad_status` reads (2D camera present -> absent), including
+//!   a 2D control click and a 3D click on the solid so 3D picking is measured
+//!   rather than assumed.
 
 use std::time::{Duration, Instant};
 

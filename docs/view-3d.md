@@ -161,9 +161,21 @@ exposes **no 3D control**:
 - **Platform placeholders**: `apps/app-web` and `apps/app-android` are explicit
   NOT IMPLEMENTED stubs, so 3D and paper-space runtime reachability there is not
   claimed.
-- **3D picking/depth test** still lives with the render workstream
-  (`Camera::screen_to_ray` exists, but no ray/scene intersection or depth
-  readback and no `PickHit` selection).
+- **3D picking is wired and measured** (corrected 2026-10-21; the previous text
+  said no ray/scene intersection existed, which was wrong).
+  `cad_app::picking::pick_at_screen_with_visibility` is the single funnel for
+  both hover (`crates/cad-host/src/input/hover.rs`) and click selection
+  (`crates/cad-host/src/input/interaction.rs`), it calls `Camera::screen_to_ray`
+  → `pick_ray`, and `pick_tolerance` derives a **perspective** world-per-pixel
+  from depth and FOV, so a 3D view picks along its true view ray.
+  Measured on a real 3D frame: a synthetic click on an ACIS solid selects it
+  (`AcDb3dSolid`, 24 vertices / 12 triangles), a click on empty space returns
+  **0** (so the hit is fresh, not a surviving selection), and a 2D control click
+  selects the same entity.
+  Limits: `cad_status` exposes no 3D camera and no hovered-entity field, so a 3D
+  hover is observable only as `hoverPreview`/`snapKind`; picking targets the CPU
+  ray funnel, which is what the host uses — the GPU ID pass
+  (`docs/picking-gpu-id-pass.md`) is a separate path.
 - **Perspective fitting on entry**: entering 3D now frames the document
   (`Camera::enter_3d`: target at the 3D bounds centre, distance
   `radius / tan(fov/2) * 1.2` with `radius` = half the bounding-box diagonal,

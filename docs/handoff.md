@@ -1,3 +1,24 @@
+## 更正：3D 拾取本来就已经可用（2026-10-21）
+
+**背景**：我上一轮把"3D 不可拾取"当作缺口，据此准备改代码。**读码后先做了测量，结论是我错了**：
+`cad-host` 的 hover（`input/hover.rs:178`）与点击选择（`input/interaction.rs:404`）都调用
+`cad_app::picking::pick_at_screen_with_visibility`，它内部走 `Camera::screen_to_ray` → `pick_ray`；
+`pick_tolerance`（`picking/mod.rs:107-127`）对 **透视投影**按 `depth × FOV` 推出世界/像素。
+既有单测 `perspective_pick_hits_3d_geometry_along_the_view_ray` 也早就在。
+
+**真机证据**（`YACR_PROBE_VIEW3D` 扩展了拾取相位；X11/XWayland + P620 + Vulkan，跑两次一致）：
+- 2D 对照点击画布 (463, 153.45) ⇒ `selection_count_2d = 1`；
+- 切 3D → orbit → 先点**空白**（95%/95%）⇒ `selection_count_3d_empty = 0`（**排除残留选择**）；
+- 再点同一点 ⇒ `selection_count_3d = 1`，同一 `id=1 handle=31 type=AcDb3dSolid vertices=24 triangles=12`；
+- 三次点击 `error` 全 `null`，`entityCount` 恒 1（选择不改图）。
+
+**限制（如实记录）**：`cad_status` **没有** 3D 相机、**没有** hovered-entity 字段 ⇒ 3D hover 只能用
+`hoverPreview`/`snapKind` 观测，orbit 只能用拖动像素观测；报告里显式写了 `hover_channel`/
+`orbit_angle_channel` 两条"通道缺失"说明。GPU ID pass 是另一条路径，宿主当前未用。
+
+**文档更正**：`docs/view-3d.md` 与 `docs/render-3d.md` 里"无 ray/scene 求交、无 PickHit 选择、
+仍待上层"的说法已按上述证据改写（那两句是过期断言，不是设计决定）。
+
 ## 实体着色：3D 改为相机相对头灯（2026-10-21）
 
 **症状**：斜视立方体的两个侧面**同为 137 = sRGB(0.25)**（环境光底），多面读不出来——因为着色的
