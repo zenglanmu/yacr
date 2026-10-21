@@ -17,6 +17,7 @@ use cad_ui_core::unsupported_status;
 use super::admission::{
     cad_present_admission, layout_needs_revalidate, BindStep, CadPresentAdmission,
 };
+use super::commands::drain_standard_views;
 use super::dom::run_dom_diag;
 use super::options::{ANIMATION_STEP, FRAME_INTERVAL};
 use super::postload::{drive_postload_pan, ActualRenderSummary};
@@ -430,10 +431,11 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
     let mut last_input_seq: Option<u64> = None;
     let mut input_age_us: Option<u128> = None;
     if cad_mode {
-        let (commands, tool_parameters, tool_texts, selected_texts, inputs) = {
+        let (commands, mut standard_views, tool_parameters, tool_texts, selected_texts, inputs) = {
             let mut state = lock(shared);
             (
                 std::mem::take(&mut state.shell.cad_commands),
+                std::mem::take(&mut state.cad_standard_views),
                 std::mem::take(&mut state.cad_tool_parameters),
                 std::mem::take(&mut state.cad_tool_texts),
                 std::mem::take(&mut state.cad_selected_texts),
@@ -441,6 +443,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
             )
         };
         let queued = commands.len()
+            + standard_views.len()
             + tool_parameters.len()
             + tool_texts.len()
             + selected_texts.len()
@@ -467,6 +470,17 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                         if let Err(error) = session.command(command) {
                             eprintln!("[probe] cad command rejected: {error}");
                         }
+                    }
+                    // Typed standard-view requests: each one dispatches the real
+                    // `CommandId::StandardView` + `CommandPayload::StandardView`
+                    // through the session funnel, so the application performs the
+                    // camera transition. They are drained in admission order (the
+                    // last one wins) and every real refusal is the session's own
+                    // error, surfaced through `cad_status.error`.
+                    for error in drain_standard_views(&mut standard_views, |view| {
+                        session.standard_view(view)
+                    }) {
+                        eprintln!("[probe] cad standard view rejected: {error}");
                     }
                     // Typed tool-parameter requests: routed through the one
                     // session path, applied before this batch's inputs so a

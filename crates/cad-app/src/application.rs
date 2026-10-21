@@ -645,21 +645,45 @@ impl Application {
 
     /// Apply a named standard view to the current target.
     ///
-    /// The camera is placed at `target + offset * distance`, where `offset` is
-    /// the standard view's unit eye direction; the distance is taken from the
-    /// current camera (or the drawing's diagonal the first time). The resulting
-    /// basis is right-handed and orthonormal ([`Camera::view_basis`]). The plan
-    /// (top) view returns the viewport to 2D mode with an orthographic
-    /// projection; every other standard view is a 3D view.
+    /// The plan (top) view is the canonical 2D view: it restores the 2D camera
+    /// snapshotted when the 3D observation was entered — the same camera
+    /// [`Application::switch_2d3d`] restores — so a standard-view round trip
+    /// never loses the 2D framing. While already in 2D that snapshot is the
+    /// current camera, so the plan view is a re-orientation no-op.
+    ///
+    /// Every other standard view is a 3D observation: the camera is placed at
+    /// `target + offset * distance`, where `offset` is the standard view's unit
+    /// eye direction. Entering 3D **from the plan** derives the distance from the
+    /// document bounds ([`Camera::enter_3d`]), exactly like the other 3D entry
+    /// points: the plan camera's fixed eye height (1000 world units) says nothing
+    /// about the model's size, so a small model would be a speck and a large one
+    /// would put the eye inside the geometry. From an existing 3D observation the
+    /// current distance is kept — a standard view re-orients, it does not reset
+    /// the user's zoom. The resulting basis is right-handed and orthonormal
+    /// ([`Camera::view_basis`]).
     pub(crate) fn apply_standard_view(
         &mut self,
         _session: &mut SessionState,
         command: &Command,
         view: StandardView,
     ) -> CadResult<()> {
+        let bounds = self.document_bounds(command.document);
         let viewport = self.viewport_mut(command)?;
+        if view.is_plan() {
+            let saved = viewport.view_mode.saved_2d_camera();
+            viewport.camera = saved;
+            viewport.view_mode = ViewMode2d3d::TwoD { saved };
+            return Ok(());
+        }
+
+        let entering_from_plan = matches!(viewport.view_mode.kind(), ProjectionKind::TwoD);
         let target = viewport.camera.target;
-        let distance = {
+        let distance = if entering_from_plan {
+            viewport
+                .camera
+                .enter_3d(bounds, camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?
+                .distance()
+        } else {
             let d = viewport.camera.distance();
             if d.is_finite() && d > 1e-6 {
                 d
@@ -678,26 +702,13 @@ impl Application {
         camera.validate()?;
         viewport.camera = camera;
 
-        if view.is_plan() {
-            // The plan view is the canonical 2D view: force orthographic and keep
-            // the current scale, then remember the camera for 2D↔3D round trips.
-            let scale = match viewport.camera.projection {
-                Projection::Orthographic { scale } => scale,
-                Projection::Perspective { .. } => camera::DEFAULT_ORTHO_SCALE,
-            };
-            viewport.camera.projection = Projection::Orthographic { scale };
-            viewport.view_mode = ViewMode2d3d::TwoD {
-                saved: viewport.camera,
-            };
-        } else {
-            // A non-plan standard view is a 3D observation.
-            if viewport.camera.projection.is_orthographic() {
-                viewport.camera.projection =
-                    Projection::perspective(camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?;
-            }
-            let saved = viewport.view_mode.saved_2d_camera();
-            viewport.view_mode = ViewMode2d3d::ThreeD { saved_2d: saved };
+        // A non-plan standard view is a 3D observation.
+        if viewport.camera.projection.is_orthographic() {
+            viewport.camera.projection =
+                Projection::perspective(camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?;
         }
+        let saved = viewport.view_mode.saved_2d_camera();
+        viewport.view_mode = ViewMode2d3d::ThreeD { saved_2d: saved };
         Ok(())
     }
 }

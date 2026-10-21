@@ -31,7 +31,8 @@ use std::collections::VecDeque;
 
 use cad_app::input::CanvasMetrics;
 use cad_app::{
-    CommandPayload, DrawToolKind, MeasurementToolKind, ToolParameter, ToolSnapshot, ToolValue,
+    CommandPayload, DrawToolKind, MeasurementToolKind, StandardView, ToolParameter, ToolSnapshot,
+    ToolValue,
 };
 use cad_domain::{CadResult, DocumentIdentity};
 use cad_engine::protocol::{EngineClient, EngineRequest, RequestError, RequestId, StatusMessage};
@@ -428,6 +429,20 @@ impl CadSession {
         self.submit_interactions(vec![InteractionRequest::DismissTextFocus])
     }
 
+    /// Apply one named standard view through the ordinary host funnel.
+    ///
+    /// The view travels as the typed [`CommandPayload::StandardView`] payload —
+    /// reached from the dedicated `cad_standard_view` IPC, never parsed out of
+    /// the name-only `cad_command` funnel. The host application performs the real
+    /// camera transition (the plan view restores 2D orthographic; every other
+    /// view is a perspective 3D observation framed on first entry). A refusal
+    /// (no active viewport, a non-finite camera, …) is returned as the real
+    /// completion error and recorded for `cad_status.error`; it is never turned
+    /// into an empty success.
+    pub fn standard_view(&self, view: StandardView) -> Result<(), String> {
+        self.dispatch_payload(CommandId::StandardView, CommandPayload::StandardView(view))
+    }
+
     /// Apply a fixed zoom step about the **viewport centre**.
     ///
     /// A `ZOOMIN`/`ZOOMOUT` button supplies no cursor, so the step is anchored
@@ -482,7 +497,13 @@ impl CadSession {
 
     /// Dispatch one non-interactive command through the ordinary host funnel.
     fn dispatch_command(&self, id: CommandId) -> Result<(), String> {
-        match self.core.command(id, CommandPayload::None) {
+        self.dispatch_payload(id, CommandPayload::None)
+    }
+
+    /// Dispatch one command and its typed payload through the ordinary host
+    /// funnel, recording the real refusal for `cad_status.error`.
+    fn dispatch_payload(&self, id: CommandId, payload: CommandPayload) -> Result<(), String> {
+        match self.core.command(id, payload) {
             Ok(()) => {
                 *self.error.borrow_mut() = None;
                 Ok(())

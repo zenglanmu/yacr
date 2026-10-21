@@ -248,8 +248,11 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
   （`crates/cad-app/src/camera/` → `cad-host/src/state.rs` 的 `ViewSnapshot` →
   `cad-engine` 按 `view_mode` 选 `render`(2D)/`render_3d`(`Camera3d`)）。
   **可达性**：命令行输入 `SWITCH2D3D` 进入 3D（无负载、在命令表内），3D 下**主键拖动即 orbit**；
-  `ORBIT` 按设计是手势命令（`GESTURE_ONLY_COMMANDS`），不是按钮。**React chrome 没有 3D 控件**，
-  `STANDARDVIEW`/`PROJECTION` 仍缺载荷通道 ⇒ **标准视图不可达**（声明缺口）。
+  `ORBIT` 按设计是手势命令（`GESTURE_ONLY_COMMANDS`），不是按钮。
+  **标准视图**经专用 typed IPC `cad_standard_view { view }`（有界队列 + 与命令同门禁，
+  名字大小写不敏感、未知值具名拒绝），走真实 `CommandId::StandardView`；`PROJECTION` 无载荷、
+  命令行本就可达。**React chrome 仍无 3D 控件**（开关/标准视图按钮），故目前只能命令行或 IPC 触发
+  （声明缺口）。
   **真机 3D 出图已验证**（Quadro P620 / Vulkan / X11）：ACIS 立方体在斜视下为 **6 顶点凸包、三面、
   平行棱收敛 31.2%、对角线不等 10.1%**，隐藏边不穿透（`docs/handoff.md` 2026-10-21 条目）。
   边界：俯视正交下"有面立方体"与"填色方片"**像素等价**，故 2D 帧不能证明三维性；

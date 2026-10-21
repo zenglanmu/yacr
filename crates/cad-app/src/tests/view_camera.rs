@@ -118,6 +118,7 @@ fn orbit_without_payload_is_rejected() {
 #[test]
 fn standard_view_is_a_real_projection_and_plan_returns_to_2d() {
     let (mut app, mut session) = application_with_document();
+    let saved_2d = app.workspace.viewports[&ViewportId(1)].camera;
     app.execute(
         &mut session,
         command(
@@ -128,10 +129,27 @@ fn standard_view_is_a_real_projection_and_plan_returns_to_2d() {
     .unwrap();
     let vp = &app.workspace.viewports[&ViewportId(1)];
     assert_eq!(vp.view_mode.kind(), ProjectionKind::ThreeD);
+    assert!(
+        matches!(vp.camera.projection, Projection::Perspective { .. }),
+        "a non-plan standard view is a perspective 3D observation"
+    );
+    // The eye sits on the standard direction and at a finite, positive distance:
+    // entering 3D from the plan derives it from the bounds, never from the plan
+    // camera's fixed 1000-unit eye height.
+    let distance = vp.camera.distance();
+    assert!(distance.is_finite() && distance > 0.0, "{distance}");
+    let offset = StandardView::Front.eye_offset();
+    for (axis, expected) in [
+        (vp.camera.eye.x - vp.camera.target.x, offset.x),
+        (vp.camera.eye.y - vp.camera.target.y, offset.y),
+        (vp.camera.eye.z - vp.camera.target.z, offset.z),
+    ] {
+        assert!((axis / distance - expected).abs() < 1e-9);
+    }
     let basis = vp.camera.view_basis().unwrap();
     assert!(basis.is_orthonormal(1e-9));
 
-    // Top (plan) returns to 2D orthographic.
+    // Top (plan) returns to 2D orthographic with the saved 2D camera.
     app.execute(
         &mut session,
         command(
@@ -143,6 +161,10 @@ fn standard_view_is_a_real_projection_and_plan_returns_to_2d() {
     let vp = &app.workspace.viewports[&ViewportId(1)];
     assert_eq!(vp.view_mode.kind(), ProjectionKind::TwoD);
     assert!(vp.camera.projection.is_orthographic());
+    assert_eq!(
+        vp.camera, saved_2d,
+        "the plan view restores the 2D camera saved when 3D was entered"
+    );
 }
 
 #[test]

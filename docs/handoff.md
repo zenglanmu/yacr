@@ -1,3 +1,31 @@
+## STANDARDVIEW 通道 + 第三个 3D 入口的取景缺陷（2026-10-21）
+
+**为什么**：`STANDARDVIEW` 需要 `CommandPayload::StandardView(view)`，而 `admit_command` 只排队**名字字符串**，
+带载荷的变体一律被拒 ⇒ 这个选择器**从任何 UI 都不可达**（`PROJECTION` 无载荷，命令行本就可达，实测确认）。
+
+**做法（遵循项目既定模式，不在 `cad_command` 里解析文本）**：专用 typed IPC
+`cad_standard_view { view }` → `parse_standard_view`（`top/bottom/front/back/left/right/isometric`，
+大小写不敏感；未知/空值**具名拒绝**）→ 独立有界队列（门禁顺序与 `admit_command` 一致：
+弹窗模态 → CAD 关闭 → 队列满）→ 宿主 tick 排空 → `CadSession::standard_view` →
+真实 `CommandId::StandardView` + payload。
+
+**顺带修掉的第三个入口缺陷**：`apply_standard_view` 是继 `SWITCH2D3D`、`PROJECTION` 之后的**第三个**进 3D 的入口，
+它**从不调用 `enter_3d`**，直接复用 2D 平面的固定 **1000 世界单位**眼高：
+对 2 单位大的立方体是**约 2 px 的斑点**，对 4000×3000 的图则把眼点放进模型内部。
+现在：从平面进入时按文档包围盒取景（与 `SwitchProjection` 同规则），**已在 3D 时保留当前距离**
+（重新定向不该重置用户缩放），平面视图**位级还原**保存的 2D 相机（此前会把正交比例重置成 `DEFAULT_ORTHO_SCALE`）。
+
+**证据**（真实 GPU，X11/XWayland，P620 + Vulkan，`pulled=active`）：
+- `YACR_PROBE_VIEW3D_STANDARD=isometric`（**零合成输入**，纯 IPC）：
+  `ack={accepted:true}`、`camera` present→absent、`error` 全程 null；CAD 帧非背景 47,827 px、
+  bbox 264×273、六边形填充比 0.634 ⇒ **等轴测视图真的被取景**，不是斑点。
+- orbit 回归（原 `YACR_PROBE_VIEW3D`）报告行不变：`camera present→absent`、选择 1/0/1、35 次拖动移动。
+
+**新发现（仍未修，下一步）**：等轴测帧里**三个可见面填色完全相同**（`215,215,215`），只靠白边区分。
+原因不是 bug：相机相对头灯在等轴测下对三个面的 `n·L` **本来相等**（对称）。
+但作为显示方案它让"等轴测"这个最常用的 3D 视角**读不出面**——需要把光源**偏离视轴一个固定角度**
+（如向上偏 20°、向左偏 20°），仍是相机相对，但等轴测下三面会有不同明暗。
+
 ## 更正：3D 拾取本来就已经可用（2026-10-21）
 
 **背景**：我上一轮把"3D 不可拾取"当作缺口，据此准备改代码。**读码后先做了测量，结论是我错了**：

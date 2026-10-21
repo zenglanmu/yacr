@@ -22,6 +22,17 @@
 //!    synthetic-event counters (`selection` count/rows/ids, `error`, `tool`,
 //!    `hoverPreview`, `snapKind`, click coordinates and rect).
 //!
+//! ## `YACR_PROBE_VIEW3D_STANDARD=<view>`: the typed-IPC proof
+//!
+//! A second, separately env-gated phase (`YACR_PROBE_VIEW3D_STANDARD`) proves the
+//! **`cad_standard_view`** IPC end to end with **no synthetic input at all**: it
+//! reads `cad_status`, invokes the typed command once with the named view,
+//! reads `cad_status` again and reports the ack, the real error string and
+//! whether the camera block became absent (3D). Nothing here drags, clicks or
+//! types, so an isometric frame from this phase can only come from the IPC. The
+//! phase is independent: with only `YACR_PROBE_VIEW3D` set the run is exactly the
+//! drag-orbit sequence above.
+//!
 //! The click is a press and a release **at the same point** (the input lane
 //! classifies exactly that as a click; any move past the drag threshold makes it
 //! a gesture, which never selects). A preceding idle `pointermove` lets the host
@@ -62,33 +73,71 @@ pub fn view3d_enabled() -> bool {
     )
 }
 
+/// The standard view the typed-IPC phase must request
+/// (`YACR_PROBE_VIEW3D_STANDARD=<view>`), or `None` when the phase is off.
+///
+/// The value is the wire name the `cad_standard_view` IPC expects (`top`,
+/// `bottom`, `front`, `back`, `left`, `right`, `isometric`). It is passed through
+/// verbatim: an unknown name is the IPC's own refusal and must be reported as
+/// one, never silently replaced by a valid view.
+pub fn standard_view_request() -> Option<String> {
+    let raw = std::env::var("YACR_PROBE_VIEW3D_STANDARD").ok()?;
+    let view = raw.trim().to_string();
+    if view.is_empty() {
+        eprintln!(
+            "[probe] view3d-standard: YACR_PROBE_VIEW3D_STANDARD is empty; no standard-view phase (nothing faked)"
+        );
+        return None;
+    }
+    Some(view)
+}
+
 /// Schedule the 3D view evidence driver if enabled. Never panics on spawn
 /// failure (a failed spawn is logged; the run continues unchanged).
 ///
 /// The thread only dispatches `Webview::eval` scripts that call the public
-/// `cad_status`/`cad_command` commands and dispatch synthetic DOM pointer
-/// events. No command/session logic is changed and no GPU state is touched.
+/// `cad_status`/`cad_command`/`cad_standard_view` commands and dispatch synthetic
+/// DOM pointer events. No command/session logic is changed and no GPU state is
+/// touched.
 pub fn maybe_spawn_view3d(webview: Option<&tauri::Webview>) {
-    if !view3d_enabled() {
+    let orbit = view3d_enabled();
+    let standard = standard_view_request();
+    if !orbit && standard.is_none() {
         return;
     }
     let Some(webview) = webview else {
         eprintln!("[probe] view3d: no child webview; 3D-view pass skipped (nothing faked)");
         return;
     };
-    eprintln!(
-        "[probe] view3d: enabled (YACR_PROBE_VIEW3D); synthetic DOM pointer events, NOT a real mouse; \
-         steps: 2D control click + cad_status(after_click_2d) + cad_status(before) + \
-         cad_command SWITCH2D3D + cad_status(after_switch) + primary orbit drag + \
-         cad_status(after_orbit) + empty 3D click + solid 3D click + cad_status(after_click_3d) + \
-         one report line"
-    );
-    let webview = webview.clone();
-    if let Err(error) = std::thread::Builder::new()
-        .name("probe-view3d".into())
-        .spawn(move || run_view3d(webview))
-    {
-        eprintln!("[probe] view3d: failed to spawn: {error}");
+    if orbit {
+        eprintln!(
+            "[probe] view3d: enabled (YACR_PROBE_VIEW3D); synthetic DOM pointer events, NOT a real mouse; \
+             steps: 2D control click + cad_status(after_click_2d) + cad_status(before) + \
+             cad_command SWITCH2D3D + cad_status(after_switch) + primary orbit drag + \
+             cad_status(after_orbit) + empty 3D click + solid 3D click + cad_status(after_click_3d) + \
+             one report line"
+        );
+        let webview = webview.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("probe-view3d".into())
+            .spawn(move || run_view3d(webview))
+        {
+            eprintln!("[probe] view3d: failed to spawn: {error}");
+        }
+    }
+    if let Some(view) = standard {
+        eprintln!(
+            "[probe] view3d-standard: enabled (YACR_PROBE_VIEW3D_STANDARD={view}); one typed \
+             `cad_standard_view` IPC and NO synthetic pointer input; steps: \
+             cad_status(before) + cad_standard_view + cad_status(after) + one report line"
+        );
+        let webview = webview.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("probe-view3d-standard".into())
+            .spawn(move || run_standard_view(webview, view))
+        {
+            eprintln!("[probe] view3d-standard: failed to spawn: {error}");
+        }
     }
 }
 
@@ -214,6 +263,140 @@ fn run_view3d(webview: tauri::Webview) {
         );
     }
 }
+
+/// Run the **typed-IPC** standard-view phase relative to driver start:
+///
+/// * t=2.4 s: read `cad_status` as `standard_before` (a loaded drawing in the
+///   default 2D view reports a `camera` block);
+/// * t=3.0 s: invoke the real `cad_standard_view` IPC once with `{view:<name>}`.
+///   The ack (or the real refusal) is stored on `window.__yacr_view3d`;
+/// * t=3.9 s: read `cad_status` as `standard_after` (`camera` must be absent for a
+///   non-plan view, and `error` must stay `null`);
+/// * t=4.6 s (retried once at t=5.4 s): print **one** report line through the
+///   `eval_with_callback` idiom the other drivers use.
+///
+/// There is deliberately **no** click, drag or command-line input in this phase:
+/// a 3D isometric frame after it can only come from the typed IPC.
+fn run_standard_view(webview: tauri::Webview, view: String) {
+    let start = Instant::now();
+    schedule_view3d(&start, 2_400, "standard_before cad_status", || {
+        webview.eval(view3d_status_js("standard_before"))
+    });
+    let invoke = standard_view_invoke_js(&view);
+    schedule_view3d(
+        &start,
+        3_000,
+        "cad_standard_view { view } (typed IPC, no synthetic input)",
+        || webview.eval(invoke),
+    );
+    schedule_view3d(&start, 3_900, "standard_after cad_status", || {
+        webview.eval(view3d_status_js("standard_after"))
+    });
+
+    let reported = Arc::new(AtomicBool::new(false));
+    for millis in [4_600u64, 5_400] {
+        let webview = webview.clone();
+        let reported = reported.clone();
+        schedule_view3d(&start, millis, "view3d standard report", move || {
+            webview.eval_with_callback(STANDARD_VIEW_REPORT_JS, move |payload| {
+                if reported.load(Ordering::SeqCst) {
+                    return;
+                }
+                let text = decode_view3d_report(&payload);
+                if text.is_empty() || text == "not-ready" {
+                    eprintln!(
+                        "[probe] view3d-standard-report deferred ({text}); the standard_after cad_status read has not landed yet"
+                    );
+                    return;
+                }
+                reported.store(true, Ordering::SeqCst);
+                eprintln!("[probe] view3d-standard-report {text}");
+            })
+        });
+    }
+    // Let the last eval callback land before deciding the report never arrived.
+    std::thread::sleep(Duration::from_millis(600));
+    if !reported.load(Ordering::SeqCst) {
+        eprintln!(
+            "[probe] view3d-standard-report FAILED (no standard_after cad_status read landed before the bound; nothing faked)"
+        );
+    }
+}
+
+/// Build the script that invokes the real `cad_standard_view` IPC and stores the
+/// ack (or the real refusal) on `window.__yacr_view3d`.
+fn standard_view_invoke_js(view: &str) -> String {
+    STANDARD_VIEW_INVOKE_TEMPLATE.replace("__VIEW__", view)
+}
+
+/// Invoke `cad_standard_view` with `{ view: "__VIEW__" }` (synthetic JS, real IPC).
+const STANDARD_VIEW_INVOKE_TEMPLATE: &str = r#"
+(function () {
+  var d = window.__yacr_view3d = window.__yacr_view3d || {};
+  var view = '__VIEW__';
+  d.standard_requested = view;
+  d.standard_ack = null;
+  d.standard_failed = null;
+  try {
+    var internals = window.__TAURI_INTERNALS__;
+    if (!internals || typeof internals.invoke !== 'function') {
+      d.standard_failed = 'no-tauri-internals';
+      return 'no-tauri-internals';
+    }
+    internals.invoke('cad_standard_view', { view: view }).then(function (ack) {
+      d.standard_ack = ack;
+    }).catch(function (err) {
+      d.standard_failed = String(err);
+    });
+    return 'cad_standard_view dispatched';
+  } catch (err) {
+    d.standard_failed = 'fatal:' + err;
+    return 'error:' + err;
+  }
+})()
+"#;
+
+/// Assemble the single typed-IPC report line from the **real** stored reads.
+///
+/// `ack` is the raw `CadCommandAck` (`{accepted:true}` means *queued*, never
+/// completion), `error_*` are the real technical `cad_status.error` strings, and
+/// `camera_before`/`camera_after` are the real presence of the 2D camera block.
+/// A missing read is `unread:<reason>` (never `absent`, which would be a claim).
+const STANDARD_VIEW_REPORT_JS: &str = r#"
+(function () {
+  try {
+    var d = window.__yacr_view3d;
+    if (!d || !d.standard_after) { return 'not-ready'; }
+    function cam(name) {
+      var v = d[name];
+      if (!v) { return 'unread:' + (d[name + '_failed'] || 'no-read'); }
+      return v.camera ? 'present' : 'absent';
+    }
+    function err(name) {
+      var v = d[name];
+      if (!v) { return 'unread:' + (d[name + '_failed'] || 'no-read'); }
+      return v.error;
+    }
+    var after = d.standard_after || {};
+    var result = {
+      requested: d.standard_requested || null,
+      ack: d.standard_ack || null,
+      ack_failed: d.standard_failed || null,
+      camera_before: cam('standard_before'),
+      camera_after: cam('standard_after'),
+      error_before: err('standard_before'),
+      error_after: err('standard_after'),
+      center_after: after.center || null,
+      scale_after: (typeof after.scale === 'number') ? after.scale : null,
+      document: after.document || null,
+      entity_count: (typeof after.entity_count === 'number') ? after.entity_count : null,
+      tool: after.tool || null,
+      synthetic_input: 'none (this phase sends no pointer input; the frame comes from the typed IPC)'
+    };
+    return JSON.stringify(result);
+  } catch (e) { return 'error:' + e; }
+})()
+"#;
 
 /// Decode the JSON-quoted eval-callback payload into the raw report string (the
 /// `eval_with_callback` idiom, identical to the pan/box reports).
@@ -580,7 +763,7 @@ const VIEW3D_REPORT_JS: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use super::decode_view3d_report;
+    use super::{decode_view3d_report, standard_view_invoke_js};
 
     #[test]
     fn decodes_a_json_quoted_eval_payload() {
@@ -594,5 +777,19 @@ mod tests {
     #[test]
     fn passes_a_raw_marker_through_unchanged() {
         assert_eq!(decode_view3d_report("  not-ready\n"), "not-ready");
+    }
+
+    #[test]
+    fn standard_view_invoke_carries_the_requested_key_verbatim() {
+        let script = standard_view_invoke_js("isometric");
+        assert!(script.contains("var view = 'isometric';"), "{script}");
+        assert!(
+            script.contains("invoke('cad_standard_view', { view: view })"),
+            "{script}"
+        );
+        assert!(
+            !script.contains("__VIEW__"),
+            "the placeholder is substituted"
+        );
     }
 }

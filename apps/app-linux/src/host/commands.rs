@@ -1,6 +1,8 @@
 //! Tauri IPC commands: probe status, CAD command admission, CAD status and the
 //! sequence-gated input funnel.
 
+use std::collections::VecDeque;
+
 use cad_render_wgpu::PulledState;
 use cad_ui_core::protocol::{InputKind, ProbeInput, ProbeInputAck, ProbeStatus};
 use cad_ui_core::session::CadStatus;
@@ -251,6 +253,118 @@ pub fn cad_set_selected_text(
     let mut state = lock(&shared.0);
     let cad_mode = state.shell.cad_mode;
     admit_selected_text(&mut state.cad_selected_texts, cad_mode, text)?;
+    Ok(CadCommandAck { accepted: true })
+}
+
+/// Bounded capacity of the dedicated standard-view queue.
+///
+/// It reuses the CAD command queue's capacity so every admission shares one
+/// bound.
+pub const CAD_STANDARD_VIEW_CAP: usize = cad_ui_core::shell::CAD_COMMAND_CAP;
+
+/// Parse the wire form of a `cad_standard_view` request into the typed view.
+///
+/// The wire carries the view's **stable machine key** (`StandardView::key`, e.g.
+/// `"isometric"`), matched ASCII case-insensitively against
+/// [`cad_app::StandardView::ALL`]. An empty request and an unknown name are
+/// explicit refusals with distinct names; there is deliberately **no** default
+/// view and no clamp to a neighbouring one, so a malformed request can never
+/// silently change the camera.
+pub fn parse_standard_view(view: &str) -> Result<cad_app::StandardView, String> {
+    let name = view.trim();
+    if name.is_empty() {
+        return Err("view.standard_empty: cad_standard_view needs a view name".into());
+    }
+    cad_app::StandardView::ALL
+        .iter()
+        .copied()
+        .find(|candidate| candidate.key().eq_ignore_ascii_case(name))
+        .ok_or_else(|| {
+            let expected = cad_app::StandardView::ALL
+                .iter()
+                .map(|view| view.key())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "view.standard_unknown: cad_standard_view has no view '{name}' (expected one of \
+                 {expected})"
+            )
+        })
+}
+
+/// Admit one typed standard view into the bounded main-thread queue.
+///
+/// Pure and toolkit-free, with the **same** gates as [`admit_command`]: the modal
+/// popup gate first (while a popup owns input, every CAD command is refused by
+/// name), then a disabled CAD session (probe mode), then the bound. The view is
+/// not applied here — the owner tick drains the queue through
+/// `CadSession::standard_view`, so no camera state is touched off the main
+/// thread and a real refusal surfaces through `cad_status.error`.
+pub fn admit_standard_view(
+    queue: &mut VecDeque<cad_app::StandardView>,
+    cad_mode: bool,
+    modal_open: bool,
+    view: cad_app::StandardView,
+) -> Result<(), String> {
+    if modal_open {
+        return Err(cad_ui_core::shell::POPUP_MODAL_OPEN.into());
+    }
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if queue.len() >= CAD_STANDARD_VIEW_CAP {
+        return Err("CAD standard-view queue is full".into());
+    }
+    queue.push_back(view);
+    Ok(())
+}
+
+/// Drain the standard-view queue in admission order, applying each view.
+///
+/// `apply` is the host session funnel (`CadSession::standard_view`), so the real
+/// camera transition — and any real refusal — happens on the owner thread. The
+/// last admitted view is the one left applied. Refusals are returned so the
+/// caller can log them; the session has already recorded them for
+/// `cad_status.error`, so nothing is swallowed and nothing is invented.
+pub fn drain_standard_views(
+    queue: &mut VecDeque<cad_app::StandardView>,
+    mut apply: impl FnMut(cad_app::StandardView) -> Result<(), String>,
+) -> Vec<String> {
+    let mut refusals = Vec::new();
+    while let Some(view) = queue.pop_front() {
+        if let Err(error) = apply(view) {
+            refusals.push(error);
+        }
+    }
+    refusals
+}
+
+/// `cad_standard_view` command: admit one typed standard view into the bounded
+/// main-thread queue.
+///
+/// `STANDARDVIEW` maps to a payload-carrying [`cad_app::CommandId::StandardView`]
+/// (`CommandPayload::StandardView`), which the name-only `cad_command` funnel
+/// cannot carry: that funnel queues a normalized name and the router refuses a
+/// payload-carrying variant. This dedicated typed IPC is the sanctioned channel
+/// for it (the same shape as `cad_set_tool_parameter`), deliberately **not** an
+/// argument added to `cad_command`.
+///
+/// The wire shape is `{ view: <key> }` with a stable key from
+/// [`cad_app::StandardView::ALL`] (`top`, `bottom`, `front`, `back`, `left`,
+/// `right`, `isometric`), matched case-insensitively. `{accepted:true}` means
+/// **queued**, not completed: the owner tick drains the queue through
+/// `CadSession::standard_view`, and the real outcome (including any refusal)
+/// surfaces through `cad_status.error` and the next camera block.
+#[tauri::command]
+pub fn cad_standard_view(
+    shared: tauri::State<'_, ProbeShared>,
+    view: String,
+) -> Result<CadCommandAck, String> {
+    let view = parse_standard_view(&view)?;
+    let mut state = lock(&shared.0);
+    let cad_mode = state.shell.cad_mode;
+    let modal_open = modal_gate_open(&state.shell);
+    admit_standard_view(&mut state.cad_standard_views, cad_mode, modal_open, view)?;
     Ok(CadCommandAck { accepted: true })
 }
 

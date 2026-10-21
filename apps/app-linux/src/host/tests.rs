@@ -1,7 +1,10 @@
+use std::collections::VecDeque;
+
 use super::admission::{cad_present_admission, layout_needs_revalidate, CadPresentAdmission};
 use super::commands::{
-    admit_selected_text, admit_tool_parameter, admit_tool_text, parse_tool_parameter,
-    CAD_SELECTED_TEXT_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
+    admit_selected_text, admit_standard_view, admit_tool_parameter, admit_tool_text,
+    drain_standard_views, parse_standard_view, parse_tool_parameter, CAD_SELECTED_TEXT_CAP,
+    CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
 };
 use super::options::{start_maximized, LaunchOptions};
 use super::postload::{
@@ -361,6 +364,116 @@ fn selected_text_admission_is_bounded_and_refuses_probe_mode_and_static_content(
         admit_selected_text(&mut queue, true, "x".into()).unwrap_err(),
         "CAD selected-text queue is full"
     );
+}
+
+#[test]
+fn standard_view_wire_names_parse_case_insensitively_and_refuse_unknown_or_empty() {
+    // The `cad_standard_view` wire form: the stable machine key of a standard
+    // view, matched ASCII case-insensitively. Every one of the seven views is
+    // reachable by name; an empty request and an unknown name are distinct,
+    // named refusals (never a default view, never a clamp).
+    use cad_app::StandardView;
+
+    for (wire, expected) in [
+        ("top", StandardView::Top),
+        ("BOTTOM", StandardView::Bottom),
+        ("Front", StandardView::Front),
+        ("bAcK", StandardView::Back),
+        ("left", StandardView::Left),
+        ("RIGHT", StandardView::Right),
+        ("isometric", StandardView::Isometric),
+        ("  Isometric  ", StandardView::Isometric),
+    ] {
+        assert_eq!(parse_standard_view(wire), Ok(expected), "{wire:?}");
+    }
+    // Distinct wire names map to distinct variants: no key aliases another.
+    let mut keys: Vec<&str> = StandardView::ALL.iter().map(|view| view.key()).collect();
+    let count = keys.len();
+    keys.sort_unstable();
+    keys.dedup();
+    assert_eq!(keys.len(), count, "standard-view keys are unique");
+
+    let empty = parse_standard_view("   ").unwrap_err();
+    let unknown = parse_standard_view("diagonal").unwrap_err();
+    assert!(empty.starts_with("view.standard_empty"), "{empty}");
+    assert!(unknown.starts_with("view.standard_unknown"), "{unknown}");
+    assert_ne!(empty, unknown);
+    assert!(unknown.contains("diagonal"), "{unknown}");
+    // The refusal lists the accepted vocabulary instead of guessing a view.
+    assert!(unknown.contains("isometric"), "{unknown}");
+}
+
+#[test]
+fn standard_view_admission_is_bounded_and_refuses_probe_mode_and_the_modal_gate() {
+    // The `cad_standard_view` ack path: the typed view is only *queued* for the
+    // owner thread. The gates are `admit_command`'s: the modal popup gate first,
+    // then a disabled CAD session, then the bound.
+    use cad_app::StandardView;
+
+    let mut queue: VecDeque<StandardView> = VecDeque::new();
+    assert_eq!(
+        admit_standard_view(&mut queue, false, false, StandardView::Top).unwrap_err(),
+        "CAD is disabled in probe mode"
+    );
+    assert_eq!(
+        admit_standard_view(&mut queue, true, true, StandardView::Top).unwrap_err(),
+        cad_ui_core::shell::POPUP_MODAL_OPEN
+    );
+    assert!(queue.is_empty(), "refusals queue nothing");
+
+    admit_standard_view(&mut queue, true, false, StandardView::Isometric).expect("accepted");
+    assert_eq!(queue.pop_front(), Some(StandardView::Isometric));
+
+    for _ in 0..CAD_STANDARD_VIEW_CAP {
+        admit_standard_view(&mut queue, true, false, StandardView::Front).expect("within capacity");
+    }
+    assert_eq!(queue.len(), CAD_STANDARD_VIEW_CAP);
+    assert_eq!(
+        admit_standard_view(&mut queue, true, false, StandardView::Top).unwrap_err(),
+        "CAD standard-view queue is full"
+    );
+    // The modal gate is checked before the bound, exactly like `admit_command`:
+    // a full queue behind an open modal reports the modal reason.
+    assert_eq!(
+        admit_standard_view(&mut queue, true, true, StandardView::Top).unwrap_err(),
+        cad_ui_core::shell::POPUP_MODAL_OPEN
+    );
+}
+
+#[test]
+fn drained_standard_views_apply_in_order_and_empty_the_queue() {
+    // Two queued views apply in admission order (the last one wins on the
+    // camera) and the queue is emptied. A real refusal is returned, never
+    // swallowed, and does not stop the remaining views.
+    use cad_app::StandardView;
+
+    let mut queue = VecDeque::from([StandardView::Front, StandardView::Isometric]);
+    let mut applied = Vec::new();
+    let refusals = drain_standard_views(&mut queue, |view| {
+        applied.push(view);
+        Ok(())
+    });
+    assert!(refusals.is_empty(), "{refusals:?}");
+    assert_eq!(
+        applied,
+        vec![StandardView::Front, StandardView::Isometric],
+        "admission order is preserved"
+    );
+    assert!(queue.is_empty(), "everything queued was drained");
+
+    let mut queue = VecDeque::from([StandardView::Back, StandardView::Top]);
+    let mut applied = Vec::new();
+    let refusals = drain_standard_views(&mut queue, |view| {
+        applied.push(view);
+        if view == StandardView::Back {
+            Err("view.refused: test refusal".into())
+        } else {
+            Ok(())
+        }
+    });
+    assert_eq!(applied, vec![StandardView::Back, StandardView::Top]);
+    assert_eq!(refusals, vec!["view.refused: test refusal".to_string()]);
+    assert!(queue.is_empty());
 }
 
 #[test]

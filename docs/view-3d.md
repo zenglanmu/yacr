@@ -134,10 +134,19 @@ exposes **no 3D control**:
   `apps/app-linux/ui/src/commands.mjs`'s `GESTURE_ONLY_COMMANDS`, so the
   affordance stays disabled with a gesture reason rather than fabricating a
   camera move.
-- **No ribbon 3D toggle and no standard-view controls**: the React chrome has
-  neither, so `STANDARDVIEW` (which needs a view payload) and `PROJECTION` are
-  reachable only through channels that do not exist yet. This is an explicit UI
-  gap, not a hidden one.
+- **Standard views**: `STANDARDVIEW` carries a view payload, and the project
+  rule is a dedicated **typed IPC** rather than text parsing on `cad_command`, so
+  the host exposes `cad_standard_view { view: "top" | "bottom" | "front" | "back"
+  | "left" | "right" | "isometric" }`. It is queued (bounded, same gates as
+  `admit_command`), drained on the owner tick, and dispatched as the real
+  `CommandId::StandardView` + `CommandPayload::StandardView`. Names parse
+  case-insensitively; an unknown or empty view is refused by name.
+- **`PROJECTION` needs no payload** and was already reachable through the
+  command line (the application arm ignores the payload), so it needed no
+  channel.
+- **Still no ribbon control**: the React chrome has no 3D toggle and no
+  standard-view affordance yet, so both are reachable only from the command line
+  and the typed IPC. That is an explicit UI gap, not a hidden one.
 
 ## Shading convention
 

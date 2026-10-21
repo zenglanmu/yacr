@@ -7,6 +7,7 @@
 mod command_vocabulary;
 mod import_accounting;
 mod input_and_lifecycle;
+mod standard_view;
 mod status_projection;
 
 /// A committed synthetic, writer-produced AC1032 DWG with four LINE
