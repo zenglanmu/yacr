@@ -113,8 +113,8 @@ fn vs_main(
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
     // Same display-convention diffuse term as `mesh.wgsl`: `camera.light.rgb` is
-    // the frame's unit vector toward the light (2D: world +Z; 3D: reversed view
-    // direction).
+    // the frame's unit vector toward the light (2D: world +Z; 3D: the
+    // camera-relative key light, offset from the view axis).
     let diffuse = max(dot(n, camera.light.xyz), 0.0);
     let base = camera.tint.rgb * in.color;
     let lit = base * (0.25 + 0.75 * diffuse);

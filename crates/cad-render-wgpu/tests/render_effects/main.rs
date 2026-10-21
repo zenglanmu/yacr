@@ -193,10 +193,10 @@ fn quad_mesh(
     }
 }
 
-/// Batch origins for the transparency scenario. The `Mesh` shader is a fixed
-/// headlight: normal `+Z` gives the full diffuse term, normal `+X` gives only
-/// the ambient floor, so the overlay is a visibly different colour from the
-/// background even though both use the same pipeline.
+/// Batch origins for the transparency scenario. This is the **2D** path, whose
+/// `Mesh` light is a fixed world-Z headlight: normal `+Z` gives the full diffuse
+/// term, normal `+X` gives only the ambient floor, so the overlay is a visibly
+/// different colour from the background even though both use the same pipeline.
 const FULL_COVER_NORMAL: [f32; 3] = [0.0, 0.0, 1.0];
 
 const OVERLAY_NORMAL: [f32; 3] = [1.0, 0.0, 0.0];

@@ -13,9 +13,10 @@ pub(crate) const LINE_INSTANCED_SHADER: &str = include_str!("../../shaders/line_
 // `Renderer::initialize_with_device`); deliberately not WebGL2-safe.
 pub(crate) const LINE_PULLED_SHADER: &str = include_str!("../../shaders/line_pulled.wgsl");
 
-// Mesh shader. Shading is intentionally explicit: a single fixed headlight
-// direction, N·L diffuse plus a constant ambient term. There is no claim of
-// physically based rendering, environment lighting or specular response.
+// Mesh shader. Shading is intentionally explicit: an N·L diffuse term against a
+// per-frame, camera-relative key light (offset from the view axis for 3D, world
+// `+Z` for 2D) plus a constant ambient term. There is no claim of physically
+// based rendering, environment lighting or specular response.
 pub(crate) const MESH_SHADER: &str = include_str!("../../shaders/mesh.wgsl");
 
 // Merged-mesh shader: the same shading body as `MESH_SHADER` with an extra

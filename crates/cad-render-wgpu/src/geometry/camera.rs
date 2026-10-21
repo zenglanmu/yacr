@@ -28,6 +28,27 @@ impl Default for Camera2d {
     }
 }
 
+/// Horizontal key-light offset along the camera's own `right` axis, in units of
+/// the camera radius (the eye-to-target distance). Negative = screen **left**.
+///
+/// [`KEY_LIGHT_UP`] and this constant are the deliberate **display convention**
+/// of the 3D shading, not a physical light: the key sits a fixed amount
+/// above-left *off* the view axis instead of exactly on it. A pure headlight
+/// (`normalize(eye - target)`) makes every face of a solid equally inclined to
+/// the view, so a symmetric view - above all the standard isometric view, where
+/// the view axis is equally inclined to `+X`, `+Y` and `+Z` - shades all visible
+/// faces identically and the solid reads as one flat silhouette. The offset is
+/// constant in camera space, so it follows the orbit and every view keeps a
+/// distinguishable face order. No shadows, no specular response, no energy
+/// conservation and no physical light are claimed.
+const KEY_LIGHT_RIGHT: f64 = -0.10;
+
+/// Vertical key-light offset along the camera's own `up` axis, in units of the
+/// camera radius: bigger than [`KEY_LIGHT_RIGHT`] so the key comes from
+/// **above**-left rather than from the side, which is the CAD convention for
+/// reading a solid.
+const KEY_LIGHT_UP: f64 = 0.35;
+
 /// A 3D orbit camera: an eye, a target and an up vector in world space.
 ///
 /// Spec §5.2/§3.3 F13/F14: the 3D view needs a real projection before standard
@@ -78,24 +99,72 @@ impl Camera3d {
         Some(mat4_mul(&proj, &view))
     }
 
-    /// Unit vector **toward** the light for this camera: the reversed view
-    /// direction, `normalize(eye - target)`, in world space - i.e. a
-    /// camera-relative headlight.
+    /// Unit vector **toward** the 3D key light for this camera, in world space:
     ///
-    /// This is the display convention the 3D mesh shading uses (the face being
-    /// looked at is the lit one), not a physical light. `None` for a degenerate
-    /// camera (eye == target), which [`Camera3d::view_projection`] already
-    /// rejects, so the renderer only normalises a usable camera.
+    /// ```text
+    /// toward_eye = normalize(eye - target)
+    /// right      = normalize(forward x up)      // forward = -toward_eye
+    /// up         = right x forward
+    /// light      = normalize(toward_eye + KEY_LIGHT_RIGHT * right
+    ///                                    + KEY_LIGHT_UP * up)
+    /// ```
+    ///
+    /// The basis is derived exactly as [`Camera3d::look_at`] builds the view
+    /// matrix, so the offset is fixed *relative to the screen*: the key sits
+    /// above-left of the line of sight at every orbit angle. That is the display
+    /// convention described on [`KEY_LIGHT_RIGHT`] - a camera-following key, not
+    /// a headlight and not a physical source - and it is what keeps a symmetric
+    /// (e.g. isometric) view from shading all of its faces identically.
+    ///
+    /// `None` for a degenerate camera (eye == target), which
+    /// [`Camera3d::view_projection`] already rejects, so the renderer only
+    /// normalises a usable camera. An up hint parallel to the line of sight has
+    /// no stable basis (also rejected by the projection); the light then falls
+    /// back to the pure view direction instead of inventing an axis.
     pub fn headlight(&self) -> Option<[f32; 3]> {
         let span = sub(self.eye, self.target);
         let len = length(span);
-        (len > 1e-12).then(|| {
-            [
-                (span.x / len) as f32,
-                (span.y / len) as f32,
-                (span.z / len) as f32,
-            ]
-        })
+        // `!(len > 1e-12)` written positively: a non-finite span has no
+        // direction either (it is `None` exactly as before).
+        if !len.is_finite() || len <= 1e-12 {
+            return None;
+        }
+        let toward_eye = Point3 {
+            x: span.x / len,
+            y: span.y / len,
+            z: span.z / len,
+        };
+        let light = normalize(self.key_light_direction(toward_eye));
+        Some([light.x as f32, light.y as f32, light.z as f32])
+    }
+
+    /// The world-space key direction for a unit `toward_eye` (the reversed view
+    /// direction), offset by [`KEY_LIGHT_RIGHT`]/[`KEY_LIGHT_UP`] along the
+    /// camera basis. Falls back to `toward_eye` when the up hint leaves no
+    /// stable basis.
+    fn key_light_direction(&self, toward_eye: Point3) -> Point3 {
+        let forward = Point3 {
+            x: -toward_eye.x,
+            y: -toward_eye.y,
+            z: -toward_eye.z,
+        };
+        let side = cross(forward, self.up);
+        let side_len = length(side);
+        if side_len < 1e-12 {
+            return toward_eye;
+        }
+        let right = Point3 {
+            x: side.x / side_len,
+            y: side.y / side_len,
+            z: side.z / side_len,
+        };
+        // `forward` is unit and perpendicular to `right`, so this is unit too.
+        let up = cross(right, forward);
+        Point3 {
+            x: toward_eye.x + KEY_LIGHT_RIGHT * right.x + KEY_LIGHT_UP * up.x,
+            y: toward_eye.y + KEY_LIGHT_RIGHT * right.y + KEY_LIGHT_UP * up.y,
+            z: toward_eye.z + KEY_LIGHT_RIGHT * right.z + KEY_LIGHT_UP * up.z,
+        }
     }
 
     /// Whether the camera has a usable projection for the given aspect.

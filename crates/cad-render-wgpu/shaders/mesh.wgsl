@@ -11,9 +11,13 @@
 // unit vector *toward* the light in world space):
 //   * 2D keeps a world-Z headlight (`camera.light = (0, 0, 1)`), so the diffuse
 //     term is exactly `n.z` and the 2D output is unchanged;
-//   * 3D uses a camera-relative headlight (the reversed view direction), so the
-//     face the user is looking at is the lit one and the other faces of a solid
-//     fall off by their orientation instead of collapsing to ambient.
+//   * 3D uses a camera-relative **key light offset from the view axis**: the
+//     reversed view direction plus a fixed offset along the camera's own right
+//     and up axes (mostly up, i.e. from above-left). The light therefore follows
+//     the orbit, but a face still shades by its orientation instead of decaying
+//     to ambient - and a *symmetric* view such as the standard isometric one,
+//     whose view axis is equally inclined to three faces, still separates all
+//     three. A pure headlight would shade those three identically.
 //
 // Winding: the mirrored variant of this pipeline selects `front_face = Cw`;
 // the shader is identical for both.
@@ -35,7 +39,8 @@ struct Camera {
     key_flags: vec4<u32>,
     // rgb = unit vector toward the light, in world space (the same space as
     // `world_normal`); a = reserved 0. It is a per-frame camera property: the
-    // 2D view keeps world +Z, the 3D view uses the reversed view direction.
+    // 2D view keeps world +Z, the 3D view uses a camera-relative key light
+    // offset from the view axis (see the header comment).
     light: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -103,8 +108,8 @@ fn vs_main(
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
     // `camera.light.rgb` is the frame's unit vector toward the light. 2D passes
-    // world +Z (so this is exactly the old `n.z`); 3D passes the reversed view
-    // direction, i.e. a camera-relative headlight.
+    // world +Z (so this is exactly the old `n.z`); 3D passes the camera-relative
+    // key light, offset from the view axis so symmetric views still separate.
     let diffuse = max(dot(n, camera.light.xyz), 0.0);
     // `tint.rgb` is the batch's own colour, modulated by the per-vertex colour
     // (white when the batch has no gradient). The diffuse term scales the

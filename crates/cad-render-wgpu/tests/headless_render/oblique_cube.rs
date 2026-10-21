@@ -16,9 +16,18 @@
 //! a **world-fixed** light, so `diffuse == n.z` and every non-horizontal face
 //! collapsed to the same ambient-only value (`sRGB(0.25) == 137`): a 3-face cube
 //! read as one bright quad plus two identical slivers. The shading is now a
-//! camera-relative headlight in 3D, and the tests below require three distinct
+//! camera-relative key light in 3D, and the tests below require three distinct
 //! flat face shades and require the *assignment* to follow a second azimuth, so
 //! a constant light (or a Rust-side per-face tint) cannot pass.
+//!
+//! Regression 3 (measured on a live **isometric** frame): a pure camera-relative
+//! headlight (`light = normalize(eye - target)`) is equally inclined to the three
+//! faces an isometric view shows, so `n.L` was *identical* for `+X`, `+Y` and
+//! `+Z` - all three faces rendered at exactly `(215, 215, 215)` and only the
+//! white edge strokes separated them. The light is therefore a key light offset
+//! from the view axis along the camera's own right/up basis (see
+//! `Camera3d::headlight`), and `isometric_cube_separates_all_three_faces` fails
+//! if the three shades ever collapse again.
 
 use super::*;
 
@@ -32,9 +41,7 @@ const SIZE: u32 = 256;
 
 /// An **asymmetric** oblique camera: azimuth `27°` from `-Y` toward `+X`,
 /// elevation `32°` above the horizon, so the three visible faces (`+Z`, `-Y`,
-/// `+X`) receive three *different* amounts of light. A symmetric isometric view
-/// (`45°`/`35.26°`) would give the two side faces equal light and could not
-/// distinguish a camera-relative headlight from a world-fixed one.
+/// `+X`) receive three *different* amounts of light.
 fn oblique_camera() -> Camera3d {
     oblique_camera_at(27.0, 32.0)
 }
@@ -102,6 +109,42 @@ fn top_down_camera() -> Camera3d {
         far: 100.0,
     }
 }
+
+/// A standard **isometric** camera: the view direction is `normalize(1, 1, 1)`
+/// toward the target and world `+Z` is screen up. Its view axis is equally
+/// inclined to the three faces it shows, which is exactly the symmetric case a
+/// pure headlight shades identically (measured on the live host: `+X`, `+Y` and
+/// `+Z` all at `215`).
+fn isometric_camera() -> Camera3d {
+    let axis = 5.0 / 3.0f64.sqrt();
+    Camera3d {
+        eye: Point3 {
+            x: axis,
+            y: axis,
+            z: axis,
+        },
+        target: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        up: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+        fov_y: std::f64::consts::FRAC_PI_4,
+        near: 0.1,
+        far: 100.0,
+    }
+}
+
+/// Sample points strictly inside the isometric view's three visible faces. Each
+/// avoids its face's triangulation diagonal (`+X`: `y == z`, `+Y`: `x == -z`,
+/// `+Z`: `y == x`) and stays half a unit away from the cube's edges.
+const ISO_X_SAMPLE: [f64; 3] = [1.0, 0.5, -0.5];
+const ISO_Y_SAMPLE: [f64; 3] = [0.5, 1.0, 0.5];
+const ISO_Z_SAMPLE: [f64; 3] = [0.55, 0.05, 1.0];
 
 fn lum(image: &RgbaImage, x: u32, y: u32) -> u8 {
     image.pixel(x, y)[0]
@@ -402,16 +445,16 @@ fn oblique_cube_renders_as_a_hexagon_with_internal_edges() {
                 shades[i].abs_diff(shades[j]) >= 2,
                 "{tier:?}: faces {i} and {j} are not distinguishable \
                  (-Y/+X/+Z shades {shades:?}); this is the world-fixed-light \
-                 collapse the camera-relative headlight removes"
+                 collapse the camera-relative key light removes"
             );
         }
-        // With the light at `normalize(eye - target)` and azimuth 27 deg /
-        // elevation 32 deg, the `-Y` face (dot ~0.76) is brighter than `+Z`
-        // (~0.53), which is brighter than `+X` (~0.39). This pins the actual
+        // The key sits above-left of the view axis, so `+Z` (up) is the
+        // brightest face - ahead of the `-Y` face the eye is closest to - and
+        // `+X` is the darkest of the three here. This pins the actual
         // orientation, not merely "some three values".
         assert!(
-            front > top && top > side,
-            "{tier:?}: expected -Y > +Z > +X, got -Y={front} +Z={top} +X={side}"
+            top > front && front > side,
+            "{tier:?}: expected +Z > -Y > +X, got +Z={top} -Y={front} +X={side}"
         );
 
         // The mesh edge overlay must draw the 12 triangles' edges in 3D too.
@@ -435,14 +478,16 @@ fn oblique_cube_renders_as_a_hexagon_with_internal_edges() {
     }
 }
 
-/// The headlight is **camera-relative**, not a world constant: orbiting the same
+/// The key light is **camera-relative**, not a world constant: orbiting the same
 /// cube to a second azimuth must re-assign which face is brightest.
 ///
-/// At azimuth 62 deg (same 32 deg elevation) the light direction turns toward
-/// `+X`, so `+X` becomes the brightest face and `-Y` the darkest - the exact
-/// opposite of the 27 deg frame. A fixed world light cannot produce this swap,
-/// and neither can a per-face tint chosen in Rust: the shade is computed in the
-/// shader from the frame's camera.
+/// The key is offset from the view axis (mostly *above* it), so `+Z` stays the
+/// brightest of the three faces at both azimuths; the swap is measured between
+/// the two side faces: at azimuth 27 deg the eye is nearest `-Y`, so `-Y` is much
+/// brighter than `+X`, while at 62 deg the light has followed the camera round to
+/// `+X` and `+X` is the brighter of the two. A fixed world light cannot produce
+/// that swap, and neither can a per-face tint chosen in Rust: the shade is
+/// computed in the shader from the frame's camera.
 #[test]
 fn oblique_cube_shading_follows_the_camera() {
     const FIRST_AZIMUTH: f64 = 27.0;
@@ -480,8 +525,9 @@ fn oblique_cube_shading_follows_the_camera() {
                 );
             }
         }
-        // First azimuth: `-Y` is the brightest face. Second: `+X` is, and `-Y`
-        // has fallen below it. The eye moved toward `+X`, so the light did too.
+        // First azimuth: `-Y` is far brighter than `+X`. Second: `+X` is the
+        // brighter of the two, so the assignment swapped. The eye moved toward
+        // `+X`, so the light did too.
         assert!(
             a[0] > a[1] + 5,
             "{tier:?}: at {FIRST_AZIMUTH} deg the -Y face ({} ) must be well \
@@ -495,6 +541,52 @@ fn oblique_cube_shading_follows_the_camera() {
              camera to +X: expected +X ({}) well above -Y ({}), got {b:?}",
             b[1],
             b[0]
+        );
+    }
+}
+
+/// The **isometric** view - the commonest 3D view, and the one a pure
+/// camera-relative headlight broke: its view axis is equally inclined to `+X`,
+/// `+Y` and `+Z`, so all three faces shaded identically (`215`, `215`, `215`).
+///
+/// The key light is offset from the view axis, so the three visible faces must
+/// come out three distinct values. The bottom of the test also requires the
+/// silhouette to still be the six-cornered hexagon of a tilted cube, so a
+/// "distinct shades" reading cannot be satisfied by a degenerate frame.
+#[test]
+fn isometric_cube_separates_all_three_faces() {
+    for tier in [RenderTier::Universal, RenderTier::Accelerated] {
+        let Some(image) = render_cube(isometric_camera(), tier) else {
+            return;
+        };
+        let camera = isometric_camera();
+        let side = face_shade(&image, camera, ISO_X_SAMPLE);
+        let front = face_shade(&image, camera, ISO_Y_SAMPLE);
+        let top = face_shade(&image, camera, ISO_Z_SAMPLE);
+        let shades = [side, front, top];
+        println!("{tier:?}: isometric +X/+Y/+Z shades {shades:?}");
+        for (i, j) in [(0, 1), (0, 2), (1, 2)] {
+            assert!(
+                shades[i].abs_diff(shades[j]) >= 2,
+                "{tier:?}: isometric faces {i} and {j} are within one shade \
+                 (+X/+Y/+Z {shades:?}); a symmetric view must still separate, \
+                 which is exactly what a pure headlight cannot do"
+            );
+        }
+        // The key is above-left of the view axis: `+Z` is the brightest face and
+        // `+X` is the brighter of the two vertical faces.
+        assert!(
+            top > side && side > front,
+            "{tier:?}: expected +Z > +X > +Y for an above-left key, got \
+             +Z={top} +X={side} +Y={front}"
+        );
+        let poly = corner_polygon(&shape_points(&image), 2.0);
+        assert_eq!(
+            poly.len(),
+            6,
+            "{tier:?}: an isometric cube must project to a 6-vertex hexagon, \
+             got {} corners at {poly:?}",
+            poly.len()
         );
     }
 }
@@ -531,13 +623,20 @@ fn top_down_cube_is_a_square_control() {
             upper_width, lower_width,
             "{tier:?}: the control must be an unbiased (non-converging) square"
         );
-        // The top-down view looks straight along `-Z`, so the camera-relative
-        // light is exactly world `+Z`: the visible face must be fully lit (the
-        // ambient floor must not dim a face the camera faces head-on).
+        // The top-down view looks along `-Z`, and the key light is the view
+        // axis offset above-left, so the visible `+Z` face is no longer exactly
+        // `255` - it is `250` (dot ~0.94) instead of a head-on `1.0`. It must
+        // still be clearly the brightest face of the solid: the ambient floor
+        // for a face pointing away is `137`, and the four side faces are unseen.
         let face = face_shade(&image, top_down_camera(), TOP_FACE_SAMPLE);
         assert_eq!(
-            face, 255,
-            "{tier:?}: a top-down 3D view must show the +Z face fully lit, got {face}"
+            face, 250,
+            "{tier:?}: a top-down 3D view must show the +Z face lit by the \
+             above-left key (measured 250), got {face}"
+        );
+        assert!(
+            face > 240,
+            "{tier:?}: the +Z face must stay clearly the brightest, got {face}"
         );
     }
 }

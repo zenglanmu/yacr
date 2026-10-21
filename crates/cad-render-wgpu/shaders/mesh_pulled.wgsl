@@ -123,8 +123,8 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VsOut {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
     // Same display-convention diffuse term as `mesh.wgsl`: `camera.light.rgb` is
-    // the frame's unit vector toward the light (2D: world +Z; 3D: reversed view
-    // direction).
+    // the frame's unit vector toward the light (2D: world +Z; 3D: the
+    // camera-relative key light, offset from the view axis).
     let diffuse = max(dot(n, camera.light.xyz), 0.0);
     // The merged uniform tint is opaque white (the per-batch tint is baked into
     // the per-vertex colour at upload), so `1.0 * in.color == in.color` exactly

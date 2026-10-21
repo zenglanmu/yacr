@@ -87,7 +87,7 @@ pub use lifecycle::maybe_spawn_lifecycle;
 pub use pan::{postload_pan_enabled, POSTLOAD_PAN_JS, POSTLOAD_PAN_REPORT_JS};
 pub use popup::{maybe_spawn_popup_evidence, popup_evidence_enabled};
 pub use tool::{maybe_spawn_tool_evidence, tool_evidence_enabled};
-pub use view3d::{maybe_spawn_view3d, view3d_enabled};
+pub use view3d::{maybe_spawn_view3d, view3d_enabled, view3d_pick_enabled};
 
 /// Sleep until `seconds` after `start`, then run `action` and log the result.
 ///

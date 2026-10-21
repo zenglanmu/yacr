@@ -5,22 +5,38 @@
 //! hover/edit/draw/popup passes). It proves the ACIS solid is genuinely
 //! three-dimensional against a **real running host**:
 //!
-//! 1. **2D control** — click the same canvas fraction that the 3D phase later
-//!    clicks, before the mode switch, and read the real `cad_status` selection.
-//!    This separates "picking is broken in general" from "picking is broken in
-//!    3D only";
-//! 2. read the real `cad_status` (the 2D view reports a `camera` block);
-//! 3. dispatch the payload-free `SWITCH2D3D` selector through the real
+//! 1. read the real `cad_status` (the 2D view reports a `camera` block);
+//! 2. dispatch the payload-free `SWITCH2D3D` selector through the real
 //!    `cad_command` funnel (the host switches the session view mode to the
 //!    perspective 3D camera, so `cad_status.camera` becomes `null`);
-//! 4. run a synthetic **primary drag** on `.native-input`, which the host
+//! 3. run a synthetic **primary drag** on `.native-input`, which the host
 //!    arbitrates as an orbit in 3D (the same drag is a box selection in 2D);
-//! 5. click **empty 3D space** (the deselect control: a real click must clear the
-//!    selection left over from the 2D control), then click the **solid** at the
-//!    same 50%/45% fraction, reading `cad_status` after each click;
-//! 6. print one report line carrying only real reads plus the driver's own
-//!    synthetic-event counters (`selection` count/rows/ids, `error`, `tool`,
-//!    `hoverPreview`, `snapKind`, click coordinates and rect).
+//! 4. read the real `cad_status` again and print one report line carrying only
+//!    real reads plus the driver's own synthetic-event counters.
+//!
+//! ## `YACR_PROBE_VIEW3D_PICK=1`: the picking phase (default OFF)
+//!
+//! The picking phase **clicks**, and the last click **selects** the solid, so
+//! its captured frame carries the selection tint over the whole body and the
+//! face fills are unreadable. It is therefore a separate opt-in:
+//!
+//! * `YACR_PROBE_VIEW3D=1` alone → **orbit only**, no click at all. The final
+//!   frame is a clean oblique solid with distinct face fills;
+//! * `YACR_PROBE_VIEW3D=1 YACR_PROBE_VIEW3D_PICK=1` → the orbit **plus** a 2D
+//!   control click (same canvas fraction, before the switch), a 3D empty-space
+//!   click (the deselect control: a real click must clear the selection left
+//!   over from the 2D control), and a 3D click on the solid, reading the real
+//!   `cad_status` selection after each click.
+//!
+//! The orbit-only path never clicks — it is not "click then deselect": the point
+//! is a clean capture, and an extra click would add behaviour the run does not
+//! need. Each report line states which mode produced the frame
+//! (`pick_phase:"off"|"on"` plus a `click_channel` note).
+//!
+//! With picking on, the click is a press and a release **at the same point**
+//! (the input lane classifies exactly that as a click; any move past the drag
+//! threshold makes it a gesture, which never selects). A preceding idle
+//! `pointermove` lets the host resolve its hover state first.
 //!
 //! ## `YACR_PROBE_VIEW3D_STANDARD=<view>`: the typed-IPC proof
 //!
@@ -33,11 +49,6 @@
 //! phase is independent: with only `YACR_PROBE_VIEW3D` set the run is exactly the
 //! drag-orbit sequence above.
 //!
-//! The click is a press and a release **at the same point** (the input lane
-//! classifies exactly that as a click; any move past the drag threshold makes it
-//! a gesture, which never selects). A preceding idle `pointermove` lets the host
-//! resolve its hover state first.
-//!
 //! Nothing here is a product behaviour change, and no number is synthesized:
 //! `camera_before` / `camera_after_switch` / `camera_after_orbit` are the real
 //! presence of `cad_status.camera`, the `error` fields are the real technical
@@ -49,7 +60,9 @@
 //! no view revision and **no hovered-entity field**, so an orbit can only be
 //! corroborated by its own drag counters plus a screenshot of the running window,
 //! and hover by `hoverPreview`/`snapKind` only. The report states that instead of
-//! claiming a measured orbit angle or a hovered id.
+//! claiming a measured orbit angle or a hovered id. Face-fill separation is a
+//! property of the captured frame, not of `cad_status`, so the report never
+//! claims it; the frame is the evidence.
 //!
 //! A negative result is reported as it is: if the 3D click selects nothing, the
 //! report carries `selection_count_3d=0` with the exact coordinates — the driver
@@ -69,6 +82,20 @@ use std::time::{Duration, Instant};
 pub fn view3d_enabled() -> bool {
     matches!(
         std::env::var("YACR_PROBE_VIEW3D").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
+
+/// Whether the **picking phase** of the 3D view driver is enabled
+/// (`YACR_PROBE_VIEW3D_PICK`, default OFF).
+///
+/// The picking phase clicks, and its last click selects the solid, so the
+/// captured frame carries the selection tint. It is therefore a separate opt-in:
+/// with only `YACR_PROBE_VIEW3D` set the run is orbit-only and never dispatches
+/// a pointer press, leaving a clean frame with readable face fills.
+pub fn view3d_pick_enabled() -> bool {
+    matches!(
+        std::env::var("YACR_PROBE_VIEW3D_PICK").as_deref(),
         Ok("1") | Ok("true") | Ok("yes")
     )
 }
@@ -110,17 +137,27 @@ pub fn maybe_spawn_view3d(webview: Option<&tauri::Webview>) {
         return;
     };
     if orbit {
-        eprintln!(
-            "[probe] view3d: enabled (YACR_PROBE_VIEW3D); synthetic DOM pointer events, NOT a real mouse; \
-             steps: 2D control click + cad_status(after_click_2d) + cad_status(before) + \
-             cad_command SWITCH2D3D + cad_status(after_switch) + primary orbit drag + \
-             cad_status(after_orbit) + empty 3D click + solid 3D click + cad_status(after_click_3d) + \
-             one report line"
-        );
+        let pick = view3d_pick_enabled();
+        if pick {
+            eprintln!(
+                "[probe] view3d: enabled (YACR_PROBE_VIEW3D, pick_phase=on via YACR_PROBE_VIEW3D_PICK); \
+                 synthetic DOM pointer events, NOT a real mouse; steps: 2D control click + \
+                 cad_status(after_click_2d) + cad_status(before) + cad_command SWITCH2D3D + \
+                 cad_status(after_switch) + primary orbit drag + cad_status(after_orbit) + \
+                 empty 3D click + solid 3D click + cad_status(after_click_3d) + one report line"
+            );
+        } else {
+            eprintln!(
+                "[probe] view3d: enabled (YACR_PROBE_VIEW3D, pick_phase=off); synthetic DOM pointer \
+                 events, NOT a real mouse; steps: cad_status(before) + cad_command SWITCH2D3D + \
+                 cad_status(after_switch) + primary orbit drag + cad_status(after_orbit) + one report \
+                 line; NO click is dispatched, so the final frame carries no selection tint"
+            );
+        }
         let webview = webview.clone();
         if let Err(error) = std::thread::Builder::new()
             .name("probe-view3d".into())
-            .spawn(move || run_view3d(webview))
+            .spawn(move || run_view3d(webview, pick))
         {
             eprintln!("[probe] view3d: failed to spawn: {error}");
         }
@@ -141,48 +178,60 @@ pub fn maybe_spawn_view3d(webview: Option<&tauri::Webview>) {
     }
 }
 
-/// Run the 3D view evidence sequence relative to driver start:
+/// Run the 3D view evidence sequence relative to driver start.
 ///
-/// * t=2.4 s: **2D control click** at 50% width / 45% height of the
-///   `.native-input` rect (the fraction the 3D phase reuses);
-/// * t=2.8 s: read `cad_status` as `after_click_2d` (real selection count/rows);
+/// **Orbit only** (`YACR_PROBE_VIEW3D=1`, pick phase off — the default):
+///
 /// * t=3.1 s: read `cad_status` as `before` (a loaded drawing in the default 2D
 ///   view reports a `camera` block);
-/// * t=3.3 s: dispatch `cad_command { command: "SWITCH2D3D" }`. The reads above
-///   are issued first so the host serves them before the switch is queued;
+/// * t=3.3 s: dispatch `cad_command { command: "SWITCH2D3D" }`. The read above is
+///   issued first so the host serves it before the switch is queued;
 /// * t=4.0 s: read `cad_status` as `after_switch` (`camera` must be `absent`,
 ///   `error` must stay `null`);
 /// * t=4.5 s: dispatch the synthetic primary drag script ([`VIEW3D_ORBIT_JS`]);
 ///   in the 3D view mode the host's primary-drag branch orbits instead of
 ///   starting a box selection;
 /// * t=7.0 s: read `cad_status` as `after_orbit`;
-/// * t=7.2 s: click **empty** 3D space at 95%/95% (the deselect control);
+/// * t=7.4 s (retried once at t=8.2 s): print **one** report line with
+///   `pick_phase:"off"`. **No click is ever dispatched on this path**, so the
+///   frame at capture time has no selection tint.
+///
+/// **With the picking phase** (`YACR_PROBE_VIEW3D_PICK=1`), the same orbit
+/// timeline plus:
+///
+/// * t=2.4 s: **2D control click** at 50% width / 45% height of the
+///   `.native-input` rect (the fraction the 3D phase reuses);
+/// * t=2.8 s: read `cad_status` as `after_click_2d` (real selection count/rows);
+/// * t=7.2 s: click **empty** 3D space at 95%/95% (the deselect control: a real
+///   click must clear the selection the 2D control left behind, otherwise a
+///   `selection_count_3d == 1` could be the stale 2D selection);
 /// * t=7.6 s: read `cad_status` as `after_click_3d_empty`;
 /// * t=7.8 s: click the **solid** at 50%/45% (the same fraction as the 2D
 ///   control);
 /// * t=8.3 s: read `cad_status` as `after_click_3d`;
-/// * t=8.7 s (retried once at t=9.5 s if the asynchronous read has not landed):
-///   print **one** report line from [`VIEW3D_REPORT_JS`] through the
-///   `eval_with_callback` idiom the pan driver uses.
+/// * t=8.7 s (retried once at t=9.5 s): print **one** report line with
+///   `pick_phase:"on"`.
 ///
 /// Every step is a dispatch only; the outcome is the **real** `cad_status`
 /// snapshot read from the host, never a value synthesized here.
-fn run_view3d(webview: tauri::Webview) {
+fn run_view3d(webview: tauri::Webview, pick: bool) {
     let start = Instant::now();
 
-    // 2D control: the same canvas fraction the 3D phase clicks later, so a
-    // selection failure can be attributed to the 3D view rather than to picking
-    // in general.
-    let click_2d = view3d_click_js("click_2d", 0.50, 0.45);
-    schedule_view3d(
-        &start,
-        2_400,
-        "2D control click at 50%/45% of .native-input (synthetic, NOT a real mouse)",
-        || webview.eval(click_2d),
-    );
-    schedule_view3d(&start, 2_800, "after_click_2d cad_status", || {
-        webview.eval(view3d_status_js("after_click_2d"))
-    });
+    if pick {
+        // 2D control: the same canvas fraction the 3D phase clicks later, so a
+        // selection failure can be attributed to the 3D view rather than to
+        // picking in general.
+        let click_2d = view3d_click_js("click_2d", 0.50, 0.45);
+        schedule_view3d(
+            &start,
+            2_400,
+            "2D control click at 50%/45% of .native-input (synthetic, NOT a real mouse)",
+            || webview.eval(click_2d),
+        );
+        schedule_view3d(&start, 2_800, "after_click_2d cad_status", || {
+            webview.eval(view3d_status_js("after_click_2d"))
+        });
+    }
 
     schedule_view3d(&start, 3_100, "before cad_status", || {
         webview.eval(view3d_status_js("before"))
@@ -205,48 +254,60 @@ fn run_view3d(webview: tauri::Webview) {
         webview.eval(view3d_status_js("after_orbit"))
     });
 
-    // Deselect control: a real click on empty 3D space must clear the selection
-    // the 2D control left behind. Without it, a `selection_count_3d == 1` could
-    // be the stale 2D selection rather than evidence that the 3D click hit.
-    let click_3d_empty = view3d_click_js("click_3d_empty", 0.95, 0.95);
-    schedule_view3d(
-        &start,
-        7_200,
-        "3D empty-space click at 95%/95% (deselect control)",
-        || webview.eval(click_3d_empty),
-    );
-    schedule_view3d(&start, 7_600, "after_click_3d_empty cad_status", || {
-        webview.eval(view3d_status_js("after_click_3d_empty"))
-    });
+    if pick {
+        // Deselect control: a real click on empty 3D space must clear the
+        // selection the 2D control left behind. Without it, a
+        // `selection_count_3d == 1` could be the stale 2D selection rather than
+        // evidence that the 3D click hit.
+        let click_3d_empty = view3d_click_js("click_3d_empty", 0.95, 0.95);
+        schedule_view3d(
+            &start,
+            7_200,
+            "3D empty-space click at 95%/95% (deselect control)",
+            || webview.eval(click_3d_empty),
+        );
+        schedule_view3d(&start, 7_600, "after_click_3d_empty cad_status", || {
+            webview.eval(view3d_status_js("after_click_3d_empty"))
+        });
 
-    // The measurement: the same fraction the 2D control hit, clicked once in 3D.
-    let click_3d = view3d_click_js("click_3d", 0.50, 0.45);
-    schedule_view3d(
-        &start,
-        7_800,
-        "3D click on the solid at 50%/45% (synthetic, NOT a real mouse)",
-        || webview.eval(click_3d),
-    );
-    schedule_view3d(&start, 8_300, "after_click_3d cad_status", || {
-        webview.eval(view3d_status_js("after_click_3d"))
-    });
+        // The measurement: the same fraction the 2D control hit, clicked once in 3D.
+        let click_3d = view3d_click_js("click_3d", 0.50, 0.45);
+        schedule_view3d(
+            &start,
+            7_800,
+            "3D click on the solid at 50%/45% (synthetic, NOT a real mouse)",
+            || webview.eval(click_3d),
+        );
+        schedule_view3d(&start, 8_300, "after_click_3d cad_status", || {
+            webview.eval(view3d_status_js("after_click_3d"))
+        });
+    }
 
     // The status reads are asynchronous (`invoke(...).then(...)`); the report is
     // assembled from what those promises really stored. One retry covers a slow
-    // read without ever printing two lines.
+    // read without ever printing two lines. The orbit-only run reports as soon as
+    // `after_orbit` has landed; only the picking phase waits for `after_click_3d`.
+    let report_js = view3d_report_js(pick);
+    let report_at = if pick { 8_700 } else { 7_400 };
     let reported = Arc::new(AtomicBool::new(false));
-    for millis in [8_700u64, 9_500] {
+    for millis in [report_at, report_at + 800] {
         let webview = webview.clone();
         let reported = reported.clone();
+        let report_js = report_js.clone();
         schedule_view3d(&start, millis, "view3d report", move || {
-            webview.eval_with_callback(VIEW3D_REPORT_JS, move |payload| {
+            webview.eval_with_callback(&report_js, move |payload| {
                 if reported.load(Ordering::SeqCst) {
                     return;
                 }
                 let text = decode_view3d_report(&payload);
                 if text.is_empty() || text == "not-ready" {
+                    let awaited = if pick {
+                        "after_click_3d"
+                    } else {
+                        "after_orbit"
+                    };
                     eprintln!(
-                        "[probe] view3d-report deferred ({text}); the after_click_3d cad_status read has not landed yet"
+                        "[probe] view3d-report deferred ({text}); the {awaited} cad_status read has not landed yet"
                     );
                     return;
                 }
@@ -258,8 +319,13 @@ fn run_view3d(webview: tauri::Webview) {
     // Let the last eval callback land before deciding the report never arrived.
     std::thread::sleep(Duration::from_millis(600));
     if !reported.load(Ordering::SeqCst) {
+        let awaited = if pick {
+            "after_click_3d"
+        } else {
+            "after_orbit"
+        };
         eprintln!(
-            "[probe] view3d-report FAILED (no after_click_3d cad_status read landed before the bound; nothing faked)"
+            "[probe] view3d-report FAILED (no {awaited} cad_status read landed before the bound; nothing faked)"
         );
     }
 }
@@ -442,6 +508,13 @@ fn view3d_click_js(label: &str, fx: f64, fy: f64) -> String {
         .replace("__LABEL__", label)
         .replace("__FX__", &fx.to_string())
         .replace("__FY__", &fy.to_string())
+}
+
+/// Build the report script for the mode that actually ran (`__PICK__` is `true`
+/// only when the picking phase was enabled, so the report never prints a
+/// selection field for a phase that was never dispatched).
+fn view3d_report_js(pick: bool) -> String {
+    VIEW3D_REPORT_TEMPLATE.replace("__PICK__", if pick { "true" } else { "false" })
 }
 
 /// Read the real `cad_status` and record it under `__NAME__` on
@@ -659,17 +732,23 @@ const VIEW3D_ORBIT_JS: &str = r#"
 /// Camera fields are `present`/`absent` only when a real read landed; a missing
 /// read is `unread:<reason>` (never `absent`, which would be a claim). Errors
 /// are the raw technical status strings (`null` when the read reported none).
-/// `selection_2d` / `selection_3d` are the real `cad_status.selection` blocks
-/// (count, display rows with `id`/`handle`/`type`/`layer`, mixed keys, whether a
-/// text target is present); `selection_3d_empty` is the deselect control. The
-/// 3D camera itself is not part of `cad_status` and there is no hovered-entity
-/// field, so neither a yaw/pitch nor a hovered id is claimed here — only the
-/// measured pixel drag and the real status fields.
-const VIEW3D_REPORT_JS: &str = r#"
+/// `pick_phase` names the mode that produced the frame, and every click/
+/// selection field is `null` in the orbit-only mode because that phase was never
+/// dispatched (never a fabricated zero). In the picking mode `selection_2d` /
+/// `selection_3d` are the real `cad_status.selection` blocks (count, display rows
+/// with `id`/`handle`/`type`/`layer`, mixed keys, whether a text target is
+/// present) and `selection_3d_empty` is the deselect control. The 3D camera is
+/// not part of `cad_status` and there is no hovered-entity field, so neither a
+/// yaw/pitch nor a hovered id is claimed here — only the measured pixel drag and
+/// the real status fields. Face-fill separation belongs to the captured frame,
+/// so the report never claims it either.
+const VIEW3D_REPORT_TEMPLATE: &str = r#"
 (function () {
+  var PICK = __PICK__;
   try {
     var d = window.__yacr_view3d;
-    if (!d || !d.after_click_3d) { return 'not-ready'; }
+    if (!d || !d.after_orbit) { return 'not-ready'; }
+    if (PICK && !d.after_click_3d) { return 'not-ready'; }
     function cam(name) {
       var v = d[name];
       if (!v) { return 'unread:' + (d[name + '_failed'] || 'no-read'); }
@@ -719,29 +798,33 @@ const VIEW3D_REPORT_JS: &str = r#"
     }
     var raw = window.__yacr_draw || {};
     var result = {
+      pick_phase: PICK ? 'on' : 'off',
       camera_before: cam('before'),
       camera_after_switch: cam('after_switch'),
       camera_after_orbit: cam('after_orbit'),
+      error_before: err('before'),
       error_after_switch: err('after_switch'),
       error_after_orbit: err('after_orbit'),
-      error_after_click_2d: err('after_click_2d'),
-      error_after_click_3d_empty: err('after_click_3d_empty'),
-      error_after_click_3d: err('after_click_3d'),
+      error_after_click_2d: PICK ? err('after_click_2d') : null,
+      error_after_click_3d_empty: PICK ? err('after_click_3d_empty') : null,
+      error_after_click_3d: PICK ? err('after_click_3d') : null,
       switch_ack: raw['switch_2d3d_ack'] || null,
       switch_failed: raw['switch_2d3d_failed'] || null,
-      document: field('after_click_3d', 'document') || field('before', 'document'),
+      document: field('after_click_3d', 'document') || field('after_orbit', 'document') ||
+                field('before', 'document'),
       entity_before: field('before', 'entity_count'),
       entity_after_orbit: field('after_orbit', 'entity_count'),
-      entity_after_click_3d: field('after_click_3d', 'entity_count'),
-      selection_count_2d: field('after_click_2d', 'selection_count'),
-      selection_count_3d_empty: field('after_click_3d_empty', 'selection_count'),
-      selection_count_3d: field('after_click_3d', 'selection_count'),
-      selection_2d: sel('after_click_2d'),
-      selection_3d_empty: sel('after_click_3d_empty'),
-      selection_3d: sel('after_click_3d'),
-      click_2d: click('click_2d'),
-      click_3d_empty: click('click_3d_empty'),
-      click_3d: click('click_3d'),
+      entity_after_click_3d: PICK ? field('after_click_3d', 'entity_count') : null,
+      selection_count_after_orbit: field('after_orbit', 'selection_count'),
+      selection_count_2d: PICK ? field('after_click_2d', 'selection_count') : null,
+      selection_count_3d_empty: PICK ? field('after_click_3d_empty', 'selection_count') : null,
+      selection_count_3d: PICK ? field('after_click_3d', 'selection_count') : null,
+      selection_2d: PICK ? sel('after_click_2d') : null,
+      selection_3d_empty: PICK ? sel('after_click_3d_empty') : null,
+      selection_3d: PICK ? sel('after_click_3d') : null,
+      click_2d: PICK ? click('click_2d') : null,
+      click_3d_empty: PICK ? click('click_3d_empty') : null,
+      click_3d: PICK ? click('click_3d') : null,
       downs: d.downs || 0,
       moves: d.moves || 0,
       ups: d.ups || 0,
@@ -753,8 +836,12 @@ const VIEW3D_REPORT_JS: &str = r#"
       end_px: d.end_px || null,
       dx_px: (typeof d.dx_px === 'number') ? d.dx_px : null,
       dy_px: (typeof d.dy_px === 'number') ? d.dy_px : null,
+      click_channel: PICK
+        ? 'on (2D control + 3D empty + 3D solid clicks; the final frame carries the solid selection tint)'
+        : 'off (no click is dispatched on this path; the final frame carries no selection tint)',
       orbit_angle_channel: 'none (cad_status exposes no 3D camera; drag pixels are the real read)',
-      hover_channel: 'none (cad_status has no hovered-entity field; hoverPreview/snapKind only)'
+      hover_channel: 'none (cad_status has no hovered-entity field; hoverPreview/snapKind only)',
+      face_fill_channel: 'none (face fills are a property of the captured frame, not of cad_status)'
     };
     return JSON.stringify(result);
   } catch (e) { return 'error:' + e; }
@@ -763,7 +850,7 @@ const VIEW3D_REPORT_JS: &str = r#"
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_view3d_report, standard_view_invoke_js};
+    use super::{decode_view3d_report, standard_view_invoke_js, view3d_report_js};
 
     #[test]
     fn decodes_a_json_quoted_eval_payload() {
@@ -777,6 +864,18 @@ mod tests {
     #[test]
     fn passes_a_raw_marker_through_unchanged() {
         assert_eq!(decode_view3d_report("  not-ready\n"), "not-ready");
+    }
+
+    #[test]
+    fn report_script_states_the_pick_mode_and_substitutes_its_placeholder() {
+        let off = view3d_report_js(false);
+        assert!(off.contains("var PICK = false;"), "{off}");
+        assert!(off.contains("pick_phase"), "{off}");
+        assert!(!off.contains("__PICK__"), "{off}");
+
+        let on = view3d_report_js(true);
+        assert!(on.contains("var PICK = true;"), "{on}");
+        assert!(!on.contains("__PICK__"), "{on}");
     }
 
     #[test]

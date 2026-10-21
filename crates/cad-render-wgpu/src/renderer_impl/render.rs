@@ -112,10 +112,12 @@ impl Renderer {
             camera.eye.y as f32,
             camera.eye.z as f32,
         ];
-        // Camera-relative headlight for 3D (see `Camera3d::headlight`): the lit
-        // face is the one being looked at, so a solid's faces no longer all
-        // collapse to ambient. The fallback is unreachable after the projection
-        // check above; it is world-`+Z` like the 2D light.
+        // Camera-relative key light for 3D (see `Camera3d::headlight`): the
+        // light follows the orbit but sits a fixed offset above-left of the view
+        // axis, so a solid's faces (including a symmetric isometric view's
+        // three) no longer all collapse to one shade. The fallback is
+        // unreachable after the projection check above; it is world-`+Z` like
+        // the 2D light.
         let light = camera
             .headlight()
             .map_or([0.0, 0.0, 1.0, 0.0], |[r, g, b]| [r, g, b, 0.0]);

@@ -152,13 +152,21 @@ exposes **no 3D control**:
 
 - **2D**: a world-fixed headlight along `-Z`, i.e. `diffuse = n.z`; unchanged
   byte-for-byte by the 3D work.
-- **3D**: a **camera-relative** headlight, `light = normalize(eye - target)`, so
-  the face you are looking at is lit and the others fall off by orientation.
+- **3D**: a **camera-relative key light offset from the view axis**:
+  `light = normalize(toward_eye + KEY_LIGHT_RIGHT * right + KEY_LIGHT_UP * up)`
+  with `toward_eye = normalize(eye - target)` and `right`/`up` the camera's own
+  basis vectors; the constants are `KEY_LIGHT_RIGHT = -0.10` (screen left) and
+  `KEY_LIGHT_UP = 0.35` (above), i.e. about **20° above-left** of the sight line
+  (`crates/cad-render-wgpu/src/geometry/camera.rs`).
+  A pure headlight (`light = toward_eye`) was tried first and **collapsed on
+  isometric views**: the three visible faces are symmetric about that axis, so
+  all three got the same shade (measured: three identical `215` fills). The
+  offset keeps symmetric views readable (measured: `204 / 189 / 238`).
   `lit = tint * (0.25 + 0.75 * max(dot(n, light), 0))` in both cases — ambient
   0.25, no specular, no shadows, no environment light. This is a **display
   convention, not physically based shading**; albedo, exposure and material
-  colour are not modelled, and two faces can end up close in value when their
-  orientations relative to the eye are similar.
+  colour are not modelled, and two faces can still end up close in value when
+  their orientations relative to the light are similar.
 
 ## What is not verified here
 

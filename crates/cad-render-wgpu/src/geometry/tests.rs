@@ -407,31 +407,83 @@ fn cached_partition_matches_fresh_plan_across_cameras() {
     assert_eq!(plan, plan_draw_order(&entries, None));
 }
 
-/// The 3D display light is the reversed view direction, derived from the camera
-/// itself - never a world constant. This is the CPU half of the shader's
-/// camera-relative headlight (the GPU half is fenced by the oblique-cube pixel
-/// tests: three distinct face shades that re-assign on a second azimuth).
+/// The 3D display light is the camera's own view direction **plus a fixed offset
+/// along the camera basis** (`KEY_LIGHT_RIGHT`/`KEY_LIGHT_UP`) - never a world
+/// constant, and deliberately *off* the view axis so a symmetric view still
+/// separates its faces. This is the CPU half of the shader's key light (the GPU
+/// half is fenced by the isometric/oblique cube pixel tests).
 #[test]
-fn camera_headlight_points_from_the_target_toward_the_eye() {
+fn camera_key_light_is_the_offset_view_direction() {
     let plan = Camera3d::plan_view(point(0.0, 0.0, 5.0), point(0.0, 0.0, 0.0));
-    assert_eq!(
-        plan.headlight(),
-        Some([0.0, 0.0, 1.0]),
-        "a top-down camera lights the +Z face head-on"
+    let unit = |v: [f32; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    // Plan view (up `+Y`): the basis is right `+X`, up `+Y`, so the offset goes
+    // toward -X and +Y while +Z still dominates - a top-down camera keeps the
+    // `+Z` face by far the brightest (it is no longer exactly 1.0).
+    let light = plan.headlight().expect("a non-degenerate camera");
+    for (got, want) in light.iter().zip([-0.09397, 0.32889, 0.93969]) {
+        assert!((got - want).abs() < 1e-4, "plan light {light:?}");
+    }
+    assert!(
+        (unit(light) - 1.0).abs() < 1e-6,
+        "must be a unit vector {light:?}"
     );
-    // An oblique eye: the unit vector toward the eye, not a world axis.
+
+    // An oblique eye `(3, -4, 0)` with up `+Y`: the camera basis is
+    // right `(0, 0, -1)`, up `(0.8, 0.6, 0)`, so the light is the reversed view
+    // direction offset toward -Z (right) and up in the view plane.
     let oblique = Camera3d {
         eye: point(3.0, -4.0, 0.0),
         ..plan
     };
     let light = oblique.headlight().expect("a non-degenerate camera");
-    assert!((light[0] - 0.6).abs() < 1e-6, "got {light:?}");
-    assert!((light[1] + 0.8).abs() < 1e-6, "got {light:?}");
-    assert_eq!(light[2], 0.0);
+    for (got, want) in light.iter().zip([0.82692, -0.55442, 0.09397]) {
+        assert!((got - want).abs() < 1e-4, "oblique light {light:?}");
+    }
+    assert!(
+        (unit(light) - 1.0).abs() < 1e-6,
+        "must be a unit vector {light:?}"
+    );
+
     // `eye == target` has no direction at all.
     let degenerate = Camera3d {
         target: point(3.0, -4.0, 0.0),
         ..oblique
     };
     assert_eq!(degenerate.headlight(), None);
+}
+
+/// A standard **isometric** camera (view axis equally inclined to `+X`, `+Y` and
+/// `+Z`) must still give the three visible faces three different diffuse terms.
+///
+/// This is the case a pure headlight cannot shade: `toward_eye` dot each face is
+/// exactly `1/sqrt(3)`, so all three faces render at one identical value. The
+/// offset along the camera basis is what breaks that symmetry - the GPU half of
+/// this fence is `oblique_cube::isometric_cube_separates_all_three_faces`.
+#[test]
+fn camera_key_light_separates_an_isometric_view() {
+    let distance = 5.0;
+    let axis = distance / 3.0f64.sqrt();
+    let camera = Camera3d {
+        eye: point(axis, axis, axis),
+        target: point(0.0, 0.0, 0.0),
+        up: point(0.0, 0.0, 1.0),
+        fov_y: std::f64::consts::FRAC_PI_4,
+        near: 0.1,
+        far: 100.0,
+    };
+    let light = camera.headlight().expect("a non-degenerate camera");
+    // The three faces the isometric view shows, `+X`, `+Y`, `+Z`.
+    let dots = [light[0], light[1], light[2]];
+    println!("isometric light {light:?} face dots {dots:?}");
+    for (i, j) in [(0, 1), (0, 2), (1, 2)] {
+        assert!(
+            (dots[i] - dots[j]).abs() > 0.1,
+            "faces {i} and {j} are too close in an isometric view: {dots:?}"
+        );
+    }
+    // The key comes from above: the `+Z` face is the brightest of the three.
+    assert!(
+        dots[2] > dots[0] && dots[0] > dots[1],
+        "expected +Z > +X > +Y for an above-left key, got {dots:?}"
+    );
 }
