@@ -471,6 +471,8 @@
   "ribbon.panel_settings": "Panel settings",
   "ribbon.collapse": "Collapse ribbon",
   "ribbon.expand": "Expand ribbon",
+  "ribbon.scroll_left": "Scroll ribbon left",
+  "ribbon.scroll_right": "Scroll ribbon right",
   "ribbon.tabs_label": "Ribbon tabs",
   "ribbon.variants": "{name} options",
   "doctabs.label": "Open drawings",

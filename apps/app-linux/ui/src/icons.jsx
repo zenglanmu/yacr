@@ -8,11 +8,16 @@ import React from 'react';
 const CUBE = <><path d="M12 3 20 7.5v9L12 21 4 16.5v-9z" /><path d="M12 12 20 7.5M12 12v9M12 12 4 7.5" /></>;
 
 // Standard-view family: one motif — the view plane with a sight line entering it
-// from the side the camera looks from — so the seven glyphs differ only in
-// direction and read as one set at the ribbon's 16px small-icon size, which a row
-// of identical cubes would not. The frame is small enough to leave the sight line
-// room, and `front`/`back` enter from the lower-left/upper-right on purpose: that
-// is where the cube's front face sits in the axonometric glyph.
+// from the side the camera looks from. The seven glyphs differ only in direction,
+// so the direction has to carry the whole silhouette at the ribbon's 16px small
+// icon size. Each shaft starts at the canvas edge and stops short of the plane,
+// and ends in the same 70° chevron: at 16px the opening stays wide enough to read
+// as two strokes, where a narrow (50°) head collapses into a filled triangle and
+// a 3–4px axis-aligned tick has no direction at all. `front`/`back` use a 45°
+// shaft into the plane's lower-left / upper-right corner — where the cube's front
+// face sits in the axonometric glyph — and their chevron is rotated with the
+// shaft *and* splayed, so it never lines up with the plane's own edges (the old
+// floating "L" tick did exactly that, which is why `front` read as `left`).
 const VIEW_PLANE = <rect x="7.5" y="7.5" width="9" height="9" rx="1" />;
 
 const P = {
@@ -35,12 +40,12 @@ const P = {
   // the upper-right (back) — the corners the axonometric cube's front face sits
   // between. The isometric view keeps the cube, because it is the only one that is
   // not a face-on projection.
-  viewTop: <>{VIEW_PLANE}<path d="M12 1.6v3.6" /><path d="M10.6 3.4 12 5.2l1.4-1.8" /></>,
-  viewBottom: <>{VIEW_PLANE}<path d="M12 22.4v-3.6" /><path d="M10.6 20.6 12 18.8l1.4 1.8" /></>,
-  viewFront: <>{VIEW_PLANE}<path d="M2.6 21.4 5.4 18.6" /><path d="M3.6 18.6h1.8V20.4" /></>,
-  viewBack: <>{VIEW_PLANE}<path d="M21.4 2.6 18.6 5.4" /><path d="M20.4 5.4h-1.8V3.6" /></>,
-  viewLeft: <>{VIEW_PLANE}<path d="M1.6 12h3.6" /><path d="M3.4 10.6 5.2 12l-1.8 1.4" /></>,
-  viewRight: <>{VIEW_PLANE}<path d="M22.4 12h-3.6" /><path d="M20.6 10.6 18.8 12l1.8 1.4" /></>,
+  viewTop: <>{VIEW_PLANE}<path d="M12 1.2v4.6" /><path d="M10.8 3.7 12 5.8 13.2 3.7" /></>,
+  viewBottom: <>{VIEW_PLANE}<path d="M12 22.8v-4.6" /><path d="M10.8 20.3 12 18.2 13.2 20.3" /></>,
+  viewFront: <>{VIEW_PLANE}<path d="M1.4 22.6 6.3 17.7" /><path d="M3.7 18.2 6.3 17.7 5.9 20.3" /></>,
+  viewBack: <>{VIEW_PLANE}<path d="M22.6 1.4 17.7 6.3" /><path d="M20.3 5.8 17.7 6.3 18.1 3.7" /></>,
+  viewLeft: <>{VIEW_PLANE}<path d="M1.2 12h4.6" /><path d="M3.7 10.8 5.8 12 3.7 13.2" /></>,
+  viewRight: <>{VIEW_PLANE}<path d="M22.8 12h-4.6" /><path d="M20.3 10.8 18.2 12 20.3 13.2" /></>,
   viewIsometric: CUBE,
   grid: <><rect x="4" y="4" width="16" height="16" /><path d="M4 9.3h16M4 14.6h16M9.3 4v16M14.6 4v16" /></>,
   axes: <><path d="M6 18V6M6 18h12" /><path d="M6 6l-2.2 2.2M6 6l2.2 2.2M18 18l-2.2-2.2M18 18l-2.2 2.2" /></>,

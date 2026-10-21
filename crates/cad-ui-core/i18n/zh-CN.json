@@ -471,6 +471,8 @@
   "ribbon.panel_settings": "面板设置",
   "ribbon.collapse": "折叠功能区",
   "ribbon.expand": "展开功能区",
+  "ribbon.scroll_left": "向左滚动功能区",
+  "ribbon.scroll_right": "向右滚动功能区",
   "ribbon.tabs_label": "功能区选项卡",
   "ribbon.variants": "{name} 选项",
   "doctabs.label": "打开的图纸",

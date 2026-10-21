@@ -9,13 +9,25 @@
 // positioned inside the panel body, so it stays inside the fixed band and never
 // paints below it over the native CAD partition. It scrolls internally if the
 // list is taller than the body. Escape or a click outside dismisses it.
-import React, { useEffect, useState } from 'react';
+//
+// The panel strip is a horizontal scroller (`overflow-x`), because a 92px band
+// cannot hold every tool of the widest tab at a 960px window. A strip that runs
+// past the right edge is exactly where a reader loses tools without noticing,
+// so each side that actually hides content gets an edge fade plus a chevron that
+// pages the strip (see `ribbon-overflow.mjs` and `.ribbon__overflow`). The cues
+// are overlays: they never take width from the panels, so the band measures the
+// same whether or not they are shown.
+import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons.jsx';
 import { IconButton, RibbonButton } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { RIBBON_TABS, ribbonTab } from '../ribbon-model.mjs';
 import { DOCUMENT_SCOPED_COMMANDS, NO_DOCUMENT_KEY, unavailableReasonKey } from '../commands.mjs';
 import { standardViewAvailable, standardViewUnavailableReasonKey } from '../view3d.mjs';
+import { ribbonOverflow, ribbonScrollTarget, sameOverflow } from '../ribbon-overflow.mjs';
+
+/** No strip, no overflow: also the answer before the first measurement. */
+const NO_OVERFLOW = Object.freeze({ overflowing: false, start: false, end: false });
 
 function runItem(shell, item) {
   if (item.action) return shell.runAction(item.action);
@@ -132,7 +144,13 @@ function Panel({ panel, openMenu, setOpenMenu }) {
     <section className="ribbon-panel" aria-label={t(panel.titleKey)}>
       <div className="ribbon-panel__body">
         {groups.map((group, index) => (
-          <div key={`${panel.id}-${index}`} className={group[0].large ? 'ribbon-panel__group is-large' : 'ribbon-panel__group is-small'}>
+          <div
+            key={`${panel.id}-${index}`}
+            className={[
+              group[0].large ? 'ribbon-panel__group is-large' : 'ribbon-panel__group is-small',
+              !group[0].large && panel.rows === 2 ? 'is-rows-2' : '',
+            ].filter(Boolean).join(' ')}
+          >
             {group.map(item => <PanelItem key={item.id} item={item} openMenu={openMenu} setOpenMenu={setOpenMenu} />)}
           </div>
         ))}
@@ -154,11 +172,91 @@ function Panel({ panel, openMenu, setOpenMenu }) {
   );
 }
 
-export function Ribbon() {
+/**
+ * Live overflow state of the panel strip.
+ *
+ * The first answer is deliberately "nothing overflows" (no cue): a cue is only
+ * honest once the strip has been measured. `resetKey` is whatever makes the
+ * strip render different content — a tab switch or a locale change — and also
+ * re-homes the scroll offset, because a new tab must start at its left edge
+ * instead of inheriting the previous tab's offset.
+ *
+ * A ResizeObserver catches window resizes; the scroll listener catches the
+ * reader paging the strip; one `requestAnimationFrame` re-measure catches the
+ * late layout (web fonts, panel titles) that a synchronous read misses.
+ */
+function useRibbonOverflow(panelsRef, resetKey) {
+  const [state, setState] = useState(NO_OVERFLOW);
+  useEffect(() => {
+    const node = panelsRef.current;
+    if (!node) {
+      setState(NO_OVERFLOW);
+      return undefined;
+    }
+    node.scrollLeft = 0;
+    const measure = () => setState(previous => {
+      const next = ribbonOverflow(node);
+      return sameOverflow(previous, next) ? previous : next;
+    });
+    measure();
+    const frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(measure) : 0;
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    node.addEventListener('scroll', measure, { passive: true });
+    window.addEventListener('resize', measure);
+    observer?.observe(node);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      node.removeEventListener('scroll', measure);
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
+  }, [panelsRef, resetKey]);
+  return state;
+}
+
+/** Page the panel strip one screen-ish step toward `direction`. */
+function pageRibbon(node, direction) {
+  if (!node) return;
+  const left = ribbonScrollTarget(node, direction);
+  // Smooth paging keeps the reader oriented; the assignment is the plain
+  // fallback for an engine without scroll options.
+  if (typeof node.scrollTo === 'function') node.scrollTo({ left, behavior: 'smooth' });
+  else node.scrollLeft = left;
+}
+
+/**
+ * One edge cue: an edge fade plus a chevron that pages the strip.
+ *
+ * Rendered only for a side that actually hides content, so a maximised window
+ * shows none. It is a real button (focusable, labelled) rather than a decorative
+ * gradient, because the reader must be able to *reach* the hidden panels, not
+ * just learn that they exist.
+ */
+function OverflowCue({ side, onPage }) {
   const { t } = useI18n();
+  const label = t(side === 'start' ? 'ribbon.scroll_left' : 'ribbon.scroll_right');
+  return (
+    <button
+      type="button"
+      className={`ribbon__overflow is-${side}`}
+      aria-label={label}
+      title={label}
+      onClick={onPage}
+    >
+      <Icon name={side === 'start' ? 'chevronLeft' : 'chevronRight'} size={16} />
+    </button>
+  );
+}
+
+export function Ribbon() {
+  const { t, locale } = useI18n();
   const shell = useShell();
   const [openMenu, setOpenMenu] = useState(null);
+  const panelsRef = useRef(null);
   const tab = ribbonTab(shell.ribbonTab);
+  // A tab switch or a language switch renders different panel widths, so both
+  // re-measure (and re-home) the strip.
+  const overflow = useRibbonOverflow(panelsRef, `${shell.ribbonTab}/${locale}`);
   // Dismiss an open variant popover on Escape or a click outside it. The
   // invoking item sits above the menu, so its caret still toggles it closed.
   useEffect(() => {
@@ -197,10 +295,14 @@ export function Ribbon() {
         />
       </div>
       {shell.ribbonCollapsed ? null : (
-        <div className="ribbon__panels" role="tabpanel" aria-label={t(tab.labelKey)}>
-          {tab.panels.map(panel => (
-            <Panel key={panel.id} panel={panel} openMenu={openMenu} setOpenMenu={setOpenMenu} />
-          ))}
+        <div className="ribbon__band">
+          <div className="ribbon__panels" role="tabpanel" aria-label={t(tab.labelKey)} ref={panelsRef}>
+            {tab.panels.map(panel => (
+              <Panel key={panel.id} panel={panel} openMenu={openMenu} setOpenMenu={setOpenMenu} />
+            ))}
+          </div>
+          {overflow.start ? <OverflowCue side="start" onPage={() => pageRibbon(panelsRef.current, 'start')} /> : null}
+          {overflow.end ? <OverflowCue side="end" onPage={() => pageRibbon(panelsRef.current, 'end')} /> : null}
         </div>
       )}
     </div>

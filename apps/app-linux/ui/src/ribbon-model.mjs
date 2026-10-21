@@ -310,9 +310,17 @@ export const RIBBON_TABS = Object.freeze([
       // `cad_standard_view`. `top` leaves 3D for the 2D plan; the other six are
       // framed 3D perspectives. The list is data (`STANDARD_VIEWS`) so the model
       // and the tests cannot drift apart.
+      //
+      // `rows: 2` is the layout contract, not a decoration: the small-item grid
+      // flows column-major, so two rows put top/bottom, front/back and
+      // left/right in the same column as neighbours (they share an edge) and
+      // leave isometric alone in the last column. With the three-row default
+      // every pair was split across two columns — top above back, front beside
+      // left — which reads as an arbitrary list rather than three pairs.
       {
         id: 'standard',
         titleKey: 'view.standard_label',
+        rows: 2,
         items: STANDARD_VIEWS.map(entry => ({ ...entry })),
       },
       {
@@ -349,6 +357,37 @@ export const RIBBON_TABS = Object.freeze([
 
 export function ribbonTab(id) {
   return RIBBON_TABS.find(tab => tab.id === id) ?? RIBBON_TABS[1];
+}
+
+/**
+ * Cell coordinates for a column-major panel grid with `rows` rows.
+ *
+ * This mirrors the layout `.ribbon-panel__group.is-small` actually produces
+ * (`display: grid; grid-auto-flow: column; grid-template-rows: repeat(rows, …)`),
+ * so a test can assert what a reader will see from the model alone: item 1 and
+ * item 2 are neighbours *only* because they share a column.
+ */
+export function columnMajorCells(items, rows) {
+  const height = Math.max(1, Math.trunc(rows) || 1);
+  return items.map((item, index) => ({ item, column: Math.floor(index / height), row: index % height }));
+}
+
+/**
+ * Whether every pair in `pairs` lands in two cells that share an edge
+ * (vertically adjacent in one column, or horizontally adjacent in one row).
+ *
+ * `key` extracts the comparison token from an item, so the same helper works for
+ * `standardView` names and for any other pairwise grouping.
+ */
+export function pairsShareEdge(items, rows, pairs, key = item => item.id) {
+  const cells = new Map(columnMajorCells(items, rows).map(cell => [key(cell.item), cell]));
+  return pairs.every(([a, b]) => {
+    const first = cells.get(a);
+    const second = cells.get(b);
+    if (!first || !second) return false;
+    if (first.column === second.column) return Math.abs(first.row - second.row) === 1;
+    return first.row === second.row && Math.abs(first.column - second.column) === 1;
+  });
 }
 
 /** All command ids referenced by the ribbon (used to keep the catalog honest). */

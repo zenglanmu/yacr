@@ -40,6 +40,21 @@ export const STANDARD_VIEWS = Object.freeze([
 export const STANDARD_VIEW_KEYS = Object.freeze(STANDARD_VIEWS.map(entry => entry.standardView));
 
 /**
+ * The semantic pairs among the standard views: each pair looks at the same axis
+ * from opposite sides, plus the isometric view as the odd one out.
+ *
+ * This is data (not a comment) because the ribbon's layout contract is built on
+ * it: the seven buttons must place each pair in two cells that share an edge
+ * (see `pairsShareEdge` in `ribbon-model.mjs`), and the test walks this list
+ * instead of restating the intent.
+ */
+export const STANDARD_VIEW_PAIRS = Object.freeze([
+  Object.freeze(['top', 'bottom']),
+  Object.freeze(['front', 'back']),
+  Object.freeze(['left', 'right']),
+]);
+
+/**
  * The host's machine key for `view`, or `null` when the name is not one of the
  * seven. Matching is trim + lower-case because the host parses ASCII
  * case-insensitively; anything else is refused locally rather than sent to be
