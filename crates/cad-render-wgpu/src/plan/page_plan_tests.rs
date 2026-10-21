@@ -748,6 +748,7 @@ fn skipped_uniform_slots_leave_surviving_bytes_bit_identical() {
             &m,
             [r, g, b, alpha],
             [batch.pick_key, batch.instance_flags(), line_wpp_bits, 0],
+            [0.0, 0.0, 1.0, 0.0],
         )
     };
 
@@ -756,8 +757,8 @@ fn skipped_uniform_slots_leave_surviving_bytes_bit_identical() {
         let n = 1 + rng.below(30);
         let batches: Vec<GpuBatch> = (0..n).map(|_| random_batch(&mut rng, 3, 3)).collect();
         let facts = BatchFacts::build(&batches);
-        let mut reference: Vec<(usize, [u8; 96])> = Vec::new();
-        let mut skipped: Vec<(usize, [u8; 96])> = Vec::new();
+        let mut reference: Vec<(usize, [u8; UNIFORM_STRUCT_BYTES as usize])> = Vec::new();
+        let mut skipped: Vec<(usize, [u8; UNIFORM_STRUCT_BYTES as usize])> = Vec::new();
         for (i, batch) in batches.iter().enumerate() {
             // Old (no-skip) slot condition: no instanced and no mesh runs.
             if batch.instanced.is_empty() && batch.mesh_runs.is_empty() {

@@ -2,9 +2,18 @@
 //
 // Kept in sync with `MESH_SHADER` in `src/plan.rs` via `include_str!`.
 //
-// Shading is deliberately explicit and minimal: a fixed headlight along -Z
-// gives an N.L diffuse term plus a constant ambient floor. No physically based
-// rendering, environment lighting or specular response is claimed.
+// Shading is deliberately explicit and minimal, and it is a **display
+// convention, not physically based shading**: an N.L diffuse term against a
+// single directional light, scaled by a constant ambient floor. No environment
+// lighting, specular response, shadows or energy conservation is claimed.
+//
+// The light direction is camera-relative and per frame (`camera.light.rgb`, a
+// unit vector *toward* the light in world space):
+//   * 2D keeps a world-Z headlight (`camera.light = (0, 0, 1)`), so the diffuse
+//     term is exactly `n.z` and the 2D output is unchanged;
+//   * 3D uses a camera-relative headlight (the reversed view direction), so the
+//     face the user is looking at is the lit one and the other faces of a solid
+//     fall off by their orientation instead of collapsing to ambient.
 //
 // Winding: the mirrored variant of this pipeline selects `front_face = Cw`;
 // the shader is identical for both.
@@ -24,6 +33,10 @@ struct Camera {
     tint: vec4<f32>,
     // x = renderer pick key, y = INSTANCE_FLAG_* bits, z/w reserved.
     key_flags: vec4<u32>,
+    // rgb = unit vector toward the light, in world space (the same space as
+    // `world_normal`); a = reserved 0. It is a per-frame camera property: the
+    // 2D view keeps world +Z, the 3D view uses the reversed view direction.
+    light: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 
@@ -89,8 +102,10 @@ fn vs_main(
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
-    let light_dir = vec3<f32>(0.0, 0.0, -1.0);
-    let diffuse = max(dot(n, -light_dir), 0.0);
+    // `camera.light.rgb` is the frame's unit vector toward the light. 2D passes
+    // world +Z (so this is exactly the old `n.z`); 3D passes the reversed view
+    // direction, i.e. a camera-relative headlight.
+    let diffuse = max(dot(n, camera.light.xyz), 0.0);
     // `tint.rgb` is the batch's own colour, modulated by the per-vertex colour
     // (white when the batch has no gradient). The diffuse term scales the
     // result and the ambient floor keeps a back-facing facet visible instead of

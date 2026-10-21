@@ -1,11 +1,12 @@
 use super::*;
 
 /// Bytes of the per-batch uniform struct: `mat4x4<f32>` (64) + `vec4<f32>` tint
-/// (16) + `vec4<u32> key_flags` (16) in
+/// (16) + `vec4<u32> key_flags` (16) + `vec4<f32>` light (16) in
 /// `shaders/{line,mesh,image,line_instanced,mesh_merged}.wgsl`. `key_flags.x` is
-/// the batch's renderer pick key and `.y` its [`INSTANCE_FLAG_*`] bitfield; the
-/// uniform is 16-byte aligned, so the struct is 96 bytes.
-pub(crate) const UNIFORM_STRUCT_BYTES: u32 = 96;
+/// the batch's renderer pick key and `.y` its [`INSTANCE_FLAG_*`] bitfield;
+/// `light.rgb` is the frame's unit vector *toward* the light in world space
+/// (`.a` reserved 0). The uniform is 16-byte aligned, so the struct is 112 bytes.
+pub(crate) const UNIFORM_STRUCT_BYTES: u32 = 112;
 
 /// Bytes of the selection-flags control uniform (`enabled` + row width + two
 /// reserved words, 16-byte aligned for the uniform layout).
@@ -445,13 +446,23 @@ pub(crate) fn pack_positions(vectors: &[[f32; 3]]) -> Vec<u8> {
     bytes
 }
 
-/// Pack one per-batch uniform: `mat4x4<f32>` transform, `vec4<f32>` tint and
-/// `vec4<u32> key_flags` (x = renderer pick key, y = [`INSTANCE_FLAG_*`] bits).
+/// Pack one per-batch uniform: `mat4x4<f32>` transform, `vec4<f32>` tint,
+/// `vec4<u32> key_flags` (x = renderer pick key, y = [`INSTANCE_FLAG_*`] bits)
+/// and `vec4<f32>` light (`rgb` = unit vector toward the light in world space,
+/// `a` reserved 0).
+///
+/// `light` is a per-frame constant, but it travels in every slot because all
+/// shaders share one uniform layout (see [`UNIFORM_STRUCT_BYTES`]).
 ///
 /// Word-oriented so the byte layout is exactly what the shaders declare and does
 /// not depend on the host's float representation or `bytemuck` alignment rules.
-pub(crate) fn uniform_bytes(matrix: &[f32; 16], tint: [f32; 4], key_flags: [u32; 4]) -> [u8; 96] {
-    let mut words = [0u32; 24];
+pub(crate) fn uniform_bytes(
+    matrix: &[f32; 16],
+    tint: [f32; 4],
+    key_flags: [u32; 4],
+    light: [f32; 4],
+) -> [u8; UNIFORM_STRUCT_BYTES as usize] {
+    let mut words = [0u32; 28];
     for (slot, value) in matrix.iter().enumerate() {
         words[slot] = value.to_bits();
     }
@@ -459,6 +470,9 @@ pub(crate) fn uniform_bytes(matrix: &[f32; 16], tint: [f32; 4], key_flags: [u32;
         words[16 + slot] = value.to_bits();
     }
     words[20..24].copy_from_slice(&key_flags);
+    for (slot, value) in light.iter().enumerate() {
+        words[24 + slot] = value.to_bits();
+    }
     let mut bytes = [0u8; UNIFORM_STRUCT_BYTES as usize];
     for (slot, word) in words.iter().enumerate() {
         bytes[slot * 4..slot * 4 + 4].copy_from_slice(&word.to_le_bytes());

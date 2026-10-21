@@ -8,8 +8,9 @@ pub(crate) const PULLED_LINE_STRIDE: u32 = 64;
 pub(crate) const PULLED_MESH_VERTEX_STRIDE: u32 = 64;
 
 /// Byte size of the per-class pulled camera uniform: four `vec4<f32>` columns
-/// (the fourth carries the world units per pixel for the AA line SDF in its `x`).
-pub(crate) const PULLED_CAMERA_BYTES: u32 = 64;
+/// (the fourth carries the world units per pixel for the AA line SDF in its `x`)
+/// plus the frame's light direction `vec4<f32>`.
+pub(crate) const PULLED_CAMERA_BYTES: u32 = 80;
 
 /// One pulled line segment: the universal [`LineInstance`] fields plus the
 /// per-chunk origin index. `vec4` members (not `vec3`/`uvec2`) so the storage
@@ -155,21 +156,23 @@ pub(crate) fn chunk_transform_column(projection: FrameProjection, origin: [f64; 
     [m[12], m[13], m[14], m[15]]
 }
 
-/// The four pulled-camera columns: the three origin-independent columns of the
-/// per-chunk transform, plus a fourth whose `x` carries the world units per pixel
-/// (the AA line SDF ramp width). `yzw` are reserved.
-pub(crate) fn pulled_camera_columns(projection: FrameProjection) -> [[f32; 4]; 4] {
+/// The five pulled-camera columns: the three origin-independent columns of the
+/// per-chunk transform, a fourth whose `x` carries the world units per pixel
+/// (the AA line SDF ramp width; `yzw` reserved), and a fifth whose `rgb` is the
+/// frame's unit vector toward the light in world space (`a` reserved 0).
+pub(crate) fn pulled_camera_columns(projection: FrameProjection, light: [f32; 4]) -> [[f32; 4]; 5] {
     let m = projection.batch_matrix_f64([0.0, 0.0, 0.0]);
     [
         [m[0], m[1], m[2], m[3]],
         [m[4], m[5], m[6], m[7]],
         [m[8], m[9], m[10], m[11]],
         [projection.world_per_px() as f32, 0.0, 0.0, 0.0],
+        light,
     ]
 }
 
-/// The packed `f32` bytes of the pulled camera uniform (four columns).
-pub(crate) fn pulled_camera_bytes(columns: &[[f32; 4]; 4]) -> [u8; PULLED_CAMERA_BYTES as usize] {
+/// The packed `f32` bytes of the pulled camera uniform (five columns).
+pub(crate) fn pulled_camera_bytes(columns: &[[f32; 4]; 5]) -> [u8; PULLED_CAMERA_BYTES as usize] {
     let mut bytes = [0u8; PULLED_CAMERA_BYTES as usize];
     for (col, column) in columns.iter().enumerate() {
         for (row, value) in column.iter().enumerate() {

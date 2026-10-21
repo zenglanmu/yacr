@@ -38,6 +38,10 @@ struct Camera {
     tint: vec4<f32>,
     // x = renderer pick key (unused: the per-vertex key wins), y = flags.
     key_flags: vec4<u32>,
+    // rgb = unit vector toward the light, in world space (the same space as
+    // `world_normal`); a = reserved 0. It is a per-frame camera property: the
+    // 2D view keeps world +Z, the 3D view uses the reversed view direction.
+    light: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 
@@ -108,8 +112,10 @@ fn vs_main(
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
-    let light_dir = vec3<f32>(0.0, 0.0, -1.0);
-    let diffuse = max(dot(n, -light_dir), 0.0);
+    // Same display-convention diffuse term as `mesh.wgsl`: `camera.light.rgb` is
+    // the frame's unit vector toward the light (2D: world +Z; 3D: reversed view
+    // direction).
+    let diffuse = max(dot(n, camera.light.xyz), 0.0);
     let base = camera.tint.rgb * in.color;
     let lit = base * (0.25 + 0.75 * diffuse);
     if (flags_ctl.enabled != 0u && (flag_bits(in.key) & FLAG_HIDDEN) != 0u) {

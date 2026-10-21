@@ -581,6 +581,7 @@ impl Renderer {
                 &entry.matrix,
                 [1.0, 1.0, 1.0, 1.0],
                 [entry.key, 0, entry.world_per_px_bits, 0],
+                self.last_light,
             );
             self.uniforms.write_slot(entry.slot as usize, &uniform);
         }

@@ -406,3 +406,32 @@ fn cached_partition_matches_fresh_plan_across_cameras() {
     assert_eq!(plan.invisible.len(), fresh.invisible);
     assert_eq!(plan, plan_draw_order(&entries, None));
 }
+
+/// The 3D display light is the reversed view direction, derived from the camera
+/// itself - never a world constant. This is the CPU half of the shader's
+/// camera-relative headlight (the GPU half is fenced by the oblique-cube pixel
+/// tests: three distinct face shades that re-assign on a second azimuth).
+#[test]
+fn camera_headlight_points_from_the_target_toward_the_eye() {
+    let plan = Camera3d::plan_view(point(0.0, 0.0, 5.0), point(0.0, 0.0, 0.0));
+    assert_eq!(
+        plan.headlight(),
+        Some([0.0, 0.0, 1.0]),
+        "a top-down camera lights the +Z face head-on"
+    );
+    // An oblique eye: the unit vector toward the eye, not a world axis.
+    let oblique = Camera3d {
+        eye: point(3.0, -4.0, 0.0),
+        ..plan
+    };
+    let light = oblique.headlight().expect("a non-degenerate camera");
+    assert!((light[0] - 0.6).abs() < 1e-6, "got {light:?}");
+    assert!((light[1] + 0.8).abs() < 1e-6, "got {light:?}");
+    assert_eq!(light[2], 0.0);
+    // `eye == target` has no direction at all.
+    let degenerate = Camera3d {
+        target: point(3.0, -4.0, 0.0),
+        ..oblique
+    };
+    assert_eq!(degenerate.headlight(), None);
+}

@@ -61,6 +61,8 @@ impl Renderer {
                 camera.center.y as f32,
                 camera.center.z as f32,
             ],
+            // 2D keeps its world-Z headlight, so the diffuse term stays `n.z`.
+            [0.0, 0.0, 1.0, 0.0],
             target,
         )
     }
@@ -110,6 +112,13 @@ impl Renderer {
             camera.eye.y as f32,
             camera.eye.z as f32,
         ];
+        // Camera-relative headlight for 3D (see `Camera3d::headlight`): the lit
+        // face is the one being looked at, so a solid's faces no longer all
+        // collapse to ambient. The fallback is unreachable after the projection
+        // check above; it is world-`+Z` like the 2D light.
+        let light = camera
+            .headlight()
+            .map_or([0.0, 0.0, 1.0, 0.0], |[r, g, b]| [r, g, b, 0.0]);
         self.render_with_projection(
             FrameProjection::Perspective {
                 vp,
@@ -117,6 +126,7 @@ impl Renderer {
             },
             camera_matrix,
             eye,
+            light,
             target,
         )
     }
@@ -126,6 +136,7 @@ impl Renderer {
         projection: FrameProjection,
         camera_matrix: [f32; 16],
         camera_position: [f32; 3],
+        light: [f32; 4],
         target: &RenderTarget,
     ) -> Result<FrameStats, RenderError> {
         if self.device_lost {
@@ -141,6 +152,8 @@ impl Renderer {
         self.last_projection = Some(projection);
         self.last_camera_matrix = camera_matrix;
         self.last_camera_position = Some(camera_position);
+        // The id pass re-uses the frame's light (the pick shaders ignore it).
+        self.last_light = light;
         // CPU-path timer: plan + uniforms + encode + submit. Stopped right after
         // `queue.submit` so the blocking device poll below is never counted as
         // CPU work.
@@ -633,6 +646,7 @@ impl Renderer {
                 &m,
                 [r, g, b, alpha],
                 [batch.pick_key, batch.instance_flags(), line_wpp_bits, 0],
+                light,
             );
             self.uniforms.write_slot(legacy_slots, &uniform);
             self.frame_slots[index] = legacy_slots as u32;
@@ -648,6 +662,7 @@ impl Renderer {
                 &camera_matrix,
                 [1.0, 1.0, 1.0, alpha],
                 [self.images[i].pick_key, 0, 0, 0],
+                light,
             );
             let slot = legacy_slots + j;
             self.uniforms.write_slot(slot, &uniform);
@@ -663,9 +678,11 @@ impl Renderer {
         // Skipped entirely on the accelerated path, which writes the equivalent
         // per-chunk translation table into its storage buffer instead.
         //
-        // Each surviving entry's 96-byte uniform is byte-identical to the
+        // Each surviving entry's uniform is byte-identical to the
         // pre-skip layout; only the (purely internal) slot index changes, and the
-        // `flush` range shrinks to the compacted count.
+        // `flush` range shrinks to the compacted count. These classes carry their
+        // colour per instance or per vertex, so their uniform tint is opaque white.
+        let white = [1.0, 1.0, 1.0, 1.0];
         let mut next_slot = legacy_slots + draw_images.len();
         let mut stream_slots: Vec<u32> = vec![u32::MAX; stream_slot_count];
         for (s, slot) in stream_slots.iter_mut().enumerate() {
@@ -677,7 +694,7 @@ impl Renderer {
             // The instanced shader ignores the uniform tint (colour and the pick
             // key are per-instance) but the layout keeps them; write opaque white
             // and a zero key, and the SDF ramp width in `key_flags.z`.
-            let uniform = uniform_bytes(&matrix, [1.0, 1.0, 1.0, 1.0], [0, 0, line_wpp_bits, 0]);
+            let uniform = uniform_bytes(&matrix, white, [0, 0, line_wpp_bits, 0], light);
             self.uniforms.write_slot(next_slot, &uniform);
             next_slot += 1;
         }
@@ -693,7 +710,7 @@ impl Renderer {
             }
             *slot = next_slot as u32;
             let matrix = projection.batch_matrix_f64(self.mesh_chunks[c].origin);
-            let uniform = uniform_bytes(&matrix, [1.0, 1.0, 1.0, 1.0], [0, 0, 0, 0]);
+            let uniform = uniform_bytes(&matrix, white, [0, 0, 0, 0], light);
             self.uniforms.write_slot(next_slot, &uniform);
             next_slot += 1;
         }
@@ -713,8 +730,7 @@ impl Renderer {
             }
             *slot = next_slot as u32;
             let matrix = projection.batch_matrix_f64(self.arc_streams[a].origin);
-            let uniform =
-                uniform_bytes(&matrix, [1.0, 1.0, 1.0, 1.0], [0, 0, world_per_px_bits, 0]);
+            let uniform = uniform_bytes(&matrix, white, [0, 0, world_per_px_bits, 0], light);
             self.uniforms.write_slot(next_slot, &uniform);
             next_slot += 1;
         }
@@ -737,6 +753,7 @@ impl Renderer {
                     clear_color.a as f32,
                 ],
                 [0, 0, 0, 0],
+                light,
             );
             self.uniforms.write_slot(next_slot, &uniform);
             next_slot += 1;
@@ -754,7 +771,7 @@ impl Renderer {
         // (the `camera_move_*` fences assert the upload counters stay flat).
         if use_pulled {
             if let Some(camera_buffer) = self.pulled_camera_buffer.as_ref() {
-                let mut columns = pulled_camera_columns(projection);
+                let mut columns = pulled_camera_columns(projection, light);
                 // The line class may use an overridden ramp width (test hook).
                 if let Some(w) = self.line_ramp_override {
                     columns[3][0] = w;

@@ -1,7 +1,7 @@
 //! An **oblique** 3D view of a closed solid must show a cube, not one square
-//! face.
+//! face - and its faces must be *distinguishable* from each other.
 //!
-//! Regression (measured on the live host): a tessellated `[-1, 1]³` ACIS cube
+//! Regression 1 (measured on the live host): a tessellated `[-1, 1]³` ACIS cube
 //! was switched to the 3D view and orbited with a primary drag, and the CAD grab
 //! came back as a **rotated square**: uniform white, no internal edges, no
 //! perspective. The camera defect was in `cad_app::Camera::orbit` (an
@@ -11,6 +11,14 @@
 //! to a six-vertex silhouette, keep its mesh edge overlay, and show measurable
 //! perspective convergence. The top-down control below is the non-vacuous
 //! reference: the same measurements report a four-cornered square there.
+//!
+//! Regression 2 (measured on a real oblique frame): the mesh shader shaded with
+//! a **world-fixed** light, so `diffuse == n.z` and every non-horizontal face
+//! collapsed to the same ambient-only value (`sRGB(0.25) == 137`): a 3-face cube
+//! read as one bright quad plus two identical slivers. The shading is now a
+//! camera-relative headlight in 3D, and the tests below require three distinct
+//! flat face shades and require the *assignment* to follow a second azimuth, so
+//! a constant light (or a Rust-side per-face tint) cannot pass.
 
 use super::*;
 
@@ -22,16 +30,28 @@ use cad_render_wgpu::RenderTier;
 /// Side of the rendered target, in pixels.
 const SIZE: u32 = 256;
 
-/// A camera in front of (`-Y`) and above (`+Z`) the cube, looking at the origin
-/// with world `+Z` as screen up, and no sideways offset, so the silhouette is
-/// symmetric: two vertical cube edges form the left/right extremes and the two
-/// horizontal faces' edges cut the top/bottom corners.
+/// An **asymmetric** oblique camera: azimuth `27°` from `-Y` toward `+X`,
+/// elevation `32°` above the horizon, so the three visible faces (`+Z`, `-Y`,
+/// `+X`) receive three *different* amounts of light. A symmetric isometric view
+/// (`45°`/`35.26°`) would give the two side faces equal light and could not
+/// distinguish a camera-relative headlight from a world-fixed one.
 fn oblique_camera() -> Camera3d {
+    oblique_camera_at(27.0, 32.0)
+}
+
+/// The oblique camera at an explicit azimuth/elevation, at a fixed distance.
+///
+/// Azimuth is measured from the `-Y` axis toward `+X`; elevation raises the eye
+/// toward `+Z`. World `+Z` stays the screen up vector.
+fn oblique_camera_at(azimuth_degrees: f64, elevation_degrees: f64) -> Camera3d {
+    let azimuth = azimuth_degrees.to_radians();
+    let elevation = elevation_degrees.to_radians();
+    let distance = 5.0;
     Camera3d {
         eye: Point3 {
-            x: 0.0,
-            y: -4.0,
-            z: 3.0,
+            x: distance * azimuth.sin() * elevation.cos(),
+            y: -distance * azimuth.cos() * elevation.cos(),
+            z: distance * elevation.sin(),
         },
         target: Point3 {
             x: 0.0,
@@ -48,6 +68,14 @@ fn oblique_camera() -> Camera3d {
         far: 100.0,
     }
 }
+
+/// Sample point strictly inside the `-Y` face, away from its triangulation
+/// diagonal (`z == x`) and from the cube edges, so the pixel is flat fill.
+const FRONT_FACE_SAMPLE: [f64; 3] = [0.5, -1.0, -0.5];
+/// Sample point strictly inside the `+X` face (same rule as above).
+const SIDE_FACE_SAMPLE: [f64; 3] = [1.0, 0.5, -0.5];
+/// Sample point strictly inside the `+Z` face (same rule as above).
+const TOP_FACE_SAMPLE: [f64; 3] = [0.55, 0.05, 1.0];
 
 /// The control: the same distance and field of view looking straight down `-Z`
 /// (the plan orientation). This must still be a square - if it were not, the
@@ -77,6 +105,34 @@ fn top_down_camera() -> Camera3d {
 
 fn lum(image: &RgbaImage, x: u32, y: u32) -> u8 {
     image.pixel(x, y)[0]
+}
+
+/// The pixel `point` (world space) projects to, using the *same* view-projection
+/// the renderer used. wgpu's viewport maps clip `+Y` to the top of the image.
+fn project(camera: Camera3d, point: [f64; 3]) -> (u32, u32) {
+    let vp = camera
+        .view_projection(1.0)
+        .expect("the test camera must have a usable projection");
+    let mut clip = [0.0f64; 4];
+    for (row, value) in clip.iter_mut().enumerate() {
+        *value = (0..4)
+            .map(|col| f64::from(vp[col][row]) * if col == 3 { 1.0 } else { point[col] })
+            .sum();
+    }
+    let ndc_x = clip[0] / clip[3];
+    let ndc_y = clip[1] / clip[3];
+    let x = ((ndc_x + 1.0) * 0.5 * f64::from(SIZE)).round() as i64;
+    let y = ((1.0 - ndc_y) * 0.5 * f64::from(SIZE)).round() as i64;
+    (
+        x.clamp(0, i64::from(SIZE) - 1) as u32,
+        y.clamp(0, i64::from(SIZE) - 1) as u32,
+    )
+}
+
+/// The flat shade of the face containing `sample`, read from the rendered frame.
+fn face_shade(image: &RgbaImage, camera: Camera3d, sample: [f64; 3]) -> u8 {
+    let (x, y) = project(camera, sample);
+    lum(image, x, y)
 }
 
 fn is_shape(image: &RgbaImage, x: u32, y: u32) -> bool {
@@ -213,14 +269,16 @@ fn width_at(image: &RgbaImage, (y0, y1): (f64, f64), fraction: f64) -> usize {
     (0..image.width).filter(|&x| is_shape(image, x, y)).count()
 }
 
-/// Count of interior pixels with a mid-tone luminance, i.e. the anti-aliased
-/// mesh edge overlay drawn *inside* the silhouette.
+/// Count of interior pixels that are **not** one of the flat face shades, i.e.
+/// the anti-aliased mesh edge overlay drawn *inside* the silhouette.
 ///
 /// The shape mask is eroded by `radius` so the silhouette's own anti-aliased
-/// border cannot be counted; the two flat faces render at their own constant
-/// values (the headlight-lit `+Z` face and the ambient-only `-Y` face) and are
-/// excluded by the band.
-fn interior_edge_pixels(image: &RgbaImage, radius: u32, band: (u8, u8)) -> usize {
+/// border cannot be counted. The flat faces render at constant, known values
+/// (one per face, sampled from the frame itself), so an interior pixel whose
+/// value is not one of those is either an edge or a blend between an edge and a
+/// face. Bands cannot be used: with a camera-relative light the face shades
+/// themselves sit in the mid-tones.
+fn interior_edge_pixels(image: &RgbaImage, radius: u32, face_shades: &[u8]) -> usize {
     let mut count = 0;
     for y in radius..image.height.saturating_sub(radius) {
         for x in radius..image.width.saturating_sub(radius) {
@@ -230,7 +288,7 @@ fn interior_edge_pixels(image: &RgbaImage, radius: u32, band: (u8, u8)) -> usize
                 continue;
             }
             let v = lum(image, x, y);
-            if v >= band.0 && v <= band.1 {
+            if !face_shades.contains(&v) {
                 count += 1;
             }
         }
@@ -293,12 +351,18 @@ fn oblique_cube_renders_as_a_hexagon_with_internal_edges() {
         let (x0, y0, x1, y1) = bbox(&points);
         let poly = corner_polygon(&points, 2.0);
         let angles = interior_angles(&poly);
-        let edge_pixels = interior_edge_pixels(&image, 2, (145, 250));
+        // The three visible faces, sampled at points strictly inside each one.
+        let camera = oblique_camera();
+        let front = face_shade(&image, camera, FRONT_FACE_SAMPLE);
+        let side = face_shade(&image, camera, SIDE_FACE_SAMPLE);
+        let top = face_shade(&image, camera, TOP_FACE_SAMPLE);
+        let shades = [front, side, top];
+        let edge_pixels = interior_edge_pixels(&image, 2, &shades);
         let upper_width = width_at(&image, (y0, y1), 0.25);
         let lower_width = width_at(&image, (y0, y1), 0.75);
         println!(
             "{tier:?}: shape px={} bbox={}x{} corners={} angles={:?} edge_px={} \
-             width_upper={} width_lower={}",
+             width_upper={} width_lower={} shades(-Y,+X,+Z)={shades:?}",
             points.len(),
             x1 - x0,
             y1 - y0,
@@ -330,6 +394,26 @@ fn oblique_cube_renders_as_a_hexagon_with_internal_edges() {
             "{tier:?}: degenerate silhouette corner angles {angles:?}"
         );
 
+        // All three visible faces must be **distinct**: a solid has to be
+        // readable, and one bright face plus two ambient-only slivers (the
+        // measured world-fixed-light defect: `255` and `137`, `137`) is not.
+        for (i, j) in [(0, 1), (0, 2), (1, 2)] {
+            assert!(
+                shades[i].abs_diff(shades[j]) >= 2,
+                "{tier:?}: faces {i} and {j} are not distinguishable \
+                 (-Y/+X/+Z shades {shades:?}); this is the world-fixed-light \
+                 collapse the camera-relative headlight removes"
+            );
+        }
+        // With the light at `normalize(eye - target)` and azimuth 27 deg /
+        // elevation 32 deg, the `-Y` face (dot ~0.76) is brighter than `+Z`
+        // (~0.53), which is brighter than `+X` (~0.39). This pins the actual
+        // orientation, not merely "some three values".
+        assert!(
+            front > top && top > side,
+            "{tier:?}: expected -Y > +Z > +X, got -Y={front} +Z={top} +X={side}"
+        );
+
         // The mesh edge overlay must draw the 12 triangles' edges in 3D too.
         // The `+Z` face is split corner to corner, so at least that diagonal is
         // strictly interior.
@@ -347,6 +431,70 @@ fn oblique_cube_renders_as_a_hexagon_with_internal_edges() {
             (upper_width as f64) > (lower_width as f64) * 1.03,
             "{tier:?}: no measurable perspective convergence \
              (upper/nearer {upper_width} px, lower/farther {lower_width} px)"
+        );
+    }
+}
+
+/// The headlight is **camera-relative**, not a world constant: orbiting the same
+/// cube to a second azimuth must re-assign which face is brightest.
+///
+/// At azimuth 62 deg (same 32 deg elevation) the light direction turns toward
+/// `+X`, so `+X` becomes the brightest face and `-Y` the darkest - the exact
+/// opposite of the 27 deg frame. A fixed world light cannot produce this swap,
+/// and neither can a per-face tint chosen in Rust: the shade is computed in the
+/// shader from the frame's camera.
+#[test]
+fn oblique_cube_shading_follows_the_camera() {
+    const FIRST_AZIMUTH: f64 = 27.0;
+    const SECOND_AZIMUTH: f64 = 62.0;
+    const ELEVATION: f64 = 32.0;
+    for tier in [RenderTier::Universal, RenderTier::Accelerated] {
+        let Some(first) = render_cube(oblique_camera_at(FIRST_AZIMUTH, ELEVATION), tier) else {
+            return;
+        };
+        let Some(second) = render_cube(oblique_camera_at(SECOND_AZIMUTH, ELEVATION), tier) else {
+            return;
+        };
+        let camera_a = oblique_camera_at(FIRST_AZIMUTH, ELEVATION);
+        let camera_b = oblique_camera_at(SECOND_AZIMUTH, ELEVATION);
+        let a = [
+            face_shade(&first, camera_a, FRONT_FACE_SAMPLE),
+            face_shade(&first, camera_a, SIDE_FACE_SAMPLE),
+            face_shade(&first, camera_a, TOP_FACE_SAMPLE),
+        ];
+        let b = [
+            face_shade(&second, camera_b, FRONT_FACE_SAMPLE),
+            face_shade(&second, camera_b, SIDE_FACE_SAMPLE),
+            face_shade(&second, camera_b, TOP_FACE_SAMPLE),
+        ];
+        println!(
+            "{tier:?}: -Y/+X/+Z shades at {FIRST_AZIMUTH} deg {a:?}, at {SECOND_AZIMUTH} deg {b:?}"
+        );
+
+        // Both frames still show three distinguishable faces.
+        for shades in [a, b] {
+            for (i, j) in [(0, 1), (0, 2), (1, 2)] {
+                assert!(
+                    shades[i].abs_diff(shades[j]) >= 2,
+                    "{tier:?}: faces {i} and {j} collapsed in {shades:?}"
+                );
+            }
+        }
+        // First azimuth: `-Y` is the brightest face. Second: `+X` is, and `-Y`
+        // has fallen below it. The eye moved toward `+X`, so the light did too.
+        assert!(
+            a[0] > a[1] + 5,
+            "{tier:?}: at {FIRST_AZIMUTH} deg the -Y face ({} ) must be well \
+             brighter than +X ({}), got {a:?}",
+            a[0],
+            a[1]
+        );
+        assert!(
+            b[1] > b[0] + 5,
+            "{tier:?}: at {SECOND_AZIMUTH} deg the light must have followed the \
+             camera to +X: expected +X ({}) well above -Y ({}), got {b:?}",
+            b[1],
+            b[0]
         );
     }
 }
@@ -382,6 +530,14 @@ fn top_down_cube_is_a_square_control() {
         assert_eq!(
             upper_width, lower_width,
             "{tier:?}: the control must be an unbiased (non-converging) square"
+        );
+        // The top-down view looks straight along `-Z`, so the camera-relative
+        // light is exactly world `+Z`: the visible face must be fully lit (the
+        // ambient floor must not dim a face the camera faces head-on).
+        let face = face_shade(&image, top_down_camera(), TOP_FACE_SAMPLE);
+        assert_eq!(
+            face, 255,
+            "{tier:?}: a top-down 3D view must show the +Z face fully lit, got {face}"
         );
     }
 }

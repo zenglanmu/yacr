@@ -337,7 +337,7 @@ pub struct FrameStats {
     pub legacy_opaque_draws: u64,
     /// Number of `Queue::write_buffer` calls issued for this frame's uniforms.
     ///
-    /// Every accepted batch (and every drawn image) writes its 96-byte uniform
+    /// Every accepted batch (and every drawn image) writes its uniform
     /// into a shared, dynamically-offset slot buffer, so a frame issues **one
     /// write per uniform page** touched (a page holds
     /// `max_uniform_buffer_binding_size / slot_size` slots) instead of one per

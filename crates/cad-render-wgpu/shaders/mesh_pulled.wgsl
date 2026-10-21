@@ -36,6 +36,9 @@ struct PullCamera {
     // x = world units per pixel (unused by the mesh path; it is the AA line SDF
     // ramp width on the pulled line pipeline), yzw reserved.
     c3: vec4<f32>,
+    // rgb = unit vector toward the light, in world space (the same space as the
+    // vertex normal); a = reserved 0.
+    light: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: PullCamera;
 
@@ -119,8 +122,10 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VsOut {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
-    let light_dir = vec3<f32>(0.0, 0.0, -1.0);
-    let diffuse = max(dot(n, -light_dir), 0.0);
+    // Same display-convention diffuse term as `mesh.wgsl`: `camera.light.rgb` is
+    // the frame's unit vector toward the light (2D: world +Z; 3D: reversed view
+    // direction).
+    let diffuse = max(dot(n, camera.light.xyz), 0.0);
     // The merged uniform tint is opaque white (the per-batch tint is baked into
     // the per-vertex colour at upload), so `1.0 * in.color == in.color` exactly
     // and the shared `camera.tint.rgb * in.color` product is reproduced.

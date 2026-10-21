@@ -42,6 +42,9 @@ struct PullCamera {
     c2: vec4<f32>,
     // x = world units per pixel (the SDF ramp width), yzw reserved.
     c3: vec4<f32>,
+    // rgb = unit vector toward the light, in world space (the same space as the
+    // vertex normal); a = reserved 0.
+    light: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: PullCamera;
 

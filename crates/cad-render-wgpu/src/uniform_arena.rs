@@ -12,7 +12,7 @@ pub(crate) struct UniformPage {
 
 /// Shared per-frame uniform storage.
 ///
-/// Every accepted geometry batch (and drawn image) writes its 96-byte uniform
+/// Every accepted geometry batch (and drawn image) writes its uniform
 /// into a slot of a shared uniform buffer and draws it with the slot's byte
 /// offset as a *dynamic* offset. This replaces one `queue.write_buffer` per
 /// batch with one per page: a page holds `slots_per_page` slots and its total

@@ -9,6 +9,10 @@ struct Camera {
     transform: mat4x4<f32>,
     tint: vec4<f32>,
     key_flags: vec4<u32>,
+    // rgb = unit vector toward the light, in world space (the same space as
+    // `world_normal`); a = reserved 0. It is a per-frame camera property: the
+    // 2D view keeps world +Z, the 3D view uses the reversed view direction.
+    light: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 

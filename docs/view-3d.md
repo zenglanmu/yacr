@@ -139,6 +139,18 @@ exposes **no 3D control**:
   reachable only through channels that do not exist yet. This is an explicit UI
   gap, not a hidden one.
 
+## Shading convention
+
+- **2D**: a world-fixed headlight along `-Z`, i.e. `diffuse = n.z`; unchanged
+  byte-for-byte by the 3D work.
+- **3D**: a **camera-relative** headlight, `light = normalize(eye - target)`, so
+  the face you are looking at is lit and the others fall off by orientation.
+  `lit = tint * (0.25 + 0.75 * max(dot(n, light), 0))` in both cases — ambient
+  0.25, no specular, no shadows, no environment light. This is a **display
+  convention, not physically based shading**; albedo, exposure and material
+  colour are not modelled, and two faces can end up close in value when their
+  orientations relative to the eye are similar.
+
 ## What is not verified here
 
 - **GPU execution has been observed** on a real adapter (Quadro P620, Vulkan)

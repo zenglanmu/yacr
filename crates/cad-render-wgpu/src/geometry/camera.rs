@@ -78,6 +78,26 @@ impl Camera3d {
         Some(mat4_mul(&proj, &view))
     }
 
+    /// Unit vector **toward** the light for this camera: the reversed view
+    /// direction, `normalize(eye - target)`, in world space - i.e. a
+    /// camera-relative headlight.
+    ///
+    /// This is the display convention the 3D mesh shading uses (the face being
+    /// looked at is the lit one), not a physical light. `None` for a degenerate
+    /// camera (eye == target), which [`Camera3d::view_projection`] already
+    /// rejects, so the renderer only normalises a usable camera.
+    pub fn headlight(&self) -> Option<[f32; 3]> {
+        let span = sub(self.eye, self.target);
+        let len = length(span);
+        (len > 1e-12).then(|| {
+            [
+                (span.x / len) as f32,
+                (span.y / len) as f32,
+                (span.z / len) as f32,
+            ]
+        })
+    }
+
     /// Whether the camera has a usable projection for the given aspect.
     pub fn is_usable(&self, aspect: f64) -> bool {
         if !point_is_finite(self.eye) || !point_is_finite(self.target) || !point_is_finite(self.up)
