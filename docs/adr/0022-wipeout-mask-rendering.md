@@ -25,10 +25,14 @@
    ⇒ **同一世界 z 下，后画的不透明 mesh 会被深度拒绝**；"再画一个背景色填充"**不成立**。
 2. **没有模板**：`StencilState::default()` + `stencil_ops: None`（`encode.rs:96`），深度格式**无模板位**。
    全仓库**没有** `set_scissor_rect`。
-3. **绘制顺序数据存在，但在上一层被丢掉**：`model_space()` 已按 `DbEntity::draw_order` 升序
-   （`cad-db/src/drawing/access.rs:431-439`），但 `DisplayFragment` **没有 `draw_order` 字段**
-   （`cad-representation/src/primitive.rs:273-319`），`SceneCache` 恒发 `SCENE_DRAW_ORDER = 0`
-   （`cad-scene/src/cache.rs:6-14`），且 opaque mesh **跨批次拍平合批、忽略顺序**（`plan/pack_mesh.rs:119-129`）。
+3. **绘制顺序数据（2026-10-21 已修正）**：`model_space()` 按 `DbEntity::draw_order` 升序
+   （`cad-db/src/drawing/access.rs:431-439`）；此前 `DisplayFragment` 无该字段、`SceneCache` 恒发
+   `SCENE_DRAW_ORDER = 0`，现已**贯通**——`DisplayFragment::draw_order` 由源实体携带（**INSERT 展开的子实体继承
+   所在 INSERT 的 order**，块内自有 order 只在块定义内有意义），`RenderBatch`/`MaskBatch` 直接取其值，
+   行/圆锥的合批谓词要求 `batch.draw_order == incoming`，因此**合批不会跨顺序吸收几何**；
+   `SCENE_DRAW_ORDER` 已删除（`ImageBatch` 仍为 0，图像遍另议，已在注释中具名）。
+   **仍未贯通的一段**：渲染器的 opaque mesh 仍**跨批次拍平合批并忽略顺序**（`plan/pack_mesh.rs`）——
+   这是渲染器分段的前置条件之一。
 4. **背景色在渲染器私有侧**：`CAD_CLEAR_COLOR`（黑，`pub(crate)`，`cad-render-wgpu/src/lib.rs:72-82`）；
    表示层只有 `DEFAULT_RENDER_COLOR = [1,1,1]`。⇒ 表示层**无法**自己给出"背景色填充"。
 5. `inverted`（DXF clip_mode = Inside）今天只被变换/包围盒/属性/导出丢弃使用，**渲染侧未消费**。
@@ -47,12 +51,14 @@
 ### D2 与绘制顺序的关系：**声明一个子集**
 
 - 真正的 WIPEOUT 语义是**按显示顺序**遮挡：draw_order 更低的实体不应被 draw_order 更高的遮罩挡住。
-  但**顺序数据在表示层已被丢弃**（事实 3），要正确实现必须先把 `draw_order` 一路穿到
-  `DisplayFragment` →批次→排序（并解决 opaque mesh 合批忽略顺序的问题）。
-- 本决策**首版**采用**"遮罩恒为最后"**（简单、可预测），并**显式声明**：遮罩总是覆盖其下所有已绘制内容，
-  **不保证**与更高 draw_order 实体的交错顺序。
-- 后续若要严格交错：把 `draw_order` 穿到表示层并按顺序分段绘制（每段一个遮罩 pass），
-  **那是另一项渲染器改造**，不在本决策内。
+  顺序数据现已从数据库穿到 `DisplayFragment` → `RenderBatch`/`MaskBatch`（事实 3 的修正），
+  但**渲染器仍然按上传顺序绘制、遮罩恒为最后一遍**。
+- 本决策**首版**仍为**"遮罩恒为最后"**，并**显式声明**：遮罩总是覆盖其下所有已绘制内容，
+  **不保证**与更高 draw_order 实体的交错顺序。声明保持不变，但**理由已从"数据被丢掉"变成
+  "渲染器分段尚未实现"**。
+- 后续若要严格交错：按 `draw_order` 分段绘制（每段一次遮罩 pass），并先解除 opaque mesh 的
+  跨批次拍平（`plan/pack_mesh.rs`）；**那是另一项渲染器改造**，不在本决策内。
+  数据侧已就绪（2026-10-21）。
 
 ### D3 `inverted` 用**补集多边形**表达，不用模板
 

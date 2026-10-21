@@ -435,6 +435,7 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
             linetype: fragment.linetype.clone(),
             linetype_scale: fragment.linetype_scale,
             linetype_unresolved: fragment.linetype_unresolved,
+            draw_order: fragment.draw_order,
             primitive: fragment.primitive.transformed(&paper_to_render),
         };
         let only = cad_representation::DisplayRepresentation {

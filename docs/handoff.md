@@ -1,3 +1,21 @@
+## `draw_order` 贯通到场景批次（2026-10-21，行为中性）
+
+**做了什么**：`DisplayFragment` 新增 `draw_order: i64`，由源 `DbEntity::draw_order` 携带；
+`cad-scene` 的 `RenderBatch`/`MaskBatch` 直接取其值，`SCENE_DRAW_ORDER` 删除。**合批不跨顺序**：
+行/圆锥的合批谓词要求 `batch.draw_order == incoming`（同序内仍以 upload 顺序为最终 tie-break）。
+`ImageBatch` 仍为 0，并在注释里**具名**为图像遍的后续项，不再是静默默认。
+
+**INSERT 语义（明确写下）**：块展开的子实体继承**所属 INSERT 实体**的 order（每层取最近的 INSERT），
+不用子实体在块定义里的自有 order，也不给合成的默认值——因为数据库是按 INSERT 排序的。
+
+**测试**：实体 order 被携带（含 WIPEOUT 遮罩）；INSERT 子实体继承；同序可合批、**异序不可合批**；
+合成夹具 `0/1/3` + 遮罩 `2` 得到 `delta.added` 顺序 `[0,1,3]` 与 `delta.masks` 的 `2`。
+
+**行为中性**：`cad-render-wgpu` **未改动**，所以遮罩**仍然最后一遍**、绘制仍按上传顺序。
+ADR-0022 的"遮罩恒最后"声明**保持不变**，但理由已从"数据在表示层被丢掉"改为
+"渲染器分段尚未实现"；另外 **opaque mesh 仍跨批次拍平并忽略顺序**（`plan/pack_mesh.rs`），
+这是分段的前置条件之一，已在 ADR 里具名。文档已同步（`docs/adr/0022`、`docs/compatibility.md`）。
+
 ## 3D 视图的 GUI 面板（2026-10-21）
 
 **做了什么**：`view` 标签新增两个面板（复用**既有** i18n 键，未新增文案）：

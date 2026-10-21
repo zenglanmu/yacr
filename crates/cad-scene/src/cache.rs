@@ -3,16 +3,6 @@
 use super::*;
 use cad_representation::DisplayFragment;
 
-/// Paint order the scene emits for every fragment batch.
-///
-/// `draw_order` is **not yet threaded** from the importer's `DbEntity::draw_order`
-/// through `DisplayFragment` into `RenderBatch` (see [`RenderBatch::draw_order`]
-/// and `docs/handoff.md`), so the scene emits `0` and the effective paint order
-/// is the upload order. Both the batch constructor and the merge predicate read
-/// this constant, so the emitted order and the order the predicate compares
-/// cannot drift apart.
-pub(crate) const SCENE_DRAW_ORDER: i64 = 0;
-
 /// Bounds and caching for the CPU-side scene.
 pub struct SceneCache {
     pub budget: SceneBudget,
@@ -214,7 +204,7 @@ impl SceneCache {
             };
             if let Some(points) = line_points.filter(|_| compact && previous_was_lines) {
                 let batch = delta.added.last_mut().expect("previous line batch");
-                if line_fragment_merges_into(batch, fragment, paired, points, SCENE_DRAW_ORDER) {
+                if line_fragment_merges_into(batch, fragment, paired, points, fragment.draw_order) {
                     let relative = |p: &Point3| {
                         [
                             (p.x - batch.local_origin.x) as f32,
@@ -249,6 +239,12 @@ impl SceneCache {
                     transform: *transform,
                     clip: clip.clone(),
                     alpha: sanitize_alpha(fragment.alpha),
+                    // Images are drawn in their own pass after geometry. Their
+                    // order is a separate segmentation follow-up (like masks
+                    // before this change), so the image item stays at the
+                    // neutral `0` rather than silently pretending the pass is
+                    // already interleaved. The fragment does carry the real
+                    // order for that follow-up.
                     draw_order: 0,
                     sources: vec![fragment.source.clone()],
                 });
@@ -270,7 +266,7 @@ impl SceneCache {
                 delta.masks.push(MaskBatch {
                     polygon: boundary.clone(),
                     inverted: *inverted,
-                    draw_order: SCENE_DRAW_ORDER,
+                    draw_order: fragment.draw_order,
                     sources: vec![fragment.source.clone()],
                 });
                 previous_was_lines = false;
@@ -302,7 +298,8 @@ impl SceneCache {
                     };
                     if compact && previous_was_conic {
                         let batch = delta.added.last_mut().expect("previous conic batch");
-                        if conic_fragment_merges_into(batch, fragment, record, SCENE_DRAW_ORDER) {
+                        if conic_fragment_merges_into(batch, fragment, record, fragment.draw_order)
+                        {
                             batch.conics.push(record);
                             if batch.sources.last() != Some(&fragment.source) {
                                 batch.sources.push(fragment.source.clone());
@@ -329,7 +326,7 @@ impl SceneCache {
                         linetype: fragment.linetype.clone(),
                         linetype_unresolved: fragment.linetype_unresolved,
                         sources: vec![fragment.source.clone()],
-                        draw_order: SCENE_DRAW_ORDER,
+                        draw_order: fragment.draw_order,
                     });
                     previous_was_lines = false;
                     previous_was_conic = true;
@@ -511,7 +508,7 @@ impl SceneCache {
                 linetype: fragment.linetype.clone(),
                 linetype_unresolved: fragment.linetype_unresolved,
                 sources: vec![fragment.source.clone()],
-                draw_order: SCENE_DRAW_ORDER,
+                draw_order: fragment.draw_order,
             });
         }
         Ok(delta)
@@ -618,12 +615,14 @@ impl SceneCache {
 ///
 /// The merge is deliberately conservative: it only joins when every attribute
 /// the renderer reads matches, **including the paint order**.
-/// `incoming_draw_order` is the order the scene would emit for a freshly built
-/// fragment batch ([`SCENE_DRAW_ORDER`] today). Comparing it closes a hazard the
-/// earlier predicate missed: a batch carrying a distinct order — e.g. a
-/// selection-highlight batch ([`crate::HIGHLIGHT_DRAW_ORDER`]) — must never
-/// absorb a normal scene fragment, or the absorbed geometry would be drawn at
-/// the wrong paint order.
+/// `incoming_draw_order` is the order of the fragment being appended
+/// (`DisplayFragment::draw_order`); the batch's own order is the key it was
+/// built with. Requiring equality is what stops a merged batch from silently
+/// losing the order of some of its geometry: fragments at different display
+/// orders must stay in separate batches so the renderer can sort them
+/// individually. It also keeps a batch carrying a distinct order — e.g. a
+/// selection-highlight batch ([`crate::HIGHLIGHT_DRAW_ORDER`]) — from absorbing
+/// a normal scene fragment.
 pub(crate) fn line_fragment_merges_into(
     batch: &RenderBatch,
     fragment: &DisplayFragment,
@@ -661,7 +660,8 @@ pub(crate) fn line_fragment_merges_into(
 /// `batch` (the conic half of [`SceneCache::build_compact`]).
 ///
 /// Mirrors [`line_fragment_merges_into`]: it joins only when every attribute the
-/// renderer reads matches (including paint order), the batch is a conic batch and
+/// renderer reads matches (including [`cad_representation::DisplayFragment::draw_order`]),
+/// the batch is a conic batch and
 /// the conic's whole extent stays within the 8,192-unit stream radius of the
 /// batch origin. A conic never merges into a line batch and vice versa.
 pub(crate) fn conic_fragment_merges_into(

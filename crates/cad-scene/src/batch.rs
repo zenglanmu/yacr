@@ -162,12 +162,9 @@ pub struct RenderBatch {
     /// (on top). The renderer performs a stable sort on this key, so batches with
     /// equal `draw_order` keep the upload order as the final tie-break.
     ///
-    /// NOTE: `draw_order` is **not yet threaded** from the importer's
-    /// `DbEntity::draw_order` through `DisplayFragment` into `RenderBatch`; that
-    /// plumbing is formally deferred (see `docs/handoff.md`). The scene builder
-    /// therefore always emits `0`, so the current effective paint order is the
-    /// upload order. This field exists so the threading can land without an API
-    /// change, not as a signal that it is wired up.
+    /// The scene copies this from [`cad_representation::DisplayFragment::draw_order`],
+    /// i.e. the source entity's `DbEntity::draw_order`. Compact merging requires
+    /// an equal order, so a batch never mixes fragments at different orders.
     pub draw_order: i64,
 }
 
@@ -366,9 +363,10 @@ pub fn sanitize_lineweight(mm: f32) -> f32 {
 ///
 /// The polygon is preserved exactly as the representation produced it (no
 /// fan-triangulation here, which would leak a concave boundary), and the
-/// draw-order interleaving promised by ADR 0022 D2 is **not** implemented: masks
-/// always paint after every other class, and `draw_order` is recorded only so a
-/// later slice can segment the pass.
+/// draw-order interleaving promised by ADR 0022 D2 is **not** implemented yet:
+/// masks always paint after every other class. `draw_order` carries the WIPEOUT
+/// entity's real display order — no longer a constant — so the follow-up can
+/// segment the mask pass at the right position without another data-loss fix.
 ///
 /// `inverted` (DXF clip mode Inside) is carried through unchanged. The renderer
 /// expresses the complement by adding a viewport-covering ring to the same

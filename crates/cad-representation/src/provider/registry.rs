@@ -190,6 +190,7 @@ impl ProviderRegistry {
             &InstancePath::default(),
             0,
             1.0,
+            entity.draw_order,
             None,
             None,
             None,

@@ -517,6 +517,9 @@ mod tests {
                 linetype: cad_db::LinetypePattern::continuous(),
                 linetype_unresolved: false,
                 linetype_scale: 1.0,
+                // Highlight fixtures are synthetic: they carry no source entity
+                // order, and the highlight builder assigns its own paint order.
+                draw_order: 0,
                 primitive,
             }],
             completeness: Completeness::Complete,

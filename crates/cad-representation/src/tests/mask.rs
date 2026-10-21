@@ -63,6 +63,19 @@ fn mask_becomes_a_colourless_mask_primitive_with_the_boundary() {
 }
 
 #[test]
+fn mask_fragment_carries_the_wipeout_draw_order() {
+    let registry = ProviderRegistry::with_default_provider();
+    let mut entity = mask_entity(4, rectangle(), false);
+    entity.draw_order = 13;
+    let r = registry.build(&entity, &context()).unwrap();
+    assert_eq!(r.fragments.len(), 1);
+    assert_eq!(
+        r.fragments[0].draw_order, 13,
+        "the mask fragment must keep the WIPEOUT's order for the mask pass"
+    );
+}
+
+#[test]
 fn inverted_mask_emits_a_mask_primitive_carrying_the_flag() {
     let registry = ProviderRegistry::with_default_provider();
     let boundary = rectangle();

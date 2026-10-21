@@ -33,11 +33,11 @@ fn image_fragment_becomes_an_image_batch_with_deferred_draw_order() {
     assert_eq!(image.resource, resource);
     assert_eq!(image.transform, transform);
     assert_eq!(image.alpha, 1.0);
-    // Codifies the CURRENT deferred state: `draw_order` is NOT yet plumbed from
-    // `DbEntity::draw_order` through `DisplayFragment` (deferred, see
-    // `docs/handoff.md`), so the scene emits `0` and paint order falls back to
-    // upload order. This is not a desired behaviour, only a snapshot of the
-    // deferral; the assertion will change when threading lands.
+    // Codifies the CURRENT deferred state of the **image pass**: the fragment
+    // now carries `DisplayFragment::draw_order`, but images are drawn in their
+    // own pass after geometry, so `ImageBatch::draw_order` stays `0` until that
+    // pass is segmented (a separate follow-up, like masks before threading).
+    // This is not a desired behaviour, only a snapshot of the deferral.
     assert_eq!(image.draw_order, 0);
     assert_eq!(image.sources, vec![rep.fragments[0].source.clone()]);
     assert!(cache.image_used_bytes() > 0);

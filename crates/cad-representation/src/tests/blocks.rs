@@ -71,6 +71,38 @@ fn insert_instances_expand_with_transform_and_instance_path() {
 }
 
 #[test]
+fn block_children_inherit_the_insert_draw_order() {
+    // The database orders a space by the INSERT entity, so expanding the block
+    // must stamp the INSERT's order on the children, not the child's own order
+    // (which only orders entities *inside* the block definition).
+    let mut b = empty_db();
+    b.insert_block(BlockDefinition {
+        id: BlockId(4),
+        entities: vec![EntityId(12)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    let mut child = line_entity(12, SpaceId::Block(BlockId(4)), p(0.0, 0.0), p(1.0, 0.0));
+    child.draw_order = 3;
+    b.insert_entity(child).unwrap();
+    let mut insert = insert_entity(1, SpaceId::Model, 4, 10.0);
+    insert.draw_order = 77;
+    b.insert_entity(insert).unwrap();
+    let db = b.finish().unwrap();
+
+    let registry = ProviderRegistry::with_default_provider();
+    let rep = registry
+        .build_expanded(&db, db.entity(EntityId(1)).unwrap(), &context())
+        .unwrap();
+    assert_eq!(rep.fragments.len(), 1);
+    assert_eq!(
+        rep.fragments[0].draw_order, 77,
+        "the child fragment takes the INSERT's order ({})",
+        77
+    );
+}
+
+#[test]
 fn missing_block_definition_is_reported_missing() {
     let mut b = empty_db();
     b.insert_entity(insert_entity(1, SpaceId::Model, 99, 0.0))

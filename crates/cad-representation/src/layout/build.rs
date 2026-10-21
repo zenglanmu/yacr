@@ -28,6 +28,7 @@ fn fragment_with(fragment: DisplayFragment, primitive: DisplayPrimitive) -> Disp
         linetype: fragment.linetype,
         linetype_unresolved: fragment.linetype_unresolved,
         linetype_scale: fragment.linetype_scale,
+        draw_order: fragment.draw_order,
         primitive,
     }
 }
@@ -173,6 +174,7 @@ pub fn build_paper_space(
                                 linetype: fragment.linetype,
                                 linetype_unresolved: fragment.linetype_unresolved,
                                 linetype_scale: fragment.linetype_scale,
+                                draw_order: fragment.draw_order,
                                 primitive: DisplayPrimitive::LineSegments(std::sync::Arc::from(
                                     clipped.into_boxed_slice(),
                                 )),
@@ -193,6 +195,7 @@ pub fn build_paper_space(
                                 linetype: fragment.linetype.clone(),
                                 linetype_unresolved: fragment.linetype_unresolved,
                                 linetype_scale: fragment.linetype_scale,
+                                draw_order: fragment.draw_order,
                                 primitive: DisplayPrimitive::Lines(std::sync::Arc::from(
                                     run.into_boxed_slice(),
                                 )),

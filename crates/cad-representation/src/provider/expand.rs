@@ -14,6 +14,10 @@ impl ProviderRegistry {
         path: &InstancePath,
         depth: usize,
         parent_alpha: f32,
+        // Display order this entity inherits: its own at the root, and the
+        // containing INSERT's when expanding a block's children (see the
+        // `Instance` arm). It is carried onto every emitted fragment.
+        draw_order: i64,
         parent_color: Option<[f32; 3]>,
         parent_lineweight: Option<f32>,
         parent_linetype: Option<&LinetypePattern>,
@@ -42,6 +46,10 @@ impl ProviderRegistry {
         out.completeness = weaker_completeness(&out.completeness, &representation.completeness);
         out.diagnostics.extend(representation.diagnostics);
         for fragment in representation.fragments {
+            // The database orders a space by the INSERT entity, so a block's
+            // children take the INSERT's order rather than their own (which is
+            // only meaningful inside the block definition) or a synthetic 0.
+            let child_draw_order = fragment.draw_order;
             match fragment.primitive {
                 DisplayPrimitive::Instance {
                     block,
@@ -87,6 +95,7 @@ impl ProviderRegistry {
                             &child_path,
                             depth + 1,
                             own_alpha,
+                            child_draw_order,
                             Some(own_color),
                             Some(own_lineweight),
                             Some(&own_linetype),
@@ -113,6 +122,7 @@ impl ProviderRegistry {
                         &own_linetype,
                         linetype_unresolved,
                         linetype_scale,
+                        draw_order,
                         context.packed_line_segments,
                         global_lt_scale,
                         out,
@@ -159,6 +169,7 @@ impl ProviderRegistry {
                             linetype: own_linetype.clone(),
                             linetype_unresolved,
                             linetype_scale,
+                            draw_order,
                             primitive: DisplayPrimitive::Conic(transformed),
                         });
                     } else {
@@ -178,6 +189,7 @@ impl ProviderRegistry {
                             &own_linetype,
                             linetype_unresolved,
                             linetype_scale,
+                            draw_order,
                             context.packed_line_segments,
                             global_lt_scale,
                             out,
@@ -199,6 +211,7 @@ impl ProviderRegistry {
                         linetype: own_linetype.clone(),
                         linetype_unresolved,
                         linetype_scale,
+                        draw_order,
                         primitive: primitive.transformed(transform),
                     });
                 }
@@ -229,6 +242,9 @@ fn emit_polyline(
     own_linetype: &LinetypePattern,
     linetype_unresolved: bool,
     linetype_scale: f32,
+    // Inherited display order (see `expand_entity`): the INSERT's order for a
+    // block's children, the entity's own at the root.
+    draw_order: i64,
     packed_configured: bool,
     global_lt_scale: f64,
     out: &mut DisplayRepresentation,
@@ -318,6 +334,7 @@ fn emit_polyline(
             linetype: own_linetype.clone(),
             linetype_unresolved,
             linetype_scale,
+            draw_order,
             primitive: if packed {
                 DisplayPrimitive::LineSegments(Arc::from(run.into_boxed_slice()))
             } else {

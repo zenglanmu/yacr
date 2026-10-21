@@ -36,6 +36,8 @@ fn fragment(primitive: DisplayPrimitive) -> DisplayFragment {
         linetype: LinetypePattern::continuous(),
         linetype_unresolved: false,
         linetype_scale: 1.0,
+        // Synthetic plot fixture with no source entity order.
+        draw_order: 0,
         primitive,
     }
 }

@@ -27,6 +27,25 @@ fn line_becomes_a_lines_primitive() {
     }
 }
 
+#[test]
+fn fragment_carries_the_source_entity_draw_order() {
+    let registry = ProviderRegistry::with_default_provider();
+    let mut e = entity(
+        1,
+        SemanticGeometry::Line {
+            start: p(0.0, 0.0),
+            end: p(10.0, 0.0),
+        },
+    );
+    e.draw_order = 42;
+    let r = registry.build(&e, &context()).unwrap();
+    assert_eq!(r.fragments.len(), 1);
+    assert_eq!(
+        r.fragments[0].draw_order, 42,
+        "a fragment must carry the source entity's display order, not a default"
+    );
+}
+
 /// A POINT must not be drawn as the degenerate zero-length `[p, p]` chord the
 /// generic fallback used to emit (ADR 0015 decision E). The omission is
 /// reported honestly, and the shared tessellator's `[p, p]` output is kept for

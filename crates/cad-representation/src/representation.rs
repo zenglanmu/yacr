@@ -96,6 +96,10 @@ impl DisplayRepresentation {
             linetype: LinetypePattern::continuous(),
             linetype_unresolved: true,
             linetype_scale: 1.0,
+            // A kernel tessellation result carries no source entity, so there
+            // is no display order to read. `0` is the neutral order and is
+            // explicit here rather than silently defaulted.
+            draw_order: 0,
             primitive: DisplayPrimitive::Mesh(Arc::new(geometry.mesh.clone())),
         };
         match &result.outcome {

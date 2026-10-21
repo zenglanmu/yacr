@@ -216,6 +216,7 @@ impl crate::RepresentationProvider for ImageProvider {
                 linetype: cad_db::LinetypePattern::continuous(),
                 linetype_unresolved: true,
                 linetype_scale: 1.0,
+                draw_order: 0,
                 primitive: DisplayPrimitive::Image {
                     resource: cad_resources::ResourceKey("img:0".into()),
                     transform: Transform3 { matrix },
@@ -335,6 +336,7 @@ impl crate::RepresentationProvider for ClippedImageProvider {
                 linetype: cad_db::LinetypePattern::continuous(),
                 linetype_unresolved: true,
                 linetype_scale: 1.0,
+                draw_order: 0,
                 primitive: DisplayPrimitive::Image {
                     resource: cad_resources::ResourceKey("img:0".into()),
                     transform: Transform3 { matrix },

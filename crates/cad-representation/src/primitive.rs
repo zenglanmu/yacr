@@ -352,6 +352,19 @@ pub struct DisplayFragment {
     /// Entity linetype scale factor, applied with the drawing's global LTSCALE
     /// when subdividing. Sanitised to `>= 0`.
     pub linetype_scale: f32,
+    /// Display order of the source entity, i.e. the same key `cad-db` sorts a
+    /// space by (`DbEntity::draw_order`). Larger values paint later.
+    ///
+    /// Threaded here so the scene can carry it onto
+    /// `RenderBatch::draw_order`/[`crate::DisplayPrimitive::Mask`] batches
+    /// instead of emitting a constant. The renderer still paints every mask in
+    /// its final pass (ADR 0022 D2); this field only removes the data loss so a
+    /// follow-up can interleave masks with geometry at their real order.
+    ///
+    /// INSERT expansion makes every child fragment inherit the **INSERT's**
+    /// order, because the database orders by the INSERT entity, not by the
+    /// block's children.
+    pub draw_order: i64,
     pub primitive: DisplayPrimitive,
 }
 

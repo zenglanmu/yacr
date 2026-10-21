@@ -200,7 +200,10 @@ fn mask_fragment_becomes_a_mask_draw_item_with_its_polygon() {
         polygon.as_slice(),
         "the world boundary polygon is preserved verbatim"
     );
-    assert_eq!(delta.masks[0].draw_order, SCENE_DRAW_ORDER);
+    assert_eq!(
+        delta.masks[0].draw_order, rep.fragments[0].draw_order,
+        "a mask carries its source fragment's display order"
+    );
     assert_eq!(delta.masks[0].sources.len(), 1);
     assert!(
         !delta.masks[0].inverted,
@@ -283,4 +286,45 @@ fn mask_is_invalidated_by_its_entity_change() {
     };
     cache.apply_changes(&changes).unwrap();
     assert_eq!(cache.mask_count(), 0);
+}
+
+/// End-to-end contract for the threaded display order: entity geometry at
+/// orders 0/1/3 and a WIPEOUT mask at order 2 produce batches that report
+/// exactly those orders, with the mask keeping its own order.
+#[test]
+fn batches_carry_each_fragments_draw_order_including_masks() {
+    let p = |x: f64| Point3 { x, y: 0.0, z: 0.0 };
+    let mut rep = line_representation(1, vec![p(0.0), p(1.0)]);
+    rep.fragments
+        .extend(line_representation(2, vec![p(2.0), p(3.0)]).fragments);
+    rep.fragments
+        .extend(line_representation(3, vec![p(4.0), p(5.0)]).fragments);
+    rep.fragments
+        .extend(line_representation(4, vec![p(6.0), p(7.0)]).fragments);
+    rep.fragments[1].draw_order = 1;
+    rep.fragments[2].draw_order = 3;
+    rep.fragments[3].draw_order = 2;
+    rep.fragments[3].primitive = DisplayPrimitive::Mask {
+        boundary: Arc::from(vec![p(0.0), p(10.0), p(10.0), p(0.0)].into_boxed_slice()),
+        inverted: false,
+    };
+
+    for compact in [false, true] {
+        let delta = if compact {
+            SceneCache::default().build_compact(&rep, stamp()).unwrap()
+        } else {
+            SceneCache::default().build(&rep, stamp()).unwrap()
+        };
+        let orders: Vec<i64> = delta.added.iter().map(|batch| batch.draw_order).collect();
+        assert_eq!(
+            orders,
+            vec![0, 1, 3],
+            "each geometry batch reports its fragment's order (compact: {compact})"
+        );
+        assert_eq!(delta.masks.len(), 1);
+        assert_eq!(
+            delta.masks[0].draw_order, 2,
+            "the mask batch reports its own order (compact: {compact})"
+        );
+    }
 }

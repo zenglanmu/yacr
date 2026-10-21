@@ -254,25 +254,27 @@ fn compact_lines_keep_style_boundaries_and_transparent_depth_keys() {
 
 #[test]
 fn compact_merge_requires_an_equal_draw_order() {
-    // Two adjacent same-style fragments merge at the scene's emitted order...
-    let rep = line_representation(1, unit_points());
+    // A fragment's order is carried onto its batch, not flattened to 0.
+    let mut rep = line_representation(1, unit_points());
+    rep.fragments[0].draw_order = 7;
     let mut batch = SceneCache::default()
         .build(&rep, stamp())
         .unwrap()
         .added
         .remove(0);
+    assert_eq!(batch.draw_order, 7);
     let fragment = &rep.fragments[0];
     let points = match &fragment.primitive {
         DisplayPrimitive::Lines(points) => points.as_ref(),
         _ => panic!("expected a line fragment"),
     };
-    assert_eq!(batch.draw_order, crate::cache::SCENE_DRAW_ORDER);
+    // Two adjacent same-style fragments merge at the same order...
     assert!(crate::cache::line_fragment_merges_into(
         &batch,
         fragment,
         false,
         points,
-        crate::cache::SCENE_DRAW_ORDER,
+        fragment.draw_order,
     ));
     // ...but a fragment emitted at a different paint order (e.g. a selection
     // highlight) must not be absorbed into the batch, so merging never draws
@@ -292,8 +294,34 @@ fn compact_merge_requires_an_equal_draw_order() {
         fragment,
         false,
         points,
-        crate::cache::SCENE_DRAW_ORDER,
+        fragment.draw_order,
     ));
+}
+
+#[test]
+fn compact_merge_keeps_collinear_lines_with_different_orders_separate() {
+    // Two collinear, identical-style segments that the merge would previously
+    // have joined into one batch. With different display orders they must stay
+    // separate, so each order is preserved for the renderer's sort.
+    let p = |x| Point3 { x, y: 0.0, z: 0.0 };
+    let mut rep = line_representation(1, vec![p(0.0), p(1.0)]);
+    rep.fragments
+        .extend(line_representation(2, vec![p(1.0), p(2.0)]).fragments);
+    rep.fragments[1].draw_order = 3;
+    let delta = SceneCache::default().build_compact(&rep, stamp()).unwrap();
+    assert_eq!(
+        delta.added.len(),
+        2,
+        "different display orders must not merge into one batch"
+    );
+    assert_eq!(delta.added[0].draw_order, 0);
+    assert_eq!(delta.added[1].draw_order, 3);
+    // The same two fragments at a shared order do merge: the split above is
+    // caused by the order boundary, not by an unrelated style difference.
+    rep.fragments[1].draw_order = 0;
+    let merged = SceneCache::default().build_compact(&rep, stamp()).unwrap();
+    assert_eq!(merged.added.len(), 1);
+    assert_eq!(merged.added[0].draw_order, 0);
 }
 
 #[test]
