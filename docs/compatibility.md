@@ -244,11 +244,16 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 
 ## 三维
 
-- 观察（轨道/标准视图/正交-透视）：`cad-app` 的相机/投影/标准视图/轨道命令与 Slint
-  桥已接线，`BeforeRendering` 按当前空间与视图模式选择 `render`(2D) 或 `render_3d`
-  (`Camera3d`)，UI 提供 2D/3D、投影、标准视图与拖动轨道（`docs/view-3d.md`）。
-  **真实设备上的 3D 出图仍未验证**（模拟器 SwiftShader 只覆盖 2D；软件 Vulkan 的
-  网格测试见 `docs/validation.md`）。
+- 观察（轨道/标准视图/正交-透视）：相机/投影/标准视图/轨道命令与宿主接线齐全
+  （`crates/cad-app/src/camera/` → `cad-host/src/state.rs` 的 `ViewSnapshot` →
+  `cad-engine` 按 `view_mode` 选 `render`(2D)/`render_3d`(`Camera3d`)）。
+  **可达性**：命令行输入 `SWITCH2D3D` 进入 3D（无负载、在命令表内），3D 下**主键拖动即 orbit**；
+  `ORBIT` 按设计是手势命令（`GESTURE_ONLY_COMMANDS`），不是按钮。**React chrome 没有 3D 控件**，
+  `STANDARDVIEW`/`PROJECTION` 仍缺载荷通道 ⇒ **标准视图不可达**（声明缺口）。
+  **真机 3D 出图已验证**（Quadro P620 / Vulkan / X11）：ACIS 立方体在斜视下为 **6 顶点凸包、三面、
+  平行棱收敛 31.2%、对角线不等 10.1%**，隐藏边不穿透（`docs/handoff.md` 2026-10-21 条目）。
+  边界：俯视正交下"有面立方体"与"填色方片"**像素等价**，故 2D 帧不能证明三维性；
+  无 golden/跨 GPU/vendor/性能结论。
 - 直接网格（Mesh/3DFACE）：数据、法向、深度、绘制顺序与透明通道已实现；透明合成有
   软件 Vulkan（lavapipe）无头测试。真实 GPU 行为未验收。
 - 底图透明度：importer 读取 acadrust `Transparency`（`ByLayer`/`ByObject`/`ByBlock`）

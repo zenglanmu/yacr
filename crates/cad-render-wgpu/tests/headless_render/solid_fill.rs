@@ -32,7 +32,7 @@ type Quad = ([f32; 3], [f32; 3], [f32; 3], [f32; 3], [f32; 3]);
 /// wound triangles and one outward per-face normal per vertex. The winding of
 /// the `+Z` face is stated explicitly so the renderer's front-face convention is
 /// the one under test.
-fn acis_cube(with_edge_overlay: bool) -> RenderBatch {
+pub(super) fn acis_cube(with_edge_overlay: bool) -> RenderBatch {
     // (corner a, b, c, d, outward normal) with the quad wound CCW seen from
     // outside, matching the adapter's facet output.
     let faces: [Quad; 6] = [

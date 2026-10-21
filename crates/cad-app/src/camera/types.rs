@@ -18,6 +18,16 @@ pub const MIN_ORTHO_SCALE: f64 = 1e-9;
 pub const DEFAULT_PERSPECTIVE_FOV_RADIANS: f64 = std::f64::consts::FRAC_PI_4;
 /// The orthographic scale used when a plan view has no scale to inherit.
 pub const DEFAULT_ORTHO_SCALE: f64 = 1.0;
+/// Breathing room applied when entering 3D: the fitted eye distance is this
+/// multiple of the exact fit distance, so the model never touches the frustum
+/// edges or the near plane.
+pub const FIT_3D_MARGIN: f64 = 1.2;
+/// The model radius used when there is no usable extent to fit (an empty or
+/// dimensionless drawing), in world units.
+pub const EMPTY_MODEL_RADIUS: f64 = 1.0;
+/// The smallest eye-to-target distance a fitted 3D camera may use, in world
+/// units. Keeps the camera renderable even for a degenerate extent.
+pub const MIN_3D_DISTANCE: f64 = 1e-6;
 /// Smallest acceptable vertical field of view, in radians (~0.057°).
 pub const MIN_FOV_RADIANS: f64 = 1e-3;
 /// Largest acceptable vertical field of view, in radians (just under 180°).

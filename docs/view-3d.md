@@ -5,12 +5,14 @@ Spec v2.0 §3.3 / audit **F13**. This note records what the *application* side o
 zoom-to-cursor and the work plane consumed by planar measurement — and what is
 still handled by the render/picking workstream.
 
-Scope: `crates/cad-app/src/camera.rs`, the camera/space commands in
-`crates/cad-app/src/lib.rs`, and the host wire-up in
-`crates/cad-ui-slint/src/{bridge.rs,lib.rs}` + `ui/app.slint`. No GPU object,
-depth buffer, framebuffer or scene graph is touched by `cad-app` (constraint:
-business layers do not submit GPU work); the bridge only selects and passes
-cameras to `cad-render-wgpu`.
+Scope: `crates/cad-app/src/camera/` (types, view math, tests), the camera/space
+commands in `crates/cad-app/src/application.rs`, and the host wire-up
+`crates/cad-host/src/state.rs` (the `ViewSnapshot` built from the viewport's
+`camera` + `view_mode`) feeding `crates/cad-engine/src/render/runtime/session.rs`,
+which dispatches `Renderer::render(Camera2d, ..)` or `Renderer::render_3d(Camera3d, ..)`.
+No GPU object, depth buffer, framebuffer or scene graph is touched by `cad-app`
+(constraint: business layers do not submit GPU work); `cad-engine` only maps the
+app-derived eye/target/up/fov/near/far onto `cad-render-wgpu::Camera3d`.
 
 ## Conventions
 
@@ -106,52 +108,55 @@ re-orthogonalised so it always satisfies the measure engine's checks
 error. `Viewport::new` and `ResetView` install the `z = 0` XY plane, so area and
 polyline measurements keep a valid explicit plane after any view transition.
 
-## Host UI wiring (F02/F04/F13/F14)
+## Host wiring and reachability (F02/F04/F13/F14)
 
-The Slint host is now wired to the app-level camera and space state:
+The 3D camera is wired end to end in the **React/Tauri** host, but the chrome
+exposes **no 3D control**:
 
-- `cad-ui-slint/src/bridge.rs` keeps, per frame, the active space
-  (`SpaceSelection::Model | Paper(LayoutId)`), the observation mode (2D/3D), the
-  full application `Camera` and the 2D centre/scale mirror. `BeforeRendering`
-  builds the drawing with `build_scene_with_annotations_in_space` (the model or
-  paper path plus the annotation overlay in one delta) and dispatches to
-  `Renderer::render(Camera2d, ..)` or `Renderer::render_3d(Camera3d, ..)`.
-- The conversion `cad_app::camera::{Camera, Projection} → cad_render_wgpu::Camera3d`
-  lives only in the bridge (`camera3d_from_params`), mapping the app-derived
-  eye/target/up/fov/near/far field-for-field. `Camera::camera3d_params` derives
-  the near/far planes with the same rule as `Camera::projection_matrix`, and
-  refuses an orthographic, coincident or pole-locked camera.
-- `CadView` exposes `set_space`, `set_view_mode`, `set_camera3d` and
-  `sync_from_viewport(&Viewport)`. `set_space` validates the layout against the
-  real layout table (`cad_app::validate_space`) and records an explicit
-  diagnostic on refusal; `BeforeRendering` re-validates every frame.
-- The shell (`ui/app.slint` + `UiAdapter`) has a 2D/3D toggle, an explicit
-  projection toggle and standard-view controls generated from `StandardView::ALL`,
-  routed through `CommandId::{Switch2d3d, SwitchProjection, StandardView}`. The
-  layout selector routes through `CommandId::SwitchSpace` (validated in
-  `cad-app`). A left-button drag while the pushed view state is 3D emits
-  `CommandId::Orbit` from the canvas callback.
+- `crates/cad-host/src/state.rs` builds `ViewSnapshot` from
+  `viewport.camera` and `viewport.view_mode.kind()` — the session view mode is
+  authoritative, so a 3D view with an orthographic camera stays `ThreeD`. In a 3D
+  view the pointer-cursor overlay input is explicitly empty (no planar cursor).
+- `crates/cad-engine/src/render/runtime/session.rs` branches on that mode:
+  `TwoD` → `camera2d_from_params` + `render`; `ThreeD` → `camera3d_from_params`
+  + `render_3d`. `camera3d_from_params` (`crates/cad-engine/src/render/camera.rs`)
+  maps `Camera3dParams` field-for-field, and `Camera::camera3d_params` derives
+  near/far with the same rule as `Camera::projection_matrix`, refusing an
+  orthographic, coincident or pole-locked camera.
+- **Reaching 3D today**: `SWITCH2D3D` is a payload-free selector in the
+  `cad-ui-core` command table, so typing it in the command line reaches the real
+  session (`cad_command`); entering 3D frames the model (`Camera::enter_3d`,
+  distance from the document's 3D bounds, see below) and returning to 2D restores
+  the snapshotted camera bit-for-bit.
+- **Orbiting**: in a 3D view a primary-button canvas drag emits
+  `CommandId::Orbit` (`crates/cad-host/src/input/pointer.rs`); it is deliberately
+  *not* a button payload — `ORBIT` is listed in
+  `apps/app-linux/ui/src/commands.mjs`'s `GESTURE_ONLY_COMMANDS`, so the
+  affordance stays disabled with a gesture reason rather than fabricating a
+  camera move.
+- **No ribbon 3D toggle and no standard-view controls**: the React chrome has
+  neither, so `STANDARDVIEW` (which needs a view payload) and `PROJECTION` are
+  reachable only through channels that do not exist yet. This is an explicit UI
+  gap, not a hidden one.
 
 ## What is not verified here
 
-- **GPU execution was not observed in this environment.** The native
-  `cad-ui-slint` build cannot be linked here (no `pkg-config`/fontconfig), so the
-  bridge was compiled only for `wasm32-unknown-unknown` and
-  `aarch64-linux-android`. No window was opened and no frame was rendered: the
-  `render` / `render_3d` dispatch, the depth buffer and perspective correctness
-  on a real adapter remain unverified. `cad-app`'s camera/space logic is the
-  part that is unit-tested on the host (`cargo test -p cad-app`).
-- **Host glue is not in this workstream.** `apps/app-web` and `apps/app-android`
-  still call `CadView::set_camera` only; the orchestrator must switch them to
-  `CadView::sync_from_viewport` (and handle `SwitchSpace`) for 3D and paper
-  space to be reachable at runtime. `LayoutSwitchSink` remains as a
-  source-compatible override; when installed it takes precedence over the
-  `SwitchSpace` command so the two paths cannot fight.
+- **GPU execution has been observed** on a real adapter (Quadro P620, Vulkan)
+  through the React/Tauri host: the 2D path renders the drawing and the 3D path
+  renders a real frame. Pixel-level correctness of the **3D image** is a separate
+  question and is tracked in `docs/handoff.md`; 2D↔3D round-trip and the camera
+  math are unit-tested (`cargo test -p cad-app`).
+- **Platform placeholders**: `apps/app-web` and `apps/app-android` are explicit
+  NOT IMPLEMENTED stubs, so 3D and paper-space runtime reachability there is not
+  claimed.
 - **3D picking/depth test** still lives with the render workstream
   (`Camera::screen_to_ray` exists, but no ray/scene intersection or depth
   readback and no `PickHit` selection).
-- **Perspective viewport fitting** is still not implemented: `fit_viewport`
-  returns to the 2D plan, and there is no bounds-framing 3D fit.
+- **Perspective fitting on entry**: entering 3D now frames the document
+  (`Camera::enter_3d`: target at the 3D bounds centre, distance
+  `radius / tan(fov/2) * 1.2` with `radius` = half the bounding-box diagonal,
+  view direction preserved). `FIT` itself still returns to the 2D plan; a
+  re-fit while already in 3D is not implemented.
 
 These are explicit gaps, not empty successes: a refused space or a degenerate
 3D camera produces a diagnostic and no frame, never a blank "success".

@@ -47,7 +47,10 @@
 //! - [`popup_textedit_reopen`]: that phase's reopen steps (stored result visible
 //!   in the dialog for an external grab, then closed again);
 //! - [`popup_textedit_summary`]: that phase's recorded reads and single-line
-//!   summary (both split at the 1000-line code-file gate).
+//!   summary (both split at the 1000-line code-file gate);
+//! - [`view3d`]: the `YACR_PROBE_VIEW3D` driver that switches the real session
+//!   to the 3D view (`SWITCH2D3D`), orbits it with a synthetic primary drag and
+//!   reports the real `cad_status` reads (2D camera present -> absent).
 
 use std::time::{Duration, Instant};
 
@@ -71,6 +74,7 @@ mod popup_textedit;
 mod popup_textedit_reopen;
 mod popup_textedit_summary;
 mod tool;
+mod view3d;
 
 pub use box_select::{box_evidence_enabled, maybe_spawn_box_evidence};
 pub use draw::{draw_evidence_enabled, maybe_spawn_draw_evidence};
@@ -81,6 +85,7 @@ pub use lifecycle::maybe_spawn_lifecycle;
 pub use pan::{postload_pan_enabled, POSTLOAD_PAN_JS, POSTLOAD_PAN_REPORT_JS};
 pub use popup::{maybe_spawn_popup_evidence, popup_evidence_enabled};
 pub use tool::{maybe_spawn_tool_evidence, tool_evidence_enabled};
+pub use view3d::{maybe_spawn_view3d, view3d_enabled};
 
 /// Sleep until `seconds` after `start`, then run `action` and log the result.
 ///

@@ -23,6 +23,69 @@ impl Camera {
         }
     }
 
+    /// Enter the perspective 3D view, framing `bounds`.
+    ///
+    /// Only the projection, the target and the eye distance change; the eye
+    /// *direction* is preserved, so entering 3D from the plan view stays
+    /// top-down (orbiting is what tilts it).
+    ///
+    /// The target becomes the bounds centre, `z` included, so a solid that does
+    /// not straddle `z = 0` is framed too. The eye is pushed back to
+    /// `radius / tan(fov_y / 2) * FIT_3D_MARGIN`, where `radius` is half the
+    /// bounding-box diagonal. The vertical extent visible at the target is then
+    /// `2 * distance * tan(fov_y / 2) = 2 * radius * FIT_3D_MARGIN`, i.e. the
+    /// whole model diagonal fits with breathing room, and the model stays far
+    /// beyond the near plane that [`perspective_near_far`] derives from the
+    /// distance (it is a tiny fraction of the distance), so a solid is no longer
+    /// clipped away.
+    ///
+    /// Fallback rule: absent, non-finite or zero-extent bounds fall back to a
+    /// radius of [`EMPTY_MODEL_RADIUS`] (one world unit), and the distance is
+    /// floored at [`MIN_3D_DISTANCE`], so the result is always a finite,
+    /// non-degenerate camera — even for an empty document.
+    pub fn enter_3d(
+        &self,
+        bounds: Option<(Point3, Point3)>,
+        vertical_fov_radians: f64,
+    ) -> CadResult<Camera> {
+        let projection = Projection::perspective(vertical_fov_radians)?;
+        let (target, radius) = match bounds {
+            Some((min, max)) if is_finite_point(min) && is_finite_point(max) => {
+                let centre = scale3(add(min, max), 0.5);
+                (centre, length3(sub(max, min)) * 0.5)
+            }
+            _ => (self.target, 0.0),
+        };
+        let radius = if radius.is_finite() && radius > 0.0 {
+            radius
+        } else {
+            EMPTY_MODEL_RADIUS
+        };
+        let tan_half = (vertical_fov_radians * 0.5).tan();
+        let distance = if tan_half.is_finite() && tan_half > 0.0 {
+            (radius / tan_half * FIT_3D_MARGIN).max(MIN_3D_DISTANCE)
+        } else {
+            // Not reachable through `Projection::perspective`'s validated FOV;
+            // kept so a caller cannot get a NaN distance from a bad angle.
+            MIN_3D_DISTANCE
+        };
+        // Preserve the view direction; a coincident eye/target pair (already an
+        // invalid camera) falls back to the top-down direction.
+        let direction = normalize3(sub(self.eye, self.target)).unwrap_or(Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        });
+        let camera = Camera {
+            eye: add(target, scale3(direction, distance)),
+            target,
+            up: self.up,
+            projection,
+        };
+        camera.validate()?;
+        Ok(camera)
+    }
+
     /// The right-handed, orthonormal view frame of this camera.
     pub fn view_basis(&self) -> CadResult<ViewBasis> {
         ViewBasis::from_forward_up(sub(self.target, self.eye), self.up)
@@ -326,19 +389,31 @@ impl Camera {
         let mut offset = sub(self.eye, self.target);
         // Yaw about world +Z.
         offset = rotate_about_z(offset, yaw);
-        // Pitch about the horizontal right axis (world +Z cross offset).
+        // Pitch about the horizontal right axis: `up × horizontal`, i.e. the
+        // camera's screen right for a Z-up world.
+        //
+        // The axis must be frame-consistent, so its sign cannot depend on which
+        // way the current offset already leans. Deriving it the other way round
+        // (`horizontal × up`) evaluates to the *negative* of screen right, so
+        // the first increment tilted the eye and every following one tilted it
+        // back: an incremental orbit (one command per pointer move, the host's
+        // real drag path) cancelled itself and left the camera a few
+        // milliradians off top-down instead of the pitched view the drag asked
+        // for. A top-down `[-1, 1]³` cube then rendered as its `+Z` face - a
+        // rotated square with no internal edges (fenced by
+        // `incremental_orbit_accumulates_the_pitch`).
         let horizontal = Point3 {
             x: offset.x,
             y: offset.y,
             z: 0.0,
         };
         let right = normalize3(cross(
-            horizontal,
             Point3 {
                 x: 0.0,
                 y: 0.0,
                 z: 1.0,
             },
+            horizontal,
         ))
         .unwrap_or(Point3 {
             x: 1.0,

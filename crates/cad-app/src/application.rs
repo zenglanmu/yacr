@@ -94,12 +94,16 @@ impl Application {
             CommandId::SwitchProjection => {
                 // Explicit toggle of the projection kind, preserving the target.
                 // 2D/3D mode is updated to stay consistent with the projection.
+                // Entering 3D frames the model (see `Camera::enter_3d`) instead of
+                // inheriting the 2D plan's unit eye offset, which would put the
+                // eye inside the model and clip it at the near plane.
+                let bounds = self.document_bounds(command.document);
                 let viewport = self.viewport_mut(&command)?;
                 match viewport.camera.projection {
                     Projection::Orthographic { .. } => {
-                        viewport.camera.projection =
-                            Projection::perspective(camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?;
                         let saved = viewport.view_mode.saved_2d_camera();
+                        viewport.camera =
+                            saved.enter_3d(bounds, camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?;
                         viewport.view_mode = ViewMode2d3d::ThreeD { saved_2d: saved };
                     }
                     Projection::Perspective { .. } => {
@@ -318,19 +322,28 @@ impl Application {
 
     /// Toggle between the 2D plan view and a 3D perspective view.
     ///
-    /// Entering 3D promotes the projection to perspective and snapshots the 2D
-    /// camera; returning to 2D restores that camera exactly (audit F13). This is
-    /// pure camera state — no GPU view or depth buffer is involved here.
+    /// Entering 3D promotes the projection to perspective, frames the document
+    /// bounds ([`Camera::enter_3d`]) and snapshots the 2D camera; returning to
+    /// 2D restores that camera exactly (audit F13). This is pure camera state —
+    /// no GPU view or depth buffer is involved here.
     pub(crate) fn switch_2d3d(
         &mut self,
         session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
+        let bounds = self.document_bounds(command.document);
         let viewport = self.viewport_mut(command)?;
         let message = match viewport.view_mode.kind() {
             ProjectionKind::TwoD => {
                 let saved = viewport.camera;
                 viewport.set_view_mode(ViewMode2d3d::ThreeD { saved_2d: saved })?;
+                // Frame the model: the plan camera's eye offset says nothing
+                // about the model's size (the measured defect carried a
+                // one-unit offset), so without this the solid can sit at or
+                // behind the near plane and be clipped away.
+                viewport.camera = viewport
+                    .camera
+                    .enter_3d(bounds, camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?;
                 "已切换到三维视图（透视）"
             }
             ProjectionKind::ThreeD => {
@@ -439,6 +452,17 @@ impl Application {
             ],
             measurement: None,
         })
+    }
+
+    /// Model-space bounds of the open document, if it has any geometry.
+    ///
+    /// This is the same bounds source [`Self::fit_viewport`] frames in 2D; the
+    /// 3D fit uses it for the eye distance and target, `z` included.
+    fn document_bounds(&self, document: DocumentId) -> Option<(Point3, Point3)> {
+        self.workspace
+            .documents
+            .get(&document)
+            .and_then(|document| document.drawing.bounds())
     }
 
     pub(crate) fn viewport_mut(&mut self, command: &Command) -> CadResult<&mut Viewport> {

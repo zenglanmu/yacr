@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 mod images_and_culling;
 mod masks;
+mod oblique_cube;
 mod render_basics;
 mod solid_fill;
 fn source() -> SelectionRef {

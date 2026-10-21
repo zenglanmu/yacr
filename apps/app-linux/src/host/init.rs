@@ -213,6 +213,11 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
     crate::evidence::maybe_spawn_tool_evidence(child.as_ref());
     crate::evidence::maybe_spawn_box_evidence(child.as_ref());
     crate::evidence::maybe_spawn_hover_evidence(child.as_ref());
+    // Env-gated, evidence-only 3D-view driver: switches the real session to the
+    // 3D view (`SWITCH2D3D`), orbits it with a synthetic primary drag and reports
+    // the real `cad_status` reads. Independent of every other driver and OFF on a
+    // normal run (`YACR_PROBE_VIEW3D` is unset).
+    crate::evidence::maybe_spawn_view3d(child.as_ref());
     crate::evidence::maybe_spawn_lifecycle(&evidence_window, app.handle());
     // Env-gated, evidence-only modal-popup pipeline driver: opens, proves the host
     // gate refuses input/commands, closes and proves the gate releases. No effect

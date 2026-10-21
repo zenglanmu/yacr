@@ -1,3 +1,44 @@
+## 3D 观察：斜视证据闭环（2026-10-21）
+
+**为什么开这一轮**：ACIS 实体在 2D 俯视下是"填色方片"，与"有面立方体"**像素等价** ⇒ 上一轮只能证明"有填充"，
+不能证明三维性。本轮补上斜视证据，并在此过程中修掉两个真缺陷。
+
+**可达性（重要，且未变）**：`SWITCH2D3D` 是**无负载**选择器、在 `cad-ui-core` 命令表内，所以
+**命令行输入即可进入 3D**；3D 下**主键拖动即 orbit**（`cad-host/src/input/pointer.rs`，0.008 rad/px）；
+`ORBIT` 在 `apps/app-linux/ui/src/commands.mjs` 的 `GESTURE_ONLY_COMMANDS` 中，**按设计不提供按钮**。
+**React chrome 没有 3D 控件**，`STANDARDVIEW`（需 view 载荷）与 `PROJECTION` 目前**没有任何通道可发**
+⇒ 标准视图/投影切换**不可达**（声明缺口，非静默）。
+
+**修掉缺陷 1：进入 3D 不设距离**。2D 俯视相机的 eye 偏移不是模型量级
+（`FitDrawing` 还刻意保留 `eye.z`），而 `Viewport::set_view_mode` 只换投影、不动距离 ⇒ 眼点落在实体
+附近/内部，近平面把立方体切掉，实测只剩 **4×3 px、8 个非黑像素**的残块。
+修法：`Camera::enter_3d(bounds, fov)` —— target 取**文档 3D 包围盒中心**（含 z），
+`distance = radius / tan(fov/2) * 1.2`（radius = 包围盒对角线一半），**保持视线方向与 up**；
+空文档/退化范围回落到有限正值。`SWITCH2D3D` 与 `PROJECTION` 两个入口都走它，`saved_2d` 位级还原不变。
+cube 夹具：radius 1.7320508 ⇒ distance 5.0178487，可见高度 4.1569219 ≥ 对角线 3.4641016。
+**2D 帧位级不变**（sha256 相同）。
+
+**修掉缺陷 2：orbit 俯仰轴取反**。`Camera::orbit` 的俯仰轴原为 `horizontal × +Z`，即**屏幕右向的反向**；
+宿主每次 pointer move 发一条增量 `Orbit`，于是**抬一次又压回去**——36 次移动后眼点只偏离 +Z
+**0.0000–0.057°**（应为 23.5°），画面是顶面被滚转后的**纯白正方形**（旋转 52°、对角线等长、零内边、零明暗）。
+改为 `+Z × horizontal`（= 视图基的 right）后增量正确累积。新增
+`orbit_from_plan_tilts_the_eye_by_the_pitch_angle` 与 `incremental_orbit_accumulates_the_pitch`（36 次增量仍为 0.41 rad）。
+
+**证据（真实 GPU：Quadro P620 / Vulkan / X11，`YACR_PROBE_VIEW3D=1`）**：
+驱动读**真实** `cad_status`（`camera` present→absent、`error` null、`downs=1/moves=36/ups=1`），
+不合成角度；斜视抓图判读结果：
+- **6 顶点凸六边形**（不是四边形：角点 C/E 分别偏离 4 顶点模型 13.3 / 4.4 px）；
+- **三面**：顶面 255（36,176 px）+ 两个侧面同为 137（4,043 / 1,466 px），第 4 个顶面角**严格在内部**（立方体俯视拓扑）；
+- **透视**：世界平行棱收敛 **31.2%**（282.95 → 194.75 px），顶面对角线差 **10.1%**、中点相距 17.2 px
+  ⇒ 非仿射；Caprile–Torre 正交性检验通过（三组消失点给出同一 f = 417.1 px，正交误差 0.00007）；
+- **遮挡**：隐藏边**不穿透**可见面（远角探针 0/300、0/200 非白），0 空洞、0 z-fighting、0 游离三角；
+- **三角化**：两个侧面各有一条**角到角对角缝**（与预测差 ≤1.5 px）⇒ 侧面确实是 2 三角形。
+
+**证据边界（判读原话，不得推广）**：顶面的对角缝在 255 上**不可见**，所以"12 三角形"整体**未被证明**；
+不能从像素推断立方体比例（顶点残差 2.7–5 px）、**背面剔除 vs 深度测试**、光照模型、ACIS 源本身；
+无 golden / 跨 GPU / vendor / 性能结论。**回归守卫**：headless `oblique_cube`（6 角、>100 内部边像素、
+透视收敛）+ 反例对照 `top_down_cube_is_a_square_control`（4 角、上下等宽）。
+
 ## 正交深度映射修复：实体终于能填充（2026-10-21）
 
 **症状**：ACIS 立方体只画线框，内部 100% 背景色；而 hatch（同一 mesh 管线）填充正常。

@@ -39,8 +39,8 @@ pub use math::{add, cross, dot3, length3, normalize3, scale3, sub};
 pub use plane::{is_finite_point, orthonormal_work_plane, xy_work_plane};
 pub use types::{
     Camera, Camera2dParams, Camera3dParams, Projection, ProjectionKind, StandardView, ViewBasis,
-    DEFAULT_ORTHO_SCALE, DEFAULT_PERSPECTIVE_FOV_RADIANS, MAX_FOV_RADIANS, MIN_FOV_RADIANS,
-    MIN_ORTHO_SCALE,
+    DEFAULT_ORTHO_SCALE, DEFAULT_PERSPECTIVE_FOV_RADIANS, EMPTY_MODEL_RADIUS, FIT_3D_MARGIN,
+    MAX_FOV_RADIANS, MIN_3D_DISTANCE, MIN_FOV_RADIANS, MIN_ORTHO_SCALE,
 };
 
 use math::{
