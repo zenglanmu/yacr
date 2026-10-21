@@ -51,9 +51,9 @@ mod tests;
 
 // Public host API (unchanged external surface; `crate::host::…` still resolves).
 pub use commands::{
-    cad_close_popup, cad_command, cad_commands, cad_open_popup, cad_set_selected_text,
-    cad_set_setting, cad_set_tool_parameter, cad_set_tool_text, cad_settings, cad_standard_view,
-    cad_status, probe_input, probe_status, CadCommandAck,
+    cad_close_popup, cad_command, cad_commands, cad_open_popup, cad_set_selected_property,
+    cad_set_selected_text, cad_set_setting, cad_set_tool_parameter, cad_set_tool_text,
+    cad_settings, cad_standard_view, cad_status, probe_input, probe_status, CadCommandAck,
 };
 pub use init::init;
 pub use options::{
@@ -80,11 +80,12 @@ pub(crate) use postload::resolve_process_exit;
 // resolves them at `crate::host::…`) keeps working after the split.
 pub(crate) use commands::{
     __cmd__cad_close_popup, __cmd__cad_command, __cmd__cad_commands, __cmd__cad_open_popup,
-    __cmd__cad_set_selected_text, __cmd__cad_set_setting, __cmd__cad_set_tool_parameter,
-    __cmd__cad_set_tool_text, __cmd__cad_settings, __cmd__cad_standard_view, __cmd__cad_status,
-    __cmd__probe_input, __cmd__probe_status, __tauri_command_name_cad_close_popup,
-    __tauri_command_name_cad_command, __tauri_command_name_cad_commands,
-    __tauri_command_name_cad_open_popup, __tauri_command_name_cad_set_selected_text,
+    __cmd__cad_set_selected_property, __cmd__cad_set_selected_text, __cmd__cad_set_setting,
+    __cmd__cad_set_tool_parameter, __cmd__cad_set_tool_text, __cmd__cad_settings,
+    __cmd__cad_standard_view, __cmd__cad_status, __cmd__probe_input, __cmd__probe_status,
+    __tauri_command_name_cad_close_popup, __tauri_command_name_cad_command,
+    __tauri_command_name_cad_commands, __tauri_command_name_cad_open_popup,
+    __tauri_command_name_cad_set_selected_property, __tauri_command_name_cad_set_selected_text,
     __tauri_command_name_cad_set_setting, __tauri_command_name_cad_set_tool_parameter,
     __tauri_command_name_cad_set_tool_text, __tauri_command_name_cad_settings,
     __tauri_command_name_cad_standard_view, __tauri_command_name_cad_status,
@@ -199,6 +200,13 @@ pub struct Shared {
     /// `CadSession::set_selected_text`, which re-resolves and validates the
     /// selection at apply time. No entity id travels on this queue.
     pub cad_selected_texts: Vec<String>,
+    /// Bounded main-thread queue of property writes for the **current
+    /// selection** (the docked panel's `SETENTITYPROPERTY` channel): admitted by
+    /// the dedicated `cad_set_selected_property` IPC as a `(key, value)` pair of
+    /// strings and drained by the owner tick into
+    /// `CadSession::set_selected_property`, which re-resolves and validates the
+    /// selection at apply time. No entity id travels on this queue.
+    pub cad_selected_properties: Vec<(String, String)>,
     /// Bounded main-thread queue of typed standard-view requests: admitted by the
     /// dedicated `cad_standard_view` IPC and drained by the owner tick into
     /// `CadSession::standard_view`, which dispatches the real
@@ -249,6 +257,7 @@ pub fn new_shared(launch: LaunchOptions) -> Arc<Mutex<Shared>> {
         cad_tool_parameters: Vec::new(),
         cad_tool_texts: Vec::new(),
         cad_selected_texts: Vec::new(),
+        cad_selected_properties: Vec::new(),
         cad_standard_views: VecDeque::new(),
         cad_setting_writes: VecDeque::new(),
         cad_settings: None,

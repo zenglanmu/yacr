@@ -36,11 +36,13 @@ pub enum CadSettingKey {
     BackgroundModel,
     BackgroundPaper,
     CrosshairSize,
+    PickboxSize,
+    ApertureSize,
 }
 
 impl CadSettingKey {
     /// Every writable key, in a stable order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::Grid,
         Self::Axes,
         Self::SelectionHighlight,
@@ -51,6 +53,8 @@ impl CadSettingKey {
         Self::BackgroundModel,
         Self::BackgroundPaper,
         Self::CrosshairSize,
+        Self::PickboxSize,
+        Self::ApertureSize,
     ];
 
     /// The stable camelCase wire key (also the config leaf's final segment).
@@ -66,6 +70,8 @@ impl CadSettingKey {
             Self::BackgroundModel => "backgroundModel",
             Self::BackgroundPaper => "backgroundPaper",
             Self::CrosshairSize => "crosshairSize",
+            Self::PickboxSize => "pickboxSize",
+            Self::ApertureSize => "apertureSize",
         }
     }
 
@@ -81,8 +87,9 @@ impl CadSettingKey {
     /// Returns the stable refusal code on mismatch. `plotFormat` accepts only its
     /// two representable vector formats, the two backgrounds accept only a
     /// canonical `#rrggbb` colour, `crosshairSize` accepts only an integer
-    /// percentage in `1..=100` (rejected, never clamped) and every switch is a
-    /// boolean.
+    /// percentage in `1..=100`, `pickboxSize` an integer pixel count in `1..=20`
+    /// and `apertureSize` an integer pixel count in `1..=50` (all three rejected,
+    /// never clamped), and every switch is a boolean.
     pub fn validate(self, value: &CadSettingValue) -> Result<(), &'static str> {
         match self {
             Self::PlotFormat => match value {
@@ -98,6 +105,24 @@ impl CadSettingKey {
             },
             Self::CrosshairSize => match value {
                 CadSettingValue::Number(percent) if (1..=100).contains(percent) => Ok(()),
+                _ => Err(SETTINGS_INVALID_VALUE),
+            },
+            // AutoCAD's own option ranges, in pixels (the same unit the schema
+            // documents). Out-of-range values are refused, never clamped.
+            Self::PickboxSize => match value {
+                CadSettingValue::Number(pixels)
+                    if cad_app::viewer_config::ViewPickbox::RANGE.contains(pixels) =>
+                {
+                    Ok(())
+                }
+                _ => Err(SETTINGS_INVALID_VALUE),
+            },
+            Self::ApertureSize => match value {
+                CadSettingValue::Number(pixels)
+                    if cad_app::viewer_config::ViewAperture::RANGE.contains(pixels) =>
+                {
+                    Ok(())
+                }
                 _ => Err(SETTINGS_INVALID_VALUE),
             },
             Self::Grid
@@ -144,6 +169,12 @@ pub struct HostSettings {
     pub background_paper: String,
     /// Crosshair arm length as an integer percentage (`1..=100`).
     pub crosshair_percent: u32,
+    /// Pickbox half-side in logical pixels (`1..=20`, the AutoCAD `PICKBOX`
+    /// option).
+    pub pickbox_size: u32,
+    /// Object-snap aperture in logical pixels (`1..=50`, the AutoCAD `APERTURE`
+    /// option).
+    pub aperture_size: u32,
     pub fonts_dir: Option<String>,
 }
 
@@ -159,6 +190,8 @@ impl HostCore {
             background_model,
             background_paper,
             crosshair_percent,
+            pickbox_size,
+            aperture_size,
         ) = {
             let store = self.viewer_config.borrow();
             let effective = store.effective();
@@ -171,6 +204,8 @@ impl HostCore {
                 effective.view.background.model.to_hex(),
                 effective.view.background.paper.to_hex(),
                 effective.view.crosshair.size_percent,
+                effective.view.pickbox.size_pixels,
+                effective.view.aperture.size_pixels,
             )
         };
         let (snap_enabled, hover_preview) = {
@@ -191,12 +226,30 @@ impl HostCore {
             background_model,
             background_paper,
             crosshair_percent,
+            pickbox_size,
+            aperture_size,
             fonts_dir: self
                 .options
                 .fonts_dir
                 .as_ref()
                 .map(|path| path.display().to_string()),
         }
+    }
+
+    /// The one interaction tolerance policy the effective config describes.
+    ///
+    /// Built by [`cad_app::viewer_config::ViewConfig::tolerance_policy`], so the
+    /// configuration is turned into a policy in exactly one place. Every pick,
+    /// hover and snap path reads this value (the live paths call it per dispatch;
+    /// [`HostCore::sync_render`] also installs it on the controller), which is why
+    /// a settings write takes effect on the next interaction without reopening the
+    /// document.
+    pub(crate) fn tolerance_policy(&self) -> cad_domain::TolerancePolicy {
+        self.viewer_config
+            .borrow()
+            .effective()
+            .view
+            .tolerance_policy()
     }
 
     /// Apply one typed setting: persist it under the allowed preference leaves
@@ -220,6 +273,8 @@ impl HostCore {
             CadSettingKey::BackgroundModel => self.apply_background_preference("model", &value),
             CadSettingKey::BackgroundPaper => self.apply_background_preference("paper", &value),
             CadSettingKey::CrosshairSize => self.apply_crosshair_size(&value),
+            CadSettingKey::PickboxSize => self.apply_pixel_size("pickbox", &value),
+            CadSettingKey::ApertureSize => self.apply_pixel_size("aperture", &value),
         }
     }
 
@@ -250,6 +305,24 @@ impl HostCore {
         };
         self.apply_user_preference_json(&format!(
             r#"{{"view":{{"crosshair":{{"sizePercent":{percent}}}}}}}"#
+        ))
+    }
+
+    /// Persist one integer pixel-size leaf: `view.pickbox.sizePixels` or
+    /// `view.aperture.sizePixels`.
+    ///
+    /// The key table has already refused an out-of-range value, so the number
+    /// written here is exactly what the schema validates back. The write path
+    /// republishes through `sync_render`, which installs the derived
+    /// [`cad_domain::TolerancePolicy`] on the session and on the cursor overlay
+    /// inputs, so the next hover/pick/snap uses the new size without reopening the
+    /// document.
+    fn apply_pixel_size(&self, leaf: &str, value: &CadSettingValue) -> CadResult<()> {
+        let CadSettingValue::Number(pixels) = value else {
+            return Err(CadError::InvalidInput(SETTINGS_INVALID_VALUE.into()));
+        };
+        self.apply_user_preference_json(&format!(
+            r#"{{"view":{{"{leaf}":{{"sizePixels":{pixels}}}}}}}"#
         ))
     }
 
@@ -323,5 +396,18 @@ impl HostCore {
         if let Some(enabled) = hover_preview {
             controller.session.set_hover_preview(enabled);
         }
+    }
+
+    /// Install the configured tolerance policy on the live session.
+    ///
+    /// The pickbox/aperture are not session switches: they are derived from the
+    /// effective config every time they are read. This installer exists for the
+    /// two paths that rebuild the controller state out from under the
+    /// configuration — startup and document replacement — so a persisted
+    /// pickbox/aperture survives open/new exactly like `snapEnabled` does, and for
+    /// `sync_render` so a live write reaches the snap engine immediately.
+    pub(crate) fn seed_interaction_tolerance(&self) {
+        let policy = self.tolerance_policy();
+        self.controller.borrow_mut().set_tolerance_policy(policy);
     }
 }

@@ -412,13 +412,16 @@ impl HostCore {
             .get(&c.viewport_id)
             .ok_or(CadError::Cancelled)?;
         let drawing = c.drawing().ok_or(CadError::Cancelled)?;
+        // The same configured pickbox the hover path and the cursor overlay use,
+        // so a click and the box drawn around it can never disagree.
+        let policy = self.tolerance_policy();
         let report = cad_app::picking::pick_at_screen_with_visibility(
             &drawing,
             c.document_id,
             &viewport.camera,
             point,
             viewport.logical_size,
-            &cad_domain::TolerancePolicy::default(),
+            &policy,
             cad_app::BackFacePolicy::Cull,
             &c.session.layer_overrides,
         )?;

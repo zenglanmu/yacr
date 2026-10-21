@@ -346,9 +346,20 @@ hoverPreview/backgroundModel/backgroundPaper/crosshairSize），持久化到 `pr
 （sRGB→linear 在配置→渲染器接缝，真机核对 0.5 读回 188、遮罩内部同值）与十字光标 1..100%
 （100% 位级不变），均**即时**生效。
 
-**仍未做（本批次明确不声称）**：属性面板 UI 与 `Ctrl+1`/`PROPERTIES`、属性的 Tauri IPC、选项弹窗
-界面、拾取框大小（仍是常量）、自动保存/.bak/xref/CTB/GPU 选择/快捷键自定义/右键菜单/夹点/极轴/
-动态 UCS（AutoCAD Options 中存在但本仓库**无行为可接**，因此不显示）。
+**属性面板（2026-10-22）**：按 `entity/geometry/text/display` 分组；多选显示**共同键交集**并以
+`properties.mixed` 占位（写入作用于**整个选中集**）；`layer/color/linetype/lineweight/transparency`
+五行可编辑（`enum`/`number`/`text` 编辑器按 `kind` 选，值语法与写侧一致），提交走
+`cad_set_selected_property`（本地暂存 → Enter/失焦/下拉即提交，拒绝则回滚并显示 i18n 文案、
+code 只进 `title`）；`Ctrl+1` 与命令行 `PROPERTIES` 均可开关（Chrome 本地命令，**不进** Rust 路由）。
+**选项弹窗（2026-10-22）**：独立弹窗（ADR-0021），五个页签、12 个写键 + 语言 + 只读字体目录；
+Apply/OK/Cancel 为 AutoCAD 语义（本地暂存、只发 diff、写失败标字段）；入口三处（File 页、
+`OPTIONS` 命令行拦截、状态栏设置按钮）。**拾取框/孔径**：`view.pickbox.sizePixels`(1..=20, 默认 3)
+与 `view.aperture.sizePixels`(1..=50, 默认 12) 已接线到 hover/拾取/光标/捕捉四条路径，实时生效。
+
+**仍未做（明确不声称）**：真实 GUI/视觉验收（本批**没有**截图或像素判据，选项弹窗与属性面板的
+真实窗口行为仅由纯函数模型 + 源码扫描 + 宿主契约测试覆盖，语言的双窗口传播标为 **NOT VERIFIED**）；
+颜色的色板选择器（仅文本语法输入）；自动保存/.bak/xref/CTB/GPU 选择/快捷键自定义/右键菜单/夹点/
+极轴/动态 UCS（AutoCAD Options 中存在但本仓库**无行为可接**，因此不显示）。
 
 2026-10-10 图元显示补全轮新增边界：**光栅图像** PNG/JPEG 已解码并出纹理，但
 TIFF/CCITT/EPS 等编解码器、亮度/对比/淡出/透明、outside/mask 裁剪显式未支持；

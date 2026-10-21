@@ -10,6 +10,7 @@
 // An item with none of the three is labelled but disabled, which is the honest
 // state for a command the host does not wire yet.
 import { POPUP_KEYS } from './popup.mjs';
+import { OPTIONS_KEYS } from './options.mjs';
 import { STANDARD_VIEWS } from './view3d.mjs';
 
 /** Shell actions that never touch the CAD protocol. */
@@ -19,6 +20,13 @@ export const SHELL_ACTIONS = Object.freeze({
   commandLine: 'commandLine',
   language: 'language',
   about: 'about',
+  // Opens the Options dialog: a host-owned window like About, so it is an
+  // `action` token and never a router command (`OPTIONS` has no Rust command;
+  // the command line intercepts it locally).
+  options: 'options',
+  // Toggles the docked properties palette. Like OPTIONS it is chrome-local:
+  // `PROPERTIES` has no Rust command, so the ribbon must not send `cad_command`.
+  properties: 'properties',
 });
 
 export const RIBBON_TABS = Object.freeze([
@@ -48,6 +56,10 @@ export const RIBBON_TABS = Object.freeze([
           // `cad_command`. It closes the File tab's utility cluster, where the
           // other chrome-level affordances live.
           { id: 'about', labelKey: POPUP_KEYS.ribbonEntry, icon: 'app', action: 'about' },
+          // Options sits beside About: the other host-owned settings window.
+          // Its label is the dialog's own title key, so the ribbon entry and the
+          // window title can never drift apart.
+          { id: 'options', labelKey: OPTIONS_KEYS.ribbonEntry, icon: 'settings', action: 'options' },
         ],
       },
     ],
@@ -125,7 +137,7 @@ export const RIBBON_TABS = Object.freeze([
         launcher: true,
         items: [
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
-          { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', command: 'PROPERTIES' },
+          { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties' },
         ],
       },
       {
@@ -268,7 +280,7 @@ export const RIBBON_TABS = Object.freeze([
           // creating the first one.
           { id: 'DIMBASELINE', labelKey: 'draw.kind.dimbaseline', icon: 'dimbaseline', command: 'DIMBASELINE', large: true },
           { id: 'DIMCONTINUE', labelKey: 'draw.kind.dimcontinue', icon: 'dimcontinue', command: 'DIMCONTINUE', large: true },
-          { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', command: 'PROPERTIES', large: true },
+          { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties', large: true },
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
           { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', command: 'SELECTALL' },
         ],

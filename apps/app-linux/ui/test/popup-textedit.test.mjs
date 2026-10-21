@@ -86,7 +86,7 @@ function recordingInvoke(response = { accepted: true }) {
 }
 
 test('the textEdit kind is implemented alongside about', () => {
-  assert.deepEqual(POPUP_KINDS, ['about', 'textEdit']);
+  assert.deepEqual(POPUP_KINDS, ['about', 'textEdit', 'options']);
 });
 
 test('a well-formed textEdit literal boots the dialog, both modes', () => {

@@ -3,8 +3,10 @@
 // including the real clean-screen / command-line view toggles.
 import React from 'react';
 import { Icon } from '../icons.jsx';
+import { Button } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { commandById, toolLabelKey } from '../commands.mjs';
+import { OPTIONS_KEYS } from '../options.mjs';
 import { dispatchHoverPreview, dispatchObjectSnap, hoverPreviewToggle, importProgressView, objectSnapToggle, snapKindLabelKey, toolParameterViews, toolStepPromptKey } from '../cad.mjs';
 
 // The drafting aids this build still has only as placeholders. OSNAP is a real
@@ -218,10 +220,19 @@ export function StatusBar() {
       ) : null}
 
       <div className="statusbar__group statusbar__group--end">
-        <button type="button" className="statusbar__workspace" disabled title={t('status.workspace')}>
-          <Icon name="settings" size={13} />
-          {t('status.workspace')}
-        </button>
+        {/* The gear opens the real Options window (the same host-owned popup the
+            File ribbon entry and the typed `OPTIONS` selector open). */}
+        <Button
+          className="statusbar__workspace"
+          variant="ghost"
+          size="sm"
+          icon="settings"
+          iconSize={13}
+          title={`${t(OPTIONS_KEYS.title)} (OPTIONS)`}
+          onClick={shell.openOptionsPopup}
+        >
+          {t(OPTIONS_KEYS.title)}
+        </Button>
         <Toggle
           label={t('status.command_line')}
           on={shell.commandLineOpen}

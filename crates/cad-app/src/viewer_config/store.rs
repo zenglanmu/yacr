@@ -30,6 +30,21 @@ impl ViewerConfig {
                 "crosshair size must be an integer percentage from 1 to 100",
             ));
         }
+        // Pickbox and aperture sizes are refusals outside AutoCAD's own option
+        // ranges, never clamps; a fractional/negative/string value never reaches
+        // here because the schema types them as integers.
+        if !ViewPickbox::RANGE.contains(&self.view.pickbox.size_pixels) {
+            return Err(ConfigError::new(
+                "view.pickbox.sizePixels",
+                "pickbox size must be an integer pixel count from 1 to 20",
+            ));
+        }
+        if !ViewAperture::RANGE.contains(&self.view.aperture.size_pixels) {
+            return Err(ConfigError::new(
+                "view.aperture.sizePixels",
+                "aperture size must be an integer pixel count from 1 to 50",
+            ));
+        }
         for key in self.ui.command_overrides.keys() {
             if !is_known_command(key) {
                 return Err(ConfigError::new(

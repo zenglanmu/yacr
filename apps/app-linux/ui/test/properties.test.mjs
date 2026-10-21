@@ -1,61 +1,29 @@
-// Properties palette contract: the pure selection view (empty / single / multi),
-// the machine-key label set, and the rendered structure of the palette.
+// Properties palette contract: the wire parser, the machine-key label set, the
+// grouped inspector's structure, and every entry point that opens it.
+//
+// The pure view/write model has its own suite (`properties-view.test.mjs`).
+// This file keeps the host-facing half: what `cad_status.selection` may contain,
+// that no emitted key ships unlabeled, and that the rendered palette edits
+// locally-until-commit instead of writing per keystroke.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { parseSelection, propertyGroupLabel, propertyRowLabel, selectionView } from '../src/cad.mjs';
+import { parseSelection, propertyGroupLabel, propertyRowLabel, queueCadCommand } from '../src/cad.mjs';
+import { admitCommandText, isSupportedCommand } from '../src/commands.mjs';
 import { createTranslator } from '../src/i18n.mjs';
-import { readCatalog, readModule } from './helpers.mjs';
+import { isPropertiesCommand } from '../src/properties.mjs';
+import { RIBBON_TABS } from '../src/ribbon-model.mjs';
+import { readCatalog, readCss, readModule } from './helpers.mjs';
 
 const zh = await readCatalog('zh-CN');
 const en = await readCatalog('en');
 const t = createTranslator({ 'zh-CN': zh, en }, 'zh-CN');
+const tEn = createTranslator({ 'zh-CN': zh, en }, 'en');
 
-test('selectionView is empty for a missing block and for an explicit empty selection', () => {
-  for (const selection of [null, undefined, { count: 0, empty: true, rows: [], mixedKeys: [] }]) {
-    const view = selectionView(selection, t);
-    assert.equal(view.kind, 'empty');
-    assert.equal(view.count, 0);
-    assert.deepEqual(view.rows, []);
-  }
-});
-
-test('selectionView maps a single object row set to catalog label/value pairs', () => {
-  const view = selectionView(
-    { count: 1, empty: false, rows: [{ key: 'id', value: '1' }, { key: 'length', value: '5.000000' }], mixedKeys: [] },
-    t,
-  );
-  assert.equal(view.kind, 'single');
-  assert.equal(view.count, 1);
-  assert.deepEqual(view.rows, [
-    { key: 'id', label: zh['properties.row.id'], value: '1' },
-    { key: 'length', label: zh['properties.row.length'], value: '5.000000' },
-  ]);
-});
-
-test('selectionView shows the count and labelled mixed keys for a multi-selection', () => {
-  const view = selectionView({ count: 3, empty: false, rows: [], mixedKeys: ['id', 'type'] }, t);
-  assert.equal(view.kind, 'multi');
-  assert.equal(view.count, 3);
-  assert.deepEqual(view.rows, []);
-  assert.deepEqual(view.mixedKeys, [zh['properties.row.id'], zh['properties.row.type']]);
-  assert.equal(view.countLabel, zh['properties.selected_count'].replace('{count}', '3'));
-  assert.equal(view.mixedLabel, zh['properties.mixed'].replace('{keys}', `${zh['properties.row.id']}, ${zh['properties.row.type']}`));
-});
-
-test('a multi-selection with no differing keys carries no mixed label instead of an empty one', () => {
-  const view = selectionView({ count: 2, empty: false, rows: [], mixedKeys: [] }, t);
-  assert.equal(view.kind, 'multi');
-  assert.equal(view.mixedLabel, null);
-});
+// --- labels ------------------------------------------------------------
 
 test('an unknown machine key is shown by its raw key, never a fabricated label', () => {
   assert.equal(propertyRowLabel(t, 'future_key'), 'future_key');
-  const view = selectionView(
-    { count: 1, empty: false, rows: [{ key: 'future_key', value: 'raw' }], mixedKeys: [] },
-    t,
-  );
-  assert.deepEqual(view.rows, [{ key: 'future_key', label: 'future_key', value: 'raw' }]);
 });
 
 test('property groups have catalog labels and unknown groups stay raw', () => {
@@ -63,9 +31,11 @@ test('property groups have catalog labels and unknown groups stay raw', () => {
   assert.equal(propertyGroupLabel(t, 'geometry'), zh['properties.group.geometry']);
   assert.equal(propertyGroupLabel(t, 'text'), zh['properties.group.text']);
   assert.equal(propertyGroupLabel(t, 'display'), zh['properties.group.display']);
-  assert.equal(propertyGroupLabel(createTranslator({ 'zh-CN': zh, en }, 'en'), 'display'), en['properties.group.display']);
+  assert.equal(propertyGroupLabel(tEn, 'display'), en['properties.group.display']);
   assert.equal(propertyGroupLabel(t, 'future_group'), 'future_group');
 });
+
+// --- wire --------------------------------------------------------------
 
 // The wire block for two selected objects sharing a layer: `id` is mixed (no
 // value), `layer` keeps its one real value and the real layer table as options.
@@ -132,28 +102,160 @@ test('every machine key emitted by cad-app::selection has a label in both catalo
     assert.equal(typeof en[`properties.row.${key}`], 'string', `en missing properties.row.${key}`);
     // The switch must map the key to that catalog entry, not fall through to raw.
     assert.equal(propertyRowLabel(t, key), zh[`properties.row.${key}`], `no label mapped for ${key}`);
-    assert.equal(propertyRowLabel(createTranslator({ 'zh-CN': zh, en }, 'en'), key), en[`properties.row.${key}`], `no en label mapped for ${key}`);
+    assert.equal(propertyRowLabel(tEn, key), en[`properties.row.${key}`], `no en label mapped for ${key}`);
   }
 });
 
-test('the properties palette renders the three states from the real status block only', async () => {
+// --- rendered palette --------------------------------------------------
+
+test('the properties palette renders the real status block through the pure view', async () => {
   const source = await readModule('components/PropertiesPalette.jsx');
-  assert.ok(source.includes('selectionView(shell.status?.selection ?? null, t)'));
+  assert.ok(source.includes('const selection = shell.status?.selection ?? null;'));
+  assert.ok(source.includes('propertiesView(selection, t)'));
   assert.ok(source.includes("t('properties.panel')"));
   assert.ok(source.includes("t('properties.empty')"));
   assert.ok(source.includes("t('properties.close')"));
-  assert.ok(source.includes("view.kind === 'single'"));
+  assert.ok(source.includes("view.kind === 'empty'"));
   assert.ok(source.includes("view.kind === 'multi'"));
-  assert.ok(source.includes('row.label'));
-  // The property rows are read-only: selection is a host operation, so there is
-  // no editing or clear affordance for them. The one editable control is the
-  // text-content editor, a separate component (ADR 0020 addendum B) — it is
-  // mounted here, not inlined, so the row table stays a plain `<dl>`.
+  assert.ok(source.includes('view.countLabel'));
+  assert.ok(source.includes('view.mixedHelp'));
+  // No fabricated rows: only the sections the view built are rendered.
   assert.ok(!source.includes('properties.clear_selection'));
-  assert.ok(!source.includes('<input'));
-  assert.ok(!source.includes('<textarea'));
+  assert.ok(source.includes('section.label'));
+});
+
+test('a read-only row is a plain value, so no disabled input stands in for it', async () => {
+  const source = await readModule('components/PropertiesPalette.jsx');
+  const readonly = source.slice(
+    source.indexOf("if (row.editor === 'value')"),
+    source.indexOf("if (row.editor === 'select')"),
+  );
+  assert.ok(readonly.includes('properties__readonly'), 'read-only rows carry the value style');
+  assert.ok(readonly.includes('{row.value}'), 'read-only rows show the host value');
+  assert.ok(!readonly.includes('<input'), 'no input is rendered for a read-only row');
+  assert.ok(!readonly.includes('<select'), 'no select is rendered for a read-only row');
+  assert.ok(!readonly.includes('disabled'), 'a read-only row is not a disabled editor');
+  assert.ok(
+    source.indexOf('<input') > source.indexOf("if (row.editor === 'value')"),
+    'every input lives below the read-only early return',
+  );
+  assert.ok(
+    source.indexOf('<select') > source.indexOf("if (row.editor === 'value')"),
+    'every select lives below the read-only early return',
+  );
+});
+
+test('editors stage a local draft and commit only on Enter, blur or select change', async () => {
+  const source = await readModule('components/PropertiesPalette.jsx');
+  // Typing only writes the draft; the two field kinds use the same handler.
+  const staged = 'onChange={event => onChange(row, event.target.value)}';
+  assert.equal(source.split(staged).length - 1, 2, 'number and text fields stage only');
+  // A blur and Enter commit; Escape drops the draft instead of blur-committing.
+  assert.equal(source.split('onBlur={() => onCommit(row)}').length - 1, 2);
+  assert.ok(source.includes("if (event.key === 'Enter')"));
+  assert.ok(source.includes("if (event.key === 'Escape')"));
+  assert.ok(source.includes('event.stopPropagation()'), 'Escape must not reach the global blur handler');
+  // A select commits its own change, and is never left as a silent local edit.
+  assert.ok(source.includes('onChange(row, value);'));
+  assert.ok(source.includes('onCommit(row);'));
+  // The row disables itself while its write is queued, but nothing else does.
+  assert.ok(source.includes('const saving = entry.sent !== null;'));
+  assert.equal(source.split('disabled={saving}').length - 1, 1, 'the select disables itself while queued');
+  assert.ok(source.includes('disabled: saving,'), 'both text fields share the queued-row flag');
+});
+
+test('the palette writes through the shell, never a private IPC', async () => {
+  const source = await readModule('components/PropertiesPalette.jsx');
+  assert.ok(source.includes('shell.applySelectedProperty(check.key, check.value)'));
+  assert.ok(!source.includes('invoke('), 'the palette never calls Tauri directly');
+  assert.ok(!source.includes('cad_set_selected_property'), 'the IPC name lives in properties.mjs only');
+  // The text editor stays a separate mounted component in every state.
   assert.ok(source.includes('<SelectionTextEditor />'));
-  assert.ok(!source.includes("invoke('cad_set_selected_text'"), 'the palette itself never sends the edit IPC');
+});
+
+test('a refusal is catalog copy with the raw code kept in the title', async () => {
+  const source = await readModule('components/PropertiesPalette.jsx');
+  assert.ok(source.includes('propertyEditMessage(code, t)'));
+  assert.ok(source.includes('title={message.code}'));
+  assert.ok(source.includes('role="alert"'));
+});
+
+test('a multi-selection says above the sections that a change applies to all objects', async () => {
+  const source = await readModule('components/PropertiesPalette.jsx');
+  assert.ok(source.includes('view.mixedHelp ? <p className="properties__hint">{view.mixedHelp}</p> : null'));
+  // Each mixed editor repeats the same sentence as its tooltip.
+  assert.ok(source.includes('const mixedTitle = row.mixed ? row.mixedHelp : null;'));
+  assert.ok(source.includes('title={mixedTitle ?? undefined}'));
+  // A mixed text/number row shows the same placeholder as its value until the
+  // user types a real one (the select uses a placeholder option instead).
+  assert.ok(source.includes('placeholder: row.mixed && entry.draft === null ? row.mixedText : undefined'));
+});
+
+test('the palette styles match the chrome tokens and keep the docked width', async () => {
+  const css = await readCss();
+  const block = css.slice(css.indexOf('/* Properties palette'), css.indexOf('.start-panel'));
+  for (const token of ['var(--hover)', 'var(--line-soft)', 'var(--focus)', 'var(--field)']) {
+    assert.ok(block.includes(token), `properties block uses ${token}`);
+  }
+  assert.ok(block.includes('.properties__input:focus-visible'));
+  assert.ok(block.includes('.properties__select:focus-visible'));
+  assert.ok(block.includes('.properties__row'));
+  assert.ok(!block.includes('position: fixed'), 'the inspector stays docked, never floating over the CAD surface');
+});
+
+// --- entry points ------------------------------------------------------
+
+test('the typed PROPERTIES selector is chrome-local and never reaches the router', async () => {
+  assert.equal(isPropertiesCommand('properties'), true);
+  assert.equal(isSupportedCommand('PROPERTIES'), true, 'the chrome answers it, so autocomplete may offer it');
+  assert.equal(admitCommandText('PROPERTIES', { status: null, pending: true }).kind, 'admitted');
+  // LAYER is untouched: still a router name, not a local selector.
+  assert.equal(isPropertiesCommand('LAYER'), false);
+  const calls = [];
+  const result = await queueCadCommand(text => calls.push(text), 'PROPERTIES', null, false);
+  assert.deepEqual(result, { kind: 'local', command: 'PROPERTIES' });
+  assert.deepEqual(calls, [], 'no cad_command is sent for a chrome-local selector');
+});
+
+test('Ctrl+1 toggles the palette after the defaultPrevented guard', async () => {
+  const app = await readModule('App.jsx');
+  assert.ok(app.includes("event.key === '1'"));
+  assert.ok(app.includes('setPropertiesOpen(value => !value)'));
+  assert.ok(
+    app.indexOf("event.key === '1'") > app.indexOf('event.defaultPrevented'),
+    'a webview-default chord must win before Ctrl+1 is claimed',
+  );
+});
+
+test('typed PROPERTIES is intercepted before the in-flight command guard', async () => {
+  const app = await readModule('App.jsx');
+  const intercept = app.indexOf('isPropertiesCommand(text)');
+  assert.ok(intercept > 0);
+  assert.ok(intercept < app.indexOf('submitting.current = true'), 'a second Enter must still open the palette');
+  assert.ok(app.includes('setPropertiesOpen(true)'));
+});
+
+test('the shell exposes the one property write and the palette action', async () => {
+  const app = await readModule('App.jsx');
+  assert.ok(app.includes('applySelectedProperty: (key, value) => setSelectedProperty(invoke, key, value)'));
+  assert.ok(app.includes("action === 'properties'"));
+  assert.ok(app.includes('setPropertiesOpen(true)'));
+});
+
+test('both ribbon PROPERTIES entries dispatch the shell action, and LAYER stays a command', () => {
+  const items = RIBBON_TABS.flatMap(tab => tab.panels.flatMap(panel => panel.items))
+    .filter(item => item.id === 'PROPERTIES');
+  assert.equal(items.length, 2, 'Home/Annotate and the large entry both exist');
+  for (const item of items) {
+    assert.equal(item.action, 'properties');
+    assert.equal(item.command, undefined, 'the ribbon must not send cad_command for PROPERTIES');
+  }
+  const layers = RIBBON_TABS.flatMap(tab => tab.panels.flatMap(panel => panel.items))
+    .filter(item => item.id === 'LAYER');
+  for (const item of layers) {
+    assert.equal(item.command, 'LAYER', 'LAYER is untouched');
+    assert.equal(item.action, undefined);
+  }
 });
 
 test('the properties palette is docked in the workspace and toggled from the status bar', async () => {

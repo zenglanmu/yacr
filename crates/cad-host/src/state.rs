@@ -3,6 +3,12 @@ use super::*;
 
 impl HostCore {
     pub(crate) fn sync_render(&self) -> CadResult<()> {
+        // Install the configured pickbox/aperture policy before anything on the
+        // snap path reads it (the snap-hint resolution below does). The same
+        // policy feeds the cursor overlay through `pickbox_logical_pixels`, so the
+        // drawn box, the click predicate and the snap aperture all come from one
+        // effective config.
+        self.seed_interaction_tolerance();
         let (
             drawing,
             view,
@@ -128,6 +134,17 @@ impl HostCore {
             Some(_) => cad_app::SelectionSet::new(),
             None => self.hover.hovered.borrow().clone(),
         };
+        let (overlay_visibility, crosshair_percent, pickbox_logical_pixels) = {
+            let store = self.viewer_config.borrow();
+            let view = &store.effective().view;
+            (
+                OverlayVisibility::from(view.overlays.clone()),
+                view.crosshair.size_percent,
+                // The same policy the pick/hover paths use, so the drawn box is
+                // exactly the click radius (see `cursor_overlay`).
+                view.tolerance_policy().pickbox_logical_pixels,
+            )
+        };
         let overlays = OverlayInputs {
             selection,
             hovered,
@@ -139,14 +156,7 @@ impl HostCore {
             // drag is in progress.
             selection_box: self.box_selection_preview(),
             snap_hints_input: snap_hints,
-            visibility: OverlayVisibility::from(
-                self.viewer_config
-                    .borrow()
-                    .effective()
-                    .view
-                    .overlays
-                    .clone(),
-            ),
+            visibility: overlay_visibility,
             viewport_bounds: self.canvas_bounds(),
             // Visible POINT markers are derived by the scene assembly from the
             // drawing being displayed, so the host feeds none itself.
@@ -156,13 +166,8 @@ impl HostCore {
             // view, and the cursor's world point.
             view_scale,
             cursor,
-            crosshair_percent: self
-                .viewer_config
-                .borrow()
-                .effective()
-                .view
-                .crosshair
-                .size_percent,
+            crosshair_percent,
+            pickbox_logical_pixels,
         };
         self.render.set_overlays(overlays);
         let _ = self.render.request_preparation()?;

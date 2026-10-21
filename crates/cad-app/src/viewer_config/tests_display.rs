@@ -13,7 +13,9 @@ fn store_allowing_display() -> ViewerConfigStore {
             "ui": { "userCustomization": { "allowedPaths": [
                 "view.background.model",
                 "view.background.paper",
-                "view.crosshair.sizePercent"
+                "view.crosshair.sizePercent",
+                "view.pickbox.sizePixels",
+                "view.aperture.sizePixels"
             ] } }
         }))
         .unwrap();
@@ -85,10 +87,109 @@ fn display_defaults_are_black_backgrounds_and_a_full_crosshair() {
     assert_eq!(config.view.background.model.to_hex(), "#000000");
     assert_eq!(config.view.background.paper.to_hex(), "#000000");
     assert_eq!(config.view.crosshair.size_percent, 100);
+    // The pickbox/aperture defaults are the values this project has always used,
+    // so a configuration that never set them changes no geometry.
+    assert_eq!(config.view.pickbox.size_pixels, 3);
+    assert_eq!(config.view.aperture.size_pixels, 12);
     // A JSON document that omits the display block inherits exactly those.
     let parsed: ViewerConfig = serde_json::from_str("{}").unwrap();
     assert_eq!(parsed.view.background, config.view.background);
     assert_eq!(parsed.view.crosshair, config.view.crosshair);
+    assert_eq!(parsed.view.pickbox, config.view.pickbox);
+    assert_eq!(parsed.view.aperture, config.view.aperture);
+}
+
+#[test]
+fn the_default_policy_is_bit_identical_to_the_domain_default() {
+    // One policy definition, one default: the default configuration must produce
+    // the domain default exactly (3.0 and 12.0 are exactly representable), so the
+    // pinned pick/hover/snap geometry cannot move.
+    let configured = ViewConfig::default().tolerance_policy();
+    let default = cad_domain::TolerancePolicy::default();
+    assert_eq!(
+        configured.pickbox_logical_pixels.to_bits(),
+        default.pickbox_logical_pixels.to_bits()
+    );
+    assert_eq!(
+        configured.interaction_logical_pixels.to_bits(),
+        default.interaction_logical_pixels.to_bits()
+    );
+    assert_eq!(configured.computation_world, default.computation_world);
+    assert_eq!(configured.topology_world, default.topology_world);
+    assert_eq!(configured.display_pixels, default.display_pixels);
+    assert_eq!(configured.formatting_decimals, default.formatting_decimals);
+
+    // And each leaf maps onto its own field, with no coupling between them.
+    let config: ViewerConfig = serde_json::from_str(
+        r#"{"view":{"pickbox":{"sizePixels":7},"aperture":{"sizePixels":24}}}"#,
+    )
+    .unwrap();
+    let policy = config.view.tolerance_policy();
+    assert_eq!(policy.pickbox_logical_pixels.to_bits(), 7.0f64.to_bits());
+    assert_eq!(
+        policy.interaction_logical_pixels.to_bits(),
+        24.0f64.to_bits()
+    );
+}
+
+#[test]
+fn the_pickbox_and_aperture_sizes_are_validated_not_clamped() {
+    // AutoCAD's own option ranges: pickbox 1..=20, aperture 1..=50. The bounds are
+    // accepted as-is...
+    for pixels in [1, 20] {
+        let mut store = ViewerConfigStore::default();
+        store
+            .update_config(json!({ "view": { "pickbox": { "sizePixels": pixels } } }))
+            .unwrap();
+        assert_eq!(store.effective().view.pickbox.size_pixels, pixels);
+    }
+    for pixels in [1, 50] {
+        let mut store = ViewerConfigStore::default();
+        store
+            .update_config(json!({ "view": { "aperture": { "sizePixels": pixels } } }))
+            .unwrap();
+        assert_eq!(store.effective().view.aperture.size_pixels, pixels);
+    }
+
+    // ...and anything outside is a path-named refusal, never a clamped value.
+    for pixels in [0, 21, 400] {
+        let mut store = ViewerConfigStore::default();
+        let error = store
+            .update_config(json!({ "view": { "pickbox": { "sizePixels": pixels } } }))
+            .unwrap_err();
+        assert_eq!(error.path, "view.pickbox.sizePixels");
+        assert_eq!(store.effective().view.pickbox.size_pixels, 3);
+    }
+    for pixels in [0, 51, 400] {
+        let mut store = ViewerConfigStore::default();
+        let error = store
+            .update_config(json!({ "view": { "aperture": { "sizePixels": pixels } } }))
+            .unwrap_err();
+        assert_eq!(error.path, "view.aperture.sizePixels");
+        assert_eq!(store.effective().view.aperture.size_pixels, 12);
+    }
+}
+
+#[test]
+fn a_non_integer_pickbox_or_aperture_is_refused() {
+    // A fractional or string pixel count is a schema type error, never a value to
+    // round or coerce. The effective config is never mutated.
+    for patch in [
+        json!({ "view": { "pickbox": { "sizePixels": 3.5 } } }),
+        json!({ "view": { "pickbox": { "sizePixels": "3" } } }),
+        json!({ "view": { "pickbox": { "sizePixels": -1 } } }),
+        json!({ "view": { "aperture": { "sizePixels": 12.5 } } }),
+        json!({ "view": { "aperture": { "sizePixels": "12" } } }),
+        json!({ "view": { "aperture": { "sizePixels": -12 } } }),
+    ] {
+        let mut store = ViewerConfigStore::default();
+        assert!(
+            store.update_config(patch).is_err(),
+            "a non-integer pixel count must be refused"
+        );
+        assert_eq!(store.effective().view.pickbox.size_pixels, 3);
+        assert_eq!(store.effective().view.aperture.size_pixels, 12);
+    }
 }
 
 #[test]
@@ -168,18 +269,32 @@ fn an_allowed_preference_fills_the_display_leaves() {
         .apply_user_preference(json!({
             "view": {
                 "background": { "model": "#112233", "paper": "#445566" },
-                "crosshair": { "sizePercent": 40 }
+                "crosshair": { "sizePercent": 40 },
+                "pickbox": { "sizePixels": 8 },
+                "aperture": { "sizePixels": 30 }
             }
         }))
         .unwrap();
     assert_eq!(store.effective().view.background.model.to_hex(), "#112233");
     assert_eq!(store.effective().view.background.paper.to_hex(), "#445566");
     assert_eq!(store.effective().view.crosshair.size_percent, 40);
+    assert_eq!(store.effective().view.pickbox.size_pixels, 8);
+    assert_eq!(store.effective().view.aperture.size_pixels, 30);
     // The durable projection carries exactly those leaves.
     let projected = store.projected_user_preference_json();
     assert!(projected.contains("\"model\":\"#112233\""), "{projected}");
     assert!(projected.contains("\"paper\":\"#445566\""), "{projected}");
     assert!(projected.contains("\"sizePercent\":40"), "{projected}");
+    assert!(projected.contains("\"sizePixels\":8"), "{projected}");
+    assert!(projected.contains("\"sizePixels\":30"), "{projected}");
+
+    // An out-of-range preference is refused by the same schema validation, never
+    // clamped, and leaves the effective config untouched.
+    let error = store
+        .apply_user_preference(json!({ "view": { "pickbox": { "sizePixels": 21 } } }))
+        .unwrap_err();
+    assert_eq!(error.path, "view.pickbox.sizePixels");
+    assert_eq!(store.effective().view.pickbox.size_pixels, 8);
 
     // A preference outside the allowed leaves is refused, not projected.
     let error = store

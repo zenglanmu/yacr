@@ -19,6 +19,10 @@ use super::telemetry::{
 };
 use cad_engine::render::FrameCompleteness;
 
+/// The properties-panel write channel's own contracts (kept in their own file
+/// so this one stays under the repository's file-size limit).
+mod properties;
+
 #[test]
 fn launch_options_parse_cli() {
     let opts = LaunchOptions::from_args(

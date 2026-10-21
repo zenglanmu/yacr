@@ -84,8 +84,8 @@ pub use fonts::{HostResources, UnsupportedResources};
 /// Host policy mirroring the web host: users may persist the two dock panels'
 /// initial-open flags and the Options-dialog settings that have real behavioural
 /// backing (overlay visibility, the plot default, the two interaction switches,
-/// the model/paper backgrounds and the crosshair size). A host `config.json`
-/// replaces this policy wholesale.
+/// the model/paper backgrounds, the crosshair size and the pickbox/aperture
+/// sizes). A host `config.json` replaces this policy wholesale.
 ///
 /// The settings leaves are listed individually (never a `view.overlays` prefix)
 /// so no other configuration field becomes user-writable by inheritance.
@@ -99,6 +99,8 @@ pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowe
     "view.background.model",
     "view.background.paper",
     "view.crosshair.sizePercent",
+    "view.pickbox.sizePixels",
+    "view.aperture.sizePixels",
     "ui.export.plotFormat",
     "interaction.snapEnabled",
     "interaction.hoverPreview"
@@ -369,6 +371,9 @@ impl HostCore {
             // A replacement rebuilds `SessionState`; re-apply the persisted
             // interaction defaults so an Options choice survives open/new.
             self.seed_session_interaction();
+            // Same for the configured pickbox/aperture policy, which is derived
+            // from the effective config and must survive a document replacement.
+            self.seed_interaction_tolerance();
         }
     }
 
@@ -833,6 +838,11 @@ impl HostCore {
         // sit in the config store: `CadStatus.snap_enabled`/`hover_preview` read
         // `SessionState`, whose constructor defaults both switches on.
         self.seed_session_interaction();
+        // The pickbox/aperture are config-derived rather than session switches,
+        // so the same startup pass installs the persisted policy on the live
+        // session (the next interaction would derive it anyway; doing it here
+        // keeps the first frame and the first pick consistent).
+        self.seed_interaction_tolerance();
 
         *self.startup_diagnostics.borrow_mut() = diagnostics.clone();
         diagnostics

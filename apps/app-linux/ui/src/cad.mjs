@@ -1,5 +1,4 @@
-import { admitCommandText } from './commands.mjs';
-import { propertyRowLabel } from './property-labels.mjs';
+import { admitCommandText, isLocalChromeCommand } from './commands.mjs';
 import { parseSelection } from './selection-wire.mjs';
 import { TEXT_PICK_PROMPT_KEY, TEXT_STEP_PROMPT_KEY, toolAwaitingText } from './text.mjs';
 import { OPEN_ENDED_PROMPTS } from './tool-open-ended.mjs';
@@ -788,42 +787,6 @@ export function importProgressView(progress, t) {
 }
 
 /**
- * A localised, honest view of the current selection for the properties panel.
- *
- * Three states, driven only by the real `selection` block (a missing/null block
- * is the explicit empty state, not a fabricated one):
- *
- * - `empty`  — no selection; `properties.empty`;
- * - `single` — the label→value rows of the one selected object;
- * - `multi`  — the selected count plus the labels of the keys whose values
- *   differ (`mixedLabel` is `null` when no key is actually mixed).
- */
-export function selectionView(selection, t) {
-  if (!selection || selection.empty || selection.count === 0) {
-    return { kind: 'empty', count: 0, rows: [], mixedKeys: [], mixedLabel: null, countLabel: null };
-  }
-  if (selection.count === 1) {
-    return {
-      kind: 'single',
-      count: 1,
-      rows: selection.rows.map(row => ({ key: row.key, label: propertyRowLabel(t, row.key), value: row.value })),
-      mixedKeys: [],
-      mixedLabel: null,
-      countLabel: null,
-    };
-  }
-  const mixedKeys = selection.mixedKeys.map(key => propertyRowLabel(t, key));
-  return {
-    kind: 'multi',
-    count: selection.count,
-    rows: [],
-    mixedKeys,
-    mixedLabel: mixedKeys.length > 0 ? t('properties.mixed', { keys: mixedKeys.join(', ') }) : null,
-    countLabel: t('properties.selected_count', { count: selection.count }),
-  };
-}
-
-/**
  * Ask the host to cancel the in-flight open (`CANCEL`).
  *
  * Only offered while the host reports the import is still cancellable; refusal
@@ -870,6 +833,10 @@ export async function queueCadCommand(invoke, text, status, pending) {
       ? { kind: 'failed', error: 'CAD_COMMAND_UNAVAILABLE' }
       : { kind: 'unsupported', command };
   }
+  // A chrome-local selector has no router command. Returning it as `local`
+  // keeps this funnel honest instead of sending a name the router would refuse
+  // (the command line intercepts it before it ever gets here).
+  if (isLocalChromeCommand(command)) return { kind: 'local', command };
   try {
     const response = await invoke('cad_command', { command });
     if (!response || response.accepted !== true) throw Error('CAD_COMMAND_NOT_ACCEPTED');

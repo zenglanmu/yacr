@@ -368,10 +368,62 @@ button, input, select { font: inherit; color: inherit; }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
 
 /* Properties palette ----------------------------------------------------- */
-/* The inspector reuses the shared `.kv` label/value grid. Only the wrapping of
-   long machine keys/labels (e.g. an instance path or a raw unknown key) and the
-   multi-selection summary need extra rules; no new visual system is introduced. */
-.properties__rows dt { overflow-wrap: anywhere; }
+/* The inspector is a compact two-column property grid: category heading, then
+   one row per property (label left, editor right). Only the label/value wrap and
+   the multi-selection note need extra rules; the surfaces reuse the shared
+   tokens (`--field`, `--line-soft`, `--hover`, `--focus`). Nothing here changes
+   the dock width or the CAD partition rect. */
+.properties__groups { display: flex; flex-direction: column; }
+.properties__group + .properties__group { margin-top: 2px; }
+.properties__group-title {
+  display: flex; align-items: center; gap: 8px;
+  margin: 12px 0 4px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .5px;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.properties__group-title::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--line); }
+.properties__group:first-child .properties__group-title { margin-top: 4px; }
+.properties__rows { display: flex; flex-direction: column; margin: 0; }
+.properties__row {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center; gap: 2px 10px;
+  min-height: 26px; padding: 1px 3px; border-radius: var(--radius);
+  font-family: var(--font-mono); font-size: 11px;
+  transition: background var(--t-fast);
+}
+.properties__row.is-editable:hover { background: var(--hover); }
+.properties__row dt { color: var(--text-muted); overflow-wrap: anywhere; }
+.properties__row dt label { cursor: text; }
+.properties__row dd { display: flex; flex-direction: column; gap: 2px; margin: 0; min-width: 0; }
+.properties__readonly { display: block; overflow-wrap: anywhere; color: var(--text-dim); }
+.properties__readonly.is-mixed { color: var(--text-muted); font-style: italic; }
+.properties__input {
+  width: 100%; min-width: 0; height: 22px; padding: 0 5px;
+  background: transparent; color: var(--text);
+  border: 1px solid transparent; border-radius: var(--radius);
+  font-family: var(--font-mono); font-size: 11px;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.properties__input:hover:not(:disabled) { border-color: var(--line-soft); background: var(--field); }
+.properties__input:focus-visible {
+  outline: none; border-color: var(--focus); background: var(--field);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+.properties__input::placeholder { color: var(--text-muted); opacity: 1; font-style: italic; }
+.properties__input:disabled { color: var(--text-disabled); opacity: .65; cursor: progress; }
+.properties__select {
+  width: 100%; min-width: 0; height: 22px; padding-right: 2px;
+  font-family: var(--font-mono); font-size: 11px;
+}
+.properties__select:focus-visible {
+  outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus);
+}
+.properties__select:disabled { color: var(--text-disabled); opacity: .65; cursor: progress; }
+.properties__row-error {
+  margin: 0; color: var(--danger); font-family: var(--font-ui);
+  font-size: 10.5px; line-height: 1.35; overflow-wrap: anywhere;
+}
+.properties__hint { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.4; }
 .properties__multi { display: flex; flex-direction: column; gap: 6px; }
 .properties__count { margin: 0; color: var(--text); font-weight: 600; }
 .properties__mixed { margin: 0; color: var(--text-muted); overflow-wrap: anywhere; }
@@ -561,10 +613,12 @@ button, input, select { font: inherit; color: inherit; }
 .status-stepper__button:disabled { color: var(--text-disabled); cursor: not-allowed; }
 .status-stepper__value { min-width: 26px; text-align: center; color: var(--text); }
 .status-stepper.is-disabled, .status-stepper.is-disabled .status-stepper__value { color: var(--text-disabled); }
+/* Status-bar Options entry: the ghost button surface at status-bar height, kept
+   a whisper quieter than the toggle chips so it reads as a utility, not a mode. */
 .statusbar__workspace {
   display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 9px;
   border: 1px solid transparent; border-radius: var(--radius);
-  background: transparent; color: var(--text-muted); cursor: not-allowed;
+  background: transparent; color: var(--text-muted);
 }
 
 /* Motion ----------------------------------------------------------------- */
@@ -591,5 +645,5 @@ button, input, select { font: inherit; color: inherit; }
   .ribbon-panel { padding: 0 5px; }
   .import-progress__phase { display: none; }
   /* Give long values room by narrowing the label column on the small dock. */
-  .properties__rows { grid-template-columns: 76px minmax(0, 1fr); }
+  .properties__row { grid-template-columns: 76px minmax(0, 1fr); }
 }

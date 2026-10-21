@@ -30,6 +30,7 @@ mod select;
 mod settings;
 mod snap_marker;
 mod text_tool;
+mod tolerance;
 
 // --- synthetic platform contracts -------------------------------------------
 
@@ -480,8 +481,9 @@ fn demo_circle_layer(core: &HostCore) -> cad_domain::LayerId {
 }
 
 /// The reference `pick_at_screen` reports at a pixel, computed exactly the way
-/// `select_at_mode` computes it.
+/// `select_at_mode` computes it: with the host's configured tolerance policy.
 fn picked_ref_at(core: &HostCore, pixel: [f64; 2]) -> cad_domain::SelectionRef {
+    let policy = core.tolerance_policy();
     let c = core.controller.borrow();
     let drawing = c.drawing().expect("the demo document");
     let viewport = &c.application.workspace.viewports[&c.viewport_id];
@@ -491,7 +493,7 @@ fn picked_ref_at(core: &HostCore, pixel: [f64; 2]) -> cad_domain::SelectionRef {
         &viewport.camera,
         pixel,
         viewport.logical_size,
-        &cad_domain::TolerancePolicy::default(),
+        &policy,
         cad_app::BackFacePolicy::Cull,
     )
     .expect("the pixel produces a pick")
@@ -506,8 +508,10 @@ fn active_camera(core: &HostCore) -> cad_app::Camera {
     c.application.workspace.viewports[&c.viewport_id].camera
 }
 
-/// Whether `pick_at_screen` reports no hit at a pixel.
+/// Whether `pick_at_screen` reports no hit at a pixel, using the host's
+/// configured tolerance policy (the same one `select_at_mode` uses).
 fn picks_nothing(core: &HostCore, pixel: [f64; 2]) -> bool {
+    let policy = core.tolerance_policy();
     let c = core.controller.borrow();
     let drawing = c.drawing().expect("the demo document");
     let viewport = &c.application.workspace.viewports[&c.viewport_id];
@@ -517,7 +521,7 @@ fn picks_nothing(core: &HostCore, pixel: [f64; 2]) -> bool {
         &viewport.camera,
         pixel,
         viewport.logical_size,
-        &cad_domain::TolerancePolicy::default(),
+        &policy,
         cad_app::BackFacePolicy::Cull,
     )
     .expect("the pixel produces a pick")

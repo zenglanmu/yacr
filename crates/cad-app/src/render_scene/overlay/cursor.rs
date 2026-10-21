@@ -11,11 +11,12 @@
 //! (derived from [`OverlayInputs::viewport_bounds`]): each arm is a configured
 //! percentage of its cursor-to-edge span, so the default 100 % is the historical
 //! full-viewport crosshair and a smaller value draws a shorter cross. The pickbox
-//! is a square centred on the cursor whose **half-side** equals the pick
-//! tolerance ([`cad_domain::TolerancePolicy::pickbox_logical_pixels`] logical
-//! pixels, the AutoCAD `PICKBOX` analogue this project's click predicate uses)
-//! converted to world units by the current view scale, so the box circumscribes
-//! the region a click can actually hit. The crosshair size never changes it.
+//! is a square centred on the cursor whose **half-side** equals the configured
+//! pickbox size (the effective `view.pickbox.sizePixels`, which is exactly
+//! [`cad_domain::TolerancePolicy::pickbox_logical_pixels`], the AutoCAD `PICKBOX`
+//! analogue this project's click predicate uses) converted to world units by the
+//! current view scale, so the box circumscribes the region a click can actually
+//! hit. The crosshair size never changes it.
 //!
 //! The whole overlay is one bounded `Lines` batch: two full-extent crosshair
 //! segments (four vertices) plus, when the view scale is usable, four closed
@@ -61,12 +62,14 @@ pub const DEFAULT_CROSSHAIR_PERCENT: u32 = 100;
 /// crosshair but omits the pickbox, since a screen-relative pickbox size has no
 /// domain.
 ///
-/// `crosshair_percent` sizes the crosshair (see [`crosshair_arms`]); the
-/// pickbox is the click tolerance and is deliberately independent of it.
+/// `crosshair_percent` sizes the crosshair (see [`crosshair_arms`]);
+/// `pickbox_logical_pixels` sizes the pickbox (the configured `PICKBOX`, see
+/// [`pickbox_half_side`]) and is deliberately independent of the crosshair.
 pub fn cursor_overlay(
     cursor: Option<Point3>,
     viewport_bounds: Option<(Point3, Point3)>,
     view_scale: Option<f64>,
+    pickbox_logical_pixels: f64,
     crosshair_percent: u32,
     document: DocumentId,
 ) -> VisualOverlay {
@@ -109,7 +112,7 @@ pub fn cursor_overlay(
         y: y1,
         z: cursor.z,
     });
-    if let Some(half) = pickbox_half_side(view_scale) {
+    if let Some(half) = pickbox_half_side(view_scale, pickbox_logical_pixels) {
         let corner = |dx: f64, dy: f64| Point3 {
             x: cursor.x + dx,
             y: cursor.y + dy,
@@ -164,15 +167,20 @@ fn crosshair_arms(min: f64, cursor: f64, max: f64, percent: u32) -> (f64, f64) {
 
 /// The pickbox half-side in world units, or `None` when the scale is degenerate.
 ///
-/// The half-side is the pick tolerance in logical pixels
-/// ([`cad_domain::TolerancePolicy::pickbox_logical_pixels`], the same value the
-/// click predicate uses) times the view scale, so the box's inscribed circle is
-/// exactly the region a click can hit. A missing or degenerate scale yields no
-/// pickbox (never a zero/NaN one).
-fn pickbox_half_side(view_scale: Option<f64>) -> Option<f64> {
+/// The half-side is the configured pickbox size in logical pixels (the effective
+/// `view.pickbox.sizePixels`, which is also
+/// [`cad_domain::TolerancePolicy::pickbox_logical_pixels`] — the value the click
+/// predicate uses) times the view scale, so the box's inscribed circle is exactly
+/// the region a click can hit. A missing or degenerate scale yields no pickbox
+/// (never a zero/NaN one). An invalid (non-finite or non-positive) pixel size also
+/// yields no box: the configuration layer refuses those, and this pure helper must
+/// not fabricate a geometry from one.
+fn pickbox_half_side(view_scale: Option<f64>, pickbox_logical_pixels: f64) -> Option<f64> {
     let scale = view_scale.filter(|scale| scale.is_finite() && *scale > 0.0)?;
-    let half = (cad_domain::TolerancePolicy::default().pickbox_logical_pixels * scale)
-        .max(f64::MIN_POSITIVE);
+    if !pickbox_logical_pixels.is_finite() || pickbox_logical_pixels <= 0.0 {
+        return None;
+    }
+    let half = (pickbox_logical_pixels * scale).max(f64::MIN_POSITIVE);
     (half.is_finite() && half > 0.0).then_some(half)
 }
 
@@ -210,7 +218,14 @@ mod tests {
 
     #[test]
     fn cursor_overlay_draws_one_crosshair_and_pickbox_batch() {
-        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), 100, DocumentId(1));
+        let overlay = cursor_overlay(
+            Some(p(1.0, 2.0)),
+            view(),
+            Some(0.5),
+            3.0,
+            100,
+            DocumentId(1),
+        );
         assert_eq!(overlay.drawn(), 1, "one bounded cursor batch");
         let batch = &overlay.batches[0];
         assert_eq!(batch.topology, RenderTopology::Lines);
@@ -223,7 +238,14 @@ mod tests {
 
     #[test]
     fn the_crosshair_spans_the_view_rectangle_through_the_cursor() {
-        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), 100, DocumentId(1));
+        let overlay = cursor_overlay(
+            Some(p(1.0, 2.0)),
+            view(),
+            Some(0.5),
+            3.0,
+            100,
+            DocumentId(1),
+        );
         let batch = &overlay.batches[0];
         let v = |i: usize| {
             [
@@ -244,7 +266,7 @@ mod tests {
         // Pinned: the historical crosshair spanned `min..max` for both axes and
         // must stay bit-identical at 100 %, independent of the cursor position.
         for cursor in [p(1.0, 2.0), p(-49.0, 29.0), p(0.0, 0.0)] {
-            let overlay = cursor_overlay(Some(cursor), view(), Some(0.5), 100, DocumentId(1));
+            let overlay = cursor_overlay(Some(cursor), view(), Some(0.5), 3.0, 100, DocumentId(1));
             let batch = &overlay.batches[0];
             let v = |i: usize| {
                 [
@@ -261,7 +283,7 @@ mod tests {
 
     #[test]
     fn a_half_crosshair_halves_each_arm_about_the_cursor() {
-        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), 50, DocumentId(1));
+        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), 3.0, 50, DocumentId(1));
         let batch = &overlay.batches[0];
         let v = |i: usize| {
             [
@@ -283,7 +305,7 @@ mod tests {
 
     #[test]
     fn a_one_percent_crosshair_is_a_minimal_centred_cross() {
-        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), 1, DocumentId(1));
+        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), 3.0, 1, DocumentId(1));
         let batch = &overlay.batches[0];
         let v = |i: usize| {
             [
@@ -305,8 +327,14 @@ mod tests {
         // The configuration/settings layer rejects these; this pure helper only
         // guarantees it never emits a zero-length or inverted line.
         for percent in [0, 101, u32::MAX] {
-            let overlay =
-                cursor_overlay(Some(p(1.0, 2.0)), view(), Some(0.5), percent, DocumentId(1));
+            let overlay = cursor_overlay(
+                Some(p(1.0, 2.0)),
+                view(),
+                Some(0.5),
+                3.0,
+                percent,
+                DocumentId(1),
+            );
             let batch = &overlay.batches[0];
             let v = |i: usize| {
                 [
@@ -323,7 +351,14 @@ mod tests {
     fn the_pickbox_half_side_is_the_pick_tolerance_times_the_scale() {
         let policy = cad_domain::TolerancePolicy::default();
         let scale = 0.5;
-        let overlay = cursor_overlay(Some(p(1.0, 2.0)), view(), Some(scale), 100, DocumentId(1));
+        let overlay = cursor_overlay(
+            Some(p(1.0, 2.0)),
+            view(),
+            Some(scale),
+            3.0,
+            100,
+            DocumentId(1),
+        );
         let half = pickbox_half_extent(&overlay.batches[0]);
         let expected = policy.pickbox_logical_pixels * scale;
         assert!(
@@ -347,6 +382,90 @@ mod tests {
     }
 
     #[test]
+    fn the_pickbox_size_is_the_configured_pixel_count_with_the_pinned_geometry() {
+        let scale = 0.5;
+        // Pinned: the default 3 px pickbox with this scale is exactly 1.5 world
+        // units of half-side (3 × 0.5). The number is the pre-existing geometry,
+        // so a configuration that never changed the size cannot move the box.
+        let three = cursor_overlay(
+            Some(p(1.0, 2.0)),
+            view(),
+            Some(scale),
+            3.0,
+            100,
+            DocumentId(1),
+        );
+        let half_three = pickbox_half_extent(&three.batches[0]);
+        assert_eq!(
+            half_three, 1.5,
+            "the default pickbox half-side must stay bit-identical: {half_three}"
+        );
+
+        // 6 px is exactly double the default size.
+        let six = cursor_overlay(
+            Some(p(1.0, 2.0)),
+            view(),
+            Some(scale),
+            6.0,
+            100,
+            DocumentId(1),
+        );
+        let half_six = pickbox_half_extent(&six.batches[0]);
+        assert_eq!(half_six, 3.0, "6 px must be exactly double the 3 px box");
+        assert_eq!(half_six / half_three, 2.0);
+
+        // 1 px is the smallest legal pickbox: still a real, visible square.
+        let one = cursor_overlay(
+            Some(p(1.0, 2.0)),
+            view(),
+            Some(scale),
+            1.0,
+            100,
+            DocumentId(1),
+        );
+        let half_one = pickbox_half_extent(&one.batches[0]);
+        assert_eq!(half_one, 0.5, "1 px at scale 0.5 is a 0.5-unit half-side");
+        assert!(half_one > 0.0 && half_one < half_three);
+
+        // The crosshair is untouched by the pickbox size: its four vertices span
+        // the view rectangle exactly at 100 % for every pickbox size.
+        for overlay in [&one, &three, &six] {
+            let batch = &overlay.batches[0];
+            let v = |i: usize| {
+                [
+                    batch.local_origin.x + f64::from(batch.vertices[i][0]),
+                    batch.local_origin.y + f64::from(batch.vertices[i][1]),
+                ]
+            };
+            assert_eq!(v(0), [-50.0, 2.0]);
+            assert_eq!(v(1), [50.0, 2.0]);
+            assert_eq!(v(2), [1.0, -30.0]);
+            assert_eq!(v(3), [1.0, 30.0]);
+        }
+    }
+
+    #[test]
+    fn an_invalid_pickbox_size_omits_the_box_instead_of_fabricating_one() {
+        // The configuration/settings layers refuse these; this pure geometry
+        // helper must not turn one into a zero/NaN/inverted square.
+        for pixels in [0.0, -3.0, f64::NAN, f64::INFINITY] {
+            let overlay = cursor_overlay(
+                Some(p(1.0, 2.0)),
+                view(),
+                Some(0.5),
+                pixels,
+                100,
+                DocumentId(1),
+            );
+            assert_eq!(
+                overlay.batches[0].vertices.len(),
+                4,
+                "no pickbox for an invalid size {pixels}"
+            );
+        }
+    }
+
+    #[test]
     fn a_degenerate_scale_omits_the_pickbox_but_keeps_the_crosshair() {
         for scale in [
             None,
@@ -355,7 +474,7 @@ mod tests {
             Some(f64::NAN),
             Some(f64::INFINITY),
         ] {
-            let overlay = cursor_overlay(Some(p(0.0, 0.0)), view(), scale, 100, DocumentId(1));
+            let overlay = cursor_overlay(Some(p(0.0, 0.0)), view(), scale, 3.0, 100, DocumentId(1));
             assert_eq!(
                 overlay.drawn(),
                 1,
@@ -372,14 +491,17 @@ mod tests {
     #[test]
     fn cursor_overlay_is_absent_without_a_cursor_or_a_view() {
         // No cursor position: an explicit empty overlay, never a fabricated one.
-        assert!(cursor_overlay(None, view(), Some(0.5), 100, DocumentId(1)).is_empty());
+        assert!(cursor_overlay(None, view(), Some(0.5), 3.0, 100, DocumentId(1)).is_empty());
         // A 3D view has no planar view rectangle.
-        assert!(cursor_overlay(Some(p(0.0, 0.0)), None, Some(0.5), 100, DocumentId(1)).is_empty());
+        assert!(
+            cursor_overlay(Some(p(0.0, 0.0)), None, Some(0.5), 3.0, 100, DocumentId(1)).is_empty()
+        );
         // A degenerate view rectangle is not a valid view.
         assert!(cursor_overlay(
             Some(p(0.0, 0.0)),
             Some((p(1.0, 0.0), p(1.0, 0.0))),
             Some(0.5),
+            3.0,
             100,
             DocumentId(1)
         )
@@ -393,6 +515,7 @@ mod tests {
             }),
             view(),
             Some(0.5),
+            3.0,
             100,
             DocumentId(1)
         )

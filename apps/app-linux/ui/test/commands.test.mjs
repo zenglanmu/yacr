@@ -678,7 +678,7 @@ test('DIMLINEAR and DIMALIGNED are annotate affordances in the ribbon and catalo
 //  - GRID, ORTHO: unimplemented drafting aids (the router has no selector).
 //  - SNAP: AutoCAD's grid snap (F9), deliberately absent from the router; it is
 //    a different feature from object snap (`OSNAP`) and must never alias it.
-//  - LAYER, PROPERTIES: panel affordances deferred to a later phase.
+//  - LAYER: panel affordance deferred to a later phase.
 // The four measurement kinds (DIST/MEASUREPOLYLINE/MEASUREANGLE/AREA) and the
 // fixed zoom steps (ZOOMIN/ZOOMOUT) were fixed: they are router-admitted
 // selectors now and moved into HOST_NAMES. `PLINE` is now the polyline **draw**
@@ -687,8 +687,10 @@ test('DIMLINEAR and DIMALIGNED are annotate affordances in the ribbon and catalo
 // deliberately **not** in this set: it is an unbound name, not a dead
 // affordance. `ORBIT` is **gesture-only** (router-admitted, click-disabled
 // with an explicit reason) and is asserted separately via GESTURE_ONLY_COMMANDS,
-// not lumped into this router-refused set.
-const ROUTER_REFUSED_AFFORDANCES = ['GRID', 'LAYER', 'ORTHO', 'PROPERTIES', 'SNAP'];
+// not lumped into this router-refused set. `PROPERTIES` is **chrome-local**:
+// the command line and ribbon open the docked inspector without the router, so
+// it is asserted separately below rather than counted as a dead affordance.
+const ROUTER_REFUSED_AFFORDANCES = ['GRID', 'LAYER', 'ORTHO', 'SNAP'];
 
 test('the command catalog lists exactly the router-refused dead affordances, and ERASE is not one', () => {
   const refused = COMMAND_CATALOG
@@ -703,6 +705,11 @@ test('the command catalog lists exactly the router-refused dead affordances, and
     assert.equal(admitCommandText(id, { status: loaded }).kind, 'unsupported', id);
   }
   assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('ERASE'), false, 'ERASE must be reachable');
+  // `PROPERTIES` left this set: the chrome answers it locally (docked palette).
+  assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('PROPERTIES'), false, 'PROPERTIES is chrome-local');
+  assert.equal(isSupportedCommand('PROPERTIES'), true, 'PROPERTIES is admitted by the chrome');
+  assert.equal(admitCommandText('PROPERTIES', { status: loaded }).kind, 'admitted');
+  assert.equal(admitCommandText('PROPERTIES', { status: null, pending: true }).kind, 'admitted');
   // `PLINE` is now a real (draw) selector, so it is neither reserved nor dead:
   // `ANGLE` (not an AutoCAD command) stays absent from the catalog and refused.
   assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('ANGLE'), false, 'ANGLE');

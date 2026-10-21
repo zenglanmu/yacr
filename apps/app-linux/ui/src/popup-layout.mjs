@@ -183,3 +183,215 @@ export const TEXT_META = Object.freeze({
   minHeight: 16,
 });
 
+// --- Options dialog -------------------------------------------------------
+// AutoCAD's Options shape: a left tab rail and one content column, both inside
+// the same card, header and footer rhythm as the other dialogs. The host owns
+// the window size (`OPTIONS_WIDTH`/`OPTIONS_HEIGHT` in popup.rs); the constants
+// here mirror it only so the metrics can be tested without a display.
+//
+// Arithmetic for a 720px window: 156px rail + 1px rule + 2 x 16px inset leaves
+// 531px of content; the 148px label column plus a 12px gap leaves 371px for the
+// control column, which fits the longest unit row and a `#rrggbb` field at 12px
+// mono without horizontal scrolling.
+export const OPTIONS_WIDTH = 720;
+export const OPTIONS_HEIGHT = 560;
+export const OPTIONS_RAIL_WIDTH = 156;
+
+/** Header: 42px, like the text editor (title breathing room, no seam). */
+export const OPTIONS_HEAD = Object.freeze({ ...DIALOG_HEAD, height: 42 });
+
+/** Body: the rail and the content column sit side by side, no outer padding. */
+export const OPTIONS_BODY = Object.freeze({
+  flex: '1 1 auto',
+  minHeight: 0,
+  minWidth: 0,
+  display: 'flex',
+});
+
+/** The tab rail: a fixed column on the deepest chrome surface. */
+export const OPTIONS_RAIL = Object.freeze({
+  flex: '0 0 auto',
+  width: OPTIONS_RAIL_WIDTH,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+  padding: '12px 8px',
+  overflow: 'auto',
+  background: 'var(--chrome-3)',
+  borderRight: '1px solid var(--line-soft)',
+});
+
+/** One rail tab. Shape comes from `.ui-button` (hover + focus-visible); this
+ * only makes it a full-width, left-aligned rail entry. */
+export const OPTIONS_TAB = Object.freeze({
+  width: '100%',
+  height: 28,
+  justifyContent: 'flex-start',
+  gap: 8,
+  padding: '0 9px',
+});
+
+/** The selected tab: raised to the card surface plus a 2px accent edge. */
+export const OPTIONS_TAB_ACTIVE = Object.freeze({
+  background: 'var(--chrome-2)',
+  color: 'var(--text)',
+  boxShadow: 'inset 2px 0 0 var(--accent)',
+});
+
+/** The content column: same 16px edge as the header and the footer actions. */
+export const OPTIONS_CONTENT = Object.freeze({
+  flex: '1 1 auto',
+  minWidth: 0,
+  overflow: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  padding: `16px ${DIALOG_INSET}px 18px`,
+});
+
+/** One settings row: label column, control column, help under the control. */
+export const OPTIONS_ROW = Object.freeze({
+  display: 'grid',
+  gridTemplateColumns: '148px minmax(0, 1fr)',
+  alignItems: 'start',
+  gap: '3px 12px',
+  padding: '9px 0',
+});
+
+/** Hairline between rows: `--line`, not `--line-soft`, so it stays a whisper. */
+export const OPTIONS_ROW_RULE = Object.freeze({ borderTop: '1px solid var(--line)' });
+
+export const OPTIONS_LABEL = Object.freeze({
+  display: 'flex',
+  alignItems: 'center',
+  minHeight: 24,
+  fontSize: 12,
+  lineHeight: 1.3,
+  color: 'var(--text)',
+});
+
+export const OPTIONS_LABEL_INVALID = Object.freeze({ color: 'var(--danger)' });
+
+/** Help copy uses `--text-dim`, the token the rest of the app uses for secondary
+ * text (6.9:1 on the card), not the weaker muted step. */
+export const OPTIONS_HELP = Object.freeze({
+  margin: 0,
+  fontSize: 11,
+  lineHeight: 1.45,
+  color: 'var(--text-dim)',
+});
+
+export const OPTIONS_HELP_INVALID = Object.freeze({ color: 'var(--danger)' });
+
+/** One line control: field surface, mono 12px (values are machine-shaped). */
+export const OPTIONS_FIELD = Object.freeze({
+  height: 24,
+  padding: '0 8px',
+  minWidth: 0,
+  background: 'var(--field)',
+  color: 'var(--text)',
+  border: '1px solid var(--line-soft)',
+  borderRadius: 'var(--radius)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 12,
+});
+
+/** Visible focus ring (inside the border box, no layout shift). */
+export const OPTIONS_FIELD_FOCUS = Object.freeze({
+  borderColor: 'var(--focus)',
+  boxShadow: 'inset 0 0 0 1px var(--focus)',
+  outline: 'none',
+});
+
+/** A value the client already knows the server will refuse. */
+export const OPTIONS_FIELD_INVALID = Object.freeze({ borderColor: 'var(--danger)' });
+
+/** Control row: the editor, its unit suffix and (for colours) the swatch. */
+export const OPTIONS_CONTROL = Object.freeze({
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  minWidth: 0,
+});
+
+export const OPTIONS_UNIT = Object.freeze({
+  flex: '0 0 auto',
+  fontSize: 11,
+  color: 'var(--text-muted)',
+  fontVariantNumeric: 'tabular-nums',
+});
+
+export const OPTIONS_SWATCH = Object.freeze({
+  flex: '0 0 auto',
+  width: 22,
+  height: 22,
+  borderRadius: 2,
+  border: '1px solid var(--line-soft)',
+  background: 'var(--field)',
+});
+
+/** The read-only fonts directory: a field-shaped well, not an editable box. */
+export const OPTIONS_WELL = Object.freeze({
+  ...OPTIONS_FIELD,
+  display: 'flex',
+  alignItems: 'center',
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
+  textOverflow: 'ellipsis',
+  color: 'var(--text-dim)',
+});
+
+export const OPTIONS_BADGE = Object.freeze({
+  flex: '0 0 auto',
+  display: 'inline-flex',
+  alignItems: 'center',
+  height: 18,
+  padding: '0 6px',
+  border: '1px solid var(--line-soft)',
+  borderRadius: 999,
+  fontSize: 10.5,
+  letterSpacing: '.2px',
+  color: 'var(--text-muted)',
+});
+
+export const OPTIONS_CHECKBOX = Object.freeze({
+  width: 14,
+  height: 14,
+  margin: 0,
+  accentColor: 'var(--accent)',
+});
+
+/** Footer staging note (left of the button row), ellipsized like the editors'. */
+export const OPTIONS_FOOT_NOTE = Object.freeze({
+  margin: '0 auto 0 0',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  fontSize: 11,
+  color: 'var(--text-dim)',
+});
+
+/**
+ * The footer refusal band. Unlike the staging note it must be readable in full,
+ * so it wraps to two lines at most instead of ellipsizing the one sentence that
+ * explains what the host refused.
+ */
+export const OPTIONS_FOOT_ERROR = Object.freeze({
+  margin: '0 auto 0 0',
+  minWidth: 0,
+  maxWidth: '52ch',
+  fontSize: 11,
+  lineHeight: 1.45,
+  color: 'var(--danger)',
+});
+
+/** The centred loading / load-failure block. */
+export const OPTIONS_STATE = Object.freeze({
+  margin: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 10,
+  maxWidth: '46ch',
+  textAlign: 'center',
+});
+

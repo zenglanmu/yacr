@@ -57,6 +57,10 @@ export function propertyRowLabel(t, key) {
     case 'fill': return t('properties.row.fill');
     case 'roots': return t('properties.row.roots');
     case 'lines': return t('properties.row.lines');
+    case 'color': return t('properties.row.color');
+    case 'linetype': return t('properties.row.linetype');
+    case 'lineweight': return t('properties.row.lineweight');
+    case 'transparency': return t('properties.row.transparency');
     // An unknown machine key is shown by its raw key, never fabricated.
     default: return key;
   }

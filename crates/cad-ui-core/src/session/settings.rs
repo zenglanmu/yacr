@@ -1,6 +1,6 @@
 //! Typed settings wire surface for the Options dialog.
 //!
-//! The session exposes the same closed ten-key surface the host persists; it
+//! The session exposes the same closed twelve-key surface the host persists; it
 //! adds no second validation and no raw-JSON entry point. A UI writes one typed
 //! key/value pair, the host validates it against the closed table, persists the
 //! matching preference leaf and applies it to the live scene/session.
@@ -18,9 +18,10 @@ pub use cad_host::{
 /// The effective settings an Options dialog reads and writes.
 ///
 /// A flat camelCase wire object (like the status/session types). `fontsDir` is
-/// read-only display data sourced from the host's `--fonts-dir`; the other ten
+/// read-only display data sourced from the host's `--fonts-dir`; the other twelve
 /// fields correspond one-to-one with [`CadSettingKey`], the two backgrounds as
-/// canonical `#rrggbb` strings and the crosshair as an integer percentage.
+/// canonical `#rrggbb` strings, the crosshair as an integer percentage and the
+/// pickbox/aperture as integer pixel counts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadSettings {
@@ -38,6 +39,12 @@ pub struct CadSettings {
     pub background_paper: String,
     /// Crosshair arm length as an integer percentage of the viewport (`1..=100`).
     pub crosshair_percent: u32,
+    /// Pickbox half-side in logical pixels (`1..=20`, the AutoCAD `PICKBOX`
+    /// option).
+    pub pickbox_size: u32,
+    /// Object-snap aperture in logical pixels (`1..=50`, the AutoCAD `APERTURE`
+    /// option).
+    pub aperture_size: u32,
     /// Read-only: the configured CAD font directory, or `null` when unset.
     pub fonts_dir: Option<String>,
 }
@@ -55,6 +62,8 @@ impl From<HostSettings> for CadSettings {
             background_model: value.background_model,
             background_paper: value.background_paper,
             crosshair_percent: value.crosshair_percent,
+            pickbox_size: value.pickbox_size,
+            aperture_size: value.aperture_size,
             fonts_dir: value.fonts_dir,
         }
     }

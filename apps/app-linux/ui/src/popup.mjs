@@ -42,8 +42,11 @@ export const POPUP_GLOBAL = '__YACR_POPUP__';
  * `textEdit` is the modal editor for one text entity's raw DXF string
  * (ADR 0021 D4). Its payload is *derived by the host* from the current single
  * selection, so the UI can never supply content it should not control.
+ *
+ * `options` is the settings dialog. It carries no payload (the settings are read
+ * from `cad_settings` after mount), so the boot literal is just the envelope.
  */
-export const POPUP_KINDS = Object.freeze(['about', 'textEdit']);
+export const POPUP_KINDS = Object.freeze(['about', 'textEdit', 'options']);
 
 /** Every catalog key the popup layer renders. Nothing else may be invented. */
 export const POPUP_KEYS = Object.freeze({
@@ -170,6 +173,9 @@ export function textEditPayload(payload) {
  * view degrades to the explicit unknown state rather than to an editor with
  * invented content.
  *
+ * `kind: 'options'` is the settings dialog: it has no payload fields (it reads
+ * `cad_settings` itself), so the view carries only the envelope.
+ *
  * Any other kind yields `{ kind: 'unknown', requestedKind }`, which the popup
  * root renders as an explicit state with a Close action rather than a blank
  * window.
@@ -187,6 +193,9 @@ export function popupView(boot) {
       version: payloadString(boot.payload, 'version'),
       build: payloadString(boot.payload, 'build'),
     };
+  }
+  if (requestedKind === 'options') {
+    return { kind: 'options', requestedKind, modal: boot.modal === true };
   }
   if (requestedKind === 'textEdit') {
     const content = textEditPayload(boot.payload);

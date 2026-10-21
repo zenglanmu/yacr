@@ -59,9 +59,9 @@ impl PropertyGroup {
     ///
     /// This is the single mapping for every key the module emits. `style` is
     /// text by default (MULTILEADER style names) and is overridden to
-    /// [`PropertyGroup::Display`] for the hatch style row. `color`,
-    /// `linetype`, `lineweight` and `transparency` are display rows once a
-    /// later lane emits them.
+    /// [`PropertyGroup::Display`] for the hatch style row. `color`, `linetype`,
+    /// `lineweight` and `transparency` are the display-attribute rows emitted by
+    /// [`display_property_rows`].
     pub fn for_key(key: &str) -> Self {
         match key {
             "id" | "handle" | "type" | "layer" | "space" | "draw_order" | "instance"
@@ -99,16 +99,19 @@ impl PropertyKind {
     }
 
     /// The control kind for a property key.
+    ///
+    /// `color` is `text` because its grammar (`ByLayer`, `ByBlock`, `aci:N`,
+    /// `#rrggbb`) is free-form, and `transparency` is `number` because its
+    /// grammar is an integer percentage. `linetype` and `lineweight` are `enum`
+    /// pickers over their accepted value sets.
     pub fn for_key(key: &str) -> Self {
         match key {
             "closed" | "inverted" | "visible" => PropertyKind::Bool,
             "draw_order" | "length" | "vertices" | "bulges" | "radius" | "start_angle"
             | "sweep" | "ratio" | "degree" | "control_points" | "triangles" | "height" | "size"
             | "opaque_version" | "payload_bytes" | "boundary" | "measurement" | "display"
-            | "loops" | "roots" | "lines" | "children" => PropertyKind::Number,
-            "layer" | "linetype" | "color" | "lineweight" | "transparency" | "space" | "status" => {
-                PropertyKind::Enum
-            }
+            | "loops" | "roots" | "lines" | "children" | "transparency" => PropertyKind::Number,
+            "layer" | "linetype" | "lineweight" | "space" | "status" => PropertyKind::Enum,
             _ => PropertyKind::Text,
         }
     }
@@ -503,30 +506,91 @@ pub fn entity_property_rows(
         }
     }
     rows.extend(geometry_property_rows(&entity.geometry));
+    rows.extend(display_property_rows(database, reference, entity));
     rows
+}
+
+/// The four display-attribute rows (`color`, `linetype`, `lineweight`,
+/// `transparency`) for one resolved entity, appended after the geometry rows.
+///
+/// Every `value` comes from
+/// [`property_value`](crate::property_value::property_value) — the **canonical,
+/// round-trippable** projection of the stored attribute — so the row text a
+/// consumer reads is exactly the string `SETENTITYPROPERTY` accepts, and writing
+/// it back unchanged is a no-op. This is the documented behaviour for these four
+/// keys; the `layer` row deliberately keeps its display text (`"WALLS (1)"`),
+/// where a writer takes the bare name from `property_value` instead.
+///
+/// A row is emitted only when the entity really has a writable value: a
+/// linetype whose stored pattern carries no name has no accepted grammar, so it
+/// is omitted rather than shown as a fabricated blank. `editable` requires both
+/// [`property_row_editable`] (directly addressed entity + a supported key) and
+/// the parser's acceptance of the projected value
+/// ([`property_value::accepts`](crate::property_value::accepts)), so a stored
+/// value no grammar can express (a `ByBlock` transparency, an out-of-range
+/// opacity) is shown read-only instead of offering a write that must fail. A
+/// block-instance member or a sub-element likewise reports its true value but
+/// cannot be written.
+///
+/// Order follows [`crate::property_value::SUPPORTED_KEYS`] without `layer`:
+/// color, linetype, lineweight, transparency.
+fn display_property_rows(
+    database: &DrawingDatabase,
+    reference: &SelectionRef,
+    entity: &DbEntity,
+) -> Vec<PropertyRow> {
+    crate::property_value::SUPPORTED_KEYS
+        .into_iter()
+        .filter(|key| *key != "layer")
+        .filter_map(|key| {
+            let value = crate::property_value::property_value(database, entity, key)?;
+            let editable = property_row_editable(database, reference, entity, key)
+                && crate::property_value::accepts(database, key, &value);
+            let mut row = PropertyRow::new(key, value);
+            row.editable = editable;
+            row.options = enum_options(database, key);
+            Some(row)
+        })
+        .collect()
 }
 
 /// The sorted, capped option list for an `enum` property key.
 ///
-/// Only real drawing tables are used: `layer` → the drawing's layer names,
-/// `linetype` → its linetype names. Every other key (including `color`,
-/// `lineweight` and `transparency`, which are ACI/value pickers rather than
-/// named tables) reports no options. Names are deduplicated and sorted so the
-/// same drawing always yields the same order.
+/// `layer` and `linetype` come from the drawing's real tables; `linetype` and
+/// `lineweight` additionally list the **symbolic** values their grammar accepts
+/// (`ByLayer`, `ByBlock`, and `Default` for lineweight), because a row whose
+/// value is symbolic must still be representable in the picker. The lineweight
+/// millimetre entries are [`crate::property_value::lineweight_options`], i.e. the
+/// same constant list the parser accepts — never a second copy of the table.
+/// `color` and `transparency` report no options: their grammar is free-form, not
+/// a named table. Names are deduplicated and sorted so the same drawing always
+/// yields the same order.
 pub fn enum_options(database: &DrawingDatabase, key: &str) -> Vec<String> {
-    let names: BTreeSet<&str> = match key {
-        "layer" => database.layers().map(|layer| layer.name.as_str()).collect(),
+    let mut names: BTreeSet<String> = match key {
+        "layer" => database.layers().map(|layer| layer.name.clone()).collect(),
         "linetype" => database
             .linetypes()
-            .map(|linetype| linetype.name.as_str())
+            .map(|linetype| linetype.name.clone())
+            .collect(),
+        "lineweight" => crate::property_value::lineweight_options()
+            .into_iter()
             .collect(),
         _ => return Vec::new(),
     };
-    names
-        .into_iter()
-        .take(MAX_ENUM_OPTIONS)
-        .map(str::to_string)
-        .collect()
+    match key {
+        "linetype" => names.extend(
+            crate::property_value::LINETYPE_SYMBOLS
+                .into_iter()
+                .map(str::to_string),
+        ),
+        "lineweight" => names.extend(
+            crate::property_value::LINEWEIGHT_SYMBOLS
+                .into_iter()
+                .map(str::to_string),
+        ),
+        _ => {}
+    }
+    names.into_iter().take(MAX_ENUM_OPTIONS).collect()
 }
 
 /// Whether the write path can change `key` for this selected object.
@@ -775,3 +839,7 @@ pub fn model_ref(document: cad_domain::DocumentId, entity: EntityId) -> Selectio
 #[cfg(test)]
 #[path = "tests/selection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/selection_display_tests.rs"]
+mod display_tests;

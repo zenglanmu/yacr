@@ -157,6 +157,9 @@ const P = {
   terminal: <><rect x="3.5" y="5" width="17" height="14" rx="1" /><path d="M7 10l3 2-3 2M12.5 14h4" /></>,
   palette: <><rect x="4" y="5" width="16" height="14" rx="1" /><path d="M10 5v14" /></>,
   language: <><circle cx="12" cy="12" r="8" /><path d="M4 12h16M12 4a12 12 0 0 1 0 16 12 12 0 0 1 0-16z" /></>,
+  // Plot / print: a page feeding through a body with the output tray below, the
+  // conventional printer silhouette (Plot and Publish tab of the Options dialog).
+  printer: <><path d="M7 8V4h10v4" /><rect x="4" y="8" width="16" height="8" rx="1" /><path d="M7 16h10v4H7z" /></>,
   more: <><circle cx="6" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="18" cy="12" r="1.5" /></>,
   start: <><path d="M4 11 12 4l8 7" /><path d="M6 10v10h12V10" /></>,
   drawing: <><rect x="4" y="5" width="16" height="14" rx="1" /><path d="M4 16l4-4 3 3 3-4 6 6" /></>,

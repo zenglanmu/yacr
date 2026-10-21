@@ -70,6 +70,22 @@ export const GESTURE_ONLY_COMMANDS = Object.freeze(['ORBIT']);
 export const DOCUMENT_SCOPED_COMMANDS = Object.freeze(['SWITCH2D3D', 'PROJECTION']);
 
 /**
+ * Selectors the **chrome** answers itself, before the router. They have a real
+ * command-line entry (typing the word works) but no Rust command: `PROPERTIES`
+ * opens the docked inspector through the shell action of the same name.
+ *
+ * They are deliberately admitted regardless of the loaded host vocabulary (and
+ * of whether a drawing is open): they touch no CAD state, exactly like the
+ * `OPTIONS` dialog the command line already intercepts locally.
+ */
+export const LOCAL_CHROME_COMMANDS = Object.freeze(['PROPERTIES']);
+
+/** Whether `id` is one of the chrome-local selectors above. */
+export function isLocalChromeCommand(id) {
+  return LOCAL_CHROME_COMMANDS.includes(normalizeCommandText(id));
+}
+
+/**
  * The catalog key the chrome uses for "open a drawing first". The catalog
  * already words this sentence once (`plot.no_document`); reusing the key keeps
  * one wording for one fact instead of growing a second copy.
@@ -84,6 +100,9 @@ export function excludedCommandNames() {
 export function isSupportedCommand(id) {
   const name = normalizeCommandText(id);
   if (!name || HOST_EXCLUDED_COMMANDS.includes(name) || GESTURE_ONLY_COMMANDS.includes(name)) return false;
+  // A chrome-local selector is supported by definition: the shell answers it
+  // without the router, so it cannot be missing from the host vocabulary.
+  if (LOCAL_CHROME_COMMANDS.includes(name)) return true;
   return loadedCatalog.includes(name);
 }
 
@@ -297,6 +316,9 @@ export function pushHistory(history, entry, limit = 64) {
 export function admitCommandText(text, { status = null, pending = false } = {}) {
   const id = normalizeCommandText(text);
   if (!id) return { kind: 'empty', command: id };
+  // A local selector is admitted without a status/document: it only toggles
+  // chrome. The submit path intercepts it before `queueCadCommand`.
+  if (LOCAL_CHROME_COMMANDS.includes(id)) return { kind: 'admitted', command: id };
   if (!isSupportedCommand(id)) return { kind: 'unsupported', command: id };
   if (!status || pending || status.loading) return { kind: 'unavailable', command: id };
   if (id === 'OPEN' && !status.canOpen) return { kind: 'unavailable', command: id };

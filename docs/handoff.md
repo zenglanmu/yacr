@@ -1,3 +1,48 @@
+## 2026-10-22 批次：选项弹窗、属性面板、拾取框/孔径、属性行 + IPC
+
+（接上一批；上一批的"仍未做"清单以本节为准）
+
+### 1. 属性显示行 + 编辑 IPC
+`color/linetype/lineweight/transparency` 四行进入 `Display` 组，值取 `property_value` 投影
+（**保证原样回写**）；`lineweight` 的下拉选项与写侧共用同一份 `lineweight_options()`；
+`editable = property_row_editable && property_value::accepts`（`ByBlock` 透明度、非规范线宽这类
+无语法可表达的值**显示为只读**而不是假编辑器）。IPC `cad_set_selected_property {key,value}` 进
+队列（有界、owner tick 消费），**受模态门禁**——与 `cad_set_selected_text` 不同（弹窗自己的
+通道必须在弹窗打开时可写），两条通道各有测试钉住。
+
+### 2. 拾取框 / 孔径
+`view.pickbox.sizePixels`（1..=20，默认 3）与 `view.aperture.sizePixels`（1..=50，默认 12），
+**拒绝而非截断**。`ViewConfig::tolerance_policy()` 是**唯一**容差来源，hover / 点选 / 光标拾取框 /
+捕捉四条路径全部改读配置；默认值**位级不变**（3 px → 1.5 世界单位、12 → 今日捕捉半径）。
+实时生效（下一次拾取即用新值），open/换图后重新播种。**未做**：名词-动词选择、夹点、AutoSnap
+颜色/磁吸、极轴、`APERTURE`/`APBOX` 命令面。
+
+### 3. 选项弹窗（AutoCAD 风格，独立窗口）
+`PopupKind::Options` + `options.mjs`（纯模型）+ `OptionsDialog.jsx`，720×560，左侧页签轨 +
+右内容列 + **Apply/OK/Cancel**（本地暂存、只发 diff、失败标字段并用 `options.error.<code>` 文案）。
+页签与控件**只有真后端**：Display（背景×2、十字光标 %、grid/axes/selectionHighlight/snapHints）、
+Drafting & Selection（snap、selection preview、拾取框、孔径）、Plot and Publish（默认格式）、
+Files（字体目录，只读 + 角标）、User Preferences（语言）。wire 里不存在的字段显示 `—` 并标
+"Not reported by this build"，**不 dirty、不写**。语言写 `yacr.locale`，主窗口靠 `storage` 事件 +
+聚焦重读同步——**双窗口传播 NOT VERIFIED**（无 GUI 会话）。入口：File 页、命令行 `OPTIONS`
+（Chrome 本地拦截，**不进** Rust 路由）、状态栏齿轮（原 disabled 占位）。
+
+### 4. 属性面板
+`PropertiesPalette.jsx` 重做 + `properties-view.mjs`（分组/编辑器选择）+ `properties.mjs`（写语法
+与拒绝码映射）。分组固定 `entity → geometry → text → display`，组内保留后端行序；只读行是纯文本
+（无 disabled 控件）；`enum` → select、`number` → 数字输入（透明度 0..=90 **拒绝**）、`text` → 文本
+输入（颜色/图层做客户端语法镜像）。**本地暂存 → Enter/失焦/下拉即提交**；拒绝则回滚并显示
+`properties.edit.*`，code 只进 `title`；混合行以 `properties.mixed` 占位且写入作用于**整个选中集**
+（有 help 文案）。`Ctrl+1` 与命令行 `PROPERTIES` 开关面板，ribbon 两个灰项改为可用（`LAYER` 不动）。
+未确认的写入显示 `properties.edit.unconfirmed`，**不伪造成功**。
+
+### 5. 门禁与证据边界
+已运行：`fmt`/`clippy -D warnings`/`check --workspace --all-targets`、架构(27)/文件大小(807)/
+i18n(685)/fixture/workflows；Rust **2175 passed / 0 failed**（CPU crates）+ **550 / 0**（GPU crates
+串行）；UI **395 passed**，`npm run build` OK。
+**未运行**：GUI/真机视觉验收、真实 DWG、默认并发的 GPU 测试（lavapipe 既存 SIGSEGV，串行通过）。
+选项弹窗与属性面板的**真实窗口行为没有像素或交互证据**，只有纯函数模型、源码扫描与宿主契约测试。
+
 ## 2026-10-21/22 批次：回显、属性、选项、语言、MLeader 宽度、字体回退、背景/光标
 
 ### 1. 命令行回显（AutoCAD 式执行记录）

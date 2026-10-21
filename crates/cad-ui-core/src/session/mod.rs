@@ -414,6 +414,29 @@ impl CadSession {
         }])
     }
 
+    /// Change one property on **every** entity of the current selection,
+    /// reached from the dedicated `cad_set_selected_property` IPC.
+    ///
+    /// No entity id travels: the host resolves its own current selection and
+    /// applies the write at apply time. `key` is one of
+    /// [`cad_app::property_value::SUPPORTED_KEYS`] (`layer`, `color`,
+    /// `linetype`, `lineweight`, `transparency`) and `value` must match that
+    /// key's documented grammar; both are validated by the host write path, and a
+    /// refusal is returned here as the real error text with its stable code
+    /// (`property.unsupported_key`, `property.invalid_value`,
+    /// `property.unknown_layer`, `property.unknown_linetype`,
+    /// `property.ambiguous_name`, `property.not_addressable`,
+    /// `property.selection_empty`, `property.target_missing`). A successful edit
+    /// is one transaction / one undo step, and the next `cad_status` carries the
+    /// new `selection.rows` (the display-attribute rows round-trip, so the value
+    /// written is the value read back).
+    pub fn set_selected_property(&self, key: &str, value: &str) -> Result<(), String> {
+        self.submit_interactions(vec![InteractionRequest::SetSelectedProperty {
+            key: key.to_string(),
+            value: value.to_string(),
+        }])
+    }
+
     /// The host-derived target of the popup text editor (ADR-0021 D4).
     ///
     /// `Some((raw string, multiline))` only when the current selection is exactly

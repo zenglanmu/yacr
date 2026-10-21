@@ -1,5 +1,5 @@
-//! Generic modal-popup layer (ADR-0021 D1/D2): the `about` dialog and the text
-//! editor (`textEdit`, D4).
+//! Generic modal-popup layer (ADR-0021 D1/D2): the `about` dialog, the text
+//! editor (`textEdit`, D4) and the Options dialog (`options`).
 //!
 //! The CAD partition is an **opaque native child** stacked above the WebView
 //! (`gtk_bridge::native`), so a popup can never be a DOM overlay: it is a
@@ -45,6 +45,12 @@ pub const TEXT_EDIT_WIDTH: f64 = 640.0;
 /// Text-edit popup height in logical pixels: the `about` card is far too short
 /// for a multi-line MTEXT / MULTILEADER annotation.
 pub const TEXT_EDIT_HEIGHT: f64 = 480.0;
+/// Options popup width in logical pixels: a 156px tab rail plus a label column
+/// and a control column wide enough for a `#rrggbb` value and a unit suffix.
+pub const OPTIONS_WIDTH: f64 = 720.0;
+/// Options popup height in logical pixels: tall enough for the longest tab
+/// (Display, seven rows) without scrolling.
+pub const OPTIONS_HEIGHT: f64 = 560.0;
 
 /// The popup kinds the host will build.
 ///
@@ -57,6 +63,10 @@ pub enum PopupKind {
     /// Edit the current single selection's text (ADR-0021 D4). The **host**
     /// derives the payload from the selection; the caller supplies no content.
     TextEdit,
+    /// The Options dialog (the settings window). It carries **no payload**: the
+    /// UI reads `cad_settings` itself after mount, so nothing is baked into the
+    /// boot script and no stale copy can be shown.
+    Options,
 }
 
 impl PopupKind {
@@ -68,6 +78,7 @@ impl PopupKind {
         match key {
             "about" => Ok(Self::About),
             "textEdit" => Ok(Self::TextEdit),
+            "options" => Ok(Self::Options),
             other => Err(format!("popup.unknown_kind: {other:?}")),
         }
     }
@@ -77,15 +88,18 @@ impl PopupKind {
         match self {
             Self::About => "about",
             Self::TextEdit => "textEdit",
+            Self::Options => "options",
         }
     }
 
     /// The logical window size of this kind. Every popup is non-resizable; the
-    /// text editor simply needs more room than the `about` card.
+    /// text editor needs more room than the `about` card, and the Options dialog
+    /// needs a rail plus a full settings column.
     pub fn size(self) -> (f64, f64) {
         match self {
             Self::About => (POPUP_WIDTH, POPUP_HEIGHT),
             Self::TextEdit => (TEXT_EDIT_WIDTH, TEXT_EDIT_HEIGHT),
+            Self::Options => (OPTIONS_WIDTH, OPTIONS_HEIGHT),
         }
     }
 }
@@ -159,6 +173,8 @@ pub(super) fn boot_payload_script(
                 "multiline": text.multiline,
             })
         }
+        // No payload: the dialog reads `cad_settings` after mount.
+        PopupKind::Options => serde_json::json!({}),
     };
     let boot = serde_json::json!({
         "kind": kind.key(),
@@ -230,7 +246,7 @@ pub(super) fn open_popup(
             // (`popup.no_text_selection`) leaves nothing to undo and creates no
             // window/gate.
             let payload = match kind {
-                PopupKind::About => None,
+                PopupKind::About | PopupKind::Options => None,
                 PopupKind::TextEdit => Some(ops.text_edit_payload()?),
             };
             ops.create(kind, payload.as_ref())?;
@@ -853,8 +869,62 @@ mod tests {
     fn popup_sizes_are_per_kind_and_the_text_editor_is_larger() {
         assert_eq!(PopupKind::About.size(), (520.0, 360.0));
         assert_eq!(PopupKind::TextEdit.size(), (640.0, 480.0));
+        assert_eq!(PopupKind::Options.size(), (720.0, 560.0));
         assert_eq!(PopupKind::from_key("textEdit"), Ok(PopupKind::TextEdit));
         assert_eq!(PopupKind::TextEdit.key(), "textEdit");
+        assert_eq!(PopupKind::from_key("options"), Ok(PopupKind::Options));
+        assert_eq!(PopupKind::Options.key(), "options");
+    }
+
+    #[test]
+    fn options_opens_without_a_payload_and_without_a_selection() {
+        let shared = new_shared(LaunchOptions::default());
+        // No text payload is available: Options must not depend on a selection.
+        let ops = FakeOps::default();
+        let ack = open_popup(&shared, "options", &ops).expect("options opens");
+        assert_eq!(
+            ack,
+            PopupAck {
+                accepted: true,
+                kind: "options".into(),
+                popup_label: POPUP_LABEL.into(),
+                existing: false,
+            }
+        );
+        assert_eq!(ops.created_kind.get(), Some(PopupKind::Options));
+        assert_eq!(
+            ops.created.borrow().clone(),
+            Some(None),
+            "options carries no host-derived payload"
+        );
+        assert!(modal_gate_open(&lock(&shared).shell));
+
+        // The same single instance is focused on a second request.
+        let again = open_popup(&shared, "options", &ops).expect("second open");
+        assert!(again.existing);
+        assert_eq!(ops.creates.get(), 1);
+        assert_eq!(ops.focuses.get(), 1);
+    }
+
+    #[test]
+    fn options_boot_payload_is_the_bare_envelope() {
+        let script =
+            boot_payload_script(PopupKind::Options, None).expect("options needs no payload");
+        let prefix = "window.__YACR_POPUP__ = ";
+        assert!(script.starts_with(prefix), "{script}");
+        let json = script[prefix.len()..]
+            .strip_suffix(';')
+            .expect("the assignment is terminated");
+        let value: serde_json::Value = serde_json::from_str(json).expect("the payload is JSON");
+        assert_eq!(value["kind"], "options");
+        assert_eq!(value["modal"], true);
+        assert_eq!(value["label"], POPUP_LABEL);
+        // An empty object, not `null` and not an invented settings snapshot.
+        assert_eq!(value["payload"], serde_json::json!({}));
+        assert_eq!(
+            value["payload"].as_object().map(serde_json::Map::len),
+            Some(0)
+        );
     }
 
     #[test]

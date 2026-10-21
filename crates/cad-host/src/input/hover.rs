@@ -131,10 +131,12 @@ impl HostCore {
             return Ok(());
         }
         let logical = self.hover_logical(point)?;
-        // The one tolerance policy the pick itself uses. Its
+        // The one tolerance policy the pick itself uses, derived from the
+        // effective configuration (`view.pickbox.sizePixels`). Its
         // `pickbox_logical_pixels` is also the sticky-re-query aperture, so the
-        // throttle and the pick can never disagree about their radius.
-        let policy = cad_domain::TolerancePolicy::default();
+        // throttle and the pick can never disagree about their radius, and a
+        // settings write applies here on the next move without reopening.
+        let policy = self.tolerance_policy();
         // The identity a resolved hover depends on (ADR-0012 §5): the drawing's
         // scene identity (database id + content revision + structural counts +
         // memoized model bounds) **and** the session layer-override fingerprint

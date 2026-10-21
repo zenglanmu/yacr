@@ -612,3 +612,239 @@ fn the_display_settings_survive_a_restart() {
     );
     assert_eq!(reloaded.render.overlays().crosshair_percent, 75);
 }
+
+// --- pickbox / aperture (AutoCAD PICKBOX + APERTURE options) -----------------
+
+#[test]
+fn the_pickbox_and_aperture_default_to_the_historical_values() {
+    let core = core();
+    let settings = core.settings();
+    assert_eq!(settings.pickbox_size, 3, "AutoCAD's PICKBOX initial value");
+    assert_eq!(
+        settings.aperture_size, 12,
+        "this project's existing snap aperture"
+    );
+    // The defaults are the effective config's, not a second source, and they are
+    // the domain default bit for bit.
+    let effective = core.config_snapshot().effective;
+    assert_eq!(settings.pickbox_size, effective.view.pickbox.size_pixels);
+    assert_eq!(settings.aperture_size, effective.view.aperture.size_pixels);
+    let policy = core.tolerance_policy();
+    let default = cad_domain::TolerancePolicy::default();
+    assert_eq!(
+        policy.pickbox_logical_pixels.to_bits(),
+        default.pickbox_logical_pixels.to_bits()
+    );
+    assert_eq!(
+        policy.interaction_logical_pixels.to_bits(),
+        default.interaction_logical_pixels.to_bits()
+    );
+    // The render input the cursor builder consumes carries the same number.
+    core.sync_render().unwrap();
+    assert_eq!(
+        core.render.overlays().pickbox_logical_pixels,
+        3.0,
+        "the cursor overlay draws the pick predicate's radius"
+    );
+}
+
+#[test]
+fn the_pickbox_and_aperture_keys_are_persisted_and_reported() {
+    let (core, config) = settings_core();
+
+    core.apply_setting(CadSettingKey::PickboxSize, CadSettingValue::Number(6))
+        .unwrap();
+    assert_eq!(core.settings().pickbox_size, 6);
+    let written = persisted(&config).expect("the pickbox write persists");
+    assert!(
+        written.contains("{\"view\":{\"pickbox\":{\"sizePixels\":6}}}"),
+        "the pickbox leaf is persisted under view.pickbox: {written}"
+    );
+    assert!(!written.contains("aperture"), "{written}");
+
+    core.apply_setting(CadSettingKey::ApertureSize, CadSettingValue::Number(24))
+        .unwrap();
+    assert_eq!(core.settings().aperture_size, 24);
+    let written = persisted(&config).expect("the aperture write persists");
+    assert!(
+        written.contains("\"aperture\":{\"sizePixels\":24}"),
+        "the aperture leaf is persisted under view.aperture: {written}"
+    );
+    // Both leaves coexist under their real config paths.
+    assert!(
+        written.contains("\"pickbox\":{\"sizePixels\":6}"),
+        "{written}"
+    );
+}
+
+#[test]
+fn out_of_range_pickbox_and_aperture_writes_are_refused_without_writing() {
+    let (core, config) = settings_core();
+
+    // AutoCAD's ranges: pickbox 1..=20, aperture 1..=50. Both bounds are accepted
+    // and everything outside is refused, never clamped.
+    for pixels in [0, 21, 1000] {
+        let error = core
+            .apply_setting(CadSettingKey::PickboxSize, CadSettingValue::Number(pixels))
+            .unwrap_err();
+        assert!(
+            matches!(&error, CadError::InvalidInput(code) if code == SETTINGS_INVALID_VALUE),
+            "pickbox {pixels} must be refused with the stable code: {error:?}"
+        );
+    }
+    for pixels in [0, 51, 1000] {
+        let error = core
+            .apply_setting(CadSettingKey::ApertureSize, CadSettingValue::Number(pixels))
+            .unwrap_err();
+        assert!(
+            matches!(&error, CadError::InvalidInput(code) if code == SETTINGS_INVALID_VALUE),
+            "aperture {pixels} must be refused with the stable code: {error:?}"
+        );
+    }
+    // A wrong shape is refused too, never coerced.
+    for value in [
+        CadSettingValue::Text("6".to_string()),
+        CadSettingValue::Bool(true),
+    ] {
+        let error = core
+            .apply_setting(CadSettingKey::PickboxSize, value.clone())
+            .unwrap_err();
+        assert!(
+            matches!(&error, CadError::InvalidInput(code) if code == SETTINGS_INVALID_VALUE),
+            "pickbox {value:?} must be refused: {error:?}"
+        );
+        let error = core
+            .apply_setting(CadSettingKey::ApertureSize, value)
+            .unwrap_err();
+        assert!(
+            matches!(&error, CadError::InvalidInput(code) if code == SETTINGS_INVALID_VALUE),
+            "aperture must be refused: {error:?}"
+        );
+    }
+
+    assert!(
+        config.persisted.borrow().is_empty(),
+        "a rejected write must not change the preference file"
+    );
+    assert_eq!(core.settings().pickbox_size, 3);
+    assert_eq!(core.settings().aperture_size, 12);
+}
+
+#[test]
+fn the_pickbox_and_aperture_settings_survive_a_restart() {
+    let (core, config) = settings_core();
+    core.apply_setting(CadSettingKey::PickboxSize, CadSettingValue::Number(20))
+        .unwrap();
+    core.apply_setting(CadSettingKey::ApertureSize, CadSettingValue::Number(50))
+        .unwrap();
+    let persisted = persisted(&config).expect("each write persists");
+
+    let reloaded = core_with_settings(Rc::new(SettingsConfig::with_preference(&persisted)));
+    reloaded.load_startup();
+    reloaded.sync_render().unwrap();
+    assert_eq!(reloaded.settings(), core.settings());
+    assert_eq!(reloaded.settings().pickbox_size, 20);
+    assert_eq!(reloaded.settings().aperture_size, 50);
+    // The reloaded values reach the live inputs on the first sync, and startup
+    // seeding installed them on the session as well.
+    assert_eq!(reloaded.render.overlays().pickbox_logical_pixels, 20.0);
+    assert_eq!(
+        reloaded
+            .controller
+            .borrow()
+            .tolerance()
+            .interaction_logical_pixels,
+        50.0
+    );
+}
+
+#[test]
+fn the_pickbox_and_aperture_survive_a_document_replacement() {
+    let config = Rc::new(SettingsConfig::with_preference(
+        r#"{"view":{"pickbox":{"sizePixels":6},"aperture":{"sizePixels":24}}}"#,
+    ));
+    let core = core_with_settings(config);
+    core.load_startup();
+    assert_eq!(core.settings().pickbox_size, 6);
+    assert_eq!(
+        core.controller.borrow().tolerance().pickbox_logical_pixels,
+        6.0
+    );
+
+    // A replacement rebuilds the session state; the configured policy is
+    // re-derived from the effective config, never reset to the constant.
+    core.controller.borrow_mut().new_blank_document().unwrap();
+    core.note_document_replaced();
+    assert_eq!(core.settings().pickbox_size, 6);
+    assert_eq!(core.settings().aperture_size, 24);
+    assert_eq!(
+        core.controller.borrow().tolerance().pickbox_logical_pixels,
+        6.0
+    );
+    assert_eq!(
+        core.controller
+            .borrow()
+            .tolerance()
+            .interaction_logical_pixels,
+        24.0
+    );
+}
+
+#[test]
+fn the_configured_pickbox_drives_the_pick_tolerance_live() {
+    let core = core();
+    let (camera, size, world_per_px) = {
+        let c = core.controller.borrow();
+        let viewport = &c.application.workspace.viewports[&c.viewport_id];
+        (
+            viewport.camera,
+            viewport.logical_size,
+            viewport.world_per_px(),
+        )
+    };
+    // The policy the click path uses is the configured one (`select_at_mode` and
+    // `resolve_hover` both read `HostCore::tolerance_policy`).
+    let before = cad_app::picking::pick_tolerance(&core.tolerance_policy(), &camera, size).unwrap();
+    assert!(
+        (before - 3.0 * world_per_px).abs() < 1e-12,
+        "the default 3 px pickbox is the pre-existing pick tolerance: {before}"
+    );
+
+    core.apply_setting(CadSettingKey::PickboxSize, CadSettingValue::Number(6))
+        .unwrap();
+    let after = cad_app::picking::pick_tolerance(&core.tolerance_policy(), &camera, size).unwrap();
+    assert!(
+        (after - before * 2.0).abs() < 1e-12,
+        "doubling the pickbox doubles the pick tolerance: {before} vs {after}"
+    );
+    // The cursor overlay reads the same doubled value on the next sync.
+    assert_eq!(core.render.overlays().pickbox_logical_pixels, 6.0);
+}
+
+#[test]
+fn the_configured_aperture_drives_the_snap_tolerance_live() {
+    let core = core();
+    let policy = core.tolerance_policy();
+    assert_eq!(policy.interaction_logical_pixels, 12.0);
+    core.apply_setting(CadSettingKey::ApertureSize, CadSettingValue::Number(24))
+        .unwrap();
+    // The session policy the snap engine is constructed with carries the new
+    // aperture; doubling it doubles the world-space snap radius at a fixed scale.
+    assert_eq!(
+        core.controller
+            .borrow()
+            .tolerance()
+            .interaction_logical_pixels,
+        24.0
+    );
+    assert_eq!(
+        core.tolerance_policy().interaction_logical_pixels,
+        24.0,
+        "the live policy is the effective config's"
+    );
+    assert_eq!(
+        core.tolerance_policy().pickbox_logical_pixels,
+        3.0,
+        "the pickbox is independent of the aperture"
+    );
+}

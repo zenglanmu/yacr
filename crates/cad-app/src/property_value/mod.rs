@@ -55,6 +55,15 @@
 //! [`PropertyRow`](crate::PropertyRow) is display text (`"WALLS (3)"`); a write
 //! target must be the **name**. [`property_value`] returns the round-trippable
 //! name, so a consumer reads it from here and never from the display row.
+//!
+//! ## How the panel reads these values
+//!
+//! The `color`, `linetype`, `lineweight` and `transparency` rows emitted by
+//! `crate::selection` carry **this module's projection verbatim**, so the string
+//! a row shows can be sent straight back to `SETENTITYPROPERTY` unchanged
+//! (a re-write of the same value is a no-op). `layer` is the documented
+//! exception above: its row keeps the display text and a writer takes the bare
+//! name from [`property_value`].
 
 mod aci;
 
@@ -74,12 +83,46 @@ pub const LINEWEIGHTS_MM: [f32; 24] = [
     0.90, 1.00, 1.06, 1.20, 1.40, 1.58, 2.00, 2.11,
 ];
 
+/// The symbolic values the `linetype` grammar accepts besides a named table
+/// entry. They are also part of the panel's pickable set, because a row whose
+/// stored value is symbolic must remain representable.
+pub const LINETYPE_SYMBOLS: [&str; 2] = ["ByLayer", "ByBlock"];
+
+/// The symbolic values the `lineweight` grammar accepts besides the canonical
+/// millimetre list.
+pub const LINEWEIGHT_SYMBOLS: [&str; 3] = ["ByLayer", "ByBlock", "Default"];
+
+/// Every value the `lineweight` grammar accepts, printed exactly like
+/// [`lineweight_value`] prints it: the symbolic values plus [`LINEWEIGHTS_MM`].
+///
+/// This is the **single shared source** for the row's `enum` options and the
+/// parser's accepted set, so a listed weight can never be refused and an
+/// accepted weight can never be missing from the picker.
+pub fn lineweight_options() -> Vec<String> {
+    LINEWEIGHT_SYMBOLS
+        .into_iter()
+        .map(str::to_string)
+        .chain(LINEWEIGHTS_MM.into_iter().map(|mm| format!("{mm:.2}")))
+        .collect()
+}
+
 /// The largest accepted transparency percentage (AutoCAD's own bound).
 pub const MAX_TRANSPARENCY_PERCENT: u8 = 90;
 
 /// Whether `key` names a property this write path accepts.
 pub fn is_supported_key(key: &str) -> bool {
     SUPPORTED_KEYS.contains(&key)
+}
+
+/// Whether the write path accepts `value` for `key` against `database`.
+///
+/// This is the parser's own verdict, exposed for the read side: a row may
+/// project a stored value that no grammar can express (a symbolic `ByBlock`
+/// transparency, or an out-of-range stored opacity reported as
+/// `opacity:<raw>`), and such a row is **not** editable even though the key
+/// itself is writable.
+pub fn accepts(database: &DrawingDatabase, key: &str, value: &str) -> bool {
+    parse(database, key, value).is_ok()
 }
 
 /// A validated write target, already resolved against the drawing's tables.

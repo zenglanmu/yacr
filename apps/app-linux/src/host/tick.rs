@@ -438,6 +438,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
             tool_parameters,
             tool_texts,
             selected_texts,
+            selected_properties,
             inputs,
         ) = {
             let mut state = lock(shared);
@@ -448,6 +449,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                 std::mem::take(&mut state.cad_tool_parameters),
                 std::mem::take(&mut state.cad_tool_texts),
                 std::mem::take(&mut state.cad_selected_texts),
+                std::mem::take(&mut state.cad_selected_properties),
                 std::mem::take(&mut state.shell.cad_inputs),
             )
         };
@@ -457,6 +459,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
             + tool_parameters.len()
             + tool_texts.len()
             + selected_texts.len()
+            + selected_properties.len()
             + inputs.len();
         last_input_seq = inputs.last().map(|input| input.sequence);
         input_age_us = last_input_seq.and_then(|sequence| {
@@ -534,6 +537,17 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                     for text in &selected_texts {
                         if let Err(error) = session.set_selected_text(text) {
                             eprintln!("[probe] cad selected text rejected: {error}");
+                        }
+                    }
+                    // Panel property writes (the docked palette's
+                    // `SETENTITYPROPERTY` channel): each pair targets the
+                    // session's **current** selection, resolved on the owner
+                    // thread at apply time (no id travelled). The value is
+                    // validated against the drawing's own tables there, so a
+                    // refusal is named and surfaces through `cad_status.error`.
+                    for (key, value) in &selected_properties {
+                        if let Err(error) = session.set_selected_property(key, value) {
+                            eprintln!("[probe] cad selected property rejected: {error}");
                         }
                     }
                 }

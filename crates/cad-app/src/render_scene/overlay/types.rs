@@ -41,9 +41,12 @@ pub const DEFAULT_PREVIEW_MARKER_SIZE: f64 = 0.5;
 ///
 /// The size is deliberately the **dominant** shape at the snap point: the pickbox
 /// is only `2 × TolerancePolicy::pickbox_logical_pixels` = **6** logical px across
-/// (it marks what a click can hit, so it stays at the pick tolerance), giving a
-/// **3 : 1** marker-to-pickbox ratio — the same order as AutoCAD, where the osnap
-/// marker reads as the large glyph and the pickbox is a small square inside it.
+/// at the default 3 (it marks what a click can hit, so it tracks the configured
+/// `view.pickbox.sizePixels`), giving a **3 : 1** marker-to-pickbox ratio — the
+/// same order as AutoCAD, where the osnap marker reads as the large glyph and the
+/// pickbox is a small square inside it. A user who enlarges the pickbox shrinks
+/// that ratio, exactly as AutoCAD's own two options do.
+///
 /// At the previous 10 px the marker and the pickbox were the same order of size
 /// and a reader could not tell the snap type from the frame.
 ///
@@ -247,6 +250,13 @@ pub struct OverlayInputs {
     /// the pick tolerance, not a display preference. Part of
     /// [`overlay_fingerprint`], so a resized crosshair rebuilds the overlay.
     pub crosshair_percent: u32,
+    /// Pickbox half-side in logical pixels
+    /// ([`cad_domain::TolerancePolicy::pickbox_logical_pixels`], the AutoCAD
+    /// `PICKBOX` analogue). It is the configured pickbox size, mapped from the
+    /// effective `view.pickbox.sizePixels` by the host, so the drawn box and the
+    /// click predicate can never disagree. Part of [`overlay_fingerprint`], so a
+    /// resized pickbox rebuilds the overlay.
+    pub pickbox_logical_pixels: f64,
 }
 
 impl Default for OverlayInputs {
@@ -265,6 +275,7 @@ impl Default for OverlayInputs {
             view_scale: None,
             cursor: None,
             crosshair_percent: DEFAULT_CROSSHAIR_PERCENT,
+            pickbox_logical_pixels: cad_domain::TolerancePolicy::default().pickbox_logical_pixels,
         }
     }
 }

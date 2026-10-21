@@ -180,6 +180,10 @@ struct SnapQueryKey {
     space: SpaceId,
     cursor: [u64; 3],
     world_per_px_bits: u64,
+    /// The aperture the candidates were resolved with: a changed
+    /// `view.aperture.sizePixels` must re-resolve, not reuse a candidate set
+    /// computed under the previous tolerance.
+    aperture_bits: u64,
 }
 
 impl SnapQueryKey {
@@ -189,6 +193,7 @@ impl SnapQueryKey {
         cursor: Point3,
         world_per_px: f64,
         space: &SpaceId,
+        policy: &TolerancePolicy,
     ) -> Self {
         SnapQueryKey {
             scene: drawing.scene_identity(),
@@ -196,6 +201,7 @@ impl SnapQueryKey {
             space: space.clone(),
             cursor: point_bits(cursor),
             world_per_px_bits: world_per_px.to_bits(),
+            aperture_bits: policy.interaction_logical_pixels.to_bits(),
         }
     }
 }
@@ -354,6 +360,7 @@ fn resolve_candidates(
     world_per_px: f64,
     space: &SpaceId,
     mode: &'static str,
+    policy: &TolerancePolicy,
 ) -> CadResult<Vec<SnapCandidate>> {
     let plane = WorkPlane {
         origin: cursor,
@@ -378,7 +385,7 @@ fn resolve_candidates(
     };
     let profile = snap_profile_enabled();
     let started = profile.then(Instant::now);
-    let result = MeasurementEngine::default().snap_targets(
+    let result = MeasurementEngine::new(*policy).snap_targets(
         targets,
         &ray,
         Some(&plane),
@@ -469,10 +476,39 @@ pub fn snap_candidates_near(
     world_per_px: f64,
     space: SpaceId,
 ) -> CadResult<Vec<SnapCandidate>> {
+    snap_candidates_near_with_policy(
+        drawing,
+        document,
+        cursor,
+        world_per_px,
+        space,
+        &TolerancePolicy::default(),
+    )
+}
+
+/// [`snap_candidates_near`] with an explicit interaction tolerance policy.
+///
+/// This is the live path: the host passes the policy derived from its effective
+/// configuration ([`TolerancePolicy::interaction_logical_pixels`] is the
+/// configured object-snap aperture). The candidate set is cached per query, and
+/// the aperture is part of that key, so changing `view.aperture.sizePixels` takes
+/// effect for the very next query instead of reusing a stale set.
+///
+/// Returns [`CadError::InvalidInput`] for a non-finite cursor, a
+/// non-positive/non-finite `world_per_px` or a non-positive/non-finite aperture;
+/// it never fabricates a candidate.
+pub fn snap_candidates_near_with_policy(
+    drawing: &DrawingDatabase,
+    document: DocumentId,
+    cursor: Point3,
+    world_per_px: f64,
+    space: SpaceId,
+    policy: &TolerancePolicy,
+) -> CadResult<Vec<SnapCandidate>> {
     validate_snap_inputs(cursor, world_per_px)?;
     let targets = cached_snap_targets(drawing, document);
-    let candidates = resolve_candidates(&targets, cursor, world_per_px, &space, "cached")?;
-    let key = SnapQueryKey::new(drawing, document, cursor, world_per_px, &space);
+    let candidates = resolve_candidates(&targets, cursor, world_per_px, &space, "cached", policy)?;
+    let key = SnapQueryKey::new(drawing, document, cursor, world_per_px, &space, policy);
     record_snap_query(key, Arc::new(candidates.clone()));
     Ok(candidates)
 }
@@ -492,7 +528,14 @@ pub fn snap_candidates_near_uncached(
 ) -> CadResult<Vec<SnapCandidate>> {
     validate_snap_inputs(cursor, world_per_px)?;
     let targets = snap_targets_for(drawing, document);
-    resolve_candidates(&targets, cursor, world_per_px, &space, "uncached")
+    resolve_candidates(
+        &targets,
+        cursor,
+        world_per_px,
+        &space,
+        "uncached",
+        &TolerancePolicy::default(),
+    )
 }
 
 /// Snap candidates for the hint overlay at the tool's stored cursor.
@@ -502,15 +545,20 @@ pub fn snap_candidates_near_uncached(
 /// set is returned instead of walking the drawing again. Otherwise the query is
 /// resolved normally. Either way the point the tool will commit is untouched:
 /// the stored tool point remains the single source for a commit.
+///
+/// `policy` must be the same policy the move resolved with: the cached query is
+/// keyed by the aperture, so a stale set can never be reused after the user
+/// changes `view.aperture.sizePixels`.
 pub(super) fn snap_candidates_for_hint(
     drawing: &DrawingDatabase,
     document: DocumentId,
     cursor: Point3,
     world_per_px: f64,
     space: SpaceId,
+    policy: &TolerancePolicy,
 ) -> CadResult<Vec<SnapCandidate>> {
     validate_snap_inputs(cursor, world_per_px)?;
-    let key = SnapQueryKey::new(drawing, document, cursor, world_per_px, &space);
+    let key = SnapQueryKey::new(drawing, document, cursor, world_per_px, &space, policy);
     let profile = snap_profile_enabled();
     let started = profile.then(Instant::now);
     if let Some(candidates) = cached_hint_candidates(&key) {
@@ -524,5 +572,5 @@ pub(super) fn snap_candidates_for_hint(
         }
         return Ok(reused);
     }
-    snap_candidates_near(drawing, document, cursor, world_per_px, space)
+    snap_candidates_near_with_policy(drawing, document, cursor, world_per_px, space, policy)
 }

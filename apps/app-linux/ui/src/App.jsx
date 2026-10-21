@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { CATALOGS } from './catalogs.mjs';
-import { createTranslator, initialLocale, LOCALES, localeTag, storeLocale } from './i18n.mjs';
+import { createTranslator, initialLocale, LOCALE_STORAGE_KEY, LOCALES, localeTag, storedLocale, storeLocale } from './i18n.mjs';
 import { bindProbeInput, createInputLane, createSuspendGate } from './input.mjs';
 import { pointerPosition } from './metrics.mjs';
 import { queueCadCommand, reconcileToolParameterPending, requestImportCancel, setToolParameterFlag, setToolParameterNumber, startCadPolling, stepToolParameterPending } from './cad.mjs';
@@ -26,6 +26,8 @@ import { CommandLine } from './components/CommandLine.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
 import { PopupRoot } from './components/PopupRoot.jsx';
 import { openPopup, popupBoot } from './popup.mjs';
+import { isOptionsCommand } from './options.mjs';
+import { isPropertiesCommand, setSelectedProperty } from './properties.mjs';
 import { textEditOpenError } from './popup-textedit.mjs';
 
 /**
@@ -118,6 +120,30 @@ function Shell() {
     // popup window) and now survives a restart. A blocked storage is a no-op.
     storeLocale(locale);
   }, [locale, t]);
+
+  // Live language propagation from the Options dialog (a separate window on the
+  // same origin). Two independent carriers, because neither alone is reliable in
+  // a WebView: a `storage` event from the other document, and a focus-time
+  // re-read for the case where that event is dropped. Only a supported stored
+  // value is adopted — an absent entry never overrides the host-resolved locale.
+  //
+  // NOT VERIFIED in a running GUI: this path was exercised by unit tests and a
+  // source scan only, never with two live windows on screen.
+  useEffect(() => {
+    const readStored = () => {
+      const next = storedLocale();
+      if (next) setLocale(current => (next === current ? current : next));
+    };
+    const onStorage = event => {
+      if (event.key === LOCALE_STORAGE_KEY || event.key === null) readStored();
+    };
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('focus', readStored);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('focus', readStored);
+    };
+  }, []);
 
   // One ordered IPC lane for the whole session: sequence stays monotonic even
   // when the canvas element is remounted.
@@ -213,7 +239,34 @@ function Shell() {
   const cadReady = Boolean(status) && !loading;
   const toolActive = Boolean(status?.tool?.key);
 
+  // The one open path for the Options dialog: a host-owned window like About.
+  // `existing: true` means it is already open and the host focused it — the
+  // success it is, never a duplicate window.
+  const openOptions = useCallback(() => {
+    void openPopup(invoke, 'options').then(result => {
+      if (result.kind !== 'accepted') setError(result.error);
+    });
+  }, []);
+
   const submitCommand = useCallback(async (text, options = {}) => {
+    // `OPTIONS` is a local chrome selector, not a router command: open the
+    // dialog and never forward the text. Intercepted before the in-flight guard
+    // so a second Enter still reaches the host (which focuses the open window).
+    if (isOptionsCommand(text)) {
+      setCommandResult(null);
+      if (options.fromInput) setCommand('');
+      openOptions();
+      return;
+    }
+    // `PROPERTIES` is the docked palette's local selector, exactly like
+    // `OPTIONS`: opening it never reaches the router, so it is intercepted
+    // before the in-flight guard (a second Enter just re-opens/focuses it).
+    if (isPropertiesCommand(text)) {
+      setCommandResult(null);
+      if (options.fromInput) setCommand('');
+      setPropertiesOpen(true);
+      return;
+    }
     if (submitting.current) return;
     submitting.current = true;
     setPending(true);
@@ -228,7 +281,7 @@ function Shell() {
       submitting.current = false;
       setPending(false);
     }
-  }, [status]);
+  }, [openOptions, status]);
 
   // The terminal text step (ADR 0019 A.1): one `cad_set_tool_text`, never a
   // `cad_command`. The result is returned to the command line so the draft can
@@ -261,7 +314,8 @@ function Shell() {
     }
   }, []);
 
-  // Global shortcuts: Ctrl+0 clean screen, Ctrl+9 command line, F2 history, Esc.
+  // Global shortcuts: Ctrl+0 clean screen, Ctrl+1 properties palette, Ctrl+9
+  // command line, F2 history, Esc.
   // While a CAD tool is active (and the keyboard is not in a field) Enter/Escape
   // are the tool's confirm/cancel instead.
   useEffect(() => {
@@ -294,6 +348,10 @@ function Shell() {
         return;
       }
       if (event.ctrlKey && event.key === '9') { event.preventDefault(); setCommandLineOpen(value => !value); return; }
+      // Ctrl+1 is AutoCAD's properties-palette toggle. It sits with Ctrl+9,
+      // after the `defaultPrevented`/modifier guard, so a webview default that
+      // already claimed the chord wins and no plain key is hijacked.
+      if (event.ctrlKey && event.key === '1') { event.preventDefault(); setPropertiesOpen(value => !value); return; }
       if (event.key === 'F2') { event.preventDefault(); setHistoryOpen(value => !value); return; }
       // F3 flips the object-snap master switch (ADR 0014 A.4) through the same
       // command funnel every other affordance uses; `preventDefault` keeps the
@@ -375,6 +433,11 @@ function Shell() {
     submitToolText,
     // The inspector's text edit; same result shape as `submitToolText`.
     applySelectedText,
+    // One property write for the current selection. `{kind:'accepted'}` is
+    // queue admission; the host's next `selection.rows` (or a `property.*`
+    // error) is the real outcome, which the palette reconciles itself. The
+    // payload is always two strings and never carries an entity id.
+    applySelectedProperty: (key, value) => setSelectedProperty(invoke, key, value),
     // The slow path of the same edit: a host-opened dialog that shows the raw
     // string. The host derives the payload from the current single selection and
     // refuses a non-text selection with `popup.no_text_selection` **without
@@ -387,6 +450,9 @@ function Shell() {
         if (failure) setError(failure);
       });
     },
+    // The Options dialog (its own host window). One instance: a second request
+    // focuses the open window, which the host reports as `existing: true`.
+    openOptionsPopup: openOptions,
     historyOpen,
     setHistoryOpen,
     clearHistory: () => setHistory([]),
@@ -445,6 +511,7 @@ function Shell() {
       if (action === 'diagnostics') setDiagnosticsOpen(value => !value);
       else if (action === 'cleanScreen') setCleanScreen(value => !value);
       else if (action === 'commandLine') setCommandLineOpen(value => !value);
+      else if (action === 'properties') setPropertiesOpen(true);
       else if (action === 'language') setLocale(value => (value === 'zh-CN' ? 'en' : 'zh-CN'));
       // Dialogs are host windows (ADR 0021 D1), never DOM overlays: the host
       // places them beside the native CAD surface. `existing: true` means the
@@ -454,6 +521,11 @@ function Shell() {
         void openPopup(invoke, 'about').then(result => {
           if (result.kind !== 'accepted') setError(result.error);
         });
+      }
+      // The Options dialog is the other host-owned window. Opening it twice is a
+      // success: the host focuses the single instance instead of building one.
+      else if (action === 'options') {
+        openOptions();
       }
     },
     // Suspend the CAD pointer lane while chrome (command line) owns the keyboard.

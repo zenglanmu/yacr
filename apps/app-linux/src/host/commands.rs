@@ -259,6 +259,101 @@ pub fn cad_set_selected_text(
     Ok(CadCommandAck { accepted: true })
 }
 
+/// Bounded capacity of the dedicated selected-property queue.
+///
+/// It reuses the CAD command queue's capacity so every admission shares one bound.
+pub const CAD_SELECTED_PROPERTY_CAP: usize = cad_ui_core::shell::CAD_COMMAND_CAP;
+
+/// Parse the wire form of a `cad_set_selected_property` request.
+///
+/// Both fields are strings: `key` is a stable machine key and `value` is that
+/// key's documented grammar (see [`cad_app::property_value`]). Only the **key**
+/// is checked here, because it is database-independent
+/// (`property.unsupported_key`, the same stable code the host write path uses
+/// for `text` and for any other unknown key). The value's grammar depends on the
+/// drawing's own tables (a layer/linetype name), so it is the host session's
+/// authority on the owner thread — never guessed or clamped here. No
+/// human-readable text is produced for a refused request: only stable codes.
+pub fn parse_property_write(key: &str, value: &str) -> Result<(String, String), String> {
+    if !cad_app::property_value::is_supported_key(key) {
+        return Err("property.unsupported_key".to_string());
+    }
+    Ok((key.to_string(), value.to_string()))
+}
+
+/// Admit one property write for the **current selection** into the bounded
+/// main-thread queue.
+///
+/// The gates match the other CAD mutation admissions
+/// ([`admit_standard_view`], [`admit_command`]): the modal popup gate first
+/// (while a popup owns input, a CAD mutation is refused by name with
+/// `popup.modal_open`), then a disabled CAD session (probe mode), then the bound.
+/// (`admit_selected_text` deliberately has no modal gate because the text-edit
+/// popup itself writes through it; this channel is the docked panel's, so it is
+/// gated like every other CAD mutation.)
+///
+/// Nothing is applied here: the key/value pair only carries strings, and whether
+/// the selection is addressable, whether the value is in the drawing's tables
+/// and whether anything actually changes are all live session state resolved on
+/// the owner thread (`CadSession::set_selected_property`) when the tick drains
+/// the queue.
+pub fn admit_selected_property(
+    queue: &mut Vec<(String, String)>,
+    cad_mode: bool,
+    modal_open: bool,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    if modal_open {
+        return Err(POPUP_MODAL_OPEN.into());
+    }
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if queue.len() >= CAD_SELECTED_PROPERTY_CAP {
+        return Err("CAD selected-property queue is full".into());
+    }
+    queue.push((key, value));
+    Ok(())
+}
+
+/// `cad_set_selected_property` command: queue one property write for every
+/// entity of the current selection.
+///
+/// The wire shape is `{ key: <string>, value: <string> }` and deliberately
+/// carries **no entity id**: the host resolves and validates its own current
+/// selection at apply time, so a stale UI can never retarget another object. An
+/// unknown key is refused immediately with the stable code
+/// `property.unsupported_key`; a value the key's grammar (or the drawing's
+/// tables) rejects is refused by the host write path and surfaces through
+/// `cad_status.error` as `property.invalid_value` / `property.unknown_layer` /
+/// `property.unknown_linetype` / `property.ambiguous_name`.
+///
+/// `{accepted:true}` means **queued**, not completed: the owner tick routes it
+/// through `CadSession::set_selected_property`, and the real outcome (including
+/// any refusal) surfaces through `cad_status.error` and the next
+/// `cad_status.selection.rows` — the display-attribute rows are the canonical
+/// write grammar, so the written value reads back unchanged.
+#[tauri::command]
+pub fn cad_set_selected_property(
+    shared: tauri::State<'_, ProbeShared>,
+    key: String,
+    value: String,
+) -> Result<CadCommandAck, String> {
+    let (key, value) = parse_property_write(&key, &value)?;
+    let mut state = lock(&shared.0);
+    let cad_mode = state.shell.cad_mode;
+    let modal_open = modal_gate_open(&state.shell);
+    admit_selected_property(
+        &mut state.cad_selected_properties,
+        cad_mode,
+        modal_open,
+        key,
+        value,
+    )?;
+    Ok(CadCommandAck { accepted: true })
+}
+
 /// Bounded capacity of the dedicated standard-view queue.
 ///
 /// It reuses the CAD command queue's capacity so every admission shares one
@@ -375,12 +470,13 @@ pub fn cad_standard_view(
 /// already open (ADR-0021 D1/D2).
 ///
 /// The wire carries a **kind key only** (`{ kind: String }`): a caller can never
-/// choose a window label, URL or script. `"about"` and `"textEdit"` are the
-/// allowlisted kinds; anything else is refused with `popup.unknown_kind: …`
+/// choose a window label, URL or script. `"about"`, `"textEdit"` and `"options"`
+/// are the allowlisted kinds; anything else is refused with `popup.unknown_kind: …`
 /// before any window or gate change. `textEdit` derives its payload from the
 /// host's current single selection (never from the caller); a selection that is
 /// not exactly one editable text is refused with `popup.no_text_selection: …`
-/// and no window is created. While the popup is open the host refuses CAD input
+/// and no window is created. `options` carries no payload at all: the dialog
+/// reads `cad_settings` itself. While the popup is open the host refuses CAD input
 /// (`popup.modal_open`), independently of the UI's own pointer suspension.
 #[tauri::command]
 pub fn cad_open_popup(

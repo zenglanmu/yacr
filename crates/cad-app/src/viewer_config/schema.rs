@@ -1,5 +1,7 @@
 use super::*;
 
+use cad_domain::TolerancePolicy;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LayoutMode {
@@ -283,12 +285,89 @@ impl Default for ViewCrosshair {
     }
 }
 
+/// Pickbox sizing: the AutoCAD `PICKBOX` range (Options ▸ Selection ▸ Pickbox
+/// size).
+///
+/// The pickbox is the square at the crosshair intersection, and its **half**-side
+/// is this value in logical pixels converted to world units by the view scale, so
+/// the box circumscribes exactly the region a click can hit. AutoCAD reports the
+/// option in pixels and so do we (logical, device-independent pixels, the unit
+/// the whole overlay/pointer contract uses). `1..=20` is AutoCAD's own range for
+/// the option; the default `3` is both AutoCAD's initial value and the value this
+/// project has always picked with, so the geometry is unchanged until a user
+/// overrides it. Out-of-range and non-integer values are rejected by
+/// [`ViewerConfig::validate`], never clamped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct ViewPickbox {
+    pub size_pixels: u32,
+}
+impl Default for ViewPickbox {
+    fn default() -> Self {
+        Self { size_pixels: 3 }
+    }
+}
+
+impl ViewPickbox {
+    /// AutoCAD's range for the Options ▸ Selection pickbox size, in pixels.
+    pub const RANGE: std::ops::RangeInclusive<u32> = 1..=20;
+}
+
+/// Object-snap aperture sizing: the AutoCAD `APERTURE` range (Options ▸ Drafting
+/// ▸ Aperture size).
+///
+/// The aperture is the radius, in logical pixels, within which the object-snap
+/// engine considers a snap candidate. It is deliberately **independent** of the
+/// pickbox (AutoCAD keeps them as two separate options too) and it never affects
+/// picking or the hover highlight. AutoCAD reports the option in pixels and so do
+/// we. `1..=50` is AutoCAD's own range; the default `12` is this project's
+/// existing aperture (AutoCAD's initial value is 10 — a pre-existing, deliberate
+/// difference, not a parity claim). Out-of-range and non-integer values are
+/// rejected by [`ViewerConfig::validate`], never clamped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct ViewAperture {
+    pub size_pixels: u32,
+}
+impl Default for ViewAperture {
+    fn default() -> Self {
+        Self { size_pixels: 12 }
+    }
+}
+
+impl ViewAperture {
+    /// AutoCAD's range for the Options ▸ Drafting aperture size, in pixels.
+    pub const RANGE: std::ops::RangeInclusive<u32> = 1..=50;
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct ViewConfig {
     pub overlays: ViewOverlays,
     pub background: ViewBackground,
     pub crosshair: ViewCrosshair,
+    pub pickbox: ViewPickbox,
+    pub aperture: ViewAperture,
+}
+
+impl ViewConfig {
+    /// The one interaction tolerance policy this view's settings describe.
+    ///
+    /// This is the single place the configuration is turned into a
+    /// [`TolerancePolicy`]: the pickbox leaf becomes
+    /// [`TolerancePolicy::pickbox_logical_pixels`] (pick + hover) and the
+    /// aperture leaf becomes [`TolerancePolicy::interaction_logical_pixels`]
+    /// (object-snap candidates only). Every other field keeps the domain default,
+    /// so a default configuration reproduces [`TolerancePolicy::default`] **bit
+    /// for bit** — `3` and `12` are exactly representable, so the pinned geometry
+    /// and tolerances are unchanged.
+    pub fn tolerance_policy(&self) -> TolerancePolicy {
+        TolerancePolicy {
+            pickbox_logical_pixels: f64::from(self.pickbox.size_pixels),
+            interaction_logical_pixels: f64::from(self.aperture.size_pixels),
+            ..TolerancePolicy::default()
+        }
+    }
 }
 
 /// Interaction defaults the Options dialog may persist.

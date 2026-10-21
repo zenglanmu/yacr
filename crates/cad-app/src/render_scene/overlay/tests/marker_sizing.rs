@@ -72,6 +72,27 @@ fn overlay_fingerprint_tracks_the_crosshair_percentage() {
 }
 
 #[test]
+fn overlay_fingerprint_tracks_the_pickbox_size() {
+    assert_eq!(
+        OverlayInputs::default().pickbox_logical_pixels,
+        cad_domain::TolerancePolicy::default().pickbox_logical_pixels,
+        "a host that never sets it keeps the historical 3 px pickbox"
+    );
+    let baseline = overlay_fingerprint(&OverlayInputs::default());
+    let larger = OverlayInputs {
+        pickbox_logical_pixels: 6.0,
+        ..OverlayInputs::default()
+    };
+    assert_ne!(
+        baseline,
+        overlay_fingerprint(&larger),
+        "a resized pickbox is overlay geometry and must rebuild it"
+    );
+    // The size alone does not make an otherwise empty overlay non-empty.
+    assert!(larger.is_empty());
+}
+
+#[test]
 fn overlay_fingerprint_tracks_the_pointer_cursor_but_not_the_view_scale() {
     let baseline = OverlayInputs::default();
     let with_cursor = OverlayInputs {

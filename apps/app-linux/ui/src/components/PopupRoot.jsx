@@ -26,8 +26,10 @@ import { Icon } from '../icons.jsx';
 import { Button, IconButton } from './primitives.jsx';
 import { closePopup, POPUP_KEYS, popupView } from '../popup.mjs';
 import { POPUP_TEXT_KEYS } from '../popup-textedit.mjs';
+import { OPTIONS_KEYS } from '../options.mjs';
 import { DIALOG_BODY, DIALOG_CARD, DIALOG_CONTENT, DIALOG_FOOT, DIALOG_HEAD, DIALOG_TITLE } from '../popup-layout.mjs';
 import { AboutDialog } from './AboutDialog.jsx';
+import { OptionsDialog } from './OptionsDialog.jsx';
 import { TextEditDialog } from './TextEditDialog.jsx';
 
 function Failure({ text }) {
@@ -85,7 +87,9 @@ export function PopupRoot({ boot }) {
   // `initialLocale` reads the host-injected `window.__YACR_HOST_LOCALE__` (this
   // popup window is loaded with the same value as the main window), so the
   // dialog's chrome language cannot diverge from the native labels and title.
-  const [locale] = useState(initialLocale);
+  // The Options dialog may switch it at runtime (its language control), so the
+  // setter travels through the same i18n context the shell exposes.
+  const [locale, setLocale] = useState(initialLocale);
   const [failure, setFailure] = useState('');
   const t = useMemo(() => createTranslator(CATALOGS, locale), [locale]);
   const view = useMemo(() => popupView(boot), [boot]);
@@ -96,7 +100,9 @@ export function PopupRoot({ boot }) {
     ? t(POPUP_KEYS.title)
     : view.kind === 'textEdit'
       ? t(POPUP_TEXT_KEYS.title)
-      : String(view.requestedKind ?? '');
+      : view.kind === 'options'
+        ? t(OPTIONS_KEYS.title)
+        : String(view.requestedKind ?? '');
 
   // Every close path funnels here. The host owns the window: an accepted close
   // tears it down, so nothing local is hidden. A failure is reported in place
@@ -129,7 +135,7 @@ export function PopupRoot({ boot }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [requestClose]);
 
-  const i18n = useMemo(() => ({ t, locale, locales: LOCALES }), [t, locale]);
+  const i18n = useMemo(() => ({ t, locale, setLocale, locales: LOCALES }), [t, locale]);
   const label = dialogTitle || undefined;
 
   return (
@@ -145,7 +151,9 @@ export function PopupRoot({ boot }) {
           ? <AboutDialog view={view} onClose={requestClose} failure={failure} />
           : view.kind === 'textEdit'
             ? <TextEditDialog view={view} onClose={requestClose} closeFailure={failure} />
-            : <UnknownDialog kind={view.requestedKind} onClose={requestClose} failure={failure} />}
+            : view.kind === 'options'
+              ? <OptionsDialog onClose={requestClose} closeFailure={failure} />
+              : <UnknownDialog kind={view.requestedKind} onClose={requestClose} failure={failure} />}
       </main>
     </I18nContext.Provider>
   );

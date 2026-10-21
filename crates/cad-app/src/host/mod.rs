@@ -28,6 +28,7 @@ mod draw_create;
 mod draw_intent_map;
 mod draw_pick;
 mod properties;
+mod tolerance;
 
 #[cfg(test)]
 mod tests;
@@ -39,6 +40,7 @@ mod tests;
 pub use cad_import_acadrust::ImportReport;
 pub use databases::{
     blank_database, demo_database, snap_candidates_near, snap_candidates_near_uncached,
+    snap_candidates_near_with_policy,
 };
 
 /// Result of a successful drawing open, for status lines and diagnostics.
@@ -88,6 +90,14 @@ pub struct HostController {
     /// Monotonic counter for a fresh `DocumentIdentity::Temporary` on each new
     /// blank document, so two New operations never share an identity.
     temporary_identity: u128,
+    /// The one interaction tolerance policy the live session resolves picks and
+    /// snaps with. It is **not** a second tolerance definition: a host derives it
+    /// from its effective config via
+    /// [`crate::viewer_config::ViewConfig::tolerance_policy`] and installs it with
+    /// [`HostController::set_tolerance_policy`]. Left unset it stays
+    /// [`TolerancePolicy::default`] (pickbox 3, aperture 12), so historical
+    /// geometry and snapping are unchanged.
+    tolerance: TolerancePolicy,
 }
 
 impl HostController {
@@ -124,6 +134,7 @@ impl HostController {
             pending_open_guard: None,
             async_open: None,
             temporary_identity: 0,
+            tolerance: TolerancePolicy::default(),
         })
     }
 
@@ -650,8 +661,9 @@ impl HostController {
     /// [`HostController::capture_tool_point`], ADR 0014 A.1–A.3). It reads the
     /// exact same inputs as [`HostController::snap_hints_near_cursor`]: the
     /// viewport's `world_per_px`, the session's active space, the drawing's
-    /// [`snap_candidates_near`] set and the default [`TolerancePolicy`] inside
-    /// the measurement engine.
+    /// [`snap_candidates_near`] set and this session's
+    /// [`HostController::tolerance`] policy inside the measurement engine (the
+    /// configured object-snap aperture).
     ///
     /// The transform-baked snap targets are cached per scene identity, so a
     /// pointer move does not re-expand the drawing. The full candidate set this
@@ -683,12 +695,13 @@ impl HostController {
         let Some(document) = self.application.workspace.documents.get(&self.document_id) else {
             return Ok(None);
         };
-        let candidates = snap_candidates_near(
+        let candidates = snap_candidates_near_with_policy(
             document.drawing.as_ref(),
             self.document_id,
             raw,
             world_per_px,
             self.session.active_space.clone(),
+            &self.tolerance,
         )?;
         Ok(candidates.into_iter().next())
     }
@@ -747,6 +760,7 @@ impl HostController {
             cursor,
             world_per_px,
             self.session.active_space.clone(),
+            &self.tolerance,
         )
     }
 

@@ -222,7 +222,18 @@ fn multi_select_lists_common_keys_with_mixed_markers() {
     let keys: Vec<&str> = props.rows.iter().map(|row| row.key).collect();
     assert_eq!(
         keys,
-        vec!["id", "handle", "type", "layer", "space", "draw_order"]
+        vec![
+            "id",
+            "handle",
+            "type",
+            "layer",
+            "space",
+            "draw_order",
+            "color",
+            "linetype",
+            "lineweight",
+            "transparency",
+        ]
     );
     assert!(props.rows.iter().all(|row| row.key != "length"));
     assert!(props.rows.iter().all(|row| row.key != "radius"));
@@ -271,6 +282,12 @@ fn single_selection_rows_order_and_values_are_pinned() {
             ("start", Some("0.000000, 0.000000, 0.000000")),
             ("end", Some("3.000000, 4.000000, 0.000000")),
             ("length", Some("5.000000")),
+            // The display-attribute rows are appended after the geometry rows,
+            // in the write path's own key order (`SUPPORTED_KEYS` minus `layer`).
+            ("color", Some("ByLayer")),
+            ("linetype", Some("ByLayer")),
+            ("lineweight", Some("ByLayer")),
+            ("transparency", Some("0")),
         ]
     );
     assert!(props.rows.iter().all(|row| !row.mixed));
@@ -422,7 +439,13 @@ fn enum_options_come_from_the_real_tables_sorted() {
     );
     assert_eq!(
         enum_options(&db, "linetype"),
-        vec!["CONTINUOUS".to_string(), "DASHDOT".to_string()]
+        vec![
+            "ByBlock".to_string(),
+            "ByLayer".to_string(),
+            "CONTINUOUS".to_string(),
+            "DASHDOT".to_string(),
+        ],
+        "the real table names plus the symbolic values the grammar accepts"
     );
     // A key with no named table has no fabricated options.
     assert!(enum_options(&db, "color").is_empty());

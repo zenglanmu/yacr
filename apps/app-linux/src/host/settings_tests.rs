@@ -22,6 +22,8 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
         background_model: "#000000".to_string(),
         background_paper: "#ffffff".to_string(),
         crosshair_percent: 25,
+        pickbox_size: 3,
+        aperture_size: 12,
         fonts_dir: Some("/tmp/yacr-fonts".to_string()),
     };
     let wire = serde_json::to_value(&settings).expect("settings serialize");
@@ -38,11 +40,13 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
             "backgroundModel": "#000000",
             "backgroundPaper": "#ffffff",
             "crosshairPercent": 25,
+            "pickboxSize": 3,
+            "apertureSize": 12,
             "fontsDir": "/tmp/yacr-fonts",
         })
     );
-    // Exactly the eleven documented fields; no unrelated Options fields.
-    assert_eq!(wire.as_object().expect("object").len(), 11);
+    // Exactly the thirteen documented fields; no unrelated Options fields.
+    assert_eq!(wire.as_object().expect("object").len(), 13);
 }
 
 #[test]
@@ -99,6 +103,16 @@ fn parse_setting_request_refuses_unknown_keys_formats_and_types() {
         parse_setting_request("crosshairSize", &serde_json::json!(40)).unwrap(),
         (CadSettingKey::CrosshairSize, CadSettingValue::Number(40))
     );
+    // The pickbox/aperture sizes are integer pixel counts in AutoCAD's own
+    // option ranges.
+    assert_eq!(
+        parse_setting_request("pickboxSize", &serde_json::json!(6)).unwrap(),
+        (CadSettingKey::PickboxSize, CadSettingValue::Number(6))
+    );
+    assert_eq!(
+        parse_setting_request("apertureSize", &serde_json::json!(24)).unwrap(),
+        (CadSettingKey::ApertureSize, CadSettingValue::Number(24))
+    );
     for (key, value) in [
         ("backgroundPaper", serde_json::json!("#abc")),
         ("backgroundPaper", serde_json::json!("red")),
@@ -109,6 +123,16 @@ fn parse_setting_request_refuses_unknown_keys_formats_and_types() {
         ("crosshairSize", serde_json::json!(-1)),
         ("crosshairSize", serde_json::json!(40.5)),
         ("crosshairSize", serde_json::json!(true)),
+        ("pickboxSize", serde_json::json!(0)),
+        ("pickboxSize", serde_json::json!(21)),
+        ("pickboxSize", serde_json::json!(3.5)),
+        ("pickboxSize", serde_json::json!("3")),
+        ("pickboxSize", serde_json::json!(true)),
+        ("apertureSize", serde_json::json!(0)),
+        ("apertureSize", serde_json::json!(51)),
+        ("apertureSize", serde_json::json!(12.5)),
+        ("apertureSize", serde_json::json!("12")),
+        ("apertureSize", serde_json::json!(true)),
     ] {
         assert_eq!(
             parse_setting_request(key, &value).unwrap_err(),
