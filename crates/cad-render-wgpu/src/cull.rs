@@ -247,9 +247,10 @@ fn class_visible(projection: FrameProjection, aabb: WorldAabb, pad: f64) -> bool
 ///
 /// `ndc_x = sx·(x − center.x)` (and likewise `y`); a box is visible iff its
 /// `x`-range and its `y`-range each overlap `[-1, 1]`. **`z` is not tested**:
-/// the ortho clip `z` is `(z − center.z) + z_plane` (`FrameProjection::
-/// batch_matrix_f64`) and the depth mapping is not a visibility criterion for the
-/// 2D view — testing it could wrongly cull geometry that projects inside.
+/// the ortho clip `z` is the frame's world-z band mapped onto the depth range
+/// (`OrthoDepth` in `FrameProjection::batch_matrix_f64`), which already contains
+/// every resident batch's z extent, and it is not a view-culling criterion for
+/// the 2D view — testing it could wrongly cull geometry that projects inside.
 fn ortho_visible(sx: f64, sy: f64, center: [f64; 3], min: [f64; 3], max: [f64; 3]) -> bool {
     if !axis_overlaps(sx, min[0], max[0], center[0]) {
         return false;
@@ -334,6 +335,7 @@ fn clip_planes(vp: &[[f32; 4]; 4]) -> [([f64; 3], f64); 6] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::OrthoDepth;
 
     fn ortho(sx: f64, sy: f64, center: [f64; 3]) -> FrameProjection {
         FrameProjection::Ortho {
@@ -341,6 +343,7 @@ mod tests {
             sy,
             center,
             z_plane: 0.0,
+            depth: OrthoDepth::default(),
             world_per_px: 1.0 / sx.max(sy),
         }
     }

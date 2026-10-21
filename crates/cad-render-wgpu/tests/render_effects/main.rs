@@ -201,16 +201,17 @@ const FULL_COVER_NORMAL: [f32; 3] = [0.0, 0.0, 1.0];
 
 const OVERLAY_NORMAL: [f32; 3] = [1.0, 0.0, 0.0];
 
-/// Opaque full-cover square (farther, `z = +0.5`), a smaller overlapping
-/// overlay (`z = 0`, nearer) with the requested alpha, and an `alpha = 0.0`
-/// ghost that must be reported but never drawn.
+/// Opaque full-cover square (the backdrop, `z = 0`), a smaller overlapping
+/// overlay (`z = +0.5`, nearer to the viewer of the 2D top view, which looks
+/// down `-Z`) with the requested alpha, and an `alpha = 0.0` ghost that must be
+/// reported but never drawn.
 fn transparency_scene(overlay_alpha: f32) -> SceneDelta {
     let cover = quad_mesh(
         0.95,
         Point3 {
             x: 0.0,
             y: 0.0,
-            z: 0.5,
+            z: 0.0,
         },
         1.0,
         FULL_COVER_NORMAL,
@@ -221,7 +222,7 @@ fn transparency_scene(overlay_alpha: f32) -> SceneDelta {
         Point3 {
             x: 0.0,
             y: 0.0,
-            z: 0.0,
+            z: 0.5,
         },
         overlay_alpha,
         OVERLAY_NORMAL,

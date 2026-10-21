@@ -84,6 +84,7 @@ fn gpu_batch(
         arc_runs,
         upload_bytes,
         pick_key: 0,
+        z_range: [0.0, 0.0],
         sources: Vec::new(),
     }
 }
@@ -733,6 +734,7 @@ fn skipped_uniform_slots_leave_surviving_bytes_bit_identical() {
         sy: 0.03125,
         center: [0.0, 0.0, 0.0],
         z_plane: 0.0,
+        depth: OrthoDepth::default(),
         world_per_px: 0.0,
     };
     let line_wpp_bits = (projection.world_per_px() as f32).to_bits();

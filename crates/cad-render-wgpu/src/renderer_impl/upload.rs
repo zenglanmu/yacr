@@ -516,6 +516,7 @@ impl Renderer {
                 arc_runs: arc_run.unwrap_or_default(),
                 upload_bytes: bytes,
                 pick_key: keys[index],
+                z_range: batch_world_z_range(batch),
                 sources: batch.sources.clone(),
             });
         }
@@ -820,4 +821,36 @@ impl Renderer {
             .map(|chunk| chunk.expect("referenced by a surviving batch"))
             .collect();
     }
+}
+
+/// World-space z range `[min, max]` of a scene batch's geometry.
+///
+/// Used only to derive an orthographic frame's depth band ([`plan::OrthoDepth`]):
+/// a batch whose triangles span `[-1, 1]` in z needs a depth range that contains
+/// that span, or its faces are clipped by (or, at the far plane, rejected by) the
+/// depth mapping. Positions are `local_origin + stored`, narrowed to `f32` after
+/// the `f64` addition exactly like the packed vertices. A batch with no
+/// positions (an empty batch) reports its origin.
+pub(crate) fn batch_world_z_range(batch: &cad_scene::RenderBatch) -> [f32; 2] {
+    let origin_z = batch.local_origin.z;
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    let mut sample = |z: f64| {
+        let world = origin_z + z;
+        if world.is_finite() {
+            lo = lo.min(world);
+            hi = hi.max(world);
+        }
+    };
+    for vertex in &batch.vertices {
+        sample(f64::from(vertex[2]));
+    }
+    for conic in &batch.conics {
+        sample(conic.center.z);
+    }
+    if lo > hi {
+        let z = origin_z as f32;
+        return [z, z];
+    }
+    [lo as f32, hi as f32]
 }

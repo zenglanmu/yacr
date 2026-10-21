@@ -340,6 +340,84 @@ fn brep_cube_is_a_closed_success() {
     ));
 }
 
+/// Every facet must be wound **outward**, under the renderer's convention that a
+/// world-CCW triangle is front-facing (`cad-render-wgpu`: `front_face = Ccw`,
+/// back faces culled).
+///
+/// This is the pin the "solid renders as a wireframe" regression was missing: a
+/// closed solid's `+Z` face is the one a top-down orthographic view sees, so its
+/// geometric normal (the facet winding, `(b - a) × (c - a)`) must be `+Z` and
+/// agree with the per-vertex normal the mesh carries.
+#[test]
+fn brep_cube_facets_wind_outward_with_matching_normals() {
+    let req = brep_request(cube_brep(1.0));
+    let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
+    let mesh = result.outcome.mesh().expect("cube must produce a mesh");
+
+    let top: Vec<&[u32; 3]> = mesh
+        .mesh
+        .triangles
+        .iter()
+        .filter(|tri| {
+            tri.iter()
+                .all(|i| (mesh.mesh.vertices[*i as usize].z - 1.0).abs() < 1e-12)
+        })
+        .collect();
+    assert_eq!(top.len(), 2, "the +Z face is two triangles");
+
+    for tri in &top {
+        let a = mesh.mesh.vertices[tri[0] as usize];
+        let b = mesh.mesh.vertices[tri[1] as usize];
+        let c = mesh.mesh.vertices[tri[2] as usize];
+        let geometric = brep::cross(brep::sub(b, a), brep::sub(c, a));
+        assert!(
+            geometric.z > 0.0,
+            "the +Z face must wind CCW seen from +Z, got {geometric:?}"
+        );
+        for index in tri.iter() {
+            let normal = mesh.mesh.normals[*index as usize];
+            assert!(
+                (normal.z - 1.0).abs() < 1e-12,
+                "the +Z face's vertex normal must be outward (+Z), got {normal:?}"
+            );
+            assert!(
+                brep::dot(geometric, normal) > 0.0,
+                "the facet winding must agree with its vertex normal"
+            );
+        }
+    }
+
+    // Every facet of the closed solid agrees with its own normal, and the whole
+    // mesh has a positive signed volume: consistent outward orientation.
+    for tri in &mesh.mesh.triangles {
+        let a = mesh.mesh.vertices[tri[0] as usize];
+        let b = mesh.mesh.vertices[tri[1] as usize];
+        let c = mesh.mesh.vertices[tri[2] as usize];
+        let geometric = brep::cross(brep::sub(b, a), brep::sub(c, a));
+        let normal = mesh.mesh.normals[tri[0] as usize];
+        assert!(
+            brep::dot(geometric, normal) > 0.0,
+            "facet {tri:?} is wound against its own normal"
+        );
+    }
+    let volume: f64 = mesh
+        .mesh
+        .triangles
+        .iter()
+        .map(|tri| {
+            let a = mesh.mesh.vertices[tri[0] as usize];
+            let b = mesh.mesh.vertices[tri[1] as usize];
+            let c = mesh.mesh.vertices[tri[2] as usize];
+            brep::dot(a, brep::cross(b, c))
+        })
+        .sum::<f64>()
+        / 6.0;
+    assert!(
+        (volume - 1.0).abs() < 1e-9,
+        "an outward-wound closed cube has signed volume +1, got {volume}"
+    );
+}
+
 #[test]
 fn brep_cube_placement_is_applied() {
     let mut brep = cube_brep(1.0);

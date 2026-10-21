@@ -156,6 +156,11 @@ struct GpuBatch {
     /// into `Camera::key_flags.x` of its per-batch uniform, so the id pass and
     /// the selection-flags table can resolve any fragment of it.
     pick_key: u32,
+    /// World-space z range `[min, max]` of this batch's geometry, captured at
+    /// upload. The orthographic frame derives its depth band from the union over
+    /// resident batches (see [`plan::OrthoDepth`]), so a solid's world-z extent
+    /// maps into the depth range instead of being clipped by it.
+    z_range: [f32; 2],
     /// The full `SelectionRef` list this batch's fragments can belong to,
     /// preserved so the CPU-side pick table can return the whole `u128` identity
     /// (the scene builder may concatenate several entities into one batch).

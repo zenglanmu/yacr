@@ -38,6 +38,7 @@ fn gpu_batch(pick_key: u32, sources: Vec<SelectionRef>) -> GpuBatch {
         arc_runs: Vec::new(),
         upload_bytes: 0,
         pick_key,
+        z_range: [0.0, 0.0],
         sources,
     }
 }

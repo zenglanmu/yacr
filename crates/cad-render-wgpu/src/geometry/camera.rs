@@ -7,6 +7,10 @@ use super::*;
 pub struct Camera2d {
     pub center: Point3,
     pub world_per_px: f64,
+    /// World-z bias along the depth axis, in world units (positive = nearer; the
+    /// 2D view looks down `-Z`). A frame's depth range is derived from the
+    /// resident geometry's world-z extent, so geometry depth is otherwise
+    /// absolute: panning `center.z` does not shift it.
     pub z_plane: f32,
 }
 

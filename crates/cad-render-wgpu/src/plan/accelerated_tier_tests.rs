@@ -183,6 +183,7 @@ fn pulled_camera_columns_are_origin_independent_and_match_the_batch_matrix() {
         sy: 0.03125,
         center: [1.0e6, 2.0e6, 0.0],
         z_plane: 0.0,
+        depth: OrthoDepth::default(),
         world_per_px: 0.0,
     };
     let columns = pulled_camera_columns(projection);
@@ -212,6 +213,7 @@ fn chunk_transform_column_keeps_the_f64_camera_reduction() {
         sy: 0.001,
         center: [1.0e7, 0.0, 0.0],
         z_plane: 0.0,
+        depth: OrthoDepth::default(),
         world_per_px: 0.0,
     };
     let origin = [1.0e7 + 1000.0, 0.0, 0.0];

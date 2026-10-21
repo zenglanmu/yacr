@@ -495,6 +495,7 @@ mod tests {
             sy: 1.0,
             center: [0.5, -0.25, 0.0],
             z_plane: 0.0,
+            depth: OrthoDepth::default(),
             world_per_px: 2.0 / 64.0,
         };
         let view = mask_view_coverage(projection, (64, 64), [0.5, -0.25, 0.0]);
