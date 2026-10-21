@@ -60,6 +60,22 @@ export const HOST_EXCLUDED_COMMANDS = Object.freeze([
  */
 export const GESTURE_ONLY_COMMANDS = Object.freeze(['ORBIT']);
 
+/**
+ * Router-admitted selectors that only mean something with a drawing open:
+ * `SWITCH2D3D` frames the document's 3D bounds and `PROJECTION` flips the
+ * projection of that same camera, so on the start page there is nothing to
+ * frame. They are disabled there with the catalog's own "no drawing is open"
+ * sentence instead of a misleading "not supported yet".
+ */
+export const DOCUMENT_SCOPED_COMMANDS = Object.freeze(['SWITCH2D3D', 'PROJECTION']);
+
+/**
+ * The catalog key the chrome uses for "open a drawing first". The catalog
+ * already words this sentence once (`plot.no_document`); reusing the key keeps
+ * one wording for one fact instead of growing a second copy.
+ */
+export const NO_DOCUMENT_KEY = 'plot.no_document';
+
 /** The names kept disabled on top of the host vocabulary (for tests/UI copy). */
 export function excludedCommandNames() {
   return [...HOST_EXCLUDED_COMMANDS];
@@ -187,6 +203,13 @@ export const COMMAND_CATALOG = Object.freeze([
   { id: 'ZOOMOUT', labelKey: 'toolbar.zoom_out', icon: 'zoomOut', group: 'view' },
   { id: 'PAN', labelKey: 'toolbar.pan', icon: 'pan', group: 'view' },
   { id: 'ORBIT', labelKey: 'view.orbit_label', icon: 'orbit', group: 'view' },
+  // 3D view selectors: both are payload-free router commands (typing them in the
+  // command line already works), and both need an open drawing — the ribbon
+  // disables them on the start page. `STANDARDVIEW` is deliberately **absent**:
+  // it carries a payload and travels on `cad_standard_view`, never on
+  // `cad_command`, so it is not a name this catalog may offer for typing.
+  { id: 'SWITCH2D3D', labelKey: 'ribbon.command.view_switch2d3d', icon: 'view', group: 'view' },
+  { id: 'PROJECTION', labelKey: 'view.projection', icon: 'axes', group: 'view' },
   { id: 'GRID', labelKey: 'overlay.grid', icon: 'grid', group: 'view' },
   { id: 'SNAP', labelKey: 'status.toggle.snap', icon: 'snap', group: 'view' },
   { id: 'ORTHO', labelKey: 'status.toggle.ortho', icon: 'angle', group: 'view' },
@@ -277,6 +300,9 @@ export function admitCommandText(text, { status = null, pending = false } = {}) 
   if (!isSupportedCommand(id)) return { kind: 'unsupported', command: id };
   if (!status || pending || status.loading) return { kind: 'unavailable', command: id };
   if (id === 'OPEN' && !status.canOpen) return { kind: 'unavailable', command: id };
+  if (DOCUMENT_SCOPED_COMMANDS.includes(id) && status.documentLabel === null) {
+    return { kind: 'unavailable', command: id };
+  }
   if (id === 'FIT' && !(status.canFit && status.documentLabel !== null && status.entityCount !== null)) {
     return { kind: 'unavailable', command: id };
   }

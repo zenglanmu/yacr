@@ -1,9 +1,16 @@
 // Declarative ribbon definition. Pure data (no React), so both the renderer and
-// the tests can walk it. An item either carries a `command` (admitted through
-// `cad_command`) or an `action` token (a DOM-only shell action); items with
-// neither are labelled but disabled, which is the honest state for a command
-// the host does not wire yet.
+// the tests can walk it. An item carries exactly one dispatch token:
+//
+//   * `command` — a payload-free name admitted through `cad_command`;
+//   * `standardView` — one of the seven host view keys, which carries a payload
+//     and therefore travels on the dedicated typed IPC `cad_standard_view`
+//     (never on `cad_command`);
+//   * `action` — a DOM-only shell action that never touches the CAD protocol.
+//
+// An item with none of the three is labelled but disabled, which is the honest
+// state for a command the host does not wire yet.
 import { POPUP_KEYS } from './popup.mjs';
+import { STANDARD_VIEWS } from './view3d.mjs';
 
 /** Shell actions that never touch the CAD protocol. */
 export const SHELL_ACTIONS = Object.freeze({
@@ -272,22 +279,47 @@ export const RIBBON_TABS = Object.freeze([
     id: 'view',
     labelKey: 'ribbon.view',
     panels: [
+      // The 3D affordances lead the View tab the way AutoCAD's View tab leads
+      // with Visualize: the mode toggle, the projection toggle and the orbit
+      // hint. `SWITCH2D3D` and `PROJECTION` are payload-free router commands, so
+      // they travel on `cad_command`; both are document-scoped and read as
+      // disabled on the start page.
+      {
+        id: 'view3d',
+        titleKey: 'view3d.title',
+        items: [
+          {
+            id: 'SWITCH2D3D',
+            labelKey: 'ribbon.command.view_switch2d3d',
+            icon: 'view',
+            command: 'SWITCH2D3D',
+            large: true,
+          },
+          { id: 'PROJECTION', labelKey: 'view.projection', icon: 'axes', command: 'PROJECTION' },
+          // Orbit stays a **gesture**: in a 3D view a primary canvas drag emits
+          // `CommandId::Orbit` with the yaw/pitch of the pointer motion, and
+          // `cad_command` refuses a payload-free `ORBIT`. The affordance is
+          // visible but disabled with `view.orbit.gesture` (through
+          // `unavailableReasonKey`), so no click can fabricate a camera move.
+          { id: 'ORBIT', labelKey: 'view.orbit_label', icon: 'orbit', command: 'ORBIT' },
+        ],
+      },
+      // Standard views carry a payload (`CommandPayload::StandardView`), so they
+      // are **not** `command` items: each names its host machine key in
+      // `standardView` and the renderer sends it on the dedicated typed IPC
+      // `cad_standard_view`. `top` leaves 3D for the 2D plan; the other six are
+      // framed 3D perspectives. The list is data (`STANDARD_VIEWS`) so the model
+      // and the tests cannot drift apart.
+      {
+        id: 'standard',
+        titleKey: 'view.standard_label',
+        items: STANDARD_VIEWS.map(entry => ({ ...entry })),
+      },
       {
         id: 'navigate',
         titleKey: 'ribbon.panel.navigate',
         launcher: true,
         items: [
-          {
-            id: 'view',
-            labelKey: 'ribbon.command.view_standard',
-            icon: 'view',
-            large: true,
-            variants: [
-              { id: 'viewTop', labelKey: 'view.standard.top', icon: 'view' },
-              { id: 'viewFront', labelKey: 'view.standard.front', icon: 'view' },
-              { id: 'viewIso', labelKey: 'view.standard.isometric', icon: 'view' },
-            ],
-          },
           { id: 'ZOOMIN', labelKey: 'toolbar.zoom_in', icon: 'zoomIn', command: 'ZOOMIN' },
           { id: 'ZOOMOUT', labelKey: 'toolbar.zoom_out', icon: 'zoomOut', command: 'ZOOMOUT' },
           { id: 'PAN', labelKey: 'toolbar.pan', icon: 'pan', command: 'PAN' },

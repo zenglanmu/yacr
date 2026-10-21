@@ -14,28 +14,54 @@ import { Icon } from '../icons.jsx';
 import { IconButton, RibbonButton } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { RIBBON_TABS, ribbonTab } from '../ribbon-model.mjs';
-import { unavailableReasonKey } from '../commands.mjs';
+import { DOCUMENT_SCOPED_COMMANDS, NO_DOCUMENT_KEY, unavailableReasonKey } from '../commands.mjs';
+import { standardViewAvailable, standardViewUnavailableReasonKey } from '../view3d.mjs';
 
 function runItem(shell, item) {
   if (item.action) return shell.runAction(item.action);
+  // A standard view carries a payload, so it never rides the name-only command
+  // funnel: the shell sends it on `cad_standard_view` through its own typed
+  // helper. Order matters — the typed branch is checked before `command`.
+  if (item.standardView) return shell.runStandardView(item.standardView);
   if (item.command) return shell.runCommand(item.command);
   return undefined;
 }
 
-function unavailable(t, item) {
+/**
+ * Why `item` cannot run here, in catalog words.
+ *
+ * Three explicit reasons, never a vague "unsupported": the orbit gesture hint
+ * for a drag-only command, the catalog's own "no drawing is open" sentence for a
+ * document-scoped selector or a standard view on the start page, and the generic
+ * unsupported reason for a command the router does not admit.
+ */
+function unavailable(t, item, shell) {
+  if (item.standardView) {
+    return t(standardViewUnavailableReasonKey(shell), { command: t(item.labelKey) });
+  }
+  if (item.command && DOCUMENT_SCOPED_COMMANDS.includes(item.command)
+    && shell.status && !shell.loading && !shell.documentOpen) {
+    return t(NO_DOCUMENT_KEY, { command: t(item.labelKey) });
+  }
   return t(unavailableReasonKey(item.command), { command: t(item.labelKey) });
 }
 
 function ItemButton({ item }) {
   const { t } = useI18n();
   const shell = useShell();
-  const enabled = item.action ? true : item.command ? shell.canCommand(item.command) : false;
+  // Three gates, one per dispatch token: a shell action is always available, a
+  // standard view needs a loaded status with an open drawing, and a command is
+  // enabled only by router admission. Nothing is ever locally enabled.
+  const enabled = item.action ? true
+    : item.standardView ? standardViewAvailable(shell)
+      : item.command ? shell.canCommand(item.command)
+        : false;
   // The About dialog is a host window, so `cad_status.popup` is the only honest
   // "open" signal. The button reads pressed while it is open and stays
   // clickable: the host answers `existing: true` and focuses the live window.
   const active = item.action === 'about' ? Boolean(shell.popupOpen) : false;
   if (!enabled) {
-    return <RibbonButton icon={item.icon} label={t(item.labelKey)} disabled hint={unavailable(t, item)} />;
+    return <RibbonButton icon={item.icon} label={t(item.labelKey)} disabled hint={unavailable(t, item, shell)} />;
   }
   return <RibbonButton icon={item.icon} label={t(item.labelKey)} active={active} onClick={() => runItem(shell, item)} />;
 }
@@ -70,7 +96,7 @@ function VariantMenu({ item, onClose }) {
   return (
     <div className="ribbon-panel__menu" role="menu" aria-label={t('ribbon.variants', { name: t(item.labelKey) })}>
       {(item.variants ?? []).map(variant => {
-        const enabled = variant.action ? true : variant.command ? shell.canCommand(variant.command) : false;
+        const enabled = variant.action ? true : variant.standardView ? standardViewAvailable(shell) : variant.command ? shell.canCommand(variant.command) : false;
         return (
           <button
             key={variant.id}
@@ -78,7 +104,7 @@ function VariantMenu({ item, onClose }) {
             role="menuitem"
             className={['ribbon-menu-item', enabled ? '' : 'is-disabled'].filter(Boolean).join(' ')}
             disabled={!enabled}
-            title={enabled ? undefined : unavailable(t, variant)}
+            title={enabled ? undefined : unavailable(t, variant, shell)}
             onClick={() => { runItem(shell, variant); onClose(); }}
           >
             <Icon name={variant.icon ?? item.icon} size={15} />

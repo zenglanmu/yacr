@@ -12,6 +12,7 @@ import { pointerPosition } from './metrics.mjs';
 import { queueCadCommand, reconcileToolParameterPending, requestImportCancel, setToolParameterFlag, setToolParameterNumber, startCadPolling, stepToolParameterPending } from './cad.mjs';
 import { setToolText } from './text.mjs';
 import { setSelectedText } from './textedit.mjs';
+import { submitStandardView } from './view3d.mjs';
 import { createFpsSampler } from './fps.mjs';
 import { bindBrowserDefaults } from './defaults.mjs';
 import { admitCommandText, commandCatalog, pushHistory, setCommandCatalog, toolCommandForKey, unavailableReasonKey } from './commands.mjs';
@@ -404,6 +405,14 @@ function Shell() {
     surfaceRef,
     canCommand,
     runCommand: id => { void submitCommand(id); },
+    // A standard view carries a payload, so it is one `cad_standard_view {view}`
+    // — never a `cad_command`. The host answers admission (queued), not
+    // completion: the real camera transition, and any refusal of it, arrives in
+    // `cad_status`. A request that was not admitted is translated into the error
+    // banner here, so a refused view is never silent.
+    runStandardView: view => {
+      void submitStandardView({ invoke, view, t, report: setError });
+    },
     cancelImport: () => { void requestImportCancel(invoke, status); },
     // The active-tool numeric stepper's bounded pending delta (see the reconcile
     // effect above). The view reads it; the stepper's action updates it.

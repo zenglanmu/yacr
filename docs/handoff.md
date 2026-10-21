@@ -1,3 +1,52 @@
+## 3D 视图的 GUI 面板（2026-10-21）
+
+**做了什么**：`view` 标签新增两个面板（复用**既有** i18n 键，未新增文案）：
+- **三维视图**：`二维 / 三维`（大按钮，`SWITCH2D3D`）、`投影`（`PROJECTION`）、
+  `环绕`（**可见但禁用**——orbit 是画布拖动，按钮只能伪造负载；理由用 `view.orbit.gesture`）。
+- **标准视图**：俯/仰/前/后/左/右/等轴测七项，各自经新 typed IPC `cad_standard_view` 派发
+  （渲染器**不**把 `standardView` 当 `command` 走 `cad_command`）。
+同时删掉了「导航」面板里**永远只能禁用**的旧标准视图下拉（其三个变体既无 `command` 也无 `action`）。
+开关**不**声称状态读数（`cad_status` 没有 3D/投影状态），所以没有用 `view.2d/3d` 之外的伪状态标签；
+无图时按既有机制禁用并给"没有打开图纸"的理由。
+
+**验证**：`npm test` **293 passed / 0 failed**（原 286，新增 7 条 + 扩展既有模型/i18n 测试）、
+`npm run build` 通过、`check-i18n` 578 键不变、无硬编码 CJK。
+
+**像素判读**（休眠前的真实抓图，`/tmp/opencode/view3d-ui-check/`）：
+带区 y 56–147 完整绘制、无黑洞；`环绕` 图标与文字**同为禁用色 `#98A3B4`（对比 3.85:1）**，
+`投影` 为 `#C3CCDA`（6.07:1）⇒ 是"刻意禁用"而不是"坏掉"；七个标准视图均为启用色 `(191,200,214)`；
+View 标签 960 宽**不溢出**（中文右缘 734、英文 848）。视觉语言与既有 ribbon 的 token/间距一致。
+
+**判读发现的真问题（未修，cosmetic）**：
+1. **常用（Home）标签在 960 宽溢出并切断字形**（墨迹到 x=959，无省略号、无可视滚动条）；
+   View 标签不溢出，但英文只剩 111 px 余量，窗口再窄到约 850 px 会同样截断。最大化宽（1853）不存在。
+2. 标准视图按**列优先**排布，语义配对 `前/后`、`左/右` 被拆到不同列；6 个面视图图标在 1× 下
+   仅靠 3–4 px 短线区分（有文字兜底，未发现错标）。
+
+## ⚠ 证据环境边界：显示器休眠会让 WebView 呈现停止（2026-10-21，非代码缺陷）
+
+**现象**：某时刻起窗口抓图里 chrome 全黑（顶层抓图 5 色），但 DOM 正常（73 按钮、`errors: []`）、
+WebView 窗口 960×600 `mapped=true native_viewable=true`、WebKit 进程存活、`/dev/shm` 正常；
+`WEBKIT_DISABLE_COMPOSITING_MODE=1` 无效。
+
+**已反证（含对照实验）**：
+- 怀疑 `reparent_webview` 的 `widget.unrealize()`：**去掉后 6 次启动仍是 5 色**（尺寸/mapped/viewable 不变）⇒ 排除；
+- 临时跳过 reparent：仍 1 色 ⇒ 排除；
+- **完全不装 yacr 的原生 GTK3 + WebKitGTK 4.1 窗口**（20 行，加载普通 HTML）：同样不绘制，
+  `gtk_widget_add_tick_callback` 探针 **`ticks=0`（7 秒）** ⇒ **GDK 帧时钟死了**；
+- Mutter：`DisplayConfig PowerSaveMode = 3`（显示器已省电关闭）、`IdleMonitor GetIdletime ≈ 4,166,272 ms`（约 69 分钟）、
+  `ScreenCast CreateSession = "Session creation inhibited"`；时间线吻合：13:52:26 最后一次正常抓图（1759 色）→ 14:02:14 首次全黑。
+
+**结论**：WebKitGTK **只在帧时钟 tick 上呈现**，显示器休眠时没有 vsync/帧回调 ⇒ chrome 不画；
+CAD 子窗口照画是因为我们**自己推 Vulkan 帧**，与 GTK 时钟无关。**这是环境状态，不是 `apps/app-linux` 的代码问题**，
+也没有把任何 `WEBKIT_*` 绕过手段写进宿主（那只是遮盖）。
+**复验方式（需人唤醒显示器）**：`/tmp/opencode/yacr-chrome-loop.sh 6 0` 期望 6/6 约 1750–1990 色；
+`yacr-chrome-loop.sh 1 1` 为最大化。若显示器已唤醒（`PowerSaveMode` 为 1、idle 很小）仍 ≤5 色，
+则帧时钟假设不完整，`unrealize()` 的问题需要重新检验——工具已就绪。
+
+**对证据的影响**：休眠期间**无法**产出新的 UI 截图；上文的 ribbon 判读用的是休眠前（13:52）的真实抓图，
+同一份 UI 代码（此后 UI 未再改动）。CAD 内容证据（真实 GPU headless 读回 + CAD 子窗口抓图）不受影响。
+
 ## 主光偏离视轴：等轴测下三面可辨（2026-10-21，接上一条）
 
 **上一条的发现被证实并修掉**：相机相对**纯头灯**（`light = normalize(eye - target)`）在**等轴测**下

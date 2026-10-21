@@ -144,9 +144,14 @@ exposes **no 3D control**:
 - **`PROJECTION` needs no payload** and was already reachable through the
   command line (the application arm ignores the payload), so it needed no
   channel.
-- **Still no ribbon control**: the React chrome has no 3D toggle and no
-  standard-view affordance yet, so both are reachable only from the command line
-  and the typed IPC. That is an explicit UI gap, not a hidden one.
+- **Ribbon (added 2026-10-21)**: the `view` tab now leads with a **3D panel** —
+  a large `2D/3D` toggle (`SWITCH2D3D`), a `Projection` toggle (`PROJECTION`), and
+  an **Orbit** item that is visible but **disabled**, because orbiting is a canvas
+  drag and a button would have to fabricate a payload — and a **Standard view**
+  panel with the seven views, each dispatching the typed IPC above. Labels come
+  from the existing catalog keys (`view.*`, `ribbon.command.*`); no new strings
+  were needed. The toggles do **not** claim a state readout, because `cad_status`
+  carries no 3D/projection state.
 
 ## Shading convention
 

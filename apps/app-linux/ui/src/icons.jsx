@@ -3,6 +3,18 @@
 // strokes) and a new region only needs a name.
 import React from 'react';
 
+// Axonometric cube: the 3D vocabulary the `view` glyph already used, shared with
+// the isometric standard view (the one view that shows volume instead of a face).
+const CUBE = <><path d="M12 3 20 7.5v9L12 21 4 16.5v-9z" /><path d="M12 12 20 7.5M12 12v9M12 12 4 7.5" /></>;
+
+// Standard-view family: one motif — the view plane with a sight line entering it
+// from the side the camera looks from — so the seven glyphs differ only in
+// direction and read as one set at the ribbon's 16px small-icon size, which a row
+// of identical cubes would not. The frame is small enough to leave the sight line
+// room, and `front`/`back` enter from the lower-left/upper-right on purpose: that
+// is where the cube's front face sits in the axonometric glyph.
+const VIEW_PLANE = <rect x="7.5" y="7.5" width="9" height="9" rx="1" />;
+
 const P = {
   app: <><path d="M12 3 20 7.5v9L12 21 4 16.5v-9z" /><path d="M12 7.6l4 2.3v4.6l-4 2.3-4-2.3V9.9z" /></>,
   new: <><path d="M6 3h7l5 5v13H6z" /><path d="M13 3v5h5M12 12v6M9 15h6" /></>,
@@ -16,7 +28,20 @@ const P = {
   zoomWindow: <><rect x="4" y="4" width="10" height="8" /><circle cx="15" cy="15" r="4.5" /><path d="M20 20l-3-3" /></>,
   pan: <><path d="M12 3v18M3 12h18" /><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" /></>,
   orbit: <><circle cx="12" cy="12" r="8" /><ellipse cx="12" cy="12" rx="8" ry="3.4" /><path d="M12 4v16" /></>,
-  view: <><path d="M12 3 20 7.5v9L12 21 4 16.5v-9z" /><path d="M12 12 20 7.5M12 12v9M12 12 4 7.5" /></>,
+  view: CUBE,
+  // Standard views (View tab). Each draws the same view plane with the sight
+  // line of the direction it looks from: down (top), up (bottom), right (left
+  // view), left (right view), into the plane from the lower-left (front) and from
+  // the upper-right (back) — the corners the axonometric cube's front face sits
+  // between. The isometric view keeps the cube, because it is the only one that is
+  // not a face-on projection.
+  viewTop: <>{VIEW_PLANE}<path d="M12 1.6v3.6" /><path d="M10.6 3.4 12 5.2l1.4-1.8" /></>,
+  viewBottom: <>{VIEW_PLANE}<path d="M12 22.4v-3.6" /><path d="M10.6 20.6 12 18.8l1.4 1.8" /></>,
+  viewFront: <>{VIEW_PLANE}<path d="M2.6 21.4 5.4 18.6" /><path d="M3.6 18.6h1.8V20.4" /></>,
+  viewBack: <>{VIEW_PLANE}<path d="M21.4 2.6 18.6 5.4" /><path d="M20.4 5.4h-1.8V3.6" /></>,
+  viewLeft: <>{VIEW_PLANE}<path d="M1.6 12h3.6" /><path d="M3.4 10.6 5.2 12l-1.8 1.4" /></>,
+  viewRight: <>{VIEW_PLANE}<path d="M22.4 12h-3.6" /><path d="M20.6 10.6 18.8 12l1.8 1.4" /></>,
+  viewIsometric: CUBE,
   grid: <><rect x="4" y="4" width="16" height="16" /><path d="M4 9.3h16M4 14.6h16M9.3 4v16M14.6 4v16" /></>,
   axes: <><path d="M6 18V6M6 18h12" /><path d="M6 6l-2.2 2.2M6 6l2.2 2.2M18 18l-2.2-2.2M18 18l-2.2 2.2" /></>,
   snap: <><path d="M12 3v6M12 15v6M3 12h6M15 12h6" /><rect x="9" y="9" width="6" height="6" /></>,

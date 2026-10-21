@@ -107,12 +107,18 @@ test('the grid-snap affordance stays visible but router-disabled, and OSNAP stay
   assert.equal(typedSnap.find(suggestion => suggestion.id === 'OSNAP').supported, true);
   // The ribbon renderer disables every command item the router does not admit
   // (the same gate GRID/ORTHO use), so the SNAP button is present but disabled.
+  // The gate is per dispatch token: a command takes router admission, a typed
+  // standard view takes the CAD-session gate, and nothing is locally enabled.
   const ribbon = await readModule('components/Ribbon.jsx');
   assert.ok(
-    ribbon.includes('const enabled = item.action ? true : item.command ? shell.canCommand(item.command) : false;'),
+    ribbon.includes(': item.command ? shell.canCommand(item.command)'),
     'a command ribbon item must be enabled only through router admission (`canCommand`)',
   );
-  assert.ok(ribbon.includes('disabled hint={unavailable(t, item)}'), 'an unadmitted item renders disabled with the unsupported hint');
+  assert.ok(
+    ribbon.includes('item.standardView ? standardViewAvailable(shell)'),
+    'a standard-view item must be enabled only through the typed-IPC session gate',
+  );
+  assert.ok(ribbon.includes('disabled hint={unavailable(t, item, shell)}'), 'an unadmitted item renders disabled with the unsupported hint');
 });
 
 test('ERASE is a modify affordance in the ribbon and catalog, enabled only by router admission', async () => {
@@ -938,11 +944,16 @@ test('every ribbon command id and label key exists in the shared catalog', async
     assert.equal(typeof zh[tab.labelKey], 'string', tab.labelKey);
     for (const panel of tab.panels) {
       assert.equal(typeof zh[panel.titleKey], 'string', panel.titleKey);
+      assert.equal(typeof en[panel.titleKey], 'string', panel.titleKey);
       for (const item of panel.items) {
         assert.equal(typeof zh[item.labelKey], 'string', item.labelKey);
         assert.equal(typeof en[item.labelKey], 'string', item.labelKey);
+        // A payload-carrying standard view must never also be a `command`: the
+        // name-only funnel would refuse it, so the button would lie about its lane.
+        if (item.standardView) assert.equal(item.command, undefined, item.id);
         for (const variant of item.variants ?? []) {
           assert.equal(typeof zh[variant.labelKey], 'string', variant.labelKey);
+          assert.equal(typeof en[variant.labelKey], 'string', variant.labelKey);
         }
       }
     }
