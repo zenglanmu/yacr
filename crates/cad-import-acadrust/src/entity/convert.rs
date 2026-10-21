@@ -320,10 +320,10 @@ impl<'a> ImporterBuilder<'a> {
             EntityType::SectionSymbol(s) => section_symbol_semantics(s),
             EntityType::Underlay(u) => underlay_semantics(u),
             EntityType::Light(l) => light_semantics(l),
-            EntityType::Solid3D(s) => acis_semantics(entity, &s.acis_data),
-            EntityType::Region(r) => acis_semantics(entity, &r.acis_data),
-            EntityType::Body(b) => acis_semantics(entity, &b.acis_data),
-            EntityType::Surface(s) => acis_semantics(entity, &s.acis_data),
+            EntityType::Solid3D(s) => self.acis_semantics(entity, &s.acis_data),
+            EntityType::Region(r) => self.acis_semantics(entity, &r.acis_data),
+            EntityType::Body(b) => self.acis_semantics(entity, &b.acis_data),
+            EntityType::Surface(s) => self.acis_semantics(entity, &s.acis_data),
             other => (
                 SemanticGeometry::Opaque {
                     type_key: entity_class_name(other),

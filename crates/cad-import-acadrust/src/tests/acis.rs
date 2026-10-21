@@ -311,3 +311,206 @@ fn opaque_payload_retains_the_raw_acis_bytes() {
     assert_eq!(version, 1);
     assert!(!payload.is_empty());
 }
+
+// ---- Import-time tessellation of the four ACIS entity types ----
+
+fn builder<'a>(req: &'a ImportRequest, acad: &'a acadrust::CadDocument) -> ImporterBuilder<'a> {
+    ImporterBuilder::new(req, acad, ReadStats::default(), compute_identity(&[]))
+}
+
+fn partial_reasons(completeness: &Completeness) -> Vec<String> {
+    match completeness {
+        Completeness::Partial(reasons) => reasons.clone(),
+        other => panic!("expected Partial, got {other:?}"),
+    }
+}
+
+/// Signed volume of a closed triangle mesh (divergence theorem).
+fn mesh_volume(mesh: &cad_domain::Mesh) -> f64 {
+    let mut volume = 0.0;
+    for triangle in &mesh.triangles {
+        let a = mesh.vertices[triangle[0] as usize];
+        let b = mesh.vertices[triangle[1] as usize];
+        let c = mesh.vertices[triangle[2] as usize];
+        volume += a.x * (b.y * c.z - b.z * c.y) - a.y * (b.x * c.z - b.z * c.x)
+            + a.z * (b.x * c.y - b.y * c.x);
+    }
+    volume / 6.0
+}
+
+fn mesh_bounds(mesh: &cad_domain::Mesh) -> (Point3, Point3) {
+    let mut min = mesh.vertices[0];
+    let mut max = min;
+    for p in &mesh.vertices {
+        min = Point3 {
+            x: min.x.min(p.x),
+            y: min.y.min(p.y),
+            z: min.z.min(p.z),
+        };
+        max = Point3 {
+            x: max.x.max(p.x),
+            y: max.y.max(p.y),
+            z: max.z.max(p.z),
+        };
+    }
+    (min, max)
+}
+
+#[test]
+fn supported_acis_solid_tessellates_to_a_mesh_at_a_derived_tolerance() {
+    let sat = include_str!("../../../../fixtures/acis/cube.sat");
+    let acad = acadrust::CadDocument::new();
+    let req = request(Vec::new());
+    let mut builder = builder(&req, &acad);
+
+    let entity = EntityType::Solid3D(acadrust::entities::Solid3D::from_sat(sat));
+    let common = entity.common();
+    let (geometry, completeness) = builder.convert(&entity, common);
+
+    let SemanticGeometry::Mesh(mesh) = geometry else {
+        panic!("a tessellated 3DSOLID must become Mesh geometry, got {geometry:?}");
+    };
+    assert_eq!(
+        mesh.triangles.len(),
+        12,
+        "a box tessellates to 12 triangles"
+    );
+
+    // The unit cube fixture spans [-1, 1] on every axis.
+    let (min, max) = mesh_bounds(&mesh);
+    for (actual, expected) in [
+        (min.x, -1.0),
+        (min.y, -1.0),
+        (min.z, -1.0),
+        (max.x, 1.0),
+        (max.y, 1.0),
+        (max.z, 1.0),
+    ] {
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "bounds {min:?}..{max:?} do not match the fixture extent"
+        );
+    }
+
+    // Exact for a planar box; the stated tolerance is 0 (analytic precision).
+    let volume = mesh_volume(&mesh);
+    assert!(
+        (volume - 8.0).abs() < 1e-9,
+        "closed-mesh volume {volume} != analytic 8.0"
+    );
+
+    // The tolerance rule is a deliberate fraction of the body diagonal.
+    let brep = sat_to_brep(&acadrust::entities::acis::SatDocument::parse(sat).unwrap());
+    let (tolerance, diagonal) = crate::solid::acis_tolerance(&brep);
+    assert!(
+        (diagonal - 2.0 * 3.0_f64.sqrt()).abs() < 1e-9,
+        "cube diagonal {diagonal}"
+    );
+    assert!(
+        (tolerance.linear_deflection - diagonal * 1e-3).abs() < 1e-12,
+        "tolerance {} must be 0.1% of {diagonal}",
+        tolerance.linear_deflection
+    );
+
+    // Exactly the two declared reasons, in order, and never Complete.
+    let reasons = partial_reasons(&completeness);
+    assert_eq!(
+        reasons,
+        vec![
+            crate::support::acis_approximation_reason(tolerance.linear_deflection),
+            crate::support::ACIS_SOURCE_NOT_RETAINED_REASON.to_string(),
+        ]
+    );
+    assert!(!matches!(completeness, Completeness::Complete));
+
+    // Recorded once per import (this builder has not seen a second solid yet).
+    let reported: Vec<&str> = builder
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "import.acis_tessellated")
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+    assert_eq!(reported.len(), 2, "{reported:?}");
+}
+
+#[test]
+fn raw_unparseable_acis_stays_opaque_with_the_kernel_reason_and_no_mesh() {
+    let acad = acadrust::CadDocument::new();
+    let req = request(Vec::new());
+    let mut builder = builder(&req, &acad);
+
+    let entity = EntityType::Solid3D(acadrust::entities::Solid3D::from_sat(
+        "this is not an ACIS payload",
+    ));
+    let common = entity.common();
+    let (geometry, completeness) = builder.convert(&entity, common);
+
+    assert!(
+        matches!(geometry, SemanticGeometry::Opaque { .. }),
+        "an unparseable payload must stay Opaque, got {geometry:?}"
+    );
+    let reasons = partial_reasons(&completeness);
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason.starts_with("kernel.no_acis_kernel:")),
+        "the kernel's own named reason must survive: {reasons:?}"
+    );
+    assert!(
+        !matches!(completeness, Completeness::Complete),
+        "a refusal is never Complete"
+    );
+    assert!(
+        builder
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "import.acis_unsupported"),
+        "the refusal must be reported as an import diagnostic"
+    );
+}
+
+#[test]
+fn importing_two_acis_solids_reports_each_reason_once_and_never_complete() {
+    use acadrust::io::dwg::dwg_writer::DwgWriter;
+
+    let sat = include_str!("../../../../fixtures/acis/cube.sat");
+    let mut doc = acadrust::CadDocument::new();
+    for _ in 0..2 {
+        doc.add_entity(EntityType::Solid3D(acadrust::entities::Solid3D::from_sat(
+            sat,
+        )))
+        .unwrap();
+    }
+    let bytes = DwgWriter::write_to_vec(&doc).unwrap();
+
+    let drawing = AcadrustImporter::new()
+        .import(&request(bytes), &|| false)
+        .expect("synthetic DWG with 3DSOLIDs imports");
+
+    assert!(
+        !matches!(drawing.report.completeness, Completeness::Complete),
+        "tessellated ACIS content may never report Complete: {:?}",
+        drawing.report.completeness
+    );
+    let meshes = drawing
+        .database
+        .entities()
+        .filter(|entity| matches!(entity.geometry, SemanticGeometry::Mesh(_)))
+        .count();
+    assert_eq!(meshes, 2, "both 3DSOLIDs must be drawn as meshes");
+
+    let brep = sat_to_brep(&acadrust::entities::acis::SatDocument::parse(sat).unwrap());
+    let (tolerance, _) = crate::solid::acis_tolerance(&brep);
+    for reason in [
+        crate::support::acis_approximation_reason(tolerance.linear_deflection),
+        crate::support::ACIS_SOURCE_NOT_RETAINED_REASON.to_string(),
+    ] {
+        let count = drawing
+            .report
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.message == reason)
+            .count();
+        assert_eq!(count, 1, "{reason:?} must be reported once per import");
+    }
+}

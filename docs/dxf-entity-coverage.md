@@ -80,7 +80,7 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）�
 | RAY / XLINE | ✅ | ✅ | 裁剪到模型 bounds；无范围回退为默认盒 `Partial` |
 | DIMENSION 子类 | ✅ | ✅/⚠️ | **P5a**：线性/对齐/半径/直径/角度(2Ln/3Pt)/坐标 `Complete` 且导入为一级 `Dimension`；**圆弧长/大半径未迁移**（保留旧 `Compound` 合成，`Partial`，导出仍有损）；导出形状见 §2 的 DIMENSION 行（内容块/42/DIMSTYLE；多项丢弃，**未用第三方读取器验证**） |
 | OLE2FRAME / UNDERLAY / VIEWBORDER / SECTIONSYMBOL / LIGHT | ✅ | ✅/⚠️ | 外框/裁剪边界/符号/灯光字形已画；外部内容不加载，均 `Partial` |
-| 3DSOLID / BODY / REGION / SURFACE (ACIS) | ✅ | ⛔ **渲染为空** | 导入只保留 `Opaque` 原始 SAT/SAB 字节（`crates/cad-import-acadrust/src/support.rs:10-23`；`crates/cad-domain/src/lib.rs:394-398`），表示层产出 `Missing("no display representation in this build")` + `representation.opaque`（`crates/cad-representation/src/provider/default.rs:533-541`），显示/拾取均 `Unsupported`。`cad-kernel-adapter` 的 `BrepTessellator` **已测试但未接入显示路径**（`crates/cad-kernel-adapter/src/brep_tessellator.rs:6-12`：只消费中性 `BrepData`，原始 SAT/SAB 仍 `kernel.no_acis_kernel`）；`DisplayRepresentation::from_tessellation` 只有测试调用者。**阻塞**：SAT/SAB→`BrepData` 的解析器只在 `cad-import-acadrust`（`solid.rs:29-127`），`scripts/check-architecture.py:174-175` 只允许该 crate 依赖 acadrust，表示层不能反转层序；域模型无 `BrepData` 载体。**完整 ACIS/样条面仍超出范围** |
+| 3DSOLID / BODY / REGION / SURFACE (ACIS) | ✅ | ✅ **渲染（导入期离散）** | 导入期经 `cad-kernel-adapter` 把 SAT/SAB 离散为中性网格（容差 = 包围盒对角线的 **0.1 %**），发出 `SemanticGeometry::Mesh`；完整性恒 `Partial`（**离散近似不随缩放细化** + **源 ACIS 不保留**，导出写 POLYFACE 而非 3DSOLID）；超出子集/原始 SAT/SAB 被拒仍为 `Opaque` + 内核具名码。**完整 ACIS/样条面仍超出范围** |
 | 绘制顺序 `draw_order` | ✅ | ⛔ 未贯通 | `DbEntity::draw_order` 未经 `DisplayFragment` 传到 `RenderBatch`（本轮正式推迟）；绘制顺序=上传顺序 |
 | 纸空间 `plot` | ✅ | ✅（视口合成近似） | 修复三处：①纸张单位优先从标准纸名解析（acadrust 实际会把 `group 72` 应用到 LAYOUT，但纸名带单位记号时更可靠）；②默认选有 viewport 的纸空间布局；③acadrust 亦应用 `group 73` 旋转，仅在文件未声明旋转时才按 viewport 范围把纸张轴交换为横向（标题栏保持正立）。纸张/边框/标题栏已出图；**模型视图仍有错位/多余图元**（视口合成保真未通过） |
 | DXF STYLE XDATA 字体 | — | ✅（DXF/DWG） | acadrust 0.6.5 已把 STYLE 的 `1001 ACAD`/`1000` 字体面类型化为 `TextStyle.true_type_font`（DXF 读取；DWG 经 `io/dwg/typeface_eed.rs`）。解析链为 `类型化 true_type_font > group 3/4 声明字体 > dxf_style_xdata_fonts 字节扫描`；字节扫描自身仍不覆盖组件 group 3/4（不改 acadrust）。DXF/DWG 文本现可按宿主 `--font <face>=<path>` 解析 |
@@ -113,8 +113,8 @@ QCAD 字体：`osifont.ttf`（GPL-3 + 字体例外）已提交到 `fonts/` 作�
   只剩字体/subclass 等保真度问题。
 - 与 opencadstudio 图元清单相比：**所有可绘制 `EntityType` 均已接线**（外部/非绘制
   对象给出外框/符号/字形并标 `Partial`），仅结构性 `Block/BlockEnd/Seqend` 不产生几何。
-  **例外（2026-10-21 更正）**：ACIS 实体 3DSOLID/BODY/REGION/SURFACE 虽有 `EntityType`
-  且被解析，但**渲染为空**（不透明负载，见 §4 对应行），不计入"已接线"。
+  **2026-10-21 起 ACIS 已接线**：3DSOLID/BODY/REGION/SURFACE 在导入期离散为网格，
+  **计入"已接线"**（见 §4 对应行）。
 - 2026-10-10 轮：**光栅图像（RASTERIMAGE）已端到端显示**（host 解码 PNG/JPEG + GPU 纹理
   管线，含每键纹理去重、UV 方向、裁剪多边形、缺失显式 `Partial`）；非 proxy `Extended`
   图元补齐基础表示；MLINE/TABLE/DIMENSION/MULTILEADER/HATCH 边界保真提升。
@@ -124,7 +124,7 @@ QCAD 字体：`osifont.ttf`（GPL-3 + 字体例外）已提交到 `fonts/` 作�
   裁剪、TABLE 逐边样式、MLINE CLOSED/cap 角度、MULTILEADER 背景填充/列/块属性、大半径
   jog、外部内容加载、纸空间视口合成，见 §4。
 - **显式不可实现**（记录、不伪造）：代理 opcode 厂商记录（本轮排除）、外部 PDF/DWF/DGN
-  underlay 与 OLE2 嵌入、CoordinationModel/Navisworks NWD、ACIS 全内核（3DSOLID/REGION/
-  BODY/SURFACE **当前渲染为空**，见 §4）、点云点数据、
+  underlay 与 OLE2 嵌入、CoordinationModel/Navisworks NWD、ACIS 的**样条曲面与一般裁剪**
+  （基础离散已接线，见 §4）、点云点数据、
   完全顺序正确的 WIPEOUT 透明覆盖掩码。STYLE xdata 字体名已由 acadrust 0.6.5 类型化
   （DXF+DWG）。

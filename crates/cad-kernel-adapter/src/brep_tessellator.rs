@@ -14,35 +14,63 @@ use super::*;
 pub struct BrepTessellator;
 
 impl BrepTessellator {
-    fn failed(stamp: &TaskStamp, code: &str, message: String) -> TessellationResult {
-        TessellationResult {
-            stamp: stamp.clone(),
-            outcome: TessellationOutcome::Failed {
-                diagnostics: vec![Diagnostic {
-                    code: code.to_string(),
-                    object: None,
-                    message,
-                }],
-            },
+    fn failed(code: &str, message: String) -> TessellationOutcome {
+        TessellationOutcome::Failed {
+            diagnostics: vec![Diagnostic {
+                code: code.to_string(),
+                object: None,
+                message,
+            }],
         }
     }
 
-    fn unsupported(
-        stamp: &TaskStamp,
-        exchange: ExchangeKind,
-        code: &str,
-        detail: String,
-    ) -> TessellationResult {
-        TessellationResult {
-            stamp: stamp.clone(),
-            outcome: TessellationOutcome::Unsupported {
-                reason: UnsupportedReason {
-                    code: code.to_string(),
-                    exchange,
-                    detail,
-                },
+    fn unsupported(exchange: ExchangeKind, code: &str, detail: String) -> TessellationOutcome {
+        TessellationOutcome::Unsupported {
+            reason: UnsupportedReason {
+                code: code.to_string(),
+                exchange,
+                detail,
             },
         }
+    }
+}
+
+/// Tessellate a raw exchange payload outside the database object lifecycle.
+///
+/// Import-time callers have no [`ObjectId`] or task stamp yet: the importer
+/// lifts SAT/SAB into a neutral [`BrepData`] and needs the facet set before it
+/// inserts the entity. This is the same evaluation path as
+/// [`BrepTessellator::tessellate`] (tolerance/budget validation, empty-payload
+/// refusal, budget enforcement), without inventing a handle or a stamp.
+pub fn tessellate_exchange(
+    exchange: &SolidExchange,
+    tolerance: TessellationTolerance,
+    budget: TessellationBudget,
+) -> TessellationOutcome {
+    if let Err(error) = tolerance.validate().and_then(|_| budget.validate()) {
+        return BrepTessellator::failed(error.code, error.message);
+    }
+    if exchange.is_empty() {
+        return BrepTessellator::failed(
+            codes::KERNEL_EMPTY_GEOMETRY,
+            format!("{} payload carried no geometry", exchange.type_key()),
+        );
+    }
+    match exchange {
+        SolidExchange::Brep(brep) => tessellate_brep(tolerance, budget, brep),
+        SolidExchange::Sat(_) | SolidExchange::Sab(_) => BrepTessellator::unsupported(
+            exchange.kind(),
+            codes::KERNEL_NO_ACIS_KERNEL,
+            "raw SAT/SAB bytes are lifted by the importer, not by this tessellator".into(),
+        ),
+        SolidExchange::Unsupported { .. } => BrepTessellator::unsupported(
+            ExchangeKind::Unsupported,
+            codes::KERNEL_UNSUPPORTED_EXCHANGE,
+            format!(
+                "no decoder registered for exchange type '{}'",
+                exchange.type_key()
+            ),
+        ),
     }
 }
 
@@ -82,48 +110,30 @@ impl SolidTessellator for BrepTessellator {
             .map_err(|e| CadError::InvalidInput(e.to_string()))?;
 
         if let GeometryHandle::Missing { key } = &request.geometry {
-            return Ok(Self::failed(
-                &request.stamp,
-                codes::KERNEL_MISSING_HANDLE,
-                format!("geometry handle '{key}' could not be resolved"),
-            ));
-        }
-        if request.exchange.is_empty() {
-            return Ok(Self::failed(
-                &request.stamp,
-                codes::KERNEL_EMPTY_GEOMETRY,
-                format!(
-                    "{} payload carried no geometry",
-                    request.exchange.type_key()
+            return Ok(TessellationResult {
+                stamp: request.stamp.clone(),
+                outcome: Self::failed(
+                    codes::KERNEL_MISSING_HANDLE,
+                    format!("geometry handle '{key}' could not be resolved"),
                 ),
-            ));
+            });
         }
 
-        match &request.exchange {
-            SolidExchange::Brep(brep) => Ok(tessellate_brep(request, brep)),
-            SolidExchange::Sat(_) | SolidExchange::Sab(_) => Ok(Self::unsupported(
-                &request.stamp,
-                request.exchange.kind(),
-                codes::KERNEL_NO_ACIS_KERNEL,
-                "raw SAT/SAB bytes are lifted by the importer, not by this tessellator".into(),
-            )),
-            SolidExchange::Unsupported { .. } => Ok(Self::unsupported(
-                &request.stamp,
-                ExchangeKind::Unsupported,
-                codes::KERNEL_UNSUPPORTED_EXCHANGE,
-                format!(
-                    "no decoder registered for exchange type '{}'",
-                    request.exchange.type_key()
-                ),
-            )),
-        }
+        Ok(TessellationResult {
+            stamp: request.stamp.clone(),
+            outcome: tessellate_exchange(&request.exchange, request.tolerance, request.budget),
+        })
     }
 }
 
 /// Tessellate a neutral B-rep, enforcing the request budget and reporting
 /// degradation exactly (missing faces, open edges, dropped shells).
-fn tessellate_brep(request: &TessellationRequest, brep: &BrepData) -> TessellationResult {
-    let tol = request.tolerance;
+fn tessellate_brep(
+    tolerance: TessellationTolerance,
+    budget: TessellationBudget,
+    brep: &BrepData,
+) -> TessellationOutcome {
+    let tol = tolerance;
     let placement = brep.placement.unwrap_or_else(BrepPlacement::identity);
 
     let mut vertices: Vec<Point3> = Vec::new();
@@ -182,7 +192,6 @@ fn tessellate_brep(request: &TessellationRequest, brep: &BrepData) -> Tessellati
     if triangles.is_empty() {
         if missing_faces.is_empty() {
             return BrepTessellator::failed(
-                &request.stamp,
                 codes::KERNEL_EMPTY_GEOMETRY,
                 "neutral B-rep carried no tessellatable face".into(),
             );
@@ -194,7 +203,6 @@ fn tessellate_brep(request: &TessellationRequest, brep: &BrepData) -> Tessellati
                 .collect::<Vec<_>>()
                 .join("; ");
             return BrepTessellator::unsupported(
-                &request.stamp,
                 ExchangeKind::Brep,
                 codes::KERNEL_UNSUPPORTED_SURFACE,
                 detail,
@@ -205,10 +213,7 @@ fn tessellate_brep(request: &TessellationRequest, brep: &BrepData) -> Tessellati
             ..TessellationDegradation::default()
         }
         .diagnostics();
-        return TessellationResult {
-            stamp: request.stamp.clone(),
-            outcome: TessellationOutcome::Failed { diagnostics },
-        };
+        return TessellationOutcome::Failed { diagnostics };
     }
 
     let open_edges = detect_open_edges(&vertices, &triangles);
@@ -231,12 +236,9 @@ fn tessellate_brep(request: &TessellationRequest, brep: &BrepData) -> Tessellati
         precision,
     };
 
-    if let Err(diagnostic) = request.budget.check(&mesh) {
-        return TessellationResult {
-            stamp: request.stamp.clone(),
-            outcome: TessellationOutcome::Failed {
-                diagnostics: vec![diagnostic],
-            },
+    if let Err(diagnostic) = budget.check(&mesh) {
+        return TessellationOutcome::Failed {
+            diagnostics: vec![diagnostic],
         };
     }
 
@@ -246,22 +248,16 @@ fn tessellate_brep(request: &TessellationRequest, brep: &BrepData) -> Tessellati
         dropped_shells,
     };
     if degradation.is_empty() {
-        TessellationResult {
-            stamp: request.stamp.clone(),
-            outcome: TessellationOutcome::Success {
-                geometry: mesh,
-                diagnostics: Vec::new(),
-            },
+        TessellationOutcome::Success {
+            geometry: mesh,
+            diagnostics: Vec::new(),
         }
     } else {
         let diagnostics = degradation.diagnostics();
-        TessellationResult {
-            stamp: request.stamp.clone(),
-            outcome: TessellationOutcome::Partial {
-                geometry: mesh,
-                degradation,
-                diagnostics,
-            },
+        TessellationOutcome::Partial {
+            geometry: mesh,
+            degradation,
+            diagnostics,
         }
     }
 }

@@ -50,7 +50,7 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | WIPEOUT | 实现(`Mask` 边界 + `inverted`) | 部分 | **非 `inverted`：真遮罩**——无颜色 `Mask` 图元，渲染器**末 pass**（`depth_compare: Always`、不写深度、**clear 颜色**），**凹形用 even-odd 填充**；**`inverted` 亦已渲染**（视口覆盖环 + 边界做 even-odd 补集；正交视口环**精确**、透视下为**宽松估计**）；矢量出图**跳过并具名**；不与更高 `draw_order` 交错（遮罩恒最后） | 经边界 | 不支持 |
 | EXTENDED(RTEXT/ARCALIGNEDTEXT/GEOPOSITIONMARKER/SECTIONOBJECT/POINTCLOUD) | 实现(基础字段) | 部分 | 基础表示(Text/圆/折线/范围盒) | 部分 | 不支持 |
 | CAMERA / 动态块参数与夹点 / OLEFRAME / LAYOUTPRINTCONFIG / FORMAT / LEGACY / REGISTEREDCLASS | 实现(仅 common 或无语义) | 显式无显示 | 不绘制(`Opaque`/`Unverified`) | — | — |
-| 3DSOLID / BODY / REGION / SURFACE (ACIS) | 实现(acadrust `entities::acis` 解析后**只**保留 `Opaque` 原始 SAT/SAB 字节 + 格式标签) | 不透明负载(`Unverified`；**不保留** shell/face/placement) | **不绘制**：表示层产出 `Missing("no display representation in this build")` + `representation.opaque` 诊断；显示/拾取两条通道均 `Unsupported`。**此前"子集离散"的描述是错的**，见下文「ACIS 实体显示状态」 | 不支持 | 不支持 |
+| 3DSOLID / BODY / REGION / SURFACE (ACIS) | 实现(acadrust 解析 SAT/SAB；**导入期离散**为中性网格) | 中性网格（**源 ACIS 不保留**） | **会绘制**：导入期经 `cad-kernel-adapter` 离散，容差 = 包围盒对角线的 **0.1 %**，恒 `Partial` 并声明「离散近似不随缩放细化 + 源不保留」；超出子集/原始 SAT/SAB 被拒 ⇒ 仍 `Opaque` + 内核具名码 | 经网格 | 不支持 |
 | TEXT/MTEXT 格式 | 实现(格式 run 解析) | 部分(堆叠分数/颜色/装饰/行对齐为显式 Partial) | 按 run 整形/换行 | — | — |
 | 实体颜色/线宽 | 实现(ByObject/ByLayer/ByBlock，ACI/RGB) | 实现(颜色)；线宽仅携带 | 颜色进入 shader；线宽**显式不绘制** | — | — |
 | LINETYPE 虚线 | 实现(名称/表/线型比例) | 实现(ByObject/ByLayer/ByBlock) | 按弧长细分 dash/gap；复杂线型仅 dash、显式 Partial | — | — |
@@ -60,40 +60,21 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | 天正/探索者代理 | 实现(仅公开缓存记录) | 仅 FillOff/UnicodeText 有证据 | 依解码结果 | 实现 | 标记缓存几何 |
 | 布局 / 视口 | 实现(矩形裁剪/比例) | 复杂裁剪标记部分 | 未装配纸空间渲染 | 部分 | 纸空间测量显式禁用 |
 
-### ACIS 实体显示状态（3DSOLID / BODY / REGION / SURFACE，2026-10-21 更正）
+### ACIS 实体显示状态（3DSOLID / BODY / REGION / SURFACE，2026-10-21：**已接线**）
 
-这些实体**当前渲染为空**，此前表中"子集离散"的说法**不成立**：离散器存在且有测试，
-但**没有生产调用者**，即没有接进显示路径。
+这些实体**现在会画**：导入期用 `cad-kernel-adapter` 的离散器把 SAT/SAB 转成**中性网格**，
+以既有的 `SemanticGeometry::Mesh` 发出（**不新增域变体**，因此没有匹配臂风暴）。
 
-- **导入**：`crates/cad-import-acadrust/src/support.rs:10-23` 只产生
-  `SemanticGeometry::Opaque { type_key, version, payload }`；`payload` 是原始 SAT/SAB 字节，
-  `version` 只是格式标签（1 = SAT 文本、2 = SAB 二进制）；**不保留** shell/face/loop/placement，
-  完整性 `Unverified`（`crates/cad-domain/src/lib.rs:394-398` 定义该负载）。
-- **表示**：`Opaque` → `Completeness::Missing(["no display representation in this build"])`
-  + 诊断 `representation.opaque`（`crates/cad-representation/src/provider/default.rs:533-541`）；
-  `display_support` 对 `Opaque` 的显示与拾取都返回 `Unsupported`
-  （`crates/cad-import-acadrust/src/support.rs:30-32`）。
-- **已存在但未接线**：`cad-kernel-adapter` 的 `BrepTessellator` **只消费中性 `BrepData`**，
-  实现平面（含孔）/整球/整环面/圆柱条带/圆锥子集，其余按具名码降级；**原始 SAT/SAB 一律
-  `Unsupported(kernel.no_acis_kernel)`**（`crates/cad-kernel-adapter/src/brep_tessellator.rs:6-12,72-120`）。
-  `DisplayRepresentation::from_tessellation`（`crates/cad-representation/src/representation.rs:82`）
-  目前**只有测试调用者**（`crates/cad-representation/src/tests/kernel_mesh.rs`）。
-  合成夹具在 `fixtures/acis/`（自撰，非 vendor 产出）。
-- **未接线的阻塞点（本次只更正文档、没有半接线）**：
-  1. **形态在导入处已丢失**：显示层只拿得到原始字节，`Opaque` 不携带 `BrepData`；把字节变
-     `BrepData` 需要 acadrust 的 `AcisData::parse()`/`SatDocument`
-     （`crates/cad-import-acadrust/src/solid.rs:29-127`）。
-  2. **层序**：`scripts/check-architecture.py:174-175` 规定只有 `cad-import-acadrust` 可以依赖
-     acadrust；`cad-representation` 位于其下层，反向调用既是层序倒置，也会把 acadrust 传递进
-     表示层。真正接线必须先让导入把 `SolidExchange::Brep` 存进域模型
-     （`cad-domain` + 导入 + 表示 + 下游消费者），是跨 crate 变更而非有界接线。
-  3. **无显示级离散缓存/预算**：场景装配在后台任务中逐实体同步构建
-     （`crates/cad-app/src/render_scene/assembly.rs:148`；
-     `crates/cad-engine/src/render/preparation.rs:87`），不阻塞 UI 帧，但每次内容修订都会重算；
-     接线前还需先定容差与预算策略。
-
-**完整 ACIS 内核与样条曲面支持仍超出范围**；上表的"读取：实现"只表示能解析出原始负载，
-**不表示能显示**。
+- **容差是规则，不是魔数**：线性偏差 = 该实体**世界包围盒对角线的 0.1 %（1e-3）**；角度偏差取内核默认 0.35 rad。
+  `fixtures/acis/cube.sat`：对角线 3.4641016 ⇒ 容差 **3.464102e-3**。
+- **完整性恒 `Partial`，两条具名理由**：①按容差 T 的**离散近似，缩放不会细化**；
+  ②**源 ACIS 不保留**——实体携带网格而非原始 SAT/SAB 字节 ⇒ **不能作为 3DSOLID 往返**。
+- **拒绝保持原状**：超出子集、或原始 SAT/SAB 被内核拒绝 ⇒ 仍是 `Opaque` + 内核具名码
+  （如 `kernel.no_acis_kernel`），**不把失败改成空成功**。
+- **导出**：网格的源类型是 `AcDb3dSolid`/`AcDbRegion`/`AcDbBody`/`AcDbSurface` 时，写 **POLYFACE 网格**
+  并记录具名转换（"tessellated from ACIS at import … not as a 3DSOLID"，`export.converted.mesh`）。
+- **证据**：cube 夹具 **12 三角形**、顶点界 `[-1,1]³`、闭合体积 **8.0**（解析 8.0，误差 < 1e-9）。
+- **仍未做**：样条曲面 / 一般裁剪 B-rep / 完整 ACIS 内核（超出范围）；离散**不随缩放细化**；**源字节不保留**。
 
 ### DIMENSION 族（ADR-0017 P5a，逐行，非脚注）
 
@@ -275,17 +256,9 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
   （`docs/render-order.md`）；plot-style 表 alpha 未应用（acadrust 只暴露样式表引用名，
   不暴露解析后的颜色/线宽/alpha 值；引用名本身由 `cad-import-acadrust` 读取并显式报告
   为 Unsupported）。
-- ACIS 曲面离散（显示）：**未接入显示路径，3DSOLID/BODY/REGION/SURFACE 渲染为空**。导入只保留
-  `Opaque` 原始 SAT/SAB 字节（`crates/cad-import-acadrust/src/support.rs:10-23`；
-  `crates/cad-domain/src/lib.rs:394-398`），表示层据此产出 `Missing`
-  （`crates/cad-representation/src/provider/default.rs:533-541`）。`cad-kernel-adapter` 中存在
-  **已测试**的 B-rep 离散器（`BrepTessellator`，`crates/cad-kernel-adapter/src/brep_tessellator.rs`：
-  平面/带孔平面/整球/整环面/圆柱/圆锥子集，其他 `Unsupported(kernel.*)` 具名降级），但它只消费
-  中性 `BrepData`，原始 SAT/SAB 仍 `kernel.no_acis_kernel`；`DisplayRepresentation::from_tessellation`
-  只有测试调用者。阻塞：SAT/SAB → `BrepData` 的解析器只在 `cad-import-acadrust`
-  （`crates/cad-import-acadrust/src/solid.rs:29-127`），而
-  `scripts/check-architecture.py:174-175` 只允许该 crate 依赖 acadrust，表示层不能反转层序；
-  且域模型没有承载 `BrepData` 的变体。完整 ACIS/样条面支持仍超出范围。
+- ACIS 曲面（显示）：**已接线**——导入期离散为中性网格（容差 = 包围盒对角线的 0.1 %），
+  恒 `Partial` 并声明「离散近似不随缩放细化 + 源 ACIS 不保留」；超出子集/原始 SAT/SAB 被拒仍为 `Opaque`
+  并带内核具名码。详见「ACIS 实体显示状态」。完整 ACIS/样条面支持仍超出范围。
 
 ## 平台
 
@@ -341,7 +314,7 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 2026-10-10 图元显示补全轮新增边界：**光栅图像** PNG/JPEG 已解码并出纹理，但
 TIFF/CCITT/EPS 等编解码器、亮度/对比/淡出/透明、outside/mask 裁剪显式未支持；
 Web/Android 宿主未接图像加载器；**`draw_order` 未贯通**（绘制顺序=上传顺序）；
-**WIPEOUT 掩码填充未渲染**（仅边界，`inverted` 未被消费）。**外部内容** PDF/DWF/DGN
+**WIPEOUT 掩码已实现**（非 `inverted` 与 `inverted` 都渲染；不与更高 `draw_order` 交错、矢量出图跳过并具名）。**外部内容** PDF/DWF/DGN
 underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、ACIS 全内核（3DSOLID/REGION/
 BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「ACIS 实体显示状态」）、点云点数据（acadrust 0.6.5 仍只暴露元数据/范围，未暴露点数据）均不加载/不实现，显式
 `Partial`/`Unsupported`，不计入完成。代理 opcode 厂商记录仍按用户要求排除（见

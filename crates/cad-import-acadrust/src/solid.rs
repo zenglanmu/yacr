@@ -19,6 +19,7 @@ use acadrust::EntityType;
 use cad_domain::Point3;
 use cad_kernel_adapter::{
     BrepCurve, BrepData, BrepFace, BrepLoop, BrepPlacement, BrepShell, BrepSurface, SolidExchange,
+    TessellationTolerance,
 };
 
 /// Lift a parsed SAT/SAB document into the neutral exchange type.
@@ -124,6 +125,121 @@ pub fn sab_to_brep(bytes: &[u8]) -> Option<BrepData> {
     SabReader::read(bytes)
         .ok()
         .map(|document| sat_to_brep(&document))
+}
+
+/// Relative chordal deflection for import-time ACIS tessellation.
+///
+/// The tolerance is a **shape-relative** quantity: `1e-3` (0.1 %) of the
+/// body's bounding-box diagonal, applied to every entity independently. It is
+/// not a drawing-unit constant, so a 2 mm part and a 2000 mm part get the same
+/// relative facet density. The angular deflection keeps the kernel default
+/// (0.35 rad), because it is a facet-normal criterion rather than a size.
+pub const ACIS_LINEAR_DEFLECTION_FRACTION: f64 = 1.0e-3;
+
+/// The tolerance used for import-time tessellation, plus the diagonal it was
+/// derived from.
+///
+/// A body with no measurable extent falls back to a unit diagonal (`1.0`), so
+/// the policy stays finite even for degenerate/unsupported B-reps (which the
+/// kernel then refuses by name).
+pub fn acis_tolerance(brep: &BrepData) -> (TessellationTolerance, f64) {
+    let diagonal = brep_bounds(brep)
+        .map(|(min, max)| {
+            let d = (max.x - min.x, max.y - min.y, max.z - min.z);
+            (d.0 * d.0 + d.1 * d.1 + d.2 * d.2).sqrt()
+        })
+        .filter(|diagonal| diagonal.is_finite() && *diagonal > 0.0)
+        .unwrap_or(1.0);
+    let linear_deflection = (diagonal * ACIS_LINEAR_DEFLECTION_FRACTION).clamp(1e-9, f64::MAX);
+    (
+        TessellationTolerance {
+            linear_deflection,
+            angular_deflection: TessellationTolerance::default().angular_deflection,
+        },
+        diagonal,
+    )
+}
+
+/// Conservative axis-aligned bounds of a neutral B-rep, in world coordinates.
+///
+/// Every analytic surface contributes its centre ± its radius on all three
+/// axes (a superset of the true extent), and every loop contributes its line
+/// endpoints. The placement is applied to each sample. This is a *size* estimate
+/// for the tolerance rule, not a display bound, so a conservative over-estimate
+/// is preferable to missing a curved face.
+pub fn brep_bounds(brep: &BrepData) -> Option<(Point3, Point3)> {
+    let placement = brep.placement.unwrap_or_else(BrepPlacement::identity);
+    let mut samples: Vec<Point3> = Vec::new();
+    for shell in &brep.shells {
+        for face in &shell.faces {
+            surface_samples(&face.surface, &mut samples);
+            for loop_ in &face.loops {
+                for curve in &loop_.edges {
+                    match curve {
+                        BrepCurve::Line { start, end } => {
+                            samples.push(*start);
+                            samples.push(*end);
+                        }
+                        BrepCurve::Circle { center, radius, .. } => {
+                            axis_box(*center, radius.abs(), &mut samples)
+                        }
+                        BrepCurve::Unsupported { .. } => {}
+                    }
+                }
+            }
+        }
+    }
+    let mut iter = samples
+        .into_iter()
+        .filter(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+        .map(|p| placement.apply(p));
+    let first = iter.next()?;
+    let mut min = first;
+    let mut max = first;
+    for p in iter {
+        min.x = min.x.min(p.x);
+        min.y = min.y.min(p.y);
+        min.z = min.z.min(p.z);
+        max.x = max.x.max(p.x);
+        max.y = max.y.max(p.y);
+        max.z = max.z.max(p.z);
+    }
+    Some((min, max))
+}
+
+fn surface_samples(surface: &BrepSurface, out: &mut Vec<Point3>) {
+    match surface {
+        BrepSurface::Plane { .. } | BrepSurface::Unsupported { .. } => {}
+        BrepSurface::Sphere { center, radius, .. } => axis_box(*center, radius.abs(), out),
+        BrepSurface::Torus {
+            center,
+            major_radius,
+            minor_radius,
+            ..
+        } => axis_box(*center, major_radius.abs() + minor_radius.abs(), out),
+        BrepSurface::Cylinder { origin, radius, .. } => axis_box(*origin, radius.abs(), out),
+        BrepSurface::Cone { origin, radius, .. } => axis_box(*origin, radius.abs(), out),
+    }
+}
+
+fn axis_box(center: Point3, radius: f64, out: &mut Vec<Point3>) {
+    if !radius.is_finite() || radius <= 0.0 {
+        return;
+    }
+    for (dx, dy, dz) in [
+        (-1.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (0.0, -1.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, -1.0),
+        (0.0, 0.0, 1.0),
+    ] {
+        out.push(Point3 {
+            x: center.x + radius * dx,
+            y: center.y + radius * dy,
+            z: center.z + radius * dz,
+        });
+    }
 }
 
 fn face_surface(document: &SatDocument, face: &SatFace<'_>) -> BrepSurface {

@@ -62,6 +62,9 @@ const PINNED: &[(&str, usize)] = &[
     ("fixtures/dxf/qcad-examples/lineweights.dxf", 0),
     ("fixtures/dxf/qcad-examples/projection.dxf", 0),
     ("fixtures/dxf/qcad-flange/flange.dxf", 6),
+    // No bulges: a single tessellated 3DSOLID, pinned so its presence stays
+    // explicit in this corpus rather than silently entering or leaving it.
+    ("fixtures/dxf/synthetic-acis-cube.dxf", 0),
 ];
 
 #[derive(Debug, Default)]

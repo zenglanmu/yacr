@@ -134,9 +134,9 @@ TessellationOutcome::Failed     { diagnostics }
   `Brep(SolidExchange)`；解析失败保留原始 `Sat`/`Sab` 字节。
 * `acis_exchange(&AcisData) -> SolidExchange`、`sat_to_brep(&SatDocument)`、
   `sab_to_brep(&[u8])` 为可单测的底层入口。
-* 导入时实体的 `SemanticGeometry::Opaque.payload` 保留原始 SAT/SAB 字节
-  （version 1 = SAT，2 = SAB）作为溯源；**显示支持是 `Unsupported`/`Missing`
-  （渲染为空），不是"未检查"**，见 `docs/compatibility.md`「ACIS 实体显示状态」。
+* 导入时**不再保留**原始 SAT/SAB：实体在导入期被离散为中性网格（`SemanticGeometry::Mesh`），
+  **源字节不保留** ⇒ 不能作为 3DSOLID 往返。显示支持因此是 **`Verified`（网格）**；
+  只有超出子集或被内核拒绝的负载才是 `Unsupported`/`Missing`，见 `docs/compatibility.md`「ACIS 实体显示状态」。
 
 acadrust API 使用：`entities::acis::{SatDocument, SabReader, SatFace, SatLoop,
 SatCoedge, SatEdge, SatVertex, SatPoint, SatPlaneSurface, SatConeSurface,
@@ -146,12 +146,10 @@ SatSphereSurface, SatTorusSurface, SatEllipseCurve, Sense}`，以及
 
 ## 8. 显示路径
 
-**当前未接线**：`cad-representation::DisplayRepresentation::from_tessellation` 只有测试调用者
-（`crates/cad-representation/src/tests/kernel_mesh.rs`），`cad-import-acadrust` 没有生产调用
-`solid_exchange_from_entity`；因此 3DSOLID/BODY/REGION/SURFACE **渲染为空**
-（`cad-representation/src/provider/default.rs:533-541`）。阻塞点：`Opaque` 只带原始字节，
-SAT/SAB → `BrepData` 的解析器只在导入侧（acadrust 依赖边界，见
-`scripts/check-architecture.py:174-175`），域模型也没有 `BrepData` 载体。
+**已接线（2026-10-21，导入期）**：导入调用 `solid_exchange_from_entity` + 内核新增的
+无 stamp 入口 `tessellate_exchange`，把结果直接作为 `SemanticGeometry::Mesh` 发出；
+`cad-representation::DisplayRepresentation::from_tessellation` 仍只有测试调用者（导入不经该转换器）。
+容差 = 包围盒对角线的 0.1 %，恒 `Partial` 并声明「离散不细化 + 源不保留」。
 
 转换器本身的行为（供接线时使用）：`DisplayRepresentation::from_tessellation(result, source,
 alpha)` 把 `TessellationResult` 转为显示图元：

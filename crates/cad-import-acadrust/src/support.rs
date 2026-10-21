@@ -2,34 +2,129 @@
 
 use super::*;
 
-/// Retain a solid/surface entity's ACIS payload as opaque bytes.
+/// Completeness reason (a) for a tessellated ACIS entity.
 ///
-/// The neutral lift for tessellation is [`solid_exchange_from_entity`]; this
-/// opaque form keeps the raw SAT/SAB for provenance and for a later kernel
-/// provider, and deliberately claims no display support of its own.
-pub(crate) fn acis_semantics(
-    entity: &EntityType,
-    acis: &acadrust::entities::AcisData,
-) -> (SemanticGeometry, Completeness) {
-    let (version, payload) = acis_raw_payload(acis);
-    (
-        SemanticGeometry::Opaque {
-            type_key: entity_class_name(entity),
-            version,
-            payload,
-        },
-        Completeness::Unverified,
+/// The tolerance is embedded so the report says **which** discretisation was
+/// used, not merely that one was used.
+pub(crate) fn acis_approximation_reason(linear_deflection: f64) -> String {
+    format!(
+        "ACIS solid drawn as a discrete mesh approximation at tolerance \
+         {linear_deflection:.6e}; it does not refine when you zoom"
     )
+}
+
+/// Completeness reason (b) for a tessellated ACIS entity: the source is gone.
+pub(crate) const ACIS_SOURCE_NOT_RETAINED_REASON: &str = "the ACIS source is not \
+retained: the entity carries tessellated mesh geometry instead of its original \
+SAT/SAB bytes, so it cannot be round-tripped as a 3DSOLID";
+
+impl<'a> ImporterBuilder<'a> {
+    /// Lift + tessellate one ACIS entity at import time.
+    ///
+    /// The importer is the only crate above the kernel seam that may parse
+    /// SAT/SAB, so this is where the four ACIS entity types become displayable
+    /// [`SemanticGeometry::Mesh`]. Success is never reported `Complete`: the
+    /// facets are a discrete approximation and the ACIS source is dropped.
+    /// A payload the kernel refuses stays [`SemanticGeometry::Opaque`] with the
+    /// kernel's own named reason instead of an empty success.
+    pub(crate) fn acis_semantics(
+        &mut self,
+        entity: &EntityType,
+        acis: &acadrust::entities::AcisData,
+    ) -> (SemanticGeometry, Completeness) {
+        use cad_kernel_adapter::{
+            tessellate_exchange, SolidExchange, TessellationBudget, TessellationTolerance,
+        };
+
+        let exchange = acis_exchange(acis);
+        let (tolerance, _diagonal) = match &exchange {
+            SolidExchange::Brep(brep) => crate::solid::acis_tolerance(brep),
+            // Raw SAT/SAB that acadrust could not parse is refused below; the
+            // tolerance is irrelevant to that refusal.
+            _ => (TessellationTolerance::default(), 0.0),
+        };
+        let outcome = tessellate_exchange(&exchange, tolerance, TessellationBudget::default());
+
+        if let Some(mesh) = outcome.mesh() {
+            if !mesh.is_empty() {
+                let mut reasons = vec![
+                    acis_approximation_reason(tolerance.linear_deflection),
+                    ACIS_SOURCE_NOT_RETAINED_REASON.to_string(),
+                ];
+                // A partially tessellated body keeps the kernel's degradation
+                // reasons (missing faces / open edges), never hides them.
+                reasons.extend(
+                    outcome
+                        .diagnostics()
+                        .iter()
+                        .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.message)),
+                );
+                let completeness = self.acis_partial("import.acis_tessellated", reasons);
+                return (SemanticGeometry::Mesh(mesh.mesh.clone()), completeness);
+            }
+        }
+
+        let reasons = acis_refusal_reasons(&outcome);
+        let completeness = self.acis_partial("import.acis_unsupported", reasons);
+        let (version, payload) = acis_raw_payload(acis);
+        (
+            SemanticGeometry::Opaque {
+                type_key: entity_class_name(entity),
+                version,
+                payload,
+            },
+            completeness,
+        )
+    }
+
+    /// Record each named reason once per import and return the entity verdict.
+    fn acis_partial(&mut self, code: &str, reasons: Vec<String>) -> Completeness {
+        for reason in &reasons {
+            if self.reported_reasons.insert(reason.clone()) {
+                self.diagnostics.push(Diagnostic {
+                    object: None,
+                    code: code.into(),
+                    message: reason.clone(),
+                });
+            }
+        }
+        Completeness::Partial(reasons)
+    }
+}
+
+/// The kernel's own named reason(s) for refusing an ACIS payload.
+fn acis_refusal_reasons(outcome: &cad_kernel_adapter::TessellationOutcome) -> Vec<String> {
+    use cad_kernel_adapter::TessellationOutcome;
+    let mut reasons: Vec<String> = match outcome {
+        TessellationOutcome::Unsupported { reason } => {
+            vec![format!("{}: {}", reason.code, reason.detail)]
+        }
+        TessellationOutcome::Failed { diagnostics } => diagnostics
+            .iter()
+            .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.message))
+            .collect(),
+        // `Success`/`Partial` with no mesh is impossible today, but must not be
+        // reported as a silent empty success if it ever happens.
+        _ => Vec::new(),
+    };
+    if reasons.is_empty() {
+        reasons.push("kernel produced no tessellatable geometry".to_string());
+    }
+    reasons
 }
 
 /// Whether the display pipeline can actually draw this geometry (audit B20).
 ///
-/// Text has no scene batching yet and opaque/ACIS geometry has no
-/// representation, so neither is `Verified`; an INSERT depends on its block
-/// contents and is resolved by the caller.
+/// Text has no scene batching yet and opaque geometry has no representation, so
+/// neither is `Verified`; an INSERT depends on its block contents and is
+/// resolved by the caller. A tessellated ACIS solid is a real [`Mesh`] and is
+/// therefore drawable (`Verified`); only a refused ACIS payload stays `Opaque`.
 pub(crate) fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, SupportStatus) {
     match geometry {
         SemanticGeometry::Opaque { .. } => (SupportStatus::Unsupported, SupportStatus::Unsupported),
+        // Tessellated ACIS solids (3DSOLID/BODY/REGION/SURFACE) arrive as Mesh:
+        // they now have a display, so they must not inherit the Opaque refusal.
+        SemanticGeometry::Mesh(_) => (SupportStatus::Verified, SupportStatus::Verified),
         // Text is a supported entity kind whose display is conditional on a
         // host font: the host registers arbitrary `name=path` keys and legacy
         // DXF names such as `txt` omit the `.shx` extension, so availability is

@@ -423,3 +423,55 @@ fn tilted_circle_and_bulge_polyline_round_trip_through_ocs() {
     assert_eq!(report.counts.dropped, 0);
     assert_eq!(report.counts.converted, 0);
 }
+
+// ---------------------------------------------------------------------------
+// 2. ACIS solids are tessellated at import: export must name the conversion.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_tessellated_acis_solid_exports_as_a_polyface_mesh_not_a_3dsolid() {
+    use acadrust::io::dwg::dwg_writer::DwgWriter;
+
+    let sat = include_str!("../../../../../fixtures/acis/cube.sat");
+    let mut doc = CadDocument::new();
+    doc.add_entity(EntityType::Solid3D(acadrust::entities::Solid3D::from_sat(
+        sat,
+    )))
+    .unwrap();
+    let dwg = DwgWriter::write_to_vec(&doc).unwrap();
+
+    let db = import_bytes(&dwg);
+    assert!(
+        db.entities()
+            .any(|entity| matches!(entity.geometry, SemanticGeometry::Mesh(_))),
+        "the importer must have tessellated the 3DSOLID"
+    );
+
+    let (bytes, report) = export_db(&db);
+    let entities = read_entities(&bytes);
+    assert!(
+        entities
+            .iter()
+            .any(|entity| matches!(entity, EntityType::PolyfaceMesh(_))),
+        "a tessellated solid must export as a polyface mesh"
+    );
+    assert!(
+        !entities
+            .iter()
+            .any(|entity| matches!(entity, EntityType::Solid3D(_))),
+        "no ACIS source is retained, so a 3DSOLID cannot be round-tripped"
+    );
+
+    let conversion = report
+        .entries
+        .iter()
+        .find(|entry| {
+            entry.code == "export.converted.mesh" && entry.message.contains("not as a 3DSOLID")
+        })
+        .expect("the mesh conversion must be recorded by name");
+    assert!(
+        conversion.message.contains("original SAT/SAB source"),
+        "the conversion must state the lost 3DSOLID round trip: {}",
+        conversion.message
+    );
+}

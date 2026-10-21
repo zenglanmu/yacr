@@ -33,6 +33,13 @@ use super::tables::ensure_text_style;
 /// fields (1-based, so a 0-based index must be `< 32767`).
 const MAX_POLYFACE_INDEX: usize = 32766;
 
+/// Source entity classes whose ACIS payload the importer tessellates into a
+/// plain [`SemanticGeometry::Mesh`]. Their original SAT/SAB bytes are gone, so
+/// an export writes a polyface and must say so rather than imply a 3DSOLID
+/// round trip.
+const ACIS_TESSELLATED_TYPE_KEYS: [&str; 4] =
+    ["AcDb3dSolid", "AcDbRegion", "AcDbBody", "AcDbSurface"];
+
 /// Immutable inputs shared by the whole export.
 pub(crate) struct EntityContext<'a> {
     pub database: &'a DrawingDatabase,
@@ -481,6 +488,13 @@ fn emit_leaf(
                 "mesh written as a polyface mesh; per-vertex colours and normals are dropped"
                     .into(),
             );
+            if ACIS_TESSELLATED_TYPE_KEYS.contains(&entity.object.type_key.as_str()) {
+                reasons.push(
+                    "this mesh was tessellated from ACIS at import; the original SAT/SAB source \
+                     is not retained, so it is exported as a polyface mesh, not as a 3DSOLID"
+                        .into(),
+                );
+            }
             acc.record(object, "mesh", MappingOutcome::Converted(reasons));
         }
         SemanticGeometry::Text {

@@ -29,6 +29,17 @@
 //! flag (DXF code 71) that the DWG object writer does not persist is dropped.
 //! Both are stable afterwards, so the committed file is a fixed point.
 //!
+//! `regenerate_synthetic_acis_cube_dxf` authors the *drawing* counterpart of
+//! the raw `fixtures/acis/cube.sat` payload: one `3DSOLID` at the origin on
+//! layer 0, written as an ASCII DXF. It exists so the import-time ACIS
+//! tessellation can be seen in a running window, not only asserted in unit
+//! tests. AC1024 is requested on purpose: from AC1027 the acadrust DXF writer
+//! relocates ACIS data into binary SAB chunks in `ACDSDATA`, while pre-AC1027
+//! keeps it inline as text lines (group code 1, DXF version-1 character cipher
+//! over the SAT stream). The generator refuses to overwrite a file that is not
+//! the same one-solid drawing, and validates the bytes through our importer
+//! before writing them.
+//!
 //! Run it with:
 //!
 //! ```text
@@ -37,8 +48,22 @@
 
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use acadrust::{CadDocument, DwgReader, DwgWriter, EntityType};
+use acadrust::entities::Solid3D;
+use acadrust::{CadDocument, DwgReader, DwgWriter, DxfReader, DxfVersion, DxfWriter, EntityType};
+use cad_domain::{DatabaseId, DocumentId, Mesh, SemanticGeometry};
+use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+
+/// Raw ACIS payload the drawing fixture is built from.
+const CUBE_SAT: &str = "fixtures/acis/cube.sat";
+/// The generated drawing fixture.
+const ACIS_CUBE_DXF: &str = "fixtures/dxf/synthetic-acis-cube.dxf";
+/// `cube.sat` spans [-1, 1] on every axis; a box tessellates to 12 triangles.
+const CUBE_TRIANGLES: usize = 12;
+/// Half extent of `cube.sat`, used to give the DXF header real extents instead
+/// of the "not computed" sentinel (the round-trip check pins it).
+const CUBE_HALF_EXTENT: f64 = 1.0;
 
 /// `(DXF variable, value)` pairs written into the `Standard` DIMSTYLE.
 ///
@@ -216,6 +241,196 @@ fn regenerate_synthetic_four_lines() {
         std::fs::write(&path, &bytes).expect("write fixture");
         println!("rewrote {} ({})", path.display(), sha256(&bytes));
     }
+}
+
+fn repo_path(relative: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join(relative)
+}
+
+/// The minimal drawing: one `3DSOLID` built from `cube.sat`, no transform, on
+/// layer 0. A cold `CadDocument` already carries the `0` layer that the entity
+/// references, so nothing else has to be synthesized.
+fn acis_cube_document() -> CadDocument {
+    let sat = std::fs::read_to_string(repo_path(CUBE_SAT))
+        .unwrap_or_else(|error| panic!("read {CUBE_SAT}: {error}"));
+    let mut document = CadDocument::new();
+    let mut solid = Solid3D::from_sat(&sat);
+    solid.common.layer = "0".to_string();
+    document
+        .add_entity(EntityType::Solid3D(solid))
+        .expect("add the 3DSOLID to the drawing");
+    // The header otherwise keeps the 1e20 "extents not computed" sentinel.
+    document.header.model_space_extents_min =
+        acadrust::Vector3::new(-CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT, -CUBE_HALF_EXTENT);
+    document.header.model_space_extents_max =
+        acadrust::Vector3::new(CUBE_HALF_EXTENT, CUBE_HALF_EXTENT, CUBE_HALF_EXTENT);
+    document
+}
+
+/// Writes the drawing as ASCII DXF.
+///
+/// `AC1024` is deliberate: `needs_sab()` in the acadrust writer switches to
+/// binary SAB in `ACDSDATA` at `AC1027`, which would turn the ASCII fixture into
+/// an opaque binary blob. Pre-AC1027 keeps the SAT stream as inline text lines
+/// (the DXF version-1 character cipher still applies, but it stays ASCII).
+fn acis_cube_dxf(document: &CadDocument) -> Vec<u8> {
+    DxfWriter::new(document)
+        .with_version(DxfVersion::AC1024)
+        .write_to_vec()
+        .expect("write the synthetic DXF")
+}
+
+fn read_dxf_document(bytes: &[u8]) -> CadDocument {
+    DxfReader::from_reader(Cursor::new(bytes.to_vec()))
+        .expect("open in-memory DXF")
+        .read()
+        .expect("read in-memory DXF")
+}
+
+/// The single-source-of-truth assertion for "this drawing is the fixture".
+fn assert_one_cube_solid(document: &CadDocument) {
+    let solids: Vec<&Solid3D> = document
+        .entities()
+        .filter_map(|entity| match entity {
+            EntityType::Solid3D(solid) => Some(solid),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(solids.len(), 1, "the fixture holds exactly one 3DSOLID");
+    assert!(
+        !solids[0].acis_data.sat_data.is_empty(),
+        "the 3DSOLID must carry SAT text, not an empty or SAB-only payload"
+    );
+    assert_eq!(solids[0].common.layer, "0", "the solid lives on layer 0");
+}
+
+fn mesh_bounds(mesh: &Mesh) -> ([f64; 3], [f64; 3]) {
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    for point in &mesh.vertices {
+        min[0] = min[0].min(point.x);
+        min[1] = min[1].min(point.y);
+        min[2] = min[2].min(point.z);
+        max[0] = max[0].max(point.x);
+        max[1] = max[1].max(point.y);
+        max[2] = max[2].max(point.z);
+    }
+    (min, max)
+}
+
+/// Round-trips the bytes through *our* importer, which is the property that
+/// makes the fixture fit for a real-display check: the `3DSOLID` must arrive as
+/// tessellated [`SemanticGeometry::Mesh`] geometry, not as an opaque proxy.
+fn assert_imports_as_tessellated_cube(bytes: &[u8]) {
+    let request = ImportRequest {
+        document: DocumentId(1),
+        database: DatabaseId(1),
+        bytes: Arc::from(bytes.to_vec().into_boxed_slice()),
+        limits: ImportLimits::default(),
+        generation: 1,
+    };
+    let drawing = AcadrustImporter::new()
+        .import(&request, &|| false)
+        .expect("the ACIS drawing fixture must import");
+
+    let meshes: Vec<&Mesh> = drawing
+        .database
+        .entities()
+        .filter_map(|entity| match &entity.geometry {
+            SemanticGeometry::Mesh(mesh) => Some(mesh),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        meshes.len(),
+        1,
+        "the single 3DSOLID must arrive as exactly one Mesh"
+    );
+
+    let mesh = meshes[0];
+    assert_eq!(
+        mesh.triangles.len(),
+        CUBE_TRIANGLES,
+        "a box tessellates to {CUBE_TRIANGLES} triangles"
+    );
+    assert!(
+        !mesh.vertices.is_empty(),
+        "a tessellated solid must have vertices"
+    );
+
+    let (min, max) = mesh_bounds(mesh);
+    for (actual, expected) in min.iter().zip([-CUBE_HALF_EXTENT; 3]) {
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "min bounds {min:?} do not match the cube extent"
+        );
+    }
+    for (actual, expected) in max.iter().zip([CUBE_HALF_EXTENT; 3]) {
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "max bounds {max:?} do not match the cube extent"
+        );
+    }
+    println!(
+        "round trip: {} triangle(s), bounds {min:?}..{max:?}",
+        mesh.triangles.len()
+    );
+}
+
+#[test]
+#[ignore = "writes a committed fixture; run explicitly, never in the default suite"]
+fn regenerate_synthetic_acis_cube_dxf() {
+    let document = acis_cube_document();
+    assert_one_cube_solid(&document);
+
+    let bytes = acis_cube_dxf(&document);
+    // The reader must agree with the writer before anything reaches disk.
+    let reread = read_dxf_document(&bytes);
+    assert_one_cube_solid(&reread);
+    assert_imports_as_tessellated_cube(&bytes);
+
+    let path = repo_path(ACIS_CUBE_DXF);
+    match std::fs::read(&path) {
+        Ok(existing) if existing == bytes => {
+            println!("fixture already up to date: {}", path.display());
+        }
+        Ok(existing) => {
+            // Refuse to overwrite a file that is not the same one-solid drawing.
+            let previous = read_dxf_document(&existing);
+            assert_one_cube_solid(&previous);
+            std::fs::write(&path, &bytes).expect("write fixture");
+            println!("rewrote {} ({})", path.display(), sha256(&bytes));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("create fixture directory");
+            }
+            std::fs::write(&path, &bytes).expect("write fixture");
+            println!("wrote {} ({})", path.display(), sha256(&bytes));
+        }
+        Err(error) => panic!("read {}: {error}", path.display()),
+    }
+}
+
+#[test]
+fn committed_acis_cube_dxf_is_reproducible_and_tessellates() {
+    let path = repo_path(ACIS_CUBE_DXF);
+    let bytes = std::fs::read(&path).unwrap_or_else(|error| {
+        panic!(
+            "read {}: {error}; run the ignored generator",
+            path.display()
+        )
+    });
+    assert_eq!(
+        bytes,
+        acis_cube_dxf(&acis_cube_document()),
+        "{} is stale; run regenerate_synthetic_acis_cube_dxf",
+        path.display()
+    );
+    assert_imports_as_tessellated_cube(&bytes);
 }
 
 fn sha256(bytes: &[u8]) -> String {

@@ -20,9 +20,10 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 
 - 宿主侧**保存/出图/导出**在当前 Linux 宿主显式 `Unsupported`（`apps/app-linux/src/platform.rs`）；
 - `SWITCHBACKEND` 经本宿主不可用（显式拒绝，非静默）；
-- **3D 观察与 ACIS 子集离散器在核心存在**（`cad-render-wgpu`、`cad-kernel-adapter`），
-  但 ACIS 离散器**未接入显示路径**：`3DSOLID`/`BODY`/`REGION`/`SURFACE` 只导入为不透明负载，
-  **渲染为空**（`docs/compatibility.md`「ACIS 实体显示状态」）；3D 观察属**当前 GUI 未接线**
+- **3D 观察与 ACIS 子集离散器在核心存在**（`cad-render-wgpu`、`cad-kernel-adapter`）；
+  ACIS **已在导入期接线**：`3DSOLID`/`BODY`/`REGION`/`SURFACE` 离散为中性网格后正常显示
+  （恒 `Partial`、源 ACIS 不保留，见 `docs/compatibility.md`「ACIS 实体显示状态」）；
+  3D 观察属**当前 GUI 未接线**
   （控件显式禁用），并非核心 NotImplemented；边界见 `docs/compatibility.md`、
   `docs/view-3d.md`、`docs/kernel-acis.md`；
 - 当前 GUI 仅 `OPEN`/`FIT` + 原生导航接线；其余命令经真实漏斗**显式拒绝**，不空成功。
