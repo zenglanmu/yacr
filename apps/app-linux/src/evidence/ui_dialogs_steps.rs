@@ -18,12 +18,13 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tauri::Manager;
 
 use crate::host::ProbeShared;
+use crate::main_thread::on_main_thread;
 
 use super::tool::tool_click_world_js;
 use super::ui_dialogs::{
-    eval_wait, log, on_main_thread, wait_for_chrome, L_CLOSE, L_CLOSE_READ, L_COMMAND_LOG,
-    L_COMMAND_OPTIONS, L_MAIN_HANDLE, L_PICK_A, L_PICK_B, L_POPUP_HANDLE, L_POPUP_RETRY,
-    L_PROPERTIES_KEY, L_PROPERTIES_READ, L_SELECT_CLICK, L_SELECT_READ,
+    eval_wait, log, wait_for_chrome, L_CLOSE, L_CLOSE_READ, L_COMMAND_LOG, L_COMMAND_OPTIONS,
+    L_MAIN_HANDLE, L_PICK_A, L_PICK_B, L_POPUP_HANDLE, L_POPUP_RETRY, L_PROPERTIES_KEY,
+    L_PROPERTIES_READ, L_SELECT_CLICK, L_SELECT_READ,
 };
 use super::ui_dialogs_js;
 use super::ui_dialogs_report::{
@@ -300,11 +301,11 @@ pub(super) fn command_log(
 }
 
 /// `at+27` (and one retry at `at+30`): the real `cad_status.popup` plus the
-/// popup window's native handle.
+/// popup's in-DOM overlay identity.
 ///
-/// The handle line is [`super::popup::log_popup_native_handle`]'s own
-/// `[probe] popup evidence: window xid=0x…`, so the external
-/// `x11-window-grab.c` extraction used by the popup driver works unchanged.
+/// The line is [`super::popup::log_popup_overlay_handle`]'s own
+/// `[probe] popup evidence: … handle=dom_overlay xid=-`, because the overlay has
+/// no window of its own; a whole-window capture contains it.
 ///
 /// A popup that is still closed at the **first** read is not a failure (the
 /// retry is scheduled for exactly that case); a popup that is still closed at
@@ -320,17 +321,12 @@ pub(super) fn popup_handle(
         return Ok(());
     }
     let app_main = app.clone();
-    let (popup, handle) = on_main_thread(app, move || {
+    let popup = on_main_thread(app, move || {
         let status = crate::host::cad_status(app_main.state::<ProbeShared>());
-        let popup = popup_detail(&status);
-        let handle = crate::host::popup_window_for_probe(&app_main)
-            .and_then(|window| super::popup::log_popup_native_handle(&window));
-        Ok((popup, handle))
+        Ok(popup_detail(&status))
     })?;
-    let (kind, xid) = match handle {
-        Some((kind, xid)) => (Some(kind), xid),
-        None => (None, None),
-    };
+    let (handle, xid) = super::popup::log_popup_overlay_handle("dialogs popup");
+    let (kind, xid) = (Some(handle), xid);
     lock_evidence(evidence).set_popup(popup.clone(), kind, xid.clone());
     let opened = lock_evidence(evidence).popup_opened();
     let label = if retry { L_POPUP_RETRY } else { L_POPUP_HANDLE };
@@ -371,8 +367,8 @@ pub(super) fn close(
     log(
         second,
         &format!(
-            "{L_CLOSE} ack accepted=true (the modal gate clears on the popup window's Destroyed \
-             event, not on this call)"
+            "{L_CLOSE} ack accepted=true (an explicit close clears the modal gate directly; no \
+             window Destroyed event is involved)"
         ),
     );
     Ok(())

@@ -52,12 +52,14 @@ pub trait ShellTelemetry: Send + Sync {
     fn note_input_accepted(&self, kind: InputKind);
 }
 
-/// The platform side of the popup commands (ADR-0021 D1/D2).
+/// The platform side of the popup commands (ADR-0021 D1/D2, WP3).
 ///
-/// The popup **state machine** is `cad_ui_core::popup`; window creation,
-/// focusing, destroying and the main-thread payload derivation stay in the
-/// concrete host. This seam keeps `cad_open_popup`/`cad_close_popup` in the
-/// shared command layer without moving GTK/Tauri window code into it.
+/// The popup **state machine** and the four-trigger gate lifecycle are
+/// `cad_ui_core::popup` / [`crate::popup`]. Since popups are in-DOM overlays, the
+/// only platform work left is deriving the `textEdit` payload from the live CAD
+/// session (a main-thread-only read), which stays in the concrete host. This
+/// seam keeps `cad_open_popup`/`cad_close_popup` in the shared command layer
+/// without moving that session read (or any GTK/Tauri type) into it.
 ///
 /// Implementations must preserve the host's threading contract (the Linux
 /// implementation marshals the whole open onto the GTK main thread). They must
@@ -67,7 +69,7 @@ pub trait ShellPopupHost: Send + Sync {
     /// Open (or focus) the allowlisted popup for `kind`.
     fn open(&self, shared: &Arc<Mutex<Shared>>, kind: &str) -> Result<PopupAck, String>;
 
-    /// Close the open popup (idempotent).
+    /// Close the open popup (idempotent) and clear the modal gate.
     fn close(&self, shared: &Arc<Mutex<Shared>>) -> Result<(), String>;
 }
 

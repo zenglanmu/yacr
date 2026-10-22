@@ -1,7 +1,7 @@
-// About dialog: the application name, the version the host injected into the
-// boot literal, one honest line about this build, and Close. It is a dialog in
-// its own window (ADR 0021 D1), so it stays deliberately sparse — no feature
-// list, no invented build metadata, no marketing copy.
+// About dialog: the application name, the version the host reported in the
+// popup payload, one honest line about this build, and Close. The shared
+// overlay chrome owns the title, the close button and Escape; this file renders
+// only the body and footer of the About dialog (ADR 0021 D1, WP3).
 //
 // Styling: `style.css` is not part of this change, so the dialog reuses the
 // existing chrome classes (`.palette__head`, `.mono`, the shared Button
@@ -10,10 +10,10 @@
 // the unknown-kind dialog so the two cannot drift.
 import React from 'react';
 import { Icon } from '../icons.jsx';
-import { Button, IconButton } from './primitives.jsx';
+import { Button } from './primitives.jsx';
 import { useI18n } from '../context.mjs';
 import { POPUP_KEYS, aboutVersionText } from '../popup.mjs';
-import { DIALOG_BODY, DIALOG_CONTENT, DIALOG_FOOT, DIALOG_HEAD, DIALOG_TITLE } from '../popup-layout.mjs';
+import { DIALOG_BODY, DIALOG_CONTENT, DIALOG_FOOT } from '../popup-layout.mjs';
 
 // The same square mark the title bar uses, in token colours only.
 const MARK = {
@@ -38,13 +38,6 @@ export function AboutDialog({ view, onClose, failure }) {
   const versionLine = aboutVersionText(view, t);
   return (
     <>
-      <header className="palette__head" style={DIALOG_HEAD}>
-        <h2 style={DIALOG_TITLE}>
-          <Icon name="app" size={15} />
-          {t(POPUP_KEYS.title)}
-        </h2>
-        <IconButton icon="close" size="xs" label={t(POPUP_KEYS.close)} onClick={onClose} />
-      </header>
       <div style={DIALOG_BODY}>
         <div style={DIALOG_CONTENT}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

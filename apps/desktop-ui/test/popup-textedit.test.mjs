@@ -27,22 +27,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readCatalog, readCss, readModule } from './helpers.mjs';
 import {
+  DIALOG_HEAD,
   DIALOG_TEXT_BODY,
   DIALOG_TITLE,
   TEXT_FIELD,
   TEXT_FIELD_FOCUS,
   TEXT_FIELD_FOCUSED,
-  TEXT_HEAD,
   TEXT_META,
 } from '../src/popup-layout.mjs';
 import {
   openPopup,
-  POPUP_GLOBAL,
   POPUP_KINDS,
   POPUP_OPEN_COMMAND,
-  popupBoot,
+  popupPayload,
   popupView,
-  readPopupBoot,
   textEditPayload,
 } from '../src/popup.mjs';
 import {
@@ -68,11 +66,9 @@ const T_EN = createTranslator({ 'zh-CN': ZH, en: EN }, 'en');
 // (one Unicode scalar value, two UTF-16 code units).
 const RAW_MTEXT = '\\W1.5;First line\\P{Second} line \u{1F600}';
 
-/** A valid textEdit literal exactly as the host injects it. */
+/** A valid textEdit payload exactly as the host derives it. */
 function textEditLiteral(payload = { text: RAW_MTEXT, multiline: true }, overrides = {}) {
-  return {
-    [POPUP_GLOBAL]: { kind: 'textEdit', modal: true, label: 'popup-1', payload, ...overrides },
-  };
+  return { kind: 'textEdit', ...payload, ...overrides };
 }
 
 /** An `invoke` stand-in that records calls and answers `response`. */
@@ -89,16 +85,15 @@ test('the textEdit kind is implemented alongside about', () => {
   assert.deepEqual(POPUP_KINDS, ['about', 'textEdit', 'options']);
 });
 
-test('a well-formed textEdit literal boots the dialog, both modes', () => {
+test('a well-formed textEdit payload gives the view, both modes', () => {
   for (const multiline of [true, false]) {
-    const boot = popupBoot(textEditLiteral({ text: RAW_MTEXT, multiline }));
-    assert.ok(boot, `multiline=${multiline} must boot`);
-    assert.equal(boot.kind, 'textEdit');
-    assert.equal(boot.modal, true);
-    assert.ok(Object.isFrozen(boot));
-    const view = popupView(boot);
+    const payload = textEditLiteral({ text: RAW_MTEXT, multiline });
+    const validated = popupPayload('textEdit', payload);
+    assert.ok(validated, `multiline=${multiline} must validate`);
+    assert.ok(Object.isFrozen(validated));
+    const view = popupView('textEdit', payload);
     assert.deepEqual(view, {
-      kind: 'textEdit', requestedKind: 'textEdit', modal: true, text: RAW_MTEXT, multiline,
+      kind: 'textEdit', requestedKind: 'textEdit', text: RAW_MTEXT, multiline,
     });
     // The raw payload object never reaches the view; only its two fields do.
     assert.equal('payload' in view, false);
@@ -106,51 +101,53 @@ test('a well-formed textEdit literal boots the dialog, both modes', () => {
 });
 
 test('the textEdit payload keeps the raw string and the empty string is real data', () => {
-  const payload = textEditPayload({ text: '', multiline: false, extra: 'ignored' });
+  const payload = textEditPayload({ kind: 'textEdit', text: '', multiline: false, extra: 'ignored' });
   assert.deepEqual(payload, { text: '', multiline: false });
   assert.ok(Object.isFrozen(payload));
-  // An envelope field the dialog does not use is simply not copied.
+  // A field the dialog does not use is simply not copied.
   assert.equal('extra' in payload, false);
-  assert.equal(textEditPayload({ text: '  spaced  ', multiline: true }).text, '  spaced  ');
+  assert.equal(textEditPayload({ kind: 'textEdit', text: '  spaced  ', multiline: true }).text, '  spaced  ');
 });
 
-test('a textEdit payload that is not exactly {text: string, multiline: boolean} is the normal shell', () => {
+test('a textEdit payload that is not exactly {kind, text: string, multiline: boolean} is the explicit unknown state', () => {
   const rejected = [
+    // tag
+    { text: RAW_MTEXT, multiline: true },
+    { kind: 'about', text: RAW_MTEXT, multiline: true },
     // text
-    { multiline: true },
-    { text: null, multiline: true },
-    { text: 7, multiline: true },
-    { text: ['a'], multiline: true },
-    { text: { value: 'a' }, multiline: true },
+    { kind: 'textEdit', multiline: true },
+    { kind: 'textEdit', text: null, multiline: true },
+    { kind: 'textEdit', text: 7, multiline: true },
+    { kind: 'textEdit', text: ['a'], multiline: true },
+    { kind: 'textEdit', text: { value: 'a' }, multiline: true },
     // multiline
-    { text: 'a' },
-    { text: 'a', multiline: 'true' },
-    { text: 'a', multiline: 1 },
-    { text: 'a', multiline: null },
-    { text: 'a', multiline: {} },
+    { kind: 'textEdit', text: 'a' },
+    { kind: 'textEdit', text: 'a', multiline: 'true' },
+    { kind: 'textEdit', text: 'a', multiline: 1 },
+    { kind: 'textEdit', text: 'a', multiline: null },
+    { kind: 'textEdit', text: 'a', multiline: {} },
   ];
   for (const payload of rejected) {
-    const scope = textEditLiteral(payload);
-    // The envelope is still readable — the literal itself is well formed…
-    assert.equal(readPopupBoot(scope)?.kind, 'textEdit', JSON.stringify(payload));
-    // …but the strict boot switch must not half-open an editor.
-    assert.equal(popupBoot(scope), null, JSON.stringify(payload));
-    // And the view degrades to the explicit unknown state, never to an empty
-    // editor with invented content.
-    assert.deepEqual(popupView(readPopupBoot(scope)), { kind: 'unknown', requestedKind: 'textEdit' });
+    assert.equal(textEditPayload(payload), null, JSON.stringify(payload));
+    assert.equal(popupPayload('textEdit', payload), null, JSON.stringify(payload));
+    // The view degrades to the explicit unknown state, never to an empty editor
+    // with invented content.
+    assert.deepEqual(popupView('textEdit', payload), {
+      kind: 'unknown', requestedKind: 'textEdit',
+    }, JSON.stringify(payload));
   }
 });
 
-test('the textEdit boot rejection is per kind: an about literal keeps booting', () => {
-  const about = { [POPUP_GLOBAL]: { kind: 'about', modal: true, label: 'popup-1', payload: { version: '1', build: 'release' } } };
-  assert.equal(popupBoot(about)?.kind, 'about');
-  // A textEdit envelope missing `multiline` never replaces the shell, even when
-  // the rest of the envelope is perfect.
-  assert.equal(popupBoot(textEditLiteral({ text: RAW_MTEXT }, { label: 'popup-2' })), null);
+test('payload validation is per kind: an about payload keeps its own view', () => {
+  const about = { kind: 'about', version: '1', build: 'release' };
+  assert.equal(popupView('about', about).kind, 'about');
+  // A textEdit payload missing `multiline` never renders an editor, even when
+  // the rest of the payload is perfect.
+  assert.equal(popupPayload('textEdit', textEditLiteral({ text: RAW_MTEXT })), null);
 });
 
 test('the draft is the host string verbatim and nothing converts a line break', async () => {
-  const view = popupView(popupBoot(textEditLiteral()));
+  const view = popupView('textEdit', textEditLiteral());
   assert.equal(view.text, RAW_MTEXT);
   // The live draft is the same string: no trim, no markup parsing, and the
   // `\P` the file holds is still two characters.
@@ -329,11 +326,10 @@ test('the dialog closes only on success, and a failed close never traps the user
   assert.equal((dialog.match(/onClose\(\)/g) ?? []).length, 1, 'only a successful apply closes');
   // Esc and Close both go through the root's idempotent close; a failure is
   // shown in the footer and both buttons stay live for a retry.
-  assert.ok(dialog.includes('label={t(POPUP_TEXT_KEYS.close)} onClick={onClose}'));
   assert.ok(dialog.includes('<Button onClick={onClose}>{t(POPUP_TEXT_KEYS.close)}</Button>'));
   assert.ok(dialog.includes('const failure = notice ?? closeFailure ?? null;'));
   assert.ok(dialog.includes('role="alert"'));
-  const root = await readModule('components/PopupRoot.jsx');
+  const root = await readModule('components/PopupOverlay.jsx');
   assert.ok(root.includes('<TextEditDialog view={view} onClose={requestClose} closeFailure={failure} />'));
   // Escape stays the only global key, and it never closes the window while an
   // IME composition is in progress (that press belongs to the IME).
@@ -375,23 +371,18 @@ test('the field shows its focus, and the ring costs no layout', async () => {
   assert.ok(dialog.includes('field.setSelectionRange(end, end);'));
 });
 
-test('the header centres the title instead of stacking the body padding under it', async () => {
-  // 42px header with a 13px title: ~14.5px of air above and below the ink. The
-  // body's top padding is 0, so the 42px above the field is all header — the
-  // reviewed frame had 9px above and ~20px below (30px header + 12px padding).
-  assert.equal(TEXT_HEAD.height, 42);
-  assert.equal(TEXT_HEAD.padding, '0 12px 0 14px');
+test('the overlay chrome is the one header, shared by every kind', async () => {
+  // The persistent chrome (title + close) lives in the overlay, so the editor
+  // body starts directly with its field. The body still keeps no top padding:
+  // the 30px chrome is the whole gap above the field.
+  assert.equal(DIALOG_HEAD.height, 30);
+  assert.equal(DIALOG_HEAD.padding, '0 12px 0 14px');
   assert.equal(DIALOG_TEXT_BODY.padding, '0 16px 12px');
-  const ink = Number.parseFloat(DIALOG_TITLE.fontSize);
-  const airAbove = (TEXT_HEAD.height - ink) / 2;
-  // No body padding below the header means the ink's bottom gap is the same:
-  // `height - (airAbove + ink)` = `airAbove`.
-  const airBelow = TEXT_HEAD.height - (airAbove + ink);
-  assert.equal(airBelow, airAbove);
-  assert.ok(airAbove >= 14 && airAbove <= 15, `air around the title: ${airAbove}px`);
   const dialog = await readModule('components/TextEditDialog.jsx');
-  assert.ok(dialog.includes('style={TEXT_HEAD}'), 'the editor uses the balanced header');
-  assert.equal(dialog.includes('DIALOG_HEAD'), false, 'no stale 30px header import');
+  assert.equal(dialog.includes('<header'), false, 'the editor body has no header of its own');
+  assert.equal(dialog.includes('TEXT_HEAD'), false, 'the old per-dialog header is gone');
+  const overlay = await readModule('components/PopupOverlay.jsx');
+  assert.ok(overlay.includes('style={DIALOG_HEAD}'), 'the overlay owns the shared header');
 });
 
 test('the title keeps the About header’s 13px/600 step above the meta copy', async () => {
@@ -401,10 +392,9 @@ test('the title keeps the About header’s 13px/600 step above the meta copy', a
   assert.equal(DIALOG_TITLE.fontSize, '13px');
   assert.equal(DIALOG_TITLE.fontWeight, 600);
   assert.ok(Number.parseFloat(DIALOG_TITLE.fontSize) - 11 >= 2);
-  for (const file of ['components/AboutDialog.jsx', 'components/TextEditDialog.jsx']) {
-    const source = await readModule(file);
-    assert.ok(source.includes('style={DIALOG_TITLE}'), `${file} must use the shared title style`);
-  }
+  // The overlay owns the one header, so the shared title style has one consumer.
+  const overlay = await readModule('components/PopupOverlay.jsx');
+  assert.ok(overlay.includes('style={DIALOG_TITLE}'), 'the overlay must use the shared title style');
 });
 
 test('the hint and count clear 4.5:1 from the stronger secondary token', async () => {
@@ -486,11 +476,12 @@ test('the palette entry is offered only for a real selection text and asks for t
   assert.ok(app.includes("openPopup(invoke, 'textEdit')"));
   assert.ok(app.includes('openTextEditPopup: () => {'));
   assert.ok(app.includes('const failure = textEditOpenError(result, t);'));
-  assert.ok(app.includes('if (failure) setError(failure);'), 'the refusal reaches the error banner');
+  assert.ok(app.includes('if (failure) {'), 'the refusal reaches the error banner');
+  assert.ok(app.includes('setError(failure);'), 'the refusal reaches the error banner');
   // The host refusal opens no window: the request is a single cad_open_popup.
   const invoke = recordingInvoke({ accepted: true, kind: 'textEdit', popup_label: 'popup-2', existing: false });
   assert.deepEqual(await openPopup(invoke.invoke, 'textEdit'), {
-    kind: 'accepted', requestedKind: 'textEdit', popupLabel: 'popup-2', existing: false,
+    kind: 'accepted', requestedKind: 'textEdit', popupLabel: 'popup-2', existing: false, payload: null,
   });
   assert.deepEqual(invoke.calls, [{ command: POPUP_OPEN_COMMAND, args: { kind: 'textEdit' } }]);
 });
@@ -534,11 +525,11 @@ test('the textEdit document starts none of the shell global effects', async () =
     'useShell()',
   ];
   // The dialog adds no listener of its own: the window's one key (Escape) stays
-  // in `PopupRoot`.
+  // in `PopupOverlay`.
   const dialogOnly = [...shared, 'addEventListener'];
   for (const [file, forbiddenList] of [
     ['components/TextEditDialog.jsx', dialogOnly],
-    ['components/PopupRoot.jsx', shared],
+    ['components/PopupOverlay.jsx', shared],
   ]) {
     const source = await readModule(file);
     for (const forbidden of forbiddenList) {
@@ -549,7 +540,7 @@ test('the textEdit document starts none of the shell global effects', async () =
   const dialog = await readModule('components/TextEditDialog.jsx');
   assert.equal(dialog.includes('setSelectedText(invoke, text)'), true);
   assert.equal(dialog.includes("invoke('cad_"), false, 'no hand-rolled IPC name');
-  const root = await readModule('components/PopupRoot.jsx');
+  const root = await readModule('components/PopupOverlay.jsx');
   // Escape remains the document's one global key, and it still closes.
   assert.ok(root.includes("event.key !== 'Escape'"));
   assert.ok(root.includes('closePopup(invoke)'));

@@ -647,3 +647,20 @@ button, input, select { font: inherit; color: inherit; }
   /* Give long values room by narrowing the label column on the small dock. */
   .properties__row { grid-template-columns: 76px minmax(0, 1fr); }
 }
+
+/* Popup overlay ---------------------------------------------------------- */
+/* The one in-DOM dialog layer (ADR 0021 D1/D2, WP3). It is portalled to
+   `document.body` so it sits above the whole shell, including the native CAD
+   partition's rect: the host keeps the modal input gate, and this layer only
+   paints and routes Close/Escape. */
+.popup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(8, 11, 15, .55);
+}
+.popup-dialog { display: flex; flex-direction: column; }

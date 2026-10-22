@@ -11,6 +11,31 @@
 //!
 //! These types are a frozen wire contract: the field names, serde renames and
 //! omission rules are byte-stable so the JavaScript frontend keeps working.
+//!
+//! ## `cad_open_popup` acknowledgement addendum (2026-10-22, WP3)
+//!
+//! Popups are in-DOM overlays in the single UI tree, so `cad_open_popup` no
+//! longer creates a window. Its acknowledgement keeps the frozen fields
+//! `{ accepted, kind, popup_label, existing }` and **adds** one optional field:
+//!
+//! ```json
+//! { "accepted": true, "kind": "about", "popup_label": "popup-1",
+//!   "existing": false,
+//!   "payload": { "kind": "about", "version": "0.1.2", "build": "release" } }
+//! ```
+//!
+//! * `payload` is present only on a **fresh open** of a kind that carries one
+//!   (`about`, `textEdit`); it is omitted (`skip_serializing_if`) for `options`
+//!   and for `existing: true`, so a consumer that ignores it sees the old shape
+//!   byte-for-byte.
+//! * its own `kind` tag repeats the requested kind; the UI rejects a payload
+//!   whose tag does not match instead of rendering guessed content.
+//! * `textEdit`'s payload is host-derived from the current single selection
+//!   (`{kind:"textEdit",text,multiline}`); the caller still supplies no content.
+//!
+//! `cad_status.popup` remains the open/closed source of truth
+//! (`{kind,label,modal}` or `null`); the acknowledgement only carries the
+//! content the newly rendered overlay needs.
 
 use serde::{Deserialize, Serialize};
 

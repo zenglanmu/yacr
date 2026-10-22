@@ -207,3 +207,20 @@ CAD 绘图区是**不可被 DOM 覆盖**的原生表面。那么后续必然出�
 - **键名**：超限文案用既有的 `status.tool_text.too_long`（**点号形式**；不存在下划线变体）。
 - **忙碌文案**：复用既有 `linux.busy`；若将来要独立文案再加 `dialog.textedit.busy`（记为本轮**不新增**）。
 - **单行 `TEXT` 的入口一致性**：弹窗由 `payload.multiline` 决定；**面板由新增的 `CadSelection.text_multiline` 决定**（同一规则两处，禁止从展示行 `type` 推断）。
+
+#### WP3 增补（2026-10-22）：弹窗改为单树 DOM 覆盖层，`cad_open_popup` 增加可选 `payload`
+
+> 状态：**本轮实现**；最终措辞留给 P5 修订本文正文（D1 的"第二个窗口"表述届时一并清理）。
+
+- **D1 机制退场**：Linux 宿主不再创建第二个 `tauri::Window`，也不再注入启动字面量；`about` / `textEdit` / `options`
+  都是**同一 React 树内的覆盖层**，由 `cad_status.popup` 驱动显示。`CadPopup::label` 仅作为**冻结的 wire 字段**保留，
+  不再用于寻址窗口，也没有第二处写入（`cad-ui-core::popup` 统一构造）。
+- **ack 只做加法**：`cad_open_popup` 的应答在原有 `{accepted, kind, popup_label, existing}` 之后**可选**携带
+  `payload`；没有 payload 时该字段**整个省略**（旧消费方看到的仍是四字段形状）。
+  - `about`：`{"kind":"about","version":…,"build":"debug"|"release"}`（宿主构建事实，不由调用方提供）。
+  - `textEdit`：`{"kind":"textEdit","text":…,"multiline":…}`（宿主从当前单选派生；打开侧只把未转义的 `\P` 显示为换行）。
+  - `options`：无 payload（UI 自行读 `cad_settings`，避免陈旧副本）。
+  - `existing: true`：无 payload，调用方不得覆盖屏幕上已有内容。
+- **唯一事实源不变**：`cad_status.popup` 仍是"开着/关着"的唯一权威（`{kind,label,modal}`）；`payload` 只随一次**成功的新开**
+  返回，不进入状态轮询。模态 gate 的准入语义、四个清除触发（显式关闭、重载/导航、渲染进程崩溃、进程退出）都不因 payload 改变。
+- **不新增 IPC、不放开调用方内容**：payload 由宿主派生，调用方仍不能传入 label、URL、脚本或文本内容。

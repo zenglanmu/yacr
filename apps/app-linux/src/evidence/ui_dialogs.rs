@@ -58,15 +58,15 @@
 //!   picked points).
 //! * `at+24`: type `OPTIONS` + Enter through the same command field; the chrome
 //!   opens the dialog over the real `cad_open_popup` path.
-//! * `at+27` (and one retry at `at+30`): log the popup's native handle with
-//!   [`super::popup::log_popup_native_handle`], i.e. the existing
-//!   `[probe] popup evidence: window xid=0x…` line the external
-//!   `apps/app-linux/scripts/x11-window-grab.c <xid> <out.ppm>` greps — plus the
+//! * `at+27` (and one retry at `at+30`): log the popup's in-DOM overlay identity
+//!   with [`super::popup::log_popup_overlay_handle`]
+//!   (`handle=dom_overlay xid=-`: the overlay has no window of its own) plus the
 //!   real `cad_status.popup` block.
 //! * `at+24+hold`: close the dialog through the same host path `cad_close_popup`
 //!   runs ([`crate::host::close_popup_for_probe`]) and log its ack. `hold` is
 //!   `YACR_PROBE_UI_DIALOGS_HOLD` seconds (default **30**, floored at
-//!   [`MIN_HOLD_SECONDS`]) so the external grab has a window while it is open.
+//!   [`MIN_HOLD_SECONDS`]) so an external whole-window capture has a window
+//!   while the overlay is open.
 //! * `+2` and `+4`: read `cad_status.popup` back (must be `-`) and print one
 //!   summary line.
 //!
@@ -79,7 +79,7 @@
 //!   real mouse or keyboard; the summary says
 //!   `ui_dialogs_trigger=probe_driver_not_a_real_click` and
 //!   `ui_dialogs_synthetic=1`. Everything downstream (palette mount, command
-//!   funnel, popup window, popup close) is the production path.
+//!   funnel, overlay, popup close) is the production path.
 //! * The pick coordinate is chosen for `fixtures/dwg/synthetic-four-lines.dwg`
 //!   and the log prints the real `documentLabel` next to it; if a different
 //!   drawing is open the click simply lands wherever that world point is, and
@@ -362,26 +362,6 @@ fn schedule_step(start: &Instant, second: u64, action: impl FnOnce() -> Result<(
     }
 }
 
-/// Run one task on the GTK main thread and wait for its result.
-///
-/// Every CAD-session read and every popup accessor must run there (the session
-/// is a main-thread-local value). Called only from the spawned driver thread, so
-/// the blocking receive cannot deadlock the thread it is waiting for.
-pub(super) fn on_main_thread<T, F>(app: &tauri::AppHandle, task: F) -> Result<T, String>
-where
-    T: Send + 'static,
-    F: FnOnce() -> Result<T, String> + Send + 'static,
-{
-    let (sender, receiver) = std::sync::mpsc::channel();
-    app.run_on_main_thread(move || {
-        let _ = sender.send(task());
-    })
-    .map_err(|error| format!("ui-dialogs.main_thread_failed: {error}"))?;
-    receiver
-        .recv()
-        .map_err(|_| "ui-dialogs.main_thread_failed: the main thread dropped it".to_string())?
-}
-
 /// Evaluate `js` in the real webview and wait for its returned string.
 ///
 /// `eval_with_callback` serializes the script's return value into a JSON string;
@@ -518,7 +498,7 @@ fn run(app: tauri::AppHandle, webview: tauri::Webview, timeline: Timeline) {
         });
     }
 
-    // ---- at+27 (+ one retry at at+30): the popup window's native handle ----
+    // ---- at+27 (+ one retry at at+30): the in-DOM popup overlay identity ----
     let second = timeline.popup_handle();
     {
         let app = app.clone();

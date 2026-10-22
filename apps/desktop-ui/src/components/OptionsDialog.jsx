@@ -1,11 +1,12 @@
-// Options dialog: the AutoCAD-style settings window (ADR 0021 D1 shape, its own
-// native window). Rendered by `PopupRoot` for `kind: 'options'`.
+// Options dialog: the AutoCAD-style settings dialog (ADR 0021 D1 shape).
+// Rendered inside `PopupOverlay` for `kind: 'options'`; the shared overlay chrome
+// owns the title, the close button and Escape.
 //
 // Structure: a left tab rail and one content column, then the footer's
 // Apply / Apply-and-close (OK) / Cancel row. Everything the dialog edits is
 // **staged**: `cad_settings` is the baseline, the controls edit a local draft,
 // and only Apply/OK send the diff through `cad_set_setting` and re-read the
-// snapshot. Cancel and Escape (owned by `PopupRoot`) discard the draft and close.
+// snapshot. Cancel and Escape (owned by `PopupOverlay`) discard the draft and close.
 //
 // Failure rules, deliberately explicit:
 //
@@ -26,7 +27,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Icon } from '../icons.jsx';
-import { Button, IconButton } from './primitives.jsx';
+import { Button } from './primitives.jsx';
 import { useI18n } from '../context.mjs';
 import { storeLocale } from '../i18n.mjs';
 import { POPUP_BLANK } from '../popup.mjs';
@@ -50,7 +51,6 @@ import {
 } from '../options.mjs';
 import {
   DIALOG_FOOT,
-  DIALOG_TITLE,
   OPTIONS_BADGE,
   OPTIONS_BODY,
   OPTIONS_CHECKBOX,
@@ -61,7 +61,6 @@ import {
   OPTIONS_FIELD_INVALID,
   OPTIONS_FOOT_ERROR,
   OPTIONS_FOOT_NOTE,
-  OPTIONS_HEAD,
   OPTIONS_HELP,
   OPTIONS_HELP_INVALID,
   OPTIONS_LABEL,
@@ -77,7 +76,6 @@ import {
   OPTIONS_WELL,
 } from '../popup-layout.mjs';
 
-const TITLE_ID = 'cad-options-title';
 const PANEL_ID = 'cad-options-panel';
 
 /** How often the dialog re-reads `cad_settings` while the host has no session. */
@@ -507,13 +505,6 @@ export function OptionsDialog({ onClose, closeFailure }) {
 
   return (
     <>
-      <header className="palette__head" style={OPTIONS_HEAD}>
-        <h2 id={TITLE_ID} style={DIALOG_TITLE}>
-          <Icon name="settings" size={15} />
-          {label}
-        </h2>
-        <IconButton icon="close" size="xs" label={t(OPTIONS_KEYS.close)} onClick={onClose} />
-      </header>
       <div style={OPTIONS_BODY}>
         <div
           role="tablist"

@@ -71,12 +71,9 @@ pub use options::{
 };
 pub use popup::PopupAck;
 // Evidence-only accessors (`YACR_PROBE_POPUP_EVIDENCE`): the host-side
-// open/close functions, the live popup window and the `textEdit` payload
-// derivation. Never used by the command path.
-pub(crate) use popup::{
-    close_popup_for_probe, open_popup_for_probe, popup_window_for_probe,
-    text_edit_payload_for_probe,
-};
+// open/close functions and the `textEdit` payload derivation. Never used by the
+// command path.
+pub(crate) use popup::{close_popup_for_probe, open_popup_for_probe, text_edit_payload_for_probe};
 // Evidence-only: the **same** selected-text admission `cad_set_selected_text`
 // runs, so the text-edit popup phase queues through the real path instead of
 // calling `CadSession::set_selected_text` directly.
@@ -243,10 +240,11 @@ impl ShellTelemetry for AppTelemetry {
 /// The platform popup seam for the shared `cad_open_popup`/`cad_close_popup`
 /// commands.
 ///
-/// Window creation, focusing, destroying and the main-thread `textEdit` payload
-/// derivation stay in [`popup`]; this adapter only routes the command to them.
-/// It holds no `Shared` handle (no reference cycle) and never locks the shell
-/// state itself.
+/// Popups are in-DOM overlays, so there is no window to create, focus or
+/// destroy. The main-thread `textEdit` payload derivation stays in [`popup`];
+/// this adapter only marshals the command onto the GTK main thread (through
+/// [`crate::main_thread`]) and calls the shared lifecycle. It holds no `Shared`
+/// handle (no reference cycle) and never locks the shell state itself.
 struct AppPopupHost {
     app: tauri::AppHandle,
 }
@@ -254,23 +252,17 @@ struct AppPopupHost {
 impl ShellPopupHost for AppPopupHost {
     fn open(&self, shared: &Arc<Mutex<Shared>>, kind: &str) -> Result<PopupAck, String> {
         let app = self.app.clone();
-        let task_app = app.clone();
         let shared = shared.clone();
         let kind = kind.to_string();
-        popup::on_main_thread(&app, move || {
-            let ops = popup::TauriPopupOps::new(task_app, shared.clone());
-            popup::open_popup(&shared, &kind, &ops)
+        crate::main_thread::on_main_thread(&app, move || {
+            popup::open_popup(&shared, &kind, &popup::HostPopupOps)
         })
     }
 
     fn close(&self, shared: &Arc<Mutex<Shared>>) -> Result<(), String> {
         let app = self.app.clone();
-        let task_app = app.clone();
         let shared = shared.clone();
-        popup::on_main_thread(&app, move || {
-            let ops = popup::TauriPopupOps::new(task_app, shared.clone());
-            popup::close_popup(&shared, &ops)
-        })
+        crate::main_thread::on_main_thread(&app, move || popup::close_popup(&shared))
     }
 }
 

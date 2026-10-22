@@ -110,11 +110,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         tauri::RunEvent::MainEventsCleared => crate::host::tick(&run_shared, &run_telemetry),
         tauri::RunEvent::ExitRequested { .. } => {
             eprintln!("[probe] run event: ExitRequested");
+            // Trigger ④ of the popup lifecycle: the host process is exiting, so
+            // no modal gate may stay set.
+            cad_desktop_shell::popup::on_process_exit(&run_shared);
             crate::host::close_presenter();
             crate::host::request_stop(&run_shared, &run_telemetry);
         }
         tauri::RunEvent::Exit => {
             eprintln!("[probe] run event: Exit");
+            cad_desktop_shell::popup::on_process_exit(&run_shared);
             crate::host::close_presenter();
             crate::host::request_stop(&run_shared, &run_telemetry);
         }

@@ -13,7 +13,7 @@ use tauri::Manager;
 
 use crate::host::{text_edit_payload_for_probe, ProbeShared};
 
-use super::popup::{describe_status_popup, log_popup_native_handle};
+use super::popup::{describe_status_popup, log_popup_overlay_handle};
 use super::popup_textedit::{EXPECTED_REOPEN_LINES, PATCH, TEXT_EDIT_KIND};
 use super::popup_textedit_summary::{bool_token, fingerprint, lock_evidence, TextEditEvidence};
 
@@ -29,7 +29,7 @@ pub(super) fn reopen_open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<Text
         return;
     }
 
-    let payload = match text_edit_payload_for_probe(app) {
+    let payload = match text_edit_payload_for_probe() {
         Ok(payload) => payload,
         Err(error) => {
             lock_evidence(evidence).fail("reopen_payload", &error);
@@ -98,6 +98,21 @@ pub(super) fn reopen_open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<Text
         "accepted={}_existing={}",
         ack.accepted, ack.existing
     ));
+    match ack.payload.as_ref() {
+        Some(cad_ui_core::popup::PopupPayload::TextEdit { text, multiline })
+            if *text == payload.text && *multiline == payload.multiline => {}
+        other => {
+            lock_evidence(evidence).fail(
+                "reopen_payload_ack",
+                &format!("the reopen ack payload does not match the host derivation: {other:?}"),
+            );
+            return;
+        }
+    }
+    eprintln!(
+        "[probe] popup textedit evidence: reopen ack payload matches host derivation \
+         len={payload_len} newline={newlines}"
+    );
 
     let during = crate::host::cad_status(app.state::<ProbeShared>());
     let during_text = describe_status_popup(&during);
@@ -125,33 +140,16 @@ pub(super) fn reopen_open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<Text
         }
     }
 
-    match crate::host::popup_window_for_probe(app) {
-        Some(window) => match log_popup_native_handle(&window) {
-            Some((handle, xid)) => {
-                match xid.as_deref() {
-                    Some(xid) => eprintln!(
-                        "[probe] popup textedit evidence: reopen window xid={xid} handle={handle} \
-                         (external grab target: stored result, focused field)"
-                    ),
-                    None => eprintln!(
-                        "[probe] popup textedit evidence: reopen window xid=- handle={handle} \
-                         (no X11 XID: the compositor owns the toplevel; no X11 grab is claimed)"
-                    ),
-                }
-                let mut state = lock_evidence(evidence);
-                state.reopen_handle = Some(handle);
-                state.reopen_xid = xid;
-            }
-            None => lock_evidence(evidence).fail(
-                "reopen_window_handle",
-                "no reportable top-level native handle for the reopened popup window",
-            ),
-        },
-        None => lock_evidence(evidence).fail(
-            "reopen_window_handle",
-            "the reopened popup window is not registered after a successful open",
-        ),
+    let (handle, xid) = log_popup_overlay_handle("textedit reopen");
+    {
+        let mut state = lock_evidence(evidence);
+        state.reopen_handle = Some(handle);
+        state.reopen_xid = xid;
     }
+    eprintln!(
+        "[probe] popup textedit evidence: reopened overlay shows the stored result in the single \
+         UI tree; a whole-window capture contains it"
+    );
 }
 
 /// Step 10: close the reopened dialog through the host path `cad_close_popup`
@@ -164,8 +162,8 @@ pub(super) fn reopen_close_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<Tex
     match crate::host::close_popup_for_probe(app) {
         Ok(()) => {
             eprintln!(
-                "[probe] popup textedit evidence: reopen close ack accepted=true (the modal gate \
-                 clears on the popup window's Destroyed event, not on this call)"
+                "[probe] popup textedit evidence: reopen close ack accepted=true (an explicit \
+                 close clears the modal gate directly; no window Destroyed event is involved)"
             );
             lock_evidence(evidence).reopen_close_ack = Some("accepted=true".into());
         }
@@ -174,6 +172,7 @@ pub(super) fn reopen_close_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<Tex
 }
 
 /// Step 11: `cad_status.popup` must be `null` after the reopen close (one retry).
+#[allow(deprecated)] // frozen `cad_status.popup.label` wire field
 pub(super) fn reopen_status_after_step(
     app: &tauri::AppHandle,
     evidence: &Arc<Mutex<TextEditEvidence>>,

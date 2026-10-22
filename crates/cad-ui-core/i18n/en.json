@@ -628,8 +628,7 @@
   "tool.draw.mleader": "Multileader",
   "tool.prompt.mleader.arrow": "Specify the arrowhead position",
   "tool.prompt.mleader.landing": "Specify the landing point (leader endpoint)",
-  "tool.prompt.mleader.type_text": "Enter the annotation text and press Enter"
-,
+  "tool.prompt.mleader.type_text": "Enter the annotation text and press Enter",
   "dialog.options.title": "Options",
   "file.options": "Options",
   "dialog.options.apply": "Apply",
@@ -705,5 +704,8 @@
   "properties.edit.failed": "The change was refused.",
   "properties.edit.pending": "Applying…",
   "startup.unsupported_backend": "yacr cannot start on X11/XWayland",
-  "startup.unsupported_backend.detail": "This build composites the DOM/WebView above the native CAD surface, which is implemented only for native Wayland. Run yacr in a Wayland session (GDK_BACKEND=wayland); the X11 web+canvas route is explicitly deferred."
+  "startup.unsupported_backend.detail": "This build composites the DOM/WebView above the native CAD surface, which is implemented only for native Wayland. Run yacr in a Wayland session (GDK_BACKEND=wayland); the X11 web+canvas route is explicitly deferred.",
+  "dialog.popup.title": "Dialog",
+  "dialog.popup.close": "Close",
+  "dialog.popup.body_failed": "This dialog's content could not be displayed. Close it and try again."
 }

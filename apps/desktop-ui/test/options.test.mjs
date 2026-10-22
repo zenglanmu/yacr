@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createTranslator } from '../src/i18n.mjs';
-import { POPUP_KINDS, popupBoot, popupView, readPopupBoot } from '../src/popup.mjs';
+import { POPUP_KINDS, popupView } from '../src/popup.mjs';
 import {
   LOCALE_CHOICES,
   OPTIONS_FIELDS,
@@ -502,20 +502,15 @@ test('every key the dialog asks for exists in both catalogs with real copy', () 
   assert.match(zh['dialog.options.changed'], /\{count\}/);
 });
 
-test('the options popup kind is allowlisted and needs no boot payload', () => {
+test('the options popup kind is allowlisted and carries no payload', () => {
   assert.ok(POPUP_KINDS.includes('options'));
-  const boot = readPopupBoot({
-    __YACR_POPUP__: { kind: 'options', modal: true, label: 'popup-1', payload: {} },
+  assert.deepEqual(popupView('options', undefined), {
+    kind: 'options', requestedKind: 'options',
   });
-  assert.deepEqual(boot, { kind: 'options', modal: true, label: 'popup-1', payload: {} });
-  assert.ok(popupBoot({ __YACR_POPUP__: boot }), 'an empty payload must boot the dialog');
-  assert.deepEqual(popupView(boot), { kind: 'options', requestedKind: 'options', modal: true });
   // A payload with settings-shaped fields is ignored: the dialog reads the
   // snapshot itself, so an injected one can never become the baseline.
-  const injected = popupView({
-    kind: 'options', modal: true, label: 'popup-1', payload: { grid: false, crosshairPercent: 99 },
-  });
-  assert.deepEqual(injected, { kind: 'options', requestedKind: 'options', modal: true });
+  const injected = popupView('options', { kind: 'options', grid: false, crosshairPercent: 99 });
+  assert.deepEqual(injected, { kind: 'options', requestedKind: 'options' });
 });
 
 test('the model is pure and the dialog owns no IPC text of its own', async () => {
@@ -541,7 +536,7 @@ test('the model is pure and the dialog owns no IPC text of its own', async () =>
   assert.match(dialog, /onClick=\{onClose\}>\{t\(OPTIONS_KEYS\.cancel\)\}/);
   assert.match(dialog, /commit\('apply'\)/);
   assert.match(dialog, /commit\('close'\)/);
-  // Keyboard closing is PopupRoot's (Escape), not a second local handler.
+  // Keyboard closing is PopupOverlay's (Escape), not a second local handler.
   assert.ok(!/['"]Escape['"]/.test(dialog), 'the dialog must not handle Escape itself');
 });
 
@@ -551,8 +546,8 @@ test('all three entry points open the same host-owned popup', async () => {
   const intercept = app.indexOf('isOptionsCommand(text)');
   assert.ok(intercept > 0, 'the command line must intercept OPTIONS');
   assert.ok(intercept < app.indexOf('submitting.current = true'), 'the intercept runs first');
-  assert.ok(app.includes("openPopup(invoke, 'options')"));
-  assert.ok(app.includes("openOptionsPopup: openOptions"));
+  assert.ok(app.includes("requestOpenPopup('options')"));
+  assert.ok(app.includes("openOptionsPopup: () => requestOpenPopup('options')"));
   assert.ok(app.includes("action === 'options'"));
 
   const ribbon = await readModule('ribbon-model.mjs');
@@ -566,15 +561,15 @@ test('all three entry points open the same host-owned popup', async () => {
   assert.ok(!/statusbar__workspace"\s+disabled/.test(status), 'the settings button is enabled now');
 });
 
-test('the dialog size agrees with the Rust window size', async () => {
+test('the dialog card size is UI-owned, not a mirror of a host window', async () => {
   const layout = await readModule('popup-layout.mjs');
   assert.ok(layout.includes('export const OPTIONS_WIDTH = 720;'));
   assert.ok(layout.includes('export const OPTIONS_HEIGHT = 560;'));
-  // The popup kinds and their window sizes are platform-independent UI logic, so
-  // they live in `cad-ui-core` (P1a moved them out of the Linux host).
+  assert.ok(layout.includes('export const POPUP_CARD_SIZE = Object.freeze({'));
+  // No host window exists any more: the former Rust constants must be gone.
   const rust = await readFile(new URL('../../../crates/cad-ui-core/src/popup/mod.rs', import.meta.url), 'utf8');
-  assert.ok(rust.includes('pub const OPTIONS_WIDTH: f64 = 720.0;'));
-  assert.ok(rust.includes('pub const OPTIONS_HEIGHT: f64 = 560.0;'));
+  assert.equal(rust.includes('pub const OPTIONS_WIDTH'), false);
+  assert.equal(rust.includes('pub const OPTIONS_HEIGHT'), false);
   assert.ok(rust.includes('PopupKind::Options'));
   assert.ok(rust.includes('"options" => Ok(Self::Options)'));
 });

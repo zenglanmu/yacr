@@ -69,12 +69,21 @@ pub fn init(
         // is parsed: this is the single system default both the native dialog
         // labels and the React UI use (see `host::locale`).
         .initialization_script(host_locale_script())
-        .on_page_load(|_webview, payload| {
-            eprintln!(
-                "[probe] page_load url={} event={:?}",
-                payload.url(),
-                payload.event()
-            );
+        .on_page_load({
+            let page_load_shared = shared.clone();
+            move |_webview, payload| {
+                eprintln!(
+                    "[probe] page_load url={} event={:?}",
+                    payload.url(),
+                    payload.event()
+                );
+                // Trigger ②: a reload/navigation replaced the document, so the
+                // in-DOM overlay no longer exists and the modal gate must not
+                // stay set. The initial page load is a harmless no-op.
+                if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                    cad_desktop_shell::popup::on_reload(&page_load_shared);
+                }
+            }
         });
         let child = window.add_child(
             webview,
@@ -85,6 +94,12 @@ pub fn init(
         WEBVIEW.with(|cell| *cell.borrow_mut() = Some(child.clone()));
         Some(child)
     };
+
+    // Trigger ③ of the popup lifecycle: a renderer crash must clear the gate and
+    // leave a visible diagnostic.
+    if let Some(webview) = child.as_ref() {
+        super::popup::install_renderer_crash_hook(webview, shared);
+    }
 
     // Window events: log geometry (WM-native evidence) and release the surface
     // before the window goes away.

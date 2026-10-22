@@ -29,7 +29,10 @@ pub use layout::{
     insets_from, surface_metrics, validate_metrics, CadMetrics, LayoutError, LayoutTracker,
     ViewportInsets,
 };
-pub use popup::{PopupAck, PopupGate, PopupKind, PopupOps, TextEditPayload, POPUP_LABEL};
+pub use popup::{
+    PopupAck, PopupGate, PopupKind, PopupOps, PopupPayload, PopupReset, TextEditPayload,
+    POPUP_LABEL,
+};
 pub use protocol::{
     InputKind, InputTracker, ProbeInput, ProbeInputAck, ProbeStatus, BUTTON_MIDDLE, BUTTON_PRIMARY,
     BUTTON_SECONDARY,

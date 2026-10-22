@@ -24,27 +24,22 @@ import { Workspace } from './components/Workspace.jsx';
 import { LayoutTabs } from './components/LayoutTabs.jsx';
 import { CommandLine } from './components/CommandLine.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
-import { PopupRoot } from './components/PopupRoot.jsx';
-import { openPopup, popupBoot } from './popup.mjs';
+import { PopupOverlay } from './components/PopupOverlay.jsx';
+import { openPopup } from './popup.mjs';
 import { isOptionsCommand } from './options.mjs';
 import { isPropertiesCommand, setSelectedProperty } from './properties.mjs';
 import { textEditOpenError } from './popup-textedit.mjs';
 
 /**
- * Boot switch between the two documents this bundle can be.
+ * The single UI document.
  *
- * The host opens dialogs as separate native windows loading the same bundle and
- * injects `window.__YACR_POPUP__` before page load (ADR 0021 D1). The main
- * window never sets it, so `popupBoot` returning `null` is the normal shell.
- *
- * The literal is fixed for the document's lifetime, so it is read once. The
- * branch matters: `Shell` owns every shell effect (status polling, shortcuts,
- * the webview-default guards, the input lane). Returning `PopupRoot` instead of
- * mounting `Shell` is what guarantees none of them start in a dialog window.
+ * There is no second document and no boot switch: since WP3 every popup is an
+ * in-DOM overlay rendered by [`Shell`] over this same tree. `Shell` owns the
+ * shell effects (status polling, shortcuts, the webview-default guards, the
+ * input lane) and the overlay; the host owns the modal gate.
  */
 export function App() {
-  const boot = useMemo(() => popupBoot(typeof window === 'undefined' ? null : window), []);
-  return boot ? <PopupRoot boot={boot} /> : <Shell />;
+  return <Shell />;
 }
 
 /** The main window: the full chrome plus the one CAD session it drives. */
@@ -79,6 +74,10 @@ function Shell() {
   // one exists. The host applies the modal input gate; the chrome mirrors it as
   // one of the pointer lane's suspension reasons plus the pressed About button.
   const popupOpen = status?.popup != null;
+  // The validated payload of the **fresh** open (`cad_open_popup`'s additive
+  // field). It is local UI state on purpose: the wire only carries the content
+  // once, so an `existing: true` answer can never overwrite a rendered dialog.
+  const [popupPayload, setPopupPayload] = useState(null);
 
   const submitting = useRef(false);
   // The text-step submit has its own in-flight guard: it must not block a
@@ -121,14 +120,12 @@ function Shell() {
     storeLocale(locale);
   }, [locale, t]);
 
-  // Live language propagation from the Options dialog (a separate window on the
-  // same origin). Two independent carriers, because neither alone is reliable in
-  // a WebView: a `storage` event from the other document, and a focus-time
-  // re-read for the case where that event is dropped. Only a supported stored
-  // value is adopted — an absent entry never overrides the host-resolved locale.
-  //
-  // NOT VERIFIED in a running GUI: this path was exercised by unit tests and a
-  // source scan only, never with two live windows on screen.
+  // Live language propagation. The Options dialog is rendered in this same tree
+  // (an in-DOM overlay), so its `setLocale` is this provider's setter and the
+  // change is immediate. The stored-value subscription is kept as a defensive
+  // same-origin fallback (a reload, or a second document in a test harness):
+  // only a supported stored value is adopted — an absent entry never overrides
+  // the host-resolved locale.
   useEffect(() => {
     const readStored = () => {
       const next = storedLocale();
@@ -232,6 +229,12 @@ function Shell() {
     suspendGate.current.set('popupOpen', popupOpen);
   }, [popupOpen]);
 
+  // A closed popup drops its payload: the next open must seed from its own ack,
+  // never from stale content.
+  useEffect(() => {
+    if (!popupOpen) setPopupPayload(null);
+  }, [popupOpen]);
+
   const documentLabel = status?.documentLabel ?? null;
   const documentOpen = documentLabel !== null;
   const loading = Boolean(status?.loading);
@@ -239,12 +242,17 @@ function Shell() {
   const cadReady = Boolean(status) && !loading;
   const toolActive = Boolean(status?.tool?.key);
 
-  // The one open path for the Options dialog: a host-owned window like About.
-  // `existing: true` means it is already open and the host focused it — the
-  // success it is, never a duplicate window.
-  const openOptions = useCallback(() => {
-    void openPopup(invoke, 'options').then(result => {
-      if (result.kind !== 'accepted') setError(result.error);
+  // The one open path for every dialog. The host owns admission and the gate;
+  // this only keeps the fresh payload for the overlay. `existing: true` means
+  // the same dialog is already open, so the success is a no-op here and no
+  // second instance (or replacement payload) is created.
+  const requestOpenPopup = useCallback(kind => {
+    void openPopup(invoke, kind).then(result => {
+      if (result.kind !== 'accepted') {
+        setError(result.error);
+        return;
+      }
+      if (!result.existing && result.payload) setPopupPayload(result.payload);
     });
   }, []);
 
@@ -255,7 +263,7 @@ function Shell() {
     if (isOptionsCommand(text)) {
       setCommandResult(null);
       if (options.fromInput) setCommand('');
-      openOptions();
+      requestOpenPopup('options');
       return;
     }
     // `PROPERTIES` is the docked palette's local selector, exactly like
@@ -281,7 +289,7 @@ function Shell() {
       submitting.current = false;
       setPending(false);
     }
-  }, [openOptions, status]);
+  }, [requestOpenPopup, status]);
 
   // The terminal text step (ADR 0019 A.1): one `cad_set_tool_text`, never a
   // `cad_command`. The result is returned to the command line so the draft can
@@ -322,6 +330,9 @@ function Shell() {
     const isTyping = target => target instanceof HTMLElement
       && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName);
     const onKeyDown = event => {
+      // While a popup is open the overlay owns its one accelerator (Escape). The
+      // shell must not also cancel a tool, toggle a panel or blur a field.
+      if (popupOpen) return;
       // Ctrl+0 is both the app's clean-screen toggle and WebKit's zoom reset.
       // Handle it before the `defaultPrevented` check: the webview-default guard
       // also prevents the browser action, and listener order between the two
@@ -367,7 +378,7 @@ function Shell() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [submitCommand, toolActive]);
+  }, [popupOpen, submitCommand, toolActive]);
 
   // Feed the reserved CAD shortcut-menu hook the selection/tool slices the
   // chrome already has. It is a ref, not a dependency, so polling never
@@ -447,12 +458,16 @@ function Shell() {
     openTextEditPopup: () => {
       void openPopup(invoke, 'textEdit').then(result => {
         const failure = textEditOpenError(result, t);
-        if (failure) setError(failure);
+        if (failure) {
+          setError(failure);
+          return;
+        }
+        if (!result.existing && result.payload) setPopupPayload(result.payload);
       });
     },
-    // The Options dialog (its own host window). One instance: a second request
-    // focuses the open window, which the host reports as `existing: true`.
-    openOptionsPopup: openOptions,
+    // The Options dialog (the same in-DOM overlay layer). One instance: a second
+    // request is answered as `existing: true`, which is not a failure.
+    openOptionsPopup: () => requestOpenPopup('options'),
     historyOpen,
     setHistoryOpen,
     clearHistory: () => setHistory([]),
@@ -513,19 +528,16 @@ function Shell() {
       else if (action === 'commandLine') setCommandLineOpen(value => !value);
       else if (action === 'properties') setPropertiesOpen(true);
       else if (action === 'language') setLocale(value => (value === 'zh-CN' ? 'en' : 'zh-CN'));
-      // Dialogs are host windows (ADR 0021 D1), never DOM overlays: the host
-      // places them beside the native CAD surface. `existing: true` means the
-      // dialog is already open and the host focuses that window, so there is
-      // nothing to do here — it is not a failure and never a second window.
+      // Dialogs are in-DOM overlays (ADR 0021 D1/D2). The host still owns the
+      // modal gate and admission; `existing: true` means the same dialog is
+      // already open, so there is nothing to do here and it is never a failure.
       else if (action === 'about') {
-        void openPopup(invoke, 'about').then(result => {
-          if (result.kind !== 'accepted') setError(result.error);
-        });
+        requestOpenPopup('about');
       }
-      // The Options dialog is the other host-owned window. Opening it twice is a
-      // success: the host focuses the single instance instead of building one.
+      // The Options dialog is the same overlay layer. Opening it twice is a
+      // success: the host reports the single instance as existing.
       else if (action === 'options') {
-        openOptions();
+        requestOpenPopup('options');
       }
     },
     // Suspend the CAD pointer lane while chrome (command line) owns the keyboard.
@@ -547,6 +559,7 @@ function Shell() {
           {commandLineOpen ? <CommandLine /> : null}
           <StatusBar />
         </main>
+        {popupOpen ? <PopupOverlay popup={status.popup} payload={popupPayload} /> : null}
       </ShellContext.Provider>
     </I18nContext.Provider>
   );

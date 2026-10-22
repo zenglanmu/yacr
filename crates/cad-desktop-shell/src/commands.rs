@@ -220,22 +220,24 @@ pub fn cad_standard_view(
     Ok(CadCommandAck { accepted: true })
 }
 
-/// `cad_open_popup` command: open the allowlisted modal popup, or focus the one
-/// already open (ADR-0021 D1/D2).
+/// `cad_open_popup` command: open the allowlisted modal popup, or report the one
+/// already open (ADR-0021 D1/D2, WP3).
 ///
 /// The wire carries a **kind key only** (`{ kind: String }`): a caller can never
-/// choose a window label, URL or script. `"about"`, `"textEdit"` and `"options"`
-/// are the allowlisted kinds; anything else is refused with `popup.unknown_kind: …`
-/// before any window or gate change. `textEdit` derives its payload from the
-/// host's current single selection (never from the caller); a selection that is
-/// not exactly one editable text is refused with `popup.no_text_selection: …`
-/// and no window is created. `options` carries no payload at all: the dialog
-/// reads `cad_settings` itself. While the popup is open the host refuses CAD input
+/// choose a label, URL or script. `"about"`, `"textEdit"` and `"options"` are
+/// the allowlisted kinds; anything else is refused with `popup.unknown_kind: …`
+/// before any gate change. `textEdit` derives its payload from the host's
+/// current single selection (never from the caller); a selection that is not
+/// exactly one editable text is refused with `popup.no_text_selection: …` and no
+/// gate is set. `options` carries no payload at all: the dialog reads
+/// `cad_settings` itself. While the popup is open the host refuses CAD input
 /// (`popup.modal_open`), independently of the UI's own pointer suspension.
 ///
-/// The window effects and the main-thread marshalling belong to the concrete
-/// host behind [`crate::state::ShellPopupHost`]; the state machine and the gate
-/// are `cad_ui_core::popup`.
+/// The popup is an in-DOM overlay in the single UI tree; the acknowledgement's
+/// additive `payload` field carries the content that overlay needs (see
+/// `cad_ui_core::protocol`). Only the main-thread payload derivation belongs to
+/// the concrete host behind [`crate::state::ShellPopupHost`]; the state machine
+/// and the gate are `cad_ui_core::popup`.
 #[tauri::command]
 pub fn cad_open_popup(
     shared: tauri::State<'_, ProbeShared>,
@@ -251,11 +253,12 @@ pub fn cad_open_popup(
     popup_host.open(&shared.0, &kind)
 }
 
-/// `cad_close_popup` command: close the open modal popup (ADR-0021 D1/D2).
+/// `cad_close_popup` command: close the open modal popup (ADR-0021 D1/D2, WP3).
 ///
-/// Closing when nothing is open is an **idempotent success**, not an error. The
-/// modal gate itself is cleared by the popup window's `Destroyed` event, which
-/// also covers Esc in the popup UI and a window-manager close.
+/// Closing when nothing is open is an **idempotent success**, not an error. This
+/// is the explicit-close trigger of the four-trigger lifecycle: it clears the
+/// modal gate directly, exactly like the overlay's close button and Esc, because
+/// the overlay and the gate belong to the same document.
 #[tauri::command]
 pub fn cad_close_popup(shared: tauri::State<'_, ProbeShared>) -> Result<CadCommandAck, String> {
     let popup_host = {

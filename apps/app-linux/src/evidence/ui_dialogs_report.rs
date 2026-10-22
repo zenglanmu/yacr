@@ -96,11 +96,13 @@ impl Evidence {
         }
     }
 
-    /// The real `cad_status.popup` block plus the popup window's native handle.
+    /// The real `cad_status.popup` block plus the in-DOM overlay identity.
     ///
-    /// This only **stores** the read: whether a still-closed popup is a failure
-    /// depends on where in the timeline it was read (the driver retries once), so
-    /// the step body judges it with [`Self::fail_popup_never_opened`] instead.
+    /// Since WP3 the popup is an overlay in the single UI tree, so `handle` is
+    /// `dom_overlay` and `xid` is always `None`. This only **stores** the read:
+    /// whether a still-closed popup is a failure depends on where in the timeline
+    /// it was read (the driver retries once), so the step body judges it with
+    /// [`Self::fail_popup_never_opened`] instead.
     pub(super) fn set_popup(
         &mut self,
         popup: String,

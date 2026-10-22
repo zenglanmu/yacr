@@ -102,6 +102,7 @@ fn probe_status_is_byte_identical_to_the_pre_migration_host() {
 }
 
 #[test]
+#[allow(deprecated)] // the frozen `cad_status` wire label is built by hand here
 fn cad_status_is_byte_identical_to_the_pre_migration_host() {
     dump_cad_status("cad_status_probe_mode.json", &new_shared(probe_launch()));
     dump_cad_status(
@@ -141,6 +142,7 @@ fn cad_status_is_byte_identical_to_the_pre_migration_host() {
 }
 
 #[test]
+#[allow(deprecated)] // the frozen `cad_status` wire label is built by hand here
 fn probe_input_acks_are_byte_identical_to_the_pre_migration_host() {
     let mut cases = Vec::new();
 

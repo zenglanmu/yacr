@@ -1,59 +1,60 @@
-// Popup-window boot contract (ADR 0021 D1).
+// Popup layer contract (ADR 0021 D1/D2, WP3).
 //
-// The host opens a dialog by creating a *second* native window that loads this
-// same bundle (`index.html`) and injects a boot literal before the page runs:
+// Popups are **in-DOM overlays** in the single UI tree. The host owns the state,
+// not a window: `cad_status.popup` is the open/closed source of truth
+// (`{ kind, label, modal }`), and `cad_open_popup` answers with an **additive**
+// `payload` on a fresh open:
 //
-//   window.__YACR_POPUP__ = {
-//     kind: "about", modal: true, label: "popup-1",
-//     payload: { version: "0.1.2", build: "release" },
-//   }
+//   { accepted: true, kind: "about", popup_label: "popup-1", existing: false,
+//     payload: { kind: "about", version: "0.1.2", build: "release" } }
 //
-// `textEdit` is the second implemented kind (ADR 0021 D4). Its payload is
-// derived by the host from the current single selection — the UI never sends
-// content, and `text` is shown and returned verbatim:
+//   { accepted: true, kind: "textEdit", popup_label: "popup-1", existing: false,
+//     payload: { kind: "textEdit", text: "…", multiline: true } }
 //
-//   window.__YACR_POPUP__ = {
-//     kind: "textEdit", modal: true, label: "popup-2",
-//     payload: { text: "…", multiline: true },
-//   }
+// `options` has no payload (the dialog reads `cad_settings` itself), and an
+// `existing: true` answer carries no replacement payload either, so an already
+// rendered dialog is never overwritten with guessed content.
 //
-// The main window never sets that global, so its absence is the *only* switch
-// between "normal shell" and "this document is a dialog". Every field is read
-// defensively: a missing, malformed or unexpected literal must fall back to the
-// normal shell — never a half-rendered popup and never a thrown error.
+// The `textEdit` payload is derived by the host from the current single
+// selection — the UI never sends content, and `text` is shown verbatim. Every
+// payload field is read defensively: a missing, malformed or mismatched tag
+// degrades to the explicit unknown state, never to an editor with invented
+// content.
 //
 // Catalog keys are addressed through [`POPUP_KEYS`] (data, not inline literals)
 // so the dialog copy has exactly one declaration site. The keys live in the
-// shared catalogs (`crates/cad-ui-core/i18n`); they are added by the Rust host
-// lane and are *not* written here.
+// shared catalogs (`crates/cad-ui-core/i18n`).
 
 /** The IPC that opens a dialog, sent by the main window. */
 export const POPUP_OPEN_COMMAND = 'cad_open_popup';
 
-/** The IPC that closes this dialog window. Idempotent on the host side. */
+/** The IPC that closes the overlay. Idempotent on the host side. */
 export const POPUP_CLOSE_COMMAND = 'cad_close_popup';
 
-/** The boot literal the host injects before page load. */
-export const POPUP_GLOBAL = '__YACR_POPUP__';
-
 /**
- * Dialog kinds this bundle implements. An unknown kind is not a shell boot.
+ * Dialog kinds this bundle implements. An unknown kind is rendered as an
+ * explicit "unknown dialog" state with the persistent close affordance, never as
+ * a blank overlay.
  *
  * `textEdit` is the modal editor for one text entity's raw DXF string
  * (ADR 0021 D4). Its payload is *derived by the host* from the current single
  * selection, so the UI can never supply content it should not control.
  *
  * `options` is the settings dialog. It carries no payload (the settings are read
- * from `cad_settings` after mount), so the boot literal is just the envelope.
+ * from `cad_settings` after mount).
  */
 export const POPUP_KINDS = Object.freeze(['about', 'textEdit', 'options']);
 
-/** Every catalog key the popup layer renders. Nothing else may be invented. */
+/**
+ * Every catalog key the popup layer's shared chrome renders. The per-dialog
+ * bodies own their own key maps (`POPUP_TEXT_KEYS`, `OPTIONS_KEYS`).
+ */
 export const POPUP_KEYS = Object.freeze({
   title: 'dialog.about.title',
   subtitle: 'dialog.about.subtitle',
   version: 'dialog.about.version',
-  close: 'dialog.about.close',
+  close: 'dialog.popup.close',
+  bodyFailed: 'dialog.popup.body_failed',
   ribbonEntry: 'file.about',
 });
 
@@ -72,63 +73,6 @@ function nonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-/**
- * Read and validate the boot literal, without deciding whether this build
- * implements its `kind`.
- *
- * Returns a frozen `{ kind, modal, label, payload }`, or `null`. Rejection
- * rules (each one falls back to the normal shell):
- *
- * 1. the scope is absent/not an object, or the global is absent/`null`;
- * 2. reading the global throws (a hostile/descoped getter never escapes);
- * 3. the global is not a plain object (array, string, number, function);
- * 4. `kind` is missing, not a string, or blank;
- * 5. `modal` is missing or not a boolean;
- * 6. `label` is missing, not a string, or empty;
- * 7. `payload` is missing or not a plain object (content is per kind).
- *
- * Unknown extra fields are ignored, so a newer host may add some without
- * breaking this bundle. `kind` is intentionally *not* checked against
- * [`POPUP_KINDS`] here: [`popupBoot`] does that, and [`popupView`] needs the
- * requested kind to render the explicit "unknown dialog" state.
- */
-export function readPopupBoot(scope) {
-  let raw;
-  try {
-    raw = scope?.[POPUP_GLOBAL];
-  } catch {
-    return null;
-  }
-  if (!isRecord(raw)) return null;
-  const { kind, modal, label, payload } = raw;
-  if (!nonEmptyString(kind)) return null;
-  if (typeof modal !== 'boolean') return null;
-  if (!nonEmptyString(label)) return null;
-  if (!isRecord(payload)) return null;
-  return Object.freeze({ kind, modal, label, payload });
-}
-
-/**
- * The boot switch: `null` means "render the normal shell".
- *
- * This is the strict form used by `App`. A well-formed literal for a kind this
- * bundle does not implement is rejected here on purpose: a stray or misspelled
- * global must never replace the whole main window with a dialog. The popup
- * window's own "unknown dialog" state (see [`popupView`]) covers the opposite
- * direction — a host that opens a kind a future bundle stops shipping.
- *
- * A kind's payload is validated here too, so a dialog is never half-rendered:
- * `textEdit` additionally requires the exact `{text, multiline}` shape of
- * [`textEditPayload`]. A missing/non-string `text` or a missing/non-boolean
- * `multiline` is therefore a **normal shell boot**, not an empty editor.
- */
-export function popupBoot(scope) {
-  const boot = readPopupBoot(scope);
-  if (!boot || !POPUP_KINDS.includes(boot.kind)) return null;
-  if (boot.kind === 'textEdit' && !textEditPayload(boot.payload)) return null;
-  return boot;
-}
-
 function payloadString(payload, field) {
   if (!isRecord(payload)) return null;
   const value = payload[field];
@@ -136,23 +80,25 @@ function payloadString(payload, field) {
 }
 
 /**
- * The `textEdit` payload, or `null` when it is not exactly what the host
- * promises: `{ text: string, multiline: boolean }`, both always present.
+ * The `textEdit` content, or `null` when it is not exactly what the host
+ * promises: `{ kind: 'textEdit', text: string, multiline: boolean }`.
  *
- * The rejection rules are deliberate and narrow, because a half-understood
- * text editor is worse than no editor at all:
+ * Rejection rules are deliberate and narrow, because a half-understood text
+ * editor is worse than no editor at all:
  *
- * 1. `text` must be a **string** — not missing, not `null`, not a number. It is
+ * 1. the tag must be the requested `kind` — one kind's fields are never read as
+ *    another's;
+ * 2. `text` must be a **string** — not missing, not `null`, not a number. It is
  *    returned **verbatim**: an empty string is legal data (nothing to guess, no
  *    trim, no `\P`/`\n` mapping, no MTEXT markup interpretation);
- * 2. `multiline` must be a real **boolean** — a truthy string or number means
+ * 3. `multiline` must be a real **boolean** — a truthy string or number means
  *    the host and this bundle disagree about the source class, and guessing
  *    would offer (or forbid) line breaks for the wrong entity.
  *
- * Extra payload fields are ignored, like extra envelope fields.
+ * Extra payload fields are ignored.
  */
 export function textEditPayload(payload) {
-  if (!isRecord(payload)) return null;
+  if (!isRecord(payload) || payload.kind !== 'textEdit') return null;
   const { text, multiline } = payload;
   if (typeof text !== 'string') return null;
   if (typeof multiline !== 'boolean') return null;
@@ -160,7 +106,32 @@ export function textEditPayload(payload) {
 }
 
 /**
- * The dialog view for a validated boot descriptor.
+ * Validate one `cad_open_popup` payload against the kind that requested it.
+ *
+ * Returns a frozen payload or `null`. The tag is checked against `kind` on
+ * purpose: a payload that disagrees with the requested kind is rejected instead
+ * of rendering guessed content.
+ */
+export function popupPayload(kind, payload) {
+  if (!isRecord(payload) || payload.kind !== kind) return null;
+  if (kind === 'about') {
+    const version = payloadString(payload, 'version');
+    // The host always sends both, but a missing/malformed `build` must not
+    // erase a real version: the view degrades that one field to `null` and
+    // `aboutVersionText` substitutes the blank marker.
+    if (!version) return null;
+    return Object.freeze({ kind, version, build: payloadString(payload, 'build') });
+  }
+  if (kind === 'textEdit') {
+    const content = textEditPayload(payload);
+    return content ? Object.freeze({ kind, ...content }) : null;
+  }
+  // `options` has no payload by design.
+  return null;
+}
+
+/**
+ * The dialog view for the host's open state.
  *
  * `kind: 'about'` carries the two payload strings the catalog template
  * consumes: `version` and `build`. Each is `null` when absent/blank/non-string;
@@ -169,46 +140,40 @@ export function textEditPayload(payload) {
  *
  * `kind: 'textEdit'` carries the entity's **raw** string verbatim and the
  * source class's line rule: `text` (never trimmed or converted) and
- * `multiline`. If the payload is not the exact shape [`popupBoot`] admits, the
- * view degrades to the explicit unknown state rather than to an editor with
- * invented content.
+ * `multiline`. Without a valid payload the view degrades to the explicit
+ * unknown state rather than to an editor with invented content.
  *
  * `kind: 'options'` is the settings dialog: it has no payload fields (it reads
  * `cad_settings` itself), so the view carries only the envelope.
  *
- * Any other kind yields `{ kind: 'unknown', requestedKind }`, which the popup
- * root renders as an explicit state with a Close action rather than a blank
- * window.
+ * Any other kind yields `{ kind: 'unknown', requestedKind }`, which the overlay
+ * renders as an explicit state with the persistent close affordance.
  */
-export function popupView(boot) {
-  const requestedKind = isRecord(boot) && nonEmptyString(boot.kind) ? boot.kind : null;
+export function popupView(kind, payload) {
+  const requestedKind = nonEmptyString(kind) ? kind : null;
   if (!requestedKind || !POPUP_KINDS.includes(requestedKind)) {
     return { kind: 'unknown', requestedKind };
   }
   if (requestedKind === 'about') {
+    const content = popupPayload('about', payload);
     return {
       kind: 'about',
       requestedKind,
-      modal: boot.modal === true,
-      version: payloadString(boot.payload, 'version'),
-      build: payloadString(boot.payload, 'build'),
+      version: content?.version ?? null,
+      build: content?.build ?? null,
     };
   }
   if (requestedKind === 'options') {
-    return { kind: 'options', requestedKind, modal: boot.modal === true };
+    return { kind: 'options', requestedKind };
   }
-  if (requestedKind === 'textEdit') {
-    const content = textEditPayload(boot.payload);
-    if (!content) return { kind: 'unknown', requestedKind };
-    return {
-      kind: 'textEdit',
-      requestedKind,
-      modal: boot.modal === true,
-      text: content.text,
-      multiline: content.multiline,
-    };
-  }
-  return { kind: 'unknown', requestedKind };
+  const content = popupPayload('textEdit', payload);
+  if (!content) return { kind: 'unknown', requestedKind };
+  return {
+    kind: 'textEdit',
+    requestedKind,
+    text: content.text,
+    multiline: content.multiline,
+  };
 }
 
 /**
@@ -234,12 +199,13 @@ export function aboutVersionText(view, t) {
 }
 
 /**
- * Ask the host to close this dialog window.
+ * Ask the host to close the open overlay.
  *
- * The popup never hides itself: the host owns the window. `{kind:'accepted'}`
- * means the host took the request; a failure is returned explicitly (never a
- * silent success) so the caller can report it and keep the Close affordance
- * usable for a retry. The IPC is idempotent, so a second Escape/click is safe.
+ * The overlay never hides itself: the host owns the gate and `cad_status.popup`.
+ * `{kind:'accepted'}` means the host took the request; a failure is returned
+ * explicitly (never a silent success) so the caller can report it and keep the
+ * persistent close affordance usable for a retry. The IPC is idempotent, so a
+ * second Escape/click is safe.
  */
 export async function closePopup(invoke) {
   try {
@@ -254,10 +220,11 @@ export async function closePopup(invoke) {
 /**
  * Ask the host to open (or focus) a dialog from the main window.
  *
- * `{kind:'accepted'}` is admission only. The host answers `existing: true` when
- * the same dialog is already open and focuses that window instead of creating a
- * duplicate; the caller must treat that as the success it is (a no-op in the
- * main window) rather than as a refusal or a second window.
+ * `{kind:'accepted'}` is admission only; `cad_status.popup` is what makes the
+ * overlay appear. `payload` is the validated host-derived content of a fresh
+ * open, or `null` when the host reports `existing: true` (the caller must keep
+ * the content already on screen instead of overwriting it) or the kind carries
+ * none (`options`).
  */
 export async function openPopup(invoke, kind) {
   if (!nonEmptyString(kind) || !POPUP_KINDS.includes(kind)) {
@@ -266,11 +233,13 @@ export async function openPopup(invoke, kind) {
   try {
     const response = await invoke(POPUP_OPEN_COMMAND, { kind });
     if (!response || response.accepted !== true) throw Error('POPUP_OPEN_NOT_ACCEPTED');
+    const existing = response.existing === true;
     return {
       kind: 'accepted',
       requestedKind: kind,
       popupLabel: typeof response.popup_label === 'string' ? response.popup_label : null,
-      existing: response.existing === true,
+      existing,
+      payload: existing ? null : popupPayload(kind, response.payload),
     };
   } catch (error) {
     return { kind: 'failed', error: String(error) };

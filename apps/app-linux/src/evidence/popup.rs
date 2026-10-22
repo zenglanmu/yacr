@@ -8,29 +8,33 @@
 //! after it closes.
 //!
 //! Unlike the drawing phases in [`super::draw`] this driver is **host-side**: the
-//! popup is a native window with its own child webview (it cannot be a DOM
-//! overlay over the opaque CAD child), so there is nothing to prove with synthetic
-//! DOM pointer events. Every step therefore calls the same host functions the IPC
-//! commands call, and reads the same `cad_status` the frontend reads.
+//! popup's open/closed state and the modal gate both live in the host shell
+//! state, so the driver exercises the same host functions the IPC commands call
+//! and reads the same `cad_status` the frontend reads. Since WP3 the popup is an
+//! **in-DOM overlay** in the single UI tree, so it has no native window of its
+//! own; the driver reports `handle=dom_overlay` and `xid=-` instead of a window
+//! handle, and there is no separate X11 target to grab.
 //!
 //! ## Timeline (seconds after driver start)
 //!
 //! * `t=3`: `cad_status` before (its `popup` must be `null`), then the open path
 //!   `cad_open_popup` uses; log the ack, read `cad_status` again and log the
-//!   `popup` block (`kind:label:modal`), then log the popup window's native handle
-//!   on the distinctive line `[probe] popup evidence: window xid=0x…` so an
-//!   external `apps/app-linux/scripts/x11-window-grab.c <xid-hex> <out.ppm>` can
-//!   capture the popup while it is up.
+//!   `popup` block (`kind:label:modal`), then log `handle=dom_overlay xid=-` on
+//!   the distinctive line `[probe] popup evidence: overlay handle=dom_overlay …`.
+//!   The overlay renders in the app window, so the whole-window capture already
+//!   contains it; there is no popup window to grab.
 //! * `t=4`: gate proof — the admission functions `probe_input` and `cad_command`
 //!   use (`queue_cad_input`, `admit_command`) are exercised on the live shell.
 //!   Both must refuse with `popup.modal_open` and must enqueue nothing.
 //! * `t=3+hold`: the **same** close path `cad_close_popup` uses; log its ack.
+//!   An explicit close clears the modal gate directly (it is trigger ① of the
+//!   four-trigger lifecycle), so no window `Destroyed` event is needed.
 //!   `hold` is `YACR_PROBE_POPUP_HOLD` seconds (default **30**), floored at
-//!   [`MIN_HOLD_SECONDS`] so the external grab always has a window in which the
-//!   popup is open.
+//!   [`MIN_HOLD_SECONDS`] so an external whole-window capture always has a
+//!   window in which the overlay is open.
 //! * `t=3+hold+1` and `+2`: read `cad_status.popup` (must be `null`; the gate is
-//!   cleared by the popup window's `Destroyed` event, so the driver retries once
-//!   instead of assuming the event arrived instantly).
+//!   cleared by the explicit close, so the driver retries once instead of
+//!   assuming an instantaneous projection).
 //! * `t=3+hold+3`: re-admission — the same two admission functions must now
 //!   **accept**, which proves the gate is released rather than merely reported as
 //!   released.
@@ -53,12 +57,11 @@
 //! The **trigger** is the probe driver, not a real mouse click on a ribbon
 //! button, so the summary says `popup_synthetic=1` and
 //! `popup_trigger=probe_driver_not_a_real_click`; everything downstream of the
-//! trigger (window, gate, status projection, close) is the production path. The
-//! XID line exists only on X11/XWayland: on native Wayland the popup is a
-//! compositor-owned toplevel, so the driver logs its `wl_surface` pointer instead
-//! and reports `popup_xid=-` (the X11 grab helper cannot target it). A screenshot
-//! is only the window's own pixels; it is not a visual-correctness, precision or
-//! cross-platform claim.
+//! trigger (overlay state, gate, status projection, close) is the production
+//! path. The popup has no native handle any more: the driver logs
+//! `handle=dom_overlay xid=-`, and a capture of the app window contains the
+//! overlay. A screenshot is only pixels; it is not a visual-correctness,
+//! precision or cross-platform claim.
 //!
 //! ## Failure behaviour
 //!
@@ -73,7 +76,6 @@ use std::time::Instant;
 use cad_ui_core::protocol::{InputKind, ProbeInput};
 use cad_ui_core::session::{CadPopup, CadStatus};
 use cad_ui_core::shell::{admit_command, queue_cad_input, POPUP_MODAL_OPEN};
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tauri::Manager;
 
 use crate::host::{ProbeShared, Shared};
@@ -177,7 +179,8 @@ pub fn maybe_spawn_popup_evidence(app: &tauri::AppHandle) {
          reopen t={}s, reopen close t={}s, summary t={}s; holds={}s \
          (YACR_PROBE_POPUP_TEXTEDIT_HOLD) and {}s (YACR_PROBE_POPUP_TEXTEDIT_REOPEN_HOLD); it \
          needs the selection left by the earlier draw phases (MLEADER at t≈212s) and skips, never \
-         passes, without one",
+         passes, without one; a combined draw run must set \
+         YACR_PROBE_POPUP_TEXTEDIT_AT=212 (P5f replaces the selection after t≈213s)",
         textedit.precondition,
         textedit.open,
         textedit.apply,
@@ -204,14 +207,14 @@ fn run_popup_evidence(app: tauri::AppHandle, hold: u64) {
     let evidence = Arc::new(Mutex::new(PopupEvidence::default()));
     let close_at = OPEN_AT + hold;
 
-    // ---- Open, read the status block, log the native handle ----
+    // ---- Open, read the status block, log the overlay identity ----
     {
         let step_app = app.clone();
         let evidence = evidence.clone();
         schedule(
             &start,
             OPEN_AT,
-            "popup open + status + native handle",
+            "popup open + status + overlay identity",
             move || {
                 let main_app = step_app.clone();
                 step_app.run_on_main_thread(move || open_step(&main_app, &evidence))
@@ -244,7 +247,7 @@ fn run_popup_evidence(app: tauri::AppHandle, hold: u64) {
         });
     }
 
-    // ---- The gate clears on the window's Destroyed event: poll the real status ----
+    // ---- The explicit close cleared the gate: poll the real status ----
     for attempt in 1..=2u32 {
         let step_app = app.clone();
         let evidence = evidence.clone();
@@ -307,7 +310,7 @@ fn run_popup_evidence(app: tauri::AppHandle, hold: u64) {
 }
 
 /// Step 1–3: status before, open through the host path, status while open, and
-/// the popup's top-level native handle.
+/// the popup's in-DOM overlay identity.
 fn open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<PopupEvidence>>) {
     let before = crate::host::cad_status(app.state::<ProbeShared>());
     let before_text = describe_status_popup(&before);
@@ -345,7 +348,7 @@ fn open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<PopupEvidence>>) {
         if during.popup.is_none() {
             state.fail(
                 "status_open",
-                "cad_status.popup is null while the popup window is open",
+                "cad_status.popup is null while the popup overlay is open",
             );
             return;
         }
@@ -358,20 +361,11 @@ fn open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<PopupEvidence>>) {
         }
     }
 
-    match crate::host::popup_window_for_probe(app) {
-        Some(window) => match log_popup_native_handle(&window) {
-            Some((handle, xid)) => {
-                let mut state = lock_evidence(evidence);
-                state.handle = Some(handle);
-                state.xid = xid;
-            }
-            None => lock_evidence(evidence)
-                .fail("window_handle", "no reportable top-level native handle"),
-        },
-        None => lock_evidence(evidence).fail(
-            "window_handle",
-            "the popup window is not registered after a successful open",
-        ),
+    let (handle, xid) = log_popup_overlay_handle("popup");
+    {
+        let mut state = lock_evidence(evidence);
+        state.handle = Some(handle);
+        state.xid = xid;
     }
 }
 
@@ -465,8 +459,8 @@ fn close_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<PopupEvidence>>) {
     match crate::host::close_popup_for_probe(app) {
         Ok(()) => {
             eprintln!(
-                "[probe] popup evidence: close ack accepted=true (the modal gate clears on the \
-                 popup window's Destroyed event, not on this call)"
+                "[probe] popup evidence: close ack accepted=true (an explicit close clears the \
+                 modal gate directly; no window Destroyed event is involved)"
             );
             lock_evidence(evidence).close_ack = Some("accepted=true".into());
         }
@@ -474,8 +468,9 @@ fn close_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<PopupEvidence>>) {
     }
 }
 
-/// Steps 6–7: the status block must be `null` again (one retry for the
-/// `Destroyed` event latency).
+/// Steps 6–7: the status block must be `null` again (one retry for projection
+/// latency; no window teardown event is involved).
+#[allow(deprecated)] // frozen `cad_status.popup.label` wire field
 fn status_after_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<PopupEvidence>>, attempt: u32) {
     if lock_evidence(evidence).is_aborted() {
         lock_evidence(evidence).skip("status_after");
@@ -616,52 +611,23 @@ pub(super) fn probe_pointer_move(sequence: u64) -> ProbeInput {
     }
 }
 
-/// Log the popup window's top-level native handle and return
-/// `(kind label, xid)`.
+/// Log the popup's overlay identity and return `(kind label, xid)`.
 ///
-/// This is the popup-specific equivalent of the main window's
-/// `host::telemetry::log_top_level_native_handle` (same
-/// `window_handle()`/`RawWindowHandle` logic), but the line is distinctive so the
-/// capture script can extract exactly the popup's XID:
-/// `[probe] popup evidence: window xid=0x…`. On native Wayland there is no XID
-/// (the compositor owns the toplevel), so the `wl_surface` pointer is logged and
-/// no X11 grab is claimed.
+/// Since WP3 the popup is an **in-DOM overlay** in the app window, so there is no
+/// separate top-level native handle: the line is
+/// `[probe] popup evidence: <scope> handle=dom_overlay xid=- (in-DOM overlay: no
+/// native window)`, and `xid` is always `None`. A whole-window capture contains
+/// the overlay; an X11 grab of a popup window is no longer possible (and is no
+/// longer claimed).
 ///
-/// `pub(super)`: the text-edit phase in [`super::popup_textedit`] logs the same
-/// line for its own window.
-pub(super) fn log_popup_native_handle(
-    window: &tauri::Window,
-) -> Option<(&'static str, Option<String>)> {
-    let handle = match window.window_handle() {
-        Ok(handle) => handle,
-        Err(error) => {
-            eprintln!("[probe] popup evidence: could not read the popup window handle: {error}");
-            return None;
-        }
-    };
-    match handle.as_raw() {
-        RawWindowHandle::Xlib(xlib) => {
-            let xid = format!("0x{:x}", xlib.window);
-            eprintln!("[probe] popup evidence: window xid={xid}");
-            Some(("x11_xid", Some(xid)))
-        }
-        RawWindowHandle::Xcb(xcb) => {
-            let xid = format!("0x{:x}", xcb.window.get());
-            eprintln!("[probe] popup evidence: window xid={xid}");
-            Some(("x11_xid", Some(xid)))
-        }
-        RawWindowHandle::Wayland(wayland) => {
-            eprintln!(
-                "[probe] popup evidence: window wayland_surface={:p} xid=-",
-                wayland.surface.as_ptr()
-            );
-            Some(("wayland_surface", None))
-        }
-        other => {
-            eprintln!("[probe] popup evidence: unexpected popup raw handle: {other:?}");
-            None
-        }
-    }
+/// `pub(super)`: the text-edit phase in [`super::popup_textedit`] and the dialog
+/// driver reuse the same line.
+pub(super) fn log_popup_overlay_handle(scope: &str) -> (&'static str, Option<String>) {
+    eprintln!(
+        "[probe] popup evidence: {scope} handle=dom_overlay xid=- \
+         (in-DOM overlay: no native window)"
+    );
+    ("dom_overlay", None)
 }
 
 /// `cad_status.popup` as `kind:label:modal`, or `-` when it is `null`.
@@ -673,6 +639,7 @@ pub(super) fn describe_status_popup(status: &CadStatus) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
+#[allow(deprecated)] // frozen `cad_status.popup.label` wire field
 fn describe_popup(popup: &CadPopup) -> String {
     format!("{}:{}:{}", popup.kind, popup.label, popup.modal)
 }

@@ -628,8 +628,7 @@
   "tool.draw.mleader": "多重引线",
   "tool.prompt.mleader.arrow": "指定箭头位置",
   "tool.prompt.mleader.landing": "指定落点（引线终点）",
-  "tool.prompt.mleader.type_text": "输入注释文字，按回车提交"
-,
+  "tool.prompt.mleader.type_text": "输入注释文字，按回车提交",
   "dialog.options.title": "选项",
   "file.options": "选项",
   "dialog.options.apply": "应用",
@@ -705,5 +704,8 @@
   "properties.edit.failed": "修改被拒绝。",
   "properties.edit.pending": "正在应用…",
   "startup.unsupported_backend": "yacr 无法在 X11/XWayland 上启动",
-  "startup.unsupported_backend.detail": "本版本将 DOM/WebView 叠加在原生 CAD 表面之上，该合成仅实现于原生 Wayland。请在 Wayland 会话中运行（GDK_BACKEND=wayland）；X11 的 web+canvas 路线已显式延后。"
+  "startup.unsupported_backend.detail": "本版本将 DOM/WebView 叠加在原生 CAD 表面之上，该合成仅实现于原生 Wayland。请在 Wayland 会话中运行（GDK_BACKEND=wayland）；X11 的 web+canvas 路线已显式延后。",
+  "dialog.popup.title": "对话框",
+  "dialog.popup.close": "关闭",
+  "dialog.popup.body_failed": "此对话框的内容无法显示；请关闭后重试。"
 }

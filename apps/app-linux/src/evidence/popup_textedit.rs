@@ -22,6 +22,15 @@
 //! while any popup is open, so stretching the `about` hold to reach this point
 //! would block the draw driver's own synthetic input.
 //!
+//! **Combined draw run timing:** if `YACR_PROBE_DRAW_EVIDENCE` also runs, set
+//! `YACR_PROBE_POPUP_TEXTEDIT_AT=212`. The draw driver selects the `MLEADER` at
+//! t≈211 s, but its P5f phase (t≈213–235 s) later leaves the base dimension
+//! selected, so the default 238 s start would find no text and skip. Starting at
+//! 212 s opens the modal gate before P5f runs; P5f's commands are then refused
+//! with `popup.modal_open` and that combined run's draw report is deliberately
+//! **not** a draw pass. The text-edit phase's own entity-count check is what
+//! makes the interference explicit (`te_entities_same=1`).
+//!
 //! * `START`: precondition — read `cad_status` and log `selection.text` presence,
 //!   `selection.text_multiline`, the selection row count/keys and
 //!   `entityCount`. No single multi-line editable text ⇒ the phase stops with
@@ -30,8 +39,8 @@
 //! * `START+1`: open `textEdit` through the same host path `cad_open_popup` uses;
 //!   log the ack, the **host-derived payload** (length, `multiline`, an 8+8 char
 //!   fingerprint — never the whole string), the `cad_status.popup` block and the
-//!   popup's native handle (`[probe] popup textedit evidence: window xid=0x…` on
-//!   X11/XWayland) so an external grab can capture the dialog.
+//!   in-DOM overlay identity (`handle=dom_overlay xid=-`); the overlay renders in
+//!   the app window, so a whole-window capture contains the dialog.
 //! * `START+1+hold`: apply — admit [`PATCH`] through
 //!   [`crate::host::admit_selected_text`], the **same admission**
 //!   `cad_set_selected_text` runs (real queue, real owner-tick drain).
@@ -42,7 +51,7 @@
 //!   display-side rebuild is at least visible in the data.
 //! * `START+4+hold`: close through the same host path `cad_close_popup` uses.
 //! * `START+5+hold` / `+6+hold`: `cad_status.popup` must be `null` (one retry for
-//!   the popup window's `Destroyed` event latency).
+//!   projection latency).
 //! * `START+7+hold`: re-admission — a harmless input must be **accepted** again,
 //!   and is removed from the queue again before the owner tick can drain it.
 //! * `START+8+hold`: **reopen** — open `textEdit` again through the same host
@@ -50,10 +59,10 @@
 //!   payload must now contain exactly one `\n`
 //!   ([`EXPECTED_REOPEN_LINES`] lines, `EVIDENCE` / `EDIT`), which proves the
 //!   stored `\P` is mapped back on open. The step logs the ack, the payload
-//!   length/newline/line count, the `popup` block and a **distinct** handle line
-//!   `[probe] popup textedit evidence: reopen window xid=0x…` for an external
-//!   grab of the stored result (a focused field also makes a caret/multi-line
-//!   frame possible).
+//!   length/newline/line count, the `popup` block and a **distinct** overlay
+//!   identity line
+//!   `[probe] popup evidence: textedit reopen handle=dom_overlay xid=-` (there is
+//!   no native popup window; the whole-app frame contains the stored result).
 //! * `START+8+hold+reopen_hold`: close the reopened dialog through the same host
 //!   path, then `+1`/`+2`: `cad_status.popup` must be `null` again (one retry).
 //!   `reopen_hold` is `YACR_PROBE_POPUP_TEXTEDIT_REOPEN_HOLD` (default **20**,
@@ -103,7 +112,7 @@ use tauri::Manager;
 
 use crate::host::{admit_selected_text, text_edit_payload_for_probe, ProbeShared, Shared};
 
-use super::popup::{describe_status_popup, log_popup_native_handle, probe_pointer_move};
+use super::popup::{describe_status_popup, log_popup_overlay_handle, probe_pointer_move};
 use super::popup_textedit_reopen::{reopen_close_step, reopen_open_step, reopen_status_after_step};
 use super::popup_textedit_summary::{
     bool_token, char_count, fingerprint, flat, lock_evidence, optional_count, row_keys, short_flat,
@@ -300,7 +309,7 @@ pub(super) fn schedule_textedit_phase(
         );
     }
 
-    // ---- Open through the host path, log payload + status + native handle ----
+    // ---- Open through the host path, log payload + status + overlay identity ----
     {
         let step_app = app.clone();
         let evidence = evidence.clone();
@@ -340,7 +349,7 @@ pub(super) fn schedule_textedit_phase(
         });
     }
 
-    // ---- The gate clears on the popup window's Destroyed event ----
+    // ---- The explicit close cleared the gate ----
     for attempt in 1..=2u32 {
         let step_app = app.clone();
         let evidence = evidence.clone();
@@ -484,7 +493,7 @@ fn open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<TextEditEvidence>>) {
 
     // The host-derived payload, read through the same derivation the open path
     // calls (ADR-0021 D4: the caller never supplies content).
-    let payload = match text_edit_payload_for_probe(app) {
+    let payload = match text_edit_payload_for_probe() {
         Ok(payload) => payload,
         Err(error) => {
             lock_evidence(evidence).fail("payload", &error);
@@ -533,6 +542,22 @@ fn open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<TextEditEvidence>>) {
         "accepted={}_existing={}",
         ack.accepted, ack.existing
     ));
+    match ack.payload.as_ref() {
+        Some(cad_ui_core::popup::PopupPayload::TextEdit { text, multiline })
+            if *text == payload.text && *multiline == payload.multiline => {}
+        other => {
+            lock_evidence(evidence).fail(
+                "open_payload_ack",
+                &format!("the ack payload does not match the host derivation: {other:?}"),
+            );
+            return;
+        }
+    }
+    eprintln!(
+        "[probe] popup textedit evidence: ack payload matches host derivation \
+         len={payload_len} multiline={}",
+        payload.multiline
+    );
 
     let during = crate::host::cad_status(app.state::<ProbeShared>());
     let during_text = describe_status_popup(&during);
@@ -546,7 +571,7 @@ fn open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<TextEditEvidence>>) {
         if during.popup.is_none() {
             state.fail(
                 "status_open",
-                "cad_status.popup is null while the text-edit popup window is open",
+                "cad_status.popup is null while the text-edit overlay is open",
             );
             return;
         }
@@ -559,33 +584,16 @@ fn open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<TextEditEvidence>>) {
         }
     }
 
-    match crate::host::popup_window_for_probe(app) {
-        Some(window) => match log_popup_native_handle(&window) {
-            Some((handle, xid)) => {
-                match xid.as_deref() {
-                    Some(xid) => eprintln!(
-                        "[probe] popup textedit evidence: window xid={xid} handle={handle} \
-                         (external grab target)"
-                    ),
-                    None => eprintln!(
-                        "[probe] popup textedit evidence: window xid=- handle={handle} \
-                         (no X11 XID: the compositor owns the toplevel; no X11 grab is claimed)"
-                    ),
-                }
-                let mut state = lock_evidence(evidence);
-                state.handle = Some(handle);
-                state.xid = xid;
-            }
-            None => lock_evidence(evidence).fail(
-                "window_handle",
-                "no reportable top-level native handle for the popup window",
-            ),
-        },
-        None => lock_evidence(evidence).fail(
-            "window_handle",
-            "the popup window is not registered after a successful open",
-        ),
+    let (handle, xid) = log_popup_overlay_handle("textedit popup");
+    {
+        let mut state = lock_evidence(evidence);
+        state.handle = Some(handle);
+        state.xid = xid;
     }
+    eprintln!(
+        "[probe] popup textedit evidence: overlay displayed in the single UI tree; a whole-window \
+         capture contains the dialog"
+    );
 }
 
 /// Step 3: admit the replacement through the **same** admission
@@ -715,8 +723,8 @@ fn close_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<TextEditEvidence>>) {
     match crate::host::close_popup_for_probe(app) {
         Ok(()) => {
             eprintln!(
-                "[probe] popup textedit evidence: close ack accepted=true (the modal gate clears \
-                 on the popup window's Destroyed event, not on this call)"
+                "[probe] popup textedit evidence: close ack accepted=true (an explicit close clears \
+                 the modal gate directly; no window Destroyed event is involved)"
             );
             lock_evidence(evidence).close_ack = Some("accepted=true".into());
         }
@@ -725,6 +733,7 @@ fn close_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<TextEditEvidence>>) {
 }
 
 /// Steps 6–7: `cad_status.popup` must be `null` again (one retry).
+#[allow(deprecated)] // frozen `cad_status.popup.label` wire field
 fn status_after_step(
     app: &tauri::AppHandle,
     evidence: &Arc<Mutex<TextEditEvidence>>,

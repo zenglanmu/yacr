@@ -198,8 +198,8 @@ test('the shell persists the choice and keeps writing document.lang', async () =
   const app = await readModule('App.jsx');
   assert.ok(app.includes('storeLocale(locale)'));
   assert.ok(app.includes('document.documentElement.lang = localeTag(locale)'));
-  // The popup document boots from the same resolver, so it cannot diverge.
-  const popup = await readModule('components/PopupRoot.jsx');
-  assert.ok(popup.includes('initialLocale'));
-  assert.ok(popup.includes('document.documentElement.lang = localeTag(locale)'));
+  // The popup overlay shares the shell's i18n context, so it cannot diverge.
+  const overlay = await readModule('components/PopupOverlay.jsx');
+  assert.ok(overlay.includes('useI18n()'));
+  assert.equal(overlay.includes('initialLocale'), false);
 });

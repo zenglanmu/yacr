@@ -1,10 +1,10 @@
-// Shared inline metrics for the popup dialogs.
+// Shared inline metrics for the popup overlay and its dialogs.
 //
-// `style.css` belongs to the shell and is out of scope for this layer, so the
-// dialog keeps its metrics here as data: one content edge, one padding rhythm,
-// and the vertical composition. All dialogs (About, the text editor and the
-// explicit "unknown kind" state) read these, so their edges can never drift
-// apart.
+// The dialog keeps its metrics here as data: one content edge, one padding
+// rhythm, and the vertical composition. The overlay chrome and all three
+// dialogs (About, the text editor, Options) read these, so their edges can never
+// drift apart. The **card size is UI-owned** now: the popup is an in-DOM
+// overlay, so there is no host window whose size it must mirror.
 //
 // Content edge — the body's mark and the footer's button row put their *box*
 // edge at `DIALOG_INSET` (16). The header is icon-led, and a glyph inside a
@@ -14,9 +14,10 @@
 // pixel off the body's 16. The pixel review measured 15px header ink vs 21px
 // body ink; both now sit on the same edge.
 //
-// Vertical composition — the window height is owned by the host, so the body
-// takes the remaining space and centres its content block instead of leaving a
-// void above the footer. `margin: auto 0` on the inner block is the safe form:
+// Vertical composition — the card height is set by [`POPUP_CARD_SIZE`] (clamped
+// to the viewport), so the body takes the remaining space and centres its
+// content block instead of leaving a void above the footer. `margin: auto 0` on
+// the inner block is the safe form:
 // when the content is taller than the body it collapses to 0 and the body
 // scrolls, which `justify-content: center` would not do (the top would be
 // unreachable).
@@ -33,6 +34,13 @@ export const HEADER_INSET = 14;
 
 /** Header right padding: 12 + 4.5 = 16.5px of ink — symmetric with the left. */
 export const CLOSE_INSET = 12;
+
+/** The overlay's card size per kind (logical px, clamped to the viewport). */
+export const POPUP_CARD_SIZE = Object.freeze({
+  about: Object.freeze({ width: 520, height: 360 }),
+  textEdit: Object.freeze({ width: 640, height: 480 }),
+  options: Object.freeze({ width: 720, height: 560 }),
+});
 
 export const DIALOG_CARD = Object.freeze({
   background: 'var(--chrome-2)',
@@ -91,26 +99,12 @@ export const DIALOG_FOOT = Object.freeze({
 });
 
 // --- Text-edit dialog -----------------------------------------------------
-// `about` is a small card with a centred block; the text editor is not. The
-// host owns a taller window for this kind (and no size is assumed here), so the
-// body fills it: the field takes every free pixel and the meta line sits under
-// it, on the same 16px content edge as the header and footer. The body's own
-// `overflow` is hidden on purpose — the field scrolls its own text, and a
-// scrolling body around a growing field would move the footer's buttons.
-
-/**
- * The editor header: taller than the shared one, and the body adds no top
- * padding of its own.
- *
- * The pixel review measured 9px from the card edge to the title's ink and ~20px
- * back down to the field: that second gap was the body's 12px top padding
- * stacked under the header's centring, so the air read as accidental. Making the
- * header 42px and dropping the body's top padding to 0 puts the same 42px above
- * the field, split evenly around the title (~15px of ink on each side) — and the
- * field keeps the exact y it had in the reviewed frame. About keeps the shared
- * 30px header: its body is centred, so it has no such seam to fix.
- */
-export const TEXT_HEAD = Object.freeze({ ...DIALOG_HEAD, height: 42 });
+// `about` is a small card with a centred block; the text editor is not. Its
+// card is taller (see [`POPUP_CARD_SIZE`]), so the body fills it: the field
+// takes every free pixel and the meta line sits under it, on the same 16px
+// content edge as the header and footer. The body's own `overflow` is hidden on
+// purpose — the field scrolls its own text, and a scrolling body around a
+// growing field would move the footer's buttons.
 
 /** The editor body: same inset, no centring, no outer scroll, no top padding. */
 export const DIALOG_TEXT_BODY = Object.freeze({
@@ -185,9 +179,9 @@ export const TEXT_META = Object.freeze({
 
 // --- Options dialog -------------------------------------------------------
 // AutoCAD's Options shape: a left tab rail and one content column, both inside
-// the same card, header and footer rhythm as the other dialogs. The host owns
-// the window size (`OPTIONS_WIDTH`/`OPTIONS_HEIGHT` in popup.rs); the constants
-// here mirror it only so the metrics can be tested without a display.
+// the same card, header and footer rhythm as the other dialogs. The card size
+// is UI-owned ([`POPUP_CARD_SIZE`]); these constants are the dialog's own
+// content arithmetic.
 //
 // Arithmetic for a 720px window: 156px rail + 1px rule + 2 x 16px inset leaves
 // 531px of content; the 148px label column plus a 12px gap leaves 371px for the
@@ -196,9 +190,6 @@ export const TEXT_META = Object.freeze({
 export const OPTIONS_WIDTH = 720;
 export const OPTIONS_HEIGHT = 560;
 export const OPTIONS_RAIL_WIDTH = 156;
-
-/** Header: 42px, like the text editor (title breathing room, no seam). */
-export const OPTIONS_HEAD = Object.freeze({ ...DIALOG_HEAD, height: 42 });
 
 /** Body: the rail and the content column sit side by side, no outer padding. */
 export const OPTIONS_BODY = Object.freeze({

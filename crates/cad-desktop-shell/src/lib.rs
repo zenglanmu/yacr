@@ -9,6 +9,11 @@
 //!   and the frozen lock-order invariant (`Shared` before render telemetry).
 //! - [`commands`]: every `#[tauri::command]` IPC function plus the single
 //!   `generate_handler!` registration (`commands::register_commands`).
+//! - [`popup`]: the shared modal-popup lifecycle (gate mapping and the
+//!   four-trigger clear contract); popups are in-DOM overlays, so it owns no
+//!   window.
+//! - [`threading`]: the shared main-thread marshalling (probe + dispatch seam),
+//!   so every desktop host reuses one channel protocol instead of copying it.
 //!
 //! It is deliberately **toolkit-, portal- and GPU-free**: no
 //! `gtk`/`gdk`/`gdkx11`/`ashpd`/`wgpu`/`cad-render-wgpu`/`cad-engine` (enforced
@@ -23,7 +28,11 @@
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod commands;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
+pub mod popup;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod state;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub mod threading;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub use commands::{register_commands, CadCommandAck, COMMAND_NAMES};

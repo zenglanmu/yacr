@@ -339,15 +339,23 @@ pub struct CadTool {
 
 /// The open modal popup of the host (ADR-0021 D1/D2).
 ///
-/// Wire shape: `{ kind, label, modal }`. It is the host's real window state, not
-/// a UI guess: `kind` is the allowlisted popup kind key, `label` the native
-/// window label the host built, and `modal` whether the host applied its input
-/// gate for it. The block is `null` while no popup exists.
+/// Wire shape: `{ kind, label, modal }`. It is the host's real popup state, not
+/// a UI guess: `kind` is the allowlisted popup kind key, `label` the frozen
+/// legacy wire label, and `modal` whether the host holds its input gate for it.
+/// The block is `null` while no popup exists.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CadPopup {
-    /// Stable popup kind key (currently only `"about"`).
+    /// Stable popup kind key (`"about"`, `"textEdit"` or `"options"`).
     pub kind: String,
-    /// Native window label the host created for this popup.
+    /// Frozen legacy wire label (`"popup-1"`).
+    ///
+    /// The popup is an in-DOM overlay now, so there is no window to address. The
+    /// field stays in the frozen `cad_status` shape and is **never** written from
+    /// a second source of truth (no dual-write): every producer uses
+    /// [`crate::popup::POPUP_LABEL`].
+    #[deprecated(
+        note = "the popup is an in-DOM overlay; this label is frozen wire state and addresses no window"
+    )]
     pub label: String,
     /// Whether the host holds the modal input gate for this popup.
     pub modal: bool,

@@ -137,12 +137,14 @@ test('the injected tag is read from the global the host sets before load', () =>
   });
 });
 
-test('both documents boot from the same host-resolved locale', async () => {
-  // The main shell and the popup call the resolver with no host argument, so
-  // both read the injected global — one source, no second resolution path.
+test('the single document boots from the host-resolved locale', async () => {
+  // There is one document now: the shell resolves the host locale once and the
+  // overlay shares its i18n context, so there is no second resolution path.
   const app = await readModule('App.jsx');
   assert.ok(app.includes('useState(initialLocale)'), 'the shell must boot from the resolver');
-  const popup = await readModule('components/PopupRoot.jsx');
-  assert.ok(popup.includes('useState(initialLocale)'), 'the popup must boot from the resolver');
-  assert.ok(popup.includes('document.documentElement.lang = localeTag(locale)'));
+  assert.ok(app.includes('document.documentElement.lang = localeTag(locale)'));
+  const overlay = await readModule('components/PopupOverlay.jsx');
+  assert.ok(overlay.includes('useI18n()'), 'the overlay uses the shell i18n context');
+  assert.equal(overlay.includes('initialLocale'), false, 'the overlay must not re-resolve the locale');
+  assert.equal(overlay.includes('createTranslator'), false, 'the overlay must not build a translator');
 });

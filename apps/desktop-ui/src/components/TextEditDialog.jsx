@@ -1,5 +1,6 @@
 // TextEditDialog: the modal editor for one text entity's raw DXF string
-// (ADR 0021 D4). Rendered by `PopupRoot` for `kind: 'textEdit'`.
+// (ADR 0021 D4). Rendered inside `PopupOverlay` for `kind: 'textEdit'`; the
+// overlay chrome owns the title, the close button and Escape.
 //
 // The payload is the host's: `text` is the entity's stored string **verbatim**
 // (MTEXT markup included — `\P`, braces, `\W…;` — because that is what the file
@@ -16,18 +17,17 @@
 //     TEXT and offering one would only earn a refusal after the fact;
 //   * an IME composition never submits, in either mode.
 //
-// Escape and Close live in `PopupRoot` (one owner for the window's one
+// Escape and Close live in `PopupOverlay` (one owner for the overlay's one
 // accelerator); this file only reports what to close. Neither a host refusal nor
 // a failed close may cost the user their draft: the draft is local state, and
-// the only path that closes the window is a **successful** Apply.
+// the only path that closes the overlay is a **successful** Apply.
 //
 // Styling note: `style.css` is not part of this change. The field reuses the
 // shared `.commandline__input` tokens and the box metrics come from
 // `popup-layout.mjs`, next to the other dialogs'.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Icon } from '../icons.jsx';
-import { Button, IconButton } from './primitives.jsx';
+import { Button } from './primitives.jsx';
 import { useI18n } from '../context.mjs';
 import { setSelectedText } from '../textedit.mjs';
 import {
@@ -41,14 +41,11 @@ import {
 import {
   DIALOG_FOOT,
   DIALOG_TEXT_BODY,
-  DIALOG_TITLE,
   TEXT_FIELD,
   TEXT_FIELD_FOCUSED,
-  TEXT_HEAD,
   TEXT_META,
 } from '../popup-layout.mjs';
 
-const TITLE_ID = 'cad-textedit-title';
 const FIELD_ID = 'cad-textedit-field';
 const HINT_ID = 'cad-textedit-hint';
 const COUNT_ID = 'cad-textedit-count';
@@ -160,13 +157,6 @@ export function TextEditDialog({ view, onClose, closeFailure }) {
 
   return (
     <>
-      <header className="palette__head" style={TEXT_HEAD}>
-        <h2 id={TITLE_ID} style={DIALOG_TITLE}>
-          <Icon name="text" size={15} />
-          {t(POPUP_TEXT_KEYS.title)}
-        </h2>
-        <IconButton icon="close" size="xs" label={t(POPUP_TEXT_KEYS.close)} onClick={onClose} />
-      </header>
       <div style={DIALOG_TEXT_BODY}>
         <textarea
           id={FIELD_ID}
@@ -179,7 +169,7 @@ export function TextEditDialog({ view, onClose, closeFailure }) {
           autoFocus
           autoComplete="off"
           spellCheck={false}
-          aria-labelledby={TITLE_ID}
+          aria-label={t(POPUP_TEXT_KEYS.title)}
           aria-describedby={describedBy}
           aria-invalid={state.tooLong || state.singleLineBreak || undefined}
           onFocus={() => setFocused(true)}

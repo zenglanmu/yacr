@@ -42,6 +42,12 @@ pub enum HostErrorKind {
     Present,
     /// The owner-thread CAD tick failed.
     Tick,
+    /// The webview renderer process failed (the UI can no longer render).
+    ///
+    /// Recorded by trigger ③ of the popup lifecycle on the way to clearing the
+    /// modal gate, so a crash is visible in `cad_status.error` instead of only
+    /// releasing input silently.
+    Renderer,
 }
 
 /// A host-side CAD error (technical caption + kind). Never UI prose.
@@ -96,10 +102,11 @@ pub struct ShellState {
     ///
     /// This is the host's **input gate** as well as the value projected onto
     /// `cad_status.popup`: while it is `Some`, [`admit_command`] and
-    /// [`queue_cad_input`] refuse with [`POPUP_MODAL_OPEN`]. The host sets it
-    /// only after a popup window was built and clears it from that window's
-    /// `Destroyed` event, so it is independent of any UI-side pointer
-    /// suspension.
+    /// [`queue_cad_input`] refuse with [`POPUP_MODAL_OPEN`]. It is set only
+    /// after a fully validated open request and cleared by exactly four
+    /// triggers: an explicit close/Esc, a UI reload, a renderer process failure
+    /// and process exit. It is therefore independent of any UI-side pointer
+    /// suspension, which a blur can release at any time.
     pub popup: Option<CadPopup>,
 }
 
@@ -181,7 +188,8 @@ pub fn projected_popup(mut snapshot: CadStatus, popup: Option<&CadPopup>) -> Cad
 /// Whether the host's modal input gate is set (ADR-0021 D2).
 ///
 /// Independent from any UI-side pointer suspension: it is cleared only by the
-/// popup window lifecycle, never by a DOM `blur`.
+/// popup lifecycle (explicit close, reload, renderer crash, process exit),
+/// never by a DOM `blur`.
 pub fn modal_gate_open(state: &ShellState) -> bool {
     state.popup.is_some()
 }
@@ -338,6 +346,7 @@ mod tests {
         );
     }
 
+    #[allow(deprecated)] // the frozen `cad_status` wire label
     fn about_popup() -> CadPopup {
         CadPopup {
             kind: "about".into(),
@@ -374,8 +383,8 @@ mod tests {
         assert_eq!(state.cad_commands, vec!["OPEN".to_string()]);
         assert_eq!(state.cad_inputs.len(), 1);
 
-        // Clearing the host gate (the popup window's Destroyed event) admits
-        // both paths again without any UI-side action.
+        // Clearing the host gate (an explicit close) admits both paths again
+        // without any UI-side action.
         state.popup = None;
         assert!(!modal_gate_open(&state));
         assert!(admit_command(&mut state, "FIT").is_ok());
