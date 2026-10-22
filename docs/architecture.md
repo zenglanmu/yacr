@@ -2,12 +2,17 @@
 
 需求权威：`CAD_IMPLEMENTATION_SPEC.md` v2.0（含 §21 桌面宿主增补）。
 当前桌面 UI 决策见 [`docs/adr/0010-react-linux-host-replaces-slint.md`](adr/0010-react-linux-host-replaces-slint.md)；
-原生 Wayland 后端见 [`docs/adr/0011-native-wayland-subsurface.md`](adr/0011-native-wayland-subsurface.md)。
+原生 Wayland 后端见 [`docs/adr/0011-native-wayland-subsurface.md`](adr/0011-native-wayland-subsurface.md)；
+跨宿主合成模型（DOM-on-top、共享层、弹窗层）见
+[`docs/adr/0023-dom-on-top-cross-host-composition.md`](adr/0023-dom-on-top-cross-host-composition.md)。
 
-> **迁移状态（2026-10-16）**：桌面 UI 已由 Slint 迁移为 **React + Tauri 原生宿主**
-> （`apps/app-linux`，二进制 `yacr`）；`cad-ui-slint` 与 Slint 依赖已删除。本文只描述**当前树中
-> 真实存在**的 crate 与契约。旧 Slint 合成（ADR 0002/0003）与实验宿主（ADR 0006）保留为历史
-> 记录，见各 ADR 顶部横幅；旧宿主验证证据见 `docs/validation*.md`（历史，含 NOT RUN 边界）。
+> **迁移状态（2026-10-16，2026-10-23 增补）**：桌面 UI 已由 Slint 迁移为 **React + Tauri 原生宿主**
+> （`apps/app-linux`，二进制 `yacr`）；`cad-ui-slint` 与 Slint 依赖已删除。2026-10-23 起合成方向为
+> **DOM/WebView 在上、CAD 原生子表面在下**（ADR 0023），React UI 归并到唯一包 `apps/desktop-ui`，
+> Tauri 薄壳下沉到新共享层 `cad-desktop-shell`；**X11/XWayland 显式 Unsupported**（退出码 4），
+> Windows 宿主已实现但视觉未验证。本文只描述**当前树中真实存在**的 crate 与契约。旧 Slint 合成
+> （ADR 0002/0003）与实验宿主（ADR 0006）保留为历史记录，见各 ADR 顶部横幅；旧宿主验证证据见
+> `docs/validation*.md`（历史，含 NOT RUN 边界）。
 
 数据流：UI/CLI → Application/权限 → Command/DrawingTransaction → DB transaction →
 ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → Renderer → RenderHost。
@@ -45,10 +50,11 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 | 工作能力 | cad-measure：MeasurementEngine/SnapCandidate |
 | 应用 | cad-app：Document/SessionState/Viewport/Workspace、CommandHandler/Tool |
 | 查询 | cad-query：分页查询/Mixed/Unset |
-| 共享 UI 层 | **cad-ui-core：平台无关的 wire protocol、逻辑布局（layout）、CAD 会话（session，`CadSession`/`CadStatus`/44-command 表）、宿主 admission/error 状态（shell，`ShellState`）、i18n 目录；UI 框架与 GPU 无关 |
+| 共享 UI 层 | **cad-ui-core：平台无关的 wire protocol、逻辑布局（layout）、CAD 会话（session，`CadSession`/`CadStatus`/44-command 表）、宿主 admission/error 状态（shell，`ShellState`）、**弹窗纯状态机（popup，`PopupKind`/`PopupAck`/`CadPopup`/allowlist/四触发）**、launch options、i18n 目录；UI 框架与 GPU 无关 |
+| 桌面壳共享层 | **cad-desktop-shell：唯一允许依赖 `tauri` 的共享层**——`#[tauri::command]` 薄壳与注册、主窗口/子 webview 构建（init scripts、`start_maximized`）、popup 命令到 `cad-ui-core::popup` 的接线、工具包无关 `threading`、通用证据驱动骨架、参数化平台实现（`ReactFiles`/`ReactSurface`/`ReactConfigStore`）；**禁止** gtk/gdk/gdkx11/ashpd/wgpu/cad-render-wgpu/cad-engine/slint/iced/acadrust |
 | 宿主编排 | cad-host：HostCore（命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink）；**不依赖任何 UI 工具包，也不依赖 slint/wgpu/web-sys/Android 类型** |
 | 宿主平台契约 | cad-platform：PlatformFiles/ConfigStore/SurfaceSource/FontLoader/Persistence/TaskExecutor/Clipboard/HostLifecycle/RenderHost |
-| 宿主组合根 | apps：app-linux（React/Tauri，真实 Linux GUI）、app-windows/app-macos/app-android/app-web（显式 NOT IMPLEMENTED 占位） |
+| 宿主组合根 | apps：app-linux（GTK/Wayland 平台缝 + 真实 Linux GUI）、app-windows（Win32/WebView2 平台缝，已实现、视觉未验证）、app-macos/app-android/app-web（显式 NOT IMPLEMENTED 占位）；**唯一桌面 React UI：`apps/desktop-ui`** |
 | 自动化 | cad-diagnostics：统计/脱敏报告；cad-cli-tools：共用 Application 命令路径 |
 
 ## 必须保持的边界
@@ -62,6 +68,16 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 - `cad-ui-core` 位于 UI 无关的应用/宿主契约**之上**（它依赖 `cad-host`，会话包装 `HostCore`）、
   具体宿主**之下**；必须保持 UI 工具包与 GPU 无关（无 slint/wgpu/tauri/gtk/portal/平台类型），
   由 `scripts/check-architecture.py` 强制。
+- **`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层**，位于 `cad-ui-core` 之上、`app-*` 之下；
+  非 Linux/Windows 目标编译为空壳（保住 wasm 门禁）。它不依赖 gtk/gdk/gdkx11/ashpd/wgpu/
+  cad-render-wgpu/cad-engine/slint/iced/acadrust（脚本强制）。
+- **`apps/desktop-ui` 是唯一桌面 React UI 包**：单 React 树、`.native-input` 单一输入漏斗、
+  in-DOM 弹窗/菜单；两个宿主的 `tauri.conf.json` 都指向 `../desktop-ui/dist`，**不得**再复制第二套 UI。
+- **`app-*` 只保留平台缝**：GTK/overlay/owner、Wayland C shim、Win32 child HWND、portal/rfd 文件选择器、
+  known-folders、redraw pump/tick（GTK `queue_draw` 与 Win32 `InvalidateRect` 机制不同，各自薄封装）。
+  **可移植逻辑不得住在 `app-*`**——payload 组装、`\P` 映射、gate 逻辑、threading 协议都在共享层。
+- **锁序不变量**：两个 `Arc<Mutex<…>>`（`Shared` + `RenderTelemetry`）固定获取顺序
+  **Shared → RenderTelemetry**，严禁反向；`ShellTelemetry` 实现永不触碰 `Shared`。
 - `cad-host` 不直接依赖 `slint`/`wgpu`/`web-sys`/Android 类型；平台 I/O 一律经 `cad-platform` 的
   `PlatformFiles`/`ConfigStore`/`SurfaceSource` 契约（事件式、无 futures、无 `Send`），
   宿主特有的路径/对话框/表面度量只存在于 `app-*`。Slint 桌面退役后 `cad-host` 不再依赖任何 UI crate。
@@ -77,30 +93,33 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 `slint`/`slint-build`/`iced`，覆盖 build/dev 与 target 表、workspace 继承别名）。
 traits 是契约草案（0.1），实现前可通过 ADR 修正不足，不代表已稳定公共 API。
 
-## 桌面宿主：React/Tauri + 原生 GTK/wgpu 分区
+## 桌面宿主：React/Tauri + DOM-on-top 合成
 
-决策见 ADR 0010（宿主）与 ADR 0011（原生 Wayland 后端）；使用说明见 `docs/react-linux-app.md`；
-需求增补见 `CAD_IMPLEMENTATION_SPEC.md` §21。
+决策见 ADR 0010（宿主）、ADR 0011（原生 Wayland 后端）与 ADR 0023（跨宿主合成模型）；
+使用说明见 `docs/react-linux-app.md`；需求增补见 `CAD_IMPLEMENTATION_SPEC.md` §21。
 
-- **组合**：GTK `GtkOverlay` 内的中央原生 CAD 分区承载原生 surface（Rust + renderer-only wgpu），
-  Tauri `WebView` 作为透明 sibling 呈现 React chrome。二者 **co-visible**；顶层透明 alpha 全屏叠加
-  是历史 FAIL（保留于 ADR 0006）。
-- **后端与原生表面**：宿主支持 **X11/XWayland** 与**原生 Wayland**。
-  - X11：中央 `GtkDrawingArea` 获得自己的**原生 X child 窗口**，渲染器用其 Xlib XID/display。
-  - Wayland：`GtkDrawingArea` 保持**非 native**（**禁止** `gdk_window_ensure_native`）；宿主自建
-    **app-owned child `wl_surface` + `wl_subsurface`**，父级为 GDK toplevel 的 `wl_surface`，渲染器
-    只接收该 child 的 live Wayland raw handles。该协议逻辑由 `app-linux` **私有小 C shim**
-    （`apps/app-linux/native/wayland_shim.{c,h}`，`build.rs` 经 `cc`+`pkg-config wayland-client` 编译）
-    封装：借用 GDK 的 `wl_display`，**从不** `dispatch`/`roundtrip`/`flush`（**GTK 独占事件分发**）。
-  - 两种后端都**不**在顶层/GDK-owned surface 上建 Vulkan swapchain，也**不**做 CPU 帧拷贝。
-- **合成约束**：**不允许**跨 CAD 分区的 DOM 浮层。下拉/自动补全/命令历史**就地展开**（撑高所在
-  region），面板（Start、Diagnostics）**停靠**并挤窄分区，从而绝不覆盖原生 surface。`.native-input`
-  CAD 分区始终挂载并上报 `getBoundingClientRect()`（CSS px + DPR），宿主 `LayoutTracker` 据此更新
-  surface metrics——这是滚轮缩放锚定光标的前提。
-- **平台范围**：**Linux（X11/XWayland 或原生 Wayland）** 宿主真实可运行（后端由
-  `apps/app-linux/src/backend.rs` 显式决议 `GDK_BACKEND`，拒绝静默回退）。非 Linux 目标上
-  `app-linux` 编译为空库、二进制返回显式 NOT IMPLEMENTED；Windows/macOS/Android/Web 均为**显式
-  NOT IMPLEMENTED 占位**，不是可运行 GUI 产品。
+- **组合（唯一方向）**：DOM/WebView **在上**，GTK `GtkOverlay` 内的中央原生 CAD 分区**在下**。
+  - Wayland（生产）：app-owned `wl_subsurface` **无条件** `place_below(parent)`；GTK toplevel 必须
+    app-paintable + 空 opaque region + 透明清屏，否则 CAD 不可见。`place_below` 是父级相对的双缓冲
+    状态，随**父表面 commit** 生效，并在每个 surface generation 重建时重放。
+  - Windows：`WS_CHILD | WS_VISIBLE | WS_DISABLED | WS_CLIPSIBLINGS` 的 CAD child HWND 用
+    `SetWindowPos` 压到 wry 容器紧邻之下（每次布局/tick 幂等重排）；WebView2 背景 alpha 必须恰为 0。
+  - X11/XWayland：**显式 Unsupported**（GTK/Tauri 初始化前拒绝，标记 `yacr: unsupported-backend: x11`
+    + 退出码 4）；旧 X child 路径编译/测试保留但运行时不可达。
+- **历史区分**：整窗顶层透明 alpha 全屏叠加是历史 FAIL（ADR 0006）；本次成功的是**分区子表面
+  `place_below`**，二者证据链不同。
+- **单一输入漏斗**：CAD 表面**从不接收 OS 输入**。`.native-input`（DOM）→ `probe_input` → host
+  准入门/队列 → `cad-host` 输入管线；指针捕获、双击时序、滚轮、右键、坐标空间与 resize 上报全部
+  在这条漏斗内。Wayland 空 input region 与 Windows `WS_DISABLED` 是**防御纵深**。**不依赖原生
+  命中原生穿透**。
+- **弹窗层**：居中模态与锚定浮层都是**同一 React 树的 DOM 覆盖层**；host 侧模态围栏
+  （`ShellState.popup` + `PopupKind` allowlist + 二次拒绝 + 四触发清除）是安全边界，与渲染机制无关。
+- **合成/布局契约**：`.native-input` CAD 分区始终挂载并上报 `getBoundingClientRect()`（CSS px + DPR），
+  宿主 `LayoutTracker` 据此更新 surface metrics——这是滚轮缩放锚定光标的前提。**生产透明不变量**：
+  `.shell`/`.workspace`/`.workspace__canvas` 在 CAD 矩形内不得涂不透明底色（有结构性回归测试）。
+- **平台范围**：**原生 Wayland** 是受支持的 Linux 后端；X11/XWayland 被拒绝；Windows 宿主已实现
+  （Tier 0 编译 + Wine 拒绝 smoke，视觉 **PENDING user real-Windows spike**）；macOS/Android/Web 是
+  显式 NOT IMPLEMENTED 占位。
 - **支持范围**：仅 **OPEN / FIT** 接线到真实漏斗；其余 UI 控件显式禁用并标注原因；原生导航按
   实际源码能力支持（缩放/平移/fit）。**不新增投机 IPC**；需要 payload 的命令经真实漏斗显式拒绝，
   绝不空成功。**不是完整 CAD 产品**。

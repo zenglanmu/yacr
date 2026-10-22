@@ -78,6 +78,32 @@ raw handles。X11 走既有的原生 X child 窗口路径，二者行为互不�
   同 UID Mutter `ScreenCast` 截图佐证、输入经合成输入验证、discovery/几何已修），但**源码批准不等于验收**，
   且证据范围有界（见下）。
 
+## 2026-10-23 增补：合成方向反转为 DOM-on-top（生产语义）
+
+保留以上历史决策与验证事实。以下变更由 [ADR 0023](0023-dom-on-top-cross-host-composition.md) D1 决定，
+**取代**本 ADR 的“默认排列”语义（子表面机制的其余契约不变）：
+
+- **决策 4 的空 input region 保留且仍是防御纵深**（输入已全部走 DOM 单一漏斗；空 region 保证 CAD 不会
+  吞事件后无人转发）。
+- **`place_below` 无条件化**：`yacr_wl_shim_create_child` 现在**总是**执行
+  `wl_subsurface_place_below(subsurface, parent)`（DOM/WebView 在上、CAD 子表面在下）。旧的
+  above-parent 排列与开关**已删除**，**无双模式**、无运行时切换。
+- **决策 5 的父 commit 语义继续成立**，并成为生产不变量：`place_below` 与 `set_position` 一样是
+  父级相对、double-buffered 的子表面状态，随**父表面 commit** 生效；宿主只 `queue_draw`，从不自行
+  提交 GDK surface。
+- **generation 重放**：`create_child` 在每个 surface generation 重建时都会重放 `place_below`，因此
+  unrealize/realize、minimize/restore、父表面替换后的重建仍成立。注意边界：**N>1 次 generation 的
+  运行期重放本轮仅代码路径验证（runtime N>1 NOT RUN）**，不得视为运行时已验证。
+- **顶层 alpha 是生产必需**：GTK toplevel 必须 `set_app_paintable(true)`、在 draw 中
+  `set_opaque_region(None)` 并用 `Operator::Source` 透明清屏，否则 `place_below` 的 CAD 永远不可见
+  （`gtk_bridge/owner.rs::install_parent_alpha_clear`，无条件执行）。
+- **决策 7 的后端策略被收紧**：原生 Wayland 仍是生产路径；**X11/XWayland 改为显式 Unsupported**
+  （GTK/Tauri 初始化前拒绝，稳定标记 `yacr: unsupported-backend: x11` + 退出码 4，**无静默回退**）。
+  本 ADR 中“X11 走既有的原生 X child 窗口路径”的描述**仅作历史记录**；该路径编译/测试保留但运行时
+  不可达（注释 `unreachable_since_dom_on_top`）。
+- **证据**：opt-in 探针（2026-10-22）见 `docs/validation-dom-on-top-linux-2026-10-22.md`；生产迁移的
+  有界证据见 `docs/validation-dom-on-top-production-2026-10-23.md`（GNOME/Mutter + P620 + `scale=1`）。
+
 ## 验证状态（诚实，截至 2026-10-16）
 
 - **已执行**：scoped `cargo check -p app-linux --all-targets`、`cargo test --lib`（`app-linux` **58/58**、

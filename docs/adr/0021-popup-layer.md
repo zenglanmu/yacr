@@ -16,6 +16,18 @@ CAD 绘图区是**不可被 DOM 覆盖**的原生表面。那么后续必然出�
 
 ## 约束（事实，附出处）
 
+> **2026-10-23 前提失效（约束 1/3/4/6）**：以下约束描述的合成方向（CAD 原生表面在上、DOM 在下）
+> **已反转**，由 [ADR 0023](0023-dom-on-top-cross-host-composition.md) D1 取代：DOM/WebView 在上，
+> CAD 子表面 `place_below` 在下。因此：
+>
+> - **约束 1** 的“像素不过去”不再成立——DOM 可以绘制在 CAD 矩形之上；“事件级 vs 像素级”的区分失去对象。
+> - **约束 3**（`GtkPopover` z 序）与 **约束 4**（进程内 grab）讨论的 popover 机制**不再是候选**
+>   （D3 退役）；历史事实保留为“为什么当时不走 popover”的证据。
+> - **约束 6 的结论仍然有效**：CAD 表面从不接收真实 OS 输入，模态**必须**在唯一漏斗里强制；
+>   它由 ADR 0023 D4 的 host 围栏 + 四条清除触发继续实现。
+> - **约束 2/5**（Wayland 禁止 toplevel 定位、`GtkMenu` 是真 popup）仍是协议事实，但**不再驱动决策**：
+>   锚定 UI 已改为 in-DOM 覆盖层，不需要 toplevel 定位或 `xdg_popup`。
+
 1. **遮挡是像素级的，不是事件级的。** CAD 分区被重新 `add_overlay` 到**最后**，是最上层 overlay child，
    且是**不透明**原生表面（X11 独立 X child / Wayland app-owned `wl_subsurface`）。WebView 在其**下面**铺满整窗。
    输入穿透（空 input shape/region）只让**输入**过去；**像素不过去**。
@@ -41,6 +53,10 @@ CAD 绘图区是**不可被 DOM 覆盖**的原生表面。那么后续必然出�
 
 ### D1 居中模态/对话框 = **第二个 Tauri webview 窗口**
 
+> **2026-10-23：已被取代（机制层面）。** 见下方 WP3 增补与
+> [ADR 0023](0023-dom-on-top-cross-host-composition.md) D4——居中模态现在是**同一 React 树的 DOM
+> 覆盖层**，不再创建第二个 `tauri::Window`/子 webview。原文保留为历史决策及其当时理由。
+
 - `WebviewWindowBuilder::new(app, label, WebviewUrl::App(...))`
   + `.parent(&main)`（Linux 上落到 `gtk_window_set_transient_for`）
   + `.decorations(false)` + `.transparent(true)` + `.resizable(false)` + `.focused(true)`，
@@ -58,6 +74,13 @@ CAD 绘图区是**不可被 DOM 覆盖**的原生表面。那么后续必然出�
 
 ### D2 模态由**我们在输入漏斗里**强制（不靠 GTK）
 
+> **2026-10-23：仍然有效（安全边界，与渲染机制无关）。** 像素方向反转后本节依旧成立，并由
+> [ADR 0023](0023-dom-on-top-cross-host-composition.md) D4 继续实现：`PopupKind` allowlist、
+> `ShellState::popup`、`admit_command`/`queue_cad_input` 的二次拒绝、恢复时相位重校验，以及
+> “UI 侧 `textFocus`/`popupOpen` 独立双开关”。清除触发器从“窗口 `Destroyed`”扩为四条
+> （显式关闭、reload/navigation、渲染进程崩溃、进程退出）。
+
+
 - 打开模态即置 `input_gate = Suspended`：`.native-input` 的 `probe_input` 转发、以及除"关闭/Esc"外的全局快捷键
   **全部停**；同时 **host 侧二次拒绝** CAD 命令（不依赖 UI 自觉——UI 与被覆盖的区域可能不同步）。
 - 关闭/取消后恢复，并**重新校验当前工具相位**（模态期间宿主状态可能变化，恢复不能假设还是同一相位）。
@@ -67,6 +90,10 @@ CAD 绘图区是**不可被 DOM 覆盖**的原生表面。那么后续必然出�
   否则**一次外部点击就把模态保护解除**。两者是**独立开关**，`input_gate = Suspended` 时 `accepting` 恒为 false。
 
 ### D3 锚定菜单（右键）= **原生 `GtkMenu`**
+
+> **2026-10-23：已退役（未实施）。** 右键菜单最终走 in-DOM 覆盖层（portal 到顶层 overlay），
+> 见 [ADR 0023](0023-dom-on-top-cross-host-composition.md) D4。本节保留为当时的设计评估与
+> “为什么不选 X11-only DOM 窗口”的历史理由；**不得**据此新写原生菜单。
 
 - 用 `gtk_menu_popup_at_pointer`（或 `popup_at_rect`），它以**当前指针**为准 ⇒ **不需要屏幕绝对坐标**，
   因此在 Wayland 也可用；并获得真实 seat grab（外部点击关闭）、键盘导航与 a11y。
@@ -96,6 +123,12 @@ CAD 绘图区是**不可被 DOM 覆盖**的原生表面。那么后续必然出�
 
 ### D6 chrome 内浮层：**已审计，规则已在代码里**
 
+> **2026-10-23：约束已解除。** “chrome 内浮层必须留在自身 chrome 矩形内”的规则源于“DOM 不能画到
+> CAD 上”的前提，该前提已被 [ADR 0023](0023-dom-on-top-cross-host-composition.md) D1 取代：
+> 现在允许跨 chrome/CAD 边界的 in-DOM 浮层。以下审计事实保留（当时确实只有一个绝对定位浮层），
+> 但不再作为新浮层的设计约束；现行命中规则见 ADR 0023 D2（半透明装饰面板 `pointer-events: none`，
+> 控件 `pointer-events: auto` 收回）。
+
 - **审计结论（2026-10-20，纠正本文初稿的猜测）**：唯一的绝对定位浮层是 ribbon 的**变体下拉**
   （`.ribbon-panel__menu`），它**已经**是 **in-band popover**：定位在 `.ribbon-panel__body`（`position: relative`）
   之内，`max-height: 100%` + 内部滚动 ⇒ **不会画到 ribbon 带之外**，因此**不会**被 CAD 原生表面遮挡。
@@ -112,6 +145,10 @@ CAD 绘图区是**不可被 DOM 覆盖**的原生表面。那么后续必然出�
 - 新增：窗口生命周期管理、input gate 一个布尔相位、`cad_open_context_menu` IPC。
 - **唯一明确牺牲**：右键菜单是**原生外观**（无法与 React chrome 像素一致）。
 - 不再假设"DOM 可以画在 CAD 上"：凡跨 CAD 矩形的 UI，要么是**独立表面**（窗口），要么在 **chrome 内**。
+
+> **2026-10-23：本段已被反转。** 现在 DOM **可以**绘制在 CAD 上（ADR 0023 D1/D4）；跨 CAD 矩形的
+> UI 走同一 React 树的覆盖层。上述“唯一明确牺牲”（原生菜单外观）也随之消失。
+
 
 ## 验证计划（真实显示，按后端分别记录）
 
@@ -211,6 +248,11 @@ CAD 绘图区是**不可被 DOM 覆盖**的原生表面。那么后续必然出�
 #### WP3 增补（2026-10-22）：弹窗改为单树 DOM 覆盖层，`cad_open_popup` 增加可选 `payload`
 
 > 状态：**本轮实现**；最终措辞留给 P5 修订本文正文（D1 的"第二个窗口"表述届时一并清理）。
+
+> **2026-10-23（P5/WP5 已执行）**：本文正文的 D1/D3/D6 与约束 1/3/4/6 已加上失效注记；权威决策与
+> 跨宿主范围见 [ADR 0023](0023-dom-on-top-cross-host-composition.md)。**D2 围栏与“真实 OS 键盘从未
+> 验证”的诚实边界保留**。
+
 
 - **D1 机制退场**：Linux 宿主不再创建第二个 `tauri::Window`，也不再注入启动字面量；`about` / `textEdit` / `options`
   都是**同一 React 树内的覆盖层**，由 `cad_status.popup` 驱动显示。`CadPopup::label` 仅作为**冻结的 wire 字段**保留，

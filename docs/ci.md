@@ -7,10 +7,13 @@
 （构建/校验层）。校验脚本：`scripts/check-workflows.py`（必需 job 片段 + 退役 job 硬禁用契约）、
 `scripts/test-linux-workflow.py`（变异契约）、`scripts/test-ui-migration-guards.py`（迁移守卫契约）。
 
-> **2026-10-16 迁移状态**：桌面已迁移到 React/Tauri（`apps/app-linux`、`yacr`），Slint 退役。
-> 编译门禁已加入 Tauri/GTK 前置（`libwebkit2gtk-4.1-dev`）与 React 前端构建（`apps/desktop-ui`、
-> `npm test`、`npm run build`）。8 个发布/Web job 以 `if: false` **硬禁用**并以 `RETIRED` 标记，
-> **不可通过仓库变量重新启用**，也不含 `secrets.…` 发布路径。见 ADR 0010。
+> **2026-10-16 迁移状态（2026-10-23 增补）**：桌面已迁移到 React/Tauri（`apps/app-linux`、`yacr`），
+> Slint 退役。编译门禁已加入 Tauri/GTK 前置（`libwebkit2gtk-4.1-dev`）与 React 前端构建
+> （`apps/desktop-ui`、`npm test`、`npm run build`）。**2026-10-23 起**：`windows-check` 编译的是
+> **真实 Windows 宿主**（不再是 NOT IMPLEMENTED 桩），但**仍只是编译门禁**；X11/XWayland 在
+> Linux 宿主中被显式拒绝（退出码 4），CI 不运行 GUI。8 个发布/Web job 以 `if: false`
+> **硬禁用**并以 `RETIRED` 标记，**不可通过仓库变量重新启用**，也不含 `secrets.…` 发布路径。
+> 见 ADR 0010 与 ADR 0023。
 
 > **本环境（无 GitHub runner、无 `gh` 权限）没有实际执行这些 job**；本文件描述的是 workflow 内容
 > 与预期，**不是通过证据**。真实 job URL/commit/结果应写入 `docs/validation*.md`。
@@ -33,13 +36,18 @@
 | `i18n-contracts` | core.yml | `ubuntu-latest` | `python3 scripts/check-i18n.py`（双语目录 / key / 占位符 / Rust + React 静态 key / 硬编码 CJK 扫描） |
 | `shader-validation` | build.yml | `ubuntu-latest` | 离线 WGSL 解析/校验（naga，无需 GPU），失败红灯 |
 | `linux-app` | build.yml | `ubuntu-latest` | 安装 GTK/WebKitGTK 前置 + 构建并测试 React 前端 + `cargo check -p app-linux --all-targets --locked`，上传日志 |
-| `windows-check` | build.yml | `windows-latest` | 原生 MSVC `cargo check -p app-windows --all-targets --locked`（占位桩，不运行） |
+| `windows-check` | build.yml | `windows-latest` | 原生 MSVC `cargo check -p app-windows --all-targets --locked`（**真实 Windows 宿主**的编译门禁；不运行 exe、不是视觉验收） |
 | `macos-check` | build.yml | `macos-latest` | 原生 arm64 `cargo check -p app-macos --all-targets --locked`（占位桩，不运行） |
 | `android-check` | core.yml | 能力相关（默认 SKIP） | `cargo check --target aarch64-linux-android -p app-android --locked`（占位桩） |
 
 `android-check` 是**唯一** capability-gated 的编译门禁（`vars.ANDROID_CI_ENABLED`）；默认未启用时
 GitHub 显示 **skipped（未运行）**，绝不显示为通过。`windows-check`/`macos-check` **只证明编译**，
-不代表这些平台可运行。
+不代表这些平台可运行；`windows-check` 的 step summary 文案**仍是旧的“NOT IMPLEMENTED placeholder”**，
+属**文案腐化**（实现已换成真实宿主），不得据此判断实现状态。
+
+**CI 未覆盖但本地已执行的门禁**（2026-10-23，证据在 `$HOME/.cache/yacr-wine/logs/`）：
+Windows MSVC `clippy`/`check`/release `build`、MinGW GNU release `build`、`app-windows` wasm 空壳
+`check`——全部 rc=0。这些**不是** CI job 证据，也不代表 Windows 可运行。
 
 ## 已退役的 job（硬禁用，`if: false` + `RETIRED`）
 
@@ -70,6 +78,9 @@ GitHub 显示 **skipped（未运行）**，绝不显示为通过。`windows-chec
 - `core-quality` / `wasm-check` / `i18n-contracts` / `shader-validation` / `linux-app` /
   `windows-check` / `macos-check` / `android-check`：workflow 已定义，但**未在本环境的
   GitHub Actions 上执行**；请以真实 job 结果为准并写入 `docs/validation*.md`。
+- **Windows 视觉/运行时**：CI **没有**也不应有 Windows 运行验收（`windows-check` 只编译）；
+  spike-1/4/5 由用户在真 Windows 自测（`docs/windows-app.md`），CI 不得冒充。
+- **Linux X11/XWayland**：宿主显式拒绝（exit 4），CI 的 `linux-app` 只做编译/测试，不运行 GUI。
 - 8 个退役 job：**永远不会**在受支持配置下运行（硬禁用）。
 - **CI 上的真实 GPU / 黄金图 / 浏览器矩阵 / Android 真机**：未运行。GitHub 托管 runner 无 GPU，
   软件渲染不能作为真实 GPU 证据。

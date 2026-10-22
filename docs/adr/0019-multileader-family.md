@@ -61,6 +61,12 @@
 ### A.3 UI（**诚实声明**）
 
 - AutoCAD 在**画布内**开就地编辑器；本仓库 React 宿主**无法**在原生 CAD 分区上嵌入 **DOM** 编辑器（ADR-0010 `:27`）——就地编辑**不交付**（DOM 路线被几何证据否决、原生 GTK 路线被决定否决，见 [ADR-0020](0020-in-canvas-text-editing.md)）。
+
+  > **2026-10-23 前提更正**：括号内“DOM 路线被几何证据否决”**已失效**（[ADR 0023](0023-dom-on-top-cross-host-composition.md)
+  > D1 允许 DOM 绘制在 CAD 之上）。**但结论“就地编辑不交付”本轮仍然成立**，理由改为产品选择：文本录入走
+  > 停靠命令行（A）、属性面板（B）与**同一 React 树的 textEdit 覆盖层**（C，ADR 0021 WP3 增补），
+  > 没有在图纸原位嵌入编辑器的实现，也没有其验收证据。**不得**据此宣称已支持就地编辑。
+
   采用**命令行/状态栏文本输入**：待文本时 `CommandLine.jsx` 切为文本模式，Enter 提交并 `SetToolText`。
   这是**传统 `-TEXT` 工作流**，可用但**不是** AutoCAD 的就地编辑。
 - 必须遵守既有规则：`isTyping(event.target)`、`InputPolicy::shortcuts_suppressed`、`EscapeAction::DismissTextFocus`；

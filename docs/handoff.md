@@ -1,3 +1,107 @@
+## 2026-10-23 DOM-on-top 跨宿主合成落地（WP1–WP5）
+
+### 1. 结论
+
+生产合成方向已反转为 **DOM/WebView 在上、wgpu CAD 原生表面在下**：Linux 原生 Wayland 是唯一
+生产路径（有界 Observer 判读）；**X11/XWayland 显式 Unsupported**（标记行 + 退出码 4，GTK 前拒绝）；
+**Windows 宿主完整实现**，上限为 **Tier 0 编译门禁（全部 rc=0）+ Wine 拒绝合同 smoke（三次 rc=5）**，
+视觉/运行时验收 **PENDING 用户真 Windows spike-1/4/5**。`macOS`/`Android`/`Web` 仍是显式
+NOT IMPLEMENTED 占位。架构权威：[ADR 0023](adr/0023-dom-on-top-cross-host-composition.md)；
+生产证据：[validation-dom-on-top-production-2026-10-23.md](validation-dom-on-top-production-2026-10-23.md)。
+
+### 2. 提交与范围（分支 `dom-on-top-layering`）
+
+- `dece71c` UI 归并 `apps/desktop-ui`（WP1c）；`10a61e5` 新 crate `cad-desktop-shell`（WP1b）；
+  `0093dae` WP1 门禁修复。
+- `359d58a` WP2：Wayland `place_below` 无条件转正、旧排列删净、顶层 alpha 清屏生产化、
+  X11 拒绝（标记行 + 退出码 4 + i18n 双目录）、探针转**回归夹具**、generation 重放。
+- `9ecce95` WP3：弹窗迁入同一 React 树的 in-DOM 覆盖层；第二 Tauri 窗口机制退役；
+  host 侧 D2 模态围栏保留，清除改**四触发**；`cad_open_popup` ack 加法式 `payload`。
+- `6e4bf06` 生产透明修复（人工复测发现，见 §5）。
+- `dd23bea` WP4：Windows 真实宿主（Tauri 2 + 透明 WebView2 + `WS_DISABLED` child HWND +
+  单一 DOM 漏斗）；`9fba811` WP4 门禁修复（布局反转守卫、z-order 失败去重、退出码注册表文档）。
+- WP5 文档收口（本条目及 `docs/**`、`AGENTS.md`、`CAD_IMPLEMENTATION_SPEC.md` §21）在**工作树中**，
+  本轮**未提交**，由协调器统一提交。
+
+### 3. 行为变化（用户可见 / 契约）
+
+- **输入不变**：唯一漏斗仍是 `.native-input` → `probe_input` IPC → host 准入门/队列；CAD 表面
+  永不接收 OS 输入（Wayland 空 input region；Windows `WS_DISABLED`）。**不声称**原生点击穿透。
+- **DOM 命中规则**：不透明 chrome 正常命中；半透明装饰面板 `pointer-events: none` 穿透，
+  面板内交互控件 `pointer-events: auto` 收回。
+- **弹窗**：锚定菜单与居中模态都是同一 React 树的 DOM 覆盖层；Esc/关闭按钮在正文
+  error-boundary 之外；renderer 崩溃/reload/进程退出均清门。
+- **X11 用户**：启动即拒绝（`yacr: unsupported-backend: x11` + 中文诊断 + 退出码 4），无窗口、
+  无静默回退；X11 web+canvas 路线**显式延后**。旧 X11 native-child 代码保留但运行时不可达
+  （`unreachable_since_dom_on_top`），删除留作独立清理。
+- **Windows**：真实宿主，非占位；WebView2 缺失 = 显式 Unsupported（标记行
+  `yacr: unsupported-runtime: webview2` + i18n + 退出码 5）。
+- **退出码注册表**（与 `docs/build.md`、ADR 0023 §9 同源）：0 成功 / 1 通用失败 / 2 非法后端策略 /
+  3 postload-pan 证据驱动失败 / 4 不支持的显示后端 / 5 不支持的运行时。
+- **回归夹具**：唯一触发器 `YACR_PROBE_STACKING=1`（严格 `"1"`）+ init-script
+  `window.__YACR_STACKING_REGRESSION__ === true` + 真实 `--open`；`--probe`/`YACR_PROBE_ONLY`
+  同现即拒绝。`YACR_PROBE_DOM_ON_TOP` 与注入对象**已删除**，不再有该开关。
+
+### 4. 门禁（本轮实跑，仅改动范围）
+
+- WP2：`app-linux` 138/138、`cad-ui-core` 212/212、`desktop-ui` 403/403、`clippy -D warnings`、
+  `fmt --check`、architecture/workflows/linux-workflow/migration-guards/fixture-manifest/i18n/
+  `test-collect-evidence.py` 全 rc=0。
+- WP3：`cad-ui-core` 215/215、`cad-desktop-shell` 11/11 + wire goldens 4/4、`app-linux` 134/134、
+  `desktop-ui` 411/411、fmt/clippy、file-size 840、architecture 28、i18n 709 全 rc=0。
+- WP4：12 项 Tier 0 全 rc=0（fmt/clippy host/msvc、`app-windows --lib` 6 passed、xwin check/build、
+  mingw build、wasm 空壳、i18n 716、file-size 851、architecture 28、migration guards 18）。
+- **NOT RUN**：全 workspace 测试与全量 CI 门禁矩阵（按日常有界策略）；Android/wasm 平台矩阵；
+  N>1 次 surface generation 的**运行期**重放（仅代码路径验证）；renderer 崩溃活体注入；
+  Windows 全部视觉/运行时项；生产透明修复后的像素复采。
+
+### 5. 人工复测抓到的生产 bug 与修复
+
+- **症状**：迁移后生产 UI 中 CAD 层不可见，但 stacking 夹具帧正常。根因是
+  `.shell`/`.workspace`/`.workspace__canvas` 在 CAD 视口区画了**不透明底色**。
+- **修复**：`6e4bf06` 三者改 `background: transparent`；回归测试
+  `apps/desktop-ui/test/metrics.test.mjs` 钉住透明不变量。
+- **教训（已写入 `docs/testing-dwg.md` 证据规则）**：夹具验证层序 ≠ 生产 UI 透明性；证据取景
+  必须包含**可见几何**；捕获时必须确认**目标窗口在前台**（WP3 textEdit 帧因此作废为
+  wrong-window）；像素复采用新目录，不覆盖旧证据。
+- **复采状态**：`wp3-fix1` 的 Wayland 运行 rc=0 但截图缺失（屏保抑制 ScreenCast，未越权解锁），
+  因此 **PENDING-RECAPTURE**，本轮**不**写透明视觉结论。
+
+### 6. Windows 证据与上限（禁止过度声称）
+
+- Tier 0 全部 rc=0（MSVC/ mingw 产物 + wasm 空壳）；**这只证明目标可编译/链接，不是可运行 GUI**。
+- Wine smoke W1–W3 均 **rc=5**，标记行/i18n/细节分支端到端成立；**Wine 不是 Windows**：
+  DComp 是 stub（bug 58921），`WS_EX_LAYERED|NOREDIRECTIONBITMAP` 黑屏（bug 55432）。
+  Wine 像素结论唯一允许的标注是 **`NOT VERIFIED (Wine limitation, bug 55432/58921)`**。
+- **NOT RUN**：z-order 稳定性、DPI/多显示器、ProcessFailed 活体、真实 COM 选择器、
+  runtime-present 启动/出帧、Windows 硬件 Vulkan 精度/性能。透明结论只能限定
+  “该 Runtime 版本 + 该 GPU/驱动 + 该 Windows 版本 + 该缩放”；**禁止**写“Windows 已验收”。
+
+### 7. 剩余工作与风险
+
+1. **PENDING 用户真 Windows spike-1/4/5**（判据与证据格式见 `docs/windows-app.md`；
+   spike-1 失败时按 tiling 应急回退并与用户决策，不擅自分片重构）。
+2. **PENDING-RECAPTURE**：透明修复后的 Wayland 生产帧复采 + Observer 重判；在此之前不得声称
+   透明视觉已验收。
+3. **依赖锁风险**：本轮 `gpu-allocator 0.28.0 → windows 0.62.2` 只是 `Cargo.lock` 调整；
+   未来 `cargo update` 可能重新引入重复 COM 绑定，需在 Windows 目标上复核。
+4. **Tauri `WS_EX_NOREDIRECTIONBITMAP`**：2.11.6 无 builder flag，仅 best-effort；升级
+   Tauri ≥2.12.3 后改用官方配置位并重跑 spike-1/N9。
+5. **平台合成 ADR（RenderTarget/HostTexture token 所有权）**：**ADR 0023 §5 显式延期**，属
+   renderer 资源契约，与层序正交；本文件「已定义，但尚需设计审查」中的原条目**原样保留**，
+   不得凭 token 猜测 GPU 对象。
+6. X11 web+canvas 路线显式延后；旧 X11 native-child 路径（不可达）待独立清理。
+7. UI “DOM 测试”只是 `node:test` 源码结构/纯函数契约，**不是**运行时挂载或像素证据；
+   不得据此宣称 UI 交互已验证。
+
+### 8. 历史结论处理（不删除，只加署期注记）
+
+- ADR 0010（`:27` 与 2026-10-22 增补后）、ADR 0011、ADR 0017（`:602`/`:870`）、ADR 0018、
+  ADR 0019、ADR 0020、ADR 0021 均已加 **2026-10-23 取代/前提更正注记**：其“DOM 不得浮于 CAD /
+  React 宿主无法绘制 overlay”的前提失效，但各自的**未实现事实**（标注预览、填充预览、就地编辑
+  入口等）不因此自动完成。ADR 0021 的 D2 模态围栏**保留**，仅 D1/D3/D6 与约束 1/3/4/6 被取代。
+- 历史整窗透明 alpha FAIL 仍然成立；本轮 PASS 的是分区子表面 `place_below`，两者不得互相翻案。
+
 ## 2026-10-22 DOM-on-top 有界探针（默认产品安排不变）
 
 - 新 opt-in：仅 `YACR_PROBE_DOM_ON_TOP=1` 且显式 `--probe`，保留 marker/真实输入准入。

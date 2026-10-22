@@ -1,5 +1,12 @@
 # DOM 位于原生 CAD 之上的 Linux 有界探针（2026-10-22）
 
+> **2026-10-23 注记**：本文记录的是**已退役的 opt-in 探针阶段**。`YACR_PROBE_DOM_ON_TOP` 与
+> `window.__YACR_PROBE_DOM_ON_TOP__` 已随生产迁移**删除**（见
+> [ADR 0023](adr/0023-dom-on-top-cross-host-composition.md) §7）。文中的启动命令仅作历史复现
+> 说明，**不是**现行操作指引；现行回归夹具与生产路径见
+> [react-linux-app.md](react-linux-app.md)，本轮生产证据见
+> [validation-dom-on-top-production-2026-10-23.md](validation-dom-on-top-production-2026-10-23.md)。
+
 ## 结论与范围
 
 **仅显式 opt-in 探针，不是生产合成迁移或双后端替代验收。** 默认产品仍采用 CAD 在 WebView

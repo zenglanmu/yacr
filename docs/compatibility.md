@@ -1,9 +1,10 @@
 # 兼容性与能力矩阵
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
-> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+> **历史横幅（2026-10-16，2026-10-23 限定）**：下列横幅原本针对**平台/宿主**段落：`cad-ui-slint`、
+> `yacr-linux`、旧脚本命令均已退役。**实体能力矩阵与命令矩阵仍是当前契约**，不要因为横幅而忽略它们。
+> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/windows-app.md`、
+> `docs/build.md`、[ADR 0010](adr/0010-react-linux-host-replaces-slint.md) 与
+> [ADR 0023](adr/0023-dom-on-top-cross-host-composition.md)。平台段落已在 2026-10-23 重写（见「平台」）。
 
 **没有任何已验收的 DWG 版本、实体或平台。** `fixtures/manifest` 现含合成夹具与一个
 开源 QCAD `flange` 样本（`Partial`，`fixtures/dxf/qcad-flange/`），因此下表的
@@ -104,7 +105,7 @@ P5a 让标注成为一级域实体并迁入两分支导入 + 导出；**P5b** �
 | 当前样式 | 硬编码 `Standard` | ADR B.3：P5 **无交互式样式管理器**；创建从**唯一存储样式** `Standard` 解析快照；数据库**无** `Standard` 时是**防御性显式拒绝** |
 | 对象选择变体 | **NOT IMPLEMENTED** | 仅**点选流程**；选直线/圆/弧自动取端点的对象选择变体未实现（决策 C） |
 | 文字覆盖（`Text`/`Mtext`） | **NOT IMPLEMENTED** | 只画自动测量值；`text_override` 字段保留以备导入（决策 C） |
-| 标注预览 | **声明限制：无真正标注预览** | 放置期间实时预览是后端**橡皮筋链**（`preview.rs` 把两种 kind 路由到 `preview_chain`）——用户看到已捕获原点 + 到光标的链，**看不到**合成标注（尺寸线/尺寸界线/箭头/测量文字）。真预览需**后端 overlay 分支**；React UI **无法**绘制 overlay（原生 CAD 分区是 X11 子窗口 / Wayland 子表面，DOM 不得浮于其上——ADR-0010 `:27`）。React 宿主因此**改为每步提示** |
+| 标注预览 | **声明限制：无真正标注预览** | 放置期间实时预览是后端**橡皮筋链**（`preview.rs` 把两种 kind 路由到 `preview_chain`）——用户看到已捕获原点 + 到光标的链，**看不到**合成标注（尺寸线/尺寸界线/箭头/测量文字）。真预览需**后端 overlay 分支**；React UI **无法**绘制 overlay（原生 CAD 分区是 X11 子窗口 / Wayland 子表面，DOM 不得浮于其上——ADR-0010 `:27`）。React 宿主因此**改为每步提示**。**2026-10-23 更正**：“React UI 无法绘制 overlay”的几何前提已失效（[ADR 0023](adr/0023-dom-on-top-cross-host-composition.md) D1）；**限制本身仍在**——缺的是后端 overlay 分支，不是前端绘制能力 |
 | 创建标注的导出形状 | 复用 P5a 形状 | 与 P5a 相同：内容块 + 组 42 = 测量值 + DIMSTYLE 记录；**往返现首次在"创建"的标注上演练**（导出 → 再导入 → 同 kind、同定义点） |
 | 域实体 | 实现 | `SemanticGeometry::Dimension`；`display` 私有、单写入路径；无块与图片两分支都迁（A.6） |
 | ArcLength / LargeRadial | 读取合成 `Partial`；**不迁移** | 不在 ADR-0017 kind 集合（无点槽/组码）；保留旧 `Compound` 合成；**导出仍与从前一样有损**，P5 **不**声称 DIMENSION 完整往返 |
@@ -275,18 +276,24 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 
 ## 平台
 
-- Android：aarch64 可编译并打包 APK；x86_64 release APK 已在无头模拟器（KVM +
-  SwiftShader）**实际安装、启动、渲染并验证画布平移/缩放**（
-  `docs/validation-android.md`）。P4 起打开/另存经 SAF
-  （`ACTION_OPEN_DOCUMENT`/`ACTION_CREATE_DOCUMENT`）实现，New 为共享核心的空白新建；
-  能力位 `open/new/save=true`、`plot=false`。真机仍 **未运行**；surface 尺寸/安全区、
-  量测拾取、面板状态推送未接线。
-- Web：wasm 静态产物可构建；`web-dist/` 在**headful Chromium 的真实 GPU**（ANGLE/Mesa
-  Intel UHD，**非** SwiftShader）以 **WebGL2 实际运行**：打开（上传）、New（空白）、
-  另存 DXF 下载、出图 SVG/PDF 下载均通过（`docs/validation-web.md` §15）。WebGPU 路径、
-  移动/桌面浏览器矩阵、真机 **未运行**；带 CAD 文本的 Web 出图在浏览器字体未装载时为
-  显式 Unsupported。
-- iOS/Linux/macOS/Windows：仅 `cad-platform` 抽象，**无宿主**。
+> **2026-10-23 重写**：旧段落的 Android/Web/“iOS/Linux/macOS/Windows 无宿主”描述属 Slint 时代，
+> 已整体替换为当前状态。能力 ≠ 验收；**没有任何平台是“完整 CAD 产品验收通过”**。
+
+| 平台 | 宿主状态 | 合成 | 有界证据 | 未验证 / 上限 |
+|---|---|---|---|---|
+| **Linux / 原生 Wayland** | **受支持，真实可运行**（`apps/app-linux`，bin `yacr`） | **DOM on top**：app-owned `wl_subsurface` 无条件 `place_below(parent)`；GTK toplevel 透明 + 空 opaque region | 生产 `--open` 运行（真实 Vulkan/Quadro P620）、合成帧由同 UID Mutter `ScreenCast` 捕获；WP2 四条判据 PASS（带 caveat）、WP3 About 帧 PASS、textEdit 帧 **INVALID wrong-window** | 仅 **GNOME/Mutter + P620 + `scale=1`**；透明修复后像素复采 **PENDING-RECAPTURE**；DPR>1/分数缩放、多显示器、跨合成器、性能、vendor/golden 均无结论 |
+| **Linux / X11 / XWayland** | **显式 Unsupported**（退出码 **4**） | —（不创建窗口） | 拒绝合同：stderr `yacr: unsupported-backend: x11` + i18n 诊断 + exit 4 | 运行/视觉 **NOT RUN**（被拒绝）；web+canvas 回退路线**显式延后**，需新 ADR |
+| **Windows** | **已实现**（`apps/app-windows`，bin `yacr-windows`） | **DOM on top**：透明 WebView2（alpha 恰 0）在上，`WS_CHILD|WS_DISABLED` CAD child HWND 在下 | **Tier 0 编译门禁全 rc=0**（msvc clippy/check/build、mingw build、wasm 空壳 check）；**Wine 拒绝合同 smoke 3/3 rc=5** | **视觉/运行时全部 NOT RUN**；spike-1/4/5 **PENDING user real-Windows spike**；Wine 像素结论固定 `NOT VERIFIED (Wine limitation, bug 55432/58921)`；无发布打包 |
+| **macOS** | 显式 NOT IMPLEMENTED 占位（`yacr-macos` 失败桩） | — | 无 | — |
+| **Android** | 显式 NOT IMPLEMENTED 占位（入口打印退役诊断后 abort） | — | 仅 `cargo check --target aarch64-linux-android` 编译门禁 | 旧模拟器/真机证据属已退役 UI，**不得**复用 |
+| **Web** | 显式 NOT IMPLEMENTED 占位（wasm 入口返回错误） | — | 仅 workspace wasm `--lib` 编译门禁 | 旧 Web 证据属已退役 UI，**不得**复用 |
+
+- 平台 I/O（文件、配置、表面度量、文件选择器）只存在于 `app-*`；共享层不含平台类型。
+- **单一 React UI**：`apps/desktop-ui`（两个桌面宿主共用）。DOM 侧“测试”是 node:test 的源码
+  结构/纯函数契约，**不是**运行时 DOM 挂载，也**不是**像素/视觉验收。
+- Windows 的判定上限复述：**实现 + Tier 0 + Wine 拒绝 smoke**，视觉由用户真 Windows 自测；
+  **不得**写“Windows 已验收”。
+
 
 ## GPU 设备能力协商（2026-10-17，政策见 `docs/adr/0013-device-capability-negotiation.md`）
 

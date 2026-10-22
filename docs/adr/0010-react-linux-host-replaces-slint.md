@@ -26,6 +26,10 @@ CAD 通过 `cad-ui-slint/src/bridge.rs` 与 wgpu 合成。2026-10-14 用户授�
    `GtkDrawingArea`/`GtkOverlay` 的 child surface 上；React（Vite）chrome 由 WebView 呈现。
    **不允许**跨 CAD 分区的 DOM 浮层；下拉/补全/历史**就地展开**，面板**停靠**（in-flow），
    从而不会压到原生 surface。
+   > **2026-10-23 失效注记**：本句是 2026-10-16 的**产品选择**，已被
+   > [ADR 0023](0023-dom-on-top-cross-host-composition.md) D1/D4 取代——生产合成方向反转为
+   > **DOM 在上、CAD 原生子表面在下**，弹窗/菜单改为同一 React 树的 DOM 覆盖层。历史事实保留，
+   > 勿按本句实施新功能。
 3. **共享 UI 逻辑**：平台无关部分下沉到新 crate `cad-ui-core`（protocol/layout/session/shell/
    i18n），位于 UI 无关的 `cad-app`/`cad-host`/`cad-engine`/`cad-platform` 契约之上、具体宿主之下。
    宿主通过 `state.shell.*` 显式访问共享状态，直接 `use cad_ui_core::…`，无过渡 re-export 别名。
@@ -91,6 +95,11 @@ CAD 通过 `cad-ui-slint/src/bridge.rs` 与 wgpu 合成。2026-10-14 用户授�
 
 ## 2026-10-22 增补：第2点的合成顺序是产品选择，不是平台必然
 
+> **2026-10-23 后续**：本节所述 opt-in 探针已被**生产迁移取代**。`YACR_PROBE_DOM_ON_TOP=1 --probe`
+> 开关与 `window.__YACR_PROBE_DOM_ON_TOP__` 注入**已删除**，不得再作为操作指引；现行回归触发器是
+> `YACR_PROBE_STACKING=1` + init-script `window.__YACR_STACKING_REGRESSION__ === true` + 真实
+> `--open`（详见 [ADR 0023](0023-dom-on-top-cross-host-composition.md) §7）。
+
 保留以上历史决策与验收事实。第2点“禁止跨 CAD 的 DOM 浮层”描述的是**当前默认产品安排**，
 不是 GTK/Linux 固有禁令。历史上同一顶层 drawable 的叠加探针失败，根因并未完整诊断；选择独立
 child CAD 分区是**绕开该重叠问题**，不能反推已证明所有顶层/DOM 叠加方案都不可行。
@@ -103,3 +112,10 @@ Wayland 上，由合成帧证明 DOM 可遮挡并半透明混合 app-owned CAD �
 **生产默认未迁移，也未建立 X11+Wayland 联合替代路线。** 未来 X11 选项需要新的有界设计与证据，
 不是 CSS/reorder 即可修复的承诺；本增补不要求重写宿主。完整范围、源码/图像证据、输入与生命周期
 缺口见 [DOM-on-top 验证记录](../validation-dom-on-top-linux-2026-10-22.md)。
+
+> **2026-10-23 更新（取代上一段的“未迁移”）**：生产默认**已迁移**到 DOM-on-top。原生 Wayland 的
+> `place_below` 成为无条件生产语义；X11/XWayland 改为**显式 Unsupported**（稳定标记
+> `yacr: unsupported-backend: x11` + 退出码 4），不再作为可运行回退。Windows 宿主采用同一合成方向，
+> 上限为“实现 + Tier 0 编译门禁 + Wine 拒绝合同 smoke”，视觉验收 **PENDING user real-Windows spike**。
+> 决策与边界见 [ADR 0023](0023-dom-on-top-cross-host-composition.md)；本轮证据见
+> [生产验证记录](../validation-dom-on-top-production-2026-10-23.md)。

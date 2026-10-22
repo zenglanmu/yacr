@@ -1,11 +1,12 @@
 # DWG 打开与渲染测试指南
 
-> **2026-10-16 迁移更新**：桌面宿主已改为 **React/Tauri + 原生 GTK/wgpu 分区**
+> **2026-10-16 迁移更新（2026-10-23 增补）**：桌面宿主已改为 **React/Tauri + 原生 Wayland 子表面**
 > （`apps/app-linux`，bin `yacr`，`scripts/run-react-linux.sh`）；Slint 桌面与其测试脚本已退役，
 > Web/Android UI 为 NOT IMPLEMENTED 占位。下文提到真实 winit + Slint、浏览器 Playwright、
 > `check-web-*.mjs`/`verify-ui.sh` 等**已退役**；当前真实 GPU 路线见 `docs/react-linux-app.md`
-> 「证据机制」。**最终合并树尚未运行任何编译/测试/GPU 验收（P6）**；早期阶段（P1 core/app 契约
-> 测试、P2a 编译检查、P4 前端构建/测试）曾在**当时**的分支上有界运行，**不**构成最终树或真实 GPU 验收。
+> 「证据机制」与 `scripts/collect-evidence.sh`。**2026-10-23 起**：Linux 只支持原生 Wayland
+> （X11/XWayland 显式拒绝，exit 4），合成方向为 DOM-on-top；Windows 宿主已实现但视觉
+> **PENDING user real-Windows spike**。旧 Slint 阶段的运行证据不得复用。
 
 ## 1. 测试顺序与结论
 
@@ -26,6 +27,11 @@ WASM + Playwright 做第二层集成测试；浏览器 UI 已退役。软件渲�
 已执行的 canteen 回归及缺陷证据见 [validation-dwg.md](validation-dwg.md)。
 
 ### 真机回归批量入口（`scripts/run-real-gpu-e2e.sh`）
+
+> **2026-10-23：本节已退役，勿当可用流程。** 该脚本与 `app-linux::host::validation` 的
+> `#[ignore]` 用例已随 Slint 宿主退役，**不再存在于当前树**。现行入口是
+> `scripts/collect-evidence.sh`（构建 → 真实 `yacr --open` → 同 UID Mutter `ScreenCast` 截图 →
+> `results.tsv`）。以下文字仅作历史记录。
 
 真实机器桌面回归的**唯一入口**是 `scripts/run-real-gpu-e2e.sh`（真实 winit 窗口 + 硬件
 Vulkan，绝不设置 `VK_ICD_FILENAMES`，并清除继承的软件 ICD）。它把 `app-linux`
@@ -153,6 +159,9 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
 
 ## 4. 第二层：WASM + Playwright 浏览器
 
+> **2026-10-23：本节已退役。** Web UI 是显式 NOT IMPLEMENTED 占位，`scripts/build-web.sh` 非零退出；
+> wasm 只保留**编译门禁**（平台隔离），没有浏览器运行验收。以下文字仅作历史记录。
+
 只在原生调试收敛后执行；前提为 wasm target、匹配锁文件的 wasm-bindgen CLI、
 外部安装的 Playwright/Chromium。浏览器环境配置参考 [validation-web.md](validation-web.md)。
 
@@ -186,7 +195,25 @@ PLAYWRIGHT_MODULE="$HOME/.local/share/headless-browser/node_modules/playwright-c
 记录实际后端；WebGPU 不可用而回退 WebGL2 的 warning 不表示 WebGPU 已验证。
 CLI 显式回退字体与 Web 按目录自动加载的策略不同，应分别描述两端文字结果。
 
-## 5. 交付记录
+## 5. 证据采集的持久规则（DOM-on-top 教训，2026-10-23）
+
+这些规则来自本轮真实踩坑；对 `scripts/collect-evidence.sh` 与任何手工截图都适用：
+
+1. **取景必须包含可见几何**。曾用几乎退化的几何（亚像素尺寸）做生产透明复核：CAD 层是否被
+   DOM 遮住**看不出来**，截图“非空”却毫无判别力。夹具必须含足够大的图元（跨视口、可辨识的
+   线/弧），并记录 `entityCount` 与 CAD rect。
+2. **截图前必须确认应用在前台**。曾有一帧抓到的是 Chrome/终端窗口（Observer 判为
+   **INVALID wrong-window**），而不是 `yacr`。脚本要验证目标窗口/标题或使用窗口自身
+   drawable；Wayland 的整屏 `RecordMonitor` 帧更要逐帧确认应用可见、未被其它窗口覆盖。
+3. **fixture 的层序 ≠ 生产 UI 的透明度**。回归夹具自己的 DOM 结构可以正确遮挡/混合，但产品
+   `.shell`/`.workspace`/`.workspace__canvas` 曾涂不透明底导致 CAD 不可见（已修 `6e4bf06`）。
+   夹具 PASS **不能**替代生产布局的像素证据。
+4. **每次运行用新目录**；保留失败/超时记录；`results.tsv` 以**稳定标记行**为第一分类依据
+   （X11 拒绝是 `UNSUPPORTED_BACKEND`，不是普通非零退出）。
+5. **说明边界**：Wayland 帧是整屏合成（可能含其它窗口，仅本地读判、不上传）；截图只是像素，
+   **不等于**视觉正确性、精度或 vendor 结论；一次 Observer PASS 不推广到其它合成器/DPI/GPU。
+
+## 6. 交付记录
 
 每轮在验证文档记录：代码版本/未提交差异、样本 SHA/来源、参考图、字体与回退、
 命令、实际适配器、图像尺寸、三层结论、耗时范围、剩余缺项，以及证据目录。

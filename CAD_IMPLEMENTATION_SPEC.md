@@ -735,30 +735,59 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
 
 本版替代 1.0：增加三维查看及独立曲面离散能力，确立数据库驱动架构。2026-10-04 修订明确 OpenCADStudio 仅为 UI 功能规格参考，取消以其为绘制核心源码抽取/参考来源的要求。2026-10-05 移除用户批注子系统（F07/F08/F09）。Android/Web、Slint、wgpu、acadrust 不改源码、极简/增强两模式、测量、注释性缩放和多后端要求继续有效。所有章节必须一起执行，不能只完成新架构而忽略原有功能和性能验收。
 
-## 21. 实验范围增补：React/Tauri 原生桌面宿主（2026-10-14 用户授权）
+## 21. 实验范围增补：React/Tauri 原生桌面宿主（2026-10-14 用户授权；2026-10-23 DOM-on-top 修订）
 
 > **已采用并取代历史定位（2026-10-16）**：本节的 React/Tauri **实验**路线已成为**正式桌面实现**；
 > Slint 桌面 UI 与 `cad-ui-slint` 已删除。当前决策契约见
-> `docs/adr/0010-react-linux-host-replaces-slint.md`（本节保留为授权与窄 2D 导航合同的来源）。
-> 下文“实验/未删旧代码/Web 仍以 Slint 为基线”等表述按此更新；**Windows/macOS 仍 NOT IMPLEMENTED**。
+> `docs/adr/0010-react-linux-host-replaces-slint.md` 与
+> `docs/adr/0023-dom-on-top-cross-host-composition.md`（本节保留为授权与窄 2D 导航合同的来源）。
+> 下文“实验/未删旧代码”等表述按此更新；**Web/Android 已退役为显式 NOT IMPLEMENTED 占位**，
+> **不存在“Web 仍以 Slint 为基线”的现行基线**；**macOS 仍 NOT IMPLEMENTED**；**Windows 已实现
+> 宿主，但视觉/运行时未验收**（见下）。
 
 > 本节为用户授权的**实验范围增补**（现已采用）；只覆盖**桌面 React/Tauri 路线**，不修改 §1–§20 的
 > 既有需求、P1–P4 历史与验收条款。细节契约见
-> `docs/adr/0006-react-native-linux-experiment.md`（起源）与
-> `docs/adr/0010-react-linux-host-replaces-slint.md`（当前决策）。
+> `docs/adr/0006-react-native-linux-experiment.md`（起源）、
+> `docs/adr/0010-react-linux-host-replaces-slint.md`（宿主决策）与
+> `docs/adr/0023-dom-on-top-cross-host-composition.md`（合成/输入/弹窗/平台状态）。
 
 - **授权目标**：桌面 UI 以 **React + Tauri** 作为替代 Slint 的实验目标；CAD 核心保持 **native
   Rust** 与 **renderer-only wgpu**（wgpu 仍仅由 `cad-render-wgpu` 依赖）；本实验路线**不允许
   WASM**、**不允许逐帧整幅 GPU→CPU 回读**。
 - **覆盖历史限制**：§4.11 与 ADR 0005 中“不引入 React 或其他未来 UI 框架承诺 / React 不在本轮”
-  的历史限制，对**桌面 React 实验路线**不再适用；**Web 与其他平台仍以 Slint 为基线**，该历史限制
-  对非桌面实验范围继续有效。
+  的历史限制，对**桌面 React 实验路线**不再适用。**非桌面范围不再有 Slint 基线**：Slint 依赖已在
+  全 workspace 删除，Web/Android UI 已退役为显式 NOT IMPLEMENTED 占位（wasm 入口返回错误、
+  Android 入口打印退役诊断后 abort）；该历史限制对任何平台都不构成“现行 Slint 路线”。
 - **保留的核心不变量**（不因本节改变）：
   - `cad-db` 仍是唯一权威数据源；业务层只操作数据库/命令/事务，不调用 GPU。
   - renderer-only wgpu：仅 `cad-render-wgpu` 依赖 wgpu；acadrust 仍仅由 `cad-import-acadrust` 依赖。
   - ChangeSet → 依赖失效 → 显示表示重建的增量语义不变；不无条件全帧重解析底图。
   - **每条合成路径只有一个 CAD presenter**；不与 UI 争抢同一 drawable；不做整幅回读。
   - 未支持/未验证能力必须显式 `Unsupported`/`Partial`/诊断；禁止空成功与假数据。
+- **合成模型（2026-10-23 起，全客户端统一）**：**DOM/WebView 在像素与输入两个方向都置顶**，
+  wgpu CAD 原生表面在下且**不接收 OS 输入**；客户端 React UI 不按平台分叉。机制：
+  - **原生 Wayland**：app-owned `wl_subsurface` 在**每次创建（含 surface generation 重建）**都
+    无条件 `place_below(parent)`；GTK toplevel 的透明清屏（`set_opaque_region(None)` +
+    `Operator::Source` 透明）是**生产必需**；`place_below`/`set_position` 随**父 commit** 生效，
+    宿主只请求 `queue_draw`，从不自行提交 GDK surface；子表面空 input region 保留为防御纵深。
+  - **Windows**：`WS_CHILD | WS_DISABLED` 的 CAD child HWND 由 `SetWindowPos` 压到 wry 的
+    `WRY_WEBVIEW` 容器紧邻之下并每 tick 幂等重排；WebView2 背景 alpha **恰为 0**、窗口
+    `transparent(true)`、`WS_EX_NOREDIRECTIONBITMAP` best-effort。**不依赖原生命中穿透**，
+    不使用 `WM_NCHITTEST`/`HTTRANSPARENT`。
+  - **生产透明不变量**：`.native-input` 的所有祖先在 CAD 分区矩形内必须透明（chrome 各区自涂
+    不透底）；否则 CAD 被 DOM 遮住（2026-10-22 手工测试真实缺陷，已修并有前端回归测试）。
+  - **历史区分（不得混用证据）**：旧「顶层透明 alpha 全屏叠加」是历史 **FAIL**（保留，不抹掉）；
+    本轮 PASS 的是**分区子表面 `place_below`**（CAD 仍只占 CAD 矩形）。二者机制与证据链不同。
+- **事件路由（2026-10-23 补入）**：输入唯一漏斗是 DOM `.native-input` → `probe_input` IPC →
+  host 准入门/队列；指针捕获、双击、滚轮、右键、坐标空间与 resize 上报均在这条漏斗内。CAD 表面
+  永不接收 OS 输入（Wayland 空 input region / Windows `WS_DISABLED`）。DOM 覆盖区命中规则：
+  不透明 chrome 控件正常命中；**半透明装饰面板 `pointer-events: none` 穿透**，面板内交互控件
+  `pointer-events: auto` 显式收回。
+- **弹窗（2026-10-23 补入）**：锚定菜单与居中模态都是**同一 React 树的 in-DOM 覆盖层**；第二
+  Tauri 窗口机制退役。host 侧 `ShellState.popup` 仍是权威模态围栏（`probe_input` 除 `resize` 外与
+  `cad_command` 均拒绝 `popup.modal_open`），清除触发器为**四触发**：显式 close / reload-navigation /
+  renderer 进程崩溃（`web-process-crashed`、`ProcessFailed`）/ 进程退出；Esc/关闭按钮挂在正文
+  error-boundary 之外，正文渲染失败时仍可关。`cad_open_popup` ack 只允许**加法式** `payload`。
 - **窄 2D 导航合同（最少）**：导航复用同一权威底图（GPU-resident、同一 DB revision），Ready fastpath
   取最新 camera、不展示旧 doc；overlay 后缀可**临时省略**并以显式
   `FrameCompleteness::BaseOnlyPendingOverlays` 标记（非静默）；`PresentedFrame.view_revision` = 实际
@@ -766,12 +795,23 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
   `None`、不回旧底图；restore 同底图 overlay 提交；device change 阻塞至新上传；**3D 严格路径不变**。
   用户可见取舍：拖拽期间 transient 覆盖（grid/axes/highlights/snaps/previews）可能暂时隐藏
   （<30ms 窗口测量，**非精确延迟**）。`input→visible` **未验**。
-- **授权边界与当前状态（2026-10-14 更新）**：本轮仅 **Linux X11/XWayland** 获批并实测，已在
-  **GTK 中央 native 分区（nativechild）** 方案下与 React UI **co-visible** 达到**有界原型**
-  验收（实际 CAD：native Rust + P620/Vulkan；**非完整 CAD 产品**）；旧「顶层透明 alpha 全屏叠加」
-  为历史 **FAIL**（保留，不抹掉）。**Windows 与 macOS 为未来实现参照，NOT IMPLEMENTED / NOT RUN**。
-  不得把本增补当作任一平台已实现或已验收的证据。
-- **明确 NOT RUN / NOT IMPLEMENTED**：跨平台同原生叠层结构未验；独立 GTK nativechild 桥已实现
-  （bounded），但跨平台一致性未验；Win/macOS 全部未实现；实际 CAD 不宣称 60fps / full visual
-  golden / vendor DWG；无 Android/Web 迁移。
+- **平台状态与证据（2026-10-23）**：
+  - **Linux 原生 Wayland**：唯一生产路径；**有界 PASS**——GNOME/Mutter + Quadro P620/Vulkan +
+    `scale=1`，生产 chrome/弹窗帧由 Observer 判读（WP2 四条判据 PASS 带 caveat；WP3 About 帧 PASS，
+    textEdit 帧 INVALID wrong-window），**不是**完整产品/跨合成器/性能/vendor 结论。**生产透明修复后
+    的像素复采 + 重判为 PENDING-RECAPTURE**（不预写视觉结论）。见
+    `docs/validation-dom-on-top-production-2026-10-23.md`。
+  - **X11/XWayland**：**显式 Unsupported**——`prepare_backend` 在 GTK 初始化前拒绝，stderr 标记行
+    `yacr: unsupported-backend: x11` + i18n 诊断 + **退出码 4**，无静默回退、无窗口/截图。依据：
+    2026-10-22 探针 **XWayland 合成 FAIL**（透明区域透出另一 CAD 应用）；具体机制**未闭环**，
+    因此记录为“本轮不支持”，**不是“X11 不可能”**；X11 web+canvas 回退路线**显式延后**。
+  - **Windows**：宿主**已实现**（Tauri2 + 透明 WebView2 + child HWND + 单一 DOM 漏斗），并通过
+    **Tier 0 编译门禁**（msvc check/build、gnu build、wasm 空壳）与 **Wine 拒绝合同 smoke**
+    （WebView2 缺失 → 标记行 + i18n + **退出码 5**）。**视觉/运行时验收 PENDING 用户真 Windows
+    spike-1/4/5**；Tier 0 ≠ 可运行 GUI，Wine ≠ 真 Windows（DComp stub，bug 55432/58921）。透明
+    结论只能限定“该 Runtime 版本 + GPU/驱动 + Windows 版本 + 缩放”；**禁止写“Windows 已验收”或
+    无限定的“透明支持”**。macOS 仍是 NOT IMPLEMENTED 占位。
+- **明确 NOT RUN / NOT IMPLEMENTED**：X11 运行/视觉（显式拒绝）；Windows 视觉、DPI、z-order 运行时
+  重排、ProcessFailed 活体、真实 COM 选择器、runtime-present 出帧；Linux 其它合成器、分数缩放、
+  多显示器、性能；实际 CAD 不宣称 60fps / full visual golden / vendor DWG；无 Android/Web 迁移。
 - 本节不扩张系统权限，不承诺跨语言稳定 IPC（仅 bounded 实验 adapter）。
