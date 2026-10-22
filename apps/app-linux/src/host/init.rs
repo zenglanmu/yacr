@@ -229,5 +229,11 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
     // gate refuses input/commands, closes and proves the gate releases. No effect
     // on a normal run (`YACR_PROBE_POPUP_EVIDENCE` is unset).
     crate::evidence::maybe_spawn_popup_evidence(app.handle());
+    // Env-gated, evidence-only UI-dialogs driver: drives the React chrome
+    // through its own Ctrl+1 handler and command field (Ctrl+1 -> Properties,
+    // click-select -> populated rows, DIST -> command echo, OPTIONS -> the real
+    // dialog) so an external grab can capture them. No effect on a normal run
+    // (`YACR_PROBE_UI_DIALOGS` is unset).
+    crate::evidence::maybe_spawn_ui_dialogs(app.handle(), child.as_ref());
     Ok(())
 }

@@ -205,7 +205,11 @@ fn schedule_tool(
 
 /// Build one synthetic click at a **world** point that coincides with a real
 /// object-snap target. Synthetic, **not a real mouse**.
-fn tool_click_world_js(wx: f64, wy: f64, label: &str) -> String {
+///
+/// `pub(super)`: [`super::ui_dialogs`] reuses this template for its
+/// click-select and its two `DIST` picks, so both drivers dispatch the identical
+/// `PointerEvent` sequence on `.native-input`.
+pub(super) fn tool_click_world_js(wx: f64, wy: f64, label: &str) -> String {
     TOOL_CLICK_TEMPLATE
         .replace("__WX__", &wx.to_string())
         .replace("__WY__", &wy.to_string())

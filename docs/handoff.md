@@ -1,3 +1,41 @@
+## 2026-10-22 GUI 验收（有界）与 `YACR_PROBE_UI_DIALOGS` 证据驱动
+
+### 1. 新增证据驱动（默认 OFF）
+`apps/app-linux/src/evidence/ui_dialogs*.rs`：`YACR_PROBE_UI_DIALOGS=1` 时按时间轴用
+`webview.eval` 走**与真实 UI 相同**的 JS 路径——`Ctrl+1` 的 `KeyboardEvent`（`App.jsx` 的全局
+keydown 分支）、命令行输入 + Enter 提交（`CommandLine.jsx` 的 onChange/keydown 路径）、画布
+`PointerEvent` 拾取（复用 `tool_click_world_js`）、`OPTIONS` 由 chrome 在路由前拦截、弹窗经
+`cad_open_popup`/`cad_close_popup` 真实路径。每步输出可 grep 的 `[probe] ui-dialogs: t=<n>s …`，
+汇总行明确 `ui_dialogs_trigger=probe_driver_not_a_real_click`。24 个契约测试。
+
+### 2. 本轮实测（真实 GPU：Vulkan + Quadro P620，1853×1011 最大化，`synthetic-four-lines.dwg`）
+- **主界面**：chrome（ribbon 中文页签、状态栏、命令行）与 CAD 子窗同窗渲染正常。
+- **属性面板**（`Ctrl+1`）：分组 **对象 / 几何 / 显示**；图层/线型/线宽为下拉、透明度为数字输入、
+  颜色为文本输入，只读值是纯文本。选中一条 `AcDbLine` 的行值与 `cad_status` 一致：
+  `id=2、句柄 31、类型 AcDbLine、图层 0 (0)、空间 model、绘制顺序 2、颜色 aci:7、线型 ByLayer、
+  线宽 ByLayer、透明度 0`。
+- **命令行回显**（用户最初的痛点）：`命令: DIST / 距离 = 3.1623 / 角度 = 18.4349° / X 增量 = 3.0000 /
+  Y 增量 = 1.0000 / Z 增量 = 0.0000`；数值正确（√10、atan2(1,3)），探针日志同时记录
+  `algorithm=distance value=3.1623 points=(0,0,0);(3,1,0)`。
+- **选项弹窗**：720×560，页签 显示/草图与选择/打印与发布/文件/用户偏好；显示页含模型/图纸背景
+  色板、十字光标 %、栅格/UCS 图标/高亮选中对象/捕捉标记；底部 `尚未修改 / 取消 / 应用 / 确定`。
+  弹窗打开期间主窗口模态门禁生效（`popup=options:popup-1:true`）。
+
+### 3. 环境事实（诚实记录）
+- **uinput 与 XTEST 注入进不了本 Wayland/XWayland 会话**：指针不动、按键无效（虚拟设备虽创建、
+  udev 已打 `ID_INPUT`，Mutter 不认领）。只有**真实 evdev 写入**（root `evemu-event` 到
+  `/dev/input/event3`）能产生活动。
+- **Mutter 空闲变暗后 WebView chrome 变黑**（帧时钟被掐），CAD 子窗口不受影响；这与此前
+  "chrome 全黑"是同一现象。`org.freedesktop.ScreenSaver` 的 Inhibit 对 Mutter 无效。
+  为完成本轮取证，已把 `org.gnome.desktop.session idle-delay` 从 **120** 设为 **0**
+  （**改动了会话设置**，恢复：`gsettings set org.gnome.desktop.session idle-delay 120`）。
+- `x11-window-grab` 取目标窗口自身像素；黑帧根因是变暗，不是布局或 z-order。
+
+### 4. 仍未验证
+选项弹窗内**交互**（改值/应用/取消/写失败标记）只有纯模型与源码扫描测试；属性面板的
+**编辑提交与拒绝**同样未在 GUI 中点过；多选（2 个以上）面板形态、语言双窗口传播仍无 GUI 证据。
+以上均为 NOT RUN，不得据本节声称已验证。
+
 ## 2026-10-22 批次：选项弹窗、属性面板、拾取框/孔径、属性行 + IPC
 
 （接上一批；上一批的"仍未做"清单以本节为准）

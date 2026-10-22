@@ -52,7 +52,12 @@
 //!   to the 3D view (`SWITCH2D3D`), orbits it with a synthetic primary drag and
 //!   reports the real `cad_status` reads (2D camera present -> absent), including
 //!   a 2D control click and a 3D click on the solid so 3D picking is measured
-//!   rather than assumed.
+//!   rather than assumed;
+//! - [`ui_dialogs`] (+ its [`ui_dialogs_js`] blobs, [`ui_dialogs_steps`] step
+//!   bodies and [`ui_dialogs_report`] reads/log formats): the
+//!   `YACR_PROBE_UI_DIALOGS` driver that drives the React chrome through its own
+//!   `Ctrl+1` handler and command field, so an external grab can capture the
+//!   Options dialog, the populated Properties palette and the command-line echo.
 
 use std::time::{Duration, Instant};
 
@@ -76,6 +81,10 @@ mod popup_textedit;
 mod popup_textedit_reopen;
 mod popup_textedit_summary;
 mod tool;
+mod ui_dialogs;
+mod ui_dialogs_js;
+mod ui_dialogs_report;
+mod ui_dialogs_steps;
 mod view3d;
 
 pub use box_select::{box_evidence_enabled, maybe_spawn_box_evidence};
@@ -87,6 +96,7 @@ pub use lifecycle::maybe_spawn_lifecycle;
 pub use pan::{postload_pan_enabled, POSTLOAD_PAN_JS, POSTLOAD_PAN_REPORT_JS};
 pub use popup::{maybe_spawn_popup_evidence, popup_evidence_enabled};
 pub use tool::{maybe_spawn_tool_evidence, tool_evidence_enabled};
+pub use ui_dialogs::{maybe_spawn_ui_dialogs, ui_dialogs_enabled};
 pub use view3d::{maybe_spawn_view3d, view3d_enabled, view3d_pick_enabled};
 
 /// Sleep until `seconds` after `start`, then run `action` and log the result.
