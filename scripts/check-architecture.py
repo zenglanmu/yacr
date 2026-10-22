@@ -163,10 +163,12 @@ def check(root: pathlib.Path) -> int:
     # allowed (it names `cad_app` queue types); the renderer and engine are not
     # (telemetry stays app-side behind the `ShellTelemetry` seam).
     #
-    # `app-windows` is deliberately NOT required here: it is a NOT IMPLEMENTED
-    # stub. Its dependency edge lands with the Windows host work package.
+    # `app-windows` is the Windows desktop host (Tauri/WebView2 + native CAD
+    # child HWND): like `app-linux`, it consumes the shared command/state layer,
+    # so the edge is required rather than merely allowed.
     require_dependency("cad-desktop-shell", "cad-ui-core")
     require_dependency("app-linux", "cad-desktop-shell")
+    require_dependency("app-windows", "cad-desktop-shell")
     forbidden_desktop_shell_dependencies = {
         "gtk", "gdk", "gdkx11", "ashpd", "wgpu", "cad-render-wgpu", "cad-engine",
         "slint", "slint-build", "iced", "acadrust",

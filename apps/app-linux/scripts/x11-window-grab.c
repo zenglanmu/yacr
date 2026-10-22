@@ -4,6 +4,13 @@
  * under rootless XWayland). A black result here means the window itself is not
  * readable, which is a distinct finding.
  *
+ * Usage note (Wine diagnostic only): the same tool can capture the **top-level
+ * X11 window that Wine creates** for a Windows host (`x11-window-grab <xid-hex>
+ * <out.ppm>`), which is useful to prove the process created a mapped window.
+ * It captures Wine's X11 drawable, **not** the Windows compositor/WebView2/DComp
+ * result, so its pixels are NOT a visual verification of the Windows host and
+ * must be labelled `NOT VERIFIED (Wine limitation)`.
+ *
  * Build: gcc -O2 -o x11-window-grab x11-window-grab.c -lX11
  * Usage: x11-window-grab <xid-hex> <out.ppm>
  */

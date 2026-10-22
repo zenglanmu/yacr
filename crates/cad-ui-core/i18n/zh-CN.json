@@ -705,6 +705,13 @@
   "properties.edit.pending": "正在应用…",
   "startup.unsupported_backend": "yacr 无法在 X11/XWayland 上启动",
   "startup.unsupported_backend.detail": "本版本将 DOM/WebView 叠加在原生 CAD 表面之上，该合成仅实现于原生 Wayland。请在 Wayland 会话中运行（GDK_BACKEND=wayland）；X11 的 web+canvas 路线已显式延后。",
+  "startup.webview2_missing": "yacr 无法启动：缺少 Microsoft Edge WebView2 运行时",
+  "startup.webview2_missing.detail": "Windows 桌面界面是一个 WebView2 文档，没有该运行时无法渲染。请安装 WebView2 Evergreen 运行时（或将 WEBVIEW2_BROWSER_EXECUTABLE_FOLDER 指向 Fixed Version 运行时）后重新启动 yacr。",
+  "windows.picker_title": "打开 DWG 或 DXF 图纸",
+  "windows.picker_filter": "CAD 图纸（DWG、DXF）",
+  "windows.picker_empty": "文件选择器未返回文件",
+  "windows.picker_local": "只能打开本地文件",
+  "windows.picker_failed": "系统文件选择器不可用，请改用 --open PATH：{error}",
   "dialog.popup.title": "对话框",
   "dialog.popup.close": "关闭",
   "dialog.popup.body_failed": "此对话框的内容无法显示；请关闭后重试。"

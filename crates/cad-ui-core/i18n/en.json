@@ -705,6 +705,13 @@
   "properties.edit.pending": "Applying…",
   "startup.unsupported_backend": "yacr cannot start on X11/XWayland",
   "startup.unsupported_backend.detail": "This build composites the DOM/WebView above the native CAD surface, which is implemented only for native Wayland. Run yacr in a Wayland session (GDK_BACKEND=wayland); the X11 web+canvas route is explicitly deferred.",
+  "startup.webview2_missing": "yacr cannot start: the Microsoft Edge WebView2 runtime is missing",
+  "startup.webview2_missing.detail": "The Windows desktop UI is a WebView2 document and cannot render without the runtime. Install the WebView2 Evergreen Runtime (or point WEBVIEW2_BROWSER_EXECUTABLE_FOLDER at a Fixed Version runtime) and start yacr again.",
+  "windows.picker_title": "Open a DWG or DXF drawing",
+  "windows.picker_filter": "CAD drawings (DWG, DXF)",
+  "windows.picker_empty": "The file picker returned no file",
+  "windows.picker_local": "Only local files can be opened",
+  "windows.picker_failed": "System file picker unavailable; use --open PATH instead: {error}",
   "dialog.popup.title": "Dialog",
   "dialog.popup.close": "Close",
   "dialog.popup.body_failed": "This dialog's content could not be displayed. Close it and try again."

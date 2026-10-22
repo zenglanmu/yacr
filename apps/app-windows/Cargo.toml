@@ -7,18 +7,65 @@ license.workspace = true
 [[bin]]
 # Deliberately distinct from the Linux product binary (`app-linux` → `yacr`):
 # both packages compile for the same host target during workspace checks, so a
-# shared `yacr` name would produce the same output artifact path and let the
-# unavailable Windows stub compete with (or overwrite) the real Linux executable.
-# `yacr-windows` is the honest name for this NOT IMPLEMENTED stub.
+# shared `yacr` name would produce the same output artifact path and let the two
+# hosts compete for (or overwrite) one executable.
 name = "yacr-windows"
 path = "src/main.rs"
 
-# The Windows host is NOT IMPLEMENTED in this round (see src/main.rs); the
-# binary is an explicit failure stub with no runtime dependencies. The former
-# `app-linux` (shared Slint host) dependency is gone — that host is retired.
+# Native Windows desktop host for the CAD viewer/measure/annotation app: a
+# transparent WebView2 (React chrome) **above** an in-process native CAD child
+# HWND. The DOM is the single input funnel (`.native-input` → `probe_input`);
+# the CAD surface is display-only and never receives OS input. The shared
+# platform-independent logic lives in `cad-ui-core`, the Tauri command/state
+# layer in `cad-desktop-shell`, and the renderer surface is created from raw
+# `Win32WindowHandle` handles with **no renderer changes**.
+#
+# **Windows only**. `tauri`/`wry`/`tao`, WebView2 and the Win32 APIs are
+# Windows-target dependencies; a workspace wasm (or other-target) `--lib` check
+# compiles an empty host instead. The binary returns an explicit NOT IMPLEMENTED
+# error elsewhere (`src/entry.rs`).
+[target.'cfg(target_os = "windows")'.dependencies]
+tauri.workspace = true
+cad-render-wgpu.workspace = true
+# Raw `Win32WindowHandle`/`WindowsDisplayHandle` for the renderer surface (the
+# presenter is built from the CAD child HWND, not from a Tauri window type).
+raw-window-handle.workspace = true
 
-# The build script embeds the shared app icon (`assets/yacr-icon.ico`) into the
-# PE resource section. `winresource` compiles on every host but is only invoked
-# for Windows targets (see build.rs), driving rc.exe (MSVC) or windres (GNU).
+cad-desktop-shell.workspace = true
+cad-app.workspace = true
+cad-engine.workspace = true
+cad-host.workspace = true
+cad-platform.workspace = true
+cad-resources.workspace = true
+cad-db.workspace = true
+cad-domain.workspace = true
+
+# Hand-rolled Win32 child window (class, z-order, sizing) + WebView2 runtime
+# detection (registry queries). Version-matched to the `windows`/`webview2-com`
+# that `tauri 2.11.6`/`wry 0.55.1` already put in `Cargo.lock`, so this adds no
+# new dependency versions and no duplicate COM bindings.
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+] }
+webview2-com = "0.38"
+
+# `support` (the WebView2 "missing runtime" contract and the transparent-background
+# constants) is target-independent, so its i18n lookup and unit tests run on every
+# host. It only pulls the UI-framework-free `cad-ui-core`.
+[dependencies]
+cad-ui-core.workspace = true
+
+# `tauri-build` generates the Tauri context and embeds the Windows icon/version
+# resource for a Windows target. It is an ordinary build-dependency (compiled for
+# the host) because build scripts are host binaries; `build.rs` additionally
+# checks the *target* os at runtime before invoking it, so non-Windows targets
+# compile an empty host.
 [build-dependencies]
-winresource = "0.1"
+tauri-build.workspace = true

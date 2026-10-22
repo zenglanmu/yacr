@@ -176,7 +176,21 @@ dependencies = [
 name = "app-windows"
 version = "0.1.2"
 dependencies = [
- "winresource",
+ "cad-app",
+ "cad-db",
+ "cad-desktop-shell",
+ "cad-domain",
+ "cad-engine",
+ "cad-host",
+ "cad-platform",
+ "cad-render-wgpu",
+ "cad-resources",
+ "cad-ui-core",
+ "raw-window-handle",
+ "tauri",
+ "tauri-build",
+ "webview2-com",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -2012,7 +2026,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.21",
- "windows 0.61.3",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -6058,16 +6072,6 @@ checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "winresource"
-version = "0.1.31"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0986a8b1d586b7d3e4fe3d9ea39fb451ae22869dcea4aa109d287a374d866087"
-dependencies = [
- "toml 1.1.6+spec-1.1.0",
- "version_check",
 ]
 
 [[package]]
