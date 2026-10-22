@@ -35,7 +35,7 @@
 3. UI 桌面实现为 **React + Tauri 原生宿主**（2026-10-16 正式采用；见 ADR 0010 与 §21），
    `cad-ui-slint` 与 Slint 依赖已删除；平台无关 UI 逻辑在 `cad-ui-core`。**历史**：曾以 Slint 复用
    UI 定义/组件与应用状态。（2026-10-14 用户授权以 React/Tauri 作为桌面 UI 替代实验目标，见 §21。）
-4. 根据 2026-10-03 用户确认，新增 Linux App 为首要开发与验收宿主，Android APK 和浏览器应用继续交付、作为跨平台回归层。2026-10-04 用户调整默认提交门禁为 debug 编译与静态检查，不默认运行完整测试、Linux 离屏渲染或 release 编译。实际 Linux 运行验收仍须使用 `apps/app-linux` 的宿主/命令/数据库/**React/Tauri + 原生 wgpu** 链路（2026-10-16 起取代旧共享 Slint/wgpu 链路），不以仅 UI 编译或测试替身代替；未运行须明确标注。无窗口可选验证默认真实 GPU，软件 Vulkan/lavapipe 仅显式开启并标注；桌面窗口、真实 GPU、真实图纸分别记录验证范围。（2026-10-15 用户决定：日常功能开发只验证改动范围，全量测试与全量门禁仅在用户明确要求或发版时运行。）架构保留 iOS、macOS、Windows 宿主扩展能力，但不能将预留接口称为这些平台已验收。**当前 Windows/macOS/Android/Web 均为 NOT IMPLEMENTED 占位。**
+4. 根据 2026-10-03 用户确认，新增 Linux App 为首要开发与验收宿主，Android APK 和浏览器应用继续交付、作为跨平台回归层。2026-10-04 用户调整默认提交门禁为 debug 编译与静态检查，不默认运行完整测试、Linux 离屏渲染或 release 编译。实际 Linux 运行验收仍须使用 `apps/app-linux` 的宿主/命令/数据库/**React/Tauri + 原生 wgpu** 链路（2026-10-16 起取代旧共享 Slint/wgpu 链路），不以仅 UI 编译或测试替身代替；未运行须明确标注。无窗口可选验证默认真实 GPU，软件 Vulkan/lavapipe 仅显式开启并标注；桌面窗口、真实 GPU、真实图纸分别记录验证范围。（2026-10-15 用户决定：日常功能开发只验证改动范围，全量测试与全量门禁仅在用户明确要求或发版时运行。）架构保留 iOS、macOS 宿主扩展能力，但不能将预留接口称为这些平台已验收。**2026-10-23 起 Windows 宿主已实现（视觉/运行时未验收，见 §21 与 `docs/windows-app.md`）；macOS/Android/Web 仍为 NOT IMPLEMENTED 占位。**
 5. Web 必须支持 WebGL2 与 WebGPU 两条 CAD 绘制路径，提供 Auto / WebGPU / WebGL2 选择。WebGL1 不属于要求。
 6. 项目准备开源。OpenCADStudio 曾仅作为功能规格与 UI 交互的历史对照参考（该对照练习已结束，原 `docs/ui-requirements/` 目录已移除）；它不作为源码抽取、移植或核心实现参考，不要求采用其算法、shader、类型或依赖树，也未采用其代码。绘制、几何离散、相机和 3D 能力在本项目契约下独立实现；不从 JS 项目迁移绘制核心。2026-10-15 起 UI 设计直接遵循 AutoCAD 桌面惯例（见 `docs/react-linux-app.md`、`docs/adr/0006-react-native-linux-experiment.md`）。mlightcad/cad-viewer 仅保留为 UI 功能组织及交互对照参考。
 7. 桌面 UI 为 React/Tauri（见决策 3 与 ADR 0010）；**不再**使用 Slint/Iced。以数据库对象、事务、
@@ -205,7 +205,8 @@ Rust 中建议采用稳定 ID + 显式数据类型/枚举 + 外部协议提供�
 | ui-core | cad-ui-core：平台无关 wire protocol/布局/CAD 会话/shell 状态/i18n | 依赖 UI 工具包或 GPU |
 | cad-platform | 文件、任务、存储、生命周期与合成契约 | 平台具体实现 |
 | app-linux | React/Tauri 真实 Linux GUI（GTK 原生 CAD 分区 + DOM chrome） | 把 CAD 业务逻辑放进 UI |
-| app-windows / app-macos / app-android / app-web | 显式 NOT IMPLEMENTED 占位（非可运行 GUI） | 伪装成可用平台产品 |
+| app-windows | Tauri 2 Windows 宿主（2026-10-23 起已实现；视觉/运行时未验收，见 `docs/windows-app.md`） | 把 CAD 业务逻辑放进 UI；把编译门禁冒称运行验收 |
+| app-macos / app-android / app-web | 显式 NOT IMPLEMENTED 占位（非可运行 GUI） | 伪装成可用平台产品 |
 | cad-diagnostics / cad-cli-tools | 报告、核心测试、基准和固定视口工具 | 生产 GUI 必需服务端 |
 
 小模块可以物理合并，但不得反转依赖方向。通过 crate 依赖约束和编译验证，不只依赖注释。

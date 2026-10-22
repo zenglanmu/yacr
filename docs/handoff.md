@@ -20,8 +20,7 @@ NOT IMPLEMENTED 占位。架构权威：[ADR 0023](adr/0023-dom-on-top-cross-hos
 - `6e4bf06` 生产透明修复（人工复测发现，见 §5）。
 - `dd23bea` WP4：Windows 真实宿主（Tauri 2 + 透明 WebView2 + `WS_DISABLED` child HWND +
   单一 DOM 漏斗）；`9fba811` WP4 门禁修复（布局反转守卫、z-order 失败去重、退出码注册表文档）。
-- WP5 文档收口（本条目及 `docs/**`、`AGENTS.md`、`CAD_IMPLEMENTATION_SPEC.md` §21）在**工作树中**，
-  本轮**未提交**，由协调器统一提交。
+- WP5 文档收口（本条目及 `docs/**`、`AGENTS.md`、`CAD_IMPLEMENTATION_SPEC.md` §21）**已提交**（commit 13747be；含 WP5 门禁 4 项行级修复）。
 
 ### 3. 行为变化（用户可见 / 契约）
 

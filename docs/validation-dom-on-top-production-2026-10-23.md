@@ -165,7 +165,7 @@ CAD child HWND 压在 `WRY_WEBVIEW` 容器紧邻之下，`ensure_order` 幂等�
 
 ### 3. Wine 拒绝合同 smoke（**不是** Windows 运行证据）
 
-统一环境：`WINEPREFIX=$HOME/.cache/yacr-wine/prefix`、`WINEARCH=win64`、
+统一环境：`WINEPREFIX=$HOME/.cache/yacr-wine/prefix`、`WINEARCH=win64`（**迁址缘由**：`/tmp/opencode` 遇 per-user `EDQUOT` 配额不足，前缀与日志改落 `$HOME/.cache/yacr-wine/`，未做任何系统级变更）、
 `WINEDLLOVERRIDES="mscoree,mshtml="`；prefix 内无 WebView2 运行时。
 
 | # | 产物 / 场景 | rc | 观察 |

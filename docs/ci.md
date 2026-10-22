@@ -58,7 +58,7 @@ Windows MSVC `clippy`/`check`/release `build`、MinGW GNU release `build`、`app
 `web-build`、`web-deploy`、`web-smoke`、`android-apk`、`android-release`、`linux-release`、
 `windows-release`、`macos-release`。
 
-含义：浏览器 UI / Android UI / Windows / macOS GUI 均已退役为显式 NOT IMPLEMENTED 占位。
+含义：浏览器 UI / Android UI / macOS GUI 已退役为显式 NOT IMPLEMENTED 占位；Windows 宿主 2026-10-23 起已实现，`windows-check` 只是**编译门禁**（≠运行验收），`windows-release` 仍硬禁用。
 `linux-release` 的**脚本**已于 2026-10-17 重启（本地可构建，见 `docs/flatpak.md`），但该 CI job 仍
 **硬禁用**；它与其余 job 一样不会产出或发布任何产物。
 
