@@ -4,9 +4,10 @@
 //! (`GDK_BACKEND`: explicit X11/Wayland, or an environment-derived `Auto`
 //! choice) **before any GTK/Tauri initialization**, then drives the single Tauri
 //! event loop (no second loop is created). The process exit codes are preserved
-//! exactly (`2` for an unsupported or unavailable display backend, `1` for a
-//! failed Tauri build) by resolving those cases here, where the original `main`
-//! did.
+//! exactly (`2` for an invalid or unavailable display backend policy, `4` for
+//! the explicitly unsupported X11/XWayland backend, `1` for a failed Tauri build
+//! or a refused startup contract) by resolving those cases here, where the
+//! original `main` did.
 //!
 //! Every non-Linux target gets an explicit NOT IMPLEMENTED error instead of an
 //! silently empty GUI: none of the `tauri`/GTK/renderer dependencies are active
@@ -19,14 +20,28 @@
 /// non-zero).
 #[cfg(target_os = "linux")]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    use crate::backend::prepare_backend;
+    use crate::backend::{prepare_backend, BackendRefusal, UNSUPPORTED_BACKEND_EXIT_CODE};
 
-    // Reject before touching GTK, and do not let YACR_PROBE_ONLY substitute for
-    // the explicitly required CLI marker mode.
-    crate::dom_on_top_probe::validate(
-        crate::dom_on_top_probe::enabled(),
-        std::env::args().skip(1).any(|arg| arg == "--probe"),
+    // Parse the real launch options first: the stacking regression contract needs
+    // the **explicit** drawing (`--open`/positional), and the `YACR_TEST_DWG`
+    // fallback below must not be able to satisfy it.
+    let mut launch = crate::host::LaunchOptions::from_args(std::env::args().skip(1));
+    if std::env::var_os("YACR_PROBE_ONLY").is_some() {
+        launch.probe_only = true;
+    }
+    // Pinned regression trigger: `YACR_PROBE_STACKING=1` + the init-script flag +
+    // a real `--open` drawing. `--probe` (a fake open) is explicitly refused.
+    crate::stacking_regression::validate(
+        crate::stacking_regression::enabled(),
+        launch.probe_only,
+        launch.drawing.is_some(),
     )?;
+    // Env-only fallback for real-DWG regression runs (never a fixture trigger).
+    if launch.drawing.is_none() {
+        if let Some(path) = std::env::var_os("YACR_TEST_DWG") {
+            launch.drawing = Some(std::path::PathBuf::from(path));
+        }
+    }
 
     // Must run before any GTK/Tauri initialization so the resolved backend is
     // fixed and GTK never falls back on its own.
@@ -42,21 +57,29 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 plan.policy, plan.resolved
             );
         }
-        Err(message) => {
+        Err(BackendRefusal::Invalid(message)) => {
             eprintln!("error: {message}");
             std::process::exit(2);
         }
-    }
-
-    let mut launch = crate::host::LaunchOptions::from_args(std::env::args().skip(1));
-    if launch.drawing.is_none() {
-        if let Some(path) = std::env::var_os("YACR_TEST_DWG") {
-            launch.drawing = Some(std::path::PathBuf::from(path));
+        Err(refusal @ BackendRefusal::Unsupported(_)) => {
+            // Stable machine marker first (evidence collection classifies on this
+            // line), then the localized user-facing diagnostic. X11 is refused
+            // outright: no fallback arrangement, no silent success.
+            if let Some(marker) = refusal.marker() {
+                eprintln!("{marker}");
+            }
+            let messages = cad_ui_core::i18n::MessageSource::from_request(
+                cad_ui_core::i18n::host_locale_tag(),
+            );
+            eprintln!("{}", messages.text("startup.unsupported_backend", &[]));
+            eprintln!(
+                "{}",
+                messages.text("startup.unsupported_backend.detail", &[])
+            );
+            std::process::exit(UNSUPPORTED_BACKEND_EXIT_CODE);
         }
     }
-    if std::env::var_os("YACR_PROBE_ONLY").is_some() {
-        launch.probe_only = true;
-    }
+
     if let Some(path) = &launch.drawing {
         eprintln!("[probe] startup drawing: {}", path.display());
     }

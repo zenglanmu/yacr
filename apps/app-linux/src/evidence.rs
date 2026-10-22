@@ -70,6 +70,7 @@ mod draw_dimension_angular_ordinate;
 mod draw_dimension_radial;
 mod draw_edit;
 mod draw_hatch;
+mod draw_js;
 mod draw_mleader;
 mod edit;
 mod hover;

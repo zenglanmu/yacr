@@ -24,8 +24,6 @@
 #[cfg(target_os = "linux")]
 pub mod backend;
 #[cfg(target_os = "linux")]
-mod dom_on_top_probe;
-#[cfg(target_os = "linux")]
 pub mod evidence;
 #[cfg(target_os = "linux")]
 pub mod gtk_bridge;
@@ -35,6 +33,8 @@ pub mod host;
 pub mod platform;
 #[cfg(target_os = "linux")]
 pub mod redraw;
+#[cfg(target_os = "linux")]
+mod stacking_regression;
 #[cfg(target_os = "linux")]
 pub mod wayland_surface;
 

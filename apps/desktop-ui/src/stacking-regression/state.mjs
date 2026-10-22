@@ -1,10 +1,11 @@
 // Strict host opt-in. URL parameters, storage and truthy strings never enable it.
-export function isDomOnTopProbe(env) {
-  return env?.__YACR_PROBE_DOM_ON_TOP__ === true;
+// DOM-on-top itself is the production arrangement; this only gates the fixture.
+export function isStackingRegression(env) {
+  return env?.__YACR_STACKING_REGRESSION__ === true;
 }
 
 // These are DOM observations, not proof of physical input or GPU composition.
-export function createProbeDiagnostics() {
+export function createStackingDiagnostics() {
   return {
     mounted: false,
     counters: { pointerDown: 0, pointerMove: 0, pointerUp: 0, pointerCancel: 0, wheel: 0, dragMove: 0, button: 0 },

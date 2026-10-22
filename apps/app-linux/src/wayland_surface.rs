@@ -1,11 +1,18 @@
 //! Native Wayland subsurface bridge (app-owned child `wl_surface`).
 //!
-//! **Why this exists:** the probe needs a GPU-rendered CAD partition *beside* the
-//! React chrome, but the GDK toplevel `wl_surface` is owned and committed by GDK,
-//! so a Vulkan swapchain must never target it. Instead this module owns a
+//! **Why this exists:** the GPU-rendered CAD partition lives *below* the React
+//! chrome, but the GDK toplevel `wl_surface` is owned and committed by GDK, so a
+//! Vulkan swapchain must never target it. Instead this module owns a
 //! **child `wl_surface` + `wl_subsurface`** whose parent is the GDK toplevel
 //! surface, and hands the child surface to the renderer as a generic
 //! raw-window-handle pair.
+//!
+//! **Stacking is unconditional:** the child is always placed below the parent
+//! (`wl_subsurface.place_below`), so the DOM/WebView chrome is the top layer on
+//! every native Wayland generation. The request is re-applied whenever the child
+//! is created (including after a parent replacement), and takes effect on the
+//! next GTK-owned parent commit — which is why creation also requests a GDK
+//! invalidation. There is no probe/env switch and no dual arrangement.
 //!
 //! Everything protocol-level lives in the private C shim
 //! (`native/wayland_shim.c`); this module:
@@ -30,8 +37,9 @@
 //!   [`WaylandSurface::release_child`] destroys the child surface/subsurface, and
 //!   only then is the GDK parent allowed to unrealize.
 //!
-//! Everything here is source-only and **NOT RUN**: the real Mutter/Vulkan
-//! behavior is unverified until the bounded `--probe` evidence run.
+//! Protocol behavior (stacking order, parent-commit timing) is only proven by a
+//! real compositor run; see `docs/validation-*.md` for the bounded evidence that
+//! was actually executed and its limits.
 
 use std::ffi::{c_char, CStr};
 use std::marker::PhantomData;
@@ -79,7 +87,6 @@ extern "C" {
         x: i32,
         y: i32,
         buffer_scale: i32,
-        below_parent: i32,
     ) -> i32;
     fn yacr_wl_shim_child_surface(shim: *const yacr_wl_shim) -> *mut wl_surface;
     fn yacr_wl_shim_destroy_child(shim: *mut yacr_wl_shim);
@@ -419,17 +426,10 @@ impl WaylandSurface {
         }
         let scale = buffer_scale.max(1);
         // SAFETY: `self.shim` is live; `parent` is a live borrowed wl_surface.
-        let below_parent = crate::dom_on_top_probe::enabled();
-        let rc = unsafe {
-            yacr_wl_shim_create_child(
-                self.shim.as_ptr(),
-                parent.as_ptr(),
-                x,
-                y,
-                scale,
-                i32::from(below_parent),
-            )
-        };
+        // The shim always places the child below the parent (DOM-on-top is the
+        // only production arrangement; there is no mode switch).
+        let rc =
+            unsafe { yacr_wl_shim_create_child(self.shim.as_ptr(), parent.as_ptr(), x, y, scale) };
         if rc != 0 {
             return Err(shim_failure(self.shim));
         }
@@ -450,14 +450,15 @@ impl WaylandSurface {
             buffer_scale: scale,
             _window: window.clone(),
         });
-        if below_parent {
-            // Queue invalidation through GDK; no direct parent wl_surface commit.
-            window.invalidate_rect(None, true);
-            eprintln!(
-                "[dom-on-top] wayland arrangement=requested child={:p} parent={:p} place_below=parent desync=true empty_input=true parent_commit=GTK-invalidation composite=NOT_VERIFIED",
-                surface.as_ptr(), parent.as_ptr(),
-            );
-        }
+        // Queue invalidation through GDK so the GTK-owned parent commits; the
+        // parent commit is what applies `place_below` + parent-relative position.
+        // This re-runs for every generation (a replaced parent recreates the
+        // child), so the stacking request is never lost on rebuild.
+        window.invalidate_rect(None, true);
+        eprintln!(
+            "[dom-on-top] wayland arrangement=apply child={:p} parent={:p} place_below=parent desync=true empty_input=true parent_commit=GTK-invalidation composite=NOT_VERIFIED",
+            surface.as_ptr(), parent.as_ptr(),
+        );
         Ok(EnsureChild::Created)
     }
 

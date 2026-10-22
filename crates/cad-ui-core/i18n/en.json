@@ -703,5 +703,7 @@
   "properties.edit.unconfirmed": "The drawing did not confirm the change; the previous value is shown.",
   "properties.edit.write_failed": "The change could not be sent.",
   "properties.edit.failed": "The change was refused.",
-  "properties.edit.pending": "Applying…"
+  "properties.edit.pending": "Applying…",
+  "startup.unsupported_backend": "yacr cannot start on X11/XWayland",
+  "startup.unsupported_backend.detail": "This build composites the DOM/WebView above the native CAD surface, which is implemented only for native Wayland. Run yacr in a Wayland session (GDK_BACKEND=wayland); the X11 web+canvas route is explicitly deferred."
 }

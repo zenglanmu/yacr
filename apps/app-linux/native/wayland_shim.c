@@ -367,7 +367,7 @@ int yacr_wl_shim_set_empty_input(yacr_wl_shim *shim)
 }
 
 int yacr_wl_shim_create_child(yacr_wl_shim *shim, struct wl_surface *parent,
-			      int32_t x, int32_t y, int32_t buffer_scale, int below_parent)
+			      int32_t x, int32_t y, int32_t buffer_scale)
 {
 	struct wl_surface *child;
 	struct wl_subsurface *subsurface;
@@ -427,10 +427,11 @@ int yacr_wl_shim_create_child(yacr_wl_shim *shim, struct wl_surface *parent,
 
 	/* Desync: the child commits independently of the parent. */
 	wl_subsurface_set_desync(subsurface);
-	/* Experimental stacking only. Never attach/commit a buffer to the borrowed
-	 * GDK parent: GTK owns its alpha, painting, opaque region and commit. */
-	if (below_parent)
-		wl_subsurface_place_below(subsurface, parent);
+	/* Always layer the CAD child below the GDK toplevel: the WebView chrome is
+	 * the parent surface and must stay on top. Never attach/commit a buffer to
+	 * the borrowed parent: GTK owns its alpha, painting, opaque region and
+	 * commit. */
+	wl_subsurface_place_below(subsurface, parent);
 	/* Parent-relative position: applied on the parent's next commit (the bridge
 	 * requests a GTK toplevel queue_draw). */
 	wl_subsurface_set_position(subsurface, x, y);

@@ -1,10 +1,13 @@
-// Isolated compositor experiment. Nothing here opens production native popups.
+// Opt-in DOM-on-top stacking regression fixture. DOM-on-top is the production
+// arrangement; this renders an opaque button, a translucent panel and a popup
+// across the chrome/CAD edge so a real compositor capture can regress it.
+// Nothing here opens production native popups.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { CATALOGS } from '../catalogs.mjs';
 import { createTranslator, initialLocale, localeTag } from '../i18n.mjs';
 import { bindProbeInput, createInputLane } from '../input.mjs';
-import { createProbeDiagnostics, observeCadInput, recordProbeAck, stopControlEvent } from './state.mjs';
+import { createStackingDiagnostics, observeCadInput, recordProbeAck, stopControlEvent } from './state.mjs';
 import './probe.css';
 
 const controlEvents = {
@@ -15,27 +18,74 @@ const controlEvents = {
   onWheel: stopControlEvent,
 };
 
-export function DomOnTopProbe() {
+// Fixture-only capture automation. This is not a production behavior: the whole
+// fixture is opt-in via the host init-script flag. One scheduled open flips the
+// same `popup` state as the toggle button, so a compositor capture can judge the
+// popup crossing the chrome/CAD edge without physical input or AT-SPI. The
+// evidence collector samples `initial` before this delay and `popup-open` after
+// it; the existing YACR_PROBE_EVIDENCE driver supplies the synthetic pointer /
+// wheel input used by the `after-synthetic-input` frames.
+const AUTO_POPUP_DELAY_MS = 9000;
+
+// Fixture-only marker-motion hook. These are click-free synthetic pointer moves
+// on the real `.native-input` binding: they reach the host's MoveCursor path,
+// so successive compositor frames show the CAD marker at different x positions.
+// They are not physical input and never touch the popup state. Delays are
+// chosen to fall before the collector's popup-open (+12s) and after-input
+// (+15s) samples.
+const MARKER_MOTION_DELAYS_MS = [8000, 11000, 14000, 17000];
+const MARKER_MOTION_FRACTIONS = [0.25, 0.5, 0.75, 0.9];
+
+export function StackingRegression() {
   const [locale] = useState(initialLocale);
   const t = useMemo(() => createTranslator(CATALOGS, locale), [locale]);
   const diagnostics = useRef(null);
-  if (!diagnostics.current) diagnostics.current = createProbeDiagnostics();
+  if (!diagnostics.current) diagnostics.current = createStackingDiagnostics();
   const [revision, setRevision] = useState(0);
   const [surface, setSurface] = useState(null);
   const d = diagnostics.current;
 
   useEffect(() => {
-    document.documentElement.classList.add('yacr-dom-on-top-probe');
+    document.documentElement.classList.add('yacr-stacking-regression');
     document.documentElement.lang = localeTag(locale);
     document.title = t('probe.dom_on_top.title');
     d.mounted = true;
-    window.__yacr_dom_on_top_probe = d;
+    window.__yacr_stacking_regression = d;
     return () => {
       d.mounted = false;
-      document.documentElement.classList.remove('yacr-dom-on-top-probe');
-      if (window.__yacr_dom_on_top_probe === d) delete window.__yacr_dom_on_top_probe;
+      document.documentElement.classList.remove('yacr-stacking-regression');
+      if (window.__yacr_stacking_regression === d) delete window.__yacr_stacking_regression;
     };
   }, [d, locale, t]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!d.popup) {
+        d.popup = true;
+        setRevision(value => value + 1);
+      }
+    }, AUTO_POPUP_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [d]);
+
+  useEffect(() => {
+    if (!surface) return undefined;
+    const timers = MARKER_MOTION_DELAYS_MS.map((delay, index) => setTimeout(() => {
+      const rect = surface.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      surface.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 91,
+        pointerType: 'mouse',
+        isPrimary: true,
+        buttons: 0,
+        clientX: rect.left + rect.width * MARKER_MOTION_FRACTIONS[index],
+        clientY: rect.top + rect.height * 0.5,
+        bubbles: true,
+        cancelable: true,
+      }));
+    }, delay));
+    return () => timers.forEach(clearTimeout);
+  }, [surface]);
 
   useEffect(() => {
     if (!surface) return undefined;
@@ -57,7 +107,7 @@ export function DomOnTopProbe() {
 
   const togglePopup = () => { d.popup = !d.popup; setRevision(value => value + 1); };
   return (
-    <main className="shell dom-on-top-probe" data-revision={revision}>
+    <main className="shell stacking-regression" data-revision={revision}>
       <header className="app-region probe-chrome" {...controlEvents}>
         <h1>{t('probe.dom_on_top.title')}</h1>
         <p>{t('probe.dom_on_top.instructions')}</p>

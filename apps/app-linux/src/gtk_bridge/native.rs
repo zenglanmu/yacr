@@ -1,5 +1,10 @@
 //! Webview reparenting, input pass-through and the native X11 classification
 //! helpers (free functions and small private types).
+//!
+//! The WebView is reparented **above** the drawing area: DOM-on-top is the only
+//! production arrangement. The X11 helpers are retained but
+//! `unreachable_since_dom_on_top` — `backend::prepare_backend` refuses X11 before
+//! GTK initializes.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -53,21 +58,12 @@ pub fn reparent_webview(webview: &tauri::Webview, label: &str) -> tauri::Result<
                 overlay.add_overlay(&widget);
                 overlay.set_overlay_pass_through(&widget, false);
                 widget.show();
-                // Product arrangement: CAD is topmost. Only the explicitly
-                // gated compositor experiment keeps WebKit as the last child;
-                // its native stacking is verified separately, not inferred here.
-                if !crate::dom_on_top_probe::enabled() {
-                    if let Some(base) = overlay.child() {
-                        overlay.remove(&base);
-                        overlay.add_overlay(&base);
-                        base.show();
-                        // B3: re-assert the pass-through + empty input region for the
-                        // new generation (the webview is now the sibling).
-                        if let Ok(drawing) = base.clone().downcast::<gtk::DrawingArea>() {
-                            apply_input_passthrough(&overlay, &drawing);
-                        }
-                    }
-                }
+                // Product arrangement: the WebView is the **last** overlay child
+                // (the top layer) and the drawing area stays the overlay's main
+                // child (below it). On Wayland the native CAD surface is the
+                // app-owned child `wl_surface`, always placed below the GDK
+                // toplevel, so the DOM is the only top layer. There is no
+                // alternative ordering and nothing to re-add here.
                 REPARENT_DONE.with(|flag| flag.set(true));
                 eprintln!("[probe] bridge: webview reparented into the overlay");
                 // Host-side sizing (see [`sync_webview_size`]): Tauri's
@@ -145,8 +141,8 @@ pub fn sync_webview_size(
     let container = (parent.allocated_width(), parent.allocated_height());
     let target = webview_target_size(Some(container), fallback);
     let skipped = allocate_webview(&widget, &parent, target);
-    if crate::dom_on_top_probe::enabled() {
-        super::stacking_probe::establish(&widget, &parent);
+    if crate::stacking_regression::enabled() {
+        super::stacking_regression::establish(&widget, &parent);
     }
     log_webview_size(
         &widget,

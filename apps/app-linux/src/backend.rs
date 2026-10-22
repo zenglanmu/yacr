@@ -15,12 +15,60 @@
 //! - unsupported or ambiguous values (unknown names, `broadway`, an ordered
 //!   `wayland,x11` list, empty) → a hard error, never a silent fallback.
 //!
+//! **X11/XWayland is explicitly unsupported since DOM-on-top (2026-10-22):** the
+//! WebView-over-CAD arrangement is native-Wayland only, and the X11 XWayland
+//! compositing attempt failed. Whatever selects X11 (an explicit
+//! `GDK_BACKEND=x11` or an `Auto` derivation from `DISPLAY`), the backend is
+//! refused here — before GTK/Tauri initialization — with
+//! [`UNSUPPORTED_BACKEND_MARKER`] and [`UNSUPPORTED_BACKEND_EXIT_CODE`]. There is
+//! no fallback X11 arrangement and no silent success.
+//!
 //! When the policy is `Auto`, the resolved backend is exported as
 //! `GDK_BACKEND` so GTK cannot fall back on its own. An explicit user value is
 //! never touched. `prepare_backend` must run from `main` before the GTK event
 //! loop starts (and before any other thread exists).
 
 use std::ffi::OsString;
+
+/// Stable stderr marker for the refused X11/XWayland backend.
+///
+/// Evidence collection classifies this line **first**; the exit code is only
+/// supporting information (an evidence driver may override the process exit
+/// code). Keep the literal byte-for-byte stable.
+pub const UNSUPPORTED_BACKEND_MARKER: &str = "yacr: unsupported-backend: x11";
+
+/// Process exit code for the refused X11/XWayland backend.
+///
+/// Registry: `0` success, `1` generic failure (incl. the Windows/macOS stubs),
+/// `2` display-backend policy error, `3` postload-pan driver failure, `4` this
+/// explicit unsupported backend. The marker line — not the code — is the primary
+/// classification key.
+pub const UNSUPPORTED_BACKEND_EXIT_CODE: i32 = 4;
+
+/// Why [`prepare_backend`] refused to start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackendRefusal {
+    /// The resolved backend is not supported by this host (X11/XWayland).
+    /// Carries the resolved backend so the caller can name it in the diagnostic.
+    Unsupported(ResolvedBackend),
+    /// The policy/session input was invalid or ambiguous (exit code `2`).
+    Invalid(String),
+}
+
+impl BackendRefusal {
+    /// The stable machine marker line for a refusal.
+    ///
+    /// Only the unsupported-backend case has one; an invalid policy is an ordinary
+    /// startup error and must not be classified as an unsupported backend.
+    pub fn marker(self) -> Option<&'static str> {
+        match self {
+            BackendRefusal::Unsupported(ResolvedBackend::X11) => Some(UNSUPPORTED_BACKEND_MARKER),
+            BackendRefusal::Unsupported(ResolvedBackend::Wayland) | BackendRefusal::Invalid(_) => {
+                None
+            }
+        }
+    }
+}
 
 /// Requested display backend policy, parsed from `GDK_BACKEND`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,8 +168,8 @@ fn present(value: Option<&str>) -> bool {
 ///   precise error (no headless success).
 /// - [`BackendPolicy::Wayland`]: requires the native Wayland session; if it is
 ///   unavailable the call fails rather than silently falling back to X11.
-/// - [`BackendPolicy::X11`]: accepted as-is (the supported X11/XWayland path is
-///   preserved); GDK reports an unusable display itself.
+/// - [`BackendPolicy::X11`]: resolved as-is here; [`ensure_supported_backend`]
+///   then refuses it explicitly (X11 is not a supported production backend).
 pub fn resolve_backend(
     policy: BackendPolicy,
     wayland_display: Option<&str>,
@@ -180,27 +228,44 @@ fn read_env(key: &str) -> Result<Option<String>, String> {
     }
 }
 
+/// Refuse a resolved backend this host does not support (pure; unit-tested).
+///
+/// Native Wayland is accepted unchanged. X11/XWayland — whether requested
+/// explicitly or derived by `Auto` — is [`BackendRefusal::Unsupported`], so the
+/// caller can print the stable marker and exit with code
+/// [`UNSUPPORTED_BACKEND_EXIT_CODE`] before GTK is initialized.
+pub fn ensure_supported_backend(plan: BackendPlan) -> Result<BackendPlan, BackendRefusal> {
+    match plan.resolved {
+        ResolvedBackend::Wayland => Ok(plan),
+        ResolvedBackend::X11 => Err(BackendRefusal::Unsupported(plan.resolved)),
+    }
+}
+
 /// Decide and apply the display backend policy.
 ///
-/// Reads the real environment, resolves the [`BackendPlan`], and — only for an
-/// `Auto` policy — exports the resolved `GDK_BACKEND` so GTK cannot fall back
-/// on its own. Returns `Err` with a user-facing message when the input is
-/// unsupported/ambiguous or the selected session is unavailable; the caller
-/// must abort startup (exit code `2`). Must run before any GTK/Tauri
-/// initialization.
-pub fn prepare_backend() -> Result<BackendPlan, String> {
-    let gdk_backend = read_env("GDK_BACKEND")?;
-    let policy = parse_backend_policy(gdk_backend.as_deref())?;
-    let wayland_display = read_env("WAYLAND_DISPLAY")?;
-    let xdg_runtime_dir = read_env("XDG_RUNTIME_DIR")?;
-    let display = read_env("DISPLAY")?;
+/// Reads the real environment, resolves the [`BackendPlan`], refuses an
+/// unsupported backend ([`ensure_supported_backend`]), and — only for an `Auto`
+/// policy that was accepted — exports the resolved `GDK_BACKEND` so GTK cannot
+/// fall back on its own. Returns [`BackendRefusal::Invalid`] with a user-facing
+/// message when the input is unsupported/ambiguous or the selected session is
+/// unavailable (caller exits `2`), or [`BackendRefusal::Unsupported`] for
+/// X11/XWayland (caller prints the marker and exits `4`). Must run before any
+/// GTK/Tauri initialization.
+pub fn prepare_backend() -> Result<BackendPlan, BackendRefusal> {
+    let gdk_backend = read_env("GDK_BACKEND").map_err(BackendRefusal::Invalid)?;
+    let policy = parse_backend_policy(gdk_backend.as_deref()).map_err(BackendRefusal::Invalid)?;
+    let wayland_display = read_env("WAYLAND_DISPLAY").map_err(BackendRefusal::Invalid)?;
+    let xdg_runtime_dir = read_env("XDG_RUNTIME_DIR").map_err(BackendRefusal::Invalid)?;
+    let display = read_env("DISPLAY").map_err(BackendRefusal::Invalid)?;
 
     let plan = resolve_backend(
         policy,
         wayland_display.as_deref(),
         xdg_runtime_dir.as_deref(),
         display.as_deref(),
-    )?;
+    )
+    .map_err(BackendRefusal::Invalid)?;
+    let plan = ensure_supported_backend(plan)?;
 
     if plan.exports_gdk_backend {
         // SAFETY: called from `main` before the GTK event loop starts and before
@@ -369,18 +434,88 @@ mod tests {
     }
 
     #[test]
-    fn explicit_x11_is_accepted_and_preserved() {
-        // The historically supported path: no session inspection, no rewrite.
+    fn explicit_x11_is_resolved_and_then_refused() {
+        // The historically supported path is no longer a production backend: it
+        // still resolves (so the diagnostic can name it) but is refused.
         let plan = resolve_backend(BackendPolicy::X11, None, None, None)
-            .expect("explicit X11 must be accepted");
+            .expect("explicit X11 resolves before the support check");
         assert_eq!(plan.resolved, ResolvedBackend::X11);
         assert!(!plan.exports_gdk_backend);
+        assert_eq!(
+            ensure_supported_backend(plan),
+            Err(BackendRefusal::Unsupported(ResolvedBackend::X11))
+        );
     }
 
     #[test]
     fn gdk_backend_strings_are_stable() {
         assert_eq!(ResolvedBackend::X11.gdk_backend(), "x11");
         assert_eq!(ResolvedBackend::Wayland.gdk_backend(), "wayland");
+    }
+
+    // --- unsupported backend refusal -----------------------------------------
+
+    #[test]
+    fn x11_is_refused_before_gtk_initialization() {
+        // Explicit X11 and an Auto fallback to X11 are both refused identically:
+        // there is no fallback arrangement and no silent success.
+        for policy in [BackendPolicy::X11, BackendPolicy::Auto] {
+            let plan = resolve_backend(policy, None, None, Some(":0"))
+                .expect("resolve_backend still resolves X11; the refusal is separate");
+            assert_eq!(plan.resolved, ResolvedBackend::X11);
+            assert_eq!(
+                ensure_supported_backend(plan),
+                Err(BackendRefusal::Unsupported(ResolvedBackend::X11))
+            );
+        }
+    }
+
+    #[test]
+    fn native_wayland_plan_is_accepted_unchanged() {
+        let plan = resolve_backend(
+            BackendPolicy::Wayland,
+            Some("wayland-0"),
+            Some("/run/user/1"),
+            Some(":0"),
+        )
+        .expect("native Wayland session");
+        assert_eq!(ensure_supported_backend(plan), Ok(plan));
+    }
+
+    #[test]
+    fn refusal_marker_and_exit_code_are_stable() {
+        assert_eq!(UNSUPPORTED_BACKEND_MARKER, "yacr: unsupported-backend: x11");
+        assert_eq!(UNSUPPORTED_BACKEND_EXIT_CODE, 4);
+        assert_eq!(
+            BackendRefusal::Unsupported(ResolvedBackend::X11).marker(),
+            Some(UNSUPPORTED_BACKEND_MARKER)
+        );
+    }
+
+    #[test]
+    fn invalid_policy_is_not_classified_as_unsupported_backend() {
+        // Exit code 2 errors must never be reported as an unsupported backend:
+        // the marker is what evidence collection classifies on.
+        let refusal = parse_backend_policy(Some("broadway"))
+            .map_err(BackendRefusal::Invalid)
+            .expect_err("invalid policy must be refused");
+        assert_eq!(refusal.clone().marker(), None);
+        assert!(matches!(refusal, BackendRefusal::Invalid(_)));
+    }
+
+    #[test]
+    fn refusal_reports_readable_x11_identity() {
+        let refusal = ensure_supported_backend(
+            resolve_backend(BackendPolicy::X11, None, None, None).expect("resolved"),
+        )
+        .expect_err("X11 refused");
+        assert_eq!(refusal.clone().marker(), Some(UNSUPPORTED_BACKEND_MARKER));
+        // The diagnostic can reuse the stable backend name.
+        let BackendRefusal::Unsupported(backend) = refusal else {
+            panic!("expected Unsupported");
+        };
+        assert_eq!(backend, ResolvedBackend::X11);
+        assert_eq!(backend.gdk_backend(), "x11");
     }
 
     // --- non-Unicode env value ------------------------------------------------

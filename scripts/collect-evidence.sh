@@ -43,6 +43,10 @@ Options:
   --no-build                         Skip the frontend and cargo release build.
   --maximize                         Do not set YACR_PROBE_NO_MAXIMIZE
                                      (default: no-maximize).
+  --stacking-regression              Also run the DOM-on-top stacking regression
+                                     fixture on Wayland (YACR_PROBE_STACKING=1 +
+                                     the init-script flag + a real --open) and
+                                     record a STACKING_REGRESSION row.
   --dry-run                          Print the resolved plan and exit without
                                      building or launching.
   -h, --help                         Show this help.
@@ -67,6 +71,7 @@ capture_at="10"
 timeout_s="90"
 do_build=1
 maximize=0
+stacking_regression=0
 dry_run=0
 
 while [[ $# -gt 0 ]]; do
@@ -80,6 +85,7 @@ while [[ $# -gt 0 ]]; do
         --timeout) timeout_s="${2:-}"; shift 2 ;;
         --no-build) do_build=0; shift ;;
         --maximize) maximize=1; shift ;;
+        --stacking-regression) stacking_regression=1; shift ;;
         --dry-run) dry_run=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "error: unknown argument: $1" >&2; usage >&2; exit 64 ;;
@@ -205,6 +211,7 @@ if [[ "$dry_run" -eq 1 ]]; then
     echo "  capture at     : ${capture_at}s"
     echo "  hard timeout   : ${timeout_s}s"
     echo "  maximize       : $([[ "$maximize" -eq 1 ]] && echo yes || echo no)"
+    echo "  stacking reg   : $([[ "$stacking_regression" -eq 1 ]] && echo yes || echo no)"
     echo "  build          : $([[ "$do_build" -eq 1 ]] && echo yes || echo no)"
     echo "  build outputs  : frontend build (skip npm ci if node_modules present)"
     echo "                   cargo build --release --locked -p app-linux --bin yacr --features tauri/custom-protocol"
@@ -229,6 +236,11 @@ if [[ "$dry_run" -eq 1 ]]; then
             echo "    grabber      : $out_dir/build/x11-window-grab (from apps/app-linux/scripts/x11-window-grab.c)"
         else
             echo "    screenshots  : $out_dir/wayland/wayland-frame.png (Mutter ScreenCast via $screencast)"
+            if [[ "$stacking_regression" -eq 1 ]]; then
+                echo "    fixture      : separate launch -> $out_dir/wayland-stacking-regression/run.log"
+                echo "    fixture env  : $(build_env_prefix "$name"; printf '%s ' "${env_prefix[@]}"; echo 'YACR_PROBE_STACKING=1 YACR_PROBE_EVIDENCE=1')"
+                echo "    fixture frames: initial.png, popup-open.png, after-synthetic-input.png, after-synthetic-input-later.png"
+            fi
         fi
     done
     echo "  results file   : $out_dir/results.tsv"
@@ -354,27 +366,35 @@ write_gpu_identity() {
     } > "$1"
 }
 
-# --------------------------------------------------------------------------
-# Per-backend run
-# --------------------------------------------------------------------------
-run_backend() {
-    local name="$1"
-    local dir="$out_dir/$name"
-    mkdir -p "$dir"
-    local run_log="$dir/run.log"
-    local pidfile="$dir/app.pid"
-    local rcfile="$dir/app.rc"
+# Capture one Wayland compositor frame into <dir>/<label>.png.
+# The frame is the FULL primary monitor and may include unrelated windows; this
+# helper never treats a capture as a visual verdict.
+capture_wayland_frame() {
+    local dir="$1" label="$2" log="$3"
+    if ! command -v gst-launch-1.0 >/dev/null 2>&1 || [[ ! -f "$screencast" ]]; then
+        echo "[collect] warning: gst-launch-1.0 or screencast helper missing; $label.png missing" >&2
+        return 1
+    fi
+    if ! python3 "$screencast" --out "$dir/$label.png" >>"$log" 2>&1; then
+        echo "[collect] warning: wayland ScreenCast capture failed for $label (see $log)" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Start one real session for the current `env_prefix`.
+#
+# Sets the global `pidfile`, `rcfile` and `launcher`; the caller owns the pid/rc
+# files under <dir>. The launch line is the single place the real binary is
+# spawned, so every case (production, fixture) is provably the same --open path.
+start_session() {
+    local dir="$1" run_log="$2"
+    pidfile="$dir/app.pid"
+    rcfile="$dir/app.rc"
     : > "$run_log"
     rm -f "$pidfile" "$rcfile"
-
-    build_env_prefix "$name"
-    echo "[collect] launching $name backend"
-
-    # Apply the resolved backend environment to the REAL launch. `env_prefix`
-    # starts with the literal `env` (plus `-u DISPLAY -u XAUTHORITY` on Wayland)
-    # and carries the probe variables, so the app sees the correct display
-    # backend and lifecycle mode. `env` execs `setsid` in place, so the `bash -c`
-    # process below stays the session/process-group leader whose PID is `$$`.
+    # `env` execs `setsid` in place, so the `bash -c` process below stays the
+    # session/process-group leader whose PID is `$$`.
     "${env_prefix[@]}" setsid bash -c '
 printf "%s\n" "$$" > "$1"
 rc=0
@@ -382,7 +402,40 @@ rc=0
 printf "%s\n" "$rc" > "$5"
 exit "$rc"
 ' _ "$pidfile" "$binary" "$dwg" "$fonts_dir" "$rcfile" >"$run_log" 2>&1 &
-    local launcher=$!
+    launcher=$!
+}
+
+# --------------------------------------------------------------------------
+# Per-backend run
+# --------------------------------------------------------------------------
+run_backend() {
+    local name="$1"
+    local mode="${2:-production}"
+    local dir
+    if [[ "$mode" == "stacking-regression" ]]; then
+        dir="$out_dir/$name-stacking-regression"
+    else
+        dir="$out_dir/$name"
+    fi
+    mkdir -p "$dir"
+    local run_log="$dir/run.log"
+
+    build_env_prefix "$name"
+    if [[ "$mode" == "stacking-regression" ]]; then
+        # Pinned fixture trigger. The env var is only one of three parts: the host
+        # injects the init-script flag and this is a real `--open` session. The
+        # synthetic pointer/wheel input comes from the existing evidence driver.
+        env_prefix+=("YACR_PROBE_STACKING=1" "YACR_PROBE_EVIDENCE=1")
+        echo "[collect] launching $name stacking-regression fixture (separate launch)"
+    else
+        echo "[collect] launching $name backend"
+    fi
+
+    # Apply the resolved backend environment to the REAL launch. `env_prefix`
+    # starts with the literal `env` (plus `-u DISPLAY -u XAUTHORITY` on Wayland)
+    # and carries the probe variables, so the app sees the correct display
+    # backend and lifecycle mode.
+    start_session "$dir" "$run_log"
 
     local t0=$SECONDS
 
@@ -394,7 +447,7 @@ exit "$rc"
     done
 
     if [[ ! -s "$pidfile" ]]; then
-        record_row "$name" "run" "LAUNCH_FAILED" "-" "missing" "-" \
+        record_row "$name" "$mode" "LAUNCH_FAILED" "-" "missing" "-" \
             "no pid captured within 10s; see $run_log"
         any_launch_failed=1
         return
@@ -419,6 +472,32 @@ exit "$rc"
         echo "[collect] warning: no backend policy line within 20s for $name"
     fi
 
+    # DOM-on-top refuses X11/XWayland before GTK init. The stable marker line is
+    # the primary classification signal (the exit code alone is not); a refused
+    # run has no window, so it must not attempt screenshots or a natural-exit
+    # verdict.
+    local unsupported_marker="yacr: unsupported-backend: x11"
+    if grep -qxF "$unsupported_marker" "$run_log" 2>/dev/null; then
+        local refusal_wait0=$SECONDS
+        while [[ ! -s "$rcfile" && $((SECONDS - refusal_wait0)) -lt 5 ]]; do
+            sleep 0.1
+        done
+        local refusal_code="-"
+        if [[ -s "$rcfile" ]]; then
+            refusal_code="$(tr -dc '0-9' < "$rcfile" | head -c 10)"
+        fi
+        [[ -n "$refusal_code" ]] || refusal_code="-"
+        if kill -0 -"$pgid" 2>/dev/null; then
+            kill -TERM -"$pgid" 2>/dev/null || true
+        fi
+        record_row "$name" "$mode" "UNSUPPORTED_BACKEND" "$refusal_code" "missing" "-" \
+            "marker='$unsupported_marker' (expected exit 4); refused before GTK init; no screenshots"
+        any_ran=1
+        ran_backends+=("$name/$mode")
+        echo "[collect] $name/$mode: verdict=UNSUPPORTED_BACKEND exit=$refusal_code (marker)"
+        return
+    fi
+
     # X11 XIDs (top-level + native CAD child), up to 20s.
     local top_xid="" child_xid=""
     if [[ "$name" == "x11" ]]; then
@@ -432,15 +511,14 @@ exit "$rc"
         echo "[collect] $name top XID='${top_xid:-<none>}' child XID='${child_xid:-<none>}'"
     fi
 
-    # Wait until the capture instant.
-    while [[ $((SECONDS - t0)) -lt "$capture_at" ]]; do
-        if [[ -s "$rcfile" ]]; then break; fi
-        sleep 0.2
-    done
-
-    # Screenshots.
+    # Sampling and screenshots. Each branch is one launch: the production frame
+    # and the multi-frame fixture never share a frame, timestamp or row.
     local captured_utc="-"
     if [[ "$name" == "x11" ]]; then
+        while [[ $((SECONDS - t0)) -lt "$capture_at" ]]; do
+            if [[ -s "$rcfile" ]]; then break; fi
+            sleep 0.2
+        done
         if [[ -n "$grabber" && -x "$grabber" ]]; then
             if [[ -n "$top_xid" ]]; then
                 if capture_x11_window "$run_log" "$top_xid" "$dir/shot-top.ppm"; then
@@ -463,21 +541,48 @@ exit "$rc"
         else
             echo "[collect] warning: X11 grabber unavailable; screenshots missing" >&2
         fi
-    else
-        if command -v gst-launch-1.0 >/dev/null 2>&1 && [[ -f "$screencast" ]]; then
-            if ! python3 "$screencast" --out "$dir/wayland-frame.png" >>"$run_log" 2>&1; then
-                echo "[collect] warning: wayland ScreenCast capture failed (see $run_log)" >&2
-            fi
-        else
-            echo "[collect] warning: gst-launch-1.0 or screencast helper missing; frame missing" >&2
-        fi
-    fi
-
-    if [[ "$name" == "x11" ]]; then
         if [[ -s "$dir/shot-top.png" || -s "$dir/shot-cad.png" ]]; then
             captured_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         fi
+    elif [[ "$mode" == "stacking-regression" ]]; then
+        # Multi-frame fixture protocol: anchor on the first real presenter
+        # readiness (not on launch) so `initial` exists even on a slow cold
+        # start. The fixture auto-opens its popup 9s after mount (matching
+        # AUTO_POPUP_DELAY_MS=9000); the existing
+        # YACR_PROBE_EVIDENCE driver injects synthetic pointer/wheel input ~8s
+        # after its own start, before `after-synthetic-input`.
+        local anchor0=$SECONDS
+        while [[ $((SECONDS - anchor0)) -lt 25 ]]; do
+            if grep -q 'bridge wayland presenter ready' "$run_log" 2>/dev/null; then break; fi
+            if [[ -s "$rcfile" ]]; then break; fi
+            sleep 0.25
+        done
+        local sample0=$SECONDS
+        echo "[collect] fixture sampling anchored ${sample0}s/$((sample0 - t0))s after launch"
+        local -a frame_labels=(initial popup-open after-synthetic-input after-synthetic-input-later)
+        local -a frame_offsets=(2 12 15 18)
+        local i
+        for i in "${!frame_labels[@]}"; do
+            local frame_target=$((sample0 + frame_offsets[i]))
+            while [[ $SECONDS -lt $frame_target && ! -s "$rcfile" ]]; do
+                sleep 0.2
+            done
+            if [[ -s "$rcfile" ]]; then
+                echo "[collect] warning: fixture exited before ${frame_labels[i]} frame" >&2
+            else
+                capture_wayland_frame "$dir" "${frame_labels[i]}" "$run_log" || true
+            fi
+        done
+        if [[ -s "$dir/initial.png" && -s "$dir/popup-open.png" \
+            && -s "$dir/after-synthetic-input.png" ]]; then
+            captured_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        fi
     else
+        while [[ $((SECONDS - t0)) -lt "$capture_at" ]]; do
+            if [[ -s "$rcfile" ]]; then break; fi
+            sleep 0.2
+        done
+        capture_wayland_frame "$dir" "wayland-frame" "$run_log" || true
         if [[ -s "$dir/wayland-frame.png" ]]; then
             captured_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         fi
@@ -535,29 +640,52 @@ exit "$rc"
             screenshot="captured"
         fi
         notes="$notes; top=${top_xid:-none} child=${child_xid:-none}"
+    elif [[ "$mode" == "stacking-regression" ]]; then
+        local frames_present=0
+        local label
+        for label in initial popup-open after-synthetic-input after-synthetic-input-later; do
+            if [[ -s "$dir/$label.png" ]]; then frames_present=$((frames_present + 1)); fi
+        done
+        if [[ -s "$dir/initial.png" && -s "$dir/popup-open.png" \
+            && -s "$dir/after-synthetic-input.png" ]]; then
+            screenshot="captured"
+        elif [[ "$frames_present" -gt 0 ]]; then
+            screenshot="partial"
+        fi
+        notes="$notes; classification=STACKING_REGRESSION; single launch; frames=${frames_present}/4 (initial,popup-open,after-synthetic-input,after-synthetic-input-later); fixture-only synthetic pointer moves on .native-input + YACR_PROBE_EVIDENCE input; fixture auto-opened popup; full-monitor compositor frames, no visual verdict"
     else
         if [[ -s "$dir/wayland-frame.png" ]]; then
             screenshot="captured"
         fi
-        notes="$notes; compositor frame (Mutter ScreenCast)"
+        notes="$notes; production chrome over CAD; compositor frame (Mutter ScreenCast)"
     fi
 
     write_gpu_identity "$dir/gpu-identity.txt"
 
-    record_row "$name" "run" "$verdict" "$exit_code" "$screenshot" "$captured_utc" "$notes"
+    record_row "$name" "$mode" "$verdict" "$exit_code" "$screenshot" "$captured_utc" "$notes"
+
     any_ran=1
-    ran_backends+=("$name")
-    echo "[collect] $name: verdict=$verdict exit=$exit_code screenshot=$screenshot"
+    ran_backends+=("$name/$mode")
+    echo "[collect] $name/$mode: verdict=$verdict exit=$exit_code screenshot=$screenshot"
 }
 
 for name in "${candidates[@]}"; do
     if backend_available "$name"; then
-        run_backend "$name"
+        run_backend "$name" "production"
+        if [[ "$name" == "wayland" && "$stacking_regression" -eq 1 ]]; then
+            run_backend "$name" "stacking-regression"
+        fi
     else
         mkdir -p "$out_dir/$name"
-        record_row "$name" "run" "SKIPPED" "-" "missing" "-" \
+        record_row "$name" "production" "SKIPPED" "-" "missing" "-" \
             "backend unavailable in this session (no display/$name socket)"
         skipped_backends+=("$name")
+        if [[ "$name" == "wayland" && "$stacking_regression" -eq 1 ]]; then
+            mkdir -p "$out_dir/$name-stacking-regression"
+            record_row "$name" "stacking-regression" "SKIPPED" "-" "missing" "-" \
+                "Wayland unavailable; fixture not launched"
+            skipped_backends+=("$name/stacking-regression")
+        fi
         echo "[collect] $name: SKIPPED (unavailable)"
     fi
 done
@@ -574,7 +702,7 @@ done
 # Record a top-level NO_DISPLAY verdict when nothing could be attempted, so the
 # results file never silently reports an empty run as success.
 if [[ "$any_ran" -eq 0 ]]; then
-    record_row "none" "run" "NO_DISPLAY" "-" "missing" "-" \
+    record_row "none" "production" "NO_DISPLAY" "-" "missing" "-" \
         "no display session available; nothing was run"
 fi
 
@@ -595,7 +723,13 @@ timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "- Backends executed: ${ran_backends[*]:-<none>}"
     echo "- Backends skipped: ${skipped_backends[*]:-<none>}"
     echo "- Lifecycle probe mode: $lifecycle"
+    echo "- Build: $([[ "$do_build" -eq 1 ]] && echo 'frontend + cargo release' || echo 'skipped (--no-build)')"
+    echo "- Stacking regression fixture (Wayland): $([[ "$stacking_regression" -eq 1 ]] && echo yes || echo no)"
     echo "- Capture delay: ${capture_at}s; hard timeout: ${timeout_s}s"
+    if [[ "$stacking_regression" -eq 1 ]]; then
+        echo "- Fixture frames: one separate launch, sampled at presenter+2s/presenter+12s/presenter+15s/presenter+18s"
+        echo "  (initial / popup-open / after-synthetic-input / after-synthetic-input-later)"
+    fi
     echo "- DWG: $dwg"
     echo "- Fonts dir: $fonts_dir"
     echo "- No-maximize env set: $([[ "$maximize" -eq 0 ]] && echo yes || echo no)"
@@ -607,11 +741,16 @@ timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo
     echo "## Artifacts (absolute paths)"
     echo "- $out_dir/results.tsv"
-    echo "- $out_dir/build/cargo-release-build.log"
-    echo "- $out_dir/build/frontend-build.log"
+    if [[ "$do_build" -eq 1 ]]; then
+        echo "- $out_dir/build/cargo-release-build.log"
+        echo "- $out_dir/build/frontend-build.log"
+    fi
     echo "- $out_dir/build/x11-window-grab (binary), $out_dir/build/x11-window-grab-build.log"
-    echo "- $out_dir/x11/run.log, shot-top.png, shot-top.ppm, shot-cad.png, shot-cad.ppm, gpu-identity.txt"
-    echo "- $out_dir/wayland/run.log, wayland-frame.png, gpu-identity.txt"
+    echo "- $out_dir/x11/run.log; (only when the backend ran, not on the refusal path) gpu-identity.txt, shot-top.png, shot-top.ppm, shot-cad.png, shot-cad.ppm"
+    echo "- $out_dir/wayland/run.log, wayland-frame.png, gpu-identity.txt (production launch)"
+    echo "- $out_dir/wayland-stacking-regression/run.log, initial.png, popup-open.png, after-synthetic-input.png, after-synthetic-input-later.png, gpu-identity.txt (separate fixture launch)"
+    echo "- A refused backend has no window and produces no screenshot; its marker line"
+    echo "  in run.log and the results.tsv row are the evidence."
     echo
     echo "## Evidence boundary"
     echo "- The Wayland frame (wayland/wayland-frame.png) is compositor output from the"
@@ -624,6 +763,19 @@ timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "  may appear in it; the X11 shots are the app window only. Every artifact is"
     echo "  written to this local output directory and is never uploaded anywhere."
     echo "- A captured screenshot is not a visual-correctness or pixel-accuracy judgement."
+    echo "- Production and fixture rows are separate launches with separate logs and frames;"
+    echo "  no row copies another launch's exit code, timestamp or screenshot. A reader can"
+    echo "  tell the mode from the case column and the frame path."
+    echo "- The fixture row records a single launch sampled four times. Marker motion is"
+    echo "  judgeable by comparing initial vs after-synthetic-input vs after-later; the"
+    echo "  popup frame shows the fixture popup across the chrome/CAD edge. The fixture"
+    echo "  auto-opens its popup 9s after mount and dispatches click-free pointer moves"
+    echo "  on .native-input at 8/11/14/17s (fixture-only hooks, no physical input); the"
+    echo "  existing YACR_PROBE_EVIDENCE driver injects more synthetic input."
+    echo "- Those frames are still whole-monitor compositor output and are not a"
+    echo "  stacking/visual PASS; an independent image review is required."
+    echo "- An UNSUPPORTED_BACKEND row is classified from the stable stderr marker line and"
+    echo "  records the refusal before GTK init; no window or screenshot exists for it."
     echo
     echo "## Authorization boundary"
     echo "- Runs as the invoking same-UID desktop user only (uid $uid); no privilege"

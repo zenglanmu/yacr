@@ -1,23 +1,29 @@
-//! GTK overlay bridge for the React probe (Linux/X11 and native Wayland).
+//! GTK overlay bridge: native Wayland CAD surface **below** the DOM/WebView.
 //!
 //! **Root cause this solves:** creating the wgpu Vulkan surface on the Tauri/GTK
-//! **top-level** window makes the Vulkan swapchain cover the React webview. Here
-//! the probe surface instead gets its own dedicated native region inside a
-//! `GtkOverlay`, with the React webview reparented as a transparent sibling
-//! **below** the CAD area`: the drawing area is re-added last so it stays the
-//! **topmost** overlay child, and its native surface covers the webview inside
-//! that rect. Only **input** passes through (empty input shape/region), so DOM
-//! can never paint over the CAD partition (ADR-0010, ADR-0020).
-//! There is **no top-level fallback**.
+//! **top-level** window makes the Vulkan swapchain cover the React webview.
 //!
-//! Two backend-specific native paths sit behind the same owner:
-//! - **X11** (`classify_native`): a windowed `GtkDrawingArea` with its own native
-//!   X child window, whose Xlib XID/display are handed to the renderer. Unchanged.
+//! **Production arrangement (the only one, since 2026-10-22):** the React WebView
+//! is the top layer and the native CAD surface is below it. On native Wayland the
+//! app-owned CAD `wl_subsurface` is always `place_below(parent)`, so the DOM is
+//! the only visible chrome layer; the GDK toplevel's alpha is cleared on every
+//! GTK draw so the CAD child shows through. There is no mode switch and **no
+//! top-level fallback**. Input keeps its single funnel: `.native-input` in the
+//! DOM; the CAD surface keeps an empty input region as defence in depth.
+//!
+//! Backend paths behind the same owner:
 //! - **Wayland** ([`WaylandSurface`]): the drawing area is a non-native GDK child
 //!   that shares the GDK toplevel `wl_surface`, so the bridge owns a **child
 //!   `wl_surface` + `wl_subsurface`** (the app-owned region) and hands *that* to
-//!   the renderer. The GDK surface is never used for Vulkan and never committed
-//!   by the host.
+//!   the renderer. The GDK surface is never used for Vulkan, never committed by
+//!   the host, and never placed above the child.
+//! - **X11** (`classify_native`): a windowed `GtkDrawingArea` with its own native
+//!   X child window. This path is **NOT on the production path since DOM-on-top
+//!   (2026-10-22)**: `backend::prepare_backend` refuses X11 before GTK
+//!   initializes (`BackendRefusal::Unsupported`, exit code 4), so it is
+//!   unreachable at runtime. It is retained, and unit-tested, pending the
+//!   explicitly deferred X11 web+canvas route decision — never as X11 capability
+//!   evidence.
 //!
 //! Threading/lifetime:
 //! - [`GtkOverlayOwner`] is `!Send`/`!Sync` (`PhantomData<Rc<()>>`): it is created,
@@ -45,7 +51,7 @@ use crate::wayland_surface::WaylandSurface;
 mod native;
 mod owner;
 mod present;
-mod stacking_probe;
+mod stacking_regression;
 
 #[cfg(test)]
 mod tests;

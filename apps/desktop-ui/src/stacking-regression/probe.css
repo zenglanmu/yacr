@@ -1,0 +1,50 @@
+/* Every rule is opt-in scoped; importing this sheet cannot alter normal App. */
+html.yacr-stacking-regression,
+html.yacr-stacking-regression body,
+html.yacr-stacking-regression #root,
+.shell.stacking-regression,
+.stacking-regression .probe-workspace,
+.stacking-regression .native-input { background: transparent; }
+
+.shell.stacking-regression { position: relative; font-size: 14px; }
+.stacking-regression .probe-chrome {
+  flex: 0 0 116px; height: 116px; padding: 10px 20px;
+  background: #172536; border-bottom: 2px solid #8ae5ff;
+}
+.stacking-regression h1 { font-size: 18px; margin: 0 0 4px; }
+.stacking-regression p { margin: 4px 0 8px; }
+.stacking-regression button {
+  padding: 7px 14px; border: 2px solid #d5f7ff; border-radius: 3px;
+  background: #183f58; color: #fff; cursor: pointer;
+}
+.stacking-regression button:focus-visible { outline: 3px solid #ffdb70; outline-offset: 3px; }
+.stacking-regression .probe-workspace { position: relative; flex: 1 1 auto; min-height: 0; }
+.stacking-regression .native-input { position: absolute; inset: 0; z-index: 0; }
+.stacking-regression .probe-overlay { position: absolute; z-index: 2; }
+.stacking-regression .probe-translucent {
+  left: 4%; top: 50%; transform: translateY(-50%); width: 26%; padding: 18px;
+  background: rgba(29, 92, 128, .55); border: 2px solid #88e1ff;
+}
+.stacking-regression .probe-comparison {
+  right: 4%; top: 50%; transform: translateY(-50%); width: 26%; height: 100px;
+  background: transparent; border: 2px dashed #fff; pointer-events: none;
+}
+.stacking-regression .probe-comparison span { display: block; margin: 8px; }
+/* CAD-local center: place opaque DOM directly across the native marker sweep. */
+.stacking-regression .probe-opaque {
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 240px; min-height: 72px; background: #ffdf70; color: #172536;
+  border: 3px solid #fff; font-weight: 700;
+}
+.stacking-regression .probe-local-popup {
+  position: absolute; z-index: 4; top: 82px; right: 8%; width: 320px;
+  padding: 18px; border: 3px solid #ffd87a; background: #382c48;
+}
+.stacking-regression .probe-readout {
+  flex: 0 0 140px; padding: 10px 20px; background: #172536;
+  border-top: 2px solid #8ae5ff; font-family: var(--font-mono);
+}
+.stacking-regression [data-error="true"] { color: #ff9f9f; font-weight: bold; }
+.stacking-regression [data-refused="true"] { color: #ffce85; }
+.stacking-regression [data-error="false"] { color: #9de4b1; }
+.stacking-regression small { display: block; margin-top: 6px; color: #c3ccda; }

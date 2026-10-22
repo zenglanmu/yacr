@@ -1,24 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createProbeDiagnostics, isDomOnTopProbe, observeCadInput, recordProbeAck, stopControlEvent } from '../src/probe-dom-on-top/state.mjs';
+import { createStackingDiagnostics, isStackingRegression, observeCadInput, recordProbeAck, stopControlEvent } from '../src/stacking-regression/state.mjs';
 
 const source = path => readFile(new URL(path, import.meta.url), 'utf8');
 
-test('only the exact host boolean selects the probe; normal App is preserved', async () => {
+test('only the exact host boolean selects the regression fixture; normal App is preserved', async () => {
   for (const value of [undefined, null, false, 0, 1, 'true', '1', {}]) {
-    assert.equal(isDomOnTopProbe({ __YACR_PROBE_DOM_ON_TOP__: value }), false);
+    assert.equal(isStackingRegression({ __YACR_STACKING_REGRESSION__: value }), false);
   }
-  assert.equal(isDomOnTopProbe(null), false);
-  assert.equal(isDomOnTopProbe({ __YACR_PROBE_DOM_ON_TOP__: true }), true);
+  assert.equal(isStackingRegression(null), false);
+  assert.equal(isStackingRegression({ __YACR_STACKING_REGRESSION__: true }), true);
   const main = await source('../src/main.jsx');
-  assert.match(main, /isDomOnTopProbe\(window\) \? <DomOnTopProbe \/> : <App \/>/);
+  assert.match(main, /isStackingRegression\(window\) \? <StackingRegression \/> : <App \/>/);
 });
 
 test('one empty native-input uses the real ordered lane and binding, with sibling overlays', async () => {
-  const jsx = await source('../src/probe-dom-on-top/Probe.jsx');
+  const jsx = await source('../src/stacking-regression/Probe.jsx');
   assert.equal((jsx.match(/className="native-input"/g) ?? []).length, 1);
-  assert.match(jsx, /<main className="shell dom-on-top-probe"/);
+  assert.match(jsx, /<main className="shell stacking-regression"/);
   assert.match(jsx, /<div className="native-input"[^>]+\/>\s*<div className="probe-overlay/);
   assert.match(jsx, /createInputLane\(/);
   assert.match(jsx, /await invoke\('probe_input', \{ input \}\)/);
@@ -33,22 +33,22 @@ test('one empty native-input uses the real ordered lane and binding, with siblin
   assert.match(jsx, /aria-label=\{t\('probe.dom_on_top.popup_title'\)\} \{\.\.\.controlEvents\}/);
 });
 
-test('probe styles are scoped, ancestors/CAD transparent, popup crosses the CAD edge', async () => {
-  const css = await source('../src/probe-dom-on-top/probe.css');
+test('fixture styles are scoped, ancestors/CAD transparent, popup crosses the CAD edge', async () => {
+  const css = await source('../src/stacking-regression/probe.css');
   const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
   for (const rule of withoutComments.split('}').filter(part => part.trim())) {
     for (const selector of rule.split('{')[0].split(',')) {
-      assert.match(selector.trim(), /^(html\.yacr-dom-on-top-probe|\.shell\.dom-on-top-probe|\.dom-on-top-probe\s)/);
+      assert.match(selector.trim(), /^(html\.yacr-stacking-regression|\.shell\.stacking-regression|\.stacking-regression\s)/);
     }
   }
-  assert.match(css, /html\.yacr-dom-on-top-probe #root/);
-  assert.match(css, /\.dom-on-top-probe \.native-input \{ background: transparent; \}/);
+  assert.match(css, /html\.yacr-stacking-regression #root/);
+  assert.match(css, /\.stacking-regression \.native-input \{ background: transparent; \}/);
   assert.match(css, /height: 116px/);
   assert.match(css, /top: 82px/);
   assert.match(css, /background: rgba\(29, 92, 128, .55\)/);
   assert.match(css, /background: transparent;[^}]*pointer-events: none/s);
   for (const region of ['probe-translucent', 'probe-comparison']) {
-    const rule = css.match(new RegExp(`\\.dom-on-top-probe \\.${region} \\{([^}]+)\\}`))[1];
+    const rule = css.match(new RegExp(`\\.stacking-regression \\.${region} \\{([^}]+)\\}`))[1];
     assert.match(rule, /top: 50%; transform: translateY\(-50%\)/);
     assert.match(rule, /width: 26%/);
   }
@@ -56,7 +56,7 @@ test('probe styles are scoped, ancestors/CAD transparent, popup crosses the CAD 
 });
 
 test('resolved acknowledgement distinguishes host admission from refusal and transport errors', () => {
-  const d = createProbeDiagnostics();
+  const d = createStackingDiagnostics();
   const refusal = { accepted: false, reason: 'layout_not_ready', sequence: 1 };
   recordProbeAck(d, refusal);
   assert.equal(d.ipc.resolved, 1);
@@ -84,7 +84,7 @@ test('resolved acknowledgement distinguishes host admission from refusal and tra
 test('DOM observation counts CAD drags/wheels, not control events, and disposes', () => {
   const cad = new EventTarget();
   const button = new EventTarget();
-  const d = createProbeDiagnostics();
+  const d = createStackingDiagnostics();
   let changes = 0;
   const dispose = observeCadInput(cad, d, () => changes++);
   const dispatch = (target, type) => {
@@ -113,8 +113,28 @@ test('DOM observation counts CAD drags/wheels, not control events, and disposes'
   assert.equal(stopped, true);
 });
 
+test('fixture auto-opens its popup once for multi-frame compositor capture', async () => {
+  const jsx = await source('../src/stacking-regression/Probe.jsx');
+  // Fixture-only automation: flips the same popup state as the toggle button
+  // after a fixed delay, so the collector can sample a popup-open frame without
+  // physical input. It must not open production dialogs or synthesize input.
+  assert.match(jsx, /const AUTO_POPUP_DELAY_MS = 9000;/);
+  assert.match(jsx, /setTimeout\(\(\) => \{\s*if \(!d\.popup\) \{\s*d\.popup = true;\s*setRevision\(value => value \+ 1\);/);
+  assert.match(jsx, /return \(\) => clearTimeout\(timer\);/);
+  assert.doesNotMatch(jsx, /cad_open_popup|native dialog/i);
+});
+
+test('fixture emits click-free pointer moves on the real CAD binding for marker motion', async () => {
+  const jsx = await source('../src/stacking-regression/Probe.jsx');
+  assert.match(jsx, /const MARKER_MOTION_DELAYS_MS = \[8000, 11000, 14000, 17000\];/);
+  assert.match(jsx, /surface\.dispatchEvent\(new PointerEvent\('pointermove'/);
+  // Click-free (no press captured) and scoped to the fixture's own surface.
+  assert.match(jsx, /buttons: 0,/);
+  assert.doesNotMatch(jsx, /pointerdown/);
+});
+
 test('every probe label exists in both authoritative catalogs', async () => {
-  const jsx = await source('../src/probe-dom-on-top/Probe.jsx');
+  const jsx = await source('../src/stacking-regression/Probe.jsx');
   const keys = [...jsx.matchAll(/t\('(probe\.dom_on_top\.[^']+)'/g)].map(match => match[1]);
   for (const locale of ['en', 'zh-CN']) {
     const catalog = JSON.parse(await source(`../../../crates/cad-ui-core/i18n/${locale}.json`));

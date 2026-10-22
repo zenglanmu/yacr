@@ -88,7 +88,10 @@ impl GtkOverlayOwner {
         }
         let presenter = self.presenter.as_mut()?;
         Some(match presenter.frame(marker) {
-            Ok(stats) => Ok((stats.frame_index, stats.timings)),
+            Ok(stats) => {
+                super::stacking_regression::note_present();
+                Ok((stats.frame_index, stats.timings))
+            }
             Err(error) => Err(format!("probe frame failed: {error}")),
         })
     }
@@ -193,6 +196,10 @@ impl GtkOverlayOwner {
                 });
                 match result {
                     Ok(stats) => {
+                        // Record the desync ordering: on Wayland this child commit
+                        // (the present) may precede the GTK-owned parent commit
+                        // that applies `place_below`.
+                        super::stacking_regression::note_present();
                         // Record only the actually presented frame's metadata; a
                         // `None`/error never overwrites it, and the host consumes
                         // it once per presented frame.

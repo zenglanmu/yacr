@@ -1,13 +1,47 @@
-//! Bounded native stacking attempt, not a compositor-success assertion.
+//! DOM-on-top stacking **regression** diagnostics and parent-commit timing.
+//!
+//! DOM-on-top is the production arrangement, not a probe: the WebView chrome is
+//! the GDK toplevel surface and the app-owned CAD `wl_subsurface` is always
+//! placed below it. Nothing here decides the arrangement.
+//!
+//! Two jobs remain:
+//! - [`establish`] reports what the compositor-facing arrangement actually is,
+//!   for the opt-in regression fixture (`crate::stacking_regression::enabled()`):
+//!   the Wayland child ownership/alpha facts, and — on the **retained but
+//!   unreachable** X11 path — whether two distinct native siblings could be
+//!   ordered WebView-above-CAD. It can report `Unsupported`; it never asserts
+//!   compositing success.
+//! - [`child_created`] / [`note_present`] / [`note_parent_commit`] record the
+//!   desync ordering across a surface generation rebuild: the stacking request is
+//!   parent-relative double-buffered state, so it only takes effect on the next
+//!   GTK-owned parent commit. Logging the first child commit (present) and the
+//!   first parent commit after a (re)created child makes a lost `place_below`
+//!   replay or an inverted first-frame order visible as a number.
+//!
+//! **X11 is NOT on the production path since DOM-on-top (2026-10-22):** the
+//! native-child/restack branch below is unreachable behind the
+//! `prepare_backend` X11 refusal (`BackendRefusal::Unsupported`). It is retained
+//! (and unit-tested) pending the explicitly deferred X11 web+canvas route
+//! decision; it is not evidence of X11 capability.
 
 use std::cell::RefCell;
 use std::ffi::{c_int, c_uint, c_ulong, c_void};
+use std::time::Instant;
 
 use gtk::glib::translate::ToGlibPtr;
 use gtk::prelude::*;
 
 thread_local! {
     static LAST: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The surface generation whose first parent commit has not been observed yet.
+    static PENDING: RefCell<Option<PendingCommit>> = const { RefCell::new(None) };
+}
+
+/// First-commit bookkeeping for one (re)created child surface.
+struct PendingCommit {
+    generation: u64,
+    child_created: Instant,
+    first_present: Option<Instant>,
 }
 
 fn report(message: String) {
@@ -19,38 +53,93 @@ fn report(message: String) {
     });
 }
 
-pub(super) fn prepare_parent(top: &gtk::ApplicationWindow) {
-    // GTK still owns this drawable and all commits. Clear via GTK's draw cycle,
-    // never by submitting Vulkan to the borrowed parent surface.
-    top.connect_draw(|widget, context| {
-        if let Some(window) = widget.window() {
-            window.set_opaque_region(None);
-        }
-        context.save().ok();
-        context.set_operator(gdk::cairo::Operator::Source);
-        context.set_source_rgba(0.0, 0.0, 0.0, 0.0);
-        context.paint().ok();
-        context.restore().ok();
-        gtk::glib::Propagation::Proceed
+/// Record that a child surface generation was (re)created and now waits for its
+/// first parent commit (which is what applies `place_below` + the position).
+///
+/// Called for every generation, so a parent replacement cannot silently lose the
+/// stacking replay.
+pub(super) fn child_created(generation: u64) {
+    PENDING.with(|pending| {
+        *pending.borrow_mut() = Some(PendingCommit {
+            generation,
+            child_created: Instant::now(),
+            first_present: None,
+        })
     });
     eprintln!(
-        "[dom-on-top] parent GTK clear=transparent opaque_region=none-on-draw app_paintable={} rgba_visual_available={} composite=NOT_VERIFIED",
-        top.is_app_paintable(), gtk::prelude::WidgetExt::screen(top).is_some_and(|screen| screen.rgba_visual().is_some()),
+        "[dom-on-top] child generation={generation} place_below=parent replayed=true \
+         desync=true parent_commit=pending"
     );
 }
 
+/// Record a successful child commit (the Vulkan present) while the first parent
+/// commit is still pending: this is the desync order that matters.
+pub(super) fn note_present() {
+    let now = Instant::now();
+    PENDING.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        let Some(state) = pending.as_mut() else {
+            return;
+        };
+        if state.first_present.is_some() {
+            return;
+        }
+        state.first_present = Some(now);
+        eprintln!(
+            "[dom-on-top] desync timing generation={} first-present before-parent-commit \
+             since_child_us={} parent_commit=NOT_YET",
+            state.generation,
+            now.duration_since(state.child_created).as_micros(),
+        );
+    });
+}
+
+/// Record the first GTK-owned parent commit after a child (re)creation.
+///
+/// This is the **trigger** assertion only: it proves GTK committed the parent
+/// (so `place_below`/position were consumed) and records whether a child present
+/// happened first. Whether the compositor honoured the order is not observable
+/// here (`composite=NOT_VERIFIED`).
+pub(super) fn note_parent_commit() {
+    let Some(state) = PENDING.with(|pending| pending.borrow_mut().take()) else {
+        return;
+    };
+    let now = Instant::now();
+    eprintln!(
+        "[dom-on-top] parent-commit generation={} since_child_us={} \
+         first_present_before_parent_commit={} place_below=applied-on-parent-commit \
+         desync=true composite=NOT_VERIFIED",
+        state.generation,
+        now.duration_since(state.child_created).as_micros(),
+        state.first_present.is_some(),
+    );
+}
+
+/// Report the current native/alpha arrangement for the regression fixture.
+///
+/// On Wayland this is the app-owned child surface under the GDK toplevel; the
+/// GTK parent's alpha is cleared unconditionally by the owner's draw handler.
+/// The X11 branch is unreachable in production (see the module docs).
 pub(super) fn establish(widget: &gtk::Widget, parent: &gtk::Widget) {
     if crate::wayland_surface::is_wayland_display(&widget.display()) {
         if let Some(window) = widget.toplevel().and_then(|top| top.window()) {
             let visual = window.visual();
             report(format!(
-                "wayland GTK-parent depth={} visual={:?} webview_has_window={} webview_native={} alpha_pixels=NOT_VERIFIED opaque_region_policy=clear-via-GTK-draw actual_protocol_region=NOT_OBSERVABLE composite=NOT_VERIFIED",
-                visual.depth(), visual.visual_type(), widget.has_window(),
+                "wayland GTK-parent depth={} visual={:?} webview_has_window={} webview_native={} \
+                 alpha_pixels=NOT_VERIFIED opaque_region_policy=clear-via-GTK-draw \
+                 actual_protocol_region=NOT_OBSERVABLE composite=NOT_VERIFIED",
+                visual.depth(),
+                visual.visual_type(),
+                widget.has_window(),
                 widget.window().is_some_and(|window| window.has_native()),
             ));
         }
         return;
     }
+    // unreachable_since_dom_on_top: `prepare_backend` refuses X11 before GTK is
+    // initialized, so this branch cannot run in the shipped host. It is kept for
+    // the deferred X11 web+canvas decision and is exercised only by unit tests
+    // (the pure `above` ordering helper below).
     let Some(overlay) = parent.downcast_ref::<gtk::Overlay>() else {
         report("x11 Unsupported: WebView parent is not the intended GTK overlay".into());
         return;
@@ -68,7 +157,10 @@ pub(super) fn establish(widget: &gtk::Widget, parent: &gtk::Widget) {
         return;
     }
     if !widget.has_window() {
-        report("x11 Unsupported: WebView does not own a GdkWindow (shared ancestor cannot be promoted)".into());
+        report(
+            "x11 Unsupported: WebView does not own a GdkWindow (shared ancestor cannot be promoted)"
+                .into(),
+        );
         return;
     }
     let (Some(web), Some(cad)) = (widget.window(), cad.window()) else {
@@ -186,7 +278,10 @@ mod tests {
     use super::above;
 
     #[test]
-    fn native_stacking_requires_both_distinct_children_in_server_order() {
+    fn x11_native_stacking_option_is_unreachable_since_dom_on_top() {
+        // unreachable_since_dom_on_top: the helper is pure, but the branch that
+        // calls it is refused by `prepare_backend` before GTK exists. This test
+        // pins the comparison rule, not an X11 capability.
         assert!(above(&[10, 20], 20, 10));
         assert!(!above(&[10, 20], 10, 20));
         assert!(!above(&[10], 10, 10));
@@ -194,10 +289,14 @@ mod tests {
     }
 
     #[test]
-    fn wayland_probe_preserves_child_ownership_and_default_stacking() {
+    fn wayland_child_is_always_placed_below_the_dom_parent() {
+        // The shim contract, asserted at the source level so a reintroduced mode
+        // switch fails loudly without a compositor run.
         let shim = include_str!("../../native/wayland_shim.c");
+        assert!(shim.contains("wl_subsurface_place_below(subsurface, parent);"));
         assert!(
-            shim.contains("if (below_parent)\n\t\twl_subsurface_place_below(subsurface, parent);")
+            !shim.contains("below_parent"),
+            "there is no optional stacking mode any more"
         );
         assert!(shim.contains("wl_subsurface_set_desync(subsurface)"));
         assert!(shim.contains("yacr_wl_shim_set_empty_input(shim)"));

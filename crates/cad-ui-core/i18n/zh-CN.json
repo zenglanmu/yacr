@@ -703,5 +703,7 @@
   "properties.edit.unconfirmed": "图纸未确认该修改，已显示原值。",
   "properties.edit.write_failed": "修改未能发送。",
   "properties.edit.failed": "修改被拒绝。",
-  "properties.edit.pending": "正在应用…"
+  "properties.edit.pending": "正在应用…",
+  "startup.unsupported_backend": "yacr 无法在 X11/XWayland 上启动",
+  "startup.unsupported_backend.detail": "本版本将 DOM/WebView 叠加在原生 CAD 表面之上，该合成仅实现于原生 Wayland。请在 Wayland 会话中运行（GDK_BACKEND=wayland）；X11 的 web+canvas 路线已显式延后。"
 }

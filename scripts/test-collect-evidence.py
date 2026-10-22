@@ -87,6 +87,7 @@ class CollectEvidenceScriptContracts(unittest.TestCase):
             "--timeout",
             "--no-build",
             "--maximize",
+            "--stacking-regression",
             "--dry-run",
             "-h|--help",
         ):
@@ -122,9 +123,58 @@ class CollectEvidenceScriptContracts(unittest.TestCase):
             "YACR_PROBE_CAD_LOG=1",
             "YACR_PROBE_LIFECYCLE=",
             "YACR_PROBE_NO_MAXIMIZE=1",
+            "YACR_PROBE_STACKING=1",
         ):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, self.text)
+
+    def test_x11_refusal_is_classified_by_the_stable_marker_line(self) -> None:
+        marker = "yacr: unsupported-backend: x11"
+        self.assertIn(marker, self.text)
+        self.assertIn('grep -qxF "$unsupported_marker"', self.text)
+        self.assertIn("UNSUPPORTED_BACKEND", self.text)
+        # The marker identifies the refusal; the code is recorded, not assumed.
+        self.assertIn("expected exit 4", self.text)
+        # A refused run has no window, so no screenshot capture is attempted.
+        block_start = self.text.index('if grep -qxF "$unsupported_marker"')
+        refusal_block = self.text[block_start : self.text.index("return", block_start)]
+        self.assertIn('"missing"', refusal_block)
+        self.assertNotIn("capture_x11_window", refusal_block)
+
+    def test_stacking_regression_fixture_is_pinned_and_wayland_only(self) -> None:
+        self.assertIn("YACR_PROBE_STACKING=1", self.text)
+        self.assertIn(
+            '"$name" == "wayland" && "$stacking_regression" -eq 1', self.text
+        )
+        self.assertIn(
+            'env_prefix+=("YACR_PROBE_STACKING=1" "YACR_PROBE_EVIDENCE=1")',
+            self.text,
+        )
+        # The fixture is still a real --open run, never the fake marker mode.
+        self.assertNotIn("--probe", self.text)
+
+    def test_fixture_and_production_are_separate_launches(self) -> None:
+        # One row per launch: separate directories, separate logs and separate
+        # frames. No post-hoc row copying another launch's screenshot/timestamp.
+        self.assertIn('dir="$out_dir/$name-stacking-regression"', self.text)
+        self.assertIn('run_backend "$name" "production"', self.text)
+        self.assertIn('run_backend "$name" "stacking-regression"', self.text)
+        self.assertIn('record_row "$name" "$mode"', self.text)
+        self.assertNotIn('"stacking-regression" "STACKING_REGRESSION"', self.text)
+
+    def test_stacking_fixture_samples_multiple_frames_from_one_launch(self) -> None:
+        # initial / popup-open / after-synthetic-input (+ one later frame) so
+        # marker motion and the chrome/CAD-crossing popup are judgeable.
+        for label in (
+            "initial",
+            "popup-open",
+            "after-synthetic-input",
+            "after-synthetic-input-later",
+        ):
+            with self.subTest(label=label):
+                self.assertIn(label, self.text)
+        self.assertIn("frame_offsets=(2 12 15 18)", self.text)
+        self.assertIn('capture_wayland_frame "$dir" "wayland-frame"', self.text)
 
     def test_records_honest_verdicts_not_empty_success(self) -> None:
         for verdict in (
@@ -134,12 +184,15 @@ class CollectEvidenceScriptContracts(unittest.TestCase):
             "BUILD_FAILED",
             "NO_DISPLAY",
             "SKIPPED",
+            "STACKING_REGRESSION",
+            "UNSUPPORTED_BACKEND",
         ):
             with self.subTest(verdict=verdict):
                 self.assertIn(verdict, self.text)
         # A missing screenshot must be recorded as missing, never captured/pass.
         self.assertIn('screenshot="missing"', self.text)
         self.assertIn('screenshot="captured"', self.text)
+        self.assertIn('screenshot="partial"', self.text)
 
     def test_requires_a_real_display_session(self) -> None:
         self.assertIn("no display session available", self.text)

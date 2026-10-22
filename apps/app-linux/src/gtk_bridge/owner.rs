@@ -21,6 +21,39 @@ use super::native::{
 };
 use super::{BridgeState, GtkOverlayOwner, OVERLAYS, REPARENT_DONE};
 
+/// Production top-level alpha policy for DOM-on-top (no probe gate).
+///
+/// The GDK toplevel **is** the WebView surface, and it is opaque by default.
+/// Since the native CAD child is always placed *below* it, an opaque parent would
+/// hide the CAD rendering completely. GTK owns this drawable and every commit, so
+/// the clear happens inside GTK's own draw cycle — never by attaching or
+/// submitting a Vulkan buffer to the borrowed parent `wl_surface` — and the
+/// opaque region is dropped on the same pass.
+///
+/// The same handler records the first GTK-owned parent commit after a child
+/// (re)creation: `place_below` + the position are parent-relative double-buffered
+/// state and only take effect on that commit. X11 never reaches this function at
+/// runtime (`backend::prepare_backend` refuses it), so it is unconditional.
+fn install_parent_alpha_clear(top: &gtk::ApplicationWindow) {
+    top.connect_draw(|widget, context| {
+        super::stacking_regression::note_parent_commit();
+        if let Some(window) = widget.window() {
+            window.set_opaque_region(None);
+        }
+        context.save().ok();
+        context.set_operator(gdk::cairo::Operator::Source);
+        context.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+        context.paint().ok();
+        context.restore().ok();
+        gtk::glib::Propagation::Proceed
+    });
+    eprintln!(
+        "[dom-on-top] parent GTK clear=transparent opaque_region=none-on-draw app_paintable={} rgba_visual_available={} composite=NOT_VERIFIED",
+        top.is_app_paintable(),
+        gtk::prelude::WidgetExt::screen(top).is_some_and(|screen| screen.rgba_visual().is_some()),
+    );
+}
+
 impl GtkOverlayOwner {
     pub fn install(
         window: &tauri::Window,
@@ -31,9 +64,10 @@ impl GtkOverlayOwner {
             .gtk_window()
             .map_err(|error| format!("gtk_window: {error}"))?;
         gtk_window.set_app_paintable(true);
-        if crate::dom_on_top_probe::enabled() {
-            super::stacking_probe::prepare_parent(&gtk_window);
-        }
+        // DOM-on-top production path: the GDK toplevel must be transparent so the
+        // CAD child placed below it is visible. This is not probe-gated and there
+        // is no alternative arrangement.
+        install_parent_alpha_clear(&gtk_window);
         let vbox = window
             .default_vbox()
             .map_err(|error| format!("default_vbox: {error}"))?;
@@ -45,6 +79,10 @@ impl GtkOverlayOwner {
         // equal the parent's). On Wayland the native region is the app-owned
         // `wl_subsurface` (never a GTK child), so leave `has_window` false and
         // never call `gdk_window_ensure_native` there.
+        // unreachable_since_dom_on_top: this host refuses X11 in
+        // `backend::prepare_backend` before GTK initializes, so `x11_backend` is
+        // always false in the shipped product; retained for the deferred X11
+        // web+canvas route decision.
         let x11_backend = !is_wayland_display(&gtk_window.display());
         #[allow(deprecated)]
         drawing_area.set_has_window(x11_backend);
@@ -301,6 +339,10 @@ impl GtkOverlayOwner {
             return self.try_init_gpu_wayland(phys_w, phys_h, scale);
         }
 
+        // unreachable_since_dom_on_top: the X11 native-child path below cannot run
+        // in the shipped host because `backend::prepare_backend` refuses X11
+        // (marker line + exit code 4) before GTK exists. Retained for the deferred
+        // X11 web+canvas route decision; unit tests keep it from rotting.
         let handles = match classify_native(&self.drawing_area, &self.top_level) {
             NativeStatus::Ready(handles) => handles,
             NativeStatus::Pending(reason) => {
@@ -493,7 +535,12 @@ impl GtkOverlayOwner {
             wayland.ensure_child(&top, x, y, scale)
         };
         match ensure_result {
-            Ok(EnsureChild::Created) | Ok(EnsureChild::Current) => {}
+            Ok(EnsureChild::Created) => {
+                // Every (re)created child re-applies `place_below`; record the
+                // generation whose first parent commit is now pending.
+                super::stacking_regression::child_created(self.generation + 1);
+            }
+            Ok(EnsureChild::Current) => {}
             Ok(EnsureChild::ParentReplaced) => {
                 // No presenter exists on this (init) path, so a stale child from a
                 // replaced parent can be safely destroyed and re-created once.
@@ -502,10 +549,23 @@ impl GtkOverlayOwner {
                     let wayland = self.wayland.as_mut().expect("attached above");
                     wayland.ensure_child(&top, x, y, scale)
                 };
-                if let Err(error) = retry {
-                    self.state = BridgeState::Failed(error.clone());
-                    eprintln!("[probe] bridge wayland FAILED (terminal): {error}");
-                    return Some(Err(error));
+                match retry {
+                    Ok(EnsureChild::Created) => {
+                        super::stacking_regression::child_created(self.generation + 1);
+                    }
+                    Ok(EnsureChild::Current) => {}
+                    Ok(EnsureChild::ParentReplaced) => {
+                        let error = "wayland GDK parent surface replaced twice in one init tick"
+                            .to_string();
+                        self.state = BridgeState::Failed(error.clone());
+                        eprintln!("[probe] bridge wayland FAILED (terminal): {error}");
+                        return Some(Err(error));
+                    }
+                    Err(error) => {
+                        self.state = BridgeState::Failed(error.clone());
+                        eprintln!("[probe] bridge wayland FAILED (terminal): {error}");
+                        return Some(Err(error));
+                    }
                 }
             }
             Err(error) => {

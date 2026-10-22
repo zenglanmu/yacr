@@ -88,10 +88,14 @@ uint32_t yacr_wl_shim_subcompositor_version(const yacr_wl_shim *shim);
  * that; it never commits the GDK surface itself. The child's own commit (performed
  * by the Vulkan swapchain present) carries only its buffer and integer
  * buffer-scale. Returns 0 on success, -1 on any error (with a failure reason
- * recorded). `below_parent` is only enabled by the opt-in DOM-on-top probe;
- * stacking, like position, takes effect on the GTK-owned parent's commit. */
+ * recorded).
+ *
+ * The child is always placed **below** `parent` (`wl_subsurface.place_below`):
+ * the DOM/WebView chrome is the parent surface and is the only layer allowed on
+ * top. There is no opt-out and no mode switch; stacking, like position, takes
+ * effect on the GTK-owned parent's commit. */
 int yacr_wl_shim_create_child(yacr_wl_shim *shim, struct wl_surface *parent,
-			      int32_t x, int32_t y, int32_t buffer_scale, int below_parent);
+			      int32_t x, int32_t y, int32_t buffer_scale);
 
 /* Owned child `wl_surface` (NULL until created or after destroy). */
 struct wl_surface *yacr_wl_shim_child_surface(const yacr_wl_shim *shim);
