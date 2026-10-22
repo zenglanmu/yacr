@@ -126,7 +126,7 @@ GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open /abs/drawing.dwg
 宿主把原生 CAD surface 合成在 GTK `GtkOverlay` 内的中央分区上，React `WebView` 作为透明 sibling
 呈现 chrome，二者 **co-visible**。
 
-**堆叠顺序（勿弄反）**：CAD 绘图区被**重新 `add_overlay` 到最后**，因此是 overlay 的**最上层** child，其原生表面（X11 子窗口 / Wayland 子表面）在该矩形内**盖住 WebView**；只有**输入**经空 input shape/region 穿透。⇒ **DOM 无法浮在 CAD 分区之上**（ADR-0010 `:26-27`、ADR-0020）。
+**当前默认堆叠顺序**：CAD 绘图区被**重新 `add_overlay` 到最后**，因此是 overlay 的**最上层** child，其原生表面（X11 子窗口 / Wayland 子表面）在该矩形内**盖住 WebView**；只有**输入**经空 input shape/region 穿透。⇒ **在此产品安排下 DOM 不能浮在 CAD 分区之上**（ADR-0010、ADR-0020），这不是 GTK/Linux 的固有要求；见下方有界探针与 ADR0010 的2026-10-22增补。
 
 **输入路由的实际后果（2026-10-20 记录）**：CAD 原生表面**只负责显示**——它把 OS 输入全部让给下面的 DOM
 （`gtk_bridge/native.rs` 的 `apply_input_passthrough`），由 `.native-input` 把 `pointerdown/move/up`（含
@@ -157,6 +157,28 @@ UI 侧另有两个**独立**挂起理由（`textFocus` / `popupOpen`），命令
   `probe_input` 的 `resize`；序号单调递增。窗口 resize、DPR 变化、ribbon 展开/折叠、面板停靠、
   命令历史展开、清屏切换都会重报，宿主 `LayoutTracker` 据此保持一致，**滚轮缩放才会锚定光标**。
 - 坐标区分 **CSS / canvas-local / world / physical** 四类，配合 DPR 与 metrics revision。
+
+### 可选 DOM-on-top 实验（不是产品迁移）
+
+在当前用户的真实图形会话中，先确保另一终端的 Vite 开发服务已启动
+（`cd apps/app-linux/ui && npm run dev`），再执行：
+
+```bash
+cargo build -p app-linux --bin yacr --locked
+GDK_BACKEND=wayland YACR_PROBE_DOM_ON_TOP=1 ./target/debug/yacr --probe
+# 上一次退出后，单独调查 X11/XWayland（本次安排合成失败，不是推荐产品路线）：
+GDK_BACKEND=x11 YACR_PROBE_DOM_ON_TOP=1 ./target/debug/yacr --probe
+```
+
+仅值 `1` 启用，必须显式 `--probe`；`YACR_PROBE_ONLY` 不替代该要求。宿主预先注入布尔全局，
+前端使用隔离夹具与既有输入准入；未设置时产品行为不变。上述 debug 构建实际访问
+`http://localhost:1420/`，**不是**嵌入的 `ui/dist`。诊断对象为
+`window.__yacr_dom_on_top_probe`，IPC resolved 不等于 accepted。
+
+本机原生 Wayland 的采样合成图像已通过遮挡/混合/局部弹窗与标记运动复核；XWayland 验证发现
+另一应用从透明区域透出，故 **FAIL**，并非原生 sibling 排序成功就代表合成正确。两者都不是完整
+产品或跨合成器结论。运行证据、安全/隐私、未测物理输入与生命周期缺口见
+[2026-10-22 验证记录](validation-dom-on-top-linux-2026-10-22.md)。
 
 ## 外壳结构（P4 设计）
 

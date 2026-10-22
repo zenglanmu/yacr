@@ -58,6 +58,9 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
         // is the real mechanism (window resize/scale events, the overlay's own
         // layout pass and the DOM layout tick).
         .initialization_script(ERROR_HOOK_JS)
+        .initialization_script(crate::dom_on_top_probe::initialization_script(
+            crate::dom_on_top_probe::enabled(),
+        ))
         // The host-resolved locale, handed to the chrome **before** the document
         // is parsed: this is the single system default both the native dialog
         // labels and the React UI use (see `host::locale`).

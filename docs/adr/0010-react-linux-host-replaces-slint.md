@@ -88,3 +88,18 @@ CAD 通过 `cad-ui-slint/src/bridge.rs` 与 wgpu 合成。2026-10-14 用户授�
 - 完整命令/退出码/日志与证据路径见 `docs/validation-react-linux-migration-2026-10-16.md`。
 - **早期阶段**在其当时分支/代码树上另有有界执行（P1 core/app 契约 59+27→86 与 check/fmt；P2a 编译检查；
   P4 前端构建+43/43 测试）；这些历史证据**不**替代本次最终树验收，也未被抹除。
+
+## 2026-10-22 增补：第2点的合成顺序是产品选择，不是平台必然
+
+保留以上历史决策与验收事实。第2点“禁止跨 CAD 的 DOM 浮层”描述的是**当前默认产品安排**，
+不是 GTK/Linux 固有禁令。历史上同一顶层 drawable 的叠加探针失败，根因并未完整诊断；选择独立
+child CAD 分区是**绕开该重叠问题**，不能反推已证明所有顶层/DOM 叠加方案都不可行。
+
+新 `YACR_PROBE_DOM_ON_TOP=1 --probe` 有界实验在 GNOME/Mutter、P620/Vulkan、scale1 的原生
+Wayland 上，由合成帧证明 DOM 可遮挡并半透明混合 app-owned CAD 子表面；因此否定了“该平台必须
+让 CAD 位于 DOM 上方”的推断。XWayland 同一实验的 native sibling 顺序虽建立，透明区域却泄露
+后方另一 CAD 应用，**该安排合成 FAIL**；精确机制尚未闭环，不能扩大为 X11 不可能。
+
+**生产默认未迁移，也未建立 X11+Wayland 联合替代路线。** 未来 X11 选项需要新的有界设计与证据，
+不是 CSS/reorder 即可修复的承诺；本增补不要求重写宿主。完整范围、源码/图像证据、输入与生命周期
+缺口见 [DOM-on-top 验证记录](../validation-dom-on-top-linux-2026-10-22.md)。

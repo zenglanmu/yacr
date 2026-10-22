@@ -53,16 +53,19 @@ pub fn reparent_webview(webview: &tauri::Webview, label: &str) -> tauri::Result<
                 overlay.add_overlay(&widget);
                 overlay.set_overlay_pass_through(&widget, false);
                 widget.show();
-                // Variant: keep the CAD drawing area as the topmost overlay child
-                // so the webview cannot cover it.
-                if let Some(base) = overlay.child() {
-                    overlay.remove(&base);
-                    overlay.add_overlay(&base);
-                    base.show();
-                    // B3: re-assert the pass-through + empty input region for the
-                    // new generation (the webview is now the sibling).
-                    if let Ok(drawing) = base.clone().downcast::<gtk::DrawingArea>() {
-                        apply_input_passthrough(&overlay, &drawing);
+                // Product arrangement: CAD is topmost. Only the explicitly
+                // gated compositor experiment keeps WebKit as the last child;
+                // its native stacking is verified separately, not inferred here.
+                if !crate::dom_on_top_probe::enabled() {
+                    if let Some(base) = overlay.child() {
+                        overlay.remove(&base);
+                        overlay.add_overlay(&base);
+                        base.show();
+                        // B3: re-assert the pass-through + empty input region for the
+                        // new generation (the webview is now the sibling).
+                        if let Ok(drawing) = base.clone().downcast::<gtk::DrawingArea>() {
+                            apply_input_passthrough(&overlay, &drawing);
+                        }
                     }
                 }
                 REPARENT_DONE.with(|flag| flag.set(true));
@@ -142,6 +145,9 @@ pub fn sync_webview_size(
     let container = (parent.allocated_width(), parent.allocated_height());
     let target = webview_target_size(Some(container), fallback);
     let skipped = allocate_webview(&widget, &parent, target);
+    if crate::dom_on_top_probe::enabled() {
+        super::stacking_probe::establish(&widget, &parent);
+    }
     log_webview_size(
         &widget,
         origin,

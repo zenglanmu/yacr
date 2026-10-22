@@ -79,6 +79,7 @@ extern "C" {
         x: i32,
         y: i32,
         buffer_scale: i32,
+        below_parent: i32,
     ) -> i32;
     fn yacr_wl_shim_child_surface(shim: *const yacr_wl_shim) -> *mut wl_surface;
     fn yacr_wl_shim_destroy_child(shim: *mut yacr_wl_shim);
@@ -418,8 +419,17 @@ impl WaylandSurface {
         }
         let scale = buffer_scale.max(1);
         // SAFETY: `self.shim` is live; `parent` is a live borrowed wl_surface.
-        let rc =
-            unsafe { yacr_wl_shim_create_child(self.shim.as_ptr(), parent.as_ptr(), x, y, scale) };
+        let below_parent = crate::dom_on_top_probe::enabled();
+        let rc = unsafe {
+            yacr_wl_shim_create_child(
+                self.shim.as_ptr(),
+                parent.as_ptr(),
+                x,
+                y,
+                scale,
+                i32::from(below_parent),
+            )
+        };
         if rc != 0 {
             return Err(shim_failure(self.shim));
         }
@@ -440,6 +450,14 @@ impl WaylandSurface {
             buffer_scale: scale,
             _window: window.clone(),
         });
+        if below_parent {
+            // Queue invalidation through GDK; no direct parent wl_surface commit.
+            window.invalidate_rect(None, true);
+            eprintln!(
+                "[dom-on-top] wayland arrangement=requested child={:p} parent={:p} place_below=parent desync=true empty_input=true parent_commit=GTK-invalidation composite=NOT_VERIFIED",
+                surface.as_ptr(), parent.as_ptr(),
+            );
+        }
         Ok(EnsureChild::Created)
     }
 

@@ -45,6 +45,7 @@ use crate::wayland_surface::WaylandSurface;
 mod native;
 mod owner;
 mod present;
+mod stacking_probe;
 
 #[cfg(test)]
 mod tests;

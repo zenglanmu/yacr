@@ -31,6 +31,9 @@ impl GtkOverlayOwner {
             .gtk_window()
             .map_err(|error| format!("gtk_window: {error}"))?;
         gtk_window.set_app_paintable(true);
+        if crate::dom_on_top_probe::enabled() {
+            super::stacking_probe::prepare_parent(&gtk_window);
+        }
         let vbox = window
             .default_vbox()
             .map_err(|error| format!("default_vbox: {error}"))?;

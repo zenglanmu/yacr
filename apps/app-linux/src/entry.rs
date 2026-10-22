@@ -21,6 +21,13 @@
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     use crate::backend::prepare_backend;
 
+    // Reject before touching GTK, and do not let YACR_PROBE_ONLY substitute for
+    // the explicitly required CLI marker mode.
+    crate::dom_on_top_probe::validate(
+        crate::dom_on_top_probe::enabled(),
+        std::env::args().skip(1).any(|arg| arg == "--probe"),
+    )?;
+
     // Must run before any GTK/Tauri initialization so the resolved backend is
     // fixed and GTK never falls back on its own.
     match prepare_backend() {

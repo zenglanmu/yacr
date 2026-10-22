@@ -1,3 +1,18 @@
+## 2026-10-22 DOM-on-top 有界探针（默认产品安排不变）
+
+- 新 opt-in：仅 `YACR_PROBE_DOM_ON_TOP=1` 且显式 `--probe`，保留 marker/真实输入准入。
+  原生 Wayland（Mutter/P620/scale1）三张采样合成帧的遮挡、混合、弹窗跨边界、标记运动由 Observer
+  判 PASS；**XWayland 合成 FAIL**：透明区域透出另一 CAD 应用（PID3186773），不是自身 marker。
+- native sibling 排序成功不是合成成功；X11 机制未完全诊断，不能推导 X11 不可能。ADR0010 增补
+  明确“禁止 DOM 覆盖 CAD”是当前产品安排，不是 Linux 必然；**不构成生产迁移/联合替代验收**。
+- Rust160、check/build、探针前端6、前端 build/i18n 通过；本次 debug 实际使用 Vite1420 服务的
+  最新夹具而非嵌入 dist。真实输入/直接诊断对象回读、全 workspace 门禁 NOT RUN；最小化恢复与
+  实际 resize 仍有限制。X11 attempt2 最终独立 Observer 确认 FAIL（取代 LIMITED），预期 marker/grid
+  缺失，运动 INDETERMINATE；具体 clipping 根因未定，最终集成由父会话完成。
+- 详见 [验证记录](validation-dom-on-top-linux-2026-10-22.md)；本机证据
+  `/tmp/opencode/yacr-dom-on-top-20261022T043353Z/`（含 `RESULTS.txt`、`x11-attempt2/FINDINGS.txt`）。
+  整屏截图仅本地、不上传；未解锁或改权限，只清理本轮进程。
+
 ## 2026-10-22 GUI 验收（有界）与 `YACR_PROBE_UI_DIALOGS` 证据驱动
 
 ### 1. 新增证据驱动（默认 OFF）
