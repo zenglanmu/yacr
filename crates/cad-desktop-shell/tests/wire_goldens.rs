@@ -1,10 +1,22 @@
-//! Behaviour-invariant contract for the WP1b command/state migration.
+//! Wire contract pins for the WP1b command/state migration (behaviour-invariant).
 //!
-//! The fixtures under `tests/fixtures/` were produced **before** the commands
-//! moved, by the unmoved command bodies in `apps/app-linux/src/host/commands.rs`
-//! (see the `wire_golden_capture` test removed with that migration). These tests
-//! call the same bodies in their new home and require byte-identical JSON, plus
-//! an exact command-registration set match.
+//! Provenance (honest record, WP1 gate finding 1): the fixtures were produced
+//! by a temporary `wire_golden_capture` harness that ran the pre-migration
+//! bodies in `apps/app-linux/src/host/commands.rs` and was removed with that
+//! file before the migration commit. It never reached git history, so "captured
+//! before the move" is NOT independently verifiable from the repository; treat
+//! these fixtures as regression pins for the current wire format. The
+//! independent equivalence argument is: the migration reused the command
+//! bodies nearly verbatim (8 bodies byte-identical; rename hunks are
+//! import/state wiring) and the registration set is asserted equal against the
+//! pre-migration `entry.rs` list (`fixtures/registered_commands.txt`).
+//!
+//! Coverage boundary (WP1 gate finding 2): NOT covered — 11 of the 14 commands
+//! (only `probe_status`/`cad_status`/`probe_input` are pinned), the telemetry
+//! and popup seam paths (`YACR_PROBE_CAD_LOG` `pulled=` token, the
+//! `popup.host_unavailable` refusal), canonical form vs actual IPC encoding
+//! (tests call the `*_impl` bodies directly), and lock ordering (reviewed
+//! separately in the WP1 gate; out of scope here).
 
 use std::sync::Arc;
 

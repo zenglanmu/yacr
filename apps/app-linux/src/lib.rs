@@ -9,7 +9,9 @@
 //!
 //! The platform-independent half (wire protocol, logical layout, CAD session,
 //! shell admission/error state, i18n catalogs) lives in `cad-ui-core` and is
-//! imported directly — this crate keeps **no** re-export shim for it.
+//! imported directly. `host::*` exposes only thin convenience re-exports
+//! (`host::LaunchOptions`, `host::cad_status`, …) consumed inside this crate —
+//! aliases for app-internal call sites, not a compatibility shim layer.
 //!
 //! **Linux only** (GTK X11/XWayland **or** native Wayland; the native CAD
 //! partition is an X11 child window on X11 and an app-owned Wayland
