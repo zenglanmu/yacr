@@ -313,7 +313,7 @@ pub struct CadTool {
     ///
     /// Wire name: **`awaiting_text`**. This field deliberately overrides the
     /// block's camelCase convention because it is the name the committed React
-    /// contract reads (`apps/app-linux/ui/src/text.mjs` / `cad.mjs` validate and
+    /// contract reads (`apps/desktop-ui/src/text.mjs` / `cad.mjs` validate and
     /// consume `tool.awaiting_text`); emitting `awaitingText` would silently
     /// never open the text prompt.
     #[serde(rename = "awaiting_text")]

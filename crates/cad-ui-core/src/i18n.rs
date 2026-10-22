@@ -181,6 +181,63 @@ pub fn locale_from_env(get: impl Fn(&str) -> Option<String>) -> Locale {
     Locale::En
 }
 
+/// The locale tag the host resolved for this process, in canonical catalog form
+/// (`zh-CN` or `en`).
+///
+/// `YACR_LOCALE` wins when set (and is itself resolved through the shared table);
+/// otherwise the POSIX precedence (`LC_ALL`, `LC_MESSAGES`, `LANGUAGE`, `LANG`)
+/// selects the system language. The result is always **resolved**: an
+/// unsupported request (`fr`, `zh-TW`) is English, never a raw environment string
+/// handed to the WebView, and the native labels and the injected chrome can
+/// therefore never disagree.
+pub fn host_locale_tag() -> &'static str {
+    match std::env::var("YACR_LOCALE") {
+        Ok(requested) => resolve_locale(&requested).locale.tag(),
+        Err(_) => locale_from_env(|key| std::env::var(key).ok()).tag(),
+    }
+}
+
+/// Initialization script: hand the host-resolved tag to the document before load.
+pub fn host_locale_script() -> String {
+    host_locale_script_for(host_locale_tag())
+}
+
+/// The literal injected for `tag`: `window.__YACR_HOST_LOCALE__ = "<tag>";`.
+///
+/// An `initialization_script` runs before any document script in the main frame,
+/// so the chrome reads the same resolved locale the native labels were built
+/// from. The value is escaped defensively ([`js_string_literal`]), so the script
+/// is always a valid assignment regardless of caller input.
+pub fn host_locale_script_for(tag: &str) -> String {
+    format!("window.__YACR_HOST_LOCALE__ = {};", js_string_literal(tag))
+}
+
+/// Quote `value` as a JavaScript string literal.
+///
+/// The shipped tags are plain ASCII, but the literal is escaped defensively so a
+/// caller-supplied tag can never break out of the assignment. Deliberately
+/// hand-written rather than adding a `serde_json` dependency to this crate (see
+/// [`parse_flat_json_object`] for the same doctrine).
+fn js_string_literal(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            control if (control as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", control as u32));
+            }
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// The exact canonical spelling of a locale tag, compared case-sensitively by
 /// [`resolve_locale`] against the trimmed request.
 fn canonical_tag_for(locale: Locale) -> &'static str {
@@ -732,5 +789,63 @@ mod tests {
         assert_eq!(catalog.len(), 2);
         assert_eq!(catalog.get("k"), Some("v {p}"));
         assert_eq!(catalog.get("n"), Some("a\\b"));
+    }
+
+    /// The host-resolved tag is always one of the shipped catalog tags, never a
+    /// raw request, and the injected literal carries that exact tag so the
+    /// native labels and the chrome cannot diverge.
+    ///
+    /// The native-label side of this contract (the same tag selecting the same
+    /// `UseOpenDialogLabels` catalog) is pinned by the host that owns those
+    /// labels.
+    #[test]
+    fn the_host_tag_is_resolved_and_injected_verbatim() {
+        for request in [
+            "zh-CN",
+            "en",
+            "zh_CN.UTF-8",
+            "zh-Hans-CN",
+            "en-US",
+            "fr",
+            "zh-TW",
+            "C",
+            "",
+        ] {
+            let tag = resolve_locale(request).locale.tag();
+            assert!(matches!(tag, "zh-CN" | "en"), "{request:?} -> {tag}");
+            assert_eq!(
+                host_locale_script_for(tag),
+                format!("window.__YACR_HOST_LOCALE__ = {tag:?};"),
+                "{request:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_injection_is_a_literal_assignment_for_both_tags() {
+        assert_eq!(
+            host_locale_script_for("zh-CN"),
+            "window.__YACR_HOST_LOCALE__ = \"zh-CN\";"
+        );
+        assert_eq!(
+            host_locale_script_for("en"),
+            "window.__YACR_HOST_LOCALE__ = \"en\";"
+        );
+    }
+
+    #[test]
+    fn the_injected_literal_cannot_break_out_of_the_assignment() {
+        assert_eq!(
+            host_locale_script_for("a\"b"),
+            "window.__YACR_HOST_LOCALE__ = \"a\\\"b\";"
+        );
+        assert_eq!(
+            host_locale_script_for("a\\b"),
+            "window.__YACR_HOST_LOCALE__ = \"a\\\\b\";"
+        );
+        assert_eq!(
+            host_locale_script_for("a\nb"),
+            "window.__YACR_HOST_LOCALE__ = \"a\\nb\";"
+        );
     }
 }

@@ -6,6 +6,7 @@
 //! fixtures through `super::test_support::*`.
 
 mod test_support;
+mod tests_admission;
 mod tests_align;
 mod tests_array;
 mod tests_command_log;

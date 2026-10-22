@@ -21,6 +21,7 @@
 //! host's open funnel validates canvas metrics against it, and an unmapped
 //! surface is an explicit `Cancelled`, never a fabricated canvas.
 
+mod admission;
 mod commands;
 mod diagnostics;
 mod input;
@@ -57,6 +58,12 @@ use self::diagnostics::{
 use self::input::{cancel_target, plan_input, CancelTarget, PointerPress};
 use self::status::{assemble_status, cad_tool};
 
+pub use self::admission::{
+    admit_selected_property, admit_selected_text, admit_setting, admit_standard_view,
+    admit_tool_parameter, admit_tool_text, drain_standard_views, parse_property_write,
+    parse_standard_view, parse_tool_parameter, CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP,
+    CAD_SETTING_CAP, CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
+};
 pub use self::commands::{
     admissible_names, canonical_command_name, command_name, measurement_selector_kind,
     normalize_command, unsupported_command_reason, zoom_step_factor, COMMAND_ALIASES,

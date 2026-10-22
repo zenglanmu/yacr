@@ -1,5 +1,17 @@
-//! Generic modal-popup layer (ADR-0021 D1/D2): the `about` dialog, the text
-//! editor (`textEdit`, D4) and the Options dialog (`options`).
+//! Native modal-popup window for the Linux host (ADR-0021 D1/D2).
+//!
+//! The **state machine** — the [`PopupKind`] allowlist, [`PopupAck`], the
+//! lifecycle transitions and the modal input gate — lives in
+//! [`cad_ui_core::popup`], shared with every host. This module owns only the
+//! Linux/Tauri side of the [`PopupOps`] seam and the gate glue:
+//!
+//! - the single popup window (label [`POPUP_LABEL`], child webview
+//!   [`POPUP_WEBVIEW_LABEL`]) whose boot payload is a literal injected with
+//!   `initialization_script` (no fetch, so the UI cannot race it);
+//! - the window effects (`create`/`focus`/`close`/`exists`) and the
+//!   host-derived `textEdit` payload, read from the main-thread CAD session;
+//! - the window's own `Destroyed` handler, so the gate is cleared by the window
+//!   lifecycle and not by a UI-side pointer release.
 //!
 //! The CAD partition is an **opaque native child** stacked above the WebView
 //! (`gtk_bridge::native`), so a popup can never be a DOM overlay: it is a
@@ -7,147 +19,76 @@
 //! main window (`tauri::window::WindowBuilder` + `window.add_child`), not a
 //! `WebviewWindowBuilder` (which would produce a different GTK parenting).
 //!
-//! The host owns two things here, and both are deliberately **not** UI state:
-//!
-//! - the single popup window (label [`POPUP_LABEL`], child webview
-//!   [`POPUP_WEBVIEW_LABEL`]) whose boot payload is a literal injected with
-//!   `initialization_script` (no fetch, so the UI cannot race it);
-//! - the **modal input gate** ([`ShellState::popup`]). It is set only after the
-//!   window was built and cleared from that window's `Destroyed` event — for
-//!   any reason (IPC close, Esc in the popup UI, or the window manager). It is
-//!   independent of the UI's `suspendPointer`, whose blur path may release at
-//!   any time.
-//!
-//! Only allowlisted kinds are ever built. A caller can never supply a window
-//! label, URL or script.
+//! A caller can never supply a window label, URL or script.
 
 use std::sync::{Arc, Mutex};
 
+use cad_ui_core::popup::{self as machine, PopupGate, PopupKind, PopupOps, TextEditPayload};
+use cad_ui_core::session::CadPopup;
 use gtk::prelude::*;
-use serde::Serialize;
 use tauri::Manager;
 
 use super::locale::host_locale_script;
 use super::options::WINDOW_LABEL;
 use super::{lock, Shared};
 
-/// Label of the single popup window.
-pub const POPUP_LABEL: &str = "popup-1";
+pub use cad_ui_core::popup::{PopupAck, POPUP_LABEL};
+
 /// Label of the popup's child webview.
 pub const POPUP_WEBVIEW_LABEL: &str = "popup-1-webview";
-/// Popup width in logical pixels (`about`).
-pub const POPUP_WIDTH: f64 = 520.0;
-/// Popup height in logical pixels (`about`).
-pub const POPUP_HEIGHT: f64 = 360.0;
-/// Text-edit popup width in logical pixels: wide enough for a full annotation
-/// line without wrapping every few words.
-pub const TEXT_EDIT_WIDTH: f64 = 640.0;
-/// Text-edit popup height in logical pixels: the `about` card is far too short
-/// for a multi-line MTEXT / MULTILEADER annotation.
-pub const TEXT_EDIT_HEIGHT: f64 = 480.0;
-/// Options popup width in logical pixels: a 156px tab rail plus a label column
-/// and a control column wide enough for a `#rrggbb` value and a unit suffix.
-pub const OPTIONS_WIDTH: f64 = 720.0;
-/// Options popup height in logical pixels: tall enough for the longest tab
-/// (Display, seven rows) without scrolling.
-pub const OPTIONS_HEIGHT: f64 = 560.0;
 
-/// The popup kinds the host will build.
+/// The shared host state as the popup state machine's gate.
 ///
-/// This enum is the allowlist: a string outside it is refused **before** any
-/// window or state change, so a caller cannot choose a label, URL or script.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PopupKind {
-    /// The trivial "About" dialog that proves the pipeline.
-    About,
-    /// Edit the current single selection's text (ADR-0021 D4). The **host**
-    /// derives the payload from the selection; the caller supplies no content.
-    TextEdit,
-    /// The Options dialog (the settings window). It carries **no payload**: the
-    /// UI reads `cad_settings` itself after mount, so nothing is baked into the
-    /// boot script and no stale copy can be shown.
-    Options,
-}
+/// The machine never holds this lock across a window effect: each
+/// [`PopupGate`] call takes the host lock, reads or writes `shell.popup` and
+/// releases it again.
+struct SharedGate<'a>(&'a Arc<Mutex<Shared>>);
 
-impl PopupKind {
-    /// Resolve one wire kind key against the allowlist.
-    ///
-    /// The refusal names the rejected kind (`popup.unknown_kind: …`) and is
-    /// never a silent fallback to a default dialog.
-    pub fn from_key(key: &str) -> Result<Self, String> {
-        match key {
-            "about" => Ok(Self::About),
-            "textEdit" => Ok(Self::TextEdit),
-            "options" => Ok(Self::Options),
-            other => Err(format!("popup.unknown_kind: {other:?}")),
-        }
+impl PopupGate for SharedGate<'_> {
+    fn current(&self) -> Option<CadPopup> {
+        lock(self.0).shell.popup.clone()
     }
 
-    /// The stable machine key of this kind.
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::About => "about",
-            Self::TextEdit => "textEdit",
-            Self::Options => "options",
-        }
+    fn replace(&self, next: Option<CadPopup>) {
+        lock(self.0).shell.popup = next;
     }
 
-    /// The logical window size of this kind. Every popup is non-resizable; the
-    /// text editor needs more room than the `about` card, and the Options dialog
-    /// needs a rail plus a full settings column.
-    pub fn size(self) -> (f64, f64) {
-        match self {
-            Self::About => (POPUP_WIDTH, POPUP_HEIGHT),
-            Self::TextEdit => (TEXT_EDIT_WIDTH, TEXT_EDIT_HEIGHT),
-            Self::Options => (OPTIONS_WIDTH, OPTIONS_HEIGHT),
+    fn take(&self) -> Option<CadPopup> {
+        lock(self.0).shell.popup.take()
+    }
+
+    fn clear_if(&self, expected: &CadPopup) {
+        let mut state = lock(self.0);
+        // Clear only the same instance: a concurrent open must not be erased.
+        if state.shell.popup.as_ref() == Some(expected) {
+            state.shell.popup = None;
         }
     }
 }
 
-/// The host-derived payload of the `textEdit` kind (ADR-0021 D4).
+/// Open the allowlisted popup (or focus the existing single instance).
 ///
-/// Both fields are always present in the boot payload. `text` is the raw stored
-/// string with only `\P` shown as `\n` (the one mapping the ADR allows, so the
-/// dialog displays natural line breaks); `multiline` is `true` for `AcDbMText`
-/// and MULTILEADER text, `false` for `AcDbText`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TextEditPayload {
-    pub text: String,
-    pub multiline: bool,
+/// The transitions live in [`cad_ui_core::popup::open_popup`]; this glue only
+/// maps the host's shared state onto the gate.
+pub(super) fn open_popup(
+    shared: &Arc<Mutex<Shared>>,
+    requested: &str,
+    ops: &dyn PopupOps,
+) -> Result<PopupAck, String> {
+    machine::open_popup(&SharedGate(shared), requested, ops)
 }
 
-/// The `cad_open_popup` acknowledgement (frozen wire shape).
+/// Close the open popup (idempotent).
 ///
-/// `accepted` is always `true` on `Ok`; `existing` says whether the host focused
-/// an already-open popup instead of building a second one. The wire field is
-/// `popup_label` (host window label), never a caller-supplied label.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct PopupAck {
-    pub accepted: bool,
-    pub kind: String,
-    pub popup_label: String,
-    pub existing: bool,
+/// The gate itself is still cleared only by the window's `Destroyed` handler
+/// (`TauriPopupOps::create`), which also covers Esc and the window manager.
+pub(super) fn close_popup(shared: &Arc<Mutex<Shared>>, ops: &dyn PopupOps) -> Result<(), String> {
+    machine::close_popup(&SharedGate(shared), ops)
 }
 
-/// The window effects an open/close request needs (one seam, so the state
-/// machine is testable without a display).
-pub(super) trait PopupOps {
-    /// Build the single popup window for `kind` (and register its `Destroyed`
-    /// handler in the production implementation). `payload` is the host-derived
-    /// text payload, present exactly for [`PopupKind::TextEdit`].
-    fn create(&self, kind: PopupKind, payload: Option<&TextEditPayload>) -> Result<(), String>;
-    /// Focus an existing popup window.
-    fn focus(&self, label: &str) -> Result<(), String>;
-    /// Ask an existing popup window to close. A missing window is not an error.
-    fn close(&self, label: &str) -> Result<(), String>;
-    /// Whether the window currently exists (stale-state reconciliation).
-    fn exists(&self, label: &str) -> bool;
-    /// Derive the `textEdit` payload from the **current** CAD selection.
-    ///
-    /// A caller can never supply content; a selection that is not exactly one
-    /// editable text is refused with `popup.no_text_selection: …` **before** any
-    /// window exists.
-    fn text_edit_payload(&self) -> Result<TextEditPayload, String>;
+/// Clear the modal input gate after the popup window is destroyed.
+pub(super) fn on_popup_destroyed(shared: &Arc<Mutex<Shared>>) {
+    machine::on_popup_destroyed(&SharedGate(shared));
 }
 
 /// The literal boot payload injected with `initialization_script`.
@@ -155,10 +96,7 @@ pub(super) trait PopupOps {
 /// It must be a JSON literal so the popup UI can read `window.__YACR_POPUP__` at
 /// mount with no fetch and no race. The values are static host facts; serde_json
 /// performs the escaping (a caller never supplies any of them).
-pub(super) fn boot_payload_script(
-    kind: PopupKind,
-    text: Option<&TextEditPayload>,
-) -> Result<String, String> {
+fn boot_payload_script(kind: PopupKind, text: Option<&TextEditPayload>) -> Result<String, String> {
     let payload = match kind {
         PopupKind::About => serde_json::json!({
             "version": env!("CARGO_PKG_VERSION"),
@@ -191,7 +129,7 @@ pub(super) fn boot_payload_script(
 /// Only `\P` is touched. `\\P` (an escaped backslash followed by `P`), `{`, `}`,
 /// `\f…;`, `\W…;` and every other code pass through byte-identically — this is
 /// not a rich-text parser.
-pub(super) fn paragraph_breaks_to_newlines(text: &str) -> String {
+fn paragraph_breaks_to_newlines(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -211,76 +149,6 @@ pub(super) fn paragraph_breaks_to_newlines(text: &str) -> String {
         }
     }
     out
-}
-
-/// Open the allowlisted popup (or focus the existing single instance).
-///
-/// Order matters:
-/// 1. validate the kind (an unknown kind touches nothing);
-/// 2. reconcile stale state (the window may have gone away before its
-///    `Destroyed` event was observed);
-/// 3. focus an existing popup, or build exactly one and only then set the gate.
-pub(super) fn open_popup(
-    shared: &Arc<Mutex<Shared>>,
-    requested: &str,
-    ops: &dyn PopupOps,
-) -> Result<PopupAck, String> {
-    let kind = PopupKind::from_key(requested)?;
-    reconcile_popup_state(shared, ops);
-
-    let open = lock(shared).shell.popup.clone();
-    match open {
-        Some(open) => {
-            // Single instance: never build a second window and never re-set the
-            // gate; only raise the one that is already there.
-            ops.focus(&open.label)?;
-            Ok(PopupAck {
-                accepted: true,
-                kind: open.kind,
-                popup_label: open.label,
-                existing: true,
-            })
-        }
-        None => {
-            // The payload is derived **before** the window exists: a refusal
-            // (`popup.no_text_selection`) leaves nothing to undo and creates no
-            // window/gate.
-            let payload = match kind {
-                PopupKind::About | PopupKind::Options => None,
-                PopupKind::TextEdit => Some(ops.text_edit_payload()?),
-            };
-            ops.create(kind, payload.as_ref())?;
-            let open = cad_ui_core::session::CadPopup {
-                kind: kind.key().to_string(),
-                label: POPUP_LABEL.to_string(),
-                modal: true,
-            };
-            // Set the gate **once**, and only after the window was built: a
-            // failed build must never leave CAD input refused forever.
-            lock(shared).shell.popup = Some(open.clone());
-            Ok(PopupAck {
-                accepted: true,
-                kind: open.kind,
-                popup_label: open.label,
-                existing: false,
-            })
-        }
-    }
-}
-
-/// Close the open popup (idempotent).
-///
-/// The gate is intentionally **not** cleared here: the authoritative clear is
-/// the window's `Destroyed` event, which also covers Esc and the window manager.
-/// A window that is already gone is reconciled instead, so the call stays an
-/// idempotent success and nothing is left dangling.
-pub(super) fn close_popup(shared: &Arc<Mutex<Shared>>, ops: &dyn PopupOps) -> Result<(), String> {
-    reconcile_popup_state(shared, ops);
-    let open = lock(shared).shell.popup.clone();
-    match open {
-        None => Ok(()),
-        Some(open) => ops.close(&open.label),
-    }
 }
 
 /// Run one popup task on the GTK **main thread**.
@@ -355,44 +223,6 @@ pub(crate) fn text_edit_payload_for_probe(
 ) -> Result<TextEditPayload, String> {
     let shared = app.state::<super::ProbeShared>().0.clone();
     TauriPopupOps::new(app.clone(), shared).text_edit_payload()
-}
-
-/// Clear the modal input gate after the popup window is destroyed.
-///
-/// Called from the popup window's `Destroyed` event, so IPC close, Esc from the
-/// popup UI and a window-manager close all release input by the same path.
-pub(super) fn on_popup_destroyed(shared: &Arc<Mutex<Shared>>) {
-    let cleared = lock(shared).shell.popup.take();
-    if let Some(open) = cleared {
-        eprintln!(
-            "[probe] popup destroyed label={} kind={}; modal input gate cleared",
-            open.label, open.kind
-        );
-    }
-}
-
-/// Re-validate the recorded popup against a window that truly exists.
-///
-/// A `Destroyed` event is the normal clear path, but a state left over from an
-/// already-gone window must never wedge CAD input: `open`/`close` reconcile
-/// first, so the next call rebuilds a fresh window and the gate stays honest.
-fn reconcile_popup_state(shared: &Arc<Mutex<Shared>>, ops: &dyn PopupOps) {
-    let open = lock(shared).shell.popup.clone();
-    let Some(open) = open else {
-        return;
-    };
-    if ops.exists(&open.label) {
-        return;
-    }
-    eprintln!(
-        "[probe] popup state was stale (window {} is gone); clearing the modal input gate",
-        open.label
-    );
-    let mut state = lock(shared);
-    // Clear only the same instance: a concurrent open must not be erased.
-    if state.shell.popup.as_ref() == Some(&open) {
-        state.shell.popup = None;
-    }
 }
 
 /// The Tauri/GTK implementation of [`PopupOps`].
@@ -555,253 +385,58 @@ fn create_popup_window(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
-
     use super::*;
     use crate::host::new_shared;
     use crate::host::options::LaunchOptions;
-    use cad_ui_core::protocol::InputKind;
-    use cad_ui_core::shell::{admit_command, modal_gate_open, projected_popup, queue_cad_input};
-    use cad_ui_core::unsupported_status;
-
-    /// Recording stand-in for the real window layer.
-    #[derive(Default)]
-    struct FakeOps {
-        creates: Cell<u32>,
-        focuses: Cell<u32>,
-        closes: Cell<u32>,
-        live: Cell<bool>,
-        fail_create: Cell<bool>,
-        /// The payload `text_edit_payload` returns (`None` = no live selection).
-        payload: std::cell::RefCell<Option<TextEditPayload>>,
-        /// Records the payload `create` actually received.
-        created: std::cell::RefCell<Option<Option<TextEditPayload>>>,
-        /// Records the kind `create` actually received.
-        created_kind: Cell<Option<PopupKind>>,
-    }
-
-    impl FakeOps {
-        fn with_payload(text: &str, multiline: bool) -> Self {
-            let ops = Self::default();
-            *ops.payload.borrow_mut() = Some(TextEditPayload {
-                text: text.into(),
-                multiline,
-            });
-            ops
-        }
-    }
-
-    impl PopupOps for FakeOps {
-        fn create(&self, kind: PopupKind, payload: Option<&TextEditPayload>) -> Result<(), String> {
-            self.creates.set(self.creates.get() + 1);
-            self.created_kind.set(Some(kind));
-            *self.created.borrow_mut() = Some(payload.cloned());
-            if self.fail_create.get() {
-                return Err("popup.build_failed: test".into());
-            }
-            self.live.set(true);
-            Ok(())
-        }
-
-        fn focus(&self, _label: &str) -> Result<(), String> {
-            self.focuses.set(self.focuses.get() + 1);
-            Ok(())
-        }
-
-        fn close(&self, _label: &str) -> Result<(), String> {
-            self.closes.set(self.closes.get() + 1);
-            self.live.set(false);
-            Ok(())
-        }
-
-        fn exists(&self, _label: &str) -> bool {
-            self.live.get()
-        }
-
-        fn text_edit_payload(&self) -> Result<TextEditPayload, String> {
-            self.payload.borrow().clone().ok_or_else(|| {
-                "popup.no_text_selection: no single editable text is selected".to_string()
-            })
-        }
-    }
-
-    fn pointer(sequence: u64) -> cad_ui_core::protocol::ProbeInput {
-        cad_ui_core::protocol::ProbeInput {
-            sequence,
-            kind: InputKind::PointerDown,
-            x: Some(1.0),
-            y: Some(2.0),
-            dx: None,
-            dy: None,
-            width: None,
-            height: None,
-            dpr: None,
-            button: None,
-            shift: None,
-        }
-    }
 
     #[test]
-    fn only_the_allowlisted_kind_is_built() {
-        for rejected in ["settings", "", "<script>alert(1)</script>", "About"] {
-            let shared = new_shared(LaunchOptions::default());
-            let ops = FakeOps::default();
-            let error = open_popup(&shared, rejected, &ops).unwrap_err();
-            assert!(
-                error.starts_with("popup.unknown_kind"),
-                "{rejected:?} must be refused by name: {error}"
-            );
-            assert_eq!(ops.creates.get(), 0, "no window for {rejected:?}");
-            assert!(
-                lock(&shared).shell.popup.is_none(),
-                "no gate for {rejected:?}"
-            );
-        }
-
+    fn the_gate_glue_reads_and_writes_the_real_shell_state() {
         let shared = new_shared(LaunchOptions::default());
-        let ops = FakeOps::default();
-        let ack = open_popup(&shared, "about", &ops).expect("about opens");
-        assert_eq!(
-            ack,
-            PopupAck {
-                accepted: true,
-                kind: "about".into(),
-                popup_label: POPUP_LABEL.into(),
-                existing: false,
-            }
-        );
-        assert_eq!(ops.creates.get(), 1);
-        assert!(modal_gate_open(&lock(&shared).shell));
-    }
-
-    #[test]
-    fn second_open_focuses_the_single_instance_and_sets_the_gate_once() {
-        let shared = new_shared(LaunchOptions::default());
-        let ops = FakeOps::default();
-        open_popup(&shared, "about", &ops).expect("first open");
-        let first_gate = lock(&shared).shell.popup.clone();
-        assert!(first_gate.is_some());
-
-        let ack = open_popup(&shared, "about", &ops).expect("second open");
-        assert!(
-            ack.existing,
-            "the second open reports the existing instance"
-        );
-        assert_eq!(ack.popup_label, POPUP_LABEL);
-        assert_eq!(ops.creates.get(), 1, "no second window is built");
-        assert_eq!(ops.focuses.get(), 1, "the existing window is focused");
-        assert_eq!(
-            lock(&shared).shell.popup,
-            first_gate,
-            "the gate is set exactly once (same single state)"
-        );
-    }
-
-    #[test]
-    fn modal_gate_refuses_cad_input_until_the_popup_is_destroyed() {
-        let shared = new_shared(LaunchOptions::default());
-        let ops = FakeOps::default();
-        {
-            let mut state = lock(&shared);
-            state.shell.cad_ready = true;
-        }
-        open_popup(&shared, "about", &ops).expect("open");
-
-        {
-            let mut state = lock(&shared);
-            assert_eq!(
-                admit_command(&mut state.shell, "OPEN").unwrap_err(),
-                cad_ui_core::shell::POPUP_MODAL_OPEN
-            );
-            assert_eq!(
-                queue_cad_input(&mut state.shell, &pointer(1)).unwrap_err(),
-                cad_ui_core::shell::POPUP_MODAL_OPEN
-            );
-            assert!(state.shell.cad_inputs.is_empty());
-        }
-
-        // Simulated destroy (the window manager's path): the gate clears and
-        // both funnels are admitted again.
-        on_popup_destroyed(&shared);
+        let gate = SharedGate(&shared);
+        assert!(gate.current().is_none());
+        let popup = CadPopup {
+            kind: "about".into(),
+            label: POPUP_LABEL.into(),
+            modal: true,
+        };
+        gate.replace(Some(popup.clone()));
+        assert_eq!(lock(&shared).shell.popup, Some(popup.clone()));
+        assert_eq!(gate.take(), Some(popup.clone()));
         assert!(lock(&shared).shell.popup.is_none());
-        {
-            let mut state = lock(&shared);
-            assert!(admit_command(&mut state.shell, "OPEN").is_ok());
-            assert!(queue_cad_input(&mut state.shell, &pointer(2)).is_ok());
-        }
+
+        // A stale expectation never clears a different instance.
+        gate.replace(Some(popup.clone()));
+        let other = CadPopup {
+            kind: "options".into(),
+            label: POPUP_LABEL.into(),
+            modal: true,
+        };
+        gate.clear_if(&other);
+        assert_eq!(gate.current(), Some(popup));
     }
 
     #[test]
-    fn status_popup_is_null_before_populated_while_open_and_null_after() {
-        let shared = new_shared(LaunchOptions::default());
-        let ops = FakeOps::default();
-        let before = projected_popup(unsupported_status(None), lock(&shared).shell.popup.as_ref());
-        assert_eq!(before.popup, None);
+    fn the_status_projection_serializes_the_popup_block() {
+        use cad_ui_core::shell::projected_popup;
+        use cad_ui_core::unsupported_status;
 
-        open_popup(&shared, "about", &ops).expect("open");
-        let during = projected_popup(unsupported_status(None), lock(&shared).shell.popup.as_ref());
-        let popup = during.popup.as_ref().expect("populated while open").clone();
-        assert_eq!(popup.kind, "about");
-        assert_eq!(popup.label, POPUP_LABEL);
-        assert!(popup.modal);
-        let wire = serde_json::to_value(&during).expect("status serializes");
+        let popup = CadPopup {
+            kind: "about".into(),
+            label: POPUP_LABEL.into(),
+            modal: true,
+        };
+        let status = projected_popup(unsupported_status(None), Some(&popup));
+        let wire = serde_json::to_value(&status).expect("status serializes");
         assert_eq!(
             wire.get("popup")
                 .and_then(|block| block.get("label"))
                 .and_then(|label| label.as_str()),
             Some(POPUP_LABEL)
         );
-
-        on_popup_destroyed(&shared);
-        let after = projected_popup(unsupported_status(None), lock(&shared).shell.popup.as_ref());
-        assert_eq!(after.popup, None);
-        let wire = serde_json::to_value(&after).expect("status serializes");
+        // After the popup is gone the block is `null`, never a stale popup.
+        let cleared = projected_popup(status, None);
+        let wire = serde_json::to_value(&cleared).expect("status serializes");
         assert_eq!(wire.get("popup"), Some(&serde_json::Value::Null));
-    }
-
-    #[test]
-    fn close_is_idempotent_and_waits_for_the_destroyed_gate_clear() {
-        let shared = new_shared(LaunchOptions::default());
-        let ops = FakeOps::default();
-        // Nothing open: closing is a success, not an error.
-        close_popup(&shared, &ops).expect("idempotent close");
-        assert_eq!(ops.closes.get(), 0);
-
-        open_popup(&shared, "about", &ops).expect("open");
-        close_popup(&shared, &ops).expect("close");
-        assert_eq!(ops.closes.get(), 1);
-        // The gate is owned by the Destroyed event, not by the close call.
-        assert!(modal_gate_open(&lock(&shared).shell));
-
-        // A second close (window already gone) reconciles the stale state and
-        // still succeeds without another destroy.
-        close_popup(&shared, &ops).expect("second close");
-        assert_eq!(ops.closes.get(), 1);
-        assert!(!modal_gate_open(&lock(&shared).shell));
-    }
-
-    #[test]
-    fn a_stale_popup_state_is_reconciled_before_a_fresh_open() {
-        let shared = new_shared(LaunchOptions::default());
-        let ops = FakeOps::default();
-        open_popup(&shared, "about", &ops).expect("first open");
-        // Simulate a missed Destroyed event: the window is gone, the state is
-        // not. The next open must not focus/return the phantom instance.
-        ops.live.set(false);
-        let ack = open_popup(&shared, "about", &ops).expect("re-open");
-        assert!(!ack.existing, "a fresh window is built for the stale state");
-        assert_eq!(ops.creates.get(), 2);
-        assert!(modal_gate_open(&lock(&shared).shell));
-    }
-
-    #[test]
-    fn a_failed_build_never_sets_the_gate() {
-        let shared = new_shared(LaunchOptions::default());
-        let ops = FakeOps::default();
-        ops.fail_create.set(true);
-        let error = open_popup(&shared, "about", &ops).unwrap_err();
-        assert!(error.starts_with("popup.build_failed"), "{error}");
-        assert!(lock(&shared).shell.popup.is_none());
     }
 
     #[test]
@@ -866,47 +501,6 @@ mod tests {
     }
 
     #[test]
-    fn popup_sizes_are_per_kind_and_the_text_editor_is_larger() {
-        assert_eq!(PopupKind::About.size(), (520.0, 360.0));
-        assert_eq!(PopupKind::TextEdit.size(), (640.0, 480.0));
-        assert_eq!(PopupKind::Options.size(), (720.0, 560.0));
-        assert_eq!(PopupKind::from_key("textEdit"), Ok(PopupKind::TextEdit));
-        assert_eq!(PopupKind::TextEdit.key(), "textEdit");
-        assert_eq!(PopupKind::from_key("options"), Ok(PopupKind::Options));
-        assert_eq!(PopupKind::Options.key(), "options");
-    }
-
-    #[test]
-    fn options_opens_without_a_payload_and_without_a_selection() {
-        let shared = new_shared(LaunchOptions::default());
-        // No text payload is available: Options must not depend on a selection.
-        let ops = FakeOps::default();
-        let ack = open_popup(&shared, "options", &ops).expect("options opens");
-        assert_eq!(
-            ack,
-            PopupAck {
-                accepted: true,
-                kind: "options".into(),
-                popup_label: POPUP_LABEL.into(),
-                existing: false,
-            }
-        );
-        assert_eq!(ops.created_kind.get(), Some(PopupKind::Options));
-        assert_eq!(
-            ops.created.borrow().clone(),
-            Some(None),
-            "options carries no host-derived payload"
-        );
-        assert!(modal_gate_open(&lock(&shared).shell));
-
-        // The same single instance is focused on a second request.
-        let again = open_popup(&shared, "options", &ops).expect("second open");
-        assert!(again.existing);
-        assert_eq!(ops.creates.get(), 1);
-        assert_eq!(ops.focuses.get(), 1);
-    }
-
-    #[test]
     fn options_boot_payload_is_the_bare_envelope() {
         let script =
             boot_payload_script(PopupKind::Options, None).expect("options needs no payload");
@@ -925,51 +519,6 @@ mod tests {
             value["payload"].as_object().map(serde_json::Map::len),
             Some(0)
         );
-    }
-
-    #[test]
-    fn text_edit_opens_with_the_host_payload_and_about_stays_unchanged() {
-        let shared = new_shared(LaunchOptions::default());
-        let ops = FakeOps::with_payload("hello", false);
-        let ack = open_popup(&shared, "textEdit", &ops).expect("textEdit opens");
-        assert_eq!(
-            ack,
-            PopupAck {
-                accepted: true,
-                kind: "textEdit".into(),
-                popup_label: POPUP_LABEL.into(),
-                existing: false,
-            }
-        );
-        assert_eq!(ops.created_kind.get(), Some(PopupKind::TextEdit));
-        assert_eq!(
-            ops.created.borrow().clone().flatten(),
-            Some(TextEditPayload {
-                text: "hello".into(),
-                multiline: false,
-            })
-        );
-        assert!(modal_gate_open(&lock(&shared).shell));
-
-        // `about` still carries no text payload and the same ack shape.
-        let about = new_shared(LaunchOptions::default());
-        let ops = FakeOps::with_payload("ignored", true);
-        let ack = open_popup(&about, "about", &ops).expect("about opens");
-        assert_eq!(ack.kind, "about");
-        assert_eq!(ops.created.borrow().clone(), Some(None));
-    }
-
-    #[test]
-    fn text_edit_without_a_text_selection_creates_no_window_and_no_gate() {
-        let shared = new_shared(LaunchOptions::default());
-        let ops = FakeOps::default();
-        let error = open_popup(&shared, "textEdit", &ops).unwrap_err();
-        assert!(
-            error.starts_with("popup.no_text_selection"),
-            "the refusal must be named: {error}"
-        );
-        assert_eq!(ops.creates.get(), 0, "no window is built");
-        assert!(lock(&shared).shell.popup.is_none(), "no modal gate is set");
     }
 
     #[test]
