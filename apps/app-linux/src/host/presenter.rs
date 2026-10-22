@@ -3,13 +3,15 @@
 
 use std::sync::{Arc, Mutex};
 
-use super::{lock, Shared, BRIDGE};
+use super::{lock, lock_telemetry, RenderTelemetry, Shared, BRIDGE};
 
 /// Ask the tick to stop and release the presenter (idempotent).
-pub fn request_stop(shared: &Arc<Mutex<Shared>>) {
-    let mut state = lock(shared);
-    state.shell.stop_requested = true;
-    state.redraw_pump = None;
+///
+/// Lock order: the shell mutex is acquired and released before the telemetry
+/// mutex (`Shared` -> `RenderTelemetry`).
+pub fn request_stop(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>) {
+    lock(shared).shell.stop_requested = true;
+    lock_telemetry(telemetry).redraw_pump = None;
 }
 
 /// Enter the terminal closing state and drop the surface **on the main thread**

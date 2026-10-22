@@ -5,11 +5,16 @@
 //!
 //! Ownership and threading (safety corrections):
 //! - The GPU presenter is **main-thread-local** (a `thread_local` `RefCell`), not
-//!   in the `Arc<Mutex<Shared>>`: IPC commands run on worker threads and hold
-//!   clones of that Arc, so a GPU object stored there could be dropped off the
-//!   main thread. It is created, used and destroyed only on the main thread.
+//!   in the shared state: IPC commands run on worker threads and hold clones of
+//!   that `Arc`, so a GPU object stored there could be dropped off the main
+//!   thread. It is created, used and destroyed only on the main thread.
+//! - Two mutexes are shared with worker threads after the WP1b split: the shell
+//!   state ([`Shared`], in `cad-desktop-shell`) and [`RenderTelemetry`] (below).
+//!   **Acquisition order is always `Shared` -> `RenderTelemetry`, never the
+//!   reverse**; the [`ShellTelemetry`] implementation below only locks the
+//!   telemetry mutex and therefore can never re-enter `Shared`.
 //! - The shared state is **GPU-free**: only status and the input tracker cross
-//!   threads, and the shared lock is never held across GPU work.
+//!   threads, and the shell lock is never held across GPU work.
 //! - The surface is explicitly stopped and released on `CloseRequested` and on
 //!   `ExitRequested`/`Exit` (surface before window), not only after `Destroyed`
 //!   (which arrives after the window is already gone, with no tick afterwards).
@@ -22,7 +27,6 @@
 //! - GPU failure: recorded in [`ProbeStatus::error`], never a fabricated frame.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
@@ -30,12 +34,10 @@ use std::time::Instant;
 use cad_host::HostOptions;
 use cad_platform::{ConfigStore, PlatformFiles};
 use cad_render_wgpu::{ProbeStageTimings, PulledState};
-use cad_ui_core::layout::LayoutTracker;
-use cad_ui_core::session::{CadSession, CadSettingKey, CadSettingValue, CadSettings};
-use cad_ui_core::shell::ShellState;
+use cad_ui_core::protocol::InputKind;
+use cad_ui_core::session::CadSession;
 
 mod admission;
-mod commands;
 mod dom;
 mod init;
 mod locale;
@@ -49,12 +51,19 @@ mod tick;
 #[cfg(test)]
 mod tests;
 
-// Public host API (unchanged external surface; `crate::host::…` still resolves).
-pub use commands::{
+// The shared Tauri command/state layer (the `#[tauri::command]` functions and
+// the shell half of the former `Shared`) now lives in `cad-desktop-shell`; the
+// `__cmd__*`/`__tauri_command_name_*` hidden macros moved with it, so no
+// re-export shim remains here.
+pub use cad_desktop_shell::commands::{
     cad_close_popup, cad_command, cad_commands, cad_open_popup, cad_set_selected_property,
     cad_set_selected_text, cad_set_setting, cad_set_tool_parameter, cad_set_tool_text,
     cad_settings, cad_standard_view, cad_status, probe_input, probe_status, CadCommandAck,
 };
+pub(crate) use cad_desktop_shell::state::lock;
+pub use cad_desktop_shell::state::new_shared;
+pub use cad_desktop_shell::state::{ProbeShared, Shared, ShellPopupHost, ShellTelemetry};
+
 pub use init::init;
 pub use options::{
     LaunchOptions, ANIMATION_STEP, FRAME_INTERVAL, INITIAL_HEIGHT, INITIAL_WIDTH, WEBVIEW_LABEL,
@@ -71,32 +80,15 @@ pub(crate) use popup::{
 // Evidence-only: the **same** selected-text admission `cad_set_selected_text`
 // runs, so the text-edit popup phase queues through the real path instead of
 // calling `CadSession::set_selected_text` directly.
-pub(crate) use commands::admit_selected_text;
+pub(crate) use cad_ui_core::session::admit_selected_text;
 pub use postload::requested_exit_code;
 pub(crate) use postload::resolve_process_exit;
-
-// The `#[tauri::command]` macro emits hidden helper macros next to each command;
-// re-export them alongside the command functions so `generate_handler!` (which
-// resolves them at `crate::host::…`) keeps working after the split.
-pub(crate) use commands::{
-    __cmd__cad_close_popup, __cmd__cad_command, __cmd__cad_commands, __cmd__cad_open_popup,
-    __cmd__cad_set_selected_property, __cmd__cad_set_selected_text, __cmd__cad_set_setting,
-    __cmd__cad_set_tool_parameter, __cmd__cad_set_tool_text, __cmd__cad_settings,
-    __cmd__cad_standard_view, __cmd__cad_status, __cmd__probe_input, __cmd__probe_status,
-    __tauri_command_name_cad_close_popup, __tauri_command_name_cad_command,
-    __tauri_command_name_cad_commands, __tauri_command_name_cad_open_popup,
-    __tauri_command_name_cad_set_selected_property, __tauri_command_name_cad_set_selected_text,
-    __tauri_command_name_cad_set_setting, __tauri_command_name_cad_set_tool_parameter,
-    __tauri_command_name_cad_set_tool_text, __tauri_command_name_cad_settings,
-    __tauri_command_name_cad_standard_view, __tauri_command_name_cad_status,
-    __tauri_command_name_probe_input, __tauri_command_name_probe_status,
-};
 pub use presenter::{
     close_presenter, force_realize, force_unrealize, release_presenter, request_stop,
 };
 pub use tick::tick;
 
-use postload::{ActualRenderSummary, PostloadPanState};
+use postload::{ActualRenderSummary, PostloadPanPhase, PostloadPanState};
 
 /// Main-thread-only CAD platform pieces (built once in `init`).
 ///
@@ -120,17 +112,20 @@ thread_local! {
     static CAD_ENV: RefCell<Option<CadEnv>> = const { RefCell::new(None) };
 }
 
-/// State shared with the IPC commands. Deliberately **GPU-free**: only status,
-/// the input tracker and the CAD admission state cross threads.
+/// App-side render telemetry: the former renderer half of `Shared`.
 ///
-/// The UI-framework-free half lives in [`ShellState`] (`cad-ui-core`) under the
-/// explicit `shell` field; this struct adds the Tauri/GTK-specific probe fields
-/// beside it. The halves are accessed explicitly (`state.shell.status`,
-/// `state.shell.cad_commands`, …) — there is deliberately no `Deref` bridge, so
-/// a future Win/macOS host cannot inherit one by accident.
-pub struct Shared {
-    /// The UI-framework-free shared state (status, input, CAD admission/errors).
-    pub shell: ShellState,
+/// These fields name `cad-render-wgpu`/`cad-engine` types, so they cannot live in
+/// `cad-desktop-shell` (both crates are forbidden there). The command layer sees
+/// only the narrow [`ShellTelemetry`] seam.
+///
+/// # Lock order (frozen)
+///
+/// Never lock this mutex while holding nothing and then lock [`Shared`] inside
+/// the same critical section: the only legal order is `Shared` ->
+/// `RenderTelemetry`. The [`ShellTelemetry`] implementation below locks **only**
+/// this mutex, which makes the reverse order impossible. The tick acquires the
+/// shell lock first whenever it needs both.
+pub struct RenderTelemetry {
     /// The most recent frame's per-stage timings (evidence).
     last_timings: Option<ProbeStageTimings>,
     /// The redraw pump's single-pending flag: the tick clears it, so the pump
@@ -142,24 +137,12 @@ pub struct Shared {
     last_frame: Option<Instant>,
     /// Wall-clock time of the last periodic status log line.
     last_log: Option<Instant>,
-    /// The probe window handle the tick polls for size/state. Kept here because
-    /// the public `Manager` trait does not expose plain windows by label.
-    window: Option<tauri::Window>,
     /// When the probe started; drives the bounded DOM-diagnostic schedule.
     diag_start: Instant,
     /// How many bounded DOM diagnostics have run (max 2).
     diag_runs: u32,
     /// `YACR_PROBE_NO_GPU`: skip the GPU presenter (WM/lifecycle baseline).
     no_gpu: bool,
-    /// React-reported CAD layout (logical rect -> viewport insets), seq/generation guarded.
-    layout: LayoutTracker,
-    /// Set when a new GPU generation starts: the cached CAD rect must be
-    /// re-validated against the current top geometry (not blindly re-applied).
-    layout_revalidate: bool,
-    /// The margin-receiving container bounds (logical px) last used for a layout
-    /// decision. A change re-validates the cached DOM rect even without a new
-    /// sequence (the container resized under an unchanged rect).
-    layout_bounds: Option<(f32, f32)>,
     /// Last emitted engine render-gate diagnostic (dedup for the cad-log line).
     last_render_diag: Option<cad_engine::render::RenderDiagnostics>,
     /// Wall-clock time of the last emitted render-gate diagnostic (≤1 Hz).
@@ -168,9 +151,8 @@ pub struct Shared {
     /// post-load pan driver's readiness/final-frame admission.
     last_actual_render: Option<ActualRenderSummary>,
     /// Observable state of the accelerated pulled organisation from the most
-    /// recent **actual** render (`cad_render_wgpu::PulledState`). Surfaced in the
-    /// `cad_status` evidence line so a skipped accelerated organisation is visible
-    /// next to the status the frontend receives.
+    /// recent **actual** render (`cad_render_wgpu::PulledState`). Surfaced through
+    /// the `ShellTelemetry` seam in the `cad_status` evidence line.
     last_pulled_state: Option<PulledState>,
     /// Bounded post-load pan evidence driver state (`YACR_PROBE_POSTLOAD_PAN`).
     postload_pan: Option<PostloadPanState>,
@@ -180,92 +162,127 @@ pub struct Shared {
     /// to the OS by the entry point after the event loop returns (`AppHandle::exit`
     /// alone was observed to leave the OS status 0).
     postload_pan_exit: Option<i32>,
-    /// Startup/CLI options (drawing, font/image dirs, size, probe mode).
-    pub launch: LaunchOptions,
-    /// Bounded main-thread queue of typed tool-parameter requests (ADR 0016
-    /// decision A): admitted by the `cad_set_tool_parameter` IPC command and
-    /// drained by the owner tick into `CadSession::set_tool_parameter`. Typed and
-    /// separate from `shell.cad_commands` (name-only) so the rejected command-line
-    /// text-payload path is never reintroduced.
-    pub cad_tool_parameters: Vec<(cad_app::ToolParameter, cad_app::ToolValue)>,
-    /// Bounded main-thread queue of terminal tool texts (ADR 0019 decision A.1):
-    /// admitted by the dedicated `cad_set_tool_text` IPC and drained by the owner
-    /// tick into `CadSession::set_tool_text`, which completes the command
-    /// immediately. Typed and separate from `shell.cad_commands` (name-only) so
-    /// the rejected command-line text-payload path is never reintroduced.
-    pub cad_tool_texts: Vec<String>,
-    /// Bounded main-thread queue of replacement texts for the **current single
-    /// selection** (ADR 0020 amendment B): admitted by the dedicated
-    /// `cad_set_selected_text` IPC and drained by the owner tick into
-    /// `CadSession::set_selected_text`, which re-resolves and validates the
-    /// selection at apply time. No entity id travels on this queue.
-    pub cad_selected_texts: Vec<String>,
-    /// Bounded main-thread queue of property writes for the **current
-    /// selection** (the docked panel's `SETENTITYPROPERTY` channel): admitted by
-    /// the dedicated `cad_set_selected_property` IPC as a `(key, value)` pair of
-    /// strings and drained by the owner tick into
-    /// `CadSession::set_selected_property`, which re-resolves and validates the
-    /// selection at apply time. No entity id travels on this queue.
-    pub cad_selected_properties: Vec<(String, String)>,
-    /// Bounded main-thread queue of typed standard-view requests: admitted by the
-    /// dedicated `cad_standard_view` IPC and drained by the owner tick into
-    /// `CadSession::standard_view`, which dispatches the real
-    /// `CommandId::StandardView` + `CommandPayload::StandardView(view)`. Typed and
-    /// separate from `shell.cad_commands` (name-only), because the router refuses
-    /// a payload-carrying variant on that funnel.
-    pub cad_standard_views: VecDeque<cad_app::StandardView>,
-    /// Bounded main-thread queue of typed settings writes: admitted by the
-    /// dedicated `cad_set_setting` IPC and drained by the owner tick into
-    /// `CadSession::apply_setting`, which validates, persists and applies the
-    /// change. Ungated by the modal popup gate (the Options dialog writes from
-    /// its own window).
-    pub cad_setting_writes: VecDeque<(CadSettingKey, CadSettingValue)>,
-    /// Latest effective settings snapshot mirrored from the owner-thread
-    /// session, so the worker-thread `cad_settings` IPC read never touches the
-    /// `!Send` session.
-    pub cad_settings: Option<CadSettings>,
 }
 
-/// Managed Tauri state: a shared handle to [`Shared`].
-pub struct ProbeShared(pub Arc<Mutex<Shared>>);
-
-/// Create the shared probe state with the parsed launch options.
-pub fn new_shared(launch: LaunchOptions) -> Arc<Mutex<Shared>> {
-    let cad_mode = !launch.probe_only;
-    Arc::new(Mutex::new(Shared {
-        shell: ShellState::new(cad_mode),
-        last_timings: None,
-        wake_pending: Arc::new(AtomicBool::new(false)),
-        redraw_pump: None,
-        last_frame: None,
-        last_log: None,
-        window: None,
-        diag_start: Instant::now(),
-        diag_runs: 0,
-        no_gpu: std::env::var_os("YACR_PROBE_NO_GPU").is_some(),
-        layout: LayoutTracker::new(),
-        layout_revalidate: false,
-        layout_bounds: None,
-        last_render_diag: None,
-        last_render_diag_log: None,
-        last_actual_render: None,
-        last_pulled_state: None,
-        postload_pan: crate::evidence::postload_pan_enabled().then(PostloadPanState::new),
-        app_handle: None,
-        postload_pan_exit: None,
-        launch,
-        cad_tool_parameters: Vec::new(),
-        cad_tool_texts: Vec::new(),
-        cad_selected_texts: Vec::new(),
-        cad_selected_properties: Vec::new(),
-        cad_standard_views: VecDeque::new(),
-        cad_setting_writes: VecDeque::new(),
-        cad_settings: None,
-    }))
+impl RenderTelemetry {
+    fn new() -> Self {
+        Self {
+            last_timings: None,
+            wake_pending: Arc::new(AtomicBool::new(false)),
+            redraw_pump: None,
+            last_frame: None,
+            last_log: None,
+            diag_start: Instant::now(),
+            diag_runs: 0,
+            no_gpu: std::env::var_os("YACR_PROBE_NO_GPU").is_some(),
+            last_render_diag: None,
+            last_render_diag_log: None,
+            last_actual_render: None,
+            last_pulled_state: None,
+            postload_pan: crate::evidence::postload_pan_enabled().then(PostloadPanState::new),
+            app_handle: None,
+            postload_pan_exit: None,
+        }
+    }
 }
 
-fn lock(shared: &Arc<Mutex<Shared>>) -> MutexGuard<'_, Shared> {
-    shared
+/// Create the app-side render telemetry.
+pub fn new_render_telemetry() -> Arc<Mutex<RenderTelemetry>> {
+    Arc::new(Mutex::new(RenderTelemetry::new()))
+}
+
+/// Lock [`RenderTelemetry`], recovering the guard from a poisoned mutex.
+///
+/// Lock order: never call this before locking [`Shared`] in the same critical
+/// section (see [`RenderTelemetry`]).
+pub(crate) fn lock_telemetry(
+    telemetry: &Arc<Mutex<RenderTelemetry>>,
+) -> MutexGuard<'_, RenderTelemetry> {
+    telemetry
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The `ShellTelemetry` implementation: reads/writes **only** the app-side
+/// telemetry. It never locks [`Shared`], so the `Shared -> telemetry` order
+/// cannot invert.
+struct AppTelemetry(Arc<Mutex<RenderTelemetry>>);
+
+impl ShellTelemetry for AppTelemetry {
+    fn cad_status_evidence(&self) -> String {
+        lock_telemetry(&self.0)
+            .last_pulled_state
+            .as_ref()
+            .map(PulledState::to_string)
+            .unwrap_or_else(|| "-".to_string())
+    }
+
+    fn note_input_accepted(&self, kind: InputKind) {
+        // Post-load pan driver accounting: count host-admitted gesture inputs,
+        // and flag a concurrent resize (which would make any view change
+        // unattributable to the pan).
+        let mut telemetry = lock_telemetry(&self.0);
+        if let Some(pan) = telemetry.postload_pan.as_mut() {
+            match kind {
+                InputKind::PointerMove => pan.admitted_moves += 1,
+                InputKind::PointerUp => pan.admitted_ups += 1,
+                InputKind::Resize => {
+                    if matches!(
+                        pan.phase,
+                        PostloadPanPhase::Gesture | PostloadPanPhase::AwaitingFinal
+                    ) {
+                        pan.concurrent_resize = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// The platform popup seam for the shared `cad_open_popup`/`cad_close_popup`
+/// commands.
+///
+/// Window creation, focusing, destroying and the main-thread `textEdit` payload
+/// derivation stay in [`popup`]; this adapter only routes the command to them.
+/// It holds no `Shared` handle (no reference cycle) and never locks the shell
+/// state itself.
+struct AppPopupHost {
+    app: tauri::AppHandle,
+}
+
+impl ShellPopupHost for AppPopupHost {
+    fn open(&self, shared: &Arc<Mutex<Shared>>, kind: &str) -> Result<PopupAck, String> {
+        let app = self.app.clone();
+        let task_app = app.clone();
+        let shared = shared.clone();
+        let kind = kind.to_string();
+        popup::on_main_thread(&app, move || {
+            let ops = popup::TauriPopupOps::new(task_app, shared.clone());
+            popup::open_popup(&shared, &kind, &ops)
+        })
+    }
+
+    fn close(&self, shared: &Arc<Mutex<Shared>>) -> Result<(), String> {
+        let app = self.app.clone();
+        let task_app = app.clone();
+        let shared = shared.clone();
+        popup::on_main_thread(&app, move || {
+            let ops = popup::TauriPopupOps::new(task_app, shared.clone());
+            popup::close_popup(&shared, &ops)
+        })
+    }
+}
+
+/// Register the app-side seams on the shared shell state.
+///
+/// Called once during Tauri `setup`, before the frontend can invoke a command.
+pub(crate) fn register_seams(
+    app: &tauri::AppHandle,
+    shared: &Arc<Mutex<Shared>>,
+    telemetry: &Arc<Mutex<RenderTelemetry>>,
+) {
+    let mut state = lock(shared);
+    state.telemetry = Some(Arc::new(AppTelemetry(telemetry.clone())));
+    state.popup_host = Some(Arc::new(AppPopupHost { app: app.clone() }));
 }

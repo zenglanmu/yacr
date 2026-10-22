@@ -1,13 +1,22 @@
-//! Tauri IPC commands: probe status, CAD command admission, CAD status and the
-//! sequence-gated input funnel.
+//! Tauri IPC commands shared by every desktop host.
 //!
-//! The **rules** these commands apply — typed wire parsing, static content
-//! limits, gate order and queue bounds — live in `cad_ui_core::session`
-//! (`admission`); this module is the thin `#[tauri::command]` surface plus the
-//! host-specific wiring. One decode stays here: `parse_setting_request` takes a
-//! `serde_json::Value`, and `cad-ui-core` deliberately carries no `serde_json`.
+//! These are the thin `#[tauri::command]` wrappers plus host-neutral wiring. The
+//! **rules** they apply — typed wire parsing, static content limits, gate order
+//! and queue bounds — live in `cad_ui_core::session` (`admission`) and
+//! `cad_ui_core::shell`; this module only maps them onto [`Shared`].
+//!
+//! The renderer telemetry that `cad_status`/`probe_input` used to read directly
+//! is now behind [`ShellTelemetry`]; no `cad-render-wgpu`/`cad-engine` type is
+//! named here.
+//!
+//! ## Registration
+//!
+//! [`register_commands`] is the single `generate_handler!` list. [`COMMAND_NAMES`]
+//! is the command set captured from the pre-migration host; the `registration`
+//! test asserts the macro list and the constant are the same set.
 
-use cad_render_wgpu::PulledState;
+use std::sync::{Arc, Mutex};
+
 use cad_ui_core::protocol::{InputKind, ProbeInput, ProbeInputAck, ProbeStatus};
 use cad_ui_core::session::{
     admit_selected_property, admit_setting, admit_standard_view, admit_tool_parameter,
@@ -21,20 +30,28 @@ use cad_ui_core::shell::{
 };
 use cad_ui_core::unsupported_status;
 
+use crate::state::{lock, ProbeShared, Shared};
+
 // Re-exported for the evidence driver, which must queue through the **same**
 // selected-text admission `cad_set_selected_text` runs.
 pub use cad_ui_core::session::admit_selected_text;
 // Re-exported for the owner tick, which drains the queue with the shared rule.
 pub use cad_ui_core::session::drain_standard_views;
 
-use super::popup::{self, PopupAck, TauriPopupOps};
-use super::postload::PostloadPanPhase;
-use super::{lock, ProbeShared};
+use cad_ui_core::popup::PopupAck;
 
 /// `probe_status` command: return the current probe status snapshot.
 #[tauri::command]
 pub fn probe_status(shared: tauri::State<'_, ProbeShared>) -> ProbeStatus {
-    lock(&shared.0).shell.status.clone()
+    probe_status_impl(&shared.0)
+}
+
+/// Command body of [`probe_status`], without the Tauri state wrapper.
+///
+/// Split out so the wire-output goldens can call the **same** implementation
+/// the IPC path runs (no duplicated projection in tests).
+pub fn probe_status_impl(shared: &Arc<Mutex<Shared>>) -> ProbeStatus {
+    lock(shared).shell.status.clone()
 }
 
 /// Admission result of `cad_command`: queued, **not** completed.
@@ -215,21 +232,23 @@ pub fn cad_standard_view(
 /// and no window is created. `options` carries no payload at all: the dialog
 /// reads `cad_settings` itself. While the popup is open the host refuses CAD input
 /// (`popup.modal_open`), independently of the UI's own pointer suspension.
+///
+/// The window effects and the main-thread marshalling belong to the concrete
+/// host behind [`crate::state::ShellPopupHost`]; the state machine and the gate
+/// are `cad_ui_core::popup`.
 #[tauri::command]
 pub fn cad_open_popup(
-    app: tauri::AppHandle,
     shared: tauri::State<'_, ProbeShared>,
     kind: String,
 ) -> Result<PopupAck, String> {
-    // The CAD session and the native window are main-thread state; the whole
-    // open runs there (see `popup::on_main_thread`).
-    let shared = shared.0.clone();
-    let task_shared = shared.clone();
-    let task_app = app.clone();
-    popup::on_main_thread(&app, move || {
-        let ops = TauriPopupOps::new(task_app, task_shared.clone());
-        popup::open_popup(&task_shared, &kind, &ops)
-    })
+    let popup_host = {
+        let state = lock(&shared.0);
+        state.popup_host.clone()
+    };
+    let Some(popup_host) = popup_host else {
+        return Err("popup.host_unavailable: no desktop popup host is registered".to_string());
+    };
+    popup_host.open(&shared.0, &kind)
 }
 
 /// `cad_close_popup` command: close the open modal popup (ADR-0021 D1/D2).
@@ -238,12 +257,15 @@ pub fn cad_open_popup(
 /// modal gate itself is cleared by the popup window's `Destroyed` event, which
 /// also covers Esc in the popup UI and a window-manager close.
 #[tauri::command]
-pub fn cad_close_popup(
-    app: tauri::AppHandle,
-    shared: tauri::State<'_, ProbeShared>,
-) -> Result<CadCommandAck, String> {
-    let ops = TauriPopupOps::new(app, shared.0.clone());
-    popup::close_popup(&shared.0, &ops)?;
+pub fn cad_close_popup(shared: tauri::State<'_, ProbeShared>) -> Result<CadCommandAck, String> {
+    let popup_host = {
+        let state = lock(&shared.0);
+        state.popup_host.clone()
+    };
+    let Some(popup_host) = popup_host else {
+        return Err("popup.host_unavailable: no desktop popup host is registered".to_string());
+    };
+    popup_host.close(&shared.0)?;
     Ok(CadCommandAck { accepted: true })
 }
 
@@ -311,7 +333,8 @@ pub fn cad_set_setting(
     Ok(CadCommandAck { accepted: true })
 }
 
-/// `cad_status` command: the latest main-thread CAD snapshot, with the host-side/// (transport) error merged in.
+/// `cad_status` command: the latest main-thread CAD snapshot, with the host-side
+/// (transport) error merged in.
 ///
 /// Before a session exists (or in probe mode) the snapshot is explicit (no
 /// fabricated document/count/camera). A host bind/present/tick error is shown
@@ -319,8 +342,16 @@ pub fn cad_set_setting(
 /// error is preserved when the host error clears.
 #[tauri::command]
 pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> CadStatus {
-    let (status, popup) = {
-        let state = lock(&shared.0);
+    cad_status_impl(&shared.0)
+}
+
+/// Command body of [`cad_status`], without the Tauri state wrapper.
+///
+/// Split out so the wire-output goldens can call the **same** implementation
+/// the IPC path runs (no duplicated projection in tests).
+pub fn cad_status_impl(shared: &Arc<Mutex<Shared>>) -> CadStatus {
+    let (status, popup, telemetry) = {
+        let state = lock(shared);
         let host_error = state
             .shell
             .cad_host_error
@@ -332,7 +363,7 @@ pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> CadStatus {
         };
         // The session never owns a window: project the host's live popup state
         // (ADR-0021 D1/D2) onto every snapshot, including the unsupported one.
-        (status, state.shell.popup.clone())
+        (status, state.shell.popup.clone(), state.telemetry.clone())
     };
     let status = projected_popup(status, popup.as_ref());
     // Env-gated, evidence-only JSON dump of the exact payload the frontend
@@ -340,11 +371,14 @@ pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> CadStatus {
     // The pulled organisation state is appended as a separate token (the JSON is
     // unchanged and stays first) so a skipped accelerated organisation is visible
     // next to the status payload.
+    //
+    // Lock order: the shell guard is released before the telemetry seam runs, so
+    // the app-side implementation only ever locks the telemetry mutex (it never
+    // re-enters `Shared`).
     if std::env::var_os("YACR_PROBE_CAD_LOG").is_some() {
-        let pulled = lock(&shared.0)
-            .last_pulled_state
+        let pulled = telemetry
             .as_ref()
-            .map(PulledState::to_string)
+            .map(|telemetry| telemetry.cad_status_evidence())
             .unwrap_or_else(|| "-".to_string());
         match serde_json::to_string(&status) {
             Ok(json) => eprintln!("[probe] cad_status {json} pulled={pulled}"),
@@ -375,6 +409,14 @@ pub fn cad_commands() -> Vec<&'static str> {
 /// `resize` is applied by the tick through the CAD rect path.
 #[tauri::command]
 pub fn probe_input(shared: tauri::State<'_, ProbeShared>, input: ProbeInput) -> ProbeInputAck {
+    probe_input_impl(&shared.0, input)
+}
+
+/// Command body of [`probe_input`], without the Tauri state wrapper.
+///
+/// Split out so the wire-output goldens can call the **same** implementation
+/// the IPC path runs (no duplicated gate/queue logic in tests).
+pub fn probe_input_impl(shared: &Arc<Mutex<Shared>>, input: ProbeInput) -> ProbeInputAck {
     let kind = input.kind;
     let sequence = input.sequence;
     // Modal popup gate (ADR-0021 D2): while a popup is open, every interaction
@@ -384,7 +426,7 @@ pub fn probe_input(shared: tauri::State<'_, ProbeShared>, input: ProbeInput) -> 
     // never release it.
     if !matches!(kind, InputKind::Resize) {
         let refused = {
-            let state = lock(&shared.0);
+            let state = lock(shared);
             modal_gate_open(&state.shell).then(|| state.shell.input.marker_offset())
         };
         if let Some(marker_offset) = refused {
@@ -401,7 +443,7 @@ pub fn probe_input(shared: tauri::State<'_, ProbeShared>, input: ProbeInput) -> 
             };
         }
     }
-    let ack = lock(&shared.0).shell.input.apply(&input);
+    let ack = lock(shared).shell.input.apply(&input);
     // Evidence line: shows the real IPC path (invoke -> command -> tracker).
     // x/y/dx/dy/width are logged so the accepted input can be tied to real OS
     // coordinates (diagnosis only; identifiers stay English).
@@ -424,31 +466,17 @@ pub fn probe_input(shared: tauri::State<'_, ProbeShared>, input: ProbeInput) -> 
     }
     // Post-load pan driver accounting: count host-admitted gesture inputs, and
     // flag a concurrent resize (which would make any view change unattributable
-    // to the pan).
-    {
-        let mut state = lock(&shared.0);
-        if let Some(pan) = state.postload_pan.as_mut() {
-            match kind {
-                InputKind::PointerMove => pan.admitted_moves += 1,
-                InputKind::PointerUp => pan.admitted_ups += 1,
-                InputKind::Resize => {
-                    if matches!(
-                        pan.phase,
-                        PostloadPanPhase::Gesture | PostloadPanPhase::AwaitingFinal
-                    ) {
-                        pan.concurrent_resize = true;
-                    }
-                }
-                _ => {}
-            }
-        }
+    // to the pan). The app-side implementation locks only the telemetry mutex.
+    let telemetry = lock(shared).telemetry.clone();
+    if let Some(telemetry) = telemetry {
+        telemetry.note_input_accepted(kind);
     }
     if matches!(kind, InputKind::Resize) {
         // The tick maps the accepted rect to GTK margins and canvas metrics.
         return ack;
     }
     let queued = {
-        let mut state = lock(&shared.0);
+        let mut state = lock(shared);
         queue_cad_input(&mut state.shell, &input)
     };
     match queued {
@@ -461,4 +489,51 @@ pub fn probe_input(shared: tauri::State<'_, ProbeShared>, input: ProbeInput) -> 
             reason: Some(reason),
         },
     }
+}
+
+/// The registered command set, in the order `generate_handler!` lists it.
+///
+/// Captured from the pre-migration Linux host (`apps/app-linux/src/host/
+/// commands.rs` + its `generate_handler!`); the `registration` test asserts the
+/// macro list below stays exactly this set.
+pub const COMMAND_NAMES: &[&str] = &[
+    "probe_status",
+    "probe_input",
+    "cad_command",
+    "cad_status",
+    "cad_commands",
+    "cad_set_tool_parameter",
+    "cad_set_tool_text",
+    "cad_set_selected_text",
+    "cad_set_selected_property",
+    "cad_standard_view",
+    "cad_open_popup",
+    "cad_close_popup",
+    "cad_settings",
+    "cad_set_setting",
+];
+
+/// Build the `invoke_handler` for the desktop hosts.
+///
+/// This is the only `generate_handler!` invocation; moving it here moved the
+/// `__cmd__*`/`__tauri_command_name_*` resolution with the commands (no
+/// re-export shim remains in the app).
+pub fn register_commands<R: tauri::Runtime>(
+) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        probe_status,
+        probe_input,
+        cad_command,
+        cad_status,
+        cad_commands,
+        cad_set_tool_parameter,
+        cad_set_tool_text,
+        cad_set_selected_text,
+        cad_set_selected_property,
+        cad_standard_view,
+        cad_open_popup,
+        cad_close_popup,
+        cad_settings,
+        cad_set_setting
+    ]
 }

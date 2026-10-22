@@ -137,6 +137,7 @@ dependencies = [
  "ashpd",
  "cad-app",
  "cad-db",
+ "cad-desktop-shell",
  "cad-domain",
  "cad-engine",
  "cad-host",
@@ -621,6 +622,17 @@ version = "0.1.2"
 dependencies = [
  "cad-db",
  "cad-domain",
+]
+
+[[package]]
+name = "cad-desktop-shell"
+version = "0.1.2"
+dependencies = [
+ "cad-app",
+ "cad-ui-core",
+ "serde",
+ "serde_json",
+ "tauri",
 ]
 
 [[package]]

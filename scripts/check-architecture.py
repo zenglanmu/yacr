@@ -156,6 +156,24 @@ def check(root: pathlib.Path) -> int:
     for dependency in sorted(forbidden_ui_core_dependencies):
         forbid_dependency("cad-ui-core", dependency)
 
+    # Desktop shell layer: `cad-desktop-shell` is the shared Tauri command/state
+    # layer between `cad-ui-core` and the concrete `apps/app-*` hosts. It is the
+    # **only** shared layer allowed to depend on `tauri`, and it must stay
+    # toolkit-, portal- and GPU-free. `cad-app`/`cad-host`/`cad-platform` are
+    # allowed (it names `cad_app` queue types); the renderer and engine are not
+    # (telemetry stays app-side behind the `ShellTelemetry` seam).
+    #
+    # `app-windows` is deliberately NOT required here: it is a NOT IMPLEMENTED
+    # stub. Its dependency edge lands with the Windows host work package.
+    require_dependency("cad-desktop-shell", "cad-ui-core")
+    require_dependency("app-linux", "cad-desktop-shell")
+    forbidden_desktop_shell_dependencies = {
+        "gtk", "gdk", "gdkx11", "ashpd", "wgpu", "cad-render-wgpu", "cad-engine",
+        "slint", "slint-build", "iced", "acadrust",
+    }
+    for dependency in sorted(forbidden_desktop_shell_dependencies):
+        forbid_dependency("cad-desktop-shell", dependency)
+
     visited, active = set(), set()
 
     def visit(name):

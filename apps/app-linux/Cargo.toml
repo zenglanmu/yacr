@@ -28,8 +28,10 @@ serde_json.workspace = true
 # CAD host/engine contracts for the host platform layer: the `cad-platform`
 # trait implementations in `src/platform.rs` (`ReactFiles`/`ReactSurface`/
 # `ReactConfigStore`) and the `HostCore`/`RenderSessionHandle` composition the
-# host builds on. `cad-ui-core` carries the platform-independent UI logic.
+# host builds on. `cad-ui-core` carries the platform-independent UI logic and
+# `cad-desktop-shell` the shared Tauri command/state layer.
 cad-ui-core.workspace = true
+cad-desktop-shell.workspace = true
 cad-app.workspace = true
 cad-engine.workspace = true
 cad-host.workspace = true

@@ -1,0 +1,33 @@
+{
+  "adapter": null,
+  "backend": null,
+  "camera": null,
+  "canFit": false,
+  "canOpen": false,
+  "commandLog": [],
+  "crosshair": false,
+  "documentLabel": null,
+  "entityCount": null,
+  "error": "cad present failed: boom; open failed",
+  "frameCount": 0,
+  "hoverPreview": false,
+  "importCount": 0,
+  "importProgress": null,
+  "loading": false,
+  "popup": {
+    "kind": "about",
+    "label": "popup-1",
+    "modal": true
+  },
+  "selection": {
+    "count": 0,
+    "empty": true,
+    "mixedKeys": [],
+    "rows": [],
+    "text": null,
+    "text_multiline": false
+  },
+  "snapEnabled": false,
+  "snapKind": null,
+  "tool": null
+}

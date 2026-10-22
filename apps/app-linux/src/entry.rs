@@ -61,29 +61,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("[probe] startup drawing: {}", path.display());
     }
     let shared = crate::host::new_shared(launch);
+    let telemetry = crate::host::new_render_telemetry();
     let setup_shared = shared.clone();
+    let setup_telemetry = telemetry.clone();
     let run_shared = shared.clone();
+    let run_telemetry = telemetry.clone();
 
     let app = tauri::Builder::default()
         .manage(crate::host::ProbeShared(shared.clone()))
-        .invoke_handler(tauri::generate_handler![
-            crate::host::probe_status,
-            crate::host::probe_input,
-            crate::host::cad_command,
-            crate::host::cad_status,
-            crate::host::cad_commands,
-            crate::host::cad_set_tool_parameter,
-            crate::host::cad_set_tool_text,
-            crate::host::cad_set_selected_text,
-            crate::host::cad_set_selected_property,
-            crate::host::cad_standard_view,
-            crate::host::cad_open_popup,
-            crate::host::cad_close_popup,
-            crate::host::cad_settings,
-            crate::host::cad_set_setting
-        ])
+        .invoke_handler(cad_desktop_shell::commands::register_commands())
         .setup(move |app| {
-            crate::host::init(app, &setup_shared)?;
+            crate::host::init(app, &setup_shared, &setup_telemetry)?;
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -96,16 +84,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // is explicitly released before the window/loop teardown (surface before
     // window); `Destroyed` arrives too late and has no tick afterwards.
     app.run(move |_app_handle, event| match event {
-        tauri::RunEvent::MainEventsCleared => crate::host::tick(&run_shared),
+        tauri::RunEvent::MainEventsCleared => crate::host::tick(&run_shared, &run_telemetry),
         tauri::RunEvent::ExitRequested { .. } => {
             eprintln!("[probe] run event: ExitRequested");
             crate::host::close_presenter();
-            crate::host::request_stop(&run_shared);
+            crate::host::request_stop(&run_shared, &run_telemetry);
         }
         tauri::RunEvent::Exit => {
             eprintln!("[probe] run event: Exit");
             crate::host::close_presenter();
-            crate::host::request_stop(&run_shared);
+            crate::host::request_stop(&run_shared, &run_telemetry);
         }
         _ => {}
     });
@@ -114,7 +102,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // so the recorded code is applied here, after the loop and teardown. A
     // default/manual run (no request) or a passing driver is `0` and returns
     // normally.
-    let exit = crate::host::resolve_process_exit(crate::host::requested_exit_code(&shared));
+    let exit = crate::host::resolve_process_exit(crate::host::requested_exit_code(&telemetry));
     if exit != 0 {
         std::process::exit(exit);
     }

@@ -20,6 +20,7 @@ members = [
     "crates/cad-engine",
     "crates/cad-host",
     "crates/cad-ui-core",
+    "crates/cad-desktop-shell",
     "crates/cad-platform",
     "crates/cad-diagnostics",
     "crates/cad-cli-tools",
@@ -58,6 +59,7 @@ cad-app = { path = "crates/cad-app" }
 cad-engine = { path = "crates/cad-engine" }
 cad-host = { path = "crates/cad-host" }
 cad-ui-core = { path = "crates/cad-ui-core" }
+cad-desktop-shell = { path = "crates/cad-desktop-shell" }
 cad-platform = { path = "crates/cad-platform" }
 cad-diagnostics = { path = "crates/cad-diagnostics" }
 

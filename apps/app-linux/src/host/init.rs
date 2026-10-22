@@ -13,12 +13,16 @@ use super::options::{
 };
 use super::presenter::{close_presenter, release_presenter, request_stop};
 use super::telemetry::log_top_level_native_handle;
-use super::{lock, CadEnv, Shared, BRIDGE, CAD_ENV, WEBVIEW};
+use super::{lock, lock_telemetry, CadEnv, RenderTelemetry, Shared, BRIDGE, CAD_ENV, WEBVIEW};
 
 /// Build the probe window, its child webview and the GPU presenter.
 ///
 /// Runs on the main thread during Tauri `setup`.
-pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<()> {
+pub fn init(
+    app: &mut tauri::App,
+    shared: &Arc<Mutex<Shared>>,
+    telemetry: &Arc<Mutex<RenderTelemetry>>,
+) -> tauri::Result<()> {
     // `YACR_PROBE_OPAQUE` is a diagnostic-only escape hatch (window visual test).
     let transparent = std::env::var_os("YACR_PROBE_OPAQUE").is_none();
     // Default: open maximized (the CAD partition should use the whole screen).
@@ -85,6 +89,7 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
     // Window events: log geometry (WM-native evidence) and release the surface
     // before the window goes away.
     let events_shared = shared.clone();
+    let events_telemetry = telemetry.clone();
     window.on_window_event(move |event| match event {
         tauri::WindowEvent::Resized(size) => {
             eprintln!(
@@ -124,15 +129,18 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
         }
         tauri::WindowEvent::Destroyed => {
             eprintln!("[probe] WM event: destroyed; requesting stop");
-            request_stop(&events_shared);
+            request_stop(&events_shared, &events_telemetry);
         }
         _ => {}
     });
 
     let evidence_window = window.clone();
-    let no_gpu = lock(shared).no_gpu;
+    // Register the app-side seams before any IPC command can run.
+    super::register_seams(app.handle(), shared, telemetry);
+
+    let no_gpu = lock_telemetry(telemetry).no_gpu;
     lock(shared).window = Some(window.clone());
-    lock(shared).app_handle = Some(app.handle().clone());
+    lock_telemetry(telemetry).app_handle = Some(app.handle().clone());
 
     // ---- CAD platform composition (main thread; `Rc`, kept in a TLS) ----
     let launch = lock(shared).launch.clone();
@@ -213,9 +221,9 @@ pub fn init(app: &mut tauri::App, shared: &Arc<Mutex<Shared>>) -> tauri::Result<
         }
     }
     // Keep the single event loop awake so the probe renders continuously.
-    let wake_pending = lock(shared).wake_pending.clone();
+    let wake_pending = lock_telemetry(telemetry).wake_pending.clone();
     let pump = crate::redraw::RedrawPump::spawn(app.handle(), wake_pending);
-    lock(shared).redraw_pump = Some(pump);
+    lock_telemetry(telemetry).redraw_pump = Some(pump);
 
     // Env-gated, evidence-only lifecycle driver (no effect on normal runs).
     crate::evidence::maybe_spawn(&evidence_window, child.as_ref());

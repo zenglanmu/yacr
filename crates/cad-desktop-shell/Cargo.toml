@@ -1,0 +1,24 @@
+[package]
+name = "cad-desktop-shell"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Desktop host shell shared by the Tauri apps: IPC commands, shared shell state and the platform seams."
+
+# The **only** shared layer allowed to depend on Tauri. It stays toolkit-,
+# portal- and GPU-free: no gtk/gdk/gdkx11/ashpd/wgpu/cad-render-wgpu/cad-engine
+# (enforced by `scripts/check-architecture.py`). `cad-app` is allowed: the shell
+# state names `cad_app::ToolParameter`/`StandardView` queue entries.
+#
+# Target gating mirrors `apps/app-linux`: on wasm (and macOS) every module is
+# compiled out and the crate is an empty shell, so the workspace wasm `--lib`
+# check keeps validating isolation instead of failing on Tauri.
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+tauri.workspace = true
+cad-ui-core.workspace = true
+cad-app.workspace = true
+serde.workspace = true
+serde_json.workspace = true

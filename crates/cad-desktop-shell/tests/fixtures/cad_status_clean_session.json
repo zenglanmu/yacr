@@ -1,0 +1,29 @@
+{
+  "adapter": null,
+  "backend": null,
+  "camera": null,
+  "canFit": true,
+  "canOpen": true,
+  "commandLog": [],
+  "crosshair": false,
+  "documentLabel": "/fixtures/complex-test.dwg",
+  "entityCount": 7,
+  "error": null,
+  "frameCount": 12,
+  "hoverPreview": false,
+  "importCount": 1,
+  "importProgress": null,
+  "loading": false,
+  "popup": null,
+  "selection": {
+    "count": 0,
+    "empty": true,
+    "mixedKeys": [],
+    "rows": [],
+    "text": null,
+    "text_multiline": false
+  },
+  "snapEnabled": false,
+  "snapKind": null,
+  "tool": null
+}

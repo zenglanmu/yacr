@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use cad_engine::render::{FrameCompleteness, RenderDiagnostics};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 
-use super::{lock, Shared};
+use super::{lock_telemetry, RenderTelemetry};
 
 /// The telemetry state of one CAD frame attempt (never UI text).
 ///
@@ -44,10 +44,13 @@ pub(super) const CAD_STAGE_SLOW_US: u64 = 50_000;
 
 /// Emit the engine render-gate diagnostic on a meaningful state change or a ~1 s
 /// heartbeat (never per frame). The caller checks `YACR_PROBE_CAD_LOG`.
-pub(super) fn log_render_diagnostics(shared: &Arc<Mutex<Shared>>, diagnostics: &RenderDiagnostics) {
+pub(super) fn log_render_diagnostics(
+    telemetry: &Arc<Mutex<RenderTelemetry>>,
+    diagnostics: &RenderDiagnostics,
+) {
     let now = Instant::now();
     {
-        let state = lock(shared);
+        let state = lock_telemetry(telemetry);
         let unchanged = state.last_render_diag.as_ref() == Some(diagnostics);
         let recent = state
             .last_render_diag_log
@@ -57,7 +60,7 @@ pub(super) fn log_render_diagnostics(shared: &Arc<Mutex<Shared>>, diagnostics: &
         }
     }
     {
-        let mut state = lock(shared);
+        let mut state = lock_telemetry(telemetry);
         state.last_render_diag = Some(diagnostics.clone());
         state.last_render_diag_log = Some(now);
     }

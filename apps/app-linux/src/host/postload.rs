@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::{lock, Shared, CAD, WEBVIEW};
+use super::{lock, lock_telemetry, RenderTelemetry, Shared, CAD, WEBVIEW};
 
 /// A compact summary of the latest **actual** render (for the post-load driver's
 /// readiness/final-frame admission). Not a replay of stats.
@@ -321,7 +321,10 @@ pub(super) fn postload_pan_step(
 /// then waits (bounded) for the final rendered+presented frame and exits
 /// naturally. Any timeout, missing moves/up, or a concurrent resize is an
 /// explicit bounded failure, never a fake pass.
-pub(super) fn drive_postload_pan(shared: &Arc<Mutex<Shared>>) {
+pub(super) fn drive_postload_pan(
+    shared: &Arc<Mutex<Shared>>,
+    telemetry: &Arc<Mutex<RenderTelemetry>>,
+) {
     let now = Instant::now();
     let Some((
         phase,
@@ -335,8 +338,8 @@ pub(super) fn drive_postload_pan(shared: &Arc<Mutex<Shared>>) {
         concurrent_resize,
         report,
     )) = ({
-        let state = lock(shared);
-        state.postload_pan.as_ref().map(|pan| {
+        let telemetry = lock_telemetry(telemetry);
+        telemetry.postload_pan.as_ref().map(|pan| {
             (
                 pan.phase,
                 pan.overall_deadline,
@@ -362,10 +365,10 @@ pub(super) fn drive_postload_pan(shared: &Arc<Mutex<Shared>>) {
         eprintln!(
             "[probe] postload-pan FAILED (no requested drawing from --open/YACR_TEST_DWG); explicit failure, no fake pass"
         );
-        if let Some(pan) = lock(shared).postload_pan.as_mut() {
+        if let Some(pan) = lock_telemetry(telemetry).postload_pan.as_mut() {
             pan.phase = PostloadPanPhase::Failed;
         }
-        exit_postload_pan(shared, 3);
+        exit_postload_pan(telemetry, 3);
         return;
     }
     let requested_file_name = requested
@@ -399,14 +402,14 @@ pub(super) fn drive_postload_pan(shared: &Arc<Mutex<Shared>>) {
             handle.device_epoch(),
         )
     });
-    let actual = lock(shared).last_actual_render;
+    let actual = lock_telemetry(telemetry).last_actual_render;
 
     // Structured report poll (RUNID-tracked marker via the eval response).
     if phase == PostloadPanPhase::Gesture && poll_at.is_some_and(|at| now >= at) {
-        if let Some(pan) = lock(shared).postload_pan.as_mut() {
+        if let Some(pan) = lock_telemetry(telemetry).postload_pan.as_mut() {
             pan.poll_at = Some(now + POSTLOAD_PAN_POLL);
         }
-        run_postload_pan_report(shared);
+        run_postload_pan_report(telemetry);
     }
 
     let ready = import_ready
@@ -440,8 +443,8 @@ pub(super) fn drive_postload_pan(shared: &Arc<Mutex<Shared>>) {
                 status.as_ref().and_then(|status| status.document_label.clone()),
                 status.as_ref().map(|status| status.import_count),
             );
-            run_postload_pan_gesture(shared);
-            let mut state = lock(shared);
+            run_postload_pan_gesture(telemetry);
+            let mut state = lock_telemetry(telemetry);
             if let Some(pan) = state.postload_pan.as_mut() {
                 pan.phase = PostloadPanPhase::Gesture;
                 pan.start_view_revision = view_revision;
@@ -460,10 +463,10 @@ pub(super) fn drive_postload_pan(shared: &Arc<Mutex<Shared>>) {
                 eprintln!(
                     "[probe] postload-pan FAILED (gesture completed but the camera did not change; start_view_rev={start_view_revision}) — explicit failure, no fake pass"
                 );
-                if let Some(pan) = lock(shared).postload_pan.as_mut() {
+                if let Some(pan) = lock_telemetry(telemetry).postload_pan.as_mut() {
                     pan.phase = PostloadPanPhase::Failed;
                 }
-                exit_postload_pan(shared, 3);
+                exit_postload_pan(telemetry, 3);
                 return;
             }
             let report_text = report
@@ -482,7 +485,7 @@ pub(super) fn drive_postload_pan(shared: &Arc<Mutex<Shared>>) {
             eprintln!(
                 "[probe] postload-pan gesture-complete {report_text} admitted_moves={admitted_moves} admitted_ups={admitted_ups} view_rev={view_revision}"
             );
-            let mut state = lock(shared);
+            let mut state = lock_telemetry(telemetry);
             if let Some(pan) = state.postload_pan.as_mut() {
                 pan.phase = PostloadPanPhase::AwaitingFinal;
                 pan.end_render_seq = actual.map(|actual| actual.render_seq).unwrap_or(0);
@@ -494,7 +497,7 @@ pub(super) fn drive_postload_pan(shared: &Arc<Mutex<Shared>>) {
             // remain. `gestures_target == 1` (the default) never takes this branch,
             // so the historical semantics are unchanged.
             let (done, target) = {
-                let state = lock(shared);
+                let state = lock_telemetry(telemetry);
                 state
                     .postload_pan
                     .as_ref()
@@ -505,7 +508,7 @@ pub(super) fn drive_postload_pan(shared: &Arc<Mutex<Shared>>) {
                     "[probe] postload-pan settle {done}/{target} view_rev={view_revision} device_epoch={device_epoch} actual_render_seq={:?} settled; re-arming for the next gesture",
                     actual.map(|actual| actual.render_seq)
                 );
-                if let Some(pan) = lock(shared).postload_pan.as_mut() {
+                if let Some(pan) = lock_telemetry(telemetry).postload_pan.as_mut() {
                     pan.gestures_done = done;
                     pan.phase = PostloadPanPhase::WaitingReady;
                     pan.poll_at = None;
@@ -518,7 +521,7 @@ pub(super) fn drive_postload_pan(shared: &Arc<Mutex<Shared>>) {
                 }
                 return;
             }
-            let elapsed_ms = lock(shared)
+            let elapsed_ms = lock_telemetry(telemetry)
                 .postload_pan
                 .as_ref()
                 .map(|pan| pan.started.elapsed().as_millis())
@@ -527,10 +530,10 @@ pub(super) fn drive_postload_pan(shared: &Arc<Mutex<Shared>>) {
                 "[probe] postload-pan end view_rev={view_revision} device_epoch={device_epoch} actual_render_seq={:?} start_view_rev={start_view_revision} elapsed_ms={elapsed_ms} natural_exit=0",
                 actual.map(|actual| actual.render_seq)
             );
-            if let Some(pan) = lock(shared).postload_pan.as_mut() {
+            if let Some(pan) = lock_telemetry(telemetry).postload_pan.as_mut() {
                 pan.phase = PostloadPanPhase::Finished;
             }
-            exit_postload_pan(shared, 0);
+            exit_postload_pan(telemetry, 0);
         }
         PostloadPanAction::Fail => {
             let reason = if concurrent_resize {
@@ -545,23 +548,23 @@ pub(super) fn drive_postload_pan(shared: &Arc<Mutex<Shared>>) {
             eprintln!(
                 "[probe] postload-pan FAILED (bounded) phase={phase:?} reason={reason} presented={presented} view_rev={view_revision} device_epoch={device_epoch} concurrent_resize={concurrent_resize} admitted_moves={admitted_moves} admitted_ups={admitted_ups} — explicit failure, no fake pass"
             );
-            if let Some(pan) = lock(shared).postload_pan.as_mut() {
+            if let Some(pan) = lock_telemetry(telemetry).postload_pan.as_mut() {
                 pan.phase = PostloadPanPhase::Failed;
             }
-            exit_postload_pan(shared, 3);
+            exit_postload_pan(telemetry, 3);
         }
     }
 }
 
 /// Exit the process for the post-load driver.
 ///
-/// The requested status is **recorded** in [`Shared`] so the entry point can
+/// The requested status is **recorded** in [`RenderTelemetry`] so the entry point can
 /// propagate it to the OS exit status after the event loop returns
 /// (`AppHandle::exit` alone was observed to leave the OS status 0); the handle's
 /// `exit` is still called to stop the loop promptly. `0` only on a proven pass.
-fn exit_postload_pan(shared: &Arc<Mutex<Shared>>, code: i32) {
+fn exit_postload_pan(telemetry: &Arc<Mutex<RenderTelemetry>>, code: i32) {
     let app = {
-        let mut state = lock(shared);
+        let mut state = lock_telemetry(telemetry);
         state.postload_pan_exit = Some(code);
         state.app_handle.clone()
     };
@@ -572,8 +575,8 @@ fn exit_postload_pan(shared: &Arc<Mutex<Shared>>, code: i32) {
 
 /// The process exit status the entry point must use after the event loop
 /// returns, if the bounded post-load driver requested one.
-pub fn requested_exit_code(shared: &Arc<Mutex<Shared>>) -> Option<i32> {
-    lock(shared).postload_pan_exit
+pub fn requested_exit_code(telemetry: &Arc<Mutex<RenderTelemetry>>) -> Option<i32> {
+    lock_telemetry(telemetry).postload_pan_exit
 }
 
 /// The OS exit status implied by a recorded requested code (pure): an absent
@@ -584,15 +587,15 @@ pub(crate) fn resolve_process_exit(requested: Option<i32>) -> i32 {
 }
 
 /// Dispatch the synthetic DOM pan gesture through the real webview (`eval`).
-fn run_postload_pan_gesture(shared: &Arc<Mutex<Shared>>) {
-    let shared = shared.clone();
+fn run_postload_pan_gesture(telemetry: &Arc<Mutex<RenderTelemetry>>) {
+    let telemetry = telemetry.clone();
     WEBVIEW.with(|cell| {
         if let Some(webview) = cell.borrow().as_ref() {
             let result =
                 webview.eval_with_callback(crate::evidence::POSTLOAD_PAN_JS, move |json| {
                     eprintln!("[probe] postload-pan gesture: {json}");
                     if let Some(run_id) = parse_pan_run_id(&json) {
-                        if let Some(pan) = lock(&shared).postload_pan.as_mut() {
+                        if let Some(pan) = lock_telemetry(&telemetry).postload_pan.as_mut() {
                             pan.expected_run_id = Some(run_id);
                         }
                     }
@@ -610,8 +613,8 @@ fn run_postload_pan_gesture(shared: &Arc<Mutex<Shared>>) {
 ///
 /// The callback payload is JSON-encoded by Tauri/GTK; `parse_pan_report` decodes
 /// it. A report whose run id does not match the gesture's unique id is rejected.
-fn run_postload_pan_report(shared: &Arc<Mutex<Shared>>) {
-    let shared = shared.clone();
+fn run_postload_pan_report(telemetry: &Arc<Mutex<RenderTelemetry>>) {
+    let telemetry = telemetry.clone();
     WEBVIEW.with(|cell| {
         if let Some(webview) = cell.borrow().as_ref() {
             let result =
@@ -620,7 +623,7 @@ fn run_postload_pan_report(shared: &Arc<Mutex<Shared>>) {
                     let Some(report) = parse_pan_report(&json) else {
                         return;
                     };
-                    let mut state = lock(&shared);
+                    let mut state = lock_telemetry(&telemetry);
                     if let Some(pan) = state.postload_pan.as_mut() {
                         if pan_report_matches_run(pan.expected_run_id, &report) {
                             pan.report = Some(report);

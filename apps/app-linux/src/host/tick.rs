@@ -17,7 +17,6 @@ use cad_ui_core::unsupported_status;
 use super::admission::{
     cad_present_admission, layout_needs_revalidate, BindStep, CadPresentAdmission,
 };
-use super::commands::drain_standard_views;
 use super::dom::run_dom_diag;
 use super::options::{ANIMATION_STEP, FRAME_INTERVAL};
 use super::postload::{drive_postload_pan, ActualRenderSummary};
@@ -26,20 +25,24 @@ use super::telemetry::{
     cad_frame_log_state, frame_completeness_label, log_render_diagnostics, opt_telemetry_u128,
     opt_telemetry_u64, CadFrameLogState, CAD_STAGE_SLOW_US,
 };
-use super::{lock, Shared, BRIDGE, CAD, CAD_ENV};
+use super::{lock, lock_telemetry, RenderTelemetry, Shared, BRIDGE, CAD, CAD_ENV};
+use cad_desktop_shell::commands::drain_standard_views;
 
 /// One probe tick. Runs on the main thread. The shared lock is held only for
 /// bookkeeping, never across GPU work.
-pub fn tick(shared: &Arc<Mutex<Shared>>) {
+pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>) {
     // ---- short critical section: bookkeeping only ----
     let (size, marker) = {
         let mut state = lock(shared);
-        state.wake_pending.store(false, Ordering::SeqCst);
+        // Lock order (frozen): Shared -> RenderTelemetry, never the reverse.
+        let mut telemetry = lock_telemetry(telemetry);
+        telemetry.wake_pending.store(false, Ordering::SeqCst);
 
         if state.shell.stopped {
             return;
         }
         if state.shell.stop_requested {
+            drop(telemetry);
             drop(state);
             release_presenter();
             let mut state = lock(shared);
@@ -49,22 +52,22 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
         }
 
         let now = Instant::now();
-        if let Some(last) = state.last_frame {
+        if let Some(last) = telemetry.last_frame {
             if now.duration_since(last) < FRAME_INTERVAL {
                 return;
             }
         }
-        state.last_frame = Some(now);
+        telemetry.last_frame = Some(now);
         state.shell.ticks += 1;
 
         // Periodic (~1 Hz) status line for evidence; includes the last frame's
         // per-stage timings and the frame index.
-        if state
+        if telemetry
             .last_log
             .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1))
         {
-            state.last_log = Some(now);
-            let stages = state
+            telemetry.last_log = Some(now);
+            let stages = telemetry
                 .last_timings
                 .map(|t| {
                     format!(
@@ -97,11 +100,12 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
 
         // Bounded DOM diagnostics at ~6s and ~14s (2 runs max); they only
         // dispatch an eval, so they never block the loop.
-        if state.diag_runs < 2 {
-            let due = Duration::from_secs(6 + 8 * u64::from(state.diag_runs));
-            if state.diag_start.elapsed() >= due {
-                state.diag_runs += 1;
-                let run = state.diag_runs;
+        if telemetry.diag_runs < 2 {
+            let due = Duration::from_secs(6 + 8 * u64::from(telemetry.diag_runs));
+            if telemetry.diag_start.elapsed() >= due {
+                telemetry.diag_runs += 1;
+                let run = telemetry.diag_runs;
+                drop(telemetry);
                 drop(state);
                 run_dom_diag(run);
                 return;
@@ -697,7 +701,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                     .map(|session| session.render_session().diagnostics())
             });
             if let Some(diagnostics) = diagnostics {
-                log_render_diagnostics(shared, &diagnostics);
+                log_render_diagnostics(telemetry, &diagnostics);
             }
         }
         // Actual-render observation: taken **once** per real renderer invocation
@@ -756,12 +760,12 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                     actual.gpu_time.as_token(),
                 );
             }
-            lock(shared).last_actual_render = Some(ActualRenderSummary {
+            lock_telemetry(telemetry).last_actual_render = Some(ActualRenderSummary {
                 render_seq: actual.render_seq,
                 view_revision: actual.view_revision,
                 device_epoch: actual.device_epoch,
             });
-            lock(shared).last_pulled_state = Some(actual.pulled_state.clone());
+            lock_telemetry(telemetry).last_pulled_state = Some(actual.pulled_state.clone());
         }
         let snapshot = CAD.with(|cell| {
             cell.borrow()
@@ -848,7 +852,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
         }
         // Env-gated, default-OFF bounded post-load pan evidence driver (runs after
         // the session status so it can gate on the imported document identity).
-        drive_postload_pan(shared);
+        drive_postload_pan(shared, telemetry);
         // Consume the presented-frame observation exactly once, and only for a
         // real present (never for a waiting/error frame), so the telemetry can
         // never replay a stale frame.
@@ -864,7 +868,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
         if let Some(observation) = observation {
             // The native presenter's real CAD stage timings (this is what makes
             // the periodic `status … stages_us[…]` meaningful in CAD mode).
-            lock(shared).last_timings = Some(observation.timings);
+            lock_telemetry(telemetry).last_timings = Some(observation.timings);
         }
         if cad_log {
             let view_current = CAD.with(|cell| {
@@ -940,7 +944,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>) {
                         state.shell.status.width = size.width;
                         state.shell.status.height = size.height;
                     }
-                    state.last_timings = Some(timings);
+                    lock_telemetry(telemetry).last_timings = Some(timings);
                     state.shell.status.error = None;
                 }
                 Err(error) => {

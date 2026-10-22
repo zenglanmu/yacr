@@ -1,0 +1,68 @@
+[
+  {
+    "ack": {
+      "accepted": false,
+      "marker_offset": 0.0002500000118743628,
+      "reason": "cad_waiting",
+      "sequence": 1,
+      "terminal": false
+    },
+    "case": "cad_waiting"
+  },
+  {
+    "ack": {
+      "accepted": true,
+      "marker_offset": 0.0,
+      "sequence": 1,
+      "terminal": false
+    },
+    "case": "probe_marker_move"
+  },
+  {
+    "ack": {
+      "accepted": true,
+      "marker_offset": 0.000750000006519258,
+      "sequence": 2,
+      "terminal": true
+    },
+    "case": "probe_marker_up"
+  },
+  {
+    "ack": {
+      "accepted": true,
+      "marker_offset": 0.0,
+      "sequence": 1,
+      "terminal": false
+    },
+    "case": "resize"
+  },
+  {
+    "ack": {
+      "accepted": true,
+      "marker_offset": 0.0004000000189989805,
+      "sequence": 1,
+      "terminal": false
+    },
+    "case": "cad_ready_pointer_down"
+  },
+  {
+    "ack": {
+      "accepted": false,
+      "marker_offset": 0.0,
+      "reason": "popup.modal_open",
+      "sequence": 1,
+      "terminal": false
+    },
+    "case": "modal_gate"
+  },
+  {
+    "ack": {
+      "accepted": false,
+      "marker_offset": 0.0,
+      "reason": "out_of_order_sequence",
+      "sequence": 4,
+      "terminal": false
+    },
+    "case": "sequence_regression"
+  }
+]

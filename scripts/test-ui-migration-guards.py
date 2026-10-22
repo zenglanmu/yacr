@@ -84,6 +84,14 @@ ARCH_MEMBERS: dict[str, str] = {
         '[dependencies]\ncad-app = { path = "../cad-app" }\n'
         'cad-host = { path = "../cad-host" }\n'
     ),
+    "crates/cad-desktop-shell": (
+        '[package]\nname = "cad-desktop-shell"\nversion = "0.1.0"\n\n'
+        '[dependencies]\ncad-ui-core = { path = "../cad-ui-core" }\n'
+    ),
+    "apps/app-linux": (
+        '[package]\nname = "app-linux"\nversion = "0.1.0"\n\n'
+        '[dependencies]\ncad-desktop-shell = { path = "../../crates/cad-desktop-shell" }\n'
+    ),
 }
 
 

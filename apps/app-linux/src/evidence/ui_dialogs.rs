@@ -16,14 +16,14 @@
 //! directly.
 //!
 //! * `Ctrl+1` is a real `KeyboardEvent('keydown')` on `window`; the app's global
-//!   handler (`apps/app-linux/ui/src/App.jsx`, `if (event.ctrlKey && event.key
+//!   handler (`apps/desktop-ui/src/App.jsx`, `if (event.ctrlKey && event.key
 //!   === '1') { … setPropertiesOpen(…) }`) toggles the docked palette.
 //! * `DIST`/`OPTIONS` are typed into `#cad-command` through the
 //!   `HTMLInputElement.prototype` value setter plus the `input` event its
 //!   `onChange` listens to, then submitted with the `KeyboardEvent('keydown')`
 //!   `Enter` that `CommandLine.jsx`'s own `onKeyDown` (`handleCommandKey`) turns
 //!   into `shell.submitCommand`. `OPTIONS` is therefore intercepted by the chrome
-//!   (`apps/app-linux/ui/src/options.mjs` `isOptionsCommand`) and never reaches
+//!   (`apps/desktop-ui/src/options.mjs` `isOptionsCommand`) and never reaches
 //!   the router — the same path a user's Enter takes.
 //! * The two `DIST` picks and the selection click are synthetic `PointerEvent`s
 //!   on `.native-input` using [`super::tool::tool_click_world_js`].

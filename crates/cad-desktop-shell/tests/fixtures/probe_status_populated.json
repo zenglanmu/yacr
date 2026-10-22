@@ -1,0 +1,9 @@
+{
+  "adapter": "Quadro P620",
+  "backend": "vulkan",
+  "error": "present failed",
+  "frames": 42,
+  "height": 720,
+  "stopped": false,
+  "width": 1280
+}
