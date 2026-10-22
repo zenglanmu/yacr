@@ -100,6 +100,9 @@ pub struct Win32CadSurface {
     gpu_time: GpuTimeConfig,
     /// Last emitted z-order line, so a steady order does not log per tick.
     order_logged: bool,
+    /// Whether a persistent `ensure_order` failure was already reported, so a
+    /// broken re-assert does not flood the log every tick.
+    order_failure_logged: bool,
 }
 
 impl Win32CadSurface {
@@ -143,6 +146,7 @@ impl Win32CadSurface {
             session: None,
             gpu_time,
             order_logged: false,
+            order_failure_logged: false,
         };
         surface.log_z_order("install");
         Ok(surface)
@@ -219,13 +223,32 @@ impl Win32CadSurface {
             )
         };
         match result {
-            Ok(()) => self.log_z_order("re-assert"),
-            Err(error) => eprintln!("[probe] win32 z-order re-assert FAILED: {error}"),
+            Ok(()) => {
+                self.order_failure_logged = false;
+                self.log_z_order("re-assert");
+            }
+            Err(error) => {
+                // Persistent failure (e.g. the container vanished) would
+                // otherwise print on every tick; report once per failure state
+                // and reset on recovery.
+                if !self.order_failure_logged {
+                    eprintln!(
+                        "[probe] win32 z-order re-assert FAILED \
+                         (suppressing repeats until recovery): {error}"
+                    );
+                    self.order_failure_logged = true;
+                }
+            }
         }
     }
 
     /// Apply the accepted DOM layout: scale the logical insets to physical pixels
     /// and place the child window.
+    ///
+    /// Placement **waits** while the wry container is unknown: `hWndInsertAfter =
+    /// NULL` is `HWND_TOP`, which would put the CAD child above the DOM — the
+    /// exact inversion this composition forbids. The desired rect is still
+    /// recorded, so [`Self::try_init_gpu`] can wait for the same container.
     pub fn apply_layout(
         &mut self,
         insets: ViewportInsets,
@@ -243,13 +266,20 @@ impl Win32CadSurface {
         let height = (container_h - top - bottom).max(1);
         self.rect = (start, top, width, height);
         self.container = self.container.or_else(|| find_webview_container(self.top));
+        let Some(container) = self.container else {
+            // Wait for the wry container: passing `NULL` here would mean
+            // `HWND_TOP` and invert the CAD-below-DOM contract. The child is
+            // still empty/1x1 and the presenter refuses to initialize without a
+            // container, so skipping the placement has no visual consequence.
+            return Ok(());
+        };
         let (x, y, w, h) = self.rect;
         // `hWndInsertAfter = container` puts the CAD window immediately **below**
         // the WebView container in the sibling z-order.
         unsafe {
             SetWindowPos(
                 self.cad,
-                self.container,
+                Some(container),
                 x,
                 y,
                 w,

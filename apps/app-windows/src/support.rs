@@ -21,6 +21,10 @@
 //! through `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER`. Detection never fabricates a
 //! positive answer: an unreadable/absent runtime is a refusal.
 //!
+//! Detection proves the runtime **exists**, not that it is **usable**: a
+//! registered but corrupt runtime fails explicitly when the window/webview is
+//! built (exit 1 with a printed error), which detection cannot predict.
+//!
 //! The pure contract half (marker, exit code, alpha, catalog keys) compiles on
 //! every host so `cargo test -p app-windows --lib` can exercise it without
 //! Windows; the Win32/registry probes are `cfg(target_os = "windows")` only.
@@ -36,8 +40,8 @@ pub const UNSUPPORTED_WEBVIEW2_MARKER: &str = "yacr: unsupported-runtime: webvie
 /// Process exit status for the WebView2 refusal.
 ///
 /// The registry is append-only: `0` success, `1` generic failure, `2` invalid
-/// display policy, `3` reserved (legacy), `4` unsupported display backend — so
-/// the next free code is `5`.
+/// display policy, `3` active post-load-pan evidence failure, `4` unsupported
+/// display backend — so the next free code is `5`.
 pub const UNSUPPORTED_WEBVIEW2_EXIT_CODE: i32 = 5;
 
 /// Catalog key: one-line user-facing refusal title.
@@ -298,6 +302,10 @@ mod tests {
         assert_ne!(UNSUPPORTED_WEBVIEW2_EXIT_CODE, 0);
         assert_ne!(UNSUPPORTED_WEBVIEW2_EXIT_CODE, 1);
         assert_ne!(UNSUPPORTED_WEBVIEW2_EXIT_CODE, 2);
+        // `3` is the **active** post-load-pan evidence code, not a legacy
+        // reservation: reusing it would make evidence classify a refusal as a
+        // post-load failure.
+        assert_ne!(UNSUPPORTED_WEBVIEW2_EXIT_CODE, 3);
         assert_ne!(UNSUPPORTED_WEBVIEW2_EXIT_CODE, 4);
     }
 
