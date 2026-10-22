@@ -8,7 +8,7 @@
 #      preserved; an unset one is resolved authoritatively by the host (Wayland
 #      preferred; see apps/app-linux/src/backend.rs,
 #      docs/adr/0006-react-native-linux-experiment.md),
-#   2. builds the designer UI (`apps/app-linux/ui`) with Vite: `npm ci`
+#   2. builds the shared desktop UI (`apps/desktop-ui`) with Vite: `npm ci`
 #      when `node_modules` is missing, then `npm run build`,
 #   3. runs the host with `custom-protocol` so the built `ui/dist` is embedded.
 #
@@ -44,7 +44,7 @@ if [[ -z "${GDK_BACKEND:-}" ]]; then
     fi
 fi
 
-ui_dir="$root/apps/app-linux/ui"
+ui_dir="$root/apps/desktop-ui"
 if [[ ! -d "$ui_dir/node_modules" ]]; then
     echo "[run] node_modules missing; running npm ci in $ui_dir"
     (cd "$ui_dir" && npm ci)

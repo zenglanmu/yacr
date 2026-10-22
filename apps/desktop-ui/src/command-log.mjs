@@ -9,7 +9,7 @@
 // nothing at all.
 //
 // Angle precedent: **none exists in the React chrome.** No module under
-// `apps/app-linux/ui/src` formats a measured angle (measurement readouts do not
+// `apps/desktop-ui/src` formats a measured angle (measurement readouts do not
 // live in the JS layer), and the only degree mark in the tree is the DXF `%%d`
 // control code mapped in `crates/cad-representation/src/text/mtext.rs`. Angles
 // are therefore printed in degrees with the same fixed decimal count as the

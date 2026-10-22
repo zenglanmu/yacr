@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 // The bilingual catalogs live in the shared, platform-independent UI core
 // (`crates/cad-ui-core/i18n`). The `@i18n` alias keeps components free of long
 // relative paths and gives the two files a single home.
-const i18nDir = fileURLToPath(new URL('../../../crates/cad-ui-core/i18n/', import.meta.url));
+const i18nDir = fileURLToPath(new URL('../../crates/cad-ui-core/i18n/', import.meta.url));
 
 export default defineConfig({
   base: './',

@@ -1,8 +1,8 @@
 # React 桌面外壳 UI（AutoCAD 风格）
 
-本目录是 `app-linux` 的前端：Vite + React 19（纯 JS/JSX）。它绘制的是**宿主外壳**
-（标题/QAT、功能区、图纸标签、命令区、状态栏），不是 CAD 图纸本身——图纸由 Rust 宿主以
-原生 surface 合成在中间分区。
+本目录是**桌面宿主共用的唯一 React UI 包**（当前消费方是 `app-linux`；后续桌面宿主复用同一棵
+UI 树，不按平台分叉）：Vite + React 19（纯 JS/JSX）。它绘制的是**宿主外壳**（标题/QAT、功能区、
+图纸标签、命令区、状态栏），不是 CAD 图纸本身——图纸由 Rust 宿主以原生 surface 合成在中间分区。
 
 ```sh
 npm ci

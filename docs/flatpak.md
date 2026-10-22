@@ -14,7 +14,7 @@
 - **app-id / 运行时**：`dev.yacr.app`，`runtime: org.gnome.Platform//51`，
   `sdk: org.gnome.Sdk//51`，`command: yacr`。运行时由构建用的 SDK 同代提供（见 §2 前置条件）。
 - **打包方式：预构建二进制**。`scripts/package-linux-release.sh` 先构建 React 前端
-  （`apps/app-linux/ui`：`npm ci` + `npm run build`），再以
+  （`apps/desktop-ui`：`npm ci` + `npm run build`），再以
   `cargo build --release --locked -p app-linux --bin yacr --features tauri/custom-protocol` 构建
   宿主，然后把 `bin/yacr` 与 **已提交的** `fonts/` 落到 `target/flatpak/payload`；manifest 以
   `type: dir` source 安装进 `/app`。**沙箱内不编译、不联网下载字体**。

@@ -38,7 +38,7 @@ export function readCss() {
 }
 
 export function catalogPath(locale) {
-  return new URL(`../../../../crates/cad-ui-core/i18n/${locale}.json`, import.meta.url);
+  return new URL(`../../../crates/cad-ui-core/i18n/${locale}.json`, import.meta.url);
 }
 
 export async function readCatalog(locale) {

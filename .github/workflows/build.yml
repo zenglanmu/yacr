@@ -76,12 +76,12 @@ jobs:
           sudo apt-get install -y \
             pkgconf libgtk-3-dev libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
-      - name: Test and build the React frontend (apps/app-linux/ui)
+      - name: Test and build the React frontend (apps/desktop-ui)
         # The frontend's own node:test suite runs first so the native compile gate
         # also exercises the React logic; `tauri::generate_context!` embeds
-        # `apps/app-linux/ui/dist` at compile time, so the Vite bundle must exist
+        # `apps/desktop-ui/dist` at compile time, so the Vite bundle must exist
         # before the Rust host is checked.
-        working-directory: apps/app-linux/ui
+        working-directory: apps/desktop-ui
         run: |
           npm ci
           npm test

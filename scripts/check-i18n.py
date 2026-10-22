@@ -22,10 +22,11 @@ Checks, all of which must pass:
    entries (best effort against a documented allowlist of dynamic/legacy
    identifiers);
 6. no hardcoded CJK literal remains in non-test Rust UI code;
-7. no hardcoded CJK copy remains in the **React UI** (`apps/app-linux/ui/src`
-   ``*.jsx``/``*.js``/``*.mjs``): both string/template literals and bare JSX text
-   nodes are scanned with a small lexical walk that skips top-level ``//`` /
-   ``/* */`` comments. Canonical JSON catalogs are never scanned.
+7. no hardcoded CJK copy remains in the **React UI** (`apps/desktop-ui/src`, the
+   one shared desktop UI tree; ``*.jsx``/``*.js``/``*.mjs``): both string/template
+   literals and bare JSX text nodes are scanned with a small lexical walk that
+   skips top-level ``//`` / ``/* */`` comments. Canonical JSON catalogs are never
+   scanned.
 
 The catalogs are the **single canonical source**: `crates/cad-ui-core/i18n/`
 (read by `cad_ui_core::i18n` via `include_str!` and by the React UI through the
@@ -37,7 +38,7 @@ Coverage limitations (honest):
 - only **literal** keys are resolved. Keys reached through indirection (e.g.
   ``t(suggestion.labelKey)`` where ``labelKey`` is built at runtime, or a key
   assembled from fragments) are not resolved here; they must stay covered by the
-  React UI's own node:test suite (`ui/test/i18n.test.mjs`) and by review.
+  React UI's own node:test suite (`apps/desktop-ui/test/i18n.test.mjs`) and by review.
 - the React CJK walk is a lexical heuristic, not a full JS/JSX parser, so it has
   both false positives and false negatives. False positives: CJK inside a comment
   nested in a template interpolation (`` `${x /* 中文 */}` ``) is read as template
@@ -120,11 +121,20 @@ def catalog_paths(root: pathlib.Path) -> dict[str, pathlib.Path]:
 
 
 def rust_sources(root: pathlib.Path) -> list[pathlib.Path]:
-    return [root / "crates" / "cad-ui-core" / "src", root / "apps" / "app-linux" / "src"]
+    # Every desktop host owns Rust UI code. `crates/cad-desktop-shell` and
+    # `apps/app-windows` are listed ahead of landing; a missing directory simply
+    # contributes no files, so the scan set stays correct as the tree grows.
+    return [
+        root / "crates" / "cad-ui-core" / "src",
+        root / "crates" / "cad-desktop-shell" / "src",
+        root / "apps" / "app-linux" / "src",
+        root / "apps" / "app-windows" / "src",
+    ]
 
 
 def ui_sources(root: pathlib.Path) -> list[pathlib.Path]:
-    return [root / "apps" / "app-linux" / "ui" / "src"]
+    # One shared React tree for every desktop host (`apps/desktop-ui`).
+    return [root / "apps" / "desktop-ui" / "src"]
 
 
 def strip_comments(text: str) -> str:

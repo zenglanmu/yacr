@@ -9,7 +9,7 @@
 仍待验证，见 `docs/validation-native-wayland-2026-10-16.md`）。
 
 - 应用：`apps/app-linux`；二进制 `yacr`（Tauri 标识 `dev.yacr.app`，产品名 `Yacr`）。
-- 前端：`apps/app-linux/ui`（Vite + React 19）。
+- 前端：`apps/desktop-ui`（所有桌面宿主共用的唯一 React UI 包；Vite + React 19）。
 - 平台无关 UI 逻辑：`crates/cad-ui-core`（protocol/layout/session/shell/i18n）。
 - 入口脚本：`scripts/run-react-linux.sh`（在仓库任意目录调用；用 git 定位根、路径加引号、
   `set -euo pipefail`）。
@@ -18,7 +18,7 @@
 
 - **WebKitGTK 4.1 开发包**（`libwebkit2gtk-4.1-dev`）与 **GTK3 开发包**（`libgtk-3-dev`）；
   `pkg-config --exists webkit2gtk-4.1 gtk+-3.0` 应通过。
-- **Node + npm**（用于 Vite 构建 `apps/app-linux/ui`）。
+- **Node + npm**（用于 Vite 构建 `apps/desktop-ui`）。
 - Rust 工具链按仓库 `rust-toolchain.toml`。
 - 默认 `debug` 构建即可快速运行；`scripts/run-react-linux.sh` 默认 `--release`（可选，较慢）。
 - **不**自动安装系统依赖；缺失时脚本报错退出。
@@ -38,7 +38,7 @@ bash scripts/run-react-linux.sh --open "$(pwd)/fixtures/dwg/synthetic-four-lines
 先构建前端（`ui/dist` 会被嵌入），再按需显式选择后端运行。**原生 Wayland**（真实原生，非 XWayland）：
 
 ```bash
-(cd apps/app-linux/ui && npm ci && npm run build)
+(cd apps/desktop-ui && npm ci && npm run build)
 # 精确复测既有二进制（当前为 sha256 7618d0d2…）：直接跑 target/release/yacr
 env -u DISPLAY -u XAUTHORITY \
     GDK_BACKEND=wayland WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000 \
@@ -161,7 +161,7 @@ UI 侧另有两个**独立**挂起理由（`textFocus` / `popupOpen`），命令
 ### 可选 DOM-on-top 实验（不是产品迁移）
 
 在当前用户的真实图形会话中，先确保另一终端的 Vite 开发服务已启动
-（`cd apps/app-linux/ui && npm run dev`），再执行：
+（`cd apps/desktop-ui && npm run dev`），再执行：
 
 ```bash
 cargo build -p app-linux --bin yacr --locked
@@ -186,11 +186,11 @@ GDK_BACKEND=x11 YACR_PROBE_DOM_ON_TOP=1 ./target/debug/yacr --probe
 右侧导航栏）→ 模型/布局标签 → 命令行（含补全与 F2 历史）→ 状态栏。所有用户可见文案来自
 `crates/cad-ui-core/i18n/{zh-CN,en}.json`，组件内不写死文案。
 
-功能区面板带为**固定高度**（`--ribbon-h`，`apps/app-linux/ui/src/style.css`），所有选项卡一致，
+功能区面板带为**固定高度**（`--ribbon-h`，`apps/desktop-ui/src/style.css`），所有选项卡一致，
 切换选项卡**不改变** chrome 高度（因而不会重报 CAD 分区矩形）；小按钮在固定高度内按列优先网格
 **横向**排布，超宽时面板带横向滚动、不静默丢命令。变体下拉改为**带内浮层**（绝对定位于面板
 body 内，不越出功能区、不撑高），Escape/点击外部关闭。契约测试见
-`apps/app-linux/ui/test/ribbon.test.mjs`。
+`apps/desktop-ui/test/ribbon.test.mjs`。
 
 ## 支持范围
 

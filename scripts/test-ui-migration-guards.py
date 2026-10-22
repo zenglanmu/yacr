@@ -239,7 +239,7 @@ class I18nGuardContract(unittest.TestCase):
         (i18n_dir / "en.json").write_text(
             json.dumps(CATALOG_EN, ensure_ascii=False), encoding="utf-8"
         )
-        self.ui_src = self.root / "apps" / "app-linux" / "ui" / "src"
+        self.ui_src = self.root / "apps" / "desktop-ui" / "src"
         self.ui_src.mkdir(parents=True)
 
     def tearDown(self) -> None:
@@ -312,7 +312,7 @@ class I18nGuardContract(unittest.TestCase):
             (i18n_dir / "en.json").write_text(
                 json.dumps(CATALOG_EN, ensure_ascii=False), encoding="utf-8"
             )
-            src = root / "apps" / "app-linux" / "ui" / "src"
+            src = root / "apps" / "desktop-ui" / "src"
             src.mkdir(parents=True)
             (src / "Bad.jsx").write_text(
                 "export const View = () => <span>打开图纸</span>;\n", encoding="utf-8"

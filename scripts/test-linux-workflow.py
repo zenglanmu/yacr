@@ -57,7 +57,7 @@ class LinuxWorkflowContracts(unittest.TestCase):
         self.assertEqual(self.check_text(text), [])
         # Dropping the WebKitGTK/Tauri prerequisite, the React test run or the
         # frontend build must be reported, not silently accepted.
-        for fragment in ("libwebkit2gtk-4.1-dev", "apps/app-linux/ui", "npm test", "npm run build"):
+        for fragment in ("libwebkit2gtk-4.1-dev", "apps/desktop-ui", "npm test", "npm run build"):
             with self.subTest(fragment=fragment):
                 self.assertNotEqual(
                     self.check_text(text.replace(fragment, "")),

@@ -570,7 +570,9 @@ test('the dialog size agrees with the Rust window size', async () => {
   const layout = await readModule('popup-layout.mjs');
   assert.ok(layout.includes('export const OPTIONS_WIDTH = 720;'));
   assert.ok(layout.includes('export const OPTIONS_HEIGHT = 560;'));
-  const rust = await readFile(new URL('../../src/host/popup.rs', import.meta.url), 'utf8');
+  // The popup kinds and their window sizes are platform-independent UI logic, so
+  // they live in `cad-ui-core` (P1a moved them out of the Linux host).
+  const rust = await readFile(new URL('../../../crates/cad-ui-core/src/popup/mod.rs', import.meta.url), 'utf8');
   assert.ok(rust.includes('pub const OPTIONS_WIDTH: f64 = 720.0;'));
   assert.ok(rust.includes('pub const OPTIONS_HEIGHT: f64 = 560.0;'));
   assert.ok(rust.includes('PopupKind::Options'));

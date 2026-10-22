@@ -8,7 +8,7 @@
 `scripts/test-linux-workflow.py`（变异契约）、`scripts/test-ui-migration-guards.py`（迁移守卫契约）。
 
 > **2026-10-16 迁移状态**：桌面已迁移到 React/Tauri（`apps/app-linux`、`yacr`），Slint 退役。
-> 编译门禁已加入 Tauri/GTK 前置（`libwebkit2gtk-4.1-dev`）与 React 前端构建（`apps/app-linux/ui`、
+> 编译门禁已加入 Tauri/GTK 前置（`libwebkit2gtk-4.1-dev`）与 React 前端构建（`apps/desktop-ui`、
 > `npm test`、`npm run build`）。8 个发布/Web job 以 `if: false` **硬禁用**并以 `RETIRED` 标记，
 > **不可通过仓库变量重新启用**，也不含 `secrets.…` 发布路径。见 ADR 0010。
 
@@ -91,7 +91,7 @@ python3 scripts/check-file-size.py   # 代码文件 ≤1000 行；文档不计�
 cargo check --workspace --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 # React 前端
-(cd apps/app-linux/ui && npm ci && npm test && npm run build)
+(cd apps/desktop-ui && npm ci && npm test && npm run build)
 # 工作流/打包/迁移契约
 python3 scripts/test-linux-workflow.py
 python3 scripts/test-ui-migration-guards.py

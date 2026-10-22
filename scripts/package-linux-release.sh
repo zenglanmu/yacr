@@ -3,7 +3,7 @@
 #
 # Pipeline (nothing is compiled inside the sandbox; the manifest only installs a
 # prebuilt payload):
-#   1. build the React frontend (apps/app-linux/ui: `npm ci` + `npm run build`);
+#   1. build the shared desktop UI (apps/desktop-ui: `npm ci` + `npm run build`);
 #   2. build the release binary with `--features tauri/custom-protocol` so the
 #      built `ui/dist` is embedded — without that feature the binary expects the
 #      Vite dev server and cannot run standalone;
@@ -38,7 +38,7 @@ RUNTIME_VERSION="51"
 RUNTIME_REF="org.gnome.Platform//${RUNTIME_VERSION}"
 SDK_REF="org.gnome.Sdk//${RUNTIME_VERSION}"
 MANIFEST="packaging/flatpak/dev.yacr.app.yml"
-UI_DIR="apps/app-linux/ui"
+UI_DIR="apps/desktop-ui"
 TAURI_CONF="apps/app-linux/tauri.conf.json"
 PAYLOAD="target/flatpak/payload"
 BUILD="target/flatpak/build"

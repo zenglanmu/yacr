@@ -264,7 +264,7 @@ record_row() {
 if [[ "$do_build" -eq 1 ]]; then
     mkdir -p "$out_dir/build"
     echo "[collect] building frontend"
-    ui_dir="$root/apps/app-linux/ui"
+    ui_dir="$root/apps/desktop-ui"
     frontend_log="$out_dir/build/frontend-build.log"
     if [[ ! -d "$ui_dir/node_modules" ]]; then
         echo "[collect] node_modules missing; running npm ci"

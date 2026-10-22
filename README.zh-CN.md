@@ -119,7 +119,7 @@ bash scripts/run-react-linux.sh --open /absolute/drawing.dwg
 直接运行（需先构建前端）：
 
 ```bash
-(cd apps/app-linux/ui && npm ci && npm run build)
+(cd apps/desktop-ui && npm ci && npm run build)
 cargo run --release --locked -p app-linux --bin yacr \
   --features tauri/custom-protocol -- --open /absolute/drawing.dwg
 ```
@@ -170,7 +170,7 @@ python3 scripts/check-i18n.py
 cargo check --workspace --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 cargo test --workspace --locked -- --test-threads=1   # GPU/CLI 用例串行跑
-(cd apps/app-linux/ui && npm ci && npm test && npm run build)
+(cd apps/desktop-ui && npm ci && npm test && npm run build)
 ```
 
 日常开发只验证改动范围（改动 crate 的编译/测试/fmt/clippy）；上述全量门禁用于明确要求与发版验收。

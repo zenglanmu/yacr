@@ -117,7 +117,7 @@ test('every probe label exists in both authoritative catalogs', async () => {
   const jsx = await source('../src/probe-dom-on-top/Probe.jsx');
   const keys = [...jsx.matchAll(/t\('(probe\.dom_on_top\.[^']+)'/g)].map(match => match[1]);
   for (const locale of ['en', 'zh-CN']) {
-    const catalog = JSON.parse(await source(`../../../../crates/cad-ui-core/i18n/${locale}.json`));
+    const catalog = JSON.parse(await source(`../../../crates/cad-ui-core/i18n/${locale}.json`));
     for (const key of keys) assert.equal(typeof catalog[key], 'string', `${locale}: ${key}`);
   }
 });

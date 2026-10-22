@@ -94,7 +94,7 @@ test('parseSelection rejects genuinely malformed selection payloads', () => {
 
 test('every machine key emitted by cad-app::selection has a label in both catalogs', async () => {
   // Read the Rust source of truth so a new row key cannot silently ship unlabeled.
-  const source = await readFile(new URL('../../../../crates/cad-app/src/selection.rs', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../../../crates/cad-app/src/selection.rs', import.meta.url), 'utf8');
   const keys = new Set([...source.matchAll(/PropertyRow::new\(\s*"([a-z0-9_]+)"/g)].map(match => match[1]));
   assert.ok(keys.size > 30, `expected the selection module to emit many row keys, saw ${keys.size}`);
   for (const key of keys) {

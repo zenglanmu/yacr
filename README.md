@@ -143,7 +143,7 @@ bash scripts/run-react-linux.sh --open /absolute/drawing.dwg
 Direct run (build the frontend first):
 
 ```bash
-(cd apps/app-linux/ui && npm ci && npm run build)
+(cd apps/desktop-ui && npm ci && npm run build)
 cargo run --release --locked -p app-linux --bin yacr \
   --features tauri/custom-protocol -- --open /absolute/drawing.dwg
 ```
@@ -197,7 +197,7 @@ python3 scripts/check-i18n.py
 cargo check --workspace --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 cargo test --workspace --locked -- --test-threads=1   # GPU/CLI cases run serially
-(cd apps/app-linux/ui && npm ci && npm test && npm run build)
+(cd apps/desktop-ui && npm ci && npm test && npm run build)
 ```
 
 Daily development only verifies the changed scope (that crate's compile/tests/fmt/clippy); the full

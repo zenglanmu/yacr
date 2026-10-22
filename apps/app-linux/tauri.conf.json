@@ -5,7 +5,7 @@
   "identifier": "dev.yacr.app",
   "build": {
     "devUrl": "http://localhost:1420",
-    "frontendDist": "ui/dist"
+    "frontendDist": "../desktop-ui/dist"
   },
   "app": {
     "windows": [],

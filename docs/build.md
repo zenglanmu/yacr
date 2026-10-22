@@ -40,7 +40,7 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
 ```bash
 cargo test -p cad-ui-core -p app-linux --lib --locked
 cargo test -p cad-engine -p cad-host -p cad-app --lib --locked
-(cd apps/app-linux/ui && npm ci && npm test && npm run build)
+(cd apps/desktop-ui && npm ci && npm test && npm run build)
 ```
 
 ## Linux 桌面宿主（当前唯一可运行 GUI）
@@ -81,10 +81,10 @@ env -u DISPLAY -u XAUTHORITY GDK_BACKEND=wayland WAYLAND_DISPLAY=wayland-0 \
 
 **配置目录**：`~/.config/yacr/`（由旧的 `~/.config/yacr-react/` 迁移，**不自动迁移**）。
 
-**前端**：`apps/app-linux/ui`（Vite + React 19）：
+**前端**：`apps/desktop-ui`（所有桌面宿主共用的唯一 React UI 包；Vite + React 19）：
 
 ```bash
-cd apps/app-linux/ui
+cd apps/desktop-ui
 npm ci          # 或 npm install
 npm test        # node:test 契约
 npm run build   # 产出 dist/（被 .gitignore 忽略）

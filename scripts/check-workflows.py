@@ -47,7 +47,7 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         # Tauri/GTK native prerequisites plus the React test + build the native
         # gate must run before `tauri::generate_context!` embeds `ui/dist`.
         "libwebkit2gtk-4.1-dev",
-        "apps/app-linux/ui",
+        "apps/desktop-ui",
         "npm test",
         "npm run build",
         "actions/upload-artifact",
@@ -64,7 +64,7 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         # needs the same Tauri/GTK prerequisites and the frontend dist — and it
         # runs the React tests and the retained platform-neutral node contract.
         "libwebkit2gtk-4.1-dev",
-        "apps/app-linux/ui",
+        "apps/desktop-ui",
         "npm test",
         "npm run build",
         "node --test scripts/test-web-pixels.mjs",
