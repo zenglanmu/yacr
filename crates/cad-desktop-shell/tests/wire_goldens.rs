@@ -17,6 +17,8 @@
 //! `popup.host_unavailable` refusal), canonical form vs actual IPC encoding
 //! (tests call the `*_impl` bodies directly), and lock ordering (reviewed
 //! separately in the WP1 gate; out of scope here).
+//! The additive `cad_open_popup` ack `payload` field (WP3) is covered by shape
+//! contract tests only (`cad_ui_core::popup::tests`); it has no byte golden here.
 
 use std::sync::Arc;
 

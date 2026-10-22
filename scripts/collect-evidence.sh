@@ -748,7 +748,9 @@ timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "- $out_dir/build/x11-window-grab (binary), $out_dir/build/x11-window-grab-build.log"
     echo "- $out_dir/x11/run.log; (only when the backend ran, not on the refusal path) gpu-identity.txt, shot-top.png, shot-top.ppm, shot-cad.png, shot-cad.ppm"
     echo "- $out_dir/wayland/run.log, wayland-frame.png, gpu-identity.txt (production launch)"
-    echo "- $out_dir/wayland-stacking-regression/run.log, initial.png, popup-open.png, after-synthetic-input.png, after-synthetic-input-later.png, gpu-identity.txt (separate fixture launch)"
+    if [[ "$stacking_regression" -eq 1 ]]; then
+        echo "- $out_dir/wayland-stacking-regression/run.log, initial.png, popup-open.png, after-synthetic-input.png, after-synthetic-input-later.png, gpu-identity.txt (separate fixture launch)"
+    fi
     echo "- A refused backend has no window and produces no screenshot; its marker line"
     echo "  in run.log and the results.tsv row are the evidence."
     echo

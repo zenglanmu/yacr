@@ -59,3 +59,20 @@ test('the CAD partition paints nothing and holds no DOM children', async () => {
   assert.ok(!app.includes('<canvas'));
   assert.ok(!app.includes('position:absolute;inset:0;z-index'));
 });
+
+test('every production ancestor over the CAD partition stays transparent', async () => {
+  const css = await readCss();
+  // WP2 composites the native CAD surface *below* the DOM, so an opaque fill on
+  // any ancestor spanning the partition rect hides it. Chrome regions keep their
+  // own opaque fills; only the shell/workspace/canvas chain is see-through.
+  for (const selector of ['.shell', '.workspace', '.workspace__canvas']) {
+    const rule = css.match(new RegExp(`${selector.replace('.', '\\.')}\\s*\\{([^}]*)\\}`));
+    assert.ok(rule, `${selector} rule exists`);
+    assert.match(rule[1], /background:\s*transparent/, `${selector} paints nothing over the CAD surface`);
+  }
+  for (const selector of ['.workspace__left', '.navrail']) {
+    const rule = css.match(new RegExp(`${selector.replace('.', '\\.')}\\s*\\{([^}]*)\\}`));
+    assert.ok(rule, `${selector} rule exists`);
+    assert.match(rule[1], /background:\s*var\(--chrome-3\)/, `${selector} keeps its opaque dock fill`);
+  }
+});

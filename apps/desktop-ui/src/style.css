@@ -5,8 +5,15 @@
  *   nav rail) · model/layout tabs · command line · status bar.
  *
  * The central CAD partition is a native surface composited by the Rust host at
- * the rect this DOM reports. `.native-input` therefore paints nothing and holds
- * no children: DOM chrome surrounds it, never floats across it.
+ * the rect this DOM reports. Since WP2 that surface is **below** this DOM tree,
+ * so every ancestor of `.native-input` must be transparent inside the partition
+ * rect: the renderer's own clear colour is the drawing backdrop. `.native-input`
+ * therefore paints nothing and holds no children; the chrome regions carry their
+ * own opaque fills, and nothing floats across the partition. Consequence: the
+ * partition is unpainted by the webview, so between window map and the first
+ * native CAD frame the desktop may briefly show through. That is accepted on
+ * purpose - the renderer's own clear colour is the intended backdrop, and
+ * re-adding a DOM fill here would hide the surface again.
  */
 
 :root {
@@ -90,7 +97,10 @@ button, input, select { font: inherit; color: inherit; }
   flex-direction: column;
   width: 100%;
   height: 100%;
-  background: var(--chrome-3);
+  /* Transparent, not a fill: the native CAD surface is composited *below* the
+     webview. Every chrome region below paints its own opaque fill, so this only
+     leaves the CAD partition rect (and the never-covered root/body) see-through. */
+  background: transparent;
   overflow: hidden;
 }
 .region { flex: 0 0 auto; min-width: 0; }
@@ -333,7 +343,10 @@ button, input, select { font: inherit; color: inherit; }
   flex: 1 1 auto;
   display: flex; align-items: stretch;
   min-height: 0; min-width: 0;
-  background: var(--canvas);
+  /* Transparent: this row spans the native CAD partition, and an opaque fill
+     here hides the surface composited below the DOM (the WP2 inversion bug).
+     Docked palettes and the nav rail keep their own opaque fills below. */
+  background: transparent;
 }
 .workspace__left {
   display: none; flex: 0 0 auto; flex-direction: column;
@@ -341,7 +354,7 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--chrome-3); border-right: 1px solid var(--line);
 }
 .workspace__left.is-open { display: flex; width: 300px; }
-.workspace__canvas { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; }
+.workspace__canvas { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; background: transparent; }
 /* The host composites the native CAD surface here. Keep it empty. */
 .native-input { position: absolute; inset: 0; background: transparent; touch-action: none; user-select: none; }
 /* The system arrow is hidden over the CAD partition only while the host is
