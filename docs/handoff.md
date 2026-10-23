@@ -1,3 +1,152 @@
+## 2026-10-24 DOM-canvas 落地第一批实现：X11 真机出图，OS 级输入仍未验证
+
+### 1. 结论
+
+ADR 0024 的阶段 ②③④⑤ 已**落地代码**（阶段 ① 文档此前完成）：wasm CAD 会话在 WebGL2 上跑通，
+X11/XWayland 宿主以 `surfaceMode=dom-canvas` 启动并**真实出图**（合成 fixture），浏览器宿主路径
+（`apps/app-web`）与桌面宿主共享同一 wasm 路径。**但 X11 上的 pan/zoom 未取得 OS 级输入证据**
+（本会话输入注入整体不可用，详见验证记录 §6.1），因此**不得**写成「X11 已支持」或「已可操作」。
+证据与边界：`docs/validation-dom-canvas-wasm-2026-10-24.md`。
+
+### 2. 本轮落地
+
+- `crates/cad-render-wgpu`：wasm 目标启用 `wgpu/webgl`；新增 `canvas/{policy,presenter,tests}`（WebGL2
+  canvas surface、显式错误分类、`resize`、`present_texture`）；把 textured fullscreen blit 抽到
+  `src/blit.rs` 与原生 presenter 共享（原生语义未变）；`upload.rs` 的 `std::time::Instant` 换 `web_time` 别名。
+- `apps/app-web`：从退役桩复活为 **wasm CAD 会话**（`include_bytes!` 合成 fixture → `AcadrustImporter`
+  → `cad_app::render_scene::build_scene` → `prepare_upload_batches/commit_upload` → `Renderer::render`
+  → `CanvasPresenter::present_texture`），导出 `start/resize/zoom_at/pan/status`；附无框架浏览器壳。
+- `apps/desktop-ui`：`surfaceMode` 数据标志 + `<canvas id="cad-canvas">`（`.native-input` 前兄弟、
+  `pointer-events:none`、`.native-input` 仍是唯一输入面）；`canvas-host.mjs` 提供 wasm transport 与
+  `bindCanvasNavigation`；`native-below` 路径零改动。
+- `apps/app-linux`：X11 → `SurfaceMode::DomCanvas`（不再退出码 4）；**不建**原生 CAD 会话 /
+  `GtkDrawingArea` / Wayland 子表面 / presenter；`cad_status` 加 `surfaceMode`；新增
+  `yacr: unsupported-runtime: webgl2` + **退出码 6** 拒绝合同（`canvas_runtime_failed`）；CSP 加
+  `'wasm-unsafe-eval'`；DOM diag 增 `canvas/canvasBacking/wasmBinding/counts` 字段。
+- `scripts/build-canvas-wasm.sh`：同一 wasm 产出 **web(ESM)** + **no-modules(classic script)** 两种
+  绑定，落 `apps/desktop-ui/public/canvas/`（gitignored）。
+- 文档：ADR 0024（含 §0 探针与 spike 原始结果、§8 CSP/无 WebGPU 约束）、SPEC §21 修订、ADR 0023 增补、
+  AGENTS 铁律 8 + 授权边界放宽、`docs/build.md` 退出码 6、本轮验证记录。
+
+### 3. 本轮修掉的真实缺陷
+
+1. **CSP 阻断 wasm**：`script-src 'self'` 下 WebKitGTK 与 Chromium 都拒绝实例化；必须
+   `'wasm-unsafe-eval'`（实测文案见验证记录 §5）。
+2. **Vite dev 改写动态 import**：`import(/* @vite-ignore */ url)` 被改写成
+   `__vite__injectQuery(url,'import')`，public 产物 `?import` 返回 **500** → WebKit 只报
+   `Importing a module script failed.`。改为 classic script + 显式 wasm URL。
+3. **wasm 运行期 panic 源**：`cad-engine`/`cad-ui-core`/`cad-host`/`cad-render-wgpu` 运行时路径上的
+   `std::time::Instant::now()` 已改 `web_time`（native 行为不变）。
+
+### 4. 门禁（有界，按日常策略）
+
+`cargo check/test/clippy/fmt`：`cad-render-wgpu`（native 串行 238+，wasm check/clippy）、
+`cad-engine 105`、`cad-ui-core 218`、`cad-host 196`、`app-linux 149`、`app-web` wasm+native、
+`apps/desktop-ui npm test 450`。脚本：`check-architecture`、`check-i18n`(723)、`check-file-size` 均通过。
+**NOT RUN**：全 workspace 全量门禁、Windows/macOS/Android、`collect-evidence.sh` 全矩阵。
+
+### 5. 未闭环 / 下一步
+
+1. **X11 OS 级输入证据**（最高优先）：本会话 `xdotool`/`ydotool` 点击滚轮均不被任何应用接收
+   （连 GNOME 顶栏都无反应），Wayland 原生路径同样如此 ⇒ 取证工具限制，非本轮回归。需在有可用注入
+   或人工操作的会话中重跑 pan/zoom 并补像素差证据。
+2. **WebKitGTK 硬件归属**：renderer 字符串被掩码、本轮未见 DRM fd 归属 ⇒ 该路径只能写
+   「WebGL2 出图成立，硬件/软件归属 NOT VERIFIED」。
+3. `scripts/collect-evidence.sh` + `test-collect-evidence.py` 仍把 X11 归为 `UNSUPPORTED_BACKEND` 码 4
+   （**同步债务**）；`docs/build.md` 已记，脚本未改。
+4. `documentLabel` 在 dom-canvas 宿主为 `null`（原生壳不镜像文档状态），左侧面板可能显示「未打开图纸」
+   而画布已有几何 —— **产品/UX 决策待定**（不得靠 native 镜像文档解决）。
+5. 阶段 ⑦：`apps/app-web` 的浏览器发布/CI 未恢复（`scripts/build-web.sh` 仍退役非零），
+   wasm 产物也未进 CI；阶段 ⑧（真实管线 in wasm / import-in-wasm 内存预算）另立项。
+6. `cad-host/src/lib.rs` 已 994 行（上限 1000），后续改动需先拆分。
+
+---
+
+
+
+### 1. 结论
+
+用户当日授权**方向变更**：**X11/XWayland 不再永久是「显式 Unsupported」**，改为 **DOM-canvas 宿主**——
+CAD 像素由 **WebView 内的 wasm（WebGL2）CAD 会话**绘制；**原生 Wayland 仍保留**现有 native wgpu 子表面
+DOM-on-top 路径；退役的浏览器宿主 `apps/app-web` 计划**复活并共享同一 wasm canvas 路径**。
+架构裁决（oracle）：**M2′**——DOM-canvas 宿主上 **wasm 侧运行 CAD 会话、是唯一 `cad-db` 权威**，
+native 壳**不得**实例化或镜像第二个会话。契约权威：
+[ADR 0024](adr/0024-dom-canvas-wasm-cad-path.md)（本轮新建）。
+**本轮只有文档 + 能力探针：一行实现代码都没改**；X11 仍按退出码 4 拒绝，`apps/app-web` 仍是退役桩，
+WebGL2 缺失的新拒绝合同（标记行 + **退出码 6**）**尚未实现**。
+
+### 2. 用户决定与裁决记录
+
+- **决定（2026-10-23）**：接受 DOM-canvas 作为第二种像素承载机制；阶段 1 验收 =
+  **synthetic fixture 可见 + pan/zoom**，仅此（不含 DWG 打开/测量/批注/性能/vendor）。
+- **oracle 裁决：M2′**（wasm 侧为唯一权威）。**否决**：M1（native 渲染 + 显示表示批次经 IPC 流入
+  wasm：双数据路径、增量 wire 复杂、与「唯一权威」冲突）；**否决** 复活 X11 native-child
+  （2026-10-22 XWayland 合成 FAIL 未闭环，见 ADR 0023 D3）。
+- **不变量保持**：输入单一漏斗（`.native-input` → `probe_input` → host 准入门）、弹窗模态围栏、
+  单 presenter/路径、**无逐帧整幅 GPU→CPU 回读**、renderer-only wgpu（宿主只递交 canvas handle）。
+
+### 3. 本轮探针原始结果（只记录，不外推）
+
+环境：Wayland GNOME 会话内的 **X11/XWayland** 客户端；**WebKitGTK 2.52.6**（本机
+`pkg-config --modversion webkit2gtk-4.1` 同为 `2.52.6`）。
+
+| 观测项 | 结果 |
+|---|---|
+| `canvas.getContext('webgl2')` | 成功；`WebGL 2.0` / `WebGL GLSL ES 3.00` |
+| `clear()` + `readPixels()` | 正确（上下文可执行，非仅句柄非空） |
+| `navigator.gpu` | **`false`（无 WebGPU）** → 本路径只能以 WebGL2 为目标后端 |
+| `UNMASKED_RENDERER_WEBGL` | 固定 `"Apple GPU"` / vendor `"Apple Inc."` → **指纹掩码，不可信** |
+| WebKit WebProcess DRM fd | 持有 `/dev/dri/renderD129` + `/dev/dri/card2`（NVIDIA render node，Quadro P620，驱动 580.178.04） |
+
+边界：**未**截图、**未**产出渲染帧、**未**在真 X11 服务器/真 X11 WM 上运行；硬件归属只能靠
+OS 级 fd/驱动证据（渲染器字符串不可信）；软件渲染运行必须显式标注。X11 canvas 的视觉证据
+**为零**（NOT RUN）。
+
+### 4. 代码现状（据实：为什么是「未开始」）
+
+- `Cargo.toml:68` `wgpu = "=30.0.1"` **未启用 `webgl` feature** ⇒
+  `crates/cad-render-wgpu/src/renderer_impl/pipelines.rs:209` 的 wasm `ActiveBackend::WebGl2` 映射是
+  **不可达死代码**。
+- **没有** canvas surface 创建：渲染器仅在 wasm 之外暴露 `headless`
+  （`crates/cad-render-wgpu/src/lib.rs:24-26`）与 `native_presenter`（同文件 `:36-45`）；
+  `crates/cad-render-wgpu/Cargo.toml:42-45` 的 wasm `HtmlCanvasElement` 声明**无模块使用**。
+- `apps/app-web/src/lib.rs:16` 仍是退役诊断；`start_web` 直接 `Err`。
+- X11 拒绝照旧：`apps/app-linux/src/backend.rs:38` 标记行 + `:46` 退出码 4。
+
+### 5. 分阶段计划（全部「未实现」，除 ①）
+
+① 文档（**本轮完成**）；② wasm renderer canvas 接通（启用 `wgpu/webgl`）；③ wasm 合成场景 + 相机；
+④ `app-linux` X11 走 `dom-canvas`（WebGL2 不可用 → 标记行 + 码 6）；⑤ React `<CadCanvas/>`
+（`.workspace__canvas` 内、`.native-input` 前一兄弟、`pointer-events:none`/`aria-hidden`、按
+`surfaceMode` 渲染）；⑥ 有界 X11 运行证据（真实会话，fixture 可见 + pan/zoom）；⑦ `app-web` 复活共享
+路径；⑧ 阶段 2 真实管线 in wasm（**另立项**）。逐阶段细节与判据见 ADR 0024 §7。
+
+### 6. 同步债务（本轮 docs-only 范围之外，勿当作已完成）
+
+- `docs/build.md:55-63` 退出码表、ADR 0023 §9 表：**缺码 6 行**。
+- `crates/cad-ui-core/i18n/{zh-CN,en}.json`：缺 `startup.webgl2_unavailable`(+`.detail`)，
+  实现阶段必须**两目录同批**加入（`scripts/check-i18n.py` 要求键集一致）。
+- ADR 0003 的「浏览器宿主已退役」注记：阶段 ⑦ 才需要改。
+- `scripts/collect-evidence.sh` 内嵌授权说明仍写旧边界（不提权/不 sudo），本轮未改脚本。
+
+### 7. 门禁
+
+**本轮未改任何代码**（仅 5 个 Markdown 文件），因此**未跑** cargo/npm/架构门禁（**NOT RUN**，不适用）。
+只做文档自检：`rg -n "unsupported-runtime: webgl2" docs CAD_IMPLEMENTATION_SPEC.md AGENTS.md` 命中；
+`git status --porcelain` 仅涉及 5 个文件（`CAD_IMPLEMENTATION_SPEC.md`、`AGENTS.md`、
+`docs/adr/0023-…`、`docs/handoff.md` 为已跟踪修改，`docs/adr/0024-…` 为未跟踪新文件）。
+
+### 8. 下一步 lane（建议顺序）
+
+1. **实现 lane A**：阶段 ②（`wgpu/webgl` + canvas surface，wasm-only，含边界/配置契约测试）。
+2. **实现 lane B**：阶段 ③（wasm synthetic 场景 + 相机，纯 wasm 测试）。
+3. **实现 lane C**：阶段 ④（`app-linux` 决议 + 码 6 拒绝合同 + D2 权威不变量测试）。
+4. **实现 lane D**：阶段 ⑤（`<CadCanvas/>` + `surfaceMode` 数据标志 + 前端结构测试）。
+5. **证据 lane**：阶段 ⑥（真实会话有界运行；软件渲染必须标注）。
+6. **后续**：阶段 ⑦（`app-web` 复活，需用户对 `build-web.sh` 退役状态的决策）、阶段 ⑧（另立项）。
+
+---
+
 ## 2026-10-23 DOM-on-top 跨宿主合成落地（WP1–WP5）
 
 ### 1. 结论

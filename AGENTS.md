@@ -28,6 +28,13 @@ Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + �
    Linux 合成结论只对 **GNOME/Mutter + P620 + `scale=1`** 成立；UI “DOM 测试”是源码结构/纯函数
    契约，不是运行时挂载或像素证据。
 7. 不覆盖/删除陌生变更（并发实现常见）；先读源码和最新构建证据。
+8. **DOM-canvas 宿主（`surfaceMode: dom-canvas`）**：wasm 侧 CAD 会话是**唯一 `cad-db` 权威**，
+   native 壳**不得**实例化/镜像第二份文档状态，也**不得**把 native 显示表示当 wasm 数据源；
+   能力缺失必须**显式拒绝**（标记行 `yacr: unsupported-runtime: webgl2` + i18n 诊断 + **退出码 6**），
+   **禁止**空白 canvas、静默回退到 X11 native-child、静默软件渲染冒充硬件路径。
+   触发条件与判据：只要某项改动让 `dom-canvas` 宿主上出现第二个 CAD 会话实例（或让 native 持有
+   文档状态），或让 WebGL2 不可用变成空白窗口/静默回退，即返工。目标态与分阶段状态见
+   `docs/adr/0024-dom-canvas-wasm-cad-path.md`（**代码未开始**）。
 
 ## 语言约定
 
@@ -175,13 +182,23 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
   `scripts/package-windows-release.sh` 仍退役非零。**macOS/Android/Web** 是显式 NOT IMPLEMENTED
   占位（Android/Web 仅保留编译门禁）。旧平台发布/打包脚本已退役或禁用；Linux release 暂时不可用，
   等待替代打包验收。**不要**把已退役脚本当作可用流程。
+  **2026-10-23 立项（[ADR 0024](docs/adr/0024-dom-canvas-wasm-cad-path.md)，代码未开始）**：
+  X11/XWayland 的目标态是 **DOM-canvas 路径**（wasm/WebGL2 CAD 会话画进 DOM `<canvas>`，
+  `surfaceMode: dom-canvas`），浏览器宿主（`apps/app-web`）将共享**同一**路径。**两者当前都未实现**：
+  X11 仍显式拒绝（`yacr: unsupported-backend: x11` + 退出码 4），`app-web` 仍是退役桩
+  （`apps/app-web/src/lib.rs:16`）。本轮**只有能力探针**（WebKitGTK 2.52.6 / XWayland：WebGL2
+  上下文可用、`navigator.gpu` = false、无帧无截图），**没有**任何 X11 canvas 运行或视觉证据；
+  缺 WebGL2 的新拒绝合同（标记行 + 退出码 6）也**尚未实现**。**禁止**写成「X11 已支持」或
+  「web 宿主已恢复」。
 - **渲染/端到端验证优先真实硬件 GPU**：只要环境存在真实显示与显卡（本机为 Wayland 桌面 +
   Intel UHD + Quadro P620，可用 `nvidia-smi`/DRM fdinfo 证明），验收**必须**走真实 GPU。
   当前桌面宿主（React/Tauri）的**唯一生产后端是原生 Wayland**（决策/子表面桥见
   `docs/adr/0011-native-wayland-subsurface.md` 与 [ADR 0023](docs/adr/0023-dom-on-top-cross-host-composition.md)；
   有界原生证据见 `docs/validation-native-wayland-2026-10-16.md` 与
   `docs/validation-dom-on-top-production-2026-10-23.md`）。**X11/XWayland 被显式拒绝**
-  （标记行 `yacr: unsupported-backend: x11` + 退出码 4），**没有** X11 生产运行证据。
+  （标记行 `yacr: unsupported-backend: x11` + 退出码 4），**没有** X11 生产运行证据
+  （2026-10-23 起 X11 目标态改走 DOM-canvas，见 [ADR 0024](docs/adr/0024-dom-canvas-wasm-cad-path.md)；
+  **代码未开始**，拒绝行为暂不变）。
   真实 GPU 路线是 env-gated 证据驱动（`apps/app-linux/src/evidence.rs`：
   `YACR_PROBE_EVIDENCE`/`YACR_PROBE_LIFECYCLE`）+ `scripts/collect-evidence.sh`
   （原生 Wayland 用同 UID Mutter `ScreenCast` 抓合成帧）。W3 曾执行有界原生运行（CAD/输入/生命周期/
@@ -247,12 +264,19 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
 **证据取景规则**：必须包含可见几何、捕获时确认目标窗口在前台（否则得到 wrong-window 帧）、
 夹具层序 ≠ 生产透明度、每轮新目录；**生产透明修复后的像素复采已执行（有界 PASS：几何满亮度、
 无蒙层；About 覆盖层 PASS）**，但 textEdit 编辑器内容与光标抑制确定性仍未闭环（见验证记录）。
-**授权边界**：以当前会话同 UID 用户运行，**不提权、不以 root 运行、不 `sudo`、不解锁/修改会话、不改
-portal/ScreenCast 权限、不装包、不起虚拟/无头显示**；无真实显示时**显式非零退出**而非假装成功；
-截图仅本地保存、不上传。Wayland 走用户**自身会话内**的 ScreenCast
-（有录制指示、不抑制），**不是**绕过授权。**Wayland 帧为整屏合成**（同 UID
-`RecordMonitor`），**会包含桌面上其它窗口**——仅供本地读判、不上传。截图只是窗口/合成像素，
-**不等于**视觉正确性、精度或 vendor 结论。
+**授权边界（2026-10-23 用户授权放宽）**：允许 `sudo`/以 root 运行、允许解锁或切换会话、允许安装
+软件（浏览器 / Playwright / 测试与构建工具）、允许在**真实用户会话**中运行有显示的程序（含
+X11/XWayland 实例下的 DOM-canvas 探针）。**仍然禁止**：① 起虚拟/无头显示（Xvfb、虚拟合成器等）并把
+其产物冒充真机/真实会话证据；② 用软件渲染（llvmpipe/SwiftShader/lavapipe 等）冒充真实 GPU——
+软件渲染产物必须显式标注，且不得用作性能结论；③ 把无头或 **XWayland** 结论推广到真机、真 X11、
+其它窗口管理器/合成器、其它 vendor 或跨平台。无真实显示时仍**显式非零退出**而非假装成功；
+截图仅本地保存、不上传。Wayland 走用户**自身会话内**的 ScreenCast（有录制指示、不抑制），
+**不是**绕过授权；**Wayland 帧为整屏合成**（同 UID `RecordMonitor`），**会包含桌面上其它窗口**——
+仅供本地读判、不上传。截图只是窗口/合成像素，**不等于**视觉正确性、精度或 vendor 结论。
+> **历史（2026-10-23 之前的边界，保留不删）**：以当前会话同 UID 用户运行，**不提权、不以 root
+> 运行、不 `sudo`、不解锁/修改会话、不改 portal/ScreenCast 权限、不装包、不起虚拟/无头显示**。
+> 该限制**只描述旧授权**；`scripts/collect-evidence.sh` 内嵌的授权说明与 `docs/handoff.md` 的
+> 历史条目仍按旧边界书写，属**同步债务**（脚本不在本轮改动范围），阅读时以本段为准。
 
 ## 交接点
 
@@ -269,6 +293,7 @@ portal/ScreenCast 权限、不装包、不起虚拟/无头显示**；无真实�
 `docs/ci.md`（CI 分层与 NOT RUN）、`docs/validation*.md`（历史执行证据，含 NOT RUN 边界；
 DOM-on-top 生产记录 = `validation-dom-on-top-production-2026-10-23.md`）、
 `docs/compatibility.md`（能力表）、`docs/handoff.md`（逐轮交接）、
-`docs/adr/`（含 ADR 0010、0017–0023；**0023 = DOM-on-top 跨宿主合成（现行权威）**、
+`docs/adr/`（含 ADR 0010、0017–0024；**0023 = DOM-on-top 跨宿主合成（现行权威）**、
+**0024 = DOM-canvas / wasm CAD 路径（已立项，代码未开始）**、
 0021 = 弹窗层（其第二窗口机制已被 0023 取代）、0022 = WIPEOUT 遮罩渲染）、
 `docs/testing-dwg.md`、`docs/app-icon.md`、`fixtures/manifest`。

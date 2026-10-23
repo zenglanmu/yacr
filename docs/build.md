@@ -58,8 +58,13 @@ cargo test -p cad-engine -p cad-host -p cad-app --lib --locked
 | 1 | 通用失败（Tauri 构建失败、启动合同拒绝、Windows 窗口/WebView 构建失败） | `entry.rs`、`main.rs` | — |
 | 2 | 无效/不可用的显示后端策略 | `app-linux/src/entry.rs`（`BackendRefusal::Invalid`） | — |
 | 3 | postload-pan 证据驱动失败 | `app-linux/src/host/postload.rs` | — |
-| 4 | **不支持的后端（X11/XWayland）** | `app-linux/src/backend.rs` | `yacr: unsupported-backend: x11` |
+| 4 | **不支持的后端（X11/XWayland）——历史合同，2026-10-24 起不再产生** | `app-linux/src/backend.rs`（常量与文档保留） | `yacr: unsupported-backend: x11` |
 | 5 | **不支持的运行时（WebView2 缺失）** | `app-windows/src/support.rs` | `yacr: unsupported-runtime: webview2` |
+| 6 | **不支持的运行时（`dom-canvas` 宿主无法绘制：无可用 WebGL2 / canvas 模块不可用）** | `app-linux/src/canvas_runtime.rs`（WebView 建好之后，由 `canvas_runtime_failed` 命令触发） | `yacr: unsupported-runtime: webgl2` |
+
+码 4 与码 6 是**不同故障域**，不得合并：4 是 GTK 之前的后端策略拒绝（已退役），6 是 WebView
+建好之后的运行时能力缺失。`dom-canvas` 上任何「画布画不出来」都按 6 显式拒绝（**禁止**空白
+canvas、**禁止**回落到已退役的 X11 native-child、**禁止**退出码 0）。
 
 ## Linux 桌面宿主（当前唯一可运行 GUI）
 
@@ -82,19 +87,31 @@ cargo run --release --locked -p app-linux --bin yacr \
   --features tauri/custom-protocol -- --open /absolute/drawing.dwg
 ```
 
-**后端**：由宿主 `apps/app-linux/src/backend.rs` 在 GTK 启动前显式决议 `GDK_BACKEND`：
-未设时 `WAYLAND_DISPLAY` + `XDG_RUNTIME_DIR` → 原生 Wayland；只有 `DISPLAY` → 解析为 X11 并
-**显式拒绝**（标记 `yacr: unsupported-backend: x11` + 退出码 4）；两者皆无 → 退出 2。
-显式 `wayland` 保留；显式 `x11` → **拒绝（exit 4）**；非法/歧义值硬错。**无静默回退**：
+**后端与像素承载**：由宿主 `apps/app-linux/src/backend.rs` 在 GTK 启动前显式决议
+`GDK_BACKEND`，同时决定**像素承载模式** `surfaceMode`（ADR 0024 D1/D4，一次决议、无热切换）：
+未设时 `WAYLAND_DISPLAY` + `XDG_RUNTIME_DIR` → 原生 Wayland（`native-below`：原生 wgpu 表面压在
+WebView 之下）；只有 `DISPLAY` → X11/XWayland（**`dom-canvas`**：CAD 由 WebView 内的 wasm 会话经
+WebGL2 画进 DOM `<canvas>`，宿主**不**建原生 CAD 会话/DrawingArea/呈现器）；两者皆无 → 退出 2。
+显式 `wayland`/`x11` 保留；非法/歧义值硬错。**无静默回退**：
 
 ```bash
 env -u DISPLAY -u XAUTHORITY GDK_BACKEND=wayland WAYLAND_DISPLAY=wayland-0 \
     XDG_RUNTIME_DIR=/run/user/1000 ./target/release/yacr --open /absolute/drawing.dwg
 
-# X11/XWayland（预期拒绝，不是替代路径）
+# X11/XWayland（dom-canvas 承载；不再是拒绝合同）
 GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open /absolute/drawing.dwg
-# stderr: yacr: unsupported-backend: x11   → exit 4
+# stderr: [probe] surfaceMode=dom-canvas ...
+# 若 WebGL2/画布模块不可用：yacr: unsupported-runtime: webgl2   → exit 6
 ```
+
+> **wasm 制品前置（`dom-canvas` 必需）**：X11/XWayland 的画布由
+> `scripts/build-canvas-wasm.sh` 产出的 `app_web.js` + `app_web_bg.wasm` 提供，落在
+> `apps/desktop-ui/public/canvas/`（Vite 复制到 `dist/canvas/`，运行时按 `/canvas/app_web.js`
+> 加载；两处生成目录都被 git 忽略）。**缺该制品或它版本不符时画布无法加载**，宿主按退出码 6
+> 显式拒绝，不会显示空白画布。顺序：`bash scripts/build-canvas-wasm.sh` →
+> `(cd apps/desktop-ui && npm ci && npm run build)` → 启动宿主。CSP 必须放行 WebAssembly
+> （`script-src 'self' 'wasm-unsafe-eval'`，`apps/app-linux/tauri.conf.json`）；**不**使用
+> `'unsafe-eval'`。
 
 宿主参数：`--open <path>`、`--fonts-dir <path>`、`--images-dir <path>`、`--probe`。完整说明、
 后端策略/原生 Wayland 子表面、DOM-on-top 合成、输入漏斗、弹窗层、支持范围（**仅 OPEN/FIT**）与
@@ -112,13 +129,18 @@ npm test        # node:test 源码结构/纯函数契约（不是运行时 DOM �
 npm run build   # 产出 dist/（被 .gitignore 忽略；两个宿主的 tauri.conf.json 都指向它）
 ```
 
-**无头/发布**：本宿主需要真实显示（**原生 Wayland**）；**无显示的 SSH/无头**不支持。
+**无头/发布**：本宿主需要真实显示（原生 Wayland 是生产路径；X11/XWayland 走 `dom-canvas`
+承载）；**无显示的 SSH/无头**不支持。
 原生 Wayland 的私有 C shim 由 `apps/app-linux/build.rs` 经 `cc` 编译并链接系统
 `wayland-client`（`pkg-config`）。该 shim **只在 Linux 宿主编译**：从**非 Linux 宿主交叉构建到
 Linux** 时原生 Wayland 路径**不支持**（`build.rs` 会显式 `cargo:warning`，不会静默省略）。
 真实 GPU 证据路线见 `docs/react-linux-app.md`「证据机制」（`YACR_PROBE_EVIDENCE`/
-`YACR_PROBE_LIFECYCLE`/`YACR_PROBE_STACKING` + `scripts/collect-evidence.sh`；X11 行只用于采集
-**拒绝合同**）；**旧 Slint 离屏/无头 `--headless` 路径已随 Slint 退役**，不再存在。
+`YACR_PROBE_LIFECYCLE`/`YACR_PROBE_STACKING` + `scripts/collect-evidence.sh`）。注意两处**证据
+同步债务**（脚本不在本轮改动范围）：`collect-evidence.sh`/`test-collect-evidence.py` 仍把 X11 行
+分类为 `UNSUPPORTED_BACKEND`（码 4）——该合同自 2026-10-24 起不再产生，X11 行现在是一次
+`dom-canvas` 运行，webgl2 缺失时才是 `yacr: unsupported-runtime: webgl2`（码 6）；且
+`YACR_PROBE_STACKING` 是 native-below 夹具，在 `dom-canvas` 上被显式拒绝（码 1）。**旧 Slint
+离屏/无头 `--headless` 路径已随 Slint 退役**，不再存在。
 
 ## 无头 CLI（仍可用）
 

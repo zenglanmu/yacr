@@ -755,6 +755,11 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
 - **授权目标**：桌面 UI 以 **React + Tauri** 作为替代 Slint 的实验目标；CAD 核心保持 **native
   Rust** 与 **renderer-only wgpu**（wgpu 仍仅由 `cad-render-wgpu` 依赖）；本实验路线**不允许
   WASM**、**不允许逐帧整幅 GPU→CPU 回读**。
+  - **2026-10-23 修订（ADR 0024）**——**原文保留**：“本实验路线**不允许 WASM**、**不允许逐帧整幅
+    GPU→CPU 回读**”。**改为**：**允许 wasm 作为 DOM-canvas 宿主（X11/XWayland、浏览器宿主）的
+    CAD 会话与渲染承载**；wgpu 边界不变（仅 `cad-render-wgpu` 依赖 wgpu，宿主只递交 canvas
+    handle，永不接触 wgpu 对象）；**逐帧整幅 GPU→CPU 回读仍然禁止**（浏览器层拾取走既有 CPU
+    拾取路径）。该路径**代码未开始**，能力缺口必须显式拒绝（见下 X11 段与 ADR 0024 D5）。
 - **覆盖历史限制**：§4.11 与 ADR 0005 中“不引入 React 或其他未来 UI 框架承诺 / React 不在本轮”
   的历史限制，对**桌面 React 实验路线**不再适用。**非桌面范围不再有 Slint 基线**：Slint 依赖已在
   全 workspace 删除，Web/Android UI 已退役为显式 NOT IMPLEMENTED 占位（wasm 入口返回错误、
@@ -779,6 +784,22 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
     不透底）；否则 CAD 被 DOM 遮住（2026-10-22 手工测试真实缺陷，已修并有前端回归测试）。
   - **历史区分（不得混用证据）**：旧「顶层透明 alpha 全屏叠加」是历史 **FAIL**（保留，不抹掉）；
     本轮 PASS 的是**分区子表面 `place_below`**（CAD 仍只占 CAD 矩形）。二者机制与证据链不同。
+  - **2026-10-23 修订（ADR 0024）**——**原文保留**：“合成模型……DOM/WebView 在像素与输入两个方向
+    都置顶……客户端 React UI 不按平台分叉”。**改为**：**输入方向单一漏斗不变** + **像素承载两种
+    已建模机制**，由宿主上报的 `surfaceMode` **数据标志**选择，用户可见契约一致：
+    - `surfaceMode: native-below`（原生 Wayland、Windows）：wgpu CAD 原生表面压在 WebView 之下
+      （上文机制原样保留）；
+    - `surfaceMode: dom-canvas`（**目标态：X11/XWayland、浏览器宿主；均未实现**）：wasm 侧 CAD
+      会话经 WebGL2 画进 DOM 内 `<canvas>`，**不存在第二原生表面**；canvas 位于
+      `.workspace__canvas` 内、`.native-input` 的**紧邻前一兄弟**，`pointer-events: none` +
+      `aria-hidden`（像素承载器不是交互目标）。
+    React 树只按该数据标志渲染，**不按平台分叉**；旧宿主缺字段按 `native-below` 处理——这是当前
+    唯一存在模式的**事实回退**，不是能力猜测；新宿主必须显式上报。
+  - **不变量（2026-10-23 新增，ADR 0024 D2）**：在 `dom-canvas` 宿主上，**wasm 侧 CAD 会话是唯一
+    `cad-db` 权威**；native 壳（Tauri 进程）**不得**实例化或镜像第二个 CAD 会话，**不得**把 native
+    文档状态/显示表示当作 wasm 的数据源（M1「native 渲染 + 显示表示批次数流过 IPC」已被否决）。
+    宿主准入门与 `ShellState.popup` 模态围栏只作为**策略层**保留，不持有文档状态；每条像素承载
+    路径仍**只有一个 CAD presenter**。
 - **事件路由（2026-10-23 补入）**：输入唯一漏斗是 DOM `.native-input` → `probe_input` IPC →
   host 准入门/队列；指针捕获、双击、滚轮、右键、坐标空间与 resize 上报均在这条漏斗内。CAD 表面
   永不接收 OS 输入（Wayland 空 input region / Windows `WS_DISABLED`）。DOM 覆盖区命中规则：
@@ -797,7 +818,8 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
   用户可见取舍：拖拽期间 transient 覆盖（grid/axes/highlights/snaps/previews）可能暂时隐藏
   （<30ms 窗口测量，**非精确延迟**）。`input→visible` **未验**。
 - **平台状态与证据（2026-10-23）**：
-  - **Linux 原生 Wayland**：唯一生产路径；**有界 PASS**——GNOME/Mutter + Quadro P620/Vulkan +
+  - **Linux 原生 Wayland**：唯一生产路径（2026-10-23 措辞限定：指**原生表面**承载路径；ADR 0024 的
+    `dom-canvas` 已立项但**未实现**，故不构成第二条已交付生产路径）；**有界 PASS**——GNOME/Mutter + Quadro P620/Vulkan +
     `scale=1`，生产 chrome/弹窗帧由 Observer 判读（WP2 四条判据 PASS 带 caveat；WP3 About 帧 PASS，
     textEdit 帧 INVALID wrong-window），**不是**完整产品/跨合成器/性能/vendor 结论。**生产透明修复后
     的像素复采已执行并由独立 Observer 判读：有界 PASS**（满亮度几何/无蒙层、About 覆盖层 PASS；
@@ -807,6 +829,15 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
     `yacr: unsupported-backend: x11` + i18n 诊断 + **退出码 4**，无静默回退、无窗口/截图。依据：
     2026-10-22 探针 **XWayland 合成 FAIL**（透明区域透出另一 CAD 应用）；具体机制**未闭环**，
     因此记录为“本轮不支持”，**不是“X11 不可能”**；X11 web+canvas 回退路线**显式延后**。
+    - **2026-10-23 修订（ADR 0024）**——**原文保留**。X11/XWayland 的目标态改为 **DOM-canvas 路径**
+      （wasm/WebGL2 CAD 会话画进 DOM 内 `<canvas>`，`surfaceMode: dom-canvas`），**分阶段、当前未实现**
+      （ADR 0024 §7 阶段 ④–⑥）。**WebGL2 不可用或路径未就绪时保留显式拒绝**：新标记行
+      `yacr: unsupported-runtime: webgl2` + i18n 诊断 + **退出码 6**；旧
+      `yacr: unsupported-backend: x11` + **退出码 4** 作为**历史合同**保留说明（阶段 ④ 完成前仍是
+      现行行为）。禁止空白 canvas、禁止静默回退到 X11 native-child、禁止把软件渲染当硬件路径。
+      理由修订：2026-10-22 的 FAIL 针对**原生表面**，本文**不为它翻案**；`dom-canvas` 无第二原生
+      表面，但该推理**未经运行验证**。本轮只有**能力探针**（WebKitGTK 2.52.6 / XWayland：
+      WebGL2 上下文可用、`navigator.gpu` = false、无帧无截图），**不是**视觉或性能证据。
   - **Windows**：宿主**已实现**（Tauri2 + 透明 WebView2 + child HWND + 单一 DOM 漏斗），并通过
     **Tier 0 编译门禁**（msvc check/build、gnu build、wasm 空壳）与 **Wine 拒绝合同 smoke**
     （WebView2 缺失 → 标记行 + i18n + **退出码 5**）。**视觉/运行时验收 PENDING 用户真 Windows
@@ -816,4 +847,8 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
 - **明确 NOT RUN / NOT IMPLEMENTED**：X11 运行/视觉（显式拒绝）；Windows 视觉、DPI、z-order 运行时
   重排、ProcessFailed 活体、真实 COM 选择器、runtime-present 出帧；Linux 其它合成器、分数缩放、
   多显示器、性能；实际 CAD 不宣称 60fps / full visual golden / vendor DWG；无 Android/Web 迁移。
+  - **2026-10-23 追加（ADR 0024）**：**X11 canvas 路径已立项（ADR 0024），代码未开始**，运行/视觉
+    NOT RUN；**浏览器宿主仍未构建**（`apps/app-web` 仍是退役桩）；wasm 侧 CAD 会话、`wgpu/webgl`
+    启用、canvas surface 创建、`surfaceMode` 上报与 `<CadCanvas/>` 全部未实现。本轮仅有能力探针
+    （WebGL2 可用、无 WebGPU），**不得**表述为 X11 已支持或 canvas 路径已验收。
 - 本节不扩张系统权限，不承诺跨语言稳定 IPC（仅 bounded 实验 adapter）。

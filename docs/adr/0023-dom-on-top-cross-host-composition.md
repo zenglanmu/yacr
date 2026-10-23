@@ -66,6 +66,13 @@ chrome/CAD 边界的弹窗（Observer 判读 PASS）；同一探针在 XWayland 
 - **共同不变量**：每条合成路径只有一个 CAD presenter；renderer 不做改动、不做整幅回读；原生表面
   只接收 raw handle（Windows 走 `Win32WindowHandle` → `create_surface_unsafe`）。
 
+> **2026-10-23 增补（署期修订，正文不重写）**：[ADR 0024](0024-dom-canvas-wasm-cad-path.md) 把 D1 的
+> 「单一合成方向」修订为**两种已建模像素承载机制**——`surfaceMode: native-below | dom-canvas`，
+> 由宿主上报的数据标志选择，React 树不按平台分叉。**D1 的输入漏斗、单 presenter、无整幅回读、
+> 原生表面只接 raw handle 四条不变量不变**；`native-below` 的机制（Wayland `place_below` /
+> Windows child HWND + WebView2 alpha=0）**原样保留**。`dom-canvas` 只是 X11/XWayland 与浏览器宿主的
+> **目标态**，**代码未开始**，当前 X11 仍按 D3 拒绝（退出码 4）。
+
 ### D2 单一 DOM 输入漏斗（跨平台同构）
 
 - 输入唯一入口是 `.native-input`（DOM）→ `probe_input` IPC → host 准入门/队列 → `cad-host` 输入管线。
@@ -203,6 +210,9 @@ chrome/CAD 边界的弹窗（Observer 判读 PASS）；同一探针在 XWayland 
 
 - macOS / Android / iOS：不在本轮；Android/Web 仍是显式 NOT IMPLEMENTED 占位。
 - **X11/XWayland 的 web+canvas 回退路线**：显式延后，需独立设计/证据。
+  - **2026-10-23 增补**：该路线已由 [ADR 0024](0024-dom-canvas-wasm-cad-path.md) **立项**（wasm/WebGL2
+    DOM-canvas 路径，分阶段；**代码未开始**，X11 当前仍拒绝）。本节其余延期条款不变——尤其
+    **RenderTarget/HostTexture 平台合成 ADR 仍独立延期，不被 ADR 0024 覆盖**。
 - **平台合成 ADR（RenderTarget/HostTexture token 所有权）——本文显式延期，未覆盖。**
   `docs/handoff.md` 的“已定义，但尚需设计审查”条目（RenderTarget/HostTexture 目前只是自有数字
   token；共享 Device/Queue 的拥有者、token 生命周期与安全访问方式须在**平台合成 ADR** 中固定）
