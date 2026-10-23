@@ -47,9 +47,10 @@ X11/XWayland 宿主以 `surfaceMode=dom-canvas` 启动并**真实出图**（合�
 
 ### 5. 未闭环 / 下一步
 
-1. **X11 OS 级输入证据**（最高优先）：本会话 `xdotool`/`ydotool` 点击滚轮均不被任何应用接收
-   （连 GNOME 顶栏都无反应），Wayland 原生路径同样如此 ⇒ 取证工具限制，非本轮回归。需在有可用注入
-   或人工操作的会话中重跑 pan/zoom 并补像素差证据。
+1. **X11 输入证据（部分闭环）**：2026-10-24 **用户手动测试确认 X11 下滚轮缩放与拖拽平移正常**
+   （用户报告，无截图、无 agent 像素差证据）。agent 侧仍无法注入输入（`xdotool`/`ydotool` 点击滚轮
+   不被任何应用接收，连 GNOME 顶栏都无反应；未改动的 Wayland 原生路径同样如此 ⇒ 取证工具限制，
+   非本轮回归）。若要 agent 级像素证据，需换到可注入输入的会话；在此之前**不得**写"X11 已验收"。
 2. **WebKitGTK 硬件归属**：renderer 字符串被掩码、本轮未见 DRM fd 归属 ⇒ 该路径只能写
    「WebGL2 出图成立，硬件/软件归属 NOT VERIFIED」。
 3. `scripts/collect-evidence.sh` + `test-collect-evidence.py` 仍把 X11 归为 `UNSUPPORTED_BACKEND` 码 4

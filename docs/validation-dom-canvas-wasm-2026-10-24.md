@@ -87,7 +87,10 @@ Playwright headed，viewport 640x480，加载同一页面：
 - 页面侧计数器（宿主注入的 capture-phase 计数）显示 `pointermove/mousemove` 可到达，
   而 `pointerdown/mousedown/wheel/keydown` 恒为 0 —— **在未改动的 Wayland 原生路径上同样如此**，
   因此**不是** `dom-canvas` 引入的回归，而是取证工具限制。
-- 结论：X11 宿主上的 **pan/zoom 未经 OS 级输入验证**。导航代码路径的证据来自
+- **2026-10-24 用户手动测试（用户报告，非 agent 抓帧）**：在 X11 宿主上滚轮缩放与拖拽平移
+  **工作正常**。因此「X11 上可操作」成立，但**本条没有 agent 可复现的像素差证据**，也没有截图；
+  不得据此写"已验收"，只能写"用户手动确认可用"。取证工具的限制仍在（后续可用输入注入的会话可补像素差）。
+- 结论（修正后）：X11 宿主上的 pan/zoom **有用户手动确认**，**无 agent 级像素证据**。导航代码路径的证据来自
   §3（WebKitGTK 内**合成 DOM wheel**）与 §4（Chromium 的 **trusted wheel**，CDP 注入），
   二者都不是 X11 宿主上的真机输入证据。
 - 需要补的证据：可用输入注入的会话（或人工操作）下重跑，记录 wheel/drag 前后的画布像素差。
