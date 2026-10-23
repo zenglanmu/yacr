@@ -3,8 +3,10 @@
 //! The host is a **transparent WebView2 (React chrome) above an in-process native
 //! CAD child HWND**: the single Tauri event loop drives
 //! `cad-render-wgpu::SurfaceProbePresenter` on a `WS_CHILD` window created with
-//! hand-rolled Win32, and the renderer surface is built from a
-//! `Win32WindowHandle` / `WindowsDisplayHandle` pair (no renderer changes).
+//! hand-rolled Win32; the renderer surface is a **DirectComposition** surface
+//! (`SurfaceTargetUnsafe::CompositionVisual`) whose visual is positioned/clipped to
+//! the accepted CAD rect and attached to the **top-level** window (no renderer
+//! geometry changes, no readback).
 //!
 //! Composition contract (the same model as the Linux host, DOM-on-top):
 //! - the DOM/WebView layer is above in **both** pixels and input;
@@ -28,6 +30,7 @@
 //! missing-runtime refusal contract (marker, exit code, localized copy) and the
 //! pinned transparent-background alpha, so its unit tests run on any host.
 
+pub mod composition_geometry;
 pub mod entry;
 pub mod support;
 

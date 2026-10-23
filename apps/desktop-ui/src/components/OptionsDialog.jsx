@@ -453,14 +453,19 @@ export function OptionsDialog({ onClose, closeFailure }) {
           </span>
         );
       }
-      case 'select':
+      case 'select': {
+        // A choice with catalog copy (the WGPU backend) reads exactly like the
+        // language selector; a bare enum keeps its upper-case wire spelling.
+        const choiceLabel = field.choiceKeyPrefix
+          ? choice => t(`${field.choiceKeyPrefix}.${choice}`)
+          : choice => choice.toUpperCase();
         return (
           <span style={OPTIONS_CONTROL}>
             <ChoiceControl
               id={ids.input}
               value={value}
               choices={field.choices}
-              labelFor={choice => choice.toUpperCase()}
+              labelFor={choiceLabel}
               invalid={Boolean(error)}
               disabled={missing}
               describedBy={description}
@@ -469,6 +474,7 @@ export function OptionsDialog({ onClose, closeFailure }) {
             {missing ? <MissingBadge t={t} /> : null}
           </span>
         );
+      }
       case 'locale':
         return (
           <span style={OPTIONS_CONTROL}>

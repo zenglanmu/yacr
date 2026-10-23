@@ -43,6 +43,16 @@ export const SETTINGS_ERROR = Object.freeze({
 /** The only plot formats the host can produce (`"svg" | "pdf"`). */
 export const PLOT_FORMATS = Object.freeze(['svg', 'pdf']);
 
+/**
+ * The graphics backends the user may ask WGPU for (`"auto" | "vulkan" | "dx12"`).
+ *
+ * The values are the shared wire contract: the host stores the choice under the
+ * JSON key `wgpu_backend` with exactly these spellings, and `"auto"` is the
+ * default. The renderer decides per platform what a choice can actually do, so
+ * the list is the same everywhere; this dialog only reports and writes it.
+ */
+export const WGPU_BACKENDS = Object.freeze(['auto', 'vulkan', 'dx12']);
+
 /** The UI languages this build ships (`localStorage['yacr.locale']`). */
 export const LOCALE_CHOICES = Object.freeze(['zh-CN', 'en']);
 
@@ -89,7 +99,10 @@ export const OPTIONS_TABS = Object.freeze([
  * for the two non-settings controls: the read-only fonts directory and the UI
  * language). `kind` selects the editor: `bool`, `number`, `color`, `select`,
  * `readonly`, `locale`. Number fields carry the host's own range and the unit
- * suffix key; a value outside it is refused, never clamped.
+ * suffix key; a value outside it is refused, never clamped. A `select` field
+ * whose options have their own copy carries `choiceKeyPrefix`, and its refusal
+ * code can be overridden with `errorCode` when the host reports a more specific
+ * one.
  */
 export const OPTIONS_FIELDS = Object.freeze([
   {
@@ -207,6 +220,7 @@ export const OPTIONS_FIELDS = Object.freeze([
     wire: 'plotFormat',
     key: 'plotFormat',
     choices: PLOT_FORMATS,
+    errorCode: SETTINGS_ERROR.invalidPlotFormat,
     labelKey: 'options.field.plotFormat',
     helpKey: 'options.help.plotFormat',
   },
@@ -224,6 +238,20 @@ export const OPTIONS_FIELDS = Object.freeze([
     kind: 'locale',
     labelKey: 'options.field.language',
     helpKey: 'options.help.language',
+  },
+  {
+    // The WGPU backend choice. Both the snapshot field and the write key are the
+    // shared snake_case `wgpu_backend` (never camelCased into `wgpuBackend`), so
+    // the host config key and this control cannot drift apart.
+    id: 'wgpuBackend',
+    tab: 'user',
+    kind: 'select',
+    wire: 'wgpu_backend',
+    key: 'wgpu_backend',
+    choices: WGPU_BACKENDS,
+    choiceKeyPrefix: 'options.wgpuBackend',
+    labelKey: 'options.field.wgpuBackend',
+    helpKey: 'options.help.wgpuBackend',
   },
 ]);
 
@@ -315,9 +343,10 @@ export function validateField(id, value) {
         ? null
         : SETTINGS_ERROR.invalidValue;
     case 'select':
-      return typeof value === 'string' && field.choices.includes(value)
-        ? null
-        : SETTINGS_ERROR.invalidPlotFormat;
+      if (typeof value === 'string' && field.choices.includes(value)) return null;
+      // The host's own code for this control (the plot format has a dedicated
+      // one); a plain enum mismatch is the generic invalid value.
+      return field.errorCode ?? SETTINGS_ERROR.invalidValue;
     case 'locale':
       return LOCALE_CHOICES.includes(value) ? null : SETTINGS_ERROR.invalidValue;
     case 'readonly':

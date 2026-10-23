@@ -25,8 +25,8 @@ mod runtime;
 pub use camera::{camera2d_from_params, camera3d_from_params, fit_camera, BridgeCamera};
 use runtime::CadRenderRuntime;
 pub use runtime::{
-    FrameBinding, FrameCompleteness, PresentedFrame, RenderLifecycle, RenderStatsObservation,
-    RuntimeDiagnostics, UploadDiagnostics, UploadTimingObservation,
+    render_target_size, FrameBinding, FrameCompleteness, PresentedFrame, RenderLifecycle,
+    RenderStatsObservation, RuntimeDiagnostics, UploadDiagnostics, UploadTimingObservation,
 };
 
 mod diagnostics;

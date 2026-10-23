@@ -18,6 +18,7 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
         crosshair_percent: 25,
         pickbox_size: 3,
         aperture_size: 12,
+        wgpu_backend: "dx12".to_string(),
         fonts_dir: Some("/tmp/yacr-fonts".to_string()),
     };
     let wire = serde_json::to_value(&settings).expect("settings serialize");
@@ -36,9 +37,16 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
             "crosshairPercent": 25,
             "pickboxSize": 3,
             "apertureSize": 12,
+            "wgpu_backend": "dx12",
             "fontsDir": "/tmp/yacr-fonts",
         })
     );
-    // Exactly the thirteen documented fields; no unrelated Options fields.
-    assert_eq!(wire.as_object().expect("object").len(), 13);
+    // Exactly the fourteen documented fields; no unrelated Options fields.
+    assert_eq!(wire.as_object().expect("object").len(), 14);
+    // The backend choice keeps the shared snake_case key on the snapshot wire
+    // (`settings.wgpu_backend` in the UI), never camelCased into `wgpuBackend`.
+    assert!(
+        wire.get("wgpuBackend").is_none(),
+        "the backend field must not camelCase on the wire: {wire}"
+    );
 }

@@ -83,8 +83,25 @@ GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open /abs/drawing.dwg
 （CAD 会话永不建立）。**必须**用上面的 `--features tauri/custom-protocol`（或 `scripts/collect-evidence.sh`）。
 环境变量（证据/诊断）：`YACR_TEST_DWG`、`YACR_LOCALE`、`YACR_PROBE_EVIDENCE`、
 `YACR_PROBE_LIFECYCLE`、`YACR_PROBE_TOOL_EVIDENCE`、`YACR_PROBE_STACKING`、`YACR_PROBE_ONLY`、
-`YACR_PROBE_NO_GPU`、`YACR_PROBE_OPAQUE`、`YACR_PROBE_NO_MAXIMIZE`、`YACR_PROBE_CAD_LOG`。
+`YACR_PROBE_NO_GPU`、`YACR_PROBE_OPAQUE`、`YACR_PROBE_NO_MAXIMIZE`、
+`YACR_PROBE_ALLOW_CPU_ADAPTER`、`YACR_PROBE_CAD_LOG`。
+`YACR_PROBE_ALLOW_CPU_ADAPTER` 是**存在即生效**（取值无关）的 bring-up/证据开关：让 CPU/软件 Vulkan
+适配器（如 VM 里的 lavapipe）可被 probe presenter 选中，硬件适配器仍严格排在前面；**未设置**时仍
+拒绝 CPU 适配器。它**不是**生产放宽——软件渲染的帧/耗时不得当作真实 GPU 结论。
 **已删除**：`YACR_PROBE_DOM_ON_TOP`（旧 opt-in 探针开关；不再是有效入口）。
+
+**渲染后端偏好（`wgpu_backend`）**：持久偏好 `preference.json` 的顶层键 `wgpu_backend`（与其它用户
+偏好同一 durable store；取值**恰为** `auto|vulkan|dx12`，缺失/空/未知一律 = `auto`）在**每次
+presenter 构造**时读取一次（非每帧），映射为渲染器的 `ProbeBackendPolicy`：`vulkan` = 历史的
+Vulkan-only；`dx12` 在 Linux **显式失败**（`ProbeError::UnsupportedBackendPolicy`，无静默回退）；
+`auto` = Vulkan + DX12 且同层 Vulkan 优先。启动新增一行
+`[probe] backend-policy wgpu_backend=… (…)` 便于证据判读（与 `[probe] adapter-policy …` 并列）。
+**DX12 在 Linux 无运行证据**；`auto` 在 Linux 实际只会枚举到 Vulkan 适配器。
+同一键也是 Options 对话框（User 页签）“WGPU backend”行的**写入契约**：`cad_settings` 以**蛇形**
+字段 `wgpu_backend` 上报、`cad_set_setting` 用同一 `wgpu_backend` 键写入（不 camelCase、仅接受
+`auto|vulkan|dx12`，其它值回 `settings.invalid_value`）；该键**不在** `ViewerConfig` schema 内，
+所以启动时先把它从偏好文档剥离再做 allowed-path 校验、并在每次偏好写入时合并回顶层，写入后
+**下次 presenter 构造**才生效（无热切换后端）。
 
 **窗口默认（最大化，非全屏）**：Linux 宿主默认以**最大化窗口**启动，该策略是窗口管理器**最大化**，
 **保留标题栏/系统面板**，**不是**全屏/无边框 kiosk。源码依据：`apps/app-linux/src/host.rs` 的

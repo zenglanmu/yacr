@@ -108,7 +108,7 @@ fn probe_presents_grid_and_rebuilds() {
     let raw_display = window.display;
     let raw_window = window.window;
 
-    let mut presenter = SurfaceProbePresenter::new(window, 320, 240)
+    let mut presenter = SurfaceProbePresenter::new(window, 320, 240, ProbeBackendPolicy::Vulkan)
         .expect("the surface probe must initialize on a real GPU");
     eprintln!(
         "probe adapter: backend={} name={} device_type={}",
@@ -119,7 +119,7 @@ fn probe_presents_grid_and_rebuilds() {
     assert_eq!(
         presenter.adapter().backend,
         "vulkan",
-        "the probe forces Vulkan"
+        "the Vulkan evidence path must select a Vulkan adapter"
     );
     assert_ne!(
         presenter.adapter().device_type,
@@ -160,8 +160,8 @@ fn probe_presents_grid_and_rebuilds() {
     // Destroy and rebuild the whole lifecycle from a fresh window.
     drop(presenter);
     let window = XlibWindow::open(160, 120).expect("second Xlib window");
-    let mut rebuilt =
-        SurfaceProbePresenter::new(window, 160, 120).expect("the probe must rebuild cleanly");
+    let mut rebuilt = SurfaceProbePresenter::new(window, 160, 120, ProbeBackendPolicy::Vulkan)
+        .expect("the probe must rebuild cleanly");
     assert!(rebuilt.frame(0.1).is_ok());
 
     rebuilt.stop();
@@ -189,9 +189,14 @@ fn probe_continuous_frames_stage_timing() {
         Ok("mailbox") => ProbePresentMode::MailboxElseImmediate,
         _ => ProbePresentMode::Fifo,
     };
-    let mut presenter =
-        SurfaceProbePresenter::new_with_present_mode(window, 320, 240, present_mode)
-            .expect("the surface probe must initialize on a real GPU");
+    let mut presenter = SurfaceProbePresenter::new_with_present_mode(
+        window,
+        320,
+        240,
+        present_mode,
+        ProbeBackendPolicy::Vulkan,
+    )
+    .expect("the surface probe must initialize on a real GPU");
     eprintln!(
         "[xlib-continuous] adapter={} device_type={} present_mode={:?}",
         presenter.adapter().name,
@@ -264,8 +269,8 @@ fn present_native_texture_checkerboard() {
             return;
         }
     };
-    let mut presenter =
-        SurfaceProbePresenter::new(window, 320, 240).expect("presenter must initialize");
+    let mut presenter = SurfaceProbePresenter::new(window, 320, 240, ProbeBackendPolicy::Vulkan)
+        .expect("presenter must initialize");
     let (device, queue) = presenter.device_queue();
     // `present_texture` requires the texture to match the configured surface
     // size (it refuses to stretch a mismatched texture), so the checkerboard is

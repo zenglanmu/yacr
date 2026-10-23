@@ -17,3 +17,7 @@ cad-platform.workspace = true
 cad-representation.workspace = true
 cad-diagnostics.workspace = true
 cad-resources.workspace = true
+# Durable preference document surgery for the one leaf that is not part of the
+# `ViewerConfig` schema (`wgpu_backend`, see `settings.rs`). No version change:
+# the workspace already pins the same serde_json.
+serde_json.workspace = true

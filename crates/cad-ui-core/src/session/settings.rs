@@ -1,6 +1,6 @@
 //! Typed settings wire surface for the Options dialog.
 //!
-//! The session exposes the same closed twelve-key surface the host persists; it
+//! The session exposes the same closed thirteen-key surface the host persists; it
 //! adds no second validation and no raw-JSON entry point. A UI writes one typed
 //! key/value pair, the host validates it against the closed table, persists the
 //! matching preference leaf and applies it to the live scene/session.
@@ -18,10 +18,11 @@ pub use cad_host::{
 /// The effective settings an Options dialog reads and writes.
 ///
 /// A flat camelCase wire object (like the status/session types). `fontsDir` is
-/// read-only display data sourced from the host's `--fonts-dir`; the other twelve
-/// fields correspond one-to-one with [`CadSettingKey`], the two backgrounds as
-/// canonical `#rrggbb` strings, the crosshair as an integer percentage and the
-/// pickbox/aperture as integer pixel counts.
+/// read-only display data sourced from the host's `--fonts-dir`; the other
+/// thirteen fields correspond one-to-one with [`CadSettingKey`], the two
+/// backgrounds as canonical `#rrggbb` strings, the crosshair as an integer
+/// percentage, the pickbox/aperture as integer pixel counts and the graphics
+/// backend as one of `auto`/`vulkan`/`dx12`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadSettings {
@@ -45,6 +46,14 @@ pub struct CadSettings {
     /// Object-snap aperture in logical pixels (`1..=50`, the AutoCAD `APERTURE`
     /// option).
     pub aperture_size: u32,
+    /// Graphics backend preference: `"auto"` (default), `"vulkan"` or `"dx12"`.
+    ///
+    /// Deliberately the **snake_case** wire key, unlike every other field: the
+    /// `cad_set_setting` key and the persisted `preference.json` leaf are the
+    /// same `wgpu_backend`, so the read field and the write key cannot drift
+    /// apart. Takes effect on the next presenter construction.
+    #[serde(rename = "wgpu_backend")]
+    pub wgpu_backend: String,
     /// Read-only: the configured CAD font directory, or `null` when unset.
     pub fonts_dir: Option<String>,
 }
@@ -64,6 +73,7 @@ impl From<HostSettings> for CadSettings {
             crosshair_percent: value.crosshair_percent,
             pickbox_size: value.pickbox_size,
             aperture_size: value.aperture_size,
+            wgpu_backend: value.wgpu_backend,
             fonts_dir: value.fonts_dir,
         }
     }

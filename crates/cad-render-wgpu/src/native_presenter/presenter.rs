@@ -8,24 +8,26 @@ use super::*;
 pub struct SurfaceProbePresenter {
     /// Kept alive for the lifetime of the presenter so the backend instance
     /// owning the surface never drops early.
-    _instance: wgpu::Instance,
-    surface: wgpu::Surface<'static>,
-    adapter: ProbeAdapterInfo,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
-    uniform: wgpu::Buffer,
-    max_dimension: u32,
-    size: (u32, u32),
-    preferred_names: Vec<String>,
+    pub(super) _instance: wgpu::Instance,
+    pub(super) surface: wgpu::Surface<'static>,
+    pub(super) adapter: ProbeAdapterInfo,
+    pub(super) device: wgpu::Device,
+    pub(super) queue: wgpu::Queue,
+    pub(super) config: wgpu::SurfaceConfiguration,
+    pub(super) pipeline: wgpu::RenderPipeline,
+    pub(super) bind_group: wgpu::BindGroup,
+    pub(super) uniform: wgpu::Buffer,
+    pub(super) max_dimension: u32,
+    pub(super) size: (u32, u32),
+    pub(super) preferred_names: Vec<String>,
+    /// The backend policy this presenter was constructed with.
+    backend_policy: ProbeBackendPolicy,
     /// Requested present-mode policy (the concrete mode lives in `config`).
     present_mode_request: ProbePresentMode,
     /// Wall-clock microseconds of the most recent `Surface::configure`.
-    last_configure_us: u64,
-    frame_index: u64,
-    stopped: bool,
+    pub(super) last_configure_us: u64,
+    pub(super) frame_index: u64,
+    pub(super) stopped: bool,
     /// Lazily built fullscreen textured pipeline (surface format bound).
     texture_pipeline: Option<wgpu::RenderPipeline>,
     texture_layout: Option<wgpu::BindGroupLayout>,
@@ -43,18 +45,35 @@ pub struct SurfaceProbePresenter {
     /// mid-resize tick or a one-pixel DOM rounding) waits; a persistent one is
     /// the explicit size-guard error.
     size_mismatch: SizeMismatchWait,
+    /// How the surface is bound to the OS compositor (HWND vs DirectComposition).
+    surface_kind: ProbeSurfaceKind,
+    /// Increments on every `Surface::configure` (construction, `resize`, and the
+    /// internal `Outdated` retry). A DirectComposition host must `Commit()` after
+    /// a (re)configure, because hal re-issues `IDCompositionVisual::SetContent`
+    /// only there; hosts compare this counter to what they last committed.
+    ///
+    /// A `Cell` because the `Outdated` retry lives in `acquire_frame(&self)`.
+    configure_generation: std::cell::Cell<u64>,
 }
 
 impl SurfaceProbePresenter {
-    /// Create and configure a Vulkan-only surface for `window`.
+    /// Create and configure a surface for `window` under `backend_policy`.
     ///
     /// `window` is an owning `raw-window-handle` provider (for example a Tauri
     /// window or an X11 child handle); the resulting `Surface<'static>` keeps it
     /// alive, so it must outlive nothing beyond the returned presenter.
     ///
+    /// [`ProbeBackendPolicy::Vulkan`] is the historical Vulkan-only contract;
+    /// [`ProbeBackendPolicy::Dx12`] fails explicitly on non-Windows targets.
+    ///
     /// Uses [`DEFAULT_PREFERRED_ADAPTER_NAMES`] as the adapter preference. See
     /// [`SurfaceProbePresenter::new_with_preferred_names`] to override it.
-    pub fn new<W>(window: W, width: u32, height: u32) -> Result<Self, ProbeError>
+    pub fn new<W>(
+        window: W,
+        width: u32,
+        height: u32,
+        backend_policy: ProbeBackendPolicy,
+    ) -> Result<Self, ProbeError>
     where
         W: wgpu::rwh::HasWindowHandle + wgpu::rwh::HasDisplayHandle + Send + Sync + 'static,
     {
@@ -69,6 +88,7 @@ impl SurfaceProbePresenter {
             preferred_names,
             ProbePresentMode::Fifo,
             crate::gpu_time::GpuTimeConfig::disabled(),
+            backend_policy,
         )
     }
 
@@ -81,6 +101,7 @@ impl SurfaceProbePresenter {
         width: u32,
         height: u32,
         present_mode: ProbePresentMode,
+        backend_policy: ProbeBackendPolicy,
     ) -> Result<Self, ProbeError>
     where
         W: wgpu::rwh::HasWindowHandle + wgpu::rwh::HasDisplayHandle + Send + Sync + 'static,
@@ -96,18 +117,21 @@ impl SurfaceProbePresenter {
             preferred_names,
             present_mode,
             crate::gpu_time::GpuTimeConfig::disabled(),
+            backend_policy,
         )
     }
 
     /// Create a probe with an explicit adapter-name preference list.
     ///
     /// Empty entries are ignored by the matcher. The list is only a preference;
-    /// a machine with none of the names still gets a Vulkan hardware adapter.
+    /// a machine with none of the names still gets an eligible hardware adapter
+    /// under `backend_policy`.
     pub fn new_with_preferred_names<W>(
         window: W,
         width: u32,
         height: u32,
         preferred_names: &[&str],
+        backend_policy: ProbeBackendPolicy,
     ) -> Result<Self, ProbeError>
     where
         W: wgpu::rwh::HasWindowHandle + wgpu::rwh::HasDisplayHandle + Send + Sync + 'static,
@@ -123,6 +147,7 @@ impl SurfaceProbePresenter {
             preferred_names,
             ProbePresentMode::Fifo,
             crate::gpu_time::GpuTimeConfig::disabled(),
+            backend_policy,
         )
     }
 
@@ -133,11 +158,15 @@ impl SurfaceProbePresenter {
         preferred_names: Vec<String>,
         present_mode_request: ProbePresentMode,
         gpu_time: crate::gpu_time::GpuTimeConfig,
+        backend_policy: ProbeBackendPolicy,
     ) -> Result<Self, ProbeError>
     where
         W: wgpu::rwh::HasWindowHandle + wgpu::rwh::HasDisplayHandle + Send + Sync + 'static,
     {
-        let instance = make_probe_instance();
+        // Refuse an impossible policy before creating any GPU object: DX12
+        // outside Windows is an explicit error, never a Vulkan fallback.
+        backend_policy.ensure_supported()?;
+        let instance = make_probe_instance(backend_policy);
         // `window` is owned for `'static`, so the surface is `Surface<'static>`
         // and keeps the window handle alive.
         let surface = instance
@@ -146,11 +175,12 @@ impl SurfaceProbePresenter {
         Self::build_with_surface(
             instance,
             surface,
-            width,
-            height,
+            (width, height),
             preferred_names,
             present_mode_request,
             gpu_time,
+            backend_policy,
+            ProbeSurfaceKind::Hwnd,
         )
     }
 
@@ -178,10 +208,10 @@ impl SurfaceProbePresenter {
     ///   re-created or given a new XID, and no surface role/lifetime change
     ///   (e.g. a Wayland surface re-role) happens while it exists;
     /// - this presenter is the **single presentation owner** of that drawable:
-    ///   no other Vulkan presenter/surface writes to the same window, and for a
-    ///   Wayland `wl_surface` the surface is app-owned — it is **never** a
-    ///   GTK/GDK-owned surface that GDK itself attaches/commits to (no double
-    ///   writer against GDK's own composition);
+    ///   no other GPU presenter/surface (Vulkan or DX12) writes to the same
+    ///   window, and for a Wayland `wl_surface` the surface is app-owned — it is
+    ///   **never** a GTK/GDK-owned surface that GDK itself attaches/commits to
+    ///   (no double writer against GDK's own composition);
     /// - construction, every `frame`/`resize`, and the final drop all happen on
     ///   the host's **main thread** (the same thread that owns the native
     ///   window), matching the safe path's semantics.
@@ -196,12 +226,16 @@ impl SurfaceProbePresenter {
         height: u32,
         present_mode: ProbePresentMode,
         gpu_time: crate::gpu_time::GpuTimeConfig,
+        backend_policy: ProbeBackendPolicy,
     ) -> Result<Self, ProbeError> {
+        // Refuse an impossible policy before touching any native handle: DX12
+        // outside Windows is an explicit error, never a Vulkan fallback.
+        backend_policy.ensure_supported()?;
         let preferred_names = DEFAULT_PREFERRED_ADAPTER_NAMES
             .iter()
             .map(|name| (*name).to_string())
             .collect();
-        let instance = make_probe_instance();
+        let instance = make_probe_instance(backend_policy);
         // SAFETY: forwarded from the caller's contract documented above.
         let surface: wgpu::Surface<'static> = unsafe {
             instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
@@ -213,12 +247,23 @@ impl SurfaceProbePresenter {
         Self::build_with_surface(
             instance,
             surface,
-            width,
-            height,
+            (width, height),
             preferred_names,
             present_mode,
             gpu_time,
+            backend_policy,
+            ProbeSurfaceKind::Hwnd,
         )
+    }
+
+    /// How this surface is bound to the OS compositor (`hwnd` / `composition`).
+    pub fn surface_kind(&self) -> ProbeSurfaceKind {
+        self.surface_kind
+    }
+
+    /// The number of `Surface::configure` calls issued so far (see the field doc).
+    pub fn configure_generation(&self) -> u64 {
+        self.configure_generation.get()
     }
 
     /// Shared factory used by the safe and unsafe constructors.
@@ -228,29 +273,72 @@ impl SurfaceProbePresenter {
     /// choice, configure and timing code. On any error path the surface, instance
     /// and (if created) device are dropped before returning, so a failed call
     /// leaves no GPU resource behind.
+    ///
+    /// `size` carries the physical `(width, height)` to configure the swapchain
+    /// with; it is validated against the adapter limit here, on the single path
+    /// both constructors take.
+    // One shared factory with an explicit parameter list (size, adapter
+    // preference, present-mode policy, GPU-time config, backend policy, surface
+    // kind): bundling them into a struct would only move the same arguments one
+    // indirection away, and every caller passes them positionally at one site.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn build_with_surface(
         instance: wgpu::Instance,
         surface: wgpu::Surface<'static>,
-        width: u32,
-        height: u32,
+        size: (u32, u32),
         preferred_names: Vec<String>,
         present_mode_request: ProbePresentMode,
         gpu_time_config: crate::gpu_time::GpuTimeConfig,
+        backend_policy: ProbeBackendPolicy,
+        surface_kind: ProbeSurfaceKind,
     ) -> Result<Self, ProbeError> {
-        let adapters = block_on(instance.enumerate_adapters(wgpu::Backends::VULKAN));
+        let (width, height) = size;
+        // Defensive: the public constructors already refuse an impossible policy
+        // before creating the instance, and this factory keeps that guarantee if
+        // it is ever reached directly.
+        backend_policy.ensure_supported()?;
+        let backends = backend_policy.backends();
+        eprintln!(
+            "[probe] backend-policy wgpu_backend={} ({})",
+            backend_policy.as_token(),
+            backend_policy.summary(),
+        );
+        let adapters = block_on(instance.enumerate_adapters(backends));
         if adapters.is_empty() {
-            return Err(ProbeError::NoVulkanAdapter(
-                "no Vulkan adapter was enumerated".into(),
-            ));
+            return Err(ProbeError::NoVulkanAdapter(format!(
+                "no adapter was enumerated for backend policy '{}' ({backends:?})",
+                backend_policy.as_token()
+            )));
         }
         let infos: Vec<ProbeAdapterInfo> = adapters
             .iter()
             .map(|adapter| probe_info(adapter, &surface))
             .collect();
-        let ranked = rank_probe_adapters(&infos, &preferred_names);
+        // Host-bring-up/evidence knob (presence-based): software-Vulkan
+        // environments such as lavapipe in a VM can present the probe, while the
+        // contract default keeps rejecting CPU adapters. Hardware still ranks
+        // first, so the override never prefers software over a real GPU.
+        let allow_cpu = allow_cpu_adapter_override();
+        if allow_cpu {
+            eprintln!(
+                "[probe] adapter-policy {ALLOW_CPU_ADAPTER_ENV} present: CPU/software adapters are eligible (hardware still preferred)"
+            );
+        }
+        let ranked = if allow_cpu {
+            rank_probe_adapters_allow_cpu(&infos, &preferred_names, backend_policy)
+        } else {
+            rank_probe_adapters(&infos, &preferred_names, backend_policy)
+        };
         let index = ranked.first().copied().ok_or_else(|| {
             ProbeError::NoVulkanAdapter(format!(
-                "no Vulkan hardware adapter can present to the surface (enumerated: {})",
+                "no {} {} adapter can present to the surface (policy '{}', enumerated: {})",
+                backend_policy.summary(),
+                if allow_cpu {
+                    "hardware or CPU"
+                } else {
+                    "hardware"
+                },
+                backend_policy.as_token(),
                 infos
                     .iter()
                     .map(|info| format!("{}/{}", info.backend, info.name))
@@ -315,14 +403,17 @@ impl SurfaceProbePresenter {
             width,
             height,
             present_mode: chosen_present_mode,
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            alpha_mode: alpha_mode_for(surface_kind),
             view_formats: Vec::new(),
             desired_maximum_frame_latency: 2,
         };
         let configure_started = std::time::Instant::now();
         surface.configure(&device, &config);
         let last_configure_us = configure_started.elapsed().as_micros() as u64;
-        eprintln!("[probe] initial configure took {last_configure_us} us");
+        eprintln!(
+            "[probe] initial configure took {last_configure_us} us surface={}",
+            surface_kind.as_token()
+        );
 
         Ok(Self {
             _instance: instance,
@@ -337,6 +428,7 @@ impl SurfaceProbePresenter {
             max_dimension,
             size: (width, height),
             preferred_names,
+            backend_policy,
             present_mode_request,
             last_configure_us,
             frame_index: 0,
@@ -348,6 +440,9 @@ impl SurfaceProbePresenter {
             device_limits: negotiated.limits,
             gpu_time: negotiated.gpu_time,
             size_mismatch: SizeMismatchWait::default(),
+            surface_kind,
+            // The construction configure above is generation 1.
+            configure_generation: std::cell::Cell::new(1),
         })
     }
 
@@ -365,6 +460,8 @@ impl SurfaceProbePresenter {
         self.config.height = height;
         let started = std::time::Instant::now();
         self.surface.configure(&self.device, &self.config);
+        self.configure_generation
+            .set(self.configure_generation.get() + 1);
         self.last_configure_us = started.elapsed().as_micros() as u64;
         eprintln!(
             "[probe] resize configure {width}x{height} took {} us",
@@ -415,6 +512,10 @@ impl SurfaceProbePresenter {
             wgpu::CurrentSurfaceTexture::Outdated => {
                 let stage = std::time::Instant::now();
                 self.surface.configure(&self.device, &self.config);
+                // A fresh swapchain: hal re-issues `SetContent`, so a
+                // DirectComposition host must commit this generation too.
+                self.configure_generation
+                    .set(self.configure_generation.get() + 1);
                 configure_us += stage.elapsed().as_micros() as u64;
                 match self.surface.get_current_texture() {
                     wgpu::CurrentSurfaceTexture::Success(frame)
@@ -502,9 +603,7 @@ impl SurfaceProbePresenter {
         }
         timings.scope_pop_us = stage.elapsed().as_micros() as u64;
 
-        let stage = std::time::Instant::now();
-        self.queue.present(frame);
-        timings.present_us = stage.elapsed().as_micros() as u64;
+        timings.present_us = self.present_in_scope(frame)?;
 
         self.frame_index += 1;
         timings.total_us = frame_started.elapsed().as_micros() as u64;
@@ -642,9 +741,7 @@ impl SurfaceProbePresenter {
         }
         timings.scope_pop_us = stage.elapsed().as_micros() as u64;
 
-        let stage = std::time::Instant::now();
-        self.queue.present(frame);
-        timings.present_us = stage.elapsed().as_micros() as u64;
+        timings.present_us = self.present_in_scope(frame)?;
 
         self.frame_index += 1;
         timings.total_us = frame_started.elapsed().as_micros() as u64;
@@ -654,6 +751,34 @@ impl SurfaceProbePresenter {
             surface_size: self.size,
             timings,
         })
+    }
+
+    /// Present `frame` inside its **own present-time validation scope**.
+    ///
+    /// Why a scope here at all: wgpu 30's `Queue::present` returns `()`, so an
+    /// `Ok` present status is discarded by the API (there is nothing to check),
+    /// while a present-time validation error would otherwise be delivered to the
+    /// *uncaptured* error handler — a panic. Present failures must be explicit
+    /// (AGENTS.md 铁律 2/6), so the call runs inside a validation scope and a
+    /// failure becomes [`ProbeError::Frame`] with the GPU's own message. This is
+    /// not a workaround: it is the only channel wgpu 30 exposes for present-time
+    /// validation failures.
+    ///
+    /// The earlier scope in the frame paths stays: it gates the **encoded**
+    /// frame, so a frame that already failed validation is dropped instead of
+    /// being presented at all.
+    pub(super) fn present_in_scope(&self, frame: wgpu::SurfaceTexture) -> Result<u64, ProbeError> {
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let stage = std::time::Instant::now();
+        self.queue.present(frame);
+        let present_us = stage.elapsed().as_micros() as u64;
+        if let Some(error) = collect_error_scope_bounded(&self.device, scope, SCOPE_COLLECT_BUDGET)
+        {
+            return Err(ProbeError::Frame(format!(
+                "present rejected: GPU validation error: {error}"
+            )));
+        }
+        Ok(present_us)
     }
 
     /// Acquire a surface frame, retrying once after a reconfigure on `Outdated`.
@@ -816,6 +941,11 @@ impl SurfaceProbePresenter {
     pub fn preferred_adapter_names(&self) -> &[String] {
         &self.preferred_names
     }
+
+    /// The backend policy this presenter was constructed with.
+    pub fn backend_policy(&self) -> ProbeBackendPolicy {
+        self.backend_policy
+    }
 }
 
 impl std::fmt::Debug for SurfaceProbePresenter {
@@ -825,6 +955,7 @@ impl std::fmt::Debug for SurfaceProbePresenter {
             .field("surface_format", &self.config.format)
             .field("surface_size", &self.size)
             .field("present_mode", &self.config.present_mode)
+            .field("backend_policy", &self.backend_policy)
             .field("frame_index", &self.frame_index)
             .field("stopped", &self.stopped)
             .finish_non_exhaustive()

@@ -19,6 +19,7 @@ import {
   SETTINGS_READ_COMMAND,
   SETTINGS_WAITING,
   SETTINGS_WRITE_COMMAND,
+  WGPU_BACKENDS,
   applyPayload,
   dirtyFields,
   draftFromSettings,
@@ -62,6 +63,8 @@ function snapshot(overrides = {}) {
     apertureSize: 12,
     plotFormat: 'svg',
     fontsDir: '/usr/share/fonts',
+    // The WGPU backend is a shared wire key: snake_case in the snapshot too.
+    wgpu_backend: 'auto',
     ...overrides,
   };
 }
@@ -112,7 +115,7 @@ test('every field sits on a declared tab exactly once and nothing else exists', 
   ]);
   assert.deepEqual(fieldsForTab('plot').map(field => field.id), ['plotFormat']);
   assert.deepEqual(fieldsForTab('files').map(field => field.id), ['fontsDir']);
-  assert.deepEqual(fieldsForTab('user').map(field => field.id), ['language']);
+  assert.deepEqual(fieldsForTab('user').map(field => field.id), ['language', 'wgpuBackend']);
 });
 
 test('each control is the editor its backend value really needs', () => {
@@ -132,6 +135,7 @@ test('each control is the editor its backend value really needs', () => {
     plotFormat: 'select',
     fontsDir: 'readonly',
     language: 'locale',
+    wgpuBackend: 'select',
   });
   // Number controls carry the host's own range and a unit suffix, never a clamp.
   assert.deepEqual(
@@ -145,6 +149,24 @@ test('each control is the editor its backend value really needs', () => {
   assert.deepEqual(fieldById('plotFormat').choices, ['svg', 'pdf']);
   assert.deepEqual(PLOT_FORMATS, ['svg', 'pdf']);
   assert.deepEqual(LOCALE_CHOICES, ['zh-CN', 'en']);
+  // The WGPU selector offers exactly the shared enum, with its own copy.
+  assert.deepEqual(WGPU_BACKENDS, ['auto', 'vulkan', 'dx12']);
+  assert.deepEqual(fieldById('wgpuBackend').choices, WGPU_BACKENDS);
+  assert.equal(fieldById('wgpuBackend').choiceKeyPrefix, 'options.wgpuBackend');
+  // The plot format keeps the host's dedicated refusal; the backend is a plain
+  // enum mismatch.
+  assert.equal(fieldById('plotFormat').errorCode, SETTINGS_ERROR.invalidPlotFormat);
+  assert.equal(fieldById('wgpuBackend').errorCode, undefined);
+});
+
+test('the WGPU backend uses the shared snake_case wire key on both directions', () => {
+  const field = fieldById('wgpuBackend');
+  // The config key another lane reads is `wgpu_backend`: never camelCased.
+  assert.equal(field.wire, 'wgpu_backend');
+  assert.equal(field.key, 'wgpu_backend');
+  assert.equal(field.tab, 'user');
+  assert.equal(field.labelKey, 'options.field.wgpuBackend');
+  assert.equal(field.helpKey, 'options.help.wgpuBackend');
 });
 
 test('the wire field and the write key differ only where the host says so', () => {
@@ -204,6 +226,16 @@ test('the validation table matches the host ranges and codes', () => {
     ['plotFormat', 'pdf', null],
     ['plotFormat', 'png', SETTINGS_ERROR.invalidPlotFormat],
     ['plotFormat', 'SVG', SETTINGS_ERROR.invalidPlotFormat],
+    ['wgpuBackend', 'auto', null],
+    ['wgpuBackend', 'vulkan', null],
+    ['wgpuBackend', 'dx12', null],
+    // A backend outside the shared enum is a plain invalid value (the host's own
+    // `settings.invalid_value`), never the plot-format sentence and never clamped
+    // to `auto`.
+    ['wgpuBackend', 'Vulkan', SETTINGS_ERROR.invalidValue],
+    ['wgpuBackend', 'metal', SETTINGS_ERROR.invalidValue],
+    ['wgpuBackend', '', SETTINGS_ERROR.invalidValue],
+    ['wgpuBackend', null, SETTINGS_ERROR.invalidValue],
     ['language', 'zh-CN', null],
     ['language', 'en', null],
     ['language', 'fr', SETTINGS_ERROR.invalidValue],
@@ -245,6 +277,7 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   assert.equal(draft.plotFormat, 'svg');
   assert.equal(draft.fontsDir, '/usr/share/fonts');
   assert.equal(draft.language, 'zh-CN');
+  assert.equal(draft.wgpuBackend, 'auto');
   // Colours are canonicalised to lower case for comparison and display.
   assert.equal(draftFromSettings(snapshot({ backgroundModel: '#AABBCC' })).backgroundModel, '#aabbcc');
 
@@ -255,11 +288,16 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   assert.equal(empty.plotFormat, null);
   assert.equal(empty.fontsDir, null);
   assert.equal(empty.language, null);
+  // A host that does not report the backend shows the row as unreported (and
+  // unwritable) rather than seeding the `auto` default on its behalf.
+  assert.equal(empty.wgpuBackend, null);
   // A malformed value is not repaired into something it never was.
   const malformed = draftFromSettings({
     grid: 'yes', crosshairPercent: -3, backgroundModel: 'grey', plotFormat: 'dxf', fontsDir: 7,
+    wgpu_backend: 'metal',
   });
   assert.equal(malformed.grid, null);
+  assert.equal(malformed.wgpuBackend, null);
   // A real number outside the range is kept as reported and refused by the
   // validator, not silently clamped into a "valid" value.
   assert.equal(malformed.crosshairSize, '-3');
@@ -302,6 +340,7 @@ test('the apply payload carries write keys, typed values and nothing else', () =
     backgroundModel: '#AABBCC',
     grid: false,
     plotFormat: 'pdf',
+    wgpuBackend: 'vulkan',
     comfort: 'ignored',
   };
   assert.deepEqual(applyPayload(draft, wire), [
@@ -310,6 +349,8 @@ test('the apply payload carries write keys, typed values and nothing else', () =
     { field: 'crosshairSize', key: 'crosshairSize', value: 40 },
     { field: 'grid', key: 'grid', value: false },
     { field: 'plotFormat', key: 'plotFormat', value: 'pdf' },
+    // The backend keeps the shared snake_case key in both directions.
+    { field: 'wgpuBackend', key: 'wgpu_backend', value: 'vulkan' },
   ]);
   // The read-only fonts folder and the UI language are never written.
   const onlyLocal = { ...draftFromSettings(wire, 'en'), fontsDir: '/tmp/fonts', language: 'zh-CN' };
@@ -323,6 +364,8 @@ test('normalizeValue is the single canonical form used by diff and settle', () =
   assert.equal(normalizeValue('backgroundModel', '#AABBCC'), '#aabbcc');
   assert.equal(normalizeValue('plotFormat', 'pdf'), 'pdf');
   assert.equal(normalizeValue('plotFormat', 'png'), null);
+  assert.equal(normalizeValue('wgpuBackend', 'dx12'), 'dx12');
+  assert.equal(normalizeValue('wgpuBackend', 'DX12'), null);
   assert.equal(normalizeValue('language', 'en'), 'en');
   assert.equal(normalizeValue('fontsDir', '/x'), '/x');
   assert.equal(normalizeValue('nope', 'x'), null);
@@ -486,6 +529,7 @@ test('every key the dialog asks for exists in both catalogs with real copy', () 
     ...OPTIONS_TABS.map(tab => tab.labelKey),
     ...OPTIONS_FIELDS.flatMap(field => [field.labelKey, field.helpKey, field.unitKey].filter(Boolean)),
     ...LOCALE_CHOICES.map(choice => `options.language.${choice}`),
+    ...WGPU_BACKENDS.map(choice => `options.wgpuBackend.${choice}`),
     'options.error.generic',
     'options.error.load_failed',
     'options.error.not_visible',
@@ -500,6 +544,31 @@ test('every key the dialog asks for exists in both catalogs with real copy', () 
   // The staged-change note keeps its {count} placeholder in both languages.
   assert.match(en['dialog.options.changed'], /\{count\}/);
   assert.match(zh['dialog.options.changed'], /\{count\}/);
+});
+
+test('the WGPU backend rows read like the language row, in both catalogs', async () => {
+  const field = fieldById('wgpuBackend');
+  // The label/help copy follows the field-table convention (both catalogs).
+  assert.equal(zh[field.labelKey], 'WGPU 后端');
+  assert.equal(en[field.labelKey], 'WGPU backend');
+  assert.ok(zh[field.helpKey].trim().length > 0);
+  assert.ok(en[field.helpKey].trim().length > 0);
+  // Each choice reads through its own catalog key, exactly like a language name
+  // does: the wire spelling is never shown raw.
+  const tzh = createTranslator({ 'zh-CN': zh, en }, 'zh-CN');
+  assert.deepEqual(WGPU_BACKENDS.map(choice => en[`${field.choiceKeyPrefix}.${choice}`]), [
+    'Auto', 'Vulkan', 'DirectX 12',
+  ]);
+  assert.deepEqual(WGPU_BACKENDS.map(choice => zh[`${field.choiceKeyPrefix}.${choice}`]), [
+    '自动', 'Vulkan', 'DirectX 12',
+  ]);
+  for (const choice of WGPU_BACKENDS) {
+    assert.notEqual(tzh(`${field.choiceKeyPrefix}.${choice}`), `${field.choiceKeyPrefix}.${choice}`,
+      `${choice} has no copy, so the raw key would be rendered`);
+  }
+  // The selector is a native select, the same control the language row uses.
+  const dialog = await readModule('components/OptionsDialog.jsx');
+  assert.ok(dialog.includes('choiceKeyPrefix'), 'a copy-carrying select must resolve through the catalog');
 });
 
 test('the options popup kind is allowlisted and carries no payload', () => {

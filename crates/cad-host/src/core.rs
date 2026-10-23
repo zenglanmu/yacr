@@ -253,6 +253,17 @@ pub struct HostCore {
     pub(crate) hover_now: Rc<dyn Fn() -> std::time::Instant>,
     /// Diagnostics from reading the config / preference files at startup.
     pub(crate) startup_diagnostics: Rc<RefCell<Vec<String>>>,
+    /// The durable renderer backend preference: `Some("auto"|"vulkan"|"dx12")`
+    /// once the user chose one, `None` before that (the wire default is `auto`).
+    ///
+    /// It deliberately lives **outside** the `ViewerConfig` schema: the graphics
+    /// backend is renderer state, not viewer configuration, and the closed
+    /// allowed-path projection cannot carry it. The value is re-read at startup
+    /// and merged back into every preference write (see
+    /// `HostCore::persist_preference`), so an unrelated setting write can never
+    /// drop it, and the host's presenter construction — which reads the same
+    /// preference file — sees exactly what the Options dialog wrote.
+    pub(crate) wgpu_backend: Rc<RefCell<Option<String>>>,
     /// The bounded P3 request queue. Admission/identity/ordering live in the
     /// engine; the host only drives it through `dispatch_immediate`.
     pub(crate) queue: Rc<RequestQueue>,

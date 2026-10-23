@@ -6,8 +6,99 @@ use super::*;
 /// selects another Vulkan hardware adapter.
 pub const DEFAULT_PREFERRED_ADAPTER_NAMES: &[&str] = &["P620"];
 
-/// The only backend the probe will use, as wgpu's `Backend::to_str` value.
-pub(super) const REQUIRED_BACKEND: &str = "vulkan";
+/// Which wgpu backend(s) the native probe may use.
+///
+/// This is the renderer half of the durable user preference `wgpu_backend`. The
+/// accepted wire values are **exactly** `"auto"`, `"vulkan"` and `"dx12"`;
+/// anything else — an absent value, an empty string, an unknown token — resolves
+/// to [`ProbeBackendPolicy::Auto`]. There is no silent third choice and no
+/// fallback from an explicit policy to another backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProbeBackendPolicy {
+    /// Vulkan and DX12, with Vulkan preferred inside a ranking tier.
+    ///
+    /// The default: on a target where one of the two backends is not compiled
+    /// in, wgpu simply has no adapters for it, so `auto` degrades to the
+    /// available one without pretending the other was tried.
+    #[default]
+    Auto,
+    /// Vulkan only — the historical probe contract.
+    Vulkan,
+    /// DirectX 12 only. Windows-only: any other target fails explicitly with
+    /// [`ProbeError::UnsupportedBackendPolicy`] (never a silent Vulkan fallback).
+    Dx12,
+}
+
+impl ProbeBackendPolicy {
+    /// Parse the durable `wgpu_backend` value.
+    ///
+    /// Accepted spellings are exactly `"vulkan"` and `"dx12"`; `"auto"`, an
+    /// absent value, an empty value and every unknown token are
+    /// [`ProbeBackendPolicy::Auto`] (the documented default). Matching is
+    /// case-sensitive: `"DX12"` is not a wire value and therefore resolves to
+    /// `auto`, never to DX12 by accident.
+    pub fn parse(raw: Option<&str>) -> Self {
+        match raw {
+            Some("vulkan") => Self::Vulkan,
+            Some("dx12") => Self::Dx12,
+            _ => Self::Auto,
+        }
+    }
+
+    /// The stable wire token (`auto`/`vulkan`/`dx12`), for logs and evidence.
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Vulkan => "vulkan",
+            Self::Dx12 => "dx12",
+        }
+    }
+
+    /// Human-readable policy summary used in the one-line startup log.
+    pub fn summary(self) -> &'static str {
+        match self {
+            Self::Auto => "vulkan preferred",
+            Self::Vulkan => "vulkan only",
+            Self::Dx12 => "dx12 only",
+        }
+    }
+
+    /// The wgpu backends this policy enables for instance creation and
+    /// enumeration.
+    pub fn backends(self) -> wgpu::Backends {
+        match self {
+            Self::Auto => wgpu::Backends::VULKAN | wgpu::Backends::DX12,
+            Self::Vulkan => wgpu::Backends::VULKAN,
+            Self::Dx12 => wgpu::Backends::DX12,
+        }
+    }
+
+    /// Whether an adapter reporting `backend` (wgpu's `Backend::to_str` value) is
+    /// eligible under this policy.
+    pub fn allows_backend(self, backend: &str) -> bool {
+        match self {
+            Self::Auto => backend == "vulkan" || backend == "dx12",
+            Self::Vulkan => backend == "vulkan",
+            Self::Dx12 => backend == "dx12",
+        }
+    }
+
+    /// Fail explicitly when this policy cannot work on the current target.
+    ///
+    /// Only [`ProbeBackendPolicy::Dx12`] has a target restriction: wgpu compiles
+    /// its DX12 backend on Windows only, so elsewhere the probe refuses the
+    /// policy by name instead of enumerating nothing or silently using Vulkan.
+    pub(crate) fn ensure_supported(self) -> Result<(), ProbeError> {
+        match self {
+            Self::Dx12 if !cfg!(target_os = "windows") => {
+                Err(ProbeError::UnsupportedBackendPolicy {
+                    policy: self.as_token(),
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+}
 
 /// Marker-offset wrapping range. The probe wraps offsets into `[0, 1)`.
 pub(super) const MARKER_PERIOD: f32 = 1.0;
@@ -180,6 +271,35 @@ pub enum ProbePresentMode {
     MailboxElseImmediate,
 }
 
+/// Which kind of native surface a presenter is presenting into.
+///
+/// This is evidence, not decoration: on Windows a **HWND-targeted** DXGI flip
+/// swapchain cannot composite a `WS_CHILD` under a transparent (`noRedirectionBitmap`)
+/// top-level window — wgpu-hal 30 hardcodes `DXGI_SWAP_EFFECT_FLIP_DISCARD`, and a
+/// flip chain binds to the top-level DWM visual, which a child window does not
+/// have. The Windows host therefore presents through **DirectComposition**
+/// (`CreateSwapChainForComposition` over an `IDCompositionVisual`); the ready line
+/// names the kind so an evidence run can never confuse the two paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeSurfaceKind {
+    /// Surface created from a raw `HWND` (the historical path; still used by the
+    /// Linux/GTK host and by callers that own an opaque top-level window).
+    Hwnd,
+    /// Surface created over an `IDCompositionVisual`
+    /// (`SurfaceTargetUnsafe::CompositionVisual`), composed by DirectComposition.
+    Composition,
+}
+
+impl ProbeSurfaceKind {
+    /// The stable `surface=…` token for the presenter-ready evidence line.
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Hwnd => "hwnd",
+            Self::Composition => "composition",
+        }
+    }
+}
+
 /// A probe failure. Every variant is a distinct, explicit cause; the probe never
 /// converts a failure into a silent success.
 #[derive(Debug, Clone, PartialEq)]
@@ -192,8 +312,13 @@ pub enum ProbeError {
     InvalidMarker(f32),
     /// `Instance::create_surface` failed.
     SurfaceCreation(String),
-    /// No Vulkan hardware adapter could present to the surface.
+    /// No Vulkan/DX12 adapter matching the selected [`ProbeBackendPolicy`] could
+    /// present to the surface. The message names the policy's backend(s) and the
+    /// adapters that were enumerated.
     NoVulkanAdapter(String),
+    /// The requested [`ProbeBackendPolicy`] cannot work on this target (DX12
+    /// outside Windows). Nothing was tried; there is no fallback backend.
+    UnsupportedBackendPolicy { policy: &'static str },
     /// `Adapter::request_device` failed.
     DeviceRequest(String),
     /// The surface reported no supported texture format.
@@ -240,8 +365,12 @@ impl std::fmt::Display for ProbeError {
                 write!(f, "surface creation failed: {message}")
             }
             ProbeError::NoVulkanAdapter(message) => {
-                write!(f, "no usable Vulkan hardware adapter: {message}")
+                write!(f, "no usable GPU adapter: {message}")
             }
+            ProbeError::UnsupportedBackendPolicy { policy } => write!(
+                f,
+                "probe backend policy '{policy}' is not supported on this target; nothing was tried (use 'auto' or 'vulkan')"
+            ),
             ProbeError::DeviceRequest(message) => {
                 write!(f, "wgpu device request failed: {message}")
             }

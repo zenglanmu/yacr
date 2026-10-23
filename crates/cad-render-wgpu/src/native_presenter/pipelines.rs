@@ -5,6 +5,22 @@ use super::*;
 /// Polls the device in small steps up to `budget`; if the scope has not resolved
 /// by then it logs and returns `None`, so a slow device poll cannot hold the
 /// frame. Validation errors that do resolve in time are still reported.
+/// The composite-alpha mode a given surface kind must request.
+///
+/// - `Hwnd`: `Auto` (wgpu picks the only mode an HWND chain advertises: opaque).
+/// - `Composition`: **`PreMultiplied`**, which is what a
+///   `CreateSwapChainForComposition` chain is specified for. `Auto` maps to
+///   `DXGI_ALPHA_MODE_UNSPECIFIED`, which is not a valid composition alpha mode.
+///   The CAD content is opaque (`alpha = 1`), so premultiplied and straight
+///   compositing are byte-identical here — the choice only makes the contract
+///   explicit instead of relying on a default.
+pub(super) fn alpha_mode_for(kind: ProbeSurfaceKind) -> wgpu::CompositeAlphaMode {
+    match kind {
+        ProbeSurfaceKind::Hwnd => wgpu::CompositeAlphaMode::Auto,
+        ProbeSurfaceKind::Composition => wgpu::CompositeAlphaMode::PreMultiplied,
+    }
+}
+
 pub(super) fn collect_error_scope_bounded(
     device: &wgpu::Device,
     guard: wgpu::ErrorScopeGuard,
@@ -30,10 +46,16 @@ pub(super) fn collect_error_scope_bounded(
     }
 }
 
-/// Create the Vulkan-only probe instance (shared by the safe and unsafe paths).
-pub(super) fn make_probe_instance() -> wgpu::Instance {
+/// Create the probe instance for `backend_policy` (shared by the safe and unsafe
+/// paths).
+///
+/// The descriptor's backend set is exactly the policy's: `vulkan` keeps the
+/// historical Vulkan-only instance, `dx12` asks for DX12 only, and `auto` enables
+/// both. Backends not compiled for the target are absent from enumeration rather
+/// than substituted.
+pub(super) fn make_probe_instance(backend_policy: ProbeBackendPolicy) -> wgpu::Instance {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-    descriptor.backends = wgpu::Backends::VULKAN;
+    descriptor.backends = backend_policy.backends();
     wgpu::Instance::new(descriptor)
 }
 
@@ -261,29 +283,94 @@ pub(super) fn device_type_str(device_type: wgpu::DeviceType) -> &'static str {
     }
 }
 
+/// Presence-based, probe-only override that makes CPU/software Vulkan adapters
+/// eligible for adapter selection.
+///
+/// Exactly like `YACR_PROBE_NO_MAXIMIZE`, only **presence** matters: the value is
+/// irrelevant (`=1` and `=` are equivalent), and an absent variable keeps the
+/// contract default (CPU adapters rejected). This is a host-bring-up/evidence
+/// knob for software-Vulkan environments (for example lavapipe in a VM), never a
+/// production relaxation.
+pub(crate) const ALLOW_CPU_ADAPTER_ENV: &str = "YACR_PROBE_ALLOW_CPU_ADAPTER";
+
+/// Whether the [`ALLOW_CPU_ADAPTER_ENV`] override is present in the environment.
+pub(crate) fn allow_cpu_adapter_override() -> bool {
+    env_flag_present(std::env::var_os(ALLOW_CPU_ADAPTER_ENV))
+}
+
+/// Pure presence test behind [`allow_cpu_adapter_override`].
+///
+/// Split out so the documented semantics (presence, not truthiness) are testable
+/// without mutating the process environment.
+pub(super) fn env_flag_present(value: Option<std::ffi::OsString>) -> bool {
+    value.is_some()
+}
+
 /// Rank adapters the probe is willing to use, most preferred first.
 ///
-/// Eligibility is hard: the backend must be Vulkan, the device type must not be
-/// `cpu`, and the adapter must be able to present to the surface. Ordering is
-/// soft: a name matching `preferred_names` (case-insensitive substring, in list
-/// order) wins, then a discrete GPU over an integrated one, then enumeration
-/// order. The result is deterministic and stable.
+/// Eligibility is hard: the adapter's backend must be allowed by
+/// `backend_policy`, the device type must not be `cpu` (unless the probe-only
+/// [`ALLOW_CPU_ADAPTER_ENV`] override is active), and the adapter must be able to
+/// present to the surface. Ordering is soft: a name matching `preferred_names`
+/// (case-insensitive substring, in list order) wins, then Vulkan before DX12,
+/// then a discrete GPU over an integrated one, then enumeration order. The result
+/// is deterministic and stable.
+///
+/// This is the contract default (CPU/software adapters rejected). The probe-only
+/// [`rank_probe_adapters_allow_cpu`] is the opt-in variant behind
+/// [`ALLOW_CPU_ADAPTER_ENV`].
 pub(crate) fn rank_probe_adapters<S: AsRef<str>>(
     infos: &[ProbeAdapterInfo],
     preferred_names: &[S],
+    backend_policy: ProbeBackendPolicy,
+) -> Vec<usize> {
+    rank_probe_adapters_policy(infos, preferred_names, backend_policy, false)
+}
+
+/// [`rank_probe_adapters`] with CPU/software adapters **also** eligible.
+///
+/// Host-bring-up/evidence only (software Vulkan such as lavapipe). Ranking keeps
+/// hardware strictly above CPU/software adapters: a CPU adapter never outranks a
+/// hardware adapter even when its name matches `preferred_names`. Inside a
+/// device-type tier the existing preference applies unchanged (preferred name
+/// first, then Vulkan before DX12, then discrete over integrated, then
+/// enumeration order). The backend policy applies exactly as in the strict path.
+pub(crate) fn rank_probe_adapters_allow_cpu<S: AsRef<str>>(
+    infos: &[ProbeAdapterInfo],
+    preferred_names: &[S],
+    backend_policy: ProbeBackendPolicy,
+) -> Vec<usize> {
+    rank_probe_adapters_policy(infos, preferred_names, backend_policy, true)
+}
+
+/// Shared ranking core. `allow_cpu` only widens eligibility; the sort key is the
+/// same shape for every backend policy, so a Vulkan-only policy (where the
+/// backend rank is constant) keeps the historical ordering bit-for-bit.
+fn rank_probe_adapters_policy<S: AsRef<str>>(
+    infos: &[ProbeAdapterInfo],
+    preferred_names: &[S],
+    backend_policy: ProbeBackendPolicy,
+    allow_cpu: bool,
 ) -> Vec<usize> {
     let mut eligible: Vec<usize> = infos
         .iter()
         .enumerate()
         .filter(|(_, info)| {
-            info.backend == REQUIRED_BACKEND && info.device_type != "cpu" && info.surface_compatible
+            backend_policy.allows_backend(&info.backend)
+                && (allow_cpu || info.device_type != "cpu")
+                && info.surface_compatible
         })
         .map(|(index, _)| index)
         .collect();
     eligible.sort_by_key(|&index| {
         let info = &infos[index];
         (
+            // Hardware always outranks CPU/software, even a name-preferred one.
+            // In the strict path CPU adapters are filtered out before sorting, so
+            // this key is constant and the ordering is unchanged.
+            u8::from(info.device_type == "cpu"),
             preferred_rank(&info.name, preferred_names),
+            backend_rank(&info.backend),
             device_rank(&info.device_type),
             index,
         )
@@ -301,6 +388,15 @@ pub(super) fn preferred_rank<S: AsRef<str>>(name: &str, preferred_names: &[S]) -
             !needle.is_empty() && lowered.contains(&needle)
         })
         .unwrap_or(usize::MAX)
+}
+
+/// Sort weight inside a backend policy: Vulkan before DX12, others last.
+pub(super) fn backend_rank(backend: &str) -> u8 {
+    match backend {
+        "vulkan" => 0,
+        "dx12" => 1,
+        _ => 2,
+    }
 }
 
 /// Sort weight inside a backend: discrete GPUs before integrated, others last.

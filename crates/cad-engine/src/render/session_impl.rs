@@ -320,6 +320,21 @@ impl RenderSessionHandle {
     pub fn cad_frame_dirty(&self) -> bool {
         self.0.borrow().runtime.dirty.dirty()
     }
+    /// The scene revision baked into the **retained/presented texture**.
+    ///
+    /// `None` until a complete render has been presented (a progressive frame
+    /// that is still pending has no single baked revision). This is bookkeeping
+    /// the runtime already holds (`presented_revision`); it is exposed so a host
+    /// can distinguish "the texture contains commit N" from "the scene reached
+    /// commit N but the texture is older" without inventing state.
+    pub fn rendered_revision(&self) -> Option<u64> {
+        self.0.borrow().runtime.presented_revision
+    }
+    /// The scene revision the GPU has **committed** (the latest commit),
+    /// regardless of whether it has been rendered into a texture yet.
+    pub fn committed_revision(&self) -> Option<u64> {
+        self.0.borrow().runtime.committed_revision()
+    }
     pub fn current_drawing_presented(&self) -> bool {
         let mut state = self.0.borrow_mut();
         state.observe_drawing();

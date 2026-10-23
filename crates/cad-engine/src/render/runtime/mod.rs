@@ -6,6 +6,26 @@ use cad_domain::SelectionRef;
 use cad_render_wgpu::{wgpu, BackendCapabilities, RenderError, RenderTarget, Renderer};
 use std::sync::Arc;
 
+/// The physical size of the CAD render target for a logical (CSS) content size
+/// and window scale factor, in device pixels.
+///
+/// This is the **single authority** for the CAD content size. The render session
+/// allocates its texture at this size, and a native host must size its CAD child
+/// surface with the same number (the host reaches this function through
+/// `cad_ui_core::layout::physical_content_size`, which delegates here). The
+/// presenter refuses to blit a texture whose size disagrees with the surface, so
+/// an independently rounded *size* is a total present failure rather than a
+/// cosmetic one; only the offset may be rounded separately.
+///
+/// Each axis is clamped to at least 1 px so a sub-pixel logical size still yields
+/// a valid texture (callers validate that the inputs are finite and positive).
+pub fn render_target_size(logical: [f64; 2], scale: f64) -> (u32, u32) {
+    (
+        (logical[0] * scale).round().max(1.0) as u32,
+        (logical[1] * scale).round().max(1.0) as u32,
+    )
+}
+
 /// Observation of one **actual** renderer invocation (`Renderer::render`/
 /// `render_3d`). Produced only when the engine really invoked the renderer this
 /// frame; a retained/reused frame or a gate `Ok(None)` never produces one, so a

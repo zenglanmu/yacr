@@ -7,7 +7,9 @@ use std::ptr::NonNull;
 use crate::wayland_surface::{
     is_wayland_display, EnsureChild, NativeHealth, SubsurfaceReadiness, WaylandSurface,
 };
-use cad_render_wgpu::{gpu_time::GpuTimeConfig, ProbePresentMode, SurfaceProbePresenter};
+use cad_render_wgpu::{
+    gpu_time::GpuTimeConfig, ProbeBackendPolicy, ProbePresentMode, SurfaceProbePresenter,
+};
 use gtk::prelude::*;
 use raw_window_handle::{
     RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
@@ -377,6 +379,12 @@ impl GtkOverlayOwner {
             native_geom.0,
             native_geom.1,
         );
+        // Durable `wgpu_backend` preference, read once per presenter build
+        // (never per frame). Absent/unreadable resolves to the renderer's
+        // `auto`; an explicit `dx12` fails explicitly on this host instead of
+        // silently falling back to Vulkan.
+        let backend_policy =
+            ProbeBackendPolicy::parse(crate::host::wgpu_backend_preference().as_deref());
         // SAFETY: the drawing area owns a live native X child window (classified
         // above: distinct XID, realized, mapped, non-zero steady geometry, a real
         // descendant of the top level). The handles stay valid while this owner
@@ -390,6 +398,7 @@ impl GtkOverlayOwner {
                 phys_h,
                 ProbePresentMode::MailboxElseImmediate,
                 self.gpu_time,
+                backend_policy,
             )
         } {
             Ok(presenter) => presenter,
@@ -603,6 +612,9 @@ impl GtkOverlayOwner {
             child.as_ptr(),
         );
 
+        // Same one-read-per-build preference as the X11 path (see above).
+        let backend_policy =
+            ProbeBackendPolicy::parse(crate::host::wgpu_backend_preference().as_deref());
         // This boundary spans the **whole presenter constructor**. wgpu-hal 30
         // panics (`expect("WaylandSurface failed")`) when `vkCreateWaylandSurfaceKHR`
         // returns an error instead of surfacing `Err`. Any panic inside the
@@ -619,6 +631,7 @@ impl GtkOverlayOwner {
                 phys_h,
                 ProbePresentMode::MailboxElseImmediate,
                 self.gpu_time,
+                backend_policy,
             )
         }));
         let presenter = match created {

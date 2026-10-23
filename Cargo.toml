@@ -110,9 +110,16 @@ web-sys = "=0.3.106"
 # React + Tauri native Linux desktop host (`apps/app-linux`). Tauri2 and its
 # build helper are the runtime/build dependencies; the host reuses the existing
 # `cad-render-wgpu::SurfaceProbePresenter` with no renderer changes.
-# `tauri-build` is versioned independently of `tauri` (2.7.x vs 2.11.x).
-tauri = { version = "=2.11.6", features = ["unstable"] }
-tauri-build = { version = "=2.6.3" }
+# `tauri-build` is versioned independently of `tauri` (2.7.x vs 2.12.x).
+# `2.12.3` is the documented floor for `WindowBuilder::no_redirection_bitmap`
+# (the creation-time `WS_EX_NOREDIRECTIONBITMAP`; the API exists since 2.12.0,
+# verified in the registry sources). Its runtime family moves with it (resolved
+# from the lock): tauri-runtime 2.12.2, tauri-runtime-wry 2.12.3,
+# tauri-macros/codegen 2.7.4, tauri-utils 2.10.2, tao 0.37.1, wry 0.57.0,
+# webview2-com 0.39.1 (single version; the app-windows pins were retargeted with
+# it so no duplicate COM bindings remain).
+tauri = { version = "=2.12.3", features = ["unstable"] }
+tauri-build = { version = "=2.7.2" }
 # GTK overlay bridge for the Linux host. Versions match the gtk/gdk/gdkx11
 # already in the lock via Tauri.
 gtk = "0.18"

@@ -7,14 +7,16 @@
 //!   startup read-back of `ICoreWebView2Controller2::DefaultBackgroundColor` so a
 //!   silent wry clamp (any non-zero alpha becomes `255`) cannot masquerade as a
 //!   working transparent layer;
-//! - `WS_EX_NOREDIRECTIONBITMAP` requested before the window is shown (best
-//!   effort: Tauri 2.11.6 has no `noRedirectionBitmap` builder field);
+//! - `WS_EX_NOREDIRECTIONBITMAP` requested **at creation** through Tauri's
+//!   `WindowBuilder::no_redirection_bitmap(true)` (tauri ≥ 2.12) and verified by
+//!   reading the created window's ex-style back. Win32 honours this style only at
+//!   creation, so there is no post-creation `SetWindowLongPtrW` path any more;
 //! - **no** `WS_EX_LAYERED`, no `set_ignore_cursor_events`.
 //!
 //! The CAD child HWND is created **after** the WebView2 container exists so the
 //! explicit `SetWindowPos(cad, container, …)` has a sibling to sit below.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use cad_host::HostOptions;
 use cad_platform::ConfigStore;
@@ -61,22 +63,34 @@ pub fn init(
         // Create hidden: the ex-style and the webview must exist before the
         // first composited frame, otherwise a white/black flash is unavoidable.
         .visible(false)
+        // `WS_EX_NOREDIRECTIONBITMAP` is a **creation-time-only** ex-style: it can
+        // only be requested while the window is created. This used to be a
+        // post-creation `SetWindowLongPtrW`, which always fails
+        // `ERROR_INVALID_PARAMETER`; tauri 2.12 exposes the builder option, so the
+        // flag is set where Win32 honours it. The read-back below verifies it.
+        .no_redirection_bitmap(true)
         .maximized(maximize)
         .build()?;
 
     let hwnd = window
         .hwnd()
         .map_err(|error| format!("window hwnd unavailable: {error}"))?;
-    match crate::win32_surface::set_no_redirection_bitmap(hwnd) {
-        Ok(()) => eprintln!(
-            "[probe] win32 ex-style: WS_EX_NOREDIRECTIONBITMAP requested (best effort, \
-             Tauri 2.11.6 has no builder flag; unverified on Wine)"
+    // Verification, not application: the flag was requested at creation above.
+    // A runtime that ignored it is reported explicitly (the window is still
+    // usable — with a possible creation flash — so this stays diagnostic).
+    match crate::win32_surface::no_redirection_bitmap_state(hwnd) {
+        crate::win32_surface::NoRedirectionBitmapState::Set => eprintln!(
+            "[probe] win32 ex-style: WS_EX_NOREDIRECTIONBITMAP set \
+             (creation-time, tauri no_redirection_bitmap)"
         ),
-        // Best effort by design: the window is still usable (with a possible
-        // creation flash), so this is diagnostic rather than fatal.
-        Err(error) => {
-            eprintln!("[probe] win32 ex-style: WS_EX_NOREDIRECTIONBITMAP FAILED: {error}")
-        }
+        crate::win32_surface::NoRedirectionBitmapState::Absent {
+            ex_style,
+            last_error,
+        } => eprintln!(
+            "[probe] win32 ex-style: WS_EX_NOREDIRECTIONBITMAP FAILED: WIN32_ERROR({last_error}) \
+             (absent from the created window, ex-style {ex_style:#x}; the runtime ignored the \
+             creation-time request)"
+        ),
     }
 
     // Use the window's real size for the child webview, not the initial
@@ -105,7 +119,7 @@ pub fn init(
         // The host-resolved locale, handed to the chrome **before** the document
         // is parsed: the single system default for the React UI and the native
         // dialog labels (see `cad_ui_core::i18n`).
-        .initialization_script(host_locale_script())
+        .initialization_script(initialization_script())
         .on_page_load({
             let page_load_shared = shared.clone();
             move |_webview, payload| {
@@ -344,5 +358,68 @@ fn record_composition_error(shared: &Arc<Mutex<Shared>>, text: String) {
     let mut state = lock(shared);
     if state.shell.status.error.is_none() {
         state.shell.status.error = Some(text);
+    }
+}
+
+/// Whether `YACR_PROBE_DOM_OVERLAY` is present (diagnostic only).
+///
+/// V0 discriminator: does the DOM/WebView2 chain actually alpha-blend the chrome
+/// in this environment? The VM's "flat" result and the laptop's see-through result
+/// may be two different sub-failures; this paints the CAD canvas host magenta at
+/// 50 % so a capture answers the DOM half independently of the native surface.
+fn dom_overlay_requested() -> bool {
+    static REQUESTED: OnceLock<bool> = OnceLock::new();
+    *REQUESTED.get_or_init(|| std::env::var_os("YACR_PROBE_DOM_OVERLAY").is_some())
+}
+
+/// The webview initialization scripts: the single host-resolved locale script,
+/// plus the diagnostic DOM overlay when its knob is present.
+fn initialization_script() -> String {
+    let mut script = host_locale_script();
+    if dom_overlay_requested() {
+        eprintln!(
+            "[probe] dom-overlay active: .workspace__canvas painted rgba(255,0,255,0.5) \
+             (diagnostic; not acceptance evidence)"
+        );
+        script.push_str(DOM_OVERLAY_SCRIPT);
+    }
+    script
+}
+
+/// V0 overlay probe (diagnostic only, never a product path).
+///
+/// Inline style only: no product CSS, no i18n key, no behaviour change — the
+/// canvas host is painted half-transparent magenta once the document exists.
+const DOM_OVERLAY_SCRIPT: &str = r#"
+(() => {
+  const paint = () => {
+    const el = document.querySelector('.workspace__canvas');
+    if (el) {
+      el.style.background = 'rgba(255,0,255,0.5)';
+    }
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', paint);
+  } else {
+    paint();
+  }
+})();
+"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The knob's payload is pinned: the CAD canvas host selector and the exact
+    /// half-transparent magenta fill, so a capture difference is attributable to
+    /// the DOM/blend path and nothing else.
+    #[test]
+    fn dom_overlay_script_paints_the_canvas_host_half_transparent_magenta() {
+        assert!(DOM_OVERLAY_SCRIPT.contains(".workspace__canvas"));
+        assert!(DOM_OVERLAY_SCRIPT.contains("rgba(255,0,255,0.5)"));
+        assert!(
+            DOM_OVERLAY_SCRIPT.contains("DOMContentLoaded"),
+            "it must survive being injected before the document exists"
+        );
     }
 }

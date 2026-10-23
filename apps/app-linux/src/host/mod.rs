@@ -109,6 +109,21 @@ thread_local! {
     static CAD_ENV: RefCell<Option<CadEnv>> = const { RefCell::new(None) };
 }
 
+/// Read the durable `wgpu_backend` preference for the next presenter build.
+///
+/// The presenter is (re)built on the host main thread, so this reads once per
+/// construction through the same `ConfigStore` every other user preference uses
+/// — the renderer never does I/O and nothing is read per frame. `None` (platform
+/// composition not built yet in probe-only runs, or an absent/unreadable
+/// preference) maps to the renderer's `auto` default.
+pub(crate) fn wgpu_backend_preference() -> Option<String> {
+    CAD_ENV.with(|cell| {
+        let env = cell.borrow();
+        let env = env.as_ref()?;
+        crate::platform::wgpu_backend_preference(env.config.as_ref())
+    })
+}
+
 /// App-side render telemetry: the former renderer half of `Shared`.
 ///
 /// These fields name `cad-render-wgpu`/`cad-engine` types, so they cannot live in

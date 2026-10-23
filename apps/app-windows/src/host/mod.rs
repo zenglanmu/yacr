@@ -77,6 +77,21 @@ thread_local! {
     static CAD_ENV: RefCell<Option<CadEnv>> = const { RefCell::new(None) };
 }
 
+/// Read the durable `wgpu_backend` preference for the next presenter build.
+///
+/// The presenter is (re)built on the host main thread, so this reads once per
+/// construction through the same `ConfigStore` every other user preference uses
+/// — the renderer never does I/O and nothing is read per frame. `None` (platform
+/// composition not built yet in probe-only runs, or an absent/unreadable
+/// preference) maps to the renderer's `auto` default.
+pub(crate) fn wgpu_backend_preference() -> Option<String> {
+    CAD_ENV.with(|cell| {
+        let env = cell.borrow();
+        let env = env.as_ref()?;
+        crate::platform::wgpu_backend_preference(env.config.as_ref())
+    })
+}
+
 /// App-side render telemetry.
 ///
 /// These fields name `cad-render-wgpu`/`cad-engine` types, so they cannot live in
@@ -106,6 +121,41 @@ pub struct RenderTelemetry {
     /// Observable state of the accelerated pulled organisation from the most
     /// recent **actual** render, surfaced through the `ShellTelemetry` seam.
     last_pulled_state: Option<PulledState>,
+    /// What the most recent **actual** render really drew, for the 1 Hz
+    /// `[probe] actual-render` evidence line (never replayed).
+    last_actual_render: Option<ActualRenderSnapshot>,
+    /// The last `cad-present-error` marker text emitted. A persistent failure
+    /// repeats every tick; the marker is evidence, not a progress log, so an
+    /// identical consecutive text is printed once (it is cleared by the next
+    /// successful present).
+    last_present_error_text: Option<String>,
+    /// Per-tick session counters (cheap bookkeeping reads, no render). A flat
+    /// `frames_rendered` while present attempts keep succeeding is the
+    /// "re-presenting a retained texture" signature; the two revisions separate
+    /// "the retained texture contains commit N" from "the scene reached N".
+    last_session_counters: Option<SessionCounters>,
+}
+
+/// The per-tick bookkeeping the 1 Hz `[probe] actual-render` line reports.
+pub(crate) struct SessionCounters {
+    /// Engine render counter (one per **actual** renderer invocation).
+    pub(crate) frames_rendered: u64,
+    /// Whether a CAD frame is pending (`cad_frame_dirty`).
+    pub(crate) dirty: bool,
+    /// Scene revision baked into the retained/presented texture.
+    pub(crate) rendered_revision: Option<u64>,
+    /// Scene revision the GPU has committed (the latest commit).
+    pub(crate) committed_revision: Option<u64>,
+}
+
+/// The actual-render evidence kept for the 1 Hz line.
+pub(crate) struct ActualRenderSnapshot {
+    /// Instanced batches the renderer drew (`instanced_batches`).
+    pub(crate) instanced_batches: usize,
+    /// Per-pulled-segment draws on the accelerated tier.
+    pub(crate) instanced_draws: u64,
+    /// Observable state of the pulled organisation on this frame.
+    pub(crate) pulled: PulledState,
 }
 
 impl RenderTelemetry {
@@ -118,6 +168,9 @@ impl RenderTelemetry {
             last_log: None,
             no_gpu: std::env::var_os("YACR_PROBE_NO_GPU").is_some(),
             last_pulled_state: None,
+            last_actual_render: None,
+            last_present_error_text: None,
+            last_session_counters: None,
         }
     }
 }

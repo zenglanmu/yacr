@@ -445,6 +445,12 @@ impl CadRenderRuntime {
     /// when this holds: a CPU-ready scene whose chunked upload is still pending
     /// must never be presented under that label (it would show the resident old
     /// scene while claiming it is current).
+    /// The scene revision the GPU has committed (the runtime's own bookkeeping,
+    /// exposed for host evidence; it is `applied_revision`).
+    pub fn committed_revision(&self) -> Option<u64> {
+        self.applied_revision
+    }
+
     pub fn scene_committed(&self, scene_revision: u64, base_revision: u64) -> bool {
         self.applied_revision == Some(scene_revision) && self.applied_base == Some(base_revision)
     }
@@ -717,10 +723,9 @@ impl CadRenderRuntime {
         {
             return Err(RenderError::Frame("invalid CAD surface dimensions".into()));
         }
-        let size = (
-            (logical[0] * scale).round().max(1.0) as u32,
-            (logical[1] * scale).round().max(1.0) as u32,
-        );
+        // The one size authority: the same function a native host uses to size
+        // its CAD child surface (see `render_target_size`'s contract).
+        let size = render_target_size(logical, scale);
         if self.target_size != Some(size) {
             self.dirty.invalidate();
         }

@@ -28,6 +28,7 @@ mod properties;
 mod queue;
 mod select;
 mod settings;
+mod settings_backend;
 mod snap_marker;
 mod text_tool;
 mod tolerance;

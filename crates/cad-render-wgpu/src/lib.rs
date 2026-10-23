@@ -29,17 +29,17 @@ pub mod headless;
 /// Never a runtime dependency; never a product default.
 pub mod gpu_time;
 
-/// Native-only surface probe presenter (forced Vulkan, real GPU) for host
-/// bring-up. Deliberately **not** the production CAD presenter: it draws only a
-/// grid, a moving colour block and corner markers, performs no readback, and
-/// owns no event loop. See [`native_presenter`].
+/// Native-only surface probe presenter (Vulkan/DX12 per [`ProbeBackendPolicy`],
+/// real GPU) for host bring-up. Deliberately **not** the production CAD
+/// presenter: it draws only a grid, a moving colour block and corner markers,
+/// performs no readback, and owns no event loop. See [`native_presenter`].
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_presenter;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_presenter::{
-    NativeTextureKey, ProbeAdapterInfo, ProbeError, ProbeFrameStats, ProbePresentMode,
-    ProbeStageTimings, SurfaceProbePresenter,
+    NativeTextureKey, ProbeAdapterInfo, ProbeBackendPolicy, ProbeError, ProbeFrameStats,
+    ProbePresentMode, ProbeStageTimings, SurfaceProbePresenter,
 };
 
 /// Native id-pass shader sources (see [`pick_at`](Renderer::pick_at)).

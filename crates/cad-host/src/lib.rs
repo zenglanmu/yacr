@@ -64,8 +64,9 @@ pub use command_log::{
     CommandLogEntry, CommandLogKind, CommandLogMeasurement, COMMAND_LOG_CAPACITY,
 };
 pub use settings::{
-    CadSettingKey, CadSettingValue, HostSettings, SETTINGS_INVALID_PLOT_FORMAT,
-    SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
+    normalize_wgpu_backend, CadSettingKey, CadSettingValue, HostSettings,
+    SETTINGS_INVALID_PLOT_FORMAT, SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
+    WGPU_BACKEND_PREFERENCE_KEY, WGPU_BACKEND_VALUES,
 };
 #[cfg(test)]
 mod tests;
@@ -203,6 +204,7 @@ impl HostCore {
             cursor_logical: Rc::new(Cell::new(None)),
             hover_now: Rc::new(std::time::Instant::now),
             startup_diagnostics: Rc::new(RefCell::new(Vec::new())),
+            wgpu_backend: Rc::new(RefCell::new(None)),
             queue: Rc::new(RequestQueue::new()),
             request_waker: Rc::new(RefCell::new(None)),
             document_epoch: Rc::new(Cell::new(0)),
@@ -821,14 +823,22 @@ impl HostCore {
 
         match self.config_store.load_preference() {
             ConfigLoad::Absent => {}
-            ConfigLoad::Text { path, text } => match self.apply_user_preference_json(&text) {
-                Ok(()) => {
-                    if let Err(error) = self.persist_preference() {
-                        diagnostics.push(format!("preferences {path} not re-persisted: {error}"));
+            ConfigLoad::Text { path, text } => {
+                // The renderer backend choice is a root preference leaf outside
+                // the `ViewerConfig` schema, so the allowed-path projection above
+                // cannot carry it: capture it here (unknown/absent -> `auto`) so
+                // the settings snapshot reports it and every later write keeps it.
+                *self.wgpu_backend.borrow_mut() = settings::wgpu_backend_from_preference(&text);
+                match self.apply_user_preference_json(&settings::without_wgpu_backend(&text)) {
+                    Ok(()) => {
+                        if let Err(error) = self.persist_preference() {
+                            diagnostics
+                                .push(format!("preferences {path} not re-persisted: {error}"));
+                        }
                     }
+                    Err(error) => diagnostics.push(format!("preferences {path} rejected: {error}")),
                 }
-                Err(error) => diagnostics.push(format!("preferences {path} rejected: {error}")),
-            },
+            }
             ConfigLoad::Unreadable { path, reason } => {
                 diagnostics.push(format!("preferences {path} unreadable: {reason}"));
             }
@@ -849,9 +859,18 @@ impl HostCore {
     }
 
     /// Write the store's allowed projection of the user preference.
+    ///
+    /// The renderer backend choice sits outside the `ViewerConfig` schema, so it
+    /// is merged back into the projected document here — every preference write
+    /// (a setting, a startup re-persist, a clear) therefore keeps exactly one
+    /// root `wgpu_backend` leaf and never drops it.
     fn persist_preference(&self) -> CadResult<()> {
         let projected = self.viewer_config.borrow().projected_user_preference_json();
-        self.config_store.persist_preference(&projected)
+        let merged = settings::merge_wgpu_backend_into_preference(
+            &projected,
+            self.wgpu_backend.borrow().as_deref(),
+        )?;
+        self.config_store.persist_preference(&merged)
     }
 
     pub fn config_snapshot(&self) -> ConfigSnapshot {
@@ -919,6 +938,10 @@ impl HostCore {
     pub fn clear_user_preference(&self) -> CadResult<()> {
         self.require_config_idle()?;
         self.viewer_config.borrow_mut().clear_user_preference();
+        // The renderer backend choice is a user preference too, even though it
+        // is not a `ViewerConfig` leaf: a real clear resets it to the `auto`
+        // default and removes the leaf from the durable document.
+        *self.wgpu_backend.borrow_mut() = None;
         self.clear_gestures();
         // Mark the publish before the fallible persistence, so a failure keeps
         // the change pending instead of silently dropping it.

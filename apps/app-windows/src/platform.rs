@@ -380,6 +380,38 @@ pub fn config_paths() -> (Option<PathBuf>, Option<PathBuf>) {
     }
 }
 
+/// Durable wire key of the renderer backend preference (`auto`/`vulkan`/`dx12`).
+///
+/// It is a top-level user-preference leaf, i.e. the store path `wgpu_backend` in
+/// the same durable `preference.json` every other user preference uses.
+pub const WGPU_BACKEND_KEY: &str = "wgpu_backend";
+
+/// Read the persisted `wgpu_backend` preference through the host's own store.
+///
+/// The probe renderer reads this once per presenter construction (never per
+/// frame) through the same [`ConfigStore::load_preference`] every other user
+/// preference uses — no second store and no ad-hoc file path. An absent or
+/// unreadable file, malformed JSON, or a non-string value yields `None`, which
+/// the caller maps to the renderer's `auto` default. `ui.wgpu_backend` is also
+/// accepted so a nested projection cannot silently disable the setting; the
+/// canonical path stays `wgpu_backend`.
+pub fn wgpu_backend_preference(store: &dyn ConfigStore) -> Option<String> {
+    let ConfigLoad::Text { text, .. } = store.load_preference() else {
+        return None;
+    };
+    backend_preference_from_json(&text)
+}
+
+/// Pure extraction behind [`wgpu_backend_preference`] (unit-testable).
+fn backend_preference_from_json(text: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    value
+        .get(WGPU_BACKEND_KEY)
+        .or_else(|| value.get("ui").and_then(|ui| ui.get(WGPU_BACKEND_KEY)))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
 /// Read a config/preference file, distinguishing absent from unreadable.
 fn load_file(path: Option<&Path>) -> ConfigLoad {
     let Some(path) = path else {
@@ -798,5 +830,47 @@ mod tests {
             store.persist_preference("{}"),
             Err(CadError::Unsupported(_))
         ));
+    }
+
+    /// The renderer backend preference is read through the same store every
+    /// other user preference uses, and every failure mode is a silent `None`
+    /// (the presenter then uses `auto`) rather than an invented value.
+    #[test]
+    fn wgpu_backend_preference_reads_the_durable_store() {
+        let absent = temp_path("absent-wgpu-pref.json");
+        let _ = std::fs::remove_file(&absent);
+        let store = ReactConfigStore::new(temp_path("unused-config.json"), absent);
+        assert_eq!(wgpu_backend_preference(&store), None);
+
+        let preferences = [
+            (r#"{"wgpu_backend":"dx12"}"#, Some("dx12")),
+            (r#"{"wgpu_backend":"vulkan"}"#, Some("vulkan")),
+            (r#"{"wgpu_backend":"auto"}"#, Some("auto")),
+            // A nested projection is tolerated, the root key is canonical.
+            (r#"{"ui":{"wgpu_backend":"dx12"}}"#, Some("dx12")),
+            // Unknown tokens are returned verbatim; the renderer resolves them
+            // to `auto` (one parser owns the wire contract).
+            (r#"{"wgpu_backend":"gl"}"#, Some("gl")),
+            // Absent key, non-string value and malformed JSON are all `None`.
+            (r#"{"interaction":{"snapEnabled":true}}"#, None),
+            (r#"{"wgpu_backend":1}"#, None),
+            (r#"not json"#, None),
+        ];
+        for (text, expected) in preferences {
+            assert_eq!(
+                backend_preference_from_json(text),
+                expected.map(str::to_string),
+                "{text} must extract {expected:?}"
+            );
+        }
+
+        // End-to-end through the durable store (the path the host reads).
+        let path = temp_path("wgpu-pref.json");
+        let store = ReactConfigStore::new(temp_path("unused-config.json"), path.clone());
+        store
+            .persist_preference(r#"{"wgpu_backend":"dx12"}"#)
+            .unwrap();
+        assert_eq!(wgpu_backend_preference(&store), Some("dx12".to_string()));
+        let _ = std::fs::remove_file(&path);
     }
 }

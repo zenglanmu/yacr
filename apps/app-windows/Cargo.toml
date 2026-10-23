@@ -39,13 +39,20 @@ cad-platform.workspace = true
 cad-resources.workspace = true
 cad-db.workspace = true
 cad-domain.workspace = true
+# Durable preference read (`wgpu_backend`) through the same JSON store the
+# shared UI writes; no new dependency version (workspace pin).
+serde_json.workspace = true
 
 # Hand-rolled Win32 child window (class, z-order, sizing) + WebView2 runtime
 # detection (registry queries). Version-matched to the `windows`/`webview2-com`
-# that `tauri 2.11.6`/`wry 0.55.1` already put in `Cargo.lock`, so this adds no
-# new dependency versions and no duplicate COM bindings.
-windows = { version = "0.61", features = [
+# that `tauri 2.12.3`/`wry 0.57.0` put in `Cargo.lock` (windows 0.62 /
+# webview2-com 0.39), so this adds no duplicate COM bindings. The tauri bump
+# forced this retarget (0.61/0.38); the code needed no changes.
+windows = { version = "0.62", features = [
     "Win32_Foundation",
+    # DirectComposition: the CAD child is composited through
+    # CreateSwapChainForComposition + IDCompositionVisual, not a HWND swapchain.
+    "Win32_Graphics_DirectComposition",
     "Win32_Graphics_Gdi",
     "Win32_System_Com",
     "Win32_System_LibraryLoader",
@@ -54,7 +61,7 @@ windows = { version = "0.61", features = [
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ] }
-webview2-com = "0.38"
+webview2-com = "0.39"
 
 # `support` (the WebView2 "missing runtime" contract and the transparent-background
 # constants) is target-independent, so its i18n lookup and unit tests run on every

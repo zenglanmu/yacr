@@ -4,17 +4,18 @@ use super::*;
 
 /// A config store with a fixed config/preference text and a record of every
 /// persisted projection, so a test can assert both the startup input and the
-/// exact JSON leaves a write produced (no `serde_json` dependency in this crate;
-/// the persisted projection is also reloaded through the real parser below).
+/// exact JSON leaves a write produced (the persisted projection is also reloaded
+/// through the real parser below; JSON is parsed in these tests, never in the
+/// host's production read/write path beyond the `wgpu_backend` merge).
 #[derive(Default)]
-struct SettingsConfig {
+pub(super) struct SettingsConfig {
     config: Option<String>,
     preference: Option<String>,
     persisted: RefCell<Vec<String>>,
 }
 
 impl SettingsConfig {
-    fn with_preference(text: &str) -> Self {
+    pub(super) fn with_preference(text: &str) -> Self {
         Self {
             preference: Some(text.to_string()),
             ..Self::default()
@@ -49,7 +50,7 @@ impl ConfigStore for SettingsConfig {
     }
 }
 
-fn persisted(config: &SettingsConfig) -> Option<String> {
+pub(super) fn persisted(config: &SettingsConfig) -> Option<String> {
     config.persisted.borrow().last().cloned()
 }
 
@@ -83,11 +84,11 @@ impl PlatformFiles for NameRecordingFiles {
     }
 }
 
-fn core_with_settings(config: Rc<SettingsConfig>) -> HostCore {
+pub(super) fn core_with_settings(config: Rc<SettingsConfig>) -> HostCore {
     core_with_config(config)
 }
 
-fn settings_core() -> (HostCore, Rc<SettingsConfig>) {
+pub(super) fn settings_core() -> (HostCore, Rc<SettingsConfig>) {
     let config = Rc::new(SettingsConfig::default());
     (core_with_settings(config.clone()), config)
 }

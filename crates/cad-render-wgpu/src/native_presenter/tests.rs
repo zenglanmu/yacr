@@ -24,8 +24,8 @@ fn rank_rejects_cpu_non_vulkan_and_incompatible() {
         info("vulkan", "discrete_gpu", "P620", false),
     ];
     assert!(
-        rank_probe_adapters(&infos, &["P620"]).is_empty(),
-        "cpu, non-Vulkan and surface-incompatible adapters must all be rejected"
+        rank_probe_adapters(&infos, &["P620"], ProbeBackendPolicy::Vulkan).is_empty(),
+        "under the vulkan policy, cpu, non-Vulkan and surface-incompatible adapters must all be rejected"
     );
 }
 
@@ -37,7 +37,7 @@ fn rank_prefers_named_adapter_before_other_discrete() {
         info("vulkan", "discrete_gpu", "Quadro P620", true),
     ];
     assert_eq!(
-        rank_probe_adapters(&infos, &["P620"]),
+        rank_probe_adapters(&infos, &["P620"], ProbeBackendPolicy::Vulkan),
         vec![2, 0, 1],
         "the preferred name wins, then discrete before integrated"
     );
@@ -49,7 +49,10 @@ fn rank_preferred_match_is_case_insensitive_substring() {
         info("vulkan", "discrete_gpu", "NVIDIA Quadro p620", true),
         info("vulkan", "discrete_gpu", "Other Discrete", true),
     ];
-    assert_eq!(rank_probe_adapters(&infos, &["P620"]), vec![0, 1]);
+    assert_eq!(
+        rank_probe_adapters(&infos, &["P620"], ProbeBackendPolicy::Auto),
+        vec![0, 1]
+    );
 }
 
 #[test]
@@ -59,7 +62,7 @@ fn rank_falls_back_when_no_preferred_name_matches() {
         info("vulkan", "discrete_gpu", "Quadro RTX", true),
     ];
     assert_eq!(
-        rank_probe_adapters(&infos, &["P620"]),
+        rank_probe_adapters(&infos, &["P620"], ProbeBackendPolicy::Auto),
         vec![1, 0],
         "no P620 present: a discrete GPU is still preferred over an integrated one"
     );
@@ -69,7 +72,7 @@ fn rank_falls_back_when_no_preferred_name_matches() {
 fn rank_falls_back_to_integrated_when_only_integrated() {
     let infos = vec![info("vulkan", "integrated_gpu", "Intel UHD Graphics", true)];
     assert_eq!(
-        rank_probe_adapters(&infos, &["P620"]),
+        rank_probe_adapters(&infos, &["P620"], ProbeBackendPolicy::Auto),
         vec![0],
         "a lone integrated Vulkan GPU is still a valid hardware target"
     );
@@ -82,7 +85,195 @@ fn rank_is_stable_for_equal_keys() {
         info("vulkan", "discrete_gpu", "B", true),
     ];
     let none: [&str; 0] = [];
-    assert_eq!(rank_probe_adapters(&infos, &none), vec![0, 1]);
+    assert_eq!(
+        rank_probe_adapters(&infos, &none, ProbeBackendPolicy::Vulkan),
+        vec![0, 1]
+    );
+}
+
+/// `vulkan` policy: an otherwise perfect DX12 adapter is ineligible, so a
+/// Vulkan-only machine keeps exactly the historical adapter set.
+#[test]
+fn vulkan_policy_rejects_dx12_backend_adapters() {
+    let infos = vec![
+        info("dx12", "discrete_gpu", "NVIDIA GeForce RTX 5000", true),
+        info("vulkan", "integrated_gpu", "Intel UHD Graphics", true),
+    ];
+    assert_eq!(
+        rank_probe_adapters(&infos, &["RTX"], ProbeBackendPolicy::Vulkan),
+        vec![1],
+        "the DX12 adapter stays ineligible even when its name is preferred"
+    );
+}
+
+/// `dx12` policy: a Vulkan adapter is ineligible, so the same machine selects the
+/// DX12 adapter instead of silently presenting through Vulkan.
+#[test]
+fn dx12_policy_rejects_vulkan_backend_adapters() {
+    let infos = vec![
+        info("vulkan", "discrete_gpu", "Quadro P620", true),
+        info("dx12", "integrated_gpu", "Intel UHD Graphics", true),
+    ];
+    assert_eq!(
+        rank_probe_adapters(&infos, &["P620"], ProbeBackendPolicy::Dx12),
+        vec![1],
+        "the Vulkan adapter stays ineligible even when its name is preferred"
+    );
+}
+
+/// `auto` policy: Vulkan is preferred over DX12 when both adapters are otherwise
+/// equally ranked (same name, same device type), and the preference is stable in
+/// either enumeration order.
+#[test]
+fn auto_policy_prefers_vulkan_within_a_tier() {
+    let none: [&str; 0] = [];
+    let infos = vec![
+        info("dx12", "discrete_gpu", "Same GPU", true),
+        info("vulkan", "discrete_gpu", "Same GPU", true),
+    ];
+    assert_eq!(
+        rank_probe_adapters(&infos, &none, ProbeBackendPolicy::Auto),
+        vec![1, 0],
+        "Vulkan outranks DX12 inside the same name/device tier"
+    );
+}
+
+/// Parsing is exact: only the three documented wire values are meaningful, and
+/// everything else — absent, empty, wrong case, an unknown token — is `auto`.
+#[test]
+fn backend_policy_parsing_is_exact() {
+    assert_eq!(
+        ProbeBackendPolicy::parse(None),
+        ProbeBackendPolicy::Auto,
+        "an absent preference is auto"
+    );
+    for raw in [
+        "", "auto", "Auto", "DX12", "Vulkan", "gl", "vulkan ", " dx12",
+    ] {
+        assert_eq!(
+            ProbeBackendPolicy::parse(Some(raw)),
+            ProbeBackendPolicy::Auto,
+            "{raw:?} is not a wire value and must resolve to auto"
+        );
+    }
+    assert_eq!(
+        ProbeBackendPolicy::parse(Some("vulkan")),
+        ProbeBackendPolicy::Vulkan
+    );
+    assert_eq!(
+        ProbeBackendPolicy::parse(Some("dx12")),
+        ProbeBackendPolicy::Dx12
+    );
+}
+
+/// The wire token and the wgpu backend set are pinned per policy: the log line,
+/// the instance descriptor and the enumerator all read them from here.
+#[test]
+fn backend_policy_backends_and_tokens_are_pinned() {
+    assert_eq!(ProbeBackendPolicy::Auto.as_token(), "auto");
+    assert_eq!(ProbeBackendPolicy::Vulkan.as_token(), "vulkan");
+    assert_eq!(ProbeBackendPolicy::Dx12.as_token(), "dx12");
+    assert_eq!(
+        ProbeBackendPolicy::Auto.backends(),
+        wgpu::Backends::VULKAN | wgpu::Backends::DX12
+    );
+    assert_eq!(
+        ProbeBackendPolicy::Vulkan.backends(),
+        wgpu::Backends::VULKAN
+    );
+    assert_eq!(ProbeBackendPolicy::Dx12.backends(), wgpu::Backends::DX12);
+    assert_eq!(ProbeBackendPolicy::default(), ProbeBackendPolicy::Auto);
+    assert!(ProbeBackendPolicy::Auto.allows_backend("vulkan"));
+    assert!(ProbeBackendPolicy::Auto.allows_backend("dx12"));
+    assert!(!ProbeBackendPolicy::Vulkan.allows_backend("dx12"));
+    assert!(!ProbeBackendPolicy::Dx12.allows_backend("vulkan"));
+}
+
+/// DX12 is a Windows-only target capability: elsewhere the probe refuses the
+/// policy explicitly (exit path is `ProbeError::UnsupportedBackendPolicy`), and
+/// on Windows it is accepted. No fallback backend is ever tried.
+#[test]
+fn dx12_policy_support_is_explicit_per_target() {
+    if cfg!(target_os = "windows") {
+        assert_eq!(ProbeBackendPolicy::Dx12.ensure_supported(), Ok(()));
+    } else {
+        assert_eq!(
+            ProbeBackendPolicy::Dx12.ensure_supported(),
+            Err(ProbeError::UnsupportedBackendPolicy { policy: "dx12" })
+        );
+        assert_eq!(ProbeBackendPolicy::Auto.ensure_supported(), Ok(()));
+        assert_eq!(ProbeBackendPolicy::Vulkan.ensure_supported(), Ok(()));
+    }
+}
+
+/// Probe-only override: a CPU/software adapter is eligible, but hardware still
+/// ranks strictly above it — even though the CPU adapter carries the preferred
+/// name.
+#[test]
+fn rank_allow_cpu_ranks_hardware_before_cpu_adapter() {
+    let infos = vec![
+        info("vulkan", "cpu", "P620", true),
+        info("vulkan", "discrete_gpu", "Other Discrete", true),
+    ];
+    assert_eq!(
+        rank_probe_adapters_allow_cpu(&infos, &["P620"], ProbeBackendPolicy::Auto),
+        vec![1, 0],
+        "the hardware adapter wins, then the name-preferred CPU adapter"
+    );
+}
+
+/// A software-Vulkan host (lavapipe in a VM) has no hardware adapter at all: the
+/// override must then rank the presentable CPU adapter rather than fail.
+#[test]
+fn rank_allow_cpu_accepts_lone_presentable_cpu_adapter() {
+    let infos = vec![info(
+        "vulkan",
+        "cpu",
+        "llvmpipe (LLVM 19.1.7, 256 bits)",
+        true,
+    )];
+    assert_eq!(
+        rank_probe_adapters_allow_cpu(&infos, &["P620"], ProbeBackendPolicy::Auto),
+        vec![0]
+    );
+}
+
+/// The override widens eligibility for `cpu` only: non-Vulkan and
+/// surface-incompatible adapters stay ineligible, and the backend policy still
+/// applies.
+#[test]
+fn rank_allow_cpu_keeps_non_vulkan_and_incompatible_ineligible() {
+    let infos = vec![
+        info("gl", "cpu", "llvmpipe", true),
+        info("vulkan", "cpu", "llvmpipe", false),
+        info("dx12", "cpu", "Microsoft Basic Render Driver", true),
+    ];
+    assert_eq!(
+        rank_probe_adapters_allow_cpu(&infos, &["P620"], ProbeBackendPolicy::Vulkan),
+        Vec::<usize>::new(),
+        "only Vulkan + surface-compatible adapters become eligible"
+    );
+    assert_eq!(
+        rank_probe_adapters_allow_cpu(&infos, &["P620"], ProbeBackendPolicy::Dx12),
+        vec![2],
+        "the DX12 WARP adapter is eligible under the dx12 policy"
+    );
+}
+
+/// `YACR_PROBE_ALLOW_CPU_ADAPTER` is presence-based (like
+/// `YACR_PROBE_NO_MAXIMIZE`): any value — including an empty one — enables it,
+/// and an absent variable disables it.
+#[test]
+fn allow_cpu_override_is_presence_based() {
+    assert!(!env_flag_present(None), "absent must keep CPU rejected");
+    assert!(
+        env_flag_present(Some(std::ffi::OsString::new())),
+        "an empty value still counts as present"
+    );
+    assert!(
+        env_flag_present(Some(std::ffi::OsString::from("0"))),
+        "the value is irrelevant; only presence counts"
+    );
 }
 
 #[test]
@@ -136,7 +327,11 @@ fn choose_format_none_when_empty() {
 /// The unsafe raw-handle constructor's signature is the next lane's contract.
 /// Pinning it here (by reference, never called) makes an accidental change a
 /// compile error in this crate rather than a silent break for the caller.
+///
+/// Deliberately updated when the backend policy was threaded through: the
+/// trailing `ProbeBackendPolicy` parameter is the only signature change.
 #[test]
+#[allow(clippy::type_complexity)] // the whole point is pinning this exact signature
 fn raw_handle_constructor_signature_is_stable() {
     let _constructor: unsafe fn(
         wgpu::rwh::RawDisplayHandle,
@@ -145,6 +340,7 @@ fn raw_handle_constructor_signature_is_stable() {
         u32,
         ProbePresentMode,
         crate::gpu_time::GpuTimeConfig,
+        ProbeBackendPolicy,
     ) -> Result<SurfaceProbePresenter, ProbeError> = SurfaceProbePresenter::new_from_raw_handles;
 }
 
@@ -375,4 +571,31 @@ fn a_persistent_size_disagreement_becomes_an_explicit_error() {
         "it stays an error while it persists"
     );
     assert_eq!(wait.consecutive(), SIZE_MISMATCH_WAIT_TICKS + 1);
+}
+
+/// The composition path is not cosmetic: it is the only surface kind that
+/// composites a `WS_CHILD` under a transparent top-level window on Windows, and
+/// it must request the composite-alpha mode that
+/// `CreateSwapChainForComposition` is specified for. `Auto` maps to
+/// `DXGI_ALPHA_MODE_UNSPECIFIED`, which is not a valid composition alpha mode, so
+/// pinning this pairing keeps a future refactor from silently regressing it.
+#[test]
+fn surface_kind_selects_its_composite_alpha_mode_and_token() {
+    assert_eq!(
+        alpha_mode_for(ProbeSurfaceKind::Hwnd),
+        wgpu::CompositeAlphaMode::Auto,
+        "an HWND chain keeps wgpu's automatic (opaque) choice"
+    );
+    assert_eq!(
+        alpha_mode_for(ProbeSurfaceKind::Composition),
+        wgpu::CompositeAlphaMode::PreMultiplied,
+        "a CreateSwapChainForComposition chain must not be UNSPECIFIED"
+    );
+    assert_ne!(
+        alpha_mode_for(ProbeSurfaceKind::Hwnd),
+        alpha_mode_for(ProbeSurfaceKind::Composition)
+    );
+    // The ready line's `surface=` token is the evidence vocabulary.
+    assert_eq!(ProbeSurfaceKind::Hwnd.as_token(), "hwnd");
+    assert_eq!(ProbeSurfaceKind::Composition.as_token(), "composition");
 }

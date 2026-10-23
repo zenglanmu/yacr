@@ -15,13 +15,27 @@
 //!    explicit re-assert). `WS_DISABLED` is the belt-and-braces counterpart of the
 //!    Wayland empty input region: the CAD surface is display-only and never takes
 //!    OS input; the DOM is the single input funnel.
-//! 3. The renderer surface is built from raw `Win32WindowHandle` /
-//!    `WindowsDisplayHandle` handles ([`SurfaceProbePresenter::new_from_raw_handles`]);
-//!    there are **no renderer changes**, no readback, and exactly one presenter.
+//! 3. The renderer surface is a **DirectComposition** surface, not a
+//!    HWND-targeted swapchain: this module owns an `IDCompositionDevice`, an
+//!    `IDCompositionTarget` for the CAD child HWND and its root
+//!    `IDCompositionVisual`; the presenter is built from that visual
+//!    ([`SurfaceProbePresenter::new_from_composition_visual`]), so wgpu-hal
+//!    creates the swapchain with `CreateSwapChainForComposition` and binds it with
+//!    `IDCompositionVisual::SetContent`. Why: under a transparent
+//!    (`WS_EX_NOREDIRECTIONBITMAP`) top-level window a HWND flip chain
+//!    (`DXGI_SWAP_EFFECT_FLIP_DISCARD`, hardcoded by wgpu-hal 30) binds to the
+//!    **top-level** DWM visual, which a `WS_CHILD` does not have — its pixels are
+//!    produced and presented but never composed. There are **no** other renderer
+//!    changes, no readback, and exactly one presenter.
 //!
-//! Geometry comes only from the accepted React CAD rect: `LayoutTracker` insets
-//! (logical px) are scaled to physical pixels and applied to the child window.
-//! A residual disagreement is never "fixed" by stretching the image.
+//! Geometry comes only from the accepted React CAD rect. The child's **size** is
+//! `cad_ui_core::layout::physical_content_size` (one rounding of `round(side ·
+//! scale)`, the render session's own formula), so `child size == session render
+//! target` by construction at every scale — the presenter refuses to blit a
+//! size-mismatched texture, making an independently rounded size a total present
+//! failure. The **offset** is `round(x · scale)`, rounded independently (a
+//! half-pixel placement is invisible and never reaches the size guard). A
+//! residual disagreement is never "fixed" by stretching the image.
 //!
 //! Lifecycle: `AwaitingMap` → `Ready` (presenter created) → `Suspended`
 //! (released, re-init allowed) / `Closing` (terminal). Release order is always
@@ -31,31 +45,52 @@
 //! windows); the value is `!Send` and lives in the host thread-local.
 
 use std::marker::PhantomData;
-use std::num::NonZeroIsize;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
 use cad_engine::render::RenderSessionHandle;
 use cad_render_wgpu::{
-    gpu_time::GpuTimeConfig, ProbeError, ProbeFrameStats, ProbePresentMode, SurfaceProbePresenter,
+    gpu_time::GpuTimeConfig, ProbeBackendPolicy, ProbeError, ProbeFrameStats, ProbePresentMode,
+    SurfaceProbePresenter,
 };
-use cad_ui_core::layout::ViewportInsets;
-use raw_window_handle::{
-    RawDisplayHandle, RawWindowHandle, Win32WindowHandle, WindowsDisplayHandle,
-};
-use windows::core::{w, BOOL, PCWSTR};
+use cad_ui_core::layout::{physical_content_size, CadMetrics};
+use windows::core::{w, Interface, BOOL, PCWSTR};
 use windows::Win32::Foundation::{
-    GetLastError, ERROR_CLASS_ALREADY_EXISTS, ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT,
-    WPARAM,
+    GetLastError, ERROR_CLASS_ALREADY_EXISTS, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM,
 };
-use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
+use windows::Win32::Graphics::DirectComposition::{
+    DCompositionCreateDevice, IDCompositionDevice, IDCompositionRectangleClip, IDCompositionTarget,
+    IDCompositionVisual,
+};
+use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, PAINTSTRUCT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, EnumChildWindows, GetClassNameW, GetClientRect,
-    GetWindow, GetWindowLongPtrW, RegisterClassExW, SetWindowLongPtrW, SetWindowPos, CS_HREDRAW,
-    CS_VREDRAW, GWL_EXSTYLE, GW_HWNDNEXT, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER,
-    SWP_NOSIZE, WINDOW_EX_STYLE, WM_ERASEBKGND, WM_PAINT, WNDCLASSEXW, WS_CHILD, WS_CLIPSIBLINGS,
+    GetWindow, GetWindowLongPtrW, RegisterClassExW, SetWindowPos, CS_HREDRAW, CS_VREDRAW,
+    GWL_EXSTYLE, GW_HWNDNEXT, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_ERASEBKGND, WM_PAINT, WNDCLASSEXW, WS_CHILD, WS_CLIPSIBLINGS,
     WS_DISABLED, WS_EX_NOREDIRECTIONBITMAP, WS_VISIBLE,
+};
+
+mod composition;
+mod discovery;
+mod geometry;
+mod present_error;
+mod styles;
+
+use crate::composition_geometry::composition_placement;
+use composition::CompositionSurface;
+use discovery::find_webview_container;
+use geometry::reconfigure_plan;
+pub use geometry::size_authority_verdict;
+use present_error::render_error_class;
+pub use present_error::{CadPresentClass, CadPresentError};
+use styles::{
+    child_ex_style, child_no_clipsiblings_requested, child_no_redirect_requested, child_style,
+    gdi_marker_requested, log_child_ex_style, paint_gdi_marker, solid_frame_requested,
+};
+pub use styles::{
+    ex_style_is_no_redirection_bitmap, no_redirection_bitmap_state, NoRedirectionBitmapState,
 };
 
 /// Class name of the CAD child window.
@@ -103,6 +138,21 @@ pub struct Win32CadSurface {
     /// Whether a persistent `ensure_order` failure was already reported, so a
     /// broken re-assert does not flood the log every tick.
     order_failure_logged: bool,
+    /// The DirectComposition device/target/visual that composites the CAD child.
+    ///
+    /// Required, not optional decoration: an HWND-targeted flip swapchain cannot
+    /// composite a `WS_CHILD` under a transparent top-level window (see the
+    /// module doc). `None` means composition creation failed and the surface
+    /// deliberately stays uninitialised instead of falling back to that dead path.
+    dcomp: Option<CompositionSurface>,
+    /// The presenter's `configure_generation` last committed to the composition
+    /// tree. hal re-issues `IDCompositionVisual::SetContent` only on configure, so
+    /// a generation change must be followed by `IDCompositionDevice::Commit`.
+    committed_generation: u64,
+    /// A layout-driven visual offset/clip change that still needs a `Commit`.
+    /// Layout changes commit even when the **size** (and therefore the presenter's
+    /// configure generation) did not move.
+    pending_placement: Option<((f32, f32), (f32, f32))>,
 }
 
 impl Win32CadSurface {
@@ -116,12 +166,20 @@ impl Win32CadSurface {
             .hwnd()
             .map_err(|error| format!("window hwnd unavailable: {error}"))?;
         ensure_class()?;
+        let no_redirect = child_no_redirect_requested();
+        let no_clipsiblings = child_no_clipsiblings_requested();
+        if no_clipsiblings {
+            eprintln!(
+                "[probe] cad-child style: WS_CLIPSIBLINGS dropped (diagnostic; not acceptance \
+                 evidence)"
+            );
+        }
         let cad = unsafe {
             CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
+                child_ex_style(no_redirect),
                 w!("YACR_CAD_CHILD"),
                 PCWSTR::null(),
-                WS_CHILD | WS_VISIBLE | WS_DISABLED | WS_CLIPSIBLINGS,
+                child_style(no_clipsiblings),
                 0,
                 0,
                 1,
@@ -133,7 +191,31 @@ impl Win32CadSurface {
             )
             .map_err(|error| format!("CreateWindowExW({CAD_CLASS}) failed: {error}"))?
         };
+        if no_redirect {
+            log_child_ex_style(cad);
+        }
         let container = find_webview_container(top);
+        // The CAD child is composited through DirectComposition, never through a
+        // HWND-targeted swapchain: under a transparent top-level window a flip
+        // chain binds to the top-level DWM visual, which a `WS_CHILD` does not
+        // have (the pixels are produced and presented but never composed).
+        let (dcomp, state) = match CompositionSurface::new(top) {
+            Ok(dcomp) => {
+                eprintln!(
+                    "[probe] win32 cad-composition: device+target+visual ready \
+                     (composed swapchain path; surface=composition target={})",
+                    dcomp.target_kind().as_token()
+                );
+                (Some(dcomp), BridgeState::AwaitingMap)
+            }
+            Err(error) => {
+                eprintln!("[probe] win32 cad-composition FAILED: {error}");
+                (
+                    None,
+                    BridgeState::Failed(format!("CAD composition unavailable: {error}")),
+                )
+            }
+        };
         let mut surface = Self {
             _not_send_sync: PhantomData,
             top,
@@ -141,14 +223,31 @@ impl Win32CadSurface {
             container,
             presenter: None,
             rect: (0, 0, 1, 1),
-            state: BridgeState::AwaitingMap,
+            state,
             generation: 0,
             session: None,
             gpu_time,
             order_logged: false,
             order_failure_logged: false,
+            dcomp,
+            committed_generation: 0,
+            pending_placement: None,
         };
         surface.log_z_order("install");
+        if solid_frame_requested() {
+            eprintln!("[probe] solid-frame active (diagnostic; not acceptance evidence)");
+        }
+        if gdi_marker_requested() {
+            eprintln!(
+                "[probe] gdi-marker active: 40x40 red square at the CAD child's top-left \
+                 (diagnostic; not acceptance evidence)"
+            );
+            // The child is display-only and may never receive a first paint on its
+            // own; force one so the calibrator is present in the next capture.
+            unsafe {
+                let _ = InvalidateRect(Some(cad), None, true);
+            }
+        }
         Ok(surface)
     }
 
@@ -242,29 +341,36 @@ impl Win32CadSurface {
         }
     }
 
-    /// Apply the accepted DOM layout: scale the logical insets to physical pixels
-    /// and place the child window.
+    /// Apply the accepted DOM layout: size the child from the CAD content size
+    /// authority and place it at the scaled DOM offset.
+    ///
+    /// The **size** is [`physical_content_size`] — the render session's own
+    /// `round(side · scale)` formula — so the child window and the render target
+    /// are the same pixel count by construction. It is deliberately **not**
+    /// derived by subtracting independently rounded insets
+    /// (`round(container·s) − round(start·s) − round(end·s)`): that second
+    /// rounding path can disagree by a pixel at fractional DPI, and the
+    /// presenter's size guard then refuses *every* frame (transparent CAD region
+    /// plus a sticky `cad present failed`). Only the offset keeps its own
+    /// rounding.
     ///
     /// Placement **waits** while the wry container is unknown: `hWndInsertAfter =
     /// NULL` is `HWND_TOP`, which would put the CAD child above the DOM — the
     /// exact inversion this composition forbids. The desired rect is still
     /// recorded, so [`Self::try_init_gpu`] can wait for the same container.
-    pub fn apply_layout(
-        &mut self,
-        insets: ViewportInsets,
-        container_logical: (f32, f32),
-        scale: f64,
-    ) -> Result<(), String> {
+    pub fn apply_layout(&mut self, rect: &CadMetrics, scale: f64) -> Result<(), CadPresentError> {
         let scale = scale.max(0.1);
-        let container_w = (f64::from(container_logical.0) * scale).round() as i32;
-        let container_h = (f64::from(container_logical.1) * scale).round() as i32;
-        let start = (f64::from(insets.start) * scale).round() as i32;
-        let top = (f64::from(insets.top) * scale).round() as i32;
-        let end = (f64::from(insets.end) * scale).round() as i32;
-        let bottom = (f64::from(insets.bottom) * scale).round() as i32;
-        let width = (container_w - start - end).max(1);
-        let height = (container_h - top - bottom).max(1);
-        self.rect = (start, top, width, height);
+        let (width, height) = physical_content_size(rect, scale);
+        // Independent rounding of the offset is fine: a half-pixel placement is
+        // invisible and never reaches the presenter's size guard.
+        let x = (f64::from(rect.x) * scale).round().max(0.0) as i32;
+        let y = (f64::from(rect.y) * scale).round().max(0.0) as i32;
+        self.rect = (
+            x,
+            y,
+            i32::try_from(width).unwrap_or(i32::MAX).max(1),
+            i32::try_from(height).unwrap_or(i32::MAX).max(1),
+        );
         self.container = self.container.or_else(|| find_webview_container(self.top));
         let Some(container) = self.container else {
             // Wait for the wry container: passing `NULL` here would mean
@@ -287,8 +393,62 @@ impl Win32CadSurface {
                 SWP_NOACTIVATE | SWP_NOOWNERZORDER,
             )
         }
-        .map_err(|error| format!("SetWindowPos(cad child) failed: {error}"))?;
+        .map_err(|error| {
+            CadPresentError::new(
+                CadPresentClass::SurfaceReconfigure,
+                format!("SetWindowPos(cad child) failed: {error}"),
+            )
+        })?;
         self.log_z_order("layout");
+        // The size authority must hold **at runtime**, not only at init: the
+        // swapchain is reconfigured here, in the same step that places the child,
+        // so the geometry snapshot taken right after this call already reports
+        // `native_surface == child_desired == dom_physical`. (The frame path also
+        // calls `resize_to` as an idempotent backstop.)
+        self.apply_composition_placement(rect, scale)?;
+        self.resize_to(width, height)?;
+        // One commit for both changes (placement and/or reconfigure). A layout
+        // that only *moves* the CAD rect changes no size, so the presenter's
+        // configure generation does not move — hence the explicit pending
+        // placement, or the visual would stay at the old offset forever.
+        self.sync_composition()
+    }
+
+    /// Position/clip the composition visual to the accepted CAD rect (DIPs).
+    ///
+    /// Records the placement as pending so `sync_composition` commits it, even
+    /// when the swapchain size (and its configure generation) is unchanged.
+    fn apply_composition_placement(
+        &mut self,
+        rect: &CadMetrics,
+        scale: f64,
+    ) -> Result<(), CadPresentError> {
+        let Some(dcomp) = self.dcomp.as_ref() else {
+            return Err(CadPresentError::new(
+                CadPresentClass::SurfaceComposition,
+                "DirectComposition is unavailable for the CAD content",
+            ));
+        };
+        let placement = composition_placement(rect, scale);
+        dcomp
+            .set_placement(placement.offset, placement.clip)
+            .map_err(|error| {
+                CadPresentError::new(
+                    CadPresentClass::SurfaceComposition,
+                    format!("composition placement failed: {error}"),
+                )
+            })?;
+        self.pending_placement = Some((placement.offset, placement.clip));
+        eprintln!(
+            "[probe] composition placement offset=({:.1},{:.1}) clip={:.1}x{:.1} dip \
+             swapchain={}x{}",
+            placement.offset.0,
+            placement.offset.1,
+            placement.clip.0,
+            placement.clip.1,
+            placement.physical_size.0,
+            placement.physical_size.1,
+        );
         Ok(())
     }
 
@@ -314,29 +474,38 @@ impl Win32CadSurface {
             self.container = find_webview_container(self.top);
             self.container?;
         }
-        let display = RawDisplayHandle::Windows(WindowsDisplayHandle::new());
-        let window_handle = match NonZeroIsize::new(self.cad.0 as isize) {
-            Some(hwnd) => RawWindowHandle::Win32(Win32WindowHandle::new(hwnd)),
-            None => {
-                let message = "CAD child HWND is null".to_string();
-                self.state = BridgeState::Failed(message.clone());
-                return Some(Err(message));
-            }
+        // Without the composition tree there is no way to composite the CAD
+        // child at all; fail explicitly instead of presenting into a swapchain
+        // that can never appear (no silent fallback to the dead HWND path).
+        let Some(visual) = self.dcomp.as_ref().map(CompositionSurface::visual_ptr) else {
+            let message = format!(
+                "CAD composition is unavailable, so the presentation surface cannot be created \
+                 (the HWND flip-swapchain path cannot composite under a transparent top-level \
+                 window): {}",
+                self.failure().unwrap_or("composition was never created")
+            );
+            self.state = BridgeState::Failed(message.clone());
+            return Some(Err(message));
         };
-        // SAFETY: the caller contract of `new_from_raw_handles` is satisfied:
-        // both handles identify the same live child HWND (created above on this
-        // thread), the window stays alive and keeps its identity until this
-        // presenter is dropped (release order in `release_gpu`/`Drop`), this is
-        // the single presenter of that drawable, and construction/frame/resize/
-        // drop all happen on the host main thread.
+        // Durable `wgpu_backend` preference, read once per presenter build
+        // (never per frame) through the host's own preference store. An absent
+        // or unreadable preference resolves to the renderer's `auto`.
+        let backend_policy =
+            ProbeBackendPolicy::parse(crate::host::wgpu_backend_preference().as_deref());
+        // SAFETY: the caller contract of `new_from_composition_visual` is
+        // satisfied: `visual` is a live `IDCompositionVisual` owned by `self.dcomp`
+        // whose target is this CAD child HWND (created above on this thread); the
+        // device/target/visual stay alive until this presenter is dropped (release
+        // order in `release_gpu`/`Drop`: presenter → composition → child HWND),
+        // and construction/frame/resize/drop all happen on the host main thread.
         let presenter = match unsafe {
-            SurfaceProbePresenter::new_from_raw_handles(
-                display,
-                window_handle,
+            SurfaceProbePresenter::new_from_composition_visual(
+                visual,
                 width,
                 height,
                 ProbePresentMode::MailboxElseImmediate,
                 self.gpu_time,
+                backend_policy,
             )
         } {
             Ok(presenter) => presenter,
@@ -348,7 +517,7 @@ impl Win32CadSurface {
             }
         };
         eprintln!(
-            "[probe] win32 surface presenter ready generation={} backend={} adapter={} device_type={} present_mode={:?} size={}x{}",
+            "[probe] win32 surface presenter ready generation={} backend={} adapter={} device_type={} present_mode={:?} size={}x{} surface={} target={}",
             self.generation + 1,
             presenter.adapter().backend,
             presenter.adapter().name,
@@ -356,10 +525,25 @@ impl Win32CadSurface {
             presenter.present_mode(),
             width,
             height,
+            presenter.surface_kind().as_token(),
+            self.dcomp
+                .as_ref()
+                .map(|dcomp| dcomp.target_kind().as_token())
+                .unwrap_or("none"),
         );
         self.presenter = Some(presenter);
         self.state = BridgeState::Ready;
         self.generation += 1;
+        // hal already issued `SetContent` for the construction configure; the
+        // composition tree only picks it up on `Commit`.
+        if let Err(error) = self.sync_composition() {
+            // Without a committed tree the content can never appear; release and
+            // fail the surface explicitly instead of presenting into a black
+            // region (no silent fallback to the dead HWND swapchain path).
+            self.release_gpu();
+            self.state = BridgeState::Failed(error.text.clone());
+            return Some(Err(error.text));
+        }
         if let Some(result) = self.attach_render_session() {
             return Some(result);
         }
@@ -396,17 +580,78 @@ impl Win32CadSurface {
         Ok(())
     }
 
-    /// Resize the presenter surface if the child geometry changed.
-    pub fn resize_to(&mut self, width: u32, height: u32) -> Result<(), String> {
+    /// Reconfigure the presenter surface to `width`x`height` (the size authority).
+    ///
+    /// This is the **single** place the swapchain follows the accepted CAD rect:
+    /// `apply_layout` calls it after moving the child window, and the frame path
+    /// calls it as an idempotent backstop. A successful change logs
+    /// `[probe] surface reconfigure {from} -> {to}`; a failure is a classed
+    /// [`CadPresentError`] (`surface_reconfigure`), never a silent skip — a
+    /// surface frozen at the old size makes the presenter's size guard refuse
+    /// every frame, which is exactly the "transparent/black CAD region with no
+    /// present error" symptom.
+    pub fn resize_to(&mut self, width: u32, height: u32) -> Result<(), CadPresentError> {
         let Some(presenter) = self.presenter.as_mut() else {
             return Ok(());
         };
-        if presenter.surface_size() == (width, height) {
+        let current = presenter.surface_size();
+        let Some((from, to)) = reconfigure_plan(Some(current), (width, height)) else {
+            return Ok(());
+        };
+        presenter.resize(to.0, to.1).map_err(|error| {
+            CadPresentError::new(
+                CadPresentClass::SurfaceReconfigure,
+                format!(
+                    "surface reconfigure {}x{} -> {}x{} failed: {error}",
+                    from.0, from.1, to.0, to.1
+                ),
+            )
+        })?;
+        eprintln!(
+            "[probe] surface reconfigure {}x{} -> {}x{}",
+            from.0, from.1, to.0, to.1
+        );
+        // The reconfigure created a new composition swapchain and hal re-issued
+        // `SetContent`; the caller commits (`apply_layout` for layout changes,
+        // `frame_cad` for the per-frame backstop path).
+        Ok(())
+    }
+
+    /// Commit the composition tree when the presenter (re)configured.
+    ///
+    /// `Surface::configure` is where hal re-issues
+    /// `IDCompositionVisual::SetContent`; the change only becomes visible after
+    /// `IDCompositionDevice::Commit`. The presenter exposes its configure
+    /// generation, so this is a no-op on ordinary ticks and exactly one COM call
+    /// after init / resize / an internal `Outdated` re-configure. A failure is a
+    /// classed `surface_composition` error (the content would never appear).
+    fn sync_composition(&mut self) -> Result<(), CadPresentError> {
+        let Some(dcomp) = self.dcomp.as_ref() else {
+            return Err(CadPresentError::new(
+                CadPresentClass::SurfaceComposition,
+                "DirectComposition is unavailable for the CAD child",
+            ));
+        };
+        let Some(presenter) = self.presenter.as_ref() else {
+            return Ok(());
+        };
+        let generation = presenter.configure_generation();
+        let placement_pending = self.pending_placement.is_some();
+        if generation == self.committed_generation && !placement_pending {
             return Ok(());
         }
-        presenter
-            .resize(width, height)
-            .map_err(|error| format!("probe resize failed: {error}"))
+        dcomp.commit().map_err(|error| {
+            CadPresentError::new(
+                CadPresentClass::SurfaceComposition,
+                format!(
+                    "composition commit failed (configure generation {generation}, \
+                     pending placement: {placement_pending}): {error}"
+                ),
+            )
+        })?;
+        self.committed_generation = generation;
+        self.pending_placement = None;
+        Ok(())
     }
 
     /// Draw the probe marker (the `--probe` path: no CAD session).
@@ -425,23 +670,68 @@ impl Win32CadSurface {
     ///
     /// `Ok(None)` means the engine has no new frame **and** no reusable retained
     /// frame: the caller waits — no blank or fake grid is drawn. Frame-state
-    /// failures are explicit; a device loss marks the session device as failed and
-    /// does not loop.
+    /// failures are explicit and **classified** ([`CadPresentError`]) so the host
+    /// can emit a stable `[probe] cad-present-error class=…` marker instead of
+    /// guessing from free text; a device loss marks the session device as failed
+    /// and does not loop.
+    ///
+    /// With the presence-based `YACR_PROBE_SOLID_FRAME` diagnostic knob this
+    /// skips the texture blit **and** the size guard and presents a solid
+    /// alternating frame instead (see
+    /// [`cad_render_wgpu::SurfaceProbePresenter::present_solid`]).
     pub fn frame_cad(
         &mut self,
         logical: [f64; 2],
         scale: f64,
-    ) -> Result<Option<ProbeFrameStats>, String> {
-        let Some(session) = self.session.clone() else {
-            return Err("no render session attached".into());
-        };
-        if self.presenter.is_none() {
-            return Err("no GPU presenter (surface not ready)".into());
+    ) -> Result<Option<ProbeFrameStats>, CadPresentError> {
+        let result = self.frame_cad_inner(logical, scale);
+        // A present path may have reconfigured internally (hal retries
+        // `Surface::configure` on `Outdated`); commit before reporting the tick.
+        match self.sync_composition() {
+            Ok(()) => result,
+            // Never mask a more specific frame failure with the commit error:
+            // the frame error is reported now and the commit error on the next
+            // tick that gets far enough to try again.
+            Err(_) if result.is_err() => result,
+            Err(error) => Err(error),
         }
+    }
+
+    fn frame_cad_inner(
+        &mut self,
+        logical: [f64; 2],
+        scale: f64,
+    ) -> Result<Option<ProbeFrameStats>, CadPresentError> {
+        if self.presenter.is_none() {
+            return Err(CadPresentError::new(
+                CadPresentClass::ApplyUpdates,
+                "no GPU presenter (surface not ready)",
+            ));
+        }
+        // Diagnostic discrimination knob: no texture, no size guard.
+        if solid_frame_requested() {
+            let presenter = self.presenter.as_mut().expect("presenter checked above");
+            return match presenter.present_solid() {
+                Ok(stats) => Ok(Some(stats)),
+                Err(error) => Err(CadPresentError::from_probe(
+                    &error,
+                    format!("solid frame failed: {error}"),
+                )),
+            };
+        }
+        let Some(session) = self.session.clone() else {
+            return Err(CadPresentError::new(
+                CadPresentClass::ApplyUpdates,
+                "no render session attached",
+            ));
+        };
         if let Err(error) = session.apply_ready_updates() {
             session.fail_device(format!("apply_ready_updates: {error:?}"), false);
             self.clear_presenter_cache();
-            return Err(format!("apply_ready_updates failed: {error:?}"));
+            return Err(CadPresentError::new(
+                CadPresentClass::ApplyUpdates,
+                format!("apply_ready_updates failed: {error:?}"),
+            ));
         }
         let presented = match session.render(logical, scale) {
             Ok(presented) => presented,
@@ -451,9 +741,9 @@ impl Win32CadSurface {
                     session.fail_device(format!("render device lost: {error}"), true);
                 }
                 self.clear_presenter_cache();
-                return Err(format!(
-                    "render failed ({}) : {error}",
-                    render_error_class(&error)
+                return Err(CadPresentError::new(
+                    CadPresentClass::from_render(&error),
+                    format!("render failed ({}) : {error}", render_error_class(&error)),
                 ));
             }
         };
@@ -482,7 +772,10 @@ impl Win32CadSurface {
             Err(ProbeError::TextureNotReady(_)) => Ok(None),
             Err(error) => {
                 self.clear_presenter_cache();
-                Err(format!("present_texture failed: {error}"))
+                Err(CadPresentError::from_probe(
+                    &error,
+                    format!("present_texture failed: {error}"),
+                ))
             }
         }
     }
@@ -514,6 +807,13 @@ impl Win32CadSurface {
             }
             self.cad = HWND::default();
         }
+        // The composition target references the child HWND that was just
+        // destroyed. Dropping the tree here means a later re-init fails with an
+        // explicit `surface_composition` error instead of composing into a dead
+        // window (there is no silent fallback to a HWND swapchain).
+        self.dcomp = None;
+        self.committed_generation = 0;
+        self.pending_placement = None;
         if !matches!(self.state, BridgeState::Closing | BridgeState::Failed(_)) {
             self.state = BridgeState::Suspended;
         }
@@ -594,31 +894,6 @@ impl Drop for Win32CadSurface {
     }
 }
 
-/// Apply `WS_EX_NOREDIRECTIONBITMAP` to the top-level window (best effort).
-///
-/// Tauri 2.11.6 has no `noRedirectionBitmap` builder option (it landed in
-/// Tauri 2.12), so the host sets the ex-style explicitly before the window is
-/// shown. This is a **best-effort** mitigation for the creation white flash: it
-/// runs after tao created the window, so tao's own creation-time branch cannot
-/// see it. The result is reported honestly (and remains NOT VERIFIED on Wine).
-pub fn set_no_redirection_bitmap(top: HWND) -> Result<(), String> {
-    let current = unsafe { GetWindowLongPtrW(top, GWL_EXSTYLE) };
-    let requested = current | (WS_EX_NOREDIRECTIONBITMAP.0 as isize);
-    if requested == current {
-        return Ok(());
-    }
-    let previous = unsafe { SetWindowLongPtrW(top, GWL_EXSTYLE, requested) };
-    if previous == 0 {
-        let error = unsafe { GetLastError() };
-        if error != ERROR_SUCCESS {
-            return Err(format!(
-                "SetWindowLongPtrW(WS_EX_NOREDIRECTIONBITMAP) failed: {error:?}"
-            ));
-        }
-    }
-    Ok(())
-}
-
 /// The physical client-area size of `top` (window/WebView container bounds).
 pub fn client_size(top: HWND) -> Option<(i32, i32)> {
     let mut rect = windows::Win32::Foundation::RECT::default();
@@ -668,61 +943,24 @@ unsafe extern "system" fn cad_window_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match msg {
-        WM_ERASEBKGND => LRESULT(1),
+        WM_ERASEBKGND => {
+            // Diagnostic V1: a GDI marker proves whether OUR child-window content
+            // reaches the composited output / shows up in a capture at all. It is
+            // painted only under the knob and never touches the swapchain path.
+            if gdi_marker_requested() {
+                paint_gdi_marker(hwnd);
+            }
+            LRESULT(1)
+        }
         WM_PAINT => {
             let mut paint = PAINTSTRUCT::default();
             let _ = unsafe { BeginPaint(hwnd, &mut paint) };
             let _ = unsafe { EndPaint(hwnd, &paint) };
+            if gdi_marker_requested() {
+                paint_gdi_marker(hwnd);
+            }
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
-    }
-}
-
-/// Find the wry-created `WRY_WEBVIEW` container among the top-level children.
-///
-/// wry 0.55 exposes the WebView2 controller/environment but not the container
-/// HWND, so the container is discovered by class name.
-fn find_webview_container(top: HWND) -> Option<HWND> {
-    struct Search {
-        found: Option<HWND>,
-    }
-
-    unsafe extern "system" fn callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        // SAFETY: `lparam` is the `&mut Search` passed by `find_webview_container`
-        // and this callback only runs inside that `EnumChildWindows` call.
-        let search = unsafe { &mut *(lparam.0 as *mut Search) };
-        if window_class(hwnd).as_deref() == Some(WEBVIEW_CONTAINER_CLASS) {
-            search.found = Some(hwnd);
-            BOOL(0)
-        } else {
-            BOOL(1)
-        }
-    }
-
-    let mut search = Search { found: None };
-    unsafe {
-        let _ = EnumChildWindows(
-            Some(top),
-            Some(callback),
-            LPARAM(std::ptr::addr_of_mut!(search) as isize),
-        );
-    }
-    search.found
-}
-
-/// The window class name of `hwnd`, if readable.
-fn window_class(hwnd: HWND) -> Option<String> {
-    let mut buffer = [0u16; 128];
-    let len = unsafe { GetClassNameW(hwnd, &mut buffer) };
-    (len > 0).then(|| String::from_utf16_lossy(&buffer[..len as usize]))
-}
-
-/// The stable class of a render error, for explicit reporting.
-fn render_error_class(error: &cad_render_wgpu::RenderError) -> &'static str {
-    match error {
-        cad_render_wgpu::RenderError::DeviceLost(_) => "device_lost",
-        cad_render_wgpu::RenderError::Frame(_) => "frame",
-        cad_render_wgpu::RenderError::NotInitialized(_) => "not_initialized",
     }
 }

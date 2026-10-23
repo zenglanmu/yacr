@@ -114,6 +114,29 @@ pub fn insets_from(metrics: &CadMetrics, screen_w: f32, screen_h: f32) -> Viewpo
     }
 }
 
+/// The physical size of the CAD content at `scale`, in **device pixels**.
+///
+/// This is the single size authority for the CAD partition: a native host must
+/// size its CAD child surface with exactly this value, and the render session
+/// allocates its render target at the same value. It delegates to the session's
+/// own formula ([`cad_engine::render::render_target_size`]) instead of
+/// re-deriving it, so the two numbers are identical **by construction** at every
+/// scale — not merely equal for integral sizes.
+///
+/// Why this matters: the presenter refuses to blit a texture whose size differs
+/// from the surface (`ProbeError::TextureInvalid` after a bounded wait), so an
+/// independently rounded size is a *total* present failure (a transparent CAD
+/// region with a sticky error), not a cosmetic one. Deriving the child size from
+/// scaled-and-rounded insets was exactly such a second rounding path
+/// (`round(container·s) − round(start·s) − round(end·s)`), which can differ from
+/// `round((container − start − end)·s)` by a pixel at fractional DPI.
+///
+/// The **offset** may be rounded independently: `round(x·s)` is fine, because a
+/// half-pixel placement is invisible and never affects the size guard.
+pub fn physical_content_size(rect: &CadMetrics, scale: f64) -> (u32, u32) {
+    cad_engine::render::render_target_size([f64::from(rect.width), f64::from(rect.height)], scale)
+}
+
 /// Map an accepted frontend CAD rect (CSS/logical pixels) plus the window scale
 /// factor to the [`SurfaceMetrics`] a native host reads each tick.
 ///
@@ -429,5 +452,69 @@ mod tests {
         let a = insets_from(&rect_a, 960.0, 553.0);
         assert_eq!(a.start as f32 + rect_a.width + a.end as f32, 960.0);
         assert_eq!(a.top as f32 + rect_a.height + a.bottom as f32, 553.0);
+    }
+    // --- the single CAD-content-size authority ------------------------------
+
+    /// The one rounding is `round(width · scale)` per axis: never a scaled
+    /// rounding of already-rounded insets. Grid over fractional content rects and
+    /// every scale this product ships for (100/125/150/175/200/250 %).
+    #[test]
+    fn physical_content_size_is_exactly_round_width_times_scale() {
+        let scales = [1.0_f64, 1.25, 1.5, 1.75, 2.0, 2.5];
+        let sizes = [
+            (626.0_f32, 266.0_f32),
+            (333.5, 199.5),
+            (1166.0, 513.0),
+            (1023.4, 768.6),
+            (0.4, 0.4),
+        ];
+        for (w, h) in sizes {
+            let rect = m(3.7, 11.3, w, h, 1.5, 1);
+            for scale in scales {
+                let expected = (
+                    (f64::from(w) * scale).round().max(1.0) as u32,
+                    (f64::from(h) * scale).round().max(1.0) as u32,
+                );
+                assert_eq!(
+                    physical_content_size(&rect, scale),
+                    expected,
+                    "rounding the product once for {w}x{h} at scale {scale}"
+                );
+                // The session's own authority is the same function, so the child
+                // surface and the render target cannot drift apart.
+                assert_eq!(
+                    physical_content_size(&rect, scale),
+                    cad_engine::render::render_target_size([f64::from(w), f64::from(h)], scale),
+                    "the host and the render session share one formula"
+                );
+            }
+        }
+    }
+
+    /// Regression for the H1 defect: the previous insets-derived child size
+    /// (`round(container·s) − round(start·s) − round(end·s)`) disagrees with the
+    /// render target for fractional content rects, and the presenter refuses every
+    /// such frame. The size authority must never be re-derived that way.
+    #[test]
+    fn insets_derived_child_size_can_disagree_with_the_render_target() {
+        // A fractional DOM rect inside an integral logical container: 0 + 333.5 +
+        // 666.5 = 1000. `insets_from` rounds the *logical* offsets first, so the
+        // insets-derived physical width loses the fraction's carry.
+        let rect = m(0.0, 0.0, 333.5, 200.0, 1.25, 1);
+        let insets = insets_from(&rect, 1000.0, 800.0);
+        assert_eq!((insets.start, insets.end), (0, 667));
+        let scale = 1.5_f64;
+        let container_px = (1000.0_f64 * scale).round() as i32;
+        let insets_width = container_px
+            - (f64::from(insets.start) * scale).round() as i32
+            - (f64::from(insets.end) * scale).round() as i32;
+        let target = physical_content_size(&rect, scale);
+        assert_eq!(target.0, 500, "round(333.5 · 1.5)");
+        assert_eq!(
+            insets_width,
+            i32::try_from(target.0).unwrap() - 1,
+            "the insets-derived path is a pixel narrower: that disagreement is a \
+             total present failure, so the child size must come from the authority"
+        );
     }
 }

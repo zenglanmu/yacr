@@ -29,6 +29,10 @@ fn session_settings_report_the_effective_defaults() {
         settings.aperture_size, 12,
         "this project's existing snap aperture"
     );
+    assert_eq!(
+        settings.wgpu_backend, "auto",
+        "the renderer backend default is `auto`"
+    );
     assert_eq!(settings.fonts_dir, None);
 }
 
@@ -197,4 +201,38 @@ fn session_unknown_keys_are_outside_the_closed_table() {
         assert_eq!(CadSettingKey::parse(key.key()), Some(key));
     }
     assert_eq!(SETTINGS_UNKNOWN_KEY, "settings.unknown_key");
+}
+
+#[test]
+fn session_backend_setting_reports_and_accepts_only_the_wire_tokens() {
+    let session = plain_session();
+    assert_eq!(session.settings().wgpu_backend, "auto");
+
+    // The Options dialog reads `settings.wgpu_backend` and writes the identical
+    // `wgpu_backend` key; both are the same closed token set the host persists.
+    let settings = session
+        .apply_setting(
+            CadSettingKey::WgpuBackend,
+            CadSettingValue::Text("vulkan".to_string()),
+        )
+        .expect("a wire token");
+    assert_eq!(settings.wgpu_backend, "vulkan");
+    assert_eq!(session.settings().wgpu_backend, "vulkan");
+
+    let error = session
+        .apply_setting(
+            CadSettingKey::WgpuBackend,
+            CadSettingValue::Text("gl".to_string()),
+        )
+        .unwrap_err();
+    assert_eq!(error, SETTINGS_INVALID_VALUE);
+    assert_eq!(
+        session.settings().wgpu_backend,
+        "vulkan",
+        "a refused token never rewrites the reported value"
+    );
+    assert_eq!(
+        CadSettingKey::parse("wgpu_backend"),
+        Some(CadSettingKey::WgpuBackend)
+    );
 }
