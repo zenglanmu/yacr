@@ -9,14 +9,32 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-# The web UI is retired (explicit NOT IMPLEMENTED placeholder): the wasm entry
-# points only reject with a diagnostic, so the old cad-* / Slint host
-# dependencies are gone. Only the wasm bindings the entry points need remain.
-[dependencies]
-
-# Browser host stack. wasm-bindgen must match the wasm-bindgen-cli used to
-# post-process the module; Slint already pins these versions in Cargo.lock.
+# The browser host is the wasm CAD session of the `dom-canvas` runtime
+# (`surfaceMode: dom-canvas`, ADR 0024): it imports the synthetic fixture, builds
+# the display scene, renders it with the renderer's offscreen frame and presents
+# that frame on a DOM `<canvas>` through the wasm-only WebGL2 presenter.
+#
+# Everything below is **wasm-only**: no native target can present on a DOM
+# canvas, so `src/lib.rs` keeps an explicit NOT IMPLEMENTED entry point there
+# instead of a second, silently different code path.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# wasm-bindgen must match the wasm-bindgen-cli used to post-process the module.
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys = { workspace = true, features = ["console"] }
+js-sys.workspace = true
+web-sys = { workspace = true, features = [
+  "Window",
+  "Document",
+  "Element",
+  "HtmlCanvasElement",
+  "console",
+] }
+# The CAD session itself: import → scene → renderer. `cad-render-wgpu` stays the
+# only wgpu owner; this crate hands it a `Device`/`Queue` it got from the canvas
+# presenter and never constructs a wgpu object of its own.
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-import-acadrust.workspace = true
+cad-app.workspace = true
+cad-render-wgpu.workspace = true
+serde_json.workspace = true

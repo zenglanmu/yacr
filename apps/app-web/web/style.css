@@ -1,0 +1,42 @@
+/*
+ * Functional layout only: the canvas owns the viewport, the status line sits on
+ * top of it. This is the prototype shell for the `dom-canvas` surface mode, not
+ * a design pass (no theme, no components, no responsive breakpoints).
+ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+#cad-canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  /* The presenter sizes the backing store from CSS px x devicePixelRatio. */
+  touch-action: none;
+  cursor: grab;
+}
+
+#cad-canvas:active {
+  cursor: grabbing;
+}
+
+#cad-status {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 4px 8px;
+  font: 12px/1.4 monospace;
+  color: #e8e8e8;
+  background: rgba(0, 0, 0, 0.65);
+  white-space: pre-wrap;
+  pointer-events: none;
+}
