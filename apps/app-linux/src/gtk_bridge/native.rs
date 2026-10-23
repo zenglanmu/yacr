@@ -2,9 +2,8 @@
 //! helpers (free functions and small private types).
 //!
 //! The WebView is reparented **above** the drawing area: DOM-on-top is the only
-//! production arrangement. The X11 helpers are retained but
-//! `unreachable_since_dom_on_top` — `backend::prepare_backend` refuses X11 before
-//! GTK initializes.
+//! production arrangement. The X11 helpers are retained but unreachable: X11 runs
+//! `surfaceMode=dom-canvas` (ADR 0024) and never installs this bridge.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;

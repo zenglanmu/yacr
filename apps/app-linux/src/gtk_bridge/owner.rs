@@ -35,7 +35,8 @@ use super::{BridgeState, GtkOverlayOwner, OVERLAYS, REPARENT_DONE};
 /// The same handler records the first GTK-owned parent commit after a child
 /// (re)creation: `place_below` + the position are parent-relative double-buffered
 /// state and only take effect on that commit. X11 never reaches this function at
-/// runtime (`backend::prepare_backend` refuses it), so it is unconditional.
+/// runtime (X11 runs the `dom-canvas` carrier and installs no bridge), so it is
+/// unconditional.
 fn install_parent_alpha_clear(top: &gtk::ApplicationWindow) {
     top.connect_draw(|widget, context| {
         super::stacking_regression::note_parent_commit();
@@ -81,10 +82,10 @@ impl GtkOverlayOwner {
         // equal the parent's). On Wayland the native region is the app-owned
         // `wl_subsurface` (never a GTK child), so leave `has_window` false and
         // never call `gdk_window_ensure_native` there.
-        // unreachable_since_dom_on_top: this host refuses X11 in
-        // `backend::prepare_backend` before GTK initializes, so `x11_backend` is
-        // always false in the shipped product; retained for the deferred X11
-        // web+canvas route decision.
+        // unreachable_since_dom_on_top: X11 runs `surfaceMode=dom-canvas` (ADR
+        // 0024) and `host::init` skips this bridge entirely there, so
+        // `x11_backend` is always false in the shipped product; retained for an
+        // explicit cleanup decision.
         let x11_backend = !is_wayland_display(&gtk_window.display());
         #[allow(deprecated)]
         drawing_area.set_has_window(x11_backend);
@@ -342,9 +343,10 @@ impl GtkOverlayOwner {
         }
 
         // unreachable_since_dom_on_top: the X11 native-child path below cannot run
-        // in the shipped host because `backend::prepare_backend` refuses X11
-        // (marker line + exit code 4) before GTK exists. Retained for the deferred
-        // X11 web+canvas route decision; unit tests keep it from rotting.
+        // in the shipped host because X11 resolves to `surfaceMode=dom-canvas`
+        // (ADR 0024) and installs no bridge, so no presenter exists to reach it.
+        // Retained for an explicit cleanup decision; unit tests keep it from
+        // rotting.
         let handles = match classify_native(&self.drawing_area, &self.top_level) {
             NativeStatus::Ready(handles) => handles,
             NativeStatus::Pending(reason) => {

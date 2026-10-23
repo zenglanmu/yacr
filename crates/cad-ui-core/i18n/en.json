@@ -710,6 +710,8 @@
   "properties.edit.pending": "Applying…",
   "startup.unsupported_backend": "yacr cannot start on X11/XWayland",
   "startup.unsupported_backend.detail": "This build composites the DOM/WebView above the native CAD surface, which is implemented only for native Wayland. Run yacr in a Wayland session (GDK_BACKEND=wayland); the X11 web+canvas route is explicitly deferred.",
+  "startup.webgl2_unavailable": "yacr cannot create the CAD canvas in this session (WebGL2)",
+  "startup.webgl2_unavailable.detail": "On X11/XWayland the CAD image is drawn through WebGL2 by the wasm CAD session inside the WebView. This session could not provide a usable WebGL2 context, so yacr refuses to start instead of showing a blank canvas. Check the graphics driver and WebKitGTK's GL support, or run in native Wayland (GDK_BACKEND=wayland).",
   "startup.webview2_missing": "yacr cannot start: the Microsoft Edge WebView2 runtime is missing",
   "startup.webview2_missing.detail": "The Windows desktop UI is a WebView2 document and cannot render without the runtime. Install the WebView2 Evergreen Runtime (or point WEBVIEW2_BROWSER_EXECUTABLE_FOLDER at a Fixed Version runtime) and start yacr again.",
   "windows.picker_title": "Open a DWG or DXF drawing",

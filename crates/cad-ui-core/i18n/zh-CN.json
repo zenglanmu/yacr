@@ -710,6 +710,8 @@
   "properties.edit.pending": "正在应用…",
   "startup.unsupported_backend": "yacr 无法在 X11/XWayland 上启动",
   "startup.unsupported_backend.detail": "本版本将 DOM/WebView 叠加在原生 CAD 表面之上，该合成仅实现于原生 Wayland。请在 Wayland 会话中运行（GDK_BACKEND=wayland）；X11 的 web+canvas 路线已显式延后。",
+  "startup.webgl2_unavailable": "yacr 无法在此会话中创建 CAD 画布（WebGL2）",
+  "startup.webgl2_unavailable.detail": "X11/XWayland 上的 CAD 图像由 WebView 内的 wasm 会话经 WebGL2 绘制。本会话无法提供可用的 WebGL2 上下文，因此 yacr 拒绝启动，而不是显示一块空白画布。请检查显卡驱动与 WebKitGTK 的 GL 支持；也可以改用原生 Wayland（GDK_BACKEND=wayland）。",
   "startup.webview2_missing": "yacr 无法启动：缺少 Microsoft Edge WebView2 运行时",
   "startup.webview2_missing.detail": "Windows 桌面界面是一个 WebView2 文档，没有该运行时无法渲染。请安装 WebView2 Evergreen 运行时（或将 WEBVIEW2_BROWSER_EXECUTABLE_FOLDER 指向 Fixed Version 运行时）后重新启动 yacr。",
   "windows.picker_title": "打开 DWG 或 DXF 图纸",

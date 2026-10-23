@@ -2,12 +2,16 @@
 //!
 //! [`run`] is the real Linux host: it prepares the display backend policy
 //! (`GDK_BACKEND`: explicit X11/Wayland, or an environment-derived `Auto`
-//! choice) **before any GTK/Tauri initialization**, then drives the single Tauri
-//! event loop (no second loop is created). The process exit codes are preserved
-//! exactly (`2` for an invalid or unavailable display backend policy, `4` for
-//! the explicitly unsupported X11/XWayland backend, `1` for a failed Tauri build
-//! or a refused startup contract) by resolving those cases here, where the
-//! original `main` did.
+//! choice) **before any GTK/Tauri initialization** and installs the pixel carrier
+//! that policy selects (`native-below` for native Wayland, `dom-canvas` for
+//! X11/XWayland, ADR 0024), then drives the single Tauri event loop (no second
+//! loop is created). The process exit codes are preserved exactly (`2` for an
+//! invalid or unavailable display backend policy, `1` for a failed Tauri build or
+//! a refused startup contract) by resolving those cases here, where the original
+//! `main` did. The `dom-canvas` runtime refusal (exit code `6`) is emitted by
+//! [`crate::canvas_runtime`] once the WebView exists — it cannot be decided here.
+//! Exit code `4` (X11/XWayland refused) is a **historical** contract kept in
+//! [`crate::backend`]; nothing produces it any more.
 //!
 //! Every non-Linux target gets an explicit NOT IMPLEMENTED error instead of an
 //! silently empty GUI: none of the `tauri`/GTK/renderer dependencies are active
@@ -20,7 +24,10 @@
 /// non-zero).
 #[cfg(target_os = "linux")]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    use crate::backend::{prepare_backend, BackendRefusal, UNSUPPORTED_BACKEND_EXIT_CODE};
+    use crate::backend::{
+        install_surface_mode, prepare_backend, BackendRefusal, SurfaceMode,
+        UNSUPPORTED_BACKEND_EXIT_CODE,
+    };
 
     // Parse the real launch options first: the stacking regression contract needs
     // the **explicit** drawing (`--open`/positional), and the `YACR_TEST_DWG`
@@ -56,15 +63,39 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "[probe] display backend policy={:?} resolved={:?} source={source}",
                 plan.policy, plan.resolved
             );
+            // The carrier is fixed here, once, before the webview exists (ADR
+            // 0024 D4: no hot switching). Wayland keeps the native subsurface
+            // path unchanged; X11/XWayland runs the wasm `dom-canvas` carrier.
+            let surface_mode = plan.surface_mode();
+            install_surface_mode(surface_mode);
+            if surface_mode == SurfaceMode::DomCanvas {
+                eprintln!(
+                    "[probe] surfaceMode={} (wasm CAD session in the WebView owns the pixels; \
+                     no native CAD surface)",
+                    surface_mode.wire_name()
+                );
+                // The stacking-regression fixture is a **native-below** fixture: it
+                // exists to prove the DOM sits above the native CAD surface. On this
+                // carrier there is no such surface, so a run that asks for it is
+                // refused instead of producing a frame that proves nothing.
+                if crate::stacking_regression::enabled() {
+                    eprintln!(
+                        "error: YACR_PROBE_STACKING=1 is a native-below compositing fixture and \
+                         is not available on surfaceMode=dom-canvas"
+                    );
+                    std::process::exit(1);
+                }
+            }
         }
         Err(BackendRefusal::Invalid(message)) => {
             eprintln!("error: {message}");
             std::process::exit(2);
         }
         Err(refusal @ BackendRefusal::Unsupported(_)) => {
-            // Stable machine marker first (evidence collection classifies on this
-            // line), then the localized user-facing diagnostic. X11 is refused
-            // outright: no fallback arrangement, no silent success.
+            // Historical (ADR 0023 D3): nothing produces this refusal since ADR
+            // 0024 stage ④ — X11 starts on `dom-canvas` instead. Kept so the
+            // recorded exit-code-4 contract (marker line first) stays executable
+            // and is never silently repurposed.
             if let Some(marker) = refusal.marker() {
                 eprintln!("{marker}");
             }
@@ -92,7 +123,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = tauri::Builder::default()
         .manage(crate::host::ProbeShared(shared.clone()))
-        .invoke_handler(cad_desktop_shell::commands::register_commands())
+        // Host-owned registration: the shared command list plus the `dom-canvas`
+        // seam (carrier report + runtime refusal). On `native-below` it forwards
+        // every command to the shared handler unchanged.
+        .invoke_handler(crate::host::invoke_handler())
         .setup(move |app| {
             crate::host::init(app, &setup_shared, &setup_telemetry)?;
             Ok(())

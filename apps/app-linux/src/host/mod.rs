@@ -1,5 +1,11 @@
 //! Tauri host wiring: window + child webview + the GPU probe lifecycle.
 //!
+//! What this module builds depends on the installed `surfaceMode` (ADR 0024
+//! D1/D2): `native-below` drives the native GPU presenter below the WebView,
+//! while `dom-canvas` (X11/XWayland) builds **only** the window and the WebView —
+//! the wasm session inside the page owns the pixels, so there is no native CAD
+//! session, no GTK drawing area and no per-frame tick ([`surface`]).
+//!
 //! The probe is driven from the **Tauri event loop** (`RunEvent::MainEventsCleared`)
 //! on the main thread; there is no second event loop.
 //!
@@ -38,6 +44,7 @@ use cad_ui_core::protocol::InputKind;
 use cad_ui_core::session::CadSession;
 
 mod admission;
+mod dispatch;
 mod dom;
 mod init;
 mod locale;
@@ -45,6 +52,7 @@ mod options;
 mod popup;
 mod postload;
 mod presenter;
+mod surface;
 mod telemetry;
 mod tick;
 
@@ -70,6 +78,13 @@ pub use options::{
     WINDOW_LABEL,
 };
 pub use popup::PopupAck;
+// The host's own `invoke_handler`: the shared command list plus the `dom-canvas`
+// seam (`surfaceMode` on `cad_status`, the runtime refusal channel and the
+// explicit native-session refusals). See [`dispatch`].
+pub use dispatch::invoke_handler;
+// What the resolved `surfaceMode` may construct on the native side (ADR 0024
+// D1/D2). One pure value, read by `init` and `tick`.
+pub(crate) use surface::current as surface_plan;
 // Evidence-only accessors (`YACR_PROBE_POPUP_EVIDENCE`): the host-side
 // open/close functions and the `textEdit` payload derivation. Never used by the
 // command path.

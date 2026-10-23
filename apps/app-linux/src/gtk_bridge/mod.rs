@@ -18,12 +18,12 @@
 //!   the renderer. The GDK surface is never used for Vulkan, never committed by
 //!   the host, and never placed above the child.
 //! - **X11** (`classify_native`): a windowed `GtkDrawingArea` with its own native
-//!   X child window. This path is **NOT on the production path since DOM-on-top
-//!   (2026-10-22)**: `backend::prepare_backend` refuses X11 before GTK
-//!   initializes (`BackendRefusal::Unsupported`, exit code 4), so it is
-//!   unreachable at runtime. It is retained, and unit-tested, pending the
-//!   explicitly deferred X11 web+canvas route decision — never as X11 capability
-//!   evidence.
+//!   X child window. This path is **NOT on the production path** and is not even
+//!   installed on X11: `backend::prepare_backend` resolves X11/XWayland to
+//!   `surfaceMode=dom-canvas` (ADR 0024), and `host::init` skips the whole bridge
+//!   there, so this code is unreachable at runtime. It is retained, and
+//!   unit-tested, pending an explicit cleanup decision — never as X11 capability
+//!   evidence, and never as a fallback for a failed canvas.
 //!
 //! Threading/lifetime:
 //! - [`GtkOverlayOwner`] is `!Send`/`!Sync` (`PhantomData<Rc<()>>`): it is created,

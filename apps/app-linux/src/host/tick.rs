@@ -151,6 +151,17 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         (size, marker)
     };
 
+    // ---- `dom-canvas`: no native frame path at all (ADR 0024 D1/D2) ----
+    //
+    // The wasm session inside the WebView owns the pixels and the camera, so this
+    // tick must not run the native layout/GPU/session/frame pipeline: there is no
+    // CAD session to bind, no presenter to init and no surface to configure. The
+    // bookkeeping above still runs (stop requests, size report, status line, DOM
+    // diagnostics) so the shell's lifecycle stays observable.
+    if !super::surface_plan().per_frame_tick {
+        return;
+    }
+
     // ---- child webview sizing (main thread, no shared lock held) ----
     // Unconditional on every frame: this host does not drain GTK's queued
     // layout by itself, so an event-driven contract (`size-allocate`, window

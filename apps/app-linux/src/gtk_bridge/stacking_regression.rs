@@ -18,11 +18,10 @@
 //!   first parent commit after a (re)created child makes a lost `place_below`
 //!   replay or an inverted first-frame order visible as a number.
 //!
-//! **X11 is NOT on the production path since DOM-on-top (2026-10-22):** the
-//! native-child/restack branch below is unreachable behind the
-//! `prepare_backend` X11 refusal (`BackendRefusal::Unsupported`). It is retained
-//! (and unit-tested) pending the explicitly deferred X11 web+canvas route
-//! decision; it is not evidence of X11 capability.
+//! **X11 is NOT on the production path:** it runs `surfaceMode=dom-canvas` (ADR
+//! 0024) and installs no bridge at all, so the native-child/restack branch below
+//! is unreachable. It is retained (and unit-tested) pending an explicit cleanup
+//! decision; it is not evidence of X11 capability and never a canvas fallback.
 
 use std::cell::RefCell;
 use std::ffi::{c_int, c_uint, c_ulong, c_void};
@@ -136,10 +135,10 @@ pub(super) fn establish(widget: &gtk::Widget, parent: &gtk::Widget) {
         }
         return;
     }
-    // unreachable_since_dom_on_top: `prepare_backend` refuses X11 before GTK is
-    // initialized, so this branch cannot run in the shipped host. It is kept for
-    // the deferred X11 web+canvas decision and is exercised only by unit tests
-    // (the pure `above` ordering helper below).
+    // unreachable_since_dom_on_top: X11 runs `dom-canvas` and installs no bridge,
+    // so this branch cannot run in the shipped host. It is kept for an explicit
+    // cleanup decision and is exercised only by unit tests (the pure `above`
+    // ordering helper below).
     let Some(overlay) = parent.downcast_ref::<gtk::Overlay>() else {
         report("x11 Unsupported: WebView parent is not the intended GTK overlay".into());
         return;
@@ -280,7 +279,7 @@ mod tests {
     #[test]
     fn x11_native_stacking_option_is_unreachable_since_dom_on_top() {
         // unreachable_since_dom_on_top: the helper is pure, but the branch that
-        // calls it is refused by `prepare_backend` before GTK exists. This test
+        // calls it never runs on X11 (dom-canvas installs no bridge). This test
         // pins the comparison rule, not an X11 capability.
         assert!(above(&[10, 20], 20, 10));
         assert!(!above(&[10, 20], 10, 20));

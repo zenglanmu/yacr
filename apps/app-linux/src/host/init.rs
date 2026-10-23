@@ -13,16 +13,25 @@ use super::options::{
 };
 use super::presenter::{close_presenter, release_presenter, request_stop};
 use super::telemetry::log_top_level_native_handle;
-use super::{lock, lock_telemetry, CadEnv, RenderTelemetry, Shared, BRIDGE, CAD_ENV, WEBVIEW};
+use super::{
+    lock, lock_telemetry, surface_plan, CadEnv, RenderTelemetry, Shared, BRIDGE, CAD_ENV, WEBVIEW,
+};
 
 /// Build the probe window, its child webview and the GPU presenter.
 ///
 /// Runs on the main thread during Tauri `setup`.
+///
+/// What is built depends on the installed `surfaceMode` (`surface_plan()`, ADR
+/// 0024 D1/D2): `native-below` builds the native CAD composition and the GTK
+/// overlay exactly as before; `dom-canvas` builds **only** the window and the
+/// WebView, because the wasm session inside the WebView is the sole CAD authority
+/// (iron rule 8) and there is no native surface to compose.
 pub fn init(
     app: &mut tauri::App,
     shared: &Arc<Mutex<Shared>>,
     telemetry: &Arc<Mutex<RenderTelemetry>>,
 ) -> tauri::Result<()> {
+    let plan = surface_plan();
     // `YACR_PROBE_OPAQUE` is a diagnostic-only escape hatch (window visual test).
     let transparent = std::env::var_os("YACR_PROBE_OPAQUE").is_none();
     // Default: open maximized (the CAD partition should use the whole screen).
@@ -113,8 +122,12 @@ pub fn init(
             );
             // The child webview does not follow the window by itself (see
             // `sync_webview_size`): apply the new inner size now, alongside the
-            // GTK layout pass the resize already triggered.
-            crate::gtk_bridge::sync_webview_size((size.width, size.height), "window-resize");
+            // GTK layout pass the resize already triggered. Only the
+            // `native-below` carrier reparents the webview; `dom-canvas` leaves it
+            // in Tauri's own `GtkBox`, which GTK sizes.
+            if plan.gtk_bridge {
+                crate::gtk_bridge::sync_webview_size((size.width, size.height), "window-resize");
+            }
         }
         tauri::WindowEvent::Moved(position) => {
             eprintln!(
@@ -129,11 +142,13 @@ pub fn init(
         } => {
             eprintln!("[probe] WM event: scale factor {scale_factor}");
             // Allocations are logical px: re-apply at the new scale instead of
-            // waiting for the next frame.
-            crate::gtk_bridge::sync_webview_size(
-                (new_inner_size.width, new_inner_size.height),
-                "window-scale",
-            );
+            // waiting for the next frame (`native-below` only, see above).
+            if plan.gtk_bridge {
+                crate::gtk_bridge::sync_webview_size(
+                    (new_inner_size.width, new_inner_size.height),
+                    "window-scale",
+                );
+            }
         }
         tauri::WindowEvent::Focused(focused) => {
             eprintln!("[probe] WM event: focused={focused}");
@@ -158,8 +173,18 @@ pub fn init(
     lock_telemetry(telemetry).app_handle = Some(app.handle().clone());
 
     // ---- CAD platform composition (main thread; `Rc`, kept in a TLS) ----
+    //
+    // `dom-canvas` (X11/XWayland) must **not** create this: it is the native CAD
+    // identity (platform files/surface/host options for a `CadSession`), and the
+    // tick would then build a second `cad-db` authority next to the wasm session
+    // (ADR 0024 D2 / iron rule 8). Only the window/WebView/platform seams remain.
     let launch = lock(shared).launch.clone();
-    if !launch.probe_only {
+    if !plan.native_cad_session {
+        eprintln!(
+            "[probe] surfaceMode=dom-canvas: native CAD composition skipped (the wasm session in \
+             the WebView is the only CAD authority)"
+        );
+    } else if !launch.probe_only {
         // Same resolved tag as the injected `window.__YACR_HOST_LOCALE__`:
         // native labels and chrome cannot pick different languages.
         match crate::platform::ReactFiles::new(host_locale_tag()) {
@@ -196,7 +221,18 @@ pub fn init(
         }
     }
 
-    if no_gpu {
+    if !plan.gtk_bridge {
+        // `dom-canvas`: there is no native surface to put below the DOM, so the
+        // GTK overlay, the windowed `GtkDrawingArea`, the app-owned Wayland
+        // subsurface shim and the wgpu presenter are all skipped. The WebView
+        // stays where Tauri packed it (the window's `GtkBox`), which GTK sizes
+        // itself — no reparent and no host-side sizing (`sync_webview_size`
+        // reports `skipped=not-registered` if anything still calls it).
+        eprintln!(
+            "[probe] surfaceMode=dom-canvas: GTK overlay drawing area, subsurface shim and wgpu \
+             presenter skipped (in-DOM canvas carrier)"
+        );
+    } else if no_gpu {
         eprintln!("[probe] YACR_PROBE_NO_GPU: GPU bridge skipped (React-only baseline)");
     } else {
         // Measurement-only GPU frame-time opt-in (ADR 0013 class 1). This is the
@@ -241,25 +277,39 @@ pub fn init(
     lock_telemetry(telemetry).redraw_pump = Some(pump);
 
     // Env-gated, evidence-only lifecycle driver (no effect on normal runs).
-    crate::evidence::maybe_spawn(&evidence_window, child.as_ref());
-    crate::evidence::maybe_spawn_tool_evidence(child.as_ref());
-    crate::evidence::maybe_spawn_box_evidence(child.as_ref());
-    crate::evidence::maybe_spawn_hover_evidence(child.as_ref());
-    // Env-gated, evidence-only 3D-view driver: switches the real session to the
-    // 3D view (`SWITCH2D3D`), orbits it with a synthetic primary drag and reports
-    // the real `cad_status` reads. Independent of every other driver and OFF on a
-    // normal run (`YACR_PROBE_VIEW3D` is unset).
-    crate::evidence::maybe_spawn_view3d(child.as_ref());
+    //
+    // The CAD drivers below drive the **native** CAD session (synthetic pointer
+    // input through the real webview, tool/edit/draw phases, popup payload reads)
+    // through `cad_status`/`cad_set_*`. `dom-canvas` has no native session, so on
+    // that carrier they are not spawned at all: a driver run there would report
+    // refusals from a path that does not exist, and its frames would prove nothing
+    // (the window-level lifecycle driver stays unconditional).
+    if plan.native_cad_session {
+        crate::evidence::maybe_spawn(&evidence_window, child.as_ref());
+        crate::evidence::maybe_spawn_tool_evidence(child.as_ref());
+        crate::evidence::maybe_spawn_box_evidence(child.as_ref());
+        crate::evidence::maybe_spawn_hover_evidence(child.as_ref());
+        // Env-gated, evidence-only 3D-view driver: switches the real session to the
+        // 3D view (`SWITCH2D3D`), orbits it with a synthetic primary drag and
+        // reports the real `cad_status` reads. Independent of every other driver
+        // and OFF on a normal run (`YACR_PROBE_VIEW3D` is unset).
+        crate::evidence::maybe_spawn_view3d(child.as_ref());
+        // Env-gated, evidence-only modal-popup pipeline driver: opens, proves the
+        // host gate refuses input/commands, closes and proves the gate releases. No
+        // effect on a normal run (`YACR_PROBE_POPUP_EVIDENCE` is unset).
+        crate::evidence::maybe_spawn_popup_evidence(app.handle());
+        // Env-gated, evidence-only UI-dialogs driver: drives the React chrome
+        // through its own Ctrl+1 handler and command field (Ctrl+1 -> Properties,
+        // click-select -> populated rows, DIST -> command echo, OPTIONS -> the real
+        // dialog) so an external grab can capture them. No effect on a normal run
+        // (`YACR_PROBE_UI_DIALOGS` is unset).
+        crate::evidence::maybe_spawn_ui_dialogs(app.handle(), child.as_ref());
+    } else {
+        eprintln!(
+            "[probe] surfaceMode=dom-canvas: native CAD evidence drivers not spawned (no native \
+             session)"
+        );
+    }
     crate::evidence::maybe_spawn_lifecycle(&evidence_window, app.handle());
-    // Env-gated, evidence-only modal-popup pipeline driver: opens, proves the host
-    // gate refuses input/commands, closes and proves the gate releases. No effect
-    // on a normal run (`YACR_PROBE_POPUP_EVIDENCE` is unset).
-    crate::evidence::maybe_spawn_popup_evidence(app.handle());
-    // Env-gated, evidence-only UI-dialogs driver: drives the React chrome
-    // through its own Ctrl+1 handler and command field (Ctrl+1 -> Properties,
-    // click-select -> populated rows, DIST -> command echo, OPTIONS -> the real
-    // dialog) so an external grab can capture them. No effect on a normal run
-    // (`YACR_PROBE_UI_DIALOGS` is unset).
-    crate::evidence::maybe_spawn_ui_dialogs(app.handle(), child.as_ref());
     Ok(())
 }

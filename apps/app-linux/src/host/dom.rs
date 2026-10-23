@@ -14,6 +14,17 @@ pub(super) const ERROR_HOOK_JS: &str = r#"
     window.addEventListener('unhandledrejection', function (e) {
       try { window.__yacr_diag.errors.push('rejection: ' + String(e.reason)); } catch (_) {}
     });
+    // Input-reach counters: distinguishes "the WebView never got the event" from
+    // "the page got it but the carrier is not bound". Bounded diagnostics only.
+    window.__yacr_diag.counts = {
+      pointerdown: 0, pointermove: 0, wheel: 0, keydown: 0,
+      mousedown: 0, mousemove: 0, mouseup: 0, click: 0, contextmenu: 0
+    };
+    ['pointerdown', 'pointermove', 'wheel', 'keydown', 'mousedown', 'mousemove', 'mouseup', 'click', 'contextmenu'].forEach(function (type) {
+      window.addEventListener(type, function () {
+        try { window.__yacr_diag.counts[type] += 1; } catch (_) {}
+      }, { capture: true, passive: true });
+    });
   } catch (_) {}
 })();
 "#;
@@ -47,6 +58,16 @@ const DOM_DIAG_JS: &str = r#"
       main: info(document.querySelector('main.shell')),
       ribbon: info(document.querySelector('.ribbon')),
       commandBar: info(document.querySelector('.commandline')),
+      // The `dom-canvas` carrier (ADR 0024 D3). Reported as mount state only:
+      // the backing-store size and the loaded wasm binding tell the two failure
+      // shapes apart (no canvas mounted vs. canvas mounted but never sized).
+      canvas: info(document.getElementById('cad-canvas')),
+      canvasBacking: (function () {
+        var c = document.getElementById('cad-canvas');
+        return c ? [c.width, c.height] : null;
+      })(),
+      wasmBinding: typeof window.wasm_bindgen,
+      counts: d.counts || null,
       errors: d.errors
     };
   } catch (e) {
