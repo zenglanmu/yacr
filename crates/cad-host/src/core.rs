@@ -1,6 +1,8 @@
 //! Shared host core types: options, platform contracts and the state handles
 //! owned by [`HostCore`].
 use super::*;
+// Same monotonic clock alias as the crate root: std off wasm, `web-time` on wasm.
+use crate::Instant;
 
 /// Platform-general host options.
 ///
@@ -126,7 +128,7 @@ pub(crate) struct PendingHover {
     /// The freshly resolved top-ranked ref that is not yet applied.
     pub reference: cad_domain::SelectionRef,
     /// The instant the ref was resolved; the dwell is measured from here.
-    pub resolved_at: std::time::Instant,
+    pub resolved_at: Instant,
 }
 
 /// Transient, entity-level hover state (ADR-0012 §10 S2).
@@ -250,7 +252,7 @@ pub struct HostCore {
     /// The monotonic clock the hover dwell is measured against. Defaults to
     /// `Instant::now` on every target; host tests install a fake to drive the
     /// dwell deterministically (no timer thread exists).
-    pub(crate) hover_now: Rc<dyn Fn() -> std::time::Instant>,
+    pub(crate) hover_now: Rc<dyn Fn() -> Instant>,
     /// Diagnostics from reading the config / preference files at startup.
     pub(crate) startup_diagnostics: Rc<RefCell<Vec<String>>>,
     /// The durable renderer backend preference: `Some("auto"|"vulkan"|"dx12")`

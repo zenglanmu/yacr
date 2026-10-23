@@ -18,6 +18,11 @@ use std::{
     sync::Arc,
 };
 
+// `std::time::Instant::now()` panics on wasm32-unknown-unknown ("time not
+// implemented on this platform"); `web-time` re-exports std elsewhere, so this
+// is a no-op off wasm.
+use web_time::Instant;
+
 use cad_app::host::HostController;
 use cad_app::render_scene::{BoxSelectionPreview, OverlayInputs};
 use cad_app::{
@@ -202,7 +207,7 @@ impl HostCore {
             navigation: Rc::new(NavInner::default()),
             hover: Rc::new(HoverState::default()),
             cursor_logical: Rc::new(Cell::new(None)),
-            hover_now: Rc::new(std::time::Instant::now),
+            hover_now: Rc::new(Instant::now),
             startup_diagnostics: Rc::new(RefCell::new(Vec::new())),
             wgpu_backend: Rc::new(RefCell::new(None)),
             queue: Rc::new(RequestQueue::new()),
@@ -292,9 +297,10 @@ impl HostCore {
     ///
     /// Production always uses `Instant::now`; this seam lets host tests advance
     /// the dwell without sleeping or spawning a timer. It is the smallest
-    /// test-visible seam that keeps production on `std::time::Instant`.
+    /// test-visible seam that keeps production on the crate's monotonic
+    /// `Instant` (std off wasm, `web-time` on wasm).
     #[cfg(test)]
-    pub(crate) fn set_hover_clock_for_test(&mut self, clock: Rc<dyn Fn() -> std::time::Instant>) {
+    pub(crate) fn set_hover_clock_for_test(&mut self, clock: Rc<dyn Fn() -> Instant>) {
         self.hover_now = clock;
     }
 

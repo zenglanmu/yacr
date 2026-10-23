@@ -21,3 +21,6 @@ cad-resources.workspace = true
 # `ViewerConfig` schema (`wgpu_backend`, see `settings.rs`). No version change:
 # the workspace already pins the same serde_json.
 serde_json.workspace = true
+# `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web-time`
+# re-exports std elsewhere (no-op off wasm). See `src/lib.rs`/`src/core.rs`.
+web-time.workspace = true

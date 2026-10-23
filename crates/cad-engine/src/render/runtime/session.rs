@@ -1,5 +1,10 @@
 use super::*;
 
+// `std::time::Instant::now()` panics on wasm32-unknown-unknown ("time not
+// implemented on this platform"); `web-time` re-exports std elsewhere, so this
+// is a no-op off wasm.
+use web_time::Instant;
+
 impl CadRenderRuntime {
     /// Attach a host device and initialize the renderer.
     ///
@@ -294,7 +299,7 @@ impl CadRenderRuntime {
             Some(prepared) => prepared,
             None => renderer.prepare_upload_batches(&[])?,
         };
-        let commit_started = std::time::Instant::now();
+        let commit_started = Instant::now();
         renderer.commit_upload(
             prepared,
             if pending.base_changed {

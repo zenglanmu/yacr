@@ -423,7 +423,9 @@ fn texture_format_support_is_explicit() {
 
 #[test]
 fn texture_shader_is_valid_wgsl() {
-    let module = naga::front::wgsl::parse_str(TEXTURE_SHADER).expect("texture shader parses");
+    // The shared blit shader (native presenter + wasm canvas presenter).
+    let module =
+        naga::front::wgsl::parse_str(crate::blit::TEXTURE_SHADER).expect("texture shader parses");
     let mut validator = naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::empty(),

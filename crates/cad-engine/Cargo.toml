@@ -14,3 +14,6 @@ cad-db.workspace = true
 cad-domain.workspace = true
 cad-render-wgpu.workspace = true
 cad-representation.workspace = true
+# `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web-time`
+# re-exports std elsewhere (no-op off wasm). See `render/runtime/session.rs`.
+web-time.workspace = true

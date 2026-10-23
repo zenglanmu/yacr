@@ -41,8 +41,22 @@ futures-lite.workspace = true
 
 # The browser surface path lives here so wgpu stays inside the renderer crate
 # (spec §4.5/§5.3): hosts hand in a canvas, never a wgpu object.
+#
+# `wgpu/webgl` is enabled **only on this wasm32 dependency edge**: Cargo features
+# are additive per package, so the native build (which does not activate a
+# wasm32-target dependency) keeps exactly the workspace declaration
+# `wgpu = "=30.0.1"` with its default features — no `default-features = false`,
+# no workspace-wide feature flip, nothing that changes a native backend. `webgl`
+# is what compiles wgpu's GLES/WebGL2 backend (`wgpu` → `web` + `wgpu-core/webgl`
+# + `wgpu-hal`), and WebGL2 is the only backend the target runtimes have: neither
+# WebKitGTK 2.52.6 nor Chromium 141 exposes `navigator.gpu`, so a WebGPU-only wasm
+# path would be dead configuration.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = { workspace = true, features = ["Window", "Document", "Element", "HtmlCanvasElement"] }
+wgpu = { workspace = true, features = ["webgl"] }
+# `HtmlCanvasElement` is what `create_surface(SurfaceTarget::Canvas(..))` takes;
+# the window/document/element features stay for hosts that resolve the canvas
+# through the DOM, `console` for the explicit logging of a refused canvas path.
+web-sys = { workspace = true, features = ["Window", "Document", "Element", "HtmlCanvasElement", "console"] }
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true

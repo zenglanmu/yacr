@@ -1,39 +1,9 @@
 /// The probe shader: a fullscreen triangle with a grid, a translating colour
 /// block and two corner markers. It deliberately draws no CAD geometry.
-/// Fullscreen textured shader: samples a native CAD texture directly to the
-/// surface (no CPU readback, no extra CAD surface). Opaque display; the CAD
-/// texture is expected to be opaque (premultiplied alpha is not used here).
-pub(crate) const TEXTURE_SHADER: &str = r#"
-struct VsOut {
-    @builtin(position) position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-};
-
-@group(0) @binding(0) var cad_texture: texture_2d<f32>;
-@group(0) @binding(1) var cad_sampler: sampler;
-
-@vertex
-fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VsOut {
-    var corners = array<vec2<f32>, 3>(
-        vec2<f32>(-1.0, -1.0),
-        vec2<f32>( 3.0, -1.0),
-        vec2<f32>(-1.0,  3.0),
-    );
-    let xy = corners[vertex_index];
-    var out: VsOut;
-    out.position = vec4<f32>(xy, 0.0, 1.0);
-    // Texture origin is top-left: clip y=+1 is the screen top, so v must be
-    // (1 - y)/2. Getting this wrong flips the image vertically.
-    out.uv = vec2<f32>((xy.x + 1.0) * 0.5, (1.0 - xy.y) * 0.5);
-    return out;
-}
-
-@fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    return textureSample(cad_texture, cad_sampler, in.uv);
-}
-"#;
-
+///
+/// The **textured** presentation shader is not a probe concern: it lives in
+/// [`crate::blit`] (`TEXTURE_SHADER` / `build_texture_pipeline`), shared with the
+/// wasm canvas presenter so both surface paths blit identically.
 pub(crate) const PROBE_SHADER: &str = r#"
 struct ProbeParams {
     resolution: vec2<f32>,

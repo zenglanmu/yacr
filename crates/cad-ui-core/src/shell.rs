@@ -12,7 +12,10 @@
 //! struct can deref to [`ShellState`] so its existing field accesses resolve
 //! here.
 
-use std::time::Instant;
+// `std::time::Instant::now()` panics on wasm32-unknown-unknown ("time not
+// implemented on this platform"); `web-time` re-exports std elsewhere, so this
+// is a no-op off wasm.
+use web_time::Instant;
 
 use crate::protocol::{InputTracker, ProbeInput, ProbeStatus};
 use crate::session::{

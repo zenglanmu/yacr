@@ -100,85 +100,16 @@ pub(crate) fn validate_texture(
 }
 
 /// Build the fullscreen textured pipeline, its bind-group layout and sampler.
+///
+/// Delegates to the shared blit module ([`crate::blit`]) so the native probe and
+/// the wasm canvas presenter build the *same* pipeline. Native presentation
+/// semantics are unchanged: this module still owns the per-frame binding cache
+/// (keyed by [`NativeTextureKey`]) and the texture/surface size fence.
 pub(super) fn build_texture_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
 ) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout, wgpu::Sampler) {
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("cad-texture-shader"),
-        source: wgpu::ShaderSource::Wgsl(TEXTURE_SHADER.into()),
-    });
-    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("cad-texture-layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-        ],
-    });
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("cad-texture-pipeline-layout"),
-        bind_group_layouts: &[Some(&layout)],
-        immediate_size: 0,
-    });
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("cad-texture-pipeline"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_main"),
-            compilation_options: Default::default(),
-            buffers: &[],
-        },
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-        },
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_main"),
-            compilation_options: Default::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                // Opaque display: the CAD texture is expected to be opaque.
-                blend: Some(wgpu::BlendState::REPLACE),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        multiview_mask: None,
-        cache: None,
-    });
-    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("cad-texture-sampler"),
-        address_mode_u: wgpu::AddressMode::ClampToEdge,
-        address_mode_v: wgpu::AddressMode::ClampToEdge,
-        address_mode_w: wgpu::AddressMode::ClampToEdge,
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
-        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-        ..Default::default()
-    });
-    (pipeline, layout, sampler)
+    crate::blit::build_texture_pipeline(device, format)
 }
 
 /// Build the probe shader, render pipeline, uniform buffer and bind group.

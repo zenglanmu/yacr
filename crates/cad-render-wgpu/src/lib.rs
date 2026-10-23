@@ -46,6 +46,23 @@ pub use native_presenter::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use pick::{pick_id_shader_sources, pick_shader_source};
 
+/// Shared fullscreen-textured blit (surface presentation only): the WGSL source
+/// and the pipeline builder used by both the native probe presenter and the wasm
+/// canvas presenter, so the two presentation paths cannot drift apart.
+pub(crate) mod blit;
+
+/// Wasm-only WebGL2 canvas presenter (the browser sibling of
+/// [`native_presenter`]): the host hands in a canvas, never a wgpu object.
+///
+/// Only [`CanvasPresenter`](canvas::CanvasPresenter) is
+/// `#[cfg(target_arch = "wasm32")]` — it owns a `web_sys::HtmlCanvasElement` and a
+/// WebGL2 surface. The framework-free policy around it
+/// ([`CanvasError`](canvas::CanvasError),
+/// [`SurfaceStatus`](canvas::SurfaceStatus) and the physical-size/format rules) is
+/// compiled on every target so its unit tests run in the ordinary native
+/// `cargo test` instead of being skipped with the browser-only code.
+pub mod canvas;
+
 /// Alias for hosts that think of this as a native surface presenter. The
 /// canonical name stays [`SurfaceProbePresenter`] so existing callers compile.
 #[cfg(not(target_arch = "wasm32"))]

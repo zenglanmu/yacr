@@ -555,7 +555,7 @@ impl Renderer {
         // covers those prefix scans/allocs and the append). It begins **after** the
         // stale-validation guard above, which is therefore not attributed to any
         // substage or to `total_us` (negligible, and deliberately unclaimed).
-        let commit_started = std::time::Instant::now();
+        let commit_started = Instant::now();
         // The **new (incoming)** suffix's rebased resource references (for the
         // ownership proof): the prepared runs are rebased onto the current
         // resource counts.
@@ -596,7 +596,7 @@ impl Renderer {
         let fast = self.pulled_fastpath_plan(keep_prefix, &incoming);
         // Re-base the prepared streams' run indices onto the existing streams so
         // a kept prefix's converted batches keep pointing at valid buffers.
-        let rebase_started = std::time::Instant::now();
+        let rebase_started = Instant::now();
         let base = self.instance_streams.len() as u32;
         for batch in &mut prepared.batches {
             for run in &mut batch.instanced {
@@ -617,7 +617,7 @@ impl Renderer {
             }
         }
         let rebase_us = rebase_started.elapsed().as_micros() as u64;
-        let append_started = std::time::Instant::now();
+        let append_started = Instant::now();
         self.instance_stream_uploads += prepared.instances.len() as u64;
         self.arc_stream_uploads += prepared.arcs.len() as u64;
         self.arc_degenerate_skips += prepared.arc_degenerate_skips;
@@ -636,15 +636,15 @@ impl Renderer {
         self.batches.truncate(keep_prefix);
         self.batches.extend(prepared.batches);
         let append_us = append_started.elapsed().as_micros() as u64;
-        let gc_started = std::time::Instant::now();
+        let gc_started = Instant::now();
         self.gc_instance_streams();
         self.gc_arc_streams();
         self.gc_mesh_chunks();
         let gc_us = gc_started.elapsed().as_micros() as u64;
-        let pulled_started = std::time::Instant::now();
+        let pulled_started = Instant::now();
         self.rebuild_pulled(fast);
         let pulled_us = pulled_started.elapsed().as_micros() as u64;
-        let pick_started = std::time::Instant::now();
+        let pick_started = Instant::now();
         self.rebuild_pick_table(Some((keep_prefix, retired_pick_keys)))?;
         let pick_us = pick_started.elapsed().as_micros() as u64;
         self.progressive_frame = None;
@@ -668,7 +668,7 @@ impl Renderer {
         if keep_prefix == 0 {
             self.reset_pacing();
         }
-        let lineweight_started = std::time::Instant::now();
+        let lineweight_started = Instant::now();
         self.rebuild_lineweight_cache();
         let lineweight_us = lineweight_started.elapsed().as_micros() as u64;
         self.uploaded_bytes += prepared.bytes;

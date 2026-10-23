@@ -21,3 +21,6 @@ cad-engine.workspace = true
 cad-host.workspace = true
 cad-platform.workspace = true
 serde.workspace = true
+# `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web-time`
+# re-exports std elsewhere (no-op off wasm). See `src/shell.rs`.
+web-time.workspace = true
