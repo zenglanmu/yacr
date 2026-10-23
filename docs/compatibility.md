@@ -282,7 +282,7 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 
 | 平台 | 宿主状态 | 合成 | 有界证据 | 未验证 / 上限 |
 |---|---|---|---|---|
-| **Linux / 原生 Wayland** | **受支持，真实可运行**（`apps/app-linux`，bin `yacr`） | **DOM on top**：app-owned `wl_subsurface` 无条件 `place_below(parent)`；GTK toplevel 透明 + 空 opaque region | 生产 `--open` 运行（真实 Vulkan/Quadro P620）、合成帧由同 UID Mutter `ScreenCast` 捕获；WP2 四条判据 PASS（带 caveat）、WP3 About 帧 PASS、textEdit 帧 **INVALID wrong-window** | 仅 **GNOME/Mutter + P620 + `scale=1`**；透明修复后像素复采 **PENDING-RECAPTURE**；DPR>1/分数缩放、多显示器、跨合成器、性能、vendor/golden 均无结论 |
+| **Linux / 原生 Wayland** | **受支持，真实可运行**（`apps/app-linux`，bin `yacr`） | **DOM on top**：app-owned `wl_subsurface` 无条件 `place_below(parent)`；GTK toplevel 透明 + 空 opaque region | 生产 `--open` 运行（真实 Vulkan/Quadro P620）、合成帧由同 UID Mutter `ScreenCast` 捕获；WP2 四条判据 PASS（带 caveat）、WP3 About 帧 PASS、**透明修复后复采有界 PASS**（A 几何满亮度/无蒙层、C About PASS；D textEdit 编辑器未像素证明、B 箭头抑制非确定性）；历史 textEdit 帧 **INVALID wrong-window** | 仅 **GNOME/Mutter + P620 + `scale=1`**；DPR>1/分数缩放、多显示器、跨合成器、性能、vendor/golden 均无结论 |
 | **Linux / X11 / XWayland** | **显式 Unsupported**（退出码 **4**） | —（不创建窗口） | 拒绝合同：stderr `yacr: unsupported-backend: x11` + i18n 诊断 + exit 4 | 运行/视觉 **NOT RUN**（被拒绝）；web+canvas 回退路线**显式延后**，需新 ADR |
 | **Windows** | **已实现**（`apps/app-windows`，bin `yacr-windows`） | **DOM on top**：透明 WebView2（alpha 恰 0）在上，`WS_CHILD|WS_DISABLED` CAD child HWND 在下 | **Tier 0 编译门禁全 rc=0**（msvc clippy/check/build、mingw build、wasm 空壳 check）；**Wine 拒绝合同 smoke 3/3 rc=5** | **视觉/运行时全部 NOT RUN**；spike-1/4/5 **PENDING user real-Windows spike**；Wine 像素结论固定 `NOT VERIFIED (Wine limitation, bug 55432/58921)`；无发布打包 |
 | **macOS** | 显式 NOT IMPLEMENTED 占位（`yacr-macos` 失败桩） | — | 无 | — |

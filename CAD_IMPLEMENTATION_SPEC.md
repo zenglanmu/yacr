@@ -800,7 +800,8 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
   - **Linux 原生 Wayland**：唯一生产路径；**有界 PASS**——GNOME/Mutter + Quadro P620/Vulkan +
     `scale=1`，生产 chrome/弹窗帧由 Observer 判读（WP2 四条判据 PASS 带 caveat；WP3 About 帧 PASS，
     textEdit 帧 INVALID wrong-window），**不是**完整产品/跨合成器/性能/vendor 结论。**生产透明修复后
-    的像素复采 + 重判为 PENDING-RECAPTURE**（不预写视觉结论）。见
+    的像素复采已执行并由独立 Observer 判读：有界 PASS**（满亮度几何/无蒙层、About 覆盖层 PASS；
+    textEdit 编辑器内容 NOT pixel-proven、箭头抑制非确定性）。见
     `docs/validation-dom-on-top-production-2026-10-23.md`。
   - **X11/XWayland**：**显式 Unsupported**——`prepare_backend` 在 GTK 初始化前拒绝，stderr 标记行
     `yacr: unsupported-backend: x11` + i18n 诊断 + **退出码 4**，无静默回退、无窗口/截图。依据：

@@ -245,8 +245,8 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
 `YACR_PROBE_STACKING=1`（严格 `"1"`）+ init-script `window.__YACR_STACKING_REGRESSION__ === true`
 时启用；`--probe`/`YACR_PROBE_ONLY` 同现拒绝；夹具不是产品开关，其帧**不是**视觉 PASS。
 **证据取景规则**：必须包含可见几何、捕获时确认目标窗口在前台（否则得到 wrong-window 帧）、
-夹具层序 ≠ 生产透明度、每轮新目录；**生产透明修复后的像素复采 = PENDING-RECAPTURE**，此前不得
-声称透明视觉已验收。
+夹具层序 ≠ 生产透明度、每轮新目录；**生产透明修复后的像素复采已执行（有界 PASS：几何满亮度、
+无蒙层；About 覆盖层 PASS）**，但 textEdit 编辑器内容与光标抑制确定性仍未闭环（见验证记录）。
 **授权边界**：以当前会话同 UID 用户运行，**不提权、不以 root 运行、不 `sudo`、不解锁/修改会话、不改
 portal/ScreenCast 权限、不装包、不起虚拟/无头显示**；无真实显示时**显式非零退出**而非假装成功；
 截图仅本地保存、不上传。Wayland 走用户**自身会话内**的 ScreenCast

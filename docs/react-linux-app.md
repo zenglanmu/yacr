@@ -154,7 +154,7 @@ GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open /abs/drawing.dwg
 `.shell`、`.workspace`、`.workspace__canvas` **不涂不透明底色**，各 chrome 区（ribbon/面板/命令行/状态栏）
 自己涂不透明底。WP2 之后的手工测试曾发现 CAD 层不可见，根因正是这些祖先在视口区画了不透明底；
 修复见 `6e4bf06`，并由 `apps/desktop-ui/test/metrics.test.mjs` 的结构性回归测试钉住。新增布局**仍须**
-遵守该规则，否则会再次遮住 CAD（像素复采为 **PENDING-RECAPTURE**，见验证记录）。
+遵守该规则，否则会再次遮住 CAD（像素复采有界 PASS：几何满亮度、无蒙层；见验证记录）。
 
 **输入路由（单一漏斗，跨平台同构）**：CAD 原生表面**只负责显示**——它不接收任何 OS 输入。
 `.native-input`（DOM）把 `pointerdown/move/up`、`wheel`、`contextmenu` 与键盘手势经 `probe_input` 转发给
@@ -312,8 +312,11 @@ verdict/退出码/截图是否产出 + `README.md`）。X11 仍会被运行一�
 | `yacr-evidence-wp3-final1` | Wayland 生产帧（DOM 覆盖层/about） | About 帧 PASS |
 | `yacr-evidence-wp3-textedit4` | `popup_textedit_pass=1`、`EVIDENCE\PEDIT` 往返、2 张 textEdit 帧 | **INVALID wrong-window** |
 | `yacr-evidence-wp3-fix1` | 透明修复后的构建与运行日志（Vulkan/P620、entityCount 4） | 截图缺失（屏保抑制 ScreenCast） |
+| `yacr-evidence-recapture1` | 透明修复后复采：生产视口/About/hover/minimize/textEdit 帧 + X11 拒绝行 | **有界 PASS**（A 几何满亮度、无蒙层；C About PASS；D textEdit 编辑器未像素证明；B 箭头抑制非确定性） |
 
-**透明修复后的像素复采与 Observer 重判 = PENDING-RECAPTURE**；本文件**不**声称透明视觉已验收。
+**透明修复后的像素复采与 Observer 重判已执行（有界）**：遮挡 bug 修复**像素验证 PASS**——满亮度
+fixture 几何直接透出生产 DOM 视口、无蒙层；About in-DOM 覆盖层 PASS。**未升级**：textEdit 编辑器
+内容（host-initiated open 降级 fallback）、光标抑制确定性、Wayland 最小化/还原恢复。
 证据边界固定为 **GNOME/Mutter + Quadro P620 + `scale=1`**；其它合成器、分数缩放、多显示器、vendor、
 精度、性能均无结论。
 
@@ -343,7 +346,8 @@ verdict/退出码/截图是否产出 + `README.md`）。X11 仍会被运行一�
   child-HWND 宿主。门禁：Tier 0 编译全 rc=0（含 Windows msvc `clippy/check/build`、mingw `build`、
   wasm 空壳 check、i18n 716 键、file-size 851）；Linux 生产 Wayland 有界运行与 Observer 判读见上表与
   [`docs/validation-dom-on-top-production-2026-10-23.md`](validation-dom-on-top-production-2026-10-23.md)。
-  **透明修复后的像素复采 PENDING-RECAPTURE**；UI “DOM 测试”是源码结构/纯函数契约，不是运行时挂载。
+  **透明修复后的像素复采有界 PASS**（几何满亮度、无蒙层；About 覆盖层 PASS；textEdit 编辑器
+  内容未像素证明、光标抑制非确定性）；UI “DOM 测试”是源码结构/纯函数契约，不是运行时挂载。
 - **Windows**：实现完成，但视觉/运行时 **NOT RUN**，上限为 Tier 0 编译 + Wine 拒绝合同 smoke；
   真 Windows 上的 spike-1/4/5 **PENDING user real-Windows spike**。Wine 不能验收透明/层序/视觉
   （DComp stub，bug 55432/58921）——任何 Wine 像素结论必须写

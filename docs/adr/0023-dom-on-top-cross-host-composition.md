@@ -239,9 +239,11 @@ chrome/CAD 边界的弹窗（Observer 判读 PASS）；同一探针在 XWayland 
 
 - **Linux 生产（真实 GPU）**：`docs/validation-dom-on-top-production-2026-10-23.md`。运行环境
   GNOME/Mutter + Wayland + Quadro P620/Vulkan + `scale=1`；证据目录
-  `/tmp/opencode/yacr-evidence-wp2-final6`、`wp3-final1`、`wp3-textedit4`、`wp3-fix1`（本地、不上传）。
-  Observer 已判：WP2 四条判据 PASS（带 caveat）；WP3 About 帧 PASS；textEdit 帧 **INVALID
-  wrong-window**。**修复生产透明后的像素复采 + Observer 重判为 PENDING-RECAPTURE**（本文不写结论）。
+  `/tmp/opencode/yacr-evidence-wp2-final6`、`wp3-final1`、`wp3-textedit4`、`wp3-fix1`、
+  `yacr-evidence-recapture1`（本地、不上传）。Observer 已判：WP2 四条判据 PASS（带 caveat）；
+  WP3 About 帧 PASS；textEdit 帧 **INVALID wrong-window**；**透明修复后的复采有界 PASS**
+  （A 几何满亮度/无蒙层、C About PASS），但 textEdit 编辑器内容 **NOT pixel-proven**（host-initiated
+  open 降级 fallback）、B 箭头抑制 **observed, non-deterministic / NOT VERIFIED deterministic**。
 - **X11**：仅拒绝证据（标记行 + 退出码 4 + 无窗口/无截图）；X11 运行/视觉此后一律 NOT RUN。
 - **Windows**：Tier 0 编译门禁全部 rc=0；Wine 三次拒绝合同 smoke rc=5；**视觉/运行时全部 NOT RUN**，
   上限见 D6 与 `docs/windows-app.md`。

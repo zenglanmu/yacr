@@ -8,6 +8,8 @@
 视觉/运行时验收 **PENDING 用户真 Windows spike-1/4/5**。`macOS`/`Android`/`Web` 仍是显式
 NOT IMPLEMENTED 占位。架构权威：[ADR 0023](adr/0023-dom-on-top-cross-host-composition.md)；
 生产证据：[validation-dom-on-top-production-2026-10-23.md](validation-dom-on-top-production-2026-10-23.md)。
+**透明修复后的像素复采已完成（有界）**：遮挡 bug 修复**像素验证 PASS**（几何满亮度、无蒙层；
+About 覆盖层 PASS）；textEdit 编辑器内容、光标抑制确定性与 Wayland 最小化恢复仍未闭环。
 
 ### 2. 提交与范围（分支 `dom-on-top-layering`）
 
@@ -52,7 +54,8 @@ NOT IMPLEMENTED 占位。架构权威：[ADR 0023](adr/0023-dom-on-top-cross-hos
   mingw build、wasm 空壳、i18n 716、file-size 851、architecture 28、migration guards 18）。
 - **NOT RUN**：全 workspace 测试与全量 CI 门禁矩阵（按日常有界策略）；Android/wasm 平台矩阵；
   N>1 次 surface generation 的**运行期**重放（仅代码路径验证）；renderer 崩溃活体注入；
-  Windows 全部视觉/运行时项；生产透明修复后的像素复采。
+  Windows 全部视觉/运行时项；textEdit 编辑器像素证明（host-initiated open 降级 fallback）；
+  光标抑制确定性；Wayland 最小化/还原恢复。
 
 ### 5. 人工复测抓到的生产 bug 与修复
 
@@ -63,8 +66,27 @@ NOT IMPLEMENTED 占位。架构权威：[ADR 0023](adr/0023-dom-on-top-cross-hos
 - **教训（已写入 `docs/testing-dwg.md` 证据规则）**：夹具验证层序 ≠ 生产 UI 透明性；证据取景
   必须包含**可见几何**；捕获时必须确认**目标窗口在前台**（WP3 textEdit 帧因此作废为
   wrong-window）；像素复采用新目录，不覆盖旧证据。
-- **复采状态**：`wp3-fix1` 的 Wayland 运行 rc=0 但截图缺失（屏保抑制 ScreenCast，未越权解锁），
-  因此 **PENDING-RECAPTURE**，本轮**不**写透明视觉结论。
+- **复采状态（已完成，有界）**：`/tmp/opencode/yacr-evidence-recapture1`（同 UID
+  GNOME/Mutter + P620/Vulkan + `scale=1`，整屏 ScreenCast，一启动一帧）。独立 Observer 判读：
+  - **A 透明视口** PASS：4 条竖 fixture 线 + 水平线满亮度、边缘锐利，canvas `(0,0,0)`、无蒙层；
+    `frame1`/`arrowcheck-13`/`arrowcheck-16` 的 canvas 区域像素一致（三次启动可复现）。
+    caveat：像素不能证明几何由哪一层绘制（旁证：CSS 回归测试 + 构建后 `background: 0 0`）。
+  - **B crosshair** PASS（1px 全跨带精确裁到 canvas 边缘 + 6×6 空心交点标记）；系统箭头
+    **observed, non-deterministic / NOT VERIFIED deterministic**——3 个启动缺失，`recon1-hover`
+    与 `frame-about` 出现；后者有设计解释（模态打开 → `status.crosshair=false`），前者是未解释的
+    1-in-many 离群，本捕获协议不能证明光标抑制。
+  - **C About 覆盖层** PASS：卡片完整、scrim 压暗整个 DOM root（几何 luma 177→84 ≈47% 仍可见），
+    CAD 竖线在卡片上方/下方明亮、卡片矩形内消失（z-order 决定性证据）。
+  - **D textEdit** chrome PASS，但显示 fallback 单行「textEdit 在本版本不可用」，**无编辑器/页脚**；
+    host-initiated open 不带 `popupPayload`，编辑器内容 **NOT pixel-proven**。另有测量分歧：
+    lane 测得几何被压暗（fill 119,121,123），Observer 测得 ring luma 212 + fill 119 ⇒ fallback 帧
+    的 scrim 覆盖 **INDETERMINATE**（About 帧无歧义）。
+  - **E 结构缺陷**：无；仅外观项（About 版本槽空「—」、textEdit 空壳卡片）与 `recon2-minimize`
+    仅桌面（Tauri unminimize 不恢复 Wayland 窗口，属捕获产物）。
+  - `frame3-textedit*` 两行为 `PLANNED_TIMEOUT 143`（`--lifecycle 0` 的弹窗阶段 t≈238s 才出现，
+    SIGTERM 为计划内收尾）；`x11-refusal` 行 `UNSUPPORTED_BACKEND` 4、无截图。
+  - **结论**：遮挡 bug 修复**已像素验证**（有界）；仍开放 textEdit 编辑器像素证明、光标抑制确定性、
+    Wayland 最小化/还原恢复。
 
 ### 6. Windows 证据与上限（禁止过度声称）
 
@@ -80,8 +102,8 @@ NOT IMPLEMENTED 占位。架构权威：[ADR 0023](adr/0023-dom-on-top-cross-hos
 
 1. **PENDING 用户真 Windows spike-1/4/5**（判据与证据格式见 `docs/windows-app.md`；
    spike-1 失败时按 tiling 应急回退并与用户决策，不擅自分片重构）。
-2. **PENDING-RECAPTURE**：透明修复后的 Wayland 生产帧复采 + Observer 重判；在此之前不得声称
-   透明视觉已验收。
+2. **复采后续（复采本身已完成，见 §5）**：textEdit 编辑器像素证明（UI-path probe hook 或真实点击；
+   host-initiated open 不带 payload）；光标抑制确定性（需真实指针移动协议）；Wayland 最小化/还原恢复。
 3. **依赖锁风险**：本轮 `gpu-allocator 0.28.0 → windows 0.62.2` 只是 `Cargo.lock` 调整；
    未来 `cargo update` 可能重新引入重复 COM 绑定，需在 Windows 目标上复核。
 4. **Tauri `WS_EX_NOREDIRECTIONBITMAP`**：2.11.6 无 builder flag，仅 best-effort；升级

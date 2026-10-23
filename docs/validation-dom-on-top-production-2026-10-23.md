@@ -9,7 +9,7 @@ spike-1/4/5**。
 
 | 路径 | 本轮结论 | 边界（必须同时引用） |
 | --- | --- | --- |
-| Linux 原生 Wayland（生产） | **有界 PASS（带 caveat）**：X11 拒绝合同、生产帧层序、回归夹具 4/4 帧、WP3 About 帧由 Observer 判读 | 仅 **GNOME/Mutter + Quadro P620/Vulkan + `scale=1`**；**透明修复后的像素复采 = PENDING-RECAPTURE**；不是完整产品/跨合成器/分数缩放/多显示器/性能/vendor/精度结论 |
+| Linux 原生 Wayland（生产） | **有界 PASS（带 caveat）**：X11 拒绝合同、生产帧层序、回归夹具 4/4 帧、WP3 About 帧由 Observer 判读；**透明修复后的像素复采有界 PASS**（几何满亮度、无蒙层；About 覆盖层 PASS），但 textEdit 编辑器内容未像素证明、光标抑制非确定性 | 仅 **GNOME/Mutter + Quadro P620/Vulkan + `scale=1`**；不是完整产品/跨合成器/分数缩放/多显示器/性能/vendor/精度结论 |
 | X11 / XWayland | **Unsupported**：GTK 前拒绝，标记行 + i18n 诊断 + **退出码 4**，无窗口、无截图 | 依据是 2026-10-22 探针**合成 FAIL**与机制未闭环；**不是“X11 不可能”**；web+canvas 回退路线显式延后 |
 | Windows | **实现 + Tier 0 编译门禁（全部 rc=0）+ Wine 拒绝合同 smoke（三次 rc=5）** | **Tier 0 ≠ 可运行 GUI**；Wine ≠ 真 Windows；z-order/DPI/ProcessFailed 活体/picker/runtime-present 出帧全部 **NOT RUN** |
 | macOS / Android / Web | 显式 NOT IMPLEMENTED 占位 | 不是可运行 GUI 产品；不得用本记录推导 |
@@ -108,26 +108,46 @@ vendor 行为。**夹具层序 ≠ 生产透明度**——WP2 之后的手工测
   `apps/desktop-ui/test/metrics.test.mjs`（钉住透明不变量）。
 - **复采尝试 `yacr-evidence-wp3-fix1`**：X11 仍为拒绝（exit 4、无截图）；Wayland 为
   `NATURAL_EXIT` 0 但 **`screenshot=missing`**——屏保抑制了 ScreenCast 会话，采集未越权解锁会话。
-  因此该目录只有构建/运行日志（Vulkan/P620、`entityCount=4`），**没有可用像素**。
+  因此该目录只有构建/运行日志（Vulkan/P620、`entityCount=4`），**没有可用像素**
+  （后续 `yacr-evidence-recapture1` 复采成功，见下）。
 
-### PENDING-RECAPTURE（不预写结论）
+### 生产透明像素复采（`yacr-evidence-recapture1`，2026-10-23）
 
-**生产透明修复后的像素复采 + Observer 重判 = PENDING-RECAPTURE。** 本记录**不**声称透明视觉已
-验收。复采必须满足：
+**状态：复采已执行，独立 Observer 已完成像素判读。** 这是对 `6e4bf06` 透明修复后的**有界**复采，
+不是新能力验收。环境与既有证据相同：同 UID **GNOME/Mutter Wayland + Quadro P620/Vulkan +
+`scale=1`**；整屏 Mutter `ScreenCast`，**每次启动一张帧**。帧内容为 `yacr` 自身窗口，未再出现
+wrong-window 帧。
 
-1. 取景包含**可见几何**（不能只拍 featureless canvas）；
-2. 捕获时确认目标窗口**在前台**并核对窗口/标题（避免再次得到 wrong-window 帧）；
-3. 新输出目录，不覆盖 `wp2-final6` / `wp3-*` 的既有证据；
-4. 结论仍限定 **GNOME/Mutter + P620 + `scale=1`**。
+**`results.tsv`（证据根下每个 case 一个子目录，各自一行 = 一次独立启动）**
 
-参考命令（同 UID 会话；若会话仍被屏保抑制，需用户自行激活会话，**不得**越权解锁或改权限）：
+| case | verdict | exit | screenshot | 说明 |
+| --- | --- | --- | --- | --- |
+| `frame1-cad-crosshair`、`arrowcheck-13`、`arrowcheck-16`、`frame-about`、`recon1-hover`、`recon2-minimize` | `NATURAL_EXIT` | 0 | captured | 应用自行退出；含透明视口、About、hover 复现与最小化观测 |
+| `frame3-textedit`、`frame3-textedit-nomax` | `PLANNED_TIMEOUT` | 143 | captured | `--lifecycle 0` 不自然退出，弹窗阶段 t≈238s 才开始；290s 进程组 SIGTERM 是**计划内**收尾，不是崩溃 |
+| `x11-refusal` | `UNSUPPORTED_BACKEND` | 4 | missing | 以稳定标记行分类；拒绝于 GTK 前，无窗口/截图 |
 
-```bash
-scripts/collect-evidence.sh --backend wayland \
-  --dwg fixtures/dwg/synthetic-four-lines.dwg \
-  --fonts-dir fonts \
-  --out /tmp/opencode/yacr-evidence-postfix-$(date -u +%Y%m%dT%H%M%SZ)
-```
+**Observer 判读（独立像素复核）**
+
+| 判据 | 结论 | 证据与 caveat |
+| --- | --- | --- |
+| A 透明生产视口可见 CAD 几何 | **PASS（有界）** | 4 条竖 fixture 线 + 水平线**满亮度、边缘锐利**；canvas 为 `(0,0,0)`；**无可察觉蒙层/DOM 填充**；`frame1`/`arrowcheck-13`/`arrowcheck-16` 在 canvas 区域**像素一致**（三次启动可复现）。**诚实 caveat**：像素本身不能证明几何由哪一层绘制；透明证据是“满亮度矢量几何 + 无合成蒙层”，另有 CSS 回归测试与构建后 CSS `background: 0 0` 检查。 |
+| B crosshair + 系统箭头 | crosshair **PASS**；箭头 **observed, non-deterministic / NOT VERIFIED deterministic** | crosshair 为 1px 全跨带（x=1034 / y=612，精确裁到 canvas 边缘）+ 6×6 空心交点标记，hover 启动中存在。箭头精灵在 `frame1`/`arrowcheck-13`/`arrowcheck-16` **缺失**，但在 `recon1-hover`（1638,702）与 `frame-about` 中出现且形态一致。`frame-about` 有设计解释（模态打开 → `status.crosshair=false` → 箭头保留）；`recon1-hover` 是**未解释的 1-in-many 离群**：本捕获协议下不能确定性证明光标抑制（物理指针静止、合成 DOM 事件不驱动 OS 光标、CSS cursor 更新通常需要指针移动）。真实使用（指针移动）影响有限，但**不得**写成“光标抑制已验证”。 |
+| C About in-DOM 覆盖层 | **PASS** | 卡片 x735-1252 / y401-748，标题「关于 yacr」、关闭 X、页脚「关闭」蓝色按钮完整渲染；scrim 压暗整个 DOM root（含 canvas，几何 luma 177→84 ≈47%，但仍清晰可见）；**决定性 z-order 证据**：一条 CAD 竖线在卡片上方与下方明亮、在卡片矩形内消失（没有东西画在卡片之上；原生标题栏保持明亮 → 压暗发生在 DOM 层）。外观观察：正文版本槽为空「—」（host 侧 probe 打开 ⇒ 无 ack payload），正文高度偏大。 |
+| D textEdit 覆盖层 | chrome **PASS**；编辑器内容 **NOT pixel-proven** | 标题「textEdit」+ 关闭 X 正常；卡片显示 fallback 单行「textEdit 在本版本不可用」，**无编辑器、无页脚**。根因是既有设计限制：probe 从 host 侧打开弹窗，而 `popupPayload` 只由 UI 发起的 `openPopup(invoke, …)` ack 设置（`apps/desktop-ui/src/App.jsx:250,459,562` + `popup.mjs:115-177` 要求 `payload.kind===kind`），host-initiated open 因而降级为 unknown/fallback 对话框。编辑器像素证明需要 UI-path probe hook 或真实用户点击 → **NOT RUN**。另记录测量分歧：lane 指标测得该帧几何被压暗（fill 119,121,123），Observer 测得 ring luma 212（亮）+ fill 119——**fallback 帧中 scrim 对几何的覆盖 = INDETERMINATE**（About 帧的压暗无歧义）。 |
+| E 结构缺陷 | **无结构缺陷** | 无黑带/接缝/错位；几何精确裁在 canvas 边缘。仅有外观项：About 版本槽为空；textEdit fallback 卡片大部分为空壳（单行内容约 520×356）。`recon2-minimize` 帧只有桌面（本会话 Tauri unminimize 不能恢复 Wayland 窗口；是**捕获产物**，不是 app 结论）。 |
+
+**本复采升级了什么 / 没有升级什么**
+
+- **升级（有界）**：`6e4bf06` 的**遮挡 bug 修复已由像素验证**——满亮度 fixture 几何直接透出生产
+  DOM 视口、无蒙层；About in-DOM 覆盖层的层序与压暗被独立判 **PASS**。
+- **未升级**：textEdit **编辑器像素内容**、光标抑制**确定性**、最小化/还原恢复、DPR>1、跨合成器、
+  多显示器、性能、vendor/精度均无结论；B 的箭头离群与 D 的 scrim 测量分歧按上文保留为
+  open / INDETERMINATE。
+- 结果仍只对 **GNOME/Mutter + P620 + `scale=1`** 成立；截图只证明该次合成像素，不等于视觉正确性、
+  精度或 vendor 结论。
+
+**仍开放的复采后续**：① textEdit 编辑器像素证明（UI-path probe hook 或真实点击）；② 光标抑制
+确定性（需真实指针移动协议）；③ Wayland 最小化/还原恢复（另立验证）。
 
 ## WP4：Windows 宿主（实现 + Tier 0 + Wine smoke）
 
@@ -210,7 +230,8 @@ Windows 结论只能限定“该 Runtime 版本 + 该 GPU/驱动 + 该 Windows �
 - **NOT RUN（如实）**：全 workspace 测试与全量 CI 门禁矩阵（按日常有界策略，本轮只验证改动范围）；
   Android/wasm 平台矩阵（仅 `app-windows` wasm 空壳 check 已跑）；N>1 次 surface generation 的
   **运行期**重放（仅代码路径与代际计数验证）；renderer 崩溃活体注入；Windows 全部视觉/运行时项；
-  生产透明修复后的像素复采。
+  **textEdit 编辑器像素证明**（host-initiated open 降级 fallback）；**光标抑制确定性**；
+  **Wayland 最小化/还原恢复**（`recon2-minimize` 仅桌面，属捕获产物）。
 
 ## 证据目录、授权与复核方式
 
@@ -219,7 +240,8 @@ Windows 结论只能限定“该 Runtime 版本 + 该 GPU/驱动 + 该 Windows �
 | `yacr-evidence-wp2-final6` | X11 拒绝行、Wayland 生产帧、stacking 夹具 4/4 帧、`results.tsv`、`README.md` |
 | `yacr-evidence-wp3-final1` | Wayland 生产帧（About 覆盖层） |
 | `yacr-evidence-wp3-textedit4` | textEdit 行为日志 + 2 帧（wrong-window，作废） |
-| `yacr-evidence-wp3-fix1` | 透明修复后构建/运行日志；截图缺失 |
+| `yacr-evidence-wp3-fix1` | 透明修复后首次构建/运行日志；截图缺失（屏保抑制 ScreenCast） |
+| `yacr-evidence-recapture1` | 透明修复后复采：生产视口/About/hover/minimize/textEdit 帧 + X11 拒绝行；`results.tsv` |
 | `$HOME/.cache/yacr-wine/{logs,smoke,smoke-msvc}` | WP4 编译门禁与 Wine rc 记录 |
 
 **授权边界**：全部以同 UID 用户态运行；**不提权、不以 root 运行、不 `sudo`、不解锁或修改会话、
