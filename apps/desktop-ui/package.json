@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "vite build",
+    "build:canvas-wasm": "bash ../../scripts/build-canvas-wasm.sh",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

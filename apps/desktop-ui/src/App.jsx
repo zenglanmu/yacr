@@ -8,7 +8,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { CATALOGS } from './catalogs.mjs';
 import { createTranslator, initialLocale, LOCALE_STORAGE_KEY, LOCALES, localeTag, storedLocale, storeLocale } from './i18n.mjs';
 import { bindProbeInput, createInputLane, createSuspendGate } from './input.mjs';
-import { pointerPosition } from './metrics.mjs';
+import { pointerPosition, rectFromElement } from './metrics.mjs';
+import { CANVAS_STEP_MODULE, bindCanvasNavigation, canvasModuleUrl, createCanvasTransport, loadCanvasModule, watchCanvasRect } from './canvas-host.mjs';
+import { SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './surface.mjs';
 import { queueCadCommand, reconcileToolParameterPending, requestImportCancel, setToolParameterFlag, setToolParameterNumber, startCadPolling, stepToolParameterPending } from './cad.mjs';
 import { setToolText } from './text.mjs';
 import { setSelectedText } from './textedit.mjs';
@@ -74,6 +76,11 @@ function Shell() {
   // one exists. The host applies the modal input gate; the chrome mirrors it as
   // one of the pointer lane's suspension reasons plus the pressed About button.
   const popupOpen = status?.popup != null;
+  // The host-reported pixel carrier (ADR 0024 D1). One data flag, read by the one
+  // helper that owns the decision; everything else in this component branches on
+  // the result, never on a platform hint. An older host that reports nothing is
+  // `native-below`: the mode every shipped host has, with today's exact behaviour.
+  const surfaceMode = surfaceModeFromShell({ status });
   // The validated payload of the **fresh** open (`cad_open_popup`'s additive
   // field). It is local UI state on purpose: the wire only carries the content
   // once, so an `existing: true` answer can never overwrite a rendered dialog.
@@ -89,6 +96,11 @@ function Shell() {
   const submittingSelectedText = useRef(false);
   const laneRef = useRef(null);
   const bindingRef = useRef(null);
+  // The `dom-canvas` transport (`null` on every other carrier) and the wasm
+  // session's most recent status. The status is diagnostics only: the chrome still
+  // reads the host's `cad_status`, and the session's own numbers are never painted.
+  const transportRef = useRef(null);
+  const canvasStatusRef = useRef(null);
   // The CAD pointer lane has two *independent* suspension reasons (N5): the
   // command line owns the keyboard, or a host dialog is open. The lane is
   // suspended while either holds, and each owner may only clear its own reason
@@ -144,11 +156,71 @@ function Shell() {
 
   // One ordered IPC lane for the whole session: sequence stays monotonic even
   // when the canvas element is remounted.
+  //
+  // `dom-canvas` hosts have no native surface behind this window, so their input
+  // must not be forwarded to a host input gate: the wasm session receives it
+  // directly (the transport effect below) and **no** `probe_input` lane exists.
+  // `native-below` - including the mount before the host reports any mode - runs
+  // exactly the code it always did.
   useEffect(() => {
+    if (surfaceMode === SURFACE_MODE_DOM_CANVAS) return undefined;
     const lane = createInputLane(input => invoke('probe_input', { input }), setError);
     laneRef.current = lane;
     return () => { lane.dispose(); laneRef.current = null; };
-  }, []);
+  }, [surfaceMode]);
+
+  // The `dom-canvas` transport (ADR 0024 D1/D2/D3). The wasm session is the single
+  // pixel carrier and the single camera owner; this component only measures the
+  // partition, hands the module a size, and forwards drag/zoom. `.native-input`
+  // stays the single input surface: navigation is bound to it and never to the
+  // canvas node, which receives no listener and no state.
+  //
+  // A module that cannot load (missing artifact, CSP without
+  // `'wasm-unsafe-eval'`, broken instantiation) never reaches the session, so it
+  // has no status of its own: the module-load step is classified here and reported
+  // to the host. One failed report, one refusal - never a blank canvas and never a
+  // retry loop.
+  useEffect(() => {
+    if (surfaceMode !== SURFACE_MODE_DOM_CANVAS || !surfaceNode) return undefined;
+    let cancelled = false;
+    let transport = null;
+    let unbindNavigation = null;
+    let stopWatching = null;
+    const fail = failure => {
+      // The host owns the refusal: it maps the step to its stable marker line and
+      // exit code (`webgl2` -> `yacr: unsupported-runtime: webgl2`, exit code 6).
+      // This side forwards the machine-readable step and the session's own detail
+      // only; it never invents user-facing copy (the i18n catalog owns every word).
+      void invoke('canvas_runtime_failed', { step: failure.step, detail: failure.detail })
+        .catch(reason => setError(String(reason)));
+    };
+    void loadCanvasModule(canvasModuleUrl()).then(module => {
+      if (cancelled) return;
+      transport = createCanvasTransport({
+        module,
+        element: surfaceNode,
+        rect: rectFromElement(surfaceNode, window.devicePixelRatio || 1),
+        onFailure: fail,
+        onStatus: next => { canvasStatusRef.current = next; },
+      });
+      transportRef.current = transport;
+      unbindNavigation = bindCanvasNavigation(surfaceNode, {
+        pan: (dx, dy) => transport.pan(dx, dy),
+        zoom: (factor, x, y) => transport.zoom(factor, x, y),
+      });
+      stopWatching = watchCanvasRect(surfaceNode, rect => transport.update(rect));
+    }).catch(error => {
+      if (cancelled) return;
+      fail({ step: CANVAS_STEP_MODULE, detail: String(error) });
+    });
+    return () => {
+      cancelled = true;
+      unbindNavigation?.();
+      stopWatching?.();
+      transport?.dispose();
+      if (transportRef.current === transport) transportRef.current = null;
+    };
+  }, [surfaceMode, surfaceNode]);
 
   // Bind (and re-bind) the input lane to the CAD partition element. The binding
   // reports the partition rect immediately, and re-reports it on every resize,

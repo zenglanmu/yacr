@@ -4,12 +4,18 @@
 // element reports, so `.native-input` holds **no** DOM children and nothing
 // floats across it. Palettes dock to the left (shrinking the partition) and the
 // navigation rail docks to the right.
+//
+// A `dom-canvas` host (ADR 0024 D3) carries its pixels inside this tree instead:
+// an empty, input-transparent `<canvas>` fills the same rect and paints under
+// `.native-input` by DOM order. It is a pixel surface only - no listeners, no
+// document state - so `.native-input` stays the single input funnel.
 import React from 'react';
 import { NavRail } from './NavRail.jsx';
 import { StartPanel } from './StartPanel.jsx';
 import { PropertiesPalette } from './PropertiesPalette.jsx';
 import { DiagnosticsPalette } from './DiagnosticsPalette.jsx';
 import { useI18n, useShell } from '../context.mjs';
+import { SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../surface.mjs';
 
 export function Workspace() {
   const { t } = useI18n();
@@ -25,6 +31,11 @@ export function Workspace() {
   // view reports `false`, so the system arrow stays and the pointer is never
   // invisible. Missing field (older host): the arrow stays, never a guess.
   const crosshair = shell.status?.crosshair === true;
+  // The host-reported pixel carrier (ADR 0024 D1/D3). Only an explicit
+  // `dom-canvas` report mounts the in-DOM carrier; a missing field (older host)
+  // and every other value stay `native-below`, i.e. the compositing this tree has
+  // always used, with no extra node in the partition.
+  const domCanvas = surfaceModeFromShell(shell) === SURFACE_MODE_DOM_CANVAS;
   return (
     <div className="region region--workspace workspace app-region">
       <div className={['workspace__left', leftOpen ? 'is-open' : ''].filter(Boolean).join(' ')}>
@@ -33,6 +44,14 @@ export function Workspace() {
         {shell.diagnosticsOpen ? <DiagnosticsPalette /> : null}
       </div>
       <div className="workspace__canvas">
+        {/* dom-canvas only: the in-DOM pixel carrier. It fills exactly the rect
+            the host reports for `.native-input`, paints underneath it (later
+            sibling wins) and takes no input, so the crosshair and pointer
+            handling are unchanged. The wasm renderer paints its own clear
+            colour, so the node deliberately carries no fill. */}
+        {domCanvas ? (
+          <canvas id="cad-canvas" className="cad-canvas" aria-hidden="true" />
+        ) : null}
         {/* The native CAD partition. Keep this node childless. */}
         <div
           ref={shell.surfaceRef}

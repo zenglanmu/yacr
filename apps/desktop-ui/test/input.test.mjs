@@ -211,7 +211,14 @@ test('ordinary UI strings use existing bilingual dictionary keys', async () => {
     assert.equal(typeof zh[match[1]], 'string', match[1]);
     assert.equal(typeof en[match[1]], 'string', match[1]);
   }
-  assert.ok(!source.includes('<canvas'));
+  // ADR 0024 D3: the only canvas in the tree is the host-flag-gated
+  // `dom-canvas` carrier. It is a pixel surface - never a wrapper around the
+  // partition and never a text host - so it adds no user-visible string and
+  // keeps `.native-input` the single label/input owner.
+  const canvases = [...source.matchAll(/<canvas\s+[a-zA-Z][^>]*>/g)];
+  assert.equal(canvases.length, 1);
+  assert.ok(!canvases[0][0].includes('aria-label'));
+  assert.ok(!canvases[0][0].includes('{t('));
 });
 
 test('CAD rect reports ribbon offset, dynamic footer height and local pointer CSS coordinates', () => {

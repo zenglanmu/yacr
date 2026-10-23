@@ -4,16 +4,19 @@
  *   title/QAT · ribbon · drawing tabs · workspace (palettes | CAD partition |
  *   nav rail) · model/layout tabs · command line · status bar.
  *
- * The central CAD partition is a native surface composited by the Rust host at
- * the rect this DOM reports. Since WP2 that surface is **below** this DOM tree,
- * so every ancestor of `.native-input` must be transparent inside the partition
- * rect: the renderer's own clear colour is the drawing backdrop. `.native-input`
- * therefore paints nothing and holds no children; the chrome regions carry their
- * own opaque fills, and nothing floats across the partition. Consequence: the
- * partition is unpainted by the webview, so between window map and the first
- * native CAD frame the desktop may briefly show through. That is accepted on
- * purpose - the renderer's own clear colour is the intended backdrop, and
- * re-adding a DOM fill here would hide the surface again.
+ * The central CAD partition is painted by one of two **host-reported** carriers
+ * (ADR 0024 D1): `native-below` composites a native surface under this DOM tree,
+ * `dom-canvas` draws into the `<canvas class="cad-canvas">` inside it. On the
+ * `native-below` path - the only one any shipped host reports - every ancestor of
+ * `.native-input` must be transparent inside the partition rect: the renderer's
+ * own clear colour is the drawing backdrop. `.native-input` therefore paints
+ * nothing and holds no children; the chrome regions carry their own opaque
+ * fills, and nothing floats across the partition. Consequence: the partition is
+ * unpainted by the webview, so between window map and the first native CAD frame
+ * the desktop may briefly show through. That is accepted on purpose - the
+ * renderer's own clear colour is the intended backdrop, and re-adding a DOM fill
+ * here would hide the surface again. The `dom-canvas` carrier is the mirror
+ * case: the canvas paints the partition, so it stays unpainted by CSS too.
  */
 
 :root {
@@ -355,6 +358,17 @@ button, input, select { font: inherit; color: inherit; }
 }
 .workspace__left.is-open { display: flex; width: 300px; }
 .workspace__canvas { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; background: transparent; }
+/* The in-DOM pixel carrier of a `surfaceMode: dom-canvas` host (ADR 0024 D3).
+ * It must overlay the exact `.native-input` rect so both carriers are sized from
+ * one measurement, and it is absolutely positioned so it is never a flex/grid
+ * item that could shift that rect. `pointer-events: none` is defensive: DOM order
+ * already puts `.native-input` on top and it stays the only input surface. No
+ * fill here - the wasm renderer paints its own clear colour, and in
+ * `native-below` mode this node is not mounted at all. */
+.cad-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  display: block; pointer-events: none;
+}
 /* The host composites the native CAD surface here. Keep it empty. */
 .native-input { position: absolute; inset: 0; background: transparent; touch-action: none; user-select: none; }
 /* The system arrow is hidden over the CAD partition only while the host is
