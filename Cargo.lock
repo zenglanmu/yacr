@@ -172,11 +172,13 @@ dependencies = [
  "cad-domain",
  "cad-import-acadrust",
  "cad-render-wgpu",
+ "cad-scene",
  "js-sys",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "web-time",
 ]
 
 [[package]]

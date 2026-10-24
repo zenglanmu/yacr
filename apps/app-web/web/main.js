@@ -3,8 +3,11 @@
  *
  * It is the browser sibling of the Linux host page: no framework, no bundler,
  * no second document. All navigation goes to the wasm exports; this file only
- * measures the canvas, forwards pointer/wheel input in CSS pixels and prints the
- * JSON status each call returns.
+ * measures the canvas, forwards pointer/wheel input in CSS pixels, opens local
+ * DWG files through the File API and prints the JSON status each call returns.
+ *
+ * The wasm module is the **only** CAD session (ADR 0024 D2): this page holds no
+ * geometry, no scene and no camera state of its own.
  *
  * Serve this directory over HTTP with the wasm-bindgen `web` output in `./pkg/`:
  *   cargo build -p app-web --target wasm32-unknown-unknown --release
@@ -12,10 +15,20 @@
  *       target/wasm32-unknown-unknown/release/app_web.wasm
  */
 
-import init, { start, resize, zoom_at, pan } from './pkg/app_web.js';
+import init, {
+  start,
+  open_bytes,
+  resize,
+  zoom_at,
+  pan,
+  document as cadDocument,
+  last_import_ms as lastImportMs,
+} from './pkg/app_web.js';
 
 const canvas = document.getElementById('cad-canvas');
 const statusLine = document.getElementById('cad-status');
+const fileInput = document.getElementById('cad-file');
+const fileName = document.getElementById('cad-file-name');
 
 /** One wheel notch, matching the desktop session's ZOOM_IN_FACTOR. */
 const ZOOM_STEP = 1.25;
@@ -46,6 +59,11 @@ function localPoint(event) {
   return { x: event.clientX - rect.left, y: event.clientY - rect.top };
 }
 
+/** Show which file the wasm session has open (`status.label`, or `-`). */
+function showLabel(label) {
+  fileName.textContent = typeof label === 'string' && label !== '' ? label : 'no file open';
+}
+
 /** Print one status object (or one rejection) on the status line. */
 function report(label, json) {
   let parsed;
@@ -57,6 +75,8 @@ function report(label, json) {
   }
   const parts = [
     `${label}: ${parsed.ok ? 'ok' : 'FAILED'}`,
+    `file=${parsed.label ?? '-'}`,
+    `bytes=${parsed.bytes ?? 0}`,
     `backend=${parsed.backend ?? '-'}`,
     `format=${parsed.format ?? '-'}`,
     `physical=${Array.isArray(parsed.physical) ? parsed.physical.join('x') : '-'}`,
@@ -74,15 +94,55 @@ function report(label, json) {
     }
   }
   statusLine.textContent = parts.join('  ');
+  if (parsed.label) {
+    showLabel(parsed.label);
+  }
 }
 
-/** Run one wasm export, reporting either its status or its rejection. */
+/**
+ * The evidence line for one document: the file the session actually holds, its
+ * source size, and the measured import duration / wasm heap.
+ *
+ * `wasm_heap_bytes` is the module's own linear memory, **not** process RSS, and
+ * `import_ms` is one measurement of the last open — neither is a performance
+ * claim.
+ */
+function documentSummary() {
+  try {
+    const doc = JSON.parse(cadDocument());
+    const heap =
+      typeof doc.wasm_heap_bytes === 'number' ? `${doc.wasm_heap_bytes} B` : 'unavailable';
+    const importMs =
+      typeof doc.import_ms === 'number' && doc.import_ms >= 0 ? `${doc.import_ms} ms` : 'not measured';
+    return [
+      `document=${doc.ok ? 'ok' : 'none'}`,
+      `label=${doc.label ?? '-'}`,
+      `bytes=${doc.bytes}`,
+      `batches=${doc.batches}`,
+      `wasm_heap=${heap}`,
+      `import_ms=${importMs}`,
+    ].join('  ');
+  } catch (error) {
+    return `document: unreadable (${String(error)})`;
+  }
+}
+
+/** Run one synchronous wasm export, reporting either its status or its rejection. */
 function run(label, action) {
   try {
     report(label, action());
   } catch (error) {
     // The wasm exports reject with the message that names the failing step.
     statusLine.textContent = `${label} failed: ${String(error)}`;
+  }
+}
+
+/** Whether the wasm session currently holds a file (`document().label`). */
+function sessionIsOpen() {
+  try {
+    return JSON.parse(cadDocument()).label !== null;
+  } catch (error) {
+    return false;
   }
 }
 
@@ -100,6 +160,57 @@ function scheduleResize() {
     run('resize', () => resize(size.w, size.h, devicePixelRatio()));
   });
 }
+
+/**
+ * Open one local DWG in the wasm session.
+ *
+ * `arrayBuffer()` is the File API read; the bytes cross into wasm through
+ * `open_bytes` and nothing is kept on this side. A rejected file (`step` `import`
+ * or `empty-scene`) leaves the previous session open — the status line reports
+ * the failure and the document line still names the file on screen.
+ */
+async function openFile(file) {
+  const size = cssSize();
+  let line;
+  fileInput.disabled = true;
+  try {
+    const buffer = await file.arrayBuffer();
+    const status = await open_bytes(
+      'cad-canvas',
+      file.name,
+      size.w,
+      size.h,
+      devicePixelRatio(),
+      new Uint8Array(buffer),
+    );
+    ready = true;
+    report(`open ${file.name}`, status);
+    line = statusLine.textContent;
+  } catch (error) {
+    line = `open ${file.name} failed: ${String(error)}`;
+    console.error(line);
+    // A rejected file leaves the previous session open; keep navigating it.
+    ready = sessionIsOpen();
+  } finally {
+    fileInput.disabled = false;
+  }
+  // Measurement surfaces for the evidence run: the raw values, not a rendering
+  // of them. `lastImportMs()` is negative until one open completed.
+  console.log(documentSummary());
+  console.log(`last_import_ms=${lastImportMs()}`);
+  statusLine.textContent = `${line}\n${documentSummary()}`;
+}
+
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files && fileInput.files[0];
+  if (!file) {
+    return;
+  }
+  // The `File` stays readable after this, and clearing the input lets a second
+  // selection of the *same* file fire `change` again (reopening for evidence).
+  fileInput.value = '';
+  openFile(file);
+});
 
 canvas.addEventListener('pointerdown', (event) => {
   if (!ready || event.button !== 0) {
@@ -160,15 +271,34 @@ canvas.addEventListener(
 
 window.addEventListener('resize', scheduleResize);
 
+/**
+ * Measurement handle for the evidence run (console access): the two measurement
+ * exports plus the document summary this page already prints. Not a product API;
+ * it exposes no geometry and no second session.
+ */
+window.__YACR_CANVAS__ = {
+  document: cadDocument,
+  lastImportMs,
+  summary: documentSummary,
+};
+
 async function boot() {
   await init();
   const size = cssSize();
-  // `start` reports its own status (including a failure with the failing step
-  // and, for a missing WebGL2 context, the marker
-  // `yacr: unsupported-runtime: webgl2`). A real host maps that marker to its
-  // explicit refusal instead of showing a blank canvas.
-  report('start', await start('cad-canvas', size.w, size.h, devicePixelRatio()));
-  ready = true;
+  // `start` loads the compiled-in synthetic fixture and reports its own status
+  // (including a failure with the failing step and, for a missing WebGL2
+  // context, the marker `yacr: unsupported-runtime: webgl2`). A real host maps
+  // that marker to its explicit refusal instead of showing a blank canvas.
+  // Opening a local file replaces the session through `open_bytes`.
+  try {
+    const status = await start('cad-canvas', size.w, size.h, devicePixelRatio());
+    report('start', status);
+    ready = sessionIsOpen();
+  } catch (error) {
+    statusLine.textContent = `start failed: ${String(error)}`;
+    ready = false;
+  }
+  statusLine.textContent = `${statusLine.textContent}\n${documentSummary()}`;
 }
 
 boot().catch((error) => {

@@ -19,12 +19,22 @@
   </head>
   <body>
     <!--
-      The wasm CAD session presents its frame on this canvas (`start` resolves it
-      by id). Build layout: the wasm-bindgen output must be served from `./pkg/`
-      (see main.js). Serve this directory over HTTP; `file://` cannot instantiate
-      wasm.
+      The wasm CAD session presents its frame on this canvas (`start`/`open_bytes`
+      resolve it by id). Build layout: the wasm-bindgen output must be served from
+      `./pkg/` (see main.js). Serve this directory over HTTP; `file://` cannot
+      instantiate wasm.
     -->
     <canvas id="cad-canvas"></canvas>
+    <!--
+      Local file open: the File API is the only way bytes reach the wasm session
+      (there is no filesystem in wasm). `main.js` reads the file with
+      `arrayBuffer()` and calls `open_bytes` with the file name as the label.
+    -->
+    <div id="cad-open">
+      <label for="cad-file">Open DWG</label>
+      <input id="cad-file" type="file" accept=".dwg" />
+      <span id="cad-file-name" aria-live="polite">no file open</span>
+    </div>
     <pre id="cad-status" role="status">starting...</pre>
     <script type="module" src="./main.js"></script>
   </body>

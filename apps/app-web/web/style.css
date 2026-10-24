@@ -40,3 +40,34 @@ body {
   white-space: pre-wrap;
   pointer-events: none;
 }
+
+/*
+ * Local-file bar. The canvas owns the whole viewport, so this has to be taken
+ * out of flow; it is the only chrome on the page (open a file, see which file is
+ * open) and it must stay clickable while the canvas handles pointer input.
+ */
+#cad-open {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font: 12px/1.4 monospace;
+  color: #e8e8e8;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+#cad-file {
+  font: inherit;
+  color: inherit;
+  max-width: 22ch;
+}
+
+#cad-file-name {
+  max-width: 30ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
