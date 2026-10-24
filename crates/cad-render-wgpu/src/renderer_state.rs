@@ -14,6 +14,11 @@ pub(crate) struct GpuTimeResources {
     pub(crate) resolve: wgpu::Buffer,
     /// `MAP_READ` staging buffer the two resolved `u64` ticks are copied into.
     pub(crate) readback: wgpu::Buffer,
+    /// GPU memory charges of `resolve` and `readback` (released with the
+    /// resources when measurement is disabled or the device is lost).
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    pub(crate) charges: [GpuCharge; 2],
 }
 
 /// Staged GPU resources, owned by the renderer that prepared them. Publishing

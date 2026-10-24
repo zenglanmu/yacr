@@ -56,6 +56,10 @@ pub(super) fn collect_error_scope_bounded(
 pub(super) fn make_probe_instance(backend_policy: ProbeBackendPolicy) -> wgpu::Instance {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = backend_policy.backends();
+    // The backend's own memory thresholds (80 % creation / 95 % device loss), the
+    // same values the headless and renderer instances use; see
+    // `gpu_memory::memory_budget_thresholds`.
+    crate::gpu_memory::apply_memory_budget_thresholds(&mut descriptor);
     wgpu::Instance::new(descriptor)
 }
 

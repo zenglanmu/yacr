@@ -86,6 +86,9 @@ fn gpu_batch(
         pick_key: 0,
         z_range: [0.0, 0.0],
         sources: Vec::new(),
+        // No device buffers are charged: these fixtures carry CPU data only.
+        vertex_charge: None,
+        index_charge: None,
     }
 }
 

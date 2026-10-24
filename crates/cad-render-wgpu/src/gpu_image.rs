@@ -25,6 +25,12 @@ pub(crate) struct GpuTexture {
     /// allocation alive, so `Arc::ptr_eq` cannot report a false match after the
     /// old image is freed.
     pub(crate) decoded: Arc<DecodedImage>,
+    /// GPU memory charge of `texture` (released with it). A quad that samples this
+    /// texture holds a handle clone but no second charge: the allocation is
+    /// counted once, where it was created.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    pub(crate) texture_charge: GpuCharge,
 }
 
 /// One uploaded raster image: a textured quad plus the bind groups needed to
@@ -58,4 +64,12 @@ pub(crate) struct GpuImage {
     /// The full identities this quad can belong to (an `ImageBatch` carries its
     /// own `sources`), preserved for the CPU-side pick table.
     pub(crate) sources: Vec<SelectionRef>,
+    /// GPU memory charge of this quad's vertex buffer.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    pub(crate) vertex_charge: GpuCharge,
+    /// GPU memory charge of this quad's index buffer.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    pub(crate) index_charge: GpuCharge,
 }

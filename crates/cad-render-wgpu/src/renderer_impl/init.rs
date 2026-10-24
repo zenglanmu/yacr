@@ -140,6 +140,17 @@ impl Renderer {
             flags_upload_count: 0,
             entity_flag_keys: std::collections::BTreeSet::new(),
             entity_flags_request: Vec::new(),
+            // The budget is resolved once, from the environment override, and is
+            // an **application estimate** (never the card's VRAM; see `gpu_memory`).
+            gpu_memory: Arc::new(GpuMemoryLedger::new(GpuBudget::from_env())),
+            unit_quad_charge: None,
+            target_charge: None,
+            depth_charge: None,
+            pick_target_charge: None,
+            pick_depth_charge: None,
+            flags_texture_charge: None,
+            flags_ctl_charge: None,
+            pulled_camera_charge: None,
         }
     }
 
@@ -618,6 +629,8 @@ impl Renderer {
         self.line_pipeline = Some(line_pipeline);
         self.line_instanced_pipeline = Some(line_instanced_pipeline);
         self.arc_pipeline = Some(arc_pipeline);
+        self.unit_quad_charge =
+            Some(self.gpu_charge(GpuMemoryCategory::Vertex, unit_quad_buffer.size()));
         self.unit_quad_buffer = Some(unit_quad_buffer);
         self.mesh_pipeline = Some(mesh_pipeline);
         self.mesh_pipeline_mirrored = Some(mesh_pipeline_mirrored);
@@ -884,6 +897,8 @@ impl Renderer {
             "cad-pulled-mesh-pipeline-mirrored",
         ));
         self.pulled_camera_layout = Some(pulled_camera_layout);
+        self.pulled_camera_charge =
+            Some(self.gpu_charge(GpuMemoryCategory::Uniform, camera_buffer.size()));
         self.pulled_camera_buffer = Some(camera_buffer);
         self.pulled_camera_bind_group = Some(camera_bind_group);
         self.pulled_line_storage_layout = Some(line_storage_layout);

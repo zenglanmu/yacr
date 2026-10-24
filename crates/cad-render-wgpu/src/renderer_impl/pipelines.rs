@@ -61,10 +61,15 @@ impl Renderer {
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
+                let charges = [
+                    self.gpu_charge(GpuMemoryCategory::Other, resolve.size()),
+                    self.gpu_charge(GpuMemoryCategory::Other, readback.size()),
+                ];
                 self.gpu_time = Some(GpuTimeResources {
                     query_set,
                     resolve,
                     readback,
+                    charges,
                 });
                 self.gpu_time_resource_creations += 1;
             }
@@ -285,33 +290,61 @@ impl Renderer {
                 size.width, size.height
             )));
         }
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("cad-target"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.target_format,
-            // COPY_SRC lets the headless evidence path read the frame back to a
-            // buffer (`Renderer::read_target_rgba`); production composition never
-            // does a per-frame GPU→CPU copy.
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let depth = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("cad-depth"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        // Budget gate **before** either target exists: a refused frame size costs
+        // no allocation and the previous target keeps rendering (see `gpu_memory`).
+        let colour_request = gpu_memory::texture_alloc_bytes(self.target_format, size, 1, 1);
+        let depth_request = gpu_memory::texture_alloc_bytes(DEPTH_FORMAT, size, 1, 1);
+        self.try_admit_gpu_memory(&[
+            (GpuMemoryCategory::ColorTarget, colour_request),
+            (GpuMemoryCategory::DepthTarget, depth_request),
+        ])?;
+        let texture = self.create_texture_checked(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("cad-target"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.target_format,
+                // COPY_SRC lets the headless evidence path read the frame back to a
+                // buffer (`Renderer::read_target_rgba`); production composition never
+                // does a per-frame GPU→CPU copy.
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            },
+            GpuMemoryCategory::ColorTarget,
+            colour_request,
+        )?;
+        let depth = self.create_texture_checked(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("cad-depth"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            },
+            GpuMemoryCategory::DepthTarget,
+            depth_request,
+        )?;
+        // Replace the charges with the new targets': dropping the previous pair
+        // releases exactly the bytes the old offscreen targets held.
         self.target_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
         self.depth_view = Some(depth.create_view(&wgpu::TextureViewDescriptor::default()));
+        self.target_charge = Some(self.gpu_charge(
+            GpuMemoryCategory::ColorTarget,
+            gpu_memory::texture_bytes(&texture),
+        ));
+        self.depth_charge = Some(self.gpu_charge(
+            GpuMemoryCategory::DepthTarget,
+            gpu_memory::texture_bytes(&depth),
+        ));
         self.target = Some(texture);
         self.texture_revision += 1;
         self.target_size = (size.width, size.height);

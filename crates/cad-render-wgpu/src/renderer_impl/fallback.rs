@@ -19,10 +19,17 @@ impl Renderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<(), PulledAllocationError> {
+        // The ledger is shared (`Arc`), so it can be used while the streams are
+        // borrowed mutably.
+        let ledger = Arc::clone(&self.gpu_memory);
         for stream in &mut self.instance_streams {
             let records = build_pulled_lines(&[stream.pulled_instances.as_slice()], 0);
             let bytes = pulled_line_bytes(&records);
-            stream.buffer = Self::try_vertex_storage_buffer(device, Some(queue), &bytes)?;
+            let buffer = Self::try_vertex_storage_buffer(device, Some(queue), &bytes)?;
+            // This buffer is now the stream's own copy of its geometry (the pulled
+            // segment that used to own it is gone), so the stream carries the charge.
+            stream.buffer_charge = Some(ledger.charge(GpuMemoryCategory::Instance, buffer.size()));
+            stream.buffer = buffer;
             stream.base = 0;
         }
         Ok(())

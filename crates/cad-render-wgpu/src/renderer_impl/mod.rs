@@ -20,6 +20,7 @@ mod frame_pacing;
 mod images;
 mod init;
 mod masks;
+mod memory;
 mod pipelines;
 mod pulled_plan;
 mod pulled_rebuild;

@@ -40,6 +40,9 @@ fn gpu_batch(pick_key: u32, sources: Vec<SelectionRef>) -> GpuBatch {
         pick_key,
         z_range: [0.0, 0.0],
         sources,
+        // No device buffers are charged: these fixtures carry CPU data only.
+        vertex_charge: None,
+        index_charge: None,
     }
 }
 

@@ -695,6 +695,19 @@ pub enum RenderError {
     /// The renderer was used before a device was initialized, or a required
     /// derived resource is missing. Not a device loss.
     NotInitialized(String),
+    /// An allocation was refused **for memory**, and the refusal is explicit: the
+    /// renderer's own application budget ([`GpuMemoryRefusalOrigin::ApplicationBudget`])
+    /// or the device reporting out-of-memory
+    /// ([`GpuMemoryRefusalOrigin::DeviceOutOfMemory`]).
+    ///
+    /// This is deliberately a separate variant, not [`RenderError::Frame`]: a
+    /// budget refusal means the caller asked for more than the configured cap lets
+    /// the renderer hold, and retrying the same upload cannot help; a device OOM
+    /// means this device could not satisfy the request at all. In both cases the
+    /// resident scene is intact and still renders, so the host must keep its
+    /// pixels rather than tearing the device down (unlike
+    /// [`RenderError::DeviceLost`]).
+    GpuMemory(GpuMemoryRefusal),
 }
 
 impl RenderError {
@@ -708,7 +721,27 @@ impl RenderError {
             RenderError::DeviceLost(m) | RenderError::Frame(m) | RenderError::NotInitialized(m) => {
                 m
             }
+            RenderError::GpuMemory(refusal) => refusal.message(),
         }
+    }
+
+    /// Whether this failure is an explicit GPU-memory refusal, and which kind.
+    ///
+    /// `None` for every other variant; the structured facts (category, used,
+    /// requested, cap) live on the returned [`GpuMemoryRefusal`].
+    pub fn gpu_memory_refusal(&self) -> Option<&GpuMemoryRefusal> {
+        match self {
+            RenderError::GpuMemory(refusal) => Some(refusal),
+            RenderError::DeviceLost(_) | RenderError::Frame(_) | RenderError::NotInitialized(_) => {
+                None
+            }
+        }
+    }
+
+    /// Whether the renderer's own application budget (not the device) refused the
+    /// request. `false` for a device OOM and for every non-memory variant.
+    pub fn is_gpu_budget_refusal(&self) -> bool {
+        matches!(self, RenderError::GpuMemory(refusal) if refusal.is_budget_refusal())
     }
 }
 

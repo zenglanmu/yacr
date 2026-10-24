@@ -63,6 +63,12 @@ impl Renderer {
             .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
             .clone();
 
+        // Every upload starts from "no refusal pending" (see `gpu_memory`). A
+        // budget refusal below leaves the resident quads (`self.images`) and their
+        // textures rendering; a texture created earlier in this refused call stays
+        // in the cache and is pruned by the next successful call (never drawn: no
+        // quad references it).
+        self.clear_gpu_memory_refusal();
         let mut report = ImageUploadReport::default();
         let mut staged = Vec::with_capacity(images.len());
         // Allocate one renderer pick key per requested image up front, mirroring
@@ -112,15 +118,34 @@ impl Renderer {
                 .get(&batch.resource)
                 .is_some_and(|existing| Arc::ptr_eq(&existing.decoded, &decoded));
             if !reusable {
-                let created =
-                    Self::build_texture(&device, &queue, &texture_layout, &sampler, &decoded);
+                // The texture is the expensive part of an image: gate it before the
+                // allocation (the refusal is recorded, so a `CadResult` caller can
+                // still read the structured facts through
+                // `Renderer::gpu_budget_refusal`).
+                let requested = u64::from(decoded.width) * u64::from(decoded.height) * 4;
+                self.admit_gpu_memory(&[(GpuMemoryCategory::ImageTexture, requested)])?;
+                let created = Self::build_texture(
+                    &device,
+                    &queue,
+                    &texture_layout,
+                    &sampler,
+                    &decoded,
+                    &self.gpu_memory,
+                )
+                .map_err(|error| self.image_allocation_error(&batch.resource, error))?;
                 report.bytes += created.upload_bytes as u64;
                 self.image_textures.insert(batch.resource.clone(), created);
             }
             let texture = &self.image_textures[&batch.resource];
             let (vertices, indices) = image_quad_vertices(batch);
+            self.admit_gpu_memory(&[
+                (GpuMemoryCategory::Vertex, vertices.len() as u64),
+                (GpuMemoryCategory::Index, (indices.len() * 4) as u64),
+            ])?;
             let vertex_buffer = Self::vertex_buffer(&device, Some(&queue), &vertices);
             let index_buffer = Self::index_buffer(&device, Some(&queue), &indices);
+            let vertex_charge = self.gpu_charge(GpuMemoryCategory::Vertex, vertex_buffer.size());
+            let index_charge = self.gpu_charge(GpuMemoryCategory::Index, index_buffer.size());
             let quad_bytes = vertices.len() + indices.len() * 4;
             report.bytes += quad_bytes as u64;
             report.uploaded += 1;
@@ -139,6 +164,8 @@ impl Renderer {
                 upload_bytes: quad_bytes,
                 pick_key: image_keys[index],
                 sources: batch.sources.clone(),
+                vertex_charge,
+                index_charge,
             });
         }
         self.image_textures.retain(|key, _| live.contains(key));
@@ -156,30 +183,65 @@ impl Renderer {
         Ok(report)
     }
 
+    /// Turn one failed image allocation into the crate's `CadError` **and** the
+    /// recorded explicit refusal.
+    ///
+    /// A device out-of-memory report is classified as
+    /// [`GpuMemoryRefusalOrigin::DeviceOutOfMemory`](crate::GpuMemoryRefusalOrigin)
+    /// (never a generic failure string); any other captured error is reported with
+    /// its own message. The image set is unchanged either way.
+    fn image_allocation_error(
+        &self,
+        resource: &ResourceKey,
+        error: PulledAllocationError,
+    ) -> CadError {
+        match error {
+            PulledAllocationError::OutOfMemory(message) => {
+                let refusal = self.gpu_memory.device_out_of_memory(
+                    GpuMemoryCategory::ImageTexture,
+                    0,
+                    message,
+                );
+                CadError::GpuFailure(refusal.message().to_string())
+            }
+            PulledAllocationError::Other(message) => CadError::GpuFailure(format!(
+                "uploading image {} failed: {message}",
+                resource.as_str()
+            )),
+        }
+    }
+
     /// Upload one decoded RGBA image into a device texture and bind it to the
     /// shared sampler. The returned texture is cached per resource key and
     /// shared by every quad that references it.
+    ///
+    /// Fallible: the texture (and its bind group) are created inside the crate's
+    /// allocation guard, so a driver refusal is classified instead of reaching
+    /// wgpu's default handler, which aborts the process on an invalid handle.
     pub(super) fn build_texture(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         texture_layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
         decoded: &Arc<DecodedImage>,
-    ) -> GpuTexture {
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("cad-image-texture"),
-            size: wgpu::Extent3d {
-                width: decoded.width,
-                height: decoded.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        ledger: &Arc<GpuMemoryLedger>,
+    ) -> Result<GpuTexture, PulledAllocationError> {
+        let texture = allocation_guard(device, || {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("cad-image-texture"),
+                size: wgpu::Extent3d {
+                    width: decoded.width,
+                    height: decoded.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            })
+        })?;
         // `write_texture` needs the row stride padded to the 256-byte copy
         // alignment; the source rows are tightly packed, so copy through a
         // padded scratch buffer only when the stride is not already aligned.
@@ -218,25 +280,32 @@ impl Renderer {
             },
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("cad-image-texture-bind"),
-            layout: texture_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(sampler),
-                },
-            ],
-        });
-        GpuTexture {
+        let bind_group = allocation_guard(device, || {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("cad-image-texture-bind"),
+                layout: texture_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                ],
+            })
+        })?;
+        let texture_charge = ledger.charge(
+            GpuMemoryCategory::ImageTexture,
+            gpu_memory::texture_bytes(&texture),
+        );
+        Ok(GpuTexture {
             texture,
             bind_group,
             upload_bytes: aligned * decoded.height as usize,
             decoded: Arc::clone(decoded),
-        }
+            texture_charge,
+        })
     }
 }

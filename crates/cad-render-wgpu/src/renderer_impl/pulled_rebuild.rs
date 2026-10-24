@@ -45,7 +45,20 @@ impl Renderer {
         // correct — the universal path draws the same pixels — so a conservative
         // verdict only costs the accelerated organisation.
         let required_bytes = self.pulled_required_bytes();
-        let budget_bytes = self.pulled_budget_bytes(&device.limits());
+        let device_budget_bytes = self.pulled_budget_bytes(&device.limits());
+        // The **application** budget (see `gpu_memory`) governs the same extra copy:
+        // the pulled organisation is a second set of buffers on top of the resident
+        // per-run geometry, so an app cap that this rebuild would cross skips it
+        // exactly like a device-capacity skip does — the universal per-run path
+        // draws the same pixels, and the refusal is recorded (and reported through
+        // `pulled_state`/`gpu_budget_refusal`) instead of failing a frame.
+        let budget_bytes = match self
+            .gpu_memory
+            .admit(&[(GpuMemoryCategory::Stream, required_bytes)])
+        {
+            Ok(()) => device_budget_bytes,
+            Err(refusal) => refusal.limit_bytes.unwrap_or(device_budget_bytes),
+        };
         if !pulled_capacity_fits(required_bytes, budget_bytes) {
             // Drop the resident pulled classes (their buffers survive through the
             // streams' handles until the fallback replaces them, so nothing is
@@ -203,6 +216,8 @@ impl Renderer {
                 if !oversized && table_bytes.len() as u64 <= limit {
                     let chunk_table =
                         Self::try_storage_buffer(&device, Some(&queue), &table_bytes)?;
+                    let table_charge =
+                        self.gpu_charge(GpuMemoryCategory::Stream, chunk_table.size());
                     // Segment boundaries fall on whole streams, so a run never
                     // straddles two buffers. The segment buffer is the per-run
                     // instance vertex buffer too, so the accelerated tier keeps one
@@ -277,7 +292,11 @@ impl Renderer {
                                 for stream in self.instance_streams[a..b].iter_mut() {
                                     stream.base = base;
                                     base += stream.instance_count;
+                                    // The segment owns the allocation (and therefore
+                                    // its charge): the stream's own prepare-time
+                                    // placeholder charge is released here.
                                     stream.buffer = segment.geometry_buffer.clone();
+                                    stream.buffer_charge = None;
                                 }
                                 line_base_ranges.push((a, b));
                                 segments.push(segment);
@@ -317,17 +336,23 @@ impl Renderer {
                                 ],
                             },
                         )?;
-                        // Point each stream in the segment at the shared buffer.
+                        let buffer_charge =
+                            self.gpu_charge(GpuMemoryCategory::Stream, buffer.size());
+                        // Point each stream in the segment at the shared buffer. The
+                        // segment owns the allocation and its charge, so the
+                        // stream's own charge is dropped (never double-counted).
                         let mut base = 0u32;
                         for stream in self.instance_streams[a..b].iter_mut() {
                             stream.base = base;
                             base += stream.instance_count;
                             stream.buffer = buffer.clone();
+                            stream.buffer_charge = None;
                         }
                         segments.push(PulledLineSegment {
                             bind_group,
                             instance_count: records.len() as u32,
                             geometry_buffer: buffer,
+                            buffer_charge,
                         });
                     }
                     if !segments.is_empty() {
@@ -335,6 +360,7 @@ impl Renderer {
                         self.pulled_lines = Some(PulledLines {
                             segments,
                             chunk_table,
+                            table_charge,
                         });
                         // A full warm-up that survives a prefix records the base
                         // ranges it just built (a reuse records them per range above).
@@ -382,6 +408,8 @@ impl Renderer {
                 if !oversized && table_bytes.len() as u64 <= limit {
                     let chunk_table =
                         Self::try_storage_buffer(&device, Some(&queue), &table_bytes)?;
+                    let table_charge =
+                        self.gpu_charge(GpuMemoryCategory::Stream, chunk_table.size());
                     // Greedy segmentation over whole chunks (a triangle never spans
                     // chunks, so a segment's indices reference only its own
                     // vertices), forced to break at the retained base boundary so the
@@ -487,6 +515,10 @@ impl Renderer {
                                 Self::try_storage_buffer(&device, Some(&queue), &vertex_bytes)?;
                             let index_buffer =
                                 Self::try_storage_buffer(&device, Some(&queue), &index_bytes)?;
+                            let vertex_charge =
+                                self.gpu_charge(GpuMemoryCategory::Stream, vertex_buffer.size());
+                            let index_charge =
+                                self.gpu_charge(GpuMemoryCategory::Stream, index_buffer.size());
                             let bind_group = Self::guarded_bind_group(
                                 &device,
                                 &wgpu::BindGroupDescriptor {
@@ -515,6 +547,8 @@ impl Renderer {
                                 mirror_split,
                                 vertex_buffer,
                                 index_buffer,
+                                vertex_charge,
+                                index_charge,
                             });
                         }
                     }
@@ -523,6 +557,7 @@ impl Renderer {
                         self.pulled_mesh = Some(PulledMesh {
                             segments,
                             chunk_table,
+                            table_charge,
                         });
                         // A full warm-up that survives a prefix records the base chunk
                         // ranges it just built (a reuse records them above).

@@ -96,11 +96,19 @@ impl Renderer {
                     polygon: mask.polygon.clone(),
                     inverted: true,
                     covered: None,
+                    vertex_charge: None,
                 });
                 continue;
             }
             match mask_fill(&mask.polygon) {
                 Ok(triangles) if !triangles.is_empty() => {
+                    // Budget gate before the fill buffer exists (12 bytes per
+                    // triangle, the exact packed size). A refusal leaves the
+                    // resident mask set untouched.
+                    self.admit_gpu_memory(&[(
+                        GpuMemoryCategory::Mask,
+                        (triangles.len() * 12) as u64,
+                    )])?;
                     staged.push(staged_mask(
                         &device,
                         &queue,
@@ -108,6 +116,7 @@ impl Renderer {
                         triangles,
                         false,
                         None,
+                        &self.gpu_memory,
                     ));
                 }
                 // Empty or refused: report the named reason instead of drawing an
@@ -158,8 +167,32 @@ impl Renderer {
             let ring = required.expanded(extent * MASK_RING_MARGIN);
             match inverted_mask_fill(&boundary, ring) {
                 Ok(triangles) if !triangles.is_empty() => {
-                    let built =
-                        staged_mask(&device, &queue, &boundary, triangles, true, Some(ring));
+                    // This runs on the frame path, so an over-budget ring cannot be
+                    // a `RenderError`: it is reported as a named mask skip (the same
+                    // surface a refused tessellation uses), never as a silent
+                    // missing fill.
+                    if let Err(refusal) = self
+                        .gpu_memory
+                        .admit(&[(GpuMemoryCategory::Mask, (triangles.len() * 12) as u64)])
+                    {
+                        self.masks[index].vertex_count = 0;
+                        self.masks[index].vertices = None;
+                        self.masks[index].vertex_charge = None;
+                        self.masks[index].covered = None;
+                        if !self.mask_skips.contains(&refusal.message().to_string()) {
+                            self.mask_skips.push(refusal.message().to_string());
+                        }
+                        continue;
+                    }
+                    let built = staged_mask(
+                        &device,
+                        &queue,
+                        &boundary,
+                        triangles,
+                        true,
+                        Some(ring),
+                        &self.gpu_memory,
+                    );
                     self.masks[index] = built;
                 }
                 Ok(_) => {
@@ -212,6 +245,7 @@ fn staged_mask(
     triangles: Vec<[f64; 3]>,
     inverted: bool,
     covered: Option<MaskCoverage>,
+    ledger: &Arc<GpuMemoryLedger>,
 ) -> GpuMask {
     let origin = triangles[0];
     let mut bytes = Vec::with_capacity(triangles.len() * 12);
@@ -224,13 +258,16 @@ fn staged_mask(
             bytes.extend_from_slice(&component.to_le_bytes());
         }
     }
+    let vertices = Renderer::vertex_buffer(device, Some(queue), &bytes);
+    let vertex_charge = Some(ledger.charge(GpuMemoryCategory::Mask, vertices.size()));
     GpuMask {
-        vertices: Some(Renderer::vertex_buffer(device, Some(queue), &bytes)),
+        vertices: Some(vertices),
         vertex_count: triangles.len() as u32,
         origin,
         polygon: Arc::from(boundary.to_vec().into_boxed_slice()),
         inverted,
         covered,
+        vertex_charge,
     }
 }
 

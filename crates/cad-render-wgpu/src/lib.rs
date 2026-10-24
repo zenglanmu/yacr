@@ -18,6 +18,16 @@ pub mod geometry;
 /// [`pacing`] for the adaptation policy and the disabled-signal boundary.
 pub mod pacing;
 
+/// Device-resident GPU memory: accounting, the application budget and the
+/// explicit budget/out-of-memory refusal. See [`gpu_memory`] for what is measured,
+/// what is only a cross-check, and why no cap here is the card's VRAM.
+pub mod gpu_memory;
+pub use gpu_memory::{
+    GpuBudget, GpuMemoryCategory, GpuMemoryRefusal, GpuMemoryRefusalOrigin, GpuMemoryReport,
+    GpuMemorySource, MEASURED_FIXTURE_GPU_BYTES,
+};
+use gpu_memory::{GpuCharge, GpuMemoryLedger};
+
 /// Native headless path: create a software device, render offscreen, read the
 /// target back and encode PNG. Native only; the browser path gets its device
 /// from the host canvas instead.
@@ -184,6 +194,18 @@ struct GpuBatch {
     /// preserved so the CPU-side pick table can return the whole `u128` identity
     /// (the scene builder may concatenate several entities into one batch).
     sources: Vec<SelectionRef>,
+    /// GPU memory charge of this batch's per-vertex buffers (positions, normals,
+    /// colours, anti-aliased line quads). `None` for a batch whose geometry lives
+    /// in a shared instance stream / merged chunk / conic stream, which owns the
+    /// charge instead. Released when the batch is dropped (see
+    /// [`gpu_memory::GpuMemoryLedger`]).
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    vertex_charge: Option<GpuCharge>,
+    /// GPU memory charge of this batch's triangle index buffer.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    index_charge: Option<GpuCharge>,
 }
 
 /// One device-resident merged mesh chunk: an interleaved vertex buffer, a
@@ -210,6 +232,14 @@ pub(crate) struct GpuMeshChunk {
     /// when the accelerated tier is live; the universal tier leaves both empty.
     pulled_vertices: Vec<MeshVertex>,
     pulled_indices: Vec<u32>,
+    /// GPU memory charge of this chunk's interleaved vertex buffer.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    vertex_charge: GpuCharge,
+    /// GPU memory charge of this chunk's rebased index buffer.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    index_charge: GpuCharge,
 }
 
 /// Where a converted batch's segments live in the instanced line streams.
@@ -266,6 +296,12 @@ pub(crate) struct InstanceStream {
     /// populated when the accelerated tier is live; the universal tier leaves it
     /// empty.
     pulled_instances: Vec<LineInstance>,
+    /// GPU memory charge of this stream's own buffer, or `None` when the buffer is
+    /// a handle to an accelerated pulled storage segment (the segment owns the
+    /// charge, so the shared allocation is counted exactly once).
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    buffer_charge: Option<GpuCharge>,
 }
 
 /// One device-resident SDF conic stream, plus the `f64` reference origin its
@@ -289,6 +325,10 @@ pub(crate) struct ArcStream {
     /// stream owns its buffer).
     #[allow(dead_code)]
     base: u32,
+    /// GPU memory charge of this stream's conic instance buffer.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    buffer_charge: GpuCharge,
 }
 
 /// One resident WIPEOUT mask: a tessellated fill plus the `f64` reference origin
@@ -319,6 +359,11 @@ pub(crate) struct GpuMask {
     /// World-XY rectangle the resident inverted fill guarantees to cover. `None`
     /// for a non-inverted mask or before the first inverted fill.
     covered: Option<MaskCoverage>,
+    /// GPU memory charge of the resident fill geometry, or `None` while an
+    /// inverted mask has no ring yet.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    vertex_charge: Option<GpuCharge>,
 }
 
 /// An axis-aligned world-XY rectangle.
@@ -412,6 +457,10 @@ pub(crate) struct PulledLineSegment {
     /// vertex buffer). Retained across admitted suffix commits so the base
     /// geometry is not re-encoded/re-uploaded.
     geometry_buffer: wgpu::Buffer,
+    /// GPU memory charge of the segment's geometry buffer.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    buffer_charge: GpuCharge,
 }
 
 /// How a commit's pulled rebuild should proceed (see [`PulledPrefixCheckpoint`]).
@@ -459,6 +508,10 @@ pub(crate) struct PulledLines {
     /// Per-chunk translation columns (one `vec4<f32>` per resident stream),
     /// rewritten each frame exactly like the universal path's per-stream uniform.
     chunk_table: wgpu::Buffer,
+    /// GPU memory charge of the chunk table.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    table_charge: GpuCharge,
 }
 
 /// One accelerated merged-mesh storage segment (see [`PulledLineSegment`]).
@@ -474,6 +527,14 @@ pub(crate) struct PulledMeshSegment {
     vertex_buffer: wgpu::Buffer,
     #[allow(dead_code)]
     index_buffer: wgpu::Buffer,
+    /// GPU memory charge of the segment's vertex buffer.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    vertex_charge: GpuCharge,
+    /// GPU memory charge of the segment's index buffer.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    index_charge: GpuCharge,
 }
 
 /// The accelerated tier's whole-scene merged-mesh storage.
@@ -481,6 +542,10 @@ pub(crate) struct PulledMesh {
     segments: Vec<PulledMeshSegment>,
     /// Per-chunk translation columns, rewritten each frame.
     chunk_table: wgpu::Buffer,
+    /// GPU memory charge of the chunk table.
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    table_charge: GpuCharge,
 }
 
 impl GpuBatch {
@@ -857,6 +922,37 @@ pub struct Renderer {
     /// the new keys instead of leaving them on retired ones. Cleared by a scene
     /// reset (`reset_pick_keys`).
     entity_flags_request: Vec<(SelectionRef, u32)>,
+    /// Device-resident GPU memory ledger: per-category accounting, the peak, the
+    /// budget policy and the last explicit refusal (see [`gpu_memory`]). Shared
+    /// with every [`GpuCharge`], so dropping a GPU resource releases its bytes.
+    gpu_memory: Arc<GpuMemoryLedger>,
+    /// Charges for device resources no resident cluster owns. `None` means "not
+    /// resident" (or "never created"), and dropping the `Some` value releases the
+    /// bytes — see [`Renderer::clear_standalone_charges`].
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    unit_quad_charge: Option<GpuCharge>,
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    target_charge: Option<GpuCharge>,
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    depth_charge: Option<GpuCharge>,
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    pick_target_charge: Option<GpuCharge>,
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    pick_depth_charge: Option<GpuCharge>,
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    flags_texture_charge: Option<GpuCharge>,
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    flags_ctl_charge: Option<GpuCharge>,
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    pulled_camera_charge: Option<GpuCharge>,
 }
 
 impl Default for Renderer {

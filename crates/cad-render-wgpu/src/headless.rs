@@ -72,6 +72,11 @@ fn backend_priority(preference: BackendPreference) -> &'static [wgpu::Backend] {
 fn make_instance(preference: BackendPreference) -> wgpu::Instance {
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = backends_for(preference);
+    // Let the backend police its own memory budget: 80 % of it makes resource
+    // creation start returning OOM (which this crate classifies explicitly) and
+    // 95 % loses the device to memory pressure instead of the process dying. See
+    // `gpu_memory::memory_budget_thresholds` for the wgpu doc this comes from.
+    crate::gpu_memory::apply_memory_budget_thresholds(&mut desc);
     wgpu::Instance::new(desc)
 }
 

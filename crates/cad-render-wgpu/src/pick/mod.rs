@@ -299,27 +299,55 @@ impl Renderer {
             height,
             depth_or_array_layers: 1,
         };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("cad-pick-target"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.id_format.texture_format(),
-            // COPY_SRC is the single texel readback; the target is never sampled.
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let depth = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("cad-pick-depth"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        // The id pass needs its own colour and depth attachment; gate both before
+        // creating either, so a refused pick target leaves the previous one (and
+        // the frame) intact.
+        let colour_request =
+            gpu_memory::texture_alloc_bytes(self.id_format.texture_format(), size, 1, 1);
+        let depth_request = gpu_memory::texture_alloc_bytes(DEPTH_FORMAT, size, 1, 1);
+        self.try_admit_gpu_memory(&[
+            (GpuMemoryCategory::ColorTarget, colour_request),
+            (GpuMemoryCategory::DepthTarget, depth_request),
+        ])?;
+        let texture = self.create_texture_checked(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("cad-pick-target"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.id_format.texture_format(),
+                // COPY_SRC is the single texel readback; the target is never sampled.
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            },
+            GpuMemoryCategory::ColorTarget,
+            colour_request,
+        )?;
+        let depth = self.create_texture_checked(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("cad-pick-depth"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            },
+            GpuMemoryCategory::DepthTarget,
+            depth_request,
+        )?;
+        self.pick_target_charge = Some(self.gpu_charge(
+            GpuMemoryCategory::ColorTarget,
+            gpu_memory::texture_bytes(&texture),
+        ));
+        self.pick_depth_charge = Some(self.gpu_charge(
+            GpuMemoryCategory::DepthTarget,
+            gpu_memory::texture_bytes(&depth),
+        ));
         self.pick_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
         self.pick_depth_view = Some(depth.create_view(&wgpu::TextureViewDescriptor::default()));
         self.pick_target = Some(texture);
@@ -575,7 +603,8 @@ impl Renderer {
         }
 
         let total_slots = slot as usize;
-        self.uniforms.ensure_slots(total_slots, &device, &layout);
+        self.uniforms
+            .ensure_slots(total_slots, &device, &layout, &self.gpu_memory);
         for entry in &pending {
             let uniform = uniform_bytes(
                 &entry.matrix,

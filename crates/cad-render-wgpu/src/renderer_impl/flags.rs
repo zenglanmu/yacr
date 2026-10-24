@@ -17,12 +17,14 @@ impl Renderer {
             return;
         };
         if self.flags_ctl_buffer.is_none() {
-            self.flags_ctl_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+            let ctl = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("cad-flags-ctl"),
                 size: u64::from(FLAGS_CTL_BYTES),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
-            }));
+            });
+            self.flags_ctl_charge = Some(self.gpu_charge(GpuMemoryCategory::Other, ctl.size()));
+            self.flags_ctl_buffer = Some(ctl);
         }
         let ctl_buffer = self
             .flags_ctl_buffer
@@ -53,6 +55,12 @@ impl Renderer {
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             });
+            // One texel per pick key: reported, so a large key space is visible in
+            // the per-category breakdown instead of being an invisible allocation.
+            self.flags_texture_charge = Some(self.gpu_charge(
+                GpuMemoryCategory::Other,
+                gpu_memory::texture_bytes(&texture),
+            ));
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             self.flags_bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("cad-flags-bind"),

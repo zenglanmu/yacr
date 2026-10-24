@@ -602,7 +602,8 @@ impl Renderer {
             + chunk_slot_count
             + arc_slot_count
             + self.masks.len();
-        self.uniforms.ensure_slots(max_slots, device, layout);
+        self.uniforms
+            .ensure_slots(max_slots, device, layout, &self.gpu_memory);
 
         // Write only this page's uniforms. Rewriting every batch for every
         // continuation would turn bounded accumulation into repeated full work.

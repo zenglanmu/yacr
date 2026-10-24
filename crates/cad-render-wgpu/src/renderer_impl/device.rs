@@ -70,6 +70,9 @@ impl Renderer {
         self.mesh_pulled_mirrored_pipeline = None;
         self.last_projection = None;
         self.last_camera_position = None;
+        // The device's resources are gone, so their charges go with them (cluster
+        // owned charges released themselves when their clusters were cleared).
+        self.clear_standalone_charges();
         // A device rebuild is a new device generation: retire the request too.
         self.reset_pick_keys_and_drop_request();
         Err(CadError::GpuFailure(
@@ -133,6 +136,9 @@ impl Renderer {
         self.flags_ctl_buffer = None;
         self.last_projection = None;
         self.last_camera_position = None;
+        // Everything the lost device held is gone: release the standalone charges
+        // (cluster owned charges went with their clusters above).
+        self.clear_standalone_charges();
         // Device loss is a new device generation: the key space and the retained
         // entity-flag request are both retired with the old device.
         self.reset_pick_keys_and_drop_request();

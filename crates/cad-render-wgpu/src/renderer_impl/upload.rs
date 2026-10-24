@@ -23,10 +23,58 @@ impl Renderer {
 
     /// Stage a bounded borrowed batch slice without cloning a full scene delta.
     /// Active GPU batches are unchanged until explicit atomic commit.
+    ///
+    /// The GPU-memory budget is enforced here, **before** each allocation (see
+    /// [`gpu_memory`]): a refusal is the recorded
+    /// [`GpuMemoryRefusal`](crate::GpuMemoryRefusal) and a
+    /// [`CadError::GpuFailure`] whose message names the category, the request, the
+    /// accounting and the cap. Callers that want the refusal **by type** use
+    /// [`Renderer::try_prepare_upload_batches`], or read
+    /// [`Renderer::gpu_budget_refusal`] after this call returns.
     pub fn prepare_upload_batches(
         &self,
         batches: &[cad_scene::RenderBatch],
     ) -> CadResult<PreparedUpload> {
+        self.prepare_upload_batches_inner(batches)
+    }
+
+    /// Stage a batch slice, keeping an explicit [`RenderError::GpuMemory`] for a
+    /// budget or out-of-memory refusal.
+    ///
+    /// This is the same staging work as [`Renderer::prepare_upload_batches`]; only
+    /// the error type differs, so a caller can tell
+    ///
+    /// * [`RenderError::GpuMemory`] — refused for memory (the resident scene is
+    ///   intact and still renders; retrying the same request cannot help),
+    /// * [`RenderError::NotInitialized`] — no device,
+    /// * [`RenderError::Frame`] — the staging request itself was invalid,
+    ///
+    /// apart by type instead of by message. Any other staging failure keeps the
+    /// message the `CadError` path reports.
+    pub fn try_prepare_upload_batches(
+        &self,
+        batches: &[cad_scene::RenderBatch],
+    ) -> Result<PreparedUpload, RenderError> {
+        match self.prepare_upload_batches_inner(batches) {
+            Ok(prepared) => Ok(prepared),
+            Err(error) => {
+                // A recorded refusal is the verdict; the `CadError` is only its
+                // message carrier.
+                match self.gpu_memory.refusal() {
+                    Some(refusal) => Err(RenderError::GpuMemory(refusal)),
+                    None => Err(RenderError::Frame(error.to_string())),
+                }
+            }
+        }
+    }
+
+    fn prepare_upload_batches_inner(
+        &self,
+        batches: &[cad_scene::RenderBatch],
+    ) -> CadResult<PreparedUpload> {
+        // Every staging attempt starts from "no refusal pending", so a stale
+        // verdict can never be reported as this attempt's.
+        self.clear_gpu_memory_refusal();
         let device = self
             .device
             .as_ref()
@@ -196,6 +244,11 @@ impl Renderer {
                         "invalid or over-limit GPU batch".into(),
                     ));
                 }
+                // Budget gate **before** the allocation: a refused staging request
+                // costs no partial scene and the resident scene keeps rendering (see
+                // `gpu_memory`).
+                let allocated = if accelerated { 4 } else { bytes.len() as u64 };
+                self.admit_gpu_memory(&[(GpuMemoryCategory::Instance, allocated)])?;
                 // On the accelerated tier the instance buffers are the
                 // whole-scene `VERTEX | STORAGE` segments, rebuilt by
                 // `rebuild_pulled` at commit (they must span every resident
@@ -207,6 +260,8 @@ impl Renderer {
                 } else {
                     Self::vertex_buffer(device, self.queue.as_ref(), &bytes)
                 };
+                let buffer_charge =
+                    Some(self.gpu_charge(GpuMemoryCategory::Instance, buffer.size()));
                 instance_streams.push(InstanceStream {
                     buffer,
                     instance_count: chunk.instances.len() as u32,
@@ -222,6 +277,7 @@ impl Renderer {
                     } else {
                         Vec::new()
                     },
+                    buffer_charge,
                 });
             }
         }
@@ -258,8 +314,15 @@ impl Renderer {
                         "invalid or over-limit GPU batch".into(),
                     ));
                 }
+                self.admit_gpu_memory(&[
+                    (GpuMemoryCategory::Vertex, vertex_bytes.len() as u64),
+                    (GpuMemoryCategory::Index, index_bytes.len() as u64),
+                ])?;
                 let vertex_buffer = Self::vertex_buffer(device, self.queue.as_ref(), &vertex_bytes);
                 let index_buffer = Self::index_buffer(device, self.queue.as_ref(), &chunk.indices);
+                let vertex_charge =
+                    self.gpu_charge(GpuMemoryCategory::Vertex, vertex_buffer.size());
+                let index_charge = self.gpu_charge(GpuMemoryCategory::Index, index_buffer.size());
                 mesh_chunk_buffers.push(GpuMeshChunk {
                     vertex_buffer,
                     index_buffer,
@@ -280,6 +343,8 @@ impl Renderer {
                     } else {
                         Vec::new()
                     },
+                    vertex_charge,
+                    index_charge,
                 });
             }
         }
@@ -311,12 +376,16 @@ impl Renderer {
                         "invalid or over-limit GPU batch".into(),
                     ));
                 }
+                self.admit_gpu_memory(&[(GpuMemoryCategory::Instance, bytes.len() as u64)])?;
+                let buffer = Self::vertex_buffer(device, self.queue.as_ref(), &bytes);
+                let buffer_charge = self.gpu_charge(GpuMemoryCategory::Instance, buffer.size());
                 arc_streams.push(ArcStream {
-                    buffer: Self::vertex_buffer(device, self.queue.as_ref(), &bytes),
+                    buffer,
                     instance_count: chunk.instances.len() as u32,
                     origin: chunk.origin,
                     aabb: chunk.aabb,
                     base: 0,
+                    buffer_charge,
                 });
             }
         }
@@ -392,6 +461,16 @@ impl Renderer {
                     }
                 };
 
+            // Budget gate for this batch's own buffers, **before** any of them is
+            // created. A converted batch owns none (its bytes are charged on the
+            // shared stream/chunk), so its request is zero and always admitted.
+            self.admit_gpu_memory(&[
+                (
+                    GpuMemoryCategory::Vertex,
+                    (vertices.len() + normals.len() + colors.len() + line_quads.len()) as u64,
+                ),
+                (GpuMemoryCategory::Index, (indices.len() * 4) as u64),
+            ])?;
             // A converted batch owns no per-batch vertex buffer; its exact upload
             // charge is the instance/merged/conic bytes it contributed (never the
             // legacy vertex bytes).
@@ -436,6 +515,24 @@ impl Renderer {
             } else {
                 None
             };
+            // Charge exactly what the created handles hold (never the packed CPU
+            // bytes: a buffer is rounded up by the backend, and the handle is the
+            // only truth). `None` when the batch owns no buffer of that kind.
+            let charged_vertex_bytes = [
+                &vertex_buffer,
+                &normal_buffer,
+                &color_buffer,
+                &line_quad_buffer,
+            ]
+            .into_iter()
+            .flatten()
+            .map(wgpu::Buffer::size)
+            .sum::<u64>();
+            let charged_index_bytes = index_buffer.as_ref().map_or(0, wgpu::Buffer::size);
+            let vertex_charge = (charged_vertex_bytes > 0)
+                .then(|| self.gpu_charge(GpuMemoryCategory::Vertex, charged_vertex_bytes));
+            let index_charge = (charged_index_bytes > 0)
+                .then(|| self.gpu_charge(GpuMemoryCategory::Index, charged_index_bytes));
 
             // The exact bytes this batch uploads: its instance-stream share
             // (56 B per segment; 64 B on the accelerated tier, whose segment
@@ -518,6 +615,8 @@ impl Renderer {
                 pick_key: keys[index],
                 z_range: batch_world_z_range(batch),
                 sources: batch.sources.clone(),
+                vertex_charge,
+                index_charge,
             });
         }
         Ok(PreparedUpload {

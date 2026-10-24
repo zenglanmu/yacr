@@ -8,6 +8,11 @@ use super::*;
 pub(crate) struct UniformPage {
     pub(crate) buffer: wgpu::Buffer,
     pub(crate) bind_group: wgpu::BindGroup,
+    /// GPU memory charge of this page's uniform buffer (released when the arena is
+    /// reset or the device is lost).
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    pub(crate) buffer_charge: GpuCharge,
 }
 
 /// Shared per-frame uniform storage.
@@ -58,6 +63,7 @@ impl UniformArena {
         needed: usize,
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
+        ledger: &Arc<GpuMemoryLedger>,
     ) {
         let pages_needed = needed.div_ceil(self.slots_per_page);
         while self.pages.len() < pages_needed {
@@ -81,7 +87,12 @@ impl UniformArena {
                     }),
                 }],
             });
-            self.pages.push(UniformPage { buffer, bind_group });
+            let buffer_charge = ledger.charge(GpuMemoryCategory::Uniform, buffer.size());
+            self.pages.push(UniformPage {
+                buffer,
+                bind_group,
+                buffer_charge,
+            });
         }
         let needed_bytes = needed * self.slot_size as usize;
         if self.staging.len() < needed_bytes {
