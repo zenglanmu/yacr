@@ -172,6 +172,21 @@ export const OPTIONS_FIELDS = Object.freeze([
     helpKey: 'options.help.snapHints',
   },
   {
+    // The share of the graphics card's memory CAD may use. The renderer lane
+    // reads this persisted value; neither the wire field, the write key nor the
+    // config leaf is renamed here, so the three spellings cannot drift apart.
+    id: 'gpuBudgetPercent',
+    tab: 'display',
+    kind: 'number',
+    wire: 'gpuBudgetPercent',
+    key: 'gpuBudgetPercent',
+    min: 10,
+    max: 100,
+    unitKey: 'options.unit.percent',
+    labelKey: 'options.field.gpuBudgetPercent',
+    helpKey: 'options.help.gpuBudgetPercent',
+  },
+  {
     id: 'snapEnabled',
     tab: 'drafting',
     kind: 'bool',

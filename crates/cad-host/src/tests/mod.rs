@@ -29,6 +29,7 @@ mod queue;
 mod select;
 mod settings;
 mod settings_backend;
+mod settings_gpu;
 mod snap_marker;
 mod text_tool;
 mod tolerance;

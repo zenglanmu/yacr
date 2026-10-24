@@ -1,6 +1,6 @@
 //! Typed settings wire surface for the Options dialog.
 //!
-//! The session exposes the same closed thirteen-key surface the host persists; it
+//! The session exposes the same closed fourteen-key surface the host persists; it
 //! adds no second validation and no raw-JSON entry point. A UI writes one typed
 //! key/value pair, the host validates it against the closed table, persists the
 //! matching preference leaf and applies it to the live scene/session.
@@ -19,10 +19,10 @@ pub use cad_host::{
 ///
 /// A flat camelCase wire object (like the status/session types). `fontsDir` is
 /// read-only display data sourced from the host's `--fonts-dir`; the other
-/// thirteen fields correspond one-to-one with [`CadSettingKey`], the two
-/// backgrounds as canonical `#rrggbb` strings, the crosshair as an integer
-/// percentage, the pickbox/aperture as integer pixel counts and the graphics
-/// backend as one of `auto`/`vulkan`/`dx12`.
+/// fourteen fields correspond one-to-one with [`CadSettingKey`], the two
+/// backgrounds as canonical `#rrggbb` strings, the crosshair and the GPU memory
+/// budget as integer percentages, the pickbox/aperture as integer pixel counts
+/// and the graphics backend as one of `auto`/`vulkan`/`dx12`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadSettings {
@@ -46,6 +46,9 @@ pub struct CadSettings {
     /// Object-snap aperture in logical pixels (`1..=50`, the AutoCAD `APERTURE`
     /// option).
     pub aperture_size: u32,
+    /// GPU memory budget as an integer percentage of the graphics card's memory
+    /// (`10..=100`): a budget for CAD rendering, not the card's total memory.
+    pub gpu_budget_percent: u32,
     /// Graphics backend preference: `"auto"` (default), `"vulkan"` or `"dx12"`.
     ///
     /// Deliberately the **snake_case** wire key, unlike every other field: the
@@ -73,6 +76,7 @@ impl From<HostSettings> for CadSettings {
             crosshair_percent: value.crosshair_percent,
             pickbox_size: value.pickbox_size,
             aperture_size: value.aperture_size,
+            gpu_budget_percent: value.gpu_budget_percent,
             wgpu_backend: value.wgpu_backend,
             fonts_dir: value.fonts_dir,
         }

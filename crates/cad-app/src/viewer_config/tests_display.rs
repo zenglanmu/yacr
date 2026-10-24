@@ -15,7 +15,8 @@ fn store_allowing_display() -> ViewerConfigStore {
                 "view.background.paper",
                 "view.crosshair.sizePercent",
                 "view.pickbox.sizePixels",
-                "view.aperture.sizePixels"
+                "view.aperture.sizePixels",
+                "view.gpuBudget.percent"
             ] } }
         }))
         .unwrap();
@@ -263,6 +264,47 @@ fn a_non_integer_crosshair_percentage_is_refused() {
 }
 
 #[test]
+fn the_gpu_budget_is_a_percentage_of_the_card_validated_not_clamped() {
+    // The default leaves headroom below the card's total memory.
+    let mut store = ViewerConfigStore::default();
+    assert_eq!(store.effective().view.gpu_budget.percent, 90);
+
+    // Both accepted bounds survive as written.
+    for percent in [10, 90, 100] {
+        let mut store = ViewerConfigStore::default();
+        store
+            .update_config(json!({ "view": { "gpuBudget": { "percent": percent } } }))
+            .unwrap();
+        assert_eq!(store.effective().view.gpu_budget.percent, percent);
+    }
+
+    // Outside `10..=100` it is a path-named refusal, never a clamp.
+    for percent in [0, 9, 101, 400] {
+        let mut store = ViewerConfigStore::default();
+        let error = store
+            .update_config(json!({ "view": { "gpuBudget": { "percent": percent } } }))
+            .unwrap_err();
+        assert_eq!(error.path, "view.gpuBudget.percent");
+        assert_eq!(store.effective().view.gpu_budget.percent, 90);
+    }
+
+    // A fractional, negative or string percentage is a schema type error, not a
+    // value to round or coerce.
+    for patch in [
+        json!({ "view": { "gpuBudget": { "percent": 90.5 } } }),
+        json!({ "view": { "gpuBudget": { "percent": "90" } } }),
+        json!({ "view": { "gpuBudget": { "percent": -90 } } }),
+    ] {
+        let mut store = ViewerConfigStore::default();
+        assert!(
+            store.update_config(patch).is_err(),
+            "a non-integer percentage must be refused"
+        );
+        assert_eq!(store.effective().view.gpu_budget.percent, 90);
+    }
+}
+
+#[test]
 fn an_allowed_preference_fills_the_display_leaves() {
     let mut store = store_allowing_display();
     store
@@ -271,7 +313,8 @@ fn an_allowed_preference_fills_the_display_leaves() {
                 "background": { "model": "#112233", "paper": "#445566" },
                 "crosshair": { "sizePercent": 40 },
                 "pickbox": { "sizePixels": 8 },
-                "aperture": { "sizePixels": 30 }
+                "aperture": { "sizePixels": 30 },
+                "gpuBudget": { "percent": 75 }
             }
         }))
         .unwrap();
@@ -280,6 +323,7 @@ fn an_allowed_preference_fills_the_display_leaves() {
     assert_eq!(store.effective().view.crosshair.size_percent, 40);
     assert_eq!(store.effective().view.pickbox.size_pixels, 8);
     assert_eq!(store.effective().view.aperture.size_pixels, 30);
+    assert_eq!(store.effective().view.gpu_budget.percent, 75);
     // The durable projection carries exactly those leaves.
     let projected = store.projected_user_preference_json();
     assert!(projected.contains("\"model\":\"#112233\""), "{projected}");
@@ -287,6 +331,7 @@ fn an_allowed_preference_fills_the_display_leaves() {
     assert!(projected.contains("\"sizePercent\":40"), "{projected}");
     assert!(projected.contains("\"sizePixels\":8"), "{projected}");
     assert!(projected.contains("\"sizePixels\":30"), "{projected}");
+    assert!(projected.contains("\"percent\":75"), "{projected}");
 
     // An out-of-range preference is refused by the same schema validation, never
     // clamped, and leaves the effective config untouched.

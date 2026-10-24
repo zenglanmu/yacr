@@ -5,8 +5,9 @@
 //! backgrounds and the crosshair size those frames really use, the
 //! `ui.export.plotFormat` default, the two session interaction switches, the
 //! renderer backend preference (`wgpu_backend`, read by the next presenter
-//! construction) and the read-only `--fonts-dir` display value. Every write goes
-//! through the same validated store/persistence path as
+//! construction), the GPU memory budget percentage the renderer lane reads
+//! (`view.gpuBudget.percent`) and the read-only `--fonts-dir` display value.
+//! Every write goes through the same validated store/persistence path as
 //! [`HostCore::apply_user_preference_json`] — the backend leaf is merged into the
 //! same durable preference document, see [`merge_wgpu_backend_into_preference`];
 //! no raw JSON is accepted from a UI.
@@ -141,13 +142,16 @@ pub enum CadSettingKey {
     CrosshairSize,
     PickboxSize,
     ApertureSize,
+    /// GPU memory budget: an integer percentage of the graphics card's memory
+    /// (`view.gpuBudget.percent`).
+    GpuBudgetPercent,
     /// Renderer graphics backend (`auto`/`vulkan`/`dx12`).
     WgpuBackend,
 }
 
 impl CadSettingKey {
     /// Every writable key, in a stable order.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Grid,
         Self::Axes,
         Self::SelectionHighlight,
@@ -160,15 +164,17 @@ impl CadSettingKey {
         Self::CrosshairSize,
         Self::PickboxSize,
         Self::ApertureSize,
+        Self::GpuBudgetPercent,
         Self::WgpuBackend,
     ];
 
-    /// The stable snake_case wire key (also the durable preference leaf).
+    /// The stable camelCase wire key (also the `cad_set_setting` key).
     ///
-    /// Every key but [`Self::WgpuBackend`] is the final segment of a camelCase
-    /// `ViewerConfig` path; the backend choice is a root-level renderer
-    /// preference, so its wire key, its `cad_set_setting` key and its persisted
-    /// key are the identical `wgpu_backend`.
+    /// Every key but [`Self::WgpuBackend`] and [`Self::GpuBudgetPercent`] is the
+    /// final segment of a camelCase `ViewerConfig` path; the backend choice is a
+    /// root-level renderer preference, so its wire key, its `cad_set_setting` key
+    /// and its persisted key are the identical `wgpu_backend`; the GPU budget is
+    /// persisted under `view.gpuBudget.percent`, whose leaf is `percent`.
     pub fn key(self) -> &'static str {
         match self {
             Self::Grid => "grid",
@@ -183,6 +189,7 @@ impl CadSettingKey {
             Self::CrosshairSize => "crosshairSize",
             Self::PickboxSize => "pickboxSize",
             Self::ApertureSize => "apertureSize",
+            Self::GpuBudgetPercent => "gpuBudgetPercent",
             Self::WgpuBackend => WGPU_BACKEND_PREFERENCE_KEY,
         }
     }
@@ -202,8 +209,10 @@ impl CadSettingKey {
     /// [`SETTINGS_INVALID_VALUE`] — never coerced to `auto`), the two backgrounds
     /// accept only a canonical `#rrggbb` colour, `crosshairSize` accepts only an
     /// integer percentage in `1..=100`, `pickboxSize` an integer pixel count in
-    /// `1..=20` and `apertureSize` an integer pixel count in `1..=50` (all three
-    /// rejected, never clamped), and every switch is a boolean.
+    /// `1..=20`, `apertureSize` an integer pixel count in `1..=50` and
+    /// `gpuBudgetPercent` an integer percentage of the graphics card's memory in
+    /// `10..=100` (all four rejected, never clamped), and every switch is a
+    /// boolean.
     pub fn validate(self, value: &CadSettingValue) -> Result<(), &'static str> {
         match self {
             Self::WgpuBackend => match value {
@@ -245,6 +254,17 @@ impl CadSettingKey {
                 }
                 _ => Err(SETTINGS_INVALID_VALUE),
             },
+            // The share of the graphics card's memory CAD may use. The renderer
+            // lane reads the effective config; this table only refuses values
+            // outside `10..=100`, never clamps them.
+            Self::GpuBudgetPercent => match value {
+                CadSettingValue::Number(percent)
+                    if cad_app::viewer_config::ViewGpuBudget::RANGE.contains(percent) =>
+                {
+                    Ok(())
+                }
+                _ => Err(SETTINGS_INVALID_VALUE),
+            },
             Self::Grid
             | Self::Axes
             | Self::SelectionHighlight
@@ -261,7 +281,7 @@ impl CadSettingKey {
 }
 
 /// A typed setting value: the wire surface carries one boolean, one string or one
-/// non-negative integer (the crosshair percentage).
+/// non-negative integer (a percentage or a pixel count).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CadSettingValue {
     Bool(bool),
@@ -295,6 +315,9 @@ pub struct HostSettings {
     /// Object-snap aperture in logical pixels (`1..=50`, the AutoCAD `APERTURE`
     /// option).
     pub aperture_size: u32,
+    /// GPU memory budget as an integer percentage of the graphics card's memory
+    /// (`10..=100`). A budget for CAD rendering, not the card's total memory.
+    pub gpu_budget_percent: u32,
     /// Renderer graphics backend: one of [`WGPU_BACKEND_VALUES`], `"auto"` when
     /// the user never chose one. Takes effect on the next presenter
     /// construction (the renderer backend cannot change inside a live surface).
@@ -316,6 +339,7 @@ impl HostCore {
             crosshair_percent,
             pickbox_size,
             aperture_size,
+            gpu_budget_percent,
         ) = {
             let store = self.viewer_config.borrow();
             let effective = store.effective();
@@ -330,6 +354,7 @@ impl HostCore {
                 effective.view.crosshair.size_percent,
                 effective.view.pickbox.size_pixels,
                 effective.view.aperture.size_pixels,
+                effective.view.gpu_budget.percent,
             )
         };
         let (snap_enabled, hover_preview) = {
@@ -352,6 +377,7 @@ impl HostCore {
             crosshair_percent,
             pickbox_size,
             aperture_size,
+            gpu_budget_percent,
             wgpu_backend: normalize_wgpu_backend(self.wgpu_backend.borrow().as_deref()).to_string(),
             fonts_dir: self
                 .options
@@ -400,6 +426,7 @@ impl HostCore {
             CadSettingKey::CrosshairSize => self.apply_crosshair_size(&value),
             CadSettingKey::PickboxSize => self.apply_pixel_size("pickbox", &value),
             CadSettingKey::ApertureSize => self.apply_pixel_size("aperture", &value),
+            CadSettingKey::GpuBudgetPercent => self.apply_gpu_budget_percent(&value),
             CadSettingKey::WgpuBackend => self.apply_wgpu_backend(&value),
         }
     }
@@ -474,6 +501,22 @@ impl HostCore {
         };
         self.apply_user_preference_json(&format!(
             r#"{{"view":{{"{leaf}":{{"sizePixels":{pixels}}}}}}}"#
+        ))
+    }
+
+    /// Persist `view.gpuBudget.percent`.
+    ///
+    /// The value is already validated against `10..=100`, so the number written
+    /// here is exactly what the schema validates back. The renderer lane that
+    /// applies the budget reads the effective config (or the same durable
+    /// preference document); this host only stores and republishes it, so an
+    /// unrelated setting write keeps it.
+    fn apply_gpu_budget_percent(&self, value: &CadSettingValue) -> CadResult<()> {
+        let CadSettingValue::Number(percent) = value else {
+            return Err(CadError::InvalidInput(SETTINGS_INVALID_VALUE.into()));
+        };
+        self.apply_user_preference_json(&format!(
+            r#"{{"view":{{"gpuBudget":{{"percent":{percent}}}}}}}"#
         ))
     }
 

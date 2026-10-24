@@ -61,6 +61,7 @@ function snapshot(overrides = {}) {
     hoverPreview: true,
     pickboxSize: 6,
     apertureSize: 12,
+    gpuBudgetPercent: 90,
     plotFormat: 'svg',
     fontsDir: '/usr/share/fonts',
     // The WGPU backend is a shared wire key: snake_case in the snapshot too.
@@ -108,7 +109,8 @@ test('every field sits on a declared tab exactly once and nothing else exists', 
   }
   assert.equal(fieldById('nope'), null);
   assert.deepEqual(fieldsForTab('display').map(field => field.id), [
-    'backgroundModel', 'backgroundPaper', 'crosshairSize', 'grid', 'axes', 'selectionHighlight', 'snapHints',
+    'backgroundModel', 'backgroundPaper', 'crosshairSize', 'grid', 'axes', 'selectionHighlight',
+    'snapHints', 'gpuBudgetPercent',
   ]);
   assert.deepEqual(fieldsForTab('drafting').map(field => field.id), [
     'snapEnabled', 'hoverPreview', 'pickboxSize', 'apertureSize',
@@ -132,6 +134,7 @@ test('each control is the editor its backend value really needs', () => {
     hoverPreview: 'bool',
     pickboxSize: 'number',
     apertureSize: 'number',
+    gpuBudgetPercent: 'number',
     plotFormat: 'select',
     fontsDir: 'readonly',
     language: 'locale',
@@ -140,7 +143,7 @@ test('each control is the editor its backend value really needs', () => {
   // Number controls carry the host's own range and a unit suffix, never a clamp.
   assert.deepEqual(
     OPTIONS_FIELDS.filter(field => field.kind === 'number').map(field => [field.id, field.min, field.max]),
-    [['crosshairSize', 1, 100], ['pickboxSize', 1, 20], ['apertureSize', 1, 50]],
+    [['crosshairSize', 1, 100], ['gpuBudgetPercent', 10, 100], ['pickboxSize', 1, 20], ['apertureSize', 1, 50]],
   );
   for (const field of OPTIONS_FIELDS.filter(entry => entry.kind === 'number')) {
     assert.ok(field.unitKey, `${field.id} needs a unit`);
@@ -208,6 +211,15 @@ test('the validation table matches the host ranges and codes', () => {
     ['pickboxSize', '21', SETTINGS_ERROR.invalidValue],
     ['apertureSize', '50', null],
     ['apertureSize', '51', SETTINGS_ERROR.invalidValue],
+    // The GPU budget is a percentage of the card: the floor and the whole card
+    // are accepted, anything outside is a refusal (never clamped).
+    ['gpuBudgetPercent', '10', null],
+    ['gpuBudgetPercent', '90', null],
+    ['gpuBudgetPercent', '100', null],
+    ['gpuBudgetPercent', '9', SETTINGS_ERROR.invalidValue],
+    ['gpuBudgetPercent', '101', SETTINGS_ERROR.invalidValue],
+    ['gpuBudgetPercent', '', SETTINGS_ERROR.invalidValue],
+    ['gpuBudgetPercent', '90.5', SETTINGS_ERROR.invalidValue],
     ['backgroundModel', '#abc', SETTINGS_ERROR.invalidValue],
     ['backgroundModel', '#aabb', SETTINGS_ERROR.invalidValue],
     ['backgroundModel', '#aabbcc', null],
@@ -273,6 +285,7 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   assert.equal(draft.crosshairSize, '5');
   assert.equal(draft.pickboxSize, '6');
   assert.equal(draft.apertureSize, '12');
+  assert.equal(draft.gpuBudgetPercent, '90');
   assert.equal(draft.grid, true);
   assert.equal(draft.plotFormat, 'svg');
   assert.equal(draft.fontsDir, '/usr/share/fonts');
@@ -284,6 +297,7 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   // An older/partial host reports less: those controls stay explicitly absent.
   const empty = draftFromSettings({}, null);
   assert.equal(empty.crosshairSize, null);
+  assert.equal(empty.gpuBudgetPercent, null);
   assert.equal(empty.grid, null);
   assert.equal(empty.plotFormat, null);
   assert.equal(empty.fontsDir, null);
@@ -339,6 +353,7 @@ test('the apply payload carries write keys, typed values and nothing else', () =
     crosshairSize: '40',
     backgroundModel: '#AABBCC',
     grid: false,
+    gpuBudgetPercent: '25',
     plotFormat: 'pdf',
     wgpuBackend: 'vulkan',
     comfort: 'ignored',
@@ -348,6 +363,8 @@ test('the apply payload carries write keys, typed values and nothing else', () =
     // The wire field is `crosshairPercent`; the write key is `crosshairSize`.
     { field: 'crosshairSize', key: 'crosshairSize', value: 40 },
     { field: 'grid', key: 'grid', value: false },
+    // The GPU budget is the same key in the snapshot, the write and the config.
+    { field: 'gpuBudgetPercent', key: 'gpuBudgetPercent', value: 25 },
     { field: 'plotFormat', key: 'plotFormat', value: 'pdf' },
     // The backend keeps the shared snake_case key in both directions.
     { field: 'wgpuBackend', key: 'wgpu_backend', value: 'vulkan' },
@@ -569,6 +586,35 @@ test('the WGPU backend rows read like the language row, in both catalogs', async
   // The selector is a native select, the same control the language row uses.
   const dialog = await readModule('components/OptionsDialog.jsx');
   assert.ok(dialog.includes('choiceKeyPrefix'), 'a copy-carrying select must resolve through the catalog');
+});
+
+test('the GPU budget is a generic numeric row, never a bespoke control', async () => {
+  const field = fieldById('gpuBudgetPercent');
+  assert.equal(field.kind, 'number');
+  assert.equal(field.tab, 'display', 'it sits with the other graphics settings');
+  assert.equal(field.wire, 'gpuBudgetPercent');
+  assert.equal(field.key, 'gpuBudgetPercent');
+  assert.equal(field.min, 10);
+  assert.equal(field.max, 100);
+  assert.equal(field.unitKey, 'options.unit.percent');
+  assert.equal(field.labelKey, 'options.field.gpuBudgetPercent');
+  assert.equal(field.helpKey, 'options.help.gpuBudgetPercent');
+  assert.ok(fieldsForTab('display').includes(field));
+  // The dialog renders every number field through the same row/editor path, so
+  // this control needs (and has) no per-field branch of its own.
+  const dialog = await readModule('components/OptionsDialog.jsx');
+  assert.ok(!dialog.includes('gpuBudgetPercent'), 'no special case for this field');
+  assert.ok(dialog.includes("case 'number':"));
+  assert.ok(dialog.includes('t(field.unitKey)'));
+  // Both catalogs carry the copy the descriptor points at.
+  assert.equal(zh[field.labelKey], 'GPU 内存预算');
+  assert.equal(en[field.labelKey], 'GPU memory budget');
+  assert.ok(zh[field.helpKey].trim().length > 0);
+  assert.ok(en[field.helpKey].trim().length > 0);
+  // The help says it is a share of the card's memory and a budget, not the total.
+  assert.match(en[field.helpKey], /graphics card's memory/i);
+  assert.match(en[field.helpKey], /budget/i);
+  assert.match(en[field.helpKey], /not the card's total/i);
 });
 
 test('the options popup kind is allowlisted and carries no payload', () => {

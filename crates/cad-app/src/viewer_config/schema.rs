@@ -340,6 +340,31 @@ impl ViewAperture {
     pub const RANGE: std::ops::RangeInclusive<u32> = 1..=50;
 }
 
+/// GPU memory budget for CAD rendering: an integer percentage of the graphics
+/// card's memory.
+///
+/// This is deliberately a **budget**, not the card's capacity: the renderer
+/// resolves the percentage against the device memory it can actually determine
+/// and treats the result as the memory CAD may use, never as the card's total.
+/// `10..=100` keeps a usable floor and never asks for more than the whole card;
+/// values outside it are rejected by [`ViewerConfig::validate`], never clamped.
+/// The default `90` leaves headroom for the window compositor and the WebView.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct ViewGpuBudget {
+    pub percent: u32,
+}
+impl Default for ViewGpuBudget {
+    fn default() -> Self {
+        Self { percent: 90 }
+    }
+}
+
+impl ViewGpuBudget {
+    /// The accepted percentage range of the graphics card's memory.
+    pub const RANGE: std::ops::RangeInclusive<u32> = 10..=100;
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct ViewConfig {
@@ -348,6 +373,7 @@ pub struct ViewConfig {
     pub crosshair: ViewCrosshair,
     pub pickbox: ViewPickbox,
     pub aperture: ViewAperture,
+    pub gpu_budget: ViewGpuBudget,
 }
 
 impl ViewConfig {

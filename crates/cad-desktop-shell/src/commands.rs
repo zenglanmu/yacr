@@ -278,8 +278,9 @@ pub fn cad_close_popup(shared: tauri::State<'_, ProbeShared>) -> Result<CadComma
 /// An unknown key is refused with `settings.unknown_key`; a wrong value shape is
 /// refused with `settings.invalid_value`; a `plotFormat` other than `svg`/`pdf`
 /// is refused by the key table's own validation, as is a colour that is not
-/// `#rrggbb` and a crosshair percentage outside `1..=100` (the same authority the
-/// owner thread uses). Nothing is coerced and no file is touched here.
+/// `#rrggbb`, a crosshair percentage outside `1..=100` and a GPU budget outside
+/// `10..=100` (the same authority the owner thread uses). Nothing is coerced and
+/// no file is touched here.
 pub fn parse_setting_request(
     key: &str,
     value: &serde_json::Value,

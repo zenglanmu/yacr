@@ -45,6 +45,15 @@ impl ViewerConfig {
                 "aperture size must be an integer pixel count from 1 to 50",
             ));
         }
+        // The GPU memory budget is a percentage of the card, refused outside
+        // `10..=100` rather than clamped: a budget below the floor or above the
+        // card is never a value the renderer should silently accept.
+        if !ViewGpuBudget::RANGE.contains(&self.view.gpu_budget.percent) {
+            return Err(ConfigError::new(
+                "view.gpuBudget.percent",
+                "GPU budget must be an integer percentage from 10 to 100",
+            ));
+        }
         for key in self.ui.command_overrides.keys() {
             if !is_known_command(key) {
                 return Err(ConfigError::new(
