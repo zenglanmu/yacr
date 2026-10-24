@@ -6,7 +6,8 @@ use cad_render_wgpu::{NativeTextureKey, ProbeError, ProbeFrameStats};
 use gtk::prelude::*;
 
 use super::native::{
-    apply_input_passthrough, checked_physical_size, render_error_class, wayland_buffer_scale,
+    apply_input_passthrough, checked_physical_size, log_gpu_memory_refusal, render_error_class,
+    wayland_buffer_scale, GPU_MEMORY_CLASS,
 };
 use super::{BridgeState, CadFrameObservation, FrameCadStages, GtkOverlayOwner, LayoutGeometry};
 
@@ -147,9 +148,19 @@ impl GtkOverlayOwner {
         }
         // `apply_ready_updates` is a CadError: any failure fails the session
         // device and clears the binding cache, so an old frame can never be
-        // replayed as a clean success.
+        // replayed as a clean success. A **GPU-memory refusal** is the one
+        // exception: the renderer's resident scene is intact and still renders
+        // (see `RenderError::GpuMemory`), so the device is kept, the refusal is
+        // named on its own stable line, and the frame error carries the
+        // `gpu_memory` class instead of the generic staging class.
         let apply_started = std::time::Instant::now();
         if let Err(error) = session.apply_ready_updates() {
+            if let Some(refusal) = session.gpu_budget_refusal() {
+                log_gpu_memory_refusal(&refusal);
+                return Err(format!(
+                    "apply_ready_updates failed ({GPU_MEMORY_CLASS}) : {error:?}"
+                ));
+            }
             session.fail_device(format!("apply_ready_updates: {error:?}"), false);
             self.clear_presenter_cache();
             return Err(format!("apply_ready_updates failed: {error:?}"));
@@ -161,8 +172,12 @@ impl GtkOverlayOwner {
             Err(error) => {
                 // Only a device loss fails the session device. Camera/size/
                 // upload/scene errors keep the device attached and are returned
-                // with their own class.
+                // with their own class. A GPU-memory refusal is named explicitly
+                // (stable, deduplicated line) and keeps the resident scene.
                 let device_loss = error.is_device_loss();
+                if let Some(refusal) = error.gpu_memory_refusal() {
+                    log_gpu_memory_refusal(refusal);
+                }
                 if device_loss {
                     session.fail_device(format!("render device lost: {error}"), true);
                 }

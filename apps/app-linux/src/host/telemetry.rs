@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use cad_engine::render::{FrameCompleteness, RenderDiagnostics};
+use cad_render_wgpu::GpuMemoryReport;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 
 use super::{lock_telemetry, RenderTelemetry};
@@ -105,6 +106,74 @@ pub(super) fn log_render_diagnostics(
         runtime.frames_rendered,
         diagnostics.result_status,
     );
+}
+
+/// Whether the bounded GPU-memory status line is due: **at most once per second**.
+///
+/// The renderer's report calls the driver's allocator query, and the budget policy
+/// only changes on a settings write, so a per-frame read would be pure waste. The
+/// line is therefore emitted on this cadence, under the same `YACR_PROBE_CAD_LOG`
+/// gate as the other renderer diagnostics.
+pub(super) fn gpu_memory_due(telemetry: &Arc<Mutex<RenderTelemetry>>) -> bool {
+    let now = Instant::now();
+    let mut state = lock_telemetry(telemetry);
+    if state
+        .last_gpu_memory_log
+        .is_some_and(|last| now.duration_since(last) < Duration::from_secs(1))
+    {
+        return false;
+    }
+    state.last_gpu_memory_log = Some(now);
+    true
+}
+
+/// `Option<u64>` as the GPU-memory line spells it: the number, or `none`.
+fn count_or_none(value: Option<u64>) -> String {
+    match value {
+        Some(value) => value.to_string(),
+        None => "none".to_string(),
+    }
+}
+
+/// One machine-readable GPU-memory status line: the card probe, the budget policy
+/// in force, and the renderer's own totals.
+///
+/// `vram_bytes` is the backend's **advertised device-local** memory, not free
+/// memory, and `none` when the backend cannot answer. `budget_source` is the
+/// renderer's stable token (`vram-percent` / `explicit-bytes` / `estimate`), never
+/// `Debug` output, so a script can tell a percentage cap from a fallback.
+/// Diagnostics only — never user-facing copy.
+pub(super) fn gpu_memory_line(report: &GpuMemoryReport) -> String {
+    format!(
+        "[probe] gpu-memory vram_bytes={} budget_percent={} budget_source={} total={} peak={} \
+         cap={}",
+        count_or_none(report.vram_bytes),
+        match report.budget_percent {
+            Some(percent) => percent.to_string(),
+            None => "none".to_string(),
+        },
+        report.budget_source.label(),
+        report.total_bytes,
+        report.peak_bytes,
+        count_or_none(report.cap_bytes),
+    )
+}
+
+/// Emit the bounded GPU-memory status line when it is due (≤1 Hz).
+///
+/// `report` is only called once the line is due, so a per-frame tick never hits
+/// the driver's allocator query. `None` (no attached renderer yet) skips the line
+/// instead of printing a fabricated zero report.
+pub(super) fn log_gpu_memory(
+    telemetry: &Arc<Mutex<RenderTelemetry>>,
+    report: impl FnOnce() -> Option<GpuMemoryReport>,
+) {
+    if !gpu_memory_due(telemetry) {
+        return;
+    }
+    if let Some(report) = report() {
+        eprintln!("{}", gpu_memory_line(&report));
+    }
 }
 
 /// Classify a CAD frame result for the env-gated telemetry log.

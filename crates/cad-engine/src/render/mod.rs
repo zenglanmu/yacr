@@ -9,7 +9,9 @@ use cad_domain::{CadError, CadResult, DocumentId, Point3, SpaceId};
 /// Re-exported so platform adapters (for example Android) can name a render
 /// session's backend preference without depending on `cad-render-wgpu`.
 pub use cad_render_wgpu::BackendPreference;
-use cad_render_wgpu::{wgpu, ActiveBackend, RenderError};
+use cad_render_wgpu::{
+    wgpu, ActiveBackend, GpuBudgetConfig, GpuMemoryRefusal, GpuMemoryReport, RenderError,
+};
 use cad_representation::{FontEngine, SpaceSelection};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -224,6 +226,15 @@ struct State {
     base_publication_revision: u64,
     published_base_identity: Option<BaseInputIdentity>,
     runtime: CadRenderRuntime,
+    /// The GPU memory budget policy a host configured through
+    /// [`RenderSessionHandle::set_gpu_budget_config`].
+    ///
+    /// `None` until a host sets one: the renderer then keeps its own
+    /// environment-derived policy ([`GpuBudgetConfig::from_env`]). A stored
+    /// policy is re-applied after every device attach, because
+    /// [`CadRenderRuntime::attach_with_gpu_time`] constructs a **fresh**
+    /// renderer that would otherwise silently fall back to the environment.
+    gpu_budget_config: Option<GpuBudgetConfig>,
     preference: BackendPreference,
     redraw_requests: u64,
     stopped: bool,
@@ -267,6 +278,7 @@ impl Default for State {
             base_publication_revision: 0,
             published_base_identity: None,
             runtime: CadRenderRuntime::default(),
+            gpu_budget_config: None,
             preference: BackendPreference::Auto,
             redraw_requests: 0,
             stopped: false,

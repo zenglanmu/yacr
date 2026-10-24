@@ -22,10 +22,12 @@ use super::options::{ANIMATION_STEP, FRAME_INTERVAL};
 use super::postload::{drive_postload_pan, ActualRenderSummary};
 use super::presenter::release_presenter;
 use super::telemetry::{
-    cad_frame_log_state, frame_completeness_label, log_render_diagnostics, opt_telemetry_u128,
-    opt_telemetry_u64, CadFrameLogState, CAD_STAGE_SLOW_US,
+    cad_frame_log_state, frame_completeness_label, log_gpu_memory, log_render_diagnostics,
+    opt_telemetry_u128, opt_telemetry_u64, CadFrameLogState, CAD_STAGE_SLOW_US,
 };
-use super::{lock, lock_telemetry, RenderTelemetry, Shared, BRIDGE, CAD, CAD_ENV};
+use super::{
+    apply_gpu_budget_percent, lock, lock_telemetry, RenderTelemetry, Shared, BRIDGE, CAD, CAD_ENV,
+};
 use cad_desktop_shell::commands::drain_standard_views;
 
 /// One probe tick. Runs on the main thread. The shared lock is held only for
@@ -370,6 +372,13 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             });
             match created {
                 Some(Ok(session)) => {
+                    // The Options dialog's GPU budget is a renderer policy: apply
+                    // the configured percentage before the first device attach
+                    // (the engine re-applies it on every re-attach).
+                    apply_gpu_budget_percent(
+                        &session.render_session(),
+                        session.settings().gpu_budget_percent,
+                    );
                     CAD.with(|cell| *cell.borrow_mut() = Some(session));
                     eprintln!("[probe] cad session created");
                 }
@@ -493,12 +502,11 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 if let Some(session) = cell.borrow().as_ref() {
                     // Settings writes apply first: an Options change in this
                     // batch is visible to the commands/inputs that follow. The
-                    // session validates, persists and applies each one; a
+                    // session validates, persists and applies each one (and a
+                    // GPU-budget change is installed on the live renderer); a
                     // refusal is its real error (surfaced through cad_status).
                     for (key, value) in setting_writes {
-                        if let Err(error) = session.apply_setting(key, value) {
-                            eprintln!("[probe] cad setting rejected: {error}");
-                        }
+                        super::apply_setting_write(session, key, value);
                     }
                     for command in &commands {
                         // Admission already returned `{accepted:true}`. The real
@@ -714,6 +722,16 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             if let Some(diagnostics) = diagnostics {
                 log_render_diagnostics(telemetry, &diagnostics);
             }
+            // Bounded GPU-memory status (≤1 Hz): the card probe, the budget policy
+            // in force and the renderer's own total/peak. The report is read only
+            // when the line is due, never per frame.
+            log_gpu_memory(telemetry, || {
+                CAD.with(|cell| {
+                    cell.borrow()
+                        .as_ref()
+                        .and_then(|session| session.render_session().gpu_memory_report())
+                })
+            });
         }
         // Actual-render observation: taken **once** per real renderer invocation
         // (a retained/waiting frame can never replay stale stats). Always recorded

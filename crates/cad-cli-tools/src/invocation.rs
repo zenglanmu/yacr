@@ -180,9 +180,10 @@ impl GpuPreference {
 /// The existence of `--gpu-budget-mb` in the process arguments.
 ///
 /// Tri-state on purpose: an **absent** flag must leave the renderer's own policy
-/// (`YACR_GPU_BUDGET_MB`, else the 512 MiB application estimate) untouched, while
-/// `--gpu-budget-mb 0` is an explicit "uncapped" that must beat both. Collapsing
-/// the two into `Option<u64>` would make `0` indistinguishable from "not given".
+/// (`YACR_GPU_BUDGET_MB`, else the percentage of probed VRAM, else the 3 GiB
+/// application estimate) untouched, while `--gpu-budget-mb 0` is an explicit
+/// "uncapped" that must beat both. Collapsing the two into `Option<u64>` would
+/// make `0` indistinguishable from "not given".
 ///
 /// Native-only meaning (`render`/`plot` are native operations), but the type
 /// itself is plain data so the wasm build keeps compiling.
@@ -219,6 +220,49 @@ pub fn parse_gpu_budget_flag(value: &str) -> Result<GpuBudgetFlag, String> {
     })?;
     Ok(GpuBudgetFlag::Capped(bytes))
 }
+
+/// The existence of `--gpu-budget-percent` in the process arguments.
+///
+/// Same tri-state reason as [`GpuBudgetFlag`]: absent must leave the renderer's
+/// own policy (`YACR_GPU_BUDGET_PERCENT`, else 90 % of the probed VRAM) alone,
+/// while an explicit value replaces the percentage even when the environment set
+/// one. An explicit byte cap (`--gpu-budget-mb` / `YACR_GPU_BUDGET_MB`) still
+/// wins over any percentage — that precedence belongs to `cad-render-wgpu`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GpuBudgetPercentFlag {
+    /// `--gpu-budget-percent` was not passed: `YACR_GPU_BUDGET_PERCENT` or the
+    /// renderer's 90 % default applies.
+    #[default]
+    Absent,
+    /// `--gpu-budget-percent <10..=100>`: share of the probed device-local VRAM.
+    Percent(u8),
+}
+
+/// Parse a `--gpu-budget-percent` value into [`GpuBudgetPercentFlag`].
+///
+/// The accepted range is the renderer's own `10..=100` (below it ordinary CAD
+/// scenes would be refused on any card; a caller that wants a tiny fixed cap must
+/// pass `--gpu-budget-mb`). A bad value is a usage error, never a silent fall-back
+/// to the default.
+pub fn parse_gpu_budget_percent_flag(value: &str) -> Result<GpuBudgetPercentFlag, String> {
+    let trimmed = value.trim();
+    let percent: u8 = trimmed
+        .parse()
+        .map_err(|_| format!("--gpu-budget-percent needs a whole percentage (got '{value}')"))?;
+    if !(MIN_GPU_BUDGET_PERCENT..=MAX_GPU_BUDGET_PERCENT).contains(&percent) {
+        return Err(format!(
+            "--gpu-budget-percent must be {MIN_GPU_BUDGET_PERCENT}..={MAX_GPU_BUDGET_PERCENT} \
+             (got '{value}')"
+        ));
+    }
+    Ok(GpuBudgetPercentFlag::Percent(percent))
+}
+
+/// The smallest accepted `--gpu-budget-percent`, mirrored from `cad-render-wgpu`.
+pub const MIN_GPU_BUDGET_PERCENT: u8 = 10;
+
+/// The largest accepted `--gpu-budget-percent`, mirrored from `cad-render-wgpu`.
+pub const MAX_GPU_BUDGET_PERCENT: u8 = 100;
 
 // ---------------------------------------------------------------------------
 // Invocation
@@ -265,13 +309,21 @@ pub struct CliInvocation {
     /// Hard cap on accumulated render vertices (`--max-vertices N`, `0` = no
     /// cap). Same protection as `max_batches`.
     pub max_vertices: Option<u64>,
-    /// `--gpu-budget-mb` (render/plot): the renderer's GPU memory cap in MiB.
+    /// `--gpu-budget-mb` (render/plot): an explicit GPU memory cap in MiB.
     ///
-    /// Precedence is **flag > `YACR_GPU_BUDGET_MB` > the 512 MiB default
-    /// estimate**: `Absent` keeps the renderer's own env/default policy, and
-    /// `Uncapped`/`Capped` replace its cap. The cap is an application estimate,
-    /// never the card's VRAM.
+    /// Precedence is **flag > `YACR_GPU_BUDGET_MB` > the percentage policy**: an
+    /// `Absent` flag keeps the renderer's own env/default policy, and
+    /// `Uncapped`/`Capped` replace the cap. An explicit cap always wins over
+    /// `--gpu-budget-percent` / `YACR_GPU_BUDGET_PERCENT` (the renderer's
+    /// documented `explicit_bytes > percent_of_vram > estimate`). The cap is an
+    /// application estimate, never the card's VRAM.
     pub gpu_budget_flag: GpuBudgetFlag,
+    /// `--gpu-budget-percent` (render/plot): share of the probed device-local VRAM.
+    ///
+    /// Precedence is **flag > `YACR_GPU_BUDGET_PERCENT` > the 90 % default**;
+    /// `Absent` keeps the renderer's env/default percentage. `--gpu-budget-mb` /
+    /// `YACR_GPU_BUDGET_MB` still wins: an explicit byte cap is not a percentage.
+    pub gpu_budget_percent_flag: GpuBudgetPercentFlag,
     /// `--gpu-memory-detail` (render/plot): also print the per-category GPU
     /// memory breakdown on stderr.
     pub gpu_memory_detail: bool,
@@ -310,6 +362,7 @@ impl CliInvocation {
             max_batches: Some(DEFAULT_MAX_RENDER_BATCHES),
             max_vertices: Some(DEFAULT_MAX_RENDER_VERTICES),
             gpu_budget_flag: GpuBudgetFlag::Absent,
+            gpu_budget_percent_flag: GpuBudgetPercentFlag::Absent,
             gpu_memory_detail: false,
             locale: Locale::default(),
         }

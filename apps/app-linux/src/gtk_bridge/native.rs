@@ -14,7 +14,8 @@ use gtk::prelude::*;
 use crate::wayland_surface::is_wayland_display;
 
 use super::{
-    BridgeState, OVERLAYS, REPARENT_DONE, WEBVIEW_FILL_ACTIVE, WEBVIEW_SIZE_LOG, WEBVIEW_WIDGET,
+    BridgeState, GPU_REFUSAL_LOG, OVERLAYS, REPARENT_DONE, WEBVIEW_FILL_ACTIVE, WEBVIEW_SIZE_LOG,
+    WEBVIEW_WIDGET,
 };
 
 /// Reparent the Tauri webview into the overlay as a transparent sibling.
@@ -397,12 +398,76 @@ pub(super) fn apply_input_passthrough(overlay: &gtk::Overlay, drawing_area: &gtk
 }
 
 /// The stable class of a render error, for explicit reporting.
+///
+/// One token per variant, never derived from a message: a GPU-memory refusal is
+/// its own class (`gpu_memory`), not a generic `frame` error and not a device
+/// loss — the resident scene is intact and re-trying the same request cannot
+/// help (see [`cad_render_wgpu::RenderError::GpuMemory`]).
 pub(crate) fn render_error_class(error: &cad_render_wgpu::RenderError) -> &'static str {
     match error {
         cad_render_wgpu::RenderError::DeviceLost(_) => "device_lost",
         cad_render_wgpu::RenderError::Frame(_) => "frame",
         cad_render_wgpu::RenderError::NotInitialized(_) => "not_initialized",
+        cad_render_wgpu::RenderError::GpuMemory(_) => GPU_MEMORY_CLASS,
     }
+}
+
+/// The stable class token of a GPU-memory refusal (budget or device OOM).
+pub(crate) const GPU_MEMORY_CLASS: &str = "gpu_memory";
+
+/// `Option<u64>` as the refusal line spells it: the number, or `none`.
+fn count_or_none(value: Option<u64>) -> String {
+    match value {
+        Some(value) => value.to_string(),
+        None => "none".to_string(),
+    }
+}
+
+/// The one stable GPU-memory refusal line, in the headless CLI's vocabulary.
+///
+/// Fixed field order and `none` for an absent cap/limit, so a refused session is
+/// diagnosable from the log alone (the structured facts are also carried by the
+/// error message and by [`cad_render_wgpu::GpuMemoryRefusal`]).
+pub(crate) fn gpu_memory_refusal_line(
+    device_out_of_memory: bool,
+    category: &str,
+    used_bytes: u64,
+    requested_bytes: u64,
+    cap_bytes: Option<u64>,
+    limit_bytes: Option<u64>,
+) -> String {
+    let origin = if device_out_of_memory {
+        "device-out-of-memory"
+    } else {
+        "application-budget"
+    };
+    format!(
+        "[probe] gpu-memory-refused: origin={origin} category={category} used={used_bytes} \
+         requested={requested_bytes} cap={} limit={}",
+        count_or_none(cap_bytes),
+        count_or_none(limit_bytes),
+    )
+}
+
+/// Log one GPU-memory refusal, deduplicated on the line body.
+///
+/// A refused staging attempt can be retried on the next tick; logging every retry
+/// would bury the event. A *different* refusal (category, counts, cap) still logs.
+pub(crate) fn log_gpu_memory_refusal(refusal: &cad_render_wgpu::GpuMemoryRefusal) {
+    let line = gpu_memory_refusal_line(
+        refusal.is_device_out_of_memory(),
+        refusal.category.label(),
+        refusal.used_bytes,
+        refusal.requested_bytes,
+        refusal.cap_bytes,
+        refusal.limit_bytes,
+    );
+    let unchanged = GPU_REFUSAL_LOG.with(|last| last.borrow().as_deref() == Some(line.as_str()));
+    if unchanged {
+        return;
+    }
+    GPU_REFUSAL_LOG.with(|last| *last.borrow_mut() = Some(line.clone()));
+    eprintln!("{line}");
 }
 
 /// Whether GPU init is allowed from `state` (B1): only `AwaitingMap`/`Suspended`.

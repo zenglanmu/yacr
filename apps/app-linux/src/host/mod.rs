@@ -143,6 +143,53 @@ pub(crate) fn wgpu_backend_preference() -> Option<String> {
     })
 }
 
+/// Apply the configured GPU-memory budget percentage to a render session.
+///
+/// The percentage is an **application policy**: the renderer resolves it against
+/// the probed device-local VRAM (or an explicit `YACR_GPU_BUDGET_MB` cap, or its
+/// 3 GiB estimate fallback) and labels the result on
+/// [`cad_render_wgpu::GpuMemoryReport::budget_source`]. The host never converts it
+/// to bytes. The engine keeps the policy across device re-attach, because a
+/// re-attach constructs a fresh renderer (see
+/// [`cad_engine::render::RenderSessionHandle::set_gpu_budget_percent`]).
+///
+/// A value outside the renderer's accepted range is refused explicitly instead of
+/// being truncated; the settings schema already validates `10..=100`.
+pub(crate) fn apply_gpu_budget_percent(
+    session: &cad_engine::render::RenderSessionHandle,
+    percent: u32,
+) -> bool {
+    match u8::try_from(percent) {
+        Ok(percent) => session.set_gpu_budget_percent(percent),
+        Err(_) => {
+            eprintln!("[probe] gpu budget ignored: {percent} is not a percentage in 0..=255");
+            false
+        }
+    }
+}
+
+/// Apply one queued `cad_set_setting` write on the owner thread.
+///
+/// The session validates, persists and applies the change (its refusal is the real
+/// error, surfaced through `cad_status`). When the write changed the effective
+/// GPU-memory budget, the new percentage is installed on the live render session
+/// immediately — a budget change must not wait for a restart, and it must not be
+/// re-derived into bytes by the host.
+pub(crate) fn apply_setting_write(
+    session: &CadSession,
+    key: cad_ui_core::session::CadSettingKey,
+    value: cad_ui_core::session::CadSettingValue,
+) {
+    let before = session.settings().gpu_budget_percent;
+    match session.apply_setting(key, value) {
+        Ok(settings) if settings.gpu_budget_percent != before => {
+            apply_gpu_budget_percent(&session.render_session(), settings.gpu_budget_percent);
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("[probe] cad setting rejected: {error}"),
+    }
+}
+
 /// App-side render telemetry: the former renderer half of `Shared`.
 ///
 /// These fields name `cad-render-wgpu`/`cad-engine` types, so they cannot live in
@@ -178,6 +225,10 @@ pub struct RenderTelemetry {
     last_render_diag: Option<cad_engine::render::RenderDiagnostics>,
     /// Wall-clock time of the last emitted render-gate diagnostic (≤1 Hz).
     last_render_diag_log: Option<Instant>,
+    /// Wall-clock time of the last bounded GPU-memory status line (≤1 Hz). The
+    /// renderer's report is never read per frame: a 60 Hz allocator query would
+    /// be wasted work (the policy only changes on a settings write).
+    last_gpu_memory_log: Option<Instant>,
     /// The most recent **actual** render (render_seq/view/device), for the
     /// post-load pan driver's readiness/final-frame admission.
     last_actual_render: Option<ActualRenderSummary>,
@@ -208,6 +259,7 @@ impl RenderTelemetry {
             no_gpu: std::env::var_os("YACR_PROBE_NO_GPU").is_some(),
             last_render_diag: None,
             last_render_diag_log: None,
+            last_gpu_memory_log: None,
             last_actual_render: None,
             last_pulled_state: None,
             postload_pan: crate::evidence::postload_pan_enabled().then(PostloadPanState::new),

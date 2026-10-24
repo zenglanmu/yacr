@@ -540,7 +540,7 @@ fn atomic_write_leaves_no_temp_on_failure() {
 /// renderer would report it (no GPU needed: the type is plain data).
 #[cfg(not(target_arch = "wasm32"))]
 fn sample_gpu_memory_report() -> cad_render_wgpu::GpuMemoryReport {
-    use cad_render_wgpu::{GpuMemoryCategory, GpuMemoryReport, GpuMemorySource};
+    use cad_render_wgpu::{BudgetSource, GpuMemoryCategory, GpuMemoryReport, GpuMemorySource};
     let mut category_bytes = [0u64; GpuMemoryCategory::COUNT];
     category_bytes[GpuMemoryCategory::Vertex.index()] = 3072;
     category_bytes[GpuMemoryCategory::Index.index()] = 512;
@@ -554,6 +554,10 @@ fn sample_gpu_memory_report() -> cad_render_wgpu::GpuMemoryReport {
         allocator_total_bytes: None,
         budget_bytes: Some(512 * MIB),
         cap_bytes: Some(512 * MIB),
+        budget_source: BudgetSource::ExplicitBytes,
+        vram_bytes: Some(1024 * MIB),
+        vram_all_heaps_bytes: Some(1024 * MIB),
+        budget_percent: None,
         source: GpuMemorySource::Accounted,
         category_bytes,
     }
@@ -596,66 +600,213 @@ fn gpu_budget_flag_parses_and_wins_over_env_and_default() {
     // A cap that cannot be expressed in bytes is rejected instead of wrapping.
     assert!(parse_gpu_budget_flag("18446744073709551615").is_err());
 
-    // Precedence flag > env > default. `base` is the policy the renderer really
-    // resolved on construction, so this compares against the real env/default
-    // policies instead of a stub.
-    use cad_render_wgpu::gpu_memory::DEFAULT_GPU_BUDGET_BYTES;
-    use cad_render_wgpu::GpuBudget;
-    let from_env = GpuBudget::resolve(Some("2048")); // YACR_GPU_BUDGET_MB=2048
-    let from_default = GpuBudget::estimated_default();
-    // No flag: the env override, else the default estimate, survives untouched.
+    // Precedence flag > env > policy. `base` is the policy the renderer really
+    // resolved on construction (`GpuBudgetConfig::resolve_env`), so this compares
+    // against the real env/default policies instead of a stub.
+    use cad_render_wgpu::gpu_memory::DEFAULT_GPU_BUDGET_PERCENT;
+    use cad_render_wgpu::GpuBudgetConfig;
+    let vram = Some(8_192 * MIB);
+    let from_env = GpuBudgetConfig::resolve_env(Some("2048"), None); // YACR_GPU_BUDGET_MB=2048
+    let from_default = GpuBudgetConfig::default();
+    // No flag: the env override, else the 90 % default, survives untouched.
     assert_eq!(
-        apply_gpu_budget_flag(from_env, GpuBudgetFlag::Absent).cap_bytes,
+        apply_gpu_budget_flag(from_env, GpuBudgetFlag::Absent).explicit_bytes,
         Some(2048 * MIB)
     );
+    let default_policy = apply_gpu_budget_flag(from_default, GpuBudgetFlag::Absent);
+    let default_resolved = default_policy.resolve(vram);
+    assert_eq!(default_resolved.percent, Some(DEFAULT_GPU_BUDGET_PERCENT));
     assert_eq!(
-        apply_gpu_budget_flag(from_default, GpuBudgetFlag::Absent).cap_bytes,
-        Some(DEFAULT_GPU_BUDGET_BYTES)
+        default_resolved.budget.cap_bytes,
+        Some((8_192 * MIB) * u64::from(DEFAULT_GPU_BUDGET_PERCENT) / 100)
+    );
+    assert_eq!(
+        default_resolved.source,
+        cad_render_wgpu::BudgetSource::VramPercent,
+        "no cap and a probe answer: the cap is a share of the card"
     );
     // The flag replaces the env cap (and the default one).
     assert_eq!(
-        apply_gpu_budget_flag(from_env, parse_gpu_budget_flag("64").unwrap()).cap_bytes,
+        apply_gpu_budget_flag(from_env, parse_gpu_budget_flag("64").unwrap()).explicit_bytes,
         Some(64 * MIB)
     );
     // `--gpu-budget-mb 0` explicitly uncaps even over an env cap.
     assert_eq!(
-        apply_gpu_budget_flag(from_env, GpuBudgetFlag::Uncapped).cap_bytes,
-        None
+        apply_gpu_budget_flag(from_env, GpuBudgetFlag::Uncapped).explicit_bytes,
+        Some(0)
     );
-    // The flag replaces only the cap: the base policy's refusal fraction stays.
-    assert_eq!(
-        apply_gpu_budget_flag(from_env.with_refuse_at(0.5), GpuBudgetFlag::Capped(MIB)).refuse_at,
-        0.5
-    );
+    // The flag replaces only the cap: the base policy's percentage/refusal
+    // fraction stay (the renderer decides that the explicit cap wins).
+    let based = GpuBudgetConfig {
+        refuse_at: 0.5,
+        percent_of_vram: 40,
+        ..GpuBudgetConfig::default()
+    };
+    let capped = apply_gpu_budget_flag(based, GpuBudgetFlag::Capped(MIB));
+    assert_eq!(capped.refuse_at, 0.5);
+    assert_eq!(capped.percent_of_vram, 40);
     // The invocation defaults mean "no flag given": the renderer's own policy.
     let fresh = CliInvocation::new(CliOperation::FixedViewportRender, "x.dwg");
     assert_eq!(fresh.gpu_budget_flag, GpuBudgetFlag::Absent);
+    assert_eq!(fresh.gpu_budget_percent_flag, GpuBudgetPercentFlag::Absent);
     assert!(!fresh.gpu_memory_detail);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn gpu_budget_percent_parses_with_its_own_precedence_and_range() {
+    use cad_render_wgpu::gpu_memory::{MAX_GPU_BUDGET_PERCENT, MIN_GPU_BUDGET_PERCENT};
+    use cad_render_wgpu::GpuBudgetConfig;
+
+    // The CLI mirrors the renderer's range (it cannot depend on
+    // `cad-render-wgpu` on wasm); this pins the two so they cannot drift.
+    assert_eq!(MIN_GPU_BUDGET_PERCENT, super::MIN_GPU_BUDGET_PERCENT);
+    assert_eq!(MAX_GPU_BUDGET_PERCENT, super::MAX_GPU_BUDGET_PERCENT);
+
+    assert_eq!(
+        parse_gpu_budget_percent_flag(" 90 ").unwrap(),
+        GpuBudgetPercentFlag::Percent(90)
+    );
+    assert_eq!(
+        parse_gpu_budget_percent_flag("10").unwrap(),
+        GpuBudgetPercentFlag::Percent(10)
+    );
+    assert_eq!(
+        parse_gpu_budget_percent_flag("100").unwrap(),
+        GpuBudgetPercentFlag::Percent(100)
+    );
+    // Out of range, empty, fractional and non-numeric values are usage errors:
+    // never a silent clamp to 10/100 and never a fall-back to the default.
+    for bad in ["", "  ", "9", "0", "101", "255", "90.5", "abc", "-10"] {
+        assert!(
+            parse_gpu_budget_percent_flag(bad).is_err(),
+            "{bad:?} must be rejected"
+        );
+    }
+
+    let vram = Some(8_192 * MIB);
+    // Environment/base: `YACR_GPU_BUDGET_PERCENT=40`, else the 90 % default.
+    let from_env = GpuBudgetConfig::resolve_env(None, Some("40"));
+    let from_default = GpuBudgetConfig::default();
+    // Precedence: flag > env > default.
+    assert_eq!(
+        apply_gpu_budget_percent_flag(from_default, GpuBudgetPercentFlag::Absent)
+            .resolve(vram)
+            .percent,
+        Some(90)
+    );
+    assert_eq!(
+        apply_gpu_budget_percent_flag(from_env, GpuBudgetPercentFlag::Absent)
+            .resolve(vram)
+            .percent,
+        Some(40)
+    );
+    assert_eq!(
+        apply_gpu_budget_percent_flag(from_env, GpuBudgetPercentFlag::Percent(75))
+            .resolve(vram)
+            .percent,
+        Some(75)
+    );
+    // Percent vs MB: the percentage changes only the share; an explicit env cap
+    // (or `--gpu-budget-mb`) still wins, exactly as the renderer resolves it.
+    let env_mb = GpuBudgetConfig::resolve_env(Some("2048"), Some("40"));
+    let percent_flag = apply_gpu_budget_percent_flag(env_mb, GpuBudgetPercentFlag::Percent(75));
+    assert_eq!(percent_flag.percent_of_vram, 75);
+    let resolved = percent_flag.resolve(vram);
+    assert_eq!(resolved.budget.cap_bytes, Some(2048 * MIB));
+    assert_eq!(
+        resolved.source,
+        cad_render_wgpu::BudgetSource::ExplicitBytes,
+        "an explicit cap is not a percentage of the card"
+    );
+    // `--gpu-budget-mb` replaces that explicit cap, and `0` uncaps even then.
+    assert_eq!(
+        apply_gpu_budget_flag(percent_flag, parse_gpu_budget_flag("64").unwrap())
+            .resolve(vram)
+            .budget
+            .cap_bytes,
+        Some(64 * MIB)
+    );
+    assert_eq!(
+        apply_gpu_budget_flag(percent_flag, GpuBudgetFlag::Uncapped)
+            .resolve(vram)
+            .budget
+            .cap_bytes,
+        None
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_resolved_policy_is_installed_on_a_renderer_without_a_gpu() {
+    // `Renderer::new` reads the environment, so only the values the invocation
+    // sets explicitly are asserted here (no GPU and no env dependence).
+    let mut renderer = cad_render_wgpu::Renderer::new(cad_render_wgpu::BackendPreference::Auto);
+    let mut invocation = CliInvocation::new(CliOperation::FixedViewportRender, "x.dwg");
+    // No flags: the renderer's own env/default policy is kept verbatim (the test
+    // asserts only that it stays in the renderer's accepted range, because the
+    // process environment may legitimately carry an override).
+    apply_resolved_gpu_budget(&mut renderer, &invocation);
+    assert!(
+        renderer.gpu_budget_config().effective_percent() >= MIN_GPU_BUDGET_PERCENT
+            && renderer.gpu_budget_config().effective_percent() <= MAX_GPU_BUDGET_PERCENT,
+        "no flag must leave a valid policy in force"
+    );
+    invocation.gpu_budget_percent_flag = GpuBudgetPercentFlag::Percent(42);
+    apply_resolved_gpu_budget(&mut renderer, &invocation);
+    assert_eq!(renderer.gpu_budget_config().percent_of_vram, 42);
+    // The explicit cap composes on top; the percentage is still recorded.
+    invocation.gpu_budget_flag = GpuBudgetFlag::Capped(128 * MIB);
+    apply_resolved_gpu_budget(&mut renderer, &invocation);
+    assert_eq!(renderer.gpu_budget_config().explicit_bytes, Some(128 * MIB));
+    assert_eq!(renderer.gpu_budget_config().percent_of_vram, 42);
+    invocation.gpu_budget_flag = GpuBudgetFlag::Uncapped;
+    apply_resolved_gpu_budget(&mut renderer, &invocation);
+    assert_eq!(renderer.gpu_budget_config().explicit_bytes, Some(0));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn gpu_memory_report_line_has_exact_field_order_and_none_spelling() {
-    use cad_render_wgpu::GpuMemorySource;
+    use cad_render_wgpu::{BudgetSource, GpuMemorySource};
 
     let report = sample_gpu_memory_report();
     assert_eq!(
         gpu_memory_line(&report),
         "gpu-memory: total=5120 buffer=4096 texture=1024 peak=6144 budget=536870912 \
-         cap=536870912 source=accounted allocator_total=none reserved=none"
+         cap=536870912 vram=1073741824 percent=none budget_source=explicit-bytes \
+         source=accounted allocator_total=none reserved=none"
     );
-    // No device attached (an estimate) and no cap: absent values spell `none`,
-    // never `0` and never an empty field.
+    // No probe and no cap: absent values spell `none`, never `0` and never an
+    // empty field. A percentage cap names the share and its source.
+    let percentage = cad_render_wgpu::GpuMemoryReport {
+        budget_source: BudgetSource::VramPercent,
+        vram_bytes: Some(1024 * MIB),
+        vram_all_heaps_bytes: Some(1024 * MIB),
+        budget_percent: Some(75),
+        ..report.clone()
+    };
+    assert_eq!(
+        gpu_memory_line(&percentage),
+        "gpu-memory: total=5120 buffer=4096 texture=1024 peak=6144 budget=536870912 \
+         cap=536870912 vram=1073741824 percent=75 budget_source=vram-percent \
+         source=accounted allocator_total=none reserved=none"
+    );
     let bare = cad_render_wgpu::GpuMemoryReport {
         budget_bytes: None,
         cap_bytes: None,
+        budget_source: BudgetSource::Estimate,
+        vram_bytes: None,
+        vram_all_heaps_bytes: None,
+        budget_percent: None,
         source: GpuMemorySource::Estimate,
         ..report.clone()
     };
     assert_eq!(
         gpu_memory_line(&bare),
         "gpu-memory: total=5120 buffer=4096 texture=1024 peak=6144 budget=none cap=none \
-         source=estimate allocator_total=none reserved=none"
+         vram=none percent=none budget_source=estimate source=estimate allocator_total=none \
+         reserved=none"
     );
     // The allocator cross-check is reported when the backend produces one.
     let with_allocator = cad_render_wgpu::GpuMemoryReport {
@@ -667,7 +818,8 @@ fn gpu_memory_report_line_has_exact_field_order_and_none_spelling() {
     assert_eq!(
         gpu_memory_line(&with_allocator),
         "gpu-memory: total=5120 buffer=4096 texture=1024 peak=6144 budget=536870912 \
-         cap=536870912 source=allocator-report allocator_total=2048 reserved=4096"
+         cap=536870912 vram=1073741824 percent=none budget_source=explicit-bytes \
+         source=allocator-report allocator_total=2048 reserved=4096"
     );
 }
 

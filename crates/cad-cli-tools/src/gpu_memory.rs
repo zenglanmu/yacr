@@ -1,5 +1,6 @@
-//! GPU-memory reporting, the `--gpu-budget-mb` policy override, and the
-//! refusal exit-code contract for the native `render`/`plot` paths.
+//! GPU-memory reporting, the `--gpu-budget-mb` / `--gpu-budget-percent` policy
+//! overrides, and the refusal exit-code contract for the native `render`/`plot`
+//! paths.
 //!
 //! # What this module does *not* do
 //!
@@ -40,11 +41,15 @@
 
 use cad_domain::CadError;
 use cad_render_wgpu::{
-    GpuBudget, GpuMemoryCategory, GpuMemoryRefusal, GpuMemoryReport, GpuMemorySource, RenderError,
-    Renderer,
+    GpuBudgetConfig, GpuMemoryCategory, GpuMemoryRefusal, GpuMemoryReport, GpuMemorySource,
+    RenderError, Renderer,
 };
 
-use crate::{error_code, invocation::GpuBudgetFlag, CliError, CliInvocation};
+use crate::{
+    error_code,
+    invocation::{GpuBudgetFlag, GpuBudgetPercentFlag},
+    CliError, CliInvocation,
+};
 
 /// The stable token for a refusal decided by the renderer's own application
 /// budget (`GpuMemoryRefusalOrigin::ApplicationBudget`).
@@ -73,6 +78,14 @@ fn bytes_or_none(bytes: Option<u64>) -> String {
     }
 }
 
+/// `Option<u8>` as the report line spells it: the number, or `none`.
+fn percent_or_none(percent: Option<u8>) -> String {
+    match percent {
+        Some(percent) => percent.to_string(),
+        None => "none".to_string(),
+    }
+}
+
 /// The stable token for [`GpuMemorySource`], so the line never depends on
 /// `Debug` formatting.
 fn source_token(source: GpuMemorySource) -> &'static str {
@@ -96,19 +109,26 @@ fn origin_token(refusal: &GpuMemoryRefusal) -> &'static str {
 /// One line, fixed field order, every number read straight off `report`.
 ///
 /// `budget` is the effective threshold the budget gate compares against
-/// (`cap × refuse_at`) and `cap` is the configured cap; both are the renderer's
-/// **application estimate**, never the card's VRAM. `none` means the field is
-/// absent (an uncapped budget, or a backend without an allocator report).
+/// (`cap × refuse_at`) and `cap` is the configured cap. `vram` is the **only**
+/// field about the card: the backend's advertised device-local memory total
+/// (`none` when it cannot answer), never free memory. `percent` is the share of
+/// `vram` the cap was derived from and `budget_source` says which rule produced
+/// the cap (`vram-percent` / `explicit-bytes` / `estimate`) — `source` describes
+/// the **measured bytes** instead. `none` means the field is absent (an uncapped
+/// budget, no VRAM probe, or a backend without an allocator report).
 pub(crate) fn gpu_memory_line(report: &GpuMemoryReport) -> String {
     format!(
-        "gpu-memory: total={} buffer={} texture={} peak={} budget={} cap={} source={} \
-         allocator_total={} reserved={}",
+        "gpu-memory: total={} buffer={} texture={} peak={} budget={} cap={} vram={} percent={} \
+         budget_source={} source={} allocator_total={} reserved={}",
         report.total_bytes,
         report.buffer_bytes,
         report.texture_bytes,
         report.peak_bytes,
         bytes_or_none(report.budget_bytes),
         bytes_or_none(report.cap_bytes),
+        bytes_or_none(report.vram_bytes),
+        percent_or_none(report.budget_percent),
+        report.budget_source.label(),
         source_token(report.source),
         bytes_or_none(report.allocator_total_bytes),
         bytes_or_none(report.reserved_bytes),
@@ -262,25 +282,62 @@ pub(crate) fn print_gpu_memory_report(renderer: &Renderer, invocation: &CliInvoc
     }
 }
 
-/// Resolve the budget the renderer must enforce: **flag > env > default**.
+/// Resolve the budget the renderer must enforce: **flag > env > policy**.
 ///
 /// `base` is the policy the renderer already resolved when it was constructed
-/// ([`GpuBudget::from_env`](cad_render_wgpu::GpuBudget::from_env): the
-/// `YACR_GPU_BUDGET_MB` override, else the 512 MiB default estimate), so the env
-/// override is parsed exactly once, by the renderer's own rules. An explicit
-/// `--gpu-budget-mb` replaces **only the cap** — `refuse_at` stays whatever the
-/// base policy says — and `--gpu-budget-mb 0` replaces it with an explicit
-/// "uncapped".
-pub(crate) fn apply_gpu_budget_flag(base: GpuBudget, flag: GpuBudgetFlag) -> GpuBudget {
+/// ([`GpuBudgetConfig::from_env`]: `YACR_GPU_BUDGET_MB` → an explicit byte cap,
+/// `YACR_GPU_BUDGET_PERCENT` → the percentage, else 90 % of the probed
+/// device-local VRAM), so the environment is parsed exactly once, by the
+/// renderer's own rules. An explicit `--gpu-budget-mb` replaces **only** the
+/// explicit cap — `percent_of_vram` and `refuse_at` stay whatever the base policy
+/// says — and `--gpu-budget-mb 0` replaces it with an explicit "uncapped"
+/// (`Some(0)`), which still wins over any percentage.
+pub(crate) fn apply_gpu_budget_flag(base: GpuBudgetConfig, flag: GpuBudgetFlag) -> GpuBudgetConfig {
     match flag {
         GpuBudgetFlag::Absent => base,
-        GpuBudgetFlag::Uncapped => base.with_cap(None),
-        GpuBudgetFlag::Capped(bytes) => base.with_cap(Some(bytes)),
+        GpuBudgetFlag::Uncapped => GpuBudgetConfig {
+            explicit_bytes: Some(0),
+            ..base
+        },
+        GpuBudgetFlag::Capped(bytes) => GpuBudgetConfig {
+            explicit_bytes: Some(bytes),
+            ..base
+        },
+    }
+}
+
+/// Resolve the percentage: **flag > `YACR_GPU_BUDGET_PERCENT` > 90 %**.
+///
+/// `base` already carries the environment/default percentage (the renderer read
+/// it on construction), so only an explicit flag replaces it. This never touches
+/// an explicit byte cap: the renderer's precedence
+/// (`explicit_bytes > percent_of_vram > estimate`) still decides the cap.
+pub(crate) fn apply_gpu_budget_percent_flag(
+    base: GpuBudgetConfig,
+    flag: GpuBudgetPercentFlag,
+) -> GpuBudgetConfig {
+    match flag {
+        GpuBudgetPercentFlag::Absent => base,
+        GpuBudgetPercentFlag::Percent(percent) => GpuBudgetConfig {
+            percent_of_vram: percent,
+            ..base
+        },
     }
 }
 
 /// Apply the resolved policy to a freshly constructed renderer.
+///
+/// Only the percentages/flags are composed here: the renderer converts them into
+/// a byte cap against the probed card
+/// ([`GpuBudgetConfig::resolve`]), so the CLI never repeats that arithmetic.
 pub(crate) fn apply_resolved_gpu_budget(renderer: &mut Renderer, invocation: &CliInvocation) {
-    let budget = apply_gpu_budget_flag(renderer.gpu_budget(), invocation.gpu_budget_flag);
-    renderer.set_gpu_budget(budget);
+    // The renderer's own env policy is the base, so an unset flag changes nothing.
+    let config = apply_gpu_budget_flag(
+        apply_gpu_budget_percent_flag(
+            renderer.gpu_budget_config(),
+            invocation.gpu_budget_percent_flag,
+        ),
+        invocation.gpu_budget_flag,
+    );
+    renderer.set_gpu_budget_config(config);
 }

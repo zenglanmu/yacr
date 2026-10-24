@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use cad_cli_tools::{
-    parse_gpu_budget_flag, CliError, CliInvocation, CliOperation, GpuPreference, Locale, PlotFormat,
+    parse_gpu_budget_flag, parse_gpu_budget_percent_flag, CliError, CliInvocation, CliOperation,
+    GpuPreference, Locale, PlotFormat,
 };
 use cad_domain::Point3;
 
@@ -56,27 +57,41 @@ Options:
                           memory (default 4000000; 0 disables the cap)
   --max-vertices <n>      render/plot: hard cap on accumulated scene vertices
                           (default 128000000; 0 disables the cap)
-  --gpu-budget-mb <n>     render/plot: application GPU memory cap in MiB.
-                          This is an application ESTIMATE, not the card's VRAM.
-                          Precedence: this flag > YACR_GPU_BUDGET_MB env var >
-                          the 512 MiB default. 0 = explicitly uncapped (reported
-                          as such); a refusal exits 7 and writes no PNG.
+  --gpu-budget-mb <n>     render/plot: explicit application GPU memory cap in
+                          MiB. This is an application ESTIMATE, not the card's
+                          VRAM. Precedence: this flag > YACR_GPU_BUDGET_MB env
+                          var > the percentage policy. An explicit cap always
+                          wins over --gpu-budget-percent. 0 = explicitly uncapped
+                          (reported as such); a refusal exits 7 and writes no PNG.
+  --gpu-budget-percent <10..=100>
+                          render/plot: share of the probed device-local VRAM the
+                          renderer may claim. Precedence: this flag >
+                          YACR_GPU_BUDGET_PERCENT env var > the 90 % default.
+                          The probe is advertised device-local memory, not free
+                          memory, and falls back to a 3 GiB estimate (reported as
+                          budget_source=estimate) when the backend cannot answer.
+                          --gpu-budget-mb / YACR_GPU_BUDGET_MB still wins.
   --gpu-memory-detail     render/plot: also print the per-category GPU memory
                           breakdown on stderr
 
 GPU memory report (render/plot, after a successful frame; stderr):
   gpu-memory: total=<n> buffer=<n> texture=<n> peak=<n> budget=<n|none>
-              cap=<n|none> source=<accounted|allocator-report|estimate>
+              cap=<n|none> vram=<n|none> percent=<n|none>
+              budget_source=<vram-percent|explicit-bytes|estimate>
+              source=<accounted|allocator-report|estimate>
               allocator_total=<n|none> reserved=<n|none>
-  Every number is the renderer's own accounting/report; none of them is the
-  card's total VRAM (wgpu cannot report it).
+  Every number is the renderer's own report. `vram` is the only field about the
+  card: the backend's advertised device-local memory (never free memory), `none`
+  when the backend cannot report it; `percent`/`budget_source` name which rule
+  produced the cap.
 
 Exit codes:
   0 success   1 failure   2 usage
-  7 GPU memory refused (application budget or device out of memory): nothing
-    was rendered and no PNG was written; the origin is named on the stable
-    line `gpu-memory-refused: origin=... category=... used=... requested=...
-    cap=... limit=...`
+  7 GPU memory refused (application budget from --gpu-budget-mb /
+    --gpu-budget-percent of the probed VRAM / YACR_GPU_BUDGET_*, or the device
+    reporting out of memory): nothing was rendered and no PNG was written; the
+    origin is named on the stable line `gpu-memory-refused: origin=...
+    category=... used=... requested=... cap=... limit=...`
 ";
 
 fn main() -> ExitCode {
@@ -319,6 +334,20 @@ fn main() -> ExitCode {
                 };
                 match parse_gpu_budget_flag(value) {
                     Ok(flag) => invocation.gpu_budget_flag = flag,
+                    Err(message) => return fail(CliError::usage(message), operation, locale),
+                }
+            }
+            "--gpu-budget-percent" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--gpu-budget-percent needs a percentage in 10..=100"),
+                        operation,
+                        locale,
+                    );
+                };
+                match parse_gpu_budget_percent_flag(value) {
+                    Ok(flag) => invocation.gpu_budget_percent_flag = flag,
                     Err(message) => return fail(CliError::usage(message), operation, locale),
                 }
             }

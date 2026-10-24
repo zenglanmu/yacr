@@ -268,3 +268,52 @@ fn diagnostics_read_is_pure_and_never_labels_a_success() {
     assert_eq!(first.runtime.upload_revision_resets, 0);
     assert_eq!(first.runtime.ready_none_clears, 0);
 }
+
+#[test]
+fn the_host_gpu_budget_percentage_is_remembered_without_a_device() {
+    // The Linux host applies the Options percentage before the first device
+    // attach (and after a re-attach, which builds a fresh renderer), so the
+    // policy must live on the session state, not only on a live `Renderer`.
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    assert_eq!(
+        session.gpu_budget_config(),
+        GpuBudgetConfig::default(),
+        "no host policy: the renderer's own 90 % default"
+    );
+    assert!(session.set_gpu_budget_percent(55));
+    assert_eq!(session.gpu_budget_config().percent_of_vram, 55);
+    // No device is attached, so there is no measurement and no fabricated report.
+    assert!(session.gpu_memory_report().is_none());
+    assert!(session.gpu_budget_refusal().is_none());
+}
+
+#[test]
+fn an_explicit_gpu_budget_cap_survives_a_percentage_change() {
+    // `explicit_bytes > percent_of_vram > estimate` is the renderer's documented
+    // precedence; changing the percentage in the dialog must not silently drop a
+    // byte cap the process was started with.
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    let config = GpuBudgetConfig {
+        percent_of_vram: 40,
+        explicit_bytes: Some(1024),
+        refuse_at: 0.75,
+    };
+    assert!(session.set_gpu_budget_config(config));
+    assert_eq!(session.gpu_budget_config(), config);
+    assert!(session.set_gpu_budget_percent(60));
+    assert_eq!(
+        session.gpu_budget_config(),
+        GpuBudgetConfig {
+            percent_of_vram: 60,
+            ..config
+        },
+        "the explicit cap and refusal fraction are preserved"
+    );
+    // The same policy applies to the next attach: an explicit `None` here means
+    // "no cap named by the host", and would otherwise re-enable the percentage.
+    assert_eq!(
+        session.gpu_budget_config().explicit_bytes,
+        Some(1024),
+        "only the percentage was replaced"
+    );
+}

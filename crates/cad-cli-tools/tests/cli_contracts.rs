@@ -284,6 +284,20 @@ fn gpu_and_budget_options_reject_bad_values_as_usage() {
             "--gpu-budget-mb",
             "18446744073709551615",
         ],
+        vec![
+            "render",
+            dwg.to_str().unwrap(),
+            "--gpu-budget-percent",
+            "abc",
+        ],
+        vec!["render", dwg.to_str().unwrap(), "--gpu-budget-percent", "9"],
+        vec![
+            "render",
+            dwg.to_str().unwrap(),
+            "--gpu-budget-percent",
+            "101",
+        ],
+        vec!["render", dwg.to_str().unwrap(), "--gpu-budget-percent"],
     ] {
         let output = run(&args.iter().map(|a| s(a)).collect::<Vec<_>>());
         assert_eq!(output.status.code(), Some(2), "args {args:?}");
@@ -312,6 +326,8 @@ fn gpu_and_budget_options_accept_valid_values() {
         s("1000000"),
         s("--gpu-budget-mb"),
         s("0"),
+        s("--gpu-budget-percent"),
+        s("90"),
         s("--gpu-memory-detail"),
     ]);
     assert_eq!(output.status.code(), Some(1));
@@ -327,11 +343,14 @@ fn usage_documents_the_gpu_budget_report_and_exit_code_seven() {
     let text = String::from_utf8(output.stdout).expect("usage is utf-8");
     for needle in [
         "--gpu-budget-mb",
+        "--gpu-budget-percent",
         "--gpu-memory-detail",
         "YACR_GPU_BUDGET_MB",
+        "YACR_GPU_BUDGET_PERCENT",
         // The report line and the refusal line are part of the documented
         // machine surface, not an implementation detail.
         "gpu-memory: total=",
+        "budget_source=<vram-percent|explicit-bytes|estimate>",
         "gpu-memory-refused: origin=",
         "7 GPU memory refused",
     ] {

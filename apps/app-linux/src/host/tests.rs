@@ -7,8 +7,8 @@ use super::postload::{
     PanReport, PostloadPanAction, PostloadPanPhase,
 };
 use super::telemetry::{
-    cad_frame_log_state, frame_completeness_label, opt_telemetry_u128, opt_telemetry_u64,
-    should_log_render_diag, CadFrameLogState,
+    cad_frame_log_state, frame_completeness_label, gpu_memory_line, opt_telemetry_u128,
+    opt_telemetry_u64, should_log_render_diag, CadFrameLogState,
 };
 use cad_engine::render::FrameCompleteness;
 
@@ -486,3 +486,59 @@ fn layout_revalidates_when_the_container_bounds_change_without_a_new_sequence() 
 
 #[path = "settings_tests.rs"]
 mod settings_tests;
+
+#[test]
+fn the_gpu_memory_line_names_the_policy_and_the_renderer_totals() {
+    use cad_render_wgpu::{BudgetSource, GpuMemoryCategory, GpuMemoryReport, GpuMemorySource};
+    let mut category_bytes = [0u64; GpuMemoryCategory::COUNT];
+    category_bytes[GpuMemoryCategory::Vertex.index()] = 1024;
+    let report = GpuMemoryReport {
+        buffer_bytes: 1024,
+        texture_bytes: 0,
+        total_bytes: 1024,
+        peak_bytes: 2048,
+        reserved_bytes: None,
+        allocator_total_bytes: None,
+        budget_bytes: Some(3_686_744_064),
+        cap_bytes: Some(3_686_744_064),
+        budget_source: BudgetSource::VramPercent,
+        vram_bytes: Some(4_096_000_000),
+        budget_percent: Some(90),
+        source: GpuMemorySource::Estimate,
+        category_bytes,
+    };
+    // One line, fixed order: the card probe, the policy and the renderer's own
+    // total/peak. `budget_source` is the renderer's stable token, never `Debug`.
+    assert_eq!(
+        gpu_memory_line(&report),
+        "[probe] gpu-memory vram_bytes=4096000000 budget_percent=90 \
+         budget_source=vram-percent total=1024 peak=2048 cap=3686744064"
+    );
+    // A backend without a VRAM probe and an estimate fallback spell `none` for the
+    // absent fields instead of inventing a number.
+    let estimated = GpuMemoryReport {
+        budget_source: BudgetSource::Estimate,
+        vram_bytes: None,
+        budget_percent: None,
+        ..report
+    };
+    assert_eq!(
+        gpu_memory_line(&estimated),
+        "[probe] gpu-memory vram_bytes=none budget_percent=none budget_source=estimate \
+         total=1024 peak=2048 cap=3686744064"
+    );
+    // An explicitly uncapped policy prints `cap=none`.
+    let uncapped = GpuMemoryReport {
+        budget_source: BudgetSource::ExplicitBytes,
+        cap_bytes: None,
+        budget_bytes: None,
+        vram_bytes: Some(4_096_000_000),
+        budget_percent: None,
+        ..report
+    };
+    assert_eq!(
+        gpu_memory_line(&uncapped),
+        "[probe] gpu-memory vram_bytes=4096000000 budget_percent=none \
+         budget_source=explicit-bytes total=1024 peak=2048 cap=none"
+    );
+}

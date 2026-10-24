@@ -18,6 +18,7 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
         crosshair_percent: 25,
         pickbox_size: 3,
         aperture_size: 12,
+        gpu_budget_percent: 90,
         wgpu_backend: "dx12".to_string(),
         fonts_dir: Some("/tmp/yacr-fonts".to_string()),
     };
@@ -37,16 +38,37 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
             "crosshairPercent": 25,
             "pickboxSize": 3,
             "apertureSize": 12,
+            "gpuBudgetPercent": 90,
             "wgpu_backend": "dx12",
             "fontsDir": "/tmp/yacr-fonts",
         })
     );
-    // Exactly the fourteen documented fields; no unrelated Options fields.
-    assert_eq!(wire.as_object().expect("object").len(), 14);
+    // Exactly the fifteen documented fields; no unrelated Options fields.
+    assert_eq!(wire.as_object().expect("object").len(), 15);
     // The backend choice keeps the shared snake_case key on the snapshot wire
     // (`settings.wgpu_backend` in the UI), never camelCased into `wgpuBackend`.
     assert!(
         wire.get("wgpuBackend").is_none(),
         "the backend field must not camelCase on the wire: {wire}"
     );
+}
+
+#[test]
+fn the_options_gpu_budget_is_applied_to_the_render_session() {
+    use cad_engine::render::{BackendPreference, RenderSessionHandle};
+    // Unit-level (no GPU, no window): the host applies the Options percentage to
+    // the engine's render session, which keeps it for the next device attach.
+    let render = RenderSessionHandle::new(BackendPreference::Auto);
+    assert!(super::super::apply_gpu_budget_percent(&render, 55));
+    assert_eq!(render.gpu_budget_config().percent_of_vram, 55);
+    // Only the percentage changes: the renderer's `explicit_bytes > percent >
+    // estimate` precedence and the refusal fraction are untouched.
+    assert_eq!(
+        render.gpu_budget_config().refuse_at,
+        cad_render_wgpu::GpuBudgetConfig::default().refuse_at
+    );
+    // A value that cannot be a percentage is refused explicitly, never truncated
+    // into a smaller number (the schema validates `10..=100` first).
+    assert!(!super::super::apply_gpu_budget_percent(&render, 5000));
+    assert_eq!(render.gpu_budget_config().percent_of_vram, 55);
 }

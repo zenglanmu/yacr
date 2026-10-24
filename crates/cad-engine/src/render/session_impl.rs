@@ -542,6 +542,15 @@ impl RenderSessionHandle {
         state
             .runtime
             .attach_with_gpu_time(device, queue, preference, gpu_time);
+        // A device attach constructs a fresh renderer, so the host's policy (if
+        // any) is re-applied here instead of being dropped with the old device.
+        if let Some(config) = state.gpu_budget_config {
+            if let Some(renderer) = state.runtime.renderer.as_mut() {
+                let installed = compose_gpu_budget(renderer.gpu_budget_config(), config);
+                renderer.set_gpu_budget_config(installed);
+                state.gpu_budget_config = Some(installed);
+            }
+        }
         match &state.runtime.lifecycle {
             RenderLifecycle::Ready { .. } => Ok(()),
             RenderLifecycle::Failed { reason } | RenderLifecycle::Lost { reason } => {
@@ -555,6 +564,85 @@ impl RenderSessionHandle {
 
     pub fn detach_device(&self) {
         self.0.borrow_mut().runtime.detach();
+    }
+
+    /// The GPU memory budget policy behind the next/current staging request.
+    ///
+    /// With a device attached this is the renderer's own policy (the percentage
+    /// resolved against the probed device-local VRAM **by the renderer**); before
+    /// an attach it is the policy the next attach will install, or
+    /// [`GpuBudgetConfig::default`] when the host never set one.
+    pub fn gpu_budget_config(&self) -> GpuBudgetConfig {
+        let state = self.0.borrow();
+        state
+            .runtime
+            .renderer
+            .as_ref()
+            .map(cad_render_wgpu::Renderer::gpu_budget_config)
+            .or(state.gpu_budget_config)
+            .unwrap_or_default()
+    }
+
+    /// Replace the GPU memory budget policy, now and after every device attach.
+    ///
+    /// The percentage and refusal fraction are taken as requested; an explicit
+    /// byte cap already chosen by the renderer's environment
+    /// (`YACR_GPU_BUDGET_MB`) is preserved when `config.explicit_bytes` is `None`,
+    /// because [`cad_render_wgpu::GpuBudgetConfig::resolve`] documents
+    /// `explicit_bytes > percent_of_vram > estimate`. No byte arithmetic happens
+    /// here — the renderer resolves the policy against the card.
+    pub fn set_gpu_budget_config(&self, config: GpuBudgetConfig) -> bool {
+        let mut state = self.0.borrow_mut();
+        let installed = match state.runtime.renderer.as_mut() {
+            Some(renderer) => {
+                let installed = compose_gpu_budget(renderer.gpu_budget_config(), config);
+                renderer.set_gpu_budget_config(installed);
+                installed
+            }
+            None => config,
+        };
+        state.gpu_budget_config = Some(installed);
+        true
+    }
+
+    /// Set only [`GpuBudgetConfig::percent_of_vram`], preserving any explicit byte
+    /// cap and the refusal fraction.
+    ///
+    /// This is the host-facing shape (the Options dialog's GPU-memory budget): the
+    /// host names a share of the card, never a byte count.
+    pub fn set_gpu_budget_percent(&self, percent: u8) -> bool {
+        let mut config = self.gpu_budget_config();
+        config.percent_of_vram = percent;
+        self.set_gpu_budget_config(config)
+    }
+
+    /// The renderer's GPU memory report, or `None` while no device is attached.
+    ///
+    /// Diagnostics only. The renderer's report is cheap (a handful of atomics plus
+    /// one allocator-report call), but a host must still bound it: the Linux host
+    /// reads it at most once per second, never per frame.
+    pub fn gpu_memory_report(&self) -> Option<GpuMemoryReport> {
+        self.0
+            .borrow()
+            .runtime
+            .renderer
+            .as_ref()
+            .map(cad_render_wgpu::Renderer::gpu_memory_report)
+    }
+
+    /// The most recent GPU-memory refusal, for callers on the `CadResult` path.
+    ///
+    /// [`RenderSessionHandle::apply_ready_updates`] cannot widen
+    /// [`cad_domain::CadError`], so a staging refusal is read here instead of
+    /// being parsed out of the error message (see
+    /// [`cad_render_wgpu::Renderer::gpu_budget_refusal`]).
+    pub fn gpu_budget_refusal(&self) -> Option<GpuMemoryRefusal> {
+        self.0
+            .borrow()
+            .runtime
+            .renderer
+            .as_ref()
+            .and_then(cad_render_wgpu::Renderer::gpu_budget_refusal)
     }
 
     pub fn fail_device(&self, reason: impl Into<String>, lost: bool) {
@@ -665,5 +753,22 @@ impl RenderSessionHandle {
         #[cfg(not(target_arch = "wasm32"))]
         s.preparation.stop();
         s.runtime.detach();
+    }
+}
+
+/// Compose a host-requested GPU budget policy with the renderer's own
+/// environment policy.
+///
+/// The percentage and the refusal fraction are the host's; an explicit byte cap
+/// the renderer already resolved from `YACR_GPU_BUDGET_MB` survives when the host
+/// did not name one (`Some(0)` — the documented explicit "uncapped" — survives
+/// too), because the renderer's precedence is
+/// `explicit_bytes > percent_of_vram > estimate`. Nothing is converted to bytes
+/// here; [`GpuBudgetConfig::resolve`] does that against the probed card.
+fn compose_gpu_budget(base: GpuBudgetConfig, requested: GpuBudgetConfig) -> GpuBudgetConfig {
+    GpuBudgetConfig {
+        percent_of_vram: requested.percent_of_vram,
+        explicit_bytes: requested.explicit_bytes.or(base.explicit_bytes),
+        refuse_at: requested.refuse_at,
     }
 }

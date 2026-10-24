@@ -81,6 +81,9 @@ thread_local! {
     /// The last emitted `webview size` line, so repeated layout passes with the
     /// same numbers stay silent (a change still logs).
     static WEBVIEW_SIZE_LOG: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The last emitted GPU-memory refusal line, so a refused upload that is
+    /// retried on the next tick cannot spam the log (a different refusal logs).
+    static GPU_REFUSAL_LOG: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// Main-thread-only owner of the GTK overlay and the GPU presenter.

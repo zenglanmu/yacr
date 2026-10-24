@@ -1,7 +1,7 @@
 use super::native::{
-    checked_physical_size, drawing_area_matches_dom, init_allowed, panic_payload_message,
-    pending_prerequisite, pending_reason_changed, render_error_class, wayland_buffer_scale,
-    webview_target_size, WebviewSkip,
+    checked_physical_size, drawing_area_matches_dom, gpu_memory_refusal_line, init_allowed,
+    panic_payload_message, pending_prerequisite, pending_reason_changed, render_error_class,
+    wayland_buffer_scale, webview_target_size, WebviewSkip, GPU_MEMORY_CLASS,
 };
 use super::BridgeState;
 
@@ -204,6 +204,44 @@ fn non_device_render_errors_are_not_device_loss() {
     assert_eq!(
         render_error_class(&RenderError::DeviceLost("x".into())),
         "device_lost"
+    );
+    assert_eq!(
+        render_error_class(&RenderError::NotInitialized("x".into())),
+        "not_initialized"
+    );
+    // A GPU-memory refusal has its own stable class: it is neither a generic
+    // frame error nor a device loss (the resident scene is intact). The class is
+    // pinned here because the host appends it to the status error verbatim; the
+    // `RenderError::GpuMemory` value itself cannot be constructed outside
+    // `cad-render-wgpu` (its message has no public constructor), so the match arm
+    // above is what keeps the variant exhaustive at compile time.
+    assert_eq!(GPU_MEMORY_CLASS, "gpu_memory");
+    assert_ne!(GPU_MEMORY_CLASS, "frame");
+    assert_ne!(GPU_MEMORY_CLASS, "device_lost");
+}
+
+#[test]
+fn a_gpu_memory_refusal_line_is_stable_and_spells_absent_fields_none() {
+    // Same vocabulary as the headless CLI's `gpu-memory-refused:` contract, so an
+    // evidence run and a CLI run can be compared field by field.
+    assert_eq!(
+        gpu_memory_refusal_line(
+            false,
+            "stream",
+            1_900_000_000,
+            144,
+            Some(3_000_000_000),
+            Some(3_000_000_000)
+        ),
+        "[probe] gpu-memory-refused: origin=application-budget category=stream \
+         used=1900000000 requested=144 cap=3000000000 limit=3000000000"
+    );
+    // A device out-of-memory refusal is a different origin; an uncapped policy has
+    // no cap/limit and must say `none`, never `0`.
+    assert_eq!(
+        gpu_memory_refusal_line(true, "mask", 10, 20, None, None),
+        "[probe] gpu-memory-refused: origin=device-out-of-memory category=mask used=10 \
+         requested=20 cap=none limit=none"
     );
 }
 
