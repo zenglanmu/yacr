@@ -45,6 +45,18 @@ X11/XWayland 宿主以 `surfaceMode=dom-canvas` 启动并**真实出图**（合�
 `apps/desktop-ui npm test 450`。脚本：`check-architecture`、`check-i18n`(723)、`check-file-size` 均通过。
 **NOT RUN**：全 workspace 全量门禁、Windows/macOS/Android、`collect-evidence.sh` 全矩阵。
 
+### 4.1 追加（同日）：真机暴露并修掉的三个缺陷 + X11 终态
+
+真机运行先后暴露：① Vite dev 把动态 import 改写成 `?import` → public 产物 500；
+② WebKitGTK 的 `document.currentScript` 是 `undefined` 而非 `null` → `--target no-modules` glue
+顶层抛错、`wasm_bindgen` 停在 TDZ；③ Vite dev 拒绝把 `public/` 文件当模块加载（截图里是错误覆盖层）。
+最终方案：public 下生成 **ESM `bootstrap.js`** + **仅 dev 生效的 Vite 插件**按模块语义返回
+`/canvas/*.js`；生产构建不受影响。**X11 终态**经 observer 独立判读：无覆盖层、canvas `926×341`、
+纯黑 + 4 条等距竖线、活动标签显示 `synthetic-four-lines.dwg`、无启动面板、无布局缺陷 ——
+**该帧读作“图纸已打开并显示”**。同时验证 exit-6 端到端（移除产物 → 标记行 + 退出码 6 + i18n 文案）。
+真实 DWG（`complex-test.dwg`，4.2 MB）在 wasm 内导入成功：145,947 batches / 7,707 draws /
+**~1.91 GB wasm heap** / 单次 ~14 s —— 阶段 ⑧ 的硬预算约束，已记入验证记录 §8。
+
 ### 5. 未闭环 / 下一步
 
 1. **X11 输入证据（部分闭环）**：2026-10-24 **用户手动测试确认 X11 下滚轮缩放与拖拽平移正常**

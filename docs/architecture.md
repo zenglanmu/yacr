@@ -104,8 +104,10 @@ traits 是契约草案（0.1），实现前可通过 ADR 修正不足，不代�
     状态，随**父表面 commit** 生效，并在每个 surface generation 重建时重放。
   - Windows：`WS_CHILD | WS_VISIBLE | WS_DISABLED | WS_CLIPSIBLINGS` 的 CAD child HWND 用
     `SetWindowPos` 压到 wry 容器紧邻之下（每次布局/tick 幂等重排）；WebView2 背景 alpha 必须恰为 0。
-  - X11/XWayland：**显式 Unsupported**（GTK/Tauri 初始化前拒绝，标记 `yacr: unsupported-backend: x11`
-    + 退出码 4）；旧 X child 路径编译/测试保留但运行时不可达。
+  - X11/XWayland：**DOM-canvas 载体**（ADR 0024）——wasm/WebGL2 CAD 会话画进 WebView 内
+    `<canvas>`（`surfaceMode: dom-canvas`），native 壳**不**建 CAD 会话/原生表面；WebGL2 不可用时
+    显式拒绝（标记 `yacr: unsupported-runtime: webgl2` + 退出码 6）。旧 X child 路径编译/测试保留
+    但运行时不可达；`yacr: unsupported-backend: x11` + 退出码 4 为**历史**合同。
 - **历史区分**：整窗顶层透明 alpha 全屏叠加是历史 FAIL（ADR 0006）；本次成功的是**分区子表面
   `place_below`**，二者证据链不同。
 - **单一输入漏斗**：CAD 表面**从不接收 OS 输入**。`.native-input`（DOM）→ `probe_input` → host

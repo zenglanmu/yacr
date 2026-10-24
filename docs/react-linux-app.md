@@ -7,11 +7,17 @@
 跨宿主合成模型见 [`docs/adr/0023-dom-on-top-cross-host-composition.md`](adr/0023-dom-on-top-cross-host-composition.md)。
 与 `CAD_IMPLEMENTATION_SPEC.md` §21。**仍是 bounded 实现，不是完整 CAD 产品**，也不代表跨平台验收。
 
-**后端（2026-10-23 起）**：只有**原生 Wayland**是受支持的后端。**X11/XWayland 显式 Unsupported**：
-在 GTK/Tauri 初始化前拒绝，stderr 稳定标记 `yacr: unsupported-backend: x11`，退出码 **4**，
-**无静默回退**。生产合成方向是 **DOM/WebView 在上、app-owned CAD 子表面在下**（`place_below`），
-不再是“CAD 分区盖住 WebView”。有界验收仅限 **GNOME/Mutter + Quadro P620 + `scale=1`**
-（见 `docs/validation-dom-on-top-production-2026-10-23.md`）。
+**后端载体（2026-10-24 起，ADR 0024 阶段 ④）**：两种后端都**会启动**，区别在像素载体：
+**原生 Wayland** = `surfaceMode: native-below`（app-owned CAD 子表面在 WebView 之下 `place_below`）；
+**X11/XWayland** = `surfaceMode: dom-canvas`（wasm CAD 会话在 WebView 内画进 DOM `<canvas>`，
+**没有**原生 CAD 子窗口、也没有原生 CAD 会话）。两者都是**真实运行**，不是拒绝或占位。
+生产合成方向仍是 **DOM/WebView 在上、app-owned CAD 子表面在下**（仅原生 Wayland 有子表面）。
+有界验收仅限 **GNOME/Mutter + Quadro P620 + `scale=1`**（见
+`docs/validation-dom-on-top-production-2026-10-23.md` 与 `docs/validation-dom-canvas-wasm-2026-10-24.md`）；
+**X11 只有用户手动确认（用户报告，非 agent 抓帧）**，见下方「证据机制」。
+**历史**：2026-10-22–24 X11/XWayland 曾在 GTK 初始化前被显式拒绝（标记
+`yacr: unsupported-backend: x11` + 退出码 **4**）；该拒绝**已不再产生**，只作为历史合同保留在
+代码/测试和旧证据记录里。
 
 
 - 应用：`apps/app-linux`；二进制 `yacr`（Tauri 标识 `dev.yacr.app`，产品名 `Yacr`）。
@@ -41,7 +47,7 @@ bash scripts/run-react-linux.sh --open "$(pwd)/fixtures/dwg/synthetic-four-lines
 `node_modules` 不存在时先 `npm ci`，再 `npm run build`；最后以 `custom-protocol` 运行宿主
 （嵌入 `../desktop-ui/dist`）。脚本**不解锁会话、不截图、不安装系统包**。
 
-先构建前端（`dist` 会被嵌入），再运行（原生 Wayland，唯一受支持后端）：
+先构建前端（`dist` 会被嵌入），再运行（原生 Wayland 载体）：
 
 ```bash
 (cd apps/desktop-ui && npm ci && npm run build)
@@ -51,16 +57,19 @@ env -u DISPLAY -u XAUTHORITY \
 # 或先构建：cargo build --release --locked -p app-linux --bin yacr --features tauri/custom-protocol
 ```
 
-**X11/XWayland 会被拒绝**（不是“保留的替代路径”）：
+**X11/XWayland 走 `dom-canvas` 载体**（不是原生子表面路径，也不是拒绝）：
 
 ```bash
 GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open /abs/drawing.dwg
-# stderr: yacr: unsupported-backend: x11  →  exit 4（无窗口、无截图）
+# 正常启动；CAD 像素由 WebView 内的 wasm(WebGL2) 会话画进 DOM <canvas>，无原生 CAD 子窗口。
+# 若该 WebView 无可用 WebGL2：yacr: unsupported-runtime: webgl2  →  exit 6
+# （显式拒绝：无空白画布、无静默回退、不复活已退役的 X11 原生 child）
 ```
 
-`Auto` 在只有 `DISPLAY` 的会话里同样解析为 X11 并被拒绝；只有
-`WAYLAND_DISPLAY` + `XDG_RUNTIME_DIR` 同时存在才进入原生 Wayland。理由（XWayland 合成曾 FAIL、
-机制未闭环）与后续 web+canvas 路线见 [ADR 0023](adr/0023-dom-on-top-cross-host-composition.md) D3。
+`Auto` 在只有 `DISPLAY` 的会话里同样解析为 X11 并走 `dom-canvas`；只有
+`WAYLAND_DISPLAY` + `XDG_RUNTIME_DIR` 同时存在才进入原生 Wayland。**历史（2026-10-22–24）**：X11
+曾在 GTK 初始化前被拒绝（标记行 + 退出码 4）。决策与后续 web+canvas 路线见
+[ADR 0024](adr/0024-dom-canvas-wasm-cad-path.md)（X11 与浏览器宿主共用该载体）。
 
 （`scripts/run-react-linux.sh` 与之等价，但内部是 `cargo run --release --locked …`，**必要时会重新构建**
 二进制并处理 `node_modules`/前端构建；若要复测**当前** `target/release/yacr` 而不触发重建，请用上面的
@@ -118,12 +127,15 @@ Vulkan-only；`dx12` 在 Linux **显式失败**（`ProbeError::UnsupportedBacken
 `GDK_BACKEND` 由 `apps/app-linux/src/backend.rs` 在 GTK 启动前显式决议（**无静默回退**）：
 
 - **未设（`Auto`）**：`WAYLAND_DISPLAY` + `XDG_RUNTIME_DIR` 同时存在 → **原生 Wayland**；
-  否则仅有 `DISPLAY` → 解析为 X11，并**被显式拒绝**（标记行 + 退出码 4）；两者皆无 → 明确报错
-  （退出 2，**没有无头成功**）。
+  否则仅有 `DISPLAY` → 解析为 X11，走 `dom-canvas`；两者皆无 → 明确报错（退出 2，**没有无头成功**）。
 - **`GDK_BACKEND=wayland`**：显式接受（需要 `WAYLAND_DISPLAY` + `XDG_RUNTIME_DIR`，否则硬错，
   **不**回退 X11）。
-- **`GDK_BACKEND=x11`**：**显式 Unsupported**——在 GTK/Tauri 初始化之前打印
-  `yacr: unsupported-backend: x11` 与 i18n 诊断，退出 **4**；不创建窗口，也不落到旧排列。
+- **`GDK_BACKEND=x11`**：显式接受，走 **`dom-canvas`** 载体（无原生 CAD 子表面）。
+  **历史（2026-10-22–24）**：曾在 GTK/Tauri 初始化之前打印 `yacr: unsupported-backend: x11` + i18n 诊断并
+  退出 **4**；该拒绝**不再产生**，不得拿旧二进制/旧证据冒充当前行为。
+- **`dom-canvas` 的运行期失败仍显式拒绝**：WebView 无可用 WebGL2 时，前端经 `canvas_runtime_failed`
+  上报，宿主输出 `yacr: unsupported-runtime: webgl2` + i18n 诊断并退出 **6**——没有空白 canvas、
+  没有静默回退、不复活 X11 原生 child（判据：标记行第一，退出码辅助）。
 - 其它值 / 大小写不符 / 空或含空白 / `wayland,x11` 之类的多后端列表：硬错（引用原值），退出 2。
 - 仅 `Auto` 会把**解析结果**导出为 `GDK_BACKEND`，使 GDK 不能自行回退；用户显式值从不改写。
 
@@ -206,8 +218,9 @@ error-boundary **之外**的最小 chrome 壳上，正文渲染失败时仍可�
 
 - **原生 Wayland**：`GtkDrawingArea` 保持**非 native**（**不** `gdk_window_ensure_native`），宿主自建
   **app-owned `wl_subsurface`** 并只把该 child 交给渲染器（见上节）。
-- **X11/XWayland**：旧的原生 X child 窗口代码**编译/测试保留、运行时不可达**（`unreachable_since_dom_on_top`），
-  后端在 GTK 初始化前即被拒绝（退出码 4）。
+- **X11/XWayland**：走 **`dom-canvas`** 载体——没有原生 CAD 子窗口，也没有原生 CAD 会话
+  （像素来自 WebView 内的 wasm 会话）。旧的原生 X child 窗口代码**编译/测试保留、运行时不可达**
+  （`unreachable_since_dom_on_top`）。2026-10-22–24 的「GTK 初始化前拒绝、退出码 4」是**历史**。
 
 两种路径都**不允许**在顶层窗口或 GDK-owned surface 上直接建 Vulkan swapchain，也**不做** CPU 帧拷贝。
 
@@ -303,21 +316,29 @@ resize/minimize/restore；`YACR_PROBE_LIFECYCLE` 生命周期；**`YACR_PROBE_TO
 （`[probe] …` 行，`YACR_PROBE_CAD_LOG` 输出 JSON 状态，`[probe] geometry …` 记录 DOM rect/容器/DrawingArea/
 origin/scale/extent）。原生 Wayland 身份由协议日志（`WAYLAND_DEBUG=client` 的 child
 `wl_surface`/`get_subsurface`/`set_desync`/`set_position`/`place_below`/空 `input_region`）+
-适配器遥测证明；**原生视觉**由自身同 UID 的 Mutter `ScreenCast`（无安全策略变更/无安装/无 sudo）
-捕获的合成帧佐证（**有界截图视觉 PASS**，无 golden/精度声明）。X11/XWayland 现在**没有运行证据**
-（后端被拒绝，退出码 4）；保留的 `apps/app-linux/scripts/x11-window-grab.c` 是历史工具，**不得**用来
-冒充当前后端的证据。
+适配器遥测证明；**原生视觉**由自身同 UID 的 Mutter `ScreenCast`（不改安全策略、不装包、不提权）
+捕获的合成帧佐证（**有界截图视觉 PASS**，无 golden/精度声明）。
+
+**X11/XWayland（`dom-canvas`，2026-10-24 起）**：宿主正常启动，CAD 像素来自 WebView 内的
+wasm(WebGL2) 会话。本会话里 X11 抓屏（`ffmpeg -f x11grab`、`gnome-screenshot` 的 X11 回退）**全黑**，
+所以**两种载体统一**用同 UID Mutter `ScreenCast` 抓帧。**证据上限**：agent 侧输入注入在本会话**不可用**
+（`xdotool`/`ydotool` 的点击与滚轮到不了任何应用，连 GNOME 顶栏也无响应），因此**没有** agent 可复现的
+输入帧或像素差；**2026-10-24 用户手动测试（用户报告，非 agent 抓帧）**：X11 宿主上滚轮缩放与拖拽平移
+工作正常。结论只能写「**用户手动确认可操作**」，**不得**写「X11 已验收」。
+`apps/app-linux/scripts/x11-window-grab.c` 是**历史工具**（X11 `XGetImage`），当前路径不用它，其产物
+**不得**冒充本轮证据。
 
 **一键自动采集**：`scripts/collect-evidence.sh` 自动完成「构建 → 启动真实 `yacr`（`--open`，非
-`--probe`）→ 截图 → 汇总日志」：原生 Wayland 用 `scripts/screencast-capture.py`（同 UID Mutter
-`ScreenCast`）抓合成帧（`wayland-frame`），输出
-`${YACR_EVIDENCE_ROOT:-/tmp/opencode}/yacr-evidence-<UTC>Z/`（`results.tsv` 逐后端记录真实
-verdict/退出码/截图是否产出 + `README.md`）。X11 仍会被运行一次以采集**拒绝合同**：`x11` 行应为
-`UNSUPPORTED_BACKEND`，标注**标记行** `yacr: unsupported-backend: x11` 与退出码 4（分类以**标记行**
-为第一依据，码值仅辅助），并**不产生窗口/截图**。契约测试 `python3 scripts/test-collect-evidence.py`。
-该脚本以同 UID 会话运行，**不提权/不 `sudo`/不解锁会话/不改 portal 权限/不装包/不起虚拟显示**，
-无真实显示时非零退出；截图仅本地保存，不代表视觉正确性。Wayland 帧为**整屏合成**
-（`RecordMonitor`），会含桌面上其它窗口。
+`--probe`）→ 截图 → 汇总日志」。**两种载体都按真实运行采集**：原生 Wayland 与 X11(`dom-canvas`) 都用
+`scripts/screencast-capture.py`（同 UID Mutter `ScreenCast`）抓**整屏合成帧**（`wayland-frame.png` /
+`x11-frame.png`），输出 `${YACR_EVIDENCE_ROOT:-/tmp/opencode}/yacr-evidence-<UTC>Z/`（`results.tsv`
+逐后端记录真实 verdict/退出码/截图是否产出（含失败原因）+ `README.md`）。拒绝按**稳定标记行**
+分类（退出码仅辅助）：当前 `yacr: unsupported-runtime: webgl2`（退出码 6）→ `UNSUPPORTED_RUNTIME`；
+历史 `yacr: unsupported-backend: x11`（退出码 4）→ `UNSUPPORTED_BACKEND`，**仅为旧二进制/旧构建**
+保留解析。契约测试 `python3 scripts/test-collect-evidence.py`。该脚本以同 UID 会话运行；
+**2026-10-23 授权放宽**了提权/root/装包/解锁，但仍**禁止**虚拟或无头显示冒充真实会话证据、
+**禁止**软件渲染冒充真实 GPU；无真实显示时非零退出；截图仅本地保存，不代表视觉正确性。
+ScreenCast 帧为**整屏合成**（`RecordMonitor`），会含桌面上其它窗口。
 
 ### 本轮 DOM-on-top 生产证据（2026-10-23，有界）
 
@@ -331,6 +352,9 @@ verdict/退出码/截图是否产出 + `README.md`）。X11 仍会被运行一�
 | `yacr-evidence-wp3-fix1` | 透明修复后的构建与运行日志（Vulkan/P620、entityCount 4） | 截图缺失（屏保抑制 ScreenCast） |
 | `yacr-evidence-recapture1` | 透明修复后复采：生产视口/About/hover/minimize/textEdit 帧 + X11 拒绝行 | **有界 PASS**（A 几何满亮度、无蒙层；C About PASS；D textEdit 编辑器未像素证明；B 箭头抑制非确定性） |
 
+> 表中「X11 拒绝」行是 2026-10-23 当时的后端行为记录（历史）。2026-10-24 起 X11 走
+> `dom-canvas`，复跑会得到**真实运行**行（`x11-frame.png`）而不是 `UNSUPPORTED_BACKEND`。
+
 **透明修复后的像素复采与 Observer 重判已执行（有界）**：遮挡 bug 修复**像素验证 PASS**——满亮度
 fixture 几何直接透出生产 DOM 视口、无蒙层；About in-DOM 覆盖层 PASS。**未升级**：textEdit 编辑器
 内容（host-initiated open 降级 fallback）、光标抑制确定性、Wayland 最小化/还原恢复。
@@ -340,7 +364,9 @@ fixture 几何直接透出生产 DOM 视口、无蒙层；About in-DOM 覆盖层
 
 ## 验证状态与限制（不夸大）
 
-- **Linux 原生 Wayland 真实可运行**；X11/XWayland **显式 Unsupported**（退出码 4，无窗口）；
+- **Linux 原生 Wayland 真实可运行**；**X11/XWayland 自 2026-10-24 起走 `dom-canvas`**（宿主启动、
+  **用户手动确认**滚轮缩放/拖拽平移可用——用户报告，**无** agent 抓帧或像素差证据；2026-10-22–24 的
+  显式拒绝（exit 4）为**历史**）；
   Windows 是**已实现但视觉未验证**的宿主（Tier 0 编译门禁 + Wine 拒绝 smoke，见
   [`docs/windows-app.md`](windows-app.md)）；macOS/Android/Web 都是显式 NOT IMPLEMENTED 占位，
   不是可运行 GUI 产品。
@@ -354,7 +380,8 @@ fixture 几何直接透出生产 DOM 视口、无蒙层；About in-DOM 覆盖层
   释放/重建/恢复（**非** toplevel `wl_surface` 替换）；几何修复后 **Observer 有界截图视觉 PASS**；X11 运行回归
   PASS。退出码按 case：原生 baseline 捕获后 SIGTERM **143**，resized 与 X11 **自然 0**。完整命令/退出码/日志/
   边界见 `docs/validation-native-wayland-2026-10-16.md`。**历史证据**：此项的 X11 运行回归属
-  CAD-on-top 时期；自 DOM-on-top 起 X11 被显式拒绝（exit 4）。
+  CAD-on-top 时期；此后 X11 在 2026-10-22–24 被显式拒绝（exit 4），2026-10-24 起改走 `dom-canvas`。
+  旧结论不得当作当前 X11 证据。
 - **仍未运行 / 未支持**：**DPR>1/分数缩放**（只测 `scale=1`）、GTK **toplevel**
   替换、GPU 设备丢失、vendor 广度、几何/像素精度、性能/60fps、跨平台、打包、vendor/golden。
   **不得**据此宣称“完整原生 Wayland CAD 支持”。
@@ -374,14 +401,16 @@ fixture 几何直接透出生产 DOM 视口、无蒙层；About in-DOM 覆盖层
   vendor 广度、几何/像素精度、性能/60fps、跨合成器。
 - **最终 Oracle（W3 attempt3）：ACCEPT-WITH-LIMITATIONS（无 blocker）** —— **有界本地验收**（GNOME/Mutter +
   Quadro P620 + `scale=1`），不是完整产品/跨平台/vendor/golden/性能验收；X11 视觉**未**由 observer 判读
-  （仅运行证据 PASS）。**该终判属本轮之前的合成方式**（CAD-on-top）；DOM-on-top 的终判见生产验证记录。
+  （仅运行证据 PASS）。X11 的 `dom-canvas` 也仍只有**用户手动确认**，无 agent 像素/输入证据。
+  **该终判属本轮之前的合成方式**（CAD-on-top）；DOM-on-top 的终判见生产验证记录。
 
 - **P6 最终验证已执行（有界、分区）**：前端 43/43 + 构建、`cargo fmt/clippy`、四个 Python 门禁与十个
   Python 契约（含 18 项迁移守卫）、`--locked` 编译/wasm/workspace 测试（1825 passed/0 failed/19 ignored）、
   真实硬件 GPU（Quadro P620 / Vulkan / 真实 GTK XWayland）的 open+渲染 smoke、原生分区生命周期
   （forced unrealize→新 XID + generation 2、自然 exit 0）、外部 WM minimize→restore 与真实 resize；
-  完整命令/退出码/日志见 `docs/validation-react-linux-migration-2026-10-16.md`。**历史证据**：其 XWayland
-  运行路径自 DOM-on-top 起**已被拒绝**（exit 4），不得作为当前后端结论。
+  完整命令/退出码/日志见 `docs/validation-react-linux-migration-2026-10-16.md`。**历史证据**：该 XWayland
+  运行路径在 2026-10-22–24 被显式拒绝（exit 4），2026-10-24 起改走 `dom-canvas`；无论哪种状态，
+  旧结论都不得作为当前后端结论。
 - **仍未验证 / 未支持**：vendor DWG 兼容、精确视觉 golden、`input→visible` 性能、60fps 声明、
   真实鼠标光标锚定像素验收、真实 portal picker、设备丢失/跨平台一致性、打包。**gate 结论**：Gate P6
   attempt2 **ACCEPT-WITH-FIXES**（文档限定已应用）；observer 终判所观察截图**无重大视觉缺陷**；

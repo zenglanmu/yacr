@@ -5,11 +5,17 @@
 
 > **2026-10-16 迁移状态（2026-10-23 增补）**：桌面 UI 已由 Slint 迁移为 **React + Tauri 原生宿主**
 > （`apps/app-linux`，二进制 `yacr`）。`cad-ui-slint` 与所有 Slint 依赖已删除；macOS/Android/Web
-> 当前是**显式 NOT IMPLEMENTED 占位**，**不是可运行 GUI 产品**；旧的平台发布/打包脚本已退役或禁用。
+> 当时是**显式 NOT IMPLEMENTED 占位**（Web 的 wasm 会话已于 2026-10-24 复活，见下一条），
+> **不是可运行 GUI 产品**；旧的平台发布/打包脚本已退役或禁用。
 > **2026-10-23 起**：Linux 只支持**原生 Wayland**（X11/XWayland 显式 Unsupported，退出码 4）；
 > 合成方向是 **DOM-on-top**（[ADR 0023](adr/0023-dom-on-top-cross-host-composition.md)）；
 > **Windows 宿主已实现**（`apps/app-windows`，Tier 0 编译 + Wine 拒绝 smoke，视觉未验证）。
 > 见 ADR 0010、`docs/architecture.md`、`docs/react-linux-app.md`、`docs/windows-app.md`。
+
+> **2026-10-24 增补（Web）**：`apps/app-web` 的 wasm CAD 会话已复活（[ADR 0024](adr/0024-dom-canvas-wasm-cad-path.md)），
+> `scripts/build-web.sh` 重新产出**真实可服务**的浏览器 bundle（`apps/app-web/dist/`，本地构建、git 忽略，
+> 见「浏览器 bundle」一节）。这**不是**可交付产品：没有 CI 构建、没有发布通道，`app-web` 的
+> **host target** 仍是显式 NOT IMPLEMENTED 空壳，浏览器侧证据只到合成夹具。
 
 ## 验证范围（2026-10-15 用户决定，提效）
 
@@ -154,6 +160,33 @@ cargo build -p cad-cli-tools --release --locked
 `docs/cli.md`。离线 WGSL 校验（无需 GPU）：
 `cargo test -p cad-render-wgpu --test wgsl_validation --locked`。
 
+## 浏览器 bundle（本地可构建；CI / 发布未恢复）
+
+`apps/app-web` 是 `surfaceMode: dom-canvas` 的 **wasm CAD 会话**（ADR 0024）：wasm 内导入图纸、建
+显示表示、用渲染器的离屏帧 + wasm-only WebGL2 presenter 画进 DOM `<canvas>`。外壳
+`apps/app-web/web/`（`index.html`/`main.js`/`style.css`）无框架、无打包器，直接
+`import './pkg/app_web.js'`。
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"   # 需要 wasm32-unknown-unknown 目标与 wasm-bindgen 0.2.129
+bash scripts/build-web.sh              # pin 校验 → cargo build -p app-web → wasm-bindgen → 组装 dist
+python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
+# 浏览器打开 http://127.0.0.1:8090/ （file:// 不能实例化 wasm）
+```
+
+- 产物：`apps/app-web/web/pkg/{app_web.js,app_web_bg.wasm}`（wasm-bindgen `--target web`，用于直接
+  serve `apps/app-web/web/`）与 `apps/app-web/dist/{index.html,main.js,style.css,pkg/*}`（可部署
+  bundle）。两者都被 git 忽略，**不要提交**。
+- 与桌面 `dom-canvas` 共用**同一条** wasm 构建链：`scripts/build-canvas-wasm.sh` 与
+  `scripts/build-web.sh` 都经 `scripts/lib/wasm-toolchain.sh`（wasm-bindgen CLI 必须与 `Cargo.toml`
+  的 `=0.2.129` 钉住**完全一致**，否则硬失败）。产物目录每次从零重建，构件缺失/为空即非零退出，
+  **不产出半成品 bundle**。
+- **上限**：本地证据只到**合成夹具**（`docs/validation-dom-canvas-wasm-2026-10-24.md`：Chromium 141 /
+  WebKitGTK 2.52.6 + 真实 GPU，出图与 zoom；无浏览器矩阵、无 golden、无性能结论）。CI 的
+  `web-build`/`web-deploy`/`web-smoke` 仍 `if: false`，`scripts/deploy-cloudflare-pages.sh` 仍退役
+  非零——**没有** CI 产物、**没有**发布通道，只能手工上传 `apps/app-web/dist/`。
+- 构建成功**不是**运行/GPU/像素证据。
+
 ## 已退役 / 禁用的平台入口（勿当可用）
 
 以下入口**不是可运行的构建路径**；脚本显式非零失败或在 CI 中 `if: false` 硬禁用。**不要**把它们
@@ -161,7 +194,7 @@ cargo build -p cad-cli-tools --release --locked
 
 | 入口 | 状态 |
 |---|---|
-| `scripts/build-web.sh`、`scripts/deploy-cloudflare-pages.sh` | **RETIRED**——浏览器 UI 未实现；非零退出，不发布任何东西 |
+| `scripts/deploy-cloudflare-pages.sh` | **RETIRED**——没有验收过的发布通道/凭据；非零退出，注释里只指向本地 `apps/app-web/dist/` |
 | `scripts/build-android.sh` | **RETIRED**——Android UI 未实现（`apps/app-android` 为占位）；非零退出 |
 | `scripts/package-windows-release.sh` | **RETIRED**——无 Windows 发布流水线；非零退出（注意：`app-windows` **已是真实宿主**，退役的是**打包脚本**，不是 GUI 实现） |
 | `scripts/package-macos-release.sh` | **RETIRED**——macOS GUI 未实现（`apps/app-macos` 占位 `yacr-macos`）；非零退出 |
@@ -182,8 +215,12 @@ React/Tauri 宿主构建 **Flatpak** bundle（`bin/yacr` + committed `fonts/`，
   Wine 只做拒绝合同 smoke。见 `docs/windows-app.md`。
 - **macOS**：`apps/app-macos`（`yacr-macos`）仍是**显式 NOT IMPLEMENTED 失败桩**（打印诊断并
   `exit 1`）；CI `macos-check` 只做编译门禁，**不运行**，也不产出可分发 GUI。
-- **Android / Web**：`apps/app-android` / `apps/app-web` 是**显式 NOT IMPLEMENTED 占位**
-  （Android 打印退役诊断后 abort；Web wasm 入口返回错误）。旧的 wasm/APK 构建与部署全部退役。
+- **Android**：`apps/app-android` 是**显式 NOT IMPLEMENTED 占位**（打印退役诊断后 abort）；
+  旧的 APK 构建与部署全部退役。
+- **Web**：`apps/app-web` 的 **wasm CAD 会话**已复活并在本地可构建/可服务（`scripts/build-web.sh`，
+  见「浏览器 bundle」一节），但 `app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳；CI 的
+  `web-build`/`web-deploy`/`web-smoke` 仍硬禁用、`scripts/deploy-cloudflare-pages.sh` 仍退役，没有
+  发布通道。浏览器侧证据只到合成夹具（`docs/validation-dom-canvas-wasm-2026-10-24.md`）。
 - **Linux release**：`dev.yacr.app` Flatpak bundle 可**本地构建并安装**（`scripts/package-linux-release.sh`，
   2026-10-17 重启，见上）；但**没有受支持的发布通道**——未提交 Flathub、无分发产物，CI `linux-release`
   job 仍硬禁用。本机实测细节见 `docs/flatpak.md`。

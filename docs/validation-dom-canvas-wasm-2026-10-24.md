@@ -106,3 +106,63 @@ Playwright headed，viewport 640x480，加载同一页面：
 - 无 DOM 挂载测试、无 Playwright 驱动的仓库内测试（本轮 Playwright 仅用于一次性人工复核）。
 - 宿主 DOM diag 的 `canvas/wasmBinding/counts` 字段是**本轮新增的诊断**（`apps/app-linux/src/host/dom.rs`），
   它们是挂载/输入到达证据，**不是**像素或视觉验收。
+
+## 8. 真实 DWG 进 wasm（`open_bytes`，阶段 ⑧ 第一片）
+
+驱动：Playwright（Chromium 141，headed，900x700）加载 `apps/app-web/dist` 的浏览器 bundle，
+用 **File API**（`<input type=file>`）把真实 DWG 交给 `open_bytes`，不经任何 native 解析。
+
+| 观测项 | 合成 fixture | 真实 DWG `fixtures/complex-test.dwg` |
+|---|---|---|
+| 字节数 | 20,755 | **4,228,788** |
+| label | `synthetic-four-lines.dwg` | `complex-test.dwg` |
+| 导入 + 建场景 + 上传 | 63 ms | **14,118 ms** |
+| batches / draws | 4 / 1 | **145,947 / 7,707** |
+| **wasm heap** | 2,621,440 B | **1,909,850,112 B（≈1.91 GB）** |
+| JS `usedJSHeapSize` | 10.0 MB | 1,917,633,246 B |
+| 画布像素 | 4 条竖线 | 非黑像素 **18,364**、3,030 种颜色、bbox `8,12–882,693` |
+| page error | 0 | **0** |
+
+**能证明**：真实 DWG 的完整管线（acadrust 导入 → 显示表示 → 上传 → WebGL2 渲染 → canvas）
+**在 wasm 内成立**，画布出非平凡几何。**不能证明**：性能/内存预算达标（见下）、vendor 兼容、
+精度、视觉 golden、其它浏览器。
+
+**暴露的硬约束（阶段 ⑧ 的风险）**：一个 4.2 MB 的 DWG 就让 **wasm 堆到 ~1.91 GB**（32-bit wasm
+上限 4 GB），且单次导入 ~14 s。这意味着：
+- 大图在 wasm 内**必然撞上限**，不能承诺"浏览器打开合格样本范围内的 DWG"而不做预算工程；
+- 可行方向（需用户决策，**不得**自行发明 batch 线协议）：导入后**释放中间表示**、场景分批/流式上传、
+  解析与渲染解耦，或对超大图**显式拒绝**并给出诊断（`Unsupported`/预算诊断，不得空白/静默降级）。
+- 这些数字是**单次测量**，不是基准；也不代表其它机器/浏览器/构建配置。
+
+## 9. X11 宿主终态与修复记录（2026-10-24 追加）
+
+### 9.1 修掉的三个真实缺陷（均由真机运行暴露，非推测）
+
+1. **Vite dev 改写动态 import**：`import(/* @vite-ignore */ url)` → `__vite__injectQuery(url,'import')`
+   → public 产物带 `?import` 返回 **500** → WebKit 只报
+   `Importing a module script failed.`。**修法**：改由 public 下的 `bootstrap.js`（ESM）加载，
+   运行时不再有被改写的动态 import。
+2. **WebKitGTK `document.currentScript === undefined`（不是 `null`）**：`--target no-modules` 的
+   glue 顶层 `document.currentScript !== null` 判空失效 → `.src` 抛 `TypeError` → 顶层 `let
+   wasm_bindgen` 停在 TDZ → 后续 `typeof` 抛 `ReferenceError: Cannot access 'wasm_bindgen' before
+   initialization`。**修法**：放弃 no-modules，改用标准 ESM target。
+3. **Vite dev 拒绝把 `public/` 文件当模块加载**（截图证据：错误覆盖层原文
+   `This file is in /public … should not be imported from source code`）。**修法**：新增**仅 dev 生效**
+   的 Vite 插件（`apply: 'serve'`、`enforce: 'pre'`），自己按模块语义返回 `/canvas/<name>.js`
+   的磁盘字节（含 realpath 包含性校验与拒绝 `..`/嵌套/`.wasm`），生产构建不受影响
+   （`dist/canvas/*` 仍原样复制、运行时加载）。
+
+三个缺陷都被**显式拒绝**接住过（`yacr: unsupported-runtime: webgl2` + 退出码 6），没有出现空白窗口。
+
+### 9.2 终态帧（observer 独立判读，真实 X11/XWayland 会话）
+
+- 无任何错误覆盖层/横幅/红框（全图饱和红像素 **0**）。
+- CAD 分区：canvas `926×341`（backing 同尺寸）、纯黑（采样非线条像素最大值 **0**，无蒙层/渐变/带状）；
+  **4 条等距竖线** x=189/388/587/786（间距 199），中性 `R=G=B`，外侧两条因亚像素相位峰值为 202、
+  内侧 239（**不是**调暗层）；无水平线、无网格/UCS/光标残留。
+- 图纸标识：图纸标签页的**活动标签**显示 `synthetic-four-lines.dwg`（带关闭 `×`）；标题栏仍只有 `Yacr`。
+- 启动面板/空态内容不可见；状态栏与命令行无重叠、无裁切。
+- observer 终判：**yes —— 该帧读作“图纸已打开并显示”**。
+
+边界不变：X11=XWayland + GNOME/Mutter + `scale=1`；**硬件归属 NOT VERIFIED**；pan/zoom 为**用户手动
+确认**（无 agent 像素差证据）；真 X11 服务器/WM、其它合成器、DPR/多显示器、性能、vendor/golden 均未验。

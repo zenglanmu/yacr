@@ -1,12 +1,15 @@
 # DWG 打开与渲染测试指南
 
-> **2026-10-16 迁移更新（2026-10-23 增补）**：桌面宿主已改为 **React/Tauri + 原生 Wayland 子表面**
+> **2026-10-16 迁移更新（2026-10-23/24 增补）**：桌面宿主已改为 **React/Tauri + 原生 Wayland 子表面**
 > （`apps/app-linux`，bin `yacr`，`scripts/run-react-linux.sh`）；Slint 桌面与其测试脚本已退役，
 > Web/Android UI 为 NOT IMPLEMENTED 占位。下文提到真实 winit + Slint、浏览器 Playwright、
 > `check-web-*.mjs`/`verify-ui.sh` 等**已退役**；当前真实 GPU 路线见 `docs/react-linux-app.md`
-> 「证据机制」与 `scripts/collect-evidence.sh`。**2026-10-23 起**：Linux 只支持原生 Wayland
-> （X11/XWayland 显式拒绝，exit 4），合成方向为 DOM-on-top；Windows 宿主已实现但视觉
-> **PENDING user real-Windows spike**。旧 Slint 阶段的运行证据不得复用。
+> 「证据机制」与 `scripts/collect-evidence.sh`。**2026-10-24 起（ADR 0024 阶段 ④）**：X11/XWayland
+> **正常启动**，走 `surfaceMode=dom-canvas`（wasm CAD 会话画进 DOM `<canvas>`）；两种载体都用同 UID
+> Mutter `ScreenCast` 抓帧（`ffmpeg -f x11grab` 与 `gnome-screenshot` 的 X11 回退在本会话**全黑**）。
+> **历史**：2026-10-22–24 X11 曾在 GTK 初始化前被拒绝（`yacr: unsupported-backend: x11` + exit 4）；
+> **当前**的运行期拒绝是 WebGL2 缺失（`yacr: unsupported-runtime: webgl2` + exit 6）。
+> Windows 宿主已实现但视觉 **PENDING user real-Windows spike**。旧 Slint 阶段的运行证据不得复用。
 
 ## 1. 测试顺序与结论
 
@@ -159,8 +162,12 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
 
 ## 4. 第二层：WASM + Playwright 浏览器
 
-> **2026-10-23：本节已退役。** Web UI 是显式 NOT IMPLEMENTED 占位，`scripts/build-web.sh` 非零退出；
-> wasm 只保留**编译门禁**（平台隔离），没有浏览器运行验收。以下文字仅作历史记录。
+> **2026-10-24 更正（本节注意）：** Web 入口已复活为**本地** wasm 会话（`apps/app-web`，ADR 0024）：
+> `scripts/build-web.sh` 现在**成功**产出可服务 bundle（`apps/app-web/dist/`），命令与边界见
+> [build.md](build.md)「浏览器 bundle」。但 **CI/发布仍未恢复**（`web-build`/`web-deploy`/`web-smoke`
+> 仍 `if: false`），且下面这段带 `DIST=`/`WITH_FONTS=` 的流程属**旧 Slint web 宿主**（两个变量已不存在），
+> **不能照抄**。当前本地浏览器读数（合成夹具、Chromium/WebKitGTK + 真实 GPU）见
+> [validation-dom-canvas-wasm-2026-10-24.md](validation-dom-canvas-wasm-2026-10-24.md)。
 
 只在原生调试收敛后执行；前提为 wasm target、匹配锁文件的 wasm-bindgen CLI、
 外部安装的 Playwright/Chromium。浏览器环境配置参考 [validation-web.md](validation-web.md)。
@@ -208,10 +215,13 @@ CLI 显式回退字体与 Web 按目录自动加载的策略不同，应分别�
 3. **fixture 的层序 ≠ 生产 UI 的透明度**。回归夹具自己的 DOM 结构可以正确遮挡/混合，但产品
    `.shell`/`.workspace`/`.workspace__canvas` 曾涂不透明底导致 CAD 不可见（已修 `6e4bf06`）。
    夹具 PASS **不能**替代生产布局的像素证据。
-4. **每次运行用新目录**；保留失败/超时记录；`results.tsv` 以**稳定标记行**为第一分类依据
-   （X11 拒绝是 `UNSUPPORTED_BACKEND`，不是普通非零退出）。
-5. **说明边界**：Wayland 帧是整屏合成（可能含其它窗口，仅本地读判、不上传）；截图只是像素，
-   **不等于**视觉正确性、精度或 vendor 结论；一次 Observer PASS 不推广到其它合成器/DPI/GPU。
+4. **每次运行用新目录**；保留失败/超时记录；`results.tsv` 以**稳定标记行**为第一分类依据：
+   当前拒绝是 `yacr: unsupported-runtime: webgl2`（→ `UNSUPPORTED_RUNTIME`，exit 6）；历史拒绝
+   `yacr: unsupported-backend: x11`（→ `UNSUPPORTED_BACKEND`，exit 4，2026-10-22–24 已不再产生）
+   仍保留解析，用于识别旧二进制/旧构建。截图抓不到时记 `missing` + 原因，**不要**编造路径。
+5. **说明边界**：ScreenCast 帧是整屏合成（可能含其它窗口，仅本地读判、不上传）；截图只是像素，
+   **不等于**视觉正确性、精度或 vendor 结论，也不证明 OS 级输入到达了应用；一次 Observer PASS
+   不推广到其它合成器/DPI/GPU。
 
 ## 6. 交付记录
 

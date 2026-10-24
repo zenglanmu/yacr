@@ -114,9 +114,11 @@ apps/app-macos|app-android|app-web（显式 NOT IMPLEMENTED 占位）
     host 侧 `ShellState.popup` 模态围栏保留，清除为四触发（close / reload / renderer crash / exit）。
   - 业务层/渲染器不因此改变：单 presenter、renderer-only wgpu、无整幅回读。
 - **`apps/app-linux`** 是真实 Linux GUI（Tauri 2 WebView 中的 React chrome + GTK 中央原生 CAD
-  分区 + renderer-only wgpu），支持**原生 Wayland**（生产）与 **X11/XWayland**（**显式拒绝**）：
-  后端由 `backend.rs` 在 GTK 启动前决议 `GDK_BACKEND`；X11 输出稳定标记行
-  `yacr: unsupported-backend: x11` + i18n 诊断 + **退出码 4**，**无静默回退**。非 Linux 目标上
+  分区 + renderer-only wgpu），支持**原生 Wayland**（native-below 生产路径）与 **X11/XWayland**
+  （**DOM-canvas 载体**，ADR 0024）：后端由 `backend.rs` 在 GTK 启动前决议 `GDK_BACKEND` 与
+  `surfaceMode`；X11 上 wasm/WebGL2 CAD 会话画进 WebView 内 `<canvas>`，native 壳不建 CAD 会话；
+  WebGL2 不可用时输出稳定标记行 `yacr: unsupported-runtime: webgl2` + i18n 诊断 + **退出码 6**，
+  **无静默回退**（`yacr: unsupported-backend: x11` + 退出码 4 为**历史**合同）。非 Linux 目标上
   它编译为空库、二进制返回显式 NOT IMPLEMENTED。
 - **`apps/app-windows`** 是真实 Windows 宿主（Tauri 2 + 透明 WebView2 + Win32 child HWND +
   单一 DOM 漏斗），**已实现但视觉/运行时未验收**：WebView2 缺失 → 标记行
@@ -182,23 +184,26 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
   `scripts/package-windows-release.sh` 仍退役非零。**macOS/Android/Web** 是显式 NOT IMPLEMENTED
   占位（Android/Web 仅保留编译门禁）。旧平台发布/打包脚本已退役或禁用；Linux release 暂时不可用，
   等待替代打包验收。**不要**把已退役脚本当作可用流程。
-  **2026-10-23 立项（[ADR 0024](docs/adr/0024-dom-canvas-wasm-cad-path.md)，代码未开始）**：
-  X11/XWayland 的目标态是 **DOM-canvas 路径**（wasm/WebGL2 CAD 会话画进 DOM `<canvas>`，
-  `surfaceMode: dom-canvas`），浏览器宿主（`apps/app-web`）将共享**同一**路径。**两者当前都未实现**：
-  X11 仍显式拒绝（`yacr: unsupported-backend: x11` + 退出码 4），`app-web` 仍是退役桩
-  （`apps/app-web/src/lib.rs:16`）。本轮**只有能力探针**（WebKitGTK 2.52.6 / XWayland：WebGL2
-  上下文可用、`navigator.gpu` = false、无帧无截图），**没有**任何 X11 canvas 运行或视觉证据；
-  缺 WebGL2 的新拒绝合同（标记行 + 退出码 6）也**尚未实现**。**禁止**写成「X11 已支持」或
-  「web 宿主已恢复」。
+  **2026-10-23 立项 / 2026-10-24 第一批实现（[ADR 0024](docs/adr/0024-dom-canvas-wasm-cad-path.md)）**：
+  X11/XWayland 走 **DOM-canvas 路径**（wasm/WebGL2 CAD 会话画进 DOM `<canvas>`，
+  `surfaceMode: dom-canvas`），`apps/app-web` 的 wasm 会话共享**同一**路径；WebGL2 缺失 →
+  标记行 `yacr: unsupported-runtime: webgl2` + **退出码 6**（已实现）。**已取得的证据**
+  （`docs/validation-dom-canvas-wasm-2026-10-24.md`）：X11 宿主 `surfaceMode=dom-canvas` 启动、
+  canvas 挂载 + backing `626×341`、合成 fixture 出图（ScreenCast 抓帧）；**X11 上加/缩放平移经用户
+  手动确认**（用户报告，无 agent 像素差证据）；Chromium 141 与 WebKitGTK 2.52.6 本地出图与缩放。
+  **仍禁止**写成「X11 已验收」或「web 已发布」：真 X11 服务器/WM、其它合成器、**硬件归属
+  （NOT VERIFIED）**、DPR/多显示器、性能、vendor/golden、真实 DWG 内存预算、浏览器矩阵与 CI/发布
+  均未验证；agent 侧输入注入在本机不可用。
 - **渲染/端到端验证优先真实硬件 GPU**：只要环境存在真实显示与显卡（本机为 Wayland 桌面 +
   Intel UHD + Quadro P620，可用 `nvidia-smi`/DRM fdinfo 证明），验收**必须**走真实 GPU。
   当前桌面宿主（React/Tauri）的**唯一生产后端是原生 Wayland**（决策/子表面桥见
   `docs/adr/0011-native-wayland-subsurface.md` 与 [ADR 0023](docs/adr/0023-dom-on-top-cross-host-composition.md)；
   有界原生证据见 `docs/validation-native-wayland-2026-10-16.md` 与
-  `docs/validation-dom-on-top-production-2026-10-23.md`）。**X11/XWayland 被显式拒绝**
-  （标记行 `yacr: unsupported-backend: x11` + 退出码 4），**没有** X11 生产运行证据
-  （2026-10-23 起 X11 目标态改走 DOM-canvas，见 [ADR 0024](docs/adr/0024-dom-canvas-wasm-cad-path.md)；
-  **代码未开始**，拒绝行为暂不变）。
+  `docs/validation-dom-on-top-production-2026-10-23.md`）。**X11/XWayland 自 2026-10-24 起走
+  DOM-canvas**（[ADR 0024](docs/adr/0024-dom-canvas-wasm-cad-path.md)）：有界运行成立（合成 fixture
+  出图 + 用户手动确认缩放平移），但它**不是** native-below 的生产证据，且硬件归属、真 X11、性能均
+  **NOT VERIFIED**；历史拒绝合同（`yacr: unsupported-backend: x11` + 退出码 4）**不得**与当前
+  `webgl2` 码 6 混用。
   真实 GPU 路线是 env-gated 证据驱动（`apps/app-linux/src/evidence.rs`：
   `YACR_PROBE_EVIDENCE`/`YACR_PROBE_LIFECYCLE`）+ `scripts/collect-evidence.sh`
   （原生 Wayland 用同 UID Mutter `ScreenCast` 抓合成帧）。W3 曾执行有界原生运行（CAD/输入/生命周期/
@@ -251,10 +256,13 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
 **自动证据采集（一键：构建 + 启动 + 截图 + 汇总）**：`scripts/collect-evidence.sh` 串起
 「前端构建 → `cargo build --release` 宿主 → 按后端启动真实 `yacr`（`--open` + `--fonts-dir`，
 **不用** `--probe` 假打开）→ 截图 → 汇总日志」。原生 Wayland 后端用 `scripts/screencast-capture.py`
-经同 UID `org.gnome.Mutter.ScreenCast` 抓合成帧（`wayland-frame`）；**X11 后端只采集拒绝合同**：
-`x11` 行应为 `UNSUPPORTED_BACKEND`，以稳定标记行 `yacr: unsupported-backend: x11` 为第一依据
-（退出码 4 仅辅助），且**不产生窗口/截图**。`apps/app-linux/scripts/x11-window-grab.c`（`shot-top`/
-`shot-cad`）是**历史 X11 工具**，当前后端被拒绝，**不得**用其产物冒充本轮证据。输出落
+经同 UID `org.gnome.Mutter.ScreenCast` 抓合成帧；**X11 自 2026-10-24 起是真实运行**
+（`surfaceMode=dom-canvas`），同样用 ScreenCast 抓 `x11/x11-frame.png`；**拒绝合同**改为
+`webgl2` 能力缺失：稳定标记行 `yacr: unsupported-runtime: webgl2` + **退出码 6** → `UNSUPPORTED_RUNTIME`
+（标记行第一依据，退出码辅助）。历史 `UNSUPPORTED_BACKEND`（`yacr: unsupported-backend: x11` +
+退出码 4）解析保留，仅用于旧构建。X11 抓屏**不得**用 `ffmpeg -f x11grab`/`gnome-screenshot`
+（本会话在 Wayland 合成下全黑）；`apps/app-linux/scripts/x11-window-grab.c` 仍是**历史工具**，
+不得冒充证据。输出落
 `${YACR_EVIDENCE_ROOT:-/tmp/opencode}/yacr-evidence-<UTC>Z/`：`results.tsv` 逐后端记录
 `NATURAL_EXIT`/`PLANNED_TIMEOUT`/`SKIPPED`/`NO_DISPLAY`/`UNSUPPORTED_BACKEND`、真实退出码、
 截图 `captured`/`missing`；`README.md` 附授权边界。契约测试

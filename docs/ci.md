@@ -4,8 +4,10 @@
 `docs/build.md`；本文件只说明 workflow 如何镜像该门禁，以及哪些层次**已退役/未运行**。
 
 工作流文件：`.github/workflows/core.yml`（核心质量层）与 `.github/workflows/build.yml`
-（构建/校验层）。校验脚本：`scripts/check-workflows.py`（必需 job 片段 + 退役 job 硬禁用契约）、
-`scripts/test-linux-workflow.py`（变异契约）、`scripts/test-ui-migration-guards.py`（迁移守卫契约）。
+（构建/校验层）。校验脚本：`scripts/check-workflows.py`（必需 job 片段 + 退役 job 硬禁用契约 +
+本地浏览器 bundle 入口契约）、`scripts/test-linux-workflow.py`（变异契约）、
+`scripts/test-web-deploy-workflow.py`（web bundle/部署入口变异契约）、
+`scripts/test-ui-migration-guards.py`（迁移守卫契约）。
 
 > **2026-10-16 迁移状态（2026-10-23 增补）**：桌面已迁移到 React/Tauri（`apps/app-linux`、`yacr`），
 > Slint 退役。编译门禁已加入 Tauri/GTK 前置（`libwebkit2gtk-4.1-dev`）与 React 前端构建
@@ -14,6 +16,11 @@
 > Linux 宿主中被显式拒绝（退出码 4），CI 不运行 GUI。8 个发布/Web job 以 `if: false`
 > **硬禁用**并以 `RETIRED` 标记，**不可通过仓库变量重新启用**，也不含 `secrets.…` 发布路径。
 > 见 ADR 0010 与 ADR 0023。
+
+> **2026-10-24 增补（Web）**：`apps/app-web` 的 wasm CAD 会话已复活（ADR 0024），
+> `scripts/build-web.sh` **重新成为真实构建入口**（产出 `apps/app-web/dist/`），不再是非零退役桩。
+> **CI 没有因此改变**：`web-build`/`web-deploy`/`web-smoke` 仍 `if: false` 硬禁用，
+> `scripts/deploy-cloudflare-pages.sh` 仍退役非零；本文件不声称任何 web CI/发布已恢复。
 
 > **本环境（无 GitHub runner、无 `gh` 权限）没有实际执行这些 job**；本文件描述的是 workflow 内容
 > 与预期，**不是通过证据**。真实 job URL/commit/结果应写入 `docs/validation*.md`。
@@ -58,7 +65,13 @@ Windows MSVC `clippy`/`check`/release `build`、MinGW GNU release `build`、`app
 `web-build`、`web-deploy`、`web-smoke`、`android-apk`、`android-release`、`linux-release`、
 `windows-release`、`macos-release`。
 
-含义：浏览器 UI / Android UI / macOS GUI 已退役为显式 NOT IMPLEMENTED 占位；Windows 宿主 2026-10-23 起已实现，`windows-check` 只是**编译门禁**（≠运行验收），`windows-release` 仍硬禁用。
+含义：Android UI / macOS GUI 仍已退役为显式 NOT IMPLEMENTED 占位；Windows 宿主 2026-10-23 起已实现，
+`windows-check` 只是**编译门禁**（≠运行验收），`windows-release` 仍硬禁用。**Web 是另一种情况**：
+wasm CAD 会话（`apps/app-web`）已于 2026-10-24 复活，并在**本地**构建出真实可服务的 bundle
+（`scripts/build-web.sh` → `apps/app-web/dist/`，见 `docs/build.md`）；但 CI 侧 `web-build`/
+`web-deploy`/`web-smoke` 三个 job 与 `scripts/deploy-cloudflare-pages.sh` **仍然硬禁用/退役**——
+没有 CI 构建、没有发布通道、没有浏览器矩阵/像素证据。`check-workflows.py` 同时断言两件事：
+本地 bundle 脚本是**真实构建**（不是 `NOT IMPLEMENTED` 桩），发布入口仍**非零失败**。
 `linux-release` 的**脚本**已于 2026-10-17 重启（本地可构建，见 `docs/flatpak.md`），但该 CI job 仍
 **硬禁用**；它与其余 job 一样不会产出或发布任何产物。
 
@@ -71,7 +84,11 @@ Windows MSVC `clippy`/`check`/release `build`、MinGW GNU release `build`、`app
 | Rust | `1.99.0` | `rust-toolchain.toml` |
 | Node | 见 workflow `NODE_VERSION` | React 前端构建/测试 |
 
-退役的 wasm-bindgen / Android / Playwright 环境钉住项已随对应 job 删除。
+退役的 wasm-bindgen / Android / Playwright 环境钉住项已随对应 job 删除：CI **不再**安装
+wasm-bindgen CLI。**本地** bundle 构建（`scripts/build-web.sh`，与 `scripts/build-canvas-wasm.sh`
+共用 `scripts/lib/wasm-toolchain.sh`）自己校验 wasm-bindgen CLI 与 `Cargo.toml` 的 `=0.2.129`
+钉住**完全一致**，不一致即硬失败；`check-workflows.py` 断言该 pin 检查与
+`cargo build -p app-web --target wasm32-unknown-unknown --release --locked` 不被删除。
 
 ## 本层 NOT RUN（明确未运行）
 
@@ -84,6 +101,10 @@ Windows MSVC `clippy`/`check`/release `build`、MinGW GNU release `build`、`app
 - 8 个退役 job：**永远不会**在受支持配置下运行（硬禁用）。
 - **CI 上的真实 GPU / 黄金图 / 浏览器矩阵 / Android 真机**：未运行。GitHub 托管 runner 无 GPU，
   软件渲染不能作为真实 GPU 证据。
+- **浏览器 bundle**：`scripts/build-web.sh` 只在本地手工运行；CI 的 `web-build`/`web-deploy`/
+  `web-smoke` 仍硬禁用，因此**没有** CI bundle 产物、没有发布、也没有浏览器矩阵/像素证据。本地
+  真实浏览器读数（Chromium 141 / WebKitGTK 2.52.6，合成夹具）记录在
+  `docs/validation-dom-canvas-wasm-2026-10-24.md`，属**本地**证据，不是 CI 证据。
 - **Linux 发布包**：CI 上仍没有受支持的流水线（`linux-release` 硬禁用）。`package-linux-release.sh`
   已于 2026-10-17 重启，本地可构建并安装 `.flatpak`（证据见
   `docs/validation-flatpak-linux-2026-10-17.md`）；**未**发布到 Flathub，也未在 CI 运行。
@@ -116,18 +137,32 @@ python3 scripts/test-android-icon.py
 cargo test -p cad-render-wgpu --test wgsl_validation --locked
 ```
 
+浏览器 bundle（本地构建，**不是**退役入口，CI 未恢复）：
+
+```bash
+bash scripts/build-web.sh    # → apps/app-web/dist/{index.html,main.js,style.css,pkg/app_web.js,pkg/app_web_bg.wasm}
+python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
+```
+
+产物目录（`apps/app-web/dist/`、`apps/app-web/web/pkg/`）都被 git 忽略；**CI 不运行此命令**
+（`web-build` 等 job 仍 `if: false`），也没有发布步骤。它不会产出半成品：构件缺失/为空、
+wasm-bindgen pin 不符、工具链缺失都硬失败。
+
 退役脚本的负向断言（每个应非零退出）：
 
 ```bash
-for s in build-web deploy-cloudflare-pages build-android \
+for s in deploy-cloudflare-pages build-android \
          package-windows-release package-macos-release; do
   bash "scripts/$s.sh"; echo "$s exit=$? (expect 1)"
 done
 ```
 
-`package-linux-release.sh` **不在**该列表：它已于 2026-10-17 重启，按退出码 0 完成构建（本地产物，
-无发布，见 `docs/flatpak.md`）。
+`scripts/build-web.sh` **不在**该列表：它构建真实 bundle 并以 0 退出；**不允许**用「退役桩」
+冒充成功。`package-linux-release.sh` **不在**负向列表：
+它已于 2026-10-17 重启，按退出码 0 完成构建（本地产物，无发布，见 `docs/flatpak.md`）。
 
 `scripts/check-workflows.py` 有 PyYAML 时做真实解析，否则退化为结构化文本检查并如实说明；
 变异契约（`test-linux-workflow.py`、`test-web-deploy-workflow.py`、`test-package-*.py`）故意删除
 关键片段并断言检查**必然报错**，证明门禁不是摆设。它们都不触网、不部署、不执行 release。
+`test-web-deploy-workflow.py` 既证明本地 bundle 契约（pin 检查、wasm32 构建、输出目录与打印一致）
+会因回归成 `NOT IMPLEMENTED` 桩或改错目录而失败，也证明发布入口仍是硬禁用的非零桩。
