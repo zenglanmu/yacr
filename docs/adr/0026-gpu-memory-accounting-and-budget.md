@@ -37,8 +37,13 @@ peak 记录真实的"旧常驻 + 新 staging 同时驻留"瞬态。
 - 预算基准由固定字节改为 **卡上显存**：`percent_of_vram`（默认 **90**，范围 10–100，可在
   **选项对话框**里改，持久化为 `view.gpuBudget.percent`）。
 - 解析顺序：`explicit_bytes`（`--gpu-budget-mb` / `YACR_GPU_BUDGET_MB`，`0`=取消上限） **>**
-  `percent × VRAM` **>** 3 GiB 兜底（仅当探测不到 VRAM，标 `Estimate`）。
-  报告新增 `vram_bytes` / `vram_all_heaps_bytes` / `budget_percent` / `budget_source`。
+  `percent × VRAM` **>** **无上限**。
+- **探测不到显存就不做预算**（用户 2026-10-24 决定）：不再有 3 GiB 估算兜底。此时
+  `cap_bytes = None`、`budget_bytes = None`、`budget_source = unprobed`，拒绝路径不会因"缺少探测"
+  而触发。理由：**猜一个上限会误拒合法图纸**（本 ADR 已记录 512 MiB 误拒 1.57 GB 状态的真实事故）。
+- 报告新增 `vram_bytes` / `vram_all_heaps_bytes` / `budget_percent` / `budget_source`
+  （`vram-percent` / `explicit-bytes` / `unprobed`）。`GpuMemorySource::Estimate` 仍保留但**只**表示
+  "没有 device / 无法测量"，不再有任何预算含义。
 - **VRAM 口径 = 最大的单个 device-local heap**（Vulkan：`VkPhysicalDeviceMemoryProperties`，经
   `as_hal::<vulkan::Adapter>()` + `ash 0.38`）。**不能用所有 device-local heap 求和**：实测该求和在
   4 GiB 卡上得到 4,552,916,992 B（**+6.0 %**，多出的是 host-visible 的 device-local 堆），
@@ -51,7 +56,7 @@ peak 记录真实的"旧常驻 + 新 staging 同时驻留"瞬态。
 
 ### D2 显式预算与显式拒绝
 
-- 无 VRAM 时的兜底：`DEFAULT_GPU_BUDGET_BYTES = 3 GiB`，标 `Estimate`（见 D2'）。
+- 无 VRAM 且无显式字节时**不设上限**（见 D2'），不猜默认值。
 - 覆盖顺序：`--gpu-budget-mb` > `YACR_GPU_BUDGET_MB` > 默认；`0` = 显式取消上限（并如实报告）。
 - 准入点在上传 staging 之前（`prepare_upload_batches` / `upload_images` / `upload_masks` /
   `ensure_target` / `ensure_pick_target`）。拒绝时**常驻场景保持可用**，返回

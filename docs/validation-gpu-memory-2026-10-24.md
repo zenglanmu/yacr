@@ -111,3 +111,17 @@ gpu-memory: total=2107964952 buffer=2100592152 texture=7372800 peak=2107964952
 - `vram_bytes` 是**堆容量**，不是空闲显存；也不含其它进程占用。
 - 只对 Vulkan 生效；D3D12/GL/Metal 本轮为 `None` → 3 GiB `Estimate` 兜底（D3D12 的 DXGI 查询未做）。
 - 未测：其它 GPU/驱动、多 GPU、共享显存 iGPU、真 X11/Windows。
+
+
+## 8. 探测不到 = 不设预算（2026-10-24 追加）
+
+- 决策：**去掉 3 GiB 估算兜底**。无 `vram_bytes` 且无显式 `--gpu-budget-mb` 时
+  `cap_bytes = None`、`budget_source = unprobed`；拒绝路径不会因缺少探测而触发。
+- 单测覆盖（本机 P620 能探测，**无法**现场构造未探测后端）：
+  - 无探测 → 巨型常驻集合也**不拒绝**，报告 `budget=none cap=none budget_source=unprobed`；
+  - 配置了百分比但无探测 → 仍 unprobed（百分比不生效）；
+  - 无探测 + 显式字节 → **仍会拒绝**（显式上限不依赖探测）。
+- 现场可复验的部分（Vulkan/P620）：默认 90 % 行为不变
+  （`vram=4294967296`、`cap=3865470566`、`budget_source=vram-percent`，exit 0）。
+- 边界：`budget_source=unprobed` 的**运行时**证据为 **NOT RUN**（本机后端可探测），只有单测；
+  D3D12/GL/Metal 的未探测路径同样只有单测。

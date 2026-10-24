@@ -1,3 +1,26 @@
+## 2026-10-24（续 3）GPU 预算改为显存百分比；探测不到则不设预算
+
+### 结论
+
+GPU 预算基准从"固定 3 GiB"改为 **显存百分比（默认 90 %）**，可在**选项对话框**改
+（`view.gpuBudget.percent`，10–100，越界拒绝不裁剪）；解析顺序
+`--gpu-budget-mb`（显式字节，0=取消）**>** `percent × VRAM` **>** **无上限**。
+**探测不到显存就不做预算**（`budget_source=unprobed`）：不再用 3 GiB 估算兜底——因为猜一个上限
+会误拒合法图纸（512 MiB 曾误拒 1.57 GB 的真实状态）。
+
+VRAM 口径 = **最大单个 device-local heap**（Vulkan：`as_hal` + `ash 0.38`；实测堆求和偏高 **6 %**，
+求和值仅作 `vram_all_heaps_bytes` 报告，永不驱动 cap）。P620 实测 `vram=4,294,967,296`（4.00 GiB）→
+90 % = **3,865,470,566**（3.60 GiB），fixture 常驻 2.11 GB，余量充足；`--gpu-budget-percent 10` →
+exit 7 + `gpu-memory-refused` + 无 PNG。
+
+### 边界
+
+- 探测仅 **Vulkan**；D3D12/GL/Metal 未实现探测 ⇒ 无预算运行（不是 3 GiB，也不是拒绝）。
+- `budget_source=unprobed` 的**运行时**证据 NOT RUN（本机后端可探测），只有单测。
+- `vram_bytes` 是堆容量，不是空闲显存，不含其它进程。
+
+---
+
 ## 2026-10-24（续 2）原生 GPU 显存记账与预算（ADR 0026）
 
 ### 结论

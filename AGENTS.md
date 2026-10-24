@@ -200,8 +200,9 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
   开图 **14.1 s → 11.2 s**；**峰值仍由导入/建场景阶段决定**，大图预算仍未达标。
   **GPU 侧同样有预算**（[ADR 0026](docs/adr/0026-gpu-memory-accounting-and-budget.md)）：渲染器按类目
   记账（current/peak，drop guard 精确退费），预算基准是**显存百分比**（默认 **90 %**，选项对话框可改
-  10–100，持久化 `view.gpuBudget.percent`；`--gpu-budget-mb` 显式字节 > 百分比 > 3 GiB 兜底），
-  VRAM 口径 = **最大单个 device-local heap**（Vulkan，ash；**不得**用堆求和，实测偏高 6 %），拒绝为
+  10–100，持久化 `view.gpuBudget.percent`；`--gpu-budget-mb` 显式字节 > 百分比 > **无上限**），
+  VRAM 口径 = **最大单个 device-local heap**（Vulkan，ash；**不得**用堆求和，实测偏高 6 %）；
+  **探测不到显存就不设预算**（`budget_source=unprobed`，不再有 3 GiB 估算兜底），拒绝为
   `RenderError::GpuMemory` + CLI **退出码 7** + 不写 PNG。实测授权样本常驻 **2.11 GB**
   （驱动 allocator 交叉校验差 **0.07 %**），P620 上 `vram=4,294,967,296`（4.00 GiB）→ 90 % =
   **3,865,470,566**；其中 **`stream` 1.70 GB** 为最大头（渲染器优化另立项）。
