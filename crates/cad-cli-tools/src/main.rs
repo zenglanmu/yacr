@@ -68,8 +68,8 @@ Options:
                           renderer may claim. Precedence: this flag >
                           YACR_GPU_BUDGET_PERCENT env var > the 90 % default.
                           The probe is advertised device-local memory, not free
-                          memory, and falls back to a 3 GiB estimate (reported as
-                          budget_source=estimate) when the backend cannot answer.
+                          memory. When the backend cannot answer, no cap is
+                          applied (budget_source=unprobed); nothing is guessed.
                           --gpu-budget-mb / YACR_GPU_BUDGET_MB still wins.
   --gpu-memory-detail     render/plot: also print the per-category GPU memory
                           breakdown on stderr
@@ -77,7 +77,7 @@ Options:
 GPU memory report (render/plot, after a successful frame; stderr):
   gpu-memory: total=<n> buffer=<n> texture=<n> peak=<n> budget=<n|none>
               cap=<n|none> vram=<n|none> percent=<n|none>
-              budget_source=<vram-percent|explicit-bytes|estimate>
+              budget_source=<vram-percent|explicit-bytes|unprobed>
               source=<accounted|allocator-report|estimate>
               allocator_total=<n|none> reserved=<n|none>
   Every number is the renderer's own report. `vram` is the only field about the

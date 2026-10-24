@@ -146,8 +146,8 @@ pub(crate) fn wgpu_backend_preference() -> Option<String> {
 /// Apply the configured GPU-memory budget percentage to a render session.
 ///
 /// The percentage is an **application policy**: the renderer resolves it against
-/// the probed device-local VRAM (or an explicit `YACR_GPU_BUDGET_MB` cap, or its
-/// 3 GiB estimate fallback) and labels the result on
+/// the probed device-local VRAM (or an explicit `YACR_GPU_BUDGET_MB` cap), and
+/// applies **no cap at all** when neither exists; it labels the result on
 /// [`cad_render_wgpu::GpuMemoryReport::budget_source`]. The host never converts it
 /// to bytes. The engine keeps the policy across device re-attach, because a
 /// re-attach constructs a fresh renderer (see

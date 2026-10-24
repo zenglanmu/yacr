@@ -350,7 +350,7 @@ fn usage_documents_the_gpu_budget_report_and_exit_code_seven() {
         // The report line and the refusal line are part of the documented
         // machine surface, not an implementation detail.
         "gpu-memory: total=",
-        "budget_source=<vram-percent|explicit-bytes|estimate>",
+        "budget_source=<vram-percent|explicit-bytes|unprobed>",
         "gpu-memory-refused: origin=",
         "7 GPU memory refused",
     ] {

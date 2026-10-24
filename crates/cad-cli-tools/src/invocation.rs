@@ -180,8 +180,8 @@ impl GpuPreference {
 /// The existence of `--gpu-budget-mb` in the process arguments.
 ///
 /// Tri-state on purpose: an **absent** flag must leave the renderer's own policy
-/// (`YACR_GPU_BUDGET_MB`, else the percentage of probed VRAM, else the 3 GiB
-/// application estimate) untouched, while `--gpu-budget-mb 0` is an explicit
+/// (`YACR_GPU_BUDGET_MB`, else the percentage of probed VRAM, else no cap at all
+/// when the backend cannot be probed) untouched, while `--gpu-budget-mb 0` is an explicit
 /// "uncapped" that must beat both. Collapsing the two into `Option<u64>` would
 /// make `0` indistinguishable from "not given".
 ///
@@ -315,8 +315,8 @@ pub struct CliInvocation {
     /// `Absent` flag keeps the renderer's own env/default policy, and
     /// `Uncapped`/`Capped` replace the cap. An explicit cap always wins over
     /// `--gpu-budget-percent` / `YACR_GPU_BUDGET_PERCENT` (the renderer's
-    /// documented `explicit_bytes > percent_of_vram > estimate`). The cap is an
-    /// application estimate, never the card's VRAM.
+    /// documented `explicit_bytes > percent_of_vram`), and there is no cap at all
+    /// when neither is available. The cap is never the card's VRAM itself.
     pub gpu_budget_flag: GpuBudgetFlag,
     /// `--gpu-budget-percent` (render/plot): share of the probed device-local VRAM.
     ///

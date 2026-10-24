@@ -795,7 +795,7 @@ fn gpu_memory_report_line_has_exact_field_order_and_none_spelling() {
     let bare = cad_render_wgpu::GpuMemoryReport {
         budget_bytes: None,
         cap_bytes: None,
-        budget_source: BudgetSource::Estimate,
+        budget_source: BudgetSource::Unprobed,
         vram_bytes: None,
         vram_all_heaps_bytes: None,
         budget_percent: None,
@@ -805,7 +805,7 @@ fn gpu_memory_report_line_has_exact_field_order_and_none_spelling() {
     assert_eq!(
         gpu_memory_line(&bare),
         "gpu-memory: total=5120 buffer=4096 texture=1024 peak=6144 budget=none cap=none \
-         vram=none percent=none budget_source=estimate source=estimate allocator_total=none \
+         vram=none percent=none budget_source=unprobed source=estimate allocator_total=none \
          reserved=none"
     );
     // The allocator cross-check is reported when the backend produces one.

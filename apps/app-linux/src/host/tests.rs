@@ -503,6 +503,7 @@ fn the_gpu_memory_line_names_the_policy_and_the_renderer_totals() {
         cap_bytes: Some(3_686_744_064),
         budget_source: BudgetSource::VramPercent,
         vram_bytes: Some(4_096_000_000),
+        vram_all_heaps_bytes: Some(4_096_000_000),
         budget_percent: Some(90),
         source: GpuMemorySource::Estimate,
         category_bytes,
@@ -514,18 +515,21 @@ fn the_gpu_memory_line_names_the_policy_and_the_renderer_totals() {
         "[probe] gpu-memory vram_bytes=4096000000 budget_percent=90 \
          budget_source=vram-percent total=1024 peak=2048 cap=3686744064"
     );
-    // A backend without a VRAM probe and an estimate fallback spell `none` for the
-    // absent fields instead of inventing a number.
+    // A backend without a VRAM probe is **unbudgeted**: absent fields spell
+    // `none` and no cap is invented.
     let estimated = GpuMemoryReport {
-        budget_source: BudgetSource::Estimate,
+        budget_bytes: None,
+        cap_bytes: None,
+        budget_source: BudgetSource::Unprobed,
         vram_bytes: None,
+        vram_all_heaps_bytes: None,
         budget_percent: None,
         ..report
     };
     assert_eq!(
         gpu_memory_line(&estimated),
-        "[probe] gpu-memory vram_bytes=none budget_percent=none budget_source=estimate \
-         total=1024 peak=2048 cap=3686744064"
+        "[probe] gpu-memory vram_bytes=none budget_percent=none budget_source=unprobed \
+         total=1024 peak=2048 cap=none"
     );
     // An explicitly uncapped policy prints `cap=none`.
     let uncapped = GpuMemoryReport {
