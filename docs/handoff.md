@@ -1,3 +1,30 @@
+## 2026-10-24（续）阶段 ⑧ 首批：预算拒绝 / 分块上传 / Worker 隔离
+
+### 结论
+
+ADR 0025 落地并实测：`complex-test.dwg`（4.2 MB）的 wasm 堆 **1.91 GB → 1.43 GB（−25 %）**、
+开图 **14.1 s → 11.2 s（−21 %）**；上传改为 **114 块、单点原子提交**；新增**显式预算拒绝**
+（64 MiB 输入 / 3 GiB 堆，`step:"budget"`，旧文档与像素保持不变）；**Worker 隔离按能力**：
+Chromium 141 实测 `target=offscreen-canvas` + `isolation=worker`（zoom 后 `presented=2`），
+WebKitGTK 2.52.6 实测 Worker 内 `getContext("webgl2") === null`，因此显式报
+`isolation=main-thread (no WebGL2 in worker)`，**不静默退回**。
+
+### 关键取舍（写进 ADR 0025，不许回退）
+
+- 预算是**显式拒绝**，不是降级：`budget` 步骤带预算名/上限/实测值；`open_bytes` 的 `&[u8]` 复制
+  发生在检查前（上限 64 MiB 使其有界），更省需调用方先按 `file.size` 拒绝。
+- `DB_RETAINED = false` 是**声明式决定**：canvas 契约当前无保存/测量/查询；引入时必须翻真并改 ADR。
+- 分块上传**必须**在一次 `commit_upload` 发布，batch 数不匹配即硬失败——禁止"部分场景算成功"。
+- Worker 只在**实测支持**的引擎上声明；WebKitGTK 的缺口是能力事实，不是待办。
+
+### 仍未达标（下一轮）
+
+- 峰值 **1.43 GB** 仍由 `cad-import-acadrust` + `cad-app::render_scene` 的导入/建场景阶段决定；
+  要真正支持大图需在导入/表示层做流式/分页或跨 crate 释放 —— 需另立 ADR，**不得**用 batch 线协议绕过。
+- 浏览器 CI/发布仍未恢复；`worker.js` 已进 `apps/app-web/dist`（`SHELL_FILES`），但无 CI 校验。
+
+---
+
 ## 2026-10-24 DOM-canvas 落地第一批实现：X11 真机出图，OS 级输入仍未验证
 
 ### 1. 结论

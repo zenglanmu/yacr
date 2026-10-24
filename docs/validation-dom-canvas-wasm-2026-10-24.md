@@ -166,3 +166,44 @@ Playwright headed，viewport 640x480，加载同一页面：
 
 边界不变：X11=XWayland + GNOME/Mutter + `scale=1`；**硬件归属 NOT VERIFIED**；pan/zoom 为**用户手动
 确认**（无 agent 像素差证据）；真 X11 服务器/WM、其它合成器、DPR/多显示器、性能、vendor/golden 均未验。
+
+## 10. 阶段 ⑧ 首批：预算 / 分块上传 / Worker 隔离（2026-10-24 追加）
+
+### 10.1 内存与耗时（同一台机器、同一 release wasm、Chromium 141）
+
+| 观测 | 改造前 | 改造后（主线程） | 改造后（Worker 隔离） |
+|---|---|---|---|
+| `complex-test.dwg`（4,228,788 B） | 4,228,788 B | 同 | 同 |
+| wasm heap | **1,909,850,112 B** | **1,425,866,752 B（−25.3 %）** | **1,423,900,672 B** |
+| 开图（导入+构建+上传） | **14,118 ms** | **11,204 ms（−20.6 %）** | **11,387 ms** |
+| batches / draws | 145,947 / 7,707 | 145,947 / 7,709 | 145,947 / 7,709 |
+| 上传 | 单次全量 | **114 块，峰值 2,048 batch/块**，单点原子提交 | 同左 |
+| `db_retained` | 未声明 | **false** | false |
+| `page errors` | 0 | 0 | 0 |
+| 画布 | 非黑 18,364 px | 非黑 18,372 px | 非黑 **19,864 px** |
+
+`draws` +2 是分块边界的已知代价（ADR 0025 D3），不是回归。
+
+### 10.2 显式预算拒绝（不是空白画布）
+
+- 输入 **73,400,320 B** 的假 DWG（`dd` 生成，非 CAD 样本）→
+  `open … failed: budget: … is 73400320 bytes, over MAX_INPUT_BYTES = 67108864 bytes; the file was
+  not parsed and the open document is unchanged`。
+- 拒绝后 `document()` 仍是原会话（`label=synthetic-four-lines.dwg`、`batches=4`、像素不变）；
+  仅 `wasm_heap_bytes` 因 70 MiB 入参复制而升到 76 MB（D1 已记录该代价）。
+
+### 10.3 Worker 隔离与能力声明（实测）
+
+- **Chromium 141**：`target=offscreen-canvas`、`isolation=worker`；`start` 后 `presented=1`，
+  真实 `mouse.wheel` 后 `presented=2`，画布 15,328 px 变化；4 条 fixture 竖线可见。
+- **WebKitGTK 2.52.6**：`target=html-canvas`、`isolation=main-thread (no WebGL2 in worker)`
+  —— 显式标注，不静默退回。
+- 探针原始结论：Worker 内 `OffscreenCanvas.getContext("webgl2")`
+  Chromium `ok`（ANGLE/Intel，clear+readPixels 正确）；WebKitGTK **`null`**。
+
+### 10.4 边界
+
+- 峰值仍由 `cad-import-acadrust` + `cad-app::render_scene` 的导入/建场景阶段决定；本批次**没有**
+  降低该峰值本身（1.43 GB 仍是高风险区，远未到"任意合格样本"）。
+- 数字是**单次测量**，不是基准；worker 堆与主线程堆是两个实例，不可相加比较。
+- 未测：真 X11、Windows、其它浏览器/引擎版本、体积更大的 vendor 样本、性能指标。

@@ -192,8 +192,12 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
   canvas 挂载 + backing `626×341`、合成 fixture 出图（ScreenCast 抓帧）；**X11 上加/缩放平移经用户
   手动确认**（用户报告，无 agent 像素差证据）；Chromium 141 与 WebKitGTK 2.52.6 本地出图与缩放。
   **仍禁止**写成「X11 已验收」或「web 已发布」：真 X11 服务器/WM、其它合成器、**硬件归属
-  （NOT VERIFIED）**、DPR/多显示器、性能、vendor/golden、真实 DWG 内存预算、浏览器矩阵与 CI/发布
-  均未验证；agent 侧输入注入在本机不可用。
+  （NOT VERIFIED）**、DPR/多显示器、性能、vendor/golden、浏览器矩阵与 CI/发布均未验证；agent 侧
+  输入注入在本机不可用。**阶段 ⑧ 首批已实现**（[ADR 0025](docs/adr/0025-wasm-memory-budget-and-worker-isolation.md)）：
+  显式内存预算拒绝（`step:"budget"`，64 MiB 输入 / 3 GiB 堆）、分块但原子提交的上传、以及**按能力**
+  的 Worker 隔离（Chromium 实测 `isolation=worker`；WebKitGTK 实测 Worker 内无 WebGL2，显式报
+  `main-thread (no WebGL2 in worker)`）。`complex-test.dwg` 实测 heap **1.91 GB → 1.43 GB**、
+  开图 **14.1 s → 11.2 s**；**峰值仍由导入/建场景阶段决定**，大图预算仍未达标。
 - **渲染/端到端验证优先真实硬件 GPU**：只要环境存在真实显示与显卡（本机为 Wayland 桌面 +
   Intel UHD + Quadro P620，可用 `nvidia-smi`/DRM fdinfo 证明），验收**必须**走真实 GPU。
   当前桌面宿主（React/Tauri）的**唯一生产后端是原生 Wayland**（决策/子表面桥见
@@ -301,7 +305,7 @@ X11/XWayland 实例下的 DOM-canvas 探针）。**仍然禁止**：① 起虚�
 `docs/ci.md`（CI 分层与 NOT RUN）、`docs/validation*.md`（历史执行证据，含 NOT RUN 边界；
 DOM-on-top 生产记录 = `validation-dom-on-top-production-2026-10-23.md`）、
 `docs/compatibility.md`（能力表）、`docs/handoff.md`（逐轮交接）、
-`docs/adr/`（含 ADR 0010、0017–0024；**0023 = DOM-on-top 跨宿主合成（现行权威）**、
-**0024 = DOM-canvas / wasm CAD 路径（已立项，代码未开始）**、
+`docs/adr/`（含 ADR 0010、0017–0025；**0023 = DOM-on-top 跨宿主合成**、
+**0024 = DOM-canvas / wasm CAD 路径（已实现首批）**、**0025 = wasm 内存预算/分块上传/Worker 隔离**、
 0021 = 弹窗层（其第二窗口机制已被 0023 取代）、0022 = WIPEOUT 遮罩渲染）、
 `docs/testing-dwg.md`、`docs/app-icon.md`、`fixtures/manifest`。

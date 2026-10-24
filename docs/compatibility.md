@@ -287,7 +287,7 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 | **Windows** | **已实现**（`apps/app-windows`，bin `yacr-windows`） | **DOM on top**：透明 WebView2（alpha 恰 0）在上，`WS_CHILD|WS_DISABLED` CAD child HWND 在下 | **Tier 0 编译门禁全 rc=0**（msvc clippy/check/build、mingw build、wasm 空壳 check）；**Wine 拒绝合同 smoke 3/3 rc=5** | **视觉/运行时全部 NOT RUN**；spike-1/4/5 **PENDING user real-Windows spike**；Wine 像素结论固定 `NOT VERIFIED (Wine limitation, bug 55432/58921)`；无发布打包 |
 | **macOS** | 显式 NOT IMPLEMENTED 占位（`yacr-macos` 失败桩） | — | 无 | — |
 | **Android** | 显式 NOT IMPLEMENTED 占位（入口打印退役诊断后 abort） | — | 仅 `cargo check --target aarch64-linux-android` 编译门禁 | 旧模拟器/真机证据属已退役 UI，**不得**复用 |
-| **Web** | **wasm CAD 会话已复活**（`apps/app-web`）；浏览器 bundle 本地可构建 | **DOM-canvas**：同一 wasm 会话画进 `<canvas>`（无第二份文档） | 本地运行（Chromium 141 + WebKitGTK 2.52.6）：合成 fixture 出图与缩放；bundle 由 `scripts/build-web.sh` 构建 | **CI/发布未恢复**；真实 DWG 内存预算、浏览器矩阵、移动端、性能均 **NOT VERIFIED**；旧 Web（Slint）证据不得复用 |
+| **Web** | **wasm CAD 会话已复活**（`apps/app-web`）；浏览器 bundle 本地可构建 | **DOM-canvas**：同一 wasm 会话画进 `<canvas>`（无第二份文档） | 本地运行（Chromium 141 + WebKitGTK 2.52.6）：合成 fixture 出图与缩放；真实 DWG（4.2 MB）在 wasm 内导入（1.43 GB 堆 / 11.2 s）；Chromium **Worker 隔离**（`isolation=worker`），WebKitGTK 显式 `main-thread (no WebGL2 in worker)`；bundle 由 `scripts/build-web.sh` 构建 | **CI/发布未恢复**；大图预算未达标（峰值由导入阶段决定）、浏览器矩阵、移动端、性能均 **NOT VERIFIED**；旧 Web（Slint）证据不得复用 |
 
 - 平台 I/O（文件、配置、表面度量、文件选择器）只存在于 `app-*`；共享层不含平台类型。
 - **单一 React UI**：`apps/desktop-ui`（两个桌面宿主共用）。DOM 侧“测试”是 node:test 的源码
