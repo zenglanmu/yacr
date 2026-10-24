@@ -21,7 +21,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons.jsx';
 import { IconButton, RibbonButton } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
-import { RIBBON_TABS, ribbonTab } from '../ribbon-model.mjs';
+import { offeredItems, RIBBON_TABS, ribbonTab } from '../ribbon-model.mjs';
 import { DOCUMENT_SCOPED_COMMANDS, NO_DOCUMENT_KEY, unavailableReasonKey } from '../commands.mjs';
 import { standardViewAvailable, standardViewUnavailableReasonKey } from '../view3d.mjs';
 import { ribbonBandOverflow, ribbonCueReserve, ribbonScrollTarget, sameOverflow } from '../ribbon-overflow.mjs';
@@ -131,15 +131,20 @@ function VariantMenu({ item, onClose }) {
 
 function Panel({ panel, openMenu, setOpenMenu }) {
   const { t } = useI18n();
+  const shell = useShell();
+  // Palette entries are offered only where the palettes exist. On a `dom-canvas`
+  // carrier they would toggle a panel that is never rendered, so they are dropped
+  // rather than left as dead buttons; every other carrier keeps the same items.
+  const items = offeredItems(panel.items, shell.palettesAvailable);
   // Group consecutive small items into one cluster; small clusters render as a
   // column-major grid that wraps across the fixed band height.
   const groups = [];
-  for (const item of panel.items) {
+  for (const item of items) {
     if (item.large) groups.push([item]);
     else if (groups.length && !groups.at(-1).some(entry => entry.large)) groups.at(-1).push(item);
     else groups.push([item]);
   }
-  const openItem = panel.items.find(item => item.id === openMenu && item.variants?.length);
+  const openItem = items.find(item => item.id === openMenu && item.variants?.length);
   return (
     <section className="ribbon-panel" aria-label={t(panel.titleKey)}>
       <div className="ribbon-panel__body">

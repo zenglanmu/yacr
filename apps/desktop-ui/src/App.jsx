@@ -10,7 +10,7 @@ import { createTranslator, initialLocale, LOCALE_STORAGE_KEY, LOCALES, localeTag
 import { bindProbeInput, createInputLane, createSuspendGate } from './input.mjs';
 import { pointerPosition, rectFromElement } from './metrics.mjs';
 import { CANVAS_STEP_MODULE, bindCanvasNavigation, canvasModuleUrl, createCanvasTransport, loadCanvasModule, watchCanvasRect } from './canvas-host.mjs';
-import { SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './surface.mjs';
+import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './surface.mjs';
 import { queueCadCommand, reconcileToolParameterPending, requestImportCancel, setToolParameterFlag, setToolParameterNumber, startCadPolling, stepToolParameterPending } from './cad.mjs';
 import { setToolText } from './text.mjs';
 import { setSelectedText } from './textedit.mjs';
@@ -81,6 +81,17 @@ function Shell() {
   // the result, never on a platform hint. An older host that reports nothing is
   // `native-below`: the mode every shipped host has, with today's exact behaviour.
   const surfaceMode = surfaceModeFromShell({ status });
+  // The `dom-canvas` session's own report of the drawing it carries (ADR 0024
+  // D1/D2). The native shell deliberately holds no document state (iron rule 8),
+  // so the relayed `status.canvasSession` is the only honest identity: it fills the
+  // document slot the host fills on a `native-below` carrier, and when it is
+  // absent, unreadable or label-less the chrome keeps the start state it has today.
+  const canvasSession = useMemo(() => canvasSessionFromShell({ status }), [status]);
+  // The docked palettes project host-side document state (selection rows, import
+  // identity, the host's own diagnostics). A `dom-canvas` shell holds none of that
+  // by design, so the palettes are not offered at all instead of shown empty. One
+  // carrier flag — never a platform check — and an absent flag means "as today".
+  const palettesAvailable = surfaceMode !== SURFACE_MODE_DOM_CANVAS;
   // The validated payload of the **fresh** open (`cad_open_popup`'s additive
   // field). It is local UI state on purpose: the wire only carries the content
   // once, so an `existing: true` answer can never overwrite a rendered dialog.
@@ -97,8 +108,9 @@ function Shell() {
   const laneRef = useRef(null);
   const bindingRef = useRef(null);
   // The `dom-canvas` transport (`null` on every other carrier) and the wasm
-  // session's most recent status. The status is diagnostics only: the chrome still
-  // reads the host's `cad_status`, and the session's own numbers are never painted.
+  // session's most recent status. The raw status stays a ref: the chrome reads the
+  // **host's** `cad_status`, which is where the relayed identity arrives, and the
+  // session's own numbers are never painted directly.
   const transportRef = useRef(null);
   const canvasStatusRef = useRef(null);
   // The CAD pointer lane has two *independent* suspension reasons (N5): the
@@ -186,6 +198,18 @@ function Shell() {
     let transport = null;
     let unbindNavigation = null;
     let stopWatching = null;
+    // The one channel that publishes *this* session's drawing identity to the
+    // host. The native shell must not hold document state of its own (iron rule
+    // 8), so the identity travels one way only: the session reports it, the host
+    // stores the relay, the chrome reads the relay back (`status.canvasSession`).
+    // Every send is deduplicated against the previous one, so a gesture that does
+    // not change the reported payload never reaches the host, and this effect —
+    // which only exists on `dom-canvas` — is the only caller: a `native-below`
+    // host never sends a session report at all.
+    const reporter = createCanvasSessionReporter(report => {
+      void invoke('canvas_session_status', canvasSessionPayload(report))
+        .catch(reason => setError(String(reason)));
+    });
     const fail = failure => {
       // The host owns the refusal: it maps the step to its stable marker line and
       // exit code (`webgl2` -> `yacr: unsupported-runtime: webgl2`, exit code 6).
@@ -201,7 +225,10 @@ function Shell() {
         element: surfaceNode,
         rect: rectFromElement(surfaceNode, window.devicePixelRatio || 1),
         onFailure: fail,
-        onStatus: next => { canvasStatusRef.current = next; },
+        onStatus: next => {
+          canvasStatusRef.current = next;
+          reporter.report(next);
+        },
       });
       transportRef.current = transport;
       unbindNavigation = bindCanvasNavigation(surfaceNode, {
@@ -307,8 +334,24 @@ function Shell() {
     if (!popupOpen) setPopupPayload(null);
   }, [popupOpen]);
 
-  const documentLabel = status?.documentLabel ?? null;
-  const documentOpen = documentLabel !== null;
+  // One document slot, two honest sources, never a guess: the host's own label on
+  // `native-below`, or the live session's label on `dom-canvas`. A carrier that
+  // reports neither keeps the start state, exactly as before.
+  const hostDocumentLabel = status?.documentLabel ?? null;
+  const documentLabel = hostDocumentLabel ?? canvasSession?.label ?? null;
+  // Two different facts, deliberately not merged into one flag:
+  //
+  // * `documentOpen` is the **host document** fact (unchanged): the host holds a
+  //   drawing it can act on, which is what admits document-scoped commands and the
+  //   standard views. A `dom-canvas` shell holds none of that by design.
+  // * `documentVisible` is the **layout** fact: something is actually drawn in the
+  //   CAD partition. That is what replaces the start panel and what the status bar
+  //   reports, and on a `dom-canvas` host the live session is the only evidence.
+  //
+  // Keeping them apart is what lets the partition look honest without enabling
+  // data this carrier does not have.
+  const documentOpen = hostDocumentLabel !== null;
+  const documentVisible = documentOpen || canvasSession !== null;
   const loading = Boolean(status?.loading);
   const importProgress = status?.importProgress ?? null;
   const cadReady = Boolean(status) && !loading;
@@ -493,6 +536,14 @@ function Shell() {
     cadReady,
     documentLabel,
     documentOpen,
+    // Whether a drawing is actually on screen (the layout fact). Equal to
+    // `documentOpen` on every `native-below` host; on `dom-canvas` the live session
+    // supplies it, and it only drives layout and the status-bar state word.
+    documentVisible,
+    // Whether the docked properties/diagnostics palettes exist on this carrier.
+    // `false` only on a reported `dom-canvas` host, which holds no host-side
+    // document state for them to project.
+    palettesAvailable,
     // True while the host reports a live dialog (`cad_status.popup`). The main
     // window keeps working — the host refuses CAD input itself — but the About
     // affordance reads as pressed, and clicking it again asks the host to focus

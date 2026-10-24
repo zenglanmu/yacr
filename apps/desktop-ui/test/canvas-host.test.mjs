@@ -10,8 +10,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  CANVAS_BOOTSTRAP_FILE,
   CANVAS_EXPORTS,
-  CANVAS_NOMODULES_FILE,
+  CANVAS_GLOBAL,
   CANVAS_STEP_CALL,
   CANVAS_STEP_MODULE,
   CANVAS_STEP_UNCLASSIFIED,
@@ -32,7 +33,11 @@ import {
   wheelZoomFactor,
   wheelZoomNotches,
 } from '../src/canvas-host.mjs';
+import { readFile } from 'node:fs/promises';
 import { readAppSource, readModule } from './helpers.mjs';
+
+/** The repo-root build entry point (source, not generated output). */
+const BUILD_SCRIPT = new URL('../../../scripts/build-canvas-wasm.sh', import.meta.url);
 
 const OK_STATUS = JSON.stringify({
   ok: true,
@@ -208,24 +213,25 @@ test('a failure status without a step or error is not silently a success', () =>
 
 // --- module URL ------------------------------------------------------------
 
-test('the loader targets the classic script and one shared wasm binary', () => {
-  assert.equal(CANVAS_NOMODULES_FILE, 'app_web_nomodules.js');
+test('the loader targets the public bootstrap module and one shared wasm binary', () => {
+  assert.equal(CANVAS_BOOTSTRAP_FILE, 'bootstrap.js');
   assert.equal(CANVAS_WASM_FILE, 'app_web_bg.wasm');
-  // The injected artifact is the classic script, never the ES module.
-  assert.equal(canvasScriptUrl(), '/canvas/app_web_nomodules.js');
+  assert.equal(CANVAS_GLOBAL, '__YACR_CANVAS_MODULE__');
+  // The injected artifact is the bootstrap module, which itself imports app_web.js.
+  assert.equal(canvasScriptUrl(), '/canvas/bootstrap.js');
   assert.equal(canvasWasmUrl(), '/canvas/app_web_bg.wasm');
-  assert.equal(canvasModuleUrl(), '/canvas/app_web_nomodules.js');
+  assert.equal(canvasModuleUrl(), '/canvas/bootstrap.js');
   // Directory, bare directory and file URL all resolve to the same pair.
-  for (const base of ['/canvas/', '/canvas', '/canvas/app_web_nomodules.js']) {
-    assert.equal(canvasScriptUrl(base), '/canvas/app_web_nomodules.js', base);
+  for (const base of ['/canvas/', '/canvas', '/canvas/bootstrap.js']) {
+    assert.equal(canvasScriptUrl(base), '/canvas/bootstrap.js', base);
     assert.equal(canvasWasmUrl(base), '/canvas/app_web_bg.wasm', base);
   }
   assert.equal(canvasBaseDir('/canvas'), '/canvas/');
   assert.equal(canvasBaseDir('https://host.test/artifacts/'), 'https://host.test/artifacts/');
-  assert.equal(canvasScriptUrl('https://host.test/artifacts'), 'https://host.test/artifacts/app_web_nomodules.js');
+  assert.equal(canvasScriptUrl('https://host.test/artifacts'), 'https://host.test/artifacts/bootstrap.js');
   // A non-string is not a base: the default is used rather than a broken specifier.
-  assert.equal(canvasScriptUrl(''), '/canvas/app_web_nomodules.js');
-  assert.equal(canvasScriptUrl(null), '/canvas/app_web_nomodules.js');
+  assert.equal(canvasScriptUrl(''), '/canvas/bootstrap.js');
+  assert.equal(canvasScriptUrl(null), '/canvas/bootstrap.js');
 });
 
 // --- transport -------------------------------------------------------------
@@ -427,18 +433,23 @@ test('native-below never imports or loads the wasm module', async () => {
   }
   // No dynamic import in code: Vite's dev transform rewrites `import(url)` into
   // `import(__vite__injectQuery(url, 'import'))`, which the dev server answers with
-  // HTTP 500 for a public-dir file. The classic script tag replaced it. (Whole-line
-  // comments are skipped, because the header *describes* that rewrite.)
+  // HTTP 500 for a public-dir file. The public bootstrap module replaced it.
+  // (Whole-line comments are skipped, because the header *describes* that rewrite.)
   assert.ok(!/\bimport\s*\(/.test(codeLines(transport)), 'the loader must not use a dynamic import');
   assert.ok(!/import\s*\(/.test(codeLines(shipped)), 'no dynamic import of the canvas artifact anywhere');
-  // The classic-script loader: one injected tag, one cached promise, explicit wasm URL.
+  // The module loader: one injected tag, one cached promise, an awaited `ready`.
   assert.match(transport, /export function loadCanvasModule/);
   assert.equal([...transport.matchAll(/createElement\('script'\)/g)].length, 1);
+  assert.match(transport, /script\.type = 'module'/);
   assert.match(transport, /script\.src = url/);
   assert.match(transport, /const bootstrapByEnv = new WeakMap\(\)/);
   assert.match(transport, /if \(pending === undefined\)/);
-  assert.match(transport, /const wasm = canvasWasmUrl\(target\)/);
-  assert.match(transport, /await init\(wasm\)/);
+  assert.match(transport, /const module = env\[CANVAS_GLOBAL\]/);
+  assert.match(transport, /await module\.ready/);
+  // The no-modules path is gone: WebKitGTK leaves `document.currentScript`
+  // `undefined`, which makes that glue's top-level `let` throw in its TDZ.
+  assert.ok(!/document\.currentScript/.test(codeLines(shipped)), 'no document.currentScript reliance');
+  assert.ok(!/\bwasm_bindgen\b/.test(codeLines(shipped)), 'no bare wasm_bindgen global');
   // CSP has no `'unsafe-eval'`: neither escape hatch may appear in code.
   assert.ok(!/\beval\s*\(/.test(codeLines(shipped)), 'no eval');
   assert.ok(!/new Function/.test(codeLines(shipped)), 'no new Function');
@@ -474,15 +485,21 @@ test('dom-canvas does not create the IPC input lane', async () => {
   assert.ok(!transport.includes('invoke('));
 });
 
-// --- classic-script loader (stubbed page, not a browser) -------------------
+// --- public bootstrap module loader (stubbed page, not a browser) ----------
 
-/** A page stub: one document, one head, one recording appendChild. */
+/**
+ * A page stub: one document, one head, one recording appendChild, and a manually
+ * controlled `ready` so the "awaits init" ordering is observable. The real
+ * bootstrap sets `globalThis.__YACR_CANVAS_MODULE__` when it evaluates; `publish()`
+ * is that step.
+ */
 function stubPage() {
   const appended = [];
   const document = {
     createElement(tag) {
       const element = {
         tagName: tag,
+        type: '',
         src: '',
         removed: false,
         listeners: {},
@@ -494,71 +511,114 @@ function stubPage() {
     },
     head: { appendChild(element) { appended.push(element); } },
   };
-  const initCalls = [];
-  const bootstrap = async argument => { initCalls.push(argument); };
-  for (const name of CANVAS_EXPORTS) bootstrap[name] = () => OK_STATUS;
+  let release;
+  let fail;
+  const ready = new Promise((resolve, reject) => { release = resolve; fail = reject; });
+  const module = { ready };
+  for (const name of CANVAS_EXPORTS) module[name] = () => OK_STATUS;
   const env = {
     document,
     location: { origin: 'http://localhost:1420', href: 'http://localhost:1420/' },
     fetch: async () => ({ status: 200, headers: { get: () => 'text/javascript' } }),
-    wasm_bindgen: bootstrap,
   };
-  return { env, appended, initCalls };
+  return { env, appended, module, publish() { env[CANVAS_GLOBAL] = module; }, release, fail };
 }
 
-test('the loader injects exactly one classic script and reuses the in-flight promise', async () => {
-  const { env, appended, initCalls } = stubPage();
-  const first = loadCanvasModule('/canvas/', env);
-  const second = loadCanvasModule('/canvas/', env);
-  // Idempotent: a second caller waits on the first attempt, no second tag.
-  assert.equal(appended.length, 1);
-  assert.equal(appended[0].tagName, 'script');
-  assert.equal(appended[0].src, '/canvas/app_web_nomodules.js');
-  assert.equal(initCalls.length, 0);
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
-  appended[0].listeners.load();
+test('the loader injects exactly one module script and reuses the in-flight promise', async () => {
+  const page = stubPage();
+  const first = loadCanvasModule('/canvas/', page.env);
+  const second = loadCanvasModule('/canvas/', page.env);
+  // Idempotent: a second caller waits on the first attempt, no second tag.
+  assert.equal(page.appended.length, 1);
+  assert.equal(page.appended[0].tagName, 'script');
+  assert.equal(page.appended[0].type, 'module');
+  assert.equal(page.appended[0].src, '/canvas/bootstrap.js');
+
+  // `load` means the bootstrap's top-level code has run and published the global.
+  page.publish();
+  page.appended[0].listeners.load();
+  page.release();
   const [a, b] = await Promise.all([first, second]);
   assert.equal(a, b);
-  assert.equal(a, env.wasm_bindgen);
-  // Initialised from the explicit existing binary - not from a derived
-  // `app_web_nomodules_bg.wasm` that is deliberately not shipped.
-  assert.deepEqual(initCalls, ['/canvas/app_web_bg.wasm']);
+  assert.equal(a, page.module);
+  assert.equal(a.start, page.module.start);
 
-  // A third call after success is still the same promise and appends nothing.
-  assert.equal(await loadCanvasModule('/canvas/', env), a);
-  assert.equal(appended.length, 1);
+  // A third call after success is still the same attempt and appends nothing.
+  assert.equal(await loadCanvasModule('/canvas/', page.env), a);
+  assert.equal(page.appended.length, 1);
 });
 
-test('a script that fails to load, or a missing bootstrap, is reported with the probe', async () => {
+test('the loader waits for the wasm init before resolving', async () => {
+  const page = stubPage();
+  let settled = false;
+  const pending = loadCanvasModule('/canvas/', page.env).then(module => {
+    settled = true;
+    return module;
+  });
+  page.publish();
+  page.appended[0].listeners.load();
+  await tick();
+  await tick();
+  // The script has loaded, but its wasm is still initialising behind `ready`.
+  assert.equal(settled, false, 'must not resolve before the bootstrap ready promise settles');
+  page.release();
+  assert.equal(await pending, page.module);
+  assert.equal(settled, true);
+});
+
+test('a module script that fails to load, or never publishes, is reported with the probe', async () => {
   const scriptFailure = stubPage();
   const failing = loadCanvasModule('/canvas/', scriptFailure.env);
   scriptFailure.appended[0].listeners.error();
   await assert.rejects(failing, error => {
-    assert.match(error.message, /^script \/canvas\/app_web_nomodules\.js failed: error event/);
+    assert.match(error.message, /^script \/canvas\/bootstrap\.js failed: error event/);
     // The origin/fetch probe that made the `?import` bug diagnosable is kept.
     assert.match(error.message, /\[origin=http:\/\/localhost:1420 href=http:\/\/localhost:1420\/ fetch=200 text\/javascript\]/);
     return true;
   });
   assert.equal(scriptFailure.appended[0].removed, true);
 
-  // A script that "loads" but installs no bootstrap is refused, not assumed.
-  const noBootstrap = stubPage();
-  delete noBootstrap.env.wasm_bindgen;
-  const missing = loadCanvasModule('/canvas/', noBootstrap.env);
-  noBootstrap.appended[0].listeners.load();
-  await assert.rejects(missing, /script \/canvas\/app_web_nomodules\.js failed: no wasm_bindgen bootstrap after load/);
+  // A script that "loads" but publishes nothing is refused, not assumed.
+  const noGlobal = stubPage();
+  const missing = loadCanvasModule('/canvas/', noGlobal.env);
+  noGlobal.appended[0].listeners.load();
+  await assert.rejects(missing, /script \/canvas\/bootstrap\.js failed: no __YACR_CANVAS_MODULE__ after load/);
+
+  // A published object without a `ready` promise is incomplete, not a success.
+  const noReady = stubPage();
+  const incomplete = loadCanvasModule('/canvas/', noReady.env);
+  noReady.env[CANVAS_GLOBAL] = { start: () => OK_STATUS };
+  noReady.appended[0].listeners.load();
+  await assert.rejects(incomplete, /__YACR_CANVAS_MODULE__\.ready is missing/);
 });
 
-test('an init failure names the wasm URL and keeps the probe', async () => {
-  const { env, appended } = stubPage();
-  env.wasm_bindgen = async () => { throw new TypeError('WebAssembly.instantiate(): Argument 0 must be a buffer source'); };
-  const pending = loadCanvasModule('/canvas/', env);
-  appended[0].listeners.load();
+test('an init rejection surfaces as init <wasm> failed with the probe', async () => {
+  const page = stubPage();
+  const pending = loadCanvasModule('/canvas/', page.env);
+  page.publish();
+  page.appended[0].listeners.load();
+  page.fail(new TypeError('WebAssembly.instantiateStreaming failed'));
   await assert.rejects(pending, error => {
     assert.match(error.message, /^init \/canvas\/app_web_bg\.wasm failed: TypeError: /);
     assert.match(error.message, /fetch=200/);
     return true;
   });
+});
+
+test('the build script generates the bootstrap module with the explicit wasm URL', async () => {
+  const script = await readFile(BUILD_SCRIPT, 'utf8');
+  const code = script.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
+  assert.match(script, /BOOTSTRAP_JS="bootstrap\.js"/);
+  // The exact three-line content the loader depends on.
+  assert.ok(script.includes("import init, * as mod from './app_web.js';"));
+  assert.ok(script.includes("new URL('./app_web_bg.wasm', import.meta.url).href"));
+  assert.ok(script.includes('globalThis.__YACR_CANVAS_MODULE__ = { ready, ...mod };'));
+  // One binding only: the no-modules target is not emitted any more (WebKitGTK
+  // leaves `document.currentScript` undefined, which breaks that glue's TDZ).
+  assert.ok(!/no-modules/.test(code), 'no no-modules emission');
+  assert.ok(!/app_web_nomodules/.test(code), 'no no-modules artifact');
 });
 
 test('.native-input is the only element with pointer listeners', async () => {

@@ -20,12 +20,18 @@ import { SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../surface.mjs';
 export function Workspace() {
   const { t } = useI18n();
   const shell = useShell();
-  const showStart = !shell.documentOpen;
+  const showStart = !shell.documentVisible;
+  // Whether the docked palettes exist on the reported carrier. A `dom-canvas`
+  // host holds no host-side document state, so it has none of the projections they
+  // read: they are not rendered at all rather than as empty panels. An absent flag
+  // (older chrome state) keeps them, as today.
+  const palettesAvailable = shell.palettesAvailable !== false;
   // The inspector is only meaningful with a drawing open; on the start screen the
   // start panel keeps the whole dock. Off by default so the startup partition
   // geometry is unchanged until the user opens it.
-  const showProperties = shell.propertiesOpen && !showStart;
-  const leftOpen = showStart || showProperties || shell.diagnosticsOpen;
+  const showProperties = palettesAvailable && shell.propertiesOpen && !showStart;
+  const showDiagnostics = palettesAvailable && Boolean(shell.diagnosticsOpen);
+  const leftOpen = showStart || showProperties || showDiagnostics;
   // The host hides the system cursor over the CAD partition only while it is
   // drawing its own crosshair (a 2D view with a pointer on the surface). A 3D
   // view reports `false`, so the system arrow stays and the pointer is never
@@ -41,7 +47,7 @@ export function Workspace() {
       <div className={['workspace__left', leftOpen ? 'is-open' : ''].filter(Boolean).join(' ')}>
         {showStart ? <StartPanel /> : null}
         {showProperties ? <PropertiesPalette /> : null}
-        {shell.diagnosticsOpen ? <DiagnosticsPalette /> : null}
+        {showDiagnostics ? <DiagnosticsPalette /> : null}
       </div>
       <div className="workspace__canvas">
         {/* dom-canvas only: the in-DOM pixel carrier. It fills exactly the rect

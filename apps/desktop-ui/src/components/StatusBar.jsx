@@ -137,7 +137,7 @@ export function StatusBar() {
     : shell.pollError ? t('diagnostics.severity.error')
       : progress ? progress.phase
         : shell.loading ? t('import.panel')
-          : shell.documentOpen ? t('status.ready') : t('plot.no_document');
+          : shell.documentVisible ? t('status.ready') : t('plot.no_document');
   return (
     <div className="region region--status statusbar app-region" role="contentinfo">
       <output
@@ -245,18 +245,26 @@ export function StatusBar() {
           title={`${t('status.clean_screen')} (Ctrl+0)`}
           onClick={() => shell.setCleanScreen(!shell.cleanScreen)}
         />
-        <Toggle
-          label={t('properties.panel')}
-          on={shell.propertiesOpen}
-          title={t('properties.panel')}
-          onClick={() => shell.setPropertiesOpen(!shell.propertiesOpen)}
-        />
-        <Toggle
-          label={t('diagnostics.title')}
-          on={shell.diagnosticsOpen}
-          title={t('diagnostics.title')}
-          onClick={() => shell.setDiagnosticsOpen(!shell.diagnosticsOpen)}
-        />
+        {/* A `dom-canvas` carrier has no host-side document state for these two
+            palettes to project, so their toggles are not offered at all — an
+            absent toggle, never a chip that opens an empty panel. Any other
+            carrier (and an older chrome state without the flag) keeps them. */}
+        {shell.palettesAvailable !== false ? (
+          <>
+            <Toggle
+              label={t('properties.panel')}
+              on={shell.propertiesOpen}
+              title={t('properties.panel')}
+              onClick={() => shell.setPropertiesOpen(!shell.propertiesOpen)}
+            />
+            <Toggle
+              label={t('diagnostics.title')}
+              on={shell.diagnosticsOpen}
+              title={t('diagnostics.title')}
+              onClick={() => shell.setDiagnosticsOpen(!shell.diagnosticsOpen)}
+            />
+          </>
+        ) : null}
       </div>
     </div>
   );

@@ -29,6 +29,25 @@ export const SHELL_ACTIONS = Object.freeze({
   properties: 'properties',
 });
 
+/** The shell actions that toggle a docked palette. */
+export const PALETTE_ACTIONS = Object.freeze([SHELL_ACTIONS.diagnostics, SHELL_ACTIONS.properties]);
+
+/**
+ * The items a panel actually offers on the reported carrier.
+ *
+ * A docked palette the carrier does not have must not be offered anywhere: the
+ * status-bar chips are hidden, and so are these ribbon entries, because a button
+ * that toggles a panel which is never rendered is a dead affordance. Only the
+ * palette toggles are filtered; every other item is returned as the very same
+ * array, so a carrier with the palettes (`native-below`, and any chrome state
+ * without the flag) renders exactly the ribbon it always did.
+ */
+export function offeredItems(items, palettesAvailable) {
+  return palettesAvailable === false
+    ? items.filter(item => !PALETTE_ACTIONS.includes(item.action))
+    : items;
+}
+
 export const RIBBON_TABS = Object.freeze([
   {
     id: 'file',
