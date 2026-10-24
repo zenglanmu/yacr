@@ -5,7 +5,7 @@
 
 use super::policy::{
     check_physical_size, check_present_format, check_present_size, check_present_usage,
-    preferred_present_format, CanvasError, SurfaceStatus,
+    preferred_present_format, CanvasError, CanvasTargetKind, SurfaceStatus,
 };
 use crate::wgpu;
 
@@ -225,4 +225,53 @@ fn present_usage_requires_texture_binding() {
     let error = check_present_usage(wgpu::TextureUsages::RENDER_ATTACHMENT)
         .expect_err("a non-sampleable frame must be refused");
     assert!(error.to_string().contains("TEXTURE_BINDING"));
+}
+
+#[test]
+fn canvas_target_kind_tokens_are_stable_and_distinct() {
+    assert_eq!(CanvasTargetKind::HtmlCanvas.as_str(), "html-canvas");
+    assert_eq!(
+        CanvasTargetKind::OffscreenCanvas.as_str(),
+        "offscreen-canvas"
+    );
+    // The tokens are a host-visible vocabulary (`target=` in a status line, the
+    // `create_surface(..)` diagnostic): they must never collide or be empty.
+    let mut tokens: Vec<&str> = CanvasTargetKind::ALL
+        .iter()
+        .map(|kind| kind.as_str())
+        .collect();
+    let count = tokens.len();
+    tokens.sort_unstable();
+    tokens.dedup();
+    assert_eq!(
+        tokens.len(),
+        count,
+        "target tokens must be unique: {tokens:?}"
+    );
+    for kind in CanvasTargetKind::ALL {
+        let token = kind.as_str();
+        assert!(!token.is_empty(), "{kind:?} has no token");
+        assert_eq!(
+            token,
+            kind.to_string(),
+            "{kind:?} Display must equal its status token"
+        );
+    }
+}
+
+#[test]
+fn only_the_offscreen_target_reports_a_worker_isolation() {
+    // This mapping is the *only* source of the `isolation` token a host reports: an
+    // `OffscreenCanvas` reaches a wasm module only through a Worker, a page
+    // `<canvas>` only through the main thread. A regression here would let a
+    // main-thread session claim `isolation: worker`.
+    for kind in CanvasTargetKind::ALL {
+        assert_eq!(
+            kind.is_worker(),
+            matches!(kind, CanvasTargetKind::OffscreenCanvas),
+            "{kind:?} isolation classification"
+        );
+    }
+    assert!(!CanvasTargetKind::HtmlCanvas.is_worker());
+    assert!(CanvasTargetKind::OffscreenCanvas.is_worker());
 }

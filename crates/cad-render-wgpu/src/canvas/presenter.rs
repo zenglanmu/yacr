@@ -5,10 +5,43 @@
 
 use super::policy::{
     check_physical_size, check_present_format, check_present_size, check_present_usage,
-    preferred_present_format, CanvasError, SurfaceStatus,
+    preferred_present_format, CanvasError, CanvasTargetKind, SurfaceStatus,
 };
 use crate::blit::FullscreenBlitter;
 use crate::wgpu;
+
+/// The web canvas a presenter owns, before it is turned into a wgpu surface.
+///
+/// One enum instead of two presenters: `Surface::configure`, the acquire/status
+/// policy, the blit and the counters are identical for both carriers, and the only
+/// thing that differs is which `wgpu::SurfaceTarget` variant is created (wgpu's
+/// GLES WebGL2 backend sizes both canvases from the surface config in the same
+/// way). Duplicating the presenter would be two copies of the same rules, which is
+/// exactly how the two carriers would drift apart.
+enum CanvasTarget {
+    /// The page's `HtmlCanvasElement` (main-thread session).
+    Html(web_sys::HtmlCanvasElement),
+    /// An `OffscreenCanvas` transferred into a Worker (isolated session).
+    Offscreen(web_sys::OffscreenCanvas),
+}
+
+impl CanvasTarget {
+    /// The stable tag recorded in diagnostics and status.
+    fn kind(&self) -> CanvasTargetKind {
+        match self {
+            Self::Html(_) => CanvasTargetKind::HtmlCanvas,
+            Self::Offscreen(_) => CanvasTargetKind::OffscreenCanvas,
+        }
+    }
+
+    /// The `wgpu::SurfaceTarget` for this canvas.
+    fn into_surface_target(self) -> wgpu::SurfaceTarget<'static> {
+        match self {
+            Self::Html(canvas) => wgpu::SurfaceTarget::Canvas(canvas),
+            Self::Offscreen(canvas) => wgpu::SurfaceTarget::OffscreenCanvas(canvas),
+        }
+    }
+}
 
 /// What evidence records about the adapter behind a canvas presenter.
 ///
@@ -30,14 +63,30 @@ pub struct CanvasAdapterInfo {
     /// The adapter's `max_texture_dimension_2d`, the upper bound a physical size
     /// may have.
     pub max_texture_dimension_2d: u32,
+    /// Which carrier this presenter draws into: `html-canvas` (main thread) or
+    /// `offscreen-canvas` (Worker). See [`CanvasTargetKind`].
+    pub target: CanvasTargetKind,
 }
 
 /// A WebGL2 canvas presenter: owns the wgpu instance, the canvas surface, the
 /// device/queue and the fullscreen blit.
 ///
-/// The host hands in an [`web_sys::HtmlCanvasElement`] and never touches a wgpu
+/// The host hands in **one of two** web canvas handles and never touches a wgpu
 /// object beyond what this crate re-exports; `wgpu` stays inside the renderer
-/// crate exactly like the native probe path.
+/// crate exactly like the native probe path:
+///
+/// - [`CanvasPresenter::create`] — an [`web_sys::HtmlCanvasElement`] from the host
+///   page (the main-thread carrier, `surfaceMode: dom-canvas` today);
+/// - [`CanvasPresenter::create_offscreen`] — a [`web_sys::OffscreenCanvas`]
+///   transferred into a Worker (the isolated carrier, ADR 0024 stage ⑧).
+///
+/// Both produce exactly the same presenter type and behaviour; the carrier is
+/// recorded as [`CanvasAdapterInfo::target`]. The measured engine split — Chromium
+/// 141 gives WebGL2 on a worker-side `OffscreenCanvas`, WebKitGTK 2.52.6 returns
+/// `null` from `getContext("webgl2")` there — is a **browser** fact, not something
+/// this crate can work around: on that engine `create_offscreen` fails with an
+/// explicit [`CanvasError::SurfaceCreate`] and the host must stay on the
+/// main-thread carrier instead of pretending.
 ///
 /// # Sizing contract
 ///
@@ -75,8 +124,8 @@ pub struct CanvasPresenter {
 }
 
 impl CanvasPresenter {
-    /// Create the WebGL2 device/queue for `canvas` and configure it at
-    /// `physical` pixels.
+    /// Create the WebGL2 device/queue for the page's `canvas` element and
+    /// configure it at `physical` pixels.
     ///
     /// `physical` is `CSS px × devicePixelRatio`; see the type-level sizing
     /// contract. The instance requests only `Backends::GL`: WebGL2 is the only
@@ -86,6 +135,33 @@ impl CanvasPresenter {
         canvas: web_sys::HtmlCanvasElement,
         physical: (u32, u32),
     ) -> Result<Self, CanvasError> {
+        Self::create_for(CanvasTarget::Html(canvas), physical).await
+    }
+
+    /// Create the WebGL2 device/queue for an `OffscreenCanvas` (a canvas already
+    /// transferred into this Worker with `transferControlToOffscreen()`) and
+    /// configure it at `physical` pixels.
+    ///
+    /// Everything except the surface target is identical to
+    /// [`CanvasPresenter::create`]: same instance descriptor (`Backends::GL`), same
+    /// WebGL2 device floor, same present-mode/format/alpha policy, same blit. That
+    /// is on purpose — one presenter, two carriers.
+    ///
+    /// Fails with [`CanvasError::SurfaceCreate`] when the engine cannot give this
+    /// offscreen canvas a WebGL2 context. That is the measured WebKitGTK 2.52.6
+    /// behaviour inside a Worker (`getContext("webgl2")` returns `null`), so the
+    /// caller must treat it as "worker rendering is unavailable here" and report
+    /// that instead of attempting a blank canvas.
+    pub async fn create_offscreen(
+        canvas: web_sys::OffscreenCanvas,
+        physical: (u32, u32),
+    ) -> Result<Self, CanvasError> {
+        Self::create_for(CanvasTarget::Offscreen(canvas), physical).await
+    }
+
+    /// The one setup path both public constructors share.
+    async fn create_for(target: CanvasTarget, physical: (u32, u32)) -> Result<Self, CanvasError> {
+        let kind = target.kind();
         // Reject an impossible size before any GPU object exists.
         check_physical_size(physical, u32::MAX)?;
 
@@ -93,9 +169,12 @@ impl CanvasPresenter {
         descriptor.backends = wgpu::Backends::GL;
         let instance = wgpu::Instance::new(descriptor);
         let surface = instance
-            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+            .create_surface(target.into_surface_target())
             .map_err(|error| {
-                CanvasError::SurfaceCreate(format!("create_surface(canvas): {error}"))
+                // The target kind is part of the message: "no WebGL2 here" means
+                // one thing for a page canvas and another for a worker-side
+                // offscreen canvas, and evidence must be able to tell them apart.
+                CanvasError::SurfaceCreate(format!("create_surface({kind}): {error}"))
             })?;
 
         // On WebGL2 an adapter can only be selected together with a compatible
@@ -107,7 +186,7 @@ impl CanvasPresenter {
             })
             .await
             .map_err(|error| {
-                CanvasError::AdapterUnavailable(format!("request_adapter: {error}"))
+                CanvasError::AdapterUnavailable(format!("request_adapter({kind}): {error}"))
             })?;
         let limits = adapter.limits();
         // The adapter limit is known only now, so the upper bound is checked here.
@@ -141,7 +220,10 @@ impl CanvasPresenter {
         {
             config.format = format;
         }
-        // Also sets `canvas.width`/`canvas.height` from `config`.
+        // Also sets `canvas.width`/`canvas.height` from `config` — for both
+        // carriers (wgpu-hal's WebGL2 backend configures `HtmlCanvasElement` and
+        // `OffscreenCanvas` identically), so the host never sizes the backing
+        // store itself.
         surface.configure(&device, &config);
 
         let blitter = FullscreenBlitter::new(&device, config.format);
@@ -151,6 +233,7 @@ impl CanvasPresenter {
             backend: adapter_info.backend.to_str(),
             format: config.format,
             max_texture_dimension_2d,
+            target: kind,
         };
         Ok(Self {
             _instance: instance,
@@ -195,6 +278,15 @@ impl CanvasPresenter {
     /// [`CanvasAdapterInfo`] — **not** hardware proof).
     pub fn adapter_info(&self) -> CanvasAdapterInfo {
         self.info.clone()
+    }
+
+    /// Which carrier this presenter draws into (see [`CanvasTargetKind`]).
+    ///
+    /// Read from the same record [`CanvasPresenter::adapter_info`] returns, so the
+    /// status a host prints and the diagnostics a failure carries cannot disagree
+    /// about whether the session is isolated.
+    pub fn target_kind(&self) -> CanvasTargetKind {
+        self.info.target
     }
 
     /// The configured physical size.

@@ -53,10 +53,13 @@ futures-lite.workspace = true
 # path would be dead configuration.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = { workspace = true, features = ["webgl"] }
-# `HtmlCanvasElement` is what `create_surface(SurfaceTarget::Canvas(..))` takes;
-# the window/document/element features stay for hosts that resolve the canvas
-# through the DOM, `console` for the explicit logging of a refused canvas path.
-web-sys = { workspace = true, features = ["Window", "Document", "Element", "HtmlCanvasElement", "console"] }
+# The two web canvas handles a presenter can own: `HtmlCanvasElement` is what
+# `create_surface(SurfaceTarget::Canvas(..))` takes (the page/main-thread carrier),
+# `OffscreenCanvas` is what `SurfaceTarget::OffscreenCanvas(..)` takes (a canvas
+# transferred into a Worker, ADR 0024 stage ⑧). The window/document/element features
+# stay for hosts that resolve the canvas through the DOM, `console` for the explicit
+# logging of a refused canvas path.
+web-sys = { workspace = true, features = ["Window", "Document", "Element", "HtmlCanvasElement", "OffscreenCanvas", "console"] }
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true

@@ -26,9 +26,12 @@ pub enum CanvasError {
         /// Why the size was refused.
         detail: String,
     },
-    /// `Instance::create_surface(SurfaceTarget::Canvas(..))` failed: the browser
-    /// refused a WebGL2 context for this canvas, or the canvas is already
-    /// attached to another context.
+    /// `Instance::create_surface(..)` failed for the presenter's canvas target: the
+    /// browser refused a WebGL2 context for this canvas (the measured WebKitGTK
+    /// 2.52.6 symptom for an `OffscreenCanvas` **inside a Worker**, where
+    /// `getContext("webgl2")` returns `null`), or the canvas is already attached to
+    /// another context. The text names the target kind
+    /// ([`CanvasTargetKind::as_str`]) so evidence can tell the two carriers apart.
     SurfaceCreate(String),
     /// `Surface::get_default_config` returned `None`: the surface advertises no
     /// usable configuration for the selected adapter (no format or present mode).
@@ -113,6 +116,64 @@ impl std::fmt::Display for CanvasError {
 }
 
 impl std::error::Error for CanvasError {}
+
+/// Which kind of web canvas a wasm presenter owns.
+///
+/// Deliberately framework-free (no `web-sys` here): the tag is part of the status
+/// and diagnostic vocabulary, so it is compiled on every target and its tokens are
+/// unit tested in the ordinary native `cargo test`. The two `web_sys` handle types
+/// that *select* a kind only exist on wasm (see
+/// [`CanvasPresenter::create`](super::CanvasPresenter::create) and
+/// [`CanvasPresenter::create_offscreen`](super::CanvasPresenter::create_offscreen)).
+///
+/// The two kinds are not interchangeable cosmetics:
+///
+/// - [`CanvasTargetKind::HtmlCanvas`] is a `<canvas>` owned by the page, so the
+///   CAD session runs on the **main thread**.
+/// - [`CanvasTargetKind::OffscreenCanvas`] is a canvas transferred into a
+///   **Worker** (`transferControlToOffscreen()`), so the session runs isolated.
+///   The measured engine split decides whether that is even possible: Chromium 141
+///   gives WebGL2 on an `OffscreenCanvas` inside a Worker, WebKitGTK 2.52.6
+///   returns `null` from `getContext("webgl2")` there (see the
+///   `cad-render-wgpu::canvas` module docs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanvasTargetKind {
+    /// A DOM `<canvas>` element in the host page (main-thread session).
+    HtmlCanvas,
+    /// An `OffscreenCanvas` transferred into a Worker (isolated session).
+    OffscreenCanvas,
+}
+
+impl CanvasTargetKind {
+    /// Every kind, in declaration order (used by the exactness tests).
+    pub const ALL: [Self; 2] = [Self::HtmlCanvas, Self::OffscreenCanvas];
+
+    /// The stable lowercase token a status or diagnostic carries.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::HtmlCanvas => "html-canvas",
+            Self::OffscreenCanvas => "offscreen-canvas",
+        }
+    }
+
+    /// Whether a presenter on this target runs inside a Worker.
+    ///
+    /// This is the single source of the `isolation` token a host reports: an
+    /// `OffscreenCanvas` cannot reach a wasm module that runs on the page's main
+    /// thread (a page has `HtmlCanvasElement`, not a transferred
+    /// `OffscreenCanvas`), and a `<canvas>` element cannot exist in a Worker. So
+    /// the target kind *is* the isolation — no second, independently-set flag can
+    /// drift from it.
+    pub fn is_worker(self) -> bool {
+        matches!(self, Self::OffscreenCanvas)
+    }
+}
+
+impl std::fmt::Display for CanvasTargetKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// One-to-one mirror of `wgpu::CurrentSurfaceTexture`'s variants.
 ///
