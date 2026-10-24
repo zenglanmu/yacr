@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
-"""Mutation contracts for the retired web build/deploy jobs (no deploy claim).
+"""Mutation contracts for the web bundle / deploy entry points (no deploy claim).
 
-The browser UI was retired: ``scripts/build-web.sh`` and
-``scripts/deploy-cloudflare-pages.sh`` now fail with ``NOT IMPLEMENTED``, and the
-Cloudflare Pages deploy job is hard-disabled. This checker proves the disable is
-real — an unconditional ``if: false`` plus a ``RETIRED`` marker, never a mutable
-``vars.…`` switch and never a ``secrets.…`` publish path — so a future edit
-cannot quietly re-enable a stub publish. It never contacts Cloudflare.
+The browser wasm session was revived (ADR 0024), so ``scripts/build-web.sh`` is a
+real local bundle build again: it re-reads the ``wasm-bindgen`` pin, compiles
+``app-web`` for ``wasm32-unknown-unknown`` (release, ``--locked``), emits the
+``--target web`` glue and assembles ``apps/app-web/dist``. These tests pin that
+contract (and the shared ``scripts/lib/wasm-toolchain.sh`` it calls) so a silent
+regression back to a "NOT IMPLEMENTED" stub, a dropped pin check or a drifted
+output directory fails.
+
+Publishing is **still** not restored: ``scripts/deploy-cloudflare-pages.sh``
+keeps failing with ``NOT IMPLEMENTED`` and the Cloudflare Pages deploy job stays
+hard-disabled. This checker proves that disable is real — an unconditional
+``if: false`` plus a ``RETIRED`` marker, never a mutable ``vars.…`` switch and
+never a ``secrets.…`` publish path — so a future edit cannot quietly re-enable a
+stub publish. It never contacts Cloudflare.
 """
 import importlib.util
 import pathlib
@@ -95,6 +103,91 @@ class RetiredWebJobsContracts(unittest.TestCase):
         self.assertIn("NOT IMPLEMENTED", script)
         self.assertRegex(script, r"(?m)^exit 1\s*$")
         self.assertNotIn("wrangler", script)
+        # It must point at the local bundle instead of implying a publish path.
+        self.assertIn(workflow.BUILD_WEB_OUT_DIR, script)
+
+    def test_removing_the_retired_deploy_diagnostic_fails(self):
+        script = (ROOT / "scripts/deploy-cloudflare-pages.sh").read_text()
+        mutated = script.replace("NOT IMPLEMENTED", "")
+        self.assertNotEqual(mutated, script)
+        self.assertTrue(workflow.retired_script_errors("scripts/deploy-cloudflare-pages.sh", mutated))
+
+    def test_deploy_script_must_exit_nonzero(self):
+        script = (ROOT / "scripts/deploy-cloudflare-pages.sh").read_text()
+        mutated = script.replace("exit 1", "exit 0")
+        self.assertNotEqual(mutated, script)
+        self.assertTrue(workflow.retired_script_errors("scripts/deploy-cloudflare-pages.sh", mutated))
+
+
+class LocalBrowserBundleContracts(unittest.TestCase):
+    """`scripts/build-web.sh` builds a real bundle; it is not a retired stub."""
+
+    def build_web(self):
+        return (ROOT / workflow.BUILD_WEB_SCRIPT).read_text()
+
+    def toolchain(self):
+        return (ROOT / workflow.WASM_TOOLCHAIN_SCRIPT).read_text()
+
+    def test_build_web_satisfies_its_contract(self):
+        self.assertEqual(workflow.build_web_errors(self.build_web()), [])
+
+    def test_shared_toolchain_satisfies_its_contract(self):
+        self.assertEqual(workflow.wasm_toolchain_errors(self.toolchain()), [])
+
+    def test_entry_point_pass_accepts_the_real_scripts(self):
+        ok, errors = workflow.entry_point_pass()
+        self.assertEqual(errors, [])
+        self.assertTrue(any(workflow.BUILD_WEB_SCRIPT in line for line in ok))
+
+    def test_reintroducing_the_retired_stub_fails(self):
+        text = self.build_web()
+        mutated = (
+            "#!/usr/bin/env bash\n"
+            "# RETIRED: NOT IMPLEMENTED\n"
+            'echo "NOT IMPLEMENTED" >&2\nexit 1\n'
+        )
+        self.assertNotEqual(mutated, text)
+        errors = workflow.build_web_errors(mutated)
+        self.assertTrue(any("NOT IMPLEMENTED" in error for error in errors))
+        self.assertTrue(any("wasm32" in error or "yacr_build_app_web_wasm" in error for error in errors))
+
+    def test_dropping_the_wasm_bindgen_pin_check_fails(self):
+        text = self.toolchain()
+        mutated = text.replace("--version", "--help")
+        self.assertNotEqual(mutated, text)
+        self.assertTrue(workflow.wasm_toolchain_errors(mutated))
+
+    def test_dropping_the_wasm32_build_fails(self):
+        text = self.toolchain()
+        mutated = text.replace("wasm32-unknown-unknown", "x86_64-unknown-linux-gnu")
+        self.assertNotEqual(mutated, text)
+        self.assertTrue(workflow.wasm_toolchain_errors(mutated))
+
+    def test_build_web_must_call_the_shared_toolchain(self):
+        text = self.build_web()
+        mutated = text.replace(workflow.WASM_TOOLCHAIN_SCRIPT, "scripts/build-canvas-wasm.sh")
+        self.assertNotEqual(mutated, text)
+        self.assertTrue(workflow.build_web_errors(mutated))
+
+    def test_output_directory_must_match_the_documented_bundle(self):
+        text = self.build_web()
+        mutated = text.replace(
+            f'readonly OUT_DIR="$REPO_ROOT/{workflow.BUILD_WEB_OUT_DIR}"',
+            'readonly OUT_DIR="$REPO_ROOT/apps/app-web/web"',
+        )
+        self.assertNotEqual(mutated, text)
+        errors = workflow.build_web_errors(mutated)
+        self.assertTrue(any("documented bundle directory" in error for error in errors))
+
+    def test_the_printed_directory_must_be_the_written_one(self):
+        text = self.build_web()
+        old = 'printf \'artifacts in %s\\n\' "$OUT_DIR"'
+        new = 'printf \'artifacts in %s\\n\' "apps/app-web/dist"'
+        self.assertIn(old, text)
+        mutated = text.replace(old, new)
+        self.assertNotEqual(mutated, text)
+        errors = workflow.build_web_errors(mutated)
+        self.assertTrue(any("does not print the directory it wrote" in error for error in errors))
 
 
 if __name__ == "__main__":

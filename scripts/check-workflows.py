@@ -23,7 +23,17 @@ checks:
     check removes. The one still capability-gated job is the ``android-check``
     compile gate, which cannot publish anything;
   * no required or retired job declares ``continue-on-error: true`` (job-level or
-    step-level).
+    step-level);
+  * the **local** browser bundle entry point (``scripts/build-web.sh`` plus the
+    shared ``scripts/lib/wasm-toolchain.sh``) is a real build, not a retired stub:
+    the script is present, readable and executable, it re-reads the
+    ``wasm-bindgen`` pin from ``Cargo.toml`` and compares it with the CLI, it runs
+    ``cargo build -p app-web --target wasm32-unknown-unknown --release --locked``,
+    emits the ``--target web`` glue, and writes the documented ``apps/app-web/dist``
+    directory it then prints. This replaces the former "build-web.sh always exits
+    non-zero" assumption. It does **not** enable any CI job: the ``web-build``,
+    ``web-deploy`` and ``web-smoke`` jobs stay hard-disabled, and
+    ``scripts/deploy-cloudflare-pages.sh`` stays a retired non-zero stub.
 
 Each guarantee is enforced structurally (and, when PyYAML is importable, with a
 real parse as well) so a mutation that removes a fragment or a disable guard is
@@ -32,6 +42,7 @@ replacement for a YAML parser or for actually running the workflow.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import sys
@@ -128,6 +139,64 @@ MUTABLE_GATE_RE = re.compile(r"\bvars\.")
 # publish path that was not really retired.
 SECRETS_RE = re.compile(r"\bsecrets\.")
 TRUE_CONTINUE_ON_ERROR = re.compile(r"continue-on-error\s*:\s*true\b", re.IGNORECASE)
+
+# --- local browser bundle entry point ---------------------------------------
+#
+# The wasm CAD session in `apps/app-web` was revived (ADR 0024), so
+# `scripts/build-web.sh` builds a real local bundle again instead of failing as a
+# retired stub. CI is unchanged (no web job is enabled), so what this checker pins
+# is the **script-level** contract that replaced the former "build-web.sh always
+# exits non-zero" assumption: falling back to a stub, dropping the wasm-bindgen
+# pin check, dropping the wasm32 build, or writing/reporting a different output
+# directory are all failures.
+
+BUILD_WEB_SCRIPT = "scripts/build-web.sh"
+WASM_TOOLCHAIN_SCRIPT = "scripts/lib/wasm-toolchain.sh"
+BUILD_WEB_OUT_DIR = "apps/app-web/dist"
+
+# Fragments `build-web.sh` must keep. The pin check and the cargo/wasm-bindgen
+# invocations live in the shared toolchain library (both wasm entry points use
+# them), so this script has to source it and call its steps in the documented
+# order rather than carry a second copy.
+BUILD_WEB_FRAGMENTS: tuple[str, ...] = (
+    "set -euo pipefail",
+    WASM_TOOLCHAIN_SCRIPT,
+    "yacr_init_wasm_toolchain",
+    "yacr_build_app_web_wasm",
+    "yacr_bindgen_web",
+    BUILD_WEB_OUT_DIR,
+)
+
+# Fragments the shared toolchain library must keep: the exact wasm-bindgen pin
+# comparison against `Cargo.toml`, the wasm32 release build and the `--target web`
+# post-processing.
+WASM_TOOLCHAIN_FRAGMENTS: tuple[str, ...] = (
+    "wasm-bindgen",
+    "Cargo.toml",
+    "--version",
+    "wasm32-unknown-unknown",
+    "build -p app-web",
+    "--release --locked",
+    "--target web",
+    "--no-typescript",
+    "app_web_bg.wasm",
+)
+
+# The declared bundle directory, e.g. `readonly OUT_DIR="$REPO_ROOT/apps/app-web/dist"`.
+BUILD_WEB_OUT_DIR_RE = re.compile(
+    r'^readonly OUT_DIR="\$REPO_ROOT/(?P<dir>[^"]+)"\s*$', re.MULTILINE
+)
+# ... and the run report must print that same variable, not a hard-coded copy.
+BUILD_WEB_REPORT_RE = re.compile(r"""printf 'artifacts in %s\\n' "\$OUT_DIR\"""")
+
+# Entry points that **stayed** retired. Each must still fail non-zero instead of
+# pretending to succeed, and must not carry a publish command.
+RETIRED_SCRIPTS: dict[str, tuple[str, ...]] = {
+    # `build-web.sh` builds the bundle locally; publishing is still not a
+    # contract anyone verified, so the deploy entry point keeps failing and just
+    # points at the bundle output.
+    "scripts/deploy-cloudflare-pages.sh": ("NOT IMPLEMENTED", BUILD_WEB_OUT_DIR),
+}
 
 
 def workflow_files() -> list[pathlib.Path]:
@@ -328,6 +397,131 @@ def load_yaml() -> object | None:
     return yaml
 
 
+def build_web_errors(text: str) -> list[str]:
+    """Contract errors for the local bundle script (`scripts/build-web.sh`)."""
+    errors: list[str] = []
+    if not text.strip():
+        return [f"{BUILD_WEB_SCRIPT}: entry point is empty"]
+    if "NOT IMPLEMENTED" in text:
+        errors.append(
+            f"{BUILD_WEB_SCRIPT}: is a retired stub again ('NOT IMPLEMENTED'); the "
+            "local browser bundle build must stay runnable"
+        )
+    for fragment in BUILD_WEB_FRAGMENTS:
+        if fragment not in text:
+            errors.append(
+                f"{BUILD_WEB_SCRIPT}: missing required fragment {fragment!r}"
+            )
+    declared = BUILD_WEB_OUT_DIR_RE.search(text)
+    if declared is None:
+        errors.append(
+            f"{BUILD_WEB_SCRIPT}: no `readonly OUT_DIR=\"$REPO_ROOT/{BUILD_WEB_OUT_DIR}\"` "
+            "declaration for the bundle directory"
+        )
+    elif declared.group("dir") != BUILD_WEB_OUT_DIR:
+        errors.append(
+            f"{BUILD_WEB_SCRIPT}: writes {declared.group('dir')!r} but the documented "
+            f"bundle directory is {BUILD_WEB_OUT_DIR!r}"
+        )
+    if BUILD_WEB_REPORT_RE.search(text) is None:
+        errors.append(
+            f"{BUILD_WEB_SCRIPT}: does not print the directory it wrote (expected "
+            "`printf 'artifacts in %s\\n' \"$OUT_DIR\"`)"
+        )
+    return errors
+
+
+def wasm_toolchain_errors(text: str) -> list[str]:
+    """Contract errors for the shared wasm toolchain (`scripts/lib/...`)."""
+    errors: list[str] = []
+    if not text.strip():
+        return [f"{WASM_TOOLCHAIN_SCRIPT}: is empty"]
+    for fragment in WASM_TOOLCHAIN_FRAGMENTS:
+        if fragment not in text:
+            errors.append(
+                f"{WASM_TOOLCHAIN_SCRIPT}: missing required fragment {fragment!r} "
+                "(wasm-bindgen pin check / wasm32 build / web glue)"
+            )
+    return errors
+
+
+def retired_script_errors(name: str, text: str) -> list[str]:
+    """Errors for a script that is still retired (must fail, must not publish)."""
+    errors: list[str] = []
+    if not text.strip():
+        return [f"{name}: retired script is empty"]
+    for fragment in RETIRED_SCRIPTS.get(name, ()):
+        if fragment not in text:
+            errors.append(
+                f"{name}: missing {fragment!r} (a retired stub must say so and point "
+                "at the local bundle instead of publishing)"
+            )
+    if re.search(r"(?m)^exit [1-9][0-9]*\s*$", text) is None:
+        errors.append(
+            f"{name}: does not exit non-zero (a retired entry point must fail loudly)"
+        )
+    if "wrangler" in text.lower():
+        errors.append(
+            f"{name}: contains a publish command ('wrangler') while it is retired"
+        )
+    return errors
+
+
+def _read_script(rel: str, require_exec: bool = True) -> tuple[str | None, list[str]]:
+    path = ROOT / rel
+    if not path.is_file():
+        return None, [f"{rel}: missing"]
+    problems: list[str] = []
+    if not os.access(path, os.R_OK):
+        problems.append(f"{rel}: is not readable")
+    if require_exec and not os.access(path, os.X_OK):
+        problems.append(f"{rel}: is not executable (chmod +x required)")
+    try:
+        return path.read_text(encoding="utf-8"), problems
+    except OSError as exc:
+        return None, problems + [f"{rel}: cannot read ({exc})"]
+
+
+def entry_point_pass() -> tuple[list[str], list[str]]:
+    """Check the local bundle script and the scripts that stayed retired."""
+    errors: list[str] = []
+    ok: list[str] = []
+
+    text, problems = _read_script(BUILD_WEB_SCRIPT)
+    errors.extend(problems)
+    if text is not None:
+        found = build_web_errors(text)
+        errors.extend(found)
+        if not found and not problems:
+            ok.append(
+                f"local entry point '{BUILD_WEB_SCRIPT}' builds the browser bundle "
+                f"into {BUILD_WEB_OUT_DIR}"
+            )
+
+    text, problems = _read_script(WASM_TOOLCHAIN_SCRIPT, require_exec=False)
+    errors.extend(problems)
+    if text is not None:
+        found = wasm_toolchain_errors(text)
+        errors.extend(found)
+        if not found and not problems:
+            ok.append(
+                f"shared wasm toolchain '{WASM_TOOLCHAIN_SCRIPT}' keeps the wasm-bindgen "
+                "pin check and the wasm32 release build"
+            )
+
+    for name in RETIRED_SCRIPTS:
+        text, problems = _read_script(name)
+        errors.extend(problems)
+        if text is None:
+            continue
+        found = retired_script_errors(name, text)
+        errors.extend(found)
+        if not found and not problems:
+            ok.append(f"retired script '{name}' still fails non-zero (no publish path)")
+
+    return ok, errors
+
+
 def main() -> int:
     files = workflow_files()
     if not files:
@@ -377,6 +571,16 @@ def main() -> int:
                 "(a silent removal hides the capability gap)"
             )
 
+    entry_ok, entry_errors = entry_point_pass()
+    errors.extend(entry_errors)
+    for line in entry_ok:
+        print(f"  [ok]   {line}")
+    # Entry-point failures are not workflow job failures, but they are still hard
+    # errors: a silent stub or a drifted shared toolchain breaks the documented
+    # local build.
+    for error in entry_errors:
+        print(f"  [FAIL] {error}")
+
     if errors:
         print(f"\n{len(errors)} problem(s):")
         for error in errors:
@@ -385,7 +589,7 @@ def main() -> int:
 
     print(
         "\nOK: required jobs present with commands intact, retired jobs hard-disabled, "
-        "no continue-on-error: true"
+        "local browser bundle entry point real, no continue-on-error: true"
     )
     return 0
 

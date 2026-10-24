@@ -4,12 +4,18 @@
 These are text/behavior contracts for two dev scripts:
 
 * ``scripts/collect-evidence.sh`` must stay inside the current desktop session
-  (same UID, no privilege escalation, no session unlock, no portal permission
-  change, no package installs, no virtual/headless display) and must never use
-  the app's fake marker mode. It must also be honest: a missing build, launch or
-  screenshot is recorded as a failure/skip, never as an empty success.
-* ``scripts/screencast-capture.py`` is the native Wayland helper and must drive
-  the same-UID Mutter ScreenCast API and always Stop() the session.
+  (same UID, no session unlock, no portal permission change, no faking real-session
+  evidence with a virtual/headless display, no software rendering reported as a real
+  GPU) and must never use the app's fake marker mode. Both Linux pixel carriers are
+  real runs as of ADR 0024: X11/XWayland starts on ``surfaceMode=dom-canvas`` and is
+  captured through the same-UID Mutter ScreenCast stream as native Wayland. It must
+  also be honest: a missing build, launch, refusal or screenshot is recorded as a
+  failure/skip/missing with a reason, never as an empty success.
+* The refusal vocabulary is marker-first, exit code second: the current
+  ``yacr: unsupported-runtime: webgl2`` (exit 6, ``dom-canvas`` has no WebGL2) and
+  the historical ``yacr: unsupported-backend: x11`` (exit 4, no longer produced).
+* ``scripts/screencast-capture.py`` is the ScreenCast helper and must drive the
+  same-UID Mutter ScreenCast API and always Stop() the session.
 
 Each guarantee is asserted against the real file; the mutations below show the
 checks are not vacuous. Text-only plus two launch-free CLI smoke checks
@@ -128,18 +134,76 @@ class CollectEvidenceScriptContracts(unittest.TestCase):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, self.text)
 
-    def test_x11_refusal_is_classified_by_the_stable_marker_line(self) -> None:
+    def test_x11_is_a_real_run_on_the_dom_canvas_carrier(self) -> None:
+        # ADR 0024 stage 4: X11/XWayland starts on `surfaceMode=dom-canvas`; the
+        # old pre-GTK refusal is not produced any more.
+        self.assertIn("GDK_BACKEND=x11", self.text)
+        self.assertIn("surfaceMode=dom-canvas", self.text)
+        # It is one of the real candidates and goes through the same launch path.
+        self.assertIn("auto|both) candidates=(x11 wayland) ;;", self.text)
+        self.assertIn('run_backend "$name" "production"', self.text)
+        # The retired window-drawable grabber is gone: using it would collect
+        # all-black frames here and imply an X11-only capture path.
+        self.assertNotIn("capture_x11_window", self.text)
+        self.assertNotIn("x11-window-grab", self.text)
+        self.assertNotIn("shot-top.png", self.text)
+        self.assertNotIn("shot-cad.png", self.text)
+
+    def test_x11_frame_is_captured_through_the_screencast_stream(self) -> None:
+        # x11grab / window-drawable read-back is all black in this session, so both
+        # carriers use the same same-UID Mutter ScreenCast capture.
+        self.assertIn('"x11-frame"', self.text)
+        self.assertIn('"wayland-frame"', self.text)
+        self.assertIn("capture_screencast_frame", self.text)
+        self.assertIn("screencast-capture.py", self.text)
+        # The X11 screenshot column is derived from a real file, never assumed.
+        self.assertIn('-s "$dir/x11-frame.png"', self.text)
+        # And a failed capture is recorded as missing with its reason.
+        self.assertIn('local screenshot="missing"', self.text)
+        self.assertIn("screenshot missing: ${capture_reason:", self.text)
+
+    def test_webgl2_runtime_refusal_is_classified_by_the_stable_marker_line(self) -> None:
+        # Current refusal: the dom-canvas carrier cannot draw (no usable WebGL2).
+        marker = "yacr: unsupported-runtime: webgl2"
+        self.assertIn(marker, self.text)
+        self.assertIn("UNSUPPORTED_RUNTIME", self.text)
+        self.assertIn("expected exit 6", self.text)
+        self.assertIn('grep -qxF "$unsupported_runtime_marker"', self.text)
+        # Marker first, exit code second: the marker wins the classification.
+        detector_start = self.text.index("detect_refusal() {")
+        detector = self.text[
+            detector_start : self.text.index("record_refusal() {", detector_start)
+        ]
+        self.assertLess(
+            detector.index("unsupported_runtime_marker"),
+            detector.index("unsupported_backend_marker"),
+            "the current webgl2 refusal must be matched before the historical marker",
+        )
+        # A refusal produces no usable carrier frame: no capture is attempted and
+        # the row is `missing`, never a fabricated path.
+        refusal_start = self.text.index("record_refusal() {")
+        refusal_block = self.text[
+            refusal_start : self.text.index("\n}\n", refusal_start) + 3
+        ]
+        self.assertNotIn("capture_screencast_frame", refusal_block)
+        self.assertIn('"$screenshot"', refusal_block)
+        self.assertIn('"missing" \\', self.text)
+
+    def test_historical_x11_backend_refusal_marker_still_parses(self) -> None:
+        # Recorded historical contract (2026-10-22 .. 2026-10-24, exit 4) kept so an
+        # old binary/build is classified instead of being misread as a normal run.
         marker = "yacr: unsupported-backend: x11"
         self.assertIn(marker, self.text)
-        self.assertIn('grep -qxF "$unsupported_marker"', self.text)
+        self.assertIn('grep -qxF "$unsupported_backend_marker"', self.text)
         self.assertIn("UNSUPPORTED_BACKEND", self.text)
-        # The marker identifies the refusal; the code is recorded, not assumed.
         self.assertIn("expected exit 4", self.text)
-        # A refused run has no window, so no screenshot capture is attempted.
-        block_start = self.text.index('if grep -qxF "$unsupported_marker"')
-        refusal_block = self.text[block_start : self.text.index("return", block_start)]
-        self.assertIn('"missing"', refusal_block)
-        self.assertNotIn("capture_x11_window", refusal_block)
+        self.assertIn("HISTORICAL", self.text)
+        # The refusal marker is polled for the whole capture window, so a refusal
+        # that arrives after the window exists is not missed.
+        poll_start = self.text.index("local refusal_kind=\"\"")
+        poll = self.text[poll_start : self.text.index('record_refusal "$name"', poll_start)]
+        self.assertIn("detect_refusal \"$run_log\"", poll)
+        self.assertIn('"$capture_at"', poll)
 
     def test_stacking_regression_fixture_is_pinned_and_wayland_only(self) -> None:
         self.assertIn("YACR_PROBE_STACKING=1", self.text)
@@ -174,7 +238,7 @@ class CollectEvidenceScriptContracts(unittest.TestCase):
             with self.subTest(label=label):
                 self.assertIn(label, self.text)
         self.assertIn("frame_offsets=(2 12 15 18)", self.text)
-        self.assertIn('capture_wayland_frame "$dir" "wayland-frame"', self.text)
+        self.assertIn('capture_screencast_frame "$dir" "${frame_labels[i]}"', self.text)
 
     def test_records_honest_verdicts_not_empty_success(self) -> None:
         for verdict in (
@@ -186,6 +250,7 @@ class CollectEvidenceScriptContracts(unittest.TestCase):
             "SKIPPED",
             "STACKING_REGRESSION",
             "UNSUPPORTED_BACKEND",
+            "UNSUPPORTED_RUNTIME",
         ):
             with self.subTest(verdict=verdict):
                 self.assertIn(verdict, self.text)
@@ -194,19 +259,41 @@ class CollectEvidenceScriptContracts(unittest.TestCase):
         self.assertIn('screenshot="captured"', self.text)
         self.assertIn('screenshot="partial"', self.text)
 
+    def test_missing_capture_records_missing_plus_the_reason(self) -> None:
+        # Every capture failure path sets an explicit reason, and the row appends
+        # it; the screenshot column is never upgraded to a fabricated path.
+        helper_start = self.text.index("capture_screencast_frame() {")
+        helper = self.text[helper_start : self.text.index("\n}\n", helper_start) + 3]
+        self.assertIn('capture_reason="gst-launch-1.0 or screencast-capture.py unavailable"', helper)
+        self.assertIn('capture_reason="Mutter ScreenCast capture failed', helper)
+        self.assertIn("reported success but wrote no frame", helper)
+        # A capture only counts when the file really exists and is non-empty.
+        self.assertNotIn('screenshot="captured"', helper)
+        self.assertIn('-s "$dir/$frame_label.png"', self.text)
+
     def test_requires_a_real_display_session(self) -> None:
         self.assertIn("no display session available", self.text)
         self.assertIn("exit 2", self.text)
 
-    def test_wayland_capture_is_labelled_as_compositor_output(self) -> None:
-        self.assertIn("compositor output", self.text)
+    def test_capture_is_labelled_as_compositor_output_on_both_carriers(self) -> None:
+        self.assertIn("compositor", self.text)
         self.assertIn("Mutter ScreenCast", self.text)
+        self.assertIn("FULL primary monitor", self.text)
+        # The X11 carrier is described as composited rather than an X11 read-back.
+        self.assertIn("read-back", self.text)
+        self.assertIn("dom-canvas", self.text)
 
     def test_declares_the_authorization_boundary(self) -> None:
         self.assertIn("Authorization boundary", self.text)
         self.assertIn("same-UID", self.text)
         self.assertIn("never runs as root", self.text)
         self.assertIn("never uploaded", self.text)
+        # 2026-10-23 authorization: elevation/root/unlocking/installs are permitted
+        # in the environment, but faking evidence is still forbidden.
+        self.assertIn("2026-10-23", self.text)
+        self.assertIn("virtual/headless display", self.text)
+        self.assertIn("software rendering", self.text)
+        self.assertIn("real GPU", self.text)
 
     def test_help_runs_and_prints_usage(self) -> None:
         result = subprocess.run(
@@ -232,6 +319,23 @@ class CollectEvidenceScriptContracts(unittest.TestCase):
         # It must not build or launch: no cargo compile, no binary spawn.
         self.assertNotIn("cargo build --release", result.stderr)
         self.assertNotIn("launching", result.stdout)
+
+    def test_x11_dry_run_plans_a_real_run_with_a_screencast_frame(self) -> None:
+        # Launch-free check of the x11 plan: a real run captured through the
+        # ScreenCast stream, not a refusal. Works with or without a display
+        # (--dry-run stops before availability gating).
+        result = subprocess.run(
+            ["bash", str(COLLECT), "--backend", "x11", "--dry-run"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("backend mode   : x11", result.stdout)
+        self.assertIn("dom-canvas", result.stdout)
+        self.assertIn("x11-frame.png", result.stdout)
+        self.assertNotIn("UNSUPPORTED_BACKEND", result.stdout)
+        self.assertNotIn("UNSUPPORTED_RUNTIME", result.stdout)
 
 
 class ScreencastCaptureContracts(unittest.TestCase):

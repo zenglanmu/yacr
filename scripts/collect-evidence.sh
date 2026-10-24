@@ -6,15 +6,40 @@
 # env-gated probe driver, captures screenshots and logs into a fresh timestamped
 # output directory, and records honest per-backend results in results.tsv.
 #
+# Both Linux pixel carriers are collected as REAL runs (ADR 0024):
+#   * `wayland`  -> `surfaceMode=native-below`: app-owned wl_subsurface below the
+#                   WebView, drawn by the host's own wgpu presenter;
+#   * `x11`      -> `surfaceMode=dom-canvas` (X11/XWayland): the wasm CAD session
+#                   inside the WebView draws into a DOM <canvas>. There is no
+#                   native CAD child window and no native CAD session.
+#
+# Screenshots of BOTH carriers come from the compositor's own ScreenCast stream
+# (`scripts/screencast-capture.py`, same-UID Mutter), because on this desktop the
+# X11 window is a normal composited toplevel: `x11grab` and `gnome-screenshot`'s
+# X11 read-back return all black, so they are not used.
+#
+# Refusals are classified from their stable marker line first; the exit code is
+# supporting evidence only:
+#   * `yacr: unsupported-runtime: webgl2` (exit code 6) - CURRENT: the
+#     `dom-canvas` carrier cannot draw because the WebView has no usable WebGL2;
+#   * `yacr: unsupported-backend: x11` (exit code 4) - HISTORICAL (2026-10-22 ..
+#     2026-10-24): X11 was refused before GTK init. Not produced any more; the
+#     parser is kept so an old binary is still classified honestly instead of
+#     being misread as a normal run.
+#
 # The runner stays inside the current desktop session:
-#   * it runs as the invoking same-UID user and never elevates privileges,
-#   * it never runs as root and never unlocks or otherwise modifies the session,
+#   * it runs as the invoking same-UID user and does not elevate for its own
+#     actions (the 2026-10-23 user authorization permits elevation, root,
+#     session unlocking and installs in this environment; none is needed here),
+#   * it never unlocks or otherwise modifies the session,
 #   * it never changes portal/ScreenCast permission state,
-#   * it never installs packages or starts a virtual/headless display helper,
+#   * it never fakes evidence: no virtual/headless display is presented as a real
+#     session, and software rendering is never reported as a real GPU,
 #   * it never uses the app's fake marker mode; the real `--open` path is used.
 #
 # If no real display session is available it exits non-zero with an explicit
-# message instead of faking success. Nothing here is uploaded anywhere.
+# message instead of faking success. Screenshots stay local and are never
+# uploaded anywhere.
 set -euo pipefail
 
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -51,11 +76,17 @@ Options:
                                      building or launching.
   -h, --help                         Show this help.
 
-The runner stays inside the current desktop session. It never elevates
-privileges, never runs as root, never unlocks or modifies the session, never
-changes portal permission state, never installs packages and never starts a
-virtual/headless display helper. If no real display session is available it
-exits non-zero and says so.
+The runner runs as the invoking same-UID desktop user on a real display session.
+Both Linux carriers -- native Wayland (native-below) and X11/XWayland (dom-canvas)
+-- are real runs; screenshots of both come from the same-UID Mutter ScreenCast
+stream.
+
+The 2026-10-23 user authorization permits privilege escalation, root, session
+unlocking and installs in this environment; this runner needs none of them and
+still never fakes evidence: a virtual/headless display is never presented as a
+real session and software rendering is never reported as a real GPU. If no real
+display session is available it exits non-zero and says so. Screenshots stay local
+and are never uploaded.
 USAGE
 }
 
@@ -112,7 +143,6 @@ root="$(git -C "$script_dir" rev-parse --show-toplevel)"
 [[ -n "$dwg" ]] || dwg="$root/fixtures/dwg/synthetic-four-lines.dwg"
 [[ -n "$fonts_dir" ]] || fonts_dir="$root/fonts"
 binary="$root/target/release/yacr"
-grabber=""
 screencast="$root/scripts/screencast-capture.py"
 
 out_root="${YACR_EVIDENCE_ROOT:-/tmp/opencode}"
@@ -184,16 +214,62 @@ build_env_prefix() {
 }
 
 # --------------------------------------------------------------------------
-# Log parsers (evidence emitted on stderr, merged into run.log)
+# Refusal classification (evidence emitted on stderr, merged into run.log)
 # --------------------------------------------------------------------------
-parse_top_xid() {
-    grep -oE 'top-level X11 XID \((Xlib|Xcb)\) = 0x[0-9a-fA-F]+' "$1" 2>/dev/null \
-        | head -n1 | grep -oE '0x[0-9a-fA-F]+' || true
+# Stable marker lines. The marker line is the PRIMARY classification signal; the
+# exit code is recorded as supporting evidence only (a driver may override it).
+#
+# `runtime` : the `dom-canvas` carrier cannot draw (no usable WebGL2), exit 6.
+#             Current refusal; emitted after the WebView exists, from the
+#             frontend's `canvas_runtime_failed` report.
+# `backend` : the HISTORICAL pre-GTK X11 refusal, exit 4. Not produced since
+#             ADR 0024 stage 4 (X11 now starts on `dom-canvas`); kept so an old
+#             binary/build is still classified instead of being misread.
+unsupported_runtime_marker="yacr: unsupported-runtime: webgl2"
+unsupported_backend_marker="yacr: unsupported-backend: x11"
+
+# detect_refusal <run.log> -> sets `refusal_kind` to runtime|backend|<empty>.
+detect_refusal() {
+    refusal_kind=""
+    if grep -qxF "$unsupported_runtime_marker" "$1" 2>/dev/null; then
+        refusal_kind="runtime"
+    elif grep -qxF "$unsupported_backend_marker" "$1" 2>/dev/null; then
+        refusal_kind="backend"
+    fi
 }
 
-parse_child_xid() {
-    grep -oE 'bridge surface: xid=0x[0-9a-fA-F]+' "$1" 2>/dev/null \
-        | head -n1 | grep -oE '0x[0-9a-fA-F]+' || true
+# record_refusal <name> <mode> <kind> <dir> <pgid> <screenshot> <extra note>
+#
+# A refusing session ends the process itself; the wrapper's exit code file is
+# read (supporting only) and the process group is reaped. No screenshot is ever
+# invented: the caller passes the real screenshot state, and a refused carrier
+# yields `missing` plus the reason.
+record_refusal() {
+    local name="$1" mode="$2" kind="$3" dir="$4" pgid="$5"
+    local screenshot="$6" extra="${7:-}"
+    local wait0=$SECONDS
+    while [[ ! -s "$dir/app.rc" && $((SECONDS - wait0)) -lt 5 ]]; do
+        sleep 0.1
+    done
+    local code="-"
+    if [[ -s "$dir/app.rc" ]]; then
+        code="$(tr -dc '0-9' < "$dir/app.rc" | head -c 10)"
+    fi
+    [[ -n "$code" ]] || code="-"
+    if kill -0 -"$pgid" 2>/dev/null; then
+        kill -TERM -"$pgid" 2>/dev/null || true
+    fi
+    if [[ "$kind" == "runtime" ]]; then
+        record_row "$name" "$mode" "UNSUPPORTED_RUNTIME" "$code" "$screenshot" "-" \
+            "marker='$unsupported_runtime_marker' (expected exit 6); dom-canvas WebGL2 carrier cannot draw; ${extra:-no screenshot}"
+        echo "[collect] $name/$mode: verdict=UNSUPPORTED_RUNTIME exit=$code (marker)"
+    else
+        record_row "$name" "$mode" "UNSUPPORTED_BACKEND" "$code" "$screenshot" "-" \
+            "marker='$unsupported_backend_marker' (expected exit 4, HISTORICAL: not produced since ADR 0024 stage 4); ${extra:-no screenshot}"
+        echo "[collect] $name/$mode: verdict=UNSUPPORTED_BACKEND exit=$code (historical marker)"
+    fi
+    any_ran=1
+    ran_backends+=("$name/$mode")
 }
 
 # --------------------------------------------------------------------------
@@ -232,9 +308,10 @@ if [[ "$dry_run" -eq 1 ]]; then
         echo "    env          : ${env_prefix[*]}"
         echo "    argv         : $binary --open $dwg --fonts-dir $fonts_dir"
         if [[ "$name" == "x11" ]]; then
-            echo "    screenshots  : $out_dir/x11/shot-top.png $out_dir/x11/shot-cad.png"
-            echo "    grabber      : $out_dir/build/x11-window-grab (from apps/app-linux/scripts/x11-window-grab.c)"
+            echo "    surfaceMode  : dom-canvas (wasm CAD session in a DOM canvas; no native CAD child)"
+            echo "    screenshots  : $out_dir/x11/x11-frame.png (Mutter ScreenCast via $screencast)"
         else
+            echo "    surfaceMode  : native-below (app-owned wl_subsurface under the WebView)"
             echo "    screenshots  : $out_dir/wayland/wayland-frame.png (Mutter ScreenCast via $screencast)"
             if [[ "$stacking_regression" -eq 1 ]]; then
                 echo "    fixture      : separate launch -> $out_dir/wayland-stacking-regression/run.log"
@@ -318,44 +395,9 @@ if [[ "$build_failed" -eq 1 ]]; then
     exit 3
 fi
 
-# Compile the X11 window grabber once (only needed for the X11 backend).
-if [[ "$x11_available" -eq 1 ]]; then
-    mkdir -p "$out_dir/build"
-    grab_src="$root/apps/app-linux/scripts/x11-window-grab.c"
-    grabber="$out_dir/build/x11-window-grab"
-    if [[ -f "$grab_src" ]]; then
-        if gcc -O2 -o "$grabber" "$grab_src" -lX11 \
-            >"$out_dir/build/x11-window-grab-build.log" 2>&1; then
-            echo "[collect] built X11 grabber: $grabber"
-        else
-            echo "warning: x11-window-grab build failed; X11 screenshots will be missing" >&2
-            grabber=""
-        fi
-    else
-        echo "warning: $grab_src missing; X11 screenshots will be missing" >&2
-        grabber=""
-    fi
-fi
-
 # --------------------------------------------------------------------------
 # Capture helpers
 # --------------------------------------------------------------------------
-ppm_to_png() {
-    python3 -c 'import sys; from PIL import Image; Image.open(sys.argv[1]).save(sys.argv[2])' "$1" "$2"
-}
-
-capture_x11_window() {
-    # capture_x11_window <log> <xid> <out.ppm>
-    local log="$1" xid="$2" out="$3"
-    if [[ -n "$x11_xauthority" ]]; then
-        env DISPLAY="$x11_display" XAUTHORITY="$x11_xauthority" \
-            "$grabber" "$xid" "$out" >>"$log" 2>&1
-    else
-        env DISPLAY="$x11_display" \
-            "$grabber" "$xid" "$out" >>"$log" 2>&1
-    fi
-}
-
 write_gpu_identity() {
     {
         if command -v nvidia-smi >/dev/null 2>&1; then
@@ -366,17 +408,33 @@ write_gpu_identity() {
     } > "$1"
 }
 
-# Capture one Wayland compositor frame into <dir>/<label>.png.
+# Capture one compositor frame into <dir>/<label>.png.
+#
+# Used for BOTH carriers: the native Wayland surface and the X11/XWayland
+# `dom-canvas` toplevel are both composited by the session's compositor, so the
+# same same-UID Mutter ScreenCast stream is the only capture that yields pixels
+# here (`x11grab` / `gnome-screenshot`'s X11 read-back comes back all black).
+# Sets `capture_reason` on failure so the results row can state the real reason
+# instead of inventing a screenshot.
 # The frame is the FULL primary monitor and may include unrelated windows; this
 # helper never treats a capture as a visual verdict.
-capture_wayland_frame() {
+capture_reason=""
+capture_screencast_frame() {
     local dir="$1" label="$2" log="$3"
+    capture_reason=""
     if ! command -v gst-launch-1.0 >/dev/null 2>&1 || [[ ! -f "$screencast" ]]; then
-        echo "[collect] warning: gst-launch-1.0 or screencast helper missing; $label.png missing" >&2
+        capture_reason="gst-launch-1.0 or screencast-capture.py unavailable"
+        echo "[collect] warning: $capture_reason; $label.png missing" >&2
         return 1
     fi
     if ! python3 "$screencast" --out "$dir/$label.png" >>"$log" 2>&1; then
-        echo "[collect] warning: wayland ScreenCast capture failed for $label (see $log)" >&2
+        capture_reason="Mutter ScreenCast capture failed (see $log)"
+        echo "[collect] warning: $capture_reason for $label" >&2
+        return 1
+    fi
+    if [[ ! -s "$dir/$label.png" ]]; then
+        capture_reason="ScreenCast reported success but wrote no frame"
+        echo "[collect] warning: $capture_reason for $label" >&2
         return 1
     fi
     return 0
@@ -472,79 +530,31 @@ run_backend() {
         echo "[collect] warning: no backend policy line within 20s for $name"
     fi
 
-    # DOM-on-top refuses X11/XWayland before GTK init. The stable marker line is
-    # the primary classification signal (the exit code alone is not); a refused
-    # run has no window, so it must not attempt screenshots or a natural-exit
-    # verdict.
-    local unsupported_marker="yacr: unsupported-backend: x11"
-    if grep -qxF "$unsupported_marker" "$run_log" 2>/dev/null; then
-        local refusal_wait0=$SECONDS
-        while [[ ! -s "$rcfile" && $((SECONDS - refusal_wait0)) -lt 5 ]]; do
-            sleep 0.1
-        done
-        local refusal_code="-"
-        if [[ -s "$rcfile" ]]; then
-            refusal_code="$(tr -dc '0-9' < "$rcfile" | head -c 10)"
-        fi
-        [[ -n "$refusal_code" ]] || refusal_code="-"
-        if kill -0 -"$pgid" 2>/dev/null; then
-            kill -TERM -"$pgid" 2>/dev/null || true
-        fi
-        record_row "$name" "$mode" "UNSUPPORTED_BACKEND" "$refusal_code" "missing" "-" \
-            "marker='$unsupported_marker' (expected exit 4); refused before GTK init; no screenshots"
-        any_ran=1
-        ran_backends+=("$name/$mode")
-        echo "[collect] $name/$mode: verdict=UNSUPPORTED_BACKEND exit=$refusal_code (marker)"
+    # Refusal polling. A refusal can arrive AFTER the window exists: the
+    # `dom-canvas` carrier reports a missing WebGL2 from the frontend once the
+    # WebView mounts (`canvas_runtime_failed`). So the markers are polled for the
+    # whole capture window instead of being sampled once. The marker line is the
+    # primary signal; a refusal has no usable carrier frame, so it must not be
+    # reported as a normal run.
+    local refusal_kind=""
+    while [[ $((SECONDS - t0)) -lt "$capture_at" ]]; do
+        detect_refusal "$run_log"
+        if [[ -n "$refusal_kind" ]]; then break; fi
+        if [[ -s "$rcfile" ]]; then break; fi
+        sleep 0.2
+    done
+    detect_refusal "$run_log"
+    if [[ -n "$refusal_kind" ]]; then
+        record_refusal "$name" "$mode" "$refusal_kind" "$dir" "$pgid" "missing" \
+            "refused before any capture; no carrier frame exists"
         return
-    fi
-
-    # X11 XIDs (top-level + native CAD child), up to 20s.
-    local top_xid="" child_xid=""
-    if [[ "$name" == "x11" ]]; then
-        while [[ $((SECONDS - t0)) -lt 20 ]]; do
-            [[ -n "$top_xid" ]] || top_xid="$(parse_top_xid "$run_log")"
-            [[ -n "$child_xid" ]] || child_xid="$(parse_child_xid "$run_log")"
-            if [[ -n "$top_xid" && -n "$child_xid" ]]; then break; fi
-            if [[ -s "$rcfile" ]]; then break; fi
-            sleep 0.25
-        done
-        echo "[collect] $name top XID='${top_xid:-<none>}' child XID='${child_xid:-<none>}'"
     fi
 
     # Sampling and screenshots. Each branch is one launch: the production frame
     # and the multi-frame fixture never share a frame, timestamp or row.
     local captured_utc="-"
-    if [[ "$name" == "x11" ]]; then
-        while [[ $((SECONDS - t0)) -lt "$capture_at" ]]; do
-            if [[ -s "$rcfile" ]]; then break; fi
-            sleep 0.2
-        done
-        if [[ -n "$grabber" && -x "$grabber" ]]; then
-            if [[ -n "$top_xid" ]]; then
-                if capture_x11_window "$run_log" "$top_xid" "$dir/shot-top.ppm"; then
-                    ppm_to_png "$dir/shot-top.ppm" "$dir/shot-top.png" >>"$run_log" 2>&1 || true
-                else
-                    echo "[collect] warning: top-level X11 grab failed (${top_xid})" >&2
-                fi
-            else
-                echo "[collect] warning: no top-level XID; shot-top missing" >&2
-            fi
-            if [[ -n "$child_xid" ]]; then
-                if capture_x11_window "$run_log" "$child_xid" "$dir/shot-cad.ppm"; then
-                    ppm_to_png "$dir/shot-cad.ppm" "$dir/shot-cad.png" >>"$run_log" 2>&1 || true
-                else
-                    echo "[collect] warning: CAD child grab failed (${child_xid})" >&2
-                fi
-            else
-                echo "[collect] warning: no CAD child XID; shot-cad missing" >&2
-            fi
-        else
-            echo "[collect] warning: X11 grabber unavailable; screenshots missing" >&2
-        fi
-        if [[ -s "$dir/shot-top.png" || -s "$dir/shot-cad.png" ]]; then
-            captured_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        fi
-    elif [[ "$mode" == "stacking-regression" ]]; then
+    local capture_reason=""
+    if [[ "$mode" == "stacking-regression" ]]; then
         # Multi-frame fixture protocol: anchor on the first real presenter
         # readiness (not on launch) so `initial` exists even on a slow cold
         # start. The fixture auto-opens its popup 9s after mount (matching
@@ -570,7 +580,7 @@ run_backend() {
             if [[ -s "$rcfile" ]]; then
                 echo "[collect] warning: fixture exited before ${frame_labels[i]} frame" >&2
             else
-                capture_wayland_frame "$dir" "${frame_labels[i]}" "$run_log" || true
+                capture_screencast_frame "$dir" "${frame_labels[i]}" "$run_log" || true
             fi
         done
         if [[ -s "$dir/initial.png" && -s "$dir/popup-open.png" \
@@ -578,12 +588,24 @@ run_backend() {
             captured_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         fi
     else
+        local frame_label="wayland-frame"
+        if [[ "$name" == "x11" ]]; then frame_label="x11-frame"; fi
         while [[ $((SECONDS - t0)) -lt "$capture_at" ]]; do
             if [[ -s "$rcfile" ]]; then break; fi
             sleep 0.2
         done
-        capture_wayland_frame "$dir" "wayland-frame" "$run_log" || true
-        if [[ -s "$dir/wayland-frame.png" ]]; then
+        # Both carriers are captured through the compositor's own ScreenCast
+        # stream. The X11/XWayland window is a normal composited toplevel, and its
+        # X11 read-back (x11grab / a window drawable grab) is all black here.
+        if [[ -s "$rcfile" ]]; then
+            # The session is already gone: a frame now would be whatever window
+            # happens to be on screen, not this run. Record the reason instead.
+            capture_reason="app exited before the capture point; no frame taken"
+            echo "[collect] warning: $name $capture_reason" >&2
+        else
+            capture_screencast_frame "$dir" "$frame_label" "$run_log" || true
+        fi
+        if [[ -s "$dir/$frame_label.png" ]]; then
             captured_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         fi
     fi
@@ -633,13 +655,42 @@ run_backend() {
         fi
     fi
 
+    # Late refusal re-check: the `dom-canvas` carrier can report a missing
+    # WebGL2 after the capture window. Classify by the marker, not by the exit
+    # code, so the row is never misread as a normal exit.
+    detect_refusal "$run_log"
+    if [[ -n "$refusal_kind" ]]; then
+        local late_shot="missing"
+        if [[ "$name" == "x11" && -s "$dir/x11-frame.png" ]]; then
+            late_shot="captured"
+        elif [[ "$name" == "wayland" && -s "$dir/wayland-frame.png" ]]; then
+            late_shot="captured"
+        elif [[ "$mode" == "stacking-regression" && -s "$dir/initial.png" ]]; then
+            late_shot="partial"
+        fi
+        local late_note="refusal observed after the capture window"
+        if [[ "$late_shot" != "missing" ]]; then
+            late_note="$late_note; the frame predates/coincides with the refusal and is not carrier evidence"
+        fi
+        record_refusal "$name" "$mode" "$refusal_kind" "$dir" "$pgid" "$late_shot" "$late_note"
+        return
+    fi
+
     # Screenshot verdict.
     local screenshot="missing"
     if [[ "$name" == "x11" ]]; then
-        if [[ -s "$dir/shot-top.png" && -s "$dir/shot-cad.png" ]]; then
+        if [[ -s "$dir/x11-frame.png" ]]; then
             screenshot="captured"
         fi
-        notes="$notes; top=${top_xid:-none} child=${child_xid:-none}"
+        # Report whether the run's own log confirms the carrier it started on.
+        if grep -q 'surfaceMode=dom-canvas' "$run_log" 2>/dev/null; then
+            notes="$notes; surfaceMode=dom-canvas (carrier line observed); compositor frame (Mutter ScreenCast) of the full monitor; the X11 window has no native CAD child"
+        else
+            notes="$notes; surfaceMode=dom-canvas (carrier line NOT observed in run.log); compositor frame (Mutter ScreenCast) of the full monitor; the X11 window has no native CAD child"
+        fi
+        if [[ "$screenshot" != "captured" ]]; then
+            notes="$notes; screenshot missing: ${capture_reason:-no frame written}"
+        fi
     elif [[ "$mode" == "stacking-regression" ]]; then
         local frames_present=0
         local label
@@ -653,11 +704,17 @@ run_backend() {
             screenshot="partial"
         fi
         notes="$notes; classification=STACKING_REGRESSION; single launch; frames=${frames_present}/4 (initial,popup-open,after-synthetic-input,after-synthetic-input-later); fixture-only synthetic pointer moves on .native-input + YACR_PROBE_EVIDENCE input; fixture auto-opened popup; full-monitor compositor frames, no visual verdict"
+        if [[ "$screenshot" != "captured" ]]; then
+            notes="$notes; frames missing: ${capture_reason:-no frame written}"
+        fi
     else
         if [[ -s "$dir/wayland-frame.png" ]]; then
             screenshot="captured"
         fi
-        notes="$notes; production chrome over CAD; compositor frame (Mutter ScreenCast)"
+        notes="$notes; surfaceMode=native-below; production chrome over CAD; compositor frame (Mutter ScreenCast) of the full monitor"
+        if [[ "$screenshot" != "captured" ]]; then
+            notes="$notes; screenshot missing: ${capture_reason:-no frame written}"
+        fi
     fi
 
     write_gpu_identity "$dir/gpu-identity.txt"
@@ -722,6 +779,8 @@ timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "- Backends requested: $backend"
     echo "- Backends executed: ${ran_backends[*]:-<none>}"
     echo "- Backends skipped: ${skipped_backends[*]:-<none>}"
+    echo "- Pixel carriers: wayland=native-below (native wgpu subsurface under the WebView);"
+    echo "  x11=dom-canvas (wasm CAD session drawing into a DOM canvas; no native CAD child)"
     echo "- Lifecycle probe mode: $lifecycle"
     echo "- Build: $([[ "$do_build" -eq 1 ]] && echo 'frontend + cargo release' || echo 'skipped (--no-build)')"
     echo "- Stacking regression fixture (Wayland): $([[ "$stacking_regression" -eq 1 ]] && echo yes || echo no)"
@@ -745,26 +804,25 @@ timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "- $out_dir/build/cargo-release-build.log"
         echo "- $out_dir/build/frontend-build.log"
     fi
-    echo "- $out_dir/build/x11-window-grab (binary), $out_dir/build/x11-window-grab-build.log"
-    echo "- $out_dir/x11/run.log; (only when the backend ran, not on the refusal path) gpu-identity.txt, shot-top.png, shot-top.ppm, shot-cad.png, shot-cad.ppm"
+    echo "- $out_dir/x11/run.log; (only when the backend ran, not on a refusal path) gpu-identity.txt, x11-frame.png"
     echo "- $out_dir/wayland/run.log, wayland-frame.png, gpu-identity.txt (production launch)"
     if [[ "$stacking_regression" -eq 1 ]]; then
         echo "- $out_dir/wayland-stacking-regression/run.log, initial.png, popup-open.png, after-synthetic-input.png, after-synthetic-input-later.png, gpu-identity.txt (separate fixture launch)"
     fi
-    echo "- A refused backend has no window and produces no screenshot; its marker line"
-    echo "  in run.log and the results.tsv row are the evidence."
+    echo "- A refused backend produces no usable carrier frame, so its row says \`missing\`;"
+    echo "  the marker line in run.log and the results.tsv row are the evidence, and the"
+    echo "  note records why a capture was not available."
     echo
     echo "## Evidence boundary"
-    echo "- The Wayland frame (wayland/wayland-frame.png) is compositor output from the"
-    echo "  Mutter ScreenCast API for the primary monitor; it is NOT an X11 grab and NOT"
-    echo "  a root-window grab."
-    echo "- The X11 screenshots (x11/shot-*.png) are the target window's own drawable via"
-    echo "  XGetImage; an all-black result means the window itself was not readable, which"
-    echo "  is a finding, not a pass."
-    echo "- The Wayland frame is the FULL primary monitor, so other windows on the desktop"
-    echo "  may appear in it; the X11 shots are the app window only. Every artifact is"
-    echo "  written to this local output directory and is never uploaded anywhere."
-    echo "- A captured screenshot is not a visual-correctness or pixel-accuracy judgement."
+    echo "- Both carriers are captured the same way: one full-monitor frame from the"
+    echo "  same-UID Mutter ScreenCast API ($screencast). On this desktop the X11/XWayland"
+    echo "  window is a normal composited toplevel, and its X11 read-back"
+    echo "  (x11grab / a window-drawable grab) comes back all black, so it is not used."
+    echo "- The frame is the FULL primary monitor, so other windows on the desktop may"
+    echo "  appear in it. Every artifact is written to this local output directory and is"
+    echo "  never uploaded anywhere."
+    echo "- A captured screenshot is not a visual-correctness or pixel-accuracy judgement,"
+    echo "  and it is not evidence that OS-level input reached the app."
     echo "- Production and fixture rows are separate launches with separate logs and frames;"
     echo "  no row copies another launch's exit code, timestamp or screenshot. A reader can"
     echo "  tell the mode from the case column and the frame path."
@@ -776,16 +834,23 @@ timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "  existing YACR_PROBE_EVIDENCE driver injects more synthetic input."
     echo "- Those frames are still whole-monitor compositor output and are not a"
     echo "  stacking/visual PASS; an independent image review is required."
-    echo "- An UNSUPPORTED_BACKEND row is classified from the stable stderr marker line and"
-    echo "  records the refusal before GTK init; no window or screenshot exists for it."
+    echo "- Classification is marker-first, exit code second:"
+    echo "  * \`$unsupported_runtime_marker\` + exit 6 = UNSUPPORTED_RUNTIME, the current"
+    echo "    dom-canvas refusal (the WebView has no usable WebGL2)."
+    echo "  * \`$unsupported_backend_marker\` + exit 4 = UNSUPPORTED_BACKEND, the"
+    echo "    HISTORICAL pre-GTK X11 refusal. It is no longer produced (X11 now starts on"
+    echo "    dom-canvas); the parser is kept so an old binary is classified, not misread."
     echo
     echo "## Authorization boundary"
-    echo "- Runs as the invoking same-UID desktop user only (uid $uid); no privilege"
-    echo "  escalation is attempted and it never runs as root."
-    echo "- It never unlocks or otherwise modifies the session, and it never changes portal"
-    echo "  or ScreenCast permission state; ScreenCast is used as the same UID under the"
-    echo "  user's own session."
-    echo "- No packages are installed and no virtual/headless display helper is started."
+    echo "- 2026-10-23 user decision: this environment permits privilege escalation,"
+    echo "  running as root, session unlocking/switching and package installation. This"
+    echo "  runner needs none of that: it runs as the invoking same-UID desktop user"
+    echo "  (uid $uid), never runs as root for its own actions, never unlocks or otherwise"
+    echo "  modifies the session, and never changes portal or ScreenCast permission state."
+    echo "- Still forbidden, and never faked: a virtual/headless display presented as"
+    echo "  real-session evidence, and software rendering (llvmpipe / SwiftShader /"
+    echo "  lavapipe) reported as a real GPU. With no real display session the runner exits"
+    echo "  non-zero instead of faking success."
     echo "- Screenshots are captured from the local session and written to this local"
     echo "  output directory only; they are never uploaded anywhere."
 } > "$out_dir/README.md"

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Static server for a yacr web bundle with correct wasm MIME and COOP/COEP.
 
-The browser UI is retired, so there is no default bundle: `--directory` is
+The bundle is a **generated, git-ignored** artifact (`scripts/build-web.sh` →
+`apps/app-web/dist/`), so there is no default directory: `--directory` is
 required. A wasm bundle needs `application/wasm` and a secure context; COOP/COEP
 are only needed for the optional shared-memory path, so they are opt-in via
 `--coi`.
 
-Usage: scripts/serve-web.py --directory <bundle-dir> [--port 8090] [--coi]
+Usage: scripts/serve-web.py --directory apps/app-web/dist [--port 8090] [--coi]
 """
 from __future__ import annotations
 
@@ -40,7 +41,10 @@ def main() -> None:
     parser.add_argument(
         "--directory",
         required=True,
-        help="bundle directory to serve (must contain index.html)",
+        help=(
+            "bundle directory to serve (must contain index.html; build one with "
+            "scripts/build-web.sh, e.g. apps/app-web/dist)"
+        ),
     )
     parser.add_argument("--port", type=int, default=8090)
     parser.add_argument("--coi", action="store_true", help="enable COOP/COEP headers")

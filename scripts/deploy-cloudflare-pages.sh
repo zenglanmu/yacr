@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# deploy-cloudflare-pages.sh — RETIRED: the browser UI is NOT IMPLEMENTED.
+# deploy-cloudflare-pages.sh — RETIRED: no browser publish path is IMPLEMENTED.
 #
-# The web bundle this script published no longer exists: the browser host was
-# retired and `scripts/build-web.sh` now fails. Publishing is disabled so the
-# Cloudflare/CI path can never ship a stub bundle. Re-enable only together with a
-# replacement browser UI and a new, verified publish pipeline.
+# Kept retired: there is no verified publish contract (no credentials, no target
+# project, no smoke run) and CI `web-deploy` is still `if: false`. The local bundle
+# this script used to publish is now built by `scripts/build-web.sh` and can be
+# uploaded **by hand** from apps/app-web/dist/ once a real publish path is agreed.
 set -euo pipefail
-echo "deploy-cloudflare-pages.sh: NOT IMPLEMENTED — the browser UI was retired; nothing is published." >&2
+echo "deploy-cloudflare-pages.sh: NOT IMPLEMENTED — no publish path is configured; build locally with scripts/build-web.sh and upload apps/app-web/dist/ by hand." >&2
 exit 1
