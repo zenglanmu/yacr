@@ -297,7 +297,8 @@ pub struct GpuMemoryReport {
     /// explicitly disabled).
     pub cap_bytes: Option<u64>,
     /// Which rule produced [`cap_bytes`](GpuMemoryReport::cap_bytes): a share of
-    /// probed VRAM, an explicit byte cap, or the estimate fallback.
+    /// probed VRAM, an explicit byte cap, or **no cap at all** (no probe answered;
+    /// the renderer runs unbudgeted).
     ///
     /// Distinct from [`source`](GpuMemoryReport::source), which describes the
     /// **measured bytes**; this describes the **policy**.

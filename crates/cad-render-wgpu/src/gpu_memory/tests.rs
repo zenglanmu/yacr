@@ -13,6 +13,10 @@ fn ledger(budget: GpuBudget) -> Arc<GpuMemoryLedger> {
     Arc::new(GpuMemoryLedger::new(ResolvedBudget::explicit(budget), None))
 }
 
+/// A clearly arbitrary cap for the ledger contracts — not a production default
+/// (there is none: an unprobed policy is uncapped).
+const TEST_CAP: u64 = 64 * 1024 * 1024;
+
 #[test]
 fn every_category_is_in_the_breakdown_exactly_once() {
     assert_eq!(GpuMemoryCategory::ALL.len(), GpuMemoryCategory::COUNT);
@@ -113,8 +117,8 @@ fn an_uncapped_ledger_admits_any_request() {
 
 #[test]
 fn an_admitted_request_records_no_refusal() {
-    let memory = ledger(GpuBudget::estimated_default());
-    let cap = DEFAULT_GPU_BUDGET_BYTES;
+    let memory = ledger(GpuBudget::uncapped().with_cap(Some(TEST_CAP)));
+    let cap = TEST_CAP;
     assert!(memory
         .admit(&[(GpuMemoryCategory::Vertex, cap / 2)])
         .is_ok());
@@ -127,8 +131,8 @@ fn an_admitted_request_records_no_refusal() {
 
 #[test]
 fn a_budget_refusal_names_the_category_request_measurement_and_cap() {
-    let memory = ledger(GpuBudget::estimated_default());
-    let cap = DEFAULT_GPU_BUDGET_BYTES;
+    let memory = ledger(GpuBudget::uncapped().with_cap(Some(TEST_CAP)));
+    let cap = TEST_CAP;
     let resident = memory.charge(GpuMemoryCategory::Vertex, cap - 1_000);
     let refusal = memory
         .admit(&[(GpuMemoryCategory::ImageTexture, 4_096)])
@@ -163,24 +167,24 @@ fn a_budget_refusal_names_the_category_request_measurement_and_cap() {
 
 #[test]
 fn a_refusal_targets_the_heaviest_part_of_the_request() {
-    let memory = ledger(GpuBudget::estimated_default());
+    let memory = ledger(GpuBudget::uncapped().with_cap(Some(TEST_CAP)));
     let refusal = memory
         .admit(&[
-            (GpuMemoryCategory::Vertex, DEFAULT_GPU_BUDGET_BYTES),
-            (GpuMemoryCategory::Index, DEFAULT_GPU_BUDGET_BYTES * 2),
+            (GpuMemoryCategory::Vertex, TEST_CAP),
+            (GpuMemoryCategory::Index, TEST_CAP * 2),
         ])
         .expect_err("two capped requests must be refused");
     assert_eq!(refusal.category, GpuMemoryCategory::Index);
     assert_eq!(
         refusal.requested_bytes,
-        DEFAULT_GPU_BUDGET_BYTES * 3,
+        TEST_CAP * 3,
         "the verdict is on the whole request, not one piece"
     );
 }
 
 #[test]
 fn a_device_out_of_memory_refusal_is_classified_separately() {
-    let memory = ledger(GpuBudget::estimated_default());
+    let memory = ledger(GpuBudget::uncapped().with_cap(Some(TEST_CAP)));
     let resident = memory.charge(GpuMemoryCategory::Stream, 12_345);
     let refusal = memory.device_out_of_memory(
         GpuMemoryCategory::Stream,
@@ -197,10 +201,10 @@ fn a_device_out_of_memory_refusal_is_classified_separately() {
         Some("create_buffer: Out of Memory")
     );
     // A device OOM is not a budget verdict, so no cap threshold is claimed...
-    assert_eq!(refusal.limit_bytes, Some(DEFAULT_GPU_BUDGET_BYTES));
+    assert_eq!(refusal.limit_bytes, Some(TEST_CAP));
     // ... but the cap that was configured is still reported, and the device's own
     // message is named in the sentence.
-    assert_eq!(refusal.cap_bytes, Some(DEFAULT_GPU_BUDGET_BYTES));
+    assert_eq!(refusal.cap_bytes, Some(TEST_CAP));
     assert!(refusal.message().contains("out of memory"));
     assert!(refusal.message().contains("create_buffer"));
     assert!(refusal.message().contains("stream"));
@@ -210,7 +214,11 @@ fn a_device_out_of_memory_refusal_is_classified_separately() {
 
 #[test]
 fn the_report_splits_buffers_from_textures_and_states_its_source() {
-    let memory = ledger(GpuBudget::estimated_default().with_refuse_at(0.5));
+    let memory = ledger(
+        GpuBudget::uncapped()
+            .with_cap(Some(TEST_CAP))
+            .with_refuse_at(0.5),
+    );
     let _vertex = memory.charge(GpuMemoryCategory::Vertex, 1_000);
     let _index = memory.charge(GpuMemoryCategory::Index, 500);
     let _image = memory.charge(GpuMemoryCategory::ImageTexture, 2_000);
@@ -225,17 +233,14 @@ fn the_report_splits_buffers_from_textures_and_states_its_source() {
     assert_eq!(accounted.category(GpuMemoryCategory::ImageTexture), 2_000);
     assert_eq!(accounted.category(GpuMemoryCategory::Uniform), 0);
     assert_eq!(accounted.peak_bytes, 6_500);
-    assert_eq!(accounted.cap_bytes, Some(DEFAULT_GPU_BUDGET_BYTES));
-    assert_eq!(accounted.budget_bytes, Some(DEFAULT_GPU_BUDGET_BYTES / 2));
+    assert_eq!(accounted.cap_bytes, Some(TEST_CAP));
+    assert_eq!(accounted.budget_bytes, Some(TEST_CAP / 2));
     // The policy is labelled as an explicit budget (this ledger was built from a
     // `GpuBudget`), and no VRAM probe was supplied on this construction path.
     assert_eq!(accounted.budget_source, BudgetSource::ExplicitBytes);
     assert_eq!(accounted.vram_bytes, None);
     assert_eq!(accounted.budget_percent, None);
-    assert_eq!(
-        accounted.headroom_bytes(),
-        Some(DEFAULT_GPU_BUDGET_BYTES / 2 - 6_500)
-    );
+    assert_eq!(accounted.headroom_bytes(), Some(TEST_CAP / 2 - 6_500));
     assert!(!accounted.over_budget());
     // No allocator report was supplied, so the cross-check is honestly absent.
     assert_eq!(accounted.reserved_bytes, None);
@@ -273,8 +278,12 @@ fn the_report_splits_buffers_from_textures_and_states_its_source() {
 
 #[test]
 fn the_report_never_claims_more_headroom_than_the_threshold() {
-    let memory = ledger(GpuBudget::estimated_default().with_refuse_at(0.5));
-    let over = memory.charge(GpuMemoryCategory::Vertex, DEFAULT_GPU_BUDGET_BYTES / 2 + 1);
+    let memory = ledger(
+        GpuBudget::uncapped()
+            .with_cap(Some(TEST_CAP))
+            .with_refuse_at(0.5),
+    );
+    let over = memory.charge(GpuMemoryCategory::Vertex, TEST_CAP / 2 + 1);
     let report = memory.report(true, None);
     assert!(report.over_budget());
     // Saturating, never a wrapped "huge headroom".
@@ -282,7 +291,7 @@ fn the_report_never_claims_more_headroom_than_the_threshold() {
     drop(over);
     assert_eq!(
         memory.report(true, None).headroom_bytes(),
-        Some(DEFAULT_GPU_BUDGET_BYTES / 2)
+        Some(TEST_CAP / 2)
     );
 }
 
@@ -291,7 +300,7 @@ fn setting_the_budget_keeps_the_accounting() {
     let memory = ledger(GpuBudget::uncapped());
     let _charge = memory.charge(GpuMemoryCategory::Uniform, 256);
     assert_eq!(memory.budget(), GpuBudget::uncapped());
-    let tighter = GpuBudget::estimated_default().with_cap(Some(1024));
+    let tighter = GpuBudget::uncapped().with_cap(Some(1024));
     memory.set_budget(tighter);
     assert_eq!(memory.budget(), tighter);
     // A verbatim policy is labelled as an explicit choice, not a VRAM percentage.
@@ -307,9 +316,9 @@ fn a_request_that_allocates_nothing_is_admitted_after_the_cap_was_lowered() {
     // A converted batch owns no per-batch buffers, so its staging request is zero
     // bytes. A host that lowers the budget below the resident scene must not have
     // every later upload rejected: only allocations are refused.
-    let memory = ledger(GpuBudget::estimated_default());
-    let resident = memory.charge(GpuMemoryCategory::Stream, DEFAULT_GPU_BUDGET_BYTES);
-    memory.set_budget(GpuBudget::estimated_default().with_cap(Some(1_024)));
+    let memory = ledger(GpuBudget::uncapped().with_cap(Some(TEST_CAP)));
+    let resident = memory.charge(GpuMemoryCategory::Stream, TEST_CAP);
+    memory.set_budget(GpuBudget::uncapped().with_cap(Some(1_024)));
     assert!(memory.admit(&[(GpuMemoryCategory::Vertex, 0)]).is_ok());
     assert!(memory.admit(&[]).is_ok());
     assert!(memory.admit(&[(GpuMemoryCategory::Vertex, 1)]).is_err());
@@ -318,9 +327,9 @@ fn a_request_that_allocates_nothing_is_admitted_after_the_cap_was_lowered() {
 
 #[test]
 fn the_render_error_variant_carries_the_refusal_by_type() {
-    let memory = ledger(GpuBudget::estimated_default());
+    let memory = ledger(GpuBudget::uncapped().with_cap(Some(TEST_CAP)));
     let refusal = memory
-        .admit(&[(GpuMemoryCategory::Vertex, DEFAULT_GPU_BUDGET_BYTES + 1)])
+        .admit(&[(GpuMemoryCategory::Vertex, TEST_CAP + 1)])
         .expect_err("over the cap");
     let error = crate::RenderError::GpuMemory(refusal.clone());
     // Not a device loss and not a rejected frame: the caller can branch on type
@@ -347,14 +356,18 @@ fn the_render_error_variant_carries_the_refusal_by_type() {
 }
 
 #[test]
-fn the_ledger_starts_uncapped_only_when_asked() {
-    // A constructed renderer defaults to the estimated cap, and its report says so
-    // rather than presenting the number as the card's VRAM.
-    let memory = ledger(GpuBudget::from_env());
+fn the_ledger_starts_unbudgeted_without_evidence() {
+    // There is no VRAM probe on this construction path and no explicit bytes, so
+    // the policy is uncapped and the report says so — instead of presenting a
+    // guessed number as a cap (`GpuBudget::default()` is the uncapped policy).
+    let memory = ledger(GpuBudget::default());
     let report = memory.report(false, None);
     assert_eq!(report.total_bytes, 0);
     assert_eq!(report.peak_bytes, 0);
     assert_eq!(report.source, GpuMemorySource::Estimate);
+    assert_eq!(report.cap_bytes, None);
+    assert_eq!(report.budget_bytes, None);
+    assert_eq!(report.budget_source, BudgetSource::ExplicitBytes);
 }
 
 #[test]
@@ -400,18 +413,21 @@ fn the_report_states_the_budget_source_and_the_probed_vram() {
     assert_eq!(report.vram_bytes, Some(vram));
     assert_eq!(report.vram_all_heaps_bytes, Some(all_heaps));
 
-    // No probe: the fallback is labelled an estimate, never a percentage of a
-    // card nobody measured.
-    let estimate = Arc::new(GpuMemoryLedger::new(
+    // No probe: **no cap at all**, labelled `Unprobed`, never a percentage of a card
+    // nobody measured and never a guessed number.
+    let unprobed = Arc::new(GpuMemoryLedger::new(
         GpuBudgetConfig::default().resolve(None),
         None,
     ));
-    let report = estimate.report(true, None);
+    let report = unprobed.report(true, None);
     assert_eq!(report.vram_bytes, None);
     assert_eq!(report.vram_all_heaps_bytes, None);
-    assert_eq!(report.budget_source, BudgetSource::Estimate);
+    assert_eq!(report.budget_source, BudgetSource::Unprobed);
     assert_eq!(report.budget_percent, None);
-    assert_eq!(report.cap_bytes, Some(DEFAULT_GPU_BUDGET_BYTES));
+    assert_eq!(report.cap_bytes, None);
+    assert_eq!(report.budget_bytes, None);
+    assert_eq!(report.headroom_bytes(), None);
+    assert!(!report.over_budget());
 
     // An explicit uncapped policy is still labelled explicit.
     let uncapped = Arc::new(GpuMemoryLedger::new(
@@ -429,4 +445,47 @@ fn the_report_states_the_budget_source_and_the_probed_vram() {
     assert_eq!(report.cap_bytes, None);
     assert_eq!(report.budget_bytes, None);
     assert_eq!(report.budget_source, BudgetSource::ExplicitBytes);
+}
+
+#[test]
+fn an_unprobed_ledger_never_refuses_even_a_huge_resident_set() {
+    // Policy: no probe and no explicit bytes ⇒ no budget. The renderer may hold and
+    // stage whatever the device allows; the ledger must not manufacture a cap.
+    let memory = Arc::new(GpuMemoryLedger::new(
+        GpuBudgetConfig::default().resolve(None),
+        None,
+    ));
+    let resident = memory.charge(GpuMemoryCategory::Stream, u64::MAX / 4);
+    assert!(memory
+        .admit(&[(GpuMemoryCategory::Vertex, u64::MAX / 4)])
+        .is_ok());
+    assert!(memory.refusal().is_none());
+    let report = memory.report(true, None);
+    assert_eq!(report.budget_source, BudgetSource::Unprobed);
+    assert_eq!(report.cap_bytes, None);
+    assert_eq!(report.budget_bytes, None);
+    assert!(!report.over_budget());
+    drop(resident);
+}
+
+#[test]
+fn an_explicit_cap_still_refuses_without_a_vram_probe() {
+    // Explicit bytes are evidence the caller supplied, so they work even when the
+    // backend cannot be probed.
+    let config = GpuBudgetConfig {
+        explicit_bytes: Some(4 * 1024),
+        ..GpuBudgetConfig::default()
+    };
+    let memory = Arc::new(GpuMemoryLedger::new(config.resolve(None), None));
+    let _resident = memory.charge(GpuMemoryCategory::Vertex, 3_000);
+    let refusal = memory
+        .admit(&[(GpuMemoryCategory::Index, 2_000)])
+        .expect_err("an explicit cap refuses without a probe");
+    assert!(refusal.is_budget_refusal());
+    assert_eq!(refusal.cap_bytes, Some(4 * 1024));
+    assert_eq!(refusal.limit_bytes, Some(4 * 1024));
+    assert_eq!(
+        memory.report(true, None).budget_source,
+        BudgetSource::ExplicitBytes
+    );
 }

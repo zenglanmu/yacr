@@ -145,10 +145,9 @@ impl Renderer {
             entity_flag_keys: std::collections::BTreeSet::new(),
             entity_flags_request: Vec::new(),
             // The budget policy is resolved from the environment now, but without
-            // a device no VRAM probe can run: this initial resolution is either
-            // the explicit override or the documented estimate fallback.
-            // `initialize_with_device` re-resolves it against the probed
-            // device-local total (see `gpu_memory`).
+            // a device no VRAM probe can run: this initial resolution is either the
+            // explicit override or **no cap** (unprobed). `initialize_with_device`
+            // re-resolves it against the probed device-local total.
             gpu_memory: Arc::new(GpuMemoryLedger::new(gpu_budget_config.resolve(None), None)),
             gpu_budget_config,
             gpu_vram: std::sync::Mutex::new(VramCache::default()),
@@ -635,8 +634,8 @@ impl Renderer {
         self.device = Some(device);
         self.queue = Some(queue);
         // A fresh device generation re-probes VRAM exactly once, so the budget is a
-        // share of *this* card rather than the previous device's (or the estimate
-        // fallback). See `Renderer::refresh_gpu_budget_from_probe`.
+        // share of *this* card rather than the previous device's (or no cap when the
+        // new backend cannot be probed). See `Renderer::refresh_gpu_budget_from_probe`.
         self.gpu_vram
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())

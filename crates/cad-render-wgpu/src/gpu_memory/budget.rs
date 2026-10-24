@@ -6,18 +6,19 @@
 //! cad-render-wgpu`), exactly like the wasm heap budget
 //! (`apps/app-web/src/budget.rs`) is.
 //!
-//! # The cap is a percentage of the card's advertised memory, with an estimate
-//! # as the fallback
+//! # The cap is a percentage of the card's advertised memory — and absent when
+//! # VRAM cannot be probed
 //!
 //! wgpu 30.0.1 exposes **no** portable VRAM field: `AdapterInfo` has no memory
 //! entry, `Instance::generate_report()` reports no budget, and
 //! [`Limits`](wgpu::Limits) only carries per-resource ceilings (`max_buffer_size`,
 //! `max_texture_dimension_2d`). The closest number a desktop backend will give is
 //! its **device-local physical memory heaps**, which this crate reads through the
-//! Vulkan HAL escape hatch ([`super::vram`]). The cap uses the **largest single
-//! device-local heap** as the VRAM proxy — **not** the sum of the heaps, which a
-//! host-visible device-local heap inflated past the card's physical capacity on the
-//! reference machine (see the validation record). Both are
+//! Vulkan HAL escape hatch ([`super::vram`]) — Vulkan only: GL/Metal/DX12/the web
+//! backend expose no such query and therefore run **unbudgeted**. The cap uses the
+//! **largest single device-local heap** as the VRAM proxy — **not** the sum of the
+//! heaps, which a host-visible device-local heap inflated past the card's physical
+//! capacity on the reference machine (see the validation record). Both are
 //! *advertised device-local memory*, **not free memory** (usage is not subtracted,
 //! other clients are unknown, and on an integrated GPU it is shared system RAM).
 //!
@@ -27,16 +28,19 @@
 //!    (`--gpu-budget-mb` / `YACR_GPU_BUDGET_MB`; `0` = explicitly uncapped);
 //! 2. `percent_of_vram` (default [`DEFAULT_GPU_BUDGET_PERCENT`] = 90 %) of the
 //!    probed proxy (`YACR_GPU_BUDGET_PERCENT`);
-//! 3. [`DEFAULT_GPU_BUDGET_BYTES`] (3 GiB) when the VRAM probe could not answer —
-//!    reported as [`BudgetSource::Estimate`], never silently presented as a
-//!    percentage of the card.
+//! 3. **no cap at all** ([`BudgetSource::Unprobed`]) when neither an explicit cap
+//!    nor a VRAM probe exists. There is deliberately **no guessed fallback**: a cap
+//!    invented without evidence can refuse legitimate drawings. This repository
+//!    already measured that failure with the old 512 MiB default, which refused the
+//!    authorized `fixtures/complex-test.dwg` while the renderer legitimately held
+//!    1.57 GB (`gpu-memory-refused: … used=1573159200 requested=144
+//!    cap=536870912`). Running unbudgeted is honest; a false refusal is not.
 //!
-//! The fallback is sized from a measurement ([`MEASURED_FIXTURE_GPU_BYTES`]:
-//! 2.11 GB for `fixtures/complex-test.dwg` on the reference machine,
-//! cross-checked against the driver's allocator report to within 0.07 %), and
-//! every level is overridable per machine with the flags/env above or
+//! Every level is overridable per machine with the flags/env above or
 //! [`Renderer::set_gpu_budget_config`](crate::Renderer::set_gpu_budget_config) /
-//! [`Renderer::set_gpu_budget`](crate::Renderer::set_gpu_budget).
+//! [`Renderer::set_gpu_budget`](crate::Renderer::set_gpu_budget). [`MEASURED_FIXTURE_GPU_BYTES`]
+//! stays a *measurement* used by a test that a probed 4 GiB card admits the fixture —
+//! never a default.
 //!
 //! The effective cap is still an **application** policy: 90 % of advertised
 //! device-local memory leaves headroom for the compositor, the host's own
@@ -47,9 +51,9 @@
 ///
 /// Read once, when the renderer is constructed ([`GpuBudgetConfig::from_env`]).
 /// `0` on its own **explicitly disables** the cap (reported as `cap_bytes: None`,
-/// never silently treated as a one-megabyte cap); an unparseable value is
-/// reported on stderr and ignored in favour of the percentage/estimate path, so a
-/// typo can never leave a session unbounded by accident.
+/// never silently treated as a one-megabyte cap); an unparseable value is reported
+/// on stderr and ignored in favour of the percentage path (or no cap at all when
+/// VRAM cannot be probed), so a bad setting never looks applied.
 pub const GPU_BUDGET_ENV: &str = "YACR_GPU_BUDGET_MB";
 
 /// The environment variable that sets [`GpuBudgetConfig::percent_of_vram`].
@@ -59,7 +63,8 @@ pub const GPU_BUDGET_ENV: &str = "YACR_GPU_BUDGET_MB";
 /// wins. A value outside [`MIN_GPU_BUDGET_PERCENT`]..=[`MAX_GPU_BUDGET_PERCENT`]
 /// (`0`, `5`, `101`, …) or a non-numeric value is reported on stderr and ignored
 /// in favour of [`DEFAULT_GPU_BUDGET_PERCENT`] — the same honesty rule as the MB
-/// override: a bad setting must neither look applied nor silently uncap.
+/// override: a bad setting must neither look applied nor silently change the
+/// policy.
 pub const GPU_BUDGET_PERCENT_ENV: &str = "YACR_GPU_BUDGET_PERCENT";
 
 /// The default share of the probed VRAM proxy the renderer may claim: **90 %**.
@@ -103,58 +108,12 @@ pub(crate) const MIB: u64 = 1024 * 1024;
 ///             mask-texture=0 other=688144
 /// ```
 ///
-/// Another drawing, another driver revision or another scene shape can need more;
-/// a host that knows its own working set should raise or lower the cap instead of
-/// treating this number as a promise. It exists so [`DEFAULT_GPU_BUDGET_BYTES`] can
-/// be *checked* against a real file (see
-/// `the_default_budget_admits_the_measured_fixture`), not so callers compare
+/// Another drawing, another driver revision or another scene shape can need more,
+/// so this is a **measurement, not a promise** and not a budget default. It is kept
+/// so a *probed* budget can be checked against a real file (see
+/// `a_probed_four_gib_card_admits_the_measured_fixture`), not so callers compare
 /// against it at runtime.
 pub const MEASURED_FIXTURE_GPU_BYTES: u64 = 2_107_964_952;
-
-/// The fallback application GPU memory cap when VRAM cannot be probed: **3 GiB**.
-///
-/// This is used only by [`BudgetSource::Estimate`] — no VRAM probe answered and no
-/// explicit cap was configured (see [`GpuBudgetConfig::resolve`]). Whenever the
-/// backend reports device-local memory, the cap is
-/// [`DEFAULT_GPU_BUDGET_PERCENT`] % of it instead.
-/// Rationale, from measurement rather than a round number picked for looks:
-///
-/// * the authorized fixture (`fixtures/complex-test.dwg`, 145,947 batches) needs
-///   **2,107,964,952 bytes** of device memory on the reference machine
-///   ([`MEASURED_FIXTURE_GPU_BYTES`]), with a peak equal to its total because the
-///   upload is one atomic commit. The dominant consumer is the `stream` category
-///   (`1,695,124,632 bytes` — instanced line and merged mesh streams), which is
-///   **larger than the wasm heap the same file needs on the canvas path**
-///   (1.43 GB, `docs/adr/0025-wasm-memory-budget-and-worker-isolation.md`).
-///   3 GiB leaves ~0.9 GiB above that peak, so a somewhat larger drawing is still
-///   admitted instead of being refused at upload.
-/// * The previous **512 MiB** default was *wrong by measurement*: it refused the
-///   same legitimate drawing with
-///   `gpu-memory-refused: origin=application-budget category=mask
-///   used=1573159200 requested=144 cap=536870912` — a false refusal, because the
-///   renderer was already holding 1.57 GB when it asked for another 144 bytes. A
-///   budget that refuses the repository's own authorized fixture is worse than no
-///   budget: it turns a working session into a broken one while claiming to
-///   protect it.
-/// * 3 GiB still stays below a 4 GB card (the P620 this was measured on), so the
-///   renderer's own refusal keeps its intended job of tripping *before* the driver
-///   starts evicting other clients — and the driver-side thresholds are the second
-///   line of defence where the backend honours them
-///   ([`apply_memory_budget_thresholds`]).
-/// * It is a **policy** number, not a hardware fact. A per-machine override is
-///   expected: `--gpu-budget-mb <n>` on the CLI / `YACR_GPU_BUDGET_MB=<n>` in the
-///   environment / [`Renderer::set_gpu_budget`](crate::Renderer::set_gpu_budget)
-///   for a bigger card or a deliberately tighter session. Nothing in the renderer
-///   assumes the default.
-///
-/// This is an **application estimate**. It is never reported as the card's VRAM
-/// (wgpu 30.0.1 cannot report that; see the module docs).
-///
-/// Renderer-side **stream sizing is a separate follow-up**: the 1.70 GB `stream`
-/// share says the instanced-line/merged-mesh representation is the thing to
-/// optimise next, and this lane deliberately does not touch it (the accounting is
-/// how that work will be measured).
-pub const DEFAULT_GPU_BUDGET_BYTES: u64 = 3 * 1024 * MIB;
 
 /// Percent of the backend's own reported memory budget at which wgpu starts
 /// returning OOM from resource creation.
@@ -247,10 +206,15 @@ pub enum BudgetSource {
     /// [`GpuBudget`] / [`GpuBudgetConfig::explicit_bytes`]). `cap_bytes: None`
     /// with this source means an explicit "uncapped".
     ExplicitBytes,
-    /// No VRAM probe answered and no explicit cap was set: the cap is the
-    /// application estimate [`DEFAULT_GPU_BUDGET_BYTES`].
+    /// **No budget**: no VRAM probe answered (non-Vulkan backend, no HAL handle,
+    /// no device-local heap) and no explicit byte cap was configured. The renderer
+    /// then runs unbudgeted ([`GpuBudget::uncapped`]) instead of guessing a cap —
+    /// a guess can falsely refuse legitimate drawings (see the module docs).
+    ///
+    /// This is also the [`Default`] value, because "we have no evidence" is the
+    /// only honest default.
     #[default]
-    Estimate,
+    Unprobed,
 }
 
 impl BudgetSource {
@@ -259,7 +223,7 @@ impl BudgetSource {
         match self {
             Self::VramPercent => "vram-percent",
             Self::ExplicitBytes => "explicit-bytes",
-            Self::Estimate => "estimate",
+            Self::Unprobed => "unprobed",
         }
     }
 
@@ -268,17 +232,17 @@ impl BudgetSource {
         match self {
             Self::VramPercent => 0,
             Self::ExplicitBytes => 1,
-            Self::Estimate => 2,
+            Self::Unprobed => 2,
         }
     }
 
-    /// Decode [`Self::code`]; an unknown code is treated as [`Self::Estimate`]
-    /// (the honest "we do not know" label) rather than panicking in a report.
+    /// Decode [`Self::code`]; an unknown code is treated as [`Self::Unprobed`]
+    /// (the honest "no budget evidence" label) rather than panicking in a report.
     pub(crate) const fn from_code(code: u8) -> Self {
         match code {
             0 => Self::VramPercent,
             1 => Self::ExplicitBytes,
-            _ => Self::Estimate,
+            _ => Self::Unprobed,
         }
     }
 }
@@ -288,22 +252,26 @@ impl BudgetSource {
 ///
 /// Plain configuration data (no wgpu types), so a host can build one and a unit
 /// test can resolve it without a GPU. [`Default`] is 90 % of probed VRAM with no
-/// explicit cap and `refuse_at = 1.0`.
+/// explicit cap and `refuse_at = 1.0`; if VRAM cannot be probed it resolves to **no
+/// cap** ([`BudgetSource::Unprobed`]) rather than a guessed number.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GpuBudgetConfig {
     /// Share of the probed VRAM proxy to use as the cap, in percent.
     ///
-    /// The default is [`DEFAULT_GPU_BUDGET_PERCENT`] (90 %). Values outside
+    /// The default is [`DEFAULT_GPU_BUDGET_PERCENT`] (90 %). It applies **only**
+    /// when a probe answered (Vulkan only): with no probe this setting cannot be
+    /// applied and the policy is unbudgeted. Values outside
     /// [`MIN_GPU_BUDGET_PERCENT`]..=[`MAX_GPU_BUDGET_PERCENT`] are **clamped** at
     /// resolution (documented, so a programmatic `255` can never become a cap
     /// above the card); the environment variable is rejected loudly instead (see
     /// [`GPU_BUDGET_PERCENT_ENV`]).
     pub percent_of_vram: u8,
-    /// An explicit cap in bytes, which always wins over the percentage.
+    /// An explicit cap in bytes, which always wins over the percentage and works
+    /// even when VRAM cannot be probed.
     ///
-    /// `None` = "no explicit cap: use the percentage". `Some(0)` is the documented
-    /// explicit **uncapped** sentinel (mirroring `--gpu-budget-mb 0`); any other
-    /// value is used verbatim.
+    /// `None` = "no explicit cap: use the percentage (or no cap if unprobed)".
+    /// `Some(0)` is the documented explicit **uncapped** sentinel (mirroring
+    /// `--gpu-budget-mb 0`); any other value is used verbatim.
     pub explicit_bytes: Option<u64>,
     /// The fraction of the effective cap at which staging is refused, in `(0, 1]`.
     /// Semantics are [`GpuBudget::refuse_at`]'s; default `1.0`.
@@ -328,7 +296,8 @@ impl GpuBudgetConfig {
     ///   [`Self::percent_of_vram`].
     ///
     /// Malformed values are reported on stderr and ignored (the default kept), so
-    /// an invalid override never looks applied and never silently uncaps.
+    /// an invalid override never looks applied — and never invents a cap: with no
+    /// explicit bytes and no probe the renderer runs unbudgeted.
     pub fn from_env() -> Self {
         Self::resolve_env(
             std::env::var(GPU_BUDGET_ENV).ok().as_deref(),
@@ -348,7 +317,7 @@ impl GpuBudgetConfig {
                 Err(reason) => {
                     eprintln!(
                         "yacr: ignoring {GPU_BUDGET_ENV}={raw:?}: {reason}; \
-                         using {} % of the probed device-local VRAM instead",
+                         using the {} % VRAM policy instead (unbudgeted if VRAM cannot be probed)",
                         DEFAULT_GPU_BUDGET_PERCENT
                     );
                     None
@@ -377,16 +346,27 @@ impl GpuBudgetConfig {
     /// Resolve the effective cap against a probed VRAM proxy.
     ///
     /// Precedence (documented in the module docs): explicit bytes **>** percentage
-    /// of the proxy **>** [`DEFAULT_GPU_BUDGET_BYTES`] when the probe is `None` or
-    /// zero.
+    /// of the proxy **>** **no cap** ([`BudgetSource::Unprobed`]) when the probe is
+    /// `None` or zero and no explicit cap was configured. There is no guessed
+    /// fallback: an unprobed backend runs unbudgeted rather than risk a false
+    /// refusal.
     ///
     /// The percentage is floored (`total × percent / 100`, integer arithmetic), so
     /// the cap never claims more than the configured share.
     pub fn resolve(&self, vram_bytes: Option<u64>) -> ResolvedBudget {
-        let cap_bytes = if let Some(explicit) = self.explicit_bytes {
-            // `Some(0)` is the explicit "uncapped" sentinel.
-            (explicit != 0).then_some(explicit)
-        } else if let Some(total) = vram_bytes.filter(|total| *total > 0) {
+        if let Some(total) = vram_bytes.filter(|total| *total > 0) {
+            if let Some(explicit) = self.explicit_bytes {
+                // An explicit choice always beats the probe, including `Some(0)` =
+                // the explicit "uncapped" sentinel.
+                return ResolvedBudget {
+                    budget: GpuBudget {
+                        cap_bytes: (explicit != 0).then_some(explicit),
+                        refuse_at: self.refuse_at,
+                    },
+                    source: BudgetSource::ExplicitBytes,
+                    percent: None,
+                };
+            }
             let percent = self.effective_percent();
             return ResolvedBudget {
                 budget: GpuBudget {
@@ -396,19 +376,25 @@ impl GpuBudgetConfig {
                 source: BudgetSource::VramPercent,
                 percent: Some(percent),
             };
-        } else {
-            Some(DEFAULT_GPU_BUDGET_BYTES)
-        };
+        }
+        if let Some(explicit) = self.explicit_bytes {
+            return ResolvedBudget {
+                budget: GpuBudget {
+                    cap_bytes: (explicit != 0).then_some(explicit),
+                    refuse_at: self.refuse_at,
+                },
+                source: BudgetSource::ExplicitBytes,
+                percent: None,
+            };
+        }
+        // No explicit cap and no probe: unbudgeted, labelled as such (never as a
+        // percentage of a card nobody measured, and never a guessed number).
         ResolvedBudget {
             budget: GpuBudget {
-                cap_bytes,
+                cap_bytes: None,
                 refuse_at: self.refuse_at,
             },
-            source: if self.explicit_bytes.is_some() {
-                BudgetSource::ExplicitBytes
-            } else {
-                BudgetSource::Estimate
-            },
+            source: BudgetSource::Unprobed,
             percent: None,
         }
     }
@@ -429,7 +415,7 @@ impl GpuBudgetConfig {
 ///
 /// The renderer keeps this as the ledger's policy, and the report exposes
 /// `budget_source`/`budget_percent` from it, so a reader can tell a percentage
-/// cap from an explicit one and from the estimate fallback.
+/// cap from an explicit one and from **no cap** ([`BudgetSource::Unprobed`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolvedBudget {
     /// The policy the ledger enforces.
@@ -480,11 +466,13 @@ fn parse_budget_percent(raw: &str) -> Result<u8, String> {
 /// refused.
 ///
 /// Both fields are plain configuration so a host can construct one without wgpu
-/// types. [`Default`] is [`GpuBudget::estimated_default`].
+/// types. [`Default`] is [`GpuBudget::uncapped`]: with no evidence about VRAM there
+/// is deliberately no default cap.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GpuBudget {
-    /// The cap in bytes. `None` **explicitly** disables the cap: the renderer then
-    /// allocates until the device or the driver refuses, which is exactly what
+    /// The cap in bytes. `None` means **no cap**: either explicitly (an opt-out)
+    /// or because no VRAM probe answered. The renderer then allocates until the
+    /// device or the driver refuses, which is exactly what
     /// [`super::GpuMemorySource`] says about the numbers it reports.
     pub cap_bytes: Option<u64>,
     /// The fraction of the cap at which a staging request is refused, in
@@ -499,19 +487,11 @@ pub struct GpuBudget {
 
 impl Default for GpuBudget {
     fn default() -> Self {
-        Self::estimated_default()
+        Self::uncapped()
     }
 }
 
 impl GpuBudget {
-    /// The default policy: [`DEFAULT_GPU_BUDGET_BYTES`] and `refuse_at = 1.0`.
-    pub const fn estimated_default() -> Self {
-        Self {
-            cap_bytes: Some(DEFAULT_GPU_BUDGET_BYTES),
-            refuse_at: 1.0,
-        }
-    }
-
     /// An uncapped policy (never refuses on the renderer's own account).
     pub const fn uncapped() -> Self {
         Self {
@@ -531,10 +511,13 @@ impl GpuBudget {
     }
 
     /// Resolve the policy from the environment: [`GPU_BUDGET_ENV`] when it is set
-    /// and parseable, [`GpuBudget::estimated_default`] otherwise.
+    /// and parseable, [`GpuBudget::uncapped`] otherwise.
     ///
-    /// A malformed value is reported on stderr and ignored — an invalid override
-    /// must not silently uncap the renderer, and must not silently look applied.
+    /// This is the **low-level** shape: it has no VRAM evidence, so unset means
+    /// "no cap" ([`GpuBudgetConfig::from_env`] + [`GpuBudgetConfig::resolve`] is the
+    /// percentage-aware path). A malformed value is reported on stderr and ignored —
+    /// an invalid override must not silently look applied, and the resulting policy
+    /// is still uncapped rather than a guessed number.
     pub fn from_env() -> Self {
         Self::resolve(std::env::var(GPU_BUDGET_ENV).ok().as_deref())
     }
@@ -542,25 +525,24 @@ impl GpuBudget {
     /// [`GpuBudget::from_env`] over an explicit value, so the parsing rules are
     /// unit-testable without touching the process environment.
     ///
-    /// * `None` (unset) → the default cap;
-    /// * `""` or a non-numeric value → the default cap, with a stderr note;
+    /// * `None` (unset) → [`GpuBudget::uncapped`];
+    /// * `""` or a non-numeric value → [`GpuBudget::uncapped`], with a stderr note;
     /// * `"0"` → [`GpuBudget::uncapped`] (an explicit opt-out);
-    /// * `"<n>"` MiB → `n × 1 MiB`, or the default cap with a stderr note if the
-    ///   multiplication overflows.
+    /// * `"<n>"` MiB → `n × 1 MiB`, or [`GpuBudget::uncapped`] with a stderr note if
+    ///   the multiplication overflows.
     pub fn resolve(raw: Option<&str>) -> Self {
         let Some(raw) = raw else {
-            return Self::estimated_default();
+            return Self::uncapped();
         };
         match parse_budget_mib(raw) {
-            Ok(Some(bytes)) => Self::estimated_default().with_cap(Some(bytes)),
+            Ok(Some(bytes)) => Self::uncapped().with_cap(Some(bytes)),
             Ok(None) => Self::uncapped(),
             Err(reason) => {
                 eprintln!(
                     "yacr: ignoring {GPU_BUDGET_ENV}={raw:?}: {reason}; \
-                     using the default application estimate of {} MiB",
-                    DEFAULT_GPU_BUDGET_BYTES / MIB
+                     running without an explicit GPU byte cap"
                 );
-                Self::estimated_default()
+                Self::uncapped()
             }
         }
     }

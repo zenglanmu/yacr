@@ -51,9 +51,8 @@
 //! Every path that cannot answer returns [`None`]: a non-Vulkan adapter, an
 //! `as_hal` callback that returns `None` (GL/Metal/DX12/noop/webgpu), a heap list
 //! with no device-local memory, or a loader that cannot resolve the entry point.
-//! The caller then falls back to the documented application estimate
-//! ([`DEFAULT_GPU_BUDGET_BYTES`](super::DEFAULT_GPU_BUDGET_BYTES)) and the report
-//! labels the cap `Estimate`.
+//! The budget policy then applies **no cap** (unless the host set explicit bytes)
+//! and the report labels it `Unprobed`: there is no guessed fallback.
 
 /// One physical memory heap, as the backend reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -7,48 +7,47 @@
 
 use super::budget::*;
 
+/// A clearly arbitrary cap for the arithmetic tests. Deliberately **not** the
+/// removed 3 GiB default: no production constant may leak back in as a policy.
+const TEST_CAP: u64 = 64 * MIB;
+
 #[test]
-fn the_default_budget_is_named_and_estimated() {
-    // Named constant, not an inline literal at a call site.
-    assert_eq!(DEFAULT_GPU_BUDGET_BYTES, 3 * 1024 * 1024 * 1024);
-    let budget = GpuBudget::estimated_default();
-    assert_eq!(budget.cap_bytes, Some(DEFAULT_GPU_BUDGET_BYTES));
-    assert_eq!(budget.refuse_at, 1.0);
-    assert_eq!(GpuBudget::default(), budget);
-    assert_eq!(budget.effective_limit_bytes(), Some(3 * 1024 * 1024 * 1024));
+fn there_is_no_default_cap() {
+    // With no VRAM evidence and no explicit bytes there is deliberately no cap:
+    // `Default` is the uncapped policy, not a guessed number.
+    assert_eq!(GpuBudget::default(), GpuBudget::uncapped());
+    assert_eq!(GpuBudget::default().cap_bytes, None);
+    assert_eq!(GpuBudget::default().effective_limit_bytes(), None);
+    assert_eq!(
+        GpuBudgetConfig::default().resolve(None).budget.cap_bytes,
+        None
+    );
 }
 
 #[test]
-fn the_default_budget_admits_the_measured_fixture() {
-    // The default must not refuse the repository's own authorized fixture. This
-    // pins a **measured** total (`fixtures/complex-test.dwg` on the reference
-    // P620: 2,107,964,952 bytes) against the policy, so shrinking the default
-    // below a real drawing fails here instead of at a user's upload.
-    let budget = GpuBudget::estimated_default();
+fn a_probed_four_gib_card_admits_the_measured_fixture() {
+    // The repository's own authorized drawing (`fixtures/complex-test.dwg`, measured
+    // at 2,107,964,952 B on the reference P620) must be admitted by the *probed*
+    // policy on that 4 GiB card. The measured constant exists for this check only;
+    // it is not a budget default.
     assert_eq!(MEASURED_FIXTURE_GPU_BYTES, 2_107_964_952);
+    let four_gib_proxy = 4 * 1024 * MIB;
+    let resolved = GpuBudgetConfig::default().resolve(Some(four_gib_proxy));
+    assert_eq!(resolved.source, BudgetSource::VramPercent);
+    let cap = resolved.budget.cap_bytes.expect("a probed card has a cap");
+    assert_eq!(cap, four_gib_proxy * 9 / 10);
     assert!(
-        !budget.would_exceed(MEASURED_FIXTURE_GPU_BYTES, 0),
-        "the default cap {} must admit the measured fixture total {}",
-        DEFAULT_GPU_BUDGET_BYTES,
-        MEASURED_FIXTURE_GPU_BYTES
+        !resolved.budget.would_exceed(MEASURED_FIXTURE_GPU_BYTES, 0),
+        "90 % of 4 GiB ({cap}) must admit the measured fixture ({MEASURED_FIXTURE_GPU_BYTES})"
     );
-    assert!(
-        !budget.would_exceed(MEASURED_FIXTURE_GPU_BYTES, 144),
-        "a staged buffer on top of the resident fixture must still be admitted"
-    );
-    // ... with real room above it, not a one-byte margin: the measurement is a
-    // data point, not the ceiling.
-    const {
-        assert!(
-            DEFAULT_GPU_BUDGET_BYTES - MEASURED_FIXTURE_GPU_BYTES >= 900 * MIB,
-            "the default must leave measurable headroom above the fixture"
-        )
-    };
-    // It also stays under the reference card's 4 GB, so the renderer's own
-    // refusal keeps tripping before the driver has to.
-    const { assert!(DEFAULT_GPU_BUDGET_BYTES < 4 * 1024 * 1024 * 1024) };
-    // The previous 512 MiB default is documented as a measured false refusal.
-    assert!(GpuBudget::estimated_default()
+    assert!(!resolved
+        .budget
+        .would_exceed(MEASURED_FIXTURE_GPU_BYTES, 144));
+    // ... with real room above it, not a one-byte margin.
+    assert!(cap - MEASURED_FIXTURE_GPU_BYTES >= 900 * MIB);
+    // The old 512 MiB default was a measured false refusal; it is only cited here
+    // as the reason there is no guessed default at all.
+    assert!(GpuBudget::uncapped()
         .with_cap(Some(512 * MIB))
         .would_exceed(1_573_159_200, 144));
 }
@@ -63,32 +62,30 @@ fn an_uncapped_budget_never_refuses() {
 
 #[test]
 fn the_limit_is_inclusive_at_the_cap() {
-    let budget = GpuBudget::estimated_default();
-    let cap = DEFAULT_GPU_BUDGET_BYTES;
+    let budget = GpuBudget::uncapped().with_cap(Some(TEST_CAP));
     // Exactly at the cap is admitted; one byte over is refused.
-    assert!(!budget.would_exceed(cap, 0));
-    assert!(!budget.would_exceed(cap - 1, 1));
-    assert!(budget.would_exceed(cap, 1));
-    assert!(budget.would_exceed(cap - 1, 2));
+    assert!(!budget.would_exceed(TEST_CAP, 0));
+    assert!(!budget.would_exceed(TEST_CAP - 1, 1));
+    assert!(budget.would_exceed(TEST_CAP, 1));
+    assert!(budget.would_exceed(TEST_CAP - 1, 2));
 }
 
 #[test]
 fn refuse_at_scales_the_threshold_down_and_never_up() {
-    let budget = GpuBudget::estimated_default().with_refuse_at(0.75);
-    assert_eq!(
-        budget.effective_limit_bytes(),
-        Some(DEFAULT_GPU_BUDGET_BYTES * 3 / 4)
-    );
+    let budget = GpuBudget::uncapped()
+        .with_cap(Some(TEST_CAP))
+        .with_refuse_at(0.75);
+    assert_eq!(budget.effective_limit_bytes(), Some(TEST_CAP * 3 / 4));
     // A fraction above 1 would promise memory the cap does not cover: clamp.
     assert_eq!(
         budget.with_refuse_at(4.0).effective_limit_bytes(),
-        Some(DEFAULT_GPU_BUDGET_BYTES)
+        Some(TEST_CAP)
     );
     // Zero, negative and non-finite mean "refuse at the cap", never a zero cap.
     for nonsense in [0.0, -1.0, f32::NAN, f32::INFINITY] {
         assert_eq!(
             budget.with_refuse_at(nonsense).effective_limit_bytes(),
-            Some(DEFAULT_GPU_BUDGET_BYTES),
+            Some(TEST_CAP),
             "refuse_at {nonsense} must clamp to the cap"
         );
     }
@@ -96,9 +93,9 @@ fn refuse_at_scales_the_threshold_down_and_never_up() {
 
 #[test]
 fn saturating_arithmetic_never_wraps_a_huge_request() {
-    let budget = GpuBudget::estimated_default();
+    let budget = GpuBudget::uncapped().with_cap(Some(TEST_CAP));
     assert!(budget.would_exceed(u64::MAX, u64::MAX));
-    assert!(budget.would_exceed(DEFAULT_GPU_BUDGET_BYTES, u64::MAX));
+    assert!(budget.would_exceed(TEST_CAP, u64::MAX));
 }
 
 #[test]
@@ -109,27 +106,23 @@ fn the_environment_override_parses_mib_and_the_explicit_off() {
     let disabled = GpuBudget::resolve(Some("0"));
     assert_eq!(disabled.cap_bytes, None);
     assert_eq!(disabled.effective_limit_bytes(), None);
-    // Unset keeps the default estimate.
-    assert_eq!(
-        GpuBudget::resolve(None).cap_bytes,
-        Some(DEFAULT_GPU_BUDGET_BYTES)
-    );
+    // Unset leaves the low-level policy uncapped (this shape has no VRAM evidence).
+    assert_eq!(GpuBudget::resolve(None).cap_bytes, None);
 }
 
 #[test]
-fn a_malformed_override_falls_back_to_the_default_instead_of_uncapping() {
+fn a_malformed_override_is_ignored_instead_of_inventing_a_cap() {
     for malformed in ["", "  ", "lots", "-1", "1.5", "1e9", "0x10"] {
         let budget = GpuBudget::resolve(Some(malformed));
         assert_eq!(
-            budget.cap_bytes,
-            Some(DEFAULT_GPU_BUDGET_BYTES),
-            "{malformed:?} must not change the cap"
+            budget.cap_bytes, None,
+            "{malformed:?} must not invent a cap"
         );
     }
     // An overflowing value is refused loudly instead of wrapping to a tiny cap.
     assert_eq!(
         GpuBudget::resolve(Some("18446744073709551615")).cap_bytes,
-        Some(DEFAULT_GPU_BUDGET_BYTES)
+        None
     );
 }
 
@@ -289,13 +282,25 @@ fn the_cap_resolution_precedence_is_explicit_then_percent_then_estimate() {
     assert_eq!(resolved.source, BudgetSource::VramPercent);
     assert_eq!(resolved.percent, Some(DEFAULT_GPU_BUDGET_PERCENT));
 
-    // 3. No explicit cap and no usable probe: the documented estimate.
+    // 3. No explicit cap and no usable probe: **no cap at all**, labelled
+    // `Unprobed`. Never a guessed number.
     for unknown in [None, Some(0)] {
         let resolved = GpuBudgetConfig::default().resolve(unknown);
-        assert_eq!(resolved.budget.cap_bytes, Some(DEFAULT_GPU_BUDGET_BYTES));
-        assert_eq!(resolved.source, BudgetSource::Estimate);
+        assert_eq!(resolved.budget.cap_bytes, None);
+        assert_eq!(resolved.source, BudgetSource::Unprobed);
         assert_eq!(resolved.percent, None);
+        assert_eq!(resolved.budget.effective_limit_bytes(), None);
     }
+    // The same holds when a percentage is configured explicitly but there is no
+    // probe: the percentage cannot be applied, so the policy is unbudgeted.
+    let configured = GpuBudgetConfig {
+        percent_of_vram: 100,
+        ..GpuBudgetConfig::default()
+    };
+    let resolved = configured.resolve(None);
+    assert_eq!(resolved.budget.cap_bytes, None);
+    assert_eq!(resolved.source, BudgetSource::Unprobed);
+    assert_eq!(resolved.percent, None);
 
     // `refuse_at` travels through every branch untouched.
     let resolved = GpuBudgetConfig {
@@ -369,6 +374,13 @@ fn the_mb_override_maps_to_explicit_bytes_and_beats_the_percentage() {
             BudgetSource::VramPercent,
             "{bad:?}"
         );
+        // ... and with no probe it is unbudgeted, not a guessed cap.
+        assert_eq!(
+            config.resolve(None).source,
+            BudgetSource::Unprobed,
+            "{bad:?}"
+        );
+        assert_eq!(config.resolve(None).budget.cap_bytes, None, "{bad:?}");
     }
 }
 

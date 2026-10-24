@@ -32,8 +32,9 @@ impl Renderer {
     /// device-local memory, *not* free memory; the sum of all device-local heaps is
     /// reported separately as `vram_all_heaps_bytes` because summing exceeds the
     /// card's physical capacity on the reference machine; see the validation
-    /// record), an explicit byte cap, or the
-    /// measured application estimate when no probe could answer. The probe runs at
+    /// record), an explicit byte cap, or **no cap**
+    /// ([`BudgetSource::Unprobed`](crate::BudgetSource::Unprobed)) when no probe
+    /// answered — the renderer runs unbudgeted rather than guess. The probe runs at
     /// most once per device (`Renderer::vram_report`).
     ///
     /// Cheap by construction: a handful of atomic loads plus one allocator report

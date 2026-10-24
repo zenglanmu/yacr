@@ -24,11 +24,12 @@
 //!    visible instead of being averaged away.
 //! 2. [`GpuBudget`] / [`GpuBudgetConfig`] — the **policy**: a cap, a refusal
 //!    fraction and the resolution order explicit bytes > percentage of the probed
-//!    VRAM **proxy** (default [`DEFAULT_GPU_BUDGET_PERCENT`] = 90 %) > the
-//!    documented estimate fallback. The proxy is the **largest** device-local heap
-//!    the backend advertises (see [`VramProbe`]), which is **not** free memory;
-//!    when no backend can answer, the cap is the application estimate
-//!    [`DEFAULT_GPU_BUDGET_BYTES`] (see the honesty note below).
+//!    VRAM **proxy** (default [`DEFAULT_GPU_BUDGET_PERCENT`] = 90 %) > **no cap**.
+//!    The proxy is the **largest** device-local heap the backend advertises (see
+//!    [`VramProbe`]), which is **not** free memory; when no backend can answer and
+//!    no explicit cap is set, the renderer runs **unbudgeted**
+//!    ([`BudgetSource::Unprobed`](crate::BudgetSource::Unprobed)) — it never guesses
+//!    a cap (see the honesty note below).
 //! 3. [`GpuMemoryRefusal`] — the **explicit refusal**: `{category, used,
 //!    requested, cap}`, carried by
 //!    [`RenderError::GpuMemory`](crate::RenderError::GpuMemory) when the
@@ -56,10 +57,12 @@
 //! does not have). Both numbers are advertised memory, **not free memory** (usage is
 //! not subtracted, other clients are unknown, and an integrated GPU's heap is
 //! shared system RAM). The default policy is 90 % of the proxy; when the probe
-//! cannot answer (non-Vulkan, no HAL handle, no device-local heap) the cap falls
-//! back to the measured application estimate [`DEFAULT_GPU_BUDGET_BYTES`] and is
-//! labelled [`BudgetSource::Estimate`](crate::BudgetSource::Estimate) — it is never
-//! presented as a percentage of the card.
+//! cannot answer (non-Vulkan — GL/Metal/DX12/the web backend expose no such query —
+//! no HAL handle, or no device-local heap) **no budget is applied at all**: the cap
+//! is `None`, labelled [`BudgetSource::Unprobed`](crate::BudgetSource::Unprobed).
+//! There is no guessed fallback, because a cap invented without evidence can falsely
+//! refuse legitimate drawings (the old 512 MiB default did exactly that to
+//! `fixtures/complex-test.dwg`, see [`GpuBudgetConfig`]).
 //!
 //! # The backend's own thresholds
 //!
@@ -103,12 +106,11 @@
 //! * the dominant consumer is **`stream`: 1.70 GB** (1,695,124,632 B — instanced
 //!   line and merged-mesh streams), which is more than the wasm heap the same file
 //!   needs on the canvas path (1.43 GB, ADR 0025);
-//! * the app-level cap is sized from that measurement
-//!   ([`DEFAULT_GPU_BUDGET_BYTES`] = 3 GiB, see [`MEASURED_FIXTURE_GPU_BYTES`] for
-//!   why the old 512 MiB default was a measured false refusal). On a card whose
-//!   device-local memory can be probed the cap is instead
-//!   [`DEFAULT_GPU_BUDGET_PERCENT`] % of it; the 3 GiB number is the documented
-//!   fallback when the probe cannot answer.
+//! * the app-level cap is a share of the probed card
+//!   ([`DEFAULT_GPU_BUDGET_PERCENT`] % of the largest device-local heap), or an
+//!   explicit byte cap; without a probe there is **no cap**. The fixture measurement
+//!   ([`MEASURED_FIXTURE_GPU_BYTES`]) is kept only to check that a probed 4 GiB card
+//!   still admits the repository's own drawing — it is not a default.
 //!
 //! **Renderer-side stream sizing is a separate follow-up.** The `stream` share is
 //! the thing to optimise (fewer/larger streams, tighter merged-chunk packing), and
@@ -126,10 +128,9 @@ pub use accounting::{
 };
 pub use budget::{
     apply_memory_budget_thresholds, memory_budget_thresholds, threshold_backends_supported,
-    BudgetSource, GpuBudget, GpuBudgetConfig, ResolvedBudget, DEFAULT_GPU_BUDGET_BYTES,
-    DEFAULT_GPU_BUDGET_PERCENT, DEVICE_LOSS_BUDGET_PERCENT, GPU_BUDGET_ENV, GPU_BUDGET_PERCENT_ENV,
-    MAX_GPU_BUDGET_PERCENT, MEASURED_FIXTURE_GPU_BYTES, MIN_GPU_BUDGET_PERCENT,
-    RESOURCE_CREATION_BUDGET_PERCENT,
+    BudgetSource, GpuBudget, GpuBudgetConfig, ResolvedBudget, DEFAULT_GPU_BUDGET_PERCENT,
+    DEVICE_LOSS_BUDGET_PERCENT, GPU_BUDGET_ENV, GPU_BUDGET_PERCENT_ENV, MAX_GPU_BUDGET_PERCENT,
+    MEASURED_FIXTURE_GPU_BYTES, MIN_GPU_BUDGET_PERCENT, RESOURCE_CREATION_BUDGET_PERCENT,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use vram::probe_vram_bytes_from_device;
