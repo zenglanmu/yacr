@@ -23,12 +23,16 @@ use std::sync::Arc;
 use cad_app::host::HostController;
 use cad_app::{Command, CommandId, CommandPayload};
 use cad_domain::*;
+#[cfg(not(target_arch = "wasm32"))]
+mod gpu_memory;
 mod invocation;
 mod io;
 mod ops;
 mod report;
 mod run;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use gpu_memory::*;
 pub use invocation::*;
 pub(crate) use io::*;
 pub(crate) use ops::*;

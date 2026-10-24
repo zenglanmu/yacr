@@ -189,11 +189,27 @@ fn render_without_png_still_returns_structured_json() {
         "render failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    // A successful render now reports its GPU memory on **stderr** (stdout stays
+    // pure JSON): one `gpu-memory:` line, plus the documented budget/detail
+    // notes. Anything else on stderr would still be a contract violation.
+    let diagnostics = String::from_utf8_lossy(&output.stderr).to_string();
     assert!(
-        output.stderr.is_empty(),
-        "success must not write to stderr: {:?}",
-        String::from_utf8_lossy(&output.stderr)
+        diagnostics
+            .lines()
+            .any(|line| line.starts_with("gpu-memory: total=")),
+        "a successful render must report its GPU memory: {diagnostics:?}"
     );
+    for line in diagnostics.lines().filter(|line| !line.is_empty()) {
+        assert!(
+            line.starts_with("gpu-memory:")
+                || line.starts_with("gpu-memory-detail:")
+                || line.starts_with("gpu-memory-budget:")
+                // The renderer's own note for a malformed `YACR_GPU_BUDGET_MB`
+                // in the test runner's environment.
+                || line.starts_with("yacr: ignoring "),
+            "unexpected stderr on a successful render: {line:?}"
+        );
+    }
     let value = stdout_json(&output);
     assert_eq!(value["operation"], "render");
     assert_eq!(value["schema_version"], 1);
@@ -259,6 +275,15 @@ fn gpu_and_budget_options_reject_bad_values_as_usage() {
         vec!["render", dwg.to_str().unwrap(), "--max-batches", "abc"],
         vec!["render", dwg.to_str().unwrap(), "--max-vertices", "-1"],
         vec!["render", dwg.to_str().unwrap(), "--max-batches"],
+        vec!["render", dwg.to_str().unwrap(), "--gpu-budget-mb", "abc"],
+        vec!["render", dwg.to_str().unwrap(), "--gpu-budget-mb", "-1"],
+        vec!["render", dwg.to_str().unwrap(), "--gpu-budget-mb"],
+        vec![
+            "render",
+            dwg.to_str().unwrap(),
+            "--gpu-budget-mb",
+            "18446744073709551615",
+        ],
     ] {
         let output = run(&args.iter().map(|a| s(a)).collect::<Vec<_>>());
         assert_eq!(output.status.code(), Some(2), "args {args:?}");
@@ -285,11 +310,33 @@ fn gpu_and_budget_options_accept_valid_values() {
         s("0"),
         s("--max-vertices"),
         s("1000000"),
+        s("--gpu-budget-mb"),
+        s("0"),
+        s("--gpu-memory-detail"),
     ]);
     assert_eq!(output.status.code(), Some(1));
     let value = stderr_json(&output);
     assert_eq!(value["error"]["code"], "invalid_input");
     clean(&dir);
+}
+
+#[test]
+fn usage_documents_the_gpu_budget_report_and_exit_code_seven() {
+    let output = run(&[s("--help")]);
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).expect("usage is utf-8");
+    for needle in [
+        "--gpu-budget-mb",
+        "--gpu-memory-detail",
+        "YACR_GPU_BUDGET_MB",
+        // The report line and the refusal line are part of the documented
+        // machine surface, not an implementation detail.
+        "gpu-memory: total=",
+        "gpu-memory-refused: origin=",
+        "7 GPU memory refused",
+    ] {
+        assert!(text.contains(needle), "usage must document {needle:?}");
+    }
 }
 
 #[test]

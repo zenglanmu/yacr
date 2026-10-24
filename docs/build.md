@@ -67,6 +67,14 @@ cargo test -p cad-engine -p cad-host -p cad-app --lib --locked
 | 4 | **不支持的后端（X11/XWayland）——历史合同，2026-10-24 起不再产生** | `app-linux/src/backend.rs`（常量与文档保留） | `yacr: unsupported-backend: x11` |
 | 5 | **不支持的运行时（WebView2 缺失）** | `app-windows/src/support.rs` | `yacr: unsupported-runtime: webview2` |
 | 6 | **不支持的运行时（`dom-canvas` 宿主无法绘制：无可用 WebGL2 / canvas 模块不可用）** | `app-linux/src/canvas_runtime.rs`（WebView 建好之后，由 `canvas_runtime_failed` 命令触发） | `yacr: unsupported-runtime: webgl2` |
+| 7 | **GPU 显存拒绝**（`cad-cli-tools` 的 `render`/`plot`：应用预算 `--gpu-budget-mb`/`YACR_GPU_BUDGET_MB`，或设备 OOM）；无帧、无 PNG | `crates/cad-cli-tools/src/gpu_memory.rs` | `gpu-memory-refused: origin=application-budget｜device-out-of-memory category=… used=… requested=… cap=… limit=…` |
+
+码 7 是 `cad-cli-tools` 自己的合同（`main.rs` 的 `CliError::exit_code`）：机器码
+`gpu_memory_refused`，**不得**用 0/1/2 代替，也**不得**在拒绝后写出空白 PNG（PNG 写入被
+readback 帧门禁）。携带 origin 的稳定行见上表；应用的显存上限是**应用估算**（默认 512 MiB），
+不是显卡 VRAM。成功渲染后另有一行 `gpu-memory: total=… buffer=… texture=… peak=… budget=…
+cap=… source=<accounted｜allocator-report｜estimate> allocator_total=… reserved=…`（stderr；
+数值全部来自 `Renderer::gpu_memory_report()`）。
 
 码 4 与码 6 是**不同故障域**，不得合并：4 是 GTK 之前的后端策略拒绝（已退役），6 是 WebView
 建好之后的运行时能力缺失。`dom-canvas` 上任何「画布画不出来」都按 6 显式拒绝（**禁止**空白

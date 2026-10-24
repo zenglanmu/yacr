@@ -174,6 +174,53 @@ impl GpuPreference {
 }
 
 // ---------------------------------------------------------------------------
+// GPU memory budget flag (CLI-local so wasm stays free of `cad-render-wgpu`)
+// ---------------------------------------------------------------------------
+
+/// The existence of `--gpu-budget-mb` in the process arguments.
+///
+/// Tri-state on purpose: an **absent** flag must leave the renderer's own policy
+/// (`YACR_GPU_BUDGET_MB`, else the 512 MiB application estimate) untouched, while
+/// `--gpu-budget-mb 0` is an explicit "uncapped" that must beat both. Collapsing
+/// the two into `Option<u64>` would make `0` indistinguishable from "not given".
+///
+/// Native-only meaning (`render`/`plot` are native operations), but the type
+/// itself is plain data so the wasm build keeps compiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GpuBudgetFlag {
+    /// `--gpu-budget-mb` was not passed: the renderer's env/default policy holds.
+    #[default]
+    Absent,
+    /// `--gpu-budget-mb 0`: explicitly no cap (reported as `uncapped`).
+    Uncapped,
+    /// `--gpu-budget-mb <n>`: the cap, already converted to **bytes**.
+    Capped(u64),
+}
+
+/// One mebibyte: the unit of `--gpu-budget-mb` and `YACR_GPU_BUDGET_MB`.
+pub(crate) const MIB: u64 = 1024 * 1024;
+
+/// Parse a `--gpu-budget-mb` value into [`GpuBudgetFlag`].
+///
+/// `0` is the documented explicit "uncapped"; anything else must be a whole
+/// number of MiB that still fits in a `u64` of bytes. A bad value is an error
+/// (never a silent fall-back to the default), because a typo must not look
+/// applied.
+pub fn parse_gpu_budget_flag(value: &str) -> Result<GpuBudgetFlag, String> {
+    let trimmed = value.trim();
+    let mib: u64 = trimmed
+        .parse()
+        .map_err(|_| format!("--gpu-budget-mb needs an integer >= 0 (got '{value}')"))?;
+    if mib == 0 {
+        return Ok(GpuBudgetFlag::Uncapped);
+    }
+    let bytes = mib.checked_mul(MIB).ok_or_else(|| {
+        format!("--gpu-budget-mb value is too large to express in bytes (got '{value}')")
+    })?;
+    Ok(GpuBudgetFlag::Capped(bytes))
+}
+
+// ---------------------------------------------------------------------------
 // Invocation
 // ---------------------------------------------------------------------------
 
@@ -218,6 +265,16 @@ pub struct CliInvocation {
     /// Hard cap on accumulated render vertices (`--max-vertices N`, `0` = no
     /// cap). Same protection as `max_batches`.
     pub max_vertices: Option<u64>,
+    /// `--gpu-budget-mb` (render/plot): the renderer's GPU memory cap in MiB.
+    ///
+    /// Precedence is **flag > `YACR_GPU_BUDGET_MB` > the 512 MiB default
+    /// estimate**: `Absent` keeps the renderer's own env/default policy, and
+    /// `Uncapped`/`Capped` replace its cap. The cap is an application estimate,
+    /// never the card's VRAM.
+    pub gpu_budget_flag: GpuBudgetFlag,
+    /// `--gpu-memory-detail` (render/plot): also print the per-category GPU
+    /// memory breakdown on stderr.
+    pub gpu_memory_detail: bool,
     /// Locale for human-facing stderr messages (never machine output).
     pub locale: Locale,
 }
@@ -252,6 +309,8 @@ impl CliInvocation {
             gpu: GpuPreference::Auto,
             max_batches: Some(DEFAULT_MAX_RENDER_BATCHES),
             max_vertices: Some(DEFAULT_MAX_RENDER_VERTICES),
+            gpu_budget_flag: GpuBudgetFlag::Absent,
+            gpu_memory_detail: false,
             locale: Locale::default(),
         }
     }
@@ -277,7 +336,18 @@ pub mod error_code {
     pub const USAGE: &str = "usage";
     /// A result could not be written to `--out`.
     pub const OUTPUT_WRITE_FAILED: &str = "output_write_failed";
+    /// A GPU allocation was refused **for memory**: the renderer's application
+    /// budget or the device reporting out-of-memory. Exit code
+    /// [`EXIT_GPU_MEMORY_REFUSED`]; never a success and never a blank PNG.
+    pub const GPU_MEMORY_REFUSED: &str = "gpu_memory_refused";
 }
+
+/// The process exit code of a GPU-memory refusal (budget or device OOM).
+///
+/// Distinct from every other code this CLI produces, so a script can tell a
+/// memory refusal apart from a usage error (2) and from a generic failure (1)
+/// without parsing text. Documented in `docs/build.md`.
+pub const EXIT_GPU_MEMORY_REFUSED: u8 = 7;
 
 /// A structured CLI failure ready to be serialized to stderr.
 ///
@@ -337,10 +407,13 @@ impl CliError {
         })
     }
 
-    /// Process exit status: 2 for usage errors, 1 for everything else.
+    /// Process exit status: 2 for usage errors, 7 for a GPU-memory refusal
+    /// (application budget or device out-of-memory), 1 for everything else.
     pub fn exit_code(&self) -> u8 {
         if self.code == error_code::USAGE {
             2
+        } else if self.code == error_code::GPU_MEMORY_REFUSED {
+            EXIT_GPU_MEMORY_REFUSED
         } else {
             1
         }
@@ -379,6 +452,16 @@ pub fn cli_error_from_domain(error: CadError) -> CliError {
     let code = error_code_for(&error);
     let message = error.to_string();
     CliError::new(code, message)
+}
+
+/// So `?` works on a `CadResult` inside an operation that returns
+/// `Result<_, CliError>` (the native render/plot paths, which must keep a
+/// GPU-memory refusal's own code and exit status instead of flattening it into
+/// `gpu_failure`).
+impl From<CadError> for CliError {
+    fn from(error: CadError) -> Self {
+        cli_error_from_domain(error)
+    }
 }
 
 pub(crate) fn domain<T>(result: CadResult<T>) -> Result<T, CliError> {

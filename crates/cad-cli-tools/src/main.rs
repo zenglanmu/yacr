@@ -8,7 +8,9 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use cad_cli_tools::{CliError, CliInvocation, CliOperation, GpuPreference, Locale, PlotFormat};
+use cad_cli_tools::{
+    parse_gpu_budget_flag, CliError, CliInvocation, CliOperation, GpuPreference, Locale, PlotFormat,
+};
 use cad_domain::Point3;
 
 const USAGE: &str = "\
@@ -54,6 +56,27 @@ Options:
                           memory (default 4000000; 0 disables the cap)
   --max-vertices <n>      render/plot: hard cap on accumulated scene vertices
                           (default 128000000; 0 disables the cap)
+  --gpu-budget-mb <n>     render/plot: application GPU memory cap in MiB.
+                          This is an application ESTIMATE, not the card's VRAM.
+                          Precedence: this flag > YACR_GPU_BUDGET_MB env var >
+                          the 512 MiB default. 0 = explicitly uncapped (reported
+                          as such); a refusal exits 7 and writes no PNG.
+  --gpu-memory-detail     render/plot: also print the per-category GPU memory
+                          breakdown on stderr
+
+GPU memory report (render/plot, after a successful frame; stderr):
+  gpu-memory: total=<n> buffer=<n> texture=<n> peak=<n> budget=<n|none>
+              cap=<n|none> source=<accounted|allocator-report|estimate>
+              allocator_total=<n|none> reserved=<n|none>
+  Every number is the renderer's own accounting/report; none of them is the
+  card's total VRAM (wgpu cannot report it).
+
+Exit codes:
+  0 success   1 failure   2 usage
+  7 GPU memory refused (application budget or device out of memory): nothing
+    was rendered and no PNG was written; the origin is named on the stable
+    line `gpu-memory-refused: origin=... category=... used=... requested=...
+    cap=... limit=...`
 ";
 
 fn main() -> ExitCode {
@@ -285,6 +308,21 @@ fn main() -> ExitCode {
                     }
                 }
             }
+            "--gpu-budget-mb" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--gpu-budget-mb needs a non-negative integer of MiB"),
+                        operation,
+                        locale,
+                    );
+                };
+                match parse_gpu_budget_flag(value) {
+                    Ok(flag) => invocation.gpu_budget_flag = flag,
+                    Err(message) => return fail(CliError::usage(message), operation, locale),
+                }
+            }
+            "--gpu-memory-detail" => invocation.gpu_memory_detail = true,
             other if other.starts_with("--") => {
                 return fail(
                     CliError::usage(format!("unknown option: {other}")),

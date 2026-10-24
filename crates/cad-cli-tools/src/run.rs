@@ -27,8 +27,8 @@ pub fn run(invocation: &CliInvocation) -> Result<String, CliError> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let value = match invocation.operation {
-                CliOperation::FixedViewportRender => domain(run_render(invocation))?,
-                CliOperation::Plot => domain(run_plot(invocation))?,
+                CliOperation::FixedViewportRender => run_render(invocation)?,
+                CliOperation::Plot => run_plot(invocation)?,
                 CliOperation::Benchmark => {
                     let controller = domain(load_document(invocation))?;
                     let fonts = domain(load_fonts(

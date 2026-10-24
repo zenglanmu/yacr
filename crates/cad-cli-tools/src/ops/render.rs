@@ -26,8 +26,8 @@ fn render_gpu(invocation: &CliInvocation) -> cad_render_wgpu::GpuSelection {
 /// `CadError::GpuFailure`, a drawing with no drawable bounds fails with
 /// `CadError::InvalidInput`, and the PNG is written only after a frame exists.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
-    use cad_render_wgpu::headless::{create_headless_gpu_with, encode_png, HeadlessGpu};
+pub(crate) fn run_render(invocation: &CliInvocation) -> Result<serde_json::Value, CliError> {
+    use cad_render_wgpu::headless::{create_headless_gpu_with, HeadlessGpu};
     use cad_render_wgpu::{BackendPreference, Camera2d, RenderTarget, Renderer};
 
     let controller = load_document(invocation)?;
@@ -141,46 +141,45 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
         adapter,
     } = create_headless_gpu_with(BackendPreference::Auto, render_gpu(invocation))?;
     let mut renderer = Renderer::new(BackendPreference::Auto);
+    // `--gpu-budget-mb` overrides the renderer's own `YACR_GPU_BUDGET_MB` /
+    // default policy (flag > env > default); see `gpu_memory`.
+    apply_resolved_gpu_budget(&mut renderer, invocation);
     // A large drawing is tens of thousands of small draw calls; a CPU software
     // adapter can legitimately exceed the interactive 1 s submission bound.
     // Headless evidence waits longer instead of misreporting a device loss.
     renderer.set_poll_timeout(std::time::Duration::from_secs(600));
     renderer.initialize_with_device(device, queue)?;
-    renderer.upload(&delta)?;
+    // A budget or device-OOM refusal is reported with its own machine code and
+    // exit 7 — never flattened into a generic GPU failure, never a blank PNG.
+    if let Err(error) = renderer.upload(&delta) {
+        return Err(staging_error(&renderer, error));
+    }
     // Decoded images are a separate resident set: upload them after the batch
     // upload, and report any key the renderer could not resolve.
-    let image_upload = renderer.upload_images(&delta.images, &image_cache)?;
+    let image_upload = match renderer.upload_images(&delta.images, &image_cache) {
+        Ok(report) => report,
+        Err(error) => return Err(staging_error(&renderer, error)),
+    };
     let target = RenderTarget::new(width, height);
-    let frame = renderer
-        .render(camera, &target)
-        .map_err(|error| CadError::GpuFailure(error.message().to_string()))?;
-    let image = renderer
-        .read_target_rgba()
-        .map_err(|error| CadError::GpuFailure(error.message().to_string()))?;
+    let frame = renderer.render(camera, &target).map_err(render_error)?;
+    let readback = renderer.read_target_rgba().map_err(render_error);
+    // The only PNG writer: it refuses to write anything unless a frame was
+    // actually read back, so a refused render cannot leave an empty image.
+    let (image, written) = write_png_for_frame(invocation.png.as_deref(), readback)?;
+    let png_json = match &written {
+        Some(png) => serde_json::json!({
+            "path": png.path.display().to_string(),
+            "bytes": png.bytes,
+        }),
+        None => serde_json::Value::Null,
+    };
+    // The renderer's own report, printed only after a successful frame (and the
+    // optional PNG write): never a CLI estimate, and never printed on a refusal.
+    print_gpu_memory_report(&renderer, invocation);
 
     let background = image.pixel(0, 0);
     let non_background = image.count_differing_from(background, 8);
     let coverage = non_background as f64 / (width as f64 * height as f64);
-
-    // Only after a successful frame: encode and atomically write, so a failure
-    // never leaves a partial PNG.
-    let png_json = match &invocation.png {
-        Some(path) => {
-            let bytes = encode_png(&image)
-                .map_err(|e| CadError::Invariant(format!("PNG encode failed: {e}")))?;
-            write_atomic(path, &bytes).map_err(|e| {
-                CadError::InvalidInput(format!(
-                    "PNG write failed: {}",
-                    cad_diagnostics::redact_text(&e.to_string())
-                ))
-            })?;
-            serde_json::json!({
-                "path": path.display().to_string(),
-                "bytes": bytes.len(),
-            })
-        }
-        None => serde_json::Value::Null,
-    };
 
     let completeness = match &controller.last_import_report {
         Some(report) => completeness_json(&report.completeness),
@@ -244,9 +243,9 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> CadResult<serde_json::Va
 /// with a synthetic sheet, marked `"synthetic": true` in the report — never
 /// claimed as a real layout plot.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn run_plot(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
+pub(crate) fn run_plot(invocation: &CliInvocation) -> Result<serde_json::Value, CliError> {
     if invocation.plot_format.is_vector() {
-        return run_plot_vector(invocation);
+        return Ok(run_plot_vector(invocation)?);
     }
     run_plot_png(invocation)
 }
@@ -375,8 +374,8 @@ fn paper_json(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
-    use cad_render_wgpu::headless::{create_headless_gpu_with, encode_png, HeadlessGpu};
+pub(crate) fn run_plot_png(invocation: &CliInvocation) -> Result<serde_json::Value, CliError> {
+    use cad_render_wgpu::headless::{create_headless_gpu_with, HeadlessGpu};
     use cad_render_wgpu::{BackendPreference, Camera2d, RenderTarget, Renderer};
 
     let started = std::time::Instant::now();
@@ -480,35 +479,39 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
         adapter,
     } = create_headless_gpu_with(BackendPreference::Auto, render_gpu(invocation))?;
     let mut renderer = Renderer::new(BackendPreference::Auto);
+    // Same policy as `render`: flag > `YACR_GPU_BUDGET_MB` > default estimate.
+    apply_resolved_gpu_budget(&mut renderer, invocation);
     renderer.set_poll_timeout(std::time::Duration::from_secs(600));
     renderer.initialize_with_device(device, queue)?;
-    renderer.upload(&delta)?;
-    let image_upload = renderer.upload_images(&delta.images, &image_cache)?;
+    if let Err(error) = renderer.upload(&delta) {
+        return Err(staging_error(&renderer, error));
+    }
+    let image_upload = match renderer.upload_images(&delta.images, &image_cache) {
+        Ok(report) => report,
+        Err(error) => return Err(staging_error(&renderer, error)),
+    };
     let render_target = RenderTarget::new(width, height);
     let frame = renderer
         .render(camera, &render_target)
-        .map_err(|error| CadError::GpuFailure(error.message().to_string()))?;
-    let image = renderer
-        .read_target_rgba()
-        .map_err(|error| CadError::GpuFailure(error.message().to_string()))?;
+        .map_err(render_error)?;
+    let readback = renderer.read_target_rgba().map_err(render_error);
+    // The plot always names an output file (defaulting from the input), so the
+    // frame-gated writer is given `Some`; a refused frame still writes nothing.
+    let output = invocation
+        .png
+        .clone()
+        .unwrap_or_else(|| invocation.input.with_extension("plot.png"));
+    let (image, png) = write_required_png(&output, readback)?;
+    let png_bytes = png.bytes;
+    // The renderer's own report, published only after a successful frame.
+    print_gpu_memory_report(&renderer, invocation);
+
     let gpu_ms = gpu_started.elapsed().as_secs_f64() * 1000.0;
 
     let background = image.pixel(0, 0);
     let non_background = image.count_differing_from(background, 8);
     let coverage = non_background as f64 / (width as f64 * height as f64);
 
-    let png_bytes =
-        encode_png(&image).map_err(|e| CadError::Invariant(format!("PNG encode failed: {e}")))?;
-    let output = invocation
-        .png
-        .clone()
-        .unwrap_or_else(|| invocation.input.with_extension("plot.png"));
-    write_atomic(&output, &png_bytes).map_err(|e| {
-        CadError::InvalidInput(format!(
-            "PNG write failed: {}",
-            cad_diagnostics::redact_text(&e.to_string())
-        ))
-    })?;
     let total_ms = started.elapsed().as_secs_f64() * 1000.0;
 
     let completeness = match &controller.last_import_report {
@@ -530,7 +533,7 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> CadResult<serde_json::
         "dpi": page.dpi,
         "paper": paper_json(&record, &page),
         "output": output.display().to_string(),
-        "bytes": png_bytes.len(),
+        "bytes": png_bytes,
         "pixels": {
             "non_background": non_background,
             "coverage": coverage,
@@ -665,6 +668,76 @@ pub(crate) fn synthetic_plot_database() -> cad_db::DrawingDatabase {
             .unwrap();
     }
     builder.finish().expect("synthetic plot database is valid")
+}
+
+/// A PNG that was actually written for a frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WrittenPng {
+    /// The path the bytes were written to (the caller's `--png`, or the plot's
+    /// default file).
+    pub path: PathBuf,
+    /// Size of the encoded PNG in bytes.
+    pub bytes: usize,
+}
+
+/// The **only** PNG writer on the GPU paths: a frame must exist first.
+///
+/// `frame` is the read-back result, so this function cannot be reached with a
+/// refused or failed render: an `Err` is returned unchanged and **nothing** is
+/// touched on disk. That is the contract behind "never a blank PNG written as if
+/// it worked": a GPU-memory refusal (or a device loss, or a rejected frame)
+/// aborts before a byte is written, leaving no file and no partial file.
+///
+/// `write_atomic` keeps the file-level half of the same promise (temp file +
+/// rename), so even a disk failure cannot leave a truncated PNG.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn write_png_for_frame(
+    path: Option<&Path>,
+    frame: Result<cad_render_wgpu::headless::RgbaImage, CliError>,
+) -> Result<(cad_render_wgpu::headless::RgbaImage, Option<WrittenPng>), CliError> {
+    use cad_render_wgpu::headless::encode_png;
+
+    let image = frame?;
+    let Some(path) = path else {
+        return Ok((image, None));
+    };
+    let bytes = encode_png(&image)
+        .map_err(|e| CliError::new(error_code::INVARIANT, format!("PNG encode failed: {e}")))?;
+    write_atomic(path, &bytes).map_err(|e| {
+        CliError::new(
+            error_code::INVALID_INPUT,
+            format!(
+                "PNG write failed: {}",
+                cad_diagnostics::redact_text(&e.to_string())
+            ),
+        )
+        .with_context(serde_json::json!({ "path": path.display().to_string() }))
+    })?;
+    Ok((
+        image,
+        Some(WrittenPng {
+            path: path.to_path_buf(),
+            bytes: bytes.len(),
+        }),
+    ))
+}
+
+/// [`write_png_for_frame`] for a path that must produce a file (the plot's
+/// output, which always has a name), failing loudly instead of reporting zero
+/// bytes if that ever stops being true.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn write_required_png(
+    path: &Path,
+    frame: Result<cad_render_wgpu::headless::RgbaImage, CliError>,
+) -> Result<(cad_render_wgpu::headless::RgbaImage, WrittenPng), CliError> {
+    let (image, written) = write_png_for_frame(Some(path), frame)?;
+    match written {
+        Some(written) => Ok((image, written)),
+        None => Err(CliError::new(
+            error_code::INVARIANT,
+            "internal: an output path was given but no PNG was written",
+        )),
+    }
 }
 
 /// Paper millimetres → renderer pixel space (y-up), as a [`Transform3`].

@@ -531,3 +531,254 @@ fn atomic_write_leaves_no_temp_on_failure() {
     assert!(leftovers.is_empty(), "temp files left: {leftovers:?}");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+// ---------------------------------------------------------------------------
+// GPU memory: budget precedence, the report line, the refusal exit contract
+// ---------------------------------------------------------------------------
+
+/// A `GpuMemoryReport` with every field set explicitly, built the way the
+/// renderer would report it (no GPU needed: the type is plain data).
+#[cfg(not(target_arch = "wasm32"))]
+fn sample_gpu_memory_report() -> cad_render_wgpu::GpuMemoryReport {
+    use cad_render_wgpu::{GpuMemoryCategory, GpuMemoryReport, GpuMemorySource};
+    let mut category_bytes = [0u64; GpuMemoryCategory::COUNT];
+    category_bytes[GpuMemoryCategory::Vertex.index()] = 3072;
+    category_bytes[GpuMemoryCategory::Index.index()] = 512;
+    category_bytes[GpuMemoryCategory::ColorTarget.index()] = 1024;
+    GpuMemoryReport {
+        buffer_bytes: 4096,
+        texture_bytes: 1024,
+        total_bytes: 5120,
+        peak_bytes: 6144,
+        reserved_bytes: None,
+        allocator_total_bytes: None,
+        budget_bytes: Some(512 * MIB),
+        cap_bytes: Some(512 * MIB),
+        source: GpuMemorySource::Accounted,
+        category_bytes,
+    }
+}
+
+/// The refusal facts the exit-code mapping is defined over.
+///
+/// A `GpuMemoryRefusal` has no public constructor (its message is only ever built
+/// by the renderer), so the mapping is tested on the CLI's own copy of the
+/// fields — which is exactly what the CLI maps from.
+#[cfg(not(target_arch = "wasm32"))]
+fn sample_budget_refusal_facts() -> GpuMemoryRefusalFacts<'static> {
+    GpuMemoryRefusalFacts {
+        origin: ORIGIN_APPLICATION_BUDGET,
+        category: "vertex",
+        used_bytes: 400,
+        requested_bytes: 200,
+        cap_bytes: Some(512),
+        limit_bytes: Some(512),
+        device_message: None,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn gpu_budget_flag_parses_and_wins_over_env_and_default() {
+    // `0` is the documented explicit "uncapped", never a one-mebibyte cap.
+    assert_eq!(parse_gpu_budget_flag("0").unwrap(), GpuBudgetFlag::Uncapped);
+    assert_eq!(
+        parse_gpu_budget_flag(" 2048 ").unwrap(),
+        GpuBudgetFlag::Capped(2048 * MIB)
+    );
+    // A bad value is a usage error, never a silent fall-back to the default.
+    for bad in ["", "  ", "abc", "-1", "1.5", "1e9", "0x10"] {
+        assert!(
+            parse_gpu_budget_flag(bad).is_err(),
+            "{bad:?} must be rejected"
+        );
+    }
+    // A cap that cannot be expressed in bytes is rejected instead of wrapping.
+    assert!(parse_gpu_budget_flag("18446744073709551615").is_err());
+
+    // Precedence flag > env > default. `base` is the policy the renderer really
+    // resolved on construction, so this compares against the real env/default
+    // policies instead of a stub.
+    use cad_render_wgpu::gpu_memory::DEFAULT_GPU_BUDGET_BYTES;
+    use cad_render_wgpu::GpuBudget;
+    let from_env = GpuBudget::resolve(Some("2048")); // YACR_GPU_BUDGET_MB=2048
+    let from_default = GpuBudget::estimated_default();
+    // No flag: the env override, else the default estimate, survives untouched.
+    assert_eq!(
+        apply_gpu_budget_flag(from_env, GpuBudgetFlag::Absent).cap_bytes,
+        Some(2048 * MIB)
+    );
+    assert_eq!(
+        apply_gpu_budget_flag(from_default, GpuBudgetFlag::Absent).cap_bytes,
+        Some(DEFAULT_GPU_BUDGET_BYTES)
+    );
+    // The flag replaces the env cap (and the default one).
+    assert_eq!(
+        apply_gpu_budget_flag(from_env, parse_gpu_budget_flag("64").unwrap()).cap_bytes,
+        Some(64 * MIB)
+    );
+    // `--gpu-budget-mb 0` explicitly uncaps even over an env cap.
+    assert_eq!(
+        apply_gpu_budget_flag(from_env, GpuBudgetFlag::Uncapped).cap_bytes,
+        None
+    );
+    // The flag replaces only the cap: the base policy's refusal fraction stays.
+    assert_eq!(
+        apply_gpu_budget_flag(from_env.with_refuse_at(0.5), GpuBudgetFlag::Capped(MIB)).refuse_at,
+        0.5
+    );
+    // The invocation defaults mean "no flag given": the renderer's own policy.
+    let fresh = CliInvocation::new(CliOperation::FixedViewportRender, "x.dwg");
+    assert_eq!(fresh.gpu_budget_flag, GpuBudgetFlag::Absent);
+    assert!(!fresh.gpu_memory_detail);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn gpu_memory_report_line_has_exact_field_order_and_none_spelling() {
+    use cad_render_wgpu::GpuMemorySource;
+
+    let report = sample_gpu_memory_report();
+    assert_eq!(
+        gpu_memory_line(&report),
+        "gpu-memory: total=5120 buffer=4096 texture=1024 peak=6144 budget=536870912 \
+         cap=536870912 source=accounted allocator_total=none reserved=none"
+    );
+    // No device attached (an estimate) and no cap: absent values spell `none`,
+    // never `0` and never an empty field.
+    let bare = cad_render_wgpu::GpuMemoryReport {
+        budget_bytes: None,
+        cap_bytes: None,
+        source: GpuMemorySource::Estimate,
+        ..report.clone()
+    };
+    assert_eq!(
+        gpu_memory_line(&bare),
+        "gpu-memory: total=5120 buffer=4096 texture=1024 peak=6144 budget=none cap=none \
+         source=estimate allocator_total=none reserved=none"
+    );
+    // The allocator cross-check is reported when the backend produces one.
+    let with_allocator = cad_render_wgpu::GpuMemoryReport {
+        source: GpuMemorySource::AllocatorReport,
+        allocator_total_bytes: Some(2048),
+        reserved_bytes: Some(4096),
+        ..report
+    };
+    assert_eq!(
+        gpu_memory_line(&with_allocator),
+        "gpu-memory: total=5120 buffer=4096 texture=1024 peak=6144 budget=536870912 \
+         cap=536870912 source=allocator-report allocator_total=2048 reserved=4096"
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn gpu_memory_detail_line_lists_every_category_in_a_stable_order() {
+    // All 11 categories in `GpuMemoryCategory::ALL` order; zero-byte ones are
+    // printed too, so no category can look unaccounted for.
+    assert_eq!(
+        gpu_memory_detail_line(&sample_gpu_memory_report()),
+        "gpu-memory-detail: vertex=3072 index=512 uniform=0 instance=0 stream=0 mask=0 \
+         color-target=1024 depth-target=0 image-texture=0 mask-texture=0 other=0"
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_gpu_memory_refusal_has_its_own_code_and_exit_status() {
+    let facts = sample_budget_refusal_facts();
+    // One stable line: origin, category, used, requested, cap, limit.
+    assert_eq!(
+        gpu_memory_refusal_line(&facts),
+        "gpu-memory-refused: origin=application-budget category=vertex used=400 requested=200 \
+         cap=512 limit=512"
+    );
+    let error = gpu_memory_refusal_error(&facts);
+    assert_eq!(error.code, error_code::GPU_MEMORY_REFUSED);
+    assert_eq!(error.exit_code(), EXIT_GPU_MEMORY_REFUSED);
+    // Stable, distinct, and never a success.
+    assert_eq!(EXIT_GPU_MEMORY_REFUSED, 7);
+    assert_ne!(EXIT_GPU_MEMORY_REFUSED, 0);
+    assert_ne!(CliError::usage("x").exit_code(), EXIT_GPU_MEMORY_REFUSED);
+    assert_ne!(
+        CliError::new(error_code::GPU_FAILURE, "boom").exit_code(),
+        EXIT_GPU_MEMORY_REFUSED
+    );
+    // The human line names the origin; the machine context carries the facts.
+    assert!(error.message.contains(ORIGIN_APPLICATION_BUDGET));
+    let json = error.to_json(CliOperation::FixedViewportRender);
+    assert_eq!(json["error"]["code"], "gpu_memory_refused");
+    assert_eq!(json["error"]["context"]["origin"], "application-budget");
+    assert_eq!(json["error"]["context"]["category"], "vertex");
+    assert_eq!(json["error"]["context"]["used_bytes"], 400);
+    assert_eq!(json["error"]["context"]["requested_bytes"], 200);
+    assert_eq!(json["error"]["context"]["cap_bytes"], 512);
+    assert_eq!(json["error"]["context"]["limit_bytes"], 512);
+
+    // A device OOM is the same code and exit status with a different origin
+    // token — the caller can tell the two apart without parsing the message.
+    let oom = GpuMemoryRefusalFacts {
+        origin: ORIGIN_DEVICE_OUT_OF_MEMORY,
+        cap_bytes: None,
+        limit_bytes: None,
+        device_message: Some("wgpu error: Out of Memory"),
+        ..facts
+    };
+    assert_eq!(
+        gpu_memory_refusal_line(&oom),
+        "gpu-memory-refused: origin=device-out-of-memory category=vertex used=400 \
+         requested=200 cap=none limit=none"
+    );
+    let oom_error = gpu_memory_refusal_error(&oom);
+    assert_eq!(oom_error.exit_code(), EXIT_GPU_MEMORY_REFUSED);
+    assert!(oom_error.message.contains(ORIGIN_DEVICE_OUT_OF_MEMORY));
+    assert_eq!(
+        oom_error.to_json(CliOperation::Plot)["error"]["context"]["device_message"],
+        "wgpu error: Out of Memory"
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_refused_frame_never_writes_the_png() {
+    use cad_render_wgpu::headless::RgbaImage;
+
+    let dir = std::env::temp_dir().join(format!("yacr-gpu-memory-{}", unique_counter()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let png = dir.join("refused.png");
+
+    // A refusal arrives as an `Err` frame: the writer must not touch the disk,
+    // for both the optional (`render`) and required (`plot`) entry points.
+    let refusal = gpu_memory_refusal_error(&sample_budget_refusal_facts());
+    let refused = write_png_for_frame(Some(&png), Err(refusal)).unwrap_err();
+    assert_eq!(refused.exit_code(), EXIT_GPU_MEMORY_REFUSED);
+    assert!(!png.exists(), "a refused frame must not write a PNG");
+    let refusal = gpu_memory_refusal_error(&sample_budget_refusal_facts());
+    let refused = write_required_png(&png, Err(refusal)).unwrap_err();
+    assert_eq!(refused.exit_code(), EXIT_GPU_MEMORY_REFUSED);
+    assert!(!png.exists(), "a refused frame must not write a PNG");
+
+    // The gate is not vacuous: a real frame is encoded and written.
+    let image = RgbaImage {
+        width: 2,
+        height: 2,
+        pixels: vec![255u8; 2 * 2 * 4],
+    };
+    let (returned, written) = write_png_for_frame(Some(&png), Ok(image.clone())).unwrap();
+    assert_eq!(returned, image);
+    let written = written.expect("a path was given");
+    assert!(png.exists());
+    assert_eq!(written.path, png);
+    assert_eq!(
+        written.bytes,
+        std::fs::metadata(&png).unwrap().len() as usize
+    );
+    assert_eq!(png_dimensions(&std::fs::read(&png).unwrap()), Some((2, 2)));
+
+    // No path for `render` means no file, and the frame still comes back for the
+    // pixel statistics.
+    let (_, written) = write_png_for_frame(None, Ok(image)).unwrap();
+    assert!(written.is_none());
+
+    std::fs::remove_dir_all(&dir).ok();
+}
