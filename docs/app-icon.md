@@ -36,11 +36,15 @@
 - **Linux 包**：`scripts/package-linux-release.sh` 舞台化
   `share/icons/hicolor/scalable/apps/yacr.svg`、`256x256/apps/yacr.png` 与
   `share/applications/yacr.desktop`（`Icon=yacr`）。
-- **Windows 包**：`apps/app-windows/build.rs` 用 `winresource` 把
-  `assets/yacr-icon.ico` 编进 `yacr.exe` 的 PE 资源段（MSVC 走 `rc.exe`，GNU 走
-  `windres`；非 Windows 目标为 no-op）。Explorer/任务栏因此直接显示图标；包内另附
-  `yacr.ico` 供安装器/快捷方式使用。`package-windows-release.sh` 用
-  `check-pe-imports.py --has-icon` 断言该资源存在，缺失即失败。
+- **Windows 包**：`apps/app-windows/build.rs` 对 Windows 目标调用 `tauri_build::build()`，
+  由 `tauri-build` 的 `tauri_winres` 把 `assets/yacr-icon.ico` 编进 `yacr-windows.exe` 的 PE
+  资源段（缺失图标即构建失败，**不**静默产出无图标可执行文件）；`CARGO_CFG_TARGET_OS` 门禁
+  保证非 Windows 目标不生成 Tauri context、不跑资源编译器。`apps/app-windows/icons/icon.ico`
+  是同一资产的逐字节副本（`tauri.conf.json` 的 `bundle.icon` 指向它；契约测试
+  `scripts/test-package-windows-release.py` 断言两者一致）。**打包脚本已退役**，当前没有
+  可发布的 Windows 包，也没有 `check-pe-imports.py --has-icon` 的发布流水线证据；
+  `.exe` 内嵌图标只在本地 GNU 交叉构建下验证过，MSVC 路径仅由 `windows-check` **编译**门禁
+  覆盖（不是运行/外观证据）。
 - **Android**：`apps/app-android/Cargo.toml` 的 `[package.metadata.android] resources = "res"`
   与 `[package.metadata.android.application] icon/label`；`res/` 由上面的生成资产填充。
 - **Web**：`apps/app-web/web/index.html` 链接 SVG favicon、apple-touch 与

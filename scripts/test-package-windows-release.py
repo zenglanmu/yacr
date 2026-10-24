@@ -64,13 +64,26 @@ class PackageWindowsReleaseRetiredContracts(unittest.TestCase):
                 )
 
     def test_window_binary_build_script_embeds_the_shared_icon(self) -> None:
-        # Still-valid source contract on the (stub) Windows package.
+        # Still-valid source contract on the Windows host (the packaging script
+        # itself is retired): `tauri-build` embeds the PE icon from the shared
+        # asset for a Windows target, gated on the *target* os so other targets
+        # never run the resource compiler, and the bundle icon is a
+        # byte-identical copy of that shared asset so the two entry points
+        # cannot drift apart.
         build_rs = (ROOT / "apps" / "app-windows" / "build.rs").read_text(encoding="utf-8")
         cargo = (ROOT / "apps" / "app-windows" / "Cargo.toml").read_text(encoding="utf-8")
         self.assertIn("assets/yacr-icon.ico", build_rs)
-        self.assertIn("winresource", build_rs)
-        self.assertIn("winresource", cargo)
+        self.assertIn("tauri_build::build()", build_rs)
         self.assertIn("CARGO_CFG_TARGET_OS", build_rs)
+        self.assertIn("tauri-build", cargo)
+
+        shared = (ROOT / "assets" / "yacr-icon.ico").read_bytes()
+        bundled = (ROOT / "apps" / "app-windows" / "icons" / "icon.ico").read_bytes()
+        self.assertEqual(
+            bundled,
+            shared,
+            "apps/app-windows/icons/icon.ico must stay a copy of assets/yacr-icon.ico",
+        )
 
 
 if __name__ == "__main__":
