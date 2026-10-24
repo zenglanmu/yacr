@@ -726,10 +726,23 @@ impl Win32CadSurface {
             ));
         };
         if let Err(error) = session.apply_ready_updates() {
-            session.fail_device(format!("apply_ready_updates: {error:?}"), false);
+            // A **GPU-memory refusal** is the one exception to failing the
+            // device: the renderer's resident scene is intact and still renders
+            // (`cad_render_wgpu::RenderError::GpuMemory`), so the device is kept
+            // and the refusal carries its own `gpu_memory` class instead of the
+            // generic staging class.
+            let refused_for_memory = session.gpu_budget_refusal().is_some();
+            if !refused_for_memory {
+                session.fail_device(format!("apply_ready_updates: {error:?}"), false);
+            }
             self.clear_presenter_cache();
+            let class = if refused_for_memory {
+                CadPresentClass::GpuMemory
+            } else {
+                CadPresentClass::ApplyUpdates
+            };
             return Err(CadPresentError::new(
-                CadPresentClass::ApplyUpdates,
+                class,
                 format!("apply_ready_updates failed: {error:?}"),
             ));
         }

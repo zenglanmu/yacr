@@ -266,7 +266,7 @@ fn a_non_integer_crosshair_percentage_is_refused() {
 #[test]
 fn the_gpu_budget_is_a_percentage_of_the_card_validated_not_clamped() {
     // The default leaves headroom below the card's total memory.
-    let mut store = ViewerConfigStore::default();
+    let store = ViewerConfigStore::default();
     assert_eq!(store.effective().view.gpu_budget.percent, 90);
 
     // Both accepted bounds survive as written.

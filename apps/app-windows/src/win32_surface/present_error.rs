@@ -36,7 +36,15 @@ pub enum CadPresentClass {
     /// can never be composed under the transparent top-level window (Windows has
     /// no working HWND-swapchain fallback for a `WS_CHILD` too).
     SurfaceComposition,
+    /// The renderer refused an allocation **for memory** (its own application
+    /// budget, or the device reporting out-of-memory). The resident scene is
+    /// intact and still renders, so this is neither a device loss nor a generic
+    /// frame error (`cad_render_wgpu::RenderError::GpuMemory`).
+    GpuMemory,
 }
+
+/// The stable class token of a GPU-memory refusal (budget or device OOM).
+pub const GPU_MEMORY_CLASS: &str = "gpu_memory";
 
 impl CadPresentClass {
     /// The stable marker token.
@@ -50,6 +58,7 @@ impl CadPresentClass {
             Self::FrameValidation => "frame_validation",
             Self::SurfaceReconfigure => "surface_reconfigure",
             Self::SurfaceComposition => "surface_composition",
+            Self::GpuMemory => GPU_MEMORY_CLASS,
         }
     }
 
@@ -72,6 +81,7 @@ impl CadPresentClass {
             cad_render_wgpu::RenderError::DeviceLost(_) => Self::DeviceLost,
             cad_render_wgpu::RenderError::Frame(_)
             | cad_render_wgpu::RenderError::NotInitialized(_) => Self::Render,
+            cad_render_wgpu::RenderError::GpuMemory(_) => Self::GpuMemory,
         }
     }
 }
@@ -117,6 +127,7 @@ pub(super) fn render_error_class(error: &cad_render_wgpu::RenderError) -> &'stat
         cad_render_wgpu::RenderError::DeviceLost(_) => "device_lost",
         cad_render_wgpu::RenderError::Frame(_) => "frame",
         cad_render_wgpu::RenderError::NotInitialized(_) => "not_initialized",
+        cad_render_wgpu::RenderError::GpuMemory(_) => GPU_MEMORY_CLASS,
     }
 }
 
@@ -136,9 +147,20 @@ mod tests {
             (CadPresentClass::FrameValidation, "frame_validation"),
             (CadPresentClass::SurfaceReconfigure, "surface_reconfigure"),
             (CadPresentClass::SurfaceComposition, "surface_composition"),
+            (CadPresentClass::GpuMemory, GPU_MEMORY_CLASS),
         ] {
             assert_eq!(class.as_str(), token);
         }
+        // A GPU-memory refusal has its own stable class: it is neither a
+        // generic frame error nor a device loss (the resident scene is intact),
+        // and it matches the Linux host's `gpu_memory` token. The class is
+        // pinned here because the host emits it verbatim in the marker; the
+        // `RenderError::GpuMemory` value itself cannot be constructed outside
+        // `cad-render-wgpu` (its message has no public constructor), so the
+        // match arm above is what keeps the variant exhaustive at compile time.
+        assert_eq!(GPU_MEMORY_CLASS, "gpu_memory");
+        assert_ne!(GPU_MEMORY_CLASS, "frame");
+        assert_ne!(GPU_MEMORY_CLASS, "device_lost");
         // The mapping reads the typed discriminants, not the text.
         assert_eq!(
             CadPresentClass::from_probe(&ProbeError::Acquire("timeout")),

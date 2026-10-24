@@ -236,12 +236,14 @@ CAD child 是 `WS_DISABLED` 纯显示表面，不需要 hit-testing 穿透。
   CAD child，故本开关是它的创建时入口）。启动后读回并记录
   `[probe] win32 cad-child ex-style: WS_EX_NOREDIRECTIONBITMAP set` 或
   `… failed: WIN32_ERROR(n)`。默认（变量不存在）= ex-style 为空，行为不变。
-- 诊断标记行 `[probe] cad-present-error class=<apply_updates|render|device_lost|acquire|texture_invalid|frame_validation|surface_reconfigure|surface_composition> text=…`：
+- 诊断标记行 `[probe] cad-present-error class=<apply_updates|render|device_lost|acquire|texture_invalid|frame_validation|surface_reconfigure|surface_composition|gpu_memory> text=…`：
   每次 present/布局失败在状态栏文案**之前**输出；class 来自 typed `ProbeError`/`RenderError`/布局
   失败类型（**不是**文本匹配），状态栏 `cad present failed: …` / `win32 CAD child placement failed: …`
   文案不变。`surface_reconfigure` = child 放置或 swapchain 没能跟到尺寸权威（见 §2.4）；
   `surface_composition` = DirectComposition 设备/目标/视觉创建或 `Commit` 失败（§2.2：没有可用的
-  HWND 回退路径，内容将永远不合成）。连续相同的标记只打印一次（下一次成功 present 会重置）。
+  HWND 回退路径，内容将永远不合成）；`gpu_memory` = 显式显存拒绝（应用预算或设备 OOM，
+  `cad_render_wgpu::RenderError::GpuMemory`）——**不是**设备丢失也不是普通帧错误，保留常驻场景
+  与设备（与 Linux 宿主同名 token）。连续相同的标记只打印一次（下一次成功 present 会重置）。
 - 诊断标记行（每次真实渲染，**不是**旧纹理重放）`[probe] render-exec rev=… size=WxH batches=… instances=…`：
   `rev` = 该次渲染时已提交的场景 revision，`size` = 渲染目标（尺寸权威），`batches`/`instances` =
   实际画出的 instanced 批/段。只在 renderer **真的执行**时出现（observation 只交付一次）。
