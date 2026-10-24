@@ -52,7 +52,7 @@ YACR_SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 
 # Committed shell sources.
 readonly WEB_SRC="$REPO_ROOT/apps/app-web/web"
-readonly SHELL_FILES=(index.html main.js style.css)
+readonly SHELL_FILES=(index.html main.js worker.js style.css)
 # Generated, git-ignored outputs.
 readonly PKG_DIR="$WEB_SRC/pkg"
 readonly OUT_DIR="$REPO_ROOT/apps/app-web/dist"
@@ -95,6 +95,7 @@ cp -- "$PKG_DIR/$PKG_WASM" "$OUT_DIR/pkg/$PKG_WASM"
 expected=(
   "$OUT_DIR/index.html"
   "$OUT_DIR/main.js"
+  "$OUT_DIR/worker.js"
   "$OUT_DIR/style.css"
   "$OUT_DIR/pkg/$PKG_JS"
   "$OUT_DIR/pkg/$PKG_WASM"
@@ -114,6 +115,9 @@ fi
 # bundle is deployable but blank.
 grep -qF "./pkg/$PKG_JS" "$OUT_DIR/main.js" \
   || die "$OUT_DIR/main.js does not import ./pkg/$PKG_JS; the bundle would not load"
+# The Worker entry must ship too, otherwise a capable browser silently falls back
+# to the main-thread carrier instead of running isolated.
+[ -s "$OUT_DIR/worker.js" ] || die "$OUT_DIR/worker.js missing; isolation would silently degrade"
 grep -qF "$PKG_WASM" "$OUT_DIR/pkg/$PKG_JS" \
   || die "$OUT_DIR/pkg/$PKG_JS does not reference $PKG_WASM; the emitted module is incomplete"
 
