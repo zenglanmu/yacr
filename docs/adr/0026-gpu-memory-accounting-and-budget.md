@@ -32,10 +32,26 @@ wgpu 30.0.1 的能力边界（读源码确认，不是推测）：
 color/depth target、image/mask texture、other）。报告是若干原子读，**不做逐帧扫描**。
 peak 记录真实的"旧常驻 + 新 staging 同时驻留"瞬态。
 
+### D2' 预算基准 = **显存百分比**（默认 90 %），并在 UI 可改
+
+- 预算基准由固定字节改为 **卡上显存**：`percent_of_vram`（默认 **90**，范围 10–100，可在
+  **选项对话框**里改，持久化为 `view.gpuBudget.percent`）。
+- 解析顺序：`explicit_bytes`（`--gpu-budget-mb` / `YACR_GPU_BUDGET_MB`，`0`=取消上限） **>**
+  `percent × VRAM` **>** 3 GiB 兜底（仅当探测不到 VRAM，标 `Estimate`）。
+  报告新增 `vram_bytes` / `vram_all_heaps_bytes` / `budget_percent` / `budget_source`。
+- **VRAM 口径 = 最大的单个 device-local heap**（Vulkan：`VkPhysicalDeviceMemoryProperties`，经
+  `as_hal::<vulkan::Adapter>()` + `ash 0.38`）。**不能用所有 device-local heap 求和**：实测该求和在
+  4 GiB 卡上得到 4,552,916,992 B（**+6.0 %**，多出的是 host-visible 的 device-local 堆），
+  90 % 会得到 3.82 GiB —— 逼近物理容量、几乎不留余量；取最大单堆后为 **4,294,967,296 B（4.00 GiB）**，
+  90 % = **3,865,470,566 B（3.60 GiB）**。求和值仍作为 `vram_all_heaps_bytes` 报告，供透明核对，
+  **永不**驱动 cap。
+- 两者都**不是**"空闲显存"；不做用量扣减（`VK_EXT_memory_budget` 的 heapBudget 含其它进程）。
+- 其它后端（D3D12/GL/Metal）本轮 `vram_bytes` 为 `None`，回落 3 GiB 并标 `Estimate`；D3D12 的
+  DXGI 查询是后续工作。
+
 ### D2 显式预算与显式拒绝
 
-- `GpuBudget { cap_bytes, refuse_at }`；**默认 3 GiB**（`DEFAULT_GPU_BUDGET_BYTES`），文档写明这是
-  **应用估算**（wgpu 拿不到 VRAM 总量），并附实测：授权样本 2,107,964,952 B。
+- 无 VRAM 时的兜底：`DEFAULT_GPU_BUDGET_BYTES = 3 GiB`，标 `Estimate`（见 D2'）。
 - 覆盖顺序：`--gpu-budget-mb` > `YACR_GPU_BUDGET_MB` > 默认；`0` = 显式取消上限（并如实报告）。
 - 准入点在上传 staging 之前（`prepare_upload_batches` / `upload_images` / `upload_masks` /
   `ensure_target` / `ensure_pick_target`）。拒绝时**常驻场景保持可用**，返回

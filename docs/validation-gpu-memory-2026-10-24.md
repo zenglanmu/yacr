@@ -72,3 +72,42 @@ gpu-memory-refused: origin=application-budget category=vertex used=8040572 reque
   （同进程第二个 device 首次 72 B 写入即 OOM，本 crate 3 个 headless 测试稳定失败），故限定 D3D12。
 - 未测：其它 GPU/驱动/样本、显存总量、跨进程显存占用、性能与帧时间。
 - `stream` 1.70 GB 的**优化**未做（ADR 0026 §4 明确另立项）。
+
+
+## 7. 显存百分比预算（2026-10-24 追加，默认 90 %）
+
+命令：`cad-cli-tools render fixtures/complex-test.dwg --gpu high`（Vulkan / Quadro P620 / 驱动 580.178.04）。
+
+```
+exit=0
+gpu-memory: total=2107964952 buffer=2100592152 texture=7372800 peak=2107964952
+            budget=3865470566 cap=3865470566 vram=4294967296 percent=90
+            budget_source=vram-percent source=accounted
+            allocator_total=2109386656 reserved=2617245696
+```
+
+- **VRAM 代理 = 最大 device-local heap = 4,294,967,296 B（4.00 GiB）**；90 % →
+  **cap = 3,865,470,566 B（3.60 GiB）**，低于物理容量；实测常驻 2.11 GB，仍有余量。
+- 交叉核对：驱动 allocator `2,109,386,656 B`，与记账差 **0.07 %**。
+
+### 7.1 被实测否决的口径：device-local heap 求和
+
+同一卡上"所有 device-local heap 求和"得到 **4,552,916,992 B**（比物理容量高 **6.0 %**，
+多出的是 host-visible device-local 堆）；其 90 % = 4,097,625,292 B（3.82 GiB），逼近物理上限、
+几乎不留余量。**已改为最大单堆**；求和值作为 `vram_all_heaps_bytes` 保留（透明，不驱动 cap）。
+（先前记录里"90 % 超过物理显存"的表述**有误**：3.82 GiB < 4 GiB；正确结论是"余量过小"。）
+
+### 7.2 拒绝与优先级
+
+- `--gpu-budget-percent 10` → cap `429,496,729` →
+  `exit=7`、`gpu-memory-refused: origin=application-budget category=mask used=1573159200 requested=144 cap=429496729 cap=…`、
+  **无 PNG**。
+- `--gpu-budget-percent 10 --gpu-budget-mb 4096` → 成功且 `percent=none`、
+  `budget_source=explicit-bytes`（显式字节 > 百分比）。
+- 设置持久化路径：`view.gpuBudget.percent`（默认 90，10..=100，选项对话框可改；越界**拒绝**不裁剪）。
+
+### 7.3 边界
+
+- `vram_bytes` 是**堆容量**，不是空闲显存；也不含其它进程占用。
+- 只对 Vulkan 生效；D3D12/GL/Metal 本轮为 `None` → 3 GiB `Estimate` 兜底（D3D12 的 DXGI 查询未做）。
+- 未测：其它 GPU/驱动、多 GPU、共享显存 iGPU、真 X11/Windows。
