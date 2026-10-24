@@ -44,6 +44,10 @@ use cad_ui_core::protocol::InputKind;
 use cad_ui_core::session::CadSession;
 
 mod admission;
+// The `dom-canvas` session descriptor relay (iron rule 8: the wasm session's own
+// status, stored verbatim and relayed through `cad_status`). `pub(crate)` so the
+// process-exit trigger in `crate::entry` can forget it.
+pub(crate) mod canvas_session;
 mod dispatch;
 mod dom;
 mod init;

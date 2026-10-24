@@ -90,6 +90,10 @@ pub fn init(
                 // in-DOM overlay no longer exists and the modal gate must not
                 // stay set. The initial page load is a harmless no-op.
                 if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                    // A reload also ends the wasm session that reported the
+                    // descriptor: forget its name so a stale one cannot outlive
+                    // it (`host::canvas_session`).
+                    crate::host::canvas_session::on_session_reset("reload");
                     cad_desktop_shell::popup::on_reload(&page_load_shared);
                 }
             }

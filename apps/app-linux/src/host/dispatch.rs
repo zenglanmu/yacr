@@ -21,18 +21,30 @@
 //!    answering `{accepted:true}` for work nothing will ever drain (iron rule 8:
 //!    the wasm session is the only `cad-db` authority, so the host must not grow a
 //!    second queue as a "harmless" stand-in).
+//! 3. **the chrome must be able to name the drawing without the shell mirroring
+//!    document state**: the wasm session reports an opaque descriptor through
+//!    `canvas_session_status` and this `cad_status` wrapper relays it as one extra
+//!    `canvasSession` key ([`super::canvas_session`]). The value is the session's
+//!    own report, stored verbatim; the host never opens, parses or derives
+//!    anything from it. On `native-below` the command is refused — that carrier's
+//!    native session already reports the document through the shared `cad_status`,
+//!    and a second status path must not exist.
 //!
 //! Registration is **not** duplicated: the shared handler is called for every
 //! command it owns, so a command added to `cad-desktop-shell` is automatically
 //! available here. Only the names in [`CANVAS_RUNTIME_FAILED_HOST_COMMAND`],
-//! [`CAD_STATUS_COMMAND`] and [`NATIVE_SESSION_COMMANDS`] are decided here, and
-//! all of them are asserted against the shared registry by a test.
+//! [`super::canvas_session::CANVAS_SESSION_STATUS_COMMAND`], [`CAD_STATUS_COMMAND`]
+//! and [`NATIVE_SESSION_COMMANDS`] are decided here, and all of them are asserted
+//! against the shared registry by a test.
 
 use cad_ui_core::session::CadStatus;
 use tauri::ipc::Invoke;
 
 use crate::backend::{surface_mode, SurfaceMode};
 
+use super::canvas_session::{
+    self, CanvasSessionAck, CanvasSessionDescriptor, CANVAS_SESSION_STATUS_COMMAND,
+};
 use super::ProbeShared;
 
 /// Commands this module answers itself, with the carrier they are routed on.
@@ -91,13 +103,14 @@ pub fn native_session_refusal(command: &str, mode: SurfaceMode) -> Option<String
     ))
 }
 
-/// The carrier report for `cad_status`: the shared projection plus `surfaceMode`.
+/// The carrier report for `cad_status`: the shared projection, the carrier, and
+/// the wasm session's own descriptor (when it has reported one).
 ///
 /// `#[serde(flatten)]` keeps the frozen `CadStatus` field set and order intact and
-/// appends exactly one key, so an existing consumer of this payload keeps reading
-/// the same shape. A `Value` round-trip was rejected on purpose: it would reorder
-/// the keys (and `serde_json`'s map is sorted), which would make the wire
-/// difference larger than the one field this carrier actually adds.
+/// appends only the carrier keys, so an existing consumer of this payload keeps
+/// reading the same shape. A `Value` round-trip was rejected on purpose: it would
+/// reorder the keys (and `serde_json`'s map is sorted), which would make the wire
+/// difference larger than the fields this carrier actually adds.
 #[derive(Debug, serde::Serialize)]
 pub struct DomCanvasStatus {
     #[serde(flatten)]
@@ -105,20 +118,31 @@ pub struct DomCanvasStatus {
     /// The carrier the host runs: always [`SurfaceMode::DomCanvas`] here.
     #[serde(rename = "surfaceMode")]
     surface_mode: &'static str,
+    /// The wasm session's reported descriptor, or **absent** before the first
+    /// report (never a fabricated null name).
+    ///
+    /// This is the session's own report relayed unchanged — not a mirrored
+    /// document, not derived geometry, not a second `cad-db` (iron rule 8). The
+    /// host only bounds it (see [`canvas_session`]) and hands it back.
+    #[serde(rename = "canvasSession", skip_serializing_if = "Option::is_none")]
+    canvas_session: Option<CanvasSessionDescriptor>,
 }
 
-/// `cad_status` on the `dom-canvas` carrier: the real host snapshot + the carrier.
+/// `cad_status` on the `dom-canvas` carrier: the real host snapshot + the carrier
+/// + the session's reported descriptor.
 ///
 /// The snapshot itself is the shared command's own output, so this wrapper cannot
 /// drift from it (no duplicated projection). There is no native CAD session on
 /// this path, so the snapshot is the explicit "no native document" one — the host
 /// reports what *it* knows; document state lives in the wasm session and is not
-/// mirrored here (ADR 0024 D2).
+/// mirrored here (ADR 0024 D2). `canvasSession` is that session's own report, not
+/// a host-side document read.
 #[tauri::command]
 pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> DomCanvasStatus {
     DomCanvasStatus {
         status: cad_desktop_shell::commands::cad_status_impl(&shared.0),
         surface_mode: SurfaceMode::DomCanvas.wire_name(),
+        canvas_session: canvas_session::current_descriptor(),
     }
 }
 
@@ -146,12 +170,24 @@ pub fn canvas_runtime_failed(step: String, detail: Option<String>) -> Result<(),
     crate::canvas_runtime::refuse(&step, detail.as_deref().unwrap_or(""))
 }
 
+/// `canvas_session_status` command: the wasm session reports its own descriptor.
+///
+/// The command exists **only** so the `dom-canvas` chrome can name the drawing
+/// without the native shell mirroring document state (iron rule 8): the body is
+/// the session's own report, stored verbatim by [`canvas_session`] and relayed
+/// through `cad_status.canvasSession`. Routed on every carrier
+/// (see [`invoke_handler`]); on `native-below` it rejects explicitly.
+#[tauri::command]
+pub fn canvas_session_status(request: tauri::ipc::Request<'_>) -> Result<CanvasSessionAck, String> {
+    canvas_session::report_from_body(request.body())
+}
+
 /// The host-only commands of this module, as one handler.
 ///
 /// Separate so the `generate_handler!` closure has a concrete return type to
 /// infer its runtime parameter from.
 fn host_commands<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![canvas_runtime_failed, cad_status]
+    tauri::generate_handler![canvas_runtime_failed, canvas_session_status, cad_status]
 }
 
 /// Build the app's `invoke_handler`.
@@ -168,6 +204,12 @@ pub fn invoke_handler<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send 
         if command == CANVAS_RUNTIME_FAILED_HOST_COMMAND {
             // Routed on every carrier: the command itself knows which one it runs
             // on and refuses explicitly (with no exit) when it is not `dom-canvas`.
+            return host(invoke);
+        }
+        if command == CANVAS_SESSION_STATUS_COMMAND {
+            // Routed on every carrier for the same reason: it stores the wasm
+            // session's descriptor on `dom-canvas` and refuses explicitly on
+            // `native-below` (no silent success, no second status path).
             return host(invoke);
         }
         if mode == SurfaceMode::DomCanvas {
@@ -243,7 +285,7 @@ mod tests {
 
     #[test]
     fn every_decided_command_exists_in_the_shared_registry() {
-        // No drift: both lists name real shared commands (or the two host-only
+        // No drift: both lists name real shared commands (or the host-only
         // ones), so a rename in `cad-desktop-shell` breaks this test instead of
         // silently turning a refusal into a pass-through.
         for command in NATIVE_SESSION_COMMANDS {
@@ -252,13 +294,22 @@ mod tests {
                 "{command} is not a registered shared command"
             );
         }
-        for command in [CANVAS_RUNTIME_FAILED_HOST_COMMAND, CAD_STATUS_COMMAND] {
+        for command in [
+            CANVAS_RUNTIME_FAILED_HOST_COMMAND,
+            CANVAS_SESSION_STATUS_COMMAND,
+            CAD_STATUS_COMMAND,
+        ] {
+            let host_only = command == CANVAS_RUNTIME_FAILED_HOST_COMMAND
+                || command == CANVAS_SESSION_STATUS_COMMAND;
             assert!(
-                command == CANVAS_RUNTIME_FAILED_HOST_COMMAND || COMMAND_NAMES.contains(&command),
+                host_only || COMMAND_NAMES.contains(&command),
                 "{command} is neither host-only nor shared"
             );
         }
         assert!(COMMAND_NAMES.contains(&CAD_STATUS_COMMAND));
+        // `canvas_session_status` is host-only on purpose: it exists only on the
+        // `dom-canvas` seam, so the shared registry must not own it.
+        assert!(!COMMAND_NAMES.contains(&CANVAS_SESSION_STATUS_COMMAND));
     }
 
     #[test]
@@ -268,6 +319,7 @@ mod tests {
         let decorated = DomCanvasStatus {
             status: base,
             surface_mode: SurfaceMode::DomCanvas.wire_name(),
+            canvas_session: None,
         };
         let wire = serde_json::to_value(&decorated).expect("decorated status serializes");
 
@@ -281,10 +333,61 @@ mod tests {
             wire_object.get("surfaceMode").and_then(|v| v.as_str()),
             Some("dom-canvas")
         );
+        // Before the first report the session key is absent, not a null name.
+        assert!(
+            !wire_object.contains_key("canvasSession"),
+            "no descriptor measured yet: {wire}"
+        );
         // The frozen field set is preserved (spot-check the camelCase spelling the
         // frontend validates).
         assert!(wire_object.contains_key("documentLabel"));
         assert!(wire_object.contains_key("importProgress"));
         assert!(wire_object.contains_key("surfaceMode"));
+    }
+
+    #[test]
+    fn the_dom_canvas_status_relays_the_session_descriptor() {
+        let base = cad_ui_core::unsupported_status(None);
+        let base_json = serde_json::to_value(&base).expect("status serializes");
+        let decorated = DomCanvasStatus {
+            status: base,
+            surface_mode: SurfaceMode::DomCanvas.wire_name(),
+            canvas_session: Some(CanvasSessionDescriptor {
+                label: "plan.dwg".into(),
+                batches: 2,
+                draws: 5,
+            }),
+        };
+        let wire = serde_json::to_value(&decorated).expect("decorated status serializes");
+
+        let wire_object = wire.as_object().expect("object");
+        let base_object = base_json.as_object().expect("object");
+        // Exactly the two carrier keys on top of the untouched shared snapshot.
+        assert_eq!(
+            wire_object.len(),
+            base_object.len() + 2,
+            "surfaceMode + canvasSession only: {wire}"
+        );
+        for (key, value) in base_object {
+            assert_eq!(wire_object.get(key), Some(value), "key {key} changed");
+        }
+
+        let session = wire_object
+            .get("canvasSession")
+            .and_then(|value| value.as_object())
+            .expect("canvasSession is the relayed descriptor");
+        let mut keys: Vec<&str> = session.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["batches", "draws", "label"],
+            "the relay carries no document field beyond the session's own report"
+        );
+        assert_eq!(
+            session.get("label").and_then(|value| value.as_str()),
+            Some("plan.dwg")
+        );
+        assert_eq!(session.get("batches"), Some(&serde_json::json!(2)));
+        assert_eq!(session.get("draws"), Some(&serde_json::json!(5)));
     }
 }

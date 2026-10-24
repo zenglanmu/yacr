@@ -145,13 +145,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         tauri::RunEvent::ExitRequested { .. } => {
             eprintln!("[probe] run event: ExitRequested");
             // Trigger ④ of the popup lifecycle: the host process is exiting, so
-            // no modal gate may stay set.
+            // no modal gate may stay set — and the wasm session's reported
+            // descriptor must not outlive its process either.
+            crate::host::canvas_session::on_session_reset("exit");
             cad_desktop_shell::popup::on_process_exit(&run_shared);
             crate::host::close_presenter();
             crate::host::request_stop(&run_shared, &run_telemetry);
         }
         tauri::RunEvent::Exit => {
             eprintln!("[probe] run event: Exit");
+            // Same reset as ExitRequested: the reported descriptor is forgotten.
+            crate::host::canvas_session::on_session_reset("exit");
             cad_desktop_shell::popup::on_process_exit(&run_shared);
             crate::host::close_presenter();
             crate::host::request_stop(&run_shared, &run_telemetry);

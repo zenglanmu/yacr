@@ -106,6 +106,9 @@ pub(super) fn install_renderer_crash_hook(webview: &tauri::Webview, shared: &Arc
                 })
                 .unwrap_or_else(|| "unknown web process termination".to_string());
             eprintln!("[probe] webview web-process-crashed: {detail}");
+            // The crashed renderer took the wasm session with it: its reported
+            // descriptor must not outlive the session.
+            crate::host::canvas_session::on_session_reset("renderer-crash");
             cad_desktop_shell::popup::on_renderer_crash(&shared, &detail);
             None
         });
