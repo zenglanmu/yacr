@@ -9,33 +9,70 @@
 //! The pipeline mirrors the headless render contract:
 //! DWG bytes (compiled-in synthetic fixture, or caller-supplied via `open_bytes`)
 //! → `AcadrustImporter` → `cad_app::render_scene::build_scene`
-//! → `Renderer::prepare_upload_batches` + `commit_upload` → `Renderer::render`
+//! → `Renderer::prepare_upload_batches` in bounded chunks + one `commit_upload`
+//! → `Renderer::render`
 //! → `CanvasPresenter::present_texture(Renderer::frame_texture())`.
 //!
 //! Opening a file is two staged halves on purpose:
 //!
-//! 1. [`load`] — geometry only: import the DWG bytes, build the display
-//!    representation, check it is not empty, fit the camera. No GPU object is
-//!    touched, so a bad or unsupported file is reported while the live session
-//!    (canvas included) stays exactly as it was.
-//! 2. [`attach`] — GPU only: initialize the renderer on the (new) presenter's
-//!    device, upload the resident batches and build the [`Session`].
+//! 1. [`import::load`] — geometry only: import the DWG bytes, build the display
+//!    representation, check it is not empty, fit the camera, then release the
+//!    imported database. No GPU object is touched, so a bad, unsupported, empty
+//!    or over-budget file is reported while the live session (canvas included)
+//!    stays exactly as it was. Both memory budgets ([`crate::budget`]) are applied
+//!    on this side of the boundary: input bytes before parsing, wasm heap after
+//!    the build.
+//! 2. [`upload::attach`] — GPU only: initialize the renderer on the (new)
+//!    presenter's device, upload the resident batches in bounded chunks (with one
+//!    atomic commit, so the first presented frame is always complete), and build
+//!    the [`Session`].
 //!
 //! Pan/zoom only touch `cad_app::Camera`: the scene batches stay resident (no
 //! re-parse, no re-upload), and each navigation step renders and presents
 //! immediately so the canvas is never a frame behind the camera.
+//!
+//! Module layout: [`session_state`] holds the registry, the failure vocabulary and
+//! the frame path; [`import`] the geometry half; [`upload`] the chunked GPU half;
+//! [`surface`] the two carriers a session can be opened on.
+//!
+//! # One session implementation, two carriers
+//!
+//! The pipeline above is identical for both carriers, and so is the code: only
+//! `Surface` changes (see [`surface`]).
+//!
+//! - **main thread** — `start`/`open_bytes` resolve a page `<canvas id=...>` and
+//!   create the presenter from an `HtmlCanvasElement`.
+//! - **worker** — `start_offscreen`/`open_bytes_offscreen` take the
+//!   `OffscreenCanvas` the page transferred with `transferControlToOffscreen()` and
+//!   create the presenter from it. The Worker owns this session outright; the page
+//!   creates none (that is why the page shell does not instantiate the module on
+//!   that path), and the offscreen entry points are refused outside a Worker
+//!   (`step: "isolation"`) so two owners can never coexist.
+//!
+//! Whether the worker carrier is possible is a **browser** fact (see
+//! [`crate::capability`]): Chromium 141 gives WebGL2 on a worker-side
+//! `OffscreenCanvas`, **WebKitGTK 2.52.6 returns `null` from
+//! `getContext("webgl2")` there and therefore cannot do worker rendering at all**.
+//! On that engine the offscreen carrier fails with the `webgl2` refusal (marker
+//! `yacr: unsupported-runtime: webgl2`) — the main-thread carrier is the honest
+//! answer, and the host says so in its status line.
 
-use std::cell::{Cell, RefCell};
-use std::sync::Arc;
+pub(crate) mod import;
+pub(crate) mod session_state;
+pub(crate) mod surface;
+pub(crate) mod upload;
 
-use cad_app::render_scene::build_scene;
-use cad_domain::{DatabaseId, DocumentId, Point3, TaskStamp};
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
-use cad_render_wgpu::canvas::CanvasPresenter;
-use cad_render_wgpu::{BackendPreference, Camera2d, RenderTarget, Renderer};
-use cad_scene::SceneDelta;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
+
+use crate::budget;
+use import::{load, Loaded};
+use session_state::{
+    begin_replace, begin_start, document_failure, ensure_not_starting, fail, install_live,
+    last_import_ms, record_import, wasm_heap_bytes, with_live, Failure, Metrics, Session, State,
+    NO_MEASUREMENT, STATE, STEP_INPUT, STEP_NAVIGATION, STEP_PRESENT, STEP_STATE, STEP_VIEWPORT,
+    STEP_WEBGL2, WEBGL2_MARKER,
+};
+use surface::Surface;
 
 /// A committed, writer-produced AC1032 DWG with four LINE entities
 /// (`fixtures/manifest`). Not a vendor sample; wasm has no filesystem, so the
@@ -47,147 +84,6 @@ const SYNTHETIC_DWG: &[u8] = include_bytes!("../../../fixtures/dwg/synthetic-fou
 /// the open file name, exactly like a caller-supplied file name.
 const SYNTHETIC_LABEL: &str = "synthetic-four-lines.dwg";
 
-/// Stable names of the steps a failure can be attributed to. They are the only
-/// stable vocabulary in the status `step` field, so a host can key on them
-/// (browser console messages, Linux exit codes) without parsing prose.
-const STEP_VIEWPORT: &str = "viewport";
-const STEP_CANVAS: &str = "canvas-element";
-const STEP_WEBGL2: &str = "webgl2";
-const STEP_IMPORT: &str = "import";
-/// The file parsed but produced nothing drawable. Never a blank-canvas success.
-const STEP_EMPTY_SCENE: &str = "empty-scene";
-const STEP_SCENE: &str = "scene";
-const STEP_DEVICE: &str = "device";
-const STEP_UPLOAD: &str = "upload";
-const STEP_CAMERA: &str = "camera";
-const STEP_RENDER: &str = "render";
-const STEP_PRESENT: &str = "present";
-const STEP_NAVIGATION: &str = "navigation";
-/// A rejected argument of `open_bytes` (an empty label, for example).
-const STEP_INPUT: &str = "input";
-const STEP_STATE: &str = "state";
-
-/// The stable refusal marker for a `dom-canvas` host without usable WebGL2
-/// (ADR 0024 D5). Only the `webgl2` step carries it; the host emits this line
-/// verbatim and exits with code 6 instead of showing a blank canvas.
-const WEBGL2_MARKER: &str = "yacr: unsupported-runtime: webgl2";
-
-/// The document identity of the single session (one file, one database).
-const SESSION_DOCUMENT: u128 = 1;
-const SESSION_DATABASE: u128 = 1;
-
-/// The value [`last_import_ms_impl`] returns until one open has completed.
-///
-/// A negative number is not a measurement: it says "nothing has been measured
-/// yet", so a host can never mistake it for a suspiciously fast import.
-const NO_MEASUREMENT: f64 = -1.0;
-
-/// The process-global session state.
-enum State {
-    /// Nothing has started yet.
-    Idle,
-    /// `start`/`open_bytes` is in flight (it awaits the canvas presenter). A
-    /// concurrent `start` or `open_bytes` is refused here, so one canvas never
-    /// gets two presenters.
-    Starting,
-    /// A start failed before a session existed; the payload is the exact status
-    /// JSON the failure produced.
-    Failed(String),
-    /// A live session on one canvas.
-    Live(Box<Session>),
-}
-
-thread_local! {
-    // `wasm` is single-threaded, so one `RefCell` slot is the whole session
-    // registry. `const` init keeps the first access allocation-free.
-    static STATE: RefCell<State> = const { RefCell::new(State::Idle) };
-    /// The last completed import+build+upload duration (`web_time::Instant`), in
-    /// milliseconds. Evidence surface only; see [`last_import_ms_impl`].
-    static LAST_IMPORT_MS: Cell<f64> = const { Cell::new(NO_MEASUREMENT) };
-}
-
-/// The one CAD session: presenter + renderer + camera.
-struct Session {
-    presenter: CanvasPresenter,
-    renderer: Renderer,
-    /// The application camera. The render camera is derived from it through
-    /// `camera2d_params()` on every frame, so the two cannot drift.
-    camera: cad_app::Camera,
-    metrics: Metrics,
-    /// The source file name this session was opened from (`status`/`document`).
-    label: String,
-    /// The source DWG length in bytes (evidence: what was actually opened).
-    bytes: usize,
-    /// Resident draw batches after the initial upload (evidence for the status).
-    batches: usize,
-    /// Draw submissions of the last presented frame.
-    draws: u64,
-    /// The last navigation/frame failure, kept so `status()` keeps reporting it
-    /// while the session stays usable (a surface `Outdated`/`Lost` frame is
-    /// retryable and must not destroy the session).
-    last_error: Option<(&'static str, String)>,
-    /// Import + display-representation build + GPU upload of this file, measured
-    /// with `web_time::Instant`. A measurement of this open, not a performance
-    /// claim.
-    import_ms: f64,
-}
-
-/// Canvas sizing in CSS pixels plus the device pixel ratio.
-#[derive(Debug, Clone, Copy)]
-struct Metrics {
-    css: (f64, f64),
-    dpr: f64,
-}
-
-impl Metrics {
-    fn new(css_w: f64, css_h: f64, dpr: f64) -> Result<Self, String> {
-        if !(css_w.is_finite() && css_h.is_finite() && dpr.is_finite()) {
-            return Err(format!(
-                "viewport must be finite: css={css_w}x{css_h}, dpr={dpr}"
-            ));
-        }
-        if css_w <= 0.0 || css_h <= 0.0 {
-            return Err(format!("canvas CSS size must be positive: {css_w}x{css_h}"));
-        }
-        if dpr <= 0.0 {
-            return Err(format!("devicePixelRatio must be positive: {dpr}"));
-        }
-        Ok(Self {
-            css: (css_w, css_h),
-            dpr,
-        })
-    }
-
-    /// The physical (device-pixel) size the presenter configures.
-    fn physical(self) -> Result<(u32, u32), String> {
-        let width = (self.css.0 * self.dpr).round();
-        let height = (self.css.1 * self.dpr).round();
-        if width < 1.0 || height < 1.0 {
-            return Err(format!(
-                "physical size rounds to zero: {}x{} (css {}x{} at dpr {})",
-                width, height, self.css.0, self.css.1, self.dpr
-            ));
-        }
-        if width > f64::from(u32::MAX) || height > f64::from(u32::MAX) {
-            return Err(format!("physical size out of range: {width}x{height}"));
-        }
-        Ok((width as u32, height as u32))
-    }
-}
-
-/// The geometry half of an open: what [`load`] produced, before any GPU object
-/// exists.
-struct Loaded {
-    /// The display representation batches (`added` is what gets uploaded).
-    delta: SceneDelta,
-    /// The camera fitted to the drawing bounds at the requested CSS size.
-    camera: cad_app::Camera,
-    /// Source DWG length in bytes.
-    bytes: usize,
-    /// Import + scene build duration in milliseconds.
-    import_ms: f64,
-}
-
 // ---------------------------------------------------------------------------
 // Exported entry points
 // ---------------------------------------------------------------------------
@@ -198,34 +94,55 @@ pub(crate) async fn start_impl(
     css_h: f64,
     dpr: f64,
 ) -> Result<String, JsValue> {
+    start_with(Surface::Page(canvas_id.to_string()), css_w, css_h, dpr).await
+}
+
+/// Worker entry: the same session on an `OffscreenCanvas` transferred into this
+/// Worker.
+///
+/// Identical pipeline to [`start_impl`] — the only difference is the carrier
+/// ([`Surface::Offscreen`]), so there is one session implementation with two
+/// carriers rather than a second copy of the import/build/upload path. Refused with
+/// `step: "isolation"` when called outside a Worker.
+pub(crate) async fn start_offscreen_impl(
+    canvas: web_sys::OffscreenCanvas,
+    css_w: f64,
+    css_h: f64,
+    dpr: f64,
+) -> Result<String, JsValue> {
+    start_with(Surface::Offscreen(canvas), css_w, css_h, dpr).await
+}
+
+async fn start_with(surface: Surface, css_w: f64, css_h: f64, dpr: f64) -> Result<String, JsValue> {
     // Claim the start slot first: a concurrent `start` must not build a second
     // presenter for the same canvas.
     begin_start()?;
-    let metrics =
-        Metrics::new(css_w, css_h, dpr).map_err(|message| fail(STEP_VIEWPORT, message))?;
+    let metrics = Metrics::new(css_w, css_h, dpr)
+        .map_err(|message| fail(Failure::new(STEP_VIEWPORT, message)))?;
     let physical = metrics
         .physical()
-        .map_err(|message| fail(STEP_VIEWPORT, message))?;
-    let canvas = canvas_element(canvas_id).map_err(|message| fail(STEP_CANVAS, message))?;
-    let loaded = load(
+        .map_err(|message| fail(Failure::new(STEP_VIEWPORT, message)))?;
+    // Resolve the carrier before the geometry load: a missing element, a wrong
+    // element type or an `OffscreenCanvas` outside a Worker is a cheap, explicit
+    // refusal that must not cost a parse.
+    let carrier = surface.resolve().map_err(fail)?;
+    let loaded = load_within_budget(
         SYNTHETIC_DWG,
         SYNTHETIC_LABEL,
         [metrics.css.0, metrics.css.1],
     )
-    .map_err(|(step, message)| fail(step, message))?;
+    .map_err(fail)?;
     // This is the real WebGL2 capability check (instance → surface → adapter →
     // device → configure), not a feature sniff: a host that fails here must emit
-    // the `webgl2` marker instead of showing a blank canvas (ADR 0024 D5).
-    let presenter = CanvasPresenter::create(canvas, physical)
-        .await
-        .map_err(|error| fail(STEP_WEBGL2, error.to_string()))?;
+    // the `webgl2` marker instead of showing a blank canvas (ADR 0024 D5). On
+    // WebKitGTK 2.52.6 this is also where a worker-side `OffscreenCanvas` fails,
+    // because `getContext("webgl2")` returns `null` there.
+    let presenter = carrier.presenter(physical).await.map_err(fail)?;
     // Everything below is synchronous, so no `RefCell` borrow and no DOM borrow
     // is held across an await point.
-    let mut session = attach(presenter, metrics, SYNTHETIC_LABEL, loaded)
-        .map_err(|(step, message)| fail(step, message))?;
-    session
-        .render_and_present()
-        .map_err(|(step, message)| fail(step, message))?;
+    let mut session = upload::attach(presenter, metrics, SYNTHETIC_LABEL, loaded).map_err(fail)?;
+    session.render_and_present().map_err(fail)?;
+    session.heap_after_open = wasm_heap_bytes();
     record_import(session.import_ms);
     let status = live_status(&session);
     install_live(session);
@@ -241,39 +158,72 @@ pub(crate) async fn open_bytes_impl(
     dpr: f64,
     bytes: &[u8],
 ) -> Result<String, JsValue> {
+    open_bytes_with(
+        Surface::Page(canvas_id.to_string()),
+        label,
+        css_w,
+        css_h,
+        dpr,
+        bytes,
+    )
+    .await
+}
+
+/// Worker entry for [`open_bytes_impl`]: caller-supplied DWG bytes on the
+/// transferred `OffscreenCanvas`.
+///
+/// Same staged halves, same budgets, same chunked upload — the carrier is the only
+/// difference.
+pub(crate) async fn open_bytes_offscreen_impl(
+    canvas: web_sys::OffscreenCanvas,
+    label: &str,
+    css_w: f64,
+    css_h: f64,
+    dpr: f64,
+    bytes: &[u8],
+) -> Result<String, JsValue> {
+    open_bytes_with(Surface::Offscreen(canvas), label, css_w, css_h, dpr, bytes).await
+}
+
+async fn open_bytes_with(
+    surface: Surface,
+    label: &str,
+    css_w: f64,
+    css_h: f64,
+    dpr: f64,
+    bytes: &[u8],
+) -> Result<String, JsValue> {
     // Refuse while another start/open is in flight, before doing any work.
     ensure_not_starting()?;
     let label = label.trim();
     if label.is_empty() {
-        return Err(document_failure(
+        return Err(document_failure(Failure::new(
             STEP_INPUT,
             "open_bytes needs a non-empty label (the source file name)",
-        ));
+        )));
     }
     let metrics = Metrics::new(css_w, css_h, dpr)
-        .map_err(|message| document_failure(STEP_VIEWPORT, &message))?;
+        .map_err(|message| document_failure(Failure::new(STEP_VIEWPORT, message)))?;
     let physical = metrics
         .physical()
-        .map_err(|message| document_failure(STEP_VIEWPORT, &message))?;
-    let canvas =
-        canvas_element(canvas_id).map_err(|message| document_failure(STEP_CANVAS, &message))?;
-    // Stage 1, before any state change: a bad, unsupported or empty file leaves a
-    // live session — and its canvas pixels — exactly as they were.
-    let loaded = load(bytes, label, [metrics.css.0, metrics.css.1])
-        .map_err(|(step, message)| document_failure(step, &message))?;
+        .map_err(|message| document_failure(Failure::new(STEP_VIEWPORT, message)))?;
+    // The carrier is resolved (not created) before any state change: the previous
+    // presenter is still live at this point.
+    let carrier = surface.resolve().map_err(document_failure)?;
+    // Stage 1, before any state change: a bad, unsupported, empty or over-budget
+    // file leaves a live session — and its canvas pixels — exactly as they were,
+    // and the open document stays navigable.
+    let loaded = load_within_budget(bytes, label, [metrics.css.0, metrics.css.1])
+        .map_err(document_failure)?;
     // Stage 2: replace. The previous renderer and canvas presenter are dropped
     // here, before the replacement presenter is created, so two presenters are
     // never live at once and no surface is leaked. From this point a failure can
     // only be a surface/device/upload failure, and it is fatal and named.
     begin_replace()?;
-    let presenter = CanvasPresenter::create(canvas, physical)
-        .await
-        .map_err(|error| fail(STEP_WEBGL2, error.to_string()))?;
-    let mut session =
-        attach(presenter, metrics, label, loaded).map_err(|(step, message)| fail(step, message))?;
-    session
-        .render_and_present()
-        .map_err(|(step, message)| fail(step, message))?;
+    let presenter = carrier.presenter(physical).await.map_err(fail)?;
+    let mut session = upload::attach(presenter, metrics, label, loaded).map_err(fail)?;
+    session.render_and_present().map_err(fail)?;
+    session.heap_after_open = wasm_heap_bytes();
     record_import(session.import_ms);
     let status = live_status(&session);
     install_live(session);
@@ -283,12 +233,15 @@ pub(crate) async fn open_bytes_impl(
 
 pub(crate) fn resize_impl(css_w: f64, css_h: f64, dpr: f64) -> Result<String, JsValue> {
     with_live(|session| {
-        let metrics = Metrics::new(css_w, css_h, dpr).map_err(|m| (STEP_VIEWPORT, m))?;
-        let physical = metrics.physical().map_err(|m| (STEP_VIEWPORT, m))?;
+        let metrics =
+            Metrics::new(css_w, css_h, dpr).map_err(|m| Failure::new(STEP_VIEWPORT, m))?;
+        let physical = metrics
+            .physical()
+            .map_err(|m| Failure::new(STEP_VIEWPORT, m))?;
         session
             .presenter
             .resize(physical)
-            .map_err(|error| (STEP_PRESENT, error.to_string()))?;
+            .map_err(|error| Failure::new(STEP_PRESENT, error.to_string()))?;
         session.metrics = metrics;
         // A resize that only reconfigures the surface would leave the old frame
         // stretched; render at the new size instead.
@@ -300,7 +253,7 @@ pub(crate) fn resize_impl(css_w: f64, css_h: f64, dpr: f64) -> Result<String, Js
 pub(crate) fn zoom_at_impl(factor: f64, x: f64, y: f64) -> Result<String, JsValue> {
     with_live(|session| {
         if !(factor.is_finite() && x.is_finite() && y.is_finite()) {
-            return Err((
+            return Err(Failure::new(
                 STEP_NAVIGATION,
                 format!("zoom arguments must be finite: factor={factor}, cursor=({x}, {y})"),
             ));
@@ -309,7 +262,7 @@ pub(crate) fn zoom_at_impl(factor: f64, x: f64, y: f64) -> Result<String, JsValu
         session
             .camera
             .zoom_at(factor, [x, y], size)
-            .map_err(|error| (STEP_NAVIGATION, error.to_string()))?;
+            .map_err(|error| Failure::new(STEP_NAVIGATION, error.to_string()))?;
         session.render_and_present()?;
         Ok(live_status(session))
     })
@@ -318,7 +271,7 @@ pub(crate) fn zoom_at_impl(factor: f64, x: f64, y: f64) -> Result<String, JsValu
 pub(crate) fn pan_impl(dx: f64, dy: f64) -> Result<String, JsValue> {
     with_live(|session| {
         if !(dx.is_finite() && dy.is_finite()) {
-            return Err((
+            return Err(Failure::new(
                 STEP_NAVIGATION,
                 format!("pan delta must be finite: ({dx}, {dy})"),
             ));
@@ -335,26 +288,30 @@ pub(crate) fn pan_impl(dx: f64, dy: f64) -> Result<String, JsValue> {
 pub(crate) fn status_impl() -> String {
     STATE.with(|cell| match cell.try_borrow() {
         Ok(state) => match &*state {
-            State::Idle => failure_status(
+            State::Idle => failure_status(&Failure::new(
                 STEP_STATE,
                 "the canvas session has not started; call start() first",
-            ),
-            State::Starting => failure_status(
+            )),
+            State::Starting => failure_status(&Failure::new(
                 STEP_STATE,
                 "the canvas session is starting or being replaced; await that call first",
-            ),
-            State::Failed(status) => status.clone(),
+            )),
+            State::Failed(failure) => failure_status(failure),
             State::Live(session) => live_status(session),
         },
-        Err(_) => failure_status(STEP_STATE, "the session state is already borrowed"),
+        Err(_) => failure_status(&Failure::new(
+            STEP_STATE,
+            "the session state is already borrowed",
+        )),
     })
 }
 
 /// What the open file is, as far as this session knows it.
 ///
-/// `{ok, label, batches, draws, presented, bytes}` plus the measured
-/// `import_ms` and the `wasm_heap_bytes` evidence field. With no live session the
-/// object is `ok: false` with null/zero values — never a made-up file.
+/// `{ok, label, batches, draws, presented, bytes}` plus the measured `import_ms`,
+/// `wasm_heap_bytes`, `heap_after_open`, `upload_chunks`,
+/// `peak_batches_per_chunk` and the `db_retained` retention flag. With no live
+/// session the object is `ok: false` with null/zero values — never a made-up file.
 pub(crate) fn document_impl() -> String {
     STATE.with(|cell| {
         let document = match cell.try_borrow() {
@@ -368,6 +325,10 @@ pub(crate) fn document_impl() -> String {
                     "bytes": session.bytes,
                     "import_ms": session.import_ms,
                     "wasm_heap_bytes": wasm_heap_bytes(),
+                    "heap_after_open": session.heap_after_open,
+                    "upload_chunks": session.upload_chunks,
+                    "peak_batches_per_chunk": session.peak_batches_per_chunk,
+                    "db_retained": session.db_retained,
                 }),
                 _ => empty_document(),
             },
@@ -384,231 +345,34 @@ pub(crate) fn document_impl() -> String {
 /// there is no default, estimated or cached-elsewhere number. This is a
 /// measurement surface for the evidence run, **not** a performance claim.
 pub(crate) fn last_import_ms_impl() -> f64 {
-    LAST_IMPORT_MS.with(Cell::get)
+    last_import_ms()
 }
 
 // ---------------------------------------------------------------------------
-// Geometry load and GPU attach
+// Budgets around the geometry load
 // ---------------------------------------------------------------------------
 
-/// Geometry load: DWG `bytes` → imported database → display representation.
+/// Geometry load guarded by both named memory budgets.
 ///
-/// Touches no GPU object and no session state, which is what lets `open_bytes`
-/// report a bad file without disturbing the session that is already open. `label`
-/// only names the file in diagnostics.
-fn load(bytes: &[u8], label: &str, logical: [f64; 2]) -> Result<Loaded, (&'static str, String)> {
-    let started = web_time::Instant::now();
-    if bytes.is_empty() {
-        return Err((STEP_IMPORT, format!("{label}: the file is empty (0 bytes)")));
-    }
-    let drawing = AcadrustImporter::new()
-        .import(
-            &ImportRequest {
-                document: DocumentId(SESSION_DOCUMENT),
-                database: DatabaseId(SESSION_DATABASE),
-                bytes: Arc::from(bytes),
-                limits: ImportLimits::default(),
-                generation: 0,
-            },
-            &|| false,
-        )
-        .map_err(|error| (STEP_IMPORT, format!("{label}: {error}")))?;
-    let stamp = TaskStamp::new(DocumentId(SESSION_DOCUMENT), 0);
-    let delta = build_scene(&drawing.database, stamp)
-        .map_err(|error| (STEP_SCENE, format!("{label}: {error}")))?;
-    if delta.added.is_empty() {
-        // A parsed drawing with nothing drawable must not become a blank canvas
-        // that looks like a successful open.
-        return Err((
-            STEP_EMPTY_SCENE,
-            format!("{label}: the drawing produced no draw batches"),
-        ));
-    }
-    // The camera is fitted once from the drawing bounds, exactly like the
-    // engine's initial fit; after that only pan/zoom move it.
-    let camera = fit_camera(&drawing.database, logical);
-    let import_ms = started.elapsed().as_secs_f64() * 1000.0;
-    Ok(Loaded {
-        delta,
-        camera,
-        bytes: bytes.len(),
-        import_ms,
-    })
-}
-
-/// GPU half of an open: initialize the renderer on `presenter`'s device, upload
-/// the resident batches, and build the session.
-fn attach(
-    presenter: CanvasPresenter,
-    metrics: Metrics,
-    label: &str,
-    loaded: Loaded,
-) -> Result<Session, (&'static str, String)> {
-    // The renderer shares the presenter's device/queue: the frame texture it
-    // renders is the one the presenter blits.
-    let mut renderer = Renderer::new(BackendPreference::WebGl2);
-    let (device, queue) = presenter.device_queue();
-    renderer
-        .initialize_with_device(device, queue)
-        .map_err(|error| (STEP_DEVICE, error.to_string()))?;
-    let upload_started = web_time::Instant::now();
-    let staged = renderer
-        .prepare_upload_batches(&loaded.delta.added)
-        .map_err(|error| (STEP_UPLOAD, error.to_string()))?;
-    renderer
-        .commit_upload(staged, 0)
-        .map_err(|error| (STEP_UPLOAD, error.to_string()))?;
-    renderer
-        .upload_masks(&loaded.delta.masks)
-        .map_err(|error| (STEP_UPLOAD, error.to_string()))?;
-    let upload_ms = upload_started.elapsed().as_secs_f64() * 1000.0;
-    let batches = renderer.batch_count();
-    if batches == 0 {
-        // `load` already refused an empty delta; this catches a renderer that
-        // admits every batch and keeps none, so a blank canvas is never success.
-        return Err((
-            STEP_EMPTY_SCENE,
-            format!("{label}: the uploaded scene holds no draw batches"),
-        ));
-    }
-    Ok(Session {
-        presenter,
-        renderer,
-        camera: loaded.camera,
-        metrics,
-        label: label.to_string(),
-        bytes: loaded.bytes,
-        batches,
-        draws: 0,
-        last_error: None,
-        import_ms: loaded.import_ms + upload_ms,
-    })
-}
-
-/// The initial camera: the default 2D top view moved to the drawing centre with
-/// the world-per-pixel scale that frames the bounds.
+/// 1. [`budget::check_input_bytes`] **before** parsing: cheap refusal of an absurd
+///    input, so the importer never copies or parses it.
+/// 2. [`budget::check_heap_after_build`] **after** the scene build and **before**
+///    any GPU object: the imported database has been released and the display
+///    representation is resident, so this is the footprint the upload would grow
+///    from. If it is over budget, the freshly built scene is dropped here (so the
+///    refusal does not keep the footprint it refused) and the live session — if
+///    any — is left untouched.
 ///
-/// The arithmetic is the engine's `fit_camera` rule (bounding-box centre, the
-/// larger of the two axis ratios, 1.05 margin), and the projection goes through
-/// the validated `Projection::orthographic` constructor. Non-finite bounds keep
-/// the default top view rather than producing a NaN scale.
-fn fit_camera(database: &cad_db::DrawingDatabase, logical: [f64; 2]) -> cad_app::Camera {
-    let mut camera = cad_app::Camera::top_view_2d();
-    let Some((min, max)) = database.bounds() else {
-        return camera;
-    };
-    let extent_x = (max.x - min.x).max(1e-6);
-    let extent_y = (max.y - min.y).max(1e-6);
-    let center = Point3 {
-        x: (min.x + max.x) * 0.5,
-        y: (min.y + max.y) * 0.5,
-        z: 0.0,
-    };
-    let world_per_px = (extent_x / logical[0].max(1.0)).max(extent_y / logical[1].max(1.0)) * 1.05;
-    if !(center.x.is_finite() && center.y.is_finite()) {
-        return camera;
+/// A refusal always carries the budget name, its limit and the measured value, both
+/// in the message and as a structured `budget` object in the status.
+fn load_within_budget(bytes: &[u8], label: &str, logical: [f64; 2]) -> Result<Loaded, Failure> {
+    budget::check_input_bytes(label, bytes.len()).map_err(Failure::from_refusal)?;
+    let loaded = load(bytes, label, logical)?;
+    if let Err(refusal) = budget::check_heap_after_build(label, wasm_heap_bytes()) {
+        drop(loaded);
+        return Err(Failure::from_refusal(refusal));
     }
-    // Shift both eye and target, so the view direction and the eye distance of
-    // the top view are preserved (the 2D path only reads the target centre and
-    // the projection scale).
-    let offset = Point3 {
-        x: center.x - camera.target.x,
-        y: center.y - camera.target.y,
-        z: 0.0,
-    };
-    camera.target = Point3 {
-        x: camera.target.x + offset.x,
-        y: camera.target.y + offset.y,
-        z: camera.target.z,
-    };
-    camera.eye = Point3 {
-        x: camera.eye.x + offset.x,
-        y: camera.eye.y + offset.y,
-        z: camera.eye.z,
-    };
-    if let Ok(projection) = cad_app::Projection::orthographic(world_per_px) {
-        camera.projection = projection;
-    }
-    camera
-}
-
-// ---------------------------------------------------------------------------
-// Frame path and navigation
-// ---------------------------------------------------------------------------
-
-impl Session {
-    /// The world-per-pixel scale the renderer will use this frame.
-    fn world_per_px(&self) -> Option<f64> {
-        self.camera.camera2d_params().ok().map(|p| p.world_per_px)
-    }
-
-    /// Pan by a CSS-pixel screen delta.
-    ///
-    /// Mirrors the desktop path: the pointer delta becomes the world delta
-    /// `[dx × wpp, -dy × wpp]` (screen y grows down, world y grows up) and the
-    /// camera target+eye shift by its negation, so the model follows the pointer.
-    fn pan_css(&mut self, delta: [f64; 2]) -> Result<(), (&'static str, String)> {
-        let world_per_px = self
-            .camera
-            .camera2d_params()
-            .map_err(|error| (STEP_CAMERA, error.to_string()))?
-            .world_per_px;
-        let shift = Point3 {
-            x: -delta[0] * world_per_px,
-            y: delta[1] * world_per_px,
-            z: 0.0,
-        };
-        if !(shift.x.is_finite() && shift.y.is_finite()) {
-            return Err((
-                STEP_NAVIGATION,
-                "pan produced a non-finite world shift".to_string(),
-            ));
-        }
-        self.camera.target = Point3 {
-            x: self.camera.target.x + shift.x,
-            y: self.camera.target.y + shift.y,
-            z: self.camera.target.z,
-        };
-        self.camera.eye = Point3 {
-            x: self.camera.eye.x + shift.x,
-            y: self.camera.eye.y + shift.y,
-            z: self.camera.eye.z,
-        };
-        Ok(())
-    }
-
-    /// Render the resident scene with the current camera and present it.
-    ///
-    /// Camera-only: nothing is parsed, rebuilt or re-uploaded here.
-    fn render_and_present(&mut self) -> Result<(), (&'static str, String)> {
-        let params = self
-            .camera
-            .camera2d_params()
-            .map_err(|error| (STEP_CAMERA, error.to_string()))?;
-        let camera = Camera2d {
-            center: params.center,
-            world_per_px: params.world_per_px,
-            z_plane: 0.0,
-        };
-        let (width, height) = self.presenter.surface_size();
-        let target = RenderTarget::new(width, height);
-        let stats = self
-            .renderer
-            .render(camera, &target)
-            .map_err(|error| (STEP_RENDER, error.to_string()))?;
-        self.draws = stats.draw_calls;
-        let texture = self.renderer.frame_texture().ok_or_else(|| {
-            (
-                STEP_RENDER,
-                "the renderer reported a frame but holds no frame texture".to_string(),
-            )
-        })?;
-        self.presenter
-            .present_texture(texture)
-            .map_err(|error| (STEP_PRESENT, error.to_string()))?;
-        self.last_error = None;
-        Ok(())
-    }
+    Ok(loaded)
 }
 
 // ---------------------------------------------------------------------------
@@ -623,6 +387,17 @@ fn live_status(session: &Session) -> String {
         "backend": info.backend,
         "adapter_name": info.name,
         "format": format!("{:?}", info.format),
+        // Which carrier draws this frame, and therefore where the session runs.
+        // `target` is the presenter's own diagnostic tag and `isolation` is derived
+        // from it (an `OffscreenCanvas` presenter can only exist inside a Worker —
+        // `surface::Surface::resolve` refuses the page case), so a host cannot be
+        // told `isolation: worker` by a main-thread session.
+        "target": info.target.as_str(),
+        "isolation": if info.target.is_worker() {
+            crate::capability::ISOLATION_WORKER
+        } else {
+            crate::capability::ISOLATION_MAIN_THREAD
+        },
         "physical": [width, height],
         "css": [session.metrics.css.0, session.metrics.css.1],
         "dpr": session.metrics.dpr,
@@ -634,36 +409,60 @@ fn live_status(session: &Session) -> String {
         "configure_count": session.presenter.configure_count(),
         "world_per_px": session.world_per_px(),
         "import_ms": session.import_ms,
+        "upload_chunks": session.upload_chunks,
+        "peak_batches_per_chunk": session.peak_batches_per_chunk,
+        "heap_after_open": session.heap_after_open,
+        "db_retained": session.db_retained,
     });
-    if let Some((step, message)) = &session.last_error {
-        status["step"] = serde_json::json!(step);
-        status["error"] = serde_json::json!(message);
-        if *step == STEP_WEBGL2 {
-            status["marker"] = serde_json::json!(WEBGL2_MARKER);
-        }
+    if let Some(failure) = &session.last_error {
+        apply_failure(&mut status, failure);
     }
     status.to_string()
 }
 
-fn failure_status(step: &str, message: &str) -> String {
+fn failure_status(failure: &Failure) -> String {
     let mut status = serde_json::json!({
         "ok": false,
-        "step": step,
-        "error": message,
         "backend": null,
         "adapter_name": null,
         "format": null,
+        // No session, so no carrier: explicit nulls, never a guessed isolation.
+        "target": null,
+        "isolation": null,
         "physical": null,
         "label": null,
         "bytes": 0,
         "batches": 0,
         "draws": 0,
         "presented": 0,
+        "upload_chunks": 0,
+        "peak_batches_per_chunk": 0,
+        "heap_after_open": null,
+        "db_retained": false,
     });
-    if step == STEP_WEBGL2 {
+    apply_failure(&mut status, failure);
+    status.to_string()
+}
+
+/// Add the stable failure vocabulary to a status object.
+///
+/// `step` + `error` are always present; a `webgl2` failure carries the
+/// `yacr: unsupported-runtime: webgl2` marker, and a `budget` failure carries the
+/// structured `{name, limit_bytes, measured_bytes}` of the budget that tripped —
+/// so a refusal is never a blank canvas and never a bare prose string.
+fn apply_failure(status: &mut serde_json::Value, failure: &Failure) {
+    status["step"] = serde_json::json!(failure.step);
+    status["error"] = serde_json::json!(failure.message);
+    if failure.step == STEP_WEBGL2 {
         status["marker"] = serde_json::json!(WEBGL2_MARKER);
     }
-    status.to_string()
+    if let Some(refusal) = &failure.budget {
+        status["budget"] = serde_json::json!({
+            "name": refusal.name,
+            "limit_bytes": refusal.limit_bytes,
+            "measured_bytes": refusal.measured_bytes,
+        });
+    }
 }
 
 /// The `document()` object with no live session: explicit nulls, no invented
@@ -678,199 +477,9 @@ fn empty_document() -> serde_json::Value {
         "bytes": 0,
         "import_ms": NO_MEASUREMENT,
         "wasm_heap_bytes": wasm_heap_bytes(),
+        "heap_after_open": null,
+        "upload_chunks": 0,
+        "peak_batches_per_chunk": 0,
+        "db_retained": false,
     })
-}
-
-/// The size of the module's **wasm linear memory**, in bytes, or `null` when the
-/// host does not expose it.
-///
-/// This is the module's own heap (`WebAssembly.Memory`), **not** process RSS:
-/// there is no process to measure in a browser tab, and the page owns memory this
-/// module cannot see. Record it as "wasm heap", never as resident memory.
-fn wasm_heap_bytes() -> Option<f64> {
-    let memory: js_sys::WebAssembly::Memory = wasm_bindgen::memory().dyn_into().ok()?;
-    let buffer: js_sys::ArrayBuffer = js_sys::WebAssembly::Memory::buffer(&memory)
-        .dyn_into()
-        .ok()?;
-    Some(f64::from(js_sys::ArrayBuffer::byte_length(&buffer)))
-}
-
-// ---------------------------------------------------------------------------
-// Plumbing
-// ---------------------------------------------------------------------------
-
-/// Record a fatal startup failure and turn it into the `Err` value the host sees.
-fn fail(step: &'static str, message: String) -> JsValue {
-    let status = failure_status(step, &message);
-    STATE.with(|cell| {
-        if let Ok(mut state) = cell.try_borrow_mut() {
-            *state = State::Failed(status);
-        }
-    });
-    rejection(step, &message)
-}
-
-/// Report an `open_bytes` failure that must not destroy a live session.
-///
-/// With a live session the failure is recorded on it — `status()`/`document()`
-/// then report the still-open file plus the failing step, and the canvas keeps
-/// its pixels — and nothing is disposed. Without one, the failure is an ordinary
-/// startup failure.
-fn document_failure(step: &'static str, message: &str) -> JsValue {
-    let recorded = STATE.with(|cell| match cell.try_borrow_mut() {
-        Ok(mut state) => match &mut *state {
-            State::Live(session) => {
-                session.last_error = Some((step, message.to_string()));
-                true
-            }
-            _ => false,
-        },
-        Err(_) => false,
-    });
-    if recorded {
-        return rejection(step, message);
-    }
-    fail(step, message.to_string())
-}
-
-/// The `Err` value for one failure: a message that names the step, echoed on the
-/// browser console so a caller that swallows the rejection still sees why.
-fn rejection(step: &str, message: &str) -> JsValue {
-    let text = format!("{step}: {message}");
-    web_sys::console::error_1(&JsValue::from_str(&text));
-    JsValue::from_str(&text)
-}
-
-/// Claim the single start slot for `start`.
-///
-/// `Idle` and `Failed` may start (a failed start is retried from scratch); an
-/// in-flight or live session refuses the second call, so one canvas has exactly
-/// one presenter even if the host calls `start` twice before the first await
-/// resolves.
-fn begin_start() -> Result<(), JsValue> {
-    STATE.with(|cell| match cell.try_borrow_mut() {
-        Ok(mut state) => {
-            if matches!(&*state, State::Idle | State::Failed(_)) {
-                *state = State::Starting;
-                return Ok(());
-            }
-            Err(rejection(
-                STEP_STATE,
-                "a canvas session is already starting or live; one canvas has exactly one presenter",
-            ))
-        }
-        Err(_) => Err(rejection(STEP_STATE, "the session state is already borrowed")),
-    })
-}
-
-/// Refuse `open_bytes` while another start/open is still in flight, without
-/// changing any state. Checked before the (expensive) geometry load.
-fn ensure_not_starting() -> Result<(), JsValue> {
-    STATE.with(|cell| match cell.try_borrow() {
-        Ok(state) => match &*state {
-            State::Starting => Err(rejection(
-                STEP_STATE,
-                "a canvas session is already starting or being replaced; await that call first",
-            )),
-            _ => Ok(()),
-        },
-        Err(_) => Err(rejection(
-            STEP_STATE,
-            "the session state is already borrowed",
-        )),
-    })
-}
-
-/// Move to `Starting` and dispose the previous session.
-///
-/// This is the one disposal point for a replacement: the old `Session` (renderer
-/// *and* canvas presenter, i.e. its surface) is dropped here, before the new
-/// presenter exists. So there is never a second presenter and never an
-/// unreleased surface.
-fn begin_replace() -> Result<(), JsValue> {
-    STATE.with(|cell| match cell.try_borrow_mut() {
-        Ok(mut state) => match std::mem::replace(&mut *state, State::Starting) {
-            State::Live(previous) => {
-                drop(previous);
-                Ok(())
-            }
-            // `Idle`/`Failed` have nothing to dispose; the replacement is the
-            // first session.
-            State::Idle | State::Failed(_) => Ok(()),
-            // Cannot happen (the caller checked `ensure_not_starting`), and it
-            // must not silently drop an in-flight start.
-            State::Starting => Err(rejection(
-                STEP_STATE,
-                "a canvas session is already starting or being replaced; await that call first",
-            )),
-        },
-        Err(_) => Err(rejection(
-            STEP_STATE,
-            "the session state is already borrowed",
-        )),
-    })
-}
-
-/// Publish the new session as the one live session.
-fn install_live(session: Session) {
-    STATE.with(|cell| {
-        if let Ok(mut state) = cell.try_borrow_mut() {
-            *state = State::Live(Box::new(session));
-        }
-    });
-}
-
-/// Publish one completed import measurement (see [`last_import_ms_impl`]).
-fn record_import(import_ms: f64) {
-    LAST_IMPORT_MS.with(|cell| cell.set(import_ms));
-}
-
-/// Run `action` on the live session, translating its failure into the exported
-/// error shape while keeping the session alive.
-fn with_live<T>(
-    action: impl FnOnce(&mut Session) -> Result<T, (&'static str, String)>,
-) -> Result<T, JsValue> {
-    STATE.with(|cell| match cell.try_borrow_mut() {
-        Ok(mut state) => match &mut *state {
-            State::Live(session) => match action(session) {
-                Ok(value) => Ok(value),
-                Err((step, message)) => {
-                    // A failed frame or navigation step is retryable: keep the
-                    // session and let `status()` keep reporting the failure.
-                    session.last_error = Some((step, message.clone()));
-                    Err(rejection(step, &message))
-                }
-            },
-            State::Idle => Err(rejection(
-                STEP_STATE,
-                "the canvas session has not started; call start() first",
-            )),
-            State::Starting => Err(rejection(
-                STEP_STATE,
-                "the canvas session is starting or being replaced; await that call first",
-            )),
-            State::Failed(_) => Err(rejection(
-                STEP_STATE,
-                "the canvas session failed to start; see status()",
-            )),
-        },
-        Err(_) => Err(rejection(
-            STEP_STATE,
-            "the session state is already borrowed",
-        )),
-    })
-}
-
-fn canvas_element(canvas_id: &str) -> Result<web_sys::HtmlCanvasElement, String> {
-    let window =
-        web_sys::window().ok_or_else(|| "the host page has no window object".to_string())?;
-    let document = window
-        .document()
-        .ok_or_else(|| "the host page has no document".to_string())?;
-    let element = document
-        .get_element_by_id(canvas_id)
-        .ok_or_else(|| format!("no element with id {canvas_id:?} in the host page"))?;
-    element
-        .dyn_into::<web_sys::HtmlCanvasElement>()
-        .map_err(|_| format!("element #{canvas_id} is not an HtmlCanvasElement"))
 }

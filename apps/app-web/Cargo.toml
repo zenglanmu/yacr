@@ -28,6 +28,10 @@ web-sys = { workspace = true, features = [
   "Document",
   "Element",
   "HtmlCanvasElement",
+  # The isolated carrier (ADR 0024 stage ⑧): the Worker receives an
+  # `OffscreenCanvas` the page transferred with `transferControlToOffscreen()`, and
+  # `worker_capability()` probes a 1x1 `OffscreenCanvas` for a WebGL2 context.
+  "OffscreenCanvas",
   "console",
 ] }
 # The CAD session itself: import → scene → renderer. `cad-render-wgpu` stays the

@@ -7,11 +7,14 @@
       `script-src 'self'`, both WebKitGTK 2.52.6 and Chromium 141 refuse the
       module ("'unsafe-eval' or 'wasm-unsafe-eval' is not an allowed source of
       script"). `connect-src` is what the wasm-bindgen `web` target needs to
-      fetch `pkg/app_web_bg.wasm`.
+      fetch `pkg/app_web_bg.wasm`. `worker-src 'self'` covers the isolated
+      carrier's module Worker (`./worker.js`), which loads the same module from
+      `./pkg/`; without it the worker inherits `script-src` and the session would
+      silently stay on the main thread.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; img-src 'self' data:"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>yacr — wasm CAD canvas</title>
@@ -23,6 +26,10 @@
       resolve it by id). Build layout: the wasm-bindgen output must be served from
       `./pkg/` (see main.js). Serve this directory over HTTP; `file://` cannot
       instantiate wasm.
+
+      The page transfers this canvas to a Worker on the isolated carrier
+      (`transferControlToOffscreen()`), so the same element is either the
+      main-thread presenter's canvas or the Worker's `OffscreenCanvas` — never both.
     -->
     <canvas id="cad-canvas"></canvas>
     <!--
