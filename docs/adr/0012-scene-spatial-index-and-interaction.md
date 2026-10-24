@@ -221,6 +221,24 @@ GPU 提交转向**CPU 侧场景组织与空间查询**：每帧遍历、可见�
      `ready.revision`/`scene_publication_revision` 语义不变，发布边界从**当前** overlay 重解析
      flags（worker 结果不会回退更新的 hover）。命中口径另按 AutoCAD 加**光圈粘滞**：光标未离开
      12 逻辑像素 pickbox 且 hover 身份（`SceneIdentity` + 图层覆盖指纹）未变时不重跑拾取。
+   - **S2 修订（2026-10-25，像素级复现 + 真机 P620/Vulkan）**：上面的 flags 快路径只覆盖**纯 hover**
+     （`hovered` 改变、几何 `Arc` 不变）。真实鼠标移动同时改变**光标 overlay**（crosshair/pickbox），
+     而 cursor 属于 `overlay_fingerprint` ⇒ `set_overlays` 走 `visual_changed` ⇒ `advance_input()`，
+     于是每个「处理了移动」的 tick 在 `render()` 时 `prepared_identity != input_revision`，落回
+     `base_only_navigation_eligible` → `render_base_only` → `suppress_overlays`：overlay 后缀被截断、
+     `applied_entity_flags`（**上一帧**的 flags）被重推、`applied_revision = None`。实测（4 条线夹具，
+     逐帧读回）：基线帧 bottom=`[187,187,187]`；每个移动 tick 都是
+     `complete=BaseOnlyPendingOverlays` 且 bottom 仍是 `[187,187,187]`（悬停高亮丢失）；停下一帧
+     `complete=CurrentScene` 且 bottom=`[108,174,187]`（高亮出现）。后果 = 被悬停图元随移动在
+     高亮/非高亮之间逐帧闪烁，且与图元数量无关。
+     **现行规则**：`suppress_overlays` / `render_base_only` / `overlays_suppressed` / `applied_entity_flags`
+     全部退役；overlay 后缀**永不截断**（suffix 是世界空间几何，任何 camera 下都成立）。strict gate 未满足
+     但底图仍 resident 时，呈现**完整 resident 场景**并标 `FrameCompleteness::PendingOverlayInputs`
+     （旧名 `BaseOnlyPendingOverlays` 的语义已不成立）；同时 `apply_ready_updates` 对 gate-stale 场景
+     只下发 **flags catch-up**（`apply_flags_catch_up`，几何不动），`set_overlays` 的 `visual_changed` 分支在
+     `flags_changed` 时先做一次同步 `refresh_flags_only`，因此悬停高亮不等待发布、也不会回退。
+     回归围栏：`crates/cad-engine/src/render/contracts/cursor_moves.rs`
+     （逐 tick 断言 tint 不回退、batch 数不降、suffix/uploads 不涨、基图元像素不变）。
 3. **S3 Snap 接线**：db 解析 `SnapTarget` → `collect_candidates`/`best_candidate` → 标记（引擎已存在，
    宿主未接）。
 4. **S4 索引与增量失效接入热路径**：落地 §7 的 chunk + local rstar，把 `filter_by_index` 接入生产的

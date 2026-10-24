@@ -77,7 +77,7 @@ pub(super) fn log_render_diagnostics(
         })
         .unwrap_or_else(|| "-".to_string());
     eprintln!(
-        "[probe] pan-wait gate={:?} lifecycle={} input_rev={} requested_token={} prepared_token={:?} prepared_identity={:?} view_rev={} ready_rev={:?} ready_base={:?} applied_rev={:?} applied_base={:?} resident_batches={} prep_busy={} upload={} upload_base_changed={:?} uploads_started={} upload_rev_resets={} ready_none_clears={} last_upload_reset={:?} suppressed={} grid_refresh_pending={} grid_refresh={} suffix_commits={} pulled_reuses={} pulled_rebuilds={} frames_rendered={} status={:?}",
+        "[probe] pan-wait gate={:?} lifecycle={} input_rev={} requested_token={} prepared_token={:?} prepared_identity={:?} view_rev={} ready_rev={:?} ready_base={:?} applied_rev={:?} applied_base={:?} resident_batches={} prep_busy={} upload={} upload_base_changed={:?} uploads_started={} upload_rev_resets={} ready_none_clears={} last_upload_reset={:?} grid_refresh_pending={} grid_refresh={} suffix_commits={} pulled_reuses={} pulled_rebuilds={} frames_rendered={} status={:?}",
         diagnostics.gate,
         diagnostics.lifecycle,
         diagnostics.input_revision,
@@ -97,7 +97,6 @@ pub(super) fn log_render_diagnostics(
         runtime.upload_revision_resets,
         runtime.ready_none_clears,
         runtime.last_upload_reset,
-        runtime.overlays_suppressed,
         diagnostics.grid_refresh_pending,
         diagnostics.grid_refresh,
         runtime.overlay_suffix_commits,
@@ -192,7 +191,7 @@ pub(super) fn cad_frame_log_state(
 pub(super) fn frame_completeness_label(completeness: FrameCompleteness) -> &'static str {
     match completeness {
         FrameCompleteness::CurrentScene => "current_scene",
-        FrameCompleteness::BaseOnlyPendingOverlays => "base_only_pending_overlays",
+        FrameCompleteness::PendingOverlayInputs => "pending_overlay_inputs",
     }
 }
 

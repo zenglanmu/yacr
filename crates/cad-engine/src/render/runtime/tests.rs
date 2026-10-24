@@ -295,30 +295,27 @@ fn prepared_scene(revision: u64, base_revision: u64, flags_revision: u64) -> Pre
 }
 
 #[test]
-fn flags_delta_applies_only_over_a_committed_or_suppressed_scene() {
+fn flags_delta_applies_only_over_a_committed_scene() {
     let scene = prepared_scene(7, 3, 5);
-    assert!(flags_delta_applies(Some(7), Some(4), false, false, &scene));
+    assert!(flags_delta_applies(Some(7), Some(4), false, &scene));
     assert!(
-        flags_delta_applies(None, Some(4), false, true, &scene),
-        "the suppressed base-only scene still takes the flags delta"
-    );
-    assert!(
-        !flags_delta_applies(Some(7), Some(5), false, false, &scene),
+        !flags_delta_applies(Some(7), Some(5), false, &scene),
         "the same flags revision is a no-op"
     );
     assert!(
-        !flags_delta_applies(Some(6), Some(4), false, false, &scene),
+        !flags_delta_applies(Some(6), Some(4), false, &scene),
         "a new scene revision must take the upload path (F4)"
     );
     assert!(
-        !flags_delta_applies(Some(7), Some(4), true, false, &scene),
+        !flags_delta_applies(Some(7), Some(4), true, &scene),
         "a pending upload keeps the upload path"
     );
     assert!(
-        !flags_delta_applies(None, Some(4), false, false, &scene),
-        "no applied scene and no suppression means no flags delta"
+        !flags_delta_applies(None, Some(4), false, &scene),
+        "no committed scene means no flags delta (a gate-stale scene uses the \
+         flags catch-up instead, never this path)"
     );
-    assert!(!flags_delta_applies(None, None, false, false, &scene));
+    assert!(!flags_delta_applies(None, None, false, &scene));
 }
 
 /// A worker publication that lands after a synchronous flags refresh must not

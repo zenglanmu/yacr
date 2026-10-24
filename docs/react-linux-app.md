@@ -296,9 +296,10 @@ body 内，Escape/点击外部关闭）；DOM-on-top 之后这不再是硬约束
   `SELECTIONPREVIEWLIMIT` 式预览上限、`PREVIEWFILTER` 的锁定图层/xref 排除、Secondary 拖拽的右键菜单。
 - **只读**：不写回 DWG；未知命令走既有 not supported 路径，不空成功。
 - 语言切换（chrome 文案）已接线；**运行时语言切换不重排 Rust 宿主的宿主侧字符串**（见限制）。
-- 导航复用**同一权威底图**（GPU-resident、同一 DB revision）；拖拽期间 overlay 后缀可经显式
-  `FrameCompleteness::BaseOnlyPendingOverlays` **临时省略**（非静默），`PresentedFrame.view_revision`
-  = 实际 camera。
+- 导航复用**同一权威底图**（GPU-resident、同一 DB revision）；新 overlay 输入未提交时呈现完整
+  resident 场景并以 `FrameCompleteness::PendingOverlayInputs` 显式标记（2026-10-25 更正：后缀**不再**
+  截断/省略，旧 `BaseOnlyPendingOverlays` 行为导致悬停图元在鼠标移动时闪烁），
+  `PresentedFrame.view_revision` = 实际 camera。
 
 ## 原生文件选择器（portal helper）与授权
 

@@ -492,16 +492,20 @@ fn current_ready_scene(state: &State) -> Option<&controller::PreparedScene> {
         .and(state.controller.ready.as_ref())
 }
 
-/// Narrow qualifier for the 2D navigation fallback.
+/// Narrow qualifier for presenting the resident scene while newer overlay inputs
+/// are still pending.
 ///
 /// It holds only when the *base* drawing is provably unchanged and fully
-/// resident while preparation lags: the view is a valid 2D camera, the latest
-/// base input identity equals the last published one (so no new database, space,
-/// layer, font, image or resource identity is pending), and the GPU holds the
-/// latest published base with no pending base replacement. Everything that could
-/// make the resident geometry stale (new/unuploaded base, device change) fails
-/// this predicate, so the fallback can only ever draw the authoritative base.
-fn base_only_navigation_eligible(state: &State) -> bool {
+/// resident: the view is a valid 2D camera, the latest base input identity equals
+/// the last published one (so no new database, space, layer, font, image or
+/// resource identity is pending), and the GPU holds the latest published base
+/// with no pending base replacement. Everything that could make the resident
+/// geometry stale (new/unuploaded base, device change) fails this predicate, so
+/// the frame can only ever draw the authoritative base. Overlay-suffix freshness
+/// is **not** a condition: the suffix is world-space geometry that stays valid
+/// under any camera, so presenting it one publication behind is always better
+/// than truncating it (a plain cursor move changes exactly that suffix).
+fn resident_scene_presentable(state: &State) -> bool {
     if state.stopped {
         return false;
     }

@@ -64,10 +64,8 @@ impl CadRenderRuntime {
         self.base_batches = 0;
         self.lifecycle = RenderLifecycle::Detached;
         self.diagnostic = None;
-        self.overlays_suppressed = false;
         self.overlay_suffix_commits = 0;
         self.applied_highlight = None;
-        self.applied_entity_flags = Vec::new();
         self.image_diagnostic = None;
         self.flags_diagnostic = None;
         self.uploads_started = 0;
@@ -118,13 +116,12 @@ impl CadRenderRuntime {
         // publication keeps the scene revision, so this must be evaluated
         // BEFORE the `applied_revision == Some(ready.revision)` early return:
         // otherwise the new flags would be silently skipped. Only the entity
-        // flags are pushed — no batch, stream or chunk is re-uploaded, and the
-        // overlay suffix stays resident (no suppression, no base-only frame).
+        // flags are pushed — no batch, stream or chunk is re-uploaded and the
+        // overlay suffix stays resident.
         if flags_delta_applies(
             self.applied_revision,
             self.applied_flags_revision,
             self.pending_upload.is_some(),
-            self.overlays_suppressed,
             ready,
         ) {
             let report = self
@@ -132,9 +129,6 @@ impl CadRenderRuntime {
                 .as_mut()
                 .expect("ready renderer")
                 .set_entity_flags(&ready.entity_flags)?;
-            // Retain the applied flags so the 2D navigation fallback can
-            // re-assert them after its truncating commit.
-            self.applied_entity_flags = ready.entity_flags.clone();
             self.applied_flags_revision = Some(ready.flags_revision);
             self.flags_diagnostic = flags_diagnostic(&report.unmatched);
             // Never wipe a still-relevant image diagnostic: merge.
@@ -156,19 +150,12 @@ impl CadRenderRuntime {
         // a batch, stream or chunk.
         let overlay_reused =
             overlay_identity_matches(self.applied_highlight.as_ref(), &ready.highlight);
-        if !base_changed
-            && overlay_reused
-            && self.pending_upload.is_none()
-            && !self.overlays_suppressed
-        {
+        if !base_changed && overlay_reused && self.pending_upload.is_none() {
             let report = self
                 .renderer
                 .as_mut()
                 .expect("ready renderer")
                 .set_entity_flags(&ready.entity_flags)?;
-            // Retain the applied flags so the 2D navigation fallback can
-            // re-assert them after its truncating commit.
-            self.applied_entity_flags = ready.entity_flags.clone();
             self.flags_diagnostic = flags_diagnostic(&report.unmatched);
             self.applied_revision = Some(ready.revision);
             self.applied_flags_revision = Some(ready.flags_revision);
@@ -352,18 +339,12 @@ impl CadRenderRuntime {
         // renderer also re-applies its retained request on the rebuild; this call
         // surfaces the unmatched refs so the runtime can report them.
         let flag_report = renderer.set_entity_flags(&ready.entity_flags)?;
-        // Retain the applied flags so the 2D navigation fallback can re-assert
-        // them after its truncating commit.
-        self.applied_entity_flags = ready.entity_flags.clone();
         // Publication follows successful GPU preparation/commit, never precedes it.
         self.base_batches = ready.base.added.len();
         self.applied_base = Some(ready.base_revision);
         self.applied_revision = Some(ready.revision);
         self.applied_flags_revision = Some(ready.flags_revision);
         self.applied_highlight = Some(ready.highlight.clone());
-        // A committed full scene restores the transient overlay suffix, so the
-        // base-only fallback is no longer active.
-        self.overlays_suppressed = false;
         self.dirty.invalidate();
         self.image_diagnostic = image_diagnostic;
         self.flags_diagnostic = flags_diagnostic(&flag_report.unmatched);
@@ -404,13 +385,8 @@ impl CadRenderRuntime {
         self.renderer.as_ref().and_then(Renderer::frame_progress)
     }
 
-    /// Whether the 2D navigation fallback is currently withholding overlays.
-    pub fn overlays_suppressed(&self) -> bool {
-        self.overlays_suppressed
-    }
-
-    /// Cumulative overlay-suffix commits (suffix-only uploads and fallback
-    /// truncations). Camera-only navigation must leave this flat.
+    /// Cumulative overlay-suffix commits (suffix-only uploads). Camera-only
+    /// navigation must leave this flat.
     pub fn overlay_suffix_commits(&self) -> u64 {
         self.overlay_suffix_commits
     }
@@ -587,7 +563,6 @@ impl CadRenderRuntime {
                     offset: pending.offset,
                     base_changed: pending.base_changed,
                 }),
-            overlays_suppressed: self.overlays_suppressed,
             overlay_suffix_commits: self.overlay_suffix_commits,
             pulled_prefix_reuses: self
                 .renderer
@@ -609,8 +584,9 @@ impl CadRenderRuntime {
     /// The latest published base is fully resident on the GPU: the device is
     /// ready, the applied base revision matches `base_publication_revision`, and
     /// no pending upload is replacing the base. This is the narrow qualifier that
-    /// lets a base-only frame stand in for the full scene during 2D navigation
-    /// without ever re-uploading base geometry.
+    /// lets the resident scene be presented while newer overlay inputs are still
+    /// preparing, and that lets the flags catch-up resolve refs against resident
+    /// pick keys — without ever re-uploading or re-committing base geometry.
     pub fn base_fully_resident(&self, base_publication_revision: u64) -> bool {
         matches!(self.lifecycle, RenderLifecycle::Ready { .. })
             && self.applied_base == Some(base_publication_revision)
@@ -620,51 +596,37 @@ impl CadRenderRuntime {
                 .is_none_or(|pending| !pending.base_changed)
     }
 
-    /// Drop the stale transient overlay suffix while keeping the base drawing
-    /// buffers. Runs at most once per fallback entry; a later full-scene commit
-    /// restores the suffix from the same base prefix (`base_batches`).
+    /// Push **only** the entity-level flags of a published scene whose geometry
+    /// is gate-stale (newer overlay inputs are still preparing), so the hover /
+    /// selection tint never waits for the next publication and can never revert
+    /// to an older set while the cursor moves.
     ///
-    /// `prepare_upload_batches(&[])` stages zero bytes, so this re-upload of the
-    /// base is impossible by construction: only the replaceable suffix after
-    /// `base_batches` is truncated.
-    ///
-    /// The commit can transiently leave the renderer with an **empty** resident
-    /// set (a zero-batch base), which restarts its pick key space. The last
-    /// applied entity flags are therefore re-pushed afterwards, exactly as
-    /// [`Self::apply_ready_updates`] does on a commit: a camera-only fallback is
-    /// not a scene mutation, so the selection tint must survive it, and an
-    /// unmatched ref is reported rather than silently dropped. Re-pushing the
-    /// unchanged set writes no flags row (the renderer diffs), so a normal
-    /// fallback entry costs no GPU upload.
-    fn suppress_overlays(&mut self) -> Result<(), RenderError> {
-        // Cloned before the renderer borrow (it is the flags the runtime last
-        // pushed; the controller remains the sole producer).
-        let flags = self.applied_entity_flags.clone();
-        let renderer = self
+    /// Safety: it never touches geometry. It applies only when the device is
+    /// ready, no upload is in flight, and the published scene's base is exactly
+    /// the resident base (`base_fully_resident`) — so the pick keys the refs
+    /// resolve against are the resident ones. `flags_revision` is monotonic in
+    /// the controller, and an already-applied revision is a no-op.
+    pub fn apply_flags_catch_up(
+        &mut self,
+        base_revision: u64,
+        flags: &[(SelectionRef, u32)],
+        flags_revision: u64,
+    ) -> CadResult<()> {
+        if !matches!(self.lifecycle, RenderLifecycle::Ready { .. })
+            || self.pending_upload.is_some()
+            || !self.base_fully_resident(base_revision)
+            || self.applied_flags_revision == Some(flags_revision)
+        {
+            return Ok(());
+        }
+        let report = self
             .renderer
             .as_mut()
-            .ok_or_else(|| RenderError::NotInitialized("renderer not initialized".into()))?;
-        let empty = renderer
-            .prepare_upload_batches(&[])
-            .map_err(|error| RenderError::Frame(error.to_string()))?;
-        renderer
-            .commit_upload(empty, self.base_batches)
-            .map_err(|error| RenderError::Frame(error.to_string()))?;
-        // Record the truncation-derived state **before** the flags re-push, so a
-        // flags failure still leaves the runtime consistent with the dropped
-        // suffix (a later full commit restores both).
-        self.overlays_suppressed = true;
-        self.overlay_suffix_commits += 1;
-        // The discarded suffix upload (if any) is overlay-only by the
-        // `base_fully_resident` qualifier; the full scene re-commits it.
-        self.pending_upload = None;
-        // The presented frame is no longer the full current scene.
-        self.applied_revision = None;
-        self.presented_revision = None;
-        let flag_report = renderer
-            .set_entity_flags(&flags)
-            .map_err(|error| RenderError::Frame(error.to_string()))?;
-        self.flags_diagnostic = flags_diagnostic(&flag_report.unmatched);
+            .expect("ready renderer")
+            .set_entity_flags(flags)?;
+        self.applied_flags_revision = Some(flags_revision);
+        self.flags_diagnostic = flags_diagnostic(&report.unmatched);
+        // Never wipe a still-relevant image diagnostic: merge.
         self.diagnostic = merge_diagnostics(
             self.image_diagnostic.as_deref(),
             self.flags_diagnostic.as_deref(),
@@ -673,44 +635,21 @@ impl CadRenderRuntime {
         Ok(())
     }
 
+    /// Render the resident scene. `completeness` is the caller's honest label for
+    /// what this frame represents: [`FrameCompleteness::CurrentScene`] when the
+    /// latest published scene is committed, [`FrameCompleteness::PendingOverlayInputs`]
+    /// when newer transient overlay inputs are still preparing. The frame always
+    /// shows the **whole** resident scene — the overlay suffix is never truncated
+    /// (a plain cursor move must not drop the cursor/tint it is updating).
     pub fn render_if_dirty(
         &mut self,
         view: &ViewSnapshot,
         logical: [f64; 2],
         scale: f64,
         view_revision: u64,
+        completeness: FrameCompleteness,
     ) -> Result<Option<PresentedFrame>, RenderError> {
-        let completeness = if self.overlays_suppressed {
-            FrameCompleteness::BaseOnlyPendingOverlays
-        } else {
-            FrameCompleteness::CurrentScene
-        };
         self.render_frame(view, logical, scale, view_revision, completeness)
-    }
-
-    /// Render the base-only navigation frame over the latest authoritative
-    /// camera. The caller has already verified that the published base is fully
-    /// resident and that only view/overlay inputs are pending.
-    pub fn render_base_only(
-        &mut self,
-        view: &ViewSnapshot,
-        logical: [f64; 2],
-        scale: f64,
-        view_revision: u64,
-    ) -> Result<Option<PresentedFrame>, RenderError> {
-        if !matches!(self.lifecycle, RenderLifecycle::Ready { .. }) {
-            return Ok(None);
-        }
-        if !self.overlays_suppressed {
-            self.suppress_overlays()?;
-        }
-        self.render_frame(
-            view,
-            logical,
-            scale,
-            view_revision,
-            FrameCompleteness::BaseOnlyPendingOverlays,
-        )
     }
 
     fn render_frame(

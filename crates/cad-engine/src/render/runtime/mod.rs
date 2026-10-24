@@ -198,8 +198,6 @@ pub struct RuntimeDiagnostics {
     pub uploading: bool,
     /// The in-flight upload, if any.
     pub upload: Option<UploadDiagnostics>,
-    /// Whether the 2D navigation fallback is withholding overlays.
-    pub overlays_suppressed: bool,
     /// Cumulative overlay-suffix commits.
     pub overlay_suffix_commits: u64,
     /// Cumulative pulled-prefix **reuses** (the accelerator retained the base
@@ -276,16 +274,17 @@ pub struct FrameBinding {
 /// still be accumulating (and `current_drawing_presented` stays false until it
 /// completes, via `presented_revision`).
 ///
-/// [`FrameCompleteness::BaseOnlyPendingOverlays`] is the explicit, non-silent
-/// marker for the narrow 2D navigation fallback: the base drawing is the latest
-/// authoritative base and is still fully uploaded, but its overlay suffix
-/// (grid/axes/highlight/snap/crosshair/measurement/draw preview) is deliberately
-/// withheld until preparation catches up. It is never a claim that the current
-/// scene is complete.
+/// [`FrameCompleteness::PendingOverlayInputs`] is the explicit, non-silent
+/// marker for a frame that presents the **latest published** scene while newer
+/// overlay inputs (cursor crosshair/pickbox, snap hints, previews, sub-element
+/// highlight, grid extent) are still being prepared and uploaded. The resident
+/// scene is complete and fully drawn — nothing is truncated or hidden — but the
+/// newest transient overlay inputs are not on screen yet. It is never a claim
+/// that the newest inputs are presented.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameCompleteness {
     CurrentScene,
-    BaseOnlyPendingOverlays,
+    PendingOverlayInputs,
 }
 
 pub struct PresentedFrame {
@@ -340,12 +339,8 @@ pub struct CadRenderRuntime {
     pub frames_rendered: u64,
     pending_upload: Option<PendingUpload>,
     pub presented_revision: Option<u64>,
-    /// True while the 2D navigation fallback has dropped the transient overlay
-    /// suffix from the GPU and is drawing the base-only scene over the latest
-    /// authoritative camera. Cleared by a successful full-scene publication.
-    overlays_suppressed: bool,
-    /// Cumulative overlay-suffix commits (suffix-only uploads and fallback
-    /// truncations). A camera-only navigation must leave this flat.
+    /// Cumulative overlay-suffix commits (suffix-only uploads). A camera-only
+    /// navigation must leave this flat.
     overlay_suffix_commits: u64,
     /// The last committed overlay delta, retained by strong reference.
     ///
@@ -359,12 +354,6 @@ pub struct CadRenderRuntime {
     /// upload and mark the stale scene current. The strong reference also keeps
     /// the address alive, so `Arc::ptr_eq` cannot observe an ABA reuse.
     applied_highlight: Option<Arc<SceneDelta>>,
-    /// The entity-flag set the runtime last pushed to the renderer, retained so
-    /// the 2D navigation fallback can **re-assert** it after its truncating
-    /// commit (see [`Self::suppress_overlays`]). This is a re-assertion mirror of
-    /// the last applied `PreparedScene::entity_flags`, never a second truth: the
-    /// controller remains the sole producer of the flags.
-    applied_entity_flags: Vec<(SelectionRef, u32)>,
     /// Diagnostic from the last base-change image upload (`None` when every image
     /// resolved). Kept separate from the flags diagnostic so a flags-only update
     /// does not wipe a still-relevant image diagnostic.
@@ -409,10 +398,8 @@ impl Default for CadRenderRuntime {
             frames_rendered: 0,
             pending_upload: None,
             presented_revision: None,
-            overlays_suppressed: false,
             overlay_suffix_commits: 0,
             applied_highlight: None,
-            applied_entity_flags: Vec::new(),
             image_diagnostic: None,
             flags_diagnostic: None,
             uploads_started: 0,
@@ -443,20 +430,21 @@ fn overlay_identity_matches(
 
 /// Whether a ready scene is a **flags-only** delta over what the GPU already has.
 ///
-/// True only when the committed scene revision is still current (or the 2D
-/// fallback holds the base with the suffix suppressed) and no upload is in
-/// flight. A `ready.revision` that is not yet applied takes the upload path: its
-/// geometry has to be committed first, and it always re-pushes the flags.
+/// True only when the committed scene revision is still current and no upload is
+/// in flight. A `ready.revision` that is not yet applied takes the upload path:
+/// its geometry has to be committed first, and it always re-pushes the flags.
+/// A gate-stale scene never reaches this path; its entity flags go through
+/// [`CadRenderRuntime::apply_flags_catch_up`] instead, which never touches
+/// geometry.
 fn flags_delta_applies(
     applied_revision: Option<u64>,
     applied_flags_revision: Option<u64>,
     pending_upload: bool,
-    overlays_suppressed: bool,
     ready: &PreparedScene,
 ) -> bool {
     applied_flags_revision != Some(ready.flags_revision)
         && !pending_upload
-        && (applied_revision == Some(ready.revision) || overlays_suppressed)
+        && applied_revision == Some(ready.revision)
 }
 
 /// The `flags.unresolved` diagnostic for the refs an entity-flag apply could not

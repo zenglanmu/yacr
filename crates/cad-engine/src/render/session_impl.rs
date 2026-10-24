@@ -184,7 +184,15 @@ impl RenderSessionHandle {
             state.advance_content();
         } else if visual_changed {
             // Real overlay batches changed (sub-element highlight, previews,
-            // snap hints, visibility): today's full immediate path.
+            // snap hints, cursor crosshair/pickbox, visibility): today's full
+            // immediate path. When the same change also moves the entity-level
+            // hover/selection/hidden set, resolve that flags delta synchronously
+            // first: the pending frame then pushes it via the runtime's flags
+            // catch-up instead of waiting for the publication, so the tint never
+            // lags a moving cursor (and never reverts to an older set).
+            if flags_changed {
+                state.refresh_flags_only();
+            }
             state.advance_input();
         } else if flags_changed {
             // Entity-level selection/hover/hidden only. Advance a separate flags
@@ -341,10 +349,6 @@ impl RenderSessionHandle {
         if !Self::preparation_current_state(&state) {
             return false;
         }
-        // A base-only navigation frame is never the presented current drawing.
-        if state.runtime.overlays_suppressed() {
-            return false;
-        }
         state.runtime.presented_revision.is_some_and(|revision| {
             state
                 .controller
@@ -368,10 +372,6 @@ impl RenderSessionHandle {
     /// on an actual view change; presented frames are tagged with it.
     pub fn view_revision(&self) -> u64 {
         self.0.borrow().view_revision
-    }
-    /// Whether the 2D navigation fallback is currently withholding overlays.
-    pub fn overlays_suppressed(&self) -> bool {
-        self.0.borrow().runtime.overlays_suppressed()
     }
     /// Whether a camera-only (pan/zoom/rotate) reference-grid refresh is deferred
     /// until the navigation settles. Honest: it is `true` only while the current
@@ -654,8 +654,36 @@ impl RenderSessionHandle {
     pub fn apply_ready_updates(&self) -> CadResult<()> {
         let mut state = self.0.borrow_mut();
         state.observe_drawing();
-        let ready = current_ready_scene(&state).cloned();
-        state.runtime.apply_ready_updates(ready.as_ref())
+        if let Some(ready) = current_ready_scene(&state).cloned() {
+            return state.runtime.apply_ready_updates(Some(&ready));
+        }
+        // Gate-stale scene (newer overlay inputs are still preparing): its
+        // geometry must not be uploaded, so the superseded in-flight upload is
+        // dropped exactly as before. Its `entity_flags`, however, are the
+        // synchronously re-resolved current set, so that delta is still pushed —
+        // the hover/selection tint then never reverts to an older set and never
+        // waits for the next publication while the cursor moves.
+        state.runtime.apply_ready_updates(None)?;
+        let catch_up = state
+            .controller
+            .ready
+            .as_ref()
+            .filter(|ready| state.runtime.base_fully_resident(ready.base_revision))
+            .map(|ready| {
+                (
+                    ready.base_revision,
+                    ready.entity_flags.clone(),
+                    ready.flags_revision,
+                )
+            });
+        match catch_up {
+            Some((base_revision, flags, flags_revision)) => {
+                state
+                    .runtime
+                    .apply_flags_catch_up(base_revision, &flags, flags_revision)
+            }
+            None => Ok(()),
+        }
     }
 
     pub fn render(
@@ -680,19 +708,32 @@ impl RenderSessionHandle {
                 None => false,
             };
             if committed {
-                return state
-                    .runtime
-                    .render_if_dirty(&view, logical, scale, view_revision);
+                return state.runtime.render_if_dirty(
+                    &view,
+                    logical,
+                    scale,
+                    view_revision,
+                    FrameCompleteness::CurrentScene,
+                );
             }
         }
-        // Strict gate is not met (or the ready scene is not yet GPU-committed).
-        // Enter the narrow 2D navigation fallback only when the authoritative base
-        // is unchanged and fully resident; render the latest camera over the base
-        // while overlays wait. Never a new/uncommitted base.
-        if base_only_navigation_eligible(&state) {
-            return state
-                .runtime
-                .render_base_only(&view, logical, scale, view_revision);
+        // The strict gate is not met: newer transient overlay inputs (cursor
+        // crosshair/pickbox, snap hints, previews, sub-element highlight, grid
+        // extent) are still being prepared. Present the **resident** scene — the
+        // whole thing, suffix included — over the latest camera and label it
+        // honestly. A plain cursor move must never truncate the overlay suffix it
+        // is updating: that dropped the cursor and reverted the hover tint to an
+        // older set for one frame, which is the entity flicker this path used to
+        // cause. Only a base that is not resident is a strict wait (never a
+        // new/uncommitted base).
+        if resident_scene_presentable(&state) {
+            return state.runtime.render_if_dirty(
+                &view,
+                logical,
+                scale,
+                view_revision,
+                FrameCompleteness::PendingOverlayInputs,
+            );
         }
         Ok(None)
     }

@@ -170,7 +170,10 @@ fn flags_only_selection_hover_and_hidden_never_defer_or_invalidate() {
     let armed = session.diagnostics();
     let scene_before = session.current_prepared_scene().expect("published scene");
     let suffix_before = session.overlay_suffix_commits();
-    assert!(!session.overlays_suppressed());
+    assert!(
+        session.preparation_current(),
+        "an armed camera settle keeps the published scene current"
+    );
 
     // Whole-entity selection is the flags path: it changes no overlay batch, so
     // it must not advance the scene identity or the preparation token, must not
@@ -199,8 +202,11 @@ fn flags_only_selection_hover_and_hidden_never_defer_or_invalidate() {
         "a flags-only selection must not republish the scene"
     );
     assert!(
-        !session.overlays_suppressed(),
-        "a flags-only selection must not enter the base-only fallback"
+        Arc::ptr_eq(
+            &scene_before.highlight,
+            &session.current_prepared_scene().expect("scene").highlight
+        ),
+        "a flags-only selection must reuse the published overlay geometry, not rebuild it"
     );
     assert_eq!(
         session.overlay_suffix_commits(),

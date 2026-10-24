@@ -111,8 +111,8 @@ fn cad_frame_log_state_never_claims_a_present_for_unknown_or_waiting() {
         "current_scene"
     );
     assert_eq!(
-        frame_completeness_label(FrameCompleteness::BaseOnlyPendingOverlays),
-        "base_only_pending_overlays"
+        frame_completeness_label(FrameCompleteness::PendingOverlayInputs),
+        "pending_overlay_inputs"
     );
     assert_eq!(opt_telemetry_u64(None), "-");
     assert_eq!(opt_telemetry_u64(Some(3)), "3");

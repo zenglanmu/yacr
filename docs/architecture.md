@@ -126,7 +126,8 @@ traits 是契约草案（0.1），实现前可通过 ADR 修正不足，不代�
   实际源码能力支持（缩放/平移/fit）。**不新增投机 IPC**；需要 payload 的命令经真实漏斗显式拒绝，
   绝不空成功。**不是完整 CAD 产品**。
 - **不变量不变**：单 presenter per drawable、renderer-only wgpu、db 唯一权威、无整幅回读；
-  `FrameCompleteness::BaseOnlyPendingOverlays` 可**临时**省略 overlay 后缀（显式标记，非静默）。
+  overlay 后缀**不再截断**（2026-10-25 更正）：新输入未提交时呈现完整 resident 场景并以
+  `FrameCompleteness::PendingOverlayInputs` 显式标记（非静默）；实体 flags 经独立 catch-up 增量。
 
 ## 历史（已退役 / 被取代）
 

@@ -4,10 +4,16 @@ use super::*;
 // Hardware GPU proof (ignored; real adapter).
 // ---------------------------------------------------------------------------
 
+/// DETERMINISTIC HARDWARE: while newer overlay inputs are still preparing, the
+/// session presents the whole resident scene (suffix included, never truncated)
+/// over the latest camera and labels the frame `PendingOverlayInputs`. The suffix
+/// batch set, the uploaded bytes and the suffix-commit counter all stay flat
+/// through the pending window; the publication that follows is one real suffix
+/// commit over the same resident base.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 #[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
-fn base_only_navigation_renders_latest_camera_and_restores_overlays() {
+fn pending_overlay_inputs_keep_the_resident_suffix() {
     let session = RenderSessionHandle::new(BackendPreference::Auto);
     let gpu = headless_gpu();
     session.attach_device(gpu.device, gpu.queue).unwrap();
@@ -18,7 +24,10 @@ fn base_only_navigation_renders_latest_camera_and_restores_overlays() {
         .unwrap();
     session.sync_drawing(Some(drawing));
     session.prepare().unwrap();
-    session.apply_ready_updates().unwrap();
+    // A single chunked pass is not guaranteed to commit under load (the real
+    // 8 ms staging budget can break it early); drive the upload to completion so
+    // the committed-scene precondition is deterministic.
+    drive_uploads(&session);
 
     let base_pub = session.0.borrow().base_publication_revision;
     let base_batches = session.0.borrow().runtime.base_batches_for_test();
@@ -28,6 +37,7 @@ fn base_only_navigation_renders_latest_camera_and_restores_overlays() {
         "the demo drawing has an axes/grid overlay suffix ({full_batches} vs {base_batches})"
     );
     let uploaded_full = cumulative_upload_bytes(&session);
+    let suffix_commits_full = session.overlay_suffix_commits();
 
     // The full current scene is presented and honestly tagged.
     let full_frame = session
@@ -37,12 +47,13 @@ fn base_only_navigation_renders_latest_camera_and_restores_overlays() {
     assert_eq!(full_frame.completeness, FrameCompleteness::CurrentScene);
     assert!(session.current_drawing_presented());
     let view_rev_0 = full_frame.view_revision;
+    assert_eq!(session.overlay_suffix_commits(), suffix_commits_full);
 
     // A camera drag alone no longer makes preparation stale: camera-only changes
-    // keep the published scene current. The fallback is entered by a real overlay
-    // input change (which rebuilds the reference overlay) while the base stays
-    // unchanged and resident. The visibility flag toggled here produces no batches
-    // for this drawing, so the batch-count comparisons stay valid.
+    // keep the published scene current. The pending window is entered by a real
+    // overlay input change (which rebuilds the reference overlay) while the base
+    // stays unchanged and resident. The visibility flag toggled here produces no
+    // batches for this drawing, so the batch-count comparisons stay valid.
     let mut view = session.view_snapshot();
     view.camera.target.x += 250.0;
     session.apply_view_snapshot(view.clone()).unwrap();
@@ -55,90 +66,112 @@ fn base_only_navigation_renders_latest_camera_and_restores_overlays() {
     assert!(session.set_overlays(overlays));
     assert!(!session.preparation_current());
 
-    let base_frame = session
+    let pending_frame = session
         .render([800.0, 600.0], 1.0)
         .unwrap()
-        .expect("base-only frame");
+        .expect("pending-overlay frame");
     assert_eq!(
-        base_frame.completeness,
-        FrameCompleteness::BaseOnlyPendingOverlays
+        pending_frame.completeness,
+        FrameCompleteness::PendingOverlayInputs,
+        "the newest overlay inputs are not presented yet"
     );
     assert!(
-        base_frame.view_revision > view_rev_0,
+        pending_frame.view_revision > view_rev_0,
         "latest view is tagged"
     );
-    assert!(session.overlays_suppressed());
     assert!(
         !session.current_drawing_presented(),
-        "a base-only frame is not the presented current drawing"
+        "a pending-overlay frame is not the presented current drawing"
     );
     assert_eq!(
         renderer_batch_count(&session),
-        base_batches,
-        "the stale overlay suffix is cleared, the base prefix preserved"
+        full_batches,
+        "the resident overlay suffix is kept, never truncated"
     );
     assert_eq!(runtime_applied_base(&session), Some(base_pub));
     assert_eq!(
         cumulative_upload_bytes(&session),
         uploaded_full,
-        "entering the fallback uploads zero bytes (empty suffix commit)"
+        "entering the pending window uploads zero bytes"
+    );
+    assert_eq!(
+        session.overlay_suffix_commits(),
+        suffix_commits_full,
+        "entering the pending window commits no overlay suffix"
     );
 
-    // Further camera updates keep rendering the latest view with no re-upload.
+    // Further camera updates keep presenting the latest view over the same
+    // resident scene: still no truncation, no upload and no suffix commit.
     let mut view2 = session.view_snapshot();
     view2.camera.target.x += 250.0;
     session.apply_view_snapshot(view2).unwrap();
-    let base_frame2 = session
+    let pending_frame2 = session
         .render([800.0, 600.0], 1.0)
         .unwrap()
-        .expect("second base-only frame");
+        .expect("second pending-overlay frame");
     assert_eq!(
-        base_frame2.completeness,
-        FrameCompleteness::BaseOnlyPendingOverlays
+        pending_frame2.completeness,
+        FrameCompleteness::PendingOverlayInputs
     );
-    assert!(base_frame2.view_revision > base_frame.view_revision);
-    assert_eq!(renderer_batch_count(&session), base_batches);
+    assert!(pending_frame2.view_revision > pending_frame.view_revision);
+    assert_eq!(renderer_batch_count(&session), full_batches);
     assert_eq!(runtime_applied_base(&session), Some(base_pub));
-    let uploaded_after_suppression = cumulative_upload_bytes(&session);
-    assert_eq!(uploaded_after_suppression, uploaded_full);
+    assert_eq!(
+        cumulative_upload_bytes(&session),
+        uploaded_full,
+        "the pending window never re-uploads the scene it already holds"
+    );
+    assert_eq!(
+        session.overlay_suffix_commits(),
+        suffix_commits_full,
+        "the pending window never commits a suffix"
+    );
 
-    // Preparation catches up: the overlay suffix is restored from the same base.
+    // Preparation catches up: one real suffix commit over the same resident base,
+    // with no truncate/restore churn.
     session.prepare().unwrap();
     assert!(session.preparation_current());
     session.apply_ready_updates().unwrap();
-    assert!(!session.overlays_suppressed());
+    assert_eq!(
+        session.overlay_suffix_commits(),
+        suffix_commits_full + 1,
+        "the publication is exactly one suffix commit, never truncate + restore"
+    );
     assert_eq!(
         renderer_batch_count(&session),
         full_batches,
-        "overlay suffix restored"
+        "the suffix stays resident through the publication"
     );
     assert_eq!(
         runtime_applied_base(&session),
         Some(base_pub),
-        "restore reused the resident base"
+        "the publication reused the resident base"
     );
-    let uploaded_restored = cumulative_upload_bytes(&session);
+    let uploaded_published = cumulative_upload_bytes(&session);
     assert!(
-        uploaded_restored > uploaded_after_suppression,
-        "the overlay suffix is re-uploaded"
+        uploaded_published > uploaded_full,
+        "the changed overlay suffix is uploaded"
     );
     assert!(
-        uploaded_restored - uploaded_after_suppression < uploaded_full,
-        "restore must not re-upload the whole base scene"
+        uploaded_published - uploaded_full < uploaded_full,
+        "the suffix commit must not re-upload the whole base scene"
     );
 
-    let restored_frame = session
+    let published_frame = session
         .render([800.0, 600.0], 1.0)
         .unwrap()
-        .expect("restored frame");
-    assert_eq!(restored_frame.completeness, FrameCompleteness::CurrentScene);
+        .expect("published frame");
+    assert_eq!(
+        published_frame.completeness,
+        FrameCompleteness::CurrentScene
+    );
     assert!(session.current_drawing_presented());
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 #[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
-fn base_only_navigation_blocked_after_device_change_until_reuploaded() {
+fn resident_scene_presentation_blocked_after_device_change_until_reuploaded() {
     let session = RenderSessionHandle::new(BackendPreference::Auto);
     let gpu = headless_gpu();
     session.attach_device(gpu.device, gpu.queue).unwrap();
@@ -148,10 +181,11 @@ fn base_only_navigation_blocked_after_device_change_until_reuploaded() {
         .unwrap();
     session.sync_drawing(Some(drawing));
     session.prepare().unwrap();
-    session.apply_ready_updates().unwrap();
+    drive_uploads(&session);
     assert!(session.render([800.0, 600.0], 1.0).unwrap().is_some());
 
-    // A new device resets the resident base; the fallback must not draw it.
+    // A new device resets the resident base; presenting the resident scene must
+    // not draw it.
     session.detach_device();
     let gpu2 = headless_gpu();
     session.attach_device(gpu2.device, gpu2.queue).unwrap();
@@ -162,12 +196,12 @@ fn base_only_navigation_blocked_after_device_change_until_reuploaded() {
     assert!(!session.preparation_current());
     assert!(
         session.render([800.0, 600.0], 1.0).unwrap().is_none(),
-        "no resident base: strict waiting, never a blank/stale base-only frame"
+        "no resident base: strict waiting, never a blank/stale frame"
     );
 
     // Re-preparing and re-uploading the same base restores rendering.
     session.prepare().unwrap();
-    session.apply_ready_updates().unwrap();
+    drive_uploads(&session);
     assert_eq!(
         runtime_applied_base(&session),
         Some(session.0.borrow().base_publication_revision)
@@ -178,7 +212,7 @@ fn base_only_navigation_blocked_after_device_change_until_reuploaded() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 #[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
-fn base_only_navigation_progressive_page_restarts_on_camera_change() {
+fn pending_overlay_progressive_page_restarts_on_camera_change() {
     let session = RenderSessionHandle::new(BackendPreference::Auto);
     let gpu = headless_gpu();
     session.attach_device(gpu.device, gpu.queue).unwrap();
@@ -188,9 +222,12 @@ fn base_only_navigation_progressive_page_restarts_on_camera_change() {
         .unwrap();
     session.sync_drawing(Some(drawing));
     session.prepare().unwrap();
-    session.apply_ready_updates().unwrap();
+    // Commit the base deterministically: one chunked pass can leave the real
+    // upload pending under load, and the pending-overlay frame needs a resident
+    // base.
+    drive_uploads(&session);
 
-    // Force the base-only batch set to need more than one progressive page.
+    // Force the base batch set to need more than one progressive page.
     let scene = session.current_prepared_scene().unwrap();
     let total: usize = scene.base.added.iter().map(|b| b.vertices.len()).sum();
     let max_batch: usize = scene
@@ -215,9 +252,9 @@ fn base_only_navigation_progressive_page_restarts_on_camera_change() {
             .max_vertices = total - 1;
     }
 
-    // Enter the base-only fallback through a real overlay input change (a
+    // Enter the pending-overlay window through a real overlay input change (a
     // camera-only change no longer invalidates the published scene), then move the
-    // camera so the next base-only page must restart under the new camera.
+    // camera so the next progressive page must restart under the new camera.
     let mut overlays = session.overlays();
     overlays.visibility.snap_hints = !overlays.visibility.snap_hints;
     assert!(session.set_overlays(overlays));
@@ -227,7 +264,7 @@ fn base_only_navigation_progressive_page_restarts_on_camera_change() {
     session
         .render([800.0, 600.0], 1.0)
         .unwrap()
-        .expect("base-only frame A");
+        .expect("pending-overlay frame A");
     let (cursor_a, len_a) = session
         .0
         .borrow()
@@ -242,7 +279,7 @@ fn base_only_navigation_progressive_page_restarts_on_camera_change() {
     session
         .render([800.0, 600.0], 1.0)
         .unwrap()
-        .expect("base-only frame B");
+        .expect("pending-overlay frame B");
     let (cursor_b, _) = session
         .0
         .borrow()
@@ -300,16 +337,12 @@ fn camera_only_navigation_does_not_churn_the_overlay_suffix() {
         assert_eq!(
             frame.completeness,
             FrameCompleteness::CurrentScene,
-            "camera-only step {step} must present the full scene, never the fallback"
+            "camera-only step {step} must present the full scene, never a pending-overlay frame"
         );
         assert_eq!(
             session.current_prepared_scene().unwrap().revision,
             ready_revision,
             "camera-only step {step} must not republish the scene"
-        );
-        assert!(
-            !session.overlays_suppressed(),
-            "camera-only step {step} must not suppress overlays"
         );
         assert_eq!(
             renderer_batch_count(&session),
@@ -393,24 +426,73 @@ fn current_cpu_scene_with_uncommitted_new_base_never_presents_old_base() {
     assert!(renderer_batch_count(&session) > old_batches);
 }
 
-/// DETERMINISTIC HARDWARE: while the overlay suffix upload is still pending on
-/// an unchanged resident base, the stale suffix must never be labeled
-/// `CurrentScene`. A large highlight forces the suffix to span multiple chunked
-/// passes with the real limits.
+/// `count` separated filled quads, each carrying one stable face source on both
+/// of its triangles, so selecting every face as a sub-element produces one
+/// overlay batch per entity. More than 1024 of them need more than the four
+/// 256-batch staging slices of one chunked pass: the real suffix upload stays
+/// pending after the first `apply_ready_updates`.
+#[cfg(not(target_arch = "wasm32"))]
+fn db_with_face_quads(count: usize) -> DrawingDatabase {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    for i in 0..count {
+        let id = i as u128 + 1;
+        let face = cad_domain::SubElementId {
+            source_key: format!("face-{id}"),
+            topology_revision: Revision(0),
+        };
+        let mut entity = quad_entity(id, i as f64 * 4.0, 0.0, 1.0);
+        match &mut entity.geometry {
+            SemanticGeometry::Mesh(mesh) => {
+                mesh.face_sources = vec![Some(face); mesh.triangles.len()];
+            }
+            other => panic!("the quad fixture must be a mesh, got {other:?}"),
+        }
+        b.insert_entity(entity).unwrap();
+    }
+    b.finish().unwrap()
+}
+
+/// DETERMINISTIC HARDWARE: while an overlay-suffix upload is still pending on an
+/// unchanged resident base, the frame must be labeled `PendingOverlayInputs` and
+/// must show the **stale suffix that is still resident** — never a truncated
+/// base-only scene and never `CurrentScene`. Selecting every mesh face as a
+/// sub-element makes the suffix span several chunked passes with the real limits.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 #[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
 fn pending_overlay_upload_never_labels_stale_suffix_current() {
+    // More than 4 staging slices x 256 batches: one `apply_ready_updates` pass
+    // cannot commit this suffix, so the pending state below is deterministic.
+    const FACES: usize = 1100;
+
     let session = RenderSessionHandle::new(BackendPreference::Auto);
     let gpu = headless_gpu();
     session.attach_device(gpu.device, gpu.queue).unwrap();
 
-    let drawing = Arc::new(db_with_lines(1500));
+    let drawing = Arc::new(db_with_face_quads(FACES));
     session.sync_drawing(Some(drawing));
     session.prepare().unwrap();
     drive_uploads(&session);
     let base_pub = session.0.borrow().base_publication_revision;
+    let document = session
+        .current_prepared_scene()
+        .expect("published scene")
+        .base
+        .stamp
+        .document;
     let committed_batches = renderer_batch_count(&session);
+    let base_batches = session.0.borrow().runtime.base_batches_for_test();
+    let suffix_commits_before = session.overlay_suffix_commits();
+    assert_ne!(
+        committed_batches, base_batches,
+        "this fixture must have a real overlay suffix, otherwise the check below is vacuous"
+    );
     assert_eq!(
         session
             .render([800.0, 600.0], 1.0)
@@ -420,13 +502,19 @@ fn pending_overlay_upload_never_labels_stale_suffix_current() {
         FrameCompleteness::CurrentScene
     );
 
-    // Same base, but a large highlight makes the overlay suffix span several
+    // Same base, but selecting every face makes the overlay suffix span several
     // chunked passes: the renderer still holds the stale previous suffix.
-    let selection = SelectionSet::from_refs((0..1500).map(|i| SelectionRef {
-        document: DocumentId(0),
-        entity: EntityId(i as u128 + 1),
-        instance: InstancePath::default(),
-        sub_element: None,
+    let selection = SelectionSet::from_refs((0..FACES).map(|i| {
+        let id = i as u128 + 1;
+        SelectionRef {
+            document,
+            entity: EntityId(id),
+            instance: InstancePath::default(),
+            sub_element: Some(cad_domain::SubElementId {
+                source_key: format!("face-{id}"),
+                topology_revision: Revision(0),
+            }),
+        }
     }));
     assert!(session.set_selection(selection));
     session.prepare().unwrap();
@@ -449,11 +537,21 @@ fn pending_overlay_upload_never_labels_stale_suffix_current() {
     let during = session
         .render([800.0, 600.0], 1.0)
         .unwrap()
-        .expect("base-only frame during the overlay upload");
+        .expect("pending-overlay frame during the overlay upload");
     assert_eq!(
         during.completeness,
-        FrameCompleteness::BaseOnlyPendingOverlays,
+        FrameCompleteness::PendingOverlayInputs,
         "a stale overlay suffix must never be labeled CurrentScene"
+    );
+    assert_eq!(
+        renderer_batch_count(&session),
+        committed_batches,
+        "the pending frame shows the stale suffix still resident, never a truncated base"
+    );
+    assert_eq!(
+        session.overlay_suffix_commits(),
+        suffix_commits_before,
+        "a staged (uncommitted) suffix upload must not count as a suffix commit"
     );
     assert!(!session.current_drawing_presented());
 
@@ -464,5 +562,10 @@ fn pending_overlay_upload_never_labels_stale_suffix_current() {
         .expect("restored frame");
     assert_eq!(restored.completeness, FrameCompleteness::CurrentScene);
     assert!(session.current_drawing_presented());
+    assert_eq!(
+        session.overlay_suffix_commits(),
+        suffix_commits_before + 1,
+        "the pending upload commits exactly once"
+    );
     assert!(renderer_batch_count(&session) > committed_batches);
 }

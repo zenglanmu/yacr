@@ -1,20 +1,23 @@
 use super::*;
 
 // ---------------------------------------------------------------------------
-// 2D navigation fallback (base-only frames while overlays wait).
+// Resident-scene presentation while newer overlay inputs are pending.
 //
-// The qualifier below is exercised two ways:
+// The qualifier below decides whether a session may present the **whole**
+// resident scene (overlay suffix included, never truncated) over the latest
+// camera while newer transient overlay inputs are still preparing. It is
+// exercised two ways:
 //   * pure-state tests (no GPU) model the resident base explicitly and are
 //     labeled as such — they prove the gating logic, not GPU behavior;
 //   * `#[ignore]` hardware tests drive a real headless adapter (P620/Vulkan on
-//     this machine) for the end-to-end suppression/restore proof. Run them with
-//     `cargo test -p cad-engine --locked -- --ignored`.
+//     this machine) for the end-to-end pending-window/publication proof. Run
+//     them with `cargo test -p cad-engine --locked -- --ignored`.
 // ---------------------------------------------------------------------------
 
 /// PURE-STATE (no GPU): the qualifier holds only for a valid 2D view whose base
 /// input identity matches the last publication while the GPU base is resident.
 #[test]
-fn base_only_navigation_qualifier_requires_same_resident_2d_base() {
+fn resident_scene_presentable_requires_same_resident_2d_base() {
     let session = session_with_published_base();
     let mut state = session.0.borrow_mut();
     let base_pub = state.base_publication_revision;
@@ -22,41 +25,41 @@ fn base_only_navigation_qualifier_requires_same_resident_2d_base() {
         .runtime
         .force_resident_base_for_test(base_pub, /* base_batches */ 1);
     assert!(
-        base_only_navigation_eligible(&state),
+        resident_scene_presentable(&state),
         "resident base + valid 2D view + unchanged base identity is eligible"
     );
 
-    // A 3D view never uses the 2D fallback.
+    // A 3D view never presents the resident scene as a pending-overlay frame.
     let two_d = state.view.clone();
     let mut three_d = two_d.clone();
     three_d.mode = ProjectionKind::ThreeD;
     state.view = three_d;
-    assert!(!base_only_navigation_eligible(&state));
+    assert!(!resident_scene_presentable(&state));
     state.view = two_d;
 
     // An unuploaded/stale base (applied revision behind the publication) blocks.
     state.runtime.force_resident_base_for_test(base_pub + 1, 1);
     assert!(
-        !base_only_navigation_eligible(&state),
+        !resident_scene_presentable(&state),
         "a base whose applied revision is not the published one must block"
     );
 
     // A detached runtime blocks even with a matching publication.
     state.runtime.detach();
     state.runtime.force_resident_base_for_test(base_pub, 1);
-    assert!(base_only_navigation_eligible(&state));
+    assert!(resident_scene_presentable(&state));
     state.runtime.detach();
     assert!(
-        !base_only_navigation_eligible(&state),
-        "no attached device must block the fallback"
+        !resident_scene_presentable(&state),
+        "no attached device must block presenting the resident scene"
     );
 }
 
 /// PURE-STATE (no GPU): a changed base input identity (new drawing, document,
-/// layers, fonts or images) blocks the fallback even if the previous base is
-/// still modeled as resident.
+/// layers, fonts or images) blocks presenting the resident scene even if the
+/// previous base is still modeled as resident.
 #[test]
-fn base_only_navigation_qualifier_blocks_changed_base_inputs() {
+fn resident_scene_presentable_blocks_changed_base_inputs() {
     // New drawing (different Arc, so a different authoritative base).
     let session = session_with_published_base();
     let other = cad_app::host::HostController::with_demo_document([800.0, 600.0])
@@ -69,8 +72,8 @@ fn base_only_navigation_qualifier_blocks_changed_base_inputs() {
         let base_pub = state.base_publication_revision;
         state.runtime.force_resident_base_for_test(base_pub, 1);
         assert!(
-            !base_only_navigation_eligible(&state),
-            "a new drawing must block the fallback"
+            !resident_scene_presentable(&state),
+            "a new drawing must block presenting the resident scene"
         );
     }
 
@@ -84,8 +87,8 @@ fn base_only_navigation_qualifier_blocks_changed_base_inputs() {
         let base_pub = state.base_publication_revision;
         state.runtime.force_resident_base_for_test(base_pub, 1);
         assert!(
-            !base_only_navigation_eligible(&state),
-            "a document switch must block the fallback"
+            !resident_scene_presentable(&state),
+            "a document switch must block presenting the resident scene"
         );
     }
 
@@ -99,8 +102,8 @@ fn base_only_navigation_qualifier_blocks_changed_base_inputs() {
         let base_pub = state.base_publication_revision;
         state.runtime.force_resident_base_for_test(base_pub, 1);
         assert!(
-            !base_only_navigation_eligible(&state),
-            "a layer change must block the fallback"
+            !resident_scene_presentable(&state),
+            "a layer change must block presenting the resident scene"
         );
     }
 
@@ -112,8 +115,8 @@ fn base_only_navigation_qualifier_blocks_changed_base_inputs() {
         let base_pub = state.base_publication_revision;
         state.runtime.force_resident_base_for_test(base_pub, 1);
         assert!(
-            !base_only_navigation_eligible(&state),
-            "a font change must block the fallback"
+            !resident_scene_presentable(&state),
+            "a font change must block presenting the resident scene"
         );
     }
 
@@ -125,19 +128,19 @@ fn base_only_navigation_qualifier_blocks_changed_base_inputs() {
         let base_pub = state.base_publication_revision;
         state.runtime.force_resident_base_for_test(base_pub, 1);
         assert!(
-            !base_only_navigation_eligible(&state),
-            "an image change must block the fallback"
+            !resident_scene_presentable(&state),
+            "an image change must block presenting the resident scene"
         );
     }
 }
 
 /// PURE-STATE (no GPU): the authoritative database revision is part of the base
 /// input identity, so a pointer-equal drawing whose revision moved is a
-/// different base and the fallback stays blocked until re-published. (The
-/// database is mutable in place behind a shared `Arc`, so the bare pointer
-/// alone would hide the edit.)
+/// different base and presenting the resident scene stays blocked until it is
+/// re-published. (The database is mutable in place behind a shared `Arc`, so the
+/// bare pointer alone would hide the edit.)
 #[test]
-fn base_only_navigation_qualifier_identity_includes_authoritative_revision() {
+fn resident_scene_presentable_identity_includes_authoritative_revision() {
     let base = BaseInputIdentity {
         drawing: 0x1234,
         revision: Some(Revision(1)),
@@ -164,13 +167,13 @@ fn base_only_navigation_qualifier_identity_includes_authoritative_revision() {
 //
 // Pan/zoom advance `view_revision` and the camera-derived reference-grid bounds,
 // but every overlay batch is world-space geometry that renders correctly under
-// any camera. The published scene therefore stays current (no base-only/full
+// any camera. The published scene therefore stays current (no pending-overlay
 // frame alternation, no suffix churn) while the reference grid still refines in
 // the background. Real scene-identity changes keep invalidating as before.
 // ---------------------------------------------------------------------------
 
-/// PURE-STATE (no GPU): a pan keeps the published scene current and never enters
-/// the base-only fallback or republishes per step.
+/// PURE-STATE (no GPU): a pan keeps the published scene current, never enters the
+/// pending-overlay window and never republishes per step.
 #[test]
 fn camera_only_navigation_keeps_published_scene_and_does_not_churn_overlays() {
     let session = session_with_published_base();
@@ -195,9 +198,10 @@ fn camera_only_navigation_keeps_published_scene_and_does_not_churn_overlays() {
             ready.revision, baseline.revision,
             "a camera-only step must not republish the scene"
         );
-        assert!(
-            !session.overlays_suppressed(),
-            "camera-only navigation never suppresses the overlay suffix"
+        assert_eq!(
+            session.overlay_suffix_commits(),
+            suffix_before,
+            "a camera-only step must leave the suffix-commit counter flat"
         );
         assert!(
             session.cad_frame_dirty(),
@@ -246,7 +250,14 @@ fn camera_only_viewport_change_reprepares_grid_without_invalidating_scene() {
         "the scene stays current through the camera-only change"
     );
     assert_eq!(session.input_revision(), input_before);
-    assert!(!session.overlays_suppressed());
+    assert_eq!(
+        session
+            .current_prepared_scene()
+            .expect("published scene")
+            .revision,
+        before.revision,
+        "a camera-only viewport change must not republish the scene"
+    );
 
     // The background re-prepare runs for the new viewport bounds.
     session.request_preparation().unwrap();

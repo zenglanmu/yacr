@@ -1,3 +1,90 @@
+## 2026-10-25 修复：普通鼠标移动时被悬停图元闪烁（base-only 截断退役）
+
+### 结论
+
+用户报告：打开图纸后**仅移动光标**（无按下/框选/pan/zoom），部分图元闪烁，与图元数量无关
+（例：`fixtures/dwg/synthetic-four-lines.dwg` 的下水平线）。根因不是拾取、不是着色器、也不是
+几何：是**每次移动都触发一次「截断 overlay 后缀 + 重推上一帧 flags」的 base-only 帧**，于是被悬停
+图元在高亮/非高亮之间逐帧交替。该截断路径（`suppress_overlays` / `render_base_only` /
+`overlays_suppressed` / `applied_entity_flags`）**已整体退役**。
+
+### 根因链（全部 file:line 已核对）
+
+1. 真实鼠标移动同时改 **cursor crosshair/pickbox**，而 `cursor` 属于 `overlay_fingerprint`
+   （`crates/cad-app/src/render_scene/overlay/fingerprint.rs:96-105`），所以 `set_overlays` 走
+   `visual_changed` → `advance_input()`（`session_impl.rs:185-188`），**不是** flags-only 快路径。
+2. host tick 顺序（`apps/app-linux/src/host/tick.rs:540-544` 输入泵 → `:671` `frame_cad`）保证：
+   处理了移动的 tick，其 `prepared_identity != input_revision` ⇒ `current_ready_scene == None`。
+3. `render()` 落回 `base_only_navigation_eligible`（该判定只看 2D camera + `BaseInputIdentity` +
+   base residency，**不含 overlay**）→ `render_base_only` → `suppress_overlays`：截断后缀、
+   `applied_revision=None`、重推 `applied_entity_flags`（**移动前**的 flags）。而同一 tick 的
+   `apply_ready_updates` 因 `ready=None` 根本没下发这次 hover 的 flags。
+4. 发布落地时完整提交才重推新 flags ⇒ 两态交替 = 闪烁。
+
+**像素级复现（真机 Quadro P620 / Vulkan，逐帧读回，4 条线夹具，entity 1 = 下水平线）**：
+
+| 帧 | completeness | bottom line pixel |
+|---|---|---|
+| baseline | `CurrentScene` | `[187,187,187]`（普通线色） |
+| 每个移动 tick（旧代码） | `BaseOnlyPendingOverlays` | `[187,187,187]`（**高亮丢失**） |
+| 停下一帧（旧代码） | `CurrentScene` | `[108,174,187]`（高亮出现） |
+
+修复后：移动 tick 保持 `[108,174,187]`，batch 数不降，`overlay_suffix_commits`/上传计数不涨。
+
+### 改动
+
+- **引擎**（`crates/cad-engine/src/render/`）：
+  - `suppress_overlays` / `render_base_only` / `overlays_suppressed` / `applied_entity_flags`
+    **删除**；overlay 后缀**永不截断**（后缀是世界空间几何，任何 camera 下都成立）。
+  - strict gate 未满足但底图 resident 时，`render()` 呈现**完整 resident 场景**并标
+    `FrameCompleteness::PendingOverlayInputs`（旧名 `BaseOnlyPendingOverlays` 语义已不成立）。
+  - `apply_ready_updates` 对 gate-stale 场景追加 **flags catch-up**
+    （`CadRenderRuntime::apply_flags_catch_up`：只下发实体 flags，几何不动，要求 base resident +
+    无在途上传），`flags_delta_applies` 去掉 `overlays_suppressed` 分支。
+  - `set_overlays` 的 `visual_changed` 分支在 `flags_changed` 时先做一次同步 `refresh_flags_only`，
+    使「移动 + 悬停变化」同一 tick 就能着色，不等待发布。
+  - 判定函数更名 `base_only_navigation_eligible` → `resident_scene_presentable`（条件不变，语义改写）。
+- **宿主**：`apps/app-linux/src/host/telemetry.rs` 标签改 `pending_overlay_inputs`，诊断行移除
+  `suppressed={}`（无脚本解析该字段；`apps/app-linux/src/host/tests.rs` 同步）。
+- **契约测试**：`contracts/gpu_base.rs`（重写 pending-overlay 用例、修 pre-existing 非确定性
+  `pending_overlay_upload_never_labels_stale_suffix_current`，用 1100 个 sub-element 面 ref 造真实
+  分块 suffix 上传）、`gpu_flags.rs`、`navigation.rs`、`settle.rs`、`runtime/tests.rs`；**新增**
+  `contracts/cursor_moves.rs`（逐 tick 逐像素围栏）。
+- **文档**：本条目、`docs/architecture.md`、`docs/react-linux-app.md`、`docs/picking-gpu-id-pass.md`
+  （「只上传标志」例外退役）、ADR 0012 §10 S2 修订、ADR 0007 附注、
+  `CAD_IMPLEMENTATION_SPEC.md` 窄 2D 导航合同（后缀不再可省略）。
+
+### 证据（本轮实际运行）
+
+- `cargo test -p cad-engine --lib --locked` → **107 passed / 0 failed / 13 ignored**。
+- `cargo test -p cad-engine --lib --locked -- --ignored --test-threads=1` → **13 passed / 0 failed**
+  （真机 P620/Vulkan，含新增 `cursor_moves_never_drop_the_tint_or_the_overlay_suffix`；
+  `threads=1` 是因为 GPU 用例按仓库规则串行）。
+- `cargo test -p app-linux --lib --locked` → **162 passed**。
+- `cargo clippy -p cad-engine -p app-linux --all-targets --locked -- -D warnings` → **exit 0**；
+  `cargo fmt --all -- --check` → **exit 0**；
+  `scripts/check-file-size.py` / `check-architecture.py` / `check-i18n.py` → **OK**；
+  `cargo check --workspace --all-targets --locked` → **exit 0**（`cad-app` lib-test 的 `unused_mut`
+  告警为既有、本轮未改该 crate）。
+- 修复前/后的像素表见上；修复前失败签名已由新用例捕获（`left: PendingOverlayInputs` /
+  `bottom=[0,0,0]` 一类的探测失败属证据工具误用，已改为只读计数器，不写回目标纹理）。
+
+### 边界 / 未验证
+
+- **真机 GUI 视觉复采 NOT RUN**：本轮只在引擎层做逐帧像素证据（真实 GPU、离屏 target），**没有**
+  启动 `yacr`、**没有** `YACR_PROBE_HOVER` 合成移动抓屏、**没有** ScreenCast 视频差分。用户侧
+  「闪烁消失」仍需一次真机运行确认；不得据此宣称视觉验收。
+- 该路径只在**原生**（异步 preparation）出现；wasm/dom-canvas 走 `prepare_synchronously`，
+  strict gate 不会被拖后 ⇒ 不受影响（**未在本轮重新验证 dom-canvas**）。
+- 连续移动时发布令牌会被不断作废（`preparation.rs` token 匹配），因此 crosshair/hover 在**大图**
+  上仍可能**保持上一次已发布状态**（现在表现为「滞后」而不再「闪没」）。这是有界退化，未做性能测量；
+  彻底解法（cursor 作为不参与发布令牌的动态 overlay）留作后续 ADR 事项。
+- hover dwell（20 ms）与 12 px 光圈粘滞语义未改；相机变化不重置光圈（既有已知残留，未在范围）。
+- 未跑：`cargo check --target wasm32-unknown-unknown`、`apps/desktop-ui` 的 `npm test/build`、
+  全 workspace clippy、真机性能/CPU 测量。旧 `docs/validation-*.md` 未改写（历史证据）。
+
+---
+
 ## 2026-10-24（续 3）GPU 预算改为显存百分比；探测不到则不设预算
 
 ### 结论

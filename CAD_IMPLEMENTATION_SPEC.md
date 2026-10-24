@@ -811,11 +811,14 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
   renderer 进程崩溃（`web-process-crashed`、`ProcessFailed`）/ 进程退出；Esc/关闭按钮挂在正文
   error-boundary 之外，正文渲染失败时仍可关。`cad_open_popup` ack 只允许**加法式** `payload`。
 - **窄 2D 导航合同（最少）**：导航复用同一权威底图（GPU-resident、同一 DB revision），Ready fastpath
-  取最新 camera、不展示旧 doc；overlay 后缀可**临时省略**并以显式
-  `FrameCompleteness::BaseOnlyPendingOverlays` 标记（非静默）；`PresentedFrame.view_revision` = 实际
+  取最新 camera、不展示旧 doc；**新增输入（overlay 后缀）未提交时呈交的仍是完整 resident 场景——overlay
+  后缀不再截断/省略**（2026-10-25 更正：旧合同允许「临时省略后缀」并标
+  `FrameCompleteness::BaseOnlyPendingOverlays`，实测导致普通鼠标移动时被悬停图元逐帧闪烁；现以显式
+  `FrameCompleteness::PendingOverlayInputs` 标记「展示的是最新已发布场景、更新的 transient overlay 输入
+  仍在准备」，且实体 flags 走独立 catch-up 增量，不等待发布）；`PresentedFrame.view_revision` = 实际
   camera，`CurrentScene` = **GPU 已提交当前场景**（非渐进全像素）；严格 CPU-ready/GPU-未提交返回
   `None`、不回旧底图；restore 同底图 overlay 提交；device change 阻塞至新上传；**3D 严格路径不变**。
-  用户可见取舍：拖拽期间 transient 覆盖（grid/axes/highlights/snaps/previews）可能暂时隐藏
+  用户可见取舍：拖拽期间 transient 覆盖（grid/axes/highlights/snaps/previews）可能短暂滞后一个发布
   （<30ms 窗口测量，**非精确延迟**）。`input→visible` **未验**。
 - **平台状态与证据（2026-10-23）**：
   - **Linux 原生 Wayland**：唯一生产路径（2026-10-23 措辞限定：指**原生表面**承载路径；ADR 0024 的

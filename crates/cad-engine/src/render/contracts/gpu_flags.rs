@@ -94,14 +94,17 @@ fn selection_survives_a_camera_zoom_and_settle() {
     );
 }
 
-/// DETERMINISTIC HARDWARE: the 2D navigation fallback re-asserts the retained
-/// entity flags after its truncating commit. The renderer's retained request is
-/// cleared directly (the transient empty-resident reset), so only a re-push from
-/// the runtime can restore the tint when the fallback is entered.
+/// DETERMINISTIC HARDWARE: entering the pending-overlay window (a real overlay
+/// input change that leaves the resident base unchanged) never disturbs the
+/// renderer's entity-flag table. The frame presents the whole resident scene and
+/// is labeled `PendingOverlayInputs`; the resolved flag keys and the
+/// suffix-commit counter stay exactly where the committed scene left them, so the
+/// selected tint survives with no truncate/restore cycle. The publication that
+/// follows is one real suffix commit over the same base and keeps the same keys.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 #[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
-fn camera_settle_fallback_reasserts_the_retained_entity_flags() {
+fn pending_overlay_window_keeps_the_retained_entity_flags_and_suffix() {
     let session = RenderSessionHandle::new(BackendPreference::Auto);
     let gpu = headless_gpu();
     session.attach_device(gpu.device, gpu.queue).unwrap();
@@ -135,55 +138,72 @@ fn camera_settle_fallback_reasserts_the_retained_entity_flags() {
     session.prepare().unwrap();
     drive_uploads(&session);
     let keys_before = entity_flag_keys(&session);
-    assert!(!keys_before.is_empty());
-
-    // Simulate the renderer-side loss of the retained request.
-    {
-        let mut state = session.0.borrow_mut();
-        state
-            .runtime
-            .renderer
-            .as_mut()
-            .expect("attached renderer")
-            .set_entity_flags(&[])
-            .unwrap();
-    }
     assert!(
-        entity_flag_keys(&session).is_empty(),
-        "the simulated loss must clear the tint"
+        !keys_before.is_empty(),
+        "the selected entity must resolve to a resident whole-entity key"
     );
+    let suffix_before = session.overlay_suffix_commits();
+    let batches_before = renderer_batch_count(&session);
 
-    // Enter the fallback: an overlay input change that produces no batches.
+    // Enter the pending-overlay window: an overlay input change that produces no
+    // batches for this drawing, with the base untouched and resident.
     let mut overlays = session.overlays();
     overlays.visibility.snap_hints = !overlays.visibility.snap_hints;
     assert!(session.set_overlays(overlays));
     assert!(!session.preparation_current());
-    let frame = session
-        .render([800.0, 600.0], 1.0)
-        .unwrap()
-        .expect("base-only frame");
-    assert_eq!(
-        frame.completeness,
-        FrameCompleteness::BaseOnlyPendingOverlays
-    );
-    assert!(session.overlays_suppressed());
+
+    // The gate-stale pump may push a flags **catch-up**; the flags did not change
+    // here, so nothing in the renderer moves.
+    session.apply_ready_updates().unwrap();
     assert_eq!(
         entity_flag_keys(&session),
         keys_before,
-        "the fallback must re-assert the retained entity flags after its commit"
+        "entering the pending window must not clear the retained entity flags"
+    );
+    assert_eq!(
+        session.overlay_suffix_commits(),
+        suffix_before,
+        "entering the pending window must commit no overlay suffix"
     );
 
-    // The full-scene restore keeps the tint.
+    let frame = session
+        .render([800.0, 600.0], 1.0)
+        .unwrap()
+        .expect("pending-overlay frame");
+    assert_eq!(
+        frame.completeness,
+        FrameCompleteness::PendingOverlayInputs,
+        "the newest overlay inputs are not presented yet"
+    );
+    assert_eq!(
+        renderer_batch_count(&session),
+        batches_before,
+        "the pending frame must show the whole resident scene, suffix included"
+    );
+    assert_eq!(entity_flag_keys(&session), keys_before);
+
+    // Publication: exactly one real suffix commit over the same resident base, and
+    // the tint is still the same resolved key set.
     session.prepare().unwrap();
     drive_uploads(&session);
-    assert!(!session.overlays_suppressed());
+    assert_eq!(
+        session.overlay_suffix_commits(),
+        suffix_before + 1,
+        "the publication must be one real suffix commit, never a truncate/restore pair"
+    );
     assert_eq!(entity_flag_keys(&session), keys_before);
+    let published = session
+        .render([800.0, 600.0], 1.0)
+        .unwrap()
+        .expect("published frame");
+    assert_eq!(published.completeness, FrameCompleteness::CurrentScene);
+    assert!(session.current_drawing_presented());
 }
 
 /// DETERMINISTIC HARDWARE: N consecutive hover changes upload **only** entity
-/// flags. The published scene identity is untouched, so no base-only frame is
-/// ever produced, no geometry stream/chunk or overlay suffix is re-uploaded, and
-/// the current scene stays committed and presented throughout.
+/// flags. The published scene identity is untouched, so no pending-overlay frame
+/// is ever produced, no geometry stream/chunk or overlay suffix is re-uploaded,
+/// and the current scene stays committed and presented throughout.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 #[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
@@ -241,12 +261,20 @@ fn hover_changes_push_only_flags_and_never_drop_the_current_scene() {
         assert_eq!(
             frame.completeness,
             FrameCompleteness::CurrentScene,
-            "hover step {step} must present the full scene, never the fallback"
+            "hover step {step} must present the full scene, never a pending-overlay frame"
         );
-        assert!(
-            !session.overlays_suppressed(),
-            "hover step {step} must not suppress overlays"
-        );
+        let hover_keys = entity_flag_keys(&session);
+        if step % 2 == 0 {
+            assert!(
+                !hover_keys.is_empty(),
+                "hover step {step} must tint the hovered whole-entity ref"
+            );
+        } else {
+            assert!(
+                hover_keys.is_empty(),
+                "hover step {step} must clear the tint when nothing is hovered"
+            );
+        }
         assert!(
             session.current_drawing_presented(),
             "hover step {step} must present the current drawing"

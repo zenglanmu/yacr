@@ -64,10 +64,12 @@ frame key 下不再重绘、保留加标志前的像素，选择要等到相机�
 `docs/input.md` §1.1.2）。**`hidden` 生产者仍未接线**（`cad-host` 传空），受 G2 门控（id pass 必须先按 key 跳过
 `FLAG_HIDDEN` 片段）；机制与测试仍就绪，hidden 的宿主生产属后续切片（backlog G2/G5）。
 
-**「只上传标志」的已知例外**：当处于 2D 导航回退（`overlays_suppressed`，即 overlay 后缀被
-有意丢弃）时，一次实体级选择变化不再走标志-only 快路径——它会把 overlay 后缀重传并
-`overlay_suffix_commits += 1`。这是**有意**的：此时 GPU 上的后缀本就缺失，必须靠一次完整提交
-恢复，标志-only 的前提（后缀驻留）不成立。相机-only 导航仍不触碰该计数器。
+**「只上传标志」的已知例外（2026-10-25 修订：该例外已退役）**：旧实现在 2D 导航回退
+（`overlays_suppressed`，即 overlay 后缀被有意丢弃）期间把一次实体级选择变化降级为「重传后缀 +
+`overlay_suffix_commits += 1`」，理由是此时 GPU 上的后缀本就缺失。该截断已被删除（它导致普通鼠标
+移动时被悬停图元逐帧闪烁）：现在**任何**帧都呈现完整 resident 场景，新 overlay 输入未提交时以
+`FrameCompleteness::PendingOverlayInputs` 标记；实体 flags 经 `CadRenderRuntime::apply_flags_catch_up`
+的独立增量下发，**不等待发布、不触发后缀提交**。相机-only 导航仍不触碰 `overlay_suffix_commits`。
 
 ## 0b. 生产拾取走 CPU 路径，现已由空间索引加速（记录）
 

@@ -88,6 +88,9 @@ NVIDIA Quadro P620 / Vulkan 实测；契约变更经用户 2026-10-15 授权。*
   两个修订。仅相机变化只推进 `content_revision`，**不**推进 `input_revision`，因此平移/缩放
   期间 `current_ready_scene` 保持 `Some`，不触发 base-only/全量交替；`overlay_suffix_commits`
   保持 **0**。
+  （2026-10-25 更正：**overlay-only** 变化——例如普通鼠标移动改 cursor crosshair——过去仍会进入
+  base-only 截断路径并逐帧丢失悬停高亮；该路径已退役，见 ADR-0012 §10 S2 修订。现在任何帧都呈现
+  完整 resident 场景，新 overlay 输入未提交时以 `FrameCompleteness::PendingOverlayInputs` 标记。）
 
 ## 明确推迟（deferred）
 
