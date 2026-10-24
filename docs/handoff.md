@@ -1,3 +1,31 @@
+## 2026-10-24（续 2）原生 GPU 显存记账与预算（ADR 0026）
+
+### 结论
+
+wasm 堆预算之外，原生 wgpu 现在也有**测量级**显存记账与**显式**预算：`GpuMemoryLedger` 按 11 个
+类目计费（drop guard 精确退费，peak 记录真实瞬态），默认 **3 GiB**（应用估算，非 VRAM 总量），
+拒绝为 `RenderError::GpuMemory` + CLI **退出码 7** + **不写 PNG**。
+
+实测（Vulkan / Quadro P620 / `complex-test.dwg`）：
+`total=2,107,964,952`、`allocator_total=2,109,386,656`（**差 0.07 %**）、
+`reserved=2,617,245,696`；明细最大头 **`stream`=1,695,124,632**（1.70 GB，比同文件 wasm 堆 1.43 GB
+还大）。强制 `--gpu-budget-mb 8` → exit 7 + `gpu-memory-refused:` + 无 PNG。
+
+### 依据实测做出的两个决定（不许回退）
+
+1. **默认值从 512 MiB 改为 3 GiB**：512 MiB 会拒绝合法图纸
+   （`category=mask used=1573159200 … cap=536870912`），已钉成回归单测。
+2. **`memory_budget_thresholds` 只在 D3D12 启用**：Vulkan 上实测同进程第二个 device 首次 72 B
+   写入即 OOM（NVIDIA heap 是进程级），会导致本 crate 3 个 headless 测试稳定失败。
+
+### 仍未做
+
+- `stream` 1.70 GB 的**渲染器侧**压缩/共享（本轮只记账，不优化）——下一步的主要收益点，需另立项。
+- 驱动 OOM（`origin=device-out-of-memory`）未现场触发（仅分类 + 单测）；D3D12 阈值无 Windows 证据。
+- 桌面宿主尚未在状态栏展示该报告（CLI 已有）；是否展示属产品决策。
+
+---
+
 ## 2026-10-24（续）阶段 ⑧ 首批：预算拒绝 / 分块上传 / Worker 隔离
 
 ### 结论
