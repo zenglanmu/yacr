@@ -20,10 +20,11 @@
 //! walks the resident scene at report time or per frame — a report is a handful
 //! of atomic loads.
 
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::budget::GpuBudget;
+use super::budget::{BudgetSource, GpuBudget, ResolvedBudget};
+use super::vram::VramSummary;
 
 /// Every device-resident class this renderer accounts for.
 ///
@@ -183,17 +184,22 @@ impl GpuMemoryRefusal {
         used_bytes: u64,
         requested_bytes: u64,
         budget: &GpuBudget,
+        source: BudgetSource,
         limit_bytes: u64,
     ) -> Self {
         let message = format!(
             "gpu memory budget: a {requested_bytes}-byte {} allocation would take the renderer \
-             from {used_bytes} to {} bytes, over the {} cap {limit_bytes} bytes \
-             (application estimate, refuse_at {}); nothing was allocated and the resident \
-             scene is unchanged",
+             from {used_bytes} to {} bytes, over the application cap {limit_bytes} bytes \
+             (source {}; {percent_env}=<{min}..{max}> or {mib_env}=<MiB>, refuse_at {}); nothing \
+             was allocated and the resident scene is unchanged",
             category.label(),
             used_bytes.saturating_add(requested_bytes),
-            super::budget::GPU_BUDGET_ENV,
+            source.label(),
             budget.refuse_at,
+            percent_env = super::budget::GPU_BUDGET_PERCENT_ENV,
+            min = super::budget::MIN_GPU_BUDGET_PERCENT,
+            max = super::budget::MAX_GPU_BUDGET_PERCENT,
+            mib_env = super::budget::GPU_BUDGET_ENV,
         );
         Self {
             category,
@@ -261,8 +267,11 @@ impl std::error::Error for GpuMemoryRefusal {}
 /// A snapshot of the renderer's device-resident GPU memory.
 ///
 /// Read [`source`](GpuMemoryReport::source) before comparing numbers:
-/// `Accounted` is this renderer's measured footprint, and **no field here is the
-/// card's total VRAM** (wgpu 30.0.1 cannot report it — see the module docs).
+/// `Accounted` is this renderer's measured footprint. `vram_bytes` is the VRAM
+/// **proxy** (the largest device-local heap) — advertised device-local memory,
+/// not free memory — and [`vram_all_heaps_bytes`](GpuMemoryReport::vram_all_heaps_bytes)
+/// is the transparency sum that would overestimate it (see
+/// [`VramProbe`](super::VramProbe)); every other byte count is this renderer's own.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GpuMemoryReport {
     /// Bytes held by buffers (every non-texture category).
@@ -282,11 +291,36 @@ pub struct GpuMemoryReport {
     /// `Device` (this renderer **and** its host). `None` as above.
     pub allocator_total_bytes: Option<u64>,
     /// The threshold the budget gate compares against (`cap × refuse_at`) in
-    /// bytes. This is an **application estimate**, not the card's capacity.
+    /// bytes. This is an **application** policy value, not the card's capacity.
     pub budget_bytes: Option<u64>,
     /// The configured application cap in bytes (`None` when the budget is
     /// explicitly disabled).
     pub cap_bytes: Option<u64>,
+    /// Which rule produced [`cap_bytes`](GpuMemoryReport::cap_bytes): a share of
+    /// probed VRAM, an explicit byte cap, or the estimate fallback.
+    ///
+    /// Distinct from [`source`](GpuMemoryReport::source), which describes the
+    /// **measured bytes**; this describes the **policy**.
+    pub budget_source: BudgetSource,
+    /// The probed **VRAM proxy** (largest device-local heap), in bytes.
+    ///
+    /// `None` when the backend cannot answer (non-Vulkan, a HAL callback that
+    /// returns `None`, or no device-local heap). It is **advertised device-local
+    /// memory, not free memory**: usage is not subtracted and an integrated GPU's
+    /// heap is shared with the CPU.
+    pub vram_bytes: Option<u64>,
+    /// The sum of **every** device-local heap, for transparency.
+    ///
+    /// Deliberately not the cap basis: on the reference machine the additional
+    /// host-visible device-local heap made this exceed the card's physical VRAM
+    /// (see the validation record). Kept visible so the overestimate cannot hide.
+    pub vram_all_heaps_bytes: Option<u64>,
+    /// The percentage of [`vram_bytes`](GpuMemoryReport::vram_bytes) applied to
+    /// the cap: `Some` only when
+    /// [`budget_source`](GpuMemoryReport::budget_source) is
+    /// [`BudgetSource::VramPercent`]; `None` for an explicit cap or the estimate
+    /// fallback.
+    pub budget_percent: Option<u8>,
     /// Which measurement the numbers above come from.
     pub source: GpuMemorySource,
     /// Per-category breakdown, indexed by [`GpuMemoryCategory::index`].
@@ -338,18 +372,33 @@ pub(crate) struct GpuMemoryLedger {
     cap_bytes: AtomicU64,
     /// `refuse_at` as `f32` bits.
     refuse_at_bits: AtomicU32,
+    /// Which rule produced `cap_bytes` ([`BudgetSource::code`]).
+    budget_source: AtomicU8,
+    /// Applied VRAM percentage; `0` encodes [`None`] (percentages start at 10).
+    budget_percent: AtomicU8,
+    /// Probed VRAM numbers; `total_bytes`/`all_device_local_bytes` are `u64::MAX`
+    /// when unknown.
+    vram_bytes: AtomicU64,
+    vram_all_heaps_bytes: AtomicU64,
     last_refusal: Mutex<Option<GpuMemoryRefusal>>,
 }
 
 impl GpuMemoryLedger {
-    /// A ledger policing `budget` (see [`GpuBudget::resolve`]).
-    pub(crate) fn new(budget: GpuBudget) -> Self {
+    /// A ledger policing a resolved policy: the budget in force plus the rule that
+    /// produced it and the probed VRAM it was derived from.
+    pub(crate) fn new(resolved: ResolvedBudget, vram: Option<VramSummary>) -> Self {
         Self {
             categories: std::array::from_fn(|_| AtomicU64::new(0)),
             total_bytes: AtomicU64::new(0),
             peak_bytes: AtomicU64::new(0),
-            cap_bytes: AtomicU64::new(budget.cap_bytes.unwrap_or(u64::MAX)),
-            refuse_at_bits: AtomicU32::new(budget.refuse_at.to_bits()),
+            cap_bytes: AtomicU64::new(resolved.budget.cap_bytes.unwrap_or(u64::MAX)),
+            refuse_at_bits: AtomicU32::new(resolved.budget.refuse_at.to_bits()),
+            budget_source: AtomicU8::new(resolved.source.code()),
+            budget_percent: AtomicU8::new(resolved.percent.unwrap_or(0)),
+            vram_bytes: AtomicU64::new(vram.map_or(u64::MAX, |vram| vram.total_bytes)),
+            vram_all_heaps_bytes: AtomicU64::new(
+                vram.map_or(u64::MAX, |vram| vram.all_device_local_bytes),
+            ),
             last_refusal: Mutex::new(None),
         }
     }
@@ -412,14 +461,68 @@ impl GpuMemoryLedger {
         }
     }
 
-    /// Replace the budget policy (see [`Renderer::set_gpu_budget`]).
-    ///
-    /// [`Renderer::set_gpu_budget`]: crate::Renderer::set_gpu_budget
-    pub(crate) fn set_budget(&self, budget: GpuBudget) {
-        self.cap_bytes
-            .store(budget.cap_bytes.unwrap_or(u64::MAX), Ordering::Relaxed);
+    /// The live policy together with the rule that produced its cap.
+    pub(crate) fn resolved(&self) -> ResolvedBudget {
+        let percent = self.budget_percent.load(Ordering::Relaxed);
+        ResolvedBudget {
+            budget: self.budget(),
+            source: BudgetSource::from_code(self.budget_source.load(Ordering::Relaxed)),
+            percent: (percent != 0).then_some(percent),
+        }
+    }
+
+    /// The probed VRAM proxy (largest device-local heap), if the backend answered.
+    pub(crate) fn vram_bytes(&self) -> Option<u64> {
+        let vram = self.vram_bytes.load(Ordering::Relaxed);
+        (vram != u64::MAX).then_some(vram)
+    }
+
+    /// The probed sum of every device-local heap, if the backend answered.
+    pub(crate) fn vram_all_heaps_bytes(&self) -> Option<u64> {
+        let vram = self.vram_all_heaps_bytes.load(Ordering::Relaxed);
+        (vram != u64::MAX).then_some(vram)
+    }
+
+    /// Both probed VRAM numbers (the proxy and the transparency sum).
+    fn vram_summary(&self) -> Option<VramSummary> {
+        Some(VramSummary {
+            total_bytes: self.vram_bytes()?,
+            all_device_local_bytes: self.vram_all_heaps_bytes()?,
+        })
+    }
+
+    /// Replace the budget policy **and** its provenance (see
+    /// [`GpuBudgetConfig::resolve`](super::GpuBudgetConfig::resolve)).
+    pub(crate) fn set_resolved(&self, resolved: ResolvedBudget, vram: Option<VramSummary>) {
+        self.cap_bytes.store(
+            resolved.budget.cap_bytes.unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
         self.refuse_at_bits
-            .store(budget.refuse_at.to_bits(), Ordering::Relaxed);
+            .store(resolved.budget.refuse_at.to_bits(), Ordering::Relaxed);
+        self.budget_source
+            .store(resolved.source.code(), Ordering::Relaxed);
+        self.budget_percent
+            .store(resolved.percent.unwrap_or(0), Ordering::Relaxed);
+        self.vram_bytes.store(
+            vram.map_or(u64::MAX, |vram| vram.total_bytes),
+            Ordering::Relaxed,
+        );
+        self.vram_all_heaps_bytes.store(
+            vram.map_or(u64::MAX, |vram| vram.all_device_local_bytes),
+            Ordering::Relaxed,
+        );
+    }
+
+    /// Replace the budget policy verbatim (the legacy
+    /// [`Renderer::set_gpu_budget`](crate::Renderer::set_gpu_budget) shape).
+    ///
+    /// The provenance becomes [`BudgetSource::ExplicitBytes`] (the caller chose
+    /// the number) and the percentage is cleared. A previously probed VRAM view is
+    /// retained: it still describes the card, even though the cap no longer
+    /// derives from it.
+    pub(crate) fn set_budget(&self, budget: GpuBudget) {
+        self.set_resolved(ResolvedBudget::explicit(budget), self.vram_summary());
     }
 
     /// Admit (or refuse) an allocation of `parts` **before** it is created.
@@ -433,7 +536,8 @@ impl GpuMemoryLedger {
     /// CadError>` path (where the crate cannot widen the error type) can still
     /// read the structured facts instead of parsing a message.
     pub(crate) fn admit(&self, parts: &[(GpuMemoryCategory, u64)]) -> Result<(), GpuMemoryRefusal> {
-        let budget = self.budget();
+        let resolved = self.resolved();
+        let budget = resolved.budget;
         let Some(limit_bytes) = budget.effective_limit_bytes() else {
             return Ok(());
         };
@@ -456,8 +560,14 @@ impl GpuMemoryLedger {
             .max_by_key(|(_, bytes)| *bytes)
             .map(|(category, _)| *category)
             .unwrap_or(GpuMemoryCategory::Other);
-        let refusal =
-            GpuMemoryRefusal::budget(category, used_bytes, requested_bytes, &budget, limit_bytes);
+        let refusal = GpuMemoryRefusal::budget(
+            category,
+            used_bytes,
+            requested_bytes,
+            &budget,
+            resolved.source,
+            limit_bytes,
+        );
         self.record_refusal(refusal.clone());
         Err(refusal)
     }
@@ -528,7 +638,7 @@ impl GpuMemoryLedger {
             .map(|category| category_bytes[category.index()])
             .sum();
         let total_bytes = self.used_bytes();
-        let budget = self.budget();
+        let resolved = self.resolved();
         let source = if device_present {
             GpuMemorySource::Accounted
         } else if allocator.is_some() {
@@ -543,8 +653,12 @@ impl GpuMemoryLedger {
             peak_bytes: self.peak_bytes(),
             reserved_bytes: allocator.map(|facts| facts.reserved_bytes),
             allocator_total_bytes: allocator.map(|facts| facts.allocated_bytes),
-            budget_bytes: budget.effective_limit_bytes(),
-            cap_bytes: budget.cap_bytes,
+            budget_bytes: resolved.budget.effective_limit_bytes(),
+            cap_bytes: resolved.budget.cap_bytes,
+            budget_source: resolved.source,
+            vram_bytes: self.vram_bytes(),
+            vram_all_heaps_bytes: self.vram_all_heaps_bytes(),
+            budget_percent: resolved.percent,
             source,
             category_bytes,
         }

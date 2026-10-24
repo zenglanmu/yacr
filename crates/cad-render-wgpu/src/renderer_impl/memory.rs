@@ -24,23 +24,38 @@ impl Renderer {
     /// The allocator report (`Device::generate_allocator_report`, `None` on a
     /// backend without sub-allocation, for example GL) is attached as
     /// `reserved_bytes`/`allocator_total_bytes` and is **never** substituted for
-    /// the accounting. No field is the card's total VRAM: wgpu 30.0.1 cannot
-    /// report it, so [`GpuMemoryReport::budget_bytes`] is an **application
-    /// estimate** (see [`GpuBudget`]) sized from a measurement — the authorized
-    /// fixture needs 2.11 GB, dominated by `stream` at 1.70 GB
-    /// ([`MEASURED_FIXTURE_GPU_BYTES`]).
+    /// the accounting.
+    ///
+    /// Read [`GpuMemoryReport::budget_source`] for the **policy**: the cap is a
+    /// percentage of the probed VRAM **proxy**
+    /// (`GpuMemoryReport::vram_bytes`, the largest device-local heap — advertised
+    /// device-local memory, *not* free memory; the sum of all device-local heaps is
+    /// reported separately as `vram_all_heaps_bytes` because summing exceeds the
+    /// card's physical capacity on the reference machine; see the validation
+    /// record), an explicit byte cap, or the
+    /// measured application estimate when no probe could answer. The probe runs at
+    /// most once per device (`Renderer::vram_report`).
     ///
     /// Cheap by construction: a handful of atomic loads plus one allocator report
     /// call, never a scan of the resident scene. It is a diagnostics call, not a
     /// frame-path dependency.
     pub fn gpu_memory_report(&self) -> GpuMemoryReport {
+        self.refresh_gpu_budget_from_probe();
         self.gpu_memory
             .report(self.device.is_some(), self.allocator_facts())
     }
 
-    /// The memory budget policy in force (see [`Renderer::set_gpu_budget`]).
+    /// The memory budget policy in force (see [`Renderer::set_gpu_budget`] and
+    /// [`Renderer::set_gpu_budget_config`]).
     pub fn gpu_budget(&self) -> GpuBudget {
+        self.refresh_gpu_budget_from_probe();
         self.gpu_memory.budget()
+    }
+
+    /// The VRAM-relative configuration in force (see
+    /// [`Renderer::set_gpu_budget_config`]).
+    pub fn gpu_budget_config(&self) -> GpuBudgetConfig {
+        self.gpu_budget_config
     }
 
     /// Replace the memory budget policy.
@@ -50,8 +65,80 @@ impl Renderer {
     /// (retroactively refusing resident bytes would mean tearing down a scene the
     /// user can currently see). Takes effect immediately for
     /// [`Renderer::try_prepare_upload_batches`] and the `CadError` staging path.
+    ///
+    /// This is the low-level shape: the policy is labelled
+    /// [`BudgetSource::ExplicitBytes`](crate::BudgetSource::ExplicitBytes) because
+    /// the caller chose the number, and it mirrors into
+    /// [`Renderer::gpu_budget_config`]'s `explicit_bytes` so a later VRAM probe
+    /// cannot silently override the caller's choice.
     pub fn set_gpu_budget(&mut self, budget: GpuBudget) {
+        self.gpu_budget_config.explicit_bytes = Some(budget.cap_bytes.unwrap_or(0));
+        self.gpu_budget_config.refuse_at = budget.refuse_at;
         self.gpu_memory.set_budget(budget);
+    }
+
+    /// Replace the VRAM-relative policy (see [`GpuBudgetConfig`]).
+    ///
+    /// Takes effect with the next staging request (resident memory is never
+    /// re-litigated). If the device's VRAM has not been probed yet this probes it
+    /// now; otherwise the cached probe is reused, so a policy change never adds a
+    /// driver query.
+    pub fn set_gpu_budget_config(&mut self, config: GpuBudgetConfig) {
+        self.gpu_budget_config = config;
+        self.refresh_gpu_budget_from_probe();
+    }
+
+    /// The probed device-local VRAM description, or `None` when the backend cannot
+    /// answer.
+    ///
+    /// Probes lazily on the first call and caches the result for this device
+    /// generation (a failed probe is cached too). `total_bytes` is the VRAM
+    /// **proxy** (the largest device-local heap): **advertised** device-local
+    /// memory, not free memory — usage is not subtracted and an integrated GPU's
+    /// heap is shared system RAM. `all_device_local_bytes` is the sum of every
+    /// device-local heap, kept for transparency (summing **overestimates**: on the
+    /// reference card the sum exceeded physical VRAM; see the validation record).
+    pub fn vram_report(&self) -> Option<VramProbe> {
+        self.ensure_vram_probe()
+    }
+
+    /// Resolve [`Self::gpu_budget_config`] against the cached (or freshly probed)
+    /// VRAM total and install the result on the ledger.
+    ///
+    /// Called after device attach, on every report/budget read, and on a policy
+    /// change; the probe itself runs at most once per device.
+    pub(crate) fn refresh_gpu_budget_from_probe(&self) {
+        let probe = self.ensure_vram_probe();
+        let vram = probe.as_ref().map(VramProbe::summary);
+        let proxy = vram.map(|vram| vram.total_bytes);
+        self.gpu_memory
+            .set_resolved(self.gpu_budget_config.resolve(proxy), vram);
+    }
+
+    /// The cached probe, probing this device on first use.
+    fn ensure_vram_probe(&self) -> Option<VramProbe> {
+        // Cloned before locking so the closure does not borrow `self` while the
+        // cache guard is held; a `wgpu::Device` clone is a cheap handle bump.
+        let device = self.device.clone();
+        let mut cache = self
+            .gpu_vram
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.get_or_probe(|| {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                device
+                    .as_ref()
+                    .and_then(gpu_memory::probe_vram_bytes_from_device)
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                // The browser tier has no HAL/VRAM query; the wasm heap budget is
+                // its memory story (see `gpu_memory::vram`).
+                let _ = &device;
+                None
+            }
+        })
     }
 
     /// The most recent GPU memory refusal, if no later staging attempt cleared it.

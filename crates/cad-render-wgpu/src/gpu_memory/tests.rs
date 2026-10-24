@@ -5,11 +5,12 @@
 //! ordinary `cargo test -p cad-render-wgpu` instead of only being observable as a
 //! dead session on a machine with a card.
 
+use super::vram::VramSummary;
 use super::*;
 use std::sync::Arc;
 
 fn ledger(budget: GpuBudget) -> Arc<GpuMemoryLedger> {
-    Arc::new(GpuMemoryLedger::new(budget))
+    Arc::new(GpuMemoryLedger::new(ResolvedBudget::explicit(budget), None))
 }
 
 #[test]
@@ -226,6 +227,11 @@ fn the_report_splits_buffers_from_textures_and_states_its_source() {
     assert_eq!(accounted.peak_bytes, 6_500);
     assert_eq!(accounted.cap_bytes, Some(DEFAULT_GPU_BUDGET_BYTES));
     assert_eq!(accounted.budget_bytes, Some(DEFAULT_GPU_BUDGET_BYTES / 2));
+    // The policy is labelled as an explicit budget (this ledger was built from a
+    // `GpuBudget`), and no VRAM probe was supplied on this construction path.
+    assert_eq!(accounted.budget_source, BudgetSource::ExplicitBytes);
+    assert_eq!(accounted.vram_bytes, None);
+    assert_eq!(accounted.budget_percent, None);
     assert_eq!(
         accounted.headroom_bytes(),
         Some(DEFAULT_GPU_BUDGET_BYTES / 2 - 6_500)
@@ -288,6 +294,9 @@ fn setting_the_budget_keeps_the_accounting() {
     let tighter = GpuBudget::estimated_default().with_cap(Some(1024));
     memory.set_budget(tighter);
     assert_eq!(memory.budget(), tighter);
+    // A verbatim policy is labelled as an explicit choice, not a VRAM percentage.
+    assert_eq!(memory.resolved().source, BudgetSource::ExplicitBytes);
+    assert_eq!(memory.resolved().percent, None);
     assert_eq!(memory.used_bytes(), 256);
     // The new cap now governs the verdict.
     assert!(memory.admit(&[(GpuMemoryCategory::Uniform, 1024)]).is_err());
@@ -346,4 +355,78 @@ fn the_ledger_starts_uncapped_only_when_asked() {
     assert_eq!(report.total_bytes, 0);
     assert_eq!(report.peak_bytes, 0);
     assert_eq!(report.source, GpuMemorySource::Estimate);
+}
+
+#[test]
+fn the_report_states_the_budget_source_and_the_probed_vram() {
+    const GIB: u64 = 1024 * 1024 * 1024;
+    let vram = 12 * GIB;
+
+    // Percentage policy: the cap derives from the probe and says so. The proxy is
+    // what the cap uses; the all-heaps sum is reported beside it, not substituted.
+    let all_heaps = vram + 258 * 1024 * 1024;
+    let percent = Arc::new(GpuMemoryLedger::new(
+        GpuBudgetConfig::default().resolve(Some(vram)),
+        Some(VramSummary {
+            total_bytes: vram,
+            all_device_local_bytes: all_heaps,
+        }),
+    ));
+    let report = percent.report(true, None);
+    assert_eq!(report.vram_bytes, Some(vram));
+    assert_eq!(report.vram_all_heaps_bytes, Some(all_heaps));
+    assert!(report.vram_all_heaps_bytes > report.vram_bytes);
+    assert_eq!(report.budget_source, BudgetSource::VramPercent);
+    assert_eq!(report.budget_percent, Some(DEFAULT_GPU_BUDGET_PERCENT));
+    assert_eq!(report.cap_bytes, Some(vram * 9 / 10));
+
+    // Explicit policy: the cap is the caller's number, but the probe still
+    // describes the card (so a report does not hide the full picture).
+    let explicit = Arc::new(GpuMemoryLedger::new(
+        GpuBudgetConfig {
+            explicit_bytes: Some(1_024),
+            ..GpuBudgetConfig::default()
+        }
+        .resolve(Some(vram)),
+        Some(VramSummary {
+            total_bytes: vram,
+            all_device_local_bytes: all_heaps,
+        }),
+    ));
+    let report = explicit.report(true, None);
+    assert_eq!(report.cap_bytes, Some(1_024));
+    assert_eq!(report.budget_source, BudgetSource::ExplicitBytes);
+    assert_eq!(report.budget_percent, None);
+    assert_eq!(report.vram_bytes, Some(vram));
+    assert_eq!(report.vram_all_heaps_bytes, Some(all_heaps));
+
+    // No probe: the fallback is labelled an estimate, never a percentage of a
+    // card nobody measured.
+    let estimate = Arc::new(GpuMemoryLedger::new(
+        GpuBudgetConfig::default().resolve(None),
+        None,
+    ));
+    let report = estimate.report(true, None);
+    assert_eq!(report.vram_bytes, None);
+    assert_eq!(report.vram_all_heaps_bytes, None);
+    assert_eq!(report.budget_source, BudgetSource::Estimate);
+    assert_eq!(report.budget_percent, None);
+    assert_eq!(report.cap_bytes, Some(DEFAULT_GPU_BUDGET_BYTES));
+
+    // An explicit uncapped policy is still labelled explicit.
+    let uncapped = Arc::new(GpuMemoryLedger::new(
+        GpuBudgetConfig {
+            explicit_bytes: Some(0),
+            ..GpuBudgetConfig::default()
+        }
+        .resolve(Some(vram)),
+        Some(VramSummary {
+            total_bytes: vram,
+            all_device_local_bytes: all_heaps,
+        }),
+    ));
+    let report = uncapped.report(true, None);
+    assert_eq!(report.cap_bytes, None);
+    assert_eq!(report.budget_bytes, None);
+    assert_eq!(report.budget_source, BudgetSource::ExplicitBytes);
 }

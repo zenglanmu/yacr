@@ -21,6 +21,28 @@ pub(crate) struct GpuTimeResources {
     pub(crate) charges: [GpuCharge; 2],
 }
 
+/// Where a converted batch's segments live in the instanced line streams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InstanceRun {
+    /// Index into [`Renderer::instance_streams`].
+    pub(crate) stream: u32,
+    /// First instance of this batch within its stream.
+    pub(crate) offset: u32,
+    /// Number of instances (segments) this batch contributes.
+    pub(crate) count: u32,
+}
+
+/// Where a conic batch's SDF instances live in the conic streams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ArcRun {
+    /// Index into [`Renderer::arc_streams`].
+    pub(crate) stream: u32,
+    /// First instance of this batch within its stream.
+    pub(crate) offset: u32,
+    /// Number of conic instances this batch contributes.
+    pub(crate) count: u32,
+}
+
 /// Staged GPU resources, owned by the renderer that prepared them. Publishing
 /// is separate so failed preparation leaves the active batches untouched.
 pub struct PreparedUpload {

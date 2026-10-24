@@ -34,6 +34,13 @@ impl Renderer {
         self.device = None;
         self.queue = None;
         self.active_backend = None;
+        // The VRAM answer belonged to the dropped device generation: forget it and
+        // fall back to the explicit/estimate policy until a new device is attached.
+        self.gpu_vram
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .reset();
+        self.refresh_gpu_budget_from_probe();
         // Measurement resources belong to the dropped device generation.
         self.gpu_time = None;
         self.gpu_time_state = gpu_time::GpuTimeState::Disabled;

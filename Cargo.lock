@@ -789,6 +789,7 @@ dependencies = [
 name = "cad-render-wgpu"
 version = "0.1.2"
 dependencies = [
+ "ash",
  "bytemuck",
  "cad-diagnostics",
  "cad-domain",

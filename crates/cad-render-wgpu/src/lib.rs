@@ -18,15 +18,15 @@ pub mod geometry;
 /// [`pacing`] for the adaptation policy and the disabled-signal boundary.
 pub mod pacing;
 
-/// Device-resident GPU memory: accounting, the application budget and the
-/// explicit budget/out-of-memory refusal. See [`gpu_memory`] for what is measured,
-/// what is only a cross-check, and why no cap here is the card's VRAM.
+/// Device-resident GPU memory: accounting, the VRAM-relative application budget
+/// and the explicit budget/out-of-memory refusal. See [`gpu_memory`] for the evidence rules.
 pub mod gpu_memory;
 pub use gpu_memory::{
-    GpuBudget, GpuMemoryCategory, GpuMemoryRefusal, GpuMemoryRefusalOrigin, GpuMemoryReport,
-    GpuMemorySource, MEASURED_FIXTURE_GPU_BYTES,
+    BudgetSource, GpuBudget, GpuBudgetConfig, GpuMemoryCategory, GpuMemoryRefusal,
+    GpuMemoryRefusalOrigin, GpuMemoryReport, GpuMemorySource, VramHeap, VramProbe,
+    DEFAULT_GPU_BUDGET_PERCENT, MEASURED_FIXTURE_GPU_BYTES,
 };
-use gpu_memory::{GpuCharge, GpuMemoryLedger};
+use gpu_memory::{GpuCharge, GpuMemoryLedger, VramCache};
 
 /// Native headless path: create a software device, render offscreen, read the
 /// target back and encode PNG. Native only; the browser path gets its device
@@ -240,28 +240,6 @@ pub(crate) struct GpuMeshChunk {
     // Held only for its `Drop` impl, which releases the ledger charge.
     #[allow(dead_code)]
     index_charge: GpuCharge,
-}
-
-/// Where a converted batch's segments live in the instanced line streams.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct InstanceRun {
-    /// Index into [`Renderer::instance_streams`].
-    stream: u32,
-    /// First instance of this batch within its stream.
-    offset: u32,
-    /// Number of instances (segments) this batch contributes.
-    count: u32,
-}
-
-/// Where a conic batch's SDF instances live in the conic streams.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ArcRun {
-    /// Index into [`Renderer::arc_streams`].
-    stream: u32,
-    /// First instance of this batch within its stream.
-    offset: u32,
-    /// Number of conic instances this batch contributes.
-    count: u32,
 }
 
 /// One device-resident instanced line stream, plus the `f64` reference origin
@@ -926,6 +904,10 @@ pub struct Renderer {
     /// budget policy and the last explicit refusal (see [`gpu_memory`]). Shared
     /// with every [`GpuCharge`], so dropping a GPU resource releases its bytes.
     gpu_memory: Arc<GpuMemoryLedger>,
+    /// VRAM-relative policy in force (see [`GpuBudgetConfig`]); the ledger keeps the resolved result.
+    gpu_budget_config: GpuBudgetConfig,
+    /// One-probe-per-device VRAM cache; interior mutability so `&self` reports can resolve it.
+    gpu_vram: std::sync::Mutex<VramCache>,
     /// Charges for device resources no resident cluster owns. `None` means "not
     /// resident" (or "never created"), and dropping the `Some` value releases the
     /// bytes — see [`Renderer::clear_standalone_charges`].

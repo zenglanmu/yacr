@@ -2,6 +2,10 @@ use super::*;
 
 impl Renderer {
     pub fn new(preference: BackendPreference) -> Self {
+        // Read once: `YACR_GPU_BUDGET_MB` (explicit bytes) and
+        // `YACR_GPU_BUDGET_PERCENT` (share of probed VRAM). Honesty rules and the
+        // precedence order live in `gpu_memory::budget`.
+        let gpu_budget_config = GpuBudgetConfig::from_env();
         Renderer {
             preference,
             recovery_limit: 2,
@@ -140,9 +144,14 @@ impl Renderer {
             flags_upload_count: 0,
             entity_flag_keys: std::collections::BTreeSet::new(),
             entity_flags_request: Vec::new(),
-            // The budget is resolved once, from the environment override, and is
-            // an **application estimate** (never the card's VRAM; see `gpu_memory`).
-            gpu_memory: Arc::new(GpuMemoryLedger::new(GpuBudget::from_env())),
+            // The budget policy is resolved from the environment now, but without
+            // a device no VRAM probe can run: this initial resolution is either
+            // the explicit override or the documented estimate fallback.
+            // `initialize_with_device` re-resolves it against the probed
+            // device-local total (see `gpu_memory`).
+            gpu_memory: Arc::new(GpuMemoryLedger::new(gpu_budget_config.resolve(None), None)),
+            gpu_budget_config,
+            gpu_vram: std::sync::Mutex::new(VramCache::default()),
             unit_quad_charge: None,
             target_charge: None,
             depth_charge: None,
@@ -625,6 +634,14 @@ impl Renderer {
         self.draw_plan = None;
         self.device = Some(device);
         self.queue = Some(queue);
+        // A fresh device generation re-probes VRAM exactly once, so the budget is a
+        // share of *this* card rather than the previous device's (or the estimate
+        // fallback). See `Renderer::refresh_gpu_budget_from_probe`.
+        self.gpu_vram
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .reset();
+        self.refresh_gpu_budget_from_probe();
         self.layout = Some(layout);
         self.line_pipeline = Some(line_pipeline);
         self.line_instanced_pipeline = Some(line_instanced_pipeline);
