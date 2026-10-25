@@ -1,3 +1,67 @@
+## 2026-10-25（续）TRIM/EXTEND 曲线子集 + chrome 收尾（含独立审查返修）
+
+### 结论
+
+在上一轮（文件命令/图层面板/右键菜单/GRID·ORTHO/别名）之后，本轮补两块：
+
+1. **TRIM / EXTEND 从"仅直线对直线"扩到曲线子集**（`crates/cad-app/src/app_drawing/trim_curves.rs`
+   + 新 `trim_boundary.rs`；旧的 straight-only helper 删除）：
+   - `TRIM` 目标：`LINE` / `ARC` / `CIRCLE`；`EXTEND` 目标：`LINE` / `ARC`（圆没有端点）。
+   - 边界：`LINE` / `ARC` / `CIRCLE` / `ELLIPSE` / `LWPOLYLINE`（含 bulge，拆成解析弧）。
+     交点来自 `cad_geometry::GeometryEngine::intersect_local`（对象捕捉同一个解析圆锥曲线求解器）。
+   - **拾取点是投影语义**：宿主按拾取框解析实体，对象捕捉可能关闭，因此把点击投影到目标曲线上再取参数；
+     只有"投影落在目标自身范围之外"与"圆/弧径向方向退化"两种显式拒绝，**绝不静默钳到最近端点**。
+   - **"整体在闭合边界内→删除"** 改为平面感知（倾斜闭合折线不再通过 XY 投影误删离面直线）、带容差、
+     覆盖 circle/ellipse/整圆弧边界与含 bulge 折线，并且对 `CIRCLE` 目标**可达**。
+   - 周期性去重按环绕距离，接缝两处交点不再被当成两刀；`|sweep| > 一圈` 的畸形弧显式拒绝；
+     `EXTEND` 的弧延伸有"小于半圈"上界（超过则显式拒绝，不绕远路）。
+   - **采样近似显式化**：ARC/CIRCLE×ELLIPSE、ELLIPSE×ELLIPSE、非共面圆族对走引擎采样回退时，
+     成功诊断追加 `drawing.trim` / `drawing.extend` 说明（**不**拒绝，也不假装解析）。
+2. **chrome 收尾**：QAT `UNDO`/`REDO` 真正派发；功能区启动器改为数据驱动（Layers→`LAYER`、
+   Properties→`PROPERTIES`，其余保持禁用并给新文案 `ribbon.panel_dialog_missing`）；
+   `palettesOffered` 成为导航栏/状态栏/工作区唯一载体判据；图纸标签 `+` 与布局标签用
+   `doctabs.one_document` / `layout.one_space` 说明真实结构限制。
+
+### 独立审查与返修（重要）
+
+`@oracle` 对本轮几何改动做了独立审查，确认"参数化裁剪架构、拒绝先于写入、单事务/单撤销"成立，
+同时指出并已修复：
+
+- **真实 bug**：负扫掠 ARC 的 `EXTEND` 起点端永远无法生长（`period()` 带符号 → 修成无符号）；
+- **真实 bug（破坏性）**：非共面闭合折线可经 XY 投影误删离面直线（改为在折线自身平面内判定 +
+  严格内含 + 容差）；
+- **真实 bug（契约不一致）**：整圆在闭合边界内的删除分支不可达（空交点判定上移到周期分支之前）；
+- **诚实性风险**：采样回退交点被当成解析交点（现追加显式诊断）；
+- **正确性风险**：拾取点未真正校验（先是改成严格拒绝，随后按真实宿主语义改为**投影**）；
+- **正确性风险**：周期交点去重不识别接缝（已环绕）；`|sweep| > TAU` 无校验（已拒绝）。
+
+### 已运行证据（本机，2026-10-25）
+
+- `cargo test -p cad-app --lib --locked` → **854 passed / 0 failed**（新增曲线裁剪 25 项契约）。
+- `cargo test -p cad-ui-core` 236、`cad-host` 208、`cad-desktop-shell` 23、`app-linux --lib` 172，
+  全部 0 failed。
+- `cargo clippy -p cad-app -p cad-host -p cad-ui-core -p cad-desktop-shell -p app-linux
+  --all-targets --locked -- -D warnings` → **0**；`cargo fmt --all -- --check` → **0**。
+- `cargo check --workspace --all-targets --locked` → **0**；
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` → **0**。
+- `python3 scripts/check-{architecture,fixture-manifest,workflows,i18n,file-size}.py` → 全部 **0**
+  （i18n 752 键；920 个代码文件，均 < 1000 行）。
+- `apps/desktop-ui`：`npm test` **551 passed / 0 failed**；`npm run build` **成功**（464.88 kB）。
+- 提交：`c79863b`（TRIM/EXTEND）、`f81197d`（chrome 收尾）。
+
+### NOT RUN / 边界
+
+- **没有任何 GUI/像素/真实 GPU 证据**：TRIM/EXTEND 只到命令层契约测试；图层面板、右键菜单、
+  启动器与新文案的视觉/交互仍只有纯函数 + 源码结构测试。
+- 拾取投影**未在真实宿主里跑过**：宿主仍把原始（或捕捉后）点击交给命令层；投影在命令层完成，
+  但"鼠标在真实窗口里点偏几像素"的行为没有实测。
+- `EXTEND` 的半圈上界与 `|sweep| > 一圈` 拒绝是**明确的产品/几何选择**，不是 AutoCAD 对齐声明。
+- ARC×ELLIPSE / ELLIPSE×ELLIPSE / 非共面圆族对是**采样近似**（有诊断但不精确）；没有与
+  AutoCAD 结果做过对照。
+- 仍显式未实现：`SPLINE` 目标/边界、`INSERT`/Opaque/Mesh 边界、3D 非共面裁剪、`SNAP`（F9）、
+  夹点、极轴、MTEXT、`LAYER` 的增删改名/颜色/锁定/冻结。
+
+
 ## 2026-10-25 桌面补齐轮：文件命令真实化 / 图层面板 / 右键菜单 / GRID·ORTHO / 命令别名
 
 ### 结论
