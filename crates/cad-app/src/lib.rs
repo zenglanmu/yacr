@@ -783,25 +783,27 @@ pub enum CommandPayload {
     /// `GRIPSTRETCH`: move **one** handle of **one** entity to a world point
     /// (the payload path of a grip drag; see [`crate::grips`] for the model).
     ///
-    /// This is **the payload of a pointer gesture, and there is no gesture yet**:
-    /// nothing in this build produces a `GripStretch` payload — there are no
-    /// renderer grip markers, no host arming and no pointer routing that would
-    /// resolve a drag into `{ id, to }`. Those are later lanes; the command is
-    /// defined now so the write path, its refusals and its undo granularity are
-    /// pinned before a UI can depend on them.
+    /// This is **the payload of a pointer gesture**: the gesture itself lives in
+    /// `cad-host` (`input/grip_drag.rs`) — a press on a marker of the selection
+    /// arms a drag, the moved marker is the preview, and the release commits one
+    /// `GripStretch`. The command is defined independently so the write path, its
+    /// refusals and its undo granularity stay pinned without a pointer, a marker
+    /// or a session.
     ///
-    /// `id` names the dragged handle and `to` the world point it is dragged to
-    /// (all three coordinates are stored; nothing is projected onto a work
-    /// plane — that projection belongs to the capture lane). The handler
+    /// `id` names the dragged handle and `to` the world point it is dragged to.
+    /// The host resolves `to` in the plan view (x/y from the viewport's
+    /// `screen_to_world`, the dragged handle's own `z`), and the command stores
+    /// all three coordinates as given — nothing is projected onto a work plane
+    /// here. The handler
     /// re-reads `id.entity`, refuses a missing entity (`grip.target_missing`) and
     /// a non-model-space one (`property.not_addressable`), then re-validates the
     /// handle against the current geometry through
     /// [`crate::grips::apply_grip`]. On success it stages exactly one
     /// `update_entity` in one transaction / one undo step; on **any** refusal it
     /// opens no transaction at all, so there is no empty undo entry and no
-    /// revision bump (a zero displacement is refused, not accepted as a no-op).
-    /// A non-finite `to` is refused (`grip.non_finite_target`) before the
-    /// drawing is read. Work-only.
+    /// revision bump (a zero displacement is refused, not accepted as a no-op —
+    /// the host turns that refusal into its own no-op). A non-finite `to` is
+    /// refused (`grip.non_finite_target`) before the drawing is read. Work-only.
     ///
     /// Supported handles are the model's whole surface: a `LINE` endpoint and a
     /// `POINT` position. Every other geometry kind refuses with

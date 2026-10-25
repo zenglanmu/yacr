@@ -224,6 +224,22 @@ pub struct OverlayInputs {
     /// rebuilds the transient overlay, and the marker size is derived from
     /// [`Self::viewport_bounds`] (see `point_marker_overlay`). Empty by default.
     pub point_markers: Vec<Point3>,
+    /// Grip handle positions of the **selected** entities, drawn as
+    /// screen-relative hollow square markers (`grip_marker_overlay`).
+    ///
+    /// One entry per grip, in whatever order the host enumerated the selection;
+    /// `cad-app` never derives it from the database (see `crate::grips` for the
+    /// handle model and `grip_markers` for the marker). While a grip is being
+    /// dragged the host replaces that entry with the current drag target, so a
+    /// moved marker **is** the drag preview. Grip *interaction* — hit testing,
+    /// dragging, commit — is not part of the overlay.
+    ///
+    /// Gated by [`OverlayVisibility::selection_highlight`] (grips only exist on a
+    /// selection), so it needs no visibility leaf of its own. It participates in
+    /// [`overlay_fingerprint`], so moving a grip rebuilds the transient overlay,
+    /// and the marker size is derived from [`Self::viewport_bounds`]. Empty by
+    /// default.
+    pub grip_markers: Vec<Point3>,
     /// Current view scale in **world units per logical pixel** of the active 2D
     /// view (the same quantity `Viewport::world_per_px` reports), used to size
     /// the screen-relative overlays — the object-snap markers
@@ -272,6 +288,7 @@ impl Default for OverlayInputs {
             visibility: OverlayVisibility::default(),
             viewport_bounds: None,
             point_markers: Vec::new(),
+            grip_markers: Vec::new(),
             view_scale: None,
             cursor: None,
             crosshair_percent: DEFAULT_CROSSHAIR_PERCENT,
@@ -283,7 +300,7 @@ impl Default for OverlayInputs {
 impl OverlayInputs {
     /// Whether every overlay input is empty (no highlight, no hover/hidden
     /// flags, no preview, no box selection, no resolved snap hints, no visible
-    /// POINT markers, no pointer cursor).
+    /// POINT markers, no grip markers, no pointer cursor).
     pub fn is_empty(&self) -> bool {
         self.selection.is_empty()
             && self.hovered.is_empty()
@@ -293,6 +310,7 @@ impl OverlayInputs {
             && self.selection_box.is_none()
             && self.snap_hints_input.is_empty()
             && self.point_markers.is_empty()
+            && self.grip_markers.is_empty()
             && self.cursor.is_none()
     }
 }

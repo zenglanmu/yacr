@@ -326,6 +326,8 @@
   "draw.kind.text": "文字",
   "draw.kind.erase": "删除",
   "draw.kind.explode": "分解",
+  "draw.kind.matchprop": "特性匹配",
+  "draw.kind.matchprop.hint": "至少需要选中两个对象：{command}会把第一个选中对象的显示特性复制到其余选中对象",
   "draw.status.idle": "选择 直线 / 圆 / 圆弧 / 移动 / 修剪 / 复制 / 延伸 / 旋转 / 缩放 / 镜像 / 偏移 开始绘制或编辑",
   "draw.error.read_only": "只读模式（查看）不允许绘制或编辑",
   "draw.error.unknown_geometry": "未知或不支持的图元",

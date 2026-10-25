@@ -33,6 +33,24 @@ export interface CadSelection {
 // contract violation because a panel would not know how to edit the row.
 const ROW_KINDS: ReadonlySet<string> = new Set(['text', 'number', 'enum', 'bool']);
 
+/**
+ * The selected-object count any consumer may read off a selection slice.
+ *
+ * Structural on purpose: the shortcut menu and the command-admission rules both
+ * ask the same question and must answer it the same way. Only a positive integer
+ * counts as a selection — `true`, `"2"` or a fractional number are not evidence
+ * of selected geometry, so they read as zero (the honest "nothing selected").
+ */
+export interface SelectionCountSlice {
+  readonly count?: unknown;
+}
+
+/** The selected-object count of a selection slice, or `0` when absent/malformed. */
+export function selectionCount(selection: SelectionCountSlice | null | undefined): number {
+  const count = selection?.count;
+  return typeof count === 'number' && Number.isSafeInteger(count) && count > 0 ? count : 0;
+}
+
 /** Validate (and return) a selection block; a broken one throws `CAD_STATUS_INVALID`. */
 export function parseSelection(selection: unknown): CadSelection {
   if (!selection || typeof selection !== 'object' || Array.isArray(selection)) {

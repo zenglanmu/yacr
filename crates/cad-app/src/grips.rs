@@ -5,10 +5,11 @@
 //! history entry, no renderer marker and no host arming here: the `GRIPSTRETCH`
 //! **command** lives in `crate::app_drawing::grip` (it re-reads the addressed
 //! entity, calls [`apply_grip`] and owns the single transaction / undo entry),
-//! and markers, host arming and pointer routing are still later lanes. Everything
-//! in this module is a pure function over one entity's geometry (or, for
-//! [`grip_hit`], over a list of entities), so it can be unit-tested without a
-//! drawing, a session or a GPU.
+//! the marker is `crate::render_scene::grip_marker_overlay` (fed by the host),
+//! and pointer routing / arming lives in `cad-host` (`input/grip_drag.rs`).
+//! Everything in this module is a pure function over one entity's geometry (or,
+//! for [`grip_hit`]/[`grip_hit_planar`], over a list of entities), so it can be
+//! unit-tested without a drawing, a session or a GPU.
 //!
 //! ## A grip is not a snap point
 //!
@@ -56,9 +57,12 @@
 //! the dragged handle in **all three** coordinates; nothing is projected onto a
 //! work plane or onto Z = 0. Because the supported kinds (`LINE` endpoint,
 //! `POINT`) have an exact 3D handle, there is no off-plane input to refuse: the
-//! caller (a later capture lane) is responsible for resolving the pointer into
-//! the world point it means, and the work-plane projection belongs there, not
-//! here. A non-finite target is refused (see below) instead of being stored.
+//! caller resolves the pointer into the world point it means, and that
+//! resolution belongs there, not here. The host (`cad-host`'s
+//! `input/grip_drag.rs`) resolves the pointer in the plan view — x/y from
+//! `screen_to_world`, and the dragged handle's own `z`, so a plan-view drag
+//! never changes an elevation — and this module stores whatever finite target it
+//! is given. A non-finite target is refused (see below) instead of stored.
 //!
 //! ## Hit-testing rule
 //!
@@ -67,6 +71,16 @@
 //! entities in the order the caller supplied them, and within one entity its
 //! grips in ascending `index` (for a `LINE`: `start` before `end`) — and a
 //! candidate replaces the current winner only when it is **strictly** closer.
+//!
+//! [`grip_hit_planar`] is the **plan-view** variant the host uses: the same
+//! ordering, tie-break and finiteness refusals, but the distance is measured in
+//! x/y only. A pointer resolves through the viewport's `screen_to_world`, which
+//! returns a point on the work plane (`z = work_plane.origin.z`); measuring 3D
+//! distance against that point would miss every grip whose own `z` differs, so
+//! a line at another elevation would be un-grippable in the very view that shows
+//! it. Ignoring `z` is the plan-view rule, **not** 3D grip editing: moving a
+//! handle in `z` is NOT IMPLEMENTED and the host keeps the dragged handle's own
+//! `z` in the target it commits.
 //!
 //! **Tie-break rule:** on an exact distance tie the winner is the **first**
 //! candidate in that iteration order, i.e. the earliest entity of the input and,
@@ -237,6 +251,60 @@ pub fn grip_hit<'a>(
     best.map(|(_, grip)| grip)
 }
 
+/// Hit-test a **plan-view** world position against the handles of `entities`.
+///
+/// Identical to [`grip_hit`] — same candidate iteration order, same
+/// "strictly closer wins" replacement rule (so an exact tie still goes to the
+/// earliest entity of the input and, within one entity, to the lower `index`),
+/// same `distance <= tolerance` predicate and same finiteness refusals — with
+/// **one** difference: the distance is measured in the x/y plane only, so the
+/// `z` coordinates of `world` and of the handle are ignored.
+///
+/// This is the documented **plan-view** hit rule for a pointer: the host
+/// resolves a pointer through the viewport's `screen_to_world`, which always
+/// returns a point on the work plane (`z = work_plane.origin.z`). A 3D distance
+/// against that point would miss every grip at another elevation (a `LINE` drawn
+/// at `z = 5` would be un-grippable in the plan view that displays it), so the
+/// plan-view rule deliberately measures what the user is aiming at on screen.
+///
+/// It is **not** 3D grip editing: dragging a handle in `z` is NOT IMPLEMENTED.
+/// The host keeps the dragged handle's own `z` in the target it commits, so a
+/// plan-view drag never changes an entity's elevation.
+///
+/// A non-finite `world`, a non-finite or negative `tolerance`, and a stored
+/// handle position at a non-finite coordinate (any of `x`, `y`, `z`) are
+/// non-hits. The explicit stored-position check is required here because an
+/// ignored `NaN` `z` would otherwise not poison the planar distance.
+#[must_use]
+pub fn grip_hit_planar<'a>(
+    entities: impl IntoIterator<Item = &'a DbEntity>,
+    world: Point3,
+    tolerance: f64,
+) -> Option<Grip> {
+    if !is_finite(world) || !tolerance.is_finite() || tolerance < 0.0 {
+        return None;
+    }
+    let mut best: Option<(f64, Grip)> = None;
+    for entity in entities {
+        for grip in grips_for_entity(entity) {
+            if !is_finite(grip.position) {
+                continue;
+            }
+            let distance = planar_distance(world, grip.position);
+            if distance.is_nan() || distance > tolerance {
+                continue;
+            }
+            match best {
+                // Strictly closer only: an exact tie keeps the earlier candidate,
+                // exactly like `grip_hit`.
+                Some((best_distance, _)) if distance >= best_distance => {}
+                _ => best = Some((distance, grip)),
+            }
+        }
+    }
+    best.map(|(_, grip)| grip)
+}
+
 /// Apply a single-handle drag to `geometry`, returning the geometry the entity
 /// must be updated to.
 ///
@@ -356,4 +424,11 @@ fn distance(a: Point3, b: Point3) -> f64 {
     let dy = a.y - b.y;
     let dz = a.z - b.z;
     (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+/// x/y distance, ignoring `z` (the plan-view rule of [`grip_hit_planar`]).
+fn planar_distance(a: Point3, b: Point3) -> f64 {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    (dx * dx + dy * dy).sqrt()
 }

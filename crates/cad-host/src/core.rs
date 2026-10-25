@@ -3,6 +3,7 @@
 use super::*;
 // Same monotonic clock alias as the crate root: std off wasm, `web-time` on wasm.
 use crate::Instant;
+use cad_app::grips::GripId;
 
 /// Platform-general host options.
 ///
@@ -70,6 +71,30 @@ pub(crate) struct BoxGesture {
     pub shift: bool,
 }
 
+/// A live grip drag: one handle of one entity, from its stored position to the
+/// current drag target.
+///
+/// Created by `HostCore::arm_grip_at` when a press lands on a handle of the
+/// current selection, updated by `HostCore::track_grip_drag` and consumed by
+/// `HostCore::commit_grip_drag` on release. It is pure transient gesture state:
+/// nothing is written (no entity update, no revision bump, no undo entry) until
+/// the commit, which is one `GripStretch` command — so a cancel is a pure state
+/// drop.
+///
+/// `from` is the handle's **stored** position (all three coordinates, verbatim;
+/// it is what the zero-displacement rule compares against) and `to` is the
+/// current target. The host keeps `from.z` in `to`, because a plan-view drag
+/// never changes an elevation (3D grip editing is NOT IMPLEMENTED).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GripDrag {
+    /// The dragged handle (entity, kind, ordinal).
+    pub id: GripId,
+    /// The handle's stored position at arm time.
+    pub from: Point3,
+    /// The current drag target; equal to `from` until the pointer moves.
+    pub to: Point3,
+}
+
 /// Per-instance pointer navigation state.
 ///
 /// The host owns the CAD gesture decisions (touch identity, drag threshold,
@@ -100,6 +125,20 @@ pub(crate) struct NavInner {
     pub press_modifiers: Cell<Option<Modifiers>>,
     /// The live box-selection drag, if a 2D primary drag is in progress.
     pub box_gesture: RefCell<Option<BoxGesture>>,
+    /// The live grip drag, if a press landed on a handle of the selection.
+    ///
+    /// Armed at press time by the single gesture arbiter (`pointer_down`), so no
+    /// later phase has to re-decide between grip, box, pan and orbit. `None`
+    /// whenever no grip is under the press.
+    pub grip_drag: RefCell<Option<GripDrag>>,
+    /// One-shot click-suppression latch.
+    ///
+    /// A release that ends a grip drag must not also select: the session emits
+    /// `Pointer Up` **followed by** `SelectAt` for a click, so `pointer_up` sets
+    /// this and `select_at_mode` consumes it. It is cleared by the next press (a
+    /// drag that produced no click must never swallow a later one) and by every
+    /// cancel/gesture-clear path.
+    pub suppress_click: Cell<bool>,
 }
 
 impl Default for NavInner {
@@ -114,6 +153,8 @@ impl Default for NavInner {
             button: Cell::new(None),
             press_modifiers: Cell::new(None),
             box_gesture: RefCell::new(None),
+            grip_drag: RefCell::new(None),
+            suppress_click: Cell::new(false),
         }
     }
 }

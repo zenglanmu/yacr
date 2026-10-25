@@ -62,6 +62,14 @@ impl HostCore {
             self.navigation.button.set(None);
             self.navigation.press_modifiers.set(None);
             *self.navigation.box_gesture.borrow_mut() = None;
+            // A stale `Up`/`Cancel` closes the gesture exactly like the live one:
+            // an armed grip drag is dropped (nothing was written). The
+            // click-suppression latch is deliberately **not** cleared here: this
+            // path also runs when a live release's commit refused, and the
+            // `SelectAt` the session emits right after that release must still be
+            // swallowed (a click on a grip never selects). The next press clears
+            // the latch, so it can never swallow a later, unrelated click.
+            self.cancel_grip_drag();
         }
     }
 

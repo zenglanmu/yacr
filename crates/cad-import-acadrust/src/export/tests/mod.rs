@@ -23,6 +23,7 @@ mod dimension;
 mod dimension_radial;
 mod entities;
 mod hatch;
+mod layers;
 mod report_limits;
 mod writer;
 

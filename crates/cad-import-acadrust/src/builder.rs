@@ -256,6 +256,17 @@ impl<'a> ImporterBuilder<'a> {
                 name: layer.name.clone(),
                 visible,
             })?;
+            // Store the full attribute set beside the row. `visible` stays the
+            // single answered question the rest of the build consumes, while
+            // `off` and `frozen` are recorded **separately** because a frozen
+            // layer is not an off layer even though this phase hides both.
+            //
+            // The four side maps above are still consumed by entity flattening
+            // (`entity/push.rs` substitutes a `ByLayer` entity's colour,
+            // lineweight, linetype and opacity from them), so they are kept in
+            // addition to — not instead of — the stored attributes.
+            self.builder
+                .set_layer_attributes(id, layer_attributes(layer))?;
         }
         Ok(())
     }

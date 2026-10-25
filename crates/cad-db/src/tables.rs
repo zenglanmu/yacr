@@ -10,6 +10,151 @@ pub struct Layer {
     pub visible: bool,
 }
 
+/// A layer's colour: the AutoCAD Color Index identity **and** its sRGB value.
+///
+/// Both are carried because they answer different questions. `aci` is the
+/// identity the source drawing used (DXF `62`, sign stripped; the sign itself
+/// is the off flag, see [`LayerAttributes::off`]) and is what a re-export must
+/// write to keep the drawing's colour *index* stable — for example a
+/// `ByLayer`-coloured entity on an ACI 1 layer must stay red, not become some
+/// nearest-RGB approximation. `rgb` is the resolved display value.
+///
+/// The pair can disagree by construction: `cad-db` may not depend on `cad-app`
+/// (architecture gate), so its ACI→sRGB table is unavailable here; a true-colour
+/// source layer (DXF `62` plus `420`) has `aci = None` and only `rgb`, and an
+/// ACI source has both. `cad-db` never derives one from the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LayerColor {
+    /// The source ACI index, when the layer had one. `None` for a true-colour
+    /// layer.
+    pub aci: Option<u8>,
+    /// Resolved sRGB display value.
+    pub rgb: [u8; 3],
+}
+
+impl Default for LayerColor {
+    fn default() -> Self {
+        // ACI 7 is AutoCAD's nominal white/black entity default.
+        LayerColor {
+            aci: Some(7),
+            rgb: [255, 255, 255],
+        }
+    }
+}
+
+/// A layer's lineweight, kept in the source's own scale and vocabulary.
+///
+/// The concrete variant stores **1/100 mm** — the DXF `370` / DWG unit — and not
+/// millimetres, so a re-export writes back the exact integer it read instead of
+/// a rounded float. `ByLayer`/`ByBlock` are degenerate on a layer record; they
+/// are modelled rather than collapsed so a source that carries them is not
+/// rewritten as an invented concrete weight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LayerLineWeight {
+    /// DXF `370` value, in 1/100 mm.
+    Hundredths(u16),
+    /// The linetype's "default" weight (DXF `370` = `-3`).
+    Default,
+    /// Symbolic inheritance (DXF `370` = `-1`).
+    #[default]
+    ByLayer,
+}
+
+/// Import-time attributes of a layer table row.
+///
+/// These live **beside** [`Layer`] in the database (map keyed by [`LayerId`]),
+/// exactly like [`EntityRenderAttributes`](crate::EntityRenderAttributes) live
+/// beside `DbEntity`, so adding an attribute never ripples into the hundreds of
+/// `Layer { .. }` literals across the workspace, and [`Layer`] itself stays the
+/// three-field row every existing consumer already reads.
+///
+/// # Invariant
+///
+/// `Layer::visible == !(off || frozen)` for every row the importer produces and
+/// for every row [`DrawingDatabase::create_layer`](crate::DrawingDatabase::create_layer)
+/// creates. `visible` remains the single answered question the rest of the
+/// build consumes; `off` and `frozen` are recorded **separately** because the
+/// drawing distinguishes them (a frozen layer is not an off layer) even though
+/// this phase treats both as "not visible".
+///
+/// # Nothing reads these yet
+///
+/// This is storage plus round-trip only. No code path reads `locked`, `frozen`,
+/// `frozen_in_new_viewport`, `plottable`, `plot_style` or the layer colour to
+/// change behaviour: layer locking/freezing/plotting, and propagating a layer
+/// colour to `ByLayer` entities, are **not implemented**.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayerAttributes {
+    /// Layer is off (DXF: the **sign** of group `62`; there is no off bit in
+    /// group `70`).
+    pub off: bool,
+    /// Layer is frozen (DXF group `70` bit `1`).
+    pub frozen: bool,
+    /// Frozen in newly created viewports (DXF group `70` bit `2`).
+    ///
+    /// This is **not** the off state; the DXF reader explicitly warns against
+    /// conflating them.
+    pub frozen_in_new_viewport: bool,
+    /// Layer is locked (DXF group `70` bit `4`).
+    pub locked: bool,
+    /// Layer came from an external reference (DXF group `70` bit `0x10`).
+    pub xref_dependent: bool,
+    /// Whether the layer plots (DXF group `290`). `true` by default.
+    pub plottable: bool,
+    /// Layer colour (DXF group `62` for the ACI, `420` for true colour).
+    pub color: LayerColor,
+    /// Linetype **name** (DXF group `6`). Resolved through the drawing's
+    /// linetype table, never a dangling reference.
+    pub linetype: String,
+    /// Lineweight (DXF group `370`).
+    pub lineweight: LayerLineWeight,
+    /// Opacity in `[0, 1]`, `1.0` fully opaque.
+    ///
+    /// The source stores transparency as an `AcCmTransparency` XDATA pair where
+    /// `0` is opaque and `255` is fully transparent; the sign of the meaning is
+    /// flipped here so every other opacity in the build compares the same way.
+    pub opacity: f32,
+    /// Plot style **name** (DXF group `390` is a handle, not a name).
+    ///
+    /// Stored because the importer can read it, but a name **cannot survive
+    /// export**: the DXF/DWG writers emit the plot-style *handle* only, so an
+    /// export writes the default and reports the dropped name. `None` means the
+    /// source declared no name.
+    pub plot_style: Option<String>,
+}
+
+impl Default for LayerAttributes {
+    fn default() -> Self {
+        // The state of a freshly created layer: on, thawed, unlocked, not
+        // xref-dependent, plottable, ACI 7 white, solid, ByLayer weight, fully
+        // opaque, no plot style. Every flag default is `false` **except**
+        // `plottable`.
+        LayerAttributes {
+            off: false,
+            frozen: false,
+            frozen_in_new_viewport: false,
+            locked: false,
+            xref_dependent: false,
+            plottable: true,
+            color: LayerColor::default(),
+            linetype: "Continuous".to_string(),
+            lineweight: LayerLineWeight::ByLayer,
+            opacity: 1.0,
+            plot_style: None,
+        }
+    }
+}
+
+impl LayerAttributes {
+    /// Whether this attribute set makes the layer visible.
+    ///
+    /// The same predicate the importer uses for [`Layer::visible`]: a frozen
+    /// layer is as invisible as an off one.
+    pub fn is_visible(&self) -> bool {
+        !self.off && !self.frozen
+    }
+}
+
 /// A named linetype table entry (spec §3.2 / §7.1).
 ///
 /// `pattern` is the resolved dash pattern; `complex` records whether the source

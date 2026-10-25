@@ -359,6 +359,17 @@ impl CadSceneController {
                             stamp.clone(),
                             fonts.clone(),
                         ));
+                        // Grip handles are the draggable affordance of the
+                        // entities just resolved above, so they share the
+                        // selection-highlight gate instead of a visibility leaf
+                        // of their own. The list is host-fed (one entry per
+                        // grip); `viewport_bounds` is `None` in a 3D view, so no
+                        // marker is emitted there.
+                        overlay.merge(grip_marker_overlay(
+                            &overlays.grip_markers,
+                            overlays.viewport_bounds,
+                            document,
+                        ));
                     }
                     overlay.merge(preview_overlay(
                         overlays.measurement.as_ref(),

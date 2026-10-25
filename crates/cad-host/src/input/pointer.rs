@@ -108,11 +108,26 @@ impl HostCore {
             self.navigation.button.set(button);
             self.navigation.press_modifiers.set(Some(modifiers));
             *self.navigation.box_gesture.borrow_mut() = None;
+            // A pending click-suppression latch belongs to the previous gesture:
+            // its click never arrived (a drag emits no `SelectAt`), so it must
+            // not swallow this gesture's click.
+            self.navigation.suppress_click.set(false);
+            // The press is the gesture arbiter: landing on a handle of the
+            // selection arms a grip drag here — before the box/pan decisions in
+            // `pointer_move` can claim the pointer — so every later phase only has
+            // to ask whether a drag is armed. Primary button only: the session
+            // emits `SelectAt` for the primary button alone, and a middle-button
+            // press on a grip must stay a pan.
+            if button == Some(PointerButton::Primary) {
+                self.arm_grip_at(point);
+            }
         } else {
             // Hard rule: multi-touch navigation replaces any active tool and
             // never commits a capture. It also takes over any single-contact box
-            // gesture: the winner is navigation, never a rubber band.
+            // gesture and any armed grip drag: the winner is navigation, never a
+            // rubber band or a geometry edit.
             self.clear_box_gesture();
+            self.cancel_grip_drag();
             self.controller.borrow_mut().cancel_tool()?;
             self.navigation.dragged.set(true);
             self.navigation.navigating.set(true);
@@ -130,6 +145,14 @@ impl HostCore {
     ) -> CadResult<()> {
         if !self.navigation.active.borrow().contains(&id) {
             // A move for a pointer that never went down (hover) is not a gesture.
+            return Ok(());
+        }
+        // An armed grip drag owns the single contact for its whole life: it is
+        // serviced **before** the capture / modal-pan / box early returns and
+        // before the drag threshold, otherwise the stream would die on the first
+        // move and the release would commit a stale target. No pan is emitted and
+        // no box gesture starts while it is armed.
+        if self.track_grip_drag(point) {
             return Ok(());
         }
         let contacts = self.navigation.active.borrow().len();
@@ -239,6 +262,18 @@ impl HostCore {
         let box_gesture = self.navigation.box_gesture.borrow_mut().take();
         self.navigation.button.set(None);
         self.navigation.press_modifiers.set(None);
+        // A release that ends an armed grip drag commits exactly one
+        // `GripStretch` (or nothing when the handle never moved) and claims the
+        // click the session emits right after this release: a click that lands on
+        // a grip must not also select. This runs before the box branch because a
+        // grip drag and a rubber band are mutually exclusive winners of the same
+        // press, and the grip won at press time.
+        if self.grip_drag_active() {
+            let committed = self.commit_grip_drag();
+            self.navigation.suppress_click.set(true);
+            committed?;
+            return Ok(());
+        }
         if let Some(gesture) = box_gesture {
             // A 2D primary drag selects a box: dispatch the real command through
             // the normal funnel and surface any refusal. The gesture and its
@@ -257,6 +292,9 @@ impl HostCore {
         // gesture and no rubber band may remain.
         self.clear_hover();
         self.clear_box_gesture();
+        // An armed grip drag is dropped, not committed: nothing was written
+        // before the release, so this is a pure state drop.
+        self.cancel_grip_drag();
         // The pointer is gone (a cancel/blur carries no position): drop the
         // cursor overlay too rather than leaving the crosshair at a stale spot.
         self.cursor_logical.set(None);
@@ -478,7 +516,10 @@ impl HostCore {
     /// projection, so a legitimate 3D view with an orthographic camera still
     /// orbits (the legacy adapter's `is_3d`). This also matches the application
     /// layer, whose `Orbit` command requires `view_mode.kind() == ThreeD`.
-    fn mode_is_3d(&self) -> bool {
+    ///
+    /// Visible to the sibling input modules: grip arming refuses a 3D view for
+    /// the same reason (no grip markers there and no 3D grip editing).
+    pub(super) fn mode_is_3d(&self) -> bool {
         let c = self.controller.borrow();
         c.application
             .workspace

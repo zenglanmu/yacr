@@ -326,6 +326,8 @@
   "draw.kind.text": "Text",
   "draw.kind.erase": "Erase",
   "draw.kind.explode": "Explode",
+  "draw.kind.matchprop": "Match properties",
+  "draw.kind.matchprop.hint": "Needs at least two selected objects: {command} copies the display properties of the first selected object to the other selected ones",
   "draw.status.idle": "Pick Line / Circle / Arc / Move / Trim / Copy / Extend / Rotate / Scale / Mirror / Offset to start drawing or editing",
   "draw.error.read_only": "Read-only (Viewer) mode does not allow drawing or editing",
   "draw.error.unknown_geometry": "Unknown or unsupported geometry",

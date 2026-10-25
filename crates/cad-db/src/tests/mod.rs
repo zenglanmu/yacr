@@ -6,6 +6,7 @@ use cad_domain::*;
 mod bounds;
 mod builder;
 mod drawing;
+mod layer_attributes;
 mod layers;
 mod plot;
 mod scale;

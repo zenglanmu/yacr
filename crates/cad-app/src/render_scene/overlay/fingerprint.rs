@@ -112,6 +112,16 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
     for point in &inputs.point_markers {
         hash_point(&mut hasher, *point);
     }
+    // Grip handles are overlay geometry too: moving a grip (a drag in progress
+    // replaces that entry with the drag target) or selecting another entity
+    // changes the marker set and must rebuild the transient overlay. The marker
+    // size is derived from `viewport_bounds` (hashed above), so a camera-only
+    // change re-scales the squares without rebuilding the base scene.
+    6u8.hash(&mut hasher);
+    inputs.grip_markers.len().hash(&mut hasher);
+    for point in &inputs.grip_markers {
+        hash_point(&mut hasher, *point);
+    }
     hasher.finish()
 }
 

@@ -258,6 +258,11 @@ impl HostCore {
                 self.render.set_draw_preview(None);
                 self.render.set_measurement_preview(None);
                 self.clear_hover();
+                // An armed grip drag is dropped, never committed: nothing was
+                // written before the release, so a cancel is a pure state drop.
+                // A pending click-suppression latch belongs to the interrupted
+                // gesture and dies with it.
+                self.reset_grip_gesture();
                 InteractionOutcome::Cancelled
             }
             InteractionRequest::SelectAt { point, mode } => {
@@ -300,6 +305,13 @@ impl HostCore {
                 modifiers,
                 ..
             } => {
+                // A grip drag owns the frame as an overlay-only change: the moved
+                // marker **is** the preview, so a press/move/release of a handle
+                // publishes no navigation delta (the camera did not move). The
+                // release commit runs through the ordinary command funnel and
+                // marks the derived state dirty there, exactly like any other
+                // write.
+                let grip_before = self.grip_drag_active();
                 if let Err(error) = self.pointer(id, phase, button, position, modifiers) {
                     // A stale/invalid coordinate refuses the request before its
                     // phase runs; a refusal of an `Up`/`Cancel` must still clear
@@ -309,6 +321,9 @@ impl HostCore {
                         self.clear_pointer_life(id);
                     }
                     return Err(error);
+                }
+                if grip_before || self.grip_drag_active() {
+                    scope = DirtyScope::Overlay;
                 }
                 InteractionOutcome::PointerObserved
             }
@@ -400,6 +415,14 @@ impl HostCore {
     }
 
     fn select_at_mode(&self, point: [f64; 2], mode: SelectionMode) -> CadResult<()> {
+        // A click that lands on a grip was already answered by the grip drag: the
+        // session emits `[Pointer Up, SelectAt]` for a click, so a release that
+        // committed a grip drag swallows the fabricated selection here. One shot:
+        // the latch is consumed, and a press resets it (see `pointer_down`), so a
+        // drag that produced no click never swallows a later one.
+        if self.navigation.suppress_click.replace(false) {
+            return Ok(());
+        }
         self.metrics()?;
         let c = self.controller.borrow();
         if !matches!(&c.session.tool, ToolState::Idle | ToolState::Selecting) {

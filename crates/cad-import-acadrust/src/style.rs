@@ -60,6 +60,77 @@ pub(crate) fn layer_rgb(color: acadrust::Color) -> [u8; 3] {
     concrete_rgb(color).unwrap_or([255, 255, 255])
 }
 
+/// The ACI identity of a layer colour, when the source carried one.
+///
+/// Only `Color::Index` has an index to preserve; a true-colour layer keeps its
+/// sRGB value in [`layer_rgb`] and answers `None` here. Symbolic variants
+/// (`ByLayer`/`ByBlock`/`None`) are degenerate on a layer record and likewise
+/// answer `None` rather than an invented index.
+pub(crate) fn layer_aci(color: acadrust::Color) -> Option<u8> {
+    match color {
+        acadrust::Color::Index(index) => Some(index),
+        acadrust::Color::ByLayer
+        | acadrust::Color::ByBlock
+        | acadrust::Color::None
+        | acadrust::Color::Rgb { .. } => None,
+    }
+}
+
+/// Map an acadrust lineweight onto the stored layer lineweight.
+///
+/// The concrete variant keeps the source's 1/100 mm integer so a re-export
+/// writes back exactly what it read; a negative value is unrepresentable as a
+/// weight and clamps to `0` (0.00 mm, an explicit "hairline") instead of
+/// wrapping into a huge `u16`.
+pub(crate) fn layer_line_weight(weight: acadrust::LineWeight) -> LayerLineWeight {
+    match weight {
+        acadrust::LineWeight::Value(hundredths) => {
+            LayerLineWeight::Hundredths(hundredths.max(0) as u16)
+        }
+        acadrust::LineWeight::Default => LayerLineWeight::Default,
+        acadrust::LineWeight::ByLayer | acadrust::LineWeight::ByBlock => LayerLineWeight::ByLayer,
+    }
+}
+
+/// Build the stored attribute row for one source layer.
+///
+/// `visible` is deliberately **not** recomputed here: the caller keeps using
+/// `!(off || frozen)` for [`Layer::visible`](cad_db::Layer::visible), and the
+/// row records the two flags separately so the invariant can be asserted.
+pub(crate) fn layer_attributes(layer: &acadrust::tables::Layer) -> LayerAttributes {
+    let linetype = layer.line_type.trim();
+    LayerAttributes {
+        off: layer.flags.off,
+        frozen: layer.flags.frozen,
+        frozen_in_new_viewport: layer.flags.frozen_in_new_viewport,
+        locked: layer.flags.locked,
+        xref_dependent: layer.flags.xref_dependent,
+        plottable: layer.is_plottable,
+        color: LayerColor {
+            aci: layer_aci(layer.color),
+            rgb: layer_rgb(layer.color),
+        },
+        // An empty name means the source did not set one; `Continuous` is the
+        // DXF default and the only name that is always defined, so it is a
+        // substitution of the documented default, not a guess.
+        linetype: if linetype.is_empty() {
+            "Continuous".to_string()
+        } else {
+            linetype.to_string()
+        },
+        lineweight: layer_line_weight(layer.line_weight),
+        opacity: layer_opacity(layer.transparency),
+        plot_style: {
+            let name = layer.plot_style.trim();
+            if name.is_empty() {
+                None
+            } else {
+                Some(name.to_string())
+            }
+        },
+    }
+}
+
 /// Resolve an entity's own colour into the effective display value.
 ///
 /// An explicit entity colour (`ByObject`: true colour or an ACI index) wins over

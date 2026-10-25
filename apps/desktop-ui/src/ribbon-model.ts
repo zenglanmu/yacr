@@ -272,6 +272,16 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'TRIM', labelKey: 'draw.kind.trim', icon: 'trim', command: 'TRIM', large: true },
           { id: 'ERASE', labelKey: 'draw.kind.erase', icon: 'erase', command: 'ERASE' },
           { id: 'EXPLODE', labelKey: 'draw.kind.explode', icon: 'explode', command: 'EXPLODE' },
+          // MATCHPROP (MA) is the selection-based property painter, so it sits
+          // beside ERASE/EXPLODE — the panel's other commands that act on the
+          // **current** selection. It is a small button with no variant popover:
+          // there is no Settings sub-prompt (which properties to copy), the
+          // command always transfers all five display properties, and a caret
+          // here would imply choices the command does not have. Its enabled state
+          // is the shared admission rule plus its own selection requirement
+          // (`SELECTION_REQUIREMENTS`), so with fewer than two selected objects it
+          // reads disabled with the sentence that names the rule.
+          { id: 'MATCHPROP', labelKey: 'draw.kind.matchprop', icon: 'matchprop', command: 'MATCHPROP' },
           { id: 'EXTEND', labelKey: 'draw.kind.extend', icon: 'extend', command: 'EXTEND' },
           { id: 'CHAMFER', labelKey: 'draw.kind.chamfer', icon: 'chamfer', command: 'CHAMFER' },
           { id: 'FILLET', labelKey: 'draw.kind.fillet', icon: 'fillet', command: 'FILLET' },
@@ -364,6 +374,10 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         items: [
           { id: 'ERASE', labelKey: 'draw.kind.erase', icon: 'erase', command: 'ERASE' },
           { id: 'EXPLODE', labelKey: 'draw.kind.explode', icon: 'explode', command: 'EXPLODE' },
+          // Same slot as on the Home tab: directly after the other selection-acting
+          // commands (see the Home/modify comment for why it is a small button with
+          // no popover and why its enablement is selection-gated).
+          { id: 'MATCHPROP', labelKey: 'draw.kind.matchprop', icon: 'matchprop', command: 'MATCHPROP' },
           { id: 'MOVE', labelKey: 'draw.kind.move', icon: 'move', command: 'MOVE' },
           { id: 'COPY', labelKey: 'draw.kind.copy', icon: 'copy', command: 'COPY' },
           { id: 'TRIM', labelKey: 'draw.kind.trim', icon: 'trim', command: 'TRIM' },

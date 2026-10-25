@@ -23,6 +23,12 @@
 //
 // Everything here is DOM-free and deterministic (no clock, no randomness), so
 // the menu contract is testable with plain Node.
+import { selectionCount } from './selection-wire.ts';
+
+// The count rule lives in `selection-wire.ts` beside the selection block it reads,
+// and the command-admission rules (`commands.ts`) ask it the same question. It is
+// re-exported here so the menu's callers keep a single import surface.
+export { selectionCount };
 
 /** The selection slice the shortcut menu reads (`cad_status.selection`). */
 export interface ContextMenuSelection {
@@ -96,17 +102,10 @@ function normalizeCommand(value: unknown): string {
 }
 
 /**
- * The selected-object count carried by `cad_status.selection`, or `0` when the
- * block is absent/malformed. Only a positive integer counts as a selection:
- * `true`/`"2"` are not evidence of selected geometry.
- */
-export function selectionCount(selection: ContextMenuSelection | null | undefined): number {
-  const count = selection?.count;
-  return typeof count === 'number' && Number.isSafeInteger(count) && count > 0 ? count : 0;
-}
-
-/**
  * Build the shortcut menu model.
+ *
+ * `hasSelection` goes through the shared `selectionCount` rule (imported above),
+ * so the menu and the command-admission rules agree on what "a selection" is.
  *
  * @param {object|null} selection    `cad_status.selection` (`{count, ...}`)
  * @param {object|null} tool         `cad_status.tool`; non-null while a tool

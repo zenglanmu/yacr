@@ -9,8 +9,8 @@ use crate::drawing::DrawingDatabase;
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::mleader_style::MLeaderStyle;
 use crate::tables::{
-    ActiveAnnotationScale, BlockDefinition, DynamicBlockVisibility, Layer, Layout, LineType,
-    PlotSettingsRecord, Scale, Style,
+    ActiveAnnotationScale, BlockDefinition, DynamicBlockVisibility, Layer, LayerAttributes, Layout,
+    LineType, PlotSettingsRecord, Scale, Style,
 };
 
 /// The only sanctioned way to construct a [`DrawingDatabase`].
@@ -37,6 +37,7 @@ impl DrawingDatabaseBuilder {
                 linetype_scale: 1.0,
                 plot_settings: BTreeMap::new(),
                 render_attributes: BTreeMap::new(),
+                layer_attributes: BTreeMap::new(),
                 scales: BTreeMap::new(),
                 dim_styles: BTreeMap::new(),
                 dim_style_ids_by_name: BTreeMap::new(),
@@ -83,6 +84,29 @@ impl DrawingDatabaseBuilder {
 
     pub fn insert_layer(&mut self, layer: Layer) -> CadResult<()> {
         self.database.layers.insert(layer.id, layer);
+        Ok(())
+    }
+
+    /// Record the attributes the importer resolved for a layer.
+    ///
+    /// The layer must already have been inserted; recording attributes for an
+    /// unknown id is a caller bug and is rejected rather than silently lost
+    /// (mirroring [`Self::set_entity_render_attributes`]).
+    ///
+    /// This is storage only: nothing in this build reads the flags to change
+    /// behaviour, and [`Layer::visible`] is **not** recomputed here — the
+    /// importer remains the authority for it.
+    pub fn set_layer_attributes(
+        &mut self,
+        id: LayerId,
+        attributes: LayerAttributes,
+    ) -> CadResult<()> {
+        if !self.database.layers.contains_key(&id) {
+            return Err(CadError::Invariant(format!(
+                "layer attributes for unknown layer {id:?}"
+            )));
+        }
+        self.database.layer_attributes.insert(id, attributes);
         Ok(())
     }
 

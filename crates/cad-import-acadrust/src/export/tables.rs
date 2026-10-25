@@ -6,11 +6,12 @@
 //! written as a dangling reference.
 
 use acadrust::tables::{Layer as DxfLayer, LineType as DxfLineType, LineTypeElement, TextStyle};
-use acadrust::CadDocument;
-use cad_db::{DrawingDatabase, LineType as DbLineType};
+use acadrust::{CadDocument, Color as DxfColor, LineWeight as DxfLineWeight, Transparency};
+use cad_db::{DrawingDatabase, LayerAttributes, LayerLineWeight, LineType as DbLineType};
 use cad_domain::Unit;
 
 use super::report::ExportReport;
+use crate::style::is_continuous_linetype;
 
 /// DXF `$INSUNITS` code for a source unit, when representable.
 ///
@@ -40,8 +41,9 @@ pub(crate) fn write_tables(
     // Layers. The document already defines layer "0"; add_or_replace keeps a
     // database layer named "0" from erroring as a duplicate.
     for layer in database.layers() {
+        let attributes = database.layer_attributes(layer.id);
         let mut entry = DxfLayer::new(layer.name.clone());
-        entry.flags.off = !layer.visible;
+        write_layer_attributes(&mut entry, &layer.name, &attributes, database, report);
         doc.layers.add_or_replace(entry);
     }
 
@@ -49,8 +51,109 @@ pub(crate) fn write_tables(
     for linetype in database.linetypes() {
         doc.line_types.add_or_replace(linetype_entry(linetype));
     }
+}
 
-    let _ = report;
+/// Copy the stored attribute row onto the DXF layer entry.
+///
+/// # The off bit versus `!visible`
+///
+/// The pre-attribute exporter wrote `flags.off = !layer.visible`, which
+/// *conflated* a frozen layer with an off one (both made `visible == false`).
+/// The stored row lets the two be written distinctly: `flags.off` now comes from
+/// [`LayerAttributes::off`] and the frozen bits from their own fields.
+///
+/// Because the importer defines `visible == !(off || frozen)`, re-importing the
+/// output still yields exactly the same `visible` value as before, so no
+/// drawing's **effective visibility** changes. What does change is that a frozen
+/// layer now round-trips as frozen instead of being rewritten as off — a
+/// previously-lost attribute, which is the point of this phase.
+fn write_layer_attributes(
+    entry: &mut DxfLayer,
+    layer_name: &str,
+    attributes: &LayerAttributes,
+    database: &DrawingDatabase,
+    report: &mut ExportReport,
+) {
+    entry.flags.off = attributes.off;
+    entry.flags.frozen = attributes.frozen;
+    entry.flags.frozen_in_new_viewport = attributes.frozen_in_new_viewport;
+    entry.flags.locked = attributes.locked;
+    entry.flags.xref_dependent = attributes.xref_dependent;
+    entry.is_plottable = attributes.plottable;
+
+    // ACI identity when the source had one (group 62), otherwise the resolved
+    // sRGB value (group 420). Never both invented: a true-colour source keeps
+    // its RGB and reports no index.
+    entry.color = match attributes.color.aci {
+        Some(index) => DxfColor::Index(index),
+        None => {
+            let [r, g, b] = attributes.color.rgb;
+            DxfColor::Rgb { r, g, b }
+        }
+    };
+
+    entry.line_type = exportable_linetype(&attributes.linetype, database, layer_name, report);
+
+    entry.line_weight = match attributes.lineweight {
+        LayerLineWeight::Hundredths(value) => DxfLineWeight::Value(value as i16),
+        LayerLineWeight::Default => DxfLineWeight::Default,
+        LayerLineWeight::ByLayer => DxfLineWeight::ByLayer,
+    };
+
+    // The source stores transparency with `0` meaning opaque; `opacity` is its
+    // complement, so the DWG byte scale is restored by inverting it. Fully
+    // opaque maps to `Explicit(0)`, which the writer omits entirely, so an
+    // opaque layer still writes no XDATA.
+    let alpha = ((1.0 - attributes.opacity.clamp(0.0, 1.0)) * 255.0).round() as u8;
+    entry.transparency = Transparency::Explicit(alpha);
+
+    // A plot-style **name** cannot survive export: both writers emit the
+    // plot-style *handle* (group 390), never the name. The entry therefore keeps
+    // the writer's default handle and the dropped name is reported.
+    if let Some(name) = attributes.plot_style.as_deref() {
+        report.notes.push(super::report::ExportDiagnostic {
+            object: None,
+            code: "export.layer_plot_style_dropped".into(),
+            message: format!(
+                "layer '{layer_name}' plot style '{name}' cannot be written (the DXF writer \
+                 emits a plot-style handle, not a name); the default plot style is used"
+            ),
+        });
+    }
+}
+
+/// The linetype name to write, never a dangling reference.
+///
+/// `Continuous` is the DXF-implied solid linetype and is always defined, so it
+/// is always writable. Any other name is written only when the database's
+/// linetype table carries it (case-insensitively, as AutoCAD names are); an
+/// unresolvable name is substituted with `Continuous` and reported, because a
+/// layer naming a linetype the file does not define is a broken reference.
+fn exportable_linetype(
+    name: &str,
+    database: &DrawingDatabase,
+    layer_name: &str,
+    report: &mut ExportReport,
+) -> String {
+    let name = name.trim();
+    if name.is_empty() || is_continuous_linetype(name) {
+        return "Continuous".to_string();
+    }
+    let known = database
+        .linetypes()
+        .any(|linetype| linetype.name.trim().eq_ignore_ascii_case(name));
+    if known {
+        return name.to_string();
+    }
+    report.notes.push(super::report::ExportDiagnostic {
+        object: None,
+        code: "export.layer_linetype_substituted".into(),
+        message: format!(
+            "layer '{layer_name}' names linetype '{name}', which this drawing's linetype table \
+             does not define; written as 'Continuous'"
+        ),
+    });
+    "Continuous".to_string()
 }
 
 /// Ensure a text style named `name` exists, returning the name to reference and

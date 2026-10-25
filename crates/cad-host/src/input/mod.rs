@@ -5,6 +5,7 @@
 //! from here).
 use super::*;
 
+mod grip_drag;
 mod hover;
 mod interaction;
 mod pointer;

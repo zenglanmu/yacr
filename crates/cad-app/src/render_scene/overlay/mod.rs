@@ -29,6 +29,7 @@
 //! | world axes/grid ([`AXES_GRID_DRAW_ORDER`]) | `800_000` |
 //! | POINT markers ([`POINT_MARKER_DRAW_ORDER`]) | `850_000` |
 //! | selection highlight (`HIGHLIGHT_DRAW_ORDER`) | `900_000` |
+//! | grip markers ([`GRIP_MARKER_DRAW_ORDER`]) | `950_000` |
 //! | box-selection rubber band ([`BOX_SELECT_DRAW_ORDER`]) | `1_750_000` |
 //! | tool preview ([`PREVIEW_DRAW_ORDER`]) | `2_000_000` |
 //! | pointer cursor crosshair + pickbox ([`CURSOR_DRAW_ORDER`]) | `2_500_000` |
@@ -38,13 +39,16 @@
 //! the user is acting on, so it draws above everything it does not anchor.
 //! Visible POINT markers are real drawing content, so they draw above the
 //! reference axes/grid but below all transient chrome. The box-selection
-//! rubber band sits below the live tool preview. The pointer cursor crosshair
-//! and its pickbox are the pointer itself, so they draw above the preview — the
-//! rubber band the user is dragging must never hide the pointer it is anchored
-//! to. The object-snap hints draw **above the crosshair**: the snap marker is
-//! what the user reads at the snap point, and when the pointer sits on the snap
-//! target the crosshair's pickbox would otherwise be painted over it, hiding the
-//! snap type exactly when it matters.
+//! rubber band sits below the live tool preview. Grip markers exist only on
+//! **selected** entities, so they draw immediately above the selection
+//! highlight — a handle must stay legible on the tinted entity it belongs to —
+//! while still sitting below the box-selection band and every live gesture
+//! overlay. The pointer cursor crosshair and its pickbox are the pointer itself,
+//! so they draw above the preview — the rubber band the user is dragging must
+//! never hide the pointer it is anchored to. The object-snap hints draw **above
+//! the crosshair**: the snap marker is what the user reads at the snap point,
+//! and when the pointer sits on the snap target the crosshair's pickbox would
+//! otherwise be painted over it, hiding the snap type exactly when it matters.
 //!
 //! The implementation is split across the submodules of this directory; every
 //! moved item is re-exported here under its original name, so the module path
@@ -71,6 +75,7 @@ use crate::viewer_config::OverlayVisibility;
 mod axes_grid;
 mod cursor;
 mod fingerprint;
+mod grip_markers;
 mod point_markers;
 mod preview;
 mod selection;
@@ -82,6 +87,7 @@ mod tests;
 pub use axes_grid::*;
 pub use cursor::*;
 pub use fingerprint::*;
+pub use grip_markers::*;
 pub use point_markers::*;
 pub use preview::*;
 pub use selection::*;

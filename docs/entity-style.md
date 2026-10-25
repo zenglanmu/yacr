@@ -52,9 +52,50 @@
 
 缺省条目仍表示“不透明、连续线、默认样式”，手工构造的数据库不受影响。
 
+## cad-db：图层属性（`Layer` 不变）
+
+图层属性与实体属性同构：**旁存**在 `DrawingDatabase::layer_attributes`
+（`BTreeMap<LayerId, LayerAttributes>`），`Layer { id, name, visible }` 保持三字段不变
+（全仓 87 个文件、183 处 `Layer` 字面量因此无需改动）。缺省条目由
+`layer_attributes(id)` 回退到 `LayerAttributes::default()`，手工构造的数据库不需要迁移；
+借用变体 `layer_attributes_ref(id)` 诚实返回 `None` 而不是伪造一行。
+
+```rust
+pub struct LayerColor { pub aci: Option<u8>, pub rgb: [u8; 3] }   // 缺省 Some(7) / 白
+pub enum LayerLineWeight { Hundredths(u16), Default, ByLayer }     // 1/100 mm，缺省 ByLayer
+pub struct LayerAttributes {
+    pub off, frozen, frozen_in_new_viewport, locked, xref_dependent: bool,
+    pub plottable: bool,          // 唯一缺省为 true 的布尔
+    pub color: LayerColor, pub linetype: String,
+    pub lineweight: LayerLineWeight, pub opacity: f32,   // 1.0 = 不透明
+    pub plot_style: Option<String>,
+}
+```
+
+各字段的 DXF 对应：`off` = 组 `62` 的**符号**（组 `70` 没有 off 位）、`frozen` = `70` bit 1、
+`frozen_in_new_viewport` = `70` bit 2、`locked` = `70` bit 4、`xref_dependent` = `70` bit `0x10`、
+`plottable` = `290`、`color.aci` = `62`、`color.rgb` = `420`（真彩）、`linetype` = `6`、
+`lineweight` = `370`、`opacity` 的补数 = `AcCmTransparency` XDATA（源里 `0` 不透明、`255` 全透明）。
+
+**`aci` 与 `rgb` 同时携带**：`cad-db` 不得依赖 `cad-app`（架构门禁），拿不到它的 ACI 表，
+所以索引身份与显示值分开存、互不推导；真彩图层 `aci = None`，索引图层两者都有。
+`lineweight` 存源的 1/100 mm 整数（不是毫米浮点），回写才能是读到的同一个整数。
+`plot_style` 存的是**名字**，而 DXF/DWG 写入器只写 plot-style **句柄**（组 `390`），
+所以这个名字**无法在导出中存活**（导出写缺省句柄并记一条诊断）。
+
+**不变量**：`Layer::visible == !(off || frozen)`（导入行与 `create_layer` 行）。`visible` 仍是
+全仓唯一被消费的“可见”答案；`off` 与 `frozen` 分开存，是因为图纸区分二者（冻结不是关闭），
+而本阶段两者都只是“不可见”。
+
+**本阶段零行为**：没有任何代码读 `locked`/`frozen`/`frozen_in_new_viewport`/`plottable`/
+`plot_style`/图层颜色去改变行为。显式未实现：(b) 锁定门禁、(c) 冻结门禁、(d) 出图、
+(e) 图层颜色传播到 `ByLayer` 实体——导入时 `ByLayer` 实体颜色仍被**拍平**成显式 sRGB
+（见下文），所以改图层颜色不会重着色任何东西。
+
 ## cad-import-acadrust：解析（ByObject → ByLayer → ByBlock）
 
-图层表先读入 `layer_colors`/`layer_lineweights`/`layer_linetypes`，线型表读入
+图层表先读入 `layer_colors`/`layer_lineweights`/`layer_linetypes`（**仍在用**：实体 `ByLayer`
+解析就从这三张旁表取值，所以它们与新的 `LayerAttributes` 行并存，不是被替换），线型表读入
 `linetype_patterns`（名字小写 → pattern），随后每个实体在 `push_entity` 里解析：
 
 - **ByObject 优先**：`Color::Rgb`/`Color::Index` → `EntityColor::Explicit`；

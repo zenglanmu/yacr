@@ -1,3 +1,211 @@
+## 2026-10-26 夹点拖拽（宿主侧）：按压 arm、移动预览、松开提交一次 `GripStretch`
+
+### 结论
+
+用户可见的夹点拖拽**宿主接线**已落地，**无 UI 改动、无 wire protocol 改动、无新 `InputKind`**：
+
+- `crates/cad-app/src/grips.rs`：新增 `grip_hit_planar`（**平面视图**命中规则：x/y 距离，
+  与 `grip_hit` 同一遍历顺序 / 同一 tie-break / 同一有限性拒绝）。文档明确这是平面规则、
+  **不是** 3D 夹点编辑。
+- `crates/cad-host/src/input/grip_drag.rs`（新文件，`impl HostCore`）：`arm_grip_at` /
+  `track_grip_drag` / `commit_grip_drag` / `cancel_grip_drag` / `reset_grip_gesture` /
+  `grip_drag_active` / `grip_marker_positions`。`GripDrag { id, from, to }` 与一次性闩锁
+  `suppress_click: Cell<bool>` 放进 `NavInner`（`core.rs`）。
+- `pointer.rs` / `interaction.rs` / `queue.rs` / `lib.rs::clear_gestures`：接线与全部取消路径。
+- `state.rs`：`OverlayInputs` 字面量补 `grip_markers: self.grip_marker_positions()`（此前该字面量
+  **编译失败**，本轮第一处修复）。
+
+### 仲裁设计（一个 gesture arbiter，按压时决定）
+
+`pointer_down` 的**单触点**分支是唯一同时持有图形、选择、相机与 pickbox 策略的时刻，因此夹点
+在此 arm，**在 box/pan 决策之前**，之后每个 phase 只问"是否已 arm"：
+
+| phase | 行为 |
+|---|---|
+| `pointer_down`（单触点，主键） | 记录 anchor/button 后 `arm_grip_at`；同时清掉上一手势遗留的闩锁 |
+| `pointer_down`（第 2 个触点） | `cancel_grip_drag()` + `clear_box_gesture()`（多触点导航获胜，绝不提交几何） |
+| `pointer_move` | **最先** `track_grip_drag`；armed 即 `return Ok(())`，因此不会被 `capturing()` / 模态平移 / box / `DRAG_THRESHOLD_LOGICAL_PX` 门槛吞掉 |
+| `pointer_up` | **在 box 分支之前** `commit_grip_drag()` 并置闩锁；armed 时早返回，绝不落到 pan/orbit |
+| `pointer_cancel` / `InteractionRequest::Cancel` | `reset_grip_gesture()`（纯状态丢弃，释放前不写任何东西） |
+| 陈旧 `Up`/`Cancel`（`queue.rs::clear_pointer_life`） | 同上 |
+| 文档/度量/配置变更（`lib.rs::clear_gestures`） | 同上 |
+
+**arming 门槛（全部满足才 arm）**：① 2D 视图（`mode_is_3d()` 为假）；② `!capturing()`；
+③ 工具状态 `Idle`/`Selecting`；④ **主键**（会话只为主键发 `SelectAt`；中键按在夹点上必须仍是平移）；
+⑤ 选择里至少有一个**可见**的**可直接寻址**实体（`document` 相同、`instance` 为空、
+`sub_element` 为 `None`）在 `pick_tolerance` 内有夹点。命中用 `grip_hit_planar`，可见性复用
+`cad_app::picking::ref_is_visible`（与点击/悬停同一谓词），没有第二套容差、命中或夹点枚举。
+
+### 点击抑制（一次性闩锁）
+
+会话对**点击**按序发 `[Pointer Up, SelectAt]`，对**拖拽**只发 `Up`。因此：
+
+- `pointer_up` 在 armed 分支置 `suppress_click = true`（**在**向上传播提交错误之前，故提交失败
+  也不会再选择一次）；
+- `select_at_mode` 顶部 `if self.navigation.suppress_click.replace(false) { return Ok(()) }` ——
+  一次性消费；
+- **下一次 `pointer_down` 清闩锁**：拖拽不产生 `SelectAt`，否则遗留闩锁会吞掉之后某个真实的点击；
+- `reset_grip_gesture()`（Cancel / 陈旧 `Up`|`Cancel` / `clear_gestures` / 第二触点）一并清闩锁。
+
+### `to` 的推导与预览路径
+
+- `to`：`Viewport::screen_to_world(logical, logical_size)` 的 **x/y** + **被拖夹点自身的 z**。
+  指针一定落在工作平面上（`z = work_plane.origin.z`），若直接采用会**静默改标高**；保留 `from.z`
+  让平面拖拽只做 2D 编辑（3D 夹点编辑 NOT IMPLEMENTED，文档已写明）。非有限目标**不写入**。
+- 预览：`grip_marker_positions()` 枚举**可见选中实体**的夹点，把被拖项替换成 `to`，喂给既有的
+  `OverlayInputs::grip_markers`；`state.rs::sync_render` 每次 dispatch 尾部重建并 request
+  preparation ⇒ **移动的标记就是预览**，没有第二份 ghost 标记。
+- 脏范围：夹点按压/移动走 `DirtyScope::Overlay`（不发布 navigation delta）；**松开提交**本身经过
+  普通 command funnel，和任何写入一样会把 derived state 标脏（相机没动）。
+
+### 证据（本地、合成；非运行时/像素证据）
+
+- `cargo test -p cad-app --lib --locked`：**965 passed**（新增 5 个 `grip_hit_planar` 契约：最近夹点、
+  标高 vs 3D 规则、容差边界/退化输入（含 NaN z 存储位）、无夹点实体跳过、tie-break）。
+- `cargo test -p cad-host --lib --locked`：**221 passed**（新增 4 个，`src/tests/grips.rs`）：
+  1. `press_on_a_grip_arms_a_drag_and_release_commits_one_gripstretch`：按下 armed；移动后
+     `overlays().grip_markers` 含目标位置（预览信号）且 `take_updates()` 的 `navigation`/`full`
+     均为 `None`；松开后端点 = 目标（x/y 来自 `screen_to_world`，z 不变）、另一端点**位级不变**、
+     revision +1、undo +1、其它实体未动；随后的 `SelectAt` **不**改变选择。
+  2. `a_press_on_a_grip_released_in_place_writes_nothing`：revision/undo/选择/status 全不变，
+     `grip.*` 不出现在状态里。
+  3. `a_later_click_that_does_not_land_on_a_grip_still_selects`：真拖拽（只发 `Up`，留下闩锁）之后，
+     下一次**非夹点**按压仍正常选中（钉住"按下即清闩锁"）。
+  4. `a_drag_from_empty_space_still_box_selects`：空白处主键拖拽仍起橡皮筋、不 arm（仲裁回归）。
+- 门禁（均实际运行）：`cargo clippy -p cad-app -p cad-host --all-targets --locked -- -D warnings`、
+  `cargo check --workspace --all-targets --locked`、`cargo fmt --all -- --check`、
+  `python3 scripts/check-architecture.py`、`python3 scripts/check-i18n.py`、
+  `python3 scripts/check-file-size.py`（`crates/cad-host/src/lib.rs` 现为 **1000 行 = 上限**，
+  新增逻辑已移入 `input/grip_drag.rs`；**零余量**，下一轮若再动 lib.rs 必须先搬走一段）。
+
+### 已知缺口 / 未验证（不得当成已验收）
+
+- **Escape 取消尚未在 UI 接好**：`apps/desktop-ui` 只在**工具有效**时发 `CANCEL`（第二次 Esc），
+  而拖拽发生在工具 `Idle`/`Selecting`，所以拖拽期间按 Esc **到不了宿主**。宿主的取消路径本身已接
+  并有合成测试，但触发端是后续 lane 的 UI/状态改动（`apps/desktop-ui` + 一个 `cad_status` 标志，
+  由 `npm test` 的源码/类型契约验证，**不得**写成运行时证据）。
+- **`dom-canvas` 载体（X11/XWayland、web）没有任何夹点标记或拖拽**：那是 wasm 侧 CAD 会话，
+  本轮 host 侧路径不参与（铁律 8）。Windows 仍只有 Tier 0 编译 + Wine 拒绝合同。
+- **无 GUI/像素/真窗口/真实鼠标证据**：全部为 `HostCore` 合成指针契约。夹点拖拽的视觉尺寸、
+  高 DPI、真实 pickbox 手感、性能均 **NOT RUN**。
+- 未实现：中点/圆心/插入点/顶点/宽度/旋转/切线夹点；多夹点与多实体拉伸；拖拽期间的
+  OSNAP / ORTHO / 栅格捕捉；3D 夹点编辑（含沿 z 移动）；夹点右键菜单与 `GRIPMULTIFUNCTIONAL`；
+  拖拽过程中的 `UNDO` 合并（每次拖拽恒为一步）。
+
+## 2026-10-26 图层属性：存储 + 导入 + 导出往返（零行为）
+
+### 结论
+
+图层的**属性此前被丢弃**：导入只保留 `visible = !off && !frozen`（**把冻结和关闭混为一谈**），
+颜色/线型/线宽/透明度只留在四张旁表供实体拍平；导出只写图层名 + `flags.off = !visible`，
+`let _ = report;` 把导出报告整个丢掉。本轮把它们变成**真实数据**并做完整往返，
+**但不加任何行为**。
+
+### 零波及（zero-churn）设计决定
+
+`Layer` **不加字段**（全仓 87 个文件、183 处 `Layer { .. }` 字面量会被迫返工）。
+属性与 `EntityRenderAttributes` 同构**旁存**：`DrawingDatabase::layer_attributes:
+BTreeMap<LayerId, LayerAttributes>`（在 `render_attributes` 旁边），单一构造器
+`DrawingDatabaseBuilder::new` 初始化，写入口 `set_layer_attributes`。
+
+- `crates/cad-db/src/tables.rs`：`LayerColor { aci: Option<u8>, rgb: [u8;3] }`
+  （缺省 `Some(7)` / 白）、`LayerLineWeight { Hundredths(u16), Default, #[default] ByLayer }`、
+  `LayerAttributes { off, frozen, frozen_in_new_viewport, locked, xref_dependent, plottable,
+  color, linetype, lineweight, opacity, plot_style }`。**唯一缺省为 `true` 的布尔是
+  `plottable`**；其余 `false`；`linetype` 缺省 `"Continuous"`；`opacity` 缺省 `1.0`；
+  `plot_style` 缺省 `None`。
+- 访问器：`layer_attributes(id) -> LayerAttributes`（clone + `Default` 回退，镜像
+  `entity_render_attributes`）与借用版 `layer_attributes_ref(id) -> Option<&LayerAttributes>`。
+- `create_layer` 写入 `Default` 行；`delete_layer` **删掉**属性行（否则旁表与行表会分叉）。
+- `aci` **与** `rgb` 同时携带：`cad-db` 不得依赖 `cad-app`（架构门禁），拿不到它的 ACI 表，
+  所以索引身份与显示值分开存、**互不推导**；真彩图层 `aci = None`。
+- `lineweight` 存源的 **1/100 mm 整数**（不是毫米浮点），回写才是读到的同一个整数。
+- `plot_style` 存**名字**，而 DXF/DWG 写入器只写 plot-style **句柄**（组 `390`）——
+  该名字**无法在导出中存活**（已在类型文档里写明，不是悄悄丢）。
+
+**不变量**（测试钉住，不进 `finish()` 校验——那会拒绝合法的 `insert_layer(visible=false)`
+手工夹具）：`Layer::visible == !(attributes.off || attributes.frozen)`，对导入行与
+`create_layer` 行都成立。
+
+### 导入（`cad-import-acadrust`）
+
+`builder.rs::read_layers` 每行同时写 `Layer` 与 `set_layer_attributes(...)`；映射集中在
+`style.rs::layer_attributes(&acadrust::tables::Layer)`：
+
+| 字段 | 来源 | 规则 |
+|---|---|---|
+| `off`/`frozen`/`frozen_in_new_viewport`/`locked`/`xref_dependent` | `layer.flags.*` | 逐位原样 |
+| `plottable` | `layer.is_plottable` | 原样 |
+| `color.aci` | `Color::Index(i)` | `Some(i)`；其余（含 `Rgb`）`None` |
+| `color.rgb` | `style::layer_rgb` | 既有解析（ACI 经 acadrust 表；符号值回退白） |
+| `linetype` | `layer.line_type` | trim；空 → `"Continuous"` |
+| `lineweight` | `layer.line_weight` | `Value(v) => Hundredths(v.max(0) as u16)`、`Default => Default`、`ByLayer`/`ByBlock => ByLayer` |
+| `opacity` | `style::layer_opacity` | 既有解析（`1 - alpha/255`） |
+| `plot_style` | `layer.plot_style` | trim；空 → `None` |
+| `visible` | — | **不变**：`!off && !frozen` |
+
+**四张旁表 `layer_transparency`/`layer_colors`/`layer_lineweights`/`layer_linetypes` 保留**：
+`entity/push.rs:89-95`（以及 `:143`/`:163`）仍在用它们解析实体 `ByLayer`，所以是
+**并存**而不是替换。`layer_attributes` 只是额外存储。无新增用户可见诊断。
+
+### 导出（`export/tables.rs`）
+
+`write_tables` 从存储属性写：`flags.off` 取 **`attributes.off`（不是 `!visible`）**、其余标志位
+逐位、`is_plottable`、颜色（有 ACI 写 `Color::Index`，否则 `Color::Rgb`）、`6` 线型名、`370` 线宽、
+`AcCmTransparency`（`opacity` 反演回源的字节刻度，`0` = 不透明；不透明时不写 XDATA，与旧行为一致）。
+`let _ = report;` 换成两条真实诊断（`report.notes`）：
+
+- `export.layer_plot_style_dropped`：存储的 plot-style 名字被丢弃（写缺省句柄）。
+- `export.layer_linetype_substituted`：线型名在本文档线型表里没有条目 →
+  写 `Continuous` + 诊断，**绝不发悬挂引用**。`Continuous` 恒可写（DXF 隐含实体线型）。
+
+**输出兼容的准确口径**：off/frozen 的**有效可见性**与旧行为一致——旧代码把
+`!visible == off || frozen` 写进 off 位、frozen 恒 0；新代码写 `off` 与真正的 `frozen` 位。
+因导入定义 `visible == !(off || frozen)`，**re-import 后 `visible` 完全相同**（测试逐层断言）。
+变化只在**冻结层现在以“冻结”而不是“关闭”回来**——这正是此前丢失的属性，也是本轮的目的。
+不得写成“输出逐字节不变”。导入型图纸的 off 位、以及全部既有 fixture 的报告码集合确实未变
+（`committed_fixtures_report_their_expected_losses` 仍绿）。
+
+### 已运行证据（本机，2026-10-26）
+
+- `cargo test -p cad-db --lib --locked` → **105 passed / 0 failed**（+7 新
+  `tests::layer_attributes`：缺省值、builder 往返、clone 回退 + 借用变体诚实 `None`、
+  `delete_layer` 删行、id 不复用、`visible == !(off||frozen)`、未知层拒绝）。
+- `cargo test -p cad-import-acadrust --lib --locked` → **283 passed / 0 failed / 1 ignored**
+  （+4 新 `tests::layer_attributes` +6 新 `export::tests::layers`）。含既有 273 条全绿。
+- `cargo clippy -p cad-db -p cad-import-acadrust --all-targets --locked -- -D warnings` → **0**。
+- `cargo fmt --all -- --check` → **0**。
+- `python3 scripts/check-architecture.py` → `Architecture OK: 28 packages`。
+- `python3 scripts/check-file-size.py` → `961 code file(s), limit 1000`（新文件 163/205/379 行；
+  `builder.rs` 766 → 777、`export/tables.rs` 119 → 222）。
+- **NOT RUN**：无 GUI/像素/真机证据（本轮不碰 UI/渲染/i18n/宿主/wire golden）；未跑全 workspace
+  全量门禁与平台编译矩阵（按日常策略只验本轮范围）；未用真实 DWG 回归（只有合成 fixture）。
+
+### 往返断言（无 GPU）
+
+- 合成 acadrust 文档（`DwgWriter`，与 `synthetic_dwg` 同套路）设**每个字段** →
+  导入 → 逐字段断言；`A-OFF`（仅 off）/`A-FROZEN`（仅 frozen）证明两者**互不混同**，
+  且两行 `visible` 均为 `false`。
+- `db1 → export → import → db2`：逐层 `LayerAttributes` **完全相等**、`visible` 相等、无
+  `export.layer_*` 诊断。**可容忍的 delta**：plot-style 名字丢失（专门一条测试 + 诊断）、
+  真彩源 `aci = None`（导出写 `420`，回读仍是 `None` + 同一 rgb）。
+- 原始组码断言：`70`（0 / 7）、`62`（符号 = off，`7` / `-5` / `2`）、`6`（`Continuous` /
+  `DASHED`）、`370`（`-1` / `35` / `-3`）、`290`（`1` / `0`）、`AcCmTransparency` 的 packed
+  低位 = `255 - alpha`。
+
+### 仍未实现（显式，不声称）
+
+1. **(b) 锁定门禁**：`locked` 被存储，**没有任何代码**据此拒绝对话/编辑。
+2. **(c) 冻结门禁**：`frozen`/`frozen_in_new_viewport` 只影响既有的 `visible` 布尔，
+   没有“新视口默认冻结”语义。
+3. **(d) 出图**：`plottable` 只被往返，`PLOT` 不看它，也没有 plot style 表（CTB/STB）行为。
+4. **(e) 图层颜色传播**：`ByLayer` 实体颜色**仍在导入时被拍平**成显式 sRGB
+   （`entity/push.rs`），所以**改图层颜色不会重着色任何东西**；线型/线宽同理。
+5. **层属性编辑命令**：没有 `SETLAYERCOLOR` 之类；`LayerAttributes` 只在导入时写，
+   编辑面为零（无事务、无撤销、无 wire 变化）。
+6. **wire/UI 不变**：图层 wire 形状与面板（色块仍是名字哈希）**本轮完全未动**。
+7. **plot-style 名字**：无法导出（写入器只发句柄）；CTB/STB 归一化未实现。
+
 ## 2026-10-26 GRIPSTRETCH 命令：一个夹点拖拽 = 一条事务 / 一步撤销
 
 ### 结论
@@ -510,7 +718,9 @@ NewEntityInsert { layer, space, display, type_key, label })`。此前 `commit_ne
 ### NOT RUN / 边界
 
 - **无 GUI/GPU/像素证据**；`MATCHPROP` 只有命令层契约测试，属性面板/画刷交互未做。
-- `MATCHPROP` 只出现在准入词表，**未**加入 chrome 的命令补全静态目录/功能区（需要新 i18n 文案与图标）。
+- ~~`MATCHPROP` 只出现在准入词表，未加入 chrome 的命令补全静态目录/功能区~~ → **2026-10-26 已补**：
+  `COMMAND_CATALOG` + Home/Draw 的 Modify 面板 + `matchprop` 图标，并按“至少选中两个”在
+  **派发前**显式拒绝（0/1 选中给出同一句提示）。
 - `HostSettings`/`CadSettings` 因携带 `f64` 不再派生 `Eq`（保留 `PartialEq`）。
 - 交互式 MATCHPROP（选源→选目标、画刷光标、Settings 子集）**NOT IMPLEMENTED**；本仓库无 AutoCAD 结果对照。
 

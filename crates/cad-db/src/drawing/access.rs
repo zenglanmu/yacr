@@ -7,9 +7,9 @@ use crate::dim_style::DimStyle;
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::mleader_style::{MLeaderStyle, MLeaderStyleResolution};
 use crate::tables::{
-    ActiveAnnotationScale, BlockDefinition, DynamicBlockVisibility, Layer, Layout, LineType,
-    PlotMargins, PlotPaperUnits, PlotProvenance, PlotRotation, PlotSettingsRecord, PlotType, Scale,
-    Style,
+    ActiveAnnotationScale, BlockDefinition, DynamicBlockVisibility, Layer, LayerAttributes, Layout,
+    LineType, PlotMargins, PlotPaperUnits, PlotProvenance, PlotRotation, PlotSettingsRecord,
+    PlotType, Scale, Style,
 };
 
 /// Dynamic-visibility membership of one entity, snapshotted before a delete.
@@ -181,6 +181,28 @@ impl DrawingDatabase {
 
     pub fn layers(&self) -> impl Iterator<Item = &Layer> {
         self.layers.values()
+    }
+
+    /// Resolved attributes of a layer table row.
+    ///
+    /// Missing entries resolve to [`LayerAttributes::default`] — on, thawed,
+    /// unlocked, plottable, ACI 7 white, `Continuous`, ByLayer weight, opaque —
+    /// so a hand-built database (tests, fixtures, imported drawings that carried
+    /// no layer attributes) keeps working without a migration. Mirroring
+    /// [`Self::entity_render_attributes`], the value is cloned rather than
+    /// borrowed so callers do not hold a borrow of the database.
+    pub fn layer_attributes(&self, id: LayerId) -> LayerAttributes {
+        self.layer_attributes.get(&id).cloned().unwrap_or_default()
+    }
+
+    /// Borrowing variant of [`Self::layer_attributes`], for callers that only
+    /// need to read one field (the exporter loops the whole table).
+    ///
+    /// `None` when this database has no recorded attributes for `id`; the caller
+    /// then uses `LayerAttributes::default()` semantics explicitly rather than
+    /// receiving a silently fabricated row.
+    pub fn layer_attributes_ref(&self, id: LayerId) -> Option<&LayerAttributes> {
+        self.layer_attributes.get(&id)
     }
 
     pub fn block(&self, id: BlockId) -> Option<&BlockDefinition> {

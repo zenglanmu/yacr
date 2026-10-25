@@ -70,6 +70,26 @@ const P = {
   stretch: <><rect x="3.5" y="8" width="6" height="8" /><rect x="14.5" y="8" width="6" height="8" strokeDasharray="2 2" /><path d="M10 12h4M12.5 10l2 2-2 2" /></>,
   erase: <><path d="M9 20.5H6.9l-3.3-3.3a1.8 1.8 0 0 1 0-2.5l8.9-8.9a1.8 1.8 0 0 1 2.5 0l3.3 3.3a1.8 1.8 0 0 1 0 2.5L11.5 20.5z" /><path d="M7.2 13.8 12.2 18.8" /><path d="M4 20.5h16" /></>,
   explode: <><circle cx="12" cy="12" r="2" /><path d="M12 6.5V3M12 21v-3.5M6.5 12H3M21 12h-3.5M8.1 8.1 5.6 5.6M18.4 18.4l-2.5-2.5M15.9 8.1l2.5-2.5M8.1 15.9l-2.5 2.5" /></>,
+  // Match properties: a paint brush, AutoCAD's own metaphor for MATCHPROP — the
+  // command "paints" one object's display properties onto the others. Two
+  // decisions, both checked by rasterising at 16 and 18 px:
+  //
+  //  * ONE closed outline for the whole brush, the way `pencil` draws body + nib
+  //    as a single object. A separate head (a stroked closed shape at the end of
+  //    a stick) collapses into a "loop on a stick" — it read as a lollipop, a key
+  //    and a magnifier at 16 px, not as a brush.
+  //  * The bristle face is the set's **only** filled shape: it is the paint the
+  //    brush carries. Stroked, the wide flat face the brush is recognised by
+  //    disappeared; filled, the glyph keeps a solid wide foot at the ribbon's
+  //    16 px small size.
+  //
+  // The flare (a narrow handle opening to a flat face more than twice its width)
+  // is what keeps it apart from `pencil` (uniform body, pointed nib) and from
+  // `erase` (a rubber block sitting on a baseline), and it carries no dimension
+  // line, tick or arrowhead, so it cannot read as one of the dimension glyphs. It
+  // spans the same 3–21 box as its neighbours so a row of small buttons keeps one
+  // optical size.
+  matchprop: <><path d="M17.2 3.5 20.5 6.8 13.8 13.5 10.1 20.5 3.5 13.9 10.5 10.2z" /><path d="M5.5 11.8 3.5 13.9 10.1 20.5 12.2 18.5z" fill="currentColor" /></>,
   distance: <><path d="M4 8v8M20 8v8M4 12h16" /><path d="M7 9 4 12l3 3M17 9l3 3-3 3" /></>,
   // Linear dimension: two vertical extension lines, a horizontal dimension line
   // between them and outward arrowheads. The aligned variant is the same shape

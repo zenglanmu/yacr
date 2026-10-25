@@ -12,6 +12,7 @@ mod dimension;
 mod dxf;
 mod hatch;
 mod insert;
+mod layer_attributes;
 mod mesh;
 mod mtext;
 mod ocs;

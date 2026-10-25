@@ -10,11 +10,13 @@
 //! ## The payload is a gesture's data, not a gesture
 //!
 //! [`crate::CommandPayload::GripStretch`] carries `{ id, to }`: the handle id
-//! resolved at pick time plus the world point the pointer resolved to. There is
-//! **no** gesture state machine, **no** renderer marker, **no** host arming and
-//! **no** pointer routing in this build — nothing produces this payload yet. A
-//! later lane owns those. The command exists now so the write path, its refusals
-//! and its one-undo-entry guarantee are pinned before a UI can depend on them.
+//! resolved at pick time plus the world point the pointer resolved to. The
+//! gesture that produces it lives in `cad-host` (`input/grip_drag.rs`): a press
+//! on a handle arms a drag, the pointer moves the marker preview, and the
+//! release commits exactly one command. Nothing in this module knows about a
+//! pointer, a marker or a session; the command exists so the write path, its
+//! refusals and its one-undo-entry guarantee are pinned independently of the
+//! host that now feeds it.
 //!
 //! ## Nothing on refusal
 //!

@@ -51,7 +51,7 @@ use cad_domain::*;
 
 use super::DrawingDatabase;
 use crate::change::ChangeSet;
-use crate::tables::Layer;
+use crate::tables::{Layer, LayerAttributes};
 
 /// Characters AutoCAD forbids in a symbol-table name (layer, linetype, style,
 /// block, …): `< > / \ " : ; ? * | , = ` plus the backtick.
@@ -110,6 +110,11 @@ impl DrawingDatabase {
                 visible: true,
             },
         );
+        // A created layer gets the documented default attributes (on, thawed,
+        // unlocked, plottable, ACI 7 white, `Continuous`, ByLayer weight,
+        // opaque), which keeps the `visible == !(off || frozen)` invariant: the
+        // row is visible and neither flag is set.
+        self.layer_attributes.insert(id, LayerAttributes::default());
         let change_set = self.publish_layer_change(transaction, reason);
         Ok((id, change_set))
     }
@@ -207,6 +212,10 @@ impl DrawingDatabase {
 
         // Phase 2: mutate.
         self.layers.remove(&id);
+        // The attributes row is keyed by layer id and must not outlive its
+        // layer: leaving it behind would keep an unreachable entry (and one that
+        // a future id-reuse would silently inherit).
+        self.layer_attributes.remove(&id);
         Ok(self.publish_layer_change(transaction, reason))
     }
 

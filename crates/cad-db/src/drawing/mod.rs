@@ -13,8 +13,8 @@ use crate::dim_style::DimStyle;
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::mleader_style::MLeaderStyle;
 use crate::tables::{
-    ActiveAnnotationScale, BlockDefinition, Layer, Layout, LineType, PlotSettingsRecord, Scale,
-    Style,
+    ActiveAnnotationScale, BlockDefinition, Layer, LayerAttributes, Layout, LineType,
+    PlotSettingsRecord, Scale, Style,
 };
 
 mod access;
@@ -55,6 +55,15 @@ pub struct DrawingDatabase {
     /// (transparency, geometry source). Absent entries are fully opaque
     /// analytic geometry, so older/hand-built databases stay valid.
     pub(crate) render_attributes: BTreeMap<EntityId, EntityRenderAttributes>,
+    /// Per-layer attributes the importer resolved from the source (flags,
+    /// colour, linetype, lineweight, plottable, opacity, plot style).
+    ///
+    /// Kept beside [`Self::layers`] rather than inside `Layer` so the row stays
+    /// the three fields every existing consumer reads. Absent entries resolve to
+    /// [`LayerAttributes::default`] (on, thawed, unlocked, plottable, ACI 7
+    /// white, `Continuous`, ByLayer weight, opaque), so older and hand-built
+    /// databases stay valid without a migration.
+    pub(crate) layer_attributes: BTreeMap<LayerId, LayerAttributes>,
     /// Named annotation scales from the drawing's `ACAD_SCALELIST`. Empty for
     /// hand-built databases; the importer fills it from the source drawing.
     pub(crate) scales: BTreeMap<ScaleId, Scale>,

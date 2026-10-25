@@ -9,8 +9,9 @@
 use super::*;
 
 use crate::grips::{
-    apply_grip, grip_hit, grips_for_entity, Grip, GripId, GripKind, REASON_NON_FINITE_TARGET,
-    REASON_STALE_HANDLE, REASON_UNSUPPORTED_KIND, REASON_ZERO_DISPLACEMENT,
+    apply_grip, grip_hit, grip_hit_planar, grips_for_entity, Grip, GripId, GripKind,
+    REASON_NON_FINITE_TARGET, REASON_STALE_HANDLE, REASON_UNSUPPORTED_KIND,
+    REASON_ZERO_DISPLACEMENT,
 };
 use cad_db::{DbEntity, DbObject};
 
@@ -301,6 +302,122 @@ fn grip_hit_tie_goes_to_the_first_candidate_in_input_order() {
     // the lower index (start) wins.
     let line = ent(13, line(0.0, 0.0, 2.0, 0.0));
     let hit = grip_hit([line].iter(), p3(1.0, 0.0, 0.0), 5.0).expect("a hit");
+    assert_eq!(
+        hit.id,
+        grip_id(13, GripKind::Endpoint, 0),
+        "start wins the tie"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 3b. Plan-view hit-testing (`grip_hit_planar`): same rules, x/y distance only.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn grip_hit_planar_picks_the_nearest_handle_within_tolerance() {
+    let entity = ent(7, line(0.0, 0.0, 10.0, 0.0));
+    let hit = grip_hit_planar([entity.clone()].iter(), p3(10.2, 0.3, 0.0), 1.0).expect("a hit");
+    assert_eq!(hit.id, grip_id(7, GripKind::Endpoint, 1));
+    assert_bits_eq(hit.position, p3(10.0, 0.0, 0.0), "the stored handle");
+
+    let hit = grip_hit_planar([entity].iter(), p3(0.4, -0.4, 0.0), 1.0).expect("a hit");
+    assert_eq!(hit.id, grip_id(7, GripKind::Endpoint, 0));
+}
+
+#[test]
+fn grip_hit_planar_ignores_z_where_the_3d_rule_misses() {
+    // A LINE drawn at z = 5, aimed at from the plan view: the pointer resolves
+    // onto the work plane (z = 0), so the 3D rule misses the handle it is sitting
+    // on while the plan-view rule hits it.
+    let elevated = ent(
+        21,
+        SemanticGeometry::Line {
+            start: p3(0.0, 0.0, 5.0),
+            end: p3(10.0, 0.0, 5.0),
+        },
+    );
+    let plan = p3(10.1, 0.0, 0.0);
+    assert!(
+        grip_hit([elevated.clone()].iter(), plan, 1.0).is_none(),
+        "the 3D rule measures the elevation difference"
+    );
+    let hit = grip_hit_planar([elevated].iter(), plan, 1.0).expect("the plan-view rule hits");
+    assert_eq!(hit.id, grip_id(21, GripKind::Endpoint, 1));
+    assert_bits_eq(
+        hit.position,
+        p3(10.0, 0.0, 5.0),
+        "the position stays the stored 3D handle, never a projected one",
+    );
+}
+
+#[test]
+fn grip_hit_planar_returns_none_outside_tolerance_and_for_degenerate_inputs() {
+    let entity = ent(7, line(0.0, 0.0, 10.0, 0.0));
+    assert!(grip_hit_planar([entity.clone()].iter(), p3(5.0, 5.0, 0.0), 1.0).is_none());
+    // Exactly at the tolerance is a hit; just beyond it is not.
+    assert!(grip_hit_planar([entity.clone()].iter(), p3(0.0, 1.0, 0.0), 1.0).is_some());
+    assert!(grip_hit_planar([entity.clone()].iter(), p3(0.0, 1.0 + 1e-9, 0.0), 1.0).is_none());
+    // Zero tolerance only hits an exactly coincident handle in x/y (z is ignored).
+    assert!(grip_hit_planar([entity.clone()].iter(), p3(0.0, 0.0, 42.0), 0.0).is_some());
+    // Negative / non-finite tolerance and non-finite query points never hit.
+    for tolerance in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(
+            grip_hit_planar([entity.clone()].iter(), p3(0.0, 0.0, 0.0), tolerance).is_none(),
+            "tolerance {tolerance:?} must not hit"
+        );
+    }
+    for world in [p3(f64::NAN, 0.0, 0.0), p3(0.0, f64::INFINITY, 0.0)] {
+        assert!(grip_hit_planar([entity.clone()].iter(), world, 1.0).is_none());
+    }
+    // A stored handle with a non-finite coordinate never hits, on any axis: the
+    // ignored z must not turn a corrupt position into a hit.
+    let corrupt = ent(
+        22,
+        SemanticGeometry::Line {
+            start: p3(0.0, 0.0, f64::NAN),
+            end: p3(10.0, 0.0, 0.0),
+        },
+    );
+    assert!(
+        grip_hit_planar([corrupt].iter(), p3(0.0, 0.0, 0.0), 1.0).is_none(),
+        "a NaN stored z is still a corrupt handle, never a hit"
+    );
+}
+
+#[test]
+fn grip_hit_planar_skips_entities_that_expose_no_grips() {
+    let circle = ent(
+        1,
+        SemanticGeometry::Circle {
+            center: p3(0.0, 0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            radius: 5.0,
+        },
+    );
+    assert!(grip_hit_planar([circle.clone()].iter(), p3(0.0, 0.0, 0.0), 1.0).is_none());
+    let line = ent(3, line(20.0, 0.0, 30.0, 0.0));
+    let hit = grip_hit_planar([circle, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
+    assert_eq!(hit.id, grip_id(3, GripKind::Endpoint, 0));
+}
+
+#[test]
+fn grip_hit_planar_tie_goes_to_the_first_candidate_in_input_order() {
+    let left = ent(11, SemanticGeometry::Point(p3(-2.0, 0.0, 0.0)));
+    let right = ent(12, SemanticGeometry::Point(p3(2.0, 0.0, 0.0)));
+    let hit = grip_hit_planar([left.clone(), right.clone()].iter(), p3(0.0, 0.0, 0.0), 5.0)
+        .expect("a hit");
+    assert_eq!(hit.id, grip_id(11, GripKind::Point, 0), "first entity wins");
+    let hit = grip_hit_planar([right, left].iter(), p3(0.0, 0.0, 0.0), 5.0).expect("a hit");
+    assert_eq!(
+        hit.id,
+        grip_id(12, GripKind::Point, 0),
+        "input order decides, not entity id"
+    );
+
+    // Within one LINE the midpoint query is equidistant from both endpoints:
+    // the lower index (start) wins, exactly like the 3D rule.
+    let line = ent(13, line(0.0, 0.0, 2.0, 0.0));
+    let hit = grip_hit_planar([line].iter(), p3(1.0, 0.0, 0.0), 5.0).expect("a hit");
     assert_eq!(
         hit.id,
         grip_id(13, GripKind::Endpoint, 0),

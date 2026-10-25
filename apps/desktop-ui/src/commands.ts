@@ -9,11 +9,14 @@
 // On top of the router's vocabulary the chrome keeps explicit **refusal** rules:
 // gesture-only names (a click cannot supply a drag payload), document-scoped
 // selectors (meaningless on the start page), the selectors the chrome answers
-// itself, and the host **capability booleans** (`NEW`/`SAVE`/`PLOT` and their
-// aliases). No name is disabled merely because it is "host-owned": the host
-// publishes `canNew`/`canSave`/`canPlot` in `cad_status` and those booleans
-// decide. Every refusal is explicit and named, not a silent omission — the
-// buttons stay visible but disabled with the real reason key.
+// itself, the host **capability booleans** (`NEW`/`SAVE`/`PLOT` and their
+// aliases), and the commands that act on the **current selection** and can
+// therefore only run once that selection is big enough (`SELECTION_REQUIREMENTS`).
+// No name is disabled merely because it is "host-owned": the host publishes
+// `canNew`/`canSave`/`canPlot` in `cad_status` and those booleans decide. Every
+// refusal is explicit and named, not a silent omission — the buttons stay visible
+// but disabled with the real reason key.
+import { selectionCount } from './selection-wire.ts';
 
 /** The `cad_status` slice the admission rules read (all fields are the host's). */
 export interface CommandStatusView {
@@ -25,6 +28,8 @@ export interface CommandStatusView {
   canPlot?: boolean;
   canFit?: boolean;
   entityCount?: number | null;
+  /** The `cad_status.selection` slice the selection rules count (`{count}`). */
+  selection?: { readonly count?: unknown } | null;
 }
 
 /** A host capability boolean that gates a file-level selector. */
@@ -292,8 +297,72 @@ export const GESTURE_ONLY_COMMANDS: readonly string[] = Object.freeze(['ORBIT'])
  * projection of that same camera, so on the start page there is nothing to
  * frame. They are disabled there with the catalog's own "no drawing is open"
  * sentence instead of a misleading "not supported yet".
+ *
+ * `MATCHPROP` needs a drawing *and* a selection; it is deliberately **not** in
+ * this list — a document is not its only precondition, and the set means exactly
+ * "a drawing is the whole requirement" (see `SELECTION_REQUIREMENTS`, which
+ * answers the no-document case for selection-gated commands itself).
  */
 export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION']);
+
+/** One command's precondition on the **current selection**. */
+export interface SelectionRequirement {
+  /** Minimum selected objects that can still produce a real result. */
+  readonly count: number;
+  /**
+   * The catalog sentence that words the requirement. It is the desktop's own
+   * copy of the host rule (`matchprop.needs_two`), so the disabled ribbon hint
+   * and the command line's refusal say the same thing — and it is the *only*
+   * place the source→targets rule is spelled out for the reader.
+   */
+  readonly reasonKey: string;
+}
+
+/**
+ * Commands whose bare name acts on the **current selection**, with the smallest
+ * selection that is not a guaranteed refusal.
+ *
+ * `MATCHPROP` is the selection-based property painter: the first selected entity
+ * is the **source**, every other selected entity is a **target**, so one object
+ * or none is never a partial success — the host refuses it outright
+ * (`matchprop.needs_two`). Offering a live button in that state would be an
+ * affordance that can only fail, so the same table disables it with a sentence
+ * that says what is missing (`draw.kind.matchprop.hint`) *and* stops the command
+ * line from sending a line that cannot succeed.
+ *
+ * Only *count* preconditions belong here. A command that merely needs "something"
+ * selected (ERASE, MOVE, COPY) keeps the neighbours' contract: it stays enabled
+ * and the host answers with an explicit refusal, because its own copy
+ * (`draw.error.selection_required`) already says so at run time.
+ */
+export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequirement>> = Object.freeze({
+  MATCHPROP: Object.freeze({ count: 2, reasonKey: 'draw.kind.matchprop.hint' }),
+});
+
+/** The selection requirement of `id`, or `null` when it has none. */
+export function selectionRequirement(id: unknown): SelectionRequirement | null {
+  return SELECTION_REQUIREMENTS[normalizeCommandText(id)] ?? null;
+}
+
+/**
+ * Whether the current selection satisfies `id`'s requirement.
+ *
+ * A command with no requirement, or one asked without a status (the host has not
+ * answered yet), is never blocked here — an unknown selection is not evidence of
+ * an empty one, and the status-less path already refuses everything it cannot
+ * prove elsewhere. With **no drawing** it is always `false`: there is no
+ * selection block to read, so the requirement can never be met (the callers say
+ * "no drawing is open" in that case rather than "select more objects").
+ */
+export function selectionRequirementMet(
+  id: unknown,
+  status: CommandStatusView | null | undefined,
+): boolean {
+  const requirement = selectionRequirement(id);
+  if (!requirement || !status) return true;
+  if (status.documentLabel === null) return false;
+  return selectionCount(status.selection) >= requirement.count;
+}
 
 /**
  * Selectors the **chrome** answers itself, before the router. They have a real
@@ -372,9 +441,25 @@ export function unavailableReasonKey(
 ): string {
   const name = normalizeCommandText(id);
   if (GESTURE_ONLY_COMMANDS.includes(name)) return 'view.orbit.gesture';
+  // Busy/loading is answered **before** the capability table, for every command.
+  // A capability gate used to be the only way into this branch, so a gate-less
+  // command (ERASE, MATCHPROP, …) told the reader "Command not available" while a
+  // load or another command was merely still running — the permanent-limitation
+  // sentence for a temporary state. The module's own contract is the opposite
+  // ("the busy sentence while the host is loading or a command is already in
+  // flight"), so the temporary fact is worded first.
+  if (status && (pending || status.loading)) return BUSY_KEY;
+  // A selection precondition is answered next: MATCHPROP has no capability gate,
+  // yet with fewer than two selected objects the real reason is the selection, not
+  // "unsupported". With no drawing open the honest reason is the catalog's own "no
+  // drawing is open" sentence — there is no selection to count.
+  const requirement = SELECTION_REQUIREMENTS[name];
+  if (requirement && status) {
+    if (status.documentLabel === null) return NO_DOCUMENT_KEY;
+    if (!selectionRequirementMet(name, status)) return requirement.reasonKey;
+  }
   const gate = CAPABILITY_GATES[name];
   if (!gate || !status) return 'command.unsupported';
-  if (pending || status.loading) return BUSY_KEY;
   if (!status[gate]) return capabilityRefusalKey(name, status);
   return 'command.unsupported';
 }
@@ -466,6 +551,12 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'STRETCH', labelKey: 'draw.kind.stretch', icon: 'stretch', group: 'modify' },
   { id: 'ERASE', labelKey: 'draw.kind.erase', icon: 'erase', group: 'modify' },
   { id: 'EXPLODE', labelKey: 'draw.kind.explode', icon: 'explode', group: 'modify' },
+  // MATCHPROP (the selection-based property painter) sits after the other
+  // selection-acting modify commands. It is a **payload-free** router command, so
+  // it is listed and typeable; whether it can run is decided by
+  // `SELECTION_REQUIREMENTS` (it needs a source *and* at least one target), so a
+  // one-object selection is refused with the sentence that says so.
+  { id: 'MATCHPROP', labelKey: 'draw.kind.matchprop', icon: 'matchprop', group: 'modify' },
   { id: 'DIST', labelKey: 'measure.kind.distance', icon: 'distance', group: 'measure' },
   { id: 'MEASUREPOLYLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', group: 'measure' },
   { id: 'MEASUREANGLE', labelKey: 'measure.kind.angle', icon: 'angle', group: 'measure' },
@@ -662,6 +753,18 @@ export function admitCommandText(text: unknown, { status = null, pending = false
   }
   if (DOCUMENT_SCOPED_COMMANDS.includes(id) && status.documentLabel === null) {
     return { kind: 'unavailable', command, reasonKey: NO_DOCUMENT_KEY };
+  }
+  // A selection precondition is checked before the command reaches the host: with
+  // no drawing open there is no selection to read, and with too small a selection
+  // MATCHPROP can only be refused (`matchprop.needs_two`). Either way the line is
+  // answered here with the sentence that says what to do first.
+  const requirement = SELECTION_REQUIREMENTS[id];
+  if (requirement && !selectionRequirementMet(id, status)) {
+    return {
+      kind: 'unavailable',
+      command,
+      reasonKey: status.documentLabel === null ? NO_DOCUMENT_KEY : requirement.reasonKey,
+    };
   }
   if (id === 'FIT' && !(status.canFit && status.documentLabel !== null && status.entityCount !== null)) {
     return { kind: 'unavailable', command, reasonKey: 'command.unsupported' };

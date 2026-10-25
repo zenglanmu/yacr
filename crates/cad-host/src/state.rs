@@ -169,6 +169,11 @@ impl HostCore {
             // Visible POINT markers are derived by the scene assembly from the
             // drawing being displayed, so the host feeds none itself.
             point_markers: Vec::new(),
+            // Grip handles of the visible selected entities, fed by the host from
+            // `cad_app::grips` (never derived by the overlay). While a grip drag
+            // is armed the dragged entry is the current drag target, so the moved
+            // marker **is** the drag preview.
+            grip_markers: self.grip_marker_positions(),
             // Screen-space sizing for the transient overlays (snap markers, the
             // cursor crosshair/pickbox): world units per logical pixel of the 2D
             // view, and the cursor's world point.

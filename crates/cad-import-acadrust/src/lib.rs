@@ -16,8 +16,9 @@ use acadrust::entities::{
 use acadrust::{DwgReadOptions, DwgReader, DxfReader, EntityType, ReadStats};
 use cad_db::{
     BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, EntityColor,
-    EntityLineType, EntityLineWeight, EntityRenderAttributes, EntityTransparency, Layer, Layout,
-    LineType as DbLineType, LinetypePattern, PaperViewport, Style,
+    EntityLineType, EntityLineWeight, EntityRenderAttributes, EntityTransparency, Layer,
+    LayerAttributes, LayerColor, LayerLineWeight, Layout, LineType as DbLineType, LinetypePattern,
+    PaperViewport, Style,
 };
 use cad_domain::hatch::GradientStop;
 use cad_domain::*;

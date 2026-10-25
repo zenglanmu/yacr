@@ -569,3 +569,121 @@ test('DIMLINEAR and DIMALIGNED are annotate affordances in the ribbon and catalo
   );
 });
 
+test('MATCHPROP sits with the selection-acting modify commands and needs a source and a target', async () => {
+  const { readCatalog, readModule } = await import('./helpers.ts');
+  const id = 'MATCHPROP';
+  // The catalog entry mirrors the neighbouring edit commands (`draw.kind.*`).
+  const entry = COMMAND_CATALOG.find(command => command.id === id);
+  assert.ok(entry, `${id} must be in the command catalog`);
+  assert.equal(entry.labelKey, 'draw.kind.matchprop');
+  assert.equal(entry.icon, 'matchprop');
+  assert.equal(entry.group, 'modify');
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  assert.equal(typeof zh['draw.kind.matchprop'], 'string');
+  assert.equal(typeof en['draw.kind.matchprop'], 'string');
+  // Both catalogs word the requirement its disabled state shows; the copy is the
+  // only place the source→targets rule is spelled out for the reader, and it must
+  // name the *two* objects the machine rule requires.
+  for (const locale of [zh, en]) {
+    assert.equal(typeof locale['draw.kind.matchprop.hint'], 'string');
+  }
+  assert.match(en['draw.kind.matchprop.hint'], /at least two|two selected/i);
+  assert.match(zh['draw.kind.matchprop.hint'], /两个/);
+  assert.match(en['draw.kind.matchprop.hint'], /\{command\}/, 'the ribbon hint names the item');
+  assert.match(en['draw.kind.matchprop.hint'], /first selected/i);
+  assert.match(en['draw.kind.matchprop.hint'], /cop(?:y|ies)/i);
+
+  // Placed with the other modify actions on the Home and Draw tabs, directly
+  // after ERASE/EXPLODE — the panel's other commands that act on the **current**
+  // selection — and wired as a router command (no local shell action).
+  for (const tabId of ['home', 'draw']) {
+    const modify = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'modify');
+    assert.ok(modify, `${tabId} must keep its modify panel`);
+    const item = modify.items.find(candidate => candidate.id === id);
+    assert.ok(item, `${tabId}/modify must carry the ${id} affordance`);
+    assert.equal(item.command, id);
+    assert.equal(item.labelKey, 'draw.kind.matchprop');
+    assert.equal(item.icon, 'matchprop');
+    assert.equal(item.action, undefined, `${id} must not be a local shell action`);
+    assert.equal(item.large, undefined, `${id} is a small modify button, not a primary tile`);
+    // No caret: MATCHPROP's Settings sub-prompt (which properties to copy) is not
+    // implemented, so a popover would imply choices the command does not have.
+    assert.equal(item.variants, undefined, `${id} has no variant popover`);
+    assert.equal(modify.items.filter(candidate => candidate.id === id).length, 1, `${tabId}: one ${id} button`);
+    const order = modify.items.map(candidate => candidate.id);
+    const at = order.indexOf(id);
+    // Directly after the selection-acting pair on both tabs (the draw panel puts
+    // MOVE/COPY after them, so the shared anchor is EXPLODE, not its successor).
+    assert.equal(order[at - 1], 'EXPLODE', `${tabId}: ${id} follows EXPLODE`);
+    assert.equal(order[at - 2], 'ERASE', `${tabId}: ERASE precedes EXPLODE`);
+  }
+  // It is a modify action only: no draw/annotate/view panel dispatches it.
+  for (const tab of RIBBON_TABS) {
+    for (const panel of tab.panels) {
+      if (panel.id === 'modify') continue;
+      assert.equal(panel.items.some(item => item.command === id), false, `${tab.id}/${panel.id} must not dispatch ${id}`);
+    }
+  }
+  // The glyph really exists (a missing name would silently draw the `dot`), and it
+  // is its own mark rather than a reuse of the neighbouring edit glyphs.
+  const icons = await readModule('icons.tsx');
+  const map = icons.match(/const P = \{([\s\S]*?)\n\};/);
+  assert.ok(map, 'expected the icon name map in icons.tsx');
+  const glyph = map[1].match(/\n\s*matchprop:\s*(<><[\s\S]*?<\/>),/);
+  assert.ok(glyph, "icons.tsx must define 'matchprop'");
+  for (const other of ['pencil', 'erase', 'explode']) {
+    const neighbour = map[1].match(new RegExp(`\\n\\s*${other}:\\s*(?:<\\/>)?(<><[\\s\\S]*?<\\/>)\\s*,`))
+      ?? map[1].match(new RegExp(`\\n\\s*${other}:\\s*(<[\\s\\S]*?),\\n`));
+    assert.ok(neighbour, `expected the ${other} glyph`);
+    assert.notEqual(glyph[1], neighbour[1], `${id} must not reuse the ${other} glyph`);
+  }
+  // The one filled shape in the set is the paint the brush carries; the bristle
+  // face it fills is what keeps the glyph legible at the ribbon's 16px.
+  assert.match(glyph[1], /fill="currentColor"/, 'the bristle face is filled');
+
+  // Router admission is the single enable gate, and the vocabulary alone is not
+  // enough: MATCHPROP reads the current selection, so the selection requirement
+  // decides too. The machine rule and the copy are pinned together here — the
+  // sentence names the two objects its `count` requires.
+  const { SELECTION_REQUIREMENTS, selectionRequirementMet, unavailableReasonKey } = await import('../src/commands.ts');
+  assert.deepEqual(SELECTION_REQUIREMENTS[id], { count: 2, reasonKey: 'draw.kind.matchprop.hint' });
+  assert.equal(isSupportedCommand(id), true, id);
+  const doc = loaded;
+  const selection = count => ({ ...doc, selection: { count, empty: count === 0 } });
+  assert.equal(selectionRequirementMet(id, selection(2)), true);
+  assert.equal(selectionRequirementMet(id, selection(0)), false);
+  assert.equal(admitCommandText(id, { status: selection(3) }).kind, 'admitted', id);
+  assert.equal(admitCommandText(id, { status: selection(2) }).kind, 'admitted', 'source + one target is enough');
+  // One object is a source with nowhere to go; none is nothing at all. Both are
+  // refused *before* IPC with the sentence that says what is missing — the same
+  // key the disabled ribbon button shows, so button and command line agree.
+  for (const count of [0, 1]) {
+    const admission = admitCommandText(id, { status: selection(count) });
+    assert.equal(admission.kind, 'unavailable', `selection of ${count}`);
+    assert.equal(admission.reasonKey, 'draw.kind.matchprop.hint', `selection of ${count}`);
+    assert.equal(unavailableReasonKey(id, { status: selection(count) }), 'draw.kind.matchprop.hint');
+  }
+  // The status-less and loading paths keep their existing answers.
+  assert.equal(admitCommandText(id, { status: null }).kind, 'unavailable', id);
+  assert.equal(admitCommandText(id, { status: { ...selection(3), loading: true } }).kind, 'unavailable', id);
+  assert.equal(unavailableReasonKey(id, { status: { ...selection(3), loading: true } }), 'linux.busy');
+  assert.equal(unavailableReasonKey(id, { status: selection(1), pending: true }), 'linux.busy');
+  // No drawing: there is no selection block to read, so the honest sentence is
+  // the catalog's own "no drawing is open" — never "select more objects".
+  const noDocument = { ...doc, documentLabel: null, entityCount: null, selection: { count: 0, empty: true } };
+  assert.equal(admitCommandText(id, { status: noDocument }).reasonKey, 'plot.no_document');
+  assert.equal(unavailableReasonKey(id, { status: noDocument }), 'plot.no_document');
+  // Without the host vocabulary the refusal is the generic one, not the selection
+  // sentence: "not supported" and "select more objects" are different facts.
+  setCommandCatalog([]);
+  assert.equal(isSupportedCommand(id), false, id);
+  assert.equal(admitCommandText(id, { status: selection(3) }).kind, 'unsupported', id);
+  setCommandCatalog(HOST_NAMES);
+  // The neighbour contract is untouched: ERASE also acts on the selection but has
+  // no *count* precondition, so it stays admitted on an empty selection and the
+  // host answers at run time (`draw.error.selection_required`).
+  assert.equal(admitCommandText('ERASE', { status: selection(0) }).kind, 'admitted');
+});
+
+
