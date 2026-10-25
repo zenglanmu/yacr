@@ -27,9 +27,20 @@
 //!   `cad-history` stores entity patches only. A layer patch kind is a separate
 //!   lane; advertising undo here would restore nothing.
 //! * the temporary visibility override set is pruned when its layer is deleted,
-//!   so no override outlives the row it referred to.
+//!   so no override outlives the row it referred to;
+//! * **a write never hides the session's current layer**
+//!   ([`ensure_current_layer_stays_visible`]): `off=true` / `frozen=true` on the
+//!   active layer is refused (`layer.current_off` / `layer.current_frozen`)
+//!   before any candidate attribute is touched. The shared create funnel does not
+//!   look at visibility, so allowing that write would store geometry the user can
+//!   neither see nor pick — the same argument that makes
+//!   [`Application::set_active_layer`] refuse an invisible layer as current
+//!   (`app_drawing::drawing_create`). Clearing the flags (`false`), and every
+//!   other key including `locked`, stay allowed on the current layer, and a
+//!   non-current layer can still be turned off or frozen.
 
 use super::*;
+use crate::layer_property::LayerPropertyValue;
 
 impl Application {
     /// Dispatch the layer-table commands.
@@ -160,6 +171,12 @@ impl Application {
                 // drawing's own linetype table) decides before any candidate
                 // attribute is touched.
                 let parsed = crate::layer_property::parse(drawing.as_ref(), key, value)?;
+                // The visibility rule of the **session's** current layer sits
+                // here, before the candidate is touched: the command layer is the
+                // only place that knows which layer is current, and `cad-db`
+                // keeps owning the invariant (`visible == !(off || frozen)`) with
+                // no second copy of this policy.
+                ensure_current_layer_stays_visible(session, id, &name, &parsed)?;
                 let mut attributes = drawing.layer_attributes(id);
                 crate::layer_property::apply(&mut attributes, parsed);
                 // The database recomputes `visible` from the new `off`/`frozen`
@@ -213,6 +230,51 @@ impl Application {
             .drawing = Arc::new(candidate);
         Ok(outcome)
     }
+}
+
+/// Refuse a layer-table write that would hide the session's **current** layer.
+///
+/// The one rule this build has for "the current layer must stay visible", and it
+/// lives at the command layer because only the session knows which layer is
+/// current: `cad-db` keeps owning `Layer::visible == !(off || frozen)` and its
+/// API is unchanged (`set_layer_attributes` still writes whatever a caller
+/// validated).
+///
+/// Refused only for `off = true` (`layer.current_off`) and `frozen = true`
+/// (`layer.current_frozen`) on the active layer; both are deliberate refusals
+/// rather than AutoCAD emulation, for the reason the module docs give: the shared
+/// create funnel does not look at visibility, so a hidden current layer would
+/// accept geometry that is then invisible and unpickable.
+///
+/// Everything else stays allowed **including `locked`** — locking is a write
+/// permission, not visibility, so it does not hide anything — and clearing a
+/// flag (`off = false`, `frozen = false`) is always accepted because it can only
+/// make the layer more visible. A non-current layer may still be turned off or
+/// frozen: the panel's chips keep working for every other row.
+///
+/// The refusal changes nothing: it runs on the parsed value, before the candidate
+/// attribute set exists, so the stored attributes, `Layer::visible`, the
+/// revision, the session and the history are all untouched. `name` is the row's
+/// own stored spelling, so the message names the layer the user sees.
+fn ensure_current_layer_stays_visible(
+    session: &SessionState,
+    id: LayerId,
+    name: &str,
+    parsed: &LayerPropertyValue,
+) -> CadResult<()> {
+    if session.active_layer != id {
+        return Ok(());
+    }
+    let (code, action) = match parsed {
+        LayerPropertyValue::Off(true) => ("layer.current_off", "turning it off"),
+        LayerPropertyValue::Frozen(true) => ("layer.current_frozen", "freezing it"),
+        _ => return Ok(()),
+    };
+    Err(CadError::InvalidInput(format!(
+        "{code}: layer '{name}' ({}) is the current layer; {action} would make geometry created \
+         on it invisible, so the write is refused; switch the current layer first",
+        id.0
+    )))
 }
 
 /// Resolve a panel-supplied layer name against the drawing's own layer table.

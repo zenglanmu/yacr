@@ -83,12 +83,17 @@
 //! since locked would be a write the user cannot see coming. (AutoCAD's own
 //! undo behaviour is not claimed here; this is this build's documented rule.)
 //!
-//! # Explicit gap: a locked layer can still be made *current*
+//! # A locked layer can no longer be made *current* (closed 2026-10-26)
 //!
-//! AutoCAD also refuses to make a locked layer the current layer. The active
-//! layer here is `SessionState` (session-only, no database write), so it is
-//! outside this choke point and **not** refused yet. Creation on a locked
-//! *active* layer is already refused, because the insert itself is checked.
+//! AutoCAD also refuses to make a locked layer the current layer. The active layer
+//! here is `SessionState` (session-only, no database write), so it is outside this
+//! choke point: the rule lives in `cad-app`'s
+//! `Application::ensure_layer_can_be_current` and refuses a **locked**
+//! (`layer.current_locked`), **frozen** (`layer.current_frozen`) or **off**
+//! (`layer.current_off`) target before the session is touched. Creation on a
+//! locked *active* layer would still be refused here by the insert itself, so a
+//! session that became stale (the layer was locked after it became current)
+//! cannot write to it.
 
 use cad_domain::*;
 

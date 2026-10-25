@@ -239,7 +239,7 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 | `ARRAYRECT` / `ARRAYPOLAR` | **实现** | **独立副本**（AutoCAD 默认关联，记为**有意偏离**）；矩形：间距=**基点间距离**、向上右生成、副本数 = `行×列−1`；极坐标：捕获中心点，副本数 = `项数−1`，**角度步长 = `i·填充角/项数`**（**我们的规则**：部分填充时 AutoCAD 是首尾跨满 `fill/(items−1)`，故 `180°/3 项` 我们为 0/60/120 而 AutoCAD 为 0/90/180——**刻意偏离**，已测试），`rotateItems` 决定绕中心旋转或仅平移（**未查证选择**） | `Path`/`Levels`/`Total`/角度间隔输入/关联编辑（`ARRAYEDIT`/grips）/`MAXARRAY` 可配置化/3D/**负间距反向**；1×1 或单项阵列**不产生副本并显式诊断**（不开事务） |
 | `ALIGN` | **实现** | **两对点**：平移（第一对）+ 旋转（两对方向夹角）+ `AlignScale` 为真时按"目标对长/源对长"做**均匀**缩放；以 `source1` 为枢轴，原位变换整个选择。**含 `MultiLeader` 且 `AlignScale` 为真 ⇒ 整命令失败**（同 C.5） | 3 对点 3D 对齐、**非均匀**缩放、**1 对点移动**（等价于 `MOVE`，不做） |
 | `STRETCH` | **实现** | 交叉窗口（**恒 CROSSING**）：**部分包围=逐顶点移动**（只动窗内顶点）、**完全包围=整移**；分类按几何类型分两种口径（直线/无 bulge 折线=逐顶点包含；圆/椭圆/块/ARC/含 bulge 折线=保守包围盒完全包含）；**bulge 数值保留**（未查证） | cpolygon/lasso、**单独选取即整移**、`TEXT`（**相似变换语义受限** ⇒ 整命令拒绝，ADR-0019 B.2——**不是**因为变换面拒绝：P7a 起 `Text` 可平移/旋转/均匀缩放）、`MultiLeader`（**显式按 `type_key` 整命令拒绝**）、`SPLINE`/`ARC`/`HATCH`/`INSERT` 的**拉伸**（部分包围不动+诊断、完全包围整移）、3D；宽度未建模 |
-| `GRIPSTRETCH`（**本项目选择器**，AutoCAD 无同名命令） | **宿主拖拽已实现（仅 `native-below`）；`dom-canvas` 载体无夹点路径；UI 层 Escape 已接线（无运行时证据）** | 纯模型（`crates/cad-app/src/grips.rs`）+ 命令（`crates/cad-app/src/app_drawing/grip.rs`）：**一个夹点、一个实体** → 一次 `update_entity`、一条事务 / 一步撤销（undo 恢复被拖端点/位置的**位级**原值，未拖端点/其它坐标逐位不变）。支持面**仅**：`LINE` 两个端点夹点（`index` 0 = start、1 = end）、`POINT` 位置夹点（`index` 0）。载荷 `CommandPayload::GripStretch(Box<GripStretchCommand>{ id: GripId, to: Point3 })`。命令层 `to` 三坐标原样存储（**不做**工作平面投影）；**宿主**在平面视图里用 `grip_hit_planar`（x/y 距离，**不是** 3D 距离——指针经 `screen_to_world` 落在工作平面上）命中夹点，并**保留被拖夹点自身的 z**，故平面拖拽**不改标高**（**3D 夹点编辑 NOT IMPLEMENTED**）。拒绝（**全部在开事务之前**，不改 revision、不写 ChangeSet、不留空撤销步）：`grip.target_missing`（实体已不存在）、`property.not_addressable`（非模型空间目标：块定义成员 / 图纸空间 —— 复用属性写的可达性理由；`GripId` 不含 instance path / 子元素字段，故那两种形态在载荷上无法表达）、`grip.stale_handle`（kind/index 与**当前**几何不符）、`grip.zero_displacement`（零位移是**错误**而非空 `Ok`，正为避免空撤销步；**宿主**把它按**显式 no-op** 处理：不发命令、不给用户报错）、`grip.unsupported_kind`（`CIRCLE`/`ARC`/`ELLIPSE`/`SPLINE`/`POLYLINE`/`INSERT`/`TEXT`/`HATCH`/`DIMENSION` 等整类无夹点模型）、`grip.non_finite_target`（**在读取图形之前**拒绝）。裸 `GRIPSTRETCH` 为 payload-required，按名拒绝（不路由 `BeginDraw`、不伪造拖拽）；**绝不**经过 `StretchEntities` | **宿主侧状态（`crates/cad-host/src/input/grip_drag.rs`，2026-10-26）**：`native-below` 桌面宿主（Linux 原生 Wayland / Windows）在选中实体上绘制夹点标记，并把**单个** `LINE`/`POINT` 夹点拖拽接到 `GripStretch`：按压命中夹点即 arm（2D、非捕获、工具 `Idle`/`Selecting`、主键、选中且**可见**的可直接寻址实体），移动只更新 overlay 预览（`OverlayInputs::grip_markers` 中被拖项替换为当前目标 ⇒ **移动的标记就是预览**，不发导航 delta），松开提交**一次**命令；落在夹点上的点击被一次性闩锁吞掉（**不**重复选中）。**`dom-canvas` 载体（X11/XWayland、web）没有任何夹点标记或拖拽**（wasm 侧无此路径，按铁律 8 显式不存在，**不是**静默回退）。**Escape 取消已接线（仅合成契约，无运行时证据）**：`cad_status` 新增布尔字段 `gripDrag`（`CadStatus::grip_drag`，取自 `HostCore::grip_drag_active()`；拖拽期间 `tool` 仍为 `null`），桌面 UI 的 Escape 门（`toolCommandForKey`）因此在**拖拽中**也发 `CANCEL`（`Enter`/`CONFIRM` 仍只认活动工具）；宿主 `InteractionRequest::Cancel` → `reset_grip_gesture()` 纯状态丢弃拖拽。该链路只有合成证据（`cad-ui-core` 状态投影契约 + `apps/desktop-ui` 的 `tsc`/纯函数/源码结构契约），**没有**真窗口、真实按键或像素证据。中点 / 圆心 / 插入点 / 顶点 / 宽度 / 旋转 / 切线夹点，多夹点与多实体拉伸，拖拽期间的 OSNAP / ORTHO / 栅格捕捉，3D，夹点右键菜单与 `GRIPMULTIFUNCTIONAL` 均**未实现 / 不存在**（模型层不建"永远为空"的 `GripKind` 变体）；证据上限：`cargo test -p cad-app -p cad-host` 契约 + 门禁，**无 GUI/像素/真窗口/真实鼠标证据**，Windows 侧更只有 Tier 0 编译 |
+| `GRIPSTRETCH`（**本项目选择器**，AutoCAD 无同名命令） | **宿主拖拽已实现（仅 `native-below`）；`dom-canvas` 载体无夹点路径；UI 层 Escape 已接线（无运行时证据）** | 纯模型（`crates/cad-app/src/grips.rs`）+ 命令（`crates/cad-app/src/app_drawing/grip.rs`）：**一个夹点、一个实体** → 一次 `update_entity`、一条事务 / 一步撤销（undo 恢复被拖端点/位置的**位级**原值，未拖端点/其它坐标逐位不变）。支持面：`LINE` 三夹点（`Endpoint` `index` 0 = start、1 = end，`Midpoint` `index` 2 —— 拖中点让**整条线平移**，两端走同一 delta，方向与长度不变；中点位置是两存储端点的 f64 精确中点）、`CIRCLE` 五夹点（`Center` `index` 0；`Quadrant` `index` 0..=3 = 圆自身平面内 `+ax` / `+ay` / `-ax` / `-ay`，拖象限**只改半径**：半径 = 中心到目标的**平面内**距离（不是 3D 距离、也不是 x/y 距离），圆心与法向逐位不变，故圆不会被拖成倾斜椭圆）、`ARC` **仅** `Center` `index` 0（刚性平移：半径/法向/起始角/张角逐位不变；**弧端点夹点 NOT IMPLEMENTED**）、`POINT` 位置夹点（`index` 0）。**其余整类 NOT IMPLEMENTED**：弧端点、`ELLIPSE`、`SPLINE`、`POLYLINE` 顶点与 bulge、`INSERT` 块成员（instance transform 不是实体句柄）、`TEXT`/`MTEXT`、`HATCH`、`DIMENSION`、`IMAGE`/`MASK`。多夹点/多实体拉伸、拖拽中捕捉、3D 夹点编辑仍不存在。载荷 `CommandPayload::GripStretch(Box<GripStretchCommand>{ id: GripId, to: Point3 })`。命令层 `to` 三坐标原样存储（**不做**工作平面投影）；**宿主**在平面视图里用 `grip_hit_planar`（x/y 距离，**不是** 3D 距离——指针经 `screen_to_world` 落在工作平面上）命中夹点，并**保留被拖夹点自身的 z**，故平面拖拽**不改标高**（**3D 夹点编辑 NOT IMPLEMENTED**）。拒绝（**全部在开事务之前**，不改 revision、不写 ChangeSet、不留空撤销步）：`grip.target_missing`（实体已不存在）、`property.not_addressable`（非模型空间目标：块定义成员 / 图纸空间 —— 复用属性写的可达性理由；`GripId` 不含 instance path / 子元素字段，故那两种形态在载荷上无法表达）、`grip.stale_handle`（kind/index 与**当前**几何不符）、`grip.zero_displacement`（零位移是**错误**而非空 `Ok`，正为避免空撤销步；**宿主**把它按**显式 no-op** 处理：不发命令、不给用户报错）、`grip.unsupported_kind`（`ELLIPSE`/`SPLINE`/`POLYLINE`/`INSERT`/`TEXT`/`HATCH`/`DIMENSION`/`IMAGE`/`MASK` 等整类无夹点模型；`CIRCLE`/`ARC` 已不在此列）、`grip.degenerate_radius`（象限拖拽的平面内半径为 0 或非有限值 —— 按名拒绝，**不夹取最小值**）、`grip.non_finite_target`（**在读取图形之前**拒绝）。裸 `GRIPSTRETCH` 为 payload-required，按名拒绝（不路由 `BeginDraw`、不伪造拖拽）；**绝不**经过 `StretchEntities` | **宿主侧状态（`crates/cad-host/src/input/grip_drag.rs`，2026-10-26）**：`native-below` 桌面宿主（Linux 原生 Wayland / Windows）在选中实体上绘制夹点标记，并把**单个**已建模夹点（`LINE` 端点/中点、`CIRCLE` 圆心/象限、`ARC` 圆心、`POINT` 位置）的拖拽接到 `GripStretch`（宿主对夹点种类**无分支**：枚举与命中都来自模型）：按压命中夹点即 arm（2D、非捕获、工具 `Idle`/`Selecting`、主键、选中且**可见**的可直接寻址实体），移动只更新 overlay 预览（`OverlayInputs::grip_markers` 中被拖项替换为当前目标 ⇒ **移动的标记就是预览**，不发导航 delta），松开提交**一次**命令；落在夹点上的点击被一次性闩锁吞掉（**不**重复选中）。**`dom-canvas` 载体（X11/XWayland、web）没有任何夹点标记或拖拽**（wasm 侧无此路径，按铁律 8 显式不存在，**不是**静默回退）。**Escape 取消已接线（仅合成契约，无运行时证据）**：`cad_status` 新增布尔字段 `gripDrag`（`CadStatus::grip_drag`，取自 `HostCore::grip_drag_active()`；拖拽期间 `tool` 仍为 `null`），桌面 UI 的 Escape 门（`toolCommandForKey`）因此在**拖拽中**也发 `CANCEL`（`Enter`/`CONFIRM` 仍只认活动工具）；宿主 `InteractionRequest::Cancel` → `reset_grip_gesture()` 纯状态丢弃拖拽。该链路只有合成证据（`cad-ui-core` 状态投影契约 + `apps/desktop-ui` 的 `tsc`/纯函数/源码结构契约），**没有**真窗口、真实按键或像素证据。中点 / 圆心 / 插入点 / 顶点 / 宽度 / 旋转 / 切线夹点，多夹点与多实体拉伸，拖拽期间的 OSNAP / ORTHO / 栅格捕捉，3D，夹点右键菜单与 `GRIPMULTIFUNCTIONAL` 均**未实现 / 不存在**（模型层不建"永远为空"的 `GripKind` 变体）；证据上限：`cargo test -p cad-app -p cad-host` 契约 + 门禁，**无 GUI/像素/真窗口/真实鼠标证据**，Windows 侧更只有 Tier 0 编译 |
 | `EXPLODE` | **实现** | **一次一层**：LWPOLYLINE→线段+ARC（bulge 还原）；INSERT→直接成员（placement 烘焙，**嵌套块引用保持为引用**，二次 EXPLODE 才展开）；`Compound`/`Hatch`→**全部子项**（`Hatch` 分解为**边界折线 + 填充网格 + 图案线**；P6a 保持既有行为，块内填充仍按 insert-child 拒绝）；MINSERT（`Compound(Insert…)`）→先得 Insert 实例 | 多级一次到底（导出层的"摊平到叶子"是**另一条路径**，不在本命令内）、`EXPLMODE`、颜色/线型变化、Dimension（按 `type_key` 显式拒绝）、关联阵列（我们不存）、属性语义；`IMAGE`/`MASK` 按**策略**拒绝（其**可变换**，不得假称被变换拒绝）；`TEXT`（**按 `child_refusal` 显式拒绝**——P7a 起变换面**接受** `Text`，故**不得**假称被变换拒绝）/`SPLINE`/`SHAPE`/`OPAQUE` 与镜像 Arc/Ellipse **整命令失败**；`MULTILEADER` **显式按 `type_key` 拒绝**（顶层与块内）；非均匀 INSERT 拒绝 |
 - **证据范围**：上述表格是**契约/场景**证据，不等于真实图纸兼容性。Linux 桌面宿主（React/Tauri）
   另有**真实硬件 GPU** 有界证据（Vulkan / Quadro P620 / X11 —— **CAD-on-top 时代**证据；
@@ -409,8 +409,8 @@ plot-style **名字**无法写出（写入器只发句柄）→ 写缺省并记 
 
 | 键 | 取值语法（`crates/cad-app/src/layer_property.rs` 是唯一语法） | 今天的语义 |
 |---|---|---|
-| `off` / `frozen` | `true` / `false` / `0` / `1` | **可见性键**：数据库在同一次变更里重算 `visible == !(off || frozen)`，因此关闭/冻结经**既有可见性路径**隐藏图层（实体不再进场景），两者都清掉才重新可见。**本仓库不为冻结在写路径上新增第二条规则**（见下方锁定轮） |
-| `locked` | `true` / `false` / `0` / `1` | **实体写的行为门**（2026-10-26 锁定轮增补，见下）：锁定层上的实体**不可创建/修改/删除**，拒绝码 `layer.locked`；显示属性写与图层表写**仍允许**。锁定层**仍可设为当前层**（未拒绝，已知缺口） |
+| `off` / `frozen` | `true` / `false` / `0` / `1` | **可见性键**：数据库在同一次变更里重算 `visible == !(off || frozen)`，因此关闭/冻结经**既有可见性路径**隐藏图层（实体不再进场景），两者都清掉才重新可见。**本仓库不为实体写路径新增冻结规则**（见下方锁定轮）；但把**当前图层**关闭/冻结会被拒绝（`layer.current_off` / `layer.current_frozen`，见「当前图层轮」） |
+| `locked` | `true` / `false` / `0` / `1` | **实体写的行为门**（2026-10-26 锁定轮增补，见下）：锁定层上的实体**不可创建/修改/删除**，拒绝码 `layer.locked`；显示属性写与图层表写**仍允许**。锁定层**不可设为当前层**（`layer.current_locked`，见「当前图层轮」） |
 | `plottable` | `true` / `false` / `0` / `1` | **只存储**：出图未实现，没有任何行为 |
 | `color` | `aci:1..=255` / `#RRGGBB` / `rgb:#RRGGBB` / `r,g,b` | **只存储**（ACI 同时写 RGB 调色板值）。`ByLayer`/`ByBlock` 拒绝；真彩写 `aci=None`。**改图层颜色不会重着色任何 `ByLayer` 实体**（导入已拍平） |
 | `linetype` | 图纸线型表里**存在**的名字（先精确后唯一大小写不敏感） | **只存储**；不存在的名字 `layer.linetype_missing`（绝不存悬挂引用）。`ByLayer`/`ByBlock` 拒绝 |
@@ -422,8 +422,7 @@ plot-style **名字**无法写出（写入器只发句柄）→ 写缺省并记 
 线缆（`cad_layers` 行）新增 `color{aci,rgb}` / `linetype` / `lineweight` / `transparency` /
 `locked` / `frozen` / `off` / `plottable`：它们仍是**显示/编辑输入**（线缆只是把数据库状态投影给面板，
 不参与判定；**锁定行为在数据库写路径上，读取线缆不改变任何行为**）；`dom-canvas` 载体
-与其它图层写一样**显式拒绝**该 IPC。面板 UI（色板/开关/锁定/打印列）**尚未接线**，
-仍是设计 lane 的工作。
+与其它图层写一样**显式拒绝**该 IPC。面板 UI 已接线：真实色块（`row.color.rgb`，缺省才回落名字哈希且标注）、`off`/`frozen`/`locked`/`plottable` chips（静止行最多两枚 + `+N`，其余在展开详情里），以及只读的线型/线宽/透明度；文案明确写道「关闭与冻结当前同走可见性路径、打印只存储」。
 
 **2026-10-26 图层锁定轮（实体写的唯一行为门）**：`locked` 从「只存储」变成**唯一一处**执行的门，
 执行点全部在 `crates/cad-db`（`crates/cad-db/src/drawing/lock.rs`），命令层**不写第二份检查**：
@@ -444,13 +443,27 @@ plot-style **名字**无法写出（写入器只发句柄）→ 写缺省并记 
 - **历史重放规则（已实现并测试）**：撤销/重做把记录的 `DrawingPatch` 重放经 `apply_drawing_changes`，
   所以**当前锁状态优先**——某步现在会写锁定层即被 `layer.locked` 拒绝，`cad-app` 把该步**放回**
   （`cancel_pending_drawing`），文档不变；不静默丢弃、也不静默越权；解锁后同一步可正常撤销。
-- **仍未实现（缺口）**：把锁定层设为**当前层**仍被允许（活动图层是 `SessionState` 会话状态，不是数据库写，
-  不在这个单一汇集点上），但随后在该层**创建**实体已被拒绝；按锁定过滤选择（AutoCAD 可选中但不可改）
-  未做；`ByLayer` 颜色仍未按层解析。
+- **当前层规则（2026-10-26 两轮，已实现）**：`SETACTIVELAYER` 拒绝把**锁定 / 冻结 / 关闭**层设为当前层
+  （`layer.current_locked` / `layer.current_frozen` / `layer.current_off`，判定顺序 locked→frozen→off，
+  消息点名图层），拒绝时活动图层、revision、撤销深度**全部不变**。规则唯一：
+  `crates/cad-app/src/app_drawing/drawing_create.rs` 的 `Application::ensure_layer_can_be_current`；
+  `cad-db` 里没有第二份检查，也没有第二套名字解析（命令载荷已是解析后的 `LayerId`）。
+  **关闭层也被拒绝**是本仓库的选择、**不是** AutoCAD 结论：关闭层在这里不可见且创建漏斗不看可见性，
+  允许它成为当前层只会画出看不见的几何。
+- **当前层不可被隐藏（补漏，已实现）**：`SETLAYERPROPERTY` 对**当前图层**写 `off=true` / `frozen=true` 也拒绝，
+  同样复用 `layer.current_off` / `layer.current_frozen`，且**先于任何写**（属性行、`Layer::visible`、revision、
+  会话当前层与撤销深度不变）。写成 `false`（打开/解冻）、`locked` 与其它键仍允许；**非当前图层**的
+  `off`/`frozen` 也仍允许（面板对其它行照常工作）。规则唯一：`app_drawing/layer_edit.rs` 的
+  `ensure_current_layer_stays_visible`（只有会话知道谁是当前层）；`cad-db` 未加检查、API 与不变量未改。
+  与上面的准入拒绝合起来，当前图层在「成为当前」与「成为之后」都不会不可见。
+- **仍未实现（缺口）**：按锁定过滤选择（AutoCAD 可选中但不可改）未做；`ByLayer` 颜色仍未按层解析
+  （导入已拍平，改图层颜色不会重着色实体）。
 
 CAD 分区右键**快捷菜单**已实现（复制/剪切/粘贴/全选/删除/特性/缩放到范围/平移/放弃/重做/重复上一命令）。
-夹点已有**纯模型 + 命令**（`GripStretch`：仅 LINE 端点 / POINT 位置，一条事务一步撤销，
-拒绝时不建事务），但**没有 marker、没有宿主 arm、没有指针路由**，用户仍看不到也拖不动夹点。
+夹点已有**纯模型 + 命令 + 宿主拖拽**（`GripStretch`：`LINE` 端点与中点 / `CIRCLE` 圆心与四象限 / `ARC` 圆心 / `POINT` 位置，
+一条事务一步撤销，拒绝时不建事务）；`native-below` 宿主已有 marker 与 arm 路径，`dom-canvas` 载体
+（X11/XWayland、web）仍无夹点路径。**仍不实现**：弧端点、椭圆/样条/多段线顶点、块成员、多夹点/多实体拉伸、
+拖拽中捕捉、3D 夹点编辑。
 仍无行为可接而**不显示**的 AutoCAD 项：极轴、动态 UCS。
 
 2026-10-10 图元显示补全轮新增边界：**光栅图像** PNG/JPEG 已解码并出纹理，但

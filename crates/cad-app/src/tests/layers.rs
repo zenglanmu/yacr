@@ -11,20 +11,47 @@
 //! entity property label following a rename, and the active-layer fallback.
 
 use super::*;
-use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
+use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer, LayerAttributes};
 
-/// The two fixture layers plus a model-space line on `WALLS` (id 3).
-fn app_with_entity_on_walls() -> (Application, SessionState) {
+/// Layers `0` (id 0) and `WALLS` (id 3), one model-space line on `WALLS`, and
+/// `WALLS` carrying the given stored attributes.
+///
+/// `Layer::visible` is derived from the attributes exactly as the database does
+/// (`!(off || frozen)`), because the builder's attribute write is storage only —
+/// the importer is the authority for the flag.
+pub(super) fn app_with_walls_attributes(
+    attributes: LayerAttributes,
+) -> (Application, SessionState) {
+    app_with_layers(attributes, false)
+}
+
+/// [`app_with_walls_attributes`] plus a third, plain layer `DOORS` (id 5) as an
+/// eligible target for the success path.
+fn app_with_walls_and_doors(attributes: LayerAttributes) -> (Application, SessionState) {
+    app_with_layers(attributes, true)
+}
+
+fn app_with_layers(attributes: LayerAttributes, doors: bool) -> (Application, SessionState) {
     let (mut app, session) = application_with_document();
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
-    for (id, name) in [(LayerId(0), "0"), (LayerId(3), "WALLS")] {
+    let mut layers = vec![(LayerId(0), "0"), (LayerId(3), "WALLS")];
+    if doors {
+        layers.push((LayerId(5), "DOORS"));
+    }
+    for (id, name) in layers {
+        let visible = if id == LayerId(3) {
+            attributes.is_visible()
+        } else {
+            true
+        };
         b.insert_layer(Layer {
             id,
             name: name.into(),
-            visible: true,
+            visible,
         })
         .unwrap();
     }
+    b.set_layer_attributes(LayerId(3), attributes).unwrap();
     b.insert_entity(DbEntity {
         object: DbObject {
             id: ObjectId(1),
@@ -50,7 +77,12 @@ fn app_with_entity_on_walls() -> (Application, SessionState) {
     (app, session)
 }
 
-fn execute(
+/// The same fixture with `WALLS` on, thawed and unlocked.
+fn app_with_entity_on_walls() -> (Application, SessionState) {
+    app_with_walls_attributes(LayerAttributes::default())
+}
+
+pub(super) fn execute(
     app: &mut Application,
     session: &mut SessionState,
     id: CommandId,
@@ -59,11 +91,11 @@ fn execute(
     app.execute(session, command(id, payload))
 }
 
-fn revision(app: &Application) -> Revision {
+pub(super) fn revision(app: &Application) -> Revision {
     app.workspace.documents[&DocumentId(1)].drawing.revision()
 }
 
-fn drawing(app: &Application) -> Arc<DrawingDatabase> {
+pub(super) fn drawing(app: &Application) -> Arc<DrawingDatabase> {
     app.workspace.documents[&DocumentId(1)].drawing.clone()
 }
 
@@ -343,6 +375,234 @@ fn an_unknown_layer_name_is_refused_by_name_and_changes_nothing() {
 
     assert_eq!(revision(&app), before);
     assert_eq!(layer_names(&app), rows);
+}
+
+// ---------------------------------------------------------------------------
+// Active (current) layer eligibility
+// ---------------------------------------------------------------------------
+
+/// Every eligibility refusal is: a stable code, a sentence naming the layer and an
+/// English remedy — and **no** state change at all (no session write, no revision
+/// bump, no history entry).
+fn assert_not_made_current(
+    app: &mut Application,
+    session: &mut SessionState,
+    code: &str,
+    remedy: &str,
+) {
+    let before = revision(app);
+    let error = execute(
+        app,
+        session,
+        CommandId::SetActiveLayer,
+        CommandPayload::ActiveLayer(LayerId(3)),
+    )
+    .expect_err("this layer cannot be the current layer");
+    let text = error.to_string();
+    assert!(text.contains(code), "stable code missing: {text}");
+    assert!(
+        text.contains("WALLS"),
+        "the refusal names the layer: {text}"
+    );
+    assert!(
+        text.contains(remedy),
+        "the refusal says how to proceed: {text}"
+    );
+    assert_eq!(
+        session.active_layer,
+        LayerId(0),
+        "the active layer is unchanged"
+    );
+    assert_eq!(revision(app), before, "a refusal is not a database write");
+    assert!(
+        !app.can_undo(&DocumentId(1)),
+        "a refusal records no history entry"
+    );
+}
+
+#[test]
+fn making_a_locked_layer_current_is_refused() {
+    let (mut app, mut session) = app_with_walls_attributes(LayerAttributes {
+        locked: true,
+        ..LayerAttributes::default()
+    });
+    assert_not_made_current(
+        &mut app,
+        &mut session,
+        "layer.current_locked",
+        "unlock it before making it the current layer",
+    );
+}
+
+#[test]
+fn making_a_frozen_layer_current_is_refused() {
+    let (mut app, mut session) = app_with_walls_attributes(LayerAttributes {
+        frozen: true,
+        ..LayerAttributes::default()
+    });
+    assert_not_made_current(
+        &mut app,
+        &mut session,
+        "layer.current_frozen",
+        "thaw it before making it the current layer",
+    );
+}
+
+#[test]
+fn making_an_off_layer_current_is_refused() {
+    // Decision (this build's rule, deliberately not AutoCAD's): an off layer is
+    // **invisible** here (`Layer::visible == !(off || frozen)`) and the shared
+    // create funnel does not look at visibility, so an off current layer would
+    // accept geometry the user can neither see nor pick. AutoCAD lets an off layer
+    // be current (it does not turn it on either); copying that would silently
+    // hide what the user just drew, so the off case is refused instead.
+    let (mut app, mut session) = app_with_walls_attributes(LayerAttributes {
+        off: true,
+        ..LayerAttributes::default()
+    });
+    assert_not_made_current(
+        &mut app,
+        &mut session,
+        "layer.current_off",
+        "turn it on before making it the current layer",
+    );
+    assert!(
+        !drawing(&app).layer(LayerId(3)).unwrap().visible,
+        "the fixture really models an invisible off layer"
+    );
+}
+
+#[test]
+fn the_first_stored_flag_wins_when_a_layer_carries_several() {
+    // locked → frozen → off: one deterministic precedence, so the reported reason
+    // never depends on attribute iteration order.
+    let (mut app, mut session) = app_with_walls_attributes(LayerAttributes {
+        locked: true,
+        frozen: true,
+        off: true,
+        ..LayerAttributes::default()
+    });
+    assert_not_made_current(
+        &mut app,
+        &mut session,
+        "layer.current_locked",
+        "unlock it before making it the current layer",
+    );
+}
+
+#[test]
+fn an_on_thawed_unlocked_layer_still_becomes_current_with_no_database_write() {
+    let (mut app, mut session) = app_with_walls_and_doors(LayerAttributes::default());
+    let before = revision(&app);
+
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::SetActiveLayer,
+        CommandPayload::ActiveLayer(LayerId(5)),
+    )
+    .expect("DOORS is on, thawed and unlocked");
+
+    assert_eq!(session.active_layer, LayerId(5));
+    assert_eq!(revision(&app), before, "session state only, no DB write");
+    assert!(
+        !app.can_undo(&DocumentId(1)),
+        "session state only, no history entry"
+    );
+    assert_eq!(outcome.diagnostics[0].code, "drawing.active_layer");
+    assert!(outcome.changes.is_none(), "no ChangeSet is published");
+}
+
+#[test]
+fn a_refused_current_layer_leaves_the_previous_layer_fully_usable() {
+    let (mut app, mut session) = app_with_walls_attributes(LayerAttributes {
+        locked: true,
+        ..LayerAttributes::default()
+    });
+    let before = revision(&app);
+    let count = drawing(&app).entity_count();
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::SetActiveLayer,
+        CommandPayload::ActiveLayer(LayerId(3)),
+    )
+    .expect_err("WALLS is locked");
+    assert_eq!(session.active_layer, LayerId(0));
+
+    // The refused transition has no collateral effect: drawing on the layer that
+    // is still current works normally (one entity, one revision bump, one undo
+    // step) and the locked layer is untouched.
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::CreateLine,
+        CommandPayload::Points(vec![point(0.0, 20.0), point(10.0, 20.0)]),
+    )
+    .expect("layer 0 is still the current layer and is writable");
+
+    assert_eq!(revision(&app), Revision(before.0 + 1));
+    assert_eq!(drawing(&app).entity_count(), count + 1);
+    let db = drawing(&app);
+    let created = db
+        .model_space()
+        .iter()
+        .max_by_key(|entity| entity.draw_order)
+        .cloned()
+        .expect("the new line");
+    assert_eq!(
+        created.layer,
+        LayerId(0),
+        "it landed on the unchanged layer"
+    );
+    assert_eq!(outcome.objects, vec![ObjectId(created.id.0)]);
+    assert!(app.can_undo(&DocumentId(1)), "one undo step was recorded");
+    assert_eq!(
+        drawing(&app)
+            .entity(EntityId(1))
+            .expect("the WALLS line")
+            .layer,
+        LayerId(3),
+        "the locked layer's entity is untouched"
+    );
+}
+
+#[test]
+fn a_layer_can_still_be_locked_or_frozen_while_it_is_not_current() {
+    // The panel's chip toggles stay available: only *becoming current* is refused,
+    // so the layer-table write that freezes/locks a non-current layer still works.
+    let (mut app, mut session) = app_with_walls_attributes(LayerAttributes::default());
+    let before = revision(&app);
+
+    for (key, value) in [("locked", "true"), ("frozen", "true")] {
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::SetLayerProperty,
+            CommandPayload::SetLayerProperty {
+                layer: "WALLS".into(),
+                key: key.into(),
+                value: value.into(),
+            },
+        )
+        .unwrap_or_else(|error| {
+            panic!("'{key}' must stay writable on a non-current layer: {error}")
+        });
+    }
+
+    let attributes = drawing(&app).layer_attributes(LayerId(3));
+    assert!(attributes.locked && attributes.frozen);
+    assert!(
+        !drawing(&app).layer(LayerId(3)).unwrap().visible,
+        "the frozen layer is hidden through the existing visibility path"
+    );
+    assert_eq!(
+        session.active_layer,
+        LayerId(0),
+        "a layer-table write never moves the current layer"
+    );
+    assert!(revision(&app).0 > before.0, "the writes are real changes");
 }
 
 // ---------------------------------------------------------------------------

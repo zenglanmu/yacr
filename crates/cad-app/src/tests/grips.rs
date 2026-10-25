@@ -15,13 +15,13 @@ use crate::grips::{
 };
 use cad_db::{DbEntity, DbObject};
 
-fn p3(x: f64, y: f64, z: f64) -> Point3 {
+pub(super) fn p3(x: f64, y: f64, z: f64) -> Point3 {
     Point3 { x, y, z }
 }
 
 /// A `DbEntity` carrying `geometry` (the grip model reads only `id` and
 /// `geometry`; the rest is the ordinary scaffolding every stored entity has).
-fn ent(id: u128, geometry: SemanticGeometry) -> DbEntity {
+pub(super) fn ent(id: u128, geometry: SemanticGeometry) -> DbEntity {
     DbEntity {
         object: DbObject {
             id: ObjectId(id),
@@ -44,7 +44,7 @@ fn line(x1: f64, y1: f64, x2: f64, y2: f64) -> SemanticGeometry {
     }
 }
 
-fn grip_id(entity: u128, kind: GripKind, index: u8) -> GripId {
+pub(super) fn grip_id(entity: u128, kind: GripKind, index: u8) -> GripId {
     GripId {
         entity: EntityId(entity),
         kind,
@@ -55,14 +55,14 @@ fn grip_id(entity: u128, kind: GripKind, index: u8) -> GripId {
 /// The message of a refusal, insisting on one of the two variants the model
 /// documents (a `NotImplemented`/`StaleResult` would mean a silent placeholder
 /// slipped in).
-fn reason(error: CadError) -> String {
+pub(super) fn reason(error: CadError) -> String {
     match error {
         CadError::Unsupported(message) | CadError::InvalidInput(message) => message,
         other => panic!("unexpected refusal variant: {other:?}"),
     }
 }
 
-fn assert_reason(error: CadError, code: &str) {
+pub(super) fn assert_reason(error: CadError, code: &str) {
     let message = reason(error);
     assert!(
         message.starts_with(code),
@@ -70,7 +70,7 @@ fn assert_reason(error: CadError, code: &str) {
     );
 }
 
-fn assert_bits_eq(actual: Point3, expected: Point3, what: &str) {
+pub(super) fn assert_bits_eq(actual: Point3, expected: Point3, what: &str) {
     assert_eq!(
         (actual.x.to_bits(), actual.y.to_bits(), actual.z.to_bits()),
         (
@@ -82,15 +82,41 @@ fn assert_bits_eq(actual: Point3, expected: Point3, what: &str) {
     );
 }
 
+/// The documented exact midpoint of two stored points, computed independently of
+/// the model (`(start + end) * 0.5`).
+fn midpoint_of(start: Point3, end: Point3) -> Point3 {
+    Point3 {
+        x: (start.x + end.x) * 0.5,
+        y: (start.y + end.y) * 0.5,
+        z: (start.z + end.z) * 0.5,
+    }
+}
+
+fn sub3(a: Point3, b: Point3) -> Point3 {
+    Point3 {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
+}
+
+fn len3(v: Point3) -> f64 {
+    (v.x * v.x + v.y * v.y + v.z * v.z).sqrt()
+}
+
 // ---------------------------------------------------------------------------
 // 1. Which handles exist, and in which order
 // ---------------------------------------------------------------------------
 
 #[test]
-fn line_exposes_two_endpoint_grips_start_before_end() {
+fn line_exposes_two_endpoint_grips_then_the_midpoint() {
     let entity = ent(7, line(1.0, 2.0, 30.5, -4.25));
     let grips = grips_for_entity(&entity);
-    assert_eq!(grips.len(), 2, "a LINE has exactly two endpoint grips");
+    assert_eq!(
+        grips.len(),
+        3,
+        "a LINE has two endpoint grips and one midpoint grip"
+    );
     assert_eq!(
         grips[0],
         Grip {
@@ -106,6 +132,14 @@ fn line_exposes_two_endpoint_grips_start_before_end() {
             position: p3(30.5, -4.25, 0.0),
         },
         "index 1 is `end`"
+    );
+    assert_eq!(
+        grips[2],
+        Grip {
+            id: grip_id(7, GripKind::Midpoint, 2),
+            position: p3(15.75, -1.125, 0.0),
+        },
+        "index 2 is the exact f64 midpoint (start + end) * 0.5"
     );
 }
 
@@ -125,32 +159,45 @@ fn point_exposes_one_point_grip() {
 
 // ---------------------------------------------------------------------------
 // 2. The refusal list: one assertion per kind, so a partial implementation of
-//    any of them has to come back and update *that* test on purpose.
+//    any of them has to come back and update *that* test on purpose. `CIRCLE`
+//    and `ARC` are no longer on this list (they have their own handles, pinned
+//    in `crates/cad-app/src/tests/grips_curves.rs`).
 // ---------------------------------------------------------------------------
 
 #[test]
-fn circle_exposes_no_grips() {
+fn ellipse_exposes_no_grips() {
+    // Ellipse axis/quadrant handles are NOT IMPLEMENTED: the major axis carries
+    // an orientation this model has no drag rule for.
     let entity = ent(
         1,
-        SemanticGeometry::Circle {
+        SemanticGeometry::Ellipse {
             center: p3(0.0, 0.0, 0.0),
             normal: p3(0.0, 0.0, 1.0),
-            radius: 5.0,
+            major_axis: p3(5.0, 0.0, 0.0),
+            ratio: 0.5,
+            start: 0.0,
+            sweep: std::f64::consts::TAU,
         },
     );
     assert!(grips_for_entity(&entity).is_empty());
 }
 
 #[test]
-fn arc_exposes_no_grips() {
+fn spline_exposes_no_grips() {
+    // Control-point grips are NOT IMPLEMENTED (they would edit the source NURBS
+    // definition, not a display representation).
     let entity = ent(
         2,
-        SemanticGeometry::Arc {
-            center: p3(0.0, 0.0, 0.0),
-            normal: p3(0.0, 0.0, 1.0),
-            radius: 5.0,
-            start: 0.0,
-            sweep: 1.0,
+        SemanticGeometry::Spline {
+            degree: 3,
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            control_points: vec![
+                p3(0.0, 0.0, 0.0),
+                p3(1.0, 2.0, 0.0),
+                p3(3.0, 2.0, 0.0),
+                p3(4.0, 0.0, 0.0),
+            ],
+            weights: vec![1.0; 4],
         },
     );
     assert!(grips_for_entity(&entity).is_empty());
@@ -245,12 +292,15 @@ fn grip_hit_returns_none_outside_tolerance_and_for_degenerate_inputs() {
 
 #[test]
 fn grip_hit_skips_entities_that_expose_no_grips() {
-    let circle = ent(
+    let ellipse = ent(
         1,
-        SemanticGeometry::Circle {
+        SemanticGeometry::Ellipse {
             center: p3(0.0, 0.0, 0.0),
             normal: p3(0.0, 0.0, 1.0),
-            radius: 5.0,
+            major_axis: p3(5.0, 0.0, 0.0),
+            ratio: 0.5,
+            start: 0.0,
+            sweep: std::f64::consts::TAU,
         },
     );
     let text = ent(
@@ -267,10 +317,10 @@ fn grip_hit_skips_entities_that_expose_no_grips() {
             wrap_width: None,
         },
     );
-    // A query sitting exactly on the circle's centre / the text's insertion
+    // A query sitting exactly on the ellipse's centre / the text's insertion
     // point still misses: those are not grips.
     assert!(grip_hit(
-        [circle.clone(), text.clone()].iter(),
+        [ellipse.clone(), text.clone()].iter(),
         p3(0.0, 0.0, 0.0),
         1.0
     )
@@ -278,7 +328,7 @@ fn grip_hit_skips_entities_that_expose_no_grips() {
 
     // A real grip elsewhere still wins while the grip-less entities are skipped.
     let line = ent(3, line(20.0, 0.0, 30.0, 0.0));
-    let hit = grip_hit([circle, text, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
+    let hit = grip_hit([ellipse, text, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
     assert_eq!(hit.id, grip_id(3, GripKind::Endpoint, 0));
 }
 
@@ -298,15 +348,20 @@ fn grip_hit_tie_goes_to_the_first_candidate_in_input_order() {
         "input order decides, not entity id"
     );
 
-    // Within one LINE, the midpoint query is equidistant from both endpoints:
-    // the lower index (start) wins.
+    // Within one LINE the candidates are `start` (0), `end` (1) and the midpoint
+    // (2). At a quarter of the line the query is exactly equidistant from
+    // `start` and the midpoint: the earlier grip of the list (index 0) wins.
     let line = ent(13, line(0.0, 0.0, 2.0, 0.0));
-    let hit = grip_hit([line].iter(), p3(1.0, 0.0, 0.0), 5.0).expect("a hit");
+    let hit = grip_hit([line.clone()].iter(), p3(0.5, 0.0, 0.0), 5.0).expect("a hit");
     assert_eq!(
         hit.id,
         grip_id(13, GripKind::Endpoint, 0),
-        "start wins the tie"
+        "start wins the exact tie with the midpoint (lower index)"
     );
+    // At the exact midpoint the midpoint grip is strictly closer than both
+    // endpoints, so it is a midpoint hit, not a tie.
+    let hit = grip_hit([line].iter(), p3(1.0, 0.0, 0.0), 5.0).expect("a hit");
+    assert_eq!(hit.id, grip_id(13, GripKind::Midpoint, 2));
 }
 
 // ---------------------------------------------------------------------------
@@ -386,17 +441,20 @@ fn grip_hit_planar_returns_none_outside_tolerance_and_for_degenerate_inputs() {
 
 #[test]
 fn grip_hit_planar_skips_entities_that_expose_no_grips() {
-    let circle = ent(
+    let ellipse = ent(
         1,
-        SemanticGeometry::Circle {
+        SemanticGeometry::Ellipse {
             center: p3(0.0, 0.0, 0.0),
             normal: p3(0.0, 0.0, 1.0),
-            radius: 5.0,
+            major_axis: p3(5.0, 0.0, 0.0),
+            ratio: 0.5,
+            start: 0.0,
+            sweep: std::f64::consts::TAU,
         },
     );
-    assert!(grip_hit_planar([circle.clone()].iter(), p3(0.0, 0.0, 0.0), 1.0).is_none());
+    assert!(grip_hit_planar([ellipse.clone()].iter(), p3(0.0, 0.0, 0.0), 1.0).is_none());
     let line = ent(3, line(20.0, 0.0, 30.0, 0.0));
-    let hit = grip_hit_planar([circle, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
+    let hit = grip_hit_planar([ellipse, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
     assert_eq!(hit.id, grip_id(3, GripKind::Endpoint, 0));
 }
 
@@ -414,15 +472,20 @@ fn grip_hit_planar_tie_goes_to_the_first_candidate_in_input_order() {
         "input order decides, not entity id"
     );
 
-    // Within one LINE the midpoint query is equidistant from both endpoints:
-    // the lower index (start) wins, exactly like the 3D rule.
+    // Within one LINE the candidates are `start` (0), `end` (1) and the midpoint
+    // (2). At a quarter of the line the query is exactly equidistant from
+    // `start` and the midpoint: the earlier grip of the list (index 0) wins,
+    // exactly like the 3D rule.
     let line = ent(13, line(0.0, 0.0, 2.0, 0.0));
-    let hit = grip_hit_planar([line].iter(), p3(1.0, 0.0, 0.0), 5.0).expect("a hit");
+    let hit = grip_hit_planar([line.clone()].iter(), p3(0.5, 0.0, 0.0), 5.0).expect("a hit");
     assert_eq!(
         hit.id,
         grip_id(13, GripKind::Endpoint, 0),
-        "start wins the tie"
+        "start wins the exact tie with the midpoint (lower index)"
     );
+    // At the exact midpoint the midpoint grip is strictly closer.
+    let hit = grip_hit_planar([line].iter(), p3(1.0, 0.0, 0.0), 5.0).expect("a hit");
+    assert_eq!(hit.id, grip_id(13, GripKind::Midpoint, 2));
 }
 
 // ---------------------------------------------------------------------------
@@ -464,6 +527,83 @@ fn apply_grip_moves_only_the_dragged_line_endpoint() {
         } => {
             assert_bits_eq(new_start, start, "the other endpoint");
             assert_bits_eq(new_end, p3(40.0, -1.0, 2.5), "the dragged endpoint");
+        }
+        other => panic!("expected a LINE, got {other:?}"),
+    }
+}
+
+#[test]
+fn apply_grip_translates_the_whole_line_from_its_midpoint() {
+    // Exact binary literals, so "moved by exactly the delta", "same length" and
+    // "still parallel" are exact comparisons rather than tolerances.
+    let original = line(0.0, 0.0, 10.0, 0.0);
+    let dragged = apply_grip(
+        &original,
+        &grip_id(7, GripKind::Midpoint, 2),
+        p3(6.0, 3.0, 0.0),
+    )
+    .expect("dragging the midpoint translates the line");
+    match dragged {
+        SemanticGeometry::Line { start, end } => {
+            // The midpoint was (5, 0, 0), so delta = (1, 3, 0) for BOTH ends.
+            assert_bits_eq(start, p3(1.0, 3.0, 0.0), "start moves by the delta");
+            assert_bits_eq(end, p3(11.0, 3.0, 0.0), "end moves by the same delta");
+            assert_bits_eq(
+                midpoint_of(start, end),
+                p3(6.0, 3.0, 0.0),
+                "the new midpoint is exactly the drag target",
+            );
+            assert_eq!(len3(sub3(end, start)), 10.0, "length unchanged");
+            assert_eq!(end.y - start.y, 0.0, "still parallel to the x axis");
+            assert_eq!(end.z - start.z, 0.0, "still planar in z");
+        }
+        other => panic!("expected a LINE, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_midpoint_drag_keeps_a_diagonal_line_parallel_and_the_same_length() {
+    // Values that survive no decimal round-trip, dragged by a delta that is not
+    // axis-aligned: the direction vector and the length must be preserved.
+    let start = p3(1.0 / 3.0, -2.0 / 7.0, 0.25);
+    let end = p3(11.0 / 7.0, 5.0 / 3.0, -1.5);
+    let original = SemanticGeometry::Line { start, end };
+    let from = midpoint_of(start, end);
+    let to = p3(from.x + 7.5, from.y - 4.25, from.z + 2.0);
+
+    let dragged = apply_grip(&original, &grip_id(7, GripKind::Midpoint, 2), to)
+        .expect("a midpoint drag translates the line");
+    match dragged {
+        SemanticGeometry::Line {
+            start: new_start,
+            end: new_end,
+        } => {
+            let close = |actual: Point3, expected: Point3, what: &str| {
+                for (axis, (a, e)) in [
+                    ("x", (actual.x, expected.x)),
+                    ("y", (actual.y, expected.y)),
+                    ("z", (actual.z, expected.z)),
+                ] {
+                    assert!(
+                        (a - e).abs() < 1e-12,
+                        "{what}: {axis} is {a} but expected {e}"
+                    );
+                }
+            };
+            close(
+                midpoint_of(new_start, new_end),
+                to,
+                "the translated midpoint follows the target",
+            );
+            let before = sub3(end, start);
+            let after = sub3(new_end, new_start);
+            close(after, before, "the direction vector is unchanged");
+            assert!(
+                (len3(after) - len3(before)).abs() < 1e-12,
+                "the length is unchanged: {} vs {}",
+                len3(after),
+                len3(before)
+            );
         }
         other => panic!("expected a LINE, got {other:?}"),
     }
@@ -516,7 +656,8 @@ fn apply_grip_refuses_an_endpoint_grip_on_a_point_entity() {
 
 #[test]
 fn apply_grip_refuses_an_out_of_range_index() {
-    // LINE: only 0 and 1 exist.
+    // LINE: only 0 and 1 exist for endpoints (`2` is the midpoint's index, but
+    // it belongs to a different kind, so an `Endpoint` at 2 is still stale).
     for index in [2u8, 7, u8::MAX] {
         let error = apply_grip(
             &line(0.0, 0.0, 10.0, 0.0),
@@ -524,6 +665,16 @@ fn apply_grip_refuses_an_out_of_range_index() {
             p3(1.0, 1.0, 0.0),
         )
         .expect_err("a LINE endpoint index above 1 does not exist");
+        assert_reason(error, REASON_STALE_HANDLE);
+    }
+    // LINE midpoint: exactly index 2.
+    for index in [0u8, 1, 3, u8::MAX] {
+        let error = apply_grip(
+            &line(0.0, 0.0, 10.0, 0.0),
+            &grip_id(7, GripKind::Midpoint, index),
+            p3(1.0, 1.0, 0.0),
+        )
+        .expect_err("a LINE has exactly one midpoint grip, at index 2");
         assert_reason(error, REASON_STALE_HANDLE);
     }
     // POINT: only 0 exists.
@@ -539,13 +690,22 @@ fn apply_grip_refuses_an_out_of_range_index() {
 #[test]
 fn apply_grip_refuses_zero_displacement() {
     // The target equals the current handle position exactly → nothing to write,
-    // so the future command must skip the transaction (no empty undo entry).
+    // so the command must skip the transaction (no empty undo entry).
     let error = apply_grip(
         &line(0.0, 0.0, 10.0, 0.0),
         &grip_id(7, GripKind::Endpoint, 0),
         p3(0.0, 0.0, 0.0),
     )
     .expect_err("a zero displacement is refused, not an Ok no-op");
+    assert_reason(error, REASON_ZERO_DISPLACEMENT);
+
+    // The same for the line midpoint, whose handle is the computed midpoint.
+    let error = apply_grip(
+        &line(0.0, 0.0, 10.0, 0.0),
+        &grip_id(7, GripKind::Midpoint, 2),
+        p3(5.0, 0.0, 0.0),
+    )
+    .expect_err("a midpoint drag onto its own handle is nothing to write");
     assert_reason(error, REASON_ZERO_DISPLACEMENT);
 
     let error = apply_grip(
@@ -559,31 +719,26 @@ fn apply_grip_refuses_zero_displacement() {
 
 #[test]
 fn apply_grip_refuses_a_kind_with_no_grip_model() {
+    // `ELLIPSE` exposes no handle at all (axis/quadrant grips are NOT
+    // IMPLEMENTED), so any id naming one is the kind refusal — even though the
+    // kind/index would also be "stale" against it.
+    let ellipse = || SemanticGeometry::Ellipse {
+        center: p3(0.0, 0.0, 0.0),
+        normal: p3(0.0, 0.0, 1.0),
+        major_axis: p3(5.0, 0.0, 0.0),
+        ratio: 0.5,
+        start: 0.0,
+        sweep: std::f64::consts::TAU,
+    };
     let error = apply_grip(
-        &SemanticGeometry::Circle {
-            center: p3(0.0, 0.0, 0.0),
-            normal: p3(0.0, 0.0, 1.0),
-            radius: 5.0,
-        },
+        &ellipse(),
         &grip_id(1, GripKind::Endpoint, 0),
         p3(6.0, 0.0, 0.0),
     )
-    .expect_err("a CIRCLE exposes no grip model");
-    assert_reason(error, REASON_UNSUPPORTED_KIND);
+    .expect_err("an ELLIPSE exposes no grip model");
+    assert_reason(error.clone(), REASON_UNSUPPORTED_KIND);
     assert!(
-        reason(
-            apply_grip(
-                &SemanticGeometry::Circle {
-                    center: p3(0.0, 0.0, 0.0),
-                    normal: p3(0.0, 0.0, 1.0),
-                    radius: 5.0,
-                },
-                &grip_id(1, GripKind::Endpoint, 0),
-                p3(6.0, 0.0, 0.0),
-            )
-            .expect_err("still refused")
-        )
-        .contains("AcDbCircle"),
+        reason(error).contains("AcDbEllipse"),
         "the refusal names the DXF class"
     );
 }
@@ -616,8 +771,14 @@ fn grip_positions_match_the_geometry_without_rounding_drift() {
     let end = p3(1e-9, 123_456.789_012_345, -0.0);
     let entity = ent(21, SemanticGeometry::Line { start, end });
     let grips = grips_for_entity(&entity);
+    assert_eq!(grips.len(), 3);
     assert_bits_eq(grips[0].position, start, "grip 0 position");
     assert_bits_eq(grips[1].position, end, "grip 1 position");
+    assert_bits_eq(
+        grips[2].position,
+        midpoint_of(start, end),
+        "grip 2 is the exact midpoint of the stored endpoints",
+    );
 
     // A drag of one endpoint reports the untouched handle at exactly the other
     // grip's stored position.

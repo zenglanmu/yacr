@@ -149,7 +149,11 @@ fn press_on_a_grip_arms_a_drag_and_release_commits_one_gripstretch() {
     // The preview signal: the dragged marker's entry is the drag target.
     let expected_target = world_of(&core, release);
     let markers = grip_markers(&core);
-    assert_eq!(markers.len(), 2, "the selected LINE exposes two handles");
+    assert_eq!(
+        markers.len(),
+        3,
+        "the selected LINE exposes two endpoints and a midpoint"
+    );
     assert!(
         markers
             .iter()

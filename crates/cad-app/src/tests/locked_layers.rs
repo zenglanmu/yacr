@@ -2,10 +2,15 @@
 //!
 //! `cad-db` owns the rule (`drawing::lock`, `layer.locked`); these tests prove a
 //! user command surfaces that refusal unchanged: no document mutation, no
-//! revision bump and **no undo entry**. They also pin the two documented
-//! allowances (display-only property writes, and layer-table writes including
-//! "make the layer current") plus the history-replay rule, which is refused once
-//! the layer is locked and keeps the step on the stack.
+//! revision bump and **no undo entry**. They also pin the remaining documented
+//! allowances (display-only property writes, and layer-table writes — a layer can
+//! still be locked while it is not current) plus the history-replay rule, which is
+//! refused once the layer is locked and keeps the step on the stack.
+//!
+//! Making a locked layer *current* is refused by `cad-app` itself
+//! (`layer.current_locked`, `app_drawing::drawing_create`), so this fixture's
+//! locked `WALLS` layer can only become active by writing the session directly.
+//! `creating_a_line_on_a_locked_current_layer_is_refused` covers both halves.
 //!
 //! The entity ids and layers match the shared fixture shape: entity 1 is on
 //! `WALLS` (id 3, **locked**), entity 2 is on layer 0.
@@ -267,16 +272,24 @@ fn a_display_only_property_change_is_allowed_on_a_locked_layer() {
 #[test]
 fn creating_a_line_on_a_locked_current_layer_is_refused() {
     let (mut app, mut session) = app_with_locked_walls();
-    // Making a locked layer current is session state and is **not** refused by
-    // this lane (documented gap); the creation it enables is refused.
-    execute(
+    // Making a locked layer current is itself refused (`layer.current_locked`),
+    // so the active layer cannot be moved there by a command any more…
+    let error = execute(
         &mut app,
         &mut session,
         CommandId::SetActiveLayer,
         CommandPayload::ActiveLayer(LayerId(3)),
     )
-    .expect("the active layer is session state");
-    assert_eq!(session.active_layer, LayerId(3));
+    .expect_err("a locked layer cannot be made current");
+    assert!(
+        error.to_string().contains("layer.current_locked"),
+        "{error}"
+    );
+    assert_eq!(session.active_layer, LayerId(0));
+    // …and a session forced into that state directly (a stale session, or a layer
+    // locked *after* it became current) still cannot create on it, because the
+    // insert itself carries the lock rule.
+    session.active_layer = LayerId(3);
 
     let before = revision(&app);
     let count = drawing(&app).entity_count();

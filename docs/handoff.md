@@ -1,3 +1,94 @@
+## 2026-10-26 夹点模型扩展：LINE 中点 / CIRCLE 圆心 + 四象限 / ARC 圆心
+
+### 结论
+
+`crates/cad-app/src/grips.rs` 的**纯模型**从「LINE 两端点 + POINT」扩到三/五/一/一句柄：新增
+`GripKind::{Midpoint, Center, Quadrant}`，`grips_for_entity` / `grip_hit` / `grip_hit_planar` /
+`apply_grip` 的**签名不变**，因此 `cad-host`（arm/track/commit/marker）、`render_scene` 的 marker
+overlay、`GRIPSTRETCH` 命令与 IPC 载荷**一行未改**。唯一被改的宿主代码是
+`crates/cad-host/src/tests/grips.rs` 里的一条断言（选中 LINE 的 marker 数 2 → 3）——那是模型事实
+变化，不是宿主逻辑。
+
+### 句柄清单（`index` 与列表顺序 = 命中候选顺序）
+
+| 几何 | 句柄（按 `grips_for_entity` 返回顺序） |
+|---|---|
+| `LINE` (`AcDbLine`) | `Endpoint` 0 = `start`，`Endpoint` 1 = `end`，`Midpoint` 2 |
+| `CIRCLE` (`AcDbCircle`) | `Center` 0，`Quadrant` 0 = `+ax`，1 = `+ay`，2 = `-ax`，3 = `-ay`（圆**自身**平面内的两轴与符号） |
+| `ARC` (`AcDbArc`) | **仅** `Center` 0（**弧端点夹点 NOT IMPLEMENTED**） |
+| `POINT` (`AcDbPoint`) | `Point` 0（不变） |
+
+### 几何规则（都写在 `grips.rs` 模块文档里）
+
+- **LINE 中点**：位置 = `(start + end) * 0.5`（f64 精确中点，不取整、不吸附）。拖拽令
+  `delta = to - midpoint`，**两端各加同一 delta** ⇒ 整条线平移，方向与长度不变（`apply_grip` 返回
+  两个新端点，不做旋转/缩放）。两端平移后若溢出成非有限值，按 `grip.non_finite_target` 拒绝
+  （有限输入也可能溢出，绝不存 `inf`）。
+- **CIRCLE 象限**：`radius` = 中心到目标**投影到圆平面内**的距离
+  （`hypot(dot(to-center, ax), dot(to-center, ay))`），`center`/`normal` **逐位不变**。因此
+  离面高度 `h` 不会进入半径（不是 3D 距离），倾斜圆也不会按 x/y 量（不是 x/y 距离）—— 圆**不会**
+  被拖成倾斜椭圆。平面框架**复用** `cad_geometry::arbitrary_axis`（tessellator / representation /
+  intersect / transform / importer 量圆角用的同一个 AutoCAD arbitrary-axis 框架），没有第二个框架。
+  平面内半径为 0 或非有限 ⇒ `grip.degenerate_radius`（**按名拒绝、不夹取最小值**）；极小但正的半径
+  原样存储（测试钉住 `1e-9`）。
+- **CIRCLE 圆心**：`center = to`，`radius`/`normal` 逐位不变。
+- **ARC 圆心**：`center = to`，`radius`/`normal`/`start`/`sweep` 逐位不变（刚性平移，半径与角度范围
+  不变）。弧端点/象限/中点 id 一律 `grip.stale_handle`，端点那条消息明写 `NOT IMPLEMENTED`。
+- **零位移**沿用同一码并**扩到**「拖了但几何不变」：目标等于当前句柄（端点/位置/中点/圆心/象限）是
+  零位移；**象限拖拽若平面内半径已等于存储半径**（例如目标沿法向偏离句柄、半径恰好不变）也算零位移，
+  因此不会产生「实体未变」的空事务 / 空撤销步。
+- **命中 tie-break**：候选顺序 = 列表顺序（LINE：start → end → 中点；CIRCLE：圆心 → 象限 0..3），
+  等距时**先出现者**胜。故圆心在等距时胜任意象限；LINE 的 `start` 在等距时胜中点（例：2 长线在
+  `x=0.5` 处等距，start 胜）；但在**中点本身**上中点是严格更近者，所以那是中点命中而**不是** tie。
+  3D 与 plan-view 两条规则一致。
+
+### 拒绝面（明确未做）
+
+`ELLIPSE`（含轴/象限）、`SPLINE`（控制点）、`POLYLINE` 顶点/bulge、`INSERT` 块成员、
+`TEXT`/`MTEXT`/`MULTILEADER`、`HATCH`、`DIMENSION`、`IMAGE`/`MASK`、`Opaque`/`Compound`/`Mesh`/
+`Shape` 仍返回**空句柄表**（`grip.unsupported_kind`）；**弧端点夹点**同样 NOT IMPLEMENTED。多夹点 /
+多实体拉伸、拖拽中捕捉、3D 夹点编辑仍不存在；`dom-canvas` 载体（X11/XWayland、web）仍**没有**夹点
+路径（模型扩展不改变那条载体事实）。倾斜圆在 plan view 里拖象限时，宿主仍按「保留被拖句柄自身 z」
+给目标，模型再把它投到圆平面 —— 该**组合**（倾斜圆 + plan 拖拽）没有运行时/像素证据，属未验证，
+不得写成已验收。
+
+### 测试（合成契约，非运行时/GUI 证据）
+
+- `crates/cad-app/src/tests/grips.rs`（改）：LINE 三句柄与顺序、中点位置精确性、中点拖拽=整线平移
+  （精确二进制用例断言两端各走同一 delta、长度与方向不变；非整值对角用例用 1e-12 容差）、
+  tie-break 更新（start vs 中点、中点严格更近）、拒绝面改为 `ELLIPSE`/`SPLINE` 等，并新增中点
+  索引/零位移用例。共 27 条。
+- `crates/cad-app/src/tests/grips_curves.rs`（新，拆分以守 1000 行上限）：CIRCLE 五句柄与文档顺序、
+  倾斜法向下句柄确实落在圆平面且距圆心 = 半径、圆心拖拽、四象限各一次、**反 bug 关键用例**
+  （离面目标 `(6,8,7)` 给半径 10 而非 `sqrt(149)`；XZ 平面圆给 10 而非 `sqrt(117)`）、
+  退化/非有限半径拒绝、极小半径不夹取、半径不变的零位移、ARC 唯一圆心句柄与刚性平移、弧端点
+  NOT IMPLEMENTED、kind/index 齐全的 stale 面、命中（含圆心 vs 象限的精确 tie）。共 18 条。
+- `crates/cad-app/src/tests/drawing/grip.rs`（改）：新增 LINE 中点命令用例（**一条事务 / 一步撤销**，
+  undo 恢复两端**位级**原值）、CIRCLE 象限命令用例（一条事务、undo 恢复半径）、象限退化半径
+  **在开事务之前**被拒且 revision/undo 不动；`grip.unsupported_kind` 用例改用 `ELLIPSE`（CIRCLE 上
+  的错误 kind 现在正确报 `grip.stale_handle`）。该文件 9 → 12 条。
+
+### 本地命令（实际运行）
+
+- `cargo test -p cad-app --lib --locked` → **1016 passed / 0 failed**（本 lane 收尾时同一命令
+  **1023 passed / 0 failed**，多出的 7 条是并行 lane 在本 crate 内新增的测试，非本轮改动）。
+- `cargo test -p cad-host --lib --locked` → **221 passed / 0 failed**。
+- `cargo clippy -p cad-app -p cad-host --all-targets --locked -- -D warnings` → exit 0
+  （`set -o pipefail` 显式检查，未用 `| tail -1` 吞退出码）。
+- `cargo fmt --all -- --check` → **exit 1**，但 diff 只落在**并行 lane 正在写的**
+  `crates/cad-app/src/tests/layers.rs:19` 与 `crates/cad-app/src/tests/layer_current_visibility.rs:195`
+  （本轮未编辑这两个文件，也不再次 `cargo fmt --all` 以免改写其半成品）；本 lane 改动的
+  `grips.rs` / `tests/grips.rs` / `tests/grips_curves.rs` / `tests/drawing/grip.rs` /
+  `tests/mod.rs` / `cad-host/src/tests/grips.rs` 在项目配置下**无 fmt diff**。
+- `python3 scripts/check-file-size.py` → OK（976 代码文件，上限 1000；`grips.rs` 764 /
+  `tests/grips.rs` 798 / `tests/grips_curves.rs` 531）。
+- **NOT RUN**：全 workspace 全量门禁、WASM/平台编译矩阵、真实 GPU/GUI/像素证据、dom-canvas 载体
+  运行证据 —— 本 lane 只改 `cad-app` 的纯模型与其测试（外加一条宿主测试断言），按日常策略只验证
+  自己的改动范围。
+- **注意（协作）**：工作树中 `drawing_create.rs` / `layer_edit.rs` / `tests/layers.rs` /
+  `tests/locked_layers.rs` / `tests/layer_current_visibility.rs` / `cad-db/src/drawing/lock.rs` 的
+  未提交改动**属于另一 lane**（锁定层/当前层规则），本 lane 未编辑其内容、未暂存任何文件、未提交。
+
 ## 2026-10-26 图层锁定：实体写的唯一行为门（`layer.locked`）
 
 ### 结论
@@ -448,6 +539,39 @@ BTreeMap<LayerId, LayerAttributes>`（在 `render_attributes` 旁边），单一
    编辑面为零（无事务、无撤销、无 wire 变化）。
 6. **wire/UI 不变**：图层 wire 形状与面板（色块仍是名字哈希）**本轮完全未动**。
 7. **plot-style 名字**：无法导出（写入器只发句柄）；CTB/STB 归一化未实现。
+
+## 2026-10-26 当前图层规则：锁/冻/关不可设为当前层，当前层也不可被隐藏
+
+### 结论
+
+1. **准入**：`SETACTIVELAYER` 拒绝把**锁定 / 冻结 / 关闭**层设为当前层，错误码
+   `layer.current_locked` / `layer.current_frozen` / `layer.current_off`（判定顺序 locked→frozen→off，
+   消息点名图层与 id 并给出补救动作）。拒绝发生在写会话之前：活动图层、revision、实体表、撤销深度全部不变。
+   规则唯一：`crates/cad-app/src/app_drawing/drawing_create.rs::Application::ensure_layer_can_be_current`
+   （它只看到已解析的 `LayerId`，没有第二套名字解析，`cad-db` 也没有第二处检查）。
+   **关闭层也被拒绝是本仓库的选择，不是 AutoCAD 结论**：关闭层在这里不可见（`visible == !(off||frozen)`），
+   而创建漏斗不看可见性，允许它成为当前层只会画出看不见的几何。
+2. **补漏**：`SETLAYERPROPERTY` 对**当前层**写 `off=true` / `frozen=true` 也拒绝（复用同两个码），
+   且**先于任何写**——属性行、`Layer::visible`、revision、会话与历史都不变。写成 `false`（打开/解冻）、
+   `locked` 与其它键仍允许；**非当前层**的 `off`/`frozen` 仍允许（面板对其它行照常工作）。规则唯一：
+   `app_drawing/layer_edit.rs::ensure_current_layer_stays_visible`（只有会话知道谁是当前层）。
+   两条合起来，当前层在“成为当前”与“成为之后”都不会不可见。
+
+### 已运行证据（本机，2026-10-26）
+
+- `cargo test -p cad-app --lib` → **1023 passed / 0 failed**（含 `tests/layers.rs` 的当前层资格一节、
+  新 `tests/layer_current_visibility.rs` 7 项、`tests/locked_layers.rs` 调整后的创建拒绝）。
+- `cargo clippy -p cad-app --all-targets --locked -- -D warnings` → 0；`cargo fmt --all -- --check` → 0；
+  `check-file-size.py` → OK（976 文件 ≤1000）；`check-i18n.py` → OK（未改 i18n）。
+
+### 边界 / 仍未实现
+
+- **按锁定过滤选择**（AutoCAD 可选中但不可改）未做；当前层规则只作用于**图层表写**，与锁定轮
+  “冻结不在实体写路径新增第二条规则”不冲突。
+- 之后把**非当前**层关闭/冻结再切过去：准入阶段就会被拒绝（不能成为当前层），因此不存在“先关后切”的漏洞。
+- **无 GUI/像素证据**；面板只是把拒绝码经 `cad_status.error` 显示出来，没有运行时截图。
+
+---
 
 ## 2026-10-26 GRIPSTRETCH 命令：一个夹点拖拽 = 一条事务 / 一步撤销
 

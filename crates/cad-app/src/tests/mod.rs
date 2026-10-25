@@ -122,6 +122,8 @@ mod commands;
 mod drawing;
 mod drawing_space;
 mod grips;
+mod grips_curves;
+mod layer_current_visibility;
 mod layer_property;
 mod layers;
 mod locked_layers;

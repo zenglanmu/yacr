@@ -67,6 +67,45 @@ impl Application {
     /// missing layer becomes an explicit `InvalidInput`, so a UI may set a
     /// preference before the table is fully known. This command performs no
     /// database write and records no history.
+    ///
+    /// # A locked, frozen or off layer cannot be made current
+    ///
+    /// One rule, one site: [`Self::ensure_layer_can_be_current`], consulted before
+    /// the session is touched. The refusal travels the ordinary command error path
+    /// with a stable reason code and a sentence naming the layer:
+    ///
+    /// * `layer.current_locked` — a locked layer is **read-only** in this build:
+    ///   every entity write on it is already refused by `cad_db::drawing::lock`
+    ///   (`layer.locked`), so a locked current layer could never receive the
+    ///   geometry this session setting exists to place. (This closes the explicit
+    ///   gap that module's docs recorded.)
+    /// * `layer.current_frozen` — a frozen layer is invisible
+    ///   (`Layer::visible == !(off || frozen)`), while the shared create funnel
+    ///   does **not** look at visibility, so a frozen current layer would happily
+    ///   store geometry the user can neither see nor pick;
+    /// * `layer.current_off` — the same invisible-geometry argument applies to an
+    ///   off layer. AutoCAD lets an off layer be current (it does not turn it on
+    ///   either), but this build has no "turn it on" side effect and no visibility
+    ///   check on creation, so copying that would silently hide what the user just
+    ///   drew. **This is this build's documented rule, not a claim about
+    ///   AutoCAD.**
+    ///
+    /// The flags are checked locked → frozen → off, so a layer carrying several of
+    /// them always reports the same first reason. A refusal changes **nothing**:
+    /// no session write, no revision bump, no history entry. Layer-table writes
+    /// stay allowed: a layer can still be locked, frozen or turned off while it is
+    /// **not** current, and the success path (session-only, one
+    /// `drawing.active_layer` diagnostic) is unchanged.
+    ///
+    /// # The complementary half
+    ///
+    /// The mirror-image hole — *turning the current layer off or freezing it after
+    /// it became current* — is closed by
+    /// `app_drawing::layer_edit`'s `ensure_current_layer_stays_visible`
+    /// (`layer.current_off` / `layer.current_frozen`), so the two refusals together
+    /// mean the current layer is never invisible: not on the way in, and not
+    /// afterwards. Locking the current layer stays allowed there (locking is a
+    /// write permission, not visibility) and so is clearing those flags.
     pub(crate) fn set_active_layer(
         &mut self,
         session: &mut SessionState,
@@ -77,6 +116,7 @@ impl Application {
                 "SetActiveLayer needs an ActiveLayer(LayerId) payload".into(),
             ));
         };
+        self.ensure_layer_can_be_current(command.document, layer)?;
         session.active_layer = layer;
         Ok(CommandOutcome {
             objects: Vec::new(),
@@ -88,6 +128,62 @@ impl Application {
             }],
             measurement: None,
         })
+    }
+
+    /// The one current-layer rule: refuse a **locked**, **frozen** or **off**
+    /// layer as the session's active layer.
+    ///
+    /// Reads the drawing's own stored attributes
+    /// ([`DrawingDatabase::layer_attributes`], `Default` — on, thawed, unlocked —
+    /// for a layer with no attribute row) and names the layer row in the refusal.
+    /// A layer id with no row at all therefore resolves to `Default` and is
+    /// allowed, which is the pre-existing "the layer need not exist yet"
+    /// allowance: the *create* funnel is what reports the missing layer.
+    ///
+    /// Nothing is resolved here: the panel and the layer-table commands own the
+    /// exact-then-unique-case-insensitive name resolver (`resolve_layer` in
+    /// `app_drawing::layer_edit` / `cad_ui_core`'s session equivalent), and this
+    /// rule only ever sees their [`LayerId`] output, so there is no second
+    /// resolution and no second rule.
+    ///
+    /// A document that is not open has no layer table to consult, so nothing is
+    /// refused here; the panel session refuses that case with
+    /// `layer.no_document` before it dispatches.
+    fn ensure_layer_can_be_current(&self, document: DocumentId, layer: LayerId) -> CadResult<()> {
+        let Some(document) = self.workspace.documents.get(&document) else {
+            return Ok(());
+        };
+        let drawing = document.drawing.as_ref();
+        let attributes = drawing.layer_attributes(layer);
+        let (code, state, remedy) = if attributes.locked {
+            (
+                "layer.current_locked",
+                "is locked",
+                "unlock it before making it the current layer",
+            )
+        } else if attributes.frozen {
+            (
+                "layer.current_frozen",
+                "is frozen",
+                "thaw it before making it the current layer",
+            )
+        } else if attributes.off {
+            (
+                "layer.current_off",
+                "is off",
+                "turn it on before making it the current layer",
+            )
+        } else {
+            return Ok(());
+        };
+        let name = drawing
+            .layer(layer)
+            .map(|row| row.name.as_str())
+            .unwrap_or("<unknown>");
+        Err(CadError::InvalidInput(format!(
+            "{code}: layer '{name}' ({}) {state}; {remedy}",
+            layer.0
+        )))
     }
 
     /// Insert a LINE into model space on the session's active layer.

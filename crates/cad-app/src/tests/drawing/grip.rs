@@ -22,6 +22,10 @@ const LINE: u128 = 1;
 const POINT: u128 = 2;
 const CIRCLE: u128 = 3;
 const PAPER_LINE: u128 = 4;
+/// A geometry with **no** grip model at all (`ELLIPSE` axis grips are NOT
+/// IMPLEMENTED), used for the `grip.unsupported_kind` refusal now that `CIRCLE`
+/// and `ARC` have handles.
+const ELLIPSE: u128 = 5;
 
 /// Non-round coordinates so an "untouched endpoint" assertion is a real bit
 /// comparison rather than a happy accident of decimal literals.
@@ -83,6 +87,19 @@ fn grip_app() -> (Application, SessionState) {
         3,
     );
     paper.space = SpaceId::Paper(LayoutId(1));
+    b.insert_entity(ent(
+        ELLIPSE,
+        SemanticGeometry::Ellipse {
+            center: p3(0.0, 0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            major_axis: p3(5.0, 0.0, 0.0),
+            ratio: 0.5,
+            start: 0.0,
+            sweep: std::f64::consts::TAU,
+        },
+        4,
+    ))
+    .unwrap();
     // The drawing must carry the layout the paper-space entity references.
     b.insert_layout(Layout {
         id: LayoutId(1),
@@ -147,6 +164,16 @@ fn endpoints_of(app: &Application, entity: u128) -> (Point3, Point3) {
     match geometry_of(app, entity) {
         SemanticGeometry::Line { start, end } => (start, end),
         other => panic!("entity {entity} is not a LINE: {other:?}"),
+    }
+}
+
+/// The documented exact midpoint of two stored points (`(start + end) * 0.5`),
+/// recomputed here independently of the model.
+fn midpoint_of(start: Point3, end: Point3) -> Point3 {
+    Point3 {
+        x: (start.x + end.x) * 0.5,
+        y: (start.y + end.y) * 0.5,
+        z: (start.z + end.z) * 0.5,
     }
 }
 
@@ -263,6 +290,137 @@ fn line_end_grip_drag_leaves_the_start_endpoint_bit_identical() {
 }
 
 #[test]
+fn line_midpoint_grip_drag_translates_one_line_in_one_undo_step() {
+    let (mut app, mut session) = grip_app();
+    let revision = revision_of(&app);
+    let (start, end) = endpoints_of(&app, LINE);
+    let mid = midpoint_of(start, end);
+    let to = p3(mid.x + 2.5, mid.y - 1.25, mid.z + 0.75);
+    // The delta the model sees is `to - midpoint` in `f64`, so compute the
+    // expectation the same way instead of assuming `(mid + d) - mid == d`.
+    let delta = p3(to.x - mid.x, to.y - mid.y, to.z - mid.z);
+
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(LINE, GripKind::Midpoint, 2, to),
+    )
+    .unwrap();
+
+    // One entity update, in one transaction, with one undo entry — the whole line
+    // moved, but it is still one handle drag.
+    assert_eq!(
+        outcome.changes.as_ref().expect("a ChangeSet").changes.len(),
+        1
+    );
+    assert_eq!(outcome.objects, vec![ObjectId(LINE)]);
+    assert_eq!(revision_of(&app), Revision(revision.0 + 1));
+    assert_eq!(undo_depth(&app), 1);
+
+    // Both endpoints moved by the *same* delta, so the line stays parallel and
+    // keeps its length.
+    let (new_start, new_end) = endpoints_of(&app, LINE);
+    assert_eq!(
+        new_start,
+        p3(start.x + delta.x, start.y + delta.y, start.z + delta.z)
+    );
+    assert_eq!(
+        new_end,
+        p3(end.x + delta.x, end.y + delta.y, end.z + delta.z)
+    );
+    // Same direction and length. The difference of two translated points is
+    // not bit-exact (cancellation), so this is the one tolerance in the test.
+    for (axis, (before, after)) in [
+        ("x", (end.x - start.x, new_end.x - new_start.x)),
+        ("y", (end.y - start.y, new_end.y - new_start.y)),
+        ("z", (end.z - start.z, new_end.z - new_start.z)),
+    ] {
+        assert!(
+            (after - before).abs() < 1e-12,
+            "{axis} direction must be preserved: {after} vs {before}"
+        );
+        assert!(
+            before.abs() > 1e-3,
+            "the fixture is not degenerate on {axis}"
+        );
+    }
+
+    // Undo restores both endpoints exactly (same `f64` bits).
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    let (start_after, end_after) = endpoints_of(&app, LINE);
+    assert_eq!(start_after, start);
+    assert_eq!(end_after, end);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn circle_quadrant_grip_drag_sets_the_radius_in_one_undo_step() {
+    let (mut app, mut session) = grip_app();
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(CIRCLE, GripKind::Quadrant, 0, p3(8.0, 0.0, 0.0)),
+    )
+    .unwrap();
+    assert_eq!(outcome.changes.as_ref().unwrap().changes.len(), 1);
+    assert_eq!(undo_depth(&app), 1);
+    match geometry_of(&app, CIRCLE) {
+        SemanticGeometry::Circle {
+            center,
+            normal,
+            radius,
+        } => {
+            assert_eq!(center, p3(0.0, 0.0, 0.0), "the centre stays put");
+            assert_eq!(radius, 8.0, "the quadrant drag sets the radius");
+            assert_eq!(normal, p3(0.0, 0.0, 1.0), "the normal stays put");
+        }
+        other => panic!("expected a CIRCLE, got {other:?}"),
+    }
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    match geometry_of(&app, CIRCLE) {
+        SemanticGeometry::Circle { radius, .. } => {
+            assert_eq!(radius, 5.0, "undo restores the stored radius");
+        }
+        other => panic!("expected a CIRCLE, got {other:?}"),
+    }
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn a_quadrant_drag_that_would_zero_the_radius_is_refused_without_a_write() {
+    let (mut app, mut session) = grip_app();
+    let revision = revision_of(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(CIRCLE, GripKind::Quadrant, 0, p3(0.0, 0.0, 0.0)),
+    )
+    .unwrap_err();
+    refused(error, crate::grips::REASON_DEGENERATE_RADIUS, false);
+    assert_untouched(&app, revision, 0);
+    match geometry_of(&app, CIRCLE) {
+        SemanticGeometry::Circle { radius, .. } => assert_eq!(radius, 5.0),
+        other => panic!("expected a CIRCLE, got {other:?}"),
+    }
+}
+
+#[test]
 fn point_grip_drag_moves_the_position_in_one_undo_step() {
     let (mut app, mut session) = grip_app();
     let outcome = execute(
@@ -361,11 +519,24 @@ fn stale_or_deleted_handles_are_refused_and_write_nothing() {
 }
 
 #[test]
-fn a_circle_handle_is_refused_as_an_unsupported_kind() {
+fn a_geometry_without_a_grip_model_is_refused_as_an_unsupported_kind() {
     let (mut app, mut session) = grip_app();
     let revision = revision_of(&app);
-    // A CIRCLE exposes no grip at all, so any id naming one is the kind refusal —
-    // even though the kind/index would also be "stale" against it.
+    // An ELLIPSE exposes no grip at all (its axis/quadrant handles are NOT
+    // IMPLEMENTED), so any id naming one is the kind refusal — even though the
+    // kind/index would also be "stale" against it.
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(ELLIPSE, GripKind::Endpoint, 0, p3(1.0, 0.0, 0.0)),
+    )
+    .unwrap_err();
+    refused(error, REASON_UNSUPPORTED_KIND, true);
+    assert_untouched(&app, revision, 0);
+
+    // A CIRCLE *does* have handles, so the wrong kind for it is a stale handle,
+    // not an unsupported kind.
     let error = execute(
         &mut app,
         &mut session,
@@ -373,7 +544,7 @@ fn a_circle_handle_is_refused_as_an_unsupported_kind() {
         drag(CIRCLE, GripKind::Endpoint, 0, p3(1.0, 0.0, 0.0)),
     )
     .unwrap_err();
-    refused(error, REASON_UNSUPPORTED_KIND, true);
+    refused(error, REASON_STALE_HANDLE, false);
     assert_untouched(&app, revision, 0);
 }
 
