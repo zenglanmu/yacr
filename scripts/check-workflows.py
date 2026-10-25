@@ -24,16 +24,17 @@ checks:
     compile gate, which cannot publish anything;
   * no required or retired job declares ``continue-on-error: true`` (job-level or
     step-level);
-  * the **local** browser bundle entry point (``scripts/build-web.sh`` plus the
-    shared ``scripts/lib/wasm-toolchain.sh``) is a real build, not a retired stub:
-    the script is present, readable and executable, it re-reads the
-    ``wasm-bindgen`` pin from ``Cargo.toml`` and compares it with the CLI, it runs
+  * the browser pipeline entry points (``scripts/build-web.sh`` plus the shared
+    ``scripts/lib/wasm-toolchain.sh``, ``scripts/web-smoke.cjs`` and
+    ``scripts/deploy-cloudflare-pages.sh``) are real: the build re-reads the
+    ``wasm-bindgen`` pin from ``Cargo.toml`` and compares it with the CLI, runs
     ``cargo build -p app-web --target wasm32-unknown-unknown --release --locked``,
-    emits the ``--target web`` glue, and writes the documented ``apps/app-web/dist``
-    directory it then prints. This replaces the former "build-web.sh always exits
-    non-zero" assumption. It does **not** enable any CI job: the ``web-build``,
-    ``web-deploy`` and ``web-smoke`` jobs stay hard-disabled, and
-    ``scripts/deploy-cloudflare-pages.sh`` stays a retired non-zero stub.
+    emits the ``--target web`` glue and writes the documented
+    ``apps/app-web/dist`` directory it then prints; the smoke waits for the typed
+    ``start: ok`` status and labels software rendering; the deploy entry point
+    validates every bundle artifact before it hands the directory to wrangler.
+    The ``web-build`` / ``web-smoke`` / ``web-deploy`` jobs are required jobs, and
+    ``web-deploy`` must stay gated to ``v*`` tags or a manual dispatch.
 
 Each guarantee is enforced structurally (and, when PyYAML is importable, with a
 real parse as well) so a mutation that removes a fragment or a disable guard is
@@ -105,25 +106,52 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         # explicit NOT IMPLEMENTED `app-android` placeholder is compiled.
         "cargo check --target aarch64-linux-android -p app-android --locked",
     ),
+    "web-build": (
+        # The real wasm CAD bundle (ADR 0024): pinned CLI install, script build,
+        # artifact upload that web-smoke and web-deploy consume.
+        "bash scripts/build-web.sh",
+        "wasm32-unknown-unknown",
+        "wasm-bindgen",
+        "apps/app-web/dist",
+        "actions/upload-artifact",
+        "web-dist",
+    ),
+    "web-smoke": (
+        # The bundle this run built must be served and driven in a browser; CI has
+        # no GPU, so the job name and the smoke log both label software rendering.
+        "actions/download-artifact",
+        "web-dist",
+        "scripts/serve-web.py",
+        "scripts/web-smoke.cjs",
+        "playwright",
+    ),
+    "web-deploy": (
+        # Publishes the uploaded artifact only; the deploy script validates every
+        # bundle file before wrangler sees it.
+        "actions/download-artifact",
+        "web-dist",
+        "scripts/deploy-cloudflare-pages.sh",
+        "CLOUDFLARE_API_TOKEN",
+        "SKIP_BUILD",
+    ),
 }
 
-# Jobs that are capability-gated: they must carry an explicit `if:` guard so
-# that when the capability is absent GitHub reports SKIPPED, never a pass. Only
-# the `android-check` compile gate remains gated (it cannot publish anything).
-GATED_JOBS: tuple[str, ...] = ("android-check",)
+# Jobs that are capability- or event-gated: they must carry an explicit `if:`
+# guard so that when the condition is absent GitHub reports SKIPPED, never a pass.
+# `android-check` is capability-gated (no Android device/toolchain by default) and
+# `web-deploy` is event-gated (only `v*` tags or a manual dispatch may publish).
+GATED_JOBS: tuple[str, ...] = ("android-check", "web-deploy")
 
-# `if:` fragment each gated job must retain (the capability switch).
+# `if:` fragment each gated job must retain (the capability/event switch).
 GATED_JOB_IF: dict[str, str] = {
     "android-check": "vars.ANDROID_CI_ENABLED",
+    "web-deploy": "refs/tags/v",
 }
 
-# Retired platform build/deploy/release jobs. They are kept declared (so the
-# gap stays visible) but must be hard-disabled: an unconditional `if: false` and
-# a `RETIRED` marker, never a mutable `vars.…` switch.
+# Retired platform build/release jobs. They are kept declared (so the gap stays
+# visible) but must be hard-disabled: an unconditional `if: false` and a
+# `RETIRED` marker, never a mutable `vars.…` switch.
 RETIRED_JOBS: tuple[str, ...] = (
-    "web-build",
-    "web-deploy",
-    "web-smoke",
     "android-apk",
     "android-release",
     "linux-release",
@@ -140,19 +168,21 @@ MUTABLE_GATE_RE = re.compile(r"\bvars\.")
 SECRETS_RE = re.compile(r"\bsecrets\.")
 TRUE_CONTINUE_ON_ERROR = re.compile(r"continue-on-error\s*:\s*true\b", re.IGNORECASE)
 
-# --- local browser bundle entry point ---------------------------------------
+# --- browser bundle, smoke and deploy entry points ---------------------------
 #
 # The wasm CAD session in `apps/app-web` was revived (ADR 0024), so
-# `scripts/build-web.sh` builds a real local bundle again instead of failing as a
-# retired stub. CI is unchanged (no web job is enabled), so what this checker pins
-# is the **script-level** contract that replaced the former "build-web.sh always
-# exits non-zero" assumption: falling back to a stub, dropping the wasm-bindgen
-# pin check, dropping the wasm32 build, or writing/reporting a different output
-# directory are all failures.
+# `scripts/build-web.sh` builds a real bundle, `scripts/web-smoke.cjs` drives it in
+# a browser, and `scripts/deploy-cloudflare-pages.sh` publishes exactly the
+# validated bundle. What this checker pins is the **script-level** contract so a
+# silent regression back to a stub, a dropped wasm-bindgen pin check, a smoke that
+# never asserts the status line, or a deploy that publishes an unvalidated
+# directory fails.
 
 BUILD_WEB_SCRIPT = "scripts/build-web.sh"
 WASM_TOOLCHAIN_SCRIPT = "scripts/lib/wasm-toolchain.sh"
 BUILD_WEB_OUT_DIR = "apps/app-web/dist"
+WEB_SMOKE_SCRIPT = "scripts/web-smoke.cjs"
+DEPLOY_SCRIPT = "scripts/deploy-cloudflare-pages.sh"
 
 # Fragments `build-web.sh` must keep. The pin check and the cargo/wasm-bindgen
 # invocations live in the shared toolchain library (both wasm entry points use
@@ -189,14 +219,38 @@ BUILD_WEB_OUT_DIR_RE = re.compile(
 # ... and the run report must print that same variable, not a hard-coded copy.
 BUILD_WEB_REPORT_RE = re.compile(r"""printf 'artifacts in %s\\n' "\$OUT_DIR\"""")
 
-# Entry points that **stayed** retired. Each must still fail non-zero instead of
-# pretending to succeed, and must not carry a publish command.
-RETIRED_SCRIPTS: dict[str, tuple[str, ...]] = {
-    # `build-web.sh` builds the bundle locally; publishing is still not a
-    # contract anyone verified, so the deploy entry point keeps failing and just
-    # points at the bundle output.
-    "scripts/deploy-cloudflare-pages.sh": ("NOT IMPLEMENTED", BUILD_WEB_OUT_DIR),
-}
+# Fragments the smoke must keep: it has to load the built bundle, wait for the
+# typed `start: ok` status, read the document status through the page handle, and
+# label software rendering instead of implying GPU evidence.
+WEB_SMOKE_FRAGMENTS: tuple[str, ...] = (
+    "playwright",
+    "#cad-status",
+    "start: ok",
+    "__YACR_CANVAS__",
+    "synthetic-four-lines.dwg",
+    "webgl2",
+    "software",
+    "process.exitCode",
+)
+
+# Fragments the deploy entry point must keep. The artifact list is spelled out so
+# a missing/partial bundle is refused before wrangler runs; the credential names
+# and the wrangler invocation are the publish contract itself.
+DEPLOY_FRAGMENTS: tuple[str, ...] = (
+    "set -euo pipefail",
+    "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "SKIP_BUILD",
+    "index.html",
+    "main.js",
+    "worker.js",
+    "style.css",
+    "pkg/app_web.js",
+    "pkg/app_web_bg.wasm",
+    BUILD_WEB_OUT_DIR,
+    "wrangler",
+    "pages deploy",
+)
 
 
 def workflow_files() -> list[pathlib.Path]:
@@ -445,24 +499,51 @@ def wasm_toolchain_errors(text: str) -> list[str]:
     return errors
 
 
-def retired_script_errors(name: str, text: str) -> list[str]:
-    """Errors for a script that is still retired (must fail, must not publish)."""
+def web_smoke_errors(text: str) -> list[str]:
+    """Contract errors for the headless browser smoke (`scripts/web-smoke.cjs`)."""
     errors: list[str] = []
     if not text.strip():
-        return [f"{name}: retired script is empty"]
-    for fragment in RETIRED_SCRIPTS.get(name, ()):
-        if fragment not in text:
-            errors.append(
-                f"{name}: missing {fragment!r} (a retired stub must say so and point "
-                "at the local bundle instead of publishing)"
-            )
-    if re.search(r"(?m)^exit [1-9][0-9]*\s*$", text) is None:
+        return [f"{WEB_SMOKE_SCRIPT}: is empty"]
+    if "NOT IMPLEMENTED" in text:
         errors.append(
-            f"{name}: does not exit non-zero (a retired entry point must fail loudly)"
+            f"{WEB_SMOKE_SCRIPT}: claims NOT IMPLEMENTED; the smoke must drive the bundle"
         )
-    if "wrangler" in text.lower():
+    for fragment in WEB_SMOKE_FRAGMENTS:
+        if fragment not in text:
+            errors.append(f"{WEB_SMOKE_SCRIPT}: missing required fragment {fragment!r}")
+    if "process.exit(0)" in text:
         errors.append(
-            f"{name}: contains a publish command ('wrangler') while it is retired"
+            f"{WEB_SMOKE_SCRIPT}: exits 0 unconditionally; a failing smoke must fail the job"
+        )
+    return errors
+
+
+def deploy_script_errors(text: str) -> list[str]:
+    """Contract errors for the Cloudflare Pages publish entry point."""
+    errors: list[str] = []
+    if not text.strip():
+        return [f"{DEPLOY_SCRIPT}: is empty"]
+    if "NOT IMPLEMENTED" in text:
+        errors.append(
+            f"{DEPLOY_SCRIPT}: is a retired stub again ('NOT IMPLEMENTED'); the publish "
+            "entry point must stay runnable"
+        )
+    for fragment in DEPLOY_FRAGMENTS:
+        if fragment not in text:
+            errors.append(f"{DEPLOY_SCRIPT}: missing required fragment {fragment!r}")
+    # The artifact guard must run before the upload: a `pages deploy` invocation
+    # that appears before any `[ -s "$DIST/…" ]` check would publish a partial
+    # bundle.
+    guard = text.find('[ -s "$DIST/')
+    upload = text.find("pages deploy")
+    if guard == -1:
+        errors.append(
+            f"{DEPLOY_SCRIPT}: no `[ -s \"$DIST/…\" ]` artifact guard; a partial bundle "
+            "could be published"
+        )
+    elif upload != -1 and guard > upload:
+        errors.append(
+            f"{DEPLOY_SCRIPT}: the artifact guard runs after the pages upload"
         )
     return errors
 
@@ -483,7 +564,7 @@ def _read_script(rel: str, require_exec: bool = True) -> tuple[str | None, list[
 
 
 def entry_point_pass() -> tuple[list[str], list[str]]:
-    """Check the local bundle script and the scripts that stayed retired."""
+    """Check the bundle build, the browser smoke and the publish entry point."""
     errors: list[str] = []
     ok: list[str] = []
 
@@ -509,15 +590,18 @@ def entry_point_pass() -> tuple[list[str], list[str]]:
                 "pin check and the wasm32 release build"
             )
 
-    for name in RETIRED_SCRIPTS:
-        text, problems = _read_script(name)
+    for rel, contract, label in (
+        (WEB_SMOKE_SCRIPT, web_smoke_errors, "drives the built bundle in a browser"),
+        (DEPLOY_SCRIPT, deploy_script_errors, "publishes only a validated bundle"),
+    ):
+        text, problems = _read_script(rel)
         errors.extend(problems)
         if text is None:
             continue
-        found = retired_script_errors(name, text)
+        found = contract(text)
         errors.extend(found)
         if not found and not problems:
-            ok.append(f"retired script '{name}' still fails non-zero (no publish path)")
+            ok.append(f"entry point '{rel}' {label}")
 
     return ok, errors
 
@@ -589,7 +673,8 @@ def main() -> int:
 
     print(
         "\nOK: required jobs present with commands intact, retired jobs hard-disabled, "
-        "local browser bundle entry point real, no continue-on-error: true"
+        "browser build/smoke/deploy entry points real (deploy tag/dispatch gated), "
+        "no continue-on-error: true"
     )
     return 0
 

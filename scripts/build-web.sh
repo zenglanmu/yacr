@@ -33,8 +33,10 @@
 #     from scratch and every expected artifact is asserted non-empty afterwards;
 #   * a successful build is **not** runtime, GPU or pixel evidence. It says the
 #     bundle exists, nothing about a browser, a GPU, or that the drawing renders.
-#     There is still **no** CI build and **no** publish path (`web-build`,
-#     `web-deploy` and `scripts/deploy-cloudflare-pages.sh` remain retired).
+#     CI builds this bundle (`web-build`) and drives it headlessly under software
+#     rendering (`web-smoke`, SwiftShader — not GPU evidence); publishing is
+#     `web-deploy`, gated to `v*` tags or a manual dispatch and limited to the
+#     artifact that job uploaded.
 #
 # Usage:
 #   bash scripts/build-web.sh
@@ -130,4 +132,4 @@ yacr_report_artifact "$OUT_DIR/style.css" "style.css"
 yacr_report_artifact "$OUT_DIR/pkg/$PKG_JS" "pkg/$PKG_JS"
 yacr_report_artifact "$OUT_DIR/pkg/$PKG_WASM" "pkg/$PKG_WASM"
 printf 'serve with: python3 scripts/serve-web.py --directory %s\n' "$OUT_DIR"
-printf 'note: a built bundle is not runtime, GPU or pixel evidence, and there is no CI/publish path.\n'
+printf 'note: a built bundle is not runtime, GPU or pixel evidence; CI drives it headlessly under software rendering and publishes only on tags/dispatch.\n'

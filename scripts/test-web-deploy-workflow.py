@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-"""Mutation contracts for the web bundle / deploy entry points (no deploy claim).
+"""Mutation contracts for the browser pipeline: build -> smoke -> publish.
 
-The browser wasm session was revived (ADR 0024), so ``scripts/build-web.sh`` is a
-real local bundle build again: it re-reads the ``wasm-bindgen`` pin, compiles
-``app-web`` for ``wasm32-unknown-unknown`` (release, ``--locked``), emits the
-``--target web`` glue and assembles ``apps/app-web/dist``. These tests pin that
-contract (and the shared ``scripts/lib/wasm-toolchain.sh`` it calls) so a silent
-regression back to a "NOT IMPLEMENTED" stub, a dropped pin check or a drifted
-output directory fails.
+The wasm CAD session (ADR 0024) is built by ``scripts/build-web.sh``, driven in a
+browser by ``scripts/web-smoke.cjs`` and — only on a ``v*`` tag or a manual
+dispatch — published by ``scripts/deploy-cloudflare-pages.sh``. These tests pin
+the workflow jobs and the script-level contracts, so a silent regression back to
+a retired stub, an unguarded publish, a smoke that never asserts the session, or
+a bundler change that stops shipping an artifact fails here.
 
-Publishing is **still** not restored: ``scripts/deploy-cloudflare-pages.sh``
-keeps failing with ``NOT IMPLEMENTED`` and the Cloudflare Pages deploy job stays
-hard-disabled. This checker proves that disable is real — an unconditional
-``if: false`` plus a ``RETIRED`` marker, never a mutable ``vars.…`` switch and
-never a ``secrets.…`` publish path — so a future edit cannot quietly re-enable a
-stub publish. It never contacts Cloudflare.
+Nothing in this file contacts Cloudflare or launches a browser: it is a
+text/contract check. The real smoke runs in CI (`web-smoke`) under software
+rendering; its log says so.
 """
+from __future__ import annotations
+
 import importlib.util
 import pathlib
 import sys
@@ -31,163 +29,155 @@ spec.loader.exec_module(workflow)
 BUILD = ROOT / ".github/workflows/build.yml"
 
 
-class RetiredWebJobsContracts(unittest.TestCase):
+class WebPipelineWorkflowContracts(unittest.TestCase):
     def check_text(self, text):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             path = pathlib.Path(directory) / "test.yml"
             path.write_text(text)
             return workflow.structural_pass([path])[2]
 
-    def test_web_build_and_deploy_jobs_are_retired_and_declared(self):
-        text = BUILD.read_text()
-        for job in ("web-build", "web-deploy", "web-smoke"):
-            with self.subTest(job=job):
-                self.assertIn(job, workflow.RETIRED_JOBS)
-        self.assertEqual(self.check_text(text), [])
+    def block(self, job):
+        block = workflow.job_block(BUILD.read_text(), job)
+        self.assertIsNotNone(block, f"job '{job}' is not declared")
+        return block
 
-    def test_retired_jobs_are_hard_disabled_not_capability_gated(self):
-        text = BUILD.read_text()
-        for job in ("web-build", "web-deploy", "web-smoke"):
+    def test_web_jobs_are_required_not_retired(self):
+        for job in ("web-build", "web-smoke", "web-deploy"):
             with self.subTest(job=job):
-                block = workflow.job_block(text, job)
-                self.assertIsNotNone(block)
-                self.assertRegex(block, r"(?m)^    if:\s*false\s*(?:#.*)?$")
-                self.assertNotIn("vars.", block)
-                self.assertIn("RETIRED", block)
+                self.assertIn(job, workflow.REQUIRED_JOBS)
+                self.assertNotIn(job, workflow.RETIRED_JOBS)
+        self.assertEqual(self.check_text(BUILD.read_text()), [])
 
-    def test_removing_the_hard_disable_fails(self):
+    def test_web_build_installs_the_pinned_cli_and_uploads_the_bundle(self):
+        block = self.block("web-build")
+        self.assertIn("bash scripts/build-web.sh", block)
+        self.assertIn("wasm32-unknown-unknown", block)
+        # The prebuilt CLI is fetched with a pinned SHA-256 and checked against the
+        # workspace pin before the bundle is built — never "whatever is on PATH".
+        self.assertIn("sha256sum -c -", block)
+        self.assertIn("scripts/lib/wasm-toolchain.sh", block)
+        self.assertIn("apps/app-web/dist", block)
+        self.assertIn("web-dist", block)
+        self.assertNotIn("if: false", block)
+
+    def test_web_smoke_drives_the_uploaded_bundle(self):
+        block = self.block("web-smoke")
+        self.assertIn("needs: web-build", block)
+        self.assertIn("actions/download-artifact", block)
+        self.assertIn("scripts/serve-web.py", block)
+        self.assertIn("scripts/web-smoke.cjs", block)
+        self.assertIn("playwright", block)
+        self.assertNotIn("if: false", block)
+        self.assertNotIn("continue-on-error", block)
+
+    def test_web_deploy_is_tag_or_dispatch_gated(self):
+        block = self.block("web-deploy")
+        self.assertIn("needs: web-build", block)
+        self.assertIn("refs/tags/v", block)
+        self.assertIn("workflow_dispatch", block)
+        self.assertIn("scripts/deploy-cloudflare-pages.sh", block)
+        self.assertIn("secrets.CLOUDFLARE_API_TOKEN", block)
+        self.assertIn('SKIP_BUILD: "1"', block)
+        self.assertIn("web-dist", block)
+        self.assertNotIn("if: false", block)
+
+    def test_deploying_on_a_routine_push_fails_the_gate_contract(self):
         text = BUILD.read_text()
-        mutated = text.replace("    if: false\n", "    if: true\n", 1)
+        mutated = text.replace("refs/tags/v", "refs/heads/main", 1)
         self.assertNotEqual(mutated, text)
-        self.assertTrue(self.check_text(mutated))
-
-    def test_reintroducing_a_mutable_capability_switch_fails(self):
-        text = BUILD.read_text()
-        mutated = text.replace(
-            "    if: false\n",
-            "    if: ${{ vars.WEB_SMOKE_ENABLED == 'true' }}\n",
-            1,
+        errors = self.check_text(mutated)
+        self.assertTrue(
+            any("web-deploy" in error for error in errors),
+            f"an ungated deploy was not reported: {errors}",
         )
-        self.assertNotEqual(mutated, text)
-        self.assertTrue(self.check_text(mutated))
 
-    def test_retired_jobs_still_fail_nonzero_if_run(self):
+    def test_dropping_the_bundle_build_fails(self):
         text = BUILD.read_text()
-        # Every retired job's only step fails non-zero, so an accidental
-        # re-enable can never pass as an empty success.
-        for job in ("web-build", "web-deploy", "web-smoke"):
-            with self.subTest(job=job):
-                block = workflow.job_block(text, job)
-                self.assertIsNotNone(block)
-                self.assertIn("exit 1", block)
-        mutated = text.replace("          exit 1\n", "          true\n", 1)
+        mutated = text.replace("run: bash scripts/build-web.sh", "run: true", 1)
         self.assertNotEqual(mutated, text)
-        self.assertTrue(self.check_text(mutated))
+        errors = self.check_text(mutated)
+        self.assertTrue(any("build-web.sh" in error for error in errors), errors)
 
-    def test_publish_command_and_credentials_are_gone_from_the_retired_deploy_job(self):
+    def test_dropping_the_artifact_upload_fails(self):
         text = BUILD.read_text()
-        block = workflow.job_block(text, "web-deploy")
-        self.assertIsNotNone(block)
-        self.assertNotIn("scripts/deploy-cloudflare-pages.sh", block)
-        self.assertNotIn("secrets.", block)
-        # A stray credential reference in the disabled job must be caught.
-        mutated = text.replace(
-            "  web-deploy:\n",
-            "  web-deploy:\n    env:\n      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n",
+        mutated = text.replace("          name: web-dist\n", "", 1)
+        self.assertNotEqual(mutated, text)
+        errors = self.check_text(mutated)
+        self.assertTrue(any("web-dist" in error for error in errors), errors)
+
+
+class WebEntryPointScriptContracts(unittest.TestCase):
+    """The three browser entry points are real; each has a fail-closed contract."""
+
+    def read(self, rel):
+        return (ROOT / rel).read_text()
+
+    def test_all_entry_points_satisfy_their_contract(self):
+        self.assertEqual(workflow.build_web_errors(self.read(workflow.BUILD_WEB_SCRIPT)), [])
+        self.assertEqual(
+            workflow.wasm_toolchain_errors(self.read(workflow.WASM_TOOLCHAIN_SCRIPT)), []
         )
-        self.assertNotEqual(mutated, text)
-        self.assertTrue(self.check_text(mutated))
-
-    def test_deploy_script_itself_fails_not_implemented(self):
-        script = (ROOT / "scripts/deploy-cloudflare-pages.sh").read_text()
-        self.assertIn("NOT IMPLEMENTED", script)
-        self.assertRegex(script, r"(?m)^exit 1\s*$")
-        self.assertNotIn("wrangler", script)
-        # It must point at the local bundle instead of implying a publish path.
-        self.assertIn(workflow.BUILD_WEB_OUT_DIR, script)
-
-    def test_removing_the_retired_deploy_diagnostic_fails(self):
-        script = (ROOT / "scripts/deploy-cloudflare-pages.sh").read_text()
-        mutated = script.replace("NOT IMPLEMENTED", "")
-        self.assertNotEqual(mutated, script)
-        self.assertTrue(workflow.retired_script_errors("scripts/deploy-cloudflare-pages.sh", mutated))
-
-    def test_deploy_script_must_exit_nonzero(self):
-        script = (ROOT / "scripts/deploy-cloudflare-pages.sh").read_text()
-        mutated = script.replace("exit 1", "exit 0")
-        self.assertNotEqual(mutated, script)
-        self.assertTrue(workflow.retired_script_errors("scripts/deploy-cloudflare-pages.sh", mutated))
-
-
-class LocalBrowserBundleContracts(unittest.TestCase):
-    """`scripts/build-web.sh` builds a real bundle; it is not a retired stub."""
-
-    def build_web(self):
-        return (ROOT / workflow.BUILD_WEB_SCRIPT).read_text()
-
-    def toolchain(self):
-        return (ROOT / workflow.WASM_TOOLCHAIN_SCRIPT).read_text()
-
-    def test_build_web_satisfies_its_contract(self):
-        self.assertEqual(workflow.build_web_errors(self.build_web()), [])
-
-    def test_shared_toolchain_satisfies_its_contract(self):
-        self.assertEqual(workflow.wasm_toolchain_errors(self.toolchain()), [])
+        self.assertEqual(workflow.web_smoke_errors(self.read(workflow.WEB_SMOKE_SCRIPT)), [])
+        self.assertEqual(workflow.deploy_script_errors(self.read(workflow.DEPLOY_SCRIPT)), [])
 
     def test_entry_point_pass_accepts_the_real_scripts(self):
         ok, errors = workflow.entry_point_pass()
         self.assertEqual(errors, [])
-        self.assertTrue(any(workflow.BUILD_WEB_SCRIPT in line for line in ok))
+        joined = "\n".join(ok)
+        for rel in (
+            workflow.BUILD_WEB_SCRIPT,
+            workflow.WASM_TOOLCHAIN_SCRIPT,
+            workflow.WEB_SMOKE_SCRIPT,
+            workflow.DEPLOY_SCRIPT,
+        ):
+            self.assertIn(rel, joined)
 
-    def test_reintroducing_the_retired_stub_fails(self):
-        text = self.build_web()
+    def test_reintroducing_the_retired_build_stub_fails(self):
         mutated = (
             "#!/usr/bin/env bash\n"
             "# RETIRED: NOT IMPLEMENTED\n"
             'echo "NOT IMPLEMENTED" >&2\nexit 1\n'
         )
-        self.assertNotEqual(mutated, text)
-        errors = workflow.build_web_errors(mutated)
-        self.assertTrue(any("NOT IMPLEMENTED" in error for error in errors))
-        self.assertTrue(any("wasm32" in error or "yacr_build_app_web_wasm" in error for error in errors))
-
-    def test_dropping_the_wasm_bindgen_pin_check_fails(self):
-        text = self.toolchain()
-        mutated = text.replace("--version", "--help")
-        self.assertNotEqual(mutated, text)
-        self.assertTrue(workflow.wasm_toolchain_errors(mutated))
-
-    def test_dropping_the_wasm32_build_fails(self):
-        text = self.toolchain()
-        mutated = text.replace("wasm32-unknown-unknown", "x86_64-unknown-linux-gnu")
-        self.assertNotEqual(mutated, text)
-        self.assertTrue(workflow.wasm_toolchain_errors(mutated))
-
-    def test_build_web_must_call_the_shared_toolchain(self):
-        text = self.build_web()
-        mutated = text.replace(workflow.WASM_TOOLCHAIN_SCRIPT, "scripts/build-canvas-wasm.sh")
-        self.assertNotEqual(mutated, text)
         self.assertTrue(workflow.build_web_errors(mutated))
 
-    def test_output_directory_must_match_the_documented_bundle(self):
-        text = self.build_web()
-        mutated = text.replace(
-            f'readonly OUT_DIR="$REPO_ROOT/{workflow.BUILD_WEB_OUT_DIR}"',
-            'readonly OUT_DIR="$REPO_ROOT/apps/app-web/web"',
-        )
-        self.assertNotEqual(mutated, text)
-        errors = workflow.build_web_errors(mutated)
-        self.assertTrue(any("documented bundle directory" in error for error in errors))
+    def test_smoke_that_does_not_assert_the_session_fails(self):
+        text = self.read(workflow.WEB_SMOKE_SCRIPT)
+        for fragment in ("start: ok", "#cad-status", "__YACR_CANVAS__"):
+            with self.subTest(fragment=fragment):
+                mutated = text.replace(fragment, "")
+                self.assertNotEqual(mutated, text)
+                self.assertTrue(workflow.web_smoke_errors(mutated))
 
-    def test_the_printed_directory_must_be_the_written_one(self):
-        text = self.build_web()
-        old = 'printf \'artifacts in %s\\n\' "$OUT_DIR"'
-        new = 'printf \'artifacts in %s\\n\' "apps/app-web/dist"'
-        self.assertIn(old, text)
-        mutated = text.replace(old, new)
+    def test_smoke_that_cannot_fail_the_job_is_rejected(self):
+        text = self.read(workflow.WEB_SMOKE_SCRIPT)
+        mutated = text.replace("process.exitCode", "process.exit(0)")
         self.assertNotEqual(mutated, text)
-        errors = workflow.build_web_errors(mutated)
-        self.assertTrue(any("does not print the directory it wrote" in error for error in errors))
+        self.assertTrue(workflow.web_smoke_errors(mutated))
+
+    def test_deploy_without_a_publish_command_fails(self):
+        text = self.read(workflow.DEPLOY_SCRIPT)
+        mutated = text.replace("wrangler", "noop")
+        self.assertNotEqual(mutated, text)
+        self.assertTrue(workflow.deploy_script_errors(mutated))
+
+    def test_deploy_that_cannot_detect_a_partial_bundle_fails(self):
+        text = self.read(workflow.DEPLOY_SCRIPT)
+        for artifact in ("worker.js", "pkg/app_web.js", "pkg/app_web_bg.wasm"):
+            with self.subTest(artifact=artifact):
+                mutated = text.replace(artifact, "")
+                self.assertNotEqual(mutated, text)
+                self.assertTrue(workflow.deploy_script_errors(mutated))
+
+    def test_deploy_without_the_artifact_guard_fails(self):
+        text = self.read(workflow.DEPLOY_SCRIPT)
+        mutated = text.replace('[ -s "$DIST/$artifact" ]', "true")
+        self.assertNotEqual(mutated, text)
+        self.assertTrue(workflow.deploy_script_errors(mutated))
+
+    def test_deploy_that_still_says_not_implemented_fails(self):
+        text = self.read(workflow.DEPLOY_SCRIPT)
+        mutated = text + "\n# NOT IMPLEMENTED\n"
+        self.assertTrue(workflow.deploy_script_errors(mutated))
 
 
 if __name__ == "__main__":

@@ -1,21 +1,32 @@
 name: CI build layers
 
 # Layered CI mirroring the repository's real gate. After the UI replacement the
-# desktop host is React/Tauri, the Slint crate is gone and the Android/Web/
-# Windows/macOS UIs are explicit NOT IMPLEMENTED placeholders.
+# desktop host is React/Tauri, the Slint crate is gone and the Android/Windows/
+# macOS UIs are explicit NOT IMPLEMENTED placeholders.
 #
 # Real (genuine) jobs:
 #   linux-app        : debug host compilation of the Tauri `app-linux` host
 #                      (frontend built first; no offscreen rendering)
-#   windows-check    : native MSVC debug compilation of the NOT IMPLEMENTED
-#                      `app-windows` placeholder (windows-latest)
+#   windows-check    : native MSVC debug compilation of the `app-windows` host
+#                      (windows-latest; compile gate only)
 #   macos-check      : native macOS debug compilation of the NOT IMPLEMENTED
 #                      `app-macos` placeholder (macos-latest)
 #   shader-validation: offline naga WGSL test (no GPU needed; forced to fail on
 #                      a broken shader)
+#   web-build        : `scripts/build-web.sh` builds the real wasm CAD bundle
+#                      (`apps/app-web/dist`, ADR 0024) and uploads it; the pinned
+#                      wasm-bindgen CLI is installed, never taken from PATH drift
+#   web-smoke        : headless Chromium loads the built bundle, starts the wasm
+#                      session and asserts the status line. The runner has no
+#                      GPU: this is **software rendering** (SwiftShader) and is
+#                      neither GPU nor pixel evidence
+#   web-deploy       : publishes the very artifact web-build uploaded to
+#                      Cloudflare Pages — only on `v*` tags or a manual dispatch,
+#                      never on a routine push/PR. Upload is deployment evidence
+#                      only (no runtime/GPU/pixel claim)
 #
-# Retired platform build/deploy/release jobs — kept *declared* so the capability
-# gap stays visible, but hard-disabled with an unconditional `if: false` and a
+# Retired platform build/release jobs — kept *declared* so the capability gap
+# stays visible, but hard-disabled with an unconditional `if: false` and a
 # `RETIRED` marker. They never carry a mutable `vars.…` switch or a `secrets.…`
 # publish path, so a stub can never be built, signed or published:
 #   linux-release   : was the Flatpak bundle (retired pending replacement packaging)
@@ -23,13 +34,14 @@ name: CI build layers
 #   macos-release   : was the universal Yacr.app tarball
 #   android-apk     : was the cargo-apk build (Android UI retired)
 #   android-release : was the release APK with fonts
-#   web-build       : was scripts/build-web.sh -> web-dist
-#   web-deploy      : was the Cloudflare Pages publish
-#   web-smoke       : was the Playwright smoke over web-dist
 #
 # The public entry points for the retired paths fail with NOT IMPLEMENTED:
-#   scripts/{build-web,deploy-cloudflare-pages,build-android,
-#             package-linux-release,package-windows-release,package-macos-release}.sh
+#   scripts/{build-android,package-linux-release,package-windows-release,
+#             package-macos-release}.sh
+#
+# `scripts/build-web.sh` and `scripts/deploy-cloudflare-pages.sh` are real entry
+# points again; the browser bundle is not a shipped product and its runtime
+# evidence boundary is documented in docs/build.md.
 #
 # No job sets `continue-on-error`, so a green check is a real pass.
 
@@ -276,39 +288,133 @@ jobs:
           exit 1
 
   web-build:
-    name: web-build (RETIRED — browser UI NOT IMPLEMENTED)
-    # RETIRED (P3b): the browser UI was retired and scripts/build-web.sh exits
-    # non-zero. Kept declared so the missing web artifact is visible, never silent.
-    if: false
+    name: web-build (wasm CAD bundle)
+    # `scripts/build-web.sh` builds the real `surfaceMode: dom-canvas` session
+    # (`apps/app-web`, ADR 0024) into `apps/app-web/dist`: wasm32 release build,
+    # pinned wasm-bindgen `--target web`, assembled shell. The CLI version must
+    # equal the workspace pin, so it is installed from the pinned prebuilt release
+    # and verified — never taken from whatever `wasm-bindgen` happens to be on PATH.
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - name: Retired — no web bundle is built or uploaded
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache web wasm build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-web-build-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-web-build-
+      - name: Install the pinned wasm-bindgen CLI
         run: |
-          echo "RETIRED: web-build is NOT IMPLEMENTED; nothing is built."
-          exit 1
-
-  web-deploy:
-    name: web-deploy (RETIRED — browser UI NOT IMPLEMENTED)
-    # RETIRED (P3b): the public deploy entry point exits non-zero, so this
-    # Cloudflare Pages publish is hard-disabled. It carries no credentials and no
-    # mutable switch: it can never publish a stub bundle.
-    if: false
-    runs-on: ubuntu-latest
-    steps:
-      - name: Retired — nothing is published
-        run: |
-          echo "RETIRED: web-deploy is NOT IMPLEMENTED; nothing is published."
-          exit 1
+          set -euo pipefail
+          # The pin lives in the shared toolchain library (the scripts compare the
+          # CLI against Cargo.toml anyway); this step fetches exactly the prebuilt
+          # static musl release for it and verifies the published SHA-256.
+          pin="$(sed -n 's/^readonly YACR_PINNED_WASM_BINDGEN="\(.*\)"$/\1/p' scripts/lib/wasm-toolchain.sh)"
+          test -n "$pin" || { echo "no wasm-bindgen pin in scripts/lib/wasm-toolchain.sh" >&2; exit 1; }
+          case "$pin" in
+            0.2.129)
+              sha="82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e" ;;
+            *)
+              echo "no verified download for wasm-bindgen $pin; add its release SHA-256 to this step" >&2
+              exit 1 ;;
+          esac
+          archive="wasm-bindgen-${pin}-x86_64-unknown-linux-musl"
+          curl -fsSL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${pin}/${archive}.tar.gz" \
+            -o "/tmp/${archive}.tar.gz"
+          echo "${sha}  /tmp/${archive}.tar.gz" | sha256sum -c -
+          tar -xzf "/tmp/${archive}.tar.gz" -C /tmp
+          install "/tmp/${archive}/wasm-bindgen" "$HOME/.cargo/bin/wasm-bindgen"
+          wasm-bindgen --version | grep -Fx "wasm-bindgen ${pin}"
+          grep -A2 'name = "wasm-bindgen"' Cargo.lock | grep -q "version = \"${pin}\"" \
+            || { echo "Cargo.lock wasm-bindgen does not match the installed CLI pin $pin" >&2; exit 1; }
+      - name: Build the browser bundle
+        run: bash scripts/build-web.sh
+      - name: Upload the browser bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/app-web/dist
+          if-no-files-found: error
+          retention-days: 7
 
   web-smoke:
-    name: web-smoke (RETIRED — browser UI NOT IMPLEMENTED)
-    # RETIRED (P3b): the Playwright smoke drove a web-dist that is no longer built
-    # (the browser host and its JS shell were retired). Hard-disabled, not the
-    # former mutable `WEB_SMOKE_ENABLED` switch.
-    if: false
+    name: web-smoke (headless Chromium, software rendering)
+    # Loads the bundle this run built, starts the wasm session and asserts its
+    # typed status. The runner has no GPU and Chromium renders through SwiftShader
+    # here: this is a carrier/status smoke, **not** GPU, pixel or performance
+    # evidence (the log line says which rendering class was measured).
+    needs: web-build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Retired — no browser smoke is run
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: apps/app-web/dist
+      - name: Install Playwright + Chromium
         run: |
-          echo "RETIRED: web-smoke is NOT IMPLEMENTED; nothing is run."
-          exit 1
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/web-smoke" --no-save --no-package-lock playwright@1.64.1
+          (cd "$RUNNER_TEMP/web-smoke" && npx playwright install --with-deps chromium)
+      - name: Headless browser smoke
+        run: |
+          set -euo pipefail
+          python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 100); do
+            if curl -fsS http://127.0.0.1:8090/ >/dev/null 2>&1; then break; fi
+            sleep 0.2
+          done
+          NODE_PATH="$RUNNER_TEMP/web-smoke/node_modules" \
+            node scripts/web-smoke.cjs \
+              --url http://127.0.0.1:8090/ \
+              --screenshot "$RUNNER_TEMP/web-smoke.png"
+      - name: Upload the diagnostic screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-smoke-diagnostic
+          path: ${{ runner.temp }}/web-smoke.png
+          if-no-files-found: warn
+          retention-days: 7
+
+  web-deploy:
+    name: web-deploy (Cloudflare Pages — tags/dispatch only)
+    # Publishes the exact artifact web-build uploaded, and only for a `v*` tag or
+    # a manual dispatch: a routine push/PR never goes public. The deploy script
+    # validates every bundle artifact before uploading, and a successful upload is
+    # deployment evidence only — the smoke job above stays software-rendering.
+    needs: web-build
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: apps/app-web/dist
+      - name: Publish the tested bundle to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_PAGES_PROJECT: yacr-examples
+          CF_PAGES_BRANCH: main
+          SKIP_BUILD: "1"
+        run: bash scripts/deploy-cloudflare-pages.sh

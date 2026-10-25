@@ -13,9 +13,12 @@
 > 见 ADR 0010、`docs/architecture.md`、`docs/react-linux-app.md`、`docs/windows-app.md`。
 
 > **2026-10-24 增补（Web）**：`apps/app-web` 的 wasm CAD 会话已复活（[ADR 0024](adr/0024-dom-canvas-wasm-cad-path.md)），
-> `scripts/build-web.sh` 重新产出**真实可服务**的浏览器 bundle（`apps/app-web/dist/`，本地构建、git 忽略，
-> 见「浏览器 bundle」一节）。这**不是**可交付产品：没有 CI 构建、没有发布通道，`app-web` 的
-> **host target** 仍是显式 NOT IMPLEMENTED 空壳，浏览器侧证据只到合成夹具。
+> `scripts/build-web.sh` 重新产出**真实可服务**的浏览器 bundle（`apps/app-web/dist/`，构建产物、git 忽略，
+> 见「浏览器 bundle」一节）。**2026-10-25 起 CI 也接线**：`web-build` 构建并上传 bundle、`web-smoke`
+> 用 Playwright Chromium（**SwiftShader 软件渲染**）断言 `start: ok`，`web-deploy` 仅在 `v*` tag /
+> 手工 dispatch 时发布到 Cloudflare Pages（`yacr-examples`）。这仍**不是**可交付产品承诺：
+> `app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳，CI 浏览器只有软件渲染的
+> carrier/status 冒烟，没有 GPU/像素/浏览器矩阵证据。
 
 ## 验证范围（2026-10-15 用户决定，提效）
 
@@ -168,7 +171,7 @@ cargo build -p cad-cli-tools --release --locked
 `docs/cli.md`。离线 WGSL 校验（无需 GPU）：
 `cargo test -p cad-render-wgpu --test wgsl_validation --locked`。
 
-## 浏览器 bundle（本地可构建；CI / 发布未恢复）
+## 浏览器 bundle（CI 构建 + 软件渲染冒烟；tag/dispatch 发布）
 
 `apps/app-web` 是 `surfaceMode: dom-canvas` 的 **wasm CAD 会话**（ADR 0024）：wasm 内导入图纸、建
 显示表示、用渲染器的离屏帧 + wasm-only WebGL2 presenter 画进 DOM `<canvas>`。外壳
@@ -190,19 +193,22 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
   的 `=0.2.129` 钉住**完全一致**，否则硬失败）。产物目录每次从零重建，构件缺失/为空即非零退出，
   **不产出半成品 bundle**。
 - **上限**：本地证据只到**合成夹具**（`docs/validation-dom-canvas-wasm-2026-10-24.md`：Chromium 141 /
-  WebKitGTK 2.52.6 + 真实 GPU，出图与 zoom；无浏览器矩阵、无 golden、无性能结论）。CI 的
-  `web-build`/`web-deploy`/`web-smoke` 仍 `if: false`，`scripts/deploy-cloudflare-pages.sh` 仍退役
-  非零——**没有** CI 产物、**没有**发布通道，只能手工上传 `apps/app-web/dist/`。
+  WebKitGTK 2.52.6 + 真实 GPU，出图与 zoom；无浏览器矩阵、无 golden、无性能结论）。CI 侧
+  `web-build` 构建并上传 bundle、`web-smoke` 在 **SwiftShader 软件渲染**下断言 `start: ok` /
+  carrier / `physical` / `batches` / `draws` / `presented`（**不是** GPU/像素证据，截图仅调试用）、
+  `web-deploy` 只在 `v*` tag 或手工 dispatch 时把同一 artifact 发到 Cloudflare Pages
+  （`yacr-examples`，上传成功≠运行/视觉验收）。常规 push/PR 不发布。
 - 构建成功**不是**运行/GPU/像素证据。
 
 ## 已退役 / 禁用的平台入口（勿当可用）
 
 以下入口**不是可运行的构建路径**；脚本显式非零失败或在 CI 中 `if: false` 硬禁用。**不要**把它们
-当作可用的发布流程（唯一例外是 2026-10-17 重启的 `scripts/package-linux-release.sh`，见下）：
+当作可用的发布流程（例外：2026-10-17 重启的 `scripts/package-linux-release.sh`，见下；
+2026-10-25 恢复的 `scripts/deploy-cloudflare-pages.sh` + `web-build`/`web-smoke`/`web-deploy`，
+见「浏览器 bundle」一节）：
 
 | 入口 | 状态 |
 |---|---|
-| `scripts/deploy-cloudflare-pages.sh` | **RETIRED**——没有验收过的发布通道/凭据；非零退出，注释里只指向本地 `apps/app-web/dist/` |
 | `scripts/build-android.sh` | **RETIRED**——Android UI 未实现（`apps/app-android` 为占位）；非零退出 |
 | `scripts/package-windows-release.sh` | **RETIRED**——无 Windows 发布流水线；非零退出（注意：`app-windows` **已是真实宿主**，退役的是**打包脚本**，不是 GUI 实现） |
 | `scripts/package-macos-release.sh` | **RETIRED**——macOS GUI 未实现（`apps/app-macos` 占位 `yacr-macos`）；非零退出 |
@@ -225,10 +231,12 @@ React/Tauri 宿主构建 **Flatpak** bundle（`bin/yacr` + committed `fonts/`，
   `exit 1`）；CI `macos-check` 只做编译门禁，**不运行**，也不产出可分发 GUI。
 - **Android**：`apps/app-android` 是**显式 NOT IMPLEMENTED 占位**（打印退役诊断后 abort）；
   旧的 APK 构建与部署全部退役。
-- **Web**：`apps/app-web` 的 **wasm CAD 会话**已复活并在本地可构建/可服务（`scripts/build-web.sh`，
-  见「浏览器 bundle」一节），但 `app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳；CI 的
-  `web-build`/`web-deploy`/`web-smoke` 仍硬禁用、`scripts/deploy-cloudflare-pages.sh` 仍退役，没有
-  发布通道。浏览器侧证据只到合成夹具（`docs/validation-dom-canvas-wasm-2026-10-24.md`）。
+- **Web**：`apps/app-web` 的 **wasm CAD 会话**（ADR 0024）在 CI 中端到端构建与冒烟：
+  `web-build` → `apps/app-web/dist` artifact、`web-smoke` → Playwright Chromium（**SwiftShader
+  软件渲染**）断言 `start: ok`，`web-deploy` → 仅 `v*` tag / 手工 dispatch 发布到 Cloudflare Pages
+  （`yacr-examples`）。`app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳；CI 没有 GPU/
+  像素/golden/浏览器矩阵证据，浏览器侧真实渲染证据只到合成夹具
+  （`docs/validation-dom-canvas-wasm-2026-10-24.md`）。
 - **Linux release**：`dev.yacr.app` Flatpak bundle 可**本地构建并安装**（`scripts/package-linux-release.sh`，
   2026-10-17 重启，见上）；但**没有受支持的发布通道**——未提交 Flathub、无分发产物，CI `linux-release`
   job 仍硬禁用。本机实测细节见 `docs/flatpak.md`。

@@ -10,8 +10,10 @@ Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + �
 > **生产合成方向是 DOM/WebView 在上、wgpu CAD 原生表面在下**（[ADR 0023](docs/adr/0023-dom-on-top-cross-host-composition.md)）。
 > Linux **原生 Wayland** 是唯一生产路径；**X11/XWayland 显式拒绝**（标记行 + 退出码 4）。
 > **Windows 宿主已实现但视觉/运行时未验收**（上限 = Tier 0 编译 + Wine 拒绝合同；
-> 真 Windows spike-1/4/5 PENDING 用户自测）。macOS/Android/Web 是**显式 NOT IMPLEMENTED 占位**，
-> 不是可运行 GUI 产品。
+> 真 Windows spike-1/4/5 PENDING 用户自测）。macOS/Android 是**显式 NOT IMPLEMENTED 占位**；
+> **Web** 的 wasm CAD 会话已实现，并由 CI `web-build` 构建 + `web-smoke`（Playwright Chromium，
+> **SwiftShader 软件渲染**）冒烟、`web-deploy` 仅在 `v*` tag / 手工 dispatch 时发布到 Cloudflare
+> Pages；`app-web` 的 host target 仍是 NOT IMPLEMENTED 空壳，浏览器侧仍不是可交付产品。
 
 ## 铁律（违反即返工）
 
@@ -81,7 +83,8 @@ tauri 的共享层：命令注册、窗口    单一输入漏斗 `.native-input`
 构建、threading、证据骨架）        构建产物被两个宿主嵌入）
   ↑                              ↑
 apps/app-linux / apps/app-windows（Tauri 宿主：React chrome + 原生 CAD 分区 + renderer-only wgpu）
-apps/app-macos|app-android|app-web（显式 NOT IMPLEMENTED 占位）
+apps/app-macos|app-android（显式 NOT IMPLEMENTED 占位）
+apps/app-web（wasm CAD 会话 + WebGL2 canvas；host target 仍是 NOT IMPLEMENTED 空壳）
 ```
 
 - `cad-host` 是平台无关的宿主编排层，**不依赖任何 UI 工具包**（不依赖 slint/tauri/gtk/wgpu/
@@ -122,8 +125,9 @@ apps/app-macos|app-android|app-web（显式 NOT IMPLEMENTED 占位）
   它编译为空库、二进制返回显式 NOT IMPLEMENTED。
 - **`apps/app-windows`** 是真实 Windows 宿主（Tauri 2 + 透明 WebView2 + Win32 child HWND +
   单一 DOM 漏斗），**已实现但视觉/运行时未验收**：WebView2 缺失 → 标记行
-  `yacr: unsupported-runtime: webview2` + i18n + **退出码 5**。`app-macos`/`app-android`/`app-web`
-  是显式 NOT IMPLEMENTED 占位。平台 I/O（文件、配置、表面度量）只存在于 `app-*`。
+  `yacr: unsupported-runtime: webview2` + i18n + **退出码 5**。`app-macos`/`app-android` 是显式
+  NOT IMPLEMENTED 占位；`app-web` 的 wasm CAD 会话已实现（见「平台状态」Web 条），其 host target
+  仍是 NOT IMPLEMENTED 空壳。平台 I/O（文件、配置、表面度量）只存在于 `app-*`。
 - **桌面窗口策略**：Linux 宿主默认以**最大化窗口**启动（`apps/app-linux/src/host.rs` 的
   `start_maximized` 默认 `true`，`WindowBuilder::maximized(true)`），**保留标题栏/系统面板**——
   这是**窗口管理器最大化**，**不是**全屏/无边框 kiosk（源码未调用 `fullscreen`/`decorations(false)`）。
@@ -191,9 +195,10 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
   （`docs/validation-dom-canvas-wasm-2026-10-24.md`）：X11 宿主 `surfaceMode=dom-canvas` 启动、
   canvas 挂载 + backing `626×341`、合成 fixture 出图（ScreenCast 抓帧）；**X11 上加/缩放平移经用户
   手动确认**（用户报告，无 agent 像素差证据）；Chromium 141 与 WebKitGTK 2.52.6 本地出图与缩放。
-  **仍禁止**写成「X11 已验收」或「web 已发布」：真 X11 服务器/WM、其它合成器、**硬件归属
-  （NOT VERIFIED）**、DPR/多显示器、性能、vendor/golden、浏览器矩阵与 CI/发布均未验证；agent 侧
-  输入注入在本机不可用。**阶段 ⑧ 首批已实现**（[ADR 0025](docs/adr/0025-wasm-memory-budget-and-worker-isolation.md)）：
+  **仍禁止**写成「X11 已验收」或「web 已验收」：真 X11 服务器/WM、其它合成器、**硬件归属
+  （NOT VERIFIED）**、DPR/多显示器、性能、vendor/golden、浏览器矩阵均未验证；agent 侧
+  输入注入在本机不可用。**2026-10-25 起** Web 侧已有 CI `web-build` + `web-smoke`（SwiftShader
+  软件渲染，carrier/status 冒烟）与 tag/dispatch `web-deploy`；这**不是** GPU/像素验收。**阶段 ⑧ 首批已实现**（[ADR 0025](docs/adr/0025-wasm-memory-budget-and-worker-isolation.md)）：
   显式内存预算拒绝（`step:"budget"`，64 MiB 输入 / 3 GiB 堆）、分块但原子提交的上传、以及**按能力**
   的 Worker 隔离（Chromium 实测 `isolation=worker`；WebKitGTK 实测 Worker 内无 WebGL2，显式报
   `main-thread (no WebGL2 in worker)`）。`complex-test.dwg` 实测 heap **1.91 GB → 1.43 GB**、
@@ -251,8 +256,13 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
 - **Android**（`apps/app-android`）：UI 已退役，是显式占位（原生入口打印退役诊断后 abort）。
   仅保留 `cargo check --target aarch64-linux-android -p app-android --locked` 编译检查。
   `build-android.sh` 非零失败；不再有 APK 流水线。**模拟器 ≠ 真机**，真机一律未验证。
-- **Web**（`apps/app-web`）：UI 已退役，wasm 入口返回错误；`build-web.sh`/`deploy-cloudflare-pages.sh`
-  非零失败。不再有 web 发布。
+- **Web**（`apps/app-web`）：wasm CAD 会话（`surfaceMode: dom-canvas`，ADR 0024）是**真实**实现，
+  `scripts/build-web.sh` 构建 `apps/app-web/dist`；CI `web-build` 构建并上传该 artifact、`web-smoke`
+  用 Playwright Chromium（**SwiftShader 软件渲染**，非 GPU/像素证据）断言 `start: ok`、
+  `web-deploy` 仅在 `v*` tag / 手工 `workflow_dispatch` 时发布到 Cloudflare Pages（`yacr-examples`）。
+  `app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳；浏览器侧真实渲染证据只到合成夹具
+  （`docs/validation-dom-canvas-wasm-2026-10-24.md`），**没有** GPU/golden/性能/浏览器矩阵结论，
+  也不得写成「web 已验收」。
 
 ## 真实 DWG 回归
 

@@ -47,8 +47,11 @@
   覆盖（不是运行/外观证据）。
 - **Android**：`apps/app-android/Cargo.toml` 的 `[package.metadata.android] resources = "res"`
   与 `[package.metadata.android.application] icon/label`；`res/` 由上面的生成资产填充。
-- **Web**：`apps/app-web/web/index.html` 链接 SVG favicon、apple-touch 与
-  `manifest.webmanifest`；`scripts/build-web.sh` 把 `assets/` 与 manifest 拷进 `web-dist/`。
+- **Web**：当前的 `apps/app-web/web/index.html` **没有** icon/favicon 链接（也没有
+  `manifest.webmanifest`），浏览器标签页因此用默认图标——这是**未实现**，不是已接入；构建脚本
+  `scripts/build-web.sh` 只组装 shell 与 wasm 产物（`index.html`/`main.js`/`worker.js`/
+  `style.css`/`pkg/*`），不拷贝 `assets/`。若恢复 web 图标支持，需同时补 shell 链接、构建拷贝与
+  契约测试。
 
 ## 验证状态（诚实记录）
 
