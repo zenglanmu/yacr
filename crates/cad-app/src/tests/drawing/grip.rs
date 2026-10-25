@@ -22,14 +22,32 @@ const LINE: u128 = 1;
 const POINT: u128 = 2;
 const CIRCLE: u128 = 3;
 const PAPER_LINE: u128 = 4;
-/// A geometry with **no** grip model at all (`ELLIPSE` axis grips are NOT
-/// IMPLEMENTED), used for the `grip.unsupported_kind` refusal now that `CIRCLE`
-/// and `ARC` have handles.
+/// The `ELLIPSE` whose axis/centre grips are dragged here (`Center 0`,
+/// `Quadrant 0..=3` on a full ellipse).
 const ELLIPSE: u128 = 5;
 /// The `ARC` whose endpoint grips are dragged here (`Center 0, Endpoint 0/1`).
 const ARC: u128 = 6;
 /// The `POLYLINE` whose `Vertex` grips are dragged here.
 const POLYLINE: u128 = 7;
+/// A geometry with **no** grip model at all (`SPLINE` control-point grips are
+/// NOT IMPLEMENTED), used for the `grip.unsupported_kind` refusal now that
+/// `CIRCLE`, `ARC` and `ELLIPSE` have handles.
+const SPLINE: u128 = 8;
+
+/// The fixture ellipse: major semi-axis `(4, 0, 0)`, ratio `0.5` (minor 2), a
+/// full turn. Non-round centre so "the untouched fields are bit-identical" is a
+/// real comparison.
+const ELLIPSE_CENTER: Point3 = Point3 {
+    x: 1.0,
+    y: -0.5,
+    z: 2.0,
+};
+const ELLIPSE_MAJOR: Point3 = Point3 {
+    x: 4.0,
+    y: 0.0,
+    z: 0.0,
+};
+const ELLIPSE_RATIO: f64 = 0.5;
 
 /// The stored `ARC` of the fixture: centre at the origin, radius 5, from angle 0
 /// over 1.5 rad, so the two endpoint handles are easy to aim at.
@@ -104,10 +122,10 @@ fn grip_app() -> (Application, SessionState) {
     b.insert_entity(ent(
         ELLIPSE,
         SemanticGeometry::Ellipse {
-            center: p3(0.0, 0.0, 0.0),
+            center: ELLIPSE_CENTER,
             normal: p3(0.0, 0.0, 1.0),
-            major_axis: p3(5.0, 0.0, 0.0),
-            ratio: 0.5,
+            major_axis: ELLIPSE_MAJOR,
+            ratio: ELLIPSE_RATIO,
             start: 0.0,
             sweep: std::f64::consts::TAU,
         },
@@ -142,6 +160,17 @@ fn grip_app() -> (Application, SessionState) {
             closed: false,
         },
         6,
+    ))
+    .unwrap();
+    b.insert_entity(ent(
+        SPLINE,
+        SemanticGeometry::Spline {
+            degree: 1,
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            control_points: vec![p3(0.0, 0.0, 0.0), p3(1.0, 0.0, 0.0)],
+            weights: vec![1.0, 1.0],
+        },
+        7,
     ))
     .unwrap();
     let drawing = b.finish().unwrap();
@@ -243,6 +272,27 @@ fn polyline_parts(app: &Application, entity: u128) -> (Vec<Point3>, Vec<f64>, bo
             closed,
         } => (points, bulges, closed),
         other => panic!("entity {entity} is not a POLYLINE: {other:?}"),
+    }
+}
+
+/// The Euclidean length of a vector (used to read a stored semi-axis).
+fn length_of(v: Point3) -> f64 {
+    (v.x * v.x + v.y * v.y + v.z * v.z).sqrt()
+}
+
+/// The stored `ELLIPSE` fields of `entity`
+/// (`center, normal, major_axis, ratio, start, sweep`).
+fn ellipse_parts(app: &Application, entity: u128) -> (Point3, Point3, Point3, f64, f64, f64) {
+    match geometry_of(app, entity) {
+        SemanticGeometry::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
+            start,
+            sweep,
+        } => (center, normal, major_axis, ratio, start, sweep),
+        other => panic!("entity {entity} is not an ELLIPSE: {other:?}"),
     }
 }
 
@@ -714,12 +764,88 @@ fn stale_or_deleted_handles_are_refused_and_write_nothing() {
 }
 
 #[test]
+fn ellipse_quadrant_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
+    let (mut app, mut session) = grip_app();
+    let revision = revision_of(&app);
+    let before = geometry_of(&app, ELLIPSE);
+    let (center, normal, _, ratio, start, sweep) = ellipse_parts(&app, ELLIPSE);
+    // Drag the +major handle to an off-axis point: the major radius becomes the
+    // in-plane distance (5, not the x offset 5 alone ... it is the same here, so
+    // the target is deliberately off both axes: (3, 4) -> distance 5, x 3).
+    let target = p3(center.x + 3.0, center.y + 4.0, center.z + 9.0);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(ELLIPSE, GripKind::Quadrant, 0, target),
+    )
+    .unwrap();
+
+    // One entity update, in one transaction, with one undo entry.
+    let changes = outcome.changes.as_ref().expect("a ChangeSet is published");
+    assert_eq!(changes.changes.len(), 1, "exactly one entity update");
+    assert_eq!(outcome.objects, vec![ObjectId(ELLIPSE)]);
+    assert_eq!(revision_of(&app), Revision(revision.0 + 1));
+    assert_eq!(undo_depth(&app), 1);
+
+    let (new_center, new_normal, new_major, new_ratio, new_start, new_sweep) =
+        ellipse_parts(&app, ELLIPSE);
+    assert_eq!(new_center, center, "the centre is bit-identical");
+    assert_eq!(new_normal, normal, "the normal is bit-identical");
+    assert_eq!(new_start, start, "the start parameter is bit-identical");
+    assert_eq!(new_sweep, sweep, "the sweep is bit-identical");
+    assert!(
+        (length_of(new_major) - 5.0).abs() < 1e-12,
+        "the major radius is the in-plane distance, got {new_major:?}"
+    );
+    assert!(
+        new_major.y.abs() < 1e-12 && new_major.z.abs() < 1e-12,
+        "the major axis direction never rotates, got {new_major:?}"
+    );
+    // The stored minor radius (|major| * ratio = 2) is preserved, so the ratio is
+    // recomputed to 2 / 5.
+    assert!(
+        (new_ratio - 2.0 / 5.0).abs() < 1e-12,
+        "the minor radius is preserved: ratio {new_ratio} vs {}",
+        2.0 / 5.0
+    );
+    assert_ne!(new_ratio, ratio, "the fixture really changes the ratio");
+
+    // Undo restores the original geometry exactly (bit-identical struct).
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(
+        geometry_of(&app, ELLIPSE),
+        before,
+        "undo restores the ellipse"
+    );
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
 fn a_geometry_without_a_grip_model_is_refused_as_an_unsupported_kind() {
     let (mut app, mut session) = grip_app();
     let revision = revision_of(&app);
-    // An ELLIPSE exposes no grip at all (its axis/quadrant handles are NOT
-    // IMPLEMENTED), so any id naming one is the kind refusal — even though the
-    // kind/index would also be "stale" against it.
+    // A SPLINE exposes no grip at all (control-point grips are NOT IMPLEMENTED),
+    // so any id naming one is the kind refusal — even though the kind/index would
+    // also be "stale" against it.
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(SPLINE, GripKind::Endpoint, 0, p3(1.0, 0.0, 0.0)),
+    )
+    .unwrap_err();
+    refused(error, REASON_UNSUPPORTED_KIND, true);
+    assert_untouched(&app, revision, 0);
+
+    // An ELLIPSE *does* have handles, so the wrong kind for it is a stale handle,
+    // not an unsupported kind.
     let error = execute(
         &mut app,
         &mut session,
@@ -727,7 +853,7 @@ fn a_geometry_without_a_grip_model_is_refused_as_an_unsupported_kind() {
         drag(ELLIPSE, GripKind::Endpoint, 0, p3(1.0, 0.0, 0.0)),
     )
     .unwrap_err();
-    refused(error, REASON_UNSUPPORTED_KIND, true);
+    refused(error, REASON_STALE_HANDLE, false);
     assert_untouched(&app, revision, 0);
 
     // A CIRCLE *does* have handles, so the wrong kind for it is a stale handle,

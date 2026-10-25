@@ -1,3 +1,90 @@
+## 2026-10-26 ELLIPSE 夹点：中心 + 四轴点（整圈），椭圆弧只给中心
+
+### 结论
+
+纯夹点模型（`crates/cad-app/src/grips/mod.rs` + `grips/drag.rs`）此前把 `ELLIPSE` 整类列在
+「无夹点」拒绝清单里。本轮为 **`SemanticGeometry::Ellipse`** 实现夹点：`Center` `index` 0 +
+`Quadrant` `index` 0..=3（**仅整圈椭圆**）。只动 `cad-app` 与其测试、`docs/`；`cad-host` /
+`apps/**` / i18n / 命令 / IPC **未改**（宿主按通用 API 消费枚举与拖拽，不需要新分支）。
+
+### 句柄表与帧（坐标从存储值计算，无漂移）
+
+| kind | index | 位置 / 含义 |
+|---|---|---|
+| `Center` | 0 | 存储的 `center`（逐位） |
+| `Quadrant` | 0 | `center + major_axis`（`+major`；与 tessellator 的 `t = 0` 逐项同式） |
+| `Quadrant` | 1 | `center + unit_minor * (|major_axis| * |ratio|)`（`+minor`，`t = π/2`） |
+| `Quadrant` | 2 | `center - major_axis`（`-major`，`t = π`） |
+| `Quadrant` | 3 | `center - unit_minor * (|major_axis| * |ratio|)`（`-minor`，`t = 3π/2`） |
+
+次序照抄 `CIRCLE` 象限的 `+, +, -, -`，但帧**不是** `arbitrary_axis`：圆/弧径向对称，任取帧等价；
+椭圆的象限点必须是**存储轴**上的点，否则标记会落在曲线外。因此用
+`unit_major = normalize(major_axis)`、`unit_minor = normalize(cross(unit(normal), unit_major))`
+——即 `cad_geometry` 里 `ellipse_minor_dir`（crate 私有）的表达式、tessellator 与 representation
+provider 画图用的同一帧，**没有第二套帧/角度约定**。帧无法导出（`major_axis` 零/非有限、法向与其平行）
+时只暴露 `Center`，不伪造象限标记。
+
+### 拖拽规则（本项目选择，**不是 AutoCAD 断言**）
+
+* **中心**：刚体平移——`center` 取目标，`normal`/`major_axis`/`ratio`/`start`/`sweep` **逐位不变**。
+* **轴点**：把该轴的**半径**设为「中心到目标在椭圆自身平面内的距离」（用上面的 `(unit_major,
+  unit_minor)` 度量；**不是** 3D 距离、也不是 x/y 距离），`center`/`normal` 逐位不变。
+  * major（0/2）：`major_axis` 按 `distance / |major_axis|` **缩放**（方向保持），保留存储的次半径
+    `|major_axis| * |ratio|`，故 `ratio` 重算为 `minor_len / distance`；
+  * minor（1/3）：`ratio = distance / |major_axis|`，`major_axis` **逐位不变**。
+  * **轴方向永不旋转**：这是「不能产生退化椭圆」的简单规则——方向不从目标重推（目标可能在中心上），
+    两轴按构造正交；也是「一个夹点只改一个半径」的圆象限规则的同类形状。目标离开轴向时仍只改半径。
+* **`minor <= major` 不需要拒绝**：域模型没有这个不变量——`cad-db` 校验只要求 `ratio` 正且有限，
+  tessellator/provider 画 `|major_axis| * |ratio|`。拖到两半径交叉**按名不拒绝、也不静默归一化**
+  （交换轴会旋转存储帧并改变参数化）；只有创建路径 `ellipse_parameters` 恰好保持 `ratio <= 1`，那是
+  轴端点法的存储假设，本轮**明确写清**它不是夹点不变量。
+* **部分椭圆（椭圆弧）**：存储 `|sweep| < 2π - 1e-9`（与 tessellator/provider 判「整圈」同一
+  `ARC_SWEEP_EPSILON` slack）时**只暴露 `Center`**；象限 id 按名拒绝新稳定码
+  `grip.partial_ellipse`（`CadError::InvalidInput`，检查位置在句柄身份段、目标有限性之前）。理由：
+  四个轴点是**存储参数**的四分点，部分椭圆的轴点未必落在已绘范围内，拿它改形等于悄悄重释参数范围；
+  中心拖拽不改半径/参数，`start`/`sweep` 仍逐位有意义。
+
+### 拒绝（沿用既有码，保持检查次序与 tie-break）
+
+次序仍是 **几何种类 → 句柄身份（含「该几何没有这种句柄」，如部分椭圆的象限）→ 目标有限性 → 拖拽几何
+规则**，且「已在句柄上」先于几何规则：
+
+* `grip.stale_handle` —— 错 kind（`Endpoint`/`Midpoint`/`Vertex`/`Point`）、`Center` > 0、
+  `Quadrant` > 3；
+* `grip.zero_displacement` —— 目标等于句柄位置，或该轴平面内距离恰等于存储半径（轴向不旋转，
+  含离开平面但平面内距离不变）；**绝不**写空更新/空撤销步；
+* `grip.degenerate_radius`（复用）—— 平面内距离为 0/非有限（目标在中心或法线上），或存储帧无法
+  导出平面内半径；**不夹取**最小值（1e-9 的半径照存）；
+* `grip.partial_ellipse`（**新增**）—— 部分椭圆的象限 id；
+* `grip.non_finite_target` 照旧（命令层仍在读图之前就拒）。
+
+### 测试与门禁
+
+新增 `crates/cad-app/src/tests/grips_ellipse.rs`（已注册，19 个测试）：句柄表/次序与**旋转椭圆**
+（3-4-5 主轴）及**倾斜法向**椭圆的精确/不变量位置（覆盖 `+major`/`-major` 逐位、次轴落平面内、轴上、
+两轴正交）、中心刚体（逐位）、每个 major/minor 象限拖拽、**非轴向目标**、**3D 距离会给出不同答案**
+（同一目标 3D = √149 vs 平面内 = 10）与**x/y 距离会给出不同答案**（法向 +Y 的 XZ 平面椭圆：平面内 10
+vs x/y √117 vs 3D √181）、半径交叉不被夹取、退化/无帧、零位移、错 kind/index、非有限目标、
+**部分椭圆只给中心 + `grip.partial_ellipse` + 中心刚体保留参数范围**、整圈判定边界（`TAU-1e-6` 为部分、
+`TAU-1e-12` 与 `-TAU` 为整圈）、命中与 tie-break（中心先于象限）、部分椭圆轴点不可命中。
+命令级：`tests/drawing/grip.rs` 新增 `ellipse_quadrant_grip_drag_is_one_change_one_undo_step_and_undoes_exactly`
+（一次 `ChangeSet`/一个 revision/一步撤销/undo 逐位还原），并把「无夹点种类」夹具从 `ELLIPSE` 改为
+**`SPLINE`**（同一断言，理由随之更新）。原 `tests/grips.rs` 的 `ellipse_exposes_no_grips` 改为
+`ellipse_exposes_a_centre_and_axis_grips`，两处「跳过无夹点实体」夹具改用 `SPLINE`。
+
+实际运行（本机，2026-10-26）：
+
+* `cargo test -p cad-app --lib --locked` → **1074 passed, 0 failed**；
+* `cargo test -p cad-host --lib --locked` → **227 passed, 0 failed**（宿主无夹点分支改动，标记计数未变）；
+* `cargo clippy -p cad-app --all-targets --locked -- -D warnings` → 通过（为 `too_many_arguments`
+  把椭圆拖拽规则收成 `EllipseParts` 元组入参，**不**引入新的包装结构体）；
+* `cargo fmt --all -- --check` → 通过；`python3 scripts/check-file-size.py` → OK（987 个代码文件，
+  上限 1000；`grips/mod.rs`、`grips/drag.rs`、`tests/grips_ellipse.rs` 均远低于上限）。
+
+**NOT RUN（本轮未运行，不得当作通过）**：全 workspace 全量门禁/全量测试、平台编译矩阵
+（wasm/Windows/Android）、任何 GUI/像素/真窗口/真实鼠标证据、Windows/Wine、`dom-canvas` 载体上的夹点路径
+（该载体仍明确**没有**夹点标记与拖拽，铁律 8）。本轮证据上限 = `cad-app`/`cad-host` 合成契约 + 上述门禁。
+
 ## 2026-10-26 HATCH 边界拼接：LINE/ARC → 精确 bulge 闭合环
 
 ### 结论

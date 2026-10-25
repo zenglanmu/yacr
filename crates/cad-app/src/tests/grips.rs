@@ -44,6 +44,17 @@ fn line(x1: f64, y1: f64, x2: f64, y2: f64) -> SemanticGeometry {
     }
 }
 
+/// A grip-less geometry (control-point grips are NOT IMPLEMENTED), used wherever
+/// a test needs "an entity that exposes no handle at all".
+fn spline() -> SemanticGeometry {
+    SemanticGeometry::Spline {
+        degree: 1,
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        control_points: vec![p3(0.0, 0.0, 0.0), p3(1.0, 0.0, 0.0)],
+        weights: vec![1.0, 1.0],
+    }
+}
+
 pub(super) fn grip_id(entity: u128, kind: GripKind, index: u8) -> GripId {
     GripId {
         entity: EntityId(entity),
@@ -161,14 +172,17 @@ fn point_exposes_one_point_grip() {
 // 2. The refusal list: one assertion per kind, so a partial implementation of
 //    any of them has to come back and update *that* test on purpose. `CIRCLE`
 //    and `ARC` are no longer on this list (they have their own handles, pinned
-//    in `crates/cad-app/src/tests/grips_curves.rs`), and neither is `POLYLINE`
-//    (vertex grips, pinned in `crates/cad-app/src/tests/grips_polyline.rs`).
+//    in `crates/cad-app/src/tests/grips_curves.rs`), neither is `POLYLINE`
+//    (vertex grips, pinned in `crates/cad-app/src/tests/grips_polyline.rs`), and
+//    neither is `ELLIPSE` (centre + axis grips, pinned in
+//    `crates/cad-app/src/tests/grips_ellipse.rs`).
 // ---------------------------------------------------------------------------
 
 #[test]
-fn ellipse_exposes_no_grips() {
-    // Ellipse axis/quadrant handles are NOT IMPLEMENTED: the major axis carries
-    // an orientation this model has no drag rule for.
+fn ellipse_exposes_a_centre_and_axis_grips() {
+    // A full ellipse is no longer on the refusal list: it has its own handles
+    // (pinned in `tests::grips_ellipse`). This assertion keeps the shape of the
+    // list honest — the kind has a grip model at all.
     let entity = ent(
         1,
         SemanticGeometry::Ellipse {
@@ -180,7 +194,7 @@ fn ellipse_exposes_no_grips() {
             sweep: std::f64::consts::TAU,
         },
     );
-    assert!(grips_for_entity(&entity).is_empty());
+    assert_eq!(grips_for_entity(&entity).len(), 5);
 }
 
 #[test]
@@ -278,17 +292,7 @@ fn grip_hit_returns_none_outside_tolerance_and_for_degenerate_inputs() {
 
 #[test]
 fn grip_hit_skips_entities_that_expose_no_grips() {
-    let ellipse = ent(
-        1,
-        SemanticGeometry::Ellipse {
-            center: p3(0.0, 0.0, 0.0),
-            normal: p3(0.0, 0.0, 1.0),
-            major_axis: p3(5.0, 0.0, 0.0),
-            ratio: 0.5,
-            start: 0.0,
-            sweep: std::f64::consts::TAU,
-        },
-    );
+    let spline = ent(1, spline());
     let text = ent(
         2,
         SemanticGeometry::Text {
@@ -303,10 +307,10 @@ fn grip_hit_skips_entities_that_expose_no_grips() {
             wrap_width: None,
         },
     );
-    // A query sitting exactly on the ellipse's centre / the text's insertion
-    // point still misses: those are not grips.
+    // A query sitting exactly on the spline's first control point / the text's
+    // insertion point still misses: those are not grips.
     assert!(grip_hit(
-        [ellipse.clone(), text.clone()].iter(),
+        [spline.clone(), text.clone()].iter(),
         p3(0.0, 0.0, 0.0),
         1.0
     )
@@ -314,7 +318,7 @@ fn grip_hit_skips_entities_that_expose_no_grips() {
 
     // A real grip elsewhere still wins while the grip-less entities are skipped.
     let line = ent(3, line(20.0, 0.0, 30.0, 0.0));
-    let hit = grip_hit([ellipse, text, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
+    let hit = grip_hit([spline, text, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
     assert_eq!(hit.id, grip_id(3, GripKind::Endpoint, 0));
 }
 
@@ -427,20 +431,10 @@ fn grip_hit_planar_returns_none_outside_tolerance_and_for_degenerate_inputs() {
 
 #[test]
 fn grip_hit_planar_skips_entities_that_expose_no_grips() {
-    let ellipse = ent(
-        1,
-        SemanticGeometry::Ellipse {
-            center: p3(0.0, 0.0, 0.0),
-            normal: p3(0.0, 0.0, 1.0),
-            major_axis: p3(5.0, 0.0, 0.0),
-            ratio: 0.5,
-            start: 0.0,
-            sweep: std::f64::consts::TAU,
-        },
-    );
-    assert!(grip_hit_planar([ellipse.clone()].iter(), p3(0.0, 0.0, 0.0), 1.0).is_none());
+    let spline = ent(1, spline());
+    assert!(grip_hit_planar([spline.clone()].iter(), p3(0.0, 0.0, 0.0), 1.0).is_none());
     let line = ent(3, line(20.0, 0.0, 30.0, 0.0));
-    let hit = grip_hit_planar([ellipse, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
+    let hit = grip_hit_planar([spline, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
     assert_eq!(hit.id, grip_id(3, GripKind::Endpoint, 0));
 }
 
@@ -705,26 +699,18 @@ fn apply_grip_refuses_zero_displacement() {
 
 #[test]
 fn apply_grip_refuses_a_kind_with_no_grip_model() {
-    // `ELLIPSE` exposes no handle at all (axis/quadrant grips are NOT
+    // `SPLINE` exposes no handle at all (control-point grips are NOT
     // IMPLEMENTED), so any id naming one is the kind refusal — even though the
     // kind/index would also be "stale" against it.
-    let ellipse = || SemanticGeometry::Ellipse {
-        center: p3(0.0, 0.0, 0.0),
-        normal: p3(0.0, 0.0, 1.0),
-        major_axis: p3(5.0, 0.0, 0.0),
-        ratio: 0.5,
-        start: 0.0,
-        sweep: std::f64::consts::TAU,
-    };
     let error = apply_grip(
-        &ellipse(),
+        &spline(),
         &grip_id(1, GripKind::Endpoint, 0),
         p3(6.0, 0.0, 0.0),
     )
-    .expect_err("an ELLIPSE exposes no grip model");
+    .expect_err("a SPLINE exposes no grip model");
     assert_reason(error.clone(), REASON_UNSUPPORTED_KIND);
     assert!(
-        reason(error).contains("AcDbEllipse"),
+        reason(error).contains("AcDbSpline"),
         "the refusal names the DXF class"
     );
 }

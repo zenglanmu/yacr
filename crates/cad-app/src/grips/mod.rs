@@ -30,6 +30,7 @@
 //! | `SemanticGeometry::Line` | [`GripKind::Endpoint`] `0` = `start`, `1` = `end`, then [`GripKind::Midpoint`] `2` |
 //! | `SemanticGeometry::Circle` | [`GripKind::Center`] `0`, then [`GripKind::Quadrant`] `0..=3` |
 //! | `SemanticGeometry::Arc` | [`GripKind::Center`] `0`, then [`GripKind::Endpoint`] `0` = start point, `1` = end point |
+//! | `SemanticGeometry::Ellipse` | [`GripKind::Center`] `0`, then [`GripKind::Quadrant`] `0..=3` — **full ellipses only** (see below) |
 //! | `SemanticGeometry::Polyline` | [`GripKind::Vertex`] `index` = stored vertex index |
 //! | `SemanticGeometry::Point` | [`GripKind::Point`] `0` |
 //!
@@ -96,6 +97,68 @@
 //!   itself, or a point on the normal through it). **This endpoint rule is our
 //!   choice, not an AutoCAD claim**: it is what keeps a single-handle drag from
 //!   tilting the arc, and no vendor behaviour is asserted by it.
+//! * **`ELLIPSE` centre** (`index` 0): the ellipse moves **rigidly** — `center`
+//!   takes the target and `normal` / `major_axis` / `ratio` / `start` / `sweep`
+//!   are returned bit-identically.
+//! * **`ELLIPSE` quadrant** (`index` `0..=3`, documented order in the ellipse's
+//!   own stored frame: `0` = `+major`, `1` = `+minor`, `2` = `-major`,
+//!   `3` = `-minor`, i.e. the same `+, +, -, -` ordering as the circle
+//!   quadrants): the drag sets the **corresponding radius** to the distance from
+//!   the centre to the target measured **in the ellipse's own plane** (never a
+//!   3D distance and never an x/y distance). `center` and `normal` are
+//!   bit-identical. Which stored field carries that radius depends on the
+//!   handle: the ellipse stores its major semi-axis **as the `major_axis`
+//!   vector** (`|major_axis|` is the major radius) and its minor radius as
+//!   `|major_axis| * ratio`, so
+//!   * a **major** quadrant (`0`/`2`) sets `|major_axis|` to the measured
+//!     distance and keeps the stored **minor radius** (`major_len * |ratio|`)
+//!     unchanged, which recomputes `ratio = minor_len / new_major_len`;
+//!   * a **minor** quadrant (`1`/`3`) sets the minor radius to the measured
+//!     distance, i.e. `ratio = distance / |major_axis|`, and leaves
+//!     `major_axis` bit-identical.
+//!
+//!   **Axis direction never rotates** (our choice, **not an AutoCAD claim**): a
+//!   major drag keeps the stored major direction and only changes its length,
+//!   so `major_axis` is the stored vector scaled by
+//!   `distance / |major_axis|`. This is the rule that cannot produce a
+//!   degenerate ellipse (the direction is never re-derived from a target that
+//!   might sit on the centre, and the two axes stay orthogonal by construction),
+//!   and it is the same "one handle, one radius" shape as the circle quadrant
+//!   rule. A target off the major axis therefore still sets the major **radius**
+//!   from its full in-plane distance; it does not turn the ellipse.
+//!
+//!   The domain model has **no** `minor <= major` ordering: `cad-db` validation
+//!   only requires a positive finite `ratio`, and the tessellator and
+//!   representation provider draw `|major_axis| * |ratio|` as the minor
+//!   semi-axis, so `ratio > 1` is a representable, correctly drawn ellipse whose
+//!   stored axis roles are simply swapped. A drag that pushes one radius past
+//!   the other is therefore **not** refused (there is no invariant to break) and
+//!   is **not** silently re-normalized (swapping the axes would rotate the
+//!   stored frame and change the parameterisation behind the user's back). Only
+//!   the create path (`draw_tool::ellipse_parameters`) happens to keep
+//!   `ratio <= 1`; that is a storage assumption of the axis-endpoint method, not
+//!   a grip invariant.
+//!
+//!   A zero or non-finite in-plane distance is refused by name
+//!   ([`REASON_DEGENERATE_RADIUS`]) and **never clamped**; so is a stored frame
+//!   from which no in-plane radius can be derived (non-finite/zero major axis or
+//!   a normal parallel to it). A drag that leaves the dragged radius at its
+//!   stored length is [`REASON_ZERO_DISPLACEMENT`], exactly like the circle rule
+//!   (a target off the plane at the same in-plane distance has no geometric
+//!   effect).
+//! * **`ELLIPSE` partial (elliptical arc)**: `SemanticGeometry::Ellipse` carries
+//!   a `start`/`sweep` parameter range, and a range that is **not** a full turn
+//!   is an elliptical arc. Such an entity exposes the **centre grip only**;
+//!   quadrant drags are refused by name ([`REASON_PARTIAL_ELLIPSE`], **our
+//!   choice, not an AutoCAD claim**). The four axis points are stored-parameter
+//!   quadrant points, and on a partial ellipse some of them lie outside the
+//!   drawn range — reshaping the arc from a handle that is not on the drawn curve
+//!   would be a silent reinterpretation of the stored parameter range, so we do
+//!   not offer it. The **centre** drag stays available because it changes no
+//!   radius and no parameter, so the arc's `start`/`sweep` remain meaningful
+//!   bit-for-bit. "Full turn" uses the same slack as the tessellator and the
+//!   representation provider (`|sweep| >= 2π - 1e-9`), so the handle set and the
+//!   drawn curve always agree about which ellipses are complete.
 //! * **`POLYLINE` vertex** (`index` = stored vertex index): the dragged vertex
 //!   takes `x`/`y` from the target and keeps its own stored `z`, so the drag
 //!   never changes an elevation (3D vertex editing is NOT IMPLEMENTED). Every
@@ -109,12 +172,14 @@
 //!
 //! ## Explicit refusal list (no marker, no hit)
 //!
-//! `ELLIPSE`, `SPLINE`, `INSERT`/block-member geometry (an instance transform is
-//! not an entity handle), `TEXT`/`MTEXT`/`MULTILEADER` (insertion-point and width
+//! `SPLINE`, `INSERT`/block-member geometry (an instance transform is not an
+//! entity handle), `TEXT`/`MTEXT`/`MULTILEADER` (insertion-point and width
 //! grips), `HATCH`, `DIMENSION` (definition-point grips; the dimension is
 //! non-associative by design), `IMAGE`/`MASK`, and opaque/compound geometry
-//! (`Opaque`, `Compound`, `Mesh`, `Shape`). **Ellipse quadrant/axis** handles
-//! are on this list too.
+//! (`Opaque`, `Compound`, `Mesh`, `Shape`). `ELLIPSE` is **no longer** on this
+//! list: a full ellipse exposes centre + quadrant handles (see the drag rules),
+//! and a partial (elliptical-arc) ellipse exposes the centre grip only, with
+//! quadrant ids refused by [`REASON_PARTIAL_ELLIPSE`].
 //!
 //! Insertion-point, width, rotation and tangent grips are **NOT IMPLEMENTED**.
 //! They are not modelled as [`GripKind`] variants either: a variant that always
@@ -122,15 +187,17 @@
 //! capability. A later lane that implements one of them adds its variant **and**
 //! its drag rule together (as this lane did for [`GripKind::Vertex`]).
 //!
-//! ## Coordinates: 3D-exact, never projected (except the two in-plane rules)
+//! ## Coordinates: 3D-exact, never projected (except the three in-plane rules)
 //!
 //! A handle's [`Grip::position`] is a stored or stored-derived point — the same
-//! `f64` bits as the geometry (an endpoint, a point position, a circle/arc
+//! `f64` bits as the geometry (an endpoint, a point position, a circle/arc/ellipse
 //! centre, a polyline vertex) or the documented exact derivation of it (a line
 //! midpoint; an arc endpoint, i.e. the stored
 //! `center + radius * (cos angle * ax + sin angle * ay)` in the arc's own plane
-//! frame, the same expression the tessellator uses). Nothing is rounded and
-//! nothing is snapped.
+//! frame, the same expression the tessellator uses; an ellipse quadrant, i.e.
+//! `center ± major_axis` and `center ± ` the stored minor semi-axis vector in the
+//! ellipse's own frame, again the tessellator's own expression). Nothing is
+//! rounded and nothing is snapped.
 //!
 //! A drag assigns the target point to the dragged handle in **all three**
 //! coordinates; nothing is projected onto a work plane or onto Z = 0. The caller
@@ -140,26 +207,36 @@
 //! never changes an elevation) — and this module stores whatever finite target it
 //! is given. A non-finite target is refused (see below) instead of stored.
 //!
-//! The **two** projections this module performs are the circle-quadrant radius
-//! and the arc-endpoint angle: both are measured in the entity's **own** plane,
-//! precisely so that a non-planar drag cannot deform a circle or tilt an arc out
-//! of its plane. Those projections apply to the *drag target of a quadrant or an
-//! arc-endpoint handle* only; a centre drag, an arc-rigid drag, a line drag, a
-//! polyline vertex drag and a point drag are stored 3D-exact (a polyline vertex
-//! keeps its own `z`), and no handle position is ever projected back onto a
-//! plane.
+//! The **three** projections this module performs are the circle-quadrant radius,
+//! the arc-endpoint angle and the ellipse-quadrant radius: all are measured in
+//! the entity's **own** plane, precisely so that a non-planar drag cannot deform a
+//! circle, tilt an arc out of its plane, or turn an ellipse. Those projections
+//! apply to the *drag target of a quadrant or an arc-endpoint handle* only; a
+//! centre drag, an arc-rigid drag, a line drag, a polyline vertex drag and a point
+//! drag are stored 3D-exact (a polyline vertex keeps its own `z`), and no handle
+//! position is ever projected back onto a plane.
 //!
 //! ## The plane frame is shared, not invented
 //!
-//! Quadrant handle positions, the in-plane radius, and the arc endpoint positions
-//! and angles use `cad_geometry::arbitrary_axis` — the AutoCAD
-//! arbitrary-axis-algorithm frame the tessellator, representation provider,
-//! intersect/transform code and the importer already measure circle/arc angles
-//! in. It returns `(ax, ay, unit normal)`, with `ax`/`ay` orthonormal and inside
-//! the circle plane, so `dot(to - center, ax)` and `dot(to - center, ay)` are the
-//! exact in-plane coordinates of a displacement, and
+//! Quadrant handle positions of a **circle**, the circle in-plane radius, and the
+//! arc endpoint positions and angles use `cad_geometry::arbitrary_axis` — the
+//! AutoCAD arbitrary-axis-algorithm frame the tessellator, representation
+//! provider, intersect/transform code and the importer already measure circle/arc
+//! angles in. It returns `(ax, ay, unit normal)`, with `ax`/`ay` orthonormal and
+//! inside the circle plane, so `dot(to - center, ax)` and `dot(to - center, ay)`
+//! are the exact in-plane coordinates of a displacement, and
 //! `atan2(dot(…, ay), dot(…, ax))` is the exact in-plane angle of a direction.
-//! There is no second frame in this module.
+//!
+//! An **ellipse** has no free choice of frame: its quadrant handles are its own
+//! stored axes, so they use the ellipse frame the tessellator and the
+//! representation provider draw with — `(unit(major_axis),
+//! normalize(cross(unit(normal), unit(major_axis))))` — which is the expression
+//! `cad_geometry`'s (crate-private) `ellipse_minor_dir` evaluates. Feeding
+//! `arbitrary_axis` here would put the "quadrant" handles off the drawn curve
+//! whenever the stored major axis is not aligned with the arbitrary frame, so the
+//! ellipse reuses the stored-axis convention instead, and it does **not** invent a
+//! second one: there is no new angle convention, no re-normalised axis and no
+//! rotated frame in this module.
 //!
 //! ## Hit-testing rule
 //!
@@ -168,7 +245,8 @@
 //! entities in the order the caller supplied them, and within one entity its
 //! grips in list order (see the table: for a `LINE` `start`, `end`, midpoint; for
 //! a `CIRCLE` the centre and then quadrants 0..=3; for an `ARC` the centre and
-//! then endpoint 0 = start, endpoint 1 = end; for a `POLYLINE` the vertices in
+//! then endpoint 0 = start, endpoint 1 = end; for an `ELLIPSE` the centre and then
+//! quadrants 0..=3 when it is a full ellipse; for a `POLYLINE` the vertices in
 //! stored order) — and a candidate replaces the current winner only when it is
 //! **strictly** closer.
 //!
@@ -186,8 +264,9 @@
 //! candidate in that iteration order, i.e. the earliest entity of the input and,
 //! within one entity, the earlier entry of the list — which is the lower `index`
 //! inside one kind, and the earlier kind in the table's order (`Endpoint` before
-//! `Midpoint` for a `LINE`, `Center` before every `Quadrant` for a `CIRCLE`,
-//! `Center` before `Endpoint` `0` before `Endpoint` `1` for an `ARC`). For a
+//! `Midpoint` for a `LINE`, `Center` before every `Quadrant` for a `CIRCLE` or a
+//! full `ELLIPSE`, `Center` before `Endpoint` `0` before `Endpoint` `1` for an
+//! `ARC`). For a
 //! `POLYLINE` the list is the stored vertex order, so the lower vertex index wins
 //! a tie. This is deterministic and is pinned by contract tests. Note that the
 //! midpoint is usually *nearer* than the endpoints, so a query at the midpoint is
@@ -211,10 +290,10 @@
 //!   [`GripKind::Center`]/[`GripKind::Quadrant`]/[`GripKind::Point`]/[`GripKind::Vertex`]
 //!   grip, an `AcDbCircle`/`AcDbArc` with a [`GripKind::Vertex`] grip, a
 //!   `POLYLINE` with a non-vertex grip, or an `index` outside the handle range
-//!   (`LINE` endpoint > 1, `LINE` midpoint ≠ 2, `CIRCLE` centre > 0, `CIRCLE`
-//!   quadrant > 3, `ARC` centre > 0, `ARC` endpoint > 1, `POLYLINE` vertex ≥ the
-//!   stored vertex count, `POINT` > 0). The caller is never trusted to have kept
-//!   its id in sync with the geometry.
+//!   (`LINE` endpoint > 1, `LINE` midpoint ≠ 2, `CIRCLE`/`ELLIPSE` centre > 0,
+//!   `CIRCLE`/`ELLIPSE` quadrant > 3, `ARC` centre > 0, `ARC` endpoint > 1,
+//!   `POLYLINE` vertex ≥ the stored vertex count, `POINT` > 0). The caller is
+//!   never trusted to have kept its id in sync with the geometry.
 //! * [`REASON_ZERO_DISPLACEMENT`] (`CadError::InvalidInput`) — the drag would not
 //!   change the geometry, so there is nothing to write. That is the target
 //!   equalling the dragged handle's current position (endpoint, arc endpoint,
@@ -222,22 +301,33 @@
 //!   a quadrant target that already sits at the **stored** radius (its
 //!   out-of-plane offset is ignored by the radius rule), an arc endpoint drag
 //!   whose recomputed start/sweep are identical to the stored ones (an
-//!   off-plane target along the same ray, which the angle rule ignores), and a
+//!   off-plane target along the same ray, which the angle rule ignores), an
+//!   ellipse-quadrant drag whose measured distance equals the stored radius of
+//!   that handle (the axis direction is fixed, so such a target changes nothing),
+//!   and a
 //!   vertex target whose x/y equal the stored vertex (the drag keeps the stored
 //!   `z`, so a z-only difference changes nothing). It is an error, not a silent
 //!   `Ok`: the command must skip the transaction (and therefore the undo entry).
 //!   Equality is IEEE `==` (so `-0.0` equals `0.0`, and no tolerance is applied —
 //!   a sub-tolerance drag is a real, tiny edit).
-//! * [`REASON_DEGENERATE_RADIUS`] (`CadError::InvalidInput`) — a circle-quadrant
-//!   drag whose in-plane distance from the centre is zero or non-finite (the
-//!   target is the centre, or the target lies on the plane normal through it). A
-//!   circle cannot have radius `0` or `NaN`, and this model never clamps: it
-//!   refuses by name.
+//! * [`REASON_DEGENERATE_RADIUS`] (`CadError::InvalidInput`) — a circle- or
+//!   ellipse-quadrant drag whose in-plane distance from the centre is zero or
+//!   non-finite (the target is the centre, or the target lies on the plane normal
+//!   through it), or an ellipse-quadrant drag on a stored frame no in-plane radius
+//!   can be derived from (non-finite/zero major axis, or a normal parallel to it).
+//!   A radius cannot be `0` or `NaN`, and this model never clamps: it refuses by
+//!   name.
 //! * [`REASON_DEGENERATE_ARC`] (`CadError::InvalidInput`) — an arc-endpoint drag
 //!   that has no in-plane direction (target at the centre or on the normal
 //!   through it), that produces a non-finite sweep, or whose sweep lands within
 //!   [`ARC_SWEEP_EPSILON`] of `0` or `2π`. The arc must keep an extent strictly
 //!   inside `(0, 2π)`; the sweep is **refused by name, never clamped**.
+//! * [`REASON_PARTIAL_ELLIPSE`] (`CadError::InvalidInput`) — an ellipse-quadrant
+//!   id on a **partial** ellipse (one whose stored `|sweep|` is not a full turn).
+//!   Such an entity exposes the centre grip only; the refusal names the reason
+//!   instead of pretending the handle is stale, and it is checked in the handle
+//!   identity position (before the target's finiteness), because no quadrant
+//!   handle of that geometry exists to be validated.
 //! * [`REASON_NON_FINITE_TARGET`] (`CadError::InvalidInput`) — the target has a
 //!   `NaN` or infinite coordinate. Storing it would corrupt the entity, and the
 //!   database refuses it at commit anyway; refusing here names the cause. The
@@ -245,8 +335,10 @@
 //!   finite but the translated endpoints are not), because the *result* would be
 //!   an unstorable coordinate.
 //!
-//! The checks run in a fixed order: geometry kind, then handle identity, then
-//! target finiteness, then the drag's own geometric refusals. "Already at the
+//! The checks run in a fixed order: geometry kind, then handle identity (which
+//! includes "this kind has no handle on this geometry at all", such as a
+//! quadrant id on a partial ellipse), then target finiteness, then the drag's own
+//! geometric refusals. "Already at the
 //! handle" is checked before a drag's geometric rule, so a drag onto the handle
 //! itself reports [`REASON_ZERO_DISPLACEMENT`] rather than a degenerate radius or
 //! arc. An unsupported kind is therefore reported as
@@ -264,7 +356,7 @@
 
 use cad_db::DbEntity;
 use cad_domain::{EntityId, Point3, SemanticGeometry};
-use cad_geometry::{add, arbitrary_axis, dot, scale, sub};
+use cad_geometry::{add, arbitrary_axis, cross, dot, length, normalize, scale, sub};
 
 mod drag;
 pub use drag::apply_grip;
@@ -282,6 +374,8 @@ pub const REASON_NON_FINITE_TARGET: &str = "grip.non_finite_target";
 pub const REASON_DEGENERATE_RADIUS: &str = "grip.degenerate_radius";
 /// Stable reason code: an arc-endpoint drag would collapse the arc's sweep.
 pub const REASON_DEGENERATE_ARC: &str = "grip.degenerate_arc";
+/// Stable reason code: a quadrant id on a **partial** ellipse (an elliptical arc).
+pub const REASON_PARTIAL_ELLIPSE: &str = "grip.partial_ellipse";
 /// Stable reason code: the addressed entity does not exist in the drawing.
 ///
 /// Raised by the `GRIPSTRETCH` command (`crate::app_drawing::grip`), which is the
@@ -309,10 +403,13 @@ pub enum GripKind {
     /// The midpoint of a straight line (`LINE` only); dragging translates the
     /// whole line by `to - midpoint`.
     Midpoint,
-    /// The centre of a circle or an arc; dragging moves the entity rigidly.
+    /// The centre of a circle, an arc or an ellipse; dragging moves the entity
+    /// rigidly.
     Center,
-    /// A quadrant point of a circle (`CIRCLE` only); dragging sets the radius to
-    /// the in-plane distance from the centre to the target.
+    /// A quadrant point of a circle, or an axis point of a **full** ellipse
+    /// (`index` `0..=3`); dragging sets the corresponding radius to the in-plane
+    /// distance from the centre to the target. A partial ellipse (an elliptical
+    /// arc) exposes no quadrant handle.
     Quadrant,
     /// A stored vertex of a polyline (`POLYLINE`/`LWPOLYLINE` only, `index` = the
     /// vertex index in stored order); dragging moves that one vertex in x/y and
@@ -322,23 +419,25 @@ pub enum GripKind {
     Point,
 }
 
-/// The four circle quadrant handles, in documented `index` order.
+/// The four circle/ellipse quadrant handles, in documented `index` order.
 ///
-/// Each entry picks one axis of the circle's own plane frame (`0` = `ax`,
-/// `1` = `ay`) and a sign, i.e. `0` = `+ax`, `1` = `+ay`, `2` = `-ax`,
-/// `3` = `-ay`. For a circle whose normal is `+Z` (the common case) that is
-/// `+X`, `+Y`, `-X`, `-Y` in the circle's own plane.
+/// Each entry picks one axis of the entity's own plane frame (`0` = the first
+/// axis, `1` = the second axis) and a sign, i.e. `0` = `+axis0`, `1` = `+axis1`,
+/// `2` = `-axis0`, `3` = `-axis1`. For a circle the frame is
+/// `cad_geometry::arbitrary_axis`, so a `+Z` circle reads `+X`, `+Y`, `-X`, `-Y`;
+/// for an ellipse the frame is its stored `(unit major, unit minor)` axes, so the
+/// same order reads `+major`, `+minor`, `-major`, `-minor`.
 const QUADRANT_DIRECTIONS: [(u8, f64); 4] = [(0, 1.0), (1, 1.0), (0, -1.0), (1, -1.0)];
 
 /// The identity of one handle: which entity, which kind of handle, which one.
 ///
 /// `index` is the handle's ordinal **within its kind**, in a documented order:
 /// for a `LINE`, `0` is `start`, `1` is `end` and `2` is the midpoint; for a
-/// `CIRCLE`, `0` is the centre and the quadrants are `0..=3`; for an `ARC`, `0`
-/// is the centre, `Endpoint` `0` is the start point and `Endpoint` `1` the end
-/// point; for a `POLYLINE`, a `Vertex` `index` is the **stored** vertex index
-/// (`u8`, so only vertices `0..=255` can be addressed); for a `POINT`, `0` is the
-/// position. The id is a caller-held reference into geometry that may have
+/// `CIRCLE`/`ELLIPSE`, `0` is the centre and the quadrants are `0..=3`; for an
+/// `ARC`, `0` is the centre, `Endpoint` `0` is the start point and `Endpoint` `1`
+/// the end point; for a `POLYLINE`, a `Vertex` `index` is the **stored** vertex
+/// index (`u8`, so only vertices `0..=255` can be addressed); for a `POINT`, `0`
+/// is the position. The id is a caller-held reference into geometry that may have
 /// changed since it was read, so [`apply_grip`] re-validates it against the
 /// geometry it is handed instead of trusting it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -361,7 +460,10 @@ pub struct Grip {
 ///
 /// `LINE` ⇒ `start`, `end` endpoints then the midpoint; `CIRCLE` ⇒ the centre
 /// then quadrants `0..=3`; `ARC` ⇒ the centre, then the start (`Endpoint` `0`)
-/// and end (`Endpoint` `1`) points; `POLYLINE` ⇒ one [`GripKind::Vertex`] per
+/// and end (`Endpoint` `1`) points; `ELLIPSE` ⇒ the centre, then quadrants
+/// `0..=3` **when the stored parameter range is a full turn** (a partial ellipse
+/// exposes the centre grip only, and its quadrant ids are
+/// [`REASON_PARTIAL_ELLIPSE`]); `POLYLINE` ⇒ one [`GripKind::Vertex`] per
 /// stored vertex, in stored order (`0..=255`; a longer polyline exposes the first
 /// 256 vertices only, because [`GripId::index`] is a `u8` — the rest are simply
 /// not addressable in this build); `POINT` ⇒ one [`GripKind::Point`] grip. Every
@@ -433,6 +535,43 @@ pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
                 },
             ]
         }
+        SemanticGeometry::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
+            sweep,
+            ..
+        } => {
+            let mut grips = Vec::with_capacity(1 + QUADRANT_DIRECTIONS.len());
+            grips.push(Grip {
+                id: id(GripKind::Center, 0),
+                position: *center,
+            });
+            // A partial ellipse (an elliptical arc) stores a parameter range, and
+            // its axis points need not lie on the drawn range: the centre is the
+            // only handle offered. A full ellipse whose stored frame is
+            // degenerate (`ellipse_axes` returns `None`) also offers the centre
+            // only — a quadrant marker with an underivable position is never
+            // fabricated.
+            if is_full_ellipse(*sweep) {
+                if let Some(axes) = ellipse_axes(*normal, *major_axis) {
+                    for (index, direction) in QUADRANT_DIRECTIONS.iter().enumerate() {
+                        grips.push(Grip {
+                            id: id(GripKind::Quadrant, index as u8),
+                            position: ellipse_quadrant_point(
+                                *center,
+                                *major_axis,
+                                *ratio,
+                                axes,
+                                *direction,
+                            ),
+                        });
+                    }
+                }
+            }
+            grips
+        }
         SemanticGeometry::Polyline { points, .. } => points
             .iter()
             .take(MAX_VERTEX_GRIP_INDEX + 1)
@@ -455,6 +594,63 @@ pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
 
 /// The highest vertex index a [`GripId`] can address: `GripId::index` is a `u8`.
 const MAX_VERTEX_GRIP_INDEX: usize = u8::MAX as usize;
+
+/// Whether a stored ellipse parameter range covers the whole curve.
+///
+/// The slack is [`ARC_SWEEP_EPSILON`], the same one the tessellator and the
+/// representation provider use to call a sweep "full", so the handle set and the
+/// drawn curve agree about which ellipses are complete.
+fn is_full_ellipse(sweep: f64) -> bool {
+    sweep.abs() >= std::f64::consts::TAU - ARC_SWEEP_EPSILON
+}
+
+/// The ellipse's own plane frame `(unit major, unit minor)`.
+///
+/// `unit_minor = normalize(cross(unit(normal), unit(major_axis)))` is the
+/// expression `cad_geometry`'s crate-private `ellipse_minor_dir` evaluates, i.e.
+/// the frame the tessellator and the representation provider draw the ellipse
+/// with. The axes are the **stored** ones; `arbitrary_axis` is only used for the
+/// radially symmetric circle/arc, where every in-plane direction is equivalent.
+///
+/// `None` when no frame can be derived: a non-finite or zero-length major axis, a
+/// non-finite normal, or a normal parallel to the major axis (`cad-db` validation
+/// refuses to store such an ellipse, so this is the corrupt case). The caller then
+/// offers no quadrant handle rather than a fabricated position.
+fn ellipse_axes(normal: Point3, major_axis: Point3) -> Option<(Point3, Point3)> {
+    let major_len = length(major_axis);
+    if !major_len.is_finite() || major_len <= 0.0 {
+        return None;
+    }
+    let unit_major = scale(major_axis, 1.0 / major_len);
+    let minor = cross(normalize(normal), unit_major);
+    let minor_len = length(minor);
+    // `1e-9` is the orthogonality slack `ellipse_minor_dir` uses before its
+    // fallback, and `cad-db` validation refuses a stored ellipse below it.
+    if !minor_len.is_finite() || minor_len < 1e-9 {
+        return None;
+    }
+    Some((unit_major, scale(minor, 1.0 / minor_len)))
+}
+
+/// One ellipse axis handle position: the tessellator's
+/// `center + major_axis * cos t + minor * sin t` at `t = 0, π/2, π, 3π/2`, term
+/// for term — `centre ± major_axis` for the major axis and
+/// `centre ± (|major_axis| * |ratio|) * unit_minor` for the minor axis.
+fn ellipse_quadrant_point(
+    center: Point3,
+    major_axis: Point3,
+    ratio: f64,
+    axes: (Point3, Point3),
+    direction: (u8, f64),
+) -> Point3 {
+    let (which, sign) = direction;
+    let vector = if which == 0 {
+        major_axis
+    } else {
+        scale(axes.1, length(major_axis) * ratio.abs())
+    };
+    add(center, scale(vector, sign))
+}
 
 /// The circle/arc plane frame: the `(ax, ay)` of the shared arbitrary-axis frame.
 ///

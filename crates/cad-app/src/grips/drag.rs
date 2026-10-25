@@ -12,13 +12,13 @@
 //! (including every refusal code) live in the parent module.
 
 use super::{
-    arc_point, in_plane_distance, is_finite, midpoint, plane_axes, quadrant_point, GripId,
-    GripKind, ARC_SWEEP_EPSILON, QUADRANT_DIRECTIONS, REASON_DEGENERATE_ARC,
-    REASON_DEGENERATE_RADIUS, REASON_NON_FINITE_TARGET, REASON_STALE_HANDLE,
-    REASON_UNSUPPORTED_KIND, REASON_ZERO_DISPLACEMENT,
+    arc_point, ellipse_axes, ellipse_quadrant_point, in_plane_distance, is_finite, is_full_ellipse,
+    midpoint, plane_axes, quadrant_point, GripId, GripKind, ARC_SWEEP_EPSILON, QUADRANT_DIRECTIONS,
+    REASON_DEGENERATE_ARC, REASON_DEGENERATE_RADIUS, REASON_NON_FINITE_TARGET,
+    REASON_PARTIAL_ELLIPSE, REASON_STALE_HANDLE, REASON_UNSUPPORTED_KIND, REASON_ZERO_DISPLACEMENT,
 };
 use cad_domain::{CadError, CadResult, Point3, SemanticGeometry};
-use cad_geometry::{add, dot, sub};
+use cad_geometry::{add, dot, length, scale, sub};
 
 /// The in-plane **angle** of `to` as seen from `center`, or `None` when the
 /// target has no in-plane direction at all (it sits on the centre, or on the
@@ -277,6 +277,135 @@ fn apply_arc(
     }
 }
 
+/// The `ELLIPSE` drag rules: the rigid centre, then the four axis quadrants of a
+/// **full** ellipse.
+///
+/// The quadrant rule (our choice, **not an AutoCAD claim**) sets the radius that
+/// the handle names from the target's **in-plane** distance to the centre: a
+/// major handle (`0`/`2`) sets `|major_axis|` while keeping the stored **minor**
+/// radius, so `ratio` is recomputed from the two stored values; a minor handle
+/// (`1`/`3`) sets `ratio = distance / |major_axis|` and leaves the major vector
+/// bit-identical. The **axis direction never rotates**: a major drag scales the
+/// stored vector, so the ellipse cannot be turned by a target off the axis and
+/// the two axes stay orthogonal by construction. A **partial** ellipse (a stored
+/// parameter range that is not a full turn) exposes no quadrant handle at all and
+/// answers a quadrant id with [`REASON_PARTIAL_ELLIPSE`].
+///
+/// The stored fields arrive as a tuple so the rule stays a three-argument
+/// function (clippy's `too_many_arguments`; no wrapper struct is introduced for
+/// what the domain already models).
+type EllipseParts = (Point3, Point3, Point3, f64, f64, f64);
+
+fn apply_ellipse(ellipse: EllipseParts, id: &GripId, to: Point3) -> CadResult<SemanticGeometry> {
+    let (center, normal, major_axis, ratio, start, sweep) = ellipse;
+    match (id.kind, id.index) {
+        (GripKind::Center, 0) => {
+            finite_target(to)?;
+            if to == center {
+                return Err(zero_displacement("AcDbEllipse centre"));
+            }
+            Ok(SemanticGeometry::Ellipse {
+                center: to,
+                normal,
+                major_axis,
+                ratio,
+                start,
+                sweep,
+            })
+        }
+        (GripKind::Center, index) => Err(stale_handle(format!(
+            "AcDbEllipse has no Center grip at index {index} (only 0)"
+        ))),
+        (GripKind::Quadrant, index @ 0..=3) => {
+            // Handle identity first: a partial ellipse has no quadrant handle, so
+            // this is not a "stale" id and not a target problem.
+            if !is_full_ellipse(sweep) {
+                return Err(partial_ellipse(index));
+            }
+            finite_target(to)?;
+            let Some(axes) = ellipse_axes(normal, major_axis) else {
+                return Err(degenerate_ellipse_radius(
+                    "the stored plane frame is degenerate (major axis or normal)",
+                ));
+            };
+            let direction = QUADRANT_DIRECTIONS[usize::from(index)];
+            if to == ellipse_quadrant_point(center, major_axis, ratio, axes, direction) {
+                return Err(zero_displacement("AcDbEllipse axis quadrant"));
+            }
+            let distance = in_plane_distance(center, axes, to);
+            if !distance.is_finite() || distance <= 0.0 {
+                return Err(degenerate_ellipse_radius(
+                    "the drag target has no in-plane distance from the centre",
+                ));
+            }
+            let major_len = length(major_axis);
+            // The stored minor semi-axis (`|major_axis| * |ratio|`, the expression
+            // the tessellator draws with) and the radius this handle names: the
+            // major semi-axis for a major handle, the minor one otherwise.
+            let minor_len = major_len * ratio.abs();
+            let stored_len = if direction.0 == 0 {
+                major_len
+            } else {
+                minor_len
+            };
+            if distance == stored_len {
+                // The radius rule ignores where inside the plane the target sits,
+                // and an ellipse axis never rotates, so a target at the stored
+                // radius changes nothing — exactly like the circle rule. Refusing
+                // also keeps a 1-ulp `distance / major_len` from being written as
+                // a "change" that draws the same curve.
+                return Err(unchanged_ellipse_radius(distance));
+            }
+            if direction.0 == 0 {
+                // Major handle: the major radius is the measured distance, the
+                // stored minor radius is kept, and the direction is the stored
+                // one (the vector is scaled, never re-derived from the target).
+                let new_ratio = minor_len / distance;
+                if !new_ratio.is_finite() || new_ratio <= 0.0 {
+                    return Err(degenerate_ellipse_radius("the recomputed ratio is invalid"));
+                }
+                Ok(SemanticGeometry::Ellipse {
+                    center,
+                    normal,
+                    major_axis: scale(major_axis, distance / major_len),
+                    ratio: new_ratio,
+                    start,
+                    sweep,
+                })
+            } else {
+                // Minor handle: `ratio = minor / major`; the stored major vector is
+                // bit-identical.
+                let new_ratio = distance / major_len;
+                if !new_ratio.is_finite() || new_ratio <= 0.0 {
+                    return Err(degenerate_ellipse_radius("the recomputed ratio is invalid"));
+                }
+                if new_ratio == ratio {
+                    return Err(unchanged_ellipse_radius(distance));
+                }
+                Ok(SemanticGeometry::Ellipse {
+                    center,
+                    normal,
+                    major_axis,
+                    ratio: new_ratio,
+                    start,
+                    sweep,
+                })
+            }
+        }
+        (GripKind::Quadrant, index) => Err(stale_handle(format!(
+            "AcDbEllipse has no Quadrant grip at index {index} \
+             (0 = +major, 1 = +minor, 2 = -major, 3 = -minor)"
+        ))),
+        (GripKind::Endpoint | GripKind::Midpoint | GripKind::Vertex | GripKind::Point, _) => {
+            Err(stale_handle(
+                "AcDbEllipse exposes a Center grip (0) and, for a full ellipse, Quadrant grips \
+                 (0..=3) only"
+                    .to_string(),
+            ))
+        }
+    }
+}
+
 /// The `POLYLINE` drag rule: one vertex, in place, with every bulge preserved.
 ///
 /// `points` are stored world-space vertices (the importer already maps the
@@ -369,6 +498,34 @@ fn degenerate_radius(radius: f64) -> CadError {
     ))
 }
 
+/// A `grip.degenerate_radius` refusal for an ellipse quadrant drag, naming the
+/// cause (a measured radius or a stored frame that cannot yield one).
+fn degenerate_ellipse_radius(cause: &str) -> CadError {
+    CadError::InvalidInput(format!(
+        "{REASON_DEGENERATE_RADIUS}: the AcDbEllipse quadrant drag yields no usable in-plane \
+         radius: {cause}; an ellipse semi-axis must be positive and finite (the centre and the \
+         normal are not moved by this handle)"
+    ))
+}
+
+/// A `grip.zero_displacement` refusal for an ellipse quadrant drag whose measured
+/// radius is already stored (the axis direction never rotates).
+fn unchanged_ellipse_radius(radius: f64) -> CadError {
+    CadError::InvalidInput(format!(
+        "{REASON_ZERO_DISPLACEMENT}: the AcDbEllipse quadrant drag leaves the axis radius at \
+         {radius}"
+    ))
+}
+
+/// A `grip.partial_ellipse` refusal naming the quadrant handle that a partial
+/// ellipse (elliptical arc) does not expose.
+fn partial_ellipse(index: u8) -> CadError {
+    CadError::InvalidInput(format!(
+        "{REASON_PARTIAL_ELLIPSE}: AcDbEllipse quadrant {index} is not a handle of a partial \
+         ellipse; a stored parameter range that is not a full turn exposes the Center grip only"
+    ))
+}
+
 /// A `grip.degenerate_arc` refusal naming the rejected sweep.
 fn degenerate_arc(handle: &str, sweep: f64) -> CadError {
     CadError::InvalidInput(format!(
@@ -416,6 +573,14 @@ pub(crate) fn finite_target(to: Point3) -> CadResult<()> {
 ///   of `to` from the centre; `center`/`radius`/`normal` are bit-identical, the
 ///   opposite endpoint keeps its angle and the sweep is recomputed in the stored
 ///   direction (an arc that would collapse is refused, never clamped);
+/// * `ELLIPSE` centre: the ellipse translates rigidly; `normal`/`major_axis`/
+///   `ratio`/`start`/`sweep` are bit-identical;
+/// * `ELLIPSE` quadrant (a full ellipse only): the corresponding radius becomes
+///   the in-plane distance from the centre to `to`. A major handle sets
+///   `|major_axis|` and keeps the stored minor radius (recomputing `ratio`); a
+///   minor handle sets `ratio = distance / |major_axis|` and keeps `major_axis`
+///   bit-identical. The axis direction never rotates and a partial ellipse refuses
+///   the handle by name;
 /// * `POLYLINE` vertex: that one vertex takes `x`/`y` from `to` and keeps its own
 ///   `z`; every other vertex and every bulge are bit-identical;
 /// * `POINT`: the position becomes `to`;
@@ -446,6 +611,18 @@ pub fn apply_grip(
             start,
             sweep,
         } => apply_arc(*center, *normal, *radius, *start, *sweep, id, to),
+        SemanticGeometry::Ellipse {
+            center,
+            normal,
+            major_axis,
+            ratio,
+            start,
+            sweep,
+        } => apply_ellipse(
+            (*center, *normal, *major_axis, *ratio, *start, *sweep),
+            id,
+            to,
+        ),
         SemanticGeometry::Polyline {
             points,
             bulges,

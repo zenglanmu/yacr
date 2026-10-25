@@ -123,6 +123,7 @@ mod drawing;
 mod drawing_space;
 mod grips;
 mod grips_curves;
+mod grips_ellipse;
 mod grips_polyline;
 mod layer_current_visibility;
 mod layer_property;
