@@ -7,14 +7,22 @@
 //! session with no document reports an empty list with no active layer, never a
 //! synthetic `0` row.
 //!
-//! The three mutations are session-scoped and travel through the ordinary host
-//! command funnel ([`CommandId::ToggleLayer`], [`CommandId::RestoreLayers`],
+//! The three session-scoped mutations travel through the ordinary host command
+//! funnel ([`CommandId::ToggleLayer`], [`CommandId::RestoreLayers`],
 //! [`CommandId::SetActiveLayer`]) so the application layer performs the real
 //! work: an override never writes the DWG layer table, never raises the database
 //! revision and is never a second visibility state machine. A name supplied by
 //! the panel is resolved against the projected rows here (exact match first,
 //! then a **unique** case-insensitive one); an unknown or ambiguous name is
 //! refused explicitly and changes nothing.
+//!
+//! The three **structural table** writes ([`CadSession::create_layer`],
+//! [`CadSession::rename_layer`], [`CadSession::delete_layer`] →
+//! [`CommandId::CreateLayer`] / `RenameLayer` / `DeleteLayer`) are different:
+//! they are real database writes with one revision bump each, they carry a name
+//! selector instead of a resolved id (the application layer applies the same
+//! resolution rule), and they are **not undoable** — `cad-history` stores entity
+//! patches only, so a layer patch kind is a separate lane.
 
 use cad_app::layers::LayerRow;
 use cad_app::{CommandId, CommandPayload};
@@ -72,6 +80,14 @@ impl CadLayers {
 /// The wire admission only carries names/booleans; whether a name resolves to a
 /// real layer is live session state and is decided on the owner thread when this
 /// write is applied ([`CadLayerWrite::apply`]).
+///
+/// Despite the module's visibility emphasis this is the **layer mutation**
+/// channel, not a visibility channel: it also carries the three structural
+/// table writes. A parallel enum would have to duplicate the same bounded queue
+/// and the same popup/probe-mode gates for no gain, so the one queue stays the
+/// single admission point. The structural variants are real database writes (one
+/// revision bump each, not undoable); the visibility/active variants stay session
+/// state only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CadLayerWrite {
     /// Set the temporary visibility of one layer, addressed by name.
@@ -80,6 +96,19 @@ pub enum CadLayerWrite {
     Restore,
     /// Make one layer the active layer new entities are created on.
     SetActive { name: String },
+    /// Create a new layer table entry (`CREATELAYER`) with this name.
+    ///
+    /// The name is validated by the database on the owner thread (trimmed,
+    /// non-empty, legal characters, unique case-insensitively); a refusal is
+    /// returned, never repaired.
+    Create { name: String },
+    /// Rename the layer addressed by `layer` to `name` (`RENAMELAYER`).
+    Rename { layer: String, name: String },
+    /// Delete the layer addressed by `layer` (`DELETELAYER`).
+    ///
+    /// The database refuses the default layer `0` and any layer an entity still
+    /// references; the command layer then reports the real reason.
+    Delete { layer: String },
 }
 
 impl CadLayerWrite {
@@ -92,6 +121,9 @@ impl CadLayerWrite {
             Self::SetVisible { name, visible } => session.set_layer_visibility(name, *visible),
             Self::Restore => session.restore_layers(),
             Self::SetActive { name } => session.set_active_layer(name),
+            Self::Create { name } => session.create_layer(name),
+            Self::Rename { layer, name } => session.rename_layer(layer, name),
+            Self::Delete { layer } => session.delete_layer(layer),
         }
     }
 }
@@ -169,6 +201,61 @@ impl CadSession {
         self.dispatch_payload(
             CommandId::SetActiveLayer,
             CommandPayload::ActiveLayer(layer),
+        )
+    }
+
+    /// Create a new layer table entry (`CREATELAYER`).
+    ///
+    /// A **real database write**: the application layer validates the name (trim,
+    /// empty/whitespace-only, the AutoCAD-illegal character set, unique
+    /// **case-insensitively**) and commits one revision bump. Nothing is repaired
+    /// here — a bad name comes back as the database's own explicit refusal, which
+    /// is recorded for `cad_status.error`. Layer edits are **not undoable**
+    /// (history has no layer patch kind).
+    ///
+    /// The answer is the ordinary queued ack; the panel re-reads [`Self::layers`],
+    /// whose rows are projected from the drawing's own table.
+    pub fn create_layer(&self, name: &str) -> Result<(), String> {
+        self.require_layer_document()?;
+        self.dispatch_payload(
+            CommandId::CreateLayer,
+            CommandPayload::CreateLayer(name.to_string()),
+        )
+    }
+
+    /// Rename the layer currently named `layer` to `name` (`RENAMELAYER`).
+    ///
+    /// `layer` is resolved by the application layer with the **same** rule this
+    /// module applies to the panel's names (exact match first, then a unique
+    /// case-insensitive one), including its stable `layer.unknown` /
+    /// `layer.ambiguous_name` reasons, so a row the panel selected always resolves
+    /// the same way. Entity references are by id, so the rename retargets nothing.
+    /// Not undoable.
+    pub fn rename_layer(&self, layer: &str, name: &str) -> Result<(), String> {
+        self.require_layer_document()?;
+        self.dispatch_payload(
+            CommandId::RenameLayer,
+            CommandPayload::RenameLayer {
+                layer: layer.to_string(),
+                name: name.to_string(),
+            },
+        )
+    }
+
+    /// Delete the layer currently named `layer` (`DELETELAYER`).
+    ///
+    /// The application layer refuses the default layer `0` and any layer an entity
+    /// still references (naming the count), so no `Entity.layer` is ever left
+    /// dangling. When the deleted layer is the session's active layer the active
+    /// layer falls back to `0`; the panel sees that in the next [`Self::layers`]
+    /// read (`active`), never as a stale id. Not undoable.
+    pub fn delete_layer(&self, layer: &str) -> Result<(), String> {
+        self.require_layer_document()?;
+        self.dispatch_payload(
+            CommandId::DeleteLayer,
+            CommandPayload::DeleteLayer {
+                layer: layer.to_string(),
+            },
         )
     }
 

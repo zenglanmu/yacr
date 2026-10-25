@@ -78,8 +78,9 @@ pub const CAD_STATUS_COMMAND: &str = "cad_status";
 /// * `probe_input` — no input lane exists on this carrier (the wasm session takes
 ///   the pointer directly), and the shared path already refuses with `cad_waiting`.
 ///
-/// The layer commands **are** in this list: their rows and their three mutations
-/// are performed by the native `CadSession` on the owner tick, and this carrier
+/// The layer commands **are** in this list: their rows and their mutations (the
+/// three session-only ones plus the create/rename/delete table writes) are
+/// performed by the native `CadSession` on the owner tick, and this carrier
 /// has none (the wasm session in the WebView is the only CAD authority there).
 pub const NATIVE_SESSION_COMMANDS: &[&str] = &[
     "cad_command",
@@ -93,6 +94,9 @@ pub const NATIVE_SESSION_COMMANDS: &[&str] = &[
     "cad_set_layer_visible",
     "cad_restore_layers",
     "cad_set_active_layer",
+    "cad_create_layer",
+    "cad_rename_layer",
+    "cad_delete_layer",
 ];
 
 /// The explicit reason a native-session command is refused on `dom-canvas`.

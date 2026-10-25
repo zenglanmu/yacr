@@ -22,6 +22,14 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   readonly pressed?: boolean;
   readonly active?: boolean;
   readonly trailing?: React.ReactNode;
+  /**
+   * The `<button>` node itself. React 19 passes `ref` as an ordinary prop, so it
+   * travels through the rest spread to the element; it is declared here because
+   * `ButtonHTMLAttributes` does not carry it. A caller needs it when focus has to
+   * come *back* to the button that opened something (the layers palette hands it
+   * back after an inline form closes).
+   */
+  readonly ref?: React.Ref<HTMLButtonElement>;
 }
 
 /**

@@ -35,6 +35,37 @@ export const TEXT_STEP_PROMPT_KEY = 'tool.prompt.text.type_text';
 /** The catalog key of the preceding pick, for the step chip while it is pending. */
 export const TEXT_PICK_PROMPT_KEY = 'tool.prompt.text.pick_point';
 
+/**
+ * MTEXT's two **named picks** in capture order (2026-10-26).
+ *
+ * The first corner is the insertion point and the opposite corner only supplies
+ * the wrap width, so each pick gets its own grounded prompt. The text step is not
+ * positional and is named from the host's `awaiting_text` flag instead (see
+ * [`MTEXT_STEP_PROMPT_KEY`] / [`textStepPromptKey`]).
+ */
+export const MTEXT_STEP_PROMPT_KEYS: readonly string[] = Object.freeze([
+  'tool.prompt.mtext.pick_corner',
+  'tool.prompt.mtext.opposite_corner',
+]);
+
+/** The catalog key naming MTEXT's terminal text step. */
+export const MTEXT_STEP_PROMPT_KEY = 'tool.prompt.mtext.type_text';
+
+/**
+ * The catalog key naming the **text step** of the active text-carrying tool.
+ *
+ * The host's `awaiting_text` flag decides *that* the step is open; this only
+ * picks the wording. MTEXT gets its own copy because its text is multiline and
+ * the prompt must not claim otherwise; every other text-carrying tool keeps the
+ * shared TEXT step key it had before. A missing or malformed tool block still
+ * yields the shared key, never a guessed tool.
+ */
+export function textStepPromptKey(tool: unknown): string {
+  return isRecord(tool) && tool.key === 'draw.mtext'
+    ? MTEXT_STEP_PROMPT_KEY
+    : TEXT_STEP_PROMPT_KEY;
+}
+
 /** The catalog key of the length refusal, shown with the real bound. */
 export const TEXT_TOO_LONG_KEY = 'status.tool_text.too_long';
 

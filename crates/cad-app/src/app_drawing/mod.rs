@@ -40,13 +40,19 @@ mod drawing_create;
 mod drawing_edit;
 mod drawing_transform;
 mod explode;
+mod grip;
 mod hatch;
 mod helpers;
+mod layer_edit;
 mod match_prop;
 mod mleader;
+mod mtext_create;
 mod properties;
 mod stretch;
 mod text_edit;
+// The single line-break / stored-type-key authority MTEXT creation and TEXTEDIT
+// share; `pub(crate)` because the TEXT capture channel refuses a newline too.
+pub(crate) mod text_policy;
 mod trim_boundary;
 mod trim_curves;
 mod trim_extend;
@@ -65,4 +71,5 @@ pub use array::MAX_ARRAY_ENTITIES;
 
 use helpers::{
     distance, geometry_kind, is_finite_point, is_multiline_text_source, offset_circle, offset_line,
+    resolve_created_text_style,
 };

@@ -135,8 +135,9 @@ pub struct Shared {
     pub cad_settings: Option<CadSettings>,
     /// Bounded main-thread queue of typed layer writes (the layer panel's
     /// `cad_set_layer_visible` / `cad_restore_layers` / `cad_set_active_layer`
-    /// channels): admitted by those commands and drained by the owner tick into
-    /// `CadSession::set_layer_visibility` / `restore_layers` / `set_active_layer`.
+    /// channels and its `cad_create_layer` / `cad_rename_layer` /
+    /// `cad_delete_layer` table writes): admitted by those commands and drained by
+    /// the owner tick into the matching `CadSession` funnel.
     pub cad_layer_writes: VecDeque<CadLayerWrite>,
     /// Latest layer projection mirrored from the owner-thread session, so the
     /// worker-thread `cad_layers` read never touches the `!Send` session.

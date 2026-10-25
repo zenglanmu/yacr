@@ -172,6 +172,23 @@ impl DrawPreview {
                     )
                 };
             }
+            // MTEXT: the two corners define the wrap rectangle (its width is the
+            // horizontal span); the text is the terminal step. Locale-neutral
+            // ASCII like the other fallback lines.
+            if self.kind == DrawToolKind::MText {
+                return if self.awaiting_text {
+                    format!(
+                        "{}: two corners captured ({}), type the text",
+                        self.kind.key(),
+                        self.points.len()
+                    )
+                } else {
+                    format!(
+                        "{}: specify the first and the opposite corner of the wrap rectangle",
+                        self.kind.key()
+                    )
+                };
+            }
             return if self.awaiting_text {
                 format!(
                     "{}: insertion point captured ({}), type the text",
@@ -605,6 +622,19 @@ impl DrawTool {
                     )
                 })?,
             },
+            // MTEXT: the two captured corners plus the submitted text. The wrap
+            // width is derived by the host from the opposite corner (the intent
+            // carries the raw clicks); the height, rotation and attachment are the
+            // documented defaults resolved by the caller, never captured here.
+            DrawToolKind::MText => DrawIntent::MText {
+                first: a,
+                opposite: b,
+                text: self.text.clone().ok_or_else(|| {
+                    CadError::InvalidInput(
+                        "tool.text_required: MTEXT needs its text before commit".into(),
+                    )
+                })?,
+            },
             // TEXTEDIT: the ref resolved at pick time plus the replacement text.
             // The command re-reads the entity at apply time, so a stale pick is
             // refused there instead of being silently retargeted.
@@ -836,9 +866,9 @@ mod parameter;
 // The general typed tool-parameter model (ADR 0016 decision A); re-exported so
 // `crate::draw_tool::<name>` and the public `cad_app::<name>` paths resolve.
 pub use parameter::{
-    ToolParameter, ToolParameterStore, ToolValue, ToolValueKind, HATCH_PATTERN_TYPE_SOLID,
-    HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
-    TEXT_DEFAULT_HEIGHT,
+    ToolParameter, ToolParameterStore, ToolValue, ToolValueKind, HATCH_PATTERN_TYPE_PREDEFINED,
+    HATCH_PATTERN_TYPE_SOLID, HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE,
+    HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER, TEXT_DEFAULT_HEIGHT,
 };
 // Re-exported so the historical `crate::draw_tool::<name>` paths and the public
 // `cad_app::circle_radius` (via `lib.rs`) stay valid for the callers that used the

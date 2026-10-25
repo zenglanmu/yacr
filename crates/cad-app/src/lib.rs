@@ -10,11 +10,13 @@ use cad_history::History;
 use cad_measure::{MeasurementEngine, MeasurementRequest, MeasurementSpace};
 use cad_query::QueryService;
 use cad_representation::{enumerate_layouts, viewport_transform, SpaceSelection, ViewportState};
+use grips::GripId;
 use std::{collections::BTreeMap, sync::Arc};
 
 pub mod api;
 pub mod camera;
 pub mod draw_tool;
+pub mod grips;
 pub mod host;
 pub mod input;
 pub mod interaction;
@@ -49,9 +51,9 @@ pub use camera::{
 pub use command_id::*;
 pub use draw_tool::{
     circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity, ToolParameter,
-    ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES, HATCH_PATTERN_TYPE_SOLID,
-    HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
-    MAX_TOOL_TEXT_CHARS,
+    ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES,
+    HATCH_PATTERN_TYPE_PREDEFINED, HATCH_PATTERN_TYPE_SOLID, HATCH_PATTERN_TYPE_USER_DEFINED,
+    HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER, MAX_TOOL_TEXT_CHARS,
 };
 pub use input::{
     apply_canvas_metrics, classify_key, escape_action, CancelReason, CanvasMetrics,
@@ -404,6 +406,23 @@ pub struct DimensionChainCommand {
     pub points: Vec<Point3>,
 }
 
+/// The input of a `GRIPSTRETCH` command: **one** handle drag on **one** entity.
+///
+/// `id` is the handle resolved at pick time (which entity, which kind of handle,
+/// which one — see [`crate::grips::GripId`]) and `to` the world point the drag
+/// resolved to. Boxed inside [`CommandPayload::GripStretch`] so the payload enum
+/// stays small (the same reason [`TwoLineCommand`] and [`DimensionChainCommand`]
+/// are boxed).
+///
+/// `id` is a caller-held reference into geometry that may have moved or been
+/// deleted since it was read, so the command re-reads the entity and re-validates
+/// the handle against the **current** geometry instead of trusting it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GripStretchCommand {
+    pub id: GripId,
+    pub to: Point3,
+}
+
 pub enum CommandPayload {
     None,
     Points(Vec<Point3>),
@@ -578,6 +597,25 @@ pub enum CommandPayload {
     },
     /// Set the session's active layer for new entities. Session state only.
     ActiveLayer(LayerId),
+    /// `CREATELAYER`: the new layer's name.
+    ///
+    /// The name is **not** normalized here: the database trims it and then
+    /// refuses an empty/whitespace-only name, an AutoCAD-illegal character and a
+    /// case-insensitive duplicate. A blank line therefore fails explicitly instead
+    /// of creating a nameless layer.
+    CreateLayer(String),
+    /// `RENAMELAYER`: the existing layer (addressed by name, exactly like the
+    /// layer panel: exact match wins, then a **unique** case-insensitive one) and
+    /// its new name.
+    RenameLayer {
+        layer: String,
+        name: String,
+    },
+    /// `DELETELAYER`: the layer to remove, addressed by name like
+    /// [`CommandPayload::RenameLayer`].
+    DeleteLayer {
+        layer: String,
+    },
     /// DIMRADIUS/DIMDIAMETER: the picked arc/circle (`target`) plus the
     /// dimension-line location (`location`, ADR 0017 decision C, P5d). The kind
     /// (radius vs diameter) comes from the [`CommandId`]; the handler resolves the
@@ -610,8 +648,8 @@ pub enum CommandPayload {
     ///
     /// `refs` is the selection snapshot the tool started with (the tool captures
     /// no points; each selected entity becomes one boundary loop). The pattern
-    /// type (solid vs user-defined), spacing, angle, double flag and style are the
-    /// session typed channel
+    /// type (solid / user-defined / predefined), the predefined pattern index,
+    /// spacing, angle, double flag and style are the session typed channel
     /// ([`crate::draw_tool::ToolParameter::HatchPatternType`] … `HatchStyle`), read
     /// by the handler so the session stays the single authority for them.
     Hatch {
@@ -631,10 +669,58 @@ pub enum CommandPayload {
     /// value must travel with it (never re-read from a session the caller does not
     /// own). The style is the drawing's `Standard` text style with the style
     /// default alignment (left/baseline).
+    ///
+    /// Single-line means single-line: a `text` containing `\r`/`\n` is **refused**
+    /// (`text.single_line_newline`), because an `AcDbText` does not interpret
+    /// `\P` — storing one would render over several lines and could never be
+    /// re-edited through `TEXTEDIT`. Use the [`Self::MText`] payload for
+    /// multi-line text.
     Text {
         position: Point3,
         text: String,
         height: f64,
+    },
+    /// MTEXT: one multiline text entity stored as **`AcDbMText`**.
+    ///
+    /// This is the command core: the interactive `DrawToolKind::MText` tool
+    /// (first corner → opposite corner → typed text) builds exactly this payload,
+    /// and a direct caller (CLI, host IPC) supplies the whole construction:
+    ///
+    /// * `text` — the draft string. `\r\n`, `\r` and `\n` are stored as `\P`, the
+    ///   form the viewport's MTEXT parser and AutoCAD both interpret, by the one
+    ///   newline policy `TEXTEDIT` shares. A later `TEXTEDIT` of this entity
+    ///   accepts line breaks again because the entity is `AcDbMText`;
+    /// * `position` — insertion point (world, must be finite);
+    /// * `width` — the automatic wrap boundary (DXF group `41`
+    ///   `rectangle_width`; the **two-corner** model: the caller passes the
+    ///   width it captured from the second corner). `None` = no wrap and is
+    ///   stored as `None`; `Some(w)` must be finite and `> 0` and is refused
+    ///   otherwise (never clamped, never dropped) and sanitized through
+    ///   [`cad_domain::wrap_width_from_dxf`] like every other wrap boundary;
+    /// * `height` — glyph height in world units (finite, `> 0`);
+    /// * `rotation` — rotation in radians (finite; `0.0` = unrotated);
+    /// * `h_align` / `v_align` — horizontal/vertical attachment relative to
+    ///   `position`.
+    ///
+    /// **Not carried, because not modelled** — the same four facets the importer
+    /// marks `Partial` under `MTEXT_UNMODELLED`: line-spacing style
+    /// (`text.line_spacing_style_unsupported`), columns
+    /// (`text.columns_unsupported`), background fill
+    /// (`text.background_unsupported`) and drawing direction
+    /// (`text.drawing_direction_unsupported`). There is deliberately no field for
+    /// any of them, so no caller can believe one is honoured.
+    ///
+    /// The style/font resolution is the one `Text` creation uses, and the stored
+    /// `type_key` is `AcDbMText` (not `Text`'s `AcDbText`), so this command can
+    /// never produce a single-line entity that claims to be multiline.
+    MText {
+        position: Point3,
+        width: Option<f64>,
+        text: String,
+        height: f64,
+        rotation: f64,
+        h_align: TextAlignH,
+        v_align: TextAlignV,
     },
     /// MLEADER: one straight-line multileader with text content (ADR 0019
     /// decision F.2, P7c).
@@ -694,6 +780,34 @@ pub enum CommandPayload {
         key: String,
         value: String,
     },
+    /// `GRIPSTRETCH`: move **one** handle of **one** entity to a world point
+    /// (the payload path of a grip drag; see [`crate::grips`] for the model).
+    ///
+    /// This is **the payload of a pointer gesture, and there is no gesture yet**:
+    /// nothing in this build produces a `GripStretch` payload — there are no
+    /// renderer grip markers, no host arming and no pointer routing that would
+    /// resolve a drag into `{ id, to }`. Those are later lanes; the command is
+    /// defined now so the write path, its refusals and its undo granularity are
+    /// pinned before a UI can depend on them.
+    ///
+    /// `id` names the dragged handle and `to` the world point it is dragged to
+    /// (all three coordinates are stored; nothing is projected onto a work
+    /// plane — that projection belongs to the capture lane). The handler
+    /// re-reads `id.entity`, refuses a missing entity (`grip.target_missing`) and
+    /// a non-model-space one (`property.not_addressable`), then re-validates the
+    /// handle against the current geometry through
+    /// [`crate::grips::apply_grip`]. On success it stages exactly one
+    /// `update_entity` in one transaction / one undo step; on **any** refusal it
+    /// opens no transaction at all, so there is no empty undo entry and no
+    /// revision bump (a zero displacement is refused, not accepted as a no-op).
+    /// A non-finite `to` is refused (`grip.non_finite_target`) before the
+    /// drawing is read. Work-only.
+    ///
+    /// Supported handles are the model's whole surface: a `LINE` endpoint and a
+    /// `POINT` position. Every other geometry kind refuses with
+    /// `grip.unsupported_kind`; this never routes through
+    /// [`CommandId::StretchEntities`] (crossing-window stretch).
+    GripStretch(Box<GripStretchCommand>),
 }
 
 pub struct Command {

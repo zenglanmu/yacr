@@ -48,6 +48,13 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("POINT", CommandId::CreatePoint),
     ("SPLINE", CommandId::CreateSpline),
     ("TEXT", CommandId::CreateText),
+    // MTEXT is the multiline create command **and** a real interactive tool
+    // (2026-10-26): the bare selector starts the two-corner capture — first
+    // corner (insertion point), opposite corner (wrap width), then the terminal
+    // text step. The payload path (`CommandPayload::MText`) stays available for
+    // CLI/host IPC. No `MT` abbreviation is admitted: this table only lists
+    // abbreviations whose behaviour it really implements end to end.
+    ("MTEXT", CommandId::CreateMText),
     ("MLEADER", CommandId::MLeader),
     ("TEXTEDIT", CommandId::TextEdit),
     ("DIMLINEAR", CommandId::DimLinear),
@@ -80,6 +87,15 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("PASTECLIP", CommandId::PasteFromClipboard),
     ("OFFSET", CommandId::OffsetEntity),
     ("SETACTIVELAYER", CommandId::SetActiveLayer),
+    // Layer **table** writes (create/rename/delete). Each needs a payload — the
+    // new name (create), `{ layer, name }` (rename) or `{ layer }` (delete) — so
+    // the bare selector normalizes and is then refused explicitly by the
+    // application layer; the panel/IPC path supplies the typed payload. The
+    // layer selector inside the payload is a **name**, resolved against the
+    // drawing's own table (exact match first, then a unique case-insensitive one).
+    ("CREATELAYER", CommandId::CreateLayer),
+    ("RENAMELAYER", CommandId::RenameLayer),
+    ("DELETELAYER", CommandId::DeleteLayer),
     // A payload-requiring edit: the selector normalizes, and the application
     // refuses a bare invocation explicitly (the panel/IPC path supplies the
     // `EntityProperty { key, value }` payload).
@@ -88,6 +104,14 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // the whole input (`CommandPayload::None`), because the current selection's
     // first entity is the source and the rest are destinations. No IPC of its own.
     ("MATCHPROP", CommandId::MatchProp),
+    // GRIPSTRETCH is the **payload path of a pointer gesture**: `GripStretch
+    // { id, to }` carries the resolved handle id plus the world point the drag
+    // resolved to. Nothing produces that payload yet (no grip markers, no host
+    // arming, no pointer routing), and the typed command line carries no handle,
+    // so the bare selector normalizes and is then refused explicitly by the
+    // application layer — it must never be routed to `BeginDraw` or turned into a
+    // fabricated drag.
+    ("GRIPSTRETCH", CommandId::GripStretch),
     ("HOVERPREVIEW", CommandId::ToggleHoverPreview),
     // The display grid switch (F7). Grid **snap** is the separate `SNAP`
     // selector below; the two are independent session switches and never alias
@@ -342,6 +366,12 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     // name onto the canonical selector (ADR 0017 decision C, P5f).
     ("DBA", "DIMBASELINE"),
     ("DCO", "DIMCONTINUE"),
+    // `NEWLAYER` is a **project** word synonym for creating a layer, not an
+    // AutoCAD command (AutoCAD reaches layer creation through `LAYER` /
+    // `-LAYER`); it is admitted only because `CREATELAYER` itself exists, the
+    // same rule every other alias row follows. It is the only non-`acad.pgp`
+    // spelling in this table, and it changes nothing but the normalized name.
+    ("NEWLAYER", "CREATELAYER"),
     // AutoCAD's default `acad.pgp` single/double-letter abbreviations, listed
     // alphabetically (draw, modify, view, annotate, drafting switches). Only the
     // subset whose target selector exists here: `MA` (MATCHPROP) joined the table

@@ -87,6 +87,11 @@ pub fn draw_preview_overlay(
         // geometry preview), so it also uses the cursor/chain.
         DrawToolKind::Point
         | DrawToolKind::Text
+        // MTEXT captures the two opposite corners of its wrap rectangle; its live
+        // preview is the existing cursor/chain rubber band (the typed text is a
+        // prompt, and the width/layout is derived at commit, so no fabricated
+        // wrapped text box is drawn here).
+        | DrawToolKind::MText
         // MLEADER captures the arrow position and the landing point; its live
         // preview is the existing cursor/chain (the typed text is a prompt, not a
         // geometry preview, and the dogleg is derived at commit from the style

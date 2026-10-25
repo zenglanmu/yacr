@@ -18,6 +18,16 @@
 //   cad_set_layer_visible  { name, visible } -> { accepted: true }   (queued)
 //   cad_restore_layers                  -> { accepted: true }         (queued)
 //   cad_set_active_layer   { name }     -> { accepted: true }         (queued)
+//   cad_create_layer       { name }     -> { accepted: true }         (queued)
+//   cad_rename_layer       { layer, name } -> { accepted: true }      (queued)
+//   cad_delete_layer       { layer }    -> { accepted: true }         (queued)
+//
+// The last three are **real layer-table writes** (one revision bump each, not
+// undoable), unlike the two overrides and the active-layer pick. Their refusals
+// are the database's own stable reasons (`layer.name_empty`,
+// `layer.name_illegal_char`, `layer.duplicate_name`, `layer.default_undeletable`,
+// `layer.in_use`, plus the host's `layer.unknown` / `layer.ambiguous_name` name
+// resolution) and none of them is repaired or swallowed here.
 //
 // Three consequences this module is built around:
 //
@@ -105,6 +115,12 @@ export interface LayersStore {
   setVisible(name: string, visible: boolean): Promise<LayerAck>;
   restore(): Promise<LayerAck>;
   setActive(name: string): Promise<LayerAck>;
+  /** Create a new layer-table entry with this name. */
+  createLayer(name: string): Promise<LayerAck>;
+  /** Rename the layer currently named `layer` to `name`. */
+  renameLayer(layer: string, name: string): Promise<LayerAck>;
+  /** Delete the layer currently named `layer`. */
+  deleteLayer(layer: string): Promise<LayerAck>;
 }
 
 /** Reads the layer table plus the session's temporary overrides. */
@@ -115,6 +131,12 @@ export const SET_LAYER_VISIBLE_COMMAND = 'cad_set_layer_visible';
 export const RESTORE_LAYERS_COMMAND = 'cad_restore_layers';
 /** Picks the layer new entities are drawn on. */
 export const SET_ACTIVE_LAYER_COMMAND = 'cad_set_active_layer';
+/** Creates a new layer-table entry. */
+export const CREATE_LAYER_COMMAND = 'cad_create_layer';
+/** Renames an existing layer-table entry. */
+export const RENAME_LAYER_COMMAND = 'cad_rename_layer';
+/** Deletes a layer-table entry. */
+export const DELETE_LAYER_COMMAND = 'cad_delete_layer';
 
 /**
  * The host's "no session yet" code. Not an error state: the panel says so in the
@@ -378,6 +400,44 @@ export function setActiveLayer(invoke: Invoke, name: unknown): Promise<LayerAck>
 }
 
 /**
+ * Create a new layer-table entry.
+ *
+ * An empty name is refused locally (`{kind:'invalid'}`, no IPC): the database
+ * would refuse it too, but sending a request whose only possible answer is
+ * `layer.name_empty` wastes the host's queue slot. Every other validation (the
+ * illegal character set, uniqueness, trimming) stays the host's, so its reason
+ * arrives unchanged.
+ */
+export function createLayer(invoke: Invoke, name: unknown): Promise<LayerAck> {
+  if (!validName(name)) return Promise.resolve({ kind: 'invalid' });
+  return sendAck(invoke, CREATE_LAYER_COMMAND, { name });
+}
+
+/**
+ * Rename the layer currently named `layer` to `name`.
+ *
+ * Both fields are required: `layer` addresses the row the panel has, `name` is
+ * the new name. The host resolves `layer` against the drawing's own table, so a
+ * stale row is an explicit `layer.unknown` refusal rather than a write to the
+ * wrong layer.
+ */
+export function renameLayer(invoke: Invoke, layer: unknown, name: unknown): Promise<LayerAck> {
+  if (!validName(layer) || !validName(name)) return Promise.resolve({ kind: 'invalid' });
+  return sendAck(invoke, RENAME_LAYER_COMMAND, { layer, name });
+}
+
+/**
+ * Delete the layer currently named `layer`.
+ *
+ * The host refuses the default layer `0` (`layer.default_undeletable`) and any
+ * layer that still contains objects (`layer.in_use`); nothing is deleted here.
+ */
+export function deleteLayer(invoke: Invoke, layer: unknown): Promise<LayerAck> {
+  if (!validName(layer)) return Promise.resolve({ kind: 'invalid' });
+  return sendAck(invoke, DELETE_LAYER_COMMAND, { layer });
+}
+
+/**
  * The palette's state before anything was read.
  *
  * `phase` is the panel's state word: `idle`/`loading` (first read, skeleton),
@@ -522,6 +582,19 @@ export function createLayersStore(invoke: Invoke, { wait = nextTick }: LayersSto
     return row ? row.visible === visible : false;
   }
 
+  /** Whether the current projection has a row named `name` (host names are trimmed). */
+  function hasLayer(name: string): boolean {
+    const needle = name.trim();
+    return state.layers.some(layer => layer.name === needle);
+  }
+
+  // The wire senders, under their own names so the store actions below
+  // (`createLayer` …) can never be mistaken for the module-level helpers.
+  const createLayerRequest = (name: string): Promise<LayerAck> => createLayer(invoke, name);
+  const renameLayerRequest = (layer: string, name: string): Promise<LayerAck> =>
+    renameLayer(invoke, layer, name);
+  const deleteLayerRequest = (layer: string): Promise<LayerAck> => deleteLayer(invoke, layer);
+
   async function mutate(send: () => Promise<LayerAck>, applied?: () => boolean): Promise<LayerAck> {
     if (busy) return { kind: 'busy' };
     busy = true;
@@ -575,6 +648,29 @@ export function createLayersStore(invoke: Invoke, { wait = nextTick }: LayersSto
       return mutate(
         () => setActiveLayer(invoke, name),
         () => state.active === name,
+      );
+    },
+    createLayer(name: string): Promise<LayerAck> {
+      if (!validName(name)) return Promise.resolve({ kind: 'invalid' });
+      return mutate(
+        () => createLayerRequest(name),
+        () => hasLayer(name),
+      );
+    },
+    renameLayer(layer: string, name: string): Promise<LayerAck> {
+      if (!validName(layer) || !validName(name)) return Promise.resolve({ kind: 'invalid' });
+      return mutate(
+        () => renameLayerRequest(layer, name),
+        // The new name resolves and the old one is gone: a half-applied rename is
+        // not a state the database can produce, so both halves are required.
+        () => hasLayer(name) && !hasLayer(layer),
+      );
+    },
+    deleteLayer(layer: string): Promise<LayerAck> {
+      if (!validName(layer)) return Promise.resolve({ kind: 'invalid' });
+      return mutate(
+        () => deleteLayerRequest(layer),
+        () => !hasLayer(layer),
       );
     },
   };

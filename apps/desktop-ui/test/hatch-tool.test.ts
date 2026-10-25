@@ -10,8 +10,11 @@
 // bar has (a numeric stepper), bounded to exactly the implemented codes.
 //
 // Nothing here may imply the unimplemented forms — internal-point boundary
-// selection, loose-line stitching, predefined pattern names (ANSI31), gradients
-// or associativity. Every user-visible string comes from the shared catalogs.
+// selection, loose-line stitching, custom pattern names/`.pat` files, gradients
+// or associativity. The **three** predefined patterns the host transcribed
+// (ANSI31, ANSI32, ANSI37) *are* implemented and are named by the catalogs; the
+// allow-list check at the bottom keeps every other pattern name out. Every
+// user-visible string comes from the shared catalogs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -58,6 +61,7 @@ const HATCH = {
   ready: 'tool.prompt.hatch.ready',
   params: [
     'hatchPatternType',
+    'hatchPattern',
     'hatchSpacing',
     'hatchAngle',
     'hatchDouble',
@@ -65,11 +69,12 @@ const HATCH = {
   ],
 };
 
-// The host projects these five values **only** while HATCH is active; the
-// defaults are the host's own (`0` solid, spacing `1`, angle `0`, double false,
-// style `0` Normal).
+// The host projects these six values **only** while HATCH is active; the
+// defaults are the host's own (`0` solid, pattern index `1` = ANSI31, spacing
+// `1`, angle `0`, double false, style `0` Normal).
 const HATCH_PARAMS = Object.freeze({
   hatchPatternType: 0,
+  hatchPattern: 1,
   hatchSpacing: 1,
   hatchAngle: 0,
   hatchDouble: false,
@@ -101,11 +106,16 @@ function drawPanel(tabId) {
 test('HATCH closes the draw command group on both draw panels, as a router command', async () => {
   for (const tabId of ['home', 'draw']) {
     const panel = drawPanel(tabId);
-    // HATCH still closes the draw group. MLEADER (ADR 0019 P7c) is appended
-    // after TEXT — its annotation neighbour — so it joins the tail without moving
-    // HATCH: `OFFSET` → `TEXT` → `MLEADER` → `HATCH` is the fixed order, and
+    // HATCH still closes the draw group. MTEXT (2026-10-26) and MLEADER
+    // (ADR 0019 P7c) are appended after TEXT — their annotation neighbours — so
+    // they join the tail without moving HATCH:
+    // `OFFSET` → `TEXT` → `MTEXT` → `MLEADER` → `HATCH` is the fixed order, and
     // HATCH stays last.
-    assert.deepEqual(panel.items.slice(-4).map(item => item.id), ['OFFSET', 'TEXT', 'MLEADER', 'HATCH'], tabId);
+    assert.deepEqual(
+      panel.items.slice(-5).map(item => item.id),
+      ['OFFSET', 'TEXT', 'MTEXT', 'MLEADER', 'HATCH'],
+      tabId,
+    );
     const item = panel.items.at(-1);
     assert.equal(item.command, 'HATCH');
     assert.equal(item.labelKey, HATCH.labelKey);
@@ -172,13 +182,14 @@ test('HATCH is a catalogued draw command whose enable state comes only from rout
   assert.equal(suggestion.labelKey, HATCH.labelKey);
 });
 
-test('a HATCH tool has exactly five parameter spec rows in the fixed host order', () => {
+test('a HATCH tool has exactly six parameter spec rows in the fixed host order', () => {
   assert.deepEqual(TOOL_PARAMETERS['draw.hatch'], {
     command: 'HATCH',
     keys: HATCH.params,
   });
   const expected = {
-    hatchPatternType: { kind: 'number', statusKey: 'hatchPatternType', step: 1, choices: [0, 1] },
+    hatchPatternType: { kind: 'number', statusKey: 'hatchPatternType', step: 1, choices: [0, 1, 2] },
+    hatchPattern: { kind: 'number', statusKey: 'hatchPattern', step: 1, choices: [1, 2, 3] },
     hatchSpacing: { kind: 'number', statusKey: 'hatchSpacing', step: 0.5 },
     hatchAngle: { kind: 'number', statusKey: 'hatchAngle', step: 15 },
     hatchDouble: { kind: 'flag', statusKey: 'hatchDouble' },
@@ -213,10 +224,11 @@ test('a HATCH tool has exactly five parameter spec rows in the fixed host order'
   assert.equal(views(hatchStatus(), () => false)[0].disabled, true);
 });
 
-test('the two closed sets stop at the implemented codes and never offer another', () => {
-  // Pattern type: 0 solid, 1 user-defined. From the default solid, `-` is
-  // disabled and `+` reaches user-defined; from user-defined, `+` is disabled
-  // (the raw target stays 2 but is never offered, so 2 cannot be sent).
+test('the three closed sets stop at the implemented codes and never offer another', () => {
+  // Pattern type: 0 solid, 1 user-defined, 2 predefined. From the default solid,
+  // `-` is disabled and `+` reaches user-defined; user-defined reaches the
+  // predefined code; from predefined `+` is disabled (the raw target stays 3 but
+  // is never offered, so 3 cannot be sent).
   const solid = viewOf(hatchStatus(), 'hatchPatternType');
   assert.equal(solid.value, 0);
   assert.equal(solid.canDecrement, false);
@@ -227,7 +239,26 @@ test('the two closed sets stop at the implemented codes and never offer another'
   assert.equal(userDefined.decrement, 0);
   assert.equal(userDefined.canDecrement, true);
   assert.equal(userDefined.increment, 2);
-  assert.equal(userDefined.canIncrement, false, 'the unimplemented type 2 must be unreachable');
+  assert.equal(userDefined.canIncrement, true, 'the predefined code 2 is reachable');
+  const predefined = viewOf(parameterStatus({ hatchPatternType: 2 }), 'hatchPatternType');
+  assert.equal(predefined.value, 2);
+  assert.equal(predefined.decrement, 1);
+  assert.equal(predefined.canDecrement, true);
+  assert.equal(predefined.increment, 3);
+  assert.equal(predefined.canIncrement, false, 'the pattern-type set ends at predefined (2)');
+  // Predefined pattern index: 1 ANSI31, 2 ANSI32, 3 ANSI37 — the host table
+  // length is the upper bound, so no offered value can be out of range.
+  const ansi31 = viewOf(hatchStatus(), 'hatchPattern');
+  assert.equal(ansi31.value, 1);
+  assert.equal(ansi31.canDecrement, false);
+  assert.equal(ansi31.increment, 2);
+  assert.equal(ansi31.canIncrement, true);
+  const ansi37 = viewOf(parameterStatus({ hatchPattern: 3 }), 'hatchPattern');
+  assert.equal(ansi37.value, 3);
+  assert.equal(ansi37.decrement, 2);
+  assert.equal(ansi37.canDecrement, true);
+  assert.equal(ansi37.increment, 4);
+  assert.equal(ansi37.canIncrement, false, 'there is no fourth predefined pattern');
   // Style: 0 Normal, 1 Outer, 2 Ignore — both ends of the set are bounded.
   const normal = viewOf(hatchStatus(), 'hatchStyle');
   assert.equal(normal.canDecrement, false);
@@ -238,9 +269,12 @@ test('the two closed sets stop at the implemented codes and never offer another'
   const ignore = viewOf(parameterStatus({ hatchStyle: 2 }), 'hatchStyle');
   assert.equal(ignore.canDecrement, true);
   assert.equal(ignore.canIncrement, false, 'the style set ends at Ignore');
-  // A projected code outside the closed set renders nothing (the host contract
-  // would be broken), rather than showing an unexplained 2/3 in a control.
-  assert.equal(viewOf(parameterStatus({ hatchPatternType: 2 }), 'hatchPatternType'), undefined);
+  // A projected code outside any closed set renders nothing (the host contract
+  // would be broken), rather than showing an unexplained code in a control.
+  assert.equal(viewOf(parameterStatus({ hatchPatternType: 3 }), 'hatchPatternType'), undefined);
+  assert.equal(viewOf(parameterStatus({ hatchPatternType: 2.5 }), 'hatchPatternType'), undefined);
+  assert.equal(viewOf(parameterStatus({ hatchPattern: 0 }), 'hatchPattern'), undefined);
+  assert.equal(viewOf(parameterStatus({ hatchPattern: 4 }), 'hatchPattern'), undefined);
   assert.equal(viewOf(parameterStatus({ hatchStyle: 3 }), 'hatchStyle'), undefined);
 });
 
@@ -281,13 +315,14 @@ test('spacing, angle and double are their own labelled controls with real bounds
   const on = viewOf(parameterStatus({ hatchDouble: true }), 'hatchDouble');
   assert.equal(on.value, true);
   assert.equal(on.next, false);
-  // HATCH projects these five and nothing else: no other parameter belongs to it.
+  // HATCH projects these six and nothing else: no other parameter belongs to it.
   assert.deepEqual(views(hatchStatus()).map(view => view.key), HATCH.params);
 });
 
 test('HATCH parameter writes use the one channel and refuse codes outside the closed sets', async () => {
   for (const [key, accepted, refused] of [
-    ['hatchPatternType', [0, 1], [-1, 2, 3, 0.5, '1', null]],
+    ['hatchPatternType', [0, 1, 2], [-1, 3, 0.5, '1', null]],
+    ['hatchPattern', [1, 2, 3], [0, -1, 4, 1.5, '1', null]],
     ['hatchStyle', [0, 1, 2], [-1, 3, 4, 1.5, '0', null]],
     ['hatchSpacing', [0.5, 1, 2.5, 1e9], [0, -1, NaN, Infinity, '1', null]],
     ['hatchAngle', [0, 45, -270, 1e6], [NaN, Infinity, -Infinity, '45', null]],
@@ -401,13 +436,29 @@ test('the HATCH copy exists in both locales and states the honest boundary', () 
     assert.doesNotMatch(locale[HATCH.ready], /dimension|标注/i);
   }
 
-  // Pattern type names its two codes and says predefined names are not supported.
-  assert.match(en['status.tool_parameter.hatch_pattern_type.hint'], /0/);
-  assert.match(en['status.tool_parameter.hatch_pattern_type.hint'], /1/);
-  assert.match(en['status.tool_parameter.hatch_pattern_type.hint'], /not supported/i);
-  assert.match(zh['status.tool_parameter.hatch_pattern_type.hint'], /0/);
-  assert.match(zh['status.tool_parameter.hatch_pattern_type.hint'], /1/);
-  assert.match(zh['status.tool_parameter.hatch_pattern_type.hint'], /尚未支持/);
+  // Pattern type names its three codes and no longer claims predefined patterns
+  // are missing.
+  for (const code of ['0', '1', '2']) {
+    assert.match(en['status.tool_parameter.hatch_pattern_type.hint'], new RegExp(`\\b${code}\\b`));
+    assert.match(zh['status.tool_parameter.hatch_pattern_type.hint'], new RegExp(code));
+  }
+  for (const locale of [zh, en]) {
+    assert.doesNotMatch(
+      locale['status.tool_parameter.hatch_pattern_type.hint'],
+      /not supported|unsupported|not implemented|不支持|尚未支持/i,
+      'predefined patterns are implemented now',
+    );
+  }
+  // The predefined index row names all three implemented patterns in both
+  // locales, and the pattern-type hint names the implemented set too.
+  const IMPLEMENTED_PATTERNS = ['ANSI31', 'ANSI32', 'ANSI37'];
+  for (const locale of [zh, en]) {
+    for (const key of ['status.tool_parameter.hatch_pattern.hint', 'status.tool_parameter.hatch_pattern_type.hint']) {
+      for (const name of IMPLEMENTED_PATTERNS) {
+        assert.ok(locale[key].includes(name), `${key} must name ${name}`);
+      }
+    }
+  }
   // Style names all three codes and their human names.
   for (const code of ['0', '1', '2']) {
     assert.match(en['status.tool_parameter.hatch_style.hint'], new RegExp(code));
@@ -419,22 +470,40 @@ test('the HATCH copy exists in both locales and states the honest boundary', () 
   for (const name of [/普通/, /外部/, /忽略/]) {
     assert.match(zh['status.tool_parameter.hatch_style.hint'], name);
   }
-  // Spacing is a length above zero; the angle is in degrees; double is the
-  // perpendicular second family.
+  // Spacing is a length above zero (and the predefined pattern scale); the
+  // angle is in degrees; double is the perpendicular second family.
   assert.match(en['status.tool_parameter.hatch_spacing.hint'], /greater than 0/);
   assert.match(zh['status.tool_parameter.hatch_spacing.hint'], /大于 0/);
+  assert.match(en['status.tool_parameter.hatch_spacing.hint'], /HPSCALE/i);
+  assert.match(zh['status.tool_parameter.hatch_spacing.hint'], /HPSCALE/);
   assert.match(en['status.tool_parameter.hatch_angle.hint'], /degrees/i);
   assert.match(zh['status.tool_parameter.hatch_angle.hint'], /度/);
   assert.match(en['status.tool_parameter.hatch_double.hint'], /perpendicular/i);
   assert.match(zh['status.tool_parameter.hatch_double.hint'], /垂直/);
 
-  // No HATCH string may imply the unimplemented forms. "Predefined pattern names
-  // are not supported" is allowed (it is a refusal); an actual pattern name,
-  // gradient or associativity claim is not.
+  // Positive allow-list: the implemented predefined set is exactly
+  // {ANSI31, ANSI32, ANSI37}. Any other pattern name is unimplemented and must
+  // not appear; gradient, associativity and `.pat` loading must not be claimed.
   for (const key of keys) {
     for (const locale of [zh, en]) {
-      assert.doesNotMatch(locale[key], /ANSI31|gradient|associat/i, `${key} in ${locale === zh ? 'zh-CN' : 'en'}`);
-      assert.doesNotMatch(locale[key], /ANSI31|渐变|关联/, `${key} in ${locale === zh ? 'zh-CN' : 'en'}`);
+      const text = locale[key];
+      const named = text.match(/ANSI\d+/g) ?? [];
+      for (const name of named) {
+        assert.ok(
+          IMPLEMENTED_PATTERNS.includes(name),
+          `${key} in ${locale === zh ? 'zh-CN' : 'en'} names unimplemented pattern ${name}`,
+        );
+      }
+      assert.doesNotMatch(text, /gradient|渐变/i, `${key} must not claim gradients`);
+      assert.doesNotMatch(text, /associat|关联/i, `${key} must not claim associativity`);
+      // A `.pat` mention is only allowed as a refusal, never as a load claim.
+      for (const mention of text.match(/[^.]*\.pat[^.]*/gi) ?? []) {
+        assert.match(
+          mention,
+          /not supported|unsupported|not implemented|不支持|尚未支持/i,
+          `${key} must not claim .pat loading: ${mention}`,
+        );
+      }
     }
   }
 });

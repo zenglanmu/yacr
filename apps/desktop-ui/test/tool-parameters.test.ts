@@ -71,7 +71,7 @@ test('the per-tool map and the spec table stay consistent', () => {
   assert.deepEqual(TOOL_PARAMETERS['draw.polygon'], { command: 'POLYGON', keys: ['polygonSides'] });
   assert.deepEqual(TOOL_PARAMETERS['draw.hatch'], {
     command: 'HATCH',
-    keys: ['hatchPatternType', 'hatchSpacing', 'hatchAngle', 'hatchDouble', 'hatchStyle'],
+    keys: ['hatchPatternType', 'hatchPattern', 'hatchSpacing', 'hatchAngle', 'hatchDouble', 'hatchStyle'],
   });
   // Every key a tool maps to has a spec, and every spec is reachable through the
   // map — so a later phase only adds a row (the specs already exist).
@@ -87,7 +87,7 @@ test('the per-tool map and the spec table stay consistent', () => {
   assert.deepEqual(Object.keys(TOOL_PARAMETER_SPECS).sort(), [
     'alignScale', 'arrayColumnSpacing', 'arrayColumns', 'arrayFillAngle', 'arrayItems',
     'arrayRotateItems', 'arrayRowSpacing', 'arrayRows', 'chamferDistanceA',
-    'chamferDistanceB', 'filletRadius', 'hatchAngle', 'hatchDouble',
+    'chamferDistanceB', 'filletRadius', 'hatchAngle', 'hatchDouble', 'hatchPattern',
     'hatchPatternType', 'hatchSpacing', 'hatchStyle', 'polygonSides',
   ]);
   assert.equal(TOOL_PARAMETER_SPECS.alignScale.kind, 'flag');

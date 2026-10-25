@@ -17,6 +17,7 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("POINT", "draw.point"),
     ("SPLINE", "draw.spline"),
     ("TEXT", "draw.text"),
+    ("MTEXT", "draw.mtext"),
     ("MLEADER", "draw.mleader"),
     ("MOVE", "draw.move"),
     ("TRIM", "draw.trim"),

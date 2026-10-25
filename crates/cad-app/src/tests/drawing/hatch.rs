@@ -15,7 +15,7 @@ use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importe
 // ---------------------------------------------------------------------------
 
 /// A drawing with layer 0 and the given model-space entities.
-fn hatch_app(entities: Vec<(u128, SemanticGeometry)>) -> (Application, SessionState) {
+pub(super) fn hatch_app(entities: Vec<(u128, SemanticGeometry)>) -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -45,7 +45,7 @@ fn hatch_app(entities: Vec<(u128, SemanticGeometry)>) -> (Application, SessionSt
     (app, SessionState::new(DocumentId(1), AppMode::Work))
 }
 
-fn circle(id: u128, x: f64, y: f64, z: f64, radius: f64) -> (u128, SemanticGeometry) {
+pub(super) fn circle(id: u128, x: f64, y: f64, z: f64, radius: f64) -> (u128, SemanticGeometry) {
     (
         id,
         SemanticGeometry::Circle {
@@ -60,7 +60,7 @@ fn circle(id: u128, x: f64, y: f64, z: f64, radius: f64) -> (u128, SemanticGeome
     )
 }
 
-fn square(id: u128, min: f64, max: f64, z: f64) -> (u128, SemanticGeometry) {
+pub(super) fn square(id: u128, min: f64, max: f64, z: f64) -> (u128, SemanticGeometry) {
     (
         id,
         SemanticGeometry::Polyline {
@@ -82,7 +82,7 @@ fn hatch_payload(ids: &[u128]) -> CommandPayload {
     }
 }
 
-fn run(
+pub(super) fn run(
     app: &mut Application,
     session: &mut SessionState,
     ids: &[u128],
@@ -90,13 +90,13 @@ fn run(
     execute(app, session, CommandId::Hatch, hatch_payload(ids))
 }
 
-fn set_number(session: &mut SessionState, parameter: ToolParameter, value: f64) {
+pub(super) fn set_number(session: &mut SessionState, parameter: ToolParameter, value: f64) {
     session
         .set_tool_parameter(parameter, ToolValue::Number(value))
         .unwrap_or_else(|error| panic!("{parameter:?} = {value} refused: {error}"));
 }
 
-fn set_flag(session: &mut SessionState, parameter: ToolParameter, value: bool) {
+pub(super) fn set_flag(session: &mut SessionState, parameter: ToolParameter, value: bool) {
     session
         .set_tool_parameter(parameter, ToolValue::Flag(value))
         .unwrap_or_else(|error| panic!("{parameter:?} = {value} refused: {error}"));
@@ -118,7 +118,7 @@ fn set_style(session: &mut SessionState, style: f64) {
     set_number(session, ToolParameter::HatchStyle, style);
 }
 
-fn the_hatch(app: &Application) -> &HatchGeometry {
+pub(super) fn the_hatch(app: &Application) -> &HatchGeometry {
     app.workspace.documents[&DocumentId(1)]
         .drawing
         .model_space()
@@ -132,7 +132,7 @@ fn the_hatch(app: &Application) -> &HatchGeometry {
 
 /// The filled area of the derived display: the summed triangle area of the fill
 /// mesh, or `0` when the display has no mesh (a pattern fill).
-fn filled_area(hatch: &HatchGeometry) -> f64 {
+pub(super) fn filled_area(hatch: &HatchGeometry) -> f64 {
     let mut area = 0.0;
     for geometry in hatch.display() {
         if let SemanticGeometry::Mesh(mesh) = geometry {
@@ -164,7 +164,7 @@ fn filled_area(hatch: &HatchGeometry) -> f64 {
 
 /// The pattern polylines of the derived display (open polylines; the boundary
 /// loops are closed) and their total length.
-fn pattern_lines(hatch: &HatchGeometry) -> (usize, f64) {
+pub(super) fn pattern_lines(hatch: &HatchGeometry) -> (usize, f64) {
     let mut count = 0;
     let mut total = 0.0;
     for geometry in hatch.display() {
@@ -201,7 +201,12 @@ fn entity_count(app: &Application) -> usize {
 
 /// Run HATCH and assert an explicit refusal that names `needle`, changed nothing
 /// and opened no transaction.
-fn assert_refused(app: &mut Application, session: &mut SessionState, ids: &[u128], needle: &str) {
+pub(super) fn assert_refused(
+    app: &mut Application,
+    session: &mut SessionState,
+    ids: &[u128],
+    needle: &str,
+) {
     let before = revision(app);
     let depth = undo_depth(app);
     let error = run(app, session, ids).expect_err("the command must refuse");

@@ -57,6 +57,7 @@ command_selector_contract! {
     CreatePoint => "POINT",
     CreateSpline => "SPLINE",
     CreateText => "TEXT",
+    CreateMText => "MTEXT",
     MLeader => "MLEADER",
     TextEdit => "TEXTEDIT",
     DimLinear => "DIMLINEAR",
@@ -89,8 +90,12 @@ command_selector_contract! {
     PasteFromClipboard => "PASTECLIP",
     OffsetEntity => "OFFSET",
     SetActiveLayer => "SETACTIVELAYER",
+    CreateLayer => "CREATELAYER",
+    RenameLayer => "RENAMELAYER",
+    DeleteLayer => "DELETELAYER",
     SetEntityProperty => "SETENTITYPROPERTY",
     MatchProp => "MATCHPROP",
+    GripStretch => "GRIPSTRETCH",
     ToggleHoverPreview => "HOVERPREVIEW",
     ToggleGrid => "GRID",
     ToggleSnapGrid => "SNAP",
@@ -111,7 +116,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 79,
+        EXPECTED_COMMAND_COUNT, 84,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -162,6 +167,53 @@ fn payload_requiring_command_is_refused_explicitly_not_silently() {
     }));
     let error = session.command("STANDARDVIEW").unwrap_err();
     assert!(!error.is_empty(), "an explicit refusal, not empty success");
+}
+
+#[test]
+fn mtext_selector_is_admitted_and_starts_the_two_corner_tool() {
+    // MTEXT is a real selector **and** a real interactive tool (2026-10-26): the
+    // bare selector starts the two-corner capture — first corner (insertion
+    // point), opposite corner (wrap width), then the terminal text step — exactly
+    // like TEXT's bare selector starts its one-point tool. The payload path
+    // (`CommandPayload::MText`) stays available for CLI/host IPC.
+    assert_eq!(normalize_command("MTEXT"), Some(CommandId::CreateMText));
+    assert_eq!(normalize_command(" mtext "), Some(CommandId::CreateMText));
+    assert_eq!(canonical_command_name("MTEXT"), Some("MTEXT"));
+    assert!(admissible_names().contains(&"MTEXT"));
+    assert!(
+        CommandId::CreateMText.requires_work_mode(),
+        "MTEXT writes the database, so Viewer must refuse it"
+    );
+    // No `MT` abbreviation is admitted.
+    assert_eq!(normalize_command("MT"), None);
+
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let (document, before) = {
+        let c = session.core.controller.borrow();
+        (c.document_id, c.drawing().unwrap())
+    };
+    session.command("MTEXT").expect("MTEXT starts the tool");
+    let tool = session
+        .snapshot(None, None, 0)
+        .tool
+        .expect("the bare MTEXT selector starts a tool");
+    assert_eq!(tool.key, "draw.mtext");
+    assert_eq!(tool.points, 0);
+    assert!(!tool.ready, "no corner captured yet");
+    assert!(
+        !tool.awaiting_text,
+        "the text prompt opens only once both corners are captured"
+    );
+    // Starting a tool writes nothing and opens no undo entry.
+    let after = session.core.controller.borrow().drawing().unwrap();
+    assert_eq!(after.revision(), before.revision());
+    assert_eq!(after.entity_count(), before.entity_count());
+    {
+        let c = session.core.controller.borrow();
+        assert!(!c.application.can_undo(&document));
+    }
 }
 
 #[test]
@@ -345,6 +397,80 @@ fn matchprop_is_admitted_with_its_autocad_alias() {
     assert_eq!(zoom_step_factor("MATCHPROP"), None);
     // Work-only like the other edits: Viewer refuses it at the command layer.
     assert!(CommandId::MatchProp.requires_work_mode());
+}
+
+#[test]
+fn gripstretch_is_admitted_but_its_bare_form_is_refused_without_a_fabricated_drag() {
+    // GRIPSTRETCH is the **payload path of a pointer gesture**: `GripStretch
+    // { id, to }` carries the handle resolved at pick time and the world point the
+    // drag resolved to. No gesture exists yet (no grip markers, no host arming,
+    // no pointer routing), so nothing produces that payload — and the typed
+    // command line cannot either: the bare selector carries no handle.
+    assert_eq!(
+        normalize_command("GRIPSTRETCH"),
+        Some(CommandId::GripStretch)
+    );
+    assert_eq!(canonical_command_name(" gripstretch "), Some("GRIPSTRETCH"));
+    assert!(admissible_names().contains(&"GRIPSTRETCH"));
+    // Neither a measurement selector nor a zoom step can shadow it, and it is
+    // Work-only because it writes the database and records history.
+    assert_eq!(measurement_selector_kind("GRIPSTRETCH"), None);
+    assert_eq!(zoom_step_factor("GRIPSTRETCH"), None);
+    assert!(CommandId::GripStretch.requires_work_mode());
+
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let (document, before) = {
+        let c = session.core.controller.borrow();
+        (c.document_id, c.drawing().unwrap())
+    };
+    // The bare selector is a real, advertised name, and the application refuses it
+    // **explicitly**: no drag is fabricated from a missing payload.
+    let error = session.command("GRIPSTRETCH").unwrap_err();
+    assert!(!error.is_empty(), "an explicit refusal, not empty success");
+    assert!(error.contains("GRIPSTRETCH"), "{error}");
+    // It must not start a draw tool either (a `BeginDraw` route would fabricate
+    // the missing handle through a capture no gesture asked for).
+    assert_eq!(
+        session.snapshot(None, None, 0).tool,
+        None,
+        "GRIPSTRETCH must not start a draw tool"
+    );
+    let after = session.core.controller.borrow().drawing().unwrap();
+    assert_eq!(after.revision(), before.revision());
+    assert_eq!(after.entity_count(), before.entity_count());
+    {
+        let c = session.core.controller.borrow();
+        assert!(!c.application.can_undo(&document));
+        assert!(!c.application.can_redo(&document));
+    }
+}
+
+#[test]
+fn the_layer_table_selectors_and_the_newlayer_synonym_are_admitted() {
+    // The three structural layer commands are canonical selectors with a real
+    // `CommandId`, and all three are Work-only like every other database write.
+    for (selector, id) in [
+        ("CREATELAYER", CommandId::CreateLayer),
+        ("RENAMELAYER", CommandId::RenameLayer),
+        ("DELETELAYER", CommandId::DeleteLayer),
+    ] {
+        assert_eq!(normalize_command(selector), Some(id), "{selector}");
+        assert_eq!(canonical_command_name(selector), Some(selector));
+        assert!(admissible_names().contains(&selector), "{selector}");
+        assert!(id.requires_work_mode(), "{id:?} must be Work-only");
+    }
+    // `NEWLAYER` is the project's word synonym for create (there is no AutoCAD
+    // command of that name); it only normalizes onto the canonical selector.
+    assert_eq!(normalize_command("NEWLAYER"), Some(CommandId::CreateLayer));
+    assert_eq!(canonical_command_name(" newlayer "), Some("CREATELAYER"));
+    // A bare structural selector carries no name, so the application layer
+    // refuses it explicitly (the panel/IPC path supplies the payload).
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    assert!(session.command("CREATELAYER").is_err());
 }
 
 #[test]

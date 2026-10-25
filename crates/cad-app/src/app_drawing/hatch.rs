@@ -40,12 +40,23 @@
 //! for a `76=0`/`78=0` hatch, so creation and import share one recipe; the
 //! generated line geometry remains **our implementation** (ADR U-1), not a
 //! documented AutoCAD formula.
+//!
+//! Pattern type code `2` selects one of the **predefined** patterns from the
+//! small hand-transcribed table in `cad_domain::hatch::patterns` (`ANSI31`,
+//! `ANSI32`, `ANSI37`) by its **1-based** index (`hatchPattern`). Spacing is the
+//! pattern scale (`HPSCALE`), angle the hatch-level rotation and the double flag
+//! the perpendicular second family; the definition rows come from the table, so
+//! these are **our transcribed values, not vendor-verified**, and `.pat` file
+//! loading is NOT IMPLEMENTED. An index outside the table is refused **by name**
+//! — never clamped onto a neighbouring pattern.
 
 use super::*;
 
+use cad_domain::hatch::{predefined_pattern_by_index, predefined_patterns, PredefinedPattern};
+
 use crate::draw_tool::{
-    ToolParameter, HATCH_PATTERN_TYPE_SOLID, HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE,
-    HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
+    ToolParameter, HATCH_PATTERN_TYPE_PREDEFINED, HATCH_PATTERN_TYPE_SOLID,
+    HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
 };
 
 /// Number of chords a full selected ellipse is sampled into.
@@ -126,8 +137,12 @@ impl BoundaryShape {
 /// The HATCH parameters read from the session typed channel.
 struct HatchParameters {
     pattern_type: f64,
+    /// The **1-based** index into the implemented predefined pattern table
+    /// (`hatchPattern`); only read for [`HATCH_PATTERN_TYPE_PREDEFINED`].
+    pattern_index: f64,
     spacing: f64,
-    /// Degrees on the channel (the AutoCAD prompt unit); the domain stores radians.
+    /// Degrees on the channel (the AutoCAD prompt unit); the domain stores
+    /// radians.
     angle_degrees: f64,
     double: bool,
     style: f64,
@@ -153,8 +168,10 @@ impl Application {
     /// * every `HatchGeometry::new` creation-path rejection (self-intersecting,
     ///   tangent/shared vertex, duplicate, partially overlapping, unclosed,
     ///   degenerate, non-finite);
-    /// * a missing active layer, an out-of-range typed parameter, and Viewer mode
-    ///   (the command layer's mode check).
+    /// * a missing active layer, an out-of-range typed parameter — including a
+    ///   `hatchPattern` index that does not resolve in the implemented predefined
+    ///   table (refused by name, never clamped) — and Viewer mode (the command
+    ///   layer's mode check).
     pub(crate) fn create_hatch(
         &mut self,
         session: &SessionState,
@@ -605,6 +622,12 @@ fn boundary_loop(shape: &BoundaryShape, plane: &HatchPlane) -> CadResult<HatchLo
 }
 
 /// Read and defensively re-validate the HATCH typed parameters.
+///
+/// The predefined pattern index is deliberately **not** re-validated here: it is
+/// resolved in [`HatchParameters::fill`], which refuses an index outside the
+/// implemented table with a message that names the index and the table (the
+/// generic range refusal would hide which pattern set the command actually
+/// implements).
 fn hatch_parameters(session: &SessionState) -> CadResult<HatchParameters> {
     let parameters = [
         ToolParameter::HatchPatternType,
@@ -631,6 +654,7 @@ fn hatch_parameters(session: &SessionState) -> CadResult<HatchParameters> {
     };
     Ok(HatchParameters {
         pattern_type: number(ToolParameter::HatchPatternType),
+        pattern_index: number(ToolParameter::HatchPattern),
         spacing: number(ToolParameter::HatchSpacing),
         angle_degrees: number(ToolParameter::HatchAngle),
         double: session
@@ -642,22 +666,23 @@ fn hatch_parameters(session: &SessionState) -> CadResult<HatchParameters> {
 }
 
 impl HatchParameters {
-    /// The fill definition and the DXF pattern type it must record.
+    /// The predefined pattern the `hatchPattern` index names, or `None` when the
+    /// index is not an implemented table entry.
     ///
-    /// A solid fill records `Predefined` (`76=1`), matching the committed SOLID
-    /// fixtures (a solid pattern has no user-defined definition rows). A
-    /// user-defined fill records `UserDefined` (`76=0`) and carries the
-    /// synthesized definition rows.
-    fn fill(&self) -> CadResult<(HatchFill, HatchPatternType)> {
-        if self.pattern_type == HATCH_PATTERN_TYPE_SOLID {
-            return Ok((HatchFill::Solid, HatchPatternType::Predefined));
+    /// The channel already bounds the index to `1..=table.len()`, but the command
+    /// re-resolves it (defence in depth) and refuses by name in [`Self::fill`];
+    /// nothing is clamped onto a neighbouring pattern.
+    fn predefined(&self) -> Option<&'static PredefinedPattern> {
+        let index = self.pattern_index;
+        if !index.is_finite() || index.fract() != 0.0 || index < 1.0 {
+            return None;
         }
-        if self.pattern_type != HATCH_PATTERN_TYPE_USER_DEFINED {
-            return Err(CadError::InvalidInput(format!(
-                "HATCH pattern type must be {} (solid) or {} (user-defined), got {}",
-                HATCH_PATTERN_TYPE_SOLID, HATCH_PATTERN_TYPE_USER_DEFINED, self.pattern_type
-            )));
-        }
+        predefined_pattern_by_index(index as usize)
+    }
+
+    /// The pattern scale (`HPSCALE`) and angle, validated once for the two
+    /// pattern kinds that use them (user-defined and predefined).
+    fn scale_and_angle(&self) -> CadResult<()> {
         if !self.spacing.is_finite() || self.spacing <= 0.0 {
             return Err(CadError::InvalidInput(format!(
                 "HATCH spacing must be finite and > 0, got {}",
@@ -670,6 +695,51 @@ impl HatchParameters {
                 self.angle_degrees
             )));
         }
+        Ok(())
+    }
+
+    /// The fill definition and the DXF pattern type it must record.
+    ///
+    /// A solid fill records `Predefined` (`76=1`), matching the committed SOLID
+    /// fixtures (a solid pattern has no user-defined definition rows). A
+    /// user-defined fill records `UserDefined` (`76=0`) and carries the
+    /// synthesized definition rows. A predefined fill (pattern type code `2`)
+    /// records `Predefined` (`76=1`) and carries the rows of the hand-transcribed
+    /// table entry the index names.
+    fn fill(&self) -> CadResult<(HatchFill, HatchPatternType)> {
+        if self.pattern_type == HATCH_PATTERN_TYPE_SOLID {
+            return Ok((HatchFill::Solid, HatchPatternType::Predefined));
+        }
+        if self.pattern_type == HATCH_PATTERN_TYPE_PREDEFINED {
+            self.scale_and_angle()?;
+            let Some(predefined) = self.predefined() else {
+                let names = predefined_patterns()
+                    .iter()
+                    .map(|pattern| pattern.name)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(CadError::InvalidInput(format!(
+                    "HATCH pattern index {} is not in the implemented predefined set (1..={}: \
+                     {names})",
+                    self.pattern_index,
+                    predefined_patterns().len()
+                )));
+            };
+            let pattern =
+                predefined.to_hatch_pattern(self.spacing, self.angle_degrees, self.double);
+            return Ok((HatchFill::Pattern(pattern), HatchPatternType::Predefined));
+        }
+        if self.pattern_type != HATCH_PATTERN_TYPE_USER_DEFINED {
+            return Err(CadError::InvalidInput(format!(
+                "HATCH pattern type must be {} (solid), {} (user-defined) or {} (predefined), got \
+                 {}",
+                HATCH_PATTERN_TYPE_SOLID,
+                HATCH_PATTERN_TYPE_USER_DEFINED,
+                HATCH_PATTERN_TYPE_PREDEFINED,
+                self.pattern_type
+            )));
+        }
+        self.scale_and_angle()?;
         let pattern = HatchPattern {
             name: USER_DEFINED_PATTERN_NAME.to_string(),
             angle: self.angle_degrees.to_radians(),
@@ -735,6 +805,18 @@ fn hatch_diagnostic(
 ) -> Diagnostic {
     let fill = if parameters.pattern_type == HATCH_PATTERN_TYPE_SOLID {
         "solid".to_string()
+    } else if parameters.pattern_type == HATCH_PATTERN_TYPE_PREDEFINED {
+        // The command already resolved the index successfully in `fill()`; the
+        // name is repeated here so the echo names the pattern instead of
+        // claiming a user-defined one.
+        let name = parameters
+            .predefined()
+            .map(|pattern| pattern.name)
+            .unwrap_or("<unresolved>");
+        format!(
+            "predefined pattern {name} (scale {}, angle {} deg, double {})",
+            parameters.spacing, parameters.angle_degrees, parameters.double
+        )
     } else {
         format!(
             "user-defined pattern (spacing {}, angle {} deg, double {})",

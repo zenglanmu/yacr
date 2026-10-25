@@ -54,7 +54,28 @@ pub(super) fn geometry_kind(geometry: &SemanticGeometry) -> &'static str {
 /// newlines to `\P` only for that source class and refuse them for `AcDbText`
 /// (ADR-0021 D4).
 pub(super) fn is_multiline_text_source(entity: &DbEntity) -> bool {
-    entity.object.type_key == "AcDbMText"
+    entity.object.type_key == text_policy::MTEXT_TYPE_KEY
+}
+
+/// The text style `TEXT`/`MTEXT` creation resolves by name before falling back to
+/// the documented `StyleId(0)` entry (ADR 0019 F.1).
+pub(super) const TEXT_STYLE_NAME: &str = "Standard";
+
+/// Resolve the `(style, font)` pair a **created** text entity stores.
+///
+/// The single style path for both text-creation commands: `Standard` by name,
+/// else the documented `StyleId(0)` fallback, else no resolved row — in which
+/// case the style id is `0` and the font key is `None` (the import path's own
+/// convention). Nothing is invented: a drawing without the style stores what the
+/// fallback actually is.
+pub(super) fn resolve_created_text_style(drawing: &DrawingDatabase) -> (StyleId, Option<String>) {
+    let resolved = drawing
+        .style_by_name(TEXT_STYLE_NAME)
+        .or_else(|| drawing.style(StyleId(0)));
+    (
+        resolved.map(|style| style.id).unwrap_or(StyleId(0)),
+        resolved.and_then(|style| style.resource_keys.first().cloned()),
+    )
 }
 
 pub(super) fn distance(a: Point3, b: Point3) -> f64 {

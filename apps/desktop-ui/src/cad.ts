@@ -1,4 +1,5 @@
-import { TEXT_PICK_PROMPT_KEY, TEXT_STEP_PROMPT_KEY, toolAwaitingText } from './text.ts';
+import { MTEXT_STEP_PROMPT_KEY, MTEXT_STEP_PROMPT_KEYS } from './text.ts';
+import { TEXT_PICK_PROMPT_KEY, TEXT_STEP_PROMPT_KEY, textStepPromptKey, toolAwaitingText } from './text.ts';
 import { OPEN_ENDED_PROMPTS } from './tool-open-ended.ts';
 import type { CadStatus, CadTool, Invoke } from './cad-status.ts';
 
@@ -380,24 +381,37 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     labelKey: 'status.tool_parameter.array_rotate_items',
     hintKey: 'status.tool_parameter.array_rotate_items.hint',
   },
-  // HATCH (ADR 0018 decision D, P6b). The five rows mirror
-  // `cad_app::draw_tool::parameter`: the two closed sets use `choices` so the
+  // HATCH (ADR 0018 decision D, P6b). The six rows mirror
+  // `cad_app::draw_tool::parameter`: the three closed sets use `choices` so the
   // stepper can only reach the implemented codes, spacing must be finite and
-  // strictly positive, the angle is any finite number of degrees (no implicit
-  // wrap — the host accepts it as typed) and `double` is a flag. Predefined
-  // pattern names, gradients and associativity have no parameter here because
-  // they are not implemented; nothing in this table may imply otherwise.
+  // strictly positive (it doubles as the pattern scale / `HPSCALE`), the angle
+  // is any finite number of degrees (no implicit wrap — the host accepts it as
+  // typed) and `double` is a flag. Pattern type `2` selects one of the
+  // **three** predefined patterns the host transcribed (`ANSI31`, `ANSI32`,
+  // `ANSI37`) by its 1-based index; custom pattern names, `.pat` files,
+  // gradients and associativity have no parameter here because they are not
+  // implemented.
   hatchPatternType: {
     kind: 'number', statusKey: 'hatchPatternType', step: 1,
-    ...closedSet(0, 1),
+    ...closedSet(0, 1, 2),
     labelKey: 'status.tool_parameter.hatch_pattern_type',
     hintKey: 'status.tool_parameter.hatch_pattern_type.hint',
+  },
+  hatchPattern: {
+    // The 1-based index of the implemented predefined pattern table. The upper
+    // bound is the host table length (ANSI31, ANSI32, ANSI37), so an offered
+    // value can never name a pattern the host does not implement.
+    kind: 'number', statusKey: 'hatchPattern', step: 1,
+    ...closedSet(1, 2, 3),
+    labelKey: 'status.tool_parameter.hatch_pattern',
+    hintKey: 'status.tool_parameter.hatch_pattern.hint',
   },
   hatchSpacing: {
     // A real length: the 1-unit step every other length uses would make every
     // spacing below the default 1 unreachable, so this one steps by 0.5. The
-    // host accepts any finite spacing > 0; the stepper cannot enter arbitrary
-    // decimals (there is no free-entry field).
+    // host accepts any finite spacing > 0; it is also the predefined pattern
+    // scale (`HPSCALE`). The stepper cannot enter arbitrary decimals (there is
+    // no free-entry field).
     kind: 'number', statusKey: 'hatchSpacing', step: 0.5,
     offered: finiteAbove(0),
     labelKey: 'status.tool_parameter.hatch_spacing',
@@ -436,7 +450,7 @@ export type ToolParameterMap = Readonly<Record<string, ToolParameterOwner>>;
  * command whose admission gates the control (`shell.canCommand`).
  *
  * Only `draw.polygon` and `draw.hatch` are reachable today: POLYGON projects its
- * side count and HATCH its five parameters while the tool is active (HATCH
+ * side count and HATCH its six parameters while the tool is active (HATCH
  * captures no points). The other tools are not implemented and the host projects
  * no value for their parameters, so nothing renders for them (a control appears
  * only when the tool is active **and** its value is projected). A later phase
@@ -449,7 +463,7 @@ export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
   'draw.polygon': { command: 'POLYGON', keys: ['polygonSides'] },
   'draw.hatch': {
     command: 'HATCH',
-    keys: ['hatchPatternType', 'hatchSpacing', 'hatchAngle', 'hatchDouble', 'hatchStyle'],
+    keys: ['hatchPatternType', 'hatchPattern', 'hatchSpacing', 'hatchAngle', 'hatchDouble', 'hatchStyle'],
   },
   'draw.fillet': { command: 'FILLET', keys: ['filletRadius'] },
   'draw.chamfer': { command: 'CHAMFER', keys: ['chamferDistanceA', 'chamferDistanceB'] },
@@ -794,6 +808,10 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
   'draw.text': [
     TEXT_PICK_PROMPT_KEY,
   ],
+  // MTEXT (2026-10-26) captures two named corners: the first is the insertion
+  // point, the opposite one only defines the wrap width. Its terminal text step
+  // is named from `awaiting_text` by [`textStepPromptKey`], never by a count.
+  'draw.mtext': MTEXT_STEP_PROMPT_KEYS,
   // MLEADER (ADR 0019 decision F.2) captures exactly two points — the arrowhead
   // position, then the landing point — and then the **same** terminal text step
   // TEXT uses. Only those two picks belong here: the text step is named from the
@@ -833,6 +851,10 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // the point is counted but the flag has not arrived yet never opens the text
   // field — it only names what comes next.
   'draw.text': TEXT_STEP_PROMPT_KEY,
+  // MTEXT's complement is its two corners plus its text, so it has the same
+  // "the next step is the text" override, with MTEXT's own multiline wording. The
+  // input mode still comes from the host's `awaiting_text` alone.
+  'draw.mtext': MTEXT_STEP_PROMPT_KEY,
   // MLEADER's complement is its two points plus its text. Once the landing pick
   // is captured the capture is complete but the host may not have raised
   // `awaiting_text` yet, and the shared dimension copy ("Dimension defined") would
@@ -911,8 +933,9 @@ export function toolStepPromptKey(tool: CadTool | null | undefined): string | nu
   if (!tool || typeof tool !== 'object' || typeof tool.key !== 'string') return null;
   // The host's `awaiting_text` names the text step outright (ADR 0019 A.2). It is
   // checked before any count-derived step: the text step is not a pick, and the
-  // flag is the only source of truth for it.
-  if (toolAwaitingText(tool)) return TEXT_STEP_PROMPT_KEY;
+  // flag is the only source of truth for it. The wording is per tool
+  // ([`textStepPromptKey`]) so MTEXT's multiline copy is never TEXT's.
+  if (toolAwaitingText(tool)) return textStepPromptKey(tool);
   const preselect = PRESELECT_PROMPTS[tool.key];
   if (preselect) return tool.ready === true ? preselect.ready : preselect.idle;
   const points = Number.isSafeInteger(tool.points) && tool.points >= 0 ? tool.points : 0;

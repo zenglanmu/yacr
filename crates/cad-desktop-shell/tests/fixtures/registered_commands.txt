@@ -2,8 +2,11 @@ cad_close_popup
 cad_command
 cad_command_aliases
 cad_commands
+cad_create_layer
+cad_delete_layer
 cad_layers
 cad_open_popup
+cad_rename_layer
 cad_restore_layers
 cad_set_active_layer
 cad_set_layer_visible

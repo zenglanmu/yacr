@@ -20,12 +20,14 @@ use crate::tables::{
 mod access;
 mod bounds;
 mod edit;
+mod layer_edit;
 mod transaction;
 
 #[cfg(test)]
 mod test_support;
 
 pub use access::{EntityDisplayState, VisibilityMembership, VisibilityStateMembership};
+pub use layer_edit::{DEFAULT_LAYER_NAME, ILLEGAL_LAYER_NAME_CHARS};
 pub use transaction::DrawingTransaction;
 
 pub(crate) use bounds::BoundsCache;
@@ -87,6 +89,11 @@ pub struct DrawingDatabase {
     /// alias a new object). Initialised by the builder from the largest existing
     /// entity/block-member id.
     pub(crate) next_entity_id: u128,
+    /// Next layer id to hand out. Monotonic like [`Self::next_entity_id`]: it is
+    /// initialised by the builder from `max(existing layer id) + 1` and never
+    /// rewound by a delete, so a deleted layer id is never reused (a stale layer
+    /// reference could otherwise alias a newly created layer).
+    pub(crate) next_layer_id: u128,
     /// Cache of [`Self::bounds`] tagged with the [`Revision`] it was computed
     /// at. Interior mutability is required because `bounds` takes `&self` (the
     /// scene-preparation worker shares one `Arc<DrawingDatabase>` across

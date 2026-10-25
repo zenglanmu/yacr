@@ -437,6 +437,12 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // Single-line TEXT (ADR 0019 decision A): a point and then its text, which is
   // the command's terminal step and travels on `cad_set_tool_text`.
   { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', group: 'draw' },
+  // MTEXT (2026-10-26): the multiline counterpart of TEXT. The bare selector
+  // starts the two-corner tool (first corner = insertion point, opposite corner =
+  // wrap width) and the text is the same terminal `cad_set_tool_text` step. It
+  // has no variant entry: rotation/attachment/line spacing/columns/background are
+  // deliberately not implemented, and nothing here may imply them.
+  { id: 'MTEXT', labelKey: 'draw.kind.mtext', icon: 'mtext', group: 'draw' },
   // MLEADER (ADR 0019 decision F.2): two points — the arrowhead position, then
   // the landing point — and then that same terminal text step. It carries no
   // variant entry because the command has no `Options` sub-prompt (leader type /

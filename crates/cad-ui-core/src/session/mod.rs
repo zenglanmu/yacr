@@ -319,6 +319,11 @@ impl CadSession {
             // `cad_set_tool_text` channel (ADR 0019 decision A.1) — never through
             // this command line, which carries a command name only.
             CommandId::CreateText => Some(InteractionRequest::BeginDraw(DrawToolKind::Text)),
+            // MTEXT starts the two-corner text tool: the first corner is the
+            // insertion point, the opposite corner supplies the wrap width, and
+            // the terminal text arrives through the same `cad_set_tool_text`
+            // channel TEXT uses (one text step, no second capture path).
+            CommandId::CreateMText => Some(InteractionRequest::BeginDraw(DrawToolKind::MText)),
             // MLEADER starts the leader tool: two points (arrow, landing) then the
             // same terminal text channel TEXT uses (ADR 0019 decision F.2).
             CommandId::MLeader => Some(InteractionRequest::BeginDraw(DrawToolKind::MLeader)),
@@ -373,6 +378,12 @@ impl CadSession {
             CommandId::Pan => Some(InteractionRequest::BeginPan),
             CommandId::ConfirmMeasurement => Some(InteractionRequest::Confirm),
             CommandId::CancelLoading => Some(InteractionRequest::Cancel),
+            // MTEXT has its own arm above (the two-corner tool). Every remaining
+            // selector either needs a payload or is handled by a typed channel, so
+            // it falls through to `dispatch_command` with `CommandPayload::None`;
+            // the application then refuses it explicitly instead of fabricating a
+            // payload. Such names are nonetheless real, advertised selectors: the
+            // payload path (CLI/host IPC) uses them.
             _ => None,
         };
         match interaction {

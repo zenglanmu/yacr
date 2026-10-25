@@ -50,6 +50,7 @@ fn the_tool_status_projects_awaiting_text_on_the_wire_for_the_react_contract() {
             array_rotate_items: None,
             align_scale: None,
             hatch_pattern_type: None,
+            hatch_pattern: None,
             hatch_spacing: None,
             hatch_angle: None,
             hatch_double: None,

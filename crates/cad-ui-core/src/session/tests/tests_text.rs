@@ -167,7 +167,7 @@ fn the_text_refusals_are_named_and_write_nothing() {
 }
 
 #[test]
-fn the_text_height_parameter_is_present_only_for_the_text_tool() {
+fn the_text_height_parameter_is_present_only_for_the_text_tools() {
     let session = fresh_session();
     session.command("TEXT").expect("TEXT is admitted");
     assert_eq!(
@@ -191,6 +191,15 @@ fn the_text_height_parameter_is_present_only_for_the_text_tool() {
             .text_height,
         Some(5.0)
     );
+    // MTEXT creates its glyph with the same parameter, so it projects it too.
+    session.command("MTEXT").expect("MTEXT is admitted");
+    let tool = session.snapshot(None, None, 0).tool.expect("the tool");
+    assert_eq!(tool.key, "draw.mtext");
+    assert_eq!(
+        tool.params.text_height,
+        Some(5.0),
+        "the shared channel keeps the value across the tool switch"
+    );
     // A non-text tool reports `null`, never a stale height.
     session.command("LINE").expect("LINE is admitted");
     assert_eq!(
@@ -206,6 +215,138 @@ fn the_text_height_parameter_is_present_only_for_the_text_tool() {
     assert!(session
         .set_tool_parameter(ToolParameter::TextHeight, ToolValue::Number(0.0))
         .is_err());
+}
+
+/// The session's created MTEXT entities: stored string, insertion point and the
+/// stored wrap width (only `AcDbMText` entities are considered, so a TEXT with
+/// the same `Text` geometry is never counted).
+fn mtext_entities(session: &CadSession) -> Vec<(String, Point3, Option<f64>)> {
+    let controller = session.core.controller.borrow();
+    let drawing = controller.drawing().expect("a document");
+    drawing
+        .model_space()
+        .iter()
+        .filter(|entity| entity.object.type_key == "AcDbMText")
+        .filter_map(|entity| match &entity.geometry {
+            SemanticGeometry::Text {
+                text,
+                position,
+                wrap_width,
+                ..
+            } => Some((text.clone(), *position, *wrap_width)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_mtext_selector_starts_the_two_corner_tool_with_the_documented_height() {
+    let session = fresh_session();
+    session.command("MTEXT").expect("MTEXT is admitted");
+    let tool = session
+        .snapshot(None, None, 0)
+        .tool
+        .expect("MTEXT starts a tool");
+    assert_eq!(tool.key, "draw.mtext");
+    assert_eq!(tool.points, 0, "no corner captured yet");
+    assert!(!tool.ready);
+    assert!(
+        !tool.awaiting_text,
+        "the text prompt opens only once both corners are captured"
+    );
+    assert_eq!(
+        tool.params.text_height,
+        Some(cad_app::draw_tool::TEXT_DEFAULT_HEIGHT),
+        "the same documented default TEXT uses"
+    );
+}
+
+#[test]
+fn mtext_two_corners_then_text_commit_one_acdbmtext() {
+    let session = fresh_session();
+    let before = {
+        let controller = session.core.controller.borrow();
+        controller.drawing().expect("a document").entity_count()
+    };
+    session.command("MTEXT").expect("MTEXT is admitted");
+    click(&session, [400.0, 300.0], 1);
+    let tool = session.snapshot(None, None, 0).tool.expect("the tool");
+    assert_eq!(tool.points, 1);
+    assert!(
+        !tool.awaiting_text,
+        "one corner is not the point complement"
+    );
+
+    click(&session, [520.0, 360.0], 3);
+    let tool = session.snapshot(None, None, 0).tool.expect("the tool");
+    assert_eq!(tool.points, 2);
+    assert!(tool.awaiting_text, "the terminal text step is open");
+    assert!(
+        !tool.ready,
+        "`ready` is false because nothing can be confirmed until the text arrives"
+    );
+
+    // `Confirm` while awaiting text must never complete the command.
+    let error = session.command("CONFIRM").unwrap_err();
+    assert!(error.contains("tool.awaiting_text"), "{error}");
+    assert!(mtext_entities(&session).is_empty(), "nothing was written");
+
+    // The same terminal text channel TEXT uses; MTEXT accepts a line break.
+    session.set_tool_text("A\nB").expect("the text is accepted");
+    assert!(
+        session.snapshot(None, None, 0).tool.is_none(),
+        "the committed text completes the tool immediately"
+    );
+    let created = mtext_entities(&session);
+    assert_eq!(created.len(), 1, "exactly one MTEXT entity");
+    let (text, _position, width) = created[0].clone();
+    assert_eq!(text, "A\\PB", "the one shared newline policy stores `\\P`");
+    let width = width.expect("the two-corner model always stores a width");
+    assert!(width.is_finite() && width > 0.0, "{width}");
+    let controller = session.core.controller.borrow();
+    let drawing = controller.drawing().expect("a document");
+    assert_eq!(
+        drawing.entity_count(),
+        before + 1,
+        "one entity, not a second"
+    );
+    assert!(controller.application.can_undo(&controller.document_id));
+}
+
+#[test]
+fn mtext_refuses_a_zero_width_rectangle_without_writing() {
+    // Two clicks on the same canvas column produce a zero horizontal span: the
+    // width is never fabricated, so the host refuses explicitly and the capture
+    // stays active for a corrected second corner.
+    let session = fresh_session();
+    let before = {
+        let controller = session.core.controller.borrow();
+        (
+            controller.drawing().expect("a document").entity_count(),
+            controller.drawing().expect("a document").revision(),
+        )
+    };
+    session.command("MTEXT").expect("MTEXT is admitted");
+    click(&session, [400.0, 300.0], 1);
+    click(&session, [400.0, 360.0], 3);
+    // The text step is **terminal**: submitting it commits immediately, so the
+    // zero-width refusal surfaces from `cad_set_tool_text` itself.
+    let error = session.set_tool_text("ZERO").unwrap_err();
+    assert!(error.contains("tool.mtext_zero_rect"), "{error}");
+    let controller = session.core.controller.borrow();
+    let drawing = controller.drawing().expect("a document");
+    assert_eq!((drawing.entity_count(), drawing.revision()), before);
+    assert!(!controller.application.can_undo(&controller.document_id));
+    drop(controller);
+    // The capture is kept so the user can correct the opposite corner.
+    assert_eq!(
+        session
+            .snapshot(None, None, 0)
+            .tool
+            .expect("still active")
+            .key,
+        "draw.mtext"
+    );
 }
 
 /// The single selected `Text` of the demo session, once the test created one.

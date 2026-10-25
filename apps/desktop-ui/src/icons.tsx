@@ -128,6 +128,13 @@ const P = {
   // glyph (extension lines with a dimension line, ticks or arrowheads) even at
   // 16 px, where only the A's two legs and the baseline survive.
   text: <><path d="M8 14.5 12 4.5l4 10" /><path d="M9.6 11h4.8" /><path d="M4 19.5h16" /></>,
+  // Multiline text: the same capital A as `text`, but standing over **two**
+  // baselines, the second one shorter — the picture of a paragraph rather than a
+  // single line. It stays apart from `text` (one baseline) and from `mleader`
+  // (an arrow, a landing and two short strokes to the right of the landing) even
+  // at 16 px, and it carries no rectangle or fill lines, so it cannot read as a
+  // boundary (`rectang`, `hatch`).
+  mtext: <><path d="M8 12.5 12 3.5l4 8.5" /><path d="M9.6 9h4.8" /><path d="M4 16h16M4 20h10" /></>,
   // Multileader: an arrowhead at the measured feature, a straight leader running
   // up to its landing and two text lines waiting above that landing — the picture
   // of a leader annotation. The barbs use the dimension family's two-wing
@@ -173,6 +180,15 @@ const P = {
   // never changes the glyph's size or shifts the name next to it.
   eye: <><path d="M2.6 12S6 6.2 12 6.2 21.4 12 21.4 12 18 17.8 12 17.8 2.6 12 2.6 12z" /><circle cx="12" cy="12" r="2.6" /></>,
   eyeOff: <><path d="M2.6 12S6 6.2 12 6.2 21.4 12 21.4 12 18 17.8 12 17.8 2.6 12 2.6 12z" opacity=".5" /><path d="M4.2 4.2 19.8 19.8" /></>,
+  // Layer row actions (Layers palette). The pencil is the conventional "edit the
+  // name I am looking at" mark: a sheared body with a nib at the lower left and a
+  // ferrule band across it (the band runs perpendicular to the body, so the
+  // silhouette cannot read as a plain diagonal stroke). The trash can is the
+  // conventional "remove this row" mark: a lid with a handle, two tapering walls
+  // and two slats — three parts, so it never collapses into `close` (an X) or
+  // `erase` (a rubber with a baseline) at the row's 16px.
+  pencil: <><path d="M16.5 3.5a2.4 2.4 0 0 1 3.4 0l.6.6a2.4 2.4 0 0 1 0 3.4L7.6 20.3 3 21l.7-4.6z" /><path d="M14.6 5.4 18.6 9.4" /></>,
+  trash: <><path d="M4 7h16" /><path d="M9.5 4.4h5" /><path d="M6.5 7l.9 12.2a1.8 1.8 0 0 0 1.8 1.7h5.6a1.8 1.8 0 0 0 1.8-1.7L17.5 7" /><path d="M10.2 11v6M13.8 11v6" /></>,
 };
 
 /** Every icon the chrome can draw, derived from the name map above. */

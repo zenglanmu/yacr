@@ -516,8 +516,26 @@ fn emit_leaf(
             let (style_name, mut reasons) = ensure_text_style(doc, &style_name, font.as_deref());
             let (common, extra) = common_for(doc, entity, ctx);
             reasons.extend(extra);
-            if text.contains('\n') {
+            // Branch precedence: the stored entity type key wins, so an entity
+            // imported as MTEXT (`type_key == "AcDbMText"`) re-exports as MTEXT
+            // even when its value has no paragraph break. The content
+            // heuristics after it are only the compatibility path for text
+            // created in the domain database, which has no MTEXT type key of
+            // its own (`class_name()` maps every `Text` to `AcDbText`) and
+            // stores multi-line content as a literal newline; the `\P`/`\p`
+            // checks also catch raw DXF paragraph marks where the type key is
+            // `AcDbText`. Deciding by content alone would silently downgrade an
+            // imported MTEXT to TEXT, emitting its `\P` as visible text and
+            // dropping the wrap boundary.
+            let mtext_by_type = entity.object.type_key == "AcDbMText";
+            let is_mtext = mtext_by_type
+                || text.contains("\\P")
+                || text.contains("\\p")
+                || text.contains('\n');
+            if is_mtext {
                 let mut mtext = MText::new();
+                // Verbatim: DXF MTEXT wants the raw `\P` paragraph mark, so the
+                // value is never rewritten to newlines here.
                 mtext.value = text.clone();
                 mtext.insertion_point = v3(*position);
                 mtext.height = *height;
@@ -526,10 +544,11 @@ fn emit_leaf(
                 mtext.normal = Vector3::UNIT_Z;
                 // The wrap boundary is MTEXT's reference-rectangle width
                 // (group 41); a single-line TEXT has no equivalent, which the
-                // other branch reports.
-                if let Some(width) = wrap_width {
-                    mtext.rectangle_width = *width;
-                }
+                // other branch reports. `MText::new()` seeds a placeholder
+                // 10.0, so an absent wrap boundary must be written as the DXF
+                // "no width limit" 0.0 rather than that fabricated value
+                // (acadrust's DXF writer always emits group 41).
+                mtext.rectangle_width = wrap_width.unwrap_or(0.0);
                 let (attachment, align_reason) = mtext_attachment(*h_align, *v_align);
                 mtext.attachment_point = attachment;
                 if let Some(reason) = align_reason {
@@ -537,8 +556,18 @@ fn emit_leaf(
                 }
                 mtext.common = common;
                 acc.push(EntityType::MText(Box::new(mtext)), ctx)?;
-                reasons.push("multi-line text written as MTEXT".into());
-                acc.record(object, "text_mtext", MappingOutcome::Converted(reasons));
+                // An entity that already was MTEXT and whose value needs no
+                // rewrite is faithful to the database (the unmodelled MTEXT
+                // fields were reported at import, not lost here), so it is
+                // `Exact` unless the attachment folding above raised a reason.
+                // Every other MTEXT here is a TEXT → MTEXT conversion.
+                let base = if mtext_by_type && !text.contains('\n') && !text.contains('\r') {
+                    MappingOutcome::Exact
+                } else {
+                    reasons.push("multi-line text written as MTEXT".into());
+                    MappingOutcome::Converted(Vec::new())
+                };
+                acc.record(object, "text_mtext", with_reasons(base, reasons));
             } else {
                 if wrap_width.is_some() {
                     reasons.push(

@@ -1,3 +1,426 @@
+## 2026-10-26 GRIPSTRETCH 命令：一个夹点拖拽 = 一条事务 / 一步撤销
+
+### 结论
+
+夹点**模型**（`crates/cad-app/src/grips.rs`：`GripKind`/`GripId`/`Grip{id,position}`、
+`grips_for_entity`/`grip_hit`/`apply_grip`）此前已存在但**没有任何命令**。本轮补上**只做命令**的那一半：
+
+- **`cad-app`**
+  - `CommandPayload::GripStretch(Box<GripStretchCommand>)`，
+    `GripStretchCommand { id: GripId, to: Point3 }`（boxed，与 `TwoLineCommand`/
+    `DimensionChainCommand` 同理由）。载荷文档显式声明：**这是指针手势的载荷路径，当前没有手势**
+    —— 无渲染夹点标记、无宿主 arming、无指针路由，所以**没有任何东西会产生它**。
+  - `CommandId::GripStretch`（选择器 `GRIPSTRETCH`，**本项目选择器**：AutoCAD 的夹点编辑不是命令），
+    在 `requires_work_mode` 内，与其他编辑一致**记历史**（一实体一 patch，不同于图层表写）。
+  - 新 handler `app_drawing/grip.rs`（在 `app_drawing/mod.rs` 注册，`drawing_command` 与
+    `application.rs` 的编辑漏斗各加一条 arm，因此事后仍走一次选择对账）。
+  - 拒绝理由（**英文、稳定、全部在 `begin_drawing_transaction` 之前**）：
+    `grip.target_missing`（新加，`grips.rs` 内与其它 `grip.*` 同处声明；模型层看不到实体 id，
+    实际由命令抛出）、`property.not_addressable`（**复用**属性写的可达性理由：目标不在模型空间
+    —— 块定义成员 / 图纸空间。`GripId` 不含 instance path / 子元素字段，那两种形态在载荷上无法
+    表达，故不另造第二个地址模型）、`grip.stale_handle` / `grip.zero_displacement` /
+    `grip.unsupported_kind`（由 `apply_grip` 按**当前**几何复核后原样上抛）、
+    `grip.non_finite_target`（在**读取图形之前**拒绝，连事务都不构建）。
+  - `grips.rs` 仅做三处配套：`finite_target` 提升为 `pub(crate)`（命令与模型共用同一码/文案）、
+    新增 `REASON_TARGET_MISSING`、文档从"没有命令"改为指向命令模块。**模型逻辑一行未改**。
+- **`cad-ui-core`**：`("GRIPSTRETCH", CommandId::GripStretch)` 进 `COMMAND_TABLE`，注释写明它是
+  **payload-required**：裸调用不路由 `BeginDraw`，落到 `dispatch_command(CommandPayload::None)`，
+  由应用层**按名拒绝**（绝不伪造拖拽、绝不静默成功）。
+
+### 保证（每条都有契约测试钉住）
+
+- 成功：**恰好一条** `changes.changes` 记录、revision **+1**、`undo_depth == 1`；undo 后几何恢复为
+  **位级**原值（未拖端点用 `to_bits()` 断言）。
+- 拒绝（零位移 / stale handle / 已删除实体 / `CIRCLE` 上的 kind / 非有限目标 / 非模型空间 /
+  裸 `GRIPSTRETCH`）：**revision 不变、undo depth 不变**（等价于"未开事务"）。
+- `LINE` 起点拖拽只改 `start`，`end` 位级不变；`LINE` 终点拖拽只改 `end`，`start` 位级不变。
+- 零位移是**错误**而不是空 `Ok`——这正是"不留空撤销步"的实现方式。
+- **绝不**经过 `StretchEntities`（交叉窗口拉伸是另一条命令与另一套拒绝面）。
+
+### 已运行证据（本机，2026-10-26）
+
+- `cargo test -p cad-app --lib --locked` → **953 passed / 0 failed**（含 9 条新 `drawing::grip`
+  契约 + 既有 20 条 `tests::grips` 模型契约）。
+- `cargo test -p cad-ui-core --lib --locked` → **272 passed / 0 failed**（含 1 条新
+  `command_vocabulary` 契约；词表总数 83 → **84**）。
+- `cargo clippy -p cad-app -p cad-ui-core --all-targets --locked -- -D warnings`、`cargo fmt --all
+  -- --check`、`check-architecture.py`、`check-file-size.py`（944 文件 ≤ 1000）、`check-i18n.py`
+  → 全 **0**。
+- **NOT RUN**：无 GUI/像素/真窗口/真实指针证据（本 lane 不碰前端、宿主、i18n、渲染）；未跑全
+  workspace 全量门禁与平台编译矩阵（按日常策略只验本轮范围）。
+
+### 仍未做（后续 lane）
+
+1. **渲染夹点标记**（`render_scene/**`；本轮明确不碰）。
+2. **宿主 arming / 悬停高亮 / 命中 → `GripId`**（`cad-host`、`apps/**`；本轮明确不碰）。
+3. **指针路由**：drag 起点 → 预览（`to` 的工作平面投影、OSNAP/ORTHO/栅格捕捉）→ 释放时提交
+   `GripStretch`。该投影在捕获 lane，**不在**模型也不在本命令（模型是 3D 精确、不投影）。
+4. 多夹点/多实体拉伸、中点/圆心/插入点/顶点夹点、夹点菜单、3D —— 均**未实现**，
+   `docs/compatibility.md` 已按此口径记录。
+
+---
+
+## 2026-10-26 图层表结构写：create / rename / delete（DB → 命令 → IPC → 面板）
+
+### 结论
+
+图层从此有**三处真实表写**（此前只有会话级临时显隐覆盖与 active layer，DB 图层表只读）：
+
+1. **`cad-db`**（`drawing/layer_edit.rs`，新模块）：`create_layer` / `rename_layer` / `delete_layer`
+   + `next_layer_id()`。全部**先校验后变更**：名称 trim 后非空（`layer.name_empty`）、拒绝 AutoCAD
+   符号名非法字符集 `< > / \ " : ; ? * | , = ` 与反引号（`layer.name_illegal_char`）、**大小写不敏感**
+   唯一（`layer.duplicate_name`；重命名排除自身，因此纯大小写改名允许，改成同名是权威 no-op 不升
+   revision）。id 按 `max+1` 单调分配、删除后不回收。成功各升 `Revision` **一次**并返回
+   `changes: vec![]` 的 `ChangeSet`（revision 即失效标记，不伪造实体 `Update`）。`delete_layer` 拒绝
+   未知 id（`layer.unknown_id`）、名为 `0` 的默认层（`layer.default_undeletable`）、仍被实体引用
+   （`layer.in_use`，消息带引用计数；绝不改指 `Entity.layer`）。**不可撤销**：历史只有实体
+   `DrawingPatch`，图层 patch 类型是独立 lane（模块文档已声明）。
+2. **`cad-app`**：`CommandId::{CreateLayer,RenameLayer,DeleteLayer}`（Work-only、不记历史）+ 三个
+   payload（图层选择器是**名字**，复用“精确优先、否则大小写不敏感唯一”解析，歧义拒绝
+   `layer.ambiguous_name`）。诊断码 `drawing.layer_created/layer_renamed/layer_deleted/
+   active_layer_fallback`。删除**当前层**时回落到 `0`（预校验；缺 `0` 则 `layer.default_missing`
+   拒绝），并清理该层的会话显隐覆盖。
+3. **`cad-ui-core`**：`CREATELAYER`/`RENAMELAYER`/`DELETELAYER` 进入 `COMMAND_TABLE`（`NEWLAYER`
+   作为项目同义词别名，非 AutoCAD 命令）；`CadLayerWrite::{Create,Rename,Delete}` 进**既有**有界
+   队列（不再造第二条写通道），ack 仍为“已排队”，面板一律重读。
+
+**IPC 与前端**：`cad_create_layer` / `cad_rename_layer` / `cad_delete_layer` 走**同一** admission
+（modal → probe → 容量）；命令名进入 `COMMAND_NAMES`、`registered_commands.txt` 与 Linux 宿主
+`NATIVE_SESSION_COMMANDS`（`dom-canvas` 上按既有规则显式 `unsupported_on_surface_mode` 拒绝，
+因为 wasm 会话是那里的唯一 CAD 权威；Windows 无该 allowlist）。`layers.ts` 增加三个 sender 与
+三个 store action（ack-then-reread 单飞），`LayersPalette.tsx` 增加**内联**新建字段（Enter 提交 /
+Esc 取消 / 焦点回收）、行内重命名（双击或铅笔、Enter 提交、Esc/失焦取消、同名不发 IPC）、
+按行删除确认（默认层 `0` 不提供该入口）。`layer-labels.ts` 新增 `layerErrorKey` 映射（5 个拒绝码；
+未知码回落 `layers.write_failed` 原文）。
+
+**文案收口（orchestrator 复核后）**：原 `layers.operation_failed` 是“显隐失败”专用却被当作通用
+兜底 → 改为中性 `layers.write_failed`（显隐/新建/重命名/删除共用）；删除确认新增
+`layers.delete_confirm`（带 `{name}`），`layers.delete_in_use_hint` 降为说明行。目录 774 键。
+
+### 已运行证据（本机，2026-10-26）
+
+- `cargo test -p cad-db --lib` **98**（13 新）、`cad-app --lib` **944**（含本轮 8 条图层命令契约）、
+  `cad-ui-core --lib` **271**（含 8 条会话写 + 1 条词表）、`cad-desktop-shell` **33**（lib 11 +
+  command_aliases 3 + layer_commands 8 + setting_commands 7 + wire_goldens 4）。
+- `cargo clippy`（上述 crate，`-D warnings`）、`cargo fmt --check`、`cargo check -p app-linux
+  --all-targets`、`cargo check -p app-windows --all-targets` → 全 0。
+- `python3 scripts/check-{architecture,i18n,file-size}.py` → 全 0；前端 `npm test`（`tsc --noEmit`
+  + `node --test`）→ **581 passed / 0 failed**。
+
+### NOT RUN / 边界
+
+- **无 GUI/像素/真实窗口证据**：面板只有 `tsc` + `node --test` 的源码/纯函数契约；未启动 React
+  宿主，未截图。
+- 图层**属性**（颜色 / 线型 / 线宽 / 锁定 / 冻结 / 打印）**未建模**：`Layer` 仍只有
+  `{id,name,visible}`；导入侧仍把 frozen 与 off 合并成一个 `visible`（已知有损），面板色块是**名字
+  哈希**不是真实颜色。属性存储/往返与 lock/freeze 语义是独立 lane。
+- 图层写**不可撤销**、**不写 DWG**（`SAVE` 仍是 DXF 导出，导出表只写图层名与 off）。
+- `dom-canvas`（X11/XWayland、web）上三个新 IPC **显式拒绝**；接入 wasm 会话是独立 lane。
+
+---
+
+## 2026-10-26 MTEXT 导出：类型键优先，修复 MTEXT 静默降级为 TEXT
+
+### 结论
+
+DXF 导出此前**只按字符串内容**（`text.contains('\n')`）决定 TEXT/MTEXT 分支，导致**导入的 MTEXT**
+（`type_key == "AcDbMText"`、值为原始 `\P`）被静默导出成 `AcDbText`，`\P` 变成可见文本且丢失
+`wrap_width`。现在分支判定顺序为：**类型键优先**（`AcDbMText`）→ 内容兜底（`\P`/`\p`/`\n`，仅用于
+域内创建的多行 TEXT 与类型键仍是 `AcDbText` 的原始 DXF 值）。值**原样写出**（DXF MTEXT 需要 `\P`，
+不做 `\P`→`\n` 改写）。
+
+同时修掉两处旧伪造：`MText::new()` 的占位 `rectangle_width = 10.0` 会让 `wrap_width: None` 导出成
+**假宽度 10.0**；现在 `None` 写 DXF 的“无宽度限制” `0.0`（acadrust 的 writer 无条件写组 41，纯省略
+需要改 acadrust，禁止）。**本就是 MTEXT 且无需改写**的实体记为 `Exact`（未建模字段在导入时已报告，
+不在这里重复计损）；由 TEXT 提升为 MTEXT 的仍记 `Converted`。
+
+### 已运行证据
+
+- `cargo test -p cad-import-acadrust --lib` **273 passed / 1 ignored**（+4 条新契约：类型键优先、
+  创建文本换行仍出 MTEXT、单行仍是 TEXT、无 `\P` 的 `AcDbMText` 仍是 MTEXT 且组 41 = 0）；
+  `committed_fixtures_report_their_expected_losses` 未修改仍通过。
+- `cargo clippy -p cad-import-acadrust --all-targets -- -D warnings`、`cargo fmt --check`、
+  `check-file-size.py` → 0。
+
+### 边界
+
+- 仍未建模并保持拒绝：行距、分栏、背景填充、绘制方向（`MTEXT_UNMODELLED`）。
+- 无真实 DWG/文件往返证据；只有内存域对象 → 导出字节 → 再解析的契约断言。
+
+---
+
+## 2026-10-26 MTEXT 交互工具（两角 + 文字）+ 路由 / 提示 / ribbon
+
+### 结论
+
+MTEXT 从“**只有命令核心、裸选择器按名拒绝**”升级为**可交互工具**，参数集刻意最小且诚实：
+**第一个角点 → 对角点 → 输入文字**。上一轮“无交互工具”的合同**已废止**（`command_vocabulary`
+里那条“裸 `MTEXT` 被拒绝”的测试被替换为“`MTEXT` 启动工具”，否则会与新路由自相矛盾）。
+
+### 捕获与派生规则（精确）
+
+| 载荷字段 | 来源 | 规则 |
+| --- | --- | --- |
+| `position` | 第 1 个角点 | 世界坐标，即插入点；`v_align = Top` 时是文本框左上角 |
+| `width` | 两角的水平跨度 | `|opposite.x − first.x|`，必须有限且 `> 0` |
+| `height` | 会话参数 `ToolParameter::TextHeight` | 复用 TEXT 的默认 `2.5`；**未新增高度参数** |
+| `rotation` | 常量 | `0.0` |
+| `h_align` / `v_align` | 常量 | `TextAlignH::Left` + `TextAlignV::Top`（AutoCAD MTEXT 默认左上附着） |
+| `text` | `cad_set_tool_text` | 与 TEXT **同一条**终端通道；多行合法，按 `app_drawing::text_policy` 存 `\P` |
+
+- **两角模型只在宿主一处应用**：`host/draw_intent_map.rs::mtext_wrap_width`。除宽度外它同时做
+  三项显式拒绝（**不开事务**）：非有限角点 / 离开同一 `+Z` 平面（与 RECTANG 相同容差式）、
+  **退化矩形**（零宽或零高）→ `tool.mtext_zero_rect: …`。**绝不**把退化矩形降级成
+  `width: None`（那是“不换行”，另一种版式）。
+- **文字闸门只有一条**：`DrawToolKind::MText.requires_text()` = true，因此
+  `awaiting_text` / `Confirm` 拒绝 / `SetToolText` 终端完成 / `Esc` 只收焦点 全部沿用 TEXT 的既有
+  状态机，**没有第二条捕获路径**。文本提交即完成命令（无第二次 Confirm）。
+- `width` 恒为 `Some(..)`：本工具的契约就是“两角定义换行宽度”，不提供“无宽度”入口。
+
+### 代码落点
+
+- `DrawToolKind::MText`（arity `Exact(2)`、`picked_step_count = 0`、`requires_selection = false`、
+  `label()` = ASCII `MTEXT`，不新增 CJK）。`ALL` 末尾追加以保持既有索引稳定。
+- `DrawIntent::MText { first, opposite, text }` → `CommandId::CreateMText`。
+- `SessionState::begin_draw`：`MText → CommandId::CreateMText`；`TextHeight` 的授权仍复用
+  `CreateText`（两者都 Work-only，同一闸门），**没有**第二个高度参数。
+- `cad-ui-core`：`CommandId::CreateMText → BeginDraw(DrawToolKind::MText)`；`MTEXT` 选择器从此
+  启动工具（载荷路径保留给 CLI/host IPC）。`status.tool.params.text_height` 现在对 TEXT 与 MTEXT
+  都投影。
+- 前端（契约级，无新视觉设计）：`COMMAND_CATALOG` 与两个 draw 面板在 TEXT 之后插入 `MTEXT`
+  （专用 `mtext` 字形 = 同一 A + **两条**基线；无 variant 弹层），提示表新增
+  `draw.mtext` 两步 + 终端文字步；`toolStepPromptKey`/`textStepPromptKey` 让 MTEXT 用自己的多行
+  文案，其余文本工具文案不变。
+- 新 i18n 键（两目录同键集）：`draw.kind.mtext`、`tool.draw.mtext`、
+  `tool.prompt.mtext.pick_corner`、`tool.prompt.mtext.opposite_corner`、
+  `tool.prompt.mtext.type_text`。同时把 `status.tool_text.prompt` 与
+  `status.tool_parameter.text_height.hint` 的 **TEXT 专属措辞**改为工具无关（否则 MTEXT 下文案
+  会谎称是 TEXT 命令）。
+- 预览：MTEXT 与 TEXT 一样用既有 cursor/chain 橡皮筋，**不**伪造换行后的文字框（渲染器无新通道）。
+
+### 显式延期（未实现，无参数 / 无提示 / 无载荷字段）
+
+用户可设旋转（`TextRotation`）、用户可设附着/对齐、行距、分栏、背景填充、绘制方向、
+绘制流程内的 MTEXT 编辑对话框；行距样式/分栏/背景填充/绘制方向仍是导入 `Partial` 的四条具名原因。
+ribbon 的 MTEXT 因此**无 variant 弹层**。
+
+### 测试（本轮实际运行）
+
+- `cargo test -p cad-app --lib --locked`：**944 passed**（新增 `draw_tool::tests::mtext` 4 条、
+  `host::tests::mtext` 7 条；`requires_text` 种类表更新为含 MText）。
+- `cargo test -p cad-ui-core --lib --locked`：**271 passed**（新增 MTEXT 路由 + 两角 + 文字提交 +
+  零宽拒绝共 4 条；`DRAW_SELECTORS` 增 `MTEXT → draw.mtext`；替换掉旧的“裸调用被拒绝”测试）。
+- `cargo clippy -p cad-app -p cad-ui-core --all-targets --locked -- -D warnings`：通过。
+- `cargo fmt --all -- --check`、`python3 scripts/check-i18n.py`（773 keys）、
+  `python3 scripts/check-file-size.py`：通过。
+- `(cd apps/desktop-ui && npm test)`：**581 passed**（typecheck + node:test；新增 MTEXT ribbon/
+  catalog/提示序列/i18n/字形 4 条，并更新 hatch/mleader 的固定尾序断言为
+  `OFFSET → TEXT → MTEXT → MLEADER → HATCH`）。
+
+### NOT RUN / NOT VERIFIED（勿推广）
+
+- **未启动 GUI**：无真实窗口、无 Wayland/X11 运行、无 GPU、无像素/截图证据；本轮全部结论是
+  单元/契约测试与纯函数。
+- **未在任何平台验证 MTEXT 的实际排版**（换行宽度在表示层如何落字、附着点视觉位置）；Rust 侧只
+  证明存进 `AcDbMText` 的字段值。
+- **未验证**真实 DWG 往返（创建 → 导出 → 重新导入后 `41` 组是否仍不保留，属既有导入 `Partial`）。
+- Windows/Wine、macOS、Android、Web 均**未运行**；无性能结论。
+
+## 2026-10-26 MTEXT 创建命令核心（无交互工具）+ TEXT 单行换行诚实性修复
+
+> 后续同日条目「MTEXT 交互工具」已补上 `DrawToolKind::MText`；本条只记录当时的命令核心。
+
+### 结论
+
+新增 **`CommandId::CreateMText` + `MTEXT` 选择器 + `CommandPayload::MText`**：一条**命令核心**
+（无 `DrawToolKind`、无两点捕获、无 ribbon、无提示串），由同一条创建漏斗写 **一个 `AcDbMText`**
+实体，一条事务 / 一步撤销；换行按**唯一权威**转 `\P`；宽度走**两角模型**且**不钳制**。
+同轮修掉一个真诚实性 bug：含换行的 `TEXT` 草案此前被存成 `AcDbText`（渲染多行，而此后
+`TEXTEDIT` 必然以 `textedit.newline_text` 拒绝它），现在**两层都被拒**。
+
+### 载荷（精确）
+
+```rust
+CommandPayload::MText {
+    position: Point3,       // 插入点（有限）
+    width: Option<f64>,     // 自动换行边界（DXF 41 / rectangle_width）；None = 不换行
+    text: String,           // 草案；存储时 \r\n|\r|\n → \P
+    height: f64,            // 字高（有限且 > 0，与 TEXT 同界）
+    rotation: f64,          // 弧度（有限）
+    h_align: TextAlignH,    // 水平附着
+    v_align: TextAlignV,    // 垂直附着
+}
+```
+
+**携带**：上述七项逐字使用。**不携带**（不建模，且拒绝而非暗示）：行距样式
+`text.line_spacing_style_unsupported`、分栏 `text.columns_unsupported`、背景填充
+`text.background_unsupported`、绘制方向 `text.drawing_direction_unsupported`——即
+`cad-import-acadrust` 的 `MTEXT_UNMODELLED` 四条稳定原因（该常量是 `pub(crate)`，故此处只复用
+**词表**，不引依赖）。`drawing.mtext_created` 诊断把这四个键写进消息。
+
+- **宽度语义（两角模型）**：调用方从第二角导出 `width` 并传入；`None` → 存 `None`（**不伪造**）；
+  `Some(w)` 必须 `w.is_finite() && w > 0`，否则按名拒绝
+  `CreateMText width must be finite and positive when given, got {w}; omit the width for an unwrapped
+  text`（**绝不**降级为 `None`，**绝不**钳制）；合法值仍经 `cad_domain::wrap_width_from_dxf`
+  （唯一消毒规则）。
+- **换行唯一权威**：新增 `crates/cad-app/src/app_drawing/text_policy.rs`，把原先 `text_edit.rs`
+  的私有 `newlines_to_paragraph_breaks` 提升为 `pub(crate)`（连同 `has_line_break`、
+  `single_line_newline_error`、`MTEXT_TYPE_KEY`）。`text_edit.rs` 只保留**按类分派**的策略
+  （`AcDbMText`/MULTILEADER → `\P`；`AcDbText` → `textedit.newline_text`），映射不再有第二份。
+- **样式/字体**：`helpers::resolve_created_text_style`（`Standard` 按名 → `StyleId(0)` 回退 →
+  无样式），`create_text` 与 `create_mtext` 共用；`drawing_create.rs` 里的私有
+  `TEXT_STYLE_NAME` 常量随之删除（移到 `helpers`）。
+
+### 类型键漏斗改动（本轮的承重点）
+
+`commit_new_entity_typed`（新，`pub(super)`）→ 私有 `insert_new_entities(command, geometries,
+NewEntityInsert { layer, space, display, type_key, label })`。此前 `commit_new_entities_in` 的
+`type_key` 恒为 `class_name(&geometry)`（对 MTEXT 会得到**错误的** `AcDbText`）。
+
+- `NewEntityInsert::type_key: Option<&str>`：`None` → `class_name()`（**既有全部调用者行为逐字不变**：
+  LINE/CIRCLE/ARC/SPLINE/POINT/DIM*/HATCH/OFFSET 等）；`Some(k)` → 直接写 `k`。
+- 覆盖**仅允许单实体**：`geometries.len() != 1` 时按名拒绝（否则会给覆盖未覆盖的实体错贴标签）。
+- 因 clippy `too_many_arguments`（8/7），参数改为选项结构体 `NewEntityInsert`；语义不变。
+- 于是新实体 `object.type_key == "AcDbMText"`，`is_multiline_text_source` 与 `TEXTEDIT` 对
+  **同一实体**一致（导出分支同样按 `type_key` 判 MTEXT，属源码核对、未新增测试，见下文）。
+
+### TEXT 单行拒绝（修复）
+
+- 捕获层 `draw_tool/text.rs::set_text`：仅 `DrawToolKind::Text` 拒绝含 `\r`/`\n` 的草案
+  （MLEADER / TEXTEDIT 是多行通道，保持接受，`\P` 转换仍在下游命令完成）。
+- 命令层 `create_text`：同样拒绝，程序化调用者无法绕过。
+- 稳定原因 **`text.single_line_newline`**（英文），消息点明改用 MTEXT；空/纯空白仍先报
+  `tool.text_empty`（顺序有意，`"\n  \r\n"` 仍是空文本）。
+
+### 选择器/派发
+
+- `COMMAND_TABLE`：`("MTEXT", CommandId::CreateMText)`；`requires_work_mode` 与 `CreateText`
+  同列（**是** Work-only）；**不**豁免历史（走正常事务，产生一条 undo）。
+- **裸 `MTEXT`**（命令行/按钮）**无载荷 → 应用层按名拒绝**
+  `MTEXT needs an MText { … } payload; the interactive two-corner capture is not implemented`；
+  `session/mod.rs` 的交互表**故意不给 arm**（无 `DrawToolKind`，不 `BeginDraw`），并在注释中写明。
+- **没有**为它授权任何 tool parameter（`session_state.rs` 未改）：该命令只读载荷，不读参数表。
+- 未新增 `MT` 缩写：交互工具尚不存在，别名表只收端到端成立的缩写（记入 defer）。
+
+### 已运行证据（本机，2026-10-26，仅 `cad-app`/`cad-ui-core` 范围）
+
+- `cargo test -p cad-app --lib --locked` → **913 passed / 0 failed**（上一轮记录为 905；本轮新增 **8**：
+  `tests/drawing/mtext.rs` **6**、`text_policy` 单元测试 **1**、`draw_tool/tests/text.rs`
+  `a_newline_is_refused_for_the_single_line_text_kind_only` **1**。计数含工作树中其它 lane 的未提交
+  测试文件，故只把 **8** 计为本轮增量）。
+- `cargo test -p cad-ui-core --lib --locked` → **268 passed / 0 failed**（上一轮 267；新增
+  `mtext_selector_is_admitted_and_a_bare_invocation_is_refused_explicitly` 1 个；
+  `command_vocabulary` 计数 82 → **83**）。
+- `cargo clippy -p cad-app -p cad-ui-core --all-targets --locked -- -D warnings` → 0。
+- `cargo fmt --all -- --check` → 0；`python3 scripts/check-architecture.py` → OK（28 packages）；
+  `python3 scripts/check-file-size.py` → 944 code files ≤1000（脚本读 `git ls-files`，本轮**未暂存**，
+  故 3 个新文件未被计入：手工核对 `text_policy.rs` 100、`mtext_create.rs` 167、`mtext.rs` 461 行；
+  `trim_extend.rs` 696、`drawing_create.rs` 732、`lib.rs` 852）；`python3 scripts/check-i18n.py` → OK
+  （本轮**未新增** i18n 键，`cad-app` CJK 冻结基线未增字面量）。
+
+### NOT RUN / 延后
+
+- **NOT RUN**：任何 GUI/桌面试跑、GPU/像素、WASM/浏览器、Windows/macOS/Android；`cad-app` 以外
+  的 crate 测试（仅按范围要求跑 `cad-app`/`cad-ui-core`）。
+- **下一 lane（交互）**：`DrawToolKind::MText`（两点角捕获 + 终端文本）、`MT` 缩写、
+  ribbon/命令面板入口、提示串与 i18n 键、`MTEXT` 的 `BeginDraw` 交互派发。
+- **仍不建模**（导入侧同）：行距样式、分栏、背景填充、绘制方向；`rectangle_width` 导入侧仍未保留
+  （本轮只补**创建**侧宽度；导入侧不变）。
+- **源码核对但未测**：创建出的 `AcDbMText` 在导出时按 `type_key` 进 MTEXT 分支并写组 `41`
+  （`cad-import-acadrust/src/export/entity.rs` 既有逻辑，`wrap_width` 参与）——本轮**未**新增
+  导出/再导入测试，故不得称为已验收往返。
+- 无渲染器改动（多行文字排版既有）；未新增依赖；未改 acadrust；未提交/推送。
+- 格式化说明：本轮执行过 `cargo fmt --all`（仓库门禁为全 workspace），若工作树中其它 lane 的未提交
+  文件原本未格式化，其空白可能已被一并规范化（无语义改动）。`session_state.rs` **未改**（新命令不读
+  任何 tool parameter，故不授权任何参数）。
+
+## 2026-10-26 HATCH 图案类型码 `2`：预定义图案表（ANSI31/ANSI32/ANSI37）
+
+### 结论
+
+`HATCH` 的图案类型闭集从 `{0 实体, 1 用户自定义}` 扩为 **`{0, 1, 2}`**，新增代码 **`2` = 预定义**：
+由 **`hatchPattern`**（`ToolParameter::HatchPattern`，**1 基**索引，闭集 = 表长 `1..=3`，默认 `1`）
+从一张**极小的手工转录表**里选一个图案，经**既有** `HatchPattern::families()` 出线（**无**渲染器改动）。
+`76` 写 **`1`**（predefined）。越界/非整数索引**按名拒绝**，**不钳制、不回退**。
+
+- **域（新模块）**：`cad-domain/src/hatch/patterns.rs` + `patterns_tests.rs`：`PredefinedPatternLine`
+  /`PredefinedPattern`（`&'static` 数据，无 `Vec`）、`predefined_patterns()`、
+  `predefined_pattern(name)`（trim + 大小写不敏感）、`predefined_pattern_by_index(i)`（1 基）、
+  `PredefinedPattern::to_hatch_pattern(scale, angle_deg, double)`。表在 **`cad-domain`**（不在
+  `cad-import-acadrust`/`cad-representation`），`check-architecture.py` 边界不变。
+  **行 offset 在 `to_hatch_pattern` 里按行自身角度旋转**：`.pat` 的行 offset 声明在**旋转后的行坐标系**
+  （`offset_y` = 垂直间距），而域 `HatchPatternLine` 的 offset 在**hatch 平面坐标系**（`families()`
+  只叠加 hatch 级角度/比例），因此组合结果恰为 `.pat` 公式：线角 = 行角 + hatch 角，垂直间距 =
+  `offset_y × scale`，虚线长度同 scale。
+- **转录值（我们自己的，ADR U-1 纪律，非 vendor 核实）**：ANSI31 = 45°、垂直间距 `0.125`（1 行）；
+  ANSI32 = 45°、间距 `0.375`、虚线 `0.125 / -0.0625`（**只转录虚线行**，真实 ANSI32 的第二条实线行
+  声明为未转录）；ANSI37 = 45° + 135°、各 `0.125`（2 行）。`.pat` 加载**未实现**（无解析器、无
+  `acad.pat` 打包）。
+- **命令层**：`HATCH_PATTERN_TYPE_PREDEFINED: f64 = 2.0`（`draw_tool/parameter.rs`）；图案类型拒绝文案
+  点明三个代码；`HatchParameters` 读 `hatchPattern`，`fill()` 的 `2` 分支用
+  `to_hatch_pattern(scale = hatchSpacing, angle = hatchAngle, double = hatchDouble)`，索引无法解析时
+  报稳定消息 **`HATCH pattern index {n} is not in the implemented predefined set (1..=3: …)`**；诊断改名
+  **`predefined pattern ANSI31 (scale …, angle … deg, double …)`**（旧文案会谎称 user-defined），
+  结尾 `associative hatch NOT IMPLEMENTED` **保留**。实体/用户自定义分支目标行为**逐字节未变**。
+- **投影/UI 契约（无 GUI）**：`CadToolParams` 增 `hatchPattern`（`hatch_pattern`，HATCH 激活时才投影，
+  其他工具 `None`）；`session_state` 把 `ToolParameter::HatchPattern` 授权到 `CommandId::Hatch`（Viewer 拒绝）；
+  `apps/desktop-ui/src/cad.ts` 的图案类型闭集 → `[0,1,2]`、新增 `hatchPattern` 行（闭集 `[1,2,3]`）并进
+  `TOOL_PARAMETERS['draw.hatch']`（六行，顺序同 Rust）；i18n 两目录新增
+  `status.tool_parameter.hatch_pattern(.hint)`，并改 `hatch_pattern_type.hint`（0/1/2 与已实现集合）、
+  `hatch_spacing.hint`（兼作 `HPSCALE`）、`hatch_angle.hint`（自定义或预定义）。**无新增 CJK**（`cad-app`
+  冻结基线未增字面量；TS/Rust UI 源码无中文）。
+
+### 已运行证据（本机，2026-10-26）
+
+- `cargo test -p cad-domain --lib --locked` → **89 passed / 0 failed**（新 `patterns_tests` **7** 个）。
+- `cargo test -p cad-app --lib --locked` → **905 passed / 0 failed**（新
+  `tests/drawing/hatch_predefined.rs` **8** 个；原 897 个全绿，实体/用户自定义预期未改）。
+- `cargo test -p cad-ui-core --lib --locked` → **267 passed / 0 failed**。
+- `cargo test -p cad-import-acadrust --lib --locked` → **273 passed / 1 ignored / 0 failed**
+  （导出→再导入路径；ignored 是既有需要 `YACR_TEST_DWG` 的用例）。
+- `cargo clippy -p cad-domain -p cad-app -p cad-ui-core --all-targets --locked -- -D warnings` → 0；
+  `cargo fmt --all -- --check` → 0；`cargo check -p app-linux --all-targets --locked` → 0（仅为
+  `CadToolParams` 测试字面量补字段）。
+- `python3 scripts/check-i18n.py` → **757 keys**、两目录键/占位一致、无硬编码 CJK（` | tail` 未使用）。
+- `python3 scripts/check-file-size.py` → `944 code file(s)` **全 ≤1000 行**；注意该脚本读 `git ls-files`，
+  本轮**未暂存**，故 3 个新文件未被它计入（手工核对：`patterns.rs` 187、`patterns_tests.rs` 262、
+  `hatch_predefined.rs` 339 行）。
+- `python3 scripts/check-architecture.py` → OK（28 packages，边界完整）。
+- `(cd apps/desktop-ui && npm test)` → `tsc --noEmit` **0 诊断** + **570 passed / 0 failed**
+  （`hatch-tool.test.ts` 9 个、`tool-parameters.test.ts` 全部通过）。
+
+### 解析数值（本仓 `families()` + 偶奇裁剪的精确推论，10×10 边界）
+
+边界取 `[0.3,10.3] × [0.7,10.7]`（`y − x` 偏移使顶点不落在 45° 线上）；`hatchSpacing = 1`。
+
+| 用例 | 线数 | 总长 |
+|---|---|---|
+| ANSI31，hatch 角 0°（45° 族，垂直间距 0.125） | **113** | **799.995 640 056 649** |
+| ANSI31，hatch 角 45°（→ 90°，纯竖线，80 × 10） | **80** | **800.0** |
+| ANSI31 + `HPDOUBLE`（= 135° 第二族） | **226** | **1 600.000 616 352 142** |
+| ANSI37，hatch 角 0°（45° + 135° 两族） | **226** | **1 600.000 616 352 142** |
+| ANSI37，hatch 角 45°（90° + 180°，各 80 × 10） | **160** | **1 600.0** |
+
+角 0° 的总长不是整数 800/1600：离散族的求和等于「面积/间距」只在梳齿相位上相差一个边界带项
+（精确闭式 `10√2 − 2|s − 0.4/√2|` 求和给出上表值），测试按 1e-6 容差钉住该闭式结果。
+
+### NOT RUN / 边界（不得推广）
+
+- **`.pat` 文件加载**、**自定义（`76=2`）图案创建**、**图案选择对话框**、**实时填充预览**、
+  **关联性（`HPASSOC`/`71`）**、**内部点求边界**、**LINE/ARC 边界拼接**、**渐变创建**、
+  **每条裁剪段的虚线相位重置**：全部 **NOT IMPLEMENTED**。
+- 转录表只是 **3 个名字**，**不是**图案库；数值**未**与 AutoCAD/其它 vendor 的输出、`.pat` 原文、
+  参考图或 golden 比对 —— 属 **ADR U-1「我们的实现」**，不得写成 vendor 兼容。
+- **无 GUI/GPU/像素证据**：本轮只做命令/会话/UI 契约层；未启动宿主、未抓帧、未跑 Wayland/X11/
+  Windows/Wine，React 侧只跑 `tsc` + `node --test`（**不是**运行时挂载或像素证据）。
+- `apps/app-linux` 的证据驱动（`evidence/draw_hatch.rs`/`draw_js.rs`）**未**扩展到新参数
+  `hatchPattern`（仍只读 `hatchPatternType` 等），因此**没有**原生/Web 侧新参数证据。
+- 预定义图案经 `HatchPattern::families()` 与导入图案共用同一合成路径，**未**改变既有导入渲染；
+  但 `HatchPatternLine` 的 offset 帧与 `.pat` 行坐标系的差异是**既有**声明（导出把域内平面帧值写回
+  组 45/46，本仓自身往返稳定；其它 CAD 读者如何解释**未验证**）。
+- 全 workspace 全量门禁、平台编译矩阵、CI、release 打包均 **NOT RUN**（按 AGENTS 的日常策略只验证
+  本轮改动范围）。
+
 ## 2026-10-26 前端迁移到 TypeScript / TSX
 
 ### 结论

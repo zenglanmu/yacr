@@ -1,3 +1,4 @@
+use super::text_policy::{has_line_break, single_line_newline_error};
 use super::*;
 
 impl Application {
@@ -18,6 +19,7 @@ impl Application {
             CommandId::CreatePoint => self.create_point(session, command),
             CommandId::CreateSpline => self.create_spline(session, command),
             CommandId::CreateText => self.create_text(session, command),
+            CommandId::CreateMText => self.create_mtext(session, command),
             CommandId::MLeader => self.create_mleader(session, command),
             CommandId::TextEdit => self.edit_text(command),
             CommandId::DimLinear => self.dim_linear(session, command),
@@ -52,6 +54,7 @@ impl Application {
             CommandId::SetActiveLayer => self.set_active_layer(session, command),
             CommandId::SetEntityProperty => self.set_entity_property(session, command),
             CommandId::MatchProp => self.match_prop(session, command),
+            CommandId::GripStretch => self.grip_stretch(command),
             _ => Err(CadError::InvalidInput(
                 "not a drawing/edit command".to_string(),
             )),
@@ -513,12 +516,17 @@ impl Application {
     /// * an empty or whitespace-only text (`tool.text_empty` semantics);
     /// * more than [`MAX_TOOL_TEXT_CHARS`] characters, counted in **characters**
     ///   (not bytes), matching the capture bound;
+    /// * a text containing `\r`/`\n` (`text.single_line_newline`): an `AcDbText`
+    ///   does not interpret `\P`, so storing a multi-line draft here produced an
+    ///   entity that rendered over several lines and could never be re-edited by
+    ///   `TEXTEDIT`. MTEXT is the multi-line channel;
     /// * a non-finite position, or a non-finite/non-positive height;
     /// * a missing active layer (the shared create funnel).
     ///
     /// The **style** is the drawing's `Standard` text style (the `StyleId(0)`
     /// entry as the documented fallback) and its first resource key becomes the
-    /// font key, so the stored text is drawn with the style's face. The
+    /// font key, so the stored text is drawn with the style's face; the resolution
+    /// is [`resolve_created_text_style`], the same one MTEXT creation uses. The
     /// **alignment** is the style default (left/baseline): the `Style` table
     /// carries no alignment and TEXT creation has no justify prompt, so a
     /// per-invocation alignment would be an invented value. A single-line text is
@@ -560,6 +568,12 @@ impl Application {
                  got {characters}"
             )));
         }
+        // TEXT is single-line: a draft with a line break would be stored as an
+        // `AcDbText` the renderer draws over several lines and `TEXTEDIT` then
+        // refuses. Refuse it here instead of storing a value we cannot edit.
+        if has_line_break(text) {
+            return Err(single_line_newline_error("CreateText"));
+        }
         if !height.is_finite() || *height <= 0.0 {
             return Err(CadError::InvalidInput(format!(
                 "CreateText height must be finite and positive, got {height}"
@@ -567,21 +581,15 @@ impl Application {
         }
         // The style is resolved from the authoritative drawing, never fabricated:
         // `Standard` by name, else the documented `StyleId(0)` fallback, else no
-        // style at all (the import path's own convention).
+        // style at all (the import path's own convention). The resolution is
+        // shared with MTEXT creation so the two cannot disagree.
         let (style, font) = {
             let document = self
                 .workspace
                 .documents
                 .get(&command.document)
                 .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-            let drawing = document.drawing.as_ref();
-            let resolved = drawing
-                .style_by_name(TEXT_STYLE_NAME)
-                .or_else(|| drawing.style(StyleId(0)));
-            (
-                resolved.map(|style| style.id).unwrap_or(StyleId(0)),
-                resolved.and_then(|style| style.resource_keys.first().cloned()),
-            )
+            resolve_created_text_style(document.drawing.as_ref())
         };
         let geometry = SemanticGeometry::Text {
             text: text.clone(),
@@ -602,10 +610,6 @@ impl Application {
         self.commit_new_entity(session, command, geometry, "create text")
     }
 }
-
-/// The text style `TEXT` creation resolves by name before falling back to the
-/// documented `StyleId(0)` entry (ADR 0019 F.1).
-const TEXT_STYLE_NAME: &str = "Standard";
 
 /// The minimum separation (world units) for two polyline vertices to count as
 /// distinct. Below this a capture is a repeated single point and has no segment.

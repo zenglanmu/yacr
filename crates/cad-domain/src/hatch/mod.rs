@@ -7,14 +7,16 @@
 //!
 //! The implementation is split across submodules: `common` (shared helpers),
 //! `simplify` (boundary reduction), `fill` (solid triangulation), `pattern`
-//! (line patterns) and `gradient` (gradient colouring). This module re-exports
-//! the public surface as `cad_domain::hatch::...`; it lives in `cad-domain`
+//! (line patterns), `patterns` (the small hand-transcribed predefined pattern
+//! table) and `gradient` (gradient colouring). This module re-exports the
+//! public surface as `cad_domain::hatch::...`; it lives in `cad-domain`
 //! because the stored display derivation sits with `SemanticGeometry::Hatch`.
 
 mod common;
 mod fill;
 mod gradient;
 mod pattern;
+mod patterns;
 mod simplify;
 
 pub(crate) use common::{point_in_ring, ring_is_inside};
@@ -28,7 +30,13 @@ pub use gradient::{
     GradientStop,
 };
 pub use pattern::{pattern_polylines, PatternLine};
+pub use patterns::{
+    predefined_pattern, predefined_pattern_by_index, predefined_patterns, PredefinedPattern,
+    PredefinedPatternLine,
+};
 pub use simplify::simplify;
 
+#[cfg(test)]
+mod patterns_tests;
 #[cfg(test)]
 mod tests;

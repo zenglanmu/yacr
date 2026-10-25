@@ -426,16 +426,7 @@ pub fn cad_set_layer_visible(
     name: String,
     visible: bool,
 ) -> Result<CadCommandAck, String> {
-    let mut state = lock(&shared.0);
-    let cad_mode = state.shell.cad_mode;
-    let modal_open = modal_gate_open(&state.shell);
-    admit_layer_write(
-        &mut state.cad_layer_writes,
-        cad_mode,
-        modal_open,
-        CadLayerWrite::SetVisible { name, visible },
-    )?;
-    Ok(CadCommandAck { accepted: true })
+    admit_shared_layer_write(&shared.0, CadLayerWrite::SetVisible { name, visible })
 }
 
 /// `cad_restore_layers` command: queue a **restore** of every temporary layer
@@ -447,16 +438,7 @@ pub fn cad_set_layer_visible(
 /// explicitly (`layer.no_document`) instead of reporting a restore of nothing.
 #[tauri::command]
 pub fn cad_restore_layers(shared: tauri::State<'_, ProbeShared>) -> Result<CadCommandAck, String> {
-    let mut state = lock(&shared.0);
-    let cad_mode = state.shell.cad_mode;
-    let modal_open = modal_gate_open(&state.shell);
-    admit_layer_write(
-        &mut state.cad_layer_writes,
-        cad_mode,
-        modal_open,
-        CadLayerWrite::Restore,
-    )?;
-    Ok(CadCommandAck { accepted: true })
+    admit_shared_layer_write(&shared.0, CadLayerWrite::Restore)
 }
 
 /// `cad_set_active_layer` command: queue one active-layer change.
@@ -473,16 +455,105 @@ pub fn cad_set_active_layer(
     shared: tauri::State<'_, ProbeShared>,
     name: String,
 ) -> Result<CadCommandAck, String> {
-    let mut state = lock(&shared.0);
+    admit_shared_layer_write(&shared.0, CadLayerWrite::SetActive { name })
+}
+
+/// Queue one typed layer write through the **one** layer-write channel.
+///
+/// Every layer command (the visibility override, the restore, the active-layer
+/// pick and the three structural table writes) shares this admission: the modal
+/// popup gate, then the probe-mode gate, then the bounded queue
+/// (`.cad_layer_writes`). There is deliberately no second write channel — the
+/// owner tick drains this one queue in admission order.
+fn admit_shared_layer_write(
+    shared: &Arc<Mutex<Shared>>,
+    write: CadLayerWrite,
+) -> Result<CadCommandAck, String> {
+    let mut state = lock(shared);
     let cad_mode = state.shell.cad_mode;
     let modal_open = modal_gate_open(&state.shell);
-    admit_layer_write(
-        &mut state.cad_layer_writes,
-        cad_mode,
-        modal_open,
-        CadLayerWrite::SetActive { name },
-    )?;
+    admit_layer_write(&mut state.cad_layer_writes, cad_mode, modal_open, write)?;
     Ok(CadCommandAck { accepted: true })
+}
+
+/// `cad_create_layer` command: queue one **layer table** write.
+///
+/// Unlike the visibility/active commands this is a real database write (one
+/// revision bump, not undoable). The wire shape is `{ name: <string> }`; the name
+/// is validated on the owner thread by the database (trimmed, non-empty, the
+/// AutoCAD-illegal character set, unique case-insensitively) and a refusal is the
+/// database's own stable reason (`layer.name_empty`, `layer.name_illegal_char`,
+/// `layer.duplicate_name`), never a repaired name.
+///
+/// `{accepted:true}` means **queued**, not completed: the panel re-reads
+/// `cad_layers` and sees the row only once the owner tick committed it.
+#[tauri::command]
+pub fn cad_create_layer(
+    shared: tauri::State<'_, ProbeShared>,
+    name: String,
+) -> Result<CadCommandAck, String> {
+    cad_create_layer_impl(&shared.0, name)
+}
+
+/// Command body of [`cad_create_layer`], without the Tauri state wrapper.
+pub fn cad_create_layer_impl(
+    shared: &Arc<Mutex<Shared>>,
+    name: String,
+) -> Result<CadCommandAck, String> {
+    admit_shared_layer_write(shared, CadLayerWrite::Create { name })
+}
+
+/// `cad_rename_layer` command: queue one layer rename (`RENAMELAYER`).
+///
+/// The wire shape is `{ layer: <string>, name: <string> }`: `layer` addresses the
+/// existing row by **name** (the host resolves it against the drawing's own table,
+/// so an unknown or ambiguous selector is an explicit `layer.unknown` /
+/// `layer.ambiguous_name` refusal) and `name` is the new name, validated by the
+/// same database rules as a create. Entity references are by id, so nothing is
+/// retargeted. Not undoable.
+///
+/// `{accepted:true}` means **queued**: the next `cad_layers` read shows the new
+/// name and no longer the old one.
+#[tauri::command]
+pub fn cad_rename_layer(
+    shared: tauri::State<'_, ProbeShared>,
+    layer: String,
+    name: String,
+) -> Result<CadCommandAck, String> {
+    cad_rename_layer_impl(&shared.0, layer, name)
+}
+
+/// Command body of [`cad_rename_layer`], without the Tauri state wrapper.
+pub fn cad_rename_layer_impl(
+    shared: &Arc<Mutex<Shared>>,
+    layer: String,
+    name: String,
+) -> Result<CadCommandAck, String> {
+    admit_shared_layer_write(shared, CadLayerWrite::Rename { layer, name })
+}
+
+/// `cad_delete_layer` command: queue one layer delete (`DELETELAYER`).
+///
+/// The wire shape is `{ layer: <string> }`, addressing the row by name. The
+/// database refuses the default layer `0` (`layer.default_undeletable`) and any
+/// layer an entity still references (`layer.in_use`, naming the count), so no
+/// entity is ever left pointing at a missing layer. Deleting the active layer
+/// makes `0` current again — that shows up in the next `cad_layers` read
+/// (`active`), never as a stale name. Not undoable.
+#[tauri::command]
+pub fn cad_delete_layer(
+    shared: tauri::State<'_, ProbeShared>,
+    layer: String,
+) -> Result<CadCommandAck, String> {
+    cad_delete_layer_impl(&shared.0, layer)
+}
+
+/// Command body of [`cad_delete_layer`], without the Tauri state wrapper.
+pub fn cad_delete_layer_impl(
+    shared: &Arc<Mutex<Shared>>,
+    layer: String,
+) -> Result<CadCommandAck, String> {
+    admit_shared_layer_write(shared, CadLayerWrite::Delete { layer })
 }
 
 /// `cad_status` command: the latest main-thread CAD snapshot, with the host-side
@@ -704,6 +775,9 @@ pub const COMMAND_NAMES: &[&str] = &[
     "cad_set_layer_visible",
     "cad_restore_layers",
     "cad_set_active_layer",
+    "cad_create_layer",
+    "cad_rename_layer",
+    "cad_delete_layer",
 ];
 
 /// Build the `invoke_handler` for the desktop hosts.
@@ -732,6 +806,9 @@ pub fn register_commands<R: tauri::Runtime>(
         cad_layers,
         cad_set_layer_visible,
         cad_restore_layers,
-        cad_set_active_layer
+        cad_set_active_layer,
+        cad_create_layer,
+        cad_rename_layer,
+        cad_delete_layer
     ]
 }

@@ -133,6 +133,56 @@ pub enum CommandId {
     /// spacing or background, and MTEXT's columns/background/line-spacing
     /// style/drawing direction are **not** modelled (decision H). Work-only.
     CreateText,
+    /// MTEXT: insert one multiline `Text` geometry stored as an `AcDbMText`
+    /// entity (the command core; the interactive two-corner tool maps onto it).
+    ///
+    /// Payload is
+    /// `MText { position, width, text, height, rotation, h_align, v_align }`.
+    /// Everything the payload carries is used verbatim:
+    ///
+    /// * `text` — the draft; `\r\n`/`\r`/`\n` are stored as `\P` by the **one**
+    ///   policy MTEXT creation and `TEXTEDIT` share, which is exactly why the
+    ///   entity is stamped `AcDbMText` (see below);
+    /// * `position` — the insertion point (finite);
+    /// * `width` — the automatic wrap boundary, the DXF group-41
+    ///   `rectangle_width` equivalent ([`cad_domain::wrap_width_from_dxf`] is the
+    ///   single sanitization rule). `None` means "no wrap" and stays `None`; a
+    ///   present value must be finite and `> 0` and is otherwise **refused** —
+    ///   never clamped, never turned into `None`. This is the **two-corner width
+    ///   model**: the caller derives the width from the second corner, the
+    ///   command does no capture;
+    /// * `height` — glyph height in world units (finite, `> 0`, same bound as
+    ///   `TEXT`);
+    /// * `rotation` — radians (finite);
+    /// * `h_align` / `v_align` — the attachment of the run relative to
+    ///   `position`.
+    ///
+    /// **NOT modelled** (no payload field, refused rather than implied; the four
+    /// stable reasons the importer already names under `MTEXT_UNMODELLED`):
+    /// line-spacing style (`text.line_spacing_style_unsupported`), columns
+    /// (`text.columns_unsupported`), background fill
+    /// (`text.background_unsupported`) and drawing direction
+    /// (`text.drawing_direction_unsupported`).
+    ///
+    /// The style is the drawing's `Standard` text style (`StyleId(0)` fallback,
+    /// first resource key as the font) — the **same** resolution `TEXT` uses. The
+    /// stored `type_key` is **`AcDbMText`**, produced by the create funnel's type
+    /// key override, so the newline policy, export and `TEXTEDIT` all agree;
+    /// MTEXT is never silently downgraded to `AcDbText`. One entity, one
+    /// transaction, one undo step on the active layer. Refusals: a wrong payload,
+    /// a non-finite position/rotation, empty or whitespace-only text,
+    /// over-1024-character text, a non-finite or non-positive height, an
+    /// unusable `width`, a missing active layer and Viewer mode. Work-only.
+    ///
+    /// There is a `DrawToolKind` for MTEXT (2026-10-26): the interactive
+    /// two-corner tool captures the first corner (this `position`) and the
+    /// opposite corner (which supplies `width`), then the typed text, and maps
+    /// onto exactly this payload. The bare `MTEXT` selector therefore **starts
+    /// that tool**; a dispatch that carries no payload is still refused by name.
+    /// Rotation, the attachment fields, line spacing, columns, background fill,
+    /// drawing direction and an in-command editing dialog remain NOT
+    /// IMPLEMENTED (the tool passes `0.0` and the default top-left attachment).
+    CreateMText,
     /// MLEADER: insert one straight-line multileader with text content from a
     /// two-point capture — the arrow position, then the landing point — followed
     /// by the terminal text step (ADR 0019 decision F.2, P7c).
@@ -308,7 +358,10 @@ pub enum CommandId {
     /// the import path (one definition row at offset `(0, 1)` with the spacing as
     /// the pattern scale) and recorded as
     /// [`cad_domain::HatchPatternType::UserDefined`]; a solid fill is recorded as
-    /// `Predefined` (`76=1`, matching the committed SOLID fixtures).
+    /// `Predefined` (`76=1`, matching the committed SOLID fixtures). Pattern type
+    /// code `2` (predefined) takes the `hatchPattern` **1-based** index into the
+    /// implemented `ANSI31`/`ANSI32`/`ANSI37` table, records `Predefined` (`76=1`)
+    /// and refuses an index outside that table by name.
     ///
     /// The display is derived by the unique constructor `HatchGeometry::new`,
     /// which rejects the ADR A.3 creation-path defects (self-intersecting,
@@ -317,8 +370,9 @@ pub enum CommandId {
     /// (`type_key`/`class_name` = `AcDbHatch`) is inserted through the shared
     /// create funnel in one transaction / one undo step on the active layer.
     /// Associativity, boundary-from-internal-point, boundary detection, arc/line
-    /// boundary stitching, predefined/custom pattern names, gradient creation and
-    /// `.pat` files are **NOT IMPLEMENTED**. Work-only.
+    /// boundary stitching, custom (`76=2`) pattern names and `.pat` loading,
+    /// a pattern picker dialog, gradient creation and a live preview are **NOT
+    /// IMPLEMENTED**. Work-only.
     Hatch,
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
@@ -434,6 +488,35 @@ pub enum CommandId {
     /// Set the session's active layer for new drawing entities. Session state
     /// only; no database write. Work-only.
     SetActiveLayer,
+    /// `CREATELAYER`: create a new layer table entry (a real database write).
+    ///
+    /// Payload is [`crate::CommandPayload::CreateLayer`] (the new name). The name
+    /// is trimmed and validated by the database: empty/whitespace-only, an
+    /// AutoCAD-illegal character and a duplicate (compared
+    /// **case-insensitively**) are all explicit refusals that change nothing. One
+    /// revision bump, one layer row; the new layer is visible. Layer edits are
+    /// **not undoable** (history has no layer patch kind), so no undo entry is
+    /// recorded. Work-only.
+    CreateLayer,
+    /// `RENAMELAYER`: rename an existing layer table entry.
+    ///
+    /// Payload is [`crate::CommandPayload::RenameLayer`] `{ layer, name }`: the
+    /// existing layer addressed **by name** (exact match first, then a unique
+    /// case-insensitive one; unknown and ambiguous names are distinct refusals)
+    /// and its new name, validated exactly like [`CommandId::CreateLayer`]'s.
+    /// Entity references are by id, so a rename retargets nothing. Not undoable;
+    /// one revision bump. Work-only.
+    RenameLayer,
+    /// `DELETELAYER`: delete a layer table entry.
+    ///
+    /// Payload is [`crate::CommandPayload::DeleteLayer`] `{ layer }` (addressed by
+    /// name like [`CommandId::RenameLayer`]). Refused for the default layer `0`
+    /// and for a layer still referenced by any entity (the refusal names the
+    /// count); an entity's `layer` is never re-pointed behind the user's back.
+    /// When the deleted layer is the session's active layer, the session falls
+    /// back to layer `0` and reports it in the diagnostics. Not undoable; one
+    /// revision bump. Work-only.
+    DeleteLayer,
     /// Flip the idle hover entity preview for this session. Session/display
     /// state only (no database write, no history, no ChangeSet), so it is
     /// allowed in Viewer and Work. It defaults to on (AutoCAD's
@@ -541,6 +624,27 @@ pub enum CommandId {
     /// otherwise all changed entities share one transaction / one undo step.
     /// Work-only.
     MatchProp,
+    /// `GRIPSTRETCH`: apply **one** grip drag (one handle of one entity) as one
+    /// entity update, one transaction / one undo entry.
+    ///
+    /// Payload is [`crate::CommandPayload::GripStretch`] (boxed
+    /// [`crate::GripStretchCommand`] `{ id, to }`, where `id` is a
+    /// [`crate::grips::GripId`]). It is the **payload path of a pointer
+    /// gesture**, and no gesture exists yet: there are no grip markers, no host
+    /// arming and no pointer routing, so nothing produces this payload in this
+    /// build. The bare `GRIPSTRETCH` selector carries no handle, so it is refused
+    /// explicitly (no fabricated drag).
+    ///
+    /// The handler re-reads `id.entity` (a missing entity is `grip.target_missing`
+    /// and a non-model-space one reuses `property.not_addressable`), then
+    /// re-validates the handle against the current geometry via
+    /// [`crate::grips::apply_grip`]. Every refusal — `grip.stale_handle`,
+    /// `grip.zero_displacement`, `grip.unsupported_kind`,
+    /// `grip.non_finite_target` — happens **before** the transaction is opened,
+    /// so nothing is written and no empty undo entry exists. It records history
+    /// (unlike the layer-table writes) and never routes through
+    /// [`CommandId::StretchEntities`]. Work-only.
+    GripStretch,
 }
 
 impl CommandId {
@@ -561,6 +665,7 @@ impl CommandId {
                 | Self::CreatePoint
                 | Self::CreateSpline
                 | Self::CreateText
+                | Self::CreateMText
                 | Self::MLeader
                 | Self::TextEdit
                 | Self::DimLinear
@@ -592,8 +697,12 @@ impl CommandId {
                 | Self::PasteFromClipboard
                 | Self::OffsetEntity
                 | Self::SetActiveLayer
+                | Self::CreateLayer
+                | Self::RenameLayer
+                | Self::DeleteLayer
                 | Self::SetEntityProperty
                 | Self::MatchProp
+                | Self::GripStretch
         )
     }
 }

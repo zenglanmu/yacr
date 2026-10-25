@@ -31,7 +31,8 @@ fn the_text_kind_metadata_is_explicit() {
     assert!(!DrawToolKind::Text.arity().is_open_ended());
     assert!(DrawToolKind::Text.requires_text());
     // `requires_text()` is the single authority: exactly the text kinds (TEXT,
-    // TEXTEDIT and the MLEADER whose last step is the same terminal text step).
+    // TEXTEDIT, the MLEADER whose last step is the same terminal text step, and
+    // MTEXT, whose two-corner capture is followed by the same step).
     let text_kinds: Vec<DrawToolKind> = DrawToolKind::ALL
         .into_iter()
         .filter(|kind| kind.requires_text())
@@ -41,7 +42,8 @@ fn the_text_kind_metadata_is_explicit() {
         vec![
             DrawToolKind::Text,
             DrawToolKind::TextEdit,
-            DrawToolKind::MLeader
+            DrawToolKind::MLeader,
+            DrawToolKind::MText
         ]
     );
 }
@@ -161,6 +163,39 @@ fn empty_and_whitespace_only_text_is_refused() {
         assert_eq!(tool.text(), None, "{text:?} must not be stored");
         assert!(tool.awaiting_text(), "{text:?} leaves the prompt open");
     }
+}
+
+#[test]
+fn a_newline_is_refused_for_the_single_line_text_kind_only() {
+    // TEXT is an `AcDbText`: it does not interpret `\P`, so the capture refuses a
+    // line break instead of storing a value that renders over several lines and
+    // can never be re-edited by TEXTEDIT.
+    for text in ["a\nb", "a\rb", "a\r\nb"] {
+        let mut tool = text_tool();
+        tool.push_point(p(0.0, 0.0)).unwrap();
+        let error = refusal_code(tool.set_text(text).expect_err("single-line only"));
+        assert!(
+            error.starts_with("text.single_line_newline: "),
+            "{text:?}: {error}"
+        );
+        assert_eq!(tool.text(), None, "{text:?} must not be stored");
+        assert!(tool.awaiting_text(), "{text:?} leaves the prompt open");
+    }
+    // A whitespace-only draft still reports the empty-text reason (checked first).
+    let mut tool = text_tool();
+    tool.push_point(p(0.0, 0.0)).unwrap();
+    let error = refusal_code(tool.set_text("\n  \r\n").expect_err("empty"));
+    assert!(error.contains("tool.text_empty"), "{error}");
+
+    // The multi-line kinds keep accepting line breaks: they are converted to `\P`
+    // downstream (leader content / an `AcDbMText` edit target).
+    let mut leader = DrawTool::new(DrawToolKind::MLeader, 0);
+    leader.push_point(p(0.0, 0.0)).unwrap();
+    leader.push_point(p(1.0, 0.0)).unwrap();
+    leader
+        .set_text("a\nb")
+        .expect("leader text accepts a newline");
+    assert_eq!(leader.text(), Some("a\nb"));
 }
 
 #[test]

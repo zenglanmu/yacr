@@ -420,6 +420,18 @@ impl SessionState {
         Ok(())
     }
 
+    /// **Test-only**: store a parameter value without validation.
+    ///
+    /// This exists so a contract test can reach a command's own defensive
+    /// re-validation of a value the typed channel would already have refused
+    /// (today: a HATCH predefined pattern index past the implemented table).
+    /// It is `#[cfg(test)]`, so no wire request, host or UI path can inject an
+    /// unvalidated value.
+    #[cfg(test)]
+    pub(crate) fn force_tool_parameter(&mut self, parameter: ToolParameter, value: ToolValue) {
+        self.tool_parameters.set(parameter, value);
+    }
+
     /// Set the session POLYGON side count, refusing out-of-range input.
     ///
     /// A thin convenience over [`SessionState::set_tool_parameter`] — the general
@@ -548,6 +560,8 @@ impl SessionState {
             DrawToolKind::DimContinue => CommandId::DimContinue,
             DrawToolKind::Hatch => CommandId::Hatch,
             DrawToolKind::Text => CommandId::CreateText,
+            // MTEXT is the multiline create command (one `AcDbMText`).
+            DrawToolKind::MText => CommandId::CreateMText,
             DrawToolKind::MLeader => CommandId::MLeader,
             DrawToolKind::TextEdit => CommandId::TextEdit,
         })?;
@@ -897,13 +911,17 @@ fn authorizing_command(parameter: ToolParameter) -> CommandId {
         // create command, so a Viewer-mode set is refused exactly like the create
         // commands.
         ToolParameter::HatchPatternType
+        | ToolParameter::HatchPattern
         | ToolParameter::HatchSpacing
         | ToolParameter::HatchAngle
         | ToolParameter::HatchDouble
         | ToolParameter::HatchStyle => CommandId::Hatch,
         // TEXT (P7a): the glyph height is authorized against the TEXT create
         // command, so a Viewer-mode set is refused exactly like the other create
-        // parameters.
+        // parameters. MTEXT captures with the **same** parameter (its only height
+        // channel) and `CreateMText` is Work-only too, so this one authorization is
+        // exactly the gate MTEXT needs — there is no second height parameter and no
+        // per-kind authorization to drift.
         ToolParameter::TextHeight => CommandId::CreateText,
     }
 }

@@ -439,9 +439,9 @@ pub enum DrawToolKind {
     /// entity picks** ([`Self::picked_step_count`] is `0`). It is defined by the
     /// selection snapshot taken at tool start (each selected entity becomes one
     /// boundary loop) plus the session typed parameters
-    /// ([`super::ToolParameter::HatchPatternType`], `HatchSpacing`, `HatchAngle`,
-    /// `HatchDouble`, `HatchStyle`), so it is ready as soon as the selection is
-    /// non-empty.
+    /// ([`super::ToolParameter::HatchPatternType`], `HatchPattern`, `HatchSpacing`,
+    /// `HatchAngle`, `HatchDouble`, `HatchStyle`), so it is ready as soon as the
+    /// selection is non-empty.
     ///
     /// Accepted boundaries are `Circle`, a full `Ellipse` and a **closed**
     /// `Polyline` (bulges handled); every other kind is an explicit named refusal
@@ -450,12 +450,14 @@ pub enum DrawToolKind {
     /// `HatchGeometry::new` creation-path rejection.
     ///
     /// Deliberate subset (NOT IMPLEMENTED for now): boundary from an internal
-    /// point, drawn boundaries, `remove boundaries`, predefined/custom pattern
-    /// names (no pattern table and no `.pat` parser — the refusal suggests
-    /// spacing/angle), gradient creation, associativity (`HPASSOC`), LINE/ARC
-    /// boundary stitching, spline boundaries, island detection beyond the style
-    /// semantics, and a live hatch preview (the React host cannot paint an
-    /// overlay above the native CAD partition).
+    /// point, drawn boundaries, `remove boundaries`, custom (`76=2`) pattern
+    /// names and `.pat` loading (no parser and no packaged pattern library; a
+    /// pattern picker dialog is also missing — only the three transcribed
+    /// predefined entries `ANSI31`/`ANSI32`/`ANSI37` are selectable), gradient
+    /// creation, associativity (`HPASSOC`), LINE/ARC boundary stitching, spline
+    /// boundaries, island detection beyond the style semantics, and a live hatch
+    /// preview (the React host cannot paint an overlay above the native CAD
+    /// partition).
     Hatch,
     /// TEXT: one insertion point, then the text itself (ADR 0019 decision A/F.1).
     ///
@@ -480,6 +482,26 @@ pub enum DrawToolKind {
     /// MTEXT's columns/background/line-spacing style/drawing direction are
     /// likewise not modelled (ADR 0019 decision H).
     Text,
+    /// MTEXT: the two opposite corners of the wrap rectangle, then the text
+    /// (interactive subset, 2026-10-26).
+    ///
+    /// Capture order: the **first corner** is the insertion point (`position`);
+    /// the **opposite corner** only supplies the wrap `width` (`|Δx|`, finite and
+    /// `> 0`, derived by the host — a degenerate rectangle is an explicit
+    /// `tool.mtext_zero_rect` refusal, never a fabricated width). The glyph
+    /// `height` is the session typed channel
+    /// [`super::ToolParameter::TextHeight`] (the same `2.5` default TEXT uses),
+    /// `rotation` is `0.0`, and the attachment is the AutoCAD MTEXT default
+    /// **top-left** (`TextAlignH::Left` + `TextAlignV::Top`). The text step is the
+    /// same terminal typed channel as [`Self::Text`]; newlines are allowed and
+    /// stored as `\P` by the shared policy (`AcDbMText`).
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED, so the honest union stays explicit):
+    /// user-settable rotation (`TextRotation`), user-settable attachment /
+    /// justification, line spacing, columns, background fill, drawing direction
+    /// and any in-command MTEXT editing dialog. None of them has a parameter, a
+    /// prompt or a payload field.
+    MText,
     /// MLEADER: the arrow position, then the landing point, then the text
     /// (ADR 0019 decision F.2, P7c).
     ///
@@ -533,7 +555,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 36] = [
+    pub const ALL: [DrawToolKind; 37] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -573,6 +595,9 @@ impl DrawToolKind {
         // P5f's pair is appended too, for the same index-stability reason.
         DrawToolKind::DimBaseline,
         DrawToolKind::DimContinue,
+        // MTEXT closes the list for the same reason: every pre-existing index
+        // (which the UI mirrors) stays stable.
+        DrawToolKind::MText,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -614,6 +639,7 @@ impl DrawToolKind {
             Self::Text => "text",
             Self::TextEdit => "textedit",
             Self::MLeader => "mleader",
+            Self::MText => "mtext",
         }
     }
 
@@ -657,6 +683,7 @@ impl DrawToolKind {
             "text" => Some(Self::Text),
             "textedit" => Some(Self::TextEdit),
             "mleader" => Some(Self::MLeader),
+            "mtext" => Some(Self::MText),
             _ => None,
         }
     }
@@ -769,6 +796,9 @@ impl DrawToolKind {
             // other post-ADR-0015 kinds: the ADR fence forbids new CJK literals on
             // the Rust side and the shell substitutes the catalog label anyway.
             Self::MLeader => "MLEADER",
+            // MTEXT shares the same locale-neutral fallback rule (no new CJK on
+            // the Rust side; the catalog carries the chrome copy).
+            Self::MText => "MTEXT",
         }
     }
 
@@ -840,7 +870,10 @@ impl DrawToolKind {
             | Self::DimOrdinate
             // MLEADER: the arrow position and the landing point; its text is the
             // terminal typed step, not a point.
-            | Self::MLeader => PointArity::Exact(2),
+            | Self::MLeader
+            // MTEXT: the two opposite corners of the wrap rectangle; its text is
+            // the terminal typed step, not a point.
+            | Self::MText => PointArity::Exact(2),
         }
     }
 
@@ -927,12 +960,15 @@ impl DrawToolKind {
     /// Whether this operation's **last** step is a typed string rather than a
     /// point (ADR 0019 decision A.1).
     ///
-    /// TEXT, TEXTEDIT and MLEADER carry the text step today. This is the single authority the capture
-    /// state machine, the status projection (`awaiting_text`) and the UI prompt
-    /// phase read; a UI must never infer "needs text" from `key` plus the point
-    /// count, because `ready` alone cannot tell "missing points" from "missing
-    /// text".
+    /// TEXT, TEXTEDIT, MLEADER and MTEXT carry the text step today. This is the
+    /// single authority the capture state machine, the status projection
+    /// (`awaiting_text`) and the UI prompt phase read; a UI must never infer
+    /// "needs text" from `key` plus the point count, because `ready` alone cannot
+    /// tell "missing points" from "missing text".
     pub fn requires_text(self) -> bool {
-        matches!(self, Self::Text | Self::TextEdit | Self::MLeader)
+        matches!(
+            self,
+            Self::Text | Self::TextEdit | Self::MLeader | Self::MText
+        )
     }
 }

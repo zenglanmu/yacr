@@ -45,6 +45,7 @@ impl DrawingDatabaseBuilder {
                 active_annotation_scale: None,
                 code_page: None,
                 next_entity_id: 1,
+                next_layer_id: 1,
                 bounds_cache: Default::default(),
             },
             errors: Vec::new(),
@@ -430,6 +431,11 @@ impl DrawingDatabaseBuilder {
             .max()
             .unwrap_or(0);
         self.database.next_entity_id = max_entity.saturating_add(1);
+        // Initialise the layer-id allocator the same way, from the largest
+        // imported layer id, so the first `create_layer` can never collide and a
+        // later delete of the largest row cannot make its id reusable.
+        let max_layer = self.database.layers.keys().map(|l| l.0).max().unwrap_or(0);
+        self.database.next_layer_id = max_layer.saturating_add(1);
         Ok(self.database)
     }
 }

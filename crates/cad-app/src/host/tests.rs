@@ -14,6 +14,7 @@ mod dimension;
 mod document;
 mod draw_pick;
 mod explode;
+mod mtext;
 mod ortho;
 mod polygon;
 mod properties;

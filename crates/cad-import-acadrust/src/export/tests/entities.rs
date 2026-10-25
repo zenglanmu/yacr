@@ -189,6 +189,131 @@ fn single_line_text_is_exact_and_newline_text_becomes_mtext() {
         .any(|e| e.code == "export.converted.text_mtext"));
 }
 
+/// Export one `Text` geometry under an explicit source `type_key`.
+///
+/// The DXF branch must follow the entity type key, so these cases cannot use
+/// `export_one`: every entity produced by `db_with` carries the synthetic
+/// `"test"` type key.
+fn export_text_as(type_key: &str, text: &str, wrap_width: Option<f64>) -> (Vec<u8>, ExportReport) {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_style(Style {
+            id: StyleId(0),
+            name: "Standard".into(),
+            resource_keys: Vec::new(),
+        })
+        .unwrap();
+    builder
+        .insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: type_key.into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Text {
+                text: text.into(),
+                position: p(1.0, 2.0, 0.0),
+                style: StyleId(0),
+                height: 2.5,
+                rotation: 0.0,
+                font: None,
+                h_align: TextAlignH::Left,
+                // Top folds to an MTEXT attachment without a lossy reason, so a
+                // type-key MTEXT stays `Exact`; baseline would report one.
+                v_align: TextAlignV::Top,
+                wrap_width,
+            },
+            draw_order: 0,
+        })
+        .unwrap();
+    export_db(&builder.finish().unwrap())
+}
+
+#[test]
+fn an_imported_mtext_type_key_wins_over_the_value_content() {
+    // An MTEXT imported from DXF keeps its raw value, where a paragraph break
+    // is the literal `\P` escape rather than a newline. Exporting it as TEXT
+    // would print that escape and drop the wrap boundary: silent data loss.
+    let (bytes, report) = export_text_as("AcDbMText", "a\\Pb", Some(5.0));
+    match &read_entities(&bytes)[0] {
+        EntityType::MText(mtext) => {
+            assert_eq!(mtext.value, "a\\Pb", "value must be written verbatim");
+            assert!(
+                (mtext.rectangle_width - 5.0).abs() < 1e-9,
+                "group 41 must carry the wrap width, got {}",
+                mtext.rectangle_width
+            );
+        }
+        other => panic!("expected MTEXT, got {other:?}"),
+    }
+    // The type key already said MTEXT and a `\P` value is written verbatim, so
+    // nothing is converted; the wrap width is carried by group 41.
+    assert_eq!(report.counts.exact, 1);
+    assert!(!report
+        .entries
+        .iter()
+        .any(|e| e.code == "export.converted.text_mtext"));
+}
+
+#[test]
+fn created_text_with_a_newline_still_exports_as_mtext() {
+    // Compatibility path: domain-created multi-line text has the `AcDbText`
+    // type key (the domain has no MTEXT key of its own), so the newline
+    // heuristic must keep promoting it.
+    let (bytes, report) = export_text_as("AcDbText", "LINE1\nLINE2", None);
+    match &read_entities(&bytes)[0] {
+        EntityType::MText(mtext) => assert_eq!(mtext.value, "LINE1\\PLINE2"),
+        other => panic!("expected MTEXT, got {other:?}"),
+    }
+    assert_eq!(report.counts.converted, 1);
+    assert!(report
+        .entries
+        .iter()
+        .any(|e| e.code == "export.converted.text_mtext"));
+}
+
+#[test]
+fn a_single_line_acdbtext_stays_a_text_entity() {
+    let (bytes, report) = export_text_as("AcDbText", "HELLO", None);
+    match &read_entities(&bytes)[0] {
+        EntityType::Text(text) => assert_eq!(text.value, "HELLO"),
+        other => panic!("expected TEXT, got {other:?}"),
+    }
+    assert_eq!(report.counts.exact, 1);
+    assert_eq!(report.counts.converted, 0);
+}
+
+#[test]
+fn an_acdbmtext_without_a_paragraph_mark_is_still_mtext() {
+    // The type key alone decides, so no content heuristic is needed here.
+    // `wrap_width: None` must not fabricate a width: acadrust's DXF writer
+    // always emits group 41, so the absent boundary is the DXF "no width
+    // limit" 0.0 rather than `MText::new()`'s placeholder 10.0.
+    let (bytes, report) = export_text_as("AcDbMText", "SINGLE", None);
+    match &read_entities(&bytes)[0] {
+        EntityType::MText(mtext) => {
+            assert_eq!(mtext.value, "SINGLE");
+            assert_eq!(mtext.rectangle_width, 0.0);
+        }
+        other => panic!("expected MTEXT, got {other:?}"),
+    }
+    // The type key already said MTEXT and the value needs no rewrite, so the
+    // mapping is faithful to the database (`wrap_width: None` is written as the
+    // DXF "no width limit" 0.0, never a fabricated value).
+    assert_eq!(report.counts.exact, 1);
+}
+
 #[test]
 fn insert_explodes_block_members_with_the_placement_transform() {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));

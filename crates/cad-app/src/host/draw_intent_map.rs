@@ -6,7 +6,7 @@
 //! inherent method on [`HostController`] so the call sites in `host/mod.rs` are
 //! unchanged.
 
-use cad_domain::{CadError, CadResult, Point3, SelectionRef};
+use cad_domain::{CadError, CadResult, Point3, SelectionRef, TextAlignH, TextAlignV};
 
 use crate::{Command, DrawIntent};
 
@@ -91,6 +91,36 @@ impl HostController {
                         .unwrap_or(crate::draw_tool::TEXT_DEFAULT_HEIGHT),
                 },
             ),
+            // MTEXT: the two captured corners and the terminal text. This is the
+            // only place the payload's **two-corner model** is applied: the wrap
+            // width is `|opposite.x − first.x|` (finite, `> 0`, refused by name
+            // otherwise), the height is the same session typed channel TEXT uses,
+            // the rotation is `0.0` and the attachment is AutoCAD's MTEXT default
+            // top-left. Nothing is fabricated: a degenerate or non-plan pair is an
+            // explicit refusal that opens no transaction.
+            DrawIntent::MText {
+                first,
+                opposite,
+                text,
+            } => {
+                let width = mtext_wrap_width(first, opposite)?;
+                (
+                    crate::CommandId::CreateMText,
+                    crate::CommandPayload::MText {
+                        position: first,
+                        width: Some(width),
+                        text,
+                        height: self
+                            .session
+                            .tool_parameter(crate::ToolParameter::TextHeight)
+                            .number()
+                            .unwrap_or(crate::draw_tool::TEXT_DEFAULT_HEIGHT),
+                        rotation: 0.0,
+                        h_align: TextAlignH::Left,
+                        v_align: TextAlignV::Top,
+                    },
+                )
+            }
             // TEXTEDIT: the pick resolved at capture time plus the replacement
             // text. The command re-reads the entity at apply time (never a stale
             // retarget) and preserves every field but the string.
@@ -400,4 +430,47 @@ impl HostController {
         }
         Ok(out)
     }
+}
+
+/// The MTEXT wrap width derived from the two captured opposite corners.
+///
+/// `|Δx|` is the only span the payload's two-corner model stores: the rectangle's
+/// vertical span is a capture-time validity check, not a stored value. The rules
+/// mirror RECTANG's command-layer refusals — finite corners, one shared `+Z`
+/// plane, a non-degenerate rectangle — so an unusable pair is named and opens no
+/// transaction instead of producing a fabricated width (a missing wrap width
+/// would silently mean "no wrap", a different layout).
+///
+/// * `tool.mtext_zero_rect` — a zero width or height (the corners do not define
+///   a rectangle), or a non-finite corner;
+/// * `CreateMText corners must lie in one +Z plane` — an off-plane pair (the flat
+///   `+Z` work-plane subset, exactly like RECTANG/ELLIPSE/POLYGON).
+fn mtext_wrap_width(first: Point3, opposite: Point3) -> CadResult<f64> {
+    if !first.x.is_finite()
+        || !first.y.is_finite()
+        || !first.z.is_finite()
+        || !opposite.x.is_finite()
+        || !opposite.y.is_finite()
+        || !opposite.z.is_finite()
+    {
+        return Err(CadError::InvalidInput(
+            "tool.mtext_zero_rect: CreateMText corners must be finite".into(),
+        ));
+    }
+    let z_tolerance = 1e-9 * (1.0 + first.z.abs() + opposite.z.abs());
+    if (opposite.z - first.z).abs() > z_tolerance {
+        return Err(CadError::InvalidInput(
+            "CreateMText corners must lie in one +Z plane".into(),
+        ));
+    }
+    let width = (opposite.x - first.x).abs();
+    let height = (opposite.y - first.y).abs();
+    if width <= 0.0 || height <= 0.0 {
+        return Err(CadError::InvalidInput(
+            "tool.mtext_zero_rect: MTEXT needs two corners with distinct X (zero width) and \
+             distinct Y (zero height)"
+                .into(),
+        ));
+    }
+    Ok(width)
 }

@@ -2,6 +2,24 @@ use super::trim_boundary::{collect_boundaries, BoundarySet};
 use super::trim_curves::{cut_tolerance, plan_extend, plan_trim, TargetCurve, TrimPlan};
 use super::*;
 
+/// The per-insertion options of the shared create funnel
+/// ([`Application::insert_new_entities`]).
+///
+/// Bundled instead of six positional parameters so the stored `type_key` override
+/// fits without a second, near-identical funnel. `type_key: None` is exactly the
+/// pre-existing behaviour ([`class_name`]'s answer).
+struct NewEntityInsert<'a> {
+    layer: LayerId,
+    space: SpaceId,
+    /// A captured display state (render attributes + dynamic-visibility
+    /// membership); single-entity OFFSET only.
+    display: Option<cad_db::EntityDisplayState>,
+    /// The stored `type_key` override; `None` = [`class_name`].
+    type_key: Option<&'a str>,
+    /// The transaction / undo label (also used in refusal messages).
+    label: &'a str,
+}
+
 impl Application {
     /// Create an offset copy of a single selected LINE or CIRCLE.
     ///
@@ -427,6 +445,35 @@ impl Application {
         )
     }
 
+    /// The same insert path with an explicit **stored type key** override.
+    ///
+    /// Every geometry gets its `type_key` from [`class_name`], which is right for
+    /// the analytic entities but cannot express "this `Text` geometry came from
+    /// MTEXT" — both would be `AcDbText`. MTEXT creation passes `AcDbMText` here
+    /// so the newline policy, the export path and `TEXTEDIT` agree on the same
+    /// entity. Everything else (active layer, model space, one transaction, one
+    /// undo step, all-or-nothing) is the shared funnel.
+    pub(super) fn commit_new_entity_typed(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        geometry: SemanticGeometry,
+        type_key: &str,
+        label: &str,
+    ) -> CadResult<CommandOutcome> {
+        self.insert_new_entities(
+            command,
+            vec![geometry],
+            NewEntityInsert {
+                layer: session.active_layer,
+                space: SpaceId::Model,
+                display: None,
+                type_key: Some(type_key),
+                label,
+            },
+        )
+    }
+
     /// Shared insert path for a **batch** of new entities on the active layer in
     /// model space (DIMCENTER inserts several plain LINEs in one transaction /
     /// one undo step).
@@ -475,6 +522,10 @@ impl Application {
     /// fallback. A captured display state (single-entity OFFSET only) is restored
     /// on the **first** inserted entity after commit and recorded on its patch's
     /// `after_state` so a redo re-applies it; a batch (DIMCENTER) passes `None`.
+    ///
+    /// Every entity's stored `type_key` is [`class_name`]'s answer; the
+    /// type-key-carrying variant [`Self::commit_new_entity_typed`] is what MTEXT
+    /// creation uses and every caller here keeps exactly that behaviour.
     fn commit_new_entities_in(
         &mut self,
         command: &Command,
@@ -484,9 +535,48 @@ impl Application {
         display: Option<cad_db::EntityDisplayState>,
         label: &str,
     ) -> CadResult<CommandOutcome> {
+        self.insert_new_entities(
+            command,
+            geometries,
+            NewEntityInsert {
+                layer,
+                space,
+                display,
+                type_key: None,
+                label,
+            },
+        )
+    }
+
+    /// The shared create funnel: one transaction, one undo step, all-or-nothing.
+    ///
+    /// `insert.type_key` is the **only** variation between an ordinary creation and
+    /// a typed one: `None` stamps [`class_name`] (every pre-existing caller), and
+    /// `Some(key)` stamps that key instead. The override is refused for a batch —
+    /// sharing one key across entities it was not meant for would mis-label them —
+    /// so it can only describe a single created entity.
+    fn insert_new_entities(
+        &mut self,
+        command: &Command,
+        geometries: Vec<SemanticGeometry>,
+        insert: NewEntityInsert<'_>,
+    ) -> CadResult<CommandOutcome> {
+        let NewEntityInsert {
+            layer,
+            space,
+            display,
+            type_key,
+            label,
+        } = insert;
         if geometries.is_empty() {
             return Err(CadError::InvalidInput(format!(
                 "{label} needs at least one entity to insert"
+            )));
+        }
+        if type_key.is_some() && geometries.len() != 1 {
+            return Err(CadError::InvalidInput(format!(
+                "{label} can stamp an explicit type key on exactly one entity, got {}",
+                geometries.len()
             )));
         }
         let document_id = command.document;
@@ -517,7 +607,9 @@ impl Application {
             entities.push(DbEntity {
                 object: cad_db::DbObject {
                     id: ObjectId(entity_id.0),
-                    type_key: class_name(&geometry).to_string(),
+                    type_key: type_key
+                        .map(str::to_string)
+                        .unwrap_or_else(|| class_name(&geometry).to_string()),
                     revision: Revision(0),
                     source_handle: None,
                 },

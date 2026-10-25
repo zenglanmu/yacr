@@ -569,6 +569,77 @@ button, input, select { font: inherit; color: inherit; }
   color: var(--text-muted); font-family: var(--font-ui); font-size: 10px;
   line-height: 1.3;
 }
+/* Row actions (rename / delete) ----------------------------------------- */
+/* Two more controls per row would make a 300px dock read as a toolbar per line,
+ * so they are revealed by hover and by `:focus-within` — the same two triggers a
+ * pointer and the keyboard already use — and their space is reserved at all times
+ * (`opacity`, never `display`), so opening the pencil never moves the name. An
+ * `.is-editing` row keeps them showing, because that row's own form is what they
+ * open. */
+.layers__actions {
+  display: inline-flex; align-items: center; gap: 1px;
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+.layers__row:hover .layers__actions,
+.layers__row:focus-within .layers__actions,
+.layers__row.is-editing .layers__actions { opacity: 1; }
+/* The row whose form is open: the pressed surface the rest of the chrome uses for
+ * "this is the thing you are working on", while the chips stay exactly as they
+ * were so the row keeps its current/override identity. */
+.layers__row.is-editing { background: var(--pressed); }
+.layers__row.is-editing:hover { background: var(--pressed); }
+/* Inline rename: the field replaces the name cell (same grid column, same line
+ * height as the name it hides) and focuses into the shared field ring, so the row
+ * keeps its height and nothing below it moves. */
+.layers__rename {
+  width: 100%; min-width: 0; height: 20px; padding: 0 4px;
+  background: var(--field); color: var(--text);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  font-family: var(--font-mono); font-size: 11.5px;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+.layers__rename:focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.layers__rename[aria-invalid='true'] { border-color: var(--danger); }
+/* The delete confirm: a note plus Cancel/Delete, spanning the row's own grid. */
+.layers__confirm { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding: 1px 0 0; }
+.layers__confirm-text {
+  margin: 0; color: var(--text); font-family: var(--font-ui);
+  font-size: 10.5px; line-height: 1.35; overflow-wrap: anywhere;
+}
+/* Destructive, in the chrome's own danger token — not the accent a `solid`
+ * button carries, because this is the one press in the panel that removes
+ * something. */
+.ui-button.layers__danger { color: var(--danger); }
+.ui-button.layers__danger:hover:not(:disabled) { color: var(--danger); background: var(--hover); }
+/* Header action group + the create form -------------------------------- */
+.layers__head-actions { display: inline-flex; align-items: center; gap: 1px; }
+/* One field, its rules and its two buttons, in the tools strip: the same padding
+ * and gap scale as the search row above it, so opening the form only makes the
+ * strip taller (never wider, never a re-measured row). `rise` is the shared
+ * "something appeared here" motion the completions list uses. */
+.layers__new { display: flex; flex-direction: column; gap: 4px; animation: rise var(--t-fast) both; }
+.layers__field {
+  display: flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 6px;
+  background: var(--field); color: var(--text-muted);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+.layers__field:focus-within { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.layers__field-label { flex: none; color: var(--text-muted); font-family: var(--font-ui); font-size: 11px; white-space: nowrap; }
+.layers__field-input {
+  flex: 1 1 auto; min-width: 0; height: 100%; padding: 0;
+  background: transparent; border: 0; color: var(--text);
+  font-family: var(--font-mono); font-size: 11px;
+}
+.layers__field-input:focus-visible { outline: none; }
+.layers__field-input::placeholder { color: var(--text-muted); opacity: 1; }
+.layers__hint {
+  margin: 0; color: var(--text-muted); font-family: var(--font-ui);
+  font-size: 10px; line-height: 1.35; overflow-wrap: anywhere;
+}
+.layers__form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 
 /* Navigation rail -------------------------------------------------------- */
 .navrail {

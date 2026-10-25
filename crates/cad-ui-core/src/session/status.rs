@@ -257,10 +257,14 @@ pub struct CadToolParams {
     pub array_rotate_items: Option<bool>,
     /// The ALIGN scale flag, or `null` for every other tool.
     pub align_scale: Option<bool>,
-    /// The HATCH pattern type (`0` solid, `1` user-defined), or `null` for every
-    /// other tool (ADR 0018 decision D, P6b).
+    /// The HATCH pattern type (`0` solid, `1` user-defined, `2` predefined), or
+    /// `null` for every other tool (ADR 0018 decision D, P6b).
     pub hatch_pattern_type: Option<f64>,
-    /// The HATCH user-defined pattern spacing, or `null` for every other tool.
+    /// The HATCH predefined pattern index (**1-based** into the implemented
+    /// `ANSI31`/`ANSI32`/`ANSI37` table), or `null` for every other tool.
+    pub hatch_pattern: Option<f64>,
+    /// The HATCH pattern spacing (also the predefined pattern scale / `HPSCALE`),
+    /// or `null` for every other tool.
     pub hatch_spacing: Option<f64>,
     /// The HATCH pattern angle in degrees, or `null` for every other tool.
     pub hatch_angle: Option<f64>,
@@ -751,11 +755,15 @@ pub(super) fn cad_tool(
                     ToolParameter::AlignScale,
                     preview.kind == DrawToolKind::Align,
                 ),
-                // The five HATCH parameters are present **only** while a HATCH
+                // The six HATCH parameters are present **only** while a HATCH
                 // capture is active (ADR 0018 decision D, P6b): the tool captures
                 // no points, so these are its whole definition.
                 hatch_pattern_type: number(
                     ToolParameter::HatchPatternType,
+                    preview.kind == DrawToolKind::Hatch,
+                ),
+                hatch_pattern: number(
+                    ToolParameter::HatchPattern,
                     preview.kind == DrawToolKind::Hatch,
                 ),
                 hatch_spacing: number(
@@ -774,12 +782,13 @@ pub(super) fn cad_tool(
                     ToolParameter::HatchStyle,
                     preview.kind == DrawToolKind::Hatch,
                 ),
-                // The TEXT height is present **only** while a TEXT capture is
-                // active (ADR 0019 decision F.1): it is that tool's whole numeric
-                // definition.
+                // The text height is present **only** while a text-carrying
+                // creation capture is active (ADR 0019 decision F.1). TEXT and
+                // MTEXT both create their text with it, so both project it; the
+                // two edit kinds (TEXTEDIT, MLEADER) have no height channel.
                 text_height: number(
                     ToolParameter::TextHeight,
-                    preview.kind == DrawToolKind::Text,
+                    matches!(preview.kind, DrawToolKind::Text | DrawToolKind::MText),
                 ),
             },
         }),
@@ -808,6 +817,7 @@ pub(super) fn cad_tool(
                 array_rotate_items: None,
                 align_scale: None,
                 hatch_pattern_type: None,
+                hatch_pattern: None,
                 hatch_spacing: None,
                 hatch_angle: None,
                 hatch_double: None,

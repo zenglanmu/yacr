@@ -16,10 +16,13 @@ import assert from 'node:assert/strict';
 import {
   awaitingToolText,
   checkToolText,
+  MTEXT_STEP_PROMPT_KEY,
+  MTEXT_STEP_PROMPT_KEYS,
   setToolText,
   textDraftState,
   textEscapeAction,
   textLength,
+  textStepPromptKey,
   TEXT_PICK_PROMPT_KEY,
   TEXT_PROMPT_KEY,
   TEXT_STEP_PROMPT_KEY,
@@ -38,7 +41,7 @@ const en = await readCatalog('en');
 
 // The router vocabulary once the text channel lands (ADR 0019 P7a): TEXT is a
 // real selector, admission — not a local flag — is what enables the button.
-const HOST_NAMES = ['TEXT', 'LINE', 'CONFIRM', 'CANCEL'];
+const HOST_NAMES = ['TEXT', 'MTEXT', 'LINE', 'CONFIRM', 'CANCEL'];
 setCommandCatalog(HOST_NAMES);
 const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
 const withTool = tool => ({ ...loaded, tool });
@@ -396,4 +399,123 @@ test('the TEXT glyph is a dedicated baseline mark, distinct from the hatch and d
   const neighbours = new Set(['hatch', 'dimlinear', 'dimaligned', 'dimradius', 'dimdiameter', 'dimcenter', 'dimangular', 'dimordinate', 'rectang', 'polygon', 'spline']);
   for (const name of neighbours) assert.ok(defined.has(name), `${name} must stay a glyph`);
   assert.equal(neighbours.has(COMMAND_CATALOG.find(command => command.id === 'TEXT').icon), false);
+});
+
+test('MTEXT sits directly after TEXT in the catalog and both draw panels, with no variant popover', () => {
+  const entry = COMMAND_CATALOG.find(command => command.id === 'MTEXT');
+  assert.ok(entry, 'MTEXT must be in the command catalog');
+  assert.equal(entry.labelKey, 'draw.kind.mtext');
+  assert.equal(entry.icon, 'mtext');
+  assert.equal(entry.group, 'draw');
+  // Both draw panels carry it, declared exactly like the other draw commands.
+  for (const tabId of ['home', 'draw']) {
+    const items = drawPanel(tabId).items;
+    const at = items.findIndex(candidate => candidate.id === 'MTEXT');
+    assert.ok(at !== -1, `${tabId}/draw must carry the MTEXT affordance`);
+    assert.equal(items[at - 1].id, 'TEXT', `${tabId}: MTEXT sits directly after TEXT`);
+    const item = items[at];
+    assert.equal(item.command, 'MTEXT');
+    assert.equal(item.labelKey, 'draw.kind.mtext');
+    assert.equal(item.icon, 'mtext');
+    assert.equal(item.action, undefined, 'MTEXT must dispatch through the router');
+    assert.equal(item.large, undefined, 'MTEXT is a small draw button, not a primary tile');
+    // Rotation/attachment/line spacing/columns/background are NOT implemented, so
+    // a variant popover here would offer choices the command does not have.
+    assert.equal(item.variants, undefined, 'MTEXT has no variant popover');
+    // HATCH still closes the draw group.
+    assert.equal(items.at(-1).id, 'HATCH', `${tabId}/draw still ends with HATCH`);
+    assert.ok(ribbonCommandIds().includes('MTEXT'));
+  }
+  // Router admission is the single enable gate, exactly like TEXT.
+  assert.equal(isSupportedCommand('MTEXT'), true);
+  assert.equal(filterCommandSuggestions('MTEXT').find(suggestion => suggestion.id === 'MTEXT').supported, true);
+  setCommandCatalog([]);
+  assert.equal(isSupportedCommand('MTEXT'), false);
+  setCommandCatalog(HOST_NAMES);
+  assert.equal(toolLabelKey('draw.mtext'), 'tool.draw.mtext');
+});
+
+test('the MTEXT prompt sequence names both corners and then the multiline text step', () => {
+  // Two named picks, in capture order; the text step is never a pick.
+  assert.deepEqual(
+    [...TOOL_STEP_PROMPTS['draw.mtext']],
+    ['tool.prompt.mtext.pick_corner', 'tool.prompt.mtext.opposite_corner'],
+  );
+  assert.deepEqual([...TOOL_STEP_PROMPTS['draw.mtext']], [...MTEXT_STEP_PROMPT_KEYS]);
+  assert.equal(MTEXT_STEP_PROMPT_KEY, 'tool.prompt.mtext.type_text');
+  // The step is derived from the host's real point count.
+  assert.equal(toolStepPromptKey({ key: 'draw.mtext', points: 0, ready: false }), 'tool.prompt.mtext.pick_corner');
+  assert.equal(toolStepPromptKey({ key: 'draw.mtext', points: 1, ready: false }), 'tool.prompt.mtext.opposite_corner');
+  // After the second corner the next step is the text, with MTEXT's own wording —
+  // the shared dimension "ready" copy would be false for a text command.
+  assert.equal(TOOL_READY_PROMPTS['draw.mtext'], MTEXT_STEP_PROMPT_KEY);
+  assert.equal(toolStepPromptKey({ key: 'draw.mtext', points: 2, ready: false }), MTEXT_STEP_PROMPT_KEY);
+  assert.equal(toolStepPromptKey({ key: 'draw.mtext', points: 2, ready: true }), MTEXT_STEP_PROMPT_KEY);
+  // The host flag names the text step for any text-carrying tool, and the wording
+  // follows the tool: MTEXT keeps its multiline copy, TEXT keeps its own.
+  assert.equal(toolStepPromptKey({ key: 'draw.mtext', points: 2, awaiting_text: true }), MTEXT_STEP_PROMPT_KEY);
+  assert.equal(toolStepPromptKey({ key: 'draw.text', points: 1, awaiting_text: true }), TEXT_STEP_PROMPT_KEY);
+  assert.equal(textStepPromptKey({ key: 'draw.mtext' }), MTEXT_STEP_PROMPT_KEY);
+  assert.equal(textStepPromptKey({ key: 'draw.text' }), TEXT_STEP_PROMPT_KEY);
+  // A malformed/absent tool never becomes MTEXT by accident.
+  for (const tool of [null, undefined, 'draw.mtext', {}, { key: 42 }]) {
+    assert.equal(textStepPromptKey(tool), TEXT_STEP_PROMPT_KEY, String(tool));
+  }
+  // MTEXT never claims TEXT's single-line insertion-point copy.
+  assert.notEqual(toolStepPromptKey({ key: 'draw.mtext', points: 0 }), TEXT_PICK_PROMPT_KEY);
+});
+
+test('every MTEXT catalog key resolves in both locales with the same placeholders', () => {
+  const keys = [
+    'draw.kind.mtext',
+    'tool.draw.mtext',
+    MTEXT_STEP_PROMPT_KEYS[0],
+    MTEXT_STEP_PROMPT_KEYS[1],
+    MTEXT_STEP_PROMPT_KEY,
+  ];
+  const placeholder = /(?<!\\)\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+  for (const key of keys) {
+    for (const locale of [zh, en]) {
+      assert.equal(typeof locale[key], 'string', `missing ${key}`);
+      assert.ok(locale[key].trim().length > 0, `empty ${key}`);
+    }
+    const a = [...zh[key].matchAll(placeholder)].map(match => match[1]).sort();
+    const b = [...en[key].matchAll(placeholder)].map(match => match[1]).sort();
+    assert.deepEqual(a, b, `placeholders differ for ${key}`);
+  }
+  // The button and the chip say the same word, like the other draw commands.
+  assert.equal(en['draw.kind.mtext'], en['tool.draw.mtext']);
+  assert.equal(zh['draw.kind.mtext'], zh['tool.draw.mtext']);
+  // The copy names the two corners and the multiline text, and promises neither a
+  // rotation/attachment prompt nor any other unimplemented option.
+  for (const locale of [zh, en]) {
+    const copy = [locale['draw.kind.mtext'], locale['tool.draw.mtext'], ...keys.slice(2).map(key => locale[key])].join(' ');
+    assert.doesNotMatch(copy, /rotation|attachment|columns|background|line spacing|旋转|附着|分栏|背景|行距/i);
+  }
+});
+
+test('the MTEXT glyph is its own mark, not a reuse of the TEXT baseline', async () => {
+  const icons = await readModule('icons.tsx');
+  const map = icons.match(/const P = \{([\s\S]*?)\n\};/);
+  assert.ok(map, 'expected the icon name map in icons.jsx');
+  const defined = new Set([...map[1].matchAll(/\n\s*([A-Za-z][A-Za-z0-9]*):/g)].map(match => match[1]));
+  assert.ok(defined.has('mtext'), "icons.tsx must define 'mtext'");
+  const glyph = map[1].match(/\n\s*mtext:\s*(<><[\s\S]*?<\/>),/);
+  assert.ok(glyph, 'expected an mtext glyph');
+  const textGlyph = map[1].match(/\n\s*text:\s*(<><[\s\S]*?<\/>),/);
+  assert.ok(textGlyph, 'expected the text glyph to stay defined');
+  assert.notEqual(glyph[1], textGlyph[1], 'MTEXT must not reuse the single-line glyph');
+  // Two baselines (the paragraph cue) over the A, and no boundary/fill vocabulary
+  // that would read as `rectang` or `hatch`.
+  assert.ok((glyph[1].match(/<path/g) ?? []).length >= 3, 'A legs, A crossbar, two baselines');
+  assert.match(glyph[1], /M4 16h16M4 20h10/, 'two baselines, the second one shorter');
+  assert.doesNotMatch(glyph[1], /<rect/, 'no boundary loop');
+  assert.doesNotMatch(glyph[1], /strokeDasharray/);
+  // Catalog and ribbon agree on the dedicated name, and `text` stays TEXT's alone.
+  for (const tabId of ['home', 'draw']) {
+    assert.equal(drawPanel(tabId).items.find(item => item.id === 'MTEXT').icon, 'mtext', tabId);
+  }
+  assert.equal(COMMAND_CATALOG.find(command => command.id === 'MTEXT').icon, 'mtext');
+  assert.equal(COMMAND_CATALOG.filter(command => command.icon === 'mtext').length, 1);
+  assert.equal(COMMAND_CATALOG.filter(command => command.icon === 'text').length, 1);
 });

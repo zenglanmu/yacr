@@ -121,4 +121,6 @@ mod cjk_baseline;
 mod commands;
 mod drawing;
 mod drawing_space;
+mod grips;
+mod layers;
 mod view_camera;

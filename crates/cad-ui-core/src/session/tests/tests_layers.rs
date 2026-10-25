@@ -254,3 +254,201 @@ fn a_drained_layer_write_is_applied_through_the_session() {
     assert!(row(&layers, "WALLS").current);
     assert_eq!(layers.overridden, 1);
 }
+
+// ---------------------------------------------------------------------------
+// Layer table structural writes: create / rename / delete
+// ---------------------------------------------------------------------------
+
+fn revision(session: &CadSession) -> cad_domain::Revision {
+    session
+        .core
+        .controller
+        .borrow()
+        .drawing()
+        .expect("the demo drawing")
+        .revision()
+}
+
+fn can_undo(session: &CadSession) -> bool {
+    let controller = session.core.controller.borrow();
+    controller.application.can_undo(&controller.document_id)
+}
+
+#[test]
+fn create_layer_adds_a_row_in_one_revision_bump_and_no_undo_entry() {
+    let session = fresh_session();
+    let before_rows = session.layers().expect("layers").layers.len();
+    let before_revision = revision(&session);
+
+    session.create_layer("DOORS").expect("a fresh legal name");
+
+    let layers = session.layers().expect("layers");
+    assert_eq!(layers.layers.len(), before_rows + 1);
+    let doors = row(&layers, "DOORS");
+    assert!(doors.visible, "a new layer is stored visible");
+    assert!(doors.database_visible);
+    assert!(!doors.overridden, "a create adds no temporary override");
+    // A real database write: exactly one revision bump, no undo entry.
+    assert_eq!(
+        revision(&session),
+        cad_domain::Revision(before_revision.0 + 1)
+    );
+    assert!(!can_undo(&session), "layer edits are not undoable");
+}
+
+#[test]
+fn create_layer_refuses_a_duplicate_and_an_illegal_name() {
+    let session = fresh_session();
+    let before = session.layers().expect("layers");
+    let before_revision = revision(&session);
+
+    let error = session
+        .create_layer("walls")
+        .expect_err("WALLS exists; names are case-insensitive");
+    assert!(error.contains("layer.duplicate_name"), "{error}");
+
+    let error = session
+        .create_layer("A*B")
+        .expect_err("'*' is not legal in a layer name");
+    assert!(error.contains("layer.name_illegal_char"), "{error}");
+
+    assert_eq!(
+        session.layers().expect("layers"),
+        before,
+        "a refused create changes no row"
+    );
+    assert_eq!(revision(&session), before_revision);
+}
+
+#[test]
+fn rename_layer_resolves_under_the_new_name_and_not_the_old_one() {
+    let session = fresh_session();
+
+    session
+        .rename_layer("WALLS", "PARTITIONS")
+        .expect("WALLS exists and PARTITIONS is free");
+
+    let layers = session.layers().expect("layers");
+    row(&layers, "PARTITIONS");
+    assert!(
+        layers.layers.iter().all(|row| row.name != "WALLS"),
+        "the old name is gone from the table"
+    );
+
+    // The old name no longer resolves; the new one resolves case-insensitively.
+    let error = session
+        .set_layer_visibility("WALLS", false)
+        .expect_err("WALLS no longer exists");
+    assert!(error.contains("layer.unknown"), "{error}");
+    session
+        .set_layer_visibility("partitions", false)
+        .expect("the new name resolves");
+    assert!(!row(&session.layers().expect("layers"), "PARTITIONS").visible);
+}
+
+#[test]
+fn delete_layer_in_use_is_refused_without_changing_the_projection() {
+    let session = fresh_session();
+    let before = session.layers().expect("layers");
+    let before_revision = revision(&session);
+
+    // The demo drawing's WALLS layer carries the room-outline entities.
+    let error = session
+        .delete_layer("WALLS")
+        .expect_err("WALLS is referenced by entities");
+    let text = error;
+    assert!(text.contains("layer.in_use"), "{text}");
+    assert!(text.contains('4'), "the refusal names the count: {text}");
+
+    assert_eq!(session.layers().expect("layers"), before);
+    assert_eq!(revision(&session), before_revision);
+}
+
+#[test]
+fn deleting_the_active_layer_makes_zero_current_again() {
+    let session = fresh_session();
+    session.create_layer("DOORS").expect("a fresh legal name");
+    session
+        .set_active_layer("DOORS")
+        .expect("the new layer can be made current");
+    assert_eq!(
+        session.layers().expect("layers").active.as_deref(),
+        Some("DOORS")
+    );
+
+    session
+        .delete_layer("DOORS")
+        .expect("nothing references DOORS");
+
+    let layers = session.layers().expect("layers");
+    assert_eq!(
+        layers.active.as_deref(),
+        Some("0"),
+        "the session never keeps a dangling active layer"
+    );
+    assert!(row(&layers, "0").current);
+    assert!(layers.layers.iter().all(|row| row.name != "DOORS"));
+}
+
+#[test]
+fn delete_of_the_default_layer_is_refused() {
+    let session = fresh_session();
+    let before = session.layers().expect("layers");
+
+    let error = session
+        .delete_layer("0")
+        .expect_err("layer 0 is the default layer");
+    assert!(error.contains("layer.default_undeletable"), "{error}");
+    assert_eq!(session.layers().expect("layers"), before);
+}
+
+#[test]
+fn the_structural_layer_writes_apply_through_the_same_queue() {
+    let session = fresh_session();
+    let rows_before = session.layers().expect("layers").layers.len();
+    let mut queue = std::collections::VecDeque::from([
+        CadLayerWrite::Create {
+            name: "DOORS".into(),
+        },
+        CadLayerWrite::Rename {
+            layer: "DOORS".into(),
+            name: "WINDOWS".into(),
+        },
+        CadLayerWrite::Delete {
+            layer: "WINDOWS".into(),
+        },
+    ]);
+
+    let refusals = drain_layer_writes(&mut queue, |write| write.apply(&session));
+    assert!(refusals.is_empty(), "{refusals:?}");
+
+    let layers = session.layers().expect("layers");
+    assert_eq!(layers.layers.len(), rows_before, "created then deleted");
+    assert!(layers.layers.iter().all(|row| row.name != "WINDOWS"));
+    assert!(layers.layers.iter().all(|row| row.name != "DOORS"));
+}
+
+#[test]
+fn the_structural_layer_writes_are_refused_without_a_document() {
+    let session = fresh_session();
+    let document = session.core.controller.borrow().document_id;
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .application
+        .workspace
+        .documents
+        .remove(&document);
+
+    for error in [
+        session.create_layer("DOORS").unwrap_err(),
+        session.rename_layer("WALLS", "PARTITIONS").unwrap_err(),
+        session.delete_layer("WALLS").unwrap_err(),
+    ] {
+        assert!(
+            error.contains("layer.no_document"),
+            "an accepted write without a drawing would be a fake success: {error}"
+        );
+    }
+}

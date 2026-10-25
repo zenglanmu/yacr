@@ -13,9 +13,10 @@
 //! of being reached into. Compound children (which is where block/tolerance
 //! MULTILEADER content stays) have no addressable identity here.
 //!
-//! The **newline policy** lives here, in the one command both entry paths
-//! (`TEXTEDIT` and the panel's `SetSelectedText`) share, so the UI cannot
-//! disagree with the stored string (ADR-0021 D4):
+//! The **newline policy** is defined once in [`super::text_policy`] and applied
+//! here, in the one command both entry paths (`TEXTEDIT` and the panel's
+//! `SetSelectedText`) share, so the UI cannot disagree with the stored string
+//! (ADR-0021 D4):
 //!
 //! * `AcDbMText` and MULTILEADER text treat a line break as a paragraph break:
 //!   `\r\n`, `\r` and `\n` are stored as `\P`, the only form the viewport
@@ -27,6 +28,7 @@
 
 use super::*;
 use cad_domain::MLeaderContent;
+use text_policy::newlines_to_paragraph_breaks;
 
 impl Application {
     /// TEXTEDIT: replace the stored string of one directly addressable
@@ -166,6 +168,9 @@ impl Application {
 /// MULTILEADER text and `AcDbMText` convert `\r\n`/`\r`/`\n` to `\P`; `AcDbText`
 /// refuses them (`textedit.newline_text`) because AutoCAD's TEXT does not
 /// interpret `\P`; any other control code passes through verbatim.
+///
+/// The mapping itself lives in [`super::text_policy`], the one authority MTEXT
+/// creation shares, so a created MTEXT and an edited MTEXT store the same form.
 fn apply_newline_policy(entity: &DbEntity, text: &str) -> CadResult<String> {
     match &entity.geometry {
         SemanticGeometry::MultiLeader(_) => Ok(newlines_to_paragraph_breaks(text)),
@@ -187,30 +192,6 @@ fn apply_newline_policy(entity: &DbEntity, text: &str) -> CadResult<String> {
             geometry_kind(other)
         ))),
     }
-}
-
-/// `\r\n`, `\r` and `\n` → `\P`, in one pass.
-///
-/// `\P` is the only paragraph-break form the viewport's MTEXT parser
-/// (`cad-representation`) interprets, so the stored string stays consistent
-/// between our renderer and AutoCAD. No other code is inspected or rewritten.
-fn newlines_to_paragraph_breaks(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\r' => {
-                // A CRLF pair is one line break, not two.
-                if chars.peek() == Some(&'\n') {
-                    chars.next();
-                }
-                out.push_str("\\P");
-            }
-            '\n' => out.push_str("\\P"),
-            other => out.push(other),
-        }
-    }
-    out
 }
 
 /// Resolve the one `TEXTEDIT` target: an existing, **directly addressable**

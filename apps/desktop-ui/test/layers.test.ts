@@ -9,7 +9,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ackAdmitted,
+  createLayer,
+  CREATE_LAYER_COMMAND,
   createLayersStore,
+  deleteLayer,
+  DELETE_LAYER_COMMAND,
   EMPTY_LAYERS_ANSWER,
   EMPTY_LAYERS_STATE,
   errorCode,
@@ -24,6 +28,8 @@ import {
   overrideCount,
   parseLayersAnswer,
   refreshLayers,
+  renameLayer,
+  RENAME_LAYER_COMMAND,
   RESTORE_LAYERS_COMMAND,
   restoreLayers,
   SET_ACTIVE_LAYER_COMMAND,
@@ -33,6 +39,7 @@ import {
   visibleLayers,
   WAITING_CODE,
 } from '../src/layers.ts';
+import { DEFAULT_LAYER_NAME, deletableLayer, layerErrorKey } from '../src/layer-labels.ts';
 import { LOCAL_CHROME_COMMANDS } from '../src/commands.ts';
 import { offeredItems, PALETTE_COMMANDS } from '../src/ribbon-model.ts';
 import { readCatalog, readCss, readModule } from './helpers.ts';
@@ -488,6 +495,145 @@ test('the empty state is the documented shape', () => {
   });
 });
 
+// --- the structural layer writes (create / rename / delete) -------------
+
+test('the three table writes send their own command and payload', async () => {
+  assert.equal(CREATE_LAYER_COMMAND, 'cad_create_layer');
+  assert.equal(RENAME_LAYER_COMMAND, 'cad_rename_layer');
+  assert.equal(DELETE_LAYER_COMMAND, 'cad_delete_layer');
+
+  const calls = [];
+  const ok = async (command, args) => { calls.push([command, args]); return { accepted: true }; };
+  assert.deepEqual(await createLayer(ok, 'DOORS'), { kind: 'ok' });
+  assert.deepEqual(await renameLayer(ok, 'DOORS', 'PARTITIONS'), { kind: 'ok' });
+  assert.deepEqual(await deleteLayer(ok, 'PARTITIONS'), { kind: 'ok' });
+  assert.deepEqual(calls, [
+    [CREATE_LAYER_COMMAND, { name: 'DOORS' }],
+    [RENAME_LAYER_COMMAND, { layer: 'DOORS', name: 'PARTITIONS' }],
+    [DELETE_LAYER_COMMAND, { layer: 'PARTITIONS' }],
+  ]);
+
+  // An unaddressable row or a nameless create never reaches the host.
+  const unreachable = async () => { throw Error('reached IPC'); };
+  assert.deepEqual(await createLayer(unreachable, ''), { kind: 'invalid' });
+  assert.deepEqual(await renameLayer(unreachable, '', 'X'), { kind: 'invalid' });
+  assert.deepEqual(await renameLayer(unreachable, 'X', ''), { kind: 'invalid' });
+  assert.deepEqual(await deleteLayer(unreachable, ''), { kind: 'invalid' });
+
+  // The database's own refusals travel untouched.
+  const refusing = async () => { throw new Error('layer.duplicate_name: this drawing already has a layer named \'WALLS\''); };
+  const refused = await createLayer(refusing, 'walls');
+  assert.equal(refused.kind, 'error');
+  assert.equal(errorCode(refused.reason), 'layer.duplicate_name');
+});
+
+test('create, rename and delete re-read the host instead of inventing a row', async () => {
+  const log = [];
+  let rows = [row('0', { current: true }), row('WALLS', { overridden: true })];
+  let applyOnHost = true;
+  const store = createLayersStore(async (command, args) => {
+    log.push([command, args]);
+    if (command === CREATE_LAYER_COMMAND) {
+      if (applyOnHost) rows = [...rows, row(args.name, { databaseVisible: true })];
+      return { accepted: true };
+    }
+    if (command === RENAME_LAYER_COMMAND) {
+      if (applyOnHost) {
+        rows = rows.map(layer => layer.name === args.layer
+          ? { ...layer, name: args.name }
+          : layer);
+      }
+      return { accepted: true };
+    }
+    if (command === DELETE_LAYER_COMMAND) {
+      if (applyOnHost) rows = rows.filter(layer => layer.name !== args.layer);
+      return { accepted: true };
+    }
+    if (command === LAYERS_COMMAND) {
+      return answer(rows, { active: '0', overridden: overrideCount(rows) });
+    }
+    throw new Error(`unexpected ${command}`);
+  }, { wait: async () => { log.push('tick'); } });
+  await store.load();
+  log.length = 0;
+
+  assert.deepEqual(await store.createLayer('DOORS'), { kind: 'ok' });
+  assert.deepEqual(log, [[CREATE_LAYER_COMMAND, { name: 'DOORS' }], 'tick', [LAYERS_COMMAND, undefined]],
+    'the ack is a queue, so the row arrives with the read-back');
+  assert.deepEqual(store.getState().layers.map(layer => layer.name), ['0', 'WALLS', 'DOORS']);
+
+  log.length = 0;
+  await store.renameLayer('WALLS', 'PARTITIONS');
+  assert.deepEqual(store.getState().layers.map(layer => layer.name), ['0', 'PARTITIONS', 'DOORS']);
+  assert.equal(store.getState().layers.find(layer => layer.name === 'WALLS'), undefined,
+    'the old name is gone');
+  // Renaming never clears the session's temporary override.
+  assert.equal(store.getState().layers.find(layer => layer.name === 'PARTITIONS').overridden, true);
+  assert.equal(store.getState().overridden, 1);
+
+  log.length = 0;
+  await store.deleteLayer('DOORS');
+  assert.deepEqual(store.getState().layers.map(layer => layer.name), ['0', 'PARTITIONS']);
+  assert.equal(store.getState().active, '0', 'the active layer comes from the read-back');
+
+  // A host that has not applied the write yet gets exactly one follow-up read,
+  // and the panel then shows the host's own answer — never the requested one.
+  applyOnHost = false;
+  log.length = 0;
+  await store.createLayer('MISSING');
+  assert.deepEqual(log.map(entry => (Array.isArray(entry) ? entry[0] : entry)),
+    [CREATE_LAYER_COMMAND, 'tick', LAYERS_COMMAND, 'tick', LAYERS_COMMAND]);
+  assert.equal(store.getState().layers.some(layer => layer.name === 'MISSING'), false);
+});
+
+test('a refused delete keeps every row and reports the stable reason', async () => {
+  const calls = [];
+  let refusal = 'layer.in_use: layer \'WALLS\' (id 2) is still referenced by 4 entities; not deleted';
+  const store = createLayersStore(async (command) => {
+    calls.push(command);
+    if (command === DELETE_LAYER_COMMAND) throw new Error(refusal);
+    if (command === LAYERS_COMMAND) return answer([row('0', { current: true }), row('WALLS')]);
+    throw new Error(`unexpected ${command}`);
+  }, { wait: () => Promise.resolve() });
+  await store.load();
+  calls.length = 0;
+
+  const refused = await store.deleteLayer('WALLS');
+  assert.equal(refused.kind, 'error');
+  assert.equal(errorCode(refused.reason), 'layer.in_use');
+  assert.deepEqual(calls, [DELETE_LAYER_COMMAND], 'a refused write is not read back');
+  assert.equal(store.getState().layers.length, 2, 'no row is dropped on a refusal');
+  assert.deepEqual(store.getState().error, { kind: 'mutation', reason: refused.reason });
+  assert.equal(store.getState().busy, false);
+
+  // Deleting the default layer is refused for its own reason.
+  refusal = 'layer.default_undeletable: layer \'0\' is the drawing\'s default layer and cannot be deleted';
+  const zero = await store.deleteLayer('0');
+  assert.equal(errorCode(zero.reason), 'layer.default_undeletable');
+  assert.equal(store.getState().layers.length, 2);
+});
+
+test('the structural writes are single flight and never send a nameless request', async () => {
+  const gate = deferred();
+  const calls = [];
+  const store = createLayersStore(async (command) => {
+    calls.push(command);
+    if (command === CREATE_LAYER_COMMAND) return gate.promise;
+    if (command === LAYERS_COMMAND) return answer([row('0', { current: true })]);
+    throw new Error(`unexpected ${command}`);
+  }, { wait: () => Promise.resolve() });
+  await store.load();
+
+  const first = store.createLayer('DOORS');
+  assert.deepEqual(await store.renameLayer('0', 'ROOT'), { kind: 'busy' },
+    'the window covers the queued write and its read-back');
+  gate.resolve({ accepted: true });
+  assert.deepEqual(await first, { kind: 'ok' });
+  assert.equal(calls.filter(command => command === CREATE_LAYER_COMMAND).length, 1);
+  assert.deepEqual(await store.createLayer(''), { kind: 'invalid' });
+  assert.deepEqual(await store.deleteLayer(''), { kind: 'invalid' });
+});
+
 // --- source / catalog assertions ---------------------------------------
 
 test('the palette is docked next to the other palettes and opened by a shell action', async () => {
@@ -548,9 +694,21 @@ test('every sentence the palette shows comes from the catalog, in both languages
     'layers.visibility_on',
     'layers.visibility_off',
     'layers.database_hidden',
-    'layers.operation_failed',
+    'layers.write_failed',
     'layers.read_failed',
     'layers.close',
+    // The three table-write forms. The palette renders every one of them: the two
+    // header/row entry points, the row's two actions, the create field with its
+    // rules, and the confirm step's note.
+    'layers.new',
+    'layers.rename',
+    'layers.delete',
+    'layers.name_label',
+    'layers.new_hint',
+    'layers.delete_confirm',
+    'layers.delete_in_use_hint',
+    // Reused, not invented: the Cancel verb every tool prompt already uses.
+    'tool.cancel',
     // Reused, not invented: the not-ready sentence is the catalog's existing
     // wording for the same fact.
     'host.poll_not_ready',
@@ -561,13 +719,156 @@ test('every sentence the palette shows comes from the catalog, in both languages
     assert.equal(typeof en[key], 'string', key);
     assert.ok(palette.includes(`'${key}'`), `the palette renders ${key}`);
   }
-  // The mutation failure sentence carries the host's real reason.
-  assert.ok(palette.includes("t('layers.operation_failed', { reason: state.error.reason })"));
+  // The mutation failure sentence is neutral across visibility/create/rename/
+  // delete (it used to name visibility only) and carries the host's real reason.
+  assert.ok(palette.includes("t('layers.write_failed', { reason: state.error.reason })"));
+  // The delete confirm names the layer it is about to remove.
+  assert.ok(palette.includes("t('layers.delete_confirm', { name: layer.name })"));
   // The visibility toggle's accessible name is the action it performs.
   assert.ok(palette.includes("t('layers.visibility_off') : t('layers.visibility_on')"));
   // A forced-on layer says so: the drawing's own flag is not overwritten.
   assert.ok(palette.includes('layer.visible && !layer.databaseVisible'));
   assert.ok(palette.includes("t('layers.database_hidden')"));
+  // The one refusal this panel makes itself (a blank name, refused before any
+  // IPC) reuses the catalog's own sentence instead of carrying copy of its own.
+  assert.ok(palette.includes("setDraftError('layers.error.layer.name_empty')"));
+  assert.equal(/[\u3400-\u9fff]/.test(palette), false, 'and it is never written in the source');
+});
+
+test('every layer refusal code maps to catalog copy, in both languages', async () => {
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  // The host refuses a layer-table write with a stable code, and the catalog keys
+  // one sentence per code (`layers.error.<wire code>`, the same
+  // `options.error.<wire code>` convention the options dialog uses). The mapper
+  // (`layer-labels.ts`) is the only place the two are joined.
+  const refusals = [
+    'layer.name_empty',
+    'layer.name_illegal_char',
+    'layer.duplicate_name',
+    'layer.default_undeletable',
+    'layer.in_use',
+  ];
+  const labels = await readModule('layer-labels.ts');
+  for (const code of refusals) {
+    const key = `layers.error.${code}`;
+    assert.equal(typeof zh[key], 'string', `zh-CN ${key}`);
+    assert.equal(typeof en[key], 'string', `en ${key}`);
+    assert.notEqual(zh[key].trim(), '', `zh-CN ${key} is not blank`);
+    assert.notEqual(en[key].trim(), '', `en ${key} is not blank`);
+    // No placeholder in either copy: these sentences name no measurement.
+    assert.equal(/\{[a-z]+\}/i.test(zh[key]) || /\{[a-z]+\}/i.test(en[key]), false, key);
+    // The mapper names the catalog key **literally**, so neither half of the pair
+    // can be dropped silently: removing the copy fails the catalog checks above,
+    // removing the mapping fails this one. The behavioural `layerErrorKey` call is
+    // the same pair, not a second, looser spelling of it.
+    assert.ok(labels.includes(`case '${code}': return '${key}';`), `${code} maps to ${key}`);
+    assert.equal(layerErrorKey(code), key);
+  }
+  // The host appends its own prose after the code (`layer.in_use: layer 'WALLS'
+  // (id 2) is still referenced by 4 entities; not deleted`); only the code is
+  // matched, so the sentence can change without breaking the lookup.
+  assert.equal(
+    layerErrorKey(errorCode("layer.in_use: layer 'WALLS' (id 2) is still referenced by 4 entities; not deleted")),
+    'layers.error.layer.in_use',
+  );
+  // A code this build has no sentence for is never guessed at: the palette falls
+  // back to its generic refusal sentence plus the host's own words.
+  for (const unmapped of ['layer.unknown', 'cad_waiting', '', null, undefined, 42, {}]) {
+    assert.equal(layerErrorKey(unmapped), null, `${String(unmapped)} is not mapped`);
+  }
+  // And the palette really routes a refused write through it.
+  const palette = await readModule('components/LayersPalette.tsx');
+  assert.ok(
+    palette.includes('layerErrorKey(errorCode(state.error.reason))'),
+    'a refused write is named by its code, never by the raw reason alone',
+  );
+  assert.ok(
+    palette.indexOf('layerErrorKey(errorCode(state.error.reason))') < palette.indexOf('t(key) : t(\'layers.write_failed\''),
+    'the mapped copy is what wins; the raw reason is the fallback',
+  );
+  // The model declares the three IPC names and the three store actions.
+  const model = await readModule('layers.ts');
+  for (const name of ['cad_create_layer', 'cad_rename_layer', 'cad_delete_layer']) {
+    assert.ok(model.includes(`'${name}'`), `${name} is the wire name the model sends`);
+  }
+  for (const action of ['createLayer(name: string)', 'renameLayer(layer: string, name: string)', 'deleteLayer(layer: string)']) {
+    assert.ok(model.includes(action), `the store exposes ${action}`);
+  }
+});
+
+test('the default layer is never offered for deletion', () => {
+  // The host refuses it (`layer.default_undeletable`); a destructive affordance
+  // that can only ever be refused must not be shown at all.
+  assert.equal(DEFAULT_LAYER_NAME, '0');
+  assert.equal(deletableLayer('0'), false);
+  assert.equal(deletableLayer(DEFAULT_LAYER_NAME), false);
+  assert.equal(deletableLayer('WALLS'), true);
+  assert.equal(deletableLayer('inner wall'), true);
+  // A row with no addressable name is not a layer, so nothing is offered for it.
+  assert.equal(deletableLayer(''), false);
+  assert.equal(deletableLayer(null), false);
+  assert.equal(deletableLayer(undefined), false);
+  assert.equal(deletableLayer(0), false, 'the number is not the name');
+});
+
+test('create, rename and delete are one inline form each, keyboard and focus included', async () => {
+  const palette = await readModule('components/LayersPalette.tsx');
+  const occurrences = (needle: string) => palette.split(needle).length - 1;
+
+  // --- entry points: real buttons, named by catalog copy --------------------
+  for (const label of ['t(\'layers.new\')', 't(\'layers.rename\')', 't(\'layers.delete\')']) {
+    assert.ok(palette.includes(`label={${label}}`), `${label} names a real button`);
+  }
+  // Only one form at a time: a single piece of state decides which.
+  assert.equal(occurrences('setForm({ kind:'), 3, 'create, rename and delete each open the one form');
+  assert.ok(palette.includes("form?.kind === 'create'"), 'the create trigger and the create form agree');
+  // A create is only offered for a layer table the host answered, and the open
+  // form always keeps its own trigger mounted so Escape has a focus target.
+  assert.ok(palette.includes("const canCreate = state.phase === 'ready' || state.phase === 'empty';"));
+  assert.ok(palette.includes("canCreate || form?.kind === 'create'"));
+  // Both rename paths are the same call: the double-click shortcut and the pencil.
+  assert.equal(occurrences('openRename(layer)'), 2, 'double-click and the explicit pencil both rename');
+  assert.ok(palette.includes('onDoubleClick={() => openRename(layer)}'));
+  // Delete is gated on the row's name, not on a guess.
+  assert.ok(palette.includes('deletableLayer(layer.name)'), 'the default layer offers no delete');
+
+  // --- one key handler for both fields: Enter submits, Escape cancels -------
+  assert.equal(occurrences('onFieldKeyDown(event'), 2, 'the create field and the rename field share one handler');
+  assert.ok(palette.includes("if (event.key === 'Escape')"), 'Escape cancels');
+  assert.ok(palette.includes("if (event.key === 'Enter')"), 'Enter submits');
+  assert.ok(palette.includes('event.isComposing || event.keyCode === 229'), 'an IME keeps its own Enter');
+  // The row itself closes on Escape too (the confirm has no field to catch it).
+  assert.ok(palette.includes("event.key !== 'Escape' || event.defaultPrevented"));
+
+  // --- a blank name is refused here, before any IPC ------------------------
+  assert.ok(palette.includes('const name = draft.trim();'));
+  assert.equal(occurrences("setDraftError('layers.error.layer.name_empty')"), 2,
+    'create and rename both refuse a blank name locally');
+  // An unchanged rename is not written either: no round trip, just a close.
+  assert.ok(palette.includes('if (name === layer.name) {'));
+  assert.ok(palette.indexOf('if (name === layer.name) {') < palette.indexOf('store.renameLayer('),
+    'the unchanged-name guard runs before the store call');
+
+  // --- blur cancels, and it is the only blur path -------------------------
+  assert.equal(occurrences('onBlur='), 1, 'one blur path, on the editing row');
+  assert.ok(palette.includes('if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;'),
+    'focus moving inside the row is not a blur out of the edit');
+  assert.ok(palette.indexOf('onBlur=') < palette.indexOf('cancelForm();', palette.indexOf('onBlur=')),
+    'blur cancels — it never commits');
+
+  // --- focus goes in, and it comes back ------------------------------------
+  assert.ok(palette.includes('newFieldRef.current?.focus?.()'), 'the create field takes focus on open');
+  assert.ok(palette.includes('renameFieldRef.current?.focus?.()'), 'the rename field takes focus on open');
+  assert.ok(palette.includes('restoreFocus.current = () => newTriggerRef.current?.focus?.();'),
+    'the header trigger takes focus back');
+  assert.ok(palette.includes('if (form === null) {'), 'the restore runs after the closing commit');
+
+  // --- feedback is the palette's own error affordance ----------------------
+  assert.ok(palette.includes('className="layers__error" role="alert"'), 'refusals land on the palette line');
+  assert.equal(/\b(?:window\.)?(?:alert|confirm|prompt)\s*\(/.test(palette), false, 'no browser dialog, ever');
+  // Nothing takes the pointer away from a control in the translucent dock.
+  assert.equal(palette.includes('pointer-events'), false, 'the controls stay clickable');
 });
 
 test('the panel and the model carry no hardcoded CJK', async () => {
@@ -594,5 +895,15 @@ test('the palette styles reuse the chrome tokens and never float over the drawin
   assert.ok(block.includes('.layers__row'));
   assert.ok(block.includes('.layers__eye'));
   assert.ok(block.includes('.layers__search:focus-within'));
+  // The inline forms reuse the same tokens and the same field ring, and the
+  // reserved actions column is what keeps a row from moving when a form opens.
+  assert.ok(block.includes('.layers__field:focus-within'), 'the create field focuses into the shared ring');
+  assert.ok(block.includes('.layers__rename:focus-visible'), 'so does the inline rename field');
+  assert.ok(block.includes('.layers__actions'), 'the row actions keep their reserved space');
+  assert.ok(block.includes('.layers__confirm'), 'the delete confirm stays inside the row');
+  assert.ok(block.includes('var(--danger)'), 'the destructive press uses the chrome danger token');
+  // The dock sits in a translucent overlay: nothing here may switch the pointer
+  // off for a control (the rows rely on the default `auto`).
+  assert.equal(block.includes('pointer-events'), false, 'no control is made pointer-transparent');
   assert.equal(block.includes('position: fixed'), false, 'docked, never floating over the CAD surface');
 });

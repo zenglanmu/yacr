@@ -274,7 +274,8 @@ pub enum DrawIntent {
     ///
     /// Carries no field: the boundary is the selection snapshot the caller
     /// supplies, and the pattern type/spacing/angle/double/style are the session
-    /// typed channel ([`super::ToolParameter::HatchPatternType`] … `HatchStyle`), so the
+    /// typed channel ([`super::ToolParameter::HatchPatternType`] … `HatchStyle`,
+    /// including the predefined pattern index `HatchPattern`), so the
     /// intent stays the pure description of what the user asked for. This kind
     /// captures **no points** (the zero-point exact complement) and takes no
     /// in-command picks.
@@ -287,6 +288,25 @@ pub enum DrawIntent {
     /// text is always a non-empty, at most
     /// [`super::MAX_TOOL_TEXT_CHARS`]-character string validated at capture time.
     Text { position: Point3, text: String },
+    /// MTEXT: place `text` inside the wrap rectangle whose opposite corners are
+    /// `first` and `opposite` (the minimal interactive subset, 2026-10-26).
+    ///
+    /// `first` is the insertion point (`position`). `opposite` only defines the
+    /// automatic wrap boundary the caller derives as `|opposite.x − first.x|`
+    /// (finite, `> 0`; a degenerate rectangle is an explicit
+    /// `tool.mtext_zero_rect` refusal, never a fabricated width). The glyph
+    /// height is the session typed channel
+    /// ([`super::ToolParameter::TextHeight`]), the rotation is `0.0`, and the
+    /// attachment is AutoCAD's MTEXT default **top-left**
+    /// (`TextAlignH::Left` + `TextAlignV::Top`); all three are resolved by the
+    /// caller, so they never ride this intent. The text is validated at capture
+    /// time (non-empty, at most [`super::MAX_TOOL_TEXT_CHARS`] characters, and
+    /// newlines are accepted because the target is an `AcDbMText`).
+    MText {
+        first: Point3,
+        opposite: Point3,
+        text: String,
+    },
     /// MLEADER: place `text` on a straight-line leader from `arrow` to the
     /// `landing` content-connection point (ADR 0019 decision F.2, P7c).
     ///

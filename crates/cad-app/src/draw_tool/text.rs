@@ -11,6 +11,7 @@
 //! prompt is open is refused by name.
 
 use super::*;
+use crate::app_drawing::text_policy;
 
 impl DrawTool {
     /// The submitted text for a text tool, if any (ADR 0019 decision A).
@@ -58,7 +59,13 @@ impl DrawTool {
     ///   still missing (checked before the "not awaiting" refusal so the message
     ///   names the real cause);
     /// * `tool.text_empty` — the text is empty or whitespace-only;
-    /// * `tool.text_too_long` — more than [`MAX_TOOL_TEXT_CHARS`] characters.
+    /// * `tool.text_too_long` — more than [`MAX_TOOL_TEXT_CHARS`] characters;
+    /// * `text.single_line_newline` — the `TEXT` kind (an `AcDbText`) was handed a
+    ///   draft containing `\r`/`\n`. TEXT does not interpret `\P`, so the value is
+    ///   refused here instead of being stored and drawn over several lines while
+    ///   `TEXTEDIT` can never reproduce it. `MLEADER` and `TEXTEDIT` are
+    ///   multi-line channels and accept newlines (the edit command converts them
+    ///   to `\P` for an `AcDbMText`/MULTILEADER target).
     ///
     /// On success the text is stored; the caller (the host) then completes the
     /// command immediately — this request is **terminal**, there is no second
@@ -94,6 +101,13 @@ impl DrawTool {
             return Err(CadError::InvalidInput(format!(
                 "tool.text_too_long: tool text allows at most {MAX_TOOL_TEXT_CHARS} characters, got {length}"
             )));
+        }
+        // Only the single-line kind refuses a line break; the multi-line kinds
+        // (MLEADER, TEXTEDIT) keep their `\P` conversion downstream (one policy,
+        // `crate::app_drawing::text_policy`). Checked after the empty-text bound so
+        // a whitespace-only draft still reports `tool.text_empty`.
+        if self.kind == DrawToolKind::Text && text_policy::has_line_break(text) {
+            return Err(text_policy::single_line_newline_error("TEXT"));
         }
         self.text = Some(text.to_string());
         Ok(())

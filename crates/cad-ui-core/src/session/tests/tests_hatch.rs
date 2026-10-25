@@ -47,6 +47,11 @@ fn the_hatch_selector_starts_the_zero_point_pre_selection_tool() {
     // honestly not ready and reports no fabricated point count.
     assert!(!tool.ready);
     assert_eq!(tool.params.hatch_pattern_type, Some(0.0));
+    assert_eq!(
+        tool.params.hatch_pattern,
+        Some(1.0),
+        "the default predefined pattern is the first table entry (ANSI31)"
+    );
     assert_eq!(tool.params.hatch_spacing, Some(1.0));
     assert_eq!(tool.params.hatch_angle, Some(0.0));
     assert_eq!(tool.params.hatch_double, Some(false));
@@ -61,9 +66,12 @@ fn cad_tool_params_project_hatch_values_only_for_the_hatch_tool() {
     hatch
         .set_tool_parameter(
             ToolParameter::HatchPatternType,
-            ToolValue::Number(cad_app::HATCH_PATTERN_TYPE_USER_DEFINED),
+            ToolValue::Number(cad_app::HATCH_PATTERN_TYPE_PREDEFINED),
         )
-        .expect("the user-defined type is admitted");
+        .expect("the predefined type is admitted");
+    hatch
+        .set_tool_parameter(ToolParameter::HatchPattern, ToolValue::Number(3.0))
+        .expect("the ANSI37 index is admitted");
     hatch
         .set_tool_parameter(ToolParameter::HatchSpacing, ToolValue::Number(2.5))
         .expect("a positive spacing is admitted");
@@ -80,7 +88,8 @@ fn cad_tool_params_project_hatch_values_only_for_the_hatch_tool() {
         )
         .expect("the Ignore style is admitted");
     let tool = hatch.snapshot(None, None, 0).tool.expect("HATCH is active");
-    assert_eq!(tool.params.hatch_pattern_type, Some(1.0));
+    assert_eq!(tool.params.hatch_pattern_type, Some(2.0));
+    assert_eq!(tool.params.hatch_pattern, Some(3.0));
     assert_eq!(tool.params.hatch_spacing, Some(2.5));
     assert_eq!(tool.params.hatch_angle, Some(45.0));
     assert_eq!(tool.params.hatch_double, Some(true));
@@ -92,6 +101,7 @@ fn cad_tool_params_project_hatch_values_only_for_the_hatch_tool() {
     line.command("LINE").expect("LINE is admitted");
     let tool = line.snapshot(None, None, 0).tool.expect("LINE is active");
     assert_eq!(tool.params.hatch_pattern_type, None);
+    assert_eq!(tool.params.hatch_pattern, None);
     assert_eq!(tool.params.hatch_spacing, None);
     assert_eq!(tool.params.hatch_angle, None);
     assert_eq!(tool.params.hatch_double, None);
@@ -116,6 +126,25 @@ fn a_hatch_parameter_set_is_refused_in_viewer_mode() {
     assert!(
         !error.is_empty(),
         "an explicit refusal, not an empty success"
+    );
+    // The predefined pattern index is authorized against the same create command,
+    // so a Viewer-mode set is refused too (never a silent write).
+    let error = session
+        .set_tool_parameter(ToolParameter::HatchPattern, ToolValue::Number(2.0))
+        .expect_err("a Viewer-mode pattern-index set is refused");
+    assert!(
+        !error.is_empty(),
+        "an explicit refusal, not an empty success"
+    );
+    assert_eq!(
+        session
+            .core
+            .controller
+            .borrow()
+            .session
+            .tool_parameter(ToolParameter::HatchPattern),
+        ToolValue::Number(1.0),
+        "the refusal left the default predefined pattern untouched"
     );
     // The refusal left the stored default untouched.
     assert_eq!(

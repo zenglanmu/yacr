@@ -896,6 +896,7 @@ mod array;
 mod dimension;
 mod hatch;
 mod mleader;
+mod mtext;
 mod point_spline;
 mod text;
 
