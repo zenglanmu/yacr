@@ -7,7 +7,8 @@
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "vite build",
     "build:canvas-wasm": "bash ../../scripts/build-canvas-wasm.sh",
-    "test": "node --test test/*.test.mjs"
+    "test": "tsc --noEmit && node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.3",
@@ -15,6 +16,9 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
     "vite": "^8.3.4"
   }
 }

@@ -38,7 +38,7 @@ Coverage limitations (honest):
 - only **literal** keys are resolved. Keys reached through indirection (e.g.
   ``t(suggestion.labelKey)`` where ``labelKey`` is built at runtime, or a key
   assembled from fragments) are not resolved here; they must stay covered by the
-  React UI's own node:test suite (`apps/desktop-ui/test/i18n.test.mjs`) and by review.
+  React UI's own node:test suite (`apps/desktop-ui/test/i18n.test.ts`) and by review.
 - the React CJK walk is a lexical heuristic, not a full JS/JSX parser, so it has
   both false positives and false negatives. False positives: CJK inside a comment
   nested in a template interpolation (`` `${x /* 中文 */}` ``) is read as template
@@ -104,7 +104,7 @@ STRING_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
 # CJK ideographs, extension A, CJK punctuation and fullwidth forms.
 CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]")
 # React UI source extensions scanned for hardcoded CJK copy.
-JS_EXTENSIONS = ("*.jsx", "*.js", "*.mjs")
+JS_EXTENSIONS = ("*.jsx", "*.js", "*.mjs", "*.tsx", "*.ts")
 
 
 def is_cjk(text: str) -> bool:
@@ -381,7 +381,7 @@ def check_hardcoded_literals(
 def check_ui_hardcoded_copy(
     ui_roots: list[pathlib.Path], root: pathlib.Path, problems: list[str]
 ) -> None:
-    """Fail on hardcoded CJK copy in React JSX/JS source (comments skipped).
+    """Fail on hardcoded CJK copy in React TS/TSX source (comments skipped).
 
     Only `ui/src` is scanned; a nested `test` directory is excluded **relative to
     the scanned source root**, so a checkout whose absolute path happens to contain
@@ -442,7 +442,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"i18n OK: {total} keys, {len(catalogs)} catalogs, "
         "keys/placeholders consistent, Rust + React static key references resolve, "
-        "no hardcoded CJK in non-test Rust UI code or React JSX/JS source"
+        "no hardcoded CJK in non-test Rust UI code or React TS/TSX source"
     )
     return 0
 
