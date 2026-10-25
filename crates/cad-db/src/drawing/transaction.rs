@@ -15,6 +15,21 @@ use crate::transform::transform_geometry;
 /// [`Self::commit`], which delegates to
 /// [`DrawingDatabase::apply_drawing_changes`]. A dropped or rolled-back
 /// transaction leaves no state behind.
+///
+/// # Layer locking
+///
+/// Every stager funnels through [`Self::stage`], which applies the drawing's
+/// layer-lock rule **before staging**: an entity on a locked layer cannot be
+/// inserted, updated, moved or deleted, and the call returns
+/// `CadError::InvalidInput` with the stable code `layer.locked`. Nothing is
+/// staged by a refused call, so `staged_len()` stays unchanged, the transaction
+/// stays empty, and the revision/history depth never move.
+///
+/// `update_entity_display` is the documented exception: it stages the stored
+/// entity row **unchanged**, i.e. no effective change, so a display
+/// representation rebuild still works on a locked layer. See
+/// `super::lock` for the full rule (and for why frozen layers are not a
+/// second rule here).
 pub struct DrawingTransaction<'a> {
     database: &'a mut DrawingDatabase,
     reason: String,
@@ -100,6 +115,16 @@ impl<'a> DrawingTransaction<'a> {
     /// At most one display replacement per id per transaction; staging twice is
     /// a caller bug and is refused. If the caller stages the entity row itself,
     /// do that **before** this call.
+    ///
+    /// # Layer locking
+    ///
+    /// This is a **display-only** write and stays allowed on a locked layer: it
+    /// stages the stored entity row unchanged (see [`Self::stage`]) and only
+    /// replaces the display attributes beside it, exactly like a representation
+    /// rebuild. AutoCAD regenerates a locked layer rather than refusing to draw
+    /// it, so the display path is not blocked. A command that also edits the
+    /// entity row is refused by its own stager (`insert_entity` /
+    /// `update_entity` / `transform_entity` / `delete_entity`).
     pub fn update_entity_display(
         &mut self,
         id: EntityId,
@@ -162,12 +187,23 @@ impl<'a> DrawingTransaction<'a> {
         self.stage(id, Some(moved), true)
     }
 
+    /// The single staging gate: duplicate detection, the layer-lock rule and the
+    /// staged-change bookkeeping every stager shares.
+    ///
+    /// The lock check runs **first**, before anything is recorded, so a refusal
+    /// leaves the transaction exactly as it was (no staged row, no `seen` entry,
+    /// no transform bit). `apply_drawing_changes` re-applies the same rule at
+    /// commit time; that second check is what covers history replay and any
+    /// direct caller, and it cannot half-apply because the apply path validates
+    /// the whole batch before mutating.
     fn stage(
         &mut self,
         id: EntityId,
         change: Option<DbEntity>,
         is_transform: bool,
     ) -> CadResult<()> {
+        self.database
+            .ensure_change_allowed_on_locked_layer(id, change.as_ref())?;
         if !self.seen.insert(id) {
             return Err(CadError::Invariant(format!(
                 "entity {id:?} is modified more than once in one transaction"

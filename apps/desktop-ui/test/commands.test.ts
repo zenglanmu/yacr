@@ -385,6 +385,30 @@ test('Enter and Escape drive the active tool, but never while typing or without 
   assert.equal(toolCommandForKey('a', { toolActive: true }), null);
 });
 
+test('an armed grip drag makes Escape cancel it and enables no other tool-only key', () => {
+  // A grip drag is **not** a tool: `cad_status.tool` stays `null` while it is
+  // armed, so the drag flag is the only thing that can route Escape to the host.
+  assert.equal(toolCommandForKey('Escape', { gripDragActive: true }), 'CANCEL');
+  assert.equal(toolCommandForKey('Escape', { toolActive: false, gripDragActive: true }), 'CANCEL');
+  // Enter must stay tool-only: confirming a capture that does not exist would
+  // dispatch a `CONFIRM` the host could only refuse.
+  assert.equal(toolCommandForKey('Enter', { gripDragActive: true }), null);
+  assert.equal(toolCommandForKey('Enter', { toolActive: false, gripDragActive: true }), null);
+  // A drag does not widen any other key either.
+  for (const key of ['F2', 'F3', 'F7', 'F8', 'F9', 'a', ' ', 'ArrowDown']) {
+    assert.equal(toolCommandForKey(key, { gripDragActive: true }), null, key);
+  }
+  // The existing gates still apply to the drag case: a field, an IME
+  // composition and an auto-repeat own their keys.
+  assert.equal(toolCommandForKey('Escape', { gripDragActive: true, typing: true }), null);
+  assert.equal(toolCommandForKey('Escape', { gripDragActive: true, composing: true }), null);
+  assert.equal(toolCommandForKey('Escape', { gripDragActive: true, repeat: true }), null);
+  // Idle (no tool, no drag) keeps Escape's panel-closing behaviour: no CANCEL.
+  assert.equal(toolCommandForKey('Escape', { toolActive: false, gripDragActive: false }), null);
+  // A tool and a drag together are still one CANCEL, never two commands.
+  assert.equal(toolCommandForKey('Escape', { toolActive: true, gripDragActive: true }), 'CANCEL');
+});
+
 test('a host tool selector maps to its catalog key', () => {
   assert.equal(toolLabelKey('draw.line'), 'tool.draw.line');
   assert.equal(toolLabelKey('measure.distance'), 'tool.measure.distance');

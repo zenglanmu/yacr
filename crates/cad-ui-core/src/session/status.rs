@@ -599,6 +599,20 @@ pub struct CadStatus {
     /// own live popup state here (see `cad_ui_core::shell::projected_popup`), so
     /// the main UI can reflect/test the real state instead of inferring it.
     pub popup: Option<CadPopup>,
+    /// Whether a **grip drag** is armed right now
+    /// ([`cad_host::HostCore::grip_drag_active`]).
+    ///
+    /// Additive wire field (never `null`, always a real boolean): the host is the
+    /// only authority for the gesture, and the chrome needs it because the drag
+    /// writes nothing until the release — Escape must reach the host as `CANCEL`
+    /// to drop it. Without this flag the UI's Escape gate (which only knew about
+    /// an active **tool**) left the drag un-cancellable from the keyboard.
+    ///
+    /// It is **not** an active tool: [`Self::tool`] stays `null` during a drag,
+    /// so every tool-only affordance (Enter/`CONFIRM`, the tool prompt) keeps
+    /// behaving exactly as before. `dom-canvas` carriers never arm a grip drag
+    /// and therefore always report `false` (ADR 0024: no grip path there).
+    pub grip_drag: bool,
 }
 
 /// A `cad_status` snapshot that advertises no CAD capability (probe mode or a
@@ -648,6 +662,8 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         // No host builds a popup for an unsupported/probe snapshot; the host
         // projection fills the real value when one is open.
         popup: None,
+        // No session means no pointer and therefore no grip drag to cancel.
+        grip_drag: false,
     }
 }
 
@@ -879,6 +895,8 @@ pub(super) fn document_capabilities(
 ///
 /// `capabilities` is the already-projected document capability block (see
 /// [`document_capabilities`]); it is carried verbatim, never re-derived here.
+/// `grip_drag` is likewise the host's own [`cad_host::HostCore::grip_drag_active`]
+/// answer, passed in by the session that owns the host.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn assemble_status(
     has_document: bool,
@@ -904,6 +922,7 @@ pub(super) fn assemble_status(
     snap_kind: Option<String>,
     crosshair: bool,
     cursor_world: Option<[f64; 3]>,
+    grip_drag: bool,
 ) -> CadStatus {
     CadStatus {
         document_label: has_document.then_some(label),
@@ -938,5 +957,8 @@ pub(super) fn assemble_status(
         // The session owns no window: the host projects its live popup state
         // onto the snapshot it returns (never inferred here).
         popup: None,
+        // Carried verbatim from the host's own gesture state; this assembler
+        // never derives a drag from the tool/pointer fields.
+        grip_drag,
     }
 }

@@ -44,7 +44,13 @@ import { LOCAL_CHROME_COMMANDS } from '../src/commands.ts';
 import { offeredItems, PALETTE_COMMANDS } from '../src/ribbon-model.ts';
 import { readCatalog, readCss, readModule } from './helpers.ts';
 
-/** One layer row as the host sends it. */
+/**
+ * One layer row as the host sends it.
+ *
+ * Every field is present, exactly like the Rust `CadLayer` (the attributes are
+ * display/edit inputs, never behaviour — see `layers-wire.test.ts` for their
+ * normalisation contracts).
+ */
 function row(name, overrides = {}) {
   return {
     name,
@@ -52,6 +58,14 @@ function row(name, overrides = {}) {
     databaseVisible: true,
     overridden: false,
     current: false,
+    color: { aci: 7, rgb: '#ffffff' },
+    linetype: 'Continuous',
+    lineweight: 'ByLayer',
+    transparency: '0',
+    locked: false,
+    frozen: false,
+    off: false,
+    plottable: true,
     ...overrides,
   };
 }
@@ -111,6 +125,8 @@ test('the answer is normalised row by row, dropping only unaddressable rows', ()
   assert.equal(parsed.layers[1].visible, true, 'the first occurrence wins');
   assert.deepEqual(parsed.layers[2], {
     name: 'DIMS', visible: true, databaseVisible: false, overridden: true, current: false,
+    color: { aci: 7, rgb: '#ffffff' }, linetype: 'Continuous', lineweight: 'ByLayer',
+    transparency: '0', locked: false, frozen: false, off: false, plottable: true,
   });
   assert.equal(parsed.active, 'WALLS');
   assert.equal(parsed.overridden, 1);
@@ -118,8 +134,12 @@ test('the answer is normalised row by row, dropping only unaddressable rows', ()
 
 test('missing or non-boolean flags read as false instead of a guessed state', () => {
   const parsed = parseLayersAnswer(answer([{ name: '0', visible: 1, databaseVisible: 'yes', overridden: 'no' }]));
+  // The attribute fields are defaults too: no colour it can paint (`rgb: ''`),
+  // no linetype/lineweight/transparency text, every flag false.
   assert.deepEqual(parsed.layers[0], {
     name: '0', visible: false, databaseVisible: false, overridden: false, current: false,
+    color: { aci: null, rgb: '' }, linetype: '', lineweight: '', transparency: '',
+    locked: false, frozen: false, off: false, plottable: false,
   });
   // A non-string/empty active layer is "no current layer", not the string "null".
   assert.equal(parseLayersAnswer(answer([row('0')], { active: 42 })).active, null);
@@ -175,8 +195,9 @@ test('the identity dot is name-derived, deterministic and deliberately muted', (
   assert.notDeepEqual(layerTone('WALLS'), layerTone('DIMS'));
   assert.ok(Number.isInteger(layerNameHash('WALLS')));
   assert.equal(layerNameHash(''), layerNameHash(''), 'stable for the empty name too');
-  // A hash, not the drawing's colour: the palette never receives the ACI colour,
-  // so every swatch stays a muted marker instead of a saturated colour sample.
+  // A hash, not the drawing's colour: the stored colour is on the wire
+  // (`row.color`), but this projection stays a muted name-derived marker, so a
+  // swatch never claims to be the user's layer colour.
   const names = ['0', 'WALLS', 'DIMS', 'HATCH', 'TEXT', 'CENTER', 'HIDDEN'];
   const tones = names.map(name => layerTone(name));
   for (const [index, tone] of tones.entries()) {
@@ -719,6 +740,30 @@ test('every sentence the palette shows comes from the catalog, in both languages
     assert.equal(typeof en[key], 'string', key);
     assert.ok(palette.includes(`'${key}'`), `the palette renders ${key}`);
   }
+  // The attribute surface (color, the four flags with their honest hints, the
+  // read-only secondaries). The marks' labels/hints are copy-keyed in
+  // `layer-attributes.ts` (pure data) and the details line is its own component
+  // (`LayerDetails.tsx`, so the palette keeps a single row of markup), so a key may
+  // be literal in any of the three; `layers-attributes.test.ts` covers the
+  // behavior.
+  const attributes = await readModule('layer-attributes.ts');
+  const details = await readModule('components/LayerDetails.tsx');
+  const renders = (key: string) =>
+    palette.includes(`'${key}'`) || attributes.includes(`'${key}'`) || details.includes(`'${key}'`);
+  const attributeKeys = [
+    'layers.off', 'layers.frozen', 'layers.locked', 'layers.plottable', 'layers.no_plot',
+    'layers.off.hint', 'layers.frozen.hint', 'layers.locked.hint',
+    'layers.plottable.hint', 'layers.no_plot.hint', 'layers.marks_more', 'layers.marks_more.hint',
+    'layers.attributes', 'layers.attributes.close', 'layers.attributes.hint',
+    'layers.color', 'layers.color.aci', 'layers.color.hint',
+    'layers.color.marker', 'layers.color.reported',
+    'layers.linetype', 'layers.lineweight', 'layers.transparency',
+  ];
+  for (const key of attributeKeys) {
+    assert.equal(typeof zh[key], 'string', key);
+    assert.equal(typeof en[key], 'string', key);
+    assert.ok(renders(key), `the palette renders ${key}`);
+  }
   // The mutation failure sentence is neutral across visibility/create/rename/
   // delete (it used to name visibility only) and carries the host's real reason.
   assert.ok(palette.includes("t('layers.write_failed', { reason: state.error.reason })"));
@@ -748,6 +793,9 @@ test('every layer refusal code maps to catalog copy, in both languages', async (
     'layer.duplicate_name',
     'layer.default_undeletable',
     'layer.in_use',
+    // The two attribute refusals the palette's own controls can provoke.
+    'layer.property.unsupported',
+    'layer.property.value',
   ];
   const labels = await readModule('layer-labels.ts');
   for (const code of refusals) {

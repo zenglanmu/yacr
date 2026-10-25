@@ -91,6 +91,15 @@ export interface AvailabilityOptions {
 
 export interface ToolCommandOptions {
   readonly toolActive?: boolean;
+  /**
+   * Whether a **grip drag** is armed (`cad_status.gripDrag`).
+   *
+   * A drag is not a tool (`tool` stays `null` while it is armed), so it only
+   * widens `Escape`: the host drops the armed drag on `CANCEL`, and without this
+   * flag the drag would be un-cancellable from the keyboard. `Enter` stays
+   * tool-only, so a drag never sends a `CONFIRM` for a capture that does not exist.
+   */
+  readonly gripDragActive?: boolean;
   readonly typing?: boolean;
   readonly composing?: boolean;
   readonly repeat?: boolean;
@@ -474,23 +483,31 @@ export function toolLabelKey(toolKey?: unknown): string | null {
 }
 
 /**
- * The CAD command a global key press should submit while an interactive tool is
- * active, or `null` when the press is not ours.
+ * The CAD command a global key press should submit while an interactive tool (or
+ * an armed grip drag) owns the pointer, or `null` when the press is not ours.
  *
- * `Enter` confirms and `Escape` cancels the active tool, but only when a tool is
- * really active and the key was not typed into a field (`typing`), was not an IME
- * composition, and was not an auto-repeat. A missing tool returns `null` for
- * every key, so Escape keeps its panel-closing behaviour when no tool is running.
+ * `Enter` confirms the active **tool**; `Escape` cancels whatever owns the
+ * pointer — the active tool or an armed grip drag — but only when the key was not
+ * typed into a field (`typing`), was not an IME composition, and was not an
+ * auto-repeat. A missing tool *and* no drag returns `null` for every key, so
+ * Escape keeps its panel-closing behaviour when nothing is in progress.
+ *
+ * The drag case deliberately only widens **Escape**: a grip drag is not a tool
+ * (`cad_status.tool` is `null`), so it must not enable `CONFIRM` or any other
+ * tool-only key. `CANCEL` is the one selector the host needs from the keyboard
+ * here — it drops the armed drag as a pure state drop (`reset_grip_gesture`).
  */
 export function toolCommandForKey(key: string, {
   toolActive = false,
+  gripDragActive = false,
   typing = false,
   composing = false,
   repeat = false,
 }: ToolCommandOptions = {}): 'CONFIRM' | 'CANCEL' | null {
-  if (!toolActive || typing || composing || repeat) return null;
+  if (typing || composing || repeat) return null;
+  if (key === 'Escape') return toolActive || gripDragActive ? 'CANCEL' : null;
+  if (!toolActive) return null;
   if (key === 'Enter') return 'CONFIRM';
-  if (key === 'Escape') return 'CANCEL';
   return null;
 }
 

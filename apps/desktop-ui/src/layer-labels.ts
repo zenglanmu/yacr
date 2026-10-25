@@ -36,6 +36,12 @@ export function layerErrorKey(code: unknown): string | null {
     case 'layer.duplicate_name': return 'layers.error.layer.duplicate_name';
     case 'layer.default_undeletable': return 'layers.error.layer.default_undeletable';
     case 'layer.in_use': return 'layers.error.layer.in_use';
+    // The attribute writes (`cad_set_layer_property`): a key this build cannot
+    // store, or a value that key's grammar refuses. Both are reachable from the
+    // palette's color control and flag chips, so both get copy rather than the
+    // generic sentence.
+    case 'layer.property.unsupported': return 'layers.error.layer.property.unsupported';
+    case 'layer.property.value': return 'layers.error.layer.property.value';
     default: return null;
   }
 }

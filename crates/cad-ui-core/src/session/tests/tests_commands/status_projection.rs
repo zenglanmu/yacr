@@ -104,6 +104,8 @@ fn blank_status_reports_no_document_capabilities() {
         false,
         // No cursor on a blank session: no world coordinate to report.
         None,
+        // No pointer, no gesture: nothing is dragging.
+        false,
     );
     assert_eq!(status.document_label, None);
     assert_eq!(status.entity_count, None);
@@ -145,6 +147,10 @@ fn blank_status_reports_no_document_capabilities() {
     );
     // The selection block is always carried, never omitted.
     assert_eq!(status.selection, CadSelection::empty());
+    assert!(
+        !status.grip_drag,
+        "a blank session has no armed grip drag to report"
+    );
 }
 
 #[test]
@@ -178,6 +184,8 @@ fn document_status_reports_counts_and_camera() {
         true,
         // The world coordinate is carried verbatim, never re-derived here.
         Some([1.5, -2.0, 3.0]),
+        // An armed grip drag is carried verbatim too, alongside `tool: null`.
+        true,
     );
     assert_eq!(status.document_label.as_deref(), Some("fixture.dwg"));
     assert_eq!(status.entity_count, Some(3));
@@ -211,6 +219,14 @@ fn document_status_reports_counts_and_camera() {
         status.cursor_world,
         Some([1.5, -2.0, 3.0]),
         "the status carries the world cursor it was given, verbatim"
+    );
+    assert!(
+        status.grip_drag,
+        "the status carries the armed-drag flag it was given, even with `tool: null`"
+    );
+    assert!(
+        status.tool.is_none(),
+        "a grip drag never fabricates a tool block"
     );
 }
 
@@ -278,6 +294,137 @@ fn session_status_projects_the_real_save_pending_state_onto_can_save() {
     assert!(
         !pending.can_save && !pending.can_plot,
         "a pending save target blocks SAVE and PLOT"
+    );
+}
+
+#[test]
+fn the_status_carries_the_grip_drag_flag_on_the_wire_in_both_states() {
+    // The status contract is "every key always exists", so the additive flag is
+    // present in the idle/unsupported state too — with the honest `false`.
+    let idle = unsupported_status(None);
+    assert!(!idle.grip_drag);
+
+    // The wire name is the block's camelCase `gripDrag`. `cad-ui-core`
+    // deliberately carries no `serde_json`, so the field-name recorder is the
+    // pinned proof that a `serde(rename)` did not silently win; the values are
+    // asserted on the struct (exactly like the `commandLog` contract).
+    let names = super::super::tests_text::wire_field_names(&idle);
+    assert!(
+        names.iter().any(|name| name == "gripDrag"),
+        "the additive key must reach the wire as `gripDrag`: {names:?}"
+    );
+    // Nothing was reordered or dropped: the pre-existing keys are all still here.
+    for key in ["popup", "tool", "commandLog", "cursorWorld", "frameCount"] {
+        assert!(
+            names.iter().any(|name| name == key),
+            "the pre-existing key `{key}` disappeared: {names:?}"
+        );
+    }
+
+    // …and the same key is emitted with `true` while a drag is armed.
+    let dragging = assemble_status(
+        true,
+        "fixture.dwg".into(),
+        Some(1),
+        false,
+        true,
+        document_capabilities(advertised_capabilities(), true, false, false),
+        None,
+        None,
+        None,
+        None,
+        CadSelection::empty(),
+        0,
+        0,
+        None,
+        true,
+        true,
+        true,
+        false,
+        10.0,
+        false,
+        None,
+        false,
+        None,
+        true,
+    );
+    assert!(dragging.grip_drag);
+    let names = super::super::tests_text::wire_field_names(&dragging);
+    assert!(names.iter().any(|name| name == "gripDrag"), "{names:?}");
+}
+
+#[test]
+fn an_armed_grip_drag_reaches_the_status_flag_and_cancel_drops_it() {
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .fit()
+        .expect("the demo document fits");
+
+    // The demo drawing's entity 1 is the line from (0, 0) to (4000, 0); its start
+    // point is a real grip (`cad_app::grips` exposes a LINE's two endpoints).
+    let reference = SelectionRef {
+        document: session.core.controller.borrow().document_id,
+        entity: EntityId(1),
+        instance: InstancePath::default(),
+        sub_element: None,
+    };
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .set_selection(vec![reference])
+        .expect("the selection");
+
+    // Idle: no gesture, and the status says exactly that.
+    assert!(!session.core.grip_drag_active());
+    assert!(!session.snapshot(None, None, 0).grip_drag);
+
+    // A primary press on the handle arms the drag; the projection is the host's
+    // own answer, never a re-derivation from the pointer stream.
+    let grip_pixel = screen_of(
+        &session,
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    );
+    session
+        .handle_input(&pointer_at(InputKind::PointerDown, 1, grip_pixel, None))
+        .expect("the press on the handle is admitted");
+    assert!(
+        session.core.grip_drag_active(),
+        "the press on a handle of the selection arms the drag"
+    );
+    let dragging = session.snapshot(None, None, 0);
+    assert_eq!(
+        dragging.grip_drag,
+        session.core.grip_drag_active(),
+        "the status flag is the host's real gesture state, not a guess"
+    );
+    assert!(dragging.grip_drag);
+    assert!(
+        dragging.tool.is_none(),
+        "a grip drag is not a tool: the tool block stays null, so no tool-only \
+         affordance (CONFIRM, the tool prompt) can turn on because of a drag"
+    );
+
+    // Escape reaches the host as `CANCEL` (the desktop UI's gate sends exactly
+    // this selector) and a cancel is a pure state drop: no write, no commit.
+    session.command("CANCEL").expect("CANCEL is admitted");
+    assert!(
+        !session.core.grip_drag_active(),
+        "CANCEL drops the armed drag"
+    );
+    let after = session.snapshot(None, None, 0);
+    assert!(
+        !after.grip_drag,
+        "a dropped drag is projected as `false`, never left stale"
     );
 }
 

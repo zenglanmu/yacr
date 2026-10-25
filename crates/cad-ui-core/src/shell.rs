@@ -319,6 +319,7 @@ mod tests {
             frame_count: 0,
             command_log: Vec::new(),
             popup: None,
+            grip_drag: false,
         }
     }
 

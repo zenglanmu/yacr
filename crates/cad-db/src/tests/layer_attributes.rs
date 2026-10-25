@@ -161,3 +161,146 @@ fn layer_ids_are_not_reused_after_delete() {
     assert!(db.layer_attributes_ref(first).is_none());
     assert_eq!(db.layer_attributes(second), LayerAttributes::default());
 }
+
+// ---------------------------------------------------------------------------
+// The post-import attribute write (`DrawingDatabase::set_layer_attributes`)
+// ---------------------------------------------------------------------------
+
+/// The whole row as comparable state: attributes plus the derived `visible` flag.
+fn row(db: &DrawingDatabase, id: LayerId) -> (LayerAttributes, bool) {
+    (
+        db.layer_attributes(id),
+        db.layer(id).expect("layer row").visible,
+    )
+}
+
+#[test]
+fn setting_attributes_raises_the_revision_once_and_keeps_changes_empty() {
+    let mut db = layer_db();
+    let before = db.revision();
+    let mut attributes = db.layer_attributes(LayerId(0));
+    attributes.color = LayerColor {
+        aci: Some(1),
+        rgb: [255, 0, 0],
+    };
+
+    let changes = db
+        .set_layer_attributes(LayerId(0), attributes.clone(), TransactionId(1), "colour")
+        .expect("the layer exists");
+
+    assert_eq!(
+        db.layer_attributes(LayerId(0)).color,
+        LayerColor {
+            aci: Some(1),
+            rgb: [255, 0, 0]
+        }
+    );
+    assert_eq!(db.revision(), Revision(before.0 + 1));
+    assert_eq!(changes.before, before);
+    assert_eq!(changes.after, db.revision());
+    // No entity changed: the revision is the staleness tag, nothing else.
+    assert!(changes.changes.is_empty());
+}
+
+#[test]
+fn off_and_frozen_drive_visible_and_unfreezing_restores_it() {
+    let mut db = layer_db();
+    let base = db.layer_attributes(LayerId(0));
+    assert!(db.layer(LayerId(0)).expect("layer").visible);
+
+    // off => invisible.
+    let mut off = base.clone();
+    off.off = true;
+    db.set_layer_attributes(LayerId(0), off.clone(), TransactionId(1), "off")
+        .expect("write");
+    assert!(!db.layer(LayerId(0)).expect("layer").visible);
+
+    // still off, now also frozen: still invisible, and the invariant holds.
+    let mut both = off.clone();
+    both.frozen = true;
+    db.set_layer_attributes(LayerId(0), both.clone(), TransactionId(2), "freeze")
+        .expect("write");
+    assert_eq!(row(&db, LayerId(0)), (both.clone(), false));
+    let stored = db.layer_attributes(LayerId(0));
+    assert_eq!(
+        db.layer(LayerId(0)).expect("layer").visible,
+        !(stored.off || stored.frozen)
+    );
+
+    // unfreezing alone does not restore visibility: `off` is still set.
+    let mut off_only = both.clone();
+    off_only.frozen = false;
+    db.set_layer_attributes(LayerId(0), off_only.clone(), TransactionId(3), "thaw")
+        .expect("write");
+    assert!(!db.layer(LayerId(0)).expect("layer").visible);
+
+    // clearing the last flag restores the row.
+    db.set_layer_attributes(LayerId(0), base.clone(), TransactionId(4), "on")
+        .expect("write");
+    assert_eq!(row(&db, LayerId(0)), (base, true));
+}
+
+#[test]
+fn an_unchanged_attribute_write_is_a_no_op_without_a_revision_bump() {
+    let mut db = layer_db();
+    let before = db.revision();
+    let attributes = db.layer_attributes(LayerId(0));
+
+    let changes = db
+        .set_layer_attributes(LayerId(0), attributes, TransactionId(1), "same")
+        .expect("the layer exists");
+
+    assert_eq!(db.revision(), before, "nothing changed, so no new revision");
+    assert_eq!(changes.before, changes.after);
+    assert!(changes.changes.is_empty());
+}
+
+#[test]
+fn a_write_that_only_fixes_a_stale_visible_flag_still_counts_as_a_change() {
+    // A hand-built row can disagree with its attributes (the builder never
+    // recomputes `visible`). Rewriting the same attributes must repair the flag
+    // and publish that as a real change, not as a no-op.
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    let attributes = LayerAttributes {
+        off: true,
+        ..LayerAttributes::default()
+    };
+    b.set_layer_attributes(LayerId(0), attributes.clone())
+        .unwrap();
+    let mut db = b.finish().unwrap();
+    assert!(
+        db.layer(LayerId(0)).expect("layer").visible,
+        "the fixture deliberately starts inconsistent"
+    );
+    let before = db.revision();
+
+    db.set_layer_attributes(LayerId(0), attributes, TransactionId(1), "repair")
+        .expect("write");
+
+    assert!(!db.layer(LayerId(0)).expect("layer").visible);
+    assert_eq!(db.revision(), Revision(before.0 + 1));
+}
+
+#[test]
+fn setting_attributes_on_an_unknown_layer_is_refused_and_changes_nothing() {
+    let mut db = layer_db();
+    let before = db.revision();
+
+    let error = db
+        .set_layer_attributes(
+            LayerId(7),
+            LayerAttributes::default(),
+            TransactionId(1),
+            "unknown",
+        )
+        .expect_err("no such layer");
+
+    assert!(error.to_string().contains("layer.unknown_id"), "{error}");
+    assert_eq!(db.revision(), before);
+}

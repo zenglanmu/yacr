@@ -18,12 +18,24 @@
 //!
 //! The three **structural table** writes ([`CadSession::create_layer`],
 //! [`CadSession::rename_layer`], [`CadSession::delete_layer`] →
-//! [`CommandId::CreateLayer`] / `RenameLayer` / `DeleteLayer`) are different:
-//! they are real database writes with one revision bump each, they carry a name
-//! selector instead of a resolved id (the application layer applies the same
-//! resolution rule), and they are **not undoable** — `cad-history` stores entity
-//! patches only, so a layer patch kind is a separate lane.
+//! [`CommandId::CreateLayer`] / `RenameLayer` / `DeleteLayer`) and the attribute
+//! write ([`CadSession::set_layer_property`] → [`CommandId::SetLayerProperty`])
+//! are different: they are real database writes with one revision bump each,
+//! they carry a name selector instead of a resolved id (the application layer
+//! applies the same resolution rule), and they are **not undoable** —
+//! `cad-history` stores entity patches only, so a layer patch kind is a separate
+//! lane.
+//!
+//! Every [`CadLayer`] row also carries the layer's stored attributes (colour,
+//! linetype, lineweight, transparency and the off/frozen/locked/plottable flags),
+//! formatted with the **write grammar's** own canonical projections
+//! ([`cad_app::layer_property`]) so a value a row shows can be sent straight back
+//! to `cad_set_layer_property`. They are display/edit inputs, **not** behaviour:
+//! only `off`/`frozen` are reflected in `visible` (through the database's own
+//! `visible == !(off || frozen)` rule), and `locked`/`plottable`/colour/linetype/
+//! lineweight/transparency still have no effect anywhere in the build.
 
+use cad_app::layer_property;
 use cad_app::layers::LayerRow;
 use cad_app::{CommandId, CommandPayload};
 use cad_domain::LayerId;
@@ -46,6 +58,47 @@ pub struct CadLayer {
     pub overridden: bool,
     /// Whether this is the active layer new entities are created on.
     pub current: bool,
+    /// The layer's stored colour: the ACI identity (when the source had one) plus
+    /// the resolved sRGB value.
+    ///
+    /// Both halves are sent because they are different facts (see
+    /// [`cad_db::LayerColor`]): `aci` is what a re-export writes and `rgb` is what
+    /// a UI can paint. `aci` is `null` for a true-colour layer.
+    pub color: CadLayerColor,
+    /// The layer's linetype **name** (a table entry, never a dangling reference).
+    pub linetype: String,
+    /// The layer's lineweight in [`cad_app::layer_property`]'s own vocabulary:
+    /// `"ByLayer"`, `"Default"`, or the DXF `370` integer as a string in
+    /// **1/100 mm** (`"35"` = 0.35 mm). Documented explicitly because it is *not*
+    /// the entity property grammar's millimetre string.
+    pub lineweight: String,
+    /// Opacity as **percent transparent** (`"0"` = opaque), the write grammar's
+    /// own unit, so the value can be sent back unchanged. A stored opacity
+    /// outside `[0, 1]` reads `"opacity:<raw>"` and is not writable back.
+    pub transparency: String,
+    /// Layer is locked (stored only: no behaviour yet).
+    pub locked: bool,
+    /// Layer is frozen (hides the layer through the existing `visible` path).
+    pub frozen: bool,
+    /// Layer is off (hides the layer through the existing `visible` path).
+    pub off: bool,
+    /// Whether the layer plots (stored only: plotting is not implemented).
+    pub plottable: bool,
+}
+
+/// The wire form of a layer's colour: the ACI identity (or `null`) plus
+/// `#rrggbb`.
+///
+/// `rgb` is always present (it is the display value), `aci` is `null` for a
+/// true-colour layer. Writing `aci:N` stores both halves; writing `#RRGGBB`
+/// stores `aci: null`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CadLayerColor {
+    /// The source ACI index, or `null` for a true colour.
+    pub aci: Option<u8>,
+    /// Resolved sRGB value, lowercase `#rrggbb`.
+    pub rgb: String,
 }
 
 /// The complete `cad_layers` answer.
@@ -77,17 +130,17 @@ impl CadLayers {
 
 /// One queued layer mutation (the typed layer IPC channels).
 ///
-/// The wire admission only carries names/booleans; whether a name resolves to a
-/// real layer is live session state and is decided on the owner thread when this
-/// write is applied ([`CadLayerWrite::apply`]).
+/// The wire admission only carries names/booleans/strings; whether a name
+/// resolves to a real layer is live session state and is decided on the owner
+/// thread when this write is applied ([`CadLayerWrite::apply`]).
 ///
 /// Despite the module's visibility emphasis this is the **layer mutation**
-/// channel, not a visibility channel: it also carries the three structural
-/// table writes. A parallel enum would have to duplicate the same bounded queue
-/// and the same popup/probe-mode gates for no gain, so the one queue stays the
-/// single admission point. The structural variants are real database writes (one
-/// revision bump each, not undoable); the visibility/active variants stay session
-/// state only.
+/// channel, not a visibility channel: it also carries the structural table writes
+/// and the attribute write. A parallel enum would have to duplicate the same
+/// bounded queue and the same popup/probe-mode gates for no gain, so the one
+/// queue stays the single admission point. The table variants are real database
+/// writes (one revision bump each, not undoable); the visibility/active variants
+/// stay session state only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CadLayerWrite {
     /// Set the temporary visibility of one layer, addressed by name.
@@ -109,6 +162,21 @@ pub enum CadLayerWrite {
     /// The database refuses the default layer `0` and any layer an entity still
     /// references; the command layer then reports the real reason.
     Delete { layer: String },
+    /// Write one attribute of the layer addressed by `layer`
+    /// (`SETLAYERPROPERTY`).
+    ///
+    /// `key` is one of [`cad_app::layer_property::SUPPORTED_KEYS`] and `value`
+    /// follows that key's documented grammar (one shared grammar — the layer's
+    /// own units: `lineweight` is 1/100 mm, `transparency` is percent
+    /// transparent). The application layer resolves the name, parses the value
+    /// against the drawing's tables and writes through
+    /// [`cad_db::DrawingDatabase::set_layer_attributes`] in one revision bump.
+    /// Not undoable, like the other layer-table writes.
+    SetProperty {
+        layer: String,
+        key: String,
+        value: String,
+    },
 }
 
 impl CadLayerWrite {
@@ -124,6 +192,9 @@ impl CadLayerWrite {
             Self::Create { name } => session.create_layer(name),
             Self::Rename { layer, name } => session.rename_layer(layer, name),
             Self::Delete { layer } => session.delete_layer(layer),
+            Self::SetProperty { layer, key, value } => {
+                session.set_layer_property(layer, key, value)
+            }
         }
     }
 }
@@ -151,12 +222,29 @@ impl CadSession {
         let overridden = rows.iter().filter(|row| row.is_overridden()).count();
         let layers = rows
             .into_iter()
-            .map(|row| CadLayer {
-                name: row.name,
-                visible: row.effective_visible,
-                database_visible: row.database_visible,
-                overridden: row.override_visible.is_some(),
-                current: row.id == active_layer,
+            .map(|row| {
+                let attributes = &row.attributes;
+                CadLayer {
+                    name: row.name,
+                    visible: row.effective_visible,
+                    database_visible: row.database_visible,
+                    overridden: row.override_visible.is_some(),
+                    current: row.id == active_layer,
+                    // The stored attributes, projected with the write grammar's
+                    // own canonical forms (one grammar for read and write, so a
+                    // value a row shows can be sent back unchanged).
+                    color: CadLayerColor {
+                        aci: attributes.color.aci,
+                        rgb: layer_property::color_hex(attributes.color.rgb),
+                    },
+                    linetype: attributes.linetype.clone(),
+                    lineweight: layer_property::lineweight_value(attributes.lineweight),
+                    transparency: layer_property::transparency_value(attributes.opacity),
+                    locked: attributes.locked,
+                    frozen: attributes.frozen,
+                    off: attributes.off,
+                    plottable: attributes.plottable,
+                }
             })
             .collect();
         Ok(CadLayers {
@@ -255,6 +343,36 @@ impl CadSession {
             CommandId::DeleteLayer,
             CommandPayload::DeleteLayer {
                 layer: layer.to_string(),
+            },
+        )
+    }
+
+    /// Write one attribute of the layer currently named `layer`
+    /// (`SETLAYERPROPERTY`).
+    ///
+    /// A **real database write**: the application layer resolves `layer` with the
+    /// same exact-then-unique-case-insensitive rule as [`Self::rename_layer`],
+    /// parses `value` with the one layer grammar
+    /// ([`cad_app::layer_property`]) — which checks a linetype name against the
+    /// drawing's own table — and applies it to a **candidate** attribute set
+    /// before publishing. One revision bump per real change, **no** undo entry
+    /// (layer edits are not undoable).
+    ///
+    /// `off` / `frozen` are the only keys with behaviour: the database recomputes
+    /// `Layer::visible` from the pair in the same mutation, so the scene hides a
+    /// frozen layer through the existing visibility path. `locked`, `plottable`,
+    /// colour, linetype, lineweight and transparency are stored only.
+    ///
+    /// The answer is the ordinary queued ack; the panel re-reads [`Self::layers`],
+    /// whose rows carry the stored attributes in the write grammar's own units.
+    pub fn set_layer_property(&self, layer: &str, key: &str, value: &str) -> Result<(), String> {
+        self.require_layer_document()?;
+        self.dispatch_payload(
+            CommandId::SetLayerProperty,
+            CommandPayload::SetLayerProperty {
+                layer: layer.to_string(),
+                key: key.to_string(),
+                value: value.to_string(),
             },
         )
     }

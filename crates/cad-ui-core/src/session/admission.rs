@@ -3,9 +3,9 @@
 //! Every CAD mutation that is not a bare command name has its own typed channel
 //! (`cad_set_tool_parameter`, `cad_set_tool_text`, `cad_set_selected_text`,
 //! `cad_set_selected_property`, `cad_standard_view`, `cad_set_setting`,
-//! `cad_set_layer_visible` / `cad_restore_layers` / `cad_set_active_layer`). Those
-//! channels share one discipline, which lives here so every host applies it
-//! identically:
+//! `cad_set_layer_visible` / `cad_restore_layers` / `cad_set_active_layer` /
+//! `cad_set_layer_property`). Those channels share one discipline, which lives
+//! here so every host applies it identically:
 //!
 //! - the wire form is parsed into a typed value, with **named** refusals and no
 //!   silent fallback;
@@ -333,6 +333,29 @@ pub fn admit_setting(
 ///
 /// It reuses the CAD command queue's capacity so every admission shares one bound.
 pub const CAD_LAYER_WRITE_CAP: usize = CAD_COMMAND_CAP;
+
+/// Parse the wire form of a `cad_set_layer_property` request.
+///
+/// The three fields are strings: `layer` is a layer **name** (resolved on the
+/// owner thread, never here), `key` is a stable machine key and `value` is that
+/// key's documented grammar (see [`cad_app::layer_property`]). Only the **key**
+/// is checked here, because it is database-independent: an unknown key and the
+/// known-but-unimplemented `plotstyle` are refused statically with
+/// `layer.property.unsupported`, naming the key. The value's grammar can depend
+/// on the drawing's own tables (a linetype name must exist), so it is the owner
+/// thread's authority — never guessed or clamped here.
+pub fn parse_layer_property_write(
+    layer: &str,
+    key: &str,
+    value: &str,
+) -> Result<(String, String, String), String> {
+    if !cad_app::layer_property::is_supported_key(key) {
+        return Err(format!(
+            "layer.property.unsupported: '{key}' is not a writable layer property"
+        ));
+    }
+    Ok((layer.to_string(), key.to_string(), value.to_string()))
+}
 
 /// Admit one typed layer write into the bounded main-thread queue.
 ///

@@ -109,8 +109,11 @@ impl HostCore {
     ///
     /// Visible crate-wide so the interaction dispatcher can demote a grip-drag
     /// frame to an overlay-only change and the synthetic contracts can observe
-    /// the armed state.
-    pub(crate) fn grip_drag_active(&self) -> bool {
+    /// the armed state. It is **public** because `cad-ui-core` projects it onto
+    /// `cad_status.gripDrag`: the desktop UI has to know a drag owns the pointer
+    /// to route Escape to `CANCEL`, and the host is the only authority for that
+    /// fact (`cad-ui-core` must not keep a second copy of a gesture).
+    pub fn grip_drag_active(&self) -> bool {
         self.navigation.grip_drag.borrow().is_some()
     }
 

@@ -67,6 +67,16 @@
 
 mod aci;
 
+/// The ACI palette's sRGB triple for an index (`0`/`256` are symbolic and answer
+/// `None`).
+///
+/// Shared **inside the crate** with the layer-property grammar
+/// ([`crate::layer_property`]), because a layer colour carries an ACI identity and
+/// a resolved sRGB value and the two must come from the one palette table: a
+/// second copy would let the entity and layer grammars disagree about what
+/// `aci:30` looks like.
+pub(crate) use aci::rgb_for_aci;
+
 use cad_db::{
     DbEntity, DrawingDatabase, EntityColor, EntityLineType, EntityLineWeight, EntityTransparency,
     LinetypePattern,

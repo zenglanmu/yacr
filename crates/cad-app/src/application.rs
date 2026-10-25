@@ -48,12 +48,14 @@ impl Application {
                     "SetLayerVisibilities needs a layer visibilities payload".into(),
                 )),
             },
-            // Layer **table** writes (create/rename/delete): real database writes
-            // in one revision bump each, never undoable, dispatched ahead of the
-            // entity-edit funnel because they mutate no entity.
-            CommandId::CreateLayer | CommandId::RenameLayer | CommandId::DeleteLayer => {
-                self.layer_command(session, &command)
-            }
+            // Layer **table** writes (create/rename/delete/attribute): real
+            // database writes in one revision bump each, never undoable,
+            // dispatched ahead of the entity-edit funnel because they mutate no
+            // entity.
+            CommandId::CreateLayer
+            | CommandId::RenameLayer
+            | CommandId::DeleteLayer
+            | CommandId::SetLayerProperty => self.layer_command(session, &command),
             CommandId::SwitchSpace => {
                 if let CommandPayload::Space(space) = command.payload {
                     // Validate against the *current* drawing before recording the

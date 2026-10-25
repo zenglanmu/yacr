@@ -20,9 +20,9 @@ use std::sync::{Arc, Mutex};
 use cad_ui_core::protocol::{InputKind, ProbeInput, ProbeInputAck, ProbeStatus};
 use cad_ui_core::session::{
     admit_layer_write, admit_selected_property, admit_setting, admit_standard_view,
-    admit_tool_parameter, admit_tool_text, parse_property_write, parse_standard_view,
-    parse_tool_parameter, CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CadSettings,
-    CadStatus, SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
+    admit_tool_parameter, admit_tool_text, parse_layer_property_write, parse_property_write,
+    parse_standard_view, parse_tool_parameter, CadLayerWrite, CadLayers, CadSettingKey,
+    CadSettingValue, CadSettings, CadStatus, SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
 use cad_ui_core::shell::{
     admit_command, modal_gate_open, projected_popup, projected_status, queue_cad_input,
@@ -556,6 +556,48 @@ pub fn cad_delete_layer_impl(
     admit_shared_layer_write(shared, CadLayerWrite::Delete { layer })
 }
 
+/// `cad_set_layer_property` command: queue one **layer attribute** write
+/// (`SETLAYERPROPERTY`).
+///
+/// The wire shape is `{ layer: <string>, key: <string>, value: <string> }`:
+/// `layer` addresses the row by **name** (the host resolves it against the
+/// drawing's own table, so an unknown or ambiguous selector is an explicit
+/// `layer.unknown` / `layer.ambiguous_name` refusal), `key` is one of
+/// [`cad_app::layer_property::SUPPORTED_KEYS`] and `value` follows that key's
+/// documented grammar — **the layer's own units**: `lineweight` is 1/100 mm and
+/// `transparency` is percent transparent, deliberately different from
+/// `SETENTITYPROPERTY`'s millimetres/percent but the same *idea*.
+///
+/// The key is checked before the queue (`layer.property.unsupported`, naming the
+/// key — `plotstyle` is refused here because the writer only emits a style
+/// handle); the value is the owner thread's call, because it can depend on the
+/// drawing's linetype table (`layer.linetype_missing`).
+///
+/// `{accepted:true}` means **queued**, not completed: a real change is one
+/// revision bump and no undo entry (layer edits are not undoable), and the next
+/// `cad_layers` read shows the new attribute values. Only `off`/`frozen` change
+/// behaviour (they hide the layer through the existing `visible` path).
+#[tauri::command]
+pub fn cad_set_layer_property(
+    shared: tauri::State<'_, ProbeShared>,
+    layer: String,
+    key: String,
+    value: String,
+) -> Result<CadCommandAck, String> {
+    cad_set_layer_property_impl(&shared.0, layer, key, value)
+}
+
+/// Command body of [`cad_set_layer_property`], without the Tauri state wrapper.
+pub fn cad_set_layer_property_impl(
+    shared: &Arc<Mutex<Shared>>,
+    layer: String,
+    key: String,
+    value: String,
+) -> Result<CadCommandAck, String> {
+    let (layer, key, value) = parse_layer_property_write(&layer, &key, &value)?;
+    admit_shared_layer_write(shared, CadLayerWrite::SetProperty { layer, key, value })
+}
+
 /// `cad_status` command: the latest main-thread CAD snapshot, with the host-side
 /// (transport) error merged in.
 ///
@@ -778,6 +820,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "cad_create_layer",
     "cad_rename_layer",
     "cad_delete_layer",
+    "cad_set_layer_property",
 ];
 
 /// Build the `invoke_handler` for the desktop hosts.
@@ -809,6 +852,7 @@ pub fn register_commands<R: tauri::Runtime>(
         cad_set_active_layer,
         cad_create_layer,
         cad_rename_layer,
-        cad_delete_layer
+        cad_delete_layer,
+        cad_set_layer_property
     ]
 }

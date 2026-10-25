@@ -8,6 +8,7 @@ mod builder;
 mod drawing;
 mod layer_attributes;
 mod layers;
+mod locked_layers;
 mod plot;
 mod scale;
 mod text_transform;

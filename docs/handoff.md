@@ -1,3 +1,244 @@
+## 2026-10-26 图层锁定：实体写的唯一行为门（`layer.locked`）
+
+### 结论
+
+`LayerAttributes::locked` 之前是**纯存储**（导入写入、`SETLAYERPROPERTY` / IPC 可编辑，但没有代码读它）。
+本轮给它**唯一一个行为**：锁定层上的实体是只读对象——**不可修改、不可创建、不可删除**，
+拒绝码 **`layer.locked`**，消息点名实体 id 与图层名/id 并提示先解锁。无 UI 改动、无新 wire 字段、
+未碰 `apps/**` / i18n / 图层线缆（另一 lane 拥有）。
+
+- **唯一执行点**：`crates/cad-db/src/drawing/lock.rs` 的
+  `DrawingDatabase::ensure_change_allowed_on_locked_layer`，两个入口调用**同一条判据**，命令层
+  （`cad-app`）**零新增检查**（MOVE/ERASE/SETENTITYPROPERTY/LINE 等只是把 `Err` 冒泡）：
+  1. `DrawingTransaction::stage` —— 五个 stager（`insert_entity` / `update_entity` /
+     `update_entity_display` / `delete_entity` / `transform_entity`）全部经它，检查在**入队之前**：
+     被拒时 `staged_len()` 不变、事务保持空、revision 与撤销深度都不动（"什么都没 staging"是真的）。
+  2. `DrawingDatabase::apply_drawing_changes` —— 唯一验证写路径，检查放在 **phase 1（整批验证）**，
+     与既有"先全量验证、后变更"结构同一相位，因此**不可能半应用**；撤销/重放也走这里。
+- **拒绝面（AutoCAD 子集，属我们的选择）**：修改（含移动/变换/改属性）、删除、插入（含把解锁层实体
+  改到锁定层上，`cannot move entity N onto locked layer …`）。只有**有效变更**才拒：与存储行逐字节
+  相同的写入不算修改——这条正是显示路径得以继续工作的原因。
+- **显式不拦**：① `update_entity_display`（颜色/线型/线宽/透明度）与
+  `restore_entity_display_state`：表示重建而非图形编辑，staging 的是**原样**实体行；AutoCAD 同样会
+  重新生成锁定层，故不拦（有测试）。② 图层表写（`create_layer`/`rename_layer`/`delete_layer`/
+  `set_layer_attributes`）：它们是图层级写、也是**解锁出口**，本身不建事务。③ 解锁后同一编辑立刻成功
+  （锁状态无缓存）。
+- **冻结不新增规则**：冻结/关闭层已不可见（`visible == !(off || frozen)`），进不了场景与选择漏斗；
+  本轮**不**在写路径加第二条冻结规则，并用测试钉住"冻结层仍可写"这一既存行为（冻结前已选中的对象）。
+- **历史重放规则（已实现并由测试钉住）**：撤销/重做把 `DrawingPatch` 重放经
+  `apply_drawing_changes`，所以**当前锁状态优先**。某步现在会写锁定层 ⇒ `layer.locked`；
+  `cad-app` 的 `undo_drawing`/`redo_drawing` 把该步**放回**（`cancel_pending_drawing`），
+  文档不变、撤销栈不清空，解锁后同一步可正常撤销。选这条（而非"按记录时状态放行"）的理由：
+  静默写一个用户刚锁上的图层是用户看不见的越权；重放永不重新授权。
+- **缺口（明确）**：把锁定层设为**当前层**仍被允许（活动图层是 `SessionState`，不是数据库写、不在这个
+  汇集点），但随后在该层**创建**实体已被拒；"锁定层可选中但不可改"的选择过滤未做；
+  `ByLayer` 颜色仍未按层解析；面板锁定列仍未接线（另一 lane）。
+
+### 测试（合成契约，非运行时/GUI 证据）
+
+`crates/cad-db/src/tests/locked_layers.rs`（新，8 条，注册进 `tests/mod.rs`）：
+
+1. `a_locked_layer_refuses_update_transform_and_delete_without_staging`：三种写都是 `layer.locked`、
+   `staged_len()==0`、commit 为空、revision/实体/图层表全不动；
+2. `inserting_on_a_locked_layer_is_refused_and_nothing_is_inserted`：不插入、不消耗 id；
+3. `moving_onto_or_off_a_locked_layer_is_refused`：`cannot move entity 2 onto` /
+   `cannot modify entity 1 on`；
+4. `unlocked_layers_still_accept_every_write`：插入/更新/移动/删除在解锁层仍各一步、mask 正确
+   （`GEOMETRY` / `GEOMETRY|TRANSFORM` / delete）；
+5. `display_attribute_writes_keep_working_on_a_locked_layer`：`update_entity_display` 允许、
+   ChangeSet 带 `STYLE`、实体行不变；
+6. `unlocking_the_layer_lets_the_same_edit_through`：解锁→同一编辑成功，重锁→再拒（无缓存）；
+7. `history_replay_that_would_touch_a_now_locked_layer_is_refused`：重放 `before` 与 `None` 都拒，
+   revision 与实体不变（"当前锁状态优先"）；
+8. `freezing_is_still_only_visibility_and_not_a_write_rule`：冻结只隐藏，写仍成功（钉住不新增冻结规则）。
+
+`crates/cad-app/src/tests/locked_layers.rs`（新，6 条，走真实 `Application::execute` 漏斗）：
+MOVE（**混合选择**：先 stage 解锁实体、再拒锁定实体 ⇒ 证明无半应用）、ERASE、
+SETENTITYPROPERTY `layer`→锁定层，三者均 `layer.locked` + revision 不变 + **无撤销步**；
+`color` 显示写**允许**且是一步可撤销；`SETACTIVELAYER` 到锁定层**不被拒**（缺口）但随后 `LINE` 被拒
+且不插入；UNDO 在图层被锁后拒绝、该步**放回**（`can_undo` 仍真），解锁后同一 UNDO 成功。
+
+### 本地命令（实际运行）
+
+- `cargo test -p cad-db --lib --locked`：**118 passed / 0 failed**（新增 8 条）。
+- `cargo test -p cad-app --lib --locked`：**986 passed / 0 failed**（新增 6 条）。
+- `cargo clippy -p cad-db -p cad-app --all-targets --locked -- -D warnings`：exit 0
+  （`PIPESTATUS` 显式检查，未用 `| tail -1` 吞退出码）。
+- `cargo fmt --all -- --check`：exit 0；`python3 scripts/check-file-size.py`：OK（967 文件，上限 1000）。
+- **NOT RUN**：全 workspace 门禁、WASM/平台编译矩阵、真实 GPU/GUI 证据——本 lane 只改 `cad-db`/`cad-app`
+  的纯模型写路径与文档，按日常策略只验证自己的改动范围。
+
+## 2026-10-26 夹点拖拽：Escape 经 `cad_status.gripDrag` 到达宿主（UI/状态门）
+
+### 结论
+
+上一轮夹点拖拽的**唯一缺口**（拖拽期间 Escape 到不了宿主）已闭环，且是**加法 wire 改动 + 一个 UI 门**：
+宿主侧早就能取消（`InteractionRequest::Cancel` → `reset_grip_gesture()` 纯状态丢弃），缺的是 UI 侧的触发条件。
+
+- **wire 字段**：`CadStatus::grip_drag`（`crates/cad-ui-core/src/session/status.rs`），serde camelCase ⇒
+  **`gripDrag`**，`bool`，**始终存在**（不是 `Option`，绝不省略）。填充点唯一：`CadSession::snapshot`
+  （`crates/cad-ui-core/src/session/mod.rs`）把它作为 `assemble_status(..)` 的最后一个实参传入，
+  值就是宿主的 `HostCore::grip_drag_active()`——**没有第二份手势状态**，UI 侧也不重算。
+  `unsupported_status()` 诚实给 `false`（无会话 ⇒ 无指针 ⇒ 无拖拽）。
+- **可见性**：`HostCore::grip_drag_active()` 由 `pub(crate)` 改 `pub`（`crates/cad-host/src/input/grip_drag.rs`），
+  否则 `cad-ui-core`（另一个 crate）读不到；这是唯一的 `cad-host` 改动（无逻辑变化）。
+- **UI 门**：`apps/desktop-ui/src/commands.ts::toolCommandForKey` 新增 `gripDragActive` 选项，
+  `Escape` 的判据从"工具有效"变为"**工具有效或拖拽已 arm**"；`Enter`/`CONFIRM` **仍只认活动工具**
+  （拖拽不是工具，`tool` 在拖拽期间仍是 `null`，绝不给不存在的 capture 发 `CONFIRM`）。
+  `App.tsx` 新增 `const gripDragActive = Boolean(status?.gripDrag);` 并传入该调用，keydown 的
+  依赖数组补 `gripDragActive`（否则闭包会读到旧值）。空闲状态（无工具、无拖拽）的 Escape **行为不变**：
+  仍然只关面板，不发 `CANCEL`。
+- `apps/desktop-ui/src/cad-status.ts`：`CadStatus.gripDrag?: boolean`（对旧宿主可选），validator 对
+  **存在**的该字段要求真 `boolean`（避免 truthy 字符串吞掉 Escape 或伪造拖拽）。
+
+### 测试（合成契约，非运行时证据）
+
+- `crates/cad-ui-core`（`session/tests/tests_commands/status_projection.rs`）：
+  1. `the_status_carries_the_grip_drag_flag_on_the_wire_in_both_states`：`gripDrag` 在 wire 记录器里
+     出现（camelCase，未被静默改名），既有键（`popup`/`tool`/`commandLog`/`cursorWorld`/`frameCount`）
+     全部保留；`unsupported_status` 为 `false`，`assemble_status(.., true)` 为 `true`。
+  2. `an_armed_grip_drag_reaches_the_status_flag_and_cancel_drops_it`：真实会话——`fit()` + 选中
+     demo 的 LINE（entity 1）→ 主键按在其端点夹点像素上 → 断言 `core.grip_drag_active()` 为真、
+     `snapshot().grip_drag` **等于**该访问器、且 `snapshot().tool` 仍为 `None`；随后
+     `session.command("CANCEL")`（UI 发的是同一个选择器）把拖拽清掉，下一帧 `grip_drag` 为 `false`
+     （不做空成功、不写几何）。
+  - 既有 `blank_status_reports_no_document_capabilities` / `document_status_reports_counts_and_camera`
+    两条 `assemble_status` 契约补了对应断言（`false` / `true`）。
+- `apps/desktop-ui`（`test/commands.test.ts`）：新增
+  `an armed grip drag makes Escape cancel it and enables no other tool-only key`——`Escape`+拖拽 ⇒
+  `CANCEL`；`Enter`+仅拖拽 ⇒ `null`；`F2/F3/F7/F8/F9/a/空格/ArrowDown`+拖拽 ⇒ 全 `null`；
+  `typing`/`composing`/`repeat` 仍然否决；空闲 ⇒ `null`。`test/text-tool.test.ts` 补源码契约
+  （`const gripDragActive = Boolean(status?.gripDrag);` 与 `gripDragActive,` 实参），
+  `test/popup-lifecycle.test.ts` 的 keydown 依赖数组断言更新为
+  `[popupOpen, submitCommand, toolActive, gripDragActive]`。
+
+### 本地命令与计数（实际运行）
+
+先在工作树（含其余 lane 的在飞改动）跑，随后在**干净的 `HEAD` 工作树**（`git worktree` + 只应用本 lane 的
+补丁）复核，以免把别的 lane 的中间态算进本轮：
+
+- `cargo test -p cad-ui-core --lib --locked`：**274 passed / 0 failed**（新增 2 条；干净基线工作树里同样 274）。
+- `cargo test -p cad-host --lib --locked`：**221 passed**（计数未变；该 crate 只改 `grip_drag_active` 可见性）。
+- `cargo clippy -p cad-ui-core --all-targets --locked -- -D warnings`：干净基线工作树 **exit 0**。
+  **当前活动工作树会失败，且与本轮无关**：`crates/cad-app/src/property_value/mod.rs:78` 的
+  `unused import: aci::rgb_for_aci`（另一 lane 的在飞改动；本 lane 明令不得碰 `cad-app`）。
+  活动树上改用 `--no-deps` ⇒ exit 0、`cad-ui-core`/`cad-host` 无警告。
+- `cargo fmt --all -- --check`：干净基线工作树 **exit 0**；活动树唯一 diff 在另一 lane 的
+  `crates/cad-db/src/tests/layer_attributes.rs`（本轮 5 个 Rust 文件 `rustfmt --check` 均 exit 0）。
+- `python3 scripts/check-file-size.py`：**OK**（967 文件，上限 1000）。
+- `python3 scripts/check-architecture.py`：**OK**（28 packages）；`python3 scripts/check-i18n.py`：**OK**
+  （本轮无新增用户可见文案）。
+- `(cd apps/desktop-ui && npm test)`：**583 passed / 0 failed**（`tsc --noEmit` + `node --test`）。
+
+**并发注意（已发生）**：本轮跑完后，另一 lane 给 `cad_app::CommandId` 加了 `SetLayerProperty`，
+使 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs` 的穷尽 match **编译失败**
+（E0004）。那是 layer 通道需要补的选择器契约，**不属本轮**；本 lane 的干净基线工作树证据如上，
+活动树上的该错误在 layer lane 补上映射后消失。
+
+### 未验证 / 不得当成验收
+
+- **无真窗口/真实按键证据**：没有在真实 Wayland 会话里按 Esc 取消拖拽的截图或日志；`CadSession`
+  契约只驱动 synthetic 指针。**不得**写成"Escape 取消已验收"。
+- **GPU/像素/高 DPI/pickbox 手感**：NOT RUN。`dom-canvas` 载体（X11/XWayland、web）**没有**夹点
+  路径，因此该处 `gripDrag` 恒为 `false`（不是回退）。Windows 仍只有 Tier 0 编译 + Wine 拒绝合同。
+- **全 workspace 全量门禁 / 跨平台矩阵**：本轮按日常策略**未运行**（NOT RUN）。
+- 拖拽仍未接线：拖拽期间 OSNAP/ORTHO/栅格捕捉、3D 夹点编辑、多夹点/多实体、夹点右键菜单。
+
+## 2026-10-26 图层属性写通（命令 + IPC + 线缆字段）：色/关/冻/锁/打印/线型/线宽/透明度
+
+### 结论
+
+图层属性从“只读存储”变成**可经命令与 IPC 编辑**，但**只有 `off`/`frozen` 有行为**，
+且该行为仍是**既有**的 `visible` 路径。**没有面板 UI**（色板/开关/锁定列属设计 lane）。
+
+- `crates/cad-db/src/drawing/layer_edit.rs`：新增
+  `DrawingDatabase::set_layer_attributes(id, attributes, transaction, reason) -> CadResult<ChangeSet>`
+  —— 唯一**导入后**的属性写路径。它在**一次变更**里同时写属性行与 `Layer::visible`
+  （`visible == !(off || frozen)`，`LayerAttributes::is_visible`），所以不变量不会被观察到
+  “半应用”；同值写入是**权威 no-op**（`before == after`、不升 revision），未知 id 拒绝且零变更。
+  5 个新测试（revision 一次、off/frozen 驱动 visible、解冻恢复、no-op、修 stale 标志、
+  未知 id）。
+- `crates/cad-app/src/layer_property.rs`（新，公开模块）：**唯一图层属性语法** +
+  规范投影（`color_hex` / `lineweight_value` / `transparency_value`）。`aci:N` 的 RGB 来自
+  `property_value::aci::rgb_for_aci`（与实体语法**同一张** ACI 表，新增 `pub(crate)` 再导出），
+  因此 `aci:30` 在实体行与图层行不可能是两种颜色。真彩写 `aci=None`（不反向推断索引，
+  否则导出会从 `420` 变 `62`）。
+- `crates/cad-app`：`CommandId::SetLayerProperty`（Work-only、**不记历史**）+
+  `CommandPayload::SetLayerProperty { layer, key, value }`；处理在
+  `app_drawing/layer_edit.rs::layer_command`（与 create/rename/delete 同一个 publish 点），
+  顺序是“解析名字 → 解析值（线型要查表）→ 应用到**克隆**的属性集 → `set_layer_attributes`”。
+  诊断 `drawing.layer_property_changed` / `drawing.layer_property_unchanged`（点名 layer 与 key）。
+  `cad_app::layers::LayerRow` 现在带 `attributes: LayerAttributes`。
+- `crates/cad-ui-core`：`CadLayerWrite::SetProperty` + `CadSession::set_layer_property`
+  （**同一条**有界队列）；`CadLayer` 新增
+  `color{aci,rgb}` / `linetype` / `lineweight` / `transparency` / `locked` / `frozen` / `off` /
+  `plottable`（camelCase、始终存在，值是**写语法的规范形**）；
+  静态准入 `parse_layer_property_write`（键在入队前拒绝，值留给 owner 线程）。
+- `crates/cad-desktop-shell`：`cad_set_layer_property(layer, key, value)`（复用
+  `admit_shared_layer_write`，无第二条通道），进 `COMMAND_NAMES` /
+  `register_commands!` / `registered_commands.txt` / Linux `NATIVE_SESSION_COMMANDS`
+  （`dom-canvas` 与其它图层写一样**显式拒绝**）。
+- `apps/desktop-ui/src/layers.ts`：`LayerRow` 扩展新字段（`parseLayerColor` 只保留
+  `aci:1..=255` 与真正的 `#rrggbb`，否则 `rgb: ''` = “宿主没报告”，绝不编颜色）、
+  `SET_LAYER_PROPERTY_COMMAND` / `setLayerProperty` / store `setProperty`（ack 后回读，
+  第二次读的判据 `showsProperty` 只比对宿主自己的投影形）。`layerTone` **保留**（设计 lane
+  才切换到真彩），文档已改成“真彩**已在**线缆上，这只是名字派生的标记”。
+
+### 属性语法（唯一权威：`crates/cad-app/src/layer_property.rs`）
+
+| 键 | 取值 | 存储 |
+|---|---|---|
+| `color` | `aci:1..=255` / `#RRGGBB` / `rgb:#RRGGBB` / `r,g,b` | `LayerColor{aci,rgb}`；`aci:` 同时写调色板 RGB，真彩 `aci=None`；`ByLayer`/`ByBlock` 拒绝 |
+| `linetype` | 图纸线型表里的名字（精确优先，再唯一大小写不敏感） | 规范化到表内拼写；不存在 `layer.linetype_missing` |
+| `lineweight` | `byLayer` / `default` / **1/100 mm** `0..=211` | `LayerLineWeight`（`35` = 0.35 mm，**不是**实体的毫米语法） |
+| `transparency` | `0..=100` 不透明度百分比 | `opacity = 1 − v/100`（实体上限是 90，图层允许 100） |
+| `off`/`frozen`/`locked`/`plottable` | `true` / `false` / `0` / `1` | 对应布尔 |
+| `plotstyle` | — | **明确拒绝为未实现**（写入器只发句柄） |
+| `name`/`visible` | — | 拒绝（分别属 `RENAMELAYER` / 由 off‖frozen 派生） |
+
+拒绝码稳定英文：`layer.property.unsupported`（未知键 / `plotstyle` / `name` / `visible`）、
+`layer.property.value`（语法或范围）、`layer.linetype_missing`、`layer.unknown` /
+`layer.ambiguous_name`（名字解析，与其它图层命令同一规则）。
+
+### 明确“仍无行为”
+
+- `locked`：不阻止选择/编辑/夹点/绘制；**零行为**。
+- `plottable`：**出图未实现**，零行为。
+- `color` / `linetype` / `lineweight` / `transparency`：**只存储**。改图层颜色**不会**重着色
+  `ByLayer` 实体（导入已拍平为显式 sRGB），线型/线宽/透明度的显示同样未接线。
+- `frozen_in_new_viewport` / `xref_dependent`：没有可写键（无“新视口”概念、无 xref 机制）。
+- `frozen` 与 `off` 的区别**只**在存储上：两者今天都等于“不画”，且都经同一条
+  `Layer::visible` 路径；没有图层级视口冻结语义。
+- 图层属性编辑**不可撤销**（`cad-history` 只有实体 patch），与 create/rename/delete 一致。
+
+### 测试计数（本轮实跑）
+
+- `cargo test -p cad-db --lib --locked`：**110 passed**（新增 5 个属性写契约）。
+- `cargo test -p cad-app --lib --locked`：**980 passed**（新增 `tests/layer_property.rs` 15 个）。
+- `cargo test -p cad-ui-core --lib --locked`：**279 passed**（新增 6 个；`CadLayer` 行字段、
+  属性写回读、off/frozen 经投影隐藏、拒绝零变更、静态键准入、队列四分支）。
+- `cargo test -p cad-desktop-shell --locked`：`tests/layer_commands.rs` **12 passed**（golden 扩展 +
+  4 个新 IPC 契约）；**但** `tests/wire_goldens.rs::cad_status_is_byte_identical_to_the_pre_migration_host`
+  **FAILED**，差集**只有** `gripDrag`（另一 lane 在写 `crates/cad-ui-core/src/session/status.rs`，
+  该 crate 的 golden 未更新），**与本轮无关**：本轮未改 `status.rs`、未改 `cad_status` 形状。
+- `(cd apps/desktop-ui && npm test)`：**596 passed**（`test/layers.test.ts` 36 +
+  新 `test/layers-wire.test.ts` 13）。`test/layers.test.ts` 已 930 行，故新契约放
+  新文件而非继续变长。
+- 门禁（均实际运行）：`cargo clippy -p cad-db -p cad-app -p cad-ui-core -p cad-desktop-shell
+  --all-targets --locked -- -D warnings`（exit 0）、`cargo fmt --all -- --check`（exit 0）、
+  `cargo check -p app-linux --all-targets --locked`（exit 0）、
+  `python3 scripts/check-architecture.py`（OK，28 packages）、
+  `python3 scripts/check-file-size.py`（OK，967 文件）、`python3 scripts/check-i18n.py`
+  （OK，本轮无新增用户可见文案）。**未运行**：全 workspace 全量测试/门禁矩阵、真机/GUI/像素证据
+  （本轮无 UI 改动）。
+
+### 设计 lane 还要做的
+
+面板 UI：真彩色板（用 `row.color.rgb`，`''` 时退回 `layerTone`）、关闭/冻结开关（走
+`setProperty(name,'off'|'frozen',...)`，与已有的临时显隐 `setVisible` **不同**——后者是会话
+覆盖不写库）、锁定/打印列（可显示与编辑，但需在文案里说明**今天零行为**）、线型/线宽/透明度
+选择器（值直接取行上的规范字符串再回写），以及 `properties.row.*` 那套 i18n 键的新增。
+
 ## 2026-10-26 夹点拖拽（宿主侧）：按压 arm、移动预览、松开提交一次 `GripStretch`
 
 ### 结论
@@ -84,6 +325,8 @@
   而拖拽发生在工具 `Idle`/`Selecting`，所以拖拽期间按 Esc **到不了宿主**。宿主的取消路径本身已接
   并有合成测试，但触发端是后续 lane 的 UI/状态改动（`apps/desktop-ui` + 一个 `cad_status` 标志，
   由 `npm test` 的源码/类型契约验证，**不得**写成运行时证据）。
+  → **已在本文顶部条目闭环**（`cad_status.gripDrag` + `toolCommandForKey` 的 Escape 门），仍然只有
+  合成证据。
 - **`dom-canvas` 载体（X11/XWayland、web）没有任何夹点标记或拖拽**：那是 wasm 侧 CAD 会话，
   本轮 host 侧路径不参与（铁律 8）。Windows 仍只有 Tier 0 编译 + Wine 拒绝合同。
 - **无 GUI/像素/真窗口/真实鼠标证据**：全部为 `HostCore` 合成指针契约。夹点拖拽的视觉尺寸、
@@ -170,7 +413,7 @@ BTreeMap<LayerId, LayerAttributes>`（在 `render_attributes` 旁边），单一
 
 - `cargo test -p cad-db --lib --locked` → **105 passed / 0 failed**（+7 新
   `tests::layer_attributes`：缺省值、builder 往返、clone 回退 + 借用变体诚实 `None`、
-  `delete_layer` 删行、id 不复用、`visible == !(off||frozen)`、未知层拒绝）。
+  `delete_layer` 删行、id 不复用、`visible == !(off || frozen)`、未知层拒绝）。
 - `cargo test -p cad-import-acadrust --lib --locked` → **283 passed / 0 failed / 1 ignored**
   （+4 新 `tests::layer_attributes` +6 新 `export::tests::layers`）。含既有 273 条全绿。
 - `cargo clippy -p cad-db -p cad-import-acadrust --all-targets --locked -- -D warnings` → **0**。

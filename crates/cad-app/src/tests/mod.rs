@@ -122,5 +122,7 @@ mod commands;
 mod drawing;
 mod drawing_space;
 mod grips;
+mod layer_property;
 mod layers;
+mod locked_layers;
 mod view_camera;

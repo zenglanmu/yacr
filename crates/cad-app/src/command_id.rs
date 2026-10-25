@@ -517,6 +517,29 @@ pub enum CommandId {
     /// back to layer `0` and reports it in the diagnostics. Not undoable; one
     /// revision bump. Work-only.
     DeleteLayer,
+    /// `SETLAYERPROPERTY`: write one attribute of one layer table row.
+    ///
+    /// Payload is [`crate::CommandPayload::SetLayerProperty`]
+    /// `{ layer, key, value }`: the row addressed **by name** (the same
+    /// exact-then-unique-case-insensitive rule as [`CommandId::RenameLayer`]),
+    /// a key from [`crate::layer_property::SUPPORTED_KEYS`] and that key's
+    /// documented value grammar. The one grammar is
+    /// [`crate::layer_property`] (a layer records the table's own units:
+    /// `lineweight` is 1/100 mm, `transparency` is percent transparent), and
+    /// `plotstyle` is a known key that is refused as not implemented.
+    ///
+    /// A refusal (`layer.unknown`, `layer.ambiguous_name`,
+    /// `layer.property.unsupported`, `layer.property.value`,
+    /// `layer.linetype_missing`) happens before anything is published, so it
+    /// changes no attribute, no revision and no undo entry. A successful write is
+    /// one revision bump of the same shape as a create/rename/delete (no entity
+    /// change), and **no** undo entry: layer edits are not undoable (history has
+    /// no layer patch kind).
+    ///
+    /// Only `off` / `frozen` change behaviour, through the database's own
+    /// `visible == !(off || frozen)` rule; `locked` / `plottable` / the colour /
+    /// the linetype / the lineweight / the transparency are stored only. Work-only.
+    SetLayerProperty,
     /// Flip the idle hover entity preview for this session. Session/display
     /// state only (no database write, no history, no ChangeSet), so it is
     /// allowed in Viewer and Work. It defaults to on (AutoCAD's
@@ -700,6 +723,7 @@ impl CommandId {
                 | Self::CreateLayer
                 | Self::RenameLayer
                 | Self::DeleteLayer
+                | Self::SetLayerProperty
                 | Self::SetEntityProperty
                 | Self::MatchProp
                 | Self::GripStretch

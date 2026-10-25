@@ -8,6 +8,22 @@
 >   chrome-local 选择器，打开/聚焦该面板）。宿主侧投影在
 >   `crates/cad-ui-core/src/session/layers.rs`，写入仍走 `cad_app` 的既有命令漏斗
 >   （临时覆盖集，不写 DWG 图层表、不升 DB revision）。
+> - **图层属性写（2026-10-26）**：`cad_set_layer_property { layer, key, value }` →
+>   `CadLayerWrite::SetProperty` → `SETLAYERPROPERTY`，与新建/重命名/删除**同一条**
+>   有界队列与同一套门（模态弹窗 → probe → 队列上界），ack 仍是**入队**。它是**真实
+>   DB 写**：一个 revision bump、**不记录撤销**、不写 DWG。键与语法唯一权威是
+>   `crates/cad-app/src/layer_property.rs`（`color` / `linetype` / `lineweight` /
+>   `transparency` / `off` / `frozen` / `locked` / `plottable`；`plotstyle` 明确拒绝为
+>   未实现）。只有 `off`/`frozen` 有行为（经既有 `visible` 路径隐藏）。
+> - **`cad_layers` 行（2026-10-26 扩展）**：`name` / `visible` / `databaseVisible` /
+>   `overridden` / `current` 不变，新增**始终存在**的
+>   `color: { aci: number|null, rgb: "#rrggbb" }`、`linetype: string`、
+>   `lineweight: string`（`ByLayer` / `Default` / **1/100 mm** 整数字符串）、
+>   `transparency: string`（**不透明度百分比**字符串，`"0"` = 不透明；越界的存储值读作
+>   `opacity:<raw>`）、`locked` / `frozen` / `off` / `plottable: boolean`。这些值是
+>   **写语法的自身规范形**，所以行上读到的字符串可以直接回写给
+>   `cad_set_layer_property`；它们是**显示/编辑输入，不是行为**（锁/打印仍零行为，
+>   改颜色不会重着色 `ByLayer` 实体）。
 > - **属性面板**：`components/PropertiesPalette.tsx` + `properties-view.mjs`，仍是
 >   **只读 + 5 个可写键**（layer/color/linetype/lineweight/transparency）。
 > - 面板停靠、伸缩与打开状态见 `docs/react-linux-app.md` 的「外壳结构」。
@@ -33,6 +49,10 @@
   - `database_visible`：DWG 图层表里的存储值（唯一权威）；
   - `override_visible: Option<bool>`：本会话的临时覆盖；
   - `effective_visible`：渲染应遵守的最终可见性（覆盖 ⊕ 存储值）。
+- `LayerRow` 还带 `attributes: LayerAttributes`（2026-10-26）：该行**存储的**属性
+  （颜色 ACI+RGB / 线型名 / 线宽 / 透明度 / off·frozen·locked·plottable）原样投影，
+  供 `cad_layers` 线缆与 `SETLAYERPROPERTY` 读同一份状态；只有 `off`/`frozen` 反映到
+  `visible`，其余仍是存储、不是行为。
 - 空数据库 → 空列表；UI 显示显式空状态，不生成假行。
 - 分页/修订绑定路径 `layers::query_layers(&QueryService, &DrawingDatabase, QueryRequest)`
   复用 `cad-query` 的修订绑定投影（§4.9），供需要丢弃陈旧投影的宿使用。

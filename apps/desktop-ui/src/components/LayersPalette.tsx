@@ -12,7 +12,7 @@
 // visibility toggle is a session-only temporary override, `restore` drops them,
 // and "set current" only says where new entities go.
 //
-// Four deliberate choices worth naming:
+// Five deliberate choices worth naming:
 //
 //  * **Not a `role="listbox"`.** Every row owns real controls (the visibility
 //    toggle, "set as current", rename and delete), and an ARIA option may not
@@ -44,13 +44,29 @@
 //    is unchanged: rename replaces the name cell with a field of the same line
 //    height, the row's actions keep their reserved space, and the create form
 //    appears under the search strip. No cell is ever re-measured.
+//  * **Attributes are a mark at rest and an editor on demand.** The dock is 300px
+//    wide, so a row cannot carry four toggle chips *and* a name: the resting row
+//    shows the dot in the drawing's own color (or the name-derived marker, and
+//    says which in its accessible name), up to two chips for states that are *not*
+//    the default (off/frozen/locked set, plottable clear) plus a count of any
+//    further ones — each set chip a button that clears that very state — and one
+//    chevron. The chevron (or the dot, or the count) opens the row's details line:
+//    the color control, the four flags as engaged-state toggles, and the read-only
+//    linetype/lineweight/transparency. That line reuses the existing second-line
+//    slot (the note line's grid column) and exists only while it is open, so a row
+//    keeps the 28px height it always had. Which color, which chips and which
+//    strings come from `layer-attributes.ts` (pure, unit-tested); what a flag
+//    *does* is catalog copy (`layers.<flag>.hint`), never a claim only a comment
+//    makes.
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Icon } from '../icons.tsx';
 import { Button, IconButton } from './primitives.tsx';
 import { useI18n, useShell } from '../context.ts';
-import { createLayersStore, errorCode, filterLayers, layerTone, nextFocusIndex } from '../layers.ts';
+import { createLayersStore, errorCode, filterLayers, nextFocusIndex } from '../layers.ts';
 import type { LayerRow, LayersStore } from '../layers.ts';
+import { colorPayload, EMPTY_MARK_SUMMARY, layerMarkSummary, layerSwatch } from '../layer-attributes.ts';
+import { LayerDetails } from './LayerDetails.tsx';
 import { deletableLayer, layerErrorKey } from '../layer-labels.ts';
 import type { ComposingKeyEvent } from './key-events.ts';
 
@@ -94,6 +110,17 @@ export function LayersPalette() {
   // A re-entrant submit guard for the window before the store reports `busy`.
   const submitting = useRef(false);
 
+  // The row whose details line (color control, the four flags, the read-only
+  // attributes) is open, by name: at most one at a time, and `null` for none. It
+  // closes on its own close button, on Escape inside it, on a second press of its
+  // own trigger, and when its row disappears (a delete, or a rename the host has
+  // already applied) — the same "a stale address closes" rule the rename form
+  // follows.
+  const [detailsFor, setDetailsFor] = useState<string | null>(null);
+  // Where focus goes when that line closes (the row's chevron), read **after** the
+  // closing commit so the trigger is mounted again — the same seam the forms use.
+  const restoreDetailsFocus = useRef<string | null>(null);
+
   // Where focus goes when the open form closes. Set when it opens (the button that
   // opened it), re-pointed just before a write that renames its own row, and read
   // by the effect below **after** the closing commit, so the trigger is mounted.
@@ -103,6 +130,7 @@ export function LayersPalette() {
   const renameFieldRef = useRef<HTMLInputElement | null>(null);
   const renameTriggers = useRef(new Map<string, HTMLButtonElement>());
   const deleteTriggers = useRef(new Map<string, HTMLButtonElement>());
+  const detailsTriggers = useRef(new Map<string, HTMLButtonElement>());
 
   const rows = useMemo(() => filterLayers(state.layers, query), [state.layers, query]);
   const searching = query.trim().length > 0;
@@ -190,6 +218,27 @@ export function LayersPalette() {
     setDraftError(null);
     setForm(null);
   }, [rows, form]);
+
+  // The details line addresses one row by name too, so it closes on the same
+  // "that name is gone" signal: a delete, or a rename the host's read-back already
+  // shows under its new name. A row that vanished takes its trigger with it, so
+  // this path restores nothing and leaves focus where the delete form put it.
+  useEffect(() => {
+    if (detailsFor === null) return;
+    if (rows.some(layer => layer.name === detailsFor)) return;
+    setDetailsFor(null);
+  }, [rows, detailsFor]);
+
+  // Focus returns to the trigger that opened the details line, **after** the
+  // closing commit (the trigger only exists once the panel is gone). A close this
+  // panel did on its own — the row disappeared — set no target and moves nothing.
+  useEffect(() => {
+    if (detailsFor !== null) return;
+    const name = restoreDetailsFocus.current;
+    if (name === null) return;
+    restoreDetailsFocus.current = null;
+    (detailsTriggers.current.get(name) ?? searchRef.current)?.focus?.();
+  }, [detailsFor]);
 
   const clearSearch = () => {
     setQuery('');
@@ -360,6 +409,62 @@ export function LayersPalette() {
     void store.setActive(layer.name);
   };
 
+  // --- the attribute surface ----------------------------------------------
+
+  /**
+   * Write one stored attribute through the store's single-flight path.
+   *
+   * A press while a mutation is in flight is dropped here as well as in the store
+   * (the window covers the queued write *and* its read-back), so a fast double
+   * press never queues a second write. A refusal travels the palette's existing
+   * error line — the store records the host's stable code and `errorText` names it.
+   */
+  const writeProperty = (layer: LayerRow, key: string, value: string) => {
+    if (controlsBusy) return;
+    void store.setProperty(layer.name, key, value);
+  };
+
+  const toggleFlag = (layer: LayerRow, key: string, value: string) => {
+    writeProperty(layer, key, value);
+  };
+
+  /**
+   * A color pick writes only on the control's **change**, never on every live
+   * `input` frame the picker emits: one committed choice is one layer-table write.
+   * A value the grammar cannot take is not sent at all (`colorPayload` answers
+   * `''`), so no refusal is provoked just to report it.
+   */
+  const pickColor = (layer: LayerRow, value: string) => {
+    const color = colorPayload(value);
+    if (!color) return;
+    writeProperty(layer, 'color', color);
+  };
+
+  /**
+   * Open the details line of this row, or close it when it is already open.
+   *
+   * Closing restores focus to the trigger that opened it (the row's chevron), the
+   * same rule the inline forms follow: a panel that unmounts under the focused
+   * colour control must not leave the keyboard on `<body>`.
+   */
+  const openDetails = (layer: LayerRow) => {
+    restoreDetailsFocus.current = null;
+    setDetailsFor(layer.name);
+  };
+
+  const toggleDetails = (layer: LayerRow) => {
+    if (detailsFor === layer.name) {
+      closeDetails();
+      return;
+    }
+    openDetails(layer);
+  };
+
+  const closeDetails = () => {
+    restoreDetailsFocus.current = detailsFor;
+    setDetailsFor(null);
+  };
+
   /**
    * The one line in the palette's error affordance. A refusal this panel made
    * itself (a blank name) comes first, because that is the attempt still on
@@ -519,7 +624,6 @@ export function LayersPalette() {
           <ul className="layers__list" aria-busy={controlsBusy || undefined} onKeyDown={onListKeyDown}>
             {rows.map((layer, index) => {
               const nameId = `layers-name-${index}`;
-              const tone = layerTone(layer);
               // The row exists below the drawing's own flag: a hidden layer the
               // user forced on. Saying so is the difference between "I turned this
               // on" and "this layer is on in the drawing".
@@ -528,6 +632,14 @@ export function LayersPalette() {
               const confirming = form?.kind === 'delete' && form.layer === layer.name;
               const editing = renaming || confirming;
               const confirmHintId = `layers-delete-hint-${index}`;
+              const colorHintId = `layers-color-hint-${index}`;
+              // The drawing's own color when the host sent a usable one; the muted
+              // name-derived marker otherwise (`layerSwatch` decides, and says which).
+              const swatch = layerSwatch(layer);
+              const detailsOpen = detailsFor === layer.name;
+              // While the details line is open it already shows all four flags as
+              // engaged-state toggles, so the resting marks would only repeat them.
+              const summary = detailsOpen ? EMPTY_MARK_SUMMARY : layerMarkSummary(layer);
               return (
                 <li
                   key={layer.name}
@@ -567,7 +679,24 @@ export function LayersPalette() {
                   >
                     <Icon name={layer.visible ? 'eye' : 'eyeOff'} size={14} />
                   </button>
-                  <span className="layers__swatch" style={{ backgroundColor: tone.color }} aria-hidden="true" />
+                  {/* The dot is a control now: it opens the row's details line,
+                      whose first control is the color picker. Its name is the
+                      honest state — the drawing's own color when the host sent
+                      one, "not reported, this is a name marker" otherwise — so a
+                      hash-colored fallback is never announced as the layer color. */}
+                  <button
+                    type="button"
+                    className={['layers__swatch', swatch.fromColor ? '' : 'is-tone'].filter(Boolean).join(' ')}
+                    style={{ backgroundColor: swatch.color }}
+                    aria-label={swatch.fromColor
+                      ? t('layers.color.reported', { color: swatch.color })
+                      : t('layers.color.marker')}
+                    aria-describedby={nameId}
+                    aria-expanded={detailsOpen}
+                    aria-disabled={controlsBusy || undefined}
+                    title={t('layers.color')}
+                    onClick={() => toggleDetails(layer)}
+                  />
                   {/* The name cell keeps the row's `nameId` whether it shows the
                       name or the rename field, so every `aria-describedby` that
                       points at it stays resolvable while the field is open. */}
@@ -612,6 +741,56 @@ export function LayersPalette() {
                     {layer.overridden ? (
                       <span className="layers__chip is-temp">{t('layers.overridden_marker')}</span>
                     ) : null}
+                    {/* The states that are not the default: the chip is the row's own
+                        flag (never a guess) and a press clears exactly that state —
+                        the one direction the mark already promises. The other
+                        direction is a press in the details line below. A row that
+                        holds more states than fit spells out two and counts the rest
+                        (`layerMarkSummary`), so the row stays one line and no state
+                        is dropped silently. */}
+                    {summary.marks.map(mark => (
+                      <button
+                        key={mark.key}
+                        type="button"
+                        className="layers__chip layers__chip--action"
+                        aria-pressed={true}
+                        aria-describedby={nameId}
+                        aria-disabled={controlsBusy || undefined}
+                        title={t(mark.hintKey)}
+                        onClick={() => toggleFlag(layer, mark.key, mark.next)}
+                      >
+                        {t(mark.labelKey)}
+                      </button>
+                    ))}
+                    {summary.hidden > 0 ? (
+                      <button
+                        type="button"
+                        className="layers__chip layers__chip--action"
+                        aria-describedby={nameId}
+                        aria-disabled={controlsBusy || undefined}
+                        title={t('layers.marks_more.hint')}
+                        onClick={() => openDetails(layer)}
+                      >
+                        {t('layers.marks_more', { count: summary.hidden })}
+                      </button>
+                    ) : null}
+                    {/* The details line's own trigger. It is always visible (unlike
+                        the row actions, which are hover/focus-revealed) because the
+                        flags, the color and the read-only attributes are the reason
+                        this palette carries attributes at all. */}
+                    <IconButton
+                      icon={detailsOpen ? 'chevronUp' : 'chevronDown'}
+                      size="xs"
+                      label={t('layers.attributes')}
+                      ref={node => {
+                        if (node) detailsTriggers.current.set(layer.name, node);
+                        else detailsTriggers.current.delete(layer.name);
+                      }}
+                      aria-describedby={nameId}
+                      aria-expanded={detailsOpen}
+                      aria-disabled={controlsBusy || undefined}
+                      onClick={() => toggleDetails(layer)}
+                    />
                     {/* Row actions. The space is reserved at all times, so the row
                         grid never moves; the buttons themselves are revealed on
                         hover or on `:focus-within`, which is also how a keyboard
@@ -672,6 +851,24 @@ export function LayersPalette() {
                   </span>
                   {forcedOn ? (
                     <span className="layers__note">{t('layers.database_hidden')}</span>
+                  ) : null}
+                  {/* The row's second line, opened from the dot, the chevron or the
+                      "more states" count and rendered only while it is open. The
+                      panel itself is `LayerDetails` (color control, the four flags,
+                      the read-only attributes); it reuses the row's existing
+                      second-line slot, so a row that is not open keeps its 28px
+                      height. */}
+                  {detailsOpen ? (
+                    <LayerDetails
+                      layer={layer}
+                      color={swatch.color}
+                      fromColor={swatch.fromColor}
+                      hintId={colorHintId}
+                      busy={controlsBusy}
+                      onPickColor={value => pickColor(layer, value)}
+                      onToggleFlag={(key, value) => toggleFlag(layer, key, value)}
+                      onClose={closeDetails}
+                    />
                   ) : null}
                   {/* The confirm step: one note plus Cancel/Delete. It spans the
                       row's own grid, so the row keeps its identity (chips

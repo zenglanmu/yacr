@@ -211,6 +211,10 @@ test('the Escape wiring keeps the two-step behaviour and never cancels from the 
   assert.ok(app.includes('if (event.defaultPrevented || event.metaKey || event.altKey) return;'));
   assert.ok(app.includes('toolCommandForKey(event.key, {'));
   assert.ok(app.includes('typing: isTyping(event.target)'));
+  // An armed grip drag (which is **not** a tool) widens Escape only, and the flag
+  // comes from the host's own `cad_status.gripDrag` — never from a local guess.
+  assert.ok(app.includes('const gripDragActive = Boolean(status?.gripDrag);'));
+  assert.ok(app.includes('gripDragActive,'));
   // First Escape while typing must never reach that branch; the existing blur
   // path is what restores the pointer lane.
   assert.ok(app.includes('if (isTyping(event.target)) event.target.blur();'));

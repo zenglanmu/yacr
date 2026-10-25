@@ -421,6 +421,11 @@ function Shell() {
   const importProgress = status?.importProgress ?? null;
   const cadReady = Boolean(status) && !loading;
   const toolActive = Boolean(status?.tool?.key);
+  // An armed grip drag is **not** a tool (`tool` stays `null`), but it does own
+  // the pointer: the host writes nothing until release, so Escape has to reach it
+  // as `CANCEL` to drop the drag. Only the Escape gate reads this; nothing else
+  // may treat a drag as an active tool.
+  const gripDragActive = Boolean(status?.gripDrag);
 
   // The one open path for every dialog. The host owns admission and the gate;
   // this only keeps the fresh payload for the overlay. `existing: true` means
@@ -537,10 +542,13 @@ function Shell() {
       }
       if (event.defaultPrevented || event.metaKey || event.altKey) return;
       // An active tool owns Enter/Escape: Enter confirms, Escape cancels, and
-      // that Escape does not also close a panel. With no tool active the
-      // branches below are exactly as before.
+      // that Escape does not also close a panel. An armed grip drag is not a
+      // tool, but it owns the pointer too, so Escape reaches the host as `CANCEL`
+      // there as well (Enter stays tool-only). With neither, the branches below
+      // are exactly as before.
       const toolCommand = toolCommandForKey(event.key, {
         toolActive,
+        gripDragActive,
         typing: isTyping(event.target),
         composing: event.isComposing,
         repeat: event.repeat,
@@ -573,7 +581,7 @@ function Shell() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [popupOpen, submitCommand, toolActive]);
+  }, [popupOpen, submitCommand, toolActive, gripDragActive]);
 
   // Feed the CAD shortcut-menu hook the state slices the chrome already has. It
   // is a ref, not a dependency, so polling never re-installs the guards below.

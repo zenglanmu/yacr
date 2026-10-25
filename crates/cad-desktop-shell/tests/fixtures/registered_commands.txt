@@ -9,6 +9,7 @@ cad_open_popup
 cad_rename_layer
 cad_restore_layers
 cad_set_active_layer
+cad_set_layer_property
 cad_set_layer_visible
 cad_set_selected_property
 cad_set_selected_text

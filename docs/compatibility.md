@@ -239,7 +239,7 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 | `ARRAYRECT` / `ARRAYPOLAR` | **实现** | **独立副本**（AutoCAD 默认关联，记为**有意偏离**）；矩形：间距=**基点间距离**、向上右生成、副本数 = `行×列−1`；极坐标：捕获中心点，副本数 = `项数−1`，**角度步长 = `i·填充角/项数`**（**我们的规则**：部分填充时 AutoCAD 是首尾跨满 `fill/(items−1)`，故 `180°/3 项` 我们为 0/60/120 而 AutoCAD 为 0/90/180——**刻意偏离**，已测试），`rotateItems` 决定绕中心旋转或仅平移（**未查证选择**） | `Path`/`Levels`/`Total`/角度间隔输入/关联编辑（`ARRAYEDIT`/grips）/`MAXARRAY` 可配置化/3D/**负间距反向**；1×1 或单项阵列**不产生副本并显式诊断**（不开事务） |
 | `ALIGN` | **实现** | **两对点**：平移（第一对）+ 旋转（两对方向夹角）+ `AlignScale` 为真时按"目标对长/源对长"做**均匀**缩放；以 `source1` 为枢轴，原位变换整个选择。**含 `MultiLeader` 且 `AlignScale` 为真 ⇒ 整命令失败**（同 C.5） | 3 对点 3D 对齐、**非均匀**缩放、**1 对点移动**（等价于 `MOVE`，不做） |
 | `STRETCH` | **实现** | 交叉窗口（**恒 CROSSING**）：**部分包围=逐顶点移动**（只动窗内顶点）、**完全包围=整移**；分类按几何类型分两种口径（直线/无 bulge 折线=逐顶点包含；圆/椭圆/块/ARC/含 bulge 折线=保守包围盒完全包含）；**bulge 数值保留**（未查证） | cpolygon/lasso、**单独选取即整移**、`TEXT`（**相似变换语义受限** ⇒ 整命令拒绝，ADR-0019 B.2——**不是**因为变换面拒绝：P7a 起 `Text` 可平移/旋转/均匀缩放）、`MultiLeader`（**显式按 `type_key` 整命令拒绝**）、`SPLINE`/`ARC`/`HATCH`/`INSERT` 的**拉伸**（部分包围不动+诊断、完全包围整移）、3D；宽度未建模 |
-| `GRIPSTRETCH`（**本项目选择器**，AutoCAD 无同名命令） | **宿主拖拽已实现（仅 `native-below`）；`dom-canvas` 载体与 UI 层 Escape 未接线** | 纯模型（`crates/cad-app/src/grips.rs`）+ 命令（`crates/cad-app/src/app_drawing/grip.rs`）：**一个夹点、一个实体** → 一次 `update_entity`、一条事务 / 一步撤销（undo 恢复被拖端点/位置的**位级**原值，未拖端点/其它坐标逐位不变）。支持面**仅**：`LINE` 两个端点夹点（`index` 0 = start、1 = end）、`POINT` 位置夹点（`index` 0）。载荷 `CommandPayload::GripStretch(Box<GripStretchCommand>{ id: GripId, to: Point3 })`。命令层 `to` 三坐标原样存储（**不做**工作平面投影）；**宿主**在平面视图里用 `grip_hit_planar`（x/y 距离，**不是** 3D 距离——指针经 `screen_to_world` 落在工作平面上）命中夹点，并**保留被拖夹点自身的 z**，故平面拖拽**不改标高**（**3D 夹点编辑 NOT IMPLEMENTED**）。拒绝（**全部在开事务之前**，不改 revision、不写 ChangeSet、不留空撤销步）：`grip.target_missing`（实体已不存在）、`property.not_addressable`（非模型空间目标：块定义成员 / 图纸空间 —— 复用属性写的可达性理由；`GripId` 不含 instance path / 子元素字段，故那两种形态在载荷上无法表达）、`grip.stale_handle`（kind/index 与**当前**几何不符）、`grip.zero_displacement`（零位移是**错误**而非空 `Ok`，正为避免空撤销步；**宿主**把它按**显式 no-op** 处理：不发命令、不给用户报错）、`grip.unsupported_kind`（`CIRCLE`/`ARC`/`ELLIPSE`/`SPLINE`/`POLYLINE`/`INSERT`/`TEXT`/`HATCH`/`DIMENSION` 等整类无夹点模型）、`grip.non_finite_target`（**在读取图形之前**拒绝）。裸 `GRIPSTRETCH` 为 payload-required，按名拒绝（不路由 `BeginDraw`、不伪造拖拽）；**绝不**经过 `StretchEntities` | **宿主侧状态（`crates/cad-host/src/input/grip_drag.rs`，2026-10-26）**：`native-below` 桌面宿主（Linux 原生 Wayland / Windows）在选中实体上绘制夹点标记，并把**单个** `LINE`/`POINT` 夹点拖拽接到 `GripStretch`：按压命中夹点即 arm（2D、非捕获、工具 `Idle`/`Selecting`、主键、选中且**可见**的可直接寻址实体），移动只更新 overlay 预览（`OverlayInputs::grip_markers` 中被拖项替换为当前目标 ⇒ **移动的标记就是预览**，不发导航 delta），松开提交**一次**命令；落在夹点上的点击被一次性闩锁吞掉（**不**重复选中）。**`dom-canvas` 载体（X11/XWayland、web）没有任何夹点标记或拖拽**（wasm 侧无此路径，按铁律 8 显式不存在，**不是**静默回退）。**Escape 取消尚未在 UI 接好**：桌面 UI 只在**工具有效**时发送 `CANCEL`，拖拽期间的 Escape 因此**到不了**宿主（宿主的 `Cancel`/`pointer_cancel`/陈旧 `Up`/`Cancel`/文档·度量·配置变更都会纯状态丢弃拖拽，但 UI 不触发）；这是后续 lane（`apps/desktop-ui` + `cad_status` 标志）的改动。中点 / 圆心 / 插入点 / 顶点 / 宽度 / 旋转 / 切线夹点，多夹点与多实体拉伸，拖拽期间的 OSNAP / ORTHO / 栅格捕捉，3D，夹点右键菜单与 `GRIPMULTIFUNCTIONAL` 均**未实现 / 不存在**（模型层不建"永远为空"的 `GripKind` 变体）；证据上限：`cargo test -p cad-app -p cad-host` 契约 + 门禁，**无 GUI/像素/真窗口/真实鼠标证据**，Windows 侧更只有 Tier 0 编译 |
+| `GRIPSTRETCH`（**本项目选择器**，AutoCAD 无同名命令） | **宿主拖拽已实现（仅 `native-below`）；`dom-canvas` 载体无夹点路径；UI 层 Escape 已接线（无运行时证据）** | 纯模型（`crates/cad-app/src/grips.rs`）+ 命令（`crates/cad-app/src/app_drawing/grip.rs`）：**一个夹点、一个实体** → 一次 `update_entity`、一条事务 / 一步撤销（undo 恢复被拖端点/位置的**位级**原值，未拖端点/其它坐标逐位不变）。支持面**仅**：`LINE` 两个端点夹点（`index` 0 = start、1 = end）、`POINT` 位置夹点（`index` 0）。载荷 `CommandPayload::GripStretch(Box<GripStretchCommand>{ id: GripId, to: Point3 })`。命令层 `to` 三坐标原样存储（**不做**工作平面投影）；**宿主**在平面视图里用 `grip_hit_planar`（x/y 距离，**不是** 3D 距离——指针经 `screen_to_world` 落在工作平面上）命中夹点，并**保留被拖夹点自身的 z**，故平面拖拽**不改标高**（**3D 夹点编辑 NOT IMPLEMENTED**）。拒绝（**全部在开事务之前**，不改 revision、不写 ChangeSet、不留空撤销步）：`grip.target_missing`（实体已不存在）、`property.not_addressable`（非模型空间目标：块定义成员 / 图纸空间 —— 复用属性写的可达性理由；`GripId` 不含 instance path / 子元素字段，故那两种形态在载荷上无法表达）、`grip.stale_handle`（kind/index 与**当前**几何不符）、`grip.zero_displacement`（零位移是**错误**而非空 `Ok`，正为避免空撤销步；**宿主**把它按**显式 no-op** 处理：不发命令、不给用户报错）、`grip.unsupported_kind`（`CIRCLE`/`ARC`/`ELLIPSE`/`SPLINE`/`POLYLINE`/`INSERT`/`TEXT`/`HATCH`/`DIMENSION` 等整类无夹点模型）、`grip.non_finite_target`（**在读取图形之前**拒绝）。裸 `GRIPSTRETCH` 为 payload-required，按名拒绝（不路由 `BeginDraw`、不伪造拖拽）；**绝不**经过 `StretchEntities` | **宿主侧状态（`crates/cad-host/src/input/grip_drag.rs`，2026-10-26）**：`native-below` 桌面宿主（Linux 原生 Wayland / Windows）在选中实体上绘制夹点标记，并把**单个** `LINE`/`POINT` 夹点拖拽接到 `GripStretch`：按压命中夹点即 arm（2D、非捕获、工具 `Idle`/`Selecting`、主键、选中且**可见**的可直接寻址实体），移动只更新 overlay 预览（`OverlayInputs::grip_markers` 中被拖项替换为当前目标 ⇒ **移动的标记就是预览**，不发导航 delta），松开提交**一次**命令；落在夹点上的点击被一次性闩锁吞掉（**不**重复选中）。**`dom-canvas` 载体（X11/XWayland、web）没有任何夹点标记或拖拽**（wasm 侧无此路径，按铁律 8 显式不存在，**不是**静默回退）。**Escape 取消已接线（仅合成契约，无运行时证据）**：`cad_status` 新增布尔字段 `gripDrag`（`CadStatus::grip_drag`，取自 `HostCore::grip_drag_active()`；拖拽期间 `tool` 仍为 `null`），桌面 UI 的 Escape 门（`toolCommandForKey`）因此在**拖拽中**也发 `CANCEL`（`Enter`/`CONFIRM` 仍只认活动工具）；宿主 `InteractionRequest::Cancel` → `reset_grip_gesture()` 纯状态丢弃拖拽。该链路只有合成证据（`cad-ui-core` 状态投影契约 + `apps/desktop-ui` 的 `tsc`/纯函数/源码结构契约），**没有**真窗口、真实按键或像素证据。中点 / 圆心 / 插入点 / 顶点 / 宽度 / 旋转 / 切线夹点，多夹点与多实体拉伸，拖拽期间的 OSNAP / ORTHO / 栅格捕捉，3D，夹点右键菜单与 `GRIPMULTIFUNCTIONAL` 均**未实现 / 不存在**（模型层不建"永远为空"的 `GripKind` 变体）；证据上限：`cargo test -p cad-app -p cad-host` 契约 + 门禁，**无 GUI/像素/真窗口/真实鼠标证据**，Windows 侧更只有 Tier 0 编译 |
 | `EXPLODE` | **实现** | **一次一层**：LWPOLYLINE→线段+ARC（bulge 还原）；INSERT→直接成员（placement 烘焙，**嵌套块引用保持为引用**，二次 EXPLODE 才展开）；`Compound`/`Hatch`→**全部子项**（`Hatch` 分解为**边界折线 + 填充网格 + 图案线**；P6a 保持既有行为，块内填充仍按 insert-child 拒绝）；MINSERT（`Compound(Insert…)`）→先得 Insert 实例 | 多级一次到底（导出层的"摊平到叶子"是**另一条路径**，不在本命令内）、`EXPLMODE`、颜色/线型变化、Dimension（按 `type_key` 显式拒绝）、关联阵列（我们不存）、属性语义；`IMAGE`/`MASK` 按**策略**拒绝（其**可变换**，不得假称被变换拒绝）；`TEXT`（**按 `child_refusal` 显式拒绝**——P7a 起变换面**接受** `Text`，故**不得**假称被变换拒绝）/`SPLINE`/`SHAPE`/`OPAQUE` 与镜像 Arc/Ellipse **整命令失败**；`MULTILEADER` **显式按 `type_key` 拒绝**（顶层与块内）；非均匀 INSERT 拒绝 |
 - **证据范围**：上述表格是**契约/场景**证据，不等于真实图纸兼容性。Linux 桌面宿主（React/Tauri）
   另有**真实硬件 GPU** 有界证据（Vulkan / Quadro P620 / X11 —— **CAD-on-top 时代**证据；
@@ -393,14 +393,61 @@ Apply/OK/Cancel 为 AutoCAD 语义（本地暂存、只发 diff、写失败标�
 图层写**不可撤销**（历史只有实体 patch），也**不写 DWG**（`SAVE` 仍是 DXF 导出）。
 **2026-10-26 更正（图层属性存储/往返轮）**：图层的**颜色/线型/线宽/关闭/冻结/锁定/可打印/
 透明度**现已**建模并随导出写入、可往返**（`LayerAttributes` 旁存于 `Layer` 行；
-`docs/entity-style.md` 有存储形状与 `visible == !(off||frozen)` 不变量）。导出表也不再只带
+`docs/entity-style.md` 有存储形状与 `visible == !(off || frozen)` 不变量）。导出表也不再只带
 “图层名 + off”：不再把“冻结”改写成“关闭”（re-import 后的**有效可见性**与旧行为一致），
 并新增 `is_plottable`/颜色（ACI 或真彩）/`6` 线型名/`370` 线宽/`AcCmTransparency`；
 plot-style **名字**无法写出（写入器只发句柄）→ 写缺省并记 `export.layer_plot_style_dropped`，
 未定义线型名 → 写 `Continuous` 并记 `export.layer_linetype_substituted`（绝不发悬挂引用）。
-**但仍是零行为**：没有代码读锁定/冻结/可打印/plot style 去改变行为，**出图未实现**，
+**但（除锁定外）仍是零行为**：没有代码读冻结/可打印/plot style 去改变行为（**锁定**后来获得行为，
+见下方「图层锁定」轮），**出图未实现**，
 `ByLayer` 实体颜色**仍在导入时被拍平**成显式 sRGB，因此**改图层颜色不会重着色任何东西**；
 面板色块仍只是名字哈希。图层**写**（新建/重命名/删除）不写 DWG、不可撤销的结论不变。
+**2026-10-26 图层属性编辑轮（本轮）**：图层属性现在**可经命令/IPC 编辑**——
+`SETLAYERPROPERTY`（命令）与 `cad_set_layer_property { layer, key, value }`（IPC），
+一行一条属性、一个 revision bump、**不记录撤销**（历史仍只有实体 patch），并**不写 DWG**
+（`SAVE` 仍是 DXF 导出）。键与今天的真实语义（**逐条，勿过度承诺**）：
+
+| 键 | 取值语法（`crates/cad-app/src/layer_property.rs` 是唯一语法） | 今天的语义 |
+|---|---|---|
+| `off` / `frozen` | `true` / `false` / `0` / `1` | **可见性键**：数据库在同一次变更里重算 `visible == !(off || frozen)`，因此关闭/冻结经**既有可见性路径**隐藏图层（实体不再进场景），两者都清掉才重新可见。**本仓库不为冻结在写路径上新增第二条规则**（见下方锁定轮） |
+| `locked` | `true` / `false` / `0` / `1` | **实体写的行为门**（2026-10-26 锁定轮增补，见下）：锁定层上的实体**不可创建/修改/删除**，拒绝码 `layer.locked`；显示属性写与图层表写**仍允许**。锁定层**仍可设为当前层**（未拒绝，已知缺口） |
+| `plottable` | `true` / `false` / `0` / `1` | **只存储**：出图未实现，没有任何行为 |
+| `color` | `aci:1..=255` / `#RRGGBB` / `rgb:#RRGGBB` / `r,g,b` | **只存储**（ACI 同时写 RGB 调色板值）。`ByLayer`/`ByBlock` 拒绝；真彩写 `aci=None`。**改图层颜色不会重着色任何 `ByLayer` 实体**（导入已拍平） |
+| `linetype` | 图纸线型表里**存在**的名字（先精确后唯一大小写不敏感） | **只存储**；不存在的名字 `layer.linetype_missing`（绝不存悬挂引用）。`ByLayer`/`ByBlock` 拒绝 |
+| `lineweight` | `byLayer` / `default` / **1/100 mm** `0..=211` | **只存储**；单位是 DXF `370`（`35` = 0.35 mm），**不是** `SETENTITYPROPERTY` 的毫米字符串 |
+| `transparency` | `0..=100`（**不透明度百分比**，`0`=不透明） | **只存储**（存 `1 − v/100`）；不参与渲染混合 |
+| `plotstyle` | — | **明确拒绝为未实现**（`layer.property.unsupported` 点名）：导出器只发 plot-style **句柄**，存下来的名字无法存活，接受即撒谎 |
+
+`name` / `visible` 不是可写键（前者属 `RENAMELAYER`，后者由 `off||frozen` 派生）。
+线缆（`cad_layers` 行）新增 `color{aci,rgb}` / `linetype` / `lineweight` / `transparency` /
+`locked` / `frozen` / `off` / `plottable`：它们仍是**显示/编辑输入**（线缆只是把数据库状态投影给面板，
+不参与判定；**锁定行为在数据库写路径上，读取线缆不改变任何行为**）；`dom-canvas` 载体
+与其它图层写一样**显式拒绝**该 IPC。面板 UI（色板/开关/锁定/打印列）**尚未接线**，
+仍是设计 lane 的工作。
+
+**2026-10-26 图层锁定轮（实体写的唯一行为门）**：`locked` 从「只存储」变成**唯一一处**执行的门，
+执行点全部在 `crates/cad-db`（`crates/cad-db/src/drawing/lock.rs`），命令层**不写第二份检查**：
+
+- **判据唯一**：`DrawingDatabase::ensure_change_allowed_on_locked_layer`。两个入口调用同一条判据：
+  `DrawingTransaction::stage`（五个 stager 都经它，**被拒时什么都没 staging**，事务保持空）与
+  `DrawingDatabase::apply_drawing_changes`（唯一验证写路径，撤销/重放也走它；整批先验证后变更，
+  因此**不可能半应用**）。
+- **拒绝语义（AutoCAD 子集，属我们的选择）**：锁定层上的实体**不可修改**（含移动/变换/改属性）、
+  **不可删除**、**不可插入**（含把解锁层的实体改到锁定层上）；错误码 **`layer.locked`**，消息点名
+  实体 id 与图层名/id 并提示先解锁。revision、实体表、图层表、撤销深度全部不变（不建撤销步）。
+- **不拦（明确）**：① **显示属性写** `update_entity_display`（颜色/线型/线宽/透明度）——它是表示重建，
+  不是图形编辑；判据只拒「有效变更」，而该路径 staging 的是**原样**实体行（AutoCAD 同样会重新生成
+  锁定层，故不拦）；② **图层表写**（新建/重命名/删除/`SETLAYERPROPERTY`），它们也是解锁的出口；
+  ③ 解锁后同一编辑立刻成功（锁状态无缓存）。
+- **冻结仍只是可见性**：冻结/关闭层已不可见（`visible == !(off || frozen)`），因此进不了场景与选择漏斗；
+  本轮**不**在写路径上新增第二条冻结规则（冻结前已选中的对象仍可被编辑——已知并记录，本轮不改）。
+- **历史重放规则（已实现并测试）**：撤销/重做把记录的 `DrawingPatch` 重放经 `apply_drawing_changes`，
+  所以**当前锁状态优先**——某步现在会写锁定层即被 `layer.locked` 拒绝，`cad-app` 把该步**放回**
+  （`cancel_pending_drawing`），文档不变；不静默丢弃、也不静默越权；解锁后同一步可正常撤销。
+- **仍未实现（缺口）**：把锁定层设为**当前层**仍被允许（活动图层是 `SessionState` 会话状态，不是数据库写，
+  不在这个单一汇集点上），但随后在该层**创建**实体已被拒绝；按锁定过滤选择（AutoCAD 可选中但不可改）
+  未做；`ByLayer` 颜色仍未按层解析。
+
 CAD 分区右键**快捷菜单**已实现（复制/剪切/粘贴/全选/删除/特性/缩放到范围/平移/放弃/重做/重复上一命令）。
 夹点已有**纯模型 + 命令**（`GripStretch`：仅 LINE 端点 / POINT 位置，一条事务一步撤销，
 拒绝时不建事务），但**没有 marker、没有宿主 arm、没有指针路由**，用户仍看不到也拖不动夹点。

@@ -20,6 +20,7 @@ pub mod grips;
 pub mod host;
 pub mod input;
 pub mod interaction;
+pub mod layer_property;
 pub mod layers;
 pub mod measure_tool;
 pub mod ortho;
@@ -615,6 +616,36 @@ pub enum CommandPayload {
     /// [`CommandPayload::RenameLayer`].
     DeleteLayer {
         layer: String,
+    },
+    /// `SETLAYERPROPERTY`: write **one** attribute of **one** layer table row
+    /// (`off`, `frozen`, `locked`, `plottable`, `color`, `linetype`,
+    /// `lineweight`, `transparency`).
+    ///
+    /// `layer` addresses the row by **name** with the same rule as
+    /// [`CommandPayload::RenameLayer`] (exact match first, then a unique
+    /// case-insensitive one; unknown and ambiguous names are distinct refusals).
+    /// `key` is one of [`crate::layer_property::SUPPORTED_KEYS`] and `value`
+    /// follows that key's documented grammar ([`crate::layer_property`], which
+    /// also fixes the units: `lineweight` is **1/100 mm**, `transparency` is
+    /// **percent transparent**). `plotstyle` is a known key that is **refused as
+    /// not implemented**, and `name` / `visible` are refused because they belong
+    /// to `RENAMELAYER` and to the derived `visible == !(off || frozen)` rule.
+    ///
+    /// One attribute per command: the value is parsed, resolved against the
+    /// drawing's own tables (a linetype name must exist) and applied to a
+    /// **candidate** attribute set before anything is published, so a refused
+    /// value changes no attribute, bumps no revision and records no undo entry
+    /// (layer edits are **not** undoable — same as create/rename/delete).
+    ///
+    /// `off` / `frozen` are the only keys with a behaviour beyond storage: the
+    /// database recomputes `Layer::visible` from the pair in the same mutation,
+    /// so turning one on hides the layer through the existing visibility path and
+    /// clearing the last of the two shows it again. `locked`, `plottable`, the
+    /// colour, the linetype, the lineweight and the transparency are stored only.
+    SetLayerProperty {
+        layer: String,
+        key: String,
+        value: String,
     },
     /// DIMRADIUS/DIMDIAMETER: the picked arc/circle (`target`) plus the
     /// dimension-line location (`location`, ADR 0017 decision C, P5d). The kind

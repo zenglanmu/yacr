@@ -64,9 +64,9 @@ use self::status::{assemble_status, cad_tool, document_capabilities};
 pub use self::admission::{
     admit_layer_write, admit_selected_property, admit_selected_text, admit_setting,
     admit_standard_view, admit_tool_parameter, admit_tool_text, drain_layer_writes,
-    drain_standard_views, parse_property_write, parse_standard_view, parse_tool_parameter,
-    CAD_LAYER_WRITE_CAP, CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP, CAD_SETTING_CAP,
-    CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
+    drain_standard_views, parse_layer_property_write, parse_property_write, parse_standard_view,
+    parse_tool_parameter, CAD_LAYER_WRITE_CAP, CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP,
+    CAD_SETTING_CAP, CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
 };
 pub use self::commands::{
     admissible_names, alias_pairs, canonical_command_name, command_name,
@@ -76,7 +76,7 @@ pub use self::commands::{
     ARGUMENT_SELECTORS, COMMAND_ALIASES, COMMAND_TABLE, MEASUREMENT_SELECTORS, SNAPUNIT_SELECTOR,
     ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
-pub use self::layers::{CadLayer, CadLayerWrite, CadLayers};
+pub use self::layers::{CadLayer, CadLayerColor, CadLayerWrite, CadLayers};
 pub use self::settings::{
     CadSettingKey, CadSettingValue, CadSettings, SETTINGS_INVALID_PLOT_FORMAT,
     SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
@@ -786,6 +786,9 @@ impl CadSession {
             snap_kind,
             crosshair,
             cursor_world,
+            // The host's own gesture state: an armed grip drag is real even
+            // though `tool` is still `null` (a drag is not a tool).
+            self.core.grip_drag_active(),
         );
         // Real live open progress (running only) from the host snapshot, so the
         // chrome can show a determinate/indeterminate bar without inventing data.

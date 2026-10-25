@@ -1,12 +1,24 @@
-//! The sanctioned layer-table write paths: create, rename and delete.
+//! The sanctioned layer-table write paths: create, rename, delete and the
+//! attribute write.
 //!
 //! The layer table is part of the authoritative drawing database, so the base
-//! drawing is read-only after import (spec §4.3) and these three methods are the
+//! drawing is read-only after import (spec §4.3) and these four methods are the
 //! **only** sanctioned way to change it — mirroring
 //! [`DrawingDatabase::set_block_visibility_state`](super::DrawingDatabase::set_block_visibility_state):
 //! validate **everything** first, then mutate, then raise the revision exactly
 //! once and publish a [`ChangeSet`]. A refusal at any point leaves the revision,
 //! the layer table and every entity exactly as they were.
+//!
+//! # The `visible == !(off || frozen)` invariant
+//!
+//! [`Layer::visible`] is the single answered question every consumer reads
+//! (scene filtering, the layer panel's `databaseVisible`), while
+//! [`LayerAttributes::off`] / [`LayerAttributes::frozen`] record **why** a row is
+//! hidden. [`DrawingDatabase::set_layer_attributes`] is the only post-import
+//! place that writes both, and it writes them **together** in one mutation, so
+//! the invariant can never be observed half-applied: a write that turns `off`
+//! or `frozen` on makes the row invisible, and clearing the last of the two
+//! makes it visible again.
 //!
 //! # Why the change set carries no object changes
 //!
@@ -219,11 +231,76 @@ impl DrawingDatabase {
         Ok(self.publish_layer_change(transaction, reason))
     }
 
+    /// Replace a layer's attributes, keeping the visibility invariant.
+    ///
+    /// This is the **post-import** attribute write: the builder's
+    /// [`DrawingDatabaseBuilder::set_layer_attributes`](crate::DrawingDatabaseBuilder::set_layer_attributes)
+    /// stores what the importer resolved, and this method is the only sanctioned
+    /// way to change it afterwards. It is deliberately narrow — it writes one
+    /// row's attribute set and the `visible` flag derived from it, and nothing
+    /// else.
+    ///
+    /// # What it enforces
+    ///
+    /// * **the invariant, atomically**: `visible` becomes
+    ///   [`LayerAttributes::is_visible`] of the new set (`!(off || frozen)`) in the
+    ///   *same* mutation as the attribute row, so no observer can see one
+    ///   updated and the other stale;
+    /// * **one revision bump per real change**: an attribute set identical to the
+    ///   stored one (and a `visible` flag that already agrees) is an
+    ///   authoritative no-op — `before == after` in the change set, no revision
+    ///   bump, nothing fabricated as changed (same rule as
+    ///   [`Self::rename_layer`] to the current name);
+    /// * a refusal — an unknown layer id — changes nothing.
+    ///
+    /// The caller is responsible for the *values*: `cad-db` does not know a
+    /// layer's legal key set, its linetype table's names or the wire grammar. It
+    /// only keeps the stored state consistent.
+    ///
+    /// Not undoable — see the module docs.
+    pub fn set_layer_attributes(
+        &mut self,
+        id: LayerId,
+        attributes: LayerAttributes,
+        transaction: TransactionId,
+        reason: &str,
+    ) -> CadResult<ChangeSet> {
+        let before = self.revision;
+        // Phase 1: validate. The row must exist; nothing else is this method's
+        // call (see "The caller is responsible for the values" above).
+        let visible = {
+            let layer = self.layers.get(&id).ok_or_else(|| unknown_layer(id))?;
+            let visible = attributes.is_visible();
+            // The document declares the *attribute* state, so the write is only a
+            // no-op when the stored attributes and the derived flag already agree.
+            if self.layer_attributes(id) == attributes && layer.visible == visible {
+                return Ok(ChangeSet {
+                    database: self.id,
+                    before,
+                    after: before,
+                    transaction,
+                    reason: reason.to_string(),
+                    changes: Vec::new(),
+                });
+            }
+            visible
+        };
+
+        // Phase 2: mutate. Both writes are part of this one phase, before the
+        // single `publish_layer_change`, so the invariant holds for the whole
+        // published state.
+        self.layer_attributes.insert(id, attributes);
+        if let Some(layer) = self.layers.get_mut(&id) {
+            layer.visible = visible;
+        }
+        Ok(self.publish_layer_change(transaction, reason))
+    }
+
     /// Raise the revision exactly once and build the revision-tagged change set.
     ///
-    /// The only mutation step shared by the three layer writes: after this the
-    /// table change is authoritative and every revision-bound projection (layer
-    /// rows, scene identity) is stale by construction.
+    /// The only mutation step shared by the layer writes: after this the table
+    /// change is authoritative and every revision-bound projection (layer rows,
+    /// scene identity) is stale by construction.
     fn publish_layer_change(&mut self, transaction: TransactionId, reason: &str) -> ChangeSet {
         let before = self.revision;
         let after = Revision(before.0 + 1);

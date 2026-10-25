@@ -15,6 +15,7 @@
   "error": null,
   "frameCount": 0,
   "gridEnabled": false,
+  "gripDrag": false,
   "hoverPreview": false,
   "importCount": 0,
   "importProgress": null,

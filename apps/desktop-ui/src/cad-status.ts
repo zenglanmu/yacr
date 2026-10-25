@@ -127,8 +127,8 @@ export interface CadPopup {
  *
  * Every field the validator below enforces is required; the additive blocks an
  * older host may omit (`hoverPreview`, `snapEnabled`, `snapKind`, `crosshair`,
- * `commandLog`, `popup`) are optional, and the consumers already read them
- * tolerantly (`?? []`, `!= null`).
+ * `commandLog`, `popup`, `gripDrag`) are optional, and the consumers already read
+ * them tolerantly (`?? []`, `!= null`, `Boolean(...)`).
  */
 export interface CadStatus {
   readonly documentLabel: string | null;
@@ -160,6 +160,16 @@ export interface CadStatus {
   readonly frameCount: number;
   readonly commandLog?: readonly CadCommandLogEntry[];
   readonly popup?: CadPopup | null;
+  /**
+   * Whether a grip drag is armed (`cad_ui_core::session::CadStatus::grip_drag`).
+   *
+   * Additive, optional for an older host. It is **not** an active tool: `tool`
+   * stays `null` while it is `true`; the chrome reads it only to route Escape to
+   * `CANCEL`, which the host answers by dropping the armed drag (nothing was
+   * written before the release). A `dom-canvas` carrier never arms a drag and
+   * therefore always reports `false`.
+   */
+  readonly gripDrag?: boolean;
 }
 
 // Phase keys the backend reports (`cad_app::import_phase_key`). A phase outside
@@ -252,6 +262,12 @@ export function parseCadStatus(value: unknown): CadStatus {
   // must be a real boolean: a truthy non-boolean would hide the system cursor
   // over a view that draws no crosshair, leaving the pointer invisible.
   if (status.crosshair !== undefined && typeof status.crosshair !== 'boolean') {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  // The armed-grip-drag flag is optional for older hosts, but a present value
+  // must be a real boolean: a truthy non-boolean would swallow Escape (or, worse,
+  // claim a drag that no host gesture owns).
+  if (status.gripDrag !== undefined && typeof status.gripDrag !== 'boolean') {
     throw Error('CAD_STATUS_INVALID');
   }
   // The cursor's world coordinate is required: `null` (no reliable 2D cursor) or

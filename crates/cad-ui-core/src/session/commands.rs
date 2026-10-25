@@ -96,6 +96,12 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CREATELAYER", CommandId::CreateLayer),
     ("RENAMELAYER", CommandId::RenameLayer),
     ("DELETELAYER", CommandId::DeleteLayer),
+    // The layer **attribute** write (`off`/`frozen`/`locked`/`plottable`/`color`/
+    // `linetype`/`lineweight`/`transparency`) is also payload-requiring:
+    // `{ layer, key, value }`. The bare selector normalizes and is refused
+    // explicitly by the application layer; the panel/IPC path
+    // (`cad_set_layer_property`) supplies the typed payload.
+    ("SETLAYERPROPERTY", CommandId::SetLayerProperty),
     // A payload-requiring edit: the selector normalizes, and the application
     // refuses a bare invocation explicitly (the panel/IPC path supplies the
     // `EntityProperty { key, value }` payload).

@@ -14,10 +14,15 @@
 //! - no override for a layer → the database `visible` flag decides;
 //! - override `Some(true)`  → shown even if the database layer says hidden;
 //! - override `Some(false)` → hidden even if the database layer says visible.
+//!
+//! Each row also carries the layer's stored [`cad_db::LayerAttributes`], so the
+//! layer panel and the attribute write path (`SETLAYERPROPERTY`) read the same
+//! state. Carrying them changes no behaviour: only `off`/`frozen` are reflected
+//! in the `visible` flag, and that flag is the database's, not this module's.
 
 use std::collections::BTreeMap;
 
-use cad_db::{DbEntity, DrawingDatabase, Layer};
+use cad_db::{DbEntity, DrawingDatabase, Layer, LayerAttributes};
 use cad_domain::{CadResult, LayerId, Revision};
 use cad_query::{QueryPage, QueryRequest, QueryService};
 
@@ -33,6 +38,18 @@ pub struct LayerRow {
     pub override_visible: Option<bool>,
     /// The visibility the scene should honour right now.
     pub effective_visible: bool,
+    /// The row's stored attributes (colour, linetype, lineweight, transparency,
+    /// off/frozen/locked/plottable), as [`DrawingDatabase::layer_attributes`]
+    /// answers them.
+    ///
+    /// Carried on the row so the panel's projection and a property write address
+    /// the **same** stored state: the wire layer (`CadLayer`) formats these
+    /// values with [`crate::layer_property`]'s canonical projections, so a value
+    /// a row shows can be sent straight back to `SETLAYERPROPERTY`. This is a
+    /// read-only snapshot — `locked`, `plottable`, the colour and the line
+    /// properties have **no behaviour** yet (see the module docs of
+    /// `cad_db::LayerAttributes`).
+    pub attributes: LayerAttributes,
 }
 
 impl LayerRow {
@@ -148,6 +165,7 @@ pub fn layer_rows(database: &DrawingDatabase, overrides: &LayerOverrideSet) -> V
             database_visible: layer.visible,
             override_visible: overrides.get(layer.id),
             effective_visible: overrides.effective(layer.id, layer.visible),
+            attributes: database.layer_attributes(layer.id),
         })
         .collect()
 }

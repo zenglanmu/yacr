@@ -21,6 +21,7 @@ mod access;
 mod bounds;
 mod edit;
 mod layer_edit;
+mod lock;
 mod transaction;
 
 #[cfg(test)]

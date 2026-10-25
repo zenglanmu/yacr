@@ -56,6 +56,128 @@ fn layers_project_the_drawing_rows_with_exactly_one_current() {
 }
 
 #[test]
+fn every_row_carries_the_stored_attributes_in_the_write_grammar() {
+    let session = fresh_session();
+    let layers = session.layers().expect("the demo drawing layers");
+
+    // The fixture's rows carry no attributes record, so the documented default
+    // is projected: ACI 7 white, `Continuous`, ByLayer weight, opaque, on,
+    // thawed, unlocked and plottable. Nothing is invented on top of it.
+    for row in &layers.layers {
+        assert_eq!(row.color.aci, Some(7));
+        assert_eq!(row.color.rgb, "#ffffff");
+        assert_eq!(row.linetype, "Continuous");
+        assert_eq!(row.lineweight, "ByLayer");
+        assert_eq!(row.transparency, "0");
+        assert!(!row.locked);
+        assert!(!row.frozen);
+        assert!(!row.off);
+        assert!(row.plottable);
+    }
+}
+
+#[test]
+fn a_layer_attribute_write_reads_back_through_the_projection() {
+    let session = fresh_session();
+    let before = revision(&session);
+
+    // Storage-only keys: they appear on the row and change nothing else.
+    session
+        .set_layer_property("WALLS", "color", "aci:30")
+        .expect("a palette index");
+    session
+        .set_layer_property("WALLS", "lineweight", "35")
+        .expect("0.35 mm in 1/100 mm");
+    session
+        .set_layer_property("WALLS", "transparency", "40")
+        .expect("40 percent transparent");
+    session
+        .set_layer_property("WALLS", "locked", "true")
+        .expect("a legal flag");
+    session
+        .set_layer_property("WALLS", "plottable", "false")
+        .expect("a legal flag");
+
+    let layers = session.layers().expect("layers");
+    let walls = row(&layers, "WALLS");
+    assert_eq!(walls.color.aci, Some(30));
+    assert_eq!(walls.color.rgb, "#ff7f00");
+    // The demo drawing has no linetype table, so this is the documented default
+    // name, not a reference this build resolved. A successful `linetype` write is
+    // pinned in `cad-app` (where the fixture has a real table); here the missing
+    // table is the refusal case below.
+    assert_eq!(walls.linetype, "Continuous");
+    assert_eq!(walls.lineweight, "35");
+    assert_eq!(walls.transparency, "40");
+    assert!(walls.locked);
+    assert!(!walls.plottable);
+    assert!(walls.visible, "locking and not plotting hide nothing");
+    // Five real changes, five revision bumps, still no undo entry.
+    assert_eq!(revision(&session), cad_domain::Revision(before.0 + 5));
+    assert!(!can_undo(&session));
+}
+
+#[test]
+fn off_and_frozen_hide_the_layer_through_the_projection() {
+    let session = fresh_session();
+
+    session
+        .set_layer_property("WALLS", "frozen", "1")
+        .expect("a legal flag");
+
+    let layers = session.layers().expect("layers");
+    let walls = row(&layers, "WALLS");
+    assert!(walls.frozen);
+    assert!(!walls.off);
+    // The database's own flag moved (not a temporary override): the row is
+    // hidden in the layer table, so no override is reported.
+    assert!(!walls.visible);
+    assert!(!walls.database_visible);
+    assert!(!walls.overridden);
+
+    // Clearing the flag shows it again; an `off` layer stays hidden until both
+    // are cleared.
+    session
+        .set_layer_property("WALLS", "off", "true")
+        .expect("a legal flag");
+    session
+        .set_layer_property("WALLS", "frozen", "false")
+        .expect("a legal flag");
+    assert!(!row(&session.layers().expect("layers"), "WALLS").visible);
+    session
+        .set_layer_property("WALLS", "off", "false")
+        .expect("a legal flag");
+    assert!(row(&session.layers().expect("layers"), "WALLS").visible);
+}
+
+#[test]
+fn a_refused_layer_attribute_write_changes_no_row_and_no_revision() {
+    let session = fresh_session();
+    let before_rows = session.layers().expect("layers");
+    let before_revision = revision(&session);
+
+    for (key, value) in [
+        ("color", "ByLayer"),
+        ("lineweight", "500"),
+        ("transparency", "101"),
+        ("plotstyle", "Normal"),
+        ("hatch", "x"),
+    ] {
+        let error = session
+            .set_layer_property("WALLS", key, value)
+            .expect_err("this key/value pair must be refused");
+        assert!(error.contains("layer."), "{key}={value}: {error}");
+    }
+    let error = session
+        .set_layer_property("ROOF", "locked", "true")
+        .expect_err("ROOF does not exist");
+    assert!(error.contains("layer.unknown"), "{error}");
+
+    assert_eq!(session.layers().expect("layers"), before_rows);
+    assert_eq!(revision(&session), before_revision);
+}
+
+#[test]
 fn hiding_a_layer_by_name_is_a_temporary_override_only() {
     let session = fresh_session();
     let revision_before = session
@@ -224,6 +346,29 @@ fn the_layer_write_admission_applies_gates_before_the_queue() {
 
     admit_layer_write(&mut queue, true, false, write).expect("an admitted write is queued");
     assert_eq!(queue.len(), 1);
+}
+
+#[test]
+fn a_layer_property_key_is_checked_statically_before_the_queue() {
+    // The key is the one part of the request that needs no session state, so the
+    // admission refuses an unknown or unimplemented key by name.
+    assert_eq!(
+        parse_layer_property_write("WALLS", "color", "aci:1"),
+        Ok((
+            "WALLS".to_string(),
+            "color".to_string(),
+            "aci:1".to_string()
+        ))
+    );
+    for key in ["plotstyle", "hatch"] {
+        let error = parse_layer_property_write("WALLS", key, "x")
+            .expect_err("this key must be refused before the queue");
+        assert!(error.contains("layer.property.unsupported"), "{error}");
+        assert!(error.contains(key), "the refusal names the key: {error}");
+    }
+    // The value is deliberately **not** validated here: the grammar can depend on
+    // the drawing's own tables, so it is the owner thread's call.
+    assert!(parse_layer_property_write("WALLS", "linetype", "PHANTOM").is_ok());
 }
 
 #[test]
@@ -414,6 +559,12 @@ fn the_structural_layer_writes_apply_through_the_same_queue() {
             layer: "DOORS".into(),
             name: "WINDOWS".into(),
         },
+        // The attribute write rides the **same** queue: no second channel.
+        CadLayerWrite::SetProperty {
+            layer: "WINDOWS".into(),
+            key: "color".into(),
+            value: "aci:1".into(),
+        },
         CadLayerWrite::Delete {
             layer: "WINDOWS".into(),
         },
@@ -445,6 +596,9 @@ fn the_structural_layer_writes_are_refused_without_a_document() {
         session.create_layer("DOORS").unwrap_err(),
         session.rename_layer("WALLS", "PARTITIONS").unwrap_err(),
         session.delete_layer("WALLS").unwrap_err(),
+        session
+            .set_layer_property("WALLS", "locked", "true")
+            .unwrap_err(),
     ] {
         assert!(
             error.contains("layer.no_document"),

@@ -1,18 +1,25 @@
-//! Layer table structural commands (`CREATELAYER` / `RENAMELAYER` /
-//! `DELETELAYER`).
+//! Layer table commands (`CREATELAYER` / `RENAMELAYER` / `DELETELAYER` /
+//! `SETLAYERPROPERTY`).
 //!
 //! These are the only commands that change the drawing's layer **table** — as
 //! opposed to the session-scoped visibility overrides in [`crate::layers`] and
 //! the session-only active layer of [`CommandId::SetActiveLayer`]. The real work
 //! happens in the database's validated write path
-//! ([`cad_db::DrawingDatabase::create_layer`] / `rename_layer` / `delete_layer`);
-//! this module only resolves the panel-supplied layer **name**, applies the
-//! candidate database, keeps the session consistent and reports what happened.
+//! ([`cad_db::DrawingDatabase::create_layer`] / `rename_layer` / `delete_layer` /
+//! `set_layer_attributes`); this module only resolves the panel-supplied layer
+//! **name**, parses the attribute value with the one layer grammar
+//! ([`crate::layer_property`]), applies the candidate database, keeps the session
+//! consistent and reports what happened.
 //!
 //! Contract:
 //!
 //! * every refusal happens **before** the candidate is published, so the open
 //!   document, its revision and the session are untouched;
+//! * the attribute write parses and resolves its value (`layer_property`) and
+//!   applies it to a **cloned** attribute set, so a refused key/value leaves the
+//!   stored attributes byte-identical; `off`/`frozen` keep
+//!   `Layer::visible == !(off || frozen)` because the database recomputes it in
+//!   the same mutation (never a second, separate write);
 //! * a successful write replaces the document's `Arc<DrawingDatabase>` and
 //!   publishes the database's `ChangeSet` (new revision, no entity changes), the
 //!   documented staleness signal every projection binds to;
@@ -25,7 +32,7 @@
 use super::*;
 
 impl Application {
-    /// Dispatch the three layer-table commands.
+    /// Dispatch the layer-table commands.
     pub(crate) fn layer_command(
         &mut self,
         session: &mut SessionState,
@@ -138,6 +145,55 @@ impl Application {
                     objects: Vec::new(),
                     changes: Some(Arc::new(changeset)),
                     diagnostics,
+                    measurement: None,
+                }
+            }
+            CommandPayload::SetLayerProperty { layer, key, value } => {
+                let id = resolve_layer(drawing.as_ref(), layer)?;
+                let name = drawing
+                    .layer(id)
+                    .map(|row| row.name.clone())
+                    .ok_or_else(|| {
+                        CadError::Invariant("resolved layer vanished before the write".into())
+                    })?;
+                // Parse **everything** first: the value grammar (which needs the
+                // drawing's own linetype table) decides before any candidate
+                // attribute is touched.
+                let parsed = crate::layer_property::parse(drawing.as_ref(), key, value)?;
+                let mut attributes = drawing.layer_attributes(id);
+                crate::layer_property::apply(&mut attributes, parsed);
+                // The database recomputes `visible` from the new `off`/`frozen`
+                // pair inside this one call, so the invariant is never published
+                // half-applied and there is no second write to forget.
+                let changeset = candidate.set_layer_attributes(
+                    id,
+                    attributes.clone(),
+                    transaction,
+                    "set layer property",
+                )?;
+                // A write of the stored value is an authoritative no-op: the
+                // revision did not move, so the report says so instead of
+                // claiming a change.
+                let changed = changeset.before != changeset.after;
+                CommandOutcome {
+                    objects: Vec::new(),
+                    changes: Some(Arc::new(changeset)),
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: if changed {
+                            "drawing.layer_property_changed".into()
+                        } else {
+                            "drawing.layer_property_unchanged".into()
+                        },
+                        message: format!(
+                            "layer '{name}' property '{key}' written as '{value}'{}",
+                            if changed {
+                                ""
+                            } else {
+                                " (already stored, no change)"
+                            }
+                        ),
+                    }],
                     measurement: None,
                 }
             }

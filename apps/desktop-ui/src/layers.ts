@@ -13,7 +13,11 @@
 // Wire shape (Rust side, frozen):
 //
 //   cad_layers                -> { layers: [{ name, visible, databaseVisible,
-//                                          overridden, current }],
+//                                          overridden, current,
+//                                          color: { aci: number|null,
+//                                                   rgb: "#rrggbb" },
+//                                          linetype, lineweight, transparency,
+//                                          locked, frozen, off, plottable }],
 //                                  active: string | null, overridden: number }
 //   cad_set_layer_visible  { name, visible } -> { accepted: true }   (queued)
 //   cad_restore_layers                  -> { accepted: true }         (queued)
@@ -21,13 +25,26 @@
 //   cad_create_layer       { name }     -> { accepted: true }         (queued)
 //   cad_rename_layer       { layer, name } -> { accepted: true }      (queued)
 //   cad_delete_layer       { layer }    -> { accepted: true }         (queued)
+//   cad_set_layer_property { layer, key, value } -> { accepted: true } (queued)
 //
-// The last three are **real layer-table writes** (one revision bump each, not
+// The last four are **real layer-table writes** (one revision bump each, not
 // undoable), unlike the two overrides and the active-layer pick. Their refusals
 // are the database's own stable reasons (`layer.name_empty`,
 // `layer.name_illegal_char`, `layer.duplicate_name`, `layer.default_undeletable`,
-// `layer.in_use`, plus the host's `layer.unknown` / `layer.ambiguous_name` name
-// resolution) and none of them is repaired or swallowed here.
+// `layer.in_use`, `layer.property.unsupported`, `layer.property.value`,
+// `layer.linetype_missing`, plus the host's `layer.unknown` /
+// `layer.ambiguous_name` name resolution) and none of them is repaired or
+// swallowed here.
+//
+// The attribute fields on a row are **display/edit inputs, not behaviour**:
+// `off` and `frozen` hide the layer through the existing `visible` path (a frozen
+// or off layer reads `databaseVisible: false`), while `locked`, `plottable`, the
+// colour, the linetype, the lineweight and the transparency are stored only — a
+// layer colour does **not** recolour `ByLayer` entities (import flattening). The
+// values are the host's own canonical write grammar: `lineweight` is `ByLayer` /
+// `Default` / a 1/100 mm integer string, `transparency` is a percent-transparent
+// string (`"0"` = opaque), and both can be sent straight back to
+// `cad_set_layer_property`.
 //
 // Three consequences this module is built around:
 //
@@ -53,6 +70,20 @@ export type InvokeArgs = Record<string, unknown> | Uint8Array | number[] | Array
 /** The typed IPC call this module needs (`invoke` satisfies it). */
 export type Invoke = (command: string, args?: InvokeArgs) => Promise<unknown>;
 
+/** One layer's stored colour: the ACI identity (or `null`) plus `#rrggbb`. */
+export interface LayerColor {
+  /** The source ACI index, `null` for a true colour or when the host sent none. */
+  readonly aci: number | null;
+  /**
+   * The resolved `#rrggbb` value, lowercase.
+   *
+   * An **empty string** means the host did not report a usable colour (a host
+   * that answered an unexpected shape); it never means "black". A consumer falls
+   * back to [`layerTone`] in that case instead of painting an invented colour.
+   */
+  readonly rgb: string;
+}
+
 /** One layer as the host's answer describes it (the only row shape ever shown). */
 export interface LayerRow {
   /** The layer name: non-empty, unique within one answer. */
@@ -65,6 +96,24 @@ export interface LayerRow {
   readonly overridden: boolean;
   /** Whether this is the layer new entities are drawn on. */
   readonly current: boolean;
+  /** The stored colour (an edit input; it does **not** recolour entities). */
+  readonly color: LayerColor;
+  /** The stored linetype **name** (`''` when the host reported none). */
+  readonly linetype: string;
+  /** The stored lineweight in the write grammar's vocabulary: `ByLayer`,
+   * `Default` or a **1/100 mm** integer string (`'35'` = 0.35 mm). */
+  readonly lineweight: string;
+  /** Stored opacity as **percent transparent** (`'0'` = opaque), or
+   * `'opacity:<raw>'` when the stored value is outside `0..=1`. */
+  readonly transparency: string;
+  /** Layer is locked (stored only: no behaviour yet). */
+  readonly locked: boolean;
+  /** Layer is frozen (hides the layer through the `visible` path). */
+  readonly frozen: boolean;
+  /** Layer is off (hides the layer through the `visible` path). */
+  readonly off: boolean;
+  /** Whether the layer plots (stored only: plotting is not implemented). */
+  readonly plottable: boolean;
 }
 
 /** One normalised `cad_layers` answer. */
@@ -121,6 +170,16 @@ export interface LayersStore {
   renameLayer(layer: string, name: string): Promise<LayerAck>;
   /** Delete the layer currently named `layer`. */
   deleteLayer(layer: string): Promise<LayerAck>;
+  /**
+   * Write one attribute of the layer currently named `layer`.
+   *
+   * `key` is one of the host's writable layer keys (`color`, `linetype`,
+   * `lineweight`, `transparency`, `off`, `frozen`, `locked`, `plottable`) and
+   * `value` follows that key's documented grammar — the **host's** units:
+   * `lineweight` is 1/100 mm, `transparency` is percent transparent. A row's own
+   * projected value can be sent back unchanged.
+   */
+  setProperty(layer: string, key: string, value: string): Promise<LayerAck>;
 }
 
 /** Reads the layer table plus the session's temporary overrides. */
@@ -137,6 +196,8 @@ export const CREATE_LAYER_COMMAND = 'cad_create_layer';
 export const RENAME_LAYER_COMMAND = 'cad_rename_layer';
 /** Deletes a layer-table entry. */
 export const DELETE_LAYER_COMMAND = 'cad_delete_layer';
+/** Writes one stored attribute of a layer (colour, flags, linetype, …). */
+export const SET_LAYER_PROPERTY_COMMAND = 'cad_set_layer_property';
 
 /**
  * The host's "no session yet" code. Not an error state: the panel says so in the
@@ -174,9 +235,9 @@ export const EMPTY_LAYERS_ANSWER: LayersAnswer = Object.freeze({ layers: [], act
  * kept only when it has a non-empty string name (a row without a name can neither
  * be shown nor addressed) and a repeated name is dropped after its first
  * occurrence, because two rows with one name are one layer. Missing booleans read
- * as `false` — the contract always sends them, so this only matters for a host
- * that answered something unexpected, and claiming an eye state it did not send
- * would be worse than showing the plain row.
+ * as `false` and missing strings as `''` — the contract always sends them, so this
+ * only matters for a host that answered something unexpected, and claiming an eye
+ * state or a colour it did not send would be worse than showing the plain row.
  */
 export function parseLayersAnswer(answer: unknown): LayersAnswer {
   const source = recordOf(answer);
@@ -195,6 +256,14 @@ export function parseLayersAnswer(answer: unknown): LayersAnswer {
       databaseVisible: fields.databaseVisible === true,
       overridden: fields.overridden === true,
       current: fields.current === true,
+      color: parseLayerColor(fields.color),
+      linetype: textOf(fields.linetype),
+      lineweight: textOf(fields.lineweight),
+      transparency: textOf(fields.transparency),
+      locked: fields.locked === true,
+      frozen: fields.frozen === true,
+      off: fields.off === true,
+      plottable: fields.plottable === true,
     });
   }
   const active = typeof source?.active === 'string' && source.active ? source.active : null;
@@ -205,6 +274,32 @@ export function parseLayersAnswer(answer: unknown): LayersAnswer {
     ? reported
     : overrideCount(layers);
   return { layers, active, overridden };
+}
+
+/** A non-empty string field, or `''` (never a fabricated value). */
+function textOf(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+/** The `#rrggbb` shape a colour must have to be paintable as CSS. */
+const RGB_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * Normalise one row's `color`.
+ *
+ * `aci` is kept only when it is a safe integer index (`1..=255`); `rgb` only when
+ * it is a real `#rrggbb`. Anything else answers `{aci: null, rgb: ''}` — the row
+ * has no colour it can honestly paint, and an empty `rgb` makes a consumer fall
+ * back to [`layerTone`] instead of a fabricated swatch.
+ */
+export function parseLayerColor(value: unknown): LayerColor {
+  const fields = recordOf(value);
+  const aci = fields?.aci;
+  const rgb = fields?.rgb;
+  return {
+    aci: typeof aci === 'number' && Number.isSafeInteger(aci) && aci >= 1 && aci <= 255 ? aci : null,
+    rgb: typeof rgb === 'string' && RGB_PATTERN.test(rgb) ? rgb.toLowerCase() : '',
+  };
 }
 
 /**
@@ -273,12 +368,15 @@ function hslToHex(hue: number, saturation: number, lightness: number): string {
 /**
  * A stable per-layer swatch, derived from the layer **name**.
  *
- * This is **not** the drawing's layer colour: the DWG layer table's ACI colour is
- * not on the wire, so painting one would be a fabricated fact. What it is instead
- * is an identity dot — the same muted hue for the same name on every open, so a
- * row stays recognisable without ever claiming to be the real colour. Deliberately
- * low saturation and mid lightness: it reads as a marker next to the name, not as
- * a colour sample a user could mistake for their own layer colour.
+ * This is **not** the drawing's layer colour. The real stored colour *is* on the
+ * wire now (`LayerRow.color`, `#rrggbb` plus the ACI identity), so a surface that
+ * wants the real colour paints `row.color.rgb` — this function is the palette's
+ * current identity dot, kept until the layer palette switches to the stored
+ * colour. What it is instead is a marker: the same muted hue for the same name on
+ * every open, so a row stays recognisable even when the host reported no usable
+ * colour (`color.rgb === ''`). Deliberately low saturation and mid lightness: it
+ * reads as a marker next to the name, not as a colour sample a user could mistake
+ * for their own layer colour.
  *
  * Accepts a layer object or a bare name. Returns `{ hue, color }` where `color` is
  * a `#rrggbb` string (computed here rather than as a CSS `hsl()` so the value does
@@ -369,6 +467,52 @@ function validName(name: unknown): name is string {
   return typeof name === 'string' && name.length > 0;
 }
 
+/** The boolean a layer flag's value spells, or `null` when it spells none. */
+function flagValue(value: string): boolean | null {
+  if (value === 'true' || value === '1') return true;
+  if (value === 'false' || value === '0') return false;
+  return null;
+}
+
+/** The ACI index `aci:<n>` names (`1..=255`), or `null`. */
+function aciValue(value: string): number | null {
+  const match = /^aci:(\d+)$/i.exec(value);
+  if (!match) return null;
+  const index = Number(match[1]);
+  return Number.isSafeInteger(index) && index >= 1 && index <= 255 ? index : null;
+}
+
+/**
+ * The `#rrggbb` a colour value resolves to (`#RRGGBB`, `rgb:#RRGGBB` or
+ * `r,g,b`), or `null` when it is not one of those spellings.
+ *
+ * Used only by [`showsProperty`]'s read-back check; the authoritative parse is the
+ * host's.
+ */
+function rgbValue(value: string): string | null {
+  const explicit = /^rgb:(.*)$/i.exec(value);
+  const body = (explicit ? explicit[1] : value).trim();
+  const hex = RGB_PATTERN.test(body) ? body.toLowerCase() : null;
+  if (hex !== null) return hex;
+  const parts = body.split(',').map(part => part.trim());
+  if (parts.length !== 3) return null;
+  const channels: string[] = [];
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const channel = Number(part);
+    if (channel > 255) return null;
+    channels.push(channel.toString(16).padStart(2, '0'));
+  }
+  return `#${channels.join('')}`;
+}
+
+/** The canonical percent string a transparency value spells, or `null`. */
+function percentValue(value: string): string | null {
+  if (!/^\d{1,3}$/.test(value)) return null;
+  const percent = Number(value);
+  return percent <= 100 ? String(percent) : null;
+}
+
 /**
  * Read the layer table. Never throws: a failure is a `{kind:'error'}` result so a
  * caller can keep the rows it already shows and report the real reason.
@@ -435,6 +579,32 @@ export function renameLayer(invoke: Invoke, layer: unknown, name: unknown): Prom
 export function deleteLayer(invoke: Invoke, layer: unknown): Promise<LayerAck> {
   if (!validName(layer)) return Promise.resolve({ kind: 'invalid' });
   return sendAck(invoke, DELETE_LAYER_COMMAND, { layer });
+}
+
+/**
+ * Write one stored attribute of the layer currently named `layer`.
+ *
+ * All three fields are required: `layer` addresses the row the panel has, `key` is
+ * one of the host's writable layer keys and `value` is that key's grammar in the
+ * **host's** units (`lineweight` = 1/100 mm, `transparency` = percent
+ * transparent). Nothing is normalised or converted here: a row's own projected
+ * value can be sent back unchanged, and anything the grammar refuses comes back as
+ * the host's reason (`layer.property.unsupported`, `layer.property.value`,
+ * `layer.linetype_missing`).
+ *
+ * An empty layer name, key or value is refused locally (`{kind:'invalid'}`, no
+ * IPC): no key in the grammar accepts an empty value, and sending a request whose
+ * only possible answer is a refusal wastes the host's queue slot.
+ */
+export function setLayerProperty(
+  invoke: Invoke,
+  layer: unknown,
+  key: unknown,
+  value: unknown,
+): Promise<LayerAck> {
+  if (!validName(layer) || !validName(key)) return Promise.resolve({ kind: 'invalid' });
+  if (typeof value !== 'string' || value.trim() === '') return Promise.resolve({ kind: 'invalid' });
+  return sendAck(invoke, SET_LAYER_PROPERTY_COMMAND, { layer, key, value });
 }
 
 /**
@@ -588,12 +758,56 @@ export function createLayersStore(invoke: Invoke, { wait = nextTick }: LayersSto
     return state.layers.some(layer => layer.name === needle);
   }
 
+  /**
+   * Whether the current projection already shows `key = value` on `layer`.
+   *
+   * This is **not** a validator: it only decides whether one more read-back is
+   * worth it (the documented two-frame window). It therefore compares the values
+   * the host itself projects (`LayerRow`), normalising the spellings the grammar
+   * accepts; a spelling it cannot interpret answers "not shown yet", which costs
+   * one extra read and never a wrong claim.
+   */
+  function showsProperty(layer: string, key: string, value: string): boolean {
+    const row = state.layers.find(entry => entry.name === layer.trim());
+    if (!row) return false;
+    const wanted = value.trim();
+    switch (key) {
+      case 'off':
+      case 'frozen':
+      case 'locked':
+      case 'plottable': {
+        const flag = flagValue(wanted);
+        return flag !== null && row[key] === flag;
+      }
+      case 'color': {
+        const aci = aciValue(wanted);
+        if (aci !== null) return row.color.aci === aci;
+        const rgb = rgbValue(wanted);
+        return rgb !== null && row.color.rgb === rgb;
+      }
+      case 'linetype':
+        return row.linetype.toLowerCase() === wanted.toLowerCase();
+      case 'lineweight':
+        return row.lineweight.toLowerCase() === wanted.toLowerCase();
+      case 'transparency': {
+        const percent = percentValue(wanted);
+        return percent !== null && row.transparency === percent;
+      }
+      default:
+        // An unknown key cannot be interpreted here. The write was still admitted
+        // (the host decides), so no extra read is claimed to be necessary.
+        return true;
+    }
+  }
+
   // The wire senders, under their own names so the store actions below
   // (`createLayer` …) can never be mistaken for the module-level helpers.
   const createLayerRequest = (name: string): Promise<LayerAck> => createLayer(invoke, name);
   const renameLayerRequest = (layer: string, name: string): Promise<LayerAck> =>
     renameLayer(invoke, layer, name);
   const deleteLayerRequest = (layer: string): Promise<LayerAck> => deleteLayer(invoke, layer);
+  const setPropertyRequest = (layer: string, key: string, value: string): Promise<LayerAck> =>
+    setLayerProperty(invoke, layer, key, value);
 
   async function mutate(send: () => Promise<LayerAck>, applied?: () => boolean): Promise<LayerAck> {
     if (busy) return { kind: 'busy' };
@@ -671,6 +885,14 @@ export function createLayersStore(invoke: Invoke, { wait = nextTick }: LayersSto
       return mutate(
         () => deleteLayerRequest(layer),
         () => !hasLayer(layer),
+      );
+    },
+    setProperty(layer: string, key: string, value: string): Promise<LayerAck> {
+      if (!validName(layer) || !validName(key)) return Promise.resolve({ kind: 'invalid' });
+      if (typeof value !== 'string' || value.trim() === '') return Promise.resolve({ kind: 'invalid' });
+      return mutate(
+        () => setPropertyRequest(layer, key, value),
+        () => showsProperty(layer, key, value),
       );
     },
   };

@@ -158,8 +158,15 @@ impl DrawingDatabase {
     /// empty batch returns a `before == after` ChangeSet with no bump and no
     /// fabricated changes.
     ///
-    /// This is shared by [`DrawingTransaction`] and, later, by history/undo: both
-    /// must go through here so validation and change-tracking cannot be bypassed.
+    /// This is shared by [`DrawingTransaction`] and by history/undo: both must go
+    /// through here so validation, layer-lock enforcement and change-tracking
+    /// cannot be bypassed.
+    ///
+    /// A write that would create, modify or delete an entity on a **locked**
+    /// layer is refused with `layer.locked` in phase 1 (before any mutation), so
+    /// the failure is all-or-nothing exactly like a validation failure. See
+    /// `drawing::lock` for the rule, its two chokepoints and the documented
+    /// history-replay and display-write decisions.
     pub fn apply_drawing_changes(
         &mut self,
         reason: &str,
@@ -174,6 +181,9 @@ impl DrawingDatabase {
                     "transaction {transaction:?} modifies entity {id:?} twice"
                 )));
             }
+            // Layer locking: the authoritative gate. Every entity write in the
+            // build — command commits and history replay alike — ends up here.
+            self.ensure_change_allowed_on_locked_layer(*id, change.as_ref())?;
             match change {
                 Some(entity) => validate_entity(self, *id, entity)?,
                 None => {
