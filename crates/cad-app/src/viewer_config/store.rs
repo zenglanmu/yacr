@@ -54,6 +54,17 @@ impl ViewerConfig {
                 "GPU budget must be an integer percentage from 10 to 100",
             ));
         }
+        // The `SNAPUNIT` spacing is a real drafting quantity: a non-finite or
+        // non-positive value is refused by name (it would otherwise divide by
+        // zero in the grid quantiser), never replaced with the default.
+        if let Some(spacing) = self.interaction.snap_spacing {
+            if !crate::snap::snap_spacing_is_valid(spacing) {
+                return Err(ConfigError::new(
+                    "interaction.snapSpacing",
+                    "snap spacing must be finite and greater than zero drawing units",
+                ));
+            }
+        }
         for key in self.ui.command_overrides.keys() {
             if !is_known_command(key) {
                 return Err(ConfigError::new(

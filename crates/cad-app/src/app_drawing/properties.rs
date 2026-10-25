@@ -98,7 +98,7 @@ impl Application {
                 .entity(reference.entity)
                 .expect("preflight verified the entity resolves")
                 .clone();
-            if let Some(change) = plan_entity(&drawing, before, &target) {
+            if let Some(change) = plan_entity(&drawing, before, &[&target]) {
                 staged_changes.push(change);
             }
         }
@@ -188,17 +188,21 @@ impl Application {
 }
 
 /// One entity that will change, with both state layers captured.
-struct StagedChange {
-    id: EntityId,
-    before: DbEntity,
-    after: DbEntity,
+///
+/// Shared with [`super::match_prop`], which applies five resolved values per
+/// entity through the same [`plan_entity`] comparison rules (the no-op rule for
+/// transparency and the linetype-scale preservation live here only).
+pub(super) struct StagedChange {
+    pub(super) id: EntityId,
+    pub(super) before: DbEntity,
+    pub(super) after: DbEntity,
     /// `Some` **iff** a display attribute changes (and therefore the display
     /// state must be replayed).
-    after_attributes: Option<EntityRenderAttributes>,
+    pub(super) after_attributes: Option<EntityRenderAttributes>,
 }
 
 /// Refuse a ref that has no directly addressable entity identity.
-fn ensure_addressable(
+pub(super) fn ensure_addressable(
     drawing: &DrawingDatabase,
     command: &Command,
     reference: &SelectionRef,
@@ -225,11 +229,18 @@ fn ensure_addressable(
     Ok(())
 }
 
-/// The planned change for one entity, or `None` when it already holds the value.
-fn plan_entity(
+/// The planned change for one entity, or `None` when it already holds every
+/// value in `targets`.
+///
+/// This is the single applicator of a resolved [`PropertyValue`] list: the
+/// `SETENTITYPROPERTY` path passes one target and `MATCHPROP` passes the five a
+/// source entity carries, so the value-independent rules — the transparency
+/// percent no-op comparison, the destination's linetype scale preservation and
+/// the "both state layers or nothing" rule — exist once.
+pub(super) fn plan_entity(
     drawing: &DrawingDatabase,
     before: DbEntity,
-    target: &PropertyValue,
+    targets: &[&PropertyValue],
 ) -> Option<StagedChange> {
     let mut after = before.clone();
     let mut attributes = drawing.entity_render_attributes(before.id);
@@ -237,43 +248,45 @@ fn plan_entity(
     let mut entity_changed = false;
     let mut attributes_changed = false;
 
-    match target {
-        PropertyValue::Layer(layer) => {
-            if before.layer != *layer {
-                after.layer = *layer;
-                entity_changed = true;
+    for target in targets {
+        match target {
+            PropertyValue::Layer(layer) => {
+                if after.layer != *layer {
+                    after.layer = *layer;
+                    entity_changed = true;
+                }
             }
-        }
-        PropertyValue::Color(color) => {
-            if attributes.color != *color {
-                attributes.color = *color;
-                attributes_changed = true;
+            PropertyValue::Color(color) => {
+                if attributes.color != *color {
+                    attributes.color = *color;
+                    attributes_changed = true;
+                }
             }
-        }
-        PropertyValue::Lineweight(lineweight) => {
-            if attributes.lineweight != *lineweight {
-                attributes.lineweight = *lineweight;
-                attributes_changed = true;
+            PropertyValue::Lineweight(lineweight) => {
+                if attributes.lineweight != *lineweight {
+                    attributes.lineweight = *lineweight;
+                    attributes_changed = true;
+                }
             }
-        }
-        PropertyValue::Transparency(transparency) => {
-            // Compare on the wire grammar (integer percent), not on the stored
-            // float: the importer quantised the source byte into an opacity, so
-            // the stored value may not equal the exact percent-derived float even
-            // though it displays the same percentage. A panel that reads "55" and
-            // writes "55" must not create an undo entry.
-            if property_value::transparency_value(attributes.transparency)
-                != property_value::transparency_value(*transparency)
-            {
-                attributes.transparency = *transparency;
-                attributes_changed = true;
+            PropertyValue::Transparency(transparency) => {
+                // Compare on the wire grammar (integer percent), not on the stored
+                // float: the importer quantised the source byte into an opacity, so
+                // the stored value may not equal the exact percent-derived float even
+                // though it displays the same percentage. A panel that reads "55" and
+                // writes "55" must not create an undo entry.
+                if property_value::transparency_value(attributes.transparency)
+                    != property_value::transparency_value(*transparency)
+                {
+                    attributes.transparency = *transparency;
+                    attributes_changed = true;
+                }
             }
-        }
-        PropertyValue::Linetype(target) => {
-            let next = resolve_linetype(&attributes.linetype, target);
-            if attributes.linetype != next {
-                attributes.linetype = next;
-                attributes_changed = true;
+            PropertyValue::Linetype(target) => {
+                let next = resolve_linetype(&attributes.linetype, target);
+                if attributes.linetype != next {
+                    attributes.linetype = next;
+                    attributes_changed = true;
+                }
             }
         }
     }

@@ -42,6 +42,7 @@ mod drawing_transform;
 mod explode;
 mod hatch;
 mod helpers;
+mod match_prop;
 mod mleader;
 mod properties;
 mod stretch;

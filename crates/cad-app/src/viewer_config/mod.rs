@@ -31,6 +31,8 @@ mod store;
 mod tests;
 #[cfg(test)]
 mod tests_display;
+#[cfg(test)]
+mod tests_interaction;
 
 pub use colour::*;
 pub use commands::*;

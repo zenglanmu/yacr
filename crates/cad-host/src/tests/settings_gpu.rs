@@ -28,9 +28,12 @@ fn the_gpu_budget_defaults_to_90_percent() {
 #[test]
 fn the_gpu_budget_key_is_in_the_closed_table() {
     let key = CadSettingKey::GpuBudgetPercent;
+    // Fourteen keys before the three drafting switches (`interaction.
+    // gridSnapEnabled`/`orthoEnabled`/`snapSpacing`) joined the table; the count
+    // is asserted deliberately so a new key is never added by accident.
     assert_eq!(
         CadSettingKey::ALL.len(),
-        14,
+        17,
         "one writable key per contract"
     );
     assert_eq!(

@@ -1,6 +1,6 @@
 //! Typed settings wire surface for the Options dialog.
 //!
-//! The session exposes the same closed fourteen-key surface the host persists; it
+//! The session exposes the same closed seventeen-key surface the host persists; it
 //! adds no second validation and no raw-JSON entry point. A UI writes one typed
 //! key/value pair, the host validates it against the closed table, persists the
 //! matching preference leaf and applies it to the live scene/session.
@@ -19,11 +19,12 @@ pub use cad_host::{
 ///
 /// A flat camelCase wire object (like the status/session types). `fontsDir` is
 /// read-only display data sourced from the host's `--fonts-dir`; the other
-/// fourteen fields correspond one-to-one with [`CadSettingKey`], the two
+/// seventeen fields correspond one-to-one with [`CadSettingKey`], the two
 /// backgrounds as canonical `#rrggbb` strings, the crosshair and the GPU memory
-/// budget as integer percentages, the pickbox/aperture as integer pixel counts
-/// and the graphics backend as one of `auto`/`vulkan`/`dx12`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// budget as integer percentages, the pickbox/aperture as integer pixel counts,
+/// the snap spacing as a real number of drawing units and the graphics backend as
+/// one of `auto`/`vulkan`/`dx12`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadSettings {
     pub grid: bool,
@@ -34,6 +35,14 @@ pub struct CadSettings {
     pub plot_format: String,
     pub snap_enabled: bool,
     pub hover_preview: bool,
+    /// `SNAP` (grid snap, F9) session switch, persisted as
+    /// `interaction.gridSnapEnabled`.
+    pub grid_snap_enabled: bool,
+    /// `ORTHO` (F8) session switch, persisted as `interaction.orthoEnabled`.
+    pub ortho_enabled: bool,
+    /// `SNAPUNIT` session spacing in drawing units, persisted as
+    /// `interaction.snapSpacing`. Finite and strictly positive.
+    pub snap_spacing: f64,
     /// Model-space canvas background, canonical lower-case `#rrggbb`.
     pub background_model: String,
     /// Paper-space canvas background, canonical lower-case `#rrggbb`.
@@ -71,6 +80,9 @@ impl From<HostSettings> for CadSettings {
             plot_format: value.plot_format,
             snap_enabled: value.snap_enabled,
             hover_preview: value.hover_preview,
+            grid_snap_enabled: value.grid_snap_enabled,
+            ortho_enabled: value.ortho_enabled,
+            snap_spacing: value.snap_spacing,
             background_model: value.background_model,
             background_paper: value.background_paper,
             crosshair_percent: value.crosshair_percent,

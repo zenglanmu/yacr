@@ -3,10 +3,12 @@
 //! Only the settings this host actually honours are representable: the four
 //! `view.overlays.*` leaves drawn by the render path, the model/paper canvas
 //! backgrounds and the crosshair size those frames really use, the
-//! `ui.export.plotFormat` default, the two session interaction switches, the
-//! renderer backend preference (`wgpu_backend`, read by the next presenter
-//! construction), the GPU memory budget percentage the renderer lane reads
-//! (`view.gpuBudget.percent`) and the read-only `--fonts-dir` display value.
+//! `ui.export.plotFormat` default, the five persisted session interaction
+//! values (object snap, hover preview, `SNAP` grid snap, `ORTHO` and the
+//! `SNAPUNIT` spacing), the renderer backend preference (`wgpu_backend`, read by
+//! the next presenter construction), the GPU memory budget percentage the
+//! renderer lane reads (`view.gpuBudget.percent`) and the read-only `--fonts-dir`
+//! display value.
 //! Every write goes through the same validated store/persistence path as
 //! [`HostCore::apply_user_preference_json`] — the backend leaf is merged into the
 //! same durable preference document, see [`merge_wgpu_backend_into_preference`];
@@ -137,6 +139,12 @@ pub enum CadSettingKey {
     PlotFormat,
     SnapEnabled,
     HoverPreview,
+    /// `SNAP` grid-snap session switch (`interaction.gridSnapEnabled`).
+    GridSnapEnabled,
+    /// `ORTHO` drafting-constraint session switch (`interaction.orthoEnabled`).
+    OrthoEnabled,
+    /// `SNAPUNIT` session spacing in drawing units (`interaction.snapSpacing`).
+    SnapSpacing,
     BackgroundModel,
     BackgroundPaper,
     CrosshairSize,
@@ -151,7 +159,7 @@ pub enum CadSettingKey {
 
 impl CadSettingKey {
     /// Every writable key, in a stable order.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 17] = [
         Self::Grid,
         Self::Axes,
         Self::SelectionHighlight,
@@ -159,6 +167,9 @@ impl CadSettingKey {
         Self::PlotFormat,
         Self::SnapEnabled,
         Self::HoverPreview,
+        Self::GridSnapEnabled,
+        Self::OrthoEnabled,
+        Self::SnapSpacing,
         Self::BackgroundModel,
         Self::BackgroundPaper,
         Self::CrosshairSize,
@@ -184,6 +195,9 @@ impl CadSettingKey {
             Self::PlotFormat => "plotFormat",
             Self::SnapEnabled => "snapEnabled",
             Self::HoverPreview => "hoverPreview",
+            Self::GridSnapEnabled => "gridSnapEnabled",
+            Self::OrthoEnabled => "orthoEnabled",
+            Self::SnapSpacing => "snapSpacing",
             Self::BackgroundModel => "backgroundModel",
             Self::BackgroundPaper => "backgroundPaper",
             Self::CrosshairSize => "crosshairSize",
@@ -211,7 +225,10 @@ impl CadSettingKey {
     /// integer percentage in `1..=100`, `pickboxSize` an integer pixel count in
     /// `1..=20`, `apertureSize` an integer pixel count in `1..=50` and
     /// `gpuBudgetPercent` an integer percentage of the graphics card's memory in
-    /// `10..=100` (all four rejected, never clamped), and every switch is a
+    /// `10..=100` (all four rejected, never clamped), `snapSpacing` a finite
+    /// spacing greater than zero drawing units (an integer or a real; `0`,
+    /// negative, non-finite and a wrong shape are rejected, never defaulted), and
+    /// every switch (including `gridSnapEnabled` and `orthoEnabled`) is a
     /// boolean.
     pub fn validate(self, value: &CadSettingValue) -> Result<(), &'static str> {
         match self {
@@ -224,9 +241,20 @@ impl CadSettingKey {
             Self::PlotFormat => match value {
                 CadSettingValue::Text(format) if format == "svg" || format == "pdf" => Ok(()),
                 CadSettingValue::Text(_) => Err(SETTINGS_INVALID_PLOT_FORMAT),
-                CadSettingValue::Bool(_) | CadSettingValue::Number(_) => {
-                    Err(SETTINGS_INVALID_VALUE)
+                CadSettingValue::Bool(_)
+                | CadSettingValue::Number(_)
+                | CadSettingValue::Real(_) => Err(SETTINGS_INVALID_VALUE),
+            },
+            // The `SNAPUNIT` spacing: finite and strictly positive, the same rule
+            // the session setter and the config validator enforce. An integer
+            // wire number and a fractional one are both accepted, and neither is
+            // silently clamped or truncated.
+            Self::SnapSpacing => match value {
+                CadSettingValue::Number(spacing) if *spacing > 0 => Ok(()),
+                CadSettingValue::Real(spacing) if cad_app::snap_spacing_is_valid(*spacing) => {
+                    Ok(())
                 }
+                _ => Err(SETTINGS_INVALID_VALUE),
             },
             Self::BackgroundModel | Self::BackgroundPaper => match value {
                 CadSettingValue::Text(text) if HexColor::parse(text).is_some() => Ok(()),
@@ -270,23 +298,30 @@ impl CadSettingKey {
             | Self::SelectionHighlight
             | Self::SnapHints
             | Self::SnapEnabled
-            | Self::HoverPreview => match value {
+            | Self::HoverPreview
+            | Self::GridSnapEnabled
+            | Self::OrthoEnabled => match value {
                 CadSettingValue::Bool(_) => Ok(()),
-                CadSettingValue::Text(_) | CadSettingValue::Number(_) => {
-                    Err(SETTINGS_INVALID_VALUE)
-                }
+                CadSettingValue::Text(_)
+                | CadSettingValue::Number(_)
+                | CadSettingValue::Real(_) => Err(SETTINGS_INVALID_VALUE),
             },
         }
     }
 }
 
-/// A typed setting value: the wire surface carries one boolean, one string or one
-/// non-negative integer (a percentage or a pixel count).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A typed setting value: the wire surface carries one boolean, one string, one
+/// non-negative integer (a percentage or a pixel count) or one real.
+#[derive(Debug, Clone, PartialEq)]
 pub enum CadSettingValue {
     Bool(bool),
     Text(String),
     Number(u32),
+    /// A real quantity: the [`CadSettingKey::SnapSpacing`] `SNAPUNIT` spacing in
+    /// drawing units. Deliberately a separate shape from [`Self::Number`] so an
+    /// integer-only leaf can never receive `90.5` and the spacing can carry
+    /// `2.5`; the key table decides which of the two a key accepts.
+    Real(f64),
 }
 
 /// The effective settings an Options dialog reads.
@@ -294,7 +329,7 @@ pub enum CadSettingValue {
 /// Derived from the effective config (defaults, then `config.json`, then the
 /// host-allowed `preference.json`) plus the live session state. `fonts_dir` is
 /// read-only display data from [`HostOptions`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HostSettings {
     pub grid: bool,
     pub axes: bool,
@@ -303,6 +338,13 @@ pub struct HostSettings {
     pub plot_format: String,
     pub snap_enabled: bool,
     pub hover_preview: bool,
+    /// `SNAP` (grid snap, F9) session switch. `false` until the user turns it on.
+    pub grid_snap_enabled: bool,
+    /// `ORTHO` (F8) drafting-constraint session switch.
+    pub ortho_enabled: bool,
+    /// `SNAPUNIT` session spacing in drawing units
+    /// ([`cad_app::DEFAULT_SNAP_SPACING`] until the user sets one).
+    pub snap_spacing: f64,
     /// Canonical lower-case `#rrggbb` of the model-space background.
     pub background_model: String,
     /// Canonical lower-case `#rrggbb` of the paper-space background.
@@ -357,11 +399,14 @@ impl HostCore {
                 effective.view.gpu_budget.percent,
             )
         };
-        let (snap_enabled, hover_preview) = {
+        let (snap_enabled, hover_preview, grid_snap_enabled, ortho_enabled, snap_spacing) = {
             let controller = self.controller.borrow();
             (
                 controller.snap_enabled(),
                 controller.hover_preview_enabled(),
+                controller.snap_grid_enabled(),
+                controller.ortho_enabled(),
+                controller.snap_spacing(),
             )
         };
         HostSettings {
@@ -372,6 +417,9 @@ impl HostCore {
             plot_format,
             snap_enabled,
             hover_preview,
+            grid_snap_enabled,
+            ortho_enabled,
+            snap_spacing,
             background_model,
             background_paper,
             crosshair_percent,
@@ -421,6 +469,10 @@ impl HostCore {
             CadSettingKey::PlotFormat => self.apply_plot_format(&value),
             CadSettingKey::SnapEnabled => self.apply_session_switch(key, &value),
             CadSettingKey::HoverPreview => self.apply_session_switch(key, &value),
+            CadSettingKey::GridSnapEnabled | CadSettingKey::OrthoEnabled => {
+                self.apply_drafting_switch(key, &value)
+            }
+            CadSettingKey::SnapSpacing => self.apply_snap_spacing(&value),
             CadSettingKey::BackgroundModel => self.apply_background_preference("model", &value),
             CadSettingKey::BackgroundPaper => self.apply_background_preference("paper", &value),
             CadSettingKey::CrosshairSize => self.apply_crosshair_size(&value),
@@ -568,19 +620,87 @@ impl HostCore {
         Ok(())
     }
 
-    /// Apply the persisted interaction defaults to the live session.
+    /// Persist a drafting-session switch (`SNAP` grid snap or `ORTHO`) and drive
+    /// the existing session toggle when the live value differs.
+    ///
+    /// The toggle is the same `CommandId` path the F9/`F8` selectors and the
+    /// typed `SNAP`/`ORTHO` lines use (never a second implementation), and it is
+    /// dispatched **only** when the live value really differs: a write that
+    /// matches the current state is a pure preference write, so it cannot flip the
+    /// switch back and cannot stage anything.
+    fn apply_drafting_switch(&self, key: CadSettingKey, value: &CadSettingValue) -> CadResult<()> {
+        let CadSettingValue::Bool(enabled) = value else {
+            return Err(CadError::InvalidInput(SETTINGS_INVALID_VALUE.into()));
+        };
+        let (leaf, command) = match key {
+            CadSettingKey::GridSnapEnabled => ("gridSnapEnabled", CommandId::ToggleSnapGrid),
+            CadSettingKey::OrthoEnabled => ("orthoEnabled", CommandId::ToggleOrtho),
+            _ => return Err(CadError::InvalidInput(SETTINGS_INVALID_VALUE.into())),
+        };
+        self.apply_user_preference_json(&format!(r#"{{"interaction":{{"{leaf}":{enabled}}}}}"#))?;
+        let current = match key {
+            CadSettingKey::GridSnapEnabled => self.controller.borrow().snap_grid_enabled(),
+            _ => self.controller.borrow().ortho_enabled(),
+        };
+        if current != *enabled {
+            self.command(command, CommandPayload::None)?;
+        }
+        Ok(())
+    }
+
+    /// Persist `interaction.snapSpacing` and apply it through the typed
+    /// `SNAPUNIT` command path when the live spacing differs.
+    ///
+    /// The key table has already refused a non-finite or non-positive spacing, so
+    /// the number written here is exactly the value the schema validates back. The
+    /// live application reuses [`CommandId::SetSnapSpacing`], whose payload is
+    /// validated by the session again; a spacing that already matches is not
+    /// re-dispatched.
+    fn apply_snap_spacing(&self, value: &CadSettingValue) -> CadResult<()> {
+        let spacing = match value {
+            CadSettingValue::Real(spacing) => *spacing,
+            CadSettingValue::Number(spacing) => f64::from(*spacing),
+            _ => return Err(CadError::InvalidInput(SETTINGS_INVALID_VALUE.into())),
+        };
+        if !cad_app::snap_spacing_is_valid(spacing) {
+            return Err(CadError::InvalidInput(SETTINGS_INVALID_VALUE.into()));
+        }
+        self.apply_user_preference_json(&format!(
+            r#"{{"interaction":{{"snapSpacing":{spacing}}}}}"#
+        ))?;
+        if self.controller.borrow().snap_spacing() != spacing {
+            self.command(
+                CommandId::SetSnapSpacing,
+                CommandPayload::SnapSpacing(spacing),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Apply the persisted interaction values to the live session.
     ///
     /// Called after startup config load and after every authoritative document
-    /// replacement (a replacement rebuilds `SessionState`, which would
-    /// otherwise reset the two switches to their defaults). `None` means "the
+    /// replacement (a replacement rebuilds `SessionState`, which would otherwise
+    /// reset the switches and the spacing to their defaults). `None` means "the
     /// user never chose", so the session default is left untouched.
     pub(crate) fn seed_session_interaction(&self) {
-        let (snap_enabled, hover_preview) = {
+        let (snap_enabled, hover_preview, grid_snap_enabled, ortho_enabled, snap_spacing) = {
             let store = self.viewer_config.borrow();
             let interaction = &store.effective().interaction;
-            (interaction.snap_enabled, interaction.hover_preview)
+            (
+                interaction.snap_enabled,
+                interaction.hover_preview,
+                interaction.grid_snap_enabled,
+                interaction.ortho_enabled,
+                interaction.snap_spacing,
+            )
         };
-        if snap_enabled.is_none() && hover_preview.is_none() {
+        if snap_enabled.is_none()
+            && hover_preview.is_none()
+            && grid_snap_enabled.is_none()
+            && ortho_enabled.is_none()
+            && snap_spacing.is_none()
+        {
             return;
         }
         let mut controller = self.controller.borrow_mut();
@@ -589,6 +709,22 @@ impl HostCore {
         }
         if let Some(enabled) = hover_preview {
             controller.session.set_hover_preview(enabled);
+        }
+        if let Some(enabled) = grid_snap_enabled {
+            controller.session.set_snap_grid_enabled(enabled);
+        }
+        if let Some(enabled) = ortho_enabled {
+            controller.session.set_ortho_enabled(enabled);
+        }
+        if let Some(spacing) = snap_spacing {
+            // The effective config is validated (`interaction.snapSpacing` must be
+            // finite and > 0), so the session setter cannot refuse it; a refusal
+            // here would be a validator bug, not a value to silently replace with
+            // the default.
+            controller
+                .session
+                .set_snap_spacing(spacing)
+                .expect("a validated interaction.snapSpacing cannot be refused");
         }
     }
 

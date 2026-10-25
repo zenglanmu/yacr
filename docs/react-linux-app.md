@@ -112,6 +112,24 @@ Vulkan-only；`dx12` 在 Linux **显式失败**（`ProbeError::UnsupportedBacken
 所以启动时先把它从偏好文档剥离再做 allowed-path 校验、并在每次偏好写入时合并回顶层，写入后
 **下次 presenter 构造**才生效（无热切换后端）。
 
+**持久化的交互开关（5 个 `interaction.*` 叶子）**：`preference.json` 的 `interaction.snapEnabled`
+（对象捕捉）、`interaction.hoverPreview`（悬停预览）、`interaction.gridSnapEnabled`（**`SNAP`** 栅格捕捉）、
+`interaction.orthoEnabled`（**`ORTHO`**）与 `interaction.snapSpacing`（**`SNAPUNIT`** 间距，图形单位实数）
+走**同一条** allowed-path 偏好路径（`HostCore::apply_user_preference_json` → 同一 `ViewerConfigStore`），
+没有第二条设置通道。叶子缺失/`null` = 用户从未选择，会话保持自身默认（对象捕捉/悬停预览**开**，
+`SNAP`/`ORTHO` **关**，间距 **10.0**）；显式的 `false` 与间距值必须跨重启保留。
+`HostCore::seed_session_interaction` 在**启动**与**每次权威文档替换（open/new）**后把这五个值重新
+施加到重建的 `SessionState`（同一调用点，不是新增入口）。活值应用仍走既有 typed 命令路径：
+开关只在活值不同时派发 `ToggleSnapGrid`/`ToggleOrtho`（值已相同是纯偏好写入，不翻转、不建历史），
+间距只不同时派发 `SetSnapSpacing`；`0`、负数、非有限间距是 `settings.invalid_value` 显式拒绝，
+绝不静默回落到默认值。
+
+`cad_settings` 快照的对应字段是 `snapEnabled`、`hoverPreview`、`gridSnapEnabled`、`orthoEnabled`、
+`snapSpacing`（**实数**，非整数百分比）；`cad_set_setting` 用同一组键写入。注意：当前
+`cad_set_setting` 的 JSON 解析只把**非负整数**映射为 `CadSettingValue::Number`，**小数**间距
+（如 `2.5`）需要解析层同时产出 `CadSettingValue::Real`（见 `crates/cad-desktop-shell`）；在此之前
+小数写入会被显式拒绝为 `settings.invalid_value`（不是静默取整），整数间距（如 `25`）已可用。
+
 **窗口默认（最大化，非全屏）**：Linux 宿主默认以**最大化窗口**启动，该策略是窗口管理器**最大化**，
 **保留标题栏/系统面板**，**不是**全屏/无边框 kiosk。源码依据：`apps/app-linux/src/host.rs` 的
 `start_maximized(..)` 默认返回 `true`（`!no_maximize_env_present`），`WindowBuilder::maximized(maximize)`

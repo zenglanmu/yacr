@@ -343,6 +343,7 @@ impl Application {
             | CommandId::OffsetEntity
             | CommandId::SetActiveLayer
             | CommandId::SetEntityProperty
+            | CommandId::MatchProp
             | CommandId::CreateText
             | CommandId::MLeader
             | CommandId::TextEdit => {

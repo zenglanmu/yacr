@@ -33,9 +33,9 @@ fn cad_command_aliases_reports_the_autocad_abbreviations_and_canonical_targets()
     // The word synonyms that predate the abbreviation block are published too:
     // the answer is the whole `COMMAND_ALIASES` table, not just the new rows.
     assert_eq!(by_alias("EXPORT"), Some("PLOT"));
-    // `MA` is AutoCAD's MATCHPROP abbreviation; MATCHPROP is not implemented, so
-    // the alias must stay unpublished rather than invent a command.
-    assert_eq!(by_alias("MA"), None);
+    // `MA` is AutoCAD's MATCHPROP abbreviation, published only because MATCHPROP
+    // itself is now an admitted command: the alias table never invents a target.
+    assert_eq!(by_alias("MA"), Some("MATCHPROP"));
 
     let admitted = admissible_names();
     for entry in &aliases {

@@ -1,3 +1,41 @@
+## 2026-10-25（续 3）MATCHPROP / drafting 开关持久化 / 小数间距 IPC
+
+### 结论
+
+1. **`MATCHPROP`（别名 `MA`）**：**选择序语义**（当前选择的第一个实体是源，其余是目标；不按 id 排序）
+   ——交互式"先选源再刷目标 + 画刷光标"**未实现**，需要新的 draw-tool kind，已显式记录。转移集合 =
+   `SETENTITYPROPERTY` 可写的五个显示属性：`layer`/`color`/`linetype`/`lineweight`/`transparency`，
+   共用同一套属性语法与 applicator（不复制第二份解析）；**不转移**：MATCHPROP 的 Settings 子集、
+   文本样式/字高、标注样式、填充图案、目标自身的线型比例。一次事务、一条撤销；全部已一致时为
+   **显式 no-op**（无事务/无撤销项）；拒绝全部发生在写入前（源/目标不可直接寻址、值对目标非法）。
+2. **drafting 开关持久化**：`SNAP`/`ORTHO`/`SNAPUNIT` 三个值接入**既有** `interaction.*` 偏好
+   （`interaction.gridSnapEnabled`/`orthoEnabled`/`snapSpacing`），沿用 `apply_user_preference_json`
+   与 `seed_session_interaction` 的**同一**调用点：启动与每次权威文档替换都会重新播种；值相同不触发
+   toggle（不产生历史）。配置校验拒绝非有限/`<= 0` 的间距（不裁剪）。设置面 14 → **17** 键，
+   `cad_settings` 快照 15 → **18** 字段（新增 `gridSnapEnabled`/`orthoEnabled`/`snapSpacing`）。
+3. **小数间距 IPC 收口**：`crates/cad-desktop-shell` 的 JSON→`CadSettingValue` 翻译原先只接受非负整数，
+   `snapSpacing: 2.5` 会被拒；现在非整数映射为 `Real(f64)`（非有限拒绝），整数路径与既有拒绝语义不变，
+   形状权威仍在 `CadSettingKey::validate`。`command_aliases` 测试同步到真实别名表（`MA → MATCHPROP`）。
+
+### 已运行证据（本机，2026-10-25）
+
+- `cargo test -p cad-app --lib` **888**、`cad-host --lib` **217**、`cad-ui-core --lib` **258**、
+  `cad-desktop-shell`（lib 11 + command_aliases 3 + layer_commands 5 + setting_commands 7 +
+  wire_goldens 4 = **19 项 test result: ok**）、`app-linux --lib` **172**，全部 0 failed。
+- `cargo clippy -p cad-app -p cad-host -p cad-ui-core -p cad-desktop-shell -p app-linux
+  --all-targets --locked -- -D warnings` → 0；`cargo fmt --all -- --check` → 0。
+- `cargo check --workspace --all-targets --locked` → 0。
+- `check-{architecture,fixture-manifest,workflows,file-size}.py` → 全 0。
+
+### NOT RUN / 边界
+
+- **无 GUI/GPU/像素证据**；`MATCHPROP` 只有命令层契约测试，属性面板/画刷交互未做。
+- `MATCHPROP` 只出现在准入词表，**未**加入 chrome 的命令补全静态目录/功能区（需要新 i18n 文案与图标）。
+- `HostSettings`/`CadSettings` 因携带 `f64` 不再派生 `Eq`（保留 `PartialEq`）。
+- 交互式 MATCHPROP（选源→选目标、画刷光标、Settings 子集）**NOT IMPLEMENTED**；本仓库无 AutoCAD 结果对照。
+
+---
+
 ## 2026-10-25（续 2）世界坐标读数 / SPLINE 边界 / ZOOM 参数 / SNAP 栅格捕捉
 
 ### 结论

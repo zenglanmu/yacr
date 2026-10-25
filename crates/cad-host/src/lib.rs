@@ -89,9 +89,10 @@ pub use fonts::{HostResources, UnsupportedResources};
 
 /// Host policy mirroring the web host: users may persist the two dock panels'
 /// initial-open flags and the Options-dialog settings that have real behavioural
-/// backing (overlay visibility, the plot default, the two interaction switches,
-/// the model/paper backgrounds, the crosshair size and the pickbox/aperture
-/// sizes). A host `config.json` replaces this policy wholesale.
+/// backing (overlay visibility, the plot default, the five persisted interaction
+/// values — object snap, hover preview, `SNAP` grid snap, `ORTHO` and the
+/// `SNAPUNIT` spacing —, the model/paper backgrounds, the crosshair size and the
+/// pickbox/aperture sizes). A host `config.json` replaces this policy wholesale.
 ///
 /// The settings leaves are listed individually (never a `view.overlays` prefix)
 /// so no other configuration field becomes user-writable by inheritance.
@@ -110,7 +111,10 @@ pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowe
     "view.gpuBudget.percent",
     "ui.export.plotFormat",
     "interaction.snapEnabled",
-    "interaction.hoverPreview"
+    "interaction.hoverPreview",
+    "interaction.gridSnapEnabled",
+    "interaction.orthoEnabled",
+    "interaction.snapSpacing"
 ]}}}"#;
 
 /// A user-facing rendering of a command error.

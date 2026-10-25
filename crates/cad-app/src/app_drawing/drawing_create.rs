@@ -51,6 +51,7 @@ impl Application {
             CommandId::OffsetEntity => self.offset_entity(command),
             CommandId::SetActiveLayer => self.set_active_layer(session, command),
             CommandId::SetEntityProperty => self.set_entity_property(session, command),
+            CommandId::MatchProp => self.match_prop(session, command),
             _ => Err(CadError::InvalidInput(
                 "not a drawing/edit command".to_string(),
             )),

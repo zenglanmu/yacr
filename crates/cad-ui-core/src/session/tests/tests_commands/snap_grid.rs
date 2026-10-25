@@ -22,7 +22,10 @@ fn snap_selector_toggles_the_projected_grid_snap_flag_only() {
         let c = session.core.controller.borrow();
         (c.document_id, c.drawing().unwrap())
     };
-    let settings_before = session.settings();
+    // A preference write would change the effective config's interaction leaves;
+    // the settings snapshot also projects live session state, so it cannot stand
+    // in for "nothing was persisted".
+    let interaction_before = session.core.config_snapshot().effective.interaction;
     let status = session.snapshot(None, None, 0);
     assert!(
         !status.snap_grid_enabled,
@@ -57,7 +60,11 @@ fn snap_selector_toggles_the_projected_grid_snap_flag_only() {
         assert!(!c.application.can_undo(&document));
         assert!(!c.application.can_redo(&document));
     }
-    assert_eq!(session.settings(), settings_before);
+    assert_eq!(
+        session.core.config_snapshot().effective.interaction,
+        interaction_before,
+        "SNAP is session state; the selector writes no persisted preference"
+    );
     assert!(!session.settings().grid);
     // Neither selector needs Work mode: both are Viewer-safe session state.
     assert!(!CommandId::ToggleSnapGrid.requires_work_mode());
@@ -71,7 +78,7 @@ fn snapunit_sets_the_projected_spacing_and_stays_session_state() {
         let c = session.core.controller.borrow();
         (c.document_id, c.drawing().unwrap())
     };
-    let settings_before = session.settings();
+    let interaction_before = session.core.config_snapshot().effective.interaction;
 
     for (typed, expected) in [
         ("SNAPUNIT 25", 25.0),
@@ -108,7 +115,11 @@ fn snapunit_sets_the_projected_spacing_and_stays_session_state() {
         assert!(!c.application.can_undo(&document));
         assert!(!c.application.can_redo(&document));
     }
-    assert_eq!(session.settings(), settings_before);
+    assert_eq!(
+        session.core.config_snapshot().effective.interaction,
+        interaction_before,
+        "SNAPUNIT is session state; the typed line writes no persisted preference"
+    );
 }
 
 #[test]

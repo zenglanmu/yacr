@@ -136,11 +136,13 @@ fn the_shipped_table_covers_the_implemented_autocad_abbreviations() {
             "{alias}"
         );
     }
-    // `MA` is AutoCAD's MATCHPROP abbreviation, and MATCHPROP is not implemented
-    // here: the abbreviation stays unknown rather than inventing a command.
-    assert_eq!(alias_target("MA"), None);
-    assert_eq!(canonical_command_name("MA"), None);
-    assert_eq!(normalize_command("MA"), None);
+    // `MA` is AutoCAD's MATCHPROP abbreviation. MATCHPROP is implemented here as
+    // the selection-based property painter, so the abbreviation now resolves onto
+    // it like every other implemented-command row (it was rejected while the
+    // command itself was absent).
+    assert_eq!(alias_target("MA"), Some("MATCHPROP"));
+    assert_eq!(canonical_command_name("MA"), Some("MATCHPROP"));
+    assert_eq!(normalize_command("MA"), Some(CommandId::MatchProp));
     // The pre-existing word synonyms stay in the same table.
     for (alias, target) in [
         ("EXPORT", "PLOT"),

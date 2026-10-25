@@ -398,10 +398,17 @@ impl ViewConfig {
 
 /// Interaction defaults the Options dialog may persist.
 ///
-/// The two optional fields are nullable on purpose: `None` means "no user
+/// The optional fields are nullable on purpose: `None` means "no user
 /// preference", so a host that never configured them keeps the live session's
-/// own default (`SessionState` starts snap/hover preview enabled). A persisted
-/// `false` is an explicit user choice and must survive a restart.
+/// own default (`SessionState` starts object snap/hover preview enabled, grid
+/// snap and ortho disabled, and the snap spacing at
+/// [`crate::snap::DEFAULT_SNAP_SPACING`]). A persisted `false` is an explicit
+/// user choice and must survive a restart, and so is a persisted spacing.
+///
+/// `snapSpacing` is the `SNAPUNIT` session spacing in drawing units; `None`
+/// leaves the session default. A persisted value must be finite and strictly
+/// positive ([`crate::snap::snap_spacing_is_valid`]); an invalid one is rejected
+/// by [`ViewerConfig::validate`], never clamped.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct InteractionConfig {
@@ -410,6 +417,14 @@ pub struct InteractionConfig {
     pub keyboard_shortcuts: bool,
     pub snap_enabled: Option<bool>,
     pub hover_preview: Option<bool>,
+    /// `SNAP` (grid snap, F9) session switch; `None` keeps the session default
+    /// (`off`).
+    pub grid_snap_enabled: Option<bool>,
+    /// `ORTHO` (F8) session switch; `None` keeps the session default (`off`).
+    pub ortho_enabled: Option<bool>,
+    /// `SNAPUNIT` session spacing in drawing units; `None` keeps the session
+    /// default ([`crate::snap::DEFAULT_SNAP_SPACING`]).
+    pub snap_spacing: Option<f64>,
 }
 impl Default for InteractionConfig {
     fn default() -> Self {
@@ -419,6 +434,9 @@ impl Default for InteractionConfig {
             keyboard_shortcuts: true,
             snap_enabled: None,
             hover_preview: None,
+            grid_snap_enabled: None,
+            ortho_enabled: None,
+            snap_spacing: None,
         }
     }
 }

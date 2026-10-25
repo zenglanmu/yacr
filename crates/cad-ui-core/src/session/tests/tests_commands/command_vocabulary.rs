@@ -90,6 +90,7 @@ command_selector_contract! {
     OffsetEntity => "OFFSET",
     SetActiveLayer => "SETACTIVELAYER",
     SetEntityProperty => "SETENTITYPROPERTY",
+    MatchProp => "MATCHPROP",
     ToggleHoverPreview => "HOVERPREVIEW",
     ToggleGrid => "GRID",
     ToggleSnapGrid => "SNAP",
@@ -110,7 +111,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 78,
+        EXPECTED_COMMAND_COUNT, 79,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -275,7 +276,10 @@ fn ortho_selector_toggles_the_projected_drafting_flag_only() {
         !session.snapshot(None, None, 0).ortho_enabled,
         "ORTHO defaults off (AutoCAD's initial state) and is projected"
     );
-    let settings_before = session.settings();
+    // The effective config's interaction leaves are what a preference write would
+    // change; the settings snapshot also projects live session state, so it can no
+    // longer stand in for "nothing was persisted".
+    let interaction_before = session.core.config_snapshot().effective.interaction;
 
     // The canonical selector flips the session flag. `SNAP` is AutoCAD's grid
     // snap (F9), a different feature with its own selector, so it must NOT be
@@ -312,14 +316,35 @@ fn ortho_selector_toggles_the_projected_drafting_flag_only() {
         assert!(!c.application.can_redo(&document));
     }
     assert_eq!(
-        session.settings(),
-        settings_before,
-        "ORTHO is session state; no persisted preference is written"
+        session.core.config_snapshot().effective.interaction,
+        interaction_before,
+        "ORTHO is session state; the selector writes no persisted preference"
     );
 
     // ...and it toggles back off with the same selector.
     session.command("ortho").expect("ORTHO is case-insensitive");
     assert!(!session.snapshot(None, None, 0).ortho_enabled);
+}
+
+#[test]
+fn matchprop_is_admitted_with_its_autocad_alias() {
+    // MATCHPROP is the selection-based property painter: the bare selector is
+    // its whole input (`CommandPayload::None`), so it is admitted like any other
+    // name-only command and advertised through `admissible_names()` — the list
+    // the chrome reads instead of a hand-written mirror.
+    assert_eq!(normalize_command("MATCHPROP"), Some(CommandId::MatchProp));
+    assert_eq!(canonical_command_name("matchprop"), Some("MATCHPROP"));
+    // AutoCAD's default abbreviation resolves onto the same `CommandId`.
+    assert_eq!(normalize_command("MA"), Some(CommandId::MatchProp));
+    assert_eq!(canonical_command_name(" ma "), Some("MATCHPROP"));
+    assert!(admissible_names().contains(&"MATCHPROP"));
+    assert!(admissible_names().contains(&"MA"));
+    // It is neither a measurement selector nor a zoom step, so no earlier lookup
+    // table can shadow it.
+    assert_eq!(measurement_selector_kind("MATCHPROP"), None);
+    assert_eq!(zoom_step_factor("MATCHPROP"), None);
+    // Work-only like the other edits: Viewer refuses it at the command layer.
+    assert!(CommandId::MatchProp.requires_work_mode());
 }
 
 #[test]

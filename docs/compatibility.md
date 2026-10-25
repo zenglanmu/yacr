@@ -198,12 +198,19 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 | MIRROR | 镜像（**保留原件**，新增副本） | 反射下 Arc/Ellipse 参数化会反向 → 显式 `Unsupported` |
 | OFFSET | LINE / CIRCLE 偏移 | 其余几何 `Unsupported`；点在线上/过圆心/在圆上显式拒绝 |
 | COPYCLIP/CUTCLIP/PASTECLIP | **应用内**剪贴板 | 非 OS 剪贴板；替换文档清空；空选择/空剪贴板拒绝 |
+| MATCHPROP（别名 `MA`） | **选择式**特性匹配（AutoCAD 特性刷的文档化变体）：当前选择按**选择顺序**（用户的拾取顺序，**从不**按 id/handle 重排）取**第一个**实体为**源**，其余每个选中实体为**目标**。转移的属性**恰好**是属性写路径支持的五项显示属性：`layer`、`color`、`linetype`、`lineweight`、`transparency`（语法与 `SETENTITYPROPERTY` 同一份，不复制第二套解析）。源/目标**类型可以不同**（只要每个值对目标合法）。目标已与源一致 ⇒ 该目标不产生变更、不进撤销补丁；全部目标都一致 ⇒ 显式 `matchprop.unchanged` 完成，**不**开事务、**不**产生空撤销步；否则一条事务、一步撤销 | **开始改写前**全部拒绝（零 DB 变更、零撤销步）：选择少于两个实体（`matchprop.needs_two`）；源**或**目标引用是块实例成员（instance path）/子图元/属于其它文档/不存在（`property.not_addressable`/`property.target_missing`，与属性写路径同一规则）；源值的存储形式无法用写语法表达、或语法拒绝该值（如 `ByBlock` 透明度、无名显式线型）⇒ `matchprop.source_value`，**点名**源实体与属性并保留解析器自己的 `property.*` 码。**明确不转移**（绝不静默近似）：MATCHPROP 的 **Settings 子集**（选择“复制哪些属性”）未实现（总是转移全部五项）；非显示属性——文字样式/字高、标注样式、填充图案等一律**不**转移；实体自身的**线型比例**不在五项之内，给名线型目标只在目标上保留**目标自己的**比例（与属性写路径一致），符号值（`ByLayer`/`ByBlock`）整值替换 |
 
 - 变换/偏移的**不支持几何**（`Spline`/`Shape`/`Opaque`/`Compound`；`MIRROR` 下的 `Arc`/`Ellipse`；**以及 `MultiLeader`——拒绝一切缩放**）返回显式
   （**更正**：`Text` 自 P7a 起**可**平移/旋转/均匀缩放，**不在**此列表；仅镜像与非均匀缩放拒绝。）
   `Unsupported`；退化/无交点等 plan 级失败返回 `InvalidInput`。二者都不创建或部分修改实体。
 - 命令行、别名、固定键位与补全行为的完整参考见 **`docs/shortcuts.md`**；`Ctrl+C/X/V` 仅为应用内
   剪贴板，不读写操作系统剪贴板。
+- **MATCHPROP 的顺序规则（契约）**：选择集合的顺序就是输入——`SelectionSet` 保留用户拾取顺序
+  （`crates/cad-app/src/selection.rs`，重复对象按首次出现去重），命令取 `refs()[0]` 为源、其后为
+  目标，**不按 id/handle 排序**。因此同一拾取序列总是同一个源；想换源就换选择顺序。
+  AutoCAD 的**交互式**流程（先选源、再逐个选目标并显示“特性刷”光标）**未实现**——它需要新的
+  draw-tool 类型与绘制光标，本项只实现选择式变体。命令无 payload（`CommandPayload::None`），
+  选择在应用时从会话读取。
 - **导出**：`SAVE` 为**有损 DXF 另存**（`Partial`，逐条记录转换/丢弃，**非** DWG 往返保存）；
   `PLOT` 为矢量 SVG/PDF。真实图纸上的导出兼容性**未验证**。逐类：LWPOLYLINE（平面的）/ELLIPSE/POINT
   为精确映射；**SPLINE 记为 `Converted`**（`DxfSpline`，几何保留，**closed/periodic 标志不携带**）；
@@ -348,9 +355,11 @@ Distance/Angle/Delta X/Y/Z，点不足两个时只显示距离，`unit:null` 不
 `kind`、`options` 取图纸真实图层/线型表名，上限 256）与**写侧** `SETENTITYPROPERTY`（一次事务/
 一步撤销；`layer`、`color`=ByLayer/ByBlock/`aci:0..=256`/`#RRGGBB`、`linetype`、`lineweight`
 = 规范毫米列表、`transparency`=0..90 百分比→不透明度；非直接可寻址引用拒绝；无变化不产生撤销步）；
-**选项设置** 10 个类型化键（grid/axes/selectionHighlight/snapHints/plotFormat/snapEnabled/
-hoverPreview/backgroundModel/backgroundPaper/crosshairSize），持久化到 `preference.json`、
-**实时生效**并在 open/替换后重新播种；**语言默认**按 `显式选择 > 宿主注入 > navigator > 英文`
+**选项设置** 17 个类型化键（grid/axes/selectionHighlight/snapHints/plotFormat/snapEnabled/
+hoverPreview/gridSnapEnabled/orthoEnabled/snapSpacing/backgroundModel/backgroundPaper/
+crosshairSize/pickboxSize/apertureSize/gpuBudgetPercent/wgpu_backend），持久化到 `preference.json`、
+**实时生效**并在 open/替换后重新播种（五个 `interaction.*` 叶子：对象捕捉、悬停预览、`SNAP`、
+`ORTHO`、`SNAPUNIT` 间距）；**语言默认**按 `显式选择 > 宿主注入 > navigator > 英文`
 （`zh-TW/zh-Hant` 无对应目录 ⇒ **英文**，不静默给简体）；**显示**：模型/图纸背景色 `#rrggbb`
 （sRGB→linear 在配置→渲染器接缝，真机核对 0.5 读回 188、遮罩内部同值）与十字光标 1..100%
 （100% 位级不变），均**即时**生效。

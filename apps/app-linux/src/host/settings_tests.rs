@@ -13,6 +13,9 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
         plot_format: "pdf".to_string(),
         snap_enabled: false,
         hover_preview: true,
+        grid_snap_enabled: false,
+        ortho_enabled: true,
+        snap_spacing: 2.5,
         background_model: "#000000".to_string(),
         background_paper: "#ffffff".to_string(),
         crosshair_percent: 25,
@@ -33,6 +36,9 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
             "plotFormat": "pdf",
             "snapEnabled": false,
             "hoverPreview": true,
+            "gridSnapEnabled": false,
+            "orthoEnabled": true,
+            "snapSpacing": 2.5,
             "backgroundModel": "#000000",
             "backgroundPaper": "#ffffff",
             "crosshairPercent": 25,
@@ -43,8 +49,8 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
             "fontsDir": "/tmp/yacr-fonts",
         })
     );
-    // Exactly the fifteen documented fields; no unrelated Options fields.
-    assert_eq!(wire.as_object().expect("object").len(), 15);
+    // Exactly the eighteen documented fields; no unrelated Options fields.
+    assert_eq!(wire.as_object().expect("object").len(), 18);
     // The backend choice keeps the shared snake_case key on the snapshot wire
     // (`settings.wgpu_backend` in the UI), never camelCased into `wgpuBackend`.
     assert!(

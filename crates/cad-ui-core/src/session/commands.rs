@@ -84,6 +84,10 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // refuses a bare invocation explicitly (the panel/IPC path supplies the
     // `EntityProperty { key, value }` payload).
     ("SETENTITYPROPERTY", CommandId::SetEntityProperty),
+    // MATCHPROP is the **selection-based** property painter: the bare selector is
+    // the whole input (`CommandPayload::None`), because the current selection's
+    // first entity is the source and the rest are destinations. No IPC of its own.
+    ("MATCHPROP", CommandId::MatchProp),
     ("HOVERPREVIEW", CommandId::ToggleHoverPreview),
     // The display grid switch (F7). Grid **snap** is the separate `SNAP`
     // selector below; the two are independent session switches and never alias
@@ -310,12 +314,12 @@ pub fn zoom_step_factor(name: &str) -> Option<f64> {
 ///
 /// The single/double-letter rows mirror AutoCAD's default `acad.pgp` command
 /// abbreviations **for the commands this build already implements only**: an
-/// alias is admitted only when its target is a real selector, so an abbreviation
-/// like `MA` (`MATCHPROP`) stays absent because the command itself is absent.
-/// There is no `acad.pgp` file parsing and no user-defined alias support; this
-/// table is the whole (curated) subset, and every row is contract-tested to
-/// canonicalise onto a [`COMMAND_TABLE`] name, to be unique, and to collide with
-/// no canonical name.
+/// alias is admitted only when its target is a real selector, so `MA`
+/// (`MATCHPROP`) is present now that MATCHPROP exists (and was absent while the
+/// command itself was absent). There is no `acad.pgp` file parsing and no
+/// user-defined alias support; this table is the whole (curated) subset, and
+/// every row is contract-tested to canonicalise onto a [`COMMAND_TABLE`] name,
+/// to be unique, and to collide with no canonical name.
 ///
 /// There is no `SNAP` alias row. AutoCAD's `SNAP` is **grid snap** (F9), a real
 /// selector of its own ([`CommandId::ToggleSnapGrid`], with the `SNAPUNIT`
@@ -340,9 +344,9 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("DCO", "DIMCONTINUE"),
     // AutoCAD's default `acad.pgp` single/double-letter abbreviations, listed
     // alphabetically (draw, modify, view, annotate, drafting switches). Only the
-    // subset whose target selector exists here: `MA` (MATCHPROP) is skipped
-    // because this build implements no MATCHPROP, and inventing one from an
-    // abbreviation is exactly what this table must never do.
+    // subset whose target selector exists here: `MA` (MATCHPROP) joined the table
+    // when MATCHPROP itself was implemented, and inventing an abbreviation for an
+    // absent command is exactly what this table must never do.
     ("A", "ARC"),
     ("AL", "ALIGN"),
     // AutoCAD's `AR` is ARRAY; `ARRAYRECT` is the array command this build
@@ -366,6 +370,7 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("H", "HATCH"),
     ("L", "LINE"),
     ("M", "MOVE"),
+    ("MA", "MATCHPROP"),
     ("MI", "MIRROR"),
     ("O", "OFFSET"),
     ("OR", "ORTHO"),

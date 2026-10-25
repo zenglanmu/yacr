@@ -56,6 +56,7 @@ canonical 命令（`work-only` 表示仅在工作模式可用，Viewer 模式由
 | `SCALE` | 编辑 | 是 | `SC` |
 | `MIRROR` | 编辑（保留原件） | 是 | `MI` |
 | `OFFSET` | 编辑（仅 LINE/CIRCLE） | 是 | `O` |
+| `MATCHPROP` | 编辑（**选择式**特性匹配：首个选中实体为源，其余为目标；转移 `layer`/`color`/`linetype`/`lineweight`/`transparency` 五项） | 是 | `MA` |
 | `COPYCLIP` | 剪贴板捕获（只读） | 否 | — |
 | `CUTCLIP` | 剪贴板剪切（删除并入剪贴板） | 是 | — |
 | `PASTECLIP` | 剪贴板粘贴（原坐标） | 是 | — |
@@ -88,10 +89,10 @@ canonical 命令（`work-only` 表示仅在工作模式可用，Viewer 模式由
 | `PANELS` | UI | 否 | — |
 | `DIAGNOSTICS` | UI | 否 | — |
 | `GRID` | 显示（**仅**栅格叠加开关，2026-10-25 起真实选择器） | 否 | — |
-| `SNAP` | 显示（**栅格捕捉**开关 F9；会话状态，不写库） | 否 | — |
-| `SNAPUNIT <value>` | 显示（栅格捕捉间距 sysvar；正十进制数） | 否 | — |
+| `SNAP` | 显示（**栅格捕捉**开关 F9；会话状态，不写库，经 `interaction.gridSnapEnabled` 持久化） | 否 | — |
+| `SNAPUNIT <value>` | 显示（栅格捕捉间距 sysvar；正十进制数，经 `interaction.snapSpacing` 持久化） | 否 | — |
 | `OSNAP` | 显示（对象捕捉开关） | 否 | — |
-| `ORTHO` | 显示（正交约束开关；会话状态，不写库） | 否 | — |
+| `ORTHO` | 显示（正交约束开关；会话状态，不写库，经 `interaction.orthoEnabled` 持久化） | 否 | — |
 | `HOVERPREVIEW` | 显示（悬停预览开关） | 否 | — |
 
 说明：
@@ -114,20 +115,30 @@ canonical 命令（`work-only` 表示仅在工作模式可用，Viewer 模式由
   与 AutoCAD 内部顺序不同，属已记录的刻意偏差）。橡皮筋预览与提交点共用同一个会话约束函数
   （`crates/cad-app/src/session_state.rs::constrained_point`，量化规则在 `crates/cad-app/src/snap.rs`），
   因此预览不会与提交分歧。**实体拾取步骤不捕捉**（TRIM/EXTEND 等拾取的是实体而非点，与 `ORTHO` 一致）。
-  它是会话/显示状态：不写数据库、不产生撤销步、不 bump revision、不改持久化偏好，Viewer 与 Work 均可用。
+  它是会话/显示状态：不写数据库、不产生撤销步、不 bump revision，Viewer 与 Work 均可用。
+  **用户的开关选择会持久化**：`cad_set_setting` 键 `gridSnapEnabled` 写入持久叶子
+  `interaction.gridSnapEnabled`（同一份 `preference.json`），在**启动**与**每次权威换图（open/new）**后由宿主的同一 seeding 路径
+  重新施加（默认仍未设置 = **关**，不写偏好就保持会话默认）。设置写入只在**活值不同**时才派发
+  本开关的切换命令；值已相同是纯偏好写入，不再切换（不会把开关翻回去）。
 - `SNAPUNIT <value>` 设置**会话内的捕捉间距**：只接受**正的十进制数**（`0.5`、`25`、`2.5`），语法与
   `ZOOM` 的数值部分相同（仅 ASCII 数字与至多一个两侧都有数字的小数点）。`SNAPUNIT 0`、`SNAPUNIT -5`、
   `SNAPUNIT abc`、`SNAPUNIT 2 3`、`.5`、`1e3`、`ALL` 一律**显式拒绝**（稳定原因写入
   `cad_status.error`，间距不变）；不带参数的裸 `SNAPUNIT` 仍走“该命令需要 payload”的显式拒绝，
   不会编造默认值。与 `ZOOM` 一样，这是**命令行参数**（同一套 `typed_command_argument` 机器），
-  不是新命令层、不是新 IPC；成功设置只改会话状态，无数据库/历史/偏好写入。
+  不是新命令层、不是新 IPC；成功设置只改会话状态，无数据库/历史写入。
+  **间距会持久化**：`cad_set_setting` 键 `snapSpacing`（有限且 > 0 的实数）写入持久叶子
+  `interaction.snapSpacing`（同一份 `preference.json`），并在**启动**与**每次权威换图**后重新施加到新会话（未设置时保持声明的 **10.0**；
+  `0`、负数、非有限值一律是显式拒绝，绝不静默回落到默认值）。
 - `ORTHO` 只切换**会话内的正交约束**（默认**关**，与 AutoCAD 初始状态一致）：开启后，绘图与测量的
   **下一次取点**被约束到相对该工具**上一个已取点**的水平或垂直方向（`|dx| >= |dy|` 取水平，
   恰好相等也取水平；`z` 保持原始输入值，正交是**二维**辅助，不在 Z 上移动点）。首个点没有参考点，
   因此原样使用；关闭时原样使用。它**不**包含极轴追踪、相对/绝对坐标输入模式。实现上顺序是
   **先对象捕捉、再栅格捕捉（`SNAP`）、最后正交**（与 AutoCAD 内部顺序不同，属已记录的刻意偏差）；
-  只改会话/显示状态，不写数据库、不产生撤销步、不改持久化偏好，Viewer 与 Work 均可用。
+  只改会话/显示状态，不写数据库、不产生撤销步，Viewer 与 Work 均可用。
   橡皮筋预览与提交点共用同一约束（见 `crates/cad-app/src/ortho.rs`）。
+  **用户的开关选择同样持久化**（`cad_set_setting` 键 `orthoEnabled` → 持久叶子
+  `interaction.orthoEnabled`），启动与每次权威换图后重新施加；
+  未设置时保持会话默认（**关**）。与 `SNAP` 一样，设置写入只在活值不同时派发切换命令。
 - `COPYCLIP` 是**只读**捕获，Viewer 亦可用；`CUTCLIP`/`PASTECLIP` 为 work-only。
 - `OPEN`/`NEW`/`SAVE`/`PLOT` 为**宿主自有**：宿主未提供能力时命令层返回显式 `Unsupported`
   （不会静默 no-op）。
@@ -165,15 +176,16 @@ canonical 命令（`work-only` 表示仅在工作模式可用，Viewer 模式由
 | `DLI` | `DIMLINEAR` | `OR` | `ORTHO` |
 | `DAL` | `DIMALIGNED` | `DRA` | `DIMRADIUS` |
 | `DDI` | `DIMDIAMETER` | `DAN` | `DIMANGULAR` |
-| `DCE` | `DIMCENTER` | | |
+| `DCE` | `DIMCENTER` | `MA` | `MATCHPROP` |
 
 全词同义词（同样在 `COMMAND_ALIASES` 内）：`EXPORT`/`PRINT`→`PLOT`、`SAVEAS`/`QSAVE`→`SAVE`、
 `ZOOM EXTENTS`→`FIT`、`ENTER`→`CONFIRM`、`DBA`→`DIMBASELINE`、`DCO`→`DIMCONTINUE`。
 
 诚实边界：这张表是**面向已实现命令的 AutoCAD `acad.pgp` 子集**，不是 `acad.pgp` 解析器，
-也**不支持用户自定义别名**；目标命令不存在的缩写一律不收录（例如 `MA`/`MATCHPROP`——本程序
-未实现 MATCHPROP），绝不用别名凭空造出命令。`SNAP`（栅格捕捉，F9）没有别名行：它已是**自己的**
-规范选择子（不是别名），与 `OSNAP`（对象捕捉）和 `GRID`（显示栅格）互不为别名。
+也**不支持用户自定义别名**；目标命令不存在的缩写一律不收录，绝不用别名凭空造出命令。
+`MA`（`MATCHPROP`）在该命令实现（选择式特性匹配）后进入本表；`MATCHPROP` 本身**无新 IPC**，
+裸命令名即全部输入（`CommandPayload::None`，选择在应用时读取）。`SNAP`（栅格捕捉，F9）没有别名行：
+它已是**自己的**规范选择子（不是别名），与 `OSNAP`（对象捕捉）和 `GRID`（显示栅格）互不为别名。
 
 ---
 
@@ -238,8 +250,8 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     其余未映射组合不拦截。
 - **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
   的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
-  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**75 个选择子**；P6b 后由 67 增加，2026-10-25
-  再加 `GRID`）；不在表内的名字报告
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**79 个选择子**，与 `CommandId` 变体一一对应；
+  P6b 后由 67 增加，2026-10-25 再加 `GRID`，本批再加 `MATCHPROP`）；不在表内的名字报告
   `command.unknown`；宿主**识别但未实现**的路径（如 `PLOT`/`SAVE` 的受限路径）由宿主报告
   `command.unsupported`。两者都是显式反馈，**不静默忽略**。
 - **仍未实现的 AutoCAD 名（据实）**：`POLYLINE`（我们有 `PLINE`）、`XLINE`、`BLOCK`、`WBLOCK`、

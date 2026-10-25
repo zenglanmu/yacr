@@ -286,6 +286,7 @@ mod explode;
 mod explode_insert;
 mod explode_self_reference;
 mod hatch;
+mod match_prop;
 mod mleader_create;
 mod multileader;
 mod offset;

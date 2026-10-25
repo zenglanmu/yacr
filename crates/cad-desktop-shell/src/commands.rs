@@ -277,13 +277,23 @@ pub fn cad_close_popup(shared: tauri::State<'_, ProbeShared>) -> Result<CadComma
 
 /// Parse one `cad_set_setting` request into the typed key/value pair.
 ///
-/// The wire is `{ key: <stable camelCase key>, value: <bool|string|integer> }`.
+/// The wire is `{ key: <stable camelCase key>, value: <bool|string|number> }`.
 /// An unknown key is refused with `settings.unknown_key`; a wrong value shape is
 /// refused with `settings.invalid_value`; a `plotFormat` other than `svg`/`pdf`
 /// is refused by the key table's own validation, as is a colour that is not
 /// `#rrggbb`, a crosshair percentage outside `1..=100` and a GPU budget outside
 /// `10..=100` (the same authority the owner thread uses). Nothing is coerced and
 /// no file is touched here.
+///
+/// A JSON number has two typed shapes: a non-negative integer that fits `u32`
+/// becomes [`CadSettingValue::Number`]; a fractional one becomes
+/// [`CadSettingValue::Real`] (never truncated into the integer shape, so
+/// `snapSpacing: 2.5` cannot become `2`). Negative integers and integers outside
+/// `u32` stay refused at this boundary: no key accepts them, and widening them
+/// into `Real` would silently re-validate a value that was never a legal number.
+/// Which keys accept which shape — and that a float on a boolean-or-integer key
+/// is still [`SETTINGS_INVALID_VALUE`] — is [`CadSettingKey::validate`]'s
+/// decision, not this parser's.
 pub fn parse_setting_request(
     key: &str,
     value: &serde_json::Value,
@@ -292,13 +302,25 @@ pub fn parse_setting_request(
     let value = match value {
         serde_json::Value::Bool(enabled) => CadSettingValue::Bool(*enabled),
         serde_json::Value::String(text) => CadSettingValue::Text(text.clone()),
-        // Only a non-negative integer that fits `u32` is a number here; a
-        // negative, fractional or out-of-range JSON number is a wrong shape.
-        serde_json::Value::Number(number) => number
-            .as_u64()
-            .and_then(|number| u32::try_from(number).ok())
-            .map(CadSettingValue::Number)
-            .ok_or_else(|| SETTINGS_INVALID_VALUE.to_string())?,
+        serde_json::Value::Number(number) => {
+            if let Some(integer) = number
+                .as_u64()
+                .and_then(|number| u32::try_from(number).ok())
+            {
+                CadSettingValue::Number(integer)
+            } else if number.is_f64() {
+                // A real that is not a non-negative `u32` integer. A non-finite
+                // real cannot arrive from JSON, but the shape is refused rather
+                // than carried to the host as a special value.
+                match number.as_f64() {
+                    Some(real) if real.is_finite() => CadSettingValue::Real(real),
+                    _ => return Err(SETTINGS_INVALID_VALUE.to_string()),
+                }
+            } else {
+                // A negative or out-of-`u32` integer: no key accepts it.
+                return Err(SETTINGS_INVALID_VALUE.to_string());
+            }
+        }
         _ => return Err(SETTINGS_INVALID_VALUE.to_string()),
     };
     key.validate(&value).map_err(str::to_string)?;
@@ -313,7 +335,15 @@ pub fn parse_setting_request(
 /// explicit `cad_waiting`, never a fabricated default object.
 #[tauri::command]
 pub fn cad_settings(shared: tauri::State<'_, ProbeShared>) -> Result<CadSettings, String> {
-    lock(&shared.0)
+    cad_settings_impl(&shared.0)
+}
+
+/// Command body of [`cad_settings`], without the Tauri state wrapper.
+///
+/// Split out so the wire-shape tests read the **same** snapshot the IPC path
+/// serves (no duplicated projection in tests).
+pub fn cad_settings_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadSettings, String> {
+    lock(shared)
         .cad_settings
         .clone()
         .ok_or_else(|| "cad_waiting".to_string())
@@ -333,8 +363,20 @@ pub fn cad_set_setting(
     key: String,
     value: serde_json::Value,
 ) -> Result<CadCommandAck, String> {
-    let (key, value) = parse_setting_request(&key, &value)?;
-    let mut state = lock(&shared.0);
+    cad_set_setting_impl(&shared.0, &key, &value)
+}
+
+/// Command body of [`cad_set_setting`], without the Tauri state wrapper.
+///
+/// Split out so the wire-shape tests drive the **same** parse-and-admit path the
+/// IPC command runs (never a re-implemented copy in the test).
+pub fn cad_set_setting_impl(
+    shared: &Arc<Mutex<Shared>>,
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<CadCommandAck, String> {
+    let (key, value) = parse_setting_request(key, value)?;
+    let mut state = lock(shared);
     let cad_mode = state.shell.cad_mode;
     admit_setting(&mut state.cad_setting_writes, cad_mode, key, value)?;
     Ok(CadCommandAck { accepted: true })
