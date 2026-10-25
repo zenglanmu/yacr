@@ -1,3 +1,51 @@
+## 2026-10-25（续 2）世界坐标读数 / SPLINE 边界 / ZOOM 参数 / SNAP 栅格捕捉
+
+### 结论
+
+补四个缺口（4 条 lane，各自跑自己范围的门禁）：
+
+1. **状态栏改为真实世界坐标**：`cad_status` 新增 `cursorWorld: [x,y,z] | null`，取自与十字光标
+   **同一个** `overlay.cursor`（两者不可能不一致）；`null` = 无可信世界坐标（3D 视图 / 指针离开 /
+   无会话），**不是零**。UI 用 4 位小数、Z 仅非零时显示、`-0` 归一为 `0`，无值时显式破折号 +
+   `status.coordinate_hint_none`；旧的 DOM 像素读数**已删除**（像素不是图纸坐标）。
+2. **TRIM/EXTEND 接受 SPLINE 边界**（采样回退，`extent × 1e-4` 弦长，约 1e-3 世界单位/10 单位图）：
+   每次由 SPLINE 贡献的裁剪都追加 `drawing.trim`/`drawing.extend` 近似说明并点名 pair；
+   `SPLINE` **目标**仍拒绝；"整体在闭合 SPLINE 内→删除"**显式拒绝**（`SemanticGeometry::Spline`
+   没有闭环标志/边界平面，不猜测、不伪造包含关系）。
+3. **命令行 `ZOOM` 真实参数**：`ZOOM <factor>`（正有限小数，>1 放大、<1 缩小，锚定视口中心）与
+   `ZOOM ALL`/`ZOOM EXTENTS`→`FIT`；裸 `ZOOM` 保持既有 payload 拒绝；`ZOOM 0`/`-1`/`abc`/`2 3`/
+   `.5` 等一律显式拒绝并记入 `cad_status.error`。参数语法由宿主解析，chrome 只做语法准入并把
+   **整行**送给 `cad_command`（历史保存整行）。
+4. **`SNAP`（F9）真实栅格捕捉 + `SNAPUNIT <value>` 间距**：纯函数 `snap_to_grid`（就近取整、
+   恰好半数远离零、Z 不动），默认间距 **10 图纸单位**（我们的选择：AutoCAD 默认值来自模板，
+   本项目无法知道图纸单位）；会话内 `constrained_point` = 栅格捕捉 → ORTHO，捕捉与两条预览路径
+   共用同一 helper（预览不会与提交不一致），宿主仍先做对象捕捉；实体拾取步骤不捕捉；
+   纯会话状态（无 DB 写入、不升 revision、无撤销项、可持久偏好也不写）。
+
+### 已运行证据（本机，2026-10-25）
+
+- `cargo test -p cad-app --lib` **877**、`cad-ui-core` **254**、`cad-host` **208**、
+  `cad-desktop-shell` **23**（11+3+5+4）、`app-linux --lib` **172**，全部 0 failed。
+- `cargo clippy -p cad-app -p cad-host -p cad-ui-core -p cad-desktop-shell -p app-linux
+  --all-targets --locked -- -D warnings` → 0；`cargo fmt --all -- --check` → 0。
+- `cargo check --workspace --all-targets --locked` → 0；
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` → 0。
+- `check-{architecture,fixture-manifest,workflows,i18n,file-size}.py` → 全 0（i18n 755 键）。
+- `apps/desktop-ui`：`npm test` **570 passed / 0 failed**；`npm run build` 成功。
+- 提交：`c6ba0f7`（host）、`ee30869`（ui）。
+
+### NOT RUN / 边界
+
+- **无 GUI / 像素 / 真实 GPU 证据**：世界坐标读数、SNAP/ORTHO 预览一致性、ZOOM 参数都只有
+  命令层与纯函数契约测试；没有真实窗口点击或截图。
+- **SNAP 默认间距 10 是本仓库的选择**，不是 AutoCAD 对齐；也不持久化（重启后回到 10 且关闭）。
+- **约束顺序**：对象捕捉（宿主）→ 栅格捕捉 → ORTHO 是已声明顺序；AutoCAD 内部排序未逐项对照。
+- **SPLINE 边界是采样近似**（有诊断），与 SPLINE 目标/闭合 SPLINE 包含判定相关的行为仍显式拒绝；
+  没有与 AutoCAD 结果对照。
+- `ZOOM` 参数语法是**严格十进制**：`.5`/`2.`/`1e3` 都被拒绝（已声明），不是 AutoCAD 的宽松数值语法。
+- Windows / macOS / Android / Web 目标未做运行验证；本轮无渲染器改动。
+
+
 ## 2026-10-25（续）TRIM/EXTEND 曲线子集 + chrome 收尾（含独立审查返修）
 
 ### 结论
