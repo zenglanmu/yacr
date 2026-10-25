@@ -2,6 +2,30 @@
 
 use super::super::super::*;
 use super::super::test_support::*;
+use crate::session::status::{document_capabilities, DocumentCapabilities};
+
+/// Host capabilities with every file command advertised, so a projection test
+/// can prove the live session state still gates them.
+fn advertised_capabilities() -> HostCapabilities {
+    HostCapabilities {
+        open: true,
+        new: true,
+        save: true,
+        plot: true,
+        import_worker: false,
+    }
+}
+
+/// Host capabilities that advertise nothing: the honest probe/unsupported host.
+fn no_capabilities() -> HostCapabilities {
+    HostCapabilities {
+        open: false,
+        new: false,
+        save: false,
+        plot: false,
+        import_worker: false,
+    }
+}
 
 #[test]
 fn status_error_is_locale_neutral() {
@@ -53,6 +77,10 @@ fn blank_status_reports_no_document_capabilities() {
         None,
         false,
         true,
+        // NEW needs no source file; SAVE/PLOT still need a document, so the
+        // projection of an empty session with all caps advertised is
+        // `true/false/false`.
+        document_capabilities(advertised_capabilities(), false, false, false),
         None,
         Some(CadCamera {
             center: [1.0, 2.0],
@@ -66,6 +94,8 @@ fn blank_status_reports_no_document_capabilities() {
         None,
         false,
         false,
+        true,
+        true,
         None,
         false,
     );
@@ -74,6 +104,9 @@ fn blank_status_reports_no_document_capabilities() {
     assert_eq!(status.camera, None, "a missing document has no camera");
     assert!(!status.can_fit);
     assert!(status.can_open);
+    assert!(status.can_new, "a blank document needs no open file");
+    assert!(!status.can_save, "saving needs an authoritative document");
+    assert!(!status.can_plot, "plotting needs an authoritative document");
     assert_eq!(status.import_count, 0);
     assert_eq!(status.frame_count, 0);
     assert!(
@@ -83,6 +116,14 @@ fn blank_status_reports_no_document_capabilities() {
     assert!(
         !status.snap_enabled,
         "the assembled status carries the object-snap flag it was given"
+    );
+    assert!(
+        status.grid_enabled,
+        "the assembled status carries the display-grid flag it was given"
+    );
+    assert!(
+        status.ortho_enabled,
+        "the assembled status carries the ORTHO flag it was given"
     );
     // The selection block is always carried, never omitted.
     assert_eq!(status.selection, CadSelection::empty());
@@ -96,6 +137,7 @@ fn document_status_reports_counts_and_camera() {
         Some(3),
         false,
         true,
+        document_capabilities(advertised_capabilities(), true, false, false),
         None,
         Some(CadCamera {
             center: [10.0, 20.0],
@@ -109,12 +151,18 @@ fn document_status_reports_counts_and_camera() {
         None,
         true,
         true,
+        false,
+        false,
         None,
         true,
     );
     assert_eq!(status.document_label.as_deref(), Some("fixture.dwg"));
     assert_eq!(status.entity_count, Some(3));
     assert!(status.can_fit);
+    assert!(
+        status.can_new && status.can_save && status.can_plot,
+        "an idle session with a document advertises NEW/SAVE/PLOT"
+    );
     assert_eq!(status.frame_count, 10);
     assert!(
         status.hover_preview,
@@ -125,8 +173,83 @@ fn document_status_reports_counts_and_camera() {
         "the status projects the session's object-snap flag"
     );
     assert!(
+        !status.grid_enabled,
+        "the display-grid flag is projected from what the caller supplied, not guessed"
+    );
+    assert!(
+        !status.ortho_enabled,
+        "the ORTHO flag is projected from what the caller supplied, not guessed"
+    );
+    assert!(
         status.crosshair,
         "the status carries the crosshair flag it was given (the 3D pointer gate)"
+    );
+}
+
+#[test]
+fn document_capabilities_follow_the_host_flags_and_the_live_session_state() {
+    // Advertised, idle, with a document: everything is available.
+    let ready = document_capabilities(advertised_capabilities(), true, false, false);
+    assert_eq!(
+        ready,
+        DocumentCapabilities {
+            can_new: true,
+            can_save: true,
+            can_plot: true,
+        }
+    );
+
+    // A host that advertises nothing reports nothing, even with a document.
+    let unsupported = document_capabilities(no_capabilities(), true, false, false);
+    assert_eq!(
+        unsupported,
+        DocumentCapabilities {
+            can_new: false,
+            can_save: false,
+            can_plot: false,
+        }
+    );
+
+    // No authoritative document: NEW still needs no source file, SAVE/PLOT do.
+    let blank = document_capabilities(advertised_capabilities(), false, false, false);
+    assert!(blank.can_new);
+    assert!(!blank.can_save && !blank.can_plot);
+
+    // While an open/import is running nothing can start, including a new
+    // drawing (the session is busy).
+    let loading = document_capabilities(advertised_capabilities(), true, true, false);
+    assert!(!loading.can_new && !loading.can_save && !loading.can_plot);
+
+    // A save/plot target chooser (or its pending export) blocks SAVE and PLOT
+    // but not NEW: the host serialises only the two export funnels.
+    let pending = document_capabilities(advertised_capabilities(), true, false, true);
+    assert!(pending.can_new);
+    assert!(!pending.can_save && !pending.can_plot);
+}
+
+#[test]
+fn session_status_projects_the_real_save_pending_state_onto_can_save() {
+    // A desktop-shaped platform (NEW/SAVE/PLOT advertised) whose save picker
+    // opens but never resolves: the host must drop SAVE/PLOT availability while
+    // that target is pending, and never invent one before/after.
+    let mut host_platform = platform(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    host_platform.files = Rc::new(PendingSaveFiles);
+    host_platform.capabilities = advertised_capabilities();
+    let session = session_with_platform(host_platform);
+
+    let idle = session.snapshot(None, None, 0);
+    assert!(idle.document_label.is_some(), "the demo document is open");
+    assert!(idle.can_new && idle.can_save && idle.can_plot);
+
+    // SAVE opens the picker and holds the pending slot.
+    session.command("SAVE").expect("SAVE opens the picker");
+    let pending = session.snapshot(None, None, 0);
+    assert!(pending.can_new, "an open picker does not block NEW");
+    assert!(
+        !pending.can_save && !pending.can_plot,
+        "a pending save target blocks SAVE and PLOT"
     );
 }
 

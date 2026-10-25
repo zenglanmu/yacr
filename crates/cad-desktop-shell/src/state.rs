@@ -32,7 +32,7 @@ use cad_ui_core::launch::LaunchOptions;
 use cad_ui_core::layout::LayoutTracker;
 use cad_ui_core::popup::PopupAck;
 use cad_ui_core::protocol::InputKind;
-use cad_ui_core::session::{CadSettingKey, CadSettingValue, CadSettings};
+use cad_ui_core::session::{CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CadSettings};
 use cad_ui_core::shell::ShellState;
 
 /// The app-side render telemetry, exposed to the command layer through a narrow
@@ -133,6 +133,18 @@ pub struct Shared {
     /// so the worker-thread `cad_settings` IPC read never touches the `!Send`
     /// session.
     pub cad_settings: Option<CadSettings>,
+    /// Bounded main-thread queue of typed layer writes (the layer panel's
+    /// `cad_set_layer_visible` / `cad_restore_layers` / `cad_set_active_layer`
+    /// channels): admitted by those commands and drained by the owner tick into
+    /// `CadSession::set_layer_visibility` / `restore_layers` / `set_active_layer`.
+    pub cad_layer_writes: VecDeque<CadLayerWrite>,
+    /// Latest layer projection mirrored from the owner-thread session, so the
+    /// worker-thread `cad_layers` read never touches the `!Send` session.
+    ///
+    /// `None` before a session exists (the read refuses with `cad_waiting`);
+    /// `Some(Err(..))` carries the session's own projection refusal rather than
+    /// serving stale rows.
+    pub cad_layers: Option<Result<CadLayers, String>>,
     /// The app-side render telemetry seam (see [`ShellTelemetry`]). `None`
     /// before the host registers it and in unit tests; `cad_status` then reports
     /// the same `"-"` token a host with no pulled state would.
@@ -161,6 +173,8 @@ impl Shared {
             cad_standard_views: VecDeque::new(),
             cad_setting_writes: VecDeque::new(),
             cad_settings: None,
+            cad_layer_writes: VecDeque::new(),
+            cad_layers: None,
             telemetry: None,
             popup_host: None,
         }

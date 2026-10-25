@@ -196,6 +196,32 @@ pub(super) fn platform(files: Rc<FakeFiles>) -> HostPlatform {
     }
 }
 
+/// A file sink whose save picker **opens but never resolves**, so the host holds
+/// its pending-save slot exactly like a live desktop dialog awaiting a target.
+pub(super) struct PendingSaveFiles;
+
+impl PlatformFiles for PendingSaveFiles {
+    fn begin_open(&self) -> CadResult<()> {
+        Ok(())
+    }
+    fn begin_open_target(&self, _target: &FileTarget) -> CadResult<()> {
+        Ok(())
+    }
+    fn begin_save(&self, _purpose: SavePurpose, _name: &str) -> CadResult<()> {
+        Ok(())
+    }
+    fn write_atomic(&self, _target: &FileTarget, _bytes: &[u8]) -> CadResult<()> {
+        Err(CadError::Unsupported("write unsupported".into()))
+    }
+    fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
+        false
+    }
+    fn set_source(&self, _target: Option<&FileTarget>) {}
+    fn poll(&self) -> Vec<FileEvent> {
+        Vec::new()
+    }
+}
+
 pub(super) fn options() -> HostOptions {
     HostOptions {
         fonts: Vec::new(),
@@ -209,6 +235,13 @@ pub(super) fn options() -> HostOptions {
 
 pub(super) fn session(files: Rc<FakeFiles>) -> CadSession {
     CadSession::new(options(), platform(files), RenderSessionHandle::default())
+        .expect("session builds")
+}
+
+/// A session built over a caller-supplied platform (e.g. different capability
+/// flags or a different file sink).
+pub(super) fn session_with_platform(host_platform: HostPlatform) -> CadSession {
+    CadSession::new(options(), host_platform, RenderSessionHandle::default())
         .expect("session builds")
 }
 

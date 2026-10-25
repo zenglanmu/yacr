@@ -474,6 +474,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             commands,
             mut standard_views,
             setting_writes,
+            layer_writes,
             tool_parameters,
             tool_texts,
             selected_texts,
@@ -485,6 +486,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 std::mem::take(&mut state.shell.cad_commands),
                 std::mem::take(&mut state.cad_standard_views),
                 std::mem::take(&mut state.cad_setting_writes),
+                std::mem::take(&mut state.cad_layer_writes),
                 std::mem::take(&mut state.cad_tool_parameters),
                 std::mem::take(&mut state.cad_tool_texts),
                 std::mem::take(&mut state.cad_selected_texts),
@@ -495,6 +497,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         let queued = commands.len()
             + standard_views.len()
             + setting_writes.len()
+            + layer_writes.len()
             + tool_parameters.len()
             + tool_texts.len()
             + selected_texts.len()
@@ -511,6 +514,11 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                             eprintln!("[probe] cad setting rejected: {error}");
                         }
                     }
+                    // Typed layer writes (the React layer panel's three
+                    // mutations): the session resolves each name against the
+                    // drawing's own layer table and dispatches the ordinary layer
+                    // command; a refusal is the session's real error.
+                    super::layers::apply_writes(session, layer_writes);
                     for command in &commands {
                         if let Err(error) = session.command(command) {
                             eprintln!("[probe] cad command rejected: {error}");
@@ -750,6 +758,8 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 state.cad_settings = Some(settings);
             }
         }
+        // The layer panel's own mirror (see `super::layers`).
+        super::layers::mirror(shared);
     } else {
         // ---- probe frame (marker path; `--probe` mode only) ----
         let outcome = SURFACE.with(|cell| {

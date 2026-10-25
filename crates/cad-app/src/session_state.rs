@@ -69,6 +69,29 @@ pub struct SessionState {
     /// the persisted `view.overlays.snapHints` preference, which only controls
     /// whether resolved hints are drawn.
     snap_enabled: bool,
+    /// Whether the display grid overlay is enabled for this session (`GRID`,
+    /// F7).
+    ///
+    /// Session/display state only: toggling it writes no database, produces no
+    /// history entry and schedules no ChangeSet. The default is `true`. It is
+    /// deliberately independent of the persisted `view.overlays.grid`
+    /// preference: the host draws the grid only when **both** this switch and
+    /// that preference are on (see `cad_host`'s render sync). This is the
+    /// **display** grid only — grid snap (AutoCAD's `SNAP`/F9) is a different,
+    /// unimplemented feature and stays refused.
+    grid_enabled: bool,
+    /// Whether the `ORTHO` drafting constraint is active for this session
+    /// (`ORTHO`, F8).
+    ///
+    /// Session state only: toggling it writes no database, produces no history
+    /// entry and schedules no ChangeSet. The default is **`false`**, matching
+    /// AutoCAD's initial `ORTHO` off. While on, the next point entry (a drawing
+    /// capture or a measurement pick) is constrained to a horizontal or vertical
+    /// direction from the tool's previous captured point — see
+    /// [`crate::ortho`] for the exact rule, the horizontal tie rule and the
+    /// documented "applied after object snap" ordering. It never moves a point in
+    /// Z and it is not grid snap (AutoCAD's `SNAP`/F9, still unimplemented).
+    ortho_enabled: bool,
     /// Whether idle pointer movement previews the entity under the cursor.
     ///
     /// Session/display state only: toggling it writes no database, produces no
@@ -135,6 +158,8 @@ impl SessionState {
             active_layer: LayerId(0),
             tool_parameters: ToolParameterStore::defaults(),
             snap_enabled: true,
+            grid_enabled: true,
+            ortho_enabled: false,
             hover_preview: true,
             hover_dwell_ms: 20,
             last_measurement: None,
@@ -165,6 +190,94 @@ impl SessionState {
     pub fn toggle_snap(&mut self) -> bool {
         self.snap_enabled = !self.snap_enabled;
         self.snap_enabled
+    }
+
+    /// Whether the display grid overlay is enabled in this session.
+    ///
+    /// Session/display state only. `true` here does not by itself mean the grid
+    /// is drawn: the host also requires the persisted `view.overlays.grid`
+    /// preference, so the two gates compose with AND.
+    pub fn grid_enabled(&self) -> bool {
+        self.grid_enabled
+    }
+
+    /// Enable or disable the display grid for this session.
+    ///
+    /// Session state only: no database write, no history entry. This is the
+    /// **display** grid only; grid snap (AutoCAD's `SNAP`/F9) is a different,
+    /// unimplemented feature.
+    pub fn set_grid_enabled(&mut self, enabled: bool) {
+        self.grid_enabled = enabled;
+    }
+
+    /// Flip the display grid and return the new state (F7 binding).
+    pub fn toggle_grid(&mut self) -> bool {
+        self.grid_enabled = !self.grid_enabled;
+        self.grid_enabled
+    }
+
+    /// Whether the `ORTHO` drafting constraint is active in this session.
+    ///
+    /// Session/display state only; the default is `false` (AutoCAD's initial
+    /// `ORTHO` off).
+    pub fn ortho_enabled(&self) -> bool {
+        self.ortho_enabled
+    }
+
+    /// Enable or disable the `ORTHO` drafting constraint for this session.
+    ///
+    /// Session state only: no database write, no history entry, no ChangeSet and
+    /// no persisted preference. See [`crate::ortho`] for the rule the capture and
+    /// preview paths apply while this is on.
+    pub fn set_ortho_enabled(&mut self, enabled: bool) {
+        self.ortho_enabled = enabled;
+    }
+
+    /// Flip the `ORTHO` drafting constraint and return the new state (F8 binding).
+    pub fn toggle_ortho(&mut self) -> bool {
+        self.ortho_enabled = !self.ortho_enabled;
+        self.ortho_enabled
+    }
+
+    /// The previous captured point of the active capture, for `ORTHO`.
+    ///
+    /// `None` for an idle/pick-only tool: the first pick of a tool has no
+    /// direction to constrain against. A **pending entity-pick** step is excluded
+    /// as well — an entity pick is not a point entry and its commit path
+    /// ([`SessionState::capture_draw_pick`]) bypasses the constraint, so a
+    /// constrained preview there would disagree with the commit.
+    fn ortho_previous_point(&self) -> Option<Point3> {
+        match &self.tool {
+            ToolState::Drawing(capture) => {
+                let pending_pick =
+                    capture.tool.points().len() < capture.tool.kind().picked_step_count();
+                if pending_pick {
+                    None
+                } else {
+                    capture.tool.points().last().copied()
+                }
+            }
+            ToolState::Measuring(tool) => tool.points().last().copied(),
+            ToolState::Idle | ToolState::Selecting | ToolState::Panning => None,
+        }
+    }
+
+    /// Apply the session `ORTHO` switch to one candidate point.
+    ///
+    /// The raw point is returned unchanged while the switch is off or when the
+    /// tool has no previous captured point; otherwise [`crate::ortho::ortho_constrain`]
+    /// decides. Capture and preview share this one call, so the rubber band can
+    /// never disagree with the committed point.
+    fn ortho_point(&self, previous: Option<Point3>, raw: Point3) -> Point3 {
+        crate::ortho::ortho_constrain_point(self.ortho_enabled, previous, raw)
+    }
+
+    /// Apply `ORTHO` to a preview cursor.
+    ///
+    /// The preview is a projection of the same pending point entry the next click
+    /// commits, so it must show the constrained value rather than the raw cursor.
+    fn ortho_cursor(&self, previous: Option<Point3>, cursor: Option<Point3>) -> Option<Point3> {
+        cursor.map(|raw| self.ortho_point(previous, raw))
     }
 
     /// Whether idle pointer movement previews the entity under the cursor.
@@ -402,10 +515,19 @@ impl SessionState {
     /// [`SessionState::capture_draw_pick`] with the ref the host resolved at
     /// capture time. A blind point for such a kind is refused rather than
     /// stored (see [`DrawTool::push_point`]).
+    ///
+    /// While the session `ORTHO` switch is on the point is constrained against the
+    /// tool's **previous captured point** before it is stored (see
+    /// [`crate::ortho`]); the first point of a tool and a disabled switch store the
+    /// raw point. The host resolves object snapping *first* and passes the snapped
+    /// point in, so `ORTHO` constrains an already-snapped point — the documented,
+    /// deliberate ordering deviation from AutoCAD. Only the stored point differs:
+    /// no database, history or preference write is involved.
     pub fn capture_point(&mut self, point: Point3) -> CadResult<bool> {
         if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
             return Err(CadError::InvalidInput("tool point must be finite".into()));
         }
+        let point = self.ortho_point(self.ortho_previous_point(), point);
         match &mut self.tool {
             ToolState::Drawing(capture) => {
                 capture.tool.push_point(point)?;
@@ -503,9 +625,30 @@ impl SessionState {
     /// field is `None` for every other kind, so the frozen frontend projection
     /// (`CadTool.params.sides`) can never report a side count for a tool that has
     /// none.
+    ///
+    /// The live cursor is the **pending point entry**, so the session `ORTHO`
+    /// constraint is applied here: the overlay's rubber band reads
+    /// [`DrawPreview::cursor`], and a raw cursor would show a free segment while
+    /// the click commits a constrained point. A pending **entity-pick** step is
+    /// left raw, because that click never enters through `capture_point`.
     fn annotate_draw_preview(&self, mut preview: DrawPreview) -> DrawPreview {
         preview.polygon_sides =
             (preview.kind == DrawToolKind::Polygon).then_some(self.polygon_sides());
+        let pending_pick = preview.points.len() < preview.kind.picked_step_count();
+        if !pending_pick {
+            preview.cursor = self.ortho_cursor(preview.points.last().copied(), preview.cursor);
+        }
+        preview
+    }
+
+    /// Apply the session `ORTHO` constraint to a measurement preview cursor.
+    ///
+    /// The measurement overlay builds its rubber band from
+    /// [`MeasurementPreview::cursor`] exactly like the draw overlay, so it is
+    /// constrained the same way: measurement points enter through
+    /// [`SessionState::capture_point`] and must preview what they will commit.
+    fn annotate_measurement_preview(&self, mut preview: MeasurementPreview) -> MeasurementPreview {
+        preview.cursor = self.ortho_cursor(preview.points.last().copied(), preview.cursor);
         preview
     }
 
@@ -565,7 +708,9 @@ impl SessionState {
             ToolState::Drawing(capture) => {
                 ToolSnapshot::Drawing(self.annotate_draw_preview(capture.tool.preview()))
             }
-            ToolState::Measuring(tool) => ToolSnapshot::Measuring(tool.preview()),
+            ToolState::Measuring(tool) => {
+                ToolSnapshot::Measuring(self.annotate_measurement_preview(tool.preview()))
+            }
             ToolState::Panning => ToolSnapshot::Panning,
         }
     }
@@ -605,7 +750,7 @@ impl SessionState {
     /// Snapshot of the active measurement for preview rendering, if any.
     pub fn measurement_preview(&self) -> Option<MeasurementPreview> {
         match &self.tool {
-            ToolState::Measuring(tool) => Some(tool.preview()),
+            ToolState::Measuring(tool) => Some(self.annotate_measurement_preview(tool.preview())),
             _ => None,
         }
     }

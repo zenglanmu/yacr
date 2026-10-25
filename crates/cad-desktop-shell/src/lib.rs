@@ -35,6 +35,6 @@ pub mod state;
 pub mod threading;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-pub use commands::{register_commands, CadCommandAck, COMMAND_NAMES};
+pub use commands::{register_commands, CadCommandAck, CadCommandAlias, COMMAND_NAMES};
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub use state::{lock, new_shared, ProbeShared, Shared, ShellPopupHost, ShellTelemetry};

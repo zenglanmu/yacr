@@ -2,7 +2,8 @@
 //!
 //! Every CAD mutation that is not a bare command name has its own typed channel
 //! (`cad_set_tool_parameter`, `cad_set_tool_text`, `cad_set_selected_text`,
-//! `cad_set_selected_property`, `cad_standard_view`, `cad_set_setting`). Those
+//! `cad_set_selected_property`, `cad_standard_view`, `cad_set_setting`,
+//! `cad_set_layer_visible` / `cad_restore_layers` / `cad_set_active_layer`). Those
 //! channels share one discipline, which lives here so every host applies it
 //! identically:
 //!
@@ -21,7 +22,7 @@ use std::collections::VecDeque;
 
 use cad_app::{StandardView, ToolParameter, ToolValue};
 
-use crate::session::{CadSettingKey, CadSettingValue};
+use crate::session::{CadLayerWrite, CadSettingKey, CadSettingValue};
 use crate::shell::{CAD_COMMAND_CAP, POPUP_MODAL_OPEN};
 
 /// Bounded capacity of the typed tool-parameter queue. It reuses the CAD command
@@ -326,4 +327,57 @@ pub fn admit_setting(
     }
     queue.push_back((key, value));
     Ok(())
+}
+
+/// Bounded capacity of the typed layer-write queue.
+///
+/// It reuses the CAD command queue's capacity so every admission shares one bound.
+pub const CAD_LAYER_WRITE_CAP: usize = CAD_COMMAND_CAP;
+
+/// Admit one typed layer write into the bounded main-thread queue.
+///
+/// The gates match [`admit_selected_property`]: the modal popup gate first (while
+/// a popup owns input, a CAD mutation is refused by name with
+/// `popup.modal_open`), then a disabled CAD session (probe mode), then the bound.
+///
+/// Nothing is resolved here: a layer name is matched against the drawing's own
+/// layer table on the owner thread (`CadSession::set_layer_visibility` /
+/// `set_active_layer`), so no name is guessed, trimmed or defaulted off the main
+/// thread and a refusal is the session's real error.
+pub fn admit_layer_write(
+    queue: &mut VecDeque<CadLayerWrite>,
+    cad_mode: bool,
+    modal_open: bool,
+    write: CadLayerWrite,
+) -> Result<(), String> {
+    if modal_open {
+        return Err(POPUP_MODAL_OPEN.into());
+    }
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if queue.len() >= CAD_LAYER_WRITE_CAP {
+        return Err("CAD layer queue is full".into());
+    }
+    queue.push_back(write);
+    Ok(())
+}
+
+/// Drain the layer-write queue in admission order, applying each write.
+///
+/// `apply` is the owner-thread funnel ([`CadLayerWrite::apply`]), so the real
+/// resolution and any real refusal happen on the main thread. Refusals are
+/// returned so the caller can log them; nothing is swallowed and nothing is
+/// invented.
+pub fn drain_layer_writes(
+    queue: &mut VecDeque<CadLayerWrite>,
+    mut apply: impl FnMut(&CadLayerWrite) -> Result<(), String>,
+) -> Vec<String> {
+    let mut refusals = Vec::new();
+    while let Some(write) = queue.pop_front() {
+        if let Err(error) = apply(&write) {
+            refusals.push(error);
+        }
+    }
+    refusals
 }

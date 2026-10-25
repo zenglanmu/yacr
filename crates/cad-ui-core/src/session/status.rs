@@ -459,7 +459,34 @@ pub struct CadStatus {
     /// Live import progress, or `null` when no import is running.
     pub import_progress: Option<CadImportProgress>,
     pub error: Option<String>,
+    /// Whether the host can start a **blank** document right now: the host
+    /// advertises the NEW capability and no open/import is in flight
+    /// ([`cad_host::HostCore::loading`]).
+    ///
+    /// A new drawing needs no source file, so this is deliberately independent
+    /// of [`Self::document_label`]: `true` in an empty session, unlike
+    /// [`Self::can_save`]/[`Self::can_plot`], which need an authoritative
+    /// document. It is a capability+state projection, never a guess.
+    pub can_new: bool,
     pub can_open: bool,
+    /// Whether the host can save the **current** document right now: the host
+    /// advertises the SAVE capability, an authoritative document exists, no
+    /// open/import is in flight and no save/plot target chooser is pending
+    /// ([`cad_host::HostCore::save_pending`]).
+    ///
+    /// A capability+state projection: a host without a save dialog reports
+    /// `false` even with a document open, and the flag drops while a save or
+    /// plot gesture is still awaiting its target, so the command is never
+    /// advertised as available twice concurrently.
+    pub can_save: bool,
+    /// Whether the host can plot the **current** document right now: the host
+    /// advertises the PLOT capability with the same document/loading/pending
+    /// rules as [`Self::can_save`] (the host serialises both through one
+    /// pending-save slot).
+    ///
+    /// A capability+state projection, never derived from the file extension or
+    /// from a UI guess about the format.
+    pub can_plot: bool,
     pub can_fit: bool,
     pub backend: Option<String>,
     pub adapter: Option<String>,
@@ -479,6 +506,25 @@ pub struct CadStatus {
     /// the `OSNAP` selector (F3). It is independent of the persisted
     /// `view.overlays.snapHints` preference, which only gates the hint overlay.
     pub snap_enabled: bool,
+    /// Whether the display grid overlay is enabled for this session (`GRID`,
+    /// F7).
+    ///
+    /// Session/display state only; defaults to `true` and can be flipped with the
+    /// `GRID` selector (F7). The grid itself is drawn only when this switch and
+    /// the persisted `view.overlays.grid` preference are both on, so this flag
+    /// alone does not mean the grid is visible. Display grid only — grid snap
+    /// (AutoCAD's `SNAP`/F9) is a different, unimplemented feature.
+    pub grid_enabled: bool,
+    /// Whether the `ORTHO` drafting constraint is enabled for this session
+    /// (`ORTHO`, F8).
+    ///
+    /// Session/display state only; defaults to `false` (AutoCAD's initial `ORTHO`
+    /// off) and can be flipped with the `ORTHO` selector (F8). While on, the next
+    /// point entry of a drawing or measurement capture is constrained to a
+    /// horizontal or vertical direction from the tool's previous point. It never
+    /// changes the drawing database, history or a persisted preference, and it is
+    /// **not** grid snap (`SNAP`/F9, still unimplemented).
+    pub ortho_enabled: bool,
     /// The best current object-snap candidate's stable kind string (ADR 0014
     /// A.7), or `null`.
     ///
@@ -533,7 +579,11 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         loading: false,
         import_progress: None,
         error,
+        // No session means no document/command capability at all.
+        can_new: false,
         can_open: false,
+        can_save: false,
+        can_plot: false,
         can_fit: false,
         backend: None,
         adapter: None,
@@ -542,6 +592,8 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         tool: None,
         hover_preview: false,
         snap_enabled: false,
+        grid_enabled: false,
+        ortho_enabled: false,
         snap_kind: None,
         // No CAD session draws no crosshair, so the system cursor is never
         // hidden: nothing is left pointerless.
@@ -728,11 +780,56 @@ pub(super) fn cad_tool(
     }
 }
 
+/// The document-dependent capability projection of [`CadStatus`]
+/// (`canNew`/`canSave`/`canPlot`).
+///
+/// Split from [`assemble_status`] so the rules are unit-testable without a
+/// live host: they are a pure function of the advertised host capabilities and
+/// the session's real open/loading/save-pending state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct DocumentCapabilities {
+    /// See [`CadStatus::can_new`].
+    pub can_new: bool,
+    /// See [`CadStatus::can_save`].
+    pub can_save: bool,
+    /// See [`CadStatus::can_plot`].
+    pub can_plot: bool,
+}
+
+/// Project the host capability flags × the live session state onto the three
+/// document-dependent capability booleans.
+///
+/// The rules are the honest minimum, each clause backed by real host state:
+///
+/// * NEW needs the capability and an **idle** session (no open/import running);
+///   it deliberately does **not** need a document — a blank drawing needs no
+///   source file.
+/// * SAVE/PLOT need the capability, an authoritative document, and an idle
+///   session: no open/import running **and** no save/plot target chooser or
+///   export still pending. The host serialises save and plot through the same
+///   pending slot, so neither is advertised while the other is in flight.
+pub(super) fn document_capabilities(
+    capabilities: cad_platform::HostCapabilities,
+    has_document: bool,
+    loading: bool,
+    save_pending: bool,
+) -> DocumentCapabilities {
+    let document_idle = has_document && !loading && !save_pending;
+    DocumentCapabilities {
+        can_new: capabilities.new && !loading,
+        can_save: capabilities.save && document_idle,
+        can_plot: capabilities.plot && document_idle,
+    }
+}
+
 /// Assemble the frozen frontend status from already-derived inputs.
 ///
 /// Pure so the empty-document capability rules are directly testable: without a
 /// document there is no label, no entity count, no camera and no `FIT`. The
 /// `selection` block is always carried, even when nothing is selected.
+///
+/// `capabilities` is the already-projected document capability block (see
+/// [`document_capabilities`]); it is carried verbatim, never re-derived here.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn assemble_status(
     has_document: bool,
@@ -740,6 +837,7 @@ pub(super) fn assemble_status(
     entity_count: Option<u64>,
     loading: bool,
     can_open: bool,
+    capabilities: DocumentCapabilities,
     error: Option<String>,
     camera: Option<CadCamera>,
     backend: Option<String>,
@@ -750,6 +848,8 @@ pub(super) fn assemble_status(
     tool: Option<CadTool>,
     hover_preview: bool,
     snap_enabled: bool,
+    grid_enabled: bool,
+    ortho_enabled: bool,
     snap_kind: Option<String>,
     crosshair: bool,
 ) -> CadStatus {
@@ -759,7 +859,10 @@ pub(super) fn assemble_status(
         loading,
         import_progress: None,
         error,
+        can_new: capabilities.can_new,
         can_open,
+        can_save: capabilities.can_save,
+        can_plot: capabilities.can_plot,
         can_fit: has_document && !loading,
         backend,
         adapter,
@@ -768,6 +871,8 @@ pub(super) fn assemble_status(
         tool,
         hover_preview,
         snap_enabled,
+        grid_enabled,
+        ortho_enabled,
         snap_kind,
         crosshair,
         import_count,

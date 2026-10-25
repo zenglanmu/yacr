@@ -51,6 +51,7 @@ pub(crate) mod canvas_session;
 mod dispatch;
 mod dom;
 mod init;
+mod layers;
 mod locale;
 mod options;
 mod popup;
@@ -59,6 +60,7 @@ mod presenter;
 mod surface;
 mod telemetry;
 mod tick;
+mod tick_evidence;
 
 #[cfg(test)]
 mod tests;

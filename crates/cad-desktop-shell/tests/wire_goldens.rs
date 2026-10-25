@@ -137,7 +137,16 @@ fn cad_status_is_byte_identical_to_the_pre_migration_host() {
         snapshot.import_count = 1;
         snapshot.frame_count = 12;
         snapshot.can_open = true;
+        snapshot.can_new = true;
+        snapshot.can_save = true;
+        snapshot.can_plot = true;
         snapshot.can_fit = true;
+        // A live session's display-grid switch defaults on (`GRID`/F7). The
+        // unsupported/probe snapshots keep `false` because no session exists.
+        snapshot.grid_enabled = true;
+        // `ORTHO` (F8) defaults **off**, so a clean live session keeps the
+        // `unsupported_status` value: the fixture asserts that initial state.
+        snapshot.ortho_enabled = false;
         state.shell.cad_status = Some(snapshot);
     }
     dump_cad_status("cad_status_clean_session.json", &clean);

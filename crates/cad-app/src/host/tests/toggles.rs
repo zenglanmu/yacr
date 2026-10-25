@@ -154,3 +154,173 @@ fn toggle_snap_is_allowed_in_viewer_mode_and_reports_the_value() {
     assert_eq!(disabled.diagnostics[0].message, "object snap: false");
     assert!(!controller.application.can_undo(&controller.document_id));
 }
+
+// --- display grid switch (default ON, `GRID`/F7) -----------------------------
+
+#[test]
+fn grid_defaults_on_and_the_controller_toggles_session_state_only() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let before = controller.drawing().unwrap();
+    assert!(controller.grid_enabled(), "the display grid defaults on");
+
+    assert!(!controller.toggle_grid(), "the first toggle disables");
+    assert!(!controller.grid_enabled());
+    assert!(controller.toggle_grid(), "the second toggle enables");
+    assert!(controller.grid_enabled());
+
+    // Session/display state only: no database revision and no history step.
+    let after = controller.drawing().unwrap();
+    assert_eq!(after.revision(), before.revision());
+    assert_eq!(after.entity_count(), before.entity_count());
+    assert!(!controller.application.can_undo(&controller.document_id));
+    assert!(!controller.application.can_redo(&controller.document_id));
+
+    // The display grid is a separate switch from object snap.
+    assert!(
+        controller.snap_enabled(),
+        "flipping the display grid must not flip object snapping"
+    );
+}
+
+#[test]
+fn toggle_grid_is_allowed_in_viewer_mode_and_reports_the_value() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    // Start explicitly from off so both directions are exercised regardless of
+    // the default.
+    controller.set_grid_enabled(false);
+    controller.set_mode(AppMode::Viewer).unwrap();
+    assert_eq!(controller.mode(), AppMode::Viewer);
+    assert!(
+        !crate::CommandId::ToggleGrid.requires_work_mode(),
+        "the display-grid switch is display/session state, allowed in Viewer and Work"
+    );
+
+    // Enabling from Viewer is admitted and reports the resulting value in a
+    // locale-neutral diagnostic; no history entry is produced.
+    let revision_before = controller.drawing().unwrap().revision();
+    let enabled = controller
+        .execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::ToggleGrid,
+            document: controller.document_id,
+            viewport: controller.viewport_id,
+            payload: crate::CommandPayload::None,
+        })
+        .expect("Viewer admits the display-state toggle");
+    assert!(controller.grid_enabled());
+    assert!(enabled.changes.is_none(), "no ChangeSet is emitted");
+    assert!(enabled.objects.is_empty());
+    assert!(enabled.measurement.is_none());
+    assert_eq!(enabled.diagnostics.len(), 1);
+    assert_eq!(enabled.diagnostics[0].code, "view.grid");
+    assert_eq!(enabled.diagnostics[0].message, "grid: true");
+
+    // The reverse direction reports its own value too.
+    let disabled = controller
+        .execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::ToggleGrid,
+            document: controller.document_id,
+            viewport: controller.viewport_id,
+            payload: crate::CommandPayload::None,
+        })
+        .expect("Viewer admits the reverse toggle");
+    assert!(!controller.grid_enabled());
+    assert_eq!(disabled.diagnostics[0].code, "view.grid");
+    assert_eq!(disabled.diagnostics[0].message, "grid: false");
+    assert!(!controller.application.can_undo(&controller.document_id));
+    assert!(!controller.application.can_redo(&controller.document_id));
+    assert_eq!(
+        controller.drawing().unwrap().revision(),
+        revision_before,
+        "toggling never bumps the database revision"
+    );
+}
+
+// --- ORTHO drafting constraint (default OFF, `ORTHO`/F8) ---------------------
+
+#[test]
+fn ortho_defaults_off_and_the_controller_toggles_session_state_only() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let before = controller.drawing().unwrap();
+    assert!(
+        !controller.ortho_enabled(),
+        "ORTHO defaults off, matching AutoCAD's initial state"
+    );
+
+    assert!(controller.toggle_ortho(), "the first toggle enables");
+    assert!(controller.ortho_enabled());
+    assert!(!controller.toggle_ortho(), "the second toggle disables");
+    assert!(!controller.ortho_enabled());
+
+    // Session/display state only: no database revision and no history step.
+    let after = controller.drawing().unwrap();
+    assert_eq!(after.revision(), before.revision());
+    assert_eq!(after.entity_count(), before.entity_count());
+    assert!(!controller.application.can_undo(&controller.document_id));
+    assert!(!controller.application.can_redo(&controller.document_id));
+
+    // ORTHO is independent of the other drafting switches.
+    assert!(
+        controller.snap_enabled(),
+        "flipping ORTHO must not flip OSNAP"
+    );
+    assert!(
+        controller.grid_enabled(),
+        "flipping ORTHO must not flip GRID"
+    );
+    assert!(
+        controller.hover_preview_enabled(),
+        "flipping ORTHO must not flip hover preview"
+    );
+}
+
+#[test]
+fn toggle_ortho_is_allowed_in_viewer_mode_and_reports_the_value() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_ortho_enabled(false);
+    controller.set_mode(AppMode::Viewer).unwrap();
+    assert_eq!(controller.mode(), AppMode::Viewer);
+    assert!(
+        !crate::CommandId::ToggleOrtho.requires_work_mode(),
+        "the ORTHO switch is display/session state, allowed in Viewer and Work"
+    );
+
+    let revision_before = controller.drawing().unwrap().revision();
+    let enabled = controller
+        .execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::ToggleOrtho,
+            document: controller.document_id,
+            viewport: controller.viewport_id,
+            payload: crate::CommandPayload::None,
+        })
+        .expect("Viewer admits the drafting-state toggle");
+    assert!(controller.ortho_enabled());
+    assert!(enabled.changes.is_none(), "no ChangeSet is emitted");
+    assert!(enabled.objects.is_empty());
+    assert!(enabled.measurement.is_none());
+    assert_eq!(enabled.diagnostics.len(), 1);
+    assert_eq!(enabled.diagnostics[0].code, "view.ortho");
+    assert_eq!(enabled.diagnostics[0].message, "ortho: true");
+
+    let disabled = controller
+        .execute(Command {
+            schema_version: 1,
+            id: crate::CommandId::ToggleOrtho,
+            document: controller.document_id,
+            viewport: controller.viewport_id,
+            payload: crate::CommandPayload::None,
+        })
+        .expect("Viewer admits the reverse toggle");
+    assert!(!controller.ortho_enabled());
+    assert_eq!(disabled.diagnostics[0].code, "view.ortho");
+    assert_eq!(disabled.diagnostics[0].message, "ortho: false");
+    assert!(!controller.application.can_undo(&controller.document_id));
+    assert!(!controller.application.can_redo(&controller.document_id));
+    assert_eq!(
+        controller.drawing().unwrap().revision(),
+        revision_before,
+        "toggling never bumps the database revision"
+    );
+}

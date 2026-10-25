@@ -39,9 +39,9 @@ pub use protocol::{
 };
 pub use session::{
     canonical_command_name, command_name, normalize_command, unsupported_command_reason,
-    unsupported_status, CadCamera, CadCommandLogEntry, CadCommandLogKind, CadMeasurementEcho,
-    CadSelection, CadSelectionRow, CadSession, CadSettingKey, CadSettingValue, CadSettings,
-    CadStatus, COMMAND_ALIASES, COMMAND_TABLE, SETTINGS_INVALID_PLOT_FORMAT,
+    unsupported_status, CadCamera, CadCommandLogEntry, CadCommandLogKind, CadLayer, CadLayers,
+    CadMeasurementEcho, CadSelection, CadSelectionRow, CadSession, CadSettingKey, CadSettingValue,
+    CadSettings, CadStatus, COMMAND_ALIASES, COMMAND_TABLE, SETTINGS_INVALID_PLOT_FORMAT,
     SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
 pub use shell::{

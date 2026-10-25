@@ -444,6 +444,26 @@ pub enum CommandId {
     /// persisted `view.overlays.snapHints` preference, which only gates the hint
     /// overlay. See [`crate::SessionState::snap_enabled`].
     ToggleSnap,
+    /// Flip the display grid overlay for this session (`GRID`, F7).
+    ///
+    /// Session/display state only (no database write, no history, no ChangeSet),
+    /// so it is allowed in Viewer and Work. It defaults to on; the host draws the
+    /// grid only when this switch **and** the persisted `view.overlays.grid`
+    /// preference are both on. This is the **display** grid only — grid snap
+    /// (AutoCAD's `SNAP`/F9) is a different, unimplemented feature and stays
+    /// refused. See [`crate::SessionState::grid_enabled`].
+    ToggleGrid,
+    /// Flip the `ORTHO` drafting constraint for this session (`ORTHO`, F8).
+    ///
+    /// Session/display state only (no database write, no history, no ChangeSet),
+    /// so it is allowed in Viewer and Work. It defaults to **off**, matching
+    /// AutoCAD's initial `ORTHO` state. While on, the next point entry of a
+    /// drawing or measurement capture is constrained to a horizontal or vertical
+    /// direction from the tool's previous captured point (see [`crate::ortho`]).
+    /// This is **not** grid snap: AutoCAD's `SNAP`/F9 stays unimplemented and is
+    /// never admitted as another selector's alias. See
+    /// [`crate::SessionState::ortho_enabled`].
+    ToggleOrtho,
     /// `SETENTITYPROPERTY`: change one named property on **every** currently
     /// selected entity, as one transaction / one undo step.
     ///

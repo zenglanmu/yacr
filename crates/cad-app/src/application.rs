@@ -227,6 +227,42 @@ impl Application {
                     measurement: None,
                 })
             }
+            CommandId::ToggleGrid => {
+                // Display/session state only: no database write, no history and
+                // no ChangeSet. The host composes this switch with the persisted
+                // `view.overlays.grid` preference when it builds the render
+                // overlay visibility, so flipping it here never touches the
+                // document.
+                let enabled = session.toggle_grid();
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: None,
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "view.grid".into(),
+                        message: format!("grid: {enabled}"),
+                    }],
+                    measurement: None,
+                })
+            }
+            CommandId::ToggleOrtho => {
+                // Display/session state only: no database write, no history and
+                // no ChangeSet. The capture and preview paths read this same flag
+                // (`SessionState::capture_point` / the preview projections), so
+                // flipping it here never touches the document or the persisted
+                // preferences. `SNAP` (grid snap, F9) stays unimplemented.
+                let enabled = session.toggle_ortho();
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: None,
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "view.ortho".into(),
+                        message: format!("ortho: {enabled}"),
+                    }],
+                    measurement: None,
+                })
+            }
             CommandId::CreateLine
             | CommandId::CreateCircle
             | CommandId::CreateArc

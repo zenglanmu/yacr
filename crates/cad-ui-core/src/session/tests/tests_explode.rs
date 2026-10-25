@@ -40,14 +40,11 @@ fn explode_selector_is_admitted_once_and_disjoint_from_other_selector_families()
     assert!(zoom_step_factor(selector).is_none(), "{selector}");
     assert!(
         !COMMAND_ALIASES.iter().any(|(alias, _)| *alias == selector),
-        "{selector} must not be an alias"
+        "{selector} must not be an alias name"
     );
-    assert!(
-        !COMMAND_ALIASES
-            .iter()
-            .any(|(_, canonical)| *canonical == selector),
-        "{selector} must not be an alias target"
-    );
+    // An abbreviation *may* target this selector (`X` -> EXPLODE); the alias
+    // table's own invariants are contract-tested once in
+    // `tests_commands::alias_table`.
 }
 
 #[test]

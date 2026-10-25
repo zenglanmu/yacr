@@ -1,7 +1,12 @@
 cad_close_popup
 cad_command
+cad_command_aliases
 cad_commands
+cad_layers
 cad_open_popup
+cad_restore_layers
+cad_set_active_layer
+cad_set_layer_visible
 cad_set_selected_property
 cad_set_selected_text
 cad_set_setting

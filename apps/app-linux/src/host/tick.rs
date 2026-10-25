@@ -69,35 +69,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1))
         {
             telemetry.last_log = Some(now);
-            let stages = telemetry
-                .last_timings
-                .map(|t| {
-                    format!(
-                        "write={} acquire={} configure={} submit={} scope={} present={} total={}",
-                        t.write_buffer_us,
-                        t.acquire_us,
-                        t.configure_us,
-                        t.submit_us,
-                        t.scope_pop_us,
-                        t.present_us,
-                        t.total_us
-                    )
-                })
-                .unwrap_or_else(|| "none".to_string());
-            eprintln!(
-                "[probe] status backend={:?} adapter={:?} size={}x{} frames={} ticks={} present_mode={:?} stopped={} marker={:.3} stages_us[{}] error={:?}",
-                state.shell.status.backend,
-                state.shell.status.adapter,
-                state.shell.status.width,
-                state.shell.status.height,
-                state.shell.status.frames,
-                state.shell.ticks,
-                state.shell.present_mode,
-                state.shell.status.stopped,
-                state.shell.input.marker_offset(),
-                stages,
-                state.shell.status.error,
-            );
+            super::tick_evidence::log_status_line(&state, telemetry.last_timings);
         }
 
         // Bounded DOM diagnostics at ~6s and ~14s (2 runs max); they only
@@ -358,9 +330,9 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                     resources: std::rc::Rc::new(cad_host::DesktopResources),
                     capabilities: HostCapabilities {
                         open: true,
-                        new: false,
-                        save: false,
-                        plot: false,
+                        new: true,
+                        save: true,
+                        plot: true,
                         import_worker: true,
                     },
                 };
@@ -459,6 +431,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             commands,
             mut standard_views,
             setting_writes,
+            layer_writes,
             tool_parameters,
             tool_texts,
             selected_texts,
@@ -470,6 +443,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 std::mem::take(&mut state.shell.cad_commands),
                 std::mem::take(&mut state.cad_standard_views),
                 std::mem::take(&mut state.cad_setting_writes),
+                std::mem::take(&mut state.cad_layer_writes),
                 std::mem::take(&mut state.cad_tool_parameters),
                 std::mem::take(&mut state.cad_tool_texts),
                 std::mem::take(&mut state.cad_selected_texts),
@@ -480,6 +454,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         let queued = commands.len()
             + standard_views.len()
             + setting_writes.len()
+            + layer_writes.len()
             + tool_parameters.len()
             + tool_texts.len()
             + selected_texts.len()
@@ -508,6 +483,11 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                     for (key, value) in setting_writes {
                         super::apply_setting_write(session, key, value);
                     }
+                    // Typed layer writes (the React layer panel's three
+                    // mutations): the session resolves each name against the
+                    // drawing's own layer table and dispatches the ordinary layer
+                    // command; a refusal is the session's real error.
+                    super::layers::apply_writes(session, layer_writes);
                     for command in &commands {
                         // Admission already returned `{accepted:true}`. The real
                         // business outcome is the CadSession snapshot error; it
@@ -813,6 +793,8 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 state.cad_settings = Some(settings);
             }
         }
+        // The layer panel's own mirror (see `super::layers`).
+        super::layers::mirror(shared);
         // Bounded CAD stage telemetry (diagnostics only): ONE aggregated line
         // when an upload work unit staged/committed, or the host frame was slow
         // (> 50 ms). Both observations are taken (consumed) at most once, so a

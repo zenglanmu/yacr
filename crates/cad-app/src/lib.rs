@@ -20,6 +20,7 @@ pub mod input;
 pub mod interaction;
 pub mod layers;
 pub mod measure_tool;
+pub mod ortho;
 pub mod picking;
 pub mod property_value;
 pub mod recovery;
@@ -57,6 +58,7 @@ pub use input::{
     PointerPhase, PointerUpdate, StatusModel, ToolStatus, ViewMetrics, DRAG_THRESHOLD_LOGICAL_PX,
 };
 pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
+pub use ortho::{ortho_constrain, ortho_constrain_point};
 pub use picking::{
     drawing_pick_items, filter_by_index, last_pick_stats, pick_at_screen, pick_ray,
     pick_ray_exhaustive, pick_ray_with_index, pick_tolerance, PickIndex, PickStats,

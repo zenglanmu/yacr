@@ -4,6 +4,7 @@
 //! verbatim and reaches the session items through `super::super::super::*` and
 //! the shared fixtures through `super::super::test_support::*`.
 
+mod alias_table;
 mod command_vocabulary;
 mod import_accounting;
 mod input_and_lifecycle;

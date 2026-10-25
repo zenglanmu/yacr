@@ -24,6 +24,7 @@ use crate::{
 };
 
 mod databases;
+mod display_switches;
 mod draw_create;
 mod draw_intent_map;
 mod draw_pick;
@@ -618,40 +619,6 @@ impl HostController {
                     .draw_preview()
                     .and_then(|preview| preview.cursor)
             })
-    }
-
-    /// The session's object-snap switch (session state only).
-    pub fn snap_enabled(&self) -> bool {
-        self.session.snap_enabled()
-    }
-
-    /// Enable or disable object snapping for this session.
-    ///
-    /// Session state only: no database write, no history entry, and no change
-    /// to the persisted `view.overlays.snapHints` preference (ADR 0014 A.4).
-    pub fn set_snap_enabled(&mut self, enabled: bool) {
-        self.session.set_snap_enabled(enabled);
-    }
-
-    /// Flip object snapping and return the new state (F3 binding).
-    pub fn toggle_snap(&mut self) -> bool {
-        self.session.toggle_snap()
-    }
-
-    /// Whether idle pointer movement previews the entity under the cursor.
-    ///
-    /// See [`crate::SessionState::hover_preview`] for the default (`true`,
-    /// matching AutoCAD's `SELECTIONPREVIEW` initial `3`).
-    pub fn hover_preview_enabled(&self) -> bool {
-        self.session.hover_preview()
-    }
-
-    /// Flip the idle hover entity preview and return the new state.
-    ///
-    /// Session/display state only: no database write, no history entry and no
-    /// ChangeSet. Object-snap markers are unaffected.
-    pub fn toggle_hover_preview(&mut self) -> bool {
-        self.session.toggle_hover_preview()
     }
 
     /// Resolve the single object-snap candidate for a raw world point.

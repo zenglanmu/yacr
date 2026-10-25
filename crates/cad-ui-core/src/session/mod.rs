@@ -25,6 +25,7 @@ mod admission;
 mod commands;
 mod diagnostics;
 mod input;
+mod layers;
 mod settings;
 mod status;
 
@@ -56,19 +57,21 @@ use self::diagnostics::{
     resource_keys_error, status_error,
 };
 use self::input::{cancel_target, plan_input, CancelTarget, PointerPress};
-use self::status::{assemble_status, cad_tool};
+use self::status::{assemble_status, cad_tool, document_capabilities};
 
 pub use self::admission::{
-    admit_selected_property, admit_selected_text, admit_setting, admit_standard_view,
-    admit_tool_parameter, admit_tool_text, drain_standard_views, parse_property_write,
-    parse_standard_view, parse_tool_parameter, CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP,
-    CAD_SETTING_CAP, CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
+    admit_layer_write, admit_selected_property, admit_selected_text, admit_setting,
+    admit_standard_view, admit_tool_parameter, admit_tool_text, drain_layer_writes,
+    drain_standard_views, parse_property_write, parse_standard_view, parse_tool_parameter,
+    CAD_LAYER_WRITE_CAP, CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP, CAD_SETTING_CAP,
+    CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
 };
 pub use self::commands::{
-    admissible_names, canonical_command_name, command_name, measurement_selector_kind,
+    admissible_names, alias_pairs, canonical_command_name, command_name, measurement_selector_kind,
     normalize_command, unsupported_command_reason, zoom_step_factor, COMMAND_ALIASES,
     COMMAND_TABLE, MEASUREMENT_SELECTORS, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
+pub use self::layers::{CadLayer, CadLayerWrite, CadLayers};
 pub use self::settings::{
     CadSettingKey, CadSettingValue, CadSettings, SETTINGS_INVALID_PLOT_FORMAT,
     SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
@@ -698,6 +701,18 @@ impl CadSession {
         let can_open = self.core.capabilities.open
             && (!self.core.options.headless || self.core.options.drawing.is_some())
             && !loading;
+        // The document-dependent capabilities (NEW/SAVE/PLOT) are a pure
+        // projection of the advertised host flags × the real session state: an
+        // open/import in flight gates all three, and SAVE/PLOT additionally
+        // need an authoritative document and no save/plot target chooser or
+        // export still pending (`HostCore::save_pending`, the same slot
+        // `request_save`/`request_plot` refuse on).
+        let capabilities = document_capabilities(
+            self.core.capabilities,
+            has_document,
+            loading,
+            self.core.save_pending(),
+        );
         // A frame the caller did not measure falls back to the last real present
         // count the GPU lane recorded; nothing is invented either way.
         let frame_count = if frame_count == 0 {
@@ -748,6 +763,7 @@ impl CadSession {
             entity_count,
             loading,
             can_open,
+            capabilities,
             error,
             camera,
             backend,
@@ -758,6 +774,8 @@ impl CadSession {
             tool,
             self.core.controller.borrow().hover_preview_enabled(),
             self.core.controller.borrow().snap_enabled(),
+            self.core.controller.borrow().grid_enabled(),
+            self.core.controller.borrow().ortho_enabled(),
             snap_kind,
             crosshair,
         );

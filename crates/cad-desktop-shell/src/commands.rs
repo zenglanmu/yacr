@@ -19,10 +19,10 @@ use std::sync::{Arc, Mutex};
 
 use cad_ui_core::protocol::{InputKind, ProbeInput, ProbeInputAck, ProbeStatus};
 use cad_ui_core::session::{
-    admit_selected_property, admit_setting, admit_standard_view, admit_tool_parameter,
-    admit_tool_text, parse_property_write, parse_standard_view, parse_tool_parameter,
-    CadSettingKey, CadSettingValue, CadSettings, CadStatus, SETTINGS_INVALID_VALUE,
-    SETTINGS_UNKNOWN_KEY,
+    admit_layer_write, admit_selected_property, admit_setting, admit_standard_view,
+    admit_tool_parameter, admit_tool_text, parse_property_write, parse_standard_view,
+    parse_tool_parameter, CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CadSettings,
+    CadStatus, SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
 use cad_ui_core::shell::{
     admit_command, modal_gate_open, projected_popup, projected_status, queue_cad_input,
@@ -37,6 +37,9 @@ use crate::state::{lock, ProbeShared, Shared};
 pub use cad_ui_core::session::admit_selected_text;
 // Re-exported for the owner tick, which drains the queue with the shared rule.
 pub use cad_ui_core::session::drain_standard_views;
+// Re-exported for the owner tick, which drains the layer-write queue with the
+// shared rule (the React layer panel's three mutations).
+pub use cad_ui_core::session::drain_layer_writes;
 
 use cad_ui_core::popup::PopupAck;
 
@@ -337,6 +340,109 @@ pub fn cad_set_setting(
     Ok(CadCommandAck { accepted: true })
 }
 
+/// `cad_layers` command: the layer-panel projection of the open drawing.
+///
+/// This is the React layer panel's explicit read path — deliberately **not** a
+/// `cad_status` field, so the frozen status contract is untouched. The
+/// owner-thread session is `!Send`, so the tick mirrors its
+/// `CadSession::layers()` answer into the shared state exactly like
+/// `cad_settings`. Before a session exists (or in probe mode) the read is an
+/// explicit `cad_waiting`, never a fabricated layer table; with a session but no
+/// drawing it is the honest empty answer (`layers: []`, `active: null`).
+#[tauri::command]
+pub fn cad_layers(shared: tauri::State<'_, ProbeShared>) -> Result<CadLayers, String> {
+    cad_layers_impl(&shared.0)
+}
+
+/// Command body of [`cad_layers`], without the Tauri state wrapper.
+///
+/// Split out so the wire-shape/golden tests can call the **same** implementation
+/// the IPC path runs (no duplicated projection in tests).
+pub fn cad_layers_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadLayers, String> {
+    lock(shared)
+        .cad_layers
+        .clone()
+        .ok_or_else(|| "cad_waiting".to_string())?
+}
+
+/// `cad_set_layer_visible` command: queue one **temporary** layer visibility.
+///
+/// The wire shape is `{ name: <string>, visible: <bool> }` and carries the
+/// layer's **name**, never a `LayerId`: the host resolves the name against the
+/// drawing's own layer table on the owner thread, so a stale UI can never flip a
+/// layer that no longer exists (that is an explicit `layer.unknown` refusal). An
+/// unknown or ambiguous name changes nothing; the DWG layer-table flag is never
+/// written.
+///
+/// `{accepted:true}` means **queued**, not completed: the owner tick routes it
+/// through `CadSession::set_layer_visibility` (the ordinary `TOGGLELAYER`
+/// funnel), and the real outcome — including any refusal — surfaces through
+/// `cad_status.error` and the next `cad_layers` read.
+#[tauri::command]
+pub fn cad_set_layer_visible(
+    shared: tauri::State<'_, ProbeShared>,
+    name: String,
+    visible: bool,
+) -> Result<CadCommandAck, String> {
+    let mut state = lock(&shared.0);
+    let cad_mode = state.shell.cad_mode;
+    let modal_open = modal_gate_open(&state.shell);
+    admit_layer_write(
+        &mut state.cad_layer_writes,
+        cad_mode,
+        modal_open,
+        CadLayerWrite::SetVisible { name, visible },
+    )?;
+    Ok(CadCommandAck { accepted: true })
+}
+
+/// `cad_restore_layers` command: queue a **restore** of every temporary layer
+/// override.
+///
+/// The wire carries no fields. `{accepted:true}` means **queued**, not
+/// completed: the owner tick routes it through `CadSession::restore_layers` (the
+/// ordinary `RESTORELAYERS` funnel). Without a drawing the session refuses
+/// explicitly (`layer.no_document`) instead of reporting a restore of nothing.
+#[tauri::command]
+pub fn cad_restore_layers(shared: tauri::State<'_, ProbeShared>) -> Result<CadCommandAck, String> {
+    let mut state = lock(&shared.0);
+    let cad_mode = state.shell.cad_mode;
+    let modal_open = modal_gate_open(&state.shell);
+    admit_layer_write(
+        &mut state.cad_layer_writes,
+        cad_mode,
+        modal_open,
+        CadLayerWrite::Restore,
+    )?;
+    Ok(CadCommandAck { accepted: true })
+}
+
+/// `cad_set_active_layer` command: queue one active-layer change.
+///
+/// The wire shape is `{ name: <string> }` and carries the layer's **name**; the
+/// host resolves it against the drawing's layer table on the owner thread and
+/// dispatches `SETACTIVELAYER`. An unknown or ambiguous name changes nothing and
+/// surfaces as `cad_status.error`.
+///
+/// `{accepted:true}` means **queued**, not completed: the next `cad_layers` read
+/// reports the new `active`/`current` row once the owner tick applied it.
+#[tauri::command]
+pub fn cad_set_active_layer(
+    shared: tauri::State<'_, ProbeShared>,
+    name: String,
+) -> Result<CadCommandAck, String> {
+    let mut state = lock(&shared.0);
+    let cad_mode = state.shell.cad_mode;
+    let modal_open = modal_gate_open(&state.shell);
+    admit_layer_write(
+        &mut state.cad_layer_writes,
+        cad_mode,
+        modal_open,
+        CadLayerWrite::SetActive { name },
+    )?;
+    Ok(CadCommandAck { accepted: true })
+}
+
 /// `cad_status` command: the latest main-thread CAD snapshot, with the host-side
 /// (transport) error merged in.
 ///
@@ -403,6 +509,42 @@ pub fn cad_status_impl(shared: &Arc<Mutex<Shared>>) -> CadStatus {
 #[tauri::command]
 pub fn cad_commands() -> Vec<&'static str> {
     cad_ui_core::session::admissible_names()
+}
+
+/// One AutoCAD-style abbreviation the router accepts, as the chrome consumes it.
+///
+/// `command` is the canonical selector the alias normalizes onto (never another
+/// alias), so a frontend can display the target without re-resolving anything.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CadCommandAlias {
+    /// The typed abbreviation, e.g. `L`.
+    pub alias: String,
+    /// The canonical selector it resolves to, e.g. `LINE`.
+    pub command: String,
+}
+
+/// `cad_command_aliases` command: the alias table the chrome offers in its
+/// suggestions.
+///
+/// Aliases are a **display** aid only: admission still goes through
+/// `cad_command`, whose router normalizes the typed text itself. The answer is
+/// derived from the same Rust table (`cad_ui_core::session::alias_pairs`), so the
+/// frontend never keeps a second copy that could drift from what the host accepts.
+#[tauri::command]
+pub fn cad_command_aliases() -> Vec<CadCommandAlias> {
+    cad_command_aliases_impl()
+}
+
+/// Command body of [`cad_command_aliases`], without the Tauri command wrapper.
+pub fn cad_command_aliases_impl() -> Vec<CadCommandAlias> {
+    cad_ui_core::session::alias_pairs()
+        .into_iter()
+        .map(|(alias, command)| CadCommandAlias {
+            alias: alias.to_string(),
+            command: command.to_string(),
+        })
+        .collect()
 }
 
 /// `probe_input` command: sequence-gate one frontend input and route it.
@@ -504,6 +646,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "probe_status",
     "probe_input",
     "cad_command",
+    "cad_command_aliases",
     "cad_status",
     "cad_commands",
     "cad_set_tool_parameter",
@@ -515,6 +658,10 @@ pub const COMMAND_NAMES: &[&str] = &[
     "cad_close_popup",
     "cad_settings",
     "cad_set_setting",
+    "cad_layers",
+    "cad_set_layer_visible",
+    "cad_restore_layers",
+    "cad_set_active_layer",
 ];
 
 /// Build the `invoke_handler` for the desktop hosts.
@@ -528,6 +675,7 @@ pub fn register_commands<R: tauri::Runtime>(
         probe_status,
         probe_input,
         cad_command,
+        cad_command_aliases,
         cad_status,
         cad_commands,
         cad_set_tool_parameter,
@@ -538,6 +686,10 @@ pub fn register_commands<R: tauri::Runtime>(
         cad_open_popup,
         cad_close_popup,
         cad_settings,
-        cad_set_setting
+        cad_set_setting,
+        cad_layers,
+        cad_set_layer_visible,
+        cad_restore_layers,
+        cad_set_active_layer
     ]
 }

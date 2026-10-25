@@ -85,7 +85,13 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // `EntityProperty { key, value }` payload).
     ("SETENTITYPROPERTY", CommandId::SetEntityProperty),
     ("HOVERPREVIEW", CommandId::ToggleHoverPreview),
+    // The display grid switch (F7). `SNAP` (grid snap, F9) stays absent on
+    // purpose: see `COMMAND_ALIASES`.
+    ("GRID", CommandId::ToggleGrid),
     ("OSNAP", CommandId::ToggleSnap),
+    // The orthographic drafting constraint (F8). Session/display state only;
+    // `SNAP` (grid snap, F9) stays absent on purpose: see `COMMAND_ALIASES`.
+    ("ORTHO", CommandId::ToggleOrtho),
 ];
 
 /// Interaction-only selectors: canonical uppercase names that carry **no**
@@ -158,13 +164,26 @@ pub fn zoom_step_factor(name: &str) -> Option<f64> {
         .map(|(_, factor)| *factor)
 }
 
-/// Full-word command synonyms, always accepted, that map onto a canonical
-/// [`COMMAND_TABLE`] selector.
+/// Full-word synonyms and AutoCAD-style abbreviations, always accepted, that map
+/// onto a canonical [`COMMAND_TABLE`] selector.
+///
+/// The single/double-letter rows mirror AutoCAD's default `acad.pgp` command
+/// abbreviations **for the commands this build already implements only**: an
+/// alias is admitted only when its target is a real selector, so an abbreviation
+/// like `MA` (`MATCHPROP`) stays absent because the command itself is absent.
+/// There is no `acad.pgp` file parsing and no user-defined alias support; this
+/// table is the whole (curated) subset, and every row is contract-tested to
+/// canonicalise onto a [`COMMAND_TABLE`] name, to be unique, and to collide with
+/// no canonical name.
 ///
 /// `SNAP` is deliberately absent: AutoCAD's `SNAP` is **grid snap** (F9), which
 /// this project does not implement and which is a different feature from the
-/// object snap (`OSNAP`) selector. Aliasing it onto `ToggleSnap` would silently
-/// turn a request for grid snap into an object-snap toggle.
+/// object snap (`OSNAP`) selector and from the display grid switch (`GRID`).
+/// Aliasing it onto `ToggleSnap` would silently turn a request for grid snap
+/// into an object-snap toggle, aliasing it onto `ToggleGrid` would silently
+/// turn it into a display toggle, and aliasing it onto `ToggleOrtho` would
+/// silently turn it into the orthographic constraint. None of those is grid
+/// snap, so the name stays refused.
 pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("EXPORT", "PLOT"),
     ("PRINT", "PLOT"),
@@ -179,7 +198,68 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     // name onto the canonical selector (ADR 0017 decision C, P5f).
     ("DBA", "DIMBASELINE"),
     ("DCO", "DIMCONTINUE"),
+    // AutoCAD's default `acad.pgp` single/double-letter abbreviations, listed
+    // alphabetically (draw, modify, view, annotate, drafting switches). Only the
+    // subset whose target selector exists here: `MA` (MATCHPROP) is skipped
+    // because this build implements no MATCHPROP, and inventing one from an
+    // abbreviation is exactly what this table must never do.
+    ("A", "ARC"),
+    ("AL", "ALIGN"),
+    // AutoCAD's `AR` is ARRAY; `ARRAYRECT` is the array command this build
+    // implements, so the abbreviation points at the implemented selector.
+    ("AR", "ARRAYRECT"),
+    ("C", "CIRCLE"),
+    ("CHA", "CHAMFER"),
+    ("CO", "COPY"),
+    ("CP", "COPY"),
+    ("DAL", "DIMALIGNED"),
+    ("DAN", "DIMANGULAR"),
+    ("DCE", "DIMCENTER"),
+    ("DDI", "DIMDIAMETER"),
+    ("DLI", "DIMLINEAR"),
+    ("DRA", "DIMRADIUS"),
+    ("E", "ERASE"),
+    ("EL", "ELLIPSE"),
+    ("EX", "EXTEND"),
+    ("F", "FILLET"),
+    ("GR", "GRID"),
+    ("H", "HATCH"),
+    ("L", "LINE"),
+    ("M", "MOVE"),
+    ("MI", "MIRROR"),
+    ("O", "OFFSET"),
+    ("OR", "ORTHO"),
+    ("OS", "OSNAP"),
+    ("P", "PAN"),
+    ("PL", "PLINE"),
+    ("PO", "POINT"),
+    ("POL", "POLYGON"),
+    ("REC", "RECTANG"),
+    ("RO", "ROTATE"),
+    ("S", "STRETCH"),
+    ("SC", "SCALE"),
+    ("SPL", "SPLINE"),
+    ("T", "TEXT"),
+    ("TR", "TRIM"),
+    ("U", "UNDO"),
+    ("X", "EXPLODE"),
+    ("Z", "ZOOM"),
 ];
+
+/// The alias table as `(alias, canonical selector)` pairs, resolved through
+/// [`canonical_command_name`].
+///
+/// This is what a host publishes to a frontend (the `cad_command_aliases` IPC):
+/// the frontend may offer aliases in its suggestion list without keeping a
+/// hand-written mirror of the table. An alias whose target does not resolve is
+/// skipped rather than guessed; the alias invariants are contract-tested, so no
+/// such row exists.
+pub fn alias_pairs() -> Vec<(&'static str, &'static str)> {
+    COMMAND_ALIASES
+        .iter()
+        .filter_map(|(alias, target)| canonical_command_name(target).map(|name| (*alias, name)))
+        .collect()
+}
 
 /// The canonical, stable uppercase selector a command name resolves to, or
 /// `None` when the name maps to no admitted command.

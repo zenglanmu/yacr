@@ -29,9 +29,8 @@ fn the_hatch_selector_is_admitted_once_and_disjoint_from_other_selector_families
     assert_eq!(measurement_selector_kind(selector), None);
     assert!(zoom_step_factor(selector).is_none());
     assert!(!COMMAND_ALIASES.iter().any(|(alias, _)| *alias == selector));
-    assert!(!COMMAND_ALIASES
-        .iter()
-        .any(|(_, canonical)| *canonical == selector));
+    // An abbreviation *may* target this selector (`H` -> HATCH); the alias table's
+    // own invariants are contract-tested once in `tests_commands::alias_table`.
 }
 
 #[test]

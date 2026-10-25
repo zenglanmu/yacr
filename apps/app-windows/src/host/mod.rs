@@ -38,6 +38,7 @@ use cad_ui_core::protocol::InputKind;
 use cad_ui_core::session::CadSession;
 
 mod init;
+mod layers;
 mod popup;
 mod tick;
 

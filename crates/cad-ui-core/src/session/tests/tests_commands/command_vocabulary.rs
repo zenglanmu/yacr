@@ -91,7 +91,9 @@ command_selector_contract! {
     SetActiveLayer => "SETACTIVELAYER",
     SetEntityProperty => "SETENTITYPROPERTY",
     ToggleHoverPreview => "HOVERPREVIEW",
+    ToggleGrid => "GRID",
     ToggleSnap => "OSNAP",
+    ToggleOrtho => "ORTHO",
 }
 
 #[test]
@@ -106,7 +108,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 74,
+        EXPECTED_COMMAND_COUNT, 76,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -198,6 +200,114 @@ fn object_snap_selector_toggles_the_projected_session_flag_only() {
         assert!(!c.application.can_undo(&document));
         assert!(!c.application.can_redo(&document));
     }
+}
+
+#[test]
+fn grid_selector_toggles_the_projected_display_flag_only() {
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let (document, before) = {
+        let c = session.core.controller.borrow();
+        (c.document_id, c.drawing().unwrap())
+    };
+    assert!(
+        session.snapshot(None, None, 0).grid_enabled,
+        "the display-grid switch defaults on and is projected"
+    );
+
+    // The canonical selector flips the session flag. `SNAP` is AutoCAD's grid
+    // snap (F9), a different feature this build does not implement, so it must
+    // NOT be admitted as the display-grid selector.
+    assert_eq!(normalize_command("SNAP"), None);
+    assert_eq!(canonical_command_name("SNAP"), None);
+    session.command("GRID").expect("GRID is admitted");
+    assert!(!session.snapshot(None, None, 0).grid_enabled);
+    assert!(
+        session.command("snap").is_err(),
+        "SNAP must not be accepted as the display-grid selector"
+    );
+    assert!(
+        !session.snapshot(None, None, 0).grid_enabled,
+        "a refused SNAP must leave the display-grid flag unchanged"
+    );
+
+    // GRID and OSNAP are independent session switches.
+    assert!(
+        session.snapshot(None, None, 0).snap_enabled,
+        "flipping the grid must not flip object snapping"
+    );
+
+    // Session state only: no database revision, no undo entry and no write to
+    // the persisted `view.overlays.grid` preference (the second gate).
+    let after = session.core.controller.borrow().drawing().unwrap();
+    assert_eq!(after.revision(), before.revision());
+    assert_eq!(after.entity_count(), before.entity_count());
+    {
+        let c = session.core.controller.borrow();
+        assert!(!c.application.can_undo(&document));
+        assert!(!c.application.can_redo(&document));
+    }
+    assert!(
+        !session.settings().grid,
+        "GRID is session state; the persisted overlay preference is untouched"
+    );
+}
+
+#[test]
+fn ortho_selector_toggles_the_projected_drafting_flag_only() {
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let (document, before) = {
+        let c = session.core.controller.borrow();
+        (c.document_id, c.drawing().unwrap())
+    };
+    assert!(
+        !session.snapshot(None, None, 0).ortho_enabled,
+        "ORTHO defaults off (AutoCAD's initial state) and is projected"
+    );
+    let settings_before = session.settings();
+
+    // The canonical selector flips the session flag. `SNAP` is AutoCAD's grid
+    // snap (F9), a different feature this build does not implement, so it must
+    // NOT be admitted as the ORTHO selector either.
+    assert_eq!(normalize_command("SNAP"), None);
+    session.command("ORTHO").expect("ORTHO is admitted");
+    assert!(session.snapshot(None, None, 0).ortho_enabled);
+    assert!(
+        session.command("snap").is_err(),
+        "SNAP must not be accepted as the ORTHO selector"
+    );
+    assert!(
+        session.snapshot(None, None, 0).ortho_enabled,
+        "a refused SNAP must leave the ORTHO flag unchanged"
+    );
+
+    // ORTHO is independent of the other drafting switches.
+    let status = session.snapshot(None, None, 0);
+    assert!(status.snap_enabled, "flipping ORTHO must not flip OSNAP");
+    assert!(status.grid_enabled, "flipping ORTHO must not flip GRID");
+
+    // Session state only: no database revision, no undo entry and no persisted
+    // preference write (there is no ORTHO preference at all).
+    let after = session.core.controller.borrow().drawing().unwrap();
+    assert_eq!(after.revision(), before.revision());
+    assert_eq!(after.entity_count(), before.entity_count());
+    {
+        let c = session.core.controller.borrow();
+        assert!(!c.application.can_undo(&document));
+        assert!(!c.application.can_redo(&document));
+    }
+    assert_eq!(
+        session.settings(),
+        settings_before,
+        "ORTHO is session state; no persisted preference is written"
+    );
+
+    // ...and it toggles back off with the same selector.
+    session.command("ortho").expect("ORTHO is case-insensitive");
+    assert!(!session.snapshot(None, None, 0).ortho_enabled);
 }
 
 #[test]

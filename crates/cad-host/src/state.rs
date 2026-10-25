@@ -137,8 +137,16 @@ impl HostCore {
         let (overlay_visibility, crosshair_percent, pickbox_logical_pixels) = {
             let store = self.viewer_config.borrow();
             let view = &store.effective().view;
+            let mut visibility = OverlayVisibility::from(view.overlays.clone());
+            // The display grid has **two** gates and both must be open: the
+            // persisted `view.overlays.grid` preference and the session's live
+            // `GRID` switch (F7). The session switch is display state, so the
+            // renderer never sees it directly and the persisted preference is
+            // never rewritten by toggling — the AND lives here, in the one place
+            // the render overlay visibility is built.
+            visibility.grid = visibility.grid && self.controller.borrow().grid_enabled();
             (
-                OverlayVisibility::from(view.overlays.clone()),
+                visibility,
                 view.crosshair.size_percent,
                 // The same policy the pick/hover paths use, so the drawn box is
                 // exactly the click radius (see `cursor_overlay`).

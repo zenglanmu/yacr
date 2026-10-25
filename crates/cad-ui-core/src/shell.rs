@@ -285,7 +285,10 @@ mod tests {
             loading: false,
             import_progress: None,
             error: error.map(str::to_string),
+            can_new: true,
             can_open: true,
+            can_save: true,
+            can_plot: true,
             can_fit: true,
             backend: Some("vulkan".into()),
             adapter: Some("P600".into()),
@@ -294,6 +297,8 @@ mod tests {
             tool: None,
             hover_preview: false,
             snap_enabled: false,
+            grid_enabled: false,
+            ortho_enabled: false,
             snap_kind: None,
             crosshair: false,
             import_count: 0,
@@ -310,11 +315,23 @@ mod tests {
         assert_eq!(status.entity_count, None);
         assert_eq!(status.camera, None);
         assert!(!status.can_open && !status.can_fit && !status.loading);
+        assert!(
+            !status.can_new && !status.can_save && !status.can_plot,
+            "a snapshot with no session advertises no NEW/SAVE/PLOT either"
+        );
         assert_eq!(status.import_count, 0);
         assert_eq!(status.frame_count, 0);
         assert!(
             !status.snap_enabled,
             "no session means no installed switch to advertise"
+        );
+        assert!(
+            !status.grid_enabled,
+            "no session means no installed display-grid switch either"
+        );
+        assert!(
+            !status.ortho_enabled,
+            "no session means no installed ORTHO switch either"
         );
         // The selection block is present and honest: nothing can be selected
         // when no CAD session exists.
