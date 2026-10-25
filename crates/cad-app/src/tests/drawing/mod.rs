@@ -300,3 +300,4 @@ mod stretch;
 mod text;
 mod text_edit;
 mod transform;
+mod trim_extend_curves;

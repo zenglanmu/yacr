@@ -243,7 +243,12 @@ fn extend_refuses_a_target_already_touching_the_boundary() {
 }
 
 #[test]
-fn extend_refuses_a_non_line_target() {
+fn extend_refuses_a_pick_whose_projection_is_outside_the_arc_span() {
+    // ARC targets are supported since the curved-cut widening. The pick is
+    // *projected* onto the target (so a wrong radius is fine), but the projection
+    // must land on the target's own span: the seed arc spans angles 0..1 rad, so
+    // (0, 3) — angle PI/2 on the same circle — projects outside it and is refused
+    // by name instead of being clamped to the nearest end.
     let (mut app, mut session) = drawing_app();
     let rev = revision(&app);
     let err = execute(
@@ -253,11 +258,84 @@ fn extend_refuses_a_non_line_target() {
         CommandPayload::Extend {
             target: ref_of(2),
             boundary: vec![ref_of(1)],
-            pick_point: point(0.0, 0.0),
+            pick_point: point(0.0, 3.0),
         },
     )
     .unwrap_err();
-    assert!(matches!(err, CadError::Unsupported(_)));
+    assert!(matches!(err, CadError::InvalidInput(_)), "{err:?}");
+    assert!(
+        err.to_string().contains("projects outside the target arc"),
+        "{err:?}"
+    );
+    assert_eq!(revision(&app), rev);
+}
+
+#[test]
+fn extend_refuses_an_unsupported_target_and_a_circle_target() {
+    // INSERT stays unsupported; a CIRCLE has no endpoint to grow.
+    let (mut app, mut session) = drawing_app();
+    let rev = revision(&app);
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::ExtendEntity,
+        CommandPayload::Extend {
+            target: ref_of(3),
+            boundary: vec![ref_of(1)],
+            pick_point: point(5.0, 5.0),
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(err, CadError::Unsupported(_)), "{err:?}");
+    assert!(err.to_string().contains("AcDbBlockReference"), "{err:?}");
+    assert_eq!(revision(&app), rev);
+
+    let (mut app, mut session) = drawing_app();
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_entity(ent(
+        1,
+        SemanticGeometry::Circle {
+            center: point(0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            radius: 5.0,
+        },
+        0,
+    ))
+    .unwrap();
+    b.insert_entity(ent(
+        2,
+        SemanticGeometry::Line {
+            start: point(20.0, -5.0),
+            end: point(20.0, 5.0),
+        },
+        1,
+    ))
+    .unwrap();
+    app.workspace
+        .documents
+        .get_mut(&DocumentId(1))
+        .unwrap()
+        .drawing = Arc::new(b.finish().unwrap());
+    let rev = revision(&app);
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::ExtendEntity,
+        CommandPayload::Extend {
+            target: ref_of(1),
+            boundary: vec![ref_of(2)],
+            pick_point: point(5.0, 0.0),
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(err, CadError::Unsupported(_)), "{err:?}");
+    assert!(err.to_string().contains("has no endpoint"), "{err:?}");
     assert_eq!(revision(&app), rev);
 }
 
@@ -476,60 +554,57 @@ fn extend_accepts_a_straight_lwpolyline_boundary() {
 }
 
 #[test]
-fn extend_refuses_unsupported_boundary_geometry() {
-    // A curved (bulged) LWPOLYLINE boundary and a CIRCLE boundary are both
-    // unsupported geometry, refused without a change.
-    let curved = ent(
-        63,
-        SemanticGeometry::Polyline {
-            points: vec![point(20.0, -5.0), point(20.0, 5.0)],
-            bulges: vec![0.5],
-            closed: false,
+fn extend_refuses_an_unsupported_boundary_geometry() {
+    // A CIRCLE boundary and a bulged LWPOLYLINE boundary are supported since the
+    // curved-cut widening (see `trim_extend_curves.rs`); a SPLINE boundary is
+    // still an explicit `Unsupported` refusal that changes nothing.
+    let spline = ent(
+        65,
+        SemanticGeometry::Spline {
+            degree: 2,
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            control_points: vec![point(20.0, -5.0), point(22.0, 0.0), point(20.0, 5.0)],
+            weights: Vec::new(),
         },
         1,
     );
-    let mut app = line_and_boundary_app(curved, None);
+    let mut app = line_and_boundary_app(spline, None);
     let mut session = SessionState::new(DocumentId(1), AppMode::Work);
     let rev = revision(&app);
+    let before = format!(
+        "{:?}",
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(1))
+            .unwrap()
+    );
     let err = execute(
         &mut app,
         &mut session,
         CommandId::ExtendEntity,
         CommandPayload::Extend {
             target: ref_of(1),
-            boundary: vec![ref_of(63)],
+            boundary: vec![ref_of(65)],
             pick_point: point(9.0, 0.0),
         },
     )
     .unwrap_err();
-    assert!(matches!(err, CadError::Unsupported(_)));
+    assert!(matches!(err, CadError::Unsupported(_)), "{err:?}");
+    // The refusal names the offending kind and the accepted set.
+    assert!(err.to_string().contains("AcDbSpline"), "{err:?}");
+    assert!(err.to_string().contains("LWPOLYLINE"), "{err:?}");
     assert_eq!(revision(&app), rev);
-
-    let circle = ent(
-        64,
-        SemanticGeometry::Circle {
-            center: point(20.0, 0.0),
-            normal: p3(0.0, 0.0, 1.0),
-            radius: 5.0,
-        },
-        1,
+    assert_eq!(
+        before,
+        format!(
+            "{:?}",
+            app.workspace.documents[&DocumentId(1)]
+                .drawing
+                .entity(EntityId(1))
+                .unwrap()
+        ),
+        "a refused EXTEND must not touch the target"
     );
-    let mut app = line_and_boundary_app(circle, None);
-    let mut session = SessionState::new(DocumentId(1), AppMode::Work);
-    let rev = revision(&app);
-    let err = execute(
-        &mut app,
-        &mut session,
-        CommandId::ExtendEntity,
-        CommandPayload::Extend {
-            target: ref_of(1),
-            boundary: vec![ref_of(64)],
-            pick_point: point(9.0, 0.0),
-        },
-    )
-    .unwrap_err();
-    assert!(matches!(err, CadError::Unsupported(_)));
-    assert_eq!(revision(&app), rev);
 }
 
 #[test]

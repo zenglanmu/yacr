@@ -1,3 +1,5 @@
+use super::trim_boundary::{collect_boundaries, BoundarySet};
+use super::trim_curves::{cut_tolerance, plan_extend, plan_trim, TargetCurve, TrimPlan};
 use super::*;
 
 impl Application {
@@ -95,14 +97,23 @@ impl Application {
         Ok(outcome)
     }
 
-    /// Trim one LINE against LINE/LWPOLYLINE straight segments (spec §3).
+    /// Trim one LINE/ARC/CIRCLE target against analytic boundaries.
     ///
-    /// Supported subset only: the target must be a LINE and every boundary must
-    /// be a LINE or an all-straight-segment LWPOLYLINE. The target is cut at the
-    /// 2D intersections with the boundary and the piece containing `pick_point`
-    /// is kept; a line fully inside a closed boundary is deleted. Curved
-    /// boundaries, ARC/SPLINE/INSERT/Opaque targets, collinear/degenerate or
-    /// intersection-free cases are explicit refusals that change nothing.
+    /// Supported subset: the target may be a LINE, an ARC or a CIRCLE, and every
+    /// boundary may be a LINE, ARC, CIRCLE, ELLIPSE or LWPOLYLINE (straight or
+    /// bulged), in any mix. The target is cut at the intersections with the
+    /// boundary and the piece containing the **projection** of `pick_point` is
+    /// kept — the pick is projected onto the target ([`TargetCurve::project_param`])
+    /// because the host resolves the target with its own pickbox, so a click a few
+    /// pixels off the curve is still a pick of this entity. A LINE keeps the
+    /// sub-segment, an ARC keeps a shorter arc with the same centre/normal/radius
+    /// and the same sweep sign, a CIRCLE becomes the one ARC between the two cuts
+    /// that bracket the pick. A LINE with no cut that lies wholly inside a closed
+    /// boundary is deleted. SPLINE/INSERT/Opaque/Mesh targets or boundaries,
+    /// degenerate input, a pick whose projection falls outside the target's span,
+    /// a pick with no radial direction on an ARC/CIRCLE (it lies on the target's
+    /// axis) and intersection-free cases are explicit refusals that change
+    /// nothing; the whole command is one transaction and one undo step.
     pub(crate) fn trim_entity(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         let CommandPayload::Trim {
             target,
@@ -131,6 +142,8 @@ impl Application {
         }
 
         let document_id = command.document;
+        let policy = TolerancePolicy::default();
+        let tol = cut_tolerance();
         let document = self
             .workspace
             .documents
@@ -146,17 +159,8 @@ impl Application {
             .ok_or_else(|| {
                 CadError::InvalidInput(format!("trim target {} does not exist", target.entity.0))
             })?;
-        let (a, b) = match &target_entity.geometry {
-            SemanticGeometry::Line { start, end } => (*start, *end),
-            other => {
-                return Err(CadError::Unsupported(format!(
-                    "TRIM target must be a LINE; {} is not supported",
-                    geometry_kind(other)
-                )));
-            }
-        };
-        let mut segments: Vec<(Point3, Point3)> = Vec::new();
-        let mut closed_loops: Vec<Vec<Point3>> = Vec::new();
+        let curve = TargetCurve::new(&target_entity.geometry, "TRIM", "a LINE, ARC or CIRCLE")?;
+        let mut boundaries = BoundarySet::default();
         for reference in boundary {
             if reference.document != document_id {
                 return Err(CadError::InvalidInput(
@@ -169,48 +173,50 @@ impl Application {
                     reference.entity.0
                 ))
             })?;
-            collect_boundary_segments(&entity.geometry, &mut segments, &mut closed_loops, "TRIM")?;
+            collect_boundaries(&entity.geometry, &mut boundaries, &policy, "TRIM")?;
         }
-        if segments.is_empty() {
+        if boundaries.is_empty() {
             return Err(CadError::Unsupported(
-                "TRIM boundary has no straight segments to cut against".into(),
+                "TRIM boundary has no supported geometry to cut against".into(),
             ));
         }
 
-        let plan = match plan_trim(a, b, *pick_point, &segments, &closed_loops) {
-            Ok(plan) => plan,
-            // A plan-level refusal (degenerate target, no intersection, pick off
-            // the target) is invalid *input*, not an unsupported geometry, so it
-            // maps to the same "no intersection" surface as EXTEND.
+        let resolution = match plan_trim(&curve, *pick_point, &boundaries, &policy, tol) {
+            Ok(resolution) => resolution,
+            // A plan-level refusal (degenerate target, no intersection, a pick
+            // whose projection falls outside the target's span) is invalid
+            // *input*, not an unsupported geometry, so it maps to the same "no
+            // intersection" surface as EXTEND.
             Err(reason) => return Err(CadError::InvalidInput(reason)),
         };
+        // Cuts the engine could only approximate are reported, never hidden.
+        let notes = resolution.notes;
+        let plan = resolution.plan;
         // Capture the display state a full delete will prune, so undo restores it.
         let target_state = document.drawing.entity_display_state(target_entity.id);
 
         let transaction = next_transaction_id();
         let mut candidate = document.drawing.as_ref().clone();
         let drawing = &mut candidate;
-        let change_set = match plan {
-            TrimPlan::Delete => {
-                let mut staged = drawing.begin_drawing_transaction("trim entity", transaction)?;
-                staged.delete_entity(target_entity.id)?;
-                staged.commit()?
+        let change_set = {
+            let mut staged = drawing.begin_drawing_transaction("trim entity", transaction)?;
+            match &plan {
+                TrimPlan::Delete => staged.delete_entity(target_entity.id)?,
+                TrimPlan::Replace(geometry) => {
+                    let mut after = target_entity.clone();
+                    after.geometry = geometry.clone();
+                    staged.update_entity(after)?;
+                }
             }
-            TrimPlan::Keep { start, end } => {
-                let mut after = target_entity.clone();
-                after.geometry = SemanticGeometry::Line { start, end };
-                let mut staged = drawing.begin_drawing_transaction("trim entity", transaction)?;
-                staged.update_entity(after.clone())?;
-                staged.commit()?
-            }
+            staged.commit()?
         };
 
         let target_id = target_entity.id;
-        let patch = match plan {
+        let patch = match &plan {
             TrimPlan::Delete => drawing_patch_deleted(target_id, target_entity, target_state),
-            TrimPlan::Keep { .. } => {
-                // `after` was recomputed above; rebuild it from the committed
-                // geometry so the patch is the exact stored value.
+            TrimPlan::Replace(_) => {
+                // Read the committed entity back so the patch is the exact stored
+                // value, never a re-derivation.
                 let after = drawing.entity(target_id).cloned().ok_or_else(|| {
                     CadError::Invariant("trimmed entity vanished after commit".into())
                 })?;
@@ -228,32 +234,40 @@ impl Application {
             },
         )?;
 
+        let mut diagnostics = vec![Diagnostic {
+            object: Some(ObjectId(target_id.0)),
+            code: "drawing.trim".into(),
+            message: match &plan {
+                TrimPlan::Delete => "TRIM：目标完全位于边界内，整段删除".to_string(),
+                TrimPlan::Replace(_) => {
+                    format!("TRIM: kept the picked piece ({} target)", curve.label())
+                }
+            },
+        }];
+        diagnostics.extend(notes.into_iter().map(|message| Diagnostic {
+            object: Some(ObjectId(target_id.0)),
+            code: "drawing.trim".into(),
+            message,
+        }));
         Ok(CommandOutcome {
             objects: vec![ObjectId(target_id.0)],
             changes: Some(Arc::new(change_set)),
-            diagnostics: vec![Diagnostic {
-                object: Some(ObjectId(target_id.0)),
-                code: "drawing.trim".into(),
-                message: match plan {
-                    TrimPlan::Delete => "TRIM：目标完全位于边界内，整段删除".to_string(),
-                    TrimPlan::Keep { .. } => {
-                        "TRIM：保留拾取点一侧（LINE 对 LINE 子集）".to_string()
-                    }
-                },
-            }],
+            diagnostics,
             measurement: None,
         })
     }
 
-    /// Extend one LINE to the nearest LINE/LWPOLYLINE boundary segment.
+    /// Extend one LINE/ARC target to the nearest boundary crossing ahead.
     ///
-    /// The supported subset mirrors TRIM: the target must be a LINE and every
-    /// boundary must be a LINE or an all-straight-segment LWPOLYLINE. The
-    /// endpoint nearer `pick_point` is moved to the nearest boundary crossing
-    /// beyond it. A non-LINE target, a curved/unsupported boundary, a target that
-    /// already touches or crosses the boundary, and a boundary whose segment
-    /// never meets the target's line are all explicit refusals that change
-    /// nothing.
+    /// The supported subset mirrors TRIM: the target may be a LINE or an ARC and
+    /// every boundary may be a LINE, ARC, CIRCLE, ELLIPSE or LWPOLYLINE (straight
+    /// or bulged), in any mix. The pick is projected onto the target and that
+    /// projection chooses the end to grow. A LINE's picked endpoint moves along
+    /// its own infinite line; an ARC's picked end moves along its own circle and
+    /// keeps the sweep's sign, so both only ever get longer. A CIRCLE target has
+    /// no end and is refused, as are unsupported targets/boundaries, a pick whose
+    /// projection falls outside the target's span, a target that already touches
+    /// or reaches the boundary, and a boundary that never lies ahead.
     pub(crate) fn extend_entity(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         let CommandPayload::Extend {
             target,
@@ -282,6 +296,8 @@ impl Application {
         }
 
         let document_id = command.document;
+        let policy = TolerancePolicy::default();
+        let tol = cut_tolerance();
         let document = self
             .workspace
             .documents
@@ -297,17 +313,14 @@ impl Application {
             .ok_or_else(|| {
                 CadError::InvalidInput(format!("extend target {} does not exist", target.entity.0))
             })?;
-        let (a, b) = match &target_entity.geometry {
-            SemanticGeometry::Line { start, end } => (*start, *end),
-            other => {
-                return Err(CadError::Unsupported(format!(
-                    "EXTEND target must be a LINE; {} is not supported",
-                    geometry_kind(other)
-                )));
-            }
-        };
-        let mut segments: Vec<(Point3, Point3)> = Vec::new();
-        let mut closed_loops: Vec<Vec<Point3>> = Vec::new();
+        let curve = TargetCurve::new(&target_entity.geometry, "EXTEND", "a LINE or ARC")?;
+        if curve.is_periodic() {
+            return Err(CadError::Unsupported(format!(
+                "EXTEND target {} is closed and has no endpoint; only LINE and ARC are supported",
+                geometry_kind(&target_entity.geometry)
+            )));
+        }
+        let mut boundaries = BoundarySet::default();
         for reference in boundary {
             if reference.document != document_id {
                 return Err(CadError::InvalidInput(
@@ -320,32 +333,30 @@ impl Application {
                     reference.entity.0
                 ))
             })?;
-            collect_boundary_segments(
-                &entity.geometry,
-                &mut segments,
-                &mut closed_loops,
-                "EXTEND",
-            )?;
+            collect_boundaries(&entity.geometry, &mut boundaries, &policy, "EXTEND")?;
         }
-        if segments.is_empty() {
+        if boundaries.is_empty() {
             return Err(CadError::Unsupported(
-                "EXTEND boundary has no straight segments to extend to".into(),
+                "EXTEND boundary has no supported geometry to extend to".into(),
             ));
         }
 
-        let (start, end) = match plan_extend(a, b, *pick_point, &segments) {
-            Ok(range) => range,
+        let resolution = match plan_extend(&curve, *pick_point, &boundaries, &policy, tol) {
+            Ok(resolution) => resolution,
             Err(reason) => return Err(CadError::InvalidInput(reason)),
         };
+        // Cuts the engine could only approximate are reported, never hidden.
+        let notes = resolution.notes;
+        let geometry = resolution.geometry;
 
         let transaction = next_transaction_id();
         let mut candidate = document.drawing.as_ref().clone();
         let drawing = &mut candidate;
         let mut after = target_entity.clone();
-        after.geometry = SemanticGeometry::Line { start, end };
+        after.geometry = geometry;
         let change_set = {
             let mut staged = drawing.begin_drawing_transaction("extend entity", transaction)?;
-            staged.update_entity(after.clone())?;
+            staged.update_entity(after)?;
             staged.commit()?
         };
         let target_id = target_entity.id;
@@ -366,15 +377,23 @@ impl Application {
             },
         )?;
 
+        let mut diagnostics = vec![Diagnostic {
+            object: Some(ObjectId(target_id.0)),
+            code: "drawing.extend".into(),
+            message: format!(
+                "EXTEND: {} extended to the nearest boundary ahead",
+                curve.label()
+            ),
+        }];
+        diagnostics.extend(notes.into_iter().map(|message| Diagnostic {
+            object: Some(ObjectId(target_id.0)),
+            code: "drawing.extend".into(),
+            message,
+        }));
         Ok(CommandOutcome {
             objects: vec![ObjectId(target_id.0)],
             changes: Some(Arc::new(change_set)),
-            diagnostics: vec![Diagnostic {
-                object: Some(ObjectId(target_id.0)),
-                code: "drawing.extend".into(),
-                message: "EXTEND：目标已延伸至最近的边界（LINE 对 LINE/LWPOLYLINE 子集）"
-                    .to_string(),
-            }],
+            diagnostics,
             measurement: None,
         })
     }

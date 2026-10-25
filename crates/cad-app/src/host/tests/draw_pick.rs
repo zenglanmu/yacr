@@ -17,7 +17,7 @@ use crate::CommandPayload;
 ///
 /// * `101` — LINE at `y = 100`, the TRIM/EXTEND target.
 /// * `102` — LINE at `x = 0`, the boundary.
-/// * `103` — CIRCLE at `(250, -200)`, r `50`, a wrong-type target.
+/// * `103` — CIRCLE at `(250, -200)`, r `50`, a target the boundary never cuts.
 fn fixture_database() -> DrawingDatabase {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
@@ -258,7 +258,7 @@ fn trim_confirm_uses_the_refs_resolved_at_capture() {
 }
 
 #[test]
-fn wrong_type_target_still_refused_by_the_command_layer() {
+fn uncut_circle_target_still_refused_by_the_command_layer() {
     let mut controller = fixture();
     let revision = controller.drawing().unwrap().revision();
     controller.begin_draw_tool(DrawToolKind::Trim).unwrap();
@@ -273,9 +273,13 @@ fn wrong_type_target_still_refused_by_the_command_layer() {
     );
     assert!(preview.can_confirm());
 
-    // The command layer keeps its own target-type refusal untouched.
+    // A CIRCLE has been a supported TRIM target since the curved-cut widening, so
+    // the command layer no longer refuses one by *type*; it still keeps its own
+    // refusal for the geometry it cannot decide — this circle lies far from the
+    // boundary, so it has no cut at all. Capture-time admission must never bypass
+    // the command layer's own refusal.
     let err = controller.confirm_draw().unwrap_err();
-    assert!(matches!(err, CadError::Unsupported(_)), "{err:?}");
+    assert!(matches!(err, CadError::InvalidInput(_)), "{err:?}");
     assert_eq!(controller.drawing().unwrap().revision(), revision);
     // A failed confirm preserves the capture.
     assert!(controller.session.draw_preview().is_some());

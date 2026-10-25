@@ -11,10 +11,11 @@
 //!   and records exactly one undo step with full before/after entity patches;
 //! * a failure changes no state (the database transaction is all-or-nothing)
 //!   and records no history;
-//! * TRIM/EXTEND cover the documented LINE-vs-LINE/LWPOLYLINE subset only: an
-//!   unsupported *geometry* (non-LINE target, curved boundary) is an explicit
-//!   `Unsupported`, while a plan-level refusal (degenerate or no intersection) is
-//!   an explicit `InvalidInput`, and neither touches the drawing.
+//! * TRIM/EXTEND cover the documented LINE/ARC/CIRCLE-target subset: an
+//!   unsupported *geometry* (SPLINE/INSERT/Opaque target or boundary) is an
+//!   explicit `Unsupported`, while a plan-level refusal (degenerate, no
+//!   intersection, already touching) is an explicit `InvalidInput`, and neither
+//!   touches the drawing.
 //!
 //! Nothing here builds UI strings or dispatches tools; that is workstream C.
 //!
@@ -45,6 +46,8 @@ mod mleader;
 mod properties;
 mod stretch;
 mod text_edit;
+mod trim_boundary;
+mod trim_curves;
 mod trim_extend;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};
@@ -60,6 +63,5 @@ pub(crate) use text_edit::resolve_text_edit_target;
 pub use array::MAX_ARRAY_ENTITIES;
 
 use helpers::{
-    collect_boundary_segments, distance, geometry_kind, is_finite_point, is_multiline_text_source,
-    offset_circle, offset_line, plan_extend, plan_trim, TrimPlan,
+    distance, geometry_kind, is_finite_point, is_multiline_text_source, offset_circle, offset_line,
 };

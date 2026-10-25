@@ -359,7 +359,12 @@ fn trim_deletes_a_line_fully_inside_a_closed_boundary() {
 }
 
 #[test]
-fn trim_arc_target_is_unsupported_and_changes_nothing() {
+fn trim_arc_with_no_interior_cut_is_refused_and_changes_nothing() {
+    // ARC targets are a supported TRIM target since the curved-cut widening. The
+    // seed arc (centre (0,0), r 5, start 0, sweep 1 rad) is met by the seed line
+    // only at its own start point (5,0), which is an endpoint rather than an
+    // interior cut, so this still refuses — now as a plan-level `InvalidInput`,
+    // not as an unsupported target type.
     let (mut app, mut session) = drawing_app();
     let rev = revision(&app);
     let depth = app
@@ -378,7 +383,7 @@ fn trim_arc_target_is_unsupported_and_changes_nothing() {
         },
     )
     .unwrap_err();
-    assert!(matches!(err, CadError::Unsupported(_)));
+    assert!(matches!(err, CadError::InvalidInput(_)), "{err:?}");
     assert_eq!(revision(&app), rev);
     assert_eq!(
         app.history
@@ -386,6 +391,45 @@ fn trim_arc_target_is_unsupported_and_changes_nothing() {
             .map(|h| h.undo_depth())
             .unwrap_or(0),
         depth
+    );
+}
+
+#[test]
+fn trim_refuses_an_unsupported_target_geometry() {
+    // INSERT / SPLINE / Opaque targets stay an explicit `Unsupported` refusal.
+    let (mut app, mut session) = drawing_app();
+    let rev = revision(&app);
+    let before = format!(
+        "{:?}",
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(3))
+            .unwrap()
+    );
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::TrimEntity,
+        CommandPayload::Trim {
+            target: ref_of(3),
+            boundary: vec![ref_of(1)],
+            pick_point: point(5.0, 5.0),
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(err, CadError::Unsupported(_)), "{err:?}");
+    assert!(err.to_string().contains("AcDbBlockReference"), "{err:?}");
+    assert_eq!(revision(&app), rev);
+    assert_eq!(
+        before,
+        format!(
+            "{:?}",
+            app.workspace.documents[&DocumentId(1)]
+                .drawing
+                .entity(EntityId(3))
+                .unwrap()
+        ),
+        "an unsupported target must not be touched"
     );
 }
 

@@ -232,11 +232,14 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
 
 ## 5. 平台与证据范围
 
-- **桌面宿主（`app-linux`，覆盖 Linux/Windows/macOS）是主验收面**：命令行、键位、绘制/编辑命令、
-  应用内剪贴板在离屏 Slint + 软件 Vulkan（lavapipe）下经合成场景与源码契约验证。
-- `EXTEND` **仅 Web 宿主接线**（`apps/app-web`）；Linux 宿主的取点尚未接线，与 `TRIM` 的
-  `linux.trim` 缺口一致，返回显式 `Unsupported`（`linux.extend`）。
-- `PLOT`/`SAVE`/`NEW` 在桌面宿主可用；Web/Android 宿主未接这些能力时显式 unsupported。
+- **桌面宿主是主验收面**：React/Tauri 宿主（Linux 原生 Wayland；X11 走 dom-canvas 载体）上的
+  命令行、键位、绘制/编辑命令与应用内剪贴板均已接线；证据以源码契约 + 单测为主，真实窗口/像素
+  证据见 `docs/validation-*.md`（历史轮次，不得推广）。
+- `TRIM`/`EXTEND` 在桌面宿主已接线（与 Web 宿主同一命令路径）：目标支持 `LINE`/`ARC`（`TRIM` 另支持
+  `CIRCLE`），边界支持 `LINE`/`ARC`/`CIRCLE`/`ELLIPSE`/`LWPOLYLINE`（含 bulge）。`SPLINE`/`INSERT`
+  等仍显式 `Unsupported`；几何子集见 `docs/compatibility.md` 与 `docs/drawing-edit.md`。
+- `PLOT`/`SAVE`/`NEW` 在桌面宿主可用（保存目标为 XDG portal `save_file`；`SAVE` 为有损 DXF）；
+  Web/Android 宿主未接这些能力时显式 unsupported。
 - **Android 本机未编译**（缺 Android 平台），`apps/app-android` 的绘制命令转发代码存在但**未编译
   验证**。
 - **全部证据为合成/离屏**：不代表真实 GPU、真实窗口、真机或 vendor 兼容；`verify_ui` 场景见
