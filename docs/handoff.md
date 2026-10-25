@@ -1,4 +1,105 @@
+## 2026-10-25 桌面补齐轮：文件命令真实化 / 图层面板 / 右键菜单 / GRID·ORTHO / 命令别名
+
+### 结论
+
+把 React 宿主上"看得见但不可用"的界面与命令行缺口按 5 条 lane 补齐（每条 lane 各自跑自己范围的
+门禁），最后统一跑整合验证 + 提交：
+
+1. **NEW / SAVE / SAVEAS / QSAVE / PLOT / EXPORT / PRINT 变成真实命令**。原先
+   `apps/desktop-ui/src/commands.mjs` 的 `HOST_EXCLUDED_COMMANDS` 以"原生对话框/打印归属未实现"
+   为由把这 7 个名字永久禁用——该理由已不成立：Linux 宿主现在有真实的 **XDG portal `save_file`**
+   目标选择器（`apps/app-linux/src/platform/save.rs`，worker 线程 + 与 open 共用的单飞准入/terminal
+   槽），`write_atomic` 是 temp → `sync_all` → rename → 目录 fsync。宿主能力上翻
+   （`HostCapabilities { open, new, save, plot }`，Windows **仍全 false**）。
+2. **`cad_status` 新增 5 个布尔**（全部"能力 × 实时状态"，非猜测）：`canNew`、`canSave`、`canPlot`
+   （保存/出图在 picker 或导出未落地时撤销）、`gridEnabled`、`orthoEnabled`。
+3. **图层（F03）面板**：新 IPC `cad_layers`（只读投影）+ `cad_set_layer_visible` /
+   `cad_restore_layers` / `cad_set_active_layer`（**入队 ack**，owner tick 经既有命令漏斗应用；
+   临时覆盖集，不写 DWG 图层表、不升 DB revision）。React 侧新增停靠面板（搜索 / 临时显隐 / 恢复 /
+   设为当前层 / 等待·空·无匹配·错误态），`LAYER` 是 **chrome-local** 选择器。
+4. **GRID / ORTHO 成为真实命令**（状态栏 F7/F8 芯片 + 功能区分组）：`GRID` 只切**显示栅格**
+   （持久偏好 **且** 会话开关，AND 在 `cad-host` 的 render sync 里）；`ORTHO` 把下一点约束到上一点的
+   水平/垂直（`|dx| >= |dy|` 取水平，平局取水平；仅 XY，Z 用原始输入；在对象捕捉之后应用）。
+   `SNAP`（栅格捕捉 F9）**仍未实现且显式拒绝**。
+5. **命令别名 + 命令行提示**：`COMMAND_ALIASES` 增加 39 条 AutoCAD 缩写（`L/C/A/PL/REC/EL/POL/PO/
+   SPL/T/M/CO/CP/E/TR/EX/O/RO/SC/MI/AR/AL/S/X/H/U/Z/P/F/CHA/OS/GR/OR/DLI/DAL/DRA/DDI/DAN/DCE`），
+   新 IPC `cad_command_aliases` 供 chrome 展示（别名作为补全条目、规范名作为次要文本），
+   **准入仍只走宿主词表**。
+6. **CAD 分区右键快捷菜单**：保留钩子实现为 in-DOM 覆盖层——重复上一命令 / 剪切·复制·粘贴 /
+   全选·删除·特性 / 缩放到范围·平移 / 放弃·重做；方向键导航、边缘翻转、Escape/Tab/外部点击关闭，
+   不可用项**保持可见**并 `aria-disabled`，按下事件仍原样转发给原生输入。
+
+### 改动要点（按层）
+
+- **`apps/app-linux`**：`platform.rs`（828 → 601 行）+ 新 `platform/save.rs` + `platform/tests.rs`；
+  `host/layers.rs`（每 tick drain + mirror）、`host/tick_evidence.rs`（`tick.rs` 1007 → 967 行的拆分）、
+  `host/dispatch.rs` 的 `NATIVE_SESSION_COMMANDS` 让 **dom-canvas 载体显式拒绝**图层写
+  （无 native 会话就不假装 accepted）。
+- **`apps/app-windows`**：同样的 `host/layers.rs` 与 tick 接线（Windows **运行时仍未验收**）。
+- **`cad-app`**：`ortho.rs`（纯约束 + 6 单测）、`session_state` 的 `grid_enabled`/`ortho_enabled` 与
+  `ortho_point`/`ortho_cursor`、`CommandId::ToggleGrid|ToggleOrtho`、`host/display_switches.rs`
+  （`host/mod.rs` 1014 → 959 行拆分）。
+- **`cad-host`**：`state.rs` 的栅格 **AND** 门控；新 `tests/grid_overlay.rs`、`tests/ortho.rs`。
+- **`cad-ui-core`**：`session/layers.rs`（wire 类型 + 三个写 + 名字解析）、`session/admission.rs`
+  的 `admit_layer_write`/`drain_layer_writes`、`status.rs` 的 5 个新字段、`commands.rs` 的
+  `GRID`/`ORTHO`/别名表 + `alias_pairs()`。
+- **`cad-desktop-shell`**：`cad_layers` / `cad_set_layer_visible` / `cad_restore_layers` /
+  `cad_set_active_layer` / `cad_command_aliases`（注册表 fixture 同步）。
+- **`apps/desktop-ui`**：`commands.mjs`（能力门 + 别名 + 统一 `reasonKey`）、`cad.mjs`（严格状态校验 +
+  `draftingAcceleratorCommand`）、`layers.mjs` + `LayersPalette.jsx`、`context-menu.mjs` +
+  `ContextMenu.jsx`、`StatusBar.jsx`（GRID/ORTHO 真开关，SNAP 仍占位）、`App.jsx`（本地选择器
+  `LAYER`、右键菜单挂载、F3/F7/F8 走同一映射表）、`TitleBar/StartPanel/Ribbon/NavRail/Workspace`。
+- **i18n**：新增 `linux.save_title_dxf|save_title_plot|save_filter_dxf|save_filter_plot`、
+  `status.toggle.grid`、`layers.close`、`layers.read_failed`、12 条 `menu.*`。目录 725 → 749 键，
+  两语言键集/占位符一致（`check-i18n.py` OK）。
+- **文档**：`docs/react-linux-app.md`（支持范围重写）、`docs/panels.md`（顶部标注 React 现状，
+  Slint 段落转为历史）、`docs/compatibility.md`（补齐说明）、`docs/shortcuts.md`（GRID/ORTHO/F7/F8 +
+  别名表）。**无渲染器改动**。
+
+### 已运行证据（本机，2026-10-25）
+
+- `cargo fmt --all -- --check` → **0**。
+- `cargo check --workspace --all-targets --locked` → **0**；
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` → **0**
+  （`cad-render-wgpu` 8 条 / `cad-engine` 1 条 wasm 既有 dead-code 告警，非本轮引入）。
+- `cargo clippy -p cad-app -p cad-host -p cad-ui-core -p cad-desktop-shell -p app-linux
+  --all-targets --locked -- -D warnings` → **0**（无管道吞码）。
+- 测试：`cad-app` **824**、`cad-host` **208**、`cad-ui-core` **236**、`cad-desktop-shell` **23**
+  （lib 11 + layer_commands 5 + wire_goldens 4 + command_aliases 3）、`app-linux --lib` **172**，
+  全部 **0 failed**。
+- `python3 scripts/check-{architecture,fixture-manifest,workflows,i18n,file-size}.py` → 全部 **0**
+  （896 个代码文件，最大仍 < 1000 行）。
+- `apps/desktop-ui`：`npm test` **537 passed / 0 failed**；`npm run build` **成功**
+  （72 modules，`dist/assets/index-*.js` 463.84 kB）。
+- 提交：`3c1bb8b`（host 侧）、`71db960`（UI 侧）。
+
+### NOT RUN / 边界（不得推广）
+
+- **真实 portal 保存对话框未人工操作过**：`portal_save` 只编译 + 由注入 chooser 单测覆盖；
+  没有"弹窗 → 选路径 → 写盘 → 重新打开"的端到端运行，也没有任何真实图纸上的 SAVE→OPEN 往返。
+- **无 GUI 启动 / 截图 / 像素证据**：图层面板、右键菜单、GRID/ORTHO 芯片、别名补全的视觉与交互
+  只有纯函数 + 源码结构测试；`npm test` 不是运行时挂载证据。
+- **无真实 GPU 运行**：本轮**没有渲染器改动**，但也**没有**重新采集任何 GPU/出图证据；
+  `docs/validation-*.md` 的旧结论不得被当成本轮结论。
+- **Windows**：`host/layers.rs` 与 tick 接线只做了编译/home 目标检查；Windows 运行时、视觉、
+  spike-1/4/5 仍 **NOT VERIFIED**，Wine 结论仍受 bug 55432/58921 限制。
+- **dom-canvas（X11/Wayland 载体）**：四个图层 IPC 在该载体上**显式拒绝**
+  （`unsupported_on_surface_mode`），没有在 X11/浏览器里验证过图层面板；`cad_canvas` 侧未跑。
+- **保存语义**：`SAVE` 仍是**有损 DXF**（无 DWG 写回）；`PLOT` 的 GUI PNG 仍显式拒绝（CLI 专有）；
+  没有 CTB/STB、没有自动保存/.bak。
+- **图层能力**：仅"临时显隐 + 恢复 + 设为当前层 + 搜索"；**没有**新建/改名/删除/颜色/线型/锁定/冻结。
+- **ORTHO**：仅 XY、仅"上一点水平/垂直"，无极轴追踪、无相对/绝对坐标输入；对象捕捉之后应用是
+  已声明的顺序偏差；TRIM/EXTEND 这类实体拾取步骤**不**受约束（走的是另一条点击路径）。
+- **GRID**：只切显示栅格；网格捕捉 `SNAP`（F9）仍**未实现**，没有别名为 ORTHO/OSNAP。
+- **别名**：`acad.pgp` 子集，仅覆盖已实现命令；**不解析用户 pgp**，别名只做补全提示，
+  准入仍由宿主词表决定。
+- **右键菜单**：无夹点/动态输入/极轴；Secondary/Back/Forward 拖拽行为未改（仍是平移）；
+  菜单项的可用性只按模型自身条件，宿主拒绝仍在命令行回显。
+
+---
+
 ## 2026-10-25 Web CI 启用：bundle 构建 + SwiftShader 冒烟 + tag/dispatch 发布
+
 
 ### 结论
 
