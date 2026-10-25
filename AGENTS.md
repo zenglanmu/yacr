@@ -42,16 +42,18 @@ Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + �
 
 代码标识、注释、测试名、commit message 用英文；`docs/`、`AGENTS.md` 用中文。
 用户可见文案只能来自**唯一权威目录** `crates/cad-ui-core/i18n/{zh-CN,en}.json`（键集必须一致，
-见 `scripts/check-i18n.py`），不得在 React JSX/JS 或 Rust UI 里硬编码中文。
+见 `scripts/check-i18n.py`），不得在 React TS/TSX 或 Rust UI 里硬编码中文。
 **该门禁的实际范围（2026-10-20 更正，勿按过度承诺理解）**：`check-i18n.py` 只扫
 `crates/cad-ui-core/src`、`cad-desktop-shell/src`、`apps/app-linux/src`、`apps/app-windows/src`（Rust）与
-`apps/desktop-ui/src`（JS/JSX）并拒绝其中的**硬编码 CJK**；
+`apps/desktop-ui/src`（TS/TSX）并拒绝其中的**硬编码 CJK**；
 **`crates/cad-app` 仍含用户可见中文字面量**（如 `measure_tool.rs` 的提示文案），它们由
 `crates/cad-app/src/tests/cjk_baseline.rs` **冻结**——只**禁止增长**，不是"已合规"。这是**已知债务**，
 新代码**不得**沿用该做法。
 
 **提交纪律（已发生两次，务必照做）**：后台 specialist lane 仍在写工作树时**禁止** `git add -A` / `git add .`；提交前必须 ①`git status --porcelain` **逐项**核对都属于本轮改动，②按**显式路径**暂存，③门禁命令**不得**用 `| tail -1` 之类的管道吞掉退出码（用 `${PIPESTATUS[0]}` 或 `set -o pipefail` 显式检查）。**已发生**：`git add -A` 两次扫入他人/lane 半成品；`clippy | tail -1` 一次把失败吞成"通过"。
-**机械规则（已发生三次，务必照做）**：在 `crates/cad-app/src/selection.rs` 新增 `PropertyRow::new("<key>")` 时，**必须同时**补两个 i18n 目录的 `properties.row.<key>` **与** `apps/desktop-ui/src/cad.mjs` 的 `propertyRowLabel` switch 分支；`apps/desktop-ui/test/properties.test.mjs` 会扫源码字面量并要求两处齐全，否则失败。
+**机械规则（已发生三次，务必照做）**：在 `crates/cad-app/src/selection.rs` 新增 `PropertyRow::new("<key>")` 时，**必须同时**补两个 i18n 目录的 `properties.row.<key>` **与** `apps/desktop-ui/src/property-labels.ts` 的 `propertyRowLabel` switch 分支；`apps/desktop-ui/test/properties.test.ts` 会扫源码字面量并要求两处齐全，否则失败。
+
+**前端语言（2026-10-26）**：`apps/desktop-ui/src` 已是 **TypeScript/TSX**（`tsc --noEmit` 为类型门禁，`npm test` = 类型检查 + `node --test test/*.test.ts`）。相对导入带显式 `.ts`/`.tsx` 扩展名（Node 24 类型剥离直接跑测试）；只用**可剥离语法**（禁 `enum`/`namespace`/参数属性），类型导入用 `import type`。`test/*.ts` 目前**不参与** `tsc` 类型检查（有意，见 `test/helpers.ts` 头注释），不得据此宣称测试已类型化。
 
 ## 仓库结构
 
@@ -100,7 +102,7 @@ apps/app-web（wasm CAD 会话 + WebGL2 canvas；host target 仍是 NOT IMPLEMEN
   cad-engine/slint/iced/acadrust（脚本强制）；非 Linux/Windows 目标编译为空壳（保 wasm 门禁）。
 - **`apps/desktop-ui`** 是**唯一桌面 React UI 包**：单 React 树、`.native-input` 单一漏斗、
   in-DOM 弹窗/菜单；两个宿主的 `tauri.conf.json` 都指向 `../desktop-ui/dist`。
-  不得在 JSX/JS 里硬编码用户可见文案。
+  不得在 TS/TSX 里硬编码用户可见文案。
 - `cad-engine` 是 UI 无关的渲染会话协调库（`cad-app`/`cad-db`/`cad-domain`/`cad-render-wgpu`/
   `cad-representation`）；`cad-app` 不依赖 `cad-engine`，`cad-engine` 不依赖 `cad-ui-core`/
   `cad-host`/任何 UI 工具包或直接依赖 wgpu。

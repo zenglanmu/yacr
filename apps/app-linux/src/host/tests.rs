@@ -24,7 +24,7 @@ fn start_maximized_defaults_true_and_opts_out_explicitly() {
 #[test]
 fn the_tool_status_projects_awaiting_text_on_the_wire_for_the_react_contract() {
     // The committed React lane reads `tool.awaiting_text`
-    // (`apps/desktop-ui/src/text.mjs`, `apps/desktop-ui/src/cad.mjs`) — the exact
+    // (`apps/desktop-ui/src/text.ts`, `apps/desktop-ui/src/cad.ts`) — the exact
     // snake_case wire name, not `awaitingText`.
     // This pins the real serialized payload, because a rename here would silently
     // never open the text prompt.

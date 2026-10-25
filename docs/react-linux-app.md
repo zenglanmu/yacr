@@ -200,7 +200,7 @@ Vulkan-only；`dx12` 在 Linux **显式失败**（`ProbeError::UnsupportedBacken
 **生产透明不变量（来自真实缺陷）**：`.native-input` 的**所有祖先**在 CAD 分区矩形内必须透明——
 `.shell`、`.workspace`、`.workspace__canvas` **不涂不透明底色**，各 chrome 区（ribbon/面板/命令行/状态栏）
 自己涂不透明底。WP2 之后的手工测试曾发现 CAD 层不可见，根因正是这些祖先在视口区画了不透明底；
-修复见 `6e4bf06`，并由 `apps/desktop-ui/test/metrics.test.mjs` 的结构性回归测试钉住。新增布局**仍须**
+修复见 `6e4bf06`，并由 `apps/desktop-ui/test/metrics.test.ts` 的结构性回归测试钉住。新增布局**仍须**
 遵守该规则，否则会再次遮住 CAD（像素复采有界 PASS：几何满亮度、无蒙层；见验证记录）。
 
 **输入路由（单一漏斗，跨平台同构）**：CAD 原生表面**只负责显示**——它不接收任何 OS 输入。
@@ -281,7 +281,7 @@ bash scripts/collect-evidence.sh --backend wayland --stacking-regression \
 切换选项卡**不改变** chrome 高度（因而不会重报 CAD 分区矩形）；小按钮在固定高度内按列优先网格
 **横向**排布，超宽时面板带横向滚动、不静默丢命令。变体下拉目前仍是**带内浮层**（绝对定位于面板
 body 内，Escape/点击外部关闭）；DOM-on-top 之后这不再是硬约束，但也没有迁移理由。契约测试见
-`apps/desktop-ui/test/ribbon.test.mjs`。
+`apps/desktop-ui/test/ribbon.test.ts`。
 
 ## 支持范围
 

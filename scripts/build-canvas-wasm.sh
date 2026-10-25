@@ -71,7 +71,7 @@ readonly ESM_JS="app_web.js"
 readonly WASM_ARTIFACT="app_web_bg.wasm"
 readonly BOOTSTRAP_JS="bootstrap.js"
 # The bootstrap module's content. Fixed on purpose: it is the one file the loader
-# in `apps/desktop-ui/src/canvas-host.mjs` waits on, and it must name the *existing*
+# in `apps/desktop-ui/src/canvas-host.ts` waits on, and it must name the *existing*
 # `app_web_bg.wasm` explicitly (the wasm-bindgen default would be derived from
 # `app_web.js`'s own URL, which is the same file — spelling it out keeps the
 # contract visible in one place).

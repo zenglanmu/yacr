@@ -157,7 +157,7 @@ pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> DomCanvasStatus {
 /// `canvas_runtime_failed` command: the `dom-canvas` transport cannot draw.
 ///
 /// Wire shape `{ step, detail }`, exactly what
-/// `apps/desktop-ui/src/canvas-host.mjs` forwards. On the `dom-canvas` carrier this
+/// `apps/desktop-ui/src/canvas-host.ts` forwards. On the `dom-canvas` carrier this
 /// ends the process through [`crate::canvas_runtime::refuse`] (marker first, i18n
 /// diagnostic, exit code `6`); there is no blank-canvas success and no fallback.
 ///

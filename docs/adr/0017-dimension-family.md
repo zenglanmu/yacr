@@ -633,7 +633,7 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
   fixture(22)、file-size(**668**)、workflow、UI **133/133** + build 全通过。
 - **受影响 crate 契约测试**：见 `crates/cad-app/src/tests/drawing/dimension.rs`、`crates/cad-app/src/draw_tool/tests.rs`、
   `crates/cad-app/src/host/tests/dimension.rs`、`crates/cad-ui-core/.../command_vocabulary.rs`、React
-  `apps/app-linux/ui/test/{dimension-tools,commands,i18n}.test.mjs`。
+  `apps/app-linux/ui/test/{dimension-tools,commands,i18n}.test.ts`。
 - **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；
   **第三方读取器验证**（本机无 `ezdxf`/`dwgread`/`dxfgrabber`）。
 
@@ -718,7 +718,7 @@ P5a 必须核实并统一（哪个是真的就改另一个），不得两处并�
   `crates/cad-app/src/draw_tool/tests/dimension.rs`、`crates/cad-app/src/host/tests/dimension.rs`、
   `crates/cad-app/src/app_drawing/dimension.rs`（纯辅助单测）、
   `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs`、React
-  `apps/app-linux/ui/test/{dimension-tools,dimension-radial-tools,commands,i18n}.test.mjs`（**React 面由 designer lane 落地**）。
+  `apps/app-linux/ui/test/{dimension-tools,dimension-radial-tools,commands,i18n}.test.ts`（**React 面由 designer lane 落地**）。
 - **NOT RUN / 未证**：全量 `cargo test --workspace`（`accelerated_tier` 超时）；跨平台；
   **第三方读取器验证**（本机无 `ezdxf`/`dwgread`/`dxfgrabber`）。
 

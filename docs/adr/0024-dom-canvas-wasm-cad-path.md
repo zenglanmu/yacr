@@ -87,7 +87,7 @@ UI 不按平台分叉：
 | `native-below` | Linux 原生 Wayland、Windows | 原生 wgpu presenter | 原生表面压在 WebView 之下（ADR 0023 D1 原样） |
 | `dom-canvas` | X11/XWayland（**目标态，未实现**）、浏览器宿主（**目标态，未实现**） | wasm 侧 CAD 会话经 WebGL2 画进 `<canvas>` | **无第二原生表面**；canvas 在 DOM 树内，由 WebKit 自行合成 |
 
-- **输入漏斗不变**：唯一入口仍是 `.native-input`（`apps/desktop-ui/src/components/Workspace.jsx:37-41`）
+- **输入漏斗不变**：唯一入口仍是 `.native-input`（`apps/desktop-ui/src/components/Workspace.tsx:37-41`）
   → `probe_input` IPC → host 准入门/队列。`dom-canvas` **不**引入第二条输入通道，**不**让 `<canvas>`
   接事件（见 D3）。
 - **数据标志而非平台分叉**：React 树只读宿主上报的 `surfaceMode`（wire 只做加法）。旧宿主缺该字段时
@@ -113,7 +113,7 @@ UI 不按平台分叉：
 
 ### D3 canvas 在 React 树中的位置（唯一合法位置）
 
-- `<canvas>` 必须是 `.workspace__canvas`（`apps/desktop-ui/src/components/Workspace.jsx:35`）的子节点，
+- `<canvas>` 必须是 `.workspace__canvas`（`apps/desktop-ui/src/components/Workspace.tsx:35`）的子节点，
   且是 `.native-input` 的**紧邻前一兄弟**（即插在 `:36-41` 那个 div 之前）。
 - `<canvas>` 必须 `pointer-events: none` 且 `aria-hidden="true"`：像素承载器**不是**交互目标，也不进
   可访问性树；`.native-input` 继续独占命中与 `aria-label`（`a11y.canvas_label`）。

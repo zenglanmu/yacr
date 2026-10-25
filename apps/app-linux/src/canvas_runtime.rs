@@ -9,7 +9,7 @@
 //!
 //! # Contract
 //!
-//! When the frontend transport (`apps/desktop-ui/src/canvas-host.mjs`) cannot
+//! When the frontend transport (`apps/desktop-ui/src/canvas-host.ts`) cannot
 //! draw — the module fails to load, `start()` rejects, or the session's own status
 //! reports `ok: false` — it reports the machine-readable step to the host through
 //! the `canvas_runtime_failed` command. The host then refuses **the whole
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn the_command_name_matches_the_frontend_call() {
-        // `apps/desktop-ui/src/App.jsx` invokes exactly this name.
+        // `apps/desktop-ui/src/App.tsx` invokes exactly this name.
         assert_eq!(CANVAS_RUNTIME_FAILED_COMMAND, "canvas_runtime_failed");
     }
 }

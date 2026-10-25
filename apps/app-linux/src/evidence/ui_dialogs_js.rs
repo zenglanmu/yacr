@@ -13,7 +13,7 @@
 //! already installs**:
 //!
 //! * [`CTRL_1_JS`] dispatches a real `KeyboardEvent('keydown')` for `Ctrl+1` on
-//!   `window`; the app's own global handler (`apps/desktop-ui/src/App.jsx`,
+//!   `window`; the app's own global handler (`apps/desktop-ui/src/App.tsx`,
 //!   `if (event.ctrlKey && event.key === '1') … setPropertiesOpen`) toggles the
 //!   palette — exactly the path a physical chord takes once the webview has the
 //!   key;
@@ -57,9 +57,9 @@ pub(super) const CTRL_1_JS: &str = r#"
 /// of the layout, not a copy of what the driver intended).
 ///
 /// `.properties` is the palette's own root
-/// (`apps/desktop-ui/src/components/PropertiesPalette.jsx`,
+/// (`apps/desktop-ui/src/components/PropertiesPalette.tsx`,
 /// `className="palette properties"`); `.native-input` is the CAD partition
-/// (`apps/desktop-ui/src/components/Workspace.jsx`).
+/// (`apps/desktop-ui/src/components/Workspace.tsx`).
 pub(super) const PALETTE_READ_JS: &str = r#"
 (function () {
   try {

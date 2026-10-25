@@ -1,3 +1,60 @@
+## 2026-10-26 前端迁移到 TypeScript / TSX
+
+### 结论
+
+`apps/desktop-ui` 的整棵 React 树从 JS/JSX 迁到 **TypeScript/TSX**，并把类型检查接进现有测试步：
+
+- **源码**：`src/*.mjs` → `*.ts`、`src/**/*.jsx` → `*.tsx`（全部 `git mv`），组件 props、DOM/React
+  事件、ref、context 值与 `cad_status` wire 形状全部标注为 `strict` 类型；只用**可剥离语法**
+  （禁 `enum`/`namespace`/参数属性），类型导入一律 `import type`，相对导入带显式 `.ts`/`.tsx`
+  扩展名（Node 24 类型剥离直接跑测试）。
+- **拆分**：`cad.mjs`（996 行）拆为 `cad.ts`（状态/开关/参数）+ `cad-status.ts`（冻结 wire 类型与
+  校验器）+ `cad-command.ts`（准入/队列/轮询），由 `cad.ts` 重新导出，导入面不变；
+  `components/key-events.ts` 承载 React 类型未声明的 IME 标记；`stacking-regression` 一并迁移；
+  `index.html` 入口改为 `/src/main.tsx`。
+- **工具链**：`tsconfig.json`（`strict`、`verbatimModuleSyntax`、`allowImportingTsExtensions`、
+  `jsx: react-jsx`、`paths` 映射 `@i18n` **无 `baseUrl`**——TypeScript 7 已移除该选项）、
+  `vite-env.d.ts`、devDeps `typescript`/`@types/react`/`@types/react-dom`。
+  `npm test` = `tsc --noEmit && node --test test/*.test.ts`（类型门禁随既有 CI 测试步执行），
+  新增 `npm run typecheck`。
+- **测试**：`test/*.test.mjs` → `*.test.ts`、`helpers.mjs` → `helpers.ts`；源码扫描从 `.jsx/.mjs/.js`
+  改为 `.ts/.tsx`；`helpers.ts` 头注释明确"这些是**未类型化**的 TS 脚本，靠 Node 类型剥离运行，
+  `tsc` 不看它们"。
+- **门禁**：`scripts/check-i18n.py` 扩展名加入 `.ts/.tsx`（输出措辞同步）；
+  `check-file-size.py` 早已覆盖 `.ts/.tsx`。
+
+### 行为变更（都由类型标注强制，逐条已核对）
+
+只允许"类型形状"变化：显式 `kind === 'failed'` 分支（与原 fallthrough 同文案）、
+`t(suggestion.labelKey ?? '')`、`{ ...canvasSessionPayload(report) }`、`marker: null`、
+`next?.frameCount ?? NaN`、`detail.point ?? {x:0,y:0}`、`status?.popup`（仍在 `popupOpen` 守卫内）、
+`isTyping` 改为类型谓词、select 值 `null` → `undefined`（保持非受控）等；另有 9 个测试的
+**源码文本断言**按新形状重钉（保留原不变量，未放宽到"任何文本都能过"）。
+
+### 已运行证据（本机，2026-10-26）
+
+- `cd apps/desktop-ui && npm test` → **570 passed / 0 failed**（先跑 `tsc --noEmit`，**0 诊断**）。
+- `npm run build` → 成功（76 modules，`dist/assets/index-*.js` 468.39 kB）。
+- `cargo check --workspace --all-targets --locked` → 0（本轮 Rust 仅注释/路径更新）；
+  `cargo fmt --all -- --check` → 0。
+- `check-{architecture,fixture-manifest,workflows,i18n,file-size}.py` → 全 0
+  （944 个代码文件 ≤1000 行；i18n 755 键一致，无硬编码 CJK）。
+- 提交：`f76e580`（UI 迁移）、本提交（文档/注释路径同步）。
+
+### NOT RUN / 边界
+
+- **测试文件不参与类型检查**（`tsconfig` 只 include `src` + `vite-env.d.ts`）：它们能运行，但
+  **不是**"已类型化"，不得据此宣称测试有类型保障。
+- **没有 GUI/真实窗口/像素/GPU 证据**：迁移只由 `tsc`、`vite build`、`node --test` 与源码契约
+  验证；真实 WebView 挂载、Wayland/X11、Windows/Wine 均未跑。
+- `dist/` 产物只是本机构建结果，未做真机冒烟；Web/Android 目标未重跑。
+- 类型严格度是"能编译且表达现有契约"，不代表公共 API 已重新设计；`context.ts` 仍有
+  `ShellRecord` 这类结构性边界类型，后续可继续收紧。
+- 历史文档（`docs/validation-*.md`、`docs/handoff.md` 旧条目）里的旧 `.mjs/.jsx` 路径**保持原样**，
+  它们记录的是当时事实，不回写。
+
+---
+
 ## 2026-10-25（续 3）MATCHPROP / drafting 开关持久化 / 小数间距 IPC
 
 ### 结论

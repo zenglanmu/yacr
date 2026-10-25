@@ -589,7 +589,7 @@ mod tests {
 
     #[test]
     fn surface_mode_wire_names_are_the_frontend_contract() {
-        // `apps/desktop-ui/src/surface.mjs` reads exactly these strings, and only
+        // `apps/desktop-ui/src/surface.ts` reads exactly these strings, and only
         // the exact `dom-canvas` value selects the in-DOM carrier.
         assert_eq!(SurfaceMode::NativeBelow.wire_name(), NATIVE_BELOW);
         assert_eq!(SurfaceMode::DomCanvas.wire_name(), DOM_CANVAS);
