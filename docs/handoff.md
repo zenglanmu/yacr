@@ -1,3 +1,57 @@
+## 2026-10-25 Web CI 启用：bundle 构建 + SwiftShader 冒烟 + tag/dispatch 发布
+
+### 结论
+
+`web-build` / `web-smoke` / `web-deploy` 从 `if: false` 退役桩改为**真实 job**（用户 2026-10-25 决定
+「三个都启用」+「deploy 只在 tag / 手工 dispatch」）。链路是：**钉住的 wasm-bindgen 预编译 CLI**
+构建 `apps/app-web/dist` 并上传 `web-dist` artifact → **Playwright Chromium（SwiftShader 软件渲染）**
+打开该 artifact 并断言 typed 状态行 → 仅在 `v*` tag 或 `workflow_dispatch` 时把**同一个** artifact
+发布到 Cloudflare Pages（`yacr-examples`）。常规 push/PR 不发布。
+
+### 改动
+
+- `.github/workflows/build.yml`：三个 web job 实装；`web-deploy` 为 event-gated
+  （`workflow_dispatch || refs/tags/v`），`needs: web-build`，`SKIP_BUILD=1`。
+- `scripts/web-smoke.cjs`（新）：加载 bundle → 等 `#cad-status` 的 `start: ok` → 断言
+  `file=synthetic-four-lines.dwg`、`target` ∈ {`html-canvas`,`offscreen-canvas`}、`physical`、
+  `batches/draws/presented ≥ 1`、canvas backing 与 physical 一致、fresh canvas 有 WebGL2；
+  打印 `rendering=software (SwiftShader/llvmpipe)` 与 `gl_renderer`。失败非零退出；截图仅诊断。
+- `scripts/deploy-cloudflare-pages.sh`：由退役非零桩改为真实发布（先逐项校验 6 个构件 +
+  `main.js` 导入 `./pkg/app_web.js`，再 `wrangler pages deploy`；项目默认 `yacr-examples`）。
+- `scripts/check-workflows.py`：三个 job 进 `REQUIRED_JOBS`；`web-deploy` 进 `GATED_JOBS`
+  （门禁片段 `refs/tags/v`）；退役 job 收敛为 5 个；新增 smoke/deploy 脚本变异契约。
+- `scripts/test-web-deploy-workflow.py` 重写为流水线变异契约（去掉 `start: ok`、构件校验、
+  wrangler、或把 deploy 改成每次 push 都必须被抓到）。
+- 删除仓库变量 `WEB_SMOKE_ENABLED`（已无引用，历史条目保留）。
+- 文档：`AGENTS.md`、`docs/build.md`、`docs/ci.md`、`docs/app-icon.md`（同时更正 Web 图标为
+  **未实现**）、`scripts/build-web.sh` 注释。
+
+### 已运行证据（真实）
+
+- **本机**：`bash scripts/build-web.sh` exit 0（`apps/app-web/dist` 6 个文件，wasm 9,606,234 B）；
+  `node scripts/web-smoke.cjs` 对本地 dist **PASS**：
+  `[probe] web-smoke ok file=synthetic-four-lines.dwg target=offscreen-canvas isolation=worker physical=1280x800 batches=4 draws=1 presented=1 ... rendering=software (SwiftShader/llvmpipe)`。
+- **CI push run 40145356987**（`a8be49a`）：`web-build` ✓ 2m40s、`web-smoke` ✓ 41s、
+  `web-deploy` **skipped**（按设计）；core workflow 40145356993 ✓。CI smoke 日志同一行
+  （`rendering=software`，`isolation=worker`）。
+- **CI 手工 dispatch run 40146098232**（`a8be49a`）：`web-build` ✓ 42s（缓存）、`web-smoke` ✓ 36s、
+  `web-deploy` ✓ 27s → 发布到 `https://yacr-examples.pages.dev/`。
+- **发布后线上复核**（本机 Playwright，对 `https://yacr-examples.pages.dev/`）：同一 `start: ok`
+  状态行 **PASS**（`isolation=worker`、`rendering=software`）；线上 `index.html` 2207 B、
+  `main.js` 20482 B 与本机构建一致，wasm 9,606,630 B（CI 产物，本机构建为 9,606,234 B，
+  非逐字节可复现）。
+- 契约：`check-workflows.py`、`test-web-deploy-workflow.py`（16 项）、`check-file-size.py`、
+  `test-*-workflow.py`、`test-package-*.py`、`test-ui-migration-guards.py`、`node --test
+  scripts/test-web-pixels.mjs` 本机全 PASS；本轮**无 Rust 源码改动**，未重跑 cargo 门禁。
+
+### NOT RUN / 边界
+
+- CI `web-deploy` 的 step 日志未能从 API 取回（`gh run view --job … --log` 无输出）；deploy 结论
+  依据 job `success` + 线上字节数匹配，不冒充逐字节一致。
+- CI / 线上冒烟都是 **SwiftShader 软件渲染**：不是 GPU、vendor、像素/golden、性能或浏览器矩阵
+  证据；WebKitGTK 与其它引擎未在 CI 覆盖。
+- `app-web` 的 host target 仍是 NOT IMPLEMENTED；没有 Windows/macOS/Android 变化。
+
 ## 2026-10-25 修复：普通鼠标移动时被悬停图元闪烁（base-only 截断退役）
 
 ### 结论
