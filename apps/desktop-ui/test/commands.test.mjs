@@ -449,3 +449,35 @@ test('every chrome-local selector is admitted without the host vocabulary and ha
     assert.ok(app.indexOf(call) < guard, `${call} must run before the in-flight guard`);
   }
 });
+
+test('the QAT undo/redo buttons dispatch real commands, gated by admission only', async () => {
+  const { readModule } = await import('./helpers.mjs');
+  const titlebar = await readModule('components/TitleBar.jsx');
+  // A tokenless QAT entry renders permanently disabled, so both history buttons
+  // must carry a real `runCommand` action — the same funnel the command line uses.
+  for (const id of ['UNDO', 'REDO']) {
+    assert.ok(
+      titlebar.includes(`action: () => shell.runCommand('${id}')`),
+      `the QAT ${id} entry must dispatch through shell.runCommand`,
+    );
+    assert.equal(COMMAND_CATALOG.some(entry => entry.id === id), true, `${id} is a catalogued command`);
+    assert.equal(isSupportedCommand(id), true, `${id} is a router command`);
+  }
+  // Availability is the shared admission, never a second local gate: the renderer
+  // asks `shell.canCommand(id)` for every QAT entry and nothing else.
+  assert.ok(titlebar.includes('const enabled = Boolean(item.action) && shell.canCommand(item.id);'));
+  assert.equal(titlebar.includes("item.id === 'UNDO'"), false, 'no per-button local gate');
+  // Both are admitted with a drawing open and (like the command line) still
+  // accepted with none: they touch no document-scoped capability.
+  for (const id of ['UNDO', 'REDO']) {
+    assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
+    assert.equal(admitCommandText(id, { status: empty }).kind, 'admitted', id);
+    assert.equal(unavailableReasonKey(id, { status: loaded }), 'command.unsupported', `${id} has no special reason`);
+  }
+  // An empty host vocabulary is the one honest disable: the router does not know
+  // the name yet, and the tooltip says so with the shared reason key.
+  setCommandCatalog([]);
+  assert.equal(admitCommandText('UNDO', { status: loaded }).kind, 'unsupported');
+  assert.ok(titlebar.includes('unavailableReasonKey(item.id, { status: shell.status, pending: shell.pending })'));
+  setCommandCatalog(HOST_NAMES);
+});

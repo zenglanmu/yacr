@@ -21,7 +21,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons.jsx';
 import { IconButton, RibbonButton } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
-import { offeredItems, offeredPanels, RIBBON_TABS, ribbonTab } from '../ribbon-model.mjs';
+import { offeredItems, offeredPanels, panelLauncherCommand, RIBBON_TABS, ribbonTab } from '../ribbon-model.mjs';
+import { PANEL_DIALOG_MISSING_KEY } from '../limits.mjs';
 import { DOCUMENT_SCOPED_COMMANDS, NO_DOCUMENT_KEY, unavailableReasonKey } from '../commands.mjs';
 import { standardViewAvailable, standardViewUnavailableReasonKey } from '../view3d.mjs';
 import { ribbonBandOverflow, ribbonCueReserve, ribbonScrollTarget, sameOverflow } from '../ribbon-overflow.mjs';
@@ -129,6 +130,50 @@ function VariantMenu({ item, onClose }) {
   );
 }
 
+/**
+ * The dialog-launcher arrow in a panel's title row.
+ *
+ * Its target is model data (`launcherCommand`), never a panel id checked here:
+ * the Layers panel launches `LAYER`, the Properties panel `PROPERTIES`. Both are
+ * chrome-local selectors, so `shell.canCommand` — the same admission the command
+ * line and every ribbon button use — answers them without a document and there is
+ * no second local gate. A panel with no target keeps the arrow (the convention
+ * readers expect) but disabled, with the "no dialog exists for this panel yet"
+ * sentence instead of the generic unsupported one.
+ */
+function PanelLauncher({ panel }) {
+  const { t } = useI18n();
+  const shell = useShell();
+  const command = panelLauncherCommand(panel);
+  const label = t('ribbon.panel_settings');
+  if (!command) {
+    return (
+      <IconButton
+        icon="launcher"
+        size="xs"
+        label={label}
+        disabled
+        title={t(PANEL_DIALOG_MISSING_KEY, { panel: t(panel.titleKey) })}
+      />
+    );
+  }
+  // Admission only: an unadmitted launcher stays disabled (no click handler) and
+  // words the refusal with the shared reason key, exactly like a ribbon item.
+  const enabled = shell.canCommand(command);
+  return (
+    <IconButton
+      icon="launcher"
+      size="xs"
+      label={label}
+      disabled={!enabled}
+      title={enabled
+        ? `${label} — ${t(panel.titleKey)}`
+        : `${label} — ${unavailable(t, { command, labelKey: panel.titleKey }, shell)}`}
+      onClick={enabled ? () => shell.runCommand(command) : undefined}
+    />
+  );
+}
+
 function Panel({ panel, openMenu, setOpenMenu }) {
   const { t } = useI18n();
   const shell = useShell();
@@ -163,15 +208,7 @@ function Panel({ panel, openMenu, setOpenMenu }) {
       </div>
       <footer className="ribbon-panel__title">
         <span>{t(panel.titleKey)}</span>
-        {panel.launcher ? (
-          <IconButton
-            icon="launcher"
-            size="xs"
-            label={t('ribbon.panel_settings')}
-            disabled
-            title={t('ribbon.command_unsupported', { command: t('ribbon.panel_settings') })}
-          />
-        ) : null}
+        {panel.launcher ? <PanelLauncher panel={panel} /> : null}
       </footer>
     </section>
   );

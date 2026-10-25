@@ -40,6 +40,23 @@ export function surfaceModeFromShell(shell) {
 }
 
 /**
+ * Whether the docked palettes (layers, properties, diagnostics) exist on the
+ * carrier the shell reported.
+ *
+ * `shell.palettesAvailable` is the one carrier flag: `false` only on a reported
+ * `dom-canvas` host, which by design holds no host-side document state for the
+ * palettes to project (AGENTS.md iron rule 8). This helper is the one reading of
+ * that flag: every palette affordance — the ribbon entries, the status-bar chips,
+ * the workspace panels and the nav-rail toggles — asks it, so a carrier without
+ * the palettes hides all of them instead of leaving a button that toggles a panel
+ * which is never rendered. An absent flag (older chrome state, no host answer)
+ * keeps the palettes: "as today" is the default, never a guessed removal.
+ */
+export function palettesOffered(shell) {
+  return shell?.palettesAvailable !== false;
+}
+
+/**
  * The longest drawing label the chrome will display, in **code points**.
  *
  * A session names its own drawing, and nothing upstream is trusted to size it:

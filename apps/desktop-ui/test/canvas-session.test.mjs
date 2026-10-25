@@ -265,7 +265,10 @@ test('the palettes are not offered on the canvas carrier', async () => {
   assert.ok(app.includes('const palettesAvailable = surfaceMode !== SURFACE_MODE_DOM_CANVAS;'));
 
   const workspace = await readModule('components/Workspace.jsx');
-  assert.ok(workspace.includes('const palettesAvailable = shell.palettesAvailable !== false;'));
+  // The carrier rule is one helper (`palettesOffered` in `surface.mjs`), asked by
+  // the panels, the status bar and the nav rail alike.
+  assert.ok(workspace.includes('const palettesAvailable = palettesOffered(shell);'));
+  assert.ok(workspace.includes("import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../surface.mjs';"));
   assert.ok(workspace.includes('const showProperties = palettesAvailable && shell.propertiesOpen && !showStart;'));
   assert.ok(workspace.includes('const showDiagnostics = palettesAvailable && Boolean(shell.diagnosticsOpen);'));
   // Both panels render from the gated flags, so no empty panel is possible.
@@ -274,8 +277,9 @@ test('the palettes are not offered on the canvas carrier', async () => {
   assert.ok(!workspace.includes('{shell.diagnosticsOpen ?'));
 
   const status = await readModule('components/StatusBar.jsx');
-  const gate = status.indexOf('{shell.palettesAvailable !== false ? (');
+  const gate = status.indexOf('{palettesOffered(shell) ? (');
   assert.ok(gate > 0, 'the status bar must gate the palette toggles');
+  assert.ok(!status.includes('shell.palettesAvailable !== false'), 'the rule is not re-spelled inline');
   const block = status.slice(gate, status.indexOf(') : null}', gate));
   assert.ok(block.includes("t('properties.panel')"), 'the properties toggle lives behind the gate');
   assert.ok(block.includes("t('diagnostics.title')"), 'the diagnostics toggle lives behind the gate');

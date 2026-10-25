@@ -14,13 +14,16 @@ export function TitleBar() {
   // `NEW`/`SAVE` carry real router actions now, exactly like `OPEN`: their
   // availability is the shared admission (`shell.canCommand` = host vocabulary +
   // `cad_status.canNew`/`canSave`), never a second local check here. A refusal is
-  // worded with the same reason key the command line uses.
+  // worded with the same reason key the command line uses. `UNDO`/`REDO` ride the
+  // same funnel — they are admitted router commands the command line already runs,
+  // so the QAT buttons dispatch `shell.runCommand` and let admission decide; a
+  // tokenless entry would be permanently disabled for no reason.
   const qat = [
     { id: 'NEW', icon: 'new', labelKey: 'qat.new', action: () => shell.runCommand('NEW') },
     { id: 'OPEN', icon: 'open', labelKey: 'file.open', action: () => shell.runCommand('OPEN') },
     { id: 'SAVE', icon: 'save', labelKey: 'qat.save', action: () => shell.runCommand('SAVE') },
-    { id: 'UNDO', icon: 'undo', labelKey: 'toolbar.undo' },
-    { id: 'REDO', icon: 'redo', labelKey: 'toolbar.redo' },
+    { id: 'UNDO', icon: 'undo', labelKey: 'toolbar.undo', action: () => shell.runCommand('UNDO') },
+    { id: 'REDO', icon: 'redo', labelKey: 'toolbar.redo', action: () => shell.runCommand('REDO') },
   ];
 
   const refusal = item => t(

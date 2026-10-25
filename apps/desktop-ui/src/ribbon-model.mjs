@@ -61,14 +61,37 @@ export function offeredItems(items, palettesAvailable) {
 /**
  * The panels a tab actually offers on the reported carrier.
  *
- * Filtering the items is not enough: the Home tab's "Layers" panel holds nothing
- * but palette toggles, so on a carrier without the palettes it would render as an
- * empty titled box. A panel that has nothing left is dropped whole, together with
- * its title and launcher.
+ * Filtering the items is not enough: the Home tab's "Layers" and "Properties"
+ * panels hold nothing but palette toggles, so on a carrier without the palettes
+ * they would render as empty titled boxes. A panel that has nothing left is
+ * dropped whole, together with its title and launcher.
  */
 export function offeredPanels(panels, palettesAvailable) {
   if (palettesAvailable !== false) return panels;
   return panels.filter(panel => offeredItems(panel.items, palettesAvailable).length > 0);
+}
+
+/**
+ * The command a panel's dialog-launcher arrow runs, or `null`.
+ *
+ * The arrow in a panel's title row is the convention for "deeper settings of
+ * this panel". A panel declares its target as data (`launcherCommand`), so the
+ * renderer never has to know panel ids:
+ *
+ *   * `'LAYER'` / `'PROPERTIES'` — the panel's own palette, opened (and, for
+ *     layers, focused) by the chrome-local selector of that name. Neither is a
+ *     Rust command, so neither needs a document or a router entry;
+ *   * no token (or `null`) — no dialog exists for that panel yet. The arrow stays
+ *     visible but disabled with the catalog key `limits.mjs` holds
+ *     (`ribbon.panel_dialog_missing`), which says exactly that instead of
+ *     claiming the command is unsupported.
+ *
+ * Anything that is not a non-empty string is "no target": an empty token would
+ * otherwise resolve to a command name of `''` and quietly render a live arrow.
+ */
+export function panelLauncherCommand(panel) {
+  const command = panel?.launcherCommand ?? null;
+  return typeof command === 'string' && command.length > 0 ? command : null;
 }
 
 export const RIBBON_TABS = Object.freeze([
@@ -176,10 +199,26 @@ export const RIBBON_TABS = Object.freeze([
       {
         id: 'layers',
         titleKey: 'layers.panel',
+        // The arrow in this panel's title row opens the same surface the LAYER
+        // button does: the docked layers palette (`LAYER` is chrome-local, so a
+        // repeat press focuses and re-reads it rather than opening a second one).
         launcher: true,
+        launcherCommand: 'LAYER',
         items: [
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
-          { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties' },
+        ],
+      },
+      {
+        // Properties sits in its own panel, the way AutoCAD's Home tab keeps
+        // Layers and Properties apart: each palette then has one launcher that
+        // opens exactly that palette. The panel is a palette toggle only, so a
+        // carrier without the palettes drops it whole (`offeredPanels`).
+        id: 'properties',
+        titleKey: 'properties.panel',
+        launcher: true,
+        launcherCommand: 'PROPERTIES',
+        items: [
+          { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties', large: true },
         ],
       },
       {

@@ -6,6 +6,7 @@ import { Icon } from '../icons.jsx';
 import { Button } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { commandById, toolLabelKey } from '../commands.mjs';
+import { palettesOffered } from '../surface.mjs';
 import { OPTIONS_KEYS } from '../options.mjs';
 import { dispatchGrid, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, gridToggle, hoverPreviewToggle, importProgressView, objectSnapToggle, orthoToggle, snapKindLabelKey, toolParameterViews, toolStepPromptKey } from '../cad.mjs';
 
@@ -276,9 +277,11 @@ export function StatusBar() {
         />
         {/* A `dom-canvas` carrier has no host-side document state for these two
             palettes to project, so their toggles are not offered at all — an
-            absent toggle, never a chip that opens an empty panel. Any other
-            carrier (and an older chrome state without the flag) keeps them. */}
-        {shell.palettesAvailable !== false ? (
+            absent toggle, never a chip that opens an empty panel. The carrier rule
+            is the shared `palettesOffered` helper (the docked panels behind these
+            chips ask the same one). Any other carrier (and an older chrome state
+            without the flag) keeps them. */}
+        {palettesOffered(shell) ? (
           <>
             <Toggle
               label={t('properties.panel')}

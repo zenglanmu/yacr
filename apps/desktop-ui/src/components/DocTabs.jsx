@@ -9,6 +9,7 @@ import { Icon } from '../icons.jsx';
 import { IconButton } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { importProgressView } from '../cad.mjs';
+import { ONE_DOCUMENT_KEY } from '../limits.mjs';
 
 export function DocTabs() {
   const { t } = useI18n();
@@ -36,7 +37,11 @@ export function DocTabs() {
             <span className="doc-tab__label">{label}</span>
           </button>
         ) : null}
-        <IconButton icon="plus" size="xs" label={t('doctabs.new_tab')} disabled />
+        {/* One drawing per session is a real limitation, not missing wiring: the
+            `+` keeps the tab-strip convention but says so, instead of leaving a
+            disabled button that explains nothing. Opening another file replaces
+            this session's drawing (it never opens a second tab). */}
+        <IconButton icon="plus" size="xs" label={t('doctabs.new_tab')} disabled title={t(ONE_DOCUMENT_KEY)} />
       </div>
       {progress ? (
         <div className="doctabs__progress">

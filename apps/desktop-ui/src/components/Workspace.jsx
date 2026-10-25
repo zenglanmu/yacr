@@ -16,7 +16,7 @@ import { LayersPalette } from './LayersPalette.jsx';
 import { PropertiesPalette } from './PropertiesPalette.jsx';
 import { DiagnosticsPalette } from './DiagnosticsPalette.jsx';
 import { useI18n, useShell } from '../context.mjs';
-import { SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../surface.mjs';
+import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../surface.mjs';
 
 export function Workspace() {
   const { t } = useI18n();
@@ -24,9 +24,11 @@ export function Workspace() {
   const showStart = !shell.documentVisible;
   // Whether the docked palettes exist on the reported carrier. A `dom-canvas`
   // host holds no host-side document state, so it has none of the projections they
-  // read: they are not rendered at all rather than as empty panels. An absent flag
-  // (older chrome state) keeps them, as today.
-  const palettesAvailable = shell.palettesAvailable !== false;
+  // read: they are not rendered at all rather than as empty panels. The carrier
+  // rule is `palettesOffered`, the same helper the nav rail and the status bar
+  // ask, so the panels and their toggles can never disagree. An absent flag (older
+  // chrome state) keeps them, as today.
+  const palettesAvailable = palettesOffered(shell);
   // The inspector is only meaningful with a drawing open; on the start screen the
   // start panel keeps the whole dock. Off by default so the startup partition
   // geometry is unchanged until the user opens it.
