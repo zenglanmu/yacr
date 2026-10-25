@@ -11,13 +11,13 @@ import { bindProbeInput, createInputLane, createSuspendGate } from './input.mjs'
 import { pointerPosition, rectFromElement } from './metrics.mjs';
 import { CANVAS_STEP_MODULE, bindCanvasNavigation, canvasModuleUrl, createCanvasTransport, loadCanvasModule, watchCanvasRect } from './canvas-host.mjs';
 import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './surface.mjs';
-import { queueCadCommand, reconcileToolParameterPending, requestImportCancel, setToolParameterFlag, setToolParameterNumber, startCadPolling, stepToolParameterPending } from './cad.mjs';
+import { queueCadCommand, reconcileToolParameterPending, requestImportCancel, setToolParameterFlag, setToolParameterNumber, startCadPolling, stepToolParameterPending, draftingAcceleratorCommand } from './cad.mjs';
 import { setToolText } from './text.mjs';
 import { setSelectedText } from './textedit.mjs';
 import { submitStandardView } from './view3d.mjs';
 import { createFpsSampler } from './fps.mjs';
-import { bindBrowserDefaults } from './defaults.mjs';
-import { admitCommandText, commandCatalog, pushHistory, setCommandCatalog, toolCommandForKey, unavailableReasonKey } from './commands.mjs';
+import { bindBrowserDefaults, cadContextMenuRequest } from './defaults.mjs';
+import { admitCommandText, commandAliases, commandCatalog, pushHistory, setCommandAliases, setCommandCatalog, toolCommandForKey, unavailableReasonKey } from './commands.mjs';
 import { I18nContext, ShellContext } from './context.mjs';
 import { TitleBar } from './components/TitleBar.jsx';
 import { Ribbon } from './components/Ribbon.jsx';
@@ -27,8 +27,10 @@ import { LayoutTabs } from './components/LayoutTabs.jsx';
 import { CommandLine } from './components/CommandLine.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
 import { PopupOverlay } from './components/PopupOverlay.jsx';
+import { ContextMenu } from './components/ContextMenu.jsx';
 import { openPopup } from './popup.mjs';
 import { isOptionsCommand } from './options.mjs';
+import { isLayersCommand } from './layers.mjs';
 import { isPropertiesCommand, setSelectedProperty } from './properties.mjs';
 import { textEditOpenError } from './popup-textedit.mjs';
 
@@ -60,10 +62,22 @@ function Shell() {
   const [cleanScreen, setCleanScreen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(false);
+  // The layers palette. Closed on the start page (the dock keeps the start panel),
+  // opened by `LAYER` / the ribbon / the toggle. `layersFocus` is bumped by every
+  // `LAYER` submission so an already-open palette still takes the keyboard and
+  // re-reads the host — a no-op otherwise.
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [layersFocus, setLayersFocus] = useState(0);
   const [commandLineOpen, setCommandLineOpen] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [cursor, setCursor] = useState(null);
   const [surfaceNode, setSurfaceNode] = useState(null);
+  // The CAD shortcut menu: `{ point, rect, menu }` while it is open, `null`
+  // otherwise. `point` is the press in viewport CSS px (the hook reports it
+  // relative to the partition, so the app converts it with `rect`), `menu` is the
+  // pure model `cadContextMenuRequest` builds. One menu, one overlay — never a
+  // second window.
+  const [contextMenu, setContextMenu] = useState(null);
   // The active-tool numeric stepper's bounded pending delta (`{key, base, delta}
   // | null`): the steps the host has queued but not yet echoed. It composes rapid
   // clicks without ever touching the displayed number.
@@ -71,6 +85,10 @@ function Shell() {
   // The host command vocabulary (names the Rust router accepts). Empty until
   // `cad_commands` answers; the state exists so the chrome re-renders once it does.
   const [catalogNames, setCatalogNames] = useState(commandCatalog);
+  // The host's alias table (`cad_command_aliases`), held the same way: it is
+  // suggestion metadata only, so a failed load leaves it empty ("no aliases
+  // known") and never blocks the command line.
+  const [aliasPairs, setAliasPairs] = useState(commandAliases);
 
   // The host's live dialog (`cad_status.popup`, ADR 0021 D1/D2): non-null while
   // one exists. The host applies the modal input gate; the chrome mirrors it as
@@ -122,17 +140,36 @@ function Shell() {
   if (!suspendGate.current) {
     suspendGate.current = createSuspendGate(value => bindingRef.current?.suspend(value));
   }
-  // Latest host status for the CAD shortcut-menu hook, so the webview-default
-  // guards are installed once and never re-bound by a status poll.
+  // Latest host status and command-line history for the CAD shortcut-menu hook,
+  // so the webview-default guards are installed once and never re-bound by a
+  // status poll or a new history entry. The menu's "repeat" item reads the same
+  // history the command line keeps — there is no second command log.
   const statusRef = useRef(null);
-  const surfaceRef = useCallback(node => setSurfaceNode(node), []);
+  const historyRef = useRef([]);
+  // The partition element itself, for two things the DOM event cannot carry: the
+  // rect that turns the hook's partition-relative point into viewport px, and the
+  // node that takes the keyboard back when the menu closes on Escape/Tab.
+  const surfaceNodeRef = useRef(null);
+  const surfaceRef = useCallback(node => {
+    surfaceNodeRef.current = node;
+    setSurfaceNode(node);
+  }, []);
 
   const t = useMemo(() => createTranslator(CATALOGS, locale), [locale]);
   const displayError = status?.error || error || pollError || '';
   const commandMessage = useMemo(() => {
     if (!commandResult) return null;
-    if (commandResult.kind === 'unsupported') return { kind: 'error', text: t(unavailableReasonKey(commandResult.command), { command: commandResult.command }) };
-    if (commandResult.kind === 'failed') return { kind: 'error', text: t('command.failed', { error: commandResult.error }) };
+    // The refusal sentence is the catalog key the admission itself reported
+    // (`reasonKey`), so a blocked command reads the same in the command line as
+    // in the disabled button that offers it — the busy sentence, "no drawing is
+    // open", the gesture hint, or "not supported yet".
+    if (commandResult.kind === 'unsupported') {
+      return { kind: 'error', text: t(commandResult.reasonKey ?? unavailableReasonKey(commandResult.command), { command: commandResult.command }) };
+    }
+    if (commandResult.kind === 'failed') {
+      if (commandResult.reasonKey) return { kind: 'error', text: t(commandResult.reasonKey, { command: commandResult.command }) };
+      return { kind: 'error', text: t('command.failed', { error: commandResult.error }) };
+    }
     return null;
   }, [commandResult, t]);
 
@@ -309,6 +346,17 @@ function Shell() {
       setCatalogNames(setCommandCatalog([]));
       setError(`cad_commands: ${String(reason)}`);
     });
+    // The alias table is suggestion metadata, fetched once from the same Rust
+    // source (`cad_command_aliases`). A failure is deliberately **not** an error:
+    // the command line simply offers no shorthand rows and admission still works,
+    // because the host canonicalises whatever is typed. Nothing is fabricated.
+    invoke('cad_command_aliases').then(pairs => {
+      if (cancelled) return;
+      setAliasPairs(setCommandAliases(pairs));
+    }).catch(() => {
+      if (cancelled) return;
+      setAliasPairs(setCommandAliases([]));
+    });
     return () => { cancelled = true; };
   }, []);
 
@@ -388,6 +436,18 @@ function Shell() {
       setCommandResult(null);
       if (options.fromInput) setCommand('');
       setPropertiesOpen(true);
+      return;
+    }
+    // `LAYER` opens the docked layers palette through the same chrome-local path.
+    // The router has no payload-free `LAYER` (only the layer *operations*), so the
+    // text never reaches `cad_command`; the palette reads the host on mount and on
+    // every repeat, which is what makes a second `LAYER` a refresh rather than a
+    // no-op.
+    if (isLayersCommand(text)) {
+      setCommandResult(null);
+      if (options.fromInput) setCommand('');
+      setLayersOpen(true);
+      setLayersFocus(value => value + 1);
       return;
     }
     if (submitting.current) return;
@@ -479,12 +539,15 @@ function Shell() {
       // already claimed the chord wins and no plain key is hijacked.
       if (event.ctrlKey && event.key === '1') { event.preventDefault(); setPropertiesOpen(value => !value); return; }
       if (event.key === 'F2') { event.preventDefault(); setHistoryOpen(value => !value); return; }
-      // F3 flips the object-snap master switch (ADR 0014 A.4) through the same
-      // command funnel every other affordance uses; `preventDefault` keeps the
-      // webview from consuming F3 itself. Like F2 it is a global accelerator that
-      // a focused text field does not swallow, and it never collides with a tool's
-      // Enter/Escape (handled above only for those two keys).
-      if (event.key === 'F3') { event.preventDefault(); void submitCommand('OSNAP'); return; }
+      // The drafting function keys (F3 object snap, F7 grid, F8 ortho) flip
+      // session switches through the same command funnel every other affordance
+      // uses; the mapping table lives in `cad.mjs` so the status-bar chips and
+      // these accelerators can never disagree. `preventDefault` keeps the webview
+      // from consuming the key itself. Like F2 these are global accelerators that
+      // a focused text field does not swallow, and they never collide with a
+      // tool's Enter/Escape (handled above only for those two keys).
+      const draftingCommand = draftingAcceleratorCommand(event.key);
+      if (draftingCommand) { event.preventDefault(); void submitCommand(draftingCommand); return; }
       if (event.key === 'Escape') {
         setHistoryOpen(false);
         if (isTyping(event.target)) event.target.blur();
@@ -495,10 +558,10 @@ function Shell() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [popupOpen, submitCommand, toolActive]);
 
-  // Feed the reserved CAD shortcut-menu hook the selection/tool slices the
-  // chrome already has. It is a ref, not a dependency, so polling never
-  // re-installs the guards below.
+  // Feed the CAD shortcut-menu hook the state slices the chrome already has. It
+  // is a ref, not a dependency, so polling never re-installs the guards below.
   useEffect(() => { statusRef.current = status; }, [status]);
+  useEffect(() => { historyRef.current = history; }, [history]);
 
   // Keep WebKitGTK's own commands out of the session. The native CAD surface is
   // input-transparent, so right-clicks and accelerators reach this DOM; the
@@ -509,13 +572,37 @@ function Shell() {
   // before its `defaultPrevented` check, so clean screen keeps working whichever
   // listener runs first while the browser zoom reset is still suppressed. The
   // guard suppresses every browser command even in a focused text field; the
-  // native menu stays in text fields, and a CAD right-click calls the one inert
-  // hook.
+  // native menu stays in text fields, and a CAD right-click opens the shortcut
+  // menu — the press itself is still forwarded to the host exactly as before.
   useEffect(() => {
     const guard = bindBrowserDefaults(window, {
       context: () => {
         const current = statusRef.current;
         return { selection: current?.selection ?? null, tool: current?.tool ?? null };
+      },
+      // The hook reports the point relative to the partition; the overlay is
+      // viewport-fixed, so the partition rect is what converts it. `repeat` reads
+      // the command line's own newest history entry, and `canFit`/`hasDocument`
+      // are the host facts the command-line admission rule already uses.
+      onContextMenu: detail => {
+        const node = surfaceNodeRef.current;
+        const bounds = node ? node.getBoundingClientRect() : null;
+        const current = statusRef.current;
+        setContextMenu({
+          point: {
+            x: (bounds?.left ?? 0) + detail.point.x,
+            y: (bounds?.top ?? 0) + detail.point.y,
+          },
+          rect: bounds
+            ? { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height }
+            : null,
+          menu: cadContextMenuRequest({
+            ...detail,
+            lastCommand: historyRef.current.at(-1) ?? null,
+            canFit: current?.canFit === true,
+            hasDocument: (current?.documentLabel ?? null) !== null,
+          }),
+        });
       },
     });
     return () => guard.dispose();
@@ -560,6 +647,10 @@ function Shell() {
     setCommand,
     commandResult,
     commandMessage,
+    // The host's alias table (`cad_command_aliases`). It is suggestion metadata
+    // only: the command line offers these rows, admission still goes through
+    // `cad_command`, and an empty table just means "no aliases known".
+    commandAliases: aliasPairs,
     submitCommand: (text, options) => submitCommand(text, { fromInput: true, ...options }),
     // The text step of a text-carrying tool; resolves with the admission result
     // (`accepted` / `refused` / `failed` / `busy`) so the command line can keep
@@ -604,6 +695,13 @@ function Shell() {
     setDiagnosticsOpen,
     propertiesOpen,
     setPropertiesOpen,
+    // The layers palette: the same open/close plumbing as its two neighbours. The
+    // palette itself reads the host; this side only owns whether it is docked.
+    layersOpen,
+    setLayersOpen,
+    toggleLayers: () => setLayersOpen(value => !value),
+    // Bumped by every `LAYER` (open + focus + re-read); the palette watches it.
+    layersFocus,
     commandLineOpen,
     setCommandLineOpen,
     surfaceRef,
@@ -682,6 +780,28 @@ function Shell() {
           {commandLineOpen ? <CommandLine /> : null}
           <StatusBar />
         </main>
+        {/* The CAD shortcut menu: one in-DOM overlay above the workspace. It has
+            no backdrop, so the press that dismisses it still reaches whatever is
+            underneath — the CAD partition keeps forwarding every press to the
+            host. Running an item uses the same funnel as the ribbon and the
+            command line (`runCommand`), which is what also resolves the
+            chrome-local `PROPERTIES` selector to the docked palette. */}
+        {contextMenu ? (
+          <ContextMenu
+            menu={contextMenu.menu}
+            anchor={contextMenu.point}
+            onRun={item => {
+              setContextMenu(null);
+              if (item.command) shell.runCommand(item.command);
+            }}
+            onDismiss={({ restoreFocus } = {}) => {
+              setContextMenu(null);
+              // Escape/Tab hand the keyboard back to the drawing area; a press
+              // outside must not steal focus from what that press just focused.
+              if (restoreFocus) surfaceNodeRef.current?.focus?.({ preventScroll: true });
+            }}
+          />
+        ) : null}
         {popupOpen ? <PopupOverlay popup={status.popup} payload={popupPayload} /> : null}
       </ShellContext.Provider>
     </I18nContext.Provider>

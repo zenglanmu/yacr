@@ -31,9 +31,9 @@ import {
   toolStepPromptKey,
 } from '../src/cad.mjs';
 import {
+  CAPABILITY_GATES,
   COMMAND_CATALOG,
   GESTURE_ONLY_COMMANDS,
-  HOST_EXCLUDED_COMMANDS,
   admitCommandText,
   filterCommandSuggestions,
   isSupportedCommand,
@@ -51,7 +51,7 @@ const en = await readCatalog('en');
 const HOST_NAMES = ['MLEADER', 'TEXT', 'CONFIRM', 'CANCEL'];
 setCommandCatalog(HOST_NAMES);
 
-const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canFit: true };
+const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
 const withTool = tool => ({ ...loaded, tool });
 
 // A structurally complete status payload, so `parseCadStatus` is exercised for
@@ -63,6 +63,9 @@ const BASE = {
   importProgress: null,
   error: null,
   canOpen: true,
+  canNew: true, gridEnabled: true, orthoEnabled: false,
+  canSave: true,
+  canPlot: true,
   canFit: true,
   backend: null,
   adapter: null,
@@ -143,8 +146,8 @@ test('MLEADER is a catalogued draw command enabled only by router admission', ()
   assert.equal(isSupportedCommand('MLEADER'), false);
   assert.equal(admitCommandText('MLEADER', { status: loaded }).kind, 'unsupported');
   setCommandCatalog(HOST_NAMES);
-  // Neither a host-owned exclusion nor a gesture-only name.
-  assert.equal(HOST_EXCLUDED_COMMANDS.includes(MLEADER.id), false);
+  // Neither capability-gated nor a gesture-only name.
+  assert.equal(CAPABILITY_GATES[MLEADER.id], undefined);
   assert.equal(GESTURE_ONLY_COMMANDS.includes(MLEADER.id), false);
   // The command line offers it with the same admission state and catalog label.
   const suggestion = filterCommandSuggestions('MLEADER').find(candidate => candidate.id === MLEADER.id);

@@ -30,7 +30,7 @@ const en = await readCatalog('en');
 const HOST_NAMES = ['DIMLINEAR', 'DIMALIGNED', 'DIMRADIUS', 'DIMDIAMETER', 'DIMCENTER'];
 setCommandCatalog(HOST_NAMES);
 
-const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canFit: true };
+const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
 
 // id -> its active-tool chip key (`tool.draw.<id>`), its named picks in order,
 // and the ready prompt once the capture is complete. The radial pair defines a

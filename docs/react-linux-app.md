@@ -270,8 +270,12 @@ body 内，Escape/点击外部关闭）；DOM-on-top 之后这不再是硬约束
 **命令准入以 Rust 为唯一来源**：前端启动时经 `cad_commands` 取
 `cad_ui_core::session::admissible_names()`（`COMMAND_TABLE` + 别名，见
 `crates/cad-ui-core/src/session/commands.rs`），**不再**手写 `OPEN`/`FIT` 白名单；宿主未应答前目录为空，
-所有命令显式 unsupported（不是默认放行）。React 宿主**显式排除** `NEW`/`SAVE`/`SAVEAS`/`QSAVE`/
-`PLOT`/`EXPORT`/`PRINT`（需要原生对话框/打印归属，本宿主未实现），按钮保持禁用并给出原因。
+所有命令显式 unsupported（不是默认放行）。文件级选择器
+`NEW`/`SAVE`/`SAVEAS`/`QSAVE`/`PLOT`/`EXPORT`/`PRINT` **不再按“宿主所有”排除**：宿主在 `cad_status`
+里发布 `canNew`/`canSave`/`canPlot`（能力 × 实时状态），chrome 只按这三个布尔准入，并给出真实的
+拒绝原因键（`linux.busy` / `plot.no_document` / `command.unsupported`）。Linux 宿主的保存目标是
+**XDG portal `save_file`** 对话框（`apps/app-linux/src/platform/save.rs`），`SAVE` 写出**有损 DXF**，
+`PLOT` 按扩展名写 SVG/PDF（`.png` 仍由 CLI 专有，GUI 显式拒绝）。
 
 - **可从 chrome 触达**：`OPEN`（`--open` 真实打开漏斗，或原生 portal picker 见下节）、`FIT`、`PAN`、
   `SELECTALL`、`UNDO`、`REDO`、`ORBIT`、`ZOOM`、`OSNAP`（**F3** 同义，切对象捕捉总开关）、
@@ -290,10 +294,15 @@ body 内，Escape/点击外部关闭）；DOM-on-top 之后这不再是硬约束
   Back/Forward 的拖拽行为本轮**未改**（仍为平移；AutoCAD 该位置是右键快捷菜单，未实现）。
 - **选择要求**：编辑类工具需要先有选择；空选择在确认时由 `cad_app`（`DrawTool::is_ready`）显式拒绝，
   UI 不预判、不静默丢弃。
-- **仍未接线**：`GRID`/`SNAP`/`ORTHO` drafting 开关（AutoCAD 的 `SNAP`=栅格捕捉 F9，与本项目的
-  对象捕捉 `OSNAP` 是两件事，前者未实现）、图层/特性面板、`ZOOMIN`/`ZOOMOUT`
-  别名（router 名为 `ZOOM`）、测量子类型 `DIST`/`PLINE`/`ANGLE`/`AREA`、`NEW`/`SAVE`/`PLOT`、
-  `SELECTIONPREVIEWLIMIT` 式预览上限、`PREVIEWFILTER` 的锁定图层/xref 排除、Secondary 拖拽的右键菜单。
+- **仍未接线**：`SNAP`（AutoCAD 的栅格捕捉 F9，与本项目的对象捕捉 `OSNAP` 是两件事，**未实现且显式拒绝**）、
+  `ZOOMIN`/`ZOOMOUT` 别名（router 名为 `ZOOM`）、测量子类型 `DIST`/`PLINE`/`ANGLE`/`AREA`、
+  `SELECTIONPREVIEWLIMIT` 式预览上限、`PREVIEWFILTER` 的锁定图层/xref 排除、Secondary/Back/Forward
+  拖拽的右键行为（右键**快捷菜单**已实现；鼠标 Secondary 拖拽仍是平移）。
+- **已接线（2026-10-25）**：`GRID`（F7，只切显示栅格；网格捕捉仍未实现）、`ORTHO`（F8，把下一点约束到
+  上一点的水平/垂直方向，仅 XY）、图层面板（`LAYER` 打开停靠面板：搜索、临时显隐、恢复、设为当前层；
+  走 `cad_layers`/`cad_set_layer_visible`/`cad_restore_layers`/`cad_set_active_layer`，IPC ack 只代表
+  **入队**，面板随后回读权威投影）、右键快捷菜单（复制/剪切/粘贴、全选/删除/特性、缩放到范围/平移、
+  放弃/重做、重复上一命令；全部走同一 `runCommand` 漏斗）。
 - **只读**：不写回 DWG；未知命令走既有 not supported 路径，不空成功。
 - 语言切换（chrome 文案）已接线；**运行时语言切换不重排 Rust 宿主的宿主侧字符串**（见限制）。
 - 导航复用**同一权威底图**（GPU-resident、同一 DB revision）；新 overlay 输入未提交时呈现完整

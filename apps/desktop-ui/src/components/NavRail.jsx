@@ -31,6 +31,23 @@ export function NavRail() {
         );
       })}
       <div className="navrail__rule" aria-hidden="true" />
+      {/* Palette toggles. The layers list exists only where the docked palettes
+          do (a `dom-canvas` carrier holds no host-side layer table of its own),
+          so the button is dropped there instead of toggling a panel that is never
+          rendered. (The diagnostics toggle below predates this carrier flag and is
+          still offered unconditionally — an existing gap, not this button's.) */}
+      {shell.palettesAvailable !== false ? (
+        <button
+          type="button"
+          className={['navrail__button', shell.layersOpen ? 'is-on' : ''].filter(Boolean).join(' ')}
+          aria-pressed={Boolean(shell.layersOpen)}
+          title={t('layers.panel')}
+          aria-label={t('layers.panel')}
+          onClick={() => shell.toggleLayers()}
+        >
+          <Icon name="layers" size={18} />
+        </button>
+      ) : null}
       <button
         type="button"
         className={['navrail__button', shell.diagnosticsOpen ? 'is-on' : ''].filter(Boolean).join(' ')}

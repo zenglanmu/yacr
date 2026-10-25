@@ -167,6 +167,11 @@ const P = {
   spinner: <><path d="M12 4a8 8 0 1 1-8 8" /></>,
   check: <><path d="M5 13l4.5 4.5L19 7" /></>,
   dot: <><circle cx="12" cy="12" r="2.5" /></>,
+  // Layer visibility (Layers palette): an eye for "on", and the same eye dimmed
+  // behind a slash for "off". Both keep the identical outline, so toggling a row
+  // never changes the glyph's size or shifts the name next to it.
+  eye: <><path d="M2.6 12S6 6.2 12 6.2 21.4 12 21.4 12 18 17.8 12 17.8 2.6 12 2.6 12z" /><circle cx="12" cy="12" r="2.6" /></>,
+  eyeOff: <><path d="M2.6 12S6 6.2 12 6.2 21.4 12 21.4 12 18 17.8 12 17.8 2.6 12 2.6 12z" opacity=".5" /><path d="M4.2 4.2 19.8 19.8" /></>,
 };
 
 export function Icon({ name, size = 20, className, title, ...rest }) {

@@ -12,6 +12,7 @@
 import React from 'react';
 import { NavRail } from './NavRail.jsx';
 import { StartPanel } from './StartPanel.jsx';
+import { LayersPalette } from './LayersPalette.jsx';
 import { PropertiesPalette } from './PropertiesPalette.jsx';
 import { DiagnosticsPalette } from './DiagnosticsPalette.jsx';
 import { useI18n, useShell } from '../context.mjs';
@@ -31,7 +32,12 @@ export function Workspace() {
   // geometry is unchanged until the user opens it.
   const showProperties = palettesAvailable && shell.propertiesOpen && !showStart;
   const showDiagnostics = palettesAvailable && Boolean(shell.diagnosticsOpen);
-  const leftOpen = showStart || showProperties || showDiagnostics;
+  // The layers palette is a document-wide list, not a selection projection, so it
+  // is offered on the start page too: with no session the host answers the empty
+  // list and the panel says "no layers" rather than disappearing after `LAYER`.
+  // Closed by default, so the startup partition geometry is unchanged.
+  const showLayers = palettesAvailable && Boolean(shell.layersOpen);
+  const leftOpen = showStart || showProperties || showDiagnostics || showLayers;
   // The host hides the system cursor over the CAD partition only while it is
   // drawing its own crosshair (a 2D view with a pointer on the surface). A 3D
   // view reports `false`, so the system arrow stays and the pointer is never
@@ -46,6 +52,7 @@ export function Workspace() {
     <div className="region region--workspace workspace app-region">
       <div className={['workspace__left', leftOpen ? 'is-open' : ''].filter(Boolean).join(' ')}>
         {showStart ? <StartPanel /> : null}
+        {showLayers ? <LayersPalette /> : null}
         {showProperties ? <PropertiesPalette /> : null}
         {showDiagnostics ? <DiagnosticsPalette /> : null}
       </div>
@@ -58,9 +65,12 @@ export function Workspace() {
         {domCanvas ? (
           <canvas id="cad-canvas" className="cad-canvas" aria-hidden="true" />
         ) : null}
-        {/* The native CAD partition. Keep this node childless. */}
+        {/* The native CAD partition. Keep this node childless. `tabIndex={-1}`
+            makes it programmatically focusable only — the shortcut menu hands the
+            keyboard back here on Escape/Tab — without adding it to the tab order. */}
         <div
           ref={shell.surfaceRef}
+          tabIndex={-1}
           className={['native-input', crosshair ? 'is-crosshair' : ''].filter(Boolean).join(' ')}
           aria-label={t('a11y.canvas_label')}
         />

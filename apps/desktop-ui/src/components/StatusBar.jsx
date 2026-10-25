@@ -7,11 +7,13 @@ import { Button } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { commandById, toolLabelKey } from '../commands.mjs';
 import { OPTIONS_KEYS } from '../options.mjs';
-import { dispatchHoverPreview, dispatchObjectSnap, hoverPreviewToggle, importProgressView, objectSnapToggle, snapKindLabelKey, toolParameterViews, toolStepPromptKey } from '../cad.mjs';
+import { dispatchGrid, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, gridToggle, hoverPreviewToggle, importProgressView, objectSnapToggle, orthoToggle, snapKindLabelKey, toolParameterViews, toolStepPromptKey } from '../cad.mjs';
 
-// The drafting aids this build still has only as placeholders. OSNAP is a real
-// toggle (ADR 0014 A.4) and is rendered separately below.
-const DRAFTING = ['GRID', 'SNAP', 'ORTHO'];
+// The drafting aids this build still has only as placeholders. GRID (display
+// grid, F7), OSNAP (object snap, F3) and ORTHO (orthographic constraint, F8) are
+// real toggles and are rendered separately below. SNAP (grid snap, F9) is a
+// different, unimplemented feature and stays a visibly disabled placeholder.
+const DRAFTING = ['SNAP'];
 
 function Toggle({ label, on, onClick, title, disabled }) {
   return (
@@ -120,6 +122,15 @@ export function StatusBar() {
   // never a local mirror (ADR 0014 A.4). An older payload without the field renders
   // no chip at all, exactly like the hover-preview chip above.
   const objectSnap = objectSnapToggle(shell.status, shell.canCommand('OSNAP'));
+  // The display-grid switch is real host session state (`status.gridEnabled`),
+  // never a local mirror (`GRID`, F7). Turning it on does not by itself draw the
+  // grid: the host also needs the persisted `view.overlays.grid` preference.
+  const grid = gridToggle(shell.status, shell.canCommand('GRID'));
+  // The orthographic drafting constraint is real host session state
+  // (`status.orthoEnabled`), never a local mirror (`ORTHO`, F8). While on, the
+  // host constrains the next point entry from the previous point; it is not grid
+  // snap (F9) and never moves a point in Z.
+  const ortho = orthoToggle(shell.status, shell.canCommand('ORTHO'));
   // The current object-snap candidate kind (ADR 0014 A.7) is real host state
   // (`status.snapKind`). Without a candidate the key is null, so nothing extra
   // is rendered — never a placeholder chip.
@@ -172,6 +183,24 @@ export function StatusBar() {
         : <ParameterStepper key={view.key} view={view} onStep={shell.stepToolParameter} />))}
 
       <div className="statusbar__group" role="group" aria-label={t('status.drafting')}>
+        {grid ? (
+          <Toggle
+            label={t('status.toggle.grid')}
+            on={grid.on}
+            disabled={grid.disabled}
+            title={`${t('status.toggle.grid')} (F7)`}
+            onClick={() => dispatchGrid(shell.runCommand)}
+          />
+        ) : null}
+        {ortho ? (
+          <Toggle
+            label={t('status.toggle.ortho')}
+            on={ortho.on}
+            disabled={ortho.disabled}
+            title={`${t('status.toggle.ortho')} (F8)`}
+            onClick={() => dispatchOrtho(shell.runCommand)}
+          />
+        ) : null}
         {DRAFTING.map(id => {
           const command = commandById(id);
           const name = t(command.labelKey);

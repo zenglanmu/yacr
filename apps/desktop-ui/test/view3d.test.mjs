@@ -35,8 +35,8 @@ setCommandCatalog(['SWITCH2D3D', 'PROJECTION', 'ORBIT', 'FIT', 'PAN', 'ZOOMIN', 
 const zh = await readCatalog('zh-CN');
 const en = await readCatalog('en');
 const t = createTranslator({ 'zh-CN': zh, en }, 'en');
-const loaded = { documentLabel: 'fixture.dxf', entityCount: 12, loading: false, canOpen: true };
-const empty = { documentLabel: null, entityCount: null, loading: false, canOpen: true };
+const loaded = { documentLabel: 'fixture.dxf', entityCount: 12, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: true, canPlot: true };
+const empty = { documentLabel: null, entityCount: null, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: false, canPlot: false };
 const EXPECTED_VIEWS = ['top', 'bottom', 'front', 'back', 'left', 'right', 'isometric'];
 
 function viewTab() {
@@ -207,7 +207,10 @@ test('the orbit affordance stays visible, gesture-disabled, and emits no command
     'a disabled ribbon button must not carry a click handler',
   );
   const ribbon = await readModule('components/Ribbon.jsx');
-  assert.ok(ribbon.includes('unavailableReasonKey(item.command)'), 'the gesture hint comes from the shared reason key');
+  assert.ok(
+    ribbon.includes('unavailableReasonKey(item.command, { status: shell.status, pending: shell.pending })'),
+    'the gesture hint comes from the shared reason key',
+  );
 });
 
 test('the renderer routes a standard view through the typed IPC, never through runCommand', async () => {

@@ -31,7 +31,7 @@ export function parseCadStatus(value) {
   const camera = value?.camera;
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || !['documentLabel', 'error', 'backend', 'adapter'].every(nullableString)
-    || !['loading', 'canOpen', 'canFit'].every(field => typeof value[field] === 'boolean')
+    || !['loading', 'canOpen', 'canNew', 'canSave', 'canPlot', 'canFit', 'gridEnabled', 'orthoEnabled'].every(field => typeof value[field] === 'boolean')
     || !(value.entityCount === null || count('entityCount'))
     || !['importCount', 'frameCount'].every(count)
     || !(camera === null || (camera && Array.isArray(camera.center) && camera.center.length === 2
@@ -126,6 +126,76 @@ export function objectSnapToggle(status, admitted) {
 /** Dispatch the toggle as the one command the router accepts. */
 export function dispatchObjectSnap(runCommand) {
   runCommand(OBJECT_SNAP_COMMAND);
+}
+
+/** The single router command that flips the display grid (`GRID`, F7). */
+export const GRID_COMMAND = 'GRID';
+
+/**
+ * Status-bar view for the display-grid switch (`GRID`, F7).
+ *
+ * The server's `gridEnabled` flag is the single source of truth: it is the
+ * session's live switch. An on chip does **not** by itself mean the grid is
+ * drawn — the host also requires the persisted `view.overlays.grid` preference,
+ * so the two gates compose with AND. This is the display grid only; grid snap
+ * (`SNAP`/F9) is a different, unimplemented feature. A payload without the field
+ * yields `null`, so the caller renders no chip at all instead of guessing
+ * `false`. `admitted` is the shell's normal command admission (`canCommand`).
+ */
+export function gridToggle(status, admitted) {
+  const on = status?.gridEnabled;
+  if (typeof on !== 'boolean') return null;
+  return { on, disabled: admitted !== true };
+}
+
+/** Dispatch the toggle as the one command the router accepts. */
+export function dispatchGrid(runCommand) {
+  runCommand(GRID_COMMAND);
+}
+
+/** The single router command that flips the ORTHO drafting constraint (F8). */
+export const ORTHO_COMMAND = 'ORTHO';
+
+/**
+ * Status-bar view for the orthographic drafting constraint (`ORTHO`, F8).
+ *
+ * The server's `orthoEnabled` flag is the single source of truth: it is the
+ * session's live switch, not a local mirror and not a persisted preference. While
+ * on, the host constrains the next point entry (and the matching rubber band) to a
+ * horizontal or vertical direction from the tool's previous point; it is not grid
+ * snap (`SNAP`/F9) and it never moves a point in Z. A payload without the field
+ * (older host) yields `null`, so the caller renders no chip at all instead of
+ * guessing `false`. `admitted` is the shell's normal command admission
+ * (`canCommand`).
+ */
+export function orthoToggle(status, admitted) {
+  const on = status?.orthoEnabled;
+  if (typeof on !== 'boolean') return null;
+  return { on, disabled: admitted !== true };
+}
+
+/** Dispatch the toggle as the one command the router accepts. */
+export function dispatchOrtho(runCommand) {
+  runCommand(ORTHO_COMMAND);
+}
+
+/**
+ * The global drafting-aid accelerators: function key -> router command.
+ *
+ * A **name** table, not a second key handler. The shell has exactly one global
+ * `keydown` listener (`App.jsx`), and it is the only place a function key may be
+ * claimed: it resolves the key through [`draftingAcceleratorCommand`] and
+ * submits the returned command through the ordinary funnel (`submitCommand`) —
+ * the same path every chip uses. `F7` is AutoCAD's own key for the display grid,
+ * `F3` is its object-snap key and `F8` is its orthographic-constraint key; grid
+ * snap (`SNAP`) has no accelerator because the feature does not exist.
+ */
+export const DRAFTING_ACCELERATORS = Object.freeze({ F3: 'OSNAP', F7: 'GRID', F8: 'ORTHO' });
+
+/** The router command a drafting-aid function key means, or `null`. */
+export function draftingAcceleratorCommand(key) {
+  if (typeof key !== 'string') return null;
+  return DRAFTING_ACCELERATORS[key] ?? null;
 }
 
 /**
@@ -806,13 +876,13 @@ export async function requestImportCancel(invoke, status) {
 /**
  * Whether the host capability gates allow `command` right now.
  *
- * Only the two capability-gated commands this build has gates for are checked
- * here (`OPEN`, `FIT`); the general admission decision comes from
- * [`admitCommandText`], which also consults the loaded host vocabulary.
+ * A thin delegation to [`admitCommandText`] — host vocabulary, pending/loading
+ * state and every capability boolean (`canOpen`, `canNew`, `canSave`,
+ * `canPlot`, `canFit`) — so there is exactly one admission rule. The chrome's
+ * buttons use the shell's `canCommand`, which is this same call.
  */
 export function commandEnabled(status, pending, command) {
-  return Boolean(status && !pending && !status.loading
-    && (command === 'OPEN' ? status.canOpen : command === 'FIT' ? status.canFit && status.documentLabel !== null && status.entityCount !== null : false));
+  return admitCommandText(command, { status, pending }).kind === 'admitted';
 }
 
 /**
@@ -820,18 +890,20 @@ export function commandEnabled(status, pending, command) {
  *
  * The command vocabulary is the one loaded from the host (`admitCommandText`),
  * so an interactive tool (`LINE`, `MOVE`, `CONFIRM`, …) reaches the router; only
- * a name the host does not know, or an explicitly excluded host-owned command,
- * is refused before IPC. `{kind:'accepted'}` is queue admission, never
- * completion; a host-side refusal is an explicit `failed`, never a silent
- * success.
+ * a name the host does not know, a gesture-only name, a document-scoped selector
+ * without a drawing, or a false host capability (`canNew`/`canSave`/`canPlot`/
+ * `canOpen`/`canFit`) is refused before IPC. The refusal carries the catalog
+ * `reasonKey` so the command line shows the real sentence. `{kind:'accepted'}`
+ * is queue admission, never completion; a host-side refusal is an explicit
+ * `failed`, never a silent success.
  */
 export async function queueCadCommand(invoke, text, status, pending) {
   const admission = admitCommandText(text, { status, pending });
   const command = admission.command;
   if (admission.kind !== 'admitted') {
     return admission.kind === 'unavailable'
-      ? { kind: 'failed', error: 'CAD_COMMAND_UNAVAILABLE' }
-      : { kind: 'unsupported', command };
+      ? { kind: 'failed', error: 'CAD_COMMAND_UNAVAILABLE', command, reasonKey: admission.reasonKey }
+      : { kind: 'unsupported', command, reasonKey: admission.reasonKey };
   }
   // A chrome-local selector has no router command. Returning it as `local`
   // keeps this funnel honest instead of sending a name the router would refuse

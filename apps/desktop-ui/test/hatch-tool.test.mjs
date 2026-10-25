@@ -27,10 +27,10 @@ import {
 } from '../src/cad.mjs';
 import {
   admitCommandText,
+  CAPABILITY_GATES,
   COMMAND_CATALOG,
   filterCommandSuggestions,
   GESTURE_ONLY_COMMANDS,
-  HOST_EXCLUDED_COMMANDS,
   isSupportedCommand,
   setCommandCatalog,
   toolLabelKey,
@@ -46,7 +46,7 @@ const en = await readCatalog('en');
 const HOST_NAMES = ['HATCH'];
 setCommandCatalog(HOST_NAMES);
 
-const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canFit: true };
+const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
 
 const HATCH = {
   id: 'HATCH',
@@ -161,8 +161,9 @@ test('HATCH is a catalogued draw command whose enable state comes only from rout
   assert.equal(isSupportedCommand('HATCH'), false);
   assert.equal(admitCommandText('HATCH', { status: loaded }).kind, 'unsupported');
   setCommandCatalog(HOST_NAMES);
-  // It is neither a host-owned exclusion nor a gesture-only command.
-  assert.equal(HOST_EXCLUDED_COMMANDS.includes('HATCH'), false);
+  // It is neither capability-gated nor gesture-only: only the host vocabulary
+  // gates it.
+  assert.equal(CAPABILITY_GATES.HATCH, undefined);
   assert.equal(GESTURE_ONLY_COMMANDS.includes('HATCH'), false);
   // The command line autocompletes it with the same admission state.
   const suggestion = filterCommandSuggestions('HATCH').find(candidate => candidate.id === 'HATCH');

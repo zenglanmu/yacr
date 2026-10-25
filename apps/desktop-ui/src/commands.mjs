@@ -6,11 +6,14 @@
 // source of truth). Until that answer arrives the catalog is empty, so every
 // command is explicitly unsupported — never "everything allowed by default".
 //
-// On top of the router's vocabulary the chrome keeps explicit **exclusion**
-// lists: names the router would accept but this React host cannot service yet
-// (native file-dialog/printer owners) and gesture-only names (a click cannot
-// supply a drag payload). The exclusion is deliberate and named, not a silent
-// omission — the buttons stay visible but disabled with the real reason.
+// On top of the router's vocabulary the chrome keeps explicit **refusal** rules:
+// gesture-only names (a click cannot supply a drag payload), document-scoped
+// selectors (meaningless on the start page), the selectors the chrome answers
+// itself, and the host **capability booleans** (`NEW`/`SAVE`/`PLOT` and their
+// aliases). No name is disabled merely because it is "host-owned": the host
+// publishes `canNew`/`canSave`/`canPlot` in `cad_status` and those booleans
+// decide. Every refusal is explicit and named, not a silent omission — the
+// buttons stay visible but disabled with the real reason key.
 
 /** Normalize typed input the same way the host does (trim + upper-case). */
 export function normalizeCommandText(text) {
@@ -40,15 +43,85 @@ export function commandCatalog() {
 }
 
 /**
- * Commands the Rust router accepts but the React host cannot service yet: they
- * are owned by native dialogs/printing that the chrome has no implementation
- * for, so their buttons stay disabled with `command.unsupported`. This is an
- * explicit exclusion list — sourced from the host vocabulary, not a claim that
- * the names are unknown to the router.
+ * The host's AutoCAD-style alias table (`cad_command_aliases`), as frozen
+ * `{ alias, target }` rows. Empty until [`setCommandAliases`] receives the
+ * host's answer, and it stays empty when that answer fails — "no aliases known"
+ * is the honest state, never a guessed table.
+ *
+ * Aliases are a **suggestion** aid only: admission still goes through
+ * [`admitCommandText`] and the host's `cad_command`, which canonicalises the
+ * typed text itself. A missing alias table therefore costs discoverability, never
+ * correctness.
  */
-export const HOST_EXCLUDED_COMMANDS = Object.freeze([
-  'NEW', 'SAVE', 'SAVEAS', 'QSAVE', 'PLOT', 'EXPORT', 'PRINT',
-]);
+let loadedAliases = Object.freeze([]);
+// Bumped on every replacement so a memoized suggestion list recomputes when the
+// table arrives (the rows are module state, not React state).
+let aliasRevision = 0;
+
+/**
+ * Replace the alias table with the `{ alias, command }` pairs the host reported.
+ *
+ * Rows are normalized like typed text (trim + upper-case) and a row missing
+ * either half is dropped rather than completed from a guess. The first row for
+ * an alias wins: the host's table has no conflicts (it is contract-tested), so
+ * this only bounds a malformed answer.
+ */
+export function setCommandAliases(pairs) {
+  const byAlias = new Map();
+  for (const pair of pairs ?? []) {
+    const alias = normalizeCommandText(pair?.alias);
+    const target = normalizeCommandText(pair?.command);
+    if (!alias || !target) continue;
+    if (!byAlias.has(alias)) byAlias.set(alias, Object.freeze({ alias, target }));
+  }
+  loadedAliases = Object.freeze([...byAlias.values()]);
+  aliasRevision += 1;
+  return loadedAliases;
+}
+
+/** The current alias table (empty until the host has answered). */
+export function commandAliases() {
+  return loadedAliases;
+}
+
+/** A counter that changes whenever the alias table is replaced. */
+export function commandAliasRevision() {
+  return aliasRevision;
+}
+
+/**
+ * The canonical command `text` is an alias for, or `null`.
+ *
+ * Case-insensitive and trimmed, exactly like the host's normalization. Only real
+ * alias rows answer: a canonical name (which is not an alias) returns `null`, so
+ * a caller can tell "this is a shorthand" from "this is already the command".
+ */
+export function aliasTarget(text) {
+  const alias = normalizeCommandText(text);
+  if (!alias) return null;
+  return loadedAliases.find(row => row.alias === alias)?.target ?? null;
+}
+
+/**
+ * Host capability gates for the file-level selectors.
+ *
+ * `NEW`/`SAVE`/`PLOT` and their router aliases are real router commands, not
+ * "host-owned" names to be hidden behind a local exclusion list: the host
+ * publishes whether it can service them right now in `cad_status`
+ * (`canNew`/`canSave`/`canPlot`) and those booleans decide admission. This table
+ * maps each name onto the field that gates it; a name absent here has no
+ * capability gate. `canNew` is about creating a blank drawing (no document
+ * needed); `canSave`/`canPlot` additionally require an open document.
+ */
+export const CAPABILITY_GATES = Object.freeze({
+  NEW: 'canNew',
+  SAVE: 'canSave',
+  SAVEAS: 'canSave',
+  QSAVE: 'canSave',
+  PLOT: 'canPlot',
+  EXPORT: 'canPlot',
+  PRINT: 'canPlot',
+});
 
 /**
  * Commands the Rust router accepts but a **click cannot perform** because they
@@ -72,13 +145,17 @@ export const DOCUMENT_SCOPED_COMMANDS = Object.freeze(['SWITCH2D3D', 'PROJECTION
 /**
  * Selectors the **chrome** answers itself, before the router. They have a real
  * command-line entry (typing the word works) but no Rust command: `PROPERTIES`
- * opens the docked inspector through the shell action of the same name.
+ * opens the docked inspector and `LAYER` opens the docked layers palette, both
+ * through the shell action of the same name.
  *
  * They are deliberately admitted regardless of the loaded host vocabulary (and
  * of whether a drawing is open): they touch no CAD state, exactly like the
- * `OPTIONS` dialog the command line already intercepts locally.
+ * `OPTIONS` dialog the command line already intercepts locally. `LAYER` is not a
+ * router name at all — the router knows the layer *operations*
+ * (`TOGGLELAYER`/`SETLAYERS`/`RESTORELAYERS`/`SETACTIVELAYER`), which the palette
+ * drives through its own dedicated commands (`cad_layers` and friends).
  */
-export const LOCAL_CHROME_COMMANDS = Object.freeze(['PROPERTIES']);
+export const LOCAL_CHROME_COMMANDS = Object.freeze(['PROPERTIES', 'LAYER']);
 
 /** Whether `id` is one of the chrome-local selectors above. */
 export function isLocalChromeCommand(id) {
@@ -92,14 +169,18 @@ export function isLocalChromeCommand(id) {
  */
 export const NO_DOCUMENT_KEY = 'plot.no_document';
 
-/** The names kept disabled on top of the host vocabulary (for tests/UI copy). */
-export function excludedCommandNames() {
-  return [...HOST_EXCLUDED_COMMANDS];
-}
+/**
+ * The catalog key for "another operation is in progress" (`linux.busy`). A
+ * capability can read `false` merely because the host is still importing or
+ * publishing, and the honest sentence there is the busy one — never
+ * `command.unsupported`, which would claim a permanent limitation for a
+ * temporary state. The key is reused as-is; no new copy is invented here.
+ */
+export const BUSY_KEY = 'linux.busy';
 
 export function isSupportedCommand(id) {
   const name = normalizeCommandText(id);
-  if (!name || HOST_EXCLUDED_COMMANDS.includes(name) || GESTURE_ONLY_COMMANDS.includes(name)) return false;
+  if (!name || GESTURE_ONLY_COMMANDS.includes(name)) return false;
   // A chrome-local selector is supported by definition: the shell answers it
   // without the router, so it cannot be missing from the host vocabulary.
   if (LOCAL_CHROME_COMMANDS.includes(name)) return true;
@@ -107,15 +188,39 @@ export function isSupportedCommand(id) {
 }
 
 /**
- * The catalog key for why `id` is unavailable in this chrome: the real gesture
- * hint for a drag-only command (`ORBIT`), otherwise the generic unsupported
- * reason. It keeps the refusal explicit instead of telling the user a command
- * "is not supported" when the real answer is "drag on the canvas".
+ * Why a false capability blocks `name`: `canNew` needs no document, so a false
+ * value there means the host cannot create a blank drawing at all;
+ * `canSave`/`canPlot` also require an open document, and on the start page that
+ * is the whole reason (with the status not loading — that case is [`BUSY_KEY`]).
  */
-export function unavailableReasonKey(id) {
-  return GESTURE_ONLY_COMMANDS.includes(normalizeCommandText(id))
-    ? 'view.orbit.gesture'
-    : 'command.unsupported';
+function capabilityRefusalKey(name, status) {
+  return CAPABILITY_GATES[name] === 'canNew' || status.documentLabel !== null
+    ? 'command.unsupported'
+    : NO_DOCUMENT_KEY;
+}
+
+/**
+ * The catalog key for why `id` is unavailable in this chrome: the real gesture
+ * hint for a drag-only command (`ORBIT`), the busy sentence while the host is
+ * loading or a command is already in flight, "no drawing is open" for a
+ * save/plot gate that only lacks a document, and otherwise the generic
+ * unsupported reason. It keeps the refusal explicit instead of telling the user
+ * a command "is not supported" when the real answer is "drag on the canvas" or
+ * "a load is still running".
+ *
+ * This is the one reason table: the command line (through
+ * [`admitCommandText`] and [`queueCadCommand`]), the ribbon hints and the QAT /
+ * start-panel titles all resolve their sentence through it, so a disabled button
+ * and a refused submission can never word the same fact differently.
+ */
+export function unavailableReasonKey(id, { status = null, pending = false } = {}) {
+  const name = normalizeCommandText(id);
+  if (GESTURE_ONLY_COMMANDS.includes(name)) return 'view.orbit.gesture';
+  const gate = CAPABILITY_GATES[name];
+  if (!gate || !status) return 'command.unsupported';
+  if (pending || status.loading) return BUSY_KEY;
+  if (!status[gate]) return capabilityRefusalKey(name, status);
+  return 'command.unsupported';
 }
 
 /**
@@ -242,13 +347,32 @@ export function commandById(id) {
 }
 
 /**
- * Autocomplete over the command catalog.
- *
+ * The suggestion rank of an alias row: after canonical prefix matches (`0`),
+ * before canonical mid-string matches (`1`). See [`filterCommandSuggestions`].
+ */
+const ALIAS_SUGGESTION_SCORE = 0.5;
+
+/**
+ * Autocomplete over the command catalog **plus** the host's alias table.
  * Ordering follows the command-window convention: prefix matches before
  * mid-string matches, then commands used more often in history float up, then
  * alphabetical for stability. `query` is the raw typed text.
+ *
+ * Alias rows (`{ id: <alias>, target: <canonical> }`) are matched as a *prefix*
+ * of the alias only (`l` finds `L`, `L → LINE`; `ine` does not). They rank
+ * between canonical prefix matches and canonical mid-string matches, so an exact
+ * canonical match is never pushed down by a shorthand, and a shorthand is never
+ * starved by a canonical name that merely *contains* the needle (`PLINE` for
+ * `l`). Among themselves they follow the same usage-frequency order. The `limit`
+ * applies to the merged list. An empty alias table (or a failed
+ * `cad_command_aliases` answer) changes nothing but the extra rows.
  */
-export function filterCommandSuggestions(query, { history = [], limit = 8, catalog = COMMAND_CATALOG } = {}) {
+export function filterCommandSuggestions(query, {
+  history = [],
+  limit = 8,
+  catalog = COMMAND_CATALOG,
+  aliases = commandAliases(),
+} = {}) {
   const needle = normalizeCommandText(query);
   const usage = new Map();
   history.forEach((entry, index) => {
@@ -265,6 +389,23 @@ export function filterCommandSuggestions(query, { history = [], limit = 8, catal
       score: needle ? (at === 0 ? 0 : 1) : 2,
       usage: usage.get(command.id) ?? 0,
     });
+  }
+  // Alias rows only make sense once something is typed: an empty query is the
+  // browse-the-catalog case, not a shorthand lookup.
+  if (needle) {
+    for (const { alias, target } of aliases) {
+      if (!alias.startsWith(needle)) continue;
+      const command = commandById(target);
+      matches.push({
+        id: alias,
+        target,
+        icon: command?.icon ?? 'terminal',
+        labelKey: command?.labelKey ?? null,
+        supported: isSupportedCommand(alias),
+        score: ALIAS_SUGGESTION_SCORE,
+        usage: usage.get(alias) ?? 0,
+      });
+    }
   }
   matches.sort((a, b) => a.score - b.score || b.usage - a.usage || a.id.localeCompare(b.id));
   return matches.slice(0, limit).map(({ score, usage: _usage, ...rest }) => rest);
@@ -312,21 +453,34 @@ export function pushHistory(history, entry, limit = 64) {
  * Admission for the command line: what would `cad_command` do with this text?
  * Uses the vocabulary loaded from the host ([`isSupportedCommand`]) plus the
  * capability gates, without touching IPC.
+ *
+ * Every non-admitted answer carries the `reasonKey` that words **why** (see
+ * [`unavailableReasonKey`]) so the caller never has to re-derive — or invent — a
+ * second explanation for the same refusal.
  */
 export function admitCommandText(text, { status = null, pending = false } = {}) {
   const id = normalizeCommandText(text);
-  if (!id) return { kind: 'empty', command: id };
+  if (!id) return { kind: 'empty', command: id, reasonKey: null };
   // A local selector is admitted without a status/document: it only toggles
   // chrome. The submit path intercepts it before `queueCadCommand`.
-  if (LOCAL_CHROME_COMMANDS.includes(id)) return { kind: 'admitted', command: id };
-  if (!isSupportedCommand(id)) return { kind: 'unsupported', command: id };
-  if (!status || pending || status.loading) return { kind: 'unavailable', command: id };
-  if (id === 'OPEN' && !status.canOpen) return { kind: 'unavailable', command: id };
+  if (LOCAL_CHROME_COMMANDS.includes(id)) return { kind: 'admitted', command: id, reasonKey: null };
+  if (!isSupportedCommand(id)) {
+    return { kind: 'unsupported', command: id, reasonKey: unavailableReasonKey(id, { status, pending }) };
+  }
+  // No status means the host has not answered yet: nothing is admitted on a
+  // guess, and the honest reason is that this build cannot say yet.
+  if (!status) return { kind: 'unavailable', command: id, reasonKey: 'command.unsupported' };
+  if (pending || status.loading) return { kind: 'unavailable', command: id, reasonKey: BUSY_KEY };
+  if (id === 'OPEN' && !status.canOpen) return { kind: 'unavailable', command: id, reasonKey: 'command.unsupported' };
+  const gate = CAPABILITY_GATES[id];
+  if (gate && !status[gate]) {
+    return { kind: 'unavailable', command: id, reasonKey: capabilityRefusalKey(id, status) };
+  }
   if (DOCUMENT_SCOPED_COMMANDS.includes(id) && status.documentLabel === null) {
-    return { kind: 'unavailable', command: id };
+    return { kind: 'unavailable', command: id, reasonKey: NO_DOCUMENT_KEY };
   }
   if (id === 'FIT' && !(status.canFit && status.documentLabel !== null && status.entityCount !== null)) {
-    return { kind: 'unavailable', command: id };
+    return { kind: 'unavailable', command: id, reasonKey: 'command.unsupported' };
   }
-  return { kind: 'admitted', command: id };
+  return { kind: 'admitted', command: id, reasonKey: null };
 }

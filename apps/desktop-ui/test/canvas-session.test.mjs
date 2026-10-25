@@ -18,7 +18,7 @@ import {
   createCanvasSessionReporter,
 } from '../src/surface.mjs';
 import { readAppSource, readCatalog, readModule } from './helpers.mjs';
-import { offeredItems, PALETTE_ACTIONS, RIBBON_TABS } from '../src/ribbon-model.mjs';
+import { offeredItems, offeredPanels, PALETTE_ACTIONS, PALETTE_COMMANDS, RIBBON_TABS } from '../src/ribbon-model.mjs';
 
 const LABEL = 'synthetic-four-lines.dwg';
 
@@ -306,15 +306,28 @@ test('the ribbon does not offer a palette toggle either', () => {
   assert.deepEqual(offeredItems(items, false).map(item => item.id), ['clean', 'OPEN']);
 
   // The shipped model really contains palette entries, and dropping them never
-  // leaves a panel with nothing to show.
+  // leaves a panel with an empty body: a panel that held nothing but palette
+  // toggles (the Home tab's "Layers" panel is exactly that now that `LAYER` opens
+  // the docked layers palette) is dropped whole by the renderer instead of
+  // rendering a titled box with no buttons.
   let paletteEntries = 0;
+  let droppedPanels = 0;
   for (const tab of RIBBON_TABS) {
     for (const panel of tab.panels) {
-      paletteEntries += panel.items.filter(item => PALETTE_ACTIONS.includes(item.action)).length;
-      assert.ok(offeredItems(panel.items, false).length > 0, `panel ${panel.id} must keep at least one item`);
+      paletteEntries += panel.items.filter(item => PALETTE_ACTIONS.includes(item.action)
+        || PALETTE_COMMANDS.includes(item.command)).length;
+      const offered = offeredItems(panel.items, false);
+      assert.equal(offeredPanels([panel], false).length > 0, offered.length > 0, panel.id);
+      if (offered.length === 0) droppedPanels += 1;
+    }
+    assert.ok(offeredPanels(tab.panels, false).length > 0, `tab ${tab.id} keeps at least one panel`);
+    for (const panel of offeredPanels(tab.panels, false)) {
+      assert.ok(offeredItems(panel.items, false).length > 0, `offered panel ${panel.id} keeps at least one item`);
     }
   }
-  assert.ok(paletteEntries >= 3, `expected the ribbon to offer palette entries, saw ${paletteEntries}`);
+  assert.ok(paletteEntries >= 4, `expected the ribbon to offer palette entries, saw ${paletteEntries}`);
+  assert.ok(droppedPanels >= 1, 'the layers-only panel is dropped, not left empty');
+  assert.equal(offeredPanels(RIBBON_TABS[0].panels, true), RIBBON_TABS[0].panels);
 });
 
 test('the identity adds no user-visible copy to either catalog', async () => {

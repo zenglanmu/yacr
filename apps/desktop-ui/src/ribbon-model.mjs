@@ -33,6 +33,16 @@ export const SHELL_ACTIONS = Object.freeze({
 export const PALETTE_ACTIONS = Object.freeze([SHELL_ACTIONS.diagnostics, SHELL_ACTIONS.properties]);
 
 /**
+ * Palette toggles that dispatch a **command name** instead of a shell action.
+ *
+ * `LAYER` opens the layers palette but rides the command funnel (it is a
+ * chrome-local selector: the palette answers it, no Rust command exists), so its
+ * dispatch token is `command` even though the affordance is a palette toggle. For
+ * this carrier filter the two spellings mean the same thing.
+ */
+export const PALETTE_COMMANDS = Object.freeze(['LAYER']);
+
+/**
  * The items a panel actually offers on the reported carrier.
  *
  * A docked palette the carrier does not have must not be offered anywhere: the
@@ -43,9 +53,22 @@ export const PALETTE_ACTIONS = Object.freeze([SHELL_ACTIONS.diagnostics, SHELL_A
  * without the flag) renders exactly the ribbon it always did.
  */
 export function offeredItems(items, palettesAvailable) {
-  return palettesAvailable === false
-    ? items.filter(item => !PALETTE_ACTIONS.includes(item.action))
-    : items;
+  if (palettesAvailable !== false) return items;
+  return items.filter(item => !PALETTE_ACTIONS.includes(item.action)
+    && !PALETTE_COMMANDS.includes(item.command));
+}
+
+/**
+ * The panels a tab actually offers on the reported carrier.
+ *
+ * Filtering the items is not enough: the Home tab's "Layers" panel holds nothing
+ * but palette toggles, so on a carrier without the palettes it would render as an
+ * empty titled box. A panel that has nothing left is dropped whole, together with
+ * its title and launcher.
+ */
+export function offeredPanels(panels, palettesAvailable) {
+  if (palettesAvailable !== false) return panels;
+  return panels.filter(panel => offeredItems(panel.items, palettesAvailable).length > 0);
 }
 
 export const RIBBON_TABS = Object.freeze([

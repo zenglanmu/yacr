@@ -49,8 +49,13 @@ export function CommandLine() {
   const prefill = textMode ? toolTextPrefill(tool) : null;
 
   const suggestions = useMemo(
-    () => (textMode ? [] : filterCommandSuggestions(shell.command, { history: shell.history })),
-    [textMode, shell.command, shell.history],
+    () => (textMode
+      ? []
+      : filterCommandSuggestions(shell.command, { history: shell.history, aliases: shell.commandAliases })),
+    // `shell.commandAliases` is a dependency because it is the row source (module
+    // state loaded once at startup): without it a memo from before the table
+    // arrived would hide the shorthand rows.
+    [textMode, shell.command, shell.history, shell.commandAliases],
   );
   // The command-window echo: `status.commandLog`, oldest first, newest at the
   // bottom. The host log is append-only (sequences are monotonic, a document
@@ -195,7 +200,10 @@ export function CommandLine() {
   // The text step never disables the field while a submit is queued: disabling
   // it would drop focus mid-edit. The submit guard handles the double Enter.
   const disabledInput = !shell.cadReady || (shell.pending && !textMode);
-  const activeOptionId = listOpen && suggestions[highlight] ? `completion-${suggestions[highlight].id}` : undefined;
+  // The option id is a slug: a multi-word alias (`ZOOM EXTENTS`) would otherwise
+  // put a space in a DOM id, and `aria-activedescendant` has to name it exactly.
+  const optionId = suggestion => `completion-${suggestion.id.replace(/\s+/g, '-')}`;
+  const activeOptionId = listOpen && suggestions[highlight] ? optionId(suggestions[highlight]) : undefined;
 
   return (
     <div ref={rootRef} className="region region--cmdline commandline app-region">
@@ -330,7 +338,7 @@ export function CommandLine() {
               key={suggestion.id}
               type="button"
               role="option"
-              id={`completion-${suggestion.id}`}
+              id={optionId(suggestion)}
               aria-selected={index === highlight}
               className={['completion', index === highlight ? 'is-highlight' : '', suggestion.supported ? 'is-supported' : ''].filter(Boolean).join(' ')}
               onMouseEnter={() => setHighlight(index)}
@@ -340,7 +348,10 @@ export function CommandLine() {
             >
               <Icon name={suggestion.icon} size={15} />
               <span className="completion__id">{suggestion.id}</span>
-              <span className="completion__label">{t(suggestion.labelKey)}</span>
+              {/* An alias row shows the canonical command it stands for as its
+                  secondary text: the shorthand is the entry, the target is the
+                  meaning. A canonical row keeps its translated label. */}
+              <span className="completion__label">{suggestion.target ?? t(suggestion.labelKey)}</span>
               {suggestion.supported ? null : <em className="completion__badge">{t('command.badge.unwired')}</em>}
             </button>
           ))}

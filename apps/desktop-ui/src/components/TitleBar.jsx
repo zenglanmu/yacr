@@ -3,6 +3,7 @@
 import React from 'react';
 import { Button, IconButton } from './primitives.jsx';
 import { Icon } from '../icons.jsx';
+import { unavailableReasonKey } from '../commands.mjs';
 import { useI18n, useShell } from '../context.mjs';
 
 export function TitleBar() {
@@ -10,13 +11,22 @@ export function TitleBar() {
   const shell = useShell();
   const brand = t('app.title').split(' — ')[0];
 
+  // `NEW`/`SAVE` carry real router actions now, exactly like `OPEN`: their
+  // availability is the shared admission (`shell.canCommand` = host vocabulary +
+  // `cad_status.canNew`/`canSave`), never a second local check here. A refusal is
+  // worded with the same reason key the command line uses.
   const qat = [
-    { id: 'NEW', icon: 'new', labelKey: 'qat.new' },
+    { id: 'NEW', icon: 'new', labelKey: 'qat.new', action: () => shell.runCommand('NEW') },
     { id: 'OPEN', icon: 'open', labelKey: 'file.open', action: () => shell.runCommand('OPEN') },
-    { id: 'SAVE', icon: 'save', labelKey: 'qat.save' },
+    { id: 'SAVE', icon: 'save', labelKey: 'qat.save', action: () => shell.runCommand('SAVE') },
     { id: 'UNDO', icon: 'undo', labelKey: 'toolbar.undo' },
     { id: 'REDO', icon: 'redo', labelKey: 'toolbar.redo' },
   ];
+
+  const refusal = item => t(
+    unavailableReasonKey(item.id, { status: shell.status, pending: shell.pending }),
+    { command: t(item.labelKey) },
+  );
 
   return (
     <div className="region region--title titlebar app-region" role="banner">
@@ -32,17 +42,20 @@ export function TitleBar() {
       </button>
 
       <div className="qat" role="toolbar" aria-label={t('qat.label')}>
-        {qat.map(item => (
-          <IconButton
-            key={item.id}
-            icon={item.icon}
-            label={t(item.labelKey)}
-            size="sm"
-            disabled={!item.action || !shell.canCommand(item.id)}
-            title={item.action && shell.canCommand(item.id) ? t(item.labelKey) : `${t(item.labelKey)} — ${t('command.unsupported', { command: t(item.labelKey) })}`}
-            onClick={item.action}
-          />
-        ))}
+        {qat.map(item => {
+          const enabled = Boolean(item.action) && shell.canCommand(item.id);
+          return (
+            <IconButton
+              key={item.id}
+              icon={item.icon}
+              label={t(item.labelKey)}
+              size="sm"
+              disabled={!enabled}
+              title={enabled ? t(item.labelKey) : `${t(item.labelKey)} — ${refusal(item)}`}
+              onClick={item.action}
+            />
+          );
+        })}
         <span className="qat__rule" aria-hidden="true" />
         <IconButton icon="chevronDown" label={t('qat.customize')} size="sm" disabled />
       </div>

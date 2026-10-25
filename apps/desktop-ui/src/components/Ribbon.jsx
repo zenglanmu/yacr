@@ -21,7 +21,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons.jsx';
 import { IconButton, RibbonButton } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
-import { offeredItems, RIBBON_TABS, ribbonTab } from '../ribbon-model.mjs';
+import { offeredItems, offeredPanels, RIBBON_TABS, ribbonTab } from '../ribbon-model.mjs';
 import { DOCUMENT_SCOPED_COMMANDS, NO_DOCUMENT_KEY, unavailableReasonKey } from '../commands.mjs';
 import { standardViewAvailable, standardViewUnavailableReasonKey } from '../view3d.mjs';
 import { ribbonBandOverflow, ribbonCueReserve, ribbonScrollTarget, sameOverflow } from '../ribbon-overflow.mjs';
@@ -55,7 +55,7 @@ function unavailable(t, item, shell) {
     && shell.status && !shell.loading && !shell.documentOpen) {
     return t(NO_DOCUMENT_KEY, { command: t(item.labelKey) });
   }
-  return t(unavailableReasonKey(item.command), { command: t(item.labelKey) });
+  return t(unavailableReasonKey(item.command, { status: shell.status, pending: shell.pending }), { command: t(item.labelKey) });
 }
 
 function ItemButton({ item }) {
@@ -320,7 +320,7 @@ export function Ribbon() {
           style={{ '--ribbon-cue-start': `${reserve.start}px`, '--ribbon-cue-end': `${reserve.end}px` }}
         >
           <div className="ribbon__panels" role="tabpanel" aria-label={t(tab.labelKey)} ref={panelsRef}>
-            {tab.panels.map(panel => (
+            {offeredPanels(tab.panels, shell.palettesAvailable).map(panel => (
               <Panel key={panel.id} panel={panel} openMenu={openMenu} setOpenMenu={setOpenMenu} />
             ))}
           </div>

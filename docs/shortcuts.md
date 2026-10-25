@@ -85,13 +85,68 @@ canonical 命令（`work-only` 表示仅在工作模式可用，Viewer 模式由
 | `TOOLS` | UI | 否 | `RIBBON` |
 | `PANELS` | UI | 否 | — |
 | `DIAGNOSTICS` | UI | 否 | — |
+| `GRID` | 显示（**仅**栅格叠加开关，2026-10-25 起真实选择器） | 否 | — |
+| `OSNAP` | 显示（对象捕捉开关） | 否 | — |
+| `ORTHO` | 显示（正交约束开关；会话状态，不写库） | 否 | — |
+| `HOVERPREVIEW` | 显示（悬停预览开关） | 否 | — |
 
 说明：
+- `GRID` 只切换**显示栅格叠加**（会话状态；宿主还要 `view.overlays.grid` 偏好同时为真才真正绘制）。
+  AutoCAD 的网格**捕捉**（`SNAP`/F9）是**另一个未实现**的特性，仍被显式拒绝（不在命令表内），
+  二者不互为别名。
+- `ORTHO` 只切换**会话内的正交约束**（默认**关**，与 AutoCAD 初始状态一致）：开启后，绘图与测量的
+  **下一次取点**被约束到相对该工具**上一个已取点**的水平或垂直方向（`|dx| >= |dy|` 取水平，
+  恰好相等也取水平；`z` 保持原始输入值，正交是**二维**辅助，不在 Z 上移动点）。首个点没有参考点，
+  因此原样使用；关闭时原样使用。它**不**包含极轴追踪、相对/绝对坐标输入模式，也**不**是网格捕捉
+  （`SNAP`/F9 仍未实现，二者不互为别名）。实现上它是**先做对象捕捉再施加正交**（与 AutoCAD 内部
+  顺序不同，属已记录的刻意偏差）；只改会话/显示状态，不写数据库、不产生撤销步、不改持久化偏好，
+  Viewer 与 Work 均可用。橡皮筋预览与提交点共用同一约束（见 `crates/cad-app/src/ortho.rs`）。
 - `COPYCLIP` 是**只读**捕获，Viewer 亦可用；`CUTCLIP`/`PASTECLIP` 为 work-only。
 - `OPEN`/`NEW`/`SAVE`/`PLOT` 为**宿主自有**：宿主未提供能力时命令层返回显式 `Unsupported`
   （不会静默 no-op）。
 - 别名表见 `crates/cad-ui-slint/src/command_completion.rs::ALIASES`，同义词表见 `SYNONYMS`；
   已知但未实现的 AutoCAD 命令表见 `crates/cad-ui-slint/src/command_line.rs::UNSUPPORTED_COMMANDS`。
+  **（以上三处均随 Slint 退役删除，现行别名表见 §2b。）**
+
+---
+
+## 2b. 现行 AutoCAD 风格命令别名（React 宿主，2026-10-25 起）
+
+> 本节描述**当前** `crates/cad-ui-core/src/session/commands.rs::COMMAND_ALIASES` 的真实内容
+> （Slint 时期的别名表已随之删除）。命令行候选列表由宿主 IPC `cad_command_aliases` 提供，
+> 前端不再维护第二份表；别名只是**候选/便捷输入**，准入与分发仍走 `cad_command` → 路由器
+> 归一化（`normalize_command`/`canonical_command_name`），别名不会改变任何命令行为。
+
+| 别名 | canonical | 别名 | canonical |
+|---|---|---|---|
+| `L` | `LINE` | `TR` | `TRIM` |
+| `C` | `CIRCLE` | `EX` | `EXTEND` |
+| `A` | `ARC` | `O` | `OFFSET` |
+| `PL` | `PLINE` | `RO` | `ROTATE` |
+| `REC` | `RECTANG` | `SC` | `SCALE` |
+| `EL` | `ELLIPSE` | `MI` | `MIRROR` |
+| `POL` | `POLYGON` | `AR` | `ARRAYRECT` |
+| `PO` | `POINT` | `AL` | `ALIGN` |
+| `SPL` | `SPLINE` | `S` | `STRETCH` |
+| `T` | `TEXT` | `X` | `EXPLODE` |
+| `M` | `MOVE` | `H` | `HATCH` |
+| `CO` | `COPY` | `U` | `UNDO` |
+| `CP` | `COPY` | `Z` | `ZOOM` |
+| `E` | `ERASE` | `P` | `PAN` |
+| `F` | `FILLET` | `OS` | `OSNAP` |
+| `CHA` | `CHAMFER` | `GR` | `GRID` |
+| `DLI` | `DIMLINEAR` | `OR` | `ORTHO` |
+| `DAL` | `DIMALIGNED` | `DRA` | `DIMRADIUS` |
+| `DDI` | `DIMDIAMETER` | `DAN` | `DIMANGULAR` |
+| `DCE` | `DIMCENTER` | | |
+
+全词同义词（同样在 `COMMAND_ALIASES` 内）：`EXPORT`/`PRINT`→`PLOT`、`SAVEAS`/`QSAVE`→`SAVE`、
+`ZOOM EXTENTS`→`FIT`、`ENTER`→`CONFIRM`、`DBA`→`DIMBASELINE`、`DCO`→`DIMCONTINUE`。
+
+诚实边界：这张表是**面向已实现命令的 AutoCAD `acad.pgp` 子集**，不是 `acad.pgp` 解析器，
+也**不支持用户自定义别名**；目标命令不存在的缩写一律不收录（例如 `MA`/`MATCHPROP`——本程序
+未实现 MATCHPROP），绝不用别名凭空造出命令。`SNAP`（网格捕捉，F9）仍被显式拒绝，与 `OSNAP`
+（对象捕捉）和 `GRID`（显示栅格）互不为别名。
 
 ---
 
@@ -110,8 +165,9 @@ canonical 命令（`work-only` 表示仅在工作模式可用，Viewer 模式由
 | `Ctrl+1` | 切换侧面板 |
 | `Ctrl+9` | 切换命令行展开（命令栏可见时） |
 | `Ctrl+0` | 切换 clean screen（隐藏 chrome） |
-| `F7` | 切换网格叠加 |
-| `F3` | 切换捕捉提示标记叠加（并非 running-OSNAP 开关） |
+| `F7` | 切换**显示栅格**会话开关（`GRID`；不再只是叠加偏好） |
+| `F3` | 切换对象捕捉会话开关（`OSNAP`；不是捕捉提示叠加偏好） |
+| `F8` | 切换正交约束会话开关（`ORTHO`；默认关，约束下一次取点） |
 | `F2` | 切换命令行展开（命令栏可见时） |
 | `Esc` | 取消最高优先级的进行中交互/命令；无进行中交互且有选择时清除选择 |
 
@@ -135,8 +191,8 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
 
 ## 4. 明确未支持的 AutoCAD 快捷键/命令（诚实）
 
-- **功能键**：`F1`、`F4`、`F5`、`F6`、`F8`、`F9`、`F10`、`F11`、`F12` 未接线，按下时通过
-  `shortcut.unsupported` 报告（含键名），**不会**静默 no-op。（`F2`/`F3`/`F7` 已接线，见上表。）
+- **功能键**：`F1`、`F4`、`F5`、`F6`、`F9`、`F10`、`F11`、`F12` 未接线，按下时通过
+  `shortcut.unsupported` 报告（含键名），**不会**静默 no-op。（`F2`/`F3`/`F7`/`F8` 已接线，见上表。）
 - **Ctrl 组合键**：上表列出的组合键已接线。以下 AutoCAD 常用组合键**未实现**，按下时通过
   `shortcut.unsupported` 报告（含精确 chord 名），**不会**静默 no-op：
   - 面板/对话框：`Ctrl+2`（DesignCenter）、`Ctrl+3`（工具选项板）、`Ctrl+4`（图纸集）、
@@ -154,7 +210,8 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     其余未映射组合不拦截。
 - **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
   的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
-  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**68 个选择子**，P6b 后由 67 增加）；不在表内的名字报告
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**75 个选择子**；P6b 后由 67 增加，2026-10-25
+  再加 `GRID`）；不在表内的名字报告
   `command.unknown`；宿主**识别但未实现**的路径（如 `PLOT`/`SAVE` 的受限路径）由宿主报告
   `command.unsupported`。两者都是显式反馈，**不静默忽略**。
 - **仍未实现的 AutoCAD 名（据实）**：`POLYLINE`（我们有 `PLINE`）、`XLINE`、`BLOCK`、`WBLOCK`、

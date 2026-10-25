@@ -1,6 +1,6 @@
 // The webview-default guards: the native context menu (except in text fields),
 // the browser reload/print/page-zoom accelerators, Ctrl+wheel page zoom, and the
-// single inert CAD shortcut-menu hook.
+// single CAD shortcut-menu hook (which builds the menu model, not a window).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -108,9 +108,22 @@ test('the CAD hook carries the point relative to the partition plus selection an
     tool,
   });
 
-  // The shipped hook is inert: no menu, no panel, no host mutation.
-  assert.equal(cadContextMenuRequest(calls[0]), undefined);
-  assert.equal(cadContextMenuRequest(), undefined);
+  // The shipped hook answers with the pure menu model and nothing else: no DOM,
+  // no IPC, no host mutation. Every section is present even when no slice is
+  // known, and every item that cannot run is disabled rather than omitted.
+  const model = cadContextMenuRequest(calls[0]);
+  assert.deepEqual(model.sections.map(section => section.id), [
+    'repeat', 'clipboard', 'selection', 'view', 'history',
+  ]);
+  const flat = model.sections.flatMap(section => section.items);
+  // The detail has no `lastCommand`/`canFit`/`hasDocument`, so those items are
+  // disabled; the detail's active tool disables the clipboard items.
+  assert.equal(flat.find(item => item.id === 'repeat.last').enabled, false);
+  assert.equal(flat.find(item => item.id === 'view.fit').enabled, false);
+  assert.equal(flat.find(item => item.id === 'clipboard.copy').enabled, false);
+  assert.equal(flat.find(item => item.id === 'selection.all').enabled, true);
+  // An empty detail is the same honest model, never a throw.
+  assert.equal(cadContextMenuRequest().sections.length, 5);
 });
 
 test('reload, print and page-zoom accelerators are blocked even with a text field focused', () => {
@@ -227,7 +240,7 @@ test('disposing the guards removes every listener', () => {
 
 test('the app shell installs the guards after its shortcuts, with status context', async () => {
   const app = await readAppSource();
-  assert.ok(app.includes("import { bindBrowserDefaults } from './defaults.mjs';"));
+  assert.ok(app.includes("import { bindBrowserDefaults, cadContextMenuRequest } from './defaults.mjs';"));
   assert.ok(app.includes('bindBrowserDefaults(window, {'));
   assert.ok(app.includes('selection: current?.selection ?? null, tool: current?.tool ?? null'));
   // Ctrl+0 is both the app's clean-screen toggle and WebKit's zoom reset: the

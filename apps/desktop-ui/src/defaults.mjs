@@ -13,8 +13,10 @@
 //
 // The command line keeps its native menu (copy/paste must keep working), so
 // text-entry targets are exempt from the context-menu suppression. Everything
-// else is blocked here, in one place, and the CAD partition gets a single inert
-// shortcut-menu hook for a future feature.
+// else is blocked here, in one place, and a right-click inside the CAD partition
+// is handed to the single shortcut-menu hook below — which builds the menu model
+// the app renders as an in-DOM overlay.
+import { buildContextMenu } from './context-menu.mjs';
 import { pointerPosition } from './metrics.mjs';
 
 const TEXT_ENTRY_TAGS = new Set(['INPUT', 'TEXTAREA']);
@@ -68,20 +70,30 @@ export function isBrowserZoomWheel(event = {}) {
 /**
  * The single CAD shortcut-menu hook (right-click inside the CAD partition).
  *
- * Reserved for a future shortcut menu (object snap, clipboard, selection and
- * tool actions). The menu itself is **not implemented**: this function
- * deliberately returns `undefined` and performs no DOM, IPC or session work, so
- * a CAD right-click today only suppresses the webview menu and forwards the
- * press exactly as before. A future feature attaches here (or replaces this
- * export) — there is exactly one call site, in `bindBrowserDefaults`.
+ * It is the **pure adapter** between the DOM event and the menu model: it maps
+ * the detail into [`buildContextMenu`] and returns the model, performing no DOM,
+ * IPC or session work of its own. A caller that installs no `onContextMenu`
+ * therefore gets the honest menu structure and nothing else.
  *
- * @param {{point: {x: number, y: number}, selection: object|null, tool: object|null}} detail
- *   `point` is CSS pixels relative to the CAD partition rect; `selection` and
- *   `tool` are the host status slices the UI already has.
+ * The app installs its own callback instead: same detail, same model, plus the
+ * two things only the app knows — the partition rect (to convert `point` into
+ * viewport CSS px for the fixed overlay) and the overlay's open/close state. The
+ * press itself is never prevented from reaching the native input lane here.
+ *
+ * @param {{point: {x: number, y: number}, selection: object|null, tool: object|null,
+ *          lastCommand?: string|null, canFit?: boolean, hasDocument?: boolean}} detail
+ *   `point` is CSS pixels relative to the CAD partition rect; `selection`, `tool`,
+ *   `lastCommand`, `canFit` and `hasDocument` are the state slices the UI already
+ *   has (absent slices mean "not available", never "enabled by default").
  */
-export function cadContextMenuRequest(detail) {
-  void detail;
-  return undefined;
+export function cadContextMenuRequest(detail = {}) {
+  return buildContextMenu({
+    selection: detail.selection ?? null,
+    tool: detail.tool ?? null,
+    lastCommand: detail.lastCommand ?? null,
+    canFit: detail.canFit === true,
+    hasDocument: detail.hasDocument === true,
+  });
 }
 
 /**
@@ -106,8 +118,10 @@ export function bindBrowserDefaults(env, {
     const cad = typeof event.target?.closest === 'function'
       ? event.target.closest(cadSelector)
       : null;
-    // One call site for the reserved CAD shortcut menu. It is inert today (see
-    // `cadContextMenuRequest`); nothing is rendered.
+    // The one call site for the CAD shortcut menu. The default hook builds the
+    // model from this detail; the app replaces it with a callback that renders
+    // the overlay. Either way the press keeps reaching the input lane untouched:
+    // only the webview's own menu is suppressed above.
     if (cad) onContextMenu({ point: pointerPosition(cad, event), ...context() });
   };
   const keydown = event => {

@@ -40,7 +40,7 @@ const en = await readCatalog('en');
 // real selector, admission — not a local flag — is what enables the button.
 const HOST_NAMES = ['TEXT', 'LINE', 'CONFIRM', 'CANCEL'];
 setCommandCatalog(HOST_NAMES);
-const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canFit: true };
+const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
 const withTool = tool => ({ ...loaded, tool });
 
 // A structurally complete status payload, so `parseCadStatus` is exercised for
@@ -52,6 +52,9 @@ const BASE = {
   importProgress: null,
   error: null,
   canOpen: true,
+  canNew: true, gridEnabled: true, orthoEnabled: false,
+  canSave: true,
+  canPlot: true,
   canFit: true,
   backend: null,
   adapter: null,

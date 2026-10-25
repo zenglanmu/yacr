@@ -371,6 +371,11 @@ button, input, select { font: inherit; color: inherit; }
 }
 /* The host composites the native CAD surface here. Keep it empty. */
 .native-input { position: absolute; inset: 0; background: transparent; touch-action: none; user-select: none; }
+/* Programmatic focus only (the shortcut menu hands the keyboard back here), so
+   no focus ring: the partition is not a control, and a 2px ring around the whole
+   drawing area would read as a selection. It is not in the tab order. */
+.native-input:focus,
+.native-input:focus-visible { outline: none; }
 /* The system arrow is hidden over the CAD partition only while the host is
    actually drawing its own crosshair (`status.crosshair`, a 2D view with a
    pointer on the surface). The native surface is input-transparent, so this DOM
@@ -468,6 +473,102 @@ button, input, select { font: inherit; color: inherit; }
 }
 .start-panel__empty p { margin: 0; }
 .start-panel__note { font-size: 11px; color: var(--text-muted); }
+
+/* Layers palette --------------------------------------------------------- */
+/* A docked list built for the 300px dock: a search strip, an optional restore
+ * strip, then one row per layer. A row is a four-column grid (eye, identity dot,
+ * name, marks) and grows a second line only when the drawing's own hidden flag
+ * needs explaining, so a plain list stays compact. Every surface reuses the shared
+ * tokens (`--field`, `--hover`, `--line-soft`, `--focus`, `--accent-*`); the one
+ * per-row colour is the inline identity dot, which is name-derived (see
+ * `layerTone`) and deliberately never claims to be the drawing's layer colour. */
+.layers__tools { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px 4px; }
+.layers__search {
+  display: flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 3px 0 6px;
+  background: var(--field); color: var(--text-muted);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+.layers__search:focus-within { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.layers__search-input {
+  flex: 1 1 auto; min-width: 0; height: 100%; padding: 0;
+  background: transparent; border: 0; color: var(--text);
+  font-family: var(--font-mono); font-size: 11px;
+}
+.layers__search-input:focus-visible { outline: none; }
+.layers__search-input::placeholder { color: var(--text-muted); opacity: 1; }
+.layers__override { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.layers__override-count { color: var(--text-muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.layers__body { padding-top: 2px; }
+.layers__error {
+  margin: 0 0 6px; padding: 3px 6px;
+  border-left: 2px solid var(--danger);
+  color: var(--danger); font-family: var(--font-ui); font-size: 10.5px;
+  line-height: 1.35; overflow-wrap: anywhere;
+}
+.layers__skeleton { display: flex; flex-direction: column; gap: 9px; padding: 7px 4px; }
+.layers__skeleton span {
+  display: block; height: 9px; border-radius: 999px;
+  background: var(--field);
+  animation: layers-pulse 1.15s ease-in-out infinite;
+}
+.layers__skeleton span:nth-child(1) { width: 68%; }
+.layers__skeleton span:nth-child(2) { width: 86%; animation-delay: .12s; }
+.layers__skeleton span:nth-child(3) { width: 57%; animation-delay: .24s; }
+@keyframes layers-pulse { 0%, 100% { opacity: .42; } 50% { opacity: .88; } }
+.layers__list { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.layers__row {
+  display: grid;
+  grid-template-columns: 20px 7px minmax(0, 1fr) auto;
+  align-items: center; gap: 6px;
+  min-height: 28px; padding: 3px 4px 3px 2px;
+  border-left: 2px solid transparent; border-radius: var(--radius);
+  font-family: var(--font-mono); font-size: 11.5px;
+  transition: background var(--t-fast);
+}
+.layers__row:hover { background: var(--hover); }
+.layers__row:focus-within { background: var(--pressed); }
+/* The current layer is marked by the accent edge plus the chip in the marks
+ * column; no fill of its own, so a hovered current row still reads as hovered. */
+.layers__row.is-current { border-left-color: var(--accent); }
+.layers__row.is-current .layers__name { color: var(--text); font-weight: 600; }
+/* Hidden layers are de-emphasised, not unreadable: muted (not disabled) text and
+ * a dimmed dot, with the name still at the same size so the list scans evenly. */
+.layers__row.is-hidden .layers__name { color: var(--text-muted); }
+.layers__row.is-hidden .layers__swatch { opacity: .35; }
+.layers__eye {
+  display: grid; place-items: center;
+  width: 20px; height: 20px; padding: 0;
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius);
+  color: var(--text-dim); cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.layers__eye.is-off { color: var(--text-muted); }
+.layers__eye:hover { background: var(--field); color: var(--text); }
+/* A mutation is in flight: the row's controls read as unavailable without being
+ * disabled (a disabled button would drop the keyboard focus mid-list, and the
+ * store refuses the second call locally anyway). */
+.layers.is-busy .layers__eye,
+.layers.is-busy .layers__marks { opacity: .6; }
+.layers.is-busy .layers__eye { cursor: progress; }
+.layers.is-busy .layers__eye:hover { background: transparent; }
+.layers__swatch { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 1px var(--line); }
+.layers__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.layers__marks { display: inline-flex; align-items: center; gap: 3px; }
+.layers__chip {
+  padding: 0 4px; border: 1px solid var(--line-soft); border-radius: 999px;
+  color: var(--text-muted); font-family: var(--font-ui); font-size: 9.5px;
+  letter-spacing: .3px; line-height: 14px; white-space: nowrap;
+}
+.layers__chip.is-current { border-color: var(--accent-strong); color: var(--accent-text); }
+/* Dashed, because the override is provisional: restoring the drawing clears it. */
+.layers__chip.is-temp { border-style: dashed; }
+.layers__note {
+  grid-column: 3 / -1;
+  color: var(--text-muted); font-family: var(--font-ui); font-size: 10px;
+  line-height: 1.3;
+}
 
 /* Navigation rail -------------------------------------------------------- */
 .navrail {
@@ -691,3 +792,50 @@ button, input, select { font: inherit; color: inherit; }
   background: rgba(8, 11, 15, .55);
 }
 .popup-dialog { display: flex; flex-direction: column; }
+
+/* CAD shortcut menu ------------------------------------------------------- */
+/* The right-click menu (the one in-DOM overlay `ContextMenu.jsx` renders). It
+   is `position: fixed` at the press point, so it paints above both carriers'
+   partition rect; there is deliberately no backdrop, because a press outside it
+   must still reach the CAD partition. The surface reuses the chrome tokens —
+   same radius, border and shadow as the ribbon popover — so it reads as part of
+   the shell, not as a system prompt. */
+.context-menu {
+  position: fixed;
+  z-index: 50;
+  display: flex; flex-direction: column; gap: 1px;
+  min-width: 208px; max-width: 300px;
+  /* `CONTEXT_MENU_MARGIN` (8px) on both sides: a menu taller than the window
+     scrolls inside itself instead of running past the edge. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  background: var(--chrome-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .42);
+  /* Quiet, no bounce: a menu is a direct answer to a press, not an entrance. */
+  animation: fade var(--t-fast) both;
+}
+/* The first frame exists only to be measured; it must never be seen. */
+.context-menu.is-unplaced { visibility: hidden; }
+.context-menu__item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 5px 9px;
+  border: 0; border-radius: var(--radius);
+  background: transparent; color: var(--text-dim);
+  text-align: left; cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.context-menu__item.is-active { background: var(--hover); color: var(--text); }
+.context-menu__item[aria-disabled="true"] { color: var(--text-disabled); cursor: not-allowed; }
+.context-menu__item[aria-disabled="true"].is-active { background: transparent; }
+.context-menu__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The command the repeat item would run: machine text, never a second label. */
+.context-menu__command {
+  flex: none; color: var(--text-muted);
+  font-family: var(--font-mono); font-size: 10.5px;
+}
+.context-menu__item[aria-disabled="true"] .context-menu__command { color: var(--text-disabled); }
+.context-menu__separator { height: 1px; margin: 3px 2px; background: var(--line-soft); opacity: .5; }

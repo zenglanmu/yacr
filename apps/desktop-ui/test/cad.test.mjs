@@ -8,18 +8,28 @@ import { readAppSource, readComponentsSource } from './helpers.mjs';
 // explicitly unsupported, so load a representative set once.
 setCommandCatalog(['OPEN', 'NEW', 'SAVE', 'PLOT', 'FIT', 'LINE', 'MOVE', 'CONFIRM', 'CANCEL', 'UNDO']);
 
-const empty = { documentLabel: null, entityCount: null, loading: false, importProgress: null, error: null, canOpen: true, canFit: false, backend: null, adapter: null, camera: null, importCount: 0, frameCount: 0, selection: { count: 0, empty: true, rows: [], mixedKeys: [] } };
-const loaded = { ...empty, documentLabel: 'fixture.dwg', entityCount: 3, canFit: true, backend: 'Vulkan', adapter: 'hardware', camera: { center: [10, 20], scale: 2 }, importCount: 1, frameCount: 10 };
-const importing = { ...empty, loading: true, canOpen: false, importProgress: { phase: 'entities', entitiesDone: 40, entitiesTotal: 200, bytes: 4096, cancellable: true } };
+const empty = { documentLabel: null, entityCount: null, loading: false, importProgress: null, error: null, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: false, canPlot: false, canFit: false, backend: null, adapter: null, camera: null, importCount: 0, frameCount: 0, selection: { count: 0, empty: true, rows: [], mixedKeys: [] } };
+const loaded = { ...empty, documentLabel: 'fixture.dwg', entityCount: 3, canSave: true, canPlot: true, canFit: true, backend: 'Vulkan', adapter: 'hardware', camera: { center: [10, 20], scale: 2 }, importCount: 1, frameCount: 10 };
+const importing = { ...empty, loading: true, canOpen: false, canNew: false, importProgress: { phase: 'entities', entitiesDone: 40, entitiesTotal: 200, bytes: 4096, cancellable: true } };
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 test('status validates explicit empty document and rejects unknown or malformed JSON', () => {
   assert.equal(parseCadStatus(empty), empty);
   assert.equal(parseCadStatus(loaded), loaded);
   assert.equal(parseCadStatus(importing), importing);
-  for (const value of [null, {}, [], 'unknown', { ...empty, entityCount: undefined }, { ...empty, loading: 'false' }, { ...empty, camera: { center: [0], scale: 1 } }, { ...empty, camera: { center: [0, 0], scale: 0 } }, { ...empty, frameCount: -1 }, { ...empty, snapEnabled: 'true' }, { ...empty, snapEnabled: 1 }, { ...empty, hoverPreview: 'true' }, { ...empty, snapKind: 1 }, { ...empty, snapKind: {} }]) {
+  for (const value of [null, {}, [], 'unknown', { ...empty, entityCount: undefined }, { ...empty, loading: 'false' }, { ...empty, canNew: undefined }, { ...empty, canSave: 'true' }, { ...empty, canPlot: 1 }, { ...empty, gridEnabled: undefined }, { ...empty, gridEnabled: 'true' }, { ...empty, gridEnabled: 1 }, { ...empty, orthoEnabled: undefined }, { ...empty, orthoEnabled: 'true' }, { ...empty, orthoEnabled: 1 }, { ...empty, camera: { center: [0], scale: 1 } }, { ...empty, camera: { center: [0, 0], scale: 0 } }, { ...empty, frameCount: -1 }, { ...empty, snapEnabled: 'true' }, { ...empty, snapEnabled: 1 }, { ...empty, hoverPreview: 'true' }, { ...empty, snapKind: 1 }, { ...empty, snapKind: {} }]) {
     assert.throws(() => parseCadStatus(value), /CAD_STATUS_INVALID/);
   }
+  // The display-grid switch is required and always present (unlike the optional
+  // `snapEnabled`/`hoverPreview`), so a host that omits it is rejected outright
+  // rather than rendered as a guessed off chip.
+  const gridOff = { ...empty, gridEnabled: false };
+  assert.equal(parseCadStatus(gridOff), gridOff);
+  // `orthoEnabled` is required the same way (the ORTHO chip is a real toggle, so
+  // a guessed default is never acceptable), and a real boolean is carried as-is.
+  const orthoOn = { ...empty, orthoEnabled: true };
+  assert.equal(parseCadStatus(orthoOn), orthoOn);
+  assert.equal(parseCadStatus(empty).orthoEnabled, false);
   // The optional object-snap flag is accepted when it is a real boolean and
   // tolerated when absent (older host).
   const snapOff = { ...empty, snapEnabled: false };
@@ -152,9 +162,22 @@ test('command admission is not completion and invokes only the frozen command IP
   assert.deepEqual(line, { kind: 'accepted', command: 'LINE' });
 });
 
-test('unsupported, full queue, IPC failure and malformed acceptance do not clear or pretend success', async () => {
-  assert.deepEqual(await queueCadCommand(() => assert.fail('unknown command reached IPC'), 'NOT_A_COMMAND', loaded, false), { kind: 'unsupported', command: 'NOT_A_COMMAND' });
-  assert.deepEqual(await queueCadCommand(() => assert.fail('excluded command reached IPC'), 'NEW', loaded, false), { kind: 'unsupported', command: 'NEW' });
+test('unsupported, unavailable, full queue, IPC failure and malformed acceptance do not clear or pretend success', async () => {
+  assert.deepEqual(
+    await queueCadCommand(() => assert.fail('unknown command reached IPC'), 'NOT_A_COMMAND', loaded, false),
+    { kind: 'unsupported', command: 'NOT_A_COMMAND', reasonKey: 'command.unsupported' },
+  );
+  // `NEW` used to be refused as "host-owned"; its capability is `canNew`, so with
+  // a true capability it reaches the frozen IPC like any other router command.
+  const calls = [];
+  const created = await queueCadCommand(async (...args) => { calls.push(args); return { accepted: true }; }, 'NEW', loaded, false);
+  assert.deepEqual(calls, [['cad_command', { command: 'NEW' }]]);
+  assert.deepEqual(created, { kind: 'accepted', command: 'NEW' });
+  // A false capability refuses before IPC and carries the catalog reason key.
+  const refusedCalls = [];
+  const save = await queueCadCommand(async (...args) => { refusedCalls.push(args); return { accepted: true }; }, 'SAVE', empty, false);
+  assert.deepEqual(refusedCalls, []);
+  assert.deepEqual(save, { kind: 'failed', error: 'CAD_COMMAND_UNAVAILABLE', command: 'SAVE', reasonKey: 'plot.no_document' });
   for (const invoke of [async () => { throw Error('QUEUE_FULL'); }, async () => { throw Error('IPC_DISCONNECTED'); }, async () => ({ accepted: false }), async () => null]) {
     const result = await queueCadCommand(invoke, 'OPEN', loaded, false);
     assert.equal(result.kind, 'failed');
