@@ -28,6 +28,7 @@ pub mod render_scene;
 mod select_all;
 mod select_box;
 pub mod selection;
+pub mod snap;
 pub mod tasks;
 pub mod tool_state;
 pub mod viewer_config;
@@ -68,6 +69,7 @@ pub use selection::{
     entity_property_rows, enum_options, property_row_editable, PropertyGroup, PropertyKind,
     PropertyRow, SelectionProperties, SelectionSet, MAX_ENUM_OPTIONS,
 };
+pub use snap::{snap_point, snap_spacing_is_valid, snap_to_grid, DEFAULT_SNAP_SPACING};
 pub use space::*;
 pub use tasks::{
     import_phase_key, AsyncOpenPoll, ImportJob, ImportManager, ImportProgressSnapshot,
@@ -429,6 +431,10 @@ pub enum CommandPayload {
     },
     /// Target mode for [`CommandId::SetMode`] (audit U02).
     Mode(AppMode),
+    /// The session grid-snap spacing for [`CommandId::SetSnapSpacing`] (the typed
+    /// `SNAPUNIT <value>` line). Must be finite and strictly positive; the
+    /// session setter validates it and refuses anything else explicitly.
+    SnapSpacing(f64),
     /// Replace the current selection with these refs (read-only; never writes
     /// the DWG). An empty list clears the selection.
     Selection(Vec<SelectionRef>),

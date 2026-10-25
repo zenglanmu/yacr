@@ -19,7 +19,8 @@ use web_time::Instant;
 
 use crate::protocol::{InputTracker, ProbeInput, ProbeStatus};
 use crate::session::{
-    canonical_command_name, unsupported_command_reason, unsupported_status, CadPopup, CadStatus,
+    canonical_command_name, typed_command_argument, unsupported_command_reason, unsupported_status,
+    CadPopup, CadStatus,
 };
 
 /// Bounded main-thread CAD command queue capacity (admission only, not completion).
@@ -209,6 +210,12 @@ pub fn bind_allowed(ready: bool, failed_generation: Option<u64>, owner_generatio
 /// the queue is touched; a disabled CAD session and a full queue are refused
 /// explicitly. The canonical selector is stored, so the queue never carries an
 /// alias.
+///
+/// The one argument form is `ZOOM <argument>` (AutoCAD's `ZOOM n` / `ZOOM ALL`):
+/// it is admitted by its base selector and queued **with** the argument, because
+/// the session — not this gate — validates the value (`0`, `-1`, `abc`, `2 3`
+/// are refused there with a reason recorded for `cad_status.error`). `LINE 2`
+/// stays an unsupported name: no other selector takes an argument.
 pub fn admit_command(state: &mut ShellState, command: &str) -> Result<(), String> {
     // The modal gate comes first: while a popup owns input, *every* CAD command
     // is refused by name (even one the router would otherwise reject), and the
@@ -216,7 +223,11 @@ pub fn admit_command(state: &mut ShellState, command: &str) -> Result<(), String
     if modal_gate_open(state) {
         return Err(POPUP_MODAL_OPEN.into());
     }
-    let Some(normalized) = canonical_command_name(command) else {
+    let queued = if let Some(normalized) = canonical_command_name(command) {
+        normalized.to_string()
+    } else if let Some((selector, argument)) = typed_command_argument(command) {
+        format!("{selector} {argument}")
+    } else {
         return Err(unsupported_command_reason(command));
     };
     if !state.cad_mode {
@@ -225,7 +236,7 @@ pub fn admit_command(state: &mut ShellState, command: &str) -> Result<(), String
     if state.cad_commands.len() >= CAD_COMMAND_CAP {
         return Err("CAD command queue is full".into());
     }
-    state.cad_commands.push(normalized.to_string());
+    state.cad_commands.push(queued);
     Ok(())
 }
 
@@ -298,9 +309,12 @@ mod tests {
             hover_preview: false,
             snap_enabled: false,
             grid_enabled: false,
+            snap_grid_enabled: false,
+            snap_spacing: cad_app::DEFAULT_SNAP_SPACING,
             ortho_enabled: false,
             snap_kind: None,
             crosshair: false,
+            cursor_world: None,
             import_count: 0,
             frame_count: 0,
             command_log: Vec::new(),
@@ -328,6 +342,16 @@ mod tests {
         assert!(
             !status.grid_enabled,
             "no session means no installed display-grid switch either"
+        );
+        assert!(
+            !status.snap_grid_enabled,
+            "no session means no installed grid-snap switch either"
+        );
+        assert_eq!(
+            status.snap_spacing,
+            cad_app::DEFAULT_SNAP_SPACING,
+            "the spacing field is always a usable positive number (the documented \
+             default); `snap_grid_enabled: false` says nothing is snapping"
         );
         assert!(
             !status.ortho_enabled,

@@ -97,19 +97,27 @@ impl Application {
         Ok(outcome)
     }
 
-    /// Trim one LINE/ARC/CIRCLE target against analytic boundaries.
+    /// Trim one LINE/ARC/CIRCLE target against a supported boundary set.
     ///
     /// Supported subset: the target may be a LINE, an ARC or a CIRCLE, and every
-    /// boundary may be a LINE, ARC, CIRCLE, ELLIPSE or LWPOLYLINE (straight or
-    /// bulged), in any mix. The target is cut at the intersections with the
-    /// boundary and the piece containing the **projection** of `pick_point` is
+    /// boundary may be a LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE (straight or
+    /// bulged) or SPLINE, in any mix. The target is cut at the intersections with
+    /// the boundary and the piece containing the **projection** of `pick_point` is
     /// kept — the pick is projected onto the target ([`TargetCurve::project_param`])
     /// because the host resolves the target with its own pickbox, so a click a few
     /// pixels off the curve is still a pick of this entity. A LINE keeps the
     /// sub-segment, an ARC keeps a shorter arc with the same centre/normal/radius
     /// and the same sweep sign, a CIRCLE becomes the one ARC between the two cuts
     /// that bracket the pick. A LINE with no cut that lies wholly inside a closed
-    /// boundary is deleted. SPLINE/INSERT/Opaque/Mesh targets or boundaries,
+    /// boundary is deleted.
+    ///
+    /// A SPLINE boundary is **sampled**, not analytic: every cut it contributes
+    /// adds a `drawing.trim` diagnostic saying the cut point is approximate. It is
+    /// also excluded from the "wholly inside" delete rule (a spline has no closed
+    /// flag and no boundary plane), so a target wholly inside a closed spline is
+    /// refused explicitly (`Unsupported`) rather than deleted.
+    ///
+    /// SPLINE/INSERT/Opaque/Mesh **targets**, INSERT/Opaque/Mesh boundaries,
     /// degenerate input, a pick whose projection falls outside the target's span,
     /// a pick with no radial direction on an ARC/CIRCLE (it lies on the target's
     /// axis) and intersection-free cases are explicit refusals that change
@@ -186,8 +194,9 @@ impl Application {
             // A plan-level refusal (degenerate target, no intersection, a pick
             // whose projection falls outside the target's span) is invalid
             // *input*, not an unsupported geometry, so it maps to the same "no
-            // intersection" surface as EXTEND.
-            Err(reason) => return Err(CadError::InvalidInput(reason)),
+            // intersection" surface as EXTEND. The one capability gap the plan
+            // reports (closed-SPLINE containment) stays `Unsupported`.
+            Err(reason) => return Err(reason.into_cad_error()),
         };
         // Cuts the engine could only approximate are reported, never hidden.
         let notes = resolution.notes;
@@ -260,14 +269,16 @@ impl Application {
     /// Extend one LINE/ARC target to the nearest boundary crossing ahead.
     ///
     /// The supported subset mirrors TRIM: the target may be a LINE or an ARC and
-    /// every boundary may be a LINE, ARC, CIRCLE, ELLIPSE or LWPOLYLINE (straight
-    /// or bulged), in any mix. The pick is projected onto the target and that
-    /// projection chooses the end to grow. A LINE's picked endpoint moves along
-    /// its own infinite line; an ARC's picked end moves along its own circle and
-    /// keeps the sweep's sign, so both only ever get longer. A CIRCLE target has
-    /// no end and is refused, as are unsupported targets/boundaries, a pick whose
-    /// projection falls outside the target's span, a target that already touches
-    /// or reaches the boundary, and a boundary that never lies ahead.
+    /// every boundary may be a LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE (straight or
+    /// bulged) or SPLINE, in any mix. A SPLINE boundary is sampled, so a cut it
+    /// contributes always adds an approximation note (`drawing.extend`). The pick
+    /// is projected onto the target and that projection chooses the end to grow. A
+    /// LINE's picked endpoint moves along its own infinite line; an ARC's picked
+    /// end moves along its own circle and keeps the sweep's sign, so both only ever
+    /// get longer. A CIRCLE target has no end and is refused, as are unsupported
+    /// targets/boundaries, a pick whose projection falls outside the target's span,
+    /// a target that already touches or reaches the boundary, and a boundary that
+    /// never lies ahead.
     pub(crate) fn extend_entity(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         let CommandPayload::Extend {
             target,

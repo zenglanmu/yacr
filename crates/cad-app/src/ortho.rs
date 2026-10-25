@@ -20,15 +20,18 @@
 //! moves a point in Z. This build documents that explicitly instead of implying
 //! a 3D constraint it does not have.
 //!
-//! **Known, deliberate ordering deviation:** the host resolves object snapping
-//! *first* and passes the already-snapped point here (see
-//! [`crate::host::HostController::capture_tool_point`]), so `ORTHO` constrains a
-//! snapped point. AutoCAD applies ortho before its own snap; this build documents
-//! the difference rather than hiding it.
+//! **Known, deliberate ordering:** the host resolves object snapping *first* and
+//! passes the already-snapped point to grid snap and then here (see
+//! [`crate::host::HostController::capture_tool_point`] and
+//! [`crate::SessionState::capture_point`]), so `ORTHO` constrains an
+//! already-snapped, grid-quantised point. AutoCAD applies ortho before its own
+//! snap; this build documents the difference rather than hiding it.
 //!
 //! What `ORTHO` deliberately does **not** include: polar tracking, relative or
-//! absolute coordinate input modes, per-axis `SNAP`/grid snap, or any persistence.
-//! It is session/display state only (no database write, no history entry, no
+//! absolute coordinate input modes, per-axis spacing, or any persistence. Grid
+//! snap itself is the separate [`crate::snap`] switch, but the two share one
+//! session constraint helper so a preview can never disagree with a commit. This
+//! is session/display state only (no database write, no history entry, no
 //! ChangeSet) and is allowed in Viewer and Work.
 
 use cad_domain::Point3;

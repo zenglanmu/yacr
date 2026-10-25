@@ -9,6 +9,7 @@
   "canSave": true,
   "commandLog": [],
   "crosshair": false,
+  "cursorWorld": null,
   "documentLabel": "/fixtures/complex-test.dwg",
   "entityCount": 7,
   "error": null,
@@ -29,6 +30,8 @@
     "text_multiline": false
   },
   "snapEnabled": false,
+  "snapGridEnabled": false,
   "snapKind": null,
+  "snapSpacing": 10.0,
   "tool": null
 }

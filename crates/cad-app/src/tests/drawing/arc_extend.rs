@@ -555,20 +555,12 @@ fn extend_accepts_a_straight_lwpolyline_boundary() {
 
 #[test]
 fn extend_refuses_an_unsupported_boundary_geometry() {
-    // A CIRCLE boundary and a bulged LWPOLYLINE boundary are supported since the
-    // curved-cut widening (see `trim_extend_curves.rs`); a SPLINE boundary is
-    // still an explicit `Unsupported` refusal that changes nothing.
-    let spline = ent(
-        65,
-        SemanticGeometry::Spline {
-            degree: 2,
-            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-            control_points: vec![point(20.0, -5.0), point(22.0, 0.0), point(20.0, 5.0)],
-            weights: Vec::new(),
-        },
-        1,
-    );
-    let mut app = line_and_boundary_app(spline, None);
+    // A CIRCLE boundary, a bulged LWPOLYLINE boundary and (since the sampled-cut
+    // widening) a SPLINE boundary are supported — see `trim_extend_curves.rs` and
+    // `trim_spline_boundary.rs`. A POINT is still an explicit `Unsupported`
+    // refusal that changes nothing.
+    let point_boundary = ent(65, SemanticGeometry::Point(point(20.0, 0.0)), 1);
+    let mut app = line_and_boundary_app(point_boundary, None);
     let mut session = SessionState::new(DocumentId(1), AppMode::Work);
     let rev = revision(&app);
     let before = format!(
@@ -591,8 +583,8 @@ fn extend_refuses_an_unsupported_boundary_geometry() {
     .unwrap_err();
     assert!(matches!(err, CadError::Unsupported(_)), "{err:?}");
     // The refusal names the offending kind and the accepted set.
-    assert!(err.to_string().contains("AcDbSpline"), "{err:?}");
-    assert!(err.to_string().contains("LWPOLYLINE"), "{err:?}");
+    assert!(err.to_string().contains("AcDbPoint"), "{err:?}");
+    assert!(err.to_string().contains("SPLINE"), "{err:?}");
     assert_eq!(revision(&app), rev);
     assert_eq!(
         before,

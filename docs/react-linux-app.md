@@ -279,6 +279,7 @@ body 内，Escape/点击外部关闭）；DOM-on-top 之后这不再是硬约束
 
 - **可从 chrome 触达**：`OPEN`（`--open` 真实打开漏斗，或原生 portal picker 见下节）、`FIT`、`PAN`、
   `SELECTALL`、`UNDO`、`REDO`、`ORBIT`、`ZOOM`、`OSNAP`（**F3** 同义，切对象捕捉总开关）、
+  `GRID`（F7）、`SNAP`（**F9**，栅格捕捉）、`SNAPUNIT <value>`（捕捉间距）、`ORTHO`（F8）、
   `HOVERPREVIEW`（状态栏「悬停预览」开关，默认开），以及
   交互工具 `LINE`/`CIRCLE`/`ARC`/`MOVE`/`COPY`/`ROTATE`/`SCALE`/`MIRROR`/`OFFSET`/`TRIM`/`EXTEND`
   （经 `InteractionRequest::BeginDraw`）与 `MEASURE`（Distance）。
@@ -294,15 +295,16 @@ body 内，Escape/点击外部关闭）；DOM-on-top 之后这不再是硬约束
   Back/Forward 的拖拽行为本轮**未改**（仍为平移；AutoCAD 该位置是右键快捷菜单，未实现）。
 - **选择要求**：编辑类工具需要先有选择；空选择在确认时由 `cad_app`（`DrawTool::is_ready`）显式拒绝，
   UI 不预判、不静默丢弃。
-- **仍未接线**：`SNAP`（AutoCAD 的栅格捕捉 F9，与本项目的对象捕捉 `OSNAP` 是两件事，**未实现且显式拒绝**）、
-  `ZOOMIN`/`ZOOMOUT` 别名（router 名为 `ZOOM`）、测量子类型 `DIST`/`PLINE`/`ANGLE`/`AREA`、
-  `SELECTIONPREVIEWLIMIT` 式预览上限、`PREVIEWFILTER` 的锁定图层/xref 排除、Secondary/Back/Forward
-  拖拽的右键行为（右键**快捷菜单**已实现；鼠标 Secondary 拖拽仍是平移）。
-- **已接线（2026-10-25）**：`GRID`（F7，只切显示栅格；网格捕捉仍未实现）、`ORTHO`（F8，把下一点约束到
-  上一点的水平/垂直方向，仅 XY）、图层面板（`LAYER` 打开停靠面板：搜索、临时显隐、恢复、设为当前层；
-  走 `cad_layers`/`cad_set_layer_visible`/`cad_restore_layers`/`cad_set_active_layer`，IPC ack 只代表
-  **入队**，面板随后回读权威投影）、右键快捷菜单（复制/剪切/粘贴、全选/删除/特性、缩放到范围/平移、
-  放弃/重做、重复上一命令；全部走同一 `runCommand` 漏斗）。
+- **仍未接线**：`ZOOMIN`/`ZOOMOUT` 别名（router 名为 `ZOOM`）、测量子类型
+  `DIST`/`PLINE`/`ANGLE`/`AREA`、`SELECTIONPREVIEWLIMIT` 式预览上限、`PREVIEWFILTER` 的锁定图层/xref
+  排除、Secondary/Back/Forward 拖拽的右键行为（右键**快捷菜单**已实现；鼠标 Secondary 拖拽仍是平移）。
+- **已接线（2026-10-25）**：`GRID`（F7，只切显示栅格）、`SNAP`（F9，会话级栅格捕捉：取点 X/Y 量化到
+  `SNAPUNIT` 间距的最近整数倍，`z` 不变；实体拾取步骤不捕捉）、`SNAPUNIT <value>`（正的十进制间距，
+  语法与 `ZOOM` 数值部分相同，非法值显式拒绝）、`ORTHO`（F8，把下一点约束到
+  上一点的水平/垂直方向，仅 XY；顺序为对象捕捉 → 栅格捕捉 → 正交）、图层面板（`LAYER` 打开停靠面板：
+  搜索、临时显隐、恢复、设为当前层；走 `cad_layers`/`cad_set_layer_visible`/`cad_restore_layers`/
+  `cad_set_active_layer`，IPC ack 只代表**入队**，面板随后回读权威投影）、右键快捷菜单（复制/剪切/粘贴、
+  全选/删除/特性、缩放到范围/平移、放弃/重做、重复上一命令；全部走同一 `runCommand` 漏斗）。
 - **只读**：不写回 DWG；未知命令走既有 not supported 路径，不空成功。
 - 语言切换（chrome 文案）已接线；**运行时语言切换不重排 Rust 宿主的宿主侧字符串**（见限制）。
 - 导航复用**同一权威底图**（GPU-resident、同一 DB revision）；新 overlay 输入未提交时呈现完整

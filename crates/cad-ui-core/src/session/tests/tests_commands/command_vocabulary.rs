@@ -92,7 +92,9 @@ command_selector_contract! {
     SetEntityProperty => "SETENTITYPROPERTY",
     ToggleHoverPreview => "HOVERPREVIEW",
     ToggleGrid => "GRID",
+    ToggleSnapGrid => "SNAP",
     ToggleSnap => "OSNAP",
+    SetSnapSpacing => "SNAPUNIT",
     ToggleOrtho => "ORTHO",
 }
 
@@ -108,7 +110,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 76,
+        EXPECTED_COMMAND_COUNT, 78,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -131,7 +133,7 @@ fn command_normalization_covers_every_variant() {
         assert_eq!(normalize_command(name), Some(*id), "{name}");
         assert_eq!(canonical_command_name(name), Some(*name), "{name}");
     }
-    for rejected in ["", "BOGUS", "open fit", "OPENX", "SNAP"] {
+    for rejected in ["", "BOGUS", "open fit", "OPENX", "SNAPX"] {
         assert_eq!(normalize_command(rejected), None, "{rejected:?}");
         assert_eq!(canonical_command_name(rejected), None, "{rejected:?}");
     }
@@ -176,19 +178,22 @@ fn object_snap_selector_toggles_the_projected_session_flag_only() {
     );
 
     // The canonical selector flips the session flag. `SNAP` is AutoCAD's grid
-    // snap (F9), a different feature this build does not implement, so it must
-    // NOT be admitted as an object-snap selector.
-    assert_eq!(normalize_command("SNAP"), None);
-    assert_eq!(canonical_command_name("SNAP"), None);
+    // snap (F9), a different feature with its own selector, so it must NOT flip
+    // the object-snap switch.
+    assert_eq!(normalize_command("SNAP"), Some(CommandId::ToggleSnapGrid));
     session.command("OSNAP").expect("OSNAP is admitted");
     assert!(!session.snapshot(None, None, 0).snap_enabled);
     assert!(
-        session.command("snap").is_err(),
-        "SNAP must not be accepted as an object-snap selector"
+        session.command("snap").is_ok(),
+        "SNAP is admitted, but as the grid-snap selector"
     );
     assert!(
         !session.snapshot(None, None, 0).snap_enabled,
-        "a refused SNAP must leave the object-snap flag unchanged"
+        "SNAP must not be accepted as an object-snap selector"
+    );
+    assert!(
+        session.snapshot(None, None, 0).snap_grid_enabled,
+        "SNAP flips its own grid-snap flag instead"
     );
 
     // Session state only: no database revision, no undo entry.
@@ -217,19 +222,22 @@ fn grid_selector_toggles_the_projected_display_flag_only() {
     );
 
     // The canonical selector flips the session flag. `SNAP` is AutoCAD's grid
-    // snap (F9), a different feature this build does not implement, so it must
-    // NOT be admitted as the display-grid selector.
-    assert_eq!(normalize_command("SNAP"), None);
-    assert_eq!(canonical_command_name("SNAP"), None);
+    // snap (F9), a different feature with its own selector, so it must NOT be
+    // accepted as the display-grid selector.
+    assert_eq!(normalize_command("SNAP"), Some(CommandId::ToggleSnapGrid));
     session.command("GRID").expect("GRID is admitted");
     assert!(!session.snapshot(None, None, 0).grid_enabled);
     assert!(
-        session.command("snap").is_err(),
-        "SNAP must not be accepted as the display-grid selector"
+        session.command("snap").is_ok(),
+        "SNAP is admitted, but as the grid-snap selector"
     );
     assert!(
         !session.snapshot(None, None, 0).grid_enabled,
-        "a refused SNAP must leave the display-grid flag unchanged"
+        "SNAP must not be accepted as the display-grid selector"
+    );
+    assert!(
+        session.snapshot(None, None, 0).snap_grid_enabled,
+        "SNAP flips its own grid-snap flag instead"
     );
 
     // GRID and OSNAP are independent session switches.
@@ -270,18 +278,22 @@ fn ortho_selector_toggles_the_projected_drafting_flag_only() {
     let settings_before = session.settings();
 
     // The canonical selector flips the session flag. `SNAP` is AutoCAD's grid
-    // snap (F9), a different feature this build does not implement, so it must
-    // NOT be admitted as the ORTHO selector either.
-    assert_eq!(normalize_command("SNAP"), None);
+    // snap (F9), a different feature with its own selector, so it must NOT be
+    // accepted as the ORTHO selector either.
+    assert_eq!(normalize_command("SNAP"), Some(CommandId::ToggleSnapGrid));
     session.command("ORTHO").expect("ORTHO is admitted");
     assert!(session.snapshot(None, None, 0).ortho_enabled);
     assert!(
-        session.command("snap").is_err(),
-        "SNAP must not be accepted as the ORTHO selector"
+        session.command("snap").is_ok(),
+        "SNAP is admitted, but as the grid-snap selector"
     );
     assert!(
         session.snapshot(None, None, 0).ortho_enabled,
-        "a refused SNAP must leave the ORTHO flag unchanged"
+        "SNAP must not be accepted as the ORTHO selector"
+    );
+    assert!(
+        session.snapshot(None, None, 0).snap_grid_enabled,
+        "SNAP flips its own grid-snap flag instead"
     );
 
     // ORTHO is independent of the other drafting switches.
@@ -312,24 +324,24 @@ fn ortho_selector_toggles_the_projected_drafting_flag_only() {
 
 #[test]
 fn reserved_drawing_names_are_not_measurement_selectors() {
-    // `SNAP` must stay absent (grid snap ≠ object snap). `ANGLE` is not an
-    // AutoCAD command at all (the real ones are `DIMANGULAR`/`MEASUREGEOM`), so
-    // it must not shadow anything. `PLINE` is now the polyline **draw** selector
+    // `SNAP` is a real command now (grid snap, F9), but it is **not** a
+    // measurement selector and must not shadow one. `ANGLE` is not an AutoCAD
+    // command at all (the real ones are `DIMANGULAR`/`MEASUREGEOM`), so it must
+    // not shadow anything. `PLINE` is now the polyline **draw** selector
     // (`COMMAND_TABLE` → `BeginDraw(Polyline)`), never a measurement selector;
     // the explicit measurement selectors are `MEASUREPOLYLINE` / `MEASUREANGLE`.
-    for reserved in ["SNAP", "ANGLE"] {
-        assert_eq!(canonical_command_name(reserved), None, "{reserved}");
-        assert_eq!(normalize_command(reserved), None, "{reserved}");
-        assert!(!admissible_names().contains(&reserved), "{reserved}");
-    }
+    assert_eq!(normalize_command("SNAP"), Some(CommandId::ToggleSnapGrid));
+    assert_eq!(measurement_selector_kind("SNAP"), None);
+    assert_eq!(canonical_command_name("ANGLE"), None);
+    assert_eq!(normalize_command("ANGLE"), None);
+    assert!(!admissible_names().contains(&"ANGLE"));
     assert_eq!(normalize_command("PLINE"), Some(CommandId::CreatePolyline));
     assert_eq!(measurement_selector_kind("PLINE"), None);
     assert!(admissible_names().contains(&"PLINE"));
-    // A reserved name is refused before the host, leaving the tool untouched.
+    // An unbound name is refused before the host, leaving the tool untouched.
     let session = session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
     }));
-    assert!(session.command("SNAP").is_err());
     assert!(session.command("ANGLE").is_err());
     assert_eq!(session.snapshot(None, None, 0).tool, None);
     for selector in ["MEASUREPOLYLINE", "MEASUREANGLE"] {

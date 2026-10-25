@@ -567,3 +567,88 @@ fn a_3d_view_keeps_the_system_cursor() {
         "a 3D view draws no crosshair (no planar view rectangle), so the system cursor must stay"
     );
 }
+
+// --- status-bar world coordinate (the drawing-unit readout) -----------------
+
+/// The status bar's coordinate readout is the **very same** world point the
+/// renderer draws the crosshair from: a 2D pointer publishes one overlay cursor,
+/// and the status projects exactly that point (`cursorWorld`), never a
+/// re-derived pointer guess that could disagree with the drawn crosshair.
+#[test]
+fn the_world_cursor_is_exactly_the_overlay_cursor() {
+    let session = fresh_session();
+    assert_eq!(
+        session.snapshot(None, None, 0).cursor_world,
+        None,
+        "no pointer on the surface: there is no reliable world coordinate (not zero)"
+    );
+
+    session
+        .handle_input(&move_input(200.0, 150.0))
+        .expect("the 2D move is admitted");
+    let overlay = session
+        .render_session()
+        .overlays()
+        .cursor
+        .expect("a 2D pointer move publishes the overlay cursor");
+    let status = session.snapshot(None, None, 0);
+    assert_eq!(
+        status.cursor_world,
+        Some([overlay.x, overlay.y, overlay.z]),
+        "the readout must be the overlay cursor itself, field for field"
+    );
+    assert_eq!(
+        status.cursor_world.is_some(),
+        status.crosshair,
+        "the readout and the drawn crosshair come from one source"
+    );
+
+    session
+        .handle_input(&probe(InputKind::PointerLeave))
+        .expect("the leave is admitted");
+    assert_eq!(
+        session.snapshot(None, None, 0).cursor_world,
+        None,
+        "leaving the surface clears both the crosshair and the coordinate"
+    );
+}
+
+/// A 3D view has no planar cursor, so it reports no world coordinate — never a
+/// fabricated `0, 0, 0`.
+#[test]
+fn a_3d_view_reports_no_world_cursor() {
+    let session = fresh_session();
+    {
+        let mut c = session.core.controller.borrow_mut();
+        let id = c.viewport_id;
+        let viewport = c
+            .application
+            .workspace
+            .viewports
+            .get_mut(&id)
+            .expect("an active viewport");
+        let saved = viewport.view_mode.saved_2d_camera();
+        viewport
+            .set_view_mode(cad_app::ViewMode2d3d::ThreeD { saved_2d: saved })
+            .expect("the 3D switch is admitted");
+    }
+    session
+        .handle_input(&move_input(200.0, 150.0))
+        .expect("the move is admitted");
+    assert_eq!(
+        session.snapshot(None, None, 0).cursor_world,
+        None,
+        "a 3D view has no planar cursor, so there is no world coordinate to show"
+    );
+}
+
+/// A snapshot with no CAD session advertises no cursor at all.
+#[test]
+fn an_unsupported_status_reports_no_world_cursor() {
+    assert_eq!(unsupported_status(None).cursor_world, None);
+    assert_eq!(
+        unsupported_status(Some("CAD is disabled".into())).cursor_world,
+        None,
+        "probe/failed sessions have no cursor, so no coordinate either"
+    );
+}

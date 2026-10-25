@@ -245,12 +245,52 @@ impl Application {
                     measurement: None,
                 })
             }
+            CommandId::ToggleSnapGrid => {
+                // Display/session state only: no database write, no history and
+                // no ChangeSet. The capture and preview paths read this same flag
+                // (`SessionState::capture_point` / the preview projections), so
+                // flipping it here never touches the document or the persisted
+                // preferences. Grid snap is neither object snap (OSNAP) nor the
+                // display grid (GRID).
+                let enabled = session.toggle_snap_grid();
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: None,
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "view.snap_grid".into(),
+                        message: format!("grid snap: {enabled}"),
+                    }],
+                    measurement: None,
+                })
+            }
+            CommandId::SetSnapSpacing => match command.payload {
+                CommandPayload::SnapSpacing(spacing) => {
+                    // Session/display state only: `set_snap_spacing` validates
+                    // (finite and positive) and refuses explicitly rather than
+                    // clamping, so a bad value can never reach the quantiser.
+                    session.set_snap_spacing(spacing)?;
+                    Ok(CommandOutcome {
+                        objects: Vec::new(),
+                        changes: None,
+                        diagnostics: vec![Diagnostic {
+                            object: None,
+                            code: "view.snap_spacing".into(),
+                            message: format!("snap spacing: {spacing}"),
+                        }],
+                        measurement: None,
+                    })
+                }
+                _ => Err(CadError::InvalidInput(
+                    "SNAPUNIT needs a positive spacing, e.g. `SNAPUNIT 10`".into(),
+                )),
+            },
             CommandId::ToggleOrtho => {
                 // Display/session state only: no database write, no history and
                 // no ChangeSet. The capture and preview paths read this same flag
                 // (`SessionState::capture_point` / the preview projections), so
                 // flipping it here never touches the document or the persisted
-                // preferences. `SNAP` (grid snap, F9) stays unimplemented.
+                // preferences. Grid snap (`SNAP`, F9) is a separate switch.
                 let enabled = session.toggle_ortho();
                 Ok(CommandOutcome {
                     objects: Vec::new(),

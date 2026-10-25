@@ -323,13 +323,15 @@ pub enum CommandId {
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
     MoveEntities,
-    /// Trim one LINE against LINE/LWPOLYLINE segments (the honest subset of
-    /// §3 of `docs/drawing-edit.md`); anything else is an explicit refusal that
-    /// changes nothing. Work-only.
+    /// Trim one LINE/ARC/CIRCLE against LINE/ARC/CIRCLE/ELLIPSE/LWPOLYLINE/SPLINE
+    /// boundaries (the honest subset of §3 of `docs/drawing-edit.md`); a SPLINE
+    /// boundary is sampled and reported as approximate, SPLINE targets and other
+    /// kinds are explicit refusals that change nothing. Work-only.
     TrimEntity,
-    /// Extend one LINE to the nearest LINE/LWPOLYLINE boundary segment beyond
-    /// the picked end (the honest subset of EXTEND); anything else is an
-    /// explicit refusal that changes nothing. Work-only.
+    /// Extend one LINE/ARC to the nearest boundary crossing beyond the picked end
+    /// (same boundary subset as TRIM, sampled SPLINE cuts reported as
+    /// approximate); anything else is an explicit refusal that changes nothing.
+    /// Work-only.
     ExtendEntity,
     /// CHAMFER two straight lines: trim/extend both to the corner of the two
     /// infinite lines (when both distances are 0) or to the offset points, joining
@@ -449,10 +451,31 @@ pub enum CommandId {
     /// Session/display state only (no database write, no history, no ChangeSet),
     /// so it is allowed in Viewer and Work. It defaults to on; the host draws the
     /// grid only when this switch **and** the persisted `view.overlays.grid`
-    /// preference are both on. This is the **display** grid only — grid snap
-    /// (AutoCAD's `SNAP`/F9) is a different, unimplemented feature and stays
-    /// refused. See [`crate::SessionState::grid_enabled`].
+    /// preference are both on. This is the **display** grid only — grid snap has
+    /// its own switch ([`CommandId::ToggleSnapGrid`]). See
+    /// [`crate::SessionState::grid_enabled`].
     ToggleGrid,
+    /// Flip the **grid snap** switch for this session (`SNAP`, F9).
+    ///
+    /// Session/display state only (no database write, no history, no ChangeSet),
+    /// so it is allowed in Viewer and Work. It defaults to **off**, matching
+    /// AutoCAD's initial `SNAP` state. While on, a captured point is quantised to
+    /// the nearest multiple of the session snap spacing in X and Y (see
+    /// [`crate::snap`]); the spacing itself is the session sysvar set by the typed
+    /// `SNAPUNIT <value>` line ([`CommandId::SetSnapSpacing`]). This is neither
+    /// object snap ([`CommandId::ToggleSnap`]) nor the display grid
+    /// ([`CommandId::ToggleGrid`]), and it is never another selector's alias. See
+    /// [`crate::SessionState::snap_grid_enabled`].
+    ToggleSnapGrid,
+    /// Set the session grid-snap spacing (`SNAPUNIT <value>`).
+    ///
+    /// Session/display state only: no database write, no history entry, no
+    /// ChangeSet and no persisted preference, allowed in Viewer and Work. The
+    /// value travels as [`crate::CommandPayload::SnapSpacing`] and must be finite
+    /// and strictly positive; anything else is an explicit refusal, never a
+    /// silent clamp. A bare `SNAPUNIT` (no argument) is refused by name because
+    /// the payload is missing. See [`crate::SessionState::set_snap_spacing`].
+    SetSnapSpacing,
     /// Flip the `ORTHO` drafting constraint for this session (`ORTHO`, F8).
     ///
     /// Session/display state only (no database write, no history, no ChangeSet),
@@ -460,8 +483,8 @@ pub enum CommandId {
     /// AutoCAD's initial `ORTHO` state. While on, the next point entry of a
     /// drawing or measurement capture is constrained to a horizontal or vertical
     /// direction from the tool's previous captured point (see [`crate::ortho`]).
-    /// This is **not** grid snap: AutoCAD's `SNAP`/F9 stays unimplemented and is
-    /// never admitted as another selector's alias. See
+    /// It is applied **after** grid snap and object snap, so it still decides the
+    /// final axis; it is **not** grid snap ([`CommandId::ToggleSnapGrid`]). See
     /// [`crate::SessionState::ortho_enabled`].
     ToggleOrtho,
     /// `SETENTITYPROPERTY`: change one named property on **every** currently

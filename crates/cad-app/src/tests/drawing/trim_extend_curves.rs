@@ -1,8 +1,10 @@
 //! TRIM/EXTEND contract tests for the widened (curved) geometry subset.
 //!
 //! The supported targets are LINE, ARC and CIRCLE; the supported boundaries are
-//! LINE, ARC, CIRCLE, ELLIPSE and LWPOLYLINE (straight or bulged), in any mix.
-//! SPLINE/INSERT/Opaque targets and boundaries stay explicit refusals that change
+//! LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE (straight or bulged) and SPLINE, in any
+//! mix. The SPLINE boundary cases (sampled cuts, their approximation notes and the
+//! refused closed-spline containment) live in `trim_spline_boundary.rs`.
+//! INSERT/Opaque targets and boundaries stay explicit refusals that change
 //! nothing, and every success is one transaction / one undo step.
 
 use std::f64::consts::PI;
@@ -490,29 +492,6 @@ fn trim_line_by_a_closed_ellipse_boundary() {
     let (start, end) = expect_line(&app, 1);
     assert!(near(start.x, 7.0), "{start:?}");
     assert!(near(end.x, 10.0), "{end:?}");
-}
-
-#[test]
-fn trim_refuses_a_spline_boundary_naming_the_kind() {
-    let mut app = app_of(vec![
-        line(1, point(0.0, 0.0), point(10.0, 0.0), 0),
-        ent(
-            2,
-            SemanticGeometry::Spline {
-                degree: 2,
-                knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-                control_points: vec![point(5.0, -1.0), point(6.0, 0.0), point(5.0, 1.0)],
-                weights: Vec::new(),
-            },
-            1,
-        ),
-    ]);
-    let before = snapshot(&app);
-    let err = trim(&mut app, 1, &[2], point(8.0, 0.0)).unwrap_err();
-    assert!(matches!(err, CadError::Unsupported(_)), "{err:?}");
-    assert!(err.to_string().contains("AcDbSpline"), "{err:?}");
-    assert_eq!(snapshot(&app), before);
-    assert_eq!(undo_depth(&app), 0);
 }
 
 #[test]

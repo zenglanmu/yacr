@@ -8,8 +8,10 @@ mod alias_table;
 mod command_vocabulary;
 mod import_accounting;
 mod input_and_lifecycle;
+mod snap_grid;
 mod standard_view;
 mod status_projection;
+mod zoom_argument;
 
 /// A committed synthetic, writer-produced AC1032 DWG with four LINE
 /// entities (`fixtures/manifest`). It is not a vendor sample.

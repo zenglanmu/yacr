@@ -85,12 +85,20 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // `EntityProperty { key, value }` payload).
     ("SETENTITYPROPERTY", CommandId::SetEntityProperty),
     ("HOVERPREVIEW", CommandId::ToggleHoverPreview),
-    // The display grid switch (F7). `SNAP` (grid snap, F9) stays absent on
-    // purpose: see `COMMAND_ALIASES`.
+    // The display grid switch (F7). Grid **snap** is the separate `SNAP`
+    // selector below; the two are independent session switches and never alias
+    // each other.
     ("GRID", CommandId::ToggleGrid),
+    // Grid snap (F9): quantise a captured point to the session `SNAPUNIT`
+    // spacing. Independent of object snap (`OSNAP`) and of the display grid
+    // (`GRID`); no alias maps onto any of the three.
+    ("SNAP", CommandId::ToggleSnapGrid),
     ("OSNAP", CommandId::ToggleSnap),
+    // The typed spacing sysvar: `SNAPUNIT <value>`. The bare name carries no
+    // value, so the application refuses it explicitly (no fabricated default).
+    ("SNAPUNIT", CommandId::SetSnapSpacing),
     // The orthographic drafting constraint (F8). Session/display state only;
-    // `SNAP` (grid snap, F9) stays absent on purpose: see `COMMAND_ALIASES`.
+    // applied after object snap and grid snap so it still decides the final axis.
     ("ORTHO", CommandId::ToggleOrtho),
 ];
 
@@ -136,6 +144,139 @@ pub const ZOOM_OUT_FACTOR: f64 = 1.0 / ZOOM_IN_FACTOR;
 pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
     &[("ZOOMIN", ZOOM_IN_FACTOR), ("ZOOMOUT", ZOOM_OUT_FACTOR)];
 
+/// The selectors that accept a **typed argument** on the command line.
+///
+/// An argument is admitted by its base selector and then validated against that
+/// selector's own grammar; it is **not** a new [`CommandId`] and there is no
+/// second IPC for it. Every other selector stays name-only, so `LINE 2` is the
+/// ordinary unsupported-name refusal.
+///
+/// * [`ARGUMENT_SELECTOR`] (`ZOOM`): a positive factor or `ALL`/`EXTENTS`
+///   ([`parse_zoom_argument`]);
+/// * [`SNAPUNIT_SELECTOR`] (`SNAPUNIT`): a positive decimal spacing
+///   ([`parse_snap_unit_argument`]).
+pub const ARGUMENT_SELECTORS: &[&str] = &[ARGUMENT_SELECTOR, SNAPUNIT_SELECTOR];
+
+/// AutoCAD's `ZOOM n` / `ZOOM ALL`: the first argument-taking selector.
+///
+/// A positive factor reuses the `ZOOMIN`/`ZOOMOUT` step path (anchored at the
+/// viewport centre); `ALL`/`EXTENTS` dispatches the ordinary `FIT`.
+pub const ARGUMENT_SELECTOR: &str = "ZOOM";
+
+/// AutoCAD's `SNAPUNIT <value>`: the session grid-snap spacing sysvar.
+///
+/// The value is a positive decimal in drawing units and is stored as session
+/// state only (no database, history or preference write). It is the spacing the
+/// `SNAP` (F9) quantiser uses.
+pub const SNAPUNIT_SELECTOR: &str = "SNAPUNIT";
+
+/// One parsed argument of the `ZOOM` selector.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ZoomArgument {
+    /// A positive finite **scale factor**: `> 1` zooms in, `< 1` zooms out —
+    /// the same convention as `ZOOMIN`/`ZOOMOUT` and
+    /// [`cad_app::CommandPayload::ZoomAt`]. The zoom is anchored at the
+    /// **viewport centre**, exactly like those cursor-less button steps.
+    Factor(f64),
+    /// `ALL` (the written-out spelling) or `EXTENTS`: frame the whole drawing,
+    /// i.e. the [`CommandId::FitDrawing`] path.
+    Fit,
+}
+
+/// Parse the argument of a `ZOOM` selector: a positive decimal factor, or
+/// `ALL` / `EXTENTS` (case-insensitive, surrounding whitespace ignored).
+///
+/// The numeric grammar is deliberately narrow — ASCII digits with at most one
+/// `.` that has digits on **both** sides (`2`, `0.5`, `1.25`, `2.0`). Signs
+/// (`-1`, `+2`), exponents (`1e3`), a bare `.`/`1.`, `NaN`/`inf` and zero are
+/// all refused with `None`; the caller turns that into the stable refusal from
+/// [`invalid_zoom_argument_reason`]. Nothing is clamped and no default factor is
+/// invented.
+pub fn parse_zoom_argument(argument: &str) -> Option<ZoomArgument> {
+    let key = argument.trim();
+    if key.eq_ignore_ascii_case("ALL") || key.eq_ignore_ascii_case("EXTENTS") {
+        return Some(ZoomArgument::Fit);
+    }
+    parse_positive_decimal(key).map(ZoomArgument::Factor)
+}
+
+/// Parse the argument of a `SNAPUNIT` selector: a positive decimal spacing.
+///
+/// The grammar is exactly the numeric shape `ZOOM` accepts
+/// ([`parse_zoom_argument`]): ASCII digits with at most one `.` that has digits
+/// on **both** sides (`25`, `0.5`, `2.5`). Signs (`-5`, `+5`), exponents
+/// (`1e3`), a bare `.`/`5.`, `NaN`/`inf`, zero and `-0` are all refused with
+/// `None`; the caller turns that into the stable refusal from
+/// [`invalid_snap_unit_argument_reason`]. Nothing is clamped, no default spacing
+/// is invented and `ALL`/`EXTENTS` mean nothing here.
+pub fn parse_snap_unit_argument(argument: &str) -> Option<f64> {
+    parse_positive_decimal(argument.trim())
+}
+
+/// Split a typed line into an argument-taking selector and its argument.
+///
+/// `Some((selector, argument))` only when `text` starts with one of
+/// [`ARGUMENT_SELECTORS`] followed by one or more spaces/tabs and a non-empty
+/// argument (`ZOOM 2`, `  snapunit\t0.5 `); a name-only line (`ZOOM`,
+/// `SNAPUNIT`) returns `None` so it keeps the name-only funnel and its existing
+/// payload refusal. The argument keeps its internal text: `ZOOM 2 3` reaches
+/// [`parse_zoom_argument`] as `2 3` and is refused there rather than being split
+/// a second time.
+pub fn typed_command_argument(text: &str) -> Option<(&'static str, &str)> {
+    let trimmed = text.trim();
+    let split = trimmed.find([' ', '\t'])?;
+    let (name, rest) = trimmed.split_at(split);
+    let argument = rest.trim_start_matches([' ', '\t']).trim_end();
+    if argument.is_empty() {
+        return None;
+    }
+    let selector = canonical_command_name(name)?;
+    ARGUMENT_SELECTORS
+        .contains(&selector)
+        .then_some((selector, argument))
+}
+
+/// The stable rejection reason for a `ZOOM` argument outside the grammar.
+///
+/// One wording for one fact: the typed line is echoed verbatim and the accepted
+/// grammar is spelled out, so a refusal is never a silent ignore or a clamp.
+pub fn invalid_zoom_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (ZOOM needs a positive factor, ALL or EXTENTS)",
+        text.trim()
+    )
+}
+
+/// The stable rejection reason for a `SNAPUNIT` argument outside the grammar.
+///
+/// Same shape as [`invalid_zoom_argument_reason`]: the typed line is echoed and
+/// the accepted grammar (one positive decimal spacing) is named.
+pub fn invalid_snap_unit_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (SNAPUNIT needs a positive decimal spacing)",
+        text.trim()
+    )
+}
+
+/// Whether `text` is a plain positive decimal number (`digits[.digits]`).
+fn parse_positive_decimal(text: &str) -> Option<f64> {
+    let (whole, fraction) = match text.split_once('.') {
+        Some((whole, fraction)) => (whole, Some(fraction)),
+        None => (text, None),
+    };
+    let digits_only = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    if !digits_only(whole) {
+        return None;
+    }
+    if let Some(fraction) = fraction {
+        if !digits_only(fraction) {
+            return None;
+        }
+    }
+    let value: f64 = text.parse().ok()?;
+    (value.is_finite() && value > 0.0).then_some(value)
+}
+
 /// The canonical name in `table` matching the already-uppercased `key`, if any.
 fn table_name<T>(table: &[(&'static str, T)], key: &str) -> Option<&'static str> {
     table
@@ -176,14 +317,13 @@ pub fn zoom_step_factor(name: &str) -> Option<f64> {
 /// canonicalise onto a [`COMMAND_TABLE`] name, to be unique, and to collide with
 /// no canonical name.
 ///
-/// `SNAP` is deliberately absent: AutoCAD's `SNAP` is **grid snap** (F9), which
-/// this project does not implement and which is a different feature from the
-/// object snap (`OSNAP`) selector and from the display grid switch (`GRID`).
-/// Aliasing it onto `ToggleSnap` would silently turn a request for grid snap
-/// into an object-snap toggle, aliasing it onto `ToggleGrid` would silently
-/// turn it into a display toggle, and aliasing it onto `ToggleOrtho` would
-/// silently turn it into the orthographic constraint. None of those is grid
-/// snap, so the name stays refused.
+/// There is no `SNAP` alias row. AutoCAD's `SNAP` is **grid snap** (F9), a real
+/// selector of its own ([`CommandId::ToggleSnapGrid`], with the `SNAPUNIT`
+/// spacing sysvar); it is a different feature from object snap (`OSNAP`) and
+/// from the display grid (`GRID`). Aliasing it onto `ToggleSnap` would silently
+/// turn a request for grid snap into an object-snap toggle, and aliasing it onto
+/// `ToggleGrid` would silently turn it into a display toggle — neither is grid
+/// snap, so no alias exists and the canonical name is the only spelling.
 pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("EXPORT", "PLOT"),
     ("PRINT", "PLOT"),

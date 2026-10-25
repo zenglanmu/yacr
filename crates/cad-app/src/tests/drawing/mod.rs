@@ -301,3 +301,4 @@ mod text;
 mod text_edit;
 mod transform;
 mod trim_extend_curves;
+mod trim_spline_boundary;

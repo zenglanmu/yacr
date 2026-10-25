@@ -77,9 +77,32 @@ pub struct SessionState {
     /// deliberately independent of the persisted `view.overlays.grid`
     /// preference: the host draws the grid only when **both** this switch and
     /// that preference are on (see `cad_host`'s render sync). This is the
-    /// **display** grid only — grid snap (AutoCAD's `SNAP`/F9) is a different,
-    /// unimplemented feature and stays refused.
+    /// **display** grid only — grid snap (AutoCAD's `SNAP`/F9) is the separate
+    /// [`SessionState::snap_grid_enabled`] switch.
     grid_enabled: bool,
+    /// Whether **grid snap** is active for this session (`SNAP`, F9).
+    ///
+    /// Session/display state only: toggling it writes no database, produces no
+    /// history entry and schedules no ChangeSet. The default is **`false`**,
+    /// matching AutoCAD's initial `SNAP` off. While on, a captured point is
+    /// quantised to the nearest multiple of [`SessionState::snap_spacing`] in X
+    /// and Y, before the `ORTHO` constraint — see [`crate::snap`] for the exact
+    /// rule, the half-away-from-zero tie rule and the documented
+    /// object-snap → grid-snap → ortho order. It never moves a point in Z and it
+    /// is neither object snap (`snap_enabled`) nor the display grid
+    /// (`grid_enabled`).
+    snap_grid_enabled: bool,
+    /// The session **snap spacing** in drawing units (AutoCAD's `SNAPUNIT`).
+    ///
+    /// Session sysvar state only, never persisted and never derived from the
+    /// drawing's units. The default is [`crate::snap::DEFAULT_SNAP_SPACING`]
+    /// (10.0 drawing units — this build's declared choice, since AutoCAD's
+    /// initial value comes from the template and is unknowable here). Only the
+    /// typed `SNAPUNIT <value>` path writes it, and only a finite, strictly
+    /// positive value is stored: anything else is an explicit refusal, never a
+    /// silent clamp. A tool switch, a cancel and a document edit leave it
+    /// untouched; only a session rebuild resets it to the default.
+    snap_spacing: f64,
     /// Whether the `ORTHO` drafting constraint is active for this session
     /// (`ORTHO`, F8).
     ///
@@ -89,8 +112,9 @@ pub struct SessionState {
     /// capture or a measurement pick) is constrained to a horizontal or vertical
     /// direction from the tool's previous captured point — see
     /// [`crate::ortho`] for the exact rule, the horizontal tie rule and the
-    /// documented "applied after object snap" ordering. It never moves a point in
-    /// Z and it is not grid snap (AutoCAD's `SNAP`/F9, still unimplemented).
+    /// documented "applied after object snap and grid snap" ordering. It never
+    /// moves a point in Z and it is not grid snap
+    /// ([`SessionState::snap_grid_enabled`]).
     ortho_enabled: bool,
     /// Whether idle pointer movement previews the entity under the cursor.
     ///
@@ -159,6 +183,8 @@ impl SessionState {
             tool_parameters: ToolParameterStore::defaults(),
             snap_enabled: true,
             grid_enabled: true,
+            snap_grid_enabled: false,
+            snap_spacing: crate::snap::DEFAULT_SNAP_SPACING,
             ortho_enabled: false,
             hover_preview: true,
             hover_dwell_ms: 20,
@@ -204,8 +230,8 @@ impl SessionState {
     /// Enable or disable the display grid for this session.
     ///
     /// Session state only: no database write, no history entry. This is the
-    /// **display** grid only; grid snap (AutoCAD's `SNAP`/F9) is a different,
-    /// unimplemented feature.
+    /// **display** grid only; grid snap has its own switch
+    /// ([`SessionState::set_snap_grid_enabled`]).
     pub fn set_grid_enabled(&mut self, enabled: bool) {
         self.grid_enabled = enabled;
     }
@@ -214,6 +240,55 @@ impl SessionState {
     pub fn toggle_grid(&mut self) -> bool {
         self.grid_enabled = !self.grid_enabled;
         self.grid_enabled
+    }
+
+    /// Whether **grid snap** is active in this session (`SNAP`, F9).
+    ///
+    /// Session/display state only; the default is `false` (AutoCAD's initial
+    /// `SNAP` off).
+    pub fn snap_grid_enabled(&self) -> bool {
+        self.snap_grid_enabled
+    }
+
+    /// Enable or disable grid snap for this session.
+    ///
+    /// Session state only: no database write, no history entry, no ChangeSet and
+    /// no persisted preference. See [`crate::snap`] for the quantisation rule the
+    /// capture and preview paths apply while this is on.
+    pub fn set_snap_grid_enabled(&mut self, enabled: bool) {
+        self.snap_grid_enabled = enabled;
+    }
+
+    /// Flip grid snap and return the new state (F9 binding).
+    pub fn toggle_snap_grid(&mut self) -> bool {
+        self.snap_grid_enabled = !self.snap_grid_enabled;
+        self.snap_grid_enabled
+    }
+
+    /// The session grid-snap spacing in drawing units (`SNAPUNIT`).
+    ///
+    /// Session sysvar state only; see [`SessionState::set_snap_spacing`] for the
+    /// accepted values and the default.
+    pub fn snap_spacing(&self) -> f64 {
+        self.snap_spacing
+    }
+
+    /// Set the session grid-snap spacing (`SNAPUNIT <value>`).
+    ///
+    /// Only a finite, strictly positive spacing is stored
+    /// ([`crate::snap::snap_spacing_is_valid`]); `0`, a negative value, `NaN` and
+    /// the infinities are explicit `InvalidInput` refusals, never a silent clamp
+    /// and never a division by zero. Session/display state only: no database
+    /// write, no history entry, no ChangeSet and no persisted preference, so it is
+    /// allowed in Viewer and Work.
+    pub fn set_snap_spacing(&mut self, spacing: f64) -> CadResult<()> {
+        if !crate::snap::snap_spacing_is_valid(spacing) {
+            return Err(CadError::InvalidInput(
+                "snap spacing must be finite and positive".into(),
+            ));
+        }
+        self.snap_spacing = spacing;
+        Ok(())
     }
 
     /// Whether the `ORTHO` drafting constraint is active in this session.
@@ -242,9 +317,10 @@ impl SessionState {
     /// The previous captured point of the active capture, for `ORTHO`.
     ///
     /// `None` for an idle/pick-only tool: the first pick of a tool has no
-    /// direction to constrain against. A **pending entity-pick** step is excluded
-    /// as well — an entity pick is not a point entry and its commit path
-    /// ([`SessionState::capture_draw_pick`]) bypasses the constraint, so a
+    /// direction to constrain against (grid snap still applies, it needs no
+    /// previous point). A **pending entity-pick** step is excluded as well — an
+    /// entity pick is not a point entry and its commit path
+    /// ([`SessionState::capture_draw_pick`]) bypasses the constraints, so a
     /// constrained preview there would disagree with the commit.
     fn ortho_previous_point(&self) -> Option<Point3> {
         match &self.tool {
@@ -262,22 +338,37 @@ impl SessionState {
         }
     }
 
-    /// Apply the session `ORTHO` switch to one candidate point.
+    /// Apply the session drafting constraints to one candidate point.
     ///
-    /// The raw point is returned unchanged while the switch is off or when the
-    /// tool has no previous captured point; otherwise [`crate::ortho::ortho_constrain`]
-    /// decides. Capture and preview share this one call, so the rubber band can
-    /// never disagree with the committed point.
-    fn ortho_point(&self, previous: Option<Point3>, raw: Point3) -> Point3 {
-        crate::ortho::ortho_constrain_point(self.ortho_enabled, previous, raw)
+    /// The full order of a point entry is:
+    ///
+    /// 1. **object snap** — already applied by the host before the point reaches
+    ///    the session ([`crate::host::HostController::capture_tool_point`]);
+    /// 2. **grid snap** — [`crate::snap::snap_point`], X and Y quantised to the
+    ///    session spacing, Z untouched;
+    /// 3. **ORTHO** — [`crate::ortho::ortho_constrain_point`], so the
+    ///    orthographic constraint still decides the final axis.
+    ///
+    /// Capture and preview both call this one helper, so a rubber band can never
+    /// disagree with the committed point (and grid snap can never silently
+    /// diverge from ortho). The raw point is returned unchanged while both
+    /// switches are off or when the tool has no previous captured point.
+    fn constrained_point(&self, previous: Option<Point3>, raw: Point3) -> Point3 {
+        let snapped = crate::snap::snap_point(self.snap_grid_enabled, self.snap_spacing, raw);
+        crate::ortho::ortho_constrain_point(self.ortho_enabled, previous, snapped)
     }
 
-    /// Apply `ORTHO` to a preview cursor.
+    /// Apply the drafting constraints to a preview cursor.
     ///
     /// The preview is a projection of the same pending point entry the next click
     /// commits, so it must show the constrained value rather than the raw cursor.
-    fn ortho_cursor(&self, previous: Option<Point3>, cursor: Option<Point3>) -> Option<Point3> {
-        cursor.map(|raw| self.ortho_point(previous, raw))
+    /// `None` (no cursor) stays `None`.
+    fn constrained_cursor(
+        &self,
+        previous: Option<Point3>,
+        cursor: Option<Point3>,
+    ) -> Option<Point3> {
+        cursor.map(|raw| self.constrained_point(previous, raw))
     }
 
     /// Whether idle pointer movement previews the entity under the cursor.
@@ -516,18 +607,21 @@ impl SessionState {
     /// capture time. A blind point for such a kind is refused rather than
     /// stored (see [`DrawTool::push_point`]).
     ///
-    /// While the session `ORTHO` switch is on the point is constrained against the
-    /// tool's **previous captured point** before it is stored (see
-    /// [`crate::ortho`]); the first point of a tool and a disabled switch store the
-    /// raw point. The host resolves object snapping *first* and passes the snapped
-    /// point in, so `ORTHO` constrains an already-snapped point — the documented,
-    /// deliberate ordering deviation from AutoCAD. Only the stored point differs:
-    /// no database, history or preference write is involved.
+    /// While the session `SNAP` (grid snap) switch is on the point is quantised
+    /// to the nearest multiple of the session snap spacing in X and Y, and while
+    /// `ORTHO` is on the (already snapped) point is then constrained against the
+    /// tool's **previous captured point** (see [`crate::snap`] and
+    /// [`crate::ortho`]). The first point of a tool has no previous point, so only
+    /// grid snap applies to it. The host resolves object snapping *first* and
+    /// passes the snapped point in, so the documented order is object snap →
+    /// grid snap → ortho — a deliberate, spelled-out ordering rather than a claim
+    /// of AutoCAD's internal order. Only the stored point differs: no database,
+    /// history or preference write is involved, and `z` is never moved.
     pub fn capture_point(&mut self, point: Point3) -> CadResult<bool> {
         if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
             return Err(CadError::InvalidInput("tool point must be finite".into()));
         }
-        let point = self.ortho_point(self.ortho_previous_point(), point);
+        let point = self.constrained_point(self.ortho_previous_point(), point);
         match &mut self.tool {
             ToolState::Drawing(capture) => {
                 capture.tool.push_point(point)?;
@@ -626,29 +720,32 @@ impl SessionState {
     /// (`CadTool.params.sides`) can never report a side count for a tool that has
     /// none.
     ///
-    /// The live cursor is the **pending point entry**, so the session `ORTHO`
-    /// constraint is applied here: the overlay's rubber band reads
+    /// The live cursor is the **pending point entry**, so the session drafting
+    /// constraints are applied here: the overlay's rubber band reads
     /// [`DrawPreview::cursor`], and a raw cursor would show a free segment while
-    /// the click commits a constrained point. A pending **entity-pick** step is
-    /// left raw, because that click never enters through `capture_point`.
+    /// the click commits a grid-snapped and/or ortho-constrained point. A pending
+    /// **entity-pick** step is left raw, because that click never enters through
+    /// `capture_point`.
     fn annotate_draw_preview(&self, mut preview: DrawPreview) -> DrawPreview {
         preview.polygon_sides =
             (preview.kind == DrawToolKind::Polygon).then_some(self.polygon_sides());
         let pending_pick = preview.points.len() < preview.kind.picked_step_count();
         if !pending_pick {
-            preview.cursor = self.ortho_cursor(preview.points.last().copied(), preview.cursor);
+            preview.cursor =
+                self.constrained_cursor(preview.points.last().copied(), preview.cursor);
         }
         preview
     }
 
-    /// Apply the session `ORTHO` constraint to a measurement preview cursor.
+    /// Apply the session drafting constraints to a measurement preview cursor.
     ///
     /// The measurement overlay builds its rubber band from
     /// [`MeasurementPreview::cursor`] exactly like the draw overlay, so it is
     /// constrained the same way: measurement points enter through
-    /// [`SessionState::capture_point`] and must preview what they will commit.
+    /// [`SessionState::capture_point`] and must preview what they will commit
+    /// (grid snap, then ortho).
     fn annotate_measurement_preview(&self, mut preview: MeasurementPreview) -> MeasurementPreview {
-        preview.cursor = self.ortho_cursor(preview.points.last().copied(), preview.cursor);
+        preview.cursor = self.constrained_cursor(preview.points.last().copied(), preview.cursor);
         preview
     }
 

@@ -192,8 +192,8 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 | MOVE | 平移选择（折叠重复 ref） | 不可变换几何整条拒绝，不静默丢弃 |
 | COPY | 复制（新 id） | 同上；按对象样式覆盖无法复制时记 `drawing.copy.style`（副本继承图层样式） |
 | ERASE | 删除选择 | 空选择拒绝；撤销恢复渲染属性与动态可见性成员 |
-| TRIM | 目标 **LINE / ARC / CIRCLE**；边界 **LINE / ARC / CIRCLE / ELLIPSE / LWPOLYLINE**（直线段或带 bulge 弧段，可任意混用）。交点用解析圆锥曲线求交（与对象捕捉同一实现）；LINE 保留拾取侧子段，ARC 保留与原弧同圆心/法向/半径、**同 sweep 符号**的剩余弧，CIRCLE 变成一段 ARC（拾取点两侧相邻交点之间），一条完全落在闭合边界内的目标整体删除（含 CIRCLE；内侧判定按边界自身平面，倾斜折线不会被 XY 投影误判）。**拾取点先投影到已解析的目标上**（LINE 取垂足；ARC/CIRCLE 取 `center + radius * normalize(pick − center)` 的径向投影），所以**点在实体附近即可工作**：宿主已用拾取框解析出目标，点不必恰好落在曲线上 | **仍拒绝**：`SPLINE`/`INSERT`/`Opaque`/`Mesh` 目标或边界、`|sweep| > 一周` 的 ARC 目标（`Unsupported`）；无交点/退化/**投影落到目标自身参数域之外**（不夹到最近端点——夹紧等于替用户决定保留哪一段）/ARC/CIRCLE 拾取点**径向方向为零**（点在目标轴线上，如圆心）/CIRCLE 交点少于 2 ⇒ `InvalidInput`。边界对无解析解（ARC×ELLIPSE、ELLIPSE×ELLIPSE、非共面圆族）时仍出图，但**额外**给一条 `drawing.trim` 诊断声明切点来自采样近似；3D 非共面输入只会“求不到交点”而非被投影凑出结果 |
-| EXTEND | 目标 LINE（沿自身无限直线）或 ARC（沿自身圆、**同号 sweep**）；边界集合同 TRIM。拾取点同样**先投影到目标上**，投影落点决定延伸哪一端（“点在哪一头”按曲线上的落点判定，与点到曲线的距离无关）；只取拾取端**前方最近**交点，**只增不减**；ARC 的延伸量**上限为半圈**（超过半圈视为“只能绕远路到达”，显式拒绝） | CIRCLE 目标（无端点）、`|sweep| > 一周` 的 ARC、`SPLINE` 等其余目标/边界 ⇒ `Unsupported`；已接触/已穿过/前方无交点/延伸超过半圈/投影落在目标参数域之外 ⇒ `InvalidInput`；采样近似同 TRIM 另给 `drawing.extend` 诊断 |
+| TRIM | 目标 **LINE / ARC / CIRCLE**；边界 **LINE / ARC / CIRCLE / ELLIPSE / LWPOLYLINE**（直线段或带 bulge 弧段，可任意混用）**/ SPLINE**。LINE/ARC/CIRCLE/ELLIPSE 及 bulge 弧段用解析圆锥曲线求交（与对象捕捉同一实现）；**SPLINE 边界只走采样**：`intersect_local` 把两个操作数按 `extent × 1e-4` 弦高（每操作数最多 256 段）扁平化后求交，切点误差界为该弦高（10 单位图纸约 `1e-3`），因此**每条真正贡献切点的 SPLINE 对都会额外给一条 `drawing.trim` 诊断**说明切点来自采样近似，绝不冒充解析解。LINE 保留拾取侧子段，ARC 保留与原弧同圆心/法向/半径、**同 sweep 符号**的剩余弧，CIRCLE 变成一段 ARC（拾取点两侧相邻交点之间），一条完全落在闭合边界内的目标整体删除（含 CIRCLE；内侧判定按边界自身平面，倾斜折线不会被 XY 投影误判）。**拾取点先投影到已解析的目标上**（LINE 取垂足；ARC/CIRCLE 取 `center + radius * normalize(pick − center)` 的径向投影），所以**点在实体附近即可工作**：宿主已用拾取框解析出目标，点不必恰好落在曲线上 | **仍拒绝**：`SPLINE`/`INSERT`/`Opaque`/`Mesh` **目标**（边界只有 `INSERT`/`Opaque`/`Mesh` 等未列出的类型被拒）、`|sweep| > 一周` 的 ARC 目标（`Unsupported`）；无交点/退化/**投影落到目标自身参数域之外**（不夹到最近端点——夹紧等于替用户决定保留哪一段）/ARC/CIRCLE 拾取点**径向方向为零**（点在目标轴线上，如圆心）/CIRCLE 交点少于 2 ⇒ `InvalidInput`。**闭合 SPLINE 的内侧删除规则不支持**：`SemanticGeometry::Spline` 既无闭合标志也无边界平面，无法做可靠的平面感知内侧判定，故“目标完全落在闭合 SPLINE 内且无切点”**显式 `Unsupported` 拒绝**（不删除、不臆造包含关系）；其它无解析解的边界对（ARC×ELLIPSE、ELLIPSE×ELLIPSE、非共面圆族）仍出图但同样附采样近似诊断；3D 非共面输入只会“求不到交点”而非被投影凑出结果 |
+| EXTEND | 目标 LINE（沿自身无限直线）或 ARC（沿自身圆、**同号 sweep**）；边界集合同 TRIM（**含 SPLINE**，同样只走采样并附 `drawing.extend` 近似诊断，弦高界同 TRIM）。拾取点同样**先投影到目标上**，投影落点决定延伸哪一端（“点在哪一头”按曲线上的落点判定，与点到曲线的距离无关）；只取拾取端**前方最近**交点，**只增不减**；ARC 的延伸量**上限为半圈**（超过半圈视为“只能绕远路到达”，显式拒绝） | CIRCLE 目标（无端点）、`|sweep| > 一周` 的 ARC、`SPLINE` 等其余**目标**、未支持的边界类型 ⇒ `Unsupported`；已接触/已穿过/前方无交点/延伸超过半圈/投影落在目标参数域之外 ⇒ `InvalidInput`；采样近似同 TRIM 另给 `drawing.extend` 诊断 |
 | ROTATE / SCALE | 绕基点旋转/均匀缩放 | 相似变换（正行列式）；不支持几何 `Unsupported`。**含 `MultiLeader` 的选择：旋转可以，缩放 ⇒ 整命令失败**（ADR-0019 C.5：掩码未置位时 AutoCAD 会从样式重解析） |
 | MIRROR | 镜像（**保留原件**，新增副本） | 反射下 Arc/Ellipse 参数化会反向 → 显式 `Unsupported` |
 | OFFSET | LINE / CIRCLE 偏移 | 其余几何 `Unsupported`；点在线上/过圆心/在圆上显式拒绝 |
@@ -375,10 +375,11 @@ Apply/OK/Cancel 为 AutoCAD 语义（本地暂存、只发 diff、写失败标�
 
 **2026-10-25 补齐（React 宿主，源码/单测证据；真机像素 NOT RUN）**：`NEW`/`SAVE`/`PLOT` 及其别名
 经宿主能力布尔（`canNew`/`canSave`/`canPlot`）真实准入，Linux 保存目标走 XDG portal `save_file`；
-`GRID`（F7，仅显示栅格）与 `ORTHO`（F8，仅 XY、上一点水平/垂直约束）成为真实命令；图层面板
+`GRID`（F7，仅显示栅格）、`SNAP`（F9，会话级栅格捕捉，间距由 `SNAPUNIT <value>` 设置）与
+`ORTHO`（F8，仅 XY、上一点水平/垂直约束）成为真实命令；图层面板
 （`LAYER`）支持搜索 / 临时显隐 / 恢复 / 设为当前层（写入仍走既有命令漏斗，不写 DWG 图层表）；
 CAD 分区右键**快捷菜单**已实现（复制/剪切/粘贴/全选/删除/特性/缩放到范围/平移/放弃/重做/重复上一命令）。
-仍无行为可接而**不显示**的 AutoCAD 项：`SNAP`（栅格捕捉 F9）、夹点、极轴、动态 UCS。
+仍无行为可接而**不显示**的 AutoCAD 项：夹点、极轴、动态 UCS。
 
 2026-10-10 图元显示补全轮新增边界：**光栅图像** PNG/JPEG 已解码并出纹理，但
 TIFF/CCITT/EPS 等编解码器、亮度/对比/淡出/透明、outside/mask 裁剪显式未支持；

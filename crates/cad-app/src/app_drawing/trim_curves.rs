@@ -9,11 +9,17 @@
 //! Cut points come from [`cad_geometry::GeometryEngine::intersect_local`], the
 //! same analytic conic intersection object-snap uses; a bulged LWPOLYLINE
 //! boundary is exploded into straight LINE pieces and ARC pieces (via
-//! [`cad_geometry::bulge_arc_geometry`]) so an LWPOLYLINE cut is analytic too.
-//! The pairs the engine does not solve analytically fall back to its documented
-//! sampled approximation; those cuts are *reported* in
+//! [`cad_geometry::bulge_arc_geometry`]) so an LWPOLYLINE cut is analytic too. A
+//! SPLINE boundary is kept whole: it is not a conic, so its cuts come from the
+//! engine's **sampled** fallback (chord tolerance `extent × 1e-4` of each operand,
+//! capped at 256 segments) and are always reported in
 //! [`TrimResolution::notes`]/[`ExtendResolution::notes`] rather than presented as
 //! exact (see `trim_boundary::note_approximation`).
+//!
+//! A SPLINE boundary does not take part in the closed-boundary delete rule: a
+//! spline carries no closed flag and no boundary plane, so no sound inside test
+//! exists. That combination is an explicit `Unsupported` refusal ([`PlanRefusal`]),
+//! never a fabricated containment.
 //!
 //! Two bounds keep the result predictable: a periodic target needs two distinct
 //! cuts to leave an arc, and an ARC extends at most **half a turn** (beyond that
@@ -68,6 +74,41 @@ pub(super) struct TrimResolution {
     /// **sampled** fallback instead of an analytic solution. Empty when every
     /// cut was analytic; never silently dropped by the caller.
     pub notes: Vec<String>,
+}
+
+/// Why a TRIM plan could not be resolved.
+///
+/// The distinction is kept (rather than a bare `String`) because one refusal is a
+/// **capability gap**, not bad input: closed-SPLINE containment. Reporting that as
+/// `InvalidInput` would blame the user for a subset the command does not implement.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum PlanRefusal {
+    /// Bad or ambiguous input (degenerate target, no intersection, a pick whose
+    /// projection falls outside the target's span).
+    Invalid(String),
+    /// A combination this command does not implement (closed-SPLINE containment).
+    Unsupported(String),
+}
+
+impl PlanRefusal {
+    pub(super) fn into_cad_error(self) -> CadError {
+        match self {
+            Self::Invalid(reason) => CadError::InvalidInput(reason),
+            Self::Unsupported(reason) => CadError::Unsupported(reason),
+        }
+    }
+}
+
+impl From<String> for PlanRefusal {
+    fn from(reason: String) -> Self {
+        Self::Invalid(reason)
+    }
+}
+
+impl From<&str> for PlanRefusal {
+    fn from(reason: &str) -> Self {
+        Self::Invalid(reason.to_string())
+    }
 }
 
 /// A resolved EXTEND plus the same honesty notes.
@@ -364,16 +405,23 @@ impl TargetCurve {
 /// The cuts are ordered in the target's own parameter; the piece containing the
 /// **projection** of `pick` is kept. A target with no cut that lies wholly inside
 /// a closed boundary is deleted — including a CIRCLE, which has no ends whose
-/// parameter range could stand in for the rule. `Err(reason)` covers the
-/// documented degenerate/no-cut/outside-the-span cases so the caller can refuse
-/// without touching the database.
+/// parameter range could stand in for the rule.
+///
+/// A SPLINE boundary only ever contributes sampled cuts; it is deliberately
+/// absent from the containment test (no closed flag, no boundary plane), so a
+/// no-cut target with a SPLINE in the boundary set is refused as
+/// [`PlanRefusal::Unsupported`] instead of being deleted or silently treated as
+/// "not inside".
+///
+/// `Err(reason)` covers the documented degenerate/no-cut/outside-the-span cases so
+/// the caller can refuse without touching the database.
 pub(super) fn plan_trim(
     curve: &TargetCurve,
     pick: Point3,
     boundaries: &BoundarySet,
     policy: &TolerancePolicy,
     tol: f64,
-) -> Result<TrimResolution, String> {
+) -> Result<TrimResolution, PlanRefusal> {
     let label = curve.label();
     let (span_len, param_tol, u_pick) = target_frame("TRIM", curve, pick, tol)?;
 
@@ -392,6 +440,15 @@ pub(super) fn plan_trim(
                 notes,
             });
         }
+        if boundaries.has_spline_boundary() {
+            return Err(PlanRefusal::Unsupported(
+                "TRIM found no intersection between the target and the boundary, and the \
+                 closed-SPLINE delete rule is not supported: a SPLINE boundary carries no \
+                 closed flag and no boundary plane, so a target wholly inside a closed spline \
+                 cannot be tested for containment; it is refused rather than deleted"
+                    .into(),
+            ));
+        }
         return Err("TRIM found no intersection between the target and the boundary".into());
     }
 
@@ -401,7 +458,8 @@ pub(super) fn plan_trim(
                 "TRIM of a {label} needs at least two boundary intersections to leave an arc; \
                  found {}",
                 cuts.len()
-            ));
+            )
+            .into());
         }
         periodic_piece(&cuts, u_pick)
     } else {
@@ -429,7 +487,7 @@ pub(super) fn plan_trim(
                 plan: TrimPlan::Delete,
                 notes,
             }),
-            _ => Err(format!("TRIM would reduce the target {label} to nothing")),
+            _ => Err(format!("TRIM would reduce the target {label} to nothing").into()),
         };
     }
     Ok(TrimResolution {

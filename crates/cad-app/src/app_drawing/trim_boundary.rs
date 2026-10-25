@@ -1,12 +1,18 @@
-//! Boundary resolution for TRIM/EXTEND: analytic primitives, closed-boundary
-//! containment and cut precision.
+//! Boundary resolution for TRIM/EXTEND: analytic primitives, sampled primitives,
+//! closed-boundary containment and cut precision.
 //!
-//! A boundary entity is reduced to analytic primitives (a bulged LWPOLYLINE is
-//! exploded into LINE pieces and [`cad_geometry::bulge_arc_geometry`] ARCs) so a
-//! cut can be an exact conic intersection. The closed-boundary "target wholly
-//! inside" rule lives here too: it is a **plane-aware** inside test, because a
-//! tilted outline projects to a real XY polygon and a flat XY ray cast would
-//! delete targets that never touch it.
+//! A boundary entity is reduced to primitives: a bulged LWPOLYLINE is exploded
+//! into LINE pieces and [`cad_geometry::bulge_arc_geometry`] ARCs, so a cut can be
+//! an exact conic intersection, and a SPLINE is kept as one sampled primitive (it
+//! is not a conic, so its cuts come from the engine's sampled fallback). The
+//! closed-boundary "target wholly inside" rule lives here too: it is a
+//! **plane-aware** inside test, because a tilted outline projects to a real XY
+//! polygon and a flat XY ray cast would delete targets that never touch it.
+//!
+//! A SPLINE boundary deliberately does **not** take part in that delete rule: a
+//! [`SemanticGeometry::Spline`] carries no closed flag and no boundary plane, so
+//! there is no sound closed test to run. A target wholly inside a closed spline is
+//! therefore refused by name instead of being deleted (see `plan_trim`).
 //!
 //! This module also decides whether a cut pair has an analytic solution at all:
 //! [`note_approximation`] reports the pairs the engine can only solve by its
@@ -120,8 +126,8 @@ impl ClosedCurve {
 /// The resolved boundary input of a TRIM/EXTEND.
 #[derive(Default)]
 pub(super) struct BoundarySet {
-    /// One analytic primitive per boundary curve piece (LINE, ARC, CIRCLE or
-    /// ELLIPSE).
+    /// One primitive per boundary curve piece (LINE, ARC, CIRCLE, ELLIPSE or
+    /// SPLINE).
     primitives: Vec<SemanticGeometry>,
     /// Closed outlines for the "target wholly inside the boundary" delete rule:
     /// a closed LWPOLYLINE is sampled once at the policy tolerance and projected
@@ -129,11 +135,21 @@ pub(super) struct BoundarySet {
     closed_outlines: Vec<ClosedOutline>,
     /// Closed analytic boundaries for the same rule.
     closed_curves: Vec<ClosedCurve>,
+    /// How many SPLINE boundaries were collected. A SPLINE is usable as a cut
+    /// boundary (via the sampled fallback) but not for the containment rule, so
+    /// the count lets `plan_trim` refuse that one combination **by name** instead
+    /// of silently reporting "no intersection".
+    spline_boundaries: usize,
 }
 
 impl BoundarySet {
     pub(super) fn primitives(&self) -> &[SemanticGeometry] {
         &self.primitives
+    }
+
+    /// Whether any boundary is a SPLINE (and therefore has no sound closed test).
+    pub(super) fn has_spline_boundary(&self) -> bool {
+        self.spline_boundaries > 0
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -158,9 +174,14 @@ impl BoundarySet {
 
 /// Resolve one boundary entity into [`BoundarySet`].
 ///
-/// Supported: LINE, ARC, CIRCLE, ELLIPSE and LWPOLYLINE (straight or bulged, in
-/// any mix). Every other geometry kind is an explicit `Unsupported` refusal
-/// naming the kind and the operation, before anything is mutated.
+/// Supported: LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE (straight or bulged, in any
+/// mix) and SPLINE. A SPLINE is accepted only as a **sampled** cut boundary: it is
+/// not a conic, so `intersect_local` flattens it (chord tolerance
+/// `extent × 1e-4`, at most 256 segments per operand) and the command reports
+/// [`note_approximation`] for every cut such a pair really contributes. SPLINE
+/// takes no part in the closed-boundary delete rule (see the module doc). Every
+/// other geometry kind is an explicit `Unsupported` refusal naming the kind and
+/// the operation, before anything is mutated.
 pub(super) fn collect_boundaries(
     geometry: &SemanticGeometry,
     set: &mut BoundarySet,
@@ -267,9 +288,17 @@ pub(super) fn collect_boundaries(
             }
             Ok(())
         }
+        SemanticGeometry::Spline { .. } => {
+            // Accepted as a *sampled* boundary. No `closed_outlines`/`closed_curves`
+            // entry: a spline has no closed flag and no boundary plane, so the
+            // wholly-inside delete rule is refused by name in `plan_trim`.
+            set.primitives.push(geometry.clone());
+            set.spline_boundaries += 1;
+            Ok(())
+        }
         other => Err(CadError::Unsupported(format!(
-            "{command} boundary {} is not supported; only LINE, ARC, CIRCLE, ELLIPSE and \
-             LWPOLYLINE are",
+            "{command} boundary {} is not supported; only LINE, ARC, CIRCLE, ELLIPSE, \
+             LWPOLYLINE and SPLINE are",
             geometry_kind(other)
         ))),
     }
@@ -277,6 +306,10 @@ pub(super) fn collect_boundaries(
 
 /// Record that this boundary pair has no analytic solution and is cut only by the
 /// engine's sampled fallback, so the reported cut point is an approximation.
+///
+/// The note names both operands, so a sampled SPLINE pair is always traceable to
+/// the boundary it came from. It is emitted only for a pair that actually
+/// contributed a cut (see the call sites).
 pub(super) fn note_approximation(
     probe: &SemanticGeometry,
     primitive: &SemanticGeometry,
@@ -300,7 +333,8 @@ pub(super) fn note_approximation(
 }
 
 /// The conic kinds `cad_geometry` solves analytically, and therefore the only
-/// ones a cut may claim to be exact for.
+/// ones a cut may claim to be exact for. A SPLINE deliberately has **no** variant
+/// here: its cuts are always sampled.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ConicKind {
     Segment,
@@ -324,11 +358,23 @@ fn conic_kind(geometry: &SemanticGeometry) -> Option<ConicKind> {
 /// point is approximate. This mirrors the engine's own dispatch without changing
 /// its public API:
 ///
+/// * a SPLINE is not a conic at all, so **any** pair involving one is sampled;
 /// * ARC×ELLIPSE and ELLIPSE×ELLIPSE have no analytic arm;
 /// * the circle/arc family is analytic only when the two planes are parallel and
 ///   each centre lies in the other's plane (`circle_circle_points` returns `None`
 ///   otherwise, which sends the pair to the fallback).
+///
+/// The sampled cut is only as good as the fallback chord: `extent × 1e-4` of each
+/// operand (`FALLBACK_CHORD_FRACTION`, capped at 256 segments), so a cut point is
+/// within roughly `1e-3` world units of the true curve on a 10-unit drawing — far
+/// coarser than the analytic arms. The contract tests assert a 2x margin (`2e-3`).
 fn pair_is_approximate(a: &SemanticGeometry, b: &SemanticGeometry, radial_tol: f64) -> bool {
+    // Explicit before the conic dispatch so a SPLINE reads as "sampled" here, not
+    // as an accident of `conic_kind` returning `None`.
+    if matches!(a, SemanticGeometry::Spline { .. }) || matches!(b, SemanticGeometry::Spline { .. })
+    {
+        return true;
+    }
     let (Some(kind_a), Some(kind_b)) = (conic_kind(a), conic_kind(b)) else {
         // Not a conic pair at all: always sampled.
         return true;

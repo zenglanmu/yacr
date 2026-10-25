@@ -1,5 +1,5 @@
-//! Session display switches: idle hover preview, object snap, the display grid and
-//! the `ORTHO` drafting constraint.
+//! Session display switches: idle hover preview, object snap, the display grid,
+//! grid snap and the `ORTHO` drafting constraint.
 //!
 //! Each of these is session/display state only: toggling it writes no database,
 //! produces no history entry and schedules no ChangeSet, so all of them are
@@ -9,10 +9,16 @@
 //! the one case where both gates compose: the host draws it only when the
 //! session switch and `view.overlays.grid` are both on.
 //!
-//! `ORTHO` is the one switch here that changes the **value** a capture stores:
-//! it constrains the next point entry (and the matching preview cursor) to a
-//! horizontal or vertical direction from the tool's previous point. It still has
-//! no database, history or preference side effect; see [`crate::ortho`].
+//! Two switches here change the **value** a capture stores (see
+//! [`crate::SessionState::capture_point`], which applies them in this order):
+//!
+//! 1. grid snap (`SNAP`, F9) quantises X and Y to the session spacing
+//!    ([`crate::snap`]);
+//! 2. `ORTHO` then constrains the snapped point to a horizontal or vertical
+//!    direction from the tool's previous point ([`crate::ortho`]).
+//!
+//! Both still have no database, history or preference side effect, and the
+//! matching preview cursor goes through the same single session helper.
 
 use super::*;
 
@@ -48,7 +54,7 @@ impl HostController {
     ///
     /// Session state only: no database write, no history entry, and no change to
     /// the persisted `view.overlays.grid` preference. Display grid only — grid
-    /// snap (AutoCAD's `SNAP`/F9) is a different, unimplemented feature.
+    /// snap has its own switch ([`HostController::set_snap_grid_enabled`]).
     pub fn set_grid_enabled(&mut self, enabled: bool) {
         self.session.set_grid_enabled(enabled);
     }
@@ -56,6 +62,44 @@ impl HostController {
     /// Flip the display grid and return the new state (F7 binding).
     pub fn toggle_grid(&mut self) -> bool {
         self.session.toggle_grid()
+    }
+
+    /// Whether grid snap is enabled for this session (`SNAP`, F9).
+    ///
+    /// Session state only; the capture and preview paths read the same flag, so a
+    /// rubber band and its commit can never disagree. This is neither object snap
+    /// ([`HostController::snap_enabled`]) nor the display grid
+    /// ([`HostController::grid_enabled`]).
+    pub fn snap_grid_enabled(&self) -> bool {
+        self.session.snap_grid_enabled()
+    }
+
+    /// Enable or disable grid snap for this session.
+    ///
+    /// Session state only: no database write, no history entry, and no change to
+    /// any persisted preference. See [`crate::snap`] for the constraint itself.
+    pub fn set_snap_grid_enabled(&mut self, enabled: bool) {
+        self.session.set_snap_grid_enabled(enabled);
+    }
+
+    /// Flip grid snap and return the new state (F9 binding).
+    pub fn toggle_snap_grid(&mut self) -> bool {
+        self.session.toggle_snap_grid()
+    }
+
+    /// The session grid-snap spacing in drawing units (`SNAPUNIT`).
+    pub fn snap_spacing(&self) -> f64 {
+        self.session.snap_spacing()
+    }
+
+    /// Set the session grid-snap spacing (`SNAPUNIT <value>`).
+    ///
+    /// Session state only: no database write, no history entry, and no change to
+    /// any persisted preference. A non-finite or non-positive spacing is an
+    /// explicit refusal (never a silent clamp); see
+    /// [`crate::SessionState::set_snap_spacing`].
+    pub fn set_snap_spacing(&mut self, spacing: f64) -> CadResult<()> {
+        self.session.set_snap_spacing(spacing)
     }
 
     /// Whether the `ORTHO` drafting constraint is enabled for this session

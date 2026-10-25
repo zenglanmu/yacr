@@ -512,9 +512,26 @@ pub struct CadStatus {
     /// Session/display state only; defaults to `true` and can be flipped with the
     /// `GRID` selector (F7). The grid itself is drawn only when this switch and
     /// the persisted `view.overlays.grid` preference are both on, so this flag
-    /// alone does not mean the grid is visible. Display grid only — grid snap
-    /// (AutoCAD's `SNAP`/F9) is a different, unimplemented feature.
+    /// alone does not mean the grid is visible. This is the **display** grid
+    /// only; grid snap is [`Self::snap_grid_enabled`].
     pub grid_enabled: bool,
+    /// Whether **grid snap** is enabled for this session (`SNAP`, F9).
+    ///
+    /// Session/display state only; defaults to `false` (AutoCAD's initial `SNAP`
+    /// off) and can be flipped with the `SNAP` selector (F9). While on, a captured
+    /// point is quantised to the nearest multiple of [`Self::snap_spacing`] in X
+    /// and Y (never Z), before the `ORTHO` constraint. It never changes the
+    /// drawing database, history or a persisted preference, and it is neither
+    /// object snap nor the display grid.
+    pub snap_grid_enabled: bool,
+    /// The session grid-snap spacing in drawing units (`SNAPUNIT`).
+    ///
+    /// Always a finite, strictly positive number: the session setter refuses
+    /// anything else explicitly, so this field never carries `0`/`NaN`. The
+    /// default is `cad_app::DEFAULT_SNAP_SPACING` (10.0 drawing units — this
+    /// build's declared choice, since AutoCAD's initial value comes from the
+    /// template). Session sysvar state only, set with `SNAPUNIT <value>`.
+    pub snap_spacing: f64,
     /// Whether the `ORTHO` drafting constraint is enabled for this session
     /// (`ORTHO`, F8).
     ///
@@ -523,7 +540,7 @@ pub struct CadStatus {
     /// point entry of a drawing or measurement capture is constrained to a
     /// horizontal or vertical direction from the tool's previous point. It never
     /// changes the drawing database, history or a persisted preference, and it is
-    /// **not** grid snap (`SNAP`/F9, still unimplemented).
+    /// **not** grid snap (`SNAP`/F9 is the separate [`Self::snap_grid_enabled`]).
     pub ortho_enabled: bool,
     /// The best current object-snap candidate's stable kind string (ADR 0014
     /// A.7), or `null`.
@@ -546,6 +563,19 @@ pub struct CadStatus {
     /// all). Derived from the same overlay input the renderer draws from, never
     /// from a guess about the view mode.
     pub crosshair: bool,
+    /// The cursor's position in **world (drawing) coordinates**, or `null`.
+    ///
+    /// Wire shape: `cursorWorld: [x, y, z] | null`, always present. It is the
+    /// very same [`cad_app::Point3`] the renderer draws the crosshair from —
+    /// `cad_engine::render::RenderSessionHandle::overlays().cursor`, which the
+    /// host only publishes for a valid 2D view with a pointer on the surface —
+    /// never a re-derived pointer guess, so the readout can never disagree with
+    /// the drawn crosshair.
+    ///
+    /// `null` means "no reliable world coordinate" (a 3D view, a pointer outside
+    /// the surface, or no session at all). It is **not** the origin: a session
+    /// without a cursor must render an em dash, never `0, 0, 0`.
+    pub cursor_world: Option<[f64; 3]>,
     /// Count of verified successful authoritative document transitions caused by
     /// an import. It is **not** a parsed-entity count and must not be read as
     /// proof that no reparse happened.
@@ -593,11 +623,20 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         hover_preview: false,
         snap_enabled: false,
         grid_enabled: false,
+        // No session means no installed grid-snap switch to advertise…
+        snap_grid_enabled: false,
+        // …but the spacing field must still be a real, usable number for the
+        // frozen wire shape (the frontend requires a finite value > 0). The
+        // documented session default is reported instead of a meaningless 0/NaN;
+        // `snap_grid_enabled: false` keeps it clear that nothing is snapping.
+        snap_spacing: cad_app::DEFAULT_SNAP_SPACING,
         ortho_enabled: false,
         snap_kind: None,
         // No CAD session draws no crosshair, so the system cursor is never
         // hidden: nothing is left pointerless.
         crosshair: false,
+        // …and no session has a cursor, so there is no world coordinate to show.
+        cursor_world: None,
         import_count: 0,
         frame_count: 0,
         // No host log exists for an unsupported/probe snapshot.
@@ -849,9 +888,12 @@ pub(super) fn assemble_status(
     hover_preview: bool,
     snap_enabled: bool,
     grid_enabled: bool,
+    snap_grid_enabled: bool,
+    snap_spacing: f64,
     ortho_enabled: bool,
     snap_kind: Option<String>,
     crosshair: bool,
+    cursor_world: Option<[f64; 3]>,
 ) -> CadStatus {
     CadStatus {
         document_label: has_document.then_some(label),
@@ -872,9 +914,12 @@ pub(super) fn assemble_status(
         hover_preview,
         snap_enabled,
         grid_enabled,
+        snap_grid_enabled,
+        snap_spacing,
         ortho_enabled,
         snap_kind,
         crosshair,
+        cursor_world,
         import_count,
         frame_count,
         // The session owns no command log: `CadSession::snapshot` projects the

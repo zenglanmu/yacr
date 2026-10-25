@@ -144,9 +144,16 @@ fn cad_status_is_byte_identical_to_the_pre_migration_host() {
         // A live session's display-grid switch defaults on (`GRID`/F7). The
         // unsupported/probe snapshots keep `false` because no session exists.
         snapshot.grid_enabled = true;
+        // `SNAP` (grid snap, F9) defaults **off**, so a clean live session keeps
+        // the `unsupported_status` value: the fixture asserts that initial state.
+        snapshot.snap_grid_enabled = false;
         // `ORTHO` (F8) defaults **off**, so a clean live session keeps the
         // `unsupported_status` value: the fixture asserts that initial state.
         snapshot.ortho_enabled = false;
+        // No pointer is on the surface in this hand-built snapshot
+        // (`crosshair: false`), so there is no world coordinate to report:
+        // `cursorWorld` stays `null`, never a fabricated origin.
+        snapshot.cursor_world = None;
         state.shell.cad_status = Some(snapshot);
     }
     dump_cad_status("cad_status_clean_session.json", &clean);

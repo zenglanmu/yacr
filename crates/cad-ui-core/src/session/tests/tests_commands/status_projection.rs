@@ -95,9 +95,15 @@ fn blank_status_reports_no_document_capabilities() {
         false,
         false,
         true,
+        // Grid snap is on with a 2.5-unit spacing in this hand-built snapshot, so
+        // both new fields are proven to be carried verbatim.
+        true,
+        2.5,
         true,
         None,
         false,
+        // No cursor on a blank session: no world coordinate to report.
+        None,
     );
     assert_eq!(status.document_label, None);
     assert_eq!(status.entity_count, None);
@@ -109,6 +115,10 @@ fn blank_status_reports_no_document_capabilities() {
     assert!(!status.can_plot, "plotting needs an authoritative document");
     assert_eq!(status.import_count, 0);
     assert_eq!(status.frame_count, 0);
+    assert_eq!(
+        status.cursor_world, None,
+        "a session without a cursor has no world coordinate, never the origin"
+    );
     assert!(
         !status.hover_preview,
         "the assembled status carries the flag it was given"
@@ -120,6 +130,14 @@ fn blank_status_reports_no_document_capabilities() {
     assert!(
         status.grid_enabled,
         "the assembled status carries the display-grid flag it was given"
+    );
+    assert!(
+        status.snap_grid_enabled,
+        "the assembled status carries the grid-snap flag it was given"
+    );
+    assert_eq!(
+        status.snap_spacing, 2.5,
+        "the assembled status carries the snap spacing it was given, never a default"
     );
     assert!(
         status.ortho_enabled,
@@ -152,9 +170,14 @@ fn document_status_reports_counts_and_camera() {
         true,
         true,
         false,
+        // Grid snap off with the documented default spacing.
+        false,
+        10.0,
         false,
         None,
         true,
+        // The world coordinate is carried verbatim, never re-derived here.
+        Some([1.5, -2.0, 3.0]),
     );
     assert_eq!(status.document_label.as_deref(), Some("fixture.dwg"));
     assert_eq!(status.entity_count, Some(3));
@@ -183,6 +206,11 @@ fn document_status_reports_counts_and_camera() {
     assert!(
         status.crosshair,
         "the status carries the crosshair flag it was given (the 3D pointer gate)"
+    );
+    assert_eq!(
+        status.cursor_world,
+        Some([1.5, -2.0, 3.0]),
+        "the status carries the world cursor it was given, verbatim"
     );
 }
 

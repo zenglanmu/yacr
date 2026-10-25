@@ -27,7 +27,9 @@ mod diagnostics;
 mod input;
 mod layers;
 mod settings;
+mod snap_unit;
 mod status;
+mod zoom;
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -67,9 +69,12 @@ pub use self::admission::{
     CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
 };
 pub use self::commands::{
-    admissible_names, alias_pairs, canonical_command_name, command_name, measurement_selector_kind,
-    normalize_command, unsupported_command_reason, zoom_step_factor, COMMAND_ALIASES,
-    COMMAND_TABLE, MEASUREMENT_SELECTORS, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
+    admissible_names, alias_pairs, canonical_command_name, command_name,
+    invalid_snap_unit_argument_reason, invalid_zoom_argument_reason, measurement_selector_kind,
+    normalize_command, parse_snap_unit_argument, parse_zoom_argument, typed_command_argument,
+    unsupported_command_reason, zoom_step_factor, ZoomArgument, ARGUMENT_SELECTOR,
+    ARGUMENT_SELECTORS, COMMAND_ALIASES, COMMAND_TABLE, MEASUREMENT_SELECTORS, SNAPUNIT_SELECTOR,
+    ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
 pub use self::layers::{CadLayer, CadLayerWrite, CadLayers};
 pub use self::settings::{
@@ -248,8 +253,33 @@ impl CadSession {
     /// a success. Selection-requiring tools are **not** pre-rejected here:
     /// `cad_app` refuses them at confirm (`DrawTool::is_ready`), the single
     /// authority for that decision.
+    ///
+    /// The argument forms this funnel understands are the typed selector
+    /// arguments ([`ARGUMENT_SELECTORS`]):
+    ///
+    /// * `ZOOM <argument>`: `ZOOM 2` / `ZOOM 0.5` apply that **scale factor**
+    ///   (`> 1` zooms in, `< 1` zooms out) about the viewport centre through the
+    ///   same [`CadSession::zoom_step`] the `ZOOMIN`/`ZOOMOUT` buttons use, and
+    ///   `ZOOM ALL` (`EXTENTS`) dispatches the ordinary `FIT`;
+    /// * `SNAPUNIT <value>`: sets the session grid-snap spacing
+    ///   ([`CadSession::snap_unit_argument`]).
+    ///
+    /// An argument outside a selector's grammar is refused with a stable reason,
+    /// recorded for `cad_status.error`, and changes nothing. A selector with
+    /// **no** argument keeps the name-only payload refusal below.
     pub fn command(&self, text: &str) -> Result<(), String> {
         let Some(name) = canonical_command_name(text) else {
+            // A typed **argument** on an argument-taking selector. It is not a
+            // new command: `ZOOM` reuses the button step, `SNAPUNIT` sets the
+            // session spacing sysvar. The base name is what gets admitted; the
+            // argument is validated here and a bad one is refused with its own
+            // stable reason, recorded for `cad_status.error`.
+            if let Some((selector, argument)) = typed_command_argument(text) {
+                return match selector {
+                    SNAPUNIT_SELECTOR => self.snap_unit_argument(argument, text),
+                    _ => self.typed_argument_command(selector, argument, text),
+                };
+            }
             return Err(unsupported_command_reason(text));
         };
         // The router admitted a stable selector: echo it in the command log.
@@ -490,50 +520,6 @@ impl CadSession {
         self.dispatch_payload(CommandId::StandardView, CommandPayload::StandardView(view))
     }
 
-    /// Apply a fixed zoom step about the **viewport centre**.
-    ///
-    /// A `ZOOMIN`/`ZOOMOUT` button supplies no cursor, so the step is anchored
-    /// at the logical centre of the active viewport — the deliberate behaviour
-    /// of a cursor-less zoom control (a real zoom about the viewport centre that
-    /// keeps the centre fixed), never a fabricated no-op. The
-    /// [`CommandPayload::ZoomAt`] payload is synthesized here because the
-    /// router's payload-bearing `ZOOM` selector otherwise requires a
-    /// caller-supplied factor. The application validates the factor and
-    /// projection and refuses explicitly on failure; the outcome is never turned
-    /// into an empty success.
-    fn zoom_step(&self, factor: f64) -> Result<(), String> {
-        let centre = {
-            let c = self.core.controller.borrow();
-            c.application
-                .workspace
-                .viewports
-                .get(&c.viewport_id)
-                .map(|viewport| {
-                    [
-                        viewport.logical_size[0] * 0.5,
-                        viewport.logical_size[1] * 0.5,
-                    ]
-                })
-        };
-        let Some(cursor) = centre else {
-            return Err("zoom step needs an active viewport".into());
-        };
-        match self
-            .core
-            .command(CommandId::Zoom, CommandPayload::ZoomAt { factor, cursor })
-        {
-            Ok(()) => {
-                *self.error.borrow_mut() = None;
-                Ok(())
-            }
-            Err(error) => {
-                let text = cad_error_text(&error);
-                *self.error.borrow_mut() = Some(text.clone());
-                Err(text)
-            }
-        }
-    }
-
     /// Whether a draw/measurement capture currently owns pointer input.
     fn capturing(&self) -> bool {
         matches!(
@@ -735,8 +721,16 @@ impl CadSession {
         // crosshair) keeps the system arrow instead of being left pointerless.
         // Read from the same overlay input the renderer draws the crosshair from
         // (`HostCore::sync_render` only publishes it for a valid 2D view), never
-        // from a guess about the view mode.
-        let crosshair = self.core.render.overlays().cursor.is_some();
+        // from a guess about the view mode. The very same point is projected as
+        // the status-bar world coordinate, so the readout and the drawn crosshair
+        // can never disagree.
+        let cursor_world = self
+            .core
+            .render
+            .overlays()
+            .cursor
+            .map(|point| [point.x, point.y, point.z]);
+        let crosshair = cursor_world.is_some();
         // Technical error sources, in priority order: a host status failure
         // (command/open/resource-install), a projected partial-resource report,
         // the last recorded operation/completion failure, the render session's
@@ -775,9 +769,12 @@ impl CadSession {
             self.core.controller.borrow().hover_preview_enabled(),
             self.core.controller.borrow().snap_enabled(),
             self.core.controller.borrow().grid_enabled(),
+            self.core.controller.borrow().snap_grid_enabled(),
+            self.core.controller.borrow().snap_spacing(),
             self.core.controller.borrow().ortho_enabled(),
             snap_kind,
             crosshair,
+            cursor_world,
         );
         // Real live open progress (running only) from the host snapshot, so the
         // chrome can show a determinate/indeterminate bar without inventing data.
