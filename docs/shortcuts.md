@@ -258,7 +258,7 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   `IMPORT`、`XREF`、`PUBLISH`、`DIMSTYLE`（样式编辑未实现；DIMSTYLE **变量子集**已实现）、
   `DIMBASELINE`/`DIMCONTINUE`（P5f **已降级**）。**已实现**：`DIMLINEAR`/`DIMALIGNED`/`DIMRADIUS`/
   `DIMDIAMETER`/`DIMANGULAR`/`DIMORDINATE`/`DIMCENTER`；以及 **`HATCH` 创建**（P6b：**先选闭合边界实体** +
-  `SOLID`/用户自定义图案 + 样式参数；**内部点求边界、LINE 拼接、预定义图案名、渐变创建、关联性未实现**，
+  `SOLID`/用户自定义图案 + 样式参数；**`LINE`/`ARC` 边界边已可按端点缝合（弧存精确 bulge，容差绝对 `1e-6`）**，**内部点求边界、预定义图案名、渐变创建、关联性未实现**，
   详见 `docs/compatibility.md` 的 HATCH 行）。
 - **`OFFSET` 为有界子集**：仅支持 LINE 与 CIRCLE；其它几何（Polyline/Arc/Ellipse/Spline/Point/
   Mesh/Text/…）显式 `Unsupported("OFFSET supports LINE and CIRCLE only")`，不创建、不部分执行。

@@ -8,15 +8,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  reconcileToolParameterPending,
-  setToolParameterFlag,
-  setToolParameterNumber,
-  stepToolParameterPending,
+  NO_TOOL_PARAMETER_DRAFT,
   TOOL_PARAMETER_COMMAND,
+  TOOL_PARAMETER_INVALID_KEY,
   TOOL_PARAMETER_PENDING_CAP,
   TOOL_PARAMETER_SPECS,
   TOOL_PARAMETERS,
+  cancelToolParameterDraft,
+  commitToolParameterDraft,
+  reconcileToolParameterPending,
+  setToolParameterFlag,
+  setToolParameterNumber,
+  stepToolParameterDraft,
+  stepToolParameterPending,
   toolParameterViews,
+  typeToolParameterDraft,
 } from '../src/cad.ts';
 import { readAppSource, readCatalog, readModule } from './helpers.ts';
 
@@ -39,6 +45,7 @@ test('the parameter group renders only for an active tool with a projected value
   const v = first(polygon(8));
   assert.deepEqual(v, {
     kind: 'number', key: 'polygonSides', value: 8, delta: 0, effective: 8, text: '8',
+    step: 1, typed: false,
     labelKey: 'status.tool_parameter.polygon_sides',
     hintKey: 'status.tool_parameter.polygon_sides.hint',
     icon: 'polygon', disabled: false,
@@ -67,12 +74,18 @@ test('the parameter group renders only for an active tool with a projected value
 });
 
 test('the per-tool map and the spec table stay consistent', () => {
-  // POLYGON and HATCH are reachable today; HATCH's row is its five parameters.
+  // POLYGON, HATCH and the two text tools are reachable today; HATCH's row is its
+  // six parameters, and TEXT/MTEXT share the one text height.
   assert.deepEqual(TOOL_PARAMETERS['draw.polygon'], { command: 'POLYGON', keys: ['polygonSides'] });
   assert.deepEqual(TOOL_PARAMETERS['draw.hatch'], {
     command: 'HATCH',
     keys: ['hatchPatternType', 'hatchPattern', 'hatchSpacing', 'hatchAngle', 'hatchDouble', 'hatchStyle'],
   });
+  // Both text-creation tools own the same row: the host projects one session
+  // `textHeight` and both create their glyphs with it (ADR 0019 F.1), so TEXT and
+  // MTEXT can never show a different height.
+  assert.deepEqual(TOOL_PARAMETERS['draw.text'], { command: 'TEXT', keys: ['textHeight'] });
+  assert.deepEqual(TOOL_PARAMETERS['draw.mtext'], { command: 'MTEXT', keys: ['textHeight'] });
   // Every key a tool maps to has a spec, and every spec is reachable through the
   // map — so a later phase only adds a row (the specs already exist).
   const mapped = new Set();
@@ -88,7 +101,7 @@ test('the per-tool map and the spec table stay consistent', () => {
     'alignScale', 'arrayColumnSpacing', 'arrayColumns', 'arrayFillAngle', 'arrayItems',
     'arrayRotateItems', 'arrayRowSpacing', 'arrayRows', 'chamferDistanceA',
     'chamferDistanceB', 'filletRadius', 'hatchAngle', 'hatchDouble', 'hatchPattern',
-    'hatchPatternType', 'hatchSpacing', 'hatchStyle', 'polygonSides',
+    'hatchPatternType', 'hatchSpacing', 'hatchStyle', 'polygonSides', 'textHeight',
   ]);
   assert.equal(TOOL_PARAMETER_SPECS.alignScale.kind, 'flag');
   assert.equal(TOOL_PARAMETER_SPECS.arrayRotateItems.kind, 'flag');
@@ -160,6 +173,144 @@ test('numeric bounds are enforced per parameter and a step is disabled, never cl
   const rowsOne = toolParameterViews({ tool: { key: 'draw.arrayrect', params: { arrayRows: 1 } } }, admitted)[0];
   assert.equal(rowsOne.canDecrement, false);
   assert.equal(rowsOne.canIncrement, true);
+});
+
+// --- the text height (ADR 0019 decision F.1) --------------------------------
+// One session parameter, owned as a single row by both text-creation tools; the
+// host's own rule is `finite_greater_than(0.0)` (`cad-app`'s
+// `ToolParameter::TextHeight` validation), mirrored here and nowhere tightened.
+
+const textHeight = (key, value) => ({ tool: { key, points: 1, ready: false, params: { textHeight: value } } });
+
+test('the text height is one row on both text tools and comes from cad_status', () => {
+  for (const key of ['draw.text', 'draw.mtext']) {
+    // One row, in the host's order, on both tools.
+    const rendered = toolParameterViews(textHeight(key, 2.5), admitted);
+    assert.deepEqual(rendered.map(v => v.key), ['textHeight'], key);
+    const v = rendered[0];
+    assert.equal(v.kind, 'number');
+    // The rendered value is the projected host value, never a local default.
+    assert.equal(v.value, 2.5);
+    assert.equal(v.text, '2.5');
+    assert.equal(v.typed, true, 'a height is a length: it can be typed');
+    assert.equal(v.step, 0.5);
+    assert.equal(v.labelKey, 'status.tool_parameter.text_height');
+    assert.equal(v.hintKey, 'status.tool_parameter.text_height.hint');
+    assert.equal(v.decrement, 2);
+    assert.equal(v.increment, 3);
+    assert.equal(v.canDecrement, true);
+    assert.equal(v.canIncrement, true);
+    // The gate is the running tool's own command, never a hard-coded id.
+    const asked = [];
+    toolParameterViews(textHeight(key, 2.5), command => { asked.push(command); return true; });
+    assert.deepEqual(asked, [key === 'draw.text' ? 'TEXT' : 'MTEXT'], key);
+  }
+  // A decimal projection round-trips verbatim, not through the 0.5 step.
+  assert.equal(toolParameterViews(textHeight('draw.text', 1.75), admitted)[0].text, '1.75');
+  // The host refuses anything not finite and strictly positive, so 0, a negative
+  // and a non-finite height render no control at all — never a guessed one.
+  for (const refused of [0, -1, -1e-9, NaN, Infinity, -Infinity, null, '2.5']) {
+    assert.deepEqual(toolParameterViews(textHeight('draw.text', refused), admitted), [], String(refused));
+  }
+  // At the lower edge the `-` step (0.5 - 0.5 = 0) is not offered: it is disabled
+  // with its raw target kept, never clamped up to a minimum.
+  const lowest = toolParameterViews(textHeight('draw.text', 0.5), admitted)[0];
+  assert.equal(lowest.decrement, 0);
+  assert.equal(lowest.canDecrement, false);
+  assert.equal(lowest.canIncrement, true);
+});
+
+test('a typed height is refused before any write, with the catalog message', async () => {
+  // The draft guard is the host's own range: finite and strictly above 0. `0`, a
+  // negative, NaN, an empty field and a non-numeric string are all refused.
+  for (const raw of ['0', '-1', '-0.5', '-0', 'NaN', 'Infinity', 'abc', '', '   ', '1..2', '2,5']) {
+    const commit = commitToolParameterDraft('textHeight', typeToolParameterDraft(NO_TOOL_PARAMETER_DRAFT, raw));
+    assert.equal(commit.kind, 'refused', `"${raw}" must be refused`);
+    assert.equal(commit.draft.messageKey, TOOL_PARAMETER_INVALID_KEY, raw);
+    // The text the user typed is kept as-is: never rewritten, never clamped.
+    assert.equal(commit.draft.text, raw);
+  }
+  // The refusal is a catalog key, and it is the one both catalogs carry.
+  assert.equal(TOOL_PARAMETER_INVALID_KEY, 'status.tool_parameter.invalid');
+  for (const locale of [zh, en]) assert.equal(typeof locale[TOOL_PARAMETER_INVALID_KEY], 'string');
+  // The same values never reach IPC through the write path either.
+  for (const number of [0, -1, NaN, Infinity, '1.75', null, undefined]) {
+    const result = await setToolParameterNumber(() => assert.fail('a refused height reached IPC'), 'textHeight', number);
+    assert.equal(result.kind, 'refused', String(number));
+  }
+});
+
+test('a valid decimal height is written verbatim through the one IPC', async () => {
+  // The commit hands over exactly what was typed.
+  assert.deepEqual(commitToolParameterDraft('textHeight', typeToolParameterDraft(NO_TOOL_PARAMETER_DRAFT, '1.75')), {
+    kind: 'write', number: 1.75, draft: NO_TOOL_PARAMETER_DRAFT,
+  });
+  // Surrounding whitespace is trimmed, the value is not re-derived from the steps.
+  assert.equal(commitToolParameterDraft('textHeight', typeToolParameterDraft(null, ' 2.25 ')).number, 2.25);
+  // …and it travels the one parameter channel, as a real json number.
+  const calls = [];
+  const result = await setToolParameterNumber(async (...args) => { calls.push(args); return { accepted: true }; }, 'textHeight', 1.75);
+  assert.deepEqual(calls, [['cad_set_tool_parameter', { parameter: 'textHeight', number: 1.75 }]]);
+  assert.deepEqual(result, { kind: 'accepted' });
+});
+
+test('an untouched height field commits nothing and Escape reverts to the host value', () => {
+  // A blur of an untouched field is not a value: nothing is written.
+  assert.deepEqual(commitToolParameterDraft('textHeight', NO_TOOL_PARAMETER_DRAFT), { kind: 'idle' });
+  assert.deepEqual(commitToolParameterDraft('textHeight', null), { kind: 'idle' });
+  assert.deepEqual(commitToolParameterDraft('textHeight', undefined), { kind: 'idle' });
+  // Typed text is the draft; Escape drops it, so the field renders the last host
+  // value again and a blur then commits nothing.
+  const typed = typeToolParameterDraft(NO_TOOL_PARAMETER_DRAFT, '9');
+  assert.equal(typed.text, '9');
+  const reverted = cancelToolParameterDraft();
+  assert.deepEqual(reverted, NO_TOOL_PARAMETER_DRAFT);
+  assert.equal(reverted.text, null);
+  assert.deepEqual(commitToolParameterDraft('textHeight', reverted), { kind: 'idle' });
+  // A refusal keeps the typed text and clears its message on the next keystroke.
+  const refused = commitToolParameterDraft('textHeight', typeToolParameterDraft(null, '0'));
+  assert.equal(typeToolParameterDraft(refused.draft, '0.').messageKey, null);
+});
+
+test('the arrow keys step the height from the draft, never off half-typed text', () => {
+  // From the host value: 2.5 ± 0.5.
+  assert.equal(stepToolParameterDraft('textHeight', NO_TOOL_PARAMETER_DRAFT, 2.5, 1), 3);
+  assert.equal(stepToolParameterDraft('textHeight', NO_TOOL_PARAMETER_DRAFT, 2.5, -1), 2);
+  // From a typed decimal the draft wins over the stale host value.
+  assert.equal(stepToolParameterDraft('textHeight', typeToolParameterDraft(null, '1.75'), 2.5, 1), 2.25);
+  // A draft that is not a usable number falls back to the host value instead of
+  // composing off it.
+  assert.equal(stepToolParameterDraft('textHeight', typeToolParameterDraft(null, 'abc'), 2.5, 1), 3);
+  assert.equal(stepToolParameterDraft('textHeight', typeToolParameterDraft(null, ''), 2.5, -1), 2);
+  // A target the host would refuse is not offered at all (0.25 - 0.5 = -0.25).
+  assert.equal(stepToolParameterDraft('textHeight', NO_TOOL_PARAMETER_DRAFT, 0.25, -1), null);
+  // An unknown key has no step.
+  assert.equal(stepToolParameterDraft('nope', NO_TOOL_PARAMETER_DRAFT, 1, 1), null);
+});
+
+test('the text height label and hint exist in both catalogs and name their scope', () => {
+  for (const locale of [zh, en]) {
+    for (const key of ['status.tool_parameter.text_height', 'status.tool_parameter.text_height.hint', TOOL_PARAMETER_INVALID_KEY]) {
+      assert.equal(typeof locale[key], 'string', `missing ${key}`);
+      assert.ok(locale[key].trim().length > 0, `empty ${key}`);
+    }
+    // The hint names both tools that own the row and the documented default.
+    assert.match(locale['status.tool_parameter.text_height.hint'], /TEXT/);
+    assert.match(locale['status.tool_parameter.text_height.hint'], /MTEXT/);
+    assert.match(locale['status.tool_parameter.text_height.hint'], /2\.5/);
+  }
+  // …and it says the height is a world-unit length, not a screen size.
+  assert.match(en['status.tool_parameter.text_height.hint'], /drawing units/i);
+  assert.match(en['status.tool_parameter.text_height.hint'], /single-line/i);
+  assert.match(zh['status.tool_parameter.text_height.hint'], /图形单位/);
+  assert.match(zh['status.tool_parameter.text_height.hint'], /单行文字/);
+  // The refusal is parameterised by the localized name and says nothing was sent.
+  for (const locale of [zh, en]) {
+    assert.deepEqual(
+      [...locale[TOOL_PARAMETER_INVALID_KEY].matchAll(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g)].map(match => match[1]),
+      ['name'],
+    );
+  }
 });
 
 test('the fill-angle stepper offers the full-circle default and never offers 0 or beyond a turn', () => {
@@ -319,15 +470,46 @@ test('the status bar renders the group from status and never mirrors it locally'
   // through the parameter key.
   assert.ok(statusbar.includes('onStep={shell.stepToolParameter}'));
   assert.ok(statusbar.includes('onToggle={shell.toggleToolParameter}'));
-  assert.ok(statusbar.includes('{view.text}'));
-  assert.ok(statusbar.includes('onStep(view.key, view.decrement)'));
-  assert.ok(statusbar.includes('onStep(view.key, view.increment)'));
-  // Bounded and admission-gated: the buttons disable at the effective edges.
-  assert.ok(statusbar.includes('const stepDown = view.disabled || !view.canDecrement;'));
-  assert.ok(statusbar.includes('const stepUp = view.disabled || !view.canIncrement;'));
-  // No local mirror of the value and no direct IPC in the view component.
+  // A control is keyed by its tool too, so a half-typed draft cannot follow the
+  // user to another tool that owns the same parameter (TEXT and MTEXT share it).
+  assert.ok(statusbar.includes('key={`${tool?.key}:${view.key}`}'));
+  // The bar itself stays a pure projection: no local state and no direct IPC.
   assert.ok(!statusbar.includes('useState'));
   assert.ok(!statusbar.includes('invoke('));
+
+  // The controls live in their own module; they render the host value and own
+  // only the typed draft.
+  const controls = await readModule('components/ParameterControls.tsx');
+  assert.ok(controls.includes('{view.text}'));
+  // One step-target table serves the `-`/`+` buttons and the arrow keys, and every
+  // dispatch goes through the one helper with the parameter key.
+  assert.ok(controls.includes('down: typing'));
+  assert.ok(controls.includes('? stepToolParameterDraft(view.key, draft, view.effective, -1)'));
+  assert.ok(controls.includes('? stepToolParameterDraft(view.key, draft, view.effective, 1)'));
+  assert.ok(controls.includes('onStep(view.key, target);'));
+  assert.ok(controls.includes('onStep(view.key, result.number);'));
+  // Bounded and admission-gated: the buttons disable at the effective edges (and
+  // at a target the host refuses) instead of clamping.
+  assert.ok(controls.includes('const stepDown = view.disabled ? null : stepTargets.down;'));
+  assert.ok(controls.includes('const stepUp = view.disabled ? null : stepTargets.up;'));
+  // The typed field is a draft, never a mirror: it commits through the parameter's
+  // own guard, reverts on Escape, is IME-safe and never calls IPC itself.
+  assert.ok(controls.includes('commitToolParameterDraft(view.key, draft)'));
+  assert.ok(controls.includes('setDraft(cancelToolParameterDraft());'));
+  assert.ok(controls.includes('if (event.isComposing || event.keyCode === 229) return;'));
+  assert.ok(controls.includes("if (event.key === 'Escape') {"));
+  // Escape must not reach the shell: the global Escape would blur the field (and
+  // thereby commit what the user just discarded) or cancel the running tool.
+  assert.ok(controls.includes('event.stopPropagation();'));
+  assert.ok(controls.includes("if (event.key === 'Enter') {"));
+  // Enter and a blur both commit — the blur is how a typed height survives the
+  // click on the drawing that follows it.
+  assert.ok(controls.includes('onBlur={commit}'));
+  // A decimal field, showing the host value until the user types (draft first).
+  assert.ok(controls.includes('inputMode="decimal"'));
+  assert.ok(controls.includes('value={draft.text ?? view.text}'));
+  assert.ok(!controls.includes('invoke('));
+
   const app = await readAppSource();
   // The pending delta is owned by the shell, reconciled on every status and
   // folded in before the one IPC; a refusal clears it and reaches the banner.

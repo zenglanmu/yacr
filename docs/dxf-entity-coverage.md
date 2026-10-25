@@ -119,7 +119,7 @@ QCAD 字体：`osifont.ttf`（GPL-3 + 字体例外）已提交到 `fonts/` 作�
   管线，含每键纹理去重、UV 方向、裁剪多边形、缺失显式 `Partial`）；非 proxy `Extended`
   图元补齐基础表示；MLINE/TABLE/DIMENSION/MULTILEADER/HATCH 边界保真提升。
 - 2026-10-20 轮（ADR-0018 P6a）：**HATCH 成为一级实体**（样式/图案类型/种子/原始路径位/解析源边不再丢弃），填充按 `Normal`/`Outer`/`Ignore` **样式感知**、图案复合修正、用户自定义图案合成；**导出写真实 `HATCH`**（此前 `Compound` 被摊平成散线 + 网格）。**创建已实现**（P6b：预选闭合实体 +
-`SOLID`/用户自定义图案 + 样式参数；内部点求边界、LINE 拼接、预定义图案名、渐变创建、关联性**未实现**）。
+`SOLID`/用户自定义图案 + 样式参数；2026-10-26 起 `LINE`/`ARC` 边界边按端点**缝合**成闭合环、弧存**精确 bulge**、容差**绝对 `1e-6`**；内部点求边界、预先定义图案名、渐变创建、关联性**未实现**）。
 - 仍有保真度缺口（`Partial`）：WIPEOUT 掩码填充、图像不支持编解码器/亮度对比淡出/outside
   裁剪、TABLE 逐边样式、MLINE CLOSED/cap 角度、MULTILEADER 背景填充/列/块属性、大半径
   jog、外部内容加载、纸空间视口合成，见 §4。

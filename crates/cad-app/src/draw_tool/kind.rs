@@ -443,19 +443,25 @@ pub enum DrawToolKind {
     /// `HatchAngle`, `HatchDouble`, `HatchStyle`), so it is ready as soon as the
     /// selection is non-empty.
     ///
-    /// Accepted boundaries are `Circle`, a full `Ellipse` and a **closed**
-    /// `Polyline` (bulges handled); every other kind is an explicit named refusal
-    /// that opens no transaction. The command layer owns the plane/normal
-    /// consistency check, the loop construction, the pattern synthesis and every
-    /// `HatchGeometry::new` creation-path rejection.
+    /// Accepted boundaries are `Circle`, a full `Ellipse`, a **closed** `Polyline`
+    /// (bulges handled) and `LINE`/`ARC` edges, which are **stitched** into one
+    /// loop per closed chain at the absolute `1e-6` world-unit tolerance with
+    /// every arc kept as an exact bulge segment (`bulge = tan(sweep / 4)`, never
+    /// sampled). Every other kind is an explicit named refusal that opens no
+    /// transaction; so are a stitched branch node (`hatch.boundary_branch`), an
+    /// unconsumed open chain (`hatch.boundary_open`) and a degenerate
+    /// `LINE`/`ARC` (`hatch.boundary_degenerate`). The command layer owns the
+    /// plane/normal consistency check, the loop construction, the pattern
+    /// synthesis and every `HatchGeometry::new` creation-path rejection
+    /// (self-intersecting loops included — they are refused, not repaired).
     ///
     /// Deliberate subset (NOT IMPLEMENTED for now): boundary from an internal
     /// point, drawn boundaries, `remove boundaries`, custom (`76=2`) pattern
     /// names and `.pat` loading (no parser and no packaged pattern library; a
     /// pattern picker dialog is also missing — only the three transcribed
     /// predefined entries `ANSI31`/`ANSI32`/`ANSI37` are selectable), gradient
-    /// creation, associativity (`HPASSOC`), LINE/ARC boundary stitching, spline
-    /// boundaries, island detection beyond the style semantics, and a live hatch
+    /// creation, associativity (`HPASSOC`), spline boundaries, island detection
+    /// beyond the style semantics, a per-span dash phase reset, and a live hatch
     /// preview (the React host cannot paint an overlay above the native CAD
     /// partition).
     Hatch,

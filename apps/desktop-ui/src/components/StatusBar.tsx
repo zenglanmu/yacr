@@ -3,10 +3,10 @@
 // including the real clean-screen / command-line view toggles.
 import React from 'react';
 import { Icon } from '../icons.tsx';
-import type { IconName } from '../icons.tsx';
-import { Button } from './primitives.tsx';
+import { Button, Toggle } from './primitives.tsx';
+import { ParameterFlag, ParameterStepper } from './ParameterControls.tsx';
 import { useI18n, useShell } from '../context.ts';
-import type { CadImportProgress, ToolParameterFlagView, ToolParameterNumberView, ToolParameterPending } from '../cad.ts';
+import type { CadImportProgress, ToolParameterPending } from '../cad.ts';
 import { toolLabelKey } from '../commands.ts';
 import { palettesOffered } from '../surface.ts';
 import { OPTIONS_KEYS } from '../options.ts';
@@ -17,94 +17,10 @@ import { dispatchGrid, dispatchGridSnap, dispatchHoverPreview, dispatchObjectSna
 // F9), OSNAP (object snap, F3) and ORTHO (orthographic constraint, F8). Each is a
 // real session switch projected from `cad_status`; there is no disabled
 // placeholder left, so no local list of "unsupported" aids exists any more.
-
-/** A status-bar toggle chip. */
-interface ToggleProps {
-  readonly label: React.ReactNode;
-  readonly on?: boolean;
-  readonly onClick?: () => void;
-  readonly title?: string;
-  readonly disabled?: boolean;
-}
-
-function Toggle({ label, on, onClick, title, disabled }: ToggleProps) {
-  return (
-    <button
-      type="button"
-      className={['status-toggle', on ? 'is-on' : '', disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')}
-      aria-pressed={Boolean(on)}
-      disabled={disabled}
-      title={title}
-      onClick={disabled ? undefined : onClick}
-    >
-      {label}
-    </button>
-  );
-}
-
-// The bounded numeric stepper for one active-tool parameter. It is a pure view
-// over the host value (no local mirror): the rendered number is always the one
-// the last `cad_status` carried, and a step only dispatches the change. The
-// effective target — the status value plus the bounded pending delta of steps
-// the host has not echoed back yet — drives the `-`/`+` targets and the disabled
-// state, so rapid clicks compose and the buttons stop at the parameter's own
-// bounds (and the pending cap) while the host is not admitting commands. Rendered
-// only while the owning tool is active with a real projected value — nothing at
-// all otherwise.
-function ParameterStepper({ view, onStep }: { readonly view: ToolParameterNumberView; readonly onStep: (key: string, target: number) => void }) {
-  const { t } = useI18n();
-  const name = t(view.labelKey);
-  const stepDown = view.disabled || !view.canDecrement;
-  const stepUp = view.disabled || !view.canIncrement;
-  return (
-    <span
-      className={['status-stepper', view.disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')}
-      role="group"
-      aria-label={name}
-      title={t(view.hintKey)}
-    >
-      {view.icon ? <Icon name={view.icon as IconName} size={12} /> : null}
-      <span className="status-stepper__label" aria-hidden="true">{name}</span>
-      <button
-        type="button"
-        className="status-stepper__button"
-        aria-label={t('status.tool_parameter.decrease', { name })}
-        title={t('status.tool_parameter.decrease', { name })}
-        disabled={stepDown}
-        onClick={stepDown ? undefined : () => onStep(view.key, view.decrement)}
-      >
-        <Icon name="minus" size={11} />
-      </button>
-      <span className="status-stepper__value mono">{view.text}</span>
-      <button
-        type="button"
-        className="status-stepper__button"
-        aria-label={t('status.tool_parameter.increase', { name })}
-        title={t('status.tool_parameter.increase', { name })}
-        disabled={stepUp}
-        onClick={stepUp ? undefined : () => onStep(view.key, view.increment)}
-      >
-        <Icon name="plus" size={11} />
-      </button>
-    </span>
-  );
-}
-
-// The toggle chip for one active-tool flag parameter, using the same status-bar
-// chip vocabulary as OSNAP / hover preview. It dispatches the *opposite* of the
-// value the last `cad_status` carried — never a fabricated one.
-function ParameterFlag({ view, onToggle }: { readonly view: ToolParameterFlagView; readonly onToggle: (key: string, next: boolean) => void }) {
-  const { t } = useI18n();
-  return (
-    <Toggle
-      label={t(view.labelKey)}
-      on={view.value}
-      disabled={view.disabled}
-      title={t(view.hintKey)}
-      onClick={() => onToggle(view.key, view.next)}
-    />
-  );
-}
+//
+// The active tool's parameter controls (see `ParameterControls.tsx`) render only
+// while the owning tool is active with a real projected value, and they own no
+// value of their own: a step or a typed commit is a dispatch, never a local mirror.
 
 export function StatusBar() {
   const { t } = useI18n();
@@ -162,7 +78,10 @@ export function StatusBar() {
   // mirror: only the ones with a real projected value render, so a tool that
   // projects none shows no control at all. Admission mirrors the toggle chips
   // (`canCommand` on the owning tool's command). The bounded pending delta
-  // composes rapid numeric steps without moving the displayed number.
+  // composes rapid numeric steps without moving the displayed number. Each
+  // control is keyed by its tool **and** its parameter, so switching tools
+  // remounts it: a half-typed draft can never follow the user to another tool
+  // that owns the same parameter key (TEXT and MTEXT share `textHeight`).
   const toolParameters = toolParameterViews(shell.status, shell.canCommand, shell.toolParameterPending as ToolParameterPending | null);
   // Announce only the phase here (rare changes); the steadily-incrementing
   // count/bytes stay in the document-tab bar, so a polite live region never
@@ -202,8 +121,8 @@ export function StatusBar() {
       ) : null}
 
       {toolParameters.map(view => (view.kind === 'flag'
-        ? <ParameterFlag key={view.key} view={view} onToggle={shell.toggleToolParameter} />
-        : <ParameterStepper key={view.key} view={view} onStep={shell.stepToolParameter} />))}
+        ? <ParameterFlag key={`${tool?.key}:${view.key}`} view={view} onToggle={shell.toggleToolParameter} />
+        : <ParameterStepper key={`${tool?.key}:${view.key}`} view={view} onStep={shell.stepToolParameter} />))}
 
       <div className="statusbar__group" role="group" aria-label={t('status.drafting')}>
         {grid ? (

@@ -1,3 +1,160 @@
+## 2026-10-26 HATCH 边界拼接：LINE/ARC → 精确 bulge 闭合环
+
+### 结论
+
+`HATCH` 的预选边界此前只接受 `Circle` / 完整 `Ellipse` / **闭合** `Polyline`，`LINE`/`ARC` 一律按名拒绝
+（"LINE/ARC boundary stitching is NOT IMPLEMENTED"）。本轮实现**缝合**：选中的 `LINE`/`ARC` 边按端点串成
+**闭合环**，再交给既有管线当**闭合 bulge 折线**边界（与闭合 `Polyline` 完全同一表示）。
+**弧不采样**：每条 `ARC` 边就是一段 `bulge = tan(sweep / 4)` 的精确弧（四分之一弧 = `tan(π/8)`，与 `Circle`
+环同一约定），`LINE` 边 bulge 0。全部既有行为（Circle/Ellipse/闭合 Polyline、参数校验、自交等创建路径拒绝、
+关联性 NOT IMPLEMENTED、图案/实体分支）**逐行未改**。
+
+`hatch.rs` 因 1000 行门禁拆成四个文件（mod.rs 只登记模块，模块路径不变）：
+`hatch.rs`（命令入口 `create_hatch`）/ `hatch_boundary.rs`（分类 + 缝合接线 + 平面解析 + 环写出）/
+`hatch_stitch.rs`（纯边串接器）/ `hatch_parameters.rs`（类型化通道 + 图案合成 + 摘要诊断）。
+
+### 缝合算法与容差
+
+`hatch_stitch.rs`（无实体概念，只认 `(start, end)`）：
+
+1. **节点聚类**：每个端点落到**第一个**距它 ≤ `STITCH_TOLERANCE` 的节点上；后到端点被“搬”到该节点
+   代表点。`STITCH_TOLERANCE = 1e-6`，**绝对世界单位**——选中的是模型空间世界坐标，本层既没有图面比例、
+   也没有 `UnitContext`、更没有视图比例可以推一个“诚实的”相对 eps；伪造相对容差只会在**大图里静默接受
+   更大的缺口**。真实端点重合是精确的（或只差双精度舍入噪声，比 1e-6 小若干数量级），可见缺口就该拒绝。
+   **超差后果**：节点不合并 → 链在那里断掉 → 整批按 `hatch.boundary_open` 拒绝，**绝不外插搭桥**。
+   聚类按“先到者代表”，不做传递闭包（每个端点只与已存在代表点比较），故不会因链式漂移把相距很远的点并成
+   一个节点。
+2. **分支判定**：任一节点上端点**度 > 2**（含自环贡献 2）→ 无唯一配对 → 拒绝 `hatch.boundary_branch`，
+   消息命名**节点坐标**与**边端数**；**永不猜配对**（先判分支、再走链，故“既有分支又开放”报分支）。
+3. **走链**：从任一未消费边出发，在节点上沿**唯一另一条**未消费边走；回到出发节点即**一个闭合环**，走到
+   死端即**开放链**。**方向规则（本轮实现的选择）**：匹配只看端点、**每边可任向消费** —— 边在
+   `start→end` 被消费时 bulge 用 `tan(+sweep/4)`，被反向消费时用 `tan(-sweep/4)`；因此混向绘制的选择
+   照样缝合成**同一个**环（测试 7 钉住：反向存的弧 + 反向存的线产出与全正向逐点相同、bulge 相同的环）。
+4. **覆盖**：每条选中边**恰好**被一个环消费；剩下的边在开放链里 → 拒绝 `hatch.boundary_open`，消息命名
+   **未消费边数**（如 `3 unconsumed of 3`）。
+
+全圈 `ARC`（`|sweep| ≥ τ - 1e-9`）在分类阶段拆成**四条四分之一边**（同 sweep 符号），理由与 `Circle` 环
+用四段相同：创建路径校验按**弦环**度量且要求 ≥3 顶点，端点重合的整圈弧否则会塌成单节点/单顶点。
+
+### bulge 约定（证明）
+
+`bulge = tan(sweep/4)`，`sweep` 是**该段在环 2D 帧（`HatchPlane` 的 OCS，右手系 rot 环法向）里带符号的
+逆时针扫角**。锚点即既有 `Circle` 环：四个四分之一弧 `sweep = π/2` → `tan(π/8)`（源码与测试既有断言）。
+方向的**几何**证据不只是半圆（半圆圆心落在弦上，符号错误看不出来）：新增的**四分之一弧圆角**用例里弧心
+明确在弦的一侧，`tan(π/8)` 与四边形弦环和弦段的**带符号**面积相加 = `88 + 2π`；若 bulge 符号反，面积变
+`96 - 2π`，测试与派生填充面积（`filled_area`）都会失败。`ARC` 端点用 `cad_geometry::arbitrary_axis(normal)`
+算（`center + r(cos t·ax + sin t·ay)`），与 tessellator 画弧的框架**同一个**，所以缝出来的顶点就落在弧上；
+`ARC` 声明的法向照旧参与 `resolve_plane` 的“单一一致法向”检查（相反向仍按既有理由拒绝）。
+
+### 环 / 拒绝规则
+
+- 一选择可产出**多个环**（两个分离矩形 → 两个环、一个 hatch 实体），与既有“每实体一环/多环（环岛）”
+  行为一致；输出顺序 = 闭合实体按选择序，缝合环作为一块插在**第一条边**的位置（链发现序）。
+- 退化边**在缝合前**按名拒绝 `hatch.boundary_degenerate`：零长度 `LINE`（短于 `1e-6`，没有方向可串）、
+  零 `|sweep| ≤ 1e-12` 的 `ARC`。
+- 保留的既有拒绝：开放折线、样条、椭圆弧、自交环（创建校验按弦，**拒绝**不修剪）、相切/重复/部分重叠、
+  退化、非共面/法向不一致、非法参数（含预定义索引越界）、无活动图层、Viewer；全部**不写、不开事务**。
+
+### 测试（合成契约，非运行时/GUI 证据）
+
+新增 `crates/cad-app/src/tests/drawing/hatch_stitch.rs`（10 条，已登记 `mod hatch_stitch;`）：
+
+1. 四个 `LINE` 组成 10×10 方框 → 一环；顶点/bulge 逐位断言（4 顶点、全 0），并与**等价闭合折线**边界
+   逐位比对同一 loop；图案线数/总长（5 条 / 50）与折线版一致；4 条边保留（实体数 5）。
+2. `LINE`+`ARC` 胶囊（10×4 两条线 + 两个半圆）→ 一环；bulge 恰为 `tan(π/4)`；由**带 bulge 折线**直接算
+   解析面积 `40 + 4π`（不采样）；派生填充面积一致；诊断含 “exact bulge segments” / “never sampled” /
+   `1e-6 world units` / 保留 “associative hatch NOT IMPLEMENTED”。
+3. 三边开放链 → `hatch.boundary_open` + `3 unconsumed`，无实体/无事务/修订不变。
+4. 三边共点（T/角） → `hatch.boundary_branch`，消息含 `3 edge ends` 与节点坐标 `(0, 0, 0)`。
+5. 两个分离方框（8 条线）→ 两环、一实体；每环面积 100，填充 200，实体数 9。
+6. 缺口 `5e-7`（< 1e-6）闭合；缺口 `2e-6`（> 1e-6）按 `hatch.boundary_open` + `4 unconsumed` 拒绝 ——
+   两侧都钉住。
+7. 混向：线/弧反向存储 → 与全正向链路逐点/逐 bulge 相同。
+8. 零长度 `LINE` 与零 sweep `ARC` → `hatch.boundary_degenerate`（每例都断言无写入）。
+9.（附加）整圈 `ARC` → 四段 `tan(π/8)` 的精确圆环，面积 `25π`。
+10.（附加）四分之一弧圆角（`bulge = tan(π/8)`，弧心在弦一侧）→ 面积 `88 + 2π`，钉住 bulge 符号。
+
+既有 `hatch.rs` 测试仅 1 条按新行为更新：`unsupported_boundary_kinds_are_refused_by_name` 里“单条 LINE
+→ AcDbLine”改为“单条 LINE → `hatch.boundary_open`（一条边永不成环）”，并注释原因；其余（圆/椭圆/折线/
+样式/参数/自交/事务/导出往返）一字未改。`cargo test -p cad-app --lib` = **1054 passed**。
+
+### 门禁（本轮实际运行）
+
+`cargo test -p cad-app --lib --locked`（1054 passed）、
+`cargo clippy -p cad-app --all-targets --locked -- -D warnings`（clean）、
+`cargo fmt --all -- --check`（clean）、`python3 scripts/check-file-size.py`（OK，最大文件 < 1000）、
+`python3 scripts/check-i18n.py`（OK，无新增 CJK；本轮文本全英文）。
+
+**NOT RUN**：全 workspace 全量门禁/测试、wasm 目标编译、真实 DWG 回归、任何 GUI/运行时/像素证据
+（本轮只改 `cad-app` 边界创建路径 + 文档，无渲染器/宿主改动）。
+
+### 仍未做 / 声明缺口
+
+- **自交环**仍拒绝（不修剪/不修复）；**内部点求边界**、**关联性**、**每段裁剪的虚线相位重置**、
+  自定义（`76=2`）图案名与 `.pat` 加载、渐变创建、实时预览仍 NOT IMPLEMENTED。
+- **开放折线不参与缝合**（`Polyline{closed:false}` 照旧拒绝）：本轮只串 `LINE`/`ARC` 实体；把折线拆边
+  再缝合是未做项（拒绝消息已写明“只有 LINE/ARC 边会被缝合”）。
+- 容差是**绝对** 1e-6：极小图（毫米级）里真实的 1e-6 缺口也会被并掉，超大图里 1e-6 的相对精度极高；
+  这是“无比例可推”下的诚实选择，不是自适应容差。
+- 分支/自环边界（如“8”字形、两个圈共点）按 `hatch.boundary_branch` 拒绝，**不做**交点切分；
+  同一对端点之间的“往返”链（例如两条重复 `LINE`）会串出 **2 顶点环**，由既有创建校验按名拒绝
+  （`hatch boundary loop has fewer than three vertices`）——不是新码，也不假称成功。
+- **i18n/GUI 未改**（本轮硬性范围外）：`crates/cad-ui-core/i18n/*.json` 的 HATCH 空闲提示仍只列
+  “圆/椭圆/多段线”，且 `apps/desktop-ui/test/hatch-tool.test.ts` 仍断言提示**不得**出现 “stitch/缝合”；
+  命令层已接受 `LINE`/`ARC`，故**用户可见文案落后于实现**，需 UI/文案 lane 跟进（`ready` 只看“选择非空”，
+  不按几何种类过滤，所以命令可从 UI 进入，不是不可达）。
+- 无 GUI/运行时证据：缝合结果只在 `cad-app` 契约测试里被检查（顶点、bulge、解析面积、派生填充面积），
+  没有屏幕像素、没有真实 DWG、没有 vendor 对比。
+
+## 2026-10-26 文字高度进入工具参数条（TEXT / MTEXT）
+
+### 结论
+
+`cad_status.tool.params.textHeight`（宿主早已投影、`ToolParameter::TextHeight` 早已被命令层读取）现在
+有 UI 控件了：`draw.text` 与 `draw.mtext` 各一行，指向**同一个** `textHeight` spec（一行定义、两处引用），
+因为两个工具用的是**同一个**会话参数。UI 的范围**逐字镜像**宿主
+`crates/cad-app/src/draw_tool/parameter.rs` 的 `(Self::TextHeight, Number) => finite_greater_than(self, number, 0.0)`
+（有限且 **> 0**），既不更严也不更松；`0`、负数、`NaN`、空串与非十进制文本都在**派发前**被拒，提示走目录键
+`status.tool_parameter.invalid`，**不发 IPC、不 clamp、不静默改写**。
+
+### 实现要点
+
+- `apps/desktop-ui/src/tool-parameters.ts`（**新**）：spec 表 / 视图 / pending 增减 / 唯一 IPC / **typed 草稿模型**
+  从 `cad.ts` 拆出（`cad.ts` 980 → 473 行，本文件 670 行），`cad.ts` 用 `export … from` 保持既有 import 面。
+- `ToolParameterNumberView` 新增 `step` 与 `typed`；`textHeight` 为 `step: 0.5, offered: finiteAbove(0), typed: true`。
+- 数字可**键入**（`1.75` 原样写入，不按 0.5 步进取整/取整到步长）：`commitToolParameterDraft` 只做
+  十进制文本语法解析 + 宿主的 `offered` 谓词。Enter 与**失焦**都提交（失焦很关键：输完高度下一步通常是
+  去图上点取插入点），Escape 撤销回宿主值并对事件 `stopPropagation`（否则全局 Escape 会取消正在跑的工具），
+  IME 组合期（`isComposing` / `keyCode === 229`）一律不提交。
+- `-`/`+` 与方向键共用一张 `stepTargets` 表：**有草稿时从草稿数走**（避免「输入 9 再点 +」落到陈旧宿主值），
+  无草稿时用 `effective`（pending 合成后的目标）；宿主会拒的目标一律禁用，不 clamp。
+- 控件按 `` `${tool.key}:${paramKey}` `` keying：TEXT → MTEXT 切换时重挂载，半途草稿不会跟着走。
+- `apps/desktop-ui/src/components/ParameterControls.tsx`（**新**）：`ParameterStepper` / `ParameterFlag` 从
+  `StatusBar.tsx` 移出，状态栏仍是纯投影（无 `useState`、无 `invoke`）；`Toggle` chip 上移到
+  `components/primitives.tsx`（一处定义，flag 参数与制图开关共用）。
+- i18n：新增 `status.tool_parameter.invalid`（`{name}`，zh/en 键集与占位符一致）；`text_height.hint` 改为明说
+  **图形单位**、单行 TEXT 与 MTEXT 共用、默认 2.5。
+
+### 验证
+
+- `cd apps/desktop-ui && npm test`：**614 通过**（608 → 614；`test/tool-parameters.test.ts` 新增 6 条：
+  两工具的行与顺序、`cad_status` 回显、非法值派发前拒绝（含目录键）、`1.75` 原样写入、未编辑提交为 no-op
+  与 Escape 回退、方向键从草稿步进、两目录键与措辞）。
+- `npx tsc --noEmit`：通过；`python3 scripts/check-i18n.py`：通过（802 键）；`npm run build`：通过（Vite 构建）。
+- `python3 scripts/check-file-size.py`：最终**通过**（981 个代码文件）。中途有一次运行**失败**在
+  `crates/cad-app/src/app_drawing/hatch.rs`（1247 行）——那是**另一条 lane 正在拆分**的 hatch 工作树改动
+  （现已拆成 `hatch_stitch.rs` / `hatch_boundary.rs` / `hatch_parameters.rs` 等未跟踪文件），**不在本轮范围、
+  本轮未触碰**；本 lane 文件均在限内（最大 670 行）。
+
+### 未做 / 仍需真实窗口
+
+- **没有运行时/像素验收**：未启动真实 Wayland 宿主、未截图、未在真实 TEXT/MTEXT 捕获里敲数值。
+  「输入 1.75 → 宿主 echo 1.75」「Escape 回退」「方向键步进」「拒绝时只出目录文案、不发 IPC」的结论只到
+  **纯函数 + 源码契约**层——与仓库既有的「DOM 测试不是运行时挂载/像素证据」边界一致。
+- 宿主侧一行未改：`textHeight` 的读取路径、默认 2.5、`Style` 表无高度字段的债务都不变；本 lane
+  未跑 `cargo` 编译/测试与全量门禁（**NOT RUN**，未改 Rust）。
+- 仍未接线：`hatchSpacing` 等其它长度参数仍是纯步进（无键入），本轮**有意**只给文字高度加键入能力。
+
 ## 2026-10-26 夹点模型扩展（二）：ARC 两端点 / LWPOLYLINE 顶点
 
 ### 结论

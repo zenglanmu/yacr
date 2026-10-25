@@ -103,7 +103,12 @@ pub(super) fn set_flag(session: &mut SessionState, parameter: ToolParameter, val
 }
 
 /// Configure a user-defined pattern (the default is a solid fill).
-fn user_defined(session: &mut SessionState, spacing: f64, angle_degrees: f64, double: bool) {
+pub(super) fn user_defined(
+    session: &mut SessionState,
+    spacing: f64,
+    angle_degrees: f64,
+    double: bool,
+) {
     set_number(
         session,
         ToolParameter::HatchPatternType,
@@ -185,14 +190,14 @@ pub(super) fn pattern_lines(hatch: &HatchGeometry) -> (usize, f64) {
     (count, total)
 }
 
-fn undo_depth(app: &Application) -> usize {
+pub(super) fn undo_depth(app: &Application) -> usize {
     app.history
         .get(&DocumentId(1))
         .map(|history| history.undo_depth())
         .unwrap_or(0)
 }
 
-fn entity_count(app: &Application) -> usize {
+pub(super) fn entity_count(app: &Application) -> usize {
     app.workspace.documents[&DocumentId(1)]
         .drawing
         .model_space()
@@ -457,7 +462,9 @@ fn an_empty_selection_is_refused_by_name() {
 
 #[test]
 fn unsupported_boundary_kinds_are_refused_by_name() {
-    // LINE has no boundary stitcher.
+    // A lone LINE is now a stitched-chain candidate, and one edge can never close
+    // a loop: the named refusal is the open chain (was "AcDbLine — no boundary
+    // stitcher" before LINE/ARC stitching existed).
     let (mut app, mut session) = hatch_app(vec![(
         1,
         SemanticGeometry::Line {
@@ -465,7 +472,7 @@ fn unsupported_boundary_kinds_are_refused_by_name() {
             end: point(10.0, 0.0),
         },
     )]);
-    assert_refused(&mut app, &mut session, &[1], "AcDbLine");
+    assert_refused(&mut app, &mut session, &[1], "hatch.boundary_open");
 
     // An open polyline is not a closed loop.
     let (mut app, mut session) = hatch_app(vec![(

@@ -1,6 +1,6 @@
 // Reusable interactive primitives. Everything the chrome does is built from
-// these three pieces plus <Icon>, so hover/pressed/disabled/focus states stay
-// identical across regions.
+// these pieces plus <Icon>, so hover/pressed/disabled/focus states stay identical
+// across regions.
 import React from 'react';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
@@ -129,6 +129,31 @@ export function RibbonButton({ icon, label, hint, disabled, active, onClick }: R
     >
       <Icon name={icon} size={26} />
       <span className="ribbon-button__label">{label}</span>
+    </button>
+  );
+}
+
+/** A status-bar chip: the one surface every toggle uses (drafting aids and flag parameters). */
+export interface ToggleProps {
+  readonly label: React.ReactNode;
+  readonly on?: boolean;
+  readonly onClick?: () => void;
+  readonly title?: string;
+  readonly disabled?: boolean;
+}
+
+/** A status-bar chip. `on` maps to `aria-pressed` and the ON style. */
+export function Toggle({ label, on, onClick, title, disabled }: ToggleProps) {
+  return (
+    <button
+      type="button"
+      className={['status-toggle', on ? 'is-on' : '', disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')}
+      aria-pressed={Boolean(on)}
+      disabled={disabled}
+      title={title}
+      onClick={disabled ? undefined : onClick}
+    >
+      {label}
     </button>
   );
 }

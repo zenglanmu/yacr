@@ -288,6 +288,7 @@ mod explode_self_reference;
 mod grip;
 mod hatch;
 mod hatch_predefined;
+mod hatch_stitch;
 mod match_prop;
 mod mleader_create;
 mod mtext;

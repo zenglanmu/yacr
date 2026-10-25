@@ -346,10 +346,20 @@ pub enum CommandId {
     /// plane's OCS 2D frame: a `Circle` (an exact four-quarter-arc bulged loop),
     /// a full `Ellipse` (sampled chords — declared, a true ellipse is not a
     /// circular arc) or a **closed** `Polyline` (its own points and bulges,
-    /// including a 3D entity that lies in one plane). A `Line`, `Arc`, open
-    /// polyline, spline, text, block, dimension or any other kind is an explicit
-    /// refusal that opens no transaction; so is a selection that is not coplanar
-    /// with a **single consistent normal**.
+    /// including a 3D entity that lies in one plane).
+    ///
+    /// Selected `Line`/`Arc` entities (in any mix with the kinds above) are
+    /// **stitched** into one loop per closed chain: endpoints are matched at the
+    /// absolute `1e-6` world-unit tolerance, an edge may be consumed in either
+    /// direction, and every `Arc` stays an **exact bulge segment**
+    /// (`bulge = tan(sweep / 4)` — never sampled). A node where more than two
+    /// edges meet is refused as `hatch.boundary_branch` (no pairing is guessed),
+    /// edges left outside every loop as `hatch.boundary_open` (naming how many),
+    /// and a zero-length `Line` / zero-sweep `Arc` as
+    /// `hatch.boundary_degenerate`. An open polyline, spline, text, block,
+    /// dimension or any other kind is an explicit refusal that opens no
+    /// transaction; so is a selection that is not coplanar with a **single
+    /// consistent normal**.
     ///
     /// The fill, spacing, angle (degrees on the channel), double flag and style
     /// are the session typed channel ([`crate::draw_tool::ToolParameter::HatchPatternType`]
@@ -369,10 +379,10 @@ pub enum CommandId {
     /// degenerate, non-finite) as a **whole-command** refusal. One entity
     /// (`type_key`/`class_name` = `AcDbHatch`) is inserted through the shared
     /// create funnel in one transaction / one undo step on the active layer.
-    /// Associativity, boundary-from-internal-point, boundary detection, arc/line
-    /// boundary stitching, custom (`76=2`) pattern names and `.pat` loading,
-    /// a pattern picker dialog, gradient creation and a live preview are **NOT
-    /// IMPLEMENTED**. Work-only.
+    /// Associativity, boundary-from-an-internal-point, self-intersecting boundary
+    /// loops (refused, never trimmed or repaired), custom (`76=2`) pattern names
+    /// and `.pat` loading, a pattern picker dialog, gradient creation, a live
+    /// preview and a per-span dash phase reset are **NOT IMPLEMENTED**. Work-only.
     Hatch,
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.

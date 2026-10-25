@@ -880,6 +880,27 @@ button, input, select { font: inherit; color: inherit; }
 .status-stepper__button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .status-stepper__button:disabled { color: var(--text-disabled); cursor: not-allowed; }
 .status-stepper__value { min-width: 26px; text-align: center; color: var(--text); }
+/* A typed length (the text height): the same value slot, now an input, so a
+   decimal no fixed step can reach (1.75) is enterable. The chip keeps its 20px
+   height; the field is transparent until focused, so the strip reads the same
+   whether a parameter is stepped or typed. An entered height is in drawing
+   units — the hint says so — and `font-variant-numeric` keeps the digits from
+   dancing while the value is retyped. */
+.status-stepper__input {
+  width: 48px; min-width: 26px; height: 16px; padding: 0 2px;
+  border: 1px solid transparent; border-radius: 2px;
+  background: transparent; color: var(--text);
+  font: inherit; font-size: 11px; font-variant-numeric: tabular-nums;
+  text-align: center;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.status-stepper__input:hover:not(:disabled) { border-color: var(--line-soft); }
+.status-stepper__input:focus-visible { outline: none; border-color: var(--focus); background: var(--field); }
+.status-stepper__input:disabled { color: var(--text-disabled); cursor: not-allowed; }
+/* A refused typed value: the chip says so (its title carries the catalog message)
+   and the field keeps the text the user typed — it is never rewritten. */
+.status-stepper.is-invalid { border-color: var(--danger); }
+.status-stepper.is-invalid .status-stepper__input { color: var(--danger); }
 .status-stepper.is-disabled, .status-stepper.is-disabled .status-stepper__value { color: var(--text-disabled); }
 /* Status-bar Options entry: the ghost button surface at status-bar height, kept
    a whisper quieter than the toggle chips so it reads as a utility, not a mode. */

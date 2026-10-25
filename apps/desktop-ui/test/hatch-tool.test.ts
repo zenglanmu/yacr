@@ -10,8 +10,10 @@
 // bar has (a numeric stepper), bounded to exactly the implemented codes.
 //
 // Nothing here may imply the unimplemented forms — internal-point boundary
-// selection, loose-line stitching, custom pattern names/`.pat` files, gradients
-// or associativity. The **three** predefined patterns the host transcribed
+// internal-point boundary selection, custom pattern names/`.pat` files,
+// gradients or associativity. LINE/ARC boundary edges **are** stitched into
+// closed loops (as exact bulge arcs) and the copy says so. The **three**
+// predefined patterns the host transcribed
 // (ANSI31, ANSI32, ANSI37) *are* implemented and are named by the catalogs; the
 // allow-list check at the bottom keeps every other pattern name out. Every
 // user-visible string comes from the shared catalogs.
@@ -414,17 +416,22 @@ test('the HATCH copy exists in both locales and states the honest boundary', () 
   assert.match(en['draw.kind.hatch'], /hatch/i);
   assert.match(zh['draw.kind.hatch'], /填充/);
 
-  // The idle prompt asks for a boundary and names the accepted closed kinds —
-  // never an internal point, and never a stitching instruction.
+  // The idle prompt asks for a boundary and names the accepted kinds: closed
+  // shapes plus LINE/ARC edges that stitch into a closed loop. It must never
+  // imply internal-point boundary detection.
   assert.match(en[HATCH.idle], /boundary/i);
   assert.match(en[HATCH.idle], /circle/i);
   assert.match(en[HATCH.idle], /ellipse/i);
   assert.match(en[HATCH.idle], /polyline/i);
+  assert.match(en[HATCH.idle], /LINE\/ARC/i);
+  assert.match(en[HATCH.idle], /closed loop/i);
   assert.match(zh[HATCH.idle], /边界/);
   assert.match(zh[HATCH.idle], /圆/);
   assert.match(zh[HATCH.idle], /椭圆/);
   assert.match(zh[HATCH.idle], /多段线/);
-  for (const [locale, pattern] of [[en, /internal|point|stitch/i], [zh, /内部|点|缝合/]]) {
+  assert.match(zh[HATCH.idle], /直线\/圆弧/);
+  assert.match(zh[HATCH.idle], /闭合环/);
+  for (const [locale, pattern] of [[en, /internal point|pick inside/i], [zh, /内部点/]]) {
     assert.doesNotMatch(locale[HATCH.idle], pattern);
   }
   // The ready prompt names the boundary and Enter, not a dimension.
