@@ -161,7 +161,8 @@ fn point_exposes_one_point_grip() {
 // 2. The refusal list: one assertion per kind, so a partial implementation of
 //    any of them has to come back and update *that* test on purpose. `CIRCLE`
 //    and `ARC` are no longer on this list (they have their own handles, pinned
-//    in `crates/cad-app/src/tests/grips_curves.rs`).
+//    in `crates/cad-app/src/tests/grips_curves.rs`), and neither is `POLYLINE`
+//    (vertex grips, pinned in `crates/cad-app/src/tests/grips_polyline.rs`).
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -217,21 +218,6 @@ fn text_exposes_no_grips() {
             h_align: TextAlignH::Left,
             v_align: TextAlignV::Baseline,
             wrap_width: None,
-        },
-    );
-    assert!(grips_for_entity(&entity).is_empty());
-}
-
-#[test]
-fn lwpolyline_exposes_no_grips() {
-    // A two-vertex polyline is *not* a LINE: its vertices carry bulges and this
-    // model has no rule for dragging one, so it exposes nothing.
-    let entity = ent(
-        4,
-        SemanticGeometry::Polyline {
-            points: vec![p3(0.0, 0.0, 0.0), p3(10.0, 0.0, 0.0)],
-            bulges: vec![0.0, 0.0],
-            closed: false,
         },
     );
     assert!(grips_for_entity(&entity).is_empty());

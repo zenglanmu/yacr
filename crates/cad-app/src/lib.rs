@@ -823,9 +823,13 @@ pub enum CommandPayload {
     ///
     /// `id` names the dragged handle and `to` the world point it is dragged to.
     /// The host resolves `to` in the plan view (x/y from the viewport's
-    /// `screen_to_world`, the dragged handle's own `z`), and the command stores
-    /// all three coordinates as given — nothing is projected onto a work plane
-    /// here. The handler
+    /// `screen_to_world`, the dragged handle's own `z`) and then runs it through
+    /// the same drafting constraint the capture path uses
+    /// (`SessionState::constrained_point`: grid `SNAP` first, `ORTHO` second
+    /// against the handle's original position), so the previewed marker and the
+    /// committed point are one coordinate. The command stores all three
+    /// coordinates as given — nothing is projected onto a work plane here. The
+    /// handler
     /// re-reads `id.entity`, refuses a missing entity (`grip.target_missing`) and
     /// a non-model-space one (`property.not_addressable`), then re-validates the
     /// handle against the current geometry through

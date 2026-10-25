@@ -11,7 +11,7 @@ use super::*;
 
 use super::grips::{assert_bits_eq, assert_reason, ent, grip_id, p3, reason};
 use crate::grips::{
-    apply_grip, grip_hit, grip_hit_planar, grips_for_entity, Grip, GripKind,
+    apply_grip, grip_hit, grip_hit_planar, grips_for_entity, Grip, GripKind, REASON_DEGENERATE_ARC,
     REASON_DEGENERATE_RADIUS, REASON_STALE_HANDLE, REASON_UNSUPPORTED_KIND,
     REASON_ZERO_DISPLACEMENT,
 };
@@ -131,22 +131,77 @@ fn circle_quadrant_grips_lie_in_the_circles_own_plane_frame() {
 }
 
 #[test]
-fn arc_exposes_exactly_one_centre_grip() {
-    // Arc endpoint grips are NOT IMPLEMENTED: the list is the centre and nothing
-    // else (asserted exactly, so adding an endpoint handle has to revisit this).
-    let entity = ent(
-        32,
-        arc(p3(4.0, -1.0, 2.0), p3(0.0, 0.0, 1.0), 5.5, 0.3, 2.7),
-    );
+fn arc_exposes_the_centre_then_both_endpoint_grips() {
+    // Documented order: `Center 0, Endpoint 0 (start), Endpoint 1 (end)`.
+    let center = p3(4.0, -1.0, 2.0);
+    let radius = 5.5;
+    let (start, sweep) = (0.3, 2.7);
+    let entity = ent(32, arc(center, p3(0.0, 0.0, 1.0), radius, start, sweep));
     let grips = grips_for_entity(&entity);
     assert_eq!(
-        grips,
-        vec![Grip {
-            id: grip_id(32, GripKind::Center, 0),
-            position: p3(4.0, -1.0, 2.0),
-        }],
-        "an ARC exposes the centre grip only, not its endpoints"
+        grips.len(),
+        3,
+        "an ARC exposes the centre and its two endpoints"
     );
+    assert_eq!(
+        grips[0],
+        Grip {
+            id: grip_id(32, GripKind::Center, 0),
+            position: center,
+        },
+        "index 0 is still the stored centre"
+    );
+    // Normal +Z: the shared arbitrary-axis frame is (+X, +Y), so the endpoint
+    // position is `centre + radius * (cos angle, sin angle)` in that frame.
+    for (index, angle) in [(0u8, start), (1, start + sweep)] {
+        assert_bits_eq(
+            grips[usize::from(index) + 1].position,
+            p3(
+                center.x + radius * angle.cos(),
+                center.y + radius * angle.sin(),
+                center.z,
+            ),
+            &format!("endpoint {index} position"),
+        );
+        assert_eq!(
+            grips[usize::from(index) + 1].id,
+            grip_id(32, GripKind::Endpoint, index)
+        );
+    }
+}
+
+#[test]
+fn arc_endpoint_grips_lie_in_the_arcs_own_plane_frame() {
+    // A tilted, unnormalized normal: the endpoint positions must come from the
+    // shared arbitrary-axis frame, the same one the tessellator measures the
+    // stored `start` / `sweep` angles in.
+    let center = p3(1.0, 2.0, 3.0);
+    let normal = p3(1.0, 2.0, -3.0);
+    let radius = 4.25;
+    let (start, sweep) = (0.7, -1.3);
+    let entity = ent(32, arc(center, normal, radius, start, sweep));
+    let grips = grips_for_entity(&entity);
+    let (ax, ay, unit_normal) = cad_geometry::arbitrary_axis(normal);
+    for (index, angle) in [(0u8, start), (1, start + sweep)] {
+        let position = grips[usize::from(index) + 1].position;
+        assert_close(
+            position,
+            p3(
+                center.x + radius * (angle.cos() * ax.x + angle.sin() * ay.x),
+                center.y + radius * (angle.cos() * ax.y + angle.sin() * ay.y),
+                center.z + radius * (angle.cos() * ax.z + angle.sin() * ay.z),
+            ),
+            &format!("endpoint {index} position"),
+        );
+        assert!(
+            dot3(sub3(position, center), unit_normal).abs() < 1e-12,
+            "endpoint {index} must lie in the arc plane"
+        );
+        assert!(
+            (len3(sub3(position, center)) - radius).abs() < 1e-12,
+            "endpoint {index} must be `radius` from the centre"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -374,29 +429,258 @@ fn dragging_the_arc_centre_moves_it_rigidly() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn arc_endpoint_grips_are_not_implemented() {
-    let geometry = arc(p3(0.0, 0.0, 0.0), p3(0.0, 0.0, 1.0), 5.0, 0.0, 1.0);
+fn dragging_the_arc_start_endpoint_moves_only_its_angle() {
+    // Centre/radius/normal are bit-identical; the start angle becomes the
+    // in-plane direction of the target and the sweep is recomputed so the end
+    // angle (the stored `start + sweep`) stays put.
+    let center = p3(1.0, 2.0, 3.0);
+    let normal = p3(0.0, 0.0, 1.0);
+    let radius = 5.0;
+    let (start, sweep) = (0.0, 1.5);
+    let geometry = arc(center, normal, radius, start, sweep);
+    let (old_start_grip, old_end_grip) = (
+        grips_for_entity(&ent(32, geometry.clone()))[1].position,
+        grips_for_entity(&ent(32, geometry.clone()))[2].position,
+    );
+    // A target off the arc's plane (z = 9): the angle rule ignores that offset.
+    let target = p3(
+        center.x + radius * 0.5f64.cos(),
+        center.y + radius * 0.5f64.sin(),
+        9.0,
+    );
+
+    let dragged = apply_grip(&geometry, &grip_id(32, GripKind::Endpoint, 0), target)
+        .expect("an arc start endpoint drag is supported");
+    match dragged {
+        SemanticGeometry::Arc {
+            center: new_center,
+            normal: new_normal,
+            radius: new_radius,
+            start: new_start,
+            sweep: new_sweep,
+        } => {
+            assert_bits_eq(new_center, center, "the centre stays put");
+            assert_bits_eq(new_normal, normal, "the normal stays put");
+            assert_eq!(
+                new_radius.to_bits(),
+                radius.to_bits(),
+                "the radius stays put"
+            );
+            assert!(
+                (new_start - 0.5).abs() < 1e-12,
+                "the start angle follows the in-plane direction, got {new_start}"
+            );
+            assert!(
+                (new_sweep - 1.0).abs() < 1e-12,
+                "the sweep shrinks to end - new start, got {new_sweep}"
+            );
+            // The anchored endpoint keeps its angle, so it keeps its position.
+            let anchored = p3(
+                new_center.x + new_radius * (new_start + new_sweep).cos(),
+                new_center.y + new_radius * (new_start + new_sweep).sin(),
+                new_center.z,
+            );
+            for (axis, (a, e)) in [
+                ("x", (anchored.x, old_end_grip.x)),
+                ("y", (anchored.y, old_end_grip.y)),
+                ("z", (anchored.z, old_end_grip.z)),
+            ] {
+                assert!(
+                    (a - e).abs() < 1e-9,
+                    "the opposite endpoint keeps its angle: {axis} {a} vs {e}"
+                );
+            }
+            assert!(
+                old_start_grip != target,
+                "the fixture drags the handle somewhere else"
+            );
+        }
+        other => panic!("expected an ARC, got {other:?}"),
+    }
+}
+
+#[test]
+fn dragging_the_arc_end_endpoint_keeps_the_start_angle() {
+    let center = p3(-2.0, 0.5, 7.0);
+    let normal = p3(0.0, 0.0, 1.0);
+    let radius = 3.0;
+    let (start, sweep) = (0.4, 1.1);
+    let geometry = arc(center, normal, radius, start, sweep);
+    let target = p3(
+        center.x + radius * 2.5f64.cos(),
+        center.y + radius * 2.5f64.sin(),
+        0.0,
+    );
+
+    let dragged = apply_grip(&geometry, &grip_id(32, GripKind::Endpoint, 1), target)
+        .expect("an arc end endpoint drag is supported");
+    match dragged {
+        SemanticGeometry::Arc {
+            center: new_center,
+            normal: new_normal,
+            radius: new_radius,
+            start: new_start,
+            sweep: new_sweep,
+        } => {
+            assert_bits_eq(new_center, center, "the centre stays put");
+            assert_bits_eq(new_normal, normal, "the normal stays put");
+            assert_eq!(
+                new_radius.to_bits(),
+                radius.to_bits(),
+                "the radius stays put"
+            );
+            assert_eq!(
+                new_start.to_bits(),
+                start.to_bits(),
+                "the start angle is bit-identical"
+            );
+            assert!(
+                (new_sweep - (2.5 - start)).abs() < 1e-12,
+                "the sweep grows to the new end angle, got {new_sweep}"
+            );
+        }
+        other => panic!("expected an ARC, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_arc_endpoint_drag_keeps_the_stored_sweep_direction() {
+    // A clockwise / reflected arc (negative sweep) must stay clockwise: dragging
+    // the start past the end gives the small clockwise extent, never the positive
+    // complement.
+    let center = p3(0.0, 0.0, 0.0);
+    let normal = p3(0.0, 0.0, 1.0);
+    let radius = 4.0;
+    let geometry = arc(center, normal, radius, 2.0, -1.0);
+    let target = p3(radius * 1.5f64.cos(), radius * 1.5f64.sin(), 0.0);
+    let dragged = apply_grip(&geometry, &grip_id(32, GripKind::Endpoint, 0), target)
+        .expect("a clockwise arc start drag is supported");
+    match dragged {
+        SemanticGeometry::Arc { start, sweep, .. } => {
+            assert!((start - 1.5).abs() < 1e-12, "the new start angle");
+            assert!(
+                sweep < 0.0,
+                "the sweep must stay negative (same direction), got {sweep}"
+            );
+            assert!(
+                (sweep + 0.5).abs() < 1e-12,
+                "the clockwise extent, got {sweep}"
+            );
+        }
+        other => panic!("expected an ARC, got {other:?}"),
+    }
+
+    // A counter-clockwise arc dragged "behind" its anchored end keeps the
+    // positive direction: the extent is the complement, not a negative sweep.
+    let geometry = arc(center, normal, radius, 0.0, 1.0);
+    let target = p3(radius * 2.0f64.cos(), radius * 2.0f64.sin(), 0.0);
+    let dragged = apply_grip(&geometry, &grip_id(32, GripKind::Endpoint, 0), target)
+        .expect("a counter-clockwise arc start drag is supported");
+    match dragged {
+        SemanticGeometry::Arc { sweep, .. } => {
+            assert!(sweep > 0.0, "the sweep must stay positive, got {sweep}");
+            assert!(
+                (sweep - (std::f64::consts::TAU - 1.0)).abs() < 1e-12,
+                "the counter-clockwise extent of the complement, got {sweep}"
+            );
+        }
+        other => panic!("expected an ARC, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_arc_endpoint_drag_that_collapses_the_arc_is_refused_by_name() {
+    let center = p3(0.0, 0.0, 0.0);
+    let normal = p3(0.0, 0.0, 1.0);
+    let radius = 5.0;
+    let geometry = arc(center, normal, radius, 0.0, 1.0);
+    let at = |angle: f64| p3(radius * angle.cos(), radius * angle.sin(), 0.0);
+
+    // ~0: the start almost reaches the anchored end angle.
     let error = apply_grip(
         &geometry,
         &grip_id(32, GripKind::Endpoint, 0),
-        p3(5.0, 0.0, 0.0),
+        at(1.0 - 1e-12),
     )
-    .expect_err("an ARC has no endpoint grip");
-    assert_reason(error.clone(), REASON_STALE_HANDLE);
-    assert!(
-        reason(error).contains("NOT IMPLEMENTED"),
-        "the refusal says the arc endpoint handle is not implemented"
-    );
+    .expect_err("a near-zero sweep is refused, never clamped");
+    assert_reason(error, REASON_DEGENERATE_ARC);
 
-    // No quadrant or midpoint handle on an arc either.
+    // ~2π: the start almost makes the whole circle.
+    let error = apply_grip(
+        &geometry,
+        &grip_id(32, GripKind::Endpoint, 0),
+        at(1.0 + 1e-12),
+    )
+    .expect_err("a near-2pi sweep is refused, never clamped");
+    assert_reason(error, REASON_DEGENERATE_ARC);
+
+    // Exactly the anchored angle: the extent is a full turn (or exactly zero).
+    let error = apply_grip(&geometry, &grip_id(32, GripKind::Endpoint, 1), at(0.0))
+        .expect_err("an end drag onto the start is a full turn");
+    assert_reason(error, REASON_DEGENERATE_ARC);
+
+    // No in-plane direction at all: the centre itself, and a point on the normal
+    // through it.
+    for target in [center, p3(0.0, 0.0, 12.0)] {
+        let error = apply_grip(&geometry, &grip_id(32, GripKind::Endpoint, 0), target)
+            .expect_err("a target without an in-plane direction is refused");
+        assert_reason(error, REASON_DEGENERATE_ARC);
+    }
+
+    // Never clamped: a tiny but real extent is stored as computed.
+    let dragged = apply_grip(
+        &geometry,
+        &grip_id(32, GripKind::Endpoint, 0),
+        at(1.0 - 1e-6),
+    )
+    .expect("a tiny positive sweep is a real edit, not a degenerate one");
+    match dragged {
+        SemanticGeometry::Arc { sweep, .. } => assert!((sweep - 1e-6).abs() < 1e-12),
+        other => panic!("expected an ARC, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_arc_endpoint_drag_with_no_geometric_effect_writes_nothing() {
+    let center = p3(0.0, 0.0, 0.0);
+    let normal = p3(0.0, 0.0, 1.0);
+    let radius = 5.0;
+    let geometry = arc(center, normal, radius, 0.0, 1.0);
+
+    // Exactly at the handle.
+    let error = apply_grip(
+        &geometry,
+        &grip_id(32, GripKind::Endpoint, 0),
+        p3(radius, 0.0, 0.0),
+    )
+    .expect_err("a drag onto the handle is nothing to write");
+    assert_reason(error, REASON_ZERO_DISPLACEMENT);
+
+    // Off the plane along the same in-plane ray: the angle rule ignores the
+    // out-of-plane offset, so the stored start/sweep would be unchanged.
+    let error = apply_grip(
+        &geometry,
+        &grip_id(32, GripKind::Endpoint, 0),
+        p3(radius, 0.0, 3.0),
+    )
+    .expect_err("an off-plane target along the same ray writes nothing");
+    assert_reason(error, REASON_ZERO_DISPLACEMENT);
+}
+
+#[test]
+fn arc_refuses_a_kind_or_index_it_has_no_handle_for() {
+    let geometry = arc(p3(0.0, 0.0, 0.0), p3(0.0, 0.0, 1.0), 5.0, 0.0, 1.0);
     for (kind, index) in [
         (GripKind::Quadrant, 0u8),
         (GripKind::Midpoint, 2),
         (GripKind::Point, 0),
+        (GripKind::Vertex, 0),
         (GripKind::Center, 1),
+        (GripKind::Endpoint, 2),
+        (GripKind::Endpoint, u8::MAX),
     ] {
         let error = apply_grip(&geometry, &grip_id(32, kind, index), p3(1.0, 1.0, 0.0))
-            .expect_err("an ARC exposes the centre grip only");
+            .expect_err("an ARC has no handle for this kind/index");
         assert_reason(error, REASON_STALE_HANDLE);
     }
 }

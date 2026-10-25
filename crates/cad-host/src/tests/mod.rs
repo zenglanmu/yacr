@@ -21,6 +21,7 @@ mod file_open_save;
 mod fonts;
 mod gate;
 mod grid_overlay;
+mod grip_drafting;
 mod grips;
 mod hover;
 mod navigation;

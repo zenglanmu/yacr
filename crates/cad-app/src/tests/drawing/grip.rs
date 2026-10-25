@@ -26,6 +26,19 @@ const PAPER_LINE: u128 = 4;
 /// IMPLEMENTED), used for the `grip.unsupported_kind` refusal now that `CIRCLE`
 /// and `ARC` have handles.
 const ELLIPSE: u128 = 5;
+/// The `ARC` whose endpoint grips are dragged here (`Center 0, Endpoint 0/1`).
+const ARC: u128 = 6;
+/// The `POLYLINE` whose `Vertex` grips are dragged here.
+const POLYLINE: u128 = 7;
+
+/// The stored `ARC` of the fixture: centre at the origin, radius 5, from angle 0
+/// over 1.5 rad, so the two endpoint handles are easy to aim at.
+const ARC_START_ANGLE: f64 = 0.0;
+const ARC_SWEEP: f64 = 1.5;
+const ARC_RADIUS: f64 = 5.0;
+/// The fixture polyline's stored bulges (non-zero, so "bulges untouched" is a
+/// real comparison at the command level too).
+const POLYLINE_BULGES: [f64; 3] = [0.0, 0.25, 0.0];
 
 /// Non-round coordinates so an "untouched endpoint" assertion is a real bit
 /// comparison rather than a happy accident of decimal literals.
@@ -45,10 +58,11 @@ const POINT_AT: Point3 = Point3 {
     z: 0.0,
 };
 
-/// A drawing with a `LINE` (id 1), a `POINT` (id 2), a `CIRCLE` (id 3, the
-/// unsupported-kind target) and a paper-space `LINE` (id 4, the
-/// non-addressable target). Nothing is created through a command, so the undo
-/// stack starts empty and a drag's undo depth is unambiguous.
+/// A drawing with a `LINE` (id 1), a `POINT` (id 2), a `CIRCLE` (id 3), a
+/// paper-space `LINE` (id 4, the non-addressable target), an `ELLIPSE` (id 5,
+/// the unsupported-kind target), an `ARC` (id 6, endpoint drags) and a
+/// `POLYLINE` (id 7, vertex drags). Nothing is created through a command, so the
+/// undo stack starts empty and a drag's undo depth is unambiguous.
 fn grip_app() -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
@@ -108,6 +122,28 @@ fn grip_app() -> (Application, SessionState) {
     })
     .unwrap();
     b.insert_entity(paper).unwrap();
+    b.insert_entity(ent(
+        ARC,
+        SemanticGeometry::Arc {
+            center: p3(0.0, 0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            radius: ARC_RADIUS,
+            start: ARC_START_ANGLE,
+            sweep: ARC_SWEEP,
+        },
+        5,
+    ))
+    .unwrap();
+    b.insert_entity(ent(
+        POLYLINE,
+        SemanticGeometry::Polyline {
+            points: vec![p3(0.0, 0.0, 1.0), p3(10.0, 0.0, 1.0), p3(10.0, 5.0, 1.0)],
+            bulges: POLYLINE_BULGES.to_vec(),
+            closed: false,
+        },
+        6,
+    ))
+    .unwrap();
     let drawing = b.finish().unwrap();
 
     let mut app = Application::new();
@@ -181,6 +217,32 @@ fn position_of(app: &Application, entity: u128) -> Point3 {
     match geometry_of(app, entity) {
         SemanticGeometry::Point(position) => position,
         other => panic!("entity {entity} is not a POINT: {other:?}"),
+    }
+}
+
+/// The stored `ARC` fields of `entity` (`center, normal, radius, start, sweep`).
+fn arc_parts(app: &Application, entity: u128) -> (Point3, Point3, f64, f64, f64) {
+    match geometry_of(app, entity) {
+        SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        } => (center, normal, radius, start, sweep),
+        other => panic!("entity {entity} is not an ARC: {other:?}"),
+    }
+}
+
+/// The stored `POLYLINE` fields of `entity` (`points, bulges, closed`).
+fn polyline_parts(app: &Application, entity: u128) -> (Vec<Point3>, Vec<f64>, bool) {
+    match geometry_of(app, entity) {
+        SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed,
+        } => (points, bulges, closed),
+        other => panic!("entity {entity} is not a POLYLINE: {other:?}"),
     }
 }
 
@@ -418,6 +480,139 @@ fn a_quadrant_drag_that_would_zero_the_radius_is_refused_without_a_write() {
         SemanticGeometry::Circle { radius, .. } => assert_eq!(radius, 5.0),
         other => panic!("expected a CIRCLE, got {other:?}"),
     }
+}
+
+#[test]
+fn arc_endpoint_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
+    let (mut app, mut session) = grip_app();
+    let revision = revision_of(&app);
+    let before = geometry_of(&app, ARC);
+    let (center, normal, radius, start, sweep) = arc_parts(&app, ARC);
+    // The start handle sits at angle 0; drag it to the in-plane direction of
+    // angle 0.5 (off the plane in z, which the endpoint rule ignores).
+    let target = p3(radius * 0.5f64.cos(), radius * 0.5f64.sin(), 42.0);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(ARC, GripKind::Endpoint, 0, target),
+    )
+    .unwrap();
+
+    // One entity update, in one transaction, with one undo entry.
+    let changes = outcome.changes.as_ref().expect("a ChangeSet is published");
+    assert_eq!(changes.changes.len(), 1, "exactly one entity update");
+    assert_eq!(outcome.objects, vec![ObjectId(ARC)]);
+    assert_eq!(revision_of(&app), Revision(revision.0 + 1));
+    assert_eq!(undo_depth(&app), 1);
+
+    let (new_center, new_normal, new_radius, new_start, new_sweep) = arc_parts(&app, ARC);
+    assert_eq!(new_center, center, "the centre is bit-identical");
+    assert_eq!(new_normal, normal, "the normal is bit-identical");
+    assert_eq!(
+        new_radius.to_bits(),
+        radius.to_bits(),
+        "the radius is bit-identical"
+    );
+    assert!(
+        (new_start - 0.5).abs() < 1e-12,
+        "the dragged start angle follows the target, got {new_start}"
+    );
+    assert!(
+        (new_sweep - (sweep - 0.5)).abs() < 1e-12,
+        "the sweep is recomputed in the same direction, got {new_sweep}"
+    );
+    assert!(
+        ((new_start + new_sweep) - (start + sweep)).abs() < 1e-12,
+        "the opposite endpoint keeps its angle"
+    );
+
+    // Undo restores the original geometry exactly (the stored struct, not a
+    // re-derived approximation).
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(geometry_of(&app, ARC), before, "undo restores the arc");
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn an_arc_endpoint_drag_that_collapses_the_arc_is_refused_before_any_write() {
+    let (mut app, mut session) = grip_app();
+    let revision = revision_of(&app);
+    let before = geometry_of(&app, ARC);
+    // Dragging the end handle onto the start's stored position is a full turn.
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(ARC, GripKind::Endpoint, 1, p3(ARC_RADIUS, 0.0, 0.0)),
+    )
+    .unwrap_err();
+    refused(error, crate::grips::REASON_DEGENERATE_ARC, false);
+    assert_untouched(&app, revision, 0);
+    assert_eq!(geometry_of(&app, ARC), before);
+}
+
+#[test]
+fn polyline_vertex_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
+    let (mut app, mut session) = grip_app();
+    let revision = revision_of(&app);
+    let before = geometry_of(&app, POLYLINE);
+    let (points, bulges, closed) = polyline_parts(&app, POLYLINE);
+    // The target is lifted in z: a vertex drag keeps the vertex's own z.
+    let target = p3(12.0, -3.0, 9.0);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(POLYLINE, GripKind::Vertex, 1, target),
+    )
+    .unwrap();
+
+    let changes = outcome.changes.as_ref().expect("a ChangeSet is published");
+    assert_eq!(changes.changes.len(), 1, "exactly one entity update");
+    assert_eq!(outcome.objects, vec![ObjectId(POLYLINE)]);
+    assert_eq!(revision_of(&app), Revision(revision.0 + 1));
+    assert_eq!(undo_depth(&app), 1);
+
+    let (new_points, new_bulges, new_closed) = polyline_parts(&app, POLYLINE);
+    assert_eq!(
+        new_points.len(),
+        points.len(),
+        "no vertex is added or dropped"
+    );
+    assert_eq!(
+        new_points[1],
+        p3(target.x, target.y, points[1].z),
+        "the dragged vertex takes x/y and keeps its own z"
+    );
+    for index in [0usize, 2] {
+        assert_eq!(
+            new_points[index], points[index],
+            "vertex {index} is untouched"
+        );
+    }
+    assert_eq!(new_bulges, bulges, "every stored bulge is preserved");
+    assert_eq!(new_closed, closed, "the closed flag is untouched");
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(
+        geometry_of(&app, POLYLINE),
+        before,
+        "undo restores the polyline"
+    );
+    assert_eq!(undo_depth(&app), 0);
 }
 
 #[test]

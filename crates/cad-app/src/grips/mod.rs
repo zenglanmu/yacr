@@ -29,8 +29,23 @@
 //! |---|---|
 //! | `SemanticGeometry::Line` | [`GripKind::Endpoint`] `0` = `start`, `1` = `end`, then [`GripKind::Midpoint`] `2` |
 //! | `SemanticGeometry::Circle` | [`GripKind::Center`] `0`, then [`GripKind::Quadrant`] `0..=3` |
-//! | `SemanticGeometry::Arc` | [`GripKind::Center`] `0` **only** |
+//! | `SemanticGeometry::Arc` | [`GripKind::Center`] `0`, then [`GripKind::Endpoint`] `0` = start point, `1` = end point |
+//! | `SemanticGeometry::Polyline` | [`GripKind::Vertex`] `index` = stored vertex index |
 //! | `SemanticGeometry::Point` | [`GripKind::Point`] `0` |
+//!
+//! The `ARC` order is `Center 0, Endpoint 0, Endpoint 1`: the centre comes
+//! first because it was the only handle before the endpoints were added, and the
+//! list order is the hit-test candidate order (see the tie-break rule), so
+//! keeping it first preserves every tie the centre used to win.
+//!
+//! `POLYLINE` is the one semantic variant for **every** polyline class the
+//! importer produces (LWPOLYLINE, 2D `AcDb2dPolyline`, legacy `AcDbPolyline` and
+//! 3D `AcDb3dPolyline`): the class is not carried into [`SemanticGeometry`], so
+//! this model cannot single out the 3D form and vertex grips therefore apply to
+//! all of them. Distinguishing (and refusing) the 3D class is NOT IMPLEMENTED
+//! and would need a domain change, not a guess here. A vertex drag only moves
+//! x/y and keeps the vertex's own `z`, exactly like a `LINE` endpoint drag, so
+//! it never edits a 3D polyline's elevation.
 //!
 //! [`grips_for_entity`] returns an **empty** vector for every other geometry, and
 //! [`grip_hit`] therefore never hits one. No marker is invented, no index is
@@ -61,35 +76,61 @@
 //! * **`ARC` centre** (`index` 0): the arc moves **rigidly** — `center` takes the
 //!   target and `radius` / `normal` / `start` / `sweep` are bit-identical, so the
 //!   radius and the angular extent are untouched.
-//!   **Arc endpoint grips are NOT IMPLEMENTED** in this build: an `AcDbArc`
-//!   exposes exactly one centre grip, and an `Endpoint` / `Quadrant` / `Midpoint`
-//!   id against it is a [`REASON_STALE_HANDLE`] refusal rather than a silently
-//!   reinterpreted centre drag.
+//! * **`ARC` endpoint** (`index` 0 = start point, `1` = end point): the arc stays
+//!   on the **same circle** — `center`, `radius` and `normal` are bit-identical —
+//!   and only the dragged endpoint's angle changes. That angle becomes the
+//!   in-plane direction of the target from the centre (the out-of-plane offset,
+//!   including the target's `z`, is ignored: the arc's plane is fixed by its own
+//!   normal). The **opposite endpoint keeps its angle**, so the end angle is the
+//!   stored `start + sweep` when the start is dragged, and the stored `start`
+//!   when the end is dragged. The sweep is then **recomputed in the stored
+//!   direction** (positive for a counter-clockwise arc, negative for a
+//!   clockwise/reflected one) as the in-plane extent between the two angles, and
+//!   must stay in the **open** interval `(0, 2π)` in that direction.
+//!
+//!   A target that collapses the arc — a recomputed sweep within
+//!   [`ARC_SWEEP_EPSILON`] (`1e-9` rad, the same slack the tessellator and the
+//!   representation provider use to call a sweep "full") of `0` or `2π` — is
+//!   refused by name ([`REASON_DEGENERATE_ARC`]) and **never clamped** into the
+//!   open interval. So is a target with no in-plane direction at all (the centre
+//!   itself, or a point on the normal through it). **This endpoint rule is our
+//!   choice, not an AutoCAD claim**: it is what keeps a single-handle drag from
+//!   tilting the arc, and no vendor behaviour is asserted by it.
+//! * **`POLYLINE` vertex** (`index` = stored vertex index): the dragged vertex
+//!   takes `x`/`y` from the target and keeps its own stored `z`, so the drag
+//!   never changes an elevation (3D vertex editing is NOT IMPLEMENTED). Every
+//!   other vertex is returned **bit-identically**, and `closed` plus the whole
+//!   `bulges` vector are copied verbatim. A bulge is therefore **never
+//!   recomputed** for the moved vertex: the segment entering and the segment
+//!   leaving it keep the bulge they were stored with (our reading of how the
+//!   handle behaves — **not vendor-verified**). An `index` outside the stored
+//!   vertices is [`REASON_STALE_HANDLE`].
 //! * **`POINT`**: the position becomes the target.
 //!
 //! ## Explicit refusal list (no marker, no hit)
 //!
-//! `ELLIPSE`, `SPLINE`, `POLYLINE`/`LWPOLYLINE` (vertex grips would have to
-//! decide the bulge semantics of the dragged segment), `INSERT`/block-member
-//! geometry (an instance transform is not an entity handle),
-//! `TEXT`/`MTEXT`/`MULTILEADER` (insertion-point and width grips), `HATCH`,
-//! `DIMENSION` (definition-point grips; the dimension is non-associative by
-//! design), `IMAGE`/`MASK`, and opaque/compound geometry (`Opaque`, `Compound`,
-//! `Mesh`, `Shape`). **Arc endpoint grips** are on this list too, as are
-//! **ellipse quadrant/axis** handles.
+//! `ELLIPSE`, `SPLINE`, `INSERT`/block-member geometry (an instance transform is
+//! not an entity handle), `TEXT`/`MTEXT`/`MULTILEADER` (insertion-point and width
+//! grips), `HATCH`, `DIMENSION` (definition-point grips; the dimension is
+//! non-associative by design), `IMAGE`/`MASK`, and opaque/compound geometry
+//! (`Opaque`, `Compound`, `Mesh`, `Shape`). **Ellipse quadrant/axis** handles
+//! are on this list too.
 //!
-//! Insertion-point, vertex, width, rotation and tangent grips are **NOT
-//! IMPLEMENTED**. They are not modelled as [`GripKind`] variants either: a
-//! variant that always yields an empty vector or an error would be a placeholder
-//! pretending to be a capability. A later lane that implements one of them adds
-//! its variant **and** its drag rule together.
+//! Insertion-point, width, rotation and tangent grips are **NOT IMPLEMENTED**.
+//! They are not modelled as [`GripKind`] variants either: a variant that always
+//! yields an empty vector or an error would be a placeholder pretending to be a
+//! capability. A later lane that implements one of them adds its variant **and**
+//! its drag rule together (as this lane did for [`GripKind::Vertex`]).
 //!
-//! ## Coordinates: 3D-exact, never projected (except the circle radius)
+//! ## Coordinates: 3D-exact, never projected (except the two in-plane rules)
 //!
 //! A handle's [`Grip::position`] is a stored or stored-derived point — the same
 //! `f64` bits as the geometry (an endpoint, a point position, a circle/arc
-//! centre) or the documented exact derivation of it (a line midpoint). Nothing
-//! is rounded and nothing is snapped.
+//! centre, a polyline vertex) or the documented exact derivation of it (a line
+//! midpoint; an arc endpoint, i.e. the stored
+//! `center + radius * (cos angle * ax + sin angle * ay)` in the arc's own plane
+//! frame, the same expression the tessellator uses). Nothing is rounded and
+//! nothing is snapped.
 //!
 //! A drag assigns the target point to the dragged handle in **all three**
 //! coordinates; nothing is projected onto a work plane or onto Z = 0. The caller
@@ -99,22 +140,26 @@
 //! never changes an elevation) — and this module stores whatever finite target it
 //! is given. A non-finite target is refused (see below) instead of stored.
 //!
-//! The **one** projection this module performs is the circle-quadrant radius: the
-//! distance is measured in the circle's own plane, precisely so that a
-//! non-planar drag cannot deform a circle. That projection applies to the *drag
-//! target of a quadrant handle* only; a centre drag, an arc drag, a line drag and
-//! a point drag are stored 3D-exact, and no handle position is ever projected
-//! back onto a plane.
+//! The **two** projections this module performs are the circle-quadrant radius
+//! and the arc-endpoint angle: both are measured in the entity's **own** plane,
+//! precisely so that a non-planar drag cannot deform a circle or tilt an arc out
+//! of its plane. Those projections apply to the *drag target of a quadrant or an
+//! arc-endpoint handle* only; a centre drag, an arc-rigid drag, a line drag, a
+//! polyline vertex drag and a point drag are stored 3D-exact (a polyline vertex
+//! keeps its own `z`), and no handle position is ever projected back onto a
+//! plane.
 //!
 //! ## The plane frame is shared, not invented
 //!
-//! Quadrant handle positions and the in-plane radius use
-//! `cad_geometry::arbitrary_axis` — the AutoCAD arbitrary-axis-algorithm frame
-//! the tessellator, representation provider, intersect/transform code and the
-//! importer already measure circle/arc angles in. It returns `(ax, ay, unit
-//! normal)`, with `ax`/`ay` orthonormal and inside the circle plane, so
-//! `dot(to - center, ax)` and `dot(to - center, ay)` are the exact in-plane
-//! coordinates of a displacement. There is no second frame in this module.
+//! Quadrant handle positions, the in-plane radius, and the arc endpoint positions
+//! and angles use `cad_geometry::arbitrary_axis` — the AutoCAD
+//! arbitrary-axis-algorithm frame the tessellator, representation provider,
+//! intersect/transform code and the importer already measure circle/arc angles
+//! in. It returns `(ax, ay, unit normal)`, with `ax`/`ay` orthonormal and inside
+//! the circle plane, so `dot(to - center, ax)` and `dot(to - center, ay)` are the
+//! exact in-plane coordinates of a displacement, and
+//! `atan2(dot(…, ay), dot(…, ax))` is the exact in-plane angle of a direction.
+//! There is no second frame in this module.
 //!
 //! ## Hit-testing rule
 //!
@@ -122,8 +167,10 @@
 //! `world` is `<= tolerance`. Candidates are visited in a fixed order — the
 //! entities in the order the caller supplied them, and within one entity its
 //! grips in list order (see the table: for a `LINE` `start`, `end`, midpoint; for
-//! a `CIRCLE` the centre and then quadrants 0..=3) — and a candidate replaces the
-//! current winner only when it is **strictly** closer.
+//! a `CIRCLE` the centre and then quadrants 0..=3; for an `ARC` the centre and
+//! then endpoint 0 = start, endpoint 1 = end; for a `POLYLINE` the vertices in
+//! stored order) — and a candidate replaces the current winner only when it is
+//! **strictly** closer.
 //!
 //! [`grip_hit_planar`] is the **plan-view** variant the host uses: the same
 //! ordering, tie-break and finiteness refusals, but the distance is measured in
@@ -139,8 +186,10 @@
 //! candidate in that iteration order, i.e. the earliest entity of the input and,
 //! within one entity, the earlier entry of the list — which is the lower `index`
 //! inside one kind, and the earlier kind in the table's order (`Endpoint` before
-//! `Midpoint` for a `LINE`, `Center` before every `Quadrant` for a `CIRCLE`).
-//! This is deterministic and is pinned by contract tests. Note that the line
+//! `Midpoint` for a `LINE`, `Center` before every `Quadrant` for a `CIRCLE`,
+//! `Center` before `Endpoint` `0` before `Endpoint` `1` for an `ARC`). For a
+//! `POLYLINE` the list is the stored vertex order, so the lower vertex index wins
+//! a tie. This is deterministic and is pinned by contract tests. Note that the
 //! midpoint is usually *nearer* than the endpoints, so a query at the midpoint is
 //! a midpoint hit, not a tie: a tie between `start` and the midpoint needs a
 //! query at a quarter of the line's length.
@@ -151,7 +200,7 @@
 //!
 //! ## Refusal reasons (English, stable, machine-matched)
 //!
-//! [`apply_grip`] refuses with an existing [`CadError`] variant whose message
+//! [`apply_grip`] refuses with an existing `CadError` variant whose message
 //! **starts with** one of these codes:
 //!
 //! * [`REASON_UNSUPPORTED_KIND`] (`CadError::Unsupported`) — the geometry kind
@@ -159,19 +208,24 @@
 //!   names the DXF class.
 //! * [`REASON_STALE_HANDLE`] (`CadError::InvalidInput`) — the [`GripId`] does
 //!   not name a handle of **this** geometry: a `LINE` with a
-//!   [`GripKind::Center`]/[`GripKind::Quadrant`]/[`GripKind::Point`] grip, an
-//!   `AcDbArc` with an [`GripKind::Endpoint`] grip (arc endpoints are not
-//!   implemented), or an `index` outside the handle range (`LINE` endpoint > 1,
-//!   `LINE` midpoint ≠ 2, `CIRCLE` centre > 0, `CIRCLE` quadrant > 3, `ARC`
-//!   centre > 0, `POINT` > 0). The caller is never trusted to have kept its id in
-//!   sync with the geometry.
+//!   [`GripKind::Center`]/[`GripKind::Quadrant`]/[`GripKind::Point`]/[`GripKind::Vertex`]
+//!   grip, an `AcDbCircle`/`AcDbArc` with a [`GripKind::Vertex`] grip, a
+//!   `POLYLINE` with a non-vertex grip, or an `index` outside the handle range
+//!   (`LINE` endpoint > 1, `LINE` midpoint ≠ 2, `CIRCLE` centre > 0, `CIRCLE`
+//!   quadrant > 3, `ARC` centre > 0, `ARC` endpoint > 1, `POLYLINE` vertex ≥ the
+//!   stored vertex count, `POINT` > 0). The caller is never trusted to have kept
+//!   its id in sync with the geometry.
 //! * [`REASON_ZERO_DISPLACEMENT`] (`CadError::InvalidInput`) — the drag would not
 //!   change the geometry, so there is nothing to write. That is the target
-//!   equalling the dragged handle's current position (endpoint, point, midpoint,
-//!   centre, quadrant), and additionally a quadrant target that already sits at
-//!   the **stored** radius: its out-of-plane offset is ignored by the radius
-//!   rule, so such a drag is equally a no-op. It is an error, not a silent `Ok`:
-//!   the command must skip the transaction (and therefore the undo entry).
+//!   equalling the dragged handle's current position (endpoint, arc endpoint,
+//!   point, midpoint, centre, quadrant, polyline vertex), and additionally:
+//!   a quadrant target that already sits at the **stored** radius (its
+//!   out-of-plane offset is ignored by the radius rule), an arc endpoint drag
+//!   whose recomputed start/sweep are identical to the stored ones (an
+//!   off-plane target along the same ray, which the angle rule ignores), and a
+//!   vertex target whose x/y equal the stored vertex (the drag keeps the stored
+//!   `z`, so a z-only difference changes nothing). It is an error, not a silent
+//!   `Ok`: the command must skip the transaction (and therefore the undo entry).
 //!   Equality is IEEE `==` (so `-0.0` equals `0.0`, and no tolerance is applied —
 //!   a sub-tolerance drag is a real, tiny edit).
 //! * [`REASON_DEGENERATE_RADIUS`] (`CadError::InvalidInput`) — a circle-quadrant
@@ -179,6 +233,11 @@
 //!   target is the centre, or the target lies on the plane normal through it). A
 //!   circle cannot have radius `0` or `NaN`, and this model never clamps: it
 //!   refuses by name.
+//! * [`REASON_DEGENERATE_ARC`] (`CadError::InvalidInput`) — an arc-endpoint drag
+//!   that has no in-plane direction (target at the centre or on the normal
+//!   through it), that produces a non-finite sweep, or whose sweep lands within
+//!   [`ARC_SWEEP_EPSILON`] of `0` or `2π`. The arc must keep an extent strictly
+//!   inside `(0, 2π)`; the sweep is **refused by name, never clamped**.
 //! * [`REASON_NON_FINITE_TARGET`] (`CadError::InvalidInput`) — the target has a
 //!   `NaN` or infinite coordinate. Storing it would corrupt the entity, and the
 //!   database refuses it at commit anyway; refusing here names the cause. The
@@ -187,10 +246,10 @@
 //!   an unstorable coordinate.
 //!
 //! The checks run in a fixed order: geometry kind, then handle identity, then
-//! target finiteness, then the drag's own geometric refusals (for a quadrant
-//! drag: "already at the handle" is checked before the radius rule, so a drag to
-//! the handle itself reports [`REASON_ZERO_DISPLACEMENT`] rather than a
-//! degenerate radius). An unsupported kind is therefore reported as
+//! target finiteness, then the drag's own geometric refusals. "Already at the
+//! handle" is checked before a drag's geometric rule, so a drag onto the handle
+//! itself reports [`REASON_ZERO_DISPLACEMENT`] rather than a degenerate radius or
+//! arc. An unsupported kind is therefore reported as
 //! [`REASON_UNSUPPORTED_KIND`] even when the id would also be stale (there is no
 //! handle of that kind to be stale *against*), while a supported kind with a
 //! mismatched id is always [`REASON_STALE_HANDLE`].
@@ -204,8 +263,12 @@
 //! every `grip.*` code has one authority.
 
 use cad_db::DbEntity;
-use cad_domain::{CadError, CadResult, EntityId, Point3, SemanticGeometry};
+use cad_domain::{EntityId, Point3, SemanticGeometry};
 use cad_geometry::{add, arbitrary_axis, dot, scale, sub};
+
+mod drag;
+pub use drag::apply_grip;
+pub(crate) use drag::finite_target;
 
 /// Stable reason code: the geometry kind exposes no grip model.
 pub const REASON_UNSUPPORTED_KIND: &str = "grip.unsupported_kind";
@@ -217,20 +280,31 @@ pub const REASON_ZERO_DISPLACEMENT: &str = "grip.zero_displacement";
 pub const REASON_NON_FINITE_TARGET: &str = "grip.non_finite_target";
 /// Stable reason code: a quadrant drag yields a zero or non-finite radius.
 pub const REASON_DEGENERATE_RADIUS: &str = "grip.degenerate_radius";
+/// Stable reason code: an arc-endpoint drag would collapse the arc's sweep.
+pub const REASON_DEGENERATE_ARC: &str = "grip.degenerate_arc";
 /// Stable reason code: the addressed entity does not exist in the drawing.
 ///
 /// Raised by the `GRIPSTRETCH` command (`crate::app_drawing::grip`), which is the
 /// only place that can know an entity id stopped resolving; see the module doc.
 pub const REASON_TARGET_MISSING: &str = "grip.target_missing";
 
+/// The angular slack that makes a recomputed arc sweep degenerate.
+///
+/// `1e-9` rad is the same slack the tessellator (`cad-geometry/src/tessellate.rs`)
+/// and the representation provider use to call an existing sweep "full"; it is
+/// reused here so "the arc vanished / became the whole circle" has one threshold
+/// in the codebase. A sweep inside it is refused, never clamped.
+pub const ARC_SWEEP_EPSILON: f64 = 1e-9;
+
 /// A draggable handle of one entity.
 ///
 /// The variants are exactly the handles the drag rules above implement; see the
-/// module doc for the deliberate absence of insertion/vertex/width/tangent
-/// kinds and for the arc-endpoint refusal.
+/// module doc for the deliberate absence of insertion/width/rotation/tangent
+/// kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GripKind {
-    /// A straight-line endpoint (`LINE` only).
+    /// An endpoint: a `LINE`'s start/end, or an `ARC`'s start (`index` 0) and end
+    /// (`index` 1) point.
     Endpoint,
     /// The midpoint of a straight line (`LINE` only); dragging translates the
     /// whole line by `to - midpoint`.
@@ -240,6 +314,10 @@ pub enum GripKind {
     /// A quadrant point of a circle (`CIRCLE` only); dragging sets the radius to
     /// the in-plane distance from the centre to the target.
     Quadrant,
+    /// A stored vertex of a polyline (`POLYLINE`/`LWPOLYLINE` only, `index` = the
+    /// vertex index in stored order); dragging moves that one vertex in x/y and
+    /// keeps its own `z`, leaving the other vertices and every bulge untouched.
+    Vertex,
     /// The position of a point entity (`POINT` only).
     Point,
 }
@@ -257,10 +335,12 @@ const QUADRANT_DIRECTIONS: [(u8, f64); 4] = [(0, 1.0), (1, 1.0), (0, -1.0), (1, 
 /// `index` is the handle's ordinal **within its kind**, in a documented order:
 /// for a `LINE`, `0` is `start`, `1` is `end` and `2` is the midpoint; for a
 /// `CIRCLE`, `0` is the centre and the quadrants are `0..=3`; for an `ARC`, `0`
-/// is the centre; for a `POINT`, `0` is the position. The id is a caller-held
-/// reference into geometry that may have changed since it was read, so
-/// [`apply_grip`] re-validates it against the geometry it is handed instead of
-/// trusting it.
+/// is the centre, `Endpoint` `0` is the start point and `Endpoint` `1` the end
+/// point; for a `POLYLINE`, a `Vertex` `index` is the **stored** vertex index
+/// (`u8`, so only vertices `0..=255` can be addressed); for a `POINT`, `0` is the
+/// position. The id is a caller-held reference into geometry that may have
+/// changed since it was read, so [`apply_grip`] re-validates it against the
+/// geometry it is handed instead of trusting it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GripId {
     pub entity: EntityId,
@@ -280,10 +360,13 @@ pub struct Grip {
 /// The handles `entity` exposes in plane space.
 ///
 /// `LINE` ⇒ `start`, `end` endpoints then the midpoint; `CIRCLE` ⇒ the centre
-/// then quadrants `0..=3`; `ARC` ⇒ the centre only (arc endpoint grips are NOT
-/// IMPLEMENTED); `POINT` ⇒ one [`GripKind::Point`] grip. Every other geometry —
-/// including the whole refusal list in the module doc — yields an empty vector:
-/// no marker is invented for a kind this build cannot drag.
+/// then quadrants `0..=3`; `ARC` ⇒ the centre, then the start (`Endpoint` `0`)
+/// and end (`Endpoint` `1`) points; `POLYLINE` ⇒ one [`GripKind::Vertex`] per
+/// stored vertex, in stored order (`0..=255`; a longer polyline exposes the first
+/// 256 vertices only, because [`GripId::index`] is a `u8` — the rest are simply
+/// not addressable in this build); `POINT` ⇒ one [`GripKind::Point`] grip. Every
+/// other geometry — including the whole refusal list in the module doc — yields
+/// an empty vector: no marker is invented for a kind this build cannot drag.
 #[must_use]
 pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
     let id = |kind, index| GripId {
@@ -327,10 +410,41 @@ pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
             }
             grips
         }
-        SemanticGeometry::Arc { center, .. } => vec![Grip {
-            id: id(GripKind::Center, 0),
-            position: *center,
-        }],
+        SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        } => {
+            let axes = plane_axes(*normal);
+            vec![
+                Grip {
+                    id: id(GripKind::Center, 0),
+                    position: *center,
+                },
+                Grip {
+                    id: id(GripKind::Endpoint, 0),
+                    position: arc_point(*center, *radius, axes, *start),
+                },
+                Grip {
+                    id: id(GripKind::Endpoint, 1),
+                    position: arc_point(*center, *radius, axes, *start + *sweep),
+                },
+            ]
+        }
+        SemanticGeometry::Polyline { points, .. } => points
+            .iter()
+            .take(MAX_VERTEX_GRIP_INDEX + 1)
+            .enumerate()
+            .map(|(index, position)| Grip {
+                // `index < MAX_VERTEX_GRIP_INDEX + 1`, so the `u8` conversion is
+                // exact (see the module doc: vertices past 255 are not
+                // addressable and are therefore not offered, never wrapped).
+                id: id(GripKind::Vertex, index as u8),
+                position: *position,
+            })
+            .collect(),
         SemanticGeometry::Point(position) => vec![Grip {
             id: id(GripKind::Point, 0),
             position: *position,
@@ -338,6 +452,9 @@ pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
         _ => Vec::new(),
     }
 }
+
+/// The highest vertex index a [`GripId`] can address: `GripId::index` is a `u8`.
+const MAX_VERTEX_GRIP_INDEX: usize = u8::MAX as usize;
 
 /// The circle/arc plane frame: the `(ax, ay)` of the shared arbitrary-axis frame.
 ///
@@ -374,6 +491,21 @@ fn quadrant_point(
 fn in_plane_distance(center: Point3, axes: (Point3, Point3), to: Point3) -> f64 {
     let offset = sub(to, center);
     dot(offset, axes.0).hypot(dot(offset, axes.1))
+}
+
+/// One point on the arc: `centre + radius * (cos(angle) * ax + sin(angle) * ay)`.
+///
+/// The expression is the tessellator's, term for term, so an arc endpoint grip
+/// sits on exactly the vertex the display draws for the same stored `start` /
+/// `sweep` (no second angle convention, no rounding).
+fn arc_point(center: Point3, radius: f64, axes: (Point3, Point3), angle: f64) -> Point3 {
+    add(
+        center,
+        add(
+            scale(axes.0, angle.cos() * radius),
+            scale(axes.1, angle.sin() * radius),
+        ),
+    )
 }
 
 /// Hit-test a world position against the handles of `entities`.
@@ -469,280 +601,6 @@ pub fn grip_hit_planar<'a>(
         }
     }
     best.map(|(_, grip)| grip)
-}
-
-/// Apply a single-handle drag to `geometry`, returning the geometry the entity
-/// must be updated to.
-///
-/// * `LINE` endpoint: the dragged endpoint takes `to`, the other endpoint is
-///   returned **bit-identically** (the very same `f64` values);
-/// * `LINE` midpoint: both endpoints move by `to - midpoint`, so the line
-///   translates rigidly (same direction, same length);
-/// * `CIRCLE` centre: the centre takes `to`; `radius`/`normal` are bit-identical;
-/// * `CIRCLE` quadrant: `radius` becomes the in-plane distance from the centre to
-///   `to`; `center`/`normal` are bit-identical;
-/// * `ARC` centre: the arc translates rigidly; `radius`/`normal`/`start`/`sweep`
-///   are bit-identical (arc endpoint grips are NOT IMPLEMENTED);
-/// * `POINT`: the position becomes `to`;
-/// * everything else, a [`GripId`] that does not name a handle of this geometry,
-///   a non-finite target and a drag with no geometric effect are refused with the
-///   stable reason codes documented in the module doc.
-///
-/// The function is pure: it writes nothing, opens no transaction and records no
-/// history. The `GRIPSTRETCH` command calls it, and on `Err` skips the
-/// transaction entirely — that is exactly why a zero displacement is an error
-/// instead of an `Ok` with unchanged geometry (no empty undo entry).
-pub fn apply_grip(
-    geometry: &SemanticGeometry,
-    id: &GripId,
-    to: Point3,
-) -> CadResult<SemanticGeometry> {
-    match geometry {
-        SemanticGeometry::Line { start, end } => apply_line(*start, *end, id, to),
-        SemanticGeometry::Circle {
-            center,
-            normal,
-            radius,
-        } => apply_circle(*center, *normal, *radius, id, to),
-        SemanticGeometry::Arc {
-            center,
-            normal,
-            radius,
-            start,
-            sweep,
-        } => apply_arc(*center, *normal, *radius, *start, *sweep, id, to),
-        SemanticGeometry::Point(position) => {
-            match (id.kind, id.index) {
-                (GripKind::Point, 0) => {}
-                (GripKind::Point, index) => {
-                    return Err(stale_handle(format!(
-                        "AcDbPoint has no Point grip at index {index} (only 0)"
-                    )));
-                }
-                (
-                    GripKind::Endpoint | GripKind::Midpoint | GripKind::Center | GripKind::Quadrant,
-                    _,
-                ) => {
-                    return Err(stale_handle(
-                        "AcDbPoint exposes a Point grip (0) only".to_string(),
-                    ));
-                }
-            }
-            finite_target(to)?;
-            if to == *position {
-                return Err(zero_displacement("AcDbPoint position"));
-            }
-            Ok(SemanticGeometry::Point(to))
-        }
-        other => Err(unsupported_kind(crate::app_drawing::class_name(other))),
-    }
-}
-
-/// The `LINE` drag rules (two endpoints, then the translating midpoint).
-fn apply_line(start: Point3, end: Point3, id: &GripId, to: Point3) -> CadResult<SemanticGeometry> {
-    match (id.kind, id.index) {
-        (GripKind::Endpoint, 0) => {
-            finite_target(to)?;
-            if to == start {
-                return Err(zero_displacement("AcDbLine start endpoint"));
-            }
-            Ok(SemanticGeometry::Line { start: to, end })
-        }
-        (GripKind::Endpoint, 1) => {
-            finite_target(to)?;
-            if to == end {
-                return Err(zero_displacement("AcDbLine end endpoint"));
-            }
-            Ok(SemanticGeometry::Line { start, end: to })
-        }
-        (GripKind::Endpoint, index) => Err(stale_handle(format!(
-            "AcDbLine has no Endpoint grip at index {index} (0 = start, 1 = end)"
-        ))),
-        (GripKind::Midpoint, 2) => {
-            finite_target(to)?;
-            let from = midpoint(start, end);
-            if to == from {
-                return Err(zero_displacement("AcDbLine midpoint"));
-            }
-            // One delta for both endpoints: the line translates, so it stays
-            // parallel to itself and keeps its length.
-            let delta = sub(to, from);
-            let new_start = add(start, delta);
-            let new_end = add(end, delta);
-            if !is_finite(new_start) || !is_finite(new_end) {
-                // Finite inputs can still overflow to infinity; storing that
-                // would corrupt the entity, so it is refused like any other
-                // unstorable coordinate.
-                return Err(overflowed("AcDbLine midpoint"));
-            }
-            Ok(SemanticGeometry::Line {
-                start: new_start,
-                end: new_end,
-            })
-        }
-        (GripKind::Midpoint, index) => Err(stale_handle(format!(
-            "AcDbLine has no Midpoint grip at index {index} (only 2)"
-        ))),
-        (GripKind::Center | GripKind::Quadrant | GripKind::Point, _) => Err(stale_handle(
-            "AcDbLine exposes Endpoint (0 = start, 1 = end) and Midpoint (2) grips only"
-                .to_string(),
-        )),
-    }
-}
-
-/// The `CIRCLE` drag rules (centre, then the four in-plane quadrants).
-fn apply_circle(
-    center: Point3,
-    normal: Point3,
-    radius: f64,
-    id: &GripId,
-    to: Point3,
-) -> CadResult<SemanticGeometry> {
-    match (id.kind, id.index) {
-        (GripKind::Center, 0) => {
-            finite_target(to)?;
-            if to == center {
-                return Err(zero_displacement("AcDbCircle centre"));
-            }
-            Ok(SemanticGeometry::Circle {
-                center: to,
-                normal,
-                radius,
-            })
-        }
-        (GripKind::Center, index) => Err(stale_handle(format!(
-            "AcDbCircle has no Center grip at index {index} (only 0)"
-        ))),
-        (GripKind::Quadrant, index @ 0..=3) => {
-            finite_target(to)?;
-            let axes = plane_axes(normal);
-            let direction = QUADRANT_DIRECTIONS[usize::from(index)];
-            if to == quadrant_point(center, radius, axes, direction) {
-                return Err(zero_displacement("AcDbCircle quadrant"));
-            }
-            let new_radius = in_plane_distance(center, axes, to);
-            if !new_radius.is_finite() || new_radius <= 0.0 {
-                return Err(degenerate_radius(new_radius));
-            }
-            if new_radius == radius {
-                // A target off the plane at exactly the stored radius has no
-                // geometric effect (the radius rule ignores the out-of-plane
-                // offset), so this is a zero-displacement refusal too: never an
-                // `Ok` that would stage an unchanged entity.
-                return Err(unchanged_radius(new_radius));
-            }
-            Ok(SemanticGeometry::Circle {
-                center,
-                normal,
-                radius: new_radius,
-            })
-        }
-        (GripKind::Quadrant, index) => Err(stale_handle(format!(
-            "AcDbCircle has no Quadrant grip at index {index} \
-             (0 = +ax, 1 = +ay, 2 = -ax, 3 = -ay)"
-        ))),
-        (GripKind::Endpoint | GripKind::Midpoint | GripKind::Point, _) => Err(stale_handle(
-            "AcDbCircle exposes a Center grip (0) and Quadrant grips (0..=3) only".to_string(),
-        )),
-    }
-}
-
-/// The `ARC` drag rule: the centre grip only (arc endpoints are NOT IMPLEMENTED).
-fn apply_arc(
-    center: Point3,
-    normal: Point3,
-    radius: f64,
-    start: f64,
-    sweep: f64,
-    id: &GripId,
-    to: Point3,
-) -> CadResult<SemanticGeometry> {
-    match (id.kind, id.index) {
-        (GripKind::Center, 0) => {
-            finite_target(to)?;
-            if to == center {
-                return Err(zero_displacement("AcDbArc centre"));
-            }
-            Ok(SemanticGeometry::Arc {
-                center: to,
-                normal,
-                radius,
-                start,
-                sweep,
-            })
-        }
-        (GripKind::Center, index) => Err(stale_handle(format!(
-            "AcDbArc has no Center grip at index {index} (only 0)"
-        ))),
-        (GripKind::Endpoint, _) => Err(stale_handle(
-            "AcDbArc endpoint grips are NOT IMPLEMENTED; an AcDbArc exposes a Center grip (0) only"
-                .to_string(),
-        )),
-        (GripKind::Quadrant, _) => Err(stale_handle(
-            "AcDbArc exposes a Center grip (0) only, not a Quadrant grip".to_string(),
-        )),
-        (GripKind::Midpoint | GripKind::Point, _) => Err(stale_handle(
-            "AcDbArc exposes a Center grip (0) only".to_string(),
-        )),
-    }
-}
-
-/// A `grip.unsupported_kind` refusal naming the DXF class.
-fn unsupported_kind(class: &str) -> CadError {
-    CadError::Unsupported(format!(
-        "{REASON_UNSUPPORTED_KIND}: {class} exposes no grippable handle"
-    ))
-}
-
-/// A `grip.stale_handle` refusal with the specific mismatch.
-fn stale_handle(detail: String) -> CadError {
-    CadError::InvalidInput(format!("{REASON_STALE_HANDLE}: {detail}"))
-}
-
-/// A `grip.zero_displacement` refusal naming the handle that did not move.
-fn zero_displacement(handle: &str) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_ZERO_DISPLACEMENT}: the {handle} is already at the drag target"
-    ))
-}
-
-/// A `grip.zero_displacement` refusal for a quadrant drag whose radius is
-/// already stored (an off-plane target at the current radius).
-fn unchanged_radius(radius: f64) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_ZERO_DISPLACEMENT}: the AcDbCircle quadrant drag leaves the radius at {radius}"
-    ))
-}
-
-/// A `grip.degenerate_radius` refusal naming the rejected radius.
-fn degenerate_radius(radius: f64) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_DEGENERATE_RADIUS}: the AcDbCircle quadrant drag yields radius {radius}; \
-         a circle radius must be positive and finite (the centre is not moved by this handle)"
-    ))
-}
-
-/// A `grip.non_finite_target` refusal for a finite input whose result overflows.
-fn overflowed(handle: &str) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_NON_FINITE_TARGET}: translating the {handle} produces a non-finite coordinate"
-    ))
-}
-
-/// Refuse a target that could not be stored as a world point.
-///
-/// Exposed to the `GRIPSTRETCH` command so it can refuse a non-finite target
-/// **before** it even reads the drawing, with the same code and message the drag
-/// rule would produce.
-pub(crate) fn finite_target(to: Point3) -> CadResult<()> {
-    if is_finite(to) {
-        Ok(())
-    } else {
-        Err(CadError::InvalidInput(format!(
-            "{REASON_NON_FINITE_TARGET}: ({}, {}, {})",
-            to.x, to.y, to.z
-        )))
-    }
 }
 
 fn is_finite(point: Point3) -> bool {

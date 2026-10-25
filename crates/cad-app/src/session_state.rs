@@ -353,7 +353,17 @@ impl SessionState {
     /// disagree with the committed point (and grid snap can never silently
     /// diverge from ortho). The raw point is returned unchanged while both
     /// switches are off or when the tool has no previous captured point.
-    fn constrained_point(&self, previous: Option<Point3>, raw: Point3) -> Point3 {
+    ///
+    /// The **grip drag** is the third caller (`cad-host`'s `input/grip_drag.rs`):
+    /// a dragged handle is another point entry, so it must obey the same two
+    /// switches in the same order rather than growing a second constraint solver.
+    /// There `previous` is the grip's discarded-original position and `raw` keeps
+    /// the handle's own `z`. An invalid spacing needs no special arm here —
+    /// [`crate::snap::snap_point`] passes a point through unchanged when the
+    /// spacing is not finite and strictly positive, and
+    /// [`SessionState::set_snap_spacing`] refuses such a value on write, so an
+    /// unusable spacing means the switch has no effect (never a fabricated one).
+    pub fn constrained_point(&self, previous: Option<Point3>, raw: Point3) -> Point3 {
         let snapped = crate::snap::snap_point(self.snap_grid_enabled, self.snap_spacing, raw);
         crate::ortho::ortho_constrain_point(self.ortho_enabled, previous, snapped)
     }

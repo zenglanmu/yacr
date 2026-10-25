@@ -1,3 +1,106 @@
+## 2026-10-26 夹点模型扩展（二）：ARC 两端点 / LWPOLYLINE 顶点
+
+### 结论
+
+在上一轮（LINE 中点 / CIRCLE 圆心+四象限 / ARC 圆心）的基础上，`cad-app` 的**纯夹点模型**再扩两类句柄：
+**ARC 两个端点**与 **LWPOLYLINE/`Polyline` 每个顶点**。新增 `GripKind::Vertex`，新增拒绝码
+`grip.degenerate_arc`；`grips_for_entity` / `grip_hit` / `grip_hit_planar` / `apply_grip` 的**签名不变**，
+`cad-host` 的 arm/track/commit/marker、`render_scene` 的 marker overlay、`GRIPSTRETCH` 命令与 IPC 载荷
+**一行未改**（本 lane 未改宿主生产代码；`cad-host` 的测试也无需改断言——那条「选中 LINE 的 marker 数 = 3」
+用例是 LINE 的事实，与 ARC/折线无关）。文件超 1000 行，故 `grips.rs` 拆成模块目录：`grips/mod.rs`
+（文档 / 句柄表 / 命中）+ `grips/drag.rs`（各类拖拽规则）。
+
+### 句柄清单（`index` 与列表顺序 = 命中候选顺序）
+
+| 几何 | 句柄（按 `grips_for_entity` 返回顺序） |
+|---|---|
+| `LINE` | `Endpoint` 0 = `start`，1 = `end`，`Midpoint` 2 |
+| `CIRCLE` | `Center` 0，`Quadrant` 0..=3 |
+| `ARC` | `Center` 0，**`Endpoint` 0 = 弧起点**，**`Endpoint` 1 = 弧终点**（顺序固定为 `Center, Endpoint 0, Endpoint 1`） |
+| `POLYLINE`/`LWPOLYLINE` | **`Vertex` `index` = 存储顶点序号，一顶点一夹点** |
+| `POINT` | `Point` 0 |
+
+`SemanticGeometry::Polyline` 是所有折线类（LWPOLYLINE / `AcDb2dPolyline` / 旧 `AcDbPolyline` /
+3D `AcDb3dPolyline`）的**唯一**语义变体：类名不进域模型，**无法单独排除 3D 折线**，故顶点夹点对所有折线
+生效（拖拽只改 x/y、保留顶点自身 z，与 `LINE` 端点同一规则，不做 3D 标高编辑）。按类区分 3D 折线
+**NOT IMPLEMENTED**，属已声明缺口，不是静默行为。`GripId::index` 是 `u8`：折线只**提供**顶点
+`0..=255` 的夹点（`take(256)`），更多顶点不可寻址，且**绝不**把 `index` 取模回绕成别的顶点。
+
+### 几何规则（写在 `grips/mod.rs` 模块文档 + `grips/drag.rs`）
+
+- **ARC 端点位置**：`center + radius * (cos t * ax + sin t * ay)`，`t` 分别为存储 `start`（端点 0）与
+  `start + sweep`（端点 1），`(ax, ay)` 来自 `cad_geometry::arbitrary_axis(normal)` —— 与 tessellator 量
+  弧角用的是**同一个** AutoCAD arbitrary-axis 框架，没有第二个框架、没有取整/吸附漂移。
+- **ARC 端点拖拽（我们的选择，不是 AutoCAD 断言）**：弧留在**同一圆**上 —— `center`/`radius`/`normal`
+  **逐位不变**；被拖端点的角度 = 目标在平面内的方向（`atan2(dot(offset, ay), dot(offset, ax))`，离面
+  偏移含 z 被忽略，故拖拽不会把弧拉出自身平面）；**另一端保持原角度**（拖起点时端角 = 存储
+  `start + sweep`，拖终点时起始角 = 存储 `start`）；张角**按存储方向重算**（`sweep >= 0` 逆时针 /
+  `sweep < 0` 顺时针或镜像弧都保持原侧），并必须落在**开**区间 `(0, 2π)`。压没弧（张角 ~0 或 ~2π，
+  阈值 `ARC_SWEEP_EPSILON = 1e-9` rad —— 与 tessellator/provider 判「整圆」同一 slack）或目标在平面内
+  无方向（圆心本身 / 圆心法线上）按名拒绝 **`grip.degenerate_arc`**，**绝不夹取**；`1e-6` rad 这类极小
+  但真实存在的张角原样存储（测试钉住）。
+- **LWPOLYLINE 顶点拖拽**：只有该顶点 x/y 取目标值，**保留其自身 z**（平面视图拖拽不改标高）；其余
+  顶点与 `closed` **逐位不变**，`bulges` 向量**整体原样复制** ⇒ **不重算任何 bulge**：进/出该顶点的两段
+  保留原有 bulge（这是我们对该句柄行为的解读，**未经 AutoCAD vendor 验证**）。顶点按世界坐标存储
+  （importer 已把 LWPOLYLINE 的 OCS/elevation 映射进世界点），故本层没有额外的 elevation/normal 框架
+  要去套；OCS 负 Z 的 bulge 取反也发生在 importer，模型只做逐字节保持。
+- **零位移**沿用同一码并扩到新句柄：目标等于句柄本身（弧端点 / 顶点）⇒ `grip.zero_displacement`；
+  另两类「拖了但几何不变」也按零位移拒绝 —— 弧端点目标**沿同一平面射线离面**（角度规则忽略离面
+  分量）、顶点目标**只改 z**（拖拽保留存储 z），因此都不会产生「实体未变」的空事务 / 空撤销步。
+- **顺序（未变）**：几何种类 → 句柄身份 → 目标有限性 → 「已在句柄上」→ 该句柄自己的几何规则。
+  故 `grip.unsupported_kind` / `grip.stale_handle` / `grip.non_finite_target` / `grip.zero_displacement`
+  的既有语义一字未改，新码 `grip.degenerate_arc` 只在弧端点规则里出现。
+- **tie-break（未变）**：候选顺序 = 列表顺序，等距时先出现者胜。ARC 的 `Center` 仍排第一（保留它过去
+  赢下的所有 tie），`Endpoint 0` 先于 `Endpoint 1`；折线按**存储顶点序**，故低序号顶点赢 tie。
+
+### 拒绝面（明确未做）
+
+`ELLIPSE`（含轴/象限）、`SPLINE`（控制点）、`INSERT` 块成员、`TEXT`/`MTEXT`/`MULTILEADER`、`HATCH`、
+`DIMENSION`、`IMAGE`/`MASK`、`Opaque`/`Compound`/`Mesh`/`Shape` 仍返回**空句柄表**
+（`grip.unsupported_kind`）。多夹点 / 多实体拉伸、拖拽期间的 OSNAP 捕捉、3D 夹点编辑、夹点右键菜单与
+`GRIPMULTIFUNCTIONAL` 仍不存在；`dom-canvas` 载体（X11/XWayland、web）仍**没有**夹点路径（模型扩展
+不改变那条载体事实）。倾斜弧在 plan view 里拖端点时宿主仍按「保留被拖句柄自身 z」给目标，模型再取
+其平面内方向 —— 该组合没有运行时/像素证据，属未验证。
+
+### 测试（合成契约，非运行时/GUI 证据）
+
+- `crates/cad-app/src/tests/grips_curves.rs`（改，24 条）：ARC 句柄表改为 `Center 0, Endpoint 0, Endpoint 1`
+  并逐位比对端点位置（+Z 与倾斜法向两种，倾斜用例断言端点在弧平面内、距圆心 = 半径）、拖起点（离面
+  目标仍按平面内方向；圆心/半径/法向逐位不变；张角重算；被锚定端点位置不变）、拖终点（起始角**位级**
+  不变）、方向保持（负张角弧仍为负、被拖到锚定端「后面」给正向补角）、压没拒绝（~0 / ~2π / 恰好整圈 /
+  圆心 / 法向点）、极小张角不夹取、零位移（句柄本身 + 沿同一射线离面）、ARC 的 kind/index 齐全 stale 面。
+- `crates/cad-app/src/tests/grips_polyline.rs`（新，13 条）：一顶点一夹点且位置位级相等、闭合折线顺序、
+  无 bulge 折线（3D/旧 `AcDbPolyline` 形态）仍可拖且 bulge 向量保持空、300 顶点只提供 0..=255 且不
+  回绕、单顶点拖拽（目标带 z 时保留自身 z，其余顶点与 bulge 位级不变、`closed` 不变）、bulge 不重算
+  （0.5 / -0.25 逐位）、闭合折线保持闭合、越界 index stale、非 Vertex kind stale、零位移（句柄本身 +
+  仅 z 变化）、命中最近顶点、等距 tie 归低序号、plan-view 命中仍返回存储 3D 顶点。
+- `crates/cad-app/src/tests/drawing/grip.rs`（改，15 条）：`GRIPSTRETCH` 命令级新增 **ARC 端点**用例
+  （一次 ChangeSet/一条 update、revision +1、一步撤销、undo 恢复原几何完全相等）、**弧端点压没在开事务
+  之前被拒**（revision/undo 不动）、**折线顶点**用例（一条事务、目标 z 不落库、其余顶点与 bulge 不变、
+  undo 原样恢复）。fixture 新增 ARC(id 6) 与 POLYLINE(id 7)。
+- `crates/cad-app/src/tests/grips.rs`（改，26 条）：删掉 `lwpolyline_exposes_no_grips`（折线已有夹点），
+  保留 ELLIPSE/SPLINE/TEXT/INSERT 的「无夹点」断言。
+- 计数：`cad-app` lib **1044 passed / 0 failed**（上一轮 1023 + 本 lane 新增 21 条净增，含并行 lane
+  在 crate 内新增的用例）；`cad-host` lib **227 passed / 0 failed**（宿主未改，含并行 lane 用例）。
+
+### 本地命令（实际运行）
+
+- `cargo test -p cad-app --lib --locked` → **1044 passed / 0 failed**。
+- `cargo test -p cad-host --lib --locked` → **227 passed / 0 failed**。
+- `cargo clippy -p cad-app -p cad-host --all-targets --locked -- -D warnings` → exit 0
+  （`set -o pipefail` + `PIPESTATUS[0]` 显式检查，未用 `| tail -1` 吞退出码）。
+- `cargo fmt --all -- --check` → exit 0（首次检查仅有本 lane 4 个文件的 diff，逐项确认后 `cargo fmt --all`；
+  未改动其它 lane 文件内容）。
+- `python3 scripts/check-file-size.py` → OK（978 代码文件，上限 1000；`grips/mod.rs` 622、
+  `grips/drag.rs` 483、`tests/grips.rs` 784、`tests/grips_curves.rs` 815、
+  `tests/grips_polyline.rs` 394、`tests/drawing/grip.rs` 808）。
+- **NOT RUN**：全 workspace 全量门禁、WASM/平台编译矩阵、真实 GPU/GUI/像素证据、`dom-canvas` 载体运行
+  证据 —— 本 lane 只改 `cad-app` 的纯模型与其测试 + 文档，按日常策略只验证自己的改动范围。
+- **注意（协作）**：工作树中 `crates/cad-host/src/input/grip_drag.rs`、`crates/cad-app/src/session_state.rs`、
+  `crates/cad-host/src/tests/mod.rs`、新文件 `crates/cad-host/src/tests/grip_drafting.rs` 的未提交改动
+  **属于另一 lane**（拖拽中的栅格/正交约束）。本 lane 未编辑其内容、未暂存、未提交；因此本轮
+  **不**对「拖拽期间捕捉」做任何结论（compatibility 那行只保留既有/未变事实）。
+
 ## 2026-10-26 夹点模型扩展：LINE 中点 / CIRCLE 圆心 + 四象限 / ARC 圆心
 
 ### 结论
@@ -539,6 +642,44 @@ BTreeMap<LayerId, LayerAttributes>`（在 `render_attributes` 旁边），单一
    编辑面为零（无事务、无撤销、无 wire 变化）。
 6. **wire/UI 不变**：图层 wire 形状与面板（色块仍是名字哈希）**本轮完全未动**。
 7. **plot-style 名字**：无法导出（写入器只发句柄）；CTB/STB 归一化未实现。
+
+## 2026-10-26 夹点扩展（弧端点 / 多段线顶点）+ 拖拽遵循 SNAP/ORTHO
+
+### 结论
+
+1. **弧端点夹点**（`ARC`：`Center 0`、`Endpoint 0` = 起点、`Endpoint 1` = 终点）：拖端点让弧**留在同一圆上**
+   （圆心/半径/法向逐位不变），被拖端点角度 = 目标在弧自身平面内的方向（复用 `grips` 的 `plane_axes` /
+   `cad_geometry::arbitrary_axis` 同一坐标架），另一端保持原角度，张角按**原方向**重算且必须落在开区间
+   `(0, 2π)`；压没弧（张角 ~0/~2π，阈值 `1e-9` rad，与「整圆」判定同一 slack）或目标在平面内无方向 →
+   `grip.degenerate_arc`，**绝不夹取**。该规则是**本项目选择，不是 AutoCAD 断言**。
+2. **多段线顶点夹点**（`POLYLINE`/`LWPOLYLINE`：`Vertex index` = 存储顶点序号）：拖拽只把该顶点 x/y 设为目标、
+   **保留其自身 z**，其余顶点与 `closed` 逐位不变，`bulges` 整体原样复制（**不重算 bulge**，属我们的解读，
+   未经 vendor 验证）；越界 `index` 为 `grip.stale_handle`；`GripId::index` 是 `u8`，故只有顶点 `0..=255`
+   可寻址。`SemanticGeometry::Polyline` 不携带类名，因此**无法单独排除 3D 折线**（已声明）。
+3. **拖拽遵循制图开关**：`HostCore` 的拖拽目标现在走 `SessionState::constrained_point` —— 与取点/预览**同一个**
+   约束实现：**先栅格捕捉**（`SNAP`，`SNAPUNIT`、世界原点、半程远离零、z 不变）**再 ORTHO**（轴过**夹点原位**，
+   `|dx| >= |dy|` 取水平、平局取水平），预览 marker 与提交的 `GripStretch` 携带**同一坐标**；两开关关时与之前
+   逐位相同。间距非法（非有限/`<=0`）由会话设置拒绝、量化器原样放行，不伪造间距。**OSNAP 仍不参与夹点拖拽**。
+
+代码结构：`crates/cad-app/src/grips.rs` 因超过 1000 行按门禁拆成 `grips/mod.rs`（句柄表/命中/文档）+
+`grips/drag.rs`（各类拖拽规则），公共 API 不变；`cad-host` 的生产代码只改了 `drag_target` 一行接线。
+
+### 已运行证据（本机，2026-10-26）
+
+- `cargo test -p cad-app --lib` → **1044 passed / 0 failed**（弧端点/弧退化/多段线顶点/命令级 undo 契约）。
+- `cargo test -p cad-host --lib` → **227 passed / 0 failed**（新增 `tests/grip_drafting.rs` 6 项：
+  ORTHO 近轴、栅格量化、两者同时的顺序（并断言与反序结果不同）、两开关关的回归、无导航 delta + 点击被吞）。
+- `cargo clippy -p cad-app -p cad-host --all-targets --locked -- -D warnings` → 0；
+  `cargo fmt --all -- --check` → 0；`check-file-size.py` → OK（978 文件 ≤1000）。
+
+### NOT RUN / 边界
+
+- **无 GUI/像素/真窗口/真实鼠标证据**；倾斜圆的象限拖拽、倾斜弧的端点拖拽、多段线顶点拖拽都只有契约测试。
+- **OSNAP 不参与夹点拖拽**；3D 夹点编辑（改 z）**NOT IMPLEMENTED**；多夹点/多实体拉伸、夹点右键菜单不存在；
+  `dom-canvas` 载体（X11/XWayland、web）仍无任何夹点路径。
+- `ELLIPSE`/`SPLINE`/`INSERT`/`TEXT`/`HATCH`/`DIMENSION`/`IMAGE`/`MASK` 仍无夹点；3D 折线无法按类区分。
+
+---
 
 ## 2026-10-26 当前图层规则：锁/冻/关不可设为当前层，当前层也不可被隐藏
 
