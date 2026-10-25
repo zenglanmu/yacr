@@ -35,8 +35,8 @@ setCommandCatalog(['SWITCH2D3D', 'PROJECTION', 'ORBIT', 'FIT', 'PAN', 'ZOOMIN', 
 const zh = await readCatalog('zh-CN');
 const en = await readCatalog('en');
 const t = createTranslator({ 'zh-CN': zh, en }, 'en');
-const loaded = { documentLabel: 'fixture.dxf', entityCount: 12, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: true, canPlot: true };
-const empty = { documentLabel: null, entityCount: null, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: false, canPlot: false };
+const loaded = { documentLabel: 'fixture.dxf', entityCount: 12, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: true, canPlot: true };
+const empty = { documentLabel: null, entityCount: null, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: false, canPlot: false };
 const EXPECTED_VIEWS = ['top', 'bottom', 'front', 'back', 'left', 'right', 'isometric'];
 
 function viewTab() {

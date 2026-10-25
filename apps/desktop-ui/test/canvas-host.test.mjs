@@ -626,9 +626,12 @@ test('.native-input is the only element with pointer listeners', async () => {
   const transport = await readModule('canvas-host.mjs');
   const workspace = await readModule('components/Workspace.jsx');
 
-  // Every pointer listener in the app targets the CAD partition element.
+  // Every pointer listener in the app targets the CAD partition element. The
+  // app may also add **none** at all: the local pixel readout was removed when
+  // the status bar started showing the host's world coordinates, so there is no
+  // app-level pointer listener left — and, above all, none on another element.
   const appTargets = [...app.matchAll(/(\w+)\.addEventListener\('pointer/g)].map(match => match[1]);
-  assert.deepEqual([...new Set(appTargets)], ['surfaceNode']);
+  assert.ok(appTargets.every(target => target === 'surfaceNode'), appTargets.join(','));
 
   // Inside the navigation binding, the only listener target is the element it was
   // handed - no query, no id lookup, no second surface.

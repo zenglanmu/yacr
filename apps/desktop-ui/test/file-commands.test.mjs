@@ -20,8 +20,8 @@ setCommandCatalog(HOST_NAMES);
 
 // The frozen `cad_status` capability shape: the three new booleans always travel
 // with `canOpen`/`canFit`.
-const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
-const empty = { documentLabel: null, entityCount: null, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: false, canPlot: false, canFit: false };
+const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
+const empty = { documentLabel: null, entityCount: null, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: false, canPlot: false, canFit: false };
 
 test('file-level commands are gated by the host capability booleans, never by a host-owned exclusion', async () => {
   // NEW: a blank drawing needs no document, so it is admitted on the start page.

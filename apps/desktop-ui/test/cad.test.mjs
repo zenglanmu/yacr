@@ -8,7 +8,7 @@ import { readAppSource, readComponentsSource } from './helpers.mjs';
 // explicitly unsupported, so load a representative set once.
 setCommandCatalog(['OPEN', 'NEW', 'SAVE', 'PLOT', 'FIT', 'LINE', 'MOVE', 'CONFIRM', 'CANCEL', 'UNDO']);
 
-const empty = { documentLabel: null, entityCount: null, loading: false, importProgress: null, error: null, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: false, canPlot: false, canFit: false, backend: null, adapter: null, camera: null, importCount: 0, frameCount: 0, selection: { count: 0, empty: true, rows: [], mixedKeys: [] } };
+const empty = { documentLabel: null, entityCount: null, loading: false, importProgress: null, error: null, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: false, canPlot: false, canFit: false, backend: null, adapter: null, camera: null, importCount: 0, frameCount: 0, cursorWorld: null, selection: { count: 0, empty: true, rows: [], mixedKeys: [] } };
 const loaded = { ...empty, documentLabel: 'fixture.dwg', entityCount: 3, canSave: true, canPlot: true, canFit: true, backend: 'Vulkan', adapter: 'hardware', camera: { center: [10, 20], scale: 2 }, importCount: 1, frameCount: 10 };
 const importing = { ...empty, loading: true, canOpen: false, canNew: false, importProgress: { phase: 'entities', entitiesDone: 40, entitiesTotal: 200, bytes: 4096, cancellable: true } };
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -17,7 +17,7 @@ test('status validates explicit empty document and rejects unknown or malformed 
   assert.equal(parseCadStatus(empty), empty);
   assert.equal(parseCadStatus(loaded), loaded);
   assert.equal(parseCadStatus(importing), importing);
-  for (const value of [null, {}, [], 'unknown', { ...empty, entityCount: undefined }, { ...empty, loading: 'false' }, { ...empty, canNew: undefined }, { ...empty, canSave: 'true' }, { ...empty, canPlot: 1 }, { ...empty, gridEnabled: undefined }, { ...empty, gridEnabled: 'true' }, { ...empty, gridEnabled: 1 }, { ...empty, orthoEnabled: undefined }, { ...empty, orthoEnabled: 'true' }, { ...empty, orthoEnabled: 1 }, { ...empty, camera: { center: [0], scale: 1 } }, { ...empty, camera: { center: [0, 0], scale: 0 } }, { ...empty, frameCount: -1 }, { ...empty, snapEnabled: 'true' }, { ...empty, snapEnabled: 1 }, { ...empty, hoverPreview: 'true' }, { ...empty, snapKind: 1 }, { ...empty, snapKind: {} }]) {
+  for (const value of [null, {}, [], 'unknown', { ...empty, entityCount: undefined }, { ...empty, loading: 'false' }, { ...empty, canNew: undefined }, { ...empty, canSave: 'true' }, { ...empty, canPlot: 1 }, { ...empty, gridEnabled: undefined }, { ...empty, gridEnabled: 'true' }, { ...empty, gridEnabled: 1 }, { ...empty, orthoEnabled: undefined }, { ...empty, orthoEnabled: 'true' }, { ...empty, orthoEnabled: 1 }, { ...empty, snapGridEnabled: undefined }, { ...empty, snapGridEnabled: 'true' }, { ...empty, snapGridEnabled: 1 }, { ...empty, snapSpacing: undefined }, { ...empty, snapSpacing: null }, { ...empty, snapSpacing: 0 }, { ...empty, snapSpacing: -5 }, { ...empty, snapSpacing: '10' }, { ...empty, snapSpacing: Number.NaN }, { ...empty, snapSpacing: Number.POSITIVE_INFINITY }, { ...empty, camera: { center: [0], scale: 1 } }, { ...empty, camera: { center: [0, 0], scale: 0 } }, { ...empty, frameCount: -1 }, { ...empty, snapEnabled: 'true' }, { ...empty, snapEnabled: 1 }, { ...empty, hoverPreview: 'true' }, { ...empty, snapKind: 1 }, { ...empty, snapKind: {} }]) {
     assert.throws(() => parseCadStatus(value), /CAD_STATUS_INVALID/);
   }
   // The display-grid switch is required and always present (unlike the optional
@@ -25,6 +25,15 @@ test('status validates explicit empty document and rejects unknown or malformed 
   // rather than rendered as a guessed off chip.
   const gridOff = { ...empty, gridEnabled: false };
   assert.equal(parseCadStatus(gridOff), gridOff);
+  // The grid-snap switch and its spacing are required the same way: a real
+  // boolean, and a finite spacing strictly greater than zero (the session setter
+  // refuses 0/NaN, so a malformed value is a contract violation, never a guessed
+  // spacing to render).
+  const snapGridOn = { ...empty, snapGridEnabled: true, snapSpacing: 2.5 };
+  assert.equal(parseCadStatus(snapGridOn), snapGridOn);
+  assert.equal(parseCadStatus(snapGridOn).snapSpacing, 2.5);
+  assert.equal(parseCadStatus(empty).snapGridEnabled, false);
+  assert.equal(parseCadStatus(empty).snapSpacing, 10);
   // `orthoEnabled` is required the same way (the ORTHO chip is a real toggle, so
   // a guessed default is never acceptable), and a real boolean is carried as-is.
   const orthoOn = { ...empty, orthoEnabled: true };
@@ -40,6 +49,29 @@ test('status validates explicit empty document and rejects unknown or malformed 
   assert.equal(parseCadStatus(snapKind), snapKind);
   const snapKindNull = { ...empty, snapKind: null };
   assert.equal(parseCadStatus(snapKindNull), snapKindNull);
+  // The cursor's world coordinate is required and strictly shaped: `null` or
+  // exactly three finite numbers. A malformed point is rejected outright, never
+  // rendered as a drawing coordinate the host did not compute.
+  const worldCursor = { ...empty, cursorWorld: [1.5, -2.25, 0] };
+  assert.equal(parseCadStatus(worldCursor), worldCursor);
+  assert.equal(parseCadStatus(worldCursor).cursorWorld[1], -2.25);
+  for (const cursorWorld of [
+    undefined,
+    '0,0,0',
+    {},
+    [],
+    [0, 0],
+    [0, 0, 0, 0],
+    [0, 0, '0'],
+    [0, 0, Number.NaN],
+    [0, 0, Number.POSITIVE_INFINITY],
+  ]) {
+    assert.throws(
+      () => parseCadStatus({ ...empty, cursorWorld }),
+      /CAD_STATUS_INVALID/,
+      `cursorWorld ${JSON.stringify(cursorWorld)}`,
+    );
+  }
 });
 
 test('import progress is validated and never rendered from a malformed block', () => {

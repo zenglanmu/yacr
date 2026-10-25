@@ -51,7 +51,7 @@ const en = await readCatalog('en');
 const HOST_NAMES = ['MLEADER', 'TEXT', 'CONFIRM', 'CANCEL'];
 setCommandCatalog(HOST_NAMES);
 
-const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
+const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
 const withTool = tool => ({ ...loaded, tool });
 
 // A structurally complete status payload, so `parseCadStatus` is exercised for
@@ -63,7 +63,7 @@ const BASE = {
   importProgress: null,
   error: null,
   canOpen: true,
-  canNew: true, gridEnabled: true, orthoEnabled: false,
+  canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false,
   canSave: true,
   canPlot: true,
   canFit: true,
@@ -72,6 +72,7 @@ const BASE = {
   camera: null,
   importCount: 0,
   frameCount: 0,
+  cursorWorld: null,
   selection: { count: 0, empty: true, rows: [], mixedKeys: [] },
 };
 

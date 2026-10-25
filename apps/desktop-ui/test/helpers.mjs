@@ -51,16 +51,17 @@ export async function readCatalog(locale) {
 // selectors, interaction-only measurement/zoom selectors, then aliases).
 // NEW/SAVE/PLOT are present because the router accepts them, and so are their
 // aliases — the chrome no longer excludes them: the host's `canNew`/`canSave`/
-// `canPlot` booleans decide. `SNAP` is **absent** because the router refuses it
-// (AutoCAD's `SNAP` is grid snap, a different feature); `OSNAP` is the
-// object-snap toggle the router does accept.
+// `canPlot` booleans decide. `SNAP` is **present**: it is AutoCAD's grid snap
+// (F9), a real selector of its own (`CommandId::ToggleSnapGrid`) with the
+// `SNAPUNIT` spacing sysvar. It is a different feature from object snap
+// (`OSNAP`), which stays the F3 toggle.
 export const HOST_NAMES = [
   'OPEN', 'NEW', 'PLOT', 'SAVE', 'CANCEL', 'PAN', 'ZOOM', 'FIT', 'RESETVIEW', 'TOGGLELAYER',
   'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'SELECT', 'SELECTALL', 'MEASURE', 'CONFIRM',
   'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
   'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'DIMLINEAR', 'DIMALIGNED', 'DIMRADIUS', 'DIMDIAMETER', 'DIMCENTER', 'DIMANGULAR', 'DIMORDINATE', 'DIMBASELINE', 'DIMCONTINUE', 'MOVE', 'TRIM',
   'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'STRETCH', 'ERASE', 'EXPLODE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
-  'OFFSET', 'SETACTIVELAYER', 'HOVERPREVIEW', 'GRID', 'OSNAP', 'ORTHO', 'HATCH',
+  'OFFSET', 'SETACTIVELAYER', 'HOVERPREVIEW', 'GRID', 'SNAP', 'SNAPUNIT', 'OSNAP', 'ORTHO', 'HATCH',
   // TEXT (ADR 0019 P7a): the single-line text command whose text step travels on
   // `cad_set_tool_text`. Its own suite lives in `text-tool.test.mjs`.
   'TEXT',

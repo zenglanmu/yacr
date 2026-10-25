@@ -27,8 +27,8 @@ setCommandCatalog(HOST_NAMES);
 
 // The frozen `cad_status` capability shape: the three new booleans
 // (`canNew`/`canSave`/`canPlot`) always travel with `canOpen`/`canFit`.
-const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
-const empty = { documentLabel: null, entityCount: null, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: false, canPlot: false, canFit: false };
+const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
+const empty = { documentLabel: null, entityCount: null, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: false, canPlot: false, canFit: false };
 
 test('admission is the loaded host catalog: empty before load, capability gates stay explicit', () => {
   // Before the host answers, nothing is supported (explicitly, not by default).
@@ -45,11 +45,12 @@ test('admission is the loaded host catalog: empty before load, capability gates 
   assert.equal(isSupportedCommand('MOVE'), true);
   assert.equal(isSupportedCommand('UNDO'), true);
   assert.equal(isSupportedCommand('CONFIRM'), true);
-  // The object-snap toggle is part of the host vocabulary, but grid snap is not:
-  // the router refuses `SNAP` (a different feature from object snap), so the
-  // grid-snap affordance stays visible yet disabled.
+  // The object-snap toggle and grid snap are both part of the host vocabulary and
+  // are **different** selectors: `OSNAP` is object snap (F3), `SNAP` is grid snap
+  // (F9) with the typed `SNAPUNIT` spacing sysvar.
   assert.equal(isSupportedCommand('OSNAP'), true);
-  assert.equal(isSupportedCommand('snap'), false);
+  assert.equal(isSupportedCommand('snap'), true);
+  assert.equal(isSupportedCommand('SNAPUNIT'), true);
   // The file-level selectors are real router commands. They are **no longer**
   // excluded for being "host-owned": the capability booleans gate them.
   for (const name of Object.keys(CAPABILITY_GATES)) assert.equal(isSupportedCommand(name), true, name);
@@ -66,12 +67,12 @@ test('admission is the loaded host catalog: empty before load, capability gates 
   setCommandCatalog(HOST_NAMES);
 });
 
-test('the grid-snap affordance stays visible but router-disabled, and GRID/OSNAP stay reachable', async () => {
+test('the grid-snap affordance is a real admitted toggle next to GRID and ORTHO', async () => {
   const { readModule } = await import('./helpers.mjs');
-  // The View tab's display panel keeps GRID/SNAP/ORTHO on screen. Grid snap is
-  // not in the router vocabulary, so `SNAP` must stay present yet disabled —
-  // never silently deleted and never re-pointed at the object-snap toggle or at
-  // the display-grid toggle.
+  // The View tab's display panel keeps GRID/SNAP/ORTHO on screen. All three are
+  // real router commands now: GRID is the display grid (F7), SNAP is grid snap
+  // (F9, with the typed `SNAPUNIT` spacing) and ORTHO is the orthographic
+  // constraint (F8).
   const view = RIBBON_TABS.find(tab => tab.id === 'view');
   const display = view.panels.find(panel => panel.id === 'display');
   assert.ok(display, 'the View tab must keep its display panel');
@@ -79,19 +80,24 @@ test('the grid-snap affordance stays visible but router-disabled, and GRID/OSNAP
   const snap = display.items.find(item => item.id === 'SNAP');
   assert.equal(snap.command, 'SNAP');
   assert.equal(snap.labelKey, 'status.toggle.snap');
-  // Router admission is the disable mechanism: grid snap is refused, while the
-  // display-grid, object-snap and ORTHO selectors (three real, independent
-  // drafting switches) are admitted.
-  assert.equal(admitCommandText('SNAP', { status: loaded }).kind, 'unsupported');
+  // Router admission is the enable mechanism: all four drafting switches are
+  // admitted, and SNAP is a different selector from OSNAP/GRID/ORTHO.
+  assert.equal(admitCommandText('SNAP', { status: loaded }).kind, 'admitted');
   assert.equal(admitCommandText('GRID', { status: loaded }).kind, 'admitted');
   assert.equal(admitCommandText('OSNAP', { status: loaded }).kind, 'admitted');
   assert.equal(admitCommandText('ORTHO', { status: loaded }).kind, 'admitted');
-  // Autocomplete keeps the same split: `SNAP` shows unsupported, `OSNAP` supported.
+  // A typed spacing line is admitted by its base selector; a bad value is refused
+  // locally (the host validates it too, and never clamps).
+  assert.equal(admitCommandText('SNAPUNIT 5', { status: loaded }).kind, 'admitted');
+  assert.equal(admitCommandText('SNAPUNIT 5', { status: loaded }).command, 'SNAPUNIT 5');
+  assert.equal(admitCommandText('SNAPUNIT 0', { status: loaded }).kind, 'unsupported');
+  // Autocomplete keeps the same split: `SNAP` and `OSNAP` are both supported and
+  // are distinct rows.
   const typedSnap = filterCommandSuggestions('SNAP');
-  assert.equal(typedSnap.find(suggestion => suggestion.id === 'SNAP').supported, false);
+  assert.equal(typedSnap.find(suggestion => suggestion.id === 'SNAP').supported, true);
   assert.equal(typedSnap.find(suggestion => suggestion.id === 'OSNAP').supported, true);
-  // The ribbon renderer disables every command item the router does not admit
-  // (the same gate GRID/ORTHO use), so the SNAP button is present but disabled.
+  // The ribbon renderer enables every command item the router admits (the same
+  // gate GRID/ORTHO use).
   // The gate is per dispatch token: a command takes router admission, a typed
   // standard view takes the CAD-session gate, and nothing is locally enabled.
   const ribbon = await readModule('components/Ribbon.jsx');
@@ -107,18 +113,19 @@ test('the grid-snap affordance stays visible but router-disabled, and GRID/OSNAP
 });
 
 // Chrome catalog entries the router does not accept: they stay **visible but
-// permanently disabled** (never deleted, never locally enabled) — the same
-// contract the grid-snap affordance holds. This is the audited dead set; a
-// future edit that adds or restores an affordance must move its id out of this
-// list.
+// permanently disabled** (never deleted, never locally enabled). This is the
+// audited dead set; a future edit that adds or restores an affordance must move
+// its id out of this list.
 //
-// Remaining dead affordances, and why:
-//  - SNAP: AutoCAD's grid snap (F9), deliberately absent from the router; it is
-//    a different feature from object snap (`OSNAP`) and from the display-grid
-//    toggle (`GRID`) and must never alias either.
-//  - GRID left this set: `GRID` is a real router selector (the display-grid
+// **Empty as of the `SNAP`/`SNAPUNIT` work**: every remaining drafting aid got a
+// real selector.
+//  - SNAP left this set: `SNAP` is a real router selector now (grid snap, F9,
+//    `CommandId::ToggleSnapGrid`), with the typed `SNAPUNIT` spacing sysvar. It is
+//    still a different feature from object snap (`OSNAP`) and from the
+//    display-grid toggle (`GRID`), and it must never alias either.
+//  - GRID left this set earlier: `GRID` is a real router selector (the display-grid
 //    session switch, F7), so it is admitted like `OSNAP`.
-//  - ORTHO left this set: `ORTHO` is a real router selector (the orthographic
+//  - ORTHO left this set earlier: `ORTHO` is a real router selector (the orthographic
 //    drafting constraint, F8), so it is admitted like `GRID`/`OSNAP`.
 // The four measurement kinds (DIST/MEASUREPOLYLINE/MEASUREANGLE/AREA) and the
 // fixed zoom steps (ZOOMIN/ZOOMOUT) were fixed: they are router-admitted
@@ -133,7 +140,7 @@ test('the grid-snap affordance stays visible but router-disabled, and GRID/OSNAP
 // docked layers palette without the router (`LAYER` is not a router name at all —
 // the layer *operations* are), so they are asserted separately below rather than
 // counted as dead affordances.
-const ROUTER_REFUSED_AFFORDANCES = ['SNAP'];
+const ROUTER_REFUSED_AFFORDANCES = [];
 
 test('the command catalog lists exactly the router-refused dead affordances, and ERASE is not one', () => {
   const refused = COMMAND_CATALOG

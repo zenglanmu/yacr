@@ -5,16 +5,16 @@ import React from 'react';
 import { Icon } from '../icons.jsx';
 import { Button } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
-import { commandById, toolLabelKey } from '../commands.mjs';
+import { toolLabelKey } from '../commands.mjs';
 import { palettesOffered } from '../surface.mjs';
 import { OPTIONS_KEYS } from '../options.mjs';
-import { dispatchGrid, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, gridToggle, hoverPreviewToggle, importProgressView, objectSnapToggle, orthoToggle, snapKindLabelKey, toolParameterViews, toolStepPromptKey } from '../cad.mjs';
+import { formatWorldCursor } from '../coords.mjs';
+import { dispatchGrid, dispatchGridSnap, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, gridSnapToggle, gridToggle, hoverPreviewToggle, importProgressView, objectSnapToggle, orthoToggle, snapKindLabelKey, toolParameterViews, toolStepPromptKey } from '../cad.mjs';
 
-// The drafting aids this build still has only as placeholders. GRID (display
-// grid, F7), OSNAP (object snap, F3) and ORTHO (orthographic constraint, F8) are
-// real toggles and are rendered separately below. SNAP (grid snap, F9) is a
-// different, unimplemented feature and stays a visibly disabled placeholder.
-const DRAFTING = ['SNAP'];
+// The drafting aids this build has: GRID (display grid, F7), SNAP (grid snap,
+// F9), OSNAP (object snap, F3) and ORTHO (orthographic constraint, F8). Each is a
+// real session switch projected from `cad_status`; there is no disabled
+// placeholder left, so no local list of "unsupported" aids exists any more.
 
 function Toggle({ label, on, onClick, title, disabled }) {
   return (
@@ -98,8 +98,12 @@ function ParameterFlag({ view, onToggle }) {
 export function StatusBar() {
   const { t } = useI18n();
   const shell = useShell();
-  const cursor = shell.cursor;
-  const coordinate = cursor ? `${cursor.x.toFixed(0)}, ${cursor.y.toFixed(0)}` : '\u2014, \u2014';
+  // The drawing-coordinate readout (AutoCAD's habit): the host's real
+  // `cursorWorld`, formatted as `X, Y` (plus `Z` when it is non-zero), or the
+  // em-dash placeholder when there is no reliable 2D cursor. The DOM pointer's
+  // CSS pixels are deliberately **not** a fallback — they are not drawing
+  // coordinates, so they must never appear under the "coordinates" label.
+  const worldCursor = formatWorldCursor(shell.status);
   const progress = importProgressView(shell.importProgress, t);
   // The interactive tool the host reports as active (`status.tool`:
   // `{key, points, ready} | null`). A missing/null block means no tool, so
@@ -127,6 +131,13 @@ export function StatusBar() {
   // never a local mirror (`GRID`, F7). Turning it on does not by itself draw the
   // grid: the host also needs the persisted `view.overlays.grid` preference.
   const grid = gridToggle(shell.status, shell.canCommand('GRID'));
+  // Grid snap is real host session state (`status.snapGridEnabled`, F9), never a
+  // local mirror. The projected `snapSpacing` is the sysvar the quantiser uses;
+  // the chip title reports it so the user can see what points snap to.
+  const snapGrid = gridSnapToggle(shell.status, shell.canCommand('SNAP'));
+  const snapGridTitle = snapGrid && snapGrid.spacing !== null
+    ? `${t('status.toggle.snap')} (F9) \u00b7 ${t('status.toggle.snap_spacing', { spacing: snapGrid.spacing })}`
+    : `${t('status.toggle.snap')} (F9)`;
   // The orthographic drafting constraint is real host session state
   // (`status.orthoEnabled`), never a local mirror (`ORTHO`, F8). While on, the
   // host constrains the next point entry from the previous point; it is not grid
@@ -154,11 +165,11 @@ export function StatusBar() {
     <div className="region region--status statusbar app-region" role="contentinfo">
       <output
         className="statusbar__coords"
-        title={t('status.coordinate_hint')}
+        title={t(worldCursor.hintKey)}
         aria-label={t('status.coordinates')}
       >
         <Icon name="snap" size={13} />
-        <span className="mono">{coordinate}</span>
+        <span className="mono">{worldCursor.text}</span>
       </output>
 
       <span className="statusbar__state" aria-live="polite">{stateLabel}</span>
@@ -202,19 +213,15 @@ export function StatusBar() {
             onClick={() => dispatchOrtho(shell.runCommand)}
           />
         ) : null}
-        {DRAFTING.map(id => {
-          const command = commandById(id);
-          const name = t(command.labelKey);
-          return (
-            <Toggle
-              key={id}
-              label={name}
-              on={false}
-              disabled
-              title={t('status.toggle_unsupported', { name })}
-            />
-          );
-        })}
+        {snapGrid ? (
+          <Toggle
+            label={t('status.toggle.snap')}
+            on={snapGrid.on}
+            disabled={snapGrid.disabled}
+            title={snapGridTitle}
+            onClick={() => dispatchGridSnap(shell.runCommand)}
+          />
+        ) : null}
         {objectSnap ? (
           <Toggle
             label={t('status.toggle.osnap')}

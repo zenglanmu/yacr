@@ -8,7 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { CATALOGS } from './catalogs.mjs';
 import { createTranslator, initialLocale, LOCALE_STORAGE_KEY, LOCALES, localeTag, storedLocale, storeLocale } from './i18n.mjs';
 import { bindProbeInput, createInputLane, createSuspendGate } from './input.mjs';
-import { pointerPosition, rectFromElement } from './metrics.mjs';
+import { rectFromElement } from './metrics.mjs';
 import { CANVAS_STEP_MODULE, bindCanvasNavigation, canvasModuleUrl, createCanvasTransport, loadCanvasModule, watchCanvasRect } from './canvas-host.mjs';
 import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './surface.mjs';
 import { queueCadCommand, reconcileToolParameterPending, requestImportCancel, setToolParameterFlag, setToolParameterNumber, startCadPolling, stepToolParameterPending, draftingAcceleratorCommand } from './cad.mjs';
@@ -70,7 +70,6 @@ function Shell() {
   const [layersFocus, setLayersFocus] = useState(0);
   const [commandLineOpen, setCommandLineOpen] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [cursor, setCursor] = useState(null);
   const [surfaceNode, setSurfaceNode] = useState(null);
   // The CAD shortcut menu: `{ point, rect, menu }` while it is open, `null`
   // otherwise. `point` is the press in viewport CSS px (the hook reports it
@@ -297,20 +296,6 @@ function Shell() {
     // (a remount must not silently resume while text focus or a popup does).
     suspendGate.current.sync();
     return () => { binding.dispose(); if (bindingRef.current === binding) bindingRef.current = null; };
-  }, [surfaceNode]);
-
-  // Local pointer readout for the status-bar coordinate box (chrome only; the
-  // CAD surface keeps receiving the real input through the lane).
-  useEffect(() => {
-    if (!surfaceNode) return undefined;
-    const move = event => setCursor(pointerPosition(surfaceNode, event));
-    const leave = () => setCursor(null);
-    surfaceNode.addEventListener('pointermove', move);
-    surfaceNode.addEventListener('pointerleave', leave);
-    return () => {
-      surfaceNode.removeEventListener('pointermove', move);
-      surfaceNode.removeEventListener('pointerleave', leave);
-    };
   }, [surfaceNode]);
 
   useEffect(() => {
@@ -641,7 +626,6 @@ function Shell() {
     errorText: displayError,
     error,
     pollError,
-    cursor,
     history,
     command,
     setCommand,

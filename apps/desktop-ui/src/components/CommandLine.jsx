@@ -15,7 +15,7 @@ import { Button, IconButton } from './primitives.jsx';
 import { useI18n, useShell } from '../context.mjs';
 import { handleCommandKey } from '../cad.mjs';
 import { commandLogView } from '../command-log.mjs';
-import { defaultSuggestionIndex, filterCommandSuggestions, historyText, stepHistoryCursor, unavailableReasonKey } from '../commands.mjs';
+import { defaultSuggestionIndex, filterCommandSuggestions, historyText, splitCommandText, stepHistoryCursor, unavailableReasonKey } from '../commands.mjs';
 import { releaseFocusOnOutsidePress } from '../focus-release.mjs';
 import {
   TEXT_PROMPT_KEY,
@@ -135,7 +135,11 @@ export function CommandLine() {
   }, [textMode, prefill]);
 
   const effectiveText = () => {
-    if (highlight >= 0 && suggestions[highlight] && shell.command.trim()) return suggestions[highlight].id;
+    // A completion row is a **name**; a typed argument belongs to the line
+    // (`ZOOM 2`), so Enter keeps the full text instead of replacing it with the
+    // bare suggestion. Tab still replaces the line with the name alone.
+    if (shell.command.trim() && splitCommandText(shell.command).argument === null
+      && highlight >= 0 && suggestions[highlight]) return suggestions[highlight].id;
     return shell.command;
   };
 

@@ -21,6 +21,56 @@ export function normalizeCommandText(text) {
 }
 
 /**
+ * Split a typed command line into its base name and typed argument.
+ *
+ * `ZOOM 2` -> `{ name: 'ZOOM', argument: '2', text: 'ZOOM 2' }`; a name-only
+ * line keeps `argument: null`. One or more spaces/tabs separate the two and
+ * surrounding whitespace is trimmed (via [`normalizeCommandText`]), while the
+ * argument keeps its own internal text — `ZOOM 2 3` yields `'2 3'`, so the
+ * argument predicate (not a second split) decides about it. This is the same
+ * grammar the Rust router reads, so a value the chrome admits is the value the
+ * host validates.
+ */
+export function splitCommandText(text) {
+  const normalized = normalizeCommandText(text);
+  if (!normalized) return { name: '', argument: null, text: normalized };
+  const match = /^([^ \t]+)[ \t]+(.+)$/.exec(normalized);
+  return match
+    ? { name: match[1], argument: match[2], text: normalized }
+    : { name: normalized, argument: null, text: normalized };
+}
+
+/** Whether `text` is a plain positive decimal number (`2`, `0.5`, `1.25`). */
+function isPositiveDecimal(text) {
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(text)) return false;
+  const value = Number(text);
+  return Number.isFinite(value) && value > 0;
+}
+
+/**
+ * The selectors that take a typed argument, with the **local syntax** predicate
+ * for that argument.
+ *
+ * This is an admission aid only: the chrome decides "does this line look like a
+ * command that could run" and the host stays the authority for semantics (a
+ * `ZOOM 0` that slipped through would be refused by the router and recorded for
+ * `cad_status.error`, never clamped). `ZOOM` mirrors the host grammar —
+ * a positive decimal scale factor (`> 1` zooms in, `< 1` zooms out), `ALL` or
+ * `EXTENTS` (the `FIT` framing). `SNAPUNIT` is the session grid-snap spacing
+ * sysvar and accepts the same positive-decimal shape (`25`, `0.5`, `2.5`).
+ * Every other selector takes no argument, so `LINE 2` and `SNAP 5` stay explicit
+ * unsupported answers.
+ */
+export const ARGUMENT_COMMANDS = Object.freeze({
+  ZOOM: Object.freeze({
+    parse: argument => argument === 'ALL' || argument === 'EXTENTS' || isPositiveDecimal(argument),
+  }),
+  SNAPUNIT: Object.freeze({
+    parse: isPositiveDecimal,
+  }),
+});
+
+/**
  * The loaded host vocabulary, uppercased and deduped. Empty until
  * [`setCommandCatalog`] receives the `cad_commands` answer.
  */
@@ -373,10 +423,13 @@ export function filterCommandSuggestions(query, {
   catalog = COMMAND_CATALOG,
   aliases = commandAliases(),
 } = {}) {
-  const needle = normalizeCommandText(query);
+  // The needle is the **base name**: a typed argument belongs to the
+  // submission, not to the lookup, so `ZOOM 2` keeps suggesting `ZOOM` while
+  // the line (argument included) is what reaches the host.
+  const needle = splitCommandText(query).name;
   const usage = new Map();
   history.forEach((entry, index) => {
-    const id = normalizeCommandText(entry);
+    const id = splitCommandText(entry).name;
     usage.set(id, (usage.get(id) ?? 0) + (history.length - index));
   });
   const matches = [];
@@ -414,7 +467,9 @@ export function filterCommandSuggestions(query, {
 /** The suggestion shown highlighted after `query` changes. */
 export function defaultSuggestionIndex(suggestions, query) {
   if (!suggestions.length) return -1;
-  const needle = normalizeCommandText(query);
+  // A typed argument does not change which name is highlighted: `ZOOM 2` still
+  // highlights the `ZOOM` row.
+  const needle = splitCommandText(query).name;
   if (!needle) return 0;
   const exact = suggestions.findIndex(suggestion => suggestion.id === needle);
   return exact === -1 ? 0 : exact;
@@ -454,33 +509,50 @@ export function pushHistory(history, entry, limit = 64) {
  * Uses the vocabulary loaded from the host ([`isSupportedCommand`]) plus the
  * capability gates, without touching IPC.
  *
+ * A line may carry the one typed argument form ([`ARGUMENT_COMMANDS`]):
+ * admission runs on the **base name** through the same vocabulary/capability
+ * gates, and the returned `command` is the **full normalized line** so the host
+ * receives (and validates) the value itself. An argument on a selector that
+ * takes none, or an argument outside the local syntax predicate, is an explicit
+ * `unsupported` answer with the shared reason key — the host remains the
+ * authority for semantics, and a bare `ZOOM` keeps its existing payload-refusal
+ * path unchanged.
+ *
  * Every non-admitted answer carries the `reasonKey` that words **why** (see
  * [`unavailableReasonKey`]) so the caller never has to re-derive — or invent — a
  * second explanation for the same refusal.
  */
 export function admitCommandText(text, { status = null, pending = false } = {}) {
-  const id = normalizeCommandText(text);
+  const { name: id, argument, text: command } = splitCommandText(text);
   if (!id) return { kind: 'empty', command: id, reasonKey: null };
+  // A typed argument is gated by its base selector and its local grammar before
+  // anything else: `LINE 2` and `ZOOM 0` never reach IPC.
+  if (argument !== null) {
+    const spec = ARGUMENT_COMMANDS[id];
+    if (!spec || !spec.parse(argument)) {
+      return { kind: 'unsupported', command, reasonKey: 'command.unsupported' };
+    }
+  }
   // A local selector is admitted without a status/document: it only toggles
   // chrome. The submit path intercepts it before `queueCadCommand`.
-  if (LOCAL_CHROME_COMMANDS.includes(id)) return { kind: 'admitted', command: id, reasonKey: null };
+  if (LOCAL_CHROME_COMMANDS.includes(id)) return { kind: 'admitted', command, reasonKey: null };
   if (!isSupportedCommand(id)) {
-    return { kind: 'unsupported', command: id, reasonKey: unavailableReasonKey(id, { status, pending }) };
+    return { kind: 'unsupported', command, reasonKey: unavailableReasonKey(id, { status, pending }) };
   }
   // No status means the host has not answered yet: nothing is admitted on a
   // guess, and the honest reason is that this build cannot say yet.
-  if (!status) return { kind: 'unavailable', command: id, reasonKey: 'command.unsupported' };
-  if (pending || status.loading) return { kind: 'unavailable', command: id, reasonKey: BUSY_KEY };
-  if (id === 'OPEN' && !status.canOpen) return { kind: 'unavailable', command: id, reasonKey: 'command.unsupported' };
+  if (!status) return { kind: 'unavailable', command, reasonKey: 'command.unsupported' };
+  if (pending || status.loading) return { kind: 'unavailable', command, reasonKey: BUSY_KEY };
+  if (id === 'OPEN' && !status.canOpen) return { kind: 'unavailable', command, reasonKey: 'command.unsupported' };
   const gate = CAPABILITY_GATES[id];
   if (gate && !status[gate]) {
-    return { kind: 'unavailable', command: id, reasonKey: capabilityRefusalKey(id, status) };
+    return { kind: 'unavailable', command, reasonKey: capabilityRefusalKey(id, status) };
   }
   if (DOCUMENT_SCOPED_COMMANDS.includes(id) && status.documentLabel === null) {
-    return { kind: 'unavailable', command: id, reasonKey: NO_DOCUMENT_KEY };
+    return { kind: 'unavailable', command, reasonKey: NO_DOCUMENT_KEY };
   }
   if (id === 'FIT' && !(status.canFit && status.documentLabel !== null && status.entityCount !== null)) {
-    return { kind: 'unavailable', command: id, reasonKey: 'command.unsupported' };
+    return { kind: 'unavailable', command, reasonKey: 'command.unsupported' };
   }
-  return { kind: 'admitted', command: id, reasonKey: null };
+  return { kind: 'admitted', command, reasonKey: null };
 }

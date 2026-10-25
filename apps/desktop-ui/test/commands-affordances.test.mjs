@@ -20,7 +20,7 @@ import { HOST_NAMES } from './helpers.mjs';
 
 setCommandCatalog(HOST_NAMES);
 
-const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
+const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
 
 test('ERASE is a modify affordance in the ribbon and catalog, enabled only by router admission', async () => {
   const { readModule } = await import('./helpers.mjs');

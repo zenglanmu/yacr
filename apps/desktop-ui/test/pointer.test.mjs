@@ -9,8 +9,8 @@ import { readCss, readModule } from './helpers.mjs';
 
 const empty = {
   documentLabel: null, entityCount: null, loading: false, importProgress: null,
-  error: null, canOpen: true, canNew: true, gridEnabled: true, orthoEnabled: false, canSave: false, canPlot: false, canFit: false, backend: null, adapter: null,
-  camera: null, importCount: 0, frameCount: 0,
+  error: null, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: false, canPlot: false, canFit: false, backend: null, adapter: null,
+  camera: null, importCount: 0, frameCount: 0, cursorWorld: null,
   selection: { count: 0, empty: true, rows: [], mixedKeys: [] },
 };
 

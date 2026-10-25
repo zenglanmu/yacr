@@ -25,17 +25,29 @@ function parseImportProgress(value) {
   return value;
 }
 
+/** Whether `value` is a well-formed world point: exactly three finite numbers. */
+function isWorldPoint(value) {
+  return Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
+}
+
 export function parseCadStatus(value) {
   const nullableString = field => value[field] === null || typeof value[field] === 'string';
   const count = field => Number.isSafeInteger(value[field]) && value[field] >= 0;
   const camera = value?.camera;
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || !['documentLabel', 'error', 'backend', 'adapter'].every(nullableString)
-    || !['loading', 'canOpen', 'canNew', 'canSave', 'canPlot', 'canFit', 'gridEnabled', 'orthoEnabled'].every(field => typeof value[field] === 'boolean')
+    || !['loading', 'canOpen', 'canNew', 'canSave', 'canPlot', 'canFit', 'gridEnabled', 'orthoEnabled', 'snapGridEnabled'].every(field => typeof value[field] === 'boolean')
     || !(value.entityCount === null || count('entityCount'))
     || !['importCount', 'frameCount'].every(count)
     || !(camera === null || (camera && Array.isArray(camera.center) && camera.center.length === 2
       && camera.center.every(Number.isFinite) && Number.isFinite(camera.scale) && camera.scale > 0))) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  // The grid-snap spacing is required and must be a real, usable spacing: a
+  // finite number strictly greater than zero. The host never sends 0/NaN (the
+  // session setter refuses those), so a malformed value is a contract violation
+  // rather than something to render as a guessed spacing.
+  if (!(typeof value.snapSpacing === 'number' && Number.isFinite(value.snapSpacing) && value.snapSpacing > 0)) {
     throw Error('CAD_STATUS_INVALID');
   }
   // Live import progress is optional (`null` when idle) but, when present, must
@@ -63,6 +75,13 @@ export function parseCadStatus(value) {
   // must be a real boolean: a truthy non-boolean would hide the system cursor
   // over a view that draws no crosshair, leaving the pointer invisible.
   if (value.crosshair !== undefined && typeof value.crosshair !== 'boolean') {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  // The cursor's world coordinate is required: `null` (no reliable 2D cursor) or
+  // exactly three finite numbers. Anything else is rejected outright — a
+  // malformed point (a string, a 2-element array, a NaN) is never rendered as a
+  // drawing coordinate the host did not compute.
+  if (!(value.cursorWorld === null || isWorldPoint(value.cursorWorld))) {
     throw Error('CAD_STATUS_INVALID');
   }
   // The active-tool block is `null`/absent when no tool runs, and an object when
@@ -138,7 +157,7 @@ export const GRID_COMMAND = 'GRID';
  * session's live switch. An on chip does **not** by itself mean the grid is
  * drawn — the host also requires the persisted `view.overlays.grid` preference,
  * so the two gates compose with AND. This is the display grid only; grid snap
- * (`SNAP`/F9) is a different, unimplemented feature. A payload without the field
+ * (`SNAP`/F9) is the separate [`gridSnapToggle`]. A payload without the field
  * yields `null`, so the caller renders no chip at all instead of guessing
  * `false`. `admitted` is the shell's normal command admission (`canCommand`).
  */
@@ -151,6 +170,38 @@ export function gridToggle(status, admitted) {
 /** Dispatch the toggle as the one command the router accepts. */
 export function dispatchGrid(runCommand) {
   runCommand(GRID_COMMAND);
+}
+
+/** The single router command that flips grid snap (`SNAP`, F9). */
+export const GRID_SNAP_COMMAND = 'SNAP';
+
+/**
+ * Status-bar view for the grid-snap switch (`SNAP`, F9).
+ *
+ * The server's `snapGridEnabled` flag is the single source of truth: it is the
+ * session's live switch, not a local mirror and not the display grid. While on,
+ * the host quantises a captured point to the nearest multiple of the session
+ * `snapSpacing` in X and Y (never Z) before the `ORTHO` constraint; `spacing` is
+ * that real projected value, present only when it is a usable number (> 0), so
+ * the chip never advertises a spacing the host did not report. A payload without
+ * the field (older host) yields `null`, so the caller renders no chip at all
+ * instead of guessing `false`. `admitted` is the shell's normal command
+ * admission (`canCommand`).
+ */
+export function gridSnapToggle(status, admitted) {
+  const on = status?.snapGridEnabled;
+  if (typeof on !== 'boolean') return null;
+  const spacing = status?.snapSpacing;
+  return {
+    on,
+    spacing: typeof spacing === 'number' && Number.isFinite(spacing) && spacing > 0 ? spacing : null,
+    disabled: admitted !== true,
+  };
+}
+
+/** Dispatch the toggle as the one command the router accepts. */
+export function dispatchGridSnap(runCommand) {
+  runCommand(GRID_SNAP_COMMAND);
 }
 
 /** The single router command that flips the ORTHO drafting constraint (F8). */
@@ -187,10 +238,10 @@ export function dispatchOrtho(runCommand) {
  * claimed: it resolves the key through [`draftingAcceleratorCommand`] and
  * submits the returned command through the ordinary funnel (`submitCommand`) —
  * the same path every chip uses. `F7` is AutoCAD's own key for the display grid,
- * `F3` is its object-snap key and `F8` is its orthographic-constraint key; grid
- * snap (`SNAP`) has no accelerator because the feature does not exist.
+ * `F3` its object-snap key, `F8` its orthographic-constraint key and `F9` its
+ * grid-snap key.
  */
-export const DRAFTING_ACCELERATORS = Object.freeze({ F3: 'OSNAP', F7: 'GRID', F8: 'ORTHO' });
+export const DRAFTING_ACCELERATORS = Object.freeze({ F3: 'OSNAP', F7: 'GRID', F8: 'ORTHO', F9: 'SNAP' });
 
 /** The router command a drafting-aid function key means, or `null`. */
 export function draftingAcceleratorCommand(key) {
