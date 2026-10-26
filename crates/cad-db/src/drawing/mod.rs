@@ -21,6 +21,7 @@ mod access;
 mod bounds;
 mod edit;
 mod layer_edit;
+mod layer_inherit;
 mod lock;
 mod transaction;
 
@@ -29,6 +30,7 @@ mod test_support;
 
 pub use access::{EntityDisplayState, VisibilityMembership, VisibilityStateMembership};
 pub use layer_edit::{DEFAULT_LAYER_NAME, ILLEGAL_LAYER_NAME_CHARS};
+pub use layer_inherit::LayerScope;
 pub use transaction::DrawingTransaction;
 
 pub(crate) use bounds::BoundsCache;

@@ -36,6 +36,7 @@ use cad_domain::{
 use cad_representation::{clip_polyline_to_rect, ConicSegment};
 use cad_spatial::pick_world_bounds;
 
+use crate::picking::ref_visibility;
 use crate::{
     api::apply_selection, drawing_pick_items, Application, Command, CommandOutcome, CommandPayload,
     SessionState, ToolState,
@@ -198,26 +199,20 @@ impl Application {
         }
 
         let database = document.drawing.as_ref();
+        // One layer-table scan per command, shared by the preflight walk and the
+        // selection walk (block members are judged on their effective layer).
+        let scope = database.root_layer_scope();
         // The pick builder silently skips cycles/depth limits; preflight the same
         // visible tree `select_all` refuses on before trusting its catalogue.
         for entity in database.model_space() {
-            validate_branch(database, session, entity, &mut Vec::new())?;
+            validate_branch(database, session, entity, scope, &mut Vec::new())?;
         }
 
         let mut matched: Vec<_> = Vec::new();
         let mut path_counts = [0usize; 3]; // exact, approximate, aabb
         for item in drawing_pick_items(database, command.document) {
-            let mut visible = true;
-            for id in item
-                .source
-                .instance
-                .0
-                .iter()
-                .chain(std::iter::once(&item.source.entity))
-            {
-                let entity = database.entity(*id).ok_or(CadError::StaleResult)?;
-                visible &= session.layer_overrides.is_entity_visible(database, entity);
-            }
+            let visible = ref_visibility(database, &session.layer_overrides, scope, &item.source)
+                .ok_or(CadError::StaleResult)?;
             if !visible {
                 continue;
             }
@@ -581,9 +576,10 @@ fn validate_branch(
     database: &DrawingDatabase,
     session: &SessionState,
     entity: &DbEntity,
+    scope: cad_db::LayerScope,
     stack: &mut Vec<BlockId>,
 ) -> CadResult<()> {
-    crate::select_all::validate_branch(database, session, entity, stack)
+    crate::select_all::validate_branch(database, session, entity, scope, stack)
 }
 
 #[cfg(test)]

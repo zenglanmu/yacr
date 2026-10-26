@@ -43,7 +43,10 @@
 //! invented; `LAYERP` (AutoCAD's "previous layer state") has no layer-state stack
 //! in this build and therefore names the one state it can really restore.
 
+use std::collections::BTreeMap;
+
 use super::*;
+use crate::picking::ref_effective_layer;
 
 impl Application {
     /// The selection's distinct layers, in first-selection order, plus the
@@ -65,10 +68,29 @@ impl Application {
     ) -> CadResult<(Vec<LayerId>, Vec<Diagnostic>)> {
         let (selected, diagnostics) =
             Self::resolve_selection(drawing, document_id, refs, code, operation, action, true)?;
+        // The layer a selection *belongs to* is its **effective** layer: a block
+        // member that is itself on layer `0` belongs to the containing INSERT's
+        // layer (AutoCAD's rule), resolved through the same `LayerScope` chain the
+        // display and pick paths use, so LAYISO/LAYOFF can never hide the layer
+        // that decides the entity's visibility and `ByLayer` styles.
+        let root = drawing.root_layer_scope();
+        // `resolve_selection` keeps the first ref per entity, so the first ref in
+        // `refs` naming an entity is the one whose instance path applies. Built
+        // once (`O(n log n)`) rather than searched per selected entity.
+        let mut first_ref: BTreeMap<EntityId, &SelectionRef> = BTreeMap::new();
+        for reference in refs {
+            first_ref.entry(reference.entity).or_insert(reference);
+        }
         let mut layers: Vec<LayerId> = Vec::new();
         for entity in &selected {
-            if !layers.contains(&entity.layer) {
-                layers.push(entity.layer);
+            let layer = first_ref
+                .get(&entity.id)
+                .and_then(|reference| ref_effective_layer(drawing, root, reference))
+                // An unresolved instance path has no containing INSERT to ask;
+                // the stored layer is then the only honest answer.
+                .unwrap_or(entity.layer);
+            if !layers.contains(&layer) {
+                layers.push(layer);
             }
         }
         Ok((layers, diagnostics))

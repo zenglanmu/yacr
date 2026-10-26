@@ -191,6 +191,9 @@ impl ProviderRegistry {
             0,
             1.0,
             entity.draw_order,
+            // One layer-table scan per expansion: the layer-`0` id is resolved
+            // here and carried down, never per entity.
+            database.root_layer_scope(),
             None,
             None,
             None,

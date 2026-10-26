@@ -1,3 +1,53 @@
+## 2026-10-26 第 5 轮：块内「图层 0 继承块引用图层」建模（显示/可见性单点解析）
+
+### 结论
+
+`docs/compatibility.md` 一直记着「AutoCAD『图层 0 继承块引用图层』特例未建模」。本轮**建模**：
+块定义内实体**自身图层为 `0`** 时按**包含它的 `INSERT` 的图层**解析，其它图层保持自身。
+
+- **单点解析**：新增 `cad-db::LayerScope`（`crates/cad-db/src/drawing/layer_inherit.rs`），
+  `DrawingDatabase::root_layer_scope()` 每次遍历解析**一次**（按**名字**找 `0` 行——id 是表索引，
+  `LayerId(0)` 可能根本不是图层 0），再用 `LayerScope::child_scope` 逐层下传。
+- **四项 `ByLayer` 一致**：`provider/expand.rs` 只在 `let layer = database.layer_attributes(...)`
+  之前换一次生效图层，颜色/透明度/线宽/线型因此不可能分叉。**规则逐层链式**：递归下传的是
+  `INSERT` 的**生效**图层，所以「`0` 成员 ⊂ `0` 块参照 ⊂ RED 块参照」⇒ RED。
+- **`ByBlock` 未变**（仍取包含 `INSERT` 的已解析值），与图层规则不叠加。
+- **无图层 `0` 的图纸规则整体关闭**（`layer_zero_id() == None`，不 panic、不猜）。
+- **不改 `DbEntity::layer`**：属性面板/导出/往返仍读到存储事实，这是纯显示解析规则（有测试钉住）。
+- **可见性/拾取同源**：`cad_app::picking::{ref_visibility, ref_effective_layer}` 内部只有一次
+  `walk_ref_chain`，判定 instance path 每一步的生效图层。改用它的路径：`ref_is_visible`
+  （拾取/悬停/夹点候选）、`SELECTALL`、`SELECTINBOX` 框选、`STRETCH` 的可见项分组、
+  `select_all::validate_branch` 预检可见树、`LAYISO`/`LAYOFF` 的「选中实体属于哪一层」
+  （`selection_layers`）。`LayerOverrideSet` 新增 `is_layer_visible(database, layer)`；
+  `is_entity_visible` 仍是**存储图层**语义（顶层实体专用），文档已注明分工。
+- **仍然存在、未在本轮修的分歧（明示）**：模型空间场景只为**顶层实体**做图层过滤
+  （`render_scene/assembly.rs` → `visible_model_entities`），**块内成员完全不做图层过滤**，
+  所以把 `INSERT` 的图层关掉目前只影响选择/拾取，屏幕上的块成员照旧显示。修它需要在场景装配里
+  按 fragment 的生效图层过滤（新语义 + 性能/缓存指纹影响），本轮未做，已写入
+  `docs/compatibility.md` 同名条目。
+
+### 证据（本机，2026-10-26）
+
+- 新增测试：`cad-db` `tests/layer_inherit.rs`（**5**：按名字解析/无图层 0/规则本身/链式/只读）；
+  `cad-representation` `tests/layer_zero_inheritance.rs`（**5**：四项样式一起继承、decoy `LayerId(0)`
+  不继承、模型根不继承、双层嵌套链、无图层 `0` 对照），并把 `bylayer_color.rs` 的旧规则测试**翻转**
+  为「图层 0 继承 `INSERT` 图层」并保留「子实体在 RED 仍是 RED」的对照；`bylayer_style.rs` /
+  `bylayer_transparency.rs` 的同名测试改名/改注释为「非零图层保持自身」。
+  `cad-app`：`layers.rs` 3 个（`ref_visibility`/`ref_effective_layer`/无法解析的路径返回 `None`）、
+  `tests/layers_isolate.rs` 2 个（LAYISO/LAYOFF 取 `INSERT` 图层）、`tests/select_all.rs` 1 个、
+  `tests/select_box.rs` 1 个。
+- `cargo test -p cad-representation` **231**（+5）、`-p cad-db --lib` **150**（+5）、
+  `-p cad-app --lib` **1241**（+5）、`-p cad-app` 全部集成测试（`select_all` 18、`select_box` 15 等）、
+  `-p cad-host` **237** → 全绿。
+- `cargo fmt --all -- --check`、`cargo check --workspace --all-targets --locked`、
+  `clippy -p cad-app -p cad-representation -p cad-db -p cad-scene --all-targets -- -D warnings`、
+  `python3 scripts/check-file-size.py`、`python3 scripts/check-architecture.py` → 见本轮执行记录
+  （未运行项在下方显式列出）。
+
+**NOT RUN**：`apps/desktop-ui`（无 UI 改动）、`check-i18n.py`/`check-workflows.py`/
+`check-fixture-manifest.py`、wasm/Windows/Android/macOS 目标、真实 DWG/GUI/像素验收
+（本轮只有合成契约测试）。
+
 ## 2026-10-26 第 4 轮：POINT 显示样式（`$PDMODE`/`$PDSIZE`）落地
 
 ### 结论

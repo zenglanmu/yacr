@@ -285,8 +285,9 @@ impl Application {
 
         // The pick builder silently skips cycles/depth limits; preflight the same
         // visible tree `select_box` refuses on before trusting its catalogue.
+        let scope = drawing.root_layer_scope();
         for entity in drawing.model_space() {
-            crate::select_all::validate_branch(drawing, session, entity, &mut Vec::new())
+            crate::select_all::validate_branch(drawing, session, entity, scope, &mut Vec::new())
                 .map_err(stretch_tree_refusal)?;
         }
 
@@ -296,17 +297,13 @@ impl Application {
         let items = drawing_pick_items(drawing, document_id);
         let mut groups: Vec<(EntityId, Vec<usize>)> = Vec::new();
         for (index, item) in items.iter().enumerate() {
-            let mut visible = true;
-            for id in item
-                .source
-                .instance
-                .0
-                .iter()
-                .chain(std::iter::once(&item.source.entity))
-            {
-                let entity = drawing.entity(*id).ok_or(CadError::StaleResult)?;
-                visible &= session.layer_overrides.is_entity_visible(drawing, entity);
-            }
+            let visible = crate::picking::ref_visibility(
+                drawing,
+                &session.layer_overrides,
+                scope,
+                &item.source,
+            )
+            .ok_or(CadError::StaleResult)?;
             if !visible {
                 continue;
             }

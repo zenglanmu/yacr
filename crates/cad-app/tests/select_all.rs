@@ -555,3 +555,71 @@ fn mismatched_open_document_identity_preserves_selection() {
         CadError::StaleResult
     ));
 }
+
+/// Layers `0`(0)/WALLS(2, visible); block 7 holds a line on layer `0`; model
+/// INSERT 20 places that block from WALLS.
+fn layer_zero_member() -> DrawingDatabaseBuilder {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name, visible) in [(LayerId(0), "0", true), (LayerId(2), "WALLS", true)] {
+        builder
+            .insert_layer(Layer {
+                id,
+                name: name.into(),
+                visible,
+            })
+            .unwrap();
+    }
+    builder
+        .insert_block(BlockDefinition {
+            id: BlockId(7),
+            entities: vec![EntityId(10)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+    builder
+        .insert_entity(entity(
+            EntityId(10),
+            LayerId(0),
+            SpaceId::Block(BlockId(7)),
+            line(),
+        ))
+        .unwrap();
+    builder
+        .insert_entity(entity(
+            EntityId(20),
+            LayerId(2),
+            SpaceId::Model,
+            SemanticGeometry::Insert {
+                block: BlockId(7),
+                transform: Transform3::identity(),
+            },
+        ))
+        .unwrap();
+    builder
+}
+
+#[test]
+fn select_all_follows_the_insert_layer_of_a_layer_zero_block_member() {
+    // The shared effective-layer rule: a member stored on layer `0` belongs to
+    // its INSERT's layer, so turning layer `0` off must not hide it…
+    let (mut app, mut session) = fixture(layer_zero_member(), AppMode::Viewer);
+    session.layer_overrides.set(LayerId(0), false);
+    app.execute(&mut session, command(CommandPayload::None))
+        .unwrap();
+    assert_eq!(
+        session.selection,
+        SelectionSet::from_refs([SelectionRef {
+            document: DOC,
+            entity: EntityId(10),
+            instance: InstancePath(vec![EntityId(20)]),
+            sub_element: None,
+        }]),
+        "the member is drawn on WALLS, so layer 0 being off does not hide it"
+    );
+
+    // …while turning the INSERT's layer off does, through the same walk.
+    session.layer_overrides.set(LayerId(2), false);
+    app.execute(&mut session, command(CommandPayload::None))
+        .unwrap();
+    assert!(session.selection.is_empty());
+}

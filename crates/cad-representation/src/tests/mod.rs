@@ -24,6 +24,7 @@ mod conic;
 mod dynamic_block;
 mod image;
 mod kernel_mesh;
+mod layer_zero_inheritance;
 mod linetype;
 mod mask;
 

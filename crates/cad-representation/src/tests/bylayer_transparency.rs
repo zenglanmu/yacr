@@ -173,10 +173,12 @@ fn by_block_inherits_the_insert_and_falls_back_to_opaque_at_the_root() {
 }
 
 #[test]
-fn block_content_resolves_by_layer_against_its_own_layer() {
-    // The same rule as colour/lineweight/linetype: every entity resolves
-    // `ByLayer` against the layer it is **itself** on, including entities inside
-    // a block definition. Only `ByBlock` walks up the parent chain.
+fn block_content_on_a_non_zero_layer_keeps_its_own_layer() {
+    // The rule for a member on a **non-zero** layer: `ByLayer` resolves against
+    // the layer it is itself on, including inside a block definition. (A member
+    // that is itself on layer `0` follows the INSERT's layer instead — see
+    // `tests/layer_zero_inheritance.rs`.) Only `ByBlock` walks up the parent
+    // chain.
     let mut b = empty_db();
     let child_layer = add_layer(&mut b, 1, "CHILD", 0.25);
     let insert_layer = add_layer(&mut b, 2, "INSERT", 0.75);

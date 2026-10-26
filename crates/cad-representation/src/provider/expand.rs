@@ -1,5 +1,7 @@
 use crate::*;
 
+use cad_db::LayerScope;
+
 use super::default::chord_tessellation_params;
 use super::registry::ProviderRegistry;
 
@@ -18,6 +20,13 @@ impl ProviderRegistry {
         // containing INSERT's when expanding a block's children (see the
         // `Instance` arm). It is carried onto every emitted fragment.
         draw_order: i64,
+        // Where this entity sits in AutoCAD's layer-`0` chain: the drawing's
+        // layer-`0` id (resolved once per expansion) plus the containing
+        // INSERT's *effective* layer. A member that is itself on layer `0`
+        // resolves its `ByLayer` styles against the INSERT's layer; the chain
+        // continues through nested blocks because the recursion descends with
+        // `child_scope`.
+        layers: LayerScope,
         parent_color: Option<[f32; 3]>,
         parent_lineweight: Option<f32>,
         // The containing INSERT's resolved pattern **and** its resolved linetype
@@ -38,17 +47,25 @@ impl ProviderRegistry {
         // The provider sees the attributes too, so annotative text can be
         // scaled while it is shaped (the geometry is not post-processed).
         // Resolution rule for `ByLayer`: the row of the layer the entity is
-        // **itself** on (`DbEntity::layer`), for model-space entities and for
-        // entities inside a block definition alike. Only `ByBlock` walks up the
-        // parent chain to the containing INSERT's already-resolved value, so a
-        // block child's `ByLayer` never inherits the INSERT's layer.
+        // **effectively** on. That is its own layer (`DbEntity::layer`), except
+        // for a block member that is itself on layer `0`: AutoCAD draws such a
+        // member on the containing INSERT's layer, and the rule chains through
+        // nested blocks (`LayerScope` carries the INSERT's *effective* layer, so
+        // one recursion level resolves one level of the chain). All four
+        // `ByLayer` styles follow this one resolution, so colour, opacity,
+        // lineweight and linetype can never disagree.
+        //
+        // `ByBlock` is a **different** rule and still walks up the parent chain
+        // to the INSERT's already-resolved value; the layer swap does not touch
+        // it, so a layer-`0` member cannot inherit twice.
         //
         // A layer with no stored attribute row uses
         // `DrawingDatabase::layer_attributes`'s documented
         // `LayerAttributes::default()` fallback (ACI 7 white, `Continuous`,
         // ByLayer weight, opaque) rather than a second, locally invented
         // default.
-        let layer = database.layer_attributes(entity.layer);
+        let effective_layer = layers.effective_layer(entity.layer);
+        let layer = database.layer_attributes(effective_layer);
         let own_alpha = resolve_alpha(attributes.transparency, parent_alpha, layer.opacity);
         let (own_color, color_unresolved) =
             resolve_color(attributes.color, parent_color, layer.color.rgb);
@@ -111,6 +128,10 @@ impl ProviderRegistry {
                     let mut child_path = path.clone();
                     child_path.0.push(entity.id);
                     stack.push(block);
+                    // The children inherit this INSERT's **effective** layer, so
+                    // a layer-`0` INSERT passes the outer block's layer one
+                    // level further down (the chained rule).
+                    let child_layers = layers.child_scope(effective_layer);
                     for child in database.block_entities(block) {
                         self.expand_entity(
                             database,
@@ -121,6 +142,7 @@ impl ProviderRegistry {
                             depth + 1,
                             own_alpha,
                             child_draw_order,
+                            child_layers,
                             Some(own_color),
                             Some(own_lineweight),
                             Some((&own_linetype, linetype_scale)),

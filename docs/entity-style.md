@@ -103,9 +103,11 @@ pub struct LayerAttributes {
 （`cad-import-acadrust` 保留符号 `EntityColor::ByLayer`），表示层
 `provider/expand.rs` 在展开时用实体自身 `layer` 的 `LayerAttributes::color.rgb` 解析，
 缺行则用 `layer_attributes()` 的既有 `Default`（ACI 7 白）。因此**改图层颜色会在下一次展开时
-重着色其 `ByLayer` 实体，且不写任何实体、不产生实体历史**。块内实体的 `ByLayer` 按**它自己
-所在图层**解析（只有 `ByBlock` 才沿父链取包含块引用的已解析颜色）；AutoCAD「图层 0 上的实体
-继承块引用图层」这一特例**未建模**（声明）。**线型**按图层行的 `linetype` **名字**去图纸线型表
+重着色其 `ByLayer` 实体，且不写任何实体、不产生实体历史**。块内实体的 `ByLayer` 取**生效图层**：
+自身图层，或（自身为图层 `0` 时）包含块参照的图层，逐层链式解析；AutoCAD「图层 0 上的实体继承
+块引用图层」自 2026-10-26 起**已建模**（`cad_db::LayerScope` + `DrawingDatabase::root_layer_scope`，
+可见性/拾取/`LAYISO` 同源，见 `docs/compatibility.md` 同名条目），只有 `ByBlock` 才沿父链取包含
+块引用的已解析颜色。**线型**按图层行的 `linetype` **名字**去图纸线型表
 （大小写不敏感）取 pattern，名字不在表内则退回连续线并置 `linetype_unresolved`（绝不编造虚线）；
 **线宽**按 `LayerLineWeight` 的 1/100 mm 精确换算，`Default` → 0.25 mm，图层行自身为 `ByLayer`
 （无数值可给）→ 0.25 mm 且置 `lineweight_unresolved`。**透明度**按图层行的 `opacity`

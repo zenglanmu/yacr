@@ -19,7 +19,8 @@
 
 - `ByObject`（`Explicit`）→ `alpha = 1 - a/255`（唯一在导入时解析的形式）；
 - `ByLayer` → **保留符号** `EntityTransparency::ByLayer`（2026-10-26 起不再拍平），由表示层在
-  展开时取实体自身 `layer` 的 `LayerAttributes::opacity`（1.0 = 不透明）；
+  展开时取实体**生效图层**的 `LayerAttributes::opacity`（1.0 = 不透明）；块内自身图层为 `0`
+  的实体取包含 `INSERT` 的图层（`cad_db::LayerScope`，见 `docs/compatibility.md`「图层 0 继承块引用图层」）；
 - `ByBlock` → 保持符号值，由表示层的 INSERT 展开继承包含块引用的有效 alpha。
 
 解析结果存入 `cad-db::EntityRenderAttributes`（随实体旁存，`DbEntity` 不变），

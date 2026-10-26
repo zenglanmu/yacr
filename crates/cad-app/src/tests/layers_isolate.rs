@@ -280,3 +280,131 @@ fn a_payload_is_refused_rather_than_ignored() {
     assert!(matches!(error, CadError::InvalidInput(_)), "{error:?}");
     assert!(session.layer_overrides.is_empty());
 }
+
+/// Layers `0`(0)/WALLS(3)/DOORS(5); block 7 holds entity 10 on layer `0` and
+/// entity 11 on DOORS; model INSERT 20 (on WALLS) places that block.
+fn app_with_a_layer_zero_block_member() -> (Application, SessionState) {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name) in [
+        (LayerId(0), "0"),
+        (LayerId(3), "WALLS"),
+        (LayerId(5), "DOORS"),
+    ] {
+        b.insert_layer(Layer {
+            id,
+            name: name.into(),
+            visible: true,
+        })
+        .unwrap();
+    }
+    b.insert_block(cad_db::BlockDefinition {
+        id: BlockId(7),
+        entities: vec![EntityId(10), EntityId(11)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    for (id, layer) in [(10u128, LayerId(0)), (11, LayerId(5))] {
+        let mut child = entity(id, layer, 0);
+        child.space = SpaceId::Block(BlockId(7));
+        b.insert_entity(child).unwrap();
+    }
+    let mut insert = entity(20, LayerId(3), 1);
+    insert.geometry = SemanticGeometry::Insert {
+        block: BlockId(7),
+        transform: Transform3::identity(),
+    };
+    b.insert_entity(insert).unwrap();
+
+    let drawing = b.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([43u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    (app, SessionState::new(DocumentId(1), AppMode::Work))
+}
+
+/// The selection ref of block member `member` through INSERT `insert`.
+fn block_member_ref(insert: u128, member: u128) -> SelectionRef {
+    SelectionRef {
+        document: DocumentId(1),
+        entity: EntityId(member),
+        instance: InstancePath(vec![EntityId(insert)]),
+        sub_element: None,
+    }
+}
+
+#[test]
+fn layiso_keeps_the_insert_layer_of_a_layer_zero_block_member() {
+    // A member stored on layer `0` belongs to its INSERT's layer (WALLS), not to
+    // layer `0`: isolating it must keep WALLS and hide layer 0.
+    let (mut app, mut session) = app_with_a_layer_zero_block_member();
+    session.active_layer = LayerId(5); // DOORS, current, not selected
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Select,
+        CommandPayload::Selection(vec![block_member_ref(20, 10)]),
+    )
+    .unwrap();
+    let outcome = isolate(&mut app, &mut session).expect("LAYISO runs");
+
+    assert_eq!(
+        session.layer_overrides.get(LayerId(0)),
+        Some(false),
+        "layer 0 is hidden: the member belongs to WALLS, not to layer 0"
+    );
+    assert_eq!(
+        session.layer_overrides.get(LayerId(3)),
+        None,
+        "the INSERT's layer is kept visible"
+    );
+    assert_eq!(session.layer_overrides.get(LayerId(5)), None);
+    assert_eq!(session.layer_overrides.len(), 1);
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "layers.isolate.current_layer"));
+    assert_eq!(undo_depth(&app), 0, "still no history entry");
+}
+
+#[test]
+fn layoff_turns_off_the_insert_layer_of_a_layer_zero_block_member() {
+    // `LAYOFF` shares `selection_layers`, so the same effective-layer rule picks
+    // WALLS to turn off — never layer `0`.
+    let (mut app, mut session) = app_with_a_layer_zero_block_member();
+    session.active_layer = LayerId(5); // DOORS is current, so it is never turned off
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Select,
+        CommandPayload::Selection(vec![block_member_ref(20, 10)]),
+    )
+    .unwrap();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::LayOff,
+        CommandPayload::None,
+    )
+    .expect("LAYOFF runs");
+
+    assert_eq!(session.layer_overrides.get(LayerId(3)), Some(false));
+    assert_eq!(
+        session.layer_overrides.get(LayerId(0)),
+        None,
+        "layer 0 was never the selection's layer"
+    );
+}

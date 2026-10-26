@@ -7,7 +7,7 @@ use cad_app::{
     AppMode, Application, Command, CommandId, CommandOutcome, CommandPayload, Document,
     SelectionSet, SessionState, ToolState, Viewport,
 };
-use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
+use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
 use cad_domain::*;
 
 const DOC: DocumentId = DocumentId(1);
@@ -675,4 +675,98 @@ fn hatch_box_select_matches_an_equivalent_compound() {
         results[0].2,
         SelectionSet::from_refs([reference(EntityId(1))])
     );
+}
+
+/// Layers `0`(0)/WALLS(2, visible); block 7 holds a line inside the box on
+/// layer `0`; model INSERT 20 places that block from WALLS.
+fn layer_zero_member_fixture(mode: AppMode) -> (Application, SessionState) {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name) in [(LayerId(0), "0"), (LayerId(2), "WALLS")] {
+        builder
+            .insert_layer(Layer {
+                id,
+                name: name.into(),
+                visible: true,
+            })
+            .unwrap();
+    }
+    builder
+        .insert_block(BlockDefinition {
+            id: BlockId(7),
+            entities: vec![EntityId(10)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+    let mut member = entity(EntityId(10), LayerId(0), line((1.0, 1.0), (2.0, 2.0)));
+    member.space = SpaceId::Block(BlockId(7));
+    builder.insert_entity(member).unwrap();
+    builder
+        .insert_entity(entity(
+            EntityId(20),
+            LayerId(2),
+            SemanticGeometry::Insert {
+                block: BlockId(7),
+                transform: Transform3::identity(),
+            },
+        ))
+        .unwrap();
+
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DOC,
+        Document {
+            id: DOC,
+            drawing: Arc::new(builder.finish().unwrap()),
+            identity: DocumentIdentity::Temporary(1),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace
+        .viewports
+        .insert(VIEWPORT, Viewport::new(VIEWPORT, DOC, [800.0, 600.0]));
+    (app, SessionState::new(DOC, mode))
+}
+
+#[test]
+fn box_selection_follows_the_insert_layer_of_a_layer_zero_block_member() {
+    let (mut app, mut session) = layer_zero_member_fixture(AppMode::Viewer);
+    // Layer `0` is off, but the member is drawn on WALLS through its INSERT, so
+    // the shared effective-layer walk keeps it selectable.
+    session.layer_overrides.set(LayerId(0), false);
+    let outcome = app
+        .execute(
+            &mut session,
+            box_command(
+                logical_rect((0.0, 0.0), (10.0, 10.0)),
+                false,
+                SelectionMode::Replace,
+            ),
+        )
+        .unwrap();
+    assert_eq!(count(&outcome), 1);
+    assert_eq!(
+        session.selection,
+        SelectionSet::from_refs([SelectionRef {
+            document: DOC,
+            entity: EntityId(10),
+            instance: InstancePath(vec![EntityId(20)]),
+            sub_element: None,
+        }])
+    );
+
+    // Hiding the INSERT's layer removes it, through the same walk.
+    session.layer_overrides.set(LayerId(2), false);
+    let outcome = app
+        .execute(
+            &mut session,
+            box_command(
+                logical_rect((0.0, 0.0), (10.0, 10.0)),
+                false,
+                SelectionMode::Replace,
+            ),
+        )
+        .unwrap();
+    assert_eq!(count(&outcome), 0);
+    assert!(session.selection.is_empty());
 }

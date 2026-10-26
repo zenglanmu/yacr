@@ -7,6 +7,7 @@ mod bounds;
 mod builder;
 mod drawing;
 mod layer_attributes;
+mod layer_inherit;
 mod layers;
 mod locked_layers;
 mod plot;

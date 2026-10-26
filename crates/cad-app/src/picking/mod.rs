@@ -23,7 +23,7 @@
 
 use crate::camera::{Camera, Projection};
 use crate::layers::LayerOverrideSet;
-use cad_db::{DrawingDatabase, MAX_INSTANCE_DEPTH};
+use cad_db::{DrawingDatabase, LayerScope, MAX_INSTANCE_DEPTH};
 use cad_domain::*;
 use cad_spatial::{BackFacePolicy, ChunkGridIndex, PickItem, PickOptions, PickReport};
 use std::sync::Arc;
@@ -140,25 +140,97 @@ pub fn pick_tolerance(
 ///
 /// This is the **exact** rule `select_all`/`select_box` apply: every step of the
 /// ref's instance path and its target entity must be visible under
-/// [`LayerOverrideSet::is_entity_visible`]. It is reused here — not duplicated as
-/// a second predicate — so a screen/ray pick targets the same set the rendered
-/// base contains. A ref with an unresolved step is refused (never silently
-/// included): an entity that cannot be resolved is not visible.
+/// [`LayerOverrideSet::is_layer_visible`], judged on each step's **effective**
+/// layer (see [`crate::picking::ref_visibility`]). It is reused here — not
+/// duplicated as a second predicate — so a screen/ray pick targets the same set
+/// the rendered base contains. A ref with an unresolved step is refused (never
+/// silently included): an entity that cannot be resolved is not visible.
+///
+/// This convenience wrapper resolves the drawing's layer-`0` id itself; a loop
+/// over many refs should call [`ref_visibility`] with one
+/// [`DrawingDatabase::root_layer_scope`].
 pub fn ref_is_visible(
     database: &DrawingDatabase,
     overrides: &LayerOverrideSet,
     reference: &SelectionRef,
 ) -> bool {
-    reference
+    ref_visibility(database, overrides, database.root_layer_scope(), reference) == Some(true)
+}
+
+/// The shared visibility walk over one selection ref's chain.
+///
+/// `root` must be [`DrawingDatabase::root_layer_scope`], resolved **once** by
+/// the caller so a per-item loop never rescans the layer table.
+///
+/// Each step is judged on its **effective** layer: its own layer, except that a
+/// block member which is itself on layer `0` follows the containing `INSERT`'s
+/// layer, chained through nested blocks (`cad_db::LayerScope`). This is the same
+/// resolution the display expansion uses for `ByLayer` styles, so a hidden
+/// layer cannot hide an entity in one place and colour it in another.
+///
+/// `Some(false)` means "a step is on a hidden layer"; `None` means a step's
+/// entity does not exist, which the caller reports rather than treating as
+/// either answer.
+pub fn ref_visibility(
+    database: &DrawingDatabase,
+    overrides: &LayerOverrideSet,
+    root: LayerScope,
+    reference: &SelectionRef,
+) -> Option<bool> {
+    let mut visible = true;
+    walk_ref_chain(database, root, reference, |layer| {
+        visible &= overrides.is_layer_visible(database, layer);
+    })?;
+    Some(visible)
+}
+
+/// The effective layer of the ref's **target** entity, or `None` when a step of
+/// the instance path does not resolve.
+///
+/// Used by the layer-view commands (`LAYISO`/`LAYOFF`) so the layer a selection
+/// belongs to is the same layer that decides its visibility and owns its
+/// `ByLayer` styles: a block member on layer `0` belongs to its `INSERT`'s
+/// layer, never to layer `0`.
+pub fn ref_effective_layer(
+    database: &DrawingDatabase,
+    root: LayerScope,
+    reference: &SelectionRef,
+) -> Option<LayerId> {
+    let mut layer = None;
+    walk_ref_chain(database, root, reference, |effective| {
+        layer = Some(effective);
+    })?;
+    layer
+}
+
+/// Walk one ref's `INSERT` chain, handing each step's **effective** layer to
+/// `visit`.
+///
+/// The single walk behind [`ref_visibility`] and [`ref_effective_layer`], so the
+/// two cannot answer differently. The scope descends with
+/// [`LayerScope::child_scope`] using **this** step's effective layer, which is
+/// what makes the layer-`0` rule chain one level per `INSERT` instead of
+/// repeatedly against the root.
+///
+/// `None` when a step's entity is missing; nothing is invented for it.
+fn walk_ref_chain(
+    database: &DrawingDatabase,
+    root: LayerScope,
+    reference: &SelectionRef,
+    mut visit: impl FnMut(LayerId),
+) -> Option<()> {
+    let mut scope = root;
+    for id in reference
         .instance
         .0
         .iter()
         .chain(std::iter::once(&reference.entity))
-        .all(|id| {
-            database
-                .entity(*id)
-                .is_some_and(|entity| overrides.is_entity_visible(database, entity))
-        })
+    {
+        let effective = scope.effective_layer(database.entity(*id)?.layer);
+        visit(effective);
+        scope = scope.child_scope(effective);
+    }
+    Some(())
 }
 
 /// Collect the model-space pick items of a drawing.
@@ -592,10 +664,16 @@ fn pick_ray_exhaustive_filtered(
     // the indexed path applies), so the exhaustive fallback and the index agree
     // on the visible set. Without overrides the list is untouched.
     let items: Vec<_> = match overrides {
-        Some(overrides) => items
-            .into_iter()
-            .filter(|(source, _, _)| ref_is_visible(database, overrides, source))
-            .collect(),
+        Some(overrides) => {
+            // One layer-table scan for the whole candidate list.
+            let scope = database.root_layer_scope();
+            items
+                .into_iter()
+                .filter(|(source, _, _)| {
+                    ref_visibility(database, overrides, scope, source) == Some(true)
+                })
+                .collect()
+        }
         None => items,
     };
     let item_count = items.len();
@@ -692,7 +770,9 @@ fn pick_ray_with_index_filtered(
     // identity, which a session-only layer override does not change; the
     // visibility rule therefore has to be applied here, at query time.
     if let Some(overrides) = overrides {
-        candidates.retain(|source| ref_is_visible(database, overrides, source));
+        let scope = database.root_layer_scope();
+        candidates
+            .retain(|source| ref_visibility(database, overrides, scope, source) == Some(true));
     }
     let candidate_count = candidates.len();
     if let Some(started) = started {

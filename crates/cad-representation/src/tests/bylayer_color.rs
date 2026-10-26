@@ -149,28 +149,34 @@ fn explicit_colour_is_untouched_by_the_layer_table() {
 }
 
 #[test]
-fn block_content_resolves_by_layer_against_its_own_layer() {
-    // The rule: every entity resolves `ByLayer` against the layer it is
-    // **itself** on (`DbEntity::layer`), including entities inside a block
-    // definition. Only `ByBlock` walks up the parent chain to the containing
-    // INSERT's already-resolved colour, which may have come from the INSERT's
-    // own layer.
+fn block_content_on_layer_zero_inherits_the_insert_layer() {
+    // AutoCAD's rule: a block member that is **itself** on layer `0` is drawn on
+    // the containing INSERT's layer, so its `ByLayer` colour is the INSERT's
+    // layer colour. A member on any other layer keeps its own layer (the control
+    // below). `ByBlock` is a different rule and still inherits the INSERT's
+    // resolved colour — which must not be applied twice.
     let mut b = empty_db();
+    // `empty_db` gives layer "0" the id `LayerId(0)`; RED and BLUE are separate
+    // rows, so "layer 0" here is resolved by name like any other drawing.
+    let zero = LayerId(0);
     let red = add_layer(&mut b, 1, "RED", layer_attributes(Some(1), [255, 0, 0]));
     let blue = add_layer(&mut b, 2, "BLUE", layer_attributes(Some(5), [0, 0, 255]));
 
     b.insert_block(BlockDefinition {
         id: BlockId(2),
-        entities: vec![EntityId(30), EntityId(31)],
+        entities: vec![EntityId(30), EntityId(31), EntityId(32)],
         dynamic_visibility: None,
     })
     .unwrap();
-    // Block child on RED with ByLayer: resolves to RED, not the INSERT's layer.
-    b.insert_entity(line_on_layer(30, red)).unwrap();
+    // Block child on layer 0 with ByLayer: resolves to the INSERT's layer.
+    b.insert_entity(line_on_layer(30, zero)).unwrap();
     set_color(&mut b, 30, cad_db::EntityColor::ByLayer);
-    // Block child on RED with ByBlock: inherits the INSERT's resolved colour.
-    b.insert_entity(line_on_layer(31, red)).unwrap();
+    // Block child on layer 0 with ByBlock: inherits the INSERT's resolved colour.
+    b.insert_entity(line_on_layer(31, zero)).unwrap();
     set_color(&mut b, 31, cad_db::EntityColor::ByBlock);
+    // Control: a child on RED with ByLayer keeps RED under the new rule too.
+    b.insert_entity(line_on_layer(32, red)).unwrap();
+    set_color(&mut b, 32, cad_db::EntityColor::ByLayer);
 
     // The INSERT itself sits on BLUE and is ByLayer.
     let mut insert = insert_entity(2, SpaceId::Model, 2, 10.0);
@@ -180,16 +186,31 @@ fn block_content_resolves_by_layer_against_its_own_layer() {
     let db = b.finish().unwrap();
 
     let rep = expand(&db, 2);
-    assert_eq!(rep.fragments.len(), 2, "both block children are expanded");
-    assert_color(&rep.fragments[0], [255, 0, 0]);
+    assert_eq!(
+        rep.fragments.len(),
+        3,
+        "all three block children are expanded"
+    );
+    assert_color(&rep.fragments[0], [0, 0, 255]);
     assert!(
         !rep.fragments[0].color_unresolved,
-        "the child's ByLayer resolved through its own layer"
+        "the layer-0 child's ByLayer resolved through the INSERT's layer"
     );
     assert_color(&rep.fragments[1], [0, 0, 255]);
     assert!(
         !rep.fragments[1].color_unresolved,
         "ByBlock inherited the INSERT's ByLayer colour, resolved from BLUE"
+    );
+    assert_color(&rep.fragments[2], [255, 0, 0]);
+    assert!(
+        !rep.fragments[2].color_unresolved,
+        "a member on a non-zero layer keeps its own layer"
+    );
+    // The stored fact survives: the member is still on layer 0.
+    assert_eq!(
+        db.entity(EntityId(30)).unwrap().layer,
+        zero,
+        "display resolution never rewrites DbEntity::layer"
     );
 }
 

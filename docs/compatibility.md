@@ -567,8 +567,9 @@ Rust 源逐项比对、双目录键/占位符、五条浮层行为与无障碍�
   **会**在下一次展开时重着色其 `ByLayer` 实体，且**不写实体、不产生实体历史**；导出把
   `ByLayer` 写作**符号值**（省略组 62 = DXF 的 256），不再拍平，原
   `export.note.bylayer_flattened` 已改名 `export.note.style_resolved` 并改说真话。
-  块内 `ByLayer` 按**自身图层**解析（只有 `ByBlock` 沿父链）；AutoCAD「图层 0 继承块引用图层」
-  特例**未建模**。
+  块内 `ByLayer` 取实体**生效图层**：自身图层，或（自身为图层 `0` 时）包含 `INSERT` 的图层，
+  逐层链式解析；AutoCAD「图层 0 继承块引用图层」自 2026-10-26 起**已建模**
+  （`cad_db::LayerScope`，见下方同名条目），`ByBlock` 仍沿父链。
 - **`ByLayer` 线型/线宽同样按层解析（同日）**：导入保留符号
   `EntityLineWeight::ByLayer` / `EntityLineType::ByLayer`；表示层按图层行线宽（1/100 mm 精确换算、
   `Default` → 0.25 mm、图层行自身 `ByLayer` → 0.25 mm 且置未解析标记）与线型**名字**去图纸线型表
@@ -590,6 +591,25 @@ Rust 源逐项比对、双目录键/占位符、五条浮层行为与无障碍�
   组 440 省略即 DXF 的“随层”（acadrust 只在非 `ByLayer` 时写 440，图层表用
   `AcCmTransparency` XDATA 携带值），`export.note.style_resolved` 已改为点名
   **colour / linetype / lineweight / transparency 四项**。
+- **「图层 0 继承块引用图层」已建模（2026-10-26，曾记为未建模）**：AutoCAD 的规则是**块定义内**
+  实体的自身图层为 `0` 时，按**包含它的 `INSERT` 的图层**绘制；其它图层保持自身。实现是
+  **单点解析** `cad_db::LayerScope`（`crates/cad-db/src/drawing/layer_inherit.rs`），由
+  `DrawingDatabase::root_layer_scope()` 每次遍历解析**一次**（按**名字**找 `0` 行，**不是**
+  `LayerId(0)`：id 是表索引）并以 `child_scope` 逐层下传，因此：
+  - 四项 `ByLayer`（颜色/透明度/线宽/线型）**在同一处**取生效图层
+    （`crates/cad-representation/src/provider/expand.rs`），不可能互相不一致；
+  - **规则逐层链式**：自身在 `0` 的 `INSERT` 把它自己的生效图层交给子实体，所以「`0` 实体 ⊂ `0` 块参照 ⊂
+    RED 块参照」⇒ RED（一次递归解一层，不回到根）；
+  - `ByBlock` 语义**未变**（仍取包含 `INSERT` 的已解析值），不会与图层规则**叠加**；
+  - 图纸里**没有**名为 `0` 的图层时规则**整体关闭**（`layer_zero_id()` 为 `None`，不 panic、不猜）；
+  - **绝不改写** `DbEntity::layer`：属性面板、导出与往返仍读到源图纸存储的事实，这是纯**显示解析**规则。
+  **可见性/拾取同源**：`cad_app::picking::{ref_visibility, ref_effective_layer}` 用同一条
+  `LayerScope` 链判定 instance path 每一步的生效图层，`SELECTALL`、框选（`SELECTINBOX`）、拾取
+  （`ref_is_visible`）、`STRETCH` 的可见项分组与 `LAYISO`/`LAYOFF` 的「选中实体属于哪一层」
+  都调用它——所以「图层 `0` 关闭」不再隐藏一个画在可见 `INSERT` 图层上的块成员，隐藏 `INSERT`
+  的图层也会一并隐藏它。**仍存在的既有分歧（未修）**：模型空间场景只为**顶层实体**做图层过滤
+  （`render_scene/assembly.rs` 走 `visible_model_entities`），块内成员**完全不做**图层过滤，
+  因此「把 `INSERT` 的图层关掉」目前只影响拾取/选择，**不**让屏幕上的块成员消失。
 
 CAD 分区右键**快捷菜单**已实现（复制/剪切/粘贴/全选/删除/特性/缩放到范围/平移/放弃/重做/重复上一命令）。
 夹点已有**纯模型 + 命令 + 宿主拖拽**（`GripStretch`：`LINE` 端点与中点 / `CIRCLE` 圆心与四象限 / `ARC` 圆心 / `POINT` 位置，

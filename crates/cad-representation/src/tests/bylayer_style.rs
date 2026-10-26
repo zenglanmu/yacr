@@ -393,11 +393,13 @@ fn editing_a_layer_linetype_and_lineweight_changes_both_with_no_entity_write() {
 }
 
 #[test]
-fn block_content_resolves_by_layer_against_its_own_layer() {
-    // The same rule as colour: every entity resolves `ByLayer` against the layer
-    // it is **itself** on, including entities inside a block definition. Only
-    // `ByBlock` walks up the parent chain to the containing INSERT's already
-    // resolved value, which may have come from the INSERT's own layer.
+fn block_content_on_a_non_zero_layer_keeps_its_own_layer() {
+    // The rule for a member on a **non-zero** layer: `ByLayer` resolves against
+    // the layer it is itself on, including inside a block definition. (A member
+    // that is itself on layer `0` follows the INSERT's layer instead — see
+    // `tests/layer_zero_inheritance.rs`.) `ByBlock` walks up the parent chain to
+    // the containing INSERT's already-resolved value, which may have come from
+    // the INSERT's own layer.
     let mut b = empty_db();
     add_linetype(&mut b, 1, "DASHED", &[2.0, -1.0]);
     add_linetype(&mut b, 2, "DOTTED", &[0.5, -0.5]);

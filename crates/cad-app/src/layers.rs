@@ -115,18 +115,29 @@ impl LayerOverrideSet {
         self.get(layer).unwrap_or(database_visible)
     }
 
-    /// Whether an entity should be drawn under this override set.
+    /// Whether a layer should be drawn under this override set.
     ///
-    /// This is the predicate a scene/representation request path uses. It reads
-    /// the entity's layer **from the drawing database** (for the stored flag)
-    /// and then applies the temporary override; the override alone cannot know
-    /// the database's own visibility, so both inputs are required.
+    /// The database flag of `layer` plus the temporary override. Callers that
+    /// resolved `layer` through [`cad_db::LayerScope`] — a block member on layer
+    /// `0` follows the containing INSERT's layer — pass the **effective** layer
+    /// here, so the visibility answer and the `ByLayer` style resolution always
+    /// come from one resolution.
+    pub fn is_layer_visible(&self, database: &DrawingDatabase, layer: LayerId) -> bool {
+        let base = database.layer(layer).map(|l| l.visible).unwrap_or(true);
+        self.effective(layer, base)
+    }
+
+    /// Whether an entity should be drawn under this override set, judged by the
+    /// layer it is **stored** on (`DbEntity::layer`).
+    ///
+    /// This is the rule for a model-space (top-level) entity, whose stored layer
+    /// is its effective layer. An entity inside a block definition is judged on
+    /// its effective layer instead — see
+    /// [`crate::picking::ref_visibility`], the one walk that resolves the
+    /// instance path's `LayerScope` chain and then calls
+    /// [`Self::is_layer_visible`].
     pub fn is_entity_visible(&self, database: &DrawingDatabase, entity: &DbEntity) -> bool {
-        let base = database
-            .layer(entity.layer)
-            .map(|l| l.visible)
-            .unwrap_or(true);
-        self.effective(entity.layer, base)
+        self.is_layer_visible(database, entity.layer)
     }
 
     /// A stable, comparable fingerprint of the override state.
@@ -229,7 +240,10 @@ pub fn database_layer(database: &DrawingDatabase, id: LayerId) -> Option<&Layer>
 mod tests {
     use super::*;
     use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
-    use cad_domain::{DatabaseId, EntityId, ObjectId, Point3, Revision, SemanticGeometry, SpaceId};
+    use cad_domain::{
+        BlockId, DatabaseId, DocumentId, EntityId, InstancePath, ObjectId, Point3, Revision,
+        SelectionRef, SemanticGeometry, SpaceId, Transform3,
+    };
 
     fn database_with_layers() -> DrawingDatabase {
         let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
@@ -430,5 +444,179 @@ mod tests {
         assert_eq!(page.total, 2);
         assert_eq!(page.rows[0].name, "0");
         assert_eq!(page.request.revision, layer_revision(&db));
+    }
+
+    // ---- Layer `0` inside a block: the effective-layer rule ----
+
+    /// A line `id` on `layer` inside `space`.
+    fn line_on(id: u128, space: SpaceId, layer: LayerId) -> DbEntity {
+        DbEntity {
+            object: DbObject {
+                id: ObjectId(id),
+                type_key: "AcDbLine".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(id),
+            layer,
+            space,
+            geometry: SemanticGeometry::Line {
+                start: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                end: Point3 {
+                    x: 10.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+            draw_order: 0,
+        }
+    }
+
+    /// Layers `0`(0)/BLUE(2, on)/RED(3, off) and block 9 with two members: 30 on
+    /// layer `0` and 31 on RED. Two model INSERTs of that block: entity 2 on
+    /// BLUE, entity 3 on RED.
+    fn database_with_a_layer_zero_block_member() -> DrawingDatabase {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        for (id, name, visible) in [
+            (LayerId(0), "0", true),
+            (LayerId(2), "BLUE", true),
+            (LayerId(3), "RED", false),
+        ] {
+            b.insert_layer(Layer {
+                id,
+                name: name.into(),
+                visible,
+            })
+            .unwrap();
+        }
+        b.insert_block(cad_db::BlockDefinition {
+            id: BlockId(9),
+            entities: vec![EntityId(30), EntityId(31)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+        b.insert_entity(line_on(30, SpaceId::Block(BlockId(9)), LayerId(0)))
+            .unwrap();
+        b.insert_entity(line_on(31, SpaceId::Block(BlockId(9)), LayerId(3)))
+            .unwrap();
+        for (id, layer) in [(2u128, LayerId(2)), (3, LayerId(3))] {
+            let mut insert = line_on(id, SpaceId::Model, layer);
+            insert.geometry = SemanticGeometry::Insert {
+                block: BlockId(9),
+                transform: Transform3::identity(),
+            };
+            b.insert_entity(insert).unwrap();
+        }
+        b.finish().unwrap()
+    }
+
+    fn block_member_ref(insert: u128, member: u128) -> SelectionRef {
+        SelectionRef {
+            document: DocumentId(1),
+            entity: EntityId(member),
+            instance: InstancePath(vec![EntityId(insert)]),
+            sub_element: None,
+        }
+    }
+
+    #[test]
+    fn a_layer_zero_block_member_follows_the_insert_layer_for_visibility() {
+        // The one visibility answer: a member stored on layer `0` inside an INSERT
+        // is drawn/selected under the INSERT's layer, so hiding that layer hides
+        // the member even though layer `0` itself is on.
+        let db = database_with_a_layer_zero_block_member();
+        let root = db.root_layer_scope();
+        let member = block_member_ref(2, 30);
+        assert_eq!(
+            crate::picking::ref_visibility(&db, &LayerOverrideSet::new(), root, &member),
+            Some(true),
+            "BLUE (the INSERT's layer) and layer 0 are both on"
+        );
+        assert_eq!(
+            crate::picking::ref_effective_layer(&db, root, &member),
+            Some(LayerId(2)),
+            "the member belongs to the INSERT's layer, not to layer 0"
+        );
+
+        let mut hide_insert_layer = LayerOverrideSet::new();
+        hide_insert_layer.set(LayerId(2), false);
+        assert_eq!(
+            crate::picking::ref_visibility(&db, &hide_insert_layer, root, &member),
+            Some(false),
+            "hiding the INSERT's layer hides its layer-0 member"
+        );
+        assert!(
+            hide_insert_layer.is_entity_visible(&db, db.entity(EntityId(30)).unwrap()),
+            "the stored-layer predicate alone still says 'on': only the shared \
+             effective-layer walk follows the INSERT"
+        );
+
+        // A member on a non-zero layer keeps its own layer: RED is off, so it is
+        // hidden even though its INSERT (BLUE) is visible.
+        assert_eq!(
+            crate::picking::ref_visibility(
+                &db,
+                &LayerOverrideSet::new(),
+                root,
+                &block_member_ref(2, 31)
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn a_hidden_layer_zero_does_not_hide_a_member_of_a_visible_insert() {
+        // The mirror case: layer `0` itself off. The member is drawn on BLUE, so it
+        // stays visible — again only through the shared walk.
+        let db = database_with_a_layer_zero_block_member();
+        let root = db.root_layer_scope();
+        let mut hide_zero = LayerOverrideSet::new();
+        hide_zero.set(LayerId(0), false);
+        let member = block_member_ref(2, 30);
+        assert!(!hide_zero.is_entity_visible(&db, db.entity(EntityId(30)).unwrap()));
+        assert_eq!(
+            crate::picking::ref_visibility(&db, &hide_zero, root, &member),
+            Some(true),
+            "the layer-0 row being off must not hide a member drawn on BLUE"
+        );
+        // A model-space entity stored on layer `0` has no INSERT to inherit from,
+        // so the same override does hide it.
+        let mut solo = block_member_ref(2, 30);
+        solo.instance = InstancePath::default();
+        assert_eq!(
+            crate::picking::ref_visibility(&db, &hide_zero, root, &solo),
+            Some(false),
+            "no containing INSERT means no inheritance"
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_instance_step_reports_no_visibility_answer() {
+        // Never fabricate `true`/`false` for a ref whose path does not resolve.
+        let db = database_with_a_layer_zero_block_member();
+        let reference = SelectionRef {
+            document: DocumentId(1),
+            entity: EntityId(30),
+            instance: InstancePath(vec![EntityId(999)]),
+            sub_element: None,
+        };
+        assert_eq!(
+            crate::picking::ref_visibility(
+                &db,
+                &LayerOverrideSet::new(),
+                db.root_layer_scope(),
+                &reference
+            ),
+            None
+        );
+        assert!(!crate::picking::ref_is_visible(
+            &db,
+            &LayerOverrideSet::new(),
+            &reference
+        ));
     }
 }

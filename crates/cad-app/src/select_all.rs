@@ -5,15 +5,19 @@
 //! sub-element identity. The current builder emits `sub_element: None`.
 //! Layer visibility and resolved dynamic-block states are the visibility data
 //! available in the database; it has no independent source-entity hidden flag.
+//! A block member is judged on its **effective** layer (a member on layer `0`
+//! follows the containing `INSERT`'s layer, `cad_db::LayerScope`), through the
+//! same walk that decides picking (`crate::picking::ref_visibility`).
 //! No promise is made about visibility flags lost before database import.
 //! Paper space, opaque geometry, nested compound INSERTs, unresolved dynamic
 //! states and truncated/cyclic expansion are refused, never empty successes.
 
+use crate::picking::ref_visibility;
 use crate::{
     drawing_pick_items, Application, Command, CommandOutcome, CommandPayload, SelectionSet,
     SessionState,
 };
-use cad_db::{DbEntity, DrawingDatabase, MAX_INSTANCE_DEPTH};
+use cad_db::{DbEntity, DrawingDatabase, LayerScope, MAX_INSTANCE_DEPTH};
 use cad_domain::{BlockId, CadError, CadResult, SemanticGeometry, SpaceId};
 
 impl Application {
@@ -39,24 +43,19 @@ impl Application {
             ));
         }
         let database = &document.drawing;
+        // One layer-table scan per command: the preflight walk and the selection
+        // walk both carry it, so a block member is judged on its effective layer
+        // everywhere and the table is never rescanned per entity.
+        let scope = database.root_layer_scope();
         // The existing pick builder skips cycles/depth limits without a report.
         // Preflight the visible tree before trusting its catalogue or publishing.
         for entity in database.model_space() {
-            validate_branch(database, session, entity, &mut Vec::new())?;
+            validate_branch(database, session, entity, scope, &mut Vec::new())?;
         }
         let mut selection = SelectionSet::new();
         for item in drawing_pick_items(database, command.document) {
-            let mut visible = true;
-            for id in item
-                .source
-                .instance
-                .0
-                .iter()
-                .chain(std::iter::once(&item.source.entity))
-            {
-                let entity = database.entity(*id).ok_or(CadError::StaleResult)?;
-                visible &= session.layer_overrides.is_entity_visible(database, entity);
-            }
+            let visible = ref_visibility(database, &session.layer_overrides, scope, &item.source)
+                .ok_or(CadError::StaleResult)?;
             if visible {
                 selection.insert(item.source);
             }
@@ -71,9 +70,14 @@ pub(crate) fn validate_branch(
     database: &DrawingDatabase,
     session: &SessionState,
     entity: &DbEntity,
+    scope: LayerScope,
     stack: &mut Vec<BlockId>,
 ) -> CadResult<()> {
-    if !session.layer_overrides.is_entity_visible(database, entity) {
+    let effective = scope.effective_layer(entity.layer);
+    if !session
+        .layer_overrides
+        .is_layer_visible(database, effective)
+    {
         return Ok(());
     }
     if let SemanticGeometry::Insert { block, .. } = &entity.geometry {
@@ -102,8 +106,9 @@ pub(crate) fn validate_branch(
             }
         }
         stack.push(*block);
+        let child_scope = scope.child_scope(effective);
         for child in database.block_entities(*block) {
-            validate_branch(database, session, child, stack)?;
+            validate_branch(database, session, child, child_scope, stack)?;
         }
         stack.pop();
         Ok(())
