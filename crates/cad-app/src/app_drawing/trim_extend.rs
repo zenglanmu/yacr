@@ -12,7 +12,7 @@ struct NewEntityInsert<'a> {
     layer: LayerId,
     space: SpaceId,
     /// A captured display state (render attributes + dynamic-visibility
-    /// membership); single-entity OFFSET only.
+    /// membership); only the single-entity OFFSET path captures one.
     display: Option<cad_db::EntityDisplayState>,
     /// The stored `type_key` override; `None` = [`class_name`].
     type_key: Option<&'a str>,
@@ -21,14 +21,19 @@ struct NewEntityInsert<'a> {
 }
 
 impl Application {
-    /// Create an offset copy of a single selected LINE or CIRCLE.
+    /// Create an offset copy of a single selected LINE, CIRCLE or straight-segment
+    /// LWPOLYLINE.
     ///
     /// The picked `side_point` defines both the side and the distance: for a LINE
     /// it is the perpendicular distance to the infinite line (the new line lies
     /// on the side the point is on); for a CIRCLE the new radius is
     /// `|side_point − centre|` (a point outside the circle grows it, inside
-    /// shrinks it). Any other geometry kind is an explicit `Unsupported` refusal;
-    /// exactly one source entity is required. The new entity has a fresh id, the
+    /// shrinks it); for a LWPOLYLINE every segment is moved that far to the pick's
+    /// side and the vertices are re-joined with **miter** joins
+    /// ([`offset_polyline`]). Any other geometry kind is an explicit `Unsupported`
+    /// refusal — and an arc (bulged) polyline segment is its own named refusal
+    /// (`offset.bulge_segment`) rather than being folded into that generic arm.
+    /// Exactly one source entity is required. The new entity has a fresh id, the
     /// source's layer/space, and the source's display state; one transaction and
     /// one undo step.
     pub(crate) fn offset_entity(&mut self, command: &Command) -> CadResult<CommandOutcome> {
@@ -80,9 +85,22 @@ impl Application {
                         offset_circle(*center, *normal, *radius, *side_point)?;
                     (geometry, format!("OFFSET：圆偏移，新半径 {distance:.4}"))
                 }
+                SemanticGeometry::Polyline {
+                    points,
+                    bulges,
+                    closed,
+                } => {
+                    let (geometry, distance) =
+                        offset_polyline(points, bulges, *closed, *side_point)?;
+                    (
+                        geometry,
+                        format!("OFFSET: polyline offset by {distance:.4} (miter joins)"),
+                    )
+                }
                 other => {
                     return Err(CadError::Unsupported(format!(
-                        "OFFSET supports LINE and CIRCLE only, got {}",
+                        "OFFSET supports LINE, CIRCLE and straight-segment LWPOLYLINE only, \
+                         got {}",
                         geometry_kind(other)
                     )));
                 }
@@ -521,8 +539,8 @@ impl Application {
     /// Insert a batch of new entities into `layer`/`space` in one transaction.
     ///
     /// The layer must exist: a missing layer is an explicit error, never a silent
-    /// fallback. A captured display state (single-entity OFFSET only) is restored
-    /// on the **first** inserted entity after commit and recorded on its patch's
+    /// fallback. A captured display state (captured only by the single-entity
+    /// OFFSET path) is restored on the **first** inserted entity after commit and recorded on its patch's
     /// `after_state` so a redo re-applies it; a batch (DIMCENTER) passes `None`.
     ///
     /// Every entity's stored `type_key` is [`class_name`]'s answer; the

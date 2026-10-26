@@ -357,12 +357,22 @@ export interface SelectionRequirement {
  * the same fact is invented. `LAYUNISO` takes **no** selection (`count: 0`): its
  * entry exists for the "no drawing is open" answer only — the requirement can
  * never be unmet, because nothing is what it restores.
+ *
+ * `LAYOFF`/`LAYON` (2026-10-26) follow the isolate pair exactly. `LAYOFF` turns
+ * **off** every layer the current selection sits on (the current layer excepted),
+ * so with nothing selected there is no layer to turn off — the same one-object
+ * minimum as `LAYISO`, worded with the same catalog sentence the host refuses a
+ * bare `LAYOFF` with (`draw.error.selection_required`). `LAYON` turns every layer
+ * back on and takes **no** selection (`count: 0`), so its entry is the
+ * "no drawing is open" answer only, exactly like `LAYUNISO`'s.
  */
 export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequirement>> = Object.freeze({
   MATCHPROP: Object.freeze({ count: 2, reasonKey: 'draw.kind.matchprop.hint' }),
   JOIN: Object.freeze({ count: 2, reasonKey: 'draw.kind.join.hint' }),
   LAYISO: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
   LAYUNISO: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
+  LAYOFF: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
+  LAYON: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
 });
 
 /** The selection requirement of `id`, or `null` when it has none. */
@@ -635,6 +645,16 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // visibility change, not a palette toggle.
   { id: 'LAYISO', labelKey: 'layers.isolate', icon: 'eyeOff', group: 'annotate' },
   { id: 'LAYUNISO', labelKey: 'layers.unisolate', icon: 'eye', group: 'annotate' },
+  // Layer off / on (2026-10-26) close the layer run. `LAYOFF` turns **off** every
+  // layer the current selection sits on (the current layer excepted), and `LAYON`
+  // is the router's restore selector: it turns every layer back on and takes no
+  // selection. Both are **router** commands like the isolate pair — never
+  // chrome-local selectors — so the host vocabulary alone admits them. They reuse
+  // the same visibility glyph pair for the same reason: turning layers off hides
+  // geometry (dimmed eye) and restoring shows it again (plain eye), which is a
+  // visibility change, not a palette toggle.
+  { id: 'LAYOFF', labelKey: 'draw.kind.layoff', icon: 'eyeOff', group: 'annotate' },
+  { id: 'LAYON', labelKey: 'draw.kind.layon', icon: 'eye', group: 'annotate' },
   { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', group: 'annotate' },
   { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', group: 'annotate' },
   { id: 'ZOOMIN', labelKey: 'toolbar.zoom_in', icon: 'zoomIn', group: 'view' },

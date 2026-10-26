@@ -26,6 +26,9 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // restore half is the existing `RESTORELAYERS` path: `LAYUNISO`/`LAYERP` are
     // aliases of it below, so there is exactly one restore.
     ("LAYISO", CommandId::IsolateLayers),
+    // LAYOFF is its sibling: hide exactly the selection's layers (the current
+    // layer is never turned off), again as session visibility overrides only.
+    ("LAYOFF", CommandId::LayOff),
     ("SPACE", CommandId::SwitchSpace),
     ("SELECT", CommandId::Select),
     ("SELECTALL", CommandId::SelectAll),
@@ -390,8 +393,13 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     // `RESTORELAYERS` does here (drop the session's temporary overrides).
     // `LAYERP` ("previous layer state") has **no** layer-state stack in this build,
     // so it names the same, single restore path rather than inventing a second one.
+    // `LAYON` ("turn all layers on") is the same restore reached by its own name.
     ("LAYUNISO", "RESTORELAYERS"),
     ("LAYERP", "RESTORELAYERS"),
+    // `LAYON` is AutoCAD's "turn all layers on", which is exactly what the one
+    // restore path does here (drop every temporary override). It carries no
+    // `CommandId` of its own, like `LAYUNISO`/`LAYERP`.
+    ("LAYON", "RESTORELAYERS"),
     ("DBA", "DIMBASELINE"),
     ("DCO", "DIMCONTINUE"),
     // `NEWLAYER` is a **project** word synonym for creating a layer, not an

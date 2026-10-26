@@ -500,9 +500,16 @@ impl Application {
     ///
     /// Mirrors MOVE/COPY's contract but **keeps the originals** (AutoCAD default):
     /// mirrored copies are inserted with fresh ids in one transaction and one undo
-    /// step, leaving the sources untouched. A reflection is orientation-reversing,
-    /// so an Arc/Ellipse (whose parameterisation would reverse) is an explicit
-    /// refusal for the whole command, never a silent drop.
+    /// step, leaving the sources untouched.
+    ///
+    /// A reflection is orientation-reversing, which the generic transform surface
+    /// refuses for `Arc`/`Ellipse`. MIRROR therefore reflects those two kinds
+    /// **explicitly** (`app_drawing::mirror_geometry`): the plane normal is negated,
+    /// the arc's start angle is re-derived from its mirrored start point with the
+    /// sweep preserved, and the ellipse's axis/parameter are reflected as-is (so a
+    /// full ellipse **and** an elliptical arc are exact). Any kind this build
+    /// cannot mirror honestly (`Text`, `Shape`, `Opaque`, …) still refuses the whole
+    /// command, never a silent drop.
     pub(crate) fn mirror_entities(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         let CommandPayload::Mirror {
             refs,

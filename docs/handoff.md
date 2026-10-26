@@ -1,3 +1,46 @@
+## 2026-10-26 命令补齐（第 2 轮）：OFFSET 折线 / MIRROR 弧与椭圆 / LAYOFF·LAYON
+
+### 结论
+
+三项 AutoCAD 对齐落地，**均不写 DWG**：`OFFSET` 支持**直线段 LWPOLYLINE**；`MIRROR` 支持
+**`Arc` 与 `Ellipse`（含椭圆弧）**；新增 `LAYOFF`（+`LAYON` 别名）。命令表 87 → **88**。
+
+- **OFFSET 折线**：新 `app_drawing/offset_polyline.rs`，接进既有「单事务」偏移路径。常数距离、**miter
+  斜接**、`n`→`n` 顶点、`closed` 与 `bulges` 原样保留、开口端不造封口。按名拒绝
+  `offset.bulge_segment`（含弧段折线，能力缺口不是坏输入）、`offset.collapsed`（近 180° 反折 /
+  偏移段塌缩）、`offset.non_planar`；其余退化输入仍 `InvalidInput`。**已知缺口**：只查**顶点局部**塌缩，
+  远端偏移段之间的自交**不检查**（写在模块文档里，不静默宣称已排除）。
+- **MIRROR 弧/椭圆**：新 `app_drawing/mirror_curves.rs`；`determinant >= 0` 直接走既有
+  `transform_geometry`，反射才进新分支。**不改 `cad-db` 的 transform 面**（那层仍是 proper similarity）。
+- **LAYOFF/LAYON**：`CommandId::LayOff`（payload-free、Viewer 可用），与 `LAYISO` 共用
+  `selection_layers`/`hide_layers_atomically` 助手；当前层除外，选择只在当前层 ⇒
+  `layers.off.current_layer` 且零改动；空选择 ⇒ `layers.off.needs_selection`。`LAYON` 是既有
+  `RESTORELAYERS` 的别名。两者只改会话覆盖，**不升 revision、不进历史**。
+
+### 契约更正（本轮纠正了编排 brief 里的一个符号错误，务必照此记录）
+
+派单时写的是「`normal' = −normal` **且** `sweep' = −sweep`」——**这两个不能同时成立**。每法向的右手帧
+`(ax, ay)` 满足 `(R·ax)×(R·ay) = −R(n) = n'`，所以**取反法向之后镜像帧仍是右手系，参数以 `+t` 前进**：
+正确组合是 `normal' = −R(normal)`、`start'` 由**镜像后的起点**在新帧重新求角、**`sweep` 符号保留**。
+反号 sweep 的写法会让 `mirror(start) → mirror(end)` 不成立（两种写法都代数验证 + 端点测试过）。同一根因
+也解释了椭圆：法向取反后参数**保留**（`θ' = θ`），因此完整椭圆与**椭圆弧**都不需要 `θ' = −θ` 映射。
+
+### 证据（本机，2026-10-26）
+
+- `cargo fmt --all -- --check`、`cargo check --workspace --all-targets --locked`、
+  `clippy -p cad-app -p cad-host -p cad-ui-core --all-targets -- -D warnings` → 通过。
+- `cargo test -p cad-app --lib --locked` → **1225 passed**（+21：`offset_polyline` 10、`mirror_curves` 7、
+  `layers_off` 7，另含 vocabulary/contracts 更新）；`-p cad-host --locked` → **237**；
+  `-p cad-ui-core --locked` → **281**；`-p app-linux --lib --locked` → **173**。
+- `apps/desktop-ui`：`tsc --noEmit` 通过；`node --test test/*.test.ts` → **634 passed**；
+  `npm run build` 通过。
+- `check-i18n.py`（825 keys）、`check-file-size.py`（1019 files）、`check-architecture.py` → 通过。
+- `offset.rs` / `transform.rs` 触顶，新增测试拆到 `tests/drawing/{offset_polyline,mirror_curves}.rs`；
+  `cjk_baseline.rs` **未增长**（新消息全英文，UI 文案进两本目录）。
+
+**NOT RUN**：GUI 真实点击/像素判据、真实 DWG 上的 OFFSET/MIRROR 目视验收、wasm/Windows/Android/macOS
+目标、`check-workflows.py`/`check-fixture-manifest.py`、性能。**不得**据此宣称「与 AutoCAD 一致」。
+
 ## 2026-10-26 命令补齐：`ID` / `JOIN` / `LAYISO`（AutoCAD 对齐，UI + 功能）
 
 ### 结论

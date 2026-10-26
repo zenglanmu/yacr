@@ -55,9 +55,11 @@ canonical 命令（`work-only` 表示仅在工作模式可用，Viewer 模式由
 | `ROTATE` | 编辑 | 是 | `RO` |
 | `SCALE` | 编辑 | 是 | `SC` |
 | `MIRROR` | 编辑（保留原件） | 是 | `MI` |
-| `OFFSET` | 编辑（仅 LINE/CIRCLE） | 是 | `O` |
+| `OFFSET` | 编辑（LINE / CIRCLE / **直线段折线**；含弧段折线按名拒绝） | 是 | `O` |
 | `MATCHPROP` | 编辑（**选择式**特性匹配：首个选中实体为源，其余为目标；转移 `layer`/`color`/`linetype`/`lineweight`/`transparency` 五项） | 是 | `MA` |
 | `JOIN` | 编辑（合并选择为**一个**实体：共线 `LINE` 或同心相续 `ARC`；一条事务、一步撤销，仅这两种几何） | 是 | — |
+| `LAYOFF` | 图层（关闭选择所在图层，当前层除外；会话覆盖，不写 DWG、不升 revision） | 否 | — |
+| `LAYON` | 图层（全部打开 = 清空会话覆盖） | 否 | — |
 | `COPYCLIP` | 剪贴板捕获（只读） | 否 | — |
 | `CUTCLIP` | 剪贴板剪切（删除并入剪贴板） | 是 | — |
 | `PASTECLIP` | 剪贴板粘贴（原坐标） | 是 | — |
@@ -252,9 +254,9 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     其余未映射组合不拦截。
 - **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
   的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
-  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**87 个选择子**，与 `CommandId` 变体一一对应；
-  P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`**——`ID`
-  是测量选择子、`LAYUNISO`/`LAYERP` 是既有 `RESTORELAYERS` 的别名，都不新增 `CommandId`）；不在表内的名字报告
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**88 个选择子**，与 `CommandId` 变体一一对应；
+  P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`/`LAYOFF`**——
+  `ID` 是测量选择子、`LAYUNISO`/`LAYERP`/`LAYON` 是既有 `RESTORELAYERS` 的别名，都不新增 `CommandId`）；不在表内的名字报告
   `command.unknown`；宿主**识别但未实现**的路径（如 `PLOT`/`SAVE` 的受限路径）由宿主报告
   `command.unsupported`。两者都是显式反馈，**不静默忽略**。
 - **仍未实现的 AutoCAD 名（据实）**：`POLYLINE`（我们有 `PLINE`）、`XLINE`、`BLOCK`、`WBLOCK`、

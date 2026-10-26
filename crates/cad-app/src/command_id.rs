@@ -53,6 +53,32 @@ pub enum CommandId {
     /// explicit refusal (`layers.isolate.needs_selection`): isolating nothing would
     /// hide every layer with no way back from the canvas.
     IsolateLayers,
+    /// `LAYOFF`: turn **off** every layer the selected entities live on, except
+    /// the current layer, using **session visibility overrides only**.
+    ///
+    /// Payload is [`crate::CommandPayload::None`]; the selection is the input (at
+    /// least one entity, refused by name otherwise). It is the sibling of
+    /// [`CommandId::IsolateLayers`] and the second half of AutoCAD's layer surgery:
+    /// where `LAYISO` keeps the selection's layers and hides the rest, `LAYOFF`
+    /// hides exactly the selection's layers.
+    ///
+    /// The **current layer is never turned off**: this build already refuses to
+    /// make an invisible layer current and refuses to turn the current layer off
+    /// (`layer.current_off`, see `app_drawing::layer_edit`), and a hidden current
+    /// layer would silently receive new geometry. When the selection has entities
+    /// *only* on the current layer the command changes nothing and reports
+    /// `layers.off.current_layer`.
+    ///
+    /// The hides are published as **one atomic batch** through the same validated
+    /// path as [`CommandId::SetLayerVisibilities`] (session overrides only), so a
+    /// refusal changes nothing. No database write, no revision bump, no history
+    /// entry. Allowed in Viewer and Work — it is a session view operation, not an
+    /// edit.
+    ///
+    /// `LAYON` is an **alias of [`CommandId::RestoreLayers`]** (it clears the
+    /// overrides, which is what turning the layers back on means here); it carries
+    /// no `CommandId` of its own.
+    LayOff,
     SwitchSpace,
     Select,
     /// Select visible model-space pick items without editing the drawing.

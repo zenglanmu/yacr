@@ -121,10 +121,12 @@ impl Application {
             "镜像",
             false,
         )?;
-        // Refuse the whole command if any selected geometry cannot be mirrored
-        // (an Arc/Ellipse would reverse its parameterisation), never drop it.
+        // Refuse the whole command if any selected geometry cannot be mirrored,
+        // never drop it. Arc/Ellipse are mirrored by this crate's explicit
+        // reflection arms (`mirror_geometry`); every other kind keeps the generic
+        // transform surface's behaviour and refusals (Text/Shape/Opaque).
         for source in &sources {
-            transform_geometry(&source.geometry, transform).map_err(|error| match error {
+            mirror_geometry(&source.geometry, transform).map_err(|error| match error {
                 CadError::Unsupported(reason) => CadError::Unsupported(format!(
                     "MIRROR cannot mirror {}: {reason}",
                     geometry_kind(&source.geometry)
@@ -157,7 +159,7 @@ impl Application {
         let mut copies: Vec<(EntityId, DbEntity)> = Vec::with_capacity(sources.len());
         for (index, source) in sources.iter().enumerate() {
             let new_id = drawing.allocate_entity_id();
-            let geometry = transform_geometry(&source.geometry, transform)?;
+            let geometry = mirror_geometry(&source.geometry, transform)?;
             let copy = DbEntity {
                 object: cad_db::DbObject {
                     id: ObjectId(new_id.0),

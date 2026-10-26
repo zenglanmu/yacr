@@ -1,6 +1,6 @@
-// ID / JOIN / LAYISO / LAYUNISO user-facing surface (2026-10-26).
+// ID / JOIN / LAYISO / LAYUNISO / LAYOFF / LAYON user-facing surface (2026-10-26).
 //
-// Three additions, each with the same contract as its AutoCAD neighbour:
+// Four additions, each with the same contract as its AutoCAD neighbour:
 //
 //   * `ID` is the **fifth measurement kind**: one point pick, echoed as X/Y/Z in
 //     the command window (`command.log.point`). It sits in the Measure panel with
@@ -12,18 +12,24 @@
 //   * `LAYISO`/`LAYUNISO` are **router** layer commands (not chrome-local
 //     selectors like `LAYER`): isolate needs something selected, unisolate needs
 //     nothing, and both need a drawing open.
+//   * `LAYOFF`/`LAYON` (2026-10-26) close that layer run with the same contract:
+//     `LAYOFF` turns off every layer the selection sits on (one object minimum,
+//     the current layer excepted), `LAYON` turns every layer back on (no
+//     selection). Both are router commands, and both are dropped with the layers
+//     palette on a carrier that never renders it.
 //
 // Nothing here may imply an unimplemented option: ID has no options sub-prompt,
-// JOIN has no settings prompt and isolate has no settings dialog, so none of the
-// three carries a variant popover. Every user-visible string comes from the shared
-// catalogs; the item ids, the dispatched selectors and the catalog entries are
-// asserted together so a ribbon button and a catalogue row cannot drift apart.
+// JOIN has no settings prompt and the layer commands have no settings dialog, so
+// none of them carries a variant popover. Every user-visible string comes from the
+// shared catalogs; the item ids, the dispatched selectors and the catalog entries
+// are asserted together so a ribbon button and a catalogue row cannot drift apart.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ARGUMENT_COMMANDS,
   CAPABILITY_GATES,
   COMMAND_CATALOG,
+  DOCUMENT_SCOPED_COMMANDS,
   GESTURE_ONLY_COMMANDS,
   LOCAL_CHROME_COMMANDS,
   SELECTION_REQUIREMENTS,
@@ -46,14 +52,14 @@ import {
   TOOL_STEP_PROMPTS,
   toolStepPromptKey,
 } from '../src/cad/cad.ts';
-import { readCatalog, readModule } from './helpers.ts';
+import { readAppSource, readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');
 const en = await readCatalog('en');
 
-// The router vocabulary that carries the three new selectors. Admission — not a
-// local flag — is what enables the buttons.
-const HOST_NAMES = ['ID', 'JOIN', 'LAYISO', 'LAYUNISO'];
+// The router vocabulary that carries the new selectors. Admission — not a local
+// flag — is what enables the buttons.
+const HOST_NAMES = ['ID', 'JOIN', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON'];
 setCommandCatalog(HOST_NAMES);
 
 const DOC = {
@@ -196,7 +202,8 @@ test('JOIN needs at least two selected objects, and says so before the host refu
 
 test('LAYISO and LAYUNISO sit beside LAYER and ride the palette carrier filter', async () => {
   const layers = panel('home', 'layers');
-  assert.deepEqual(layers.items.map(item => item.id), ['LAYER', 'LAYISO', 'LAYUNISO']);
+  // LAYOFF/LAYON (2026-10-26) close the same run; they have their own test below.
+  assert.deepEqual(layers.items.map(item => item.id), ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON']);
   const [layer, isolate, unisolate] = layers.items;
   assert.equal(layer.large, true, 'the palette opener keeps the large slot');
   for (const item of [isolate, unisolate]) {
@@ -229,9 +236,9 @@ test('LAYISO and LAYUNISO sit beside LAYER and ride the palette carrier filter',
   assert.equal(order.indexOf('LAYUNISO'), order.indexOf('LAYER') + 2);
 
   // A carrier that never renders the layers palette has no surface for the
-  // isolation state, so the whole panel (toggle + isolate pair) is dropped — never
-  // left behind as live buttons that hide geometry invisibly.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO']);
+  // isolation state, so the whole panel (toggle + isolate pair + the off/on pair) is
+  // dropped — never left behind as live buttons that hide geometry invisibly.
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON']);
   assert.deepEqual(offeredItems(layers.items, false), []);
   assert.equal(offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false)
     .some(each => each.id === 'layers'), false);
@@ -297,11 +304,188 @@ test('every new label comes from the shared catalogs, in both languages', () => 
   }
 });
 
-test('the renderer dispatches all three through the one command funnel', async () => {
+test('the renderer dispatches every new selector through the one command funnel', async () => {
   const ribbon = await readModule('components/Ribbon.tsx');
   assert.ok(ribbon.includes('if (item.command) return shell.runCommand(item.command);'));
   // No per-button local gate and no hardcoded selector for the new items.
-  for (const id of ['ID', 'JOIN', 'LAYISO', 'LAYUNISO']) {
+  for (const id of ['ID', 'JOIN', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON']) {
     assert.equal(ribbon.includes(`'${id}'`), false, `${id} must be driven by the model, not by an id check`);
   }
 });
+
+test('LAYOFF and LAYON close the Layers panel and ride the same carrier filter', async () => {
+  const layers = panel('home', 'layers');
+  // Directly after the isolate pair, so the run reads palette opener → isolate →
+  // restore → off → on. Appending keeps every shipped button where it was.
+  assert.deepEqual(layers.items.map(item => item.id), ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON']);
+  const [off, on] = layers.items.slice(-2);
+  assert.equal(off.id, 'LAYOFF');
+  assert.equal(on.id, 'LAYON');
+  for (const item of [off, on]) {
+    assert.equal(item.large, undefined, `${item.id} is not a primary affordance`);
+    assert.equal(item.command, item.id, `${item.id} dispatches its own selector`);
+    assert.equal(item.action, undefined, `${item.id} is a router command, never a shell action`);
+    assert.equal(item.standardView, undefined, `${item.id} carries no payload`);
+    assert.equal(item.variants, undefined, `${item.id} has no options sub-prompt`);
+    // Exactly one dispatch token, the model's own union contract: a button with
+    // two lanes would have no defined order.
+    assert.deepEqual(
+      [item.command, item.standardView, item.action].filter(token => token !== undefined),
+      [item.id],
+      `${item.id} carries exactly one dispatch token`,
+    );
+  }
+  // The labels are the Rust lane's catalogue keys, never UI-invented copy.
+  assert.equal(off.labelKey, 'draw.kind.layoff');
+  assert.equal(on.labelKey, 'draw.kind.layon');
+  // Same visibility vocabulary as the isolate pair: turning a layer off hides its
+  // geometry (dimmed eye), turning every layer back on shows it again (plain eye).
+  assert.equal(off.icon, 'eyeOff');
+  assert.equal(on.icon, 'eye');
+  const icons = iconNames(await readModule('icons.tsx'));
+  assert.ok(icons.has(off.icon) && icons.has(on.icon), 'both glyphs must exist in icons.tsx');
+
+  // Catalogue mirror: the same group the isolate pair uses, and the ribbon really
+  // references both.
+  for (const [id, labelKey, icon] of [
+    ['LAYOFF', 'draw.kind.layoff', 'eyeOff'],
+    ['LAYON', 'draw.kind.layon', 'eye'],
+  ]) {
+    const entry = COMMAND_CATALOG.find(command => command.id === id);
+    assert.deepEqual({ ...entry }, { id, labelKey, icon, group: 'annotate' }, id);
+    assert.ok(new Set(ribbonCommandIds()).has(id), id);
+  }
+  const order = COMMAND_CATALOG.map(command => command.id);
+  assert.equal(order.indexOf('LAYOFF'), order.indexOf('LAYUNISO') + 1);
+  assert.equal(order.indexOf('LAYON'), order.indexOf('LAYUNISO') + 2);
+
+  // One button each: no other panel dispatches them.
+  for (const tab of RIBBON_TABS) {
+    for (const each of tab.panels) {
+      if (each === layers) continue;
+      for (const id of ['LAYOFF', 'LAYON']) {
+        assert.equal(each.items.some(item => item.command === id), false, `${tab.id}/${each.id} must not dispatch ${id}`);
+      }
+    }
+  }
+
+  // The carrier rule is "is its effect only visible in the layers palette": turning
+  // the selection's layers off hides geometry and the palette is the only place
+  // either state is named or reversed, so both go with the palette.
+  assert.ok(PALETTE_COMMANDS.includes('LAYOFF') && PALETTE_COMMANDS.includes('LAYON'));
+  assert.deepEqual(offeredItems(layers.items, false), []);
+  assert.equal(offeredItems(layers.items, true), layers.items);
+});
+
+test('LAYOFF needs a selection, LAYON needs none, both need a drawing', () => {
+  // Router commands, not chrome-local selectors: `LAYER` answers itself, these do
+  // not, and neither has a capability gate or a gesture-only refusal.
+  for (const id of ['LAYOFF', 'LAYON']) {
+    assert.equal(LOCAL_CHROME_COMMANDS.includes(id), false, id);
+    assert.equal(CAPABILITY_GATES[id], undefined, id);
+    assert.equal(GESTURE_ONLY_COMMANDS.includes(id), false, id);
+    assert.equal(ARGUMENT_COMMANDS[id], undefined, `${id} takes no typed argument`);
+    // The selection requirement already answers the no-document case.
+    assert.equal(DOCUMENT_SCOPED_COMMANDS.includes(id), false, id);
+    assert.equal(isSupportedCommand(id.toLowerCase()), true, id);
+  }
+  // Turning a layer off means turning off the layers the selection sits on: with
+  // nothing selected there is no layer to act on, and the host refuses that
+  // outright. The sentence is the catalogue's own "Select objects first", exactly
+  // like LAYISO — no second copy of the same fact is invented.
+  assert.deepEqual({ ...SELECTION_REQUIREMENTS.LAYOFF }, { count: 1, reasonKey: 'draw.error.selection_required' });
+  assert.equal(admitCommandText('LAYOFF', { status: selected(1) }).kind, 'admitted');
+  assert.equal(admitCommandText('LAYOFF', { status: selected(3) }).kind, 'admitted');
+  assert.deepEqual(admitCommandText('LAYOFF', { status: DOC }), {
+    kind: 'unavailable',
+    command: 'LAYOFF',
+    reasonKey: 'draw.error.selection_required',
+  });
+  assert.equal(unavailableReasonKey('LAYOFF', { status: DOC }), 'draw.error.selection_required');
+  // With no drawing open the honest sentence is the missing drawing, not "select
+  // objects first" — there is no selection block to count.
+  assert.equal(admitCommandText('LAYOFF', { status: NO_DOCUMENT }).reasonKey, 'plot.no_document');
+  assert.equal(unavailableReasonKey('LAYOFF', { status: NO_DOCUMENT }), 'plot.no_document');
+
+  // LAYON restores every layer, so no selection is ever the reason it cannot run;
+  // only a missing drawing is.
+  assert.deepEqual({ ...SELECTION_REQUIREMENTS.LAYON }, { count: 0, reasonKey: 'draw.error.selection_required' });
+  for (const status of [DOC, selected(0), selected(5)]) {
+    assert.equal(admitCommandText('LAYON', { status }).kind, 'admitted');
+  }
+  assert.equal(admitCommandText('LAYON', { status: NO_DOCUMENT }).reasonKey, 'plot.no_document');
+  assert.equal(unavailableReasonKey('LAYON', { status: NO_DOCUMENT }), 'plot.no_document');
+
+  // Neither is admitted on an empty host vocabulary: the router's own answer is the
+  // gate, never a local enable.
+  setCommandCatalog([]);
+  for (const id of ['LAYOFF', 'LAYON']) {
+    assert.equal(admitCommandText(id, { status: selected(2) }).kind, 'unsupported', id);
+  }
+  setCommandCatalog(HOST_NAMES);
+});
+
+test('every LAYOFF/LAYON label comes from the shared catalogs, in both languages', () => {
+  // The keys the Rust lane owns. This test is deliberately the UI-side marker that
+  // the surface never invents copy of its own: while a key is missing the UI
+  // references a label it cannot render, and the honest state is a failing check,
+  // never a literal in the React tree.
+  const keys = ['draw.kind.layoff', 'draw.kind.layon'];
+  for (const key of keys) {
+    assert.equal(typeof en[key], 'string', `en missing ${key}`);
+    assert.equal(typeof zh[key], 'string', `zh-CN missing ${key}`);
+    assert.ok(String(en[key] ?? '').trim().length > 0, `en empty ${key}`);
+    assert.ok(String(zh[key] ?? '').trim().length > 0, `zh-CN empty ${key}`);
+  }
+  // The wording names the layer operation (not the selection): "Turn layer off" /
+  // "Turn all layers on".
+  assert.match(String(en['draw.kind.layoff'] ?? ''), /layer/i);
+  assert.match(String(en['draw.kind.layon'] ?? ''), /layer/i);
+});
+
+test('no rendered copy still claims the retired OFFSET/MIRROR entity limits', async () => {
+  // The shipped engine went past the old limits (2026-10-26: OFFSET also takes
+  // straight-segment polylines, MIRROR also takes Arc and Ellipse). Any *rendered*
+  // sentence that still says otherwise would be a lie in the affordance, so the
+  // claim shapes are swept over every catalog string this tree can display: the
+  // keys the components pass to `t(...)` plus every catalogue `labelKey` the
+  // command/ribbon models carry.
+  //
+  // The scan is on the **rendered text**, not on module comments: prose in a source
+  // comment explains history and is never shown to the user.
+  const source = await readAppSource();
+  const keys = new Set();
+  for (const match of source.matchAll(/\bt\(\s*'([^']+)'/g)) keys.add(match[1]);
+  for (const match of source.matchAll(/labelKey:\s*'([^']+)'/g)) keys.add(match[1]);
+  assert.ok(keys.size > 20, `expected the tree to render many catalogue keys, saw ${keys.size}`);
+  const retired = [
+    // "OFFSET supports LINE and CIRCLE only" / "only a line or circle can be offset"
+    /\bonly\b[^.]{0,60}\b(?:LINE|CIRCLE)\b/i,
+    /\b(?:LINE|CIRCLE)\b[^.]{0,40}\bonly\b/i,
+    // "MIRROR cannot mirror an Arc/Ellipse" / "refuses an arc or ellipse"
+    /cannot\s+mirror/i,
+    /(?:refuses?|not\s+supported\s+for)\s+(?:an?\s+)?(?:ARC|ELLIPSE)/i,
+    // "an Arc/Ellipse cannot be offset/mirrored"
+    /(?:ARC|ELLIPSE)[^.]{0,40}\b(?:cannot|is\s+not|are\s+not)\b[^.]{0,30}\b(?:offset|mirrored|mirror)\b/i,
+  ];
+  // The Chinese sentences would word the same claims as "仅/只…直线…" and
+  // "镜像/偏移…不支持"; they are swept too, so a locale-only regression cannot hide
+  // behind the English patterns. (Only the *sentence* shapes above are probed — a
+  // claim in wording these patterns do not anticipate is not covered, and this is
+  // not a general capability audit.)
+  const retiredZh = [
+    /(?:仅|只)\s*(?:支持)?\s*(?:直线|圆)/,
+    /(?:镜像|偏移)[^。]{0,20}(?:不支持|无法|不能)/,
+  ];
+  for (const key of keys) {
+    for (const [locale, catalog] of [['en', en], ['zh-CN', zh]]) {
+      const text = catalog[key];
+      if (typeof text !== 'string') continue;
+      const claims = locale === 'en' ? retired : retiredZh;
+      for (const claim of claims) {
+        assert.equal(claim.test(text), false, `${locale}/${key} still claims a retired entity limit: ${text}`);
+      }
+    }
+  }
+});
+

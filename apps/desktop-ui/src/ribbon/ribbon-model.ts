@@ -49,8 +49,22 @@ export const PALETTE_ACTIONS: readonly string[] = Object.freeze([
  * (`dom-canvas`) the isolate pair would hide geometry with nothing on screen to
  * explain or undo it — a dead affordance, exactly like the toggle itself. They
  * are therefore dropped with the palette rather than left behind as live buttons.
+ *
+ * The rule this list encodes is therefore not "is it a palette toggle" but
+ * **"is its effect only observable in the layers palette"**. `LAYOFF`/`LAYON`
+ * (2026-10-26) pass it for the same reason: turning the selection's layers off
+ * hides geometry, and turning every layer back on restores it, and the palette is
+ * the only place either state is named or reversed. Left behind on a palette-less
+ * carrier they would hide geometry with no surface to explain it, so they are
+ * dropped with the palette too.
  */
-export const PALETTE_COMMANDS: readonly string[] = Object.freeze(['LAYER', 'LAYISO', 'LAYUNISO']);
+export const PALETTE_COMMANDS: readonly string[] = Object.freeze([
+  'LAYER',
+  'LAYISO',
+  'LAYUNISO',
+  'LAYOFF',
+  'LAYON',
+]);
 
 /** The facts every ribbon item carries. */
 interface RibbonItemBase {
@@ -329,6 +343,14 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // visible there.
           { id: 'LAYISO', labelKey: 'layers.isolate', icon: 'eyeOff', command: 'LAYISO' },
           { id: 'LAYUNISO', labelKey: 'layers.unisolate', icon: 'eye', command: 'LAYUNISO' },
+          // Layer off / on (2026-10-26) close the panel: LAYOFF turns off every
+          // layer the selection sits on (needs one object), LAYON turns every
+          // layer back on (needs none). Same conventions as the isolate pair —
+          // small, payload-free router commands, no popover — and the same
+          // carrier rule: the resulting layer state is only visible in the
+          // palette, so they are dropped with it (`PALETTE_COMMANDS`).
+          { id: 'LAYOFF', labelKey: 'draw.kind.layoff', icon: 'eyeOff', command: 'LAYOFF' },
+          { id: 'LAYON', labelKey: 'draw.kind.layon', icon: 'eye', command: 'LAYON' },
         ],
       },
       {

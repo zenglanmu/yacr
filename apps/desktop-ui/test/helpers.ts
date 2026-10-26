@@ -103,8 +103,10 @@ export const HOST_NAMES = [
   'DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ID', 'ZOOMIN', 'ZOOMOUT',
   // JOIN (2026-10-26): the modify selector that welds the current selection into
   // one polyline. `LAYISO`/`LAYUNISO` (2026-10-26) are the layer isolate pair —
-  // router commands, not chrome-local selectors like `LAYER`.
-  'JOIN', 'LAYISO', 'LAYUNISO',
+  // router commands, not chrome-local selectors like `LAYER`. `LAYOFF`/`LAYON`
+  // (2026-10-26) close that run: `LAYOFF` turns off every layer the selection sits
+  // on, `LAYON` is the restore selector that turns them all back on.
+  'JOIN', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON',
   // Full-word aliases.
   'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER', 'DBA', 'DCO',
   // AutoCAD's default `acad.pgp` abbreviations, restricted to implemented

@@ -36,6 +36,9 @@ impl Application {
             // dispatched here beside the other layer-view commands rather than
             // through the entity-edit funnel.
             CommandId::IsolateLayers => self.isolate_layers(session, &command),
+            // LAYOFF is its sibling: same session-override funnel, same "the
+            // current layer is never hidden" rule.
+            CommandId::LayOff => self.layoff_layers(session, &command),
             CommandId::ToggleLayer => {
                 if let CommandPayload::Layer(id, visible) = command.payload {
                     self.set_layer_visibilities(session, command.document, &[(id, visible)])

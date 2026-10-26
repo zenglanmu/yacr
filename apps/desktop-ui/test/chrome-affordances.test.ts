@@ -69,13 +69,14 @@ test('the Layers arrow runs LAYER and the Properties arrow runs PROPERTIES', () 
   assert.equal(byId.properties.titleKey, 'properties.panel');
   const layerItems = byId.layers.items.map(item => item.id);
   const propertyItems = byId.properties.items.map(item => item.id);
-  // The Layers panel holds the palette toggle **plus** the isolate pair
-  // (2026-10-26): `LAYISO`/`LAYUNISO` are router commands that change which layers
-  // are visible, which is the one state this palette is the surface for.
+  // The Layers panel holds the palette toggle **plus** the layer-state commands
+  // (2026-10-26): `LAYISO`/`LAYUNISO` and `LAYOFF`/`LAYON` are router commands that
+  // change which layers are visible, which is the one state this palette is the
+  // surface for.
   assert.deepEqual(
     layerItems,
-    ['LAYER', 'LAYISO', 'LAYUNISO'],
-    'the Layers panel holds its palette toggle and the isolate pair',
+    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON'],
+    'the Layers panel holds its palette toggle and the layer-state commands',
   );
   assert.deepEqual(propertyItems, ['PROPERTIES']);
 });
@@ -105,10 +106,11 @@ test('every launcher target is a chrome-local command, so admission always answe
     assert.equal(admitCommandText(command, { status: null }).kind, 'admitted', command);
   }
   // Both palette toggles the carrier filter knows are also launcher targets, so a
-  // carrier without the palettes drops the arrows with the panels. The isolate
-  // pair rides the same filter: the layers palette is the only surface that shows
-  // what isolating did, so those buttons are not offered where it never renders.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO']);
+  // carrier without the palettes drops the arrows with the panels. The layer-state
+  // commands ride the same filter (`2026-10-26`: the isolate pair, then the off/on
+  // pair): the layers palette is the only surface that shows what they did, so
+  // those buttons are not offered where it never renders.
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON']);
   assert.equal(offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false)
     .some(panel => panel.id === 'layers' || panel.id === 'properties'), false);
 });

@@ -49,8 +49,10 @@ mod helpers;
 mod join;
 mod layer_edit;
 mod match_prop;
+mod mirror_curves;
 mod mleader;
 mod mtext_create;
+mod offset_polyline;
 mod properties;
 mod stretch;
 mod text_edit;
@@ -77,3 +79,5 @@ use helpers::{
     distance, geometry_kind, is_finite_point, is_multiline_text_source, offset_circle, offset_line,
     resolve_created_text_style,
 };
+use mirror_curves::mirror_geometry;
+use offset_polyline::offset_polyline;

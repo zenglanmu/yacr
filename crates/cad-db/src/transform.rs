@@ -14,7 +14,11 @@
 //! - `Arc` and `Ellipse` accept a **positive-determinant similarity**. A mirror
 //!   would reverse their parameter orientation, so it is **rejected explicitly**
 //!   with [`CadError::Unsupported`], never silently dropped. A non-uniform scale
-//!   would distort the curve and is likewise rejected.
+//!   would distort the curve and is likewise rejected. This surface stays
+//!   proper-similarity only on purpose: the one command that really is a
+//!   reflection (MIRROR) handles `Arc`/`Ellipse` with its own explicit arms in
+//!   `cad-app` (`app_drawing::mirror_curves`), so a mirror reached through *this*
+//!   function keeps refusing them.
 //! - `Polyline` with non-zero bulges (arc segments) is only exact under a
 //!   similarity; under shear it returns `Unsupported` (a mirror negates the
 //!   signed bulges so the arc direction is preserved). Straight-segment

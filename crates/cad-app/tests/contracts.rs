@@ -19,9 +19,11 @@ fn viewer_rejects_every_mutating_work_entry() {
         CommandId::Pan,
         CommandId::Zoom,
         CommandId::ToggleLayer,
-        // LAYISO/LAYUNISO are session view operations (temporary overrides only),
-        // not edits: a Viewer must be able to isolate and restore layers.
+        // LAYISO/LAYOFF/LAYUNISO/LAYON are session view operations (temporary
+        // overrides only), not edits: a Viewer must be able to isolate, turn off
+        // and restore layers.
         CommandId::IsolateLayers,
+        CommandId::LayOff,
         CommandId::RestoreLayers,
         CommandId::SwitchSpace,
         CommandId::SetMode,

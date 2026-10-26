@@ -229,14 +229,15 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 | TRIM | 目标 **LINE / ARC / CIRCLE**；边界 **LINE / ARC / CIRCLE / ELLIPSE / LWPOLYLINE**（直线段或带 bulge 弧段，可任意混用）**/ SPLINE**。LINE/ARC/CIRCLE/ELLIPSE 及 bulge 弧段用解析圆锥曲线求交（与对象捕捉同一实现）；**SPLINE 边界只走采样**：`intersect_local` 把两个操作数按 `extent × 1e-4` 弦高（每操作数最多 256 段）扁平化后求交，切点误差界为该弦高（10 单位图纸约 `1e-3`），因此**每条真正贡献切点的 SPLINE 对都会额外给一条 `drawing.trim` 诊断**说明切点来自采样近似，绝不冒充解析解。LINE 保留拾取侧子段，ARC 保留与原弧同圆心/法向/半径、**同 sweep 符号**的剩余弧，CIRCLE 变成一段 ARC（拾取点两侧相邻交点之间），一条完全落在闭合边界内的目标整体删除（含 CIRCLE；内侧判定按边界自身平面，倾斜折线不会被 XY 投影误判）。**拾取点先投影到已解析的目标上**（LINE 取垂足；ARC/CIRCLE 取 `center + radius * normalize(pick − center)` 的径向投影），所以**点在实体附近即可工作**：宿主已用拾取框解析出目标，点不必恰好落在曲线上 | **仍拒绝**：`SPLINE`/`INSERT`/`Opaque`/`Mesh` **目标**（边界只有 `INSERT`/`Opaque`/`Mesh` 等未列出的类型被拒）、`|sweep| > 一周` 的 ARC 目标（`Unsupported`）；无交点/退化/**投影落到目标自身参数域之外**（不夹到最近端点——夹紧等于替用户决定保留哪一段）/ARC/CIRCLE 拾取点**径向方向为零**（点在目标轴线上，如圆心）/CIRCLE 交点少于 2 ⇒ `InvalidInput`。**闭合 SPLINE 的内侧删除规则不支持**：`SemanticGeometry::Spline` 既无闭合标志也无边界平面，无法做可靠的平面感知内侧判定，故“目标完全落在闭合 SPLINE 内且无切点”**显式 `Unsupported` 拒绝**（不删除、不臆造包含关系）；其它无解析解的边界对（ARC×ELLIPSE、ELLIPSE×ELLIPSE、非共面圆族）仍出图但同样附采样近似诊断；3D 非共面输入只会“求不到交点”而非被投影凑出结果 |
 | EXTEND | 目标 LINE（沿自身无限直线）或 ARC（沿自身圆、**同号 sweep**）；边界集合同 TRIM（**含 SPLINE**，同样只走采样并附 `drawing.extend` 近似诊断，弦高界同 TRIM）。拾取点同样**先投影到目标上**，投影落点决定延伸哪一端（“点在哪一头”按曲线上的落点判定，与点到曲线的距离无关）；只取拾取端**前方最近**交点，**只增不减**；ARC 的延伸量**上限为半圈**（超过半圈视为“只能绕远路到达”，显式拒绝） | CIRCLE 目标（无端点）、`|sweep| > 一周` 的 ARC、`SPLINE` 等其余**目标**、未支持的边界类型 ⇒ `Unsupported`；已接触/已穿过/前方无交点/延伸超过半圈/投影落在目标参数域之外 ⇒ `InvalidInput`；采样近似同 TRIM 另给 `drawing.extend` 诊断 |
 | ROTATE / SCALE | 绕基点旋转/均匀缩放 | 相似变换（正行列式）；不支持几何 `Unsupported`。**含 `MultiLeader` 的选择：旋转可以，缩放 ⇒ 整命令失败**（ADR-0019 C.5：掩码未置位时 AutoCAD 会从样式重解析） |
-| MIRROR | 镜像（**保留原件**，新增副本） | 反射下 Arc/Ellipse 参数化会反向 → 显式 `Unsupported` |
-| OFFSET | LINE / CIRCLE 偏移 | 其余几何 `Unsupported`；点在线上/过圆心/在圆上显式拒绝 |
+| MIRROR | 镜像（**保留原件**，新增副本）：含 `Arc` 与 `Ellipse`（**含椭圆弧**，2026-10-26 起） | 反射的 `normal' = −R(normal)`，弧的 `start` 由镜像后的起点在新帧中**重新求角**、`sweep` **符号保留**（负法向已把帧的重手性翻正；若同时取反 sweep，端点映射不成立——两种写法都验证过）。椭圆：圆心/长轴向量反射、`ratio` 与参数保留。仍拒绝 `Text`/`Shape`/`Opaque`/`MultiLeader`：`Text` 只镜像拒绝（平面文字无法表达真反射），`MultiLeader` 拒绝一切缩放 |
+| OFFSET | LINE / CIRCLE / **直线段 LWPOLYLINE**（2026-10-26 起）偏移 | 折线要求**每段 |bulge| ≤ 1e-12**；整条折线**同一侧**、常数距离（取拾取点到最近段直线的**平面内**垂距，面外分量只用于定侧）、**miter 斜接**、顶点数/顺序/`closed`/`bulges` 原样保留（开口端不造封口）。按名拒绝：`offset.bulge_segment`（含弧段折线）、`offset.collapsed`（顶点处近 180° 反折或偏移段塌缩/归零）、`offset.non_planar`（顶点偏离自身平面）；退化段/点数 < 2/非有限顶点/闭合零面积/拾取点落在折线上 ⇒ `InvalidInput`。**仅顶点局部塌缩检测**：远端偏移段之间的自交**未检查**（声明，不静默宣称已排除）。其余几何（ELLIPSE/SPLINE/INSERT/ARC）仍 `Unsupported` |
 | COPYCLIP/CUTCLIP/PASTECLIP | **应用内**剪贴板 | 非 OS 剪贴板；替换文档清空；空选择/空剪贴板拒绝 |
 | MATCHPROP（别名 `MA`） | **选择式**特性匹配（AutoCAD 特性刷的文档化变体）：当前选择按**选择顺序**（用户的拾取顺序，**从不**按 id/handle 重排）取**第一个**实体为**源**，其余每个选中实体为**目标**。转移的属性**恰好**是属性写路径支持的五项显示属性：`layer`、`color`、`linetype`、`lineweight`、`transparency`（语法与 `SETENTITYPROPERTY` 同一份，不复制第二套解析）。源/目标**类型可以不同**（只要每个值对目标合法）。目标已与源一致 ⇒ 该目标不产生变更、不进撤销补丁；全部目标都一致 ⇒ 显式 `matchprop.unchanged` 完成，**不**开事务、**不**产生空撤销步；否则一条事务、一步撤销 | **开始改写前**全部拒绝（零 DB 变更、零撤销步）：选择少于两个实体（`matchprop.needs_two`）；源**或**目标引用是块实例成员（instance path）/子图元/属于其它文档/不存在（`property.not_addressable`/`property.target_missing`，与属性写路径同一规则）；源值的存储形式无法用写语法表达、或语法拒绝该值（如 `ByBlock` 透明度、无名显式线型）⇒ `matchprop.source_value`，**点名**源实体与属性并保留解析器自己的 `property.*` 码。**明确不转移**（绝不静默近似）：MATCHPROP 的 **Settings 子集**（选择“复制哪些属性”）未实现（总是转移全部五项）；非显示属性——文字样式/字高、标注样式、填充图案等一律**不**转移；实体自身的**线型比例**不在五项之内，给名线型目标只在目标上保留**目标自己的**比例（与属性写路径一致），符号值（`ByLayer`/`ByBlock`）整值替换 |
 | JOIN | 合并当前选择为**一个**实体：共线且首尾相接/重叠的 `LINE` → 一条 `LINE`；同圆心/法向/半径且扫掠相续的 `ARC` → 一条 `ARC` | 一条事务、**一步撤销**，全有或全无（先全部校验，再删除 N + 插入 1）。**仅 LINE 与 ARC**：折线/样条/圆、需要桥接空隙、跨图层/跨空间、非同心弧、块内成员 ⇒ 显式拒绝（`join.needs_two`/`join.mixed_kinds`/`join.not_collinear`/`join.not_contiguous`/`join.layer_mismatch`/`join.space_mismatch`/`join.sweep_overflow`/`join.degenerate`）。合并 `LINE` 的端点按 `(x,y,z)` 升序归一（同一批拾取总得同一几何）；`draw_order` 取源最小值（原位替换，不跳到最上层）；扫掠和恰为一整圈时**保留 `2π` ARC**，不静默转成 `CIRCLE`；反向法向的弧按「不相续」拒绝而非重新推导 |
 
-- 变换/偏移的**不支持几何**（`Spline`/`Shape`/`Opaque`/`Compound`；`MIRROR` 下的 `Arc`/`Ellipse`；**以及 `MultiLeader`——拒绝一切缩放**）返回显式
-  （**更正**：`Text` 自 P7a 起**可**平移/旋转/均匀缩放，**不在**此列表；仅镜像与非均匀缩放拒绝。）
+- 变换/偏移的**不支持几何**（`Spline`/`Shape`/`Opaque`/`Compound`；**以及 `MultiLeader`——拒绝一切缩放**）返回显式
+  （**更正**：`Text` 自 P7a 起**可**平移/旋转/均匀缩放，**不在**此列表；仅镜像与非均匀缩放拒绝。
+  **2026-10-26 起 `MIRROR` 的 `Arc`/`Ellipse` 不再被拒**，见上表 MIRROR 行。）
   `Unsupported`；退化/无交点等 plan 级失败返回 `InvalidInput`。二者都不创建或部分修改实体。
 - 命令行、别名、固定键位与补全行为的完整参考见 **`docs/shortcuts.md`**；`Ctrl+C/X/V` 仅为应用内
   剪贴板，不读写操作系统剪贴板。
@@ -466,6 +467,12 @@ Apply/OK/Cancel 为 AutoCAD 语义（本地暂存、只发 diff、写失败标�
 （否则会把所有层藏掉，画布上无从恢复）。`LAYUNISO` 与 `LAYERP` 都解析到**既有** `RESTORELAYERS`
 （清空全部覆盖）：本构建**没有图层状态栈**，所以 `LAYERP` 不是「上一层状态」，只是这一条恢复路径的
 AutoCAD 拼写。`LAYISO`/`LAYUNISO` 在 Viewer 模式**可用**（视图操作，不是实体写）。
+
+**2026-10-26 新增 `LAYOFF` / `LAYON`**：`LAYOFF`（新 `CommandId`，payload-free，Viewer 可用）把当前
+**选择所在图层**全部关闭（会话覆盖），**当前层除外**（与其他写路径的 `layer.current_off` 合同一致）；
+选择只落在当前层 ⇒ `layers.off.current_layer` 且**不改变任何状态**；空选择 ⇒ `layers.off.needs_selection`。
+与 `LAYISO` 共用同一原子批量覆盖助手，**不写 DWG、不升 revision、不进历史**。`LAYON` 是既有
+`RESTORELAYERS` 的**别名**（不新增 `CommandId`），命令表因此为 **88**。
 
 **2026-10-26 更正（图层属性存储/往返轮）**：图层的**颜色/线型/线宽/关闭/冻结/锁定/可打印/
 透明度**现已**建模并随导出写入、可往返**（`LayerAttributes` 旁存于 `Layer` 行；

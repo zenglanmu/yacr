@@ -218,57 +218,6 @@ fn mirror_across_a_diagonal_axis_keeps_the_original_and_adds_a_copy() {
 }
 
 #[test]
-fn mirror_refuses_an_arc_or_ellipse_without_change() {
-    // Arc target (entity 2 of the shared drawing) is not representable under
-    // a reflection and must refuse the whole command.
-    let (mut app, mut session) = drawing_app();
-    let rev = revision(&app);
-    let err = execute(
-        &mut app,
-        &mut session,
-        CommandId::MirrorEntities,
-        CommandPayload::Mirror {
-            refs: vec![ref_of(2)],
-            axis_start: point(0.0, 0.0),
-            axis_end: point(1.0, 1.0),
-        },
-    )
-    .unwrap_err();
-    assert!(matches!(err, CadError::Unsupported(_)));
-    assert_eq!(revision(&app), rev);
-
-    // Ellipse target: same explicit refusal.
-    let ellipse = ent(
-        3,
-        SemanticGeometry::Ellipse {
-            center: point(0.0, 0.0),
-            normal: p3(0.0, 0.0, 1.0),
-            major_axis: p3(2.0, 0.0, 0.0),
-            ratio: 0.5,
-            start: 0.0,
-            sweep: std::f64::consts::TAU,
-        },
-        0,
-    );
-    let mut app = line_and_boundary_app(ellipse, None);
-    let mut session = SessionState::new(DocumentId(1), AppMode::Work);
-    let rev = revision(&app);
-    let err = execute(
-        &mut app,
-        &mut session,
-        CommandId::MirrorEntities,
-        CommandPayload::Mirror {
-            refs: vec![ref_of(3)],
-            axis_start: point(0.0, 0.0),
-            axis_end: point(1.0, 1.0),
-        },
-    )
-    .unwrap_err();
-    assert!(matches!(err, CadError::Unsupported(_)));
-    assert_eq!(revision(&app), rev);
-}
-
-#[test]
 fn transform_refs_report_sub_element_and_instance_diagnostics() {
     let (mut app, mut session) = drawing_app();
     let mut sub = ref_of(1);

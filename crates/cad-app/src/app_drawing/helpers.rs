@@ -90,7 +90,7 @@ pub(super) fn is_finite_point(p: Point3) -> bool {
 }
 
 /// The default world tolerance used by the OFFSET construction.
-fn offset_tolerance() -> f64 {
+pub(super) fn offset_tolerance() -> f64 {
     let policy = TolerancePolicy::default();
     policy
         .computation_world

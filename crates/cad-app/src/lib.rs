@@ -502,15 +502,22 @@ pub enum CommandPayload {
     },
     /// Mirror a set of selected refs across the line through `axis_start` and
     /// `axis_end`, keeping the originals and adding mirrored copies (MIRROR,
-    /// spec F-EDIT). Same interaction shape as `Copy`.
+    /// spec F-EDIT). Same interaction shape as `Copy`. `Arc`/`Ellipse` (including
+    /// elliptical arcs) are reflected explicitly — the plane normal is negated and
+    /// the arc's start angle is re-derived from its mirrored start point
+    /// (`app_drawing::mirror_curves`); kinds with no honest reflection (`Text`,
+    /// `Shape`, `Opaque`, `MultiLeader`) still refuse the whole command.
     Mirror {
         refs: Vec<SelectionRef>,
         axis_start: Point3,
         axis_end: Point3,
     },
-    /// Offset a single selected LINE/CIRCLE by the distance and side defined by
-    /// `side_point` (OFFSET, spec F-EDIT). Exactly one source entity is required;
-    /// any other geometry kind is an explicit refusal.
+    /// Offset a single selected LINE, CIRCLE or straight-segment LWPOLYLINE by the
+    /// distance and side defined by `side_point` (OFFSET, spec F-EDIT). A polyline
+    /// is offset with miter joins, vertex count/order preserved (see
+    /// `app_drawing::offset_polyline`). Exactly one source entity is required; any
+    /// other geometry kind is an explicit refusal, and an arc (bulged) polyline
+    /// segment is its own named refusal (`offset.bulge_segment`).
     Offset {
         refs: Vec<SelectionRef>,
         side_point: Point3,

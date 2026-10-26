@@ -354,7 +354,7 @@ fn offset_carries_the_source_render_attributes() {
 }
 
 /// Wrap a hand-built drawing in a one-document application.
-fn app_with_drawing(drawing: DrawingDatabase) -> Application {
+pub(super) fn app_with_drawing(drawing: DrawingDatabase) -> Application {
     let mut app = Application::new();
     app.workspace.documents.insert(
         DocumentId(1),

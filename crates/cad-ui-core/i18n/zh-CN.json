@@ -361,6 +361,8 @@
   "draw.kind.matchprop.hint": "至少需要选中两个对象：{command}会把第一个选中对象的显示特性复制到其余选中对象",
   "draw.kind.join": "合并",
   "draw.kind.join.hint": "至少需要选中两个对象：{command} 会把共线的直线（或同心、半径相同的圆弧）合并成一条",
+  "draw.kind.layoff": "关闭图层",
+  "draw.kind.layon": "全开图层",
   "draw.status.idle": "选择 直线 / 圆 / 圆弧 / 移动 / 修剪 / 复制 / 延伸 / 旋转 / 缩放 / 镜像 / 偏移 开始绘制或编辑",
   "draw.error.read_only": "只读模式（查看）不允许绘制或编辑",
   "draw.error.unknown_geometry": "未知或不支持的图元",

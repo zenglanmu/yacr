@@ -156,9 +156,9 @@ fn unbacked_new_plot_save_are_refused_without_side_effects() {
 fn error_text_unwraps_unsupported_and_not_implemented() {
     assert_eq!(
         error_text(&CadError::Unsupported(
-            "OFFSET supports LINE and CIRCLE only".into()
+            "OFFSET supports LINE, CIRCLE and straight-segment LWPOLYLINE only".into()
         )),
-        "OFFSET supports LINE and CIRCLE only"
+        "OFFSET supports LINE, CIRCLE and straight-segment LWPOLYLINE only"
     );
     assert_eq!(
         error_text(&CadError::NotImplemented("web save")),

@@ -158,6 +158,9 @@ fn the_shipped_table_covers_the_implemented_autocad_abbreviations() {
         // names the same restore rather than inventing a second one.
         ("LAYUNISO", "RESTORELAYERS"),
         ("LAYERP", "RESTORELAYERS"),
+        // `LAYON` is the same single restore path by its AutoCAD name ("turn all
+        // layers on"): no second restore exists.
+        ("LAYON", "RESTORELAYERS"),
     ] {
         assert_eq!(alias_target(alias), Some(target), "{alias}");
     }

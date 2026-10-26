@@ -31,6 +31,7 @@ command_selector_contract! {
     SetLayerVisibilities => "SETLAYERS",
     RestoreLayers => "RESTORELAYERS",
     IsolateLayers => "LAYISO",
+    LayOff => "LAYOFF",
     SwitchSpace => "SPACE",
     Select => "SELECT",
     SelectAll => "SELECTALL",
@@ -119,7 +120,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 87,
+        EXPECTED_COMMAND_COUNT, 88,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -474,6 +475,31 @@ fn the_layer_table_selectors_and_the_newlayer_synonym_are_admitted() {
         events: RefCell::new(Vec::new()),
     }));
     assert!(session.command("CREATELAYER").is_err());
+}
+
+#[test]
+fn layoff_is_admitted_and_layon_is_the_restore_alias() {
+    // LAYOFF is LAYISO's sibling: a canonical selector with a real `CommandId`,
+    // payload-free (the selection is the input) and **not** Work-only — it is a
+    // session view operation, so a Viewer may turn layers off.
+    assert_eq!(normalize_command("LAYOFF"), Some(CommandId::LayOff));
+    assert_eq!(normalize_command(" layoff "), Some(CommandId::LayOff));
+    assert_eq!(canonical_command_name("LAYOFF"), Some("LAYOFF"));
+    assert!(admissible_names().contains(&"LAYOFF"));
+    assert!(
+        !CommandId::LayOff.requires_work_mode(),
+        "LAYOFF is session view state, not a database edit"
+    );
+    // It is neither a measurement selector nor a zoom step, so no earlier lookup
+    // table can shadow it.
+    assert_eq!(measurement_selector_kind("LAYOFF"), None);
+    assert_eq!(zoom_step_factor("LAYOFF"), None);
+    // LAYON carries **no** `CommandId`: it is an alias of the one restore path
+    // (`RESTORELAYERS`), exactly like LAYUNISO/LAYERP.
+    assert_eq!(normalize_command("LAYON"), Some(CommandId::RestoreLayers));
+    assert_eq!(canonical_command_name("LAYON"), Some("RESTORELAYERS"));
+    assert!(admissible_names().contains(&"LAYON"));
+    assert_eq!(command_name(CommandId::LayOff), Some("LAYOFF"));
 }
 
 #[test]
