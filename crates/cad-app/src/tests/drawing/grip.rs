@@ -422,6 +422,75 @@ fn spline_control_point_grip_drag_is_one_change_one_undo_step_and_undoes_exactly
 }
 
 #[test]
+fn text_insertion_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
+    let (mut app, mut session) = grip_app();
+    let revision = revision_of(&app);
+    let before = geometry_of(&app, TEXT);
+    let (content, position, style, height, rotation, font, h_align, v_align, wrap_width) =
+        text_parts(&app, TEXT);
+    assert_eq!(position, TEXT_AT, "the fixture stores the documented point");
+
+    let target = p3(position.x + 7.5, position.y - 4.25, -1.0);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(TEXT, GripKind::Insertion, 0, target),
+    )
+    .unwrap();
+
+    // One entity update, in one transaction, with one undo entry.
+    let changes = outcome.changes.as_ref().expect("a ChangeSet is published");
+    assert_eq!(changes.changes.len(), 1, "exactly one entity update");
+    assert_eq!(outcome.objects, vec![ObjectId(TEXT)]);
+    assert_eq!(revision_of(&app), Revision(revision.0 + 1));
+    assert_eq!(undo_depth(&app), 1);
+
+    // Only the stored insertion point moved: the run's text, style, height,
+    // rotation, font, attachment and wrap boundary are bit-identical (including
+    // `wrap_width: Some(..)`, which is copied, never recomputed).
+    let (
+        content_after,
+        position_after,
+        style_after,
+        height_after,
+        rotation_after,
+        font_after,
+        h_after,
+        v_after,
+        wrap_after,
+    ) = text_parts(&app, TEXT);
+    assert_eq!(
+        position_after, target,
+        "the insertion point takes the target"
+    );
+    assert_eq!(content_after, content, "the string is untouched");
+    assert_eq!(style_after, style, "the style id is untouched");
+    assert_eq!(height_after.to_bits(), height.to_bits(), "the height");
+    assert_eq!(rotation_after.to_bits(), rotation.to_bits(), "the rotation");
+    assert_eq!(font_after, font, "the font key");
+    assert_eq!(h_after, h_align, "the horizontal attachment");
+    assert_eq!(v_after, v_align, "the vertical attachment");
+    assert_eq!(
+        wrap_after.map(f64::to_bits),
+        wrap_width.map(f64::to_bits),
+        "the wrap boundary (Some here, so it must survive)"
+    );
+
+    // Undo restores the stored geometry exactly (same `f64` bits, not a
+    // re-derived approximation).
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(geometry_of(&app, TEXT), before, "undo restores the text");
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
 fn point_grip_drag_moves_the_position_in_one_undo_step() {
     let (mut app, mut session) = grip_app();
     let outcome = execute(

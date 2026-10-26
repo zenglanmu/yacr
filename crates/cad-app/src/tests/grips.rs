@@ -179,6 +179,9 @@ fn point_exposes_one_point_grip() {
 //    neither is `ELLIPSE` (centre + axis grips, pinned in
 //    `crates/cad-app/src/tests/grips_ellipse.rs`), and neither is `SPLINE`
 //    (control-point grips, pinned in `crates/cad-app/src/tests/grips_spline.rs`).
+//    `TEXT`/`MTEXT` is no longer on it either (one insertion-point grip, pinned in
+//    `crates/cad-app/src/tests/grips_text.rs`); `INSERT` is the fixture that
+//    genuinely has none.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -200,25 +203,10 @@ fn ellipse_exposes_a_centre_and_axis_grips() {
     assert_eq!(grips_for_entity(&entity).len(), 5);
 }
 
-#[test]
-fn text_exposes_no_grips() {
-    let entity = ent(
-        3,
-        SemanticGeometry::Text {
-            text: "GRIP".into(),
-            position: p3(1.0, 1.0, 0.0),
-            style: StyleId(0),
-            height: 2.5,
-            rotation: 0.0,
-            font: None,
-            h_align: TextAlignH::Left,
-            v_align: TextAlignV::Baseline,
-            wrap_width: None,
-        },
-    );
-    assert!(grips_for_entity(&entity).is_empty());
-}
-
+// `TEXT` used to be the fixture of `text_exposes_no_grips` here; it now exposes
+// one insertion-point grip (`GripKind::Insertion` 0), pinned in
+// `crates/cad-app/src/tests/grips_text.rs`. `INSERT` is the remaining fixture for
+// "an entity that genuinely exposes no handle at all".
 #[test]
 fn insert_exposes_no_grips() {
     let entity = ent(5, insert());
@@ -269,32 +257,15 @@ fn grip_hit_returns_none_outside_tolerance_and_for_degenerate_inputs() {
 #[test]
 fn grip_hit_skips_entities_that_expose_no_grips() {
     let insert = ent(1, insert());
-    let text = ent(
-        2,
-        SemanticGeometry::Text {
-            text: "no grip".into(),
-            position: p3(0.0, 0.0, 0.0),
-            style: StyleId(0),
-            height: 1.0,
-            rotation: 0.0,
-            font: None,
-            h_align: TextAlignH::Left,
-            v_align: TextAlignV::Baseline,
-            wrap_width: None,
-        },
-    );
-    // A query sitting exactly on the text's insertion point still misses: that is
-    // not a grip (`INSERT` exposes no handle at all either).
-    assert!(grip_hit(
-        [insert.clone(), text.clone()].iter(),
-        p3(0.0, 0.0, 0.0),
-        1.0
-    )
-    .is_none());
+    // A query sitting exactly on the INSERT's translation still misses: an
+    // instance transform is not an entity handle. (`TEXT` was the second fixture
+    // here until it got its insertion-point grip; that path is now covered — in
+    // the opposite direction — by `tests::grips_text`.)
+    assert!(grip_hit([insert.clone()].iter(), p3(5.0, 5.0, 0.0), 1.0).is_none());
 
     // A real grip elsewhere still wins while the grip-less entities are skipped.
     let line = ent(3, line(20.0, 0.0, 30.0, 0.0));
-    let hit = grip_hit([insert, text, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
+    let hit = grip_hit([insert, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
     assert_eq!(hit.id, grip_id(3, GripKind::Endpoint, 0));
 }
 

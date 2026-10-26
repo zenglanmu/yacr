@@ -28,6 +28,22 @@ pub(super) const POLYLINE: u128 = 7;
 pub(super) const INSERT: u128 = 8;
 /// The `SPLINE` whose `ControlPoint` grips are dragged here.
 pub(super) const SPLINE: u128 = 9;
+/// The `TEXT` whose `Insertion` grip is dragged here (`Insertion` `0`; MTEXT is
+/// the same variant, so one text fixture covers both classes).
+pub(super) const TEXT: u128 = 10;
+
+/// The fixture text's stored insertion point: non-round coordinates, so "only
+/// `position` moved" is a real bit comparison. Non-default alignment, a non-zero
+/// rotation and a `wrap_width` make the "untouched field" assertions meaningful.
+pub(super) const TEXT_AT: Point3 = Point3 {
+    x: 1.0 / 3.0,
+    y: -2.0 / 7.0,
+    z: 0.5,
+};
+pub(super) const TEXT_CONTENT: &str = "GRIP\\Psecond line";
+pub(super) const TEXT_HEIGHT: f64 = 1.125;
+pub(super) const TEXT_ROTATION: f64 = 0.75;
+pub(super) const TEXT_WRAP: f64 = 12.5;
 
 /// The fixture ellipse: major semi-axis `(4, 0, 0)`, ratio `0.5` (minor 2), a
 /// full turn. Non-round centre so "the untouched fields are bit-identical" is a
@@ -74,8 +90,9 @@ pub(super) const POINT_AT: Point3 = Point3 {
 /// A drawing with a `LINE` (id 1), a `POINT` (id 2), a `CIRCLE` (id 3), a
 /// paper-space `LINE` (id 4, the non-addressable target), an `ELLIPSE` (id 5,
 /// axis/centre drags), an `ARC` (id 6, endpoint drags), a `POLYLINE` (id 7, vertex
-/// drags), an `INSERT` (id 8, the unsupported-kind target) and a `SPLINE` (id 9,
-/// control-point drags). Nothing is created through a command, so the
+/// drags), an `INSERT` (id 8, the unsupported-kind target), a `SPLINE` (id 9,
+/// control-point drags) and a `TEXT` (id 10, the insertion-point drag). Nothing is
+/// created through a command, so the
 /// undo stack starts empty and a drag's undo depth is unambiguous.
 pub(super) fn grip_app() -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
@@ -184,6 +201,26 @@ pub(super) fn grip_app() -> (Application, SessionState) {
         8,
     ))
     .unwrap();
+    // The text fixture: `AcDbText`-classed (the grip model reads the geometry only;
+    // TEXT and MTEXT share the variant) with a `wrap_width`, a non-zero rotation
+    // and a centre/middle attachment, so "every other field is bit-identical" is a
+    // real claim at the command level too.
+    let text = ent(
+        TEXT,
+        SemanticGeometry::Text {
+            text: TEXT_CONTENT.into(),
+            position: TEXT_AT,
+            style: StyleId(0),
+            height: TEXT_HEIGHT,
+            rotation: TEXT_ROTATION,
+            font: Some("arial.ttf".into()),
+            h_align: TextAlignH::Center,
+            v_align: TextAlignV::Middle,
+            wrap_width: Some(TEXT_WRAP),
+        },
+        9,
+    );
+    b.insert_entity(text).unwrap();
     let drawing = b.finish().unwrap();
 
     let mut app = Application::new();
@@ -307,6 +344,42 @@ pub(super) fn ellipse_parts(
             sweep,
         } => (center, normal, major_axis, ratio, start, sweep),
         other => panic!("entity {entity} is not an ELLIPSE: {other:?}"),
+    }
+}
+
+/// The stored `TEXT` fields of `entity` that a drag must leave alone
+/// (`text, style, height, rotation, font, h_align, v_align, wrap_width`), plus the
+/// insertion point — so a caller can assert the position and compare the rest.
+#[allow(clippy::type_complexity)]
+pub(super) fn text_parts(
+    app: &Application,
+    entity: u128,
+) -> (
+    String,
+    Point3,
+    StyleId,
+    f64,
+    f64,
+    Option<String>,
+    TextAlignH,
+    TextAlignV,
+    Option<f64>,
+) {
+    match geometry_of(app, entity) {
+        SemanticGeometry::Text {
+            text,
+            position,
+            style,
+            height,
+            rotation,
+            font,
+            h_align,
+            v_align,
+            wrap_width,
+        } => (
+            text, position, style, height, rotation, font, h_align, v_align, wrap_width,
+        ),
+        other => panic!("entity {entity} is not a TEXT: {other:?}"),
     }
 }
 

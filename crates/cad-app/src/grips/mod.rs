@@ -34,6 +34,7 @@
 //! | `SemanticGeometry::Polyline` | [`GripKind::Vertex`] `index` = stored vertex index |
 //! | `SemanticGeometry::Spline` | [`GripKind::ControlPoint`] `index` = stored control-point index |
 //! | `SemanticGeometry::Point` | [`GripKind::Point`] `0` |
+//! | `SemanticGeometry::Text` | [`GripKind::Insertion`] `0` = the stored `position` (TEXT and MTEXT alike) |
 //!
 //! The `ARC` order is `Center 0, Endpoint 0, Endpoint 1`: the centre comes
 //! first because it was the only handle before the endpoints were added, and the
@@ -78,6 +79,19 @@
 //! validate the shape either: `cad-db`'s validator is the authority on what may be
 //! stored. This model only declines to invent a handle for a definition it cannot
 //! interpret.
+//!
+//! `TEXT` and `MTEXT` are the **same** semantic variant
+//! (`SemanticGeometry::Text`); only `DbEntity.object.type_key` distinguishes the
+//! DXF class (`AcDbText` vs `AcDbMText`), so this model cannot — and does not —
+//! give them different handles. Both expose exactly one [`GripKind::Insertion`]
+//! grip at the **stored insertion point**: the stored `position`, verbatim. The
+//! handle is **not** offset by `h_align`/`v_align` (a centre/right or middle/top
+//! attachment does not move it), is **not** rotated about that point by
+//! `rotation`, and does not depend on `height`/`wrap_width`, so an alignment
+//! change or a rotation never moves it and a drag moves nothing but `position`.
+//! `MULTILEADER` (`SemanticGeometry::MultiLeader`) is a **different** variant and
+//! stays on the refusal list: its annotation text is not exposed through a text
+//! insertion-point handle in this build, so it has no grip at all.
 //!
 //! [`grips_for_entity`] returns an **empty** vector for every other geometry, and
 //! [`grip_hit`] therefore never hits one. No marker is invented, no index is
@@ -212,33 +226,47 @@
 //!   `index` outside the stored control points — and any id against an
 //!   internally inconsistent definition — is [`REASON_STALE_HANDLE`].
 //! * **`POINT`**: the position becomes the target.
+//! * **`TEXT`/`MTEXT` insertion point** (`index` 0): the stored `position`
+//!   becomes the target **verbatim** — all three coordinates, no projection and
+//!   no alignment/rotation offset — and `text`, `style`, `height`, `rotation`,
+//!   `font`, `h_align`, `v_align` and `wrap_width` are returned
+//!   **bit-identically**, including `wrap_width: Some(w)` (a plain `f64` that is
+//!   copied, never recomputed). Because the handle is the **stored** insertion
+//!   point, a `Center`/`Right` or `Middle`/`Top` attachment and a non-zero
+//!   `rotation` do not move it, and a drag does not change them. A rotation,
+//!   height, wrap-width or attachment (alignment) grip is **NOT IMPLEMENTED**:
+//!   the insertion point is the only text handle in this build.
 //!
 //! ## Explicit refusal list (no marker, no hit)
 //!
 //! `INSERT`/block-member geometry (an instance transform is not an entity
-//! handle), `TEXT`/`MTEXT`/`MULTILEADER` (insertion-point and width grips),
-//! `HATCH`, `DIMENSION` (definition-point grips; the dimension is
-//! non-associative by design), `IMAGE`/`MASK`, and opaque/compound geometry
-//! (`Opaque`, `Compound`, `Mesh`, `Shape`). `ELLIPSE` is **no longer** on this
-//! list: a full ellipse exposes centre + quadrant handles (see the drag rules),
-//! and a partial (elliptical-arc) ellipse exposes the centre grip only, with
-//! quadrant ids refused by [`REASON_PARTIAL_ELLIPSE`]. `SPLINE` is **no longer**
-//! on this list either: it exposes one [`GripKind::ControlPoint`] per stored
-//! control point (see above).
+//! handle), `MULTILEADER` (its annotation text is not addressed through a text
+//! insertion-point handle here), `HATCH`, `DIMENSION` (definition-point grips;
+//! the dimension is non-associative by design), `IMAGE`/`MASK`, and
+//! opaque/compound geometry (`Opaque`, `Compound`, `Mesh`, `Shape`). `TEXT`/
+//! `MTEXT` is **no longer** on this list: it exposes one [`GripKind::Insertion`]
+//! grip at the stored insertion point (see above). `ELLIPSE` is **no longer** on
+//! this list: a full ellipse exposes centre + quadrant handles (see the drag
+//! rules), and a partial (elliptical-arc) ellipse exposes the centre grip only,
+//! with quadrant ids refused by [`REASON_PARTIAL_ELLIPSE`]. `SPLINE` is **no
+//! longer** on this list either: it exposes one [`GripKind::ControlPoint`] per
+//! stored control point (see above).
 //!
-//! Insertion-point, width, rotation and tangent grips are **NOT IMPLEMENTED**.
+//! A **width**, **rotation**, **height**, **attachment** (alignment) and
+//! **tangent** grip are **NOT IMPLEMENTED**.
 //! They are not modelled as [`GripKind`] variants either: a variant that always
 //! yields an empty vector or an error would be a placeholder pretending to be a
 //! capability. A later lane that implements one of them adds its variant **and**
-//! its drag rule together (as this lane did for [`GripKind::Vertex`]).
+//! its drag rule together (as this lane did for [`GripKind::Vertex`] and, for the
+//! stored text insertion point, [`GripKind::Insertion`]).
 //!
 //! ## Coordinates: 3D-exact, never projected (except the three in-plane rules)
 //!
 //! A handle's [`Grip::position`] is a stored or stored-derived point — the same
 //! `f64` bits as the geometry (an endpoint, a point position, a circle/arc/ellipse
-//! centre, a polyline vertex, a spline control point) or the documented exact
-//! derivation of it (a line
-//! midpoint; an arc endpoint, i.e. the stored
+//! centre, a polyline vertex, a spline control point, a text insertion point) or
+//! the documented exact derivation of it (a line midpoint; an arc endpoint, i.e.
+//! the stored
 //! `center + radius * (cos angle * ax + sin angle * ay)` in the arc's own plane
 //! frame, the same expression the tessellator uses; an ellipse quadrant, i.e.
 //! `center ± major_axis` and `center ± ` the stored minor semi-axis vector in the
@@ -259,8 +287,9 @@
 //! circle, tilt an arc out of its plane, or turn an ellipse. Those projections
 //! apply to the *drag target of a quadrant or an arc-endpoint handle* only; a
 //! centre drag, an arc-rigid drag, a line drag, a polyline vertex drag, a spline
-//! control-point drag and a point drag are stored 3D-exact (a polyline vertex
-//! keeps its own `z`), and no handle position is ever projected back onto a plane.
+//! control-point drag, a point drag and a text insertion-point drag are stored
+//! 3D-exact (a polyline vertex keeps its own `z`), and no handle position is ever
+//! projected back onto a plane.
 //!
 //! ## The plane frame is shared, not invented
 //!
@@ -293,7 +322,8 @@
 //! a `CIRCLE` the centre and then quadrants 0..=3; for an `ARC` the centre and
 //! then endpoint 0 = start, endpoint 1 = end; for an `ELLIPSE` the centre and then
 //! quadrants 0..=3 when it is a full ellipse; for a `POLYLINE` the vertices in
-//! stored order; for a `SPLINE` the control points in stored order) — and a
+//! stored order; for a `SPLINE` the control points in stored order; for a
+//! `TEXT`/`MTEXT` the single insertion point) — and a
 //! candidate replaces the current winner only when it is
 //! **strictly** closer.
 //!
@@ -337,14 +367,16 @@
 //!   names the DXF class.
 //! * [`REASON_STALE_HANDLE`] (`CadError::InvalidInput`) — the [`GripId`] does
 //!   not name a handle of **this** geometry: a `LINE` with a
-//!   [`GripKind::Center`]/[`GripKind::Quadrant`]/[`GripKind::Point`]/[`GripKind::Vertex`]/[`GripKind::ControlPoint`]
+//!   [`GripKind::Center`]/[`GripKind::Quadrant`]/[`GripKind::Point`]/[`GripKind::Vertex`]/[`GripKind::ControlPoint`]/[`GripKind::Insertion`]
 //!   grip, an `AcDbCircle`/`AcDbArc` with a [`GripKind::Vertex`] grip, a
 //!   `POLYLINE` with a non-vertex grip, a `SPLINE` with a non-control-point grip,
+//!   a `TEXT`/`MTEXT` with a non-[`GripKind::Insertion`] grip,
 //!   or an `index` outside the handle range
 //!   (`LINE` endpoint > 1, `LINE` midpoint ≠ 2, `CIRCLE`/`ELLIPSE` centre > 0,
 //!   `CIRCLE`/`ELLIPSE` quadrant > 3, `ARC` centre > 0, `ARC` endpoint > 1,
 //!   `POLYLINE` vertex ≥ the stored vertex count,
-//!   `SPLINE` control point ≥ the stored control-point count, `POINT` > 0). It is
+//!   `SPLINE` control point ≥ the stored control-point count, `POINT` > 0,
+//!   `TEXT`/`MTEXT` insertion point > 0). It is
 //!   also the refusal for **every** control-point id on an internally
 //!   inconsistent spline definition, because such a spline exposes no handle at
 //!   all. The caller is
@@ -352,7 +384,8 @@
 //! * [`REASON_ZERO_DISPLACEMENT`] (`CadError::InvalidInput`) — the drag would not
 //!   change the geometry, so there is nothing to write. That is the target
 //!   equalling the dragged handle's current position (endpoint, arc endpoint,
-//!   point, midpoint, centre, quadrant, polyline vertex, spline control point),
+//!   point, midpoint, centre, quadrant, polyline vertex, spline control point,
+//!   text insertion point),
 //!   and additionally:
 //!   a quadrant target that already sits at the **stored** radius (its
 //!   out-of-plane offset is ignored by the radius rule), an arc endpoint drag
@@ -449,8 +482,8 @@ pub const ARC_SWEEP_EPSILON: f64 = 1e-9;
 /// A draggable handle of one entity.
 ///
 /// The variants are exactly the handles the drag rules above implement; see the
-/// module doc for the deliberate absence of insertion/width/rotation/tangent
-/// kinds.
+/// module doc for the deliberate absence of width/rotation/height/attachment/
+/// tangent kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GripKind {
     /// An endpoint: a `LINE`'s start/end, or an `ARC`'s start (`index` 0) and end
@@ -480,6 +513,14 @@ pub enum GripKind {
     ControlPoint,
     /// The position of a point entity (`POINT` only).
     Point,
+    /// The stored insertion point of a `TEXT`/`MTEXT` (`index` 0). Dragging sets
+    /// `position` to the target and leaves `text`, `style`, `height`, `rotation`,
+    /// `font`, `h_align`, `v_align` and `wrap_width` bit-identical, so alignment
+    /// and rotation never move the handle. It is deliberately **not**
+    /// [`GripKind::Point`]: that kind is the `POINT` entity's own handle, and
+    /// sharing it would leave [`REASON_STALE_HANDLE`] unable to tell a text from a
+    /// point entity.
+    Insertion,
 }
 
 /// The four circle/ellipse quadrant handles, in documented `index` order.
@@ -501,7 +542,8 @@ const QUADRANT_DIRECTIONS: [(u8, f64); 4] = [(0, 1.0), (1, 1.0), (0, -1.0), (1, 
 /// the end point; for a `POLYLINE`, a `Vertex` `index` is the **stored** vertex
 /// index (`u8`, so only vertices `0..=255` can be addressed); for a `SPLINE`, a
 /// `ControlPoint` `index` is the **stored** control-point index (`u8`, so only
-/// control points `0..=255` can be addressed); for a `POINT`, `0`
+/// control points `0..=255` can be addressed); for a `TEXT`/`MTEXT`, `0` is the
+/// stored insertion point; for a `POINT`, `0`
 /// is the position. The id is a caller-held reference into geometry that may have
 /// changed since it was read, so [`apply_grip`] re-validates it against the
 /// geometry it is handed instead of trusting it.
@@ -537,7 +579,10 @@ pub struct Grip {
 /// addressable), and **no** grip at all when the stored definition is internally
 /// inconsistent (`control_points.len() != weights.len()`, or
 /// `knots.len() != control_points.len() + degree + 1`) — no marker is invented for
-/// a definition this model cannot interpret; `POINT` ⇒ one [`GripKind::Point`]
+/// a definition this model cannot interpret; `TEXT`/`MTEXT` ⇒ exactly one
+/// [`GripKind::Insertion`] grip (`index` 0) at the stored insertion point — the
+/// stored `position` verbatim, never offset by `h_align`/`v_align` and never
+/// rotated about it by `rotation`; `POINT` ⇒ one [`GripKind::Point`]
 /// grip. Every
 /// other geometry — including the whole refusal list in the module doc — yields
 /// an empty vector: no marker is invented for a kind this build cannot drag.
@@ -682,6 +727,14 @@ pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
         }
         SemanticGeometry::Point(position) => vec![Grip {
             id: id(GripKind::Point, 0),
+            position: *position,
+        }],
+        // TEXT and MTEXT are one variant (only `object.type_key` tells the DXF
+        // classes apart), so both expose the same single handle: the **stored**
+        // insertion point, verbatim. No alignment offset and no rotation is
+        // applied — the grip marks where the run is anchored.
+        SemanticGeometry::Text { position, .. } => vec![Grip {
+            id: id(GripKind::Insertion, 0),
             position: *position,
         }],
         _ => Vec::new(),

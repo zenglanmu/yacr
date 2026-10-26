@@ -1,3 +1,101 @@
+## 2026-10-26 TEXT/MTEXT 插入点夹点（存储插入点，不受对齐/旋转影响）
+
+### 结论
+
+纯夹点模型（`crates/cad-app/src/grips/mod.rs` + `grips/drag.rs`）此前把 `TEXT`/`MTEXT` 整类列在
+「无夹点」拒绝清单里。本轮为 **`SemanticGeometry::Text { text, position, style, height, rotation,
+font, h_align, v_align, wrap_width }`** 实现 **`GripKind::Insertion`**（新变体，**不**复用 `Point`）。
+只动 `cad-app` 与其测试、`docs/compatibility.md`、本文件；`cad-host` / `apps/**` / i18n / 命令 /
+IPC / wire **未改**（宿主与渲染器按通用 API 消费枚举，无新分支、无新命令）。
+
+**`TEXT` 与 `MTEXT` 是同一个变体**：只有 `DbEntity.object.type_key`（`AcDbText` vs `AcDbMText`，
+见 `app_drawing/text_policy.rs::MTEXT_TYPE_KEY` 与 `helpers::is_multiline_text_source`）区分 DXF 类，
+域模型不带这个区别，所以夹点模型**无法也不该**给两者不同的句柄：两者都是同一个「一个插入点」。
+**`MULTILEADER` 存在**（`SemanticGeometry::MultiLeader(Box<MultiLeaderGeometry>)`，ADR 0019 C）且是
+**另一个**变体；本轮**不**给它任何夹点（其注记文本不通过文本插入点句柄暴露），仍在拒绝清单里，
+`grip.unsupported_kind` 按 `AcDbMultiLeader` 命名。
+
+### 句柄表
+
+| kind | index | 位置 / 含义 |
+|---|---|---|
+| `Insertion` | 0 | **存储的 `position` 原值**（三坐标逐位） |
+
+* **不**按 `h_align`/`v_align` 偏移：左/基线以外的 attachment（`Center`/`Right`、`Middle`/`Top`）
+  **不**移动句柄；**不**绕该点按 `rotation` 旋转（旋转转的是文本走向，不是句柄）；`height` 与
+  `wrap_width` 也不影响位置。句柄标的是**锚点本身**。
+* **为什么是 `Insertion` 而不是 `Point`**：`Point` 是 `POINT` 实体自身的句柄；若共用，
+  `grip.stale_handle` 就无法从 `GripId.kind` 区分「文本插入点」与「点实体」，只剩 index 可猜。
+* `GripId::index` 仍是 `u8`，这里固定为 `0`（不是索引族，无 255 上限问题）。
+
+### 拖拽规则
+
+* `position = to`（三坐标原样；**不**投影到工作平面/任何平面，**不**加或减对齐、旋转偏移）。
+* `text`、`style`、`height`、`rotation`、`font`、`h_align`、`v_align`、`wrap_width` **逐位不变**，
+  含 `wrap_width: Some(w)`（普通 `f64`，只复制、不重算）与 `None`（不会被合成成某个默认宽度）。
+  测试对每个字段用 `to_bits()` 逐个断言，另加一次整结构 `==` 对照。
+* 旋转 / 高度 / 对齐（attachment）/ 宽度夹点**未实现**：规则从不改写这些字段，拖插入点因此
+  不会改变文本的贴附、朝向或大小。**只**有插入点。
+
+### 拒绝（沿用既有码与既有次序）
+
+次序仍是 **几何种类 → 句柄身份 → 目标有限性 → 拖拽几何规则**，绝不夹取：
+
+* `grip.stale_handle` —— 该文本上的其它任何 kind（`Endpoint`/`Midpoint`/`Center`/`Quadrant`/
+  `Vertex`/`ControlPoint`/`Point`），以及 `Insertion` 的 `index != 0`（含 `1`/`2`/`u8::MAX`）；
+  句柄身份先于目标校验，故「错 kind + 目标恰是插入点」仍报 stale；
+* `grip.zero_displacement` —— 目标恰等于存储 `position`（IEEE `==`，无容差；1 ulp 的位移是**真编辑**，
+  有测试钉住「不是零位移」）；
+* `grip.non_finite_target` —— 目标含 `NaN`/`inf`（命令层`GRIPSTRETCH` 仍在读图之前就拒）；
+* 其它几何对 `Insertion` 一律 `grip.stale_handle`（`LINE`/`CIRCLE`/`ARC`/`ELLIPSE`/`POLYLINE`/
+  `SPLINE`/`POINT` 的拒绝清单各补一条断言）。
+
+### tie-break 未变
+
+命中仍是「严格更近才替换」⇒ 精确平局归**列表里更早的候选**（同一实体只有一个句柄，故只剩
+「输入里更早的实体」），且**落在插入点上就是插入点夹点的命中**。有测试把 TEXT 与 POINT 放在同一点，
+验证两种输入顺序下都按**输入顺序**决定（不是「Point 优先」或「Insertion 优先」）。
+
+### 测试与夹具迁移
+
+新增 `crates/cad-app/src/tests/grips_text.rs`（已注册，**14 个测试**）：句柄表 = 恰好一个
+`Insertion` 0 且位置逐位（普通 TEXT 与 `wrap_width: Some(..)` + 非默认对齐 + 非零旋转的
+「MTEXT 式」文本各一）、拖拽只改 `position`（`Some`/`None` 两种 `wrap_width`、非零 `rotation`、
+非默认 `h_align`/`v_align` 全覆盖，逐字段 `to_bits` + 整结构 `==`）、越界 index / 错 kind /
+零位移 / 非有限目标四种拒绝、命中/容差外不命中/平面视图（另一标高）/精确平局。
+
+`TEXT` 此前是两个「无夹点」用例的夹具，已迁移到 `INSERT`（各附注释说明原因）：
+
+* `tests/grips.rs`：`text_exposes_no_grips` **删除**（其断言被 `grips_text` 反向钉住）；第 2 节的
+  清单注释补 `TEXT`/`MTEXT` 不再在列；`grip_hit_skips_entities_that_expose_no_grips` 去掉 TEXT 实体，
+  改为只对 `INSERT` 断言「在其实例平移点上查询也不命中」；
+* `tests/grips_curves.rs` / `grips_ellipse.rs` / `grips_polyline.rs` / `grips_spline.rs`：各自的
+  「错 kind 一律 stale」清单加一条 `(GripKind::Insertion, 0)`。
+
+命令级：`tests/drawing/grip.rs` 新增
+`text_insertion_grip_drag_is_one_change_one_undo_step_and_undoes_exactly`（一次 `ChangeSet`、一个
+revision、一步撤销、`position` 到位且其余字段逐位不变、undo 逐位还原）。夹具扩在
+`tests/drawing/grip_fixture.rs`（`TEXT` id 10 + `TEXT_AT`/`TEXT_CONTENT`/`TEXT_HEIGHT`/
+`TEXT_ROTATION`/`TEXT_WRAP` 常量 + `text_parts()`），`grip.rs` 只加测试本体，未逼近 1000 行。
+
+### 文档同步
+
+* `crates/cad-app/src/grips/mod.rs`：句柄表加 `Text` 行、TEXT/MTEXT 同一变体与「存储插入点，
+  不受对齐/旋转影响」段落、拖拽规则加插入点条目、拒绝清单把 `TEXT`/`MTEXT` 移出并保留
+  `MULTILEADER`、`GripKind::Insertion` 变体文档（含「为何不复用 `Point`」）；
+* `docs/compatibility.md` `GRIPSTRETCH` 行：支持面加 `TEXT`/`MTEXT` 插入点与规则，明确
+  「旋转/高度/对齐夹点**未实现**，只有插入点」，`grip.unsupported_kind` 清单改为
+  `INSERT`/`MULTILEADER`/`HATCH`/`DIMENSION`/`IMAGE`/`MASK`。
+
+### 证据与边界
+
+`cargo test -p cad-app --lib --locked`（1100 passed / 0 failed，含新增 14 + 1）、
+`cargo test -p cad-host --lib --locked`、`cargo clippy -p cad-app --all-targets --locked -- -D warnings`、
+`cargo fmt --all -- --check`、`python3 scripts/check-file-size.py`。**无** GUI/像素/真窗口/真实鼠标证据；
+宿主对夹点种类无分支，故 TEXT 标记/拖拽自然走同一通用 `native-below` 路径，但**未做**宿主运行或
+像素验证；`dom-canvas` 载体仍无任何夹点路径。`MULTILEADER` 插入点、文本旋转/高度/对齐/宽度夹点、
+多夹点与多实体拉伸、拖拽中捕捉、3D 夹点编辑均**不存在**。
+
 ## 2026-10-26 SPLINE 控制点夹点（NURBS 定义点，非曲线上的点）
 
 ### 结论

@@ -235,6 +235,7 @@ fn a_non_control_point_grip_on_a_spline_is_stale() {
         (GripKind::Quadrant, 0),
         (GripKind::Vertex, 0),
         (GripKind::Point, 0),
+        (GripKind::Insertion, 0),
     ] {
         let error = apply_grip(&geometry, &grip_id(61, kind, index), p3(1.0, 1.0, 0.0))
             .expect_err("a SPLINE exposes ControlPoint grips only");

@@ -18,7 +18,7 @@ use super::{
     REASON_NON_FINITE_TARGET, REASON_PARTIAL_ELLIPSE, REASON_STALE_HANDLE, REASON_UNSUPPORTED_KIND,
     REASON_ZERO_DISPLACEMENT,
 };
-use cad_domain::{CadError, CadResult, Point3, SemanticGeometry};
+use cad_domain::{CadError, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV};
 use cad_geometry::{add, dot, length, scale, sub};
 
 /// The in-plane **angle** of `to` as seen from `center`, or `None` when the
@@ -113,7 +113,8 @@ fn apply_line(start: Point3, end: Point3, id: &GripId, to: Point3) -> CadResult<
             | GripKind::Quadrant
             | GripKind::Vertex
             | GripKind::ControlPoint
-            | GripKind::Point,
+            | GripKind::Point
+            | GripKind::Insertion,
             _,
         ) => Err(stale_handle(
             "AcDbLine exposes Endpoint (0 = start, 1 = end) and Midpoint (2) grips only"
@@ -178,7 +179,8 @@ fn apply_circle(
             | GripKind::Midpoint
             | GripKind::Vertex
             | GripKind::ControlPoint
-            | GripKind::Point,
+            | GripKind::Point
+            | GripKind::Insertion,
             _,
         ) => Err(stale_handle(
             "AcDbCircle exposes a Center grip (0) and Quadrant grips (0..=3) only".to_string(),
@@ -281,12 +283,17 @@ fn apply_arc(
              not a Quadrant grip"
                 .to_string(),
         )),
-        (GripKind::Midpoint | GripKind::Vertex | GripKind::ControlPoint | GripKind::Point, _) => {
-            Err(stale_handle(
-                "AcDbArc exposes a Center grip (0) and Endpoint grips (0 = start, 1 = end) only"
-                    .to_string(),
-            ))
-        }
+        (
+            GripKind::Midpoint
+            | GripKind::Vertex
+            | GripKind::ControlPoint
+            | GripKind::Point
+            | GripKind::Insertion,
+            _,
+        ) => Err(stale_handle(
+            "AcDbArc exposes a Center grip (0) and Endpoint grips (0 = start, 1 = end) only"
+                .to_string(),
+        )),
     }
 }
 
@@ -414,7 +421,8 @@ fn apply_ellipse(ellipse: EllipseParts, id: &GripId, to: Point3) -> CadResult<Se
             | GripKind::Midpoint
             | GripKind::Vertex
             | GripKind::ControlPoint
-            | GripKind::Point,
+            | GripKind::Point
+            | GripKind::Insertion,
             _,
         ) => Err(stale_handle(
             "AcDbEllipse exposes a Center grip (0) and, for a full ellipse, Quadrant grips \
@@ -474,7 +482,8 @@ fn apply_polyline(
         | GripKind::Center
         | GripKind::Quadrant
         | GripKind::ControlPoint
-        | GripKind::Point => Err(stale_handle(
+        | GripKind::Point
+        | GripKind::Insertion => Err(stale_handle(
             "AcDbPolyline exposes one Vertex grip per stored vertex (index = stored vertex \
              index) only"
                 .to_string(),
@@ -553,9 +562,83 @@ fn apply_spline(
         | GripKind::Center
         | GripKind::Quadrant
         | GripKind::Vertex
-        | GripKind::Point => Err(stale_handle(
+        | GripKind::Point
+        | GripKind::Insertion => Err(stale_handle(
             "AcDbSpline exposes one ControlPoint grip per stored control point (index = stored \
              control-point index) only"
+                .to_string(),
+        )),
+    }
+}
+
+/// The stored `TEXT`/`MTEXT` fields behind the [`GripKind::Insertion`] rule.
+///
+/// A tuple (not a wrapper struct) for the same reason as [`EllipseParts`]: the
+/// rule stays a three-argument function (clippy's `too_many_arguments`), and the
+/// domain already models these fields. `text` and `font` are borrowed so the rule
+/// clones them exactly once, when it builds the updated geometry.
+type TextParts<'a> = (
+    &'a str,
+    Point3,
+    StyleId,
+    f64,
+    f64,
+    Option<&'a str>,
+    TextAlignH,
+    TextAlignV,
+    Option<f64>,
+);
+
+/// The `TEXT`/`MTEXT` drag rule: the stored insertion point, every other field
+/// verbatim.
+///
+/// The handle is the **stored** `position`, so the rule is a plain assignment:
+/// `position = to` in all three coordinates (nothing is projected, and no
+/// alignment or rotation offset is applied or removed). `text`, `style`,
+/// `height`, `rotation`, `font`, `h_align`, `v_align` and `wrap_width` are copied
+/// **bit-identically** — `wrap_width: Some(w)` is an `f64` like any other and is
+/// never recomputed, and the alignment/rotation fields are simply not handles in
+/// this build.
+///
+/// A rotation, height, wrap-width or attachment (alignment) grip is **NOT
+/// IMPLEMENTED**: this rule never rewrites one of those fields, so dragging the
+/// insertion point cannot change how the run is attached, turned or sized.
+fn apply_text(text: TextParts<'_>, id: &GripId, to: Point3) -> CadResult<SemanticGeometry> {
+    let (content, position, style, height, rotation, font, h_align, v_align, wrap_width) = text;
+    match (id.kind, id.index) {
+        (GripKind::Insertion, 0) => {
+            finite_target(to)?;
+            if to == position {
+                return Err(zero_displacement("AcDbText insertion point"));
+            }
+            Ok(SemanticGeometry::Text {
+                // Every other field is the stored value, bit for bit: the drag
+                // moves the run's anchor only.
+                text: content.to_string(),
+                position: to,
+                style,
+                height,
+                rotation,
+                font: font.map(str::to_string),
+                h_align,
+                v_align,
+                wrap_width,
+            })
+        }
+        (GripKind::Insertion, index) => Err(stale_handle(format!(
+            "AcDbText has no Insertion grip at index {index} (only 0)"
+        ))),
+        (
+            GripKind::Endpoint
+            | GripKind::Midpoint
+            | GripKind::Center
+            | GripKind::Quadrant
+            | GripKind::Vertex
+            | GripKind::ControlPoint
+            | GripKind::Point,
+            _,
+        ) => Err(stale_handle(
+            "AcDbText exposes a single Insertion grip (0) at the stored insertion point only"
                 .to_string(),
         )),
     }
@@ -687,6 +770,10 @@ pub(crate) fn finite_target(to: Point3) -> CadResult<()> {
 ///   (a control point is not on the curve — see the module doc) and an internally
 ///   inconsistent definition refuses every control-point id as stale;
 /// * `POINT`: the position becomes `to`;
+/// * `TEXT`/`MTEXT` insertion point: the stored `position` becomes `to` and
+///   `text`/`style`/`height`/`rotation`/`font`/`h_align`/`v_align`/`wrap_width`
+///   are bit-identical (the handle is the stored insertion point, so alignment
+///   and rotation neither move it nor are moved by it);
 /// * everything else, a [`GripId`] that does not name a handle of this geometry,
 ///   a non-finite target and a drag with no geometric effect are refused with the
 ///   stable reason codes documented in the module doc.
@@ -737,6 +824,31 @@ pub fn apply_grip(
             control_points,
             weights,
         } => apply_spline(*degree, knots, control_points, weights, id, to),
+        SemanticGeometry::Text {
+            text,
+            position,
+            style,
+            height,
+            rotation,
+            font,
+            h_align,
+            v_align,
+            wrap_width,
+        } => apply_text(
+            (
+                text.as_str(),
+                *position,
+                *style,
+                *height,
+                *rotation,
+                font.as_deref(),
+                *h_align,
+                *v_align,
+                *wrap_width,
+            ),
+            id,
+            to,
+        ),
         SemanticGeometry::Point(position) => {
             match (id.kind, id.index) {
                 (GripKind::Point, 0) => {}
@@ -751,7 +863,8 @@ pub fn apply_grip(
                     | GripKind::Center
                     | GripKind::Quadrant
                     | GripKind::Vertex
-                    | GripKind::ControlPoint,
+                    | GripKind::ControlPoint
+                    | GripKind::Insertion,
                     _,
                 ) => {
                     return Err(stale_handle(
