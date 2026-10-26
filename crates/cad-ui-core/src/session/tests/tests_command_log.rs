@@ -137,10 +137,18 @@ fn the_command_log_wire_shape_has_no_message_or_text_field() {
             precision: Some("analytic".into()),
             points: vec![[0.0, 0.0, 0.0], [3.0, 4.0, 0.0]],
         }),
+        point: None,
     };
     assert_eq!(
         super::tests_text::wire_field_names(&entry),
-        vec!["sequence", "kind", "command", "code", "measurement"],
+        vec![
+            "sequence",
+            "kind",
+            "command",
+            "code",
+            "measurement",
+            "point"
+        ],
         "no message/text field exists on the wire"
     );
 
@@ -150,5 +158,58 @@ fn the_command_log_wire_shape_has_no_message_or_text_field() {
             .iter()
             .any(|name| name == "commandLog"),
         "the status field is the camelCase `commandLog`"
+    );
+}
+
+#[test]
+fn an_id_pick_echoes_its_point_with_space_snap_and_precision() {
+    // ID is a real interactive one-pick command: the router admits the selector,
+    // the host resolves the pick (object snap included) and the echo carries the
+    // coordinate with its provenance. No `measurement` is fabricated for it.
+    let session = fresh_session();
+    // The demo drawing's geometry would snap the synthetic pick, and this test
+    // asserts the exact picked coordinate, so object snap is off.
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .session
+        .set_snap_enabled(false);
+    session.command("ID").expect("ID is admitted");
+    interact(&session, InteractionRequest::CapturePoint(world(2.0, 3.0)));
+
+    let status = session.snapshot(None, None, 0);
+    assert_eq!(status.command_log.len(), 2, "one command, one result");
+    assert_eq!(status.command_log[0].command.as_deref(), Some("ID"));
+    let result = &status.command_log[1];
+    assert_eq!(result.kind, CadCommandLogKind::Result);
+    assert_eq!(
+        result.measurement, None,
+        "ID is not a measurement: `measurement` stays measurement-only"
+    );
+    let point = result.point.as_ref().expect("the point echo travels");
+    assert_eq!(point.position, [2.0, 3.0, 0.0]);
+    assert_eq!(point.space, "model");
+    assert_eq!(point.snap, None, "no snap resolved for this pick");
+    assert_eq!(point.precision, Some("analytic"));
+    // The demo document has no unit assignment: drawing units stay `null`
+    // instead of being fabricated as millimetres.
+    assert_eq!(point.unit, None);
+    assert_eq!(point.pixel_distance, None);
+
+    // The wire projection is the frozen shape: camelCase keys, with `snap`/
+    // `precision`/`unit`/`pixelDistance` present as explicit nulls. The field
+    // recorder reads the **serialized** keys, so the rename is pinned too.
+    assert_eq!(
+        super::tests_text::wire_field_names(point),
+        vec![
+            "position",
+            "space",
+            "snap",
+            "precision",
+            "unit",
+            "pixelDistance"
+        ],
+        "the `ID` point echo is the frozen camelCase wire block"
     );
 }

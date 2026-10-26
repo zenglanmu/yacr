@@ -8,6 +8,8 @@ use serde::Serialize;
 
 use cad_app::ToolSnapshot;
 
+use super::command_log::CadCommandLogEntry;
+
 /// Camera block of the frontend status (`{center, scale}`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct CadCamera {
@@ -285,7 +287,7 @@ pub struct CadToolParams {
 #[serde(rename_all = "camelCase")]
 pub struct CadTool {
     /// Stable machine key: `"draw.line"`..`"draw.offset"`, `"measure.distance"`,
-    /// `"measure.polyline"`, `"measure.angle"`, `"measure.area"`.
+    /// `"measure.polyline"`, `"measure.angle"`, `"measure.area"`, `"measure.id"`.
     pub key: String,
     /// Points captured so far (the real count from the preview).
     pub points: usize,
@@ -363,85 +365,6 @@ pub struct CadPopup {
     pub label: String,
     /// Whether the host holds the modal input gate for this popup.
     pub modal: bool,
-}
-
-/// Which kind of echo a [`CadCommandLogEntry`] is.
-///
-/// Serialized as a lowercase string (`"command"`, `"result"`, `"error"`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CadCommandLogKind {
-    /// A named selector was admitted by the router.
-    Command,
-    /// A command produced a typed measurement result.
-    Result,
-    /// A command was refused.
-    Error,
-}
-
-/// Typed measurement echo carried by a `Result` entry.
-///
-/// Every field is a stable machine key or a real measured number: `algorithm`
-/// is one of `distance`/`polyline`/`angle`/`area`, `unit` is a known display
-/// symbol (`mm`/`m`/`in`/`ft`) or `null` for drawing units, and `precision` is
-/// the modelled precision token. There is deliberately **no** text field.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct CadMeasurementEcho {
-    /// Stable machine algorithm key (never translated).
-    pub algorithm: String,
-    /// The measured value in the record's own unit context.
-    pub value: f64,
-    /// A known display unit symbol, or `null` for drawing units.
-    pub unit: Option<String>,
-    /// The modelled precision token (`analytic`/`approximate`/`unknown`).
-    pub precision: Option<String>,
-    /// The picked points, in capture order, so the UI can format deltas.
-    pub points: Vec<[f64; 3]>,
-}
-
-/// One entry of the command-window echo (AutoCAD-style command history).
-///
-/// The type has **no** message/text field by construction: the host only ever
-/// supplies stable codes/keys, and `Diagnostic::message` (partly Chinese today)
-/// can never reach the wire. `command` is present only on `Command` entries and
-/// `measurement` only on `Result` entries; an `Error` carries only `code`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct CadCommandLogEntry {
-    /// Monotonic sequence, unique for the host log's lifetime.
-    pub sequence: u64,
-    pub kind: CadCommandLogKind,
-    /// Stable selector name (`DIST`, `LINE`, …) for a `Command` entry.
-    pub command: Option<String>,
-    /// Stable diagnostic code for an `Error` entry.
-    pub code: Option<String>,
-    /// Typed measurement echo for a `Result` entry.
-    pub measurement: Option<CadMeasurementEcho>,
-}
-
-impl CadCommandLogEntry {
-    /// Project one host log entry onto the wire shape.
-    pub(super) fn from_host(entry: &cad_host::CommandLogEntry) -> Self {
-        Self {
-            sequence: entry.sequence,
-            kind: match entry.kind {
-                cad_host::CommandLogKind::Command => CadCommandLogKind::Command,
-                cad_host::CommandLogKind::Result => CadCommandLogKind::Result,
-                cad_host::CommandLogKind::Error => CadCommandLogKind::Error,
-            },
-            command: entry.command.clone(),
-            code: entry.code.clone(),
-            measurement: entry
-                .measurement
-                .as_ref()
-                .map(|measurement| CadMeasurementEcho {
-                    algorithm: measurement.algorithm.clone(),
-                    value: measurement.value,
-                    unit: measurement.unit.clone(),
-                    precision: measurement.precision.clone(),
-                    points: measurement.points.clone(),
-                }),
-        }
-    }
 }
 
 /// The `cad_status` snapshot consumed by the frontend.

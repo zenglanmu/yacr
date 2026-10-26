@@ -42,6 +42,7 @@ impl Application {
             CommandId::AlignEntities => self.align_entities(session, command),
             CommandId::StretchEntities => self.stretch_entities(session, command),
             CommandId::EraseEntities => self.erase_entities(session, command),
+            CommandId::Join => self.join_entities(session, command),
             CommandId::ExplodeEntities => self.explode_entities(session, command),
             CommandId::CopyEntities => self.copy_entities(command),
             CommandId::RotateEntities => self.rotate_entities(command),
@@ -127,6 +128,7 @@ impl Application {
                 message: format!("活动图层：{}", layer.0),
             }],
             measurement: None,
+            point_report: None,
         })
     }
 

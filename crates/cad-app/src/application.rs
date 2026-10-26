@@ -31,6 +31,11 @@ impl Application {
                 session.layer_overrides.clear();
                 Ok(CommandOutcome::none())
             }
+            // LAYISO is a **session view** operation (temporary overrides only: no
+            // revision bump, no history entry, no database write), so it is
+            // dispatched here beside the other layer-view commands rather than
+            // through the entity-edit funnel.
+            CommandId::IsolateLayers => self.isolate_layers(session, &command),
             CommandId::ToggleLayer => {
                 if let CommandPayload::Layer(id, visible) = command.payload {
                     self.set_layer_visibilities(session, command.document, &[(id, visible)])
@@ -174,6 +179,7 @@ impl Application {
                             message: format!("后端偏好：{choice:?}（渲染会话由宿主重建）"),
                         }],
                         measurement: None,
+                        point_report: None,
                     })
                 } else {
                     Err(CadError::InvalidInput(
@@ -197,6 +203,7 @@ impl Application {
                             message: format!("模式：{mode:?}"),
                         }],
                         measurement: None,
+                        point_report: None,
                     })
                 }
                 _ => Err(CadError::InvalidInput(
@@ -217,6 +224,7 @@ impl Application {
                         message: format!("hover preview: {enabled}"),
                     }],
                     measurement: None,
+                    point_report: None,
                 })
             }
             CommandId::ToggleSnap => {
@@ -233,6 +241,7 @@ impl Application {
                         message: format!("object snap: {enabled}"),
                     }],
                     measurement: None,
+                    point_report: None,
                 })
             }
             CommandId::ToggleGrid => {
@@ -251,6 +260,7 @@ impl Application {
                         message: format!("grid: {enabled}"),
                     }],
                     measurement: None,
+                    point_report: None,
                 })
             }
             CommandId::ToggleSnapGrid => {
@@ -270,6 +280,7 @@ impl Application {
                         message: format!("grid snap: {enabled}"),
                     }],
                     measurement: None,
+                    point_report: None,
                 })
             }
             CommandId::SetSnapSpacing => match command.payload {
@@ -287,6 +298,7 @@ impl Application {
                             message: format!("snap spacing: {spacing}"),
                         }],
                         measurement: None,
+                        point_report: None,
                     })
                 }
                 _ => Err(CadError::InvalidInput(
@@ -309,6 +321,7 @@ impl Application {
                         message: format!("ortho: {enabled}"),
                     }],
                     measurement: None,
+                    point_report: None,
                 })
             }
             CommandId::CreateLine
@@ -340,6 +353,7 @@ impl Application {
             | CommandId::AlignEntities
             | CommandId::StretchEntities
             | CommandId::EraseEntities
+            | CommandId::Join
             | CommandId::ExplodeEntities
             | CommandId::CopyEntities
             | CommandId::RotateEntities
@@ -371,7 +385,7 @@ impl Application {
 
     /// Validate the complete batch before publishing a replacement override set.
     /// Drawing data and history are untouched; unrelated overrides are retained.
-    fn set_layer_visibilities(
+    pub(crate) fn set_layer_visibilities(
         &self,
         session: &mut SessionState,
         document: DocumentId,
@@ -450,6 +464,7 @@ impl Application {
                 message: message.into(),
             }],
             measurement: None,
+            point_report: None,
         })
     }
 
@@ -480,6 +495,7 @@ impl Application {
                 message: format!("轨道旋转 yaw={yaw:.4} pitch={pitch:.4}"),
             }],
             measurement: None,
+            point_report: None,
         })
     }
 
@@ -504,6 +520,7 @@ impl Application {
                 message: format!("资源引用 {}：{keys}", document.resource_keys.len()),
             }],
             measurement: None,
+            point_report: None,
         })
     }
 
@@ -539,6 +556,7 @@ impl Application {
                 },
             ],
             measurement: None,
+            point_report: None,
         })
     }
 
@@ -581,6 +599,7 @@ impl Application {
                 message: "fit.empty".into(),
             }],
             measurement: None,
+            point_report: None,
         })
     }
 

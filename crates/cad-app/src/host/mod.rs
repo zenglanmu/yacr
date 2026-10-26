@@ -20,7 +20,8 @@ use cad_import_acadrust::{
 use cad_measure::{MeasurementEngine, SnapCandidate, SnapTarget};
 
 use crate::{
-    AppMode, Application, Command, CommandOutcome, Document, DrawToolKind, SessionState, Viewport,
+    AppMode, Application, Command, CommandOutcome, Document, DrawToolKind, InputSnap, SessionState,
+    Viewport,
 };
 
 mod databases;
@@ -163,7 +164,11 @@ impl HostController {
     /// rather than the misleading entity-pick text. The click is never silently
     /// ignored.
     pub fn capture_tool_point(&mut self, point: Point3) -> CadResult<bool> {
-        let point = self.resolve_snap(point)?.map_or(point, |snap| snap.point);
+        let resolved = self.resolve_snap(point)?;
+        let (point, snap) = match resolved {
+            Some(candidate) => (candidate.point, Some(InputSnap::from_candidate(&candidate))),
+            None => (point, None),
+        };
         if self.session.draw_requires_entity_pick() {
             let reference = self.resolve_draw_pick(point)?;
             // TEXTEDIT's pick must resolve to a single, directly addressable
@@ -189,7 +194,9 @@ impl HostController {
             }
             return Ok(false);
         }
-        self.session.capture_point(point)
+        // The captured point and the provenance of the pick travel together, so
+        // `ID` reports the same coordinate (and the same snap) the preview showed.
+        self.session.capture_point_with_snap(point, snap)
     }
 
     /// Move the active tool preview cursor without advancing its generation.

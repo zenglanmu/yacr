@@ -340,9 +340,20 @@ pub(super) fn command_log_line(entry: &CadCommandLogEntry) -> String {
             "-".to_string(),
         ),
     };
+    let point = match entry.point.as_ref() {
+        Some(point) => format!(
+            "{:.3},{:.3},{:.3}@{}#{}",
+            point.position[0],
+            point.position[1],
+            point.position[2],
+            flat(point.space),
+            point.snap.map(flat).unwrap_or_else(|| "-".to_string()),
+        ),
+        None => "-".to_string(),
+    };
     format!(
         "commandlog seq={} kind={} command={} code={} algorithm={} value={} unit={} precision={} \
-         points={}",
+         points={} point={}",
         entry.sequence,
         kind,
         entry
@@ -360,5 +371,6 @@ pub(super) fn command_log_line(entry: &CadCommandLogEntry) -> String {
         unit,
         precision,
         points,
+        point,
     )
 }

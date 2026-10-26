@@ -9,6 +9,9 @@ fn viewer_rejects_every_mutating_work_entry() {
         CommandId::Redo,
         CommandId::Measure,
         CommandId::CreateLine,
+        // JOIN writes the database (delete the sources, insert the weld), so
+        // Viewer must refuse it like every other edit.
+        CommandId::Join,
     ] {
         assert_eq!(session.authorize(command), Err(CadError::PermissionDenied));
     }
@@ -16,6 +19,10 @@ fn viewer_rejects_every_mutating_work_entry() {
         CommandId::Pan,
         CommandId::Zoom,
         CommandId::ToggleLayer,
+        // LAYISO/LAYUNISO are session view operations (temporary overrides only),
+        // not edits: a Viewer must be able to isolate and restore layers.
+        CommandId::IsolateLayers,
+        CommandId::RestoreLayers,
         CommandId::SwitchSpace,
         CommandId::SetMode,
     ] {

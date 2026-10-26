@@ -22,6 +22,7 @@
 //! surface is an explicit `Cancelled`, never a fabricated canvas.
 
 mod admission;
+mod command_log;
 mod commands;
 mod diagnostics;
 mod input;
@@ -68,6 +69,9 @@ pub use self::admission::{
     parse_tool_parameter, CAD_LAYER_WRITE_CAP, CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP,
     CAD_SETTING_CAP, CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
 };
+pub use self::command_log::{
+    CadCommandLogEntry, CadCommandLogKind, CadCommandLogPoint, CadMeasurementEcho,
+};
 pub use self::commands::{
     admissible_names, alias_pairs, canonical_command_name, command_name,
     invalid_snap_unit_argument_reason, invalid_zoom_argument_reason, measurement_selector_kind,
@@ -82,8 +86,8 @@ pub use self::settings::{
     SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
 pub use self::status::{
-    unsupported_status, CadCamera, CadCommandLogEntry, CadCommandLogKind, CadImportProgress,
-    CadMeasurementEcho, CadPopup, CadSelection, CadSelectionRow, CadStatus, CadTool, CadToolParams,
+    unsupported_status, CadCamera, CadImportProgress, CadPopup, CadSelection, CadSelectionRow,
+    CadStatus, CadTool, CadToolParams,
 };
 
 /// Completions drained per poll. The queue's absolute capacity is 256, so this

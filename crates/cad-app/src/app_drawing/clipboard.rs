@@ -27,6 +27,7 @@ impl Application {
             changes: None,
             diagnostics,
             measurement: None,
+            point_report: None,
         })
     }
 
@@ -59,6 +60,7 @@ impl Application {
             changes: deleted.changes,
             diagnostics: merged,
             measurement: None,
+            point_report: None,
         })
     }
 
@@ -168,6 +170,7 @@ impl Application {
                 message: format!("从剪贴板粘贴 {} 个实体（原坐标）", copies.len()),
             }],
             measurement: None,
+            point_report: None,
         })
     }
 

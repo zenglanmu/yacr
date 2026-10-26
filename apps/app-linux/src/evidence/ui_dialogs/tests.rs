@@ -8,7 +8,8 @@
 use std::collections::BTreeSet;
 
 use cad_ui_core::session::{
-    CadCommandLogEntry, CadCommandLogKind, CadMeasurementEcho, CadSelection, CadSelectionRow,
+    CadCommandLogEntry, CadCommandLogKind, CadCommandLogPoint, CadMeasurementEcho, CadSelection,
+    CadSelectionRow,
 };
 
 use super::super::ui_dialogs_report::{
@@ -342,11 +343,39 @@ fn command_log_line_carries_the_measurement_echo() {
             precision: Some("analytic".to_string()),
             points: vec![[0.0, 0.0, 0.0], [3.0, 1.0, 0.0]],
         }),
+        point: None,
     };
     assert_eq!(
         command_log_line(&entry),
         "commandlog seq=4 kind=result command=- code=- algorithm=distance value=3.1623 \
-         unit=mm precision=analytic points=0.000,0.000,0.000;3.000,1.000,0.000"
+         unit=mm precision=analytic points=0.000,0.000,0.000;3.000,1.000,0.000 point=-"
+    );
+}
+
+#[test]
+fn command_log_line_carries_the_point_echo() {
+    // ID reports a coordinate, not a scalar measurement: the line must name the
+    // position, its space and the snap that produced it, and keep `algorithm=-`
+    // (nothing was measured).
+    let entry = CadCommandLogEntry {
+        sequence: 6,
+        kind: CadCommandLogKind::Result,
+        command: None,
+        code: None,
+        measurement: None,
+        point: Some(CadCommandLogPoint {
+            position: [12.5, -3.0, 0.0],
+            space: "model",
+            snap: Some("endpoint"),
+            precision: Some("analytic"),
+            unit: Some("mm".to_string()),
+            pixel_distance: Some(2.5),
+        }),
+    };
+    assert_eq!(
+        command_log_line(&entry),
+        "commandlog seq=6 kind=result command=- code=- algorithm=- value=- unit=- precision=- \
+         points=- point=12.500,-3.000,0.000@model#endpoint"
     );
 }
 
@@ -358,11 +387,12 @@ fn command_log_line_shows_dashes_where_an_entry_has_no_echo() {
         command: Some("DIST".to_string()),
         code: None,
         measurement: None,
+        point: None,
     };
     assert_eq!(
         command_log_line(&entry),
         "commandlog seq=3 kind=command command=DIST code=- algorithm=- value=- unit=- \
-         precision=- points=-"
+         precision=- points=- point=-"
     );
 
     let error = CadCommandLogEntry {
@@ -371,6 +401,7 @@ fn command_log_line_shows_dashes_where_an_entry_has_no_echo() {
         command: None,
         code: Some("tool_not_ready".to_string()),
         measurement: None,
+        point: None,
     };
     let line = command_log_line(&error);
     assert!(line.contains("kind=error"), "{line}");

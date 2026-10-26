@@ -29,6 +29,30 @@ pub enum CommandId {
     /// Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,
     RestoreLayers,
+    /// `LAYISO`: hide every layer that is not on a selected entity or is not the
+    /// current layer, using **session visibility overrides only**.
+    ///
+    /// Payload is [`crate::CommandPayload::None`]; the selection is the input. The
+    /// keep-set is `{ layers of the selected entities } ∪ { current layer }` — the
+    /// current layer is included unconditionally because this build already refuses
+    /// to make an invisible layer current and refuses to hide the current layer
+    /// (`layer.current_off` / `layer.current_frozen`); see
+    /// [`crate::layers_isolate`]. When the current layer carried no selected entity
+    /// a `layers.isolate.current_layer` diagnostic names it.
+    ///
+    /// The hides are published as **one atomic batch** through the same validated
+    /// path as [`CommandId::SetLayerVisibilities`], so a refusal changes nothing.
+    /// No database write, no revision bump, no history entry and no persisted
+    /// preference: the drawing's own layer flags stay the authority. When every
+    /// layer is already in the keep-set the command writes no override at all and
+    /// reports `layers.isolate.noop`.
+    ///
+    /// `LAYUNISO` and `LAYERP` are **aliases of [`CommandId::RestoreLayers`]** (they
+    /// clear the overrides); there is no second restore path. Allowed in Viewer and
+    /// Work — it is a session view operation, not an edit. An empty selection is an
+    /// explicit refusal (`layers.isolate.needs_selection`): isolating nothing would
+    /// hide every layer with no way back from the canvas.
+    IsolateLayers,
     SwitchSpace,
     Select,
     /// Select visible model-space pick items without editing the drawing.
@@ -456,8 +480,36 @@ pub enum CommandId {
     /// Delete every entity in the current selection in one transaction. An
     /// empty selection is an explicit refusal. Work-only.
     EraseEntities,
-    /// EXPLODE the current selection one level at a time (ADR 0016 decision G):
-    /// a LWPOLYLINE becomes straight segments plus ARCs (bulge segments through
+    /// `JOIN`: merge the current selection into **one** entity (this build's
+    /// honest subset of AutoCAD's `JOIN`).
+    ///
+    /// Payload is [`crate::CommandPayload::None`]; the selection is the whole
+    /// input. Two shapes are implemented, and nothing else:
+    ///
+    /// * **all LINE** — every pick must be collinear with the longest one
+    ///   (`join.not_collinear`), on one layer (`join.layer_mismatch`) in one space
+    ///   (`join.space_mismatch`), with spans that touch or overlap along the common
+    ///   direction (`join.not_contiguous`). The result is one LINE spanning
+    ///   `min → max` with a **fresh entity id**.
+    /// * **all ARC** — every pick must share the reference arc's centre, normal
+    ///   direction and radius, its layer and its space, and its sweeps must be
+    ///   contiguous in one rotational direction. The result is one ARC with the
+    ///   **summed** sweep; a total above one full turn is `join.sweep_overflow`
+    ///   (never wrapped) and exactly one turn stays an ARC of `2π` (this build does
+    ///   not silently produce a `Circle`).
+    ///
+    /// Refusals (all before any write): `join.needs_two` (fewer than two distinct
+    /// picks), `join.mixed_kinds`, `join.degenerate` (zero-length LINE / zero-sweep
+    /// ARC), the four codes above, and [`CadError::Unsupported`] for any other
+    /// geometry kind (a capability gap, never a silent partial merge). On success
+    /// the sources are deleted and the merged entity inserted in **one transaction
+    /// / one undo step**, so an undo restores every source and removes the weld.
+    /// The merged entity keeps the lowest draw order of its sources, and its layer,
+    /// space and type key come from the sources. Associativity, a polyline/spline
+    /// merge, closing a gap, joining across spaces/layers and joining
+    /// non-concentric arcs are **NOT IMPLEMENTED**. Work-only.
+    Join,
+    /// EXPLODE the current selection one level at a time (ADR 0016 decision G):    /// a LWPOLYLINE becomes straight segments plus ARCs (bulge segments through
     /// `bulge_arc_geometry`), a uniformly scaled INSERT becomes its block members
     /// with the placement baked in (nested inserts expanded under a cycle stack
     /// and a depth cap of 32), and a Compound becomes **all** of its children (a
@@ -726,6 +778,7 @@ impl CommandId {
                 | Self::AlignEntities
                 | Self::StretchEntities
                 | Self::EraseEntities
+                | Self::Join
                 | Self::ExplodeEntities
                 | Self::CopyEntities
                 | Self::RotateEntities

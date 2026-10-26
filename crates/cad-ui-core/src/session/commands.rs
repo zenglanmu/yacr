@@ -21,6 +21,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("TOGGLELAYER", CommandId::ToggleLayer),
     ("SETLAYERS", CommandId::SetLayerVisibilities),
     ("RESTORELAYERS", CommandId::RestoreLayers),
+    // LAYISO hides every layer the selection is not on (plus the current layer),
+    // as session visibility overrides only — no payload, no database write. The
+    // restore half is the existing `RESTORELAYERS` path: `LAYUNISO`/`LAYERP` are
+    // aliases of it below, so there is exactly one restore.
+    ("LAYISO", CommandId::IsolateLayers),
     ("SPACE", CommandId::SwitchSpace),
     ("SELECT", CommandId::Select),
     ("SELECTALL", CommandId::SelectAll),
@@ -77,6 +82,10 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("ALIGN", CommandId::AlignEntities),
     ("STRETCH", CommandId::StretchEntities),
     ("ERASE", CommandId::EraseEntities),
+    // JOIN merges the **selection** into one entity (collinear LINEs / concentric
+    // ARCs in this build); the bare selector is its whole input, so no payload and
+    // no IPC. The application refuses a shorter selection by name at apply time.
+    ("JOIN", CommandId::Join),
     ("EXPLODE", CommandId::ExplodeEntities),
     ("COPY", CommandId::CopyEntities),
     ("ROTATE", CommandId::RotateEntities),
@@ -160,6 +169,12 @@ pub const MEASUREMENT_SELECTORS: &[(&str, MeasurementToolKind)] = &[
     ("MEASUREPOLYLINE", MeasurementToolKind::PolylineLength),
     ("MEASUREANGLE", MeasurementToolKind::Angle),
     ("AREA", MeasurementToolKind::Area),
+    // ID is AutoCAD's own point-coordinate command (`Specify point`). It is an
+    // interaction-only selector like the four above: the one pick is resolved by
+    // the host (object snap included) and the answer is a point report, not a
+    // measurement, so it carries no `CommandId` and never enters the measurement
+    // engine.
+    ("ID", MeasurementToolKind::Id),
 ];
 
 /// The zoom-in step factor for the `ZOOMIN` selector.
@@ -371,6 +386,12 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     // AutoCAD command reference documents the full names, not these shorthand
     // forms), and an alias never changes behaviour: it only normalizes a typed
     // name onto the canonical selector (ADR 0017 decision C, P5f).
+    // `LAYUNISO` is AutoCAD's "turn layer isolation off", which is exactly what
+    // `RESTORELAYERS` does here (drop the session's temporary overrides).
+    // `LAYERP` ("previous layer state") has **no** layer-state stack in this build,
+    // so it names the same, single restore path rather than inventing a second one.
+    ("LAYUNISO", "RESTORELAYERS"),
+    ("LAYERP", "RESTORELAYERS"),
     ("DBA", "DIMBASELINE"),
     ("DCO", "DIMCONTINUE"),
     // `NEWLAYER` is a **project** word synonym for creating a layer, not an

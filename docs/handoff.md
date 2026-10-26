@@ -1,3 +1,57 @@
+## 2026-10-26 命令补齐：`ID` / `JOIN` / `LAYISO`（AutoCAD 对齐，UI + 功能）
+
+### 结论
+
+三个 AutoCAD 命令端到端落地（UI 入口 → IPC → Rust 命令 → 契约测试）：**`ID`** 点坐标查询、
+**`JOIN`** 合并、**`LAYISO`**/**`LAYUNISO`** 图层隔离。均**不写 DWG**；`ID`/`LAYISO` 不进历史，
+`JOIN` 一条事务一步撤销。
+
+- `ID`：`MeasurementToolKind::Id`（**不是**新 `CommandId`，走 `CommandId::Measure` 的测量选择子，
+  与 DIST/AREA 同一准入），单点自动完成，结果走**新增的 `point` 回显**而非 `measurement`
+  （点坐标不是标量）。真实捕捉来源：`capture_tool_point` 不再丢弃 `SnapCandidate`，
+  `SessionState::capture_point_with_snap` + `MeasurementTool` 的 `InputSnap` 携带 kind/precision/
+  像素距离，最终投影为 `CommandOutcome.point_report` → `CommandLogEntry.point` →
+  `CadCommandLogPoint`（wire：`{position, space, snap, precision, unit, pixelDistance}`）→
+  React `pointLines()` 一行 `X, Y, Z` + 空间/捕捉/精度 meta。
+- `JOIN`：新 `CommandId::Join`（work-only），实现 `app_drawing/join.rs`。**仅 LINE（共线相接）与
+  ARC（同心同半径相续）**，其余按名拒绝；端点归一排序、`draw_order` 取源最小值、整圈保留 `2π` ARC。
+- `LAYISO`：新 `CommandId::IsolateLayers`（**非** work-only），keep 集 = 选择图层 ∪ 当前层，
+  其余经既有原子批量路径隐藏；只改会话覆盖。`LAYUNISO`/`LAYERP` 是既有 `RESTORELAYERS` 的别名
+  （本构建无图层状态栈）。命令表 85 → **87**。
+
+### 必须记下的行为选择（我们的规则，不是规范要求）
+
+1. **`ID` 跳过栅格捕捉与 `ORTHO`**：报告的就是捕捉点本身，两个约束都不挪坐标；预览光标同样不约束。
+2. `ID` 的 `precision` = 捕捉几何的精度，无捕捉时 `Analytic`；`pixelDistance` 无捕捉为 `null`。
+3. `ID` 拒绝：块空间、透视/非正交视图（`Unsupported`）、`Points` 载荷路径（`InvalidInput`）。
+4. **`ID` 无 spec 授权**：§3.3 未要求点坐标查询，属项目自选范围（已记进 `compatibility.md`）。
+5. `JOIN` 的 `LINE` 端点按 `(x,y,z)` 升序归一 ⇒ 同一批拾取总得同一几何；`draw_order = min(源)`。
+6. `JOIN` 扫掠和恰一整圈保留 `2π` ARC（不静默转 `CIRCLE`）；反向法向弧按「不相续」拒绝。
+7. `LAYISO` keep 集**无条件含当前层**，避免与既有 `layer.current_off` 合同矛盾；当前层不在选择内时
+   给 `layers.isolate.current_layer` 诊断。空选择拒绝；全在 keep 集 ⇒ `layers.isolate.noop`。
+8. `LAYERP` 指向**唯一存在的**恢复路径（清空覆盖），不是「上一层状态」。
+
+### 证据（本机，2026-10-26）
+
+- `cargo fmt --all -- --check` / `cargo clippy -p cad-app -p cad-host -p cad-ui-core --all-targets
+  --locked -- -D warnings` → 通过；`cargo check` 同三 crate `--all-targets` → 通过。
+- `cargo test -p cad-app --lib --locked` → **1204 passed**；`-p cad-host --locked` → **237 passed**；
+  `-p cad-ui-core --locked` → **280 passed**（含新增 `id_report` 7、`join` 22、`layers_isolate` 7、
+  `id_point_echo` 3）。
+- `apps/desktop-ui`：`npx tsc --noEmit` 通过；`node --test test/*.test.ts` → **630 passed**
+  （含新 `test/id-join-layiso.test.ts`、`command-log` 的 `point` 行与精度 meta）。
+- `python3 scripts/check-i18n.py`（823 keys、两目录一致）、`scripts/check-file-size.py` 通过
+  （两处触顶文件已按模块拆分：`cad-host/src/command_log_echo.rs`、`cad-ui-core/src/session/command_log.rs`）。
+- 额外（超出三 crate 日常范围，因为宿主测试直接构造 `CadCommandLogEntry`）：`cargo check --workspace
+  --all-targets --locked` 通过、`cargo test -p app-linux --lib --locked` → **173 passed**、
+  `clippy -p app-linux --all-targets -- -D warnings` 通过、`apps/desktop-ui` `npm run build` 通过。
+  `apps/app-linux` 的 evidence 打印器补了 `point=` 字段（含位置/空间/捕捉），否则 ID 结果会在证据
+  日志里被**静默丢弃**——这是唯一一处 cad-app 之外的连带改动。
+
+**NOT RUN**：`wasm32` / Windows / Android / macOS 目标、GUI 真实点击与像素判据、与 AutoCAD 的逐项
+目视对照、`scripts/check-workflows.py` / `check-fixture-manifest.py`。**不得**据此宣称
+「UI 与 AutoCAD 已一致」。
+
 ## 2026-10-26 文档口径对账（spec / architecture / compatibility / handoff 与源码）
 
 ### 结论

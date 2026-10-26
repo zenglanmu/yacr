@@ -142,6 +142,7 @@ impl Application {
                     ),
                 }],
                 measurement: None,
+                point_report: None,
             });
         }
 
@@ -212,6 +213,7 @@ impl Application {
                 ),
             }],
             measurement: None,
+            point_report: None,
         })
     }
 }

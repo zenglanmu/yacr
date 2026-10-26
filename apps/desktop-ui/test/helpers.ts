@@ -98,7 +98,13 @@ export const HOST_NAMES = [
   // channel. Its own suite lives in `mleader-tool.test.mjs`.
   'MLEADER',
   // Interaction-only selectors: one per measurement kind, plus fixed zoom steps.
-  'DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ZOOMIN', 'ZOOMOUT',
+  // ID (2026-10-26) joined the measurement kinds: one point pick, reported as
+  // X/Y/Z plus the snap that produced it (`command.log.point`).
+  'DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ID', 'ZOOMIN', 'ZOOMOUT',
+  // JOIN (2026-10-26): the modify selector that welds the current selection into
+  // one polyline. `LAYISO`/`LAYUNISO` (2026-10-26) are the layer isolate pair —
+  // router commands, not chrome-local selectors like `LAYER`.
+  'JOIN', 'LAYISO', 'LAYUNISO',
   // Full-word aliases.
   'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER', 'DBA', 'DCO',
   // AutoCAD's default `acad.pgp` abbreviations, restricted to implemented

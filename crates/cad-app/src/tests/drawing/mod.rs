@@ -294,6 +294,7 @@ mod grip_fixture;
 mod hatch;
 mod hatch_predefined;
 mod hatch_stitch;
+mod join;
 mod match_prop;
 mod mleader_create;
 mod mtext;

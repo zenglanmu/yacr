@@ -153,6 +153,11 @@ fn the_shipped_table_covers_the_implemented_autocad_abbreviations() {
         ("ENTER", "CONFIRM"),
         ("DBA", "DIMBASELINE"),
         ("DCO", "DIMCONTINUE"),
+        // Layer isolation's off switch. There is one restore path
+        // (`RESTORELAYERS`); `LAYERP` has no layer-state stack in this build, so it
+        // names the same restore rather than inventing a second one.
+        ("LAYUNISO", "RESTORELAYERS"),
+        ("LAYERP", "RESTORELAYERS"),
     ] {
         assert_eq!(alias_target(alias), Some(target), "{alias}");
     }

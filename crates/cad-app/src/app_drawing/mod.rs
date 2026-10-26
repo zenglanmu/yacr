@@ -46,6 +46,7 @@ mod hatch_boundary;
 mod hatch_parameters;
 mod hatch_stitch;
 mod helpers;
+mod join;
 mod layer_edit;
 mod match_prop;
 mod mleader;

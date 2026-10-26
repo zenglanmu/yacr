@@ -268,6 +268,7 @@ impl Application {
                 },
             }],
             measurement: None,
+            point_report: None,
         })
     }
 }

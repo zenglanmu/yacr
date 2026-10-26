@@ -141,6 +141,7 @@ impl Application {
                 message: "GRIPSTRETCH: moved one grip handle".into(),
             }],
             measurement: None,
+            point_report: None,
         })
     }
 }

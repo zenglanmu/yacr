@@ -642,17 +642,49 @@ impl SessionState {
     /// of AutoCAD's internal order. Only the stored point differs: no database,
     /// history or preference write is involved, and `z` is never moved.
     pub fn capture_point(&mut self, point: Point3) -> CadResult<bool> {
+        self.capture_point_with_snap(point, None)
+    }
+
+    /// Capture a point together with the object-snap provenance the host resolved
+    /// for it.
+    ///
+    /// This is the capture entry of the host's acquisition funnel
+    /// ([`crate::host::HostController::capture_tool_point`]); `snap` is the
+    /// candidate whose point the host already substituted, or `None`. The
+    /// provenance is stored beside the point so `ID` can report it
+    /// ([`crate::PointReport`]).
+    ///
+    /// **`ID` skips the grid-snap/`ORTHO` constraint.** For every other tool the
+    /// constraint chain documented on [`SessionState::capture_point`] applies
+    /// unchanged; for `ID` the reported coordinate must be the coordinate the user
+    /// aimed at (the snapped point, or the raw pick), so re-quantising it onto the
+    /// grid or onto an orthographic axis would report a point the user never
+    /// picked. This is our declared rule, recorded in
+    /// [`crate::point_report`]'s module docs.
+    pub fn capture_point_with_snap(
+        &mut self,
+        point: Point3,
+        snap: Option<crate::point_report::InputSnap>,
+    ) -> CadResult<bool> {
         if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
             return Err(CadError::InvalidInput("tool point must be finite".into()));
         }
-        let point = self.constrained_point(self.ortho_previous_point(), point);
+        let identifying = matches!(
+            &self.tool,
+            ToolState::Measuring(tool) if tool.kind() == MeasurementToolKind::Id
+        );
+        let point = if identifying {
+            point
+        } else {
+            self.constrained_point(self.ortho_previous_point(), point)
+        };
         match &mut self.tool {
             ToolState::Drawing(capture) => {
                 capture.tool.push_point(point)?;
                 Ok(false)
             }
             ToolState::Measuring(tool) => {
-                tool.push_point(point);
+                tool.push_point_with_snap(point, snap);
                 Ok(tool.auto_ready())
             }
             _ => Err(CadError::InvalidInput(
@@ -769,6 +801,13 @@ impl SessionState {
     /// [`SessionState::capture_point`] and must preview what they will commit
     /// (grid snap, then ortho).
     fn annotate_measurement_preview(&self, mut preview: MeasurementPreview) -> MeasurementPreview {
+        // `ID` never applies the drafting constraints (see
+        // [`SessionState::capture_point_with_snap`]), so its preview cursor must
+        // not be constrained either: the rubber band would otherwise show a point
+        // the commit will never report.
+        if preview.kind == MeasurementToolKind::Id {
+            return preview;
+        }
         preview.cursor = self.constrained_cursor(preview.points.last().copied(), preview.cursor);
         preview
     }

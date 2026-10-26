@@ -25,6 +25,7 @@ mod grip_drafting;
 mod grip_osnap;
 mod grips;
 mod hover;
+mod id_point_echo;
 mod navigation;
 mod ortho;
 mod p4_origin_dispatch;

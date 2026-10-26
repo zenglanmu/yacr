@@ -42,8 +42,15 @@ export const PALETTE_ACTIONS: readonly string[] = Object.freeze([
  * chrome-local selector: the palette answers it, no Rust command exists), so its
  * dispatch token is `command` even though the affordance is a palette toggle. For
  * this carrier filter the two spellings mean the same thing.
+ *
+ * `LAYISO`/`LAYUNISO` are **router** commands, not palette toggles, and they are
+ * listed here only for the carrier rule: layer isolation is a state the layers
+ * palette is the only surface for, so on a carrier that never renders the palette
+ * (`dom-canvas`) the isolate pair would hide geometry with nothing on screen to
+ * explain or undo it — a dead affordance, exactly like the toggle itself. They
+ * are therefore dropped with the palette rather than left behind as live buttons.
  */
-export const PALETTE_COMMANDS: readonly string[] = Object.freeze(['LAYER']);
+export const PALETTE_COMMANDS: readonly string[] = Object.freeze(['LAYER', 'LAYISO', 'LAYUNISO']);
 
 /** The facts every ribbon item carries. */
 interface RibbonItemBase {
@@ -295,6 +302,12 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'STRETCH', labelKey: 'draw.kind.stretch', icon: 'stretch', command: 'STRETCH' },
           { id: 'MIRROR', labelKey: 'draw.kind.mirror', command: 'MIRROR', icon: 'mirror' },
           { id: 'SCALE', labelKey: 'draw.kind.scale', command: 'SCALE', icon: 'scale' },
+          // JOIN (2026-10-26) closes the Modify panel the way AutoCAD's does. It
+          // is a small button (it is not a primary edit) with no variant popover —
+          // the command has no options sub-prompt — and its enablement is the
+          // shared admission **plus** its own two-object selection requirement, so
+          // with fewer objects it reads disabled with the rule's sentence.
+          { id: 'JOIN', labelKey: 'draw.kind.join', icon: 'polyline', command: 'JOIN' },
         ],
       },
       {
@@ -307,6 +320,15 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         launcherCommand: 'LAYER',
         items: [
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
+          // Layer isolate / unisolate (2026-10-26) sit beside the palette opener
+          // they operate on: both are payload-free router commands acting on the
+          // **current selection** (LAYISO needs at least one object, LAYUNISO
+          // none), so they are small buttons with the shared admission and no
+          // popover. They are dropped with the palette on a carrier that never
+          // renders it (`PALETTE_COMMANDS`), because the isolation state is only
+          // visible there.
+          { id: 'LAYISO', labelKey: 'layers.isolate', icon: 'eyeOff', command: 'LAYISO' },
+          { id: 'LAYUNISO', labelKey: 'layers.unisolate', icon: 'eye', command: 'LAYUNISO' },
         ],
       },
       {
@@ -395,6 +417,9 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'ROTATE', labelKey: 'draw.kind.rotate', icon: 'rotate', command: 'ROTATE' },
           { id: 'SCALE', labelKey: 'draw.kind.scale', icon: 'scale', command: 'SCALE' },
           { id: 'MIRROR', labelKey: 'draw.kind.mirror', icon: 'mirror', command: 'MIRROR' },
+          // Same slot as on the Home tab: JOIN closes the Modify panel (AutoCAD's
+          // own order puts Join last), small, no popover, selection-gated.
+          { id: 'JOIN', labelKey: 'draw.kind.join', icon: 'polyline', command: 'JOIN' },
         ],
       },
     ],
@@ -412,6 +437,12 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'PLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', command: 'MEASUREPOLYLINE', large: true },
           { id: 'ANGLE', labelKey: 'measure.kind.angle', icon: 'angle', command: 'MEASUREANGLE', large: true },
           { id: 'AREA', labelKey: 'measure.kind.area', icon: 'area', command: 'AREA', large: true },
+          // ID (2026-10-26) is the point-coordinate readout — AutoCAD's Measure
+          // panel keeps it in the same group as Distance, so it is the fifth
+          // measurement button here. It stays `large` like its four neighbours
+          // (this panel has no small-entry row) and carries no variant popover:
+          // there is no options sub-prompt. Its tool chip is `tool.measure.id`.
+          { id: 'ID', labelKey: 'measure.kind.id', icon: 'point', command: 'ID', large: true },
         ],
       },
     ],

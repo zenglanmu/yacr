@@ -58,6 +58,7 @@ impl Application {
             changes: Some(Arc::new(changes)),
             diagnostics: Vec::new(),
             measurement: None,
+            point_report: None,
         })
     }
 
@@ -99,6 +100,7 @@ impl Application {
             changes: Some(Arc::new(changes)),
             diagnostics: Vec::new(),
             measurement: None,
+            point_report: None,
         })
     }
 

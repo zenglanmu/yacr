@@ -87,6 +87,7 @@ impl Application {
             changes: Some(Arc::new(change_set)),
             diagnostics,
             measurement: None,
+            point_report: None,
         })
     }
 
@@ -201,6 +202,7 @@ impl Application {
             changes: Some(Arc::new(change_set)),
             diagnostics,
             measurement: None,
+            point_report: None,
         })
     }
 
@@ -212,7 +214,7 @@ impl Application {
     /// `read_only_capture` selects the capture wording for an instance ref, which
     /// affects no other instance (a transform, by contrast, edits the shared block
     /// definition).
-    pub(super) fn resolve_selection(
+    pub(crate) fn resolve_selection(
         drawing: &DrawingDatabase,
         document_id: DocumentId,
         refs: &[SelectionRef],

@@ -14,7 +14,7 @@
 use std::collections::VecDeque;
 
 use cad_db::{MeasurementAlgorithm, MeasurementRecord};
-use cad_domain::{CadError, Precision, Unit, UnitContext};
+use cad_domain::{CadError, Precision, UnitContext};
 
 /// Maximum number of retained entries; pushing past it drops the oldest.
 pub const COMMAND_LOG_CAPACITY: usize = 200;
@@ -46,6 +46,29 @@ pub struct CommandLogMeasurement {
     pub points: Vec<[f64; 3]>,
 }
 
+/// Typed point-coordinate echo (`ID`) a `Result` entry carries.
+///
+/// Every field is a stable machine token or a real coordinate: `space` is
+/// `model`/`paper`, `snap` is `SnapKind::as_str()` (`endpoint`, `midpoint`,
+/// `center`, `quadrant`, `perpendicular`, `intersection`), `precision` is the
+/// modelled precision token and `unit` is a known display symbol. No text, no
+/// label: the UI localizes from these keys.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandLogPoint {
+    /// The reported world coordinate (the snapped point when a snap resolved).
+    pub position: [f64; 3],
+    /// The observation space the pick was made in: `model` or `paper`.
+    pub space: &'static str,
+    /// The object snap that produced the point, or `None` for a bare pick.
+    pub snap: Option<&'static str>,
+    /// The modelled precision token (`analytic`, `approximate`, `unknown`).
+    pub precision: Option<&'static str>,
+    /// A known display unit symbol, or `None` for drawing units.
+    pub unit: Option<String>,
+    /// Perpendicular distance from the raw pick, in logical pixels.
+    pub pixel_distance: Option<f64>,
+}
+
 /// One command-window echo entry.
 ///
 /// Deliberately has **no** message/text field: a `Diagnostic::message` (partly
@@ -61,7 +84,11 @@ pub struct CommandLogEntry {
     /// Stable diagnostic code for an `Error` entry; `None` otherwise.
     pub code: Option<String>,
     /// Typed measurement echo for a `Result` entry; `None` otherwise.
+    ///
+    /// Strictly measurement-only: an `ID` result carries [`Self::point`] instead.
     pub measurement: Option<CommandLogMeasurement>,
+    /// Typed point-coordinate echo for an `ID` result; `None` otherwise.
+    pub point: Option<CommandLogPoint>,
 }
 
 /// The bounded ring plus its monotonic sequence counter.
@@ -90,6 +117,7 @@ impl CommandLog {
             command: Some(name.to_string()),
             code: None,
             measurement: None,
+            point: None,
         });
     }
 
@@ -101,6 +129,30 @@ impl CommandLog {
             command: None,
             code: None,
             measurement: Some(measurement_echo(record)),
+            point: None,
+        });
+    }
+
+    /// Record a typed point-coordinate result (`ID`).
+    ///
+    /// Same `Result` kind as a measurement: it is a real, typed answer of a
+    /// read-only query, not a command admission or a refusal. The two payloads are
+    /// mutually exclusive by construction (`measurement` stays measurement-only).
+    pub fn push_point_result(&mut self, report: &cad_app::PointReport) {
+        self.push(CommandLogEntry {
+            sequence: 0,
+            kind: CommandLogKind::Result,
+            command: None,
+            code: None,
+            measurement: None,
+            point: Some(CommandLogPoint {
+                position: [report.position.x, report.position.y, report.position.z],
+                space: report.space.as_str(),
+                snap: report.snap.map(|kind| kind.as_str()),
+                precision: Some(precision_key(&report.precision)),
+                unit: report.unit.clone(),
+                pixel_distance: report.logical_pixel_distance,
+            }),
         });
     }
 
@@ -112,6 +164,7 @@ impl CommandLog {
             command: None,
             code: Some(code.to_string()),
             measurement: None,
+            point: None,
         });
     }
 
@@ -178,27 +231,30 @@ fn measurement_echo(record: &MeasurementRecord) -> CommandLogMeasurement {
     }
 }
 
-/// A known display unit symbol. `DrawingUnits` is unknown by definition, so it
-/// maps to `None` instead of inventing millimetres.
+/// A known display unit symbol, or `None` for drawing units.
+///
+/// Delegates to [`cad_app::unit_symbol`] — the one projection `cad-app`'s point
+/// report also uses — so the two wire echoes cannot drift apart.
+/// `DrawingUnits` is unknown by definition, so it maps to `None` instead of
+/// inventing millimetres.
 fn unit_symbol(units: &UnitContext) -> Option<String> {
-    let symbol = match units.display {
-        Unit::DrawingUnits => return None,
-        Unit::Millimeter => "mm",
-        Unit::Meter => "m",
-        Unit::Inch => "in",
-        Unit::Foot => "ft",
-    };
-    Some(symbol.to_string())
+    cad_app::unit_symbol(units).map(str::to_string)
 }
 
 /// The modelled precision state as a stable token (no new label is invented).
-fn precision_token(precision: &Precision) -> Option<String> {
-    let token = match precision {
+///
+/// The one authority for the three tokens: the measurement echo (owned `String`)
+/// and the point echo (`&'static str`) both read it.
+fn precision_key(precision: &Precision) -> &'static str {
+    match precision {
         Precision::Analytic => "analytic",
         Precision::Approximate { .. } => "approximate",
         Precision::Unknown => "unknown",
-    };
-    Some(token.to_string())
+    }
+}
+
+fn precision_token(precision: &Precision) -> Option<String> {
+    Some(precision_key(precision).to_string())
 }
 
 #[cfg(test)]

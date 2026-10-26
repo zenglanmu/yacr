@@ -182,6 +182,15 @@ export function draftingAcceleratorCommand(key: unknown): string | null {
 }
 
 
+/**
+ * The catalog key for ID's single pick.
+ *
+ * ID reports the coordinates of the point the user picks, so its one step is a
+ * plain "specify a point" prompt — `tool.prompt.point`, the catalog's own point
+ * sentence. It borrowed the dimension feature-location copy only while that key
+ * did not exist yet; a dimension prompt would name the wrong operation.
+ */
+const ID_POINT_PROMPT_KEY = 'tool.prompt.point';
 
 /**
  * Per-step capture prompts for tools whose picks have names (ADR 0017 P5c–P5e).
@@ -285,6 +294,14 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
     'tool.prompt.mleader.arrow',
     'tool.prompt.mleader.landing',
   ],
+  // ID (2026-10-26) is a **single-point** capture that commits itself: one pick,
+  // then the host reports the coordinates. It therefore has exactly one step and
+  // never reaches the ready state in practice (the capture is complete the moment
+  // the pick lands), so the list must stay at one entry. The wording is the
+  // catalog's own point-pick sentence (`tool.prompt.point`).
+  'measure.id': [
+    ID_POINT_PROMPT_KEY,
+  ],
 });
 
 /**
@@ -325,6 +342,13 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // (see [`toolStepPromptKey`]), so the field never appears before the host says
   // so.
   'draw.mleader': 'tool.prompt.mleader.type_text',
+  // ID's capture is complete after its single pick, so it commits itself and the
+  // shared dimension ready copy ("Dimension defined; press Enter to confirm")
+  // would be false twice over — nothing is dimensioned and there is nothing left
+  // to confirm. The generic "Enter to confirm" sentence is the honest override for
+  // the one state a race can still expose (the point counted before the host
+  // closed the tool).
+  'measure.id': 'tool.prompt.confirm',
 });
 
 /** A pre-selection tool's two prompts: waiting for a selection, and ready. */

@@ -77,6 +77,16 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 > 该偏离**不得**被写成「已满足规范」；补文案属代码改动（消费 `units.unknown` 或写 `DrawingUnits`
 > 标签），不在本轮文档对账范围内。
 
+#### 测量命令面（含 2026-10-26 新增 `ID`）
+
+| 命令 / 选择子 | 行为 | 诚实边界 |
+|---|---|---|
+| `DIST`（`MEASURE DISTANCE`，别名 `DI`） | 2 点：距离 + 角度 + Δx/Δy/Δz | 单点不足即拒绝；结果随 `measurement` 回显 |
+| `MEASUREPOLYLINE`（`MEASURE POLYLINE`） | N 点开放链长度 | 需 `CONFIRM` 收尾 |
+| `MEASUREANGLE`（`MEASURE ANGLE`，别名 `ANGLE`） | 3 点顶点角 | 纸空间 `ANGLE` 显式拒绝 |
+| `AREA`（`MEASURE AREA`，别名 `AA`） | 用户选点闭合多边形面积 | 自交拒绝、非共面拒绝、3 点起 |
+| **`ID`（2026-10-26 新增）** | **单点拾取 → 该点世界坐标 X/Y/Z + 空间（`model`/`paper`）+ 捕捉来源 + 精度 token**，作为一条 `point` 回显行（不是 `measurement`：点坐标不是标量测量） | **无 spec 授权**：§3.3 只要求距离/折线长度/三点角度/面积，「点坐标查询」是**项目自选范围**（与 DIMENSION 创建同一口径）。**`ID` 故意跳过栅格捕捉与 `ORTHO`**——报告的就是捕捉点本身，两者都不会把坐标挪走（**我们的规则**，见 `crates/cad-app/src/point_report.rs`）。`precision` = 捕捉几何的精度，无捕捉时 `Analytic`；`pixelDistance` = 原拾取到捕捉点的逻辑像素距离（无捕捉为 `null`）。拒绝面：块空间、透视/非正交视图、`Points` 载荷路径（`InvalidInput`，只接受真实拾取）。**不写库、不进历史、无撤销步** |
+
 ### ACIS 实体显示状态（3DSOLID / BODY / REGION / SURFACE，2026-10-21：**已接线**）
 
 这些实体**现在会画**：导入期用 `cad-kernel-adapter` 的离散器把 SAT/SAB 转成**中性网格**，
@@ -223,6 +233,7 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 | OFFSET | LINE / CIRCLE 偏移 | 其余几何 `Unsupported`；点在线上/过圆心/在圆上显式拒绝 |
 | COPYCLIP/CUTCLIP/PASTECLIP | **应用内**剪贴板 | 非 OS 剪贴板；替换文档清空；空选择/空剪贴板拒绝 |
 | MATCHPROP（别名 `MA`） | **选择式**特性匹配（AutoCAD 特性刷的文档化变体）：当前选择按**选择顺序**（用户的拾取顺序，**从不**按 id/handle 重排）取**第一个**实体为**源**，其余每个选中实体为**目标**。转移的属性**恰好**是属性写路径支持的五项显示属性：`layer`、`color`、`linetype`、`lineweight`、`transparency`（语法与 `SETENTITYPROPERTY` 同一份，不复制第二套解析）。源/目标**类型可以不同**（只要每个值对目标合法）。目标已与源一致 ⇒ 该目标不产生变更、不进撤销补丁；全部目标都一致 ⇒ 显式 `matchprop.unchanged` 完成，**不**开事务、**不**产生空撤销步；否则一条事务、一步撤销 | **开始改写前**全部拒绝（零 DB 变更、零撤销步）：选择少于两个实体（`matchprop.needs_two`）；源**或**目标引用是块实例成员（instance path）/子图元/属于其它文档/不存在（`property.not_addressable`/`property.target_missing`，与属性写路径同一规则）；源值的存储形式无法用写语法表达、或语法拒绝该值（如 `ByBlock` 透明度、无名显式线型）⇒ `matchprop.source_value`，**点名**源实体与属性并保留解析器自己的 `property.*` 码。**明确不转移**（绝不静默近似）：MATCHPROP 的 **Settings 子集**（选择“复制哪些属性”）未实现（总是转移全部五项）；非显示属性——文字样式/字高、标注样式、填充图案等一律**不**转移；实体自身的**线型比例**不在五项之内，给名线型目标只在目标上保留**目标自己的**比例（与属性写路径一致），符号值（`ByLayer`/`ByBlock`）整值替换 |
+| JOIN | 合并当前选择为**一个**实体：共线且首尾相接/重叠的 `LINE` → 一条 `LINE`；同圆心/法向/半径且扫掠相续的 `ARC` → 一条 `ARC` | 一条事务、**一步撤销**，全有或全无（先全部校验，再删除 N + 插入 1）。**仅 LINE 与 ARC**：折线/样条/圆、需要桥接空隙、跨图层/跨空间、非同心弧、块内成员 ⇒ 显式拒绝（`join.needs_two`/`join.mixed_kinds`/`join.not_collinear`/`join.not_contiguous`/`join.layer_mismatch`/`join.space_mismatch`/`join.sweep_overflow`/`join.degenerate`）。合并 `LINE` 的端点按 `(x,y,z)` 升序归一（同一批拾取总得同一几何）；`draw_order` 取源最小值（原位替换，不跳到最上层）；扫掠和恰为一整圈时**保留 `2π` ARC**，不静默转成 `CIRCLE`；反向法向的弧按「不相续」拒绝而非重新推导 |
 
 - 变换/偏移的**不支持几何**（`Spline`/`Shape`/`Opaque`/`Compound`；`MIRROR` 下的 `Arc`/`Ellipse`；**以及 `MultiLeader`——拒绝一切缩放**）返回显式
   （**更正**：`Text` 自 P7a 起**可**平移/旋转/均匀缩放，**不在**此列表；仅镜像与非均匀缩放拒绝。）
@@ -239,6 +250,11 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
   `PLOT` 为矢量 SVG/PDF。真实图纸上的导出兼容性**未验证**。逐类：LWPOLYLINE（平面的）/ELLIPSE/POINT
   为精确映射；**SPLINE 记为 `Converted`**（`DxfSpline`，几何保留，**closed/periodic 标志不携带**）；
   Shape/Image/Mask/Opaque 被丢弃并逐条记录。
+
+- **2026-10-26 新增命令的运行时证据边界**：`ID` / `JOIN` / `LAYISO` / `LAYUNISO` 的 UI 入口
+  （ribbon 按钮、命令目录、工具提示、命令窗口的 `point` 回显行）目前只有**源码结构/纯函数契约 +
+  Rust 契约测试**证据；真实窗口点击、像素判据、与 AutoCAD 的逐项对照**均 NOT RUN**。`point` 回显行的
+  单位后缀沿用既有规则（`unit:null` 不加后缀，见上文测量偏离），**不得**据此宣称已实现「图纸单位」文案。
 
 ### 创建命令（ADR-0015，逐条按实施状态）
 
@@ -441,6 +457,15 @@ Apply/OK/Cancel 为 AutoCAD 语义（本地暂存、只发 diff、写失败标�
 > `SETLAYERPROPERTY` 的**存储型**键（`linetype`/`lineweight`/`plottable`）**超出 F03**，属
 > **项目自选范围（我们的选择）**；它们只改内存文档与会话覆盖，**不写 DWG**、**不可撤销**。
 > 会话级显隐覆盖（`cad_set_layer_visible` / 恢复）仍在 F03 内，且**不使底图变脏、不升 revision**。
+
+**2026-10-26 新增 `LAYISO` / `LAYUNISO`（AutoCAD 图层隔离）**：`LAYISO` 读当前选择 → keep 集 =
+**所选实体的图层 ∪ 当前层**（**我们的规则**：与既有「当前层不可关闭」合同一致；当前层不在选择内时
+给 `layers.isolate.current_layer` 诊断），其余图层经**既有原子批量路径** `set_layer_visibilities`
+一次性置为隐藏（校验先行、无部分状态、无静默半成品）；只改**会话覆盖**，**不写 DWG、不升 revision、
+不进历史**。全部图层都已在 keep 集 ⇒ `layers.isolate.noop` 且不产生覆盖抖动；空选择拒绝
+（否则会把所有层藏掉，画布上无从恢复）。`LAYUNISO` 与 `LAYERP` 都解析到**既有** `RESTORELAYERS`
+（清空全部覆盖）：本构建**没有图层状态栈**，所以 `LAYERP` 不是「上一层状态」，只是这一条恢复路径的
+AutoCAD 拼写。`LAYISO`/`LAYUNISO` 在 Viewer 模式**可用**（视图操作，不是实体写）。
 
 **2026-10-26 更正（图层属性存储/往返轮）**：图层的**颜色/线型/线宽/关闭/冻结/锁定/可打印/
 透明度**现已**建模并随导出写入、可往返**（`LayerAttributes` 旁存于 `Layer` 行；

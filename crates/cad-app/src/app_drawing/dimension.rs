@@ -602,6 +602,7 @@ impl Application {
                         .into(),
                 }],
                 measurement: None,
+                point_report: None,
             });
         }
         let geometries = center_mark_geometry(&frame, dimcen)?;

@@ -287,6 +287,7 @@ fn box_selection_outcome(count: usize, precision: &str) -> CommandOutcome {
             message: format!("count={count};precision={precision}"),
         }],
         measurement: None,
+        point_report: None,
     }
 }
 

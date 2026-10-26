@@ -9,6 +9,8 @@
 use cad_db::MeasurementAlgorithm;
 use cad_domain::Point3;
 
+use crate::point_report::InputSnap;
+
 /// Algorithm a measurement tool is capturing for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeasurementToolKind {
@@ -16,17 +18,23 @@ pub enum MeasurementToolKind {
     PolylineLength,
     Angle,
     Area,
+    /// `ID`: report the picked world coordinate with its snap provenance and
+    /// space. It is **not** a measurement algorithm — see
+    /// [`MeasurementToolKind::algorithm`] (returns `None`) and
+    /// [`crate::PointReport`].
+    Id,
 }
 
 impl MeasurementToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI panel mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [MeasurementToolKind; 4] = [
+    pub const ALL: [MeasurementToolKind; 5] = [
         MeasurementToolKind::Distance,
         MeasurementToolKind::PolylineLength,
         MeasurementToolKind::Angle,
         MeasurementToolKind::Area,
+        MeasurementToolKind::Id,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -36,6 +44,7 @@ impl MeasurementToolKind {
             Self::PolylineLength => "polyline",
             Self::Angle => "angle",
             Self::Area => "area",
+            Self::Id => "id",
         }
     }
 
@@ -47,6 +56,7 @@ impl MeasurementToolKind {
             "polyline" => Some(Self::PolylineLength),
             "angle" => Some(Self::Angle),
             "area" => Some(Self::Area),
+            "id" => Some(Self::Id),
             _ => None,
         }
     }
@@ -74,14 +84,23 @@ impl MeasurementToolKind {
             .and_then(|i| Self::ALL.get(i).copied())
     }
 
-    /// The engine algorithm this tool evaluates with.
-    pub fn algorithm(self) -> MeasurementAlgorithm {
-        match self {
+    /// The engine algorithm this tool evaluates with, or `None` for a tool that
+    /// is not a measurement at all.
+    ///
+    /// `ID` is the one `None`: it reports a coordinate (see [`crate::PointReport`])
+    /// and is deliberately **not** routed through [`crate::MeasurementEngine`].
+    /// `MeasurementAlgorithm` has no point variant and
+    /// `cad_db::MeasurementRecord::value` is a single `f64`, so evaluating an
+    /// identifier through the engine would have to invent a scalar.
+    pub fn algorithm(self) -> Option<MeasurementAlgorithm> {
+        let algorithm = match self {
             Self::Distance => MeasurementAlgorithm::Distance3d,
             Self::PolylineLength => MeasurementAlgorithm::PolylineLength,
             Self::Angle => MeasurementAlgorithm::Angle3Points,
             Self::Area => MeasurementAlgorithm::PlanarPolygonArea,
-        }
+            Self::Id => return None,
+        };
+        Some(algorithm)
     }
 
     /// Points required before an evaluation is defined.
@@ -89,6 +108,7 @@ impl MeasurementToolKind {
         match self {
             Self::Distance | Self::PolylineLength => 2,
             Self::Angle | Self::Area => 3,
+            Self::Id => 1,
         }
     }
 
@@ -97,6 +117,10 @@ impl MeasurementToolKind {
         match self {
             Self::Distance => Some(2),
             Self::Angle => Some(3),
+            // ID is a single-pick command: the existing auto-complete path
+            // (`MeasurementTool::auto_ready`) commits it as soon as the one point
+            // lands, exactly like DISTANCE does after two.
+            Self::Id => Some(1),
             Self::PolylineLength | Self::Area => None,
         }
     }
@@ -107,12 +131,18 @@ impl MeasurementToolKind {
     }
 
     /// Short user-facing label.
+    ///
+    /// `ID`'s label is deliberately ASCII: it is AutoCAD's own command word, it
+    /// needs no translation, and every other label here is the recorded CJK
+    /// baseline (`crates/cad-app/src/tests/cjk_baseline.rs`) — new user-visible
+    /// copy belongs in the i18n catalog (`measure.kind.id`), not here.
     pub fn label(self) -> &'static str {
         match self {
             Self::Distance => "距离",
             Self::PolylineLength => "折线长度",
             Self::Angle => "角度",
             Self::Area => "面积",
+            Self::Id => "ID",
         }
     }
 }
@@ -172,6 +202,12 @@ pub struct MeasurementTool {
     kind: MeasurementToolKind,
     points: Vec<Point3>,
     cursor: Option<Point3>,
+    /// Snap provenance of the last captured point, when the host resolved one.
+    ///
+    /// Only `ID` reports it, but it is stored for every kind: the capture path is
+    /// one entry point, and dropping the provenance for the other kinds is the
+    /// caller's reading decision, not this state machine's.
+    snap: Option<InputSnap>,
 }
 
 impl MeasurementTool {
@@ -180,6 +216,7 @@ impl MeasurementTool {
             kind,
             points: Vec::new(),
             cursor: None,
+            snap: None,
         }
     }
 
@@ -195,15 +232,36 @@ impl MeasurementTool {
         self.cursor
     }
 
+    /// The snap provenance of the most recently captured point, if any.
+    ///
+    /// `None` means "no object snap resolved for that pick" — it is never a
+    /// fabricated `analytic` provenance.
+    pub fn snap(&self) -> Option<&InputSnap> {
+        self.snap.as_ref()
+    }
+
     /// Move the preview cursor without capturing a point.
     pub fn set_cursor(&mut self, cursor: Option<Point3>) {
         self.cursor = cursor;
     }
 
-    /// Capture one point. Capture is unbounded; [`Self::is_ready`] decides when
-    /// an evaluation is defined.
-    pub fn push_point(&mut self, point: Point3) {
+    /// Capture one point with the snap provenance the host resolved for it.
+    ///
+    /// Capture is unbounded; [`Self::is_ready`] decides when an evaluation is
+    /// defined. The provenance is stored beside the point it belongs to (the last
+    /// capture wins), so a report reads the same pick the evaluation does.
+    pub fn push_point_with_snap(&mut self, point: Point3, snap: Option<InputSnap>) {
         self.points.push(point);
+        self.snap = snap;
+    }
+
+    /// Capture one point without snap provenance.
+    ///
+    /// Used by callers with no acquisition layer (`Points` payloads, tests). The
+    /// stored provenance is cleared, so a stale snap from a previous pick can
+    /// never be attributed to this one.
+    pub fn push_point(&mut self, point: Point3) {
+        self.push_point_with_snap(point, None);
     }
 
     pub fn is_ready(&self) -> bool {
@@ -245,20 +303,55 @@ mod tests {
     fn each_kind_selects_its_own_algorithm() {
         assert_eq!(
             MeasurementToolKind::Distance.algorithm(),
-            MeasurementAlgorithm::Distance3d
+            Some(MeasurementAlgorithm::Distance3d)
         );
         assert_eq!(
             MeasurementToolKind::PolylineLength.algorithm(),
-            MeasurementAlgorithm::PolylineLength
+            Some(MeasurementAlgorithm::PolylineLength)
         );
         assert_eq!(
             MeasurementToolKind::Angle.algorithm(),
-            MeasurementAlgorithm::Angle3Points
+            Some(MeasurementAlgorithm::Angle3Points)
         );
         assert_eq!(
             MeasurementToolKind::Area.algorithm(),
-            MeasurementAlgorithm::PlanarPolygonArea
+            Some(MeasurementAlgorithm::PlanarPolygonArea)
         );
+        // ID is not a measurement: it must never be routed through the engine,
+        // whose only scalar output would force a fabricated value.
+        assert_eq!(MeasurementToolKind::Id.algorithm(), None);
+    }
+
+    #[test]
+    fn id_is_a_single_pick_auto_completing_tool() {
+        let kind = MeasurementToolKind::Id;
+        assert_eq!(kind.key(), "id");
+        assert_eq!(MeasurementToolKind::from_key("id"), Some(kind));
+        assert_eq!(kind.min_points(), 1);
+        assert_eq!(kind.exact_points(), Some(1));
+        assert!(kind.auto_completes());
+        assert_eq!(kind.label(), "ID", "the label stays ASCII");
+        assert_eq!(MeasurementToolKind::from_label("ID"), Some(kind));
+
+        let mut tool = MeasurementTool::new(kind);
+        assert!(!tool.auto_ready(), "nothing is captured yet");
+        tool.push_point_with_snap(p(1.0, 2.0), None);
+        assert!(tool.is_ready());
+        assert!(tool.auto_ready(), "one pick completes ID");
+        assert_eq!(tool.snap(), None, "no snap resolved for this pick");
+
+        // A later pick replaces the stored provenance: a stale snap is never
+        // attributed to a different point.
+        let snap = InputSnap {
+            kind: cad_measure::SnapKind::Endpoint,
+            precision: cad_domain::Precision::Analytic,
+            logical_pixel_distance: 2.0,
+        };
+        let mut tool = MeasurementTool::new(kind);
+        tool.push_point_with_snap(p(1.0, 2.0), None);
+        tool.push_point_with_snap(p(3.0, 4.0), Some(snap.clone()));
+        assert_eq!(tool.snap(), Some(&snap));
+        assert_eq!(tool.points().len(), 2);
     }
 
     #[test]

@@ -76,6 +76,7 @@ impl Application {
                         message: format!("layer '{stored}' created (id {})", id.0),
                     }],
                     measurement: None,
+                    point_report: None,
                 }
             }
             CommandPayload::RenameLayer { layer, name } => {
@@ -100,6 +101,7 @@ impl Application {
                         message: format!("layer '{previous}' renamed to '{stored}'"),
                     }],
                     measurement: None,
+                    point_report: None,
                 }
             }
             CommandPayload::DeleteLayer { layer } => {
@@ -157,6 +159,7 @@ impl Application {
                     changes: Some(Arc::new(changeset)),
                     diagnostics,
                     measurement: None,
+                    point_report: None,
                 }
             }
             CommandPayload::SetLayerProperty { layer, key, value } => {
@@ -212,6 +215,7 @@ impl Application {
                         ),
                     }],
                     measurement: None,
+                    point_report: None,
                 }
             }
             _ => {

@@ -5,8 +5,8 @@
 // array (newest last), cleared by the host when the document is replaced and
 // capped at 200 entries. Nothing here reads CAD state or invents a value, a point
 // or a message: every label comes from the catalogs, an error's wording is looked
-// up by its stable code, and a `result` entry without a measurement renders
-// nothing at all.
+// up by its stable code, and a `result` entry with neither a measurement nor a
+// point renders nothing at all.
 //
 // Angle precedent: **none exists in the React chrome.** No module under
 // `apps/desktop-ui/src` formats a measured angle (measurement readouts do not
@@ -223,6 +223,93 @@ function measurementLines(t: Translator, measurement: unknown): CommandLogLine[]
 }
 
 /**
+ * The two drawing spaces a point can be reported in, with their own labels.
+ *
+ * A token outside this set is rendered as the token itself (see [`tokenLabel`]):
+ * the same rule the algorithm and precision tokens follow, so an unreleased space
+ * can never be relabelled into a claim about where the point lives.
+ */
+const SPACE_KEYS: Readonly<Record<string, string | undefined>> = Object.freeze({
+  model: 'command.log.space.model',
+  paper: 'command.log.space.paper',
+});
+
+/**
+ * The object snaps a point result can report, with their own labels.
+ *
+ * These are the **command-window** spellings, deliberately separate from the
+ * status bar's `snap.kind.*` labels: the echo names the snap that produced this
+ * stored coordinate ("the point you asked for was an endpoint"), which is a result
+ * fact, not the live candidate hint. An unknown snap token is rendered raw.
+ */
+const POINT_SNAP_KEYS: Readonly<Record<string, string | undefined>> = Object.freeze({
+  endpoint: 'command.log.snap.endpoint',
+  midpoint: 'command.log.snap.midpoint',
+  center: 'command.log.snap.center',
+  quadrant: 'command.log.snap.quadrant',
+  perpendicular: 'command.log.snap.perpendicular',
+  intersection: 'command.log.snap.intersection',
+});
+
+/**
+ * A machine token's label, or the token itself, or `null` when there is none.
+ *
+ * A token this build does not know is printed verbatim: relabelling it would
+ * invent a fact, and dropping it would hide one the host reported.
+ */
+function tokenLabel(
+  t: Translator,
+  keys: Readonly<Record<string, string | undefined>>,
+  token: unknown,
+): string | null {
+  if (typeof token !== 'string' || token === '') return null;
+  const key = keys[token];
+  return key ? t(key) : token;
+}
+
+/**
+ * The value line of a reported **point** (`entry.point`), or nothing.
+ *
+ * ID echoes the coordinates of one picked point: the wire carries
+ * `{ position, space, snap, precision, unit, pixelDistance }`. The line prints the
+ * three ordinates with the same fixed decimal count every measurement uses,
+ * joined by `", "` (AutoCAD's own `X, Y, Z` shape), the drawing unit when the host
+ * reported one, and a meta chip naming the space and — when there was one — the
+ * object snap that produced the point.
+ *
+ * Nothing is invented: an ordinate that is not a finite number ends the run rather
+ * than becoming a zero, and a point with fewer than two usable ordinates produces
+ * no line at all (a coordinate needs at least X and Y to mean anything). The meta
+ * chip names the space, the object snap when there was one, and the precision
+ * token when the source geometry is not analytic (`analytic` prints nothing) — a
+ * coordinate picked off sampled geometry says so, exactly like a measurement row.
+ */
+function pointLines(t: Translator, point: unknown): CommandLogLine[] {
+  if (!point || typeof point !== 'object') return [];
+  const record = point as Record<string, unknown>;
+  const position = Array.isArray(record.position) ? record.position : [];
+  const ordinates: string[] = [];
+  for (const value of position.slice(0, 3)) {
+    const formatted = formatMeasurementValue(value);
+    if (formatted === null) break;
+    ordinates.push(formatted);
+  }
+  if (ordinates.length < 2) return [];
+  const meta = [
+    tokenLabel(t, SPACE_KEYS, record.space),
+    tokenLabel(t, POINT_SNAP_KEYS, record.snap),
+    precisionLabel(t, record.precision),
+  ].filter((part): part is string => part !== null).join(' \u00b7 ');
+  return [{
+    tone: 'value',
+    label: t('command.log.point'),
+    text: ordinates.join(', '),
+    unit: displayUnit(record.unit),
+    meta: meta === '' ? null : meta,
+  }];
+}
+
+/**
  * One rendered echo row, or `null` when there is nothing honest to show.
  *
  * Row shapes (the component only styles them):
@@ -251,9 +338,11 @@ export function formatCommandLogEntry(entry: unknown, t: Translator): CommandLog
     };
   }
   if (record.kind === 'result') {
-    // A result without a measurement has no value to print: render nothing
-    // rather than a placeholder that reads as a measurement.
-    const lines = measurementLines(t, record.measurement);
+    // A result with neither a measurement nor a point has nothing to print:
+    // render nothing rather than a placeholder that reads as a measurement. A
+    // result that carries both (a command that measures *and* reports a point)
+    // prints the measurement group first, then the point line.
+    const lines = [...measurementLines(t, record.measurement), ...pointLines(t, record.point)];
     if (lines.length === 0) return null;
     return { sequence: sequenceOf(record), kind: 'result', lines };
   }

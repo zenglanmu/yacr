@@ -69,7 +69,14 @@ test('the Layers arrow runs LAYER and the Properties arrow runs PROPERTIES', () 
   assert.equal(byId.properties.titleKey, 'properties.panel');
   const layerItems = byId.layers.items.map(item => item.id);
   const propertyItems = byId.properties.items.map(item => item.id);
-  assert.deepEqual(layerItems, ['LAYER'], 'the Layers panel holds exactly its own palette toggle');
+  // The Layers panel holds the palette toggle **plus** the isolate pair
+  // (2026-10-26): `LAYISO`/`LAYUNISO` are router commands that change which layers
+  // are visible, which is the one state this palette is the surface for.
+  assert.deepEqual(
+    layerItems,
+    ['LAYER', 'LAYISO', 'LAYUNISO'],
+    'the Layers panel holds its palette toggle and the isolate pair',
+  );
   assert.deepEqual(propertyItems, ['PROPERTIES']);
 });
 
@@ -98,8 +105,10 @@ test('every launcher target is a chrome-local command, so admission always answe
     assert.equal(admitCommandText(command, { status: null }).kind, 'admitted', command);
   }
   // Both palette toggles the carrier filter knows are also launcher targets, so a
-  // carrier without the palettes drops the arrows with the panels.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER']);
+  // carrier without the palettes drops the arrows with the panels. The isolate
+  // pair rides the same filter: the layers palette is the only surface that shows
+  // what isolating did, so those buttons are not offered where it never renders.
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO']);
   assert.equal(offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false)
     .some(panel => panel.id === 'layers' || panel.id === 'properties'), false);
 });

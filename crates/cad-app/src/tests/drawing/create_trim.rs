@@ -674,6 +674,7 @@ fn drawing_commands_are_work_only_in_the_catalogue() {
         CommandId::TrimEntity,
         CommandId::ExtendEntity,
         CommandId::EraseEntities,
+        CommandId::Join,
         CommandId::CopyEntities,
         CommandId::RotateEntities,
         CommandId::ScaleEntities,

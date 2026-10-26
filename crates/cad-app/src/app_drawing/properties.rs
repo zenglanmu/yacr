@@ -117,6 +117,7 @@ impl Application {
                     ),
                 }],
                 measurement: None,
+                point_report: None,
             });
         }
 
@@ -183,6 +184,7 @@ impl Application {
                 message: format!("SETENTITYPROPERTY: set {key} on {count} entities"),
             }],
             measurement: None,
+            point_report: None,
         })
     }
 }

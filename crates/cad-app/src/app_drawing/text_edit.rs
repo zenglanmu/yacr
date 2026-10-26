@@ -158,6 +158,7 @@ impl Application {
                 message: "TEXTEDIT: replaced the text of one text entity".into(),
             }],
             measurement: None,
+            point_report: None,
         })
     }
 }

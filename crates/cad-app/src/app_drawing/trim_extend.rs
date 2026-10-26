@@ -281,6 +281,7 @@ impl Application {
             changes: Some(Arc::new(change_set)),
             diagnostics,
             measurement: None,
+            point_report: None,
         })
     }
 
@@ -424,6 +425,7 @@ impl Application {
             changes: Some(Arc::new(change_set)),
             diagnostics,
             measurement: None,
+            point_report: None,
         })
     }
 
@@ -666,6 +668,7 @@ impl Application {
             changes: Some(Arc::new(change_set)),
             diagnostics: Vec::new(),
             measurement: None,
+            point_report: None,
         })
     }
 

@@ -181,7 +181,7 @@ test('the command catalog lists exactly the router-refused dead affordances, and
   }
 });
 
-test('the four measurement buttons dispatch their own admitted kind selectors', async () => {
+test('the five measurement buttons dispatch their own admitted kind selectors', async () => {
   const { readModule } = await import('./helpers.ts');
   const measure = RIBBON_TABS.find(tab => tab.id === 'measure');
   const panel = measure.panels.find(candidate => candidate.id === 'measure');
@@ -189,15 +189,18 @@ test('the four measurement buttons dispatch their own admitted kind selectors', 
   // Each button dispatches its own selector; none collapses onto
   // `MEASURE`/Distance. The internal ids keep the familiar words, but the
   // **dispatched selectors** are explicit: `PLINE` stays reserved for the P3
-  // polyline draw command and `ANGLE` is deliberately unbound.
+  // polyline draw command and `ANGLE` is deliberately unbound. ID (2026-10-26) is
+  // the point-coordinate readout, appended as the fifth kind so no shipped button
+  // moved.
   const dispatched = panel.items.map(item => item.command);
-  assert.deepEqual(dispatched, ['DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA']);
+  assert.deepEqual(dispatched, ['DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ID']);
   const idToSelector = Object.fromEntries(panel.items.map(item => [item.id, item.command]));
   assert.deepEqual(idToSelector, {
     DIST: 'DIST',
     PLINE: 'MEASUREPOLYLINE',
     ANGLE: 'MEASUREANGLE',
     AREA: 'AREA',
+    ID: 'ID',
   });
   for (const id of dispatched) {
     assert.equal(isSupportedCommand(id), true, id);
@@ -211,8 +214,8 @@ test('the four measurement buttons dispatch their own admitted kind selectors', 
   assert.equal(dispatched.includes('PLINE'), false, 'PLINE is not a measurement selector');
   assert.equal(isSupportedCommand('ANGLE'), false, 'ANGLE');
   assert.equal(admitCommandText('ANGLE', { status: loaded }).kind, 'unsupported', 'ANGLE');
-  // Distinct labels, so four different measurement kinds are presented.
-  assert.equal(new Set(panel.items.map(item => item.labelKey)).size, 4);
+  // Distinct labels, so five different measurement kinds are presented.
+  assert.equal(new Set(panel.items.map(item => item.labelKey)).size, 5);
   // The renderer dispatches each selector through the single command funnel.
   const ribbon = await readModule('components/Ribbon.tsx');
   assert.ok(ribbon.includes('if (item.command) return shell.runCommand(item.command);'));

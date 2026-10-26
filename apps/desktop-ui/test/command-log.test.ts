@@ -29,6 +29,17 @@ const CATALOG_KEYS = [
   'command.log.delta_z',
   'command.log.length',
   'command.log.area',
+  // ID's point row (2026-10-26): the coordinate label, the two space labels and
+  // the six snap labels the echo can name.
+  'command.log.point',
+  'command.log.space.model',
+  'command.log.space.paper',
+  'command.log.snap.endpoint',
+  'command.log.snap.midpoint',
+  'command.log.snap.center',
+  'command.log.snap.quadrant',
+  'command.log.snap.perpendicular',
+  'command.log.snap.intersection',
   'command.log.unit_squared',
   'command.log.precision.approximate',
   'command.log.precision.unknown',
@@ -49,6 +60,33 @@ function measurement(overrides = {}) {
 
 function result(overrides = {}) {
   return { sequence: 2, kind: 'result', command: null, code: null, measurement: measurement(), ...overrides };
+}
+
+// The frozen point shape an ID result carries (`cad_host`'s command log): the
+// picked position, the space it belongs to, the object snap that produced it, the
+// precision token, the drawing unit and the screen distance (unused here).
+function POINT(overrides = {}) {
+  return {
+    position: [12.5, -3, 0],
+    space: 'model',
+    snap: 'endpoint',
+    precision: 'analytic',
+    unit: null,
+    pixelDistance: 41,
+    ...overrides,
+  };
+}
+
+function pointResult(overrides = {}) {
+  return {
+    sequence: 4,
+    kind: 'result',
+    command: null,
+    code: null,
+    measurement: null,
+    point: POINT(),
+    ...overrides,
+  };
 }
 
 test('a measured number always carries the same fixed decimal count', () => {
@@ -178,6 +216,81 @@ test('a result without a measurement renders nothing instead of a fake value', (
   assert.deepEqual(rows.map(row => row.sequence), [1, 3], 'the empty result leaves no row behind');
 });
 
+test('an ID point echoes its three ordinates with the measurement formatter', () => {
+  const row = formatCommandLogEntry(pointResult(), t);
+  assert.equal(row.kind, 'result');
+  assert.equal(row.sequence, 4);
+  // One value line only: the coordinates, the drawing unit, and the space/snap
+  // chip. No distance, no deltas — ID measures nothing.
+  assert.deepEqual(row.lines, [{
+    tone: 'value',
+    label: en['command.log.point'],
+    text: '12.5000, -3.0000, 0.0000',
+    unit: null,
+    meta: `${en['command.log.space.model']} \u00b7 ${en['command.log.snap.endpoint']}`,
+  }]);
+  // The ordinates use the measurement formatter, so they agree with every other
+  // measured number in the window (fixed decimals, never a negative zero).
+  assert.equal(row.lines[0].text.split(', ')[2], formatMeasurementValue(0));
+  // Paper space and a reported unit are the host's own values.
+  const paper = formatCommandLogEntry(pointResult({
+    point: { ...POINT(), space: 'paper', unit: 'mm', snap: null },
+  }), t);
+  assert.equal(paper.lines[0].unit, 'mm');
+  assert.equal(paper.lines[0].meta, en['command.log.space.paper']);
+  // A coordinate read off sampled geometry must say so: `analytic` adds nothing to
+  // the chip (it is the default), `approximate` and an unknown token do.
+  const approximate = formatCommandLogEntry(pointResult({
+    point: { ...POINT(), precision: 'approximate' },
+  }), t);
+  assert.equal(approximate.lines[0].meta,
+    `${en['command.log.space.model']} \u00b7 ${en['command.log.snap.endpoint']} \u00b7 ${en['command.log.precision.approximate']}`);
+  const unmodelled = formatCommandLogEntry(pointResult({
+    point: { ...POINT(), precision: 'sampled' },
+  }), t);
+  assert.equal(unmodelled.lines[0].meta, `${en['command.log.space.model']} \u00b7 ${en['command.log.snap.endpoint']} \u00b7 sampled`);
+});
+
+test('a point row never invents an ordinate, a space label or a snap label', () => {
+  // Only the reported prefix is printed: an unusable ordinate ends the run, never
+  // replaced by a zero.
+  const twoD = formatCommandLogEntry(pointResult({ point: { ...POINT(), position: [1, 2] } }), t);
+  assert.equal(twoD.lines[0].text, '1.0000, 2.0000');
+  // ... and a point with fewer than two usable ordinates prints no row at all
+  // (`[1, null, 0]` stops at the bad ordinate, leaving one number — not a point).
+  for (const position of [[], [1], [1, null, 0], [null, 2], 'oops', undefined]) {
+    assert.equal(
+      formatCommandLogEntry(pointResult({ point: { ...POINT(), position } }), t),
+      null,
+      `position ${JSON.stringify(position)} must not produce a coordinate`,
+    );
+  }
+  // Tokens this build does not know are shown as themselves, never guessed at —
+  // the same rule the unknown algorithm token follows.
+  const unknown = formatCommandLogEntry(
+    pointResult({ point: { ...POINT(), space: 'layout2', snap: 'nearest' } }),
+    t,
+  );
+  assert.equal(unknown.lines[0].meta, 'layout2 \u00b7 nearest');
+  // An absent space/snap adds nothing to the chip — not even a separator.
+  const bare = formatCommandLogEntry(pointResult({ point: { ...POINT(), space: null, snap: null } }), t);
+  assert.equal(bare.lines[0].meta, null);
+  const snapOnly = formatCommandLogEntry(pointResult({ point: { ...POINT(), space: null } }), t);
+  assert.equal(snapOnly.lines[0].meta, en['command.log.snap.endpoint']);
+});
+
+test('a point row reads in the active language and names every known snap', () => {
+  const row = formatCommandLogEntry(pointResult({ point: { ...POINT(), snap: 'midpoint' } }), tzh);
+  assert.equal(row.lines[0].label, zh['command.log.point']);
+  assert.equal(row.lines[0].meta, `${zh['command.log.space.model']} \u00b7 ${zh['command.log.snap.midpoint']}`);
+  // Every snap the wire can carry has its own sentence; none collapses onto
+  // another (an intersection is not a "center").
+  const keys = ['endpoint', 'midpoint', 'center', 'quadrant', 'perpendicular', 'intersection']
+    .map(snap => formatCommandLogEntry(pointResult({ point: { ...POINT(), snap } }), t).lines[0].meta);
+  assert.equal(new Set(keys).size, keys.length);
+  assert.equal(keys.includes(undefined), false);
+});
+
 test('a command entry is echoed with the catalog prompt, in a meta tone', () => {
   const row = formatCommandLogEntry(
     { sequence: 1, kind: 'command', command: 'DIST', code: null, measurement: null },
@@ -238,10 +351,10 @@ test('malformed entries and a non-array log render nothing', () => {
 });
 
 test('every echo key exists in both catalogs with the same placeholders', () => {
-  // 23 keys: label, prompt, four result labels (Distance/Angle/Length/Area),
-  // three deltas, the squared-unit template, two precision chips, the generic
-  // refusal and ten codes.
-  assert.equal(CATALOG_KEYS.length, 23);
+  // 32 keys: label, prompt, four result labels (Distance/Angle/Length/Area), the
+  // point label with its two space and six snap labels, three deltas, the
+  // squared-unit template, two precision chips, the generic refusal and ten codes.
+  assert.equal(CATALOG_KEYS.length, 32);
   assert.equal(COMMAND_LOG_ERROR_CODES.length, 10);
   for (const key of CATALOG_KEYS) {
     assert.equal(typeof en[key], 'string', `en missing ${key}`);

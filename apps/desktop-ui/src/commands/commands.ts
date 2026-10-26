@@ -343,9 +343,26 @@ export interface SelectionRequirement {
  * selected (ERASE, MOVE, COPY) keeps the neighbours' contract: it stays enabled
  * and the host answers with an explicit refusal, because its own copy
  * (`draw.error.selection_required`) already says so at run time.
+ *
+ * `JOIN` (2026-10-26) is the second real count precondition: it welds the
+ * selection into a single entity (one LINE or one ARC), so one object or none can
+ * never be a partial success and the host refuses it outright. Its sentence is the
+ * catalog's own `draw.kind.join.hint`, which is also what the disabled ribbon
+ * button shows, so the button and the refusal word the same rule once.
+ *
+ * `LAYISO` needs at least one object — isolating "nothing" would leave every
+ * layer hidden and no way back from the canvas — and it reuses the catalog's
+ * existing "Select objects first" line (`draw.error.selection_required`): that is
+ * already the sentence the host refuses a bare isolate with, so no second copy of
+ * the same fact is invented. `LAYUNISO` takes **no** selection (`count: 0`): its
+ * entry exists for the "no drawing is open" answer only — the requirement can
+ * never be unmet, because nothing is what it restores.
  */
 export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequirement>> = Object.freeze({
   MATCHPROP: Object.freeze({ count: 2, reasonKey: 'draw.kind.matchprop.hint' }),
+  JOIN: Object.freeze({ count: 2, reasonKey: 'draw.kind.join.hint' }),
+  LAYISO: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
+  LAYUNISO: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
 });
 
 /** The selection requirement of `id`, or `null` when it has none. */
@@ -579,10 +596,24 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // `SELECTION_REQUIREMENTS` (it needs a source *and* at least one target), so a
   // one-object selection is refused with the sentence that says so.
   { id: 'MATCHPROP', labelKey: 'draw.kind.matchprop', icon: 'matchprop', group: 'modify' },
+  // JOIN (2026-10-26) closes the modify run: welding the current selection into
+  // one entity acts on that selection exactly like MATCHPROP, so it is appended
+  // after it (no shipped row moves). It is a payload-free router command, and the
+  // "at least two objects" rule is `SELECTION_REQUIREMENTS`' — the host refuses a
+  // one-object join outright, so the button is never a live affordance that can
+  // only fail. The glyph is the polyline one: the icon set has no dedicated join
+  // mark yet, and the merge output is a curve either way.
+  { id: 'JOIN', labelKey: 'draw.kind.join', icon: 'polyline', group: 'modify' },
   { id: 'DIST', labelKey: 'measure.kind.distance', icon: 'distance', group: 'measure' },
   { id: 'MEASUREPOLYLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', group: 'measure' },
   { id: 'MEASUREANGLE', labelKey: 'measure.kind.angle', icon: 'angle', group: 'measure' },
   { id: 'AREA', labelKey: 'measure.kind.area', icon: 'area', group: 'measure' },
+  // ID (2026-10-26) is the point-coordinate readout: one point pick, reported as
+  // X/Y/Z plus the object snap that produced it. It is the fifth measurement kind
+  // and is listed last there so no shipped entry moves. It reuses the `point`
+  // glyph (a crosshair on a marker) because the command is "which point is this",
+  // and it has no variant popover: there is no options sub-prompt.
+  { id: 'ID', labelKey: 'measure.kind.id', icon: 'point', group: 'measure' },
   { id: 'DIMLINEAR', labelKey: 'draw.kind.dimlinear', icon: 'dimlinear', group: 'annotate' },
   { id: 'DIMALIGNED', labelKey: 'draw.kind.dimaligned', icon: 'dimaligned', group: 'annotate' },
   { id: 'DIMRADIUS', labelKey: 'draw.kind.dimradius', icon: 'dimradius', group: 'annotate' },
@@ -596,6 +627,14 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'DIMBASELINE', labelKey: 'draw.kind.dimbaseline', icon: 'dimbaseline', group: 'annotate' },
   { id: 'DIMCONTINUE', labelKey: 'draw.kind.dimcontinue', icon: 'dimcontinue', group: 'annotate' },
   { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', group: 'annotate' },
+  // Layer isolate / unisolate (2026-10-26). Unlike `LAYER` they are **router**
+  // commands (`LAYISO`/`LAYUNISO`), not chrome-local selectors, so they are
+  // admitted by the host vocabulary alone. Their glyphs are the layers palette's
+  // own visibility pair — isolating hides the other layers (dimmed eye),
+  // unisolating shows them again (plain eye) — because the operation is a
+  // visibility change, not a palette toggle.
+  { id: 'LAYISO', labelKey: 'layers.isolate', icon: 'eyeOff', group: 'annotate' },
+  { id: 'LAYUNISO', labelKey: 'layers.unisolate', icon: 'eye', group: 'annotate' },
   { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', group: 'annotate' },
   { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', group: 'annotate' },
   { id: 'ZOOMIN', labelKey: 'toolbar.zoom_in', icon: 'zoomIn', group: 'view' },

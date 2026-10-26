@@ -25,6 +25,7 @@ pub mod layers;
 pub mod measure_tool;
 pub mod ortho;
 pub mod picking;
+pub mod point_report;
 pub mod property_value;
 pub mod recovery;
 pub mod render_scene;
@@ -67,6 +68,7 @@ pub use picking::{
     drawing_pick_items, filter_by_index, last_pick_stats, pick_at_screen, pick_ray,
     pick_ray_exhaustive, pick_ray_with_index, pick_tolerance, PickIndex, PickStats,
 };
+pub use point_report::{unit_symbol, IdSpace, InputSnap, PointReport};
 pub use recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
 pub use selection::{
     entity_property_rows, enum_options, property_row_editable, PropertyGroup, PropertyKind,
@@ -861,7 +863,14 @@ pub struct CommandOutcome {
     pub changes: Option<Arc<ChangeSet>>,
     pub diagnostics: Vec<Diagnostic>,
     /// Structured measurement result, when the command produced one (spec F06).
+    ///
+    /// Strictly a **measurement**: `ID` produces [`PointReport`] instead, so a
+    /// consumer can never mistake a coordinate report for a measured scalar.
     pub measurement: Option<MeasurementRecord>,
+    /// The `ID` point-coordinate report, when the command produced one.
+    ///
+    /// `None` for every other command, including every real measurement.
+    pub point_report: Option<PointReport>,
 }
 
 impl CommandOutcome {
@@ -871,6 +880,7 @@ impl CommandOutcome {
             changes: None,
             diagnostics: Vec::new(),
             measurement: None,
+            point_report: None,
         }
     }
 }
@@ -929,6 +939,7 @@ mod app_drawing;
 mod app_history;
 mod app_measure;
 mod application;
+mod layers_isolate;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod background;
