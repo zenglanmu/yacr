@@ -32,6 +32,7 @@ import {
   optionsErrorView,
   optionsTabs,
   parseIntegerText,
+  parseRealText,
   readSettings,
   settleSettings,
   settingErrorCode,
@@ -59,6 +60,8 @@ function snapshot(overrides = {}) {
     snapHints: true,
     snapEnabled: true,
     hoverPreview: true,
+    // `SNAPUNIT`: a real, in drawing units (the host's default is 10.0).
+    snapSpacing: 10,
     pickboxSize: 6,
     apertureSize: 12,
     gpuBudgetPercent: 90,
@@ -113,7 +116,7 @@ test('every field sits on a declared tab exactly once and nothing else exists', 
     'snapHints', 'gpuBudgetPercent',
   ]);
   assert.deepEqual(fieldsForTab('drafting').map(field => field.id), [
-    'snapEnabled', 'hoverPreview', 'pickboxSize', 'apertureSize',
+    'snapEnabled', 'hoverPreview', 'snapSpacing', 'pickboxSize', 'apertureSize',
   ]);
   assert.deepEqual(fieldsForTab('plot').map(field => field.id), ['plotFormat']);
   assert.deepEqual(fieldsForTab('files').map(field => field.id), ['fontsDir']);
@@ -132,6 +135,7 @@ test('each control is the editor its backend value really needs', () => {
     snapHints: 'bool',
     snapEnabled: 'bool',
     hoverPreview: 'bool',
+    snapSpacing: 'real',
     pickboxSize: 'number',
     apertureSize: 'number',
     gpuBudgetPercent: 'number',
@@ -145,7 +149,7 @@ test('each control is the editor its backend value really needs', () => {
     OPTIONS_FIELDS.filter(field => field.kind === 'number').map(field => [field.id, field.min, field.max]),
     [['crosshairSize', 1, 100], ['gpuBudgetPercent', 10, 100], ['pickboxSize', 1, 20], ['apertureSize', 1, 50]],
   );
-  for (const field of OPTIONS_FIELDS.filter(entry => entry.kind === 'number')) {
+  for (const field of OPTIONS_FIELDS.filter(entry => entry.kind === 'number' || entry.kind === 'real')) {
     assert.ok(field.unitKey, `${field.id} needs a unit`);
   }
   // The plot selector offers exactly the two formats the host can produce.
@@ -196,6 +200,29 @@ test('integers are parsed strictly and never silently coerced', () => {
   }
 });
 
+test('reals are parsed exactly, and the host positive rule is mirrored', () => {
+  assert.equal(parseRealText('2.5'), 2.5);
+  assert.equal(parseRealText(' 0.5 '), 0.5);
+  assert.equal(parseRealText('10'), 10);
+  assert.equal(parseRealText(2.5), 2.5);
+  assert.equal(parseRealText('.5'), 0.5);
+  assert.equal(parseRealText('2.'), 2);
+  for (const bad of [
+    '', ' ', '0', '0.0', '-1', '-0.5', 'abc', '2,5', '0x10', 'Infinity', 'NaN', '2 5',
+    null, undefined, {}, [], NaN, Infinity, -Infinity, 0, -1,
+  ]) {
+    assert.equal(parseRealText(bad), null, `${String(bad)} must not parse`);
+  }
+  // A field passes its own bounds in; the seeder does not (see `draftFromSettings`).
+  const field = fieldById('snapSpacing');
+  assert.equal(parseRealText('1000000', field), 1_000_000);
+  assert.equal(parseRealText('2000001', field), null);
+  // The snapshot's text form round-trips, including exponent spellings.
+  for (const value of [0.5, 2.5, 10, 1e-7, 1234.5678]) {
+    assert.equal(parseRealText(String(value)), value, `${value} must round-trip`);
+  }
+});
+
 test('the validation table matches the host ranges and codes', () => {
   const cases = [
     // [field, value, expected]
@@ -211,6 +238,21 @@ test('the validation table matches the host ranges and codes', () => {
     ['pickboxSize', '21', SETTINGS_ERROR.invalidValue],
     ['apertureSize', '50', null],
     ['apertureSize', '51', SETTINGS_ERROR.invalidValue],
+    // The snap spacing is a real: a fraction is legal (the host's
+    // `snap_spacing_is_valid` is `finite && > 0`), zero and negatives are not.
+    ['snapSpacing', '2.5', null],
+    ['snapSpacing', '0.5', null],
+    ['snapSpacing', '10', null],
+    ['snapSpacing', 2.5, null],
+    ['snapSpacing', '1000000', null],
+    ['snapSpacing', '0', SETTINGS_ERROR.invalidValue],
+    ['snapSpacing', 0, SETTINGS_ERROR.invalidValue],
+    ['snapSpacing', '-1', SETTINGS_ERROR.invalidValue],
+    ['snapSpacing', '-0.5', SETTINGS_ERROR.invalidValue],
+    ['snapSpacing', 'abc', SETTINGS_ERROR.invalidValue],
+    ['snapSpacing', '', SETTINGS_ERROR.invalidValue],
+    ['snapSpacing', '2000001', SETTINGS_ERROR.invalidValue],
+    ['snapSpacing', NaN, SETTINGS_ERROR.invalidValue],
     // The GPU budget is a percentage of the card: the floor and the whole card
     // are accepted, anything outside is a refusal (never clamped).
     ['gpuBudgetPercent', '10', null],
@@ -285,6 +327,7 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   assert.equal(draft.crosshairSize, '5');
   assert.equal(draft.pickboxSize, '6');
   assert.equal(draft.apertureSize, '12');
+  assert.equal(draft.snapSpacing, '10');
   assert.equal(draft.gpuBudgetPercent, '90');
   assert.equal(draft.grid, true);
   assert.equal(draft.plotFormat, 'svg');
@@ -298,6 +341,7 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   const empty = draftFromSettings({}, null);
   assert.equal(empty.crosshairSize, null);
   assert.equal(empty.gpuBudgetPercent, null);
+  assert.equal(empty.snapSpacing, null);
   assert.equal(empty.grid, null);
   assert.equal(empty.plotFormat, null);
   assert.equal(empty.fontsDir, null);
@@ -308,8 +352,14 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   // A malformed value is not repaired into something it never was.
   const malformed = draftFromSettings({
     grid: 'yes', crosshairPercent: -3, backgroundModel: 'grey', plotFormat: 'dxf', fontsDir: 7,
-    wgpu_backend: 'metal',
+    wgpu_backend: 'metal', snapSpacing: 0,
   });
+  // A spacing the host's own rule refuses is reported as absent, never seeded as
+  // a "valid" default; a legal real that merely exceeds this row's typo guard is
+  // kept as reported and then refused by the validator.
+  assert.equal(malformed.snapSpacing, null);
+  assert.equal(draftFromSettings({ snapSpacing: 2_000_000 }).snapSpacing, '2000000');
+  assert.equal(validateField('snapSpacing', '2000000'), SETTINGS_ERROR.invalidValue);
   assert.equal(malformed.grid, null);
   assert.equal(malformed.wgpuBackend, null);
   // A real number outside the range is kept as reported and refused by the
@@ -586,6 +636,70 @@ test('the WGPU backend rows read like the language row, in both catalogs', async
   // The selector is a native select, the same control the language row uses.
   const dialog = await readModule('components/OptionsDialog.tsx');
   assert.ok(dialog.includes('choiceKeyPrefix'), 'a copy-carrying select must resolve through the catalog');
+});
+
+test('the snap spacing is a decimal drafting row, written through cad_set_setting', async () => {
+  const field = fieldById('snapSpacing');
+  assert.equal(field.kind, 'real');
+  assert.equal(field.tab, 'drafting');
+  // The host's `cad_settings` field and its `cad_set_setting` key agree here, and
+  // both are the camelCase wire spelling of `SNAPUNIT` (`snap_spacing`).
+  assert.equal(field.wire, 'snapSpacing');
+  assert.equal(field.key, 'snapSpacing');
+  // The range mirrors `snap_spacing_is_valid` (finite, strictly positive) plus a
+  // typo guard; the host re-validates and its refusal is authoritative.
+  assert.equal(field.min, Number.MIN_VALUE);
+  assert.equal(field.max, 1_000_000);
+  assert.equal(field.unitKey, 'options.unit.drawing_units');
+  assert.equal(field.labelKey, 'options.field.snapSpacing');
+  assert.equal(field.helpKey, 'options.help.snapSpacing');
+  assert.ok(fieldsForTab('drafting').includes(field));
+
+  // Seeded from the snapshot (a fraction survives as text), validated, diffed.
+  const wire = snapshot({ snapSpacing: 2.5 });
+  assert.equal(draftFromSettings(wire).snapSpacing, '2.5');
+  assert.equal(validateField('snapSpacing', draftFromSettings(wire).snapSpacing), null);
+  // A textually different equal value is not a change.
+  assert.deepEqual(dirtyFields({ ...draftFromSettings(wire), snapSpacing: '2.50' }, wire), []);
+  const draft = { ...draftFromSettings(wire), snapSpacing: '0.5' };
+  assert.deepEqual(applyPayload(draft, wire), [
+    { field: 'snapSpacing', key: 'snapSpacing', value: 0.5 },
+  ]);
+
+  // The very same staged write path as every other writable field: one typed
+  // `cad_set_setting` call, a JSON **number** (never a string the host would
+  // read as text and refuse).
+  const granted = recordingInvoke({ accepted: true });
+  assert.deepEqual(await writeAll(granted.invoke, applyPayload(draft, wire)), { kind: 'accepted' });
+  assert.deepEqual(granted.calls, [
+    { command: 'cad_set_setting', args: { key: 'snapSpacing', value: 0.5 } },
+  ]);
+  // A refusal keeps the host's code and names the field it came from.
+  const refused = recordingInvoke(() => { throw 'settings.invalid_value: spacing must be > 0'; });
+  assert.deepEqual(await writeAll(refused.invoke, applyPayload(draft, wire)), {
+    kind: 'failed', field: 'snapSpacing', key: 'snapSpacing', code: 'settings.invalid_value',
+  });
+  // And the re-read check recognises the written real, so settle cannot claim a
+  // value the host does not have.
+  const entry = { field: 'snapSpacing', key: 'snapSpacing', value: 0.5 };
+  assert.equal(entryVisible(snapshot({ snapSpacing: 0.5 }), entry), true);
+  assert.equal(entryVisible(snapshot({ snapSpacing: 2.5 }), entry), false);
+
+  // Both catalogs carry the row's copy, and it reads as drawing units.
+  assert.equal(zh[field.labelKey], '捕捉间距');
+  assert.equal(en[field.labelKey], 'Snap spacing');
+  assert.equal(zh[field.unitKey], '单位');
+  assert.equal(en[field.unitKey], 'units');
+  assert.ok(zh[field.helpKey].trim().length > 0);
+  assert.ok(en[field.helpKey].trim().length > 0);
+
+  // Rendered by the shared numeric editor, not a bespoke control.
+  const dialog = await readModule('components/OptionsDialog.tsx');
+  assert.ok(!dialog.includes('snapSpacing'), 'no special case for this field');
+  assert.ok(dialog.includes("case 'real':"));
+  assert.ok(dialog.includes("inputMode={decimal ? 'decimal' : 'numeric'}"));
+  assert.ok(dialog.includes("step={decimal ? 'any' : undefined}"));
+  assert.ok(dialog.includes('t(field.unitKey)'));
 });
 
 test('the GPU budget is a generic numeric row, never a bespoke control', async () => {

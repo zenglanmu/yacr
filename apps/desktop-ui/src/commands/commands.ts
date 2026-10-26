@@ -525,6 +525,11 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'FIT', labelKey: 'toolbar.fit', icon: 'fit', group: 'view' },
   { id: 'NEW', labelKey: 'qat.new', icon: 'new', group: 'file' },
   { id: 'SAVE', labelKey: 'qat.save', icon: 'save', group: 'file' },
+  // PLOT is the same router selector as the `EXPORT`/`PRINT` aliases (the host
+  // writes SVG/PDF through the platform save picker and refuses `.png` for the
+  // GUI). It sits after SAVE because it is a file-level output action, and it is
+  // gated by `canPlot` like the aliases, not by anything local.
+  { id: 'PLOT', labelKey: 'file.plot', icon: 'save', group: 'file' },
   { id: 'UNDO', labelKey: 'toolbar.undo', icon: 'undo', group: 'modify' },
   { id: 'REDO', labelKey: 'toolbar.redo', icon: 'redo', group: 'modify' },
   { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', group: 'draw' },
@@ -596,6 +601,10 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'ZOOMIN', labelKey: 'toolbar.zoom_in', icon: 'zoomIn', group: 'view' },
   { id: 'ZOOMOUT', labelKey: 'toolbar.zoom_out', icon: 'zoomOut', group: 'view' },
   { id: 'PAN', labelKey: 'toolbar.pan', icon: 'pan', group: 'view' },
+  // RESETVIEW is a payload-free router command (`CommandId::ResetView`) that
+  // restores the drawing's saved view; it has no capability gate and no
+  // document-scoped precondition of its own.
+  { id: 'RESETVIEW', labelKey: 'view.reset', icon: 'view', group: 'view' },
   { id: 'ORBIT', labelKey: 'view.orbit_label', icon: 'orbit', group: 'view' },
   // 3D view selectors: both are payload-free router commands (typing them in the
   // command line already works), and both need an open drawing — the ribbon

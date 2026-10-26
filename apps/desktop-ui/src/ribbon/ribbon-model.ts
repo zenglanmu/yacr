@@ -187,6 +187,10 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'OPEN', labelKey: 'file.open', icon: 'open', command: 'OPEN', large: true },
           { id: 'NEW', labelKey: 'qat.new', icon: 'new', command: 'NEW', large: true },
           { id: 'SAVE', labelKey: 'qat.save', icon: 'save', command: 'SAVE', large: true },
+          // Plot is a file-level output action like Save: it is the same router
+          // selector as the `EXPORT`/`PRINT` aliases, gated by `canPlot`. The
+          // entry reuses the `save` glyph (there is no dedicated plot icon).
+          { id: 'PLOT', labelKey: 'file.plot', icon: 'save', command: 'PLOT', large: true },
         ],
       },
       {
@@ -528,6 +532,10 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'ZOOMOUT', labelKey: 'toolbar.zoom_out', icon: 'zoomOut', command: 'ZOOMOUT' },
           { id: 'PAN', labelKey: 'toolbar.pan', icon: 'pan', command: 'PAN' },
           { id: 'FIT', labelKey: 'toolbar.fit', icon: 'fit', command: 'FIT' },
+          // RESETVIEW closes the navigate cluster: it is the payload-free
+          // `CommandId::ResetView` selector, so it travels on `cad_command` like
+          // its neighbours and is enabled by router admission alone.
+          { id: 'RESETVIEW', labelKey: 'view.reset', icon: 'view', command: 'RESETVIEW' },
         ],
       },
       {

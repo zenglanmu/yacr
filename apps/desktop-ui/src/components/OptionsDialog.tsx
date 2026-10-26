@@ -136,14 +136,20 @@ interface DraftInputProps {
   readonly disabled: boolean;
   readonly placeholder?: string;
   readonly describedBy: string;
-  readonly inputMode?: 'numeric' | 'text';
+  readonly inputMode?: 'numeric' | 'decimal' | 'text';
+  /**
+   * The declared granularity of a numeric field. The control stays `type="text"`
+   * (a numeric input rewrites a half-typed `2.` into an empty value), so this is
+   * declarative only: `"any"` says the value is a real, not a whole number.
+   */
+  readonly step?: number | 'any';
   readonly maxWidth?: number;
   readonly onChange: (value: string) => void;
   readonly title?: string;
 }
 
 function DraftInput({
-  id, value, invalid, disabled, placeholder, describedBy: description, inputMode, maxWidth, onChange, title,
+  id, value, invalid, disabled, placeholder, describedBy: description, inputMode, step, maxWidth, onChange, title,
 }: DraftInputProps) {
   const [focused, setFocused] = useState(false);
   const style = fieldStyle({ focused, invalid });
@@ -159,6 +165,7 @@ function DraftInput({
       placeholder={placeholder}
       title={title}
       inputMode={inputMode}
+      step={step}
       autoComplete="off"
       spellCheck={false}
       aria-invalid={invalid || undefined}
@@ -477,6 +484,11 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
           </span>
         );
       case 'number':
+      case 'real': {
+        // One editor for both numeric kinds. The wire shape (integer vs real) and
+        // the parser behind it differ; the control, its unit suffix and its row
+        // do not. A `real` gets the decimal keypad hint and an `any` step.
+        const decimal = field.kind === 'real';
         return (
           <span style={OPTIONS_CONTROL}>
             <DraftInput
@@ -486,13 +498,15 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
               disabled={missing}
               placeholder={missing ? t(OPTIONS_KEYS.missing) : undefined}
               describedBy={description}
-              inputMode="numeric"
+              inputMode={decimal ? 'decimal' : 'numeric'}
+              step={decimal ? 'any' : undefined}
               maxWidth={120}
               onChange={next => update(field.id, next)}
             />
             <span style={OPTIONS_UNIT}>{missing ? null : t(field.unitKey)}</span>
           </span>
         );
+      }
       case 'color': {
         const valid = typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.trim());
         return (

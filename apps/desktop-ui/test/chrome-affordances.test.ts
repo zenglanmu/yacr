@@ -104,6 +104,25 @@ test('every launcher target is a chrome-local command, so admission always answe
     .some(panel => panel.id === 'layers' || panel.id === 'properties'), false);
 });
 
+test('the View tab navigation cluster holds only router command tokens', () => {
+  // `RESETVIEW` joined ZOOMIN/ZOOMOUT/PAN/FIT: all five are payload-free router
+  // selectors, so none may be a local `action` (which would bypass the shared
+  // admission) and none may carry a typed payload the name-only funnel refuses.
+  const navigate = RIBBON_TABS.find(tab => tab.id === 'view').panels.find(panel => panel.id === 'navigate');
+  assert.ok(navigate, 'the View tab keeps its navigate panel');
+  assert.deepEqual(navigate.items.map(item => item.id), ['ZOOMIN', 'ZOOMOUT', 'PAN', 'FIT', 'RESETVIEW']);
+  for (const item of navigate.items) {
+    assert.equal(item.command, item.id, `${item.id} keeps its own selector`);
+    assert.equal(item.action, undefined, `${item.id} must not be a local action`);
+    assert.equal(item.standardView, undefined, `${item.id} carries no payload`);
+  }
+  // The new entry adds a command, not a launcher target: the panel's arrow still
+  // has no dialog behind it, so it stays honestly null instead of opening one.
+  assert.equal(panelLauncherCommand(navigate), null);
+  // Its copy is the catalog's, never an inline literal.
+  assert.equal(navigate.items.find(item => item.id === 'RESETVIEW').labelKey, 'view.reset');
+});
+
 test('a malformed launcher token is no target, never a live empty command', () => {
   assert.equal(panelLauncherCommand({ launcher: true }), null);
   assert.equal(panelLauncherCommand({ launcher: true, launcherCommand: null }), null);

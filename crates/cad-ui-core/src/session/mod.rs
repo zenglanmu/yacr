@@ -576,9 +576,12 @@ impl CadSession {
     /// **current** canvas metrics revision and both follow the ordinary release
     /// [`InteractionRequest::Pointer`] so the host's gesture life is closed. Any
     /// drag beyond [`DRAG_THRESHOLD_LOGICAL_PX`] (or a release of a different
-    /// button) keeps the plain pointer mapping, which the host resolves as
-    /// navigation (a primary/middle drag pans in 2D); a drag never captures a
-    /// point. Box selection is **not** implemented: a primary drag still pans.
+    /// button) keeps the plain pointer mapping: this layer emits no `SelectAt` /
+    /// `CapturePoint` for a drag, and the host arbitrates from its own
+    /// press/move/release state. Outside a capture, a 2D primary drag is a box
+    /// selection (`SelectInBox` + `CommandPayload::BoxSelect`) — unless a modal
+    /// pan owns the pointer — a middle drag pans, and a 3D primary drag orbits;
+    /// a drag never captures a point, and this layer holds no box-gesture state.
     ///
     /// `Enter` (`CONFIRM`) confirms a capture and `Esc`/`CANCEL` cancels it
     /// through the command funnel; this method only routes the pointer stream.

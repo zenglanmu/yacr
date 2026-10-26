@@ -100,8 +100,14 @@ export const OPTIONS_TABS: readonly OptionTab[] = Object.freeze<OptionTab[]>([
   { id: 'user', labelKey: 'options.tab.user', icon: 'language' },
 ]);
 
-/** The editor a control offers. */
-export type OptionFieldKind = 'bool' | 'number' | 'color' | 'select' | 'readonly' | 'locale';
+/**
+ * The editor a control offers.
+ *
+ * `number` is the integer editor (a wire `u32`); `real` is the fractional one
+ * (a wire `f64`). They are separate kinds on purpose: reusing `number` for a real
+ * would silently refuse a legal `2.5` (see [`parseIntegerText`]).
+ */
+export type OptionFieldKind = 'bool' | 'number' | 'real' | 'color' | 'select' | 'readonly' | 'locale';
 
 /** The facts every control carries. */
 interface OptionFieldBase {
@@ -122,13 +128,21 @@ interface OptionWritableField extends OptionFieldBase {
 
 /**
  * One control. The `kind` tag decides which editor renders it and which facts
- * are meaningful, so the numeric range only exists on a `number` field and the
- * delivered options only exist on a `select` field.
+ * are meaningful, so the numeric range only exists on a `number`/`real` field and
+ * the delivered options only exist on a `select` field.
  */
 export type OptionField =
   | (OptionWritableField & { readonly kind: 'bool' | 'color' })
   | (OptionWritableField & {
     readonly kind: 'number';
+    readonly min: number;
+    readonly max: number;
+    readonly unitKey: string;
+  })
+  | (OptionWritableField & {
+    // A fractional number (the wire shape is a JSON real, never a truncated
+    // integer). Same facts as `number`; only the parser differs.
+    readonly kind: 'real';
     readonly min: number;
     readonly max: number;
     readonly unitKey: string;
@@ -147,12 +161,12 @@ export type OptionField =
  *
  * `wire` is the `cad_settings` field, `key` is the `cad_set_setting` key (absent
  * for the two non-settings controls: the read-only fonts directory and the UI
- * language). `kind` selects the editor: `bool`, `number`, `color`, `select`,
- * `readonly`, `locale`. Number fields carry the host's own range and the unit
- * suffix key; a value outside it is refused, never clamped. A `select` field
- * whose options have their own copy carries `choiceKeyPrefix`, and its refusal
- * code can be overridden with `errorCode` when the host reports a more specific
- * one.
+ * language). `kind` selects the editor: `bool`, `number`, `real`, `color`,
+ * `select`, `readonly`, `locale`. Number fields carry the host's own range and
+ * the unit suffix key; a value outside it is refused, never clamped. A `select`
+ * field whose options have their own copy carries `choiceKeyPrefix`, and its
+ * refusal code can be overridden with `errorCode` when the host reports a more
+ * specific one.
  */
 export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[]>([
   {
@@ -253,6 +267,28 @@ export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[
     key: 'hoverPreview',
     labelKey: 'options.field.hoverPreview',
     helpKey: 'options.help.hoverPreview',
+  },
+  {
+    // `SNAPUNIT`: the grid-snap spacing in drawing units. The host accepts **any
+    // finite spacing strictly greater than zero**, integer or fractional
+    // (`crates/cad-app/src/snap.rs::snap_spacing_is_valid`), so this row must be
+    // the decimal editor: the integer parser would refuse a legal `2.5`.
+    //
+    // `min` is `Number.MIN_VALUE`, the smallest positive double, which makes the
+    // inclusive range check exactly the host's `spacing > 0`. The host has **no**
+    // upper bound; `max` is only a typo guard here, so a larger value is refused
+    // visibly (never clamped into something the user did not type). The host
+    // re-validates every write and its refusal is the authoritative one.
+    id: 'snapSpacing',
+    tab: 'drafting',
+    kind: 'real',
+    wire: 'snapSpacing',
+    key: 'snapSpacing',
+    min: Number.MIN_VALUE,
+    max: 1_000_000,
+    unitKey: 'options.unit.drawing_units',
+    labelKey: 'options.field.snapSpacing',
+    helpKey: 'options.help.snapSpacing',
   },
   {
     id: 'pickboxSize',
@@ -380,6 +416,13 @@ export function draftFromSettings(
     } else if (field.kind === 'number') {
       const number = parseIntegerText(value);
       draft[field.id] = number === null ? null : String(number);
+    } else if (field.kind === 'real') {
+      // Seeded under the host's own rule only (finite, `> 0`): a reported value
+      // the field's typo guard dislikes still shows as what the host has, and is
+      // then refused by the validator instead of being rewritten to "not
+      // reported".
+      const number = parseRealText(value);
+      draft[field.id] = number === null ? null : String(number);
     } else if (field.kind === 'color') {
       draft[field.id] = typeof value === 'string' && HEX_COLOUR.test(value)
         ? value.trim().toLowerCase()
@@ -405,6 +448,45 @@ export function parseIntegerText(value: unknown): number | null {
 }
 
 /**
+ * A trimmed decimal number from draft text (or a number), else `null`.
+ *
+ * This is the `real` counterpart of [`parseIntegerText`], and it mirrors the
+ * host's `SNAPUNIT` rule (`snap_spacing_is_valid`: finite **and** strictly
+ * positive) rather than a range of its own: `2.5`, `0.5` and `10` all parse,
+ * while `0`, `-1`, `abc`, hex/`Infinity` spellings and anything non-finite are
+ * `null`. Exponent spellings are accepted because the snapshot is re-seeded from
+ * `String(number)`, which renders small doubles as `1e-7`.
+ *
+ * `range` adds the field's inclusive bounds; `validateField` passes them, the
+ * draft seeder does not (the host's own snapshot is never re-judged as absent).
+ */
+export function parseRealText(
+  value: unknown,
+  range?: { readonly min: number; readonly max: number },
+): number | null {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return inRange(value, range) ? value : null;
+  }
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  // Plain decimal or decimal-with-exponent: never hex, binary, `Infinity`, `NaN`
+  // or a bare sign. A trailing/leading point (`2.`, `.5`) is a real the user may
+  // be typing, so it parses.
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) return null;
+  const number = Number(text);
+  if (!Number.isFinite(number) || number <= 0) return null;
+  return inRange(number, range) ? number : null;
+}
+
+function inRange(
+  number: number,
+  range: { readonly min: number; readonly max: number } | undefined,
+): boolean {
+  return !range || (number >= range.min && number <= range.max);
+}
+
+/**
  * Validate one control value against the host's rules.
  *
  * Returns a stable error code (`settings.*`) or `null` when the value is
@@ -422,6 +504,10 @@ export function validateField(id: string, value: unknown): string | null {
       if (number === null) return SETTINGS_ERROR.invalidValue;
       return number >= field.min && number <= field.max ? null : SETTINGS_ERROR.invalidValue;
     }
+    case 'real':
+      // The decimal mirror: the host's `snap_spacing_is_valid` (finite, `> 0`)
+      // plus this field's declared bounds (see the `snapSpacing` descriptor).
+      return parseRealText(value, field) === null ? SETTINGS_ERROR.invalidValue : null;
     case 'color':
       return typeof value === 'string' && HEX_COLOUR.test(value.trim())
         ? null
@@ -475,6 +561,10 @@ export function normalizeValue(id: string, value: unknown): string | boolean | n
       return typeof value === 'boolean' ? value : null;
     case 'number':
       return parseIntegerText(value);
+    case 'real':
+      // One canonical JSON real per value, so the diff and the settle check
+      // cannot disagree (`'2.50'` and `2.5` are the same setting).
+      return parseRealText(value);
     case 'color':
       return typeof value === 'string' && HEX_COLOUR.test(value.trim())
         ? value.trim().toLowerCase()
@@ -521,7 +611,7 @@ export function dirtyFields(
  *
  * Order is the table order (stable across sessions). Each entry carries the
  * **write** key (`crosshairSize`, not the wire field `crosshairPercent`) and a
- * typed value: boolean, integer or string. The language control and the
+ * typed value: boolean, integer, real or string. The language control and the
  * read-only fonts directory are never part of this payload.
  */
 export function applyPayload(

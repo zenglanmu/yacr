@@ -112,8 +112,9 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MATCHPROP", CommandId::MatchProp),
     // GRIPSTRETCH is the **payload path of a pointer gesture**: `GripStretch
     // { id, to }` carries the resolved handle id plus the world point the drag
-    // resolved to. Nothing produces that payload yet (no grip markers, no host
-    // arming, no pointer routing), and the typed command line carries no handle,
+    // resolved to. That payload comes from the host's own pointer routing on the
+    // release of an armed grip drag (`cad_host`), never from this table: this
+    // layer only maps the selector, and the typed command line carries no handle,
     // so the bare selector normalizes and is then refused explicitly by the
     // application layer — it must never be routed to `BeginDraw` or turned into a
     // fabricated drag.

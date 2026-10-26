@@ -141,12 +141,12 @@ test('the start panel offers New through the same admission, not a permanent dis
   assert.ok(source.includes("refusal('NEW', 'qat.new')"));
 });
 
-test('the File tab keeps NEW/SAVE as command tokens enabled by admission', async () => {
-  const { RIBBON_TABS } = await import('../src/ribbon/ribbon-model.ts');
+test('the File tab keeps NEW/SAVE/PLOT as command tokens enabled by admission', async () => {
+  const { RIBBON_TABS, ribbonCommandIds } = await import('../src/ribbon/ribbon-model.ts');
   const { readModule } = await import('./helpers.ts');
   const file = RIBBON_TABS.find(tab => tab.id === 'file').panels.find(panel => panel.id === 'file');
   const byId = Object.fromEntries(file.items.map(item => [item.id, item]));
-  for (const id of ['NEW', 'SAVE']) {
+  for (const id of ['NEW', 'SAVE', 'PLOT']) {
     assert.equal(byId[id].command, id, `${id} must stay a router command token`);
     // No local `disabled`/`enabled` override: the renderer's `canCommand` gate is
     // the only switch.
@@ -154,6 +154,18 @@ test('the File tab keeps NEW/SAVE as command tokens enabled by admission', async
     assert.equal('action' in byId[id], false, id);
     assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
   }
+  // PLOT is the host's SVG/PDF output selector — the very command the `EXPORT`
+  // and `PRINT` aliases normalise onto — so it carries the neighbours' label
+  // style and the shared `canPlot` gate, and the ribbon must offer it.
+  assert.equal(byId.PLOT.labelKey, 'file.plot');
+  assert.equal(byId.PLOT.large, true, 'PLOT is a primary file action like SAVE');
+  assert.equal(CAPABILITY_GATES.PLOT, 'canPlot');
+  assert.deepEqual(admitCommandText('PLOT', { status: empty }), {
+    kind: 'unavailable',
+    command: 'PLOT',
+    reasonKey: 'plot.no_document',
+  });
+  assert.equal(ribbonCommandIds().includes('PLOT'), true, 'the File tab offers PLOT');
   // The ribbon renders a refused command through the shared reason key + state.
   const ribbon = await readModule('components/Ribbon.tsx');
   assert.ok(ribbon.includes(': item.command ? shell.canCommand(item.command)'));

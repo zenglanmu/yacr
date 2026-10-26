@@ -246,6 +246,63 @@ test('ZOOMIN and ZOOMOUT dispatch admitted fixed zoom steps', () => {
   }
 });
 
+// `PLOT` and `RESETVIEW` are host-implemented router selectors that only lacked
+// a chrome entry: `PLOT` is the SVG/PDF output command (the `EXPORT`/`PRINT`
+// aliases normalise onto it) and `RESETVIEW` restores the drawing's saved view.
+// This test locks the three surfaces they now share with every other entry —
+// the display catalog, the loaded vocabulary that actually enables them, and the
+// ribbon that offers them — so a display row cannot drift from the host.
+test('PLOT and RESETVIEW are catalogued and offered by their tabs', async () => {
+  const { readCatalog } = await import('./helpers.ts');
+  const plot = COMMAND_CATALOG.find(command => command.id === 'PLOT');
+  const reset = COMMAND_CATALOG.find(command => command.id === 'RESETVIEW');
+  assert.ok(plot, 'PLOT must be a catalogued display entry');
+  assert.ok(reset, 'RESETVIEW must be a catalogued display entry');
+  // Catalog ordering: PLOT sits in the file group next to SAVE, RESETVIEW in the
+  // view group with the other navigation selectors.
+  assert.deepEqual({ ...plot }, { id: 'PLOT', labelKey: 'file.plot', icon: 'save', group: 'file' });
+  assert.deepEqual({ ...reset }, { id: 'RESETVIEW', labelKey: 'view.reset', icon: 'view', group: 'view' });
+  // `commandCatalog()` is the **host** vocabulary (`cad_commands`), which is what
+  // enables a row: both names must be on it, and admission follows from that.
+  for (const id of ['PLOT', 'RESETVIEW']) {
+    assert.equal(commandCatalog().includes(id), true, `${id} is in the loaded host vocabulary`);
+    assert.equal(isSupportedCommand(id), true, id);
+    assert.equal(isSupportedCommand(id.toLowerCase()), true, `${id} is case-insensitive`);
+    assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
+    assert.equal(admitCommandText(id.toLowerCase(), { status: loaded }).kind, 'admitted', id);
+  }
+  // PLOT keeps the same capability gate as its aliases (`canPlot`): with no
+  // drawing open the honest sentence is "open a drawing first", never
+  // "unsupported". RESETVIEW has no gate, so the same status admits it.
+  assert.equal(CAPABILITY_GATES.PLOT, 'canPlot');
+  assert.deepEqual(admitCommandText('PLOT', { status: empty }), {
+    kind: 'unavailable',
+    command: 'PLOT',
+    reasonKey: 'plot.no_document',
+  });
+  assert.equal(CAPABILITY_GATES.RESETVIEW, undefined, 'RESETVIEW has no capability gate');
+  assert.equal(unavailableReasonKey('RESETVIEW', { status: loaded }), 'command.unsupported');
+  // The ribbon actually offers both selectors (a catalog row nothing renders is
+  // not an affordance), each exactly once in its own tab.
+  const ids = ribbonCommandIds();
+  assert.equal(ids.includes('PLOT'), true, 'PLOT is offered by the File tab');
+  assert.equal(ids.includes('RESETVIEW'), true, 'RESETVIEW is offered by the View tab');
+  const tabItems = tabId => RIBBON_TABS.find(tab => tab.id === tabId).panels.flatMap(panel => panel.items);
+  assert.deepEqual(tabItems('file').filter(item => item.id === 'PLOT').map(item => item.command), ['PLOT']);
+  assert.deepEqual(tabItems('view').filter(item => item.id === 'RESETVIEW').map(item => item.command), ['RESETVIEW']);
+  // Both are router tokens, never a local action: the renderer's `canCommand`
+  // admission stays the only switch (no second, local enable path).
+  const resetItem = tabItems('view').find(item => item.id === 'RESETVIEW');
+  assert.equal(resetItem.action, undefined, 'RESETVIEW must dispatch through the router');
+  // Both label keys resolve in both catalogs — no new copy is invented here.
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  for (const [id, key] of [['PLOT', 'file.plot'], ['RESETVIEW', 'view.reset']]) {
+    assert.equal(typeof zh[key], 'string', `${id}: ${key} (zh-CN)`);
+    assert.equal(typeof en[key], 'string', `${id}: ${key} (en)`);
+  }
+});
+
 test('ORBIT stays visible but gesture-disabled with an explicit orbit reason', async () => {
   const { readModule, readCatalog } = await import('./helpers.ts');
   // The router knows ORBIT, but a click cannot supply yaw/pitch; the chrome
