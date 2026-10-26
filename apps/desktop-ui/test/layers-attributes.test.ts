@@ -382,10 +382,18 @@ test('the copy states what off, frozen, locked and plottable actually do', async
   assert.match(en['layers.attributes.hint'], /off and frozen both hide/i);
   assert.match(en['layers.attributes.hint'], /locked refuses creating, changing or deleting/i);
   assert.match(en['layers.attributes.hint'], /plotting does not read it yet/i);
-  // The color control says which identity it replaces.
+  // The colour cell says which identity it writes, and which ones a layer cannot
+  // take: an index color from the palette, a true color from the value field, and
+  // no by-layer/by-block because there is no layer above a layer.
   assert.match(en['layers.color.hint'], /#RRGGBB/);
   assert.match(en['layers.color.hint'], /index color/i);
-  assert.match(en['layers.color.hint'], /does not recolor/i);
+  assert.match(en['layers.color.hint'], /aci:N/);
+  assert.match(en['layers.color.hint'], /cannot be by-layer/i);
+  // The copy does not claim the drawing is left alone: a ByLayer object does take
+  // the layer's new colour on the next expansion (cad-db resolves it), so the hint
+  // names exactly which objects follow and which keep their own colour.
+  assert.match(en['layers.color.hint'], /drawn by layer show the new color/i);
+  assert.match(en['layers.color.hint'], /explicit color keep it/i);
   assert.match(en['layers.color.marker'], /not reported/i);
   // And both languages carry the same facts (no bare "已冻结" that explains
   // nothing): each Chinese hint is at least as long as its English sibling's
@@ -440,14 +448,19 @@ test('the swatch, the marks and the details line are the palette\'s own rows', a
     'hintId={colorHintId}', 'busy={controlsBusy}', 'onPickColor=', 'onToggleFlag=', 'onClose={closeDetails}']) {
     assert.ok(head.includes(prop), `the details line is handed ${prop}`);
   }
-  // The panel renders what the row says and sends one write per press.
+  // The panel renders what the row says and sends one write per press. The colour
+  // cell is the shared in-DOM chooser: no webview colour dialog, no symbolic entry
+  // the layer grammar would refuse, and the free-form entry routed by the layer
+  // grammar's own `colorPayload`.
   const code = details.slice(details.indexOf('export function'));
   assert.ok(code.includes('className="layers__details"'));
   assert.ok(code.includes('role="group"'));
   assert.ok(details.includes("aria-label={t('layers.attributes')}"), 'the panel is named in catalog copy');
-  assert.equal(code.split('type="color"').length - 1, 1, 'one color control');
-  assert.ok(details.includes('onChange={event => onPickColor(event.target.value)}'),
-    'one committed change is one write');
+  assert.equal(code.split('type="color"').length - 1, 0, 'no webview colour dialog');
+  assert.ok(details.includes('<ColorField'), 'one shared colour cell');
+  assert.ok(details.includes('symbols={LAYER_COLOR_SYMBOLS}'), 'only entries the layer grammar takes');
+  assert.ok(details.includes('custom={colorPayload}'), 'the free-form entry is the layer grammar');
+  assert.ok(details.includes('onPick={onPickColor}'), 'one committed press is one write');
   assert.ok(details.includes("t('layers.color.aci', { index: layer.color.aci })"));
   assert.ok(details.includes('{layerFlags(layer).map(flag => ('));
   assert.ok(details.includes('aria-pressed={flag.value}'));
@@ -507,7 +520,10 @@ test('the attribute styles reuse the chrome tokens and keep the resting row 28px
   // The dot keeps its 7px and gains a wider pointer target, not a wider column.
   assert.ok(block.includes('.layers__swatch::after'));
   assert.ok(block.includes('.layers__swatch.is-tone'));
-  assert.ok(block.includes('.layers__color-input'), 'the native color control is styled, not replaced');
+  // The details line has no colour control of its own: it renders the shared
+  // colour cell, styled once in that component's own block (see below).
+  assert.equal(block.includes('.layers__color-input'), false, 'no native colour dialog is left');
+  assert.ok(css.includes('.color-field__trigger'), 'the shared colour cell is the one control');
   // Same tokens as the rest of the chrome; nothing floats, nothing goes
   // pointer-transparent inside the translucent dock.
   for (const token of ['var(--field)', 'var(--line-soft)', 'var(--focus)', 'var(--pressed)', 'var(--text-muted)']) {

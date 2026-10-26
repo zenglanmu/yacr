@@ -131,15 +131,29 @@ function isPoint(point: unknown): point is LogPoint {
   return Array.isArray(point) && Number.isFinite(point[0]) && Number.isFinite(point[1]);
 }
 
-/** The known display unit symbol, or `null` for drawing units (never invented). */
-function displayUnit(unit: unknown): string | null {
+/**
+ * The unit text of a numeric value row, or `null` when the row must stay unit-less.
+ *
+ * `null` is the host's **own statement** that the source unit is unknown: it maps
+ * `Unit::DrawingUnits` onto `unit: null` and never onto a symbol, so a `null` unit
+ * is named with the catalog's drawing-units label (`units.unknown`) instead of
+ * dropping the suffix. A measured number is therefore never silently read as
+ * millimetres, and the unit is never invented either — a missing or malformed
+ * field is a broken row, not a claim about the drawing, so it renders no unit.
+ */
+function unitLabel(t: Translator, unit: unknown): string | null {
+  if (unit === null) return t('units.unknown');
   return typeof unit === 'string' && unit.length > 0 ? unit : null;
 }
 
-/** An area's unit is squared; drawing units stay unit-less. */
+/**
+ * An area's unit is squared — the same unit text in the squared template, so a
+ * drawing-units area reads as the squared drawing-units label, not as a bare
+ * number that could be taken for square millimetres.
+ */
 function areaUnit(t: Translator, unit: unknown): string | null {
-  const symbol = displayUnit(unit);
-  return symbol === null ? null : t('command.log.unit_squared', { unit: symbol });
+  const label = unitLabel(t, unit);
+  return label === null ? null : t('command.log.unit_squared', { unit: label });
 }
 
 function precisionLabel(t: Translator, precision: unknown): string | null {
@@ -166,7 +180,10 @@ function sequenceOf(entry: Record<string, unknown>): CommandLogSequence {
 }
 
 function distanceLines(t: Translator, measurement: Record<string, unknown>, formatted: string): CommandLogLine[] {
-  const unit = displayUnit(measurement.unit);
+  // The value and every delta share one unit: the deltas are the components of
+  // the same measured distance, so a drawing-units distance names drawing units on
+  // all of them.
+  const unit = unitLabel(t, measurement.unit);
   const lines: CommandLogLine[] = [{
     tone: 'value',
     label: t('command.log.distance'),
@@ -215,11 +232,12 @@ function measurementLines(t: Translator, measurement: unknown): CommandLogLine[]
     { tone: 'value', label, text, unit, meta },
   ];
   if (algorithm === 'angle') return single(t('command.log.angle'), `${formatted}${DEGREE_SIGN}`, null);
-  if (algorithm === 'polyline') return single(t('command.log.length'), formatted, displayUnit(record.unit));
+  if (algorithm === 'polyline') return single(t('command.log.length'), formatted, unitLabel(t, record.unit));
   if (algorithm === 'area') return single(t('command.log.area'), formatted, areaUnit(t, record.unit));
   // A future algorithm token is shown by its raw key — the properties palette's
-  // rule for an unknown machine key, never an invented label.
-  return single(algorithm, formatted, displayUnit(record.unit));
+  // rule for an unknown machine key, never an invented label — with the same unit
+  // rule: a reported symbol as-is, `null` named as drawing units.
+  return single(algorithm, formatted, unitLabel(t, record.unit));
 }
 
 /**
@@ -274,7 +292,9 @@ function tokenLabel(
  * `{ position, space, snap, precision, unit, pixelDistance }`. The line prints the
  * three ordinates with the same fixed decimal count every measurement uses,
  * joined by `", "` (AutoCAD's own `X, Y, Z` shape), the drawing unit when the host
- * reported one, and a meta chip naming the space and — when there was one — the
+ * reported one — and, when the host reported none (`unit: null` = drawing units),
+ * the catalog's drawing-units label, so a coordinate is never implied to be
+ * millimetres — and a meta chip naming the space and — when there was one — the
  * object snap that produced the point.
  *
  * Nothing is invented: an ordinate that is not a finite number ends the run rather
@@ -304,7 +324,7 @@ function pointLines(t: Translator, point: unknown): CommandLogLine[] {
     tone: 'value',
     label: t('command.log.point'),
     text: ordinates.join(', '),
-    unit: displayUnit(record.unit),
+    unit: unitLabel(t, record.unit),
     meta: meta === '' ? null : meta,
   }];
 }

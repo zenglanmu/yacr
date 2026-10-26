@@ -41,6 +41,10 @@ const CATALOG_KEYS = [
   'command.log.snap.perpendicular',
   'command.log.snap.intersection',
   'command.log.unit_squared',
+  // The drawing-units label a `unit: null` row falls back to (§3.3: an unknown
+  // source unit is named, never dropped and never assumed to be millimetres). It
+  // is the shared `units.*` family's key, not a second `command.log` copy.
+  'units.unknown',
   'command.log.precision.approximate',
   'command.log.precision.unknown',
   'command.log.error',
@@ -114,12 +118,15 @@ test('a two-point distance echoes the AutoCAD group with computed angle and delt
   const row = formatCommandLogEntry(result(), t);
   assert.equal(row.kind, 'result');
   assert.equal(row.sequence, 2);
+  // The fixture reports `unit: null`, which is the host's drawing-units statement:
+  // the value and its deltas name drawing units, the bearing does not.
+  const drawingUnits = en['units.unknown'];
   assert.deepEqual(row.lines, [
-    { tone: 'value', label: en['command.log.distance'], text: '5.0000', unit: null, meta: null },
+    { tone: 'value', label: en['command.log.distance'], text: '5.0000', unit: drawingUnits, meta: null },
     { tone: 'delta', label: en['command.log.angle'], text: '53.1301\u00B0', unit: null, meta: null },
-    { tone: 'delta', label: en['command.log.delta_x'], text: '3.0000', unit: null, meta: null },
-    { tone: 'delta', label: en['command.log.delta_y'], text: '4.0000', unit: null, meta: null },
-    { tone: 'delta', label: en['command.log.delta_z'], text: '0.0000', unit: null, meta: null },
+    { tone: 'delta', label: en['command.log.delta_x'], text: '3.0000', unit: drawingUnits, meta: null },
+    { tone: 'delta', label: en['command.log.delta_y'], text: '4.0000', unit: drawingUnits, meta: null },
+    { tone: 'delta', label: en['command.log.delta_z'], text: '0.0000', unit: drawingUnits, meta: null },
   ]);
 });
 
@@ -133,19 +140,54 @@ test('the same group reads in the active language', () => {
 });
 
 test('a distance without exactly two usable points prints the value alone', () => {
-  const alone = { tone: 'value', label: en['command.log.distance'], text: '5.0000', unit: null, meta: null };
+  const alone = {
+    tone: 'value',
+    label: en['command.log.distance'],
+    text: '5.0000',
+    unit: en['units.unknown'],
+    meta: null,
+  };
   for (const points of [[], [[1, 2, 0]], [[1, 2, 0], [4, 6, 0], [7, 8, 0]], [[1, 2, 0], [null, 6, 0]]]) {
     const row = formatCommandLogEntry(result({ measurement: measurement({ points }) }), t);
     assert.deepEqual(row.lines, [alone], `points ${JSON.stringify(points)} must not gain a fabricated group`);
   }
 });
 
-test('a known unit is shown and drawing units (null) stay unit-less', () => {
+test('a known unit is shown as itself and drawing units are named, not dropped', () => {
   const metric = formatCommandLogEntry(result({ measurement: measurement({ unit: 'mm' }) }), t);
   assert.equal(metric.lines[0].unit, 'mm');
   assert.equal(metric.lines[2].unit, 'mm', 'the deltas carry the same unit as the distance');
   const drawing = formatCommandLogEntry(result({ measurement: measurement({ unit: null }) }), t);
-  assert.equal(drawing.lines[0].unit, null);
+  assert.equal(drawing.lines[0].unit, en['units.unknown']);
+  // A unit field that is absent or not a string is a broken row, not a claim about
+  // the drawing: it renders no unit instead of being relabelled into drawing units.
+  for (const unit of [undefined, 7, '']) {
+    const row = formatCommandLogEntry(result({ measurement: measurement({ unit }) }), t);
+    assert.equal(row.lines[0].unit, null, `unit ${JSON.stringify(unit)} is not a drawing-units statement`);
+  }
+});
+
+test('an unknown source unit reads as the drawing-units label in the active language', () => {
+  // §3.3: never default to millimetres, never drop the suffix. Both catalogs carry
+  // the same label through the one key `units.unknown`.
+  const distanceZh = formatCommandLogEntry(result({ measurement: measurement({ unit: null }) }), tzh);
+  assert.equal(distanceZh.lines[0].unit, zh['units.unknown']);
+  assert.equal(distanceZh.lines[0].unit, '图纸单位');
+  const polylineZh = formatCommandLogEntry(
+    result({ measurement: measurement({ algorithm: 'polyline', value: 10, unit: null }) }),
+    tzh,
+  );
+  assert.equal(polylineZh.lines[0].unit, zh['units.unknown']);
+  const areaZh = formatCommandLogEntry(
+    result({ measurement: measurement({ algorithm: 'area', value: 12.5, unit: null }) }),
+    tzh,
+  );
+  assert.equal(areaZh.lines[0].unit, zh['command.log.unit_squared'].replace('{unit}', zh['units.unknown']));
+  assert.equal(areaZh.lines[0].unit, '图纸单位\u00B2');
+  const pointZh = formatCommandLogEntry(pointResult(), tzh);
+  assert.equal(pointZh.lines[0].unit, zh['units.unknown']);
+  // The English catalog names the same fact.
+  assert.equal(en['units.unknown'], 'Drawing units');
 });
 
 test('polyline, angle and area each print their own labelled line', () => {
@@ -154,20 +196,36 @@ test('polyline, angle and area each print their own labelled line', () => {
     t,
   );
   assert.deepEqual(polyline.lines, [
-    { tone: 'value', label: en['command.log.length'], text: '10.0000', unit: null, meta: null },
+    { tone: 'value', label: en['command.log.length'], text: '10.0000', unit: en['units.unknown'], meta: null },
   ]);
-
-  // The backend's Angle3Points value is already in degrees, so it is printed with
-  // the degree mark and no unit context.
-  const angle = formatCommandLogEntry(
-    result({ measurement: measurement({ algorithm: 'angle', value: 90, points: [[1, 0, 0], [0, 0, 0], [0, 1, 0]] }) }),
+  const polylineMetric = formatCommandLogEntry(
+    result({ measurement: measurement({ algorithm: 'polyline', value: 10, unit: 'm', points: [] }) }),
     t,
   );
-  assert.deepEqual(angle.lines, [
-    { tone: 'value', label: en['command.log.angle'], text: '90.0000\u00B0', unit: null, meta: null },
-  ]);
+  assert.equal(polylineMetric.lines[0].unit, 'm');
 
-  // An area's unit is squared; drawing units stay absent.
+  // The backend's Angle3Points value is already in degrees, so it is printed with
+  // the degree mark and no unit context: an angle is unit-less **by design**, not
+  // because its source unit is unknown — the degree sign is its unit.
+  for (const measurementUnit of [null, 'mm']) {
+    const angle = formatCommandLogEntry(
+      result({
+        measurement: measurement({
+          algorithm: 'angle',
+          value: 90,
+          unit: measurementUnit,
+          points: [[1, 0, 0], [0, 0, 0], [0, 1, 0]],
+        }),
+      }),
+      t,
+    );
+    assert.deepEqual(angle.lines, [
+      { tone: 'value', label: en['command.log.angle'], text: '90.0000\u00B0', unit: null, meta: null },
+    ], `an angle stays unit-less even when the wire carries ${JSON.stringify(measurementUnit)}`);
+  }
+
+  // An area's unit is squared, and a drawing-units area is the squared form of the
+  // drawing-units label — never a bare number that could read as square millimetres.
   const area = formatCommandLogEntry(
     result({ measurement: measurement({ algorithm: 'area', value: 12.5, unit: 'mm', points: [[0, 0, 0], [5, 0, 0], [0, 2, 0]] }) }),
     t,
@@ -179,7 +237,11 @@ test('polyline, angle and area each print their own labelled line', () => {
     result({ measurement: measurement({ algorithm: 'area', value: 12.5, unit: null }) }),
     t,
   );
-  assert.equal(areaInDrawingUnits.lines[0].unit, null);
+  assert.equal(
+    areaInDrawingUnits.lines[0].unit,
+    en['command.log.unit_squared'].replace('{unit}', en['units.unknown']),
+  );
+  assert.equal(areaInDrawingUnits.lines[0].unit, 'Drawing units\u00B2');
 });
 
 test('an unknown algorithm token is shown by its raw key, never a fabricated label', () => {
@@ -226,7 +288,7 @@ test('an ID point echoes its three ordinates with the measurement formatter', ()
     tone: 'value',
     label: en['command.log.point'],
     text: '12.5000, -3.0000, 0.0000',
-    unit: null,
+    unit: en['units.unknown'],
     meta: `${en['command.log.space.model']} \u00b7 ${en['command.log.snap.endpoint']}`,
   }]);
   // The ordinates use the measurement formatter, so they agree with every other
@@ -351,10 +413,11 @@ test('malformed entries and a non-array log render nothing', () => {
 });
 
 test('every echo key exists in both catalogs with the same placeholders', () => {
-  // 32 keys: label, prompt, four result labels (Distance/Angle/Length/Area), the
+  // 33 keys: label, prompt, four result labels (Distance/Angle/Length/Area), the
   // point label with its two space and six snap labels, three deltas, the
-  // squared-unit template, two precision chips, the generic refusal and ten codes.
-  assert.equal(CATALOG_KEYS.length, 32);
+  // squared-unit template, the shared drawing-units label, two precision chips, the
+  // generic refusal and ten codes.
+  assert.equal(CATALOG_KEYS.length, 33);
   assert.equal(COMMAND_LOG_ERROR_CODES.length, 10);
   for (const key of CATALOG_KEYS) {
     assert.equal(typeof en[key], 'string', `en missing ${key}`);

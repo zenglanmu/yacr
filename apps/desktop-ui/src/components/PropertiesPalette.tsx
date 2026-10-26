@@ -22,7 +22,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons.tsx';
 import { IconButton } from './primitives.tsx';
+import { ColorField } from './ColorChooser.tsx';
 import { SelectionTextEditor } from './SelectionTextEditor.tsx';
+import { ENTITY_COLOR_SYMBOLS } from '../color/color-value.ts';
 import { useI18n, useShell } from '../context.ts';
 import type { ComposingKeyEvent } from './key-events.ts';
 import type { Translator } from '../i18n.ts';
@@ -90,9 +92,11 @@ interface RowEditorProps {
   readonly onChange: (row: PropertyRowView, value: string) => void;
   readonly onCommit: (row: PropertyRowView) => void;
   readonly onCancel: (row: PropertyRowView) => void;
+  /** A chooser pick: one value straight through the same commit path. */
+  readonly onPick: (row: PropertyRowView, value: string) => void;
 }
 
-function RowEditor({ row, entry, t, onChange, onCommit, onCancel }: RowEditorProps) {
+function RowEditor({ row, entry, t, onChange, onCommit, onCancel, onPick }: RowEditorProps) {
   const id = `properties-value-${row.key}`;
   const saving = entry.sent !== null;
   const mixedTitle = row.mixed ? row.mixedHelp : null;
@@ -187,7 +191,7 @@ function RowEditor({ row, entry, t, onChange, onCommit, onCancel }: RowEditorPro
     );
   }
 
-  return (
+  const textField = (
     <input
       {...common}
       type="text"
@@ -196,6 +200,27 @@ function RowEditor({ row, entry, t, onChange, onCommit, onCancel }: RowEditorPro
       onKeyDown={keyHandler}
     />
   );
+
+  // The colour row keeps its text field (the fallback for any syntax the grid
+  // cannot say) and gains the chooser beside it: the swatch trigger opens the
+  // standard indexed palette and the entity grammar's two symbolic entries. A pick
+  // is one value straight through `onPick` — the same commit path Enter uses, so
+  // there is one write per choice and one refusal vocabulary.
+  if (row.key === 'color') {
+    return (
+      <ColorField
+        value={current}
+        label={t('properties.row.color')}
+        symbols={ENTITY_COLOR_SYMBOLS}
+        busy={saving}
+        onPick={value => onPick(row, value)}
+      >
+        {textField}
+      </ColorField>
+    );
+  }
+
+  return textField;
 }
 
 export function PropertiesPalette() {
@@ -333,6 +358,21 @@ export function PropertiesPalette() {
     void send(row, entry ? entry.draft : null);
   }
 
+  /**
+   * A chooser pick: one value, one write, through the very path Enter uses.
+   *
+   * The chooser only produces spellings the grammar already takes (`aci:N`, or
+   * `ByLayer`/`ByBlock`), so no local validation is owed; a row that already has a
+   * write queued drops the press (single flight, exactly like `commit`), and a
+   * host refusal restores the host value and shows its code through the palette's
+   * existing error line.
+   */
+  function choose(row: PropertyRowView, value: string) {
+    const entry = editsRef.current[row.key];
+    if (entry && entry.sent !== null) return;
+    void send(row, value);
+  }
+
   function cancel(row: PropertyRowView) {
     clear(row.key);
   }
@@ -400,6 +440,7 @@ export function PropertiesPalette() {
                               onChange={change}
                               onCommit={commit}
                               onCancel={cancel}
+                              onPick={choose}
                             />
                             {message ? (
                               <p className="properties__row-error" role="alert" title={message.code}>

@@ -615,16 +615,9 @@ button, input, select { font: inherit; color: inherit; }
 /* The close button sits at the far end of the head, so it stays put whatever the
  * layer's hex/index text is. */
 .layers__details-head .ui-icon-button { margin-left: auto; }
-/* The native color input: 22×17 in the field token. It writes `#rrggbb`, which
- * replaces the layer's index color — the hint under it says so. */
-.layers__color-input {
-  flex: none; width: 22px; height: 17px; padding: 0;
-  background: var(--field); border: 1px solid var(--line-soft); border-radius: var(--radius);
-  cursor: pointer;
-}
-.layers__color-input::-webkit-color-swatch-wrapper { padding: 1px; }
-.layers__color-input::-webkit-color-swatch { border: 0; border-radius: 1px; }
-.layers__color-input:focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+/* The colour cell of the details line is the shared `.color-field` trigger (see
+ * the chooser block at the end of this file): one control for both palettes, so
+ * the dock needs no third colour surface of its own. */
 .layers__flags { display: flex; flex-wrap: wrap; gap: 3px; }
 /* The read-only secondaries: the mono scale the rows already use, verbatim values
  * (no unit conversion), labels on the UI scale so a value never reads as a name. */
@@ -1004,3 +997,119 @@ button, input, select { font: inherit; color: inherit; }
 }
 .context-menu__item[aria-disabled="true"] .context-menu__command { color: var(--text-disabled); }
 .context-menu__separator { height: 1px; margin: 3px 2px; background: var(--line-soft); opacity: .5; }
+
+/* Color chooser ----------------------------------------------------------- */
+/* The in-DOM chooser both palettes open (`ColorChooser.tsx`): the swatch trigger
+   plus the anchored popover. The popover uses the shortcut menu's placement rule
+   (`position: fixed`, measured against the trigger's rect), so it paints above the
+   docked palettes and the CAD partition and is never clipped by the palette body's
+   own scroll. It reuses the same chrome surface tokens as the menu (radius, border,
+   shadow, `--chrome-2`), so it reads as part of the shell rather than as a system
+   dialog — it replaces the webview's own colour dialog, which could neither show
+   the indexed palette nor keep a colour's ACI identity.
+
+   The grid is 15 columns: the standard palette is 255 entries, so it is exactly 17
+   rows and no swatch reflows when a label or the locale changes. Hover is a ring,
+   never a scale, so nothing overlaps its neighbours. */
+.color-field { display: flex; align-items: center; gap: 5px; min-width: 0; }
+/* The row's own field (the properties palette's text entry) keeps the rest of the
+   cell; the trigger is a fixed square. */
+.color-field > input { flex: 1 1 auto; min-width: 0; }
+.color-field__trigger {
+  flex: none;
+  width: 18px; height: 18px; padding: 0;
+  border: 1px solid var(--line-soft); border-radius: 3px;
+  background-clip: padding-box;
+  cursor: pointer;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast), background-color var(--t-fast);
+}
+.color-field__trigger:hover { border-color: var(--text-muted); }
+.color-field__trigger:focus-visible {
+  outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus);
+}
+.color-field__trigger[aria-expanded='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+/* A symbolic value (`ByLayer`/`ByBlock`) has no colour of its own: a neutral
+   diagonal says "inherited", and the row's own value text says which token it is.
+   The trigger never paints a colour the drawing would not store. */
+.color-field__trigger.is-symbolic {
+  background-color: var(--field);
+  background-image: repeating-linear-gradient(
+    45deg, var(--line-soft) 0 2px, transparent 2px 4px
+  );
+}
+.color-chooser {
+  position: fixed;
+  z-index: 50;
+  display: flex; flex-direction: column; gap: 5px;
+  width: 248px;
+  /* `CONTEXT_MENU_MARGIN`'s 8px on both sides, like the shortcut menu: a chooser
+     taller than the window scrolls inside itself instead of running past the edge. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px 8px 8px;
+  background: var(--chrome-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .42);
+  animation: fade var(--t-fast) both;
+}
+/* The first frame exists only to be measured; it must never be seen. */
+.color-chooser.is-unplaced { visibility: hidden; }
+.color-chooser__head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.color-chooser__title { color: var(--text); font-size: 11.5px; font-weight: 600; }
+.color-chooser__label {
+  margin: 3px 0 0; color: var(--text-muted);
+  font-family: var(--font-ui); font-size: 10px; letter-spacing: .4px;
+  text-transform: uppercase;
+}
+.color-chooser__symbols { display: flex; gap: 4px; }
+.color-chooser__symbol {
+  flex: 1 1 auto; padding: 3px 6px;
+  background: transparent; color: var(--text-dim);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  font-family: var(--font-mono); font-size: 11px;
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.color-chooser__symbol:hover { background: var(--hover); color: var(--text); }
+.color-chooser__symbol:focus-visible {
+  outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus);
+}
+.color-chooser__symbol[aria-pressed='true'] {
+  background: var(--pressed); border-color: var(--accent); color: var(--text);
+}
+.color-chooser__grid { display: grid; grid-template-columns: repeat(15, 1fr); gap: 2px; }
+.color-chooser__swatch {
+  aspect-ratio: 1; width: 100%; padding: 0;
+  border: 1px solid rgba(0, 0, 0, .35); border-radius: 2px;
+  cursor: pointer;
+  transition: box-shadow var(--t-fast);
+}
+.color-chooser__swatch:hover { box-shadow: 0 0 0 1px var(--text); }
+.color-chooser__swatch:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* The selected index carries a ring on both sides of its own colour, so it reads on
+   white and on black alike. */
+.color-chooser__swatch[aria-pressed='true'] {
+  box-shadow: 0 0 0 1px var(--chrome-2), 0 0 0 2px var(--accent);
+}
+.color-chooser__custom { display: flex; flex-direction: column; gap: 3px; margin-top: 3px; }
+.color-chooser__custom-label { color: var(--text-muted); font-size: 10.5px; }
+.color-chooser__custom-row { display: flex; align-items: center; gap: 4px; }
+/* The entry's apply button is `aria-disabled` (never `disabled`, so the keyboard
+   stays where it is) while the text is not a value this surface would send: it has
+   to *look* unavailable, or the press reads as broken rather than as refused. */
+.color-chooser__custom-row .ui-button[aria-disabled='true'] {
+  color: var(--text-disabled); cursor: not-allowed;
+}
+.color-chooser__custom-row .ui-button[aria-disabled='true']:hover { background: transparent; }
+.color-chooser__input {
+  flex: 1 1 auto; min-width: 0; height: 22px; padding: 0 6px;
+  background: var(--field); color: var(--text);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  font-family: var(--font-mono); font-size: 11px;
+}
+.color-chooser__input:focus-visible {
+  outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus);
+}
+.color-chooser__hint { margin: 0; color: var(--text-muted); font-size: 10px; line-height: 1.35; }

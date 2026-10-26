@@ -231,15 +231,30 @@ export function layerAttributes(row: LayerRow | null | undefined): LayerAttribut
 }
 
 /**
- * The `#RRGGBB` a color control's value means, or `''` when it is not a hex color.
+ * The wire value a colour control's value means, or `''` when the layer's colour
+ * grammar takes none of it.
  *
- * The host's color grammar takes `#RRGGBB` (its row projection hands back
- * lowercase), and a native `<input type="color">` produces `#rrggbb`. Both
- * spellings are the same color, so the value is upper-cased here rather than
- * sent twice; anything else — an empty string before a pick, a named color, a
- * shorthand hex — answers `''` and is never sent at all.
+ * Two spellings reach this surface now, and both are the **layer** grammar's own
+ * (one parser, no new capability):
+ *
+ *  * a true colour, `#RRGGBB` — upper-cased here so one colour is never sent under
+ *    two casings (the wire's row projection hands back lowercase, so a typed
+ *    uppercase has to mean the same colour);
+ *  * an indexed palette colour, `aci:1..=255` — what a swatch in the shared
+ *    colour chooser writes, so a pick keeps the drawing's ACI identity instead of
+ *    silently becoming a true colour. `aci:0` (ByBlock) and `aci:256` (ByLayer)
+ *    are **refused**: a layer has no layer above it, and this surface offers no
+ *    symbolic entry for the same reason.
+ *
+ * Anything else — an empty field, a named colour, a shorthand hex, `ByLayer`, a
+ * three-part `r,g,b` this control never emits — answers `''` and is never sent.
  */
 export function colorPayload(value: unknown): string {
   const raw = typeof value === 'string' ? value.trim() : '';
+  const indexed = /^aci:(\d+)$/i.exec(raw);
+  if (indexed) {
+    const index = Number(indexed[1]);
+    return Number.isSafeInteger(index) && index >= 1 && index <= 255 ? `aci:${index}` : '';
+  }
   return HEX_COLOR.test(raw) ? `#${raw.slice(1).toUpperCase()}` : '';
 }

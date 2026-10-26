@@ -72,10 +72,11 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | 三点角度 | **实现**（顶点 = 第 2 点，按活动空间/工作平面求角） | `crates/cad-measure/src/engine.rs:91-99`（`Angle3Points` + `angle_at_vertex`）；命令面 `MEASUREANGLE` |
 | 纸空间 / 视口反变换 | 纸面直接测量；`ViewportModel` **需有效反变换**，否则**禁用**模型测量；纸空间 `ANGLE` 显式拒绝 | `crates/cad-app/src/space.rs:52-116`、`crates/cad-measure/src/engine.rs:138-141` |
 | 显示 LOD 不影响计算 / 代理标记缓存几何 | 实现（SPLINE 解析/采样与显示 LOD 解耦；天正代理标缓存几何） | 见上表 SPLINE 行与「天正/探索者代理」行 |
-| **源单位未知 → 显示「图纸单位」** | **未实现（与 spec 偏离；TS 侧注释明写为有意选择）**：测量回显 `unit: null` ⇒ UI **不加单位后缀**，用户看不到「图纸单位」 | `crates/cad-host/src/command_log.rs:183-192`（`DrawingUnits → None`）、`apps/desktop-ui/src/commands/command-log.ts:135-143`（`displayUnit`/`areaUnit` 对 null 返回 null，`:139` 注释明写 *drawing units stay unit-less*）、`:218,222`；i18n 键 `units.unknown`（`zh-CN.json:367` / `en.json:367`）**无生产消费者**（仅 `crates/cad-ui-core/src/i18n.rs:730-739` 测试与迁移守卫夹具引用）。`docs/handoff.md`「接线验收」里「未知源单位显示图纸单位」据此为**未落地验收项**，不是现状 |
+| **源单位未知 → 显示「图纸单位」** | **已实现（2026-10-26 补齐）**：测量与点回显的 `unit: null`（宿主对 `Unit::DrawingUnits` 的唯一投影）现在渲染目录键 `units.unknown`（图纸单位 / “Drawing units”），面积按其平方模板得 `图纸单位²`；`angle` 仍只带 `°`（角度自带单位，不是未知源单位）。**区分保留**：字段缺失/非字符串/空串仍**不**加后缀——那是坏行，不是宿主声明「图纸单位」 | `crates/cad-host/src/command_log.rs:183-192`（`DrawingUnits → None`）、`apps/desktop-ui/src/commands/command-log.ts:144-147`（`unitLabel`）、`:154-157`（`areaUnit` 平方同一个标签）、ID 点行同路径；测试 `apps/desktop-ui/test/command-log.test.ts`「an unknown source unit reads as the drawing-units label in the active language」 |
 
-> 该偏离**不得**被写成「已满足规范」；补文案属代码改动（消费 `units.unknown` 或写 `DrawingUnits`
-> 标签），不在本轮文档对账范围内。
+> 该条**已闭环**（2026-10-26）：`units.unknown` 现由命令窗口真实消费；`docs/handoff.md`「接线验收」里
+> 「未知源单位显示图纸单位」一句至此成立。仍未做的是**用户指定单位/校准**（spec 同句后半段）——
+> 那需要新的单位设置面，不在本批范围。
 
 #### 测量命令面（含 2026-10-26 新增 `ID`）
 
@@ -441,8 +442,9 @@ Apply/OK/Cancel 为 AutoCAD 语义（本地暂存、只发 diff、写失败标�
 选项弹窗（720×560 五页签）——证据驱动为 `YACR_PROBE_UI_DIALOGS`（**触发非真鼠标**，下游为
 生产路径）。**仍未做（明确不声称）**：弹窗内交互与属性编辑提交/拒绝的 GUI 实测（只有模型+源码测试）；真实 GUI/视觉验收的完整覆盖面（本批**没有**截图或像素判据，选项弹窗与属性面板的
 真实窗口行为仅由纯函数模型 + 源码扫描 + 宿主契约测试覆盖，语言的双窗口传播标为 **NOT VERIFIED**）；
-颜色的色板选择器（仅文本语法输入）；自动保存/.bak/xref/CTB/GPU 选择/快捷键自定义/夹点/
-极轴/动态 UCS（AutoCAD Options 中存在但本仓库**无行为可接**，因此不显示）。
+自动保存/.bak/xref/CTB/GPU 选择/快捷键自定义/夹点/
+极轴/动态 UCS（AutoCAD Options 中存在但本仓库**无行为可接**，因此不显示）。（**颜色色板选择器已于
+2026-10-26 补上**，见下方「颜色选择器」条。）
 
 **2026-10-25 补齐（React 宿主，源码/单测证据；真机像素 NOT RUN）**：`NEW`/`SAVE`/`PLOT` 及其别名
 经宿主能力布尔（`canNew`/`canSave`/`canPlot`）真实准入，Linux 保存目标走 XDG portal `save_file`；
@@ -507,6 +509,24 @@ plot-style **名字**无法写出（写入器只发句柄）→ 写缺省并记 
 `locked` / `frozen` / `off` / `plottable`：它们仍是**显示/编辑输入**（线缆只是把数据库状态投影给面板，
 不参与判定；**锁定行为在数据库写路径上，读取线缆不改变任何行为**）；`dom-canvas` 载体
 与其它图层写一样**显式拒绝**该 IPC。面板 UI 已接线：真实色块（`row.color.rgb`，缺省才回落名字哈希且标注）、`off`/`frozen`/`locked`/`plottable` chips（静止行最多两枚 + `+N`，其余在展开详情里），以及只读的线型/线宽/透明度；文案明确写道「关闭与冻结当前同走可见性路径、打印只存储」。
+
+**2026-10-26 颜色选择器（属性/图层共用；源码 + 单测证据，运行时挂载与真机像素 NOT RUN）**：属性面板的
+`color` 行与图层详情行的颜色单元现在共用一个 **in-DOM** 选择器
+（`apps/desktop-ui/src/components/ColorChooser.tsx`、纯模型 `src/color/color-value.ts`），不再依赖
+webview 自带颜色对话框。它提供且**只**提供写语法真正接受的东西：① 符号项——实体颜色给
+`ByLayer`/`ByBlock`（`crates/cad-app/src/property_value` 的 `color` 语法两者都收；AutoCAD 显示的
+`ByObject` 是 `ByBlock` 的别名，**不在**语法内，因此不提供该字面量），图层颜色**不提供任何符号项**
+（`crates/cad-app/src/layer_property` 按名字拒绝 `ByLayer`/`ByBlock`，因为图层之上没有图层）；
+② 标准索引色板 **ACI 1..=255** 的色块网格，点击写入 **`aci:N`**——与行投影同一拼写、同一解析器，
+**没有新值形式**；色板逐项镜像 `crates/cad-app/src/property_value/aci.rs`，并由测试直接读该 Rust 源比对；
+③ 属性行保留**原有文本输入**作为兜底（任何网格表达不了的语法仍在那里输入），图层行提供按该键语法归一化的
+自由输入（`colorPayload`：`aci:1..=255` / `#RRGGBB`，其余不发送）。写入仍只走既有唯一通道：属性 =
+`shell.applySelectedProperty`（**不** `invoke`），图层 = store 的 `setProperty` 单飞与读回；拒绝照旧进各自
+既有错误行，**没有**新 toast。浮层行为沿用 App 既有 in-DOM 规则（`position: fixed` + `placeContextMenu`
+翻转夹取、Escape 关闭并把焦点还给触发器、外部 `pointerdown` 关闭、window blur/resize/外部滚动关闭），
+网格是**单一 tab 停靠点** + 方向键/Home/End 游标。证据边界：`tsc --noEmit`、`node --test`（含 ACI 表与
+Rust 源逐项比对、双目录键/占位符、五条浮层行为与无障碍属性的源码契约）、`check-i18n.py`、
+`check-file-size.py`；**未**做组件运行时挂载、真实窗口交互或像素证据，**不是** GUI 验收。
 
 **2026-10-26 图层锁定轮（实体写的唯一行为门）**：`locked` 从「只存储」变成**唯一一处**执行的门，
 执行点全部在 `crates/cad-db`（`crates/cad-db/src/drawing/lock.rs`），命令层**不写第二份检查**：

@@ -1,3 +1,44 @@
+## 2026-10-26 第 3 轮：未知源单位文案闭环 + 颜色选择器（UI 对齐）
+
+### 结论
+
+本轮**无 Rust 源码改动**（只动 React/TS、样式、两本 i18n 目录、文档）。两项用户可见缺口关闭：
+
+1. **`units.unknown` 终于有生产消费者**——`CAD_IMPLEMENTATION_SPEC.md` §3.3「源单位未知时显示
+   『图纸单位』」至此成立（此前 `docs/compatibility.md` 明确记为偏离）。测量值行（距离及其 X/Y/Z 增量、
+   折线长度、面积）与 `ID` 的点回显行：`unit: null`（宿主对 `Unit::DrawingUnits` 的**唯一**投影）⇒
+   `图纸单位` / “Drawing units”，面积走既有平方模板得 `图纸单位²`；`angle` 仍只带 `°`。
+   **区分保留**：字段缺失 / 非字符串 / 空串仍**不**加后缀——那是坏行，不是「图纸单位」。
+   仍未做：spec 同句后半段的「由用户指定单位或校准」（需要新的单位设置面）。
+2. **颜色选择器**（`docs/compatibility.md` 原记「仅文本语法」的缺口）：属性面板 `color` 行与图层详情
+   颜色单元共用一个 in-DOM 选择器（`src/components/ColorChooser.tsx` + 纯模型 `src/color/color-value.ts`
+   + 自 `crates/cad-app/src/property_value/aci.rs` 镜像的 ACI 表）。**只提供写语法真接受的东西**：
+   实体颜色给 `ByLayer`/`ByBlock`（`ByObject` 只是 AutoCAD 对 ByBlock 的显示名，**不在**语法内，故不提供）；
+   图层颜色**不给**符号项（`layer_property.rs` 按名拒绝）；色板点击写 `aci:N`（**同一解析器、无新值形式**）；
+   属性行保留原文本输入兜底，图层行提供按语法归一的自由输入。写入仍走**既有唯一通道**
+   （属性 = `shell.applySelectedProperty`，**不** `invoke`；图层 = store 单飞 + 读回），拒绝进既有错误行。
+   浮层：`position: fixed` + 既有 `placeContextMenu` 翻转夹取、Escape 关闭并还焦点、外部 `pointerdown`
+   关闭、window blur/resize/外部滚动关闭；网格是**单一 tab 停靠点** + 方向键/Home/End 游标。
+   **无 focus trap**：本仓其它 in-DOM 浮层都不 trap，Tab-out 直接关闭（明示选择，不是遗漏）。
+
+### 顺带纠正的文案错误（重要）
+
+`layers.color.hint` 原文写「这还不会重新着色图纸」——自 2026-10-26 表示层按层解析后**这句话是错的**
+（改图层颜色会在下次展开时重着色该层的 `ByLayer` 实体）。已改写为「点击色块写入 `aci:N`；文本框接受
+`#RRGGBB`；图层不能随层/随块；按层着色的对象显示新颜色，导入时带显式颜色的对象保持原色」，
+并把原先钉住旧句子的断言换成正面断言。
+
+### 证据（本机，2026-10-26）
+
+- `cd apps/desktop-ui && npx tsc --noEmit` → 通过；`node --test test/*.test.ts` → **654 passed**
+  （新增 `test/properties-color.test.ts` 19 项；`command-log` 的图纸单位用例；ACI 表与 Rust 源逐项比对）。
+- `python3 scripts/check-i18n.py` → **836 keys**、两目录一致、Rust/React 静态键全部解析、无硬编码 CJK；
+  `check-file-size.py`（1024 文件）、`check-architecture.py` → 通过。
+- 本轮**未运行**任何 cargo 门禁：`git status` 确认无 `.rs` 改动（i18n 是 JSON），因此 Rust 侧不重跑。
+
+**NOT RUN / NOT VERIFIED**：组件运行时挂载、真实窗口交互、像素判据（**不是** GUI 验收）；属性面板与
+图层面板在真实窗口里的选择器行为仅有纯函数/源码契约证据。
+
 ## 2026-10-26 命令补齐（第 2 轮）：OFFSET 折线 / MIRROR 弧与椭圆 / LAYOFF·LAYON
 
 ### 结论

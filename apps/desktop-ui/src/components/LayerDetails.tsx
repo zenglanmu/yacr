@@ -1,4 +1,4 @@
-// The row's details line: the color control, the four flags as engaged-state
+// The row's details line: the colour cell, the four flags as engaged-state
 // toggles, and the three read-only attributes.
 //
 // It is a component of its own for two reasons, and neither is decoration:
@@ -16,24 +16,29 @@
 //
 // Two deliberate choices:
 //
-//  * **One write per colour pick, on `change`.** A native `<input type="color">`
-//    emits live `input` frames while the picker is open; writing on those would
-//    queue a layer-table write per frame and fight the single-flight window. A
-//    committed `change` is one write.
+//  * **One write per colour pick.** The colour cell is the shared in-DOM chooser
+//    (`ColorChooser.tsx`), not the webview's own colour dialog: a press on a swatch
+//    or a committed entry is one layer-table write, and the pick keeps the
+//    drawing's ACI identity (`aci:N`) instead of flattening every colour to a true
+//    colour. The free-form entry is normalised by `colorPayload` — the layer
+//    grammar's own routing — and a value it cannot take sends nothing.
 //  * **Escape closes it, and it stops the event.** The panel catches its own Escape
 //    (so the row's form handler never sees a second one) and the palette restores
-//    focus to the trigger that opened it.
+//    focus to the trigger that opened it. While the chooser is open it owns Escape
+//    itself and closes first.
 import React from 'react';
 import { IconButton } from './primitives.tsx';
+import { ColorField } from './ColorChooser.tsx';
 import { useI18n } from '../context.ts';
-import { layerAttributes, layerFlags } from '../layers/layer-attributes.ts';
+import { colorPayload, layerAttributes, layerFlags } from '../layers/layer-attributes.ts';
+import { LAYER_COLOR_SYMBOLS } from '../color/color-value.ts';
 import type { LayerRow } from '../layers/layers.ts';
 
 /** What the panel needs from the row, and the three things a press may do. */
 export interface LayerDetailsProps {
   /** The row the line belongs to (its stored attributes are what is shown). */
   readonly layer: LayerRow;
-  /** The `#rrggbb` the colour control starts at (`layerSwatch().color`). */
+  /** The colour the cell paints: the stored colour, or the name-derived marker. */
   readonly color: string;
   /** Whether `color` is the drawing's own (false: the name-derived marker). */
   readonly fromColor: boolean;
@@ -73,13 +78,18 @@ export function LayerDetails({
     >
       <div className="layers__details-head">
         <span className="layers__field-label">{t('layers.color')}</span>
-        <input
-          type="color"
-          className="layers__color-input"
-          value={color}
-          aria-label={t('layers.color')}
-          aria-describedby={hintId}
-          onChange={event => onPickColor(event.target.value)}
+        {/* The colour cell: the swatch trigger opens the shared in-DOM chooser (the
+            standard indexed palette, written as `aci:N`, plus the layer grammar's
+            true-colour entry). The row's own index and hex stay beside it, verbatim
+            from the host, so the chooser never has to describe them in prose. */}
+        <ColorField
+          value={layer.color.aci !== null ? `aci:${layer.color.aci}` : layer.color.rgb}
+          label={t('layers.color')}
+          symbols={LAYER_COLOR_SYMBOLS}
+          custom={colorPayload}
+          busy={busy}
+          paint={color}
+          onPick={onPickColor}
         />
         {layer.color.rgb ? (
           <span className="layers__attr-value">{layer.color.rgb}</span>
