@@ -165,25 +165,26 @@ pub(crate) fn lineweight_mm(weight: acadrust::LineWeight) -> Option<f32> {
     }
 }
 
-/// Resolve an entity's own lineweight into the effective display value.
+/// Preserve an entity's own lineweight provenance.
 ///
-/// A concrete entity weight wins over the layer; `ByLayer` uses the layer's
-/// pre-resolved weight; `ByBlock` stays symbolic for INSERT expansion;
-/// `Default` keeps acadrust's explicit "default" meaning.
-pub(crate) fn resolve_entity_lineweight(
-    weight: acadrust::LineWeight,
-    layer_weight: Option<f32>,
-) -> EntityLineWeight {
+/// A concrete weight wins over the layer and is stored as `Explicit` in
+/// millimetres (1/100 mm integers via acadrust's own conversion, so no scale
+/// factor is invented here); acadrust's `Default` keeps its explicit "default"
+/// meaning. `ByLayer` and `ByBlock` stay **symbolic**: the representation
+/// resolves `ByLayer` from the owning layer's
+/// [`LayerAttributes::lineweight`](cad_db::LayerAttributes::lineweight) and
+/// `ByBlock` from the containing INSERT at draw time, so editing a layer
+/// lineweight takes effect on the next expansion with no entity write. (Before
+/// this change `ByLayer` was flattened into an `Explicit` copy of the layer's
+/// millimetres right here, which made a later layer edit change nothing.)
+pub(crate) fn resolve_entity_lineweight(weight: acadrust::LineWeight) -> EntityLineWeight {
     match weight {
         acadrust::LineWeight::Value(_) => {
             EntityLineWeight::Explicit(lineweight_mm(weight).unwrap_or(0.0))
         }
-        acadrust::LineWeight::ByBlock => EntityLineWeight::ByBlock,
         acadrust::LineWeight::Default => EntityLineWeight::Default,
-        acadrust::LineWeight::ByLayer => match layer_weight {
-            Some(mm) => EntityLineWeight::Explicit(mm),
-            None => EntityLineWeight::ByLayer,
-        },
+        acadrust::LineWeight::ByBlock => EntityLineWeight::ByBlock,
+        acadrust::LineWeight::ByLayer => EntityLineWeight::ByLayer,
     }
 }
 
@@ -206,27 +207,33 @@ pub(crate) fn is_continuous_linetype(name: &str) -> bool {
     name.trim().eq_ignore_ascii_case("Continuous")
 }
 
-/// Resolve an entity's linetype into the effective display value.
+/// Preserve an entity's linetype provenance.
 ///
-/// Precedence mirrors colour/lineweight: an explicit named linetype wins, then
-/// `ByLayer` uses the layer's pre-resolved pattern, and `ByBlock` stays
-/// symbolic for INSERT expansion. `named_pattern` is the caller's lookup of a
-/// concrete pattern for an explicit name (`None` when unknown); `layer_pattern`
-/// is the layer's resolved pattern.
+/// Precedence mirrors colour/lineweight, but nothing about the owning layer is
+/// baked in here:
+/// * `ByBlock` stays symbolic for INSERT expansion;
+/// * the standard solid linetype is known and continuous, so it is recorded
+///   explicitly rather than marked unresolved;
+/// * `ByLayer` (and an absent name, which DXF treats the same way) stays
+///   **symbolic**: the representation looks the owning layer's linetype *name*
+///   up in the drawing's linetype table on every expansion, so a layer linetype
+///   edit changes the entity's dashes with no entity write. (Before this change
+///   the layer's pattern was substituted here as an `Explicit` copy, which froze
+///   it at import time.) A name the table does not define is still reported by
+///   the caller and resolves to continuous **and** unresolved at draw time;
+/// * an explicit named linetype is `Explicit` with the entity's own `scale`
+///   (sanitised to a positive finite value), byte-identical to the source
+///   pattern;
+/// * an unknown explicit name becomes an explicit **continuous** pattern
+///   carrying the source name — never invented dashes.
 ///
-/// The result is never a fabricated pattern:
-/// * a concrete pattern is `Explicit` with the entity's own `scale`;
-/// * `ByLayer` with a reachable layer pattern is `Explicit` using that pattern;
-/// * `ByBlock` is symbolic;
-/// * an unknown named linetype falls back to an explicit **continuous** pattern
-///   carrying the source name, and the caller reports a `Partial` reason;
-/// * a `ByLayer` with no reachable pattern is symbolic `ByLayer`, which the
-///   representation treats as continuous and marks unresolved.
+/// A symbolic entity linetype carries no per-entity linetype scale: `cad_db`
+/// has no slot for one beside `ByLayer`/`ByBlock` (the same as the existing
+/// `ByBlock` path), so the source's group `48` is only preserved for `Explicit`.
 pub(crate) fn resolve_entity_linetype(
     name: &str,
     scale: f64,
     named_pattern: Option<LinetypePattern>,
-    layer_pattern: Option<LinetypePattern>,
 ) -> EntityLineType {
     // A non-finite/zero scale is treated as 1.0; the representation sanitises
     // again, and this keeps a corrupt scale from disabling dashes entirely.
@@ -248,14 +255,7 @@ pub(crate) fn resolve_entity_linetype(
         };
     }
     if is_bylayer_linetype(name) {
-        return match layer_pattern {
-            Some(pattern) => EntityLineType::Explicit {
-                name: "ByLayer".to_string(),
-                pattern,
-                scale,
-            },
-            None => EntityLineType::ByLayer,
-        };
+        return EntityLineType::ByLayer;
     }
     match named_pattern {
         Some(pattern) => EntityLineType::Explicit {

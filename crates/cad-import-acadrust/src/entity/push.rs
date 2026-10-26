@@ -82,21 +82,17 @@ impl<'a> ImporterBuilder<'a> {
 
         self.note_capability(&class_name, &geometry, &completeness, render, pick);
 
-        // Resolve the entity's effective display opacity, lineweight and
-        // linetype so the representation/scene layers can carry real style
-        // instead of always drawing opaque grey (audit F14 / §2.1.3). ByObject
-        // wins over ByLayer; ByBlock is kept symbolic for INSERT expansion.
+        // Resolve the entity's effective display opacity so the
+        // representation/scene layers can carry real style instead of always
+        // drawing opaque grey (audit F14 / §2.1.3).
         //
-        // Colour is **not** resolved here: `ByLayer` is preserved symbolically
-        // and the representation reads the owning layer's colour from the layer
-        // table at draw time, so editing a layer colour recolours its entities
-        // without touching an entity row.
+        // Colour, lineweight and linetype are **not** resolved here: `ByLayer`
+        // is preserved symbolically and the representation reads the owning
+        // layer's row from the layer table at draw time, so editing a layer's
+        // colour/lineweight/linetype takes effect on the next expansion without
+        // touching an entity row. `ByBlock` stays symbolic for INSERT expansion,
+        // and a concrete entity value stays `Explicit` byte-identically.
         let layer_alpha = self.layer_transparency.get(&layer).copied().unwrap_or(1.0);
-        let layer_lineweight = self.layer_lineweights.get(&layer).copied();
-        let layer_pattern = self
-            .layer_linetypes
-            .get(&layer)
-            .and_then(|name| self.linetype_pattern(name));
         // An explicit entity linetype is looked up in the drawing's table; a
         // missing name is reported, never silently turned into dashes. R13/R14
         // entities may carry only a handle, so fall back to the table's handle
@@ -134,15 +130,12 @@ impl<'a> ImporterBuilder<'a> {
                 ),
             });
         }
-        let resolved_linetype = resolve_entity_linetype(
-            &source_linetype,
-            common.linetype_scale,
-            named_pattern.clone(),
-            layer_pattern.clone(),
-        );
+        let resolved_linetype =
+            resolve_entity_linetype(&source_linetype, common.linetype_scale, named_pattern);
         // A `ByLayer` entity whose layer names a non-continuous linetype that is
         // missing from the table cannot resolve; report rather than silently
-        // drawing the layer solid.
+        // drawing the layer solid (the representation then draws it continuous
+        // and flags the fragment unresolved).
         if is_bylayer_linetype(&source_linetype) {
             if let Some(layer_name) = self.layer_linetypes.get(&layer) {
                 let key = layer_name.trim().to_ascii_lowercase();
@@ -195,7 +188,7 @@ impl<'a> ImporterBuilder<'a> {
         let attributes = EntityRenderAttributes {
             transparency: resolve_entity_transparency(common.transparency, layer_alpha),
             color: resolve_entity_color(common.color),
-            lineweight: resolve_entity_lineweight(common.line_weight, layer_lineweight),
+            lineweight: resolve_entity_lineweight(common.line_weight),
             linetype: resolved_linetype,
             geometry_source: if proxy_geometry_allowed(entity) {
                 GeometrySource::ProxyCache

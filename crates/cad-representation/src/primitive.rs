@@ -336,23 +336,36 @@ pub struct DisplayFragment {
     /// or the database-less `build` path.
     pub color_unresolved: bool,
     /// Resolved lineweight in millimetres (see [`DEFAULT_LINEWEIGHT_MM`]).
+    ///
+    /// `build`/`from_tessellation` only see one entity and emit the default
+    /// (flagged unresolved); [`ProviderRegistry::build_expanded`] resolves the
+    /// stored provenance: an explicit weight, `ByBlock` inheritance, or the
+    /// owning layer's weight for `ByLayer` (see [`resolve_lineweight`]).
     pub lineweight: f32,
-    /// `true` when the source lineweight was symbolic and unresolved.
+    /// `true` when the source lineweight was symbolic and no concrete value was
+    /// available, so `lineweight` is a fallback: a `ByBlock` with no enclosing
+    /// INSERT, a `ByLayer` whose layer row carries no weight of its own, or the
+    /// database-less `build` path.
     pub lineweight_unresolved: bool,
     /// Resolved dash pattern. An empty `elements` list means continuous.
     ///
-    /// The importer resolves an explicit entity linetype and a reachable layer
-    /// linetype into a concrete pattern; `build` has no database access so it
-    /// emits [`LinetypePattern::continuous`]. This field is carried onto the
-    /// scene batch for diagnostics and, for line geometry, drives the
-    /// arc-length dash subdivision performed by
-    /// [`ProviderRegistry::build_expanded`].
+    /// An explicit entity pattern is carried as stored. A `ByBlock` inherits the
+    /// enclosing reference's pattern; a `ByLayer` resolves the owning layer's
+    /// linetype **name** against the drawing's linetype table at expansion time
+    /// (see [`resolve_linetype`]), so a layer linetype edit is visible without an
+    /// entity write. `build` has no database access so it emits
+    /// [`LinetypePattern::continuous`]. This field is carried onto the scene
+    /// batch for diagnostics and, for line geometry, drives the arc-length dash
+    /// subdivision performed by [`ProviderRegistry::build_expanded`].
     pub linetype: LinetypePattern,
     /// `true` when the source linetype was symbolic (`ByLayer`/`ByBlock`) and
-    /// no concrete pattern was available, so the fragment is drawn continuous.
+    /// no concrete pattern was available — including a layer linetype name this
+    /// drawing's table does not define — so the fragment is drawn continuous.
     pub linetype_unresolved: bool,
     /// Entity linetype scale factor, applied with the drawing's global LTSCALE
-    /// when subdividing. Sanitised to `>= 0`.
+    /// when subdividing. Sanitised to `>= 0`; `1.0` for a symbolic
+    /// (`ByLayer`/`ByBlock`) value, which carries no per-entity scale in
+    /// `cad_db` (the source's group `48` is only stored inside `Explicit`).
     pub linetype_scale: f32,
     /// Display order of the source entity, i.e. the same key `cad-db` sorts a
     /// space by (`DbEntity::draw_order`). Larger values paint later.
@@ -404,8 +417,37 @@ pub fn resolve_color(
 }
 
 /// Resolve an entity's stored lineweight (millimetres) against an enclosing
-/// block reference's resolved value, mirroring [`resolve_color`].
-pub fn resolve_lineweight(weight: EntityLineWeight, parent: Option<f32>) -> (f32, bool) {
+/// block reference's resolved value and the owning layer's stored weight,
+/// mirroring [`resolve_color`].
+///
+/// * `Explicit(mm)`: a concrete source weight, passed through (only sanitised:
+///   non-finite becomes `0`, negatives clamp to `0`).
+/// * `Default`: acadrust's explicit "default" weight (DWG/DXF `370` = `-3`), a
+///   real source value, so it resolves to [`DEFAULT_LINEWEIGHT_MM`].
+/// * `ByBlock`: inherits the enclosing INSERT's resolved weight; at the model
+///   root there is nothing to inherit, so the default is used **and flagged**.
+/// * `ByLayer`: the owning layer's [`cad_db::LayerAttributes::lineweight`], read
+///   from the layer table by the caller at draw time (so editing a layer weight
+///   takes effect on the next expansion with no entity write):
+///   - `Hundredths(v)`: the source's 1/100 mm integer, so `v / 100` mm exactly —
+///     no rounding is invented here;
+///   - `Default` (`-3`): [`DEFAULT_LINEWEIGHT_MM`], a value the layer record
+///     really carries;
+///   - `ByLayer` **on the layer record**: degenerate — a layer whose own
+///     lineweight is `ByLayer` has no weight to give — so the default is used
+///     with the unresolved flag set rather than claiming a source value.
+///
+/// A layer with no stored attribute row goes through
+/// [`cad_db::DrawingDatabase::layer_attributes`]'s documented
+/// `LayerAttributes::default()` fallback, whose `lineweight` is
+/// `LayerLineWeight::ByLayer`, so a missing row lands in that last sub-bullet:
+/// the documented default value plus the unresolved flag, and no second default
+/// invented here.
+pub fn resolve_lineweight(
+    weight: EntityLineWeight,
+    parent: Option<f32>,
+    layer_weight: LayerLineWeight,
+) -> (f32, bool) {
     match weight {
         EntityLineWeight::Explicit(mm) => (if mm.is_finite() { mm.max(0.0) } else { 0.0 }, false),
         EntityLineWeight::Default => (DEFAULT_LINEWEIGHT_MM, false),
@@ -413,22 +455,40 @@ pub fn resolve_lineweight(weight: EntityLineWeight, parent: Option<f32>) -> (f32
             Some(parent) => (parent, false),
             None => (DEFAULT_LINEWEIGHT_MM, true),
         },
-        EntityLineWeight::ByLayer => (DEFAULT_LINEWEIGHT_MM, true),
+        EntityLineWeight::ByLayer => match layer_weight {
+            LayerLineWeight::Hundredths(hundredths) => (hundredths as f32 / 100.0, false),
+            LayerLineWeight::Default => (DEFAULT_LINEWEIGHT_MM, false),
+            LayerLineWeight::ByLayer => (DEFAULT_LINEWEIGHT_MM, true),
+        },
     }
 }
 
 /// Resolve an entity's stored linetype against an enclosing INSERT's resolved
-/// pattern, mirroring [`resolve_color`].
+/// pattern and the owning layer's pattern, mirroring [`resolve_color`].
 ///
 /// Returns the concrete pattern, whether it is unresolved (drawn continuous),
-/// and the entity's own linetype scale. An explicit pattern is concrete;
-/// `ByBlock` inherits the enclosing reference's pattern when one is threaded
-/// down, otherwise it is unresolved. `ByLayer` is unresolved here because this
-/// layer has no layer table; the importer already substituted the layer pattern
-/// for real imports, so this is only reached for hand-built databases.
+/// and the linetype scale to apply.
+///
+/// * `Explicit`: a concrete source pattern, passed through with the entity's own
+///   linetype scale.
+/// * `ByBlock`: inherits the enclosing block reference's pattern when one is
+///   threaded down, otherwise it is unresolved (continuous).
+/// * `ByLayer`: `layer_pattern` is the caller's lookup of the owning layer's
+///   [`cad_db::LayerAttributes::linetype`] **name** in the drawing's linetype
+///   table (DXF group `6` is a name, not a pattern). `Some` is that named
+///   pattern, so the entity follows a layer linetype edit on the next expansion
+///   with no entity write; `None` means the drawing defines no entry under that
+///   name (or the layer names nothing), so the line is drawn continuous **and**
+///   flagged unresolved rather than an invented pattern being fabricated.
+///
+/// The symbolic variants (`ByBlock`/`ByLayer`) carry no per-entity linetype
+/// scale: `cad_db::EntityLineType` has no slot for one (the source's group `48`
+/// is only stored inside `Explicit`), so `1.0` is reported and the drawing's
+/// `$LTSCALE` is the whole factor.
 pub fn resolve_linetype(
     linetype: EntityLineType,
     parent: Option<&LinetypePattern>,
+    layer_pattern: Option<&LinetypePattern>,
 ) -> (LinetypePattern, bool, f32) {
     match linetype {
         EntityLineType::Explicit {
@@ -447,7 +507,10 @@ pub fn resolve_linetype(
             Some(parent) => (parent.clone(), false, 1.0),
             None => (LinetypePattern::continuous(), true, 1.0),
         },
-        EntityLineType::ByLayer => (LinetypePattern::continuous(), true, 1.0),
+        EntityLineType::ByLayer => match layer_pattern {
+            Some(pattern) => (pattern.clone(), false, 1.0),
+            None => (LinetypePattern::continuous(), true, 1.0),
+        },
     }
 }
 

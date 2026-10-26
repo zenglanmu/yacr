@@ -6,7 +6,7 @@
 
 use cad_db::{
     DbEntity, DrawingDatabase, EntityColor, EntityLineType, EntityLineWeight,
-    EntityRenderAttributes, EntityTransparency, LinetypePattern,
+    EntityRenderAttributes, EntityTransparency, LayerAttributes, LayerLineWeight, LinetypePattern,
 };
 use cad_domain::*;
 use cad_geometry::{tessellate_geometry, TessellationParams};

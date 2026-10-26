@@ -6,9 +6,11 @@
 //! the [`ExportReport`](super::report::ExportReport).
 //!
 //! "Exact" means **faithful to the domain database**, not faithful to the source
-//! DWG: the database has already dropped information (ByLayer resolution, block
-//! names, spline closed/periodic flags), and a `Spline` is therefore reported as
-//! `Converted`, never `Exact`.
+//! DWG: the database has already dropped information (per-entity `ByLayer`
+//! transparency, block names, spline closed/periodic flags), and a `Spline` is
+//! therefore reported as `Converted`, never `Exact`. Colour, lineweight and
+//! linetype **provenance** is not among the losses: a symbolic `ByLayer`/
+//! `ByBlock` value is written back symbolically (see [`common_for`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -32,6 +34,14 @@ use super::tables::ensure_text_style;
 /// The largest polyface vertex index that fits `PolyfaceFace`'s signed `i16`
 /// fields (1-based, so a 0-based index must be `< 32767`).
 const MAX_POLYFACE_INDEX: usize = 32766;
+
+/// DXF group `6` value meaning "the layer's linetype".
+///
+/// The DXF spelling is `BYLAYER`; acadrust omits group `6` when the value is
+/// empty or exactly `ByLayer`, so the canonical upper-case token is what makes
+/// the symbolic form visible in the written file instead of implied by an
+/// omission.
+const BY_LAYER_LINETYPE: &str = "BYLAYER";
 
 /// Source entity classes whose ACIS payload the importer tessellates into a
 /// plain [`SemanticGeometry::Mesh`]. Their original SAT/SAB bytes are gone, so
@@ -751,19 +761,28 @@ pub(super) fn common_for(
         ),
         EntityTransparency::ByBlock => Transparency::ByBlock,
     };
-    // Linetype scale (group 48): an explicit entity scale is carried; inherited
-    // values keep the 1.0 default.
+    // Linetype scale (group 48): an explicit entity scale is carried; symbolic
+    // values (`ByLayer`/`ByBlock`) carry none in this model, so the attribute's
+    // default 1.0 is kept.
     common.linetype_scale = match &attributes.linetype {
         EntityLineType::Explicit { scale, .. } => *scale,
         _ => 1.0,
     };
     common.linetype = match &attributes.linetype {
         EntityLineType::Explicit { name, pattern, .. } if !name.trim().is_empty() => {
-            if doc.line_types.get(name).is_none() {
-                doc.line_types
-                    .add_or_replace(linetype_from_pattern(name, pattern));
+            // A source that was stored as an explicit copy of `ByLayer` (an
+            // older import) must not create a linetype table entry literally
+            // named "ByLayer": the symbolic DXF token is written instead, so the
+            // layer table keeps carrying the pattern.
+            if name.trim().eq_ignore_ascii_case("BYLAYER") {
+                BY_LAYER_LINETYPE.to_string()
+            } else {
+                if doc.line_types.get(name).is_none() {
+                    doc.line_types
+                        .add_or_replace(linetype_from_pattern(name, pattern));
+                }
+                name.clone()
             }
-            name.clone()
         }
         EntityLineType::Explicit { pattern, .. } => {
             if !pattern.elements.is_empty() {
@@ -774,7 +793,13 @@ pub(super) fn common_for(
             }
             String::new()
         }
-        EntityLineType::ByLayer => String::new(),
+        // Keep the symbol: the layer table entry carries the pattern, so a layer
+        // linetype edit still round-trips. `BYLAYER` is the DXF spelling of
+        // "by layer" for group 6 (acadrust writes group 6 only when the value is
+        // neither empty nor the exact string `ByLayer`, which is why the
+        // canonical upper-case token is used here: it is unambiguous in the
+        // output rather than implied by an omitted group).
+        EntityLineType::ByLayer => BY_LAYER_LINETYPE.to_string(),
         EntityLineType::ByBlock => "ByBlock".to_string(),
     };
     (common, reasons)

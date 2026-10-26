@@ -84,10 +84,10 @@ pub enum LayerLineWeight {
 /// `plottable` and `plot_style` are storage plus round-trip only: freeze-specific
 /// regeneration, plotting and named plot styles are **not implemented**.
 ///
-/// `color` **is** read: the representation resolves a `ByLayer` entity colour
-/// from this row, so editing a layer colour recolours its `ByLayer` entities
-/// without writing any entity. `linetype` and `lineweight` are still flattened
-/// onto entities at import time and are therefore storage-only here.
+/// `color`, `linetype` and `lineweight` **are** read: the representation resolves
+/// a `ByLayer` entity's colour, linetype (name → pattern in the drawing's
+/// linetype table) and lineweight from this row, so editing any of them updates
+/// its `ByLayer` entities without writing a single entity.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerAttributes {
     /// Layer is off (DXF: the **sign** of group `62`; there is no off bit in

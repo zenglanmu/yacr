@@ -81,9 +81,9 @@ pub enum EntityColor {
 /// How an entity's display lineweight is determined before batching.
 ///
 /// Values are millimetres, matching acadrust's `LineWeight::millimeters()`; the
-/// source stores 1/100 mm integers. As with [`EntityColor`], `ByObject` and
-/// `ByLayer` are resolved by the importer and `ByBlock` stays symbolic for
-/// INSERT expansion.
+/// source stores 1/100 mm integers. As with [`EntityColor`], only an explicit
+/// entity value is resolved by the importer: `ByLayer` and `ByBlock` stay
+/// symbolic and the representation resolves them at expansion time.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum EntityLineWeight {
     /// A resolved lineweight in millimetres.
@@ -93,8 +93,10 @@ pub enum EntityLineWeight {
     /// Inherit the containing block reference's lineweight (`ByBlock`). At the
     /// model root this falls back to the documented default.
     ByBlock,
-    /// No concrete lineweight was resolved (`ByLayer` with no reachable layer,
-    /// or a missing attribute). The representation applies the default.
+    /// Use the owning layer's lineweight. The representation resolves it from
+    /// the layer table at expansion time (1/100 mm → mm); a layer row that itself
+    /// carries no weight falls back to the documented default and is flagged
+    /// unresolved.
     #[default]
     ByLayer,
 }
@@ -155,13 +157,11 @@ impl LinetypePattern {
 
 /// How an entity's display linetype is determined before batching.
 ///
-/// The importer resolves an explicit entity linetype and a reachable layer
-/// linetype before storing: the representation resolves only **colour** through
-/// the layer table, so linetype provenance is flattened here. `ByBlock` stays
-/// symbolic so INSERT expansion can substitute
-/// the containing block reference's linetype, exactly like [`EntityColor`] and
-/// [`EntityLineWeight`]. An unresolvable or unknown linetype becomes
-/// `Continuous` rather than an invented pattern.
+/// The importer resolves only an explicit entity linetype; `ByLayer` and
+/// `ByBlock` stay symbolic and the representation resolves them at expansion time
+/// (a `ByLayer` name is looked up in the drawing's linetype table). This mirrors
+/// [`EntityColor`] and [`EntityLineWeight`]. An unresolvable or unknown linetype
+/// becomes `Continuous` rather than an invented pattern.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum EntityLineType {
     /// A named linetype with a concrete dash pattern. `scale` is the entity's
@@ -177,9 +177,10 @@ pub enum EntityLineType {
     /// Inherit the containing block reference's linetype (`ByBlock`). At the
     /// model root this falls back to continuous.
     ByBlock,
-    /// The source linetype is non-continuous (or unknown) but no concrete
-    /// pattern could be resolved. The representation falls back to continuous
-    /// and reports it, never fabricating dashes.
+    /// Use the owning layer's linetype. The representation looks the layer's
+    /// linetype name up in the drawing's linetype table at expansion time; when
+    /// the name is absent it falls back to continuous and flags the fragment
+    /// unresolved, never fabricating dashes.
     #[default]
     ByLayer,
 }
@@ -249,9 +250,11 @@ pub struct EntityRenderAttributes {
     /// Display colour: `Explicit` is concrete sRGB, while `ByLayer` and
     /// `ByBlock` stay symbolic until expansion resolves them.
     pub color: EntityColor,
-    /// Resolved display lineweight (or a symbolic `ByBlock`).
+    /// Display lineweight: `Explicit`/`Default` are concrete, `ByLayer` and
+    /// `ByBlock` stay symbolic until expansion resolves them.
     pub lineweight: EntityLineWeight,
-    /// Resolved display linetype (or a symbolic `ByBlock`).
+    /// Display linetype: `Explicit` is concrete, `ByLayer` and `ByBlock` stay
+    /// symbolic until expansion resolves them.
     pub linetype: EntityLineType,
     /// Which producer supplied the display geometry (proxy cache vs analytic).
     pub geometry_source: GeometrySource,

@@ -230,6 +230,107 @@ fn by_layer_colour_is_written_symbolically_and_keeps_the_layer_colour() {
 }
 
 #[test]
+fn by_layer_linetype_and_lineweight_are_written_symbolically() {
+    // Import preserves linetype/lineweight provenance too, so the export keeps
+    // the symbolic form: group 6 = `BYLAYER` and no group 370 (its DXF code for
+    // "by layer" is `-1`, which acadrust expresses by omitting the group). The
+    // layer table row carries the values they resolve to.
+    let mut builder = base_builder();
+    builder
+        .insert_linetype(DbLineType {
+            id: LinetypeId(1),
+            name: "DASHED".into(),
+            pattern: LinetypePattern::from_elements([0.5, -0.25]),
+            complex: false,
+        })
+        .unwrap();
+    builder
+        .insert_layer(Layer {
+            id: LayerId(1),
+            name: "WALLS".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .set_layer_attributes(
+            LayerId(1),
+            cad_db::LayerAttributes {
+                linetype: "DASHED".into(),
+                lineweight: cad_db::LayerLineWeight::Hundredths(35),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let mut line = entity(
+        1,
+        SemanticGeometry::Line {
+            start: p(0.0, 0.0, 0.0),
+            end: p(1.0, 0.0, 0.0),
+        },
+        SpaceId::Model,
+        0,
+    );
+    line.layer = LayerId(1);
+    builder.insert_entity(line).unwrap();
+    builder
+        .set_entity_render_attributes(
+            EntityId(1),
+            EntityRenderAttributes {
+                transparency: EntityTransparency::Explicit(1.0),
+                color: cad_db::EntityColor::Explicit([1, 2, 3]),
+                lineweight: cad_db::EntityLineWeight::ByLayer,
+                linetype: EntityLineType::ByLayer,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let db = builder.finish().unwrap();
+    let (bytes, report) = export_db(&db);
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.code == "export.note.style_resolved"),
+        "the style note must describe what is and is not flattened"
+    );
+
+    match &read_entities(&bytes)[0] {
+        EntityType::Line(line) => {
+            assert_eq!(
+                line.common.linetype, "BYLAYER",
+                "a ByLayer linetype must stay symbolic, not become the layer's pattern name"
+            );
+            assert_eq!(
+                line.common.line_weight,
+                acadrust::LineWeight::ByLayer,
+                "a ByLayer lineweight must stay symbolic (no group 370)"
+            );
+            // A symbolic linetype carries no per-entity scale.
+            assert!((line.common.linetype_scale - 1.0).abs() < 1e-12);
+        }
+        other => panic!("expected LINE, got {other:?}"),
+    }
+    assert!(
+        !String::from_utf8_lossy(&bytes).contains("0\nBYLAYER\n0\nLTYPE"),
+        "a symbolic entity linetype must not create a linetype table row named BYLAYER"
+    );
+
+    // The pair (symbolic entity values, layer row) survives a round trip, which
+    // is what makes a later layer linetype/lineweight edit take effect.
+    let reimported = import_bytes(&bytes);
+    let entity = reimported.entities().next().expect("one line reimports");
+    let attributes = reimported.entity_render_attributes(entity.id);
+    assert_eq!(attributes.linetype, EntityLineType::ByLayer);
+    assert_eq!(attributes.lineweight, cad_db::EntityLineWeight::ByLayer);
+    let layer_attributes = reimported.layer_attributes(entity.layer);
+    assert_eq!(layer_attributes.linetype.to_ascii_uppercase(), "DASHED");
+    assert_eq!(
+        layer_attributes.lineweight,
+        cad_db::LayerLineWeight::Hundredths(35)
+    );
+}
+
+#[test]
 fn aligned_text_writes_the_alignment_point_and_round_trips() {
     let (bytes, report) = export_one(SemanticGeometry::Text {
         text: "X".into(),

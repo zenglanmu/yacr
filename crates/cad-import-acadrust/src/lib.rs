@@ -343,10 +343,11 @@ struct ImporterBuilder<'a> {
     /// Effective display opacity of each layer, resolved from its DWG
     /// transparency (0 = opaque, 255 = transparent).
     layer_transparency: HashMap<LayerId, f32>,
-    /// Resolved lineweight of each layer in millimetres.
-    layer_lineweights: HashMap<LayerId, f32>,
-    /// Root linetype name of each layer (`Layer.line_type`), looked up against
-    /// the drawing's linetype table when an entity is `ByLayer`.
+    /// Root linetype name of each layer (`Layer.line_type`), used only to report
+    /// the import-time "layer names a linetype this table does not define"
+    /// diagnostic. The value itself is **not** flattened onto entities: a
+    /// `ByLayer` entity keeps the symbol and the representation resolves the
+    /// owning layer's name against the linetype table at draw time.
     layer_linetypes: HashMap<LayerId, String>,
     /// Linetype name (lower-cased) -> resolved dash pattern, from the drawing's
     /// `LineType` table. Nothing is fabricated; unknown names are reported.

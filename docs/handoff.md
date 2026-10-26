@@ -1,3 +1,101 @@
+## 2026-10-26 `STRETCH` 的部分包围 `INSERT`：按插入点的刚性平移（新规则 + 具名前置条件）
+
+### 结论
+
+`STRETCH` 的 move-only 清单里最后一类 `INSERT` 有了**声明过的规则**：部分包围的块参照不再
+「不动 + `not_stretchable`」，而是**插入点在交叉窗口内就整条刚性平移**，否则**逐位不动**并报
+`drawing.stretch.insert_outside`。改动只在 `cad-app`（`app_drawing/stretch.rs` + 测试）与
+`docs/compatibility.md`、本文件；`cad-db` / `cad-domain` / `cad-host` / `crates/cad-representation` /
+`crates/cad-import-acadrust` / `apps/**` / i18n / 命令表 / wire **一个字节未改**（无新命令、无新 payload、
+无新 UI 分支、无新依赖）。
+
+### 规则（唯一权威：`app_drawing/stretch.rs` 模块文档）
+
+块参照在这条路径上只有**一个**可寻址「顶点」：**插入点** = 块坐标系原点 `(0,0,0)` 过放置矩阵
+（`Transform3::apply_point`，即放置矩阵的平移列；非有限放置 ⇒ 非有限点 ⇒ 不在任何窗口内，按「插入点
+在窗外」处理）。
+
+| 包围分类 | 插入点 | 结果 | 写入 |
+|---|---|---|---|
+| 部分（窗口压到成员的显示几何/保守包围盒） | **在**窗口内 | 整条参照**刚性平移** delta | 一次 `update_entity` |
+| 部分 | **不在**窗口内 | 逐位不动 + `drawing.stretch.insert_outside` | **不写**、不 staging |
+| 完全（保守包围盒全含） | — | 整移（**未变**） | 一次 `update_entity` |
+| 窗口外 | — | 完全不动 | **不写** |
+
+刚性平移走 **`transform_geometry(&Transform3::translation(delta))`**——与完全包围整移、与 MOVE
+**同一个调用**（没有新写逐顶点逻辑，也**没有**走 `StretchEntities` 风格的顶点规划）。放置矩阵的
+**线性部分（旋转/缩放/镜像列）与 `block` 逐位不变**，只有平移列 `+= delta`；因此旋转/缩放的参照
+**只刚移、不重拟合**。`STRETCH` 一律用 `update_entity` staging，所以变更掩码是 **`GEOMETRY`**
+（不是 MOVE 才有 `GEOMETRY ∪ TRANSFORM` 快路径掩码），与既有逐顶点拉伸同形。
+
+### 诚实的边界（同时写进兼容表的非目标）
+
+* 块**成员不会被逐个拉伸**：实例路径在这条路径上不可寻址（规划只写顶层模型空间所有者，没有逐成员
+  顶点编辑）；
+* **旋转/缩放/镜像**的参照只刚移、**不重拟合**（不按窗口重塑，旋转与比例逐位保留）；
+* 这**不是** AutoCAD 的完整块参照 STRETCH 语义：定义级编辑、嵌套成员拉伸、属性重排**未建模、不声明**。
+
+其余规则**逐字未动**：`LINE`/`POLYLINE`/`SPLINE`/`ARC` 的逐顶点来源与三类 ARC 具名拒绝、
+`TEXT`/`MULTILEADER` 整命令拒绝、`CIRCLE`/`ELLIPSE` move-only、`DIMENSION`/`HATCH` 各自规则、
+一个事务/一步 undo、什么都没动时不写事务不记历史。
+
+### 诊断（稳定英文码）
+
+| 情形 | code | 写入 |
+|---|---|---|
+| 部分包围的块参照，插入点在窗口外 | `drawing.stretch.insert_outside` | **不写**，逐位不变 |
+| move-only 种类（圆/椭圆） | `drawing.stretch.not_stretchable` | **不写**（**未变**；`INSERT` **已不在**该类） |
+
+`insert_outside` 是**按实体**的，与 `no_vertex`/`arc_*`/`spline_inconsistent` 同一粒度：窗口里其它
+实体照常提交。该实体**不进入 plan**，所以**不会**再被追加一条泛化的 `not_stretchable`（单一具名原因）。
+消息写明前置条件（"its insertion point (the transformed block-space origin) is outside it, and STRETCH
+moves a block reference only rigidly by its insertion point"）。
+
+### 测试
+
+新增 `crates/cad-app/src/tests/drawing/stretch_insert.rs`（已注册，**6 个用例**，596 行）：
+
+1. 插入点在窗内 ⇒ 插入点落到 `old + delta`、线性部分与 `block` 逐位不变、块成员实体逐位不变、
+   一个 `Update(id, GEOMETRY)`、一个 revision、一步 undo、undo 后放置**逐位**还原；
+2. 插入点在窗外但显示几何压到窗口 ⇒ `changes.is_none()`、`objects` 空、revision 不变、undo 深度 0、
+   放置与成员逐位不变、`drawing.stretch.insert_outside` 存在且消息含 "insertion point"、
+   **没有** `not_stretchable`；
+3. 完全包围 ⇒ 仍整移（回归）；
+4. **30° 旋转 + 非均匀缩放**的放置（`Transform3::from_basis`）⇒ 插入点在窗内仍整移，线性部分逐位不变
+   （不重拟合）、成员相对插入点的偏移不变、undo 逐位还原；
+5. **混合窗口**（块参照 + 直线）⇒ 两个 `Update(.., GEOMETRY)`、一个 revision、一步 undo，
+   undo 同时逐位还原两者；
+6. **命令级**：按宿主方式构造 `Command`（id/document/viewport/payload）驱动 `Application::execute`，
+   断言 `delta − base` 生效、`objects`、`measurement.is_none()`、汇总诊断计数、一个事务/一步 undo。
+
+`tests/drawing/stretch.rs` 里的
+`stretch_fully_enclosed_insert_is_moved_and_partially_enclosed_insert_is_unchanged` 改名为
+`stretch_fully_enclosed_insert_is_moved_whole`（只留整移断言；部分包围的旧「不动」断言已被新规则取代，
+指向新文件）。
+
+### 实际运行（本机，2026-10-26）
+
+* `cargo test -p cad-app --lib --locked` → **1168 passed, 0 failed**（新增 6 个用例）；
+* `cargo clippy -p cad-app --all-targets --locked -- -D warnings` → 通过；
+* `python3 scripts/check-file-size.py` → OK（1004 个代码文件，上限 1000；`app_drawing/stretch.rs` **987**、
+  `tests/drawing/stretch_insert.rs` 596、`tests/drawing/stretch.rs` 686 行）；
+* `cargo fmt --all -- --check` → **workspace 不通过，失败点全部在别的 lane 正在编辑的文件**
+  （`crates/cad-import-acadrust/src/tests/linetype_weight_provenance.rs`、
+  `crates/cad-representation/src/lib.rs`）；本轮 4 个文件用
+  `rustfmt --check --edition 2021` 单独校验 **通过**。
+
+**NOT RUN（本轮未运行，不得当作通过）**：全 workspace 全量门禁/全量测试、平台编译矩阵
+（wasm/Windows/Android）、任何 GUI/像素/真窗口/真实鼠标证据（含「拉伸后的块参照显示」）、
+`cad-host`/`cad-ui-core` 层、Windows/Wine、真机 AutoCAD 行为对照。本轮证据上限 = `cad-app` 合成契约
++ 上述门禁。
+
+### 仍然存在的缺口
+
+* `HATCH` 的拉伸、块**成员级**拉伸、cpolygon/lasso 窗口、单独选取即整移、3D STRETCH：仍**不存在**；
+* 块参照的 STRETCH **不是** vendor 语义：插入点规则是**我们**的选择（AutoCAD 的块处理未查证），
+  因此不能据此宣称 AutoCAD 兼容；
+* `app_drawing/stretch.rs` 已到 **987 行**（上限 1000）：下一轮再往这个文件加规则必须**先拆分**。
+
 ## 2026-10-26 `cad-db` 的 `transform_geometry` 支持 `SPLINE`（仿射不变），删除 STRETCH 的应用内样条例外
 
 ### 结论
@@ -1541,6 +1639,53 @@ BTreeMap<LayerId, LayerAttributes>`（在 `render_attributes` 旁边），单一
 6. **wire/UI 不变**：图层 wire 形状与面板（色块仍是名字哈希）**本轮完全未动**。
 7. **plot-style 名字**：无法导出（写入器只发句柄）；CTB/STB 归一化未实现。
 
+## 2026-10-26 并行两条 lane：块参照 STRETCH / `ByLayer` 线型·线宽
+
+### 1. `STRETCH` 支持块参照（`cad-app`）
+
+- 部分包围的 `INSERT`：**仅当插入点**（block-space 原点经放置变换的像）落在交叉窗口内时，整块引用
+  **刚性平移**（`transform_geometry(translation)`，3x3 线性部分与 `block` 逐位不变）；插入点在外则
+  **逐位不变、零写入**，并记 `drawing.stretch.insert_outside`（消息点名前提，不再是通用
+  `not_stretchable`）。完全包围仍整移，窗口外仍不动。
+- 声明未做：**块成员不单独拉伸**（该路径无法表达 instance path）、旋转/缩放/镜像的引用只刚性平移
+  **不重新拟合**，这不是 AutoCAD 完整的块参照拉伸语义。
+
+### 2. `ByLayer` 线型/线宽改为按层解析（`cad-import-acadrust` + `cad-representation`）
+
+- 导入保留符号 `EntityLineWeight::ByLayer` / `EntityLineType::ByLayer`（此前被拍平成
+  `Explicit`）；`layer_lineweights` 旁表删除，`layer_linetypes` 仅剩诊断用途。
+- 表示层在 `expand_entity` 用**同一条** `layer_attributes(entity.layer)` 解析三者：
+  - 线宽：`Hundredths(v)` → `v/100` mm（精确，无四舍五入）、`Default` → 0.25 mm、
+    图层行自身为 `ByLayer` → 0.25 mm **并置 `lineweight_unresolved`**（图层无数值可给）；
+  - 线型：图层行 `linetype` **名字**去图纸线型表（大小写不敏感）取 pattern；名字缺失/空 →
+    连续线 **并置 `linetype_unresolved`**，**绝不**编造虚线；表内存在的 `Continuous` 行正常解析；
+  - 未解析标记只在真的解析不出来时置位；块内实体同样按**自身图层**，只有 `ByBlock` 沿父链。
+- 导出三者**全部符号化**：组 62 省略（=256）、组 6 = `BYLAYER`、组 370 省略（=-1）；
+  旧 `Explicit{name:"ByLayer"}` 遗留行也写 `BYLAYER` 且不再造同名线型表项。note 改写为
+  `export.note.style_resolved` 并逐项说明符号化内容。
+- **已知缺口（未假装）**：符号线型不携带**实体线型比例**（组 48）——`EntityLineType` 的
+  `ByLayer`/`ByBlock` 变体没有该槽位（`ByBlock` 早就丢），`ByLayer` 源上组 48 ≠ 1 会丢失，
+  `$LTSCALE` 仍生效；修它需要改 `cad-db` 的形状，另立 lane。**实体透明度**的 `ByLayer` 仍在导入时
+  拍平（三者中唯一残留）。
+
+### 已运行证据（本机，2026-10-26）
+
+- `cargo test -p cad-app --lib` → **1168 passed / 0 failed**（`tests/drawing/stretch_insert.rs` 6 项：
+  插入点在窗口内刚性移动 + 逐位 undo、插入点在外但包围盒相交 → `changes.is_none()` 且零撤销、
+  完全包围回归、旋转+非均匀缩放仍刚性、混合窗口一条事务一步撤销、命令级）。
+- `cargo test -p cad-representation --lib` → **216 passed / 0 failed**（`tests/bylayer_style.rs` 7 项）；
+  `cargo test -p cad-import-acadrust --lib` → **295 passed / 1 ignored / 0 failed**
+  （含组 6 = `BYLAYER`、无组 370、不造 `BYLAYER` 线型表行的往返）。
+- 两条 lane 的 `clippy -D warnings`、`fmt --check`、`check-architecture.py`、`check-file-size.py` 均 0。
+
+### NOT RUN / 边界
+
+- **无 GUI/像素/真窗口/真实鼠标证据**；`dom-canvas` 载体仍无夹点路径。
+- 仍缺：块成员级拉伸、`HATCH` 拉伸、cpolygon/lasso、单击即整移、3D STRETCH；符号线型比例（组 48）；
+  透明度 `ByLayer` 按层解析。
+
+---
+
 ## 2026-10-26 并行两条 lane：夹点拖拽的 OSNAP / `ByLayer` 颜色按层解析
 
 ### 1. 夹点拖拽解析对象捕捉（`cad-host`）
@@ -1589,13 +1734,17 @@ BTreeMap<LayerId, LayerAttributes>`（在 `render_attributes` 旁边），单一
 - `cargo test -p cad-representation --lib` → **209 passed / 0 failed**；
   `cargo test -p cad-import-acadrust --lib` → **292 passed / 1 ignored / 0 failed**
   （含写出的 DXF 再导入仍为 `ByLayer` 且图层带 aci/rgb 的往返）。
+- 同日续补（线型/线宽）：`cad-representation` **216** / `cad-import-acadrust` **295 (+1 ignored)**，
+  见上方「`ByLayer` 线型/线宽」条。
 - 两条 lane 的 `clippy -D warnings`、`check-architecture.py`、`check-file-size.py` 均 0。
 
 ### NOT RUN / 边界
 
 - **无 GUI/像素/真窗口/真实鼠标证据**；OSNAP 夹点只有 `HostCore` 合成契约。`dom-canvas` 载体仍
   无任何夹点路径。
-- `ByLayer` **线型与线宽**仍在导入时拍平；`ByBlock` 沿父链的既有语义未改。
+- ~~`ByLayer` **线型与线宽**仍在导入时拍平~~ → **同日已补**（保留符号、表示层按层解析、导出符号化）；
+  只剩**实体透明度**的 `ByLayer` 仍在导入时拍平，且符号线型不携带实体线型比例（组 48，已声明）。
+  `ByBlock` 沿父链的既有语义未改。
 - 夹点拖拽不发布 OSNAP 提示标记；块成员/`ATTRIB` 夹点、多夹点/多实体拉伸、3D 夹点编辑仍缺。
 
 ---

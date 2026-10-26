@@ -15,6 +15,7 @@ mod hatch;
 mod hatch_pattern_table;
 mod insert;
 mod layer_attributes;
+mod linetype_weight_provenance;
 mod mesh;
 mod mtext;
 mod ocs;

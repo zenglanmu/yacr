@@ -16,9 +16,9 @@
 //!   `LINE` (start/end), `POLYLINE`/`LWPOLYLINE` (every stored vertex, bulges
 //!   preserved) and `SPLINE` (every stored **control point**); an `ARC` is
 //!   stretchable per endpoint under the declared rule below;
-//! * `CIRCLE`/`ELLIPSE`/`INSERT` cannot be stretched (Autodesk documents the
-//!   first three): fully enclosed ⇒ move, partially enclosed ⇒ unchanged plus an
-//!   explicit diagnostic;
+//! * `CIRCLE`/`ELLIPSE` cannot be stretched: fully enclosed ⇒ move, partially
+//!   enclosed ⇒ unchanged plus an explicit diagnostic; `INSERT` follows the
+//!   declared insertion-point rule below (it is no longer in the move-only list);
 //! * `TEXT` fails the **whole** command. This is a deliberate, tested choice
 //!   that is **unchanged** by ADR 0019 decision B: text now accepts a
 //!   similarity transform, but STRETCH's per-vertex semantics have no meaning for
@@ -88,6 +88,39 @@
 //! deliberately the same rule the arc endpoint grip applies, so the grip and the
 //! command never disagree about what "move an arc endpoint" means.
 //!
+//! **INSERT partial stretch (our declared rule).** A block reference has exactly one
+//! addressable "vertex" through this path: its **insertion point**, i.e. the
+//! block-space origin `(0, 0, 0)` mapped through the instance placement
+//! (`Transform3::apply_point`), which is the placement's translation column. A
+//! partially enclosed INSERT therefore translates the **whole reference rigidly** —
+//! one `transform_geometry` translation of the placement, the same call a fully
+//! enclosed move makes, so the linear part (rotation / uniform or non-uniform scale
+//! / mirror columns) is copied **bit-identically** and only the translation column
+//! gains the displacement — **iff** that insertion point lies inside the crossing
+//! window. Otherwise the reference is left **bit-identically** unchanged and the
+//! reason is named: `drawing.stretch.insert_outside` (the window overlaps the
+//! reference's displayed geometry, e.g. its members' conservative bounds, but not
+//! its insertion point). A fully enclosed INSERT keeps the ordinary whole-move path,
+//! and a reference outside the window is not touched at all (no staging, no write).
+//!
+//! Honest limits of that rule (all deliberate; none of them is "block support"):
+//!
+//! * block **members are not stretched individually** — an instance path into a
+//!   block definition is not addressable through this path (the plan only ever
+//!   writes top-level model-space owners, and there is no per-member vertex edit);
+//! * a **rotated/scaled/mirrored** reference moves **rigidly** by the displacement
+//!   and is **not** re-fitted to the window: the reference keeps its rotation and
+//!   scale exactly, so "the part of the block inside the window stretches" does not
+//!   happen;
+//! * this is **not** AutoCAD's full block-reference STRETCH semantics. Autodesk's
+//!   block-specific handling (definition-level edits, nested member stretching,
+//!   attribute reflow) is **not modelled here and not claimed**; the rule above is
+//!   our own, chosen so that a partial enclosure is never silent and never guesses.
+//!
+//! The insertion point of a non-finite placement is not special-cased: a
+//! non-finite point is simply not inside any window, so such a reference reports
+//! `insert_outside` and is left untouched.
+//!
 //! The per-vertex edits are built here as new geometry and staged as
 
 //! `update_entity`, exactly like TRIM's keep branch; `cad-db` re-validates at
@@ -121,7 +154,9 @@ enum Enclosure {
 /// The planned action for one in-window entity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StretchAction {
-    /// Fully enclosed: translate the whole entity by the displacement.
+    /// Translate the whole entity by the displacement: a fully enclosed entity, or a
+    /// partially enclosed `INSERT` whose insertion point is inside the window (a
+    /// block reference moves rigidly, see the module doc).
     Move,
     /// Partially enclosed `LINE`/`POLYLINE`/`SPLINE`/`ARC`: move only the
     /// in-window vertices, control points or arc endpoints.
@@ -342,13 +377,27 @@ impl Application {
                     | SemanticGeometry::Arc { .. } => {
                         plan.push((owner, StretchAction::Stretch));
                     }
-                    // CIRCLE/ELLIPSE/INSERT cannot be stretched (Autodesk for the
-                    // first three). All are move-only when fully enclosed and
-                    // unchanged here.
-                    SemanticGeometry::Circle { .. }
-                    | SemanticGeometry::Ellipse { .. }
-                    | SemanticGeometry::Insert { .. } => {
+                    // CIRCLE/ELLIPSE cannot be stretched. Both are move-only when
+                    // fully enclosed and unchanged here.
+                    SemanticGeometry::Circle { .. } | SemanticGeometry::Ellipse { .. } => {
                         plan.push((owner, StretchAction::Unchanged));
+                    }
+                    // INSERT: the reference has no per-vertex edit, so the declared
+                    // rule is rigid: translate the whole reference by the
+                    // displacement **iff** its insertion point (the transformed
+                    // block-space origin) is inside the crossing window, otherwise
+                    // leave it bit-identically unchanged and report the reason by
+                    // name (`drawing.stretch.insert_outside`). Both arms are
+                    // pre-existing paths — `Move` is the ordinary whole-entity
+                    // `transform_geometry` translation (so the linear part of the
+                    // placement is preserved bit for bit) and the diagnostic is an
+                    // ordinary per-entity "unchanged" report, so nothing is staged.
+                    SemanticGeometry::Insert { transform, .. } => {
+                        if rect.contains_point(insertion_point(transform)) {
+                            plan.push((owner, StretchAction::Move));
+                        } else {
+                            diagnostics.push(stretch_unchanged_diagnostic(owner, "insert_outside"));
+                        }
                     }
                     // A dimension is not stretchable: a partial enclosure leaves
                     // it unchanged (like ARC) rather than failing the command,
@@ -488,6 +537,23 @@ impl Application {
             measurement: None,
         })
     }
+}
+
+/// The insertion point of an `INSERT`: the block-space origin `(0, 0, 0)` mapped
+/// through the instance placement, i.e. the placement's translation column.
+///
+/// This is the **one** addressable vertex a block reference has on this path (see
+/// the module doc): a partial enclosure moves the whole reference rigidly iff this
+/// point is inside the crossing window. Mapping the origin (rather than reading the
+/// column directly) keeps the definition honest for any affine placement, including a
+/// reflected or sheared one, and a non-finite placement simply yields a non-finite
+/// point that is inside no window.
+fn insertion_point(transform: &Transform3) -> Point3 {
+    transform.apply_point(Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    })
 }
 
 /// Classify one entity's geometry against the crossing window.
@@ -775,6 +841,8 @@ fn stretched_geometry(
 /// (`drawing.stretch.<reason>`); the ones in use are `no_vertex` (a per-vertex
 /// kind with no vertex inside), `not_stretchable` (a move-only kind),
 /// `dimension`/`hatch` (a kind unchanged by its own documented rule),
+/// `insert_outside` (a block reference whose insertion point is outside the
+/// window, so its rigid move does not apply),
 /// `spline_inconsistent` (a spline definition that cannot be indexed),
 /// `arc_no_direction`, `arc_degenerate_sweep` and `arc_unchanged` (the three ARC
 /// outcomes of the declared endpoint rule).
@@ -810,6 +878,16 @@ fn stretch_unchanged_diagnostic(entity: EntityId, reason: &str) -> Diagnostic {
         "arc_unchanged" => format!(
             "STRETCH: entity {} crosses the window but its in-window endpoint(s) keep their stored \
              angles on the arc's circle (the displacement has no tangential in-plane component); \
+             left unchanged",
+            entity.0
+        ),
+        // Our declared INSERT rule: a block reference only moves rigidly, and only
+        // when its insertion point is in the window. The message names the
+        // precondition so a partially enclosed reference is never silently dropped.
+        "insert_outside" => format!(
+            "STRETCH: block reference {} crosses the window but its insertion point (the \
+             transformed block-space origin) is outside it, and STRETCH moves a block reference \
+             only rigidly by its insertion point (block members are not stretched individually); \
              left unchanged",
             entity.0
         ),

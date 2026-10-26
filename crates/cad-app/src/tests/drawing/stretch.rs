@@ -483,8 +483,15 @@ fn insert_app() -> (Application, SessionState) {
     )
 }
 
+/// A fully enclosed INSERT is still translated as a whole. The **partial** case is
+/// no longer "unchanged + `not_stretchable`": since the declared insertion-point
+/// rule a partially enclosed block reference moves rigidly iff its insertion point
+/// is inside the window, otherwise it is unchanged with
+/// `drawing.stretch.insert_outside` — pinned in
+/// `tests/drawing/stretch_insert.rs` (both arms, plus the rotated/scaled
+/// no-refit case and the mixed insert+line window).
 #[test]
-fn stretch_fully_enclosed_insert_is_moved_and_partially_enclosed_insert_is_unchanged() {
+fn stretch_fully_enclosed_insert_is_moved_whole() {
     // Fully enclosed: the insert's placement is translated by the displacement.
     let (mut app, mut session) = insert_app();
     stretch(
@@ -499,31 +506,6 @@ fn stretch_fully_enclosed_insert_is_moved_and_partially_enclosed_insert_is_uncha
     assert!(
         near(transform.apply_point(point(0.0, 0.0)), point(7.0, 8.0)),
         "{transform:?}"
-    );
-
-    // Partially enclosed: an insert cannot stretch, so it is unchanged with a
-    // diagnostic.
-    let (mut app2, mut session2) = insert_app();
-    let before = revision(&app2);
-    let outcome = stretch(
-        &mut app2,
-        &mut session2,
-        window(point(0.0, 0.0), point(5.5, 5.5)),
-        point(0.0, 0.0),
-        point(1.0, 1.0),
-    )
-    .unwrap();
-    assert!(outcome.changes.is_none());
-    assert_eq!(revision(&app2), before);
-    let transform = insert_transform(&app2, 1);
-    assert!(
-        near(transform.apply_point(point(0.0, 0.0)), point(5.0, 5.0)),
-        "{transform:?}"
-    );
-    assert!(
-        has_code(&outcome, "drawing.stretch.not_stretchable"),
-        "{:?}",
-        outcome.diagnostics
     );
 }
 

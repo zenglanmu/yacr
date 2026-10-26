@@ -32,7 +32,6 @@ impl<'a> ImporterBuilder<'a> {
             capabilities: HashMap::new(),
             layer_ids: HashMap::new(),
             layer_transparency: HashMap::new(),
-            layer_lineweights: HashMap::new(),
             layer_linetypes: HashMap::new(),
             linetype_patterns: HashMap::new(),
             linetype_ids: HashMap::new(),
@@ -244,9 +243,6 @@ impl<'a> ImporterBuilder<'a> {
             self.layer_ids.insert(layer.name.clone(), id);
             self.layer_transparency
                 .insert(id, layer_opacity(layer.transparency));
-            if let Some(mm) = lineweight_mm(layer.line_weight) {
-                self.layer_lineweights.insert(id, mm);
-            }
             self.layer_linetypes.insert(id, layer.line_type.clone());
             let visible = !layer.flags.off && !layer.flags.frozen;
             self.builder.insert_layer(Layer {
@@ -259,14 +255,15 @@ impl<'a> ImporterBuilder<'a> {
             // `off` and `frozen` are recorded **separately** because a frozen
             // layer is not an off layer even though this phase hides both.
             //
-            // The side maps above are still consumed by entity style resolution
-            // (`entity/push.rs` substitutes a `ByLayer` entity's lineweight,
-            // linetype and opacity from them), so they are kept in addition to —
-            // not instead of — the stored attributes. Layer **colour** is not
-            // among them: `ByLayer` colour stays symbolic on the entity and the
-            // representation reads `attributes.color.rgb` from this very row at
-            // draw time, so a layer colour edit recolours its entities without
-            // an entity write.
+            // The row is the **only** source for a `ByLayer` entity's colour,
+            // lineweight and linetype: none of the three is flattened onto the
+            // entity any more. The representation reads
+            // `color.rgb`/`lineweight`/`linetype` (the last one is a *name*,
+            // resolved through the linetype table) from this row at draw time,
+            // so a layer edit changes its `ByLayer` entities without an entity
+            // write. `layer_transparency`/`layer_linetypes` remain only for the
+            // import-time diagnostics (opacity is still resolved per entity,
+            // and an unknown layer linetype name is reported once per entity).
             self.builder
                 .set_layer_attributes(id, layer_attributes(layer))?;
         }

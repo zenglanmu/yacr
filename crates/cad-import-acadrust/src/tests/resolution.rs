@@ -79,30 +79,28 @@ fn layer_rgb_resolves_index_and_rgb_and_falls_back_to_white() {
 }
 
 #[test]
-fn lineweight_resolution_prefers_byobject_then_layer_then_byblock() {
-    // A concrete weight is 1/100 mm; 35 -> 0.35 mm.
+fn lineweight_resolution_keeps_the_symbolic_by_layer_form() {
+    // A concrete weight is 1/100 mm; 35 -> 0.35 mm, byte-identical.
     assert_eq!(
-        resolve_entity_lineweight(acadrust::LineWeight::Value(35), Some(0.5)),
+        resolve_entity_lineweight(acadrust::LineWeight::Value(35)),
         EntityLineWeight::Explicit(0.35)
-    );
-    // ByLayer uses the layer's pre-resolved weight.
-    assert_eq!(
-        resolve_entity_lineweight(acadrust::LineWeight::ByLayer, Some(0.5)),
-        EntityLineWeight::Explicit(0.5)
     );
     // acadrust's Default keeps its explicit meaning.
     assert_eq!(
-        resolve_entity_lineweight(acadrust::LineWeight::Default, Some(0.5)),
+        resolve_entity_lineweight(acadrust::LineWeight::Default),
         EntityLineWeight::Default
     );
-    // ByBlock stays symbolic.
+    // ByBlock stays symbolic so INSERT expansion can supply the value.
     assert_eq!(
-        resolve_entity_lineweight(acadrust::LineWeight::ByBlock, Some(0.5)),
+        resolve_entity_lineweight(acadrust::LineWeight::ByBlock),
         EntityLineWeight::ByBlock
     );
-    // ByLayer with no reachable layer stays unresolved.
+    // ByLayer stays symbolic too: the representation resolves it from the
+    // owning layer's stored `LayerLineWeight` at draw time. (Before this change
+    // the layer's millimetres were flattened into `Explicit` here, so a layer
+    // lineweight edit changed nothing.)
     assert_eq!(
-        resolve_entity_lineweight(acadrust::LineWeight::ByLayer, None),
+        resolve_entity_lineweight(acadrust::LineWeight::ByLayer),
         EntityLineWeight::ByLayer
     );
 }
@@ -123,44 +121,37 @@ fn dashed_pattern() -> LinetypePattern {
 }
 
 #[test]
-fn linetype_resolution_prefers_explicit_then_layer_then_byblock() {
+fn linetype_resolution_keeps_the_symbolic_by_layer_form() {
     let dashed = dashed_pattern();
-    // An explicit named linetype wins over the layer.
+    // An explicit named linetype wins over the layer and is stored
+    // byte-identically (pattern and entity scale).
     assert_eq!(
-        resolve_entity_linetype("Dashed", 2.0, Some(dashed.clone()), Some(dashed_pattern())),
+        resolve_entity_linetype("Dashed", 2.0, Some(dashed.clone())),
         EntityLineType::Explicit {
             name: "Dashed".into(),
             pattern: dashed.clone(),
             scale: 2.0,
         }
     );
-    // ByLayer uses the layer's pre-resolved pattern (and the entity's scale).
+    // ByLayer stays symbolic: the representation looks the owning layer's
+    // linetype name up in the drawing's linetype table at draw time, so a layer
+    // linetype edit changes the dashes without an entity write. (Before this
+    // change the layer's pattern was substituted here as an `Explicit` copy,
+    // which froze it at import time.) A symbolic value carries no per-entity
+    // scale; only the drawing's LTSCALE applies.
     assert_eq!(
-        resolve_entity_linetype("ByLayer", 1.5, None, Some(dashed.clone())),
-        EntityLineType::Explicit {
-            name: "ByLayer".into(),
-            pattern: dashed.clone(),
-            scale: 1.5,
-        }
+        resolve_entity_linetype("ByLayer", 1.5, None),
+        EntityLineType::ByLayer
     );
     // An empty name is also ByLayer.
     assert_eq!(
-        resolve_entity_linetype("", 1.0, None, Some(dashed.clone())),
-        EntityLineType::Explicit {
-            name: "ByLayer".into(),
-            pattern: dashed,
-            scale: 1.0,
-        }
+        resolve_entity_linetype("", 1.0, None),
+        EntityLineType::ByLayer
     );
     // ByBlock stays symbolic so INSERT expansion can substitute the value.
     assert_eq!(
-        resolve_entity_linetype("ByBlock", 1.0, None, Some(dashed_pattern())),
+        resolve_entity_linetype("ByBlock", 1.0, Some(dashed_pattern())),
         EntityLineType::ByBlock
-    );
-    // ByLayer with no reachable pattern is symbolic, not fabricated.
-    assert_eq!(
-        resolve_entity_linetype("ByLayer", 1.0, None, None),
-        EntityLineType::ByLayer
     );
 }
 
@@ -168,7 +159,7 @@ fn linetype_resolution_prefers_explicit_then_layer_then_byblock() {
 fn unknown_named_linetype_is_an_explicit_continuous_fallback() {
     // The caller passes `None` for an unknown name; the entity gets an explicit
     // continuous pattern carrying the source name, never invented dashes.
-    let resolved = resolve_entity_linetype("NoSuchLine", 1.0, None, None);
+    let resolved = resolve_entity_linetype("NoSuchLine", 1.0, None);
     match resolved {
         EntityLineType::Explicit {
             name,
@@ -185,7 +176,7 @@ fn unknown_named_linetype_is_an_explicit_continuous_fallback() {
 
 #[test]
 fn standard_continuous_linetype_is_explicit_and_solid() {
-    let resolved = resolve_entity_linetype("Continuous", 1.0, None, None);
+    let resolved = resolve_entity_linetype("Continuous", 1.0, None);
     match resolved {
         EntityLineType::Explicit { pattern, .. } => assert!(pattern.is_continuous()),
         other => panic!("expected explicit continuous, got {other:?}"),
@@ -194,12 +185,12 @@ fn standard_continuous_linetype_is_explicit_and_solid() {
 
 #[test]
 fn non_finite_linetype_scale_falls_back_to_one() {
-    let resolved = resolve_entity_linetype("Dashed", f64::NAN, Some(dashed_pattern()), None);
+    let resolved = resolve_entity_linetype("Dashed", f64::NAN, Some(dashed_pattern()));
     match resolved {
         EntityLineType::Explicit { scale, .. } => assert_eq!(scale, 1.0),
         other => panic!("expected explicit, got {other:?}"),
     }
-    let resolved = resolve_entity_linetype("Dashed", -2.0, Some(dashed_pattern()), None);
+    let resolved = resolve_entity_linetype("Dashed", -2.0, Some(dashed_pattern()));
     match resolved {
         EntityLineType::Explicit { scale, .. } => assert_eq!(scale, 1.0),
         other => panic!("expected explicit, got {other:?}"),

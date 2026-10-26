@@ -304,6 +304,7 @@ mod selection_reconcile;
 mod spline;
 mod stretch;
 mod stretch_curves;
+mod stretch_insert;
 mod text;
 mod text_edit;
 mod transform;

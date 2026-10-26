@@ -437,19 +437,6 @@ impl<'a> ImporterBuilder<'a> {
         self.style_ids.get(name).copied().unwrap_or(StyleId(0))
     }
 
-    /// Resolved dash pattern for a linetype name, or `None` when unknown.
-    ///
-    /// An empty or symbolic name has no concrete pattern; callers handle those
-    /// cases before calling. The lookup is case-insensitive like the source
-    /// table.
-    pub(crate) fn linetype_pattern(&self, name: &str) -> Option<LinetypePattern> {
-        let key = name.trim().to_ascii_lowercase();
-        if key.is_empty() || key == "bylayer" || key == "byblock" {
-            return None;
-        }
-        self.linetype_patterns.get(&key).cloned()
-    }
-
     /// Primary font file declared by a named text style, if any.
     pub(crate) fn style_font(&self, name: &str) -> Option<String> {
         self.style_fonts.get(&name.to_ascii_lowercase()).cloned()
