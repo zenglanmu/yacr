@@ -13,319 +13,11 @@
 use super::*;
 
 use crate::grips::{
-    GripId, GripKind, REASON_NON_FINITE_TARGET, REASON_STALE_HANDLE, REASON_TARGET_MISSING,
+    GripKind, REASON_NON_FINITE_TARGET, REASON_STALE_HANDLE, REASON_TARGET_MISSING,
     REASON_UNSUPPORTED_KIND, REASON_ZERO_DISPLACEMENT,
 };
-use crate::GripStretchCommand;
 
-const LINE: u128 = 1;
-const POINT: u128 = 2;
-const CIRCLE: u128 = 3;
-const PAPER_LINE: u128 = 4;
-/// The `ELLIPSE` whose axis/centre grips are dragged here (`Center 0`,
-/// `Quadrant 0..=3` on a full ellipse).
-const ELLIPSE: u128 = 5;
-/// The `ARC` whose endpoint grips are dragged here (`Center 0, Endpoint 0/1`).
-const ARC: u128 = 6;
-/// The `POLYLINE` whose `Vertex` grips are dragged here.
-const POLYLINE: u128 = 7;
-/// A geometry with **no** grip model at all (`SPLINE` control-point grips are
-/// NOT IMPLEMENTED), used for the `grip.unsupported_kind` refusal now that
-/// `CIRCLE`, `ARC` and `ELLIPSE` have handles.
-const SPLINE: u128 = 8;
-
-/// The fixture ellipse: major semi-axis `(4, 0, 0)`, ratio `0.5` (minor 2), a
-/// full turn. Non-round centre so "the untouched fields are bit-identical" is a
-/// real comparison.
-const ELLIPSE_CENTER: Point3 = Point3 {
-    x: 1.0,
-    y: -0.5,
-    z: 2.0,
-};
-const ELLIPSE_MAJOR: Point3 = Point3 {
-    x: 4.0,
-    y: 0.0,
-    z: 0.0,
-};
-const ELLIPSE_RATIO: f64 = 0.5;
-
-/// The stored `ARC` of the fixture: centre at the origin, radius 5, from angle 0
-/// over 1.5 rad, so the two endpoint handles are easy to aim at.
-const ARC_START_ANGLE: f64 = 0.0;
-const ARC_SWEEP: f64 = 1.5;
-const ARC_RADIUS: f64 = 5.0;
-/// The fixture polyline's stored bulges (non-zero, so "bulges untouched" is a
-/// real comparison at the command level too).
-const POLYLINE_BULGES: [f64; 3] = [0.0, 0.25, 0.0];
-
-/// Non-round coordinates so an "untouched endpoint" assertion is a real bit
-/// comparison rather than a happy accident of decimal literals.
-const LINE_START: Point3 = Point3 {
-    x: 0.1,
-    y: 0.2,
-    z: 1.0 / 3.0,
-};
-const LINE_END: Point3 = Point3 {
-    x: -4.5,
-    y: 6.25,
-    z: 0.5,
-};
-const POINT_AT: Point3 = Point3 {
-    x: 3.0,
-    y: 4.0,
-    z: 0.0,
-};
-
-/// A drawing with a `LINE` (id 1), a `POINT` (id 2), a `CIRCLE` (id 3), a
-/// paper-space `LINE` (id 4, the non-addressable target), an `ELLIPSE` (id 5,
-/// the unsupported-kind target), an `ARC` (id 6, endpoint drags) and a
-/// `POLYLINE` (id 7, vertex drags). Nothing is created through a command, so the
-/// undo stack starts empty and a drag's undo depth is unambiguous.
-fn grip_app() -> (Application, SessionState) {
-    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
-    b.insert_layer(Layer {
-        id: LayerId(0),
-        name: "0".into(),
-        visible: true,
-    })
-    .unwrap();
-    b.insert_entity(ent(
-        LINE,
-        SemanticGeometry::Line {
-            start: LINE_START,
-            end: LINE_END,
-        },
-        0,
-    ))
-    .unwrap();
-    b.insert_entity(ent(POINT, SemanticGeometry::Point(POINT_AT), 1))
-        .unwrap();
-    b.insert_entity(ent(
-        CIRCLE,
-        SemanticGeometry::Circle {
-            center: p3(0.0, 0.0, 0.0),
-            normal: p3(0.0, 0.0, 1.0),
-            radius: 5.0,
-        },
-        2,
-    ))
-    .unwrap();
-    let mut paper = ent(
-        PAPER_LINE,
-        SemanticGeometry::Line {
-            start: p3(0.0, 0.0, 0.0),
-            end: p3(1.0, 0.0, 0.0),
-        },
-        3,
-    );
-    paper.space = SpaceId::Paper(LayoutId(1));
-    b.insert_entity(ent(
-        ELLIPSE,
-        SemanticGeometry::Ellipse {
-            center: ELLIPSE_CENTER,
-            normal: p3(0.0, 0.0, 1.0),
-            major_axis: ELLIPSE_MAJOR,
-            ratio: ELLIPSE_RATIO,
-            start: 0.0,
-            sweep: std::f64::consts::TAU,
-        },
-        4,
-    ))
-    .unwrap();
-    // The drawing must carry the layout the paper-space entity references.
-    b.insert_layout(Layout {
-        id: LayoutId(1),
-        name: "Sheet1".into(),
-        viewports: Vec::new(),
-    })
-    .unwrap();
-    b.insert_entity(paper).unwrap();
-    b.insert_entity(ent(
-        ARC,
-        SemanticGeometry::Arc {
-            center: p3(0.0, 0.0, 0.0),
-            normal: p3(0.0, 0.0, 1.0),
-            radius: ARC_RADIUS,
-            start: ARC_START_ANGLE,
-            sweep: ARC_SWEEP,
-        },
-        5,
-    ))
-    .unwrap();
-    b.insert_entity(ent(
-        POLYLINE,
-        SemanticGeometry::Polyline {
-            points: vec![p3(0.0, 0.0, 1.0), p3(10.0, 0.0, 1.0), p3(10.0, 5.0, 1.0)],
-            bulges: POLYLINE_BULGES.to_vec(),
-            closed: false,
-        },
-        6,
-    ))
-    .unwrap();
-    b.insert_entity(ent(
-        SPLINE,
-        SemanticGeometry::Spline {
-            degree: 1,
-            knots: vec![0.0, 0.0, 1.0, 1.0],
-            control_points: vec![p3(0.0, 0.0, 0.0), p3(1.0, 0.0, 0.0)],
-            weights: vec![1.0, 1.0],
-        },
-        7,
-    ))
-    .unwrap();
-    let drawing = b.finish().unwrap();
-
-    let mut app = Application::new();
-    app.workspace.documents.insert(
-        DocumentId(1),
-        Document {
-            id: DocumentId(1),
-            drawing: Arc::new(drawing),
-            identity: DocumentIdentity::Sha256([11u8; 32]),
-            units: UnitContext::drawing_units(),
-            resource_keys: Vec::new(),
-        },
-    );
-    app.workspace.viewports.insert(
-        ViewportId(1),
-        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
-    );
-    (app, SessionState::new(DocumentId(1), AppMode::Work))
-}
-
-fn grip_id(entity: u128, kind: GripKind, index: u8) -> GripId {
-    GripId {
-        entity: EntityId(entity),
-        kind,
-        index,
-    }
-}
-
-/// The payload a grip gesture would produce: one handle id plus the world point.
-fn drag(entity: u128, kind: GripKind, index: u8, to: Point3) -> CommandPayload {
-    CommandPayload::GripStretch(Box::new(GripStretchCommand {
-        id: grip_id(entity, kind, index),
-        to,
-    }))
-}
-
-fn undo_depth(app: &Application) -> usize {
-    app.history
-        .get(&DocumentId(1))
-        .map(|history| history.undo_depth())
-        .unwrap_or(0)
-}
-
-fn geometry_of(app: &Application, entity: u128) -> SemanticGeometry {
-    app.workspace.documents[&DocumentId(1)]
-        .drawing
-        .entity(EntityId(entity))
-        .unwrap_or_else(|| panic!("entity {entity} is gone"))
-        .geometry
-        .clone()
-}
-
-fn endpoints_of(app: &Application, entity: u128) -> (Point3, Point3) {
-    match geometry_of(app, entity) {
-        SemanticGeometry::Line { start, end } => (start, end),
-        other => panic!("entity {entity} is not a LINE: {other:?}"),
-    }
-}
-
-/// The documented exact midpoint of two stored points (`(start + end) * 0.5`),
-/// recomputed here independently of the model.
-fn midpoint_of(start: Point3, end: Point3) -> Point3 {
-    Point3 {
-        x: (start.x + end.x) * 0.5,
-        y: (start.y + end.y) * 0.5,
-        z: (start.z + end.z) * 0.5,
-    }
-}
-
-fn position_of(app: &Application, entity: u128) -> Point3 {
-    match geometry_of(app, entity) {
-        SemanticGeometry::Point(position) => position,
-        other => panic!("entity {entity} is not a POINT: {other:?}"),
-    }
-}
-
-/// The stored `ARC` fields of `entity` (`center, normal, radius, start, sweep`).
-fn arc_parts(app: &Application, entity: u128) -> (Point3, Point3, f64, f64, f64) {
-    match geometry_of(app, entity) {
-        SemanticGeometry::Arc {
-            center,
-            normal,
-            radius,
-            start,
-            sweep,
-        } => (center, normal, radius, start, sweep),
-        other => panic!("entity {entity} is not an ARC: {other:?}"),
-    }
-}
-
-/// The stored `POLYLINE` fields of `entity` (`points, bulges, closed`).
-fn polyline_parts(app: &Application, entity: u128) -> (Vec<Point3>, Vec<f64>, bool) {
-    match geometry_of(app, entity) {
-        SemanticGeometry::Polyline {
-            points,
-            bulges,
-            closed,
-        } => (points, bulges, closed),
-        other => panic!("entity {entity} is not a POLYLINE: {other:?}"),
-    }
-}
-
-/// The Euclidean length of a vector (used to read a stored semi-axis).
-fn length_of(v: Point3) -> f64 {
-    (v.x * v.x + v.y * v.y + v.z * v.z).sqrt()
-}
-
-/// The stored `ELLIPSE` fields of `entity`
-/// (`center, normal, major_axis, ratio, start, sweep`).
-fn ellipse_parts(app: &Application, entity: u128) -> (Point3, Point3, Point3, f64, f64, f64) {
-    match geometry_of(app, entity) {
-        SemanticGeometry::Ellipse {
-            center,
-            normal,
-            major_axis,
-            ratio,
-            start,
-            sweep,
-        } => (center, normal, major_axis, ratio, start, sweep),
-        other => panic!("entity {entity} is not an ELLIPSE: {other:?}"),
-    }
-}
-
-/// Assert a refusal with the exact stable reason code, and that the refusal
-/// variant is the documented one (`InvalidInput` for its family,
-/// `Unsupported` for the kind/addressability refusals).
-fn refused(error: CadError, code: &str, unsupported: bool) -> String {
-    let message = match (error, unsupported) {
-        (CadError::Unsupported(message), true) | (CadError::InvalidInput(message), false) => {
-            message
-        }
-        (other, _) => panic!("unexpected refusal variant for {code}: {other:?}"),
-    };
-    assert!(
-        message.starts_with(code),
-        "reason must start with {code}, got {message}"
-    );
-    message
-}
-
-/// Every refusal must leave the drawing and the undo stack exactly as they were.
-fn assert_untouched(app: &Application, revision: Revision, undo: usize) {
-    assert_eq!(
-        revision_of(app),
-        revision,
-        "a refusal must not bump revision"
-    );
-    assert_eq!(undo_depth(app), undo, "a refusal must not record history");
-}
-
-fn revision_of(app: &Application) -> Revision {
-    app.workspace.documents[&DocumentId(1)].drawing.revision()
-}
+use super::grip_fixture::*;
 
 #[test]
 fn line_start_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
@@ -666,6 +358,70 @@ fn polyline_vertex_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
 }
 
 #[test]
+fn spline_control_point_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
+    let (mut app, mut session) = grip_app();
+    let revision = revision_of(&app);
+    let before = geometry_of(&app, SPLINE);
+    let target = p3(-2.5, 9.75, 0.0);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(SPLINE, GripKind::ControlPoint, 2, target),
+    )
+    .unwrap();
+
+    // One entity update, in one transaction, with one undo entry.
+    let changes = outcome.changes.as_ref().expect("a ChangeSet is published");
+    assert_eq!(changes.changes.len(), 1, "exactly one entity update");
+    assert_eq!(outcome.objects, vec![ObjectId(SPLINE)]);
+    assert_eq!(revision_of(&app), Revision(revision.0 + 1));
+    assert_eq!(undo_depth(&app), 1);
+
+    // One definition point moved; `degree`/`knots`/`weights` are untouched, so the
+    // stored NURBS is a different curve on the same parameterisation (no re-fit).
+    match geometry_of(&app, SPLINE) {
+        SemanticGeometry::Spline {
+            degree,
+            knots,
+            control_points,
+            weights,
+        } => {
+            assert_eq!(degree, 3, "the degree is untouched");
+            assert_eq!(
+                knots,
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+                "the knot vector is bit-identical"
+            );
+            assert_eq!(weights, vec![1.0; 4], "the weight vector is bit-identical");
+            assert_eq!(control_points.len(), 4, "no control point is added");
+            assert_eq!(control_points[2], target, "the dragged control point");
+            assert_eq!(
+                control_points[0],
+                p3(0.0, 0.0, 1.0),
+                "control point 0 is untouched"
+            );
+        }
+        other => panic!("expected a SPLINE, got {other:?}"),
+    }
+
+    // Undo restores the original definition exactly (the stored NURBS struct).
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(
+        geometry_of(&app, SPLINE),
+        before,
+        "undo restores the spline"
+    );
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
 fn point_grip_drag_moves_the_position_in_one_undo_step() {
     let (mut app, mut session) = grip_app();
     let outcome = execute(
@@ -831,14 +587,15 @@ fn ellipse_quadrant_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
 fn a_geometry_without_a_grip_model_is_refused_as_an_unsupported_kind() {
     let (mut app, mut session) = grip_app();
     let revision = revision_of(&app);
-    // A SPLINE exposes no grip at all (control-point grips are NOT IMPLEMENTED),
+    // An INSERT exposes no grip at all (its instance transform is not an entity
+    // handle; `SPLINE` used to be this fixture but now has control-point grips),
     // so any id naming one is the kind refusal — even though the kind/index would
     // also be "stale" against it.
     let error = execute(
         &mut app,
         &mut session,
         CommandId::GripStretch,
-        drag(SPLINE, GripKind::Endpoint, 0, p3(1.0, 0.0, 0.0)),
+        drag(INSERT, GripKind::Endpoint, 0, p3(1.0, 0.0, 0.0)),
     )
     .unwrap_err();
     refused(error, REASON_UNSUPPORTED_KIND, true);

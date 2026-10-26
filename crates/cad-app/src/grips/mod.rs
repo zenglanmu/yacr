@@ -32,6 +32,7 @@
 //! | `SemanticGeometry::Arc` | [`GripKind::Center`] `0`, then [`GripKind::Endpoint`] `0` = start point, `1` = end point |
 //! | `SemanticGeometry::Ellipse` | [`GripKind::Center`] `0`, then [`GripKind::Quadrant`] `0..=3` — **full ellipses only** (see below) |
 //! | `SemanticGeometry::Polyline` | [`GripKind::Vertex`] `index` = stored vertex index |
+//! | `SemanticGeometry::Spline` | [`GripKind::ControlPoint`] `index` = stored control-point index |
 //! | `SemanticGeometry::Point` | [`GripKind::Point`] `0` |
 //!
 //! The `ARC` order is `Center 0, Endpoint 0, Endpoint 1`: the centre comes
@@ -47,6 +48,36 @@
 //! and would need a domain change, not a guess here. A vertex drag only moves
 //! x/y and keeps the vertex's own `z`, exactly like a `LINE` endpoint drag, so
 //! it never edits a 3D polyline's elevation.
+//!
+//! `SPLINE` is a NURBS definition, and its control points are **not on the
+//! curve**: a B-spline (rational or not) passes through its first and last control
+//! point only when the end knots have full multiplicity, and never through the
+//! interior ones. That is not a bug and not an approximation: the
+//! stored `control_points` are the definition, the drawn curve is the
+//! de-Boor/NURBS evaluation of `(degree, knots, control_points, weights)`. A
+//! control-point grip therefore sits at the stored control point (a marker off
+//! the drawn curve is correct), and a drag that redefines one of them **reshapes**
+//! the curve — after such a drag the curve no longer passes through the points it
+//! used to pass through. No handle names a point **on** the drawn curve: this
+//! model exposes the definition points only, not the curve's endpoints (see the
+//! drag rules). We do not claim vendor equivalence for the preview/reshape feel;
+//! AutoCAD also drags control points without re-fitting, but that is a
+//! resemblance, not a tested claim.
+//!
+//! Only control-point indices `0..=255` are addressable because [`GripId::index`]
+//! is a `u8`: a spline with more than 256 stored control points exposes the first
+//! 256 (exactly like a [`GripKind::Vertex`] polyline) and the rest are simply
+//! unreachable in this build. Nothing is wrapped, truncated or renumbered.
+//!
+//! A spline whose stored definition is **internally inconsistent** —
+//! `control_points.len() != weights.len()`, or
+//! `knots.len() != control_points.len() + degree + 1` — exposes **no** grips at
+//! all, and every [`GripKind::ControlPoint`] id against it is
+//! [`REASON_STALE_HANDLE`]. We do not guess a repaired definition (padding a knot
+//! vector or a weight list would silently change the curve), and we do not
+//! validate the shape either: `cad-db`'s validator is the authority on what may be
+//! stored. This model only declines to invent a handle for a definition it cannot
+//! interpret.
 //!
 //! [`grips_for_entity`] returns an **empty** vector for every other geometry, and
 //! [`grip_hit`] therefore never hits one. No marker is invented, no index is
@@ -168,18 +199,32 @@
 //!   leaving it keep the bulge they were stored with (our reading of how the
 //!   handle behaves — **not vendor-verified**). An `index` outside the stored
 //!   vertices is [`REASON_STALE_HANDLE`].
+//! * **`SPLINE` control point** (`index` = stored control-point index): the
+//!   dragged entry of `control_points` takes the target **verbatim** (all three
+//!   coordinates, no projection: a control point is a free 3D definition point,
+//!   not a point on a plane) and `degree`, `knots` and `weights` are returned
+//!   **bit-identically**. No knot and no weight is recomputed, renormalised or
+//!   re-fitted: the result is a **different NURBS** that happens to share the
+//!   parameterisation — that is our choice (AutoCAD also drags control points
+//!   without re-fitting, but no vendor equivalence is claimed), and it is the
+//!   reason a control-point drag changes the shape of the whole curve rather than
+//!   moving a point along it. Every other control point is bit-identical. An
+//!   `index` outside the stored control points — and any id against an
+//!   internally inconsistent definition — is [`REASON_STALE_HANDLE`].
 //! * **`POINT`**: the position becomes the target.
 //!
 //! ## Explicit refusal list (no marker, no hit)
 //!
-//! `SPLINE`, `INSERT`/block-member geometry (an instance transform is not an
-//! entity handle), `TEXT`/`MTEXT`/`MULTILEADER` (insertion-point and width
-//! grips), `HATCH`, `DIMENSION` (definition-point grips; the dimension is
+//! `INSERT`/block-member geometry (an instance transform is not an entity
+//! handle), `TEXT`/`MTEXT`/`MULTILEADER` (insertion-point and width grips),
+//! `HATCH`, `DIMENSION` (definition-point grips; the dimension is
 //! non-associative by design), `IMAGE`/`MASK`, and opaque/compound geometry
 //! (`Opaque`, `Compound`, `Mesh`, `Shape`). `ELLIPSE` is **no longer** on this
 //! list: a full ellipse exposes centre + quadrant handles (see the drag rules),
 //! and a partial (elliptical-arc) ellipse exposes the centre grip only, with
-//! quadrant ids refused by [`REASON_PARTIAL_ELLIPSE`].
+//! quadrant ids refused by [`REASON_PARTIAL_ELLIPSE`]. `SPLINE` is **no longer**
+//! on this list either: it exposes one [`GripKind::ControlPoint`] per stored
+//! control point (see above).
 //!
 //! Insertion-point, width, rotation and tangent grips are **NOT IMPLEMENTED**.
 //! They are not modelled as [`GripKind`] variants either: a variant that always
@@ -191,7 +236,8 @@
 //!
 //! A handle's [`Grip::position`] is a stored or stored-derived point — the same
 //! `f64` bits as the geometry (an endpoint, a point position, a circle/arc/ellipse
-//! centre, a polyline vertex) or the documented exact derivation of it (a line
+//! centre, a polyline vertex, a spline control point) or the documented exact
+//! derivation of it (a line
 //! midpoint; an arc endpoint, i.e. the stored
 //! `center + radius * (cos angle * ax + sin angle * ay)` in the arc's own plane
 //! frame, the same expression the tessellator uses; an ellipse quadrant, i.e.
@@ -212,9 +258,9 @@
 //! the entity's **own** plane, precisely so that a non-planar drag cannot deform a
 //! circle, tilt an arc out of its plane, or turn an ellipse. Those projections
 //! apply to the *drag target of a quadrant or an arc-endpoint handle* only; a
-//! centre drag, an arc-rigid drag, a line drag, a polyline vertex drag and a point
-//! drag are stored 3D-exact (a polyline vertex keeps its own `z`), and no handle
-//! position is ever projected back onto a plane.
+//! centre drag, an arc-rigid drag, a line drag, a polyline vertex drag, a spline
+//! control-point drag and a point drag are stored 3D-exact (a polyline vertex
+//! keeps its own `z`), and no handle position is ever projected back onto a plane.
 //!
 //! ## The plane frame is shared, not invented
 //!
@@ -247,7 +293,8 @@
 //! a `CIRCLE` the centre and then quadrants 0..=3; for an `ARC` the centre and
 //! then endpoint 0 = start, endpoint 1 = end; for an `ELLIPSE` the centre and then
 //! quadrants 0..=3 when it is a full ellipse; for a `POLYLINE` the vertices in
-//! stored order) — and a candidate replaces the current winner only when it is
+//! stored order; for a `SPLINE` the control points in stored order) — and a
+//! candidate replaces the current winner only when it is
 //! **strictly** closer.
 //!
 //! [`grip_hit_planar`] is the **plan-view** variant the host uses: the same
@@ -268,7 +315,10 @@
 //! full `ELLIPSE`, `Center` before `Endpoint` `0` before `Endpoint` `1` for an
 //! `ARC`). For a
 //! `POLYLINE` the list is the stored vertex order, so the lower vertex index wins
-//! a tie. This is deterministic and is pinned by contract tests. Note that the
+//! a tie; for a `SPLINE` it is the stored control-point order, so the lower
+//! control-point index wins a tie and a query exactly at a control point is that
+//! control point's hit (it is strictly closer than every other one). This is
+//! deterministic and is pinned by contract tests. Note that the
 //! midpoint is usually *nearer* than the endpoints, so a query at the midpoint is
 //! a midpoint hit, not a tie: a tie between `start` and the midpoint needs a
 //! query at a quarter of the line's length.
@@ -287,17 +337,23 @@
 //!   names the DXF class.
 //! * [`REASON_STALE_HANDLE`] (`CadError::InvalidInput`) — the [`GripId`] does
 //!   not name a handle of **this** geometry: a `LINE` with a
-//!   [`GripKind::Center`]/[`GripKind::Quadrant`]/[`GripKind::Point`]/[`GripKind::Vertex`]
+//!   [`GripKind::Center`]/[`GripKind::Quadrant`]/[`GripKind::Point`]/[`GripKind::Vertex`]/[`GripKind::ControlPoint`]
 //!   grip, an `AcDbCircle`/`AcDbArc` with a [`GripKind::Vertex`] grip, a
-//!   `POLYLINE` with a non-vertex grip, or an `index` outside the handle range
+//!   `POLYLINE` with a non-vertex grip, a `SPLINE` with a non-control-point grip,
+//!   or an `index` outside the handle range
 //!   (`LINE` endpoint > 1, `LINE` midpoint ≠ 2, `CIRCLE`/`ELLIPSE` centre > 0,
 //!   `CIRCLE`/`ELLIPSE` quadrant > 3, `ARC` centre > 0, `ARC` endpoint > 1,
-//!   `POLYLINE` vertex ≥ the stored vertex count, `POINT` > 0). The caller is
+//!   `POLYLINE` vertex ≥ the stored vertex count,
+//!   `SPLINE` control point ≥ the stored control-point count, `POINT` > 0). It is
+//!   also the refusal for **every** control-point id on an internally
+//!   inconsistent spline definition, because such a spline exposes no handle at
+//!   all. The caller is
 //!   never trusted to have kept its id in sync with the geometry.
 //! * [`REASON_ZERO_DISPLACEMENT`] (`CadError::InvalidInput`) — the drag would not
 //!   change the geometry, so there is nothing to write. That is the target
 //!   equalling the dragged handle's current position (endpoint, arc endpoint,
-//!   point, midpoint, centre, quadrant, polyline vertex), and additionally:
+//!   point, midpoint, centre, quadrant, polyline vertex, spline control point),
+//!   and additionally:
 //!   a quadrant target that already sits at the **stored** radius (its
 //!   out-of-plane offset is ignored by the radius rule), an arc endpoint drag
 //!   whose recomputed start/sweep are identical to the stored ones (an
@@ -415,6 +471,13 @@ pub enum GripKind {
     /// vertex index in stored order); dragging moves that one vertex in x/y and
     /// keeps its own `z`, leaving the other vertices and every bulge untouched.
     Vertex,
+    /// A stored control point of a NURBS spline (`SPLINE` only, `index` = the
+    /// control-point index in stored order). A control point belongs to the curve
+    /// **definition** and is generally **not on** the drawn curve; dragging it
+    /// redefines that one entry and keeps `degree`/`knots`/`weights` bit-identical,
+    /// so the drag reshapes the curve as a different NURBS — it never re-fits it,
+    /// and the curve stops passing through the points it used to pass through.
+    ControlPoint,
     /// The position of a point entity (`POINT` only).
     Point,
 }
@@ -436,7 +499,9 @@ const QUADRANT_DIRECTIONS: [(u8, f64); 4] = [(0, 1.0), (1, 1.0), (0, -1.0), (1, 
 /// `CIRCLE`/`ELLIPSE`, `0` is the centre and the quadrants are `0..=3`; for an
 /// `ARC`, `0` is the centre, `Endpoint` `0` is the start point and `Endpoint` `1`
 /// the end point; for a `POLYLINE`, a `Vertex` `index` is the **stored** vertex
-/// index (`u8`, so only vertices `0..=255` can be addressed); for a `POINT`, `0`
+/// index (`u8`, so only vertices `0..=255` can be addressed); for a `SPLINE`, a
+/// `ControlPoint` `index` is the **stored** control-point index (`u8`, so only
+/// control points `0..=255` can be addressed); for a `POINT`, `0`
 /// is the position. The id is a caller-held reference into geometry that may have
 /// changed since it was read, so [`apply_grip`] re-validates it against the
 /// geometry it is handed instead of trusting it.
@@ -466,7 +531,14 @@ pub struct Grip {
 /// [`REASON_PARTIAL_ELLIPSE`]); `POLYLINE` ⇒ one [`GripKind::Vertex`] per
 /// stored vertex, in stored order (`0..=255`; a longer polyline exposes the first
 /// 256 vertices only, because [`GripId::index`] is a `u8` — the rest are simply
-/// not addressable in this build); `POINT` ⇒ one [`GripKind::Point`] grip. Every
+/// not addressable in this build); `SPLINE` ⇒ one [`GripKind::ControlPoint`] per
+/// stored control point, in stored order (the same `0..=255` `u8` cap: a spline
+/// with more than 256 control points exposes the first 256 and the rest are not
+/// addressable), and **no** grip at all when the stored definition is internally
+/// inconsistent (`control_points.len() != weights.len()`, or
+/// `knots.len() != control_points.len() + degree + 1`) — no marker is invented for
+/// a definition this model cannot interpret; `POINT` ⇒ one [`GripKind::Point`]
+/// grip. Every
 /// other geometry — including the whole refusal list in the module doc — yields
 /// an empty vector: no marker is invented for a kind this build cannot drag.
 #[must_use]
@@ -574,16 +646,40 @@ pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
         }
         SemanticGeometry::Polyline { points, .. } => points
             .iter()
-            .take(MAX_VERTEX_GRIP_INDEX + 1)
+            .take(MAX_GRIP_INDEX + 1)
             .enumerate()
             .map(|(index, position)| Grip {
-                // `index < MAX_VERTEX_GRIP_INDEX + 1`, so the `u8` conversion is
+                // `index < MAX_GRIP_INDEX + 1`, so the `u8` conversion is
                 // exact (see the module doc: vertices past 255 are not
                 // addressable and are therefore not offered, never wrapped).
                 id: id(GripKind::Vertex, index as u8),
                 position: *position,
             })
             .collect(),
+        SemanticGeometry::Spline {
+            degree,
+            knots,
+            control_points,
+            weights,
+        } => {
+            // A definition this model cannot interpret exposes no handle at all:
+            // padding a knot/weight vector would silently rewrite the curve, and
+            // `cad-db`'s validator is the authority on shape validity.
+            if !spline_is_consistent(*degree, knots, control_points, weights) {
+                return Vec::new();
+            }
+            control_points
+                .iter()
+                .take(MAX_GRIP_INDEX + 1)
+                .enumerate()
+                .map(|(index, position)| Grip {
+                    // Same `u8` cap as the polyline vertices: control points past
+                    // 255 are not addressable and are therefore not offered.
+                    id: id(GripKind::ControlPoint, index as u8),
+                    position: *position,
+                })
+                .collect()
+        }
         SemanticGeometry::Point(position) => vec![Grip {
             id: id(GripKind::Point, 0),
             position: *position,
@@ -592,8 +688,40 @@ pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
     }
 }
 
-/// The highest vertex index a [`GripId`] can address: `GripId::index` is a `u8`.
-const MAX_VERTEX_GRIP_INDEX: usize = u8::MAX as usize;
+/// The highest handle index a [`GripId`] can address: `GripId::index` is a `u8`.
+///
+/// Shared by every index-based handle family (polyline vertices, spline control
+/// points) so the `0..=255` cap has exactly one value in this module.
+const MAX_GRIP_INDEX: usize = u8::MAX as usize;
+
+/// Whether a stored spline definition is internally consistent enough to expose
+/// control-point handles for.
+///
+/// Two structural invariants, both pure length arithmetic on the stored vectors:
+///
+/// * `control_points.len() == weights.len()` — every control point carries its
+///   own weight (a non-rational B-spline stores all `1.0`, but the vector is still
+///   per control point);
+/// * `knots.len() == control_points.len() + degree + 1` — a clamped B-spline of
+///   degree `d` with `n + 1` control points has `n + d + 2` knots.
+///
+/// This is **not** shape validation: `cad-db`'s validator is the authority on what
+/// may be stored, and this model only declines to invent a handle for a definition
+/// it cannot index into. A mismatch is not repaired here (padding either vector
+/// would change the curve behind the user's back); the spline simply exposes no
+/// grip, and every control-point id against it is [`REASON_STALE_HANDLE`].
+fn spline_is_consistent(
+    degree: u32,
+    knots: &[f64],
+    control_points: &[Point3],
+    weights: &[f64],
+) -> bool {
+    if control_points.len() != weights.len() {
+        return false;
+    }
+    let expected_knots = control_points.len() + degree as usize + 1;
+    knots.len() == expected_knots
+}
 
 /// Whether a stored ellipse parameter range covers the whole curve.
 ///

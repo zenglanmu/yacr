@@ -13,9 +13,10 @@
 
 use super::{
     arc_point, ellipse_axes, ellipse_quadrant_point, in_plane_distance, is_finite, is_full_ellipse,
-    midpoint, plane_axes, quadrant_point, GripId, GripKind, ARC_SWEEP_EPSILON, QUADRANT_DIRECTIONS,
-    REASON_DEGENERATE_ARC, REASON_DEGENERATE_RADIUS, REASON_NON_FINITE_TARGET,
-    REASON_PARTIAL_ELLIPSE, REASON_STALE_HANDLE, REASON_UNSUPPORTED_KIND, REASON_ZERO_DISPLACEMENT,
+    midpoint, plane_axes, quadrant_point, spline_is_consistent, GripId, GripKind,
+    ARC_SWEEP_EPSILON, QUADRANT_DIRECTIONS, REASON_DEGENERATE_ARC, REASON_DEGENERATE_RADIUS,
+    REASON_NON_FINITE_TARGET, REASON_PARTIAL_ELLIPSE, REASON_STALE_HANDLE, REASON_UNSUPPORTED_KIND,
+    REASON_ZERO_DISPLACEMENT,
 };
 use cad_domain::{CadError, CadResult, Point3, SemanticGeometry};
 use cad_geometry::{add, dot, length, scale, sub};
@@ -107,12 +108,17 @@ fn apply_line(start: Point3, end: Point3, id: &GripId, to: Point3) -> CadResult<
         (GripKind::Midpoint, index) => Err(stale_handle(format!(
             "AcDbLine has no Midpoint grip at index {index} (only 2)"
         ))),
-        (GripKind::Center | GripKind::Quadrant | GripKind::Vertex | GripKind::Point, _) => {
-            Err(stale_handle(
-                "AcDbLine exposes Endpoint (0 = start, 1 = end) and Midpoint (2) grips only"
-                    .to_string(),
-            ))
-        }
+        (
+            GripKind::Center
+            | GripKind::Quadrant
+            | GripKind::Vertex
+            | GripKind::ControlPoint
+            | GripKind::Point,
+            _,
+        ) => Err(stale_handle(
+            "AcDbLine exposes Endpoint (0 = start, 1 = end) and Midpoint (2) grips only"
+                .to_string(),
+        )),
     }
 }
 
@@ -167,11 +173,16 @@ fn apply_circle(
             "AcDbCircle has no Quadrant grip at index {index} \
              (0 = +ax, 1 = +ay, 2 = -ax, 3 = -ay)"
         ))),
-        (GripKind::Endpoint | GripKind::Midpoint | GripKind::Vertex | GripKind::Point, _) => {
-            Err(stale_handle(
-                "AcDbCircle exposes a Center grip (0) and Quadrant grips (0..=3) only".to_string(),
-            ))
-        }
+        (
+            GripKind::Endpoint
+            | GripKind::Midpoint
+            | GripKind::Vertex
+            | GripKind::ControlPoint
+            | GripKind::Point,
+            _,
+        ) => Err(stale_handle(
+            "AcDbCircle exposes a Center grip (0) and Quadrant grips (0..=3) only".to_string(),
+        )),
     }
 }
 
@@ -270,10 +281,12 @@ fn apply_arc(
              not a Quadrant grip"
                 .to_string(),
         )),
-        (GripKind::Midpoint | GripKind::Vertex | GripKind::Point, _) => Err(stale_handle(
-            "AcDbArc exposes a Center grip (0) and Endpoint grips (0 = start, 1 = end) only"
-                .to_string(),
-        )),
+        (GripKind::Midpoint | GripKind::Vertex | GripKind::ControlPoint | GripKind::Point, _) => {
+            Err(stale_handle(
+                "AcDbArc exposes a Center grip (0) and Endpoint grips (0 = start, 1 = end) only"
+                    .to_string(),
+            ))
+        }
     }
 }
 
@@ -396,13 +409,18 @@ fn apply_ellipse(ellipse: EllipseParts, id: &GripId, to: Point3) -> CadResult<Se
             "AcDbEllipse has no Quadrant grip at index {index} \
              (0 = +major, 1 = +minor, 2 = -major, 3 = -minor)"
         ))),
-        (GripKind::Endpoint | GripKind::Midpoint | GripKind::Vertex | GripKind::Point, _) => {
-            Err(stale_handle(
-                "AcDbEllipse exposes a Center grip (0) and, for a full ellipse, Quadrant grips \
-                 (0..=3) only"
-                    .to_string(),
-            ))
-        }
+        (
+            GripKind::Endpoint
+            | GripKind::Midpoint
+            | GripKind::Vertex
+            | GripKind::ControlPoint
+            | GripKind::Point,
+            _,
+        ) => Err(stale_handle(
+            "AcDbEllipse exposes a Center grip (0) and, for a full ellipse, Quadrant grips \
+             (0..=3) only"
+                .to_string(),
+        )),
     }
 }
 
@@ -455,9 +473,89 @@ fn apply_polyline(
         | GripKind::Midpoint
         | GripKind::Center
         | GripKind::Quadrant
+        | GripKind::ControlPoint
         | GripKind::Point => Err(stale_handle(
             "AcDbPolyline exposes one Vertex grip per stored vertex (index = stored vertex \
              index) only"
+                .to_string(),
+        )),
+    }
+}
+
+/// The `SPLINE` drag rule: one stored control point, every other field verbatim.
+///
+/// `control_points` are the **NURBS definition** points, not points on the drawn
+/// curve: they are the `P_i` of `C(u) = sum(N_i(u) w_i P_i) / sum(N_i(u) w_i)`, so
+/// an interior control point does not lie on the curve at all (only a clamped
+/// spline's first/last one does). Dragging one therefore **redefines** that entry
+/// and leaves `degree`, `knots` and `weights` **bit-identical**: no knot is
+/// re-parameterised, no weight is renormalised, no fit is re-run. The result is a
+/// **different NURBS** sharing the same parameterisation, which is exactly the
+/// point of a control-point handle — the curve is reshaped, not translated — and
+/// after such a drag the curve generally no longer passes through the points it
+/// passed through before. That is our choice (AutoCAD also drags control points
+/// without re-fitting, but **no vendor equivalence is claimed**).
+///
+/// The target is stored in all three coordinates (a control point is a free 3D
+/// definition point, so nothing is projected; the plan view supplies the handle's
+/// own `z`, so a plan-view drag cannot change an elevation).
+///
+/// An `index` outside the stored control points, **any** control-point id on an
+/// internally inconsistent definition (`control_points.len() != weights.len()` or
+/// `knots.len() != control_points.len() + degree + 1`, which exposes no grip at
+/// all — see [`super::grips_for_entity`]) and any other [`GripKind`] are
+/// [`REASON_STALE_HANDLE`]. Mismatched data is never repaired by guessing.
+fn apply_spline(
+    degree: u32,
+    knots: &[f64],
+    control_points: &[Point3],
+    weights: &[f64],
+    id: &GripId,
+    to: Point3,
+) -> CadResult<SemanticGeometry> {
+    match id.kind {
+        GripKind::ControlPoint => {
+            if !spline_is_consistent(degree, knots, control_points, weights) {
+                return Err(stale_handle(format!(
+                    "AcDbSpline stores an inconsistent NURBS definition ({} control points, \
+                     {} weights, {} knots for degree {degree}); it exposes no ControlPoint grip \
+                     and no knot or weight is recomputed here",
+                    control_points.len(),
+                    weights.len(),
+                    knots.len()
+                )));
+            }
+            let index = usize::from(id.index);
+            let Some(stored) = control_points.get(index) else {
+                return Err(stale_handle(format!(
+                    "AcDbSpline has no ControlPoint grip at index {index} \
+                     (it has {} stored control points)",
+                    control_points.len()
+                )));
+            };
+            finite_target(to)?;
+            if to == *stored {
+                return Err(zero_displacement("AcDbSpline control point"));
+            }
+            let mut new_points = control_points.to_vec();
+            new_points[index] = to;
+            Ok(SemanticGeometry::Spline {
+                degree,
+                knots: knots.to_vec(),
+                control_points: new_points,
+                // Copied verbatim: a control-point drag changes the definition
+                // point only, never the weights or the knot vector.
+                weights: weights.to_vec(),
+            })
+        }
+        GripKind::Endpoint
+        | GripKind::Midpoint
+        | GripKind::Center
+        | GripKind::Quadrant
+        | GripKind::Vertex
+        | GripKind::Point => Err(stale_handle(
+            "AcDbSpline exposes one ControlPoint grip per stored control point (index = stored \
+             control-point index) only"
                 .to_string(),
         )),
     }
@@ -583,6 +681,11 @@ pub(crate) fn finite_target(to: Point3) -> CadResult<()> {
 ///   the handle by name;
 /// * `POLYLINE` vertex: that one vertex takes `x`/`y` from `to` and keeps its own
 ///   `z`; every other vertex and every bulge are bit-identical;
+/// * `SPLINE` control point: that one **definition** point takes `to` verbatim and
+///   `degree`/`knots`/`weights` plus every other control point are bit-identical.
+///   No knot/weight is recomputed, so the curve is reshaped as a different NURBS
+///   (a control point is not on the curve — see the module doc) and an internally
+///   inconsistent definition refuses every control-point id as stale;
 /// * `POINT`: the position becomes `to`;
 /// * everything else, a [`GripId`] that does not name a handle of this geometry,
 ///   a non-finite target and a drag with no geometric effect are refused with the
@@ -628,6 +731,12 @@ pub fn apply_grip(
             bulges,
             closed,
         } => apply_polyline(points, bulges, *closed, id, to),
+        SemanticGeometry::Spline {
+            degree,
+            knots,
+            control_points,
+            weights,
+        } => apply_spline(*degree, knots, control_points, weights, id, to),
         SemanticGeometry::Point(position) => {
             match (id.kind, id.index) {
                 (GripKind::Point, 0) => {}
@@ -641,7 +750,8 @@ pub fn apply_grip(
                     | GripKind::Midpoint
                     | GripKind::Center
                     | GripKind::Quadrant
-                    | GripKind::Vertex,
+                    | GripKind::Vertex
+                    | GripKind::ControlPoint,
                     _,
                 ) => {
                     return Err(stale_handle(

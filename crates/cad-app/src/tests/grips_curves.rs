@@ -675,6 +675,7 @@ fn arc_refuses_a_kind_or_index_it_has_no_handle_for() {
         (GripKind::Midpoint, 2),
         (GripKind::Point, 0),
         (GripKind::Vertex, 0),
+        (GripKind::ControlPoint, 0),
         (GripKind::Center, 1),
         (GripKind::Endpoint, 2),
         (GripKind::Endpoint, u8::MAX),
@@ -693,6 +694,7 @@ fn circle_refuses_a_kind_or_index_it_has_no_handle_for() {
         (GripKind::Endpoint, 1),
         (GripKind::Midpoint, 2),
         (GripKind::Point, 0),
+        (GripKind::ControlPoint, 0),
         (GripKind::Center, 1),
         (GripKind::Quadrant, 4),
         (GripKind::Quadrant, u8::MAX),
@@ -733,21 +735,21 @@ fn a_non_finite_target_is_refused_before_the_radius_rule() {
 
 #[test]
 fn a_geometry_with_no_grip_model_still_names_its_class() {
-    // `SPLINE` stays on the refusal list: no grip model at all.
-    let spline = SemanticGeometry::Spline {
-        degree: 1,
-        knots: vec![0.0, 0.0, 1.0, 1.0],
-        control_points: vec![p3(0.0, 0.0, 0.0), p3(1.0, 0.0, 0.0)],
-        weights: vec![1.0, 1.0],
+    // `INSERT` stays on the refusal list: no grip model at all. (`SPLINE` used to
+    // be this fixture; it now has control-point grips, pinned in
+    // `tests::grips_spline`.)
+    let insert = SemanticGeometry::Insert {
+        block: BlockId(0),
+        transform: Transform3::translation(p3(5.0, 5.0, 0.0)),
     };
     let error = apply_grip(
-        &spline,
+        &insert,
         &grip_id(33, GripKind::Center, 0),
         p3(1.0, 1.0, 0.0),
     )
-    .expect_err("a SPLINE exposes no grip model");
+    .expect_err("an INSERT exposes no grip model");
     assert_reason(error.clone(), REASON_UNSUPPORTED_KIND);
-    assert!(reason(error).contains("AcDbSpline"));
+    assert!(reason(error).contains("AcDbBlockReference"));
 }
 
 // ---------------------------------------------------------------------------

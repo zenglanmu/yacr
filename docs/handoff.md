@@ -1,3 +1,108 @@
+## 2026-10-26 SPLINE 控制点夹点（NURBS 定义点，非曲线上的点）
+
+### 结论
+
+纯夹点模型（`crates/cad-app/src/grips/mod.rs` + `grips/drag.rs`）此前把 `SPLINE` 整类列在「无夹点」
+拒绝清单里。本轮为 **`SemanticGeometry::Spline { degree, knots, control_points, weights }`** 实现
+**`GripKind::ControlPoint`**（新变体，**不**复用 `Vertex`，好让 `grip.stale_handle` 仍无歧义）。
+只动 `cad-app` 与其测试、`docs/`；`cad-host` / `apps/**` / i18n / 命令 / IPC / wire **未改**
+（宿主按通用 API 消费枚举，无新分支）。
+
+**NURBS 事实（不是 bug）**：`control_points` 是曲线**定义**点，**一般不在曲线上**——只有 clamped
+样条的首/末控制点恰好落在曲线上，内部控制点不在。所以控制点夹点的标记落在曲线**外**是正确行为；
+拖拽其中一个是**重新定义**该点，曲线形状整体改变，**且曲线不再经过它原先经过的点（含原来的端点）**。
+没有任何 NURBS 求值、没有任何重拟合。
+
+### 句柄表
+
+| kind | index | 位置 / 含义 |
+|---|---|---|
+| `ControlPoint` | 存储控制点序号 | 存储的 `control_points[i]` **原值**（三坐标逐位，不求值、不漂移） |
+
+* `GripId::index` 是 `u8` ⇒ **只暴露 `0..=255`**；控制点多于 256 个时只给前 256 个，其余在本版本
+  **不可寻址**（**不**回绕、**不**截断、**不**重编号）。与 `POLYLINE` 顶点共用同一常量
+  `MAX_GRIP_INDEX`（原 `MAX_VERTEX_GRIP_INDEX` 改名，值不变）。
+* **存储定义自相矛盾 ⇒ 一个夹点都不暴露**：`control_points.len() != weights.len()`，或
+  `knots.len() != control_points.len() + degree + 1`。**不猜**（补齐向量等于悄悄改写曲线），
+  形状有效性以 `cad-db` 校验器为准；此时任何控制点 id 都是 `grip.stale_handle`，命中测试也**不**
+  伪造标记。
+
+### 拖拽规则（本项目选择，**不是 AutoCAD 断言**）
+
+* `control_points[index] = to`（三坐标原样；控制点是自由的 3D 定义点，**不**投影到任何平面/工作平面）。
+* `degree`、`knots`、`weights` 与其余控制点**逐位不变**：不重算节点、不归一化权重、不做拟合 ⇒
+  结果是**参数化相同的另一个 NURBS**。AutoCAD 也直接拖控制点而不重拟合，但我们**不声称**等价。
+* 与 `POLYLINE` 顶点不同，**z 变化是真编辑**（控制点无「保留自身 z」规则）；宿主仍按通用规则把
+  被拖夹点自身的 `z` 放进 plan-view 目标，因此平面视图拖拽不会改变标高（宿主行为未改）。
+
+### 拒绝（沿用既有码，次序不变）
+
+次序仍是 **几何种类 → 句柄身份 → 目标有限性 → 拖拽几何规则**，绝不夹取：
+
+* `grip.stale_handle` —— 控制点 `index` 超出存储个数；该几何上的其它 kind
+  （`Endpoint`/`Midpoint`/`Center`/`Quadrant`/`Vertex`/`Point`）；以及**自相矛盾定义上的任何控制点 id**；
+* `grip.zero_displacement` —— 目标恰等于存储控制点（IEEE `==`，无容差；1 ulp 的拖拽照存）；
+* `grip.non_finite_target` —— 目标含 `NaN`/`inf`（命令层仍在读图之前就拒）；
+* 其它几何对 `ControlPoint` 一律 `grip.stale_handle`（`LINE`/`CIRCLE`/`ARC`/`ELLIPSE`/`POLYLINE`/`POINT`
+  的拒绝清单各补一条断言）。
+
+### tie-break 未变
+
+命中仍是「严格更近才替换」⇒ 精确平局归**列表里更早的候选**（同一 `SPLINE` 内即**更小的控制点序号**），
+且**落在控制点上就是该控制点的命中**（它严格更近）；追加 `SPLINE` 分支不改变任何既有语义。
+
+### 测试与夹具迁移
+
+新增 `crates/cad-app/src/tests/grips_spline.rs`（已注册，**12 个测试**）：句柄表次序/`index`/位置逐位、
+>256 控制点只给 256（且 255 仍可拖）、拖拽只改一个控制点且 `degree`/`knots`/`weights` 逐位不变、
+越界/错 kind/零位移/非有限目标四种拒绝、**weights 长度不符**与 **knots 长度不符**各自「零夹点 + id 全 stale」、
+命中/容差外不命中/平面视图命中/精确平局归小序号。
+
+`SPLINE` 此前是多个用例的「无夹点」夹具，全部迁移（附注释说明原因）：
+
+* `tests/grips.rs`：夹具 `spline()` → `insert()`（`SemanticGeometry::Insert` +
+  `Transform3::translation`，instance transform 本就不是实体句柄）；`spline_exposes_no_grips` **删除**
+  （其断言已被 `grips_spline` 反转钉住）；`grip_hit_skips_entities_that_expose_no_grips`、
+  `grip_hit_planar_skips_entities_that_expose_no_grips`、`insert_exposes_no_grips`、
+  `apply_grip_refuses_a_kind_with_no_grip_model`（改断言 `AcDbBlockReference`）改用该夹具；
+* `tests/grips_curves.rs`：`a_geometry_with_no_grip_model_still_names_its_class` → `INSERT` /
+  `AcDbBlockReference`；
+* `tests/grips_ellipse.rs`、`tests/grips_polyline.rs`：拒绝清单各加 `(ControlPoint, 0)` 一条；
+* `tests/drawing/grip.rs`：无夹点夹具 `SPLINE` → **`INSERT`**（id 8），新增 **`SPLINE`** 夹具（id 9，
+  clamped cubic：4 控制点 ⇒ 8 节点）与命令级用例
+  `spline_control_point_grip_drag_is_one_change_one_undo_step_and_undoes_exactly`
+  （一次 `ChangeSet`/一个 revision/一步撤销/undo 逐位还原，且 `degree`/`knots`/`weights` 不变）。
+
+**1000 行门禁导致的一次拆分**：`drawing/grip.rs` 加完新用例后达 1012 行，故把**夹具与共享断言**
+（常量、`grip_app()`、`drag()`、`grip_id()`、`endpoints_of`/`arc_parts`/`polyline_parts`/`ellipse_parts`、
+`refused`、`assert_untouched`、`revision_of` 等）原样移到新模块
+`crates/cad-app/src/tests/drawing/grip_fixture.rs`（全部 `pub(super)`，测试仍全部住在 `grip.rs`；
+`grip.rs` 687 → 现 691 行、fixture 342 行）。
+
+### 实际运行（本机，2026-10-26）
+
+* `cargo test -p cad-app --lib --locked` → **1086 passed, 0 failed**（新增 12 个 spline 用例）；
+* `cargo test -p cad-host --lib --locked` → **227 passed, 0 failed**（宿主无改动）；
+* `cargo clippy -p cad-app --all-targets --locked -- -D warnings` → 通过；
+* `cargo fmt --all -- --check` → 通过；`python3 scripts/check-file-size.py` → OK（989 个代码文件，
+  上限 1000；`grips/mod.rs` 946、`grips/drag.rs` 770、`tests/grips_spline.rs` 446 行）。
+
+**NOT RUN（本轮未运行，不得当作通过）**：全 workspace 全量门禁/全量测试、平台编译矩阵
+（wasm/Windows/Android）、任何 GUI/像素/真窗口/真实鼠标证据（含「spline 控制点标记是否可见」）、
+Windows/Wine、`dom-canvas` 载体夹点路径（该载体仍明确没有夹点标记与拖拽，铁律 8）。
+本轮证据上限 = `cad-app`/`cad-host` 合成契约 + 上述门禁。
+
+### 仍然存在的缺口
+
+* `cad-db` 校验器**目前不检查**这两条长度不变量（`weights.len() == control_points.len()`、
+  `knots.len() == control_points.len() + degree + 1`；它只查 degree ≥ 1、控制点数 ≥ degree+1、数值有限、
+  权重 > 0），所以**自相矛盾的 spline 仍可被存储**；夹点模型的回答是「不提供夹点」而不是「修数据」。
+  要不要让 `cad-db` 拒收这类定义是**另一个决定**（会改变导入路径），本轮**未改** `cad-db`。
+* 夹点标记的**运行时/像素**验证、宿主 arm/预览/提交的真实鼠标证据：**NOT RUN**。
+* 控制点拖拽的**拟合/预览手感**、多控制点同时拖拽、控制点右键菜单、`GRIPMULTIFUNCTIONAL`、
+  3D 夹点编辑：**不存在**。
+* 权重/节点本身没有夹点（非有理 NURBS 的权重夹点、节点向量夹点均 NOT IMPLEMENTED）。
+
 ## 2026-10-26 ELLIPSE 夹点：中心 + 四轴点（整圈），椭圆弧只给中心
 
 ### 结论

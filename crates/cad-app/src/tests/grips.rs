@@ -44,14 +44,16 @@ fn line(x1: f64, y1: f64, x2: f64, y2: f64) -> SemanticGeometry {
     }
 }
 
-/// A grip-less geometry (control-point grips are NOT IMPLEMENTED), used wherever
-/// a test needs "an entity that exposes no handle at all".
-fn spline() -> SemanticGeometry {
-    SemanticGeometry::Spline {
-        degree: 1,
-        knots: vec![0.0, 0.0, 1.0, 1.0],
-        control_points: vec![p3(0.0, 0.0, 0.0), p3(1.0, 0.0, 0.0)],
-        weights: vec![1.0, 1.0],
+/// A grip-less geometry, used wherever a test needs "an entity that exposes no
+/// handle at all".
+///
+/// `SPLINE` used to play this role; it now has control-point grips (pinned in
+/// `crates/cad-app/src/tests/grips_spline.rs`), so the fixture moved to an
+/// `INSERT`, whose instance transform genuinely is not an entity handle.
+fn insert() -> SemanticGeometry {
+    SemanticGeometry::Insert {
+        block: BlockId(0),
+        transform: Transform3::translation(p3(5.0, 5.0, 0.0)),
     }
 }
 
@@ -173,9 +175,10 @@ fn point_exposes_one_point_grip() {
 //    any of them has to come back and update *that* test on purpose. `CIRCLE`
 //    and `ARC` are no longer on this list (they have their own handles, pinned
 //    in `crates/cad-app/src/tests/grips_curves.rs`), neither is `POLYLINE`
-//    (vertex grips, pinned in `crates/cad-app/src/tests/grips_polyline.rs`), and
+//    (vertex grips, pinned in `crates/cad-app/src/tests/grips_polyline.rs`),
 //    neither is `ELLIPSE` (centre + axis grips, pinned in
-//    `crates/cad-app/src/tests/grips_ellipse.rs`).
+//    `crates/cad-app/src/tests/grips_ellipse.rs`), and neither is `SPLINE`
+//    (control-point grips, pinned in `crates/cad-app/src/tests/grips_spline.rs`).
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -195,27 +198,6 @@ fn ellipse_exposes_a_centre_and_axis_grips() {
         },
     );
     assert_eq!(grips_for_entity(&entity).len(), 5);
-}
-
-#[test]
-fn spline_exposes_no_grips() {
-    // Control-point grips are NOT IMPLEMENTED (they would edit the source NURBS
-    // definition, not a display representation).
-    let entity = ent(
-        2,
-        SemanticGeometry::Spline {
-            degree: 3,
-            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
-            control_points: vec![
-                p3(0.0, 0.0, 0.0),
-                p3(1.0, 2.0, 0.0),
-                p3(3.0, 2.0, 0.0),
-                p3(4.0, 0.0, 0.0),
-            ],
-            weights: vec![1.0; 4],
-        },
-    );
-    assert!(grips_for_entity(&entity).is_empty());
 }
 
 #[test]
@@ -239,13 +221,7 @@ fn text_exposes_no_grips() {
 
 #[test]
 fn insert_exposes_no_grips() {
-    let entity = ent(
-        5,
-        SemanticGeometry::Insert {
-            block: BlockId(0),
-            transform: Transform3::translation(p3(5.0, 5.0, 0.0)),
-        },
-    );
+    let entity = ent(5, insert());
     assert!(grips_for_entity(&entity).is_empty());
 }
 
@@ -292,7 +268,7 @@ fn grip_hit_returns_none_outside_tolerance_and_for_degenerate_inputs() {
 
 #[test]
 fn grip_hit_skips_entities_that_expose_no_grips() {
-    let spline = ent(1, spline());
+    let insert = ent(1, insert());
     let text = ent(
         2,
         SemanticGeometry::Text {
@@ -307,10 +283,10 @@ fn grip_hit_skips_entities_that_expose_no_grips() {
             wrap_width: None,
         },
     );
-    // A query sitting exactly on the spline's first control point / the text's
-    // insertion point still misses: those are not grips.
+    // A query sitting exactly on the text's insertion point still misses: that is
+    // not a grip (`INSERT` exposes no handle at all either).
     assert!(grip_hit(
-        [spline.clone(), text.clone()].iter(),
+        [insert.clone(), text.clone()].iter(),
         p3(0.0, 0.0, 0.0),
         1.0
     )
@@ -318,7 +294,7 @@ fn grip_hit_skips_entities_that_expose_no_grips() {
 
     // A real grip elsewhere still wins while the grip-less entities are skipped.
     let line = ent(3, line(20.0, 0.0, 30.0, 0.0));
-    let hit = grip_hit([spline, text, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
+    let hit = grip_hit([insert, text, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
     assert_eq!(hit.id, grip_id(3, GripKind::Endpoint, 0));
 }
 
@@ -431,10 +407,10 @@ fn grip_hit_planar_returns_none_outside_tolerance_and_for_degenerate_inputs() {
 
 #[test]
 fn grip_hit_planar_skips_entities_that_expose_no_grips() {
-    let spline = ent(1, spline());
-    assert!(grip_hit_planar([spline.clone()].iter(), p3(0.0, 0.0, 0.0), 1.0).is_none());
+    let insert = ent(1, insert());
+    assert!(grip_hit_planar([insert.clone()].iter(), p3(0.0, 0.0, 0.0), 1.0).is_none());
     let line = ent(3, line(20.0, 0.0, 30.0, 0.0));
-    let hit = grip_hit_planar([spline, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
+    let hit = grip_hit_planar([insert, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
     assert_eq!(hit.id, grip_id(3, GripKind::Endpoint, 0));
 }
 
@@ -699,18 +675,19 @@ fn apply_grip_refuses_zero_displacement() {
 
 #[test]
 fn apply_grip_refuses_a_kind_with_no_grip_model() {
-    // `SPLINE` exposes no handle at all (control-point grips are NOT
-    // IMPLEMENTED), so any id naming one is the kind refusal — even though the
+    // `INSERT` exposes no handle at all (an instance transform is not an entity
+    // handle; `SPLINE` used to be the fixture here but now has control-point
+    // grips), so any id naming one is the kind refusal — even though the
     // kind/index would also be "stale" against it.
     let error = apply_grip(
-        &spline(),
+        &insert(),
         &grip_id(1, GripKind::Endpoint, 0),
         p3(6.0, 0.0, 0.0),
     )
-    .expect_err("a SPLINE exposes no grip model");
+    .expect_err("an INSERT exposes no grip model");
     assert_reason(error.clone(), REASON_UNSUPPORTED_KIND);
     assert!(
-        reason(error).contains("AcDbSpline"),
+        reason(error).contains("AcDbBlockReference"),
         "the refusal names the DXF class"
     );
 }

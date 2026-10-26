@@ -595,6 +595,7 @@ fn ellipse_refuses_a_kind_or_index_it_has_no_handle_for() {
         (GripKind::Endpoint, 1),
         (GripKind::Midpoint, 2),
         (GripKind::Vertex, 0),
+        (GripKind::ControlPoint, 0),
         (GripKind::Point, 0),
         (GripKind::Center, 1),
         (GripKind::Quadrant, 4),

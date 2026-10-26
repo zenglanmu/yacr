@@ -42,3 +42,6 @@ apps/app-web/dist/
 
 fixtures/complex-test.dwg
 fixtures/debug-default-fonts.dwg
+
+# Loop-command scratch state (session-local, never committed)
+loop.txt

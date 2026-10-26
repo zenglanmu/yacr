@@ -299,6 +299,7 @@ fn a_non_vertex_grip_on_a_polyline_is_stale() {
         (GripKind::Center, 0),
         (GripKind::Quadrant, 0),
         (GripKind::Point, 0),
+        (GripKind::ControlPoint, 0),
     ] {
         let error = apply_grip(&geometry, &grip_id(41, kind, index), p3(1.0, 1.0, 0.0))
             .expect_err("a POLYLINE exposes Vertex grips only");
