@@ -86,6 +86,29 @@ fn set_style(
         .unwrap();
 }
 
+/// Store this entity's import attributes plus the entity's own linetype scale
+/// (the source's DXF group `48`), which is independent of the linetype variant.
+fn set_style_with_scale(
+    builder: &mut DrawingDatabaseBuilder,
+    id: u128,
+    linetype: EntityLineType,
+    linetype_scale: f64,
+) {
+    builder
+        .set_entity_render_attributes(
+            EntityId(id),
+            EntityRenderAttributes {
+                transparency: EntityTransparency::Explicit(1.0),
+                color: cad_db::EntityColor::Explicit([1, 2, 3]),
+                lineweight: EntityLineWeight::ByLayer,
+                linetype,
+                linetype_scale,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+}
+
 fn expand(db: &DrawingDatabase, id: u128) -> DisplayRepresentation {
     ProviderRegistry::with_default_provider()
         .build_expanded(db, db.entity(EntityId(id)).unwrap(), &context())
@@ -432,5 +455,188 @@ fn block_content_resolves_by_layer_against_its_own_layer() {
             !fragment.linetype_unresolved && !fragment.lineweight_unresolved,
             "every child resolves: ByLayer through its own layer, ByBlock through the INSERT"
         );
+    }
+}
+
+#[test]
+fn a_by_layer_linetype_applies_the_entity_linetype_scale() {
+    // The entity's own scale (DXF group `48`) used to be lost with the symbolic
+    // variant: only `Explicit` had a slot for it. It now lives on
+    // `EntityRenderAttributes::linetype_scale` for every provenance, so a
+    // `ByLayer` entity with `2.0` must render exactly like an explicit linetype
+    // with `scale = 2.0`.
+    let mut b = empty_db();
+    add_linetype(&mut b, 1, "DASHED", &[2.0, -1.0]);
+    let dashed = add_layer(
+        &mut b,
+        1,
+        "DASHED-LAYER",
+        layer_attributes("DASHED", LayerLineWeight::Hundredths(35)),
+    );
+    // (a) group 48 = 1.0 is the identity: cycle 3 over a 10-unit line -> 4 dashes.
+    b.insert_entity(line_on_layer(40, dashed)).unwrap();
+    set_style_with_scale(&mut b, 40, EntityLineType::ByLayer, 1.0);
+    // (b) group 48 = 2.0 doubles the cycle: dash 4 / gap 2 -> 2 dashes.
+    b.insert_entity(line_on_layer(41, dashed)).unwrap();
+    set_style_with_scale(&mut b, 41, EntityLineType::ByLayer, 2.0);
+    // (c) a corrupt factor degrades to the identity instead of erasing dashes.
+    b.insert_entity(line_on_layer(42, dashed)).unwrap();
+    set_style_with_scale(&mut b, 42, EntityLineType::ByLayer, f64::NAN);
+    // (d) the explicit reference the symbolic path must match.
+    b.insert_entity(line_on_layer(43, dashed)).unwrap();
+    set_style_with_scale(
+        &mut b,
+        43,
+        EntityLineType::Explicit {
+            name: "DASHED".into(),
+            pattern: LinetypePattern::from_elements([2.0, -1.0]),
+            scale: 2.0,
+        },
+        2.0,
+    );
+    let db = b.finish().unwrap();
+
+    let identity = expand(&db, 40);
+    assert_eq!(identity.fragments[0].linetype_scale, 1.0);
+    assert_eq!(identity.fragments[0].linetype.elements, vec![2.0, -1.0]);
+    assert_eq!(line_primitives(&identity).len(), 4);
+
+    let doubled = expand(&db, 41);
+    assert_eq!(doubled.fragments[0].linetype_scale, 2.0);
+    assert_eq!(
+        doubled.fragments[0].linetype.elements,
+        vec![2.0, -1.0],
+        "the layer's pattern is scaled at draw time, never rewritten"
+    );
+    assert!(!doubled.fragments[0].linetype_unresolved);
+    assert_eq!(
+        line_primitives(&doubled).len(),
+        2,
+        "2/1 scaled by 2 is a 6-unit cycle over a 10-unit line"
+    );
+
+    // The explicit path is the yardstick: same pattern, same scale, same dashes.
+    let explicit = expand(&db, 43);
+    assert_eq!(
+        explicit.fragments[0].linetype,
+        doubled.fragments[0].linetype
+    );
+    assert_eq!(
+        explicit.fragments[0].linetype_scale,
+        doubled.fragments[0].linetype_scale
+    );
+    assert_eq!(
+        line_primitives(&explicit).len(),
+        line_primitives(&doubled).len()
+    );
+
+    let corrupt = expand(&db, 42);
+    assert_eq!(
+        corrupt.fragments[0].linetype_scale, 1.0,
+        "a non-finite factor sanitises to the identity"
+    );
+    assert_eq!(line_primitives(&corrupt).len(), 4);
+}
+
+#[test]
+fn an_explicit_linetype_keeps_its_variant_scale_unchanged() {
+    // The explicit path resolves the copy inside its own variant, so the new
+    // attribute field is not applied a second time: the variant's `1.0` wins over
+    // a stored `2.0`.
+    let mut b = empty_db();
+    add_linetype(&mut b, 1, "DASHED", &[2.0, -1.0]);
+    let dashed = add_layer(
+        &mut b,
+        1,
+        "DASHED-LAYER",
+        layer_attributes("DASHED", LayerLineWeight::Hundredths(35)),
+    );
+    b.insert_entity(line_on_layer(44, dashed)).unwrap();
+    set_style_with_scale(
+        &mut b,
+        44,
+        EntityLineType::Explicit {
+            name: "DASHED".into(),
+            pattern: LinetypePattern::from_elements([2.0, -1.0]),
+            scale: 1.0,
+        },
+        2.0,
+    );
+    let db = b.finish().unwrap();
+
+    let rep = expand(&db, 44);
+    assert_eq!(rep.fragments[0].linetype_scale, 1.0);
+    assert_eq!(line_primitives(&rep).len(), 4);
+}
+
+#[test]
+fn a_by_block_linetype_inherits_the_parents_resolved_scale() {
+    // `ByBlock` inherits the containing INSERT's *resolved* scale, not just its
+    // pattern: an INSERT that is `ByLayer` with group 48 = 2.0 hands `2.0` down.
+    // A child's own factor multiplies the inherited one, and the default `1.0` is
+    // the identity.
+    let mut b = empty_db();
+    add_linetype(&mut b, 1, "DASHED", &[2.0, -1.0]);
+    let insert_layer = add_layer(
+        &mut b,
+        1,
+        "INSERT",
+        layer_attributes("DASHED", LayerLineWeight::Hundredths(35)),
+    );
+    let child_layer = add_layer(
+        &mut b,
+        2,
+        "CHILD",
+        layer_attributes("DASHED", LayerLineWeight::Hundredths(35)),
+    );
+    b.insert_block(BlockDefinition {
+        id: BlockId(2),
+        entities: vec![EntityId(50), EntityId(51)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    // 50: plain `ByBlock`, group 48 absent -> exactly the parent's resolved scale.
+    b.insert_entity(line_on_layer(50, child_layer)).unwrap();
+    set_style(
+        &mut b,
+        50,
+        EntityLineType::ByBlock,
+        EntityLineWeight::ByBlock,
+    );
+    // 51: `ByBlock` with its own group 48 = 2.0 -> 2.0 x inherited 2.0.
+    b.insert_entity(line_on_layer(51, child_layer)).unwrap();
+    set_style_with_scale(&mut b, 51, EntityLineType::ByBlock, 2.0);
+
+    let mut insert = insert_entity(2, SpaceId::Model, 2, 10.0);
+    insert.layer = insert_layer;
+    b.insert_entity(insert).unwrap();
+    set_style_with_scale(&mut b, 2, EntityLineType::ByLayer, 2.0);
+    let db = b.finish().unwrap();
+
+    let rep = expand(&db, 2);
+    let scale_of = |id: u128| -> Vec<f32> {
+        rep.fragments
+            .iter()
+            .filter(|fragment| fragment.source.entity == EntityId(id))
+            .map(|fragment| fragment.linetype_scale)
+            .collect()
+    };
+    let inherited = scale_of(50);
+    assert!(
+        !inherited.is_empty(),
+        "the plain ByBlock child emits fragments"
+    );
+    assert!(
+        inherited.iter().all(|scale| *scale == 2.0),
+        "the INSERT's resolved scale is inherited, got {inherited:?}"
+    );
+    let multiplied = scale_of(51);
+    assert!(!multiplied.is_empty(), "the scaled child emits fragments");
+    assert!(
+        multiplied.iter().all(|scale| *scale == 4.0),
+        "a child's own factor multiplies the inherited one, got {multiplied:?}"
+    );
+    for fragment in &rep.fragments {
+        assert!(!fragment.linetype_unresolved);
     }
 }

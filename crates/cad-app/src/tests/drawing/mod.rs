@@ -175,6 +175,10 @@ fn non_default_attributes() -> cad_db::EntityRenderAttributes {
         },
         geometry_source: cad_domain::GeometrySource::Analytic,
         annotative: Default::default(),
+        // The entity linetype scale lives beside the variant (2026-10-26); this
+        // fixture pins an explicit linetype whose own variant already carries the
+        // 2.0 factor, so the attribute-level scale stays the identity.
+        linetype_scale: 1.0,
     }
 }
 

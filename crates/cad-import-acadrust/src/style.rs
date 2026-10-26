@@ -230,21 +230,20 @@ pub(crate) fn is_continuous_linetype(name: &str) -> bool {
 /// * an unknown explicit name becomes an explicit **continuous** pattern
 ///   carrying the source name — never invented dashes.
 ///
-/// A symbolic entity linetype carries no per-entity linetype scale: `cad_db`
-/// has no slot for one beside `ByLayer`/`ByBlock` (the same as the existing
-/// `ByBlock` path), so the source's group `48` is only preserved for `Explicit`.
+/// The entity's own group `48` factor is not part of the returned variant: the
+/// caller stores it on
+/// [`EntityRenderAttributes::linetype_scale`](cad_db::EntityRenderAttributes::linetype_scale)
+/// for **every** provenance, so a symbolic `ByLayer`/`ByBlock` keeps the same
+/// factor the explicit path records inside its variant.
 pub(crate) fn resolve_entity_linetype(
     name: &str,
     scale: f64,
     named_pattern: Option<LinetypePattern>,
 ) -> EntityLineType {
-    // A non-finite/zero scale is treated as 1.0; the representation sanitises
-    // again, and this keeps a corrupt scale from disabling dashes entirely.
-    let scale = if scale.is_finite() && scale > 0.0 {
-        scale
-    } else {
-        1.0
-    };
+    // A non-finite/zero scale is treated as 1.0 by the shared sanitiser, which
+    // keeps a corrupt scale from disabling dashes entirely; the representation
+    // applies the same rule again when it consumes the value.
+    let scale = sanitize_linetype_scale(scale);
     if is_byblock_linetype(name) {
         return EntityLineType::ByBlock;
     }

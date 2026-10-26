@@ -23,8 +23,8 @@ use acadrust::tables::{LineType as DxfLineType, LineTypeElement};
 use acadrust::types::{Color, LineWeight, Matrix3, Vector2, Vector3};
 use acadrust::{CadDocument, Transparency};
 use cad_db::{
-    DbEntity, DrawingDatabase, EntityColor, EntityLineType, EntityLineWeight, EntityTransparency,
-    LinetypePattern,
+    sanitize_linetype_scale, DbEntity, DrawingDatabase, EntityColor, EntityLineType,
+    EntityLineWeight, EntityTransparency, LinetypePattern,
 };
 use cad_domain::*;
 
@@ -767,12 +767,19 @@ pub(super) fn common_for(
         EntityTransparency::ByBlock => Transparency::ByBlock,
         EntityTransparency::ByLayer => Transparency::ByLayer,
     };
-    // Linetype scale (group 48): an explicit entity scale is carried; symbolic
-    // values (`ByLayer`/`ByBlock`) carry none in this model, so the attribute's
-    // default 1.0 is kept.
+    // Linetype scale (group 48): the entity's own factor is written for **every**
+    // provenance. An explicit entry keeps the copy stored inside its variant
+    // (unchanged); a symbolic `ByLayer`/`ByBlock` entry now writes the factor the
+    // importer recorded on the attributes, so a source with group `48` = 2.0
+    // round-trips instead of silently dropping to 1.0. acadrust's DXF writer emits
+    // group `48` when the value differs from `1.0`, which is the DXF default, so
+    // the identity stays implicit. A corrupt stored factor is sanitised rather
+    // than written as a non-finite double.
     common.linetype_scale = match &attributes.linetype {
         EntityLineType::Explicit { scale, .. } => *scale,
-        _ => 1.0,
+        EntityLineType::ByLayer | EntityLineType::ByBlock => {
+            sanitize_linetype_scale(attributes.linetype_scale)
+        }
     };
     common.linetype = match &attributes.linetype {
         EntityLineType::Explicit { name, pattern, .. } if !name.trim().is_empty() => {

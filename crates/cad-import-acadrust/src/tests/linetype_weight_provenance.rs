@@ -125,14 +125,18 @@ fn imported_entities_keep_their_source_linetype_and_lineweight_provenance() {
 }
 
 #[test]
-fn a_symbolic_linetype_does_not_carry_the_entity_linetype_scale() {
-    // `cad_db::EntityLineType` has no slot for a per-entity linetype scale beside
-    // `ByLayer`/`ByBlock` (only `Explicit` carries one), so a `ByLayer` source
-    // with group 48 set loses that factor: the drawing's `$LTSCALE` is the whole
-    // factor at draw time. This is stated rather than hidden — the stored value
-    // is still symbolic and the layer's pattern still applies. Fixing it needs a
-    // `cad_db` shape change, which is out of this change's scope.
+fn a_symbolic_linetype_carries_the_entity_linetype_scale() {
+    // Inverted by the group-48 change: `cad_db` used to have no slot for a
+    // per-entity linetype scale beside `ByLayer`/`ByBlock` (only `Explicit`
+    // carried one), so a symbolic source with group 48 set lost that factor and
+    // drew at the identity. The factor now lives on
+    // `EntityRenderAttributes::linetype_scale` for every provenance, and export
+    // writes it back, so the stored value is both symbolic **and** scaled.
     let mut doc = acadrust::CadDocument::new();
+    let mut dashed = acadrust::tables::LineType::new("DASHED");
+    dashed.add_element(acadrust::tables::LineTypeElement::dash(0.5));
+    dashed.add_element(acadrust::tables::LineTypeElement::space(0.25));
+    doc.line_types.add_or_replace(dashed);
     let mut walls = acadrust::tables::Layer::new("WALLS");
     walls.line_type = "DASHED".to_string();
     doc.layers.add_or_replace(walls);
@@ -156,12 +160,43 @@ fn a_symbolic_linetype_does_not_carry_the_entity_linetype_scale() {
         .entities()
         .next()
         .expect("one line imports");
+    let imported = drawing.database.entity_render_attributes(entity.id);
     assert_eq!(
-        drawing
-            .database
-            .entity_render_attributes(entity.id)
-            .linetype,
+        imported.linetype,
         EntityLineType::ByLayer,
-        "the provenance is still preserved; only the entity scale is not representable"
+        "the provenance is still symbolic, so a layer linetype edit still applies"
+    );
+    assert_eq!(
+        imported.linetype_scale, 2.5,
+        "group 48 is kept beside the symbolic variant, not only inside `Explicit`"
+    );
+
+    // Group 48 must also come back out of a written DXF for a symbolic linetype.
+    let (exported, _report) = crate::export::export(&crate::export::ExportRequest {
+        database: &drawing.database,
+        document_id: DocumentId(1),
+        space: crate::export::ExportSpace::Model,
+        format: crate::export::ExportFormat::DxfText,
+        limits: crate::export::ExportLimits::default(),
+        units: None,
+    })
+    .expect("the imported database exports");
+    let reimported = AcadrustImporter::new()
+        .import(&request(exported), &|| false)
+        .expect("the exported DXF re-imports");
+    let entity = reimported
+        .database
+        .entities()
+        .next()
+        .expect("one line re-imports");
+    let round_tripped = reimported.database.entity_render_attributes(entity.id);
+    assert_eq!(
+        round_tripped.linetype,
+        EntityLineType::ByLayer,
+        "the symbolic linetype survives the written DXF"
+    );
+    assert_eq!(
+        round_tripped.linetype_scale, 2.5,
+        "group 48 is written for a symbolic entity linetype"
     );
 }

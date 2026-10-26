@@ -198,7 +198,7 @@ fn transparency_and_linetype_scale_are_written() {
                     scale: 2.5,
                 },
                 geometry_source: GeometrySource::Analytic,
-                annotative: Default::default(),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -368,7 +368,8 @@ fn by_layer_linetype_and_lineweight_are_written_symbolically() {
                 acadrust::LineWeight::ByLayer,
                 "a ByLayer lineweight must stay symbolic (no group 370)"
             );
-            // A symbolic linetype carries no per-entity scale.
+            // The fixture stores no entity linetype scale, so the symbolic
+            // entity writes the identity (group 48 is omitted as the DXF default).
             assert!((line.common.linetype_scale - 1.0).abs() < 1e-12);
         }
         other => panic!("expected LINE, got {other:?}"),

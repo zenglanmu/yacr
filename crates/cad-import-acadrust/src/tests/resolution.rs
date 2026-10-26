@@ -141,8 +141,10 @@ fn linetype_resolution_keeps_the_symbolic_by_layer_form() {
     // linetype name up in the drawing's linetype table at draw time, so a layer
     // linetype edit changes the dashes without an entity write. (Before this
     // change the layer's pattern was substituted here as an `Explicit` copy,
-    // which froze it at import time.) A symbolic value carries no per-entity
-    // scale; only the drawing's LTSCALE applies.
+    // which froze it at import time.) The variant itself carries no scale by
+    // design: the entity's own group `48` factor (1.5 here) is stored beside it
+    // on `EntityRenderAttributes::linetype_scale`, so it is preserved for a
+    // symbolic linetype too.
     assert_eq!(
         resolve_entity_linetype("ByLayer", 1.5, None),
         EntityLineType::ByLayer

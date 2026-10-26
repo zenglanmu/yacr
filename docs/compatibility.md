@@ -489,8 +489,10 @@ plot-style **名字**无法写出（写入器只发句柄）→ 写缺省并记 
   `Default` → 0.25 mm、图层行自身 `ByLayer` → 0.25 mm 且置未解析标记）与线型**名字**去图纸线型表
   （大小写不敏感）取 pattern（名字缺失 → 连续线 + 未解析标记，**不**编造虚线）解析。三者改层即生效、
   **不写实体**。导出三者**全部符号化**：组 62 省略（=256）、组 6 = `BYLAYER`、组 370 省略（=-1）。
-  **已知缺口**：符号线型不携带实体线型比例（组 48）——`EntityLineType` 的 `ByLayer`/`ByBlock`
-  变体没有该槽位，`ByLayer` 源上组 48 ≠ 1 的比例会丢失（`$LTSCALE` 仍生效）。
+  **实体线型比例（组 48）不再是缺口**（2026-10-26 收尾）：因子改由
+  `EntityRenderAttributes::linetype_scale` 携带，**与线型变体无关**，符号 `ByLayer`/`ByBlock` 也保留源值；
+  表示层把它乘进已解析 pattern（`ByLayer` + `2.0` 与显式 `scale = 2.0` 渲染相同，`$LTSCALE` 行为不变），
+  导出对符号线型也写回组 48。显式变体内的 `scale` 仍是显式路径的权威值，逐位不变。
 - **`ByLayer` 透明度同样按层解析（2026-10-26，`by-layer` 家族最后一项）**：`EntityTransparency`
   新增 **`ByLayer`** 并成为 **`#[default]`**（新建实体继承图层，而不是把“不透明”烘进实体）；
   导入**不再拍平** `ByLayer`（此前把图层 `opacity` 复制成 `Explicit`，`layer_transparency` 旁表

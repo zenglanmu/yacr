@@ -160,6 +160,20 @@ impl LinetypePattern {
     }
 }
 
+/// The single sanitisation rule for a linetype scale factor.
+///
+/// A non-finite or non-positive factor is meaningless (it would erase every
+/// dash), so it degrades to the identity `1.0`; anything else is kept as stored.
+/// The importer, the database field and the representation all call **this**
+/// function rather than each keeping a private copy of the rule.
+pub fn sanitize_linetype_scale(scale: f64) -> f64 {
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    }
+}
+
 /// How an entity's display linetype is determined before batching.
 ///
 /// The importer resolves only an explicit entity linetype; `ByLayer` and
@@ -167,6 +181,12 @@ impl LinetypePattern {
 /// (a `ByLayer` name is looked up in the drawing's linetype table). This mirrors
 /// [`EntityColor`] and [`EntityLineWeight`]. An unresolvable or unknown linetype
 /// becomes `Continuous` rather than an invented pattern.
+///
+/// The entity's own scale factor is **not** part of the symbolic variants: it
+/// lives on [`EntityRenderAttributes::linetype_scale`] for every provenance.
+/// `Explicit` additionally carries a copy inside the variant, and that copy is
+/// what the explicit path resolves (byte-identical to before the attribute
+/// field existed).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum EntityLineType {
     /// A named linetype with a concrete dash pattern. `scale` is the entity's
@@ -176,7 +196,9 @@ pub enum EntityLineType {
         name: String,
         /// Resolved dash pattern.
         pattern: LinetypePattern,
-        /// Entity linetype scale factor (`EntityCommon::linetype_scale`).
+        /// Entity linetype scale factor (`EntityCommon::linetype_scale`). The
+        /// authoritative factor for this variant; also mirrored on
+        /// [`EntityRenderAttributes::linetype_scale`] by the importer.
         scale: f64,
     },
     /// Inherit the containing block reference's linetype (`ByBlock`). At the
@@ -263,6 +285,17 @@ pub struct EntityRenderAttributes {
     /// Display linetype: `Explicit` is concrete, `ByLayer` and `ByBlock` stay
     /// symbolic until expansion resolves them.
     pub linetype: EntityLineType,
+    /// The entity's own linetype scale (DXF group `48`), stored for **every**
+    /// linetype provenance — explicit and symbolic alike — so a `ByLayer` or
+    /// `ByBlock` entity whose source carried a scale keeps that factor instead
+    /// of losing it with the symbolic variant.
+    ///
+    /// `EntityLineType::Explicit` also carries the factor inside its variant and
+    /// that copy stays authoritative for the explicit path (its behaviour is
+    /// unchanged); the importer writes both to the same sanitised value. Consume
+    /// this field through [`sanitize_linetype_scale`]: a non-finite or
+    /// non-positive value means the identity `1.0`.
+    pub linetype_scale: f64,
     /// Which producer supplied the display geometry (proxy cache vs analytic).
     pub geometry_source: GeometrySource,
     /// Annotative scaling state (§3.2). Defaults to non-annotative.
@@ -276,6 +309,7 @@ impl Default for EntityRenderAttributes {
             color: EntityColor::default(),
             lineweight: EntityLineWeight::default(),
             linetype: EntityLineType::default(),
+            linetype_scale: 1.0,
             geometry_source: GeometrySource::Analytic,
             annotative: AnnotativeAttributes::default(),
         }

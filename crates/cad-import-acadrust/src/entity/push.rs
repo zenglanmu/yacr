@@ -186,6 +186,10 @@ impl<'a> ImporterBuilder<'a> {
             color: resolve_entity_color(common.color),
             lineweight: resolve_entity_lineweight(common.line_weight),
             linetype: resolved_linetype,
+            // The entity's own group `48` is stored for every provenance, so a
+            // symbolic `ByLayer`/`ByBlock` keeps the factor an explicit variant
+            // carries inside itself. Same sanitiser as the explicit path.
+            linetype_scale: sanitize_linetype_scale(common.linetype_scale),
             geometry_source: if proxy_geometry_allowed(entity) {
                 GeometrySource::ProxyCache
             } else {

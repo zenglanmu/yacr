@@ -1,3 +1,63 @@
+## 2026-10-26 实体线型比例（组 48）：不再随符号线型丢失（by-layer 家族最后一项保真缺口）
+
+### 结论
+
+符号线型（`ByLayer`/`ByBlock`）此前**没有**携带实体自身线型比例（DXF 组 48）的槽位：只有
+`EntityLineType::Explicit { scale }` 里有，于是「`ByLayer` 源上组 48 ≠ 1」这一份保真在导入时就丢了。
+现在因子**与线型变体解耦**，存在 `EntityRenderAttributes::linetype_scale: f64`（缺省 `1.0`）：
+
+- **导入**：无论变体是显式还是符号，`push_entity` 都把 `common.linetype_scale` 消毒后存进该字段；
+  显式变体内的 `scale` 仍是同一份值的副本。
+- **表示层**：`resolve_linetype` 多收一个 `entity_scale` 参数，`ByLayer` 用它（因此
+  `ByLayer` + 组 48 = `2.0` 与显式 `scale = 2.0` **渲染相同**），`ByBlock` 继承包含块引用的**已解析**
+  比例、再把子实体自身比例乘上去（缺省 `1.0` 是单位元）。`$LTSCALE` 仍是后面的全局因子，行为不变。
+- **导出**：符号线型也写回组 48（acadrust 在值 ≠ `1.0` 时写组 48，`1.0` 是 DXF 缺省）；显式路径
+  仍取变体内的 `scale`，逐位不变。
+
+### 表示形状与字面量计数（为什么加字段而不是改枚举）
+
+基线（HEAD）全仓 `EntityRenderAttributes {` 出现 **41** 次：去掉结构体定义、`impl Default` 头与
+函数返回类型标注后，真正的构造字面量 **27** 处，其中 **23** 处已用 `..Default::default()` /
+`..EntityRenderAttributes::default()` 之类的结构更新，只有 **4** 处穷举字段：本轮自己的
+`Default` impl、`cad-import-acadrust/src/entity/push.rs:184`、该 crate 一个导出测试，以及**禁改**的
+`crates/cad-app/src/tests/drawing/mod.rs:167`。因此加一个带缺省值的字段只撞 **1 处**禁改文件。
+对照：`EntityLineType::ByLayer` 22 处、`ByBlock` 11 处单元变体，改成携带字段的变体会同时打破这些
+构造点与 `resolve_linetype`/导出/`cad-app` 的穷尽 match，远贵于加字段。
+
+### 消毒规则（复用，不新造）
+
+新增 `cad_db::sanitize_linetype_scale(f64) -> f64`：**非有限或非正 → `1.0`**，正是
+`cad-import-acadrust/src/style.rs::resolve_entity_linetype` 里原有的内联规则（也是表示层显式路径的
+同一条）。导入、数据库字段消费方（`resolve_linetype`）、导出（写前消毒）三处共用它；
+存储本身保持**逐字**（`NaN` 存进去仍是 `NaN`，读出来是事实，消毒发生在消费点），有 cad-db 测试钉住。
+
+### cad-app 保留现场（未改，属禁止范围）
+
+`cargo check -p cad-app --lib --locked` **通过**；`cargo check -p cad-app --tests --locked` 报
+**1 处** `E0063`：`crates/cad-app/src/tests/drawing/mod.rs:167` 的 `non_default_attributes()`
+穷举了字段、没有 `..Default::default()`。修法只需在该字面量末尾加 `..Default::default()`
+（或显式写 `linetype_scale: 1.0`）。本轮按硬规则**未编辑** `crates/cad-app/**`，留给 orchestrator。
+
+### 证据
+
+- `cargo test -p cad-db --lib --locked`：**144 passed / 0 failed**（新增 3：缺省 1.0、值往返、
+  消毒与既有规则一致）。
+- `cargo test -p cad-representation --lib --locked`：**226 passed / 0 failed**（新增 3：`ByLayer` ×
+  2.0 = 显式的 2.0、`Explicit` 仍取变体 scale、`ByBlock` 继承父已解析比例）。
+- `cargo test -p cad-import-acadrust --lib --locked`：**297 passed / 1 ignored / 0 failed**
+  （原「符号线型不携带实体比例」的测试**反写**为携带，并新增导出→再导入的 DXF 往返回组 48）。
+- `cargo clippy -p cad-db -p cad-representation -p cad-import-acadrust --all-targets --locked -- -D warnings`：
+  **通过**（退出码 0）。
+- `cargo fmt --all -- --check`、`python3 scripts/check-architecture.py`、`python3 scripts/check-file-size.py`：
+  见本轮提交前门禁（全部按显式退出码判定）。
+- **未运行**：全 workspace 全量门禁、任何平台编译矩阵、真实 GPU/像素证据——本轮不涉及渲染行为变化
+  之外的可视结论；`cad-app` 测试目标仍因上述 1 处字面量**编译不过**（已知、已点名）。
+- 改动范围：`crates/cad-db`（字段 + 消毒函数 + 文档 + 3 测试）、`crates/cad-representation`
+  （`resolve_linetype` 签名/文档、`expand.rs` 透传父比例、3 测试）、
+  `crates/cad-import-acadrust`（导入存值、导出写值、注释与反写测试）、
+  `docs/entity-style.md`、`docs/compatibility.md`、本文件。`cad-host` / `cad-ui-core` / `apps/**` /
+  i18n / acadrust 源码**未改**，无新依赖、无新命令、无新 payload。
+
 ## 2026-10-26 实体透明度 `ByLayer`：不再在导入时拍平（by-layer 家族最后一项）
 
 ### 收尾（orchestrator 补，同轮）

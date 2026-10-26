@@ -45,6 +45,10 @@
   `LineWeight::Default`）| `ByBlock`（符号）| `ByLayer`（缺省）。
 - `linetype: EntityLineType`：`Explicit { name, pattern: LinetypePattern, scale }`（已解析
   虚线）| `ByBlock`（符号）| `ByLayer`（缺省，表示层按连续线画并标记未解析）。
+- `linetype_scale: f64`：**实体自身**线型比例（DXF 组 48），缺省 `1.0`，与线型变体**无关**——
+  符号 `ByLayer`/`ByBlock` 也保留源值（此前只有 `Explicit` 变体内有槽位，符号源的比例会丢）。
+  显式变体内的 `scale` 仍是显式路径的权威值，导入把二者写成同一个已消毒的值；消费方一律经
+  `sanitize_linetype_scale`（非有限或非正 → `1.0`，全仓唯一规则，导入/数据库/表示层共用）。
 
 `LinetypePattern { elements: Vec<f64>, cycle: f64 }` 采用 DWG/DXF 元素约定：正=划、负=空、
 0=点；`cycle` 为 `Σ|element|`。`from_elements` 过滤非有限元素，若过滤后为空或周期 ≤ 0 则
@@ -137,6 +141,10 @@ pub struct LayerAttributes {
   `Explicit { pattern: 连续, name: 原名 }`——显式连续回退，绝不编造虚线。
 - **复杂线型**（含 shape/text 元素）：仍按元素长度生成划/空段落，但字形不绘制，记
   `import.linetype_complex`（`Partial`）。
+- **实体线型比例（组 48）**：无论线型变体是 `Explicit` 还是符号 `ByLayer`/`ByBlock`，源值都存到
+  `EntityRenderAttributes::linetype_scale`，并经 `sanitize_linetype_scale` 消毒（非有限或非正 → `1.0`，
+  与显式路径同一条规则，不再有第二份实现）。显式变体内保留同一值的副本（显式路径的权威值，
+  逐位不变）；符号来源因此不再丢比例（2026-10-26 起）。
 - 全局 `$LTSCALE` 经 `set_linetype_scale` 存入数据库；非有限/非正时回退 1.0。
 
 ## cad-representation：分片携带 + INSERT 解析 + 虚线细分
@@ -147,7 +155,9 @@ pub struct LayerAttributes {
   消毒/钳制在 `cad-scene::sanitize_alpha`，表示层不做第二份）；
 - `color: [f32; 3]`（归一化 sRGB）与 `color_unresolved: bool`；
 - `lineweight: f32`（毫米）与 `lineweight_unresolved: bool`；
-- `linetype: LinetypePattern`、`linetype_unresolved: bool`、`linetype_scale: f32`。
+- `linetype: LinetypePattern`、`linetype_unresolved: bool`、`linetype_scale: f32`（实体自身
+  组 48：`Explicit` 取变体内的 scale，符号变体取 `EntityRenderAttributes::linetype_scale`，
+  都过 `sanitize_linetype_scale`）。
 
 `build`/`from_tessellation` 没有图层表，输出文档化缺省
 （`DEFAULT_RENDER_COLOR = [1,1,1]`、`DEFAULT_LINEWEIGHT_MM = 0.25`、连续 pattern、`alpha = 1.0`）并置
@@ -166,8 +176,10 @@ pub struct LayerAttributes {
 - 非连续线：每条 `DisplayPrimitive::Lines` 按**弧长**切成多个划段子折线（直线与
   离散化曲线同规则），一个划段一个 `DisplayFragment` → 场景里一个 `RenderBatch`，因此
   虚线实体在 GPU 上真实地呈现为间断的划段；
-- 比例：`combined = entity_linetype_scale × global LTSCALE`。二者都不合法时回退 1.0；
-  有效 `< 0`/0/NaN 由 `resolve_linetype`/`dash_polyline` 拒绝并走回退路径。
+- 比例：`combined = entity_linetype_scale × global LTSCALE`。实体比例对**所有**变体生效：
+  `ByLayer` + 组 48 = `2.0` 与显式 `scale = 2.0` 渲染相同；`ByBlock` 继承包含块引用的**已解析**
+  比例，子实体自身比例再乘上去（缺省 `1.0` 是单位元）。二者都不合法时回退 1.0；
+  有效 `< 0`/0/NaN 由 `resolve_linetype`（经 `sanitize_linetype_scale`）/`dash_polyline` 拒绝并走回退路径。
 - **退化/零周期/全空/非法比例**：`dash_polyline` 永不 panic，返回
   `DashOutcome::Continuous(reason)`；`subdivide_dashes` 原样返回连续线并给出原因，由
   `build_expanded` 追加 `Completeness::Partial` 与 `representation.linetype_fallback`

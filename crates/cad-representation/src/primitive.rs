@@ -367,9 +367,12 @@ pub struct DisplayFragment {
     /// drawing's table does not define — so the fragment is drawn continuous.
     pub linetype_unresolved: bool,
     /// Entity linetype scale factor, applied with the drawing's global LTSCALE
-    /// when subdividing. Sanitised to `>= 0`; `1.0` for a symbolic
-    /// (`ByLayer`/`ByBlock`) value, which carries no per-entity scale in
-    /// `cad_db` (the source's group `48` is only stored inside `Explicit`).
+    /// when subdividing. Sanitised through `cad_db::sanitize_linetype_scale`
+    /// (a non-finite/non-positive factor becomes `1.0`). It is the entity's own
+    /// group `48` value for **every** provenance: the explicit variant's stored
+    /// scale, and `cad_db::EntityRenderAttributes::linetype_scale` for a
+    /// symbolic (`ByLayer`/`ByBlock`) one, so `ByLayer` + `2.0` dashes exactly
+    /// like an explicit linetype with `scale = 2.0`.
     pub linetype_scale: f32,
     /// Display order of the source entity, i.e. the same key `cad-db` sorts a
     /// space by (`DbEntity::draw_order`). Larger values paint later.
@@ -495,15 +498,16 @@ pub fn resolve_lineweight(
 }
 
 /// Resolve an entity's stored linetype against an enclosing INSERT's resolved
-/// pattern and the owning layer's pattern, mirroring [`resolve_color`].
+/// pattern/scale and the owning layer's pattern, mirroring [`resolve_color`].
 ///
 /// Returns the concrete pattern, whether it is unresolved (drawn continuous),
 /// and the linetype scale to apply.
 ///
-/// * `Explicit`: a concrete source pattern, passed through with the entity's own
-///   linetype scale.
-/// * `ByBlock`: inherits the enclosing block reference's pattern when one is
-///   threaded down, otherwise it is unresolved (continuous).
+/// * `Explicit`: a concrete source pattern, passed through with the factor stored
+///   inside the variant (that copy stays authoritative for this path).
+/// * `ByBlock`: inherits the enclosing block reference's pattern **and** its
+///   resolved scale when one is threaded down, otherwise it is unresolved
+///   (continuous).
 /// * `ByLayer`: `layer_pattern` is the caller's lookup of the owning layer's
 ///   [`cad_db::LayerAttributes::linetype`] **name** in the drawing's linetype
 ///   table (DXF group `6` is a name, not a pattern). `Some` is that named
@@ -512,35 +516,44 @@ pub fn resolve_lineweight(
 ///   name (or the layer names nothing), so the line is drawn continuous **and**
 ///   flagged unresolved rather than an invented pattern being fabricated.
 ///
-/// The symbolic variants (`ByBlock`/`ByLayer`) carry no per-entity linetype
-/// scale: `cad_db::EntityLineType` has no slot for one (the source's group `48`
-/// is only stored inside `Explicit`), so `1.0` is reported and the drawing's
-/// `$LTSCALE` is the whole factor.
+/// `entity_scale` is the entity's own linetype scale (`EntityRenderAttributes::
+/// linetype_scale`, DXF group `48`) and applies to the symbolic variants: a
+/// `ByLayer` entity with `2.0` renders like an explicit linetype with
+/// `scale = 2.0`, which is what makes a symbolic provenance faithful. A
+/// `ByBlock` child multiplies it into the inherited parent scale (`1.0`, the
+/// default, is the identity, so a child whose group `48` was absent renders at
+/// exactly the parent's resolved scale). Every factor goes through
+/// [`cad_db::sanitize_linetype_scale`], the one sanitisation rule, so a corrupt
+/// value degrades to `1.0` instead of erasing the dashes. The drawing's
+/// `$LTSCALE` is applied later, by [`subdivide_dashes`].
 pub fn resolve_linetype(
     linetype: EntityLineType,
-    parent: Option<&LinetypePattern>,
+    entity_scale: f64,
+    parent: Option<(&LinetypePattern, f32)>,
     layer_pattern: Option<&LinetypePattern>,
 ) -> (LinetypePattern, bool, f32) {
+    let entity_scale = cad_db::sanitize_linetype_scale(entity_scale) as f32;
     match linetype {
         EntityLineType::Explicit {
             pattern,
             scale,
             name: _,
         } => {
-            let scale = if scale.is_finite() && scale > 0.0 {
-                scale as f32
-            } else {
-                1.0
-            };
-            (pattern, false, scale)
+            // Unchanged: the variant's own scale (sanitised by the same rule) is
+            // the whole factor, exactly as before the attribute field existed.
+            (
+                pattern,
+                false,
+                cad_db::sanitize_linetype_scale(scale) as f32,
+            )
         }
         EntityLineType::ByBlock => match parent {
-            Some(parent) => (parent.clone(), false, 1.0),
-            None => (LinetypePattern::continuous(), true, 1.0),
+            Some((parent, parent_scale)) => (parent.clone(), false, parent_scale * entity_scale),
+            None => (LinetypePattern::continuous(), true, entity_scale),
         },
         EntityLineType::ByLayer => match layer_pattern {
-            Some(pattern) => (pattern.clone(), false, 1.0),
-            None => (LinetypePattern::continuous(), true, 1.0),
+            Some(pattern) => (pattern.clone(), false, entity_scale),
+            None => (LinetypePattern::continuous(), true, entity_scale),
         },
     }
 }

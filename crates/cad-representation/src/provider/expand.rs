@@ -20,7 +20,9 @@ impl ProviderRegistry {
         draw_order: i64,
         parent_color: Option<[f32; 3]>,
         parent_lineweight: Option<f32>,
-        parent_linetype: Option<&LinetypePattern>,
+        // The containing INSERT's resolved pattern **and** its resolved linetype
+        // scale: a `ByBlock` child inherits both.
+        parent_linetype: Option<(&LinetypePattern, f32)>,
         global_lt_scale: f64,
         stack: &mut Vec<BlockId>,
         out: &mut DisplayRepresentation,
@@ -56,8 +58,12 @@ impl ProviderRegistry {
         // drawing's linetype table (`None` when the name is not defined there,
         // which stays unresolved rather than becoming invented dashes).
         let layer_linetype = layer_linetype_pattern(database, &layer);
+        // The entity's own scale (group `48`) is stored for symbolic linetypes
+        // too, so `ByLayer`/`ByBlock` keep the source's factor instead of
+        // rendering at the identity.
         let (own_linetype, linetype_unresolved, linetype_scale) = resolve_linetype(
             attributes.linetype.clone(),
+            attributes.linetype_scale,
             parent_linetype,
             layer_linetype.as_ref(),
         );
@@ -117,7 +123,7 @@ impl ProviderRegistry {
                             child_draw_order,
                             Some(own_color),
                             Some(own_lineweight),
-                            Some(&own_linetype),
+                            Some((&own_linetype, linetype_scale)),
                             global_lt_scale,
                             stack,
                             out,

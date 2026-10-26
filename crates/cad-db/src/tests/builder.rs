@@ -256,3 +256,100 @@ fn code_page_is_absent_by_default_and_survives_the_builder() {
     let drawing = b.finish().unwrap();
     assert_eq!(drawing.code_page(), None);
 }
+
+/// One model-space point entity on layer 0, with `attributes` stored beside it.
+fn db_with_attributes(attributes: EntityRenderAttributes) -> DrawingDatabase {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_entity(raw_entity(
+        1,
+        SpaceId::Model,
+        SemanticGeometry::Point(point(0.0, 0.0)),
+    ))
+    .unwrap();
+    b.set_entity_render_attributes(EntityId(1), attributes)
+        .unwrap();
+    b.finish().unwrap()
+}
+
+#[test]
+fn the_entity_linetype_scale_defaults_to_the_identity() {
+    // The factor is stored for every linetype provenance, explicit and symbolic,
+    // so it lives beside the variant rather than inside it. A database built
+    // without an importer must keep the identity, or every hand-built entity
+    // would render with invented dashes.
+    assert_eq!(EntityRenderAttributes::default().linetype_scale, 1.0);
+
+    let db = db_with_attributes(EntityRenderAttributes::default());
+    assert_eq!(db.entity_render_attributes(EntityId(1)).linetype_scale, 1.0);
+}
+
+#[test]
+fn a_stored_entity_linetype_scale_round_trips_with_either_provenance() {
+    // `ByLayer` is the case that used to lose the factor: the variant is
+    // symbolic and carries no scale of its own.
+    let by_layer = db_with_attributes(EntityRenderAttributes {
+        linetype: EntityLineType::ByLayer,
+        linetype_scale: 2.5,
+        ..Default::default()
+    });
+    let stored = by_layer.entity_render_attributes(EntityId(1));
+    assert_eq!(stored.linetype, EntityLineType::ByLayer);
+    assert_eq!(stored.linetype_scale, 2.5);
+
+    // An explicit provenance still keeps its own copy in the variant, and the
+    // attribute field carries the same factor (the importer writes both).
+    let explicit = EntityLineType::Explicit {
+        name: "DASHED".into(),
+        pattern: LinetypePattern::from_elements([0.5, -0.25]),
+        scale: 2.5,
+    };
+    let explicit_db = db_with_attributes(EntityRenderAttributes {
+        linetype: explicit.clone(),
+        linetype_scale: 2.5,
+        ..Default::default()
+    });
+    let stored = explicit_db.entity_render_attributes(EntityId(1));
+    assert_eq!(stored.linetype, explicit);
+    assert_eq!(stored.linetype_scale, 2.5);
+}
+
+#[test]
+fn a_non_finite_or_non_positive_linetype_scale_sanitises_to_the_identity() {
+    // The rule is the existing one (a corrupt factor must not erase every dash),
+    // now shared by the importer, the attribute field and the representation
+    // instead of being re-implemented per caller.
+    for bad in [
+        0.0,
+        -0.0,
+        -1.0,
+        -2.5,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ] {
+        assert_eq!(
+            sanitize_linetype_scale(bad),
+            1.0,
+            "a {bad} linetype scale must degrade to the identity"
+        );
+    }
+    for good in [1.0, 0.5, 2.5, 1e-6, 1e6] {
+        assert_eq!(sanitize_linetype_scale(good), good);
+    }
+
+    // Storage is verbatim (the fact is preserved as read); sanitising happens
+    // where the factor is consumed.
+    let db = db_with_attributes(EntityRenderAttributes {
+        linetype_scale: f64::NAN,
+        ..Default::default()
+    });
+    let stored = db.entity_render_attributes(EntityId(1)).linetype_scale;
+    assert!(stored.is_nan(), "the stored factor is kept as read");
+    assert_eq!(sanitize_linetype_scale(stored), 1.0);
+}
