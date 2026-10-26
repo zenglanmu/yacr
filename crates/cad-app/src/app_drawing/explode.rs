@@ -353,10 +353,11 @@ fn explode_polyline(
 /// which flattens a block reference to leaf geometry.)
 ///
 /// Members keep their own block-definition layer; the placement is baked through
-/// the existing [`transform_geometry`] surface. A member this build cannot place
-/// (a `Spline`/`Shape`/`Opaque`/`Compound` member, e.g. an in-block
-/// MINSERT/hatch) or cannot decompose (`Text`, refused explicitly by
-/// [`push_produced`]) fails the whole command.
+/// the existing [`transform_geometry`] surface, which handles a `Spline` exactly
+/// (a NURBS is affinely invariant). A member this build cannot place (a
+/// `Shape`/`Opaque`/`Compound` member, e.g. an in-block MINSERT/hatch) or cannot
+/// decompose (`Text` and `Spline`, refused explicitly by [`push_produced`] /
+/// [`child_refusal`]) fails the whole command.
 fn explode_insert(
     drawing: &DrawingDatabase,
     space: &SpaceId,

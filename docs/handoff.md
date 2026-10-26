@@ -1,3 +1,104 @@
+## 2026-10-26 `cad-db` 的 `transform_geometry` 支持 `SPLINE`（仿射不变），删除 STRETCH 的应用内样条例外
+
+### 结论
+
+上一轮 STRETCH 为让「完全包围整移」对 `SPLINE` 成立，在 `cad-app` 里加了一条**纯平移控制点**的特例，
+理由是 `cad-db` 的 `transform_geometry` 按种类拒绝样条。这留下真实的不对称：**MOVE/COPY/ROTATE/SCALE/
+MIRROR/ARRAY/ALIGN 都不能动样条**，而 STRETCH 能。本轮把拒绝的原因本身消掉：
+
+* `crates/cad-db/src/transform.rs`：`Spline` 臂从 `Unsupported` 改为**任意有限非奇异仿射**的精确映射；
+* `crates/cad-app/src/app_drawing/stretch.rs`：删除 `moved_geometry` 的样条例外，完全包围整移对所有
+  种类（含样条）都直接调用 `transform_geometry`；**部分**包围的控制点规则**逐字未动**；
+* `docs/compatibility.md`（`MOVE`/`COPY`/`STRETCH` 行 + 新增「仿射不变规则」段）与本文件。
+
+**未改**：`cad-host` / `crates/cad-domain` / `crates/cad-geometry` / `apps/**` / i18n / wire / 命令表 /
+payload（无新命令、无新字段、无新诊断码）。`TEXT` 的相似变换限制、`MultiLeader` 按 `type_key` 拒绝、
+`Arc`/`Ellipse` 的镜像与非均匀拒绝、`Shape`/`Opaque`/`Compound` 的拒绝**全部逐字未变**。
+
+### 规则（写进 `transform_geometry` 的模块文档）
+
+NURBS 曲线**仿射不变**：把每个控制点过同一仿射映射，`degree`/`knots`/`weights` **原样保留**，
+得到的就是原曲线的**精确仿射像**。因此平移、旋转、**均匀与非均匀**缩放、镜像、剪切**全部精确**：
+不重拟合、不重参数化、不改权重。`Transform3::apply_point` 只用 0..2 行、**不做齐次除法**（源码核对），
+故严格仿射，第 3 行（投影行）不参与；因此规则覆盖**整个仿射群**，不是相似变换子集。
+
+`cad-db` 只做三件事：校验矩阵有限、行列式非奇异（既有检查，未放宽）、逐个映射控制点；`degree`/
+`knots`/`weights` **复制**而非重算，所以 `validate_geometry` 的关系
+（`knots.len() == n + degree + 1`、`weights.len() == n`、节点非降序）**按构造成立**。新增的唯一拒绝：
+**有限矩阵把有限控制点算成非有限**（如 `1e10 × 1e300`）⇒ `InvalidInput`（"transformed spline control
+point is non-finite"）；否则会返回一份任何消费者都无法求值的定义。`knots: []` / `weights: []`
+两个既定简写**保持为空**（不被展开）。
+
+**仍拒绝（同一保守理由但本轮未放宽）**：`Shape`（存的是 `position`/`size`/`rotation` 的单字形，只有
+相似变换有处安放，且其变换臂未实现）、`Opaque`（代理字节，无几何）、`Compound`（需逐成员映射，成员可能
+含本构建拒绝的种类）。`Arc`/`Ellipse`/`Text` 的相似+正行列式限制、多边形 bulge 的相似限制、
+`Dimension`/`Hatch`/`MultiLeader` 各自规则**未动一个字节**。
+
+### 直接后果（已测，不是推断）
+
+* **MOVE 对样条真的成功**：一条事务、一个 `ChangeSet`，其唯一变更 =
+  `ObjectChange::Update(id, GEOMETRY ∪ TRANSFORM)`、revision +1、一步 undo、undo 后整条定义**逐位**还原。
+* **锁层强制**走同一条 staging gate（不在 kind 分支里）：锁层上的样条 `transform_entity` ⇒
+  `layer.locked`、`staged_len() == 0`、revision 不变、定义逐位不变。
+* **STRETCH 完全包围 == MOVE**：同一命令同一位移在同一图纸上的结果**几何相等**（断言 `geometry` 相等），
+  应用内例外已不存在；完全包围遇到**不可索引**定义时改由 `cad-db` 校验按 `spline.weight_count` 拒绝
+  （整命令失败、不写入），不再有 app 侧私有前置检查。
+* **ARRAY/ALIGN/EXPLODE 的块成员烘焙**：`array.rs`/`drawing_transform.rs`/`explode_insert` 都走
+  `transform_geometry`，样条不再因种类被拒（块内样条成员仍被 EXPLODE 按 `child_refusal` 拒绝，
+  与 `compatibility.md` 的 EXPLODE 行一致——拒绝理由从变换层移到策略层，行为不变）。
+
+### 仿射不变性的直接证据（anti-bug 测试）
+
+`tests/drawing/stretch_curves.rs::a_non_uniform_scale_maps_the_sampled_spline_curve_point_for_point`：
+二次**有理**样条（权重 `1 / 0.5 / 2 / 1`）+ 非均匀缩放兼剪切（`x' = 3x + 2y`、`y' = 0.5y`），
+用 `cad_geometry::NurbsCurve::evaluate` 在参数域上取 **21 个**样本，逐点比较「缩放后的曲线样本」与
+「原样本过同一变换」：**最大偏差 3.55e-15**（断言 < 1e-12），参数域端点相同。
+这条测试区分「映射了控制点」与「映射了曲线」——重参数化/改权重/重拟合都会让控制点仍然逐位相等而
+曲线样本漂移。均匀/非均匀/剪切/镜像的控制点级断言另有 5 个用例（见下）。
+
+### 测试
+
+* 新文件 `crates/cad-db/src/tests/spline_transform.rs`（已注册，**11 个用例**，434 行）：
+  平移/旋转/均匀缩放/**非均匀缩放+剪切**/镜像五种映射的**逐控制点**断言 + `degree`/`knots`/`weights`
+  逐位相等 + `validate_geometry` 通过；`knots: []`/`weights: []` 简写保持为空；
+  非有限矩阵拒绝；**有限矩阵溢出**拒绝；不可索引输入**仍被既有校验拒绝**（`spline.weight_count`，
+  纯映射本身不修不拒计数）；`transform_entity` 的 TRANSFORM 掩码 / 单次 revision / id·space·layer·
+  draw_order 保留；锁层拒绝且零 staged。
+* `crates/cad-app/src/tests/drawing/stretch_curves.rs`（+3 用例，890 行）：MOVE 样条（一条事务 /
+  `GEOMETRY ∪ TRANSFORM` / 一步 undo / 位级还原）；完全包围 STRETCH 与 MOVE 结果相等 +
+  `validate_geometry`；完全包围 + 不可索引定义 ⇒ 整命令按 `spline.weight_count` 拒绝且不写入；
+  上述 anti-bug 采样测试。既有「部分包围只动窗内控制点」「窗内无控制点 ⇒ `no_vertex`」
+  「部分包围不可索引 ⇒ `spline_inconsistent`」「SPLINE+LINE 同窗一条事务」用例**未改**并通过。
+
+### 实际运行（本机，2026-10-26）
+
+* `cargo test -p cad-db --lib --locked` → **141 passed, 0 failed**（+11）；
+* `cargo test -p cad-app --lib --locked` → **1162 passed, 0 failed**（+3，上一轮 1159）；
+* `cargo clippy -p cad-db -p cad-app --all-targets --locked -- -D warnings` → 通过（**管道未吞退出码**：
+  用 `set -o pipefail` + `${PIPESTATUS[0]}`）；
+* `cargo fmt --all -- --check` → 通过；
+* `python3 scripts/check-file-size.py` → OK（1003 个代码文件，上限 1000；`cad-db/src/transform.rs` 621、
+  `app_drawing/stretch.rs` 909、`tests/drawing/stretch_curves.rs` 890、`tests/spline_transform.rs` 434 行）。
+
+**NOT RUN（不得当作通过）**：全 workspace 全量门禁/全量测试、平台编译矩阵（wasm/Windows/Android）、
+`python3 scripts/check-architecture.py`（本轮未跑；依赖图未变：`cad-db` 仍只依赖 `cad-domain`，
+未新增依赖、未引入 `cad-geometry`——曲线求值测试放在 `cad-app` 侧正是为此）、`check-i18n.py`、
+任何 GUI/像素/真窗口证据（含「旋转/缩放后的样条显示」与曲面细分）、`cad-host`/`cad-ui-core` 层、
+真机 AutoCAD 行为对照。本轮证据上限 = 两个 crate 的合成契约 + 上述门禁。
+
+### 仍然存在的缺口
+
+* **曲线求值/显示**：本轮只证明「控制点被映射」与「曲线样本被映射」（合成、`cad-geometry` 求值）。
+  渲染/细分的像素证据、`cad-representation` 的样条 LOD、大坐标/极端缩放的数值稳定性**均 NOT RUN**。
+* **`host/databases.rs` 的注释旧了**（`snap_targets_for` 仍把 `spline` 列在「本构建不能精确变换、故跳过」的
+  括号清单里）。行为上现在**不再跳过**块内样条的 snap 目标（会精确烘焙进世界坐标，这是改进），
+  但该注释属 `cad-host` 相邻文件、本轮范围外，**未改**（同步债务）。
+* **`explode.rs` 的注释**同样把 `Spline` 写成「cannot place block member」；实际拒绝理由已改成
+  `push_produced`/`child_refusal`（策略层），行为不变。属本轮范围外，**未改**。
+* `Shape`/`Opaque`/`Compound` 仍不可变换（理由见上）；样条的 `closed`/`periodic` 标志仍未建模
+  （`transform` 因此也无从保真，与导入层的既有偏差一致）。
+* 部分包围 STRETCH 仍是「整条曲线重塑」（NURBS 固有，未变）；cpolygon/lasso、单独选取即整移、3D 仍不存在。
+
 ## 2026-10-26 `STRETCH` 曲线种类：`SPLINE` 控制点与 `ARC` 端点（逐顶点，含三种具名拒绝）
 
 ### 结论
@@ -55,12 +156,15 @@
 
 * 完全包围的分类口径**未变**：`LINE`/无 bulge 折线按逐顶点包含；`CIRCLE`/`ELLIPSE`/`INSERT`/`ARC`/
   含 bulge 折线与 SPLINE 走**保守包围盒**（`union_bounds` + `Rect::contains_aabb`）。
-* 整移对所有种类都走 `cad-db` 的 `transform_geometry`（与 MOVE 同一个调用），**唯一例外是 `SPLINE`**：
-  `cad-db` 明确拒绝烘焙样条（`transform of Spline entities is not supported`，有意为之，不在本轮范围）。
+* 整移对所有种类都走 `cad-db` 的 `transform_geometry`（与 MOVE 同一个调用），**当时唯一例外是 `SPLINE`**：
+  `cad-db` 当时明确拒绝烘焙样条（`transform of Spline entities is not supported`，有意为之，不在该轮范围）。
   纯平移的 NURBS 就是控制点平移，因此 `moved_geometry` 只对**这一段**就地平移控制点、把
-  `degree`/`knots`/`weights` 逐位复制，**绝不**产生旋转/缩放/镜像；`cad-db` 的通用拒绝**未改**。
-  于是「完全包围的样条整移」这句 `compatibility.md` 的老描述**现在才真正成立**（旧实现走到
+  `degree`/`knots`/`weights` 逐位复制，**绝不**产生旋转/缩放/镜像；`cad-db` 的通用拒绝**当时未改**。
+  于是「完全包围的样条整移」这句 `compatibility.md` 的老描述**当时才真正成立**（旧实现走到
   `transform_geometry` 会整命令 `Unsupported` 失败）。
+  ⚠️ **已被取代（2026-10-26 后续轮次，见本文件顶部条目）**：`cad-db` 的 `transform_geometry` 现在对样条
+  实现**任意有限仿射**映射（NURBS 仿射不变），`moved_geometry` 的样条例外**已删除**，完全包围的样条
+  与 MOVE 走同一条路径。
 
 ### 事务 / 撤销形状（未变）
 
@@ -109,9 +213,11 @@
 * **SPLINE 部分拉伸会整体重塑曲线**（NURBS 固有），因此「拉伸一小段而不动其余」不可能实现，也没有
   拟合/重参数化路径（`degree`/`knots`/`weights` 一律不改）。
 * `HATCH`/`INSERT` 的**拉伸**、cpolygon/lasso 窗口、单独选取即整移、3D STRETCH：仍**不存在**（本轮未动）。
-* `cad-db` 对样条的 `transform_geometry` 拒绝仍在（这是它的决定）；只有 `STRETCH` 的**纯平移**在
-  `cad-app` 侧给出了等价实现，MOVE/其它命令的样条平移**仍未支持**——两者不一致是已知债务，
-  本轮**不**修（要修得动 `cad-db`）。
+* `cad-db` 对样条的 `transform_geometry` 拒绝**当时仍在**（这是它的决定）；只有 `STRETCH` 的**纯平移**在
+  `cad-app` 侧给出了等价实现，MOVE/其它命令的样条平移**当时仍未支持**——两者不一致是已知债务，
+  该轮**不**修（要修得动 `cad-db`）。
+  ⚠️ **已清偿（2026-10-26 后续轮次，见本文件顶部条目）**：`cad-db` 现已对样条实现任意有限仿射映射，
+  上述不对称**已删除**。
 * 曲线拉伸的运行时/像素与宿主证据：**NOT RUN**。
 
 ## 2026-10-26 DIMENSION 定义点夹点（重合成显示，非法即按名拒绝）

@@ -11,6 +11,7 @@ mod layers;
 mod locked_layers;
 mod plot;
 mod scale;
+mod spline_transform;
 mod spline_validation;
 mod text_transform;
 mod visibility;

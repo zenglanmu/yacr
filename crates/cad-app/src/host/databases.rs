@@ -238,10 +238,12 @@ pub(super) fn snap_target_build_count() -> u64 {
 /// geometry in its **own local** coordinates plus the accumulated world
 /// transform; the snap engine has no transform parameter, so the transform is
 /// baked into the geometry with [`transform_geometry`]. An item whose kind this
-/// build cannot transform exactly (text, spline, shape, opaque, compound) is
-/// **skipped**, never snapped at a wrong location; a top-level entity carries
-/// the identity transform and is passed through unchanged (so a model-space
-/// spline still snaps to its sampled points).
+/// build cannot transform exactly (shape, opaque, compound) is **skipped**, never
+/// snapped at a wrong location; a top-level entity carries the identity
+/// transform and is passed through unchanged. A `SPLINE` **is** baked exactly
+/// (a NURBS is affinely invariant, so its control points transform without
+/// refitting), and `TEXT` is placed by its similarity limit; both snap to their
+/// sampled points.
 ///
 /// Every expanded item is presented in **world model space** (block children
 /// are inlined by their composed transform), so all targets are tagged

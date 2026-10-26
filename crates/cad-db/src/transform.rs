@@ -36,8 +36,26 @@
 //!   rebuilt. A scale (even uniform) or a mirror is refused for the whole
 //!   entity, because it would change text height/arrowhead size/dogleg length
 //!   while the raw `90` override mask keeps its bits.
-//! - `Spline`, `Opaque` and `Compound` are not baked: they return `Unsupported`
-//!   so a caller cannot believe a move happened when it did not.
+//! - `Spline` accepts **any finite non-singular affine** transform. A NURBS curve
+//!   is **affinely invariant**: mapping every control point through the transform
+//!   while copying `degree`, `knots` and `weights` verbatim yields exactly the
+//!   affine image of the curve. Translation, rotation, uniform **and non-uniform**
+//!   scale, mirror and shear are therefore all exact — no refitting, no
+//!   reparameterisation and no weight change. [`Transform3::apply_point`] is
+//!   strictly affine (it reads only rows 0..2 and performs no homogeneous divide),
+//!   so the whole affine group applies and no projective row can sneak in. The
+//!   structural relations `crate::validate_geometry` enforces
+//!   (`knots.len() == control_points.len() + degree + 1`,
+//!   `weights.len() == control_points.len()`, non-decreasing knots) are preserved
+//!   **by construction** because those vectors are copied, never recomputed.
+//! - `Shape`, `Opaque` and `Compound` are still refused. `Shape` stores one glyph
+//!   as `position` + `size` + `rotation`, so only a similarity is representable at
+//!   all (a shear or a non-uniform scale has no field to live in) and its arm is
+//!   not implemented; `Opaque` holds proxy bytes with no geometry to map; a
+//!   `Compound` would have to map every member, and its members may include kinds
+//!   whose image this build refuses. None of the three is the conservative
+//!   "control hulls are not modelled" reason that used to cover splines, so none
+//!   of them is widened here.
 //!
 //! Every accepted result is re-validated by [`crate::validate_geometry`], so a
 //! singular or collapsing transform is rejected before it reaches the store.
@@ -56,7 +74,9 @@ const SIMILARITY_TOLERANCE: f64 = 1e-9;
 ///
 /// Fails with [`CadError::Unsupported`] when this build cannot represent the
 /// exact image of the source kind, and with [`CadError::InvalidInput`] when the
-/// transform itself is non-finite/singular.
+/// transform itself is non-finite/singular or when a finite transform overflows a
+/// finite coordinate into a non-finite one (a spline's mapped control points are
+/// checked, since the result would be unevaluable).
 pub fn transform_geometry(
     geometry: &SemanticGeometry,
     transform: &Transform3,
@@ -269,10 +289,39 @@ pub fn transform_geometry(
                 wrap_width: wrap_width.map(|width| width * uniform_scale(transform)),
             }
         }
-        SemanticGeometry::Spline { .. } => {
-            return Err(CadError::Unsupported(
-                "transform of Spline entities is not supported".to_string(),
-            ));
+        // A NURBS curve is affinely invariant: the affine image of the curve is
+        // the curve through the mapped control points with the very same degree,
+        // knot vector and weights. Every vector is copied (never recomputed), so
+        // the counts `validate_geometry` relates to each other cannot change and
+        // the transformed definition is as indexable as the source. This is an
+        // exact map under *any* non-singular affine transform — including a
+        // non-uniform scale, a shear and a mirror — because `apply_point` is
+        // strictly affine (rows 0..2, no homogeneous divide).
+        SemanticGeometry::Spline {
+            degree,
+            knots,
+            control_points,
+            weights,
+        } => {
+            let mapped: Vec<Point3> = control_points
+                .iter()
+                .map(|point| transform.apply_point(*point))
+                .collect();
+            // A finite transform can still overflow a finite control point
+            // (`1e308 * 1e10`). Refuse that here rather than returning a
+            // definition whose coordinates are infinite: no consumer can
+            // evaluate or bound it, and the caller asked for an exact image.
+            if !mapped.iter().all(|point| finite_point(*point)) {
+                return Err(CadError::InvalidInput(
+                    "transformed spline control point is non-finite".to_string(),
+                ));
+            }
+            SemanticGeometry::Spline {
+                degree: *degree,
+                knots: knots.clone(),
+                control_points: mapped,
+                weights: weights.clone(),
+            }
         }
         SemanticGeometry::Shape { .. } => {
             return Err(CadError::Unsupported(
@@ -339,6 +388,15 @@ fn require_orientation_preserving(transform: &Transform3, what: &str) -> CadResu
         )));
     }
     Ok(())
+}
+
+/// Whether all three coordinates of `point` are finite.
+///
+/// [`transform_is_finite`] only judges the matrix; a finite matrix applied to a
+/// finite point can still overflow to infinity, so a transform that must return
+/// an exact, evaluable image checks the result too.
+fn finite_point(point: Point3) -> bool {
+    point.x.is_finite() && point.y.is_finite() && point.z.is_finite()
 }
 
 fn uniform_scale(transform: &Transform3) -> f64 {

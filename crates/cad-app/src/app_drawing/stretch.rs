@@ -51,12 +51,16 @@
 //! can evaluate. All of that is **our choice**: Autodesk does not document
 //! STRETCH on a spline.
 //!
-//! A **fully enclosed** spline is translated as a whole like every other kind, but
-//! not through `cad-db`'s `transform_geometry`: that call deliberately refuses to
-//! bake a spline at all. A rigid translation of a NURBS is a translation of its
-//! control points with `degree`/`knots`/`weights` untouched, so `moved_geometry`
-//! applies exactly that one case here (no rotation/scale/mirror ever) and leaves
-//! `cad-db`'s general refusal in place.
+//! A **fully enclosed** spline is translated as a whole like every other kind,
+//! through `cad-db`'s `transform_geometry`. That arm used to be missing: `cad-db`
+//! refused to bake a spline at all, so this command kept a private
+//! translation-only control-point shift for the fully enclosed case. `cad-db` now
+//! bakes a spline under **any** finite affine transform (a NURBS is affinely
+//! invariant: mapping the control points with `degree`/`knots`/`weights` copied
+//! verbatim is exactly the affine image of the curve), so the app-side exception
+//! is **gone** and a fully enclosed STRETCH and a MOVE cannot disagree about a
+//! spline. Only a stored definition that is already unindexable is refused, by
+//! the same `transform_geometry`/`validate_geometry` rules every other kind obeys.
 //!
 //! **ARC partial stretch (our declared rule).** An arc has exactly two addressable
 //! vertices: its stored start point and end point,
@@ -564,57 +568,22 @@ fn union_bounds(items: &[&crate::PickItem]) -> Option<(Point3, Point3)> {
 }
 
 /// The whole-entity translation used by `Enclosure::Full` — exactly MOVE's
-/// result — with one declared exception.
+/// result.
 ///
 /// Every kind goes through `cad-db`'s [`transform_geometry`], the same call MOVE
-/// makes, so a fully enclosed STRETCH and a MOVE cannot disagree. `SPLINE` is the
-/// exception: `cad-db` **deliberately refuses** to bake a spline (`transform of
-/// Spline entities is not supported`) so that no caller can believe a general
-/// transform happened, and that decision is out of this command's scope. A pure
-/// **translation** of a NURBS is only a translation of its control points —
-/// `degree`, `knots` and `weights` are unaffected by a rigid move — so STRETCH
-/// declares exactly that one case and applies it here, copying the definition
-/// vectors bit-identically. No rotation/scale/mirror is ever produced on this
-/// path, and `cad-db`'s general refusal stays untouched.
+/// makes, so a fully enclosed STRETCH and a MOVE cannot disagree. That includes
+/// `SPLINE`: a NURBS is affinely invariant under a control-point map with
+/// `degree`/`knots`/`weights` copied verbatim, so `transform_geometry` bakes a
+/// spline under any finite affine transform and this command needs no per-kind
+/// exception (the translation-only control-point shift that used to live here for
+/// the fully enclosed case was removed once that arm existed).
 ///
 /// A stored spline definition that cannot be indexed (knot or weight count not
-/// matching the control points) is refused by name rather than staged: a
-/// fully enclosed entity that cannot be written fails the whole command, which is
-/// the `Move` arm's existing rule.
+/// matching the control points) is refused by `cad-db` (the transform's result is
+/// re-validated on commit) rather than staged: a fully enclosed entity that
+/// cannot be written fails the whole command, which is the `Move` arm's rule.
 fn moved_geometry(geometry: &SemanticGeometry, translation: Point3) -> CadResult<SemanticGeometry> {
-    match geometry {
-        SemanticGeometry::Spline {
-            degree,
-            knots,
-            control_points,
-            weights,
-        } => {
-            let expected_knots = control_points.len() + *degree as usize + 1;
-            let weights_indexable = weights.is_empty() || weights.len() == control_points.len();
-            let knots_indexable = knots.is_empty() || knots.len() == expected_knots;
-            if !weights_indexable || !knots_indexable {
-                return Err(CadError::Unsupported(
-                    "its stored definition is inconsistent (knot or weight count does not match \
-                     its control points)"
-                        .into(),
-                ));
-            }
-            Ok(SemanticGeometry::Spline {
-                degree: *degree,
-                knots: knots.clone(),
-                control_points: control_points
-                    .iter()
-                    .map(|point| Point3 {
-                        x: point.x + translation.x,
-                        y: point.y + translation.y,
-                        z: point.z + translation.z,
-                    })
-                    .collect(),
-                weights: weights.clone(),
-            })
-        }
-        other => transform_geometry(other, &Transform3::translation(translation)),
-    }
+    transform_geometry(geometry, &Transform3::translation(translation))
 }
 
 /// Build the per-vertex stretched geometry for a `LINE`, `POLYLINE`, `SPLINE` or

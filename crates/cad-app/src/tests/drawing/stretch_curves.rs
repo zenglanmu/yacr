@@ -9,7 +9,16 @@
 //!   inside the window by the drag delta, every other control point stays
 //!   bit-identical, and `degree`/`knots`/`weights` are copied verbatim, so the
 //!   committed entity still passes `cad_db::validate_geometry`. A fully enclosed
-//!   spline moves whole; a window with no control point inside writes nothing.
+//!   spline moves whole **through `cad_db::transform_geometry`** (the same call
+//!   MOVE makes — the app-side translation-only exception is gone); a window with
+//!   no control point inside writes nothing.
+//! * MOVE on a spline is now a real command: one transaction, one `ChangeSet`
+//!   whose update carries `ChangeMask::TRANSFORM`, one undo entry that restores
+//!   the stored definition bit-exactly.
+//! * AFFINE INVARIANCE: the anti-bug test samples the NURBS itself before and
+//!   after a **non-uniform** scale and checks every sample against the mapped
+//!   sample, so "mapped control points" is pinned as "mapped curve" instead of
+//!   being assumed.
 //! * ARC: a partial crossing window moves **only the in-window endpoints** onto
 //!   new in-plane angles while `center`/`radius`/`normal` stay bit-identical and
 //!   the sweep is recomputed in the stored direction; the three refusals
@@ -280,6 +289,205 @@ fn stretch_spline_fully_enclosed_moves_every_control_point_whole() {
             point(7.0, 2.0)
         ],
         "a fully enclosed spline is translated as a whole"
+    );
+
+    // …and it is exactly MOVE's result for the same displacement: one path
+    // (`cad_db::transform_geometry`), no app-side spline exception. If STRETCH
+    // kept a private control-point shift the two would still agree for a pure
+    // translation, so this also pins the definition vectors (degree/knots/weights
+    // are copies on both paths) and the stored validation.
+    let (mut moved_app, mut moved_session) = build(vec![ent(1, spline_geometry(), 0)]);
+    execute(
+        &mut moved_app,
+        &mut moved_session,
+        CommandId::MoveEntities,
+        CommandPayload::Move {
+            refs: vec![ref_of(1)],
+            delta: p3(1.0, 2.0, 0.0),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        geometry_of(&app, 1),
+        geometry_of(&moved_app, 1),
+        "a fully enclosed STRETCH and a MOVE must not disagree"
+    );
+    cad_db::validate_geometry(&geometry_of(&app, 1))
+        .expect("the wholly moved spline is a valid stored definition");
+}
+
+#[test]
+fn stretch_spline_fully_enclosed_with_an_unindexable_definition_refuses_the_command() {
+    // The app-side exception is gone, so an unindexable definition on the
+    // full-enclosure path is refused by `cad-db`'s validated write (the transform
+    // copies the counts, then `validate_geometry` refuses them) instead of by a
+    // private pre-check. It is still a refusal with nothing written — never a
+    // silent skip and never a fabricated repair.
+    let original = SemanticGeometry::Spline {
+        degree: 2,
+        knots: vec![0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0],
+        control_points: vec![
+            point(0.0, 0.0),
+            point(2.0, 0.0),
+            point(4.0, 0.0),
+            point(6.0, 0.0),
+        ],
+        weights: vec![1.0, 1.0, 1.0], // one weight short: not indexable
+    };
+    let (mut app, mut session) = build(vec![ent(1, original.clone(), 0)]);
+    let before = revision(&app);
+    let error = stretch(
+        &mut app,
+        &mut session,
+        window(point(-1.0, -1.0), point(7.0, 1.0)),
+        point(0.0, 0.0),
+        point(1.0, 2.0),
+    )
+    .expect_err("an unindexable spline cannot be written");
+    assert!(
+        error
+            .to_string()
+            .contains(cad_db::REASON_SPLINE_WEIGHT_COUNT),
+        "{error}"
+    );
+    assert_eq!(revision(&app), before);
+    assert_eq!(undo_depth(&app), 0);
+    assert_eq!(geometry_of(&app, 1), original, "nothing is written");
+}
+
+#[test]
+fn move_spline_succeeds_with_one_transform_change_and_a_bit_exact_undo() {
+    let original = spline_geometry();
+    let (mut app, mut session) = build(vec![ent(1, original.clone(), 0)]);
+    let before = revision(&app);
+
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::MoveEntities,
+        CommandPayload::Move {
+            refs: vec![ref_of(1)],
+            delta: p3(1.5, -2.5, 0.0),
+        },
+    )
+    .expect("MOVE now transforms a spline");
+
+    // Geometry: every control point translated, the definition copied verbatim.
+    let (degree, knots, control_points, weights) = spline_of(&app, 1);
+    assert_eq!(degree, 2);
+    assert_eq!(knots, vec![0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0]);
+    assert_eq!(weights, vec![1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(
+        control_points,
+        vec![
+            point(1.5, -2.5),
+            point(3.5, -2.5),
+            point(5.5, -2.5),
+            point(7.5, -2.5)
+        ]
+    );
+    cad_db::validate_geometry(&geometry_of(&app, 1))
+        .expect("the moved spline is a valid stored definition");
+
+    // Transactions: one committed ChangeSet, one update, carrying TRANSFORM.
+    let changes = outcome.changes.as_ref().expect("one committed transaction");
+    assert_eq!(
+        changes.changes,
+        vec![cad_db::ObjectChange::Update(
+            ObjectId(1),
+            cad_db::ChangeMask::GEOMETRY.union(cad_db::ChangeMask::TRANSFORM)
+        )],
+        "MOVE is a transform change of exactly one entity"
+    );
+    assert_eq!(revision(&app).0, before.0 + 1, "one transaction");
+    assert_eq!(undo_depth(&app), 1, "one undo entry");
+
+    // Undo restores the whole stored definition bit-exactly.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(geometry_of(&app, 1), original);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+/// The anti-bug test for the affine-invariance claim: sample the **curve**, not
+/// the control polygon. A NURBS is affinely invariant — the affine image of the
+/// curve through the mapped control points with unchanged `degree`/`knots`/
+/// `weights` — so every sampled parameter must land on the mapped sample. This
+/// distinguishes "mapped control points" from "mapped curve": a reparameterisation,
+/// a weight change, or a refit would leave the control points mapped (bit for bit)
+/// while moving the sampled points.
+#[test]
+fn a_non_uniform_scale_maps_the_sampled_spline_curve_point_for_point() {
+    // Explicit knots and non-unit weights, so the rational (not just polynomial)
+    // form is covered: weight changes would show up as curve drift.
+    let original = SemanticGeometry::Spline {
+        degree: 2,
+        knots: vec![0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0],
+        control_points: vec![
+            point(0.0, 0.0),
+            point(2.0, 4.0),
+            point(4.0, 0.0),
+            point(6.0, 4.0),
+        ],
+        weights: vec![1.0, 0.5, 2.0, 1.0],
+    };
+    // Non-uniform scale + shear: no similarity check would allow this, and a
+    // circle/arc/ellipse under it is refused — a spline must not be.
+    let mut matrix = Transform3::identity().matrix;
+    matrix[0][0] = 3.0;
+    matrix[1][1] = 0.5;
+    matrix[0][1] = 2.0;
+    let transform = Transform3 { matrix };
+    let moved = cad_db::transform_geometry(&original, &transform).expect("spline scales");
+
+    let curve_of = |geometry: &SemanticGeometry| {
+        let SemanticGeometry::Spline {
+            degree,
+            knots,
+            control_points,
+            weights,
+        } = geometry
+        else {
+            panic!("expected a spline, got {geometry:?}");
+        };
+        cad_geometry::NurbsCurve::new(
+            *degree as usize,
+            control_points.clone(),
+            knots.clone(),
+            weights.clone(),
+        )
+        .expect("a valid NURBS definition")
+    };
+    let before_curve = curve_of(&original);
+    let after_curve = curve_of(&moved);
+    let (t_min, t_max) = before_curve.domain();
+    assert_eq!(before_curve.domain(), after_curve.domain(), "same knots");
+
+    let mut worst: f64 = 0.0;
+    let samples = 21;
+    for index in 0..samples {
+        let t = t_min + (t_max - t_min) * (index as f64) / ((samples - 1) as f64);
+        let sampled = before_curve.evaluate(t);
+        let expected = transform.apply_point(sampled);
+        let actual = after_curve.evaluate(t);
+        let error = (actual.x - expected.x)
+            .abs()
+            .max((actual.y - expected.y).abs())
+            .max((actual.z - expected.z).abs());
+        worst = worst.max(error);
+        assert!(
+            error < 1e-12,
+            "t = {t}: curve sample {actual:?} != mapped sample {expected:?} (error {error:e})"
+        );
+    }
+    assert!(
+        worst < 1e-12,
+        "every sampled point matches; worst deviation {worst:e}"
     );
 }
 
