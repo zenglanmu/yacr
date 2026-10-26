@@ -303,6 +303,7 @@ mod reports;
 mod selection_reconcile;
 mod spline;
 mod stretch;
+mod stretch_curves;
 mod text;
 mod text_edit;
 mod transform;

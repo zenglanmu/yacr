@@ -527,8 +527,13 @@ fn stretch_fully_enclosed_insert_is_moved_and_partially_enclosed_insert_is_uncha
     );
 }
 
+/// A fully enclosed ARC is still translated as a whole. The **partial** case is
+/// no longer "unchanged": since ADR 0016 decision E's per-vertex refinement an arc
+/// stretches per endpoint under the declared rule, pinned in
+/// `tests/drawing/stretch_curves.rs` (`stretch_arc_moves_only_the_in_window_*`,
+/// the three refusals, and the clockwise case).
 #[test]
-fn stretch_fully_enclosed_arc_is_moved_and_partially_enclosed_arc_is_unchanged() {
+fn stretch_fully_enclosed_arc_is_moved_whole() {
     let arc = || SemanticGeometry::Arc {
         center: point(5.0, 5.0),
         normal: p3(0.0, 0.0, 1.0),
@@ -548,26 +553,14 @@ fn stretch_fully_enclosed_arc_is_moved_and_partially_enclosed_arc_is_unchanged()
     let (center, radius) = arc_of(&app, 1);
     assert!(near(center, point(7.0, 8.0)), "{center:?}");
     assert!((radius - 3.0).abs() < 1e-9);
-
-    let (mut app2, mut session2) = build(vec![ent(1, arc(), 0)], Vec::new());
-    let before = revision(&app2);
-    let outcome = stretch(
-        &mut app2,
-        &mut session2,
-        window(point(0.0, 0.0), point(6.0, 6.0)),
-        point(0.0, 0.0),
-        point(1.0, 1.0),
-    )
-    .unwrap();
-    assert!(outcome.changes.is_none());
-    assert_eq!(revision(&app2), before);
-    let (center, _) = arc_of(&app2, 1);
-    assert!(near(center, point(5.0, 5.0)), "{center:?}");
-    assert!(
-        has_code(&outcome, "drawing.stretch.not_stretchable"),
-        "{:?}",
-        outcome.diagnostics
-    );
+    // The move is a translation: the stored angles are copied, never recomputed.
+    match geometry_of(&app, 1) {
+        SemanticGeometry::Arc { start, sweep, .. } => {
+            assert_eq!(start, 0.0);
+            assert_eq!(sweep, std::f64::consts::PI);
+        }
+        other => panic!("expected an arc, got {other:?}"),
+    }
 }
 
 #[test]

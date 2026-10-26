@@ -1,3 +1,119 @@
+## 2026-10-26 `STRETCH` 曲线种类：`SPLINE` 控制点与 `ARC` 端点（逐顶点，含三种具名拒绝）
+
+### 结论
+
+`STRETCH` 此前把 `SPLINE`/`ARC` 放在「部分包围**不动** + 诊断、完全包围整移」的 move-only 清单里
+（`docs/compatibility.md` 的 `SPLINE`/`ARC` 拉伸缺口）。本轮把两者改成**真正的逐顶点**：只动
+`cad-app`（`app_drawing/stretch.rs` + 测试）与 `docs/compatibility.md`、本文件；
+`cad-host` / `crates/cad-domain` / `crates/cad-db` / `apps/**` / i18n / 命令表 / IPC **未改**
+（无新命令、无新 payload 字段、无新 wire 字段；宿主与 UI 无按几何种类的分支）。缺口清单里
+**移出 `SPLINE`/`ARC`**，仍留 `HATCH`/`INSERT`（move-only 未变）。
+
+### 每类的逐顶点来源与规则
+
+| 种类 | 「顶点」是什么 | 部分包围时怎么动 |
+|---|---|---|
+| `LINE` | 两端点 | 只移窗内端点（**未变**） |
+| `POLYLINE`/`LWPOLYLINE` | 每个存储顶点 | 只移窗内顶点，`bulges` 原样复制（**未变**，bulge 语义仍 `UNVERIFIED`） |
+| `SPLINE` | 每个存储**控制点** `control_points[i]` | 窗内控制点各平移 delta；窗外控制点逐位不变；`degree`/`knots`/`weights` **逐字复制** |
+| `ARC` | 存储**起点**（`start`）与**终点**（`start+sweep`）两点 | 窗内端点按「平移后位置相对圆心的平面内方向」改角；`center`/`radius`/`normal` 逐位不变；窗外端点保持原角；`sweep` 按**存储方向**重算 |
+| `CIRCLE`/`ELLIPSE`/`INSERT` | — | 仍 move-only：部分包围**不动** + `drawing.stretch.not_stretchable`（**未变**） |
+
+**SPLINE / NURBS 声明**：控制点**不是曲线点**（只有 clamped 样条的首/末控制点落在曲线上；内部控制点
+一般不在）。单个控制点的支撑域是 `degree+1` 个节点区间，所以**部分**拉伸会**整体**重塑曲线，而不是
+「移动曲线的一段」——这是 NURBS 控制点编辑的固有性质，**不是缺陷**（与控制点夹点拖拽同一性质：结果是
+参数化相同的另一个 NURBS，曲线不再经过它原先经过的点）。本轮**不做**任何 NURBS 求值/重拟合，只平移
+控制点 + 复制定义向量，因此 `knots.len() == control_points.len() + degree + 1`、
+`weights.len() == control_points.len()`、节点非降序这三条 `cad-db` 不变量按构造成立；契约测试额外用
+`cad_db::validate_geometry` 对**提交后**的实体断言一次。
+
+**ARC / 我们的选择（不是 AutoCAD 断言）**：规则刻意与**弧端点夹点**同一条——弧留在**同一个圆**上，
+被拖端点的新角度 = 目标在弧自身平面内的方向，另一端保持原角，`sweep` 按存储方向（`sweep<0` 仍顺时针）
+从 start 到 end 重算；位移的**平面外分量被丢弃**（弧端点不能离开自身平面）。角度帧用
+`cad_geometry::arbitrary_axis`（tessellator / 表示层 / 夹点同一帧），点就是
+`centre + radius·(cos θ·ax + sin θ·ay)` 的逐项表达式。窗内两个端点都在时，两条端点规则各作用一次。
+**为什么不用「只允许一个端点在窗内」的更强规则**：两个端点都在窗内而弧仍被判为 partial（保守包围盒
+未被包含 ⇒ 弧身鼓出窗外）时，一次只动一个端点会需要一条**无依据的次序**规则；逐端点同时施加是唯一
+对称、可写进文档、且与夹点一致的定义。
+
+### 诊断（稳定英文码，绝无静默丢弃）
+
+| 情形 | code | 写入 |
+|---|---|---|
+| 窗内没有控制点/端点（窗只切到曲线） | `drawing.stretch.no_vertex` | **不写** |
+| 重算张角 ~0 或 ~2π（阈值 `1e-9`，与 tessellator / 弧夹点同一 slack） | `drawing.stretch.arc_degenerate_sweep` | **不写**，该实体逐位不变 |
+| 被拖端点无平面内方向（落在圆心或圆心法线上） | `drawing.stretch.arc_no_direction` | **不写** |
+| 规则使两个存储角都不变（位移在弧平面内无切向分量，如纯径向/纯平面外） | `drawing.stretch.arc_unchanged` | **不写** |
+| 样条定义本身不可索引（knot/weight 数量不符；导入路径可以产生） | `drawing.stretch.spline_inconsistent` | **不写**（部分包围）；完全包围整移 → **整命令拒绝**，因为写不了 |
+| move-only 种类（圆/椭圆/块） | `drawing.stretch.not_stretchable` | **不写**（**未变**） |
+
+三条 ARC 拒绝与 `spline_inconsistent` 都是**按实体**的：该实体不动 + 具名诊断，窗口里其它实体照常提交
+（与既有 `dimension`/`hatch`/`not_stretchable` 同一粒度）；窗口内**任何**实体都没变时不写事务、不记历史，
+只追加 `drawing.stretch`「nothing changed in the window」。`TEXT`/`MULTILEADER` 仍**整命令拒绝**（未变）。
+
+### 完全包围仍整移（含 SPLINE 的一个已声明特例）
+
+* 完全包围的分类口径**未变**：`LINE`/无 bulge 折线按逐顶点包含；`CIRCLE`/`ELLIPSE`/`INSERT`/`ARC`/
+  含 bulge 折线与 SPLINE 走**保守包围盒**（`union_bounds` + `Rect::contains_aabb`）。
+* 整移对所有种类都走 `cad-db` 的 `transform_geometry`（与 MOVE 同一个调用），**唯一例外是 `SPLINE`**：
+  `cad-db` 明确拒绝烘焙样条（`transform of Spline entities is not supported`，有意为之，不在本轮范围）。
+  纯平移的 NURBS 就是控制点平移，因此 `moved_geometry` 只对**这一段**就地平移控制点、把
+  `degree`/`knots`/`weights` 逐位复制，**绝不**产生旋转/缩放/镜像；`cad-db` 的通用拒绝**未改**。
+  于是「完全包围的样条整移」这句 `compatibility.md` 的老描述**现在才真正成立**（旧实现走到
+  `transform_geometry` 会整命令 `Unsupported` 失败）。
+
+### 事务 / 撤销形状（未变）
+
+整个窗口一次事务、每个变更实体一次 `update_entity`、一条 undo 记录；undo patch 的 `after` 是从提交后
+**读回**的存储值，不是重算值。什么都没动时**不写事务、不记历史**。
+
+### 测试
+
+新增 `crates/cad-app/src/tests/drawing/stretch_curves.rs`（已注册，**13 个用例**，682 行）：
+
+* SPLINE：部分包围时**逐个**控制点断言（窗内 = 存储值 + delta 精确相等；窗外 = 存储值逐位相等），
+  `degree`/`knots`/`weights` 逐位相等，提交后 `cad_db::validate_geometry` 通过，一个 revision / 一步撤销，
+  且 undo 后整条定义**逐位**还原；完全包围 ⇒ 四个控制点全移；窗内无控制点 ⇒ 不写 + `no_vertex`；
+  weights 数量不符的夹具 ⇒ `spline_inconsistent` 且逐位不变；**命令级**：`SPLINE` + `LINE` 同窗 ⇒
+  两个 `update_entity`、一个 revision、一步撤销、undo 同时还原两者。
+* ARC（`+Z`、中心 `(5,5)`、半径 3、`start=0`）：起点在窗内 ⇒ `start == atan2(1,4)`、`sweep == π/2 −
+  atan2(1,4)`、中心/法向/半径逐位不变；终点在窗内 ⇒ `start` 逐位 `0.0`、`sweep == atan2(4,1)`；
+  顺时针弧（`sweep = -π/2`）⇒ 重算后 `sweep < 0` 且等于 `atan2(-2,1)`（方向不翻转）；窗只切到弧身 ⇒
+  `no_vertex`；起点拖到终点 ⇒ `arc_degenerate_sweep`（不入库）；起点拖到圆心 ⇒ `arc_no_direction`；
+  纯径向拖动 ⇒ `arc_unchanged`。每个拒绝都断言 revision 不变、undo 深度 0、几何逐位不变。
+* 回归：`LINE` 只动窗内端点、含 bulge 折线只动窗内顶点且 bulge 保留、`CIRCLE` 部分包围仍
+  `not_stretchable` 且不写。
+
+`tests/drawing/stretch.rs` 里旧的 `stretch_fully_enclosed_arc_is_moved_and_partially_enclosed_arc_is_unchanged`
+被改名为 `stretch_fully_enclosed_arc_is_moved_whole`（只留整移断言，并新增「整移是平移 ⇒ `start`/`sweep`
+逐位不变」；部分包围的旧断言已被新规则取代，指向新文件），该文件仍未过 1000 行门禁。
+
+### 实际运行（本机，2026-10-26）
+
+* `cargo test -p cad-app --lib --locked` → **1159 passed, 0 failed**（新增 13 个用例）；
+* `cargo clippy -p cad-app --all-targets --locked -- -D warnings` → 通过；
+* `cargo fmt --all -- --check` → 通过；
+* `python3 scripts/check-file-size.py` → OK（1002 个代码文件，上限 1000；`app_drawing/stretch.rs` 935、
+  `tests/drawing/stretch_curves.rs` 682、`tests/drawing/stretch.rs` 704 行）。
+
+**NOT RUN（本轮未运行，不得当作通过）**：全 workspace 全量门禁/全量测试、平台编译矩阵
+（wasm/Windows/Android）、任何 GUI/像素/真窗口/真实鼠标证据（含「曲线拉伸后的显示」）、
+`cad-host`/`cad-ui-core` 层、Windows/Wine、真机 AutoCAD 行为对照。本轮证据上限 =
+`cad-app` 合成契约 + 上述门禁。
+
+### 仍然存在的缺口
+
+* **ARC 规则不是 vendor 断言**：AutoCAD 的弧 STRETCH 行为未查证；本轮只声明并钉住**我们**的端点规则
+  （与弧端点夹点一致）。两个端点都在窗内时逐端点各作用一次，结果一般**不是**平移（弧会被重新张角）——
+  这是已声明的选择，不是像素/几何等价结论。
+* **SPLINE 部分拉伸会整体重塑曲线**（NURBS 固有），因此「拉伸一小段而不动其余」不可能实现，也没有
+  拟合/重参数化路径（`degree`/`knots`/`weights` 一律不改）。
+* `HATCH`/`INSERT` 的**拉伸**、cpolygon/lasso 窗口、单独选取即整移、3D STRETCH：仍**不存在**（本轮未动）。
+* `cad-db` 对样条的 `transform_geometry` 拒绝仍在（这是它的决定）；只有 `STRETCH` 的**纯平移**在
+  `cad-app` 侧给出了等价实现，MOVE/其它命令的样条平移**仍未支持**——两者不一致是已知债务，
+  本轮**不**修（要修得动 `cad-db`）。
+* 曲线拉伸的运行时/像素与宿主证据：**NOT RUN**。
+
 ## 2026-10-26 DIMENSION 定义点夹点（重合成显示，非法即按名拒绝）
 
 ### 结论
