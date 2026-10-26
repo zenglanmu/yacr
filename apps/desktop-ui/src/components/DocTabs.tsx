@@ -8,8 +8,8 @@ import React from 'react';
 import { Icon } from '../icons.tsx';
 import { IconButton } from './primitives.tsx';
 import { useI18n, useShell } from '../context.ts';
-import { importProgressView } from '../cad/cad.ts';
-import type { CadImportProgress } from '../cad/cad.ts';
+import { importProgressView } from '../cad/cad-status.ts';
+import type { CadImportProgress } from '../cad/cad-status.ts';
 import { ONE_DOCUMENT_KEY } from '../limits.ts';
 
 export function DocTabs() {

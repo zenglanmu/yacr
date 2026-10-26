@@ -23,7 +23,7 @@ import {
   stepToolParameterPending,
   toolParameterViews,
   typeToolParameterDraft,
-} from '../src/cad/cad.ts';
+} from '../src/tools/tool-parameters.ts';
 import { readAppSource, readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');

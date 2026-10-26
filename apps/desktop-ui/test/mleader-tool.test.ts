@@ -21,15 +21,9 @@ import {
   textEscapeAction,
   toolTextPrefill,
 } from '../src/tools/text.ts';
-import {
-  TOOL_PARAMETER_SPECS,
-  TOOL_PARAMETERS,
-  TOOL_READY_PROMPTS,
-  TOOL_STEP_PROMPTS,
-  parseCadStatus,
-  toolParameterViews,
-  toolStepPromptKey,
-} from '../src/cad/cad.ts';
+import { TOOL_PARAMETER_SPECS, TOOL_PARAMETERS, toolParameterViews } from '../src/tools/tool-parameters.ts';
+import { TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad/cad.ts';
+import { parseCadStatus } from '../src/cad/cad-status.ts';
 import {
   CAPABILITY_GATES,
   COMMAND_CATALOG,

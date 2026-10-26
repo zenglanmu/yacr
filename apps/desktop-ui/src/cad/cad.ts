@@ -3,19 +3,6 @@ import { TEXT_PICK_PROMPT_KEY, TEXT_STEP_PROMPT_KEY, textStepPromptKey, toolAwai
 import { OPEN_ENDED_PROMPTS } from '../tools/tool-open-ended.ts';
 import type { CadStatus, CadTool } from './cad-status.ts';
 
-export { propertyGroupLabel, propertyRowLabel } from '../properties/property-labels.ts';
-export { parseSelection } from './selection-wire.ts';
-// The status validator and the import-progress/cancel affordances live in
-// `cad-status.ts`, and the command funnel in `cad-command.ts` (this file is at
-// the size ceiling); re-exporting keeps the chrome's import surface stable.
-export { importProgressView, parseCadStatus, requestImportCancel } from './cad-status.ts';
-export { commandEnabled, handleCommandKey, queueCadCommand, startCadPolling } from './cad-command.ts';
-export type { CadCommandResult, CommandKeyEvent, PollClock } from './cad-command.ts';
-export type {
-  CadCamera, CadCommandLogEntry, CadImportProgress, CadMeasurementEcho, CadPopup, CadSelection,
-  CadSelectionRow, CadSelectionRowKind, CadStatus, CadTool, CadToolParams, ImportCancelResult,
-  ImportProgressView, Invoke, WorldPoint,
-} from './cad-status.ts';
 
 /** A status-flag chip: whether it is on, and whether its command is admitted. */
 export interface StatusToggleView {
@@ -194,24 +181,6 @@ export function draftingAcceleratorCommand(key: unknown): string | null {
   return DRAFTING_ACCELERATORS[key] ?? null;
 }
 
-// The active tool's typed parameters live in `tool-parameters.ts` (this file is at
-// the size ceiling): the control spec table, the views, the bounded pending delta,
-// the typed-entry draft model and the one IPC. Re-exporting keeps the chrome's
-// import surface stable, exactly like the `cad-status.ts` / `cad-command.ts`
-// split above.
-export {
-  NO_TOOL_PARAMETER_DRAFT, TOOL_PARAMETER_COMMAND, TOOL_PARAMETER_INVALID_KEY,
-  TOOL_PARAMETER_PENDING_CAP, TOOL_PARAMETER_SPECS, TOOL_PARAMETERS,
-  cancelToolParameterDraft, commitToolParameterDraft, reconcileToolParameterPending,
-  setToolParameterFlag, setToolParameterNumber, stepToolParameterDraft, stepToolParameterPending,
-  toolParameterViews, typeToolParameterDraft,
-} from '../tools/tool-parameters.ts';
-export type {
-  FlagToolParameterSpec, NumberToolParameterSpec, ToolParameterDraft, ToolParameterDraftCommit,
-  ToolParameterFlagView, ToolParameterMap, ToolParameterNumberView, ToolParameterOwner,
-  ToolParameterPending, ToolParameterResult, ToolParameterSpec, ToolParameterSpecMap,
-  ToolParameterView,
-} from '../tools/tool-parameters.ts';
 
 
 /**
@@ -385,10 +354,6 @@ export const PRESELECT_PROMPTS: Readonly<Record<string, PreselectPrompt>> = Obje
     ready: 'tool.prompt.hatch.ready',
   }),
 });
-
-// Every prompt table stays reachable from this module; the open-ended one lives
-// in `tool-open-ended.ts` because this file is at the size ceiling.
-export { OPEN_ENDED_PROMPTS };
 
 /** The shared ready prompt for a capture that produced a dimension entity. */
 const DEFAULT_READY_PROMPT: string = 'tool.prompt.dim.ready';

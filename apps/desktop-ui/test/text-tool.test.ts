@@ -31,7 +31,9 @@ import {
   TOOL_TEXT_MAX_LENGTH,
   toolAwaitingText,
 } from '../src/tools/text.ts';
-import { handleCommandKey, parseCadStatus, TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad/cad.ts';
+import { handleCommandKey } from '../src/cad/cad-command.ts';
+import { parseCadStatus } from '../src/cad/cad-status.ts';
+import { TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad/cad.ts';
 import { COMMAND_CATALOG, filterCommandSuggestions, isSupportedCommand, setCommandCatalog, toolLabelKey } from '../src/commands/commands.ts';
 import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon/ribbon-model.ts';
 import { readAppSource, readCatalog, readModule } from './helpers.ts';

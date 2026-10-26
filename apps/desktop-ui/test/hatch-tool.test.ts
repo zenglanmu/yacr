@@ -19,17 +19,8 @@
 // user-visible string comes from the shared catalogs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  PRESELECT_PROMPTS,
-  setToolParameterFlag,
-  setToolParameterNumber,
-  TOOL_PARAMETER_SPECS,
-  TOOL_PARAMETERS,
-  TOOL_READY_PROMPTS,
-  TOOL_STEP_PROMPTS,
-  toolParameterViews,
-  toolStepPromptKey,
-} from '../src/cad/cad.ts';
+import { PRESELECT_PROMPTS, TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad/cad.ts';
+import { setToolParameterFlag, setToolParameterNumber, TOOL_PARAMETER_SPECS, TOOL_PARAMETERS, toolParameterViews } from '../src/tools/tool-parameters.ts';
 import {
   admitCommandText,
   CAPABILITY_GATES,

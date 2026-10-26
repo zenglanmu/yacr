@@ -8209,3 +8209,31 @@ host/wasm/clippy + 4 static / diff **均 0**；`fmt` 仅既有陌生未跟踪 `d
 - **NOT RUN**：全 workspace / 平台编译测试矩阵、真实宿主运行、运行时 DOM 挂载、截图、
   像素 / GPU / 性能验证。源码契约通过不是运行时 DOM 或视觉证据；最终 diff 审查由主协调者负责。
   本 lane 未暂存、未提交。
+
+## 2026-10-26：移除 cad.ts 转导出门面（有界整理）
+
+- 开始时工作树干净，基线 `13e7fcd`。不再移动或重命名文件；移除
+  `apps/desktop-ui/src/cad/cad.ts` 对其他模块的值 / 类型转导出，并将源码与测试消费方
+  改为直接导入符号所属模块。类型导入与显式 `.ts` 扩展名保持不变。
+- 直接归属：状态解析、导入进度 / 取消及状态类型 → `cad/cad-status.ts`；
+  命令漏斗、键处理、轮询及命令结果类型 → `cad/cad-command.ts`；选择解析 →
+  `cad/selection-wire.ts`；属性标签 → `properties/property-labels.ts`；工具参数常量、
+  操作、视图与类型 → `tools/tool-parameters.ts`；开放步骤提示表 →
+  `tools/tool-open-ended.ts`。后者仍由 `cad.ts` 直接导入供本地提示计算使用，
+  不再通过本地 `export { OPEN_ENDED_PROMPTS }` 中转。
+- `cad.ts` 本地绘图辅助开关、快捷键映射、工具步骤 / 就绪 / 预选提示及捕捉标签逻辑不变；
+  MLEADER 提示保留原处，basename 契约仍通过。无函数体、样式、UI 文案、依赖、线缆契约或
+  既有断言改动。非导入 / 导出改动仅删除过时转导出注释、修正上下文注释的状态类型所属路径、
+  更新 README 职责说明，并新增源码结构回归测试。
+- 新增 `test/cad-module-boundary.test.ts` 禁止 `cad/cad.ts` 再次出现值、类型或星号的
+  `export ... from`。这只是源码结构约束，不是运行时 DOM 挂载或像素验证。
+- 本轮实际验证：`npm test` **615/615 PASS，0 skipped**（原 614 项 + 1 条结构回归，含
+  `tsc --noEmit`）；`npm run build` **PASS**（81 modules）；
+  `python3 scripts/check-i18n.py` **PASS**（802 keys / 2 catalogs）；
+  `check-file-size.py --root apps/desktop-ui/src` **PASS**（63 files）与
+  `--root apps/desktop-ui/test` **PASS**（49 files），上限均为 1000 行；
+  `git diff --check` **PASS**。测试日志本地保存在
+  `/tmp/opencode/frontend-direct-imports-test.log`。
+- **NOT RUN**：运行时 DOM / 视觉 / GPU / 性能、平台矩阵、全 workspace 测试与编译，
+  根目录索引式全量 file-size 门禁。未发现遗漏的转导出消费方；最终 diff 验证由主协调者负责。
+  本 lane 未暂存、未提交、未推送。

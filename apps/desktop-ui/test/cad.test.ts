@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { commandEnabled, handleCommandKey, importProgressView, parseCadStatus, queueCadCommand, requestImportCancel, startCadPolling } from '../src/cad/cad.ts';
+import { commandEnabled, handleCommandKey, queueCadCommand, startCadPolling } from '../src/cad/cad-command.ts';
+import { importProgressView, parseCadStatus, requestImportCancel } from '../src/cad/cad-status.ts';
 import { setCommandCatalog } from '../src/commands/commands.ts';
 import { readAppSource, readComponentsSource } from './helpers.ts';
 

@@ -11,7 +11,7 @@ import type { Locale, Translator } from './i18n.ts';
  * `cad.mjs` owns the authoritative shapes and validates them; re-declaring forty
  * host fields here would be a second declaration site that drifts. The regions
  * therefore read these blocks structurally, and this alias is the one documented
- * boundary — it becomes `import type { Status } from './cad/cad.ts'` once that module
+ * boundary — it becomes `import type { CadStatus } from './cad/cad-status.ts'` once that module
  * exports its typed status.
  */
 export type ShellRecord = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- cad.mjs owns the shape

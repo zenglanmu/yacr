@@ -6,12 +6,15 @@ import { Icon } from '../icons.tsx';
 import { Button, Toggle } from './primitives.tsx';
 import { ParameterFlag, ParameterStepper } from './ParameterControls.tsx';
 import { useI18n, useShell } from '../context.ts';
-import type { CadImportProgress, ToolParameterPending } from '../cad/cad.ts';
+import type { CadImportProgress } from '../cad/cad-status.ts';
+import type { ToolParameterPending } from '../tools/tool-parameters.ts';
 import { toolLabelKey } from '../commands/commands.ts';
 import { palettesOffered } from '../cad/surface.ts';
 import { OPTIONS_KEYS } from '../options/options.ts';
 import { formatWorldCursor } from '../cad/coords.ts';
-import { dispatchGrid, dispatchGridSnap, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, gridSnapToggle, gridToggle, hoverPreviewToggle, importProgressView, objectSnapToggle, orthoToggle, snapKindLabelKey, toolParameterViews, toolStepPromptKey } from '../cad/cad.ts';
+import { dispatchGrid, dispatchGridSnap, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, gridSnapToggle, gridToggle, hoverPreviewToggle, objectSnapToggle, orthoToggle, snapKindLabelKey, toolStepPromptKey } from '../cad/cad.ts';
+import { importProgressView } from '../cad/cad-status.ts';
+import { toolParameterViews } from '../tools/tool-parameters.ts';
 
 // The drafting aids this build has: GRID (display grid, F7), SNAP (grid snap,
 // F9), OSNAP (object snap, F3) and ORTHO (orthographic constraint, F8). Each is a

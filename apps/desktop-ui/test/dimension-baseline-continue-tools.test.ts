@@ -10,12 +10,8 @@
 // comes from the shared catalogs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  OPEN_ENDED_PROMPTS,
-  TOOL_READY_PROMPTS,
-  TOOL_STEP_PROMPTS,
-  toolStepPromptKey,
-} from '../src/cad/cad.ts';
+import { OPEN_ENDED_PROMPTS } from '../src/tools/tool-open-ended.ts';
+import { TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad/cad.ts';
 import {
   admitCommandText,
   COMMAND_CATALOG,

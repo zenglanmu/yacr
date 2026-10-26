@@ -8,7 +8,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { parseSelection, propertyGroupLabel, propertyRowLabel, queueCadCommand } from '../src/cad/cad.ts';
+import { parseSelection } from '../src/cad/selection-wire.ts';
+import { propertyGroupLabel, propertyRowLabel } from '../src/properties/property-labels.ts';
+import { queueCadCommand } from '../src/cad/cad-command.ts';
 import { admitCommandText, isSupportedCommand } from '../src/commands/commands.ts';
 import { createTranslator } from '../src/i18n.ts';
 import { isPropertiesCommand } from '../src/properties/properties.ts';

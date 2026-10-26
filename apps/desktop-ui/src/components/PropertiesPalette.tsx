@@ -28,7 +28,7 @@ import type { ComposingKeyEvent } from './key-events.ts';
 import type { Translator } from '../i18n.ts';
 import { propertiesView } from '../properties/properties-view.ts';
 import type { PropertyRowView } from '../properties/properties-view.ts';
-import type { CadSelectionRow } from '../cad/cad.ts';
+import type { CadSelectionRow } from '../cad/cad-status.ts';
 import {
   PROPERTY_ERRORS,
   propertyCommit,

@@ -13,7 +13,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../icons.tsx';
 import { Button, IconButton } from './primitives.tsx';
 import { useI18n, useShell } from '../context.ts';
-import { handleCommandKey } from '../cad/cad.ts';
+import { handleCommandKey } from '../cad/cad-command.ts';
 import { commandLogView } from '../commands/command-log.ts';
 import { defaultSuggestionIndex, filterCommandSuggestions, historyText, splitCommandText, stepHistoryCursor, unavailableReasonKey } from '../commands/commands.ts';
 import type { CommandAlias, CommandSuggestion } from '../commands/commands.ts';
