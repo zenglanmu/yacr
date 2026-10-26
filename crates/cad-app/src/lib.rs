@@ -457,6 +457,15 @@ pub enum CommandPayload {
     /// `SNAPUNIT <value>` line). Must be finite and strictly positive; the
     /// session setter validates it and refuses anything else explicitly.
     SnapSpacing(f64),
+    /// The raw `$PDMODE` value for [`CommandId::SetPointDisplayMode`] (the typed
+    /// `PDMODE <n>` line), stored verbatim in the drawing header. The display
+    /// layer interprets the base glyph and the `32`/`64`/`96` shape bits.
+    PointDisplayMode(i16),
+    /// The raw `$PDSIZE` value for [`CommandId::SetPointDisplaySize`] (the typed
+    /// `PDSIZE <n>` line), stored verbatim. Must be finite; the sign and the
+    /// magnitude are the display layer's contract (`> 0` absolute drawing units,
+    /// `0` viewport-relative, `< 0` a percentage of the viewport height).
+    PointDisplaySize(f64),
     /// Replace the current selection with these refs (read-only; never writes
     /// the DWG). An empty list clears the selection.
     Selection(Vec<SelectionRef>),

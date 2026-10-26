@@ -64,6 +64,14 @@ impl Application {
             | CommandId::RenameLayer
             | CommandId::DeleteLayer
             | CommandId::SetLayerProperty => self.layer_command(session, &command),
+            // The two drawing-header POINT display style writes (`PDMODE <n>` /
+            // `PDSIZE <n>`): real database writes in one revision bump each (the
+            // display refresh signal), never undoable because `cad-history` has
+            // no header patch kind, and no entity change — so they also stay out
+            // of the entity-edit funnel.
+            CommandId::SetPointDisplayMode | CommandId::SetPointDisplaySize => {
+                self.point_display_command(&command)
+            }
             CommandId::SwitchSpace => {
                 if let CommandPayload::Space(space) = command.payload {
                     // Validate against the *current* drawing before recording the

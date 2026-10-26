@@ -57,10 +57,12 @@ test('the local grammar mirrors the host: a positive decimal, ALL or EXTENTS', (
   for (const refused of ['0', '0.0', '-1', '+2', 'abc', '2 3', '.5', '2.', '1e3', 'NaN', '']) {
     assert.equal(parse(refused), false, refused);
   }
-  // The table is explicit: `ZOOM` and `SNAPUNIT` are the argument-taking
-  // selectors, and each has its own grammar (`SNAPUNIT` is a positive decimal
-  // spacing only — `ALL`/`EXTENTS` mean nothing there).
-  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT']);
+  // The table is explicit: `ZOOM`, `SNAPUNIT` and the two POINT display sysvars
+  // are the argument-taking selectors, and each has its own grammar (`SNAPUNIT`
+  // is a positive decimal spacing only — `ALL`/`EXTENTS` mean nothing there; the
+  // sysvars take one plain decimal, zero/negative included, and are covered in
+  // `point-display-sysvar.test.ts`).
+  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE']);
   const snapUnit = ARGUMENT_COMMANDS.SNAPUNIT.parse;
   for (const admitted of ['25', '0.5', '2.5', '10.0']) {
     assert.equal(snapUnit(admitted), true, admitted);

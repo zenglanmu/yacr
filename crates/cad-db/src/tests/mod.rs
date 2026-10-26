@@ -11,6 +11,7 @@ mod layer_inherit;
 mod layers;
 mod locked_layers;
 mod plot;
+mod point_style;
 mod scale;
 mod spline_transform;
 mod spline_validation;

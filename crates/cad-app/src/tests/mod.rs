@@ -136,4 +136,5 @@ mod layers;
 mod layers_isolate;
 mod layers_off;
 mod locked_layers;
+mod point_display_style;
 mod view_camera;

@@ -177,8 +177,10 @@ AutoCAD 用提示行输入数字；本项目没有数值输入通道，且命令
     同尺寸的** `+`（一条 `overlay.point-mode-dot` 诊断，`Partial`，**不声称**是点；刻意不缩小，因为
     DWG 缺省 `PDMODE=0`，缩小会静默改变所有未设样式图纸的点外观）；无法表达的模式按名
     `overlay.point-mode-unsupported` 拒绝、**不发明**几何；非有限/超限 `PDSIZE` 回退到 `0` 行为并
-    发一条 `overlay.point-size-sanitized`。3D 仍不画（显式限制，与样式无关）。无 `SETVAR`，样式只在
-    导入时到达；`SemanticGeometry::Point` **未改**（DXF 组 50 轴向角仍不建模）。
+    发一条 `overlay.point-size-sanitized`。3D 仍不画（显式限制，与样式无关）。**可由 `PDMODE <n>` /
+    `PDSIZE <n>` 命令修改**（写图纸头值、一次 revision 提升、**不进历史/不可撤销**；导出写入
+    `$PDMODE`/`$PDSIZE`，`SAVE→OPEN` 往返由本仓读写器验证）；**无 `SETVAR` 间接寻址**（只有这两个名字，
+    无任意头变量设置、无值查询）。`SemanticGeometry::Point` **未改**（DXF 组 50 轴向角仍不建模）。
 - **3D 视图：NOT IMPLEMENTED**——`viewport_bounds` 在 3D 为 `None`，屏占比尺寸没有定义域，因此 3D 下不画
   点标记（显式记录，不猜一个 fallback）。
 - **已知偏差**：标记在 overlay 顺序里绘制（始终在最上层），与基础场景实体的遮挡关系不同。
@@ -217,8 +219,9 @@ AutoCAD 用提示行输入数字；本项目没有数值输入通道，且命令
 - ELLIPSE 的 **`Center`（中心法）**、`Arc`（椭圆弧 start/sweep）、`Rotation`、`Isocircle`、`PELLIPSE` 旧式 polyline 椭圆。
 - POINT 的 `PDMODE`/`PDSIZE`/点样式、Multiple Points 重复放置、**3D 视图中的点标记**。
   - **2026-10-26 修正**：`PDMODE`/`PDSIZE` 已实现（显示样式，见决策 E 的修正条目）；仍然 NOT IMPLEMENTED 的
-    是 `32`/`64`/`96` 周边圆/方、`PDMODE 0` 的真实点（Lines-only 拓扑下为 `+` 近似）、以及无 `SETVAR`
-    （样式只在导入时到达）。Multiple Points 与 3D 点标记不变。
+    是 `32`/`64`/`96` 周边圆/方、`PDMODE 0` 的真实点（Lines-only 拓扑下为 `+` 近似）、以及**无 `SETVAR`
+    间接寻址**（`PDMODE`/`PDSIZE` 已成为真实命令，但只支持这两个名字，无任意头变量设置与值查询）。
+    Multiple Points 与 3D 点标记不变。
 - SPLINE 的 CV 法/节点类型/阶数/切向/公差/`Close`/`Object` 转换，以及 **2–3 个 fit 点的小样本输入**；
   **fit 点数据不参与 SAVE→OPEN 往返**。
 - 六者的 **3D/OCS 非共面输入**（沿用"+Z 平面"子集，不静默投影）；**纸空间造形**（插入漏斗固定模型空间）。

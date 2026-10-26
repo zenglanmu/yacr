@@ -107,6 +107,14 @@ export const HOST_NAMES = [
   // (2026-10-26) close that run: `LAYOFF` turns off every layer the selection sits
   // on, `LAYON` is the restore selector that turns them all back on.
   'JOIN', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON',
+  // POINT display style sysvars (2026-10-26): `PDMODE` and `PDSIZE` are typed
+  // command-line settings with one numeric argument each (like `SNAPUNIT`), not
+  // buttons. This mirror is instructed locally, exactly like `SNAPUNIT` before
+  // it: the selectors change the open drawing's in-memory point display style
+  // (no undo entry, and the exporter writes neither), so no copy may suggest
+  // that the value is persisted. Admission tests read this list, never a Rust
+  // import.
+  'PDMODE', 'PDSIZE',
   // Full-word aliases.
   'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER', 'DBA', 'DCO',
   // AutoCAD's default `acad.pgp` abbreviations, restricted to implemented

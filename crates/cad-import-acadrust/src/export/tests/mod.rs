@@ -24,6 +24,7 @@ mod dimension_radial;
 mod entities;
 mod hatch;
 mod layers;
+mod point_style;
 mod report_limits;
 mod writer;
 

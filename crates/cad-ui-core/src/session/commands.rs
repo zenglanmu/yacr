@@ -144,6 +144,13 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // The typed spacing sysvar: `SNAPUNIT <value>`. The bare name carries no
     // value, so the application refuses it explicitly (no fabricated default).
     ("SNAPUNIT", CommandId::SetSnapSpacing),
+    // The two typed POINT display style sysvars (`PDMODE <n>` / `PDSIZE <n>`).
+    // Each writes one **drawing header** value (not session state): the bare name
+    // carries no value, so the application refuses it explicitly (no fabricated
+    // default). There is no `SETVAR` indirection and no `SETVAR` selector: the
+    // two names are the command-line form of the two system variables.
+    ("PDMODE", CommandId::SetPointDisplayMode),
+    ("PDSIZE", CommandId::SetPointDisplaySize),
     // The orthographic drafting constraint (F8). Session/display state only;
     // applied after object snap and grid snap so it still decides the final axis.
     ("ORTHO", CommandId::ToggleOrtho),
@@ -207,8 +214,17 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 /// * [`ARGUMENT_SELECTOR`] (`ZOOM`): a positive factor or `ALL`/`EXTENTS`
 ///   ([`parse_zoom_argument`]);
 /// * [`SNAPUNIT_SELECTOR`] (`SNAPUNIT`): a positive decimal spacing
-///   ([`parse_snap_unit_argument`]).
-pub const ARGUMENT_SELECTORS: &[&str] = &[ARGUMENT_SELECTOR, SNAPUNIT_SELECTOR];
+///   ([`parse_snap_unit_argument`]);
+/// * [`PDMODE_SELECTOR`] (`PDMODE`): one integer in the `i16` range
+///   ([`parse_pdmode_argument`]);
+/// * [`PDSIZE_SELECTOR`] (`PDSIZE`): one finite decimal size
+///   ([`parse_pdsize_argument`]).
+pub const ARGUMENT_SELECTORS: &[&str] = &[
+    ARGUMENT_SELECTOR,
+    SNAPUNIT_SELECTOR,
+    PDMODE_SELECTOR,
+    PDSIZE_SELECTOR,
+];
 
 /// AutoCAD's `ZOOM n` / `ZOOM ALL`: the first argument-taking selector.
 ///
@@ -222,6 +238,21 @@ pub const ARGUMENT_SELECTOR: &str = "ZOOM";
 /// state only (no database, history or preference write). It is the spacing the
 /// `SNAP` (F9) quantiser uses.
 pub const SNAPUNIT_SELECTOR: &str = "SNAPUNIT";
+
+/// AutoCAD's `PDMODE <n>`: the drawing-global POINT display **mode** sysvar.
+///
+/// The value is an integer stored **raw** in the drawing header (`$PDMODE`), so
+/// it is a document write (one revision bump, no undo entry), not session state.
+/// The display layer interprets the bits.
+pub const PDMODE_SELECTOR: &str = "PDMODE";
+
+/// AutoCAD's `PDSIZE <n>`: the drawing-global POINT display **size** sysvar.
+///
+/// The value is a finite decimal stored **raw** in the drawing header
+/// (`$PDSIZE`): `> 0` absolute drawing units, `0` viewport-relative, `< 0` a
+/// percentage of the viewport height. A document write like
+/// [`PDMODE_SELECTOR`], not session state.
+pub const PDSIZE_SELECTOR: &str = "PDSIZE";
 
 /// One parsed argument of the `ZOOM` selector.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -264,6 +295,43 @@ pub fn parse_zoom_argument(argument: &str) -> Option<ZoomArgument> {
 /// is invented and `ALL`/`EXTENTS` mean nothing here.
 pub fn parse_snap_unit_argument(argument: &str) -> Option<f64> {
     parse_positive_decimal(argument.trim())
+}
+
+/// Parse the argument of a `PDMODE` selector: one integer that fits `i16`.
+///
+/// The grammar is deliberately narrow — an optional `+`/`-` sign followed by
+/// ASCII digits only (`0`, `3`, `35`, `-1`). A **fraction** (`3.5`) is refused:
+/// `$PDMODE` is an integer bit field, so a decimal point can only mean the typist
+/// has the wrong variable, and rounding it would silently draw a different marker
+/// than the one asked for. Exponents (`1e1`), a bare sign, embedded spaces
+/// (`3 5`) and every non-digit are refused too, as is any value outside
+/// `i16::MIN..=i16::MAX` (`40000`) — the header field cannot hold it, and clamping
+/// would store a value the user never typed. The caller turns `None` into the
+/// stable refusal from [`invalid_pdmode_argument_reason`]; nothing is clamped and
+/// no default mode is invented.
+pub fn parse_pdmode_argument(argument: &str) -> Option<i16> {
+    let text = argument.trim();
+    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok()
+}
+
+/// Parse the argument of a `PDSIZE` selector: one finite decimal size.
+///
+/// Unlike [`parse_snap_unit_argument`] the **sign and zero are meaningful** and
+/// therefore accepted: `> 0` is an absolute drawing-unit size, `0` the
+/// viewport-relative DWG default and `< 0` a percentage of the viewport height
+/// (AutoCAD's own `PDSIZE` range). The numeric shape is the same narrow decimal
+/// (`2`, `2.5`, `0`, `-20`, `+4`): ASCII digits with at most one `.` that has
+/// digits on **both** sides. A bare `.`/`5.`, exponents (`1e3`), `NaN`/`inf`,
+/// embedded spaces (`2 3`) and anything else are refused with `None`, as is a
+/// magnitude that overflows to a non-finite `f64`. Nothing is clamped; the caller
+/// turns `None` into the stable refusal from
+/// [`invalid_pdsize_argument_reason`].
+pub fn parse_pdsize_argument(argument: &str) -> Option<f64> {
+    parse_signed_decimal(argument.trim())
 }
 
 /// Split a typed line into an argument-taking selector and its argument.
@@ -311,11 +379,55 @@ pub fn invalid_snap_unit_argument_reason(text: &str) -> String {
     )
 }
 
+/// The stable rejection reason for a `PDMODE` argument outside the grammar.
+///
+/// The typed line is echoed and the accepted grammar is named, so a fractional
+/// (`PDMODE 3.5`) or out-of-`i16` (`PDMODE 40000`) value is refused **by name**
+/// instead of being rounded, truncated or clamped into a different marker.
+pub fn invalid_pdmode_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (PDMODE needs one whole number in the i16 range, e.g. \
+         `PDMODE 3`)",
+        text.trim()
+    )
+}
+
+/// The stable rejection reason for a `PDSIZE` argument outside the grammar.
+///
+/// The typed line is echoed and the accepted grammar (one finite decimal size,
+/// sign and zero allowed) is named.
+pub fn invalid_pdsize_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (PDSIZE needs one finite decimal size, e.g. `PDSIZE 2.5`)",
+        text.trim()
+    )
+}
+
 /// Whether `text` is a plain positive decimal number (`digits[.digits]`).
+///
+/// A leading sign is refused here even though
+/// [`parse_signed_decimal`] accepts one: `ZOOM`/`SNAPUNIT` have always refused
+/// `+5`/`-5` (a spacing is written unsigned), and widening their grammar would
+/// change an existing refusal contract.
 fn parse_positive_decimal(text: &str) -> Option<f64> {
-    let (whole, fraction) = match text.split_once('.') {
+    if text.starts_with(['+', '-']) {
+        return None;
+    }
+    parse_signed_decimal(text).filter(|value| *value > 0.0)
+}
+
+/// Whether `text` is a plain decimal number with an optional sign
+/// (`[+-]digits[.digits]`).
+///
+/// No exponent, no bare `.`/`5.`, no embedded spaces: the same narrow shape
+/// `ZOOM`/`SNAPUNIT` accept, widened only by the sign (which `PDSIZE` needs:
+/// a negative size is a percentage of the viewport height). A magnitude that
+/// overflows to a non-finite `f64` is refused rather than stored.
+fn parse_signed_decimal(text: &str) -> Option<f64> {
+    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let (whole, fraction) = match digits.split_once('.') {
         Some((whole, fraction)) => (whole, Some(fraction)),
-        None => (text, None),
+        None => (digits, None),
     };
     let digits_only = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
     if !digits_only(whole) {
@@ -327,7 +439,7 @@ fn parse_positive_decimal(text: &str) -> Option<f64> {
         }
     }
     let value: f64 = text.parse().ok()?;
-    (value.is_finite() && value > 0.0).then_some(value)
+    value.is_finite().then_some(value)
 }
 
 /// The canonical name in `table` matching the already-uppercased `key`, if any.

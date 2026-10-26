@@ -266,7 +266,7 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 | `RECTANG` | **实现** | 闭合 LWPOLYLINE（4 顶点，bulge=0） | `Chamfer`/`Fillet`/`Thickness`/`Elevation`/`Width`/`Area`/`Dimensions`/`Rotation`（含圆角会话内持久怪癖）；3D/OCS |
 | `ELLIPSE` | **实现** | 单个 `Ellipse`（`center`、`+Z`、中心相对 `major_axis`、`ratio = 短/长 ≤ 1`、`start=0`、`sweep=2π`） | 轴端点法；`Center` 法/`Arc`/`Rotation`/`Isocircle`/`PELLIPSE`；**长短轴重排为未对齐假设**：本仓库把较长者存为长轴以保证 DXF 组 40 ≤ 1，AutoCAD 确切重排规则**未查证**；预览为有界弦近似（16–128 段），存储实体精确 |
 | `POLYGON` | **实现** | 单个闭合 `Polyline`（n 顶点、bulge=0、`+Z`），**内接于圆**；第一顶点在"中心→半径点"射线上（指针方向决定旋转） | `Edge` 分支与**外切**模式；"数值半径 ⇒ 底边对齐捕捉旋转角"；边数**不跨会话持久化**（会话参数，默认 4，范围 3–1024，越界显式拒绝） |
-| `POINT` | **实现** | 单个 `Point`（`+Z` 平面）；**单次放置**（AutoCAD 是否重复放置**未查证** ⇒ 不按猜测实现）；显示走 overlay 标记，并读取图纸的 `$PDMODE`/`$PDSIZE`（见上方 POINT 绘制列） | `32`/`64`/`96` 周边圆/方形状、`PDMODE 0` 的真实点（Lines-only 拓扑下是 `+` 近似）、无 `SETVAR`（样式只在导入时到达）、Multiple Points 重复放置、**3D 视图中的点标记** |
+| `POINT` | **实现** | 单个 `Point`（`+Z` 平面）；**单次放置**（AutoCAD 是否重复放置**未查证** ⇒ 不按猜测实现）；显示走 overlay 标记，并读取图纸的 `$PDMODE`/`$PDSIZE`（见上方 POINT 绘制列）；**样式可改**：`PDMODE <n>` / `PDSIZE <n>` 写图纸头值（一次 revision 提升，显示立即刷新；**不进历史**、**不可撤销**；导出写入 `$PDMODE`/`$PDSIZE`，`SAVE→OPEN` 往返已用本仓库读写器验证——不是 vendor 验证） | `32`/`64`/`96` 周边圆/方形状、`PDMODE 0` 的真实点（Lines-only 拓扑下是 `+` 近似）、**`SETVAR` 间接寻址**（只支持这两个名字，无任意头变量设置、无 `SETVAR ?` 查询）、Multiple Points 重复放置、**3D 视图中的点标记** |
 | `SPLINE` | **实现** | fit 点法（**≥4** fit 点）→ 三次/clamped/chord **插值** NURBS（`degree=3`、`weights=1`）；预览为 ≤256 段有界弦近似 | `Method(CV)`/`Knots`/`Degree`/`Start-End Tangency`/`Tolerance`/`Close`/`Object` 转换；**2–3 个 fit 点**；**fit 点数据不参与 SAVE→OPEN 往返**（domain 无该字段） |
 
 - 创建命令均为 **Work 模式**（Viewer 显式拒绝）、**模型空间**（插入漏斗固定 `SpaceId::Model`）、

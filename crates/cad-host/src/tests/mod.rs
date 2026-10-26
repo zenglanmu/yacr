@@ -30,6 +30,7 @@ mod navigation;
 mod ortho;
 mod p4_origin_dispatch;
 mod p4_trace;
+mod point_style;
 mod properties;
 mod queue;
 mod select;

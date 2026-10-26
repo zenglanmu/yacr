@@ -53,6 +53,7 @@ mod mirror_curves;
 mod mleader;
 mod mtext_create;
 mod offset_polyline;
+mod point_style;
 mod properties;
 mod stretch;
 mod text_edit;

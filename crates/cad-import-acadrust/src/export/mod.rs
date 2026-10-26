@@ -57,6 +57,7 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
     };
 
     write_units(&mut doc, request, &mut report);
+    write_point_display_style(&mut doc, request.database);
     tables::write_tables(&mut doc, request.database, &mut report);
 
     // Colour, lineweight, linetype and transparency **provenance** is preserved
@@ -171,6 +172,23 @@ fn write_units(doc: &mut CadDocument, request: &ExportRequest<'_>, report: &mut 
             message: "no unit context supplied; $INSUNITS left at Unitless".into(),
         }),
     }
+}
+
+/// Carry the drawing-global POINT display style (`$PDMODE` / `$PDSIZE`) into the
+/// output document.
+///
+/// Both values are the database's **raw** header values (the display layer is the
+/// single interpreter of the mode bits and the size's sign), and the acadrust DXF
+/// writer emits both header variables from these two fields. Without this the
+/// exporter wrote the writer's defaults, so a `PDMODE`/`PDSIZE` write — or an
+/// imported style — was dropped by a SAVE→OPEN cycle. Nothing is converted and no
+/// diagnostic is emitted: this is a preserved value, not a lossy mapping.
+///
+/// The boundary is still the acadrust writer plus **our own** reader (internal
+/// consistency), never a vendor-compatibility claim.
+fn write_point_display_style(doc: &mut CadDocument, database: &DrawingDatabase) {
+    doc.header.point_display_mode = database.point_display_mode();
+    doc.header.point_display_size = database.point_display_size();
 }
 
 #[cfg(test)]

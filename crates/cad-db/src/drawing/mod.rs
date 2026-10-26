@@ -23,6 +23,7 @@ mod edit;
 mod layer_edit;
 mod layer_inherit;
 mod lock;
+mod point_style;
 mod transaction;
 
 #[cfg(test)]

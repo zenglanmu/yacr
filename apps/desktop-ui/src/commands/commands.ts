@@ -165,6 +165,23 @@ function isPositiveDecimal(text: string): boolean {
 }
 
 /**
+ * Whether `text` is a plain decimal number, sign and zero included (`3`, `2.5`,
+ * `0`, `-5`).
+ *
+ * The point-style sysvars need the signed form where `SNAPUNIT` does not:
+ * `PDMODE 0` is the DWG default (dot) and `PDSIZE 0` is the "size from the
+ * viewport" default, so a positive-only gate would refuse the drawing's own
+ * defaults; a negative `PDSIZE` is a percentage of the viewport height in the
+ * DWG model, and the renderer reads the sign. The value is still a **single**
+ * plain decimal (`5.`, `.5`, `1e3`, `+5` and `2 3` are not one) — the same
+ * literal shape the other sysvar uses, so one grammar is typed either way.
+ */
+function isDecimalNumber(text: string): boolean {
+  if (!/^-?[0-9]+(\.[0-9]+)?$/.test(text)) return false;
+  return Number.isFinite(Number(text));
+}
+
+/**
  * The selectors that take a typed argument, with the **local syntax** predicate
  * for that argument.
  *
@@ -175,6 +192,12 @@ function isPositiveDecimal(text: string): boolean {
  * a positive decimal scale factor (`> 1` zooms in, `< 1` zooms out), `ALL` or
  * `EXTENTS` (the `FIT` framing). `SNAPUNIT` is the session grid-snap spacing
  * sysvar and accepts the same positive-decimal shape (`25`, `0.5`, `2.5`).
+ * `PDMODE`/`PDSIZE` (2026-10-26) are the drawing's POINT display-style sysvars:
+ * one plain decimal each (`PDMODE 3`, `PDSIZE 2.5`), zero and negative included
+ * because `PDMODE 0` (dot) and `PDSIZE 0` (viewport-relative) are the DWG
+ * defaults and a negative `PDSIZE` is a viewport percentage. They change the
+ * in-memory display style of the open drawing only — not undoable, and the
+ * exporter writes neither — so nothing here may suggest persistence.
  * Every other selector takes no argument, so `LINE 2` and `SNAP 5` stay explicit
  * unsupported answers.
  */
@@ -184,6 +207,18 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   }),
   SNAPUNIT: Object.freeze({
     parse: isPositiveDecimal,
+  }),
+  // Point display style (`$PDMODE` / `$PDSIZE`): the same one-number grammar as
+  // `SNAPUNIT`, widened to the signed/zero form the DWG values themselves use.
+  // The range semantics (which mode means dot/cross/…) and whether a value is
+  // expressible stay the host's call — a value refused here is refused before
+  // IPC with the shared `command.unsupported` sentence, and a value admitted
+  // here is still validated by the router.
+  PDMODE: Object.freeze({
+    parse: isDecimalNumber,
+  }),
+  PDSIZE: Object.freeze({
+    parse: isDecimalNumber,
   }),
 });
 
@@ -676,6 +711,16 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'SNAP', labelKey: 'status.toggle.snap', icon: 'snap', group: 'view' },
   { id: 'ORTHO', labelKey: 'status.toggle.ortho', icon: 'angle', group: 'view' },
   { id: 'OSNAP', labelKey: 'status.toggle.osnap', icon: 'snap', group: 'view' },
+  // POINT display style sysvars (2026-10-26). They are **command-line settings**
+  // like `SNAPUNIT`, not buttons: typing `PDMODE 3` / `PDSIZE 2.5` on the command
+  // line is the whole affordance, so neither gets a ribbon item — the
+  // `SNAPUNIT` precedent, which also has no ribbon button. They are listed at
+  // the end of the drafting-aid run (after `OSNAP`) because no shipped row may
+  // move, and they reuse the `point` glyph: the setting is how POINTs are drawn.
+  // Both change the open drawing's in-memory display style only; nothing here
+  // may imply undo or that the exporter writes the values.
+  { id: 'PDMODE', labelKey: 'point.display.mode', icon: 'point', group: 'view' },
+  { id: 'PDSIZE', labelKey: 'point.display.size', icon: 'point', group: 'view' },
 ]);
 
 const CATALOG_BY_ID = new Map<string, CommandCatalogEntry>(COMMAND_CATALOG.map(command => [command.id, command]));

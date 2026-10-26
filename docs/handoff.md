@@ -1,3 +1,42 @@
+## 2026-10-26 第 6 轮：`PDMODE` / `PDSIZE` 命令（点样式不再是「只在导入时到达」）
+
+### 结论
+
+第 4 轮把 `$PDMODE`/`$PDSIZE` 做成**只在导入时到达**的显示样式，并把「无 `SETVAR`」写进文档。本轮补上
+两个**真实命令**，只支持这两个名字（Autodesk 的 `SETVAR` 间接寻址与值查询**仍未实现**）：
+
+- `PDMODE <n>`：一个**整数**参数，必须落在 `i16` 域（`3.5`/`40000`/`1e1` 按名拒绝，**不四舍五入、不钳制**）。
+- `PDSIZE <n>`：一个有符号**有限**小数（`.5`/`5.`/`1e3`/`NaN`/`inf` 拒绝）。
+- 两者都写**图纸头值**（`cad-db` 新增校验写入 `set_point_display_style`：校验 → 改值 → **一次 revision 提升**
+  + 空对象变更集 → 命令层发布新 `Arc<DrawingDatabase>`，沿用图层表写入的先例）。**不是**会话覆盖，
+  所以**会刷新显示**（overlay 按 base revision 缓存样式）。
+- **不进历史、不可撤销**：没有头变量 patch 类型，这是「一条命令一步撤销」的**显式例外**，不伪造空撤销步。
+- **导出会写入** `$PDMODE`/`$PDSIZE`（acadrust 写入器本来就从 `doc.header` 发这两个变量），并有**真实
+  `SAVE→OPEN` 主机测试**证明 `35 / -20.0` 往返保持。口径限定：这是**本仓库写入器 + 本仓库读取器**的往返，
+  **不是** vendor/AutoCAD 验证，二进制 DXF 未跑。
+- Viewer 拒绝（`PermissionDenied`，走 `requires_work_mode`）；无参数调用 ⇒ `InvalidInput`。
+
+### 一并纠正的三处文案（重要）
+
+UI 半场最初按旧限制写了「只影响本图纸会话 / 导出不写入」，而实现证明这两句都**不成立**：实际是
+**图纸文档值**（保存后仍有效，打开另一张图时被替换）、且导出**会**写入。已改两本目录的
+`point.display.*.hint`，并把 UI 测试从「断言会话态/不导出」改成**正面断言 + 禁止旧措辞回归**
+（`doesNotMatch(/session only|does not write/)`、`doesNotMatch(/本图纸会话|不会写入/)`）。「不可撤销」保留。
+
+### 证据（本机，2026-10-26）
+
+- `cargo fmt --all -- --check`、`cargo check --workspace --all-targets --locked`、
+  `clippy -p cad-app -p cad-db -p cad-ui-core -p cad-host -p cad-import-acadrust --all-targets
+  -- -D warnings` → 通过。
+- `cargo test -p cad-db --lib` **154**、`-p cad-app --lib` **1251**、`-p cad-ui-core` **287**、
+  `-p cad-host` **239**、`-p cad-import-acadrust --lib` **302 + 1 ignored** → 全绿。
+- `apps/desktop-ui`：`tsc` 通过、`node --test` **662 passed**（新增 `point-display-sysvar.test.ts` 8 项）；
+  `check-i18n.py` **840 keys**、`check-file-size.py`（1033 文件）、`check-architecture.py` → 通过。
+- 命令表 88 → **90**。
+
+**NOT RUN / NOT VERIFIED**：vendor/AutoCAD 的 `$PDMODE`/`$PDSIZE` 往返、二进制 DXF、GUI/像素判据、
+wasm/Windows/Android/macOS 目标。
+
 ## 2026-10-26 第 5 轮：块内「图层 0 继承块引用图层」建模（显示/可见性单点解析）
 
 ### 结论

@@ -8,6 +8,7 @@ mod alias_table;
 mod command_vocabulary;
 mod import_accounting;
 mod input_and_lifecycle;
+mod point_style;
 mod snap_grid;
 mod standard_view;
 mod status_projection;

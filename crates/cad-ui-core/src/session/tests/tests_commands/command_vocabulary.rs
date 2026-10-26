@@ -105,6 +105,8 @@ command_selector_contract! {
     ToggleSnapGrid => "SNAP",
     ToggleSnap => "OSNAP",
     SetSnapSpacing => "SNAPUNIT",
+    SetPointDisplayMode => "PDMODE",
+    SetPointDisplaySize => "PDSIZE",
     ToggleOrtho => "ORTHO",
 }
 
@@ -120,7 +122,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 88,
+        EXPECTED_COMMAND_COUNT, 90,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

@@ -205,8 +205,11 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
         assert_eq!(parse_snap_unit_argument(refused), None, "{refused:?}");
     }
 
-    // The shared splitter knows both argument-taking selectors.
-    assert_eq!(ARGUMENT_SELECTORS, &["ZOOM", "SNAPUNIT"]);
+    // The shared splitter knows every argument-taking selector.
+    assert_eq!(
+        ARGUMENT_SELECTORS,
+        &["ZOOM", "SNAPUNIT", "PDMODE", "PDSIZE"]
+    );
     assert_eq!(
         typed_command_argument("SNAPUNIT 5"),
         Some(("SNAPUNIT", "5"))

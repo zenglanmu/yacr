@@ -69,6 +69,8 @@ canonical 命令（`work-only` 表示仅在工作模式可用，Viewer 模式由
 | `MEASURE AREA` | 测量 | 是 | `AA`、`AREA` |
 | `MEASURE POLYLINE` | 测量 | 是 | — |
 | `ID` | 测量（点坐标查询：单点拾取 → X/Y/Z + 空间 + 捕捉来源 + 精度；**故意跳过栅格捕捉与 `ORTHO`**） | 是 | — |
+| `PDMODE <n>` | 点显示模式（0 点/1 无/2 `+`/3 `×`/4 竖线；32/64 未绘制）——写图纸头值、刷新显示、**不可撤销** | 是 | — |
+| `PDSIZE <n>` | 点显示大小（>0 绝对图纸尺寸 / 0 视口比例 / <0 视口高度百分比）——同上 | 是 | — |
 | `UNDO` | 历史 | 是 | `U` |
 | `REDO` | 历史 | 是 | — |
 | `CONFIRM` | 交互 | 是 | `ENTER` |
@@ -254,9 +256,10 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     其余未映射组合不拦截。
 - **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
   的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
-  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**88 个选择子**，与 `CommandId` 变体一一对应；
-  P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`/`LAYOFF`**——
-  `ID` 是测量选择子、`LAYUNISO`/`LAYERP`/`LAYON` 是既有 `RESTORELAYERS` 的别名，都不新增 `CommandId`）；不在表内的名字报告
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**90 个选择子**，与 `CommandId` 变体一一对应；
+  P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`/`LAYOFF`/
+  `PDMODE`/`PDSIZE`**——`ID` 是测量选择子、`LAYUNISO`/`LAYERP`/`LAYON` 是既有 `RESTORELAYERS` 的别名，
+  都不新增 `CommandId`）；不在表内的名字报告
   `command.unknown`；宿主**识别但未实现**的路径（如 `PLOT`/`SAVE` 的受限路径）由宿主报告
   `command.unsupported`。两者都是显式反馈，**不静默忽略**。
 - **仍未实现的 AutoCAD 名（据实）**：`POLYLINE`（我们有 `PLINE`）、`XLINE`、`BLOCK`、`WBLOCK`、
