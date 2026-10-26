@@ -12,6 +12,7 @@ pub mod area;
 pub mod clip;
 pub mod mesh;
 pub mod nurbs;
+pub mod nurbs_edit;
 pub mod spline;
 
 pub use area::{
@@ -21,6 +22,10 @@ pub use clip::{clip_polyline_to_xy_rect, clip_segment_to_xy_rect};
 pub use dash::{dash_polyline, dash_polyline_segments, polyline_length, DashIssue, DashOutcome};
 pub use mesh::{compute_vertex_normals, mesh_bounds};
 pub use nurbs::{clamped_uniform_knots, NurbsCurve};
+pub use nurbs_edit::{
+    control_polygon_extent, expand_spline_source, invert_point, max_absolute_coordinate,
+    nearest_point_parameter, sub_curve, SplineSubCurve,
+};
 pub use spline::{
     chord_parameters, cubic_spline_control_point_count, fit_points_to_cubic_spline,
     FIT_SPLINE_DEGREE, MIN_FIT_POINTS_FOR_CUBIC_SPLINE,

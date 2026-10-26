@@ -40,6 +40,7 @@
 
 use super::helpers::normalize_signed;
 use super::trim_boundary::{note_approximation, BoundarySet};
+use super::trim_spline::SplineTarget;
 use super::*;
 use cad_geometry::{add, dot, length, scale, sub, DefaultGeometryEngine, GeometryEngine};
 
@@ -119,7 +120,7 @@ pub(super) struct ExtendResolution {
 }
 
 /// The target curve's own parameter space.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) enum TargetCurve {
     /// `u ∈ [0, 1]` from `start` to `end`.
     Line { start: Point3, end: Point3 },
@@ -132,11 +133,18 @@ pub(super) enum TargetCurve {
         start: f64,
         sweep: f64,
     },
+    /// `u ∈ [0, 1]` across the raw knot domain, from `knots[degree]` to
+    /// `knots[n]`. Only TRIM builds this variant; EXTEND refuses a SPLINE by name
+    /// before reaching [`Self::new`] (see
+    /// [`super::trim_spline::no_continuation_semantics`]).
+    Spline(SplineTarget),
 }
 
 impl TargetCurve {
-    /// The supported targets: LINE, ARC and CIRCLE (`supported` names the set in
-    /// the refusal so TRIM and EXTEND stay honest about their own subset).
+    /// The supported targets: LINE, ARC and CIRCLE, plus SPLINE (`supported` names
+    /// the set in the refusal so TRIM and EXTEND stay honest about their own
+    /// subset). EXTEND refuses a SPLINE before reaching this constructor, because
+    /// its reason is about continuation semantics rather than about a kind list.
     ///
     /// An ARC whose sweep exceeds one full turn is refused: it has no single
     /// periodic period, so its cuts would fold at the wrong place.
@@ -183,6 +191,17 @@ impl TargetCurve {
                 start: 0.0,
                 sweep: TAU,
             }),
+            SemanticGeometry::Spline {
+                degree,
+                knots,
+                control_points,
+                weights,
+            } => Ok(Self::Spline(SplineTarget::new(
+                *degree,
+                knots,
+                control_points,
+                weights,
+            )?)),
             other => Err(CadError::Unsupported(format!(
                 "{command} target must be {supported}; {} is not supported",
                 geometry_kind(other)
@@ -190,25 +209,33 @@ impl TargetCurve {
         }
     }
 
-    /// A short lowercase label for plan-level messages ("line", "arc", "circle").
+    /// A short lowercase label for plan-level messages ("line", "arc", "circle",
+    /// "spline").
     pub(super) fn label(&self) -> &'static str {
         match self {
             Self::Line { .. } => "line",
             Self::Arc { .. } if self.is_periodic() => "circle",
             Self::Arc { .. } => "arc",
+            Self::Spline(_) => "spline",
         }
     }
 
     /// A full circle has no ends: its parameter space wraps.
+    ///
+    /// A SPLINE is never periodic here: the stored geometry carries no closed flag,
+    /// so a closed spline is treated as the open curve its knot domain describes
+    /// (its seam is its start/end, not a wrap).
     pub(super) fn is_periodic(&self) -> bool {
         matches!(self, Self::Arc { sweep, .. } if sweep.abs() >= TAU - 1e-9)
     }
 
-    /// The target's world length (chord for a line, arc length for an arc).
+    /// The target's world length (chord for a line, arc length for an arc, a
+    /// sampled polyline length for a spline).
     pub(super) fn length(&self) -> f64 {
         match self {
             Self::Line { start, end } => length(sub(*end, *start)),
             Self::Arc { radius, sweep, .. } => radius * sweep.abs(),
+            Self::Spline(spline) => spline.length(),
         }
     }
 
@@ -232,10 +259,14 @@ impl TargetCurve {
                 start: *start,
                 sweep: *sweep,
             },
+            // The shorthand-expanded form, so the intersector never has to decide
+            // what `knots: []` means: that decision is made once, by the target.
+            Self::Spline(spline) => spline.geometry(),
         }
     }
 
-    /// The point at parameter `u` (extrapolated outside `[0, 1]`).
+    /// The point at parameter `u` (extrapolated outside `[0, 1]` for a LINE/ARC; a
+    /// SPLINE has no continuation, so it is clamped to the knot domain).
     pub(super) fn point_at(&self, u: f64) -> Point3 {
         match self {
             Self::Line { start, end } => add(*start, scale(sub(*end, *start), u)),
@@ -256,6 +287,7 @@ impl TargetCurve {
                     ),
                 )
             }
+            Self::Spline(spline) => spline.point_at(u),
         }
     }
 
@@ -269,6 +301,8 @@ impl TargetCurve {
     /// This is the **boundary-hit** parameter, where the point really is on the
     /// curve (an off-plane or off-radius hit must not become a cut). The pick uses
     /// [`Self::project_param`] instead, which projects a near miss onto the curve.
+    /// A SPLINE is inverted exactly, within the target's own sampled-cut bound; a
+    /// hit farther away than that is `None`.
     pub(super) fn param_of(&self, p: Point3, tol: f64) -> Option<f64> {
         match self {
             Self::Line { start, end } => {
@@ -302,6 +336,7 @@ impl TargetCurve {
                 };
                 Some(raw / sweep)
             }
+            Self::Spline(spline) => spline.param_of(p, tol),
         }
     }
 
@@ -317,7 +352,10 @@ impl TargetCurve {
     /// * ARC/CIRCLE: the radial projection `center + radius * normalize(pick −
     ///   center)` in the target's own plane, i.e. the angle of the in-plane part of
     ///   `pick − center` (its normal component changes the distance, never the
-    ///   direction).
+    ///   direction);
+    /// * SPLINE: the nearest point of the curve (the only projection it has). No
+    ///   distance bound applies, for the same reason it applies to neither of the
+    ///   other two: the pick was already resolved onto this entity by the host.
     ///
     /// The result is **not** clamped or range filtered; [`target_frame`] checks it
     /// against the target's own span. `None` is the one case with no projection at
@@ -359,16 +397,18 @@ impl TargetCurve {
                 };
                 Some(raw / sweep)
             }
+            Self::Spline(spline) => spline.project_param(pick, tol),
         }
     }
 
     /// The parameter distance of one full turn (the periodic residue), **always
     /// positive**: a point one turn away from `u` is at `u - period` for either
     /// sweep sign, because [`Self::param_of`] measures `u` along the sweep and so
-    /// is never negative for a point "behind" the start. `None` for a line.
+    /// is never negative for a point "behind" the start. `None` for a line and for
+    /// a spline (neither has a periodic parameter space here).
     pub(super) fn period(&self) -> Option<f64> {
         match self {
-            Self::Line { .. } => None,
+            Self::Line { .. } | Self::Spline(_) => None,
             Self::Arc { sweep, .. } => Some(TAU / sweep.abs()),
         }
     }
@@ -376,26 +416,30 @@ impl TargetCurve {
     /// Rebuild the target as the piece `[u0, u0 + fraction]` of its own span.
     ///
     /// An arc reuses the target's centre/normal/radius and recomputes
-    /// `start`/`sweep`, so the sweep sign is preserved.
-    pub(super) fn with_span(&self, u0: f64, fraction: f64) -> SemanticGeometry {
+    /// `start`/`sweep`, so the sweep sign is preserved. A spline becomes the exact
+    /// sub-curve of the source on that span (same degree, same weights, both ends
+    /// clamped); a span that cannot keep `degree + 1` control points is refused by
+    /// name instead of yielding a degenerate curve.
+    pub(super) fn with_span(&self, u0: f64, fraction: f64) -> Result<SemanticGeometry, String> {
         match self {
-            Self::Line { .. } => SemanticGeometry::Line {
+            Self::Line { .. } => Ok(SemanticGeometry::Line {
                 start: self.point_at(u0),
                 end: self.point_at(u0 + fraction),
-            },
+            }),
             Self::Arc {
                 center,
                 normal,
                 radius,
                 start,
                 sweep,
-            } => SemanticGeometry::Arc {
+            } => Ok(SemanticGeometry::Arc {
                 center: *center,
                 normal: *normal,
                 radius: *radius,
                 start: normalize_signed(start + sweep * u0),
                 sweep: sweep * fraction,
-            },
+            }),
+            Self::Spline(spline) => spline.with_span(u0, fraction),
         }
     }
 }
@@ -487,11 +531,22 @@ pub(super) fn plan_trim(
                 plan: TrimPlan::Delete,
                 notes,
             }),
-            _ => Err(format!("TRIM would reduce the target {label} to nothing").into()),
+            _ => Err(format!(
+                "TRIM would reduce the target {label} to nothing: the kept span is below the \
+                 parameter tolerance"
+            )
+            .into()),
         };
     }
+    let geometry = curve.with_span(u0, fraction)?;
+    // The target-side honesty note: a SPLINE is replaced by an exact sub-curve whose
+    // *cut parameters* came from the sampled intersection. It is reported next to
+    // the per-pair approximation notes, not instead of them.
+    if let TargetCurve::Spline(spline) = curve {
+        spline.note_exact_sub_curve_on_sampled_cuts(&mut notes);
+    }
     Ok(TrimResolution {
-        plan: TrimPlan::Replace(curve.with_span(u0, fraction)),
+        plan: TrimPlan::Replace(geometry),
         notes,
     })
 }
@@ -521,7 +576,9 @@ pub(super) fn plan_extend(
     let engine = DefaultGeometryEngine;
     // A line extends along its own infinite line: the probe is a segment long
     // enough to contain every boundary. An arc extends along its own circle, so
-    // the probe is that full circle.
+    // the probe is that full circle. A spline has no probe at all: EXTEND refuses
+    // it by name before the plan is reached, and says so here too instead of
+    // inventing a continuation curve.
     let probe = match curve {
         TargetCurve::Line { .. } => line_probe(curve, boundaries, tol)?,
         TargetCurve::Arc {
@@ -534,6 +591,7 @@ pub(super) fn plan_extend(
             normal: *normal,
             radius: *radius,
         },
+        TargetCurve::Spline(_) => return Err(super::trim_spline::no_continuation_semantics()),
     };
 
     let period = curve.period();
@@ -625,11 +683,12 @@ pub(super) fn plan_extend(
         // on the grow side, so the arc only ever gets longer.
         TargetCurve::Arc { .. } => {
             if grow_end {
-                curve.with_span(0.0, u)
+                curve.with_span(0.0, u)?
             } else {
-                curve.with_span(u, 1.0 - u)
+                curve.with_span(u, 1.0 - u)?
             }
         }
+        TargetCurve::Spline(_) => return Err(super::trim_spline::no_continuation_semantics()),
     };
     Ok(ExtendResolution { geometry, notes })
 }

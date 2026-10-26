@@ -1,3 +1,58 @@
+## 2026-10-27 第 8 轮：SPLINE 作为 TRIM 目标（精确子曲线）
+
+### 结论
+
+`SPLINE` 从「只能当边界（采样求交）」升级为 **TRIM 的目标**，且结果**仍是精确 B 样条**——不是折线、
+不是重拟合、不是移动控制点冒充裁剪。EXTEND 对 `SPLINE` 目标**仍然拒绝**，但换成具名理由。
+
+- 新 `cad-geometry/src/nurbs_edit.rs`：① 用与 `tessellate_spline` **同一约定**展开 `knots: []` /
+  `weights: []` 简写并校验；② `[0,1] → 原始节点域` 映射；③ **点 → 参数反解**（`discretize_params`
+  取种子、在 `g(t) = (C(t)−P)·C'(t)` 上括区间二分，端点/节点上的极小值不被丢掉，**不**静默夹入域）；
+  ④ **Boehm 插入**（在**齐次点**上做，有理样条权重精确）到两端 multiplicity `degree+1`，再截取子曲线，
+  长度关系与两端块重新校验，并用源曲线在 `t0`/中点/`t1` 自检。
+- `TargetCurve::Spline`（新 `app_drawing/trim_spline.rs`）接入**既有** TRIM 计划：切除收集、保留哪一段、
+  `update_entity` **原地**替换（id/layer/space 不变）、一条事务一步撤销——**没有**分叉出第二套裁剪逻辑。
+- **诚实的两段式口径**（写进 `drawing.trim` 诊断，逐条明确）：**切割参数**来自采样求交（弦高
+  `控制多边形盒对角线 × 1e-4`、≤256 段）⇒ 由切割产生的**新端点**最远偏离真实交点一个弦高；而**保留下来的
+  子曲线是精确的**（degree / weights / 内部节点 / 未被触及的那一端逐位不变）。
+- **EXTEND 对 SPLINE 目标**在 `TargetCurve::new` 之前就拒绝，理由具名：NURBS 由节点向量定义，移动端点会
+  改变节点向量进而改变整条曲线的参数化，且本构建无外推策略——**不用切线近似冒充延伸**。
+
+### 过程中修掉的一个真实缺陷
+
+Boehm 插入的区间必须按**整条节点向量**取「最后一个 `knots[k] <= value`」，若按控制点数截断，会改变
+**非 clamp** 曲线的端点值（端点不再等于控制点）。现有两个测试钉住了这点：整域 clamp 与 degree-2
+开放节点向量内部截取，各在 51 个参数上比对（`< 1e-12`）。这在实践中很常见，因为保留窗口经常止于 `t_max`。
+
+### 证据（本机，2026-10-27）
+
+- `cargo fmt --all -- --check`、`cargo check --workspace --all-targets --locked`、
+  `clippy -p cad-app -p cad-geometry -p cad-db --all-targets -- -D warnings` → 通过。
+- `cargo test -p cad-geometry` **71**（+9）、`-p cad-app --lib` **1278**（+9）、`-p cad-db --lib` **154**、
+  `-p cad-host` **240**、`-p cad-app --locked` 全部 9 个套件 → 全绿。
+- **有理四分圆实测**：裁剪后子曲线在 201 个参数上 `| |P| − 1 |` 最坏 **3.33e-16**（断言 `< 1e-12`），
+  即子曲线在 f64 下就是精确圆弧。
+- `check-file-size.py`（1048 文件；最大改动文件 `trim_curves.rs` 891、`nurbs_edit.rs` 787）、
+  `check-architecture.py`、`check-i18n.py` → 通过。
+
+### 仍未成立 / 边界（必须原样保留）
+
+1. **切割参数是采样的**：新端点最远偏离真实交点一个弦高（`extent × 1e-4`，≤256 段）。把整条裁剪说成
+   「精确」是错的——只有子曲线精确。
+2. **EXTEND 仍不支持 SPLINE 目标**。
+3. `Spline` 无 closed 标志 ⇒ 闭合样条的接缝按起/终点处理（不环绕）；「整体落在闭合边界内 ⇒ 删除」沿用
+   LINE 的共享规则（闭合 **SPLINE** 边界内的包含判定仍是既有的 `Unsupported`）。
+4. 「保留跨度小于参数容差」的计划级拒绝对样条**实际不可达**（世界容差 1e-6 与去重窗口 `2·param_tol`），
+   真正的守卫在 `cad_geometry::sub_curve`；没有测试声称 app 路径会触发它。
+5. 畸形存储定义（长度不符/节点非单调/degree 0）作为 `InvalidInput` 拒绝，只有 `cad-geometry` 层覆盖
+   （`cad-db` 在校验期就会拒绝这类实体）。
+6. `project_param` 对样条**没有距离界**（与 LINE/ARC 一致）；等距/歧义拾取取种子括区间找到的那个极小值，
+   **没有**用户可见提示。
+7. 测试覆盖是**平面 XY**、degree 2 多项式与有理二次；无倾斜/3D 样条目标、无三次/非均匀有理夹具、
+   无多节点跨度病态摆动、无性能数据。
+
+**NOT RUN**：GUI/像素判据、真实 DWG 上的裁剪目视验收、wasm/Windows/Android/macOS 目标。
+
 ## 2026-10-27 第 7 轮：`AREA OBJECT`（精确对象面积）+ `LAYERP`（真·上一图层状态）+ 多词选择子准入修复
 
 ### 结论

@@ -3,7 +3,9 @@
 //! A SPLINE is accepted as a *sampled* TRIM/EXTEND boundary: `cad_geometry` has no
 //! analytic arm for it, so the cut comes from the engine's flatten-and-intersect
 //! fallback and every command reports a `drawing.trim`/`drawing.extend` note saying
-//! the cut point is approximate. It stays refused as a **target**.
+//! the cut point is approximate. As a **target** it is supported by TRIM only (the
+//! kept piece is an exact sub-curve, see `trim_spline_target`); EXTEND refuses it
+//! because a NURBS curve has no continuation semantics.
 //!
 //! Sampled tolerance (documented in `app_drawing::trim_boundary`): the fallback
 //! flattens each operand with chord tolerance
@@ -323,7 +325,9 @@ fn extend_line_to_a_spline_boundary_stops_at_the_near_crossing_ahead() {
 }
 
 #[test]
-fn spline_targets_are_still_refused_by_name_with_no_database_change() {
+fn spline_targets_are_refused_where_the_command_has_no_semantics_for_them() {
+    // TRIM *does* support a SPLINE target now (see `trim_spline_target`), so the
+    // only refusal left here is the honest one: no intersection with the boundary.
     let target = quadratic_spline(1, point(2.0, -2.0), point(5.0, 4.0), point(8.0, -2.0), 0);
     let mut app = app_of(vec![
         target,
@@ -332,17 +336,24 @@ fn spline_targets_are_still_refused_by_name_with_no_database_change() {
     let before = snapshot(&app);
 
     let err = trim(&mut app, 1, &[2], point(5.0, 1.0)).unwrap_err();
-    assert!(matches!(err, CadError::Unsupported(_)), "{err:?}");
+    assert!(matches!(err, CadError::InvalidInput(_)), "{err:?}");
     assert!(
-        err.to_string().contains("AcDbSpline") && err.to_string().contains("target"),
-        "the refusal names the target kind: {err:?}"
+        err.to_string().contains("no intersection"),
+        "the refusal names what is missing: {err:?}"
     );
     assert_eq!(snapshot(&app), before, "a refused target changes nothing");
     assert_eq!(undo_depth(&app), 0, "a refused target opens no transaction");
 
+    // EXTEND still refuses a SPLINE target, now naming the reason: a NURBS curve
+    // has no continuation semantics (see `trim_spline_target` for the full
+    // message contract).
     let err = extend(&mut app, 1, &[2], point(5.0, 1.0)).unwrap_err();
     assert!(matches!(err, CadError::Unsupported(_)), "{err:?}");
-    assert!(err.to_string().contains("AcDbSpline"), "{err:?}");
+    assert!(
+        err.to_string().contains("AcDbSpline")
+            && err.to_string().contains("no continuation semantics"),
+        "the EXTEND refusal names the target kind and the reason: {err:?}"
+    );
     assert_eq!(snapshot(&app), before);
     assert_eq!(undo_depth(&app), 0);
 }

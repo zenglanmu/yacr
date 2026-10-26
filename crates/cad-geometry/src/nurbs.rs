@@ -224,6 +224,24 @@ impl NurbsCurve {
     /// follows the geometry instead of a fixed parameter step. `params`
     /// bounds the result; its `max_segments` is a hard cap.
     pub fn discretize(&self, tolerance: f64, params: &TessellationParams) -> Vec<Point3> {
+        self.discretize_params(tolerance, params)
+            .into_iter()
+            .map(|(_, point)| point)
+            .collect()
+    }
+
+    /// The same adaptive sampling as [`Self::discretize`], keeping each sample's
+    /// **parameter** next to its point.
+    ///
+    /// The parameter is the curve's own raw knot parameter (never normalised), so
+    /// a caller that has to invert a point back onto the curve can use these as
+    /// brackets without re-deriving them. Both functions share one refinement, so
+    /// the points are identical.
+    pub fn discretize_params(
+        &self,
+        tolerance: f64,
+        params: &TessellationParams,
+    ) -> Vec<(f64, Point3)> {
         let tol = tolerance.max(0.0);
         let (t_min, t_max) = self.domain();
         let mut breaks = vec![t_min];
@@ -238,13 +256,16 @@ impl NurbsCurve {
 
         let mut budget = params.max_segments.max(1);
         let mut out = Vec::with_capacity(budget.min(4096) + 1);
-        out.push(self.evaluate(t_min));
+        out.push((t_min, self.evaluate(t_min)));
         for span in breaks.windows(2) {
             let (a, b) = (span[0], span[1]);
             if b <= a {
                 continue;
             }
-            let pa = *out.last().unwrap_or(&self.evaluate(a));
+            let pa = out
+                .last()
+                .map(|(_, point)| *point)
+                .unwrap_or_else(|| self.evaluate(a));
             let pb = self.evaluate(b);
             refine(self, a, b, pa, pb, tol, 0, &mut budget, &mut out);
         }
@@ -266,11 +287,11 @@ fn refine(
     tol: f64,
     depth: usize,
     budget: &mut usize,
-    out: &mut Vec<Point3>,
+    out: &mut Vec<(f64, Point3)>,
 ) {
     let max_depth = 24usize;
     if depth >= max_depth || (b - a) <= f64::EPSILON {
-        push_limited(pb, budget, out);
+        push_limited(b, pb, budget, out);
         return;
     }
     let mid_t = 0.5 * (a + b);
@@ -281,19 +302,23 @@ fn refine(
         z: 0.5 * (pa.z + pb.z),
     };
     if distance(pm, chord_mid) <= tol.max(1e-15) {
-        push_limited(pb, budget, out);
+        push_limited(b, pb, budget, out);
         return;
     }
     refine(curve, a, mid_t, pa, pm, tol, depth + 1, budget, out);
     refine(curve, mid_t, b, pm, pb, tol, depth + 1, budget, out);
 }
 
-fn push_limited(p: Point3, budget: &mut usize, out: &mut Vec<Point3>) {
+fn push_limited(t: f64, p: Point3, budget: &mut usize, out: &mut Vec<(f64, Point3)>) {
     if *budget > 0 {
         *budget -= 1;
     }
-    if !out.last().map(|q| distance(*q, p) < 1e-15).unwrap_or(false) {
-        out.push(p);
+    if !out
+        .last()
+        .map(|(_, q)| distance(*q, p) < 1e-15)
+        .unwrap_or(false)
+    {
+        out.push((t, p));
     }
 }
 

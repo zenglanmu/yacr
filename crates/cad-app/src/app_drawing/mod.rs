@@ -11,11 +11,12 @@
 //!   and records exactly one undo step with full before/after entity patches;
 //! * a failure changes no state (the database transaction is all-or-nothing)
 //!   and records no history;
-//! * TRIM/EXTEND cover the documented LINE/ARC/CIRCLE-target subset: an
-//!   unsupported *geometry* (SPLINE/INSERT/Opaque target or boundary) is an
-//!   explicit `Unsupported`, while a plan-level refusal (degenerate, no
-//!   intersection, already touching) is an explicit `InvalidInput`, and neither
-//!   touches the drawing.
+//! * TRIM/EXTEND cover the documented LINE/ARC/CIRCLE-target subset plus SPLINE
+//!   targets for TRIM only: an unsupported *geometry* (INSERT/Opaque target, a
+//!   SPLINE EXTEND target, or an unsupported boundary) is an explicit
+//!   `Unsupported`, while a plan-level refusal (degenerate, no intersection,
+//!   already touching) is an explicit `InvalidInput`, and neither touches the
+//!   drawing.
 //!
 //! Nothing here builds UI strings or dispatches tools; that is workstream C.
 //!
@@ -63,6 +64,7 @@ pub(crate) mod text_policy;
 mod trim_boundary;
 mod trim_curves;
 mod trim_extend;
+mod trim_spline;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};
 // The single base-dimension resolution the DIMBASELINE/DIMCONTINUE capture check

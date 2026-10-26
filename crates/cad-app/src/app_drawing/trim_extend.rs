@@ -133,10 +133,11 @@ impl Application {
         Ok(outcome)
     }
 
-    /// Trim one LINE/ARC/CIRCLE target against a supported boundary set.
+    /// Trim one LINE/ARC/CIRCLE target against a supported boundary set (plus a
+    /// SPLINE target, see below).
     ///
-    /// Supported subset: the target may be a LINE, an ARC or a CIRCLE, and every
-    /// boundary may be a LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE (straight or
+    /// Supported subset: the target may be a LINE, an ARC, a CIRCLE or a SPLINE, and
+    /// every boundary may be a LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE (straight or
     /// bulged) or SPLINE, in any mix. The target is cut at the intersections with
     /// the boundary and the piece containing the **projection** of `pick_point` is
     /// kept — the pick is projected onto the target ([`TargetCurve::project_param`])
@@ -147,16 +148,23 @@ impl Application {
     /// that bracket the pick. A LINE with no cut that lies wholly inside a closed
     /// boundary is deleted.
     ///
+    /// A SPLINE target is replaced by an **exact B-spline sub-curve** of itself (see
+    /// `super::trim_spline`): same degree, same weights, both ends clamped, never a
+    /// polyline and never a refit. The two precisions are reported separately: the
+    /// **cut parameter** comes from the sampled intersection fallback and is noted
+    /// per contributing pair, while the sub-curve itself is exact and gets its own
+    /// `drawing.trim` note.
+    ///
     /// A SPLINE boundary is **sampled**, not analytic: every cut it contributes
     /// adds a `drawing.trim` diagnostic saying the cut point is approximate. It is
     /// also excluded from the "wholly inside" delete rule (a spline has no closed
     /// flag and no boundary plane), so a target wholly inside a closed spline is
     /// refused explicitly (`Unsupported`) rather than deleted.
     ///
-    /// SPLINE/INSERT/Opaque/Mesh **targets**, INSERT/Opaque/Mesh boundaries,
-    /// degenerate input, a pick whose projection falls outside the target's span,
-    /// a pick with no radial direction on an ARC/CIRCLE (it lies on the target's
-    /// axis) and intersection-free cases are explicit refusals that change
+    /// INSERT/Opaque/Mesh **targets**, INSERT/Opaque/Mesh boundaries, degenerate
+    /// input, a pick whose projection falls outside the target's span, a pick with
+    /// no radial direction on an ARC/CIRCLE (it lies on the target's axis) and
+    /// intersection-free cases are explicit refusals that change
     /// nothing; the whole command is one transaction and one undo step.
     pub(crate) fn trim_entity(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         let CommandPayload::Trim {
@@ -203,7 +211,11 @@ impl Application {
             .ok_or_else(|| {
                 CadError::InvalidInput(format!("trim target {} does not exist", target.entity.0))
             })?;
-        let curve = TargetCurve::new(&target_entity.geometry, "TRIM", "a LINE, ARC or CIRCLE")?;
+        let curve = TargetCurve::new(
+            &target_entity.geometry,
+            "TRIM",
+            "a LINE, ARC, CIRCLE or SPLINE",
+        )?;
         let mut boundaries = BoundarySet::default();
         for reference in boundary {
             if reference.document != document_id {
@@ -305,17 +317,20 @@ impl Application {
 
     /// Extend one LINE/ARC target to the nearest boundary crossing ahead.
     ///
-    /// The supported subset mirrors TRIM: the target may be a LINE or an ARC and
-    /// every boundary may be a LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE (straight or
-    /// bulged) or SPLINE, in any mix. A SPLINE boundary is sampled, so a cut it
-    /// contributes always adds an approximation note (`drawing.extend`). The pick
-    /// is projected onto the target and that projection chooses the end to grow. A
-    /// LINE's picked endpoint moves along its own infinite line; an ARC's picked
-    /// end moves along its own circle and keeps the sweep's sign, so both only ever
-    /// get longer. A CIRCLE target has no end and is refused, as are unsupported
-    /// targets/boundaries, a pick whose projection falls outside the target's span,
-    /// a target that already touches or reaches the boundary, and a boundary that
-    /// never lies ahead.
+    /// The supported subset is narrower than TRIM's: the target may be a LINE or an
+    /// ARC and every boundary may be a LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE
+    /// (straight or bulged) or SPLINE, in any mix. A SPLINE boundary is sampled, so
+    /// a cut it contributes always adds an approximation note (`drawing.extend`). The
+    /// pick is projected onto the target and that projection chooses the end to
+    /// grow. A LINE's picked endpoint moves along its own infinite line; an ARC's
+    /// picked end moves along its own circle and keeps the sweep's sign, so both only
+    /// ever get longer. A CIRCLE target has no end and is refused, as are SPLINE
+    /// targets (**no continuation semantics**: moving an end of a NURBS curve changes
+    /// its knot vector, and therefore its parameterisation, and no extrapolation
+    /// policy exists — see `super::trim_spline::no_continuation_semantics`),
+    /// unsupported boundaries, a pick whose projection falls outside the target's
+    /// span, a target that already touches or reaches the boundary, and a boundary
+    /// that never lies ahead.
     pub(crate) fn extend_entity(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         let CommandPayload::Extend {
             target,
@@ -361,6 +376,14 @@ impl Application {
             .ok_or_else(|| {
                 CadError::InvalidInput(format!("extend target {} does not exist", target.entity.0))
             })?;
+        // A SPLINE target is refused here, before `TargetCurve::new`, because the
+        // reason is not "unsupported kind": EXTEND has no continuation semantics for
+        // a NURBS curve (see `super::trim_spline::no_continuation_semantics`).
+        if let SemanticGeometry::Spline { .. } = &target_entity.geometry {
+            return Err(CadError::Unsupported(
+                super::trim_spline::no_continuation_semantics(),
+            ));
+        }
         let curve = TargetCurve::new(&target_entity.geometry, "EXTEND", "a LINE or ARC")?;
         if curve.is_periodic() {
             return Err(CadError::Unsupported(format!(
