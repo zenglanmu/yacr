@@ -22,6 +22,7 @@ mod fonts;
 mod gate;
 mod grid_overlay;
 mod grip_drafting;
+mod grip_osnap;
 mod grips;
 mod hover;
 mod navigation;

@@ -1,10 +1,13 @@
 //! Lossy DXF export: reverse-map the domain database to an acadrust document.
 //!
 //! This is a **Save As**, never a round-trip save. The domain database is a
-//! resolved display model — ByLayer colours are flattened, block names and base
-//! points are dropped, and several kinds arrive pre-lossy — so the returned
-//! [`ExportReport`] records every conversion and every drop explicitly. The
-//! caller (host/CLI) owns file I/O; this module only produces bytes.
+//! resolved display model — `ByLayer` **linetype and lineweight** are flattened,
+//! block names and base points are dropped, and several kinds arrive pre-lossy —
+//! so the returned [`ExportReport`] records every conversion and every drop
+//! explicitly. `ByLayer` **colour** is the exception: it is preserved
+//! symbolically on import and written back symbolically, so a layer colour
+//! survives the round trip. The caller (host/CLI) owns file I/O; this module only
+//! produces bytes.
 
 mod dimension;
 mod entity;
@@ -56,14 +59,19 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
     write_units(&mut doc, request, &mut report);
     tables::write_tables(&mut doc, request.database, &mut report);
 
-    // The importer resolved ByLayer colour/linetype/lineweight onto each entity;
-    // the export bakes the resolved values back. Anything still symbolic
-    // (ByLayer with no reachable layer, ByBlock) stays symbolic.
+    // Colour provenance is preserved on import, so a `ByLayer` entity is written
+    // back symbolically: acadrust omits group 62 for `Color::ByLayer`, which is
+    // exactly the DXF encoding of "256 / by layer", and the layer table carries
+    // the colour. Linetype and lineweight are still **flattened** at import, so
+    // those are written as the resolved explicit values (visual parity, semantic
+    // change); an unresolved `ByBlock` stays symbolic for both.
     report.notes.push(ExportDiagnostic {
         object: None,
-        code: "export.note.bylayer_flattened".into(),
-        message: "resolved colour/linetype/lineweight values are written explicitly (visual \
-                  parity, semantic change); unresolved ByLayer/ByBlock are kept symbolic"
+        code: "export.note.style_resolved".into(),
+        message: "ByLayer colour is written symbolically (no group 62 = DXF colour 256), so a \
+                  layer colour change survives a save/load; the import-resolved linetype and \
+                  lineweight are written explicitly (visual parity, semantic change); \
+                  unresolved ByBlock values stay symbolic"
             .into(),
     });
 

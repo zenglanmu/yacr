@@ -131,24 +131,23 @@ pub(crate) fn layer_attributes(layer: &acadrust::tables::Layer) -> LayerAttribut
     }
 }
 
-/// Resolve an entity's own colour into the effective display value.
+/// Preserve an entity's source colour as its symbolic/explicit identity.
 ///
 /// An explicit entity colour (`ByObject`: true colour or an ACI index) wins over
-/// the layer. `ByLayer` uses the layer's pre-resolved colour. `ByBlock` is kept
-/// symbolic so INSERT expansion substitutes the containing reference's colour;
-/// `None` (no colour) is treated as unresolved `ByLayer` rather than drawn black.
-pub(crate) fn resolve_entity_color(
-    color: acadrust::Color,
-    layer_color: Option<[u8; 3]>,
-) -> EntityColor {
+/// the layer and is stored as `Explicit`, byte-identically (no rounding, no
+/// palette lookup beyond acadrust's own ACI table). `ByLayer` stays **symbolic**:
+/// the representation resolves it against the owning layer's
+/// `LayerAttributes::color.rgb` at draw time, so a layer colour edit recolours
+/// the entity without any entity write. `ByBlock` is likewise kept symbolic so
+/// INSERT expansion substitutes the containing reference's colour. `None` (no
+/// colour) means ByLayer in DXF, so it is stored the same way rather than drawn
+/// black.
+pub(crate) fn resolve_entity_color(color: acadrust::Color) -> EntityColor {
     match concrete_rgb(color) {
         Some(rgb) => EntityColor::Explicit(rgb),
         None => match color {
             acadrust::Color::ByBlock => EntityColor::ByBlock,
-            _ => match layer_color {
-                Some(rgb) => EntityColor::Explicit(rgb),
-                None => EntityColor::ByLayer,
-            },
+            _ => EntityColor::ByLayer,
         },
     }
 }

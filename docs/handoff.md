@@ -1209,6 +1209,65 @@ BTreeMap<LayerId, LayerAttributes>`（在 `render_attributes` 旁边），单一
 6. **wire/UI 不变**：图层 wire 形状与面板（色块仍是名字哈希）**本轮完全未动**。
 7. **plot-style 名字**：无法导出（写入器只发句柄）；CTB/STB 归一化未实现。
 
+## 2026-10-26 并行两条 lane：夹点拖拽的 OSNAP / `ByLayer` 颜色按层解析
+
+### 1. 夹点拖拽解析对象捕捉（`cad-host`）
+
+- 复用**取点路径唯一**的解析器 `HostController::resolve_snap`（同一候选生成器、同一
+  `SessionState::snap_enabled` 门、同一「最佳候选」排序与同一光圈容差
+  `interaction_logical_pixels × world_per_px`），**没有**第二套求解器、新 snap kind 或新设置。
+- 顺序：原始 `screen_to_world` x/y（z 取被拖夹点自身）→ **OSNAP 替换**（有候选在光圈内）→
+  **栅格捕捉** → **ORTHO**（轴过夹点原位）。预览 marker 与提交的 `GripStretch` 仍是**同一个**
+  已约束坐标。
+- **顺序后果显式声明**：`OSNAP` 与 `SNAP` 同开时，栅格会把已捕捉点**再量化**，落点在栅格而非
+  候选点，除非二者重合。之所以照此实现，是因为**取点路径就是这个顺序**；若要 OSNAP 压过栅格，
+  那应改共享取点管线而不是给夹点单开一条规则。
+- 唯一有意偏离取点路径的字段：**不采用候选的 `z`**（取点是在造新点，夹点拖拽只移动已有句柄）。
+- **不排除自捕捉**（取点路径也不排除）：指针停在夹点自身光圈内 ⇒ 目标 = 夹点原位 ⇒
+  零位移 no-op（不发命令、不升 revision、不留撤销步）；排除自捕捉会让同一指针位置在"点击"与
+  "拖夹点"下解析出不同结果。
+- `resolve_snap` 出错（非有限点、退化 `world_per_px`）时拖拽**保留上一个有限目标**，不静默回退
+  到原始点。拖拽**不**发布 OSNAP 提示标记（移动的夹点 marker 仍是唯一预览；属 overlay 输入决策，
+  本轮不做）。
+
+### 2. `ByLayer` 颜色改为按图层解析（`cad-import-acadrust` + `cad-representation`）
+
+- 导入**不再拍平** `ByLayer` 颜色：`Color::ByLayer` 与 `Color::None` 都保留符号
+  `EntityColor::ByLayer`（`ByBlock` 仍符号），`layer_colors` 旁表**删除**。
+- 解析点在 `ProviderRegistry::expand_entity`（`provider/expand.rs`）：取实体自身 `layer` 的
+  `LayerAttributes::color.rgb` 传入 `resolve_color`，`color_unresolved = false`；图层无属性行时
+  走 `DrawingDatabase::layer_attributes` 的既有 `Default`（ACI 7 白），**不另立默认值**。
+  `Explicit` 逐位不变；`ByBlock` 仍沿父链，模型根上保持未解析 + 默认色。
+- **块内容规则**：块定义里的实体按**它自己所在图层**解析 `ByLayer`（只有 `ByBlock` 才向包含的
+  INSERT 已解析颜色上溯）。AutoCAD「图层 0 上的实体继承块引用图层」特例**未建模**（声明）。
+- **改图层颜色即生效**：`set_layer_attributes` 之后下一次展开就是新颜色，**实体行与 revision
+  逐位不变**，`ChangeSet` 不含任何 object change，也没有实体撤销步。
+- 导出**无需改代码**：`common_for` 本就把 `ByLayer` 映射为 `Color::ByLayer`，acadrust 对该值
+  **省略组 62**，正是 DXF 的 256（by layer）；颜色由图层表承载。原
+  `export.note.bylayer_flattened` 改名 `export.note.style_resolved`：颜色符号写出，
+  **线型/线宽仍是解析后写出**（真话）。
+- 顺手修掉 `cad-db` 里「表示层拿不到图层表」的过期注释与 `LayerAttributes`
+  「颜色传播未实现」的过期结论。
+
+### 已运行证据（本机，2026-10-26）
+
+- `cargo test -p cad-host --lib` → **234 passed / 0 failed**（`tests/grip_osnap.rs` 7 项：候选替换、
+  OSNAP 关闭回归、超光圈回落、三开关同开的精确点 `(0,10,0)` 并断言与另两种顺序不同、
+  异标高候选只贡献平面位置、自捕捉=零位移 no-op、无导航 delta + 点击被吞）。
+- `cargo test -p cad-representation --lib` → **209 passed / 0 failed**；
+  `cargo test -p cad-import-acadrust --lib` → **292 passed / 1 ignored / 0 failed**
+  （含写出的 DXF 再导入仍为 `ByLayer` 且图层带 aci/rgb 的往返）。
+- 两条 lane 的 `clippy -D warnings`、`check-architecture.py`、`check-file-size.py` 均 0。
+
+### NOT RUN / 边界
+
+- **无 GUI/像素/真窗口/真实鼠标证据**；OSNAP 夹点只有 `HostCore` 合成契约。`dom-canvas` 载体仍
+  无任何夹点路径。
+- `ByLayer` **线型与线宽**仍在导入时拍平；`ByBlock` 沿父链的既有语义未改。
+- 夹点拖拽不发布 OSNAP 提示标记；块成员/`ATTRIB` 夹点、多夹点/多实体拉伸、3D 夹点编辑仍缺。
+
+---
+
 ## 2026-10-26 并行三条 lane：INSERT 夹点 / 样条定义校验 / HATCH 图案名补行
 
 三条 lane 按 **crate** 隔离并行（同一 crate 的两个 lane 会互相把 `cargo test -p <crate>` 打红，

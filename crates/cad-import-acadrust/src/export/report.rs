@@ -1,9 +1,10 @@
 //! Lossy-export report types.
 //!
 //! This is a *Save As* report, not a round-trip-save report: the domain database
-//! is a resolved display model (ByLayer colours flattened, block names and base
-//! points dropped, several kinds arriving pre-lossy), so every conversion and
-//! every drop is recorded explicitly here rather than silently swallowed.
+//! is a resolved display model (`ByLayer` linetype and lineweight flattened,
+//! `ByLayer` colour kept symbolic, block names and base points dropped, several
+//! kinds arriving pre-lossy), so every conversion and every drop is recorded
+//! explicitly here rather than silently swallowed.
 
 use cad_domain::{Completeness, ObjectId};
 

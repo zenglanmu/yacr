@@ -25,11 +25,14 @@ impl ProviderRegistry {
         stack: &mut Vec<BlockId>,
         out: &mut DisplayRepresentation,
     ) -> CadResult<()> {
-        // The importer resolved this entity's effective opacity, colour,
-        // lineweight and linetype into the database. `ByBlock` inherits the
-        // containing INSERT's value, threaded down through the `parent_*`
-        // arguments; at the model root those fall back to the documented
-        // defaults.
+        // The importer resolved this entity's effective opacity, lineweight and
+        // linetype into the database. Colour is resolved **here** instead of at
+        // import time, because `ByLayer` means "the owning layer's colour" and
+        // only this layer has the layer table: a layer colour edit therefore
+        // recolours its `ByLayer` entities on the next expansion with no entity
+        // write and no revision bump. `ByBlock` inherits the containing INSERT's
+        // value, threaded down through the `parent_*` arguments; at the model
+        // root those fall back to the documented defaults.
         let attributes = database.entity_render_attributes(entity.id);
         // The provider sees the attributes too, so annotative text can be
         // scaled while it is shaped (the geometry is not post-processed).
@@ -37,7 +40,19 @@ impl ProviderRegistry {
             EntityTransparency::Explicit(alpha) => alpha,
             EntityTransparency::ByBlock => parent_alpha,
         };
-        let (own_color, color_unresolved) = resolve_color(attributes.color, parent_color);
+        // Resolution rule for `ByLayer`: the colour of the layer the entity is
+        // **itself** on (`DbEntity::layer`), for model-space entities and for
+        // entities inside a block definition alike. Only `ByBlock` walks up the
+        // parent chain to the containing INSERT's already-resolved colour, so a
+        // block child's `ByLayer` never inherits the INSERT's layer.
+        //
+        // A layer with no stored attribute row uses
+        // `DrawingDatabase::layer_attributes`'s documented
+        // `LayerAttributes::default()` fallback (ACI 7 white) rather than a
+        // second, locally invented default.
+        let layer_color = database.layer_attributes(entity.layer).color.rgb;
+        let (own_color, color_unresolved) =
+            resolve_color(attributes.color, parent_color, layer_color);
         let (own_lineweight, lineweight_unresolved) =
             resolve_lineweight(attributes.lineweight, parent_lineweight);
         let (own_linetype, linetype_unresolved, linetype_scale) =

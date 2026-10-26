@@ -87,24 +87,36 @@ pub struct LayerAttributes {
 全仓唯一被消费的“可见”答案；`off` 与 `frozen` 分开存，是因为图纸区分二者（冻结不是关闭），
 而本阶段两者都只是“不可见”。
 
-**本阶段零行为**：没有任何代码读 `locked`/`frozen`/`frozen_in_new_viewport`/`plottable`/
-`plot_style`/图层颜色去改变行为。显式未实现：(b) 锁定门禁、(c) 冻结门禁、(d) 出图、
-(e) 图层颜色传播到 `ByLayer` 实体——导入时 `ByLayer` 实体颜色仍被**拍平**成显式 sRGB
-（见下文），所以改图层颜色不会重着色任何东西。
+**行为现状（2026-10-26 更新）**：`locked` 已在**实体写路径**单点强制
+（`crates/cad-db/src/drawing/lock.rs`），`off`/`frozen` 经派生的 `Layer::visible` 生效；
+`frozen_in_new_viewport`/`plottable`/`plot_style` 仍是**只存储 + 往返**，冻结的独立语义、
+出图与命名打印样式**显式未实现**。
+
+**`ByLayer` 颜色现在按图层解析（(e) 已完成，仅颜色）**：导入不再把 `ByLayer` 拍平成显式 sRGB
+（`cad-import-acadrust` 保留符号 `EntityColor::ByLayer`），表示层
+`provider/expand.rs` 在展开时用实体自身 `layer` 的 `LayerAttributes::color.rgb` 解析，
+缺行则用 `layer_attributes()` 的既有 `Default`（ACI 7 白）。因此**改图层颜色会在下一次展开时
+重着色其 `ByLayer` 实体，且不写任何实体、不产生实体历史**。块内实体的 `ByLayer` 按**它自己
+所在图层**解析（只有 `ByBlock` 才沿父链取包含块引用的已解析颜色）；AutoCAD「图层 0 上的实体
+继承块引用图层」这一特例**未建模**（声明）。**线型与线宽的 `ByLayer` 仍在导入时拍平**。
 
 ## cad-import-acadrust：解析（ByObject → ByLayer → ByBlock）
 
-图层表先读入 `layer_colors`/`layer_lineweights`/`layer_linetypes`（**仍在用**：实体 `ByLayer`
-解析就从这三张旁表取值，所以它们与新的 `LayerAttributes` 行并存，不是被替换），线型表读入
+图层表先读入 `layer_lineweights`/`layer_linetypes`/`layer_transparency`（**仍在用**：实体
+`ByLayer` 的**线宽/线型/透明度**解析就从这几张旁表取值，所以它们与新的 `LayerAttributes` 行并存，
+不是被替换；`layer_colors` 旁表**已删除**——颜色改为保留符号 `ByLayer`，由表示层查图层行），
+线型表读入
 `linetype_patterns`（名字小写 → pattern），随后每个实体在 `push_entity` 里解析：
 
 - **ByObject 优先**：`Color::Rgb`/`Color::Index` → `EntityColor::Explicit`；
   `LineWeight::Value` → `EntityLineWeight::Explicit(mm)`；命名线型 → 查表得到
   `EntityLineType::Explicit`（其 `scale` 取实体 `linetype_scale`）。
-- **ByLayer**：取该图层已解析的颜色/线宽/线型；图层缺失才退回符号 `ByLayer`（不伪造）。
+- **ByLayer**（颜色）：**保持符号 `EntityColor::ByLayer`**，由表示层在展开时查图层行解析
+  （2026-10-26 起；此前在此处拍平成显式 sRGB）。
+- **ByLayer**（线宽/线型）：取该图层已解析的线宽/线型；图层缺失才退回符号 `ByLayer`（不伪造）。
 - **ByBlock**：保持符号 `*::ByBlock`，由表示层 INSERT 展开时用包含块引用的有效值替代
   （与 alpha 同一机制）。
-- `Color::None`：视为 `ByLayer`（继承图层），而不是画成黑色；无图层时标记未解析。
+- `Color::None`：视为 `ByLayer`（继承图层），保留符号不画成黑色；解析由表示层按图层完成。
 - 图层颜色若是退化符号值，回退白色（AutoCAD 名义默认 ACI 7）；图层线宽若是符号值，则
   该图层不提供线宽，实体留给 `ByLayer` 缺省；图层线型名若在表中不存在，同样视为
   `ByLayer` 缺省（连续线）。

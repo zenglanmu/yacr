@@ -60,34 +60,68 @@
 //! changes an elevation (3D grip editing is NOT IMPLEMENTED). Only a finite
 //! target is ever stored.
 //!
-//! ## Drafting switches: the capture path's own helper
+//! ## Drafting switches: the capture path's own pipeline
 //!
-//! A dragged handle is another point entry, so the session switches the capture
-//! path obeys also apply to it, applied by **the same** helper
-//! (`SessionState::constrained_point`) in the **same order** — nothing here
-//! re-implements an ortho or snap rule:
+//! A dragged handle is another point entry, so the point-entry pipeline the
+//! capture path obeys applies to it, in **the capture path's own order** and
+//! through **the capture path's own functions** — nothing here re-implements an
+//! object-snap, grid or ortho rule:
 //!
-//! 1. **grid snap** (`SNAP`, F9, session `SNAPUNIT` spacing) —
+//! 1. **object snap** (`OSNAP`) — `cad_app`'s `HostController::resolve_snap`,
+//!    the one acquisition entry point the two tool boundaries
+//!    (`move_tool_cursor`, `capture_tool_point`) also use: the same candidate
+//!    generator
+//!    (`cad_app::host::databases::snap_candidates_near_with_policy` over the
+//!    transform-baked target set and the session's active space), the same gate
+//!    (`SessionState::snap_enabled`), the same aperture (the controller's
+//!    `TolerancePolicy::interaction_logical_pixels` × the viewport's
+//!    `world_per_px`) and the same "best candidate" rule
+//!    (`MeasurementEngine::snap_targets` ordering: smallest logical-pixel
+//!    distance, then `SnapKind` priority, then x, then y).
+//!
+//!    A candidate inside the aperture **replaces** the raw pointer point on x/y;
+//!    the dragged handle's own `z` is kept, so a plan-view drag still never
+//!    changes an elevation (`z` is the handle's, and the plan position of the
+//!    candidate is all the drag can adopt). `OSNAP` off, or no candidate inside
+//!    the aperture, leaves the raw point untouched.
+//! 2. **grid snap** (`SNAP`, F9, session `SNAPUNIT` spacing) —
 //!    `cad_app::snap_point`: x and y are quantised to the nearest multiple of the
 //!    spacing **about the world origin**, half away from zero, `z` untouched. An
 //!    invalid spacing (non-finite or `<= 0`) passes the point through unchanged,
 //!    so the switch simply has no effect; the session refuses such a value on
 //!    write, so no spacing is ever fabricated here.
-//! 2. **ORTHO** (`ORTHO`, F8) — `cad_app::ortho_constrain_point`: the already
+//! 3. **ORTHO** (`ORTHO`, F8) — `cad_app::ortho_constrain_point`: the already
 //!    snapped target is constrained to the horizontal or vertical axis through
 //!    the **grip's original position** (`GripDrag::from`), whichever axis the
 //!    unconstrained target is closer to (`|dx| >= |dy|` → horizontal; an exact
 //!    tie is horizontal). `x`/`y` therefore take the snapped coordinate on the
 //!    chosen axis and the original coordinate on the other, bit for bit.
 //!
-//! Object snap (OSNAP) is **not** applied to a grip drag: the host resolves it
-//! for a drawing/measurement capture point only, and a grip target is not a
-//! snapped capture candidate.
+//! Steps 2 and 3 are [`SessionState::constrained_point`], applied **to the
+//! object-snapped point** exactly as a captured point is: the capture path
+//! resolves OSNAP first (in the host) and then hands the result to the session,
+//! whose documented order is object snap, grid snap, ORTHO. The consequence is
+//! stated rather than left to be discovered: with `OSNAP` **and** `SNAP` both
+//! on, grid snap re-quantises the object-snapped target, so the handle lands on
+//! the grid rather than on the candidate unless the two agree. That is the
+//! capture path's behaviour too, and a grip-only order (grid, then OSNAP) would
+//! be a second rule; if OSNAP is ever to override the grid it must change for
+//! every point entry, not here.
 //!
-//! With both switches off the target is the raw `screen_to_world` x/y with the
-//! handle's own `z` — byte-identical to the unconstrained behaviour. The preview
-//! marker and the release commit read the **one** stored `to`, so a drag can
-//! never preview one point and commit another.
+//! **Self-snapping** gets no special case, because the capture path has none:
+//! the candidate generator walks every model-space entity, so a candidate on the
+//! dragged handle's own entity — including the handle's own position — is a
+//! normal candidate. A drag whose pointer stays inside its own handle's aperture
+//! therefore resolves to the handle's own position, `GripDrag::to ==
+//! GripDrag::from`, which the release turns into the model's zero-displacement
+//! no-op. Excluding self here would diverge from a click's snap resolution for
+//! the same pointer position.
+//!
+//! With every switch off the target is the raw `screen_to_world` x/y with the
+//! handle's own `z` — byte-identical to the unconstrained behaviour (a
+//! disabled `OSNAP` returns `Ok(None)` without even resolving a candidate). The
+//! preview marker and the release commit read the **one** stored `to`, so a drag
+//! can never preview one point and commit another.
 //!
 //! ## The preview
 //!
@@ -254,12 +288,25 @@ impl HostCore {
 
     /// The world point the armed drag currently names.
     ///
-    /// The pointer resolves on the work plane (`screen_to_world`), but the target
-    /// keeps the dragged handle's own `z`: a plan-view drag moves the handle in
-    /// x/y only. The session drafting switches then apply through the **same**
-    /// helper the point-capture path uses ([`SessionState::constrained_point`]),
-    /// so there is one constraint implementation: grid snap first, then `ORTHO`
-    /// (see the module doc). A non-finite result is refused rather than stored.
+    /// The pointer resolves on the work plane (`screen_to_world`) and keeps the
+    /// dragged handle's own `z`: a plan-view drag moves the handle in x/y only.
+    /// The session drafting switches then apply through the **same** helper the
+    /// point-capture path uses ([`SessionState::constrained_point`]), so there is
+    /// one constraint implementation: grid snap first, then `ORTHO` (see the
+    /// module doc).
+    ///
+    /// Object snap is resolved **before** that helper, by the capture path's one
+    /// resolver (`HostController::resolve_snap`): a candidate inside the
+    /// configured aperture replaces the raw x/y, so the constraint step sees the
+    /// snapped point exactly as a captured point entry does. Two things are
+    /// deliberately not adopted from the candidate: its `z` (the handle keeps its
+    /// own elevation — 3D grip editing is NOT IMPLEMENTED) and its identity (the
+    /// drag target stays one `Point3`; nothing here records snap provenance).
+    ///
+    /// A non-finite result — the raw point, the snapped x/y or the constrained
+    /// target — is refused rather than stored, and a snap resolution failure is
+    /// not turned into a silent raw success: it yields no target, so the caller
+    /// keeps the drag's last finite target.
     fn drag_target(&self, logical: [f64; 2]) -> Option<Point3> {
         let from = self.navigation.grip_drag.borrow().as_ref()?.from;
         let c = self.controller.borrow();
@@ -273,10 +320,30 @@ impl HostCore {
         if !is_finite_point(raw) {
             return None;
         }
+        // Object snap, through the capture path's one resolver: same candidate
+        // generator, same `snap_enabled` gate, same aperture policy and same
+        // "best candidate" rule. `Ok(None)` is "nothing to snap to" (disabled,
+        // or no candidate inside the aperture) and leaves the raw point alone.
+        let snapped = match c.resolve_snap(raw) {
+            Ok(Some(candidate)) => Point3 {
+                x: candidate.point.x,
+                y: candidate.point.y,
+                // The handle's elevation, never the candidate's: a plan-view drag
+                // must not move the geometry out of its plane.
+                z: from.z,
+            },
+            Ok(None) => raw,
+            // An unusable snap input (a non-finite point, a degenerate
+            // `world_per_px`) is not a candidate: no target is fabricated.
+            Err(_) => return None,
+        };
+        if !is_finite_point(snapped) {
+            return None;
+        }
         // `from` is the grip's **original** position, not the last pointer
         // position: the ORTHO axis passes through the handle being dragged.
-        // While both switches are off this is `raw` verbatim.
-        let target = c.session.constrained_point(Some(from), raw);
+        // While both switches are off this is `snapped` verbatim.
+        let target = c.session.constrained_point(Some(from), snapped);
         is_finite_point(target).then_some(target)
     }
 

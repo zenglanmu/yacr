@@ -152,6 +152,84 @@ fn transparency_and_linetype_scale_are_written() {
 }
 
 #[test]
+fn by_layer_colour_is_written_symbolically_and_keeps_the_layer_colour() {
+    // Colour provenance is preserved on import, so the export must not bake the
+    // layer's RGB onto the entity: a `ByLayer` entity is written with no group 62
+    // (the DXF spelling of "256 / by layer") and the layer table carries the
+    // colour it resolves to.
+    let mut builder = base_builder();
+    builder
+        .insert_layer(Layer {
+            id: LayerId(1),
+            name: "WALLS".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .set_layer_attributes(
+            LayerId(1),
+            cad_db::LayerAttributes {
+                color: cad_db::LayerColor {
+                    aci: Some(1),
+                    rgb: [255, 0, 0],
+                },
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let mut line = entity(
+        1,
+        SemanticGeometry::Line {
+            start: p(0.0, 0.0, 0.0),
+            end: p(1.0, 0.0, 0.0),
+        },
+        SpaceId::Model,
+        0,
+    );
+    line.layer = LayerId(1);
+    builder.insert_entity(line).unwrap();
+    builder
+        .set_entity_render_attributes(
+            EntityId(1),
+            EntityRenderAttributes {
+                transparency: EntityTransparency::Explicit(1.0),
+                color: cad_db::EntityColor::ByLayer,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let db = builder.finish().unwrap();
+    let (bytes, _) = export_db(&db);
+
+    match &read_entities(&bytes)[0] {
+        EntityType::Line(line) => assert_eq!(
+            line.common.color,
+            acadrust::Color::ByLayer,
+            "a ByLayer entity must stay symbolic, not become the layer's RGB"
+        ),
+        other => panic!("expected LINE, got {other:?}"),
+    }
+
+    // The pair (symbolic entity colour, layer table row) survives a round trip,
+    // which is what makes a later layer colour edit take effect.
+    let reimported = import_bytes(&bytes);
+    let entity = reimported.entities().next().expect("one line reimports");
+    assert_eq!(
+        reimported.entity_render_attributes(entity.id).color,
+        cad_db::EntityColor::ByLayer
+    );
+    let layer = reimported.layer(entity.layer).expect("the layer reimports");
+    assert_eq!(layer.name, "WALLS");
+    assert_eq!(
+        reimported.layer_attributes(entity.layer).color,
+        cad_db::LayerColor {
+            aci: Some(1),
+            rgb: [255, 0, 0],
+        }
+    );
+}
+
+#[test]
 fn aligned_text_writes_the_alignment_point_and_round_trips() {
     let (bytes, report) = export_one(SemanticGeometry::Text {
         text: "X".into(),

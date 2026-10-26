@@ -34,9 +34,10 @@ impl DbEntity {
 /// it records the attribute.
 ///
 /// The importer resolves `ByObject` (an explicit entity value) and `ByLayer`
-/// before storing, because the representation layer has no access to the layer
-/// table. `ByBlock` is kept symbolic so INSERT expansion can substitute the
-/// containing block reference's opacity (audit B21 / F14).
+/// before storing: the representation resolves **colour** through the layer
+/// table (`ByLayer` below), but it does not resolve transparency, so opacity
+/// provenance is flattened here. `ByBlock` is kept symbolic so INSERT expansion
+/// can substitute the containing block reference's opacity (audit B21 / F14).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EntityTransparency {
     /// A resolved opacity in `[0, 1]`.
@@ -56,11 +57,12 @@ impl Default for EntityTransparency {
 ///
 /// Channels are sRGB `0..=255`, exactly the values acadrust exposes through
 /// `Color::Rgb` / its canonical ACI table, so nothing is invented on the way in.
-/// The importer resolves an explicit entity colour (`ByObject`) and `ByLayer`
-/// before storing, because the representation layer has no access to the layer
-/// table. `ByBlock` stays symbolic so INSERT expansion can substitute the
-/// containing block reference's colour (the same mechanism `EntityTransparency`
-/// uses; audit B21 / F14).
+/// The importer resolves an explicit entity colour (`ByObject`) and keeps
+/// `ByLayer` **symbolic**: the representation reads the owning layer's colour
+/// from the layer table when it expands the entity, so editing a layer colour
+/// recolours its `ByLayer` entities without any entity write. `ByBlock` stays
+/// symbolic so INSERT expansion can substitute the containing block reference's
+/// colour (the same mechanism `EntityTransparency` uses; audit B21 / F14).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EntityColor {
     /// A resolved sRGB colour.
@@ -69,8 +71,9 @@ pub enum EntityColor {
     /// model root, or with no enclosing INSERT, this falls back to the
     /// documented default render colour.
     ByBlock,
-    /// No concrete colour was resolved (`ByLayer` with no reachable layer, or a
-    /// missing attribute). The representation applies the default render colour.
+    /// Use the owning layer's colour. The representation resolves it from the
+    /// layer table at expansion time; a layer with no stored attribute row falls
+    /// back to `LayerAttributes::default().color` (ACI 7 white).
     #[default]
     ByLayer,
 }
@@ -153,8 +156,9 @@ impl LinetypePattern {
 /// How an entity's display linetype is determined before batching.
 ///
 /// The importer resolves an explicit entity linetype and a reachable layer
-/// linetype before storing, because the representation layer has no access to
-/// the layer table. `ByBlock` stays symbolic so INSERT expansion can substitute
+/// linetype before storing: the representation resolves only **colour** through
+/// the layer table, so linetype provenance is flattened here. `ByBlock` stays
+/// symbolic so INSERT expansion can substitute
 /// the containing block reference's linetype, exactly like [`EntityColor`] and
 /// [`EntityLineWeight`]. An unresolvable or unknown linetype becomes
 /// `Continuous` rather than an invented pattern.
@@ -242,7 +246,8 @@ impl AnnotativeAttributes {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityRenderAttributes {
     pub transparency: EntityTransparency,
-    /// Resolved display colour (or a symbolic `ByBlock`).
+    /// Display colour: `Explicit` is concrete sRGB, while `ByLayer` and
+    /// `ByBlock` stay symbolic until expansion resolves them.
     pub color: EntityColor,
     /// Resolved display lineweight (or a symbolic `ByBlock`).
     pub lineweight: EntityLineWeight,

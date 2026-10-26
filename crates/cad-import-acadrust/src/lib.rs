@@ -343,9 +343,6 @@ struct ImporterBuilder<'a> {
     /// Effective display opacity of each layer, resolved from its DWG
     /// transparency (0 = opaque, 255 = transparent).
     layer_transparency: HashMap<LayerId, f32>,
-    /// Resolved sRGB colour of each layer, used to substitute `ByLayer` on an
-    /// entity (an acadrust `Color::Index` is resolved through its ACI table).
-    layer_colors: HashMap<LayerId, [u8; 3]>,
     /// Resolved lineweight of each layer in millimetres.
     layer_lineweights: HashMap<LayerId, f32>,
     /// Root linetype name of each layer (`Layer.line_type`), looked up against

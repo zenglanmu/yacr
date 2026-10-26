@@ -34,13 +34,13 @@ fn committed_fixtures_report_their_expected_losses() {
             "fixtures/plot/a4-layout.dwg",
             &[
                 "export.dropped.paper_space",
-                "export.note.bylayer_flattened",
+                "export.note.style_resolved",
                 "export.note.units_missing",
             ],
         ),
         (
             "fixtures/dwg/synthetic-four-lines.dwg",
-            &["export.note.bylayer_flattened", "export.note.units_missing"],
+            &["export.note.style_resolved", "export.note.units_missing"],
         ),
         (
             // The flange's six DIMENSIONs now migrate to the domain variant and
@@ -56,7 +56,7 @@ fn committed_fixtures_report_their_expected_losses() {
                 "export.converted.hatch",
                 "export.dropped.paper_space",
                 "export.dropped.unreferenced_block",
-                "export.note.bylayer_flattened",
+                "export.note.style_resolved",
                 "export.note.units_missing",
             ],
         ),

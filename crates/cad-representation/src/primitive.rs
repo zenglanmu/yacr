@@ -324,14 +324,16 @@ pub struct DisplayFragment {
     pub alpha: f32,
     /// Resolved display colour as normalized sRGB in `[0, 1]` per channel.
     ///
-    /// `build`/`from_tessellation` cannot reach the layer table, so they emit
+    /// `build`/`from_tessellation` only see one entity, so they emit
     /// [`DEFAULT_RENDER_COLOR`] and set [`Self::color_unresolved`];
-    /// [`ProviderRegistry::build_expanded`] replaces it with the importer's
-    /// resolved value, including `ByBlock` inheritance. Alpha stays in
+    /// [`ProviderRegistry::build_expanded`] replaces it with the entity's own
+    /// resolved colour — an explicit value, `ByBlock` inheritance, or the owning
+    /// layer's colour for `ByLayer` (see [`resolve_color`]). Alpha stays in
     /// [`Self::alpha`] so the two channels cannot diverge.
     pub color: [f32; 3],
-    /// `true` when the source colour was symbolic (`ByLayer`/`ByBlock`) and no
-    /// concrete value was available at this layer, so `color` is a fallback.
+    /// `true` when the source colour was symbolic and no concrete value was
+    /// available, so `color` is a fallback: a `ByBlock` with no enclosing INSERT,
+    /// or the database-less `build` path.
     pub color_unresolved: bool,
     /// Resolved lineweight in millimetres (see [`DEFAULT_LINEWEIGHT_MM`]).
     pub lineweight: f32,
@@ -368,25 +370,36 @@ pub struct DisplayFragment {
     pub primitive: DisplayPrimitive,
 }
 
-/// Resolve an entity's stored colour against an enclosing INSERT's resolved
-/// colour.
+/// Resolve an entity's stored colour against the enclosing INSERT's resolved
+/// colour and the owning layer's colour.
 ///
-/// An explicit sRGB value is concrete. `ByBlock` inherits the enclosing block
-/// reference's colour when one is threaded down, otherwise it is unresolved and
-/// the fallback default is used (never a fabricated source colour). `ByLayer`
-/// is unresolved here because this layer has no layer table; the importer has
-/// already substituted the layer colour for real imports.
-pub fn resolve_color(color: EntityColor, parent: Option<[f32; 3]>) -> ([f32; 3], bool) {
+/// An explicit sRGB value is concrete and passed through unchanged — no
+/// rounding and no palette lookup, so the stored bytes reach the renderer
+/// exactly. `ByBlock` inherits the enclosing block reference's colour when one
+/// is threaded down, otherwise it is unresolved and the fallback default is used
+/// (never a fabricated source colour). `ByLayer` resolves to `layer_color`: the
+/// owning layer's [`cad_db::LayerAttributes::color`] `.rgb`, read from the layer
+/// table by the caller at draw time, so editing a layer colour recolours its
+/// `ByLayer` entities on the next expansion with no entity write at all.
+pub fn resolve_color(
+    color: EntityColor,
+    parent: Option<[f32; 3]>,
+    layer_color: [u8; 3],
+) -> ([f32; 3], bool) {
+    let srgb = |rgb: [u8; 3]| {
+        [
+            rgb[0] as f32 / 255.0,
+            rgb[1] as f32 / 255.0,
+            rgb[2] as f32 / 255.0,
+        ]
+    };
     match color {
-        EntityColor::Explicit([r, g, b]) => (
-            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0],
-            false,
-        ),
+        EntityColor::Explicit(rgb) => (srgb(rgb), false),
         EntityColor::ByBlock => match parent {
             Some(parent) => (parent, false),
             None => (DEFAULT_RENDER_COLOR, true),
         },
-        EntityColor::ByLayer => (DEFAULT_RENDER_COLOR, true),
+        EntityColor::ByLayer => (srgb(layer_color), false),
     }
 }
 

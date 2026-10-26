@@ -8,6 +8,7 @@ use super::*;
 
 mod acis;
 mod basics;
+mod colour_provenance;
 mod dimension;
 mod dxf;
 mod hatch;

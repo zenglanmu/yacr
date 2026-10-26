@@ -82,12 +82,16 @@ impl<'a> ImporterBuilder<'a> {
 
         self.note_capability(&class_name, &geometry, &completeness, render, pick);
 
-        // Resolve the entity's effective display opacity, colour, lineweight
-        // and linetype so the representation/scene layers can carry real style
+        // Resolve the entity's effective display opacity, lineweight and
+        // linetype so the representation/scene layers can carry real style
         // instead of always drawing opaque grey (audit F14 / §2.1.3). ByObject
         // wins over ByLayer; ByBlock is kept symbolic for INSERT expansion.
+        //
+        // Colour is **not** resolved here: `ByLayer` is preserved symbolically
+        // and the representation reads the owning layer's colour from the layer
+        // table at draw time, so editing a layer colour recolours its entities
+        // without touching an entity row.
         let layer_alpha = self.layer_transparency.get(&layer).copied().unwrap_or(1.0);
-        let layer_color = self.layer_colors.get(&layer).copied();
         let layer_lineweight = self.layer_lineweights.get(&layer).copied();
         let layer_pattern = self
             .layer_linetypes
@@ -190,7 +194,7 @@ impl<'a> ImporterBuilder<'a> {
         }
         let attributes = EntityRenderAttributes {
             transparency: resolve_entity_transparency(common.transparency, layer_alpha),
-            color: resolve_entity_color(common.color, layer_color),
+            color: resolve_entity_color(common.color),
             lineweight: resolve_entity_lineweight(common.line_weight, layer_lineweight),
             linetype: resolved_linetype,
             geometry_source: if proxy_geometry_allowed(entity) {

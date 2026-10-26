@@ -38,36 +38,35 @@ fn layer_opacity_maps_dwg_bytes_to_opacity() {
 // ---- §3.2/§7.1: colour and lineweight resolution ----
 
 #[test]
-fn color_resolution_prefers_byobject_then_layer_then_byblock() {
-    // ByObject true colour wins over the layer.
+fn color_resolution_preserves_source_provenance() {
+    // ByObject true colour wins over the layer and is stored byte-identically.
     assert_eq!(
-        resolve_entity_color(acadrust::Color::from_rgb(10, 20, 30), Some([1, 2, 3])),
+        resolve_entity_color(acadrust::Color::from_rgb(10, 20, 30)),
         EntityColor::Explicit([10, 20, 30])
     );
     // An ACI index resolves through acadrust's canonical table, not a guess.
     assert_eq!(
-        resolve_entity_color(acadrust::Color::Index(1), Some([1, 2, 3])),
+        resolve_entity_color(acadrust::Color::Index(1)),
         EntityColor::Explicit([255, 0, 0])
     );
-    // ByLayer uses the layer's pre-resolved colour.
+    // ByLayer stays symbolic: the representation resolves it against the owning
+    // layer's `LayerAttributes::color.rgb` at draw time, so editing a layer
+    // colour recolours the entity without an entity write. (Before this change
+    // the importer flattened the layer RGB into `Explicit` here.)
     assert_eq!(
-        resolve_entity_color(acadrust::Color::ByLayer, Some([1, 2, 3])),
-        EntityColor::Explicit([1, 2, 3])
+        resolve_entity_color(acadrust::Color::ByLayer),
+        EntityColor::ByLayer
     );
-    // A materialised `None` keeps the layer's colour rather than black.
+    // A materialised `None` is DXF's "no colour", i.e. by layer; keeping it
+    // symbolic is what makes it follow the layer instead of drawing black.
     assert_eq!(
-        resolve_entity_color(acadrust::Color::None, Some([4, 5, 6])),
-        EntityColor::Explicit([4, 5, 6])
+        resolve_entity_color(acadrust::Color::None),
+        EntityColor::ByLayer
     );
     // ByBlock stays symbolic so INSERT expansion can supply the value.
     assert_eq!(
-        resolve_entity_color(acadrust::Color::ByBlock, Some([4, 5, 6])),
+        resolve_entity_color(acadrust::Color::ByBlock),
         EntityColor::ByBlock
-    );
-    // ByLayer with no reachable layer stays unresolved, not fabricated.
-    assert_eq!(
-        resolve_entity_color(acadrust::Color::ByLayer, None),
-        EntityColor::ByLayer
     );
 }
 

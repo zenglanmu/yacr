@@ -79,10 +79,15 @@ pub enum LayerLineWeight {
 ///
 /// # Nothing reads these yet
 ///
-/// This is storage plus round-trip only. No code path reads `locked`, `frozen`,
-/// `frozen_in_new_viewport`, `plottable`, `plot_style` or the layer colour to
-/// change behaviour: layer locking/freezing/plotting, and propagating a layer
-/// colour to `ByLayer` entities, are **not implemented**.
+/// `locked` is enforced on the entity write path (`crate::drawing::lock`), and
+/// `off`/`frozen` drive the derived `Layer::visible`. `frozen_in_new_viewport`,
+/// `plottable` and `plot_style` are storage plus round-trip only: freeze-specific
+/// regeneration, plotting and named plot styles are **not implemented**.
+///
+/// `color` **is** read: the representation resolves a `ByLayer` entity colour
+/// from this row, so editing a layer colour recolours its `ByLayer` entities
+/// without writing any entity. `linetype` and `lineweight` are still flattened
+/// onto entities at import time and are therefore storage-only here.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerAttributes {
     /// Layer is off (DXF: the **sign** of group `62`; there is no off bit in
