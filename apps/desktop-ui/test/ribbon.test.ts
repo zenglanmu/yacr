@@ -15,12 +15,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readCatalog, readCss, readModule } from './helpers.ts';
-import { columnMajorCells, pairsShareEdge, ribbonTab } from '../src/ribbon-model.ts';
-import { STANDARD_VIEW_PAIRS, STANDARD_VIEWS } from '../src/view3d.ts';
+import { columnMajorCells, pairsShareEdge, ribbonTab } from '../src/ribbon/ribbon-model.ts';
+import { STANDARD_VIEW_PAIRS, STANDARD_VIEWS } from '../src/cad/view3d.ts';
 import {
   OVERFLOW_EPSILON, RIBBON_CUE_WIDTH, ribbonBandOverflow, ribbonCueLayout, ribbonCueReserve,
   ribbonOverflow, ribbonScrollStep, ribbonScrollTarget, sameOverflow,
-} from '../src/ribbon-overflow.ts';
+} from '../src/ribbon/ribbon-overflow.ts';
 
 function block(css, selector) {
   const match = css.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`));

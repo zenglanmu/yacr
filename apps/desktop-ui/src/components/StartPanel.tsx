@@ -6,7 +6,7 @@
 import React from 'react';
 import { Icon } from '../icons.tsx';
 import { Button } from './primitives.tsx';
-import { unavailableReasonKey } from '../commands.ts';
+import { unavailableReasonKey } from '../commands/commands.ts';
 import { useI18n, useShell } from '../context.ts';
 
 export function StartPanel() {

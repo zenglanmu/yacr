@@ -17,10 +17,10 @@
 // What lives here is the part that must be true without a renderer: the catalog
 // registry, the live draft bounds, what a key press means in each mode, and the
 // fate of one Apply (close vs. keep the draft and say why).
-import { SELECTED_TEXT_MAX_LENGTH, selectedTextOf } from './textedit.ts';
-import type { SelectedTextResult, TextEditKeyAction, TextEditKeyEvent } from './textedit.ts';
-import { TEXT_TOO_LONG_KEY, textLength } from './text.ts';
-import type { Translator } from './i18n.ts';
+import { SELECTED_TEXT_MAX_LENGTH, selectedTextOf } from '../tools/textedit.ts';
+import type { SelectedTextResult, TextEditKeyAction, TextEditKeyEvent } from '../tools/textedit.ts';
+import { TEXT_TOO_LONG_KEY, textLength } from '../tools/text.ts';
+import type { Translator } from '../i18n.ts';
 
 /**
  * Every catalog key this dialog and its entry point render.

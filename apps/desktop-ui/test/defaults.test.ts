@@ -11,7 +11,7 @@ import {
   isBrowserZoomWheel,
   isTextEntryTarget,
 } from '../src/defaults.ts';
-import { bindProbeInput } from '../src/input.ts';
+import { bindProbeInput } from '../src/cad/input.ts';
 import { readAppSource } from './helpers.ts';
 
 function fakeTarget() {

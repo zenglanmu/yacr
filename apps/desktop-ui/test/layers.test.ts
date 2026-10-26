@@ -38,10 +38,10 @@ import {
   setLayerVisible,
   visibleLayers,
   WAITING_CODE,
-} from '../src/layers.ts';
-import { DEFAULT_LAYER_NAME, deletableLayer, layerErrorKey } from '../src/layer-labels.ts';
-import { LOCAL_CHROME_COMMANDS } from '../src/commands.ts';
-import { offeredItems, PALETTE_COMMANDS } from '../src/ribbon-model.ts';
+} from '../src/layers/layers.ts';
+import { DEFAULT_LAYER_NAME, deletableLayer, layerErrorKey } from '../src/layers/layer-labels.ts';
+import { LOCAL_CHROME_COMMANDS } from '../src/commands/commands.ts';
+import { offeredItems, PALETTE_COMMANDS } from '../src/ribbon/ribbon-model.ts';
 import { readCatalog, readCss, readModule } from './helpers.ts';
 
 /**
@@ -666,7 +666,7 @@ test('the palette is docked next to the other palettes and opened by a shell act
   assert.ok(workspace.includes('const leftOpen = showStart || showProperties || showDiagnostics || showLayers;'));
 
   const app = await readModule('App.tsx');
-  assert.ok(app.includes("import { isLayersCommand } from './layers.ts';"));
+  assert.ok(app.includes("import { isLayersCommand } from './layers/layers.ts';"));
   assert.ok(app.includes('const [layersOpen, setLayersOpen] = useState(false);'),
     'closed by default, so the start page keeps its geometry');
   assert.ok(app.includes('const [layersFocus, setLayersFocus] = useState(0);'));
@@ -746,7 +746,7 @@ test('every sentence the palette shows comes from the catalog, in both languages
   // (`LayerDetails.tsx`, so the palette keeps a single row of markup), so a key may
   // be literal in any of the three; `layers-attributes.test.ts` covers the
   // behavior.
-  const attributes = await readModule('layer-attributes.ts');
+  const attributes = await readModule('layers/layer-attributes.ts');
   const details = await readModule('components/LayerDetails.tsx');
   const renders = (key: string) =>
     palette.includes(`'${key}'`) || attributes.includes(`'${key}'`) || details.includes(`'${key}'`);
@@ -797,7 +797,7 @@ test('every layer refusal code maps to catalog copy, in both languages', async (
     'layer.property.unsupported',
     'layer.property.value',
   ];
-  const labels = await readModule('layer-labels.ts');
+  const labels = await readModule('layers/layer-labels.ts');
   for (const code of refusals) {
     const key = `layers.error.${code}`;
     assert.equal(typeof zh[key], 'string', `zh-CN ${key}`);
@@ -836,7 +836,7 @@ test('every layer refusal code maps to catalog copy, in both languages', async (
     'the mapped copy is what wins; the raw reason is the fallback',
   );
   // The model declares the three IPC names and the three store actions.
-  const model = await readModule('layers.ts');
+  const model = await readModule('layers/layers.ts');
   for (const name of ['cad_create_layer', 'cad_rename_layer', 'cad_delete_layer']) {
     assert.ok(model.includes(`'${name}'`), `${name} is the wire name the model sends`);
   }
@@ -921,7 +921,7 @@ test('create, rename and delete are one inline form each, keyboard and focus inc
 
 test('the panel and the model carry no hardcoded CJK', async () => {
   const sources = [
-    await readModule('layers.ts'),
+    await readModule('layers/layers.ts'),
     await readModule('components/LayersPalette.tsx'),
     await readModule('App.tsx'),
     await readModule('components/Workspace.tsx'),

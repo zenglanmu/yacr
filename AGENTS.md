@@ -51,9 +51,11 @@ Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + �
 新代码**不得**沿用该做法。
 
 **提交纪律（已发生两次，务必照做）**：后台 specialist lane 仍在写工作树时**禁止** `git add -A` / `git add .`；提交前必须 ①`git status --porcelain` **逐项**核对都属于本轮改动，②按**显式路径**暂存，③门禁命令**不得**用 `| tail -1` 之类的管道吞掉退出码（用 `${PIPESTATUS[0]}` 或 `set -o pipefail` 显式检查）。**已发生**：`git add -A` 两次扫入他人/lane 半成品；`clippy | tail -1` 一次把失败吞成"通过"。
-**机械规则（已发生三次，务必照做）**：在 `crates/cad-app/src/selection.rs` 新增 `PropertyRow::new("<key>")` 时，**必须同时**补两个 i18n 目录的 `properties.row.<key>` **与** `apps/desktop-ui/src/property-labels.ts` 的 `propertyRowLabel` switch 分支；`apps/desktop-ui/test/properties.test.ts` 会扫源码字面量并要求两处齐全，否则失败。
+**机械规则（已发生三次，务必照做）**：在 `crates/cad-app/src/selection.rs` 新增 `PropertyRow::new("<key>")` 时，**必须同时**补两个 i18n 目录的 `properties.row.<key>` **与** `apps/desktop-ui/src/properties/property-labels.ts` 的 `propertyRowLabel` switch 分支；`apps/desktop-ui/test/properties.test.ts` 会扫源码字面量并要求两处齐全，否则失败。
 
 **前端语言（2026-10-26）**：`apps/desktop-ui/src` 已是 **TypeScript/TSX**（`tsc --noEmit` 为类型门禁，`npm test` = 类型检查 + `node --test test/*.test.ts`）。相对导入带显式 `.ts`/`.tsx` 扩展名（Node 24 类型剥离直接跑测试）；只用**可剥离语法**（禁 `enum`/`namespace`/参数属性），类型导入用 `import type`。`test/*.ts` 目前**不参与** `tsc` 类型检查（有意，见 `test/helpers.ts` 头注释），不得据此宣称测试已类型化。
+
+**前端目录（2026-10-26）**：纯逻辑按功能放入 `src/{cad,tools,commands,ribbon,layers,properties,popup,options}/`，保留原文件名；区域组件仍在 `src/components/`，回归夹具仍在 `src/stacking-regression/`。`App.tsx` 与入口、共享上下文、文案入口、样式等留在根目录；新文件优先放入所属功能目录，不新增桶式导出。职责表见 `apps/desktop-ui/README.md`。
 
 ## 仓库结构
 

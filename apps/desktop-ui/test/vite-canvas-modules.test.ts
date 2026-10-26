@@ -152,6 +152,6 @@ test('vite.config.mjs registers the dev-only plugin', async () => {
   assert.match(config, /import \{ canvasPublicModules \} from '\.\/vite-canvas-modules\.mjs';/);
   assert.match(config, /plugins: \[canvasPublicModules\(\)\]/);
   // The plugin module itself must not sneak into the shipped UI sources.
-  const src = await readFile(join(PACKAGE_DIR, 'src', 'canvas-host.ts'), 'utf8');
+  const src = await readFile(join(PACKAGE_DIR, 'src', 'cad', 'canvas-host.ts'), 'utf8');
   assert.ok(!src.includes('vite-canvas-modules'), 'the loader must not import dev tooling');
 });

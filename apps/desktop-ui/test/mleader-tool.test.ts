@@ -20,7 +20,7 @@ import {
   setToolText,
   textEscapeAction,
   toolTextPrefill,
-} from '../src/text.ts';
+} from '../src/tools/text.ts';
 import {
   TOOL_PARAMETER_SPECS,
   TOOL_PARAMETERS,
@@ -29,7 +29,7 @@ import {
   parseCadStatus,
   toolParameterViews,
   toolStepPromptKey,
-} from '../src/cad.ts';
+} from '../src/cad/cad.ts';
 import {
   CAPABILITY_GATES,
   COMMAND_CATALOG,
@@ -39,8 +39,8 @@ import {
   isSupportedCommand,
   setCommandCatalog,
   toolLabelKey,
-} from '../src/commands.ts';
-import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon-model.ts';
+} from '../src/commands/commands.ts';
+import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon/ribbon-model.ts';
 import { readAppSource, readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');

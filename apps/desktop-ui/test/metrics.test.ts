@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canvasBackingSize, isReportableRect, metricsKey, pointerPosition, rectFromElement } from '../src/metrics.ts';
+import { canvasBackingSize, isReportableRect, metricsKey, pointerPosition, rectFromElement } from '../src/cad/metrics.ts';
 import { readAppSource, readCss, readModule } from './helpers.ts';
 
 const element = rect => ({ getBoundingClientRect: () => rect });
@@ -66,7 +66,7 @@ test('canvasBackingSize rejects degenerate rects instead of inventing a size', (
 });
 
 test('the input binding listens to every chrome region so metrics refresh on layout change', async () => {
-  const source = await readModule('input.ts');
+  const source = await readModule('cad/input.ts');
   assert.ok(source.includes(".closest?.('.shell')"));
   assert.ok(source.includes(".querySelectorAll('.app-region')"));
   assert.ok(source.includes('rectFromElement'));

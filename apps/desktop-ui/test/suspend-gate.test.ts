@@ -8,7 +8,7 @@
 // window while the user is looking at the dialog.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSuspendGate } from '../src/input.ts';
+import { createSuspendGate } from '../src/cad/input.ts';
 import { readModule } from './helpers.ts';
 
 /** A gate wired to a fake lane binding, the way `App` wires a real one. */

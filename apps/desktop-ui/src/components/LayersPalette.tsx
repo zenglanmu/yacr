@@ -63,11 +63,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { Icon } from '../icons.tsx';
 import { Button, IconButton } from './primitives.tsx';
 import { useI18n, useShell } from '../context.ts';
-import { createLayersStore, errorCode, filterLayers, nextFocusIndex } from '../layers.ts';
-import type { LayerRow, LayersStore } from '../layers.ts';
-import { colorPayload, EMPTY_MARK_SUMMARY, layerMarkSummary, layerSwatch } from '../layer-attributes.ts';
+import { createLayersStore, errorCode, filterLayers, nextFocusIndex } from '../layers/layers.ts';
+import type { LayerRow, LayersStore } from '../layers/layers.ts';
+import { colorPayload, EMPTY_MARK_SUMMARY, layerMarkSummary, layerSwatch } from '../layers/layer-attributes.ts';
 import { LayerDetails } from './LayerDetails.tsx';
-import { deletableLayer, layerErrorKey } from '../layer-labels.ts';
+import { deletableLayer, layerErrorKey } from '../layers/layer-labels.ts';
 import type { ComposingKeyEvent } from './key-events.ts';
 
 /** The three skeleton bars of a first read. */

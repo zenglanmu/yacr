@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { commandEnabled, handleCommandKey, importProgressView, parseCadStatus, queueCadCommand, requestImportCancel, startCadPolling } from '../src/cad.ts';
-import { setCommandCatalog } from '../src/commands.ts';
+import { commandEnabled, handleCommandKey, importProgressView, parseCadStatus, queueCadCommand, requestImportCancel, startCadPolling } from '../src/cad/cad.ts';
+import { setCommandCatalog } from '../src/commands/commands.ts';
 import { readAppSource, readComponentsSource } from './helpers.ts';
 
 // The admission vocabulary the host reports; without it every command would be

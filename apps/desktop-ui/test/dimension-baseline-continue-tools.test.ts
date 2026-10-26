@@ -15,7 +15,7 @@ import {
   TOOL_READY_PROMPTS,
   TOOL_STEP_PROMPTS,
   toolStepPromptKey,
-} from '../src/cad.ts';
+} from '../src/cad/cad.ts';
 import {
   admitCommandText,
   COMMAND_CATALOG,
@@ -23,8 +23,8 @@ import {
   isSupportedCommand,
   setCommandCatalog,
   toolLabelKey,
-} from '../src/commands.ts';
-import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon-model.ts';
+} from '../src/commands/commands.ts';
+import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon/ribbon-model.ts';
 import { readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');
@@ -292,7 +292,7 @@ test('every new key resolves in both catalogs and the copy names the base pick a
   // The open-ended table references exactly the contract's prompt keys: no
   // invented key, no reuse of another tool's step, and no duplicate of the shared
   // ready copy.
-  const table = await readModule('tool-open-ended.ts');
+  const table = await readModule('tools/tool-open-ended.ts');
   const referenced = new Set([...table.matchAll(/'(tool\.prompt\.[a-z0-9_.]+)'/g)].map(match => match[1]));
   assert.deepEqual(
     [...referenced].sort(),

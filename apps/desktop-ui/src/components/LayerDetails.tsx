@@ -26,8 +26,8 @@
 import React from 'react';
 import { IconButton } from './primitives.tsx';
 import { useI18n } from '../context.ts';
-import { layerAttributes, layerFlags } from '../layer-attributes.ts';
-import type { LayerRow } from '../layers.ts';
+import { layerAttributes, layerFlags } from '../layers/layer-attributes.ts';
+import type { LayerRow } from '../layers/layers.ts';
 
 /** What the panel needs from the row, and the three things a press may do. */
 export interface LayerDetailsProps {

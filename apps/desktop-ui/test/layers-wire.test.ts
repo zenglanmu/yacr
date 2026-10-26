@@ -25,7 +25,7 @@ import {
   RENAME_LAYER_COMMAND,
   SET_LAYER_PROPERTY_COMMAND,
   setLayerProperty,
-} from '../src/layers.ts';
+} from '../src/layers/layers.ts';
 
 /** One layer row exactly as the Rust `CadLayer` serializes it. */
 function row(name, overrides = {}) {

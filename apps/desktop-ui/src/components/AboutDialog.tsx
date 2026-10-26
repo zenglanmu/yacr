@@ -12,9 +12,9 @@ import React from 'react';
 import { Icon } from '../icons.tsx';
 import { Button } from './primitives.tsx';
 import { useI18n } from '../context.ts';
-import { POPUP_KEYS, aboutVersionText } from '../popup.ts';
-import type { PopupView } from '../popup.ts';
-import { DIALOG_BODY, DIALOG_CONTENT, DIALOG_FOOT } from '../popup-layout.ts';
+import { POPUP_KEYS, aboutVersionText } from '../popup/popup.ts';
+import type { PopupView } from '../popup/popup.ts';
+import { DIALOG_BODY, DIALOG_CONTENT, DIALOG_FOOT } from '../popup/popup-layout.ts';
 
 // The same square mark the title bar uses, in token colours only.
 const MARK = {

@@ -29,9 +29,9 @@ import {
   textEditHostChanged,
   textEditKeyAction,
   textEditView,
-} from '../src/textedit.ts';
-import { POPUP_TEXT_KEYS, textEditKeyAction as popupTextEditKeyAction } from '../src/popup-textedit.ts';
-import { TEXT_TOO_LONG_KEY, TOOL_TEXT_MAX_LENGTH, toolTextPrefill } from '../src/text.ts';
+} from '../src/tools/textedit.ts';
+import { POPUP_TEXT_KEYS, textEditKeyAction as popupTextEditKeyAction } from '../src/popup/popup-textedit.ts';
+import { TEXT_TOO_LONG_KEY, TOOL_TEXT_MAX_LENGTH, toolTextPrefill } from '../src/tools/text.ts';
 import { createTranslator } from '../src/i18n.ts';
 import { readCatalog, readModule } from './helpers.ts';
 

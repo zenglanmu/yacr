@@ -21,8 +21,8 @@ import {
   menuItems,
   nextEnabledIndex,
   placeContextMenu,
-} from '../context-menu.ts';
-import type { ContextMenuModel, ContextMenuItem, MenuPlacement } from '../context-menu.ts';
+} from '../commands/context-menu.ts';
+import type { ContextMenuModel, ContextMenuItem, MenuPlacement } from '../commands/context-menu.ts';
 
 const ITEM_ID_PREFIX = 'cad-context-item-';
 

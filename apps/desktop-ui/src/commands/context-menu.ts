@@ -23,7 +23,7 @@
 //
 // Everything here is DOM-free and deterministic (no clock, no randomness), so
 // the menu contract is testable with plain Node.
-import { selectionCount } from './selection-wire.ts';
+import { selectionCount } from '../cad/selection-wire.ts';
 
 // The count rule lives in `selection-wire.ts` beside the selection block it reads,
 // and the command-admission rules (`commands.ts`) ask it the same question. It is

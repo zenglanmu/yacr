@@ -34,7 +34,7 @@ import {
   TEXT_FIELD_FOCUS,
   TEXT_FIELD_FOCUSED,
   TEXT_META,
-} from '../src/popup-layout.ts';
+} from '../src/popup/popup-layout.ts';
 import {
   openPopup,
   POPUP_KINDS,
@@ -42,7 +42,7 @@ import {
   popupPayload,
   popupView,
   textEditPayload,
-} from '../src/popup.ts';
+} from '../src/popup/popup.ts';
 import {
   POPUP_TEXT_KEYS,
   POPUP_TEXT_MAX,
@@ -53,7 +53,7 @@ import {
   textEditKeyAction,
   textEditLocalRefusal,
   textEditOpenError,
-} from '../src/popup-textedit.ts';
+} from '../src/popup/popup-textedit.ts';
 import { createTranslator } from '../src/i18n.ts';
 
 const ZH = await readCatalog('zh-CN');
@@ -155,7 +155,7 @@ test('the draft is the host string verbatim and nothing converts a line break', 
   assert.ok(textEditDraftView(view.text, true).value.includes('\\P'));
 
   const dialog = await readModule('components/TextEditDialog.tsx');
-  const module = await readModule('popup-textedit.ts');
+  const module = await readModule('popup/popup-textedit.ts');
   // Comments may *name* the codes; code must not touch them.
   const code = source => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   for (const [file, source] of [['TextEditDialog.tsx', dialog], ['popup-textedit.ts', module]]) {
@@ -518,10 +518,10 @@ test('the textEdit document starts none of the shell global effects', async () =
     'createInputLane(',
     'setCommandCatalog(',
     'probe_input',
-    './cad.ts',
+    './cad/cad.ts',
     './defaults.ts',
-    './input.ts',
-    './commands.ts',
+    './cad/input.ts',
+    './commands/commands.ts',
     'useShell()',
   ];
   // The dialog adds no listener of its own: the window's one key (Escape) stays
@@ -565,7 +565,7 @@ test('every key the text-edit dialog uses is a declared contract key', async () 
   // Declared once, as data, and addressed through the registry. The dialog's own
   // copy is a literal here; the reused bound is the shared `TEXT_TOO_LONG_KEY`
   // constant, so the dialog and the text step cannot drift apart.
-  const source = await readModule('popup-textedit.ts');
+  const source = await readModule('popup/popup-textedit.ts');
   for (const key of NEW_KEYS) {
     assert.equal(source.includes(`'${key}'`), true, `popup-textedit.mjs must declare ${key}`);
   }

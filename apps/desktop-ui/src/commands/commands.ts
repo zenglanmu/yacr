@@ -16,7 +16,7 @@
 // `canNew`/`canSave`/`canPlot` in `cad_status` and those booleans decide. Every
 // refusal is explicit and named, not a silent omission — the buttons stay visible
 // but disabled with the real reason key.
-import { selectionCount } from './selection-wire.ts';
+import { selectionCount } from '../cad/selection-wire.ts';
 
 /** The `cad_status` slice the admission rules read (all fields are the host's). */
 export interface CommandStatusView {

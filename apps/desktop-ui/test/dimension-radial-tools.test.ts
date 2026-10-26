@@ -9,7 +9,7 @@
 // fabricated step. Every user-visible string comes from the shared catalogs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad.ts';
+import { TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad/cad.ts';
 import {
   admitCommandText,
   COMMAND_CATALOG,
@@ -17,8 +17,8 @@ import {
   isSupportedCommand,
   setCommandCatalog,
   toolLabelKey,
-} from '../src/commands.ts';
-import { RIBBON_TABS } from '../src/ribbon-model.ts';
+} from '../src/commands/commands.ts';
+import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
 import { readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');
@@ -267,7 +267,7 @@ test('the new ribbon items use dedicated dimension glyphs that exist and stay di
   const familyIcons = family.map(id => panel.items.find(item => item.id === id).icon);
   assert.equal(new Set(familyIcons).size, familyIcons.length, 'the dimension family glyphs must be distinct');
   // The catalog uses the same dedicated names, so the command-line list matches.
-  const { COMMAND_CATALOG } = await import('../src/commands.ts');
+  const { COMMAND_CATALOG } = await import('../src/commands/commands.ts');
   for (const id of family) {
     assert.equal(COMMAND_CATALOG.find(command => command.id === id).icon, panel.items.find(item => item.id === id).icon, id);
   }

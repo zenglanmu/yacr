@@ -13,9 +13,9 @@ import {
   isSupportedCommand,
   NO_DOCUMENT_KEY,
   setCommandCatalog,
-} from '../src/commands.ts';
+} from '../src/commands/commands.ts';
 import { createTranslator } from '../src/i18n.ts';
-import { RIBBON_TABS } from '../src/ribbon-model.ts';
+import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
 import {
   requestStandardView,
   STANDARD_VIEWS,
@@ -24,7 +24,7 @@ import {
   standardViewName,
   standardViewUnavailableReasonKey,
   submitStandardView,
-} from '../src/view3d.ts';
+} from '../src/cad/view3d.ts';
 import { readCatalog, readModule } from './helpers.ts';
 
 // Only the names this suite exercises. `ORBIT` is here because the router does

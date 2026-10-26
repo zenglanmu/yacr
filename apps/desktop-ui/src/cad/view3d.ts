@@ -13,8 +13,8 @@
 // or its refusal — surfaces later through `cad_status.error`. Nothing here may
 // present admission as completion, retry a request, or clamp a view name to a
 // neighbouring one.
-import { NO_DOCUMENT_KEY } from './commands.ts';
-import type { Translator } from './i18n.ts';
+import { NO_DOCUMENT_KEY } from '../commands/commands.ts';
+import type { Translator } from '../i18n.ts';
 
 /**
  * Tauri IPC arguments, the subset of `@tauri-apps/api`'s `InvokeArgs` this

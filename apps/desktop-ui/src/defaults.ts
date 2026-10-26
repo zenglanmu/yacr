@@ -16,10 +16,10 @@
 // else is blocked here, in one place, and a right-click inside the CAD partition
 // is handed to the single shortcut-menu hook below — which builds the menu model
 // the app renders as an in-DOM overlay.
-import { buildContextMenu } from './context-menu.ts';
-import type { ContextMenuModel, ContextMenuSelection } from './context-menu.ts';
-import { pointerPosition } from './metrics.ts';
-import type { LocalPoint } from './metrics.ts';
+import { buildContextMenu } from './commands/context-menu.ts';
+import type { ContextMenuModel, ContextMenuSelection } from './commands/context-menu.ts';
+import { pointerPosition } from './cad/metrics.ts';
+import type { LocalPoint } from './cad/metrics.ts';
 
 const TEXT_ENTRY_TAGS: ReadonlySet<string> = new Set(['INPUT', 'TEXTAREA']);
 

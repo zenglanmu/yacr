@@ -16,7 +16,7 @@ import { LayersPalette } from './LayersPalette.tsx';
 import { PropertiesPalette } from './PropertiesPalette.tsx';
 import { DiagnosticsPalette } from './DiagnosticsPalette.tsx';
 import { useI18n, useShell } from '../context.ts';
-import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../surface.ts';
+import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../cad/surface.ts';
 
 export function Workspace() {
   const { t } = useI18n();

@@ -5,7 +5,7 @@
 // exercised end to end with the real input binding.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bindProbeInput } from '../src/input.ts';
+import { bindProbeInput } from '../src/cad/input.ts';
 import { releaseFocusOnOutsidePress } from '../src/focus-release.ts';
 import { readModule } from './helpers.ts';
 

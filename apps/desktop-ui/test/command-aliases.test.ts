@@ -17,7 +17,7 @@ import {
   isSupportedCommand,
   setCommandAliases,
   setCommandCatalog,
-} from '../src/commands.ts';
+} from '../src/commands/commands.ts';
 import { HOST_NAMES, readModule } from './helpers.ts';
 
 setCommandCatalog(HOST_NAMES);

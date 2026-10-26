@@ -16,9 +16,9 @@ import {
   canvasSessionReport,
   clampCanvasLabel,
   createCanvasSessionReporter,
-} from '../src/surface.ts';
+} from '../src/cad/surface.ts';
 import { readAppSource, readCatalog, readModule } from './helpers.ts';
-import { offeredItems, offeredPanels, PALETTE_ACTIONS, PALETTE_COMMANDS, RIBBON_TABS } from '../src/ribbon-model.ts';
+import { offeredItems, offeredPanels, PALETTE_ACTIONS, PALETTE_COMMANDS, RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
 
 const LABEL = 'synthetic-four-lines.dwg';
 
@@ -251,7 +251,7 @@ test('a visible canvas drawing never becomes a host document for admission', asy
   // standard views or the host's palettes.
   assert.ok(!/const documentOpen = [^;]*canvasSession/.test(app));
   // Command admission keeps reading the host's own label.
-  const commands = await readModule('commands.ts');
+  const commands = await readModule('commands/commands.ts');
   assert.ok(commands.includes('DOCUMENT_SCOPED_COMMANDS.includes(id) && status.documentLabel === null'));
   // The ribbon's no-document gate keeps reading the host fact too.
   const ribbon = await readModule('components/Ribbon.tsx');
@@ -270,7 +270,7 @@ test('the palettes are not offered on the canvas carrier', async () => {
   // The carrier rule is one helper (`palettesOffered` in `surface.mjs`), asked by
   // the panels, the status bar and the nav rail alike.
   assert.ok(workspace.includes('const palettesAvailable = palettesOffered(shell);'));
-  assert.ok(workspace.includes("import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../surface.ts';"));
+  assert.ok(workspace.includes("import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../cad/surface.ts';"));
   assert.ok(workspace.includes('const showProperties = palettesAvailable && shell.propertiesOpen && !showStart;'));
   assert.ok(workspace.includes('const showDiagnostics = palettesAvailable && Boolean(shell.diagnosticsOpen);'));
   // Both panels render from the gated flags, so no empty panel is possible.
@@ -345,7 +345,7 @@ test('the identity adds no user-visible copy to either catalog', async () => {
     assert.ok(!/canvas.?session/i.test(key), `unexpected catalog key ${key}`);
   }
   // And the touched modules carry no hardcoded CJK of their own.
-  for (const name of ['App.tsx', 'surface.ts', 'components/Workspace.tsx', 'components/StatusBar.tsx', 'components/DocTabs.tsx']) {
+  for (const name of ['App.tsx', 'cad/surface.ts', 'components/Workspace.tsx', 'components/StatusBar.tsx', 'components/DocTabs.tsx']) {
     const source = await readModule(name);
     assert.ok(!/[\u3400-\u9fff]/.test(source), `${name} must not carry hardcoded CJK`);
   }

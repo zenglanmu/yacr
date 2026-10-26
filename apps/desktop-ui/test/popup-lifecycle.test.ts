@@ -117,7 +117,7 @@ test('the D1 second-window mechanism is gone', async () => {
   ]) {
     assert.equal(app.includes(forbidden), false, `the app popup module must not contain ${forbidden}`);
   }
-  const ui = await readModule('popup.ts');
+  const ui = await readModule('popup/popup.ts');
   for (const forbidden of ['POPUP_GLOBAL', 'readPopupBoot', 'popupBoot', '__YACR_POPUP__']) {
     assert.equal(ui.includes(forbidden), false, `popup.mjs must not keep ${forbidden}`);
   }

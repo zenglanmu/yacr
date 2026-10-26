@@ -10,7 +10,7 @@ import {
   formatCommandLogEntry,
   formatMeasurementValue,
   xyAngleDegrees,
-} from '../src/command-log.ts';
+} from '../src/commands/command-log.ts';
 import { createTranslator } from '../src/i18n.ts';
 import { readCatalog, readCss, readModule } from './helpers.ts';
 

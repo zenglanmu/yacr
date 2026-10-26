@@ -11,7 +11,7 @@ import {
   CAPABILITY_GATES,
   setCommandCatalog,
   unavailableReasonKey,
-} from '../src/commands.ts';
+} from '../src/commands/commands.ts';
 
 // The router's vocabulary for these names: the canonical selectors plus their
 // full-word aliases, as `admissible_names()` reports them.
@@ -142,7 +142,7 @@ test('the start panel offers New through the same admission, not a permanent dis
 });
 
 test('the File tab keeps NEW/SAVE as command tokens enabled by admission', async () => {
-  const { RIBBON_TABS } = await import('../src/ribbon-model.ts');
+  const { RIBBON_TABS } = await import('../src/ribbon/ribbon-model.ts');
   const { readModule } = await import('./helpers.ts');
   const file = RIBBON_TABS.find(tab => tab.id === 'file').panels.find(panel => panel.id === 'file');
   const byId = Object.fromEntries(file.items.map(item => [item.id, item]));

@@ -4,7 +4,7 @@
 // the system arrow stays — the pointer is never left invisible.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCadStatus } from '../src/cad.ts';
+import { parseCadStatus } from '../src/cad/cad.ts';
 import { readCss, readModule } from './helpers.ts';
 
 const empty = {

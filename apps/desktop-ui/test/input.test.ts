@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bindProbeInput, createInputLane, shiftField } from '../src/input.ts';
+import { bindProbeInput, createInputLane, shiftField } from '../src/cad/input.ts';
 import { readAppSource, readCatalog } from './helpers.ts';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));

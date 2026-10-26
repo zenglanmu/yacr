@@ -2,7 +2,7 @@
 // `cad_status` poll. Split out of `cad.ts` (file-size ceiling); `cad.ts`
 // re-exports every symbol here so the chrome's import surface is unchanged.
 
-import { admitCommandText, isLocalChromeCommand } from './commands.ts';
+import { admitCommandText, isLocalChromeCommand } from '../commands/commands.ts';
 import { parseCadStatus } from './cad-status.ts';
 import type { CadStatus, Invoke } from './cad-status.ts';
 

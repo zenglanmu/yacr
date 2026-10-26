@@ -27,11 +27,11 @@ import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
 import { IconButton } from './primitives.tsx';
 import { useI18n } from '../context.ts';
-import { closePopup, POPUP_KEYS, popupView } from '../popup.ts';
-import type { PopupPayload, PopupView } from '../popup.ts';
+import { closePopup, POPUP_KEYS, popupView } from '../popup/popup.ts';
+import type { PopupPayload, PopupView } from '../popup/popup.ts';
 import type { Translator } from '../i18n.ts';
-import { POPUP_TEXT_KEYS } from '../popup-textedit.ts';
-import { OPTIONS_KEYS } from '../options.ts';
+import { POPUP_TEXT_KEYS } from '../popup/popup-textedit.ts';
+import { OPTIONS_KEYS } from '../options/options.ts';
 import {
   DIALOG_BODY,
   DIALOG_CARD,
@@ -39,7 +39,7 @@ import {
   DIALOG_HEAD,
   DIALOG_TITLE,
   POPUP_CARD_SIZE,
-} from '../popup-layout.ts';
+} from '../popup/popup-layout.ts';
 import { AboutDialog } from './AboutDialog.tsx';
 import { OptionsDialog } from './OptionsDialog.tsx';
 import { TextEditDialog } from './TextEditDialog.tsx';

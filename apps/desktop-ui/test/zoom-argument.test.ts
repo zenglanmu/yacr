@@ -17,8 +17,8 @@ import {
   setCommandAliases,
   setCommandCatalog,
   splitCommandText,
-} from '../src/commands.ts';
-import { queueCadCommand } from '../src/cad.ts';
+} from '../src/commands/commands.ts';
+import { queueCadCommand } from '../src/cad/cad.ts';
 import { HOST_NAMES, readModule } from './helpers.ts';
 
 setCommandCatalog(HOST_NAMES);

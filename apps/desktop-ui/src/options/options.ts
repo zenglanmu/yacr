@@ -18,7 +18,7 @@
 //
 // Nothing here invents a value. A field the host does not report stays `null`
 // (rendered as "not reported"), is never dirty and is never written.
-import type { Translator } from './i18n.ts';
+import type { Translator } from '../i18n.ts';
 
 /** The IPC that returns the effective settings snapshot. */
 export const SETTINGS_READ_COMMAND = 'cad_settings';

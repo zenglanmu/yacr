@@ -1,9 +1,9 @@
-import { MTEXT_STEP_PROMPT_KEY, MTEXT_STEP_PROMPT_KEYS } from './text.ts';
-import { TEXT_PICK_PROMPT_KEY, TEXT_STEP_PROMPT_KEY, textStepPromptKey, toolAwaitingText } from './text.ts';
-import { OPEN_ENDED_PROMPTS } from './tool-open-ended.ts';
+import { MTEXT_STEP_PROMPT_KEY, MTEXT_STEP_PROMPT_KEYS } from '../tools/text.ts';
+import { TEXT_PICK_PROMPT_KEY, TEXT_STEP_PROMPT_KEY, textStepPromptKey, toolAwaitingText } from '../tools/text.ts';
+import { OPEN_ENDED_PROMPTS } from '../tools/tool-open-ended.ts';
 import type { CadStatus, CadTool } from './cad-status.ts';
 
-export { propertyGroupLabel, propertyRowLabel } from './property-labels.ts';
+export { propertyGroupLabel, propertyRowLabel } from '../properties/property-labels.ts';
 export { parseSelection } from './selection-wire.ts';
 // The status validator and the import-progress/cancel affordances live in
 // `cad-status.ts`, and the command funnel in `cad-command.ts` (this file is at
@@ -205,13 +205,13 @@ export {
   cancelToolParameterDraft, commitToolParameterDraft, reconcileToolParameterPending,
   setToolParameterFlag, setToolParameterNumber, stepToolParameterDraft, stepToolParameterPending,
   toolParameterViews, typeToolParameterDraft,
-} from './tool-parameters.ts';
+} from '../tools/tool-parameters.ts';
 export type {
   FlagToolParameterSpec, NumberToolParameterSpec, ToolParameterDraft, ToolParameterDraftCommit,
   ToolParameterFlagView, ToolParameterMap, ToolParameterNumberView, ToolParameterOwner,
   ToolParameterPending, ToolParameterResult, ToolParameterSpec, ToolParameterSpecMap,
   ToolParameterView,
-} from './tool-parameters.ts';
+} from '../tools/tool-parameters.ts';
 
 
 /**

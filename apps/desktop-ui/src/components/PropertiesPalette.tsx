@@ -26,15 +26,15 @@ import { SelectionTextEditor } from './SelectionTextEditor.tsx';
 import { useI18n, useShell } from '../context.ts';
 import type { ComposingKeyEvent } from './key-events.ts';
 import type { Translator } from '../i18n.ts';
-import { propertiesView } from '../properties-view.ts';
-import type { PropertyRowView } from '../properties-view.ts';
-import type { CadSelectionRow } from '../cad.ts';
+import { propertiesView } from '../properties/properties-view.ts';
+import type { PropertyRowView } from '../properties/properties-view.ts';
+import type { CadSelectionRow } from '../cad/cad.ts';
 import {
   PROPERTY_ERRORS,
   propertyCommit,
   propertyEditMessage,
   propertyErrorCode,
-} from '../properties.ts';
+} from '../properties/properties.ts';
 
 /** How many status polls a queued write may wait for the host's echo. */
 const PROPERTY_CONFIRM_POLLS = 8;

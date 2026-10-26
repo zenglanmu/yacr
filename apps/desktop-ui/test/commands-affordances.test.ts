@@ -14,8 +14,8 @@ import {
   isSupportedCommand,
   setCommandCatalog,
   toolLabelKey,
-} from '../src/commands.ts';
-import { RIBBON_TABS } from '../src/ribbon-model.ts';
+} from '../src/commands/commands.ts';
+import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
 import { HOST_NAMES } from './helpers.ts';
 
 setCommandCatalog(HOST_NAMES);
@@ -646,7 +646,7 @@ test('MATCHPROP sits with the selection-acting modify commands and needs a sourc
   // enough: MATCHPROP reads the current selection, so the selection requirement
   // decides too. The machine rule and the copy are pinned together here — the
   // sentence names the two objects its `count` requires.
-  const { SELECTION_REQUIREMENTS, selectionRequirementMet, unavailableReasonKey } = await import('../src/commands.ts');
+  const { SELECTION_REQUIREMENTS, selectionRequirementMet, unavailableReasonKey } = await import('../src/commands/commands.ts');
   assert.deepEqual(SELECTION_REQUIREMENTS[id], { count: 2, reasonKey: 'draw.kind.matchprop.hint' });
   assert.equal(isSupportedCommand(id), true, id);
   const doc = loaded;

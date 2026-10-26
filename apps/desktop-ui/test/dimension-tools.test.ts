@@ -5,7 +5,7 @@
 // fabricated step. Every user-visible string comes from the shared catalogs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad.ts';
+import { TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad/cad.ts';
 import { readCatalog, readCss, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');

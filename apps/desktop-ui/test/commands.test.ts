@@ -19,8 +19,8 @@ import {
   toolCommandForKey,
   toolLabelKey,
   unavailableReasonKey,
-} from '../src/commands.ts';
-import { RIBBON_TABS, ribbonCommandIds, ribbonTab } from '../src/ribbon-model.ts';
+} from '../src/commands/commands.ts';
+import { RIBBON_TABS, ribbonCommandIds, ribbonTab } from '../src/ribbon/ribbon-model.ts';
 import { HOST_NAMES } from './helpers.ts';
 
 setCommandCatalog(HOST_NAMES);

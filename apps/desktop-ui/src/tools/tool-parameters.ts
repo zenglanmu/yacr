@@ -4,7 +4,7 @@
 //
 // Split out of `cad.ts` (which is at the code-size ceiling); `cad.ts` re-exports
 // this module, so the chrome's import surface is exactly what it was.
-import type { CadStatus, CadTool, Invoke } from './cad-status.ts';
+import type { CadStatus, CadTool, Invoke } from '../cad/cad-status.ts';
 
 /**
  * The one general typed tool-parameter IPC (ADR 0016 decision A). It replaces

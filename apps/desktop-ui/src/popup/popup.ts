@@ -24,7 +24,7 @@
 // Catalog keys are addressed through [`POPUP_KEYS`] (data, not inline literals)
 // so the dialog copy has exactly one declaration site. The keys live in the
 // shared catalogs (`crates/cad-ui-core/i18n`).
-import type { Translator } from './i18n.ts';
+import type { Translator } from '../i18n.ts';
 
 /** The IPC that opens a dialog, sent by the main window. */
 export const POPUP_OPEN_COMMAND = 'cad_open_popup';

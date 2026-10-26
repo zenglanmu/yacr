@@ -15,7 +15,7 @@ import {
   nextEnabledIndex,
   placeContextMenu,
   selectionCount,
-} from '../src/context-menu.ts';
+} from '../src/commands/context-menu.ts';
 import { readAppSource, readCatalog, readCss, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');
@@ -144,7 +144,7 @@ test('ids are unique and the output is deterministic', async () => {
   assert.equal(new Set(ids).size, ids.length, 'no duplicate item id');
   assert.deepEqual(buildContextMenu(READY), buildContextMenu({ ...READY }));
   // No clock, no randomness: the same input always renders the same menu.
-  const source = await readModule('context-menu.ts');
+  const source = await readModule('commands/context-menu.ts');
   assert.doesNotMatch(source, /Math\.random|Date\.now|new Date\(/);
 });
 

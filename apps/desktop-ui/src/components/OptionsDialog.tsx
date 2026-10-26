@@ -33,7 +33,7 @@ import { useI18n } from '../context.ts';
 import type { Locale, Translator } from '../i18n.ts';
 import type { CSSProperties } from 'react';
 import { storeLocale } from '../i18n.ts';
-import { POPUP_BLANK } from '../popup.ts';
+import { POPUP_BLANK } from '../popup/popup.ts';
 import {
   LOCALE_CHOICES,
   OPTIONS_FIELDS,
@@ -51,8 +51,8 @@ import {
   validateDraft,
   validateField,
   writeAll,
-} from '../options.ts';
-import type { OptionField, OptionTab, OptionsDraft, SettingsSnapshot } from '../options.ts';
+} from '../options/options.ts';
+import type { OptionField, OptionTab, OptionsDraft, SettingsSnapshot } from '../options/options.ts';
 import {
   DIALOG_FOOT,
   OPTIONS_BADGE,
@@ -78,7 +78,7 @@ import {
   OPTIONS_TAB_ACTIVE,
   OPTIONS_UNIT,
   OPTIONS_WELL,
-} from '../popup-layout.ts';
+} from '../popup/popup-layout.ts';
 
 const PANEL_ID = 'cad-options-panel';
 

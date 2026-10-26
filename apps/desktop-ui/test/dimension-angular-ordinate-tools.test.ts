@@ -10,7 +10,7 @@
 // fabricated step. Every user-visible string comes from the shared catalogs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad.ts';
+import { TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad/cad.ts';
 import {
   admitCommandText,
   COMMAND_CATALOG,
@@ -18,8 +18,8 @@ import {
   isSupportedCommand,
   setCommandCatalog,
   toolLabelKey,
-} from '../src/commands.ts';
-import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon-model.ts';
+} from '../src/commands/commands.ts';
+import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon/ribbon-model.ts';
 import { readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');

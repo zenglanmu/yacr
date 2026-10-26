@@ -17,8 +17,8 @@
 // unknown key/group is shown by its raw machine name, exactly like the label
 // switch in `property-labels.ts`.
 import { propertyGroupLabel, propertyRowLabel } from './property-labels.ts';
-import type { CadSelection, PropertyRowKind, SelectionPropertyRow } from './selection-wire.ts';
-import type { Translator } from './i18n.ts';
+import type { CadSelection, PropertyRowKind, SelectionPropertyRow } from '../cad/selection-wire.ts';
+import type { Translator } from '../i18n.ts';
 
 /** Stable section order, matching the backend's row order within each group. */
 export const PROPERTY_GROUP_ORDER: readonly string[] = Object.freeze([

@@ -28,8 +28,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons.tsx';
 import { Button } from './primitives.tsx';
 import { useI18n, useShell } from '../context.ts';
-import { TEXT_TOO_LONG_KEY } from '../text.ts';
-import { POPUP_TEXT_KEYS, canOpenTextEditPopup } from '../popup-textedit.ts';
+import { TEXT_TOO_LONG_KEY } from '../tools/text.ts';
+import { POPUP_TEXT_KEYS, canOpenTextEditPopup } from '../popup/popup-textedit.ts';
 import {
   SELECTED_TEXT_MAX_LENGTH,
   TEXT_EDIT_INITIAL,
@@ -41,8 +41,8 @@ import {
   textEditHostChanged,
   textEditKeyAction,
   textEditView,
-} from '../textedit.ts';
-import type { TextEditState } from '../textedit.ts';
+} from '../tools/textedit.ts';
+import type { TextEditState } from '../tools/textedit.ts';
 
 const EDITOR_STYLE: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '4px' };
 // The section label and the window entry share one row: the entry is an action

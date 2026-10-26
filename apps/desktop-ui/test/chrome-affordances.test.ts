@@ -19,12 +19,12 @@ import assert from 'node:assert/strict';
 import { readCatalog, readComponentsSource, readModule } from './helpers.ts';
 import {
   offeredPanels, PALETTE_COMMANDS, panelLauncherCommand, RIBBON_TABS,
-} from '../src/ribbon-model.ts';
-import { admitCommandText, LOCAL_CHROME_COMMANDS } from '../src/commands.ts';
+} from '../src/ribbon/ribbon-model.ts';
+import { admitCommandText, LOCAL_CHROME_COMMANDS } from '../src/commands/commands.ts';
 import {
   ONE_DOCUMENT_KEY, ONE_LAYOUT_SPACE_KEY, PANEL_DIALOG_MISSING_KEY, PENDING_CATALOG_KEYS,
 } from '../src/limits.ts';
-import { palettesOffered } from '../src/surface.ts';
+import { palettesOffered } from '../src/cad/surface.ts';
 
 const ALL_PANELS = RIBBON_TABS.flatMap(tab => tab.panels.map(panel => ({ tab: tab.id, panel })));
 const LAUNCHER_PANELS = ALL_PANELS.filter(({ panel }) => panel.launcher);
@@ -135,7 +135,7 @@ test('the ribbon reads the launcher target from the model, never from a panel id
 test('one carrier helper decides for every nav-rail palette toggle', async () => {
   const rail = await readModule('components/NavRail.tsx');
   // One gate, one helper, both toggles inside it.
-  assert.ok(rail.includes("import { palettesOffered } from '../surface.ts';"));
+  assert.ok(rail.includes("import { palettesOffered } from '../cad/surface.ts';"));
   assert.ok(rail.includes('const palettes = palettesOffered(shell);'));
   assert.equal(rail.includes('shell.palettesAvailable !== false'), false, 'the rule is not re-spelled inline');
   const gate = rail.indexOf('{palettes ? (');
@@ -163,7 +163,7 @@ test('the carrier flag itself keeps its one reading: absent means "as today"', (
 test('no component re-spells the carrier comparison inline', async () => {
   const components = await readComponentsSource();
   assert.equal(components.includes('shell.palettesAvailable !== false'), false);
-  const surface = await readModule('surface.ts');
+  const surface = await readModule('cad/surface.ts');
   assert.equal(surface.match(/palettesAvailable !== false/g).length, 1, 'exactly one reading of the flag');
 });
 

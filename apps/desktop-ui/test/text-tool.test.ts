@@ -30,10 +30,10 @@ import {
   TOOL_TEXT_COMMAND,
   TOOL_TEXT_MAX_LENGTH,
   toolAwaitingText,
-} from '../src/text.ts';
-import { handleCommandKey, parseCadStatus, TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad.ts';
-import { COMMAND_CATALOG, filterCommandSuggestions, isSupportedCommand, setCommandCatalog, toolLabelKey } from '../src/commands.ts';
-import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon-model.ts';
+} from '../src/tools/text.ts';
+import { handleCommandKey, parseCadStatus, TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad/cad.ts';
+import { COMMAND_CATALOG, filterCommandSuggestions, isSupportedCommand, setCommandCatalog, toolLabelKey } from '../src/commands/commands.ts';
+import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon/ribbon-model.ts';
 import { readAppSource, readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');

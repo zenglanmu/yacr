@@ -7,7 +7,7 @@
 // nothing, and (b) the shape of the conditional that mounts the carrier.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SURFACE_MODE_DOM_CANVAS, SURFACE_MODE_NATIVE_BELOW, surfaceModeFromShell } from '../src/surface.ts';
+import { SURFACE_MODE_DOM_CANVAS, SURFACE_MODE_NATIVE_BELOW, surfaceModeFromShell } from '../src/cad/surface.ts';
 import { readAppSource, readModule } from './helpers.ts';
 
 test('the two modelled carriers have the wire names the host reports', () => {
@@ -50,7 +50,7 @@ test('an unrecognised value is not matched loosely or inferred', () => {
 
 test('the workspace mounts the carrier from the helper, never from a local mirror', async () => {
   const workspace = await readModule('components/Workspace.tsx');
-  assert.ok(workspace.includes("from '../surface.ts'"));
+  assert.ok(workspace.includes("from '../cad/surface.ts'"));
   assert.ok(workspace.includes('surfaceModeFromShell(shell)'));
   assert.ok(workspace.includes('SURFACE_MODE_DOM_CANVAS'));
   // No local state, no platform sniffing: the mode is a data flag only.

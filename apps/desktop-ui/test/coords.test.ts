@@ -3,7 +3,7 @@
 // pointer's CSS pixels under the "coordinates" label.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COORDINATE_PLACEHOLDER, formatWorldCursor } from '../src/coords.ts';
+import { COORDINATE_PLACEHOLDER, formatWorldCursor } from '../src/cad/coords.ts';
 import { readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');

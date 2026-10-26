@@ -5,8 +5,8 @@ import React from 'react';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
 import { useI18n, useShell } from '../context.ts';
-import { commandById } from '../commands.ts';
-import { palettesOffered } from '../surface.ts';
+import { commandById } from '../commands/commands.ts';
+import { palettesOffered } from '../cad/surface.ts';
 
 const NAV_ITEMS = ['FIT', 'ZOOMIN', 'ZOOMOUT', 'PAN', 'ORBIT'];
 

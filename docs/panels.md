@@ -2,7 +2,7 @@
 
 > **2026-10-25 现状（React 宿主）**：本文 §3 及之后的 “Slint 通道” 属**历史记录**
 > （Slint 宿主已于 2026-10-16 删除）。当前 React 宿主的真实接线是：
-> - **图层面板**：`apps/desktop-ui/src/layers.ts` + `components/LayersPalette.tsx`，
+> - **图层面板**：`apps/desktop-ui/src/layers/layers.ts` + `components/LayersPalette.tsx`，
 >   经 `cad_layers` 读取、经 `cad_set_layer_visible` / `cad_restore_layers` /
 >   `cad_set_active_layer` 写入；ack 只表示**入队**，面板随后回读权威投影（`LAYER` 是
 >   chrome-local 选择器，打开/聚焦该面板）。宿主侧投影在
@@ -24,7 +24,7 @@
 >   **写语法的自身规范形**，所以行上读到的字符串可以直接回写给
 >   `cad_set_layer_property`；它们是**显示/编辑输入，不是行为**（锁/打印仍零行为，
 >   改颜色不会重着色 `ByLayer` 实体）。
-> - **属性面板**：`components/PropertiesPalette.tsx` + `properties-view.mjs`，仍是
+> - **属性面板**：`components/PropertiesPalette.tsx` + `properties/properties-view.ts`，仍是
 >   **只读 + 5 个可写键**（layer/color/linetype/lineweight/transparency）。
 > - 面板停靠、伸缩与打开状态见 `docs/react-linux-app.md` 的「外壳结构」。
 > 下文保留为历史设计记录与仍未闭环的缺口清单（如 3D fit、视口比例命令面）。

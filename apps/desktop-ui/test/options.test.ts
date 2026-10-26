@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createTranslator } from '../src/i18n.ts';
-import { POPUP_KINDS, popupView } from '../src/popup.ts';
+import { POPUP_KINDS, popupView } from '../src/popup/popup.ts';
 import {
   LOCALE_CHOICES,
   OPTIONS_FIELDS,
@@ -40,7 +40,7 @@ import {
   validateField,
   writeAll,
   writeSetting,
-} from '../src/options.ts';
+} from '../src/options/options.ts';
 import { readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');
@@ -629,7 +629,7 @@ test('the options popup kind is allowlisted and carries no payload', () => {
 });
 
 test('the model is pure and the dialog owns no IPC text of its own', async () => {
-  const model = await readModule('options.ts');
+  const model = await readModule('options/options.ts');
   // No JSX/React/DOM in the model: it is importable from a node test.
   for (const forbidden of ["from 'react'", 'React.', 'document.', 'window.', '<div']) {
     assert.ok(!model.includes(forbidden), `options.mjs must stay pure: ${forbidden}`);
@@ -639,7 +639,7 @@ test('the model is pure and the dialog owns no IPC text of its own', async () =>
   assert.ok(model.includes(`'cad_set_setting'`));
 
   const dialog = await readModule('components/OptionsDialog.tsx');
-  assert.ok(dialog.includes("from '../options.ts'"));
+  assert.ok(dialog.includes("from '../options/options.ts'"));
   assert.ok(dialog.includes('setLocale'));
   assert.ok(dialog.includes('storeLocale'));
   // The dialog never builds the write IPC or the payload itself: it calls the
@@ -665,7 +665,7 @@ test('all three entry points open the same host-owned popup', async () => {
   assert.ok(app.includes("openOptionsPopup: () => requestOpenPopup('options')"));
   assert.ok(app.includes("action === 'options'"));
 
-  const ribbon = await readModule('ribbon-model.ts');
+  const ribbon = await readModule('ribbon/ribbon-model.ts');
   assert.ok(ribbon.includes("options: 'options'"));
   assert.ok(ribbon.includes('labelKey: OPTIONS_KEYS.ribbonEntry'));
   assert.ok(ribbon.includes("action: 'options'"));
@@ -677,7 +677,7 @@ test('all three entry points open the same host-owned popup', async () => {
 });
 
 test('the dialog card size is UI-owned, not a mirror of a host window', async () => {
-  const layout = await readModule('popup-layout.ts');
+  const layout = await readModule('popup/popup-layout.ts');
   assert.ok(layout.includes('export const OPTIONS_WIDTH = 720;'));
   assert.ok(layout.includes('export const OPTIONS_HEIGHT = 560;'));
   assert.ok(layout.includes('export const POPUP_CARD_SIZE = Object.freeze({'));

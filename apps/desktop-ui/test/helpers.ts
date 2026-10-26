@@ -47,7 +47,7 @@ export async function readComponentsSource() {
 
 /**
  * Source text of one file under `src/`, by its src-relative path with the real
- * extension (`'App.tsx'`, `'components/Ribbon.tsx'`, `'cad.ts'`). No extension
+ * extension (`'App.tsx'`, `'components/Ribbon.tsx'`, `'cad/cad.ts'`). No extension
  * normalisation: a wrong name fails with ENOENT, which is the honest signal that
  * the file was renamed or never existed.
  */

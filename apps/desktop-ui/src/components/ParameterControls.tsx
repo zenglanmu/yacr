@@ -16,8 +16,8 @@ import { useI18n } from '../context.ts';
 import {
   NO_TOOL_PARAMETER_DRAFT, cancelToolParameterDraft, commitToolParameterDraft,
   stepToolParameterDraft, typeToolParameterDraft,
-} from '../tool-parameters.ts';
-import type { ToolParameterDraft, ToolParameterFlagView, ToolParameterNumberView } from '../tool-parameters.ts';
+} from '../tools/tool-parameters.ts';
+import type { ToolParameterDraft, ToolParameterFlagView, ToolParameterNumberView } from '../tools/tool-parameters.ts';
 
 /**
  * The bounded numeric control for one active-tool parameter.

@@ -24,14 +24,14 @@ import {
   layerMarkSummary,
   layerSwatch,
   RESTING_MARK_LIMIT,
-} from '../src/layer-attributes.ts';
+} from '../src/layers/layer-attributes.ts';
 import {
   createLayersStore,
   LAYERS_COMMAND,
   layerTone,
   parseLayersAnswer,
   SET_LAYER_PROPERTY_COMMAND,
-} from '../src/layers.ts';
+} from '../src/layers/layers.ts';
 import { readCatalog, readModule } from './helpers.ts';
 
 /** One layer row exactly as the Rust `CadLayer` serializes it. */
@@ -332,7 +332,7 @@ test('every attribute key exists in both catalogs and is rendered, never invente
   const zh = await readCatalog('zh-CN');
   const en = await readCatalog('en');
   const palette = await readModule('components/LayersPalette.tsx');
-  const attributes = await readModule('layer-attributes.ts');
+  const attributes = await readModule('layers/layer-attributes.ts');
   const details = await readModule('components/LayerDetails.tsx');
   const renders = (key: string) =>
     palette.includes(`'${key}'`) || attributes.includes(`'${key}'`) || details.includes(`'${key}'`);
@@ -486,7 +486,7 @@ test('the swatch, the marks and the details line are the palette\'s own rows', a
     // And the attribute surface adds no second copy: every sentence is a catalog key.
     assert.equal(/[\u3400-\u9fff\uf900-\ufaff]/.test(source), false, `${name}: no hardcoded CJK`);
   }
-  assert.equal(/[\u3400-\u9fff\uf900-\ufaff]/.test(await readModule('layer-attributes.ts')), false,
+  assert.equal(/[\u3400-\u9fff\uf900-\ufaff]/.test(await readModule('layers/layer-attributes.ts')), false,
     'no hardcoded CJK in the attribute model');
 });
 

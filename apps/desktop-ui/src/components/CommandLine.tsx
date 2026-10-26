@@ -13,10 +13,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../icons.tsx';
 import { Button, IconButton } from './primitives.tsx';
 import { useI18n, useShell } from '../context.ts';
-import { handleCommandKey } from '../cad.ts';
-import { commandLogView } from '../command-log.ts';
-import { defaultSuggestionIndex, filterCommandSuggestions, historyText, splitCommandText, stepHistoryCursor, unavailableReasonKey } from '../commands.ts';
-import type { CommandAlias, CommandSuggestion } from '../commands.ts';
+import { handleCommandKey } from '../cad/cad.ts';
+import { commandLogView } from '../commands/command-log.ts';
+import { defaultSuggestionIndex, filterCommandSuggestions, historyText, splitCommandText, stepHistoryCursor, unavailableReasonKey } from '../commands/commands.ts';
+import type { CommandAlias, CommandSuggestion } from '../commands/commands.ts';
 import type { FocusReleaseRoot } from '../focus-release.ts';
 import type { IconName } from '../icons.tsx';
 import { releaseFocusOnOutsidePress } from '../focus-release.ts';
@@ -30,7 +30,7 @@ import {
   textDraftState,
   textEscapeAction,
   toolTextPrefill,
-} from '../text.ts';
+} from '../tools/text.ts';
 
 export function CommandLine() {
   const { t } = useI18n();

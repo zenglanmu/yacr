@@ -32,7 +32,7 @@ import {
   statusFailure,
   wheelZoomFactor,
   wheelZoomNotches,
-} from '../src/canvas-host.ts';
+} from '../src/cad/canvas-host.ts';
 import { readFile } from 'node:fs/promises';
 import { readAppSource, readModule } from './helpers.ts';
 
@@ -424,7 +424,7 @@ function codeLines(source) {
 
 test('native-below never imports or loads the wasm module', async () => {
   const app = await readModule('App.tsx');
-  const transport = await readModule('canvas-host.ts');
+  const transport = await readModule('cad/canvas-host.ts');
   const shipped = await readAppSource();
 
   // No static import of the artifact anywhere in the shipped tree.
@@ -479,7 +479,7 @@ test('dom-canvas does not create the IPC input lane', async () => {
   assert.match(app, /\}, \[surfaceMode\]\);/);
 
   // The transport module never speaks the host IPC and never builds a lane.
-  const transport = await readModule('canvas-host.ts');
+  const transport = await readModule('cad/canvas-host.ts');
   assert.ok(!transport.includes('probe_input'));
   assert.ok(!transport.includes('createInputLane'));
   assert.ok(!transport.includes('invoke('));
@@ -623,7 +623,7 @@ test('the build script generates the bootstrap module with the explicit wasm URL
 
 test('.native-input is the only element with pointer listeners', async () => {
   const app = await readModule('App.tsx');
-  const transport = await readModule('canvas-host.ts');
+  const transport = await readModule('cad/canvas-host.ts');
   const workspace = await readModule('components/Workspace.tsx');
 
   // Every pointer listener in the app targets the CAD partition element. The

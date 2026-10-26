@@ -18,7 +18,7 @@
 //
 // Entries and measurements come off the host wire, so they are typed `unknown`
 // and narrowed here; a row is only produced from what the entry really carries.
-import type { Translator } from './i18n.ts';
+import type { Translator } from '../i18n.ts';
 
 /** Decimal places for every measured number, matching AutoCAD's command echo. */
 export const MEASUREMENT_DECIMALS = 4;

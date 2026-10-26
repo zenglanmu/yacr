@@ -29,8 +29,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from './primitives.tsx';
 import { useI18n } from '../context.ts';
-import { setSelectedText } from '../textedit.ts';
-import type { PopupView } from '../popup.ts';
+import { setSelectedText } from '../tools/textedit.ts';
+import type { PopupView } from '../popup/popup.ts';
 import {
   POPUP_TEXT_KEYS,
   createTextEditSubmitter,
@@ -38,14 +38,14 @@ import {
   textEditDraftView,
   textEditKeyAction,
   textEditLocalRefusal,
-} from '../popup-textedit.ts';
+} from '../popup/popup-textedit.ts';
 import {
   DIALOG_FOOT,
   DIALOG_TEXT_BODY,
   TEXT_FIELD,
   TEXT_FIELD_FOCUSED,
   TEXT_META,
-} from '../popup-layout.ts';
+} from '../popup/popup-layout.ts';
 
 const FIELD_ID = 'cad-textedit-field';
 const HINT_ID = 'cad-textedit-hint';

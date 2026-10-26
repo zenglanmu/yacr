@@ -8,11 +8,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { parseSelection, propertyGroupLabel, propertyRowLabel, queueCadCommand } from '../src/cad.ts';
-import { admitCommandText, isSupportedCommand } from '../src/commands.ts';
+import { parseSelection, propertyGroupLabel, propertyRowLabel, queueCadCommand } from '../src/cad/cad.ts';
+import { admitCommandText, isSupportedCommand } from '../src/commands/commands.ts';
 import { createTranslator } from '../src/i18n.ts';
-import { isPropertiesCommand } from '../src/properties.ts';
-import { RIBBON_TABS } from '../src/ribbon-model.ts';
+import { isPropertiesCommand } from '../src/properties/properties.ts';
+import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
 import { readCatalog, readCss, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');

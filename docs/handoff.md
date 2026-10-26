@@ -8178,3 +8178,34 @@ host/wasm/clippy + 4 static / diff **均 0**；`fmt` 仅既有陌生未跟踪 `d
 全产品验收**；不承诺未支持平台（Win/macOS 仍 future）字段；跨平台同契约、仍引用 RapidRAW 固定
 版本、**Linux 无 readback**。清理：会话本就 unlocked → **保持 unlocked**（保留原状态）；portal 权限
 恢复（保留 `wechat`）、虚拟 uinput 与自身 PID 已清理；全屏截图**仅本地私有，未远程上传**。
+
+## 2026-10-26：桌面前端按功能整理目录（机械移动）
+
+- 开始时工作树干净，基线 `e8b8c65`。将 `apps/desktop-ui/src` 的 29 个现有纯逻辑文件
+  按既定职责移入 `cad/`、`tools/`、`commands/`、`ribbon/`、`layers/`、`properties/`、
+  `popup/`、`options/`，保留全部 basename。`App.tsx` 与共享入口仍在根目录；
+  `components/`、`stacking-regression/` 不移动，仅更新必要的导入路径。
+- 源码与测试仅机械更新相对导入、`readModule` 精确路径、精确导入字符串断言及
+  canvas transport 的拼接路径。保留显式 `.ts` / `.tsx`、类型导入及 `@i18n` 别名；
+  不拆 App、不新增桶式导出、依赖或抽象，不修改组件逻辑、样式、UI 文案或断言强度。
+- 更新前端 README 的职责表与新代码放置说明、AGENTS 当前路径及 `docs/panels.md`
+  当前 React 路径；历史交接、验证记录与其他历史文档引用不改写。
+- 本轮实际验证：`apps/desktop-ui` 下 `npm test` **614/614 PASS，0 skipped**（含
+  `tsc --noEmit`）；`npm run build` **PASS**（81 modules）；根目录
+  `python3 scripts/check-i18n.py` **PASS**（802 keys / 2 catalogs）。
+- 根目录 `python3 scripts/check-file-size.py` **FAIL**：该脚本仅枚举 Git 索引，
+  本轮按约定不暂存移动，因而仍读取 29 个已移动旧路径并报不存在；输出为 0 个超限、
+  29 个不可读路径，不能记为通过，也未覆盖新增未跟踪路径。未为绕过检查而暂存或修改门禁。
+- 协调者补充最终验证：分别运行 `python3 scripts/check-file-size.py --root apps/desktop-ui/src`
+  与 `--root apps/desktop-ui/test`，以目录遍历覆盖本轮全部源码与测试，**PASS**（63 / 48 个
+  代码文件，均不超过 1000 行）。直接扫描整个前端目录会纳入生成的
+  `public/canvas/app_web.js`（2850 行）而失败，不能代替上述源码范围检查。
+  对照 HEAD 核对 113 个源码/测试文件（含 29 个移动文件），归一化路径后无非路径改动；
+  `git diff --check` **PASS**。未改变测试断言强度。
+- 未发现仍依赖旧路径的可执行消费者。范围外 `scripts/build-canvas-wasm.sh`、
+  `apps/app-linux/src/{canvas_runtime.rs,backend.rs,host/dispatch.rs,host/tests.rs,evidence/ui_dialogs.rs}`、
+  `crates/cad-ui-core/src/session/status.rs` 与前端 `vite-canvas-modules.mjs` 仍有旧路径注释，
+  不参与模块解析，本轮未修改。
+- **NOT RUN**：全 workspace / 平台编译测试矩阵、真实宿主运行、运行时 DOM 挂载、截图、
+  像素 / GPU / 性能验证。源码契约通过不是运行时 DOM 或视觉证据；最终 diff 审查由主协调者负责。
+  本 lane 未暂存、未提交。

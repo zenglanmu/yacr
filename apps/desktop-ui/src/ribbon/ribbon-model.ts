@@ -9,9 +9,9 @@
 //
 // An item with none of the three is labelled but disabled, which is the honest
 // state for a command the host does not wire yet.
-import { POPUP_KEYS } from './popup.ts';
-import { OPTIONS_KEYS } from './options.ts';
-import { STANDARD_VIEWS } from './view3d.ts';
+import { POPUP_KEYS } from '../popup/popup.ts';
+import { OPTIONS_KEYS } from '../options/options.ts';
+import { STANDARD_VIEWS } from '../cad/view3d.ts';
 
 /** Shell actions that never touch the CAD protocol. */
 export const SHELL_ACTIONS = Object.freeze({

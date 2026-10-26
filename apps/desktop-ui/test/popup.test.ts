@@ -29,7 +29,7 @@ import {
   popupPayload,
   popupView,
   textEditPayload,
-} from '../src/popup.ts';
+} from '../src/popup/popup.ts';
 import { createTranslator } from '../src/i18n.ts';
 import {
   CLOSE_GLYPH_INSET,
@@ -44,8 +44,8 @@ import {
   HEADER_GLYPH_INSET,
   HEADER_INSET,
   POPUP_CARD_SIZE,
-} from '../src/popup-layout.ts';
-import { RIBBON_TABS } from '../src/ribbon-model.ts';
+} from '../src/popup/popup-layout.ts';
+import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
 
 const RIBBON_LITERAL = POPUP_KEYS.ribbonEntry;
 
@@ -347,7 +347,7 @@ test('popup copy comes only from the catalog registry, with no hardcoded CJK', a
   ]);
   // `popup.mjs` is the single declaration site; the components address these
   // keys through `POPUP_KEYS` and never repeat a literal.
-  const registry = await readModule('popup.ts');
+  const registry = await readModule('popup/popup.ts');
   for (const key of Object.values(POPUP_KEYS)) {
     assert.equal(registry.includes(`'${key}'`), true, `popup.mjs must declare ${key}`);
   }
@@ -397,7 +397,7 @@ test('the overlay uses one content edge for header, body and footer', async () =
     'components/OptionsDialog.tsx',
   ]) {
     const source = await readModule(file);
-    assert.ok(source.includes("from '../popup-layout.ts'"), `${file} must use the shared metrics`);
+    assert.ok(source.includes("from '../popup/popup-layout.ts'"), `${file} must use the shared metrics`);
     assert.equal(source.includes('20px 20px 18px'), false, `${file} still carries the old body inset`);
     assert.equal(source.includes("'0 6px 0 12px'"), false, `${file} still carries the old header inset`);
   }

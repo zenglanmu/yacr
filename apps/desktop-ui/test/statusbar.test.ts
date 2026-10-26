@@ -3,7 +3,7 @@
 // renders nothing when an older payload omits the field (never a guessed value).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dispatchGrid, dispatchGridSnap, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, draftingAcceleratorCommand, GRID_COMMAND, gridSnapToggle, gridToggle, GRID_SNAP_COMMAND, HOVER_PREVIEW_COMMAND, hoverPreviewToggle, OBJECT_SNAP_COMMAND, objectSnapToggle, ORTHO_COMMAND, orthoToggle, snapKindLabelKey } from '../src/cad.ts';
+import { dispatchGrid, dispatchGridSnap, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, draftingAcceleratorCommand, GRID_COMMAND, gridSnapToggle, gridToggle, GRID_SNAP_COMMAND, HOVER_PREVIEW_COMMAND, hoverPreviewToggle, OBJECT_SNAP_COMMAND, objectSnapToggle, ORTHO_COMMAND, orthoToggle, snapKindLabelKey } from '../src/cad/cad.ts';
 import { readAppSource, readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');

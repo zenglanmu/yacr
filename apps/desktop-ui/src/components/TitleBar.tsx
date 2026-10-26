@@ -4,7 +4,7 @@ import React from 'react';
 import { Button, IconButton } from './primitives.tsx';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
-import { unavailableReasonKey } from '../commands.ts';
+import { unavailableReasonKey } from '../commands/commands.ts';
 import { useI18n, useShell } from '../context.ts';
 import type { Locale } from '../i18n.ts';
 

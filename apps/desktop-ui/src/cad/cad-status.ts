@@ -10,7 +10,7 @@
 // `CAD_STATUS_INVALID` and is never coerced into a guessed state.
 
 import { parseSelection } from './selection-wire.ts';
-import type { Translator } from './i18n.ts';
+import type { Translator } from '../i18n.ts';
 
 /** The `invoke` callable the shell threads in (Tauri IPC, or a test double). */
 export type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;

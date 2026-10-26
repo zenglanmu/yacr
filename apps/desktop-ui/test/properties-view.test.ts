@@ -14,7 +14,7 @@ import {
   propertiesView,
   propertyEditor,
   propertyRowView,
-} from '../src/properties-view.ts';
+} from '../src/properties/properties-view.ts';
 import {
   PROPERTY_ERRORS,
   PROPERTY_WRITE_COMMAND,
@@ -24,7 +24,7 @@ import {
   propertyErrorCode,
   setSelectedProperty,
   validatePropertyValue,
-} from '../src/properties.ts';
+} from '../src/properties/properties.ts';
 import { readCatalog } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');

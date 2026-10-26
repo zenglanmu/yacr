@@ -20,7 +20,7 @@
 // A successful write round-trips: the host's `selection.rows` are the canonical
 // grammar, so the written value (or its canonical form, e.g. `#ff0000` read back
 // as `aci:1`) is what the next status shows.
-import type { Translator } from './i18n.ts';
+import type { Translator } from '../i18n.ts';
 
 /** The IPC that queues one property write for the current selection. */
 export const PROPERTY_WRITE_COMMAND = 'cad_set_selected_property';
