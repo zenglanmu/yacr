@@ -18,6 +18,8 @@ use crate::grips::{
 };
 
 use super::grip_fixture::*;
+use crate::tests::grips::assert_bits_eq;
+use cad_domain::DimensionPoints;
 
 #[test]
 fn line_start_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
@@ -819,4 +821,158 @@ fn a_bare_payload_is_refused_instead_of_fabricating_a_drag() {
         "the refusal names the required payload: {error:?}"
     );
     assert_untouched(&app, revision, 0);
+}
+
+#[test]
+fn dimension_definition_point_drag_re_synthesizes_in_one_undo_step_and_undoes_exactly() {
+    let (mut app, mut session) = grip_app();
+    let revision = revision_of(&app);
+    let before_definition = dimension_definition_of(&app, DIMENSION);
+    let before_measurement = dimension_measurement_of(&app, DIMENSION);
+    let before_display = dimension_display_of(&app, DIMENSION);
+    // `Linear { rotation: 0.0 }` measures along +X: `|second.x - first.x|`.
+    assert_eq!(before_measurement, 11.75);
+
+    // Drag `second` (index 1) inward, in one gesture.
+    let to = p3(2.5, 3.5, 0.25);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(DIMENSION, GripKind::DefinitionPoint, 1, to),
+    )
+    .unwrap();
+
+    // One entity update, in one transaction, with one undo entry — a drag that
+    // re-synthesizes the whole display is still one handle drag.
+    let changes = outcome.changes.as_ref().expect("a ChangeSet is published");
+    assert_eq!(changes.changes.len(), 1, "exactly one entity update");
+    assert_eq!(outcome.objects, vec![ObjectId(DIMENSION)]);
+    assert_eq!(revision_of(&app), Revision(revision.0 + 1));
+    assert_eq!(undo_depth(&app), 1);
+
+    // The dragged point took the target; every other stored field is untouched.
+    let after_definition = dimension_definition_of(&app, DIMENSION);
+    match (&before_definition.points, &after_definition.points) {
+        (
+            DimensionPoints::Linear {
+                first: before_first,
+                dimension_line: before_line,
+                ..
+            },
+            DimensionPoints::Linear {
+                first: after_first,
+                second: after_second,
+                dimension_line: after_line,
+            },
+        ) => {
+            assert_bits_eq(*after_second, to, "the dragged definition point");
+            assert_bits_eq(*after_first, *before_first, "the untoched first point");
+            assert_bits_eq(*after_line, *before_line, "the dimension line");
+        }
+        other => panic!("expected linear points, got {other:?}"),
+    }
+    assert_eq!(after_definition.kind, before_definition.kind);
+    assert_eq!(
+        after_definition.text_rotation.to_bits(),
+        DIMENSION_TEXT_ROTATION.to_bits(),
+        "group 53 is not a handle"
+    );
+    assert_eq!(after_definition.normal, before_definition.normal);
+    assert_bits_eq(
+        after_definition.text_middle,
+        before_definition.text_middle,
+        "the text middle point",
+    );
+    let after = dimension_geometry_of(&app, DIMENSION);
+    assert_eq!(after.style_name(), DIMENSION_STYLE_NAME);
+    assert_eq!(after.style(), &dimension_style());
+    assert_eq!(after.text_override(), None);
+
+    // The display is our **re-synthesis** of the mutated definition, with the
+    // recomputed measurement: the dimension line shrank from 11.75 to 2.0.
+    assert_eq!(after.measurement(), 2.0);
+    assert_ne!(
+        dimension_display_of(&app, DIMENSION),
+        before_display,
+        "the display follows the mutated definition"
+    );
+    assert!(
+        !dimension_display_of(&app, DIMENSION).is_empty(),
+        "the re-synthesized display is never empty"
+    );
+
+    // Undo restores the entity exactly, including the synthesized display.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    let restored = dimension_definition_of(&app, DIMENSION);
+    assert_eq!(
+        restored.kind, before_definition.kind,
+        "the subtype is restored"
+    );
+    assert_eq!(
+        restored.text_rotation.to_bits(),
+        before_definition.text_rotation.to_bits()
+    );
+    assert_eq!(restored.normal, before_definition.normal);
+    match (&before_definition.points, &restored.points) {
+        (
+            DimensionPoints::Linear {
+                first: before_first,
+                second: before_second,
+                dimension_line: before_line,
+            },
+            DimensionPoints::Linear {
+                first,
+                second,
+                dimension_line,
+            },
+        ) => {
+            assert_bits_eq(*first, *before_first, "restored first");
+            assert_bits_eq(*second, *before_second, "restored second");
+            assert_bits_eq(*dimension_line, *before_line, "restored dimension line");
+        }
+        other => panic!("expected linear points, got {other:?}"),
+    }
+    assert_bits_eq(
+        restored.text_middle,
+        before_definition.text_middle,
+        "restored text middle point",
+    );
+    let restored_geometry = dimension_geometry_of(&app, DIMENSION);
+    assert_eq!(restored_geometry.measurement(), before_measurement);
+    assert_eq!(
+        restored_geometry.display(),
+        before_display.as_slice(),
+        "undo restores the exact synthesized display, not a re-derivation"
+    );
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn a_dimension_drag_onto_its_own_point_records_nothing() {
+    let (mut app, mut session) = grip_app();
+    let revision = revision_of(&app);
+    // `DefinitionPoint` 0 is `first`; dragging it onto itself is a zero
+    // displacement, refused before the transaction (no empty undo entry).
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(
+            DIMENSION,
+            GripKind::DefinitionPoint,
+            0,
+            p3(0.5, -1.75, 0.25),
+        ),
+    )
+    .unwrap_err();
+    refused(error, REASON_ZERO_DISPLACEMENT, false);
+    assert_untouched(&app, revision, 0);
+    assert_eq!(dimension_measurement_of(&app, DIMENSION), 11.75);
 }

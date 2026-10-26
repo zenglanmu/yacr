@@ -36,7 +36,10 @@ use super::{Grip, GripId, GripKind, QUADRANT_DIRECTIONS};
 /// [`GripKind::Insertion`] grip (`index` 0) at the placement's **insertion
 /// point**, i.e. the image of the block-space origin under the stored transform
 /// (see [`insert_origin`]); `POINT` ⇒ one [`GripKind::Point`]
-/// grip. Every
+/// grip; `DIMENSION` ⇒ one [`GripKind::DefinitionPoint`] grip per stored DXF
+/// definition point, in the documented per-subtype order, then one for the stored
+/// text middle point (group 11) — the order itself, and the drag rule that
+/// re-synthesizes the display, live together in `grips/dimension.rs`. Every
 /// other geometry — including the whole refusal list in the module doc — yields
 /// an empty vector: no marker is invented for a kind this build cannot drag.
 #[must_use]
@@ -204,6 +207,15 @@ pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
             id: id(GripKind::Insertion, 0),
             position: insert_origin(transform),
         }],
+        // A dimension exposes its stored DXF definition points in the documented
+        // per-subtype order, then the stored text middle point. The order and the
+        // drag rule live together in `grips/dimension.rs`, so the handle list and
+        // the replaceable slots cannot drift; a definition whose subtype and point
+        // slots disagree exposes no handle at all (and cannot be stored through the
+        // public constructors).
+        SemanticGeometry::Dimension(dimension) => {
+            super::dimension::definition_point_grips(entity.id, dimension)
+        }
         _ => Vec::new(),
     }
 }

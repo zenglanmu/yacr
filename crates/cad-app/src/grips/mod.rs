@@ -36,6 +36,7 @@
 //! | `SemanticGeometry::Point` | [`GripKind::Point`] `0` |
 //! | `SemanticGeometry::Text` | [`GripKind::Insertion`] `0` = the stored `position` (TEXT and MTEXT alike) |
 //! | `SemanticGeometry::Insert` | [`GripKind::Insertion`] `0` = the placement's **insertion point** (the transformed block-space origin) |
+//! | `SemanticGeometry::Dimension` | [`GripKind::DefinitionPoint`] `index` = the position in the per-subtype order below (the DXF definition points, then the text middle point) |
 //!
 //! The `ARC` order is `Center 0, Endpoint 0, Endpoint 1`: the centre comes
 //! first because it was the only handle before the endpoints were added, and the
@@ -115,6 +116,43 @@
 //! target with `property.not_addressable`. This model adds **no second**
 //! addressability rule: it describes the geometry it is handed. Grips for block
 //! members, for attributes and for points inside a block are **NOT IMPLEMENTED**.
+//!
+//! ### `DIMENSION` definition points
+//!
+//! A dimension exposes one [`GripKind::DefinitionPoint`] grip per stored DXF
+//! definition point, in the documented per-subtype order, plus **one final**
+//! handle for the stored text middle point (group 11). `index` is the position in
+//! that order, so the handle set is fully described by the stored definition:
+//!
+//! | subtype | `index` → slot |
+//! |---|---|
+//! | `Linear { rotation }` and `Aligned` | `0` `first` (13), `1` `second` (14), `2` `dimension_line` (10), `3` `text_middle` (11) |
+//! | `Radius` / `Diameter` (`DimensionPoints::Radial`) | `0` `center` (10), `1` `point_on_arc` (15), `2` `text_middle` (11) |
+//! | `Angular2Ln` | `0` `line1_start` (13), `1` `line1_end` (14), `2` `line2_start` (15), `3` `line2_end` (10), `4` `arc_point` (16), `5` `text_middle` (11) |
+//! | `Angular3Pt` | `0` `vertex` (15), `1` `first` (13), `2` `second` (14), `3` `arc_point` (10), `4` `text_middle` (11) |
+//! | `Ordinate { x_ordinate }` | `0` `feature` (13), `1` `leader_end` (14), `2` `base` (10), `3` `text_middle` (11) |
+//!
+//! `text_middle` is always the last index, i.e. the subtype's definition-point
+//! count, so it can never be confused with a point slot. Every handle position is
+//! the **stored** point verbatim (bit for bit, all three coordinates): nothing is
+//! derived, offset or projected, so the marker sits exactly on the stored DXF slot
+//! even when the drawn display puts the text elsewhere (a stored `text_middle` of
+//! `(0, 0, 0)` means "derive the text position", and the handle still marks the
+//! stored zero slot — it does not pretend to be the drawn text anchor).
+//!
+//! **Not a grip**: `leader_length` (group 40, a scalar), `text_rotation` (group
+//! 53, a scalar), every resolved style value (`DimensionStyleValues`: arrow size,
+//! text height/gap, extension-line offsets, `DIMLFAC`/`DIMDEC`/`DIMPOST`/
+//! `DIMZIN`/`DIMDSEP`, …), the subtype scalars (`Linear { rotation }`,
+//! `Ordinate { x_ordinate }`) and the extrusion `normal`. They are carried through
+//! every drag verbatim; a length/rotation/style grip is **NOT IMPLEMENTED**, and no
+//! [`GripKind`] variant is invented for one.
+//!
+//! A `DefinitionPoint` variant (rather than reusing [`GripKind::Endpoint`] or
+//! [`GripKind::Insertion`]) is deliberate: a dimension's handles *are* its DXF
+//! definition points plus the text middle point, and sharing another kind would
+//! leave [`REASON_STALE_HANDLE`] unable to tell a dimension's handle from a
+//! `LINE`'s endpoint or a text's insertion point.
 //!
 //! [`grips_for_entity`] returns an **empty** vector for every other geometry, and
 //! [`grip_hit`] therefore never hits one. No marker is invented, no index is
@@ -280,12 +318,37 @@
 //!   ([`REASON_DEGENERATE_TRANSFORM`]) instead of being written back — `cad-db`
 //!   refuses such an insert transform at commit, so staging it would only move the
 //!   failure later.
+//! * **`DIMENSION` definition point / text middle point**
+//!   ([`GripKind::DefinitionPoint`], `index` = the position in the per-subtype
+//!   order above): the rule clones the stored [`DimensionDefinition`], replaces
+//!   **exactly that one point** and **re-synthesizes** the entity with
+//!   [`DimensionGeometry::synthesized`], passing the entity's own `style_name`,
+//!   `style` and `text_override` — so `kind`, `text_rotation`, `normal`,
+//!   `style_name`, `style` and the override string are preserved, and every point
+//!   the drag did not address (plus `leader_length`) is bit-identical. The
+//!   measurement and the whole display are **recomputed** from the mutated
+//!   definition by `cad-domain`'s single builder; `cad-app` never patches a
+//!   dimension child by hand, which is what keeps group 42 and the drawn number in
+//!   step. Dragging the text middle point therefore moves the stored group-11
+//!   anchor, recomputes the display around it and leaves the measurement alone.
+//!
+//!   Refusals, all before anything is written: a subtype/point-set mismatch is
+//!   [`REASON_DIMENSION_INCONSISTENT`] (a bug signal — the public constructors
+//!   cannot produce one), and a mutation the synthesis cannot express is
+//!   [`REASON_DIMENSION_DEGENERATE`] (a `Radial` `point_on_arc` dragged onto its
+//!   centre, two angular lines driven parallel, an `Angular3Pt` `arc_point` on the
+//!   vertex, …). A non-finite measurement or an empty display is refused with the
+//!   same code: a `NaN` group 42 is never stored and an empty display is never
+//!   emitted. Nothing is clamped. Declared limitation: `cad-domain` keeps
+//!   `DisplaySource` private, so a drag cannot distinguish the synthesized branch
+//!   from the imported-picture branch and always re-synthesizes — a picture-branch
+//!   dimension becomes a synthesized one whose measurement matches its mutated
+//!   definition (see `grips/dimension.rs`).
 //!
 //! ## Explicit refusal list (no marker, no hit)
 //!
 //! `MULTILEADER` (its annotation text is not addressed through a text
-//! insertion-point handle here), `HATCH`, `DIMENSION` (definition-point grips;
-//! the dimension is non-associative by design), `IMAGE`/`MASK`, and
+//! insertion-point handle here), `HATCH`, `IMAGE`/`MASK`, and
 //! opaque/compound geometry (`Opaque`, `Compound`, `Mesh`, `Shape`). `TEXT`/
 //! `MTEXT` is **no longer** on this list: it exposes one [`GripKind::Insertion`]
 //! grip at the stored insertion point (see above). **`INSERT` is no longer on this
@@ -297,7 +360,12 @@
 //! rules), and a partial (elliptical-arc) ellipse exposes the centre grip only,
 //! with quadrant ids refused by [`REASON_PARTIAL_ELLIPSE`]. `SPLINE` is **no
 //! longer** on this list either: it exposes one [`GripKind::ControlPoint`] per
-//! stored control point (see above).
+//! stored control point (see above). **`DIMENSION` is no longer on this list
+//! either**: it exposes one [`GripKind::DefinitionPoint`] grip per stored DXF
+//! definition point plus one for the text middle point (see above), and a drag
+//! re-synthesizes the display from the mutated definition. The dimension stays
+//! **non-associative** by design — moving the geometry it measures does not move
+//! it — which is a property of the entity, not of its handle set.
 //!
 //! A **width**, **rotation**, **height**, **attachment** (alignment) and
 //! **tangent** grip are **NOT IMPLEMENTED**.
@@ -314,7 +382,8 @@
 //! `f64` bits as the geometry (an endpoint, a point position, a circle/arc/ellipse
 //! centre, a polyline vertex, a spline control point, a text insertion point, a
 //! block reference's insertion point, i.e. the transformed origin — the
-//! translation column of its placement) or
+//! translation column of its placement — a dimension's DXF definition point or its
+//! text middle point) or
 //! the documented exact derivation of it (a line midpoint; an arc endpoint, i.e.
 //! the stored
 //! `center + radius * (cos angle * ax + sin angle * ay)` in the arc's own plane
@@ -373,7 +442,8 @@
 //! then endpoint 0 = start, endpoint 1 = end; for an `ELLIPSE` the centre and then
 //! quadrants 0..=3 when it is a full ellipse; for a `POLYLINE` the vertices in
 //! stored order; for a `SPLINE` the control points in stored order; for a
-//! `TEXT`/`MTEXT` the single insertion point) — and a
+//! `TEXT`/`MTEXT` the single insertion point; for a `DIMENSION` its definition
+//! points in the per-subtype order above, ending with the text middle point) — and a
 //! candidate replaces the current winner only when it is
 //! **strictly** closer.
 //!
@@ -417,17 +487,19 @@
 //!   names the DXF class.
 //! * [`REASON_STALE_HANDLE`] (`CadError::InvalidInput`) — the [`GripId`] does
 //!   not name a handle of **this** geometry: a `LINE` with a
-//!   [`GripKind::Center`]/[`GripKind::Quadrant`]/[`GripKind::Point`]/[`GripKind::Vertex`]/[`GripKind::ControlPoint`]/[`GripKind::Insertion`]
+//!   [`GripKind::Center`]/[`GripKind::Quadrant`]/[`GripKind::Point`]/[`GripKind::Vertex`]/[`GripKind::ControlPoint`]/[`GripKind::Insertion`]/[`GripKind::DefinitionPoint`]
 //!   grip, an `AcDbCircle`/`AcDbArc` with a [`GripKind::Vertex`] grip, a
 //!   `POLYLINE` with a non-vertex grip, a `SPLINE` with a non-control-point grip,
 //!   a `TEXT`/`MTEXT` with a non-[`GripKind::Insertion`] grip, a block reference
-//!   with a non-[`GripKind::Insertion`] grip,
+//!   with a non-[`GripKind::Insertion`] grip, a `DIMENSION` with a
+//!   non-[`GripKind::DefinitionPoint`] grip,
 //!   or an `index` outside the handle range
 //!   (`LINE` endpoint > 1, `LINE` midpoint ≠ 2, `CIRCLE`/`ELLIPSE` centre > 0,
 //!   `CIRCLE`/`ELLIPSE` quadrant > 3, `ARC` centre > 0, `ARC` endpoint > 1,
 //!   `POLYLINE` vertex ≥ the stored vertex count,
 //!   `SPLINE` control point ≥ the stored control-point count, `POINT` > 0,
-//!   `TEXT`/`MTEXT` insertion point > 0, block-reference insertion point > 0). It is
+//!   `TEXT`/`MTEXT` insertion point > 0, block-reference insertion point > 0,
+//!   `DIMENSION` definition point ≥ this subtype's handle count). It is
 //!   also the refusal for **every** control-point id on an internally
 //!   inconsistent spline definition, because such a spline exposes no handle at
 //!   all. The caller is
@@ -476,6 +548,20 @@
 //!   **singular** (but finite) linear part is deliberately **not** refused: the
 //!   rule needs no matrix inverse or decomposition, so a flattened instance still
 //!   translates exactly and its linear part stays bit-identical.
+//! * [`REASON_DIMENSION_INCONSISTENT`] (`CadError::InvalidInput`) — a
+//!   `DIMENSION` whose [`DimensionDefinition::is_consistent`] fails: its subtype
+//!   and point slots disagree, or a stored point is non-finite. Such a dimension
+//!   exposes no handle at all (see `grips/dimension.rs`); both public constructors
+//!   refuse such a definition, so reaching this refusal through a stored entity is
+//!   a **bug signal**, and it is also what a mutated definition that stopped being
+//!   consistent would report (replacing one point in place cannot do that).
+//! * [`REASON_DIMENSION_DEGENERATE`] (`CadError::InvalidInput`) — a `DIMENSION`
+//!   definition-point drag whose mutated definition no longer has a synthesizable
+//!   display (a `Radial` `point_on_arc` moved onto the centre, an `Angular3Pt`
+//!   `arc_point` moved onto the vertex, two angular lines driven parallel, an
+//!   angular sector collapsed to `0` or `2π`, …), or whose synthesis would produce
+//!   a non-finite measurement or an empty display. Refused by name, **never
+//!   clamped**: no `NaN` group 42 and no empty display is ever stored.
 //! * [`REASON_NON_FINITE_TARGET`] (`CadError::InvalidInput`) — the target has a
 //!   `NaN` or infinite coordinate. Storing it would corrupt the entity, and the
 //!   database refuses it at commit anyway; refusing here names the cause. The
@@ -507,11 +593,13 @@
 use cad_db::DbEntity;
 use cad_domain::{EntityId, Point3};
 
+mod dimension;
 mod drag;
 mod handles;
+mod reasons;
 pub use drag::apply_grip;
-pub(crate) use drag::finite_target;
 pub use handles::grips_for_entity;
+pub(crate) use reasons::finite_target;
 
 /// Stable reason code: the geometry kind exposes no grip model.
 pub const REASON_UNSUPPORTED_KIND: &str = "grip.unsupported_kind";
@@ -529,6 +617,19 @@ pub const REASON_DEGENERATE_ARC: &str = "grip.degenerate_arc";
 pub const REASON_PARTIAL_ELLIPSE: &str = "grip.partial_ellipse";
 /// Stable reason code: a block reference's stored placement is not finite.
 pub const REASON_DEGENERATE_TRANSFORM: &str = "grip.degenerate_transform";
+/// Stable reason code: a dimension definition is self-contradictory (its subtype
+/// and point slots disagree, or a stored point is non-finite).
+///
+/// Both public `DimensionGeometry` constructors refuse such a definition, so this
+/// is a **bug signal** for a stored entity: it also covers a mutated definition
+/// that stopped being consistent, which no single-point replacement can cause.
+pub const REASON_DIMENSION_INCONSISTENT: &str = "grip.dimension_inconsistent";
+/// Stable reason code: a dimension definition-point drag leaves no synthesizable
+/// display (or a non-finite measurement / an empty display).
+///
+/// The mutated definition is never clamped into something storable: a `NaN`
+/// group 42 or an empty display would be silent corruption.
+pub const REASON_DIMENSION_DEGENERATE: &str = "grip.dimension_degenerate";
 /// Stable reason code: the addressed entity does not exist in the drawing.
 ///
 /// Raised by the `GRIPSTRETCH` command (`crate::app_drawing::grip`), which is the
@@ -590,6 +691,21 @@ pub enum GripKind {
     /// sharing it would leave [`REASON_STALE_HANDLE`] unable to tell a text or a
     /// block reference from a point entity.
     Insertion,
+    /// A stored DXF **definition point** of a dimension, or the dimension's stored
+    /// text middle point (group 11). `index` is the position in the documented
+    /// per-subtype order (see the handle table): for a `Linear`/`Aligned`
+    /// dimension `0` = `first`, `1` = `second`, `2` = `dimension_line`, `3` =
+    /// `text_middle`; a `Radial` one has `0` = `center`, `1` = `point_on_arc`,
+    /// `2` = `text_middle`; and so on for `Angular2Ln`, `Angular3Pt` and
+    /// `Ordinate`. Dragging replaces that one stored point and **re-synthesizes**
+    /// the display with the entity's own style and text override, so `kind`,
+    /// `text_rotation`, `normal`, `style_name` and `style` are preserved and every
+    /// other point is bit-identical. `leader_length` and `text_rotation` are
+    /// scalars and are **not** handles. It is deliberately **not**
+    /// [`GripKind::Endpoint`] or [`GripKind::Insertion`]: sharing another kind
+    /// would leave [`REASON_STALE_HANDLE`] unable to tell a dimension's handle from
+    /// a line endpoint or a text insertion point.
+    DefinitionPoint,
 }
 
 /// The four circle/ellipse quadrant handles, in documented `index` order.
@@ -613,7 +729,9 @@ const QUADRANT_DIRECTIONS: [(u8, f64); 4] = [(0, 1.0), (1, 1.0), (0, -1.0), (1, 
 /// `ControlPoint` `index` is the **stored** control-point index (`u8`, so only
 /// control points `0..=255` can be addressed); for a `TEXT`/`MTEXT`, `0` is the
 /// stored insertion point; for a block reference (`INSERT`), `0` is the placement's
-/// insertion point (the transformed block-space origin); for a `POINT`, `0`
+/// insertion point (the transformed block-space origin); for a `DIMENSION`, a
+/// `DefinitionPoint` `index` is the position in that subtype's documented order
+/// (the DXF definition points, then the text middle point); for a `POINT`, `0`
 /// is the position. The id is a caller-held reference into geometry that may have
 /// changed since it was read, so [`apply_grip`] re-validates it against the
 /// geometry it is handed instead of trusting it.

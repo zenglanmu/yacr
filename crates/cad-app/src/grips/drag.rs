@@ -16,15 +16,16 @@ use super::handles::{
     arc_point, ellipse_axes, ellipse_quadrant_point, in_plane_distance, insert_origin,
     is_full_ellipse, midpoint, plane_axes, quadrant_point, spline_is_consistent,
 };
+use super::reasons::{
+    degenerate_arc, degenerate_ellipse_radius, degenerate_radius, degenerate_transform,
+    finite_target, overflowed, partial_ellipse, stale_handle, unchanged_ellipse_radius,
+    unchanged_radius, unsupported_kind, zero_displacement,
+};
 use super::{
     is_finite, transform_is_finite, GripId, GripKind, ARC_SWEEP_EPSILON, QUADRANT_DIRECTIONS,
-    REASON_DEGENERATE_ARC, REASON_DEGENERATE_RADIUS, REASON_DEGENERATE_TRANSFORM,
-    REASON_NON_FINITE_TARGET, REASON_PARTIAL_ELLIPSE, REASON_STALE_HANDLE, REASON_UNSUPPORTED_KIND,
-    REASON_ZERO_DISPLACEMENT,
 };
 use cad_domain::{
-    BlockId, CadError, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV,
-    Transform3,
+    BlockId, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV, Transform3,
 };
 use cad_geometry::{add, dot, length, scale, sub};
 
@@ -121,7 +122,8 @@ fn apply_line(start: Point3, end: Point3, id: &GripId, to: Point3) -> CadResult<
             | GripKind::Vertex
             | GripKind::ControlPoint
             | GripKind::Point
-            | GripKind::Insertion,
+            | GripKind::Insertion
+            | GripKind::DefinitionPoint,
             _,
         ) => Err(stale_handle(
             "AcDbLine exposes Endpoint (0 = start, 1 = end) and Midpoint (2) grips only"
@@ -187,7 +189,8 @@ fn apply_circle(
             | GripKind::Vertex
             | GripKind::ControlPoint
             | GripKind::Point
-            | GripKind::Insertion,
+            | GripKind::Insertion
+            | GripKind::DefinitionPoint,
             _,
         ) => Err(stale_handle(
             "AcDbCircle exposes a Center grip (0) and Quadrant grips (0..=3) only".to_string(),
@@ -295,7 +298,8 @@ fn apply_arc(
             | GripKind::Vertex
             | GripKind::ControlPoint
             | GripKind::Point
-            | GripKind::Insertion,
+            | GripKind::Insertion
+            | GripKind::DefinitionPoint,
             _,
         ) => Err(stale_handle(
             "AcDbArc exposes a Center grip (0) and Endpoint grips (0 = start, 1 = end) only"
@@ -429,7 +433,8 @@ fn apply_ellipse(ellipse: EllipseParts, id: &GripId, to: Point3) -> CadResult<Se
             | GripKind::Vertex
             | GripKind::ControlPoint
             | GripKind::Point
-            | GripKind::Insertion,
+            | GripKind::Insertion
+            | GripKind::DefinitionPoint,
             _,
         ) => Err(stale_handle(
             "AcDbEllipse exposes a Center grip (0) and, for a full ellipse, Quadrant grips \
@@ -490,7 +495,8 @@ fn apply_polyline(
         | GripKind::Quadrant
         | GripKind::ControlPoint
         | GripKind::Point
-        | GripKind::Insertion => Err(stale_handle(
+        | GripKind::Insertion
+        | GripKind::DefinitionPoint => Err(stale_handle(
             "AcDbPolyline exposes one Vertex grip per stored vertex (index = stored vertex \
              index) only"
                 .to_string(),
@@ -570,7 +576,8 @@ fn apply_spline(
         | GripKind::Quadrant
         | GripKind::Vertex
         | GripKind::Point
-        | GripKind::Insertion => Err(stale_handle(
+        | GripKind::Insertion
+        | GripKind::DefinitionPoint => Err(stale_handle(
             "AcDbSpline exposes one ControlPoint grip per stored control point (index = stored \
              control-point index) only"
                 .to_string(),
@@ -642,7 +649,8 @@ fn apply_text(text: TextParts<'_>, id: &GripId, to: Point3) -> CadResult<Semanti
             | GripKind::Quadrant
             | GripKind::Vertex
             | GripKind::ControlPoint
-            | GripKind::Point,
+            | GripKind::Point
+            | GripKind::DefinitionPoint,
             _,
         ) => Err(stale_handle(
             "AcDbText exposes a single Insertion grip (0) at the stored insertion point only"
@@ -718,7 +726,8 @@ fn apply_insert(
             | GripKind::Quadrant
             | GripKind::Vertex
             | GripKind::ControlPoint
-            | GripKind::Point,
+            | GripKind::Point
+            | GripKind::DefinitionPoint,
             _,
         ) => Err(stale_handle(
             "AcDbBlockReference exposes a single Insertion grip (0) at its insertion point only"
@@ -727,110 +736,6 @@ fn apply_insert(
     }
 }
 
-/// A `grip.unsupported_kind` refusal naming the DXF class.
-fn unsupported_kind(class: &str) -> CadError {
-    CadError::Unsupported(format!(
-        "{REASON_UNSUPPORTED_KIND}: {class} exposes no grippable handle"
-    ))
-}
-
-/// A `grip.stale_handle` refusal with the specific mismatch.
-fn stale_handle(detail: String) -> CadError {
-    CadError::InvalidInput(format!("{REASON_STALE_HANDLE}: {detail}"))
-}
-
-/// A `grip.zero_displacement` refusal naming the handle that did not move.
-fn zero_displacement(handle: &str) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_ZERO_DISPLACEMENT}: the {handle} is already at the drag target"
-    ))
-}
-
-/// A `grip.zero_displacement` refusal for a quadrant drag whose radius is
-/// already stored (an off-plane target at the current radius).
-fn unchanged_radius(radius: f64) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_ZERO_DISPLACEMENT}: the AcDbCircle quadrant drag leaves the radius at {radius}"
-    ))
-}
-
-/// A `grip.degenerate_radius` refusal naming the rejected radius.
-fn degenerate_radius(radius: f64) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_DEGENERATE_RADIUS}: the AcDbCircle quadrant drag yields radius {radius}; \
-         a circle radius must be positive and finite (the centre is not moved by this handle)"
-    ))
-}
-
-/// A `grip.degenerate_radius` refusal for an ellipse quadrant drag, naming the
-/// cause (a measured radius or a stored frame that cannot yield one).
-fn degenerate_ellipse_radius(cause: &str) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_DEGENERATE_RADIUS}: the AcDbEllipse quadrant drag yields no usable in-plane \
-         radius: {cause}; an ellipse semi-axis must be positive and finite (the centre and the \
-         normal are not moved by this handle)"
-    ))
-}
-
-/// A `grip.zero_displacement` refusal for an ellipse quadrant drag whose measured
-/// radius is already stored (the axis direction never rotates).
-fn unchanged_ellipse_radius(radius: f64) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_ZERO_DISPLACEMENT}: the AcDbEllipse quadrant drag leaves the axis radius at \
-         {radius}"
-    ))
-}
-
-/// A `grip.partial_ellipse` refusal naming the quadrant handle that a partial
-/// ellipse (elliptical arc) does not expose.
-fn partial_ellipse(index: u8) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_PARTIAL_ELLIPSE}: AcDbEllipse quadrant {index} is not a handle of a partial \
-         ellipse; a stored parameter range that is not a full turn exposes the Center grip only"
-    ))
-}
-
-/// A `grip.degenerate_arc` refusal naming the rejected sweep.
-fn degenerate_arc(handle: &str, sweep: f64) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_DEGENERATE_ARC}: the {handle} drag yields sweep {sweep}; an arc sweep must \
-         stay finite and strictly inside (0, 2*pi) in its stored direction \
-         (the centre, radius and normal are not moved by this handle)"
-    ))
-}
-
-/// A `grip.degenerate_transform` refusal for a block reference whose stored
-/// placement cannot be written back (a non-finite coefficient).
-fn degenerate_transform(cause: &str) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_DEGENERATE_TRANSFORM}: the AcDbBlockReference insert transform cannot be moved \
-         rigidly: {cause}; a translation column rewrite keeps every other coefficient verbatim, \
-         so the result would be an unstorable transform"
-    ))
-}
-
-/// A `grip.non_finite_target` refusal for a finite input whose result overflows.
-fn overflowed(handle: &str) -> CadError {
-    CadError::InvalidInput(format!(
-        "{REASON_NON_FINITE_TARGET}: translating the {handle} produces a non-finite coordinate"
-    ))
-}
-
-/// Refuse a target that could not be stored as a world point.
-///
-/// Exposed to the `GRIPSTRETCH` command so it can refuse a non-finite target
-/// **before** it even reads the drawing, with the same code and message the drag
-/// rule would produce.
-pub(crate) fn finite_target(to: Point3) -> CadResult<()> {
-    if is_finite(to) {
-        Ok(())
-    } else {
-        Err(CadError::InvalidInput(format!(
-            "{REASON_NON_FINITE_TARGET}: ({}, {}, {})",
-            to.x, to.y, to.z
-        )))
-    }
-}
 /// Apply a single-handle drag to `geometry`, returning the geometry the entity
 /// must be updated to.
 ///
@@ -874,6 +779,14 @@ pub(crate) fn finite_target(to: Point3) -> CadResult<()> {
 ///   scales it. A non-finite stored placement is refused
 ///   ([`REASON_DEGENERATE_TRANSFORM`]); a singular but finite one is not, because
 ///   the rule needs no matrix inverse;
+/// * `DIMENSION` definition point / text middle point: that one stored DXF point
+///   becomes `to` and the entity is **re-synthesized** with the same `style`/
+///   `style_name`/`text_override`, so `kind`, `text_rotation`, `normal`, the style
+///   and every other point stay bit-identical and the measurement plus the whole
+///   display are recomputed from the mutated definition (see
+///   `grips/dimension.rs`). A mutation the synthesis cannot express — a `Radial`
+///   `point_on_arc` on its centre, lines driven parallel, … — is refused with
+///   [`REASON_DIMENSION_DEGENERATE`], never clamped;
 /// * everything else, a [`GripId`] that does not name a handle of this geometry,
 ///   a non-finite target and a drag with no geometric effect are refused with the
 ///   stable reason codes documented in the module doc.
@@ -964,7 +877,8 @@ pub fn apply_grip(
                     | GripKind::Quadrant
                     | GripKind::Vertex
                     | GripKind::ControlPoint
-                    | GripKind::Insertion,
+                    | GripKind::Insertion
+                    | GripKind::DefinitionPoint,
                     _,
                 ) => {
                     return Err(stale_handle(
@@ -979,6 +893,9 @@ pub fn apply_grip(
             Ok(SemanticGeometry::Point(to))
         }
         SemanticGeometry::Insert { block, transform } => apply_insert(*block, transform, id, to),
+        SemanticGeometry::Dimension(dimension) => {
+            super::dimension::apply_dimension(dimension, id, to)
+        }
         other => Err(unsupported_kind(crate::app_drawing::class_name(other))),
     }
 }

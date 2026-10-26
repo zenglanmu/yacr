@@ -10,6 +10,9 @@ use super::*;
 
 use crate::grips::{GripId, GripKind};
 use crate::GripStretchCommand;
+use cad_domain::{
+    DimensionDefinition, DimensionGeometry, DimensionKind, DimensionPoints, DimensionStyleValues,
+};
 
 pub(super) const LINE: u128 = 1;
 pub(super) const POINT: u128 = 2;
@@ -36,6 +39,9 @@ pub(super) const TEXT: u128 = 10;
 /// non-uniformly scaled** placement, so "only the translation column moved" is a
 /// real bit comparison rather than a property of an axis-aligned matrix.
 pub(super) const INSERT: u128 = 11;
+/// The `DIMENSION` whose `DefinitionPoint` grips are dragged here (`index` 0 =
+/// `first`, 1 = `second`, 2 = `dimension_line`, 3 = `text_middle`).
+pub(super) const DIMENSION: u128 = 12;
 
 /// The fixture block reference's placement: translation `(7, -3, 2)`, a `0.4` rad
 /// rotation about Z and a non-uniform scale `(2, 3, 4)` — the importer's own
@@ -107,6 +113,75 @@ pub(super) const POINT_AT: Point3 = Point3 {
     y: 4.0,
     z: 0.0,
 };
+
+/// The dimension fixture's subtype: `Linear { rotation: 0.0 }`, so the measurement
+/// is `|second.x - first.x|` and the drag expectations are exact arithmetic.
+pub(super) const DIMENSION_ROTATION: f64 = 0.0;
+/// The fixture dimension's stored text rotation (group 53): non-zero, so "the drag
+/// does not touch it" is a real comparison.
+pub(super) const DIMENSION_TEXT_ROTATION: f64 = 0.375;
+/// The style name the fixture dimension stores (not `"Standard"`).
+pub(super) const DIMENSION_STYLE_NAME: &str = "ISO-25";
+
+/// The stored definition of the fixture dimension: `first = (0.5, -1.75, 0.25)`,
+/// `second = (12.25, 3.5, 0.25)` — so the initial measurement is exactly `11.75`.
+/// Non-round (but binary-exact) coordinates keep "every other point is
+/// bit-identical" honest.
+pub(super) fn dimension_definition() -> DimensionDefinition {
+    DimensionDefinition {
+        kind: DimensionKind::Linear {
+            rotation: DIMENSION_ROTATION,
+        },
+        points: DimensionPoints::Linear {
+            first: p3(0.5, -1.75, 0.25),
+            second: p3(12.25, 3.5, 0.25),
+            dimension_line: p3(0.5, -6.25, 0.25),
+        },
+        text_middle: p3(6.125, -8.5, 0.25),
+        text_rotation: DIMENSION_TEXT_ROTATION,
+        normal: p3(0.0, 0.0, 1.0),
+    }
+}
+
+/// The resolved style snapshot the fixture dimension is synthesized with.
+pub(super) fn dimension_style() -> DimensionStyleValues {
+    DimensionStyleValues {
+        arrow_size: 2.5,
+        ext_offset: 0.625,
+        ext_beyond: 1.25,
+        text_height: 2.5,
+        text_gap: 0.625,
+        center_mark: 0.0,
+        dim_line_increment: 3.75,
+        text_vertical: 1,
+        text_vertical_position: 0.0,
+        suppress_ext1: false,
+        suppress_ext2: false,
+        suppress_dim1: false,
+        suppress_dim2: false,
+        linear_factor: 1.0,
+        decimals: 4,
+        rounding: 0.0,
+        postfix: String::new(),
+        zero_suppression: 0,
+        linear_unit_format: 2,
+        decimal_separator: 46,
+        text_style_name: "Standard".into(),
+        text_style: StyleId(0),
+        text_font: None,
+    }
+}
+
+/// The fixture dimension geometry, built through the domain's single builder.
+pub(super) fn dimension_geometry() -> DimensionGeometry {
+    DimensionGeometry::synthesized(
+        dimension_definition(),
+        DIMENSION_STYLE_NAME.to_string(),
+        dimension_style(),
+        None,
+    )
+    .expect("the fixture dimension synthesizes")
+}
 
 /// A drawing with a `LINE` (id 1), a `POINT` (id 2), a `CIRCLE` (id 3), a
 /// paper-space `LINE` (id 4, the non-addressable target), an `ELLIPSE` (id 5,
@@ -246,6 +321,15 @@ pub(super) fn grip_app() -> (Application, SessionState) {
             transform: insert_transform(),
         },
         10,
+    ))
+    .unwrap();
+    // The dimension fixture: a `Linear { rotation: 0.0 }` dimension whose definition
+    // points are the drag target (`DefinitionPoint` 0 = first, 1 = second,
+    // 2 = dimension line, 3 = text middle).
+    b.insert_entity(ent(
+        DIMENSION,
+        SemanticGeometry::Dimension(Box::new(dimension_geometry())),
+        11,
     ))
     .unwrap();
     let drawing = b.finish().unwrap();
@@ -484,4 +568,27 @@ pub(super) fn assert_untouched(app: &Application, revision: Revision, undo: usiz
 
 pub(super) fn revision_of(app: &Application) -> Revision {
     app.workspace.documents[&DocumentId(1)].drawing.revision()
+}
+
+/// The stored `DimensionGeometry` of `entity`.
+pub(super) fn dimension_geometry_of(app: &Application, entity: u128) -> DimensionGeometry {
+    match geometry_of(app, entity) {
+        SemanticGeometry::Dimension(dimension) => *dimension,
+        other => panic!("entity {entity} is not a DIMENSION: {other:?}"),
+    }
+}
+
+/// The stored `DimensionDefinition` of `entity`.
+pub(super) fn dimension_definition_of(app: &Application, entity: u128) -> DimensionDefinition {
+    dimension_geometry_of(app, entity).definition().clone()
+}
+
+/// The stored raw measurement (DXF group 42) of `entity`.
+pub(super) fn dimension_measurement_of(app: &Application, entity: u128) -> f64 {
+    dimension_geometry_of(app, entity).measurement()
+}
+
+/// The stored derived display of `entity` (our synthesis, never a picture here).
+pub(super) fn dimension_display_of(app: &Application, entity: u128) -> Vec<SemanticGeometry> {
+    dimension_geometry_of(app, entity).display().to_vec()
 }

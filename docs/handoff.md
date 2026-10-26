@@ -1,3 +1,113 @@
+## 2026-10-26 DIMENSION 定义点夹点（重合成显示，非法即按名拒绝）
+
+### 结论
+
+纯夹点模型（`crates/cad-app/src/grips/`）此前把 `DIMENSION` 整类列在「无夹点」拒绝清单里。本轮为
+`SemanticGeometry::Dimension(Box<DimensionGeometry>)` 实现**定义点夹点**：新变体
+`GripKind::DefinitionPoint`，`index` = 该子类型**文档化次序里的位置**，一个句柄对应一个存储的 DXF
+定义点，**最后一个**句柄是存储的**文字中点**（group 11）。只动 `cad-app`（模型 + 测试）与
+`docs/compatibility.md`、本文件；`cad-host` / `crates/cad-domain` / `apps/**` / i18n / 命令 / IPC / wire
+**未改**（宿主与渲染器按通用 `Grip`/`GripId` 消费枚举，无 `GripKind` 分支、无新命令、无新字段）。
+`MULTILEADER` / `HATCH` / `IMAGE` / `MASK` 仍在「无夹点」清单（与 `Opaque`/`Compound`/`Mesh`/`Shape` 一起）。
+
+### 句柄表（按子类型的 `index` 次序，`text_middle` 永远最后）
+
+| 子类型 | `index` → 点槽 |
+|---|---|
+| `Linear { rotation }` 与 `Aligned`（同 `DimensionPoints::Linear`） | `0` `first`(13)、`1` `second`(14)、`2` `dimension_line`(10)、`3` `text_middle`(11) |
+| `Radius`/`Diameter`（`Radial`） | `0` `center`(10)、`1` `point_on_arc`(15)、`2` `text_middle`(11) |
+| `Angular2Ln` | `0` `line1_start`(13)、`1` `line1_end`(14)、`2` `line2_start`(15)、`3` `line2_end`(10)、`4` `arc_point`(16)、`5` `text_middle`(11) |
+| `Angular3Pt` | `0` `vertex`(15)、`1` `first`(13)、`2` `second`(14)、`3` `arc_point`(10)、`4` `text_middle`(11) |
+| `Ordinate { x_ordinate }` | `0` `feature`(13)、`1` `leader_end`(14)、`2` `base`(10)、`3` `text_middle`(11) |
+
+句柄位置 = **存储点逐位原值**（三坐标；不投影、不派生、不按对齐/旋转偏移）。存储 `text_middle` 为
+`(0,0,0)` 时合成器会自行推导文字位置，句柄仍标记**存储的零槽**，不假装成已绘文字锚点。
+**不是夹点**（拖拽逐位保留）：`leader_length`(40)、`text_rotation`(53)、子类型标量
+（`Linear { rotation }`、`Ordinate { x_ordinate }`）、`normal`，以及整套解析后的
+`DimensionStyleValues`。**新变体而非复用** `Endpoint`/`Insertion`：dimension 的句柄就是它的 DXF 定义点
+加文字中点，共用会让 `grip.stale_handle` 无法区分。存储定义自相矛盾（子类型与点槽不符）时**一个夹点都不
+暴露**（两个公开构造器本会拒绝这种定义，故这属损坏输入分支，**不**猜次序）。
+
+### 拖拽规则（重合成）
+
+* 克隆存储 `DimensionDefinition`，**只替换那一个点**（`with_point`），再用
+  `DimensionGeometry::synthesized(definition, style_name, style, text_override)` 重建实体 —— 参数全部
+  取自实体自身，故 `kind`（含子类型标量）、`text_rotation`、`normal`、`style_name`、`style`、文字覆盖串
+  （DXF group 1，**不丢弃**）与未被拖动的点槽/`leader_length` 全部**逐位不变**。
+* `measurement`（group 42）与**整幅显示**按改后的定义**重算**：`cad-domain` 是 dimension 显示的唯一
+  构建器（ADR 0017 A.4 不变量 1），`cad-app` **不**手改 dimension 子几何，故 group 42 与已绘数字始终同步。
+* 拖 `text_middle` 只移动存储的 group-11 锚点（显示随之重排），`measurement` **不变**。
+* 次序仍是 **几何种类 → 句柄身份 → 存储定义自洽 → 目标有限性 → 拖拽几何规则**；
+  `grip.stale_handle` / `grip.non_finite_target` / `grip.zero_displacement` 的含义与其它家族一致
+  （零位移含「目标 == 该槽位存储点」，IEEE `==`，无容差）。
+
+### 拒绝（新码，绝不夹取）
+
+* `grip.dimension_inconsistent` —— 存储定义子类型与点槽不符或有点非有限；或改后的定义不再自洽。
+  后者是**缺陷信号**：原地替换一个点不可能改变子类型/点槽配对，且目标已确认有限。任何 `DefinitionPoint`
+  id 打到这种维度上都是该码（该维度不暴露夹点）。
+* `grip.dimension_degenerate` —— 改后的定义**无法合成显示**：`Radial` 的 `point_on_arc` 拖到圆心（或
+  `Diameter` 的 group-10 槽拖到 `point_on_arc`）、`Angular3Pt` 的 `arc_point` 拖到顶点、两条角尺线被拖成
+  平行等；以及合成出的 `measurement` **非有限**或显示**为空**（纵深防御）。**绝不**写 `NaN` group 42、
+  **绝不**写空显示、**绝不**夹取到某个合法值；`apply_grip` 返回 `Err`，故连半改的几何都不存在。
+* `DIMENSION` **不再**出现在 `grip.unsupported_kind` 里；该码仍覆盖 `MULTILEADER`/`HATCH`/`IMAGE`/
+  `MASK`/`Opaque`/`Compound`/`Mesh`/`Shape`。
+
+### 声明限制：显示来源分支
+
+`cad-domain` 的 `DisplaySource` 是**私有**的，`cad-app` 无法区分「我们的合成」与「导入的匿名块图片」
+（`DimensionGeometry::from_picture`），也没有能从**改后定义**重建图片分支的构造器。故拖拽**总是**重合成：
+图片分支的 dimension 拖后变成合成分支（`measurement` 跟随改后的定义、显示 = 我们的合成）。这里**声明**
+而不是静默近似 —— 另一种选择是保留一幅已与任何存储定义点不符的导入图片。该行为有测试钉住
+（`a_picture_branch_dimension_is_re_synthesized_by_a_drag`），不是"已验收"的替代品。
+
+### 文件与拆分（1000 行上限）
+
+新增 `crates/cad-app/src/grips/dimension.rs`（395 行：子类型次序 `slots` + 句柄表 + `with_point` +
+拖拽规则 + 两个新码的构造器），句柄表与拖拽规则**写在同一文件**，次序只有一份声明。`grips/drag.rs`
+原 984 行，加 dimension 分支与各 kind 的 `DefinitionPoint` 排除臂后会越界，故把全部 `grip.*` 拒绝构造器
+拆到新文件 `crates/cad-app/src/grips/reasons.rs`（124 行，纯格式化，无判断），`drag.rs` **901**、
+`mod.rs` **881**、`handles.rs` **387**；公开路径 `crate::grips::apply_grip` /
+`crate::grips::grips_for_entity` / `crate::grips::finite_target`（`pub(crate)`）**不变**。
+
+### 测试
+
+新增 `crates/cad-app/src/tests/grips_dimension.rs`（已注册，**27 个测试**）：
+
+* 句柄表：五个子类型各自的 `index` + 位置**逐位**断言（另有 `Aligned` 共用 `Linear` 次序）；夹具用
+  二进制精确的非整坐标（`0.5`/`-1.75`/`12.25`/`9.125`…），且测试**独立复述**了次序（`documented_slots`），
+  不与实现共用一张表；
+* 拖拽：遍历**每个子类型 × 每个文档化 index**，断言「只有该槽位变、其余点/`kind`/`text_rotation`/
+  `normal`/`style_name`/`style`/`text_override` 逐位不变、`measurement` 有限、显示非空」；另外每个子类型
+  一个测量断言（linear `11.75 → 2.0`、radial `5.0 → 10.0`（3-4-5 向量）、angular2ln `90° → 45°`、
+  angular3pt 保持 `90°`、ordinate `8.125 → 11.375`；两个角度是 `atan2` 的度数，按容差断言）；
+  `text_middle` 拖拽（五子类型）只移动该点且测量逐位不变；保留的 `<> mm` 覆盖串在拖后仍生效
+  （文字变成 `2.0000 mm`）；
+* 拒绝：非 `DefinitionPoint` 的八种 kind、超界 index（含 `u8::MAX`，逐子类型计数不同）、非有限目标、
+  每个槽位的零位移、radial/diameter 退化、angular3pt `arc_point` 落顶点、两条角尺线拖成平行、
+  「拒绝时纯模型手里的实体逐位未变」；
+* 命中：精确命中（`tolerance = 0`）、平面视图（夹具在 z = 0.25、指针落在工作平面）、平局归**更小 index**、
+  句柄之间不命中。
+
+命令级：`tests/drawing/grip.rs` 新增
+`dimension_definition_point_drag_re_synthesizes_in_one_undo_step_and_undoes_exactly`（一次 `ChangeSet`、
+一个 revision、一步撤销、被拖点等于目标且其余字段逐位不变、`measurement` 重算为 `2.0`、显示**已重合成**
+且非空、undo 逐位还原定义**与合成显示**），以及 `a_dimension_drag_onto_its_own_point_records_nothing`
+（零位移不写、不留空撤销步）。夹具扩在 `grip_fixture.rs`：id 12 = `DIMENSION`
+（`Linear { rotation: 0.0 }`，`first`/`second` 给出精确 `11.75`，`text_rotation = 0.375`、
+`style_name = "ISO-25"`）。
+
+### 证据与边界
+
+`cargo test -p cad-app --lib --locked`（1146 passed / 0 failed，含新增 27 + 2）、
+`cargo test -p cad-host --lib --locked`（234 passed）、
+`cargo clippy -p cad-app --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、
+`python3 scripts/check-file-size.py`。**无** GUI/像素/真窗口/真实鼠标证据：宿主对夹点种类无分支，
+dimension 标记/拖拽应自然走同一通用 `native-below` 路径，但**未做**宿主运行或像素验证，
+`dom-canvas` 载体仍无任何夹点路径。**未实现**：`leader_length` / `text_rotation` / 样式值 /
+子类型标量夹点、dimension 文字内容夹点（只保留覆盖串，不编辑）、关联尺寸（移动被测量几何不牵动
+dimension）、图片分支的保留（见上「声明限制」）、多夹点与多实体拉伸、拖拽中捕捉、3D 夹点编辑。
+
 ## 2026-10-26 INSERT（块引用）插入点夹点（刚性平移，旋转/缩放不动）
 
 ### 结论
