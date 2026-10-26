@@ -960,6 +960,7 @@ fn entity_flags_fingerprint_ignores_the_box_selection() {
 
 mod ellipse_preview;
 mod marker_sizing;
+mod point_styles;
 mod polygon_preview;
 mod rectang_preview;
 mod snap_glyphs;

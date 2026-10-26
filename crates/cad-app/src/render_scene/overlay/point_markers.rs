@@ -4,8 +4,21 @@
 //! A `SemanticGeometry::Point` has no base-scene geometry: the chord tessellator
 //! would degenerate it to a zero-length `[p, p]` segment, which is invisible.
 //! The base-scene provider therefore skips it (`representation.point_overlay`)
-//! and it is drawn here instead, as a screen-relative cross in overlay order —
+//! and it is drawn here instead, as a screen-relative glyph in overlay order —
 //! the same transient pipeline the snap hints and tool previews use.
+//!
+//! The glyph is AutoCAD's drawing-global **point display style** (`$PDMODE` /
+//! `$PDSIZE`, carried on [`cad_db::DrawingDatabase`] and surfaced as
+//! [`PointDisplayStyle`]): `$PDMODE` chooses the base shape and `$PDSIZE` the
+//! size. This is **display only** — it never touches
+//! `SemanticGeometry::Point`, whose DXF group 50 axis angle stays unmodelled
+//! because adding a field to the domain geometry for a display nicety would
+//! ripple through every crate — and there is no `SETVAR` equivalent, so the
+//! style can only arrive with the imported drawing.
+//!
+//! The topology is `Lines` (`cad_scene::RenderTopology` has no `Points`
+//! variant), which is why a dot is an approximation and the surrounding
+//! circle/square shapes are refused; both are reported, never dropped silently.
 
 use super::preview::line_batch;
 use super::*;
@@ -34,13 +47,193 @@ pub const POINT_MARKER_DRAW_ORDER: i64 = 850_000;
 /// and both preview colours.
 pub const POINT_MARKER_COLOR: [f32; 3] = [0.80, 0.90, 1.0];
 
-/// Half-extent of a POINT marker cross as a fraction of the viewport height.
+/// Half-extent of a POINT marker as a fraction of the viewport height, used when
+/// `$PDSIZE` is `0` (the DWG default).
 ///
-/// The full cross therefore spans 5% of the viewport height, aligning with the
-/// `PDSIZE = 0` screen-relative size. `PDMODE`/`PDSIZE` and point styles are
-/// **NOT IMPLEMENTED** (ADR 0015 decision E); the shape is a fixed axis-aligned
-/// plus and this size formula is a deliberate deviation.
+/// The full marker therefore spans 5% of the viewport height, which is AutoCAD's
+/// own meaning of `PDSIZE = 0` and the historical behaviour of this overlay.
+/// `$PDSIZE > 0` is an absolute drawing-unit size and `$PDSIZE < 0` a percentage
+/// of the viewport height; see [`point_marker_overlay`].
 pub const POINT_MARKER_HALF_EXTENT_FRACTION: f64 = 0.025;
+
+/// Largest `$PDSIZE` magnitude the overlay will use, in drawing units (positive)
+/// or percent of viewport height (negative).
+///
+/// A larger magnitude cannot be a display size — a marker a million units (or a
+/// million percent of the screen) across is unrenderable — so it is treated as
+/// "unset", i.e. the `$PDSIZE = 0` behaviour, exactly like
+/// [`cad_db::sanitize_linetype_scale`] degrades a broken scale to its identity.
+/// The sanitisation is applied by [`sanitize_point_display_size`] at the consume
+/// point and reported once, never silently.
+pub const POINT_DISPLAY_SIZE_LIMIT: f64 = 1.0e6;
+
+/// `$PDMODE` bits that request a surrounding shape around the base marker
+/// (`32` circle, `64` square, `96` both).
+///
+/// These shapes are **NOT IMPLEMENTED**: the overlay draws the base marker and
+/// reports the requested shapes once (see [`point_marker_overlay`]), so nothing
+/// is dropped silently and no substitute shape is invented.
+const PDMODE_SURROUNDING_SHAPE_BITS: i16 = 32 | 64;
+
+/// One marker segment, in units of the marker half-extent: `(dx0, dy0, dx1, dy1)`.
+type MarkerArm = (f64, f64, f64, f64);
+
+/// `$PDMODE` base `2`: an axis-aligned plus (`+`).
+const PLUS_ARMS: [MarkerArm; 2] = [(-1.0, 0.0, 1.0, 0.0), (0.0, -1.0, 0.0, 1.0)];
+/// `$PDMODE` base `3`: a diagonal cross (`x`).
+const CROSS_ARMS: [MarkerArm; 2] = [(-1.0, -1.0, 1.0, 1.0), (-1.0, 1.0, 1.0, -1.0)];
+/// `$PDMODE` base `4`: a vertical tick (`|`).
+const TICK_ARMS: [MarkerArm; 1] = [(0.0, -1.0, 0.0, 1.0)];
+/// `$PDMODE` base `1` and every unexpressible mode: no marker at all.
+const NO_ARMS: [MarkerArm; 0] = [];
+
+/// The marker geometry decision for one `$PDMODE` value.
+struct MarkerPlan {
+    /// Segments to emit per point, in units of the half-extent. Empty = no marker.
+    arms: &'static [MarkerArm],
+    /// `(code, message)` per unsupported/approximated aspect, in report order.
+    findings: Vec<(&'static str, String)>,
+}
+
+/// Decide what one `$PDMODE` value draws, and what has to be reported about it.
+///
+/// Supported base glyphs are `0` dot, `1` none, `2` plus, `3` cross and `4`
+/// vertical tick. Two of those are **not literal**:
+///
+/// * `0` (dot) cannot be rasterised by a `Lines`-only topology (there is no
+///   `Points` topology, and adding one is out of scope), so it is drawn as the
+///   smallest plus glyph this path can express and reported as `Partial` — it is
+///   **not** a dot.
+/// * The `32`/`64` bits request a circle/square around the base glyph; those
+///   shapes are **NOT IMPLEMENTED**, so the base glyph is drawn and the requested
+///   shapes are named once.
+///
+/// Any value the project cannot express as a whole (a negative mode, a base mode
+/// above `4`, a bit outside `0..=4 | 32 | 64`) is reported as
+/// `overlay.point-mode-unsupported`; whatever part *is* expressible is drawn and
+/// nothing is invented for the rest.
+fn marker_plan(mode: i16) -> MarkerPlan {
+    let mut findings: Vec<(&'static str, String)> = Vec::new();
+    if mode < 0 {
+        findings.push((
+            "overlay.point-mode-unsupported",
+            format!(
+                "PDMODE {mode} is negative, which is not a point display mode; \
+                 no POINT marker is drawn for it"
+            ),
+        ));
+        return MarkerPlan {
+            arms: &NO_ARMS,
+            findings,
+        };
+    }
+    // The low five bits select the base glyph; `32`/`64` add surrounding shapes;
+    // anything else is not part of the AutoCAD point display mode.
+    let base = mode & 0x1F;
+    let unknown_bits = mode & !(0x1F | PDMODE_SURROUNDING_SHAPE_BITS);
+    let (arms, base_name): (&'static [MarkerArm], &str) = match base {
+        // A dot cannot be a real dot in a Lines-only topology. Two
+        // approximations were possible: a plus at the configured size, or a
+        // shrunken plus. The configured size is chosen deliberately — a dot is
+        // the DWG default `$PDMODE`, so shrinking it would silently change how
+        // every unstyled drawing's points look at `$PDSIZE = 0`, while a plus at
+        // the configured size is exactly the marker this overlay drew before the
+        // point style existed. The glyph is still reported as an approximation.
+        0 => (&PLUS_ARMS, "plus, standing in for the dot"),
+        1 => (&NO_ARMS, "nothing"),
+        2 => (&PLUS_ARMS, "plus"),
+        3 => (&CROSS_ARMS, "cross"),
+        4 => (&TICK_ARMS, "vertical tick"),
+        _ => (&NO_ARMS, "no base shape"),
+    };
+    if base == 0 {
+        findings.push((
+            "overlay.point-mode-dot",
+            "PDMODE 0 is a dot, which the Lines-only marker topology cannot draw; \
+             the point is marked with the smallest plus glyph this topology can \
+             draw instead (an approximation, not a dot), sized by PDSIZE"
+                .into(),
+        ));
+    }
+    let mut refused: Vec<String> = Vec::new();
+    if base > 4 {
+        refused.push(format!(
+            "base mode {base} is not one of the implemented point styles \
+             (0 dot, 1 none, 2 plus, 3 cross, 4 vertical tick)"
+        ));
+    }
+    if unknown_bits != 0 {
+        refused.push(format!(
+            "bit(s) {unknown_bits} are not part of the AutoCAD point display mode"
+        ));
+    }
+    if !refused.is_empty() {
+        let tail = if arms.is_empty() {
+            "no POINT marker is drawn for this mode"
+        } else {
+            "only the expressible base marker is drawn and no substitute shape is invented"
+        };
+        findings.push((
+            "overlay.point-mode-unsupported",
+            format!("PDMODE {mode}: {}; {tail}", refused.join("; ")),
+        ));
+    }
+    if mode & PDMODE_SURROUNDING_SHAPE_BITS != 0 {
+        let mut shapes: Vec<&str> = Vec::new();
+        if mode & 32 != 0 {
+            shapes.push("32 (circle)");
+        }
+        if mode & 64 != 0 {
+            shapes.push("64 (square)");
+        }
+        findings.push((
+            "overlay.point-mode-shape-bits",
+            format!(
+                "PDMODE {mode} requests the surrounding shape(s) {}; those shapes are \
+                 NOT IMPLEMENTED, so only the base marker ({base_name}) is drawn",
+                shapes.join(" + ")
+            ),
+        ));
+    }
+    MarkerPlan { arms, findings }
+}
+
+/// The single sanitisation rule for `$PDSIZE`.
+///
+/// A non-finite or absurd magnitude ([`POINT_DISPLAY_SIZE_LIMIT`]) is meaningless
+/// as a display size, so it degrades to `0.0` — the "viewport-relative" default —
+/// exactly like [`cad_db::sanitize_linetype_scale`] degrades a broken linetype
+/// scale to its identity. Everything else is kept as stored, sign included, so
+/// the sign (`> 0` absolute, `< 0` percent) is interpreted by
+/// [`marker_half_extent`] and nowhere else.
+///
+/// The database stores the raw value; this function is the **consume point**, and
+/// [`point_marker_overlay`] reports a fallback once so it is never silent.
+pub fn sanitize_point_display_size(size: f64) -> f64 {
+    if size.is_finite() && size.abs() <= POINT_DISPLAY_SIZE_LIMIT {
+        size
+    } else {
+        0.0
+    }
+}
+
+/// The marker half-extent in drawing units for a sanitised `$PDSIZE` and a 2D
+/// viewport height. `None` when no marker can be sized from it.
+///
+/// * `size > 0` — the absolute drawing-unit size of the marker, so `half = size / 2`.
+/// * `size == 0` — viewport-relative: [`POINT_MARKER_HALF_EXTENT_FRACTION`] of the
+///   viewport height (the historical behaviour).
+/// * `size < 0` — the magnitude is a percentage of the viewport height.
+fn marker_half_extent(size: f64, viewport_height: f64) -> Option<f64> {
+    let half = if size > 0.0 {
+        size / 2.0
+    } else if size < 0.0 {
+        viewport_height * (size.abs() / 100.0)
+    } else {
+        viewport_height * POINT_MARKER_HALF_EXTENT_FRACTION
+    };
+    (half.is_finite() && half > 0.0).then_some(half)
+}
 
 /// Maximum number of POINT markers drawn in one overlay batch.
 ///
@@ -89,85 +282,111 @@ pub fn visible_point_marker_positions(
 /// Build the POINT marker overlay as **one** bounded `Lines` batch
 /// (ADR 0015 decision E).
 ///
-/// The marker size is derived from `viewport_bounds` (5% of the viewport height
-/// as a full cross), so it stays a constant screen size under any zoom instead
-/// of a fixed world size that distorts at extreme scales.
+/// The glyph is `$PDMODE`'s base shape and the size is `$PDSIZE`
+/// ([`marker_plan`], [`marker_half_extent`]): `$PDSIZE = 0` keeps the historical
+/// viewport-relative size (2.5% of the viewport height as a half-extent), a
+/// positive size is an absolute drawing-unit size and a negative one a percentage
+/// of the viewport height. A camera-only change therefore rescales the markers
+/// without rebuilding the base scene.
 ///
-/// In a 3D view `viewport_bounds` is `None`, so a screen-relative size has no
-/// domain and **no** marker is emitted (ADR 0015 decision E: 3D point markers
-/// are NOT IMPLEMENTED). This is an explicit branch, not an accidental
-/// `unwrap_or(0.0)`.
+/// In a 3D view `viewport_bounds` is `None`, so **no** marker is emitted (ADR 0015
+/// decision E: 3D point markers are NOT IMPLEMENTED). This stays a deliberate
+/// restriction even where `$PDSIZE > 0` would be definable without a viewport
+/// height: the 3D restriction is about the view, not about the style, and a marker
+/// that only appears for some drawings would read as a bug. A 3D view emits no
+/// style diagnostic either, for the same reason — nothing is dropped, because
+/// nothing was going to be drawn.
+///
+/// Every unsupported or approximated aspect of the style is reported **once** per
+/// call (`overlay.point-mode-dot`, `overlay.point-mode-shape-bits`,
+/// `overlay.point-mode-unsupported`, `overlay.point-size-sanitized`) together with
+/// the cap diagnostic, and the overlay is `Partial` when any of them applies —
+/// never a silent drop, never one diagnostic per point.
 ///
 /// Cost is `O(visible points)`: a single vertex buffer and a single batch, with
 /// no per-point allocation.
 pub fn point_marker_overlay(
     points: &[Point3],
     viewport_bounds: Option<(Point3, Point3)>,
+    style: PointDisplayStyle,
     document: DocumentId,
 ) -> VisualOverlay {
     let mut out = VisualOverlay::default();
     if points.is_empty() {
         return out;
     }
-    // 3D view: no screen-relative size domain -> no markers.
+    // 3D view: no screen-relative size domain -> no markers (deliberate).
     let Some((min, max)) = viewport_bounds else {
         return out;
     };
-    let half = (max.y - min.y).abs() * POINT_MARKER_HALF_EXTENT_FRACTION;
-    if !half.is_finite() || half <= 0.0 {
-        return out;
+    let mut findings: Vec<(&'static str, String)> = Vec::new();
+    let size = sanitize_point_display_size(style.size);
+    if size.to_bits() != style.size.to_bits() {
+        findings.push((
+            "overlay.point-size-sanitized",
+            format!(
+                "PDSIZE {} is not a usable marker size (non-finite or beyond the \
+                 {POINT_DISPLAY_SIZE_LIMIT} limit); the PDSIZE 0 viewport-relative size is used instead",
+                style.size
+            ),
+        ));
     }
-    let drawn = if points.len() > POINT_MARKER_LIMIT {
-        &points[..POINT_MARKER_LIMIT]
-    } else {
-        points
-    };
-    // One axis-aligned plus per point, emitted as two explicit `LineList`
-    // segment pairs (shape fixed; point styles are NOT IMPLEMENTED).
-    let mut vertices: Vec<Point3> = Vec::with_capacity(drawn.len() * 4);
-    for point in drawn {
-        vertices.push(Point3 {
-            x: point.x - half,
-            y: point.y,
-            z: point.z,
-        });
-        vertices.push(Point3 {
-            x: point.x + half,
-            y: point.y,
-            z: point.z,
-        });
-        vertices.push(Point3 {
-            x: point.x,
-            y: point.y - half,
-            z: point.z,
-        });
-        vertices.push(Point3 {
-            x: point.x,
-            y: point.y + half,
-            z: point.z,
-        });
+    let plan = marker_plan(style.mode);
+    findings.extend(plan.findings);
+
+    if let Some(half) = marker_half_extent(size, (max.y - min.y).abs()) {
+        let drawn = if points.len() > POINT_MARKER_LIMIT {
+            &points[..POINT_MARKER_LIMIT]
+        } else {
+            points
+        };
+        // One glyph per point, `plan.arms` explicit `LineList` segment pairs each.
+        let mut vertices: Vec<Point3> = Vec::with_capacity(drawn.len() * plan.arms.len() * 2);
+        for point in drawn {
+            for (dx0, dy0, dx1, dy1) in plan.arms {
+                vertices.push(Point3 {
+                    x: point.x + dx0 * half,
+                    y: point.y + dy0 * half,
+                    z: point.z,
+                });
+                vertices.push(Point3 {
+                    x: point.x + dx1 * half,
+                    y: point.y + dy1 * half,
+                    z: point.z,
+                });
+            }
+        }
+        if let Some(batch) = line_batch(
+            &vertices,
+            POINT_MARKER_COLOR,
+            document,
+            POINT_MARKER_DRAW_ORDER,
+            "overlay.point-marker",
+        ) {
+            out.batches.push(batch);
+        }
+        if points.len() > POINT_MARKER_LIMIT {
+            findings.push((
+                "overlay.point-marker-limit",
+                format!(
+                    "{} visible POINT entities exceed the {POINT_MARKER_LIMIT}-marker cap; \
+                     drawing the first {POINT_MARKER_LIMIT}",
+                    points.len()
+                ),
+            ));
+        }
     }
-    if let Some(batch) = line_batch(
-        &vertices,
-        POINT_MARKER_COLOR,
-        document,
-        POINT_MARKER_DRAW_ORDER,
-        "overlay.point-marker",
-    ) {
-        out.batches.push(batch);
-    }
-    if points.len() > POINT_MARKER_LIMIT {
-        let message = format!(
-            "{} visible POINT entities exceed the {POINT_MARKER_LIMIT}-marker cap; \
-             drawing the first {POINT_MARKER_LIMIT}",
-            points.len()
-        );
+    let mut messages: Vec<String> = Vec::with_capacity(findings.len());
+    for (code, message) in findings {
+        messages.push(message.clone());
         out.diagnostics.push(Diagnostic {
             object: None,
-            code: "overlay.point-marker-limit".into(),
-            message: message.clone(),
+            code: code.into(),
+            message,
         });
-        out.completeness = Completeness::Partial(vec![message]);
+    }
+    if !messages.is_empty() {
+        out.completeness = Completeness::Partial(messages);
     }
     out
 }
@@ -207,18 +426,23 @@ mod tests {
         Some((p(0.0, 0.0), p(100.0, height)))
     }
 
+    /// `$PDMODE = 2` (plus) with the default viewport-relative size: the shape
+    /// that pins the historical `PDSIZE = 0` formula without the mode-0 dot
+    /// approximation's diagnostic in the way.
+    const PLUS_STYLE: PointDisplayStyle = PointDisplayStyle { mode: 2, size: 0.0 };
+
     #[test]
     fn point_marker_overlay_draws_one_batch_and_scales_with_the_viewport_height() {
         let points = [p(0.0, 0.0)];
-        let small = point_marker_overlay(&points, viewport(100.0), DocumentId(1));
-        let large = point_marker_overlay(&points, viewport(400.0), DocumentId(1));
+        let small = point_marker_overlay(&points, viewport(100.0), PLUS_STYLE, DocumentId(1));
+        let large = point_marker_overlay(&points, viewport(400.0), PLUS_STYLE, DocumentId(1));
         assert_eq!(small.drawn(), 1, "all points share one bounded batch");
         assert_eq!(large.drawn(), 1);
         assert_eq!(small.batches[0].topology, RenderTopology::Lines);
         assert_eq!(small.batches[0].draw_order, POINT_MARKER_DRAW_ORDER);
         assert_eq!(small.batches[0].color, POINT_MARKER_COLOR);
         assert!(!small.batches[0].color_unresolved);
-        // One marker => two segments => four vertices.
+        // One plus marker => two segments => four vertices.
         assert_eq!(small.batches[0].vertices.len(), 4);
         // 5% of the viewport height as a full cross: half-extent = 0.025 * height.
         let small_extent = batch_extent(&small.batches[0]);
@@ -228,6 +452,12 @@ mod tests {
             (large_extent / small_extent - 4.0).abs() < 1e-3,
             "a 4x taller viewport must give a 4x larger marker: {large_extent} vs {small_extent}"
         );
+        assert_eq!(
+            small.diagnostics.len(),
+            0,
+            "a supported base mode with the default size reports nothing"
+        );
+        assert_eq!(small.completeness, Completeness::Complete);
     }
 
     #[test]
@@ -235,7 +465,7 @@ mod tests {
         let at_cap: Vec<Point3> = (0..POINT_MARKER_LIMIT as u64)
             .map(|i| p(i as f64, 0.0))
             .collect();
-        let overlay = point_marker_overlay(&at_cap, viewport(100.0), DocumentId(1));
+        let overlay = point_marker_overlay(&at_cap, viewport(100.0), PLUS_STYLE, DocumentId(1));
         assert_eq!(overlay.drawn(), 1);
         assert_eq!(overlay.batches[0].vertices.len(), POINT_MARKER_LIMIT * 4);
         assert!(
@@ -247,7 +477,7 @@ mod tests {
         let over_cap: Vec<Point3> = (0..(POINT_MARKER_LIMIT as u64 + 1))
             .map(|i| p(i as f64, 0.0))
             .collect();
-        let overlay = point_marker_overlay(&over_cap, viewport(100.0), DocumentId(1));
+        let overlay = point_marker_overlay(&over_cap, viewport(100.0), PLUS_STYLE, DocumentId(1));
         assert_eq!(overlay.drawn(), 1);
         assert_eq!(
             overlay.batches[0].vertices.len(),
@@ -291,9 +521,9 @@ mod tests {
             .map(|i| p(i as f64, 0.0))
             .collect();
         // Warm up first so the timed run does not pay one-off allocation growth.
-        let _ = point_marker_overlay(&at_cap, viewport(100.0), DocumentId(1));
+        let _ = point_marker_overlay(&at_cap, viewport(100.0), PLUS_STYLE, DocumentId(1));
         let started = std::time::Instant::now();
-        let overlay = point_marker_overlay(&at_cap, viewport(100.0), DocumentId(1));
+        let overlay = point_marker_overlay(&at_cap, viewport(100.0), PLUS_STYLE, DocumentId(1));
         let elapsed = started.elapsed();
 
         assert_eq!(overlay.drawn(), 1, "the whole cap is one bounded batch");
@@ -319,8 +549,11 @@ mod tests {
     #[test]
     fn point_marker_overlay_is_not_drawn_in_a_3d_view() {
         let points = [p(1.0, 2.0)];
-        // `viewport_bounds == None` is the 3D case: no size domain, no markers.
-        let overlay = point_marker_overlay(&points, None, DocumentId(1));
+        // `viewport_bounds == None` is the 3D case: markers are deliberately not
+        // drawn, whatever the style asks for (see `tests/point_styles.rs` for the
+        // `PDSIZE > 0` case).
+        let overlay =
+            point_marker_overlay(&points, None, PointDisplayStyle::default(), DocumentId(1));
         assert!(overlay.is_empty());
         assert!(overlay.diagnostics.is_empty());
         assert_eq!(overlay.completeness, Completeness::Complete);
@@ -328,9 +561,13 @@ mod tests {
 
     #[test]
     fn point_marker_overlay_emits_nothing_for_an_empty_set_or_a_degenerate_viewport() {
-        assert!(point_marker_overlay(&[], viewport(100.0), DocumentId(1)).is_empty());
-        // A zero-height viewport has no screen-relative size domain.
-        assert!(point_marker_overlay(&[p(0.0, 0.0)], viewport(0.0), DocumentId(1)).is_empty());
+        assert!(point_marker_overlay(&[], viewport(100.0), PLUS_STYLE, DocumentId(1)).is_empty());
+        // A zero-height viewport has no screen-relative size domain for the
+        // `PDSIZE = 0` (default) size.
+        assert!(
+            point_marker_overlay(&[p(0.0, 0.0)], viewport(0.0), PLUS_STYLE, DocumentId(1))
+                .is_empty()
+        );
     }
 
     fn point_entity(id: u128, layer: u128, point: Point3) -> DbEntity {

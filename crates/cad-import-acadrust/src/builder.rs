@@ -128,6 +128,7 @@ impl<'a> ImporterBuilder<'a> {
 
         // Capture everything we need before the builder is consumed.
         self.read_code_page();
+        self.read_point_display_style();
         let units = self.read_units();
         let capabilities: Vec<EntityCapability> = {
             let mut v: Vec<_> = std::mem::take(&mut self.capabilities)
@@ -198,6 +199,23 @@ impl<'a> ImporterBuilder<'a> {
     pub(crate) fn read_code_page(&mut self) {
         self.builder
             .set_code_page(Some(self.acad.header.code_page.as_str()));
+    }
+
+    /// Carry the source drawing's POINT display style (`$PDMODE` / `$PDSIZE`)
+    /// into the database.
+    ///
+    /// Both values are copied **raw**: the reader always materialises them
+    /// (their defaults are `0` / `0.0`), and interpreting them — marker shape,
+    /// viewport-relative vs absolute size, sanitisation, and the diagnostics for
+    /// the shapes this project cannot express — belongs to the display layer.
+    /// No import diagnostic is produced here, because a mode this project cannot
+    /// draw is a *display* limitation, not a lost entity; it is reported once by
+    /// `cad_app::render_scene::point_marker_overlay` when the markers are built.
+    pub(crate) fn read_point_display_style(&mut self) {
+        self.builder
+            .set_point_display_mode(self.acad.header.point_display_mode);
+        self.builder
+            .set_point_display_size(self.acad.header.point_display_size);
     }
 
     pub(crate) fn read_units(&self) -> UnitContext {

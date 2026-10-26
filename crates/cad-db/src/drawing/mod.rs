@@ -49,6 +49,23 @@ pub struct DrawingDatabase {
     /// Drawing-global linetype scale (`$LTSCALE`). `1.0` is the DWG default and
     /// the value used when a database was not built by the importer.
     pub(crate) linetype_scale: f64,
+    /// Drawing-global POINT display mode (`$PDMODE`), exactly as the source
+    /// declared it. `0` (a dot) is the DWG default and the value a database that
+    /// was not built by the importer gets.
+    ///
+    /// Stored **raw**: the display layer interprets the value — including the
+    /// marker shapes this project cannot express — and reports them, so the db
+    /// never invents a marker shape and never silently rewrites the header.
+    pub(crate) point_display_mode: i16,
+    /// Drawing-global POINT display size (`$PDSIZE`), exactly as the source
+    /// declared it. `0.0` — the DWG default — means "relative to the viewport"
+    /// (see `cad_app::render_scene::point_marker_overlay`); `> 0` is an absolute
+    /// world size and `< 0` a percentage of the viewport height.
+    ///
+    /// Stored **raw** (a non-finite or absurd value is kept as read): the
+    /// display layer owns the single sanitisation rule, so the db does not keep a
+    /// second copy of it and a corrupt header stays observable.
+    pub(crate) point_display_size: f64,
     /// Plot configuration per paper-space layout. Absent entries are resolved
     /// to an explicit default page by [`DrawingDatabase::plot_settings_for`].
     pub(crate) plot_settings: BTreeMap<LayoutId, PlotSettingsRecord>,

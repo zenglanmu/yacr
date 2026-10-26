@@ -167,8 +167,10 @@ impl HostCore {
             visibility: overlay_visibility,
             viewport_bounds: self.canvas_bounds(),
             // Visible POINT markers are derived by the scene assembly from the
-            // drawing being displayed, so the host feeds none itself.
+            // drawing being displayed, so the host feeds none itself — and the
+            // same holds for the drawing's `$PDMODE`/`$PDSIZE` marker style.
             point_markers: Vec::new(),
+            point_display_style: cad_app::render_scene::PointDisplayStyle::default(),
             // Grip handles of the visible selected entities, fed by the host from
             // `cad_app::grips` (never derived by the overlay). While a grip drag
             // is armed the dragged entry is the current drag target, so the moved

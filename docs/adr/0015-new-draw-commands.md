@@ -169,6 +169,16 @@ AutoCAD 用提示行输入数字；本项目没有数值输入通道，且命令
   （加一条有界成本断言；如超预算再下调上限，下调属实现细节不另改 ADR）。
 - `PDMODE`/`PDSIZE`/点样式**NOT IMPLEMENTED**：不实现 0–4 图形位码与围绕点画形状；标记形状固定（十字/点），
   并标注为**有意偏离**。
+  - **2026-10-26 修正（本轮已实现，见下）**：此条已作废。`$PDMODE`/`$PDSIZE` 现已实现为**显示样式**
+    （`crates/cad-app/src/render_scene/overlay/point_markers.rs`）：基础形状 `0` 点 / `1` 无 / `2` `+` /
+    `3` `×` / `4` 竖线；`PDSIZE > 0` 绝对图纸尺寸（`half = size/2`）、`= 0` 沿用上述屏占比语义
+    （视口高 2.5% 半幅）、`< 0` 视口高的百分比；`32`/`64`/`96` 周边圆/方**仍未实现**（画基础形状 +
+    一条 `overlay.point-mode-shape-bits` 诊断）；`0`（点）在 **Lines-only** 拓扑下只能画**与配置尺寸
+    同尺寸的** `+`（一条 `overlay.point-mode-dot` 诊断，`Partial`，**不声称**是点；刻意不缩小，因为
+    DWG 缺省 `PDMODE=0`，缩小会静默改变所有未设样式图纸的点外观）；无法表达的模式按名
+    `overlay.point-mode-unsupported` 拒绝、**不发明**几何；非有限/超限 `PDSIZE` 回退到 `0` 行为并
+    发一条 `overlay.point-size-sanitized`。3D 仍不画（显式限制，与样式无关）。无 `SETVAR`，样式只在
+    导入时到达；`SemanticGeometry::Point` **未改**（DXF 组 50 轴向角仍不建模）。
 - **3D 视图：NOT IMPLEMENTED**——`viewport_bounds` 在 3D 为 `None`，屏占比尺寸没有定义域，因此 3D 下不画
   点标记（显式记录，不猜一个 fallback）。
 - **已知偏差**：标记在 overlay 顺序里绘制（始终在最上层），与基础场景实体的遮挡关系不同。
@@ -206,6 +216,9 @@ AutoCAD 用提示行输入数字；本项目没有数值输入通道，且命令
   **边数的跨会话持久化**（不写持久化 config）。
 - ELLIPSE 的 **`Center`（中心法）**、`Arc`（椭圆弧 start/sweep）、`Rotation`、`Isocircle`、`PELLIPSE` 旧式 polyline 椭圆。
 - POINT 的 `PDMODE`/`PDSIZE`/点样式、Multiple Points 重复放置、**3D 视图中的点标记**。
+  - **2026-10-26 修正**：`PDMODE`/`PDSIZE` 已实现（显示样式，见决策 E 的修正条目）；仍然 NOT IMPLEMENTED 的
+    是 `32`/`64`/`96` 周边圆/方、`PDMODE 0` 的真实点（Lines-only 拓扑下为 `+` 近似）、以及无 `SETVAR`
+    （样式只在导入时到达）。Multiple Points 与 3D 点标记不变。
 - SPLINE 的 CV 法/节点类型/阶数/切向/公差/`Close`/`Object` 转换，以及 **2–3 个 fit 点的小样本输入**；
   **fit 点数据不参与 SAVE→OPEN 往返**。
 - 六者的 **3D/OCS 非共面输入**（沿用"+Z 平面"子集，不静默投影）；**纸空间造形**（插入漏斗固定模型空间）。

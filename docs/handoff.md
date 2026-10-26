@@ -1,3 +1,41 @@
+## 2026-10-26 第 4 轮：POINT 显示样式（`$PDMODE`/`$PDSIZE`）落地
+
+### 结论
+
+`docs/compatibility.md` 的 POINT 行此前写着「`PDMODE`/`PDSIZE`/点样式**未实现**」，现在**实现了显示样式**
+（只影响显示，不写图纸）：acadrust 早已解析两个头变量，我们把它们**按原值**搬进 `DrawingDatabase`
+（沿用 `linetype_scale`/`code_page` 的三行模式，缺省 `0`/`0.0`，无迁移），由
+`crates/cad-app/src/render_scene/overlay/point_markers.rs` **单一处**解释与消毒。
+
+- 基础形状：`0` 点 / `1` 无 / `2` `+` / `3` `×` / `4` 竖线。
+- `PDSIZE`：`> 0` 绝对图纸尺寸（`half = size/2`）、`= 0` 沿用视口高 2.5% 半幅（即 5% 全幅）、
+  `< 0` 视口高的百分比；非有限/超限（> 1e6）回退到 `0` 行为并**报一次** `overlay.point-size-sanitized`
+  （数据库里仍保留原值可观测）。
+- 拓扑仍是 **Lines-only**（未新增 `Points` 拓扑）：`PDMODE 0` 的“点”只能画**与配置尺寸同尺寸的** `+`，
+  报 `overlay.point-mode-dot`（`Partial`，**不声称**是点）；刻意**不**缩小，因为 DWG 缺省就是 `0`，
+  缩小会静默改变所有未设样式图纸的点外观。
+- `32`/`64`/`96` 周边圆/方**未实现**：画可表达的基础形状 **+** 一条 `overlay.point-mode-shape-bits`。
+  无法表达的模式（负数、`5..=31`、未知高位）→ 不画并报 `overlay.point-mode-unsupported`，**不发明几何**。
+- 3D 仍**不画**点标记（与样式无关的视图限制，`PDSIZE > 0` 也一样）；**块内 POINT 仍不标记**；
+  `SemanticGeometry::Point` **未改**（DXF 组 50 轴向角仍不建模）；**无 `SETVAR`**，样式只在导入时到达。
+- 样式（mode + size 位）已并入 overlay 指纹，两张实体相同但样式不同的图纸**不会**共享缓存的 overlay。
+
+### 证据（本机，2026-10-26）
+
+- `cargo fmt --all -- --check`、`cargo check --workspace --all-targets --locked`、
+  `clippy -p cad-app -p cad-db -p cad-representation -p cad-import-acadrust -p cad-scene --all-targets
+  -- -D warnings` → 通过。
+- `cargo test -p cad-db --lib` **145**、`-p cad-representation` **226**、`-p cad-import-acadrust`
+  **299+1+1+3**（3 个 `#[ignore]` 为既有夹具生成器）、`-p cad-app --lib` **1236**（+11）、
+  `-p cad-host` **237** → 全绿。
+- `python3 scripts/check-file-size.py`（1028 文件）、`check-architecture.py` → 通过；
+  `apps/desktop-ui` `tsc` + `node --test`（**654**）、`check-i18n.py`（836 keys）→ 通过（本轮无 UI 改动，
+  仅证明没打破）。
+- 既有 `point_markers` 测试**更新而非删除**（现在显式传 `PLUS_STYLE`，保留「无诊断 / 恰一条诊断」的语义）。
+
+**NOT RUN / NOT VERIFIED**：GUI/真实窗口/像素判据（本轮只有几何契约测试）、真实 DWG 上的样式目视比对、
+wasm/Windows/Android/macOS 目标、`check-workflows.py`/`check-fixture-manifest.py`。
+
 ## 2026-10-26 第 3 轮：未知源单位文案闭环 + 颜色选择器（UI 对齐）
 
 ### 结论

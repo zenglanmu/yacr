@@ -169,6 +169,47 @@ impl PreviewOptions {
     }
 }
 
+/// AutoCAD's drawing-global POINT display style (`$PDMODE` / `$PDSIZE`).
+///
+/// **Display only.** It decides the glyph [`point_marker_overlay`] draws for every
+/// visible POINT and never touches `SemanticGeometry::Point` (the DXF group 50
+/// axis angle stays unmodelled: adding a field to the domain geometry for a
+/// display nicety would ripple through every crate). There is no `SETVAR`
+/// equivalent, so the style can only arrive with the imported drawing.
+///
+/// Both values are carried **raw**, exactly as [`cad_db::DrawingDatabase`] stores
+/// them; [`point_marker_overlay`] is the single interpreter and the single place
+/// that sanitises them.
+#[derive(Debug, Clone, Copy)]
+pub struct PointDisplayStyle {
+    /// `$PDMODE`: base values `0` dot, `1` none, `2` plus, `3` cross, `4` vertical
+    /// tick; the `32`/`64` bits request a surrounding circle/square, which are
+    /// NOT IMPLEMENTED.
+    pub mode: i16,
+    /// `$PDSIZE` in drawing units: `> 0` absolute, `0` viewport-relative
+    /// (2.5% of the viewport height as a half-extent), `< 0` a percentage of the
+    /// viewport height.
+    pub size: f64,
+}
+
+impl Default for PointDisplayStyle {
+    /// `$PDMODE = 0` (dot), `$PDSIZE = 0.0` (viewport-relative) — the DWG
+    /// defaults, i.e. exactly the behaviour of a drawing that declared neither
+    /// variable.
+    fn default() -> Self {
+        Self { mode: 0, size: 0.0 }
+    }
+}
+
+impl PartialEq for PointDisplayStyle {
+    /// Bitwise size identity, so `NaN` equals itself: the style is a cache and
+    /// fingerprint key (hashed through `to_bits`), and a corrupt non-finite
+    /// header value must not make every preparation look like a change.
+    fn eq(&self, other: &Self) -> bool {
+        self.mode == other.mode && self.size.to_bits() == other.size.to_bits()
+    }
+}
+
 /// The transient highlight / preview overlay inputs a host supplies.
 ///
 /// All fields are pure session state; none of them writes the database. An
@@ -214,8 +255,9 @@ pub struct OverlayInputs {
     /// Updated on camera, canvas size, and zoom changes; the base scene remains
     /// reusable while only this visual overlay is regenerated.
     pub viewport_bounds: Option<(Point3, Point3)>,
-    /// Positions of the visible POINT entities, drawn as screen-relative cross
-    /// markers (ADR 0015 decision E).
+    /// Positions of the visible POINT entities, drawn as screen-relative marker
+    /// glyphs (ADR 0015 decision E; the glyph is the drawing's
+    /// [`Self::point_display_style`]).
     ///
     /// Filled by the scene assembly from the drawing being displayed
     /// (`CadSceneController::prepare_*`), respecting the same layer-visibility
@@ -224,6 +266,15 @@ pub struct OverlayInputs {
     /// rebuilds the transient overlay, and the marker size is derived from
     /// [`Self::viewport_bounds`] (see `point_marker_overlay`). Empty by default.
     pub point_markers: Vec<Point3>,
+    /// Drawing-global POINT display style (`$PDMODE` / `$PDSIZE`) to draw
+    /// [`Self::point_markers`] with.
+    ///
+    /// Like the positions, the scene assembly derives it from the displayed
+    /// drawing (`CadSceneController::prepare_*`), so a host normally leaves it at
+    /// [`PointDisplayStyle::default`]. It participates in [`overlay_fingerprint`],
+    /// so a drawing styled differently never reuses another drawing's marker
+    /// shape or size.
+    pub point_display_style: PointDisplayStyle,
     /// Grip handle positions of the **selected** entities, drawn as
     /// screen-relative hollow square markers (`grip_marker_overlay`).
     ///
@@ -288,6 +339,7 @@ impl Default for OverlayInputs {
             visibility: OverlayVisibility::default(),
             viewport_bounds: None,
             point_markers: Vec::new(),
+            point_display_style: PointDisplayStyle::default(),
             grip_markers: Vec::new(),
             view_scale: None,
             cursor: None,

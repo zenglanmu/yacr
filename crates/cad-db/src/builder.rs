@@ -35,6 +35,8 @@ impl DrawingDatabaseBuilder {
                 styles: BTreeMap::new(),
                 linetypes: BTreeMap::new(),
                 linetype_scale: 1.0,
+                point_display_mode: 0,
+                point_display_size: 0.0,
                 plot_settings: BTreeMap::new(),
                 render_attributes: BTreeMap::new(),
                 layer_attributes: BTreeMap::new(),
@@ -295,6 +297,26 @@ impl DrawingDatabaseBuilder {
         }
         self.database.linetype_scale = scale;
         Ok(())
+    }
+
+    /// Record the drawing-global POINT display mode (`$PDMODE`).
+    ///
+    /// The value is stored **raw**, including bit combinations and values this
+    /// project cannot express: the display layer is the single interpreter (it
+    /// draws the expressible base marker and reports the rest), so rejecting an
+    /// unknown mode here would turn a display nicety into an import failure. No
+    /// migration is needed — the field defaults to the DWG default `0`.
+    pub fn set_point_display_mode(&mut self, mode: i16) {
+        self.database.point_display_mode = mode;
+    }
+
+    /// Record the drawing-global POINT display size (`$PDSIZE`).
+    ///
+    /// Stored **raw**, for the same reason as [`Self::set_point_display_mode`]:
+    /// the sign (viewport-relative vs absolute) and the sanitisation rule are the
+    /// display layer's contract, not the db's. Defaults to the DWG default `0.0`.
+    pub fn set_point_display_size(&mut self, size: f64) {
+        self.database.point_display_size = size;
     }
 
     /// Record the plot configuration read for a layout.

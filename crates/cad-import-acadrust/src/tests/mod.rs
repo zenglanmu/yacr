@@ -20,6 +20,7 @@ mod mesh;
 mod mtext;
 mod ocs;
 mod plot;
+mod point_display_style;
 mod resolution;
 mod transparency_provenance;
 mod viewport;

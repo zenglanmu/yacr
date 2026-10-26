@@ -112,6 +112,14 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
     for point in &inputs.point_markers {
         hash_point(&mut hasher, *point);
     }
+    // The POINT display style is part of the marker geometry (glyph shape and
+    // size) and travels with the drawing, so it is hashed as well: two drawings
+    // with equal entity content but a different `$PDMODE`/`$PDSIZE` must not
+    // share a cached overlay. The size is hashed by bits so `NaN` stays a stable
+    // key (the overlay itself sanitises it to the default behaviour).
+    7u8.hash(&mut hasher);
+    inputs.point_display_style.mode.hash(&mut hasher);
+    inputs.point_display_style.size.to_bits().hash(&mut hasher);
     // Grip handles are overlay geometry too: moving a grip (a drag in progress
     // replaces that entry with the drag target) or selecting another entity
     // changes the marker set and must rebuild the transient overlay. The marker

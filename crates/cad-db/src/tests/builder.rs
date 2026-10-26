@@ -257,6 +257,51 @@ fn code_page_is_absent_by_default_and_survives_the_builder() {
     assert_eq!(drawing.code_page(), None);
 }
 
+#[test]
+fn the_point_display_style_defaults_to_the_dwg_defaults_and_survives_the_builder() {
+    // A hand-built database — or a source that declared neither `$PDMODE` nor
+    // `$PDSIZE` — gets the DWG defaults: mode 0 (dot), size 0 (viewport-relative).
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    let drawing = b.finish().unwrap();
+    assert_eq!(drawing.point_display_mode(), 0);
+    assert_eq!(drawing.point_display_size(), 0.0);
+
+    // Declared values survive verbatim, sign included, so the display layer is
+    // the single interpreter of the mode's bits and the size's sign.
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.set_point_display_mode(35); // cross + a requested circle (bits 32|3)
+    b.set_point_display_size(-20.0); // 20% of the viewport height
+    let drawing = b.finish().unwrap();
+    assert_eq!(drawing.point_display_mode(), 35);
+    assert_eq!(drawing.point_display_size(), -20.0);
+
+    // The db stores the value it was given even when it is not usable as a
+    // display size: sanitisation is the **consume point's** rule
+    // (`cad_app::render_scene::sanitize_point_display_size`), so a corrupt header
+    // stays observable here instead of being silently rewritten at import.
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.set_point_display_size(f64::NAN);
+    assert!(b.finish().unwrap().point_display_size().is_nan());
+}
+
 /// One model-space point entity on layer 0, with `attributes` stored beside it.
 fn db_with_attributes(attributes: EntityRenderAttributes) -> DrawingDatabase {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));

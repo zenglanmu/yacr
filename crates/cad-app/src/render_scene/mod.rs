@@ -93,6 +93,10 @@ pub struct CadSceneController {
     /// changes; a camera-only overlay rebuild reuses them instead of rescanning
     /// the model space on every navigation step.
     point_markers: Vec<Point3>,
+    /// The displayed drawing's POINT display style (`$PDMODE` / `$PDSIZE`),
+    /// cached beside [`Self::point_markers`] for the same reason: it belongs to
+    /// the drawing, so it can only change when the base changes.
+    point_display_style: PointDisplayStyle,
     pub ready: Option<PreparedScene>,
     pub diagnostic: Option<String>,
 }
@@ -265,11 +269,21 @@ impl CadSceneController {
                 Some(db) => visible_point_marker_positions(db, layers, space),
                 None => Vec::new(),
             };
+            self.point_display_style = match doc {
+                Some(db) => PointDisplayStyle {
+                    mode: db.point_display_mode(),
+                    size: db.point_display_size(),
+                },
+                None => PointDisplayStyle::default(),
+            };
         }
-        let injected = (overlays.point_markers != self.point_markers).then(|| OverlayInputs {
-            point_markers: self.point_markers.clone(),
-            ..overlays.clone()
-        });
+        let injected = (overlays.point_markers != self.point_markers
+            || overlays.point_display_style != self.point_display_style)
+            .then(|| OverlayInputs {
+                point_markers: self.point_markers.clone(),
+                point_display_style: self.point_display_style,
+                ..overlays.clone()
+            });
         let overlays = injected.as_ref().unwrap_or(overlays);
         let next_base = self.base_revision + u64::from(base_changed);
         let visual_version = (next_base, overlay_fingerprint(overlays));
@@ -344,11 +358,13 @@ impl CadSceneController {
                     }
                     // Visible POINT markers (ADR 0015 decision E): real drawing
                     // content, drawn above the reference axes/grid and below all
-                    // transient chrome. `viewport_bounds` is `None` in a 3D view,
+                    // transient chrome, with the drawing's `$PDMODE`/`$PDSIZE`
+                    // glyph and size. `viewport_bounds` is `None` in a 3D view,
                     // so no marker is emitted there.
                     overlay.merge(point_marker_overlay(
                         &overlays.point_markers,
                         overlays.viewport_bounds,
+                        overlays.point_display_style,
                         document,
                     ));
                     if overlays.visibility.selection_highlight {

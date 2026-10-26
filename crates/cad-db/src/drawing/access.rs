@@ -301,6 +301,23 @@ impl DrawingDatabase {
         self.linetype_scale
     }
 
+    /// Drawing-global POINT display mode (`$PDMODE`), raw as stored. `0` (dot)
+    /// is the DWG default.
+    ///
+    /// This is a **display** value only: it changes how the `cad-app` overlay
+    /// marker is drawn, not the point's geometry, and there is no `SETVAR`
+    /// equivalent, so it can only arrive from the source drawing.
+    pub fn point_display_mode(&self) -> i16 {
+        self.point_display_mode
+    }
+
+    /// Drawing-global POINT display size (`$PDSIZE`), raw as stored. `0.0` is
+    /// the DWG default ("viewport-relative"); the sign is interpreted by the
+    /// display layer, which also sanitises a non-finite/absurd value.
+    pub fn point_display_size(&self) -> f64 {
+        self.point_display_size
+    }
+
     /// Named annotation scales from the drawing's `ACAD_SCALELIST`.
     pub fn scales(&self) -> impl Iterator<Item = &Scale> {
         self.scales.values()
