@@ -38,11 +38,13 @@ pub mod tool_state;
 pub mod viewer_config;
 
 mod command_id;
+mod layer_history;
 mod space;
 
 pub use api::{
     ApiOutcome, ApiRequest, ApiTarget, EntityEdit, NewEntity, RawCommandTrace, TracedCommandOutcome,
 };
+pub use app_measure_object::FULL_TURN_TOLERANCE_RADIANS;
 pub use cad_spatial::{
     BackFacePolicy, GeometryHit, PickItem, PickOptions, PickOutcome, PickReport, SkippedGeometry,
 };
@@ -62,6 +64,7 @@ pub use input::{
     DiagnosticsDrawer, EscapeAction, InputOutcome, InputPolicy, KeyAction, LoadingState,
     PointerPhase, PointerUpdate, StatusModel, ToolStatus, ViewMetrics, DRAG_THRESHOLD_LOGICAL_PX,
 };
+pub use layer_history::{LayerOverrideHistory, LAYER_OVERRIDE_HISTORY_CAP};
 pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
 pub use ortho::{ortho_constrain, ortho_constrain_point};
 pub use picking::{
@@ -954,6 +957,7 @@ pub trait Tool {
 mod app_drawing;
 mod app_history;
 mod app_measure;
+mod app_measure_object;
 mod application;
 mod layers_isolate;
 

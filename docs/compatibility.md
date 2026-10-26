@@ -86,6 +86,7 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | `MEASUREPOLYLINE`（`MEASURE POLYLINE`） | N 点开放链长度 | 需 `CONFIRM` 收尾 |
 | `MEASUREANGLE`（`MEASURE ANGLE`，别名 `ANGLE`） | 3 点顶点角 | 纸空间 `ANGLE` 显式拒绝 |
 | `AREA`（`MEASURE AREA`，别名 `AA`） | 用户选点闭合多边形面积 | 自交拒绝、非共面拒绝、3 点起 |
+| **`AREA OBJECT`（2026-10-27 新增）** | 对**当前选择的一个**闭合实体求**精确**面积：`Circle` ⇒ πr²、**完整** `Ellipse` ⇒ π·a·b、**闭合** `Polyline` ⇒ 平面内 **bulge 感知**的环面积（弧段用解析式，不采样） | **选择式**，不是 AutoCAD 的交互 Object 拾取（与 MATCHPROP 同型的声明式偏离）；`AREA` 的 `Add`/`Subtract` 未实现。拒绝面（全部按名、零改动）：0 或 >1 选择、开放折线、`Arc`（即使整圈）、`Spline`/`Line`/其它种类、折线平面不可定（含**两顶点**闭合 bulge 折线——仅凭顶点无法定平面与 bulge 符号）、非共面、弦环自交、椭圆弧、退化/零面积。`inputs` 诚实：圆/椭圆为空（不造点）、闭合折线为**自身顶点**且带自身平面；`precision = Analytic`。测量**不产生事务/撤销/revision** |
 | **`ID`（2026-10-26 新增）** | **单点拾取 → 该点世界坐标 X/Y/Z + 空间（`model`/`paper`）+ 捕捉来源 + 精度 token**，作为一条 `point` 回显行（不是 `measurement`：点坐标不是标量测量） | **无 spec 授权**：§3.3 只要求距离/折线长度/三点角度/面积，「点坐标查询」是**项目自选范围**（与 DIMENSION 创建同一口径）。**`ID` 故意跳过栅格捕捉与 `ORTHO`**——报告的就是捕捉点本身，两者都不会把坐标挪走（**我们的规则**，见 `crates/cad-app/src/point_report.rs`）。`precision` = 捕捉几何的精度，无捕捉时 `Analytic`；`pixelDistance` = 原拾取到捕捉点的逻辑像素距离（无捕捉为 `null`）。拒绝面：块空间、透视/非正交视图、`Points` 载荷路径（`InvalidInput`，只接受真实拾取）。**不写库、不进历史、无撤销步** |
 
 ### ACIS 实体显示状态（3DSOLID / BODY / REGION / SURFACE，2026-10-21：**已接线**）
@@ -466,9 +467,12 @@ Apply/OK/Cancel 为 AutoCAD 语义（本地暂存、只发 diff、写失败标�
 给 `layers.isolate.current_layer` 诊断），其余图层经**既有原子批量路径** `set_layer_visibilities`
 一次性置为隐藏（校验先行、无部分状态、无静默半成品）；只改**会话覆盖**，**不写 DWG、不升 revision、
 不进历史**。全部图层都已在 keep 集 ⇒ `layers.isolate.noop` 且不产生覆盖抖动；空选择拒绝
-（否则会把所有层藏掉，画布上无从恢复）。`LAYUNISO` 与 `LAYERP` 都解析到**既有** `RESTORELAYERS`
-（清空全部覆盖）：本构建**没有图层状态栈**，所以 `LAYERP` 不是「上一层状态」，只是这一条恢复路径的
-AutoCAD 拼写。`LAYISO`/`LAYUNISO` 在 Viewer 模式**可用**（视图操作，不是实体写）。
+（否则会把所有层藏掉，画布上无从恢复）。`LAYUNISO` 与 `LAYON` 解析到**既有** `RESTORELAYERS`
+（清空全部覆盖）。**`LAYERP`（2026-10-27 起）不再是别名**：它有独立 `CommandId::LayerPrevious`，恢复**上一次**
+覆盖状态——会话内保留**有界**（上限 **16** 条）的快照环，仅在覆盖**真的改变**前压栈（`ToggleLayer` /
+`SETLAYERS` 及其派生 `LAYISO`/`LAYOFF` / `RESTORELAYERS`），no-op 与 `LAYERP` 自身**不压栈**；
+历史空 ⇒ `layers.previous.empty` 且不改状态；**不写 DWG、不升 revision、不进历史、不持久化**
+（无 `LAYRSTATE`/`LAYRDO`）。`DELETELAYER` 的覆盖清理**刻意**不是一步 `LAYERP` 状态。`LAYISO`/`LAYUNISO` 在 Viewer 模式**可用**（视图操作，不是实体写）。
 
 **2026-10-26 新增 `LAYOFF` / `LAYON`**：`LAYOFF`（新 `CommandId`，payload-free，Viewer 可用）把当前
 **选择所在图层**全部关闭（会话覆盖），**当前层除外**（与其他写路径的 `layer.current_off` 合同一致）；

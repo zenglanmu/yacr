@@ -691,8 +691,9 @@ test('the palette is docked next to the other palettes and opened by a shell act
 
 test('LAYER is not offered as a ribbon affordance on a carrier without palettes', () => {
   // The layer-state commands ride the same carrier filter: a carrier that never
-  // renders the layers palette has no surface for the isolation or off/on state.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON']);
+  // renders the layers palette has no surface for the isolation, previous-state or
+  // off/on state.
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON']);
   const layer = { id: 'LAYER', labelKey: 'layers.panel', command: 'LAYER' };
   const properties = { id: 'PROPERTIES', labelKey: 'properties.panel', action: 'properties' };
   const items = [layer, properties, { id: 'OPEN', command: 'OPEN' }];

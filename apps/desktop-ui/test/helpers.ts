@@ -99,14 +99,22 @@ export const HOST_NAMES = [
   'MLEADER',
   // Interaction-only selectors: one per measurement kind, plus fixed zoom steps.
   // ID (2026-10-26) joined the measurement kinds: one point pick, reported as
-  // X/Y/Z plus the snap that produced it (`command.log.point`).
-  'DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ID', 'ZOOMIN', 'ZOOMOUT',
+  // X/Y/Z plus the snap that produced it (`command.log.point`). `AREA OBJECT`
+  // (2026-10-27) is the selection-based area variant: it is a **multi-word
+  // canonical selector** (the host canonicalises the whole trimmed line, exactly
+  // like the `MEASURE AREA` alias it mirrors), so it stays one entry here and is
+  // never split into `AREA` + a typed argument.
+  'DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'AREA OBJECT', 'ID', 'ZOOMIN', 'ZOOMOUT',
   // JOIN (2026-10-26): the modify selector that welds the current selection into
   // one polyline. `LAYISO`/`LAYUNISO` (2026-10-26) are the layer isolate pair —
   // router commands, not chrome-local selectors like `LAYER`. `LAYOFF`/`LAYON`
   // (2026-10-26) close that run: `LAYOFF` turns off every layer the selection sits
   // on, `LAYON` is the restore selector that turns them all back on.
-  'JOIN', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON',
+  // `LAYERP` (2026-10-27) is a canonical selector of its own ("restore the previous
+  // layer-override state"), **not** an alias of `RESTORELAYERS`: the UI therefore
+  // writes no alias row for it (the alias table is the host's, and this mirror
+  // lists it in the canonical run).
+  'JOIN', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON', 'LAYERP',
   // POINT display style sysvars (2026-10-26): `PDMODE` and `PDSIZE` are typed
   // command-line settings with one numeric argument each (like `SNAPUNIT`), not
   // buttons. This mirror is instructed locally, exactly like `SNAPUNIT` before

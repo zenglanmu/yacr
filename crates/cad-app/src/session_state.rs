@@ -12,6 +12,7 @@ use crate::draw_tool::{
     DrawIntent, DrawPreview, DrawTool, DrawToolKind, ToolParameter, ToolParameterStore, ToolValue,
     DEFAULT_POLYGON_SIDES,
 };
+use crate::layer_history::LayerOverrideHistory;
 use crate::layers::LayerOverrideSet;
 use crate::measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
 use crate::selection::SelectionSet;
@@ -36,6 +37,9 @@ pub struct SessionState {
     pub selection: SelectionSet,
     /// Temporary layer visibility. Never the drawing's layer table (F03).
     pub layer_overrides: LayerOverrideSet,
+    /// Bounded history of layer-override snapshots for `LAYERP`
+    /// ([`crate::layer_history`]): session view state only, never persisted.
+    pub layer_history: LayerOverrideHistory,
     pub tool: ToolState,
     /// Generation incremented whenever an active tool lifecycle is replaced.
     pub tool_generation: u64,
@@ -175,6 +179,7 @@ impl SessionState {
             active_space: SpaceId::Model,
             selection: SelectionSet::new(),
             layer_overrides: LayerOverrideSet::new(),
+            layer_history: LayerOverrideHistory::new(),
             tool: ToolState::Idle,
             tool_generation: 0,
             generation: 0,

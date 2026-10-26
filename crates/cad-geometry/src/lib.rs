@@ -14,7 +14,9 @@ pub mod mesh;
 pub mod nurbs;
 pub mod spline;
 
-pub use area::{measure_polygon_area, signed_area, AreaError};
+pub use area::{
+    measure_bulged_ring_area, measure_polygon_area, signed_area, AreaError, BulgedRingArea,
+};
 pub use clip::{clip_polyline_to_xy_rect, clip_segment_to_xy_rect};
 pub use dash::{dash_polyline, dash_polyline_segments, polyline_length, DashIssue, DashOutcome};
 pub use mesh::{compute_vertex_normals, mesh_bounds};

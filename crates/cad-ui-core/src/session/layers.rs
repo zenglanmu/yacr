@@ -279,6 +279,24 @@ impl CadSession {
         self.dispatch_command(CommandId::RestoreLayers)
     }
 
+    /// Restore the **previous** layer state ([`CommandId::LayerPrevious`],
+    /// `LAYERP`).
+    ///
+    /// Pops the newest snapshot of the session's bounded layer-override history
+    /// and applies it, so the panel can offer the same one-step "back" the
+    /// `LAYERP` selector does. Unlike [`Self::restore_layers`] it is **not** a
+    /// clear-all: only the most recent change is undone, and it never pushes (so
+    /// repeated calls walk back monotonically).
+    ///
+    /// An empty history is **not** an error: the host reports the
+    /// `layers.previous.empty` diagnostic and nothing changes — the same "nothing
+    /// to restore" shape `RESTORELAYERS` uses. Without a drawing it is the same
+    /// explicit `layer.no_document` refusal as every other layer mutation.
+    pub fn layer_previous(&self) -> Result<(), String> {
+        self.require_layer_document()?;
+        self.dispatch_command(CommandId::LayerPrevious)
+    }
+
     /// Make the layer named `name` the active layer new entities are created on.
     ///
     /// Dispatched as [`CommandId::SetActiveLayer`] +

@@ -3,8 +3,9 @@
 //! Pins that isolation is a **session view operation**: one atomic override batch,
 //! no database revision bump, no history/undo entry, the current layer always kept
 //! visible, a no-op that writes nothing, and an admitted Viewer-mode path. The
-//! restore half is the existing `RESTORELAYERS` command (`LAYUNISO`/`LAYERP` are
-//! its aliases, pinned in `cad-ui-core`).
+//! restore half is the existing `RESTORELAYERS` command (`LAYUNISO`/`LAYON` are
+//! its aliases, pinned in `cad-ui-core`; `LAYERP` is its **own** previous-state
+//! command and is pinned in `tests::layers_previous`).
 
 use super::*;
 use cad_db::{DrawingDatabaseBuilder, Layer};
@@ -241,7 +242,8 @@ fn restore_layers_clears_the_isolation() {
     isolate(&mut app, &mut session).expect("LAYISO runs");
     assert_eq!(session.layer_overrides.len(), 1);
 
-    // `LAYUNISO`/`LAYERP` are aliases of exactly this command (cad-ui-core).
+    // `LAYUNISO` is an alias of exactly this command (cad-ui-core); `LAYERP` is
+    // the separate previous-state command (`tests::layers_previous`).
     execute(
         &mut app,
         &mut session,

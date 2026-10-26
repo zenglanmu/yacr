@@ -319,6 +319,7 @@ fn no_document_projects_an_empty_answer_and_refuses_the_mutations() {
     for error in [
         session.set_layer_visibility("0", false).unwrap_err(),
         session.restore_layers().unwrap_err(),
+        session.layer_previous().unwrap_err(),
         session.set_active_layer("0").unwrap_err(),
     ] {
         assert!(
@@ -398,6 +399,99 @@ fn a_drained_layer_write_is_applied_through_the_session() {
     assert!(!row(&layers, "WALLS").visible);
     assert!(row(&layers, "WALLS").current);
     assert_eq!(layers.overridden, 1);
+}
+
+// ---------------------------------------------------------------------------
+// LAYERP: the previous layer state
+// ---------------------------------------------------------------------------
+
+#[test]
+fn layerp_restores_the_previous_layer_state_in_a_viewer_session() {
+    // `LAYERP` reads/writes session view state only, so a **Viewer** session must
+    // be able to run it through the real selector funnel.
+    let session = fresh_session();
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .set_mode(cad_app::AppMode::Viewer)
+        .expect("switch to Viewer");
+
+    // An empty history is a no-op, not an error, and changes nothing.
+    let before = session.layers().expect("layers");
+    session
+        .command("LAYERP")
+        .expect("LAYERP is admitted in Viewer");
+    assert_eq!(session.layers().expect("layers"), before);
+
+    // Two real overrides, then LAYERP steps back to the state before the **last**
+    // change (layer 0's hide is undone; WALLS stays hidden) — not clear everything.
+    session
+        .set_layer_visibility("WALLS", false)
+        .expect("WALLS exists");
+    session
+        .set_layer_visibility("0", false)
+        .expect("layer 0 exists");
+    let layers = session.layers().expect("layers");
+    assert_eq!(layers.overridden, 2);
+
+    session.command("LAYERP").expect("LAYERP in Viewer");
+    let layers = session.layers().expect("layers");
+    assert!(
+        !row(&layers, "WALLS").visible,
+        "the previous state still had WALLS hidden"
+    );
+    assert!(row(&layers, "0").visible, "layer 0's hide was undone");
+    assert_eq!(
+        layers.overridden, 1,
+        "one step back, not a clear-all restore"
+    );
+
+    // ...and one more step back reaches the original, fully restored state.
+    session.command("layerp").expect("case-insensitive");
+    let layers = session.layers().expect("layers");
+    assert_eq!(layers.overridden, 0);
+    assert!(layers.layers.iter().all(|row| row.visible));
+
+    // Exhausted history: another LAYERP is a no-op (no ping-pong) and the layers
+    // are unchanged.
+    session
+        .command("LAYERP")
+        .expect("an empty history is not an error");
+    assert_eq!(session.layers().expect("layers"), layers);
+}
+
+#[test]
+fn layerp_and_restore_layers_are_different_commands() {
+    // `RESTORELAYERS`/`LAYUNISO`/`LAYON` clear every override; `LAYERP` steps back
+    // one recorded state. Both must work through the selector funnel, and they must
+    // not be the same name.
+    assert_eq!(normalize_command("LAYERP"), Some(CommandId::LayerPrevious));
+    assert_eq!(
+        normalize_command("LAYUNISO"),
+        Some(CommandId::RestoreLayers)
+    );
+
+    let session = fresh_session();
+    session
+        .set_layer_visibility("WALLS", false)
+        .expect("WALLS exists");
+    session
+        .set_layer_visibility("0", false)
+        .expect("layer 0 exists");
+
+    // RESTORELAYERS clears both overrides (and records one LAYERP step).
+    session.command("LAYUNISO").expect("LAYUNISO clears");
+    assert_eq!(session.layers().expect("layers").overridden, 0);
+
+    // LAYERP brings the cleared pair *back*: that is the previous state. The typed
+    // panel entrance and the selector reach the same command.
+    session.layer_previous().expect("LAYERP restores");
+    assert_eq!(
+        session.layers().expect("layers").overridden,
+        2,
+        "LAYERP is not an alias of the clear-all restore"
+    );
 }
 
 // ---------------------------------------------------------------------------

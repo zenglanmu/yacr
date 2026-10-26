@@ -33,7 +33,8 @@ pub enum CommandLogKind {
 /// Typed measurement echo a `Result` entry carries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandLogMeasurement {
-    /// Stable machine algorithm key: `distance`, `polyline`, `angle`, `area`.
+    /// Stable machine algorithm key: `distance`, `polyline`, `angle`, `area`,
+    /// `area_object`.
     pub algorithm: String,
     /// The measured value in the record's own unit context.
     pub value: f64,
@@ -195,6 +196,11 @@ pub fn algorithm_key(algorithm: &MeasurementAlgorithm) -> &'static str {
         MeasurementAlgorithm::PolylineLength => "polyline",
         MeasurementAlgorithm::Angle3Points => "angle",
         MeasurementAlgorithm::PlanarPolygonArea => "area",
+        // `AREA OBJECT`: its own key, because the value came from one entity's
+        // stored geometry rather than from a picked polygon ring. A consumer
+        // that wants the two areas grouped can group them, but the log never
+        // claims a circle's area was a polygon.
+        MeasurementAlgorithm::ObjectArea => "area_object",
     }
 }
 

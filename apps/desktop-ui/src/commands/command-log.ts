@@ -233,7 +233,14 @@ function measurementLines(t: Translator, measurement: unknown): CommandLogLine[]
   ];
   if (algorithm === 'angle') return single(t('command.log.angle'), `${formatted}${DEGREE_SIGN}`, null);
   if (algorithm === 'polyline') return single(t('command.log.length'), formatted, unitLabel(t, record.unit));
-  if (algorithm === 'area') return single(t('command.log.area'), formatted, areaUnit(t, record.unit));
+  // `area_object` (2026-10-27) is the selection-based area variant: the same
+  // measurement, a different input. It renders as an **area row** — the area label
+  // and the squared unit — so a reader cannot mistake an object's area for a
+  // length; the algorithm token itself stays on the wire, where it tells the two
+  // inputs apart.
+  if (algorithm === 'area' || algorithm === 'area_object') {
+    return single(t('command.log.area'), formatted, areaUnit(t, record.unit));
+  }
   // A future algorithm token is shown by its raw key — the properties palette's
   // rule for an unknown machine key, never an invented label — with the same unit
   // rule: a reported symbol as-is, `null` named as drawing units.

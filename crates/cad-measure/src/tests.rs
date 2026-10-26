@@ -90,6 +90,36 @@ fn planar_area_requires_an_explicit_plane() {
 }
 
 #[test]
+fn object_area_is_refused_by_the_point_engine() {
+    // `AREA OBJECT` measures one entity's stored geometry in `cad-app`; this
+    // engine has no points to feed it, so it refuses the variant by name instead
+    // of returning a number derived from a point list that does not exist — and it
+    // refuses in every space, including a valid plane.
+    for request in [
+        request(MeasurementAlgorithm::ObjectArea, Vec::new()),
+        plane_request(
+            MeasurementAlgorithm::ObjectArea,
+            vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0)],
+        ),
+    ] {
+        let r = engine().measure(&request);
+        match r {
+            Err(CadError::Unsupported(message)) => {
+                assert!(
+                    message.contains("area.object.points_unsupported"),
+                    "{message}"
+                );
+                assert!(
+                    message.contains("not from picked points"),
+                    "the refusal must say where the value does come from: {message}"
+                );
+            }
+            other => panic!("object area must be refused by name, got {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn distance_2d_in_plane_matches_planar_projection() {
     // A point off the plane contributes no in-plane distance.
     let r = engine()

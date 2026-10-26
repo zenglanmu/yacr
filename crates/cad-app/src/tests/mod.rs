@@ -117,6 +117,7 @@ fn application_with_layouts() -> (Application, SessionState) {
     (app, session)
 }
 
+mod area_object;
 mod cjk_baseline;
 mod commands;
 mod drawing;
@@ -135,6 +136,7 @@ mod layer_property;
 mod layers;
 mod layers_isolate;
 mod layers_off;
+mod layers_previous;
 mod locked_layers;
 mod point_display_style;
 mod view_camera;

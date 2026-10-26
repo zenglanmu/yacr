@@ -70,12 +70,12 @@ test('the Layers arrow runs LAYER and the Properties arrow runs PROPERTIES', () 
   const layerItems = byId.layers.items.map(item => item.id);
   const propertyItems = byId.properties.items.map(item => item.id);
   // The Layers panel holds the palette toggle **plus** the layer-state commands
-  // (2026-10-26): `LAYISO`/`LAYUNISO` and `LAYOFF`/`LAYON` are router commands that
-  // change which layers are visible, which is the one state this palette is the
-  // surface for.
+  // (2026-10-26): `LAYISO`/`LAYUNISO`, the previous-state restore (`LAYERP`,
+  // 2026-10-27) and `LAYOFF`/`LAYON` are router commands that change which layers
+  // are visible, which is the one state this palette is the surface for.
   assert.deepEqual(
     layerItems,
-    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON'],
+    ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON'],
     'the Layers panel holds its palette toggle and the layer-state commands',
   );
   assert.deepEqual(propertyItems, ['PROPERTIES']);
@@ -110,7 +110,7 @@ test('every launcher target is a chrome-local command, so admission always answe
   // commands ride the same filter (`2026-10-26`: the isolate pair, then the off/on
   // pair): the layers palette is the only surface that shows what they did, so
   // those buttons are not offered where it never renders.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON']);
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON']);
   assert.equal(offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false)
     .some(panel => panel.id === 'layers' || panel.id === 'properties'), false);
 });

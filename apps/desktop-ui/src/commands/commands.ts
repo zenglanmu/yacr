@@ -408,6 +408,19 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   LAYUNISO: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
   LAYOFF: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
   LAYON: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
+  // AREA OBJECT (2026-10-27) measures **exactly one** closed object, so its rule is
+  // a count of one: `SelectionRequirement.count` is a *minimum* here (the table's
+  // shape does not express an upper bound), which means a selection of two is let
+  // through locally and refused by the host **by name** — the same division of
+  // labour every other selection rule uses. The sentence is this command's own
+  // `measure.kind.area_object.hint`, which states the one-object rule and that the
+  // command does not pick objects interactively, so the refusal and the catalogue
+  // row cannot describe two different behaviours.
+  'AREA OBJECT': Object.freeze({ count: 1, reasonKey: 'measure.kind.area_object.hint' }),
+  // LAYERP restores the previous layer-override state, so no selection is ever the
+  // reason it cannot run. Like LAYON/LAYUNISO its entry exists for the "no drawing
+  // is open" answer only.
+  LAYERP: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
 });
 
 /** The selection requirement of `id`, or `null` when it has none. */
@@ -653,6 +666,23 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'MEASUREPOLYLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', group: 'measure' },
   { id: 'MEASUREANGLE', labelKey: 'measure.kind.angle', icon: 'angle', group: 'measure' },
   { id: 'AREA', labelKey: 'measure.kind.area', icon: 'area', group: 'measure' },
+  // AREA OBJECT (2026-10-27) is the selection-based area variant: it takes the
+  // current selection (exactly one closed object — a circle, an ellipse or a
+  // closed polyline with bulges) instead of a picked boundary, and echoes the
+  // exact area under its own algorithm token (`area_object`). Sharing the `area`
+  // glyph is deliberate: it is the same measurement, only its input differs.
+  //
+  // The id is **multi-word**, which matters for the local admission path: the
+  // host canonicalises the whole trimmed line, so a space-separated selector is
+  // one name there, while `splitCommandText` here reads the first word as the
+  // base name (`AREA`) and the rest as a typed argument (`OBJECT`). This entry is
+  // therefore the *catalogue* half only — the surface that names and suggests the
+  // command; the local admission path still refuses the line because it splits on
+  // the space before the vocabulary is consulted (pinned by
+  // `test/area-object-layerp.test.ts` and reported, never patched into the parser
+  // with a one-off exception). It is listed beside `AREA` because it is the same
+  // measurement kind, and no shipped row moves.
+  { id: 'AREA OBJECT', labelKey: 'measure.kind.area_object', icon: 'area', group: 'measure' },
   // ID (2026-10-26) is the point-coordinate readout: one point pick, reported as
   // X/Y/Z plus the object snap that produced it. It is the fifth measurement kind
   // and is listed last there so no shipped entry moves. It reuses the `point`
@@ -690,6 +720,12 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // visibility change, not a palette toggle.
   { id: 'LAYOFF', labelKey: 'draw.kind.layoff', icon: 'eyeOff', group: 'annotate' },
   { id: 'LAYON', labelKey: 'draw.kind.layon', icon: 'eye', group: 'annotate' },
+  // LAYERP (2026-10-27) is **no longer an alias of the restore command**: it
+  // restores the *previous* layer-override state and names itself (`layers.previous`),
+  // so it is a selector in its own right at the same layer run's end. `LAYUNISO`
+  // and `LAYON` keep meaning "clear every override"; this one does not, which is
+  // why it never borrows `layers.restore` or `draw.kind.layon` as its label.
+  { id: 'LAYERP', labelKey: 'layers.previous', icon: 'eye', group: 'annotate' },
   { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', group: 'annotate' },
   { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', group: 'annotate' },
   { id: 'ZOOMIN', labelKey: 'toolbar.zoom_in', icon: 'zoomIn', group: 'view' },
@@ -856,7 +892,16 @@ export function pushHistory(history: readonly string[], entry: unknown, limit = 
  * second explanation for the same refusal.
  */
 export function admitCommandText(text: unknown, { status = null, pending = false }: AvailabilityOptions = {}): CommandAdmission {
-  const { name: id, argument, text: command } = splitCommandText(text);
+  const split = splitCommandText(text);
+  const command = split.text;
+  // A canonical selector may contain a space (`MEASURE AREA`, `AREA OBJECT`,
+  // `ZOOM EXTENTS`). The host router resolves the **whole** trimmed line against its
+  // command table first and only then falls back to base-plus-argument, so the
+  // chrome must use the same order: otherwise a real selector is refused locally as
+  // "`BASE` with a bad argument" while the host would have accepted it.
+  const whole = split.argument !== null && isSupportedCommand(command) ? command : null;
+  const id = whole ?? split.name;
+  const argument = whole === null ? split.argument : null;
   if (!id) return { kind: 'empty', command: id, reasonKey: null };
   // A typed argument is gated by its base selector and its local grammar before
   // anything else: `LINE 2` and `ZOOM 0` never reach IPC.

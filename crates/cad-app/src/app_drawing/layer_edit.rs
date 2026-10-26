@@ -137,6 +137,12 @@ impl Application {
 
                 // Post-commit session hygiene: neither the temporary override nor
                 // the active layer may keep a reference to the removed row.
+                //
+                // Deliberately **not** a `LAYERP` step (`crate::layer_history`
+                // records layer-*view* mutations: toggle/batch/isolate/layoff/
+                // restore). Pushing here would let `LAYERP` restore an override on
+                // a layer id that no longer exists, and the delete itself is not
+                // undoable either (history has no layer patch kind).
                 session.layer_overrides.remove(id);
                 let mut diagnostics = vec![Diagnostic {
                     object: None,

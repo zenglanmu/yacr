@@ -1,5 +1,6 @@
 //! `LAYISO` (isolate the selection's layers), `LAYOFF` (turn the selection's
-//! layers off) and the `LAYUNISO`/`LAYERP`/`LAYON` restore path.
+//! layers off) and the `LAYUNISO`/`LAYON` restore path (plus `LAYERP`, the
+//! previous layer state, defined next door in [`crate::layer_history`]).
 //!
 //! Both `LAYISO` and `LAYOFF` are **session view operations**: they never touch
 //! the drawing's layer table, the database revision or history. Each computes a
@@ -36,12 +37,17 @@
 //!
 //! ## Restore
 //!
-//! `LAYUNISO`, `LAYERP` and `LAYON` are **aliases of the existing restore
-//! command** ([`CommandId::RestoreLayers`], `RESTORELAYERS`): all three clear the
-//! session's temporary overrides, which is exactly what un-isolating (or turning
-//! the layers back on) means here. A second restore path is deliberately not
-//! invented; `LAYERP` (AutoCAD's "previous layer state") has no layer-state stack
-//! in this build and therefore names the one state it can really restore.
+//! `LAYUNISO` and `LAYON` are **aliases of the existing restore command**
+//! ([`CommandId::RestoreLayers`], `RESTORELAYERS`): both clear the session's
+//! temporary overrides, which is exactly what un-isolating (or turning the layers
+//! back on) means here. A second clear-all path is deliberately not invented.
+//!
+//! `LAYERP` is **not** an alias of it (2026-10-27): it is its own command
+//! ([`CommandId::LayerPrevious`]) that pops the newest snapshot of the session's
+//! bounded layer-override history ([`crate::layer_history`]), so it restores the
+//! *previous* state (the formerly isolated state) instead of clearing everything.
+//! Its push sites are the same batch this module publishes through, so `LAYISO`
+//! and `LAYOFF` are one `LAYERP` step each.
 
 use std::collections::BTreeMap;
 

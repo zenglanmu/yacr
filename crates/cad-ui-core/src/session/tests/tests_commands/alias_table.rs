@@ -153,17 +153,21 @@ fn the_shipped_table_covers_the_implemented_autocad_abbreviations() {
         ("ENTER", "CONFIRM"),
         ("DBA", "DIMBASELINE"),
         ("DCO", "DIMCONTINUE"),
-        // Layer isolation's off switch. There is one restore path
-        // (`RESTORELAYERS`); `LAYERP` has no layer-state stack in this build, so it
-        // names the same restore rather than inventing a second one.
+        // Layer isolation's off switch. There is one "clear every override" path
+        // (`RESTORELAYERS`); `LAYERP` is **not** an alias of it — it is its own
+        // previous-state command (`CommandId::LayerPrevious`, asserted in
+        // `command_vocabulary`), so it is absent from this table.
         ("LAYUNISO", "RESTORELAYERS"),
-        ("LAYERP", "RESTORELAYERS"),
         // `LAYON` is the same single restore path by its AutoCAD name ("turn all
         // layers on"): no second restore exists.
         ("LAYON", "RESTORELAYERS"),
     ] {
         assert_eq!(alias_target(alias), Some(target), "{alias}");
     }
+    // The old `LAYERP` alias row is gone: it must not resolve through the alias
+    // table, and must not point at the clear-all restore.
+    assert_eq!(alias_target("LAYERP"), None);
+    assert_eq!(normalize_command("LAYERP"), Some(CommandId::LayerPrevious));
 }
 
 #[test]

@@ -1,3 +1,46 @@
+## 2026-10-27 第 7 轮：`AREA OBJECT`（精确对象面积）+ `LAYERP`（真·上一图层状态）+ 多词选择子准入修复
+
+### 结论
+
+- **`AREA OBJECT`**（新 `CommandId::AreaObject`，work-only）：对**当前选择的一个**闭合实体求**精确**面积——
+  `Circle` πr²、**完整** `Ellipse` π·a·b、**闭合** `Polyline` 用平面内 **bulge 解析式**（`cad-geometry`
+  新增 `measure_bulged_ring_area`，含消去相消的级数分支，不采样）。结果走**新**算法
+  `MeasurementAlgorithm::ObjectArea`（`cad-host` 回显键 `area_object`），`precision = Analytic`，
+  **不产生事务/撤销/revision**。`cad-measure` 的点引擎对 `ObjectArea` 显式拒绝
+  （`area.object.points_unsupported`），避免「用选点算对象面积」的语义混淆。
+  - **声明式偏离**：选择式而非 AutoCAD 的交互 Object 拾取（与 MATCHPROP 同型）；`AREA` 的
+    `Add`/`Subtract` 未实现。
+  - `inputs`/`plane` 诚实：圆/椭圆为空（不造点）、闭合折线为**自身顶点**并带自身平面。
+  - 拒绝面全部按名、零改动：0/>1 选择、开放折线、`Arc`（含整圈）、`Spline`/`Line`/其它、平面不可定
+    （含**两顶点**闭合 bulge 折线）、非共面、**弦环**自交（弧与远段相交不检测，已声明）、椭圆弧、退化/零面积。
+- **`LAYERP`** 不再是 `RESTORELAYERS` 的别名：新 `CommandId::LayerPrevious`，恢复**上一次**覆盖状态。
+  会话内**有界 16 步**快照环；仅在覆盖**真的改变**前压栈（`ToggleLayer`/`SETLAYERS` 及其派生
+  `LAYISO`/`LAYOFF`/`RESTORELAYERS`），no-op 与 `LAYERP` 自身不压栈；历史空 ⇒ `layers.previous.empty`
+  且不改状态；**不升 revision、不进历史、不持久化**（无 `LAYRSTATE`/`LAYRDO`）。
+  `LAYUNISO`/`LAYON` 仍是「清空全部覆盖」。`DELETELAYER` 的覆盖清理**刻意**不算一步。
+
+### 顺带修复的真实缺陷（本轮最有价值的一条）
+
+UI 侧 `admitCommandText` 把整行按「基名 + 参数」切分，于是**任何含空格的 canonical 选择子**在界面上
+都被拒绝（`AREA OBJECT`，以及既有的 `MEASURE AREA` 一类）。宿主路由的顺序相反——先按**整行**查命令表，
+再退回参数语法。已在 UI 用同一条规则修好（整行优先，参数语法作后备），并保证 `LINE 2`/`SNAPUNIT 10`
+仍走参数语法；`ZOOM EXTENTS`（基名本身是参数选择子）不变。修好后 `AREA OBJECT` 才得以成为 AREA
+按钮的**变体行**（AutoCAD 的 Area 分裂按钮语义），而不是永久禁用的死按钮。
+
+### 证据（本机，2026-10-27）
+
+- `cargo fmt --all -- --check`、`cargo check --workspace --all-targets --locked`、
+  `clippy -p cad-app -p cad-measure -p cad-db -p cad-ui-core -p cad-host -p cad-geometry --all-targets
+  -- -D warnings` → 通过。
+- `cargo test -p cad-app --lib` **1269**（+18）、`-p cad-measure` **54+2**、`-p cad-ui-core` **291**（+4）、
+  `-p cad-host` **240**（+1）、`-p cad-geometry` **62+5**（+7 面积用例）→ 全绿。
+- `apps/desktop-ui`：`tsc` 通过、`node --test` **672 passed**（+10）；`check-i18n.py` **843 keys**、
+  `check-file-size.py`（1042 文件）、`check-architecture.py` → 通过。
+- 命令表 90 → **92**；别名表不再含 `LAYERP`。
+
+**NOT RUN / NOT VERIFIED**：GUI/像素判据、真实 DWG 上的面积/图层态目视验收、vendor 对照、
+wasm/Windows/Android/macOS 目标、`LAYRSTATE`/`LAYRDO`、`AREA` 的 `Add`/`Subtract`。
+
 ## 2026-10-26 第 6 轮：`PDMODE` / `PDSIZE` 命令（点样式不再是「只在导入时到达」）
 
 ### 结论

@@ -21,10 +21,16 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("TOGGLELAYER", CommandId::ToggleLayer),
     ("SETLAYERS", CommandId::SetLayerVisibilities),
     ("RESTORELAYERS", CommandId::RestoreLayers),
+    // LAYERP is the **previous layer state** (AutoCAD's one-step layer stack), a
+    // real command of its own — never an alias of the restore. It pops the newest
+    // session layer-override snapshot; an empty history is a named
+    // `layers.previous.empty` no-op, not an error.
+    ("LAYERP", CommandId::LayerPrevious),
     // LAYISO hides every layer the selection is not on (plus the current layer),
     // as session visibility overrides only — no payload, no database write. The
-    // restore half is the existing `RESTORELAYERS` path: `LAYUNISO`/`LAYERP` are
-    // aliases of it below, so there is exactly one restore.
+    // restore half is the existing `RESTORELAYERS` path: `LAYUNISO`/`LAYON` are
+    // aliases of it below, so there is exactly one "clear the overrides" path and
+    // one "previous state" path (`LAYERP`).
     ("LAYISO", CommandId::IsolateLayers),
     // LAYOFF is its sibling: hide exactly the selection's layers (the current
     // layer is never turned off), again as session visibility overrides only.
@@ -34,6 +40,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("SELECTALL", CommandId::SelectAll),
     ("SELECTINBOX", CommandId::SelectInBox),
     ("MEASURE", CommandId::Measure),
+    // `AREA OBJECT` is our **selection-based** exact area of one closed object
+    // (AutoCAD's `AREA` → `Object` pick prompt, read from the selection instead).
+    // The bare `AREA` selector stays the interactive point measurement below, so
+    // the two are distinct names, not aliases.
+    ("AREA OBJECT", CommandId::AreaObject),
     ("CONFIRM", CommandId::ConfirmMeasurement),
     ("CANCELMEASURE", CommandId::CancelMeasurement),
     ("UNDO", CommandId::Undo),
@@ -164,7 +175,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
 /// [`MeasurementToolKind`] algorithms, so a measurement button starts *its own*
 /// kind instead of every button collapsing onto `MEASURE`/Distance. `DIST`
 /// (distance) and `AREA` are the real AutoCAD command names with exactly this
-/// meaning. `MEASUREPOLYLINE` (polyline length) and `MEASUREANGLE` are explicit
+/// meaning — `AREA` is the **interactive point** area; its AutoCAD `Object`
+/// sub-prompt is the separate canonical selector `AREA OBJECT`
+/// ([`CommandId::AreaObject`], a selection-based measurement, not a point
+/// algorithm, so it is not listed here). `MEASUREPOLYLINE` (polyline length) and
+/// `MEASUREANGLE` are explicit
 /// project selectors: AutoCAD's `PLINE` now names the polyline **draw** command
 /// (a [`COMMAND_TABLE`] entry, not a measurement selector) and `ANGLE` is not an
 /// AutoCAD command at all, so neither measurement meaning shadows a real
@@ -503,14 +518,16 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     // name onto the canonical selector (ADR 0017 decision C, P5f).
     // `LAYUNISO` is AutoCAD's "turn layer isolation off", which is exactly what
     // `RESTORELAYERS` does here (drop the session's temporary overrides).
-    // `LAYERP` ("previous layer state") has **no** layer-state stack in this build,
-    // so it names the same, single restore path rather than inventing a second one.
     // `LAYON` ("turn all layers on") is the same restore reached by its own name.
+    //
+    // `LAYERP` is deliberately **not** in this table any more (2026-10-27): it is a
+    // canonical selector of its own ([`CommandId::LayerPrevious`]) that restores
+    // the *previous* layer state from the session's bounded override history. An
+    // alias onto `RESTORELAYERS` would silently clear every override instead.
     ("LAYUNISO", "RESTORELAYERS"),
-    ("LAYERP", "RESTORELAYERS"),
     // `LAYON` is AutoCAD's "turn all layers on", which is exactly what the one
     // restore path does here (drop every temporary override). It carries no
-    // `CommandId` of its own, like `LAYUNISO`/`LAYERP`.
+    // `CommandId` of its own, like `LAYUNISO`.
     ("LAYON", "RESTORELAYERS"),
     ("DBA", "DIMBASELINE"),
     ("DCO", "DIMCONTINUE"),

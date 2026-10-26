@@ -13,6 +13,15 @@ pub enum MeasurementAlgorithm {
     PolylineLength,
     Angle3Points,
     PlanarPolygonArea,
+    /// The exact area of **one closed entity**, computed from that entity's own
+    /// stored geometry (`AREA OBJECT`).
+    ///
+    /// Deliberately its own variant: the value did **not** come from a picked
+    /// polygon ring, and the point engine (`cad-measure`) has no input points to
+    /// feed it — that engine refuses this variant by name rather than pretending
+    /// a point list exists. The record's `inputs`/`plane` conventions are
+    /// documented on `cad_app::CommandId::AreaObject`.
+    ObjectArea,
 }
 
 #[derive(Debug, Clone, PartialEq)]

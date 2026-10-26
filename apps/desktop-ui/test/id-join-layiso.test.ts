@@ -203,7 +203,7 @@ test('JOIN needs at least two selected objects, and says so before the host refu
 test('LAYISO and LAYUNISO sit beside LAYER and ride the palette carrier filter', async () => {
   const layers = panel('home', 'layers');
   // LAYOFF/LAYON (2026-10-26) close the same run; they have their own test below.
-  assert.deepEqual(layers.items.map(item => item.id), ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON']);
+  assert.deepEqual(layers.items.map(item => item.id), ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON']);
   const [layer, isolate, unisolate] = layers.items;
   assert.equal(layer.large, true, 'the palette opener keeps the large slot');
   for (const item of [isolate, unisolate]) {
@@ -238,7 +238,7 @@ test('LAYISO and LAYUNISO sit beside LAYER and ride the palette carrier filter',
   // A carrier that never renders the layers palette has no surface for the
   // isolation state, so the whole panel (toggle + isolate pair + the off/on pair) is
   // dropped — never left behind as live buttons that hide geometry invisibly.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON']);
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON']);
   assert.deepEqual(offeredItems(layers.items, false), []);
   assert.equal(offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false)
     .some(each => each.id === 'layers'), false);
@@ -317,7 +317,7 @@ test('LAYOFF and LAYON close the Layers panel and ride the same carrier filter',
   const layers = panel('home', 'layers');
   // Directly after the isolate pair, so the run reads palette opener → isolate →
   // restore → off → on. Appending keeps every shipped button where it was.
-  assert.deepEqual(layers.items.map(item => item.id), ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON']);
+  assert.deepEqual(layers.items.map(item => item.id), ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON']);
   const [off, on] = layers.items.slice(-2);
   assert.equal(off.id, 'LAYOFF');
   assert.equal(on.id, 'LAYON');

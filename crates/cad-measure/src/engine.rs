@@ -109,6 +109,18 @@ impl MeasurementEngine {
                 measure_polygon_area(&flat, self.tolerance.topology_world)
                     .map_err(|e| CadError::InvalidInput(format!("area rejected: {e}")))?
             }
+            // `AREA OBJECT` measures one entity's own stored geometry. There are
+            // no picked points to feed this engine, and the record's `value` is a
+            // single scalar computed elsewhere (`cad-app`), so this engine
+            // refuses **by name** instead of returning a number derived from an
+            // input list that does not exist.
+            MeasurementAlgorithm::ObjectArea => {
+                return Err(CadError::Unsupported(
+                    "area.object.points_unsupported: object area is computed from entity \
+                     geometry, not from picked points"
+                        .to_string(),
+                ));
+            }
         };
         if !value.is_finite() {
             return Err(CadError::InvalidInput(

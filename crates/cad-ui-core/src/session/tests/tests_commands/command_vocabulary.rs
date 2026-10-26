@@ -30,6 +30,7 @@ command_selector_contract! {
     ToggleLayer => "TOGGLELAYER",
     SetLayerVisibilities => "SETLAYERS",
     RestoreLayers => "RESTORELAYERS",
+    LayerPrevious => "LAYERP",
     IsolateLayers => "LAYISO",
     LayOff => "LAYOFF",
     SwitchSpace => "SPACE",
@@ -37,6 +38,7 @@ command_selector_contract! {
     SelectAll => "SELECTALL",
     SelectInBox => "SELECTINBOX",
     Measure => "MEASURE",
+    AreaObject => "AREA OBJECT",
     ConfirmMeasurement => "CONFIRM",
     CancelMeasurement => "CANCELMEASURE",
     Undo => "UNDO",
@@ -122,7 +124,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 90,
+        EXPECTED_COMMAND_COUNT, 92,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -496,12 +498,89 @@ fn layoff_is_admitted_and_layon_is_the_restore_alias() {
     // table can shadow it.
     assert_eq!(measurement_selector_kind("LAYOFF"), None);
     assert_eq!(zoom_step_factor("LAYOFF"), None);
-    // LAYON carries **no** `CommandId`: it is an alias of the one restore path
-    // (`RESTORELAYERS`), exactly like LAYUNISO/LAYERP.
+    // LAYON carries **no** `CommandId`: it is an alias of the one "clear every
+    // override" path (`RESTORELAYERS`), exactly like LAYUNISO.
     assert_eq!(normalize_command("LAYON"), Some(CommandId::RestoreLayers));
     assert_eq!(canonical_command_name("LAYON"), Some("RESTORELAYERS"));
     assert!(admissible_names().contains(&"LAYON"));
     assert_eq!(command_name(CommandId::LayOff), Some("LAYOFF"));
+}
+
+#[test]
+fn layerp_is_its_own_previous_state_command_not_a_restore_alias() {
+    // `LAYERP` is AutoCAD's previous layer state. It used to be an alias of
+    // `RESTORELAYERS` (which clears **every** override) — that silently threw the
+    // previous state away instead of restoring it. It is now a canonical selector
+    // with a real `CommandId`, and the alias row is gone.
+    assert_eq!(normalize_command("LAYERP"), Some(CommandId::LayerPrevious));
+    assert_eq!(
+        normalize_command(" layerp "),
+        Some(CommandId::LayerPrevious)
+    );
+    assert_eq!(canonical_command_name("LAYERP"), Some("LAYERP"));
+    assert_eq!(command_name(CommandId::LayerPrevious), Some("LAYERP"));
+    assert!(admissible_names().contains(&"LAYERP"));
+    // No alias maps onto `LAYERP`'s target through the alias table any more, so
+    // `canonical_command_name` reaches it through `COMMAND_TABLE` only.
+    assert!(
+        !COMMAND_ALIASES.iter().any(|(alias, _)| *alias == "LAYERP"),
+        "LAYERP must not be an alias row"
+    );
+    assert!(
+        !COMMAND_ALIASES
+            .iter()
+            .any(|(_, target)| *target == "LAYERP"),
+        "no alias may point at LAYERP"
+    );
+    // The other two restores keep resolving to the one clear path.
+    for alias in ["LAYUNISO", "LAYON"] {
+        assert_eq!(
+            normalize_command(alias),
+            Some(CommandId::RestoreLayers),
+            "{alias}"
+        );
+    }
+    // It is a session view operation, so a Viewer may run it.
+    assert!(!CommandId::LayerPrevious.requires_work_mode());
+    // It is neither a measurement selector nor a zoom step.
+    assert_eq!(measurement_selector_kind("LAYERP"), None);
+    assert_eq!(zoom_step_factor("LAYERP"), None);
+}
+
+#[test]
+fn area_object_is_a_canonical_multiword_selector_distinct_from_area() {
+    // `AREA OBJECT` is our selection-based exact area of one closed object; the
+    // bare `AREA` stays the interactive point measurement. Distinct names, no
+    // alias between them, no measurement-selector collision.
+    assert_eq!(
+        normalize_command("AREA OBJECT"),
+        Some(CommandId::AreaObject)
+    );
+    assert_eq!(
+        normalize_command(" area object "),
+        Some(CommandId::AreaObject)
+    );
+    assert_eq!(canonical_command_name("AREA OBJECT"), Some("AREA OBJECT"));
+    assert_eq!(command_name(CommandId::AreaObject), Some("AREA OBJECT"));
+    assert!(admissible_names().contains(&"AREA OBJECT"));
+    assert_eq!(
+        measurement_selector_kind("AREA"),
+        Some(cad_app::MeasurementToolKind::Area),
+        "the bare selector keeps its interactive point meaning"
+    );
+    assert_eq!(measurement_selector_kind("AREA OBJECT"), None);
+    // The multi-word name is not an argument form either: `AREA` takes no typed
+    // argument, so the vocabulary must not split it into `AREA` + `OBJECT`.
+    assert_eq!(typed_command_argument("AREA OBJECT"), None);
+    // Work-only like the other measurement commands (it needs Work to measure).
+    assert!(CommandId::AreaObject.requires_work_mode());
+    // No alias spells it.
+    assert!(
+        !COMMAND_ALIASES
+            .iter()
+            .any(|(alias, _)| *alias == "AREA OBJECT"),
+        "AREA OBJECT must be canonical, not an alias"
+    );
 }
 
 #[test]

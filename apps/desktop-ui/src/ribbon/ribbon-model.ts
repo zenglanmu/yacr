@@ -62,6 +62,10 @@ export const PALETTE_COMMANDS: readonly string[] = Object.freeze([
   'LAYER',
   'LAYISO',
   'LAYUNISO',
+  // `LAYERP` (2026-10-27) restores the previous layer-override state: the result is
+  // again a layer state that only the palette names or reverses, so it is dropped
+  // with the palette for the same reason as the rest of the layer run.
+  'LAYERP',
   'LAYOFF',
   'LAYON',
 ]);
@@ -343,6 +347,14 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // visible there.
           { id: 'LAYISO', labelKey: 'layers.isolate', icon: 'eyeOff', command: 'LAYISO' },
           { id: 'LAYUNISO', labelKey: 'layers.unisolate', icon: 'eye', command: 'LAYUNISO' },
+          // LAYERP (2026-10-27) restores the previous layer-override state, so it
+          // sits directly beside LAYUNISO — the two are the layer run's two
+          // "bring back what was there" commands, and the pair reads in the order
+          // the reader reaches for them (unisolate everything, or go back one
+          // step). It is a payload-free router command with no popover, and the
+          // carrier rule is the panel's: the state it restores is only visible in
+          // the palette, so it is dropped with it (`PALETTE_COMMANDS`).
+          { id: 'LAYERP', labelKey: 'layers.previous', icon: 'eye', command: 'LAYERP' },
           // Layer off / on (2026-10-26) close the panel: LAYOFF turns off every
           // layer the selection sits on (needs one object), LAYON turns every
           // layer back on (needs none). Same conventions as the isolate pair —
@@ -458,7 +470,30 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'DIST', labelKey: 'measure.kind.distance', icon: 'distance', command: 'DIST', large: true },
           { id: 'PLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', command: 'MEASUREPOLYLINE', large: true },
           { id: 'ANGLE', labelKey: 'measure.kind.angle', icon: 'angle', command: 'MEASUREANGLE', large: true },
-          { id: 'AREA', labelKey: 'measure.kind.area', icon: 'area', command: 'AREA', large: true },
+          {
+            id: 'AREA',
+            labelKey: 'measure.kind.area',
+            icon: 'area',
+            command: 'AREA',
+            large: true,
+            // `AREA OBJECT` (2026-10-27) is AutoCAD's Area → Object mode: the
+            // current selection, one closed object, measured analytically. It is a
+            // popover row rather than its own button because AutoCAD keeps it in
+            // the same split button. A variant row is enabled by
+            // `shell.canCommand('AREA OBJECT')`, which works now that admission
+            // resolves the whole line before the base-plus-argument grammar — the
+            // multi-word selector used to be refused locally, which is exactly why
+            // this row could not exist before.
+            variants: [
+              { id: 'AREA', labelKey: 'measure.kind.area', icon: 'area', command: 'AREA' },
+              {
+                id: 'AREA OBJECT',
+                labelKey: 'measure.kind.area_object',
+                icon: 'area',
+                command: 'AREA OBJECT',
+              },
+            ],
+          },
           // ID (2026-10-26) is the point-coordinate readout — AutoCAD's Measure
           // panel keeps it in the same group as Distance, so it is the fifth
           // measurement button here. It stays `large` like its four neighbours

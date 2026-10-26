@@ -16,6 +16,11 @@
 //!   orthogonality, finiteness and coplanarity with the normalised normal before
 //!   computing the signed area. A skewed or degenerate plane, a non-coplanar
 //!   ring or a non-finite projection is reported, never silently flattened to 0.
+//! * [`cad_db::MeasurementAlgorithm::ObjectArea`] (`AREA OBJECT`) has **no point
+//!   algorithm at all**: the area of one closed entity is computed from that
+//!   entity's own stored geometry in `cad-app`. This engine refuses the variant
+//!   by name (`area.object.points_unsupported`) rather than returning a value
+//!   derived from a point list that does not exist.
 //! * Snap candidates are constrained by a pick-ray parameter `t >= 0` and a
 //!   unit-direction contract, so geometry *behind* the camera is not snapped.
 //! * Every algorithm checks the space policy up front. Paper space measures the
