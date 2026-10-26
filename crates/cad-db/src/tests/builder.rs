@@ -128,7 +128,9 @@ fn render_attributes_default_to_by_layer_and_opaque() {
     // fully opaque and use the documented ByLayer colour/lineweight, never a
     // fabricated explicit value.
     let attributes = EntityRenderAttributes::default();
-    assert_eq!(attributes.transparency, EntityTransparency::Explicit(1.0));
+    // ByLayer, not a baked `Explicit(1.0)`: a hand-built entity inherits its
+    // layer's opacity, and the layer table's `Default` row is opaque.
+    assert_eq!(attributes.transparency, EntityTransparency::ByLayer);
     assert_eq!(attributes.color, EntityColor::ByLayer);
     assert_eq!(attributes.lineweight, EntityLineWeight::ByLayer);
     assert_eq!(attributes.geometry_source, GeometrySource::Analytic);

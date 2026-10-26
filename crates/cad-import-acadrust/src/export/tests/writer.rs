@@ -101,6 +101,69 @@ fn dangling_style_id_is_substituted_and_reported_as_a_conversion() {
 }
 
 #[test]
+fn by_layer_transparency_is_written_symbolically() {
+    // A `ByLayer` entity must reach the file as the DXF default, i.e. with no
+    // group 440 at all (acadrust's writer omits it for `Transparency::ByLayer`),
+    // so the layer table's `AcCmTransparency` value keeps owning it and a layer
+    // opacity edit survives a save/load. Reading the bytes back through the same
+    // reader is what proves the symbolic form arrived.
+    let mut builder = base_builder();
+    builder
+        .insert_layer(Layer {
+            id: LayerId(1),
+            name: "WALLS".into(),
+            visible: true,
+        })
+        .unwrap();
+    let mut line = entity(
+        1,
+        SemanticGeometry::Line {
+            start: p(0.0, 0.0, 0.0),
+            end: p(1.0, 0.0, 0.0),
+        },
+        SpaceId::Model,
+        0,
+    );
+    line.layer = LayerId(1);
+    builder.insert_entity(line).unwrap();
+    builder
+        .set_entity_render_attributes(
+            EntityId(1),
+            EntityRenderAttributes {
+                transparency: EntityTransparency::ByLayer,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let db = builder.finish().unwrap();
+
+    let (bytes, report) = export_db(&db);
+    // The symbolic form is *the absence* of group 440, so pin that too: an
+    // explicit value would own a `440` code line here.
+    let text = String::from_utf8(bytes.clone()).expect("DXF text output is ASCII");
+    assert!(
+        !text.lines().any(|line| line.trim() == "440"),
+        "a ByLayer entity must not write group 440"
+    );
+    match &read_entities(&bytes)[0] {
+        EntityType::Line(line) => assert_eq!(line.common.transparency, Transparency::ByLayer),
+        other => panic!("expected LINE, got {other:?}"),
+    }
+    // The export note names transparency as one of the symbolically written
+    // attributes rather than staying silent about it.
+    let note = report
+        .notes
+        .iter()
+        .find(|entry| entry.code == "export.note.style_resolved")
+        .expect("the style note is always reported");
+    assert!(
+        note.message.contains("transparency"),
+        "the note must name transparency: {}",
+        note.message
+    );
+}
+
+#[test]
 fn transparency_and_linetype_scale_are_written() {
     let mut builder = base_builder();
     builder

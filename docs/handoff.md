@@ -1,3 +1,132 @@
+## 2026-10-26 实体透明度 `ByLayer`：不再在导入时拍平（by-layer 家族最后一项）
+
+### 收尾（orchestrator 补，同轮）
+
+该 lane 把 `crates/cad-app` 划在范围外，因此 `EntityTransparency` 的新变体让 **`cad-app` 编译不过**
+（`property_value::transparency_value` 的 match 不穷尽，E0004）。已补齐：
+
+- `cad-app/src/property_value/mod.rs`：投影新增 `ByLayer => "ByLayer"`；新增
+  `TRANSPARENCY_SYMBOLS = ["ByLayer", "ByBlock"]` 并在 `parse_transparency` 里**接受符号输入**
+  （与 `color`/`linetype`/`lineweight` 语法一致；此前 `ByBlock` 能投影却不可写，属既有不一致，
+  一并修掉）；拒绝消息改为 "integer 0..=90 (percent) or ByLayer/ByBlock"。
+- 4 处**编码了旧拍平行为**的测试期望按新事实修正（不是放宽）：默认行透明度现为 `ByLayer`；
+  原来的"语法无法表达"样例从 `ByBlock`（现已可写）换成**越界存储 opacity**（投影
+  `opacity:1.5`，语法仍拒绝），并新增断言符号形式可写。
+- `docs/render-order.md` 的数据路径同步（`ByLayer` 保留符号、展开时按层解析）。
+- 证据：`cargo test -p cad-app --lib` **1168 passed / 0 failed**。
+
+### 结论
+
+`by-layer` 家族的第四项也闭环了：**透明度不再在导入时拍平**。`cad_db::EntityTransparency`
+新增符号变体 **`ByLayer`** 并成为 **`#[default]`**，导入只解析真正显式的 `ByObject`
+（`Explicit(byte)` → `1 − byte/255`，逐位不变），`ByLayer`/`ByBlock` 都保留符号；表示层在
+**展开时**用实体自身 `layer` 的 `LayerAttributes::opacity` 解析 `ByLayer`。因此
+`SETLAYERPROPERTY transparency` 现在**真的**会改变该层 `ByLayer` 实体的混合，**不写实体、
+不产生实体历史**（此前 `layer_transparency` 旁表把图层 opacity 复制成 `Explicit`，改层无效）。
+改动只在 `cad-db`（枚举 + 文档注释 + 一条测试期望）、`crates/cad-representation/**`、
+`crates/cad-import-acadrust/**` 与 `docs/entity-style.md`、`docs/compatibility.md`、本文件；
+`cad-host` / `cad-ui-core` / `apps/**` / i18n **未改**，无新命令、无新 payload、无新依赖。
+
+### 枚举形状与缺省决定
+
+```rust
+pub enum EntityTransparency {
+    Explicit(f32),   // 已解析不透明度 0..=1（ByObject）
+    ByBlock,         // 符号：INSERT 展开时取包含块引用的已解析值
+    #[default]
+    ByLayer,         // 符号：展开时取实体自身图层的 LayerAttributes::opacity
+}
+```
+
+* 缺省**从 `Explicit(1.0)` 改成 `ByLayer`**（`#[derive(Default)]` + `#[default]`，与
+  `EntityColor`/`EntityLineWeight` 同形）：手工构造/未记录属性的实体**继承图层**，而不是把
+  “不透明”烘进实体；图层无属性行时 `LayerAttributes::default().opacity == 1.0`，所以
+  既有手工数据库**仍然不透明**（无迁移）。`cad-db` 的
+  `render_attributes_default_to_by_layer_and_opaque` 期望随之改为 `ByLayer`（测试名本来就
+  这么写，此前断言的是拍平后的 `Explicit(1.0)`）。
+* 匹配点：`cad-representation`（`expand.rs` 改调 `resolve_alpha`）、`cad-import-acadrust`
+  （`style.rs` 解析、`export/entity.rs` 写回）。**`crates/cad-app/src/property_value/mod.rs`
+  的 `transparency_value` 是唯一仍在 `cad-app` 的非穷尽 `match`**——本 lane 硬性禁止改
+  `cad-app`，见下方「未完成」。
+
+### 解析规则（唯一权威：`cad-representation/src/primitive.rs::resolve_alpha`）
+
+| 存储形式 | 解析 | 说明 |
+|---|---|---|
+| `Explicit(a)` | `a` 原样 | 与旧路径**逐位相同**（无新钳制、无新取整） |
+| `ByBlock` | 外层 INSERT 的已解析 alpha | 模型根由 `build_expanded` 以 `1.0` 起链 ⇒ **不透明** |
+| `ByLayer` | 实体**自身图层**的 `LayerAttributes::opacity` | 缺行 = `LayerAttributes::default()` 的 `1.0` |
+
+* **表示层不钳制、不消毒**：`Explicit` 与 `ByLayer` 都原样进 `DisplayFragment::alpha`，
+  `cad_scene::sanitize_alpha`（非有限 → 不透明，否则钳 `[0,1]`）是两者**共用的唯一消毒点**，
+  因此两条路径不可能分叉（有测试用 `f32::NAN` 钉住两者一致）。
+* **块内规则与其它三项相同**：块内实体的 `ByLayer` 按**它自己所在图层**解析，只有 `ByBlock`
+  沿父链取 INSERT 的已解析值。AutoCAD「图层 0 上的实体继承块引用图层」特例**仍未建模**。
+
+### 导出决定与 note 文案
+
+`Transparency::ByLayer` **可以**表达：acadrust 的 DXF 写入器只在
+`!is_by_layer()` 时写组 `440`（`io/dxf/writer/section_writer.rs`），**省略组 440 就是 DXF 的
+“随层”**，值由图层表的 `AcCmTransparency` XDATA 携带。因此导出**符号化写回**（不是“无法表达、
+保留旧输出”那条分支）：`ByLayer → Transparency::ByLayer`（无组 440）、`ByBlock` 符号、
+`Explicit` 仍按反字节序（`0` 不透明 / `255` 全透明）写。`export.note.style_resolved` 改为点名
+**四**项：
+
+> ByLayer colour, linetype, lineweight and transparency are written symbolically (no group 62 = DXF
+> colour 256, group 6 = BYLAYER, group 370 omitted = -1, group 440 omitted = transparency ByLayer),
+> so a layer colour, linetype, lineweight or transparency change survives a save/load; explicit
+> entity values are written as stored; unresolved ByBlock values stay symbolic
+
+### 测试
+
+| crate | 命令 | 结果 |
+|---|---|---|
+| `cad-db` | `cargo test -p cad-db --lib --locked` | **141 passed / 0 failed**（1 条期望改为 `ByLayer`） |
+| `cad-representation` | `cargo test -p cad-representation --lib --locked` | **223 passed / 0 failed**（新增 `tests/bylayer_transparency.rs` **7 条**） |
+| `cad-import-acadrust` | `cargo test -p cad-import-acadrust --lib --locked` | **297 passed / 1 ignored / 0 failed**（新增 2 条，改写 1 条） |
+
+新增/改写的用例：
+
+1. `cad-representation/src/tests/bylayer_transparency.rs`：① `ByLayer` 取图层 `opacity`；
+   ② 缺属性行 = 文档缺省 `1.0`；③ `Explicit` 不被图层表改动（`0.25` 逐位到达）；
+   ④ `Explicit(NaN)` 与 `ByLayer`（图层 opacity = `NaN`）**都原样出 NaN**（同一消毒点）；
+   ⑤ `ByBlock` 继承 INSERT（0.25 而非自身层 0.75）且模型根回退不透明；
+   ⑥ 块内 `ByLayer` 按自身图层（0.25）而 `ByBlock` 继承 INSERT（0.75）；
+   ⑦ 图层 opacity 编辑（`set_layer_attributes`）后：`ChangeSet.changes` 为空、实体行与 revision
+   **逐位不变**、下一帧 `alpha` 变成新值、实体仍存 `ByLayer`。
+2. `cad-import-acadrust/src/tests/transparency_provenance.rs`（新，用 acadrust 写入器造 DXF）：
+   图层 51/255 透明 + 三个实体（无组 440 / `Explicit(102)` / `ByBlock`）⇒ 存 `ByLayer` /
+   `Explicit(1 − 102/255)` / `ByBlock`，且图层行 `opacity = 1 − 51/255`。
+3. `cad-import-acadrust/src/tests/resolution.rs`：旧用例
+   `transparency_resolution_prefers_byobject_then_layer_then_byblock` 改名为
+   `transparency_resolution_keeps_the_symbolic_by_layer_form`（它编码的是拍平：`BY_LAYER` →
+   `Explicit(layer_alpha)`），期望改为 `ByLayer`，注释写明原因。
+4. `cad-import-acadrust/src/export/tests/writer.rs`：新增
+   `by_layer_transparency_is_written_symbolically`——导出字节里**没有任何组 440 行**、读回
+   `Transparency::ByLayer`，并断言 note 文本含 `transparency`。
+
+### 门禁（本轮实际运行）
+
+* `cargo test -p cad-db -p cad-representation -p cad-import-acadrust --lib --locked`：全绿（见上表）。
+* `cargo clippy -p cad-db -p cad-representation -p cad-import-acadrust --all-targets --locked -- -D warnings`：**通过**。
+* `cargo fmt --all -- --check`：**通过**。
+* `python3 scripts/check-architecture.py`：**Architecture OK**（28 packages）。
+* `python3 scripts/check-file-size.py`：**OK**（1007 个代码文件）。
+* **NOT RUN**：全 workspace `cargo check`/全量测试、wasm32 目标、`apps/desktop-ui` `npm test`、
+  Windows/Android 目标——按日常“只验证自己改动范围”的策略未跑，**不得**当作全量通过。
+
+### 未完成（必须的后续，勿当成已闭环）
+
+1. **`crates/cad-app` 的属性行/属性写还没跟上（编译级缺口）**：`property_value::transparency_value`
+   的 `match` 没有 `ByLayer` 分支，本 lane 被禁止改 `cad-app`，所以**在补齐前
+   `cargo check -p cad-app`（及 workspace 全量）会因非穷尽匹配失败**。补齐需要：显示侧把
+   `ByLayer` 投影为 `"ByLayer"`，写入侧决定 `ByLayer` 的语法（现语法只接受 `0..=90` 百分比，
+   即只能写 `Explicit`）；`crates/cad-app/src/tests/**` 里编码 `Explicit(1.0)` 默认的期望也要复核。
+2. **`docs/render-order.md` 第 21 行仍写“`ByLayer` → 取该图层已解析的透明度”**：导入不再预解析，
+   措辞需同步（该文件不在本轮允许改动的三份文档内）。
+3. 图层透明度**没有其它消费者**：出图/打印不应用 alpha（plot style 的 alpha 仍未支持），
+   AutoCAD「图层 0 继承块引用图层」特例未建模，都是既有缺口。
+
 ## 2026-10-26 `STRETCH` 的部分包围 `INSERT`：按插入点的刚性平移（新规则 + 具名前置条件）
 
 ### 结论

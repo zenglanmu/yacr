@@ -421,12 +421,12 @@ fn non_addressable_source_or_destination_refuses_the_whole_command() {
 
 #[test]
 fn a_source_value_no_destination_can_accept_is_refused_by_name() {
-    // A stored `ByBlock` transparency is legal display state but has no writable
-    // form in the shared grammar, so the destination could not accept it. The
-    // refusal names the source entity **and** the property and keeps the
-    // parser's own `property.*` code.
+    // A stored out-of-range opacity is legal display state (the scene sanitises
+    // it) but has no writable form: the row projects `opacity:1.5`, so the
+    // destination could not accept it. The refusal names the source entity **and**
+    // the property and keeps the parser's own `property.*` code.
     let (mut app, mut session) = match_app_with_source(EntityRenderAttributes {
-        transparency: EntityTransparency::ByBlock,
+        transparency: EntityTransparency::Explicit(1.5),
         ..source_attributes()
     });
     assert_eq!(
@@ -436,7 +436,7 @@ fn a_source_value_no_destination_can_accept_is_refused_by_name() {
             "transparency",
         )
         .as_deref(),
-        Some("ByBlock"),
+        Some("opacity:1.5"),
         "the fixture stores a value the write grammar cannot express"
     );
 

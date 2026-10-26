@@ -418,7 +418,8 @@ plot-style **名字**无法写出（写入器只发句柄）→ 写缺省并记 
 未定义线型名 → 写 `Continuous` 并记 `export.layer_linetype_substituted`（绝不发悬挂引用）。
 **但（除锁定外）仍是零行为**：没有代码读冻结/可打印/plot style 去改变行为（**锁定**后来获得行为，
 见下方「图层锁定」轮），**出图未实现**，
-`ByLayer` 实体颜色**仍在导入时被拍平**成显式 sRGB，因此**改图层颜色不会重着色任何东西**；
+`ByLayer` 实体颜色**当时仍在导入时被拍平**成显式 sRGB（**同日随后改为按层解析**，见下方
+「`ByLayer` 颜色已按层解析」），改图层颜色的效果随该轮一并生效；
 面板色块仍只是名字哈希。图层**写**（新建/重命名/删除）不写 DWG、不可撤销的结论不变。
 **2026-10-26 图层属性编辑轮（本轮）**：图层属性现在**可经命令/IPC 编辑**——
 `SETLAYERPROPERTY`（命令）与 `cad_set_layer_property { layer, key, value }`（IPC），
@@ -433,7 +434,7 @@ plot-style **名字**无法写出（写入器只发句柄）→ 写缺省并记 
 | `color` | `aci:1..=255` / `#RRGGBB` / `rgb:#RRGGBB` / `r,g,b` | **有行为（仅显示）**：写入 `LayerColor{aci,rgb}`（`aci:` 同时写调色板 RGB，与实体颜色语法共用**同一张** ACI 表）。`ByLayer`/`ByBlock` 拒绝；真彩写 `aci=None`。**改图层颜色会在下一次展开时重着色该层的 `ByLayer` 实体**（2026-10-26 起表示层按层解析），**不写实体、不产生实体历史**；`Explicit` 实体颜色不受影响 |
 | `linetype` | 图纸线型表里**存在**的名字（先精确后唯一大小写不敏感） | **只存储**；不存在的名字 `layer.linetype_missing`（绝不存悬挂引用）。`ByLayer`/`ByBlock` 拒绝 |
 | `lineweight` | `byLayer` / `default` / **1/100 mm** `0..=211` | **只存储**；单位是 DXF `370`（`35` = 0.35 mm），**不是** `SETENTITYPROPERTY` 的毫米字符串 |
-| `transparency` | `0..=100`（**不透明度百分比**，`0`=不透明） | **只存储**（存 `1 − v/100`）；不参与渲染混合 |
+| `transparency` | `0..=100`（**不透明度百分比**，`0`=不透明） | **有行为（仅显示，2026-10-26 起）**：存 `1 − v/100`。`ByLayer` 实体在下一次展开时取该值作为 `DisplayFragment::alpha`（缺行 = 不透明），所以**改图层透明度会改变该层 `ByLayer` 实体的混合**，**不写实体、不产生实体历史**；`Explicit` 实体透明度不受影响。图层行自身不再有别的消费者 |
 | `plotstyle` | — | **明确拒绝为未实现**（`layer.property.unsupported` 点名）：导出器只发 plot-style **句柄**，存下来的名字无法存活，接受即撒谎 |
 
 `name` / `visible` 不是可写键（前者属 `RENAMELAYER`，后者由 `off||frozen` 派生）。
@@ -490,6 +491,18 @@ plot-style **名字**无法写出（写入器只发句柄）→ 写缺省并记 
   **不写实体**。导出三者**全部符号化**：组 62 省略（=256）、组 6 = `BYLAYER`、组 370 省略（=-1）。
   **已知缺口**：符号线型不携带实体线型比例（组 48）——`EntityLineType` 的 `ByLayer`/`ByBlock`
   变体没有该槽位，`ByLayer` 源上组 48 ≠ 1 的比例会丢失（`$LTSCALE` 仍生效）。
+- **`ByLayer` 透明度同样按层解析（2026-10-26，`by-layer` 家族最后一项）**：`EntityTransparency`
+  新增 **`ByLayer`** 并成为 **`#[default]`**（新建实体继承图层，而不是把“不透明”烘进实体）；
+  导入**不再拍平** `ByLayer`（此前把图层 `opacity` 复制成 `Explicit`，`layer_transparency` 旁表
+  因此**删除**），`ByBlock` 仍符号、`Explicit` 仍按 `1 − byte/255` 逐位不变。表示层
+  `resolve_alpha` 在展开时取实体自身 `layer` 的 `LayerAttributes::opacity`（缺行 = `Default` 的
+  `1.0`），且**不在表示层钳制**——`cad_scene::sanitize_alpha`（非有限 → 不透明，否则钳 `[0,1]`）
+  是显式与 `ByLayer` 共用的唯一消毒点。`SETLAYERPROPERTY transparency` 因此**会**在下一次展开时
+  改变其 `ByLayer` 实体的混合，**不写实体、不产生实体历史**。块内规则与其它三项相同：`ByLayer`
+  按**自身图层**解析，只有 `ByBlock` 沿父链（模型根无父 = 不透明）。导出也**符号化**：
+  组 440 省略即 DXF 的“随层”（acadrust 只在非 `ByLayer` 时写 440，图层表用
+  `AcCmTransparency` XDATA 携带值），`export.note.style_resolved` 已改为点名
+  **colour / linetype / lineweight / transparency 四项**。
 
 CAD 分区右键**快捷菜单**已实现（复制/剪切/粘贴/全选/删除/特性/缩放到范围/平移/放弃/重做/重复上一命令）。
 夹点已有**纯模型 + 命令 + 宿主拖拽**（`GripStretch`：`LINE` 端点与中点 / `CIRCLE` 圆心与四象限 / `ARC` 圆心 / `POINT` 位置，

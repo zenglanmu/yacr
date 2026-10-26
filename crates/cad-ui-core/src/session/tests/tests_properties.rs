@@ -80,7 +80,9 @@ fn a_written_display_value_reads_back_unchanged() {
     for (key, before, written, after) in [
         ("color", "ByLayer", "aci:1", "aci:1"),
         ("lineweight", "ByLayer", "0.35", "0.35"),
-        ("transparency", "0", "60", "60"),
+        // Transparency inherits from the layer by default (2026-10-26: no longer
+        // flattened to a concrete opacity at import).
+        ("transparency", "ByLayer", "60", "60"),
     ] {
         let status = session.snapshot(None, None, 0);
         let current = row(&status, key).value.clone().expect("a value");

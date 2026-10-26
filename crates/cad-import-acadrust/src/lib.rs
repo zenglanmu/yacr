@@ -340,9 +340,6 @@ struct ImporterBuilder<'a> {
     diagnostics: Vec<Diagnostic>,
     capabilities: HashMap<String, EntityCapability>,
     layer_ids: HashMap<String, LayerId>,
-    /// Effective display opacity of each layer, resolved from its DWG
-    /// transparency (0 = opaque, 255 = transparent).
-    layer_transparency: HashMap<LayerId, f32>,
     /// Root linetype name of each layer (`Layer.line_type`), used only to report
     /// the import-time "layer names a linetype this table does not define"
     /// diagnostic. The value itself is **not** flattened onto entities: a

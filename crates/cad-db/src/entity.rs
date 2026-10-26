@@ -30,27 +30,32 @@ impl DbEntity {
 ///
 /// Alpha is *opacity* in `[0, 1]`: `1.0` is fully opaque and `0.0` fully
 /// transparent. This is the inverse of acadrust's `Transparency` byte value
-/// (`0` opaque, `255` transparent); the importer performs that conversion when
-/// it records the attribute.
+/// (`0` opaque, `255` transparent); the importer performs that conversion only
+/// when it records an explicit entity value.
 ///
-/// The importer resolves `ByObject` (an explicit entity value) and `ByLayer`
-/// before storing: the representation resolves **colour** through the layer
-/// table (`ByLayer` below), but it does not resolve transparency, so opacity
-/// provenance is flattened here. `ByBlock` is kept symbolic so INSERT expansion
-/// can substitute the containing block reference's opacity (audit B21 / F14).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// The importer resolves an explicit entity value (`ByObject`) and keeps both
+/// symbolic forms. `ByLayer` is resolved by the representation from the owning
+/// layer's [`LayerAttributes::opacity`](crate::LayerAttributes::opacity) at
+/// expansion time — the same mechanism [`EntityColor`] and [`EntityLineWeight`]
+/// use — so editing a layer opacity changes its `ByLayer` entities with no
+/// entity write. `ByBlock` is kept symbolic so INSERT expansion can substitute
+/// the containing block reference's resolved opacity (audit B21 / F14).
+///
+/// The default is `ByLayer`, so an entity built without an explicit
+/// transparency inherits from its layer (opaque when the layer has no stored
+/// attribute row) rather than baking "fully opaque" into the entity.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum EntityTransparency {
     /// A resolved opacity in `[0, 1]`.
     Explicit(f32),
     /// Inherit the opacity of the containing block reference (`ByBlock`). At
     /// the model root, or with no enclosing INSERT, this resolves to opaque.
     ByBlock,
-}
-
-impl Default for EntityTransparency {
-    fn default() -> Self {
-        EntityTransparency::Explicit(1.0)
-    }
+    /// Use the owning layer's opacity. The representation resolves it from the
+    /// layer table at expansion time; a layer with no stored attribute row falls
+    /// back to `LayerAttributes::default().opacity` (fully opaque).
+    #[default]
+    ByLayer,
 }
 
 /// How an entity's display colour is determined before batching.
@@ -246,6 +251,8 @@ impl AnnotativeAttributes {
 /// (and because the geometry itself remains the authoritative data).
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityRenderAttributes {
+    /// Display opacity: `Explicit` is concrete, `ByLayer` and `ByBlock` stay
+    /// symbolic until expansion resolves them.
     pub transparency: EntityTransparency,
     /// Display colour: `Explicit` is concrete sRGB, while `ByLayer` and
     /// `ByBlock` stay symbolic until expansion resolves them.

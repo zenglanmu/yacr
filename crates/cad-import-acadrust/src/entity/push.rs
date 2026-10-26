@@ -82,17 +82,13 @@ impl<'a> ImporterBuilder<'a> {
 
         self.note_capability(&class_name, &geometry, &completeness, render, pick);
 
-        // Resolve the entity's effective display opacity so the
-        // representation/scene layers can carry real style instead of always
-        // drawing opaque grey (audit F14 / §2.1.3).
-        //
-        // Colour, lineweight and linetype are **not** resolved here: `ByLayer`
-        // is preserved symbolically and the representation reads the owning
-        // layer's row from the layer table at draw time, so editing a layer's
-        // colour/lineweight/linetype takes effect on the next expansion without
-        // touching an entity row. `ByBlock` stays symbolic for INSERT expansion,
-        // and a concrete entity value stays `Explicit` byte-identically.
-        let layer_alpha = self.layer_transparency.get(&layer).copied().unwrap_or(1.0);
+        // Colour, lineweight, linetype and transparency are **not** resolved
+        // here: `ByLayer` is preserved symbolically and the representation reads
+        // the owning layer's row from the layer table at draw time, so editing a
+        // layer's colour/lineweight/linetype/opacity takes effect on the next
+        // expansion without touching an entity row. `ByBlock` stays symbolic for
+        // INSERT expansion, and a concrete entity value stays `Explicit`
+        // byte-identically (audit F14 / §2.1.3).
         // An explicit entity linetype is looked up in the drawing's table; a
         // missing name is reported, never silently turned into dashes. R13/R14
         // entities may carry only a handle, so fall back to the table's handle
@@ -186,7 +182,7 @@ impl<'a> ImporterBuilder<'a> {
             });
         }
         let attributes = EntityRenderAttributes {
-            transparency: resolve_entity_transparency(common.transparency, layer_alpha),
+            transparency: resolve_entity_transparency(common.transparency),
             color: resolve_entity_color(common.color),
             lineweight: resolve_entity_lineweight(common.line_weight),
             linetype: resolved_linetype,

@@ -16,7 +16,7 @@
 //! | `color` | `ByLayer`, `ByBlock`, `aci:N` (`N` in `0..=256`), `#RRGGBB` | [`EntityColor`] |
 //! | `linetype` | `ByLayer`, `ByBlock`, or an existing linetype **name** | [`EntityLineType`] |
 //! | `lineweight` | `ByLayer`, `ByBlock`, `Default`, or a canonical millimetre value (below) | [`EntityLineWeight`] |
-//! | `transparency` | a decimal integer `0..=90` (transparency **percent**) | [`EntityTransparency`] |
+//! | `transparency` | `ByLayer`, `ByBlock`, or a decimal integer `0..=90` (transparency **percent**) | [`EntityTransparency`] |
 //!
 //! `text` is deliberately **not** accepted here: it has its own command
 //! (`TEXTEDIT` / `set_selected_text`) with its own newline policy.
@@ -43,8 +43,10 @@
 //!   1.40, 1.58, 2.00, 2.11` mm); the stored value is that constant, not a
 //!   re-parse of the string. Anything else is refused, never snapped.
 //! * **transparency** — the input is the AutoCAD **percent transparent**
-//!   (`0` = opaque, `90` = most transparent). The database stores **opacity**
-//!   (`1.0` = opaque), so the conversion is `opacity = 1.0 − percent / 100`; the
+//!   (`0` = opaque, `90` = most transparent), or the symbolic `ByLayer` /
+//!   `ByBlock` (the stored value is symbolic in both cases and resolves at draw
+//!   time). The database stores **opacity** (`1.0` = opaque), so the numeric
+//!   conversion is `opacity = 1.0 − percent / 100`; the
 //!   canonical projection is `round((1.0 − opacity) · 100)`. The no-op rule
 //!   compares the projected **percentage**, so re-writing the value the panel
 //!   displays never creates an undo entry even when the stored float was
@@ -119,6 +121,11 @@ pub fn lineweight_options() -> Vec<String> {
 /// The largest accepted transparency percentage (AutoCAD's own bound).
 pub const MAX_TRANSPARENCY_PERCENT: u8 = 90;
 
+/// The symbolic values the `transparency` grammar accepts besides an integer
+/// percentage. A symbolic value resolves from the layer (or the containing block
+/// reference) at draw time, so it is a stored form, not a resolved opacity.
+pub const TRANSPARENCY_SYMBOLS: [&str; 2] = ["ByLayer", "ByBlock"];
+
 /// Whether `key` names a property this write path accepts.
 pub fn is_supported_key(key: &str) -> bool {
     SUPPORTED_KEYS.contains(&key)
@@ -127,10 +134,9 @@ pub fn is_supported_key(key: &str) -> bool {
 /// Whether the write path accepts `value` for `key` against `database`.
 ///
 /// This is the parser's own verdict, exposed for the read side: a row may
-/// project a stored value that no grammar can express (a symbolic `ByBlock`
-/// transparency, or an out-of-range stored opacity reported as
-/// `opacity:<raw>`), and such a row is **not** editable even though the key
-/// itself is writable.
+/// project a out-of-range stored opacity as `opacity:<raw>`, which no grammar can
+/// express, and such a row is **not** editable even though the key itself is
+/// writable.
 pub fn accepts(database: &DrawingDatabase, key: &str, value: &str) -> bool {
     parse(database, key, value).is_ok()
 }
@@ -270,6 +276,7 @@ pub fn lineweight_value(lineweight: EntityLineWeight) -> String {
 /// Canonical projection of a stored transparency.
 pub fn transparency_value(transparency: EntityTransparency) -> String {
     match transparency {
+        EntityTransparency::ByLayer => "ByLayer".to_string(),
         EntityTransparency::ByBlock => "ByBlock".to_string(),
         EntityTransparency::Explicit(opacity) => {
             if opacity.is_finite() && (0.0..=1.0).contains(&opacity) {
@@ -388,8 +395,15 @@ fn canonical_lineweight(millimetres: f32) -> Option<f32> {
 }
 
 fn parse_transparency(value: &str) -> CadResult<EntityTransparency> {
-    // Digits only: no sign, no decimal point, no whitespace. `-1`/`91`/`abc`
-    // are refusals, never clamped.
+    // The two symbolic forms are stored, not resolved: `ByLayer` inherits the
+    // owning layer's opacity and `ByBlock` the containing reference's.
+    match value {
+        "ByLayer" => return Ok(EntityTransparency::ByLayer),
+        "ByBlock" => return Ok(EntityTransparency::ByBlock),
+        _ => {}
+    }
+    // Otherwise digits only: no sign, no decimal point, no whitespace.
+    // `-1`/`91`/`abc` are refusals, never clamped.
     if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(invalid_transparency(value));
     }
@@ -404,7 +418,8 @@ fn parse_transparency(value: &str) -> CadResult<EntityTransparency> {
 
 fn invalid_transparency(value: &str) -> CadError {
     CadError::InvalidInput(format!(
-        "property.invalid_value: transparency needs an integer 0..=90 (percent), got '{value}'"
+        "property.invalid_value: transparency needs an integer 0..=90 (percent) or ByLayer/ByBlock, \
+         got '{value}'"
     ))
 }
 

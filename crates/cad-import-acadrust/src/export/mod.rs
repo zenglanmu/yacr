@@ -59,22 +59,25 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
     write_units(&mut doc, request, &mut report);
     tables::write_tables(&mut doc, request.database, &mut report);
 
-    // Colour, lineweight and linetype **provenance** is preserved on import, so
-    // all three are written back symbolically where the source was symbolic:
-    // acadrust omits group 62 for `Color::ByLayer` (the DXF encoding of 256 /
-    // by layer), an entity linetype of `BYLAYER` (group 6) plus an omitted
-    // group 370 (acadrust writes group 370 only when the weight is not
-    // `LineWeight::ByLayer`, whose DXF code is `-1`) mean "take the layer's",
-    // and the layer table carries the actual colour, linetype and weight.
+    // Colour, lineweight, linetype and transparency **provenance** is preserved
+    // on import, so all four are written back symbolically where the source was
+    // symbolic: acadrust omits group 62 for `Color::ByLayer` (the DXF encoding
+    // of 256 / by layer), an entity linetype of `BYLAYER` (group 6) plus an
+    // omitted group 370 (acadrust writes group 370 only when the weight is not
+    // `LineWeight::ByLayer`, whose DXF code is `-1`) and an omitted group 440
+    // (acadrust writes group 440 only when the transparency is not
+    // `Transparency::ByLayer`) all mean "take the layer's", and the layer table
+    // carries the actual colour, linetype, weight and `AcCmTransparency` XDATA.
     // Byte-identical explicit values are written as explicit values, and an
     // unresolved `ByBlock` stays symbolic.
     report.notes.push(ExportDiagnostic {
         object: None,
         code: "export.note.style_resolved".into(),
-        message: "ByLayer colour, linetype and lineweight are written symbolically (no group 62 = \
-                  DXF colour 256, group 6 = BYLAYER, group 370 omitted = -1), so a layer colour, \
-                  linetype or lineweight change survives a save/load; explicit entity values are \
-                  written as stored; unresolved ByBlock values stay symbolic"
+        message: "ByLayer colour, linetype, lineweight and transparency are written symbolically \
+                  (no group 62 = DXF colour 256, group 6 = BYLAYER, group 370 omitted = -1, group 440 \
+                  omitted = transparency ByLayer), so a layer colour, linetype, lineweight or \
+                  transparency change survives a save/load; explicit entity values are written as \
+                  stored; unresolved ByBlock values stay symbolic"
             .into(),
     });
 

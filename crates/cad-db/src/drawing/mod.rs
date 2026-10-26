@@ -52,9 +52,11 @@ pub struct DrawingDatabase {
     /// Plot configuration per paper-space layout. Absent entries are resolved
     /// to an explicit default page by [`DrawingDatabase::plot_settings_for`].
     pub(crate) plot_settings: BTreeMap<LayoutId, PlotSettingsRecord>,
-    /// Per-entity display attributes that the importer resolved from the source
-    /// (transparency, geometry source). Absent entries are fully opaque
-    /// analytic geometry, so older/hand-built databases stay valid.
+    /// Per-entity display attributes the importer resolved from the source
+    /// (transparency, geometry source). Absent entries resolve to
+    /// [`EntityRenderAttributes::default`] (ByLayer opacity/colour/lineweight,
+    /// continuous linetype, analytic geometry), so older/hand-built databases
+    /// stay valid.
     pub(crate) render_attributes: BTreeMap<EntityId, EntityRenderAttributes>,
     /// Per-layer attributes the importer resolved from the source (flags,
     /// colour, linetype, lineweight, plottable, opacity, plot style).

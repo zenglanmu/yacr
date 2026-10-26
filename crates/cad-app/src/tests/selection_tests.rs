@@ -287,7 +287,7 @@ fn single_selection_rows_order_and_values_are_pinned() {
             ("color", Some("ByLayer")),
             ("linetype", Some("ByLayer")),
             ("lineweight", Some("ByLayer")),
-            ("transparency", Some("0")),
+            ("transparency", Some("ByLayer")),
         ]
     );
     assert!(props.rows.iter().all(|row| !row.mixed));

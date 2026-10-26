@@ -751,8 +751,13 @@ pub(super) fn common_for(
         EntityLineWeight::ByBlock => LineWeight::ByBlock,
         EntityLineWeight::ByLayer => LineWeight::ByLayer,
     };
-    // Transparency: the domain stores a resolved opacity in `[0, 1]`; DXF group
-    // 440 stores transparency (0 = opaque, 255 = transparent).
+    // Transparency: the stored provenance is written back symbolically where the
+    // source was symbolic. acadrust's DXF writer omits group 440 when the value
+    // `is_by_layer()`, and an omitted group 440 **is** the DXF encoding of
+    // "by layer" (the layer table's `AcCmTransparency` XDATA carries the value),
+    // so `ByLayer` needs no special case here. An explicit opacity is still
+    // written on the inverted byte scale (0 = opaque, 255 = transparent) and
+    // `ByBlock` stays symbolic.
     common.transparency = match attributes.transparency {
         EntityTransparency::Explicit(opacity) => Transparency::Explicit(
             ((1.0 - opacity.clamp(0.0, 1.0)) * 255.0)
@@ -760,6 +765,7 @@ pub(super) fn common_for(
                 .clamp(0.0, 255.0) as u8,
         ),
         EntityTransparency::ByBlock => Transparency::ByBlock,
+        EntityTransparency::ByLayer => Transparency::ByLayer,
     };
     // Linetype scale (group 48): an explicit entity scale is carried; symbolic
     // values (`ByLayer`/`ByBlock`) carry none in this model, so the attribute's

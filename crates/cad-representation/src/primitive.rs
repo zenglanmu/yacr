@@ -317,10 +317,14 @@ pub struct DisplayFragment {
     /// Effective per-entity opacity in `[0, 1]` (1.0 opaque, 0.0 transparent).
     ///
     /// `build` cannot resolve transparency (it only sees the entity), so it
-    /// emits `1.0`; [`ProviderRegistry::build_expanded`] applies the value the
-    /// importer resolved and stored in the database, including `ByBlock`
-    /// inheritance through INSERT expansion. The scene carries this straight
-    /// into `RenderBatch::alpha`.
+    /// emits `1.0`; [`ProviderRegistry::build_expanded`] writes the value
+    /// [`resolve_alpha`] derives from the stored provenance: an explicit
+    /// opacity, `ByBlock` inheritance through INSERT expansion, or the owning
+    /// layer's [`cad_db::LayerAttributes::opacity`] for `ByLayer`. The scene
+    /// carries this straight into `RenderBatch::alpha` after
+    /// `cad_scene::sanitize_alpha` (NaN → opaque, otherwise clamped to `[0, 1]`),
+    /// which is the single sanitising point the explicit and `ByLayer` values
+    /// share.
     pub alpha: f32,
     /// Resolved display colour as normalized sRGB in `[0, 1]` per channel.
     ///
@@ -413,6 +417,33 @@ pub fn resolve_color(
             None => (DEFAULT_RENDER_COLOR, true),
         },
         EntityColor::ByLayer => (srgb(layer_color), false),
+    }
+}
+
+/// Resolve an entity's stored transparency against the enclosing INSERT's
+/// resolved opacity and the owning layer's opacity, mirroring [`resolve_color`].
+///
+/// * `Explicit(opacity)`: a concrete source value, passed through unchanged.
+/// * `ByBlock`: the enclosing block reference's already-resolved opacity, which
+///   the caller threads down; at the model root the chain starts at `1.0`, so
+///   "nothing to inherit" is opaque rather than a fabricated value.
+/// * `ByLayer`: `layer_opacity`, the owning layer's
+///   [`cad_db::LayerAttributes::opacity`], read from the layer table by the
+///   caller at draw time, so a layer opacity edit changes its `ByLayer` entities
+///   on the next expansion with no entity write. A layer with no stored
+///   attribute row goes through
+///   [`cad_db::DrawingDatabase::layer_attributes`]'s documented
+///   `LayerAttributes::default()` fallback, which is fully opaque.
+///
+/// No arm clamps or sanitises here: an explicit and a `ByLayer` value reach the
+/// fragment exactly as stored, and `cad_scene::sanitize_alpha` (non-finite →
+/// opaque, otherwise clamp to `[0, 1]`) is the one sanitising point both share,
+/// so the two paths cannot diverge.
+pub fn resolve_alpha(transparency: EntityTransparency, parent: f32, layer_opacity: f32) -> f32 {
+    match transparency {
+        EntityTransparency::Explicit(opacity) => opacity,
+        EntityTransparency::ByBlock => parent,
+        EntityTransparency::ByLayer => layer_opacity,
     }
 }
 

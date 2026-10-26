@@ -4,25 +4,29 @@ use super::*;
 // ---- F14/B21: transparency resolution + proxy fragment preservation ----
 
 #[test]
-fn transparency_resolution_prefers_byobject_then_layer_then_byblock() {
+fn transparency_resolution_keeps_the_symbolic_by_layer_form() {
     // acadrust packs transparency as a byte: 0 opaque, 255 transparent.
     assert_eq!(
-        resolve_entity_transparency(acadrust::Transparency::new(0), 0.5),
+        resolve_entity_transparency(acadrust::Transparency::new(0)),
         EntityTransparency::Explicit(1.0)
     );
-    // ByObject (Explicit) overrides the layer value.
+    // ByObject (Explicit) is the one form resolved here, byte-identically.
     assert_eq!(
-        resolve_entity_transparency(acadrust::Transparency::new(128), 0.5),
+        resolve_entity_transparency(acadrust::Transparency::new(128)),
         EntityTransparency::Explicit(1.0 - 128.0 / 255.0)
     );
-    // ByLayer uses the pre-resolved layer opacity.
+    // ByLayer stays symbolic: the representation resolves it from the owning
+    // layer's stored `LayerAttributes::opacity` at draw time, so a layer opacity
+    // edit changes the entity without an entity write. (Before this change the
+    // layer opacity was flattened into `Explicit` here, which froze it at import
+    // time and made a later layer edit change nothing.)
     assert_eq!(
-        resolve_entity_transparency(acadrust::Transparency::BY_LAYER, 0.25),
-        EntityTransparency::Explicit(0.25)
+        resolve_entity_transparency(acadrust::Transparency::BY_LAYER),
+        EntityTransparency::ByLayer
     );
     // ByBlock stays symbolic so INSERT expansion can supply the value.
     assert_eq!(
-        resolve_entity_transparency(acadrust::Transparency::BY_BLOCK, 0.25),
+        resolve_entity_transparency(acadrust::Transparency::BY_BLOCK),
         EntityTransparency::ByBlock
     );
 }

@@ -20,22 +20,25 @@ pub(crate) fn layer_opacity(transparency: acadrust::Transparency) -> f32 {
     }
 }
 
-/// Resolve an entity's own DWG transparency into the effective display value.
+/// Resolve an entity's own DWG transparency into its stored provenance.
 ///
-/// `ByObject` (`Explicit`) overrides the layer; `ByLayer` uses the pre-resolved
-/// `layer_alpha`; `ByBlock` is kept symbolic so INSERT expansion substitutes the
-/// containing reference's opacity.
+/// Only a really explicit value is resolved: `ByObject` (`Explicit`) converts the
+/// source byte to an opacity in `[0, 1]`, byte-identically (the inverse byte
+/// scale, so `0` stays fully opaque). `ByLayer` and `ByBlock` stay **symbolic**:
+/// the representation resolves `ByLayer` from the owning layer's
+/// [`LayerAttributes::opacity`](cad_db::LayerAttributes::opacity) and `ByBlock`
+/// from the containing INSERT at draw time, so editing a layer opacity takes
+/// effect on the next expansion with no entity write. (Before this change
+/// `ByLayer` was flattened into an `Explicit` copy of the layer opacity right
+/// here, which made a later layer edit change nothing.)
 pub(crate) fn resolve_entity_transparency(
     transparency: acadrust::Transparency,
-    layer_alpha: f32,
 ) -> EntityTransparency {
     match transparency {
         acadrust::Transparency::Explicit(alpha) => {
             EntityTransparency::Explicit(dwg_transparency_to_opacity(alpha))
         }
-        acadrust::Transparency::ByLayer => {
-            EntityTransparency::Explicit(layer_alpha.clamp(0.0, 1.0))
-        }
+        acadrust::Transparency::ByLayer => EntityTransparency::ByLayer,
         acadrust::Transparency::ByBlock => EntityTransparency::ByBlock,
     }
 }

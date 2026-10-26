@@ -2,9 +2,10 @@
 
 规范 §3.2（显示表示）与 §7.1（图层/实体样式）；审计 §2.1.3。本文记录 `cad-db` →
 `cad-import-acadrust` → `cad-representation` → `cad-scene` → `cad-render-wgpu` 的
-**颜色（color）**、**线宽（lineweight）** 与 **线型（linetype / 虚线比例）** 数据路径，
-区分已实现、显式未实现和只能在真实设备上验证的部分。透明度（alpha）见
-`docs/render-order.md`，本文不重复。
+**颜色（color）**、**线宽（lineweight）**、**线型（linetype / 虚线比例）** 与
+**透明度（transparency / alpha）的 `ByLayer` 解析** 数据路径，
+区分已实现、显式未实现和只能在真实设备上验证的部分。alpha 进入场景/渲染器后的混合与
+绘制顺序见 `docs/render-order.md`，本文只记录它的**来源图片段解析**（与颜色/线宽/线型同一规则）。
 
 ## 数据来源（acadrust 0.6.5 真实 API）
 
@@ -33,9 +34,11 @@
 
 ## cad-db：旁存属性（`DbEntity` 不变）
 
-`EntityRenderAttributes` 新增三个字段，随实体旁存，保持“加字段不波及每个实体构造器”的
-既有设计：
+`EntityRenderAttributes` 旁存的显示字段（`DbEntity` 因此不变），随实体旁存，保持
+“加字段不波及每个实体构造器”的既有设计：
 
+- `transparency: EntityTransparency`：`Explicit(f32)`（不透明度 `0..=1`）| `ByBlock`（符号）|
+  `ByLayer`（缺省；表示层按图层行 `opacity` 解析）。
 - `color: EntityColor`：`Explicit([u8;3])`（已解析 sRGB）| `ByBlock`（符号，待 INSERT 解析）|
   `ByLayer`（无法解析时的缺省；`Default` 取 `ByLayer`）。
 - `lineweight: EntityLineWeight`：`Explicit(f32)`（毫米）| `Default`（acadrust 的
@@ -92,7 +95,7 @@ pub struct LayerAttributes {
 `frozen_in_new_viewport`/`plottable`/`plot_style` 仍是**只存储 + 往返**，冻结的独立语义、
 出图与命名打印样式**显式未实现**。
 
-**`ByLayer` 颜色/线型/线宽现在全部按图层解析（(e) 已完成）**：导入不再把 `ByLayer` 拍平成显式 sRGB
+**`ByLayer` 颜色/线型/线宽/透明度现在全部按图层解析（(e) 已完成）**：导入不再把 `ByLayer` 拍平成显式 sRGB
 （`cad-import-acadrust` 保留符号 `EntityColor::ByLayer`），表示层
 `provider/expand.rs` 在展开时用实体自身 `layer` 的 `LayerAttributes::color.rgb` 解析，
 缺行则用 `layer_attributes()` 的既有 `Default`（ACI 7 白）。因此**改图层颜色会在下一次展开时
@@ -101,13 +104,16 @@ pub struct LayerAttributes {
 继承块引用图层」这一特例**未建模**（声明）。**线型**按图层行的 `linetype` **名字**去图纸线型表
 （大小写不敏感）取 pattern，名字不在表内则退回连续线并置 `linetype_unresolved`（绝不编造虚线）；
 **线宽**按 `LayerLineWeight` 的 1/100 mm 精确换算，`Default` → 0.25 mm，图层行自身为 `ByLayer`
-（无数值可给）→ 0.25 mm 且置 `lineweight_unresolved`。三者都**不写实体**。
+（无数值可给）→ 0.25 mm 且置 `lineweight_unresolved`。**透明度**按图层行的 `opacity`
+（`0..=1`，缺行 = `1.0` 不透明）解析成 `DisplayFragment::alpha`，**与显式 alpha 走同一条消毒路径**
+（表示层不钳制、不消毒，`cad_scene::sanitize_alpha` 是唯一消毒点：非有限 → 不透明，否则钳 `[0,1]`）。
+四者都**不写实体**。
 
 ## cad-import-acadrust：解析（ByObject → ByLayer → ByBlock）
 
-图层表现在只读入 `layer_transparency`（实体透明度 `ByLayer` 仍在此解析，是三者中唯一还拍平的）
-与线型表；`layer_colors` 与 `layer_lineweights` 两张旁表**已删除**——颜色/线宽改为保留符号
-`ByLayer` 由表示层查图层行，线型名字也由表示层查图纸线型表（`layer_linetypes` 仅剩诊断用途），
+图层表现在只读入 `layer_linetypes`（**仅诊断用途**：图层线型名不在图纸线型表时按实体报一次）与
+线型表；`layer_colors`、`layer_lineweights` 与 `layer_transparency` 三张旁表**已全部删除**——
+颜色/线宽/透明度改为保留符号 `ByLayer` 由表示层查图层行，线型名字也由表示层查图纸线型表，
 线型表读入
 `linetype_patterns`（名字小写 → pattern），随后每个实体在 `push_entity` 里解析：
 
@@ -118,6 +124,9 @@ pub struct LayerAttributes {
   （2026-10-26 起；此前在此处拍平成显式 sRGB）。
 - **ByLayer**（线宽/线型）：**保持符号** `EntityLineWeight::ByLayer` / `EntityLineType::ByLayer`，
   由表示层在展开时查图层行/线型表解析（2026-10-26 起；此前在此处拍平）。
+- **ByLayer**（透明度）：**保持符号 `EntityTransparency::ByLayer`**（并是 `Default`），
+  由表示层在展开时取该图层的 `opacity` 解析（2026-10-26 起；此前在此处把图层 opacity
+  拍平成 `Explicit`，图层透明度改动因此无效）。
 - **ByBlock**：保持符号 `*::ByBlock`，由表示层 INSERT 展开时用包含块引用的有效值替代
   （与 alpha 同一机制）。
 - `Color::None`：视为 `ByLayer`（继承图层），保留符号不画成黑色；解析由表示层按图层完成。
@@ -134,16 +143,21 @@ pub struct LayerAttributes {
 
 `DisplayFragment` 新增：
 
+- `alpha: f32`（有效不透明度 `0..=1`：`Explicit` 原样、`ByLayer` 取图层 `opacity`、`ByBlock` 继承；
+  消毒/钳制在 `cad-scene::sanitize_alpha`，表示层不做第二份）；
 - `color: [f32; 3]`（归一化 sRGB）与 `color_unresolved: bool`；
 - `lineweight: f32`（毫米）与 `lineweight_unresolved: bool`；
 - `linetype: LinetypePattern`、`linetype_unresolved: bool`、`linetype_scale: f32`。
 
 `build`/`from_tessellation` 没有图层表，输出文档化缺省
-（`DEFAULT_RENDER_COLOR = [1,1,1]`、`DEFAULT_LINEWEIGHT_MM = 0.25`、连续 pattern）并置
+（`DEFAULT_RENDER_COLOR = [1,1,1]`、`DEFAULT_LINEWEIGHT_MM = 0.25`、连续 pattern、`alpha = 1.0`）并置
 `*_unresolved = true`，**不冒充**源值。`build_expanded` 用
-`resolve_color`/`resolve_lineweight`/`resolve_linetype` 写入已解析值：`Explicit` 直接采用；
-`ByBlock` 继承外层 INSERT 的已解析值；模型根无外层时退回缺省且标记未解析。`ByLayer` 在
-真实导入里已被 importer 替换，此处保持未解析标记。
+`resolve_alpha`/`resolve_color`/`resolve_lineweight`/`resolve_linetype` 写入已解析值：`Explicit` 直接采用；
+`ByBlock` 继承外层 INSERT 的已解析值；模型根无外层时退回缺省（`ByBlock` alpha 为不透明；
+颜色/线宽/线型退回缺省且标记未解析）。`ByLayer` 在这里解析：颜色取实体自身图层的
+`LayerAttributes::color.rgb`、线宽取 `lineweight`、线型取图层**名字**在图纸线型表中的 pattern、
+透明度取 `opacity`，缺行一律走 `layer_attributes()` 的既有 `LayerAttributes::default()`，
+**不另造本地缺省**。
 
 **虚线细分发生在表示层**（`subdivide_dashes`，底层为 `cad-geometry::dash_polyline`），
 不在渲染器里：

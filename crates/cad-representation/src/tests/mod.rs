@@ -19,6 +19,7 @@ mod blocks;
 mod bulge_arcs;
 mod bylayer_color;
 mod bylayer_style;
+mod bylayer_transparency;
 mod conic;
 mod dynamic_block;
 mod image;

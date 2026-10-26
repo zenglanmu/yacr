@@ -206,8 +206,13 @@ fn a_by_layer_color_projects_as_the_symbolic_value() {
             .unwrap(),
         crate::property_value::PropertyValue::Color(cad_db::EntityColor::ByLayer)
     );
-    // The other display rows are honest defaults too, not blanks.
-    assert_eq!(row(&props.rows, "transparency").value.as_deref(), Some("0"));
+    // The other display rows are honest defaults too, not blanks. Transparency
+    // inherits from the layer like the colour does (2026-10-26: it is no longer
+    // flattened to a concrete opacity at import).
+    assert_eq!(
+        row(&props.rows, "transparency").value.as_deref(),
+        Some("ByLayer")
+    );
     assert_eq!(
         row(&props.rows, "lineweight").value.as_deref(),
         Some("ByLayer")
@@ -285,7 +290,10 @@ fn a_value_no_grammar_can_express_is_shown_but_not_offered_as_editable() {
     b.set_entity_render_attributes(
         EntityId(1),
         EntityRenderAttributes {
-            transparency: EntityTransparency::ByBlock,
+            // An out-of-range stored opacity is legal display state (the scene
+            // sanitises it) but has no writable form: the row projects
+            // `opacity:1.5`, which the grammar refuses.
+            transparency: EntityTransparency::Explicit(1.5),
             ..EntityRenderAttributes::default()
         },
     )
@@ -295,12 +303,24 @@ fn a_value_no_grammar_can_express_is_shown_but_not_offered_as_editable() {
     let props = SelectionProperties::extract(&db, &set);
 
     let transparency = row(&props.rows, "transparency");
-    assert_eq!(transparency.value.as_deref(), Some("ByBlock"));
+    assert_eq!(transparency.value.as_deref(), Some("opacity:1.5"));
     assert!(
         !transparency.editable,
         "the write grammar cannot express this stored value"
     );
     assert!(!crate::property_value::accepts(
+        &db,
+        "transparency",
+        "opacity:1.5"
+    ));
+    // The symbolic forms are representable, so a stored `ByLayer`/`ByBlock`
+    // row stays editable (it resolves at draw time).
+    assert!(crate::property_value::accepts(
+        &db,
+        "transparency",
+        "ByLayer"
+    ));
+    assert!(crate::property_value::accepts(
         &db,
         "transparency",
         "ByBlock"

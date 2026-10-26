@@ -84,10 +84,12 @@ pub enum LayerLineWeight {
 /// `plottable` and `plot_style` are storage plus round-trip only: freeze-specific
 /// regeneration, plotting and named plot styles are **not implemented**.
 ///
-/// `color`, `linetype` and `lineweight` **are** read: the representation resolves
-/// a `ByLayer` entity's colour, linetype (name → pattern in the drawing's
+/// `color`, `linetype`, `lineweight` and `opacity` **are** read: the representation
+/// resolves a `ByLayer` entity's colour, linetype (name → pattern in the drawing's
 /// linetype table) and lineweight from this row, so editing any of them updates
-/// its `ByLayer` entities without writing a single entity.
+/// its `ByLayer` entities without writing a single entity. `opacity` is resolved
+/// the same way (it is the `ByLayer` transparency), so a layer opacity edit also
+/// reaches its `ByLayer` entities with no entity write.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerAttributes {
     /// Layer is off (DXF: the **sign** of group `62`; there is no off bit in
@@ -118,6 +120,11 @@ pub struct LayerAttributes {
     /// The source stores transparency as an `AcCmTransparency` XDATA pair where
     /// `0` is opaque and `255` is fully transparent; the sign of the meaning is
     /// flipped here so every other opacity in the build compares the same way.
+    ///
+    /// Read by the representation for an entity whose
+    /// [`EntityTransparency`](crate::EntityTransparency) is `ByLayer`, so a layer
+    /// opacity edit reaches its `ByLayer` entities on the next expansion with no
+    /// entity write.
     pub opacity: f32,
     /// Plot style **name** (DXF group `390` is a handle, not a name).
     ///

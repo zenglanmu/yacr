@@ -25,21 +25,16 @@ impl ProviderRegistry {
         stack: &mut Vec<BlockId>,
         out: &mut DisplayRepresentation,
     ) -> CadResult<()> {
-        // Opacity is resolved by the importer; colour, lineweight and linetype
-        // **provenance** is resolved **here** instead, because `ByLayer` means
-        // "the owning layer's value" and only this layer has the layer table:
-        // a layer edit therefore changes its `ByLayer` entities on the next
-        // expansion with no entity write and no revision bump. `ByBlock`
-        // inherits the containing INSERT's resolved value, threaded down through
-        // the `parent_*` arguments; at the model root those fall back to the
-        // documented defaults.
+        // Opacity, colour, lineweight and linetype **provenance** is resolved
+        // **here**, because `ByLayer` means "the owning layer's value" and only
+        // this layer has the layer table: a layer edit therefore changes its
+        // `ByLayer` entities on the next expansion with no entity write and no
+        // revision bump. `ByBlock` inherits the containing INSERT's resolved
+        // value, threaded down through the `parent_*` arguments; at the model
+        // root those fall back to the documented defaults.
         let attributes = database.entity_render_attributes(entity.id);
         // The provider sees the attributes too, so annotative text can be
         // scaled while it is shaped (the geometry is not post-processed).
-        let own_alpha = match attributes.transparency {
-            EntityTransparency::Explicit(alpha) => alpha,
-            EntityTransparency::ByBlock => parent_alpha,
-        };
         // Resolution rule for `ByLayer`: the row of the layer the entity is
         // **itself** on (`DbEntity::layer`), for model-space entities and for
         // entities inside a block definition alike. Only `ByBlock` walks up the
@@ -49,8 +44,10 @@ impl ProviderRegistry {
         // A layer with no stored attribute row uses
         // `DrawingDatabase::layer_attributes`'s documented
         // `LayerAttributes::default()` fallback (ACI 7 white, `Continuous`,
-        // ByLayer weight) rather than a second, locally invented default.
+        // ByLayer weight, opaque) rather than a second, locally invented
+        // default.
         let layer = database.layer_attributes(entity.layer);
+        let own_alpha = resolve_alpha(attributes.transparency, parent_alpha, layer.opacity);
         let (own_color, color_unresolved) =
             resolve_color(attributes.color, parent_color, layer.color.rgb);
         let (own_lineweight, lineweight_unresolved) =

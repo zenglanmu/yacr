@@ -21,6 +21,7 @@ mod mtext;
 mod ocs;
 mod plot;
 mod resolution;
+mod transparency_provenance;
 mod viewport;
 mod visibility;
 
