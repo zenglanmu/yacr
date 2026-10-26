@@ -298,44 +298,110 @@ pub(crate) fn hatch_pattern_type(
     }
 }
 
-/// Translate the pattern definition, including the **user-defined synthesis**.
+/// Where a HATCH's pattern-definition rows come from.
 ///
-/// A `76=0` hatch does not have to carry definition rows: the file may store
-/// only angle (`52`), spacing (`41`) and double (`77`). When `78 == 0` this
-/// synthesizes one family at offset `(0, 1)` in pattern space, so the hatch-level
-/// scale is exactly the spacing; the double flag adds the perpendicular family
-/// in [`HatchPattern::families`]. The generated geometry is **our
-/// implementation** (ADR U-1/N4), not a documented AutoCAD formula. A file that
-/// carries rows is replayed as-is even for `76=0` (ADR U-11: the priority is
-/// unverified, and this keeps the committed `flange.dxf` result).
+/// The classification lives in one place so [`import_pattern`] and the
+/// provenance diagnostic in [`crate::entity`] can never disagree about whether
+/// the drawn rows were the file's or ours.
+pub(crate) enum PatternRowSource<'a> {
+    /// `78 > 0`: the file carries rows. They win **verbatim** — even when they
+    /// disagree with the built-in table (see [`import_pattern`]).
+    File,
+    /// `76=0` with no rows and a usable spacing: one family synthesized from
+    /// angle/spacing/double ([`import_pattern`]).
+    UserDefinedSynthesis,
+    /// `76=1` with no rows and a name the built-in table implements.
+    Table(&'static cad_domain::hatch::PredefinedPattern),
+    /// `76=1` with no rows and a name outside the implemented table: nothing is
+    /// fabricated, the hatch stays `Partial`.
+    Unresolved(&'a str),
+    /// Nothing to resolve: `76=2` (custom) with no rows, or a `76=0` hatch
+    /// whose spacing is unusable.
+    Nothing,
+}
+
+/// Classify where this hatch's rows come from (see [`PatternRowSource`]).
+///
+/// The name lookup is [`cad_domain::hatch::predefined_pattern`], which already
+/// trims and compares case-insensitively; no second normalisation happens here.
+/// A `76=2` (`Custom`) name is **never** resolved: a custom pattern is defined
+/// by the file, so substituting table rows would be a guess.
+pub(crate) fn pattern_row_source(h: &Hatch) -> PatternRowSource<'_> {
+    use acadrust::entities::HatchPatternType as AcPatternType;
+    if !h.pattern.lines.is_empty() {
+        return PatternRowSource::File;
+    }
+    match h.pattern_type {
+        AcPatternType::UserDefined if h.pattern_scale.is_finite() && h.pattern_scale > 0.0 => {
+            PatternRowSource::UserDefinedSynthesis
+        }
+        AcPatternType::Predefined => match cad_domain::hatch::predefined_pattern(&h.pattern.name) {
+            Some(table) => PatternRowSource::Table(table),
+            None => PatternRowSource::Unresolved(h.pattern.name.as_str()),
+        },
+        _ => PatternRowSource::Nothing,
+    }
+}
+
+/// Translate the pattern definition, including the row-resolution rules.
+///
+/// **File rows always win.** A hatch whose `78 > 0` definition rows are replayed
+/// as-is, verbatim, even when they disagree with the built-in predefined table
+/// and even for `76=0` (ADR U-11: the priority is unverified, and this keeps the
+/// committed `flange.dxf` result). There is no diagnostic and no rewriting in
+/// that case — the file is the definition.
+///
+/// **User-defined synthesis.** A `76=0` hatch does not have to carry definition
+/// rows: the file may store only angle (`52`), spacing (`41`) and double (`77`).
+/// When `78 == 0` this synthesizes one family at offset `(0, 1)` in pattern
+/// space, so the hatch-level scale is exactly the spacing; the double flag adds
+/// the perpendicular family in [`HatchPattern::families`]. The generated
+/// geometry is **our implementation** (ADR U-1/N4), not a documented AutoCAD
+/// formula.
+///
+/// **Predefined table rows.** A `76=1` hatch whose name resolves in
+/// [`cad_domain::hatch::predefined_pattern`] and whose file carries no rows is
+/// imported with that table's rows (rotated into the hatch-plane frame by
+/// [`cad_domain::hatch::PredefinedPattern::to_hatch_pattern`]) and the file's
+/// own scale (`41`)/angle (`52`)/double (`77`). Those rows are **our hand
+/// transcription (ADR U-1), not vendor-verified values**, so the caller records
+/// a provenance diagnostic (see [`crate::entity`]); the name is kept exactly as
+/// the file wrote it, so a name round-trip is not rewritten. A name outside the
+/// implemented table (`ANSI33`, a vendor pattern) keeps today's honest result:
+/// no rows at all, and a `Partial` reason that names the unresolved pattern.
 pub(crate) fn import_pattern(h: &Hatch) -> HatchPattern {
-    let mut lines: Vec<HatchPatternLine> = h
-        .pattern
-        .lines
-        .iter()
-        .map(|line| HatchPatternLine {
-            angle: line.angle,
-            base_x: line.base_point.x,
-            base_y: line.base_point.y,
-            offset_x: line.offset.x,
-            offset_y: line.offset.y,
-            dashes: line.dash_lengths.clone(),
-        })
-        .collect();
-    if lines.is_empty()
-        && h.pattern_type == acadrust::entities::HatchPatternType::UserDefined
-        && h.pattern_scale.is_finite()
-        && h.pattern_scale > 0.0
-    {
-        lines.push(HatchPatternLine {
+    let lines: Vec<HatchPatternLine> = match pattern_row_source(h) {
+        PatternRowSource::File => h
+            .pattern
+            .lines
+            .iter()
+            .map(|line| HatchPatternLine {
+                angle: line.angle,
+                base_x: line.base_point.x,
+                base_y: line.base_point.y,
+                offset_x: line.offset.x,
+                offset_y: line.offset.y,
+                dashes: line.dash_lengths.clone(),
+            })
+            .collect(),
+        PatternRowSource::UserDefinedSynthesis => vec![HatchPatternLine {
             angle: 0.0,
             base_x: 0.0,
             base_y: 0.0,
             offset_x: 0.0,
             offset_y: 1.0,
             dashes: Vec::new(),
-        });
-    }
+        }],
+        // Only the rows are taken from the table: the definition angle is
+        // degrees there and radians here, and the name/scale/double of the
+        // hatch stay exactly what the file carried.
+        PatternRowSource::Table(table) => {
+            table
+                .to_hatch_pattern(h.pattern_scale, h.pattern_angle.to_degrees(), h.is_double)
+                .lines
+        }
+        PatternRowSource::Unresolved(_) | PatternRowSource::Nothing => Vec::new(),
+    };
     HatchPattern {
         name: h.pattern.name.clone(),
         angle: h.pattern_angle,

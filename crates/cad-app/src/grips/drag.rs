@@ -8,17 +8,24 @@
 //! (`crate::app_drawing::grip`) is what stages the result, exactly once.
 //!
 //! Split out of `grips/mod.rs` so both files stay well under the 1000-line cap.
-//! The handle lists, the hit-testing rules and the module-level documentation
-//! (including every refusal code) live in the parent module.
+//! The handle lists live in `grips/handles.rs`; the hit-testing rules and the
+//! module-level documentation (including every refusal code) live in the parent
+//! module.
 
+use super::handles::{
+    arc_point, ellipse_axes, ellipse_quadrant_point, in_plane_distance, insert_origin,
+    is_full_ellipse, midpoint, plane_axes, quadrant_point, spline_is_consistent,
+};
 use super::{
-    arc_point, ellipse_axes, ellipse_quadrant_point, in_plane_distance, is_finite, is_full_ellipse,
-    midpoint, plane_axes, quadrant_point, spline_is_consistent, GripId, GripKind,
-    ARC_SWEEP_EPSILON, QUADRANT_DIRECTIONS, REASON_DEGENERATE_ARC, REASON_DEGENERATE_RADIUS,
+    is_finite, transform_is_finite, GripId, GripKind, ARC_SWEEP_EPSILON, QUADRANT_DIRECTIONS,
+    REASON_DEGENERATE_ARC, REASON_DEGENERATE_RADIUS, REASON_DEGENERATE_TRANSFORM,
     REASON_NON_FINITE_TARGET, REASON_PARTIAL_ELLIPSE, REASON_STALE_HANDLE, REASON_UNSUPPORTED_KIND,
     REASON_ZERO_DISPLACEMENT,
 };
-use cad_domain::{CadError, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV};
+use cad_domain::{
+    BlockId, CadError, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV,
+    Transform3,
+};
 use cad_geometry::{add, dot, length, scale, sub};
 
 /// The in-plane **angle** of `to` as seen from `center`, or `None` when the
@@ -644,6 +651,82 @@ fn apply_text(text: TextParts<'_>, id: &GripId, to: Point3) -> CadResult<Semanti
     }
 }
 
+/// The `INSERT` (block reference) drag rule: the instance moves **rigidly**.
+///
+/// The handle is the placement's **insertion point**, i.e. the image of the
+/// block-space origin under the stored transform ([`insert_origin`]: the
+/// translation column). A placement maps the origin to that column, so making the
+/// handle land on `to` means writing `to` into the column and nothing else:
+///
+/// ```text
+///   m[0][3] = to.x      m[1][3] = to.y      m[2][3] = to.z
+/// ```
+///
+/// Every other coefficient keeps its exact `f64` bits — the whole 3x3 linear part
+/// (rotation, non-uniform scale, mirror, shear) and row 3 — and `block` is copied
+/// verbatim. The rule therefore needs **no matrix inverse and no decomposition**,
+/// which is exactly why it cannot approximate: the insertion point of the result
+/// is `to` bit for bit, and a drag never rotates, scales, mirrors or shears a
+/// block reference.
+///
+/// A **singular** (but finite) linear part is not an error here: translating a
+/// flattened instance is still exact, and `cad-db`'s validator is the authority on
+/// what may be stored. A stored transform with a **non-finite** coefficient *is*
+/// refused ([`REASON_DEGENERATE_TRANSFORM`]), because the rule keeps that
+/// coefficient and writing it back would stage an entity the database refuses.
+///
+/// Block *members*, block *attributes* and points inside a block are not
+/// reachable from a [`GripId`] at all (a block member needs an instance path), so
+/// this rule never has to model them.
+fn apply_insert(
+    block: BlockId,
+    transform: &Transform3,
+    id: &GripId,
+    to: Point3,
+) -> CadResult<SemanticGeometry> {
+    match (id.kind, id.index) {
+        (GripKind::Insertion, 0) => {
+            // Stored-geometry sanity first: the rule keeps the linear part
+            // verbatim, so a corrupt coefficient would be written straight back.
+            if !transform_is_finite(transform) {
+                return Err(degenerate_transform(
+                    "the stored placement has a non-finite coefficient",
+                ));
+            }
+            finite_target(to)?;
+            if to == insert_origin(transform) {
+                return Err(zero_displacement("AcDbBlockReference insertion point"));
+            }
+            let mut matrix = transform.matrix;
+            // The origin's image *is* the translation column, so assigning the
+            // target there is the whole rule: no solve, no residual.
+            matrix[0][3] = to.x;
+            matrix[1][3] = to.y;
+            matrix[2][3] = to.z;
+            Ok(SemanticGeometry::Insert {
+                block,
+                transform: Transform3 { matrix },
+            })
+        }
+        (GripKind::Insertion, index) => Err(stale_handle(format!(
+            "AcDbBlockReference has no Insertion grip at index {index} (only 0)"
+        ))),
+        (
+            GripKind::Endpoint
+            | GripKind::Midpoint
+            | GripKind::Center
+            | GripKind::Quadrant
+            | GripKind::Vertex
+            | GripKind::ControlPoint
+            | GripKind::Point,
+            _,
+        ) => Err(stale_handle(
+            "AcDbBlockReference exposes a single Insertion grip (0) at its insertion point only"
+                .to_string(),
+        )),
+    }
+}
+
 /// A `grip.unsupported_kind` refusal naming the DXF class.
 fn unsupported_kind(class: &str) -> CadError {
     CadError::Unsupported(format!(
@@ -716,6 +799,16 @@ fn degenerate_arc(handle: &str, sweep: f64) -> CadError {
     ))
 }
 
+/// A `grip.degenerate_transform` refusal for a block reference whose stored
+/// placement cannot be written back (a non-finite coefficient).
+fn degenerate_transform(cause: &str) -> CadError {
+    CadError::InvalidInput(format!(
+        "{REASON_DEGENERATE_TRANSFORM}: the AcDbBlockReference insert transform cannot be moved \
+         rigidly: {cause}; a translation column rewrite keeps every other coefficient verbatim, \
+         so the result would be an unstorable transform"
+    ))
+}
+
 /// A `grip.non_finite_target` refusal for a finite input whose result overflows.
 fn overflowed(handle: &str) -> CadError {
     CadError::InvalidInput(format!(
@@ -774,6 +867,13 @@ pub(crate) fn finite_target(to: Point3) -> CadResult<()> {
 ///   `text`/`style`/`height`/`rotation`/`font`/`h_align`/`v_align`/`wrap_width`
 ///   are bit-identical (the handle is the stored insertion point, so alignment
 ///   and rotation neither move it nor are moved by it);
+/// * `INSERT` (block reference) insertion point: only the placement's translation
+///   column becomes `to`, so the insertion point lands on `to` bit for bit while
+///   the whole 3x3 linear part (rotation, non-uniform scale, mirror) and `block`
+///   stay bit-identical — a drag moves the reference rigidly and never rotates or
+///   scales it. A non-finite stored placement is refused
+///   ([`REASON_DEGENERATE_TRANSFORM`]); a singular but finite one is not, because
+///   the rule needs no matrix inverse;
 /// * everything else, a [`GripId`] that does not name a handle of this geometry,
 ///   a non-finite target and a drag with no geometric effect are refused with the
 ///   stable reason codes documented in the module doc.
@@ -878,6 +978,7 @@ pub fn apply_grip(
             }
             Ok(SemanticGeometry::Point(to))
         }
+        SemanticGeometry::Insert { block, transform } => apply_insert(*block, transform, id, to),
         other => Err(unsupported_kind(crate::app_drawing::class_name(other))),
     }
 }

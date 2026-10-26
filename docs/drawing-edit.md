@@ -56,6 +56,26 @@ impl<'a> DrawingTransaction<'a> {
    变换=`TRANSFORM`（用于 MOVE）；删除=`Delete`。
 5. `EntityId` 分配单调递增，删除后不复用；`scene_identity()` 随之变化使缓存失效。
 6. 删除不存在的实体、更新/删除 id 不匹配 → `CadError::Invariant`/`InvalidInput`，非静默成功。
+7. **样条必须是内部自洽的 NURBS**（2026-10-26 增补，`validate_geometry` 的 `Spline` 分支）：
+   **非空** `knots` 必须恰有 `control_points.len() + degree + 1` 个（`spline.knot_count`）；
+   **非空** `weights` 必须每个控制点一项（`spline.weight_count`）；非空 knot 向量必须**非递减**
+   （`spline.knot_order`，消息点名相邻两个索引与数值）。既有的 degree ≥ 1、控制点数 ≥ degree+1、
+   有限性、正权重检查保持在前面，不被新码遮蔽。
+
+   **两条被认可的简写**（各自独立判定，互不遮蔽）：`knots` 为空 = "clamped uniform"，
+   `weights` 为空 = "全 1"。它们不是宽松容错，而是本仓库真实产生的形态：
+   `cad-domain/src/multileader.rs::path_geometry` 与
+   `cad-import-acadrust/src/dimension/multileader.rs::multileader_path` 都用
+   `knots: Vec::new(), weights: Vec::new()` 构造 MULTILEADER 引线的显示样条；
+   `cad-geometry::tessellate_spline` 会在空 knot 时回退到 `clamped_uniform_knots`，
+   `NurbsCurve::new` 会把空权重展开成全 1。**不做任何补齐/均匀化/修复**，拒绝先于任何变更。
+
+   该规则对**派生显示几何**递归生效（`Compound`/`Dimension`/`Hatch`/`MultiLeader`），
+   这正是必须接受这两种简写的原因：拒绝它会让导入的 Spline 引线 MULTILEADER 变得不可编辑。
+   注意导入构建器走的是宽松的 `DrawingDatabaseBuilder`（记录来源、报告完整性），
+   因此该不变式只约束**受校验的写路径**，不拒绝导入本身。
+   `cad-app` 的夹点模型（`crates/cad-app/src/grips/mod.rs::spline_is_consistent`）对无法索引的
+   定义给出**零夹点**，它是纵深防御（覆盖未经受校验写入的几何与逐次拖拽），不是第二套校验。
 
 ## 2. 应用命令（`cad-app`，workstream B 落地）
 

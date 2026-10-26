@@ -47,14 +47,61 @@ fn line(x1: f64, y1: f64, x2: f64, y2: f64) -> SemanticGeometry {
 /// A grip-less geometry, used wherever a test needs "an entity that exposes no
 /// handle at all".
 ///
-/// `SPLINE` used to play this role; it now has control-point grips (pinned in
-/// `crates/cad-app/src/tests/grips_spline.rs`), so the fixture moved to an
-/// `INSERT`, whose instance transform genuinely is not an entity handle.
-fn insert() -> SemanticGeometry {
-    SemanticGeometry::Insert {
-        block: BlockId(0),
-        transform: Transform3::translation(p3(5.0, 5.0, 0.0)),
-    }
+/// `SPLINE` used to play this role (it now has control-point grips, pinned in
+/// `crates/cad-app/src/tests/grips_spline.rs`), then `INSERT` did — it now exposes
+/// the block reference's insertion-point grip, pinned in
+/// `crates/cad-app/src/tests/grips_insert.rs`. The fixture is therefore a
+/// `MULTILEADER`: its annotation text is deliberately **not** exposed through a
+/// text insertion-point handle in this build, so the whole kind stays on the
+/// refusal list. The leader runs through the origin (`0,0` → `5,0` → `8,0` with a
+/// landing at `10,5`), so a query placed exactly on one of its vertices still
+/// misses — there is no handle to hit.
+pub(super) fn multi_leader() -> SemanticGeometry {
+    let (geometry, _) = MultiLeaderGeometry::from_import(MultiLeaderParts {
+        style: MLeaderStyleValues {
+            path_type: MLeaderPathType::StraightLineSegments,
+            enable_landing: true,
+            enable_dogleg: true,
+            landing_distance: 2.0,
+            landing_gap: 0.1,
+            arrowhead_size: 0.5,
+            text_height: 0.2,
+            text_style: StyleId(0),
+            text_style_name: "Standard".into(),
+            text_font: None,
+            scale_factor: 1.0,
+        },
+        style_name: "Standard".into(),
+        override_mask: 0,
+        content: MLeaderContent::None,
+        text: MLeaderText {
+            string: String::new(),
+            location: p3(0.0, 0.0, 0.0),
+            rotation: 0.0,
+            height: 0.2,
+            width: 0.0,
+            attachment_point: 2,
+            left_attachment: 2,
+        },
+        roots: vec![MLeaderRoot {
+            leader_index: 0,
+            landing_point: p3(10.0, 5.0, 0.0),
+            dogleg_vector: p3(1.0, 0.0, 0.0),
+            dogleg_length: 2.0,
+        }],
+        lines: vec![MLeaderLine {
+            root_index: 0,
+            index: 0,
+            points: vec![p3(0.0, 0.0, 0.0), p3(5.0, 0.0, 0.0), p3(8.0, 0.0, 0.0)],
+            path_type: MLeaderPathType::StraightLineSegments,
+            override_flags: 0,
+            arrowhead_size: 0.5,
+            arrowhead_handle: None,
+        }],
+        reserved: MLeaderReserved::default(),
+        plane: PlaneFrame::default(),
+    });
+    SemanticGeometry::MultiLeader(Box::new(geometry))
 }
 
 pub(super) fn grip_id(entity: u128, kind: GripKind, index: u8) -> GripId {
@@ -180,8 +227,10 @@ fn point_exposes_one_point_grip() {
 //    `crates/cad-app/src/tests/grips_ellipse.rs`), and neither is `SPLINE`
 //    (control-point grips, pinned in `crates/cad-app/src/tests/grips_spline.rs`).
 //    `TEXT`/`MTEXT` is no longer on it either (one insertion-point grip, pinned in
-//    `crates/cad-app/src/tests/grips_text.rs`); `INSERT` is the fixture that
-//    genuinely has none.
+//    `crates/cad-app/src/tests/grips_text.rs`), and neither is `INSERT`'s own
+//    block-reference placement (one insertion-point grip, pinned in
+//    `crates/cad-app/src/tests/grips_insert.rs`); `MULTILEADER` is the fixture
+//    that genuinely has none.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -205,11 +254,13 @@ fn ellipse_exposes_a_centre_and_axis_grips() {
 
 // `TEXT` used to be the fixture of `text_exposes_no_grips` here; it now exposes
 // one insertion-point grip (`GripKind::Insertion` 0), pinned in
-// `crates/cad-app/src/tests/grips_text.rs`. `INSERT` is the remaining fixture for
+// `crates/cad-app/src/tests/grips_text.rs`, and `INSERT` used to be the remaining
+// fixture — it now exposes the block reference's insertion point (pinned in
+// `crates/cad-app/src/tests/grips_insert.rs`). `MULTILEADER` is the fixture for
 // "an entity that genuinely exposes no handle at all".
 #[test]
-fn insert_exposes_no_grips() {
-    let entity = ent(5, insert());
+fn multi_leader_exposes_no_grips() {
+    let entity = ent(5, multi_leader());
     assert!(grips_for_entity(&entity).is_empty());
 }
 
@@ -256,16 +307,17 @@ fn grip_hit_returns_none_outside_tolerance_and_for_degenerate_inputs() {
 
 #[test]
 fn grip_hit_skips_entities_that_expose_no_grips() {
-    let insert = ent(1, insert());
-    // A query sitting exactly on the INSERT's translation still misses: an
-    // instance transform is not an entity handle. (`TEXT` was the second fixture
-    // here until it got its insertion-point grip; that path is now covered — in
-    // the opposite direction — by `tests::grips_text`.)
-    assert!(grip_hit([insert.clone()].iter(), p3(5.0, 5.0, 0.0), 1.0).is_none());
+    let leader = ent(1, multi_leader());
+    // A query sitting exactly on one of the MULTILEADER's stored leader vertices
+    // still misses: the kind exposes no handle at all. (`TEXT` and `INSERT` were
+    // the fixtures here until they got their insertion-point grips; those paths are
+    // now covered — in the opposite direction — by `tests::grips_text` and
+    // `tests::grips_insert`.)
+    assert!(grip_hit([leader.clone()].iter(), p3(5.0, 0.0, 0.0), 1.0).is_none());
 
     // A real grip elsewhere still wins while the grip-less entities are skipped.
     let line = ent(3, line(20.0, 0.0, 30.0, 0.0));
-    let hit = grip_hit([insert, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
+    let hit = grip_hit([leader, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
     assert_eq!(hit.id, grip_id(3, GripKind::Endpoint, 0));
 }
 
@@ -378,10 +430,10 @@ fn grip_hit_planar_returns_none_outside_tolerance_and_for_degenerate_inputs() {
 
 #[test]
 fn grip_hit_planar_skips_entities_that_expose_no_grips() {
-    let insert = ent(1, insert());
-    assert!(grip_hit_planar([insert.clone()].iter(), p3(0.0, 0.0, 0.0), 1.0).is_none());
+    let leader = ent(1, multi_leader());
+    assert!(grip_hit_planar([leader.clone()].iter(), p3(0.0, 0.0, 0.0), 1.0).is_none());
     let line = ent(3, line(20.0, 0.0, 30.0, 0.0));
-    let hit = grip_hit_planar([insert, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
+    let hit = grip_hit_planar([leader, line].iter(), p3(20.1, 0.0, 0.0), 1.0).expect("a hit");
     assert_eq!(hit.id, grip_id(3, GripKind::Endpoint, 0));
 }
 
@@ -646,19 +698,19 @@ fn apply_grip_refuses_zero_displacement() {
 
 #[test]
 fn apply_grip_refuses_a_kind_with_no_grip_model() {
-    // `INSERT` exposes no handle at all (an instance transform is not an entity
-    // handle; `SPLINE` used to be the fixture here but now has control-point
-    // grips), so any id naming one is the kind refusal — even though the
-    // kind/index would also be "stale" against it.
+    // A MULTILEADER exposes no handle at all (its annotation text is not addressed
+    // through a text insertion-point handle here), so any id naming one is the kind
+    // refusal — even though the kind/index would also be "stale" against it.
+    // (`SPLINE` used to be this fixture, then `INSERT`; both now have handles.)
     let error = apply_grip(
-        &insert(),
+        &multi_leader(),
         &grip_id(1, GripKind::Endpoint, 0),
         p3(6.0, 0.0, 0.0),
     )
-    .expect_err("an INSERT exposes no grip model");
+    .expect_err("a MULTILEADER exposes no grip model");
     assert_reason(error.clone(), REASON_UNSUPPORTED_KIND);
     assert!(
-        reason(error).contains("AcDbBlockReference"),
+        reason(error).contains("AcDbMultiLeader"),
         "the refusal names the DXF class"
     );
 }

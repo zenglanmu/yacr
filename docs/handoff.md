@@ -1,3 +1,122 @@
+## 2026-10-26 INSERT（块引用）插入点夹点（刚性平移，旋转/缩放不动）
+
+### 结论
+
+纯夹点模型（`crates/cad-app/src/grips/`）此前把 `Insertion` 只给 `TEXT`/`MTEXT`，并把 `INSERT` 整类列在
+「无夹点」拒绝清单里。本轮为 **`SemanticGeometry::Insert { block, transform }`** 实现**块引用插入点**
+夹点：`GripKind::Insertion`、`index` 0，位置 = **放置变换的插入点**。只动 `cad-app`（模型 + 测试）、
+`docs/compatibility.md`、本文件；`cad-host` / `apps/**` / i18n / 命令 / IPC / wire **未改**（宿主与渲染器
+按通用 `Grip`/`GripId` 消费枚举，无新分支、无新命令、无新字段）。
+
+**“插入点”的既有定义（不新造约定）**：`Transform3` 是 4x4 仿射，`apply_point` **不做**齐次除法，所以
+block-space 原点的像**就是**矩阵的平移列（`m[0][3]`, `m[1][3]`, `m[2][3]`）。导入器已把块基点折进放置
+（`cad-import-acadrust/src/geometry.rs` 的 `insert_array_transform` = `translate * rotate * scale *
+block_placement(-base_point)`，`block_placement` 就是 `-base_point` 的平移），因此 block-space 原点落在
+**`INSERT` 存入的插入点**上：`transform.apply_point(0,0,0) == (m[0][3], m[1][3], m[2][3])`。
+模型直接读平移列（而不是走 `apply_point`），只是为避免线性部分的 `0.0 * 系数` 把**非有限**系数
+变成 `NaN`、从而用伪造的句柄位置掩盖损坏的放置；两点在有限输入下等同。
+
+### 句柄表
+
+| geometry | kind | index | 位置 / 含义 |
+|---|---|---|---|
+| `SemanticGeometry::Insert` | `Insertion` | 0 | 放置的插入点 = 平移列 = block-space 原点的像 |
+
+`Insertion` 变体由 `TEXT`/`MTEXT`（存储 `position`）与 `INSERT`（变换后的原点）共用：两者靠**几何变体**
+区分，`grip.stale_handle` 仍无歧义，故**不**新增 `GripKind`。
+
+### 拖拽规则（刚性平移）
+
+* 只改平移列：`m[0][3] = to.x`、`m[1][3] = to.y`、`m[2][3] = to.z`；
+  因为放置把 block-space 原点映到平移列，这就是「插入点落到目标上」的**充分且精确**的写法
+  （**不**求逆、**不**分解、**无**残差）。
+* 其余全部**逐位不变**：整个 3x3 线性部分（旋转 / **非均匀**缩放 / 镜像 / 剪切，九个系数）、
+  第 3 行、以及 `block` 引用。⇒ 拖拽**永不**旋转、缩放、镜像或剪切块引用；块内每个点在 block space 的
+  坐标不变，故它相对插入点的偏移也不变（有采样点测试钉住
+  `new ∘ old⁻¹ == 平移 (to − old_origin)`）。
+* 目标三坐标原样存储（不投影、不捕捉）；与 `LINE` 中点、`ARC`/`ELLIPSE` 中心一致的「一个手柄，整移」语义。
+* **有限但奇异**（`det == 0`、块被压平）的放置**不**拒绝：规则不需要求逆，平移仍逐位精确，线性部分
+  原样保留（`cad-db` 的校验器本来拒绝**存储**奇异放置，所以这属于损坏输入）。
+
+### 拒绝（沿用既有码与既有次序，绝不夹取）
+
+次序仍是 **几何种类 → 句柄身份 → 存储几何自洽 → 目标有限性 → 拖拽几何规则**：
+
+* `grip.stale_handle` —— 该块引用上的其它任何 kind（`Endpoint`/`Midpoint`/`Center`/`Quadrant`/
+  `Vertex`/`ControlPoint`/`Point`），以及 `Insertion` 的 `index != 0`（含 `1`/`u8::MAX`）。句柄身份先于
+  目标有限性与存储放置校验，故「错 kind + 非有限目标」或「错 kind + 损坏放置」都仍报 stale；
+* `grip.degenerate_transform`（**新码**）—— 存储放置含**非有限**系数。刚性规则会把它原样写回，而
+  `cad-db` 提交时拒绝非有限 insert 变换，故按名拒绝而不是把失败推后；有测试断言「拒绝时存储的放置
+  逐位未变」（纯函数，不写任何东西）；
+* `grip.non_finite_target` —— 目标含 `NaN`/`inf`（命令层 `GRIPSTRETCH` 仍在读图之前就拒）；
+* `grip.zero_displacement` —— 目标恰等于当前插入点（IEEE `==`，无容差，不夹取）。
+* `INSERT` **不再**出现在 `grip.unsupported_kind` 里；该码仍覆盖 `MULTILEADER`/`HATCH`/`DIMENSION`/
+  `IMAGE`/`MASK`/`Opaque`/`Compound`/`Mesh`/`Shape`。
+
+### 命中 / tie-break 未变
+
+`grip_hit`/`grip_hit_planar` 的候选顺序、`距离 <= tolerance`、严格更近才替换、精确平局归**输入里更早
+的实体**全部不变；块引用就是一个普通候选。测试覆盖：插入点上精确命中（`tolerance = 0`）、容差边界、
+非有限查询/容差、**平面视图**（实体在 z = 5、指针落在工作平面）、与 `POINT` 同点的精确平局（两种输入
+顺序，两种命中规则）、以及平移列非有限时两种规则都**不**命中。
+
+### 文件与拆分（1000 行上限）
+
+`grips/mod.rs` 原已 999 行，本轮把**句柄表实现**（`grips_for_entity` + 全部几何辅助函数）拆到新文件
+`crates/cad-app/src/grips/handles.rs`（375 行），`grips/mod.rs` 保留模块文档 / 类型 / 常量 / 命中测试 /
+`is_finite`/`transform_is_finite`，并 `pub use handles::grips_for_entity;`（公开路径
+`crate::grips::grips_for_entity` **不变**）。当前：`mod.rs` 761、`handles.rs` 375、`drag.rs` 984、
+`tests/grips_insert.rs` 669、`tests/drawing/grip.rs` 822、`grip_fixture.rs` 487，全部 < 1000。
+
+### 测试与夹具迁移
+
+新增 `crates/cad-app/src/tests/grips_insert.rs`（已注册，**16 个测试**）：句柄表（平移型 + 旋转/非均匀
+缩放型，位置逐位等于变换后的原点）、手柄不受线性部分影响（同平移、不同旋转/缩放 ⇒ 位置逐位相同）、
+刚性拖拽（变换的九个线性系数 + 第 3 行 + `block` + 列长逐位不变，结果等于「仅平移列被替换」，新插入点
+逐位等于目标）、块空间采样点一致性（`new ∘ old⁻¹` 是纯平移 `to − old_origin`，等价地「相对插入点偏移
+不变」）、奇异但有限放置仍可平移、四类拒绝 + 次序（stale 先于目标/放置）、非有限放置按名拒绝且未写入、
+`MULTILEADER` 仍报 `grip.unsupported_kind`、命中/容差/平面视图/平局/非有限句柄，以及「句柄仍是普通
+`Grip`/`GripId` 形状」。
+
+**「无夹点」夹具从 `INSERT` 迁到 `MULTILEADER`**（各附注释说明原因）：
+
+* `tests/grips.rs`：`insert()` fixture → `multi_leader()`（`MultiLeaderGeometry::from_import` 搭建，
+  leader 经过原点，故「在 leader 顶点上查询也不命中」是有意义的断言）；`insert_exposes_no_grips`
+  → `multi_leader_exposes_no_grips`；`grip_hit_skips_entities_that_expose_no_grips` /
+  `grip_hit_planar_skips_entities_that_expose_no_grips` / `apply_grip_refuses_a_kind_with_no_grip_model`
+  改用 `MULTILEADER`（后者断言拒绝里出现 `AcDbMultiLeader`）；
+* `tests/grips_text.rs`：`a_grip_less_entity_still_exposes_nothing_while_the_text_is_hittable` 的无夹点
+  实体改为 `MULTILEADER`（查询落在其 leader 顶点上仍不命中）；
+* `tests/grips_curves.rs`：`a_geometry_with_no_grip_model_still_names_its_class` 改为 `MULTILEADER`；
+* `tests/drawing/grip_fixture.rs`：id 8 由 `INSERT` 改为 `MULTILEADER`（`grip.unsupported_kind` 目标），
+  新增 id 11 = `INSERT`（`translate(7,-3,2) * rotate(0.4 about Z) * scale(2,3,4)`）挂
+  `insert_transform()`/`insert_parts()`/`linear_bits()` 辅助。
+
+命令级：`tests/drawing/grip.rs` 新增
+`insert_insertion_grip_drag_is_one_change_one_undo_step_and_undoes_exactly`（一次 `ChangeSet`、一个
+revision、一步撤销、线性部分与第 3 行逐位不变、插入点等于目标、undo 逐位还原）。`grip.rs` 只加测试
+本体，夹具扩在 `grip_fixture.rs`。
+
+### 文档同步
+
+* `crates/cad-app/src/grips/mod.rs`：句柄表加 `Insert` 行、INSERT 段落（既有插入点约定 / instance path
+  边界 / 块内属性与块内点 NOT IMPLEMENTED）、拖拽规则加刚性平移条目、拒绝清单把 `INSERT` 移出并新增
+  `REASON_DEGENERATE_TRANSFORM` 段落与检查次序说明，`GripKind::Insertion` 文档覆盖两种几何；
+* `docs/compatibility.md` `GRIPSTRETCH` 行：加「块引用插入点（刚性移动，旋转/缩放不动）」段落，明确
+  「块成员（instance path）/块内属性/块内点夹点**未实现**」，`grip.unsupported_kind` 清单去掉 `INSERT`，
+  拒绝清单加 `grip.degenerate_transform`。
+
+### 证据与边界
+
+`cargo test -p cad-app --lib --locked`（1117 passed / 0 failed，含新增 16 + 1）、
+`cargo test -p cad-host --lib --locked`（227 passed）、
+`cargo clippy -p cad-app --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、
+`python3 scripts/check-file-size.py`、`python3 scripts/check-i18n.py`。**无** GUI/像素/真窗口/真实鼠标证据：
+宿主对夹点种类无分支，块引用标记/拖拽应自然走同一通用 `native-below` 路径，但**未做**宿主运行或像素
+验证，`dom-canvas` 载体仍无任何夹点路径。**未实现**：块成员（instance path）夹点、块内属性（ATTRIB）
+夹点、块内点夹点、块引用的旋转/缩放/基点夹点（本轮只有插入点）、多夹点与多实体拉伸、拖拽中捕捉、
+3D 夹点编辑。
+
 ## 2026-10-26 TEXT/MTEXT 插入点夹点（存储插入点，不受对齐/旋转影响）
 
 ### 结论
@@ -1089,6 +1208,72 @@ BTreeMap<LayerId, LayerAttributes>`（在 `render_attributes` 旁边），单一
    编辑面为零（无事务、无撤销、无 wire 变化）。
 6. **wire/UI 不变**：图层 wire 形状与面板（色块仍是名字哈希）**本轮完全未动**。
 7. **plot-style 名字**：无法导出（写入器只发句柄）；CTB/STB 归一化未实现。
+
+## 2026-10-26 并行三条 lane：INSERT 夹点 / 样条定义校验 / HATCH 图案名补行
+
+三条 lane 按 **crate** 隔离并行（同一 crate 的两个 lane 会互相把 `cargo test -p <crate>` 打红，
+因此并行只在 crate 之间安全）：`cad-app`（夹点）、`cad-db`（校验）、`cad-import-acadrust`（导入）。
+
+### 1. `INSERT` 块引用插入点夹点（`cad-app`）
+
+- `Insertion` `index` 0 = **放置变换的插入点**。`Transform3` 是 4x4 仿射、`apply_point`
+  **不做**齐次除法，故 block-space 原点在变换下的像**就是**矩阵平移列；导入器已把块基点折进
+  放置（`translate * rotate * scale * block_placement(-base)`），所以这里是仓库**既有**定义，
+  本轮**不**引入第二套约定。
+- 拖拽是**刚性移动**：只写平移列三个分量，**整个 3x3 线性部分（旋转/非均匀缩放/镜像/剪切）与
+  `block` 逐位不变**，插入点**恰好**落在目标上（不求逆、无残差、不夹取）。**有限但奇异**的放置
+  **不**拒绝（平移仍精确，线性部分原样保留）；存储放置含**非有限**系数 → `grip.degenerate_transform`。
+- 块成员（instance path）/ 块内 `ATTRIB` / 块内点的夹点 **NOT IMPLEMENTED**：`GripId` 不含
+  instance path 与子元素字段，`GRIPSTRETCH` 另有 `property.not_addressable` 兜底，模型**不**另立规则。
+- `grips/mod.rs` 因 1000 行门禁拆出 `grips/handles.rs`（句柄表 + 各几何助手，`grips_for_entity`
+  由 `grips` 再导出，公共路径不变）；`MULTILEADER` 变为"无夹点"的新夹具（`AcDbMultiLeader`）。
+
+### 2. 样条定义不变量（`cad-db`）
+
+- `validate_geometry` 的 `Spline` 分支新增三条稳定码：`spline.knot_count`
+  （非空 `knots` 必须 = `control_points.len() + degree + 1`）、`spline.weight_count`
+  （非空 `weights` 必须每个控制点一项）、`spline.knot_order`（非空 knot 向量非递减，消息点名
+  相邻索引与数值）。既有 degree ≥ 1 / 控制点数 / 有限性 / 正权重检查仍在前面，不被遮蔽。
+- **两条简写被明确豁免**（各判各的，互不遮蔽）：空 `knots` = "clamped uniform"、空 `weights` = 全 1。
+  这不是宽松容错，而是仓库真实产物：`cad-domain/src/multileader.rs::path_geometry` 与
+  `cad-import-acadrust/src/dimension/multileader.rs::multileader_path` 都用空向量构造 MULTILEADER
+  引线显示样条；`cad-geometry::tessellate_spline` 在空 knot 时回退到 `clamped_uniform_knots`，
+  `NurbsCurve::new` 把空权重展开成全 1。**不做补齐/均匀化/修复**，拒绝先于任何变更。
+- 该规则对**派生显示几何**递归生效（`Compound`/`Dimension`/`Hatch`/`MultiLeader`），这正是不拒绝
+  空向量的原因：否则导入的 Spline 引线 MULTILEADER 会变成**不可编辑**（refusing to write back a
+  state the repo itself produces 是回归，不是诚实）。导入构建器走宽松 builder，故该不变式只约束
+  **受校验的写路径**，不拒绝导入本身。
+- 与 `cad-app` 的关系：`grips::spline_is_consistent` 对无法索引的定义给**零夹点**，属纵深防御
+  （覆盖未经受校验写入的几何与逐次拖拽），不是第二套校验。
+
+### 3. HATCH 预定义图案名补行（`cad-import-acadrust`）
+
+- `76=1` 且文件无 `78` 定义行 → 按名字查 `cad_domain::hatch::predefined_pattern`（trimmed、
+  case-insensitive，无第二套归一化）；命中则用**内置转录表**的行 + 文件自带 `41`/`52`/`77`，并记
+  `import.hatch_pattern_table`（消息明说 rows 是转录、ADR U-1、**非** vendor 核实；带此诊断的图纸
+  报告因此不再 `Complete`）。
+- **文件自带行永远优先**（即使与表不一致也不查表、不重写、不记诊断）；表中没有的名字（`ANSI33`）
+  **不造行**，仍 `Partial` 且原因点名；`76=2`（Custom）从不查表。
+
+### 已运行证据（本机，2026-10-26）
+
+- `cargo test -p cad-app --lib` → **1117 passed / 0 failed**（INSERT 16 模型 + 1 命令级；含伪造
+  `new ∘ old⁻¹ == translate(to − old_origin)` 的反 bug 断言）。
+- `cargo test -p cad-db --lib` → **130 passed / 0 failed**（12 条样条契约，含 MULTILEADER 可写回）。
+- `cargo test -p cad-import-acadrust --lib` → **290 passed / 1 ignored / 0 failed**（7 条图案补行契约，
+  含 `DwgWriter` 真实字节往返）。
+- 各 lane 的 `clippy -D warnings`、`fmt --check`、`check-file-size.py` 均 0（split 后最大文件
+  `grips/drag.rs` 984）。
+
+### NOT RUN / 边界
+
+- **无 GUI/像素/真窗口/真实鼠标证据**；`INSERT`/`SPLINE`/`TEXT` 夹点的标记与拖拽走通用宿主路径但
+  **未**做运行验证；`dom-canvas` 载体仍无任何夹点路径。
+- 仍缺：块成员/`ATTRIB`/块内点夹点；块引用旋转/缩放/基点夹点；多夹点与多实体拉伸；拖拽中 OSNAP；
+  3D 夹点编辑；夹点右键菜单。
+- 图案表值仍是**手工转录**（ADR U-1），没有 vendor/参考图/golden 对比，不得写成厂商一致。
+
+---
 
 ## 2026-10-26 夹点扩展（弧端点 / 多段线顶点）+ 拖拽遵循 SNAP/ORTHO
 

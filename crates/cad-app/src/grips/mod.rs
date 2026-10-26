@@ -35,6 +35,7 @@
 //! | `SemanticGeometry::Spline` | [`GripKind::ControlPoint`] `index` = stored control-point index |
 //! | `SemanticGeometry::Point` | [`GripKind::Point`] `0` |
 //! | `SemanticGeometry::Text` | [`GripKind::Insertion`] `0` = the stored `position` (TEXT and MTEXT alike) |
+//! | `SemanticGeometry::Insert` | [`GripKind::Insertion`] `0` = the placement's **insertion point** (the transformed block-space origin) |
 //!
 //! The `ARC` order is `Center 0, Endpoint 0, Endpoint 1`: the centre comes
 //! first because it was the only handle before the endpoints were added, and the
@@ -92,6 +93,28 @@
 //! `MULTILEADER` (`SemanticGeometry::MultiLeader`) is a **different** variant and
 //! stays on the refusal list: its annotation text is not exposed through a text
 //! insertion-point handle in this build, so it has no grip at all.
+//!
+//! `INSERT` (a block reference) exposes exactly **one** [`GripKind::Insertion`]
+//! grip, `index` 0, at the placement's **insertion point**. The stored
+//! `SemanticGeometry::Insert { block, transform }` carries the reference and a
+//! 4x4 affine `Transform3` whose point mapping has no homogeneous divide
+//! (`Transform3::apply_point`), and the importer folds the block's base point into
+//! that transform, so the block-space origin lands exactly on the `INSERT`'s
+//! insertion point. The handle is therefore `transform * (0, 0, 0)` — the
+//! translation column of the matrix, which is the one existing convention for "the
+//! insertion point of an insert" in this repo (`cad-import-acadrust`'s
+//! `insert_array_transform` / `block_placement`); no second convention is invented
+//! here. The handle is the *origin's image*, not "the translation as a point":
+//! those are the same `f64` bits, and the contract test pins that a change to the
+//! rotation/scale part with an unchanged translation does not move the handle.
+//!
+//! A block reference is grip-able only as a **top-level model-space entity**. A
+//! block *member* — and any attribute (`ATTRIB`) or point inside a block — is
+//! reached through an instance path (`SelectionRef::instance`), which a
+//! [`GripId`] cannot even express; `GRIPSTRETCH` already refuses a non-model-space
+//! target with `property.not_addressable`. This model adds **no second**
+//! addressability rule: it describes the geometry it is handed. Grips for block
+//! members, for attributes and for points inside a block are **NOT IMPLEMENTED**.
 //!
 //! [`grips_for_entity`] returns an **empty** vector for every other geometry, and
 //! [`grip_hit`] therefore never hits one. No marker is invented, no index is
@@ -236,16 +259,40 @@
 //!   `rotation` do not move it, and a drag does not change them. A rotation,
 //!   height, wrap-width or attachment (alignment) grip is **NOT IMPLEMENTED**:
 //!   the insertion point is the only text handle in this build.
+//! * **`INSERT` insertion point** (`index` 0): the block reference moves
+//!   **rigidly** — the drag keeps the whole 3x3 linear part of the transform
+//!   (rotation, non-uniform scale, mirror, shear: all nine coefficients) and the
+//!   `block` reference **bit-identically**, and changes only the translation
+//!   column so that the insertion point becomes the target. Concretely the new
+//!   matrix is the stored one with `m[0][3] = to.x`, `m[1][3] = to.y`,
+//!   `m[2][3] = to.z`; rows 0..2 keep every other coefficient and row 3 is
+//!   untouched. That is the *origin's image* rule: a placement maps the
+//!   block-space origin to its translation column, so assigning the target there
+//!   makes the handle land on the target **exactly** (no solve, no inverse, no
+//!   residual error). A drag therefore never rotates, scales, mirrors or shears a
+//!   block reference — it only moves it — and every block-space point keeps its
+//!   offset from the insertion point. Nothing is snapped and nothing is
+//!   projected: the target is stored in all three coordinates.
+//!
+//!   Because no matrix is inverted, a **singular** (but finite) linear part is
+//!   not refused: translating a flattened instance is still exact. A stored
+//!   transform with a **non-finite** coefficient is refused by name
+//!   ([`REASON_DEGENERATE_TRANSFORM`]) instead of being written back — `cad-db`
+//!   refuses such an insert transform at commit, so staging it would only move the
+//!   failure later.
 //!
 //! ## Explicit refusal list (no marker, no hit)
 //!
-//! `INSERT`/block-member geometry (an instance transform is not an entity
-//! handle), `MULTILEADER` (its annotation text is not addressed through a text
+//! `MULTILEADER` (its annotation text is not addressed through a text
 //! insertion-point handle here), `HATCH`, `DIMENSION` (definition-point grips;
 //! the dimension is non-associative by design), `IMAGE`/`MASK`, and
 //! opaque/compound geometry (`Opaque`, `Compound`, `Mesh`, `Shape`). `TEXT`/
 //! `MTEXT` is **no longer** on this list: it exposes one [`GripKind::Insertion`]
-//! grip at the stored insertion point (see above). `ELLIPSE` is **no longer** on
+//! grip at the stored insertion point (see above). **`INSERT` is no longer on this
+//! list either**: a block reference exposes one [`GripKind::Insertion`] grip at its
+//! insertion point and drags rigidly (see above) — but grips for block **members**
+//! (instance paths), for block **attributes** and for points **inside** a block are
+//! **NOT IMPLEMENTED**. `ELLIPSE` is **no longer** on
 //! this list: a full ellipse exposes centre + quadrant handles (see the drag
 //! rules), and a partial (elliptical-arc) ellipse exposes the centre grip only,
 //! with quadrant ids refused by [`REASON_PARTIAL_ELLIPSE`]. `SPLINE` is **no
@@ -258,13 +305,16 @@
 //! yields an empty vector or an error would be a placeholder pretending to be a
 //! capability. A later lane that implements one of them adds its variant **and**
 //! its drag rule together (as this lane did for [`GripKind::Vertex`] and, for the
-//! stored text insertion point, [`GripKind::Insertion`]).
+//! stored text insertion point and the block-reference insertion point,
+//! [`GripKind::Insertion`]).
 //!
 //! ## Coordinates: 3D-exact, never projected (except the three in-plane rules)
 //!
 //! A handle's [`Grip::position`] is a stored or stored-derived point — the same
 //! `f64` bits as the geometry (an endpoint, a point position, a circle/arc/ellipse
-//! centre, a polyline vertex, a spline control point, a text insertion point) or
+//! centre, a polyline vertex, a spline control point, a text insertion point, a
+//! block reference's insertion point, i.e. the transformed origin — the
+//! translation column of its placement) or
 //! the documented exact derivation of it (a line midpoint; an arc endpoint, i.e.
 //! the stored
 //! `center + radius * (cos angle * ax + sin angle * ay)` in the arc's own plane
@@ -370,13 +420,14 @@
 //!   [`GripKind::Center`]/[`GripKind::Quadrant`]/[`GripKind::Point`]/[`GripKind::Vertex`]/[`GripKind::ControlPoint`]/[`GripKind::Insertion`]
 //!   grip, an `AcDbCircle`/`AcDbArc` with a [`GripKind::Vertex`] grip, a
 //!   `POLYLINE` with a non-vertex grip, a `SPLINE` with a non-control-point grip,
-//!   a `TEXT`/`MTEXT` with a non-[`GripKind::Insertion`] grip,
+//!   a `TEXT`/`MTEXT` with a non-[`GripKind::Insertion`] grip, a block reference
+//!   with a non-[`GripKind::Insertion`] grip,
 //!   or an `index` outside the handle range
 //!   (`LINE` endpoint > 1, `LINE` midpoint ≠ 2, `CIRCLE`/`ELLIPSE` centre > 0,
 //!   `CIRCLE`/`ELLIPSE` quadrant > 3, `ARC` centre > 0, `ARC` endpoint > 1,
 //!   `POLYLINE` vertex ≥ the stored vertex count,
 //!   `SPLINE` control point ≥ the stored control-point count, `POINT` > 0,
-//!   `TEXT`/`MTEXT` insertion point > 0). It is
+//!   `TEXT`/`MTEXT` insertion point > 0, block-reference insertion point > 0). It is
 //!   also the refusal for **every** control-point id on an internally
 //!   inconsistent spline definition, because such a spline exposes no handle at
 //!   all. The caller is
@@ -385,7 +436,7 @@
 //!   change the geometry, so there is nothing to write. That is the target
 //!   equalling the dragged handle's current position (endpoint, arc endpoint,
 //!   point, midpoint, centre, quadrant, polyline vertex, spline control point,
-//!   text insertion point),
+//!   text insertion point, block-reference insertion point),
 //!   and additionally:
 //!   a quadrant target that already sits at the **stored** radius (its
 //!   out-of-plane offset is ignored by the radius rule), an arc endpoint drag
@@ -417,6 +468,14 @@
 //!   instead of pretending the handle is stale, and it is checked in the handle
 //!   identity position (before the target's finiteness), because no quadrant
 //!   handle of that geometry exists to be validated.
+//! * [`REASON_DEGENERATE_TRANSFORM`] (`CadError::InvalidInput`) — a block-reference
+//!   insertion-point drag on a stored `Transform3` that carries a **non-finite**
+//!   coefficient. The rigid rule keeps that coefficient (it only rewrites the
+//!   translation column), and `cad-db` refuses a non-finite insert transform at
+//!   commit, so writing it back would move the failure later and hide the cause. A
+//!   **singular** (but finite) linear part is deliberately **not** refused: the
+//!   rule needs no matrix inverse or decomposition, so a flattened instance still
+//!   translates exactly and its linear part stays bit-identical.
 //! * [`REASON_NON_FINITE_TARGET`] (`CadError::InvalidInput`) — the target has a
 //!   `NaN` or infinite coordinate. Storing it would corrupt the entity, and the
 //!   database refuses it at commit anyway; refusing here names the cause. The
@@ -426,7 +485,9 @@
 //!
 //! The checks run in a fixed order: geometry kind, then handle identity (which
 //! includes "this kind has no handle on this geometry at all", such as a
-//! quadrant id on a partial ellipse), then target finiteness, then the drag's own
+//! quadrant id on a partial ellipse), then the stored-geometry sanity the drag
+//! rule needs (an internally inconsistent spline definition, a block reference's
+//! non-finite placement), then target finiteness, then the drag's own
 //! geometric refusals. "Already at the
 //! handle" is checked before a drag's geometric rule, so a drag onto the handle
 //! itself reports [`REASON_ZERO_DISPLACEMENT`] rather than a degenerate radius or
@@ -444,12 +505,13 @@
 //! every `grip.*` code has one authority.
 
 use cad_db::DbEntity;
-use cad_domain::{EntityId, Point3, SemanticGeometry};
-use cad_geometry::{add, arbitrary_axis, cross, dot, length, normalize, scale, sub};
+use cad_domain::{EntityId, Point3};
 
 mod drag;
+mod handles;
 pub use drag::apply_grip;
 pub(crate) use drag::finite_target;
+pub use handles::grips_for_entity;
 
 /// Stable reason code: the geometry kind exposes no grip model.
 pub const REASON_UNSUPPORTED_KIND: &str = "grip.unsupported_kind";
@@ -465,6 +527,8 @@ pub const REASON_DEGENERATE_RADIUS: &str = "grip.degenerate_radius";
 pub const REASON_DEGENERATE_ARC: &str = "grip.degenerate_arc";
 /// Stable reason code: a quadrant id on a **partial** ellipse (an elliptical arc).
 pub const REASON_PARTIAL_ELLIPSE: &str = "grip.partial_ellipse";
+/// Stable reason code: a block reference's stored placement is not finite.
+pub const REASON_DEGENERATE_TRANSFORM: &str = "grip.degenerate_transform";
 /// Stable reason code: the addressed entity does not exist in the drawing.
 ///
 /// Raised by the `GRIPSTRETCH` command (`crate::app_drawing::grip`), which is the
@@ -513,13 +577,18 @@ pub enum GripKind {
     ControlPoint,
     /// The position of a point entity (`POINT` only).
     Point,
-    /// The stored insertion point of a `TEXT`/`MTEXT` (`index` 0). Dragging sets
-    /// `position` to the target and leaves `text`, `style`, `height`, `rotation`,
-    /// `font`, `h_align`, `v_align` and `wrap_width` bit-identical, so alignment
-    /// and rotation never move the handle. It is deliberately **not**
+    /// The **insertion point** of an entity that is placed by an anchor
+    /// (`index` 0): a `TEXT`/`MTEXT`'s stored `position`, or a block reference's
+    /// transformed block-space origin. For a text, dragging sets `position` to the
+    /// target and leaves `text`, `style`, `height`, `rotation`, `font`, `h_align`,
+    /// `v_align` and `wrap_width` bit-identical, so alignment and rotation never
+    /// move the handle. For a block reference, dragging moves the instance
+    /// **rigidly**: only the placement's translation column changes, so rotation,
+    /// scale, mirror and `block` stay bit-identical — a drag never rotates or
+    /// scales a block. It is deliberately **not**
     /// [`GripKind::Point`]: that kind is the `POINT` entity's own handle, and
-    /// sharing it would leave [`REASON_STALE_HANDLE`] unable to tell a text from a
-    /// point entity.
+    /// sharing it would leave [`REASON_STALE_HANDLE`] unable to tell a text or a
+    /// block reference from a point entity.
     Insertion,
 }
 
@@ -543,7 +612,8 @@ const QUADRANT_DIRECTIONS: [(u8, f64); 4] = [(0, 1.0), (1, 1.0), (0, -1.0), (1, 
 /// index (`u8`, so only vertices `0..=255` can be addressed); for a `SPLINE`, a
 /// `ControlPoint` `index` is the **stored** control-point index (`u8`, so only
 /// control points `0..=255` can be addressed); for a `TEXT`/`MTEXT`, `0` is the
-/// stored insertion point; for a `POINT`, `0`
+/// stored insertion point; for a block reference (`INSERT`), `0` is the placement's
+/// insertion point (the transformed block-space origin); for a `POINT`, `0`
 /// is the position. The id is a caller-held reference into geometry that may have
 /// changed since it was read, so [`apply_grip`] re-validates it against the
 /// geometry it is handed instead of trusting it.
@@ -559,330 +629,9 @@ pub struct GripId {
 pub struct Grip {
     pub id: GripId,
     /// The stored handle position (a line midpoint is the exact f64 midpoint of
-    /// the two stored endpoints).
+    /// the two stored endpoints; a block reference's insertion point is the
+    /// translation column of its placement).
     pub position: Point3,
-}
-
-/// The handles `entity` exposes in plane space.
-///
-/// `LINE` ⇒ `start`, `end` endpoints then the midpoint; `CIRCLE` ⇒ the centre
-/// then quadrants `0..=3`; `ARC` ⇒ the centre, then the start (`Endpoint` `0`)
-/// and end (`Endpoint` `1`) points; `ELLIPSE` ⇒ the centre, then quadrants
-/// `0..=3` **when the stored parameter range is a full turn** (a partial ellipse
-/// exposes the centre grip only, and its quadrant ids are
-/// [`REASON_PARTIAL_ELLIPSE`]); `POLYLINE` ⇒ one [`GripKind::Vertex`] per
-/// stored vertex, in stored order (`0..=255`; a longer polyline exposes the first
-/// 256 vertices only, because [`GripId::index`] is a `u8` — the rest are simply
-/// not addressable in this build); `SPLINE` ⇒ one [`GripKind::ControlPoint`] per
-/// stored control point, in stored order (the same `0..=255` `u8` cap: a spline
-/// with more than 256 control points exposes the first 256 and the rest are not
-/// addressable), and **no** grip at all when the stored definition is internally
-/// inconsistent (`control_points.len() != weights.len()`, or
-/// `knots.len() != control_points.len() + degree + 1`) — no marker is invented for
-/// a definition this model cannot interpret; `TEXT`/`MTEXT` ⇒ exactly one
-/// [`GripKind::Insertion`] grip (`index` 0) at the stored insertion point — the
-/// stored `position` verbatim, never offset by `h_align`/`v_align` and never
-/// rotated about it by `rotation`; `POINT` ⇒ one [`GripKind::Point`]
-/// grip. Every
-/// other geometry — including the whole refusal list in the module doc — yields
-/// an empty vector: no marker is invented for a kind this build cannot drag.
-#[must_use]
-pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
-    let id = |kind, index| GripId {
-        entity: entity.id,
-        kind,
-        index,
-    };
-    match &entity.geometry {
-        SemanticGeometry::Line { start, end } => vec![
-            Grip {
-                id: id(GripKind::Endpoint, 0),
-                position: *start,
-            },
-            Grip {
-                id: id(GripKind::Endpoint, 1),
-                position: *end,
-            },
-            Grip {
-                id: id(GripKind::Midpoint, 2),
-                position: midpoint(*start, *end),
-            },
-        ],
-        SemanticGeometry::Circle {
-            center,
-            normal,
-            radius,
-        } => {
-            let axes = plane_axes(*normal);
-            let mut grips = Vec::with_capacity(1 + QUADRANT_DIRECTIONS.len());
-            grips.push(Grip {
-                id: id(GripKind::Center, 0),
-                position: *center,
-            });
-            for (index, direction) in QUADRANT_DIRECTIONS.iter().enumerate() {
-                // `QUADRANT_DIRECTIONS` has exactly four entries, so the index
-                // always fits the documented `0..=3` range.
-                grips.push(Grip {
-                    id: id(GripKind::Quadrant, index as u8),
-                    position: quadrant_point(*center, *radius, axes, *direction),
-                });
-            }
-            grips
-        }
-        SemanticGeometry::Arc {
-            center,
-            normal,
-            radius,
-            start,
-            sweep,
-        } => {
-            let axes = plane_axes(*normal);
-            vec![
-                Grip {
-                    id: id(GripKind::Center, 0),
-                    position: *center,
-                },
-                Grip {
-                    id: id(GripKind::Endpoint, 0),
-                    position: arc_point(*center, *radius, axes, *start),
-                },
-                Grip {
-                    id: id(GripKind::Endpoint, 1),
-                    position: arc_point(*center, *radius, axes, *start + *sweep),
-                },
-            ]
-        }
-        SemanticGeometry::Ellipse {
-            center,
-            normal,
-            major_axis,
-            ratio,
-            sweep,
-            ..
-        } => {
-            let mut grips = Vec::with_capacity(1 + QUADRANT_DIRECTIONS.len());
-            grips.push(Grip {
-                id: id(GripKind::Center, 0),
-                position: *center,
-            });
-            // A partial ellipse (an elliptical arc) stores a parameter range, and
-            // its axis points need not lie on the drawn range: the centre is the
-            // only handle offered. A full ellipse whose stored frame is
-            // degenerate (`ellipse_axes` returns `None`) also offers the centre
-            // only — a quadrant marker with an underivable position is never
-            // fabricated.
-            if is_full_ellipse(*sweep) {
-                if let Some(axes) = ellipse_axes(*normal, *major_axis) {
-                    for (index, direction) in QUADRANT_DIRECTIONS.iter().enumerate() {
-                        grips.push(Grip {
-                            id: id(GripKind::Quadrant, index as u8),
-                            position: ellipse_quadrant_point(
-                                *center,
-                                *major_axis,
-                                *ratio,
-                                axes,
-                                *direction,
-                            ),
-                        });
-                    }
-                }
-            }
-            grips
-        }
-        SemanticGeometry::Polyline { points, .. } => points
-            .iter()
-            .take(MAX_GRIP_INDEX + 1)
-            .enumerate()
-            .map(|(index, position)| Grip {
-                // `index < MAX_GRIP_INDEX + 1`, so the `u8` conversion is
-                // exact (see the module doc: vertices past 255 are not
-                // addressable and are therefore not offered, never wrapped).
-                id: id(GripKind::Vertex, index as u8),
-                position: *position,
-            })
-            .collect(),
-        SemanticGeometry::Spline {
-            degree,
-            knots,
-            control_points,
-            weights,
-        } => {
-            // A definition this model cannot interpret exposes no handle at all:
-            // padding a knot/weight vector would silently rewrite the curve, and
-            // `cad-db`'s validator is the authority on shape validity.
-            if !spline_is_consistent(*degree, knots, control_points, weights) {
-                return Vec::new();
-            }
-            control_points
-                .iter()
-                .take(MAX_GRIP_INDEX + 1)
-                .enumerate()
-                .map(|(index, position)| Grip {
-                    // Same `u8` cap as the polyline vertices: control points past
-                    // 255 are not addressable and are therefore not offered.
-                    id: id(GripKind::ControlPoint, index as u8),
-                    position: *position,
-                })
-                .collect()
-        }
-        SemanticGeometry::Point(position) => vec![Grip {
-            id: id(GripKind::Point, 0),
-            position: *position,
-        }],
-        // TEXT and MTEXT are one variant (only `object.type_key` tells the DXF
-        // classes apart), so both expose the same single handle: the **stored**
-        // insertion point, verbatim. No alignment offset and no rotation is
-        // applied — the grip marks where the run is anchored.
-        SemanticGeometry::Text { position, .. } => vec![Grip {
-            id: id(GripKind::Insertion, 0),
-            position: *position,
-        }],
-        _ => Vec::new(),
-    }
-}
-
-/// The highest handle index a [`GripId`] can address: `GripId::index` is a `u8`.
-///
-/// Shared by every index-based handle family (polyline vertices, spline control
-/// points) so the `0..=255` cap has exactly one value in this module.
-const MAX_GRIP_INDEX: usize = u8::MAX as usize;
-
-/// Whether a stored spline definition is internally consistent enough to expose
-/// control-point handles for.
-///
-/// Two structural invariants, both pure length arithmetic on the stored vectors:
-///
-/// * `control_points.len() == weights.len()` — every control point carries its
-///   own weight (a non-rational B-spline stores all `1.0`, but the vector is still
-///   per control point);
-/// * `knots.len() == control_points.len() + degree + 1` — a clamped B-spline of
-///   degree `d` with `n + 1` control points has `n + d + 2` knots.
-///
-/// This is **not** shape validation: `cad-db`'s validator is the authority on what
-/// may be stored, and this model only declines to invent a handle for a definition
-/// it cannot index into. A mismatch is not repaired here (padding either vector
-/// would change the curve behind the user's back); the spline simply exposes no
-/// grip, and every control-point id against it is [`REASON_STALE_HANDLE`].
-fn spline_is_consistent(
-    degree: u32,
-    knots: &[f64],
-    control_points: &[Point3],
-    weights: &[f64],
-) -> bool {
-    if control_points.len() != weights.len() {
-        return false;
-    }
-    let expected_knots = control_points.len() + degree as usize + 1;
-    knots.len() == expected_knots
-}
-
-/// Whether a stored ellipse parameter range covers the whole curve.
-///
-/// The slack is [`ARC_SWEEP_EPSILON`], the same one the tessellator and the
-/// representation provider use to call a sweep "full", so the handle set and the
-/// drawn curve agree about which ellipses are complete.
-fn is_full_ellipse(sweep: f64) -> bool {
-    sweep.abs() >= std::f64::consts::TAU - ARC_SWEEP_EPSILON
-}
-
-/// The ellipse's own plane frame `(unit major, unit minor)`.
-///
-/// `unit_minor = normalize(cross(unit(normal), unit(major_axis)))` is the
-/// expression `cad_geometry`'s crate-private `ellipse_minor_dir` evaluates, i.e.
-/// the frame the tessellator and the representation provider draw the ellipse
-/// with. The axes are the **stored** ones; `arbitrary_axis` is only used for the
-/// radially symmetric circle/arc, where every in-plane direction is equivalent.
-///
-/// `None` when no frame can be derived: a non-finite or zero-length major axis, a
-/// non-finite normal, or a normal parallel to the major axis (`cad-db` validation
-/// refuses to store such an ellipse, so this is the corrupt case). The caller then
-/// offers no quadrant handle rather than a fabricated position.
-fn ellipse_axes(normal: Point3, major_axis: Point3) -> Option<(Point3, Point3)> {
-    let major_len = length(major_axis);
-    if !major_len.is_finite() || major_len <= 0.0 {
-        return None;
-    }
-    let unit_major = scale(major_axis, 1.0 / major_len);
-    let minor = cross(normalize(normal), unit_major);
-    let minor_len = length(minor);
-    // `1e-9` is the orthogonality slack `ellipse_minor_dir` uses before its
-    // fallback, and `cad-db` validation refuses a stored ellipse below it.
-    if !minor_len.is_finite() || minor_len < 1e-9 {
-        return None;
-    }
-    Some((unit_major, scale(minor, 1.0 / minor_len)))
-}
-
-/// One ellipse axis handle position: the tessellator's
-/// `center + major_axis * cos t + minor * sin t` at `t = 0, π/2, π, 3π/2`, term
-/// for term — `centre ± major_axis` for the major axis and
-/// `centre ± (|major_axis| * |ratio|) * unit_minor` for the minor axis.
-fn ellipse_quadrant_point(
-    center: Point3,
-    major_axis: Point3,
-    ratio: f64,
-    axes: (Point3, Point3),
-    direction: (u8, f64),
-) -> Point3 {
-    let (which, sign) = direction;
-    let vector = if which == 0 {
-        major_axis
-    } else {
-        scale(axes.1, length(major_axis) * ratio.abs())
-    };
-    add(center, scale(vector, sign))
-}
-
-/// The circle/arc plane frame: the `(ax, ay)` of the shared arbitrary-axis frame.
-///
-/// `ax` and `ay` are orthonormal and lie in the plane whose normal is `normal`;
-/// they are the same axes the tessellator, the representation provider and the
-/// importer measure circle/arc angles in.
-fn plane_axes(normal: Point3) -> (Point3, Point3) {
-    let (ax, ay, _) = arbitrary_axis(normal);
-    (ax, ay)
-}
-
-/// The exact f64 midpoint of two stored points: `(start + end) * 0.5`.
-fn midpoint(start: Point3, end: Point3) -> Point3 {
-    scale(add(start, end), 0.5)
-}
-
-/// One quadrant handle position: `centre + radius * (sign * axis)`.
-fn quadrant_point(
-    center: Point3,
-    radius: f64,
-    axes: (Point3, Point3),
-    direction: (u8, f64),
-) -> Point3 {
-    let (which, sign) = direction;
-    let axis = if which == 0 { axes.0 } else { axes.1 };
-    add(center, scale(axis, sign * radius))
-}
-
-/// The distance from `center` to `to`, **projected into the plane** spanned by
-/// the orthonormal in-plane axes `axes`.
-///
-/// This is the circle-quadrant radius rule: the out-of-plane component of
-/// `to - center` is discarded, so a drag can never tilt the circle.
-fn in_plane_distance(center: Point3, axes: (Point3, Point3), to: Point3) -> f64 {
-    let offset = sub(to, center);
-    dot(offset, axes.0).hypot(dot(offset, axes.1))
-}
-
-/// One point on the arc: `centre + radius * (cos(angle) * ax + sin(angle) * ay)`.
-///
-/// The expression is the tessellator's, term for term, so an arc endpoint grip
-/// sits on exactly the vertex the display draws for the same stored `start` /
-/// `sweep` (no second angle convention, no rounding).
-fn arc_point(center: Point3, radius: f64, axes: (Point3, Point3), angle: f64) -> Point3 {
-    add(
-        center,
-        add(
-            scale(axes.0, angle.cos() * radius),
-            scale(axes.1, angle.sin() * radius),
-        ),
-    )
 }
 
 /// Hit-test a world position against the handles of `entities`.
@@ -982,6 +731,20 @@ pub fn grip_hit_planar<'a>(
 
 fn is_finite(point: Point3) -> bool {
     point.x.is_finite() && point.y.is_finite() && point.z.is_finite()
+}
+
+/// Whether every coefficient of a stored placement is finite.
+///
+/// The block-reference drag rule rewrites the translation column only, so a
+/// non-finite coefficient of the stored transform would be carried straight into
+/// the staged entity; `cad-db`'s validator refuses a non-finite insert transform,
+/// so the drag refuses it by name ([`REASON_DEGENERATE_TRANSFORM`]) instead.
+fn transform_is_finite(transform: &cad_domain::Transform3) -> bool {
+    transform
+        .matrix
+        .iter()
+        .flatten()
+        .all(|cell| cell.is_finite())
 }
 
 fn distance(a: Point3, b: Point3) -> f64 {

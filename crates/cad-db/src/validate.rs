@@ -28,17 +28,47 @@ use crate::math::{cross, length, transform_is_finite};
 /// nominal zero is rejected.
 pub const MIN_GEOMETRY_EXTENT: f64 = 1e-12;
 
+/// Stable reason code: a spline's **non-empty** knot vector has a length other
+/// than `control_points.len() + degree + 1`, so control points cannot be indexed
+/// into the knot vector. An empty knot vector is the sanctioned "clamped uniform"
+/// shorthand and is exempt (see [`validate_geometry`]).
+pub const REASON_SPLINE_KNOT_COUNT: &str = "spline.knot_count";
+
+/// Stable reason code: a spline's weight vector is non-empty but its length is
+/// not `control_points.len()`. An empty weight vector is the sanctioned
+/// "all ones" shorthand and is exempt (see [`validate_geometry`]).
+pub const REASON_SPLINE_WEIGHT_COUNT: &str = "spline.weight_count";
+
+/// Stable reason code: a spline's knot vector decreases somewhere, so the
+/// parameter domain is not a subdivision of one interval.
+pub const REASON_SPLINE_KNOT_ORDER: &str = "spline.knot_order";
+
 /// Validate a [`SemanticGeometry`] before it is written.
 ///
 /// Rejects non-finite coordinates and degenerate/unsupported-for-write cases:
 /// a zero-length line, a polyline with fewer than two points, a non-positive
 /// circle/arc radius, a collapsed ellipse axis, a spline with too few control
-/// points, a mesh with out-of-range or repeated triangle indices, a text run
-/// with a non-positive height, and a singular insert transform.
+/// points or an inconsistent knot/weight definition, a mesh with out-of-range or
+/// repeated triangle indices, a text run with a non-positive height, and a
+/// singular insert transform.
 ///
 /// `Opaque` payloads and `Compound` are accepted recursively: an opaque entity
 /// has no numeric content this build can judge, and rejecting it would block a
 /// legitimate style edit of an imported proxy.
+///
+/// The spline arm additionally enforces the structural relations of a NURBS
+/// definition (see [`REASON_SPLINE_KNOT_COUNT`], [`REASON_SPLINE_WEIGHT_COUNT`])
+/// and knot non-decreasing order ([`REASON_SPLINE_KNOT_ORDER`]). Both length
+/// relations apply to a **non-empty** vector only: `knots: []` is the sanctioned
+/// "clamped uniform" shorthand produced by the MULTILEADER leader-path
+/// constructors and expanded by `cad-geometry`'s tessellator, and `weights: []` is
+/// the sanctioned "all ones" shorthand expanded by `cad-geometry::NurbsCurve::new`.
+/// `cad-app`'s grip model (`cad-app/src/grips/mod.rs`, `spline_is_consistent`)
+/// already answers "no control-point grips" for a definition it cannot index into
+/// rather than guessing a repair; this validation makes that inconsistent state
+/// unrepresentable through the database. The grip-side check stays as defence in
+/// depth: it also guards geometry that never went through a validated write
+/// (import build, derived display) and it refuses per drag instead of per write.
 pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
     let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
     let finite_vec = |v: &Point3| finite(*v);
@@ -158,6 +188,80 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             }
             if !weights.iter().all(|w| w.is_finite() && *w > 0.0) {
                 return Err(degenerate("spline has a non-positive or non-finite weight"));
+            }
+            // Structural NURBS relations. Both are pure length arithmetic on the
+            // stored vectors, and both are required by every consumer that
+            // indexes a control point together with its knot span and weight
+            // (`cad-geometry::NurbsCurve`, `cad-app`'s control-point grips). A
+            // definition that violates either cannot be evaluated or edited
+            // faithfully, so it is refused here instead of being padded,
+            // uniformised or otherwise repaired.
+            //
+            // Two **empty** vectors are sanctioned shorthand rather than malformed
+            // data, and each is exempted only in its own respect:
+            //
+            // * `knots: []` means "clamped uniform". Two shipped constructors
+            //   produce it deliberately — `cad-domain/src/multileader.rs`
+            //   (`path_geometry`) and `cad-import-acadrust/src/dimension/
+            //   multileader.rs` (`multileader_path`) — for a MULTILEADER leader
+            //   path of type Spline. `cad-geometry`'s `tessellate_spline` expands
+            //   it: `NurbsCurve::new` rejects the wrong-length vector, and the
+            //   documented fallback then supplies
+            //   `clamped_uniform_knots(n, degree.min(n - 1))` (the behaviour its own
+            //   doc comment calls the "clamped-uniform convention"; for every
+            //   producer here `degree <= n - 1`, so the degree is preserved).
+            //   Refusing the empty vector would make an *imported* MULTILEADER
+            //   unwritable, since this validator recurses into
+            //   `MultiLeader::display()`.
+            // * `weights: []` means "all ones": `NurbsCurve::new` expands it to
+            //   `1.0` per control point, and the same constructors store it.
+            //
+            // So the length relations apply to the **non-empty** vector only; the
+            // empty form inherits exactly the semantics the consumer already
+            // implements (clamped uniform knots, unit weights) and nothing is
+            // invented or filled in here. A *non-empty* vector of the wrong length
+            // is still refused, and the two exemptions never cover for each other:
+            // each vector is judged on its own.
+            let n = control_points.len();
+            let expected_knots = n + *degree as usize + 1;
+            if !knots.is_empty() && knots.len() != expected_knots {
+                return Err(degenerate_reason(
+                    REASON_SPLINE_KNOT_COUNT,
+                    &format!(
+                        "a degree {degree} spline with {n} control points needs \
+                         {expected_knots} knots (control points + degree + 1), but stores {}",
+                        knots.len()
+                    ),
+                ));
+            }
+            if !weights.is_empty() && weights.len() != n {
+                return Err(degenerate_reason(
+                    REASON_SPLINE_WEIGHT_COUNT,
+                    &format!(
+                        "a spline with {n} control points needs {n} weights (one per control \
+                         point), but stores {}",
+                        weights.len()
+                    ),
+                ));
+            }
+            // The existing arm already reasons about knots (they must be finite),
+            // so the order relation belongs here too: `NurbsCurve::new` refuses a
+            // decreasing vector, and a decreasing vector would make the
+            // parameter domain meaningless rather than merely unusual. An empty
+            // vector has no window to compare and is trivially ordered, so the
+            // clamped-uniform shorthand passes; the `position` and indexing below
+            // only ever run on a non-empty vector.
+            if let Some(index) = knots.windows(2).position(|w| w[1] < w[0]) {
+                return Err(degenerate_reason(
+                    REASON_SPLINE_KNOT_ORDER,
+                    &format!(
+                        "spline knots must be non-decreasing, but knot {index} ({}) is followed \
+                         by knot {} ({})",
+                        knots[index],
+                        index + 1,
+                        knots[index + 1]
+                    ),
+                ));
             }
         }
         SemanticGeometry::Point(p) => {
@@ -441,6 +545,16 @@ pub fn validate_entity(
 
 fn degenerate(message: &str) -> CadError {
     CadError::Invariant(format!("invalid entity geometry: {message}"))
+}
+
+/// A degenerate-geometry refusal that carries a stable reason code.
+///
+/// The shape is `<category>: <code>: <detail>`, the same "code then colon then
+/// message" form the layer refusal codes use (`layer.name_empty`,
+/// `layer.duplicate_name`): the code is the machine-stable part, the detail names
+/// the actual values so a caller can explain the refusal without guessing.
+fn degenerate_reason(code: &str, detail: &str) -> CadError {
+    CadError::Invariant(format!("invalid entity geometry: {code}: {detail}"))
 }
 
 #[cfg(test)]

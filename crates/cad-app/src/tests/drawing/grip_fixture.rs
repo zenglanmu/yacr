@@ -22,15 +22,36 @@ pub(super) const ELLIPSE: u128 = 5;
 pub(super) const ARC: u128 = 6;
 /// The `POLYLINE` whose `Vertex` grips are dragged here.
 pub(super) const POLYLINE: u128 = 7;
-/// A geometry with **no** grip model at all (an `INSERT`: an instance transform is
-/// not an entity handle), used for the `grip.unsupported_kind` refusal now that
-/// `CIRCLE`, `ARC`, `ELLIPSE`, `POLYLINE` and `SPLINE` all have handles.
-pub(super) const INSERT: u128 = 8;
+/// A geometry with **no** grip model at all (a `MULTILEADER`: its annotation text is
+/// not exposed through a text insertion-point handle here), used for the
+/// `grip.unsupported_kind` refusal now that `CIRCLE`, `ARC`, `ELLIPSE`,
+/// `POLYLINE`, `SPLINE`, `TEXT` and `INSERT` all have handles.
+pub(super) const MULTILEADER: u128 = 8;
 /// The `SPLINE` whose `ControlPoint` grips are dragged here.
 pub(super) const SPLINE: u128 = 9;
 /// The `TEXT` whose `Insertion` grip is dragged here (`Insertion` `0`; MTEXT is
 /// the same variant, so one text fixture covers both classes).
 pub(super) const TEXT: u128 = 10;
+/// The block reference whose `Insertion` grip is dragged here: a **rotated and
+/// non-uniformly scaled** placement, so "only the translation column moved" is a
+/// real bit comparison rather than a property of an axis-aligned matrix.
+pub(super) const INSERT: u128 = 11;
+
+/// The fixture block reference's placement: translation `(7, -3, 2)`, a `0.4` rad
+/// rotation about Z and a non-uniform scale `(2, 3, 4)` — the importer's own
+/// composition order (`translate * rotate * scale`, base point already folded in),
+/// so the insertion point of the fixture is exactly `INSERT_AT`.
+pub(super) const INSERT_AT: Point3 = Point3 {
+    x: 7.0,
+    y: -3.0,
+    z: 2.0,
+};
+pub(super) const INSERT_ROTATION: f64 = 0.4;
+pub(super) const INSERT_SCALE: Point3 = Point3 {
+    x: 2.0,
+    y: 3.0,
+    z: 4.0,
+};
 
 /// The fixture text's stored insertion point: non-round coordinates, so "only
 /// `position` moved" is a real bit comparison. Non-default alignment, a non-zero
@@ -90,8 +111,9 @@ pub(super) const POINT_AT: Point3 = Point3 {
 /// A drawing with a `LINE` (id 1), a `POINT` (id 2), a `CIRCLE` (id 3), a
 /// paper-space `LINE` (id 4, the non-addressable target), an `ELLIPSE` (id 5,
 /// axis/centre drags), an `ARC` (id 6, endpoint drags), a `POLYLINE` (id 7, vertex
-/// drags), an `INSERT` (id 8, the unsupported-kind target), a `SPLINE` (id 9,
-/// control-point drags) and a `TEXT` (id 10, the insertion-point drag). Nothing is
+/// drags), a `MULTILEADER` (id 8, the unsupported-kind target), a `SPLINE` (id 9,
+/// control-point drags), a `TEXT` (id 10, the insertion-point drag) and an `INSERT`
+/// (id 11, the block reference's insertion-point drag). Nothing is
 /// created through a command, so the
 /// undo stack starts empty and a drag's undo depth is unambiguous.
 pub(super) fn grip_app() -> (Application, SessionState) {
@@ -175,15 +197,8 @@ pub(super) fn grip_app() -> (Application, SessionState) {
         6,
     ))
     .unwrap();
-    b.insert_entity(ent(
-        INSERT,
-        SemanticGeometry::Insert {
-            block: BlockId(0),
-            transform: Transform3::translation(p3(5.0, 5.0, 0.0)),
-        },
-        7,
-    ))
-    .unwrap();
+    b.insert_entity(ent(MULTILEADER, super::super::grips::multi_leader(), 7))
+        .unwrap();
     // A clamped cubic: 4 control points need `4 + 3 + 1 = 8` knots.
     b.insert_entity(ent(
         SPLINE,
@@ -221,6 +236,18 @@ pub(super) fn grip_app() -> (Application, SessionState) {
         9,
     );
     b.insert_entity(text).unwrap();
+    // The block-reference fixture: `translate(7, -3, 2) * rotate(0.4 about Z) *
+    // scale(2, 3, 4)`, i.e. the importer's placement order with the block base
+    // point already folded in, so the reference's insertion point is `INSERT_AT`.
+    b.insert_entity(ent(
+        INSERT,
+        SemanticGeometry::Insert {
+            block: BlockId(3),
+            transform: insert_transform(),
+        },
+        10,
+    ))
+    .unwrap();
     let drawing = b.finish().unwrap();
 
     let mut app = Application::new();
@@ -239,6 +266,32 @@ pub(super) fn grip_app() -> (Application, SessionState) {
         Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
     );
     (app, SessionState::new(DocumentId(1), AppMode::Work))
+}
+
+/// The fixture block reference's placement, composed the way the importer composes
+/// one: translation, then rotation about Z, then non-uniform scale (the block base
+/// point is already folded in, so the block-space origin lands on [`INSERT_AT`]).
+pub(super) fn insert_transform() -> Transform3 {
+    let (sin, cos) = INSERT_ROTATION.sin_cos();
+    let rotate = Transform3 {
+        matrix: [
+            [cos, -sin, 0.0, 0.0],
+            [sin, cos, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    };
+    let scale = Transform3 {
+        matrix: [
+            [INSERT_SCALE.x, 0.0, 0.0, 0.0],
+            [0.0, INSERT_SCALE.y, 0.0, 0.0],
+            [0.0, 0.0, INSERT_SCALE.z, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    };
+    Transform3::translation(INSERT_AT)
+        .matrix_mul(&rotate)
+        .matrix_mul(&scale)
 }
 
 pub(super) fn grip_id(entity: u128, kind: GripKind, index: u8) -> GripId {
@@ -381,6 +434,25 @@ pub(super) fn text_parts(
         ),
         other => panic!("entity {entity} is not a TEXT: {other:?}"),
     }
+}
+
+/// The stored `INSERT` fields of `entity` (`block, transform`).
+pub(super) fn insert_parts(app: &Application, entity: u128) -> (BlockId, Transform3) {
+    match geometry_of(app, entity) {
+        SemanticGeometry::Insert { block, transform } => (block, transform),
+        other => panic!("entity {entity} is not an INSERT: {other:?}"),
+    }
+}
+
+/// The 3x3 linear part of a placement, as raw bits, so "the linear part is
+/// bit-identical" is a real comparison.
+pub(super) fn linear_bits(transform: &Transform3) -> [[u64; 3]; 3] {
+    let m = transform.matrix;
+    [
+        [m[0][0].to_bits(), m[0][1].to_bits(), m[0][2].to_bits()],
+        [m[1][0].to_bits(), m[1][1].to_bits(), m[1][2].to_bits()],
+        [m[2][0].to_bits(), m[2][1].to_bits(), m[2][2].to_bits()],
+    ]
 }
 
 /// Assert a refusal with the exact stable reason code, and that the refusal

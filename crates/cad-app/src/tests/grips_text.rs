@@ -19,7 +19,7 @@
 
 use super::*;
 
-use super::grips::{assert_bits_eq, assert_reason, ent, grip_id, p3};
+use super::grips::{assert_bits_eq, assert_reason, ent, grip_id, multi_leader, p3};
 use crate::grips::{
     apply_grip, grip_hit, grip_hit_planar, grips_for_entity, Grip, GripId, GripKind,
     REASON_NON_FINITE_TARGET, REASON_STALE_HANDLE, REASON_ZERO_DISPLACEMENT,
@@ -479,18 +479,14 @@ fn an_exact_tie_at_a_shared_point_goes_to_the_first_candidate() {
 
 #[test]
 fn a_grip_less_entity_still_exposes_nothing_while_the_text_is_hittable() {
-    // An INSERT has no handle (its instance transform is not an entity handle), so
-    // it is skipped even when the query sits on its translation, while the text's
-    // insertion grip is the nearest real candidate.
-    let insert = ent(
-        79,
-        SemanticGeometry::Insert {
-            block: BlockId(0),
-            transform: Transform3::translation(p3(0.0, 0.0, 0.0)),
-        },
-    );
+    // A MULTILEADER has no handle (its annotation text is not exposed through a text
+    // insertion-point handle here), so it is skipped even when the query sits on one
+    // of its leader vertices, while the text's insertion grip is the nearest real
+    // candidate. (`INSERT` used to be this fixture; it now has its own
+    // insertion-point grip, pinned in `tests::grips_insert`.)
+    let leader = ent(79, multi_leader());
     let text = ent(80, plain(p3(0.25, 0.0, 0.0)));
-    assert!(grips_for_entity(&insert).is_empty());
+    assert!(grips_for_entity(&leader).is_empty());
     assert_eq!(
         grips_for_entity(&text),
         vec![Grip {
@@ -498,6 +494,6 @@ fn a_grip_less_entity_still_exposes_nothing_while_the_text_is_hittable() {
             position: p3(0.25, 0.0, 0.0),
         }]
     );
-    let hit = grip_hit([insert, text].iter(), p3(0.0, 0.0, 0.0), 1.0).expect("the text handle");
+    let hit = grip_hit([leader, text].iter(), p3(0.0, 0.0, 0.0), 1.0).expect("the text handle");
     assert_eq!(hit.id, grip_id(80, GripKind::Insertion, 0));
 }

@@ -491,6 +491,68 @@ fn text_insertion_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
 }
 
 #[test]
+fn insert_insertion_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
+    let (mut app, mut session) = grip_app();
+    let revision = revision_of(&app);
+    let before = geometry_of(&app, INSERT);
+    let (block, transform) = insert_parts(&app, INSERT);
+    let origin = transform.apply_point(p3(0.0, 0.0, 0.0));
+    assert_eq!(origin, INSERT_AT, "the fixture stores the documented point");
+
+    let target = p3(origin.x + 7.5, origin.y - 4.25, origin.z + 2.0);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::GripStretch,
+        drag(INSERT, GripKind::Insertion, 0, target),
+    )
+    .unwrap();
+
+    // One entity update, in one transaction, with one undo entry.
+    let changes = outcome.changes.as_ref().expect("a ChangeSet is published");
+    assert_eq!(changes.changes.len(), 1, "exactly one entity update");
+    assert_eq!(outcome.objects, vec![ObjectId(INSERT)]);
+    assert_eq!(revision_of(&app), Revision(revision.0 + 1));
+    assert_eq!(undo_depth(&app), 1);
+
+    // Only the translation column moved: the whole 3x3 linear part (rotation and
+    // the non-uniform scale), row 3 and the block reference are bit-identical, and
+    // the insertion point is the target exactly.
+    let (block_after, transform_after) = insert_parts(&app, INSERT);
+    assert_eq!(block_after, block, "the block reference is untouched");
+    assert_eq!(
+        linear_bits(&transform_after),
+        linear_bits(&transform),
+        "the rotation/scale part is bit-identical"
+    );
+    assert_eq!(
+        transform_after.matrix[3], transform.matrix[3],
+        "row 3 of the placement is untouched"
+    );
+    assert_eq!(
+        transform_after.apply_point(p3(0.0, 0.0, 0.0)),
+        target,
+        "the insertion point is the drag target"
+    );
+
+    // Undo restores the stored geometry exactly (same `f64` bits, not a
+    // re-derived approximation).
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(
+        geometry_of(&app, INSERT),
+        before,
+        "undo restores the insert"
+    );
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
 fn point_grip_drag_moves_the_position_in_one_undo_step() {
     let (mut app, mut session) = grip_app();
     let outcome = execute(
@@ -656,15 +718,15 @@ fn ellipse_quadrant_grip_drag_is_one_change_one_undo_step_and_undoes_exactly() {
 fn a_geometry_without_a_grip_model_is_refused_as_an_unsupported_kind() {
     let (mut app, mut session) = grip_app();
     let revision = revision_of(&app);
-    // An INSERT exposes no grip at all (its instance transform is not an entity
-    // handle; `SPLINE` used to be this fixture but now has control-point grips),
-    // so any id naming one is the kind refusal — even though the kind/index would
-    // also be "stale" against it.
+    // A MULTILEADER exposes no grip at all (its annotation text is not addressed
+    // through a text insertion-point handle here), so any id naming one is the kind
+    // refusal — even though the kind/index would also be "stale" against it.
+    // (`SPLINE` used to be this fixture, then `INSERT`; both now have handles.)
     let error = execute(
         &mut app,
         &mut session,
         CommandId::GripStretch,
-        drag(INSERT, GripKind::Endpoint, 0, p3(1.0, 0.0, 0.0)),
+        drag(MULTILEADER, GripKind::Endpoint, 0, p3(1.0, 0.0, 0.0)),
     )
     .unwrap_err();
     refused(error, REASON_UNSUPPORTED_KIND, true);

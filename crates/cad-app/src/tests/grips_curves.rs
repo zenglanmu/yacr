@@ -9,7 +9,7 @@
 
 use super::*;
 
-use super::grips::{assert_bits_eq, assert_reason, ent, grip_id, p3, reason};
+use super::grips::{assert_bits_eq, assert_reason, ent, grip_id, multi_leader, p3, reason};
 use crate::grips::{
     apply_grip, grip_hit, grip_hit_planar, grips_for_entity, Grip, GripKind, REASON_DEGENERATE_ARC,
     REASON_DEGENERATE_RADIUS, REASON_STALE_HANDLE, REASON_UNSUPPORTED_KIND,
@@ -737,21 +737,17 @@ fn a_non_finite_target_is_refused_before_the_radius_rule() {
 
 #[test]
 fn a_geometry_with_no_grip_model_still_names_its_class() {
-    // `INSERT` stays on the refusal list: no grip model at all. (`SPLINE` used to
-    // be this fixture; it now has control-point grips, pinned in
-    // `tests::grips_spline`.)
-    let insert = SemanticGeometry::Insert {
-        block: BlockId(0),
-        transform: Transform3::translation(p3(5.0, 5.0, 0.0)),
-    };
+    // `MULTILEADER` stays on the refusal list: no grip model at all. (`SPLINE` used
+    // to be this fixture, then `INSERT`; both now have handles, the insert's pinned
+    // in `tests::grips_insert`.)
     let error = apply_grip(
-        &insert,
+        &multi_leader(),
         &grip_id(33, GripKind::Center, 0),
         p3(1.0, 1.0, 0.0),
     )
-    .expect_err("an INSERT exposes no grip model");
+    .expect_err("a MULTILEADER exposes no grip model");
     assert_reason(error.clone(), REASON_UNSUPPORTED_KIND);
-    assert!(reason(error).contains("AcDbBlockReference"));
+    assert!(reason(error).contains("AcDbMultiLeader"));
 }
 
 // ---------------------------------------------------------------------------

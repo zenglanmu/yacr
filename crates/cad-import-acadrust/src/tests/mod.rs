@@ -11,6 +11,7 @@ mod basics;
 mod dimension;
 mod dxf;
 mod hatch;
+mod hatch_pattern_table;
 mod insert;
 mod layer_attributes;
 mod mesh;

@@ -124,6 +124,7 @@ mod drawing_space;
 mod grips;
 mod grips_curves;
 mod grips_ellipse;
+mod grips_insert;
 mod grips_polyline;
 mod grips_spline;
 mod grips_text;

@@ -205,7 +205,7 @@ impl<'a> ImporterBuilder<'a> {
                 self.proxy_geometry(x.class_name(), common, None)
             }
             EntityType::Extended(x) => self.extended_semantics(x),
-            EntityType::Hatch(h) => Self::hatch_geometry(h),
+            EntityType::Hatch(h) => self.hatch_semantics(h),
             // A DIMENSION becomes a `SemanticGeometry::Dimension`: with a
             // pre-rendered `*D...` block its display is the expanded picture,
             // otherwise it is our synthesis (ADR 0017 A.6).
