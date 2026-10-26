@@ -9,7 +9,9 @@
 > **迁移状态（2026-10-16，2026-10-23 增补）**：桌面 UI 已由 Slint 迁移为 **React + Tauri 原生宿主**
 > （`apps/app-linux`，二进制 `yacr`）；`cad-ui-slint` 与 Slint 依赖已删除。2026-10-23 起合成方向为
 > **DOM/WebView 在上、CAD 原生子表面在下**（ADR 0023），React UI 归并到唯一包 `apps/desktop-ui`，
-> Tauri 薄壳下沉到新共享层 `cad-desktop-shell`；**X11/XWayland 显式 Unsupported**（退出码 4），
+> Tauri 薄壳下沉到新共享层 `cad-desktop-shell`；**X11/XWayland 自 2026-10-24 起走 DOM-canvas**
+> （wasm/WebGL2 CAD 会话画进 DOM `<canvas>`，ADR 0024；仅当 WebGL2 不可用才输出
+> `yacr: unsupported-runtime: webgl2` + 退出码 6，旧「`unsupported-backend: x11` + 退出码 4」为历史合同），
 > Windows 宿主已实现但视觉未验证。本文只描述**当前树中真实存在**的 crate 与契约。旧 Slint 合成
 > （ADR 0002/0003）与实验宿主（ADR 0006）保留为历史记录，见各 ADR 顶部横幅；旧宿主验证证据见
 > `docs/validation*.md`（历史，含 NOT RUN 边界）。
@@ -32,7 +34,10 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   命令行 `SWITCH2D3D`、3D 下主键拖动 orbit（`docs/view-3d.md`），并非核心 NotImplemented；
   边界见 `docs/compatibility.md`、
   `docs/view-3d.md`、`docs/kernel-acis.md`；
-- 当前 GUI 仅 `OPEN`/`FIT` + 原生导航接线；其余命令经真实漏斗**显式拒绝**，不空成功。
+- ~~当前 GUI 仅 `OPEN`/`FIT` + 原生导航接线；其余命令经真实漏斗显式拒绝，不空成功。~~
+  **2026-10-26 更正（原句停在 2026-10-23 DOM-on-top 之前，已过期）**：绘制/编辑、测量、图层与属性
+  读写命令均经真实漏斗接线，逐条边界以 `docs/compatibility.md` 为准；宿主侧**保存/出图/导出**在
+  Linux 宿主仍显式 `Unsupported`。payload 缺失、Viewer 模式、未支持几何一律**显式拒绝**，绝不空成功。
 
 > 2026-10-05 变更：用户批注子系统整体移除（提交 `0120d09`），`cad-annotations` crate
 > 不再存在，F07/F08/F09 退出产品范围。2026-10-16 变更：Slint 桌面 UI 退役，见 ADR 0010。
@@ -119,12 +124,13 @@ traits 是契约草案（0.1），实现前可通过 ADR 修正不足，不代�
 - **合成/布局契约**：`.native-input` CAD 分区始终挂载并上报 `getBoundingClientRect()`（CSS px + DPR），
   宿主 `LayoutTracker` 据此更新 surface metrics——这是滚轮缩放锚定光标的前提。**生产透明不变量**：
   `.shell`/`.workspace`/`.workspace__canvas` 在 CAD 矩形内不得涂不透明底色（有结构性回归测试）。
-- **平台范围**：**原生 Wayland** 是受支持的 Linux 后端；X11/XWayland 被拒绝；Windows 宿主已实现
-  （Tier 0 编译 + Wine 拒绝 smoke，视觉 **PENDING user real-Windows spike**）；macOS/Android/Web 是
-  显式 NOT IMPLEMENTED 占位。
-- **支持范围**：仅 **OPEN / FIT** 接线到真实漏斗；其余 UI 控件显式禁用并标注原因；原生导航按
-  实际源码能力支持（缩放/平移/fit）。**不新增投机 IPC**；需要 payload 的命令经真实漏斗显式拒绝，
-  绝不空成功。**不是完整 CAD 产品**。
+- **平台范围**（2026-10-26 更正）：**原生 Wayland** 是唯一生产 Linux 后端；**X11/XWayland 走
+  DOM-canvas**（ADR 0024，wasm/WebGL2 在 DOM `<canvas>`，WebGL2 缺失才拒绝 + 退出码 6）；Windows 宿主
+  已实现（Tier 0 编译 + Wine 拒绝 smoke，视觉 **PENDING user real-Windows spike**）；macOS/Android 是
+  显式 NOT IMPLEMENTED 占位；Web 的 wasm CAD 会话已实现，其 host target 仍是 NOT IMPLEMENTED 空壳。
+- **支持范围**：命令面**不以 OPEN/FIT 为界**（见上一条更正），以 `docs/compatibility.md` 与宿主能力
+  布尔为准；未接线的 UI 控件显式禁用并标注原因；原生导航按实际源码能力支持（缩放/平移/fit）。
+  **不新增投机 IPC**；需要 payload 的命令经真实漏斗显式拒绝，绝不空成功。**不是完整 CAD 产品**。
 - **不变量不变**：单 presenter per drawable、renderer-only wgpu、db 唯一权威、无整幅回读；
   overlay 后缀**不再截断**（2026-10-25 更正）：新输入未提交时呈现完整 resident 场景并以
   `FrameCompleteness::PendingOverlayInputs` 显式标记（非静默）；实体 flags 经独立 catch-up 增量。

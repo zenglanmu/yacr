@@ -61,6 +61,22 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | 天正/探索者代理 | 实现(仅公开缓存记录) | 仅 FillOff/UnicodeText 有证据 | 依解码结果 | 实现 | 标记缓存几何 |
 | 布局 / 视口 | 实现(矩形裁剪/比例) | 复杂裁剪标记部分 | 未装配纸空间渲染 | 部分 | 纸空间测量显式禁用 |
 
+### 测量命令与 §3.3 的逐条对应（2026-10-26 对账补齐）
+
+`spec §3.3` 的测量条款此前只有零散行，**没有**逐条「要求 ↔ 实现」对照，读表会误判。按源码与契约测试
+（非像素证据）对账如下：
+
+| §3.3 条款 | 当前实现 | 证据 / 边界 |
+|---|---|---|
+| 自交多边形面积「拒绝或明确规定算法」 | **拒绝**（不返回数字） | `crates/cad-geometry/src/area.rs:73`（`self_intersects` 判定）→ `AreaError::SelfIntersecting`；`crates/cad-measure/src/engine.rs:100-111` 映射为 `InvalidInput("area rejected: …")`；测试见 `docs/validation.md:149` |
+| 三点角度 | **实现**（顶点 = 第 2 点，按活动空间/工作平面求角） | `crates/cad-measure/src/engine.rs:91-99`（`Angle3Points` + `angle_at_vertex`）；命令面 `MEASUREANGLE` |
+| 纸空间 / 视口反变换 | 纸面直接测量；`ViewportModel` **需有效反变换**，否则**禁用**模型测量；纸空间 `ANGLE` 显式拒绝 | `crates/cad-app/src/space.rs:52-116`、`crates/cad-measure/src/engine.rs:138-141` |
+| 显示 LOD 不影响计算 / 代理标记缓存几何 | 实现（SPLINE 解析/采样与显示 LOD 解耦；天正代理标缓存几何） | 见上表 SPLINE 行与「天正/探索者代理」行 |
+| **源单位未知 → 显示「图纸单位」** | **未实现（与 spec 偏离；TS 侧注释明写为有意选择）**：测量回显 `unit: null` ⇒ UI **不加单位后缀**，用户看不到「图纸单位」 | `crates/cad-host/src/command_log.rs:183-192`（`DrawingUnits → None`）、`apps/desktop-ui/src/commands/command-log.ts:135-143`（`displayUnit`/`areaUnit` 对 null 返回 null，`:139` 注释明写 *drawing units stay unit-less*）、`:218,222`；i18n 键 `units.unknown`（`zh-CN.json:367` / `en.json:367`）**无生产消费者**（仅 `crates/cad-ui-core/src/i18n.rs:730-739` 测试与迁移守卫夹具引用）。`docs/handoff.md`「接线验收」里「未知源单位显示图纸单位」据此为**未落地验收项**，不是现状 |
+
+> 该偏离**不得**被写成「已满足规范」；补文案属代码改动（消费 `units.unknown` 或写 `DrawingUnits`
+> 标签），不在本轮文档对账范围内。
+
 ### ACIS 实体显示状态（3DSOLID / BODY / REGION / SURFACE，2026-10-21：**已接线**）
 
 这些实体**现在会画**：导入期用 `cad-kernel-adapter` 的离散器把 SAT/SAB 转成**中性网格**，
@@ -186,6 +202,14 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 `cad-app` 现提供一组**真实、事务化**的绘制/编辑命令（均 work-only，Viewer 由命令层显式拒绝；
 每条命令一次事务、一步撤销，失败不改任何状态、也不记历史）：
 
+> **授权口径（2026-10-26 补齐，此前缺失）**：本节与下方「创建命令」的**编辑/创建命令族不在 spec
+> 授权范围内**。规范在初期范围里明确「仅测量及其管理，不修改 DWG 原始图元」「不允许原图修改命令」
+> 「不实现 DWG 回写、原始实体移动/删除/修改」，完整编辑亦被排除在初期之外。因此 MOVE/COPY/ERASE/
+> TRIM/EXTEND/ROTATE/SCALE/MIRROR/OFFSET/CLIPBOARD/MATCHPROP、各类创建命令、夹点拖拽
+> **全部是项目自选范围**：行为选择标为**我们的选择**，不得表述为「符合规范」。与 DIMENSION 创建行
+> （「创建无 spec 授权」）同一口径。这些命令**只改内存文档**：`SAVE` 仍是有损 **DXF 另存**，
+> **没有任何 DWG 回写**。
+
 | 命令 | 能力 | 诚实边界 |
 |---|---|---|
 | LINE / CIRCLE / ARC | 创建（点捕获或几何直通） | 退化/共线/非有限输入显式拒绝 |
@@ -261,7 +285,9 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 
 - **证据范围**：上述表格是**契约/场景**证据，不等于真实图纸兼容性。Linux 桌面宿主（React/Tauri）
   另有**真实硬件 GPU** 有界证据（Vulkan / Quadro P620 / X11 —— **CAD-on-top 时代**证据；
-  2026-10-23 起 X11 被显式拒绝，勿当作当前后端能力）：打开与渲染、悬停、框选（含橡皮筋像素判据）、
+  2026-10-23 起原生子表面路径在 X11 上被拒绝，**2026-10-24 起 X11 改走 DOM-canvas**（ADR 0024，
+  合成夹具出图 + 用户手动确认缩放平移，见 `docs/validation-dom-canvas-wasm-2026-10-24.md`；
+  硬件归属 NOT VERIFIED）：打开与渲染、悬停、框选（含橡皮筋像素判据）、
   TRIM 的交互链（实体拾取/漏点拒绝/CONFIRM 到达命令层）、以及 **ERASE 的真实提交**（`entityCount` 4→3）。
   **注意**：这些运行的输入由**合成 DOM 指针事件**驱动（Rust probe 经 `webview.eval` 注入、在 webview 内
   `dispatchEvent`，走正常 UI→IPC→宿主路径），**不是真实鼠标**、不经 evdev/XTest——因此它们证明的是
@@ -409,6 +435,13 @@ Apply/OK/Cancel 为 AutoCAD 语义（本地暂存、只发 diff、写失败标�
 （`CREATELAYER` / `RENAMELAYER` / `DELETELAYER`，`NEWLAYER` 是项目同义词别名）：内联新建、
 行内重命名、按行删除确认（默认层 `0` 不提供入口），写经**既有**有界队列 ack 后重读。
 图层写**不可撤销**（历史只有实体 patch），也**不写 DWG**（`SAVE` 仍是 DXF 导出）。
+
+> **授权口径（2026-10-26 补齐，此前缺失）**：F03 只要求图层**临时显隐 / 搜索 / 恢复**，并明确
+> 「不修改 DWG 图层表」。已落地的 `CREATELAYER`/`RENAMELAYER`/`DELETELAYER` 与
+> `SETLAYERPROPERTY` 的**存储型**键（`linetype`/`lineweight`/`plottable`）**超出 F03**，属
+> **项目自选范围（我们的选择）**；它们只改内存文档与会话覆盖，**不写 DWG**、**不可撤销**。
+> 会话级显隐覆盖（`cad_set_layer_visible` / 恢复）仍在 F03 内，且**不使底图变脏、不升 revision**。
+
 **2026-10-26 更正（图层属性存储/往返轮）**：图层的**颜色/线型/线宽/关闭/冻结/锁定/可打印/
 透明度**现已**建模并随导出写入、可往返**（`LayerAttributes` 旁存于 `Layer` 行；
 `docs/entity-style.md` 有存储形状与 `visible == !(off || frozen)` 不变量）。导出表也不再只带

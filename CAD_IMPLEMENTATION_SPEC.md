@@ -841,6 +841,14 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
       理由修订：2026-10-22 的 FAIL 针对**原生表面**，本文**不为它翻案**；`dom-canvas` 无第二原生
       表面，但该推理**未经运行验证**。本轮只有**能力探针**（WebKitGTK 2.52.6 / XWayland：
       WebGL2 上下文可用、`navigator.gpu` = false、无帧无截图），**不是**视觉或性能证据。
+    - **2026-10-26 修订（ADR 0024 阶段 ④–⑥ 首批已实现）**——上文「**未实现** / 不构成第二条已交付
+      生产路径 / 分阶段、当前未实现」**已过期**：X11/XWayland 宿主实测以 `surfaceMode: dom-canvas`
+      启动，DOM `<canvas>` 挂载并有合成夹具出图（ScreenCast 抓帧），WebGL2 缺失走
+      `yacr: unsupported-runtime: webgl2` + **退出码 6**；证据见
+      `docs/validation-dom-canvas-wasm-2026-10-24.md`。**仍不得**据此宣称「X11 已验收」：真 X11
+      服务器/窗口管理器、其它合成器、**硬件归属（NOT VERIFIED）**、DPR/多显示器、性能与
+      vendor/golden 均未验证，且 agent 侧输入注入在本机不可用。读者以 `docs/compatibility.md`
+      「平台」段与 `AGENTS.md` 为准，本文原文保留作决策沿革。
   - **Windows**：宿主**已实现**（Tauri2 + 透明 WebView2 + child HWND + 单一 DOM 漏斗），并通过
     **Tier 0 编译门禁**（msvc check/build、gnu build、wasm 空壳）与 **Wine 拒绝合同 smoke**
     （WebView2 缺失 → 标记行 + i18n + **退出码 5**）。**视觉/运行时验收 PENDING 用户真 Windows

@@ -1,3 +1,32 @@
+## 2026-10-26 文档口径对账（spec / architecture / compatibility / handoff 与源码）
+
+### 结论
+
+本轮**只改文档，不改代码**。对账出的偏离按源码钉死，避免后续把过期表述当证据：
+
+1. **`docs/architecture.md` 平台与命令面过期**：X11「显式 Unsupported（退出码 4）」与「GUI 仅
+   `OPEN`/`FIT` 接线」两句停在 2026-10-23 DOM-on-top 之前。已改为 DOM-canvas 现状（ADR 0024，
+   WebGL2 缺失才退出码 6）与命令面现状，并把「仅 OPEN/FIT」明确标为历史。
+2. **`CAD_IMPLEMENTATION_SPEC.md` §21 过期**：该段写 `dom-canvas`「未实现 / 不构成第二条生产路径」。
+   保留原文，追加 **2026-10-26 修订**（阶段 ④–⑥ 首批已实现 + 证据文件 + 仍 NOT VERIFIED 的边界）。
+3. **授权口径缺口（两处长期缺失）**：编辑/创建命令族与图层表写一直没有 spec 授权声明（此前只有
+   DIMENSION 创建有）。已在 `docs/compatibility.md` 两处补齐：明确标为**项目自选范围**、只改内存文档、
+   `SAVE` 是有损 DXF。
+4. **测量 §3.3 对账**：`docs/compatibility.md` 新增逐条对照表。**自交面积拒绝**（`area.rs:73`）、
+   **三点角度已实现**（`engine.rs:91-99`）、纸空间无有效反变换时禁用模型测量——均与规范一致；
+   唯一真实偏离是**源单位未知时未显示「图纸单位」**（测量回显 `unit:null` ⇒ 无后缀，`units.unknown`
+   无生产消费者）。本节原「接线验收」中「未知源单位显示图纸单位」据此标为**未落地验收项**。
+
+### 未做（显式不在本轮）
+
+- 不实现任何新命令/新功能；`ID`（点坐标查询）、`LAYISO`（按选择隔离图层）、`JOIN` 一类的候选只在
+  recon 阶段做了可行性定位，**未写任何代码**。
+- 对账时怀疑的「注释同步债务」**经查不存在**：`crates/cad-app/src/host/databases.rs:243` 与
+  `app_drawing/explode.rs:356` 的注释已写明 `Spline` 被**精确烘焙**（逐控制点映射），
+  与 `docs/compatibility.md` 的 MOVE/COPY 行一致；本轮**未**改这些注释。
+- 本轮**未运行**任何门禁命令（只动 `.md`）：`cargo fmt/clippy/test`、`check-*.py`、`npm test`
+  一律 **NOT RUN**，不为文档改动伪造执行证据。
+
 ## 2026-10-26 实体线型比例（组 48）：不再随符号线型丢失（by-layer 家族最后一项保真缺口）
 
 ### 结论
@@ -9026,6 +9055,11 @@ flange 样本，但仅 `Partial`，不构成兼容性或黄金图验收）；Mul
 
 ## 已定义，但尚需设计审查
 
+> **2026-10-26 更正**：本节多数条目是**批注时代遗留**（`AnnotationId` / `fingerprint` /
+> `PropertyProvider`；批注子系统已于 2026-10-05 整体移除），**不代表**当前仍有待审设计。
+> 当前**测量 / 编辑命令 / 图层与属性**三区**没有**待设计审查项（对账见本文件顶部 2026-10-26 条目）。
+> 第一条 RenderTarget/HostTexture 仍是**现存且有效**的延期项（ADR 0023 §5 显式延期，未被 DOM-on-top 覆盖）。
+
 - RenderTarget/HostTexture 当前仅为自有数字 token；共享 Device/Queue 的拥有者、
   token 生命周期与安全访问方式须在平台合成 ADR 中固定，不可凭 token 猜测 GPU 对象。
 - AnnotationId(u128) 只表达 UUID 位宽；生成/碰撞防护由宿主服务和数据库校验完成。
@@ -9045,7 +9079,8 @@ flange 样本，但仅 `Partial`，不构成兼容性或黄金图验收）；Mul
 
 业务不调用 draw；批注确认一次事务，取消零事务；UI 回填不触发重复命令；
 revision 不连续重建；GPU 重建不改数据库；设备失败和退出保护未保存批注；
-局部失败保留对象级报告；未知源单位显示图纸单位。Android/Web 真机与浏览器分开记录。
+局部失败保留对象级报告；未知源单位显示图纸单位（**2026-10-26 更正：未落地**——测量回显 `unit:null`
+不加后缀，`units.unknown` 无生产消费者；见本文件顶部文档口径对账）。Android/Web 真机与浏览器分开记录。
 ## 2026-10-04 Linux release 后续排查（部分优化，问题未闭环）
 
 - 用户手工 release 仍卡死；补窗口启动后打开和实际 pointer/click 探针，基线 release
