@@ -123,8 +123,8 @@
 | `EXPLODE` | 部分 | **一次一层**；`LWPOLYLINE`→线段+`ARC`、`INSERT`→直接成员（嵌套保持引用）、`Hatch`→子项；**拒绝** `Dimension`/`MULTILEADER`/非均匀 `INSERT`；`TEXT` 按子项 `child_refusal`；`SPLINE`/`SHAPE`/`OPAQUE`/镜像 `Arc`·`Ellipse` **整命令失败**；无 `EXPLMODE` |
 | `JOIN` | 部分 | **仅**共线首尾相接 `LINE` 或同心相续 `ARC`；折线/样条/圆、需桥接空隙、跨图层/空间 ⇒ 按名拒绝 |
 | `ERASE` | 实现 | 空选择拒绝；撤销恢复渲染属性与动态可见性 |
-| `CHAMFER` | 部分 | **仅两条独立直线**；无 `Polyline` 模式/`Angle` 方法/`Multiple`/`Trim` 开关 |
-| `FILLET` | 部分 | **仅两条独立直线** + 半径（`R=0` 只修角点）；无 `Polyline` 模式/`Multiple`/`Trim` 开关；平行线**显式拒绝**（不自动调半径） |
+| `CHAMFER` | 部分 | **两线形式**：两条独立直线、两距离按拾取顺序施加；无 `Angle` 方法/`Multiple`/`Trim` 开关。**Polyline 模式是独立选择子** `CHAMFER POLYLINE`（2026-10-28，选择式、恰好 1 条开放直线段 `+Z` LWPOLYLINE；`chamferDistanceA` 沿**入边**、`B` 沿**出边**——**我们的规则**） |
+| `FILLET` | 部分 | **两线形式**：两条独立直线 + 半径（`R=0` 只修角点）；平行线**显式拒绝**（不自动调半径）；无 `Multiple`/`Trim` 开关。**Polyline 模式是独立选择子** `FILLET POLYLINE`（2026-10-28，选择式、同上形状；半径取 `filletRadius`、每个内顶点加圆弧；`R ≤ 0` 按名拒绝、**不做** AutoCAD 的自动缩半径） |
 | `MATCHPROP` | 部分 | **选择式**（AutoCAD 特性刷的文档化变体：首个选中为源）；只转移 `layer`/`color`/`linetype`/`lineweight`/`transparency` 五项；**无 Settings 子集**；文字样式/标注样式/填充图案一律**不**转移 |
 
 ### 3.4 块 / 外部参照 / 发布
@@ -205,12 +205,13 @@
 | HATCH 自定义 `76=2` / `.pat` 加载 | **M** | `.pat` 解析器（含 `*`/`;` 注释、角度/原点/偏移/虚线定义）+ 名称解析 + 缺失图案的显式拒绝；现在只有**我们转录**的三项内置表 |
 | ~~HATCH **渐变创建**~~ | **已关闭（2026-10-27）** | 双色 `LINEAR`/`SPHERICAL` 已实现（类型码 `3` + 四个参数，见 §3.1）。**仍未闭合**的是它的三个性质缺口，不再算「创建缺失」：`SPHERICAL` 在矩形/圆边界上烘焙成平色（需要按值细分内部三角形）、只有 ACI（无真彩/色簿）、`76=1` 的梯度约定**未用 vendor 文件核实** |
 | HATCH **关联性** | **L** | 需要边界→填充的持久引用（类似 `ACAD_DIMASSOC`），并定义边界编辑后的重生成/失效规则；与「实体非关联」的既有边界冲突，需 ADR |
+| ~~`FILLET`/`CHAMFER` 的 **Polyline 模式**~~ | **已关闭（2026-10-28）** | 两个独立选择子 `FILLET POLYLINE`/`CHAMFER POLYLINE`（选择式 `CommandPayload::None`、恰好 1 条开放直线段 `+Z` LWPOLYLINE、原地重写一条事务/一步撤销）；**仍未闭合**的是四条**声明偏差**：闭合环、含 bulge 段、非 `+Z` 平面都按名拒绝（不是 AutoCAD 的全功能子选项），`TRIMMODE` 不建模，AutoCAD 的**自动缩半径**不复刻，倒角的 `A`/`B` 方向是**我们的规则** |
 | `PASTEBLOCK`（`Ctrl+Shift+V`，粘贴为块） | **L** | 需要「把剪贴板实体包成一个块定义再插入」——`cad-db` **没有块写 API**（无 `BlockDefinition` 写入路径，现有 `insert_block` 只服务测试/导入构造器），要先有块定义写入口 + 命名/去重 + 与 EXPLODE/夹点/STRETCH 的交互；在它存在之前**不得**把 `Ctrl+Shift+V` 降级成 `PASTECLIP` |
 | OFFSET **含弧段折线** | **M** | 弧段偏移不是弧段（同样「椭圆的等距偏移不是椭圆」的问题），需要桥接/修剪策略；现在是 `offset.bulge_segment` 按名拒绝 |
 | OFFSET **`ELLIPSE`** | **L** | 等距偏移曲线**不是**椭圆（非圆二次曲线的高阶偏移），要么新增偏移曲线类型、要么折线近似并显式声明；两条都不是补丁 |
 
 > 其它已知缺口（不属上述名字，但读表时容易误判为已完整）：`MATCHPROP` 的 Settings 子集、
-> `ARRAY` 的 Path/关联编辑、`FILLET`/`CHAMFER` 的 Polyline 模式、`STRETCH` 的 HATCH 部分拉伸、
+> `ARRAY` 的 Path/关联编辑、`STRETCH` 的 HATCH 部分拉伸、
 > OS 剪贴板（真系统剪贴板）与 `PASTEBLOCK`（粘贴为块）、`ZOOM WINDOW/PREVIOUS`、命名视图、CTB/STB 打印样式、
 > 非均匀缩放与镜像的文字/`MULTILEADER`（域限制，非命令层缺失）。
 
@@ -275,7 +276,7 @@ python3 scripts/test-check-command-docs.py   # 自测：注入伪造 canonical �
 
 ```
 tables: 97/5/2/4 selectors, 51 aliases, 104 canonical selectors (aliases excluded)
-§2 rows: 57, §2b aliases: 51, §3.7 rows: 6, alias mentions: 1
+§2 rows: 59, §2b aliases: 51, §3.7 rows: 6, alias mentions: 1
 OK: 0 mismatches
 ```
 

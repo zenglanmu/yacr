@@ -81,6 +81,8 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `OFFSET` | 编辑（LINE / CIRCLE / **ARC** / **直线段折线**；含弧段折线与 `Ellipse` 按名拒绝） | 是 | `O` |
 | `MATCHPROP` | 编辑（**选择式**特性匹配：首个选中实体为源，其余为目标；转移 `layer`/`color`/`linetype`/`lineweight`/`transparency` 五项） | 是 | `MA` |
 | `JOIN` | 编辑（合并选择为**一个**实体：共线 `LINE` 或同心相续 `ARC`；一条事务、一步撤销，仅这两种几何） | 是 | — |
+| `FILLET POLYLINE` | 编辑（AutoCAD 的 **Polyline 模式**，独立选择子：**恰好 1 个**选中实体，每个**内顶点**用会话参数 `filletRadius` 换成两切点 + 一段圆弧；实体**原地重写**、一条事务/一步撤销；两线 `FILLET` 不变） | 是 | — |
+| `CHAMFER POLYLINE` | 编辑（同上选择式：`chamferDistanceA` 量在**入边**、`chamferDistanceB` 量在**出边**——**我们的规则**，不是 AutoCAD 提示顺序的复刻） | 是 | — |
 | `LAYOFF` | 图层（关闭选择所在图层，当前层除外；会话覆盖，不写 DWG、不升 revision） | 否 | — |
 | `LAYERP` | 图层（恢复**上一次**覆盖状态；有界 16 步快照环，仅真实改动前压栈；会话内，不持久化） | 否 | — |
 | `LAYISO` | 图层（隐藏选择**不在**的图层 + 当前层保留；会话覆盖，不写 DWG、不升 revision） | 否 | — |
@@ -383,6 +385,14 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   **不是**椭圆，不拿近似当实现。其余几何走通用 `Unsupported`
   （`OFFSET supports LINE, CIRCLE, ARC and straight-segment LWPOLYLINE only, got …`），不创建、不部分执行。
   **没有全局自交修剪**：只在顶点处检测局部塌缩，远端偏移段之间的自交**不检查**（声明）。
+- **`FILLET POLYLINE` / `CHAMFER POLYLINE` 的 v1 界限**（选择式，恰好 1 条**开放**、**直线段**、`+Z` 平面
+  LWPOLYLINE，≥ 3 顶点；每个**内顶点**被改，两个端顶点不动、不造端帽、不产生新实体）：**闭合环**按名拒绝
+  （`*.polyline_closed`，v1 只做开口；AutoCAD 会连闭合环一起倒角/圆角）；**任何带 bulge 的段**按名拒绝
+  （`*.polyline_bulged_segment`，不悄悄拉直）；**非 `+Z` 平面**拒绝（`*.polyline_not_planar`）；`FILLET` 的
+  `R ≤ 0` 拒绝（两线版 `R=0` 的移角形式没有折线等价物）；倒角 `A=B=0` 或负数拒绝；**角太大放不下**按名拒绝
+  （`*.polyline_too_large`，**不**做 AutoCAD 的自动缩半径）；**不建模 `TRIMMODE`**（被修剪的源永远是这条折线
+  本身，没有第二个对象）；**倒角 A/B 方向是我们的规则**（入边/出边）。全部拒绝都具名且在任何写入之前，
+  Viewer 由命令层拒绝。
 - **剪贴板是应用内的**，**不是**操作系统剪贴板：不与其他应用互通，也不跨文档（替换文档时清空），
   无 OS 剪贴板读写。**两个捕获形状 + 两个粘贴形状**（2026-10-28 起）：
   `COPYCLIP`/`CUTCLIP`（`Ctrl+C`/`Ctrl+X`）**不记基点**；`COPYBASE`/`CUTBASE`

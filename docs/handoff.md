@@ -1,3 +1,61 @@
+## 2026-10-28 第 12 轮：`FILLET POLYLINE` / `CHAMFER POLYLINE`（Polyline 模式）
+
+### 结论
+
+AutoCAD 的 **Polyline 模式**以**两个独立的选择式选择子**落地（`FILLET POLYLINE`/`CHAMFER POLYLINE`，
+命令表 95 → **97**）。两线命令 `FILLET`/`CHAMFER` **未改**：它们的固定步数捕获表达不了「选第一个对象
+**或** 选 Polyline 子选项」，所以模式是单独的选择子而不是别名——别名会把折线编辑偷偷路由进两线捕获。
+v1 的形状是**一条开放、全直线段、`+Z` 平面的 LWPOLYLINE**，每个**内顶点**被替换；端顶点不动、不造端帽、
+不产生新实体。
+
+### 做了什么（`cad-app`）
+
+- `command_id.rs`：`ChamferPolyline` / `FilletPolyline`（`CommandPayload::None`、**恰好 1 个**选中实体、
+  work-only、Viewer 由命令层拒绝）。
+- `app_drawing/polyline_fillet.rs`（904 行）：纯规划器 + 应用层。公式：`u_in` = 前一顶点→角点、`u_out` = 角点→
+  下一顶点的单位向量，**内角** `phi = acos((-u_in)·u_out) ∈ (0, π]`——正是两线 `plan_fillet` 的 `theta`。
+  - **FILLET**：`d = R/tan(phi/2)`，切点 `t1 = corner − d·u_in`、`t2 = corner + d·u_out`；圆心在
+    **内角平分线** `normalize(-u_in + u_out)` 上、距角点 `R/sin(phi/2)`（与两线规划同一个圆心）。
+  - **CHAMFER**：`t1 = corner − a·u_in`、`t2 = corner + b·u_out`，连接段 `bulge = 0`。
+- **弧的符号证明**：sweep **只**由圆心角导出（`start = atan2(t1−centre)`、`end = atan2(t2−centre)`、
+  `sweep = normalize_signed(end − start)`），用 `cad_geometry::arc_sweep_to_bulge`（全仓唯一的 `sweep → bulge`
+  权威，`bulge = tan(sweep/4)`）转成 bulge；**绝不**用叉积猜符号——产出的 bulge 再喂回
+  `bulge_arc_geometry`，恢复出的圆心/半径/sweep 必须与规划值一致，否则**整条命令**按名拒绝
+  （`<c>.polyline_arc_mismatch`）。90° 角因此与两线 `plan_fillet` 给出同一个圆心/半径/sweep，
+  **parity 测试钉在 1e-12**。
+- **参数**沿用会话通道：`filletRadius`、`chamferDistanceA`、`chamferDistanceB`（同一份，不新增）。
+- **重叠守卫**：每条段两侧的内缩之和必须严格小于段长（`<c>.polyline_too_large`），否则拒绝而不是自交。
+- **重写**：一条 `update_entity`（一条事务/一步撤销），实体 id/图层/空间/draw order/样式全部保留。
+- **拒绝面**（全部具名、在任何写入之前）：payload、选择 ≠ 1、不可寻址/缺失、不是折线、**闭合环**、
+  <3 顶点、**含 bulge 段**、**非 `+Z` 平面**、重复/零长段、共线顶点（两个朝向都测）、`R ≤ 0`、
+  非法距离（`A=B=0`/负数）、角放不下、缺会话参数、退化接缝、弧不自洽。
+- **声明的偏差**：闭合环与弧段**按名拒绝**（`Unsupported`，不是 AutoCAD 的全功能子选项）；**不建模
+  `TRIMMODE`**（被修剪的源永远是这条折线本身）；**不复刻** AutoCAD 的自动缩半径；**倒角 A/B 方向是
+  我们的规则**（`A` 入边、`B` 出边）。
+
+### 证据（本机，2026-10-28）
+
+- `cargo test -p cad-app --locked` → **1324 / 0**（集成套件 4+11+18+15+5+2 全 0 failed，1 ignored）；
+  `-p cad-ui-core` → **293 / 0**。
+- 新测试 `crates/cad-app/src/tests/drawing/polyline_fillet.rs`（912 行，**11 个测试**）：与两线规划
+  **1e-12** 对照、每个内顶点一次撤销步、倒角 A/B 方向、逐类拒绝（形状/退化/尺寸/缺参数/选择/寻址/
+  Viewer）、**DXF 导出往返**。
+- `python3 scripts/check-command-docs.py` → `OK: 0 mismatches`（`tables: 97/5/2/4 selectors`）；
+  `check-architecture.py` → 28 packages 无环；`check-file-size.py` → **1074** 文件 ≤1000 行；
+  `cargo fmt --all -- --check` → 通过。
+- **`cargo clippy -p cad-app -p cad-ui-core` 本轮复跑时失败**，但原因与本轮无关：另一 lane 正在给
+  `ToolParameter` 加 `TextRotation`/`MTextAttachment`（新文件 `app_drawing/text_params.rs`），
+  `session_state/tool_authorization.rs` 的 match 还没补齐（`E0004` non-exhaustive）。**不宣称 clippy 绿**。
+
+### 仍未成立 / 边界（必须原样保留）
+
+1. **没有 GUI/像素/真窗口证据**：规划器只有契约测试与 DXF 往返；桌面 UI 的 ribbon/命令目录条目由
+   **另一个 lane** 落地（本轮**不声称**已接线）。
+2. **v1 只做开放直线段折线**：闭合环、任何弧段、非 `+Z` 平面全部按名拒绝；`TRIMMODE` 与自动缩半径不存在。
+3. **倒角 A/B 方向是我们的规则**，不是 AutoCAD 提示顺序的复刻；两线 `CHAMFER` 的「按拾取顺序」语义不变。
+4. **`plan_fillet` 的圆心公式仍是几何推论（UNVERIFIED）**——折线模式复用它，因此继承同一个未查证前提。
+5. **平台 NOT RUN**：全 workspace 矩阵、wasm/Windows/Android/macOS、真按键均未运行。
+
 ## 2026-10-28 第 11 轮：剪贴板集群（基点捕获 + 插入点粘贴）+ XLINE/RAY 诚实化 + 文档门禁脚本化
 
 ### 结论
