@@ -895,6 +895,42 @@ button, input, select { font: inherit; color: inherit; }
 .status-stepper.is-invalid { border-color: var(--danger); }
 .status-stepper.is-invalid .status-stepper__input { color: var(--danger); }
 .status-stepper.is-disabled, .status-stepper.is-disabled .status-stepper__value { color: var(--text-disabled); }
+/* Active-tool parameter chooser: a closed set whose codes have names (HATCH's
+   predefined pattern). The same 20px chip surface as .status-stepper so the strip
+   keeps one control height, but the value slot is the whole set: one segment per
+   implemented code, so the pattern NAME is on screen instead of an index nobody
+   can decode. */
+.status-choices {
+  display: inline-flex; align-items: center; gap: 2px;
+  height: 20px; padding: 0 2px 0 7px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  background: var(--field); color: var(--text-dim);
+}
+.status-choices__label { color: var(--text-muted); margin-right: 2px; }
+.status-choices__choice {
+  display: inline-flex; align-items: center;
+  height: 16px; padding: 0 5px;
+  border: none; border-radius: 3px;
+  background: transparent; color: var(--text-dim);
+  font: inherit; font-size: 10.5px; font-family: var(--font-mono);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.status-choices__choice:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+/* No pointer events while disabled, so the row's own title (the reason it is
+   inert) is still reachable over a segment. */
+.status-choices__choice:disabled { color: var(--text-disabled); cursor: not-allowed; pointer-events: none; }
+/* The code in force: the same accent an ON chip uses, so the current pattern reads
+   at a glance and the chosen segment is the row's only loud element. */
+.status-choices__choice.is-selected { background: var(--on); color: #fff; }
+/* Inert row (the pattern name under a solid/user-defined fill): scope is muted too,
+   so a greyed row never looks like the fill it is currently drawing. */
+.status-choices.is-inactive .status-choices__label,
+.status-choices.is-inactive .status-choices__choice { color: var(--text-disabled); }
+.status-choices__choice.is-selected:disabled {
+  background: transparent; color: var(--text-muted);
+  outline: 1px solid var(--line-soft); outline-offset: -1px;
+}
 /* Status-bar Options entry: the ghost button surface at status-bar height, kept
    a whisper quieter than the toggle chips so it reads as a utility, not a mode. */
 .statusbar__workspace {
@@ -919,6 +955,10 @@ button, input, select { font: inherit; color: inherit; }
   .workspace__left.is-open { width: 240px; }
   .titlebar__brand { display: none; }
   .import-progress__detail { display: none; }
+  /* The named-pattern chooser keeps all three names (they are the whole point of
+     the row) and gives up its group label first: the row still carries the name as
+     its accessible label, and it sits directly beside the pattern-type control. */
+  .status-choices__label { display: none; }
 }
 @media (max-width: 640px) {
   .field-inline__label { display: none; }

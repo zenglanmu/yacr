@@ -87,6 +87,33 @@ export interface NumberToolParameterSpec extends ToolParameterSpecBase {
   /** For a closed-set parameter, the exact integer codes the host accepts. */
   readonly choices?: readonly number[];
   /**
+   * The catalog key of each code's user-visible **name**, keyed by the code.
+   *
+   * Only a closed set whose codes a user cannot be expected to decode carries
+   * this: `hatchPattern` is `ANSI31`/`ANSI32`/`ANSI37` in the host's own
+   * transcribed table, so the strip can name the pattern instead of showing the
+   * index. A row without it stays a plain bounded stepper, and its codes are
+   * spoken by its `hintKey` alone.
+   *
+   * Every code in `choices` must carry a name and no other code may appear:
+   * [`toolParameterViews`] keeps the stepper when the two disagree, so an
+   * incomplete table can neither invent a name nor hide a code the host accepts.
+   * The names are copy, so they live in the catalogs — never here.
+   */
+  readonly choiceLabelKeys?: Readonly<Record<number, string>>;
+  /**
+   * The sibling parameter code this row is **scoped to**, or absent when the row
+   * always applies.
+   *
+   * HATCH's predefined pattern only means something while the pattern type is `2`
+   * (predefined); under solid (`0`) or user-defined (`1`) the host ignores the
+   * index. A scoped row stays **visible** — so the choice set is discoverable
+   * before the type is switched — but renders inert, with its `hintKey` (plus
+   * [`TOOL_PARAMETER_INACTIVE_KEY`]) as the reason. An absent or unprojected
+   * sibling code never claims the row applies.
+   */
+  readonly activeWhen?: { readonly statusKey: string; readonly values: readonly number[] };
+  /**
    * Whether the value may also be **typed** into the strip, not only stepped.
    *
    * Only a real length needs it: a text height of `1.75` is a value no fixed
@@ -122,10 +149,15 @@ export type ToolParameterSpecMap = Readonly<Record<string, ToolParameterSpec>>;
  * - `offered`   — the host's own predicate: whether the host would **accept** a
  *   value as a target (the stepper never offers a value this rejects);
  * - `choices`   — for a closed-set numeric parameter, the exact integer codes the
- *   host accepts (and therefore the only ones the stepper can reach). It is
- *   machine metadata, not copy: the status bar has no choice control and the
- *   catalog carries no per-choice label keys, so the choice names are spoken by
- *   the parameter's `hintKey` ("0 Normal, 1 Outer, 2 Ignore");
+ *   host accepts (and therefore the only ones the stepper can reach);
+ * - `choiceLabelKeys` — the catalog key of each code's name, for a closed set a
+ *   user reads by name (the predefined HATCH patterns). Such a row renders a
+ *   named chooser instead of a stepper; the value on the wire is unchanged, so
+ *   the choice's name and the integer index are the same choice;
+ * - `activeWhen` — the sibling code a row only applies under (the pattern name
+ *   under the predefined pattern type). The row stays visible but inert while the
+ *   sibling says otherwise; its hint (and [`TOOL_PARAMETER_INACTIVE_KEY`]) says
+ *   why, rather than the control disappearing;
  * - `projectable` — whether a value from `cad_status` may be **rendered**. It
  *   defaults to `offered` (an out-of-range projection is a contract violation and
  *   renders nothing), so no parameter currently overrides it;
@@ -225,6 +257,18 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     // value can never name a pattern the host does not implement.
     kind: 'number', statusKey: 'hatchPattern', step: 1,
     ...closedSet(1, 2, 3),
+    // The three implemented patterns are read **by name**: the wire keeps the
+    // 1-based index (1 ANSI31, 2 ANSI32, 3 ANSI37), and the strip offers the names
+    // as a segmented chip, so nothing has to be decoded from a number.
+    choiceLabelKeys: Object.freeze({
+      1: 'status.tool_parameter.hatch_pattern.ansi31',
+      2: 'status.tool_parameter.hatch_pattern.ansi32',
+      3: 'status.tool_parameter.hatch_pattern.ansi37',
+    }),
+    // A pattern name only applies to the predefined type (2): solid and
+    // user-defined fills ignore the index, so under those codes the chooser stays
+    // visible but inert and its hint says why.
+    activeWhen: Object.freeze({ statusKey: 'hatchPatternType', values: Object.freeze([2]) }),
     labelKey: 'status.tool_parameter.hatch_pattern',
     hintKey: 'status.tool_parameter.hatch_pattern.hint',
   },
@@ -339,7 +383,29 @@ export interface ToolParameterFlagView {
   readonly disabled: boolean;
 }
 
-/** A numeric parameter's status-bar view: a bounded stepper. */
+/**
+ * One named code of a closed-set parameter: the machine value the IPC carries
+ * plus the catalog key of the name a user reads.
+ *
+ * The `value` is the integer the one parameter IPC sends, exactly as a step would
+ * send it, so naming a code never changes what travels on the wire.
+ */
+export interface ToolParameterChoice {
+  /** The integer code the host accepts — exactly the value the IPC carries. */
+  readonly value: number;
+  /** Catalog key of the code's name (present in both catalogs). */
+  readonly labelKey: string;
+  /**
+   * Whether the row currently stands on this code: the projected status value plus
+   * the bounded pending delta. A pick therefore shows at once, and the host's next
+   * echo — or an explicit refusal, which drops the delta — corrects it.
+   */
+  readonly selected: boolean;
+  /** Whether picking it would dispatch: command admission **and** the row's scope. */
+  readonly disabled: boolean;
+}
+
+/** A numeric parameter's status-bar view: a bounded stepper, optionally a named chooser. */
 export interface ToolParameterNumberView {
   readonly kind: 'number';
   readonly key: string;
@@ -351,6 +417,20 @@ export interface ToolParameterNumberView {
   readonly step: number;
   /** Whether the value may also be typed in place (a real length), not only stepped. */
   readonly typed: boolean;
+  /**
+   * The named closed set this row chooses among, in the host's own code order, or
+   * `null` for a plain stepper. A named row is still a numeric row — the same
+   * `choices` the `offered` predicate keeps, the same one IPC — so the chooser can
+   * never offer a code a step could not, and the bounds below stay meaningful.
+   */
+  readonly choices: readonly ToolParameterChoice[] | null;
+  /**
+   * Whether the row sits outside the sibling code that scopes it (`activeWhen`):
+   * always `false` for a row without one. This is **scope, not capability** — the
+   * host would still accept a write — so it is reported separately from `disabled`
+   * (which is command admission) and only mutes the chooser.
+   */
+  readonly inactive: boolean;
   readonly labelKey: string;
   readonly hintKey: string;
   readonly icon?: string;
@@ -376,7 +456,8 @@ export interface ToolParameterPending {
  * The status-bar views for every parameter of the currently active tool.
  *
  * Returns `[]` unless a tool is active with a map entry; each parameter yields a
- * numeric stepper view or a flag view, and a parameter whose value is absent (not
+ * numeric view (a bounded stepper, or a named chooser when its spec names the
+ * codes) or a flag view, and a parameter whose value is absent (not
  * projected, `null`, or malformed/out of range) yields nothing at all — never an
  * invented default. `admitted(command)` is the shell's normal command admission
  * (`canCommand`), which already accounts for a pending command and a
@@ -388,7 +469,9 @@ export interface ToolParameterPending {
  * where `delta` is the bounded pending magnitude the host has not echoed back yet
  * (see [`stepToolParameterPending`]); it only shifts the target the next step
  * builds on and the button bounds, so a rapid double-click composes into
- * `value + 2·step` while the displayed number still follows the status.
+ * `value + 2·step` while the displayed number still follows the status. A named
+ * chooser marks the code at `effective`, so a pick reads as chosen at once and the
+ * host's echo (or its refusal, which drops the delta) settles it.
  */
 export function toolParameterViews(
   status: Partial<CadStatus> | null | undefined,
@@ -410,6 +493,52 @@ export function toolParameterViews(
   return views;
 }
 
+/**
+ * Whether a row scoped by `activeWhen` applies under the current sibling code.
+ *
+ * An absent, `null` or non-numeric sibling value never claims the row applies: the
+ * strip can only make a scope claim it can prove from `cad_status`, and the host
+ * projects every parameter of an active tool together.
+ */
+function activeUnder(spec: NumberToolParameterSpec, tool: CadTool): boolean {
+  const condition = spec.activeWhen;
+  if (!condition) return true;
+  const raw = tool.params?.[condition.statusKey];
+  return typeof raw === 'number' && condition.values.includes(raw);
+}
+
+/**
+ * The named choices of a closed set, or `null` when the row is a plain stepper.
+ *
+ * The codes come from the spec's own `choices` — the same list the `offered`
+ * predicate keeps — so the chooser can never show a code the host would refuse,
+ * and it lists them all: a code without a catalog name (a broken table) demotes
+ * the whole row to the stepper instead of silently dropping a value the host
+ * accepts. Every name is a catalog key, never copy: this module carries none.
+ */
+function choiceViews(
+  spec: NumberToolParameterSpec,
+  selectedCode: number,
+  disabled: boolean,
+  inactive: boolean,
+): readonly ToolParameterChoice[] | null {
+  const keys = spec.choiceLabelKeys;
+  const codes = spec.choices;
+  if (!keys || !codes) return null;
+  const choices: ToolParameterChoice[] = [];
+  for (const value of codes) {
+    const labelKey = keys[value];
+    if (typeof labelKey !== 'string' || labelKey.length === 0) return null;
+    choices.push({
+      value,
+      labelKey,
+      selected: value === selectedCode,
+      disabled: disabled || inactive,
+    });
+  }
+  return Object.freeze(choices);
+}
+
 function parameterView(
   key: string,
   spec: ToolParameterSpec,
@@ -429,9 +558,12 @@ function parameterView(
   if (value === null) return null;
   const delta = pending && pending.key === key && pending.base === value ? pending.delta : 0;
   const effective = value + delta;
+  const inactive = !activeUnder(spec, tool);
   return {
     kind: 'number', key, value, delta, effective, text: String(value),
     step: spec.step, typed: spec.typed === true,
+    choices: choiceViews(spec, effective, disabled, inactive),
+    inactive,
     labelKey: spec.labelKey, hintKey: spec.hintKey, icon: spec.icon, disabled,
     decrement: effective - spec.step,
     increment: effective + spec.step,
@@ -574,6 +706,16 @@ export async function setToolParameterFlag(
  * localized name, so the message can never drift from the label it is about.
  */
 export const TOOL_PARAMETER_INVALID_KEY = 'status.tool_parameter.invalid';
+
+/**
+ * The catalog key of the reason a scoped row is inert right now.
+ *
+ * It is a catalog key, not copy: the strip prefixes it to the row's own hint, so a
+ * greyed chooser says *why* it is greyed without a second hand-written sentence
+ * per parameter. Scope is not capability — the host would still accept the write —
+ * so the sentence talks about what the current setting uses, never about support.
+ */
+export const TOOL_PARAMETER_INACTIVE_KEY = 'status.tool_parameter.inactive';
 
 /**
  * The local draft of one typed numeric parameter.

@@ -1,12 +1,13 @@
-// The active-tool parameter controls of the status bar: one bounded stepper per
-// numeric parameter and one toggle chip per flag parameter.
+// The active-tool parameter controls of the status bar: one bounded stepper (or
+// one named chooser) per numeric parameter and one toggle chip per flag parameter.
 //
 // Split out of `StatusBar.tsx` so the bar itself stays a stateless projection of
 // `cad_status`: a stepper of a **typed** parameter (a real length, e.g. the text
 // height) owns the one piece of local state in the strip — the text the user is
 // typing — while the number it renders still comes from the host. Nothing here
-// mirrors a value and nothing here calls IPC: a step or a commit is handed to the
-// shell (`onStep`), which owns the pending delta and the single parameter IPC.
+// mirrors a value and nothing here calls IPC: a step, a pick or a commit is handed
+// to the shell (`onStep`/`onChoose`), which owns the pending delta and the single
+// parameter IPC.
 import React, { useState } from 'react';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
@@ -14,7 +15,7 @@ import { Toggle } from './primitives.tsx';
 import type { ComposingKeyEvent } from './key-events.ts';
 import { useI18n } from '../context.ts';
 import {
-  NO_TOOL_PARAMETER_DRAFT, cancelToolParameterDraft, commitToolParameterDraft,
+  NO_TOOL_PARAMETER_DRAFT, TOOL_PARAMETER_INACTIVE_KEY, cancelToolParameterDraft, commitToolParameterDraft,
   stepToolParameterDraft, typeToolParameterDraft,
 } from '../tools/tool-parameters.ts';
 import type { ToolParameterDraft, ToolParameterFlagView, ToolParameterNumberView } from '../tools/tool-parameters.ts';
@@ -149,6 +150,64 @@ export function ParameterStepper({ view, onStep }: { readonly view: ToolParamete
       {/* The refusal is visible in the chip's title and announced here, so a
           keyboard/screen-reader user hears why nothing was written. */}
       {refusal ? <span className="sr-only" role="alert">{refusal}</span> : null}
+    </span>
+  );
+}
+
+/**
+ * The named chooser for a closed-set parameter: one segment per implemented code.
+ *
+ * HATCH's predefined pattern is the only row that carries one today, and there the
+ * three codes **are** the three patterns the host transcribed: the name is the
+ * whole choice, and a number is exactly the part a user cannot be expected to
+ * remember. So that row stops being a stepper — every implemented name is on screen
+ * at once (nothing hides behind a popup, which on this surface would also be a
+ * second native surface over the CAD window), one click picks any of them, and the
+ * chosen one carries the same accent an ON chip uses.
+ *
+ * What it keeps from the stepper it replaces: a pick is an **absolute target**
+ * dispatched through the one parameter channel (`onChoose(key, value)`), so the wire
+ * still carries the integer 1..3 and no string ever travels; the offered set is the
+ * spec's own `choices`, never a superset; nothing is mirrored locally; admission
+ * disables it; and `selected` follows the status value plus the bounded pending
+ * delta, so the host's echo (or its refusal) is what settles it.
+ *
+ * Keyboard: each segment is a real `<button>` with `aria-pressed`, so Tab reaches
+ * the row and Enter/Space picks — the same vocabulary as the ON/OFF chips beside
+ * it. (Naming it a radiogroup without roving tabindex would promise arrow keys it
+ * does not have.)
+ */
+export function ParameterChoices({ view, onChoose }: { readonly view: ToolParameterNumberView; readonly onChoose: (key: string, target: number) => void }) {
+  const { t } = useI18n();
+  const name = t(view.labelKey);
+  // A scoped row outside its sibling code (the pattern name while the fill is solid
+  // or user-defined) stays visible but inert. The reason is the row's own hint,
+  // prefixed by the one generic sentence, so the copy can never drift from the
+  // parameter it is about.
+  const title = view.inactive ? `${t(TOOL_PARAMETER_INACTIVE_KEY)} \u00b7 ${t(view.hintKey)}` : t(view.hintKey);
+  return (
+    <span
+      className={['status-choices', view.inactive ? 'is-inactive' : ''].filter(Boolean).join(' ')}
+      role="group"
+      aria-label={name}
+      title={title}
+    >
+      {view.icon ? <Icon name={view.icon as IconName} size={12} /> : null}
+      <span className="status-choices__label" aria-hidden="true">{name}</span>
+      {/* One segment per implemented code, in the host's own order. A choice is
+          absolute, so the segment the row already stands on writes nothing. */}
+      {(view.choices ?? []).map(choice => (
+        <button
+          key={choice.value}
+          type="button"
+          className={['status-choices__choice', choice.selected ? 'is-selected' : ''].filter(Boolean).join(' ')}
+          aria-pressed={choice.selected}
+          disabled={choice.disabled}
+          onClick={choice.selected ? undefined : () => onChoose(view.key, choice.value)}
+        >
+          {t(choice.labelKey)}
+        </button>
+      ))}
     </span>
   );
 }

@@ -5,12 +5,13 @@
 // command. Its point arity is the zero-point exact complement, so the chip has
 // no point step: it asks for the boundary while the host reports the tool as not
 // ready, and says the boundary is ready once the host's own `ready` flag turns
-// true. The five parameters are numeric/flag codes on the wire; the two closed
-// sets (pattern type, style) are expressed through the only control the status
-// bar has (a numeric stepper), bounded to exactly the implemented codes.
+// true. The six parameters are numeric/flag codes on the wire; two closed sets
+// (pattern type, style) are stepped, and the predefined pattern is picked **by
+// name** from the three patterns the host transcribed — the wire value there is
+// still the host's 1-based index.
 //
 // Nothing here may imply the unimplemented forms — internal-point boundary
-// internal-point boundary selection, custom pattern names/`.pat` files,
+// selection, custom pattern names/`.pat` files,
 // gradients or associativity. LINE/ARC boundary edges **are** stitched into
 // closed loops (as exact bulge arcs) and the copy says so. The **three**
 // predefined patterns the host transcribed
@@ -394,6 +395,10 @@ test('the HATCH copy exists in both locales and states the honest boundary', () 
     ...Object.values(TOOL_PARAMETER_SPECS)
       .filter(spec => spec.labelKey.startsWith('status.tool_parameter.hatch_'))
       .flatMap(spec => [spec.labelKey, spec.hintKey]),
+    // The pattern names the chooser offers are copy too, so the allow-list below
+    // covers them: a name that is not one of the three implemented patterns can
+    // never reach a segment.
+    ...Object.values(TOOL_PARAMETER_SPECS.hatchPattern.choiceLabelKeys),
   ]);
   for (const key of keys) {
     for (const locale of [zh, en]) {
@@ -447,8 +452,9 @@ test('the HATCH copy exists in both locales and states the honest boundary', () 
       'predefined patterns are implemented now',
     );
   }
-  // The predefined index row names all three implemented patterns in both
-  // locales, and the pattern-type hint names the implemented set too.
+  // The predefined pattern row names all three implemented patterns in both
+  // locales (it is a name chooser now), and the pattern-type hint names the
+  // implemented set too.
   const IMPLEMENTED_PATTERNS = ['ANSI31', 'ANSI32', 'ANSI37'];
   for (const locale of [zh, en]) {
     for (const key of ['status.tool_parameter.hatch_pattern.hint', 'status.tool_parameter.hatch_pattern_type.hint']) {
@@ -504,6 +510,55 @@ test('the HATCH copy exists in both locales and states the honest boundary', () 
       }
     }
   }
+});
+
+test('the predefined pattern is a named chooser, not a raw index stepper', async () => {
+  // The row's own shape: three named segments in the host's code order, the chosen
+  // one marked, nothing invented.
+  const row = views(parameterStatus({ hatchPatternType: 2 })).find(view => view.key === 'hatchPattern');
+  assert.deepEqual(row.choices.map(choice => choice.labelKey), [
+    'status.tool_parameter.hatch_pattern.ansi31',
+    'status.tool_parameter.hatch_pattern.ansi32',
+    'status.tool_parameter.hatch_pattern.ansi37',
+  ]);
+  assert.deepEqual(row.choices.map(choice => choice.value), [1, 2, 3]);
+  for (const choice of row.choices) {
+    assert.equal(typeof zh[choice.labelKey], 'string', choice.labelKey);
+    assert.equal(typeof en[choice.labelKey], 'string', choice.labelKey);
+  }
+  // Under a type the index does not apply to, the row is still there (the names
+  // stay discoverable) but every segment is inert — the pattern-type control is
+  // what gates it, so the two rows can never disagree.
+  for (const type of [0, 1]) {
+    const inert = views(parameterStatus({ hatchPatternType: type })).find(view => view.key === 'hatchPattern');
+    assert.ok(inert, `the row stays visible under type ${type}`);
+    assert.equal(inert.inactive, true);
+    assert.deepEqual(inert.choices.map(choice => choice.disabled), [true, true, true]);
+  }
+
+  // The status bar routes a named row to the chooser and every other numeric row
+  // to the stepper — one funnel, no duplicated controls.
+  const statusbar = await readModule('components/StatusBar.tsx');
+  assert.ok(statusbar.includes('if (view.choices) return <ParameterChoices'));
+  assert.ok(statusbar.includes('<ParameterStepper'));
+  assert.ok(statusbar.includes('onChoose={shell.stepToolParameter}'));
+  assert.ok(statusbar.includes('onStep={shell.stepToolParameter}'));
+  // The chooser dispatches the **code**, never the name: the wire stays the
+  // host's integer index and no catalog string can leak into a parameter write.
+  const controls = await readModule('components/ParameterControls.tsx');
+  assert.ok(controls.includes('onChoose(view.key, choice.value)'));
+  assert.ok(!controls.includes('onChoose(view.key, choice.labelKey)'));
+  assert.ok(!controls.includes("onChoose(view.key, t("));
+  // …and it owns no value of its own: no local state, no IPC.
+  assert.ok(!controls.includes('invoke('));
+  // The chosen segment is exposed and announced, and an inert row says why.
+  assert.ok(controls.includes('aria-pressed={choice.selected}'));
+  assert.ok(controls.includes('disabled={choice.disabled}'));
+  assert.ok(controls.includes("role=\"group\""));
+  assert.ok(controls.includes('aria-label={name}'));
+  assert.ok(controls.includes('t(TOOL_PARAMETER_INACTIVE_KEY)'));
+  // The names come from the catalog on the segment itself, not from a title only.
+  assert.ok(controls.includes('{t(choice.labelKey)}'));
 });
 
 test('the hatch glyph is a dedicated boundary-with-fill icon, not a neighbour glyph', async () => {

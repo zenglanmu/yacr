@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import {
   NO_TOOL_PARAMETER_DRAFT,
   TOOL_PARAMETER_COMMAND,
+  TOOL_PARAMETER_INACTIVE_KEY,
   TOOL_PARAMETER_INVALID_KEY,
   TOOL_PARAMETER_PENDING_CAP,
   TOOL_PARAMETER_SPECS,
@@ -46,6 +47,9 @@ test('the parameter group renders only for an active tool with a projected value
   assert.deepEqual(v, {
     kind: 'number', key: 'polygonSides', value: 8, delta: 0, effective: 8, text: '8',
     step: 1, typed: false,
+    // A plain row is not a chooser and is not scoped to a sibling code: both facets
+    // stay explicitly false/absent rather than being left off the view.
+    choices: null, inactive: false,
     labelKey: 'status.tool_parameter.polygon_sides',
     hintKey: 'status.tool_parameter.polygon_sides.hint',
     icon: 'polygon', disabled: false,
@@ -541,6 +545,7 @@ test('the tool-parameter catalog keys exist in both locales with matching placeh
     'status.tool_parameter.decrease',
     'status.tool_parameter.increase',
     'status.tool_parameter.failed',
+    TOOL_PARAMETER_INACTIVE_KEY,
   ];
   for (const spec of Object.values(TOOL_PARAMETER_SPECS)) keys.push(spec.labelKey, spec.hintKey);
   const placeholder = /(?<!\\)\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
@@ -566,5 +571,161 @@ test('the tool-parameter catalog keys exist in both locales with matching placeh
   for (const gone of ['status.polygon_sides', 'status.polygon_sides.decrease', 'status.polygon_sides.increase', 'status.polygon_sides.hint', 'status.polygon_sides.failed']) {
     assert.equal(gone in zh, false, `stale ${gone} still in zh-CN`);
     assert.equal(gone in en, false, `stale ${gone} still in en`);
+  }
+});
+
+// --- a closed set the user reads by name (HATCH's predefined pattern) --------
+// The HATCH predefined pattern used to be a raw 1..3 stepper: the user had to
+// remember that "2" means ANSI32. The wire value is unchanged (the host's 1-based
+// index); only the control gained names, so every assertion below is about the
+// *same* numeric row presenting its own `choices`.
+
+const HATCH_DEFAULTS = Object.freeze({
+  hatchPatternType: 0,
+  hatchPattern: 1,
+  hatchSpacing: 1,
+  hatchAngle: 0,
+  hatchDouble: false,
+  hatchStyle: 0,
+});
+
+const hatch = params => ({ tool: { key: 'draw.hatch', points: 0, ready: false, params: { ...HATCH_DEFAULTS, ...params } } });
+const hatchRow = (params = {}, gate = admitted, inflight = null) =>
+  toolParameterViews(hatch(params), gate, inflight).find(entry => entry.key === 'hatchPattern');
+
+test('the predefined pattern offers its three implemented names and still sends the integer index', async () => {
+  const spec = TOOL_PARAMETER_SPECS.hatchPattern;
+  // The names cover the offered set exactly — no code without a name, no name
+  // without a code — so the chooser can neither show a code the host would refuse
+  // nor hide one it accepts. (A table that ever disagreed demotes the row back to
+  // the stepper rather than inventing or dropping a value.)
+  assert.deepEqual([...spec.choices], [1, 2, 3]);
+  assert.deepEqual(Object.keys(spec.choiceLabelKeys).map(Number).sort(), [...spec.choices]);
+  for (const key of Object.values(spec.choiceLabelKeys)) {
+    for (const locale of [zh, en]) assert.equal(typeof locale[key], 'string', `missing ${key}`);
+  }
+
+  const row = hatchRow({ hatchPatternType: 2 });
+  assert.equal(row.kind, 'number');
+  // It is still the same numeric row: same key, same value slot, same bounds. The
+  // chooser is a presentation of that row, never a second parameter.
+  assert.equal(row.value, 1);
+  assert.equal(row.text, '1');
+  assert.equal(row.decrement, 0);
+  assert.equal(row.canDecrement, false);
+  assert.equal(row.increment, 2);
+  assert.equal(row.canIncrement, true);
+  // Three segments, in the host's own code order, each carrying the integer the
+  // IPC sends plus the catalog key of the name the user reads.
+  assert.deepEqual(row.choices.map(choice => [choice.value, choice.labelKey, choice.selected, choice.disabled]), [
+    [1, 'status.tool_parameter.hatch_pattern.ansi31', true, false],
+    [2, 'status.tool_parameter.hatch_pattern.ansi32', false, false],
+    [3, 'status.tool_parameter.hatch_pattern.ansi37', false, false],
+  ]);
+  // The chosen state follows the host value, so the segment that is filled is the
+  // pattern the host actually holds.
+  assert.deepEqual(hatchRow({ hatchPatternType: 2, hatchPattern: 3 }).choices.map(choice => choice.selected), [false, false, true]);
+  assert.deepEqual(row.choices.map(choice => choice.selected).filter(Boolean).length, 1);
+
+  // A pick writes exactly the 1-based index through the one numeric channel: no
+  // string, no second IPC, no name on the wire.
+  for (const [choice, index] of [[row.choices[1], 2], [row.choices[2], 3], [row.choices[0], 1]]) {
+    assert.equal(typeof choice.value, 'number');
+    assert.equal(Number.isSafeInteger(choice.value), true);
+    const calls = [];
+    const result = await setToolParameterNumber(async (...args) => { calls.push(args); return { accepted: true }; }, 'hatchPattern', choice.value);
+    assert.deepEqual(result, { kind: 'accepted' });
+    assert.deepEqual(calls, [['cad_set_tool_parameter', { parameter: 'hatchPattern', number: index }]]);
+    assert.equal(typeof calls[0][1].number, 'number');
+  }
+});
+
+test('the pattern chooser stays visible but inert outside the predefined type', () => {
+  // Solid (0) and user-defined (1) ignore the pattern index: the row is still
+  // rendered — the three names stay discoverable before the type is switched — but
+  // nothing is pickable, and the hint says why.
+  for (const type of [0, 1]) {
+    const row = hatchRow({ hatchPatternType: type });
+    assert.ok(row, `the row stays visible under type ${type}`);
+    assert.equal(row.inactive, true, `inactive under type ${type}`);
+    for (const choice of row.choices) assert.equal(choice.disabled, true, `type ${type} / ${choice.value}`);
+    // Scope, never capability: the command is admitted, so the row's `disabled`
+    // (admission alone) stays false — this is not a support claim.
+    assert.equal(row.disabled, false);
+    // The stored code is still marked, so the pattern in force is readable even
+    // while it is not being used.
+    assert.deepEqual(row.choices.filter(choice => choice.selected).map(choice => choice.value), [row.value]);
+  }
+  // Predefined (2) is the one type the index applies to.
+  const predefined = hatchRow({ hatchPatternType: 2 });
+  assert.equal(predefined.inactive, false);
+  for (const choice of predefined.choices) assert.equal(choice.disabled, false);
+  // An absent, null or non-numeric sibling value never claims the row applies.
+  for (const params of [{}, { hatchPatternType: null }, { hatchPatternType: '2' }, { hatchPatternType: 2.5 }]) {
+    const row = hatchRow(params);
+    assert.ok(row, JSON.stringify(params));
+    assert.equal(row.inactive, true, JSON.stringify(params));
+  }
+  // Command admission disables every segment independently of scope.
+  const deniedRow = hatchRow({ hatchPatternType: 2 }, denied);
+  assert.equal(deniedRow.disabled, true);
+  for (const choice of deniedRow.choices) assert.equal(choice.disabled, true);
+  // The other closed sets keep their plain steppers: only a row whose spec names
+  // its codes becomes a chooser, so the pattern-type and style controls did not
+  // change shape.
+  const rendered = toolParameterViews(hatch({ hatchPatternType: 2 }), admitted);
+  assert.deepEqual(rendered.map(entry => entry.key), ['hatchPatternType', 'hatchPattern', 'hatchSpacing', 'hatchAngle', 'hatchDouble', 'hatchStyle']);
+  for (const entry of rendered) {
+    if (entry.kind === 'number') assert.equal(entry.choices === null, entry.key !== 'hatchPattern', entry.key);
+  }
+});
+
+test('a pattern pick composes through the existing pending delta and never moves the status value', () => {
+  const status = hatch({ hatchPatternType: 2, hatchPattern: 1 });
+  const row = hatchRow({ hatchPatternType: 2, hatchPattern: 1 }, admitted, pending('hatchPattern', 1, 2));
+  // The status value is untouched: the host still holds ANSI31.
+  assert.equal(row.value, 1);
+  assert.equal(row.text, '1');
+  assert.equal(row.effective, 3);
+  // …while the picked name already reads as chosen. A choice is an absolute
+  // target, so the pick folds into the same bounded delta a step uses.
+  assert.deepEqual(row.choices.map(choice => choice.selected), [false, false, true]);
+  assert.deepEqual(stepToolParameterPending(null, status, 'hatchPattern', 3), pending('hatchPattern', 1, 2));
+  // A pending for another parameter never moves this row's chosen segment.
+  const other = hatchRow({ hatchPatternType: 2, hatchPattern: 2 }, admitted, pending('hatchStyle', 1, 1));
+  assert.deepEqual(other.choices.map(choice => choice.selected), [false, true, false]);
+  // While the host has not echoed, the delta is kept (same reference: no re-render).
+  const inflight = pending('hatchPattern', 1, 2);
+  assert.equal(reconcileToolParameterPending(inflight, status), inflight);
+  // Once the host echoes, the delta is dropped and the name is the status itself.
+  const echoedStatus = hatch({ hatchPatternType: 2, hatchPattern: 3 });
+  assert.equal(reconcileToolParameterPending(inflight, echoedStatus), null);
+  const echoed = toolParameterViews(echoedStatus, admitted).find(entry => entry.key === 'hatchPattern');
+  assert.equal(echoed.delta, 0);
+  assert.deepEqual(echoed.choices.map(choice => choice.selected), [false, false, true]);
+});
+
+test('the pattern names and the scope sentence exist in both catalogs', () => {
+  const names = Object.values(TOOL_PARAMETER_SPECS.hatchPattern.choiceLabelKeys);
+  const placeholder = /(?<!\\)\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+  for (const key of [TOOL_PARAMETER_INACTIVE_KEY, ...names]) {
+    for (const locale of [zh, en]) {
+      assert.equal(typeof locale[key], 'string', `missing ${key}`);
+      assert.ok(locale[key].trim().length > 0, `empty ${key}`);
+    }
+    const a = [...zh[key].matchAll(placeholder)].map(match => match[1]).sort();
+    const b = [...en[key].matchAll(placeholder)].map(match => match[1]).sort();
+    assert.deepEqual(a, b, `placeholders differ for ${key}`);
+  }
+  // A pattern name is the host's own table name, not translated copy: it is the
+  // same string in both locales and is never a number.
+  for (const key of names) {
+    assert.equal(zh[key], en[key], `${key} must be the pattern's own name`);
+    assert.match(zh[key], /^ANSI[0-9]+$/);
+  }
+  // The scope sentence says the row is not in effect here; it never claims the
+  // parameter is unsupported (the host would accept the write either way).
+  for (const locale of [zh, en]) {
+    assert.doesNotMatch(locale[TOOL_PARAMETER_INACTIVE_KEY], /not supported|unsupported|not implemented|不支持|尚未支持/i);
   }
 });
