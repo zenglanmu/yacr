@@ -7,7 +7,10 @@
 （构建/校验层）。校验脚本：`scripts/check-workflows.py`（必需 job 片段 + 退役 job 硬禁用契约 +
 浏览器 build/smoke/deploy 入口契约）、`scripts/test-linux-workflow.py`（变异契约）、
 `scripts/test-web-deploy-workflow.py`（浏览器流水线变异契约）、
-`scripts/test-ui-migration-guards.py`（迁移守卫契约）。
+`scripts/test-ui-migration-guards.py`（迁移守卫契约）、
+`scripts/check-command-docs.py`（§2/§2b/§3.7 的命令名与别名一致性，权威是
+`crates/cad-ui-core/src/session/commands.rs`）与它的自测
+`scripts/test-check-command-docs.py`（注入伪造名字/别名，断言检查器必然非零退出）。
 
 > **2026-10-16 迁移状态（2026-10-23 增补）**：桌面已迁移到 React/Tauri（`apps/app-linux`、`yacr`），
 > Slint 退役。编译门禁已加入 Tauri/GTK 前置（`libwebkit2gtk-4.1-dev`）与 React 前端构建
@@ -43,7 +46,7 @@
 
 | Job | Workflow | Runner | 门禁 |
 |---|---|---|---|
-| `core-quality` | core.yml | `ubuntu-latest` | fmt + clippy(exclude android/web) + 架构/fixture/workflow/迁移契约 + **代码文件 ≤1000 行**（`check-file-size.py`）+ 全目标 debug 编译；并安装 GTK/WebKitGTK 前置 + 构建 React 前端（`npm test`/`npm run build`） |
+| `core-quality` | core.yml | `ubuntu-latest` | fmt + clippy(exclude android/web) + 架构/fixture/workflow/迁移契约 + **代码文件 ≤1000 行**（`check-file-size.py`）+ **命令名/别名文档一致性**（`check-command-docs.py` + 自测 `test-check-command-docs.py`）+ 全目标 debug 编译；并安装 GTK/WebKitGTK 前置 + 构建 React 前端（`npm test`/`npm run build`） |
 | `wasm-check` | core.yml | `ubuntu-latest` | 全 workspace wasm `--lib` 检查 + 单独 `app-web` 检查 |
 | `i18n-contracts` | core.yml | `ubuntu-latest` | `python3 scripts/check-i18n.py`（双语目录 / key / 占位符 / Rust + React 静态 key / 硬编码 CJK 扫描） |
 | `shader-validation` | build.yml | `ubuntu-latest` | 离线 WGSL 解析/校验（naga，无需 GPU），失败红灯 |
@@ -134,6 +137,8 @@ python3 scripts/check-fixture-manifest.py
 python3 scripts/check-workflows.py
 python3 scripts/check-i18n.py
 python3 scripts/check-file-size.py   # 代码文件 ≤1000 行；文档不计入；自测 scripts/test-check-file-size.py
+python3 scripts/check-command-docs.py     # docs/shortcuts.md §2/§2b + autocad-command-coverage.md §3.7
+python3 scripts/test-check-command-docs.py  # 自测：注入伪造 canonical + 伪造别名，必须退出 1
 cargo check --workspace --all-targets --locked
 cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 # React 前端
@@ -184,3 +189,13 @@ done
 `test-web-deploy-workflow.py` 既证明 bundle/smoke/deploy 入口契约（pin 检查、wasm32 构建、输出目录、
 `start: ok` 断言、构件校验先于上传）会因回归而失败，也证明 `web-deploy` 的 tag/dispatch 门禁
 不能被改成「每次 push 都发布」。
+
+`check-command-docs.py` 每次运行都从 `crates/cad-ui-core/src/session/commands.rs` 重新解析
+`COMMAND_TABLE` / `MEASUREMENT_SELECTORS` / `ZOOM_STEP_SELECTORS` / `COMMAND_ALIASES`，然后检查
+`docs/shortcuts.md` §2（canonical 列必须是准入名、别名单元必须是真实别名行且映射回本行）、§2b
+（整张别名表必须与 `COMMAND_ALIASES` **完全一致**）、`docs/autocad-command-coverage.md` §3.7（第一列
+必须是准入名），以及两篇文档里每一处 ``别名 `x` `` 提法（先剥离围栏代码块）。退出码 **0** = 一致
+（`OK: 0 mismatches`）、**1** = 有 mismatch（逐条打印）、**2** = 文档/源码形状读不出来（缺章节或
+缺常量表，**不会**当成通过）。**守门范围只有名字**：§1/§3/§4/§5 与 §3 的语义边界仍是人工核对。
+本条目的证据是**本地**退出码（`scripts/test-check-command-docs.py` 注入伪造 canonical 与伪造别名
+并断言退出 1），**不是** GitHub runner 上的 job 结果（本环境 NOT RUN）。

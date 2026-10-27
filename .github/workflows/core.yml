@@ -86,6 +86,14 @@ jobs:
         run: python3 scripts/check-fixture-manifest.py
       - name: Code file size (tracked code files must stay under the line ceiling)
         run: python3 scripts/check-file-size.py
+      - name: Command docs match the command and alias tables
+        # docs/shortcuts.md §2/§2b and docs/autocad-command-coverage.md §3.7 are
+        # hand-transcribed from cad-ui-core's COMMAND_TABLE / COMMAND_ALIASES.
+        # check-command-docs.py re-parses the source tables and fails on any
+        # invented canonical name or alias; the *.py self-test proves it can fail.
+        run: |
+          python3 scripts/check-command-docs.py
+          python3 scripts/test-check-command-docs.py
       - name: Workflow, packaging and migration contracts
         run: |
           python3 scripts/check-workflows.py
