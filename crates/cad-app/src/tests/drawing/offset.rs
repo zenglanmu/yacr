@@ -300,32 +300,39 @@ fn offset_circle_grows_outward_and_shrinks_inward() {
 #[test]
 fn offset_refuses_unsupported_geometry() {
     let (mut app, mut session) = drawing_app();
-    // Entity 2 is an ARC, entity 3 an INSERT: both are outside the subset.
+    // Entity 3 is an INSERT: outside the subset and left on the generic arm.
+    // (Entity 2 is an ARC and is supported since the ARC arm landed; the ARC
+    // contract tests live in `offset_arc.rs`.)
     let count = app.workspace.documents[&DocumentId(1)]
         .drawing
         .entity_count();
-    for source in [ref_of(2), ref_of(3)] {
-        let rev = revision(&app);
-        let err = execute(
-            &mut app,
-            &mut session,
-            CommandId::OffsetEntity,
-            CommandPayload::Offset {
-                refs: vec![source.clone()],
-                side_point: point(5.0, 3.0),
-            },
-        )
-        .unwrap_err();
-        assert!(matches!(err, CadError::Unsupported(_)), "{source:?}");
-        assert_eq!(revision(&app), rev);
-        assert_eq!(
-            app.workspace.documents[&DocumentId(1)]
-                .drawing
-                .entity_count(),
-            count,
-            "nothing may be created for an unsupported source"
-        );
-    }
+    let rev = revision(&app);
+    let err = execute(
+        &mut app,
+        &mut session,
+        CommandId::OffsetEntity,
+        CommandPayload::Offset {
+            refs: vec![ref_of(3)],
+            side_point: point(5.0, 3.0),
+        },
+    )
+    .unwrap_err();
+    let message = match err {
+        CadError::Unsupported(message) => message,
+        other => panic!("expected an Unsupported refusal, got {other:?}"),
+    };
+    assert!(
+        message.contains("LINE, CIRCLE, ARC and straight-segment LWPOLYLINE"),
+        "the generic refusal names ARC: {message}"
+    );
+    assert_eq!(revision(&app), rev);
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity_count(),
+        count,
+        "nothing may be created for an unsupported source"
+    );
 }
 
 #[test]

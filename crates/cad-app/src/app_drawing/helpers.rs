@@ -506,6 +506,66 @@ pub(super) fn offset_circle(
     ))
 }
 
+/// Offset an ARC so its new radius is `|side_point − centre|`.
+///
+/// Exactly the CIRCLE distance model ([`offset_circle`]) — the same 3D distance
+/// from the centre decides the new radius, so an arc and a circle sharing a
+/// centre/radius can never disagree about what the pick means. The arc keeps its
+/// `center`, `normal`, `start` and `sweep` byte-identical and only its `radius`
+/// changes, so the offset covers the same angular span on a concentric circle
+/// (a negative sweep stays negative).
+///
+/// A degenerate stored radius, a pick at the centre and a pick on the arc's own
+/// circle (a zero offset) are explicit, named refusals rather than a silent
+/// no-op.
+pub(super) fn offset_arc(
+    center: Point3,
+    normal: Point3,
+    radius: f64,
+    start: f64,
+    sweep: f64,
+    side_point: Point3,
+) -> CadResult<(SemanticGeometry, f64)> {
+    let tol = offset_tolerance();
+    if !radius.is_finite() || radius <= tol {
+        return Err(CadError::InvalidInput(format!(
+            "OFFSET arc: source radius must be finite and positive, got {radius}"
+        )));
+    }
+    let dx = side_point.x - center.x;
+    let dy = side_point.y - center.y;
+    let dz = side_point.z - center.z;
+    let distance = (dx * dx + dy * dy + dz * dz).sqrt();
+    if !distance.is_finite() || distance <= tol {
+        return Err(CadError::InvalidInput(
+            "OFFSET arc: distance must be positive; pick a point away from the centre".into(),
+        ));
+    }
+    if (distance - radius).abs() <= tol {
+        return Err(CadError::InvalidInput(
+            "OFFSET arc: distance must be positive; pick a point off the arc's circle".into(),
+        ));
+    }
+    let new_radius = distance;
+    // The guard above already rejects a non-positive pick distance; this keeps
+    // the constructed radius's own contract explicit if that ever changes.
+    if !new_radius.is_finite() || new_radius <= tol {
+        return Err(CadError::InvalidInput(format!(
+            "OFFSET arc: computed radius must be finite and positive, got {new_radius}"
+        )));
+    }
+    Ok((
+        SemanticGeometry::Arc {
+            center,
+            normal,
+            radius: new_radius,
+            start,
+            sweep,
+        },
+        new_radius,
+    ))
+}
+
 /// Apply a list of drawing patches to a database (used by undo/redo).
 ///
 /// `forward` selects the `after` side (redo); otherwise the `before` side is

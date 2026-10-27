@@ -301,6 +301,7 @@ mod mleader_create;
 mod mtext;
 mod multileader;
 mod offset;
+mod offset_arc;
 mod offset_polyline;
 mod point;
 mod polygon;

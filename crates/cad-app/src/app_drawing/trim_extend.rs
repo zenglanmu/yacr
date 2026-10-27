@@ -21,18 +21,22 @@ struct NewEntityInsert<'a> {
 }
 
 impl Application {
-    /// Create an offset copy of a single selected LINE, CIRCLE or straight-segment
-    /// LWPOLYLINE.
+    /// Create an offset copy of a single selected LINE, CIRCLE, ARC or
+    /// straight-segment LWPOLYLINE.
     ///
     /// The picked `side_point` defines both the side and the distance: for a LINE
     /// it is the perpendicular distance to the infinite line (the new line lies
     /// on the side the point is on); for a CIRCLE the new radius is
     /// `|side_point − centre|` (a point outside the circle grows it, inside
-    /// shrinks it); for a LWPOLYLINE every segment is moved that far to the pick's
-    /// side and the vertices are re-joined with **miter** joins
+    /// shrinks it); an ARC uses exactly the same distance model and keeps its
+    /// centre, normal, start angle and sweep, so only its radius changes
+    /// ([`offset_arc`]); for a LWPOLYLINE every segment is moved that far to the
+    /// pick's side and the vertices are re-joined with **miter** joins
     /// ([`offset_polyline`]). Any other geometry kind is an explicit `Unsupported`
-    /// refusal — and an arc (bulged) polyline segment is its own named refusal
-    /// (`offset.bulge_segment`) rather than being folded into that generic arm.
+    /// refusal — an arc (bulged) polyline segment is its own named refusal
+    /// (`offset.bulge_segment`) rather than being folded into that generic arm,
+    /// and an ELLIPSE is refused by name too (a uniform offset of an ellipse is
+    /// not an ellipse; it is not faked).
     /// Exactly one source entity is required. The new entity has a fresh id, the
     /// source's layer/space, and the source's display state; one transaction and
     /// one undo step.
@@ -85,6 +89,20 @@ impl Application {
                         offset_circle(*center, *normal, *radius, *side_point)?;
                     (geometry, format!("OFFSET：圆偏移，新半径 {distance:.4}"))
                 }
+                SemanticGeometry::Arc {
+                    center,
+                    normal,
+                    radius,
+                    start,
+                    sweep,
+                } => {
+                    let (geometry, distance) =
+                        offset_arc(*center, *normal, *radius, *start, *sweep, *side_point)?;
+                    (
+                        geometry,
+                        format!("OFFSET: arc offset, new radius {distance:.4}"),
+                    )
+                }
                 SemanticGeometry::Polyline {
                     points,
                     bulges,
@@ -97,9 +115,19 @@ impl Application {
                         format!("OFFSET: polyline offset by {distance:.4} (miter joins)"),
                     )
                 }
+                // Uniformly offsetting an ellipse is not an ellipse (the offset
+                // of a non-circular conic is a higher-order curve), so it gets
+                // its own named refusal instead of being faked.
+                SemanticGeometry::Ellipse { .. } => {
+                    return Err(CadError::Unsupported(
+                        "OFFSET ellipse: a uniform offset of an ellipse is not an ellipse; \
+                         not implemented"
+                            .into(),
+                    ));
+                }
                 other => {
                     return Err(CadError::Unsupported(format!(
-                        "OFFSET supports LINE, CIRCLE and straight-segment LWPOLYLINE only, \
+                        "OFFSET supports LINE, CIRCLE, ARC and straight-segment LWPOLYLINE only, \
                          got {}",
                         geometry_kind(other)
                     )));

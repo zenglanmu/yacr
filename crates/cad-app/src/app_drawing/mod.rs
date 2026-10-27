@@ -79,8 +79,8 @@ pub(crate) use text_edit::resolve_text_edit_target;
 pub use array::MAX_ARRAY_ENTITIES;
 
 use helpers::{
-    distance, geometry_kind, is_finite_point, is_multiline_text_source, offset_circle, offset_line,
-    resolve_created_text_style,
+    distance, geometry_kind, is_finite_point, is_multiline_text_source, offset_arc, offset_circle,
+    offset_line, resolve_created_text_style,
 };
 use mirror_curves::mirror_geometry;
 use offset_polyline::offset_polyline;
