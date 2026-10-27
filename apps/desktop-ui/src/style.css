@@ -971,6 +971,61 @@ button, input, select { font: inherit; color: inherit; }
   color: var(--text-disabled);
   border-color: var(--line-soft);
 }
+/* Compact grid chooser: MTEXT's nine attachment codes. The codes are AutoCAD's
+   3×3 anchor grid, so the picker is one 20px chip — label plus the name in force —
+   that opens the nine names laid out in the same three rows and three columns the
+   codes mean. Nine inline segments with readable names would be ~600px of strip
+   and would push the drafting aids off a narrow window; the grid instead reads as
+   the diagram it is, and the chip keeps the strip's one control height. The panel
+   is a fixed in-DOM overlay placed by the shortcut menu's own `placeContextMenu`
+   (it opens upward off the status bar), with the same radius, border, shadow and
+   quiet fade as that menu so it belongs to the chrome. */
+.status-grid { display: inline-flex; }
+.status-grid__trigger {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 4px 0 7px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  background: var(--field); color: var(--text-dim);
+  font: inherit; font-size: 11px; cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.status-grid__trigger:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.status-grid__trigger:focus-visible { outline: none; border-color: var(--focus); }
+.status-grid__trigger:disabled { color: var(--text-disabled); cursor: not-allowed; }
+.status-grid__label { color: var(--text-muted); }
+.status-grid__value { color: var(--text); }
+.status-grid__caret { display: inline-flex; color: var(--text-muted); }
+.status-grid.is-inactive .status-grid__label,
+.status-grid.is-inactive .status-grid__value { color: var(--text-disabled); }
+.status-grid__menu {
+  position: fixed; z-index: 46;
+  display: grid; grid-template-columns: repeat(3, auto); gap: 2px;
+  padding: 4px;
+  background: var(--chrome-2);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .42);
+  animation: fade var(--t-fast) both;
+}
+/* The first frame exists only to be measured; it must never be seen. */
+.status-grid__menu.is-unplaced { visibility: hidden; }
+.status-grid__choice {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 20px; padding: 0 7px;
+  border: none; border-radius: var(--radius);
+  background: transparent; color: var(--text-dim);
+  font: inherit; font-size: 10.5px; white-space: nowrap; cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.status-grid__choice:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.status-grid__choice:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+/* The code in force: the same accent an ON chip (and the segmented chooser) uses,
+   so the cell the MTEXT currently anchors to is the panel's only loud element. */
+.status-grid__choice.is-selected { background: var(--on); color: #fff; }
+.status-grid__choice:disabled { color: var(--text-disabled); cursor: not-allowed; }
+.status-grid__choice.is-selected:disabled {
+  background: transparent; color: var(--text-muted);
+  outline: 1px solid var(--line-soft); outline-offset: -1px;
+}
 /* Status-bar Options entry: the ghost button surface at status-bar height, kept
    a whisper quieter than the toggle chips so it reads as a utility, not a mode. */
 .statusbar__workspace {

@@ -114,6 +114,13 @@ export interface ToolParameterNumberView {
    */
   readonly choices: readonly ToolParameterChoice[] | null;
   /**
+   * How the named set is laid out, or `null` for a plain stepper: `'segments'` is
+   * the one-row chooser, `'grid'` the compact chip that opens the names as a grid
+   * (MTEXT's 3×3 attachment codes — see the spec's `choiceLayout`). Presentation
+   * only: a pick is the same integer through the same one IPC either way.
+   */
+  readonly choiceLayout: 'segments' | 'grid' | null;
+  /**
    * Whether the row sits outside the sibling code that scopes it (`activeWhen`):
    * always `false` for a row without one. This is **scope, not capability** — the
    * host would still accept a write — so it is reported separately from `disabled`
@@ -249,10 +256,14 @@ function parameterView(
   const delta = pending && pending.key === key && pending.base === value ? pending.delta : 0;
   const effective = value + delta;
   const inactive = !activeUnder(spec, tool);
+  const choices = choiceViews(spec, effective, disabled, inactive);
   return {
     kind: 'number', key, value, delta, effective, text: String(value),
     step: spec.step, typed: spec.typed === true, swatch: spec.swatch === true,
-    choices: choiceViews(spec, effective, disabled, inactive),
+    choices,
+    // A row without a named set has no layout (`null`); a named one keeps the
+    // spec's own — `'segments'` unless it asks for the compact grid.
+    choiceLayout: choices ? (spec.choiceLayout ?? 'segments') : null,
     inactive,
     labelKey: spec.labelKey, hintKey: spec.hintKey, icon: spec.icon, disabled,
     decrement: effective - spec.step,

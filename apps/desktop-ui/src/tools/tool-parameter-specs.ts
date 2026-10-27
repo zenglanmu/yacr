@@ -101,6 +101,21 @@ export interface NumberToolParameterSpec extends ToolParameterSpecBase {
    */
   readonly choiceLabelKeys?: Readonly<Record<number, string>>;
   /**
+   * How a **named** closed set is laid out on the strip.
+   *
+   * `'segments'` (the default) is one row of segments, which is what every set so
+   * far uses. `'grid'` is a compact chip that opens the same names as a grid —
+   * reserved for a set whose codes **are** a spatial arrangement, where nine
+   * segments with readable names would take roughly 600 px of status strip and
+   * push the drafting aids off a narrow window. MTEXT's nine attachment codes are
+   * AutoCAD's 3×3 anchor grid, so the grid lays them out in the three rows and
+   * three columns the codes mean: the arrangement itself is the diagram, and the
+   * chip still sends the same integer a segment would.
+   *
+   * A row without `choiceLabelKeys` has no named set, so this field does nothing.
+   */
+  readonly choiceLayout?: 'segments' | 'grid';
+  /**
    * Whether the value is a **colour** the strip shows as a swatch, not a number.
    *
    * HATCH's two gradient stops are the only such rows: the wire carries a bare
@@ -155,6 +170,9 @@ export type ToolParameterSpecMap = Readonly<Record<string, ToolParameterSpec>>;
  *   user reads by name (the predefined HATCH patterns). Such a row renders a
  *   named chooser instead of a stepper; the value on the wire is unchanged, so
  *   the choice's name and the integer index are the same choice;
+ * - `choiceLayout` — `'segments'` (the default named chooser) or `'grid'` (the
+ *   compact grid MTEXT's 3×3 attachment codes open from one chip). Presentation
+ *   only: the wire still carries the integer code;
  * - `activeWhen` — the sibling code a row only applies under (the pattern name
  *   under the predefined pattern type, the gradient rows under the gradient type,
  *   the pattern-only rows under the two pattern types). The row stays visible but
@@ -380,6 +398,52 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     labelKey: 'status.tool_parameter.text_height',
     hintKey: 'status.tool_parameter.text_height.hint',
   },
+  // TEXT / MTEXT creation rotation, in **degrees** (the unit AutoCAD prompts
+  // with, exactly like the two HATCH angle rows). The host accepts any finite
+  // value and never wraps it — `-30` stays `-30`, and a full turn is not folded
+  // into `0` — so `offered` is plain finiteness and both steps stay available.
+  // The degrees are converted to radians exactly once by the host, never here.
+  // Both creation tools own the row (see `TOOL_PARAMETERS`).
+  //
+  // It steps by 15° like the other angle rows and is also `typed`: a rotation is
+  // routinely a value no fixed increment reaches (`12`, `22.5`, `-33.75`), and a
+  // typed value travels the same one IPC through the same `offered` guard.
+  textRotation: {
+    kind: 'number', statusKey: 'textRotation', step: 15,
+    offered: finiteAny(), typed: true,
+    labelKey: 'status.tool_parameter.text_rotation',
+    hintKey: 'status.tool_parameter.text_rotation.hint',
+  },
+  // MTEXT attachment: AutoCAD's **nine** attachment codes (DXF group 71), a
+  // closed set `1..=9` — `1..=3` are the top row (left/centre/right), `4..=6` the
+  // middle row and `7..=9` the bottom row. Unlike a pattern index, the code is a
+  // position, so the nine codes are read **by name** and laid out as the 3×3 grid
+  // they describe (`choiceLayout: 'grid'`): a name plus its place in the grid is
+  // the whole meaning, and a raw 1..9 stepper would be a number nobody decodes.
+  // The wire keeps the integer, exactly as the host's `validate` demands.
+  //
+  // MTEXT is the only owner: TEXT stays single-line at its insertion point and
+  // has no attachment, so this row never appears for `draw.text`. MTEXT's line
+  // spacing, columns, background fill and drawing direction are NOT IMPLEMENTED
+  // and therefore have no parameter (and no control) here.
+  mtextAttachment: {
+    kind: 'number', statusKey: 'mtextAttachment', step: 1,
+    ...closedSet(1, 2, 3, 4, 5, 6, 7, 8, 9),
+    choiceLabelKeys: Object.freeze({
+      1: 'status.tool_parameter.mtext_attachment.top_left',
+      2: 'status.tool_parameter.mtext_attachment.top_center',
+      3: 'status.tool_parameter.mtext_attachment.top_right',
+      4: 'status.tool_parameter.mtext_attachment.middle_left',
+      5: 'status.tool_parameter.mtext_attachment.middle_center',
+      6: 'status.tool_parameter.mtext_attachment.middle_right',
+      7: 'status.tool_parameter.mtext_attachment.bottom_left',
+      8: 'status.tool_parameter.mtext_attachment.bottom_center',
+      9: 'status.tool_parameter.mtext_attachment.bottom_right',
+    }),
+    choiceLayout: 'grid',
+    labelKey: 'status.tool_parameter.mtext_attachment',
+    hintKey: 'status.tool_parameter.mtext_attachment.hint',
+  },
 });
 
 /** Which parameters belong to an active tool, and the command that gates them. */
@@ -398,7 +462,8 @@ export type ToolParameterMap = Readonly<Record<string, ToolParameterOwner>>;
  * Three kinds are reachable today, and each is reachable because the host really
  * projects the value while that tool runs: `draw.polygon` (its side count),
  * `draw.hatch` (its ten fill parameters; HATCH captures no points) and
- * `draw.text` / `draw.mtext` (the one shared text height). The other tools are
+ * `draw.text` / `draw.mtext` (the one shared text height and the one shared
+ * creation rotation, plus the MTEXT-only attachment). The other tools are
  * not implemented and the host projects no value for their parameters, so nothing
  * renders for them (a control appears only when the tool is active **and** its
  * value is projected). A later phase makes a tool live by adding one row here
@@ -434,8 +499,12 @@ export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
   'draw.arrayrect': { command: 'ARRAYRECT', keys: ['arrayRows', 'arrayColumns', 'arrayRowSpacing', 'arrayColumnSpacing'] },
   'draw.arraypolar': { command: 'ARRAYPOLAR', keys: ['arrayItems', 'arrayFillAngle', 'arrayRotateItems'] },
   // TEXT and MTEXT create their glyphs with the **one** session `textHeight`
-  // (ADR 0019 F.1; the host projects it for both kinds), so both tools own the
-  // same single row. The gating command is the running tool's own.
-  'draw.text': { command: 'TEXT', keys: ['textHeight'] },
-  'draw.mtext': { command: 'MTEXT', keys: ['textHeight'] },
+  // (ADR 0019 F.1; the host projects it for both kinds) and read the **one**
+  // `textRotation` (degrees) at creation, so both tools own those two rows. MTEXT
+  // alone owns `mtextAttachment`: TEXT is single-line at its insertion point and
+  // has no attachment code. The gating command is the running tool's own, and the
+  // order is the order the strip shows (height, rotation, then the MTEXT-only
+  // attachment).
+  'draw.text': { command: 'TEXT', keys: ['textHeight', 'textRotation'] },
+  'draw.mtext': { command: 'MTEXT', keys: ['textHeight', 'textRotation', 'mtextAttachment'] },
 });

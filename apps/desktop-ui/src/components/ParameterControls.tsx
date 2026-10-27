@@ -9,7 +9,7 @@
 // mirrors a value and nothing here calls IPC: a step, a pick or a commit is handed
 // to the shell (`onStep`/`onChoose`), which owns the pending delta and the single
 // parameter IPC.
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
 import { Toggle } from './primitives.tsx';
@@ -17,11 +17,16 @@ import { ColorField } from './ColorChooser.tsx';
 import type { ComposingKeyEvent } from './key-events.ts';
 import { useI18n } from '../context.ts';
 import { aciChoice, selectedAciIndex } from '../color/color-value.ts';
+import { placeContextMenu } from '../commands/context-menu.ts';
+import type { MenuPlacement } from '../commands/context-menu.ts';
+import { choiceGridFocus, isChoiceGridKey } from '../tools/choice-grid.ts';
 import {
   NO_TOOL_PARAMETER_DRAFT, TOOL_PARAMETER_INACTIVE_KEY, cancelToolParameterDraft, commitToolParameterDraft,
   stepToolParameterDraft, typeToolParameterDraft,
 } from '../tools/tool-parameters.ts';
-import type { ToolParameterDraft, ToolParameterFlagView, ToolParameterNumberView } from '../tools/tool-parameters.ts';
+import type {
+  ToolParameterChoice, ToolParameterDraft, ToolParameterFlagView, ToolParameterNumberView,
+} from '../tools/tool-parameters.ts';
 
 /**
  * The bounded numeric control for one active-tool parameter.
@@ -211,6 +216,184 @@ export function ParameterChoices({ view, onChoose }: { readonly view: ToolParame
           {t(choice.labelKey)}
         </button>
       ))}
+    </span>
+  );
+}
+
+/**
+ * The compact **grid** chooser for a closed set whose codes are a position: MTEXT's
+ * nine attachment codes (AutoCAD's DXF group `71` anchor grid).
+ *
+ * Why not the segmented chooser beside it: the nine names ("Top left" … "Bottom
+ * right") are the whole meaning, but nine readable segments would be roughly
+ * 600 px of status strip — the row would push the drafting aids off a narrow
+ * window, and the strip already scrolls for HATCH's ten rows. So the row keeps one
+ * 20 px chip showing the label and the name in force, and opens the nine names as
+ * the **3×3 grid the codes describe**: the arrangement itself is the diagram, so a
+ * user picks a corner by where it sits, not by remembering that `7` means
+ * bottom-left.
+ *
+ * What it keeps from the chooser it sits beside: a pick is an absolute target
+ * dispatched through the one parameter channel (`onChoose(key, value)`), so the
+ * wire still carries the integer `1..9` and no string ever travels; the offered
+ * set is the view's own `choices` (the host's closed set plus its catalog name),
+ * never a superset; nothing is mirrored locally; admission disables the chip; and
+ * `selected` follows the status value plus the bounded pending delta.
+ *
+ * Placement: the panel is `position: fixed` and placed by the shortcut menu's own
+ * `placeContextMenu`, anchored at the chip's top-left — the status bar sits on the
+ * window's bottom edge, so the panel opens upward and is clamped inside the window.
+ * It is the same in-DOM overlay vocabulary as the shortcut menu (no second window,
+ * no portal); a press outside, a window blur/resize or any scroll closes it, and
+ * the press is not prevented, so it still does what it would have done underneath.
+ *
+ * Keyboard: on open, focus moves to the code in force. Arrow keys move in **space**
+ * (see `choiceGridFocus`: no wrapping across a row edge), Home/End jump to the first
+ * and last code, Enter/Space pick the focused cell, and Escape closes and returns
+ * focus to the chip — with `stopPropagation`, so the shell's Escape does not also
+ * cancel the running tool.
+ */
+export function ParameterGridChoices({ view, onChoose }: { readonly view: ToolParameterNumberView; readonly onChoose: (key: string, target: number) => void }) {
+  const { t } = useI18n();
+  const name = t(view.labelKey);
+  const choices = view.choices ?? [];
+  const selectedIndex = choices.findIndex(choice => choice.selected);
+  const current = selectedIndex >= 0 ? t(choices[selectedIndex].labelKey) : view.text;
+  const title = view.inactive ? `${t(TOOL_PARAMETER_INACTIVE_KEY)} \u00b7 ${t(view.hintKey)}` : t(view.hintKey);
+  const [open, setOpen] = useState(false);
+  // `null` until the panel has been measured: the first paint is invisible, so it
+  // never flashes at an unclamped position (the shortcut menu's own rule).
+  const [placed, setPlaced] = useState<MenuPlacement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  // One stable id per row, so the chip can point at the panel it opens.
+  const menuId = `status-grid-${view.key}`;
+
+  const close = useCallback((restoreFocus: boolean): void => {
+    setOpen(false);
+    setPlaced(null);
+    if (restoreFocus) triggerRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  // Measure once per open (and again if a locale/label change resizes it).
+  useLayoutEffect(() => {
+    if (!open) return;
+    const menu = menuRef.current;
+    const trigger = triggerRef.current;
+    if (!menu || !trigger) return;
+    const size = menu.getBoundingClientRect();
+    const anchor = trigger.getBoundingClientRect();
+    setPlaced(placeContextMenu({
+      anchor: { x: anchor.left, y: anchor.top },
+      size: { width: size.width, height: size.height },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    }));
+  }, [open, t]);
+
+  // Focus follows the code in force, so the first arrow key starts from the cell
+  // the user is actually on (and a host echo keeps it there).
+  useEffect(() => {
+    if (!open || !placed) return;
+    cellRefs.current[Math.max(0, selectedIndex)]?.focus({ preventScroll: true });
+  }, [open, placed, selectedIndex]);
+
+  useEffect(() => {
+    if (!open) return;
+    const inside = (target: EventTarget | null): boolean => Boolean(target && typeof target === 'object'
+      && (menuRef.current?.contains(target as Node) === true || triggerRef.current?.contains(target as Node) === true));
+    const onPointerDown = (event: PointerEvent): void => { if (!inside(event.target)) close(false); };
+    // The panel does not scroll itself, so any scroll moves the chip out from
+    // under it (or the strip under the pointer): close rather than drift.
+    const onScroll = (): void => close(false);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('blur', onScroll);
+    window.addEventListener('resize', onScroll);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('blur', onScroll);
+      window.removeEventListener('resize', onScroll);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [open, close]);
+
+  const onMenuKeyDown = (event: ComposingKeyEvent<HTMLDivElement>): void => {
+    // An IME owns its keys (the commit Enter included).
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      // The panel's Escape is its own: the shell must not also cancel the tool.
+      event.stopPropagation();
+      close(true);
+      return;
+    }
+    if (event.key === 'Tab') {
+      // Not a grid move: the browser's own focus order leaves the panel, and the
+      // panel closes behind it (no prevented default, so focus really moves on).
+      close(false);
+      return;
+    }
+    if (!isChoiceGridKey(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const focused = cellRefs.current.findIndex(cell => cell === document.activeElement);
+    cellRefs.current[choiceGridFocus(focused, event.key, choices.length)]?.focus({ preventScroll: true });
+  };
+
+  const pick = (choice: ToolParameterChoice): void => {
+    // A pick is absolute: the code already in force writes nothing, it only closes.
+    close(true);
+    if (!choice.selected) onChoose(view.key, choice.value);
+  };
+
+  return (
+    <span className={['status-grid', view.inactive ? 'is-inactive' : '', view.disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="status-grid__trigger"
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        title={title}
+        disabled={view.disabled}
+        onClick={() => setOpen(value => !value)}
+      >
+        {view.icon ? <Icon name={view.icon as IconName} size={12} /> : null}
+        {/* The chip reads the parameter's name and then the name of the code in
+            force ("Attachment  Top left"), so the row never shows a bare number. */}
+        <span className="status-grid__label">{name}</span>
+        <span className="status-grid__value">{current}</span>
+        <span className="status-grid__caret" aria-hidden="true">
+          <Icon name="chevronUp" size={10} />
+        </span>
+      </button>
+      {open ? (
+        <div
+          ref={menuRef}
+          id={menuId}
+          className={['status-grid__menu', placed ? '' : 'is-unplaced'].filter(Boolean).join(' ')}
+          role="group"
+          aria-label={name}
+          style={{ left: `${placed?.left ?? 0}px`, top: `${placed?.top ?? 0}px` }}
+          onKeyDown={onMenuKeyDown}
+        >
+          {choices.map((choice, index) => (
+            <button
+              key={choice.value}
+              ref={node => { cellRefs.current[index] = node; }}
+              type="button"
+              className={['status-grid__choice', choice.selected ? 'is-selected' : ''].filter(Boolean).join(' ')}
+              aria-pressed={choice.selected}
+              disabled={choice.disabled}
+              onClick={() => pick(choice)}
+            >
+              {t(choice.labelKey)}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </span>
   );
 }

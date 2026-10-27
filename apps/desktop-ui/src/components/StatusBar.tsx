@@ -4,7 +4,7 @@
 import React from 'react';
 import { Icon } from '../icons.tsx';
 import { Button, Toggle } from './primitives.tsx';
-import { ParameterChoices, ParameterFlag, ParameterStepper, ParameterSwatch } from './ParameterControls.tsx';
+import { ParameterChoices, ParameterFlag, ParameterGridChoices, ParameterStepper, ParameterSwatch } from './ParameterControls.tsx';
 import { useI18n, useShell } from '../context.ts';
 import type { CadImportProgress } from '../cad/cad-status.ts';
 import type { ToolParameterPending } from '../tools/tool-parameters.ts';
@@ -132,6 +132,10 @@ export function StatusBar() {
       <div className={toolParameters.length > 0 ? 'statusbar__params' : 'statusbar__params is-empty'}>
         {toolParameters.map(view => {
           if (view.kind === 'flag') return <ParameterFlag key={`${tool?.key}:${view.key}`} view={view} onToggle={shell.toggleToolParameter} />;
+          // A named set whose codes are a position (MTEXT's nine attachment
+          // codes) opens the same names as a 3×3 grid from one chip: nine
+          // segments with readable names would not fit the strip.
+          if (view.choiceLayout === 'grid') return <ParameterGridChoices key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
           // A closed set with catalog names (HATCH's predefined pattern, its gradient
           // kind) renders the same row as a named chooser instead of a stepper: the
           // wire value is still the integer code, but the user picks a name.

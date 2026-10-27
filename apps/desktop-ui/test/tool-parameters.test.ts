@@ -52,7 +52,7 @@ test('the parameter group renders only for an active tool with a projected value
     // A plain row is not a chooser, not a colour swatch and is not scoped to a
     // sibling code: all three facets stay explicitly false/absent rather than being
     // left off the view.
-    swatch: false, choices: null, inactive: false,
+    swatch: false, choices: null, choiceLayout: null, inactive: false,
     labelKey: 'status.tool_parameter.polygon_sides',
     hintKey: 'status.tool_parameter.polygon_sides.hint',
     icon: 'polygon', disabled: false,
@@ -82,7 +82,8 @@ test('the parameter group renders only for an active tool with a projected value
 
 test('the per-tool map and the spec table stay consistent', () => {
   // POLYGON, HATCH and the two text tools are reachable today; HATCH's row is its
-  // six parameters, and TEXT/MTEXT share the one text height.
+  // ten parameters, and TEXT/MTEXT share the height and rotation while MTEXT alone
+  // owns the attachment.
   assert.deepEqual(TOOL_PARAMETERS['draw.polygon'], { command: 'POLYGON', keys: ['polygonSides'] });
   assert.deepEqual(TOOL_PARAMETERS['draw.hatch'], {
     command: 'HATCH',
@@ -99,11 +100,14 @@ test('the per-tool map and the spec table stay consistent', () => {
       'hatchStyle',
     ],
   });
-  // Both text-creation tools own the same row: the host projects one session
-  // `textHeight` and both create their glyphs with it (ADR 0019 F.1), so TEXT and
-  // MTEXT can never show a different height.
-  assert.deepEqual(TOOL_PARAMETERS['draw.text'], { command: 'TEXT', keys: ['textHeight'] });
-  assert.deepEqual(TOOL_PARAMETERS['draw.mtext'], { command: 'MTEXT', keys: ['textHeight'] });
+  // Both text-creation tools own the one shared height and the one shared
+  // rotation; MTEXT alone owns the attachment (TEXT is single-line at its
+  // insertion point and has no attachment code).
+  assert.deepEqual(TOOL_PARAMETERS['draw.text'], { command: 'TEXT', keys: ['textHeight', 'textRotation'] });
+  assert.deepEqual(TOOL_PARAMETERS['draw.mtext'], {
+    command: 'MTEXT',
+    keys: ['textHeight', 'textRotation', 'mtextAttachment'],
+  });
   // Every key a tool maps to has a spec, and every spec is reachable through the
   // map — so a later phase only adds a row (the specs already exist).
   const mapped = new Set();
@@ -120,7 +124,8 @@ test('the per-tool map and the spec table stay consistent', () => {
     'arrayRotateItems', 'arrayRowSpacing', 'arrayRows', 'chamferDistanceA',
     'chamferDistanceB', 'filletRadius', 'hatchAngle', 'hatchDouble',
     'hatchGradientAngle', 'hatchGradientColorA', 'hatchGradientColorB', 'hatchGradientKind',
-    'hatchPattern', 'hatchPatternType', 'hatchSpacing', 'hatchStyle', 'polygonSides', 'textHeight',
+    'hatchPattern', 'hatchPatternType', 'hatchSpacing', 'hatchStyle', 'mtextAttachment',
+    'polygonSides', 'textHeight', 'textRotation',
   ]);
   assert.equal(TOOL_PARAMETER_SPECS.alignScale.kind, 'flag');
   assert.equal(TOOL_PARAMETER_SPECS.arrayRotateItems.kind, 'flag');
