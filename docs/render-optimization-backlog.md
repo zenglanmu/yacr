@@ -874,11 +874,16 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 
 > 本节为**交互 / 空间查询**待办，与上方渲染项分属不同层。架构、不变量、明确否决项与延后项见
 > `docs/adr/0012-scene-spatial-index-and-interaction.md`。所有收益均**未实测**，一律标「预期」。
+>
+> **2026-10-28 提示**：S1/S2 的「证据（2026-10-17）」块里的 `apps/app-linux/ui` 与
+> `(cd apps/app-linux/ui && npm ci/test)` 是**当时**的路径；React UI 已于 2026-10-23 移到
+> `apps/desktop-ui`，那些命令**原样不能再跑**（保留为历史证据，不改写）。
 
 ### S1 — 点选闭环接线（SelectAt → pick_at_screen → 高亮/属性）
 
 - **现状/问题（更新于 2026-10-17）**：**点选已接线**（`crates/cad-ui-core/src/session.rs`、`crates/cad-host`、
-  React `apps/app-linux/ui`；ADR-0012 §10 S1）。宿主线载荷 `ProbeInput` 新增可选 `button`
+  React 前端——当时在 `apps/app-linux/ui`，2026-10-23 起是 `apps/desktop-ui`；ADR-0012 §10 S1）。
+  宿主线载荷 `ProbeInput` 新增可选 `button`
   （`BUTTON_PRIMARY/MIDDLE/SECONDARY` = 0/1/2，见 `docs/input.md` §1.1）；`plan_input` 在**主键**按下+抬起、
   位移 `< DRAG_THRESHOLD_LOGICAL_PX`（4.0 逻辑像素）、期间无拖拽时发出 `Pointer{Up}` **与**
   `InteractionRequest::SelectAt{mode: Replace}`（携带当前 `metrics_revision`）；`cad-host` 把 `SelectAt` 落到

@@ -41,9 +41,10 @@ units/source/precision），而不是只给格式化字符串。
 
 ### 仍未接线（诚实开放项）
 
-- Slint 外壳 `crates/cad-ui-slint/ui/app.slint` 的「测量」按钮仍发送
-  `CommandPayload::None`；按钮已能启动距离工具，但**点选/确认/取消与算法选择
-  尚未接入 UI**（U04 的 UI 侧仍待完成）。
+- ~~Slint 外壳 `crates/cad-ui-slint/ui/app.slint` 的「测量」按钮~~：该外壳与 `app.slint`
+  **已随 2026-10-16 的 Slint 退役删除，无同名替代**。当前桌面测量入口是 `cad-ui-core` 的选择子
+  （`DIST`/`MEASUREPOLYLINE`/`MEASUREANGLE`/`AREA`/`ID`，经 ribbon 与命令行），见
+  `apps/desktop-ui/src/ribbon/ribbon-model.ts`；本条不再作为当前 UI 缺口追踪。
 - 宿主（Web/Android）尚未把画布指针映射为测量点或预览几何；`PreviewState`
   还没有消费 `SessionState::measurement_preview()` 来绘制预览。
 - `Switch2d3d` / `Orbit` 仍为 `pending(...)`，本任务不涉及 3D。

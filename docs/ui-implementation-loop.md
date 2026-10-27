@@ -1,5 +1,9 @@
 # UI 功能实现迭代（2026-10-04）
 
+> **2026-10-28 提示**：本文是逐轮实现日志（最早 2026-10-04）。文中 `cad-ui-slint`（含
+> `crates/cad-ui-slint/ui/app.slint`）、`shortcut.unsupported` 通道与 `cargo test -p cad-ui-slint`
+> 一律**已随 2026-10-16 的 Slint 退役删除**；当前键位以 `docs/shortcuts.md` 为准，下文命令仅作历史证据。
+
 ## 当前默认编译门禁
 
 后续实现按当前 workspace host 门禁执行 `cargo check --workspace --all-targets --locked`，

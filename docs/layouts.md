@@ -33,7 +33,7 @@ pub fn enumerate_layouts(db: &DrawingDatabase) -> Vec<LayoutDescriptor>;
 桥接层导出：
 
 ```rust
-// cad-ui-slint
+// cad-ui-slint（已随 2026-10-16 退役删除；下列导出面仅为历史记录）
 pub fn layout_descriptors(db: &DrawingDatabase) -> Vec<LayoutDescriptor>;
 pub fn build_scene_with_space(
     db: &DrawingDatabase,
@@ -237,8 +237,8 @@ world = OCS(normal) · translate(insert_point) · R(rotation) · S(x_scale, y_sc
 - **打印输出**：无 plot/打印路径。布局绘制是屏幕显示，不是可交付的图纸输出。
 - **倾斜/扭转/透视视口、非矩形裁剪、非均匀视口、注释性缩放、动态块**：导入时置
   `Partial` 并给出原因，本层以稳定原因码显式 `Unsupported`，按样本标记，不假装支持。
-- **布局切换 UI 控件接线**：`LayoutPanelState`（`cad-ui-slint`）已把布局列表与支持/原因
-  投影成面板状态；`.slint` 面板控件与宿主命令接线属 UI 工作流。`cad-app` 提供并测试了
+- **布局切换 UI 控件接线**：`LayoutPanelState`（`cad-ui-slint`）**已随 Slint 退役删除，无同名替代**；
+  当前桌面宿主的布局页签是 `apps/desktop-ui/src/components/LayoutTabs.tsx`。`cad-app` 提供并测试了
   校验与切换命令（`SwitchSpace` 校验真实布局表、失败保留原空间、不修改图纸、不产生
   `ChangeSet`）。
 
@@ -275,5 +275,6 @@ world = OCS(normal) · translate(insert_point) · R(rotation) · S(x_scale, y_sc
 提升、数组单元为 pre-scale 行主序、未知块为 `Missing`；SOLID 边界顶点序（面积守恒）与
 非 Z 挤出提升；倾斜 OCS 折线长度守恒。
 
-`cad-ui-slint` 的桥接测试与 `LayoutPanelState` 测试需在可构建 Slint 的宿主运行；
-本机缺 fontconfig，故以 wasm32 `--lib` 检查替代编译验证（见诚实边界说明）。
+`cad-ui-slint` 的桥接测试与 `LayoutPanelState` 测试**已随 Slint 退役删除**（该 runner 在仓库中
+**不存在，也没有当前对应物**）；本节有效的验证是上面两条 `cargo test -p cad-app` 与
+`-p cad-import-acadrust`。

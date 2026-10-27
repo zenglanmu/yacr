@@ -4,6 +4,10 @@
 它只描述本工作stream（`cad-app` / `cad-ui-slint`）实现的纯逻辑；真实 GPU 设备初始化、
 Slint 渲染与浏览器后端探测**未在本环境运行**，见文末“仍未验证”。
 
+> **2026-10-28 更正**：`cad-ui-slint`（含 `src/bridge.rs`、`src/web.rs`）**已随 2026-10-16 的 Slint
+> 退役删除**，文中这些路径**没有当前对应物**（`cad-app::recovery` 的纯逻辑仍在）；当前桌面宿主
+> 见 `docs/react-linux-app.md`。下文保留为历史记录。
+
 ## 1. 后端选择与回退（F12）
 
 后端选择的结果是一个可区分的结构，而不是一个通用字符串。`cad-app::recovery` 定义：

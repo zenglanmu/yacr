@@ -1,5 +1,10 @@
 # 响应式外壳布局与紧凑配置（U01 / U03 / U10）
 
+> **已退役（2026-10-28 加注）**：本文描述的响应式编排实现在 `crates/cad-ui-slint/**`（`src/responsive.rs`、
+> `ui/app.slint`），该 crate **已随 2026-10-16 的 Slint 退役删除**，因此文中「范围」「编译门」
+> （`cargo check -p cad-ui-slint …`）与测试名**都没有当前对应物**，仅作历史记录；当前桌面外壳见
+> `docs/react-linux-app.md`。
+
 本文件记录本轮（工作流 `ws/uxpolish`）为审计项 **U01**（单行工具栏 + compact 配置
 未消费）、**U03**（面板入口）与 **U10**（硬编码尺寸/英语长文压力）落地的响应式编排。
 规范权威是 `CAD_IMPLEMENTATION_SPEC.md` v2.0；面板接线细节见 `docs/panels.md`、
