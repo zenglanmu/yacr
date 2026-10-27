@@ -20,10 +20,10 @@
 2. **显式点名的 AutoCAD 名字**（不可穷尽）：只包含本仓库文档/ADR 真正讨论过的名字，
    来源是 `docs/compatibility.md`、`docs/shortcuts.md` 与各 ADR。它们的状态是**逐条读过源码**后写的。
 
-> **禁止的读法**：不得把 `95`、`153` 或本表任何数字读成「已实现 AutoCAD 的 X%」。AutoCAD 的
+> **禁止的读法**：不得把 `97`、`155` 或本表任何数字读成「已实现 AutoCAD 的 X%」。AutoCAD 的
 > 命令总数取决于版本、产品（完整版/ LT / 工具集）、是否含扩展与第三方；我们没有那份清单，
 > 也**没有**逐条比对过绝大多数命令的语义（例如同名命令的选项、提示顺序、系统变量副作用）。
-> 任何 `95/N` 形式的百分比都是**编造**。本审计回答的是：**我们自己承诺的词表是否名实相符**，
+> 任何 `97/N` 形式的百分比都是**编造**。本审计回答的是：**我们自己承诺的词表是否名实相符**，
 > 以及**我们明确点过名的 AutoCAD 名字还缺什么**。
 
 ---
@@ -32,19 +32,21 @@
 
 | 表 | 数量 | 源码位置 | 断言 / 说明 |
 |---|---|---|---|
-| `COMMAND_TABLE` | **95** 个选择子 | `crates/cad-ui-core/src/session/commands.rs:11` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 95` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs:130`（并断言每变体在表中**恰好一次**、`COMMAND_TABLE.len()` 相等） |
+| `COMMAND_TABLE` | **97** 个选择子 | `crates/cad-ui-core/src/session/commands.rs:11` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 97` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs:132`（并断言每变体在表中**恰好一次**、`COMMAND_TABLE.len()` 相等） |
 | `MEASUREMENT_SELECTORS` | **5** | 同文件 `:207` | `DIST` / `MEASUREPOLYLINE` / `MEASUREANGLE` / `AREA` / `ID`；**交互专用**，没有自己的 `CommandId` |
 | `ZOOM_STEP_SELECTORS` | **2** | 同文件 `:234` | `ZOOMIN` / `ZOOMOUT`（固定步进因子 `1.25` 与倒数，锚定视口中心） |
 | `ARGUMENT_SELECTORS` | **4** | 同文件 `:252` | `ZOOM` / `SNAPUNIT` / `PDMODE` / `PDSIZE`——**接受命令行参数的基选择子**，不是新命令、不是第二条 IPC |
 | `COMMAND_ALIASES` | **51** 行 | 同文件 `:522` | 别名 + 全词同义词；只收录**目标选择子真实存在**的拼写 |
-| `admissible_names()` | **153** 个可输入拼写 | 同文件（`admissible_names` 函数） | 95 + 5 + 2 + 51，去重后仍为 153（无重名）；这是**拼写**数，**不是**命令数 |
+| `admissible_names()` | **155** 个可输入拼写 | 同文件（`admissible_names` 函数） | 97 + 5 + 2 + 51，去重后仍为 155（无重名）；这是**拼写**数，**不是**命令数 |
 
-> 这些数字是**当前源码表的长度**（本次复核：表 95 / 测量 5 / 缩放 2 / 参数 4 / 别名 51 / 拼写 153）。
-> 表一变，本表与 §5 的「期望输出」都要跟着改；**权威是 §5b 那道门禁的实跑输出**，不是这里的手抄值。
+> 这些数字是**当前源码表的长度**（本次复核：表 97 / 测量 5 / 缩放 2 / 参数 4 / 别名 51 / 拼写 155）。
+> **组成**：92 → **95**（+`COPYBASE`/`CUTBASE`/`PASTEORIG`，剪贴板轮）→ **97**（+`CHAMFER POLYLINE`/
+> `FILLET POLYLINE`，同日另一 lane）。表一变，本表与 §5 的期望输出都要跟着改；**权威是 §5b 那道
+> 守门脚本的实跑输出**，不是这里的手抄值。
 
-**为什么不把 153 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
+**为什么不把 155 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
 不改变行为；`ZOOMIN`/`ZOOMOUT` 与各测量选择子不携带 `CommandId`。命令的**行为**数上限是
-`CommandId` 变体数（= 95），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
+`CommandId` 变体数（= 97），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
 
 **本项目自己的名字（AutoCAD 无同名，或同名不同义）**，不计入 AutoCAD 覆盖：
 `RESETVIEW`、`SWITCHBACKEND`、`SWITCH2D3D`、`STANDARDVIEW`（AutoCAD 的 `VIEW` 是命名的视图管理）、
@@ -156,7 +158,7 @@
 
 | AutoCAD 名 | 状态 | 界 |
 |---|---|---|
-| `COPYCLIP` / `CUTCLIP` / `PASTECLIP` | 部分 | **应用内**剪贴板：**不是** OS 剪贴板、不跨应用、替换文档即清空。**`Ctrl+C`/`Ctrl+X`/`Ctrl+V` 已接线**（`commands/accelerators.ts`，映射到本行的三个命令，准入走 `admitCommandText`）。`Ctrl+Shift+C`/`Ctrl+Shift+V`（`COPYBASE`/`PASTEBLOCK`）**未实现也未接线**：加速器表只承认 `Shift+S`/`Shift+Z`，这两个 chord 不会被降级成普通复制/粘贴 |
+| `COPYCLIP` / `CUTCLIP` / `COPYBASE` / `CUTBASE` / `PASTECLIP` / `PASTEORIG` | 部分（**集群已实现**，`PASTEBLOCK` 缺） | **应用内**剪贴板：**不是** OS 剪贴板、不跨应用、替换文档即清空。**两个捕获形状**：`COPYCLIP`/`CUTCLIP`（`Ctrl+C`/`Ctrl+X`，**不记基点**；`COPYCLIP` 只读、Viewer 可用；`CUTCLIP` work-only）与 `COPYBASE`/`CUTBASE`（`Ctrl+Shift+C`/`Ctrl+Shift+X`，在预选择之上**再抓一个基点**存进剪贴板元数据；`COPYBASE` 只读、Viewer 可用；`CUTBASE` work-only，**先删除成功再提交剪贴板（含基点）**，失败的剪切不毁旧剪贴板）。**两个粘贴形状**：`PASTECLIP`（`Ctrl+V`，**单点插入点工具**，平移 `插入点 − 基点`，`base = clipboard_base.unwrap_or(世界原点)`，复用 COPY 的同一个 `cad_db` 变换——**不再是原坐标粘贴**）与 `PASTEORIG`（原坐标，忽略基点，等价改动前的 `PASTECLIP`）。所有权重走 `commands/accelerators.ts` → `admitCommandText` 的同一准入。**仍缺**：`PASTEBLOCK`（`Ctrl+Shift+V`）**未实现**——`cad-db` 没有块写 API，加速器表故意拒绝该 chord、不降级成 `PASTECLIP` |
 | `ZOOM` | 部分 | `ZOOM <factor>`（正十进制，锚定视口中心）、`ZOOM ALL`/`EXTENTS`（⇒ `FIT`）、`ZOOMIN`/`ZOOMOUT`；**无** `WINDOW`/`PREVIOUS`/`OBJECT`/`DYNAMIC`，也**无**图纸空间比例 `nXP` |
 | `PAN` | 实现 | 视图平移（实时） |
 | `VIEW` | 部分 | 预设标准视图（top/bottom/front/back/left/right/isometric）经 IPC；**无**命名视图的保存/恢复/删除 |
@@ -203,12 +205,13 @@
 | HATCH 自定义 `76=2` / `.pat` 加载 | **M** | `.pat` 解析器（含 `*`/`;` 注释、角度/原点/偏移/虚线定义）+ 名称解析 + 缺失图案的显式拒绝；现在只有**我们转录**的三项内置表 |
 | ~~HATCH **渐变创建**~~ | **已关闭（2026-10-27）** | 双色 `LINEAR`/`SPHERICAL` 已实现（类型码 `3` + 四个参数，见 §3.1）。**仍未闭合**的是它的三个性质缺口，不再算「创建缺失」：`SPHERICAL` 在矩形/圆边界上烘焙成平色（需要按值细分内部三角形）、只有 ACI（无真彩/色簿）、`76=1` 的梯度约定**未用 vendor 文件核实** |
 | HATCH **关联性** | **L** | 需要边界→填充的持久引用（类似 `ACAD_DIMASSOC`），并定义边界编辑后的重生成/失效规则；与「实体非关联」的既有边界冲突，需 ADR |
+| `PASTEBLOCK`（`Ctrl+Shift+V`，粘贴为块） | **L** | 需要「把剪贴板实体包成一个块定义再插入」——`cad-db` **没有块写 API**（无 `BlockDefinition` 写入路径，现有 `insert_block` 只服务测试/导入构造器），要先有块定义写入口 + 命名/去重 + 与 EXPLODE/夹点/STRETCH 的交互；在它存在之前**不得**把 `Ctrl+Shift+V` 降级成 `PASTECLIP` |
 | OFFSET **含弧段折线** | **M** | 弧段偏移不是弧段（同样「椭圆的等距偏移不是椭圆」的问题），需要桥接/修剪策略；现在是 `offset.bulge_segment` 按名拒绝 |
 | OFFSET **`ELLIPSE`** | **L** | 等距偏移曲线**不是**椭圆（非圆二次曲线的高阶偏移），要么新增偏移曲线类型、要么折线近似并显式声明；两条都不是补丁 |
 
 > 其它已知缺口（不属上述名字，但读表时容易误判为已完整）：`MATCHPROP` 的 Settings 子集、
 > `ARRAY` 的 Path/关联编辑、`FILLET`/`CHAMFER` 的 Polyline 模式、`STRETCH` 的 HATCH 部分拉伸、
-> OS 剪贴板与 `COPYBASE`/`PASTEBLOCK`、`ZOOM WINDOW/PREVIOUS`、命名视图、CTB/STB 打印样式、
+> OS 剪贴板（真系统剪贴板）与 `PASTEBLOCK`（粘贴为块）、`ZOOM WINDOW/PREVIOUS`、命名视图、CTB/STB 打印样式、
 > 非均匀缩放与镜像的文字/`MULTILEADER`（域限制，非命令层缺失）。
 
 ---
@@ -234,9 +237,9 @@ aliases = [a for a, _ in re.findall(r'\("([^"]+)",\s*"([^"]+)"\)',
 names = list(dict.fromkeys(table + meas + zoom + aliases))   # = admissible_names() 的顺序
 print(len(table), len(meas), len(zoom), len(args), len(aliases), "admissible:", len(names))
 PY
-# 期望输出：95 5 2 4 51 admissible: 153
+# 期望输出：97 5 2 4 51 admissible: 155
 
-# 2) 钉住 95 的契约（变体数、表长、每变体恰好一次）
+# 2) 钉住 97 的契约（变体数、表长、每变体恰好一次）
 cargo test -p cad-ui-core --locked command_normalization_covers_every_variant
 cargo test -p cad-ui-core --locked admissible_names_cover_the_vocabulary_exactly_once
 
@@ -271,12 +274,12 @@ python3 scripts/test-check-command-docs.py   # 自测：注入伪造 canonical �
 **本次实测（仓库当前树）**：
 
 ```
-tables: 95/5/2/4 selectors, 51 aliases, 102 canonical selectors (aliases excluded)
-§2 rows: 54, §2b aliases: 51, §3.7 rows: 6, alias mentions: 1
+tables: 97/5/2/4 selectors, 51 aliases, 104 canonical selectors (aliases excluded)
+§2 rows: 57, §2b aliases: 51, §3.7 rows: 6, alias mentions: 1
 OK: 0 mismatches
 ```
 
-（`102` 是 **canonical 选择子**数：95 表 + 5 测量 + 2 缩放步进，**不含** 51 个别名；`153` 才是
+（`104` 是 **canonical 选择子**数：97 表 + 5 测量 + 2 缩放步进，**不含** 51 个别名；`155` 才是
 「可输入拼写」数，见 §2。两个数不要混用。）
 
 **它确实会失败**（同一个脚本，换输入就红）：

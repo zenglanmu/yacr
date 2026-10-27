@@ -1,3 +1,88 @@
+## 2026-10-28 第 11 轮：剪贴板集群（基点捕获 + 插入点粘贴）+ XLINE/RAY 诚实化 + 文档门禁脚本化
+
+### 结论
+
+三件事同一天落地，证据等级不同：**剪贴板命令集群**（4 个新/改命令 + UI）有 `cad-app` 契约测试与前端
+测试；**XLINE/RAY 的导入/导出诚实化**把「无限线装成 `Complete`、再以 `Exact` 导回 `LINE`」这条谎言拆掉；
+**文档门禁**从一份没人执行的 doc 代码块变成仓库脚本 + CI job。前端的两个超长文件也顺带拆开，
+第 10 轮记的 `tool-parameters.ts` 928/1000 行头寸警告**解除**。
+
+### 做了什么
+
+**A. 剪贴板集群（`cad-app` + UI）**
+
+- 命令表 92 → **95**：新增 `COPYBASE`、`CUTBASE`、`PASTEORIG`（别名仍 51）。
+- **两个捕获形状**：`COPYCLIP`/`CUTCLIP` 捕获当前选择、**不记基点**（`clipboard_base = None`，陈旧基点
+  不会改写它们）；`COPYBASE`（只读、0 事务、Viewer 可用）/`CUTBASE`（work-only）在**预选择**之上再抓
+  **一个基点**并存进 `SessionState::clipboard_base`。`CUTBASE` 的顺序是**先删除成功、再提交剪贴板与基点**，
+  失败的剪切不会毁掉旧剪贴板（`clipboard.rs::cut_to_clipboard_base`）。
+- **两个粘贴形状**：`PASTECLIP` 改为**单点插入点工具**，`delta = 插入点 − 基点`、
+  `base = clipboard_base.unwrap_or(世界原点)`，平移复用 COPY 的同一个 `cad_db::transform_geometry`；
+  `PASTEORIG` 是**原坐标**粘贴（忽略基点），即改动前的 `PASTECLIP`。两者都是新 id + 一条事务/一步撤销，
+  几何不可平移时**在开事务前整命令拒绝**。
+- **UI**：快捷键菜单加「带基点复制 / 带基点剪切 / 粘贴到原坐标」；加速器 `Ctrl+Shift+C → COPYBASE`、
+  `Ctrl+Shift+X → CUTBASE`（`commands/accelerators.ts`，未带 Shift 的 `Ctrl+C/X` 仍是 `COPYCLIP`/`CUTCLIP`）；
+  提示串 `tool.prompt.copybase.base`、`tool.prompt.pasteclip.insertion`。
+- **`PASTEBLOCK` 仍未实现**（`cad-db` 没有块写 API），`Ctrl+Shift+V` 保持不接线、也**不**降级成 `PASTECLIP`。
+
+**B. XLINE / RAY 诚实化（`cad-import-acadrust`）**
+
+- 导入：仍把无限线压成**有限 `Line`**（裁到运行中模型 bounds，**顺序相关**；无范围用默认盒），但**每个成功
+  降级都报 `Partial`**，原因是具名常量 `support::XLINE_SEGMENT_REASON` / `XLINE_DEFAULT_BOX_REASON`，
+  并额外记一次 `import.construct_line`；方向退化或裁不到盒内 → `Opaque` + `Partial`。
+- 导出：`AcDbXline`/`AcDbRay` 标记的 `Line` 仍写成 DXF `LINE`（不伪造 XLINE 载荷），但映射结果从
+  `Exact` 改为 **`Converted`**（`export.converted.line`，消息点名「实体类型改变、不再是无限线」）。
+- 文档随之改：`docs/compatibility.md` 新增 RAY/XLINE 行、`docs/dxf-entity-coverage.md` 两处 ✅ 降为
+  ⚠️ Partial、`docs/autocad-command-coverage.md` §3.1/§4 给出 **M（命令）/ L（真无限几何）** 的拆分。
+
+**C. 几何助手**
+
+- `cad-geometry` 导出 `arc_sweep_to_bulge`（`pub use transform::{arc_sweep_to_bulge, bulge_arc_geometry}`），
+  带往返与 `sweep = 0 ⇒ bulge = 0` 的契约测试。**如实声明**：当前只有它自己的测试调用它
+  （`grep` 全仓无其它 caller），是**已导出但未被消费**的公共 API。
+
+**D. 文档门禁脚本化**
+
+- `docs/autocad-command-coverage.md` §5b 里那段没人执行的 heredoc 变成仓库脚本
+  `scripts/check-command-docs.py`（自测 `scripts/test-check-command-docs.py`），CI `core-quality` 每次
+  都跑两者；文档只留「怎么跑 + 实测输出 + 它会红」的说明，规则判据不再复制。
+
+**E. 前端拆分（解除第 10 轮的行数头寸）**
+
+- `commands.ts` 557 行、`tool-parameters.ts` **502** 行（原 928）；新增 `commands/catalog.ts`（197）、
+  `commands/gating.ts`（231）、`tools/tool-parameter-specs.ts`（441）。第 10 轮记的「下一轮会顶到 1000 行」
+  警告**已解除**。
+
+### 证据（本机，2026-10-28；标注的来源各不相同）
+
+- `cargo test -p cad-app --locked` → **1313 passed / 0 failed**（剪贴板轮，本轮早段实测）；**同一工作树稍后**
+  并入 `CHAMFER POLYLINE`/`FILLET POLYLINE` 后复跑 **1324 / 0 failed**。集成套件 4 + 11 + 18 + 15 + 5 + 2
+  全 0 failed，`pick_index_real_fixture` 1 ignored。
+- `cargo test -p cad-ui-core --locked` → **292 / 0**；`-p cad-import-acadrust` → **305 / 0**（1 ignored）；
+  `-p cad-geometry` → lib **75 / 0**。
+- `cd apps/desktop-ui && npm test` → **699 pass / 0 fail**（含 `tsc --noEmit`）。
+- `python3 scripts/check-i18n.py` → **869 keys / 2 目录**。
+- `python3 scripts/check-command-docs.py` → `OK: 0 mismatches`（`tables: 97/5/2/4 selectors, 51 aliases,
+  104 canonical selectors`）；`scripts/test-check-command-docs.py` → **7 tests OK**。
+- `python3 scripts/check-file-size.py` → **1072** 个代码文件 ≤1000 行；`check-architecture.py` →
+  28 packages 无环；`check-workflows.py` → 必需/退役 job 全绿。
+- `cargo fmt --all -- --check` → **HEAD 通过**（在 `/tmp` 的 detached worktree 上验证）；**当前工作树不通过**，
+  diff 全落在另一 lane 正在写的 `crates/cad-app/src/app_drawing/polyline_fillet.rs`（未跟踪）与它的
+  `mod.rs` 重导出。**不是本轮文档改动引入的**，也不能据此宣称「工作树 fmt 绿」。
+
+### 仍未成立 / 边界（必须原样保留）
+
+1. **没有运行时证据**：剪贴板 UI（菜单项、两个提示串）与加速器只有 `tsc`/纯函数/源码结构契约，
+   **没有**挂载后的 DOM、真按键或像素证据。
+2. **`PASTEBLOCK` 未实现**：`cad-db` 无块写 API；`Ctrl+Shift+V` 不接线、不降级。
+3. **XLINE/RAY 依然不是无限几何**：导入是有界降级（`Partial`），导出是 `Converted`；真正的无限表示是
+   **ADR 级**（约 14 处编译强制点 + 约 12 处静默兜底，且 bounds 累积会被毒化）。
+4. **`76`/vendor 面**：本轮没有新增任何 vendor 对照；XLINE/RAY 的裁剪段长度只由**裁剪盒**决定。
+5. **平台 NOT RUN**：全 workspace 矩阵、wasm / Windows / Android / macOS 目标、GUI/像素/真按键均未运行；
+   Rust 侧只跑了上述四个 crate 的测试（clippy 未跑）。
+6. **树在动**：本轮期间另一 lane 落地了 `CHAMFER POLYLINE`/`FILLET POLYLINE`（表 95 → **97**，
+   canonical 104、拼写 155），文档里的计数已按**当前树**写并在 coverage §2 注明组成；工作树 fmt 失败亦源自该 lane。
+
 ## 2026-10-27 第 10 轮：HATCH 渐变创建（类型码 `3`，核心 + UI）
 
 ### 结论

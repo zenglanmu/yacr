@@ -36,7 +36,7 @@
 - **补全候选**（`apps/desktop-ui/src/components/CommandLine.tsx` + `commands.ts::filterCommandSuggestions`；
   旧文档指向的 `command-bar.slint` 已随 Slint 删除）：
   - 候选来源是 **`COMMAND_CATALOG`（显示目录）+ 宿主别名表**（`cad_command_aliases`），
-    **不是**全部 92 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
+    **不是**全部 97 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
     字母序（**不去重**，也**不是**纯字典序）。
   - 输入变化即时计算候选；候选只**填充**文本，**从不执行**命令。
   - `Tab`：**仅当有高亮行**时把命令行替换成该名字（**没有**“无高亮则第一项”的回退）。
@@ -55,10 +55,10 @@
 
 ## 2. 命令表（只列**有行为注解**的选择子）
 
-> **完整清单不在这里**：穷尽的 **92 个 canonical 选择子**（含源码位置与契约断言）见
+> **完整清单不在这里**：穷尽的 **97 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
 > `docs/autocad-command-coverage.md` §2；本节只保留**有行为注解**的行。
 > 选择子与别名的**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs`
-> （`COMMAND_TABLE` **92** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
+> （`COMMAND_TABLE` **97** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
 > `ARGUMENT_SELECTORS` **4** / `COMMAND_ALIASES` **51**）。
 > 本表的 **canonical 列**只出现**被准入的名字**，**别名列**只出现 `COMMAND_ALIASES` 里的真实行；
 > 键位、面板与 IPC 能力见 §2a，**不混进命令表**。
@@ -86,9 +86,12 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `LAYISO` | 图层（隐藏选择**不在**的图层 + 当前层保留；会话覆盖，不写 DWG、不升 revision） | 否 | — |
 | `RESTORELAYERS` | 图层（清空**全部**会话覆盖 = AutoCAD 的 LAYON/LAYUNISO 之意） | 否 | `LAYON`、`LAYUNISO` |
 | `AREA OBJECT` | 测量（对当前选择的一个闭合实体求精确面积：圆 πr² / 完整椭圆 π·a·b / 闭合折线 bulge 解析面积；选择式，非交互拾取） | 是 | — |
-| `COPYCLIP` | 剪贴板捕获（只读） | 否 | — |
-| `CUTCLIP` | 剪贴板剪切（删除并入剪贴板） | 是 | — |
-| `PASTECLIP` | 剪贴板粘贴（原坐标） | 是 | — |
+| `COPYCLIP` | 剪贴板捕获（**只读**，无事务；**不记基点**） | 否 | — |
+| `CUTCLIP` | 剪贴板剪切（捕获 + 一次事务删除；**不记基点**） | 是 | — |
+| `COPYBASE` | 剪贴板捕获 **+ 基点**（选一个基点；只读、开 0 事务，Viewer 亦可用） | 否 | — |
+| `CUTBASE` | 剪切 **+ 基点**（先删除成功、再提交剪贴板与基点；work-only） | 是 | — |
+| `PASTECLIP` | 粘贴到**插入点**：平移 `插入点 − 基点`（无基点时基点为世界原点；与 COPY 同一个 `cad_db` 变换） | 是 | — |
+| `PASTEORIG` | 粘贴到**原坐标**（忽略基点；等价改动前的 `PASTECLIP`） | 是 | — |
 | `MEASURE` | 测量入口（默认 `DIST`＝距离） | 是 | — |
 | `DIST` | 测量：2 点距离 + 角度 + Δx/Δy/Δz | 是 | — |
 | `MEASUREANGLE` | 测量：3 点顶点角（纸空间显式拒绝） | 是 | — |
@@ -256,7 +259,9 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `Ctrl+A` | `SELECTALL`（全选可见模型空间对象） | 加速器表 |
 | `Ctrl+C` | `COPYCLIP`（**应用内**剪贴板，不是 OS 剪贴板） | 加速器表 |
 | `Ctrl+X` | `CUTCLIP`（应用内剪切：一次事务/一步撤销） | 加速器表 |
-| `Ctrl+V` | `PASTECLIP`（应用内粘贴，原坐标） | 加速器表 |
+| `Ctrl+V` | `PASTECLIP`（应用内粘贴：进入**插入点**工具，平移 `插入点 − 基点`） | 加速器表 |
+| `Ctrl+Shift+C` | `COPYBASE`（捕获 **+ 基点**；只读，Viewer 亦可用） | 加速器表 |
+| `Ctrl+Shift+X` | `CUTBASE`（剪切 **+ 基点**；先删除再提交剪贴板） | 加速器表 |
 | `Ctrl+Z` | `UNDO` | 加速器表 |
 | `Ctrl+Y` / `Ctrl+Shift+Z` | `REDO` | 加速器表 |
 | `Ctrl+Home` | `FIT`（缩放到范围） | 加速器表 |
@@ -291,14 +296,14 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
   （`isComposing` 或遗留 `keyCode === 229`）→ ② 焦点在文本入口（`INPUT`/`SELECT`/`TEXTAREA` 或
   `contentEditable`，原生复制/粘贴/撤销/全选保持可用）→ ③ 宿主对话框开着（`cad_status.popup`）→
   ④ `toolActive || textStep || gripDragActive`（那三种情形归 Enter/Esc）→ ⑤ 按住 `Meta`/`Alt`
-  或没有 `Ctrl` → ⑥ 查表（`Ctrl+Home`；字母里只有 `Shift+S`/`Shift+Z` 两个带 Shift 的形式，
-  因此 `Ctrl+Shift+C/X/V` 与 `Ctrl+Shift+Home` **不会被误降级**成复制/粘贴/缩放到范围）。
+  或没有 `Ctrl` → ⑥ 查表（`Ctrl+Home`；字母里带 Shift 的形式只有 `Shift+C`/`Shift+S`/`Shift+X`/
+  `Shift+Z` 四个，因此 `Ctrl+Shift+V` 与 `Ctrl+Shift+Home` **不会被误降级**成粘贴/缩放到范围）。
 - **Viewer 模式仍是宿主侧拒绝**：加速器只做 UI 准入，`MODE` 为 Viewer 时 work-only 命令由命令层
   显式报错——键位不是第二道模式门，也不会静默改成 no-op。
 
-**仍然没有全局键的**：`Ctrl+Shift+C`（COPYBASE）、`Ctrl+Shift+X`（CUTBASE）、`Ctrl+Shift+V`
-（PASTEBLOCK）、`Ctrl+Shift+Home`，以及其余未列出的 `Ctrl+<字母/数字>`——加速器表**故意**拒绝任何
-别的带 Shift 字母，所以它们不会被降级成非 Shift 的兄弟命令。这些键**不被本应用拦截**，webview 默认
+**仍然没有全局键的**：`Ctrl+Shift+V`（`PASTEBLOCK`，命令本身未实现）、`Ctrl+Shift+Home`，以及其余
+未列出的 `Ctrl+<字母/数字>`——加速器表**故意**拒绝任何别的带 Shift 字母，所以它们不会被降级成
+非 Shift 的兄弟命令。这些键**不被本应用拦截**，webview 默认
 照旧；其中 `F5`/`Ctrl+R`/`Ctrl+Shift+R`（重载）与 `Ctrl+=`/`Ctrl+-`（页面缩放）被 `defaults.ts`
 抑制为无动作。`Ctrl+P` **不**属于这一类：它归 `PLOT`，`defaults.ts` 的打印抑制只在 `PLOT` 未被
 准入（无文档/无 `canPlot`）时才会落到键上。
@@ -323,8 +328,9 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   **没有** `shortcut.unsupported` 的消费路径（该键只存在于两个 i18n 目录，无代码引用），所以按下是
   **静默无动作**（少数浏览器默认被 `defaults.ts` 抑制）。这是**已知的诚实缺口**，旧文档的
   “通过 `shortcut.unsupported` 报告、不会静默 no-op”是 **Slint 时期**的行为，**不是现状**。
-- **Ctrl 组合键**：§3 表里的 **11 个命令 / 13 个键写法**（`Ctrl+A/C/X/V/Z/Y/Shift+Z/Home/O/N/S/Shift+S/P`，
-  其中 `Ctrl+Y` 与 `Ctrl+Shift+Z` 都是 `REDO`、`Ctrl+S` 与 `Ctrl+Shift+S` 都是 `SAVE`）已接线。
+- **Ctrl 组合键**：§3 表里的 **13 个命令 / 15 个键写法**
+  （`Ctrl+A/C/X/V/Z/Y/Shift+Z/Home/O/N/S/Shift+S/P` 加上 `Ctrl+Shift+C`/`Ctrl+Shift+X`；其中 `Ctrl+Y` 与
+  `Ctrl+Shift+Z` 都是 `REDO`、`Ctrl+S` 与 `Ctrl+Shift+S` 都是 `SAVE`）已接线。
   以下 AutoCAD 常用组合键**本仓库没有接线**（静默无动作，或落到浏览器/系统默认，
   **不是** `shortcut.unsupported`）：
   - 面板/对话框：`Ctrl+2`（DesignCenter）、`Ctrl+3`（工具选项板）、`Ctrl+4`（图纸集）、
@@ -333,10 +339,9 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     `Ctrl+F`（对象捕捉）、`Ctrl+G`（栅格）、`Ctrl+H`（拾取样式）、`Ctrl+I`（坐标）、
     `Ctrl+J`/`Ctrl+M`（重复）、`Ctrl+L`（正交）、`Ctrl+R`（视口）、`Ctrl+T`（数字化仪）、
     `Ctrl+W`（选择循环）、`Ctrl+U`（极轴）、`Ctrl+Q`（退出）。
-  - 对象/超链接：`Ctrl+K`（超链接）、`Ctrl+Shift+C`（复制为块 COPYBASE）、`Ctrl+Shift+V`
-    （粘贴为块）、`Ctrl+Shift+X`（剪切为块 CUTBASE）。**这三个带 Shift 的剪贴板 chord 故意不接线**：
-    加速器表只承认 `Shift+S`/`Shift+Z` 两个带 Shift 的形式，所以它们不会被静默降级成普通
-    复制/粘贴/剪切（`COPYBASE`/`CUTBASE`/`PASTEBLOCK` 本身也未实现）。
+  - 对象/超链接：`Ctrl+K`（超链接）未接线；`Ctrl+Shift+V`（**粘贴为块 `PASTEBLOCK`**）**仍未实现**
+    （`cad-db` 没有块写 API），所以加速器表**故意**拒绝它、也拒绝把它降级成 `PASTECLIP`。
+    （`Ctrl+Shift+C`/`Ctrl+Shift+X` 已接线到 `COPYBASE`/`CUTBASE`，见 §3。）
   - 面板/组/约束：`Ctrl+Shift+H`（选项板）、`Ctrl+Shift+A`（组）、`Ctrl+Shift+I`（推断约束）、
     `Ctrl+Shift+L`（选择对象）、`Ctrl+Shift+P`（快速特性）、`Ctrl+Shift+W`（选择循环）。
   - `Ctrl+P` **已接线到 `PLOT`**（旧文档此处说它被打印守卫占住，已过时）：`PLOT` 未被准入时
@@ -345,9 +350,10 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     其余未映射组合不拦截。
 - **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
   的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
-  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**92 个选择子**，与 `CommandId` 变体一一对应；
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**97 个选择子**，与 `CommandId` 变体一一对应；
   P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`/`LAYOFF`/
-  `PDMODE`/`PDSIZE`，2026-10-27 再加 `LAYERP`/`AREA OBJECT`**——`ID` 是测量选择子、
+  `PDMODE`/`PDSIZE`，2026-10-27 再加 `LAYERP`/`AREA OBJECT`，**2026-10-28 再加 `COPYBASE`/`CUTBASE`/
+  `PASTEORIG`**——`ID` 是测量选择子、
   `LAYUNISO`/`LAYON` 是既有 `RESTORELAYERS` 的别名，都不新增 `CommandId`；`LAYERP` **已不是**别名）；
   不在表内的名字在 chrome 侧就按 `command.unsupported` 拒绝（**`command.unknown` 这个键没有消费方**，
   见 §1）；宿主侧「认识这个名字、但该路径不可用」（如 `PLOT`/`SAVE` 的受限路径）同样报告
@@ -377,8 +383,14 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   **不是**椭圆，不拿近似当实现。其余几何走通用 `Unsupported`
   （`OFFSET supports LINE, CIRCLE, ARC and straight-segment LWPOLYLINE only, got …`），不创建、不部分执行。
   **没有全局自交修剪**：只在顶点处检测局部塌缩，远端偏移段之间的自交**不检查**（声明）。
-- **`Ctrl+C/X/V` 是应用内剪贴板**，**不是**操作系统剪贴板：不与其他应用互通，也不跨文档
-  （替换文档时清空）。无 OS 剪贴板读写。
+- **剪贴板是应用内的**，**不是**操作系统剪贴板：不与其他应用互通，也不跨文档（替换文档时清空），
+  无 OS 剪贴板读写。**两个捕获形状 + 两个粘贴形状**（2026-10-28 起）：
+  `COPYCLIP`/`CUTCLIP`（`Ctrl+C`/`Ctrl+X`）**不记基点**；`COPYBASE`/`CUTBASE`
+  （`Ctrl+Shift+C`/`Ctrl+Shift+X`）在预选择之上**再选一个基点**并把它存进剪贴板元数据。
+  **`PASTECLIP` 已改为插入点粘贴**（`Ctrl+V` 进入单点工具，平移 `插入点 − 基点`，无基点时基点为
+  世界原点，复用 COPY 的同一个 `cad_db` 变换）；**要原坐标请用 `PASTEORIG`**——它就是改动前的
+  `PASTECLIP`。`CUTBASE` 是「先删除成功、再提交剪贴板（含基点）」，失败的剪切不会毁掉旧剪贴板。
+  **`PASTEBLOCK`（`Ctrl+Shift+V`）仍未实现**（没有块写 API），`Ctrl+Shift+V` 保持不接线。
 - **导出**：`SAVE` 是**有损 DXF 另存**（`Partial`，记录每次转换/丢弃），**不是** DWG 往返保存；
   `PLOT` 为矢量 SVG/PDF 导出。**真实图纸上的导出兼容性未验证**。
 - 任何未支持的能力都返回显式 `Unsupported`/`Partial` 或稳定诊断码，**绝不**把失败改写成空成功。
@@ -388,8 +400,8 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
 ## 5. 平台与证据范围
 
 - **桌面宿主是主验收面**：React/Tauri 宿主（Linux 原生 Wayland；X11 走 dom-canvas 载体）上的
-  命令行、绘制/编辑命令与应用内剪贴板（ribbon / 右键菜单 / 命令行选择子 / §3 的 `Ctrl+C/X/V`
-  加速器）均已接线；**键位只有 §3 列出的那些**（其余 `Ctrl+*` 未接线）。证据以源码契约 + 单测为主，
+  命令行、绘制/编辑命令与应用内剪贴板（ribbon / 右键菜单 / 命令行选择子 / §3 的 `Ctrl+C/X/V` 与
+  `Ctrl+Shift+C/X` 加速器）均已接线；**键位只有 §3 列出的那些**（其余 `Ctrl+*` 未接线）。证据以源码契约 + 单测为主，
   真实窗口/像素证据见 `docs/validation-*.md`（历史轮次，不得推广）。
 - `TRIM`/`EXTEND` 在桌面宿主已接线（与 Web 宿主同一命令路径）：目标支持 `LINE`/`ARC`（`TRIM` 另支持
   `CIRCLE`，且自 2026-10-27 起支持 `SPLINE` 目标——子曲线精确、**切割参数**来自采样），边界支持
