@@ -95,6 +95,60 @@ fn assert_partial(overlay: &VisualOverlay) {
     );
 }
 
+/// The fixed chord count of a `$PDMODE` `32` circle surround.
+const RING_SEGMENTS: usize = POINT_SURROUND_CIRCLE_SEGMENTS;
+
+/// One surround square's four sides, in emission order, for a `±half` square:
+/// bottom-left → bottom-right → top-right → top-left, back to bottom-left.
+fn square_offsets(half: f64) -> [(f64, f64); 8] {
+    let (left, right) = (-half, half);
+    let (bottom, top) = (-half, half);
+    [
+        (left, bottom),
+        (right, bottom),
+        (right, bottom),
+        (right, top),
+        (right, top),
+        (left, top),
+        (left, top),
+        (left, bottom),
+    ]
+}
+
+/// A closed [`RING_SEGMENTS`]-chord ring of `radius`, as the surround emits it:
+/// every vertex on the circumscribed radius, every consecutive pair a full chord,
+/// and the last vertex bit-identical to the first (a closed ring, not an arc).
+fn assert_closed_ring(ring: &[(f64, f64)], radius: f64) {
+    assert_eq!(
+        ring.len(),
+        RING_SEGMENTS * 2,
+        "one closed ring of {RING_SEGMENTS} chords: {ring:?}"
+    );
+    let step = std::f64::consts::TAU / RING_SEGMENTS as f64;
+    let chord = 2.0 * radius * (step * 0.5).sin();
+    for (index, pair) in ring.chunks(2).enumerate() {
+        let (sx, sy) = pair[0];
+        let (ex, ey) = pair[1];
+        assert!(
+            (sx.hypot(sy) - radius).abs() < 1e-5,
+            "chord {index} start ({sx}, {sy}) is not on the radius {radius}"
+        );
+        assert!(
+            (ex.hypot(ey) - radius).abs() < 1e-5,
+            "chord {index} end ({ex}, {ey}) is not on the radius {radius}"
+        );
+        assert!(
+            ((ex - sx).hypot(ey - sy) - chord).abs() < 1e-5,
+            "chord {index} is not {chord} long: ({sx}, {sy}) -> ({ex}, {ey})"
+        );
+    }
+    assert_eq!(
+        ring[ring.len() - 1],
+        ring[0],
+        "the ring must close on its first vertex exactly"
+    );
+}
+
 #[test]
 fn each_implemented_base_mode_draws_its_documented_glyph() {
     // Mode 2: `+` (two axis-aligned segments).
@@ -289,47 +343,212 @@ fn an_unusable_pdsize_falls_back_to_the_viewport_relative_size_once() {
     }
 }
 
-/// `$PDMODE` bits 32/64 add a circle/square around the base glyph. Those shapes
-/// are NOT IMPLEMENTED: the base glyph is drawn, the requested shapes are named
-/// once, and no substitute geometry is invented.
+/// `$PDMODE` bits `32`/`64` add a circle/square around the base glyph, drawn as
+/// explicit segments in the same `Lines` batch: `35` is a cross inside a circle.
 #[test]
-fn surrounding_shape_bits_are_reported_and_only_the_base_glyph_is_drawn() {
-    // 32 | 3 -> cross, circle requested.
+fn mode_35_is_a_cross_inside_one_closed_sixteen_segment_ring() {
     let circle_cross = overlay_at(style(35, 0.0));
+    let all = offsets(&circle_cross);
+    assert_eq!(
+        all.len(),
+        4 + RING_SEGMENTS * 2,
+        "the cross's two segments plus one closed ring"
+    );
     assert_offsets(
-        &offsets(&circle_cross),
+        &all[..4],
         &[(-2.5, -2.5), (2.5, 2.5), (-2.5, 2.5), (2.5, -2.5)],
     );
-    assert_eq!(codes(&circle_cross), vec!["overlay.point-mode-shape-bits"]);
-    let message = &circle_cross.diagnostics[0].message;
-    assert!(message.contains("32"), "{message}");
-    assert!(message.contains("circle"), "{message}");
-    assert!(message.contains("NOT IMPLEMENTED"), "{message}");
-    assert_partial(&circle_cross);
+    // Radius = the marker half extent, i.e. the ring circumscribes the cross.
+    assert_closed_ring(&all[4..], 2.5);
+    assert!(
+        circle_cross.diagnostics.is_empty(),
+        "cross + circle is fully implemented: {:?}",
+        circle_cross.diagnostics
+    );
+    assert_eq!(circle_cross.completeness, Completeness::Complete);
+    // Still one batch: the ring shares colour, order and topology with the glyph.
+    assert_eq!(circle_cross.drawn(), 1);
+    assert_eq!(circle_cross.batches[0].topology, RenderTopology::Lines);
+    assert_eq!(circle_cross.batches[0].color, POINT_MARKER_COLOR);
+    assert_eq!(circle_cross.batches[0].draw_order, POINT_MARKER_DRAW_ORDER);
+    assert!(!circle_cross.batches[0].color_unresolved);
+}
 
-    // 64 | 2 -> plus, square requested.
+/// `66` (`64 | 2`) is a plus inside a square: exactly four extra segments at
+/// `±half`, i.e. the same square the grip marker draws.
+#[test]
+fn mode_66_is_a_plus_inside_a_four_segment_square_at_half_extent() {
     let square_plus = overlay_at(style(66, 0.0));
+    let all = offsets(&square_plus);
+    assert_eq!(
+        all.len(),
+        4 + POINT_SURROUND_SQUARE_SEGMENTS * 2,
+        "the plus's two segments plus the square's four sides"
+    );
     assert_offsets(
-        &offsets(&square_plus),
+        &all[..4],
         &[(-2.5, 0.0), (2.5, 0.0), (0.0, -2.5), (0.0, 2.5)],
     );
-    assert_eq!(codes(&square_plus), vec!["overlay.point-mode-shape-bits"]);
-    assert!(square_plus.diagnostics[0].message.contains("64"));
-    assert!(square_plus.diagnostics[0].message.contains("square"));
+    assert_offsets(&all[4..], &square_offsets(2.5));
+    assert!(square_plus.diagnostics.is_empty());
+    assert_eq!(square_plus.completeness, Completeness::Complete);
+    assert_eq!(square_plus.drawn(), 1);
+}
 
-    // 96 = 32 | 64 -> both shapes named in the same single diagnostic.
+/// `96 | 4` (tick + circle + square) draws both surrounds and invents no base
+/// glyph beyond the tick the base bits ask for.
+#[test]
+fn mode_100_is_a_tick_with_both_surrounds_and_no_invented_base_glyph() {
     let both = overlay_at(style(96 | 4, 0.0));
-    assert_offsets(&offsets(&both), &[(0.0, -2.5), (0.0, 2.5)]);
-    assert_eq!(codes(&both), vec!["overlay.point-mode-shape-bits"]);
-    let message = &both.diagnostics[0].message;
+    let all = offsets(&both);
+    assert_eq!(
+        all.len(),
+        2 + POINT_SURROUND_SQUARE_SEGMENTS * 2 + RING_SEGMENTS * 2,
+        "tick + square + ring, nothing else"
+    );
+    assert_offsets(&all[..2], &[(0.0, -2.5), (0.0, 2.5)]);
+    assert_offsets(
+        &all[2..2 + POINT_SURROUND_SQUARE_SEGMENTS * 2],
+        &square_offsets(2.5),
+    );
+    assert_closed_ring(&all[2 + POINT_SURROUND_SQUARE_SEGMENTS * 2..], 2.5);
     assert!(
-        message.contains("32") && message.contains("64"),
-        "{message}"
+        both.diagnostics.is_empty(),
+        "tick + circle + square is fully implemented: {:?}",
+        both.diagnostics
+    );
+    assert_eq!(both.completeness, Completeness::Complete);
+    assert_eq!(both.drawn(), 1);
+}
+
+/// The surrounding shapes leave the base-bit decoding exactly as it was: bare
+/// `32` decodes as base `0` (the dot approximation, hence its diagnostic) and
+/// bare `33` as base `1` (no base glyph, ring only). AutoCAD's own rendering of a
+/// bare `32` is **not verified**, so no per-shape exception is invented; there is
+/// one decoding rule.
+#[test]
+fn bare_32_and_33_keep_the_base_bit_decoding_and_only_add_the_ring() {
+    assert_eq!(32 & 0x1F, 0, "the surround bit leaves the base bits alone");
+    assert_eq!(33 & 0x1F, 1);
+
+    // 32 = circle + base 0, i.e. the honest plus approximation inside the ring.
+    let dot_ring = overlay_at(style(32, 0.0));
+    let all = offsets(&dot_ring);
+    assert_eq!(all.len(), 4 + RING_SEGMENTS * 2);
+    assert_offsets(
+        &all[..4],
+        &[(-2.5, 0.0), (2.5, 0.0), (0.0, -2.5), (0.0, 2.5)],
+    );
+    assert_closed_ring(&all[4..], 2.5);
+    assert_eq!(
+        codes(&dot_ring),
+        vec!["overlay.point-mode-dot"],
+        "base 0 stays an honest approximation and gets no shape diagnostic"
+    );
+    assert_partial(&dot_ring);
+
+    // 33 = circle + base 1: no base glyph at all, the ring only.
+    let ring_only = overlay_at(style(33, 0.0));
+    let all = offsets(&ring_only);
+    assert_eq!(
+        all.len(),
+        RING_SEGMENTS * 2,
+        "base 1 draws no glyph; the ring is the whole marker"
+    );
+    assert_closed_ring(&all, 2.5);
+    assert!(
+        ring_only.diagnostics.is_empty(),
+        "base 1 + circle is fully implemented: {:?}",
+        ring_only.diagnostics
+    );
+    assert_eq!(ring_only.completeness, Completeness::Complete);
+}
+
+/// An unimplemented base mode (5..=31) still reports
+/// `overlay.point-mode-unsupported`, and a requested surround is drawn without
+/// inventing the missing base glyph.
+#[test]
+fn an_unsupported_base_mode_with_a_surround_draws_the_ring_and_no_base_glyph() {
+    for base in 5..=31 {
+        let overlay = overlay_at(style(32 | base, 0.0));
+        let all = offsets(&overlay);
+        assert_eq!(
+            all.len(),
+            RING_SEGMENTS * 2,
+            "base {base}: the requested ring only, no invented glyph"
+        );
+        assert_closed_ring(&all, 2.5);
+        assert_eq!(
+            codes(&overlay),
+            vec!["overlay.point-mode-unsupported"],
+            "base {base} must be refused by name"
+        );
+        assert!(
+            overlay.diagnostics[0]
+                .message
+                .contains(&format!("base mode {base}")),
+            "{}",
+            overlay.diagnostics[0].message
+        );
+        assert_partial(&overlay);
+    }
+}
+
+/// The 4000 cap counts **markers**, not the vertices the surrounds add, and the
+/// worst case stays inside the documented structural vertex bound.
+#[test]
+fn the_cap_counts_markers_not_surround_vertices() {
+    // `96 | 4`: tick (1 segment) + square (4) + ring (16) = 21 segments = 42
+    // vertices per marker. Fixed, never zoom-derived.
+    const VERTICES_PER_TICK_SURROUND_MARKER: usize = 42;
+    let worst = style(96 | 4, 0.0);
+    let at_cap: Vec<Point3> = (0..POINT_MARKER_LIMIT as u64)
+        .map(|i| p(i as f64, 0.0))
+        .collect();
+    let overlay = point_marker_overlay(&at_cap, viewport(), worst, DocumentId(1));
+    assert_eq!(overlay.drawn(), 1, "still one bounded batch");
+    assert_eq!(
+        overlay.batches[0].vertices.len(),
+        POINT_MARKER_LIMIT * VERTICES_PER_TICK_SURROUND_MARKER
+    );
+    assert!(
+        overlay.diagnostics.is_empty(),
+        "no diagnostic at exactly the cap"
+    );
+    assert_eq!(overlay.completeness, Completeness::Complete);
+
+    let over_cap: Vec<Point3> = (0..(POINT_MARKER_LIMIT as u64 + 1))
+        .map(|i| p(i as f64, 0.0))
+        .collect();
+    let overlay = point_marker_overlay(&over_cap, viewport(), worst, DocumentId(1));
+    assert_eq!(overlay.drawn(), 1);
+    assert_eq!(
+        overlay.batches[0].vertices.len(),
+        POINT_MARKER_LIMIT * VERTICES_PER_TICK_SURROUND_MARKER,
+        "the first {POINT_MARKER_LIMIT} markers are drawn, even though one more \
+         marker's vertices would fit in any vertex-based cap"
     );
     assert_eq!(
-        both.batches[0].vertices.len(),
-        2,
-        "no circle/square geometry is invented around the tick"
+        codes(&overlay),
+        vec!["overlay.point-marker-limit"],
+        "exactly one diagnostic, never one per point"
+    );
+    assert!(overlay.diagnostics[0].message.contains("4001"));
+    assert!(overlay.diagnostics[0].message.contains("4000"));
+    assert_partial(&overlay);
+
+    // The widest marker this path can emit (cross + square + ring = 22 segments):
+    // the exact capped vertex count is the documented structural bound.
+    let widest = style(96 | 3, 0.0);
+    let overlay = point_marker_overlay(&over_cap, viewport(), widest, DocumentId(1));
+    assert_eq!(
+        overlay.batches[0].vertices.len(),
+        POINT_MARKER_LIMIT * POINT_MARKER_MAX_SEGMENTS_PER_MARKER * 2
+    );
+    assert_eq!(
+        overlay.batches[0].vertices.len(),
+        POINT_MARKER_MAX_VERTICES,
+        "the cap bound is exact for the widest marker, not an estimate"
     );
 }
 
@@ -355,6 +574,23 @@ fn unexpressible_modes_are_refused_by_name_instead_of_substituted() {
     assert_offsets(&offsets(&unknown_bit), &[(0.0, -2.5), (0.0, 2.5)]);
     assert_eq!(codes(&unknown_bit), vec!["overlay.point-mode-unsupported"]);
     assert!(unknown_bit.diagnostics[0].message.contains("128"));
+
+    // An unknown bit neither hides nor invents the implemented geometry: the
+    // valid bits (tick 4, circle 32, square 64) still draw, the 128 bit is named.
+    let unknown_with_surrounds = overlay_at(style(96 | 4 | 128, 0.0));
+    let all = offsets(&unknown_with_surrounds);
+    assert_eq!(
+        all.len(),
+        2 + POINT_SURROUND_SQUARE_SEGMENTS * 2 + RING_SEGMENTS * 2
+    );
+    assert_eq!(
+        codes(&unknown_with_surrounds),
+        vec!["overlay.point-mode-unsupported"]
+    );
+    assert!(unknown_with_surrounds.diagnostics[0]
+        .message
+        .contains("128"));
+    assert_partial(&unknown_with_surrounds);
 
     // A negative mode is not a point display mode at all.
     let negative = overlay_at(style(-3, 0.0));

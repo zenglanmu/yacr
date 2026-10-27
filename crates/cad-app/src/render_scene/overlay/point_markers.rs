@@ -17,9 +17,13 @@
 //! style can only arrive with the imported drawing.
 //!
 //! The topology is `Lines` (`cad_scene::RenderTopology` has no `Points`
-//! variant), which is why a dot is an approximation and the surrounding
-//! circle/square shapes are refused; both are reported, never dropped silently.
+//! variant), which is why a dot is an approximation. The `$PDMODE` surrounding
+//! shapes (`32` circle, `64` square, `96` both) *are* drawn — as explicit
+//! segments in the same batch, see [`super::point_surrounds`] — and a circle is
+//! therefore a closed chord ring, not a conic. The dot approximation is reported,
+//! never dropped silently.
 
+use super::point_surrounds::push_point_surrounds;
 use super::preview::line_batch;
 use super::*;
 use crate::layers::LayerOverrideSet;
@@ -70,10 +74,31 @@ pub const POINT_DISPLAY_SIZE_LIMIT: f64 = 1.0e6;
 /// `$PDMODE` bits that request a surrounding shape around the base marker
 /// (`32` circle, `64` square, `96` both).
 ///
-/// These shapes are **NOT IMPLEMENTED**: the overlay draws the base marker and
-/// reports the requested shapes once (see [`point_marker_overlay`]), so nothing
-/// is dropped silently and no substitute shape is invented.
+/// The shapes are implemented ([`super::point_surrounds`]); this mask is what
+/// decides which bits are **valid** mode bits. Anything outside
+/// `0x1F | this mask` is not part of the AutoCAD point display mode and is
+/// reported as `overlay.point-mode-unsupported`.
 const PDMODE_SURROUNDING_SHAPE_BITS: i16 = 32 | 64;
+
+/// Largest base arm table ([`PLUS_ARMS`] / [`CROSS_ARMS`]: two segments).
+///
+/// Used only for the structural vertex bound of a capped batch; the emitted
+/// count still comes from the actual plan.
+const POINT_MARKER_MAX_BASE_ARMS: usize = 2;
+
+/// Structural upper bound on the `LineList` segments one marker can emit: the
+/// widest base glyph plus both surrounding shapes.
+///
+/// The circle is a fixed [`super::POINT_SURROUND_CIRCLE_SEGMENTS`]-chord ring and
+/// the square [`super::POINT_SURROUND_SQUARE_SEGMENTS`] sides, so this is a real
+/// bound, not an estimate; nothing here scales with zoom.
+pub const POINT_MARKER_MAX_SEGMENTS_PER_MARKER: usize =
+    POINT_MARKER_MAX_BASE_ARMS + POINT_SURROUND_SQUARE_SEGMENTS + POINT_SURROUND_CIRCLE_SEGMENTS;
+
+/// Structural upper bound on the vertices of one capped marker batch: two
+/// vertices per segment of the widest marker, [`POINT_MARKER_LIMIT`] times over.
+pub const POINT_MARKER_MAX_VERTICES: usize =
+    POINT_MARKER_LIMIT * POINT_MARKER_MAX_SEGMENTS_PER_MARKER * 2;
 
 /// One marker segment, in units of the marker half-extent: `(dx0, dy0, dx1, dy1)`.
 type MarkerArm = (f64, f64, f64, f64);
@@ -91,6 +116,8 @@ const NO_ARMS: [MarkerArm; 0] = [];
 struct MarkerPlan {
     /// Segments to emit per point, in units of the half-extent. Empty = no marker.
     arms: &'static [MarkerArm],
+    /// Surrounding shapes requested by bits `32`/`64`, drawn around the arms.
+    surrounds: PointSurrounds,
     /// `(code, message)` per unsupported/approximated aspect, in report order.
     findings: Vec<(&'static str, String)>,
 }
@@ -98,20 +125,28 @@ struct MarkerPlan {
 /// Decide what one `$PDMODE` value draws, and what has to be reported about it.
 ///
 /// Supported base glyphs are `0` dot, `1` none, `2` plus, `3` cross and `4`
-/// vertical tick. Two of those are **not literal**:
+/// vertical tick. One of those is **not literal**: `0` (dot) cannot be rasterised
+/// by a `Lines`-only topology (there is no `Points` topology, and adding one is
+/// out of scope), so it is drawn as the smallest plus glyph this path can express
+/// and reported as `Partial` — it is **not** a dot.
 ///
-/// * `0` (dot) cannot be rasterised by a `Lines`-only topology (there is no
-///   `Points` topology, and adding one is out of scope), so it is drawn as the
-///   smallest plus glyph this path can express and reported as `Partial` — it is
-///   **not** a dot.
-/// * The `32`/`64` bits request a circle/square around the base glyph; those
-///   shapes are **NOT IMPLEMENTED**, so the base glyph is drawn and the requested
-///   shapes are named once.
+/// Bits `32` (circle) and `64` (square) add the surrounding shapes as explicit
+/// segments in the same batch ([`super::point_surrounds`]); `96` is both. They
+/// are fully implemented, so they raise no diagnostic of their own.
 ///
 /// Any value the project cannot express as a whole (a negative mode, a base mode
 /// above `4`, a bit outside `0..=4 | 32 | 64`) is reported as
 /// `overlay.point-mode-unsupported`; whatever part *is* expressible is drawn and
 /// nothing is invented for the rest.
+///
+/// The base decoding is `mode & 0x1F` and is deliberately **unchanged** by the
+/// surrounding shapes, so the additive rule AutoCAD documents for `35`/`66`
+/// holds: `32 | 3` is a circle around the cross. Note the arithmetic
+/// consequence, which is pinned by tests rather than special-cased: bare `32`
+/// decodes as base `0` (the dot approximation, plus a circle) and bare `33` as
+/// base `1` (nothing, plus a circle). Whether AutoCAD itself shows a centre dot
+/// for a bare `32` is **not verified**; inventing an exception would make the
+/// decode depend on which shape bit is set, which is worse than one rule.
 fn marker_plan(mode: i16) -> MarkerPlan {
     let mut findings: Vec<(&'static str, String)> = Vec::new();
     if mode < 0 {
@@ -124,6 +159,7 @@ fn marker_plan(mode: i16) -> MarkerPlan {
         ));
         return MarkerPlan {
             arms: &NO_ARMS,
+            surrounds: PointSurrounds::NONE,
             findings,
         };
     }
@@ -131,7 +167,7 @@ fn marker_plan(mode: i16) -> MarkerPlan {
     // anything else is not part of the AutoCAD point display mode.
     let base = mode & 0x1F;
     let unknown_bits = mode & !(0x1F | PDMODE_SURROUNDING_SHAPE_BITS);
-    let (arms, base_name): (&'static [MarkerArm], &str) = match base {
+    let arms: &'static [MarkerArm] = match base {
         // A dot cannot be a real dot in a Lines-only topology. Two
         // approximations were possible: a plus at the configured size, or a
         // shrunken plus. The configured size is chosen deliberately — a dot is
@@ -139,20 +175,26 @@ fn marker_plan(mode: i16) -> MarkerPlan {
         // every unstyled drawing's points look at `$PDSIZE = 0`, while a plus at
         // the configured size is exactly the marker this overlay drew before the
         // point style existed. The glyph is still reported as an approximation.
-        0 => (&PLUS_ARMS, "plus, standing in for the dot"),
-        1 => (&NO_ARMS, "nothing"),
-        2 => (&PLUS_ARMS, "plus"),
-        3 => (&CROSS_ARMS, "cross"),
-        4 => (&TICK_ARMS, "vertical tick"),
-        _ => (&NO_ARMS, "no base shape"),
+        0 => &PLUS_ARMS,
+        1 => &NO_ARMS,
+        2 => &PLUS_ARMS,
+        3 => &CROSS_ARMS,
+        4 => &TICK_ARMS,
+        _ => &NO_ARMS,
+    };
+    let surrounds = PointSurrounds {
+        circle: mode & 32 != 0,
+        square: mode & 64 != 0,
     };
     if base == 0 {
         findings.push((
             "overlay.point-mode-dot",
-            "PDMODE 0 is a dot, which the Lines-only marker topology cannot draw; \
-             the point is marked with the smallest plus glyph this topology can \
-             draw instead (an approximation, not a dot), sized by PDSIZE"
-                .into(),
+            format!(
+                "PDMODE {mode} selects the dot base shape (0), which the Lines-only \
+                 marker topology cannot draw; the point is marked with the smallest plus \
+                 glyph this topology can draw instead (an approximation, not a dot), \
+                 sized by PDSIZE"
+            ),
         ));
     }
     let mut refused: Vec<String> = Vec::new();
@@ -168,34 +210,21 @@ fn marker_plan(mode: i16) -> MarkerPlan {
         ));
     }
     if !refused.is_empty() {
-        let tail = if arms.is_empty() {
+        let tail = if arms.is_empty() && surrounds.is_empty() {
             "no POINT marker is drawn for this mode"
         } else {
-            "only the expressible base marker is drawn and no substitute shape is invented"
+            "only the expressible marker parts are drawn and no substitute shape is invented"
         };
         findings.push((
             "overlay.point-mode-unsupported",
             format!("PDMODE {mode}: {}; {tail}", refused.join("; ")),
         ));
     }
-    if mode & PDMODE_SURROUNDING_SHAPE_BITS != 0 {
-        let mut shapes: Vec<&str> = Vec::new();
-        if mode & 32 != 0 {
-            shapes.push("32 (circle)");
-        }
-        if mode & 64 != 0 {
-            shapes.push("64 (square)");
-        }
-        findings.push((
-            "overlay.point-mode-shape-bits",
-            format!(
-                "PDMODE {mode} requests the surrounding shape(s) {}; those shapes are \
-                 NOT IMPLEMENTED, so only the base marker ({base_name}) is drawn",
-                shapes.join(" + ")
-            ),
-        ));
+    MarkerPlan {
+        arms,
+        surrounds,
+        findings,
     }
-    MarkerPlan { arms, findings }
 }
 
 /// The single sanitisation rule for `$PDSIZE`.
@@ -298,13 +327,17 @@ pub fn visible_point_marker_positions(
 /// nothing was going to be drawn.
 ///
 /// Every unsupported or approximated aspect of the style is reported **once** per
-/// call (`overlay.point-mode-dot`, `overlay.point-mode-shape-bits`,
-/// `overlay.point-mode-unsupported`, `overlay.point-size-sanitized`) together with
-/// the cap diagnostic, and the overlay is `Partial` when any of them applies —
-/// never a silent drop, never one diagnostic per point.
+/// call (`overlay.point-mode-dot`, `overlay.point-mode-unsupported`,
+/// `overlay.point-size-sanitized`) together with the cap diagnostic, and the
+/// overlay is `Partial` when any of them applies — never a silent drop, never one
+/// diagnostic per point. The implemented `$PDMODE` surrounding shapes (`32`
+/// circle, `64` square) are geometry, not diagnostics.
 ///
 /// Cost is `O(visible points)`: a single vertex buffer and a single batch, with
-/// no per-point allocation.
+/// no per-point allocation. The per-marker segment count is fixed (base arms plus
+/// [`POINT_SURROUND_SQUARE_SEGMENTS`]/[`POINT_SURROUND_CIRCLE_SEGMENTS`], see
+/// [`PointSurrounds::segment_count`]), bounded by
+/// [`POINT_MARKER_MAX_SEGMENTS_PER_MARKER`], and never derived from zoom.
 pub fn point_marker_overlay(
     points: &[Point3],
     viewport_bounds: Option<(Point3, Point3)>,
@@ -340,8 +373,10 @@ pub fn point_marker_overlay(
         } else {
             points
         };
-        // One glyph per point, `plan.arms` explicit `LineList` segment pairs each.
-        let mut vertices: Vec<Point3> = Vec::with_capacity(drawn.len() * plan.arms.len() * 2);
+        // One glyph per point: `plan.arms` explicit `LineList` segment pairs, plus
+        // the requested surrounding shapes, in the same batch.
+        let segments_per_marker = plan.arms.len() + plan.surrounds.segment_count();
+        let mut vertices: Vec<Point3> = Vec::with_capacity(drawn.len() * segments_per_marker * 2);
         for point in drawn {
             for (dx0, dy0, dx1, dy1) in plan.arms {
                 vertices.push(Point3 {
@@ -355,6 +390,7 @@ pub fn point_marker_overlay(
                     z: point.z,
                 });
             }
+            push_point_surrounds(&mut vertices, *point, half, plan.surrounds);
         }
         if let Some(batch) = line_batch(
             &vertices,
