@@ -292,6 +292,7 @@ mod explode_self_reference;
 mod grip;
 mod grip_fixture;
 mod hatch;
+mod hatch_gradient;
 mod hatch_predefined;
 mod hatch_stitch;
 mod join;

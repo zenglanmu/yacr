@@ -969,7 +969,11 @@ fn authorizing_command(parameter: ToolParameter) -> CommandId {
         | ToolParameter::HatchSpacing
         | ToolParameter::HatchAngle
         | ToolParameter::HatchDouble
-        | ToolParameter::HatchStyle => CommandId::Hatch,
+        | ToolParameter::HatchStyle
+        | ToolParameter::HatchGradientKind
+        | ToolParameter::HatchGradientAngle
+        | ToolParameter::HatchGradientColorA
+        | ToolParameter::HatchGradientColorB => CommandId::Hatch,
         // TEXT (P7a): the glyph height is authorized against the TEXT create
         // command, so a Viewer-mode set is refused exactly like the other create
         // parameters. MTEXT captures with the **same** parameter (its only height

@@ -70,13 +70,43 @@ impl ToolValue {
 /// command synthesizes. `0` is a solid fill; `1` is a user-defined pattern
 /// (angle/spacing/double); `2` is a **predefined** pattern from the small
 /// hand-transcribed table in `cad_domain::hatch::patterns` (`ANSI31`, `ANSI32`,
-/// `ANSI37`), selected by [`ToolParameter::HatchPattern`]. A custom (`76=2`)
-/// pattern name / `.pat` file is NOT IMPLEMENTED.
+/// `ANSI37`), selected by [`ToolParameter::HatchPattern`]; `3` is a two-colour
+/// **gradient** ([`ToolParameter::HatchGradientKind`] / `HatchGradientAngle` /
+/// `HatchGradientColorA` / `HatchGradientColorB`). A custom (`76=2`) pattern
+/// name / `.pat` file is NOT IMPLEMENTED.
 pub const HATCH_PATTERN_TYPE_SOLID: f64 = 0.0;
 /// The user-defined pattern type code (see [`HATCH_PATTERN_TYPE_SOLID`]).
 pub const HATCH_PATTERN_TYPE_USER_DEFINED: f64 = 1.0;
 /// The predefined pattern type code (see [`HATCH_PATTERN_TYPE_SOLID`]).
 pub const HATCH_PATTERN_TYPE_PREDEFINED: f64 = 2.0;
+/// The gradient fill type code (see [`HATCH_PATTERN_TYPE_SOLID`]).
+///
+/// The created entity still records `HatchPatternType::Predefined` (`76=1`):
+/// a gradient HATCH is written as a solid fill plus the 450-470 gradient block,
+/// so no definition rows exist. That mapping is an **unverified vendor
+/// convention** (declared), not a round-tripped file claim.
+pub const HATCH_PATTERN_TYPE_GRADIENT: f64 = 3.0;
+
+/// HATCH gradient-kind closed set (`LINEAR`): a 1D ramp along the gradient
+/// angle.
+pub const HATCH_GRADIENT_LINEAR: f64 = 0.0;
+/// The radial gradient kind code (`SPHERICAL`): the value is the normalised
+/// distance from the centre of the boundary extent.
+///
+/// Never emit the DXF spelling `CYLINDER`: the domain silently bakes it as
+/// spherical, so offering it would be a second name for one behaviour.
+pub const HATCH_GRADIENT_SPHERICAL: f64 = 1.0;
+
+/// The default ACI index of the gradient's start stop: **1 (red)**.
+///
+/// ACI `0` is the ByBlock placeholder (it has no sRGB triple, so it cannot be a
+/// gradient stop) and ACI `7` is white, which merges with a light background;
+/// `1..=9` are the standard saturated colours, so `1` (red) is a real colour and
+/// the canonical first stop.
+pub const HATCH_GRADIENT_DEFAULT_ACI_A: f64 = 1.0;
+/// The default ACI index of the gradient's end stop: **5 (blue)**, the red/blue
+/// pair being visually distinct on any background.
+pub const HATCH_GRADIENT_DEFAULT_ACI_B: f64 = 5.0;
 
 /// HATCH style closed set (DXF group 75, ADR 0018 A.3): `0` Normal (odd-parity
 /// area), `1` Outer (outermost area only), `2` Ignore (through the entire area).
@@ -143,11 +173,30 @@ pub enum ToolParameter {
     /// parameter is the single source and its default is the documented
     /// [`TEXT_DEFAULT_HEIGHT`] constant.
     TextHeight,
+    /// HATCH gradient kind for a [`HATCH_PATTERN_TYPE_GRADIENT`] fill: a
+    /// **closed set** — `0` Linear (`"LINEAR"`), `1` Spherical
+    /// (`"SPHERICAL"`). The domain's `"CYLINDER"` spelling is deliberately not
+    /// offered: it bakes as spherical.
+    HatchGradientKind,
+    /// HATCH gradient angle in **degrees** (the prompt unit, like
+    /// [`Self::HatchAngle`]): any finite value, no implicit wrap. The command
+    /// converts it exactly once with `.to_radians()` when it builds the entity,
+    /// because the domain stores the gradient angle **in radians** verbatim (the
+    /// import path never converts either — pinned by a round-trip test).
+    HatchGradientAngle,
+    /// HATCH gradient start-stop colour as an **integer ACI index** in
+    /// `0..=255` (the `ToolValue` channel carries no colour type), resolved
+    /// through the ACI palette into the stop's sRGB triple. ACI `0` is accepted
+    /// by the channel but refused by the command: it is the ByBlock
+    /// placeholder, not a colour.
+    HatchGradientColorA,
+    /// HATCH gradient end-stop colour (see [`Self::HatchGradientColorA`]).
+    HatchGradientColorB,
 }
 
 impl ToolParameter {
     /// Every member, in a fixed order (the key round-trip uses it).
-    pub const ALL: [ToolParameter; 19] = [
+    pub const ALL: [ToolParameter; 23] = [
         ToolParameter::PolygonSides,
         ToolParameter::FilletRadius,
         ToolParameter::ChamferDistanceA,
@@ -167,10 +216,14 @@ impl ToolParameter {
         ToolParameter::HatchDouble,
         ToolParameter::HatchStyle,
         ToolParameter::TextHeight,
+        ToolParameter::HatchGradientKind,
+        ToolParameter::HatchGradientAngle,
+        ToolParameter::HatchGradientColorA,
+        ToolParameter::HatchGradientColorB,
     ];
 
     /// Number of members (the store's fixed width).
-    pub const COUNT: usize = 19;
+    pub const COUNT: usize = 23;
 
     /// The dense index of this member in [`Self::ALL`] (the store's slot).
     pub fn index(self) -> usize {
@@ -194,6 +247,10 @@ impl ToolParameter {
             Self::HatchDouble => 16,
             Self::HatchStyle => 17,
             Self::TextHeight => 18,
+            Self::HatchGradientKind => 19,
+            Self::HatchGradientAngle => 20,
+            Self::HatchGradientColorA => 21,
+            Self::HatchGradientColorB => 22,
         }
     }
 
@@ -223,6 +280,10 @@ impl ToolParameter {
             Self::HatchDouble => "hatchDouble",
             Self::HatchStyle => "hatchStyle",
             Self::TextHeight => "textHeight",
+            Self::HatchGradientKind => "hatchGradientKind",
+            Self::HatchGradientAngle => "hatchGradientAngle",
+            Self::HatchGradientColorA => "hatchGradientColorA",
+            Self::HatchGradientColorB => "hatchGradientColorB",
         }
     }
 
@@ -267,6 +328,14 @@ impl ToolParameter {
     ///   constant (the drawing's `Style` table carries no height, so there is no
     ///   style value to defer to and the default is stated rather than invented
     ///   per invocation). 2.5 matches the dimension text height default.
+    /// * `HatchGradientKind` **0 (Linear)** — the straightforward ramp; the
+    ///   radial kind is the deliberate alternative.
+    /// * `HatchGradientAngle` **0** degrees — the ramp runs along the hatch
+    ///   plane's +X axis (the same 0 as the pattern angle).
+    /// * `HatchGradientColorA` / `HatchGradientColorB` **1 (red) / 5 (blue)** —
+    ///   both are real palette colours ([`HATCH_GRADIENT_DEFAULT_ACI_A`] /
+    ///   [`HATCH_GRADIENT_DEFAULT_ACI_B`]) and are visually distinct, which ACI
+    ///   `0` (ByBlock, no colour at all) could never be.
     ///
     /// Note the fill-angle range (ADR 0016 decision A): the legal values are
     /// `0 < |angle| <= 360`, so the full-circle **default 360 is re-settable** (a
@@ -293,6 +362,10 @@ impl ToolParameter {
             Self::HatchDouble => ToolValue::Flag(false),
             Self::HatchStyle => ToolValue::Number(HATCH_STYLE_NORMAL),
             Self::TextHeight => ToolValue::Number(TEXT_DEFAULT_HEIGHT),
+            Self::HatchGradientKind => ToolValue::Number(HATCH_GRADIENT_LINEAR),
+            Self::HatchGradientAngle => ToolValue::Number(0.0),
+            Self::HatchGradientColorA => ToolValue::Number(HATCH_GRADIENT_DEFAULT_ACI_A),
+            Self::HatchGradientColorB => ToolValue::Number(HATCH_GRADIENT_DEFAULT_ACI_B),
         }
     }
 
@@ -325,8 +398,9 @@ impl ToolParameter {
                     HATCH_PATTERN_TYPE_SOLID,
                     HATCH_PATTERN_TYPE_USER_DEFINED,
                     HATCH_PATTERN_TYPE_PREDEFINED,
+                    HATCH_PATTERN_TYPE_GRADIENT,
                 ],
-                "0 (solid), 1 (user-defined) or 2 (predefined)",
+                "0 (solid), 1 (user-defined), 2 (predefined) or 3 (gradient)",
             ),
             (Self::HatchPattern, ToolValue::Number(number)) => {
                 predefined_pattern_choice(self, number)
@@ -342,6 +416,20 @@ impl ToolParameter {
                 "0 (Normal), 1 (Outer) or 2 (Ignore)",
             ),
             (Self::TextHeight, ToolValue::Number(number)) => finite_greater_than(self, number, 0.0),
+            (Self::HatchGradientKind, ToolValue::Number(number)) => closed_choice(
+                self,
+                number,
+                &[HATCH_GRADIENT_LINEAR, HATCH_GRADIENT_SPHERICAL],
+                "0 (Linear) or 1 (Spherical)",
+            ),
+            (Self::HatchGradientAngle, ToolValue::Number(number)) => finite(self, number),
+            // The ACI index is an integer in `0..=255`. Index `0` is the ByBlock
+            // placeholder (no colour), so the command refuses it when it builds
+            // the stop; the channel accepts the documented ACI domain.
+            (Self::HatchGradientColorA, ToolValue::Number(number))
+            | (Self::HatchGradientColorB, ToolValue::Number(number)) => {
+                integer_in_range(self, number, 0, 255)
+            }
             (Self::AlignScale, ToolValue::Flag(_))
             | (Self::ArrayRotateItems, ToolValue::Flag(_))
             | (Self::HatchDouble, ToolValue::Flag(_)) => Ok(()),
@@ -518,453 +606,4 @@ impl Default for ToolParameterStore {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A refusal must name the parameter and the accepted range (or kind).
-    fn assert_refusal_names_parameter(error: CadError, key: &str) {
-        match error {
-            CadError::InvalidInput(message) => {
-                assert!(
-                    message.contains(key),
-                    "the refusal must name the parameter '{key}': {message}"
-                );
-            }
-            other => panic!("expected an InvalidInput refusal, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn every_member_has_a_unique_stable_key_and_round_trips() {
-        assert_eq!(ToolParameter::ALL.len(), ToolParameter::COUNT);
-        let mut keys = std::collections::BTreeSet::new();
-        for parameter in ToolParameter::ALL {
-            assert!(
-                keys.insert(parameter.key()),
-                "duplicate key {}",
-                parameter.key()
-            );
-            assert_eq!(
-                ToolParameter::from_key(parameter.key()),
-                Some(parameter),
-                "the key must round-trip"
-            );
-        }
-        assert_eq!(ToolParameter::from_key("nope"), None);
-    }
-
-    #[test]
-    fn defaults_are_the_documented_values() {
-        assert_eq!(
-            ToolParameter::PolygonSides.default_value(),
-            ToolValue::Number(4.0)
-        );
-        assert_eq!(
-            ToolParameter::FilletRadius.default_value(),
-            ToolValue::Number(0.0)
-        );
-        assert_eq!(
-            ToolParameter::ChamferDistanceA.default_value(),
-            ToolValue::Number(0.0)
-        );
-        assert_eq!(
-            ToolParameter::ChamferDistanceB.default_value(),
-            ToolValue::Number(0.0)
-        );
-        assert_eq!(
-            ToolParameter::AlignScale.default_value(),
-            ToolValue::Flag(false)
-        );
-        assert_eq!(
-            ToolParameter::ArrayRows.default_value(),
-            ToolValue::Number(1.0)
-        );
-        assert_eq!(
-            ToolParameter::ArrayColumns.default_value(),
-            ToolValue::Number(1.0)
-        );
-        assert_eq!(
-            ToolParameter::ArrayRowSpacing.default_value(),
-            ToolValue::Number(0.0)
-        );
-        assert_eq!(
-            ToolParameter::ArrayColumnSpacing.default_value(),
-            ToolValue::Number(0.0)
-        );
-        assert_eq!(
-            ToolParameter::ArrayItems.default_value(),
-            ToolValue::Number(1.0)
-        );
-        assert_eq!(
-            ToolParameter::ArrayFillAngle.default_value(),
-            ToolValue::Number(360.0)
-        );
-        assert_eq!(
-            ToolParameter::ArrayRotateItems.default_value(),
-            ToolValue::Flag(false)
-        );
-
-        // The store starts at exactly those defaults.
-        let store = ToolParameterStore::defaults();
-        for parameter in ToolParameter::ALL {
-            assert_eq!(store.get(parameter), parameter.default_value());
-        }
-    }
-
-    #[test]
-    fn polygon_sides_accepts_the_integer_range_and_refuses_fractional_or_out_of_range() {
-        for accepted in [3.0, 4.0, 1024.0] {
-            ToolParameter::PolygonSides
-                .validate(ToolValue::Number(accepted))
-                .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
-        }
-        // Fractional 4.5 is refused, not rounded.
-        assert_refusal_names_parameter(
-            ToolParameter::PolygonSides
-                .validate(ToolValue::Number(4.5))
-                .unwrap_err(),
-            "polygonSides",
-        );
-        for refused in [2.0, 0.0, 1025.0, f64::NAN, f64::INFINITY] {
-            assert_refusal_names_parameter(
-                ToolParameter::PolygonSides
-                    .validate(ToolValue::Number(refused))
-                    .unwrap_err(),
-                "polygonSides",
-            );
-        }
-        // A Flag for a numeric parameter is a kind mismatch.
-        assert_refusal_names_parameter(
-            ToolParameter::PolygonSides
-                .validate(ToolValue::Flag(true))
-                .unwrap_err(),
-            "polygonSides",
-        );
-    }
-
-    #[test]
-    fn fillet_radius_and_chamfer_distances_accept_zero_and_positive_finite() {
-        for parameter in [
-            ToolParameter::FilletRadius,
-            ToolParameter::ChamferDistanceA,
-            ToolParameter::ChamferDistanceB,
-        ] {
-            for accepted in [0.0, 0.5, 1e9] {
-                parameter
-                    .validate(ToolValue::Number(accepted))
-                    .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
-            }
-            for refused in [-1e-9, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-                assert_refusal_names_parameter(
-                    parameter.validate(ToolValue::Number(refused)).unwrap_err(),
-                    parameter.key(),
-                );
-            }
-            assert_refusal_names_parameter(
-                parameter.validate(ToolValue::Flag(true)).unwrap_err(),
-                parameter.key(),
-            );
-        }
-    }
-
-    #[test]
-    fn array_counts_accept_one_and_above_and_refuse_zero_fractional_and_negative() {
-        for parameter in [
-            ToolParameter::ArrayRows,
-            ToolParameter::ArrayColumns,
-            ToolParameter::ArrayItems,
-        ] {
-            for accepted in [1.0, 2.0, 100.0] {
-                parameter
-                    .validate(ToolValue::Number(accepted))
-                    .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
-            }
-            for refused in [0.0, 0.5, -1.0, f64::NAN, f64::INFINITY] {
-                assert_refusal_names_parameter(
-                    parameter.validate(ToolValue::Number(refused)).unwrap_err(),
-                    parameter.key(),
-                );
-            }
-            assert_refusal_names_parameter(
-                parameter.validate(ToolValue::Flag(true)).unwrap_err(),
-                parameter.key(),
-            );
-        }
-    }
-
-    #[test]
-    fn array_spacing_accepts_any_finite_value_and_refuses_non_finite() {
-        for parameter in [
-            ToolParameter::ArrayRowSpacing,
-            ToolParameter::ArrayColumnSpacing,
-        ] {
-            // The channel accepts any finite spacing (including negative); the
-            // ARRAYRECT command (P4c) is what refuses a negative spacing.
-            for accepted in [0.0, 1.5, -2.0] {
-                parameter
-                    .validate(ToolValue::Number(accepted))
-                    .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
-            }
-            for refused in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-                assert_refusal_names_parameter(
-                    parameter.validate(ToolValue::Number(refused)).unwrap_err(),
-                    parameter.key(),
-                );
-            }
-            assert_refusal_names_parameter(
-                parameter.validate(ToolValue::Flag(false)).unwrap_err(),
-                parameter.key(),
-            );
-        }
-    }
-
-    #[test]
-    fn array_fill_angle_accepts_within_a_turn_including_the_full_circle_and_refuses_zero_and_beyond(
-    ) {
-        // The legal range is `0 < |angle| <= 360`: the full-circle default 360 is
-        // re-settable (and -360 too), so a user who steps away can return to it.
-        for accepted in [90.0, 180.0, 359.0, -90.0, 0.5, 360.0, -360.0] {
-            ToolParameter::ArrayFillAngle
-                .validate(ToolValue::Number(accepted))
-                .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
-        }
-        // 0, anything beyond a single turn, and non-finite values are refused
-        // (no implicit wrap).
-        for refused in [0.0, 360.5, 720.0, -720.0, -360.5, f64::NAN, f64::INFINITY] {
-            assert_refusal_names_parameter(
-                ToolParameter::ArrayFillAngle
-                    .validate(ToolValue::Number(refused))
-                    .unwrap_err(),
-                "arrayFillAngle",
-            );
-        }
-        assert_refusal_names_parameter(
-            ToolParameter::ArrayFillAngle
-                .validate(ToolValue::Flag(true))
-                .unwrap_err(),
-            "arrayFillAngle",
-        );
-    }
-
-    #[test]
-    fn flags_accept_booleans_and_refuse_numbers() {
-        for parameter in [ToolParameter::AlignScale, ToolParameter::ArrayRotateItems] {
-            assert!(parameter.validate(ToolValue::Flag(true)).is_ok());
-            assert!(parameter.validate(ToolValue::Flag(false)).is_ok());
-            assert_refusal_names_parameter(
-                parameter.validate(ToolValue::Number(1.0)).unwrap_err(),
-                parameter.key(),
-            );
-        }
-    }
-
-    #[test]
-    fn the_store_round_trips_a_validated_value_per_slot() {
-        let mut store = ToolParameterStore::defaults();
-        store.set(ToolParameter::PolygonSides, ToolValue::Number(7.0));
-        store.set(ToolParameter::AlignScale, ToolValue::Flag(true));
-        assert_eq!(
-            store.get(ToolParameter::PolygonSides),
-            ToolValue::Number(7.0)
-        );
-        assert_eq!(store.get(ToolParameter::AlignScale), ToolValue::Flag(true));
-        // Untouched slots keep their defaults.
-        assert_eq!(
-            store.get(ToolParameter::ArrayFillAngle),
-            ToolValue::Number(360.0)
-        );
-    }
-
-    #[test]
-    fn hatch_defaults_are_valid_and_documented() {
-        assert_eq!(
-            ToolParameter::HatchPatternType.default_value(),
-            ToolValue::Number(HATCH_PATTERN_TYPE_SOLID)
-        );
-        assert_eq!(
-            ToolParameter::HatchPattern.default_value(),
-            ToolValue::Number(1.0),
-            "the default predefined pattern is the first table entry (ANSI31)"
-        );
-        assert_eq!(
-            ToolParameter::HatchSpacing.default_value(),
-            ToolValue::Number(1.0)
-        );
-        assert_eq!(
-            ToolParameter::HatchAngle.default_value(),
-            ToolValue::Number(0.0)
-        );
-        assert_eq!(
-            ToolParameter::HatchDouble.default_value(),
-            ToolValue::Flag(false)
-        );
-        assert_eq!(
-            ToolParameter::HatchStyle.default_value(),
-            ToolValue::Number(HATCH_STYLE_NORMAL)
-        );
-        // A default the channel would refuse at commit would make the tool limp
-        // into a forced error, so every HATCH default must itself be valid.
-        for parameter in [
-            ToolParameter::HatchPatternType,
-            ToolParameter::HatchPattern,
-            ToolParameter::HatchSpacing,
-            ToolParameter::HatchAngle,
-            ToolParameter::HatchDouble,
-            ToolParameter::HatchStyle,
-        ] {
-            parameter
-                .validate(parameter.default_value())
-                .unwrap_or_else(|error| panic!("{parameter:?} default refused: {error}"));
-        }
-        assert_eq!(ToolParameter::HatchDouble.kind(), ToolValueKind::Flag);
-        for parameter in [
-            ToolParameter::HatchPatternType,
-            ToolParameter::HatchPattern,
-            ToolParameter::HatchSpacing,
-            ToolParameter::HatchAngle,
-            ToolParameter::HatchStyle,
-        ] {
-            assert_eq!(parameter.kind(), ToolValueKind::Number, "{parameter:?}");
-        }
-    }
-
-    #[test]
-    fn hatch_spacing_is_finite_and_strictly_positive() {
-        for accepted in [1e-9, 0.5, 1.0, 1e9] {
-            ToolParameter::HatchSpacing
-                .validate(ToolValue::Number(accepted))
-                .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
-        }
-        for refused in [0.0, -1e-9, -2.0, f64::NAN, f64::INFINITY] {
-            assert_refusal_names_parameter(
-                ToolParameter::HatchSpacing
-                    .validate(ToolValue::Number(refused))
-                    .unwrap_err(),
-                "hatchSpacing",
-            );
-        }
-        assert_refusal_names_parameter(
-            ToolParameter::HatchSpacing
-                .validate(ToolValue::Flag(true))
-                .unwrap_err(),
-            "hatchSpacing",
-        );
-    }
-
-    #[test]
-    fn hatch_angle_accepts_any_finite_value_and_refuses_non_finite() {
-        for accepted in [0.0, 90.0, -270.0, 1e6] {
-            ToolParameter::HatchAngle
-                .validate(ToolValue::Number(accepted))
-                .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
-        }
-        for refused in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            assert_refusal_names_parameter(
-                ToolParameter::HatchAngle
-                    .validate(ToolValue::Number(refused))
-                    .unwrap_err(),
-                "hatchAngle",
-            );
-        }
-        assert_refusal_names_parameter(
-            ToolParameter::HatchAngle
-                .validate(ToolValue::Flag(false))
-                .unwrap_err(),
-            "hatchAngle",
-        );
-    }
-
-    #[test]
-    fn hatch_pattern_type_and_style_are_closed_sets() {
-        // Pattern type: 0 solid, 1 user-defined, 2 predefined (the hand-transcribed
-        // ANSI31/ANSI32/ANSI37 table). 3 and anything non-integral are outside the
-        // implemented set (custom `76=2` patterns and `.pat` files are NOT
-        // IMPLEMENTED).
-        for accepted in [
-            HATCH_PATTERN_TYPE_SOLID,
-            HATCH_PATTERN_TYPE_USER_DEFINED,
-            HATCH_PATTERN_TYPE_PREDEFINED,
-        ] {
-            ToolParameter::HatchPatternType
-                .validate(ToolValue::Number(accepted))
-                .unwrap();
-        }
-        for refused in [3.0, -1.0, 0.5, f64::NAN, f64::INFINITY] {
-            let message = match ToolParameter::HatchPatternType
-                .validate(ToolValue::Number(refused))
-                .unwrap_err()
-            {
-                CadError::InvalidInput(message) => message,
-                other => panic!("expected an InvalidInput refusal, got {other:?}"),
-            };
-            assert!(message.contains("hatchPatternType"), "{message}");
-            assert!(message.contains("user-defined"), "{message}");
-            assert!(message.contains("predefined"), "{message}");
-        }
-        // Style: 0 Normal, 1 Outer, 2 Ignore.
-        for accepted in [HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER, HATCH_STYLE_IGNORE] {
-            ToolParameter::HatchStyle
-                .validate(ToolValue::Number(accepted))
-                .unwrap();
-        }
-        for refused in [3.0, -1.0, 1.5, f64::NAN] {
-            let message = match ToolParameter::HatchStyle
-                .validate(ToolValue::Number(refused))
-                .unwrap_err()
-            {
-                CadError::InvalidInput(message) => message,
-                other => panic!("expected an InvalidInput refusal, got {other:?}"),
-            };
-            assert!(message.contains("hatchStyle"), "{message}");
-            assert!(message.contains("Ignore"), "{message}");
-        }
-        assert_refusal_names_parameter(
-            ToolParameter::HatchStyle
-                .validate(ToolValue::Flag(true))
-                .unwrap_err(),
-            "hatchStyle",
-        );
-    }
-
-    #[test]
-    fn the_hatch_pattern_index_is_a_one_based_closed_set_of_the_implemented_table() {
-        let count = cad_domain::hatch::predefined_patterns().len();
-        assert_eq!(count, 3, "ANSI31, ANSI32 and ANSI37 are implemented");
-        for index in 1..=count {
-            ToolParameter::HatchPattern
-                .validate(ToolValue::Number(index as f64))
-                .unwrap_or_else(|error| panic!("index {index} refused: {error}"));
-            // The accepted index really resolves, and it is 1-based.
-            assert_eq!(
-                cad_domain::hatch::predefined_pattern_by_index(index).map(|pattern| pattern.name),
-                Some(cad_domain::hatch::predefined_patterns()[index - 1].name),
-                "index {index} is 1-based"
-            );
-        }
-        // 0 (an off-by-one), anything past the table, a fraction and non-finite
-        // values are refused by name: never clamped onto the nearest pattern.
-        for refused in [0.0, -1.0, (count + 1) as f64, 1.5, f64::NAN, f64::INFINITY] {
-            let message = match ToolParameter::HatchPattern
-                .validate(ToolValue::Number(refused))
-                .unwrap_err()
-            {
-                CadError::InvalidInput(message) => message,
-                other => panic!("expected an InvalidInput refusal, got {other:?}"),
-            };
-            assert!(message.contains("hatchPattern"), "{message}");
-            assert!(message.contains("ANSI31"), "{message}");
-        }
-        assert_refusal_names_parameter(
-            ToolParameter::HatchPattern
-                .validate(ToolValue::Flag(true))
-                .unwrap_err(),
-            "hatchPattern",
-        );
-        // The member joined the frozen vocabulary with its own stable key.
-        assert_eq!(ToolParameter::HatchPattern.key(), "hatchPattern");
-        assert_eq!(
-            ToolParameter::from_key("hatchPattern"),
-            Some(ToolParameter::HatchPattern)
-        );
-    }
-}
+mod tests;

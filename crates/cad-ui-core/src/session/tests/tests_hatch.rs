@@ -56,6 +56,12 @@ fn the_hatch_selector_starts_the_zero_point_pre_selection_tool() {
     assert_eq!(tool.params.hatch_angle, Some(0.0));
     assert_eq!(tool.params.hatch_double, Some(false));
     assert_eq!(tool.params.hatch_style, Some(0.0));
+    // The gradient parameters are part of the same HATCH capture; their defaults
+    // are the documented Linear kind, a 0 degree angle and the red/blue ACI pair.
+    assert_eq!(tool.params.hatch_gradient_kind, Some(0.0));
+    assert_eq!(tool.params.hatch_gradient_angle, Some(0.0));
+    assert_eq!(tool.params.hatch_gradient_color_a, Some(1.0));
+    assert_eq!(tool.params.hatch_gradient_color_b, Some(5.0));
 }
 
 #[test]
@@ -95,6 +101,33 @@ fn cad_tool_params_project_hatch_values_only_for_the_hatch_tool() {
     assert_eq!(tool.params.hatch_double, Some(true));
     assert_eq!(tool.params.hatch_style, Some(2.0));
 
+    // A gradient parameter round-trips through the same channel and the same
+    // projection (the type code `3` is admitted exactly like `0..=2`).
+    hatch
+        .set_tool_parameter(
+            ToolParameter::HatchPatternType,
+            ToolValue::Number(cad_app::HATCH_PATTERN_TYPE_GRADIENT),
+        )
+        .expect("the gradient type is admitted");
+    hatch
+        .set_tool_parameter(
+            ToolParameter::HatchGradientKind,
+            ToolValue::Number(cad_app::HATCH_GRADIENT_SPHERICAL),
+        )
+        .expect("the spherical kind is admitted");
+    hatch
+        .set_tool_parameter(ToolParameter::HatchGradientAngle, ToolValue::Number(30.0))
+        .expect("a finite gradient angle is admitted");
+    hatch
+        .set_tool_parameter(ToolParameter::HatchGradientColorB, ToolValue::Number(255.0))
+        .expect("a valid ACI index is admitted");
+    let tool = hatch.snapshot(None, None, 0).tool.expect("HATCH is active");
+    assert_eq!(tool.params.hatch_pattern_type, Some(3.0));
+    assert_eq!(tool.params.hatch_gradient_kind, Some(1.0));
+    assert_eq!(tool.params.hatch_gradient_angle, Some(30.0));
+    assert_eq!(tool.params.hatch_gradient_color_a, Some(1.0));
+    assert_eq!(tool.params.hatch_gradient_color_b, Some(255.0));
+
     // Every other tool reports none of the hatch parameters (never a carried-over
     // value), and HATCH reports none of theirs.
     let line = fresh_session();
@@ -106,6 +139,10 @@ fn cad_tool_params_project_hatch_values_only_for_the_hatch_tool() {
     assert_eq!(tool.params.hatch_angle, None);
     assert_eq!(tool.params.hatch_double, None);
     assert_eq!(tool.params.hatch_style, None);
+    assert_eq!(tool.params.hatch_gradient_kind, None);
+    assert_eq!(tool.params.hatch_gradient_angle, None);
+    assert_eq!(tool.params.hatch_gradient_color_a, None);
+    assert_eq!(tool.params.hatch_gradient_color_b, None);
     assert_eq!(tool.params.array_rows, None);
     assert_eq!(tool.params.align_scale, None);
 }

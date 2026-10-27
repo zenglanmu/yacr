@@ -62,6 +62,17 @@
 //! loading is NOT IMPLEMENTED. An index outside the table is refused **by name**
 //! — never clamped onto a neighbouring pattern.
 //!
+//! Pattern type code `3` creates a two-colour **gradient** fill from its own
+//! channel (`hatchGradientKind` Linear/Spherical, `hatchGradientAngle` in
+//! **degrees**, `hatchGradientColorA`/`B` as ACI indices resolved through the
+//! canonical palette). The entity records `Predefined` (`76=1`) because a
+//! gradient is written as a solid fill plus the 450-470 block (an unverified
+//! vendor convention). The angle is converted to radians exactly once here, while
+//! the import path stores group 460 verbatim — the two conventions are pinned by
+//! the create/export/reimport test. `reserved` and `shift` are fixed `0`, and the
+//! pattern spacing/double/style are not consulted (a stale spacing never refuses
+//! a gradient).
+//!
 //! The implementation is split for the 1000-line gate: this file is the command
 //! entry point, [`super::hatch_boundary`] classifies the boundary / stitches it /
 //! resolves the plane / writes the loops, [`super::hatch_stitch`] is the pure edge
@@ -101,8 +112,11 @@ impl Application {
     ///   degenerate, non-finite);
     /// * a missing active layer, an out-of-range typed parameter — including a
     ///   `hatchPattern` index that does not resolve in the implemented predefined
-    ///   table (refused by name, never clamped) — and Viewer mode (the command
-    ///   layer's mode check).
+    ///   table (refused by name, never clamped), a gradient kind outside
+    ///   `{Linear, Spherical}`, a gradient angle that is not finite and a
+    ///   gradient ACI index that is non-integral, outside `0..=255` or the ACI
+    ///   `0` ByBlock placeholder — and Viewer mode (the command layer's mode
+    ///   check).
     pub(crate) fn create_hatch(
         &mut self,
         session: &SessionState,

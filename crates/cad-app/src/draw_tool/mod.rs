@@ -866,9 +866,11 @@ mod parameter;
 // The general typed tool-parameter model (ADR 0016 decision A); re-exported so
 // `crate::draw_tool::<name>` and the public `cad_app::<name>` paths resolve.
 pub use parameter::{
-    ToolParameter, ToolParameterStore, ToolValue, ToolValueKind, HATCH_PATTERN_TYPE_PREDEFINED,
-    HATCH_PATTERN_TYPE_SOLID, HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE,
-    HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER, TEXT_DEFAULT_HEIGHT,
+    ToolParameter, ToolParameterStore, ToolValue, ToolValueKind, HATCH_GRADIENT_DEFAULT_ACI_A,
+    HATCH_GRADIENT_DEFAULT_ACI_B, HATCH_GRADIENT_LINEAR, HATCH_GRADIENT_SPHERICAL,
+    HATCH_PATTERN_TYPE_GRADIENT, HATCH_PATTERN_TYPE_PREDEFINED, HATCH_PATTERN_TYPE_SOLID,
+    HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
+    TEXT_DEFAULT_HEIGHT,
 };
 // Re-exported so the historical `crate::draw_tool::<name>` paths and the public
 // `cad_app::circle_radius` (via `lib.rs`) stay valid for the callers that used the

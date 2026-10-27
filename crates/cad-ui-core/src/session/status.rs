@@ -275,6 +275,18 @@ pub struct CadToolParams {
     /// The HATCH style (`0` Normal, `1` Outer, `2` Ignore), or `null` for every
     /// other tool.
     pub hatch_style: Option<f64>,
+    /// The HATCH gradient kind (`0` Linear, `1` Spherical), or `null` for every
+    /// other tool (a gradient fill is pattern type `3`).
+    pub hatch_gradient_kind: Option<f64>,
+    /// The HATCH gradient angle in **degrees** (the domain stores radians), or
+    /// `null` for every other tool.
+    pub hatch_gradient_angle: Option<f64>,
+    /// The HATCH gradient start-stop colour as an integer ACI index, or `null`
+    /// for every other tool.
+    pub hatch_gradient_color_a: Option<f64>,
+    /// The HATCH gradient end-stop colour as an integer ACI index, or `null` for
+    /// every other tool.
+    pub hatch_gradient_color_b: Option<f64>,
     /// The TEXT glyph height, or `null` for every other tool (ADR 0019 F.1).
     pub text_height: Option<f64>,
 }
@@ -721,6 +733,24 @@ pub(super) fn cad_tool(
                     ToolParameter::HatchStyle,
                     preview.kind == DrawToolKind::Hatch,
                 ),
+                // The four gradient parameters ride the same HATCH capture (they
+                // are only read when the pattern type is the gradient code `3`).
+                hatch_gradient_kind: number(
+                    ToolParameter::HatchGradientKind,
+                    preview.kind == DrawToolKind::Hatch,
+                ),
+                hatch_gradient_angle: number(
+                    ToolParameter::HatchGradientAngle,
+                    preview.kind == DrawToolKind::Hatch,
+                ),
+                hatch_gradient_color_a: number(
+                    ToolParameter::HatchGradientColorA,
+                    preview.kind == DrawToolKind::Hatch,
+                ),
+                hatch_gradient_color_b: number(
+                    ToolParameter::HatchGradientColorB,
+                    preview.kind == DrawToolKind::Hatch,
+                ),
                 // The text height is present **only** while a text-carrying
                 // creation capture is active (ADR 0019 decision F.1). TEXT and
                 // MTEXT both create their text with it, so both project it; the
@@ -761,6 +791,10 @@ pub(super) fn cad_tool(
                 hatch_angle: None,
                 hatch_double: None,
                 hatch_style: None,
+                hatch_gradient_kind: None,
+                hatch_gradient_angle: None,
+                hatch_gradient_color_a: None,
+                hatch_gradient_color_b: None,
                 text_height: None,
             },
         }),

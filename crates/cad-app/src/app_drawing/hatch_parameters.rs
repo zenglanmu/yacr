@@ -11,12 +11,29 @@ use super::*;
 
 use super::hatch_stitch::STITCH_TOLERANCE;
 
-use cad_domain::hatch::{predefined_pattern_by_index, predefined_patterns, PredefinedPattern};
+use cad_domain::hatch::{
+    predefined_pattern_by_index, predefined_patterns, GradientDef, GradientKind, GradientStop,
+    PredefinedPattern,
+};
 
 use crate::draw_tool::{
-    ToolParameter, HATCH_PATTERN_TYPE_PREDEFINED, HATCH_PATTERN_TYPE_SOLID,
-    HATCH_PATTERN_TYPE_USER_DEFINED, HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
+    ToolParameter, HATCH_GRADIENT_LINEAR, HATCH_GRADIENT_SPHERICAL, HATCH_PATTERN_TYPE_GRADIENT,
+    HATCH_PATTERN_TYPE_PREDEFINED, HATCH_PATTERN_TYPE_SOLID, HATCH_PATTERN_TYPE_USER_DEFINED,
+    HATCH_STYLE_IGNORE, HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER,
 };
+
+/// The gradient-kind name written for the `LINEAR` kind.
+const GRADIENT_NAME_LINEAR: &str = "LINEAR";
+/// The gradient-kind name written for the `SPHERICAL` kind.
+///
+/// `CYLINDER` is never written: the domain bakes it as spherical, so emitting it
+/// would make one behaviour answer to two names.
+const GRADIENT_NAME_SPHERICAL: &str = "SPHERICAL";
+
+/// The fixed DXF `reserved` value (group 451) of a created gradient.
+const GRADIENT_RESERVED: i32 = 0;
+/// The fixed normalised ramp start (group 461) of a created gradient: no shift.
+const GRADIENT_SHIFT: f64 = 0.0;
 
 /// The pattern name written for a created user-defined pattern.
 ///
@@ -38,9 +55,25 @@ pub(super) struct HatchParameters {
     angle_degrees: f64,
     double: bool,
     pub(super) style: f64,
+    /// Gradient kind closed set (`0` linear, `1` spherical); only read for
+    /// `HATCH_PATTERN_TYPE_GRADIENT`.
+    gradient_kind: f64,
+    /// Gradient angle in **degrees** (the prompt unit). The entity stores
+    /// radians, converted exactly once in [`HatchParameters::gradient`].
+    gradient_angle_degrees: f64,
+    /// The gradient start-stop colour as an ACI index (`hatchGradientColorA`).
+    gradient_color_a: f64,
+    /// The gradient end-stop colour as an ACI index (`hatchGradientColorB`).
+    gradient_color_b: f64,
 }
 
 /// Read and defensively re-validate the HATCH typed parameters.
+///
+/// The parameter set is **fill-dependent**: a gradient never consults the
+/// pattern spacing/angle (`scale_and_angle`), so a stale invalid spacing must
+/// not refuse a gradient and likewise a stale invalid gradient colour must not
+/// refuse a pattern. The channel already refuses those values at set time; this
+/// re-validation is the defence in depth for a value injected past the channel.
 ///
 /// The predefined pattern index is deliberately **not** re-validated here: it is
 /// resolved in [`HatchParameters::fill`], which refuses an index outside the
@@ -48,14 +81,7 @@ pub(super) struct HatchParameters {
 /// generic range refusal would hide which pattern set the command actually
 /// implements).
 pub(super) fn hatch_parameters(session: &SessionState) -> CadResult<HatchParameters> {
-    let parameters = [
-        ToolParameter::HatchPatternType,
-        ToolParameter::HatchSpacing,
-        ToolParameter::HatchAngle,
-        ToolParameter::HatchDouble,
-        ToolParameter::HatchStyle,
-    ];
-    for parameter in parameters {
+    let validate = |parameter: ToolParameter| -> CadResult<()> {
         parameter
             .validate(session.tool_parameter(parameter))
             .map_err(|error| match error {
@@ -63,7 +89,15 @@ pub(super) fn hatch_parameters(session: &SessionState) -> CadResult<HatchParamet
                     CadError::InvalidInput(format!("HATCH: {message}"))
                 }
                 other => other,
-            })?;
+            })
+    };
+    // Always validated: the fill selector itself, the style and the flag.
+    for parameter in [
+        ToolParameter::HatchPatternType,
+        ToolParameter::HatchDouble,
+        ToolParameter::HatchStyle,
+    ] {
+        validate(parameter)?;
     }
     let number = |parameter: ToolParameter| {
         session
@@ -71,7 +105,7 @@ pub(super) fn hatch_parameters(session: &SessionState) -> CadResult<HatchParamet
             .number()
             .unwrap_or(f64::NAN)
     };
-    Ok(HatchParameters {
+    let parameters = HatchParameters {
         pattern_type: number(ToolParameter::HatchPatternType),
         pattern_index: number(ToolParameter::HatchPattern),
         spacing: number(ToolParameter::HatchSpacing),
@@ -81,10 +115,45 @@ pub(super) fn hatch_parameters(session: &SessionState) -> CadResult<HatchParamet
             .flag()
             .unwrap_or(false),
         style: number(ToolParameter::HatchStyle),
-    })
+        gradient_kind: number(ToolParameter::HatchGradientKind),
+        gradient_angle_degrees: number(ToolParameter::HatchGradientAngle),
+        gradient_color_a: number(ToolParameter::HatchGradientColorA),
+        gradient_color_b: number(ToolParameter::HatchGradientColorB),
+    };
+    let fill_parameters: &[ToolParameter] = if parameters.is_gradient() {
+        &[
+            ToolParameter::HatchGradientKind,
+            ToolParameter::HatchGradientAngle,
+            ToolParameter::HatchGradientColorA,
+            ToolParameter::HatchGradientColorB,
+        ]
+    } else {
+        &[ToolParameter::HatchSpacing, ToolParameter::HatchAngle]
+    };
+    for parameter in fill_parameters {
+        validate(*parameter)?;
+    }
+    Ok(parameters)
 }
 
 impl HatchParameters {
+    /// Whether the fill selector names a gradient.
+    fn is_gradient(&self) -> bool {
+        self.pattern_type == HATCH_PATTERN_TYPE_GRADIENT
+    }
+
+    /// The gradient kind name actually written, or `None` when the stored code is
+    /// outside the closed set.
+    fn gradient_name(&self) -> Option<&'static str> {
+        if self.gradient_kind == HATCH_GRADIENT_LINEAR {
+            Some(GRADIENT_NAME_LINEAR)
+        } else if self.gradient_kind == HATCH_GRADIENT_SPHERICAL {
+            Some(GRADIENT_NAME_SPHERICAL)
+        } else {
+            None
+        }
+    }
+
     /// The predefined pattern the `hatchPattern` index names, or `None` when the
     /// index is not an implemented table entry.
     ///
@@ -97,6 +166,67 @@ impl HatchParameters {
             return None;
         }
         predefined_pattern_by_index(index as usize)
+    }
+
+    /// The two-colour gradient definition and its validation.
+    ///
+    /// Every field is re-validated here (the channel already refused an
+    /// out-of-set value, so this is defence in depth) and the assembled
+    /// definition is checked against `GradientDef::is_usable`, the same predicate
+    /// the bake consults: a gradient this build could not render must be refused
+    /// **by the command**, never deferred to "cannot build the hatch display".
+    ///
+    /// Spacing, double and style are deliberately not read: they belong to the
+    /// pattern kinds and must not influence (or refuse) a gradient.
+    fn gradient(&self) -> CadResult<HatchGradient> {
+        let Some(name) = self.gradient_name() else {
+            return Err(CadError::InvalidInput(format!(
+                "HATCH gradient kind must be {HATCH_GRADIENT_LINEAR} (LINEAR) or \
+                 {HATCH_GRADIENT_SPHERICAL} (SPHERICAL), got {}",
+                self.gradient_kind
+            )));
+        };
+        if !self.gradient_angle_degrees.is_finite() {
+            return Err(CadError::InvalidInput(format!(
+                "HATCH gradient angle must be finite, got {}",
+                self.gradient_angle_degrees
+            )));
+        }
+        // The single degrees -> radians conversion of this path. The import path
+        // stores group 460 verbatim and never converts, so this is the only place
+        // the two conventions meet (pinned by the create/export/reimport test).
+        let angle_raw = self.gradient_angle_degrees.to_radians();
+        let stops = vec![
+            gradient_stop(0.0, self.gradient_color_a, "A")?,
+            gradient_stop(1.0, self.gradient_color_b, "B")?,
+        ];
+        let kind = if name == GRADIENT_NAME_LINEAR {
+            GradientKind::Linear
+        } else {
+            GradientKind::Spherical
+        };
+        let definition = GradientDef {
+            kind,
+            angle: angle_raw,
+            shift: GRADIENT_SHIFT,
+            single_color: false,
+            tint: 0.0,
+            stops: stops.clone(),
+        };
+        if !definition.is_usable() {
+            return Err(CadError::InvalidInput(format!(
+                "HATCH gradient definition is not usable ({} stop(s), angle {angle_raw}, shift \
+                 {GRADIENT_SHIFT})",
+                stops.len()
+            )));
+        }
+        Ok(HatchGradient::TwoColor {
+            name: name.to_string(),
+            reserved: GRADIENT_RESERVED,
+            angle_raw,
+            shift: GRADIENT_SHIFT,
+            stops,
+        })
     }
 
     /// The pattern scale (`HPSCALE`) and angle, validated once for the two
@@ -124,10 +254,23 @@ impl HatchParameters {
     /// user-defined fill records `UserDefined` (`76=0`) and carries the
     /// synthesized definition rows. A predefined fill (pattern type code `2`)
     /// records `Predefined` (`76=1`) and carries the rows of the hand-transcribed
-    /// table entry the index names.
+    /// table entry the index names. A gradient fill (pattern type code `3`) also
+    /// records `Predefined` (`76=1`): a gradient HATCH is written as a solid fill
+    /// plus the 450-470 block, so it has no definition rows (an **unverified**
+    /// vendor convention, declared).
+    ///
+    /// The gradient branch comes **before** [`Self::scale_and_angle`]: a gradient
+    /// has no line family, so a stale non-positive spacing must not refuse it and
+    /// spacing/double/style must not affect it.
     pub(super) fn fill(&self) -> CadResult<(HatchFill, HatchPatternType)> {
         if self.pattern_type == HATCH_PATTERN_TYPE_SOLID {
             return Ok((HatchFill::Solid, HatchPatternType::Predefined));
+        }
+        if self.is_gradient() {
+            return Ok((
+                HatchFill::Gradient(self.gradient()?),
+                HatchPatternType::Predefined,
+            ));
         }
         if self.pattern_type == HATCH_PATTERN_TYPE_PREDEFINED {
             self.scale_and_angle()?;
@@ -150,11 +293,12 @@ impl HatchParameters {
         }
         if self.pattern_type != HATCH_PATTERN_TYPE_USER_DEFINED {
             return Err(CadError::InvalidInput(format!(
-                "HATCH pattern type must be {} (solid), {} (user-defined) or {} (predefined), got \
-                 {}",
+                "HATCH pattern type must be {} (solid), {} (user-defined), {} (predefined) or {} \
+                 (gradient), got {}",
                 HATCH_PATTERN_TYPE_SOLID,
                 HATCH_PATTERN_TYPE_USER_DEFINED,
                 HATCH_PATTERN_TYPE_PREDEFINED,
+                HATCH_PATTERN_TYPE_GRADIENT,
                 self.pattern_type
             )));
         }
@@ -168,6 +312,30 @@ impl HatchParameters {
         };
         Ok((HatchFill::Pattern(pattern), HatchPatternType::UserDefined))
     }
+}
+
+/// One gradient colour stop resolved from an ACI index.
+///
+/// The `ToolValue` channel carries no colour type, so the stop colour arrives as
+/// an integer ACI index and is resolved through the canonical palette here — one
+/// conversion, never a caller-supplied triple. Index `0` is the ByBlock
+/// placeholder with **no** sRGB triple ([`crate::property_value::rgb_for_aci`]
+/// returns `None`), so it is refused by name instead of being written as black.
+fn gradient_stop(value: f64, aci: f64, label: &str) -> CadResult<GradientStop> {
+    if !aci.is_finite() || aci.fract() != 0.0 || !(0.0..=255.0).contains(&aci) {
+        return Err(CadError::InvalidInput(format!(
+            "HATCH gradient colour {label} must be an integer ACI index between 0 and 255, got \
+             {aci}"
+        )));
+    }
+    let index = aci as u16;
+    let Some(rgb) = crate::property_value::rgb_for_aci(index) else {
+        return Err(CadError::InvalidInput(format!(
+            "HATCH gradient colour {label} ACI {index} is the ByBlock placeholder, not a colour \
+             (use 1..=255)"
+        )));
+    };
+    Ok(GradientStop { value, rgb })
 }
 
 /// One pattern-definition row at offset `(0, 1)` in pattern space.
@@ -225,6 +393,17 @@ pub(super) fn hatch_diagnostic(
 ) -> Diagnostic {
     let fill = if parameters.pattern_type == HATCH_PATTERN_TYPE_SOLID {
         "solid".to_string()
+    } else if parameters.is_gradient() {
+        // The command already validated the gradient in `fill()`; the name and
+        // colours are echoed so the summary says which ramp was written instead
+        // of naming a pattern that does not exist.
+        format!(
+            "gradient {} (angle {} deg, ACI {} -> {}, stops 0/1)",
+            parameters.gradient_name().unwrap_or("<unresolved>"),
+            parameters.gradient_angle_degrees,
+            parameters.gradient_color_a,
+            parameters.gradient_color_b
+        )
     } else if parameters.pattern_type == HATCH_PATTERN_TYPE_PREDEFINED {
         // The command already resolved the index successfully in `fill()`; the
         // name is repeated here so the echo names the pattern instead of
