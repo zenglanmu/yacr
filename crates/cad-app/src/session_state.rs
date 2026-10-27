@@ -157,10 +157,20 @@ pub struct SessionState {
     /// Holds clones of the selected entities (with their display state); it is
     /// **never** the OS/system clipboard. It is cleared whenever the document
     /// content is replaced (`HostController::reset_for_new_content` rebuilds the
-    /// session), so a paste can never cross documents. Ctrl+C/X capture here;
-    /// Ctrl+V inserts fresh-id clones at their original coordinates (PASTEORIG
-    /// semantics).
+    /// session), so a paste can never cross documents. `COPYCLIP`/`CUTCLIP` and
+    /// `COPYBASE`/`CUTBASE` capture here; `PASTECLIP` inserts fresh-id clones
+    /// translated by `insertion − clipboard_base` and `PASTEORIG` inserts them at
+    /// their original coordinates.
     pub(crate) clipboard: Vec<ClipboardEntry>,
+    /// The base point captured by `COPYBASE`/`CUTBASE`, if any (AutoCAD's "Specify
+    /// base point").
+    ///
+    /// `None` for a clipboard captured by `COPYCLIP`/`CUTCLIP`, and also after a
+    /// clear (it is reset together with [`Self::clipboard`]). `PASTECLIP`
+    /// translates by `insertion − clipboard_base.unwrap_or(origin)`, so a clipboard
+    /// with no base pastes relative to the world origin, exactly like the two
+    /// commands' documented behaviour; `PASTEORIG` ignores it entirely.
+    pub(crate) clipboard_base: Option<Point3>,
 }
 
 /// CAD backend preference shared by UI, app state and hosts (spec §6).
@@ -196,6 +206,7 @@ impl SessionState {
             last_measurement: None,
             selected_measurement_kind: MeasurementToolKind::Distance,
             clipboard: Vec::new(),
+            clipboard_base: None,
         }
     }
 
@@ -540,7 +551,12 @@ impl SessionState {
 
     /// Begin drawing capture and snapshot the current selection identity.
     pub fn begin_draw(&mut self, kind: DrawToolKind) -> CadResult<()> {
-        self.authorize(match kind {
+        // The command this capture belongs to. It is recorded on the capture (and
+        // exposed through [`Self::draw_command`]) because a kind is not always one
+        // command: `COPYBASE` and `CUTBASE` share the `CopyBase` capture shape but
+        // differ in authorization (Viewer-legal vs work-only) and in the confirmed
+        // payload (capture only vs capture **and** delete).
+        let command = match kind {
             DrawToolKind::Line => CommandId::CreateLine,
             DrawToolKind::Circle => CommandId::CreateCircle,
             DrawToolKind::Arc => CommandId::CreateArc,
@@ -579,10 +595,23 @@ impl SessionState {
             DrawToolKind::MText => CommandId::CreateMText,
             DrawToolKind::MLeader => CommandId::MLeader,
             DrawToolKind::TextEdit => CommandId::TextEdit,
-        })?;
+            // COPYBASE is a read-only capture (Viewer-legal); CUTBASE is the same
+            // capture for the work-only cutting command. The host reads the recorded
+            // command to choose `CopyBase` vs `CutBase`.
+            DrawToolKind::CopyBase => CommandId::CopyToClipboardBase,
+            DrawToolKind::CutBase => CommandId::CutToClipboardBase,
+            // PASTECLIP is work-only through its command (the capture itself needs
+            // no selection).
+            DrawToolKind::PasteClip => CommandId::PasteFromClipboard,
+        };
+        self.authorize(command)?;
         let selection = self.selection.refs().to_vec();
         let tool = DrawTool::new(kind, selection.len());
-        self.tool = ToolState::Drawing(Box::new(DrawCapture { tool, selection }));
+        self.tool = ToolState::Drawing(Box::new(DrawCapture {
+            tool,
+            selection,
+            command,
+        }));
         self.bump_tool_generation();
         Ok(())
     }
@@ -866,6 +895,20 @@ impl SessionState {
         }
     }
 
+    /// The [`CommandId`] of the active drawing capture, or `None` when no drawing
+    /// capture is active.
+    ///
+    /// The single authority the host reads to map a confirmed
+    /// [`DrawIntent::CopyBase`] to its payload: `COPYBASE` captures into the
+    /// clipboard only, `CUTBASE` captures **and** deletes, and both start the same
+    /// capture shape, so the payload can only be chosen from the command.
+    pub fn draw_command(&self) -> Option<CommandId> {
+        match &self.tool {
+            ToolState::Drawing(capture) => Some(capture.command),
+            _ => None,
+        }
+    }
+
     pub fn tool_snapshot(&self) -> ToolSnapshot {
         match &self.tool {
             ToolState::Idle => ToolSnapshot::Idle,
@@ -887,99 +930,9 @@ impl SessionState {
             self.bump_tool_generation();
         }
     }
-
-    /// Number of entities currently held in the in-process clipboard.
-    ///
-    /// Pure getter; reading it never captures or mutates anything.
-    pub fn clipboard_len(&self) -> usize {
-        self.clipboard.len()
-    }
-
-    /// The last structured measurement result, if one has been confirmed.
-    ///
-    /// Pure getter: reading it never advances a tool or writes a database.
-    pub fn last_measurement(&self) -> Option<&MeasurementRecord> {
-        self.last_measurement.as_ref()
-    }
-
-    /// Whether a confirmed measurement result is currently retained.
-    pub fn has_last_measurement(&self) -> bool {
-        self.last_measurement.is_some()
-    }
-
-    /// Record the structured result of a completed measurement (F06).
-    pub fn set_last_measurement(&mut self, record: MeasurementRecord) {
-        self.last_measurement = Some(record);
-    }
-
-    /// Snapshot of the active measurement for preview rendering, if any.
-    pub fn measurement_preview(&self) -> Option<MeasurementPreview> {
-        match &self.tool {
-            ToolState::Measuring(tool) => Some(self.annotate_measurement_preview(tool.preview())),
-            _ => None,
-        }
-    }
-
-    /// Move the measurement preview cursor without capturing a point.
-    ///
-    /// This is a pure state update: it emits no command and touches no database.
-    pub fn set_measurement_cursor(&mut self, cursor: Option<Point3>) -> CadResult<()> {
-        match &mut self.tool {
-            ToolState::Measuring(tool) => {
-                tool.set_cursor(cursor);
-                Ok(())
-            }
-            _ => Err(CadError::InvalidInput(
-                "no measurement tool is active".into(),
-            )),
-        }
-    }
 }
 
-/// The Work-only command a [`ToolParameter`] is authorized against.
-///
-/// `PolygonSides` keeps its original authorization (`CreatePolygon`) exactly as
-/// before the migration. `FilletRadius` and the two `ChamferDistance`s belong to
-/// the FILLET/CHAMFER edit commands (ADR 0016 decisions B/C); the array
-/// parameters belong to the ARRAYRECT/ARRAYPOLAR edit commands (ADR 0016 decision
-/// D). Each parameter is authorized against its own command, so a Viewer-mode set
-/// is refused exactly like the create commands.
-fn authorizing_command(parameter: ToolParameter) -> CommandId {
-    match parameter {
-        ToolParameter::PolygonSides => CommandId::CreatePolygon,
-        ToolParameter::FilletRadius => CommandId::FilletLines,
-        ToolParameter::ChamferDistanceA | ToolParameter::ChamferDistanceB => {
-            CommandId::ChamferLines
-        }
-        ToolParameter::ArrayRows
-        | ToolParameter::ArrayColumns
-        | ToolParameter::ArrayRowSpacing
-        | ToolParameter::ArrayColumnSpacing => CommandId::ArrayRectangular,
-        ToolParameter::ArrayItems
-        | ToolParameter::ArrayFillAngle
-        | ToolParameter::ArrayRotateItems => CommandId::ArrayPolar,
-        // ALIGN (P4d): `AlignScale` is authorized against the ALIGN edit command,
-        // so a Viewer-mode set is refused exactly like the other edit parameters.
-        ToolParameter::AlignScale => CommandId::AlignEntities,
-        // HATCH (P6b): every hatch parameter is authorized against the HATCH
-        // create command, so a Viewer-mode set is refused exactly like the create
-        // commands.
-        ToolParameter::HatchPatternType
-        | ToolParameter::HatchPattern
-        | ToolParameter::HatchSpacing
-        | ToolParameter::HatchAngle
-        | ToolParameter::HatchDouble
-        | ToolParameter::HatchStyle
-        | ToolParameter::HatchGradientKind
-        | ToolParameter::HatchGradientAngle
-        | ToolParameter::HatchGradientColorA
-        | ToolParameter::HatchGradientColorB => CommandId::Hatch,
-        // TEXT (P7a): the glyph height is authorized against the TEXT create
-        // command, so a Viewer-mode set is refused exactly like the other create
-        // parameters. MTEXT captures with the **same** parameter (its only height
-        // channel) and `CreateMText` is Work-only too, so this one authorization is
-        // exactly the gate MTEXT needs — there is no second height parameter and no
-        // per-kind authorization to drift.
-        ToolParameter::TextHeight => CommandId::CreateText,
-    }
-}
+mod inspection;
+mod tool_authorization;
+
+pub(crate) use tool_authorization::authorizing_command;

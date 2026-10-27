@@ -51,6 +51,11 @@ impl Application {
             CommandId::CopyToClipboard => self.copy_to_clipboard(session, command),
             CommandId::CutToClipboard => self.cut_to_clipboard(session, command),
             CommandId::PasteFromClipboard => self.paste_from_clipboard(session, command),
+            CommandId::CopyToClipboardBase => self.copy_to_clipboard_base(session, command),
+            CommandId::CutToClipboardBase => self.cut_to_clipboard_base(session, command),
+            CommandId::PasteOriginalCoordinates => {
+                self.paste_original_coordinates(session, command)
+            }
             CommandId::OffsetEntity => self.offset_entity(command),
             CommandId::SetActiveLayer => self.set_active_layer(session, command),
             CommandId::SetEntityProperty => self.set_entity_property(session, command),

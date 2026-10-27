@@ -153,7 +153,14 @@ pub fn draw_preview_overlay(
         // cursor/chain (the stacking normal and the chain geometry belong to the
         // command, not to a preview overlay).
         | DrawToolKind::DimBaseline
-        | DrawToolKind::DimContinue => {
+        | DrawToolKind::DimContinue
+        // COPYBASE/CUTBASE capture one base point over a selection, and PASTECLIP
+        // captures one insertion point over the clipboard. All three use the
+        // existing cursor/chain preview (the translation and the fresh ids are the
+        // command's, never a fabricated rubber-band geometry).
+        | DrawToolKind::CopyBase
+        | DrawToolKind::CutBase
+        | DrawToolKind::PasteClip => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }

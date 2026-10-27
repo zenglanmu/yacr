@@ -212,6 +212,33 @@ impl HostController {
                     side_point,
                 },
             ),
+            // COPYBASE/CUTBASE: the same capture shape, mapped to two different
+            // commands and payloads. The choice is the **active command** recorded
+            // by the session when the tool started (never a guess from the kind):
+            // COPYBASE is a read-only capture, CUTBASE additionally deletes exactly
+            // these refs after the capture succeeded.
+            DrawIntent::CopyBase { base } => match self.session.draw_command() {
+                Some(crate::CommandId::CutToClipboardBase) => (
+                    crate::CommandId::CutToClipboardBase,
+                    crate::CommandPayload::CutBase {
+                        refs: selection.to_vec(),
+                        base,
+                    },
+                ),
+                _ => (
+                    crate::CommandId::CopyToClipboardBase,
+                    crate::CommandPayload::CopyBase {
+                        refs: selection.to_vec(),
+                        base,
+                    },
+                ),
+            },
+            // PASTECLIP: the captured insertion point travels on the payload; the
+            // clipboard (entries + base) is the command layer's input.
+            DrawIntent::PasteClip { insertion } => (
+                crate::CommandId::PasteFromClipboard,
+                crate::CommandPayload::PasteClip { insertion },
+            ),
             // CHAMFER/FILLET: the two captured refs and pick points travel on the
             // payload; the distances/radius are the session typed channel the
             // command layer reads, so they never ride the payload.

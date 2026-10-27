@@ -144,7 +144,37 @@ impl Application {
                 "ERASE needs a non-empty selection".into(),
             ));
         }
-        let document_id = command.document;
+        let (changes, diagnostics) = self.delete_entity_refs(command.document, &refs, "ERASE")?;
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes,
+            diagnostics,
+            measurement: None,
+            point_report: None,
+        })
+    }
+
+    /// Delete exactly `refs` in one transaction and one undo step.
+    ///
+    /// This is the **single** delete body: ERASE passes the session selection,
+    /// `CUTCLIP` passes the same snapshot it captured, and `CUTBASE` passes the
+    /// payload refs (which need not match the session selection any more). Every
+    /// ref is validated **before** the transaction opens — a foreign-document ref,
+    /// an entity id that does not exist, or an empty list refuses the whole batch
+    /// and writes nothing — and the batch is committed once, so a cut can never
+    /// leave a partially deleted selection.
+    ///
+    /// Sub-element/instance refs are accepted as whole-entity deletes with a
+    /// diagnostic (`drawing.erase.sub_element` / `drawing.erase.instance`), exactly
+    /// like MOVE/COPY report their whole-entity fallback. The display state pruned
+    /// by the delete is captured and recorded on the undo patch, so undo restores
+    /// the render attributes and dynamic-visibility membership.
+    pub(crate) fn delete_entity_refs(
+        &mut self,
+        document_id: DocumentId,
+        refs: &[SelectionRef],
+        operation: &str,
+    ) -> CadResult<(Option<Arc<ChangeSet>>, Vec<Diagnostic>)> {
         let document = self
             .workspace
             .documents
@@ -153,49 +183,22 @@ impl Application {
         let mut candidate = document.drawing.as_ref().clone();
         let drawing = &mut candidate;
 
-        let mut seen: Vec<EntityId> = Vec::new();
-        let mut before_states: Vec<DbEntity> = Vec::new();
-        let mut display_states: Vec<_> = Vec::new();
-        let mut diagnostics = Vec::new();
-        for reference in &refs {
-            if reference.document != document_id {
-                return Err(CadError::InvalidInput(
-                    "EraseEntities reference belongs to another document".into(),
-                ));
-            }
-            if seen.contains(&reference.entity) {
-                continue;
-            }
-            seen.push(reference.entity);
-            let before = drawing.entity(reference.entity).cloned().ok_or_else(|| {
-                CadError::InvalidInput(format!("entity {} does not exist", reference.entity.0))
-            })?;
-            // Mirror MOVE's contract: a sub-element/instance ref is accepted as a
-            // whole-entity erase, reported rather than silently over-applied.
-            if reference.sub_element.is_some() {
-                diagnostics.push(Diagnostic {
-                    object: Some(ObjectId(reference.entity.0)),
-                    code: "drawing.erase.sub_element".into(),
-                    message: format!(
-                        "子图元 {} 按整实体删除（子图元级编辑未支持）",
-                        reference.entity.0
-                    ),
-                });
-            }
-            if !reference.instance.0.is_empty() {
-                diagnostics.push(Diagnostic {
-                    object: Some(ObjectId(reference.entity.0)),
-                    code: "drawing.erase.instance".into(),
-                    message: format!(
-                        "实例路径引用的实体 {} 删除其块定义，影响所有实例",
-                        reference.entity.0
-                    ),
-                });
-            }
-            // Capture the display state the delete will prune, so undo restores it.
-            display_states.push(drawing.entity_display_state(reference.entity));
-            before_states.push(before);
-        }
+        // The shared resolution collapses duplicates, refuses any unaddressable
+        // ref and refuses an empty batch — all before a write.
+        let (before_states, diagnostics) = Self::resolve_selection(
+            drawing,
+            document_id,
+            refs,
+            "erase",
+            operation,
+            "删除",
+            false,
+        )?;
+        // Capture the display state the delete will prune, so undo restores it.
+        let display_states: Vec<_> = before_states
+            .iter()
+            .map(|before| drawing.entity_display_state(before.id))
+            .collect();
 
         let transaction = next_transaction_id();
         let change_set = {
@@ -221,13 +224,7 @@ impl Application {
             },
         )?;
 
-        Ok(CommandOutcome {
-            objects: Vec::new(),
-            changes: Some(Arc::new(change_set)),
-            diagnostics,
-            measurement: None,
-            point_report: None,
-        })
+        Ok((Some(Arc::new(change_set)), diagnostics))
     }
 
     /// Reconcile the session selection with the authoritative document after an

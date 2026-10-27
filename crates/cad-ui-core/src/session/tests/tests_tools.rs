@@ -39,6 +39,11 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("DIMANGULAR", "draw.dimangular"),
     ("DIMORDINATE", "draw.dimordinate"),
     ("HATCH", "draw.hatch"),
+    // The clipboard cluster's capture tools (`PASTECLIP` is insertion-point based
+    // and `COPYBASE`/`CUTBASE` capture a base point over the selection).
+    ("COPYBASE", "draw.copybase"),
+    ("CUTBASE", "draw.cutbase"),
+    ("PASTECLIP", "draw.pasteclip"),
 ];
 
 fn fresh_session() -> CadSession {

@@ -421,7 +421,9 @@ fn pasting_after_a_cut_does_not_retarget_the_emptied_selection() {
         &mut app,
         &mut session,
         CommandId::PasteFromClipboard,
-        CommandPayload::None,
+        CommandPayload::PasteClip {
+            insertion: point(0.0, 0.0),
+        },
     )
     .unwrap();
     assert_eq!(outcome.objects.len(), 1, "one pasted copy");

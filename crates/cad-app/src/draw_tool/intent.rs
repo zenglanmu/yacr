@@ -111,6 +111,21 @@ pub enum DrawIntent {
     /// Offset the single selected LINE/CIRCLE; `side_point` gives both the side
     /// and the distance.
     Offset { side_point: Point3 },
+    /// `COPYBASE`/`CUTBASE`: the captured base point of a selection capture.
+    ///
+    /// One intent covers both commands: the capture (selection at start, then one
+    /// free point) is identical, and only the command decides whether the captured
+    /// refs are also deleted. The host therefore maps this intent to
+    /// [`crate::CommandPayload::CopyBase`] or [`crate::CommandPayload::CutBase`]
+    /// **by the active [`crate::CommandId`]**, which the session records when the
+    /// tool starts. Nothing is invented here: the intent carries exactly the point
+    /// the user clicked.
+    CopyBase { base: Point3 },
+    /// `PASTECLIP`: the captured insertion point of an insertion-point paste.
+    ///
+    /// The translation (`insertion − clipboard base`) and the fresh ids are the
+    /// command layer's; the intent is only the point the user clicked.
+    PasteClip { insertion: Point3 },
     /// CHAMFER the two picked straight lines (ADR 0016 decision C).
     ///
     /// `first`/`second` are the refs resolved at capture time, in pick order;

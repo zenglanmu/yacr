@@ -726,6 +726,17 @@ impl DrawTool {
             // OFFSET: the single captured point is the side/distance point; the
             // source is the session selection, resolved by the command layer.
             DrawToolKind::Offset => DrawIntent::Offset { side_point: a },
+            // COPYBASE/CUTBASE: the single captured point is the clipboard base
+            // point; the source is the selection snapshot taken at tool start and
+            // the selected entities are resolved by the command layer. Which of the
+            // two commands runs (and therefore whether the captured refs are also
+            // deleted) is decided by the host from the active `CommandId`, so the
+            // intent carries only the point the user clicked.
+            DrawToolKind::CopyBase | DrawToolKind::CutBase => DrawIntent::CopyBase { base: a },
+            // PASTECLIP: the single captured point is the insertion point; the
+            // clipboard is the input and the translation + fresh ids are the
+            // command layer's.
+            DrawToolKind::PasteClip => DrawIntent::PasteClip { insertion: a },
             // CHAMFER/FILLET: the two resolved refs and the two raw pick points,
             // in pick order. The distances/radius are the session typed channel,
             // read by the command layer, so the intent stays the pure description

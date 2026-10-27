@@ -551,7 +551,20 @@ fn viewer_mode_rejects_all_drawing_commands_without_change() {
             },
         ),
         (CommandId::CutToClipboard, CommandPayload::None),
-        (CommandId::PasteFromClipboard, CommandPayload::None),
+        (
+            CommandId::PasteFromClipboard,
+            CommandPayload::PasteClip {
+                insertion: point(0.0, 0.0),
+            },
+        ),
+        (CommandId::PasteOriginalCoordinates, CommandPayload::None),
+        (
+            CommandId::CutToClipboardBase,
+            CommandPayload::CutBase {
+                refs: vec![ref_of(1)],
+                base: point(0.0, 0.0),
+            },
+        ),
         (
             CommandId::OffsetEntity,
             CommandPayload::Offset {
@@ -681,6 +694,8 @@ fn drawing_commands_are_work_only_in_the_catalogue() {
         CommandId::MirrorEntities,
         CommandId::CutToClipboard,
         CommandId::PasteFromClipboard,
+        CommandId::CutToClipboardBase,
+        CommandId::PasteOriginalCoordinates,
         CommandId::OffsetEntity,
         CommandId::SetActiveLayer,
     ] {

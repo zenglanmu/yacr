@@ -432,6 +432,9 @@ impl Application {
             | CommandId::CopyToClipboard
             | CommandId::CutToClipboard
             | CommandId::PasteFromClipboard
+            | CommandId::CopyToClipboardBase
+            | CommandId::CutToClipboardBase
+            | CommandId::PasteOriginalCoordinates
             | CommandId::OffsetEntity
             | CommandId::SetActiveLayer
             | CommandId::SetEntityProperty

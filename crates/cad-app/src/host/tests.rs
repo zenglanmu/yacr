@@ -10,6 +10,7 @@ use super::*;
 mod align;
 mod array;
 mod chamfer_fillet;
+mod clipboard;
 mod dimension;
 mod document;
 mod draw_pick;

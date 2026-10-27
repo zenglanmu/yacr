@@ -17,24 +17,6 @@ fn pick(id: u128) -> SelectionRef {
 }
 
 #[test]
-fn keys_indices_and_labels_round_trip_and_reject_unknowns() {
-    for (index, kind) in DrawToolKind::ALL.iter().copied().enumerate() {
-        assert_eq!(kind.index(), index);
-        assert_eq!(DrawToolKind::from_index(index as i32), Some(kind));
-        assert_eq!(DrawToolKind::from_key(kind.key()), Some(kind));
-        assert_eq!(DrawToolKind::from_label(kind.label()), Some(kind));
-    }
-    assert_eq!(DrawToolKind::from_key("arc"), Some(DrawToolKind::Arc));
-    assert_eq!(DrawToolKind::from_key("elbow"), None);
-    assert_eq!(DrawToolKind::from_index(-1), None);
-    assert_eq!(
-        DrawToolKind::from_index(DrawToolKind::ALL.len() as i32),
-        None
-    );
-    assert_eq!(DrawToolKind::from_label("半径"), None);
-}
-
-#[test]
 fn required_points_and_selection_are_explicit_per_kind() {
     for kind in DrawToolKind::ALL {
         let expected = match kind {
@@ -53,7 +35,12 @@ fn required_points_and_selection_are_explicit_per_kind() {
             // point (ADR 0019 decision A.1). TEXTEDIT's one step is its entity
             // pick (ADR 0020 amendment A).
             | DrawToolKind::Text
-            | DrawToolKind::TextEdit => 1,
+            | DrawToolKind::TextEdit
+            // COPYBASE/CUTBASE capture their base point; PASTECLIP its insertion
+            // point.
+            | DrawToolKind::CopyBase
+            | DrawToolKind::CutBase
+            | DrawToolKind::PasteClip => 1,
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot. HATCH has the same
             // pre-selection shape: the selected entities are the boundary and the
@@ -893,8 +880,10 @@ fn polygon_intent_carries_the_two_picks_exactly_and_is_ready_at_two() {
 }
 
 mod array;
+mod clipboard;
 mod dimension;
 mod hatch;
+mod keys;
 mod mleader;
 mod mtext;
 mod point_spline;

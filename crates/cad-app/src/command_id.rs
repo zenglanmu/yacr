@@ -655,9 +655,55 @@ pub enum CommandId {
     /// Capture the current selection into the clipboard, then delete it in one
     /// transaction and one undo step. Work-only.
     CutToClipboard,
-    /// Insert fresh-id clones of the clipboard entities at their original
-    /// coordinates in one transaction (PASTEORIG). Work-only.
+    /// `COPYBASE`: capture the selection into the clipboard **with a base point**.
+    ///
+    /// Payload is [`crate::CommandPayload::CopyBase`] `{ refs, base }`; the
+    /// interactive form is the one-point [`crate::draw_tool::DrawToolKind::CopyBase`]
+    /// capture with a selection (`COPYBASE` → pick a base point), which the host
+    /// maps by the active command (see
+    /// [`crate::host::HostController`]). Read-only: it clones the payload refs and
+    /// opens **no** transaction, so the drawing revision and undo history are
+    /// untouched; it records `clipboard_base = Some(base)` so the insertion-point
+    /// [`Self::PasteFromClipboard`] can translate by `insertion − base`. Allowed
+    /// in Viewer (a read-only capture), like [`Self::CopyToClipboard`]; an empty
+    /// `refs` list is an explicit refusal.
+    ///
+    /// AutoCAD's `COPYBASE` prompt is "Specify base point" after the object
+    /// selection, which is exactly this shape. Unlike [`Self::CopyToClipboard`]
+    /// this command always records a base — and recording **none** is exactly what
+    /// [`Self::CopyToClipboard`] keeps doing.
+    CopyToClipboardBase,
+    /// `CUTBASE`: [`Self::CopyToClipboardBase`] **and** delete the payload refs.
+    ///
+    /// Payload is [`crate::CommandPayload::CutBase`] `{ refs, base }`. The capture
+    /// is read-only; the delete is one transaction and one undo step through the
+    /// same validated delete path ERASE uses (render attributes and
+    /// dynamic-visibility membership are restored on undo). The clipboard (entries
+    /// **and** base) is committed only **after** the delete succeeded, so a failed
+    /// cut cannot destroy the previous clipboard. Work-only.
+    CutToClipboardBase,
+    /// `PASTECLIP`: insert fresh-id clones of the clipboard entities translated by
+    /// `insertion − clipboard base`, in one transaction.
+    ///
+    /// Payload is [`crate::CommandPayload::PasteClip`] `{ insertion }`; the
+    /// interactive form is the one-point [`crate::draw_tool::DrawToolKind::PasteClip`]
+    /// capture. The base is the clipboard's recorded
+    /// [`crate::SessionState`] base, written by [`Self::CopyToClipboardBase`] /
+    /// [`Self::CutToClipboardBase`]; a clipboard captured by
+    /// [`Self::CopyToClipboard`] / [`Self::CutToClipboard`] has **none**, so its
+    /// base is the world origin and the paste translates by the insertion point
+    /// itself. This is AutoCAD's documented `PASTECLIP` behaviour and the reason
+    /// `COPYBASE` exists. An empty clipboard is an explicit refusal. Work-only;
+    /// attribute/layer/space handling is identical to [`Self::PasteOriginalCoordinates`].
     PasteFromClipboard,
+    /// `PASTEORIG`: insert fresh-id clones of the clipboard entities at their
+    /// **original** coordinates (the base is ignored).
+    ///
+    /// Payload is [`crate::CommandPayload::None`]. This is the behaviour
+    /// `PASTECLIP` had before it became insertion-point based, kept reachable
+    /// under its own AutoCAD name. Exactly one transaction / one undo step; an
+    /// empty clipboard is an explicit refusal. Work-only.
+    PasteOriginalCoordinates,
     /// Create an offset copy of a single LINE/CIRCLE source, at the distance and
     /// side given by the picked point. Another geometry kind is an explicit
     /// `Unsupported` refusal. Work-only.
@@ -906,67 +952,4 @@ pub enum CommandId {
     GripStretch,
 }
 
-impl CommandId {
-    pub fn requires_work_mode(self) -> bool {
-        matches!(
-            self,
-            Self::Measure
-                | Self::ConfirmMeasurement
-                | Self::AreaObject
-                | Self::Undo
-                | Self::Redo
-                | Self::CreateLine
-                | Self::CreateCircle
-                | Self::CreateArc
-                | Self::CreatePolyline
-                | Self::CreateRectangle
-                | Self::CreateEllipse
-                | Self::CreatePolygon
-                | Self::CreatePoint
-                | Self::CreateSpline
-                | Self::CreateText
-                | Self::CreateMText
-                | Self::MLeader
-                | Self::TextEdit
-                | Self::DimLinear
-                | Self::DimAligned
-                | Self::DimRadius
-                | Self::DimDiameter
-                | Self::DimCenter
-                | Self::DimAngular
-                | Self::DimOrdinate
-                | Self::DimBaseline
-                | Self::DimContinue
-                | Self::Hatch
-                | Self::MoveEntities
-                | Self::TrimEntity
-                | Self::ExtendEntity
-                | Self::ChamferLines
-                | Self::FilletLines
-                | Self::ArrayRectangular
-                | Self::ArrayPolar
-                | Self::AlignEntities
-                | Self::StretchEntities
-                | Self::EraseEntities
-                | Self::Join
-                | Self::ExplodeEntities
-                | Self::CopyEntities
-                | Self::RotateEntities
-                | Self::ScaleEntities
-                | Self::MirrorEntities
-                | Self::CutToClipboard
-                | Self::PasteFromClipboard
-                | Self::OffsetEntity
-                | Self::SetActiveLayer
-                | Self::CreateLayer
-                | Self::RenameLayer
-                | Self::DeleteLayer
-                | Self::SetLayerProperty
-                | Self::SetPointDisplayMode
-                | Self::SetPointDisplaySize
-                | Self::SetEntityProperty
-                | Self::MatchProp
-                | Self::GripStretch
-        )
-    }
-}
+mod capabilities;
