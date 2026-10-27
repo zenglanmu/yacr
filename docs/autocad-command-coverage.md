@@ -116,7 +116,7 @@
 | `MIRROR` | 部分 | 镜像并**新增副本**（保留原件）；含 `Arc`/`Ellipse`（含椭圆弧）；**拒绝 `Text`**（平面文字无法表达真反射）与 `MultiLeader` |
 | `TRIM` | 部分 | 目标 `LINE`/`ARC`/`CIRCLE`/`SPLINE`；边界含 `LINE`/`ARC`/`CIRCLE`/`ELLIPSE`/`LWPOLYLINE`（含 bulge）/`SPLINE`（**采样**，附诊断）；拒绝 `INSERT`/`Opaque`/`Mesh` 目标、无交点/投影出域 |
 | `EXTEND` | 部分 | 目标 **`LINE` 或 `ARC`**（弧延伸上限半圈）；**`SPLINE` 目标显式拒绝**（NURBS 端点移动会改参数化，无外推策略）；`CIRCLE` 目标拒绝 |
-| `OFFSET` | 部分 | `LINE` / `CIRCLE` / `ARC` / **直线段** `LWPOLYLINE`；`ARC` 与 `CIRCLE` 共用 `\|p−c\|` 半径模型；**按名拒绝**含弧段折线（`offset.bulge_segment`）与 `ELLIPSE`（椭圆的等距偏移不是椭圆）；**无全局自交修剪** |
+| `OFFSET` | 部分 | `LINE` / `CIRCLE` / `ARC` / `LWPOLYLINE`（直线段**与含弧段**，后者 2026-10-28）；`ARC` 与 `CIRCLE` 共用 `\|p−c\|` 半径模型。**弧段同心**（`R' = R − s·sign(sweep)`；`R' <= tol` ⇒ `offset.arc_collapsed`，不删除不混合）；接点 = miter（line/line）/ 最近解析交点（line-circle、circle-circle；0 或两个等距 ⇒ `offset.join_failed`），相切闭式；弧 start/sweep 由接点重导并过 `bulge_arc_geometry`（`offset.arc_mismatch`）；闭合环含 wrap 角、开口弧端不封口。**按名拒绝**：`arc_collapsed`/`join_failed`/`ambiguous_plane`/`arc_mismatch`/`bulge_segment`（只剩非有限或不可构造）/`collapsed`/`non_planar` 与 `ELLIPSE`；**不做**弧段删除与邻居混合；**无全局自交修剪**；弧增长上限 `\|new\| <= \|old\| + π` |
 | `ARRAYRECT` / `ARRAYPOLAR` | 部分 | **独立副本**（非关联，有意偏离）；无 `Path`/`Levels`/`Total`/角度间隔输入/关联编辑；极坐标角度步长 `i·fill/items` 是**我们的规则**（与 AutoCAD 的 `fill/(items−1)` 不同，已测试） |
 | `STRETCH` | 部分 | 恒**交叉窗口**；逐顶点（折线）/控制点（样条）；`TEXT` 与 `MultiLeader` **整命令拒绝**；`HATCH` 部分包围不动 + 诊断；块参照只**刚性平移插入点**、不逐成员拉伸 |
 | `ALIGN` | 部分 | **两对点**（平移 + 旋转 + 可选均匀缩放）；无 3 对点 3D 对齐、无非均匀缩放、无「1 对点移动」 |
@@ -207,7 +207,7 @@
 | HATCH **关联性** | **L** | 需要边界→填充的持久引用（类似 `ACAD_DIMASSOC`），并定义边界编辑后的重生成/失效规则；与「实体非关联」的既有边界冲突，需 ADR |
 | ~~`FILLET`/`CHAMFER` 的 **Polyline 模式**~~ | **已关闭（2026-10-28）** | 两个独立选择子 `FILLET POLYLINE`/`CHAMFER POLYLINE`（选择式 `CommandPayload::None`、恰好 1 条开放直线段 `+Z` LWPOLYLINE、原地重写一条事务/一步撤销）；**仍未闭合**的是四条**声明偏差**：闭合环、含 bulge 段、非 `+Z` 平面都按名拒绝（不是 AutoCAD 的全功能子选项），`TRIMMODE` 不建模，AutoCAD 的**自动缩半径**不复刻，倒角的 `A`/`B` 方向是**我们的规则** |
 | `PASTEBLOCK`（`Ctrl+Shift+V`，粘贴为块） | **L** | 需要「把剪贴板实体包成一个块定义再插入」——`cad-db` **没有块写 API**（无 `BlockDefinition` 写入路径，现有 `insert_block` 只服务测试/导入构造器），要先有块定义写入口 + 命名/去重 + 与 EXPLODE/夹点/STRETCH 的交互；在它存在之前**不得**把 `Ctrl+Shift+V` 降级成 `PASTECLIP` |
-| OFFSET **含弧段折线** | **M** | 弧段偏移不是弧段（同样「椭圆的等距偏移不是椭圆」的问题），需要桥接/修剪策略；现在是 `offset.bulge_segment` 按名拒绝 |
+| ~~OFFSET **含弧段折线**~~ | **已关闭（2026-10-28）** | 弧段现在**精确同心**偏移（`R' = R − s·sign(sweep)`），接点按最近交点 + 闭式相切求解，弧经 `bulge_arc_geometry` 回验。**仍未闭合**的是三条**声明偏差**：不做 AutoCAD 的弧段删除与邻居重接（半径耗尽即 `offset.arc_collapsed`）、**全局自交修剪未做**（只在顶点检局部塌缩）、**2 顶点（纯弧）或全弦共线带 bulge ⇒ `offset.ambiguous_plane`** |
 | OFFSET **`ELLIPSE`** | **L** | 等距偏移曲线**不是**椭圆（非圆二次曲线的高阶偏移），要么新增偏移曲线类型、要么折线近似并显式声明；两条都不是补丁 |
 
 > 其它已知缺口（不属上述名字，但读表时容易误判为已完整）：`MATCHPROP` 的 Settings 子集、

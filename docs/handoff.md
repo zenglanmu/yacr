@@ -1,3 +1,61 @@
+## 2026-10-28 第 15 轮：含弧段折线的 OFFSET（精确同心）
+
+### 结论
+
+LWPOLYLINE 的 `OFFSET` 不再只做直线段：**带 bulge 的段现在精确偏移**——弧段保持**同心**，接点用解析交点
+求解，弧的 `start`/`sweep` 由接点重新导出并**回验**。没有采样、没有把弧换成折线、也**没有** AutoCAD 那种
+「弧段半径耗尽就删掉并重接邻居」的行为（我们的选择是**按名拒绝**）。
+
+### 做了什么（`cad-app`）
+
+- 新 `app_drawing/offset_polyline_bulge.rs`（832 行）。`offset_polyline.rs` 仍是直线段路径；检测到**真实**
+  bulge（`|bulge| > 1e-12`）就分派过来。`|bulge|` 非有限或不可构造（整圈及以上、退化弦）仍报 `offset.bulge_segment`
+  ——它的语义**收窄**了（不再是「含弧段折线」）。
+- **一个拾取、一个侧、一个距离**：`m = cross(n, u)`（`u` = 最近段单位切向）；直线段 `s = (pick − start)·m`
+  （与直线臂共享 `line_pick`）；弧段 `s = (|pick − c| − R)·(−sign σ)`——**同一个量**，只是沿半径量。
+- **弧段同心**：`R' = R − s·sweep.signum()`，**圆心不变**；`R' <= tol` ⇒ `offset.arc_collapsed`。不删除、
+  不把弧翻到圆的另一侧、不与邻居混合。
+- **接点**：line/line 用钉住的 miter（`miter_vertex` 共享）；line/circle 与 circle/circle 用
+  `GeometryEngine::intersect_local` 的解析交点，取**离源顶点最近**的那个；**0 个**或**两个等距** ⇒
+  `offset.join_failed`；**相切走闭式**（线/圆取垂足、圆/圆取心线切点）——引擎在相切处解二次方程的双根，
+  判别式 ~0 时相对误差变成 `sqrt(eps)`，实测把根抖 ~3e-10 并可能翻成负值，会把「每条 FILLET 轮廓的接点」
+  误判成失败，所以相切必须闭式。圆按 `Circle` 喂入（**不**按 `Arc`：miter 点可以合法落在源段跨度之外）。
+- **弧重导**：`start`/`sweep` 由两个接点的**圆心角**沿遍历方向重导（符号由构造保持），经
+  `cad_geometry::arc_sweep_to_bulge` 转 bulge，再 `bulge_arc_geometry` 回验圆心/半径/sweep；不一致即
+  `offset.arc_mismatch`（错的符号进不了库）。
+- **闭合/开口**：闭合环**一趟**跑完（`segments = count`，含 wrap 角）；开口折线的两端**不 miter、不封口**
+  （`open_vertex`）。
+- **平面**：`cad_geometry::polyline_plane_normal`（tessellator/EXPLODE 的同一权威）；**全弦共线却带 bulge**
+  ⇒ `offset.ambiguous_plane`——不假设 `+Z`，因为错平面里的 bulge 是另一条弧。
+- **拒绝面**：新增 `arc_collapsed`、`join_failed`、`ambiguous_plane`、`arc_mismatch`；`non_planar`、`collapsed`
+  不变；非有限顶点/零长段/拾取点落在折线上/点数 < 2 仍是 `InvalidInput`。
+- **声明的偏差**：① 不做 AutoCAD 的弧段删除与邻居重接；② **全局自交未查**（只在顶点处检局部塌缩）；
+  ③ 2 顶点（纯弧）或全弦共线的带 bulge 折线 ⇒ `ambiguous_plane`；④ 弧修剪允许**增长**，上限
+  `|new| <= |old| + π`——外凸 miter 会延长弧，严格的 `|new| <= |old| + tol` 会拒绝**合法的**外偏。
+
+### 证据（本机，2026-10-28）
+
+- `cargo test -p cad-app --locked` → **1363 / 0**（集成套件 4+11+18+15+5+2 全 0 failed，1 ignored）。
+- 新测试文件 `crates/cad-app/src/tests/drawing/offset_polyline_bulge.rs`（752 行），含
+  `offset_bulged_arc_and_tangent_line_outward_keeps_centre_and_sweep`、
+  `offset_bulged_arc_and_tangent_line_inward_shrinks_the_radius`、
+  `offset_bulged_line_arc_join_is_the_analytic_intersection`、
+  `offset_bulged_tangent_continuous_arcs_join_at_their_tangent_point` 等。
+- `cargo fmt --all -- --check` → 通过；`check-architecture.py` → 28 packages 无环；
+  `check-file-size.py` → **1081** 文件 ≤1000 行；`check-i18n.py` → 886 keys；`check-command-docs.py` → 0 mismatch。
+
+### 仍未成立 / 边界（必须原样保留）
+
+1. **没有 GUI/像素证据**：全部是几何契约测试；这批含弧段偏移从未在真实窗口/GPU 上看过。
+2. **不做弧段删除与邻居混合**（AutoCAD 会）：半径耗尽即 `offset.arc_collapsed`。
+3. **全局自交未检查**：远端偏移段之间交叉不检测（与直线臂同一已知缺口）。
+4. **增长上限 `+π` 是启发式边界**（借用 EXTEND 的单步上限），不是 AutoCAD 规则。
+5. **`ambiguous_plane` 是保守拒绝**：2 顶点纯弧或全弦共线带 bulge 时不猜平面。
+6. **代码措辞滞后（未改代码）**：`trim_extend.rs` 的通用拒绝串仍写
+   `OFFSET supports LINE, CIRCLE, ARC and straight-segment LWPOLYLINE only, got …`；含弧段已支持后这句话已过时，
+   文档中已显式标注。
+7. **平台 NOT RUN**：全 workspace 矩阵、wasm/Windows/Android/macOS、真按键均未运行。
+
 ## 2026-10-28 第 14 轮：`$PDMODE` 周边圆/方（`32`/`64`/`96`）落地
 
 ### 结论

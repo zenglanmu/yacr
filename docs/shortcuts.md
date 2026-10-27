@@ -78,7 +78,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `ROTATE` | 编辑 | 是 | `RO` |
 | `SCALE` | 编辑 | 是 | `SC` |
 | `MIRROR` | 编辑（保留原件） | 是 | `MI` |
-| `OFFSET` | 编辑（LINE / CIRCLE / **ARC** / **直线段折线**；含弧段折线与 `Ellipse` 按名拒绝） | 是 | `O` |
+| `OFFSET` | 编辑（LINE / CIRCLE / **ARC** / **LWPOLYLINE**：直线段与**含弧段**；`Ellipse` 按名拒绝） | 是 | `O` |
 | `MATCHPROP` | 编辑（**选择式**特性匹配：首个选中实体为源，其余为目标；转移 `layer`/`color`/`linetype`/`lineweight`/`transparency` 五项） | 是 | `MA` |
 | `JOIN` | 编辑（合并选择为**一个**实体：共线 `LINE` 或同心相续 `ARC`；一条事务、一步撤销，仅这两种几何） | 是 | — |
 | `FILLET POLYLINE` | 编辑（AutoCAD 的 **Polyline 模式**，独立选择子：**恰好 1 个**选中实体，每个**内顶点**用会话参数 `filletRadius` 换成两切点 + 一段圆弧；实体**原地重写**、一条事务/一步撤销；两线 `FILLET` 不变） | 是 | — |
@@ -384,13 +384,18 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   不钳制、不折到邻居；`0` 度是合法值，默认值永不触发提交期拒绝。两个参数都经 `cad_set_tool_parameter`
   （**不新增选择子**，命令表仍 **97**）。**仍未实现**：MTEXT 的行距、分栏、背景填充、绘制方向、绘制流程内的
   MTEXT 对话框；`TEXT` 仍是**单行、在插入点**。
-- **`OFFSET` 为有界子集**：支持 **LINE / CIRCLE / ARC / 直线段 LWPOLYLINE**；拾取点同时决定**侧**与
-  **距离**。**ARC 与 CIRCLE 共用同一距离模型**（新半径 = `|拾取点 − 圆心|`，`center`/`normal`/`start`/
-  `sweep` **逐位保留**，顺时针 sweep 仍为负，只改半径）；`LINE` 取到无限直线的垂距；折线整条同侧、
-  `miter` 斜接、顶点/bulge 原样保留。**按名拒绝**：`offset.bulge_segment`（含弧段折线）、
-  `offset.collapsed`（局部塌缩）、`offset.non_planar`；**`ELLIPSE` 单独按名拒绝**——椭圆的等距偏移
+- **`OFFSET` 的多边形范围**：支持 **LINE / CIRCLE / ARC / LWPOLYLINE（直线段与含弧段）**；拾取点同时决定
+  **侧**与**距离**。**ARC 与 CIRCLE 共用同一距离模型**（新半径 = `|拾取点 − 圆心|`，`center`/`normal`/
+  `start`/`sweep` **逐位保留**，顺时针 sweep 仍为负，只改半径）；`LINE` 取到无限直线的垂距。**折线**：整条
+  同侧常数距离；直线段 `miter` 斜接，**弧段同心**（`R' = R − s·sign(sweep)`，圆心不变）；接点 line/line 走
+  钉住的 miter、line/circle 与 circle/circle 取**离源顶点最近**的解析交点（0 个或两个等距 ⇒ `offset.join_failed`），
+  相切按闭式判定；弧的 `start`/`sweep` 由接点重导并回验（`offset.arc_mismatch`）；**闭合环一趟**（含 wrap 角）、
+  开口弧端**不封口**。**按名拒绝**：`offset.arc_collapsed`（半径耗尽，**不删除、不混合**）、`offset.join_failed`、
+  `offset.ambiguous_plane`（全弦共线却带 bulge）、`offset.arc_mismatch`、`offset.bulge_segment`（只剩非有限/不可构造的 bulge）、
+  `offset.collapsed`、`offset.non_planar`；**`ELLIPSE` 单独按名拒绝**——椭圆的等距偏移
   **不是**椭圆，不拿近似当实现。其余几何走通用 `Unsupported`
-  （`OFFSET supports LINE, CIRCLE, ARC and straight-segment LWPOLYLINE only, got …`），不创建、不部分执行。
+  （代码串仍是 `OFFSET supports LINE, CIRCLE, ARC and straight-segment LWPOLYLINE only, got …`——**含弧段折线已支持，该措辞未更新**），
+  不创建、不部分执行。
   **没有全局自交修剪**：只在顶点处检测局部塌缩，远端偏移段之间的自交**不检查**（声明）。
 - **`FILLET POLYLINE` / `CHAMFER POLYLINE` 的 v1 界限**（选择式，恰好 1 条**开放**、**直线段**、`+Z` 平面
   LWPOLYLINE，≥ 3 顶点；每个**内顶点**被改，两个端顶点不动、不造端帽、不产生新实体）：**闭合环**按名拒绝
