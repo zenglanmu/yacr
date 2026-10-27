@@ -377,6 +377,13 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   颜色**只有 ACI**（无真彩），ACI `0`（ByBlock）被拒，默认 1 红 / 5 蓝；`SPHERICAL` 在矩形/圆边界上
   会读成平色（按三角化顶点烘焙，不是径向）。**HATCH 仍未实现**：**内部点求边界**、
   **自定义（`76=2`）图案名与 `.pat` 加载**、**关联性**（其余拒绝面见 `docs/compatibility.md` 的 HATCH 行）。
+- **`TEXT`/`MTEXT` 创建的两个参数（2026-10-28）**：**`textRotation`**（通道**度**，任意有限、**不 wrap**、
+  默认 `0`；TEXT 与 MTEXT 都读，创建时**一次** `.to_radians()` 存弧度）与 **`mtextAttachment`**
+  （闭集 **`1..=9`**，默认 `1`，**只给 MTEXT**：`1..=3` top / `4..=6` middle / `7..=9` bottom，每行左/中/右——
+  `h = (code−1) % 3`、`row = (code−1)/3`，**永不产出 `TextAlignV::Baseline`**）。越界 code 与非有限旋转**按名拒绝**，
+  不钳制、不折到邻居；`0` 度是合法值，默认值永不触发提交期拒绝。两个参数都经 `cad_set_tool_parameter`
+  （**不新增选择子**，命令表仍 **97**）。**仍未实现**：MTEXT 的行距、分栏、背景填充、绘制方向、绘制流程内的
+  MTEXT 对话框；`TEXT` 仍是**单行、在插入点**。
 - **`OFFSET` 为有界子集**：支持 **LINE / CIRCLE / ARC / 直线段 LWPOLYLINE**；拾取点同时决定**侧**与
   **距离**。**ARC 与 CIRCLE 共用同一距离模型**（新半径 = `|拾取点 − 圆心|`，`center`/`normal`/`start`/
   `sweep` **逐位保留**，顺时针 sweep 仍为负，只改半径）；`LINE` 取到无限直线的垂距；折线整条同侧、

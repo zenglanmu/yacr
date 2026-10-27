@@ -1,3 +1,50 @@
+## 2026-10-28 第 13 轮：TEXT/MTEXT 创建参数（`textRotation` + `mtextAttachment`）
+
+### 结论
+
+文字创建多了两个**会话级**参数：**`textRotation`**（TEXT 与 MTEXT 都读）与 **`mtextAttachment`**（只给 MTEXT）。
+没有新选择子、没有新载荷字段、没有第二套转换：两者都经既有的 `cad_set_tool_parameter` 通道写入，
+由 `app_drawing/text_params.rs` 在**创建时**各转换一次。命令表仍是 **97**。
+
+### 做了什么（`cad-app`）
+
+- `draw_tool/parameter.rs`：新增两个 `Number` 成员（`ToolParameter::ALL` 25 项、`COUNT = 25`）。
+  - `textRotation`：通道**度**、**任意有限**值、**不 wrap**（`-30` 就是 `-30`，整圈不折回 0），默认
+    `TEXT_DEFAULT_ROTATION_DEGREES = 0`；`validate` 走 `finite`。
+  - `mtextAttachment`：闭集 `MTEXT_ATTACHMENT_MIN..=MAX` = **`1..=9`**，默认
+    `MTEXT_ATTACHMENT_TOP_LEFT = 1`；`validate` 走 `integer_in_range(1, 9)`，`0`/`10`/小数/非有限**按名拒绝**。
+- `app_drawing/text_params.rs`（新模块，唯一解析点）：
+  - `text_rotation_radians(session)`：读 `textRotation`，非有限即按名拒绝，然后**一次** `.to_radians()`
+    （域存弧度，通道存度）；**不替换默认值、不 wrap**。
+  - `mtext_attachment_align(session)`：读 `mtextAttachment`，经 `mtext_align_for_code` 映射为
+    `(TextAlignH, TextAlignV)`：`offset = code − 1`、`h = offset % 3`（Left/Center/Right）、
+    `row = offset / 3`（Top/Middle/Bottom），因此 `1` 左上、`5` 中中、`9` 右下；
+    **`TextAlignV::Baseline` 永不产出**（没有任何附着码表示基线）。越界 code 按名拒绝，不钳制、不折到邻居。
+- **消费点**：`create_text` 直接读旋转（`Text` 载荷**没有**旋转字段，通道是唯一来源）；
+  交互 MTEXT 捕获（`host/draw_intent_map.rs`）把 `rotation` 与 `h_align`/`v_align` 填进 `CommandPayload::MText`，
+  命令层逐字消费。`TEXTEDIT` **不**重转角度；MLEADER 保持自己的朝向规则（未受影响）。
+- `All`/`COUNT` 的固定宽度存储与 key 往返随之 +2（既有测试覆盖）。
+
+### 证据（本机，2026-10-28）
+
+- `cargo test -p cad-app --locked` → **1341 / 0**（集成套件 4+11+18+15+5+2 全 0 failed，1 ignored）。
+- `cargo test -p cad-ui-core --locked` → **295 / 0**。
+- `python3 scripts/check-command-docs.py` → `OK: 0 mismatches`（`tables: 97/5/2/4 selectors`）；
+  `check-file-size.py` → **1076** 文件 ≤1000 行；`check-architecture.py` → 28 packages 无环。
+
+### 仍未成立 / 边界（必须原样保留）
+
+1. **没有 GUI/像素/真窗口证据**：两个参数只有 `cad-app` 契约测试；桌面控件由**另一个 lane** 落地，
+   本轮**不声称**已接线（`apps/desktop-ui` 正在改）。
+2. **MTEXT 仍不建模**：行距（样式/倍率）、分栏、背景填充、绘制方向、绘制流程内的 MTEXT 对话框；
+   `TEXT` 仍是**单行、在插入点**（换行按名拒绝 `text.single_line_newline`）。
+3. **度/弧度的约定**：通道度、域弧度；`textRotation` 与 HATCH 的图案角、渐变角共用这条规则。
+   **不 wrap**：`-30` 与 `330` 存下来的弧度值不同（视觉朝向相同），既不折回也不取模。
+4. **附着只是创建期的 3×3 网格**：`TextAlignV::Baseline` 永不产出；导入侧已有的基线/其它附着值不受影响
+   （导入是另一条路径）。
+5. **平台 NOT RUN**：全 workspace 矩阵、wasm/Windows/Android/macOS、真按键均未运行；本轮只跑了两个
+   crate 的测试与三个静态门禁（`check-command-docs` / `check-file-size` / `check-architecture`）。
+
 ## 2026-10-28 第 12 轮：`FILLET POLYLINE` / `CHAMFER POLYLINE`（Polyline 模式）
 
 ### 结论
