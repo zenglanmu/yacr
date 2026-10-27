@@ -154,6 +154,11 @@ python3 scripts/test-fetch-fonts.py
 python3 scripts/test-android-icon.py
 # 离线 WGSL 校验（无需 GPU）
 cargo test -p cad-render-wgpu --test wgsl_validation --locked
+# 全量 workspace 测试必须拆两步：先排除 cad-render-wgpu，再单独串行跑该 crate。
+# 默认并行的整包命令会在 accelerated_tier 因 wgpu device 争用而“挂起”（不是失败），
+# 见 docs/testing-dwg.md §3「全量 workspace 测试：必须排除 cad-render-wgpu 并单独串行」。
+cargo test --workspace --exclude app-android --exclude app-web --exclude cad-render-wgpu --locked
+cargo test -p cad-render-wgpu --locked -- --test-threads=1
 ```
 
 浏览器 bundle（与 CI 的 `web-build` 同一条命令；**本地**运行，产物 git 忽略）：

@@ -160,6 +160,44 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
 需要实际执行外部图纸的 CLI render 契约时，额外设置 `YACR_TEST_DWG` 为该 DWG 的绝对路径。
 不设置时此项会跳过，不能将其计作真实样本证据。完整核心门见 `AGENTS.md`。
 
+### 全量 workspace 测试：必须排除 `cad-render-wgpu` 并单独串行（2026-10-28 实测）
+
+**这是测试 harness 的设备争用限制，不是代码缺陷**；证据只覆盖**测试运行方式**，
+**不是** GPU 渲染/像素/视觉验收结论。
+
+现象（本机实测，树 `1f0829f`）：直接跑默认并行 harness 的
+
+```bash
+cargo test --workspace --exclude app-android --exclude app-web --locked
+```
+
+会在 `cad-render-wgpu` 的 `tests/accelerated_tier` **挂住而不是失败**：1 个用例完成后，22 个
+卡住超过 12 分钟，GPU 利用率 0 %、约 1.3 GiB 显存被占住，所有线程停在 futex 等待。判读要点是
+**没有失败输出、没有断言错误，进程只是不前进**。原因是并行 harness 同时创建多个 wgpu device，
+在 4 GiB 显存上互相争用（把并行度调低只会降低概率，**不构成**可依赖的行为）。
+
+因此全量测试必须**拆成两步**（即 `AGENTS.md` 的「GPU/CLI 用例串行跑」）：
+
+```bash
+# 1) 除 GPU 渲染器外的全部 workspace 测试（并行 harness 可用）
+cargo test --workspace --exclude app-android --exclude app-web --exclude cad-render-wgpu --locked
+
+# 2) GPU 渲染器测试：单线程
+cargo test -p cad-render-wgpu --locked -- --test-threads=1
+```
+
+本轮实测（同一台机器、同一会话内真实 GPU）：
+
+| 命令 | 退出码 | 结果 |
+|---|---|---|
+| 上面第 1 条 | 0 | **3636 passed / 0 failed / 20 ignored** |
+| 上面第 2 条 | 0 | **478 passed / 0 failed / 8 ignored**；`accelerated_tier` 23/23 用时 2.80 s |
+
+机器上下文：单机 Linux 桌面会话，**NVIDIA Quadro P620（4 GiB 显存）**，真实 GPU（非软件渲染）。
+具体计数随提交变化，**不要**把上面的数字当作长期门禁期望值；稳定的是**拆分形式**以及
+「挂起 ≠ 失败」的判读方式。看到 `accelerated_tier` 长时间无输出时应先按串行形式重跑，再判断
+是否真有回归。
+
 ## 4. 第二层：WASM + Playwright 浏览器
 
 > **2026-10-24 更正（本节注意）：** Web 入口已复活为**本地** wasm 会话（`apps/app-web`，ADR 0024）：
