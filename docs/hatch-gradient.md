@@ -72,6 +72,42 @@ solid.
 * A single-colour gradient is expanded to a two-stop ramp from the listed colour
   to white (`tint > 0`) or black (`tint < 0`).
 
+## 2b. 创建（2026-10-27）：`HATCH` 类型码 `3`
+
+同一套域类型与烘焙也被**创建**路径复用：没有新 `CommandId`、没有新载荷、没有渲染器或写出改动。
+能力表（`docs/compatibility.md` 的 HATCH（创建）行）是这里语义的权威；本节只记**创建出来的实体长什么样**。
+
+- **入口**：`hatchPatternType` 闭集在 `{0 solid, 1 user-defined, 2 predefined}` 之外新增 **`3` 渐变**
+  （`crates/cad-app/src/draw_tool/parameter.rs`）。四个 `Number` 参数（`cad_set_tool_parameter`）：
+
+  | 键 | 默认 | 校验 |
+  | --- | --- | --- |
+  | `hatchGradientKind` | `0` LINEAR | 闭集 `{0 LINEAR, 1 SPHERICAL}`；**从不**写 `CYLINDER`（域把它烘焙成球面，一个行为不给两个名字） |
+  | `hatchGradientAngle` | `0`（度） | 任意**有限**值；**通道是度**，实体存**弧度** |
+  | `hatchGradientColorA` | `1`（红） | **整数 ACI `1..=255`**；`0`＝ByBlock 占位、无 sRGB ⇒ 按名拒绝 |
+  | `hatchGradientColorB` | `5`（蓝） | 同上 |
+
+- **写出的实体**：`HatchGradient::TwoColor { reserved: 0, angle_raw: 弧度, shift: 0.0,
+  stops: [0.0 → A 的 rgb, 1.0 → B 的 rgb] }`；`pattern_type` 是 **`Predefined`（`76=1`）**，
+  `HatchStyle` 按所选写。渐变**不读**图案的间距/角度/`double`：陈旧的非法间距不得拒绝一个渐变，
+  反之陈旧的非法渐变颜色也不得拒绝图案。
+- **度 → 弧度只转一次**：`app_drawing/hatch_parameters.rs` 的 `.to_radians()` 是本路径唯一的换算；
+  **导入**侧按组 `460` **逐字**存弧度、从不换算。两个约定在
+  `crates/cad-app/src/tests/drawing/hatch_gradient.rs` 的
+  `the_degrees_to_radians_conversion_survives_export_and_reimport`（create → export → reimport）上被钉住
+  ——改任何一侧都会让它失败。
+- **只有 ACI**：颜色是整数索引，经 `crate::property_value::rgb_for_aci` 解析一次；没有真彩、没有色名/色簿。
+  `0` 没有 sRGB 三元组（`rgb_for_aci(0)` 返回 `None`），所以命令**按名拒绝**它，绝不退化成黑色。stop 颜色下游仍会被
+  实体/图层 tint 相乘，即渐变颜色不是绝对值。
+- **`SPHERICAL` 在矩形/圆上读成平色**（已声明，见 §6 第 3 条）：ramp 按三角化顶点取值，而矩形四角的
+  归一化半径相同 ⇒ 常数颜色；三角形或曲线边界才会真正径向。按值细分内部三角形是未来工作。
+- **`76=1` 是未查证的 vendor 约定**：渐变按「实体填充 + 450–470 块」写、没有图案定义行，所以
+  `pattern_type` 记 `Predefined`；这是**声明**的映射，**没有**用 vendor 生成的文件比对过。
+  也因此没有单色/tint 变体（`single_color=false`、`tint=0`）、没有逐站命名。
+
+证据上限：创建路径的证据是 `cargo test -p cad-app` 的契约测试（含上面那条往返钉）；UI 侧的四个控件
+只有源码结构/纯函数契约，**没有**挂载后的 DOM、像素或真窗口证据。
+
 ## 3. Importer behaviour and reason codes
 
 `cad_import_acadrust::translate_gradient` maps `HatchGradientPattern`:

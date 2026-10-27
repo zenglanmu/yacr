@@ -364,8 +364,11 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   容差绝对 `1e-6`））。**预定义图案名已实现（2026-10-27）**：内置表**恰好三项**
   `ANSI31`/`ANSI32`/`ANSI37`，状态栏按**名字**选择（分段 chip），线上传的仍是 **1 基索引**
   （1/2/3，经 `cad_set_tool_parameter`）；表值是**我们的转录值**，**非** vendor 核实。
-  **HATCH 仍未实现**：**内部点求边界**、**自定义（`76=2`）图案名与 `.pat` 加载**、**渐变创建**、
-  **关联性**（其余拒绝面见 `docs/compatibility.md` 的 HATCH 行）。
+  **渐变创建已实现（2026-10-27）**：填充类型码 **`3`** + 四个参数（`hatchGradientKind`
+  `0` Linear/`1` Spherical、`hatchGradientAngle` **度**、`hatchGradientColorA`/`B` **ACI 整数**），
+  颜色**只有 ACI**（无真彩），ACI `0`（ByBlock）被拒，默认 1 红 / 5 蓝；`SPHERICAL` 在矩形/圆边界上
+  会读成平色（按三角化顶点烘焙，不是径向）。**HATCH 仍未实现**：**内部点求边界**、
+  **自定义（`76=2`）图案名与 `.pat` 加载**、**关联性**（其余拒绝面见 `docs/compatibility.md` 的 HATCH 行）。
 - **`OFFSET` 为有界子集**：支持 **LINE / CIRCLE / ARC / 直线段 LWPOLYLINE**；拾取点同时决定**侧**与
   **距离**。**ARC 与 CIRCLE 共用同一距离模型**（新半径 = `|拾取点 − 圆心|`，`center`/`normal`/`start`/
   `sweep` **逐位保留**，顺时针 sweep 仍为负，只改半径）；`LINE` 取到无限直线的垂距；折线整条同侧、

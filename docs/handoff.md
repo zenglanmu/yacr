@@ -1,3 +1,82 @@
+## 2026-10-27 第 10 轮：HATCH 渐变创建（类型码 `3`，核心 + UI）
+
+### 结论
+
+`HATCH` 的第四种填充——**双色渐变**——现在能**创建**了，而且**没有**新增 `CommandId`、载荷、渲染器或写出改动：
+它复用既有的 `HatchFill::Gradient` 域类型、既有烘焙与既有导出。真正新增的是**参数面**（四个 `Number`）与
+**一条度/弧度约定**，以及把「渐变无视图案参数」写成可测规则。
+
+### 做了什么
+
+**核心（`cad-app`）**
+
+- `draw_tool/parameter.rs`：`hatchPatternType` 闭集 `{0 solid, 1 user-defined, 2 predefined}` →
+  加 **`3` gradient**（拒绝串同时更新）；新增四个 `Number` 参数（见下表）。`HATCH_GRADIENT_LINEAR`/
+  `_SPHERICAL` 是唯一 kind 码，**从不**产出 DXF 的 `CYLINDER`（域会把它烘焙成球面）。
+- `app_drawing/hatch_parameters.rs`：`HatchParameters::gradient()` 组装
+  `HatchGradient::TwoColor { reserved: 0, angle_raw: 弧度, shift: 0.0, stops: [0.0 → A, 1.0 → B] }`；
+  `.to_radians()` 是**本路径唯一**的换算；`gradient_stop()` 用 `property_value::rgb_for_aci` 解析 ACI，
+  **`0`（ByBlock，无 sRGB）按名拒绝**；组装后还要过 `GradientDef::is_usable()`（与烘焙同一谓词），
+  不可渲染的梯度**由命令拒绝**，不推迟到「画不出来」。
+- **填充依赖的参数集**：渐变分支插在 `scale_and_angle()` **之前**，所以陈旧的非法间距不会拒绝渐变；
+  反过来，图案分支也不会因为陈旧的非法渐变颜色被拒。
+- **写出**：`fill()` 返回 `(HatchFill::Gradient(..), HatchPatternType::Predefined)` —— 即 `76=1`
+  （渐变按「实体填充 + 450–470 块」写，没有定义行）。该映射是**未查证的 vendor 约定**（代码注释与本文都如此声明）。
+- **拒绝面**：kind 不在 `{0,1}`、角度非有限、ACI 非整数/越界/`0`、图案类型不在 `{0,1,2,3}`。
+
+| 参数（`cad_set_tool_parameter`，全为 `Number`） | 默认 | 校验 |
+|---|---|---|
+| `hatchGradientKind` | `0` LINEAR | 闭集 `{0 LINEAR, 1 SPHERICAL}`；**无 `CYLINDER`** |
+| `hatchGradientAngle` | `0`（度） | 任意**有限**值；通道度、实体弧度 |
+| `hatchGradientColorA` | `1`（红） | 通道 `0..=255` 的**整数**；命令**额外拒绝 `0`**（ByBlock 占位） |
+| `hatchGradientColorB` | `5`（蓝） | 同上 |
+
+**UI（`apps/desktop-ui`）**
+
+- 状态栏填充类型多出 `3`；新增 **Linear/Spherical 命名 chooser**（与图案名同一套 `choiceLabelKeys` 机制）、
+  **度步进器**（step 15，任意有限值）、**两个 ACI 色块**（走 in-DOM `ColorChooser`，`offered` 收窄到
+  `1..=255`，所以**不提供** ACI 0）。
+- 四行都用 `activeWhen: hatchPatternType == 3` 作用域：非 `3` 时**可见但惰性**并给出原因；图案专用行
+  （间距/角度/双线）在 `3` 下同样惰性。
+- i18n **+11 键**（847 → **858**）：`status.tool_parameter.choose_color` + 10 个
+  `status.tool_parameter.hatch_gradient_*`；图案类型/间距/角度/双线的 hint 同步改写。
+
+### 证据（本机，2026-10-27；全部为本轮重跑）
+
+- `cargo test -p cad-app --locked` → **exit 0**：`unittests src/lib.rs` **1295 passed, 0 failed**；
+  集成套件 4 + 11 + 18 + 15 + 5 + 2 全 0 failed；`pick_index_real_fixture` **1 ignored**（需外部真实 DWG）；
+  doc-tests 0。新增 `crates/cad-app/src/tests/drawing/hatch_gradient.rs`（381 行，**6 个测试**）。
+- `cargo test -p cad-ui-core --locked` → **291 passed, 0 failed**。
+- `cd apps/desktop-ui && npm test`（`tsc --noEmit && node --test test/*.test.ts`）→ **692 pass / 0 fail**。
+- `python3 scripts/check-i18n.py` → **858 keys / 2 目录**，键与占位符一致。
+- `python3 scripts/check-file-size.py` → **1054** 个代码文件 ≤1000 行。
+
+**关键钉**：`hatch_gradient.rs::the_degrees_to_radians_conversion_survives_export_and_reimport` 做
+**create → export → reimport**：创建时 30° 存成 `30f64.to_radians()`，导出写组 `460`，再导入仍是同一弧度值
+（`< 1e-9`）。导入侧**从不**换算，所以这条测试是两个约定唯一的交汇点——改任何一侧都会失败。
+
+### 仍未成立 / 边界（必须原样保留）
+
+1. **没有挂载后的 DOM/像素/真窗口证据**：四个新控件只有 `tsc` / `node --test` / 源码结构契约，
+   没在真实窗口点过，也没有截图。
+2. **`76=1` 是未查证的 vendor 约定**：没有用 AutoCAD/vendor 生成的渐变文件对照过导出形状；
+   也没有 vendor 侧的非零角度梯度往返样本。
+3. **`SPHERICAL` 在矩形/圆边界上读成平色**（烘焙按三角化顶点取半径，矩形四角半径相同），
+   不是径向；按值细分内部三角形仍是未来工作（`docs/hatch-gradient.md` §6 第 3 条）。
+4. **只有 ACI 调色板**：无真彩、无色名/色簿；stop 颜色会被实体/图层 tint 相乘（不是绝对值）；
+   无单色/tint 变体、无逐站命名。
+5. **其它 HATCH 缺口不变**：内部点求边界、自定义 `76=2` 名与 `.pat`、关联性、AutoCAD 式模态图案对话框、
+   实时预览、每段裁剪的虚线相位重置。
+6. **平台 NOT RUN**：wasm / Windows / Android / macOS 目标未编译或运行；Rust 侧本轮只跑了两个 crate
+   的测试，**未跑** clippy / fmt / workspace 全量 check / 架构与 workflow 脚本。
+
+### 债务提醒（下一轮会撞上）
+
+`apps/desktop-ui/src/tools/tool-parameters.ts` 已 **928 / 1000 行**（`check-file-size.py` 的上限）。
+再加一个参数或一条 hint 就会顶到上限：下一个 HATCH/工具参数应当先把该文件按功能拆出去
+（例如把 `TOOL_PARAMETER_SPECS` 按工具族分文件，或把 `closedSet`/`choiceLabelKeys` 的辅助与表分离），
+**不要**加白名单豁免。
+
 ## 2026-10-27 第 9 轮：OFFSET 支持独立 ARC + HATCH 预定义图案按名选择（状态栏 chip）+ 命令覆盖审计
 
 ### 结论
