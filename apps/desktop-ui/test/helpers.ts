@@ -121,6 +121,15 @@ export const HOST_NAMES = [
   // writes no alias row for it (the alias table is the host's, and this mirror
   // lists it in the canonical run).
   'JOIN', 'LAYISO', 'LAYUNISO', 'LAYOFF', 'LAYON', 'LAYERP',
+  // CHAMFER POLYLINE / FILLET POLYLINE (2026-10-27): the Polyline modes of the
+  // two corner commands, canonical **multi-word** selectors of their own (like
+  // `AREA OBJECT`, the space is part of one name and is never split into a typed
+  // argument). They are not aliases of `CHAMFER`/`FILLET`: those keep their
+  // two-pick capture, and an alias would route a polyline edit into it. Each
+  // takes the current selection (`CommandPayload::None`), so the mirror lists
+  // them in the canonical run, exactly as `cad_ui_core::session::COMMAND_TABLE`
+  // now does.
+  'CHAMFER POLYLINE', 'FILLET POLYLINE',
   // POINT display style sysvars (2026-10-26): `PDMODE` and `PDSIZE` are typed
   // command-line settings with one numeric argument each (like `SNAPUNIT`), not
   // buttons. This mirror is instructed locally, exactly like `SNAPUNIT` before

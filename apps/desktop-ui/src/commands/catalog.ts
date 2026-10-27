@@ -79,6 +79,21 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', group: 'modify' },
   { id: 'CHAMFER', labelKey: 'draw.kind.chamfer', icon: 'chamfer', group: 'modify' },
   { id: 'FILLET', labelKey: 'draw.kind.fillet', icon: 'fillet', group: 'modify' },
+  // The **Polyline modes** (2026-10-27) are selectors of their own, directly
+  // after the two-line pair they share a name with and never aliases of it: the
+  // two-pick `CHAMFER`/`FILLET` capture is unchanged, and an alias would route a
+  // polyline edit into that capture. Each takes `CommandPayload::None` — the one
+  // preselected polyline is the whole input — and acts on the current selection,
+  // so `SELECTION_REQUIREMENTS` (not a draw tool) decides when it can run. The
+  // radius and the two chamfer distances are the existing `filletRadius` /
+  // `chamferDistanceA` / `chamferDistanceB` tool parameters: no new setting row.
+  //
+  // Both ids are **multi-word**, exactly like `AREA OBJECT`: the host
+  // canonicalises the whole trimmed line, so the space is part of one name here
+  // and in the vocabulary mirror. The glyphs are the parents' own — the operation
+  // is the same corner treatment, only its input differs.
+  { id: 'CHAMFER POLYLINE', labelKey: 'draw.kind.chamfer_polyline', icon: 'chamfer', group: 'modify' },
+  { id: 'FILLET POLYLINE', labelKey: 'draw.kind.fillet_polyline', icon: 'fillet', group: 'modify' },
   { id: 'ARRAYRECT', labelKey: 'draw.kind.arrayrect', icon: 'arrayrect', group: 'modify' },
   { id: 'ARRAYPOLAR', labelKey: 'draw.kind.arraypolar', icon: 'arraypolar', group: 'modify' },
   { id: 'ALIGN', labelKey: 'draw.kind.align', icon: 'align', group: 'modify' },

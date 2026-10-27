@@ -196,6 +196,16 @@ export interface SelectionRequirement {
 export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequirement>> = Object.freeze({
   MATCHPROP: Object.freeze({ count: 2, reasonKey: 'draw.kind.matchprop.hint' }),
   JOIN: Object.freeze({ count: 2, reasonKey: 'draw.kind.join.hint' }),
+  // CHAMFER POLYLINE / FILLET POLYLINE (2026-10-27) are the Polyline modes of the
+  // two corner commands: each rewrites **exactly one** preselected open polyline
+  // in place (`CommandPayload::None`, so nothing is picked interactively). The
+  // table states a *minimum* of one — the host is what refuses a selection of two
+  // or a non-polyline, by name — and the sentence is this command's own hint, so
+  // the disabled button and the refusal describe the same rule once. Zero
+  // selected objects can never be a partial success, which is the whole reason
+  // the row exists instead of leaving the host to answer at run time.
+  'CHAMFER POLYLINE': Object.freeze({ count: 1, reasonKey: 'draw.kind.chamfer_polyline.hint' }),
+  'FILLET POLYLINE': Object.freeze({ count: 1, reasonKey: 'draw.kind.fillet_polyline.hint' }),
   LAYISO: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
   LAYUNISO: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
   LAYOFF: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),

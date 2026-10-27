@@ -314,6 +314,13 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'EXTEND', labelKey: 'draw.kind.extend', icon: 'extend', command: 'EXTEND' },
           { id: 'CHAMFER', labelKey: 'draw.kind.chamfer', icon: 'chamfer', command: 'CHAMFER' },
           { id: 'FILLET', labelKey: 'draw.kind.fillet', icon: 'fillet', command: 'FILLET' },
+          // The Polyline modes sit directly after the two-pick pair they belong
+          // to: the same corner treatment, one preselected open polyline instead
+          // of two picks. Small buttons with no variant popover (there is no
+          // options sub-prompt and no TRIMMODE switch), enabled by the shared
+          // admission plus their own one-object selection requirement.
+          { id: 'CHAMFER POLYLINE', labelKey: 'draw.kind.chamfer_polyline', icon: 'chamfer', command: 'CHAMFER POLYLINE' },
+          { id: 'FILLET POLYLINE', labelKey: 'draw.kind.fillet_polyline', icon: 'fillet', command: 'FILLET POLYLINE' },
           { id: 'ARRAYRECT', labelKey: 'draw.kind.arrayrect', icon: 'arrayrect', command: 'ARRAYRECT' },
           { id: 'ARRAYPOLAR', labelKey: 'draw.kind.arraypolar', icon: 'arraypolar', command: 'ARRAYPOLAR' },
           { id: 'ALIGN', labelKey: 'draw.kind.align', icon: 'align', command: 'ALIGN' },
@@ -444,6 +451,13 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'EXTEND', labelKey: 'draw.kind.extend', icon: 'extend', command: 'EXTEND' },
           { id: 'CHAMFER', labelKey: 'draw.kind.chamfer', icon: 'chamfer', command: 'CHAMFER' },
           { id: 'FILLET', labelKey: 'draw.kind.fillet', icon: 'fillet', command: 'FILLET' },
+          // The Polyline modes sit directly after the two-pick pair they belong
+          // to: the same corner treatment, one preselected open polyline instead
+          // of two picks. Small buttons with no variant popover (there is no
+          // options sub-prompt and no TRIMMODE switch), enabled by the shared
+          // admission plus their own one-object selection requirement.
+          { id: 'CHAMFER POLYLINE', labelKey: 'draw.kind.chamfer_polyline', icon: 'chamfer', command: 'CHAMFER POLYLINE' },
+          { id: 'FILLET POLYLINE', labelKey: 'draw.kind.fillet_polyline', icon: 'fillet', command: 'FILLET POLYLINE' },
           { id: 'ARRAYRECT', labelKey: 'draw.kind.arrayrect', icon: 'arrayrect', command: 'ARRAYRECT' },
           { id: 'ARRAYPOLAR', labelKey: 'draw.kind.arraypolar', icon: 'arraypolar', command: 'ARRAYPOLAR' },
           { id: 'ALIGN', labelKey: 'draw.kind.align', icon: 'align', command: 'ALIGN' },
