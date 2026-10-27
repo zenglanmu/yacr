@@ -152,6 +152,34 @@ fn with_reasons(base: MappingOutcome, extra: Vec<String>) -> MappingOutcome {
     }
 }
 
+/// Type keys whose source entity is an infinite construct line.
+///
+/// The importer stores both as a finite [`SemanticGeometry::Line`] clipped to
+/// the drawing extents (`support::XLINE_SEGMENT_REASON`), so they reach the
+/// `Line` export arm with their original class name intact.
+const FINITE_CONSTRUCT_LINE_TYPE_KEYS: [&str; 2] = ["AcDbXline", "AcDbRay"];
+
+/// Outcome for a `Line` whose stored source type key is a construct line.
+///
+/// Writing an XLINE/RAY as a DXF `LINE` is a real approximation: the entity type
+/// changes and the line is no longer infinite, so the round-trip is reported as
+/// `Converted` with a named reason rather than `Exact`. The written DXF stays a
+/// faithful `LINE` of the clipped segment — no fake XLINE payload is emitted.
+/// Deliberately limited to these two classes: no other source entity is expected
+/// to reach the `Line` arm through a class name that lies about the geometry.
+fn finite_construct_line_outcome(type_key: &str) -> MappingOutcome {
+    if !FINITE_CONSTRUCT_LINE_TYPE_KEYS
+        .iter()
+        .any(|key| key.eq_ignore_ascii_case(type_key))
+    {
+        return MappingOutcome::Exact;
+    }
+    MappingOutcome::Converted(vec![format!(
+        "{type_key} was imported as a finite LINE clipped to the drawing extents; \
+         the DXF entity type changes and the line is no longer infinite"
+    )])
+}
+
 /// Map one model-space entity's geometry, expanding INSERTs and flattening
 /// compounds. `transform` is the accumulated block placement (identity at the
 /// model root).
@@ -339,7 +367,19 @@ fn emit_leaf(
             line.normal = Vector3::UNIT_Z;
             line.common = common;
             acc.push(EntityType::Line(line), ctx)?;
-            acc.record(object, "line", with_reasons(MappingOutcome::Exact, reasons));
+            // The database has no infinite construct-line geometry, so an
+            // imported XLINE/RAY reaches this arm as a finite `Line`. The writer
+            // keeps writing a real LINE (never a fake XLINE payload), but the
+            // source entity is *not* recovered: the round-trip is a conversion,
+            // not an exact mapping.
+            acc.record(
+                object,
+                "line",
+                with_reasons(
+                    finite_construct_line_outcome(&entity.object.type_key),
+                    reasons,
+                ),
+            );
         }
         SemanticGeometry::Polyline {
             points,

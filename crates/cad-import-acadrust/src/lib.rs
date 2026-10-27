@@ -418,6 +418,7 @@ struct BlockMember {
 }
 
 mod builder;
+mod construct_line;
 mod dimension;
 mod dynamic;
 mod entity;

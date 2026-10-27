@@ -195,6 +195,29 @@ fn single_line_text_is_exact_and_newline_text_becomes_mtext() {
 /// `export_one`: every entity produced by `db_with` carries the synthetic
 /// `"test"` type key.
 fn export_text_as(type_key: &str, text: &str, wrap_width: Option<f64>) -> (Vec<u8>, ExportReport) {
+    export_one_as(
+        type_key,
+        SemanticGeometry::Text {
+            text: text.into(),
+            position: p(1.0, 2.0, 0.0),
+            style: StyleId(0),
+            height: 2.5,
+            rotation: 0.0,
+            font: None,
+            h_align: TextAlignH::Left,
+            // Top folds to an MTEXT attachment without a lossy reason, so a
+            // type-key MTEXT stays `Exact`; baseline would report one.
+            v_align: TextAlignV::Top,
+            wrap_width,
+        },
+    )
+}
+
+/// Export one geometry whose stored source class name is `type_key`.
+///
+/// Mirrors what the importer records: the class name survives in
+/// `DbObject::type_key` even when the geometry is a reduced semantic form.
+fn export_one_as(type_key: &str, geometry: SemanticGeometry) -> (Vec<u8>, ExportReport) {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
     builder
         .insert_layer(Layer {
@@ -221,23 +244,54 @@ fn export_text_as(type_key: &str, text: &str, wrap_width: Option<f64>) -> (Vec<u
             id: EntityId(1),
             layer: LayerId(0),
             space: SpaceId::Model,
-            geometry: SemanticGeometry::Text {
-                text: text.into(),
-                position: p(1.0, 2.0, 0.0),
-                style: StyleId(0),
-                height: 2.5,
-                rotation: 0.0,
-                font: None,
-                h_align: TextAlignH::Left,
-                // Top folds to an MTEXT attachment without a lossy reason, so a
-                // type-key MTEXT stays `Exact`; baseline would report one.
-                v_align: TextAlignV::Top,
-                wrap_width,
-            },
+            geometry,
             draw_order: 0,
         })
         .unwrap();
     export_db(&builder.finish().unwrap())
+}
+
+#[test]
+fn a_construct_line_class_name_export_records_a_named_approximation_and_stays_a_line() {
+    // The importer stores an infinite XLINE/RAY as a finite `Line` clipped to
+    // the drawing extents while keeping the source class name. Writing that as
+    // a DXF LINE is a real approximation (the entity type changes and the line
+    // is no longer infinite), so it must never be reported `Exact`.
+    for type_key in ["AcDbXline", "AcDbRay"] {
+        let (bytes, report) = export_one_as(
+            type_key,
+            SemanticGeometry::Line {
+                start: p(-10.0, 0.0, 0.0),
+                end: p(10.0, 0.0, 0.0),
+            },
+        );
+        match &read_entities(&bytes)[0] {
+            EntityType::Line(line) => {
+                assert_eq!(line.start, Vector3::new(-10.0, 0.0, 0.0));
+                assert_eq!(line.end, Vector3::new(10.0, 0.0, 0.0));
+            }
+            other => panic!("expected LINE, got {other:?}"),
+        }
+        assert_eq!(report.counts.exact, 0, "{type_key}");
+        assert_eq!(report.counts.converted, 1, "{type_key}");
+        assert_eq!(report.counts.dropped, 0, "{type_key}");
+        let entry = report
+            .entries
+            .iter()
+            .find(|e| e.code == "export.converted.line")
+            .unwrap_or_else(|| panic!("{type_key} must record a conversion"));
+        assert!(entry.message.contains(type_key), "{}", entry.message);
+        assert!(
+            entry.message.contains("no longer infinite"),
+            "{}",
+            entry.message
+        );
+        assert_eq!(
+            report.completeness,
+            Completeness::Partial(vec![entry.message.clone()]),
+            "{type_key}"
+        );
+    }
 }
 
 #[test]

@@ -181,3 +181,57 @@ fn dxf_code_page_is_carried_into_the_database() {
         .unwrap();
     assert_eq!(reloaded.database.code_page(), Some("ANSI_936"));
 }
+
+/// An XLINE/RAY can only be stored as a finite segment, so the per-class
+/// capability must say `Partial` — never `Verified`, which would tell the host
+/// the infinite entity survived the import.
+#[test]
+fn construct_lines_import_as_partial_capabilities_not_verified() {
+    // A LINE first so the drawing extent (the clip box) is a real one.
+    let bytes = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n\
+0\nSECTION\n2\nENTITIES\n\
+0\nLINE\n5\n10\n8\n0\n10\n-10\n20\n-10\n30\n0\n11\n10\n21\n10\n31\n0\n\
+0\nXLINE\n5\n11\n8\n0\n10\n0\n20\n0\n30\n0\n11\n1\n21\n0\n31\n0\n\
+0\nRAY\n5\n12\n8\n0\n10\n0\n20\n5\n30\n0\n11\n0\n21\n1\n31\n0\n\
+0\nENDSEC\n0\nEOF\n";
+    let drawing = AcadrustImporter::default()
+        .import(&request(bytes.to_vec()), &|| false)
+        .expect("the DXF imports");
+    for type_key in ["AcDbXline", "AcDbRay"] {
+        // The geometry is a real finite line (not opaque), so the clipping
+        // worked; only the verdict is partial.
+        let stored = drawing
+            .database
+            .entities()
+            .find(|e| e.object.type_key == type_key)
+            .unwrap_or_else(|| panic!("{type_key} was not imported"));
+        assert!(
+            matches!(stored.geometry, SemanticGeometry::Line { .. }),
+            "{type_key} must still reduce to a finite line"
+        );
+        let capability = drawing
+            .report
+            .capabilities
+            .iter()
+            .find(|c| c.type_key == type_key)
+            .unwrap_or_else(|| panic!("{type_key} has no capability entry"));
+        assert_eq!(
+            capability.semantic,
+            SupportStatus::Partial,
+            "{type_key} is stored as a finite segment, not the infinite entity"
+        );
+    }
+    // The reason is one of the two named construct-line reasons; which one
+    // depends on whether the drawing extent was already known.
+    let reasons = match &drawing.report.completeness {
+        Completeness::Partial(reasons) => reasons.clone(),
+        other => panic!("expected a partial import, got {other:?}"),
+    };
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason.contains("finite segment")
+                || reason.contains("default 1000-unit box")),
+        "no construct-line reason in {reasons:?}"
+    );
+}

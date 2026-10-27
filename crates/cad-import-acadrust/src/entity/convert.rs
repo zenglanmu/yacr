@@ -253,18 +253,18 @@ impl<'a> ImporterBuilder<'a> {
             // ignored, so the smoothed surface is not what appears on screen.
             EntityType::Mesh(m) => (
                 subd_mesh_semantics(m),
-                self.mesh_partial("import.subd_mesh_partial", &SUBD_MESH_UNMODELLED),
+                self.named_partial("import.subd_mesh_partial", &SUBD_MESH_UNMODELLED),
             ),
             // A POLYFACE MESH erases the negative-index invisible-edge flag.
             EntityType::PolyfaceMesh(m) => (
                 polyface_mesh_semantics(m),
-                self.mesh_partial("import.polyface_mesh_partial", &POLYFACE_MESH_UNMODELLED),
+                self.named_partial("import.polyface_mesh_partial", &POLYFACE_MESH_UNMODELLED),
             ),
             // A POLYGON MESH is the flat M x N grid: closed/smoothed forms are
             // not stitched or smoothed.
             EntityType::PolygonMesh(m) => (
                 polygon_mesh_semantics(m),
-                self.mesh_partial("import.polygon_mesh_partial", &POLYGON_MESH_UNMODELLED),
+                self.named_partial("import.polygon_mesh_partial", &POLYGON_MESH_UNMODELLED),
             ),
             EntityType::Wipeout(w) => wipeout_semantics(w),
             EntityType::Helix(h) => spline_semantics(&h.spline),
@@ -289,10 +289,10 @@ impl<'a> ImporterBuilder<'a> {
             }
             EntityType::MultiLeader(ml) => self.multileader_semantics(ml),
             EntityType::Ray(r) => {
-                ray_semantics(p3(r.base_point), p3(r.direction), true, self.model_bounds)
+                self.construct_line_semantics(p3(r.base_point), p3(r.direction), true)
             }
             EntityType::XLine(x) => {
-                ray_semantics(p3(x.base_point), p3(x.direction), false, self.model_bounds)
+                self.construct_line_semantics(p3(x.base_point), p3(x.direction), false)
             }
             EntityType::Table(t) => self.table_semantics(t),
             EntityType::RasterImage(img) => raster_image_semantics(img),
@@ -347,7 +347,7 @@ impl<'a> ImporterBuilder<'a> {
     /// Mirrors the MTEXT fold: `reported_reasons` keeps a mesh-heavy drawing
     /// from burying the report in thousands of identical diagnostics, while
     /// every entity still declares its own `Partial` reasons.
-    fn mesh_partial(&mut self, code: &str, reasons: &[&str]) -> Completeness {
+    pub(crate) fn named_partial(&mut self, code: &str, reasons: &[&str]) -> Completeness {
         for reason in reasons {
             if self.reported_reasons.insert((*reason).to_string()) {
                 self.diagnostics.push(Diagnostic {

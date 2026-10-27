@@ -18,6 +18,22 @@ pub(crate) const ACIS_SOURCE_NOT_RETAINED_REASON: &str = "the ACIS source is not
 retained: the entity carries tessellated mesh geometry instead of its original \
 SAT/SAB bytes, so it cannot be round-tripped as a 3DSOLID";
 
+/// Completeness reason for a RAY/XLINE reduced to a finite segment.
+///
+/// The segment is a stand-in for an infinite entity: it ends where the drawing
+/// (or the guessed default box) ends, so zooming out shows a truncated line.
+/// Even with the real drawing extents the source is infinite, so the import is
+/// never `Complete` — and a DWG→DXF round-trip that writes a LINE is not exact.
+pub(crate) const XLINE_SEGMENT_REASON: &str =
+    "xline/ray stored as a finite segment clipped to the drawing extents; not scale invariant";
+
+/// Completeness reason for a RAY/XLINE clipped to the guessed default box.
+///
+/// This is the same loss as [`XLINE_SEGMENT_REASON`] plus the fact that the clip
+/// extents themselves were guessed because no drawing geometry had been seen.
+pub(crate) const XLINE_DEFAULT_BOX_REASON: &str =
+    "ray/xline clipped to a default 1000-unit box; no drawing bounds were available";
+
 impl<'a> ImporterBuilder<'a> {
     /// Lift + tessellate one ACIS entity at import time.
     ///
