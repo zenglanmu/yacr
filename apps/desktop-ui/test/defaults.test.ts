@@ -240,7 +240,7 @@ test('disposing the guards removes every listener', () => {
 
 test('the app shell installs the guards after its shortcuts, with status context', async () => {
   const app = await readAppSource();
-  assert.ok(app.includes("import { bindBrowserDefaults, cadContextMenuRequest } from './defaults.ts';"));
+  assert.ok(app.includes("import { bindBrowserDefaults, cadContextMenuRequest, isTextEntryTarget } from './defaults.ts';"));
   assert.ok(app.includes('bindBrowserDefaults(window, {'));
   assert.ok(app.includes('selection: current?.selection ?? null, tool: current?.tool ?? null'));
   // Ctrl+0 is both the app's clean-screen toggle and WebKit's zoom reset: the

@@ -21,12 +21,13 @@ import { draftingAcceleratorCommand } from './cad/cad.ts';
 import type { CadCommandResult } from './cad/cad-command.ts';
 import type { CadStatus } from './cad/cad-status.ts';
 import type { ToolParameterPending } from './tools/tool-parameters.ts';
-import { setToolText } from './tools/text.ts';
+import { awaitingToolText, setToolText } from './tools/text.ts';
 import { setSelectedText } from './tools/textedit.ts';
 import { submitStandardView } from './cad/view3d.ts';
 import { createFpsSampler } from './fps.ts';
-import { bindBrowserDefaults, cadContextMenuRequest } from './defaults.ts';
+import { bindBrowserDefaults, cadContextMenuRequest, isTextEntryTarget } from './defaults.ts';
 import { admitCommandText, commandAliases, commandCatalog, pushHistory, setCommandAliases, setCommandCatalog, toolCommandForKey, unavailableReasonKey } from './commands/commands.ts';
+import { acceleratorDispatch } from './commands/accelerators.ts';
 import type { CommandAlias, CommandAliasInput } from './commands/commands.ts';
 import type { ContextMenuModel } from './commands/context-menu.ts';
 import type { PopupKind, PopupPayload } from './popup/popup.ts';
@@ -426,6 +427,11 @@ function Shell() {
   const importProgress = status?.importProgress ?? null;
   const cadReady = Boolean(status) && !loading;
   const toolActive = Boolean(status?.tool?.key);
+  // The active tool's terminal text step (ADR 0019 A.1). It is a step of a tool,
+  // so `toolActive` already holds it, but the additive accelerator gate reads the
+  // host's own `awaiting_text` flag rather than inferring it from the tool key: a
+  // text step owns the keyboard even when focus has left the command line.
+  const textStep = awaitingToolText(status);
   // An armed grip drag is **not** a tool (`tool` stays `null`), but it does own
   // the pointer: the host writes nothing until release, so Escape has to reach it
   // as `CANCEL` to drop the drag. Only the Escape gate reads this; nothing else
@@ -524,8 +530,19 @@ function Shell() {
     }
   }, []);
 
+  // Admission recomputes when the loaded host vocabulary changes, so the chrome
+  // enables exactly the tools the router really accepts. Declared above the
+  // shortcut effect because the document accelerators are gated on it: they must
+  // run only where the same command is admitted from the ribbon or the command
+  // line, and an unadmitted chord is left to the webview untouched.
+  const canCommand = useCallback(
+    (id: string) => admitCommandText(id, { status, pending }).kind === 'admitted',
+    [status, pending, catalogNames],
+  );
+
   // Global shortcuts: Ctrl+0 clean screen, Ctrl+1 properties palette, Ctrl+9
-  // command line, F2 history, Esc.
+  // command line, F2 history, Esc, plus the document accelerators from
+  // `commands/accelerators.ts` (Ctrl+A/C/X/V/Z/Y/Home/O/N/S/Shift+S/P).
   // While a CAD tool is active (and the keyboard is not in a field) Enter/Escape
   // are the tool's confirm/cancel instead.
   useEffect(() => {
@@ -543,6 +560,39 @@ function Shell() {
       if (event.ctrlKey && !event.metaKey && !event.altKey && event.key === '0') {
         event.preventDefault();
         setCleanScreen(value => !value);
+        return;
+      }
+      // The document accelerators resolve through the one pure table, and they
+      // run the same command every other affordance runs (`submitCommand`) only
+      // when `canCommand` admits it — the same admission the ribbon, the QAT and
+      // the command line use, including the host's own `canOpen`/`canNew`/
+      // `canSave`/`canPlot` booleans. `acceleratorDispatch` is that gate, so a
+      // refused chord is neither dispatched nor prevented: the webview keeps its
+      // key and the explicit path (ribbon/command line) stays the authority.
+      //
+      // They sit before the `defaultPrevented` check for the same reason Ctrl+0
+      // does: `bindBrowserDefaults` below claims Ctrl+P for the webview's print
+      // action and is installed *after* this effect, so listener order between
+      // the two must not decide whether PLOT works. That guard only ever
+      // prevents the six WebKit commands (reload/print/zoom), and no other
+      // listener here prevents a Ctrl chord on a non-text target, so this
+      // exception does not widen what the app intercepts.
+      //
+      // `typing` is the union of the two text-entry predicates the app already
+      // has: `isTyping` (input/select/textarea) and the shared
+      // `isTextEntryTarget` (which adds `contentEditable`). Native editing — the
+      // webview's copy/paste/undo/select-all and every IME — keeps working in the
+      // command line, the property fields, the text dialogs and the layer panels.
+      const accelerator = acceleratorDispatch(event, {
+        typing: isTyping(event.target) || isTextEntryTarget(event.target),
+        popupOpen,
+        toolActive,
+        textStep,
+        gripDragActive,
+      }, canCommand);
+      if (accelerator) {
+        event.preventDefault();
+        void submitCommand(accelerator);
         return;
       }
       if (event.defaultPrevented || event.metaKey || event.altKey) return;
@@ -586,7 +636,7 @@ function Shell() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [popupOpen, submitCommand, toolActive, gripDragActive]);
+  }, [popupOpen, submitCommand, toolActive, gripDragActive, textStep, canCommand]);
 
   // Feed the CAD shortcut-menu hook the state slices the chrome already has. It
   // is a ref, not a dependency, so polling never re-installs the guards below.
@@ -638,13 +688,6 @@ function Shell() {
     });
     return () => guard.dispose();
   }, []);
-
-  // Admission recomputes when the loaded host vocabulary changes, so the chrome
-  // enables exactly the tools the router really accepts.
-  const canCommand = useCallback(
-    (id: string) => admitCommandText(id, { status, pending }).kind === 'admitted',
-    [status, pending, catalogNames],
-  );
 
   const shell: ShellValue = {
     status,
