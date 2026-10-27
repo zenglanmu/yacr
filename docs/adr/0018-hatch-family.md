@@ -400,7 +400,7 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
 3. **折线**须 `closed == true` 且 ≥3 顶点；3D 折线共面时接受；其自身 2D 点与 bulge 保留。
 4. **声明局限**：创建校验基于**弦**，两段 bulge 环的**弦之间**相切可能漏检（"精确圆接触但其内接正方形相切"会被拒绝并有测试）。
 5. **参数单位**：通道**度**、域**弧度**——与 P5e 的度/弧度事故同类陷阱，此处显式分层并在测试中钉住。
-6. **未实现项**（与决策 D 一致，且 UI 不得暗示）：内部点求边界、LINE 拼接、预定义图案名、渐变创建、关联性、
+6. **未实现项**（与决策 D 一致，且 UI 不得暗示）：内部点求边界、LINE 拼接、~~预定义图案名~~（**2026-10-26 已兑现**：三项转录表按 1 基索引；**2026-10-27 起**状态栏按名 chip，见决策 G 的 P6c 补注）、渐变创建、关联性、
    **真正的填充预览**（`preview.rs` 对 `Hatch` 明确返回无预览链）。
 7. **i18n**：P6b **+14 键**（`draw.kind.hatch`、`tool.draw.hatch`、`tool.prompt.hatch.{select_boundary,ready}`、
    `status.tool_parameter.hatch_{pattern_type,spacing,angle,double,style}` + `.hint`），两目录一致；总数 **534**。

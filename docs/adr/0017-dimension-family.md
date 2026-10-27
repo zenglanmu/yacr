@@ -10,6 +10,10 @@
 - **不**覆盖：关联性（`DIMASSOC=2`）、`DIMEDIT`/`DIMTEDIT`/`DIMOVERRIDE`、`DIMSTYLE` 编辑命令、
   注释性缩放下的标注、`MLEADER`、`DIMBREAK`/`DIMSPACE`/`QDIM`/`DIMARC`、`DIMJOGGED`、容差/极限/备用单位、
   3D/OCS 平面外标注、自定义箭头块、`DIMBASELINE`/`DIMCONTINUE`（**降级为 NOT IMPLEMENTED**，见决策 C）。
+  > **就地更正（2026-10-21，不改写上面的历史记录）**：`DIMBASELINE`/`DIMCONTINUE` 此后由本文件末尾的
+  > **「决策 C（2026-10-21 解禁 P5f）」**解禁并**已实装**——**显式拾取基准线性标注**、命令**零跨命令状态**、
+  > 一条事务/一步撤销；范围**仅线性基准**、**不写 `DIMCONTINUEMODE`**、**非关联**。本行上面的「降级」是 P5
+  > 设计当时的决定，**不是现状**；现状以该节与 `docs/compatibility.md` 的 DIMENSION 族逐行表为准。
 - 相关：`docs/adr/0015-new-draw-commands.md`、`docs/adr/0016-edit-command-extensions.md`（EXPLODE 按
   `type_key` 拒绝 Dimension 的既有结论）、`docs/compatibility.md`、`CAD_IMPLEMENTATION_SPEC.md` §3.2/§3.3、
   `docs/dxf-entity-coverage.md`。

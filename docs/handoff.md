@@ -1,3 +1,219 @@
+## 2026-10-27 第 9 轮：OFFSET 支持独立 ARC + HATCH 预定义图案按名选择（状态栏 chip）+ 命令覆盖审计
+
+### 结论
+
+两件事同时成立，但**证据等级不同**：
+
+1. **`OFFSET` 的几何面扩大了**：`ARC` 从「按名拒绝」变成**可偏移**，且与 `CIRCLE` **共用同一距离模型**
+   —— 这不是「再加一个 match 臂」，而是把「拾取点意味着什么」在两个同心几何之间钉成同一条规则。
+2. **HATCH 预定义图案在 UI 上改成按名选**（`ANSI31`/`ANSI32`/`ANSI37` 三段 chip），**线上传的值没变**
+   （仍是 1 基索引）。这条只有**源码结构/纯函数契约**证据，**没有像素/运行时/真窗口证据**。
+3. 另交付一份**命令覆盖审计** `docs/autocad-command-coverage.md`：明确说明仓库里**没有**可枚举的
+   「AutoCAD 命令全集」，因此不给任何「覆盖率百分比」。
+
+### 做了什么
+
+**A. `OFFSET` 的 ARC 臂（`cad-app`）**
+
+- `crates/cad-app/src/app_drawing/trim_extend.rs`：新增 `SemanticGeometry::Arc` 臂 → `offset_arc`；
+  `ELLIPSE` 改为**具名拒绝**（「椭圆的等距偏移**不是**椭圆」——高阶偏移曲线，不拿近似冒充）。
+  通用拒绝串改为 `OFFSET supports LINE, CIRCLE, ARC and straight-segment LWPOLYLINE only, got {kind}`。
+- `crates/cad-app/src/app_drawing/helpers.rs::offset_arc`：新半径 = `|side_point − centre|`（**3D** 距离），
+  `center`/`normal`/`start`/`sweep` **逐位保留**（顺时针 sweep 仍为负），**只有半径变**；退化存储半径、
+  拾取点在圆心、拾取点落在该弧自身圆上（零偏移）都是**具名 `InvalidInput`**，不写、不记撤销步。
+- 新测试文件 `crates/cad-app/src/tests/drawing/offset_arc.rs`（**7 个测试**）：向外放大/向内缩小、
+  **顺时针 sweep 保留**、圆心与自身圆上拾取的拒绝、退化半径、`Ellipse` 按名拒绝、源图层/空间复制。
+  原 `offset.rs::offset_refuses_unsupported_geometry` 改为只测 `INSERT`（ARC 已不在拒绝集），并断言
+  通用串**点名 ARC**。
+
+**B. HATCH 预定义图案按名选（`apps/desktop-ui` + i18n）**
+
+- `apps/desktop-ui/src/tools/tool-parameters.ts`：闭集参数新增 `choiceLabelKeys`（每个整数码 → 目录键）
+  与 `activeWhen`（只在图案类型 `2` 预定义下生效）；`hatchPattern` 绑定
+  `status.tool_parameter.hatch_pattern.ansi31/ansi32/ansi37`。**线上值没变**：`choices` 仍是 `1..3`，
+  发送仍走**同一个**参数 IPC（`cad_set_tool_parameter`）。
+- `apps/desktop-ui/src/components/ParameterControls.tsx`：闭集带名字时渲染分段 chip（`status-choices`），
+  否则仍是数字步进器；类型不是 `2` 时该行**可见但惰性**并给出原因。
+- `crates/cad-ui-core/i18n/{zh-CN,en}.json`：新增三个图案名键 + 更新 hint（两目录键集一致）。
+  宿主侧的**唯一权威**仍是 `cad_domain::hatch::predefined_patterns()` 的**三项转录表**，UI 不复制表。
+
+**C. 文档（本轮 lane 的交付面）**
+
+- `docs/shortcuts.md`：§2 OFFSET 行补 **ARC**；§4 把 `DIMBASELINE`/`DIMCONTINUE` 从「未实现」移到
+  **已实现**（显式基准、零跨命令状态、`DIMDLI` 行距、无 `DIMCONTINUEMODE`、非关联），HATCH 段落改为
+  「预定义图案名已实现（恰好三项，传 1 基索引）」，并列出**诚实剩余缺口**（内部点、`76=2`/`.pat`、
+  渐变创建、关联性）；OFFSET 条目重写为**真实范围**（并删掉过时的
+  `Unsupported("OFFSET supports LINE and CIRCLE only")`）。**选择子计数仍是 92**（本轮不新增选择子）。
+- `docs/compatibility.md`：DIMENSION（创建）行与 DIMENSION 族「`DIMBASELINE`/`DIMCONTINUE`（基准/连续）」
+  行由 NOT IMPLEMENTED 改为**已实现**（保留已知限制）；OFFSET 行补 ARC 模型与 `ELLIPSE` 具名拒绝；
+  HATCH（创建）行写明「状态栏按名选、线上传 1 基索引」并附**证据边界**句（源码结构/纯函数契约，
+  无像素/运行时/真窗口证据）。
+- `docs/adr/0017-dimension-family.md:12`：**就地更正**指向文末「决策 C（2026-10-21 解禁 P5f）」，
+  不改写上面的历史记录。
+- `docs/adr/0018-hatch-family.md`（决策 G 的 §未实现项第 6 条）：把「预定义图案名」划掉并指向 P6c 补注
+  （2026-10-26 表已兑现；2026-10-27 起状态栏按名 chip）——同样**不改写历史行**。
+- 新增 `docs/autocad-command-coverage.md`：词表总量（92/5/2/4/51，`admissible_names()` 150 个拼写）、
+  AutoCAD 命名命令的三档状态表、缺口清单与规模（S/M/L）、复跑命令、以及「不主张什么」。
+
+### 证据（本机，2026-10-27）
+
+**合成契约（真实运行，可复跑）**
+
+- `cargo test -p cad-app --locked` → **exit 0**：`unittests src/lib.rs` **1285 passed, 0 failed**
+  （含 `offset_arc` 的 7 个新测试）；集成套件 `contracts` 4、`layer_visibility_batch` 11、`select_all` 18、
+  `select_box` 15、`select_box_real_fixture` 5、`text_transform_parity` 2，**全 0 failed**；
+  `pick_index_real_fixture` 0 passed / **1 ignored**（需外部真实 DWG，属跳过**不是**运行证据）；doc-tests 0。
+- `apps/desktop-ui`：`npm test`（= `tsc --noEmit && node --test test/*.test.ts`）→ **exit 0**，
+  **677 pass / 0 fail**（含里边的 `tsc` 类型检查）。
+- `apps/desktop-ui`：`npm run build` → **exit 0**（vite 构建成功，仅 chunk >500 kB 警告）。
+- `python3 scripts/check-i18n.py` → **exit 0**：**847 keys、2 个目录**、键/占位符一致、
+  Rust 与 React 静态键引用全部可解析、无硬编码 CJK。
+
+**由实现 lane 报告、本 lane 未复跑（NOT RUN by this lane）**
+
+- `cargo fmt --all -- --check`、`cargo clippy …`、`python3 scripts/check-file-size.py`：实现 lane 报告通过；
+  本轮文档 lane **没有**重跑，故不把它当成本轮证据。
+
+**明确没有做的事**：chip 的**像素/运行时/真窗口**证据（无截图、无 GUI 驱动、无真实点击）；
+`docs` 改动本身没有可执行门禁（`.md` 不计入 `check-file-size.py`）。
+
+### 仍未成立 / 边界
+
+1. **HATCH 按名选只有合成证据**：`tsc`、`node --test`、`vite build` 都是**源码结构/纯函数**门禁；
+   **没有**像素、**没有**真实窗口点击、**没有**运行时挂载验证。三段 chip 是否在真机布局下不挤、
+   惰性态是否正确显示原因，**都未验证**。
+2. **全 workspace 门禁 NOT RUN**：`cargo check --workspace --all-targets --locked`、workspace clippy、
+   `check-architecture.py`、`check-workflows.py`、`check-fixture-manifest.py`、wasm 目标编译**本轮均未运行**。
+3. **平台 NOT RUN**：wasm / Windows / Android / macOS 目标**均未编译或运行**；Linux 侧**没有**新窗口运行。
+4. **OFFSET 的剩余边界**：含**弧段折线**（`offset.bulge_segment`）与 **`ELLIPSE`**（按名拒绝）仍不支持；
+   **无全局自交修剪**（只在顶点处检测局部塌缩）；只有一个实体可偏移。
+5. **剩余 AutoCAD 缺口**（规模分类与理由见 `docs/autocad-command-coverage.md` §4）：
+   `POLYLINE`（旧式 heavy 2D 折线实体；**不**别名到 `PLINE`）、`XLINE`、
+   `BLOCK`/`WBLOCK`/`INSERT`-**创建**侧、`XREF`、`IMPORT`、`PUBLISH`、`DIMSTYLE` **编辑**、
+   HATCH 的**内部点求边界 / `76=2` 与 `.pat` / 渐变创建 / 关联性**、OFFSET 的**含弧折线段 / 椭圆**。
+6. **本轮发现的文档债务（未改，避免超出范围）**：`docs/shortcuts.md` §2 仍把 `CLEAR SELECTION`
+   （别名 `DESELECT`）与 `VIEW TOP/BOTTOM/…` 列为 canonical 选择子，但两者**不在**
+   `crates/cad-ui-core/src/session/commands.rs::COMMAND_TABLE`，全仓库也搜不到该拼写——按当前代码
+   输入它们会得到 `command.unknown`。**这是既有缺口，不是本轮引入**，下一轮修文档时应一并处理。
+
+### 第 9 轮补记：`docs/shortcuts.md` §2 曾是**虚构**的（2026-10-27 自查）
+
+同一轮里对 `docs/shortcuts.md` §2 做了一次**机器自查**（解析 `commands.rs` 的四张表 + `COMMAND_ALIASES`，
+再解析 §2 的 canonical 列与别名列）。结论：**这张「单一诚实参考」本身就是假的**——旧版本有 **35 处**
+对不上源码，全部是人手转写时凭空造出来的名字。
+
+**发现并修掉的（逐类，共 35 处）**
+
+- **18 个非准入 canonical 行**：`MEASURE DISTANCE`/`MEASURE ANGLE`/`MEASURE AREA`/`MEASURE POLYLINE`
+  （真名是交互选择子 `DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE`；`MEASURE` 自身是默认距离的
+  `CommandId` 选择子）、`CLEAR SELECTION`（**不存在**；Esc 是键、`SELECTALL` 是全选）、
+  `VIEW TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT/ISOMETRIC` 与 `VIEW MODE`（**不是**命令行名：`STANDARDVIEW`
+  需载荷，视图经 IPC `cad_standard_view` 的 7 个键投递）、`TOOLS`/`PANELS`（不存在；chrome 本地词是
+  `LAYER`/`PROPERTIES`/`OPTIONS`）、`ZOOM IN`/`ZOOM OUT`（真名 `ZOOMIN`/`ZOOMOUT`）、
+  `ZOOM EXTENTS`/`ZOOM <factor>`/`ZOOM ALL`（`FIT` 才是 canonical，其余是别名或**参数**写法）、
+  `PDMODE <n>`/`PDSIZE <n>`/`SNAPUNIT <value>`（canonical 是 `PDMODE`/`PDSIZE`/`SNAPUNIT`，`<n>` 是参数）、
+  `LAYON`（是 `RESTORELAYERS` 的**别名**）。
+- **14 个假别名**：`DI`、`DIST`、`DISTANCE`、`ANGLE`、`AA`、`AREA`、`ESC`、`DESELECT`、`FIT`、`ZE`、
+  `Z E`、`ZI`、`ZO`、`RIBBON` —— 都不在 `COMMAND_ALIASES` 里。`ENTER`→`CONFIRM` 是**唯一**键名同形
+  的真实别名；`ESC` 只是键。
+- **§2b 少 3 行**：`LAYON`、`LAYUNISO`（→`RESTORELAYERS`）、`NEWLAYER`（→`CREATELAYER`）实际存在却
+  没写；补上后 §2b = **51** 行，与 `COMMAND_ALIASES` 等长。
+
+**改法（只动文档）**
+
+- §2 重写：表头说明「完整 92 选择子清单在 `docs/autocad-command-coverage.md`，本表只留有行为注解的行」；
+  canonical 列只放准入名，别名列只放真实别名行，`<…>` 参数形式移进注解；行为注解全部保留在真名上。
+- 新增 **§2a「不是命令行选择子（键位 / 面板 / IPC）」**：标准视图 IPC、清除选择（Esc/SELECTALL）、
+  chrome 本地 `LAYER`/`PROPERTIES`/`OPTIONS`、测量多词写法、键位≠别名。
+- §3 重写：把 `ui/app.slint`（已删除）换成 `apps/desktop-ui/src/App.tsx` 的 `onKeyDown` +
+  `commands.ts::toolCommandForKey` + `cad.ts::DRAFTING_ACCELERATORS` + `defaults.ts`；**区分「现行 React
+  宿主真的接线了的键」与「Slint 时期历史契约」**——`Ctrl+O/N/S/Shift+S/P`、`Ctrl+A/C/X/V/Z/Y`、
+  `Ctrl+Home` 在 React 源码里**没有**全局处理（剪贴板/撤销/缩放走 ribbon、右键菜单、选择子）；
+  `Esc` **不清除选择**。
+- §4：`F9` 从「未接线」移除（它已接到 `SNAP`）；并更正**报告机制**——`shortcut.unsupported` 只剩在
+  两个 i18n 目录里、**无代码消费**，未接线的键是**静默无动作**（`Ctrl+P`/`F5`/`Ctrl+R` 被
+  `defaults.ts` 抑制），不是显式报告。
+- §5：`scripts/verify-ui.sh` 已删除（`docs/verify-ui.md` 仍在且顶部标「已退役」）——**没有可运行的
+  verify-ui 脚本**；同时更正「`SPLINE` 一律不支持」：`TRIM` 自第 8 轮起支持 `SPLINE` **目标**。
+- §1（同一类虚构，顺带修）：**「空 Enter 重复上一条」不存在**（`admitCommandText('')` → `empty`，chrome
+  不回退）；**`command.unknown` 没有任何消费方**（未知名字在 chrome 侧就是 `command.unsupported`）；
+  **补全候选不是全部选择子**（`COMMAND_CATALOG` + 宿主别名表，上限 8，排序含历史频次）；`Tab` **没有**
+  “无高亮则第一项”的回退；`Space` **没有**填充行为；**别名没有 `keyboardShortcuts` 门控**
+  （该键只剩在 `cad-app` 的测试夹具里）；`command-bar.slint` 指针换成 `CommandLine.tsx`。
+  另：chrome 本地词除 `LAYER`/`PROPERTIES` 还有 `OPTIONS`（`App.tsx::submitCommand` 本地拦截）。
+
+**守门人（已落地）**
+
+`docs/autocad-command-coverage.md` §5b 新增**会非零退出**的自检：解析四张表 + `COMMAND_ALIASES`，
+再解析 `docs/shortcuts.md` §2 的 canonical 列/别名单元与 §2b 整张表，任何不一致即 `exit 1`。
+实测（本机 2026-10-27）：
+
+```
+tables: 92/5/2/4 selectors, 51 aliases, 99 admitted names
+§2 rows checked: 54, §2b aliases checked: 51
+OK: 0 mismatches
+```
+
+把**修复前**的版本（`git show HEAD:docs/shortcuts.md`）喂进同一脚本 → `exit 1`、**35 处 mismatch**，
+证明它真的会失败，不是装饰。
+
+**守门范围（别把它当全页保险）**：这段脚本只守 `docs/shortcuts.md` **§2 / §2b**（名字与别名；
+**随后扩展到本文 §3.7 第一列与「别名」提法**，见下一小节）。
+§1（命令行行为）、§3（键位）、§4（未实现清单）、§5（证据边界）是**人工按源码核对**后改的，
+**没有**机器守卫；下一轮若再动它们，仍需打开 `App.tsx` / `CommandLine.tsx` / `commands.ts` 对照。
+
+**仍未成立 / 边界（不变）**：本轮**只改 `docs/**`**；写这条补记时未跑任何门禁，前端四项（`npm test` /
+`npm run build` / `check-i18n` / `check-file-size`）随后在下一小节复跑，Rust 侧仍是 NOT RUN。
+**没有**运行时/像素/真窗口证据；上一节列的全部 NOT RUN 边界继续有效。`docs/verify-ui.md` 正文仍引用
+已删除的脚本（历史文档，未在本轮改写）。
+
+### 第 9 轮追加：全局文档加速器（Ctrl 组合键）落地
+
+**做了什么（代码 lane）**
+
+- 新 `apps/desktop-ui/src/commands/accelerators.ts`（146 行）：**纯** `acceleratorCommand(event, context)`
+  （键 → 命令名）与 `acceleratorDispatch(event, context, admitted)`（再套一层共享准入）；无 DOM/React/dispatch。
+- 唯一调用点在 `apps/desktop-ui/src/App.tsx::onKeyDown`，挂在 `Ctrl+0` 分支之后、
+  `defaultPrevented` 守卫**之前**——否则 `defaults.ts` 的打印抑制会按监听器注册顺序吃掉 `Ctrl+P`。
+- **接线 11 个命令 / 13 个键写法**：`Ctrl+A`→`SELECTALL`、`Ctrl+C`→`COPYCLIP`、`Ctrl+X`→`CUTCLIP`、
+  `Ctrl+V`→`PASTECLIP`、`Ctrl+Z`→`UNDO`、`Ctrl+Y`/`Ctrl+Shift+Z`→`REDO`、`Ctrl+Home`→`FIT`、
+  `Ctrl+O`→`OPEN`、`Ctrl+N`→`NEW`、`Ctrl+S`/`Ctrl+Shift+S`→`SAVE`、`Ctrl+P`→`PLOT`。
+- **拒答顺序**（全部在查表之前）：IME 组合（`isComposing`/`keyCode 229`）→ 文本入口焦点
+  （`INPUT`/`SELECT`/`TEXTAREA`/`contentEditable`，原生编辑保持可用）→ 宿主对话框打开 →
+  `toolActive || textStep || gripDragActive` → `Meta`/`Alt` 或没有 `Ctrl` → 查表。字母里只承认
+  `Shift+S`/`Shift+Z` 两个带 Shift 的形式，所以 `Ctrl+Shift+C/X/V` 与 `Ctrl+Shift+Home` **不会**被
+  降级成普通复制/粘贴/缩放到范围。
+- **派发 ⟺ `preventDefault`**：准入（`shell.canCommand` ＝ `admitCommandText`，与 ribbon/QAT/命令行
+  同一个函数）拒绝时返回 `null`，调用点既不派发也不 preventDefault。Viewer 模式仍是**宿主侧**拒绝，
+  键位不是第二道模式门。
+
+**证据（本机，2026-10-27；本轮 docs lane 复跑了下面前四项）**
+
+- `cd apps/desktop-ui && npm test`（= `tsc --noEmit && node --test test/*.test.ts`）→ **exit 0**，
+  **686 pass / 0 fail**（`accelerators.test.ts` 为新增）。
+- `npm run build` → **exit 0**（vite 构建成功，仅 chunk >500 kB 警告）。
+- `python3 scripts/check-i18n.py` → **exit 0**：**847 keys / 2 目录**。
+- `python3 scripts/check-file-size.py` → **exit 0**：**1051** 个代码文件 ≤1000 行。
+- `docs/autocad-command-coverage.md` §5b 名字自检 → `OK: 0 mismatches`（`§2 rows: 54, §2b aliases: 51,
+  §3.7 rows: 6`）。
+
+**仍未成立 / 边界（必须原样保留）**
+
+1. **没有真实按键/窗口/像素证据**：以上全是 `tsc` / `node --test` / `vite build` / 静态门禁；
+   真正按下 `Ctrl+P` 会不会被 webview 抢、Focus 在不同控件时的表现，**都未在真实窗口验证**。
+2. **Viewer 模式与 `dom-canvas` 载体的门控未运行时验证**：Viewer 拒绝由宿主命令层完成（契约有测试），
+   `dom-canvas`（X11/web）上这些 chord 的实际归属**未测**。
+3. `Ctrl+Shift+C/X/V`（COPYBASE/CUTBASE/PASTEBLOCK）**仍未实现也未接线**；`Ctrl+R`/`F5` 仍是
+   `defaults.ts` 抑制的浏览器重载。
+4. 本轮 **docs lane** 只改 `docs/**`，**没有**重跑 Rust 侧门禁（`cargo test`/clippy/fmt 全部 NOT RUN）。
+
+**本轮据此改的文档**：`docs/shortcuts.md` §3（11 个加速器进「真的接线了」表 + 拒答顺序/派发规则/
+Viewer 边界；「没有全局键」收缩到 `Ctrl+Shift+C/X/V`/`Ctrl+Shift+Home`/其余未列出 chord）、§4
+（把已接线的 chord 从「未实现」列表移除，`Ctrl+P` 的旧说法改正）；`docs/autocad-command-coverage.md`
+§3.6（剪贴板行 + `Ctrl+C/X/V` 已接线 / `Ctrl+Shift+C/V` 未实现未接线）、§3.7（**删掉虚构的
+`DI`/`AA`/`ANGLE` 别名与 `MEASURE DISTANCE`/`MEASURE AREA` 写法**）、§5b（`99` 改标为 canonical 选择子数，
+自检扩到 §3.7 第一列与「别名」提法）。
+
 ## 2026-10-27 第 8 轮：SPLINE 作为 TRIM 目标（精确子曲线）
 
 ### 结论
