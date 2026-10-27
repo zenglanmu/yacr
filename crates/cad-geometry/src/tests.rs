@@ -203,6 +203,100 @@ fn bulge_arc_geometry_recovers_a_semicircle_and_has_no_zero_bulge_arc() {
     assert!(bulge_arc_geometry(p(0.0, 0.0), p(2.0, 0.0), 0.0, normal).is_none());
 }
 
+#[test]
+fn arc_sweep_to_bulge_round_trips_through_bulge_arc_geometry() {
+    let normal = Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 1.0,
+    };
+    let a = p(0.0, 0.0);
+    let b = p(1.0, 0.0);
+    for sweep in [
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+        -std::f64::consts::FRAC_PI_2,
+        -1.5,
+        0.013,
+    ] {
+        let bulge = arc_sweep_to_bulge(sweep).expect("a sweep inside (-2π, 2π) has a bulge");
+        assert!(bulge.is_finite(), "sweep {sweep} gave bulge {bulge}");
+        let arc = bulge_arc_geometry(a, b, bulge, normal).expect("a nonzero sweep is an arc");
+        let SemanticGeometry::Arc {
+            normal: arc_normal,
+            start,
+            sweep: recovered,
+            ..
+        } = arc
+        else {
+            panic!("expected an Arc for sweep {sweep}, got {arc:?}");
+        };
+        assert!(
+            (recovered - sweep).abs() <= 1e-12,
+            "sweep {sweep} round-tripped to {recovered} via bulge {bulge}"
+        );
+        // The arc keeps the caller's plane normal; the sweep carries the sign.
+        assert!(
+            (arc_normal.z - 1.0).abs() <= 1e-12,
+            "arc normal z = {} for sweep {sweep}",
+            arc_normal.z
+        );
+        // Sample the traversal: its directed plane normal follows the sweep sign.
+        let radial = |angle: f64| Point3 {
+            x: angle.cos(),
+            y: angle.sin(),
+            z: 0.0,
+        };
+        let step = sweep.signum() * 1e-3;
+        let turn = cross(radial(start), radial(start + step));
+        assert!(
+            turn.z.signum() == sweep.signum(),
+            "sweep {sweep} turns the wrong way (turn.z = {})",
+            turn.z
+        );
+    }
+}
+
+#[test]
+fn arc_sweep_to_bulge_treats_zero_as_a_straight_segment() {
+    assert_eq!(arc_sweep_to_bulge(0.0), Some(0.0));
+    assert_eq!(arc_sweep_to_bulge(-0.0), Some(0.0));
+}
+
+#[test]
+fn arc_sweep_to_bulge_refuses_a_full_turn_and_non_finite_sweeps() {
+    let tau = std::f64::consts::TAU;
+    for sweep in [
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        tau,
+        -tau,
+        tau + 1e-9,
+        -tau - 1e-9,
+        10.0,
+        -10.0,
+    ] {
+        assert!(
+            arc_sweep_to_bulge(sweep).is_none(),
+            "sweep {sweep} must not be one bulge segment"
+        );
+    }
+}
+
+#[test]
+fn arc_sweep_to_bulge_stays_finite_just_under_a_full_turn() {
+    let tau = std::f64::consts::TAU;
+    for sweep in [tau - 1e-9, tau - 1e-12, -tau + 1e-9, -tau + 1e-12] {
+        let bulge = arc_sweep_to_bulge(sweep).expect("just under a full turn is one segment");
+        assert!(bulge.is_finite(), "sweep {sweep} gave bulge {bulge}");
+        assert!(
+            bulge.abs() > 1.0,
+            "a near-full turn has |bulge| >> 1: {bulge}"
+        );
+    }
+}
+
 fn sample_image() -> SemanticGeometry {
     SemanticGeometry::Image {
         origin: p(1.0, 2.0),

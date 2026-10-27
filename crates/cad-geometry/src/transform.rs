@@ -211,11 +211,18 @@ pub(crate) fn affine_normal_fallback(t: &Transform3, n: Point3) -> Point3 {
     }
 }
 
+/// The divisor of the bulge convention: `bulge = tan(sweep / 4)`.
+const BULGE_SWEEP_DIVISOR: f64 = 4.0;
+
+/// The sweep magnitude a single bulge segment cannot reach: one full turn.
+const MAX_BULGE_SWEEP_ABS: f64 = std::f64::consts::TAU;
+
 /// Recover a bulge segment as an exact circular arc in the polyline's plane.
 ///
 /// `bulge = tan(θ/4)`; the arc is the one bowing to the sign of the bulge. This
 /// mirrors the tessellator's construction so the analytic and sampled forms are
-/// the same curve (audit B23).
+/// the same curve (audit B23). The inverse (sweep → bulge) is
+/// [`arc_sweep_to_bulge`].
 ///
 /// Public so a caller outside this crate (EXPLODE's polyline decomposition) can
 /// reuse the single implementation instead of re-deriving the arc.
@@ -230,7 +237,7 @@ pub fn bulge_arc_geometry(
     if chord_len < 1e-12 {
         return None;
     }
-    let theta = 4.0 * bulge.atan();
+    let theta = BULGE_SWEEP_DIVISOR * bulge.atan();
     let half = theta * 0.5;
     let half_chord = chord_len * 0.5;
     let sagitta = bulge * half_chord;
@@ -268,6 +275,26 @@ pub fn bulge_arc_geometry(
         start: start_angle,
         sweep: theta,
     })
+}
+
+/// Bulge of the arc segment that spans `sweep` radians (sweep sign preserved).
+///
+/// This is the inverse of [`bulge_arc_geometry`] and the single conversion point
+/// for emitting an arc as one polyline segment: a polyline stores one bulge per
+/// vertex, and segment `i` uses `bulges[i]` (`0.0` = straight).
+///
+/// The convention is `bulge = tan(sweep / 4)`, so a segment carries any sweep in
+/// the open range `(-2π, 2π)`; a full turn cannot be one bulge segment. Returns
+/// `None` for a non-finite sweep or `|sweep| >= 2π`; `sweep == 0` is the straight
+/// segment and returns `0.0`. The returned bulge is always finite.
+pub fn arc_sweep_to_bulge(sweep: f64) -> Option<f64> {
+    if !sweep.is_finite() || sweep.abs() >= MAX_BULGE_SWEEP_ABS {
+        return None;
+    }
+    let bulge = (sweep / BULGE_SWEEP_DIVISOR).tan();
+    // A sweep strictly inside the open range still rounds to a non-finite
+    // tangent only if `sweep / 4` lands on a pole; refuse instead of emitting it.
+    bulge.is_finite().then_some(bulge)
 }
 
 pub(crate) fn rotation_of(t: &Transform3) -> f64 {

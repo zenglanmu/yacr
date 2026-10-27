@@ -47,8 +47,8 @@ pub use engine::*;
 pub(crate) use intersect::*;
 pub use intersect::{infinite_line_intersection, LineIntersection};
 pub use tessellate::*;
-pub use transform::bulge_arc_geometry;
 pub(crate) use transform::*;
+pub use transform::{arc_sweep_to_bulge, bulge_arc_geometry};
 pub use vector::*;
 pub use workplane::*;
 
