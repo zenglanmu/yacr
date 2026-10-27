@@ -30,7 +30,7 @@ DXF 图元与 `../opencadstudio` 当前支持的图元，并要求“务必实�
 | TOLERANCE | ⚠️ Partial | 公差框 + 文字；框高按 `text_lines()` 行数，**框宽仍按字符数估计**，显式 `Partial` |
 | MLINE | ⚠️ Partial | `ImporterBuilder::mline_semantics`：从 `doc.objects` 的 `MLinestyle` 解析元素偏移/线型/`flags`，画 justification/scale 基准下的逐元素平行线、方/圆 caps 与 joins；精确 miter、`CLOSED`、cap 角度、`start_point`、`FILL_ON`、元素颜色/线型未应用，显式 `Partial` |
 | MULTILEADER | ⚠️ Partial | `multileader_semantics`：`MLeaderStyle` 解析、箭头三角、`path_type`（Straight/Spline/Invisible）、dogleg/landing、文本附着枚举；颜色/线宽/背景填充/列/打断/自定义箭头（含**实体级 `342`**）/非默认平面 未应用，显式 `Partial`；**块/公差内容仍走 `Compound`**（渲染不变） |
-| RAY / XLINE | ✅ | `ray_semantics`：按运行中模型 bounds 裁剪到 XY 盒；无范围时默认盒并 `Partial` |
+| RAY / XLINE | ⚠️ Partial | `construct_line.rs::ray_semantics`：库里**没有无限直线** ⇒ 压成有限 `Line`，裁到**运行中模型 bounds**（每边外扩对角线 5%、至少 1.0）⇒ **裁多长取决于导入顺序**；无范围时用默认 1000 单位盒。**每个成功降级都是 `Partial`**（`support::XLINE_SEGMENT_REASON` / `XLINE_DEFAULT_BOX_REASON`，另记 `import.construct_line`）；方向退化或裁不到盒内 → `Opaque` + `Partial`。导出写 `LINE` 报 `Converted`，**不是**精确往返 |
 | SHAPE | ✅ | SHX 字形：`FontEngine::shape_glyph` 经 SHX `glyph_by_code` 生成折线；缺字体/按名引用显式 `Partial` |
 | TABLE | ⚠️ Partial | 单元格网格 + 文字 + 合并单元格跨格；**按 `CellStyle`/`CellBorder` 逐边绘制**（`invisible` 跳过、`double_spacing` 双线、合并抑制内边）；逐边颜色/线宽、`override_flags`、`border_type`、`additional_borders` 未应用 |
 | RASTERIMAGE | ✅/⚠️ | **新增端到端纹理显示**：importer 发 `SemanticGeometry::Image`；host 按相对路径解析 + PNG/JPEG 解码（`cad-resources`）；renderer 上传纹理（每键去重、UV 方向修正、裁剪多边形）；缺纹理→frame + `image.unresolved`；不支持编解码器、亮度/对比/淡出、outside 裁剪→`Partial` |
@@ -77,7 +77,7 @@ ARC、CIRCLE、POINT、ELLIPSE、HATCH、LEADER、SOLID、VIEWPORT（边框）�
 | RASTERIMAGE | ✅ | ✅/⚠️ | **端到端纹理显示已接**（host 解码 PNG/JPEG + GPU 纹理，每键去重/UV 修正/裁剪多边形）；不支持编解码器（TIFF/CCITT/EPS）、亮度/对比/淡出、outside 裁剪为 `Partial`；真实光栅文件未验收 |
 | WIPEOUT 掩码 | ✅ | ⚠️ Partial | `Mask` 语义（边界+inverted）已发；**掩码填充未渲染**，透明覆盖顺序洞仍在 |
 | EXTENDED 基础表示 | ✅ | ⚠️ Partial | RTEXT/ARCALIGNEDTEXT/GEOPOSITIONMARKER/SECTIONOBJECT/POINTCLOUD 基础表示已画（多为 `Partial`）；CAMERA/动态块参数夹点无几何、外部内容不加载 |
-| RAY / XLINE | ✅ | ✅ | 裁剪到模型 bounds；无范围回退为默认盒 `Partial` |
+| RAY / XLINE | ✅ | ⚠️ Partial | 无限线压成**有限段**（裁到运行中模型 bounds，顺序相关；无范围回退默认盒）：**所有成功导入都 `Partial`**，导出写 `LINE` 报 `Converted`——不是无损能力 |
 | DIMENSION 子类 | ✅ | ✅/⚠️ | **P5a**：线性/对齐/半径/直径/角度(2Ln/3Pt)/坐标 `Complete` 且导入为一级 `Dimension`；**圆弧长/大半径未迁移**（保留旧 `Compound` 合成，`Partial`，导出仍有损）；导出形状见 §2 的 DIMENSION 行（内容块/42/DIMSTYLE；多项丢弃，**未用第三方读取器验证**） |
 | OLE2FRAME / UNDERLAY / VIEWBORDER / SECTIONSYMBOL / LIGHT | ✅ | ✅/⚠️ | 外框/裁剪边界/符号/灯光字形已画；外部内容不加载，均 `Partial` |
 | 3DSOLID / BODY / REGION / SURFACE (ACIS) | ✅ | ✅ **渲染（导入期离散）** | 导入期经 `cad-kernel-adapter` 把 SAT/SAB 离散为中性网格（容差 = 包围盒对角线的 **0.1 %**），发出 `SemanticGeometry::Mesh`；完整性恒 `Partial`（**离散近似不随缩放细化** + **源 ACIS 不保留**，导出写 POLYFACE 而非 3DSOLID）；超出子集/原始 SAT/SAB 被拒仍为 `Opaque` + 内核具名码。**完整 ACIS/样条面仍超出范围** |

@@ -131,9 +131,9 @@ exposes **no 3D control**:
 - **Orbiting**: in a 3D view a primary-button canvas drag emits
   `CommandId::Orbit` (`crates/cad-host/src/input/pointer.rs`); it is deliberately
   *not* a button payload — `ORBIT` is listed in
-  `apps/app-linux/ui/src/commands.mjs`'s `GESTURE_ONLY_COMMANDS`, so the
-  affordance stays disabled with a gesture reason rather than fabricating a
-  camera move.
+  `apps/desktop-ui/src/commands/commands.ts`'s `GESTURE_ONLY_COMMANDS`, so the
+  affordance stays disabled with a gesture reason (`view.orbit.gesture`, returned
+  by `unavailableReasonKey`) rather than fabricating a camera move.
 - **Standard views**: `STANDARDVIEW` carries a view payload, and the project
   rule is a dedicated **typed IPC** rather than text parsing on `cad_command`, so
   the host exposes `cad_standard_view { view: "top" | "bottom" | "front" | "back"

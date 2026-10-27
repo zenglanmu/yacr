@@ -3,6 +3,11 @@
 > **已退役（2026-10-16）**：本文件的 Slint `yacr-linux` 宿主与其脚本（`check-linux-app.sh` 等）已随
 > Slint 删除。当前 Linux 桌面宿主见 `docs/react-linux-app.md`（`apps/app-linux`，bin `yacr`）与
 > `docs/build.md`；决策见 [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文保留为历史事实。
+>
+> **下方命令块里的运行器在仓库中已不存在**（`scripts/verify-ui.sh`、`scripts/check-linux-app.sh`，
+> 以及 `yacr-linux` 二进制），**不要照抄执行**。现行入口是 `scripts/run-react-linux.sh`
+> （构建 `apps/desktop-ui` 并启动真实 `yacr` 宿主）与 `scripts/collect-evidence.sh`
+> （构建 + 启动 + 抓帧 + `results.tsv` 汇总）；见 `docs/react-linux-app.md`。
 
 2026-10-03 用户要求新增 Linux App，并将其设为优先验收标准，见规范 §1/§11.0。
 不是复用 Android 宿主，也不是用 mock sink 的 UI 测试冒充应用。

@@ -32,6 +32,7 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | 对象 | 读取 | 语义 | 绘制 | 拾取 | 测量 |
 |---|---|---|---|---|---|
 | LINE | 实现 | 实现 | 实现(线) | 实现(AABB) | 实现(2D/3D) |
+| RAY / XLINE | **实现（有界降级，非无损）** | **部分**：库里**没有无限直线几何** ⇒ 压成有限 `SemanticGeometry::Line`（源类名 `AcDbRay`/`AcDbXline` 留在 `type_key`）。裁到**运行中的模型包围盒**（每边外扩对角线 5%、至少 1.0）⇒ **裁多长取决于导入顺序**；还没有任何几何时用**默认 1000 单位盒**。方向退化 ⇒ `Opaque` + `Partial`；**裁不到盒内** ⇒ `Opaque` + `Partial`；否则 `Line` + **`Partial`**（具名常量 `support::XLINE_SEGMENT_REASON`，无范围时 `XLINE_DEFAULT_BOX_REASON`），并额外记一次 `import.construct_line` | 按有限段绘制（缩放后也不会延伸）；**导出只能写 DXF `LINE`**，报 `Converted`（`export.converted.line`，点名「entity type changes / no longer infinite」），**不是** `Exact` | 按有限段（AABB） | 按有限段（同 `LINE`，但它只是裁剪结果；**没有创建命令**、没有无限表示——真正的无限几何是 ADR 级，见 `docs/autocad-command-coverage.md` §4） |
 | LWPOLYLINE/POLYLINE(bulge) | 实现 | 实现 | 实现(含 bulge) | 实现 | 折线长度实现 |
 | CIRCLE / ARC / ELLIPSE | 实现 | 实现(保留 normal/OCS)；非均匀仿射重解为真椭圆 | 实现 | 实现 | 距离实现；面积限共面环 |
 | SPLINE | 实现 | 实现(保留 degree/knots/weights，真实 NURBS) | 弦高自适应离散 | 实现 | 解析/采样(与显示 LOD 解耦) |

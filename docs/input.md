@@ -106,7 +106,7 @@ Idle ──1 触点按下──▶ Pending ──移动 ≥ 阈值──▶ Drag
 
 #### 1.1.4 React 侧 flush-before-leave 顺序（必须）
 
-`apps/app-linux/ui/src/input.mjs` 的 `pointerleave` 处理器在**无按下**时才压入 `{ kind: 'pointer_leave' }`
+`apps/desktop-ui/src/cad/input.ts` 的 `leave` 处理器（绑定 `pointerleave`）在**无按下**时才压入 `{ kind: 'pointer_leave' }`
 （载荷**恰为** kind + lane `sequence`，**无**位置/按键/metrics，**不** `preventDefault`），且**必须先 flush**
 任何仍待发的 rAF 合并移动，正如 `down`/`up`/`wheel` 一样。**为何必须**：若合并移动留到**下一帧**才 flush，
 它会在 leave **之后**到达宿主——宿主先因 leave 清掉 hover，又据一个**已离面的陈旧位置**重新点亮 hover。
@@ -168,8 +168,8 @@ Idle ──1 触点按下──▶ Pending ──移动 ≥ 阈值──▶ Drag
 
 ## 5. 尚未完成（诚实边界）
 
-- **平台事件接线**：`cad-ui-slint` / Android `ViewInput` / Web 指针与键盘事件
-  尚未调用本策略；多触点身份、pointer capture、长按语义需各宿主接入并补集成
+- **平台事件接线**：`cad-ui-slint`（已随 Slint 退役，不再是宿主）/ Android `ViewInput` /
+  Web 指针与键盘事件尚未调用本策略；多触点身份、pointer capture、长按语义需各宿主接入并补集成
   测试。
 - **真实 IME/DPI 运行**：中文组合、软键盘高度变化、浏览器缩放、横竖屏切换、
   DPR=1/2/3 真机验证尚未执行；当前只有纯逻辑单元测试与 Linux 离屏（lavapipe）集成

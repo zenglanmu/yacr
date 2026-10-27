@@ -20,10 +20,10 @@
 2. **显式点名的 AutoCAD 名字**（不可穷尽）：只包含本仓库文档/ADR 真正讨论过的名字，
    来源是 `docs/compatibility.md`、`docs/shortcuts.md` 与各 ADR。它们的状态是**逐条读过源码**后写的。
 
-> **禁止的读法**：不得把 `92`、`150` 或本表任何数字读成「已实现 AutoCAD 的 X%」。AutoCAD 的
+> **禁止的读法**：不得把 `95`、`153` 或本表任何数字读成「已实现 AutoCAD 的 X%」。AutoCAD 的
 > 命令总数取决于版本、产品（完整版/ LT / 工具集）、是否含扩展与第三方；我们没有那份清单，
 > 也**没有**逐条比对过绝大多数命令的语义（例如同名命令的选项、提示顺序、系统变量副作用）。
-> 任何 `92/N` 形式的百分比都是**编造**。本审计回答的是：**我们自己承诺的词表是否名实相符**，
+> 任何 `95/N` 形式的百分比都是**编造**。本审计回答的是：**我们自己承诺的词表是否名实相符**，
 > 以及**我们明确点过名的 AutoCAD 名字还缺什么**。
 
 ---
@@ -32,16 +32,19 @@
 
 | 表 | 数量 | 源码位置 | 断言 / 说明 |
 |---|---|---|---|
-| `COMMAND_TABLE` | **92** 个选择子 | `crates/cad-ui-core/src/session/commands.rs:11` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 92` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs:127`（并断言每变体在表中**恰好一次**、`COMMAND_TABLE.len()` 相等） |
-| `MEASUREMENT_SELECTORS` | **5** | 同文件 `:192` | `DIST` / `MEASUREPOLYLINE` / `MEASUREANGLE` / `AREA` / `ID`；**交互专用**，没有自己的 `CommandId` |
-| `ZOOM_STEP_SELECTORS` | **2** | 同文件 `:219` | `ZOOMIN` / `ZOOMOUT`（固定步进因子 `1.25` 与倒数，锚定视口中心） |
-| `ARGUMENT_SELECTORS` | **4** | 同文件 `:237` | `ZOOM` / `SNAPUNIT` / `PDMODE` / `PDSIZE`——**接受命令行参数的基选择子**，不是新命令、不是第二条 IPC |
-| `COMMAND_ALIASES` | **51** 行 | 同文件 `:507` | 别名 + 全词同义词；只收录**目标选择子真实存在**的拼写 |
-| `admissible_names()` | **150** 个可输入拼写 | 同文件（`admissible_names` 函数） | 92 + 5 + 2 + 51，去重后仍为 150（无重名）；这是**拼写**数，**不是**命令数 |
+| `COMMAND_TABLE` | **95** 个选择子 | `crates/cad-ui-core/src/session/commands.rs:11` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 95` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs:130`（并断言每变体在表中**恰好一次**、`COMMAND_TABLE.len()` 相等） |
+| `MEASUREMENT_SELECTORS` | **5** | 同文件 `:207` | `DIST` / `MEASUREPOLYLINE` / `MEASUREANGLE` / `AREA` / `ID`；**交互专用**，没有自己的 `CommandId` |
+| `ZOOM_STEP_SELECTORS` | **2** | 同文件 `:234` | `ZOOMIN` / `ZOOMOUT`（固定步进因子 `1.25` 与倒数，锚定视口中心） |
+| `ARGUMENT_SELECTORS` | **4** | 同文件 `:252` | `ZOOM` / `SNAPUNIT` / `PDMODE` / `PDSIZE`——**接受命令行参数的基选择子**，不是新命令、不是第二条 IPC |
+| `COMMAND_ALIASES` | **51** 行 | 同文件 `:522` | 别名 + 全词同义词；只收录**目标选择子真实存在**的拼写 |
+| `admissible_names()` | **153** 个可输入拼写 | 同文件（`admissible_names` 函数） | 95 + 5 + 2 + 51，去重后仍为 153（无重名）；这是**拼写**数，**不是**命令数 |
 
-**为什么不把 150 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
+> 这些数字是**当前源码表的长度**（本次复核：表 95 / 测量 5 / 缩放 2 / 参数 4 / 别名 51 / 拼写 153）。
+> 表一变，本表与 §5 的「期望输出」都要跟着改；**权威是 §5b 那道门禁的实跑输出**，不是这里的手抄值。
+
+**为什么不把 153 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
 不改变行为；`ZOOMIN`/`ZOOMOUT` 与各测量选择子不携带 `CommandId`。命令的**行为**数上限是
-`CommandId` 变体数（= 92），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
+`CommandId` 变体数（= 95），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
 
 **本项目自己的名字（AutoCAD 无同名，或同名不同义）**，不计入 AutoCAD 覆盖：
 `RESETVIEW`、`SWITCHBACKEND`、`SWITCH2D3D`、`STANDARDVIEW`（AutoCAD 的 `VIEW` 是命名的视图管理）、
@@ -79,7 +82,7 @@
 | `POINT` | 实现 | **单次放置**；显示走 `$PDMODE`/`$PDSIZE` 子集（`32`/`64`/`96` 未画）；无 `Multiple` 重复放置 |
 | `SPLINE` | 实现 | fit 点法（≥4 点）→ 三次/clamped/chord 插值 NURBS；无 `CV`/`Knots`/`Degree`/`Close`/`Tangency`/`Object` |
 | `POLYLINE` | **未实现** | 旧式 heavy 2D 折线实体（`AcDb2dPolyline` + 顶点子实体）。我们**只创建 LWPOLYLINE**；别名到 `PLINE` 会**凭空发明语义**，故不做 |
-| `XLINE` | **未实现** | 无无限长构造线 |
+| `XLINE`（含 `RAY`） | **未实现**（无创建命令；**导入**有有界降级） | 库里**没有无限直线几何**：导入期把 XLINE/RAY 压成**有限 `SemanticGeometry::Line`**，裁到**运行中的模型包围盒**（盒每边外扩对角线 5%、至少 1.0）⇒ 裁多长**取决于导入顺序**（先出现什么几何，盒就是什么）；还没有任何几何时用**默认 1000 单位盒**。判定：方向退化 → `Opaque` + `Partial`；裁不到盒内 → `Opaque` + `Partial`；否则 `Line` + **`Partial`**（原因是具名常量 `support::XLINE_SEGMENT_REASON` / `XLINE_DEFAULT_BOX_REASON`，并额外记一次 `import.construct_line`）。**导出**只能写 DXF `LINE`，报 `Converted`（`export.converted.line`，点名「不再是无限线」），**不是**精确往返。没有创建命令、没有无限表示。**规模**：命令 **M**（建在既有有界切片上）；真正的无限几何 **L / ADR 级**（见 §4） |
 | `HATCH` | 部分 | **先选闭合边界实体**（非内部点拾取）；填充类型 `0` 实体 / `1` 用户自定义 / `2` 预定义 / **`3` 渐变（2026-10-27）**；预定义图案**恰好** `ANSI31`/`ANSI32`/`ANSI37`（状态栏**按名**选，线上传 1 基索引）。**渐变创建**：双色两站（`stop 0.0` = `hatchGradientColorA`、`stop 1.0` = B），kind 只有 `LINEAR`/`SPHERICAL`（**从不**写 `CYLINDER`），角度**通道给度、实体存弧度**（一次 `.to_radians()`），颜色是 **ACI 整数 `1..=255`**（`0` 是 ByBlock 占位、无 sRGB，按名拒绝），默认 1 红 / 5 蓝；实体写 `HatchGradient::TwoColor { reserved: 0, shift: 0.0 }` + `pattern_type = Predefined`（`76=1`，**未查证的 vendor 约定**）。**界**：`SPHERICAL` 在矩形/圆这类「边界顶点同半径」的形状上**烘焙成平色/椭圆感、不是径向**（按三角化顶点取值）；只有 ACI 调色板（无真彩、无名/色簿）；stop 颜色下游还会被实体/图层 tint 乘；**无单色/tint 变体、无逐站命名**。无内部点求边界、无 `76=2`/`.pat`、无关联性、无实时预览 |
 | `MLEADER` | 部分 | 单簇/单线/2 顶点/**仅直线**；无 `Options`（引线类型/内容类型/最多点数/角度约束）；狗腿/箭头/字高取 `Standard` 样式表（常量为债务） |
 | `TEXT` | 实现 | **单行**、1024 字符上限、**拒绝换行**；不解释 MTEXT 控制码（逐字存储） |
@@ -190,7 +193,7 @@
 | 缺口 | 规模 | 为什么不是「顺手补一下」 |
 |---|---|---|
 | `POLYLINE`（旧式 heavy 2D 折线**实体**）创建 | **M** | 需要写 `AcDb2dPolyline` + 顶点子实体（本仓库的唯一折线语义变体是 `Polyline`，类名不进域模型）；**不得**把 `POLYLINE` 别名到 `PLINE`——那会把 heavy 折线**假装**成 LWPOLYLINE，凭空发明语义 |
-| `XLINE` | **M** | 域里 `Line` 是**两点段**；构造线需要「原点 + 单位方向 + 无限」的新表示，并牵动包围盒、拾取、TRIM 边界（无限直线求交）与出图裁剪 |
+| `XLINE`（含 `RAY`） | **M（命令）/ L（真正的无限几何）** | **命令（M）**只建在**既有有界切片**上：复用导入期的有限段降级 + 一条创建命令/工具，牵动 `TRIM`/`EXTEND` 的无限直线求交语义与出图裁剪，但不新增几何种类。**真正的无限几何（L，ADR 级）**要新增一个 `SemanticGeometry` 变体：约 **14 处**编译强制点（validate / bounds / transform / tessellate / engine / spatial pick·bounds / representation provider / measure snap / `geometry_kind` / 导出 / 选择属性行）＋约 **12 处**静默兜底（`intersect` 的 `_ => None`、extent 回退、grips 的 `_ => Vec::new()` 等）——而 `cad-domlib` 级的 bounds 累积会被无限线**毒化**成无限模型范围。这不是补丁 |
 | `BLOCK` / `WBLOCK` / `INSERT` 创建 | **L** | 块定义写入口、基点、属性定义（ATTDEF/ATTRIB）、嵌套与命名冲突、与 EXPLODE/夹点/STRETCH 的相互作用；WBLOCK 还要单独文件写出 |
 | `XREF` | **L** | 外部文件解析、相对/绝对路径解析、循环深度（已只有预算钩子）、图层名前缀、绑定/重载语义；跨文件一致性属新契约面 |
 | `IMPORT` | **L** | 依赖 acadrust 的格式能力与 `cad-import-acadrust` 的迁移策略；每个格式都要自己的 capability 表与拒绝面（DWG/DXF 的打开走 `OPEN`，不是 `IMPORT`） |
@@ -231,9 +234,9 @@ aliases = [a for a, _ in re.findall(r'\("([^"]+)",\s*"([^"]+)"\)',
 names = list(dict.fromkeys(table + meas + zoom + aliases))   # = admissible_names() 的顺序
 print(len(table), len(meas), len(zoom), len(args), len(aliases), "admissible:", len(names))
 PY
-# 期望输出：92 5 2 4 51 admissible: 150
+# 期望输出：95 5 2 4 51 admissible: 153
 
-# 2) 钉住 92 的契约（变体数、表长、每变体恰好一次）
+# 2) 钉住 95 的契约（变体数、表长、每变体恰好一次）
 cargo test -p cad-ui-core --locked command_normalization_covers_every_variant
 cargo test -p cad-ui-core --locked admissible_names_cover_the_vocabulary_exactly_once
 
@@ -251,176 +254,40 @@ grep -n "仍未实现的 AutoCAD 名" -A 20 docs/shortcuts.md
 复跑时**必须**同时读 `docs/compatibility.md` 的「绘制/编辑命令」「创建命令」「编辑命令」
 「DIMENSION 族」四节：本文第 3 节只是它们的**索引与归类**，不重述全部拒绝码。
 
-### 5b. 名字自检（**会非零退出**）
+### 5b. 名字自检（**会非零退出**；已是仓库脚本 + CI 门禁）
 
 `docs/shortcuts.md` §2 曾经混进**不存在的命令名与别名**（`MEASURE DISTANCE`、`CLEAR SELECTION`、
-`VIEW TOP/…`、`TOOLS`/`RIBBON`、`ZOOM IN`/`ZOOM OUT`、`DI`/`ZE`/`ESC`/`RIBBON` 等 35 处），
-§3.7（本文）也曾把 `DI`/`AA`/`ANGLE` 写成测量选择子的别名。都是人手转写不校验的后果。下面这段
-**每次都从源码表重新解析**，检查四件事，**任何一项对不上就退出码 1**：
-
-1. §2（`docs/shortcuts.md`）的 canonical 列必须是**准入名字**（`COMMAND_TABLE` + 测量 + 缩放步进）；
-2. §2 的别名单元必须是 `COMMAND_ALIASES` 里的真实行，**且指向本行的 canonical**；
-3. §2b 整张别名表必须与 `COMMAND_ALIASES` **完全一致**（不多不少、映射相同）；
-4. §3.7（本文的测量选择子表）第一列必须是准入名字；文档里凡是把某个 token 声明为别名的地方，
-   该 token 必须真在 `COMMAND_ALIASES` 里。
+`VIEW TOP/…`、`TOOLS`/`RIBBON`、`ZOOM IN`/`ZOOM OUT`、`DI`/`ZE`/`ESC`/`RIBBON` 等 **35 处**），本文 §3.7
+也曾把 `DI`/`AA`/`ANGLE` 写成测量选择子的别名。**规则不再以代码块形式住在本文件里**：唯一可运行副本是
+`scripts/check-command-docs.py`，自测是 `scripts/test-check-command-docs.py`，CI 的 `core-quality` 每次
+都跑两者（见 `docs/ci.md` 的 `core-quality` 行与脚本清单）。四条检查（§2 canonical 列、§2 别名单元、
+§2b 全表、§3.7 第一列 + 别名提法）的判据只写在脚本的 docstring 里，**本文不复制**。
 
 ```bash
-python3 - <<'PY'
-import re
-import sys
-
-COMMANDS = 'crates/cad-ui-core/src/session/commands.rs'
-DOC = sys.argv[1] if len(sys.argv) > 1 else 'docs/shortcuts.md'
-
-src = open(COMMANDS, encoding='utf-8').read()
-
-
-def first_column(pattern):
-    body = re.search(pattern, src, re.S).group(1)
-    return re.findall(r'\("([^"]+)"', body)
-
-
-table = first_column(r'pub const COMMAND_TABLE: &\[\(&str, CommandId\)\] = &\[(.*?)\n\];')
-meas = first_column(r'pub const MEASUREMENT_SELECTORS: &\[\(&str, MeasurementToolKind\)\] = &\[(.*?)\n\];')
-zoom = first_column(r'pub const ZOOM_STEP_SELECTORS: &\[\(&str, f64\)\] =\s*&\[(.*?)\];')
-args = re.findall(
-    r'^\s{4}([A-Z_]+_SELECTOR),$',
-    re.search(r'pub const ARGUMENT_SELECTORS: &\[&str\] = &\[(.*?)\n\];', src, re.S).group(1),
-    re.M,
-)
-alias = dict(re.findall(
-    r'\("([^"]+)",\s*"([^"]+)"\)',
-    re.search(r'pub const COMMAND_ALIASES: &\[\(&str, &str\)\] = &\[(.*?)\n\];', src, re.S).group(1),
-))
-
-admitted = set(table) | set(meas) | set(zoom)
-doc = open(DOC, encoding='utf-8').read()
-bad = []
-
-
-def cells_of(line):
-    return [c.strip() for c in line.strip().strip('|').split('|')]
-
-
-# --- §2: canonical column + alias cells -------------------------------------
-sec2 = re.split(r'\n## 2\.', doc)[1]
-sec2 = re.split(r'\n## 2b\.', sec2)[0]
-rows = 0
-for line in sec2.splitlines():
-    if not line.startswith('| ') or line.startswith('|---'):
-        continue
-    cells = cells_of(line)
-    if len(cells) != 4 or cells[0] == 'canonical':
-        continue
-    rows += 1
-    name = cells[0].strip('` ')
-    if name not in admitted:
-        bad.append('§2 canonical not admitted: %r' % name)
-    cell = cells[3]
-    if cell in ('—', '-', ''):
-        continue
-    for tok in re.findall(r'`([^`]+)`', cell):
-        if tok not in alias:
-            bad.append('§2 %s: alias %r is not in COMMAND_ALIASES' % (name, tok))
-        elif alias[tok] != name:
-            bad.append('§2 %s: alias %r maps to %r' % (name, tok, alias[tok]))
-
-# --- §2b: the alias table must be exactly COMMAND_ALIASES -------------------
-sec2b = re.split(r'\n## 2b\.', doc)[1]
-sec2b = re.split(r'\n## 3\.', sec2b)[0]
-documented = {}
-for line in sec2b.splitlines():
-    if not line.startswith('| ') or line.startswith('|---'):
-        continue
-    cells = cells_of(line)
-    if len(cells) != 4:
-        continue
-    for a, c in ((cells[0], cells[1]), (cells[2], cells[3])):
-        a, c = a.strip('` '), c.strip('` ')
-        if a and a not in ('别名', 'canonical'):
-            documented[a] = c
-for m in re.finditer(r'((?:`[^`]+`/?)+)→(`[^`]+`)', sec2b):
-    target = m.group(2).strip('`')
-    for a in re.findall(r'`([^`]+)`', m.group(1)):
-        documented[a] = target
-
-for a in sorted(set(alias) - set(documented)):
-    bad.append('§2b missing alias %r' % a)
-for a in sorted(set(documented) - set(alias)):
-    bad.append('§2b extra alias %r' % a)
-for a in sorted(set(alias) & set(documented)):
-    if alias[a] != documented[a]:
-        bad.append('§2b %s: %r != %r' % (a, documented[a], alias[a]))
-
-# --- §3.7 (the audit doc): its first column must be admitted names ----------
-import os
-AUDIT = os.path.join(os.path.dirname(DOC) or '.', 'autocad-command-coverage.md')
-if not os.path.exists(AUDIT):  # DOC pointed at a copy outside docs/ (the failure demo)
-    AUDIT = 'docs/autocad-command-coverage.md'
-audit = open(AUDIT, encoding='utf-8').read()
-sec37 = re.split(r'\n### 3\.7', audit)[1]
-sec37 = re.split(r'\n---', sec37)[0]
-sel_rows = 0
-for line in sec37.splitlines():
-    if not line.startswith('| ') or line.startswith('|---'):
-        continue
-    cells = cells_of(line)
-    if len(cells) != 3 or cells[0] in ('选择子', 'AutoCAD 名'):
-        continue
-    sel_rows += 1
-    name = cells[0].strip('` ')
-    if name not in admitted:
-        bad.append('§3.7 not admitted: %r' % name)
-
-# --- every token the docs call an alias must be a real COMMAND_ALIASES row ---
-# Fenced blocks are stripped first: the script's own source names example aliases
-# (`DI`, the regex itself), and scanning them would report the guard on itself.
-alias_mentions = 0
-for text in (doc, audit):
-    fence = chr(96) * 3  # a literal triple backtick would end this markdown fence
-    text = re.sub(fence + '.*?' + fence, '', text, flags=re.S)
-    for m in re.finditer(r'别名\s*`([^`]+)`', text):
-        alias_mentions += 1
-        if m.group(1) not in alias:
-            bad.append('alias mention %r is not in COMMAND_ALIASES' % m.group(1))
-
-print('tables: %d/%d/%d/%d selectors, %d aliases, %d canonical selectors (aliases excluded)'
-      % (len(table), len(meas), len(zoom), len(args), len(alias), len(admitted)))
-print('§2 rows: %d, §2b aliases: %d, §3.7 rows: %d, alias mentions: %d'
-      % (rows, len(documented), sel_rows, alias_mentions))
-
-if bad:
-    print('\nFAIL: %d mismatch(es)' % len(bad))
-    for line in bad:
-        print('  - ' + line)
-    sys.exit(1)
-print('OK: 0 mismatches')
-PY
+python3 scripts/check-command-docs.py        # 一致 → 0 / 有 mismatch → 1 / 读不出结构 → 2
+python3 scripts/test-check-command-docs.py   # 自测：注入伪造 canonical 与伪造别名，必须退出 1
 ```
 
-**本轮实测输出（2026-10-27，修好后的文档）**：
+**本次实测（仓库当前树）**：
 
 ```
-tables: 92/5/2/4 selectors, 51 aliases, 99 canonical selectors (aliases excluded)
+tables: 95/5/2/4 selectors, 51 aliases, 102 canonical selectors (aliases excluded)
 §2 rows: 54, §2b aliases: 51, §3.7 rows: 6, alias mentions: 1
 OK: 0 mismatches
 ```
 
-（`99` 是**canonical 选择子**数：92 表 + 5 测量 + 2 缩放步进；**不含** 51 个别名。`150` 才是
-「可输入拼写」数，两者不要混用。）
+（`102` 是 **canonical 选择子**数：95 表 + 5 测量 + 2 缩放步进，**不含** 51 个别名；`153` 才是
+「可输入拼写」数，见 §2。两个数不要混用。）
 
-**它确实会失败**：
+**它确实会失败**（同一个脚本，换输入就红）：
 
-- 把修复前的 `docs/shortcuts.md`（`git show HEAD:docs/shortcuts.md`）喂进去 → 退出码 1、**35 处**
-  mismatch：18 个非准入 canonical（`MEASURE DISTANCE`/`MEASURE ANGLE`/`MEASURE AREA`/
-  `MEASURE POLYLINE`/`CLEAR SELECTION`/`VIEW TOP/…`/`VIEW MODE`/`TOOLS`/`PANELS`/`ZOOM IN`/`ZOOM OUT`/
-  `ZOOM EXTENTS`/`ZOOM <factor>`/`ZOOM ALL`/`PDMODE <n>`/`PDSIZE <n>`/`SNAPUNIT <value>`/`LAYON`）、
-  14 个假别名（`DI`/`DIST`/`DISTANCE`/`ANGLE`/`AA`/`AREA`/`ESC`/`DESELECT`/`FIT`/`ZE`/`Z E`/`ZI`/`ZO`/`RIBBON`）、
-  以及 §2b 缺 3 行（`LAYON`/`LAYUNISO`/`NEWLAYER`）。18 + 14 + 3 = 35。
-- 把本文 §3.7 的 `DIST` 行改回带 `DI` 别名的旧写法 → 退出码 1，报 `§3.7 not admitted` 与
-  `alias mention 'DI' is not in COMMAND_ALIASES` 两条。
+- `python3 scripts/check-command-docs.py --doc <修复前的 shortcuts.md>` →
+  退出码 1、**35 处** mismatch：18 个非准入 canonical + 14 个假别名 + §2b 缺 3 行
+  （`LAYON`/`LAYUNISO`/`NEWLAYER`）。
+- 把本文 §3.7 的 `DIST` 行改回带 `DI` 别名的旧写法 → 同样退出 1，
+  报 `§3.7 not admitted: …` 与 `alias mention 'DI' is not in COMMAND_ALIASES`。
 
-**守门范围（别把它当全页保险）**：这段脚本守的是**名字**（§2 / §2b / §3.7 第一列 / 别名提法）。
+**守门范围（别把它当全页保险）**：只守**名字**（§2 / §2b / §3.7 第一列 / 别名提法）。
 `docs/shortcuts.md` 的 §1（命令行行为）、§3（键位）、§4（未实现清单）、§5（证据边界）以及本文 §3
 的**语义**（部分/实现的界）仍是**人工按源码核对**，没有机器守卫。
 
