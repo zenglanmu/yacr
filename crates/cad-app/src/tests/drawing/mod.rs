@@ -306,6 +306,7 @@ mod offset_arc;
 mod offset_polyline;
 mod point;
 mod polygon;
+mod polyline_fillet;
 mod properties;
 mod rectangle;
 mod reports;

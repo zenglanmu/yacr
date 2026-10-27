@@ -91,6 +91,15 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("EXTEND", CommandId::ExtendEntity),
     ("CHAMFER", CommandId::ChamferLines),
     ("FILLET", CommandId::FilletLines),
+    // The **Polyline mode** of the two corner commands. AutoCAD reaches it
+    // through the `Polyline` sub-option of the object prompt; the fixed-step
+    // capture cannot express "pick the first object *or* the Polyline option",
+    // so each mode is a selection-based selector of its own with
+    // `CommandPayload::None` (the one selected polyline is the whole input).
+    // They are **not** aliases of `CHAMFER`/`FILLET`: those keep their two-pick
+    // capture, and an alias would silently route a polyline edit into it.
+    ("CHAMFER POLYLINE", CommandId::ChamferPolyline),
+    ("FILLET POLYLINE", CommandId::FilletPolyline),
     ("ARRAYRECT", CommandId::ArrayRectangular),
     ("ARRAYPOLAR", CommandId::ArrayPolar),
     ("ALIGN", CommandId::AlignEntities),

@@ -550,6 +550,34 @@ pub enum CommandId {
     /// ([`crate::draw_tool::ToolParameter::FilletRadius`]). One transaction and one
     /// undo step. Work-only.
     FilletLines,
+    /// `CHAMFER POLYLINE`: the AutoCAD **Polyline mode** of CHAMFER as its own
+    /// selection-based selector. Payload is [`crate::CommandPayload::None`] — the
+    /// one selected entity is the whole input (the fixed-step capture cannot
+    /// express "pick the first object *or* the Polyline option"). The chamfered
+    /// entity must be an **open** LWPOLYLINE with **≥ 3** vertices whose every
+    /// segment is straight and which is `+Z` planar (v1); every interior vertex is
+    /// replaced by its two chamfer split points and the original entity is
+    /// rewritten **in place** in one transaction / one undo step. The distances are
+    /// the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::ChamferDistanceA`]/`B`); `A` measures
+    /// along the incoming arm and `B` along the outgoing arm (our declared rule).
+    /// A closed ring, an arc segment, a 3D polyline, `A = B = 0`, a distance that
+    /// does not fit its segments, a collinear vertex (`CHAMFER POLYLINE` needs a
+    /// real corner) and a missing source is an explicit, named refusal that writes
+    /// nothing. Work-only.
+    ChamferPolyline,
+    /// `FILLET POLYLINE`: the AutoCAD **Polyline mode** of FILLET as its own
+    /// selection-based selector (same shape as
+    /// [`CommandId::ChamferPolyline`]: `CommandPayload::None`, exactly one selected
+    /// open straight-segment `+Z` LWPOLYLINE, rewritten in place in one transaction
+    /// / one undo step). Every interior vertex becomes two tangent points joined by
+    /// an **arc** of the session radius
+    /// ([`crate::draw_tool::ToolParameter::FilletRadius`]); the sweep is derived
+    /// from the centre angles in the `+Z` plane and stored as the segment bulge.
+    /// `R <= 0` is refused **by name**: the two-line `R = 0` corner move has no
+    /// polyline equivalent. AutoCAD's radius auto-reduction is **not**
+    /// reproduced — a radius that does not fit is a refusal. Work-only.
+    FilletPolyline,
     /// ARRAYRECT: insert **independent** copies of the current selection on a
     /// rectangular grid, growing up and to the right (ADR 0016 decision D).
     /// Payload is `ArrayRect { refs }`; the row/column counts and spacings are the

@@ -79,6 +79,8 @@ command_selector_contract! {
     ExtendEntity => "EXTEND",
     ChamferLines => "CHAMFER",
     FilletLines => "FILLET",
+    ChamferPolyline => "CHAMFER POLYLINE",
+    FilletPolyline => "FILLET POLYLINE",
     ArrayRectangular => "ARRAYRECT",
     ArrayPolar => "ARRAYPOLAR",
     AlignEntities => "ALIGN",
@@ -127,7 +129,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 95,
+        EXPECTED_COMMAND_COUNT, 97,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -408,6 +410,59 @@ fn matchprop_is_admitted_with_its_autocad_alias() {
     assert_eq!(zoom_step_factor("MATCHPROP"), None);
     // Work-only like the other edits: Viewer refuses it at the command layer.
     assert!(CommandId::MatchProp.requires_work_mode());
+}
+
+#[test]
+fn fillet_polyline_and_chamfer_polyline_are_selection_based_work_only_selectors() {
+    // AutoCAD reaches the two **Polyline modes** through the `Polyline`
+    // sub-option of the FILLET/CHAMFER object prompt. The fixed-step capture
+    // cannot express "pick the first object *or* the Polyline option", so each
+    // mode is its own multi-word, selection-based selector with
+    // `CommandPayload::None` and no interactive tool.
+    for (selector, id) in [
+        ("FILLET POLYLINE", CommandId::FilletPolyline),
+        ("CHAMFER POLYLINE", CommandId::ChamferPolyline),
+    ] {
+        assert_eq!(normalize_command(selector), Some(id), "{selector}");
+        assert_eq!(
+            normalize_command(&selector.to_ascii_lowercase()),
+            Some(id),
+            "{selector} is case-insensitive"
+        );
+        assert_eq!(canonical_command_name(selector), Some(selector));
+        assert_eq!(command_name(id), Some(selector));
+        assert!(admissible_names().contains(&selector), "{selector}");
+        // Neither a measurement selector nor a zoom step can shadow it.
+        assert_eq!(measurement_selector_kind(selector), None, "{selector}");
+        assert_eq!(zoom_step_factor(selector), None, "{selector}");
+        // A canonical selector, never an alias of the two-line command.
+        assert!(
+            !COMMAND_ALIASES.iter().any(|(alias, _)| *alias == selector),
+            "{selector} must be canonical, not an alias"
+        );
+        // The multi-word name is not an argument form either: the vocabulary
+        // must not split it into `FILLET`/`CHAMFER` + `POLYLINE`.
+        assert_eq!(typed_command_argument(selector), None, "{selector}");
+        // It writes the database, so Viewer must refuse it.
+        assert!(id.requires_work_mode(), "{selector} must be Work-only");
+    }
+    // The two-line commands keep their own selectors: the polyline modes are
+    // distinct names, never aliases that would reroute a two-line edit.
+    assert_eq!(normalize_command("FILLET"), Some(CommandId::FilletLines));
+    assert_eq!(normalize_command("CHAMFER"), Some(CommandId::ChamferLines));
+
+    // The bare selector is a real, advertised name whose whole input is the
+    // selection: an empty selection is an explicit refusal (never a silent
+    // success) and no draw tool is started.
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let error = session.command("FILLET POLYLINE").unwrap_err();
+    assert!(
+        error.contains("fillet.polyline_"),
+        "the refusal names its code: {error}"
+    );
+    assert_eq!(session.snapshot(None, None, 0).tool, None);
 }
 
 #[test]

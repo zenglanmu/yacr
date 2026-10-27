@@ -418,6 +418,8 @@ impl Application {
             | CommandId::ExtendEntity
             | CommandId::ChamferLines
             | CommandId::FilletLines
+            | CommandId::ChamferPolyline
+            | CommandId::FilletPolyline
             | CommandId::ArrayRectangular
             | CommandId::ArrayPolar
             | CommandId::AlignEntities

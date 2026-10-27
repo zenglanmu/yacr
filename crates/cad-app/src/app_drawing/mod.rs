@@ -55,6 +55,7 @@ mod mleader;
 mod mtext_create;
 mod offset_polyline;
 mod point_style;
+mod polyline_fillet;
 mod properties;
 mod stretch;
 mod text_edit;
@@ -67,6 +68,13 @@ mod trim_extend;
 mod trim_spline;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};
+// The POLYLINE-mode FILLET/CHAMFER planner, its spec and the two-line parity
+// reference: exposed to the crate's tests only (`tests::drawing::polyline_fillet`
+// drives the pure planner and compares it against the two-line `plan_fillet`).
+#[cfg(test)]
+pub(crate) use polyline_fillet::{
+    plan_polyline_corners, polyline_corner_tolerance, two_line_fillet_plan, PolylineCornerSpec,
+};
 // The single base-dimension resolution the DIMBASELINE/DIMCONTINUE capture check
 // and the command both use, so a wrong pick is refused with the same reason at
 // capture time and at apply time (ADR 0017 decision C, P5f).

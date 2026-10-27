@@ -43,6 +43,8 @@ impl CommandId {
                 | Self::ExtendEntity
                 | Self::ChamferLines
                 | Self::FilletLines
+                | Self::ChamferPolyline
+                | Self::FilletPolyline
                 | Self::ArrayRectangular
                 | Self::ArrayPolar
                 | Self::AlignEntities
