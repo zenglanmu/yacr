@@ -304,6 +304,7 @@ mod multileader;
 mod offset;
 mod offset_arc;
 mod offset_polyline;
+mod offset_polyline_bulge;
 mod point;
 mod polygon;
 mod polyline_fillet;

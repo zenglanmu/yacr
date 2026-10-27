@@ -54,6 +54,7 @@ mod mirror_curves;
 mod mleader;
 mod mtext_create;
 mod offset_polyline;
+mod offset_polyline_bulge;
 mod point_style;
 mod polyline_fillet;
 mod properties;

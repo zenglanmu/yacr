@@ -3,8 +3,11 @@
 //! The straight-segment polyline arm of OFFSET (`app_drawing::offset_polyline`):
 //! constant distance to the pick's side, **miter** joins, vertex count and order
 //! preserved, a closed polyline staying closed, one transaction / one undo step,
-//! and the named refusals (`offset.bulge_segment`, `offset.collapsed`,
-//! `offset.non_planar`) that change nothing.
+//! and the named refusals (`offset.collapsed`, `offset.non_planar`) that change
+//! nothing.
+//!
+//! The **arc-segment** (bulge) arm lives in the sibling `offset_polyline_bulge`
+//! test module, which reuses the fixtures below.
 //!
 //! Split out of `offset.rs` (which keeps the LINE/CIRCLE arm) so both files stay
 //! well inside the 1000-line code-file cap.
@@ -13,7 +16,7 @@ use super::offset::app_with_drawing;
 use super::*;
 
 /// A drawing whose only entity (id 1) is the given polyline on layer 0.
-fn polyline_app(points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> Application {
+pub(super) fn polyline_app(points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> Application {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -49,7 +52,10 @@ fn rectangle_polyline_app() -> Application {
 }
 
 /// The offset copy an OFFSET outcome created.
-fn created_polyline(app: &Application, outcome: &CommandOutcome) -> (Vec<Point3>, Vec<f64>, bool) {
+pub(super) fn created_polyline(
+    app: &Application,
+    outcome: &CommandOutcome,
+) -> (Vec<Point3>, Vec<f64>, bool) {
     let created = EntityId(outcome.objects[0].0);
     match &app.workspace.documents[&DocumentId(1)]
         .drawing
@@ -66,14 +72,14 @@ fn created_polyline(app: &Application, outcome: &CommandOutcome) -> (Vec<Point3>
     }
 }
 
-fn assert_vertex(actual: Point3, x: f64, y: f64) {
+pub(super) fn assert_vertex(actual: Point3, x: f64, y: f64) {
     assert!(
         (actual.x - x).abs() < 1e-9 && (actual.y - y).abs() < 1e-9,
         "expected ({x}, {y}), got {actual:?}"
     );
 }
 
-fn undo_depth(app: &Application) -> usize {
+pub(super) fn undo_depth(app: &Application) -> usize {
     app.history
         .get(&DocumentId(1))
         .map(|history| history.undo_depth())
@@ -214,7 +220,7 @@ fn offset_polyline_pick_side_is_symmetric() {
 }
 
 #[test]
-fn offset_polyline_with_a_bulge_segment_is_refused_by_name() {
+fn offset_polyline_with_a_non_finite_bulge_is_refused_by_name() {
     let mut app = polyline_app(
         vec![
             point(0.0, 0.0),
@@ -222,7 +228,7 @@ fn offset_polyline_with_a_bulge_segment_is_refused_by_name() {
             point(10.0, 5.0),
             point(0.0, 5.0),
         ],
-        vec![0.0, 0.5, 0.0, 0.0],
+        vec![0.0, f64::NAN, 0.0, 0.0],
         true,
     );
     let mut session = SessionState::new(DocumentId(1), AppMode::Work);
@@ -240,7 +246,7 @@ fn offset_polyline_with_a_bulge_segment_is_refused_by_name() {
     match err {
         CadError::Unsupported(reason) => assert!(
             reason.contains("offset.bulge_segment"),
-            "the refusal must name the arc-segment gap: {reason}"
+            "the refusal must name the non-constructible bulge: {reason}"
         ),
         other => panic!("expected an Unsupported refusal, got {other:?}"),
     }
@@ -410,4 +416,37 @@ fn offset_polyline_is_one_undo_step() {
     .unwrap();
     let (points, _, _) = created_polyline(&app, &outcome);
     assert_vertex(points[1], 12.0, -2.0);
+}
+
+#[test]
+fn offset_straight_polyline_keeps_the_pinned_miter_arithmetic_exactly() {
+    // Regression guard for the arc arm's dispatch: a polyline with no real bulge
+    // must still go through the untouched straight path, so every coordinate is
+    // *bit-identical* to the analytic miter value — compared exactly here, not
+    // within a tolerance, so a re-routed or re-derived straight offset shows up.
+    let mut app = rectangle_polyline_app();
+    let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::OffsetEntity,
+        CommandPayload::Offset {
+            refs: vec![ref_of(1)],
+            side_point: point(12.0, 2.5),
+        },
+    )
+    .unwrap();
+    let (points, bulges, closed) = created_polyline(&app, &outcome);
+    assert!(closed);
+    assert_eq!(
+        points,
+        vec![
+            point(-2.0, -2.0),
+            point(12.0, -2.0),
+            point(12.0, 7.0),
+            point(-2.0, 7.0),
+        ],
+        "the straight miter arithmetic is unchanged, exactly"
+    );
+    assert_eq!(bulges, vec![0.0; 4], "the straight bulges are copied");
 }

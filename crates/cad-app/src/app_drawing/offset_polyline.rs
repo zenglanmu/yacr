@@ -1,18 +1,20 @@
-//! The LWPOLYLINE arm of `OFFSET`: a constant-distance, **miter-joined** offset
-//! of a polyline whose every segment is straight.
+//! The LWPOLYLINE arm of `OFFSET`: a constant-distance, **miter-joined** offset.
 //!
 //! ## What is supported
 //!
-//! Open and closed polylines whose every segment is a straight segment (a bulge
-//! within [`STRAIGHT_BULGE`], the tessellator's own straight-segment rule — see
-//! `app_drawing::explode`). The pick point (`side_point`) decides **one** side and
-//! **one** distance for the whole polyline, exactly like the LINE arm: the
-//! distance is the pick's in-plane perpendicular distance to the line of the
-//! picked (nearest) segment, and every segment is moved that far to the pick's
-//! side. Vertices are joined with **miter** joins, the vertex count and order are
-//! preserved (`n` in → `n` out) and a closed polyline stays closed.
+//! Open and closed polylines in any plane. A segment whose bulge is within
+//! [`STRAIGHT_BULGE`] is straight and is offset here; a segment with a real bulge
+//! is a circular arc and is offset by the sibling arm
+//! [`super::offset_polyline_bulge`] (concentric, exact, arc-aware joins — see that
+//! module for the construction and its refusals). Both arms keep the vertex count
+//! and order (`n` in → `n` out), the closed flag, and carry one bulge per vertex.
 //!
-//! ## Declared construction
+//! The pick point (`side_point`) decides **one** side and **one** distance for the
+//! whole polyline, exactly like the LINE arm: the distance is the pick's in-plane
+//! distance to the picked (nearest) segment, and every segment is moved that far to
+//! the pick's side. Straight vertices are joined with **miter** joins.
+//!
+//! ## Declared construction (straight segments)
 //!
 //! With `n` the polyline's plane unit normal, `u_i` the unit direction of segment
 //! `i` and `m_i = cross(n, u_i)` its in-plane `+90°` direction, the offset of
@@ -31,15 +33,17 @@
 //! adjacent segment directions); a non-planar polyline is refused. A polyline
 //! whose segments are **all collinear** (a "straight" polyline) has no plane of
 //! its own, so — like the LINE arm — its plane is the one the line spans with the
-//! pick point. The pick's out-of-plane component is ignored: it decides only the
-//! side and the distance *within* the polyline's plane.
+//! pick point. (With a bulge present that is no longer sound: an arc read in an
+//! assumed plane is a different arc, so the arc arm refuses it as
+//! `offset.ambiguous_plane`.) The pick's out-of-plane component is ignored: it
+//! decides only the side and the distance *within* the polyline's plane.
 //!
 //! ## Refusals (explicit, nothing written)
 //!
-//! * any segment with a real bulge (an arc segment) ⇒ `Unsupported` naming
-//!   `offset.bulge_segment`. Bridging a bulge segment honestly needs an arc-offset
-//!   construction this command does not implement, and dropping the bulge would
-//!   silently change the geometry;
+//! * a bulge that is not a constructible arc (non-finite, or a full turn or more)
+//!   ⇒ `Unsupported` naming `offset.bulge_segment`; an arc segment that cannot be
+//!   offset ⇒ the arc arm's own named refusals (`offset.arc_collapsed`,
+//!   `offset.join_failed`, `offset.ambiguous_plane`, `offset.arc_mismatch`);
 //! * a degenerate (zero-length) segment, fewer than two vertices, a non-finite
 //!   vertex, a zero-area closed polyline or a pick on the polyline itself
 //!   (distance 0) ⇒ `InvalidInput`;
@@ -55,7 +59,7 @@
 //! Only **vertex-local** collapse is detected. An offset whose *distant* segments
 //! cross each other (a global self-intersection that no single vertex reveals) is
 //! NOT detected here; it is not silently reported as fine either — it simply is
-//! not checked, and that is a known gap of this command.
+//! not checked, and that is a known gap of this command (both arms).
 
 use super::helpers::offset_tolerance;
 use super::*;
@@ -63,7 +67,7 @@ use cad_geometry::{add, cross, dot, length, normalize, scale, sub};
 
 /// Below this a polyline bulge is a straight segment (the tessellator's rule,
 /// matching `app_drawing::explode`'s `STRAIGHT_BULGE`).
-const STRAIGHT_BULGE: f64 = 1e-12;
+pub(super) const STRAIGHT_BULGE: f64 = 1e-12;
 
 /// The `sin` of the turn below which two adjacent unit segment directions count
 /// as parallel.
@@ -72,7 +76,7 @@ const STRAIGHT_BULGE: f64 = 1e-12;
 /// of two unit vectors) rather than a world distance; it is derived from the
 /// tolerance policy's computation tolerance so the judgement is not a second,
 /// hand-picked constant.
-fn turn_sine_tolerance() -> f64 {
+pub(super) fn turn_sine_tolerance() -> f64 {
     TolerancePolicy::default().computation_world.max(1e-12)
 }
 
@@ -86,11 +90,13 @@ fn miter_reversal_tolerance() -> f64 {
     TolerancePolicy::default().computation_world.max(1e-12)
 }
 
-/// Offset a straight-segment LWPOLYLINE to the side of `side_point`.
+/// Offset a LWPOLYLINE to the side of `side_point`.
 ///
 /// Returns the new geometry and the offset distance that was applied (the pick's
-/// perpendicular distance to the picked segment's line), so the command can
-/// report the exact value instead of a re-derivation.
+/// distance to the picked segment), so the command can report the exact value
+/// instead of a re-derivation. A polyline with at least one real bulge is handed
+/// to the arc arm ([`super::offset_polyline_bulge`]); everything here is then the
+/// straight-only path and is byte-for-byte what it always was.
 pub(super) fn offset_polyline(
     points: &[Point3],
     bulges: &[f64],
@@ -98,13 +104,22 @@ pub(super) fn offset_polyline(
     side_point: Point3,
 ) -> CadResult<(SemanticGeometry, f64)> {
     let tol = offset_tolerance();
-    // An arc segment is a capability gap, not bad input: name it and write
-    // nothing (the caller has not started a transaction yet).
+    // An arc segment is the sibling arm's job; a bulge that is not even a finite
+    // number is nobody's: name it and write nothing (the caller has not started a
+    // transaction yet).
+    if bulges
+        .iter()
+        .any(|bulge| bulge.is_finite() && bulge.abs() > STRAIGHT_BULGE)
+    {
+        return super::offset_polyline_bulge::offset_polyline_with_arcs(
+            points, bulges, closed, side_point,
+        );
+    }
     for (index, bulge) in bulges.iter().enumerate() {
-        if !bulge.is_finite() || bulge.abs() > STRAIGHT_BULGE {
+        if !bulge.is_finite() {
             return Err(CadError::Unsupported(format!(
-                "OFFSET offset.bulge_segment: LWPOLYLINE segment {index} is an arc \
-                 (bulge {bulge}); only polylines whose every segment is straight can be offset"
+                "OFFSET offset.bulge_segment: LWPOLYLINE segment {index} has a non-finite bulge \
+                 ({bulge}), which is not a constructible arc"
             )));
         }
     }
@@ -179,7 +194,11 @@ pub(super) fn offset_polyline(
 ///
 /// A zero-length segment is an explicit refusal: it has no direction, so there is
 /// no offset side and no way to keep the vertex count meaningful.
-fn unit_segment_directions(points: &[Point3], closed: bool, tol: f64) -> CadResult<Vec<Point3>> {
+pub(super) fn unit_segment_directions(
+    points: &[Point3],
+    closed: bool,
+    tol: f64,
+) -> CadResult<Vec<Point3>> {
     let count = points.len();
     let segments = if closed { count } else { count - 1 };
     let mut dirs = Vec::with_capacity(segments);
@@ -271,17 +290,7 @@ fn pick_signed_distance(
     for (index, u) in dirs.iter().enumerate() {
         let start = points[index];
         let end = points[(index + 1) % count];
-        let toward = sub(side_point, start);
-        let along = dot(toward, *u);
-        let signed = dot(toward, cross(normal, *u));
-        let reach = length(sub(end, start));
-        let distance = if along <= 0.0 {
-            length(toward)
-        } else if along >= reach {
-            length(sub(side_point, end))
-        } else {
-            signed.abs()
-        };
+        let (distance, signed) = line_pick(start, end, *u, normal, side_point);
         if best.map(|(current, _)| distance < current).unwrap_or(true) {
             best = Some((distance, signed));
         }
@@ -289,11 +298,39 @@ fn pick_signed_distance(
     best.map(|(_, signed)| signed).unwrap_or(0.0)
 }
 
+/// The pick's distance to one straight segment and its signed offset value.
+///
+/// The distance is the Euclidean distance to the **finite** segment (an end point
+/// for a pick beyond an end), while the signed value is always the pick's
+/// perpendicular displacement along `m = cross(n, u)` — the LINE arm's rule. The
+/// arc arm shares this function, so a line pick can never mean two different
+/// things in the two arms.
+pub(super) fn line_pick(
+    start: Point3,
+    end: Point3,
+    u: Point3,
+    normal: Point3,
+    side_point: Point3,
+) -> (f64, f64) {
+    let toward = sub(side_point, start);
+    let along = dot(toward, u);
+    let signed = dot(toward, cross(normal, u));
+    let reach = length(sub(end, start));
+    let distance = if along <= 0.0 {
+        length(toward)
+    } else if along >= reach {
+        length(sub(side_point, end))
+    } else {
+        signed.abs()
+    };
+    (distance, signed)
+}
+
 /// The analytic miter vertex between two adjacent segments.
 ///
 /// A vanishing denominator is a doubling-back vertex: the two offset lines are
 /// parallel, so there is no join, only a spike of unbounded length — refused.
-fn miter_vertex(
+pub(super) fn miter_vertex(
     vertex: Point3,
     before: Point3,
     after: Point3,

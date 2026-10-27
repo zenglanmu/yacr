@@ -32,11 +32,13 @@ impl Application {
     /// centre, normal, start angle and sweep, so only its radius changes
     /// ([`offset_arc`]); for a LWPOLYLINE every segment is moved that far to the
     /// pick's side and the vertices are re-joined with **miter** joins
-    /// ([`offset_polyline`]). Any other geometry kind is an explicit `Unsupported`
-    /// refusal — an arc (bulged) polyline segment is its own named refusal
-    /// (`offset.bulge_segment`) rather than being folded into that generic arm,
-    /// and an ELLIPSE is refused by name too (a uniform offset of an ellipse is
-    /// not an ellipse; it is not faked).
+    /// ([`offset_polyline`]). A bulge segment (an arc) is offset exactly by the
+    /// arc arm: concentric, with the same centre and the joins as exact
+    /// line/circle or circle/circle intersections (`offset_polyline_bulge`). Any
+    /// other geometry kind is an explicit `Unsupported` refusal — a bulge that is
+    /// not a constructible arc keeps its own name (`offset.bulge_segment`) rather
+    /// than being folded into that generic arm, and an ELLIPSE is refused by name
+    /// too (a uniform offset of an ellipse is not an ellipse; it is not faked).
     /// Exactly one source entity is required. The new entity has a fresh id, the
     /// source's layer/space, and the source's display state; one transaction and
     /// one undo step.
