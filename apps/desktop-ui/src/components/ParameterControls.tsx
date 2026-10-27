@@ -1,5 +1,6 @@
 // The active-tool parameter controls of the status bar: one bounded stepper (or
-// one named chooser) per numeric parameter and one toggle chip per flag parameter.
+// one named chooser, or one colour swatch) per numeric parameter and one toggle
+// chip per flag parameter.
 //
 // Split out of `StatusBar.tsx` so the bar itself stays a stateless projection of
 // `cad_status`: a stepper of a **typed** parameter (a real length, e.g. the text
@@ -12,8 +13,10 @@ import React, { useState } from 'react';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
 import { Toggle } from './primitives.tsx';
+import { ColorField } from './ColorChooser.tsx';
 import type { ComposingKeyEvent } from './key-events.ts';
 import { useI18n } from '../context.ts';
+import { aciChoice, selectedAciIndex } from '../color/color-value.ts';
 import {
   NO_TOOL_PARAMETER_DRAFT, TOOL_PARAMETER_INACTIVE_KEY, cancelToolParameterDraft, commitToolParameterDraft,
   stepToolParameterDraft, typeToolParameterDraft,
@@ -212,18 +215,83 @@ export function ParameterChoices({ view, onChoose }: { readonly view: ToolParame
   );
 }
 
+/**
+ * The colour swatch for an ACI-indexed parameter: HATCH's two gradient stops.
+ *
+ * The wire carries a bare integer ACI index, so this row must not offer a
+ * spelling the channel cannot take: no free-form field (`custom` is absent), no
+ * `#RRGGBB` and no ByLayer/ByBlock entries (`symbols` is empty). What opens is the
+ * app's one in-DOM colour chooser showing the standard palette `1..=255` — index
+ * `0` is absent from it because it is the ByBlock placeholder, not a colour, and
+ * the command refuses it by name.
+ *
+ * The pick is translated back to the **integer** with the shared
+ * [`selectedAciIndex`] and dispatched through the same `onChoose(key, value)`
+ * funnel a named chooser uses, so the wire is byte-for-byte what a step would send
+ * and nothing string-shaped can leak into a numeric parameter. A pick that parses
+ * to no index (or to the index already in force) sends nothing at all — the
+ * chooser's own no-op rule.
+ *
+ * Layout: label + an 18px swatch trigger on the same 20px chip as the steppers, so
+ * the strip keeps one control height at ten rows. It paints the colour the row
+ * currently stands on (status value plus the bounded pending delta, like a
+ * chooser's selected segment), never a fabricated one. A scoped row outside
+ * `hatchPatternType === 3` is muted with the same "not in effect" sentence and
+ * still opens: the palette is discoverable before the fill is switched, and the
+ * host would accept the write either way.
+ */
+export function ParameterSwatch({ view, onChoose }: { readonly view: ToolParameterNumberView; readonly onChoose: (key: string, target: number) => void }) {
+  const { t } = useI18n();
+  const name = t(view.labelKey);
+  const title = view.inactive ? `${t(TOOL_PARAMETER_INACTIVE_KEY)} \u00b7 ${t(view.hintKey)}` : t(view.hintKey);
+  return (
+    <div
+      className={['status-swatch', view.inactive ? 'is-inactive' : '', view.disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')}
+      role="group"
+      aria-label={name}
+      title={title}
+    >
+      {view.icon ? <Icon name={view.icon as IconName} size={12} /> : null}
+      <span className="status-swatch__label" aria-hidden="true">{name}</span>
+      <ColorField
+        // The chooser speaks the colour grammar (`aci:N`); the row's own value is
+        // the integer, so the adapter lives here and nowhere else.
+        value={aciChoice(view.effective)}
+        label={t('status.tool_parameter.choose_color', { name })}
+        symbols={[]}
+        busy={view.disabled}
+        onPick={next => {
+          const index = selectedAciIndex(next);
+          if (index === null || index === view.effective) return;
+          onChoose(view.key, index);
+        }}
+      />
+    </div>
+  );
+}
+
 // The toggle chip for one active-tool flag parameter, using the same status-bar
 // chip vocabulary as OSNAP / hover preview. It dispatches the *opposite* of the
 // value the last `cad_status` carried — never a fabricated one.
+//
+// A flag scoped to a sibling code (HATCH `double`, which only the two pattern
+// fills consult) keeps its chip and its dispatch and is only muted: the host
+// accepts the write whatever the current fill is, so refusing it here would be a
+// capability claim the host does not make. The title carries the one generic
+// "not in effect" sentence plus the row's own hint, the same words the inert
+// choosers and swatches use.
 export function ParameterFlag({ view, onToggle }: { readonly view: ToolParameterFlagView; readonly onToggle: (key: string, next: boolean) => void }) {
   const { t } = useI18n();
+  const title = view.inactive ? `${t(TOOL_PARAMETER_INACTIVE_KEY)} \u00b7 ${t(view.hintKey)}` : t(view.hintKey);
   return (
-    <Toggle
-      label={t(view.labelKey)}
-      on={view.value}
-      disabled={view.disabled}
-      title={t(view.hintKey)}
-      onClick={() => onToggle(view.key, view.next)}
-    />
+    <span className={['status-flag', view.inactive ? 'is-inactive' : ''].filter(Boolean).join(' ')}>
+      <Toggle
+        label={t(view.labelKey)}
+        on={view.value}
+        disabled={view.disabled}
+        title={title}
+        onClick={() => onToggle(view.key, view.next)}
+      />
+    </span>
   );
 }

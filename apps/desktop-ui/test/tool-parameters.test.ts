@@ -47,9 +47,10 @@ test('the parameter group renders only for an active tool with a projected value
   assert.deepEqual(v, {
     kind: 'number', key: 'polygonSides', value: 8, delta: 0, effective: 8, text: '8',
     step: 1, typed: false,
-    // A plain row is not a chooser and is not scoped to a sibling code: both facets
-    // stay explicitly false/absent rather than being left off the view.
-    choices: null, inactive: false,
+    // A plain row is not a chooser, not a colour swatch and is not scoped to a
+    // sibling code: all three facets stay explicitly false/absent rather than being
+    // left off the view.
+    swatch: false, choices: null, inactive: false,
     labelKey: 'status.tool_parameter.polygon_sides',
     hintKey: 'status.tool_parameter.polygon_sides.hint',
     icon: 'polygon', disabled: false,
@@ -83,7 +84,18 @@ test('the per-tool map and the spec table stay consistent', () => {
   assert.deepEqual(TOOL_PARAMETERS['draw.polygon'], { command: 'POLYGON', keys: ['polygonSides'] });
   assert.deepEqual(TOOL_PARAMETERS['draw.hatch'], {
     command: 'HATCH',
-    keys: ['hatchPatternType', 'hatchPattern', 'hatchSpacing', 'hatchAngle', 'hatchDouble', 'hatchStyle'],
+    keys: [
+      'hatchPatternType',
+      'hatchPattern',
+      'hatchGradientKind',
+      'hatchGradientAngle',
+      'hatchGradientColorA',
+      'hatchGradientColorB',
+      'hatchSpacing',
+      'hatchAngle',
+      'hatchDouble',
+      'hatchStyle',
+    ],
   });
   // Both text-creation tools own the same row: the host projects one session
   // `textHeight` and both create their glyphs with it (ADR 0019 F.1), so TEXT and
@@ -104,8 +116,9 @@ test('the per-tool map and the spec table stay consistent', () => {
   assert.deepEqual(Object.keys(TOOL_PARAMETER_SPECS).sort(), [
     'alignScale', 'arrayColumnSpacing', 'arrayColumns', 'arrayFillAngle', 'arrayItems',
     'arrayRotateItems', 'arrayRowSpacing', 'arrayRows', 'chamferDistanceA',
-    'chamferDistanceB', 'filletRadius', 'hatchAngle', 'hatchDouble', 'hatchPattern',
-    'hatchPatternType', 'hatchSpacing', 'hatchStyle', 'polygonSides', 'textHeight',
+    'chamferDistanceB', 'filletRadius', 'hatchAngle', 'hatchDouble',
+    'hatchGradientAngle', 'hatchGradientColorA', 'hatchGradientColorB', 'hatchGradientKind',
+    'hatchPattern', 'hatchPatternType', 'hatchSpacing', 'hatchStyle', 'polygonSides', 'textHeight',
   ]);
   assert.equal(TOOL_PARAMETER_SPECS.alignScale.kind, 'flag');
   assert.equal(TOOL_PARAMETER_SPECS.arrayRotateItems.kind, 'flag');
@@ -583,6 +596,10 @@ test('the tool-parameter catalog keys exist in both locales with matching placeh
 const HATCH_DEFAULTS = Object.freeze({
   hatchPatternType: 0,
   hatchPattern: 1,
+  hatchGradientKind: 0,
+  hatchGradientAngle: 0,
+  hatchGradientColorA: 1,
+  hatchGradientColorB: 5,
   hatchSpacing: 1,
   hatchAngle: 0,
   hatchDouble: false,
@@ -641,10 +658,10 @@ test('the predefined pattern offers its three implemented names and still sends 
 });
 
 test('the pattern chooser stays visible but inert outside the predefined type', () => {
-  // Solid (0) and user-defined (1) ignore the pattern index: the row is still
-  // rendered — the three names stay discoverable before the type is switched — but
-  // nothing is pickable, and the hint says why.
-  for (const type of [0, 1]) {
+  // Solid (0), user-defined (1) and gradient (3) ignore the pattern index: the row
+  // is still rendered — the three names stay discoverable before the type is
+  // switched — but nothing is pickable, and the hint says why.
+  for (const type of [0, 1, 3]) {
     const row = hatchRow({ hatchPatternType: type });
     assert.ok(row, `the row stays visible under type ${type}`);
     assert.equal(row.inactive, true, `inactive under type ${type}`);
@@ -672,11 +689,14 @@ test('the pattern chooser stays visible but inert outside the predefined type', 
   for (const choice of deniedRow.choices) assert.equal(choice.disabled, true);
   // The other closed sets keep their plain steppers: only a row whose spec names
   // its codes becomes a chooser, so the pattern-type and style controls did not
-  // change shape.
+  // change shape. (The gradient kind names its two codes, so it is a chooser too.)
   const rendered = toolParameterViews(hatch({ hatchPatternType: 2 }), admitted);
-  assert.deepEqual(rendered.map(entry => entry.key), ['hatchPatternType', 'hatchPattern', 'hatchSpacing', 'hatchAngle', 'hatchDouble', 'hatchStyle']);
+  assert.deepEqual(rendered.map(entry => entry.key), TOOL_PARAMETERS['draw.hatch'].keys);
   for (const entry of rendered) {
-    if (entry.kind === 'number') assert.equal(entry.choices === null, entry.key !== 'hatchPattern', entry.key);
+    if (entry.kind === 'number') {
+      const named = entry.key === 'hatchPattern' || entry.key === 'hatchGradientKind';
+      assert.equal(entry.choices === null, !named, entry.key);
+    }
   }
 });
 

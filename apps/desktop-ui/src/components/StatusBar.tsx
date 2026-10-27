@@ -4,7 +4,7 @@
 import React from 'react';
 import { Icon } from '../icons.tsx';
 import { Button, Toggle } from './primitives.tsx';
-import { ParameterChoices, ParameterFlag, ParameterStepper } from './ParameterControls.tsx';
+import { ParameterChoices, ParameterFlag, ParameterStepper, ParameterSwatch } from './ParameterControls.tsx';
 import { useI18n, useShell } from '../context.ts';
 import type { CadImportProgress } from '../cad/cad-status.ts';
 import type { ToolParameterPending } from '../tools/tool-parameters.ts';
@@ -123,14 +123,25 @@ export function StatusBar() {
         </span>
       ) : null}
 
-      {toolParameters.map(view => {
-        if (view.kind === 'flag') return <ParameterFlag key={`${tool?.key}:${view.key}`} view={view} onToggle={shell.toggleToolParameter} />;
-        // A closed set with catalog names (HATCH's predefined pattern) renders the
-        // same row as a named chooser instead of a stepper: the wire value is still
-        // the integer code, but the user picks a name.
-        if (view.choices) return <ParameterChoices key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
-        return <ParameterStepper key={`${tool?.key}:${view.key}`} view={view} onStep={shell.stepToolParameter} />;
-      })}
+      {/* The active tool's parameter rows. Ten HATCH rows do not fit beside the
+          drafting chips and the right-hand utilities on a narrow window, so this
+          is the one part of the bar that scrolls: a bounded `min-width` keeps it
+          from pushing the utilities off the edge, and `overflow-x` reveals the
+          rest instead of clipping it. Each control keeps its own 20px height and
+          its own label, so the strip still reads as one line. */}
+      <div className={toolParameters.length > 0 ? 'statusbar__params' : 'statusbar__params is-empty'}>
+        {toolParameters.map(view => {
+          if (view.kind === 'flag') return <ParameterFlag key={`${tool?.key}:${view.key}`} view={view} onToggle={shell.toggleToolParameter} />;
+          // A closed set with catalog names (HATCH's predefined pattern, its gradient
+          // kind) renders the same row as a named chooser instead of a stepper: the
+          // wire value is still the integer code, but the user picks a name.
+          if (view.choices) return <ParameterChoices key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
+          // A colour row (HATCH's two gradient stops) is the same numeric row shown as
+          // a swatch: the integer ACI index still travels the one parameter channel.
+          if (view.swatch) return <ParameterSwatch key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
+          return <ParameterStepper key={`${tool?.key}:${view.key}`} view={view} onStep={shell.stepToolParameter} />;
+        })}
+      </div>
 
       <div className="statusbar__group" role="group" aria-label={t('status.drafting')}>
         {grid ? (

@@ -830,6 +830,23 @@ button, input, select { font: inherit; color: inherit; }
   color: var(--text-dim); font-size: 11px;
 }
 .statusbar__coords { display: inline-flex; align-items: center; gap: 6px; min-width: 108px; color: var(--text-dim); }
+/* The active tool's parameter rows. HATCH alone owns ten of them now (four make a
+ * gradient), which no longer fits beside the drafting chips and the right-hand
+ * utilities on a narrow window. So this group — and only this group — is the
+ * status bar's scroller: `min-width: 0` lets it give up width first,
+ * `overflow-x: auto` reveals the rest instead of clipping it, and the scrollbar
+ * is hidden so a 26px bar keeps its single line. Every row keeps its own 20px chip
+ * and its own label, so it still reads as one strip. An empty group collapses, so
+ * a tool with no parameters costs no gap. */
+.statusbar__params {
+  display: flex; align-items: center; gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.statusbar__params::-webkit-scrollbar { display: none; }
+.statusbar__params.is-empty { display: none; }
 .mono { font-family: var(--font-mono); }
 .statusbar__state { color: var(--text-muted); }
 /* Active-tool chip: the tool name, an optional per-step prompt (the named picks
@@ -931,6 +948,29 @@ button, input, select { font: inherit; color: inherit; }
   background: transparent; color: var(--text-muted);
   outline: 1px solid var(--line-soft); outline-offset: -1px;
 }
+/* Active-tool colour swatch (the HATCH gradient stops): the same 20px chip as the
+   stepper, but its value slot is the shared colour trigger. The wire value is an
+   integer ACI index; the row paints that index from the shared palette and opens
+   the one in-DOM colour chooser. Only the label is muted while the row is scoped
+   out — the swatch keeps its colour, because it is still the stored value. */
+.status-swatch {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 20px; padding: 0 5px 0 7px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  background: var(--field); color: var(--text-dim);
+}
+.status-swatch__label { color: var(--text-muted); }
+.status-swatch .color-field { gap: 0; }
+.status-swatch.is-inactive .status-swatch__label { color: var(--text-disabled); }
+.status-swatch.is-inactive .color-field__trigger { opacity: .45; }
+.status-swatch.is-disabled .color-field__trigger { cursor: not-allowed; opacity: .5; }
+/* A flag scoped to a sibling code keeps its 20px chip and its dispatch; only the
+   face goes quiet, the same way an inert chooser's label does. */
+.status-flag { display: inline-flex; }
+.status-flag.is-inactive .status-toggle:not(.is-on) {
+  color: var(--text-disabled);
+  border-color: var(--line-soft);
+}
 /* Status-bar Options entry: the ghost button surface at status-bar height, kept
    a whisper quieter than the toggle chips so it reads as a utility, not a mode. */
 .statusbar__workspace {
@@ -959,6 +999,9 @@ button, input, select { font: inherit; color: inherit; }
      the row) and gives up its group label first: the row still carries the name as
      its accessible label, and it sits directly beside the pattern-type control. */
   .status-choices__label { display: none; }
+  /* A swatch is recognisable by its colour alone, so the label is the first thing
+     the narrow strip gives up too (the accessible name stays on the group). */
+  .status-swatch__label { display: none; }
 }
 @media (max-width: 640px) {
   .field-inline__label { display: none; }

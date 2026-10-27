@@ -1,22 +1,25 @@
-// HATCH user-facing surface contract (ADR 0018 decision D, P6b).
+// HATCH user-facing surface contract (ADR 0018 decision D, P6b; gradient fill
+// channel 2026-10-27).
 //
 // HATCH is a **pre-selection** tool: the user selects the closed boundary
 // objects first (circle, full ellipse or closed polyline) and then runs the
 // command. Its point arity is the zero-point exact complement, so the chip has
 // no point step: it asks for the boundary while the host reports the tool as not
 // ready, and says the boundary is ready once the host's own `ready` flag turns
-// true. The six parameters are numeric/flag codes on the wire; two closed sets
-// (pattern type, style) are stepped, and the predefined pattern is picked **by
-// name** from the three patterns the host transcribed — the wire value there is
-// still the host's 1-based index.
+// true. Ten parameters are numeric/flag codes on the wire; three closed sets
+// (pattern type, style, gradient kind) carry `choices` so a control can only reach
+// implemented codes, and two of them are read **by name**: the predefined pattern
+// (three transcribed entries, still the host's 1-based index on the wire) and the
+// gradient kind (Linear / Spherical). The two gradient stops are integer ACI
+// indices shown as colour swatches — the wire stays a number.
 //
 // Nothing here may imply the unimplemented forms — internal-point boundary
-// selection, custom pattern names/`.pat` files,
-// gradients or associativity. LINE/ARC boundary edges **are** stitched into
-// closed loops (as exact bulge arcs) and the copy says so. The **three**
-// predefined patterns the host transcribed
-// (ANSI31, ANSI32, ANSI37) *are* implemented and are named by the catalogs; the
-// allow-list check at the bottom keeps every other pattern name out. Every
+// selection, custom pattern names/`.pat` files, associativity. LINE/ARC boundary
+// edges **are** stitched into closed loops (as exact bulge arcs) and the copy says
+// so. The **three** predefined patterns the host transcribed (ANSI31, ANSI32,
+// ANSI37) and the two-colour gradient `LINEAR`/`SPHERICAL` *are* implemented and
+// are named by the catalogs; the allow-list checks at the bottom keep every other
+// pattern name out and keep the domain's `CYLINDER` spelling out. Every
 // user-visible string comes from the shared catalogs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,6 +59,10 @@ const HATCH = {
   params: [
     'hatchPatternType',
     'hatchPattern',
+    'hatchGradientKind',
+    'hatchGradientAngle',
+    'hatchGradientColorA',
+    'hatchGradientColorB',
     'hatchSpacing',
     'hatchAngle',
     'hatchDouble',
@@ -63,12 +70,17 @@ const HATCH = {
   ],
 };
 
-// The host projects these six values **only** while HATCH is active; the
-// defaults are the host's own (`0` solid, pattern index `1` = ANSI31, spacing
-// `1`, angle `0`, double false, style `0` Normal).
+// The host projects these ten values **only** while HATCH is active; the defaults
+// are the host's own (`0` solid, pattern index `1` = ANSI31, gradient kind `0`
+// Linear, gradient angle `0`, gradient stops `1` red / `5` blue, spacing `1`,
+// angle `0`, double false, style `0` Normal).
 const HATCH_PARAMS = Object.freeze({
   hatchPatternType: 0,
   hatchPattern: 1,
+  hatchGradientKind: 0,
+  hatchGradientAngle: 0,
+  hatchGradientColorA: 1,
+  hatchGradientColorB: 5,
   hatchSpacing: 1,
   hatchAngle: 0,
   hatchDouble: false,
@@ -176,14 +188,20 @@ test('HATCH is a catalogued draw command whose enable state comes only from rout
   assert.equal(suggestion.labelKey, HATCH.labelKey);
 });
 
-test('a HATCH tool has exactly six parameter spec rows in the fixed host order', () => {
+test('a HATCH tool has exactly ten parameter spec rows in the strip order', () => {
   assert.deepEqual(TOOL_PARAMETERS['draw.hatch'], {
     command: 'HATCH',
     keys: HATCH.params,
   });
   const expected = {
-    hatchPatternType: { kind: 'number', statusKey: 'hatchPatternType', step: 1, choices: [0, 1, 2] },
+    hatchPatternType: { kind: 'number', statusKey: 'hatchPatternType', step: 1, choices: [0, 1, 2, 3] },
     hatchPattern: { kind: 'number', statusKey: 'hatchPattern', step: 1, choices: [1, 2, 3] },
+    hatchGradientKind: { kind: 'number', statusKey: 'hatchGradientKind', step: 1, choices: [0, 1] },
+    hatchGradientAngle: { kind: 'number', statusKey: 'hatchGradientAngle', step: 15 },
+    // A colour stop is a bare integer ACI index on the wire, shown as a swatch. Its
+    // offered set starts at 1: ACI 0 is ByBlock, not a colour.
+    hatchGradientColorA: { kind: 'number', statusKey: 'hatchGradientColorA', step: 1, swatch: true },
+    hatchGradientColorB: { kind: 'number', statusKey: 'hatchGradientColorB', step: 1, swatch: true },
     hatchSpacing: { kind: 'number', statusKey: 'hatchSpacing', step: 0.5 },
     hatchAngle: { kind: 'number', statusKey: 'hatchAngle', step: 15 },
     hatchDouble: { kind: 'flag', statusKey: 'hatchDouble' },
@@ -195,13 +213,14 @@ test('a HATCH tool has exactly six parameter spec rows in the fixed host order',
     assert.equal(spec.kind, expected[key].kind, key);
     assert.equal(spec.statusKey, expected[key].statusKey, key);
     assert.equal(spec.step, expected[key].step, key);
+    assert.equal(spec.swatch, expected[key].swatch, key);
     assert.equal(spec.labelKey, `status.tool_parameter.${key.replace(/[A-Z]/g, c => `_${c.toLowerCase()}`)}`, key);
     assert.equal(spec.hintKey, `${spec.labelKey}.hint`, key);
     if (expected[key].choices) assert.deepEqual([...spec.choices], expected[key].choices, key);
     else assert.equal(spec.choices, undefined, `${key} is not a closed set`);
   }
-  // The views render in the host's order, each with its own label from the
-  // shared catalogs — no hand-written row wording.
+  // The views render in the strip order, each with its own label from the shared
+  // catalogs — no hand-written row wording.
   const rendered = views(hatchStatus());
   assert.deepEqual(rendered.map(view => view.key), HATCH.params);
   for (const view of rendered) {
@@ -211,6 +230,11 @@ test('a HATCH tool has exactly six parameter spec rows in the fixed host order',
     assert.equal(typeof en[view.hintKey], 'string', view.hintKey);
     assert.equal(view.disabled, false);
   }
+  // Exactly the two colour stops are swatches; no other row paints a colour.
+  assert.deepEqual(
+    rendered.filter(view => view.kind === 'number' && view.swatch).map(view => view.key),
+    ['hatchGradientColorA', 'hatchGradientColorB'],
+  );
   // The group is gated by HATCH's own command, never a hard-coded id.
   const asked = [];
   views(hatchStatus(), command => { asked.push(command); return true; });
@@ -218,11 +242,11 @@ test('a HATCH tool has exactly six parameter spec rows in the fixed host order',
   assert.equal(views(hatchStatus(), () => false)[0].disabled, true);
 });
 
-test('the three closed sets stop at the implemented codes and never offer another', () => {
-  // Pattern type: 0 solid, 1 user-defined, 2 predefined. From the default solid,
-  // `-` is disabled and `+` reaches user-defined; user-defined reaches the
-  // predefined code; from predefined `+` is disabled (the raw target stays 3 but
-  // is never offered, so 3 cannot be sent).
+test('the closed sets stop at the implemented codes and never offer another', () => {
+  // Pattern type: 0 solid, 1 user-defined, 2 predefined, 3 gradient. From the
+  // default solid, `-` is disabled and `+` reaches user-defined; … ; from gradient
+  // `+` is disabled (the raw target stays 4 but is never offered, so 4 cannot be
+  // sent).
   const solid = viewOf(hatchStatus(), 'hatchPatternType');
   assert.equal(solid.value, 0);
   assert.equal(solid.canDecrement, false);
@@ -239,7 +263,12 @@ test('the three closed sets stop at the implemented codes and never offer anothe
   assert.equal(predefined.decrement, 1);
   assert.equal(predefined.canDecrement, true);
   assert.equal(predefined.increment, 3);
-  assert.equal(predefined.canIncrement, false, 'the pattern-type set ends at predefined (2)');
+  assert.equal(predefined.canIncrement, true, 'the gradient code 3 is reachable');
+  const gradient = viewOf(parameterStatus({ hatchPatternType: 3 }), 'hatchPatternType');
+  assert.equal(gradient.value, 3);
+  assert.equal(gradient.canDecrement, true);
+  assert.equal(gradient.increment, 4);
+  assert.equal(gradient.canIncrement, false, 'the pattern-type set ends at gradient (3)');
   // Predefined pattern index: 1 ANSI31, 2 ANSI32, 3 ANSI37 — the host table
   // length is the upper bound, so no offered value can be out of range.
   const ansi31 = viewOf(hatchStatus(), 'hatchPattern');
@@ -265,11 +294,12 @@ test('the three closed sets stop at the implemented codes and never offer anothe
   assert.equal(ignore.canIncrement, false, 'the style set ends at Ignore');
   // A projected code outside any closed set renders nothing (the host contract
   // would be broken), rather than showing an unexplained code in a control.
-  assert.equal(viewOf(parameterStatus({ hatchPatternType: 3 }), 'hatchPatternType'), undefined);
+  assert.equal(viewOf(parameterStatus({ hatchPatternType: 4 }), 'hatchPatternType'), undefined);
   assert.equal(viewOf(parameterStatus({ hatchPatternType: 2.5 }), 'hatchPatternType'), undefined);
   assert.equal(viewOf(parameterStatus({ hatchPattern: 0 }), 'hatchPattern'), undefined);
   assert.equal(viewOf(parameterStatus({ hatchPattern: 4 }), 'hatchPattern'), undefined);
   assert.equal(viewOf(parameterStatus({ hatchStyle: 3 }), 'hatchStyle'), undefined);
+  assert.equal(viewOf(parameterStatus({ hatchGradientKind: 2 }), 'hatchGradientKind'), undefined);
 });
 
 test('spacing, angle and double are their own labelled controls with real bounds', () => {
@@ -309,17 +339,26 @@ test('spacing, angle and double are their own labelled controls with real bounds
   const on = viewOf(parameterStatus({ hatchDouble: true }), 'hatchDouble');
   assert.equal(on.value, true);
   assert.equal(on.next, false);
-  // HATCH projects these six and nothing else: no other parameter belongs to it.
+  // HATCH projects these ten and nothing else: no other parameter belongs to it.
   assert.deepEqual(views(hatchStatus()).map(view => view.key), HATCH.params);
 });
 
 test('HATCH parameter writes use the one channel and refuse codes outside the closed sets', async () => {
   for (const [key, accepted, refused] of [
-    ['hatchPatternType', [0, 1, 2], [-1, 3, 0.5, '1', null]],
+    ['hatchPatternType', [0, 1, 2, 3], [-1, 4, 0.5, '1', null]],
     ['hatchPattern', [1, 2, 3], [0, -1, 4, 1.5, '1', null]],
     ['hatchStyle', [0, 1, 2], [-1, 3, 4, 1.5, '0', null]],
+    ['hatchGradientKind', [0, 1], [-1, 2, 0.5, '0', null]],
     ['hatchSpacing', [0.5, 1, 2.5, 1e9], [0, -1, NaN, Infinity, '1', null]],
     ['hatchAngle', [0, 45, -270, 1e6], [NaN, Infinity, -Infinity, '45', null]],
+    // Degrees, any finite value: the host converts to radians once and wraps
+    // nothing, so a value beyond a turn is still a value it accepts.
+    ['hatchGradientAngle', [0, 45, -270, 1e6], [NaN, Infinity, -Infinity, '45', null]],
+    // ACI indices 1..=255. `0` is ByBlock (no colour) and the command refuses it by
+    // name, so the UI never offers or sends it; a string spelling of a colour
+    // (`aci:5`, `#ff0000`) has no numeric channel to travel on and is refused.
+    ['hatchGradientColorA', [1, 5, 255], [0, -1, 256, 1.5, 'aci:5', '#ff0000', null]],
+    ['hatchGradientColorB', [1, 7, 255], [0, -1, 256, 1.5, '5', null]],
   ]) {
     for (const number of accepted) {
       const calls = [];
@@ -395,10 +434,13 @@ test('the HATCH copy exists in both locales and states the honest boundary', () 
     ...Object.values(TOOL_PARAMETER_SPECS)
       .filter(spec => spec.labelKey.startsWith('status.tool_parameter.hatch_'))
       .flatMap(spec => [spec.labelKey, spec.hintKey]),
-    // The pattern names the chooser offers are copy too, so the allow-list below
-    // covers them: a name that is not one of the three implemented patterns can
-    // never reach a segment.
+    // The names the two choosers offer are copy too, so the allow-list below
+    // covers them: a pattern name that is not one of the three implemented ones, or
+    // a gradient kind that is not Linear/Spherical, can never reach a segment.
     ...Object.values(TOOL_PARAMETER_SPECS.hatchPattern.choiceLabelKeys),
+    ...Object.values(TOOL_PARAMETER_SPECS.hatchGradientKind.choiceLabelKeys),
+    // The colour swatch's trigger name (it is the row's own label, parameterised).
+    'status.tool_parameter.choose_color',
   ]);
   for (const key of keys) {
     for (const locale of [zh, en]) {
@@ -439,9 +481,9 @@ test('the HATCH copy exists in both locales and states the honest boundary', () 
     assert.doesNotMatch(locale[HATCH.ready], /dimension|标注/i);
   }
 
-  // Pattern type names its three codes and no longer claims predefined patterns
-  // are missing.
-  for (const code of ['0', '1', '2']) {
+  // Pattern type names its four codes and no longer claims predefined patterns or
+  // gradients are missing.
+  for (const code of ['0', '1', '2', '3']) {
     assert.match(en['status.tool_parameter.hatch_pattern_type.hint'], new RegExp(`\\b${code}\\b`));
     assert.match(zh['status.tool_parameter.hatch_pattern_type.hint'], new RegExp(code));
   }
@@ -449,8 +491,9 @@ test('the HATCH copy exists in both locales and states the honest boundary', () 
     assert.doesNotMatch(
       locale['status.tool_parameter.hatch_pattern_type.hint'],
       /not supported|unsupported|not implemented|不支持|尚未支持/i,
-      'predefined patterns are implemented now',
+      'predefined patterns and gradients are implemented now',
     );
+    assert.match(locale['status.tool_parameter.hatch_pattern_type.hint'], /3/);
   }
   // The predefined pattern row names all three implemented patterns in both
   // locales (it is a name chooser now), and the pattern-type hint names the
@@ -485,9 +528,63 @@ test('the HATCH copy exists in both locales and states the honest boundary', () 
   assert.match(en['status.tool_parameter.hatch_double.hint'], /perpendicular/i);
   assert.match(zh['status.tool_parameter.hatch_double.hint'], /垂直/);
 
+  // The gradient rows state what they really write: an ACI palette index (not a
+  // true colour), a degrees angle, and the two implemented kinds. The Spherical
+  // note is deliberately modest — on an ordinary rectangular/circular boundary the
+  // ramp is baked over the whole boundary extent, so it is not "radial".
+  for (const locale of [zh, en]) {
+    for (const key of ['status.tool_parameter.hatch_gradient_color_a.hint', 'status.tool_parameter.hatch_gradient_color_b.hint']) {
+      assert.match(locale[key], /ACI/, `${key} must say the value is an ACI index`);
+      assert.match(locale[key], /1[–-]255/, `${key} must name the real index range`);
+      assert.match(locale[key], /ByBlock/, `${key} must name the refused placeholder`);
+      assert.match(locale[key], /3/, `${key} must say which pattern type uses it`);
+    }
+    assert.match(locale['status.tool_parameter.hatch_gradient_angle.hint'], /3/);
+    assert.match(locale['status.tool_parameter.hatch_gradient_kind.hint'], /3/);
+    // The gradient rows are pattern-type-3 rows only, and the pattern-only rows say
+    // the same about themselves.
+    for (const key of ['status.tool_parameter.hatch_spacing.hint', 'status.tool_parameter.hatch_angle.hint', 'status.tool_parameter.hatch_double.hint']) {
+      assert.match(locale[key], /gradient|渐变/i, `${key} must say a gradient does not use it`);
+    }
+  }
+  // "palette index, not a true colour" — the honest limit, in both languages.
+  assert.match(en['status.tool_parameter.hatch_gradient_color_a.hint'], /not a true colour/i);
+  assert.match(en['status.tool_parameter.hatch_gradient_color_a.hint'], /palette index/i);
+  assert.match(zh['status.tool_parameter.hatch_gradient_color_a.hint'], /不是真彩色/);
+  assert.match(zh['status.tool_parameter.hatch_gradient_color_a.hint'], /调色板序号/);
+  // The Spherical caveat: still offered, but never sold as a true radial ramp.
+  assert.match(en['status.tool_parameter.hatch_gradient_kind.hint'], /Spherical/);
+  assert.match(en['status.tool_parameter.hatch_gradient_kind.hint'], /Linear/);
+  assert.match(en['status.tool_parameter.hatch_gradient_kind.hint'], /flat or elliptical/i);
+  assert.match(zh['status.tool_parameter.hatch_gradient_kind.hint'], /球面/);
+  assert.match(zh['status.tool_parameter.hatch_gradient_kind.hint'], /线性/);
+  assert.match(zh['status.tool_parameter.hatch_gradient_kind.hint'], /椭圆/);
+  // The gradient angle is a degrees value (the host converts once).
+  assert.match(en['status.tool_parameter.hatch_gradient_angle.hint'], /degrees/i);
+  assert.match(zh['status.tool_parameter.hatch_gradient_angle.hint'], /度/);
+
   // Positive allow-list: the implemented predefined set is exactly
-  // {ANSI31, ANSI32, ANSI37}. Any other pattern name is unimplemented and must
-  // not appear; gradient, associativity and `.pat` loading must not be claimed.
+  // {ANSI31, ANSI32, ANSI37}. Any other pattern name is unimplemented and must not
+  // appear; associativity and `.pat` loading must not be claimed. Gradients **are**
+  // implemented now, so the ban is narrower: only the two gradient rows and the
+  // pattern-type hint may mention one, and no row may imply a gradient carries a
+  // pattern name.
+  const GRADIENT_KEYS = new Set([
+    'status.tool_parameter.hatch_pattern_type.hint',
+    'status.tool_parameter.hatch_gradient_kind',
+    'status.tool_parameter.hatch_gradient_kind.hint',
+    'status.tool_parameter.hatch_gradient_kind.linear',
+    'status.tool_parameter.hatch_gradient_kind.spherical',
+    'status.tool_parameter.hatch_gradient_angle',
+    'status.tool_parameter.hatch_gradient_angle.hint',
+    'status.tool_parameter.hatch_gradient_color_a',
+    'status.tool_parameter.hatch_gradient_color_a.hint',
+    'status.tool_parameter.hatch_gradient_color_b',
+    'status.tool_parameter.hatch_gradient_color_b.hint',
+    'status.tool_parameter.hatch_spacing.hint',
+    'status.tool_parameter.hatch_angle.hint',
+    'status.tool_parameter.hatch_double.hint',
+  ]);
   for (const key of keys) {
     for (const locale of [zh, en]) {
       const text = locale[key];
@@ -498,7 +595,9 @@ test('the HATCH copy exists in both locales and states the honest boundary', () 
           `${key} in ${locale === zh ? 'zh-CN' : 'en'} names unimplemented pattern ${name}`,
         );
       }
-      assert.doesNotMatch(text, /gradient|渐变/i, `${key} must not claim gradients`);
+      if (!GRADIENT_KEYS.has(key)) {
+        assert.doesNotMatch(text, /gradient|渐变/i, `${key} must not claim a gradient`);
+      }
       assert.doesNotMatch(text, /associat|关联/i, `${key} must not claim associativity`);
       // A `.pat` mention is only allowed as a refusal, never as a load claim.
       for (const mention of text.match(/[^.]*\.pat[^.]*/gi) ?? []) {
@@ -508,6 +607,13 @@ test('the HATCH copy exists in both locales and states the honest boundary', () 
           `${key} must not claim .pat loading: ${mention}`,
         );
       }
+    }
+  }
+  // The domain's third gradient spelling is never offered: `CYLINDER` bakes as
+  // spherical, so naming it would be a second name for one behaviour.
+  for (const locale of [zh, en]) {
+    for (const key of GRADIENT_KEYS) {
+      assert.doesNotMatch(locale[key], /CYLINDER|圆柱/i, `${key} must not offer CYLINDER`);
     }
   }
 });
@@ -526,10 +632,10 @@ test('the predefined pattern is a named chooser, not a raw index stepper', async
     assert.equal(typeof zh[choice.labelKey], 'string', choice.labelKey);
     assert.equal(typeof en[choice.labelKey], 'string', choice.labelKey);
   }
-  // Under a type the index does not apply to, the row is still there (the names
-  // stay discoverable) but every segment is inert — the pattern-type control is
-  // what gates it, so the two rows can never disagree.
-  for (const type of [0, 1]) {
+  // Under a type the index does not apply to (solid, user-defined, gradient), the
+  // row is still there (the names stay discoverable) but every segment is inert —
+  // the pattern-type control is what gates it, so the two rows can never disagree.
+  for (const type of [0, 1, 3]) {
     const inert = views(parameterStatus({ hatchPatternType: type })).find(view => view.key === 'hatchPattern');
     assert.ok(inert, `the row stays visible under type ${type}`);
     assert.equal(inert.inactive, true);
@@ -605,3 +711,4 @@ test('the hatch glyph is a dedicated boundary-with-fill icon, not a neighbour gl
     assert.notEqual(HATCH.icon, neighbour);
   }
 });
+

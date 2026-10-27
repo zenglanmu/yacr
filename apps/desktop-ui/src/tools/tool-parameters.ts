@@ -75,6 +75,23 @@ interface ToolParameterSpecBase {
   readonly icon?: string;
   /** Whether a projected value may be rendered; defaults to `offered`. */
   readonly projectable?: ParameterPredicate;
+  /**
+   * The sibling parameter code this row is **scoped to**, or absent when the row
+   * always applies.
+   *
+   * A scoped row stays **visible** — so its choices/values stay discoverable before
+   * the sibling is switched — but renders inert, with its `hintKey` (plus
+   * [`TOOL_PARAMETER_INACTIVE_KEY`]) as the reason. It is **scope, not capability**:
+   * the host would still accept the write, so an inert row never disables dispatch
+   * on that ground. An absent or unprojected sibling code never claims the row
+   * applies.
+   *
+   * HATCH: the predefined pattern only means something while the pattern type is
+   * `2`, its spacing/angle/`double` only while the fill is one of the pattern kinds
+   * (`1` user-defined, `2` predefined), and the gradient rows only while the type
+   * is `3` — under any other type the host ignores them.
+   */
+  readonly activeWhen?: { readonly statusKey: string; readonly values: readonly number[] };
 }
 
 /** A `'number'` parameter: a bounded stepper. */
@@ -102,17 +119,19 @@ export interface NumberToolParameterSpec extends ToolParameterSpecBase {
    */
   readonly choiceLabelKeys?: Readonly<Record<number, string>>;
   /**
-   * The sibling parameter code this row is **scoped to**, or absent when the row
-   * always applies.
+   * Whether the value is a **colour** the strip shows as a swatch, not a number.
    *
-   * HATCH's predefined pattern only means something while the pattern type is `2`
-   * (predefined); under solid (`0`) or user-defined (`1`) the host ignores the
-   * index. A scoped row stays **visible** — so the choice set is discoverable
-   * before the type is switched — but renders inert, with its `hintKey` (plus
-   * [`TOOL_PARAMETER_INACTIVE_KEY`]) as the reason. An absent or unprojected
-   * sibling code never claims the row applies.
+   * HATCH's two gradient stops are the only such rows: the wire carries a bare
+   * integer ACI index (`cad_set_tool_parameter {parameter, number}`), so the row
+   * paints that index from the shared ACI palette and opens the shared in-DOM
+   * colour chooser. Nothing free-form is offered — a `#RRGGBB` would have nowhere
+   * to go — and the chooser's symbolic entries are empty, so ACI `0` (ByBlock, the
+   * placeholder with no colour) can never be picked.
+   *
+   * A swatch row is still a numeric row: the same `offered` predicate guards the
+   * write and the same one IPC carries it.
    */
-  readonly activeWhen?: { readonly statusKey: string; readonly values: readonly number[] };
+  readonly swatch?: boolean;
   /**
    * Whether the value may also be **typed** into the strip, not only stepped.
    *
@@ -155,9 +174,14 @@ export type ToolParameterSpecMap = Readonly<Record<string, ToolParameterSpec>>;
  *   named chooser instead of a stepper; the value on the wire is unchanged, so
  *   the choice's name and the integer index are the same choice;
  * - `activeWhen` — the sibling code a row only applies under (the pattern name
- *   under the predefined pattern type). The row stays visible but inert while the
- *   sibling says otherwise; its hint (and [`TOOL_PARAMETER_INACTIVE_KEY`]) says
- *   why, rather than the control disappearing;
+ *   under the predefined pattern type, the gradient rows under the gradient type,
+ *   the pattern-only rows under the two pattern types). The row stays visible but
+ *   inert while the sibling says otherwise; its hint (and
+ *   [`TOOL_PARAMETER_INACTIVE_KEY`]) says why, rather than the control
+ *   disappearing;
+ * - `swatch`    — the row's value is an integer ACI index shown as a colour
+ *   swatch (HATCH's two gradient stops), not a number to step. What travels on the
+ *   wire is unchanged: the same integer through the same one IPC;
  * - `projectable` — whether a value from `cad_status` may be **rendered**. It
  *   defaults to `offered` (an out-of-range projection is a contract violation and
  *   renders nothing), so no parameter currently overrides it;
@@ -235,19 +259,22 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     labelKey: 'status.tool_parameter.array_rotate_items',
     hintKey: 'status.tool_parameter.array_rotate_items.hint',
   },
-  // HATCH (ADR 0018 decision D, P6b). The six rows mirror
-  // `cad_app::draw_tool::parameter`: the three closed sets use `choices` so the
-  // stepper can only reach the implemented codes, spacing must be finite and
-  // strictly positive (it doubles as the pattern scale / `HPSCALE`), the angle
-  // is any finite number of degrees (no implicit wrap — the host accepts it as
-  // typed) and `double` is a flag. Pattern type `2` selects one of the
-  // **three** predefined patterns the host transcribed (`ANSI31`, `ANSI32`,
-  // `ANSI37`) by its 1-based index; custom pattern names, `.pat` files,
-  // gradients and associativity have no parameter here because they are not
-  // implemented.
+  // HATCH (ADR 0018 decision D, P6b; gradient channel 2026-10-27). The rows
+  // mirror `cad_app::draw_tool::parameter`: the closed sets use `choices` so a
+  // control can only reach the implemented codes, spacing must be finite and
+  // strictly positive (it doubles as the pattern scale / `HPSCALE`), the angle is
+  // any finite number of degrees (no implicit wrap — the host accepts it as
+  // typed) and `double` is a flag.
+  //
+  // The four fill kinds are the closed set `0` solid, `1` user-defined, `2`
+  // predefined, `3` gradient. Pattern type `2` selects one of the **three**
+  // predefined patterns the host transcribed (`ANSI31`, `ANSI32`, `ANSI37`) by its
+  // 1-based index; type `3` is a two-colour gradient whose own four rows live
+  // below. Custom pattern names, `.pat` files and associativity still have no
+  // parameter here because they are not implemented.
   hatchPatternType: {
     kind: 'number', statusKey: 'hatchPatternType', step: 1,
-    ...closedSet(0, 1, 2),
+    ...closedSet(0, 1, 2, 3),
     labelKey: 'status.tool_parameter.hatch_pattern_type',
     hintKey: 'status.tool_parameter.hatch_pattern_type.hint',
   },
@@ -265,13 +292,68 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
       2: 'status.tool_parameter.hatch_pattern.ansi32',
       3: 'status.tool_parameter.hatch_pattern.ansi37',
     }),
-    // A pattern name only applies to the predefined type (2): solid and
-    // user-defined fills ignore the index, so under those codes the chooser stays
+    // A pattern name only applies to the predefined type (2): solid, user-defined
+    // and gradient fills ignore the index, so under those codes the chooser stays
     // visible but inert and its hint says why.
     activeWhen: Object.freeze({ statusKey: 'hatchPatternType', values: Object.freeze([2]) }),
     labelKey: 'status.tool_parameter.hatch_pattern',
     hintKey: 'status.tool_parameter.hatch_pattern.hint',
   },
+  // --- the gradient fill (pattern type 3) -----------------------------------
+  // The gradient kind is a **named** chooser, like the pattern names: the two
+  // codes are two ramps a user reads by name, and a raw 0/1 stepper would be a
+  // number nobody can decode. The domain's third spelling (`CYLINDER`) is
+  // deliberately absent — it bakes as spherical, so offering it would be a second
+  // name for one behaviour.
+  hatchGradientKind: {
+    kind: 'number', statusKey: 'hatchGradientKind', step: 1,
+    ...closedSet(0, 1),
+    choiceLabelKeys: Object.freeze({
+      0: 'status.tool_parameter.hatch_gradient_kind.linear',
+      1: 'status.tool_parameter.hatch_gradient_kind.spherical',
+    }),
+    activeWhen: Object.freeze({ statusKey: 'hatchPatternType', values: Object.freeze([3]) }),
+    labelKey: 'status.tool_parameter.hatch_gradient_kind',
+    hintKey: 'status.tool_parameter.hatch_gradient_kind.hint',
+  },
+  hatchGradientAngle: {
+    // Degrees, like the pattern angle (the host converts to radians exactly once
+    // when it builds the entity), so the two angle rows step by the same 15° and
+    // any finite value is accepted — no implicit wrap.
+    kind: 'number', statusKey: 'hatchGradientAngle', step: 15,
+    offered: finiteAny(),
+    activeWhen: Object.freeze({ statusKey: 'hatchPatternType', values: Object.freeze([3]) }),
+    labelKey: 'status.tool_parameter.hatch_gradient_angle',
+    hintKey: 'status.tool_parameter.hatch_gradient_angle.hint',
+  },
+  hatchGradientColorA: {
+    // A bare integer ACI index on the wire (the channel has no colour type), shown
+    // as a swatch. `1..=255` — deliberately narrower than the channel's `0..=255`,
+    // because index `0` is the ByBlock placeholder with no sRGB triple and the
+    // command refuses it by name; the row must never offer a value the drawing
+    // would refuse. `step` is unused (a swatch has no `-`/`+`), kept at 1 so the
+    // row stays an ordinary numeric row.
+    kind: 'number', statusKey: 'hatchGradientColorA', step: 1,
+    offered: integerInRange(1, 255),
+    swatch: true,
+    activeWhen: Object.freeze({ statusKey: 'hatchPatternType', values: Object.freeze([3]) }),
+    labelKey: 'status.tool_parameter.hatch_gradient_color_a',
+    hintKey: 'status.tool_parameter.hatch_gradient_color_a.hint',
+  },
+  hatchGradientColorB: {
+    // The ramp's end stop; the same ACI rule as the start stop.
+    kind: 'number', statusKey: 'hatchGradientColorB', step: 1,
+    offered: integerInRange(1, 255),
+    swatch: true,
+    activeWhen: Object.freeze({ statusKey: 'hatchPatternType', values: Object.freeze([3]) }),
+    labelKey: 'status.tool_parameter.hatch_gradient_color_b',
+    hintKey: 'status.tool_parameter.hatch_gradient_color_b.hint',
+  },
+  // --- pattern-only rows ----------------------------------------------------
+  // Spacing, angle and double exist for the two pattern kinds only: the command
+  // never consults them for a solid or a gradient fill, so under those codes the
+  // rows stay visible but inert (scope, never capability — a write is still
+  // accepted, the host simply ignores it).
   hatchSpacing: {
     // A real length: the 1-unit step every other length uses would make every
     // spacing below the default 1 unreachable, so this one steps by 0.5. The
@@ -280,17 +362,20 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     // no free-entry field).
     kind: 'number', statusKey: 'hatchSpacing', step: 0.5,
     offered: finiteAbove(0),
+    activeWhen: Object.freeze({ statusKey: 'hatchPatternType', values: Object.freeze([1, 2]) }),
     labelKey: 'status.tool_parameter.hatch_spacing',
     hintKey: 'status.tool_parameter.hatch_spacing.hint',
   },
   hatchAngle: {
     kind: 'number', statusKey: 'hatchAngle', step: 15,
     offered: finiteAny(),
+    activeWhen: Object.freeze({ statusKey: 'hatchPatternType', values: Object.freeze([1, 2]) }),
     labelKey: 'status.tool_parameter.hatch_angle',
     hintKey: 'status.tool_parameter.hatch_angle.hint',
   },
   hatchDouble: {
     kind: 'flag', statusKey: 'hatchDouble',
+    activeWhen: Object.freeze({ statusKey: 'hatchPatternType', values: Object.freeze([1, 2]) }),
     labelKey: 'status.tool_parameter.hatch_double',
     hintKey: 'status.tool_parameter.hatch_double.hint',
   },
@@ -330,7 +415,7 @@ export type ToolParameterMap = Readonly<Record<string, ToolParameterOwner>>;
  *
  * Three kinds are reachable today, and each is reachable because the host really
  * projects the value while that tool runs: `draw.polygon` (its side count),
- * `draw.hatch` (its six fill parameters; HATCH captures no points) and
+ * `draw.hatch` (its ten fill parameters; HATCH captures no points) and
  * `draw.text` / `draw.mtext` (the one shared text height). The other tools are
  * not implemented and the host projects no value for their parameters, so nothing
  * renders for them (a control appears only when the tool is active **and** its
@@ -341,9 +426,25 @@ export type ToolParameterMap = Readonly<Record<string, ToolParameterOwner>>;
  */
 export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
   'draw.polygon': { command: 'POLYGON', keys: ['polygonSides'] },
+  // The fill kind first, then the rows that kind scopes (the predefined pattern,
+  // then the whole gradient), then the pattern-only rows and the style last. Only
+  // one group is in effect at a time, but every row stays visible: a scoped row is
+  // greyed with its reason rather than disappearing, so switching the fill kind
+  // never moves the strip under the pointer.
   'draw.hatch': {
     command: 'HATCH',
-    keys: ['hatchPatternType', 'hatchPattern', 'hatchSpacing', 'hatchAngle', 'hatchDouble', 'hatchStyle'],
+    keys: [
+      'hatchPatternType',
+      'hatchPattern',
+      'hatchGradientKind',
+      'hatchGradientAngle',
+      'hatchGradientColorA',
+      'hatchGradientColorB',
+      'hatchSpacing',
+      'hatchAngle',
+      'hatchDouble',
+      'hatchStyle',
+    ],
   },
   'draw.fillet': { command: 'FILLET', keys: ['filletRadius'] },
   'draw.chamfer': { command: 'CHAMFER', keys: ['chamferDistanceA', 'chamferDistanceB'] },
@@ -380,6 +481,13 @@ export interface ToolParameterFlagView {
   readonly labelKey: string;
   readonly hintKey: string;
   readonly icon?: string;
+  /**
+   * Whether the row sits outside the sibling code that scopes it (`activeWhen`):
+   * always `false` for a row without one. Scope, not capability — the toggle still
+   * dispatches (the host accepts the write and simply ignores it), but the chip is
+   * muted and its title says the current setting does not use it.
+   */
+  readonly inactive: boolean;
   readonly disabled: boolean;
 }
 
@@ -417,6 +525,13 @@ export interface ToolParameterNumberView {
   readonly step: number;
   /** Whether the value may also be typed in place (a real length), not only stepped. */
   readonly typed: boolean;
+  /**
+   * Whether the row is a **colour swatch** rather than a number to step (`spec.swatch`).
+   * The wire value is still the integer ACI index this view carries; the row paints
+   * that index from the shared palette and opens the shared colour chooser, which
+   * can only hand back another index of the same palette.
+   */
+  readonly swatch: boolean;
   /**
    * The named closed set this row chooses among, in the host's own code order, or
    * `null` for a plain stepper. A named row is still a numeric row — the same
@@ -500,7 +615,7 @@ export function toolParameterViews(
  * strip can only make a scope claim it can prove from `cad_status`, and the host
  * projects every parameter of an active tool together.
  */
-function activeUnder(spec: NumberToolParameterSpec, tool: CadTool): boolean {
+function activeUnder(spec: ToolParameterSpec, tool: CadTool): boolean {
   const condition = spec.activeWhen;
   if (!condition) return true;
   const raw = tool.params?.[condition.statusKey];
@@ -551,6 +666,7 @@ function parameterView(
     if (value === null) return null;
     return {
       kind: 'flag', key, value, next: !value,
+      inactive: !activeUnder(spec, tool),
       labelKey: spec.labelKey, hintKey: spec.hintKey, icon: spec.icon, disabled,
     };
   }
@@ -561,7 +677,7 @@ function parameterView(
   const inactive = !activeUnder(spec, tool);
   return {
     kind: 'number', key, value, delta, effective, text: String(value),
-    step: spec.step, typed: spec.typed === true,
+    step: spec.step, typed: spec.typed === true, swatch: spec.swatch === true,
     choices: choiceViews(spec, effective, disabled, inactive),
     inactive,
     labelKey: spec.labelKey, hintKey: spec.hintKey, icon: spec.icon, disabled,
