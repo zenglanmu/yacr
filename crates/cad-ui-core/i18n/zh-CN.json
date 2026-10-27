@@ -227,7 +227,7 @@
   "overlay.snap_hints": "捕捉提示",
   "point.display.mode": "点显示模式（PDMODE）",
   "point.display.size": "点显示大小（PDSIZE）",
-  "point.display.mode.hint": "PDMODE 只取一个数值：0 为点、1 为不显示、2 为加号、3 为叉号、4 为竖线；32/64 表示外加圆框或方框，目前尚未绘制。该值保存在图纸里，保存后仍然有效，打开另一张图纸时被替换。改动不能撤销。",
+  "point.display.mode.hint": "PDMODE 只取一个数值：0 为点、1 为不显示、2 为加号、3 为叉号、4 为竖线；32/64 分别追加圆框/方框（96 两者都要），按固定段数用线段近似绘制（圆为 16 段弦环、方为 4 段），半径取标记半幅——该比例是本项目的选择，未与 AutoCAD 核对。该值保存在图纸里，保存后仍然有效，打开另一张图纸时被替换。改动不能撤销。",
   "point.display.size.hint": "PDSIZE 只取一个数值：正数是图纸单位下的绝对大小，0 表示按视口比例取大小，负数是视口高度的百分比。该值保存在图纸里，保存后仍然有效，打开另一张图纸时被替换。改动不能撤销。",
   "properties.panel": "属性",
   "properties.selected_count": "已选 {count}",

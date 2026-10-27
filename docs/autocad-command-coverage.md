@@ -81,7 +81,7 @@
 | `RECTANG` | 实现 | 两对角点 → 闭合 4 顶点 LWPOLYLINE；无 `Chamfer`/`Fillet`/`Width`/`Elevation`/`Rotation`/`Area` |
 | `POLYGON` | 实现 | **内接于圆**、边数 3–1024；无 `Edge` 分支、**无外切模式** |
 | `ELLIPSE` | 实现 | 轴端点法**整椭圆**；无 `Arc`/`Center` 法/`Rotation`/`Isocircle` |
-| `POINT` | 实现 | **单次放置**；显示走 `$PDMODE`/`$PDSIZE` 子集（`32`/`64`/`96` 未画）；无 `Multiple` 重复放置 |
+| `POINT` | 实现 | **单次放置**；显示走 `$PDMODE`/`$PDSIZE`（基础 `0`–`4`，周边 `32` 圆/`64` 方/`96` 两者，线段近似）；无 `Multiple` 重复放置 |
 | `SPLINE` | 实现 | fit 点法（≥4 点）→ 三次/clamped/chord 插值 NURBS；无 `CV`/`Knots`/`Degree`/`Close`/`Tangency`/`Object` |
 | `POLYLINE` | **未实现** | 旧式 heavy 2D 折线实体（`AcDb2dPolyline` + 顶点子实体）。我们**只创建 LWPOLYLINE**；别名到 `PLINE` 会**凭空发明语义**，故不做 |
 | `XLINE`（含 `RAY`） | **未实现**（无创建命令；**导入**有有界降级） | 库里**没有无限直线几何**：导入期把 XLINE/RAY 压成**有限 `SemanticGeometry::Line`**，裁到**运行中的模型包围盒**（盒每边外扩对角线 5%、至少 1.0）⇒ 裁多长**取决于导入顺序**（先出现什么几何，盒就是什么）；还没有任何几何时用**默认 1000 单位盒**。判定：方向退化 → `Opaque` + `Partial`；裁不到盒内 → `Opaque` + `Partial`；否则 `Line` + **`Partial`**（原因是具名常量 `support::XLINE_SEGMENT_REASON` / `XLINE_DEFAULT_BOX_REASON`，并额外记一次 `import.construct_line`）。**导出**只能写 DXF `LINE`，报 `Converted`（`export.converted.line`，点名「不再是无限线」），**不是**精确往返。没有创建命令、没有无限表示。**规模**：命令 **M**（建在既有有界切片上）；真正的无限几何 **L / ADR 级**（见 §4） |
@@ -151,7 +151,7 @@
 | `SNAP` | 实现 | 会话级**栅格捕捉**（F9，二维：X/Y 量化，`z` 原样）；默认间距 **10.0 图形单位**是**我们的选择** |
 | `OSNAP` | 实现 | 对象捕捉开关；候选生成/最佳候选规则见 `crates/cad-host`（不在本文范围） |
 | `ORTHO` | 实现 | 仅 XY 约束；约束顺序 **OSNAP → 栅格捕捉 → 正交**，与 AutoCAD 内部顺序不同（已记录的刻意偏差） |
-| `PDMODE` | 部分 | `0`/`1`/`2`/`3`/`4` 已画；`32`/`64`/`96` 周边圆/方**未实现**；写图纸头、**不可撤销** |
+| `PDMODE` | 部分 | `0`/`1`/`2`/`3`/`4` 已画；`32`/`64`/`96` 周边圆/方**已实现（2026-10-28）**：圆 = 16 段弦环、方 = 4 段，半径 = 标记半幅（比例是我们的选择，**未经 AutoCAD 核对**）；写图纸头、**不可撤销** |
 | `PDSIZE` | 实现 | `>0` 绝对尺寸 / `0` 视口比例 / `<0` 视口高度百分比；非有限/超限回退 `0` 行为 + 诊断 |
 
 ### 3.6 剪贴板 / 视图 / 文件

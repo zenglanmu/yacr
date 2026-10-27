@@ -227,7 +227,7 @@
   "overlay.snap_hints": "Snap hints",
   "point.display.mode": "Point display mode (PDMODE)",
   "point.display.size": "Point display size (PDSIZE)",
-  "point.display.mode.hint": "PDMODE takes one number: 0 dot, 1 nothing, 2 plus, 3 cross, 4 vertical tick; 32/64 request a surrounding shape, which is not drawn yet. The value is stored in the drawing, so it survives saving and is replaced when another drawing is opened. The change cannot be undone.",
+  "point.display.mode.hint": "PDMODE takes one number: 0 dot, 1 nothing, 2 plus, 3 cross, 4 vertical tick; 32/64 add a surrounding circle or square (96 requests both), drawn as fixed-segment line approximations (a 16-chord ring and a 4-segment square) at the marker half extent — that proportion is this build's choice, not verified against AutoCAD. The value is stored in the drawing, so it survives saving and is replaced when another drawing is opened. The change cannot be undone.",
   "point.display.size.hint": "PDSIZE takes one number: positive is an absolute size in drawing units, 0 sizes the marker from the viewport, negative is a percentage of the viewport height. The value is stored in the drawing, so it survives saving and is replaced when another drawing is opened. The change cannot be undone.",
   "properties.panel": "Properties",
   "properties.selected_count": "{count} selected",

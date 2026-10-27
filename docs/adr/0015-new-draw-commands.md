@@ -181,6 +181,13 @@ AutoCAD 用提示行输入数字；本项目没有数值输入通道，且命令
     `PDSIZE <n>` 命令修改**（写图纸头值、一次 revision 提升、**不进历史/不可撤销**；导出写入
     `$PDMODE`/`$PDSIZE`，`SAVE→OPEN` 往返由本仓读写器验证）；**无 `SETVAR` 间接寻址**（只有这两个名字，
     无任意头变量设置、无值查询）。`SemanticGeometry::Point` **未改**（DXF 组 50 轴向角仍不建模）。
+  - **2026-10-28 修正**：上面「`32`/`64`/`96` 周边圆/方仍未实现」一条**已作废**。三种位现在都画：
+    `32` 圆 = **16 段闭合弦环**、`64` 方 = **4 段**，`96` = 两者，全部作为**线段**发进**同一个** POINT 标记
+    `Lines` 批次（`render_scene/overlay/point_surrounds.rs`；不引入 conic、不改 `RenderTopology`）。
+    **半径/半边长取标记半幅**，这是**我们的选择**，AutoCAD 的图形与围绕形状比例**未核对**；弦高 ≈ 半径 1.9 %。
+    `overlay.point-mode-shape-bits` 诊断**已删除**（不再有「未实现」可报）；保留 `point-mode-dot` /
+    `-unsupported` / `point-size-sanitized` / `point-marker-limit`。基码解码不变：裸 `32` = 基码 0 的 `+` 近似
+    + 圆 + 一条 dot 诊断，裸 `33` = 只有圆。
 - **3D 视图：NOT IMPLEMENTED**——`viewport_bounds` 在 3D 为 `None`，屏占比尺寸没有定义域，因此 3D 下不画
   点标记（显式记录，不猜一个 fallback）。
 - **已知偏差**：标记在 overlay 顺序里绘制（始终在最上层），与基础场景实体的遮挡关系不同。
@@ -222,6 +229,8 @@ AutoCAD 用提示行输入数字；本项目没有数值输入通道，且命令
     是 `32`/`64`/`96` 周边圆/方、`PDMODE 0` 的真实点（Lines-only 拓扑下为 `+` 近似）、以及**无 `SETVAR`
     间接寻址**（`PDMODE`/`PDSIZE` 已成为真实命令，但只支持这两个名字，无任意头变量设置与值查询）。
     Multiple Points 与 3D 点标记不变。
+  - **2026-10-28 更正**：本条列出的「`32`/`64`/`96` 周边圆/方」**已实现**（线段近似，见决策 E 的 2026-10-28 修正）；
+    仍 NOT IMPLEMENTED 的是 `PDMODE 0` 的真实点、`SETVAR` 间接寻址、Multiple Points 与 3D 点标记。
 - SPLINE 的 CV 法/节点类型/阶数/切向/公差/`Close`/`Object` 转换，以及 **2–3 个 fit 点的小样本输入**；
   **fit 点数据不参与 SAVE→OPEN 往返**。
 - 六者的 **3D/OCS 非共面输入**（沿用"+Z 平面"子集，不静默投影）；**纸空间造形**（插入漏斗固定模型空间）。

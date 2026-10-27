@@ -1,3 +1,54 @@
+## 2026-10-28 第 14 轮：`$PDMODE` 周边圆/方（`32`/`64`/`96`）落地
+
+### 结论
+
+`$PDMODE` 的三个「周边形状」位现在**真的画**了：`32` 圆、`64` 方、`96` 两者。它们不是新图元，而是
+**线段**，发进**同一个** POINT 标记 `Lines` 批次（一个批次、一种颜色、一个 draw order、一个合成源 id）——
+overlay 仍然 `Lines`-only，`cad_scene::RenderTopology` **没有**新增变体。
+`overlay.point-mode-shape-bits` 诊断随之**删除**：不再有「未实现」可报。
+
+### 做了什么（`cad-app`）
+
+- 新 `render_scene/overlay/point_surrounds.rs`：`POINT_SURROUND_CIRCLE_SEGMENTS = 16`（闭合弦环，从角 0
+  开始、终点与首点**逐位相同**）、`POINT_SURROUND_SQUARE_SEGMENTS = 4`（`±half` 四边，与夹点方框同一
+  发射方式）。`PointSurrounds { circle, square }` **只**由模式位决定（`32`/`64`；`96` 两者），与缩放无关
+  ⇒ 给定（点集、样式、视口）输出**逐字节确定**。
+- **半径约定 = 标记半幅**（`marker_half_extent`，即 `$PDSIZE` 推出的那一份）：`$PDMODE 35` 的十字在斜角
+  顶到圆、永不越界，整个标记仍占 2×半幅（`$PDSIZE = 0` 时仍是视口高 5% 的脚印）。**这个比例是我们的选择**，
+  AutoCAD 的「图形 vs 周边」尺寸比**未核对**（模块文档与兼容性行都标 `UNVERIFIED`）。
+- **弦高**：16 段环是**多边形近似**——顶点在外接半径上、弦向内切，中弦处 `half·(1−cos(π/16))`
+  ≈ **半径的 1.9 %**。这是 `Lines`-only 拓扑的诚实代价（渲染器没有 conic 路径可用）。
+- **诊断**：删 `overlay.point-mode-shape-bits`；保留 `overlay.point-mode-dot`（基码 0 的 `+` 近似）、
+  `overlay.point-mode-unsupported`（负模式、基码 `5..=31`、未知位）、`overlay.point-size-sanitized`、
+  `overlay.point-marker-limit`。**上限仍按 marker 计 4000**（不是按周边顶点），且只发一条上限诊断。
+- **不变**：基码解码 `mode & 0x1F` 未动 ⇒ 裸 `32` 仍是「基码 0 的 `+` 近似 + 圆 + 一条 dot 诊断」，
+  裸 `33` 是「只有圆」；**3D 视图不画**；**块内 POINT 不标记**；POINT 的拾取/测量/导出不受影响。
+
+### 证据（本机，2026-10-28）
+
+- `cargo test -p cad-app --locked` → **1346 / 0**：在 **HEAD 的 detached worktree** 上跑（工作树里另一 lane
+  的未提交 `offset_polyline_bulge.rs` 当前不可编译，见边界 5）。集成套件 4+11+18+15+5+2 全 0 failed，1 ignored。
+- 相关测试：`mode_66_is_a_plus_inside_a_four_segment_square_at_half_extent`、
+  `mode_100_is_a_tick_with_both_surrounds_and_no_invented_base_glyph`、
+  `bare_32_and_33_keep_the_base_bit_decoding_and_only_add_the_ring`、
+  `an_unsupported_base_mode_with_a_surround_draws_the_ring_and_no_base_glyph`、
+  `the_cap_counts_markers_not_surround_vertices`。
+- `cargo fmt --all -- --check` **在 HEAD 上通过**；`cargo clippy -p cad-app --all-targets -- -D warnings` → 0；
+  `check-architecture.py` → 28 packages 无环；`check-file-size.py` → **1079** 文件 ≤1000 行。
+- `check-i18n.py` → **886 keys / 2 目录**（`point.display.mode.hint` 已改，键集与占位符不变）；
+  `check-command-docs.py` → `OK: 0 mismatches`。
+
+### 仍未成立 / 边界（必须原样保留）
+
+1. **没有像素/GPU 证据**：全部是几何契约测试；这批圆/方从未在真实窗口或真实 GPU 上看过。
+2. **16 段是近似**：弦高 ≈ 半径 1.9 %，不是真圆；要真圆需要 conic 拓扑（不在本轮）。
+3. **半径比例是我们的选择**，未与 AutoCAD 的任何图纸/参考渲染对照（`UNVERIFIED`）。
+4. **`PDMODE 0` 仍不是点**（`+` 近似）；`SETVAR` 间接寻址、Multiple Points、3D 点标记、块内 POINT 标记
+   仍不存在。
+5. **树在动**：本轮期间另一 lane 在写 `app_drawing/offset_polyline_bulge.rs`（未跟踪且当前
+   `E0425: tangency_point` 未定义、未 fmt），所以**工作树**的 `cargo test`/`fmt` 失败**与本轮无关**；
+   HEAD 的 1346/fmt OK 是在独立 worktree 上取的证。
+
 ## 2026-10-28 第 13 轮：TEXT/MTEXT 创建参数（`textRotation` + `mtextAttachment`）
 
 ### 结论
