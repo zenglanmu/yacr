@@ -27,7 +27,8 @@ import type { RibbonItem, RibbonPanel } from '../ribbon/ribbon-model.ts';
 import type { Translator } from '../i18n.ts';
 import { offeredItems, offeredPanels, panelLauncherCommand, RIBBON_TABS, ribbonTab } from '../ribbon/ribbon-model.ts';
 import { PANEL_DIALOG_MISSING_KEY } from '../limits.ts';
-import { DOCUMENT_SCOPED_COMMANDS, NO_DOCUMENT_KEY, unavailableReasonKey } from '../commands/commands.ts';
+import { NO_DOCUMENT_KEY, unavailableReasonKey } from '../commands/commands.ts';
+import { DOCUMENT_SCOPED_COMMANDS } from '../commands/gating.ts';
 import { standardViewAvailable, standardViewUnavailableReasonKey } from '../cad/view3d.ts';
 import { ribbonBandOverflow, ribbonCueReserve, ribbonScrollTarget, sameOverflow } from '../ribbon/ribbon-overflow.ts';
 

@@ -20,7 +20,8 @@
 // and the wording, not the rendered appearance.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setToolParameterNumber, TOOL_PARAMETER_SPECS, toolParameterViews } from '../src/tools/tool-parameters.ts';
+import { setToolParameterNumber, toolParameterViews } from '../src/tools/tool-parameters.ts';
+import { TOOL_PARAMETER_SPECS } from '../src/tools/tool-parameter-specs.ts';
 import { aciHex } from '../src/color/aci-palette.ts';
 import { aciChoice, COLOR_GRID, selectedAciIndex } from '../src/color/color-value.ts';
 import { readCatalog, readModule } from './helpers.ts';

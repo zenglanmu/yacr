@@ -51,15 +51,18 @@ export interface AcceleratorContext {
 }
 
 /**
- * The `Ctrl`+letter chords that exist in their unshifted form only.
+ * The `Ctrl`+letter chords that exist in their unshifted form **only**.
  *
- * The two documented shifted forms are handled by name in the function below:
- * `Ctrl+Shift+S` is still `SAVE`, and `Ctrl+Shift+Z` is `REDO`.
+ * `Ctrl+V` is the one clipboard chord left here: it has no shifted sibling,
+ * because `PASTEBLOCK` (AutoCAD's `Ctrl+Shift+V`) is not implemented and must
+ * stay unwired rather than degrade into a plain paste.
+ *
+ * Every letter with a shifted form is handled by name in the function below —
+ * `Ctrl+Shift+S` is still `SAVE`, `Ctrl+Shift+Z` is `REDO`, and the clipboard
+ * pair `Ctrl+Shift+C`/`Ctrl+Shift+X` are `COPYBASE`/`CUTBASE`.
  */
 const CONTROL_LETTER_COMMANDS: Readonly<Record<string, string>> = Object.freeze({
   a: 'SELECTALL',
-  c: 'COPYCLIP',
-  x: 'CUTCLIP',
   v: 'PASTECLIP',
   o: 'OPEN',
   n: 'NEW',
@@ -85,8 +88,10 @@ const CONTROL_LETTER_COMMANDS: Readonly<Record<string, string>> = Object.freeze(
  *    `AltGr` chords belong to the desktop, and a plain key is nobody's chord);
  * 6. `Ctrl+Home` → `FIT` (AutoCAD's zoom extents);
  * 7. otherwise the letters: `Ctrl+Z` → `UNDO`, `Ctrl+Shift+Z`/`Ctrl+Y` → `REDO`,
- *    `Ctrl+Shift+S`/`Ctrl+S` → `SAVE`, and the unshifted-only rows above (any
- *    other shifted letter is declined on purpose).
+ *    `Ctrl+Shift+S`/`Ctrl+S` → `SAVE`, `Ctrl+Shift+C`/`Ctrl+C` →
+ *    `COPYBASE`/`COPYCLIP`, `Ctrl+Shift+X`/`Ctrl+X` → `CUTBASE`/`CUTCLIP`, and
+ *    the unshifted-only rows above (any other shifted letter is declined on
+ *    purpose, `Ctrl+Shift+V` included).
  */
 export function acceleratorCommand(
   event: AcceleratorKeyEvent = {},
@@ -113,15 +118,20 @@ export function acceleratorCommand(
   //    exact spelling; only single characters are case-folded below.
   if (key === 'Home') return shift ? null : 'FIT';
   // 7. Letters. Only the documented shifted forms exist: `Ctrl+Shift+S` is still
-  //    `SAVE`, and `Ctrl+Shift+Z` is `REDO` (`Ctrl+Y` is the same redo). Every
-  //    other letter is unshifted-only, which keeps `Ctrl+Shift+C/X/V` clear of
-  //    AutoCAD's COPYBASE/CUTBASE/PASTEBASE family — commands this build does
-  //    not implement, so they must not degrade silently into plain copy/paste.
+  //    `SAVE`, `Ctrl+Shift+Z` is `REDO` (`Ctrl+Y` is the same redo), and the
+  //    clipboard pair follows AutoCAD — `Ctrl+Shift+C` copies **with a base
+  //    point** (`COPYBASE`), `Ctrl+Shift+X` cuts with one (`CUTBASE`). The
+  //    shifted forms are their own commands, never a silent fallback to plain
+  //    copy/cut: the plain form has no base point, so the two pastes that follow
+  //    are not interchangeable. `Ctrl+Shift+V` stays unwired (`PASTEBLOCK` is not
+  //    implemented), and every other shifted letter is declined as before.
   if (key.length !== 1) return null;
   const letter = key.toLowerCase();
   if (letter === 'z') return shift ? 'REDO' : 'UNDO';
   if (letter === 's') return 'SAVE';
   if (letter === 'y') return shift ? null : 'REDO';
+  if (letter === 'c') return shift ? 'COPYBASE' : 'COPYCLIP';
+  if (letter === 'x') return shift ? 'CUTBASE' : 'CUTCLIP';
   if (shift) return null;
   return CONTROL_LETTER_COMMANDS[letter] ?? null;
 }

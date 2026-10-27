@@ -26,19 +26,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ARGUMENT_COMMANDS,
-  CAPABILITY_GATES,
-  COMMAND_CATALOG,
-  DOCUMENT_SCOPED_COMMANDS,
-  GESTURE_ONLY_COMMANDS,
-  LOCAL_CHROME_COMMANDS,
-  SELECTION_REQUIREMENTS,
   admitCommandText,
   isSupportedCommand,
   setCommandCatalog,
   toolLabelKey,
   unavailableReasonKey,
 } from '../src/commands/commands.ts';
+import {
+  ARGUMENT_COMMANDS,
+  CAPABILITY_GATES,
+  DOCUMENT_SCOPED_COMMANDS,
+  GESTURE_ONLY_COMMANDS,
+  LOCAL_CHROME_COMMANDS,
+  SELECTION_REQUIREMENTS,
+} from '../src/commands/gating.ts';
+import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
 import {
   PALETTE_COMMANDS,
   RIBBON_TABS,

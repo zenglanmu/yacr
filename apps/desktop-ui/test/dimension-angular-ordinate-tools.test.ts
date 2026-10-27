@@ -13,12 +13,12 @@ import assert from 'node:assert/strict';
 import { TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad/cad.ts';
 import {
   admitCommandText,
-  COMMAND_CATALOG,
   filterCommandSuggestions,
   isSupportedCommand,
   setCommandCatalog,
   toolLabelKey,
 } from '../src/commands/commands.ts';
+import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
 import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon/ribbon-model.ts';
 import { readCatalog, readModule } from './helpers.ts';
 

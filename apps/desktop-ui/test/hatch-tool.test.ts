@@ -24,17 +24,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PRESELECT_PROMPTS, TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad/cad.ts';
-import { setToolParameterFlag, setToolParameterNumber, TOOL_PARAMETER_SPECS, TOOL_PARAMETERS, toolParameterViews } from '../src/tools/tool-parameters.ts';
+import { setToolParameterFlag, setToolParameterNumber, toolParameterViews } from '../src/tools/tool-parameters.ts';
+import { TOOL_PARAMETER_SPECS, TOOL_PARAMETERS } from '../src/tools/tool-parameter-specs.ts';
 import {
   admitCommandText,
-  CAPABILITY_GATES,
-  COMMAND_CATALOG,
   filterCommandSuggestions,
-  GESTURE_ONLY_COMMANDS,
   isSupportedCommand,
   setCommandCatalog,
   toolLabelKey,
 } from '../src/commands/commands.ts';
+import {
+  CAPABILITY_GATES,
+  GESTURE_ONLY_COMMANDS,
+} from '../src/commands/gating.ts';
+import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
 import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon/ribbon-model.ts';
 import { readCatalog, readModule } from './helpers.ts';
 

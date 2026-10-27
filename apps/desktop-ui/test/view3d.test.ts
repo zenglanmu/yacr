@@ -8,12 +8,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   admitCommandText,
-  COMMAND_CATALOG,
-  DOCUMENT_SCOPED_COMMANDS,
   isSupportedCommand,
   NO_DOCUMENT_KEY,
   setCommandCatalog,
 } from '../src/commands/commands.ts';
+import { DOCUMENT_SCOPED_COMMANDS } from '../src/commands/gating.ts';
+import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
 import { createTranslator } from '../src/i18n.ts';
 import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
 import {

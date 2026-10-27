@@ -21,19 +21,22 @@ import {
   textEscapeAction,
   toolTextPrefill,
 } from '../src/tools/text.ts';
-import { TOOL_PARAMETER_SPECS, TOOL_PARAMETERS, toolParameterViews } from '../src/tools/tool-parameters.ts';
+import { toolParameterViews } from '../src/tools/tool-parameters.ts';
+import { TOOL_PARAMETER_SPECS, TOOL_PARAMETERS } from '../src/tools/tool-parameter-specs.ts';
 import { TOOL_READY_PROMPTS, TOOL_STEP_PROMPTS, toolStepPromptKey } from '../src/cad/cad.ts';
 import { parseCadStatus } from '../src/cad/cad-status.ts';
 import {
-  CAPABILITY_GATES,
-  COMMAND_CATALOG,
-  GESTURE_ONLY_COMMANDS,
   admitCommandText,
   filterCommandSuggestions,
   isSupportedCommand,
   setCommandCatalog,
   toolLabelKey,
 } from '../src/commands/commands.ts';
+import {
+  CAPABILITY_GATES,
+  GESTURE_ONLY_COMMANDS,
+} from '../src/commands/gating.ts';
+import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
 import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon/ribbon-model.ts';
 import { readAppSource, readCatalog, readModule } from './helpers.ts';
 
@@ -257,12 +260,14 @@ test('the text step keeps its generic semantics for MLEADER — no special case'
   assert.doesNotMatch(app, /mleader/i, 'the app shell must not special-case MLEADER');
   // Across the whole chrome, only the model, the listing, the prompt table and
   // the glyph mention the leader — the text step is inherited, not reimplemented.
+  // The listing is the display catalog, which lives in `catalog.ts` (split out of
+  // `commands.ts` verbatim), so that is the module this scan must name.
   const all = await readAppSource();
   const owners = [...all.matchAll(/\/\* (.*?) \*\/\n([\s\S]*?)(?=\n\/\* |$)/g)]
     .filter(([, , body]) => /mleader/i.test(body))
     .map(([, path]) => path.split('/').pop())
     .sort();
-  assert.deepEqual(owners, ['cad.ts', 'commands.ts', 'icons.tsx', 'ribbon-model.ts']);
+  assert.deepEqual(owners, ['cad.ts', 'catalog.ts', 'icons.tsx', 'ribbon-model.ts']);
 });
 
 test('no control implies the Options sub-prompt MLEADER does not have', () => {

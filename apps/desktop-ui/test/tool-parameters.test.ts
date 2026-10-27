@@ -13,8 +13,6 @@ import {
   TOOL_PARAMETER_INACTIVE_KEY,
   TOOL_PARAMETER_INVALID_KEY,
   TOOL_PARAMETER_PENDING_CAP,
-  TOOL_PARAMETER_SPECS,
-  TOOL_PARAMETERS,
   cancelToolParameterDraft,
   commitToolParameterDraft,
   reconcileToolParameterPending,
@@ -25,6 +23,10 @@ import {
   toolParameterViews,
   typeToolParameterDraft,
 } from '../src/tools/tool-parameters.ts';
+import {
+  TOOL_PARAMETER_SPECS,
+  TOOL_PARAMETERS,
+} from '../src/tools/tool-parameter-specs.ts';
 import { readAppSource, readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');

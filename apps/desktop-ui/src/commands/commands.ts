@@ -16,29 +16,18 @@
 // `canNew`/`canSave`/`canPlot` in `cad_status` and those booleans decide. Every
 // refusal is explicit and named, not a silent omission — the buttons stay visible
 // but disabled with the real reason key.
+//
+// The declarative tables live in same-directory siblings — `catalog.ts` (the display
+// catalog) and `gating.ts` (the refusal/gating rows) — which this module imports
+// directly. The functions that read them all stay here.
 import { selectionCount } from '../cad/selection-wire.ts';
-
-/** The `cad_status` slice the admission rules read (all fields are the host's). */
-export interface CommandStatusView {
-  loading?: boolean;
-  documentLabel?: string | null;
-  canOpen?: boolean;
-  canNew?: boolean;
-  canSave?: boolean;
-  canPlot?: boolean;
-  canFit?: boolean;
-  entityCount?: number | null;
-  /** The `cad_status.selection` slice the selection rules count (`{count}`). */
-  selection?: { readonly count?: unknown } | null;
-}
-
-/** A host capability boolean that gates a file-level selector. */
-export type CapabilityGate = 'canNew' | 'canSave' | 'canPlot';
-
-/** The parser for the one typed-argument form a selector accepts. */
-export interface ArgumentSpec {
-  readonly parse: (argument: string) => boolean;
-}
+import { COMMAND_CATALOG } from './catalog.ts';
+import type { CommandCatalogEntry } from './catalog.ts';
+import {
+  ARGUMENT_COMMANDS, CAPABILITY_GATES, DOCUMENT_SCOPED_COMMANDS, GESTURE_ONLY_COMMANDS,
+  LOCAL_CHROME_COMMANDS, SELECTION_REQUIREMENTS,
+} from './gating.ts';
+import type { CommandStatusView, SelectionRequirement } from './gating.ts';
 
 /** A typed command line split into its base name and its argument. */
 export interface SplitCommandText {
@@ -57,14 +46,6 @@ export interface CommandAlias {
 export interface CommandAliasInput {
   readonly alias?: unknown;
   readonly command?: unknown;
-}
-
-/** One entry of the chrome's display catalog. */
-export interface CommandCatalogEntry {
-  readonly id: string;
-  readonly labelKey: string;
-  readonly icon: string;
-  readonly group: string;
 }
 
 /** One autocomplete row: a canonical command or an alias shorthand. */
@@ -157,71 +138,6 @@ export function splitCommandText(text: unknown): SplitCommandText {
     : { name: normalized, argument: null, text: normalized };
 }
 
-/** Whether `text` is a plain positive decimal number (`2`, `0.5`, `1.25`). */
-function isPositiveDecimal(text: string): boolean {
-  if (!/^[0-9]+(\.[0-9]+)?$/.test(text)) return false;
-  const value = Number(text);
-  return Number.isFinite(value) && value > 0;
-}
-
-/**
- * Whether `text` is a plain decimal number, sign and zero included (`3`, `2.5`,
- * `0`, `-5`).
- *
- * The point-style sysvars need the signed form where `SNAPUNIT` does not:
- * `PDMODE 0` is the DWG default (dot) and `PDSIZE 0` is the "size from the
- * viewport" default, so a positive-only gate would refuse the drawing's own
- * defaults; a negative `PDSIZE` is a percentage of the viewport height in the
- * DWG model, and the renderer reads the sign. The value is still a **single**
- * plain decimal (`5.`, `.5`, `1e3`, `+5` and `2 3` are not one) — the same
- * literal shape the other sysvar uses, so one grammar is typed either way.
- */
-function isDecimalNumber(text: string): boolean {
-  if (!/^-?[0-9]+(\.[0-9]+)?$/.test(text)) return false;
-  return Number.isFinite(Number(text));
-}
-
-/**
- * The selectors that take a typed argument, with the **local syntax** predicate
- * for that argument.
- *
- * This is an admission aid only: the chrome decides "does this line look like a
- * command that could run" and the host stays the authority for semantics (a
- * `ZOOM 0` that slipped through would be refused by the router and recorded for
- * `cad_status.error`, never clamped). `ZOOM` mirrors the host grammar —
- * a positive decimal scale factor (`> 1` zooms in, `< 1` zooms out), `ALL` or
- * `EXTENTS` (the `FIT` framing). `SNAPUNIT` is the session grid-snap spacing
- * sysvar and accepts the same positive-decimal shape (`25`, `0.5`, `2.5`).
- * `PDMODE`/`PDSIZE` (2026-10-26) are the drawing's POINT display-style sysvars:
- * one plain decimal each (`PDMODE 3`, `PDSIZE 2.5`), zero and negative included
- * because `PDMODE 0` (dot) and `PDSIZE 0` (viewport-relative) are the DWG
- * defaults and a negative `PDSIZE` is a viewport percentage. They change the
- * in-memory display style of the open drawing only — not undoable, and the
- * exporter writes neither — so nothing here may suggest persistence.
- * Every other selector takes no argument, so `LINE 2` and `SNAP 5` stay explicit
- * unsupported answers.
- */
-export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.freeze({
-  ZOOM: Object.freeze({
-    parse: (argument: string) => argument === 'ALL' || argument === 'EXTENTS' || isPositiveDecimal(argument),
-  }),
-  SNAPUNIT: Object.freeze({
-    parse: isPositiveDecimal,
-  }),
-  // Point display style (`$PDMODE` / `$PDSIZE`): the same one-number grammar as
-  // `SNAPUNIT`, widened to the signed/zero form the DWG values themselves use.
-  // The range semantics (which mode means dot/cross/…) and whether a value is
-  // expressible stay the host's call — a value refused here is refused before
-  // IPC with the shared `command.unsupported` sentence, and a value admitted
-  // here is still validated by the router.
-  PDMODE: Object.freeze({
-    parse: isDecimalNumber,
-  }),
-  PDSIZE: Object.freeze({
-    parse: isDecimalNumber,
-  }),
-});
-
 /**
  * The loaded host vocabulary, uppercased and deduped. Empty until
  * [`setCommandCatalog`] receives the `cad_commands` answer.
@@ -304,125 +220,6 @@ export function aliasTarget(text: unknown): string | null {
   return loadedAliases.find(row => row.alias === alias)?.target ?? null;
 }
 
-/**
- * Host capability gates for the file-level selectors.
- *
- * `NEW`/`SAVE`/`PLOT` and their router aliases are real router commands, not
- * "host-owned" names to be hidden behind a local exclusion list: the host
- * publishes whether it can service them right now in `cad_status`
- * (`canNew`/`canSave`/`canPlot`) and those booleans decide admission. This table
- * maps each name onto the field that gates it; a name absent here has no
- * capability gate. `canNew` is about creating a blank drawing (no document
- * needed); `canSave`/`canPlot` additionally require an open document.
- */
-export const CAPABILITY_GATES: Readonly<Record<string, CapabilityGate>> = Object.freeze({
-  NEW: 'canNew',
-  SAVE: 'canSave',
-  SAVEAS: 'canSave',
-  QSAVE: 'canSave',
-  PLOT: 'canPlot',
-  EXPORT: 'canPlot',
-  PRINT: 'canPlot',
-});
-
-/**
- * Commands the Rust router accepts but a **click cannot perform** because they
- * are canvas drag gestures: `ORBIT` is the 3D primary drag, and its `yaw`/
- * `pitch` come from pointer motion, not from a button payload. Inventing an
- * orbit here would fabricate a camera move, so the affordance stays visible but
- * disabled with a gesture reason that tells the user how to orbit. This is an
- * explicit disable, never a local enable.
- */
-export const GESTURE_ONLY_COMMANDS: readonly string[] = Object.freeze(['ORBIT']);
-
-/**
- * Router-admitted selectors that only mean something with a drawing open:
- * `SWITCH2D3D` frames the document's 3D bounds and `PROJECTION` flips the
- * projection of that same camera, so on the start page there is nothing to
- * frame. They are disabled there with the catalog's own "no drawing is open"
- * sentence instead of a misleading "not supported yet".
- *
- * `MATCHPROP` needs a drawing *and* a selection; it is deliberately **not** in
- * this list — a document is not its only precondition, and the set means exactly
- * "a drawing is the whole requirement" (see `SELECTION_REQUIREMENTS`, which
- * answers the no-document case for selection-gated commands itself).
- */
-export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION']);
-
-/** One command's precondition on the **current selection**. */
-export interface SelectionRequirement {
-  /** Minimum selected objects that can still produce a real result. */
-  readonly count: number;
-  /**
-   * The catalog sentence that words the requirement. It is the desktop's own
-   * copy of the host rule (`matchprop.needs_two`), so the disabled ribbon hint
-   * and the command line's refusal say the same thing — and it is the *only*
-   * place the source→targets rule is spelled out for the reader.
-   */
-  readonly reasonKey: string;
-}
-
-/**
- * Commands whose bare name acts on the **current selection**, with the smallest
- * selection that is not a guaranteed refusal.
- *
- * `MATCHPROP` is the selection-based property painter: the first selected entity
- * is the **source**, every other selected entity is a **target**, so one object
- * or none is never a partial success — the host refuses it outright
- * (`matchprop.needs_two`). Offering a live button in that state would be an
- * affordance that can only fail, so the same table disables it with a sentence
- * that says what is missing (`draw.kind.matchprop.hint`) *and* stops the command
- * line from sending a line that cannot succeed.
- *
- * Only *count* preconditions belong here. A command that merely needs "something"
- * selected (ERASE, MOVE, COPY) keeps the neighbours' contract: it stays enabled
- * and the host answers with an explicit refusal, because its own copy
- * (`draw.error.selection_required`) already says so at run time.
- *
- * `JOIN` (2026-10-26) is the second real count precondition: it welds the
- * selection into a single entity (one LINE or one ARC), so one object or none can
- * never be a partial success and the host refuses it outright. Its sentence is the
- * catalog's own `draw.kind.join.hint`, which is also what the disabled ribbon
- * button shows, so the button and the refusal word the same rule once.
- *
- * `LAYISO` needs at least one object — isolating "nothing" would leave every
- * layer hidden and no way back from the canvas — and it reuses the catalog's
- * existing "Select objects first" line (`draw.error.selection_required`): that is
- * already the sentence the host refuses a bare isolate with, so no second copy of
- * the same fact is invented. `LAYUNISO` takes **no** selection (`count: 0`): its
- * entry exists for the "no drawing is open" answer only — the requirement can
- * never be unmet, because nothing is what it restores.
- *
- * `LAYOFF`/`LAYON` (2026-10-26) follow the isolate pair exactly. `LAYOFF` turns
- * **off** every layer the current selection sits on (the current layer excepted),
- * so with nothing selected there is no layer to turn off — the same one-object
- * minimum as `LAYISO`, worded with the same catalog sentence the host refuses a
- * bare `LAYOFF` with (`draw.error.selection_required`). `LAYON` turns every layer
- * back on and takes **no** selection (`count: 0`), so its entry is the
- * "no drawing is open" answer only, exactly like `LAYUNISO`'s.
- */
-export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequirement>> = Object.freeze({
-  MATCHPROP: Object.freeze({ count: 2, reasonKey: 'draw.kind.matchprop.hint' }),
-  JOIN: Object.freeze({ count: 2, reasonKey: 'draw.kind.join.hint' }),
-  LAYISO: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
-  LAYUNISO: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
-  LAYOFF: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
-  LAYON: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
-  // AREA OBJECT (2026-10-27) measures **exactly one** closed object, so its rule is
-  // a count of one: `SelectionRequirement.count` is a *minimum* here (the table's
-  // shape does not express an upper bound), which means a selection of two is let
-  // through locally and refused by the host **by name** — the same division of
-  // labour every other selection rule uses. The sentence is this command's own
-  // `measure.kind.area_object.hint`, which states the one-object rule and that the
-  // command does not pick objects interactively, so the refusal and the catalogue
-  // row cannot describe two different behaviours.
-  'AREA OBJECT': Object.freeze({ count: 1, reasonKey: 'measure.kind.area_object.hint' }),
-  // LAYERP restores the previous layer-override state, so no selection is ever the
-  // reason it cannot run. Like LAYON/LAYUNISO its entry exists for the "no drawing
-  // is open" answer only.
-  LAYERP: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
-});
-
 /** The selection requirement of `id`, or `null` when it has none. */
 export function selectionRequirement(id: unknown): SelectionRequirement | null {
   return SELECTION_REQUIREMENTS[normalizeCommandText(id)] ?? null;
@@ -448,22 +245,7 @@ export function selectionRequirementMet(
   return selectionCount(status.selection) >= requirement.count;
 }
 
-/**
- * Selectors the **chrome** answers itself, before the router. They have a real
- * command-line entry (typing the word works) but no Rust command: `PROPERTIES`
- * opens the docked inspector and `LAYER` opens the docked layers palette, both
- * through the shell action of the same name.
- *
- * They are deliberately admitted regardless of the loaded host vocabulary (and
- * of whether a drawing is open): they touch no CAD state, exactly like the
- * `OPTIONS` dialog the command line already intercepts locally. `LAYER` is not a
- * router name at all — the router knows the layer *operations*
- * (`TOGGLELAYER`/`SETLAYERS`/`RESTORELAYERS`/`SETACTIVELAYER`), which the palette
- * drives through its own dedicated commands (`cad_layers` and friends).
- */
-export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze(['PROPERTIES', 'LAYER']);
-
-/** Whether `id` is one of the chrome-local selectors above. */
+/** Whether `id` is one of the chrome-local selectors (`LOCAL_CHROME_COMMANDS`). */
 export function isLocalChromeCommand(id: unknown): boolean {
   return LOCAL_CHROME_COMMANDS.includes(normalizeCommandText(id));
 }
@@ -585,179 +367,6 @@ export function toolCommandForKey(key: string, {
   if (key === 'Enter') return 'CONFIRM';
   return null;
 }
-
-/**
- * Every command name the app exposes in the chrome, in AutoCAD-style listing
- * order (file, draw, modify, view, measure, annotate, classify). `labelKey` is a
- * catalog key; `icon` names an entry in the icon set.
- *
- * This is a **display** table only: whether an entry is enabled comes from the
- * loaded host vocabulary ([`isSupportedCommand`]), so a command missing here can
- * still be typed and admitted when the router knows it.
- */
-export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
-  { id: 'OPEN', labelKey: 'file.open', icon: 'open', group: 'file' },
-  { id: 'FIT', labelKey: 'toolbar.fit', icon: 'fit', group: 'view' },
-  { id: 'NEW', labelKey: 'qat.new', icon: 'new', group: 'file' },
-  { id: 'SAVE', labelKey: 'qat.save', icon: 'save', group: 'file' },
-  // PLOT is the same router selector as the `EXPORT`/`PRINT` aliases (the host
-  // writes SVG/PDF through the platform save picker and refuses `.png` for the
-  // GUI). It sits after SAVE because it is a file-level output action, and it is
-  // gated by `canPlot` like the aliases, not by anything local.
-  { id: 'PLOT', labelKey: 'file.plot', icon: 'save', group: 'file' },
-  { id: 'UNDO', labelKey: 'toolbar.undo', icon: 'undo', group: 'modify' },
-  { id: 'REDO', labelKey: 'toolbar.redo', icon: 'redo', group: 'modify' },
-  { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', group: 'draw' },
-  { id: 'CIRCLE', labelKey: 'draw.kind.circle', icon: 'circle', group: 'draw' },
-  { id: 'ARC', labelKey: 'draw.kind.arc', icon: 'arc', group: 'draw' },
-  { id: 'PLINE', labelKey: 'draw.kind.polyline', icon: 'polyline', group: 'draw' },
-  { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', group: 'draw' },
-  { id: 'ELLIPSE', labelKey: 'draw.kind.ellipse', icon: 'ellipse', group: 'draw' },
-  { id: 'POLYGON', labelKey: 'draw.kind.polygon', icon: 'polygon', group: 'draw' },
-  { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', group: 'draw' },
-  { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', group: 'draw' },
-  // Single-line TEXT (ADR 0019 decision A): a point and then its text, which is
-  // the command's terminal step and travels on `cad_set_tool_text`.
-  { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', group: 'draw' },
-  // MTEXT (2026-10-26): the multiline counterpart of TEXT. The bare selector
-  // starts the two-corner tool (first corner = insertion point, opposite corner =
-  // wrap width) and the text is the same terminal `cad_set_tool_text` step. It
-  // has no variant entry: rotation/attachment/line spacing/columns/background are
-  // deliberately not implemented, and nothing here may imply them.
-  { id: 'MTEXT', labelKey: 'draw.kind.mtext', icon: 'mtext', group: 'draw' },
-  // MLEADER (ADR 0019 decision F.2): two points — the arrowhead position, then
-  // the landing point — and then that same terminal text step. It carries no
-  // variant entry because the command has no `Options` sub-prompt (leader type /
-  // content type / max points / angular constraint), and nothing here may imply
-  // one.
-  { id: 'MLEADER', labelKey: 'draw.kind.mleader', icon: 'mleader', group: 'draw' },
-  { id: 'HATCH', labelKey: 'draw.kind.hatch', icon: 'hatch', group: 'draw' },
-  { id: 'MOVE', labelKey: 'draw.kind.move', icon: 'move', group: 'modify' },
-  { id: 'COPY', labelKey: 'draw.kind.copy', icon: 'copy', group: 'modify' },
-  { id: 'TRIM', labelKey: 'draw.kind.trim', icon: 'trim', group: 'modify' },
-  { id: 'EXTEND', labelKey: 'draw.kind.extend', icon: 'extend', group: 'modify' },
-  { id: 'ROTATE', labelKey: 'draw.kind.rotate', icon: 'rotate', group: 'modify' },
-  { id: 'SCALE', labelKey: 'draw.kind.scale', icon: 'scale', group: 'modify' },
-  { id: 'MIRROR', labelKey: 'draw.kind.mirror', icon: 'mirror', group: 'modify' },
-  { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', group: 'modify' },
-  { id: 'CHAMFER', labelKey: 'draw.kind.chamfer', icon: 'chamfer', group: 'modify' },
-  { id: 'FILLET', labelKey: 'draw.kind.fillet', icon: 'fillet', group: 'modify' },
-  { id: 'ARRAYRECT', labelKey: 'draw.kind.arrayrect', icon: 'arrayrect', group: 'modify' },
-  { id: 'ARRAYPOLAR', labelKey: 'draw.kind.arraypolar', icon: 'arraypolar', group: 'modify' },
-  { id: 'ALIGN', labelKey: 'draw.kind.align', icon: 'align', group: 'modify' },
-  { id: 'STRETCH', labelKey: 'draw.kind.stretch', icon: 'stretch', group: 'modify' },
-  { id: 'ERASE', labelKey: 'draw.kind.erase', icon: 'erase', group: 'modify' },
-  { id: 'EXPLODE', labelKey: 'draw.kind.explode', icon: 'explode', group: 'modify' },
-  // MATCHPROP (the selection-based property painter) sits after the other
-  // selection-acting modify commands. It is a **payload-free** router command, so
-  // it is listed and typeable; whether it can run is decided by
-  // `SELECTION_REQUIREMENTS` (it needs a source *and* at least one target), so a
-  // one-object selection is refused with the sentence that says so.
-  { id: 'MATCHPROP', labelKey: 'draw.kind.matchprop', icon: 'matchprop', group: 'modify' },
-  // JOIN (2026-10-26) closes the modify run: welding the current selection into
-  // one entity acts on that selection exactly like MATCHPROP, so it is appended
-  // after it (no shipped row moves). It is a payload-free router command, and the
-  // "at least two objects" rule is `SELECTION_REQUIREMENTS`' — the host refuses a
-  // one-object join outright, so the button is never a live affordance that can
-  // only fail. The glyph is the polyline one: the icon set has no dedicated join
-  // mark yet, and the merge output is a curve either way.
-  { id: 'JOIN', labelKey: 'draw.kind.join', icon: 'polyline', group: 'modify' },
-  { id: 'DIST', labelKey: 'measure.kind.distance', icon: 'distance', group: 'measure' },
-  { id: 'MEASUREPOLYLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', group: 'measure' },
-  { id: 'MEASUREANGLE', labelKey: 'measure.kind.angle', icon: 'angle', group: 'measure' },
-  { id: 'AREA', labelKey: 'measure.kind.area', icon: 'area', group: 'measure' },
-  // AREA OBJECT (2026-10-27) is the selection-based area variant: it takes the
-  // current selection (exactly one closed object — a circle, an ellipse or a
-  // closed polyline with bulges) instead of a picked boundary, and echoes the
-  // exact area under its own algorithm token (`area_object`). Sharing the `area`
-  // glyph is deliberate: it is the same measurement, only its input differs.
-  //
-  // The id is **multi-word**, which matters for the local admission path: the
-  // host canonicalises the whole trimmed line, so a space-separated selector is
-  // one name there, while `splitCommandText` here reads the first word as the
-  // base name (`AREA`) and the rest as a typed argument (`OBJECT`). This entry is
-  // therefore the *catalogue* half only — the surface that names and suggests the
-  // command; the local admission path still refuses the line because it splits on
-  // the space before the vocabulary is consulted (pinned by
-  // `test/area-object-layerp.test.ts` and reported, never patched into the parser
-  // with a one-off exception). It is listed beside `AREA` because it is the same
-  // measurement kind, and no shipped row moves.
-  { id: 'AREA OBJECT', labelKey: 'measure.kind.area_object', icon: 'area', group: 'measure' },
-  // ID (2026-10-26) is the point-coordinate readout: one point pick, reported as
-  // X/Y/Z plus the object snap that produced it. It is the fifth measurement kind
-  // and is listed last there so no shipped entry moves. It reuses the `point`
-  // glyph (a crosshair on a marker) because the command is "which point is this",
-  // and it has no variant popover: there is no options sub-prompt.
-  { id: 'ID', labelKey: 'measure.kind.id', icon: 'point', group: 'measure' },
-  { id: 'DIMLINEAR', labelKey: 'draw.kind.dimlinear', icon: 'dimlinear', group: 'annotate' },
-  { id: 'DIMALIGNED', labelKey: 'draw.kind.dimaligned', icon: 'dimaligned', group: 'annotate' },
-  { id: 'DIMRADIUS', labelKey: 'draw.kind.dimradius', icon: 'dimradius', group: 'annotate' },
-  { id: 'DIMDIAMETER', labelKey: 'draw.kind.dimdiameter', icon: 'dimdiameter', group: 'annotate' },
-  { id: 'DIMCENTER', labelKey: 'draw.kind.dimcenter', icon: 'dimcenter', group: 'annotate' },
-  { id: 'DIMANGULAR', labelKey: 'draw.kind.dimangular', icon: 'dimangular', group: 'annotate' },
-  { id: 'DIMORDINATE', labelKey: 'draw.kind.dimordinate', icon: 'dimordinate', group: 'annotate' },
-  // Baseline/continue dimensions (ADR 0017 decision C, P5f): both pick an
-  // existing linear dimension first, then accept any number of points and commit
-  // with Enter — never a fixed three-point capture like the linear pair.
-  { id: 'DIMBASELINE', labelKey: 'draw.kind.dimbaseline', icon: 'dimbaseline', group: 'annotate' },
-  { id: 'DIMCONTINUE', labelKey: 'draw.kind.dimcontinue', icon: 'dimcontinue', group: 'annotate' },
-  { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', group: 'annotate' },
-  // Layer isolate / unisolate (2026-10-26). Unlike `LAYER` they are **router**
-  // commands (`LAYISO`/`LAYUNISO`), not chrome-local selectors, so they are
-  // admitted by the host vocabulary alone. Their glyphs are the layers palette's
-  // own visibility pair — isolating hides the other layers (dimmed eye),
-  // unisolating shows them again (plain eye) — because the operation is a
-  // visibility change, not a palette toggle.
-  { id: 'LAYISO', labelKey: 'layers.isolate', icon: 'eyeOff', group: 'annotate' },
-  { id: 'LAYUNISO', labelKey: 'layers.unisolate', icon: 'eye', group: 'annotate' },
-  // Layer off / on (2026-10-26) close the layer run. `LAYOFF` turns **off** every
-  // layer the current selection sits on (the current layer excepted), and `LAYON`
-  // is the router's restore selector: it turns every layer back on and takes no
-  // selection. Both are **router** commands like the isolate pair — never
-  // chrome-local selectors — so the host vocabulary alone admits them. They reuse
-  // the same visibility glyph pair for the same reason: turning layers off hides
-  // geometry (dimmed eye) and restoring shows it again (plain eye), which is a
-  // visibility change, not a palette toggle.
-  { id: 'LAYOFF', labelKey: 'draw.kind.layoff', icon: 'eyeOff', group: 'annotate' },
-  { id: 'LAYON', labelKey: 'draw.kind.layon', icon: 'eye', group: 'annotate' },
-  // LAYERP (2026-10-27) is **no longer an alias of the restore command**: it
-  // restores the *previous* layer-override state and names itself (`layers.previous`),
-  // so it is a selector in its own right at the same layer run's end. `LAYUNISO`
-  // and `LAYON` keep meaning "clear every override"; this one does not, which is
-  // why it never borrows `layers.restore` or `draw.kind.layon` as its label.
-  { id: 'LAYERP', labelKey: 'layers.previous', icon: 'eye', group: 'annotate' },
-  { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', group: 'annotate' },
-  { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', group: 'annotate' },
-  { id: 'ZOOMIN', labelKey: 'toolbar.zoom_in', icon: 'zoomIn', group: 'view' },
-  { id: 'ZOOMOUT', labelKey: 'toolbar.zoom_out', icon: 'zoomOut', group: 'view' },
-  { id: 'PAN', labelKey: 'toolbar.pan', icon: 'pan', group: 'view' },
-  // RESETVIEW is a payload-free router command (`CommandId::ResetView`) that
-  // restores the drawing's saved view; it has no capability gate and no
-  // document-scoped precondition of its own.
-  { id: 'RESETVIEW', labelKey: 'view.reset', icon: 'view', group: 'view' },
-  { id: 'ORBIT', labelKey: 'view.orbit_label', icon: 'orbit', group: 'view' },
-  // 3D view selectors: both are payload-free router commands (typing them in the
-  // command line already works), and both need an open drawing — the ribbon
-  // disables them on the start page. `STANDARDVIEW` is deliberately **absent**:
-  // it carries a payload and travels on `cad_standard_view`, never on
-  // `cad_command`, so it is not a name this catalog may offer for typing.
-  { id: 'SWITCH2D3D', labelKey: 'ribbon.command.view_switch2d3d', icon: 'view', group: 'view' },
-  { id: 'PROJECTION', labelKey: 'view.projection', icon: 'axes', group: 'view' },
-  { id: 'GRID', labelKey: 'overlay.grid', icon: 'grid', group: 'view' },
-  { id: 'SNAP', labelKey: 'status.toggle.snap', icon: 'snap', group: 'view' },
-  { id: 'ORTHO', labelKey: 'status.toggle.ortho', icon: 'angle', group: 'view' },
-  { id: 'OSNAP', labelKey: 'status.toggle.osnap', icon: 'snap', group: 'view' },
-  // POINT display style sysvars (2026-10-26). They are **command-line settings**
-  // like `SNAPUNIT`, not buttons: typing `PDMODE 3` / `PDSIZE 2.5` on the command
-  // line is the whole affordance, so neither gets a ribbon item — the
-  // `SNAPUNIT` precedent, which also has no ribbon button. They are listed at
-  // the end of the drafting-aid run (after `OSNAP`) because no shipped row may
-  // move, and they reuse the `point` glyph: the setting is how POINTs are drawn.
-  // Both change the open drawing's in-memory display style only; nothing here
-  // may imply undo or that the exporter writes the values.
-  { id: 'PDMODE', labelKey: 'point.display.mode', icon: 'point', group: 'view' },
-  { id: 'PDSIZE', labelKey: 'point.display.size', icon: 'point', group: 'view' },
-]);
 
 const CATALOG_BY_ID = new Map<string, CommandCatalogEntry>(COMMAND_CATALOG.map(command => [command.id, command]));
 

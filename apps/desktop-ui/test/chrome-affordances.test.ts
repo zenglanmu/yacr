@@ -20,7 +20,8 @@ import { readCatalog, readComponentsSource, readModule } from './helpers.ts';
 import {
   offeredPanels, PALETTE_COMMANDS, panelLauncherCommand, RIBBON_TABS,
 } from '../src/ribbon/ribbon-model.ts';
-import { admitCommandText, LOCAL_CHROME_COMMANDS } from '../src/commands/commands.ts';
+import { admitCommandText } from '../src/commands/commands.ts';
+import { LOCAL_CHROME_COMMANDS } from '../src/commands/gating.ts';
 import {
   ONE_DOCUMENT_KEY, ONE_LAYOUT_SPACE_KEY, PANEL_DIALOG_MISSING_KEY, PENDING_CATALOG_KEYS,
 } from '../src/limits.ts';

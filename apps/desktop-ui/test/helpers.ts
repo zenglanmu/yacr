@@ -83,6 +83,12 @@ export const HOST_NAMES = [
   'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
   'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'DIMLINEAR', 'DIMALIGNED', 'DIMRADIUS', 'DIMDIAMETER', 'DIMCENTER', 'DIMANGULAR', 'DIMORDINATE', 'DIMBASELINE', 'DIMCONTINUE', 'MOVE', 'TRIM',
   'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'STRETCH', 'ERASE', 'EXPLODE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
+  // Clipboard-with-base-point family (2026-10-27): `COPYBASE`/`CUTBASE` put the
+  // selection on the clipboard **with a base point**, so the following `PASTECLIP`
+  // is placed relative to it, and `PASTEORIG` pastes at the coordinates the
+  // clipboard came from. `PASTEBLOCK` is deliberately **absent**: it is not
+  // implemented, so nothing may admit or suggest it.
+  'COPYBASE', 'CUTBASE', 'PASTEORIG',
   'OFFSET', 'SETACTIVELAYER', 'HOVERPREVIEW', 'GRID', 'SNAP', 'SNAPUNIT', 'OSNAP', 'ORTHO', 'HATCH',
   // MATCHPROP: the selection-based property painter (`CommandId::MatchProp`,
   // `CommandPayload::None` — the selection's first entity is the source). No

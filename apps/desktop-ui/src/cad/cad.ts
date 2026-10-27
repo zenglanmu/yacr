@@ -302,6 +302,33 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
   'measure.id': [
     ID_POINT_PROMPT_KEY,
   ],
+  // COPYBASE (2026-10-27) is the clipboard copy **with a base point**: the
+  // selection already exists when the capture starts (the host only begins it
+  // with a non-empty selection, exactly like OFFSET), so its one pick is the base
+  // the next paste is measured from. It is deliberately **not** in
+  // [`PRESELECT_PROMPTS`]: that table is for zero-pick captures (HATCH) whose only
+  // states are "select" and "ready"; this tool does take a pick, and a
+  // pre-selection entry would hide it.
+  'draw.copybase': [
+    'tool.prompt.copybase.base',
+  ],
+  // PASTECLIP's one pick is the **insertion point**: the host translates the
+  // clipboard by `insertion − base`, where the base is the COPYBASE/CUTBASE pick
+  // (the origin for a plain COPYCLIP/CUTCLIP). PASTEORIG is the explicit "paste at
+  // the original coordinates" path and takes no pick, so it has no entry here and
+  // no prompt to name.
+  'draw.pasteclip': [
+    'tool.prompt.pasteclip.insertion',
+  ],
+  // CUTBASE is the same one-base-point capture as COPYBASE, reported by the host
+  // under its **own** machine key (`cutbase`, the cutting variant), so it needs its
+  // own row: without it the chip would name no pick at all. The sentence is
+  // shared, because the pick means the same thing — `tool.prompt.copybase.base`
+  // says "the next paste is placed relative to this point", which is equally true
+  // of the cutting form.
+  'draw.cutbase': [
+    'tool.prompt.copybase.base',
+  ],
 });
 
 /**
@@ -349,6 +376,14 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // the one state a race can still expose (the point counted before the host
   // closed the tool).
   'measure.id': 'tool.prompt.confirm',
+  // The clipboard captures (2026-10-27) commit on their single pick, so the
+  // shared dimension ready copy ("Dimension defined; press Enter to confirm")
+  // would be false twice over. The generic confirm sentence is the honest
+  // override for the one state a race can still expose (the pick counted before
+  // the host closed the tool) — the same override `measure.id` uses.
+  'draw.copybase': 'tool.prompt.confirm',
+  'draw.pasteclip': 'tool.prompt.confirm',
+  'draw.cutbase': 'tool.prompt.confirm',
 });
 
 /** A pre-selection tool's two prompts: waiting for a selection, and ready. */

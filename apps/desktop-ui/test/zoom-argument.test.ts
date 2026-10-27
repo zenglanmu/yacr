@@ -9,7 +9,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ARGUMENT_COMMANDS,
   admitCommandText,
   defaultSuggestionIndex,
   filterCommandSuggestions,
@@ -18,6 +17,7 @@ import {
   setCommandCatalog,
   splitCommandText,
 } from '../src/commands/commands.ts';
+import { ARGUMENT_COMMANDS } from '../src/commands/gating.ts';
 import { queueCadCommand } from '../src/cad/cad-command.ts';
 import { HOST_NAMES, readModule } from './helpers.ts';
 

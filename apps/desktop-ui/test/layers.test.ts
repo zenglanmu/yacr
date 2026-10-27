@@ -40,7 +40,7 @@ import {
   WAITING_CODE,
 } from '../src/layers/layers.ts';
 import { DEFAULT_LAYER_NAME, deletableLayer, layerErrorKey } from '../src/layers/layer-labels.ts';
-import { LOCAL_CHROME_COMMANDS } from '../src/commands/commands.ts';
+import { LOCAL_CHROME_COMMANDS } from '../src/commands/gating.ts';
 import { offeredItems, PALETTE_COMMANDS } from '../src/ribbon/ribbon-model.ts';
 import { readCatalog, readCss, readModule } from './helpers.ts';
 

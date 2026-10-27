@@ -2,16 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   admitCommandText,
-  CAPABILITY_GATES,
-  COMMAND_CATALOG,
   commandCatalog,
   defaultSuggestionIndex,
   filterCommandSuggestions,
-  GESTURE_ONLY_COMMANDS,
   historyText,
   isLocalChromeCommand,
   isSupportedCommand,
-  LOCAL_CHROME_COMMANDS,
   normalizeCommandText,
   pushHistory,
   setCommandCatalog,
@@ -20,6 +16,12 @@ import {
   toolLabelKey,
   unavailableReasonKey,
 } from '../src/commands/commands.ts';
+import {
+  CAPABILITY_GATES,
+  GESTURE_ONLY_COMMANDS,
+  LOCAL_CHROME_COMMANDS,
+} from '../src/commands/gating.ts';
+import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
 import { RIBBON_TABS, ribbonCommandIds, ribbonTab } from '../src/ribbon/ribbon-model.ts';
 import { HOST_NAMES } from './helpers.ts';
 

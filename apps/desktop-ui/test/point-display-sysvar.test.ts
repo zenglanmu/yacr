@@ -15,15 +15,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ARGUMENT_COMMANDS,
   admitCommandText,
-  COMMAND_CATALOG,
   commandById,
   filterCommandSuggestions,
   isSupportedCommand,
   setCommandCatalog,
   splitCommandText,
 } from '../src/commands/commands.ts';
+import { ARGUMENT_COMMANDS } from '../src/commands/gating.ts';
+import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
 import { queueCadCommand } from '../src/cad/cad-command.ts';
 import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
 import { HOST_NAMES, readAppSource, readCatalog, readModule } from './helpers.ts';

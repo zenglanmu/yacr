@@ -9,12 +9,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   admitCommandText,
-  COMMAND_CATALOG,
-  GESTURE_ONLY_COMMANDS,
   isSupportedCommand,
   setCommandCatalog,
   toolLabelKey,
 } from '../src/commands/commands.ts';
+import { GESTURE_ONLY_COMMANDS } from '../src/commands/gating.ts';
+import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
 import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
 import { HOST_NAMES } from './helpers.ts';
 
@@ -646,7 +646,8 @@ test('MATCHPROP sits with the selection-acting modify commands and needs a sourc
   // enough: MATCHPROP reads the current selection, so the selection requirement
   // decides too. The machine rule and the copy are pinned together here — the
   // sentence names the two objects its `count` requires.
-  const { SELECTION_REQUIREMENTS, selectionRequirementMet, unavailableReasonKey } = await import('../src/commands/commands.ts');
+  const { SELECTION_REQUIREMENTS } = await import('../src/commands/gating.ts');
+  const { selectionRequirementMet, unavailableReasonKey } = await import('../src/commands/commands.ts');
   assert.deepEqual(SELECTION_REQUIREMENTS[id], { count: 2, reasonKey: 'draw.kind.matchprop.hint' });
   assert.equal(isSupportedCommand(id), true, id);
   const doc = loaded;

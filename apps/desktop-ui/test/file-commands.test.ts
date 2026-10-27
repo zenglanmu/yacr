@@ -8,10 +8,10 @@ import assert from 'node:assert/strict';
 import {
   admitCommandText,
   BUSY_KEY,
-  CAPABILITY_GATES,
   setCommandCatalog,
   unavailableReasonKey,
 } from '../src/commands/commands.ts';
+import { CAPABILITY_GATES } from '../src/commands/gating.ts';
 
 // The router's vocabulary for these names: the canonical selectors plus their
 // full-word aliases, as `admissible_names()` reports them.

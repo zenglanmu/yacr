@@ -151,8 +151,21 @@ export function buildContextMenu({
         id: 'clipboard',
         items: [
           { id: 'clipboard.cut', key: 'menu.clipboard.cut', command: 'CUTCLIP', enabled: editable },
+          // The base-point variants sit directly beside their plain sibling: same
+          // selection requirement, but the extra base-point pick is what makes the
+          // following paste land relative to that point. The menu only states the
+          // choice — `COPYBASE` is a read-only capture, `CUTBASE` deletes after the
+          // pick, and whether either is admitted in the current mode is the
+          // router's decision, never a local gate invented here.
+          { id: 'clipboard.cutbase', key: 'menu.clipboard.cutbase', command: 'CUTBASE', enabled: editable },
           { id: 'clipboard.copy', key: 'menu.clipboard.copy', command: 'COPYCLIP', enabled: editable },
+          { id: 'clipboard.copybase', key: 'menu.clipboard.copybase', command: 'COPYBASE', enabled: editable },
+          // `PASTECLIP` asks for an insertion point; `PASTEORIG` is the explicit
+          // "put it back where it came from" path and takes no pick. Neither is
+          // gated on the clipboard's length — the chrome has no such fact, and a
+          // locally invented gate would hide a paste the host can run.
           { id: 'clipboard.paste', key: 'menu.clipboard.paste', command: 'PASTECLIP', enabled: !capturing },
+          { id: 'clipboard.pasteorig', key: 'menu.clipboard.pasteorig', command: 'PASTEORIG', enabled: !capturing },
         ],
       },
       {

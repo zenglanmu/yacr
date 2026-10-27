@@ -1,5 +1,6 @@
-// The documented AutoCAD control accelerators (Ctrl+A/C/X/V/Z/Y/Home/O/N/S/P),
-// the one pure mapping table behind them, and the one wiring point in the shell.
+// The documented AutoCAD control accelerators (Ctrl+A/C/X/V/Z/Y/Home/O/N/S/P, plus
+// Ctrl+Shift+C and Ctrl+Shift+X for the base-point clipboard pair), the one pure
+// mapping table behind them, and the one wiring point in the shell.
 //
 // The table is exercised directly (it takes plain records, no DOM), and the
 // call site is asserted by source structure — the same contract style the other
@@ -43,6 +44,9 @@ test('every documented control accelerator resolves to its AutoCAD command', () 
     [ctrl('C'), 'COPYCLIP'],
     [ctrl('x'), 'CUTCLIP'],
     [ctrl('X'), 'CUTCLIP'],
+    // The shifted clipboard pair (AutoCAD's copy/cut with a base point).
+    [ctrl('c', { shiftKey: true }), 'COPYBASE'],
+    [ctrl('x', { shiftKey: true }), 'CUTBASE'],
     [ctrl('v'), 'PASTECLIP'],
     [ctrl('V'), 'PASTECLIP'],
     [ctrl('z'), 'UNDO'],
@@ -73,14 +77,37 @@ test('Ctrl+Shift+Z is REDO while Ctrl+Z is UNDO, and Ctrl+Y is the same REDO', (
   assert.equal(acceleratorCommand(ctrl('z')), 'UNDO');
   assert.equal(acceleratorCommand(ctrl('Z', { shiftKey: true })), 'REDO');
   assert.equal(acceleratorCommand(ctrl('y')), 'REDO');
-  // Only the two documented shifted forms exist. Every other shifted letter is
-  // declined, so Ctrl+Shift+C/X/V stay clear of AutoCAD's COPYBASE/CUTBASE/
-  // PASTEBASE family (commands this build does not implement).
+  // Ctrl+Shift+C/X are the base-point clipboard pair, so they are their own
+  // commands and never a silent fallback to plain copy/cut.
   assert.equal(acceleratorCommand(ctrl('s', { shiftKey: true })), 'SAVE');
-  for (const key of ['a', 'c', 'x', 'v', 'o', 'n', 'p', 'y']) {
+  assert.equal(acceleratorCommand(ctrl('c', { shiftKey: true })), 'COPYBASE');
+  assert.equal(acceleratorCommand(ctrl('x', { shiftKey: true })), 'CUTBASE');
+  // Every other shifted letter is declined — Ctrl+Shift+V included, because
+  // PASTEBLOCK is not implemented and must stay unwired.
+  for (const key of ['a', 'v', 'o', 'n', 'p', 'y', 'b', 'e', 'l', 'm']) {
     assert.equal(acceleratorCommand(ctrl(key, { shiftKey: true })), null, `Ctrl+Shift+${key}`);
   }
   assert.equal(acceleratorCommand(ctrl('Home', { shiftKey: true })), null);
+});
+
+test('the shifted clipboard chords are COPYBASE/CUTBASE, and Ctrl+Shift+V stays unwired', () => {
+  // The letters are case-folded, so a caps-lock press resolves the same way.
+  assert.equal(acceleratorCommand(ctrl('C', { shiftKey: true })), 'COPYBASE');
+  assert.equal(acceleratorCommand(ctrl('X', { shiftKey: true })), 'CUTBASE');
+  // The unshifted forms keep their own names: a base point changes the paste that
+  // follows, so the two are not interchangeable and must not collapse.
+  assert.equal(acceleratorCommand(ctrl('c')), 'COPYCLIP');
+  assert.equal(acceleratorCommand(ctrl('x')), 'CUTCLIP');
+  assert.notEqual(acceleratorCommand(ctrl('c', { shiftKey: true })), acceleratorCommand(ctrl('c')));
+  assert.notEqual(acceleratorCommand(ctrl('x', { shiftKey: true })), acceleratorCommand(ctrl('x')));
+  // PASTEBLOCK (`Ctrl+Shift+V`) is unimplemented: the chord maps to nothing at all
+  // — no PASTECLIP fallback — and therefore cannot be dispatched or prevented.
+  assert.equal(acceleratorCommand(ctrl('v', { shiftKey: true })), null);
+  assert.equal(acceleratorCommand(ctrl('V', { shiftKey: true })), null);
+  assert.equal(acceleratorCommand(ctrl('v')), 'PASTECLIP');
+  let asked = 0;
+  assert.equal(acceleratorDispatch(ctrl('v', { shiftKey: true }), {}, () => { asked += 1; return true; }), null);
+  assert.equal(asked, 0, 'a declined chord never asks the admission function');
 });
 
 test('text entry, IME composition, an open popup, a tool and a grip drag all decline the chord', () => {
@@ -149,6 +176,7 @@ test('a chord whose command the shell does not admit is not dispatched', () => {
   // command's own admission — not a second, private list here.
   for (const [event, expected] of [
     [ctrl('a'), 'SELECTALL'], [ctrl('c'), 'COPYCLIP'], [ctrl('x'), 'CUTCLIP'],
+    [ctrl('c', { shiftKey: true }), 'COPYBASE'], [ctrl('x', { shiftKey: true }), 'CUTBASE'],
     [ctrl('v'), 'PASTECLIP'], [ctrl('z'), 'UNDO'], [ctrl('y'), 'REDO'],
     [ctrl('Home'), 'FIT'], [ctrl('o'), 'OPEN'], [ctrl('n'), 'NEW'],
     [ctrl('s'), 'SAVE'], [ctrl('p'), 'PLOT'],
