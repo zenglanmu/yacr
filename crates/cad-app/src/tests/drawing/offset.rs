@@ -322,7 +322,7 @@ fn offset_refuses_unsupported_geometry() {
         other => panic!("expected an Unsupported refusal, got {other:?}"),
     };
     assert!(
-        message.contains("LINE, CIRCLE, ARC and straight-segment LWPOLYLINE"),
+        message.contains("LINE, CIRCLE, ARC and LWPOLYLINE (straight or bulged)"),
         "the generic refusal names ARC: {message}"
     );
     assert_eq!(revision(&app), rev);

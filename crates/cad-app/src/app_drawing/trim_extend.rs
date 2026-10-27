@@ -22,7 +22,7 @@ struct NewEntityInsert<'a> {
 
 impl Application {
     /// Create an offset copy of a single selected LINE, CIRCLE, ARC or
-    /// straight-segment LWPOLYLINE.
+    /// LWPOLYLINE (straight or bulged segments).
     ///
     /// The picked `side_point` defines both the side and the distance: for a LINE
     /// it is the perpendicular distance to the infinite line (the new line lies
@@ -129,8 +129,8 @@ impl Application {
                 }
                 other => {
                     return Err(CadError::Unsupported(format!(
-                        "OFFSET supports LINE, CIRCLE, ARC and straight-segment LWPOLYLINE only, \
-                         got {}",
+                        "OFFSET supports LINE, CIRCLE, ARC and LWPOLYLINE (straight or bulged) \
+                         only, got {}",
                         geometry_kind(other)
                     )));
                 }

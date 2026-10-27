@@ -225,12 +225,13 @@ pub enum CommandPayload {
         axis_start: Point3,
         axis_end: Point3,
     },
-    /// Offset a single selected LINE, CIRCLE or straight-segment LWPOLYLINE by the
-    /// distance and side defined by `side_point` (OFFSET, spec F-EDIT). A polyline
-    /// is offset with miter joins, vertex count/order preserved (see
-    /// `app_drawing::offset_polyline`). Exactly one source entity is required; any
-    /// other geometry kind is an explicit refusal, and an arc (bulged) polyline
-    /// segment is its own named refusal (`offset.bulge_segment`).
+    /// Offset a single selected LINE, CIRCLE, ARC or LWPOLYLINE (straight or
+    /// bulged) by the distance and side defined by `side_point` (OFFSET, spec
+    /// F-EDIT). A polyline is offset with miter joins and its vertex
+    /// count/order preserved (see `app_drawing::offset_polyline`); an arc
+    /// segment offsets concentrically with its centre unchanged (see
+    /// `app_drawing::offset_polyline_bulge`). Exactly one source entity is
+    /// required; any other geometry kind is an explicit refusal.
     Offset {
         refs: Vec<SelectionRef>,
         side_point: Point3,
