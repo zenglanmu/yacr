@@ -259,7 +259,9 @@ pub enum CommandId {
     /// command, no second Confirm). The height comes from the session typed
     /// parameter ([`crate::draw_tool::ToolParameter::TextHeight`], default
     /// [`crate::draw_tool::TEXT_DEFAULT_HEIGHT`] = 2.5 because the drawing's
-    /// `Style` table carries no height), so the capture never invents one.
+    /// `Style` table carries no height), so the capture never invents one; the
+    /// rotation comes from [`crate::draw_tool::ToolParameter::TextRotation`]
+    /// (degrees, default `0`) and is stored in radians.
     ///
     /// The style is the drawing's `Standard` text style (the `StyleId(0)` entry as
     /// the documented fallback, with its first resource key as the font) and the
@@ -318,9 +320,13 @@ pub enum CommandId {
     /// opposite corner (which supplies `width`), then the typed text, and maps
     /// onto exactly this payload. The bare `MTEXT` selector therefore **starts
     /// that tool**; a dispatch that carries no payload is still refused by name.
-    /// Rotation, the attachment fields, line spacing, columns, background fill,
-    /// drawing direction and an in-command editing dialog remain NOT
-    /// IMPLEMENTED (the tool passes `0.0` and the default top-left attachment).
+    /// The interactive capture fills the rotation from
+    /// [`crate::draw_tool::ToolParameter::TextRotation`] (degrees → radians) and
+    /// the attachment from
+    /// [`crate::draw_tool::ToolParameter::MTextAttachment`] (AutoCAD's `1..=9`
+    /// codes), whose defaults reproduce the previously fixed `0.0` / top-left.
+    /// Line spacing, columns, background fill, drawing direction and an
+    /// in-command editing dialog remain NOT IMPLEMENTED.
     CreateMText,
     /// MLEADER: insert one straight-line multileader with text content from a
     /// two-point capture — the arrow position, then the landing point — followed

@@ -60,6 +60,8 @@ fn the_tool_status_projects_awaiting_text_on_the_wire_for_the_react_contract() {
             hatch_gradient_color_a: None,
             hatch_gradient_color_b: None,
             text_height: Some(2.5),
+            text_rotation: Some(0.0),
+            mtext_attachment: None,
         },
     };
     let value = serde_json::to_value(&tool).expect("the tool serializes");

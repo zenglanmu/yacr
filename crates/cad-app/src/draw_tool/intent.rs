@@ -297,10 +297,11 @@ pub enum DrawIntent {
     Hatch,
     /// TEXT: place `text` at the captured insertion point (ADR 0019 F.1).
     ///
-    /// The height is the session typed channel
-    /// ([`super::ToolParameter::TextHeight`], default `2.5`), read by the command layer,
-    /// so the intent stays the pure description of what the user supplied. The
-    /// text is always a non-empty, at most
+    /// The height and the rotation are the session typed channel
+    /// ([`super::ToolParameter::TextHeight`], default `2.5`, and
+    /// [`super::ToolParameter::TextRotation`], degrees, default `0`), read by the
+    /// command layer, so the intent stays the pure description of what the user
+    /// supplied. The text is always a non-empty, at most
     /// [`super::MAX_TOOL_TEXT_CHARS`]-character string validated at capture time.
     Text { position: Point3, text: String },
     /// MTEXT: place `text` inside the wrap rectangle whose opposite corners are
@@ -310,13 +311,16 @@ pub enum DrawIntent {
     /// automatic wrap boundary the caller derives as `|opposite.x − first.x|`
     /// (finite, `> 0`; a degenerate rectangle is an explicit
     /// `tool.mtext_zero_rect` refusal, never a fabricated width). The glyph
-    /// height is the session typed channel
-    /// ([`super::ToolParameter::TextHeight`]), the rotation is `0.0`, and the
-    /// attachment is AutoCAD's MTEXT default **top-left**
-    /// (`TextAlignH::Left` + `TextAlignV::Top`); all three are resolved by the
-    /// caller, so they never ride this intent. The text is validated at capture
-    /// time (non-empty, at most [`super::MAX_TOOL_TEXT_CHARS`] characters, and
-    /// newlines are accepted because the target is an `AcDbMText`).
+    /// height, the rotation and the attachment are the session typed channel
+    /// ([`super::ToolParameter::TextHeight`],
+    /// [`super::ToolParameter::TextRotation`] in degrees — converted once to the
+    /// stored radians — and [`super::ToolParameter::MTextAttachment`], AutoCAD's
+    /// `1..=9` codes mapped onto the domain alignment pair); all three are
+    /// resolved by the caller, so they never ride this intent. Their defaults
+    /// reproduce the previously fixed values: `0` rad and top-left. The text is
+    /// validated at capture time (non-empty, at most
+    /// [`super::MAX_TOOL_TEXT_CHARS`] characters, and newlines are accepted
+    /// because the target is an `AcDbMText`).
     MText {
         first: Point3,
         opposite: Point3,

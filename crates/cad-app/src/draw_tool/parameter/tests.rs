@@ -598,3 +598,96 @@ fn hatch_gradient_colours_are_integer_aci_indices_in_range() {
         );
     }
 }
+
+#[test]
+fn text_rotation_and_mtext_attachment_are_appended_after_the_gradient_members() {
+    // Both joined the frozen vocabulary **after** every pre-existing member, so no
+    // earlier slot moved.
+    for (parameter, key, index) in [
+        (ToolParameter::TextRotation, "textRotation", 23),
+        (ToolParameter::MTextAttachment, "mtextAttachment", 24),
+    ] {
+        assert_eq!(parameter.key(), key);
+        assert_eq!(ToolParameter::from_key(key), Some(parameter));
+        assert_eq!(parameter.index(), index, "{key} slot");
+        assert_eq!(parameter.kind(), ToolValueKind::Number, "{key}");
+        // A default the channel would refuse at commit would make the tool limp
+        // into a forced error, so each default must itself be valid.
+        parameter
+            .validate(parameter.default_value())
+            .unwrap_or_else(|error| panic!("{key} default refused: {error}"));
+    }
+    assert_eq!(ToolParameter::COUNT, 25);
+    assert_eq!(ToolParameter::ALL.len(), 25);
+    assert_eq!(
+        ToolParameter::TextRotation.default_value(),
+        ToolValue::Number(TEXT_DEFAULT_ROTATION_DEGREES)
+    );
+    assert_eq!(TEXT_DEFAULT_ROTATION_DEGREES, 0.0);
+    assert_eq!(
+        ToolParameter::MTextAttachment.default_value(),
+        ToolValue::Number(MTEXT_ATTACHMENT_TOP_LEFT)
+    );
+    assert_eq!(
+        MTEXT_ATTACHMENT_TOP_LEFT, 1.0,
+        "AutoCAD's MTEXT default attachment is top-left"
+    );
+}
+
+#[test]
+fn text_rotation_accepts_any_finite_degrees_value_and_never_wraps() {
+    // Degrees on the channel (like `hatchAngle`); no implicit wrap, so a negative
+    // angle stays negative and creation stores exactly `.to_radians()` of it.
+    for accepted in [0.0, 30.0, -30.0, 90.0, 360.0, -720.0, 1e6] {
+        ToolParameter::TextRotation
+            .validate(ToolValue::Number(accepted))
+            .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
+    }
+    for refused in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_refusal_names_parameter(
+            ToolParameter::TextRotation
+                .validate(ToolValue::Number(refused))
+                .unwrap_err(),
+            "textRotation",
+        );
+    }
+    assert_refusal_names_parameter(
+        ToolParameter::TextRotation
+            .validate(ToolValue::Flag(false))
+            .unwrap_err(),
+        "textRotation",
+    );
+}
+
+#[test]
+fn mtext_attachment_is_the_closed_integer_set_one_to_nine() {
+    for accepted in 1..=9 {
+        ToolParameter::MTextAttachment
+            .validate(ToolValue::Number(f64::from(accepted)))
+            .unwrap_or_else(|error| panic!("{accepted} refused: {error}"));
+    }
+    // Out of the set, fractional (never rounded onto a neighbouring cell) and
+    // non-finite values are refused by name.
+    for refused in [0.0, 10.0, -1.0, 1.5, f64::NAN, f64::INFINITY] {
+        let error = ToolParameter::MTextAttachment
+            .validate(ToolValue::Number(refused))
+            .unwrap_err();
+        assert_refusal_names_parameter(error, "mtextAttachment");
+    }
+    // The refusal states the documented closed set.
+    match ToolParameter::MTextAttachment
+        .validate(ToolValue::Number(10.0))
+        .unwrap_err()
+    {
+        CadError::InvalidInput(message) => {
+            assert!(message.contains("between 1 and 9"), "{message}");
+        }
+        other => panic!("expected an InvalidInput refusal, got {other:?}"),
+    }
+    assert_refusal_names_parameter(
+        ToolParameter::MTextAttachment
+            .validate(ToolValue::Flag(true))
+            .unwrap_err(),
+        "mtextAttachment",
+    );
+}

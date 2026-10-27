@@ -6,7 +6,7 @@
 //! inherent method on [`HostController`] so the call sites in `host/mod.rs` are
 //! unchanged.
 
-use cad_domain::{CadError, CadResult, Point3, SelectionRef, TextAlignH, TextAlignV};
+use cad_domain::{CadError, CadResult, Point3, SelectionRef};
 
 use crate::{Command, DrawIntent};
 
@@ -94,16 +94,22 @@ impl HostController {
             // MTEXT: the two captured corners and the terminal text. This is the
             // only place the payload's **two-corner model** is applied: the wrap
             // width is `|opposite.x − first.x|` (finite, `> 0`, refused by name
-            // otherwise), the height is the same session typed channel TEXT uses,
-            // the rotation is `0.0` and the attachment is AutoCAD's MTEXT default
-            // top-left. Nothing is fabricated: a degenerate or non-plan pair is an
-            // explicit refusal that opens no transaction.
+            // otherwise), and the height, rotation and attachment come from the
+            // session typed channel — the same `textHeight` TEXT uses, plus
+            // `textRotation` (degrees → radians, converted once here) and
+            // `mtextAttachment` (AutoCAD code `1..=9` → the domain alignment
+            // pair). The payload's documented defaults are therefore reproduced
+            // exactly when the parameters are untouched: `0` rad, Left/Top.
+            // Nothing is fabricated: a degenerate or non-plan pair, an
+            // unrepresentable rotation or an attachment code outside the closed
+            // set is an explicit refusal that opens no transaction.
             DrawIntent::MText {
                 first,
                 opposite,
                 text,
             } => {
                 let width = mtext_wrap_width(first, opposite)?;
+                let (h_align, v_align) = crate::app_drawing::mtext_attachment_align(&self.session)?;
                 (
                     crate::CommandId::CreateMText,
                     crate::CommandPayload::MText {
@@ -115,9 +121,10 @@ impl HostController {
                             .tool_parameter(crate::ToolParameter::TextHeight)
                             .number()
                             .unwrap_or(crate::draw_tool::TEXT_DEFAULT_HEIGHT),
-                        rotation: 0.0,
-                        h_align: TextAlignH::Left,
-                        v_align: TextAlignV::Top,
+                        // The domain stores radians; the channel carries degrees.
+                        rotation: crate::app_drawing::text_rotation_radians(&self.session)?,
+                        h_align,
+                        v_align,
                     },
                 )
             }

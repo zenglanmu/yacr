@@ -458,8 +458,13 @@ pub enum CommandPayload {
     /// the height from [`crate::draw_tool::ToolParameter::TextHeight`]; it is a
     /// payload field because the command is the single construction point and the
     /// value must travel with it (never re-read from a session the caller does not
-    /// own). The style is the drawing's `Standard` text style with the style
-    /// default alignment (left/baseline).
+    /// own). The **rotation** deliberately has no payload field: the command reads
+    /// it from the session it is handed through the typed channel
+    /// [`crate::draw_tool::ToolParameter::TextRotation`] (**degrees**, any finite
+    /// value) and stores the radians, so a session at its default stores `0.0`
+    /// exactly like the previously fixed unrotated text. The style is the
+    /// drawing's `Standard` text style with the style default alignment
+    /// (left/baseline).
     ///
     /// Single-line means single-line: a `text` containing `\r`/`\n` is **refused**
     /// (`text.single_line_newline`), because an `AcDbText` does not interpret
@@ -489,9 +494,16 @@ pub enum CommandPayload {
     ///   otherwise (never clamped, never dropped) and sanitized through
     ///   [`cad_domain::wrap_width_from_dxf`] like every other wrap boundary;
     /// * `height` — glyph height in world units (finite, `> 0`);
-    /// * `rotation` — rotation in radians (finite; `0.0` = unrotated);
+    /// * `rotation` — rotation in radians (finite; `0.0` = unrotated). The
+    ///   interactive capture fills it from
+    ///   [`crate::draw_tool::ToolParameter::TextRotation`] (**degrees**, any finite
+    ///   value) and converts once; a programmatic caller supplies the radians
+    ///   directly, exactly as before this parameter existed;
     /// * `h_align` / `v_align` — horizontal/vertical attachment relative to
-    ///   `position`.
+    ///   `position`. The interactive capture fills them from
+    ///   [`crate::draw_tool::ToolParameter::MTextAttachment`] (AutoCAD's `1..=9`
+    ///   codes; `1` = Left/Top, `5` = Center/Middle, `9` = Right/Bottom), so
+    ///   `TextAlignV::Baseline` is never produced by the interactive path.
     ///
     /// **Not carried, because not modelled** — the same four facets the importer
     /// marks `Partial` under `MTEXT_UNMODELLED`: line-spacing style

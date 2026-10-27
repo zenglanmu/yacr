@@ -737,3 +737,143 @@ fn the_selection_wire_name_is_text_multiline_not_camel_case() {
     );
     assert!(names.iter().any(|name| name == "text"), "{names:?}");
 }
+
+#[test]
+fn the_text_rotation_and_mtext_attachment_parameters_are_projected_for_their_own_tools() {
+    let session = fresh_session();
+
+    // TEXT owns the rotation (its payload has no rotation field) but never an
+    // attachment.
+    session.command("TEXT").expect("TEXT is admitted");
+    let tool = session.snapshot(None, None, 0).tool.expect("the tool");
+    assert_eq!(
+        tool.params.text_rotation,
+        Some(0.0),
+        "the documented default is projected, never invented"
+    );
+    assert_eq!(
+        tool.params.mtext_attachment, None,
+        "TEXT has no attachment channel"
+    );
+    session
+        .set_tool_parameter(ToolParameter::TextRotation, ToolValue::Number(30.0))
+        .expect("a finite rotation is accepted");
+    assert_eq!(
+        session
+            .snapshot(None, None, 0)
+            .tool
+            .expect("the tool")
+            .params
+            .text_rotation,
+        Some(30.0),
+        "the channel value is projected in degrees (the stored value is radians)"
+    );
+
+    // MTEXT owns both; the values carry across the tool switch like every other
+    // session-scoped parameter.
+    session.command("MTEXT").expect("MTEXT is admitted");
+    let tool = session.snapshot(None, None, 0).tool.expect("the tool");
+    assert_eq!(tool.key, "draw.mtext");
+    assert_eq!(tool.params.text_rotation, Some(30.0));
+    assert_eq!(
+        tool.params.mtext_attachment,
+        Some(1.0),
+        "AutoCAD's MTEXT default attachment"
+    );
+    session
+        .set_tool_parameter(ToolParameter::MTextAttachment, ToolValue::Number(9.0))
+        .expect("an attachment code in the closed set is accepted");
+    assert_eq!(
+        session
+            .snapshot(None, None, 0)
+            .tool
+            .expect("the tool")
+            .params
+            .mtext_attachment,
+        Some(9.0)
+    );
+
+    // Every other tool reports `null` for both, never a stale value.
+    session.command("LINE").expect("LINE is admitted");
+    let tool = session.snapshot(None, None, 0).tool.expect("the tool");
+    assert_eq!(tool.params.text_rotation, None);
+    assert_eq!(tool.params.mtext_attachment, None);
+    // A measurement capture reports `null` too.
+    let measuring = fresh_session();
+    measuring.command("DIST").expect("DIST is admitted");
+    let tool = measuring.snapshot(None, None, 0).tool.expect("the tool");
+    assert_eq!(tool.params.text_rotation, None);
+    assert_eq!(tool.params.mtext_attachment, None);
+}
+
+/// The stored layout of the first text entity of `type_key`.
+fn text_layout(
+    session: &CadSession,
+    type_key: &str,
+) -> (f64, cad_domain::TextAlignH, cad_domain::TextAlignV) {
+    let controller = session.core.controller.borrow();
+    let drawing = controller.drawing().expect("a document");
+    drawing
+        .model_space()
+        .iter()
+        .find(|entity| entity.object.type_key == type_key)
+        .and_then(|entity| match &entity.geometry {
+            SemanticGeometry::Text {
+                rotation,
+                h_align,
+                v_align,
+                ..
+            } => Some((*rotation, *h_align, *v_align)),
+            _ => None,
+        })
+        .expect("the created text entity")
+}
+
+#[test]
+fn the_text_creation_parameters_reach_the_stored_entities_through_the_ui_session() {
+    use cad_domain::{TextAlignH, TextAlignV};
+
+    // TEXT: 30° on the channel becomes π/6 radians in the entity.
+    let session = fresh_session();
+    session
+        .set_tool_parameter(ToolParameter::TextRotation, ToolValue::Number(30.0))
+        .expect("a finite rotation is accepted");
+    session.command("TEXT").expect("TEXT is admitted");
+    click(&session, [400.0, 300.0], 1);
+    session.set_tool_text("ROT").expect("the text");
+    let (rotation, h_align, v_align) = text_layout(&session, "AcDbText");
+    assert_eq!(
+        rotation,
+        30.0_f64.to_radians(),
+        "TEXT stores the radians of the channel's degrees"
+    );
+    assert_eq!(
+        (h_align, v_align),
+        (TextAlignH::Left, TextAlignV::Baseline),
+        "TEXT keeps the style-default alignment"
+    );
+
+    // MTEXT: the same rotation plus attachment code 9 (bottom-right).
+    let session = fresh_session();
+    session
+        .set_tool_parameter(ToolParameter::TextRotation, ToolValue::Number(-30.0))
+        .expect("a finite rotation is accepted");
+    session
+        .set_tool_parameter(ToolParameter::MTextAttachment, ToolValue::Number(9.0))
+        .expect("a code in the closed set is accepted");
+    session.command("MTEXT").expect("MTEXT is admitted");
+    click(&session, [400.0, 300.0], 1);
+    click(&session, [520.0, 360.0], 3);
+    session.set_tool_text("NEG").expect("the text");
+    let (rotation, h_align, v_align) = text_layout(&session, "AcDbMText");
+    assert_eq!(
+        rotation,
+        -30.0_f64.to_radians(),
+        "MTEXT stores the negative radians verbatim"
+    );
+    assert_eq!(
+        (h_align, v_align),
+        (TextAlignH::Right, TextAlignV::Bottom),
+        "attachment code 9 is the bottom-right cell"
+    );
+}

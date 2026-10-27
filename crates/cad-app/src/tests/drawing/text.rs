@@ -375,3 +375,144 @@ fn a_created_text_exports_as_text_and_reimports() {
     assert!((position.y - 5.0).abs() < 1e-9, "{position:?}");
     assert!((height - 3.5).abs() < 1e-9, "{height}");
 }
+
+/// Dispatch one TEXT creation with the given payload (the create path under test).
+fn create_text(app: &mut Application, session: &mut SessionState, position: Point3) {
+    execute(
+        app,
+        session,
+        CommandId::CreateText,
+        CommandPayload::Text {
+            position,
+            text: "ROT".into(),
+            height: 2.5,
+        },
+    )
+    .expect("the text is created");
+}
+
+#[test]
+fn create_text_defaults_to_the_zero_rotation_of_the_session_channel() {
+    // The parameter's default reproduces the previously fixed value byte for byte:
+    // an untouched session stores exactly `0.0` radians.
+    let (mut app, mut session) = text_app(Vec::new());
+    assert_eq!(
+        session.tool_parameter(ToolParameter::TextRotation),
+        ToolValue::Number(0.0),
+        "the session starts at the documented default"
+    );
+    create_text(&mut app, &mut session, p3(0.0, 0.0, 0.0));
+    assert_eq!(the_text(&app).4, 0.0, "unrotated, exactly as before");
+}
+
+#[test]
+fn create_text_converts_the_session_degrees_once_into_stored_radians() {
+    // The channel carries the degrees AutoCAD prompts with; the domain stores
+    // radians. 30° is π/6 and the conversion happens exactly once.
+    let (mut app, mut session) = text_app(Vec::new());
+    session
+        .set_tool_parameter(ToolParameter::TextRotation, ToolValue::Number(30.0))
+        .expect("30 degrees is a finite value");
+    create_text(&mut app, &mut session, p3(1.0, 2.0, 0.0));
+    // Exactly one conversion: the stored value is `30°.to_radians()`, which is
+    // π/6 to the last bit of the two literals' rounding.
+    let stored = the_text(&app).4;
+    assert_eq!(
+        stored,
+        30.0_f64.to_radians(),
+        "the channel's degrees are converted once with `.to_radians()`"
+    );
+    assert!(
+        (stored - std::f64::consts::FRAC_PI_6).abs() < 1e-15,
+        "30 degrees is π/6 radians, got {stored}"
+    );
+}
+
+#[test]
+fn create_text_stores_a_negative_rotation_verbatim_without_wrapping() {
+    let (mut app, mut session) = text_app(Vec::new());
+    session
+        .set_tool_parameter(ToolParameter::TextRotation, ToolValue::Number(-30.0))
+        .expect("-30 degrees is a finite value");
+    create_text(&mut app, &mut session, p3(1.0, 2.0, 0.0));
+    let stored = the_text(&app).4;
+    assert_eq!(
+        stored,
+        -30.0_f64.to_radians(),
+        "no wrap and no clamp: a negative angle stays negative"
+    );
+}
+
+#[test]
+fn create_text_refuses_a_forced_non_finite_rotation_and_writes_nothing() {
+    // The channel refuses NaN/∞, so this forced store value reaches the command's
+    // own guard: it must refuse by name and write nothing.
+    for refused in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let (mut app, mut session) = text_app(Vec::new());
+        let before = revision(&app);
+        session.force_tool_parameter(ToolParameter::TextRotation, ToolValue::Number(refused));
+        let error = execute(
+            &mut app,
+            &mut session,
+            CommandId::CreateText,
+            CommandPayload::Text {
+                position: p3(0.0, 0.0, 0.0),
+                text: "BAD".into(),
+                height: 2.5,
+            },
+        )
+        .expect_err("a non-finite rotation must refuse");
+        let message = match error {
+            CadError::InvalidInput(message) => message,
+            other => panic!("expected an InvalidInput refusal, got {other:?}"),
+        };
+        assert!(message.contains("textRotation"), "{message}");
+        assert!(message.contains("finite"), "{message}");
+        assert_eq!(revision(&app), before, "{refused}: no transaction ran");
+        assert!(!app.can_undo(&DocumentId(1)), "{refused}: no undo entry");
+        assert!(
+            app.workspace.documents[&DocumentId(1)]
+                .drawing
+                .model_space()
+                .is_empty(),
+            "{refused}: nothing written"
+        );
+    }
+}
+
+#[test]
+fn the_text_creation_parameter_channel_refuses_by_name_and_writes_nothing() {
+    let (app, mut session) = text_app(Vec::new());
+    let before = revision(&app);
+    for (parameter, refused, expected) in [
+        (ToolParameter::TextRotation, f64::NAN, "must be finite"),
+        (ToolParameter::TextRotation, f64::INFINITY, "must be finite"),
+        (ToolParameter::MTextAttachment, 0.0, "between 1 and 9"),
+        (ToolParameter::MTextAttachment, 10.0, "between 1 and 9"),
+        (ToolParameter::MTextAttachment, 1.5, "between 1 and 9"),
+        (ToolParameter::MTextAttachment, f64::NAN, "between 1 and 9"),
+    ] {
+        let error = session
+            .set_tool_parameter(parameter, ToolValue::Number(refused))
+            .expect_err("the channel refuses the value");
+        let message = match error {
+            CadError::InvalidInput(message) => message,
+            other => panic!("expected an InvalidInput refusal, got {other:?}"),
+        };
+        assert!(
+            message.contains(parameter.key()),
+            "the refusal names '{}': {message}",
+            parameter.key()
+        );
+        assert!(message.contains(expected), "{message}");
+        // The store keeps its previous value: a refusal never mutates.
+        assert_eq!(
+            session.tool_parameter(parameter),
+            parameter.default_value(),
+            "{} keeps its default",
+            parameter.key()
+        );
+    }
+    assert_eq!(revision(&app), before, "no channel refusal writes");
+    assert!(!app.can_undo(&DocumentId(1)));
+}

@@ -51,5 +51,15 @@ pub(crate) fn authorizing_command(parameter: ToolParameter) -> CommandId {
         // exactly the gate MTEXT needs — there is no second height parameter and no
         // per-kind authorization to drift.
         ToolParameter::TextHeight => CommandId::CreateText,
+        // TEXT creation also owns the rotation: the `Text` payload has no rotation
+        // field, so `textRotation` is read straight from this channel by
+        // `create_text`. MTEXT consumes the same parameter (it has no rotation
+        // parameter of its own), and `CreateMText` is Work-only too, so the one
+        // authorization is exactly the gate both create commands need.
+        ToolParameter::TextRotation => CommandId::CreateText,
+        // MTEXT attachment is MTEXT-only, so it is authorized against the MTEXT
+        // create command (`CreateMText` is Work-only, like every other parameter
+        // command here).
+        ToolParameter::MTextAttachment => CommandId::CreateMText,
     }
 }

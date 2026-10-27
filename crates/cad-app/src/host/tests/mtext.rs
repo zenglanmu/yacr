@@ -3,9 +3,12 @@
 //! The tool captures the two opposite corners of the wrap rectangle and then the
 //! terminal typed text. The **host** is the one place the payload's two-corner
 //! model is applied: `width = |opposite.x − first.x|` (finite, `> 0`), height from
-//! [`ToolParameter::TextHeight`], rotation `0.0` and AutoCAD's MTEXT default
-//! top-left attachment. A degenerate or off-plane pair is an explicit refusal
-//! that opens no transaction.
+//! [`ToolParameter::TextHeight`], rotation from
+//! [`ToolParameter::TextRotation`] (degrees → radians, converted once) and the
+//! attachment from [`ToolParameter::MTextAttachment`] (AutoCAD's `1..=9` codes →
+//! the domain alignment pair; the untouched defaults are `0` rad and top-left).
+//! A degenerate or off-plane pair, and a value the closed sets do not allow, are
+//! explicit refusals that open no transaction.
 
 use super::*;
 
@@ -134,17 +137,17 @@ fn mtext_captures_two_corners_and_writes_one_acdbmtext() {
     );
     assert_eq!(
         stored.rotation, 0.0,
-        "rotation is fixed at zero in this subset"
+        "the untouched `textRotation` default is 0, exactly as before"
     );
     assert_eq!(
         stored.h_align,
         TextAlignH::Left,
-        "AutoCAD MTEXT default attachment"
+        "the untouched `mtextAttachment` default is 1 (left)"
     );
     assert_eq!(
         stored.v_align,
         TextAlignV::Top,
-        "AutoCAD MTEXT default attachment"
+        "the untouched `mtextAttachment` default is 1 (top)"
     );
     assert_eq!(
         stored.width,
@@ -280,4 +283,139 @@ fn mtext_confirm_is_refused_while_the_text_prompt_is_open() {
             .kind,
         DrawToolKind::MText
     );
+}
+
+#[test]
+fn mtext_rotation_comes_from_the_text_rotation_parameter_in_radians() {
+    // The channel carries degrees (AutoCAD's prompt unit) and the host converts
+    // once into the radians the domain stores: 30° is π/6.
+    let mut controller = fixture();
+    controller
+        .session
+        .set_tool_parameter(ToolParameter::TextRotation, ToolValue::Number(30.0))
+        .expect("30 degrees is finite");
+    let traced = capture_and_confirm(&mut controller, p(0.0, 0.0), p(40.0, 20.0), "ROT")
+        .expect("the create runs");
+    assert!(traced.result.is_ok(), "{:?}", traced.result);
+    let created = mtexts(&controller);
+    assert_eq!(created.len(), 1);
+    let stored = created[0].rotation;
+    assert_eq!(
+        stored,
+        30.0_f64.to_radians(),
+        "the channel's degrees are converted once with `.to_radians()`"
+    );
+    assert!(
+        (stored - std::f64::consts::FRAC_PI_6).abs() < 1e-15,
+        "30 degrees is π/6 radians, got {stored}"
+    );
+    // The default attachment is untouched by a rotation change.
+    assert_eq!(created[0].h_align, TextAlignH::Left);
+    assert_eq!(created[0].v_align, TextAlignV::Top);
+}
+
+#[test]
+fn mtext_stores_a_negative_rotation_verbatim_without_wrapping() {
+    let mut controller = fixture();
+    controller
+        .session
+        .set_tool_parameter(ToolParameter::TextRotation, ToolValue::Number(-30.0))
+        .expect("-30 degrees is finite");
+    let traced = capture_and_confirm(&mut controller, p(0.0, 0.0), p(40.0, 20.0), "NEG")
+        .expect("the create runs");
+    assert!(traced.result.is_ok(), "{:?}", traced.result);
+    assert_eq!(
+        mtexts(&controller)[0].rotation,
+        -30.0_f64.to_radians(),
+        "no wrap and no clamp: a negative angle stays negative"
+    );
+}
+
+#[test]
+fn mtext_attachment_parameter_maps_the_nine_codes_onto_the_domain_grid() {
+    use TextAlignH::{Center, Left, Right};
+    use TextAlignV::{Bottom, Middle, Top};
+    for (code, h_align, v_align) in [
+        (1.0, Left, Top),
+        (2.0, Center, Top),
+        (3.0, Right, Top),
+        (4.0, Left, Middle),
+        (5.0, Center, Middle),
+        (6.0, Right, Middle),
+        (7.0, Left, Bottom),
+        (8.0, Center, Bottom),
+        (9.0, Right, Bottom),
+    ] {
+        let mut controller = fixture();
+        controller
+            .session
+            .set_tool_parameter(ToolParameter::MTextAttachment, ToolValue::Number(code))
+            .expect("a code in the closed set is accepted");
+        let traced = capture_and_confirm(&mut controller, p(0.0, 0.0), p(40.0, 20.0), "ATT")
+            .expect("the create runs");
+        assert!(traced.result.is_ok(), "{code}: {:?}", traced.result);
+        let created = mtexts(&controller);
+        assert_eq!(created.len(), 1, "{code}: one entity");
+        assert_eq!(
+            (created[0].h_align, created[0].v_align),
+            (h_align, v_align),
+            "attachment code {code}"
+        );
+        assert_ne!(
+            created[0].v_align,
+            TextAlignV::Baseline,
+            "{code}: no attachment code names a baseline"
+        );
+    }
+}
+
+#[test]
+fn mtext_refuses_an_attachment_code_outside_the_closed_set_instead_of_guessing() {
+    // The channel refuses 0/10/1.5/NaN, so this forced store value reaches the
+    // intent mapping's own guard: it must refuse by name and write nothing.
+    for refused in [0.0, 10.0, 1.5, f64::NAN] {
+        let mut controller = fixture();
+        let before = entity_count(&controller);
+        controller
+            .session
+            .force_tool_parameter(ToolParameter::MTextAttachment, ToolValue::Number(refused));
+        let error = controller
+            .command_for_draw_intent(
+                DrawIntent::MText {
+                    first: p(0.0, 0.0),
+                    opposite: p(40.0, 20.0),
+                    text: "BAD".into(),
+                },
+                &[],
+            )
+            .err()
+            .expect("an out-of-set attachment cannot become a payload");
+        let message = match error {
+            CadError::InvalidInput(message) => message,
+            other => panic!("expected an InvalidInput refusal, got {other:?}"),
+        };
+        assert!(message.contains("mtextAttachment"), "{message}");
+        assert!(message.contains("between 1 and 9"), "{message}");
+        assert_eq!(entity_count(&controller), before, "{refused}: no write");
+    }
+}
+
+#[test]
+fn mtext_refuses_a_forced_non_finite_rotation_at_the_intent_mapping() {
+    let mut controller = fixture();
+    controller
+        .session
+        .force_tool_parameter(ToolParameter::TextRotation, ToolValue::Number(f64::NAN));
+    let error = controller
+        .command_for_draw_intent(
+            DrawIntent::MText {
+                first: p(0.0, 0.0),
+                opposite: p(40.0, 20.0),
+                text: "BAD".into(),
+            },
+            &[],
+        )
+        .err()
+        .expect("a non-finite rotation cannot become a payload");
+    assert!(error.to_string().contains("textRotation"), "{error}");
 }

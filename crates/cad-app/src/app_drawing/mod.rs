@@ -62,6 +62,11 @@ mod text_edit;
 // The single line-break / stored-type-key authority MTEXT creation and TEXTEDIT
 // share; `pub(crate)` because the TEXT capture channel refuses a newline too.
 pub(crate) mod text_policy;
+// The session-side resolution of `textRotation` / `mtextAttachment`; shared by
+// TEXT creation (which reads the rotation directly, its payload has no rotation
+// field) and the interactive MTEXT capture (which fills its payload from both).
+mod text_params;
+pub(crate) use text_params::{mtext_attachment_align, text_rotation_radians};
 mod trim_boundary;
 mod trim_curves;
 mod trim_extend;

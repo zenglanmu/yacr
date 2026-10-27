@@ -634,9 +634,14 @@ impl Application {
     /// is [`resolve_created_text_style`], the same one MTEXT creation uses. The
     /// **alignment** is the style default (left/baseline): the `Style` table
     /// carries no alignment and TEXT creation has no justify prompt, so a
-    /// per-invocation alignment would be an invented value. A single-line text is
-    /// always on the `+Z` plane through its insertion point — there is no plane
-    /// input to be non-`+Z` and nothing is projected.
+    /// per-invocation alignment would be an invented value. The **rotation** is
+    /// the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::TextRotation`], degrees, default `0`),
+    /// resolved by [`text_rotation_radians`] and stored in the domain's radians:
+    /// the payload carries no rotation field, so the channel is the only source
+    /// and nothing invents a second one. A single-line text is always on the `+Z`
+    /// plane through its insertion point — there is no plane input to be
+    /// non-`+Z` and nothing is projected.
     ///
     /// The entity goes through the shared [`Self::commit_new_entity`] funnel: one
     /// `AcDbText` entity, one transaction, one undo step, active-layer check
@@ -701,9 +706,12 @@ impl Application {
             position: *position,
             style,
             height: *height,
-            // No rotation prompt: the documented subset is unrotated text, and the
-            // style table carries no rotation to defer to.
-            rotation: 0.0,
+            // The `Text` payload deliberately carries no rotation (adding one
+            // would be a second construction input), so the session typed channel
+            // `textRotation` is the single source: degrees in, radians stored, one
+            // conversion. A session at its default stores `0.0`, exactly as
+            // before the parameter existed.
+            rotation: text_rotation_radians(session)?,
             font,
             // Style defaults: the `Style` table has no alignment column and TEXT
             // creation has no justify prompt.

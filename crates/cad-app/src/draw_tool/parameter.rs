@@ -125,6 +125,30 @@ pub const HATCH_STYLE_IGNORE: f64 = 2.0;
 /// forced refusal at commit.
 pub const TEXT_DEFAULT_HEIGHT: f64 = 2.5;
 
+/// The documented default TEXT/MTEXT rotation, in **degrees**: `0` (unrotated).
+///
+/// The channel carries degrees — the unit AutoCAD prompts with, like
+/// [`ToolParameter::HatchAngle`] and [`ToolParameter::HatchGradientAngle`] — and
+/// the creation site converts exactly once with `.to_radians()`, because the
+/// domain stores the rotation **in radians**. `0` is a valid value for
+/// [`ToolParameter::TextRotation`], so the default can never limp into a forced
+/// refusal at commit.
+pub const TEXT_DEFAULT_ROTATION_DEGREES: f64 = 0.0;
+
+/// The default MTEXT attachment code: **`1`, top-left**.
+///
+/// AutoCAD addresses an MTEXT's attachment with DXF group `71`, a 3×3 grid:
+/// `1..=3` are the top row (Left/Center/Right), `4..=6` the middle row and
+/// `7..=9` the bottom row. `1` is AutoCAD's `MTEXT` default and exactly what
+/// MTEXT creation stored before the parameter existed, so the default keeps
+/// today's output. It is a valid code, so the default can never limp into a
+/// forced refusal at commit.
+pub const MTEXT_ATTACHMENT_TOP_LEFT: f64 = 1.0;
+/// The lowest MTEXT attachment code (see [`MTEXT_ATTACHMENT_TOP_LEFT`]).
+pub const MTEXT_ATTACHMENT_MIN: f64 = 1.0;
+/// The highest MTEXT attachment code: `9`, bottom-right.
+pub const MTEXT_ATTACHMENT_MAX: f64 = 9.0;
+
 /// A session-scoped tool parameter with a stable machine key (ADR 0016 decision A).
 ///
 /// The member set and the machine keys are the frozen channel vocabulary: the
@@ -192,11 +216,26 @@ pub enum ToolParameter {
     HatchGradientColorA,
     /// HATCH gradient end-stop colour (see [`Self::HatchGradientColorA`]).
     HatchGradientColorB,
+    /// TEXT/MTEXT rotation in **degrees** (the unit AutoCAD prompts with, exactly
+    /// like [`Self::HatchAngle`]): any **finite** value, with **no implicit
+    /// wrap**, so `-30` stays `-30` and a full turn is not silently folded into
+    /// `0`. The creation sites convert it exactly once with `.to_radians()`,
+    /// because the domain stores the rotation in radians. TEXT and MTEXT are the
+    /// only consumers — `TEXTEDIT` never re-rotates and MLEADER keeps its own
+    /// orientation rule.
+    TextRotation,
+    /// MTEXT attachment: a **closed set** of AutoCAD's nine attachment codes
+    /// (`1..=9`, DXF group `71`). `1..=3` are the top row (Left/Center/Right),
+    /// `4..=6` the middle row (Left/Center/Right) and `7..=9` the bottom row
+    /// (Left/Center/Right): the creation site maps `h = (code - 1) % 3` and
+    /// `row = (code - 1) / 3` onto the domain's `TextAlignH`/`TextAlignV` pair,
+    /// so `TextAlignV::Baseline` is never produced. MTEXT is the only consumer.
+    MTextAttachment,
 }
 
 impl ToolParameter {
     /// Every member, in a fixed order (the key round-trip uses it).
-    pub const ALL: [ToolParameter; 23] = [
+    pub const ALL: [ToolParameter; 25] = [
         ToolParameter::PolygonSides,
         ToolParameter::FilletRadius,
         ToolParameter::ChamferDistanceA,
@@ -220,10 +259,12 @@ impl ToolParameter {
         ToolParameter::HatchGradientAngle,
         ToolParameter::HatchGradientColorA,
         ToolParameter::HatchGradientColorB,
+        ToolParameter::TextRotation,
+        ToolParameter::MTextAttachment,
     ];
 
     /// Number of members (the store's fixed width).
-    pub const COUNT: usize = 23;
+    pub const COUNT: usize = 25;
 
     /// The dense index of this member in [`Self::ALL`] (the store's slot).
     pub fn index(self) -> usize {
@@ -251,6 +292,8 @@ impl ToolParameter {
             Self::HatchGradientAngle => 20,
             Self::HatchGradientColorA => 21,
             Self::HatchGradientColorB => 22,
+            Self::TextRotation => 23,
+            Self::MTextAttachment => 24,
         }
     }
 
@@ -284,6 +327,8 @@ impl ToolParameter {
             Self::HatchGradientAngle => "hatchGradientAngle",
             Self::HatchGradientColorA => "hatchGradientColorA",
             Self::HatchGradientColorB => "hatchGradientColorB",
+            Self::TextRotation => "textRotation",
+            Self::MTextAttachment => "mtextAttachment",
         }
     }
 
@@ -336,6 +381,12 @@ impl ToolParameter {
     ///   both are real palette colours ([`HATCH_GRADIENT_DEFAULT_ACI_A`] /
     ///   [`HATCH_GRADIENT_DEFAULT_ACI_B`]) and are visually distinct, which ACI
     ///   `0` (ByBlock, no colour at all) could never be.
+    /// * `TextRotation` **0** degrees — [`TEXT_DEFAULT_ROTATION_DEGREES`], the
+    ///   unrotated TEXT/MTEXT creation of today (and a *valid* value, so the
+    ///   default can never limp into a forced refusal at commit).
+    /// * `MTextAttachment` **1 (top-left)** — [`MTEXT_ATTACHMENT_TOP_LEFT`],
+    ///   AutoCAD's MTEXT default attachment and the exact pair MTEXT creation
+    ///   stored before the parameter existed (Left/Top).
     ///
     /// Note the fill-angle range (ADR 0016 decision A): the legal values are
     /// `0 < |angle| <= 360`, so the full-circle **default 360 is re-settable** (a
@@ -366,6 +417,8 @@ impl ToolParameter {
             Self::HatchGradientAngle => ToolValue::Number(0.0),
             Self::HatchGradientColorA => ToolValue::Number(HATCH_GRADIENT_DEFAULT_ACI_A),
             Self::HatchGradientColorB => ToolValue::Number(HATCH_GRADIENT_DEFAULT_ACI_B),
+            Self::TextRotation => ToolValue::Number(TEXT_DEFAULT_ROTATION_DEGREES),
+            Self::MTextAttachment => ToolValue::Number(MTEXT_ATTACHMENT_TOP_LEFT),
         }
     }
 
@@ -430,6 +483,18 @@ impl ToolParameter {
             | (Self::HatchGradientColorB, ToolValue::Number(number)) => {
                 integer_in_range(self, number, 0, 255)
             }
+            // Any finite degrees value: no implicit wrap, so a negative angle is
+            // stored as the negative radian value. NaN/∞ are refused by name.
+            (Self::TextRotation, ToolValue::Number(number)) => finite(self, number),
+            // AutoCAD's nine attachment codes: an integer in `1..=9`. `0`, `10`,
+            // a fraction and a non-finite value are refused by name — never
+            // rounded and never folded onto another cell.
+            (Self::MTextAttachment, ToolValue::Number(number)) => integer_in_range(
+                self,
+                number,
+                MTEXT_ATTACHMENT_MIN as i64,
+                MTEXT_ATTACHMENT_MAX as i64,
+            ),
             (Self::AlignScale, ToolValue::Flag(_))
             | (Self::ArrayRotateItems, ToolValue::Flag(_))
             | (Self::HatchDouble, ToolValue::Flag(_)) => Ok(()),

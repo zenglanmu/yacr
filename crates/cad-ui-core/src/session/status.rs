@@ -289,6 +289,12 @@ pub struct CadToolParams {
     pub hatch_gradient_color_b: Option<f64>,
     /// The TEXT glyph height, or `null` for every other tool (ADR 0019 F.1).
     pub text_height: Option<f64>,
+    /// The TEXT/MTEXT rotation in **degrees** (the domain stores radians), or
+    /// `null` for every other tool.
+    pub text_rotation: Option<f64>,
+    /// The MTEXT attachment code — AutoCAD's closed set `1..=9` (`1` top-left,
+    /// `5` centre-middle, `9` bottom-right) — or `null` for every other tool.
+    pub mtext_attachment: Option<f64>,
 }
 
 /// The active interactive tool, projected from `cad_app`'s real capture state.
@@ -612,7 +618,8 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
 /// `session` is the authoritative session whose typed parameter store supplies the
 /// projected values (POLYGON's `sides`, FILLET's `filletRadius`, CHAMFER's
 /// `chamferDistanceA`/`B`, ARRAYRECT's four grid parameters, ARRAYPOLAR's item
-/// count / fill angle / rotate flag); each is present **only** while its own tool is
+/// count / fill angle / rotate flag, TEXT/MTEXT's `textHeight`/`textRotation` and
+/// MTEXT's `mtextAttachment`); each is present **only** while its own tool is
 /// active, so a control's enablement is derived from `tool.key` and never from a
 /// stale local value. No value is fabricated for an inactive tool.
 pub(super) fn cad_tool(
@@ -759,6 +766,19 @@ pub(super) fn cad_tool(
                     ToolParameter::TextHeight,
                     matches!(preview.kind, DrawToolKind::Text | DrawToolKind::MText),
                 ),
+                // The creation rotation (degrees) rides the same two kinds: TEXT
+                // reads it directly at creation, MTEXT converts it into its
+                // payload. No other kind stores a rotation parameter.
+                text_rotation: number(
+                    ToolParameter::TextRotation,
+                    matches!(preview.kind, DrawToolKind::Text | DrawToolKind::MText),
+                ),
+                // MTEXT is the only tool with an attachment channel; TEXT's
+                // alignment is the style default and never parameterised.
+                mtext_attachment: number(
+                    ToolParameter::MTextAttachment,
+                    preview.kind == DrawToolKind::MText,
+                ),
             },
         }),
         ToolSnapshot::Measuring(preview) => Some(CadTool {
@@ -796,6 +816,8 @@ pub(super) fn cad_tool(
                 hatch_gradient_color_a: None,
                 hatch_gradient_color_b: None,
                 text_height: None,
+                text_rotation: None,
+                mtext_attachment: None,
             },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,

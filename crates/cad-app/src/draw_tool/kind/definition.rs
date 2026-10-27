@@ -479,13 +479,16 @@ pub enum DrawToolKind {
     /// **terminal**: once the point complement is complete, the submitted text
     /// completes the command immediately (no second `Confirm`).
     ///
-    /// The height is the session typed parameter
+    /// The height and the rotation are the session typed parameters
     /// [`super::ToolParameter::TextHeight`] (finite, `> 0`, default `2.5` — the
     /// documented constant, because the drawing's `Style` table carries no
-    /// height), so the capture never invents one.
+    /// height) and [`super::ToolParameter::TextRotation`] (any finite degrees
+    /// value, default `0`, converted once to the stored radians), so the capture
+    /// never invents one.
     ///
     /// Deliberate subset (NOT IMPLEMENTED for now): a per-invocation height /
-    /// rotation prompt, the `Justify` / `Style` / `Align` / `Fit` / `Center` /
+    /// rotation prompt (both are session parameters with no in-tool prompt yet),
+    /// the `Justify` / `Style` / `Align` / `Fit` / `Center` /
     /// `Middle` / `Right` / `TL` sub-prompts (the stored alignment is always the
     /// style default, left/baseline), width factor, oblique angle, character
     /// spacing, background/mask and any in-canvas in-place editor (the React
@@ -502,15 +505,18 @@ pub enum DrawToolKind {
     /// `tool.mtext_zero_rect` refusal, never a fabricated width). The glyph
     /// `height` is the session typed channel
     /// [`super::ToolParameter::TextHeight`] (the same `2.5` default TEXT uses),
-    /// `rotation` is `0.0`, and the attachment is the AutoCAD MTEXT default
-    /// **top-left** (`TextAlignH::Left` + `TextAlignV::Top`). The text step is the
-    /// same terminal typed channel as [`Self::Text`]; newlines are allowed and
+    /// the `rotation` is [`super::ToolParameter::TextRotation`] (degrees, default
+    /// `0`, converted once to the stored radians) and the attachment is
+    /// [`super::ToolParameter::MTextAttachment`] (AutoCAD's `1..=9` codes, default
+    /// `1` = top-left → `TextAlignH::Left` + `TextAlignV::Top`). The text step is
+    /// the same terminal typed channel as [`Self::Text`]; newlines are allowed and
     /// stored as `\P` by the shared policy (`AcDbMText`).
     ///
     /// Deliberate subset (NOT IMPLEMENTED, so the honest union stays explicit):
-    /// user-settable rotation (`TextRotation`), user-settable attachment /
-    /// justification, line spacing, columns, background fill, drawing direction
-    /// and any in-command MTEXT editing dialog. None of them has a parameter, a
+    /// an in-tool rotation / attachment prompt (both are session parameters with
+    /// no prompt yet; the GUI comes later), user-settable justification outside the
+    /// nine attachment codes, line spacing, columns, background fill, drawing
+    /// direction and any in-command MTEXT editing dialog. None of them has a
     /// prompt or a payload field.
     MText,
     /// MLEADER: the arrow position, then the landing point, then the text
