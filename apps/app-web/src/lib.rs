@@ -71,6 +71,10 @@
 //! status()                                                  -> JSON status
 //! document()                                                -> JSON document summary
 //! last_import_ms()                                          -> f64 milliseconds
+//! shell_status()                                            -> JSON `cad_status` snapshot
+//! shell_commands()                                          -> JSON array of executable command names
+//! shell_aliases()                                           -> JSON array of `[alias, canonical]` pairs
+//! shell_command(name)                                       -> Err("unsupported-runtime: cad_command: …")
 //! ```
 //!
 //! `resize`/`zoom_at`/`pan`/`status`/`document`/`last_import_ms` are
@@ -89,6 +93,21 @@
 //! `start` loads the compiled-in synthetic fixture with the stable label
 //! `synthetic-four-lines.dwg`; `open_bytes` opens **caller-supplied DWG bytes**
 //! (the browser shell reads them with the File API) and replaces a live session.
+//!
+//! # The shell surface: the shared React chrome without Tauri IPC
+//!
+//! The desktop hosts serve the chrome (`apps/desktop-ui`) through Tauri commands.
+//! A browser page (and an Android WebView) has no IPC, so [`shell`] exposes the
+//! **same four wire answers** directly: `shell_status()` is the frozen `cad_status`
+//! snapshot (`cad_ui_core::session::CadStatus`) overlaid with this session's **real**
+//! facts — its label, resident batch/draw counts, presented-frame count, camera,
+//! adapter and installed-document count — serialized with
+//! `surfaceMode: "dom-canvas"`, `palettesAvailable: false` and the session's own
+//! `canvasSession` descriptor; `shell_commands()`/`shell_aliases()` are the honest
+//! **empty** vocabulary (there is no command router here); `shell_command(name)`
+//! always refuses with the stable `unsupported-runtime: cad_command` prefix. The
+//! chrome therefore renders with every capability it does not have turned **off**
+//! rather than with fabricated state (see [`shell`] for the per-field table).
 //!
 //! # Failure vocabulary (stable)
 //!
@@ -156,12 +175,17 @@
 //!   `WebAssembly.Memory` (the page's is untouched), and the per-open peak is the
 //!   same work. `heap_after_open` therefore measures the Worker's heap when the
 //!   isolated carrier is used; it is not a claim about the tab's total memory.
-//! - **No command surface.** Pan/zoom are camera-only (a uniform change: no
+//! - **A shell status surface, but still no command surface.** [`shell`] serves
+//!   the shared chrome's frozen `cad_status` snapshot from wasm with no host
+//!   process behind it (see the section above), and it says exactly what this
+//!   carrier cannot do: `canNew`/`canOpen`/`canSave`/`canPlot`/`canFit` are
+//!   `false`, `entityCount` is `null` (the database is released) and
+//!   `shell_commands()` is `[]`. Pan/zoom are camera-only (a uniform change: no
 //!   re-parse and no re-upload), which is exactly what a viewport needs. There is
-//!   no measurement, annotation, editing or wire-protocol work here. That is also
-//!   **why the imported database is released** ([`budget::DB_RETAINED`] is
-//!   `false`): nothing in this contract can use it after the display
-//!   representation exists.
+//!   no measurement, annotation, editing or wire-protocol work here — `shell_command`
+//!   refuses every name instead of faking one. That is also **why the imported
+//!   database is released** ([`budget::DB_RETAINED`] is `false`): nothing in this
+//!   contract can use it after the display representation exists.
 //! - **Chunked upload, one atomic commit.** The scene is staged in bounded
 //!   `prepare_upload_batches` chunks (`upload_chunks`,
 //!   `peak_batches_per_chunk`) but published by a single `commit_upload`, so the
@@ -198,8 +222,13 @@
 //!   `heap_after_open` can only improve if the *peak* improves — an honest partial
 //!   improvement, not a claim that a 4.2 MB file is now cheap.
 //!
-//! Native builds cannot present on a DOM canvas, so every entry point below
-//! returns the explicit NOT IMPLEMENTED diagnostic instead of a stub success.
+//! Native builds cannot present on a DOM canvas, so the session entry points below
+//! return the explicit NOT IMPLEMENTED diagnostic instead of a stub success. The
+//! **pure** answers keep their honest value there instead of refusing: the
+//! capability report ([`worker_capability`]) reports the native limitations it can
+//! see, and the shell surface ([`shell`]) reports the no-session status, the empty
+//! command vocabulary and the same `unsupported-runtime: cad_command` refusal —
+//! none of which needs a browser to be true.
 
 /// The stable reason a native build has no canvas host.
 ///
@@ -220,6 +249,18 @@ pub mod budget;
 /// the decision matrix (Chromium 141 vs WebKitGTK 2.52.6) is unit tested on the
 /// host. Read the module docs for the measured capability split.
 pub mod capability;
+
+/// The **host-agnostic shell surface**: `shell_status`/`shell_commands`/
+/// `shell_aliases`/`shell_command`, i.e. the `cad_status` snapshot and command
+/// vocabulary the shared React chrome (`apps/desktop-ui`) polls, served without
+/// Tauri IPC.
+///
+/// Target-independent on purpose: the projection is a pure function of observed
+/// session facts ([`shell::status_json`]), so its exact wire shape — including that
+/// every unimplemented capability is `false` — is asserted by host unit tests
+/// rather than only in a browser. Read the module docs for the per-field table and
+/// for why the command vocabulary is empty.
+pub mod shell;
 
 #[cfg(target_arch = "wasm32")]
 mod session;

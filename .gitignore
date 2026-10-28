@@ -17,10 +17,30 @@ keystore.properties
 # Cloudflare Pages/Wrangler local state (scripts/deploy-cloudflare-pages.sh)
 .wrangler/
 
-# Bundled CAD fonts for the Android APK are third-party and not committed;
-# assemble them with scripts/fetch-fonts.sh (see the README in that folder).
-apps/app-android/assets/fonts/*
-!apps/app-android/assets/fonts/README.md
+# Bundled CAD fonts are third-party and not committed; assemble them with
+# scripts/fetch-fonts.sh (see fonts/SOURCE.md and docs/fonts.md). Hosts keep them
+# outside the repository tree (the retired Android APK asset package that used to
+# live in apps/app-android/assets is gone with the cargo-apk pipeline).
+
+# Android host (apps/app-android): the Tauri CLI/Gradle state and the generated
+# Rust library are local build outputs. The Gradle project itself
+# (apps/app-android/src-tauri/gen/android) IS committed — regenerating it is
+# CLI-version sensitive, and CI must be able to point at the exact glue.
+apps/app-android/dist/
+apps/app-android/node_modules/
+apps/app-android/src-tauri/gen/android/.gradle/
+apps/app-android/src-tauri/gen/android/build/
+apps/app-android/src-tauri/gen/android/app/build/
+apps/app-android/src-tauri/gen/android/local.properties
+apps/app-android/src-tauri/gen/android/**/local.properties
+apps/app-android/src-tauri/gen/android/.idea/
+apps/app-android/src-tauri/gen/android/*.iml
+apps/app-android/src-tauri/gen/android/**/*.iml
+apps/app-android/src-tauri/gen/android/app/src/main/jniLibs/
+# Tauri's generated ACL/capability schemas are build output of `tauri-build` (and
+# regenerate on a CLI bump); the Gradle project above is the part that must be
+# reproducible, so only that is committed.
+apps/app-android/src-tauri/gen/schemas/
 
 # CLI plot default output written next to the input
 *.plot.png
@@ -39,6 +59,7 @@ apps/app-android/assets/fonts/*
 apps/desktop-ui/public/canvas/
 apps/app-web/web/pkg/
 apps/app-web/dist/
+apps/app-web/dist-ui/
 
 fixtures/complex-test.dwg
 fixtures/debug-default-fonts.dwg

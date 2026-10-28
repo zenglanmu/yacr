@@ -9,6 +9,19 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[dependencies]
+# The **host-agnostic shell surface** (`src/shell.rs`): the frozen `cad_status`
+# snapshot the shared React chrome (`apps/desktop-ui`) validates, plus the command
+# vocabulary. `cad-ui-core` is a platform-free projection crate (no wgpu, no
+# tauri, no GTK, no DOM), and `serde_json` is what serializes that snapshot, so
+# both are dependencies of **every** target. That is what lets
+# `cargo test -p app-web` assert the exact JSON wire shape on the host instead of
+# only in a browser — the alternative (a wasm-only dependency) would leave the
+# status untestable off-target. No `cad-*` crate gains a platform dependency from
+# this: the arrow points app → cad, never back.
+cad-ui-core.workspace = true
+serde_json.workspace = true
+
 # The browser host is the wasm CAD session of the `dom-canvas` runtime
 # (`surfaceMode: dom-canvas`, ADR 0024): it imports caller-supplied DWG bytes (or
 # the compiled-in synthetic fixture for `start`), builds the display scene,
@@ -46,7 +59,8 @@ cad-app.workspace = true
 # session untouched.
 cad-scene.workspace = true
 cad-render-wgpu.workspace = true
-serde_json.workspace = true
+# `serde_json` moved to `[dependencies]`: it now serializes the shell status on
+# every target (see above), not only the wasm session status.
 # `std::time::Instant::now()` panics on wasm32-unknown-unknown ("time not
 # implemented"); `web-time` uses `Performance.now()` in the browser and re-exports
 # std natively. Used only for the honest import measurement.

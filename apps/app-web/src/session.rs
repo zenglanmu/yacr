@@ -68,9 +68,9 @@ use crate::budget;
 use import::{load, Loaded};
 use session_state::{
     begin_replace, begin_start, document_failure, ensure_not_starting, fail, install_live,
-    last_import_ms, record_import, wasm_heap_bytes, with_live, Failure, Metrics, Session, State,
-    NO_MEASUREMENT, STATE, STEP_INPUT, STEP_NAVIGATION, STEP_PRESENT, STEP_STATE, STEP_VIEWPORT,
-    STEP_WEBGL2, WEBGL2_MARKER,
+    installed_documents, last_import_ms, record_import, wasm_heap_bytes, with_live, Failure,
+    Metrics, Session, State, NO_MEASUREMENT, STATE, STEP_INPUT, STEP_NAVIGATION, STEP_PRESENT,
+    STEP_STATE, STEP_VIEWPORT, STEP_WEBGL2, WEBGL2_MARKER,
 };
 use surface::Surface;
 
@@ -304,6 +304,78 @@ pub(crate) fn status_impl() -> String {
             "the session state is already borrowed",
         )),
     })
+}
+
+/// The shell surface's view of this session (`crate::shell::shell_status`).
+///
+/// Projects only facts the registry already holds: the label the session was opened
+/// with, its resident batch/draw counts, the frames that actually reached the
+/// canvas, the camera it would render with, the presenter's adapter descriptor, the
+/// last failure and the installed-document counter. Nothing here reads a file, a
+/// database or the document: after the open this crate has no query path (the
+/// imported database is released, [`crate::budget::DB_RETAINED`] is `false`), which
+/// is exactly why the shell status reports `entityCount: null` instead of a count.
+pub(crate) fn shell_facts() -> crate::shell::SessionFacts {
+    STATE.with(|cell| match cell.try_borrow() {
+        Ok(state) => match &*state {
+            // A start/open is genuinely in flight and no session exists yet, so
+            // `loading: true` is the real registry state, not a guess.
+            State::Starting => crate::shell::SessionFacts {
+                loading: true,
+                ..crate::shell::SessionFacts::default()
+            },
+            // A start failed before a session existed: report that failure instead
+            // of an empty status that would look healthy.
+            State::Failed(failure) => crate::shell::SessionFacts {
+                error: Some(format!("{}: {}", failure.step, failure.message)),
+                ..crate::shell::SessionFacts::default()
+            },
+            State::Live(session) => crate::shell::SessionFacts {
+                session: Some(live_shell_facts(session)),
+                loading: false,
+                import_count: installed_documents(),
+                error: None,
+            },
+            // Nothing has started (and, in practice, nothing has been installed):
+            // the honest empty facts.
+            State::Idle => crate::shell::SessionFacts::default(),
+        },
+        // A re-entrant borrow means a frame is being presented right now. A status
+        // poll must not panic on that: report "not observable" and let the next
+        // poll answer.
+        Err(_) => crate::shell::SessionFacts::default(),
+    })
+}
+
+/// The observable facts of one live session, for [`shell_facts`].
+fn live_shell_facts(session: &Session) -> crate::shell::LiveSession {
+    let info = session.presenter.adapter_info();
+    crate::shell::LiveSession {
+        label: session.label.clone(),
+        batches: session.batches as u64,
+        draws: session.draws,
+        presented: session.presenter.presented_frames(),
+        // Tagged with the session kind so a reader of the status knows which
+        // session reported it; `info.name` is the browser's own GL string, which
+        // may be masked and is never treated as a hardware claim.
+        adapter: format!(
+            "wasm32-webgl2 session: {} ({})",
+            info.name,
+            info.target.as_str()
+        ),
+        // The camera the renderer would use this frame; `None` when it is not a
+        // valid 2D view (never a placeholder centre/scale).
+        camera: session.camera.camera2d_params().ok().map(|params| {
+            cad_ui_core::session::CadCamera {
+                center: [params.center.x, params.center.y],
+                scale: params.world_per_px,
+            }
+        }),
+        error: session
+            .last_error
+            .as_ref()
+            .map(|failure| format!("{}: {}", failure.step, failure.message)),
+    }
 }
 
 /// What the open file is, as far as this session knows it.

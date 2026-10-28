@@ -125,6 +125,10 @@ thread_local! {
     /// The last completed import+build+upload duration (`web_time::Instant`), in
     /// milliseconds. Evidence surface only; see `last_import_ms_impl`.
     static LAST_IMPORT_MS: Cell<f64> = const { Cell::new(NO_MEASUREMENT) };
+    /// How many documents this wasm instance has **installed** (see
+    /// [`installed_documents`]). Incremented only by [`install_live`], i.e. after a
+    /// completed import + upload + first presented frame.
+    static INSTALLED_DOCUMENTS: Cell<u64> = const { Cell::new(0) };
 }
 
 /// The one CAD session: presenter + renderer + camera.
@@ -431,12 +435,29 @@ pub(super) fn begin_replace() -> Result<(), JsValue> {
 }
 
 /// Publish the new session as the one live session.
+///
+/// This is also the single place an import is **counted**: the call happens after
+/// the geometry loaded, the upload committed and the first frame was presented, so
+/// the counter behind [`installed_documents`] can never include a refused, failed
+/// or partially uploaded open.
 pub(super) fn install_live(session: Session) {
     STATE.with(|cell| {
         if let Ok(mut state) = cell.try_borrow_mut() {
             *state = State::Live(Box::new(session));
+            // Only a published session counts: a failed borrow above drops the
+            // session, so it must not increment anything either.
+            INSTALLED_DOCUMENTS.with(|count| count.set(count.get().saturating_add(1)));
         }
     });
+}
+
+/// How many documents this wasm instance has successfully installed.
+///
+/// A real observed count (see [`install_live`]) for the shell status's
+/// `importCount`; `0` before the first completed open — never an estimate from the
+/// presence of a session.
+pub(super) fn installed_documents() -> u64 {
+    INSTALLED_DOCUMENTS.with(Cell::get)
 }
 
 /// Publish one completed import measurement (see `last_import_ms_impl`).
