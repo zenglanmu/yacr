@@ -78,6 +78,23 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   cad-render-wgpu/cad-engine/slint/iced/acadrust（脚本强制）。
 - **`apps/desktop-ui` 是唯一桌面 React UI 包**：单 React 树、`.native-input` 单一输入漏斗、
   in-DOM 弹窗/菜单；两个宿主的 `tauri.conf.json` 都指向 `../desktop-ui/dist`，**不得**再复制第二套 UI。
+- **移动端是同一棵 chrome 的呈现，不是第二套 UI**：桌面/移动**只按屏幕宽度**切换
+  （`apps/desktop-ui/src/layout/layout-mode.ts` 的 `MOBILE_MAX_WIDTH = 1024`，`max-width` 含端点；
+  `data-layout` 写在 `<html>` 与 `main.shell` 上，由 live `matchMedia` 订阅驱动，resize 不 reload）。
+  组件、状态、命令规则、wire 契约全部共享（命令行规则只在 `src/commands/command-line-model.ts`
+  一处）；差异限于呈现：移动树的顶栏 + ribbon drawer + 全幅 CAD 分区 + 底部命令栏。**禁止**为移动端
+  另开文档状态、另建命令表或另写一套输入/命令解析。
+- **宿主传输缝在 chrome 侧（`apps/desktop-ui/src/host/`）**：构建期常量 `__YACR_RUNTIME__` ∈
+  `tauri | web | android`（Vite `define`，默认 `tauri`）决定路由；**只有 `invoke.ts` import
+  `@tauri-apps/api`**，`runtime.ts` 决定去向，`web-adapter.ts` 把 6 个命令映射到 wasm 会话的
+  `shell_*` 导出，其余一律 `unsupported-runtime: <command>`。适配器**只拒绝、不伪造**：浏览器/移动
+  载体没有命令路由（`shell_commands`/`shell_aliases` 为 `[]`），chrome 因此禁用命令入口。这层是
+  **UI 侧**的路由，与 `cad-host`/`cad-platform` 的宿主编排分层正交（铁律 8 不变：wasm 会话是
+  `dom-canvas` 宿主上唯一的 `cad-db` 权威）。
+- **每宿主产物互不共享**：桌面 `apps/desktop-ui/dist`（`npm run build`）、Web
+  `apps/app-web/dist-ui`（`scripts/build-web-ui.sh`）、Android `apps/app-android/dist`
+  （`scripts/build-android-ui.sh`）。三者用不同运行时常量编译，**不得**互相覆盖，也**不得**把其中
+  一个当成另一个的证据；`apps/app-web/dist`（旧 vanilla harness）是**另一份**产物。
 - **`app-*` 只保留平台缝**：GTK/overlay/owner、Wayland C shim、Win32 child HWND、portal/rfd 文件选择器、
   known-folders、redraw pump/tick（GTK `queue_draw` 与 Win32 `InvalidateRect` 机制不同，各自薄封装）。
   **可移植逻辑不得住在 `app-*`**——payload 组装、`\P` 映射、gate 逻辑、threading 协议都在共享层。

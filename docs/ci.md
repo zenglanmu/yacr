@@ -56,7 +56,7 @@
 | `web-build` | build.yml | `ubuntu-latest` | 安装钉住版本的 wasm-bindgen CLI（预编译 release + SHA-256 + `Cargo.lock` 对照）→ `bash scripts/build-web.sh` → 上传 `web-dist` artifact |
 | `web-smoke` | build.yml | `ubuntu-latest` | 下载 `web-dist` → `scripts/serve-web.py` → Playwright Chromium 打开页面，断言 `start: ok` / `target` / `physical` / `batches` / `draws` / `presented`；**SwiftShader 软件渲染**，非 GPU/像素证据 |
 | `web-deploy` | build.yml | `ubuntu-latest` | **仅 `v*` tag 或手工 dispatch**；`needs: web-build`，下载同一 `web-dist` 后 `scripts/deploy-cloudflare-pages.sh`（`SKIP_BUILD=1`）发布到 Cloudflare Pages |
-| `android-check` | core.yml | 能力相关（默认 SKIP） | `cargo check --target aarch64-linux-android -p app-android --locked`（占位桩） |
+| `android-check` | core.yml | 能力相关（默认 SKIP） | `bash scripts/build-android-ui.sh`（wasm 会话 + `YACR_RUNTIME=android` chrome，因为 `tauri::generate_context!` 会内嵌 `frontendDist`）→ `cargo check --target aarch64-linux-android -p app-android --locked`（**真实 Android 宿主**的编译门禁；不跑 Gradle、不建 APK、不跑设备） |
 
 `android-check` 是 capability-gated（`vars.ANDROID_CI_ENABLED`），`web-deploy` 是
 **event-gated**（`github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')`）；
@@ -76,7 +76,10 @@ Windows MSVC `clippy`/`check`/release `build`、MinGW GNU release `build`、`app
 
 `android-apk`、`android-release`、`linux-release`、`windows-release`、`macos-release`。
 
-含义：Android UI / macOS GUI 仍已退役为显式 NOT IMPLEMENTED 占位；Windows 宿主 2026-10-23 起已实现，
+含义：**Android 宿主自 2026-10-28 起重新是真实宿主**（`apps/app-android` = Tauri 2 WebView 载体 +
+wasm `dom-canvas` 会话），但 CI 仍**不**构建/签名/发布 APK——`android-apk`/`android-release` 保持硬禁用
+（无签名密钥、无商店路径），APK 由本地 `scripts/build-android.sh` 产出；`android-check` 是
+capability-gated 的编译门禁。macOS GUI 仍是显式 NOT IMPLEMENTED 占位；Windows 宿主 2026-10-23 起已实现，
 `windows-check` 只是**编译门禁**（≠运行验收），`windows-release` 仍硬禁用。**Web job 已不在退役
 列表**（2026-10-25）：`web-build`/`web-smoke` 是必需的验证 job，`web-deploy` 是 event-gated 的真实
 发布 job（`secrets.…` + `v*` tag/dispatch）；`scripts/deploy-cloudflare-pages.sh` 也是真实发布入口，
@@ -114,6 +117,14 @@ runner 上恰好存在的 CLI。**本地** bundle 构建（`scripts/build-web.sh
 - 5 个退役 job：**永远不会**在受支持配置下运行（硬禁用）。
 - **CI 上的真实 GPU / 黄金图 / 浏览器矩阵 / Android 真机**：未运行。GitHub 托管 runner 无 GPU，
   软件渲染不能作为真实 GPU 证据。
+- **Android 设备**：CI **没有**设备/模拟器 job（`android-check` 只编译）。本地模拟器
+  （x86_64 + `-gpu swiftshader_indirect`）的一次有界运行记录在 `docs/android-host.md`；
+  它**不是**真机、真实 GPU 或像素验收。
+- **响应式 chrome 验收未接线 CI**：`scripts/build-web-ui.sh`（→ `apps/app-web/dist-ui`）与
+  `scripts/web-ui-smoke.cjs`（Chromium + SwiftShader 的布局/DOM 套件）、以及
+  `scripts/build-android-ui.sh` / `scripts/build-android.sh` 都是**本地/手工**入口，**没有**对应
+  workflow；CI 的 `web-smoke` 只冒烟旧的 `apps/app-web/dist`（见下一条「浏览器 bundle」），不得据本地
+  结果宣称 CI 通过。本地有界记录见 `docs/validation-mobile-responsive-2026-10-28.md`。
 - **浏览器 bundle**：`web-build` 在 CI 构建并上传 artifact；`web-smoke` 用 Playwright Chromium
   （SwiftShader 软件渲染）打开并断言 typed 状态行，因此**有** CI bundle 产物与 carrier/status 冒烟，
   但**没有**真实 GPU、像素/golden、性能或 WebKitGTK/其它浏览器矩阵证据；本地真实浏览器读数
@@ -151,7 +162,7 @@ python3 scripts/test-package-linux-release.py
 python3 scripts/test-package-windows-release.py
 python3 scripts/test-package-macos-release.py
 python3 scripts/test-fetch-fonts.py
-python3 scripts/test-android-icon.py
+python3 scripts/test-android-host.py
 # 离线 WGSL 校验（无需 GPU）
 cargo test -p cad-render-wgpu --test wgsl_validation --locked
 # 全量 workspace 测试必须拆两步：先排除 cad-render-wgpu，再单独串行跑该 crate。
@@ -177,11 +188,13 @@ node scripts/web-smoke.cjs --url http://127.0.0.1:8090/
 退役脚本的负向断言（每个应非零退出）：
 
 ```bash
-for s in build-android package-windows-release package-macos-release; do
+for s in package-windows-release package-macos-release; do
   bash "scripts/$s.sh"; echo "$s exit=$? (expect 1)"
 done
 ```
 
+`scripts/build-android.sh` **不在**负向列表：2026-10-28 起它构建真实 APK（`tauri android build --apk`，
+需要 SDK/NDK/JDK 17，release 默认未签名），失败即非零退出，绝不产出桩。
 `scripts/build-web.sh`、`scripts/web-smoke.cjs` 与 `scripts/deploy-cloudflare-pages.sh` **不在**该
 列表：它们构建真实 bundle、驱动真实浏览器、发布经过校验的 bundle（后者需要 Cloudflare 凭据，
 且只在 tag/dispatch 由 CI 触发）；**不允许**用「退役桩」冒充成功。`package-linux-release.sh`

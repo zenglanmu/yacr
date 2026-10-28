@@ -10,7 +10,13 @@ Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + �
 > **生产合成方向是 DOM/WebView 在上、wgpu CAD 原生表面在下**（[ADR 0023](docs/adr/0023-dom-on-top-cross-host-composition.md)）。
 > Linux **原生 Wayland** 是唯一生产路径；**X11/XWayland 显式拒绝**（标记行 + 退出码 4）。
 > **Windows 宿主已实现但视觉/运行时未验收**（上限 = Tier 0 编译 + Wine 拒绝合同；
-> 真 Windows spike-1/4/5 PENDING 用户自测）。macOS/Android 是**显式 NOT IMPLEMENTED 占位**；
+> 真 Windows spike-1/4/5 PENDING 用户自测）。macOS 是**显式 NOT IMPLEMENTED 占位**；
+> **Android 宿主是 Tauri 2 WebView 载体 + wasm `dom-canvas` 会话**（2026-10-28 起，`apps/app-android`），
+> 已在本地模拟器（x86_64、**SwiftShader 软件渲染**）跑通启动/布局/IPC/会话，并已修好 **CAD 像素全透明**
+> （根因：该 GLES 实现的**顶点阶段动态数组下标恒为 0**，命中 wgpu-hal 的 sRGB present 全屏三角形与
+> 本仓库 blit；修复 = 线性 present 目标 + blit 内 sRGB 编码 + 顶点阶段算术取角，
+> 见 `docs/validation-android-present-2026-10-28.md`），出图为**有界模拟器证据**；真机与真实 GPU
+> **NOT VERIFIED**（见 `docs/android-host.md`）；
 > **Web** 的 wasm CAD 会话已实现，并由 CI `web-build` 构建 + `web-smoke`（Playwright Chromium，
 > **SwiftShader 软件渲染**）冒烟、`web-deploy` 仅在 `v*` tag / 手工 dispatch 时发布到 Cloudflare
 > Pages；`app-web` 的 host target 仍是 NOT IMPLEMENTED 空壳，浏览器侧仍不是可交付产品。
@@ -87,7 +93,8 @@ tauri 的共享层：命令注册、窗口    单一输入漏斗 `.native-input`
 构建、threading、证据骨架）        构建产物被两个宿主嵌入）
   ↑                              ↑
 apps/app-linux / apps/app-windows（Tauri 宿主：React chrome + 原生 CAD 分区 + renderer-only wgpu）
-apps/app-macos|app-android（显式 NOT IMPLEMENTED 占位）
+apps/app-android（Tauri 2 WebView 载体：React chrome + wasm dom-canvas 会话，无原生 CAD 表面）
+apps/app-macos（显式 NOT IMPLEMENTED 占位）
 apps/app-web（wasm CAD 会话 + WebGL2 canvas；host target 仍是 NOT IMPLEMENTED 空壳）
 ```
 
@@ -129,9 +136,14 @@ apps/app-web（wasm CAD 会话 + WebGL2 canvas；host target 仍是 NOT IMPLEMEN
   它编译为空库、二进制返回显式 NOT IMPLEMENTED。
 - **`apps/app-windows`** 是真实 Windows 宿主（Tauri 2 + 透明 WebView2 + Win32 child HWND +
   单一 DOM 漏斗），**已实现但视觉/运行时未验收**：WebView2 缺失 → 标记行
-  `yacr: unsupported-runtime: webview2` + i18n + **退出码 5**。`app-macos`/`app-android` 是显式
-  NOT IMPLEMENTED 占位；`app-web` 的 wasm CAD 会话已实现（见「平台状态」Web 条），其 host target
-  仍是 NOT IMPLEMENTED 空壳。平台 I/O（文件、配置、表面度量）只存在于 `app-*`。
+  `yacr: unsupported-runtime: webview2` + i18n + **退出码 5**。
+- **`apps/app-android`** 是真实 Android 宿主（Tauri 2 WebView/资源载体）：`tauri` 仅作
+  `cfg(target_os = "android")` 依赖，原生侧**只**注册 `canvas_session_status` /
+  `canvas_runtime_failed` 两个 shell 报表命令（后者对 `webgl2` 打标记行后 `exit(6)`），
+  **不**持有文档状态（铁律 8）；UI 产物由 `scripts/build-android-ui.sh` 写到
+  `apps/app-android/dist`。证据与 **NOT VERIFIED** 见 `docs/android-host.md`。
+  `app-macos` 是显式 NOT IMPLEMENTED 占位；`app-web` 的 wasm CAD 会话已实现（见「平台状态」Web 条），
+  其 host target 仍是 NOT IMPLEMENTED 空壳。平台 I/O（文件、配置、表面度量）只存在于 `app-*`。
 - **桌面窗口策略**：Linux 宿主默认以**最大化窗口**启动（`apps/app-linux/src/host.rs` 的
   `start_maximized` 默认 `true`，`WindowBuilder::maximized(true)`），**保留标题栏/系统面板**——
   这是**窗口管理器最大化**，**不是**全屏/无边框 kiosk（源码未调用 `fullscreen`/`decorations(false)`）。
@@ -147,6 +159,42 @@ cad-render-wgpu/cad-engine/slint/iced/acadrust；`apps/desktop-ui` 不是 Cargo 
 **全 workspace 禁止任何直接 `slint`/`slint-build`/`iced` 依赖**（含 build/dev 与 target 表、
 workspace 继承别名）；平台类型（`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`。
 `cad-db` 是唯一权威数据源；UI 与渲染均为派生。详见 `docs/architecture.md`。
+
+## 响应式 UI 与宿主传输缝
+
+- **移动端不是第二套 UI**：`apps/desktop-ui` 仍是**一套 React 树、一个站点**，桌面与移动只是同一批
+  组件/状态的两种**呈现**，**仅按屏幕宽度**切换。单源是 `apps/desktop-ui/src/layout/layout-mode.ts`
+  的 `MOBILE_MAX_WIDTH = 1024` / `MOBILE_MEDIA_QUERY = '(max-width: 1024px)'`（含端点：1024 是最后
+  一个 mobile 宽度）；`data-layout="mobile"|"desktop"` 同时写在 `<html>` 与 `main.shell` 上，由 live
+  `matchMedia` 订阅驱动 ⇒ **resize 即时翻转、不 reload**。移动树 = `.mobile-topbar`（最左菜单按钮
+  44×44）→ ribbon **drawer**（in-DOM 覆盖层：标签 chip + 2 列触摸网格、≤ `68dvh`、44 px 目标、
+  同因拒绝只给**一条**面板级说明）+ 全幅 `Workspace` + `.mobile-commandbar`（唯一底部组件）；
+  移动端**不渲染**标题栏、桌面 ribbon 带、文档/布局标签、状态栏、dock。命令行规则只抽一次
+  （`src/commands/command-line-model.ts` + `use-command-line.ts` + `components/CommandField.tsx`），
+  桌面与移动都从它渲染。Android 手势条由宿主发布 `--yacr-safe-bottom` 给 `.mobile-commandbar` 消费。
+- **宿主传输缝（`apps/desktop-ui/src/host/`，铁律）**：构建期常量 `__YACR_RUNTIME__` ∈
+  `tauri | web | android`（Vite `define` 注入并校验，默认 `tauri`）。**`invoke.ts` 是唯一 import
+  `@tauri-apps/api` 的模块**；`runtime.ts` 决定路由；`web-adapter.ts` 把 `cad_status` /
+  `cad_commands` / `cad_command_aliases` / `cad_command` / `canvas_session_status` /
+  `canvas_runtime_failed` 映射到 wasm 会话，**其余命令一律 `unsupported-runtime: <command>` 拒绝**。
+  `tauri`/`android` 运行时把两个 shell-only 命令（`canvas_session_status`、`canvas_runtime_failed`）
+  在有 Tauri 桥时送给 Tauri，**其余（含全部 CAD 数据）**送 wasm adapter；`web` 运行时全走 adapter。
+  **适配器只许拒绝，不许伪造答案**；浏览器/移动载体**没有命令路由**（`shell_commands`/`shell_aliases`
+  为 `[]`），因此 chrome **禁用**命令入口而不是假装可用——该载体是**看 + 导航**（open/pan/zoom/
+  resize），不是可编辑的 CAD 产品。
+- **每宿主产物互不共享**：桌面宿主 `apps/desktop-ui/dist`（`npm run build`）；Web
+  `apps/app-web/dist-ui`（`bash scripts/build-web-ui.sh`，内部 `npm run build:web`）；
+  Android `apps/app-android/dist`（`bash scripts/build-android-ui.sh`，内部 `npm run build:android`）。
+  三者用不同运行时常量编译，**不得**互相覆盖；`apps/app-web/dist`（旧的独立 vanilla harness，
+  含 Worker 隔离）是**另一份**产物，由 `scripts/build-web.sh` 构建，未被上述脚本触动。
+- **验收入口是本地/手工，未接线 CI**：
+  `bash scripts/build-web-ui.sh` → `python3 scripts/serve-web.py --directory apps/app-web/dist-ui` →
+  `NODE_PATH=… node scripts/web-ui-smoke.cjs --url http://127.0.0.1:8090/ --verbose --evidence <dir>`
+  （Chromium + SwiftShader ⇒ **软件渲染，布局/DOM 证据**；最近一次 **PASS 7/7 cases、141/141 checks**，
+  退出码 0）；Android 侧 `bash scripts/build-android-ui.sh` / `bash scripts/build-android.sh --release`。
+  CI 的 `web-smoke` 仍只冒烟旧的 `apps/app-web/dist`（见 `docs/ci.md`），**不得**把本地这两条入口
+  冒充 CI 结果。证据与 **NOT VERIFIED** 见 `docs/validation-mobile-responsive-2026-10-28.md` 与
+  `docs/android-host.md`。
 
 ## 构建与门禁
 
@@ -189,8 +237,9 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
 - **平台状态（2026-10-23）**：**Windows 宿主已实现**（Tauri 2 + 透明 WebView2 + Win32 child HWND +
   共享 `apps/desktop-ui`），但**视觉/运行时未验收**；CI `windows-check` 只做**编译门禁**
   （msvc/gnu/wasm 空壳），**不代表**可运行 GUI 或运行验收。`windows-release` 仍 `if: false`，
-  `scripts/package-windows-release.sh` 仍退役非零。**macOS/Android/Web** 是显式 NOT IMPLEMENTED
-  占位（Android/Web 仅保留编译门禁）。旧平台发布/打包脚本已退役或禁用；Linux release 暂时不可用，
+  `scripts/package-windows-release.sh` 仍退役非零。**macOS** 是显式 NOT IMPLEMENTED 占位；
+  **Android（2026-10-28 起）与 Web 是真实宿主/会话，只保留编译与（Web 侧）CI 冒烟门禁**，
+  不代表真机/真实 GPU 验收。旧平台发布/打包脚本已退役或禁用；Linux release 暂时不可用，
   等待替代打包验收。**不要**把已退役脚本当作可用流程。
   **2026-10-23 立项 / 2026-10-24 第一批实现（[ADR 0024](docs/adr/0024-dom-canvas-wasm-cad-path.md)）**：
   X11/XWayland 走 **DOM-canvas 路径**（wasm/WebGL2 CAD 会话画进 DOM `<canvas>`，
@@ -257,9 +306,16 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
   `NOT VERIFIED (Wine limitation, bug 55432/58921)`。详见 `docs/windows-app.md`。
 - **macOS**（`apps/app-macos`）：显式 NOT IMPLEMENTED 失败桩（`yacr-macos`），只随
   `--all-targets` 编译；不打可分发 GUI。
-- **Android**（`apps/app-android`）：UI 已退役，是显式占位（原生入口打印退役诊断后 abort）。
-  仅保留 `cargo check --target aarch64-linux-android -p app-android --locked` 编译检查。
-  `build-android.sh` 非零失败；不再有 APK 流水线。**模拟器 ≠ 真机**，真机一律未验证。
+- **Android**（`apps/app-android`）：**真实 Tauri 2 宿主**（2026-10-28 起，WebView/资源载体；
+  `src-tauri/` 布局，`gen/android` 已提交）。wasm `dom-canvas` 会话是唯一 CAD 权威，原生侧只注册
+  `canvas_session_status` / `canvas_runtime_failed`。构建 = `scripts/build-android.sh`
+  （`tauri android build --apk`，release 默认未签名）；`android-check` 仍需先跑
+  `scripts/build-android-ui.sh`（`generate_context!` 内嵌 `frontendDist`）。
+  **验收上限**：本地模拟器 x86_64 + **SwiftShader** 上启动/布局/IPC/会话成立，且**出图成立**
+  （修复了「CAD 像素全透明」：该 GLES 实现的顶点阶段动态数组下标恒为 0，present 全屏三角形退化；
+  改为线性 present 目标 + blit 内 sRGB 编码 + 算术取角，见
+  `docs/validation-android-present-2026-10-28.md`）。**模拟器 ≠ 真机**，真机/真实 GPU/其它
+  WebView 版本/像素 golden/色彩空间一律 **NOT VERIFIED**；详见 `docs/android-host.md`。
 - **Web**（`apps/app-web`）：wasm CAD 会话（`surfaceMode: dom-canvas`，ADR 0024）是**真实**实现，
   `scripts/build-web.sh` 构建 `apps/app-web/dist`；CI `web-build` 构建并上传该 artifact、`web-smoke`
   用 Playwright Chromium（**SwiftShader 软件渲染**，非 GPU/像素证据）断言 `start: ok`、
@@ -325,7 +381,8 @@ X11/XWayland 实例下的 DOM-canvas 探针）。**仍然禁止**：① 起虚�
 ## 文档索引
 
 `docs/architecture.md`（边界与不变量）、`docs/react-linux-app.md`（当前 Linux 宿主与 DOM-on-top）、
-`docs/windows-app.md`（Windows 宿主与 spike 判据）、`docs/build.md`（构建与退役入口）、
+`docs/windows-app.md`（Windows 宿主与 spike 判据）、`docs/android-host.md`（Android Tauri 载体、
+模拟器证据与 NOT VERIFIED 边界）、`docs/build.md`（构建与退役入口）、
 `docs/ci.md`（CI 分层与 NOT RUN）、`docs/validation*.md`（历史执行证据，含 NOT RUN 边界；
 DOM-on-top 生产记录 = `validation-dom-on-top-production-2026-10-23.md`）、
 `docs/compatibility.md`（能力表）、`docs/handoff.md`（逐轮交接）、

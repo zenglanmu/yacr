@@ -1,3 +1,54 @@
+## 2026-10-28 Android 宿主：Tauri 2 载体 + wasm `dom-canvas` 会话（模拟器有界运行）
+
+### 结论
+
+`apps/app-android` 从「显式 NOT IMPLEMENTED 占位」重建为**真实 Tauri 2 Android 宿主**（WebView/
+资源载体）。本地 AVD（API 35、x86_64、**`-gpu swiftshader_indirect` 软件渲染**）上：**安装成功、
+启动成功、mobile 布局正确、`canvas_session_status` 经 Tauri IPC 到达原生侧并进 `logcat`（图纸名
+`synthetic-four-lines.dwg`、`batches=4 draws=1`）**；但 **CAD 分区没有任何像素**——canvas 默认
+framebuffer 读回全 `(0,0,0,0)`，即 present blit 在该 WebView GL 路径上输出全 0。
+**这不是载体/打包问题**：同一个 `YACR_RUNTIME=android` bundle 在桌面 Chromium 141（SwiftShader）
+里**正常出图**。缺陷属**渲染器 lane**（`crates/cad-render-wgpu` 的 `blit` 或 `wgpu/webgl` 在该
+驱动上的采样），本 lane 未修改 `crates/**`/`apps/app-web/**`/`apps/desktop-ui/src/**`，故未修。
+证据、命令、日志与 **NOT VERIFIED** 清单见 `docs/android-host.md`。
+
+### 做了什么
+
+- **布局迁移**：`apps/app-android/Cargo.toml` → `src-tauri/Cargo.toml`（`name = "app-android"`、
+  `[lib] app_android`、`staticlib/cdylib/rlib`），新增 `build.rs`（仅 android target 跑
+  `tauri_build::build()`）、`tauri.conf.json`、`icons/icon.png`（复用 `assets/icons/yacr-1024.png`）、
+  `src/{lib,host,refusal,report}.rs`；根 `Cargo.toml` 成员改为 `apps/app-android/src-tauri`。
+- **`tauri` 是 target-scoped 依赖**（`cfg(target_os = "android")`），host 与 wasm32 检查继续编译
+  有文档的空壳，不破坏 `--all-targets` / `--lib wasm32` 门禁。
+- **原生侧只注册两个命令**：`canvas_session_status`（登一行 `logcat`，**不存状态**）、
+  `canvas_runtime_failed`（先打 `yacr: unsupported-runtime: <step>`，`webgl2` 时 `exit(6)`；
+  其余 step 只报告）。无 CAD 命令、无 `cad-*` 依赖（铁律 8）。
+- **UI 产物**：`apps/desktop-ui` 的 `build:android` 改写 `../app-android/dist`
+  （`YACR_RUNTIME=android` + `--emptyOutDir`，不碰桌面 `dist/`）；新增 `scripts/build-android-ui.sh`
+  （wasm 会话 + chrome，带构件守卫），并作为 `beforeBuildCommand`（CLI 工作目录实测
+  `apps/app-android`）。
+- **化石清理**：删除 `android/dev/yacr/app/YacrNativeActivity.java`、`res/`、`assets/fonts/`、
+  `dev-release.jks`、旧 `src/lib.rs` 与 cargo-apk 元数据；删除 `scripts/test-android-icon.py`、
+  `scripts/check-android-apk-fonts.py`、`scripts/test-check-android-apk-fonts.py`（APK 字体/图标
+  打包路径随 cargo-apk 一起消失）。`scripts/build-android.sh` 由「非零退役桩」**改为真实 APK 构建入口**。
+- **门禁**：新增 `scripts/test-android-host.py`（静态契约 + 变异失败，已接入 `core-quality`）；
+  `android-check` 改为「先 `bash scripts/build-android-ui.sh`，再 aarch64 `cargo check`」——
+  因为 `tauri::generate_context!` 内嵌 `frontendDist`，缺 bundle 会 panic（已实测）。
+  `check-workflows.py` 的片段 pin 同步加严。
+- **`gen/android` 提交**：CLI 版本敏感（AGP 9.3.1 / Gradle 9.6.1 / Kotlin 2.2.10），生成物由
+  `gen/android/app/.gitignore` 忽略。`compileSdk = 37` 在本机 SDK **可解析**
+  （`platforms/android-37.0` 的 `AndroidVersion.ApiLevel=37.0`），**未**降级到 36。
+
+### 边界
+
+模拟器 ≠ 真机、SwiftShader ≠ 真实 GPU、静态截图 ≠ 像素验收。真机、真实 GPU、其它 WebView 版本、
+输入/手势、生命周期、aarch64 产物、release 签名流程一律 **NOT VERIFIED**。
+
+**文档同步债务（本轮未改，读时注意）**：`docs/validation-android.md`、`docs/ui.md`、
+`docs/code-structure.md`、`docs/shortcuts.md`、`docs/validation-web.md`、`docs/code-audit-and-agent-handoff.md`
+里关于 Android 的段落描述的是**已删除的 cargo-apk/Slint/SAF 宿主**，属历史记录。当前契约以
+`docs/android-host.md` 为准。
+
 ## 2026-10-28 第 16 轮：`ZOOM WINDOW` / `ZOOM PREVIOUS`（都是 `ZOOM` 的参数写法）
 
 ### 结论
@@ -10410,3 +10461,50 @@ host/wasm/clippy + 4 static / diff **均 0**；`fmt` 仅既有陌生未跟踪 `d
 - **NOT RUN**：运行时 DOM / 视觉 / GPU / 性能、平台矩阵、全 workspace 测试与编译，
   根目录索引式全量 file-size 门禁。未发现遗漏的转导出消费方；最终 diff 验证由主协调者负责。
   本 lane 未暂存、未提交、未推送。
+
+## 2026-10-28：移动/响应式 chrome + 宿主传输缝 + 浏览器与 Android 有界验收
+
+- **响应式单树**：`apps/desktop-ui` 仍是一套 React 树，桌面/移动是同一批组件的两种**呈现**，只按屏幕
+  宽度切换。单源 `src/layout/layout-mode.ts` 的 `MOBILE_MAX_WIDTH = 1024`
+  （`MOBILE_MEDIA_QUERY = '(max-width: 1024px)'`，含端点）；`data-layout` 写在 `<html>` 与
+  `main.shell`，live `matchMedia` 订阅 ⇒ resize 即时翻转、不 reload。移动树 = `.mobile-topbar` +
+  ribbon drawer（in-DOM 覆盖层、标签 chip、2 列触摸网格、≤ `68dvh`、44 px 目标、同因拒绝一条面板级
+  说明）+ 全幅 `Workspace` + `.mobile-commandbar`；不渲染标题栏/ribbon 带/文档与布局标签/状态栏/dock。
+  命令行规则抽到 `src/commands/command-line-model.ts` + `use-command-line.ts` +
+  `components/CommandField.tsx`，桌面与移动共用。
+- **宿主传输缝**（`apps/desktop-ui/src/host/`）：`__YACR_RUNTIME__` ∈ `tauri | web | android`
+  （Vite `define`，默认 `tauri`）；`invoke.ts` 是唯一 import `@tauri-apps/api` 的模块；`web-adapter.ts`
+  把 6 个命令映射到 wasm `shell_*`，其余 `unsupported-runtime: <command>` 拒绝。浏览器/移动载体
+  `shell_commands`/`shell_aliases` 为 `[]`（无命令路由）⇒ chrome 禁用命令入口而非伪造，载体是
+  **看 + 导航**。每宿主产物互不共享：`apps/desktop-ui/dist`、`apps/app-web/dist-ui`、
+  `apps/app-android/dist`；`apps/app-web/dist`（旧 vanilla harness）未触动。
+- **Web 验收（有界，本地手工）**：`bash scripts/build-web-ui.sh` →
+  `python3 scripts/serve-web.py --directory apps/app-web/dist-ui` →
+  `node scripts/web-ui-smoke.cjs --url http://127.0.0.1:8090/ --verbose --evidence …` =
+  **PASS 7/7 cases（141/141 checks），退出码 0**（390×844 29、768×1024 18、914×412 18、1024×900 18、
+  1025×900 14、1280×800 14、live resize 双向含 1 px 门槛 30）；headless Chromium **156.0.8078.4**
+  + `--use-angle=swiftshader` ⇒ **软件渲染，布局/DOM 证据**。
+- **顺带修掉既有缺陷**：浏览器载体上永久 `unsupported-runtime: probe_input` 横幅
+  （`src/cad/input.ts` / `App.tsx` 的 `nativeInputLane`：native-below 输入通道在载体未知时就建，且
+  dispose 后仍上报在途拒绝）。
+- **Android 宿主（模拟器，有界）**：Tauri 2 WebView 载体 + wasm `dom-canvas` 会话；AVD `yacr-mobile`
+  （API 35、x86_64、1080×2400 @420dpi ⇒ DPR 2.625 ⇒ 竖屏 412 CSS / 横屏 915 CSS），WebView
+  `124.0.6367.219`、**SwiftShader 软件渲染**。竖屏 mobile 布局、CAD 出图成立（4 个亮列组、
+  `#000000` 99.8%、6 色，此前全透明）；横屏 `data-layout=mobile`、canvas 277.4 CSS（67.3 %）、
+  chrome 32.7 %（此前桌面 ribbon 时 62.5 %）。手势条内边距修复：发布
+  `--yacr-safe-bottom = 24 CSS px` 后命令框与手势条有 49 px（18.7 CSS px）空档（此前内嵌 19 px）。
+  APK `app-universal-release-unsigned.apk` 15,236,576 B（release 未签名，模拟器安装用 `/tmp` 临时密钥）。
+  「CAD 像素全透明」根因（该 GLES 实现的顶点阶段动态数组下标恒为 0）与 present 修复**不在此重复**，
+  见 `docs/validation-android-present-2026-10-28.md`；宿主契约与 NOT VERIFIED 见 `docs/android-host.md`。
+- **开放项（未闭环）**：
+  - **Android 初始 fit 取景**：竖屏下图形只占画布宽度约 **36 %**（本轮判读，非契约数字），
+    初始 fit 未按移动视口/纵横比适配。
+  - **pinch/手势输入**：未验证（程序化 resize ≠ 真机旋转，双指缩放/平移/长按均未测）。
+  - **色彩空间等价**：线性 present 目标 + blit 内 sRGB 编码与 sRGB surface 路径按构造等价，
+    但无中灰像素对比证据（夹具纯黑白）。
+  - **CI 未接线**：`build-web-ui.sh` 与 `web-ui-smoke.cjs` 是本地/手工入口；CI `web-smoke` 仍只冒烟
+    旧的 `apps/app-web/dist`。
+  - **桌面窄窗口 ribbon 裁切**：未改，属**既有**缺陷（与移动布局无关）。
+- **NOT RUN / NOT VERIFIED**：真实 GPU、真机、像素 golden、其它浏览器/Chromium 版本、WebKitGTK 上的
+  该 7-case 套件、软键盘、性能、全 workspace 测试与平台矩阵。证据目录为 `/tmp/opencode/…`
+  （**非持久、不上传**），按 `docs/validation-mobile-responsive-2026-10-28.md` §3 的命令重跑重建。
