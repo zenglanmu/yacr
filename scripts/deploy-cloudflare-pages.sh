@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-# deploy-cloudflare-pages.sh — publish `apps/app-web/dist` (the wasm CAD session
-# shell) to Cloudflare Pages by direct upload.
+# deploy-cloudflare-pages.sh — publish a built browser bundle to Cloudflare
+# Pages by direct upload.
 #
-# The bundle is built by `scripts/build-web.sh` (ADR 0024). This script only
-# validates what it is about to publish and uploads it — it never edits the
-# bundle, never substitutes a placeholder and never reports a success it did not
-# get from wrangler.
+# Two bundles are supported (`BUNDLE_KIND`):
+#   harness — `apps/app-web/dist`, the standalone vanilla page built by
+#             `scripts/build-web.sh` (ADR 0024; what CI's `web-smoke` drives);
+#   ui      — `apps/app-web/dist-ui`, the shared React chrome built by
+#             `scripts/build-web-ui.sh` with `__YACR_RUNTIME__=web` (the mobile
+#             responsive site, and what the `yacr-examples` project serves).
+#
+# This script only validates what it is about to publish and uploads it — it
+# never edits the bundle, never substitutes a placeholder and never reports a
+# success it did not get from wrangler.
 #
 # Prerequisites:
 #   CLOUDFLARE_API_TOKEN   token with "Cloudflare Pages: Edit"; add "Zone: DNS:
@@ -20,6 +26,11 @@
 #   CF_PAGES_DOMAIN    optional custom domain to attach, e.g. yacr.example.com
 #   WRANGLER_VERSION   npm version/dist-tag (default: 4)
 #   DIST               bundle to deploy (default: <repo>/apps/app-web/dist)
+#   BUNDLE_KIND        which bundle contract `DIST` must satisfy (default: harness)
+#                        harness — `scripts/build-web.sh`: index.html, main.js,
+#                                  worker.js, style.css, pkg/app_web.js|wasm
+#                        ui      — `scripts/build-web-ui.sh`: index.html,
+#                                  assets/*.js, canvas/app_web.js|wasm, bootstrap
 #   SKIP_BUILD=1       deploy the existing bundle without rebuilding it
 #
 # Honesty rules:
@@ -34,6 +45,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="${DIST:-$ROOT/apps/app-web/dist}"
+BUNDLE_KIND="${BUNDLE_KIND:-harness}"
 PROJECT="${CF_PAGES_PROJECT:-yacr-examples}"
 BRANCH="${CF_PAGES_BRANCH:-main}"
 DOMAIN="${CF_PAGES_DOMAIN:-}"
@@ -47,8 +59,12 @@ if [ "${SKIP_BUILD:-0}" != "1" ]; then
   "$ROOT/scripts/build-web.sh"
 fi
 
-# The bundle contract from `scripts/build-web.sh`: exactly these files, each
-# non-empty. A stale or partial directory must never be published.
+# The two bundle contracts. Exactly these files, each non-empty: a stale or
+# partial directory must never be published.
+#   harness — `scripts/build-web.sh`: the standalone vanilla page (+ Worker
+#             isolation) that CI's `web-smoke` drives.
+#   ui      — `scripts/build-web-ui.sh`: the shared React chrome compiled with
+#             `__YACR_RUNTIME__=web`; this is what the Pages site serves.
 required=(
   index.html
   main.js
@@ -57,13 +73,42 @@ required=(
   pkg/app_web.js
   pkg/app_web_bg.wasm
 )
-for artifact in "${required[@]}"; do
-  [ -s "$DIST/$artifact" ] || { echo "missing $DIST/$artifact; run scripts/build-web.sh" >&2; exit 1; }
+ui_required=(
+  index.html
+  canvas/app_web.js
+  canvas/app_web_bg.wasm
+  canvas/bootstrap.js
+)
+case "$BUNDLE_KIND" in
+  harness) artifacts=("${required[@]}") ;;
+  ui) artifacts=("${ui_required[@]}") ;;
+  *)
+    echo "unknown BUNDLE_KIND '$BUNDLE_KIND' (expected 'harness' or 'ui')" >&2
+    exit 1
+    ;;
+esac
+for artifact in "${artifacts[@]}"; do
+  [ -s "$DIST/$artifact" ] || {
+    echo "missing $DIST/$artifact (BUNDLE_KIND=$BUNDLE_KIND); run the matching build script" >&2
+    exit 1
+  }
 done
 # The shell must load the module this bundle ships, otherwise the deployment is
-# a blank page nobody notices.
-grep -qF './pkg/app_web.js' "$DIST/main.js" \
-  || { echo "$DIST/main.js does not import ./pkg/app_web.js; refusing to publish a blank page" >&2; exit 1; }
+# a blank page nobody notices. Each kind has its own loader.
+if [ "$BUNDLE_KIND" = "ui" ]; then
+  grep -qF './assets/' "$DIST/index.html" \
+    || { echo "$DIST/index.html references no ./assets/ bundle; refusing to publish a blank page" >&2; exit 1; }
+  grep -qF './app_web.js' "$DIST/canvas/bootstrap.js" \
+    || { echo "$DIST/canvas/bootstrap.js does not import ./app_web.js; refusing to publish a blank page" >&2; exit 1; }
+  shopt -s nullglob
+  ui_assets=("$DIST"/assets/*.js)
+  shopt -u nullglob
+  [ "${#ui_assets[@]}" -gt 0 ] \
+    || { echo "$DIST/assets has no emitted .js bundle; refusing to publish a blank page" >&2; exit 1; }
+else
+  grep -qF './pkg/app_web.js' "$DIST/main.js" \
+    || { echo "$DIST/main.js does not import ./pkg/app_web.js; refusing to publish a blank page" >&2; exit 1; }
+fi
 
 auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
 

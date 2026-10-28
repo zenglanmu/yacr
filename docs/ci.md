@@ -23,8 +23,10 @@
 > **2026-10-25 增补（Web 流水线恢复）**：`apps/app-web` 的 wasm CAD 会话（ADR 0024）已在 CI 中
 > 端到端接线：`web-build` 用**钉住 SHA-256 的 wasm-bindgen 预编译 CLI** 构建
 > `apps/app-web/dist` 并上传 artifact；`web-smoke` 下载该 artifact、起静态服务器、用 Playwright
-> Chromium 打开页面并断言 typed `start: ok` 状态行；`web-deploy` 只在 **`v*` tag 或手工
-> `workflow_dispatch`** 时把**同一个** artifact 发布到 Cloudflare Pages（`yacr-examples`）。
+> Chromium 打开页面并断言 typed `start: ok` 状态行；同一 job 还构建**共享 chrome bundle**
+> （`scripts/build-web-ui.sh` → `apps/app-web/dist-ui`，上传为 `web-ui-dist`）。
+> `web-deploy` 只在 **`v*` tag 或手工 `workflow_dispatch`** 时把 `web-ui-dist`
+> （`BUNDLE_KIND=ui`）发布到 Cloudflare Pages（`yacr-examples`）。
 > 常规 push/PR **不会**发布。CI runner 无 GPU：`web-smoke` 走 **SwiftShader 软件渲染**，
 > 因此它是 carrier/status 冒烟，**不是** GPU/像素/性能证据。CI 也未覆盖 WebKitGTK/其它浏览器
 > 矩阵（本地证据见 `docs/validation-dom-canvas-wasm-2026-10-24.md`）。
@@ -55,7 +57,7 @@
 | `macos-check` | build.yml | `macos-latest` | 原生 arm64 `cargo check -p app-macos --all-targets --locked`（占位桩，不运行） |
 | `web-build` | build.yml | `ubuntu-latest` | 安装钉住版本的 wasm-bindgen CLI（预编译 release + SHA-256 + `Cargo.lock` 对照）→ `bash scripts/build-web.sh` → 上传 `web-dist` artifact |
 | `web-smoke` | build.yml | `ubuntu-latest` | 下载 `web-dist` → `scripts/serve-web.py` → Playwright Chromium 打开页面，断言 `start: ok` / `target` / `physical` / `batches` / `draws` / `presented`；**SwiftShader 软件渲染**，非 GPU/像素证据 |
-| `web-deploy` | build.yml | `ubuntu-latest` | **仅 `v*` tag 或手工 dispatch**；`needs: web-build`，下载同一 `web-dist` 后 `scripts/deploy-cloudflare-pages.sh`（`SKIP_BUILD=1`）发布到 Cloudflare Pages |
+| `web-deploy` | build.yml | `ubuntu-latest` | **仅 `v*` tag 或手工 dispatch**；`needs: web-build`，下载 `web-ui-dist`（`apps/app-web/dist-ui`）后 `scripts/deploy-cloudflare-pages.sh`（`SKIP_BUILD=1`、`BUNDLE_KIND=ui`）发布到 Cloudflare Pages |
 | `android-check` | core.yml | 能力相关（默认 SKIP） | `bash scripts/build-android-ui.sh`（wasm 会话 + `YACR_RUNTIME=android` chrome，因为 `tauri::generate_context!` 会内嵌 `frontendDist`）→ `cargo check --target aarch64-linux-android -p app-android --locked`（**真实 Android 宿主**的编译门禁；不跑 Gradle、不建 APK、不跑设备） |
 
 `android-check` 是 capability-gated（`vars.ANDROID_CI_ENABLED`），`web-deploy` 是
@@ -120,19 +122,20 @@ runner 上恰好存在的 CLI。**本地** bundle 构建（`scripts/build-web.sh
 - **Android 设备**：CI **没有**设备/模拟器 job（`android-check` 只编译）。本地模拟器
   （x86_64 + `-gpu swiftshader_indirect`）的一次有界运行记录在 `docs/android-host.md`；
   它**不是**真机、真实 GPU 或像素验收。
-- **响应式 chrome 验收未接线 CI**：`scripts/build-web-ui.sh`（→ `apps/app-web/dist-ui`）与
-  `scripts/web-ui-smoke.cjs`（Chromium + SwiftShader 的布局/DOM 套件）、以及
-  `scripts/build-android-ui.sh` / `scripts/build-android.sh` 都是**本地/手工**入口，**没有**对应
-  workflow；CI 的 `web-smoke` 只冒烟旧的 `apps/app-web/dist`（见下一条「浏览器 bundle」），不得据本地
+- **响应式 chrome：构建/发布已接线，*验收* 仍未接线**：`web-build` 现在同时构建
+  `scripts/build-web-ui.sh`（→ `apps/app-web/dist-ui`），`web-deploy` 发布该 artifact；但
+  `scripts/web-ui-smoke.cjs`（Chromium + SwiftShader 的布局/DOM 套件）与
+  `scripts/build-android-ui.sh` / `scripts/build-android.sh` 仍是**本地/手工**入口，**没有**对应
+  workflow。CI 的 `web-smoke` 只冒烟旧的 `apps/app-web/dist`（见下一条「浏览器 bundle」），不得据本地
   结果宣称 CI 通过。本地有界记录见 `docs/validation-mobile-responsive-2026-10-28.md`。
 - **浏览器 bundle**：`web-build` 在 CI 构建并上传 artifact；`web-smoke` 用 Playwright Chromium
   （SwiftShader 软件渲染）打开并断言 typed 状态行，因此**有** CI bundle 产物与 carrier/status 冒烟，
   但**没有**真实 GPU、像素/golden、性能或 WebKitGTK/其它浏览器矩阵证据；本地真实浏览器读数
   （Chromium 141 / WebKitGTK 2.52.6，合成夹具）记录在
   `docs/validation-dom-canvas-wasm-2026-10-24.md`，属**本地**证据，不是 CI 证据。
-- **Web 发布**：`web-deploy` 只在 `v*` tag 或手工 dispatch 时运行，把该次 `web-build` 的 artifact
-  发布到 Cloudflare Pages（`yacr-examples`）；上传成功只是**发布证据**，不是运行/GPU/像素验收。
-  常规 push/PR 没有发布路径。
+- **Web 发布**：`web-deploy` 只在 `v*` tag 或手工 dispatch 时运行，把该次 `web-build` 产出的
+  `web-ui-dist`（共享 chrome bundle，`BUNDLE_KIND=ui`）发布到 Cloudflare Pages（`yacr-examples`）；
+  上传成功只是**发布证据**，不是运行/GPU/像素验收。常规 push/PR 没有发布路径。
 - **Linux 发布包**：CI 上仍没有受支持的流水线（`linux-release` 硬禁用）。`package-linux-release.sh`
   已于 2026-10-17 重启，本地可构建并安装 `.flatpak`（证据见
   `docs/validation-flatpak-linux-2026-10-17.md`）；**未**发布到 Flathub，也未在 CI 运行。

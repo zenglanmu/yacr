@@ -327,7 +327,9 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
 - **Web**（`apps/app-web`）：wasm CAD 会话（`surfaceMode: dom-canvas`，ADR 0024）是**真实**实现，
   `scripts/build-web.sh` 构建 `apps/app-web/dist`；CI `web-build` 构建并上传该 artifact、`web-smoke`
   用 Playwright Chromium（**SwiftShader 软件渲染**，非 GPU/像素证据）断言 `start: ok`、
-  `web-deploy` 仅在 `v*` tag / 手工 `workflow_dispatch` 时发布到 Cloudflare Pages（`yacr-examples`）。
+  `web-deploy` 仅在 `v*` tag / 手工 `workflow_dispatch` 时把**共享 chrome bundle**
+  （`web-ui-dist` → `apps/app-web/dist-ui`，`BUNDLE_KIND=ui`）发布到 Cloudflare Pages
+  （`yacr-examples`）。
   `app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳；浏览器侧真实渲染证据只到合成夹具
   （`docs/validation-dom-canvas-wasm-2026-10-24.md`），**没有** GPU/golden/性能/浏览器矩阵结论，
   也不得写成「web 已验收」。

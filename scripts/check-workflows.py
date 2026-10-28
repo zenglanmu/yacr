@@ -120,13 +120,19 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     ),
     "web-build": (
         # The real wasm CAD bundle (ADR 0024): pinned CLI install, script build,
-        # artifact upload that web-smoke and web-deploy consume.
+        # artifact upload that web-smoke and web-deploy consume. The same job also
+        # builds the shared React chrome bundle (`web-ui-dist`) that web-deploy
+        # publishes: one wasm build, two bundles, no cross-use.
         "bash scripts/build-web.sh",
         "wasm32-unknown-unknown",
         "wasm-bindgen",
         "apps/app-web/dist",
         "actions/upload-artifact",
         "web-dist",
+        "npm ci",
+        "bash scripts/build-web-ui.sh",
+        "apps/app-web/dist-ui",
+        "web-ui-dist",
     ),
     "web-smoke": (
         # The bundle this run built must be served and driven in a browser; CI has
@@ -138,10 +144,12 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "playwright",
     ),
     "web-deploy": (
-        # Publishes the uploaded artifact only; the deploy script validates every
-        # bundle file before wrangler sees it.
+        # Publishes the uploaded chrome artifact only; the deploy script validates
+        # every bundle file (`BUNDLE_KIND=ui`) before wrangler sees it.
         "actions/download-artifact",
-        "web-dist",
+        "web-ui-dist",
+        "apps/app-web/dist-ui",
+        "BUNDLE_KIND",
         "scripts/deploy-cloudflare-pages.sh",
         "CLOUDFLARE_API_TOKEN",
         "SKIP_BUILD",
@@ -253,12 +261,16 @@ DEPLOY_FRAGMENTS: tuple[str, ...] = (
     "CLOUDFLARE_API_TOKEN",
     "CLOUDFLARE_ACCOUNT_ID",
     "SKIP_BUILD",
+    "BUNDLE_KIND",
     "index.html",
     "main.js",
     "worker.js",
     "style.css",
     "pkg/app_web.js",
     "pkg/app_web_bg.wasm",
+    "canvas/app_web.js",
+    "canvas/app_web_bg.wasm",
+    "canvas/bootstrap.js",
     BUILD_WEB_OUT_DIR,
     "wrangler",
     "pages deploy",

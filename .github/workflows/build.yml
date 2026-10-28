@@ -15,15 +15,20 @@ name: CI build layers
 #                      a broken shader)
 #   web-build        : `scripts/build-web.sh` builds the real wasm CAD bundle
 #                      (`apps/app-web/dist`, ADR 0024) and uploads it; the pinned
-#                      wasm-bindgen CLI is installed, never taken from PATH drift
+#                      wasm-bindgen CLI is installed, never taken from PATH drift.
+#                      The same job builds the shared React chrome bundle
+#                      (`scripts/build-web-ui.sh` -> `apps/app-web/dist-ui`) and
+#                      uploads it as `web-ui-dist`
 #   web-smoke        : headless Chromium loads the built bundle, starts the wasm
 #                      session and asserts the status line. The runner has no
 #                      GPU: this is **software rendering** (SwiftShader) and is
 #                      neither GPU nor pixel evidence
-#   web-deploy       : publishes the very artifact web-build uploaded to
-#                      Cloudflare Pages — only on `v*` tags or a manual dispatch,
-#                      never on a routine push/PR. Upload is deployment evidence
-#                      only (no runtime/GPU/pixel claim)
+#   web-deploy       : publishes the shared chrome bundle web-build uploaded
+#                      (`web-ui-dist`, `BUNDLE_KIND=ui`) to Cloudflare Pages —
+#                      only on `v*` tags or a manual dispatch, never on a routine
+#                      push/PR. Upload is deployment evidence only (no
+#                      runtime/GPU/pixel claim); the vanilla harness bundle is
+#                      still built and smoked but is not what the site serves
 #
 # Retired platform build/release jobs — kept *declared* so the capability gap
 # stays visible, but hard-disabled with an unconditional `if: false` and a
@@ -307,6 +312,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - name: Cache web wasm build
         uses: actions/cache@v4
         with:
@@ -348,6 +356,23 @@ jobs:
         with:
           name: web-dist
           path: apps/app-web/dist
+          if-no-files-found: error
+          retention-days: 7
+      - name: Install the React frontend dependencies
+        # `scripts/build-web-ui.sh` refuses to run without `node_modules`; the
+        # lockfile is checked in, so the install is reproducible and offline-safe
+        # relative to the previous step's registry fetch.
+        working-directory: apps/desktop-ui
+        run: npm ci
+      - name: Build the shared chrome bundle (browser + Android runtime)
+        # Same wasm session, but the React chrome compiled with
+        # `__YACR_RUNTIME__=web`; `apps/app-web/dist` above stays untouched.
+        run: bash scripts/build-web-ui.sh
+      - name: Upload the shared chrome bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-ui-dist
+          path: apps/app-web/dist-ui
           if-no-files-found: error
           retention-days: 7
 
@@ -414,13 +439,15 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - uses: actions/download-artifact@v4
         with:
-          name: web-dist
-          path: apps/app-web/dist
-      - name: Publish the tested bundle to Cloudflare Pages
+          name: web-ui-dist
+          path: apps/app-web/dist-ui
+      - name: Publish the shared chrome bundle to Cloudflare Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CF_PAGES_PROJECT: yacr-examples
           CF_PAGES_BRANCH: main
+          DIST: ${{ github.workspace }}/apps/app-web/dist-ui
+          BUNDLE_KIND: ui
           SKIP_BUILD: "1"
         run: bash scripts/deploy-cloudflare-pages.sh

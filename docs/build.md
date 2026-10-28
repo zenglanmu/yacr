@@ -16,7 +16,9 @@
 > `scripts/build-web.sh` 重新产出**真实可服务**的浏览器 bundle（`apps/app-web/dist/`，构建产物、git 忽略，
 > 见「浏览器 bundle」一节）。**2026-10-25 起 CI 也接线**：`web-build` 构建并上传 bundle、`web-smoke`
 > 用 Playwright Chromium（**SwiftShader 软件渲染**）断言 `start: ok`，`web-deploy` 仅在 `v*` tag /
-> 手工 dispatch 时发布到 Cloudflare Pages（`yacr-examples`）。这仍**不是**可交付产品承诺：
+> 手工 dispatch 时发布到 Cloudflare Pages（`yacr-examples`）。**发布的是共享 chrome bundle**
+> `apps/app-web/dist-ui`（`web-ui-dist`，`BUNDLE_KIND=ui`），不是独立的 vanilla harness。这仍**不是**
+> 可交付产品承诺：
 > `app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳，CI 浏览器只有软件渲染的
 > carrier/status 冒烟，没有 GPU/像素/浏览器矩阵证据。
 
@@ -196,7 +198,8 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
   WebKitGTK 2.52.6 + 真实 GPU，出图与 zoom；无浏览器矩阵、无 golden、无性能结论）。CI 侧
   `web-build` 构建并上传 bundle、`web-smoke` 在 **SwiftShader 软件渲染**下断言 `start: ok` /
   carrier / `physical` / `batches` / `draws` / `presented`（**不是** GPU/像素证据，截图仅调试用）、
-  `web-deploy` 只在 `v*` tag 或手工 dispatch 时把同一 artifact 发到 Cloudflare Pages
+  `web-deploy` 只在 `v*` tag 或手工 dispatch 时把共享 chrome bundle（`web-ui-dist` →
+  `apps/app-web/dist-ui`，`BUNDLE_KIND=ui`）发到 Cloudflare Pages
   （`yacr-examples`，上传成功≠运行/视觉验收）。常规 push/PR 不发布。
 - 构建成功**不是**运行/GPU/像素证据。
 

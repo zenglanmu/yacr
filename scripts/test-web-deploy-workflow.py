@@ -58,6 +58,11 @@ class WebPipelineWorkflowContracts(unittest.TestCase):
         self.assertIn("scripts/lib/wasm-toolchain.sh", block)
         self.assertIn("apps/app-web/dist", block)
         self.assertIn("web-dist", block)
+        # The same job builds the shared chrome bundle web-deploy publishes.
+        self.assertIn("npm ci", block)
+        self.assertIn("bash scripts/build-web-ui.sh", block)
+        self.assertIn("apps/app-web/dist-ui", block)
+        self.assertIn("web-ui-dist", block)
         self.assertNotIn("if: false", block)
 
     def test_web_smoke_drives_the_uploaded_bundle(self):
@@ -78,7 +83,10 @@ class WebPipelineWorkflowContracts(unittest.TestCase):
         self.assertIn("scripts/deploy-cloudflare-pages.sh", block)
         self.assertIn("secrets.CLOUDFLARE_API_TOKEN", block)
         self.assertIn('SKIP_BUILD: "1"', block)
-        self.assertIn("web-dist", block)
+        # The published artifact is the shared chrome bundle, validated as `ui`.
+        self.assertIn("web-ui-dist", block)
+        self.assertIn("apps/app-web/dist-ui", block)
+        self.assertIn("BUNDLE_KIND: ui", block)
         self.assertNotIn("if: false", block)
 
     def test_deploying_on_a_routine_push_fails_the_gate_contract(self):
@@ -162,7 +170,14 @@ class WebEntryPointScriptContracts(unittest.TestCase):
 
     def test_deploy_that_cannot_detect_a_partial_bundle_fails(self):
         text = self.read(workflow.DEPLOY_SCRIPT)
-        for artifact in ("worker.js", "pkg/app_web.js", "pkg/app_web_bg.wasm"):
+        for artifact in (
+            "worker.js",
+            "pkg/app_web.js",
+            "pkg/app_web_bg.wasm",
+            "canvas/app_web.js",
+            "canvas/app_web_bg.wasm",
+            "canvas/bootstrap.js",
+        ):
             with self.subTest(artifact=artifact):
                 mutated = text.replace(artifact, "")
                 self.assertNotEqual(mutated, text)
