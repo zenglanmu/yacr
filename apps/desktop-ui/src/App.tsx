@@ -222,6 +222,12 @@ function Shell() {
   }, []);
 
   const t = useMemo(() => createTranslator(CATALOGS, locale), [locale]);
+  // The banner's precedence is fixed and **host-first**: a host-reported
+  // `status.error` and a failed poll always win, because the host is the authority
+  // on its own failures. The middle slot — `error` — is the chrome's own transient
+  // line (a refused command attempt, a forwarded lane failure, a popup refusal),
+  // and it is cleared at the start of every new attempt so a stale sentence cannot
+  // outlive the action that produced it (see `submitCommand`/`runStandardView`).
   const displayError = status?.error || error || pollError || '';
   const commandMessage = useMemo<CommandMessage | null>(() => {
     if (!commandResult) return null;
@@ -530,10 +536,18 @@ function Shell() {
     if (submitting.current) return;
     submitting.current = true;
     setPending(true);
+    // A new attempt owns the chrome banner: the previous attempt's sentence is not
+    // news any more, and it used to survive a later successful command (a sticky
+    // `unsupported-runtime: cad_standard_view` line stayed up through a working
+    // `FIT` until the app restarted). `status.error`/`pollError` are untouched.
+    setError('');
     try {
       const result = await queueCadCommand(invoke, text, status, false);
       setCommandResult(result);
       if (result.kind === 'accepted') {
+        // An admitted command is the strongest evidence the attempt went through:
+        // no chrome-side failure line may stay on screen after it.
+        setError('');
         setHistory(entries => pushHistory(entries, result.command));
         if (result.kind === 'accepted' && options.fromInput) setCommand('');
       }
@@ -831,7 +845,12 @@ function Shell() {
     // completion: the real camera transition, and any refusal of it, arrives in
     // `cad_status`. A request that was not admitted is translated into the error
     // banner here, so a refused view is never silent.
+    //
+    // The banner is cleared first, exactly like a command attempt: a refused view
+    // used to leave its line up for the rest of the session (a later `FIT` could
+    // not clear it), which is the same sticky-error defect from the other side.
     runStandardView: view => {
+      setError('');
       void submitStandardView({ invoke, view, t, report: setError });
     },
     cancelImport: () => { void requestImportCancel(invoke, status); },

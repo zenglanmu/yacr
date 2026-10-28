@@ -1,3 +1,112 @@
+## 2026-10-28 浏览器/Android 载体：标准视图能力显式化 + `OPEN` 文档选择器（缺陷修复）
+
+### 结论
+
+上一轮设备验收发现两个缺陷，本轮**按根因修掉**并复验：① 标准视图在无 `cad_standard_view`
+映射的载体上**显示可用**、点按抛 `unsupported-runtime: cad_standard_view`，且红色横幅**永不清除**
+（后续成功的 `FIT` 也清不掉，只能重启 App）；② `OPEN` 的 `accept=".dwg,.dxf"` 在 Android 把 `.dwg`
+解析成 `image/vnd.dwg`，意图被路由到**媒体 Photo Picker**，`/sdcard/Download` 的 DWG 选不到。
+
+### 做了什么
+
+- **`cad_status.standardViews?: readonly string[]`（新，可选，加法字段）**：**缺省** = 旧行为
+  （老宿主、桌面 `native-below`，字节不变）；**存在** = 该载体的权威列表，键不在列表里的视图在
+  发 IPC **之前**被拒绝。`parseCadStatus` 只接受「数组且每项是字符串」（`null`/字符串/含非字符串项
+  一律 `CAD_STATUS_INVALID`，不做猜测）。`standardViewAvailable(ctx, view)` /
+  `standardViewUnavailableReasonKey(ctx, view)` 读取它；`Ribbon` 传 `item.standardView`（逐按钮，
+  不是逐面板）。原因为新目录键 **`view.standard_unavailable`**（无 `{command}` 占位，抽屉按
+  `PANEL_REFUSAL_KEY` 打一条面板级说明）。
+- **wasm 会话报 `standardViews: []`**（`apps/app-web/src/shell.rs`）：它是 2D presenter，没有 3D
+  相机、没有 `StandardView` 状态、没有 `cad_standard_view` 映射；`[]` 是**肯定的"不支持"**，
+  缺省字段会被读成"宿主没声明"而继续启用。宿主单测 `standard_views_are_affirmatively_unavailable`
+  钉住这一点。
+- **错误横幅不再比动作活得久**（`App.tsx`）：每次命令尝试开始前 `setError('')`，命令被受理后再
+  清一次；标准视图尝试同样先清。横幅优先级仍是 **`status.error` → chrome 行 → `pollError`**，
+  宿主上报永不抑制。源码契约测试 `apps/desktop-ui/test/error-banner.test.ts` 钉住顺序（清在
+  `queueCadCommand`/`submitStandardView` 之前、受理后复清、chrome 从不写 `status.error`）。
+- **`OPEN` 用文档选择器**（`apps/desktop-ui/src/host/web-adapter.ts`）：隐藏
+  `<input type="file">` **去掉 `accept`**、`multiple = false`；选中后按扩展名（`.dwg`/`.dxf`，
+  大小写不敏感）校验，类型不符抛 `OPEN refused "<name>": only .dwg / .dxf files …`，
+  **不会**把任意字节交给导入器。理由写在 `pickDrawingFile` 的注释里（`accept` → 媒体 MIME →
+  Photo Picker）。
+
+### 复验（本轮实际运行）
+
+- **web**：`npx tsc --noEmit` + `node --test test/*.test.ts`（**786 passed / 0 failed**）；
+  `bash scripts/build-web-ui.sh` → smoke **PASS 8/8 cases（158/158 checks）**，OPEN 用例仍绿
+  （`documentLabel` = `synthetic-four-lines.dwg`、`importCount` 1→2）。另用一次性 Playwright 探针
+  读渲染后的 DOM：mobile `View` 抽屉七个标准视图单元 **全部 disabled**、面板说明为
+  `Standard views are not available on this carrier: it has no 3D camera.`；
+  抹掉 `disabled` 后点击**不发 IPC、不出横幅**（禁用单元的 handler 根本没挂）；
+  `OPTIONS`（本载体真实拒绝路径）先出横幅、下一条 `FIT` 后横幅节点数 **0**（旧缺陷正是这里不清）。
+- **Rust**：`cargo test -p app-web --locked`（35 passed）、
+  `cargo clippy -p app-web --all-targets --locked -- -D warnings`、`cargo fmt --all -- --check`、
+  `python3 scripts/check-i18n.py`（895 键、双语一致）、`python3 scripts/check-file-size.py`。
+- **Android（模拟器，有界）**：重建 UI + `--release --target x86_64`、`apksigner` 临时 `/tmp` 密钥、
+  `adb install -r`、启动；经 WebView devtools socket 读 DOM：`shell_status().standardViews = []`、
+  七个标准视图单元 **`disabled=true`** 且面板说明如上（`portrait-drawer-view.png`）；
+  点 `Open drawing` 后前台 Activity = **`com.google.android.documentsui/.picker.PickActivity`**
+  （**文档**选择器，不是 `…media.photopicker.PhotoPickerGetContentActivity`），
+  截图 `picker-documents.png`。返回取消后 `Open drawing` 重新可用、无横幅。
+- **NOT VERIFIED**：Android 上的**真实文件选中**（系统选择器需真实触摸，无法无头驱动）、
+  设备内非图纸文件的拒绝（只有单测）、真机/真实 GPU/其它 ROM 与 picker 实现。详见
+  `docs/android-host.md` §5「命令接线缺陷修复」与 §6。
+
+### 文件
+
+`apps/desktop-ui/src/cad/cad-status.ts`、`src/cad/view3d.ts`、`src/components/Ribbon.tsx`、
+`src/layout/mobile-ribbon.ts`、`src/App.tsx`、`src/host/web-adapter.ts`、
+`crates/cad-ui-core/i18n/{en,zh-CN}.json`（`view.standard_unavailable`）、
+`apps/app-web/src/shell.rs`、
+测试 `test/{cad,view3d,host-adapter,commands}.test.ts` + 新 `test/error-banner.test.ts`、
+文档 `docs/android-host.md`。
+
+## 2026-10-28 浏览器/Android 载体：四个命令真正接线（FIT / ZOOMIN / ZOOMOUT / OPEN）
+
+### 结论
+
+浏览器/Android 载体从「`shell_commands()` 为 `[]`、chrome 禁用每个命令入口」改为**真的执行四个
+命令**，并由**真实 UI**（`#cad-command` 的 Enter → `queueCadCommand` → `web-adapter` → wasm 会话）
+有界跑通：`ZOOMIN`/`ZOOMOUT` 各一步（1.25 / 倒数，视口中心）、`FIT` 用**开图同一条规则**从保留的
+`(min,max)` 重拟合、`OPEN` 走宿主文件选择器再进会话 `open_bytes`。**其余命令仍按名字拒绝**，没有
+伪造词汇。证据（含逐字冒烟输出与 **NOT VERIFIED** 边界）见
+`docs/validation-web-commands-2026-10-28.md`。
+
+### 做了什么
+
+- **`apps/app-web/src/view.rs`（新，平台无关）**：`retain_bounds` / `fit_camera`（唯一拟合规则，
+  原来在 `session/import.rs`）/ `zoom_step`（视口中心锚点）。`apps/app-web/Cargo.toml` 把
+  `cad-domain`/`cad-db`/`cad-app` 提到全 target，于是拟合规则、保留范围与"重拟合把相机还原"都有
+  **宿主单测**（其余依赖仍 wasm-only）。
+- **保留范围**：`session/import.rs` 在 `drop(database)` 之前记下 `(min,max)`（`Loaded.bounds`），
+  `Session.bounds` 带着它；`db_retained: false` 不变（只留两个点，不是第二份文档）。
+- **会话命令面**：`Session::fit_view` / `zoom_about_centre`；`session::{fit_view_impl,
+  zoom_step_impl}`；`lib.rs` 导出 `fit_view()`（+ native NOT IMPLEMENTED 孪生）。
+- **`shell.rs`**：`EXECUTABLE_COMMANDS = ["FIT","ZOOMIN","ZOOMOUT"]`、`Execution`、`Runner` +
+  `dispatch_json`（**宿主可测**的接受路径，含"会话失败不得变成 accepted"）、`resolve_command`
+  （trim + selector 大写，**并解析已发布的别名**）、`aliases_json` 改为桌面同形的
+  `{alias, command}` 对象（旧数组形态在 `setCommandAliases` 里会被丢弃）、`canFit` 来自
+  `has_bounds`；native `shell_command` 解析后报 `NOT_IMPLEMENTED`。
+- **传输缝**：`web-adapter.ts` 实现 `OPEN`（隐藏 `<input type=file accept=".dwg,.dxf">` + 真实
+  `arrayBuffer` + 以 `#cad-canvas` 实时矩形调用 `open_bytes`；**取消 = 已执行**，不是失败），
+  `cad_commands` = 会话列表 + `OPEN`（去重、稳定顺序），`cad_status.canOpen` 由适配器抬成 `true`
+  （选择器是 DOM 能力，会话自身仍诚实报 `false`）。**2026-10-28 修正**：`accept=".dwg,.dxf"` 会让
+  Android 走媒体 Photo Picker，已去掉该属性并改为选中后按扩展名校验，见上一条交接。
+- **一处共用判定**：`commands.ts` 的 `FIT` 门禁去掉 `entityCount !== null`——载体释放数据库后
+  `entityCount` 诚实为 `null`，`canFit` 才是"能重拟合"的答案；桌面宿主上两者等价（有文档即有计数）。
+- **冒烟**：`scripts/web-ui-smoke.cjs` 增一个用例；用例体与服务器管线拆到
+  `scripts/web-ui-command-case.cjs` / `scripts/web-ui-server.cjs`（`check-file-size.py` 1000 行上限，
+  原脚本已 1012+）。既有用例与断言**未削弱**。
+
+### 门禁（本轮实际运行）
+
+`cargo test -p app-web`（34 passed）、`cargo check -p app-web --target wasm32-unknown-unknown`、
+`cargo clippy -p app-web --all-targets -- -D warnings`、`cargo fmt --all -- --check`、
+`npx tsc --noEmit` + `node --test test/*.test.ts`（778 pass）、`check-{architecture,i18n,file-size}.py`、
+`bash scripts/build-web-ui.sh`、冒烟 `PASS 8/8 cases (158/158 checks)`（Chromium + **SwiftShader**，
+仅布局/DOM 证据）。**全 workspace 全量门禁 NOT RUN**（按日常提效策略）；真 Android、X11 宿主、真实
+GPU/像素/性能、Android SAF 文件选择器均 **NOT VERIFIED**。
+
 ## 2026-10-28 Android 宿主：Tauri 2 载体 + wasm `dom-canvas` 会话（模拟器有界运行）
 
 ### 结论

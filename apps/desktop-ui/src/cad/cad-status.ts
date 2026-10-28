@@ -127,8 +127,8 @@ export interface CadPopup {
  *
  * Every field the validator below enforces is required; the additive blocks an
  * older host may omit (`hoverPreview`, `snapEnabled`, `snapKind`, `crosshair`,
- * `commandLog`, `popup`, `gripDrag`) are optional, and the consumers already read
- * them tolerantly (`?? []`, `!= null`, `Boolean(...)`).
+ * `commandLog`, `popup`, `gripDrag`, `standardViews`) are optional, and the
+ * consumers already read them tolerantly (`?? []`, `!= null`, `Boolean(...)`).
  */
 export interface CadStatus {
   readonly documentLabel: string | null;
@@ -170,6 +170,27 @@ export interface CadStatus {
    * therefore always reports `false`.
    */
   readonly gripDrag?: boolean;
+  /**
+   * Standard-view machine keys this **carrier** can execute
+   * (`cad_ui_core::session::status` has no such block; the carriers add it).
+   *
+   * Additive and optional, with a deliberate three-state meaning:
+   *
+   * * **absent** — the host never declared a capability list (an older host, and
+   *   every desktop `native-below` host today). The chrome then keeps its historic
+   *   rule: a standard view needs a loaded status and an open drawing.
+   * * **present** — the list is authoritative for the seven keys
+   *   (`apps/desktop-ui/src/cad/view3d.ts`). A key that is not in it is refused
+   *   *before* IPC, with its own reason, because the transport has no
+   *   `cad_standard_view` mapping and the click would otherwise throw
+   *   `unsupported-runtime: cad_standard_view` from a button that looked live.
+   *
+   * `[]` is therefore a real, affirmative answer — "this carrier has no standard
+   * views" — and never the same as absent. The `dom-canvas` carrier reports `[]`:
+   * the wasm session is a 2D presenter with no 3D camera, so there is nothing for
+   * a standard view to do.
+   */
+  readonly standardViews?: readonly string[];
 }
 
 // Phase keys the backend reports (`cad_app::import_phase_key`). A phase outside
@@ -269,6 +290,17 @@ export function parseCadStatus(value: unknown): CadStatus {
   // claim a drag that no host gesture owns).
   if (status.gripDrag !== undefined && typeof status.gripDrag !== 'boolean') {
     throw Error('CAD_STATUS_INVALID');
+  }
+  // The standard-view capability list is optional (absent = the host declared
+  // nothing, which is today's desktop behaviour), but a present value must be an
+  // array of strings. `null`, a string or an array with holes would each be read
+  // as "some views are available" by a truthy check, so a malformed block is a
+  // contract violation rather than a guessed capability.
+  if (status.standardViews !== undefined) {
+    if (!Array.isArray(status.standardViews)
+      || !status.standardViews.every((key: unknown) => typeof key === 'string')) {
+      throw Error('CAD_STATUS_INVALID');
+    }
   }
   // The cursor's world coordinate is required: `null` (no reliable 2D cursor) or
   // exactly three finite numbers. Anything else is rejected outright — a

@@ -68,16 +68,17 @@
 //! resize(css_w, css_h, dpr)                                 -> JSON status
 //! zoom_at(factor, x, y)                                     -> JSON status (CSS px)
 //! pan(dx, dy)                                               -> JSON status (CSS px)
+//! fit_view()                                                -> JSON status
 //! status()                                                  -> JSON status
 //! document()                                                -> JSON document summary
 //! last_import_ms()                                          -> f64 milliseconds
 //! shell_status()                                            -> JSON `cad_status` snapshot
 //! shell_commands()                                          -> JSON array of executable command names
-//! shell_aliases()                                           -> JSON array of `[alias, canonical]` pairs
-//! shell_command(name)                                       -> Err("unsupported-runtime: cad_command: …")
+//! shell_aliases()                                           -> JSON array of `{alias, command}` rows
+//! shell_command(name)                                       -> `{"accepted":true}` or Err("unsupported-runtime: cad_command: …")
 //! ```
 //!
-//! `resize`/`zoom_at`/`pan`/`status`/`document`/`last_import_ms` are
+//! `resize`/`zoom_at`/`pan`/`fit_view`/`status`/`document`/`last_import_ms` are
 //! **carrier-agnostic**: they act on the one process-global session and never touch
 //! a canvas handle, so a Worker calls exactly the same exports as the page. Only the
 //! *opening* calls differ, because only they need a canvas.
@@ -101,13 +102,18 @@
 //! **same four wire answers** directly: `shell_status()` is the frozen `cad_status`
 //! snapshot (`cad_ui_core::session::CadStatus`) overlaid with this session's **real**
 //! facts — its label, resident batch/draw counts, presented-frame count, camera,
-//! adapter and installed-document count — serialized with
-//! `surfaceMode: "dom-canvas"`, `palettesAvailable: false` and the session's own
-//! `canvasSession` descriptor; `shell_commands()`/`shell_aliases()` are the honest
-//! **empty** vocabulary (there is no command router here); `shell_command(name)`
-//! always refuses with the stable `unsupported-runtime: cad_command` prefix. The
+//! adapter, installed-document count and its `canFit` (a live session with retained
+//! bounds) — serialized with `surfaceMode: "dom-canvas"`, `palettesAvailable: false`
+//! and the session's own `canvasSession` descriptor; `shell_commands()`/
+//! `shell_aliases()` are the selectors this crate really executes (`FIT`, `ZOOMIN`,
+//! `ZOOMOUT`, plus the desktop alias rows that point at them); `shell_command(name)`
+//! runs one of those on the live session and answers `{"accepted":true}`, and refuses
+//! every other name with the stable `unsupported-runtime: cad_command` prefix. The
 //! chrome therefore renders with every capability it does not have turned **off**
 //! rather than with fabricated state (see [`shell`] for the per-field table).
+//! `OPEN` is not in this crate's vocabulary: the page's file picker owns it
+//! (`apps/desktop-ui/src/host/web-adapter.ts`), because a picker is a DOM capability
+//! and the bytes are the transport's.
 //!
 //! # Failure vocabulary (stable)
 //!
@@ -175,17 +181,19 @@
 //!   `WebAssembly.Memory` (the page's is untouched), and the per-open peak is the
 //!   same work. `heap_after_open` therefore measures the Worker's heap when the
 //!   isolated carrier is used; it is not a claim about the tab's total memory.
-//! - **A shell status surface, but still no command surface.** [`shell`] serves
-//!   the shared chrome's frozen `cad_status` snapshot from wasm with no host
+//! - **A shell status surface and the commands the session really owns.** [`shell`]
+//!   serves the shared chrome's frozen `cad_status` snapshot from wasm with no host
 //!   process behind it (see the section above), and it says exactly what this
-//!   carrier cannot do: `canNew`/`canOpen`/`canSave`/`canPlot`/`canFit` are
-//!   `false`, `entityCount` is `null` (the database is released) and
-//!   `shell_commands()` is `[]`. Pan/zoom are camera-only (a uniform change: no
-//!   re-parse and no re-upload), which is exactly what a viewport needs. There is
-//!   no measurement, annotation, editing or wire-protocol work here — `shell_command`
-//!   refuses every name instead of faking one. That is also **why the imported
-//!   database is released** ([`budget::DB_RETAINED`] is `false`): nothing in this
-//!   contract can use it after the display representation exists.
+//!   carrier cannot do: `canNew`/`canOpen`/`canSave`/`canPlot` are `false`,
+//!   `entityCount` is `null` (the database is released), and the command vocabulary
+//!   is the three camera selectors it implements (`FIT`, `ZOOMIN`, `ZOOMOUT`).
+//!   Pan/zoom/fit are camera-only (a uniform change: no re-parse and no re-upload),
+//!   which is exactly what a viewport needs. There is no measurement, annotation,
+//!   editing or wire-protocol work here — `shell_command` refuses every other name
+//!   instead of faking one. The imported database stays released
+//!   ([`budget::DB_RETAINED`] is `false`); the only thing retained for a later
+//!   capability is the pair of world points the initial fit used, which is what
+//!   `FIT` refits to.
 //! - **Chunked upload, one atomic commit.** The scene is staged in bounded
 //!   `prepare_upload_batches` chunks (`upload_chunks`,
 //!   `peak_batches_per_chunk`) but published by a single `commit_upload`, so the
@@ -243,6 +251,15 @@ pub const NOT_IMPLEMENTED: &str =
 /// unit-tested on the host, not only observable as a dead module in a browser.
 pub mod budget;
 
+/// The camera arithmetic of an open and of the `FIT`/`ZOOMIN`/`ZOOMOUT` selectors:
+/// the retained drawing bounds, **one** fit rule, and the fixed zoom step about the
+/// viewport centre.
+///
+/// Target-independent on purpose (no DOM, no GPU, no session state), so a refit
+/// restoring the framing a zoom step moved away from is asserted by
+/// `cargo test -p app-web` rather than only in a browser. See the module docs.
+pub mod view;
+
 /// Which isolation a browser can actually deliver (`worker_capability()`).
 ///
 /// Target-independent model ([`capability::Capability`]) plus a wasm-only probe, so
@@ -257,9 +274,10 @@ pub mod capability;
 ///
 /// Target-independent on purpose: the projection is a pure function of observed
 /// session facts ([`shell::status_json`]), so its exact wire shape — including that
-/// every unimplemented capability is `false` — is asserted by host unit tests
-/// rather than only in a browser. Read the module docs for the per-field table and
-/// for why the command vocabulary is empty.
+/// every capability the carrier does not have is `false` — is asserted by host unit
+/// tests rather than only in a browser. The vocabulary is exactly the selectors
+/// [`crate::session`] executes (`FIT`, `ZOOMIN`, `ZOOMOUT`) plus the alias rows that
+/// point at them; read the module docs for the per-field table.
 pub mod shell;
 
 #[cfg(target_arch = "wasm32")]
@@ -446,6 +464,22 @@ pub fn pan(dx: f64, dy: f64) -> Result<String, JsValue> {
     session::pan_impl(dx, dy)
 }
 
+/// Refit the camera to the drawing extents retained by the open, then present.
+///
+/// This is the `FIT` selector's implementation: the same fit rule the open used
+/// (centre, larger axis ratio, 1.05 margin, validated orthographic projection) run
+/// again at the session's **current** CSS size, from the `(min, max)` bounds the
+/// import kept. The imported database itself is still released
+/// ([`budget::DB_RETAINED`]), so this is not a second query path.
+///
+/// Fails explicitly when the session retained no bounds (nothing to frame) — never
+/// a silent no-op that would look like a refit.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn fit_view() -> Result<String, JsValue> {
+    session::fit_view_impl()
+}
+
 /// The JSON status object of the current session (or of the last failure).
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -515,6 +549,12 @@ pub fn zoom_at(_factor: f64, _x: f64, _y: f64) -> Result<String, String> {
 /// Native builds cannot pan a DOM canvas (see [`NOT_IMPLEMENTED`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn pan(_dx: f64, _dy: f64) -> Result<String, String> {
+    Err(NOT_IMPLEMENTED.to_string())
+}
+
+/// Native builds cannot refit a DOM canvas (see [`NOT_IMPLEMENTED`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn fit_view() -> Result<String, String> {
     Err(NOT_IMPLEMENTED.to_string())
 }
 

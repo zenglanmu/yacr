@@ -17,6 +17,7 @@ import {
   WEB_SESSION_COMMAND,
   WEB_UNAVAILABLE_PREFIX,
   createWebAdapter,
+  isDrawingFileName,
   loadWebShellModule,
   unsupportedRuntimeMessage,
 } from '../src/host/web-adapter.ts';
@@ -31,25 +32,33 @@ const SRC_ROOT = new URL('../src/', import.meta.url);
 // stops sending one, this suite fails before a browser ever loads.
 // ---------------------------------------------------------------------------
 
-const STATUS_NO_SESSION = `{"adapter":null,"backend":null,"camera":null,"canFit":false,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":null,"entityCount":null,"error":null,"frameCount":0,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":0,"importProgress":null,"loading":false,"orthoEnabled":false,"palettesAvailable":false,"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"surfaceMode":"dom-canvas","tool":null}`;
+const STATUS_NO_SESSION = `{"adapter":null,"backend":null,"camera":null,"canFit":false,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":null,"entityCount":null,"error":null,"frameCount":0,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":0,"importProgress":null,"loading":false,"orthoEnabled":false,"palettesAvailable":false,"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"standardViews":[],"surfaceMode":"dom-canvas","tool":null}`;
 
-const STATUS_LIVE = `{"adapter":"webgl2: example adapter (wasm32 session)","backend":"webgl2","camera":{"center":[10.0,-5.0],"scale":0.25},"canFit":false,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"canvasSession":{"batches":4,"draws":4,"label":"synthetic-four-lines.dwg"},"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":"synthetic-four-lines.dwg","entityCount":null,"error":null,"frameCount":7,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":1,"importProgress":null,"loading":false,"orthoEnabled":false,"palettesAvailable":false,"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"surfaceMode":"dom-canvas","tool":null}`;
+const STATUS_LIVE = `{"adapter":"webgl2: example adapter (wasm32 session)","backend":"webgl2","camera":{"center":[10.0,-5.0],"scale":0.25},"canFit":true,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"canvasSession":{"batches":4,"draws":4,"label":"synthetic-four-lines.dwg"},"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":"synthetic-four-lines.dwg","entityCount":null,"error":null,"frameCount":7,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":1,"importProgress":null,"loading":false,"orthoEnabled":false,"palettesAvailable":false,"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"standardViews":[],"surfaceMode":"dom-canvas","tool":null}`;
 
-const REFUSAL = 'unsupported-runtime: cad_command: "OPEN" is not executable — the browser carrier is view/navigate only';
+const REFUSAL = 'unsupported-runtime: cad_command: "PAN" is not executable — this carrier executes ["FIT", "ZOOMIN", "ZOOMOUT"] only';
 
 /** A stand-in wasm session module: the four exports, over the two fixtures. */
-function fakeModule({ status = STATUS_NO_SESSION, commands = '[]', aliases = '[]' } = {}) {
+function fakeModule({ status = STATUS_NO_SESSION, commands = '[]', aliases = '[]', reply = null, open = null } = {}) {
   const calls = [];
-  return {
-    calls,
-    module: {
-      ready: Promise.resolve(),
-      shell_status() { calls.push('shell_status'); return status; },
-      shell_commands() { calls.push('shell_commands'); return commands; },
-      shell_aliases() { calls.push('shell_aliases'); return aliases; },
-      shell_command(command) { calls.push(['shell_command', command]); throw REFUSAL; },
+  const module = {
+    ready: Promise.resolve(),
+    shell_status() { calls.push('shell_status'); return status; },
+    shell_commands() { calls.push('shell_commands'); return commands; },
+    shell_aliases() { calls.push('shell_aliases'); return aliases; },
+    shell_command(command) {
+      calls.push(['shell_command', command]);
+      if (reply !== null) return reply;
+      throw REFUSAL;
     },
   };
+  if (open !== null) {
+    module.open_bytes = (...args) => {
+      calls.push(['open_bytes', ...args]);
+      return open(...args);
+    };
+  }
+  return { calls, module };
 }
 
 // ---------------------------------------------------------------------------
@@ -75,10 +84,15 @@ test('parseCadStatus accepts a real shell_status() with a live session', () => {
   assert.equal(status.frameCount, 7);
   assert.equal(status.importCount, 1);
   assert.deepEqual(status.canvasSession, { batches: 4, draws: 4, label: 'synthetic-four-lines.dwg' });
-  // A live session still advertises no document capability.
-  for (const key of ['canNew', 'canOpen', 'canSave', 'canPlot', 'canFit']) {
+  // A live session can refit (the open retained its bounds) and still advertises
+  // no file/document capability: opening is the transport's, not the session's.
+  assert.equal(status.canFit, true);
+  for (const key of ['canNew', 'canOpen', 'canSave', 'canPlot']) {
     assert.equal(status[key], false, `${key} must stay false`);
   }
+  // `entityCount` stays `null`: the database is released, so a count would be
+  // invented. `FIT` must not depend on it (see `commands.ts`).
+  assert.equal(status.entityCount, null);
 });
 
 test('a status missing a required field is rejected, not coerced', () => {
@@ -167,26 +181,219 @@ test('createInvoke routes per call through the injected transports', async () =>
 // ---------------------------------------------------------------------------
 
 test('the adapter serves the four shell commands from the wasm module', async () => {
-  const fake = fakeModule({ commands: '["ZOOM"]', aliases: '[["Z","ZOOM"]]' });
+  const fake = fakeModule({ commands: '["ZOOM"]', aliases: '[{"alias":"Z","command":"ZOOM"}]' });
   const adapter = createWebAdapter(fake.module);
 
   const status = await adapter.invoke('cad_status');
   assert.equal(status.surfaceMode, 'dom-canvas');
   assert.equal(status.documentLabel, null);
-  assert.deepEqual(await adapter.invoke('cad_commands'), ['ZOOM']);
-  assert.deepEqual(await adapter.invoke('cad_command_aliases'), [['Z', 'ZOOM']]);
+  // The session says it cannot open; the transport can, so it lifts the flag.
+  assert.equal(status.canOpen, true);
+  assert.deepEqual(await adapter.invoke('cad_commands'), ['ZOOM', 'OPEN']);
+  assert.deepEqual(await adapter.invoke('cad_command_aliases'), [{ alias: 'Z', command: 'ZOOM' }]);
   assert.deepEqual(fake.calls, ['shell_status', 'shell_commands', 'shell_aliases']);
+});
+
+test('the advertised vocabulary is the session list plus the host OPEN', async () => {
+  const real = fakeModule({ commands: '["FIT","ZOOMIN","ZOOMOUT"]' });
+  const adapter = createWebAdapter(real.module);
+  const vocabulary = await adapter.invoke('cad_commands');
+  for (const name of ['FIT', 'ZOOMIN', 'ZOOMOUT', 'OPEN']) {
+    assert.ok(vocabulary.includes(name), `${name} must be advertised: ${vocabulary}`);
+  }
+  // Stable order: the session's own names first, then the host's, deduped.
+  assert.deepEqual(vocabulary, ['FIT', 'ZOOMIN', 'ZOOMOUT', 'OPEN']);
+
+  // A duplicate (or a differently-cased spelling) is advertised once.
+  const duped = fakeModule({ commands: '["fit","FIT","OPEN"]' });
+  assert.deepEqual(await createWebAdapter(duped.module).invoke('cad_commands'), ['FIT', 'OPEN']);
+
+  // A non-string name is a loud failure, never a silently dropped entry.
+  const broken = fakeModule({ commands: '["FIT", 7]' });
+  await assert.rejects(createWebAdapter(broken.module).invoke('cad_commands'), /non-string command name/);
 });
 
 test('cad_command rethrows the session refusal verbatim', async () => {
   const fake = fakeModule();
   const adapter = createWebAdapter(fake.module);
-  await assert.rejects(adapter.invoke('cad_command', { command: 'OPEN' }), error => {
+  // `PAN` is not implemented by either side: the session's own words come back.
+  await assert.rejects(adapter.invoke('cad_command', { command: 'PAN' }), error => {
     assert.ok(error instanceof Error);
     assert.equal(error.message, REFUSAL);
+    assert.ok(error.message.startsWith('unsupported-runtime: cad_command: '));
     return true;
   });
-  assert.deepEqual(fake.calls, [['shell_command', 'OPEN']]);
+  assert.deepEqual(fake.calls, [['shell_command', 'PAN']]);
+});
+
+test('a non-OPEN command is forwarded unchanged', async () => {
+  const fake = fakeModule({ reply: '{"accepted":true}' });
+  const adapter = createWebAdapter(fake.module);
+  for (const command of ['FIT', 'ZOOMIN', 'ZOOMOUT', '  zoomin ']) {
+    assert.deepEqual(await adapter.invoke('cad_command', { command }), { accepted: true });
+  }
+  // Exactly what the chrome sent reaches the session, including its whitespace.
+  assert.deepEqual(fake.calls, [
+    ['shell_command', 'FIT'],
+    ['shell_command', 'ZOOMIN'],
+    ['shell_command', 'ZOOMOUT'],
+    ['shell_command', '  zoomin '],
+  ]);
+});
+
+// --- the host OPEN flow (fake DOM: a real file picker cannot run in Node) ---
+
+/**
+ * A fake document with just what the picker flow touches: a `#cad-canvas` with a
+ * measurable box, and a `<input type="file">` whose `click()` delivers the
+ * selection the way the browser does (`change` with files, or `cancel`).
+ */
+function fakeDocument({ cancel = false, file = null, canvas = { width: 800, height: 600 } } = {}) {
+  const inputs = [];
+  const doc = {
+    defaultView: undefined,
+    body: { appendChild() {} },
+    documentElement: { appendChild() {} },
+    getElementById(id) {
+      if (id !== 'cad-canvas' || canvas === null) return null;
+      return {
+        getBoundingClientRect() {
+          return { left: 0, top: 0, width: canvas.width, height: canvas.height };
+        },
+      };
+    },
+    createElement(tag) {
+      const listeners = new Map();
+      const input = {
+        tag,
+        type: '',
+        accept: '',
+        files: null,
+        style: {},
+        removed: false,
+        addEventListener(type, handler) {
+          listeners.set(type, [...(listeners.get(type) ?? []), handler]);
+        },
+        remove() { input.removed = true; },
+        click() {
+          if (cancel) {
+            for (const handler of listeners.get('cancel') ?? []) handler();
+            return;
+          }
+          input.files = file === null ? [] : [file];
+          for (const handler of listeners.get('change') ?? []) handler();
+        },
+      };
+      inputs.push(input);
+      return input;
+    },
+  };
+  return { doc, inputs };
+}
+
+/** A stand-in for the browser `File` (name + bytes). */
+function fakeFile(name = 'plan.dwg', bytes = [1, 2, 3]) {
+  return { name, arrayBuffer: async () => new Uint8Array(bytes).buffer };
+}
+
+test('OPEN is served by the host: picker, bytes, then the session open_bytes', async () => {
+  const file = fakeFile('plan.dwg', [1, 2, 3, 4]);
+  const page = fakeDocument({ file });
+  const fake = fakeModule({ open: async () => '{"ok":true,"label":"plan.dwg"}' });
+  const adapter = createWebAdapter(fake.module, { document: page.doc });
+
+  assert.deepEqual(await adapter.invoke('cad_command', { command: 'OPEN' }), { accepted: true });
+
+  // One hidden file input, **without** a type filter: an `accept` list sends
+  // Android to the media picker (see `pickDrawingFile`), so the format is checked
+  // on the selected name instead.
+  assert.equal(page.inputs.length, 1);
+  assert.equal(page.inputs[0].tag, 'input');
+  assert.equal(page.inputs[0].type, 'file');
+  assert.equal(page.inputs[0].accept ?? '', '', 'no accept attribute: it would route Android to the photo picker');
+  assert.equal(page.inputs[0].multiple, false, 'opening replaces the one document, so the picker is single-file');
+  assert.equal(page.inputs[0].removed, true);
+  // The session was asked to open the file's bytes at the live canvas size/DPR.
+  assert.equal(fake.calls.length, 1);
+  const [call, ...args] = fake.calls[0];
+  assert.equal(call, 'open_bytes');
+  assert.deepEqual(args, ['cad-canvas', 'plan.dwg', 800, 600, 1, new Uint8Array([1, 2, 3, 4])]);
+  // The session's own shell_command is never touched by OPEN.
+  assert.equal(fake.calls.some(([name]) => name === 'shell_command'), false);
+});
+
+test('a cancelled file dialog is an accepted, executed command (not a failure)', async () => {
+  const page = fakeDocument({ cancel: true });
+  const fake = fakeModule({ open: async () => { throw new Error('must not be called'); } });
+  const adapter = createWebAdapter(fake.module, { document: page.doc });
+
+  // The command ran (the picker was opened and dismissed by the user); the
+  // document simply did not change, which is not a failure to report.
+  assert.deepEqual(await adapter.invoke('cad_command', { command: 'OPEN' }), { accepted: true });
+  assert.equal(page.inputs.length, 1);
+  assert.deepEqual(fake.calls, []);
+});
+
+test('a selected file that is not a drawing is refused by name, before any import', async () => {
+  // The picker no longer filters by type, so this is the only thing standing
+  // between an arbitrary file and the importer.
+  const page = fakeDocument({ file: fakeFile('holiday.png', [0, 1, 2]) });
+  const fake = fakeModule({ open: async () => { throw new Error('must not be called'); } });
+  const adapter = createWebAdapter(fake.module, { document: page.doc });
+  await assert.rejects(
+    adapter.invoke('cad_command', { command: 'OPEN' }),
+    /OPEN refused "holiday\.png": only \.dwg \/ \.dxf files/,
+  );
+  assert.deepEqual(fake.calls, [], 'a non-drawing must never reach open_bytes');
+  assert.equal(page.inputs[0].removed, true, 'the hidden input is cleaned up either way');
+});
+
+test('the extension check is case-insensitive and matches only the last dot', async () => {
+  for (const name of ['PLAN.DWG', 'plan.v2.dxf', 'plan.Dwg']) {
+    const page = fakeDocument({ file: fakeFile(name) });
+    const fake = fakeModule({ open: async () => '{"ok":true}' });
+    const adapter = createWebAdapter(fake.module, { document: page.doc });
+    assert.deepEqual(await adapter.invoke('cad_command', { command: 'OPEN' }), { accepted: true }, name);
+    assert.equal(fake.calls.length, 1, name);
+    assert.equal(fake.calls[0][2], name, 'the picked label is passed through verbatim');
+  }
+  // A drawing-looking extension in the middle is not an extension.
+  assert.equal(isDrawingFileName('plan.dwg.png'), false);
+  assert.equal(isDrawingFileName('dwg'), false);
+  assert.equal(isDrawingFileName('.dwg'), false);
+  assert.equal(isDrawingFileName(undefined), false);
+  assert.equal(isDrawingFileName('plan.dwg'), true);
+});
+
+test('a failed open rejects with the real module error', async () => {
+  const page = fakeDocument({ file: fakeFile('broken.dwg') });
+  const fake = fakeModule({ open: async () => { throw new Error('import: broken.dwg: truncated header'); } });
+  const adapter = createWebAdapter(fake.module, { document: page.doc });
+  await assert.rejects(
+    adapter.invoke('cad_command', { command: 'OPEN' }),
+    /import: broken\.dwg: truncated header/,
+  );
+});
+
+test('OPEN without a canvas, a document or an open_bytes export is refused by name', async () => {
+  // No document injected and no page document (Node): nothing to pick a file with.
+  await assert.rejects(
+    createWebAdapter(fakeModule().module).invoke('cad_command', { command: 'OPEN' }),
+    /web-adapter: cad_command: no document to open a file from/,
+  );
+  // A document without the canvas: the session cannot be sized for the open.
+  await assert.rejects(
+    createWebAdapter(fakeModule().module, { document: fakeDocument({ canvas: null }).doc })
+      .invoke('cad_command', { command: 'OPEN' }),
+    /no #cad-canvas element/,
+  );
+  // A module that never got the open export: refuse before showing a picker.
+  const page = fakeDocument({ file: fakeFile() });
+  await assert.rejects(
+    createWebAdapter(fakeModule().module, { document: page.doc }).invoke('cad_command', { command: 'OPEN' }),
+    /no open_bytes export/,
+  );
+  assert.equal(page.inputs.length, 0);
 });
 
 test('cad_command without a command name fails loudly', async () => {
@@ -326,7 +533,7 @@ test('an unloaded page injects the canvas bootstrap instead of deadlocking', asy
   assert.equal(page.scripts[0].type, 'module');
 
   // The module is published now, so later calls never inject a second tag.
-  assert.deepEqual(await adapter.invoke('cad_commands'), []);
+  assert.deepEqual(await adapter.invoke('cad_commands'), ['OPEN']);
   assert.equal(page.scripts.length, 1);
 });
 

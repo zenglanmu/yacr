@@ -19,12 +19,14 @@ import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
 import {
   requestStandardView,
   STANDARD_VIEWS,
+  STANDARD_VIEW_UNAVAILABLE_KEY,
   standardViewAvailable,
   standardViewFailure,
   standardViewName,
   standardViewUnavailableReasonKey,
   submitStandardView,
 } from '../src/cad/view3d.ts';
+import { panelRefusalKey } from '../src/layout/mobile-ribbon.ts';
 import { readCatalog, readModule } from './helpers.ts';
 
 // Only the names this suite exercises. `ORBIT` is here because the router does
@@ -184,6 +186,52 @@ test('standard views and the 3D toggles need an open drawing, with a real reason
     assert.equal(admitCommandText(id, { status: empty }).kind, 'unavailable', id);
     assert.equal(admitCommandText(id, { status: null }).kind, 'unavailable', id);
   }
+});
+
+test('a declared carrier capability list decides which standard views are live', () => {
+  // Absent (`undefined`) is the older-host / desktop `native-below` case: today's
+  // exact behaviour, no capability question asked.
+  assert.equal(standardViewAvailable({ status: loaded, documentOpen: true }, 'top'), true);
+  assert.equal(standardViewAvailable({ status: loaded, documentOpen: true }), true);
+  assert.equal(standardViewUnavailableReasonKey({ status: loaded, documentOpen: true }, 'top'), 'command.unsupported');
+  // `[]` is an affirmative "this carrier has no standard views" (the dom-canvas
+  // wasm session): every view is refused, and with its own reason — the carrier
+  // limitation, not the "no drawing is open" sentence (a drawing *is* open there).
+  const noViews = { ...loaded, standardViews: [] };
+  for (const view of EXPECTED_VIEWS) {
+    assert.equal(standardViewAvailable({ status: noViews, documentOpen: true }, view), false, view);
+    assert.equal(standardViewUnavailableReasonKey({ status: noViews, documentOpen: true }, view), STANDARD_VIEW_UNAVAILABLE_KEY, view);
+  }
+  assert.notEqual(STANDARD_VIEW_UNAVAILABLE_KEY, NO_DOCUMENT_KEY);
+  assert.notEqual(STANDARD_VIEW_UNAVAILABLE_KEY, 'command.unsupported');
+  // A list that names the view keeps it live; a key outside it is refused.
+  const someViews = { ...loaded, standardViews: ['top', 'isometric'] };
+  assert.equal(standardViewAvailable({ status: someViews, documentOpen: true }, 'top'), true);
+  assert.equal(standardViewAvailable({ status: someViews, documentOpen: true }, 'isometric'), true);
+  assert.equal(standardViewAvailable({ status: someViews, documentOpen: true }, 'front'), false);
+  assert.equal(standardViewUnavailableReasonKey({ status: someViews, documentOpen: true }, 'front'), STANDARD_VIEW_UNAVAILABLE_KEY);
+  // An unnamed request on a declaring carrier cannot be confirmed by a bare list,
+  // so it is refused rather than guessed — and the unknown-name path is unchanged.
+  assert.equal(standardViewAvailable({ status: noViews, documentOpen: true }), false);
+  assert.equal(standardViewAvailable({ status: someViews, documentOpen: true }, 'sideways'), false);
+  // The capability never overrides the document gate: a carrier that *does* support
+  // the view still needs an open drawing.
+  assert.equal(standardViewAvailable({ status: someViews, documentOpen: false }, 'top'), false);
+  assert.equal(standardViewUnavailableReasonKey({ status: someViews, documentOpen: false }, 'top'), NO_DOCUMENT_KEY);
+  assert.equal(standardViewAvailable({ status: { ...someViews, loading: true }, documentOpen: true }, 'top'), false);
+  // The catalog words the new reason in both languages, without a `{command}`
+  // placeholder: a whole panel shares it (see `panelRefusalKey`).
+  assert.equal(typeof zh[STANDARD_VIEW_UNAVAILABLE_KEY], 'string');
+  assert.equal(typeof en[STANDARD_VIEW_UNAVAILABLE_KEY], 'string');
+  assert.equal(en[STANDARD_VIEW_UNAVAILABLE_KEY].includes('{command}'), false);
+  assert.equal(zh[STANDARD_VIEW_UNAVAILABLE_KEY].includes('{command}'), false);
+  assert.equal(panelRefusalKey(STANDARD_VIEW_UNAVAILABLE_KEY), STANDARD_VIEW_UNAVAILABLE_KEY);
+  // The ribbon passes the item's own view, so a capability list is consulted per
+  // button rather than panel-wide.
+  return readModule('components/Ribbon.tsx').then(ribbon => {
+    assert.ok(ribbon.includes('item.standardView ? standardViewAvailable(shell, item.standardView)'));
+    assert.ok(ribbon.includes('standardViewUnavailableReasonKey(shell, item.standardView)'));
+  });
 });
 
 test('the orbit affordance stays visible, gesture-disabled, and emits no command', async () => {

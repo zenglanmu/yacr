@@ -13,18 +13,22 @@
 //! exported functions that return the **same wire contract** the Tauri hosts
 //! serve, computed from what the wasm session actually knows.
 //!
-//! It is deliberately *not* a second session, a second document or a command
-//! router (ADR 0024 D2 / iron rule 8): it only **projects** facts the session
-//! already owns, and it refuses the command channel instead of pretending to
-//! implement it.
+//! It is deliberately *not* a second session or a second document (ADR 0024 D2 /
+//! iron rule 8): it only **projects** facts the session already owns, and it
+//! **executes** exactly the selectors that session really implements — refusing
+//! everything else by name instead of pretending to route it.
 //!
 //! # Exports (all return JSON strings)
 //!
 //! ```text
 //! shell_status()            -> JSON `cad_status` snapshot
-//! shell_commands()          -> JSON array of executable command names ([])
-//! shell_aliases()           -> JSON array of `[alias, canonical]` pairs ([])
-//! shell_command(command)    -> Err("unsupported-runtime: cad_command: …")
+//! shell_commands()          -> JSON array of executable command names
+//!                              (["FIT", "ZOOMIN", "ZOOMOUT"])
+//! shell_aliases()           -> JSON array of `{alias, command}` rows whose target
+//!                              is executable here ([{"alias":"ZOOM EXTENTS",
+//!                              "command":"FIT"}])
+//! shell_command(command)    -> `{"accepted":true}`, or Err("unsupported-runtime:
+//!                              cad_command: …")
 //! ```
 //!
 //! # `shell_status`: every field is real or honestly empty
@@ -44,9 +48,9 @@
 //! | `importProgress` | always `null` | a JS caller's in-flight `open_bytes` promise *is* the progress channel; no tick stream exists here |
 //! | `error` | the live session's last failure step+message, or a failed start's | the session's own [`Failure`](crate::session) text; technical, never localized |
 //! | `canNew` | `false` | no blank-document path exists in this crate |
-//! | `canOpen` | `false` | opening is the page's `open_bytes(bytes)`, not a command; the chrome must not advertise a host OPEN |
+//! | `canOpen` | `false` | opening is the page's `open_bytes(bytes)`, not a command served from here; the **transport** (`apps/desktop-ui/src/host/web-adapter.ts`) owns the file picker and reports `canOpen: true` |
 //! | `canSave`/`canPlot` | `false` | no save/plot path, and the database is released (no second document to write) |
-//! | `canFit` | `false` | there is **no refit entry point** in this crate — the fit happens once inside the open, from bounds that are dropped with the database. A `true` would advertise a command that cannot run |
+//! | `canFit` | `true` for a live session **with retained bounds** | `FIT` re-runs the open's own fit rule from the two retained world points ([`crate::view::DrawingBounds`]); `false` without a session or without bounds, because then there is nothing to frame |
 //! | `backend` | `"webgl2"` **only while a session is live** | the presenter is the real proof the WebGL2 backend came up; a failed/unstarted carrier never claims a backend |
 //! | `adapter` | the presenter's adapter name, tagged as the wasm session | names *which* session is drawing; the name itself is the browser's GL string (possibly masked), never a hardware claim |
 //! | `camera` | the session camera's real `{center, scale}` | `camera2d_params()`; `null` when the camera is not a valid 2D view |
@@ -57,7 +61,7 @@
 //! | `importCount` | documents this wasm instance **installed** | incremented only after import + upload + first presented frame ([`crate::session`]), so a refused file never counts |
 //! | `cursorWorld`/`crosshair` | `null`/`false` | no pointer stream reaches this crate; a synthesized coordinate would be a fabricated readout |
 //!
-//! Three fields are added on top of the frozen `CadStatus` shape (the same way
+//! Four fields are added on top of the frozen `CadStatus` shape (the same way
 //! the Linux `dom-canvas` host adds them):
 //!
 //! * `surfaceMode: "dom-canvas"` — the carrier (`apps/desktop-ui/src/cad/surface.ts`
@@ -67,44 +71,71 @@
 //!   8). Note for the page shell: `palettesOffered()` reads that flag from the
 //!   **shell** object, so a wrapper that builds `{ status }` must lift this value
 //!   out of the status instead of nesting it;
+//! * `standardViews: []` — the standard-view capability list, **empty**: there is
+//!   no `cad_standard_view` mapping here (see the `#[doc]` on every other carrier
+//!   field below). The chrome reads a present list as authoritative and disables
+//!   the seven view buttons with their own reason; an absent list would mean "the
+//!   host declared nothing" and keep them enabled;
 //! * `canvasSession: {label, batches, draws}` — the session's own descriptor,
 //!   present only while a session is live (the same shape `status()` publishes and
 //!   the Linux host relays), never a mirrored document.
 //!
-//! # `shell_commands`/`shell_aliases`: the empty vocabulary, on purpose
+//! # `shell_commands`/`shell_aliases`: the vocabulary this carrier executes
 //!
 //! `cad_ui_core::session::admissible_names()` is the *desktop* command
-//! vocabulary: those names are routed by `cad_host`/`CadSession`, which this crate
-//! does not have. Claiming them would make the chrome (ribbon, command line) offer
-//! buttons that nothing can execute, and the first click would be a silent
-//! nothing. `OPEN` is the sharpest example: opening a file here is
-//! [`open_bytes`](crate::open_bytes) (the canvas transport owns the bytes and the
-//! canvas), not a command, so it is **not** in the list either.
+//! vocabulary: most of those names are routed by `cad_host`/`CadSession`, which
+//! this crate does not have. Claiming them would make the chrome (ribbon, command
+//! line) offer buttons that nothing can execute, and the first click would be a
+//! silent nothing.
 //!
-//! So both lists are `[]` until a command genuinely runs. When one does, it is
-//! added here **at the same time** as its implementation and its contract test —
-//! never ahead of it.
+//! So the list is exactly the selectors this crate implements **end to end**, each
+//! added at the same time as its implementation and its contract test — never
+//! ahead of it:
 //!
-//! # `shell_command`: a stable refusal, never an empty success
+//! | name | what the session does |
+//! |---|---|
+//! | `FIT` | refits the camera with the open's own fit rule, from the retained bounds ([`EXECUTABLE_COMMANDS`]) |
+//! | `ZOOMIN` | one [`cad_ui_core::session::ZOOM_IN_FACTOR`] step about the viewport centre |
+//! | `ZOOMOUT` | one [`cad_ui_core::session::ZOOM_OUT_FACTOR`] step about the viewport centre |
 //!
-//! The browser carrier is view/navigate only (open, pan, zoom, resize). An
-//! unimplemented command must be *loud*: the stable machine prefix
-//! [`SHELL_COMMAND_REFUSAL`] plus one sentence, so a caller can key on the prefix
-//! and a human reads why. Returning `Ok("")` would look like a success to the
-//! chrome and to any future caller.
+//! `OPEN` is deliberately **not** in this list: opening a file here is
+//! [`open_bytes`](crate::open_bytes) — the canvas transport owns the bytes, the
+//! file picker and the canvas — so it is implemented by the page shell
+//! (`apps/desktop-ui/src/host/web-adapter.ts`), not by this module. Everything else
+//! (layers, settings, measurements, drawing tools, `PAN`, …) is refused by name.
+//!
+//! `shell_aliases` publishes only the rows of the desktop table
+//! (`cad_ui_core::session::alias_pairs()`) whose **target is executable here** —
+//! today `ZOOM EXTENTS → FIT`. No alias is invented, and a row pointing at a
+//! selector this carrier cannot run would be a suggestion that always fails, so it
+//! is filtered out. [`resolve_command`] honours every published row.
+//!
+//! # `shell_command`: execute, or a stable refusal — never an empty success
+//!
+//! A published name is executed against the one live session and answers
+//! `{"accepted":true}` (the reply `cad_command` requires); a name this carrier
+//! cannot run is refused with the stable machine prefix
+//! [`SHELL_COMMAND_REFUSAL`] plus one sentence naming the selector, so a caller can
+//! key on the prefix and a human reads why. Returning `Ok("")` would look like a
+//! success to the chrome and to any future caller.
 //!
 //! # Native builds
 //!
 //! The JSON contract is target-independent (it describes the carrier this crate
 //! implements, and degrades to the honest no-session snapshot where no session
 //! exists), which is what lets `cargo test -p app-web` assert the exact payload on
-//! the host instead of only in a browser. The one platform refusal is the command
-//! channel: [`shell_command`] refuses on every target, because no target of this
-//! crate has a command router.
+//! the host instead of only in a browser. [`resolve_command`] — the whole
+//! vocabulary — is target-independent too, so the accepted path of every published
+//! name is unit-tested on the host through [`dispatch_json`] with a recording
+//! [`Runner`]. What a native build cannot do is *execute*: it has no session
+//! ([`crate::NOT_IMPLEMENTED`]), so [`shell_command`] resolves the name and then
+//! reports that honest platform failure instead of a fabricated `accepted`.
 
 use serde_json::{json, Value};
 
-use cad_ui_core::session::{unsupported_status, CadCamera, CadStatus};
+use cad_ui_core::session::{
+    alias_pairs, unsupported_status, CadCamera, CadStatus, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR,
+};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -128,8 +159,63 @@ pub const BACKEND_WEBGL2: &str = "webgl2";
 ///
 /// A caller keys on this (like the `yacr: unsupported-runtime: webgl2` marker);
 /// the sentence that follows it is for a human. It always names `cad_command`, the
-/// only channel this carrier refuses wholesale.
+/// channel this carrier answers by name.
 pub const SHELL_COMMAND_REFUSAL: &str = "unsupported-runtime: cad_command";
+
+/// The selectors this carrier executes **end to end**, in the order the chrome
+/// advertises them.
+///
+/// Every name here has a real implementation in the wasm session (`crate::session`,
+/// wasm-only) and a contract test; nothing is listed ahead of its implementation, and
+/// `OPEN` is not listed because the page shell implements it (see the module docs).
+pub const EXECUTABLE_COMMANDS: [&str; 3] = ["FIT", "ZOOMIN", "ZOOMOUT"];
+
+/// One resolved command: what the live session has to do.
+///
+/// Kept target-independent (no session handle) so the vocabulary and its dispatch
+/// are unit-testable on the host, not only in a browser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Execution {
+    /// Reframe the camera with the open's own fit rule, from the retained bounds.
+    Fit,
+    /// One [`ZOOM_IN_FACTOR`] step about the viewport centre.
+    ZoomIn,
+    /// One [`ZOOM_OUT_FACTOR`] step about the viewport centre.
+    ZoomOut,
+}
+
+impl Execution {
+    /// The selector this step was resolved from (the name `cad_command` sent).
+    pub fn selector(self) -> &'static str {
+        match self {
+            Execution::Fit => "FIT",
+            Execution::ZoomIn => "ZOOMIN",
+            Execution::ZoomOut => "ZOOMOUT",
+        }
+    }
+
+    /// The zoom factor of a fixed step, or `None` for [`Execution::Fit`].
+    ///
+    /// The factors are `cad-ui-core`'s own constants, so the browser step and the
+    /// desktop `ZOOMIN`/`ZOOMOUT` cannot drift apart.
+    pub fn zoom_factor(self) -> Option<f64> {
+        match self {
+            Execution::Fit => None,
+            Execution::ZoomIn => Some(ZOOM_IN_FACTOR),
+            Execution::ZoomOut => Some(ZOOM_OUT_FACTOR),
+        }
+    }
+}
+
+/// Something that can carry out one [`Execution`] against a live session.
+///
+/// The wasm build implements this over the process-global session
+/// (`SessionRunner`, wasm-only); host tests implement it as a recorder, which is how
+/// the accepted path of every published selector is asserted without a browser.
+pub trait Runner {
+    /// Run `step`; the error text is the session's own diagnostic.
+    fn run(&self, step: Execution) -> Result<(), String>;
+}
 
 /// The real facts of the live wasm session, as the status projection needs them.
 ///
@@ -152,6 +238,12 @@ pub struct LiveSession {
     /// view (a failed navigation leaves it unusable; the status then reports
     /// `camera: null`).
     pub camera: Option<CadCamera>,
+    /// Whether the import retained the drawing bounds this session's fit used.
+    ///
+    /// `true` is what makes `FIT` executable (`cad_status.canFit`); `false` means
+    /// the imported database reported no bounds, so there is nothing to reframe and
+    /// a `true` would advertise a command that cannot run.
+    pub has_bounds: bool,
     /// The live session's last technical failure (step + message), or `None`.
     pub error: Option<String>,
 }
@@ -193,6 +285,10 @@ pub fn status_json(facts: &SessionFacts) -> String {
         status.adapter = Some(live.adapter.clone());
         status.camera = live.camera;
         status.frame_count = live.presented;
+        // `FIT` is executable iff the import retained the bounds it fitted to.
+        // That is the session's own observation, so the chrome can enable the
+        // button exactly when the command will run.
+        status.can_fit = live.has_bounds;
     }
     // A live session's own last failure wins; otherwise report the failure that
     // ended a start attempt, so a failed carrier never looks healthy.
@@ -202,13 +298,15 @@ pub fn status_json(facts: &SessionFacts) -> String {
         .and_then(|live| live.error.clone())
         .or_else(|| facts.error.clone());
 
-    // `entityCount`, `canNew`, `canOpen`, `canSave`, `canPlot`, `canFit`,
-    // `importProgress`, `tool`, `popup`, `commandLog`, `gripDrag`,
-    // `cursorWorld`/`crosshair`, `selection`, `snap*`/`ortho`/`grid` and the
-    // snap spacing stay exactly as the baseline set them: `null`/`false`/empty,
-    // or the documented `DEFAULT_SNAP_SPACING` for the one field the frozen wire
-    // shape requires to be a usable number. None of them has an implementation on
-    // this carrier, so none of them may claim one.
+    // `entityCount`, `canNew`, `canOpen`, `canSave`, `canPlot`, `importProgress`,
+    // `tool`, `popup`, `commandLog`, `gripDrag`, `cursorWorld`/`crosshair`,
+    // `selection`, `snap*`/`ortho`/`grid` and the snap spacing stay exactly as the
+    // baseline set them: `null`/`false`/empty, or the documented
+    // `DEFAULT_SNAP_SPACING` for the one field the frozen wire shape requires to be
+    // a usable number. None of them has an implementation on this carrier, so none
+    // of them may claim one. (`canOpen` is not set here on purpose: the file picker
+    // is the **transport's** capability, so `apps/desktop-ui/src/host/web-adapter.ts`
+    // lifts it, not this module.)
 
     let mut wire = to_json_value(&status);
     if let Some(object) = wire.as_object_mut() {
@@ -219,6 +317,16 @@ pub fn status_json(facts: &SessionFacts) -> String {
         // nothing to project (iron rule 8). An affirmative `false`, never a
         // silently missing key.
         object.insert("palettesAvailable".to_string(), json!(false));
+        // The standard-view capability list: **empty, on purpose**. This carrier
+        // has no `cad_standard_view` mapping at all. The wasm session is a 2D
+        // presenter — it imports, draws and presets a `camera2d` view, and has no
+        // 3D camera, no `StandardView` state and no transport channel behind the
+        // seven view names. Reporting `[]` (not omitting the field) is the honest
+        // answer: absent would mean "this host declared nothing", which the chrome
+        // keeps enabling as before, and tapping a view then throws
+        // `unsupported-runtime: cad_standard_view` from a button that looked live.
+        // `[]` makes `standardViewAvailable` refuse every view **before** IPC.
+        object.insert("standardViews".to_string(), json!([]));
         // The session's own descriptor, in the shape `status()` publishes and the
         // Linux host relays. Absent (not `null`) without a live session, so
         // "no session" and "a session with no label" cannot be confused.
@@ -236,40 +344,110 @@ pub fn status_json(facts: &SessionFacts) -> String {
     wire.to_string()
 }
 
-/// The command names this carrier can execute: **none, today** (see the module
-/// docs).
+/// The command names this carrier executes: [`EXECUTABLE_COMMANDS`].
 ///
-/// An empty array is the honest answer, not a placeholder: this crate has no
-/// command router, and the names `cad_ui_core::session::admissible_names()` lists
-/// belong to the desktop session. `OPEN` is not listed either — opening here is
-/// the carrier's own `open_bytes`, which the canvas transport calls with the file
-/// bytes.
+/// Not the desktop router's vocabulary — only the selectors the wasm session
+/// (`crate::session`, wasm-only) really implements (see the module docs). `OPEN` is
+/// served by the page shell.
 pub fn commands_json() -> String {
-    json!([]).to_string()
+    json!(EXECUTABLE_COMMANDS).to_string()
 }
 
-/// The command aliases this carrier resolves: **none**, for the same reason as
-/// [`commands_json`].
+/// The alias rows this carrier resolves: the desktop table filtered to targets it
+/// can execute.
 ///
-/// The desktop alias table (`cad_ui_core::session::alias_pairs()`) maps names onto
-/// a router this carrier does not have, so publishing it would let the chrome
-/// accept an alias and then silently do nothing.
+/// `cad_ui_core::session::alias_pairs()` is the single alias source; a row whose
+/// target is not in [`EXECUTABLE_COMMANDS`] is dropped, because a suggestion that
+/// this carrier would refuse is worse than no suggestion. The wire shape is the
+/// desktop one (`{alias, command}`), which is what `setCommandAliases` in
+/// `apps/desktop-ui/src/commands/commands.ts` reads.
+pub fn aliases() -> Vec<(&'static str, &'static str)> {
+    alias_pairs()
+        .into_iter()
+        .filter(|(_, target)| EXECUTABLE_COMMANDS.contains(target))
+        .collect()
+}
+
+/// The JSON alias table (see [`aliases`]).
 pub fn aliases_json() -> String {
-    json!([]).to_string()
+    json!(aliases()
+        .into_iter()
+        .map(|(alias, command)| json!({ "alias": alias, "command": command }))
+        .collect::<Vec<_>>())
+    .to_string()
 }
 
-/// Refuse one command with the stable [`SHELL_COMMAND_REFUSAL`] prefix.
+/// The stable refusal for one name this carrier cannot execute.
 ///
-/// The requested name is echoed with `{:?}` so a caller sees exactly what it sent
-/// (including a newline or quote) without the refusal prose being spoofable. This
-/// never returns `Ok`: the browser carrier is view/navigate only (open, pan, zoom,
-/// resize), and an unimplemented command must fail loudly rather than look like an
-/// empty success.
-pub fn command_json(command: &str) -> Result<String, String> {
-    Err(format!(
-        "{SHELL_COMMAND_REFUSAL}: {command:?} is not executable — the browser carrier is \
-         view/navigate only (open, pan, zoom, resize; it has no command router)"
-    ))
+/// The requested text is echoed with `{:?}` so a caller sees exactly what it sent
+/// (including a newline or quote) without the refusal prose being spoofable.
+pub fn refusal(command: &str) -> String {
+    format!(
+        "{SHELL_COMMAND_REFUSAL}: {command:?} is not executable — this carrier executes \
+         {EXECUTABLE_COMMANDS:?} only (open is the page's file picker, pan/scroll are the \
+         pointer transport; there is no command router)"
+    )
+}
+
+/// Normalise one command line the way the router does: trim, and upper-case the
+/// **selector** while keeping the rest of the line as typed.
+///
+/// The three published selectors take no argument, but the normalisation is the
+/// documented one (not a special case per name), so an unexpected argument is
+/// preserved verbatim in the refusal instead of being silently folded.
+pub fn normalize_line(line: &str) -> String {
+    let trimmed = line.trim();
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let selector = parts.next().unwrap_or("").to_ascii_uppercase();
+    match parts.next().map(str::trim) {
+        Some(rest) if !rest.is_empty() => format!("{selector} {rest}"),
+        _ => selector,
+    }
+}
+
+/// Resolve one typed line to the step it asks for, or the stable refusal.
+///
+/// This is the whole vocabulary: the three canonical selectors plus every
+/// **published** alias (`ZOOM EXTENTS → FIT`). Matching is case-insensitive on the
+/// normalised line, exactly like `cad_ui_core::session::canonical_command_name`;
+/// anything else is [`refusal`]. Nothing is executed here, which is what makes the
+/// accepted path assertable on the host.
+pub fn resolve_command(command: &str) -> Result<Execution, String> {
+    let key = normalize_line(command);
+    let step = match key.as_str() {
+        "FIT" => Some(Execution::Fit),
+        "ZOOMIN" => Some(Execution::ZoomIn),
+        "ZOOMOUT" => Some(Execution::ZoomOut),
+        _ => aliases()
+            .into_iter()
+            .find(|(alias, _)| alias.eq_ignore_ascii_case(&key))
+            .and_then(|(_, target)| match target {
+                "FIT" => Some(Execution::Fit),
+                "ZOOMIN" => Some(Execution::ZoomIn),
+                "ZOOMOUT" => Some(Execution::ZoomOut),
+                _ => None,
+            }),
+    };
+    step.ok_or_else(|| refusal(command))
+}
+
+/// The wire reply a completed command answers with.
+///
+/// `queueCadCommand` (`apps/desktop-ui/src/cad/cad-command.ts`) requires exactly
+/// `accepted: true`; anything else counts as a failure, so this is the only success
+/// shape emitted.
+pub fn accepted_json() -> String {
+    json!({ "accepted": true }).to_string()
+}
+
+/// Execute one line through `runner` and answer its wire reply.
+///
+/// A refusal never reaches the runner (an unimplemented name has nothing to run),
+/// and a runner error is the session's own diagnostic, handed on unchanged instead
+/// of being turned into a success.
+pub fn dispatch_json(runner: &impl Runner, command: &str) -> Result<String, String> {
+    runner.run(resolve_command(command)?)?;
+    Ok(accepted_json())
 }
 
 /// The honest all-capabilities-off baseline every field starts from.
@@ -305,23 +483,58 @@ pub fn shell_status() -> String {
 
 /// `[]`: no command is executable on this carrier (wasm).
 #[cfg(target_arch = "wasm32")]
+/// `["FIT","ZOOMIN","ZOOMOUT"]`: the selectors the wasm session executes (wasm).
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn shell_commands() -> String {
     commands_json()
 }
 
-/// `[]`: no alias resolves on this carrier (wasm).
+/// The desktop alias rows whose target this carrier executes (wasm).
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn shell_aliases() -> String {
     aliases_json()
 }
 
-/// Always the stable `unsupported-runtime: cad_command` refusal (wasm).
+/// Execute one published selector against the live session, or refuse it.
+///
+/// A published name (`FIT`/`ZOOMIN`/`ZOOMOUT`, or a published alias of one) runs on
+/// the one wasm session through [`SessionRunner`] and answers
+/// `{"accepted":true}`; everything else is the stable
+/// [`SHELL_COMMAND_REFUSAL`]. A session failure (no live session, a navigation
+/// error) is the session's own message, never a rewritten success.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn shell_command(command: &str) -> Result<String, JsValue> {
-    command_json(command).map_err(|message| JsValue::from_str(&message))
+    dispatch_json(&SessionRunner, command).map_err(|message| JsValue::from_str(&message))
+}
+
+/// The wasm [`Runner`]: every step is one call on the process-global session.
+#[cfg(target_arch = "wasm32")]
+struct SessionRunner;
+
+#[cfg(target_arch = "wasm32")]
+impl Runner for SessionRunner {
+    fn run(&self, step: Execution) -> Result<(), String> {
+        match step.zoom_factor() {
+            // `FIT` reframes from the bounds the open retained.
+            None => crate::session::fit_view_impl()
+                .map(|_status| ())
+                .map_err(describe_session_error),
+            // `ZOOMIN`/`ZOOMOUT` are fixed steps about the viewport centre.
+            Some(factor) => crate::session::zoom_step_impl(factor)
+                .map(|_status| ())
+                .map_err(describe_session_error),
+        }
+    }
+}
+
+/// The text of a session `Err(JsValue)` (the session always rejects with a string;
+/// a non-string is described rather than swallowed).
+#[cfg(target_arch = "wasm32")]
+fn describe_session_error(error: JsValue) -> String {
+    error.as_string().unwrap_or_else(|| format!("{error:?}"))
 }
 
 /// Native builds have no browser registry to project, so the status is the honest
@@ -337,24 +550,28 @@ pub fn shell_status() -> String {
     status_json(&SessionFacts::default())
 }
 
-/// `[]` on every target: the command vocabulary is a property of the carrier, not
-/// of the build (see [`commands_json`]).
+/// The same vocabulary on every target: it is a property of the carrier, not of the
+/// build (see [`commands_json`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn shell_commands() -> String {
     commands_json()
 }
 
-/// `[]` on every target (see [`aliases_json`]).
+/// The same filtered alias table on every target (see [`aliases_json`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn shell_aliases() -> String {
     aliases_json()
 }
 
-/// The same stable refusal as the wasm build: no target of this crate has a
-/// command router, so this is a capability statement, not a platform limitation.
+/// Resolve the name, then report the platform failure: a native build has no wasm
+/// session to run it on, so it must never answer `accepted`.
+///
+/// An unlisted name keeps the stable [`SHELL_COMMAND_REFUSAL`]; a listed one is
+/// [`crate::NOT_IMPLEMENTED`], exactly like the other native canvas entry points.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn shell_command(command: &str) -> Result<String, String> {
-    command_json(command)
+    resolve_command(command)?;
+    Err(crate::NOT_IMPLEMENTED.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +611,11 @@ mod tests {
 
     /// A live session built from values a real one could report.
     fn live() -> LiveSession {
+        live_with_bounds(true)
+    }
+
+    /// A live session with or without retained drawing bounds (`FIT` viability).
+    fn live_with_bounds(has_bounds: bool) -> LiveSession {
         LiveSession {
             label: "synthetic-four-lines.dwg".to_string(),
             batches: 4,
@@ -404,7 +626,39 @@ mod tests {
                 center: [10.0, -5.0],
                 scale: 0.25,
             }),
+            has_bounds,
             error: None,
+        }
+    }
+
+    /// A [`Runner`] that records what it was asked to do (the host-side accepted
+    /// path, without a browser).
+    #[derive(Default)]
+    struct RecordingRunner {
+        seen: std::cell::RefCell<Vec<Execution>>,
+        fail: Option<String>,
+    }
+
+    impl RecordingRunner {
+        fn failing(message: &str) -> Self {
+            Self {
+                seen: std::cell::RefCell::new(Vec::new()),
+                fail: Some(message.to_string()),
+            }
+        }
+
+        fn seen(&self) -> Vec<Execution> {
+            self.seen.borrow().clone()
+        }
+    }
+
+    impl Runner for RecordingRunner {
+        fn run(&self, step: Execution) -> Result<(), String> {
+            self.seen.borrow_mut().push(step);
+            match &self.fail {
+                Some(message) => Err(message.clone()),
+                None => Ok(()),
+            }
         }
     }
 
@@ -445,6 +699,29 @@ mod tests {
         }
     }
 
+    /// The standard-view capability list is present and **empty**: this carrier
+    /// executes no standard view, and `[]` is the affirmative answer that makes the
+    /// chrome disable the seven buttons with their own reason. Omitting the field
+    /// would read as "host declared nothing" and leave them enabled.
+    #[test]
+    fn standard_views_are_affirmatively_unavailable() {
+        for facts in [
+            SessionFacts::default(),
+            SessionFacts {
+                session: Some(live()),
+                loading: false,
+                import_count: 1,
+                error: None,
+            },
+        ] {
+            let wire = parse(&status_json(&facts));
+            let views = wire
+                .get("standardViews")
+                .unwrap_or_else(|| panic!("standardViews must be present: {wire}"));
+            assert_eq!(views, &json!([]), "standardViews must be empty: {wire}");
+        }
+    }
+
     #[test]
     fn status_reports_no_document_capability() {
         for facts in [
@@ -457,7 +734,9 @@ mod tests {
             },
         ] {
             let wire = parse(&status_json(&facts));
-            for key in ["canNew", "canOpen", "canSave", "canPlot", "canFit"] {
+            // `canFit` is the one capability this carrier has (a live session with
+            // retained bounds), and it is asserted separately below.
+            for key in ["canNew", "canOpen", "canSave", "canPlot"] {
                 assert_eq!(wire[key], json!(false), "{key} must be false: {wire}");
             }
             // The database is released after the open: no entity count exists.
@@ -469,6 +748,29 @@ mod tests {
             assert_eq!(wire["gripDrag"], json!(false));
             assert_eq!(wire["selection"]["count"], json!(0));
         }
+    }
+
+    /// `canFit` is exactly "a live session whose import retained the bounds".
+    #[test]
+    fn can_fit_needs_a_live_session_with_retained_bounds() {
+        let facts = |session: Option<LiveSession>| SessionFacts {
+            session,
+            loading: false,
+            import_count: 1,
+            error: None,
+        };
+        // No session: nothing to refit, so nothing is advertised.
+        assert_eq!(parse(&status_json(&facts(None)))["canFit"], json!(false));
+        // A session that retained no bounds: the fit had nothing to frame.
+        assert_eq!(
+            parse(&status_json(&facts(Some(live_with_bounds(false)))))["canFit"],
+            json!(false)
+        );
+        // A session with the import's bounds: `FIT` really can run.
+        assert_eq!(
+            parse(&status_json(&facts(Some(live_with_bounds(true)))))["canFit"],
+            json!(true)
+        );
     }
 
     #[test]
@@ -505,9 +807,10 @@ mod tests {
             wire["canvasSession"],
             json!({"label": "synthetic-four-lines.dwg", "batches": 4, "draws": 4})
         );
-        // A live session still cannot save, plot, refit or count entities.
+        // A live session still cannot save, plot or count entities — but it can
+        // refit, because the import retained the bounds (`has_bounds`).
         assert_eq!(wire["canSave"], json!(false));
-        assert_eq!(wire["canFit"], json!(false));
+        assert_eq!(wire["canFit"], json!(true));
         assert_eq!(wire["entityCount"], json!(null));
     }
 
@@ -529,20 +832,88 @@ mod tests {
     }
 
     #[test]
-    fn the_command_vocabulary_is_empty() {
-        assert_eq!(commands_json(), "[]");
-        assert_eq!(aliases_json(), "[]");
-        assert_eq!(shell_commands(), "[]");
-        assert_eq!(shell_aliases(), "[]");
-        // ...and it parses as an array, not as a string that merely looks like one.
-        assert_eq!(parse(&shell_commands()), json!([]));
-        assert_eq!(parse(&shell_aliases()), json!([]));
+    fn the_command_vocabulary_is_exactly_what_the_session_executes() {
+        // The exact list, in order — the chrome advertises this and nothing else.
+        assert_eq!(
+            parse(&shell_commands()),
+            json!(["FIT", "ZOOMIN", "ZOOMOUT"])
+        );
+        assert_eq!(parse(&commands_json()), json!(["FIT", "ZOOMIN", "ZOOMOUT"]));
+        // Every published name is a real admitted selector of the shared table, so
+        // no name is invented here.
+        let admitted = cad_ui_core::session::admissible_names();
+        for name in EXECUTABLE_COMMANDS {
+            assert!(
+                admitted.contains(&name),
+                "{name} is not an admitted selector"
+            );
+        }
+        // `OPEN` is the page shell's command, never this carrier's.
+        assert!(!EXECUTABLE_COMMANDS.contains(&"OPEN"));
+        assert_eq!(shell_commands(), commands_json());
+        assert_eq!(shell_aliases(), aliases_json());
+    }
+
+    #[test]
+    fn the_alias_table_only_points_at_executable_targets() {
+        assert_eq!(
+            parse(&aliases_json()),
+            json!([{ "alias": "ZOOM EXTENTS", "command": "FIT" }])
+        );
+        // Every row is a real row of the desktop table, filtered — never invented,
+        // and never pointing at a name this carrier would refuse.
+        let desktop = cad_ui_core::session::alias_pairs();
+        for (alias, target) in aliases() {
+            assert!(desktop.contains(&(alias, target)), "{alias} -> {target}");
+            assert!(EXECUTABLE_COMMANDS.contains(&target), "{alias} -> {target}");
+        }
+        // The alias resolves to the same step as its target, so a published alias
+        // can never be a suggestion that always fails.
+        assert_eq!(resolve_command("ZOOM EXTENTS"), resolve_command("FIT"));
+        assert_eq!(resolve_command("zoom extents"), Ok(Execution::Fit));
+    }
+
+    #[test]
+    fn each_published_command_resolves_and_is_dispatched() {
+        let runner = RecordingRunner::default();
+        for (line, expected) in [
+            ("FIT", Execution::Fit),
+            ("ZOOMIN", Execution::ZoomIn),
+            ("ZOOMOUT", Execution::ZoomOut),
+            // Trim + selector case are normalised like the router does.
+            ("  zoomin ", Execution::ZoomIn),
+        ] {
+            assert_eq!(resolve_command(line), Ok(expected), "{line}");
+            assert_eq!(dispatch_json(&runner, line), Ok(accepted_json()), "{line}");
+        }
+        assert_eq!(
+            runner.seen(),
+            vec![
+                Execution::Fit,
+                Execution::ZoomIn,
+                Execution::ZoomOut,
+                Execution::ZoomIn
+            ]
+        );
+        // The reply is the only shape `queueCadCommand` treats as accepted, and the
+        // steps are the desktop factors.
+        assert_eq!(parse(&accepted_json()), json!({"accepted": true}));
+        assert_eq!(Execution::ZoomIn.zoom_factor(), Some(ZOOM_IN_FACTOR));
+        assert_eq!(Execution::ZoomOut.zoom_factor(), Some(ZOOM_OUT_FACTOR));
+        assert_eq!(Execution::Fit.zoom_factor(), None);
+    }
+
+    #[test]
+    fn a_session_failure_is_never_turned_into_an_accepted_reply() {
+        let runner = RecordingRunner::failing("navigation: no drawing bounds");
+        let error = dispatch_json(&runner, "FIT").expect_err("the session refused");
+        assert_eq!(error, "navigation: no drawing bounds");
     }
 
     #[test]
     fn a_command_is_refused_with_the_stable_prefix() {
-        for command in ["OPEN", "SAVE", "", "cad_status"] {
-            let error = shell_command(command).expect_err("no command is executable");
+        for command in ["OPEN", "PAN", "SAVE", "ZOOM", "GARBAGE", "", "cad_status"] {
+            let error = resolve_command(command).expect_err("not an executable command");
             assert!(
                 error.starts_with(SHELL_COMMAND_REFUSAL),
                 "the refusal must be machine-readable: {error}"
@@ -552,9 +923,23 @@ mod tests {
                 "the refusal must carry the stable prefix: {error}"
             );
             assert!(
-                error.contains("view/navigate only"),
-                "the refusal must say what the carrier can do: {error}"
+                error.contains(&format!("{command:?}")),
+                "the refusal must name the selector it refused: {error}"
             );
         }
+    }
+
+    /// A native build resolves a published name but cannot execute it: no session
+    /// exists on this target, so it says so instead of answering `accepted`.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_native_build_reports_the_platform_failure_not_a_success() {
+        for command in EXECUTABLE_COMMANDS {
+            let error = shell_command(command).expect_err("no session exists natively");
+            assert_eq!(error, crate::NOT_IMPLEMENTED.to_string());
+        }
+        // …and an unlisted name keeps the stable refusal.
+        let error = shell_command("OPEN").expect_err("OPEN is the page's command");
+        assert!(error.starts_with(SHELL_COMMAND_REFUSAL), "{error}");
     }
 }

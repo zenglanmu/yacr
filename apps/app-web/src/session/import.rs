@@ -9,12 +9,19 @@
 //!
 //! # What is released, and why that is honest
 //!
-//! The imported `Database` is needed exactly twice — `build_scene` and the
-//! one-off camera fit from its bounds — and is then dropped here, before any GPU
-//! object exists. `budget::DB_RETAINED` is `false` and the status says
-//! `db_retained: false`; a capability that needs the database later (save,
-//! measure, entity query) must flip that constant instead of quietly keeping a
-//! second copy of the document alive.
+//! The imported `Database` is needed exactly twice — `build_scene` and the camera
+//! fit from its bounds — and is then dropped here, before any GPU object exists.
+//! `budget::DB_RETAINED` is `false` and the status says `db_retained: false`; a
+//! capability that needs the database later (save, measure, entity query) must
+//! flip that constant instead of quietly keeping a second copy of the document
+//! alive.
+//!
+//! What *is* retained is the pair of world points the fit was computed from
+//! ([`DrawingBounds`]): two numbers the import already measured, not another copy
+//! of the drawing. That is what lets the `FIT` selector re-run the same
+//! [`fit_camera`] rule after the open without the database, and it is why
+//! `shell_status().canFit` can be `true` for a live session while `entityCount`
+//! stays `null`.
 //!
 //! The display representation itself (`SceneDelta`) is the one thing that must
 //! survive into the upload, and it is handed to [`super::upload`], which releases
@@ -23,13 +30,14 @@
 use std::sync::Arc;
 
 use cad_app::render_scene::build_scene;
-use cad_domain::{DatabaseId, DocumentId, Point3, TaskStamp};
+use cad_domain::{DatabaseId, DocumentId, TaskStamp};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 use cad_scene::SceneDelta;
 
 use super::session_state::{
     Failure, SESSION_DATABASE, SESSION_DOCUMENT, STEP_EMPTY_SCENE, STEP_IMPORT, STEP_SCENE,
 };
+use crate::view::{fit_camera, retain_bounds, DrawingBounds};
 
 /// The geometry half of an open: what [`load`] produced, before any GPU object
 /// exists.
@@ -39,6 +47,10 @@ pub(super) struct Loaded {
     pub(super) delta: SceneDelta,
     /// The camera fitted to the drawing bounds at the requested CSS size.
     pub(super) camera: cad_app::Camera,
+    /// The extents that fit used ([`DrawingBounds`]), or `None` when the imported
+    /// database reported no bounds. This is what makes `FIT` possible after the
+    /// open; `None` means there is nothing to refit and `canFit` stays `false`.
+    pub(super) bounds: Option<DrawingBounds>,
     /// Source DWG length in bytes.
     pub(super) bytes: usize,
     /// Import + scene build duration in milliseconds.
@@ -83,8 +95,10 @@ pub(super) fn load(bytes: &[u8], label: &str, logical: [f64; 2]) -> Result<Loade
         ));
     }
     // The camera is fitted once from the drawing bounds, exactly like the
-    // engine's initial fit; after that only pan/zoom move it.
-    let camera = fit_camera(&drawing.database, logical);
+    // engine's initial fit; after that only pan/zoom move it. The bounds
+    // themselves are kept (two points) so `FIT` can re-run this same rule later.
+    let bounds = retain_bounds(&drawing.database);
+    let camera = fit_camera(bounds, logical);
     // Release the imported document now, while it is still the only owner: the
     // display representation above is complete and neither the upload nor the
     // frame path reads the database. Keeping it would be an unexplained second
@@ -97,54 +111,8 @@ pub(super) fn load(bytes: &[u8], label: &str, logical: [f64; 2]) -> Result<Loade
     Ok(Loaded {
         delta,
         camera,
+        bounds,
         bytes: bytes.len(),
         import_ms,
     })
-}
-
-/// The initial camera: the default 2D top view moved to the drawing centre with
-/// the world-per-pixel scale that frames the bounds.
-///
-/// The arithmetic is the engine's `fit_camera` rule (bounding-box centre, the
-/// larger of the two axis ratios, 1.05 margin), and the projection goes through
-/// the validated `Projection::orthographic` constructor. Non-finite bounds keep
-/// the default top view rather than producing a NaN scale.
-fn fit_camera(database: &cad_db::DrawingDatabase, logical: [f64; 2]) -> cad_app::Camera {
-    let mut camera = cad_app::Camera::top_view_2d();
-    let Some((min, max)) = database.bounds() else {
-        return camera;
-    };
-    let extent_x = (max.x - min.x).max(1e-6);
-    let extent_y = (max.y - min.y).max(1e-6);
-    let center = Point3 {
-        x: (min.x + max.x) * 0.5,
-        y: (min.y + max.y) * 0.5,
-        z: 0.0,
-    };
-    let world_per_px = (extent_x / logical[0].max(1.0)).max(extent_y / logical[1].max(1.0)) * 1.05;
-    if !(center.x.is_finite() && center.y.is_finite()) {
-        return camera;
-    }
-    // Shift both eye and target, so the view direction and the eye distance of
-    // the top view are preserved (the 2D path only reads the target centre and
-    // the projection scale).
-    let offset = Point3 {
-        x: center.x - camera.target.x,
-        y: center.y - camera.target.y,
-        z: 0.0,
-    };
-    camera.target = Point3 {
-        x: camera.target.x + offset.x,
-        y: camera.target.y + offset.y,
-        z: camera.target.z,
-    };
-    camera.eye = Point3 {
-        x: camera.eye.x + offset.x,
-        y: camera.eye.y + offset.y,
-        z: camera.eye.z,
-    };
-    if let Ok(projection) = cad_app::Projection::orthographic(world_per_px) {
-        camera.projection = projection;
-    }
-    camera
 }

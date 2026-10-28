@@ -125,10 +125,10 @@ export function sharedRefusal(reasons: readonly (string | null)[]): string | nul
  * A shared reason still has to be said **without** naming one command: the
  * catalog's own sentence carries a `{command}` placeholder
  * (`command.unsupported` -> "Command {command} is not supported yet."), which
- * would be a lie for a whole panel. The three reasons a whole panel can really
- * share have a command-free sentence of their own; `plot.no_document` and
- * `linux.busy` already read that way and are reused verbatim, and only
- * `command.unsupported` needs new words.
+ * would be a lie for a whole panel. The reasons a whole panel can really share
+ * have a command-free sentence of their own; `plot.no_document`,
+ * `view.standard_unavailable` and `linux.busy` already read that way and are
+ * reused verbatim, and only `command.unsupported` needs new words.
  *
  * A reason that is not in this table returns `null`: an unknown shared reason
  * falls back to the per-cell sentences rather than printing a key or inventing
@@ -137,6 +137,7 @@ export function sharedRefusal(reasons: readonly (string | null)[]): string | nul
 const PANEL_REFUSAL_KEY: Readonly<Record<string, string>> = Object.freeze({
   'command.unsupported': 'mobile.refusal.unsupported',
   'plot.no_document': 'plot.no_document',
+  'view.standard_unavailable': 'view.standard_unavailable',
   'linux.busy': 'linux.busy',
 });
 

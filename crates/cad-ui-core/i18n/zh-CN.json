@@ -416,6 +416,7 @@
   "view.standard.left": "左视",
   "view.standard.right": "右视",
   "view.standard.isometric": "等轴测",
+  "view.standard_unavailable": "当前载体不提供标准视图：该载体没有 3D 相机。",
   "shell.tools": "工具与面板",
   "shell.drawer": "面板",
   "shell.nav": "导航",

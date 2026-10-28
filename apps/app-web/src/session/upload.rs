@@ -100,6 +100,7 @@ pub(super) fn attach(
         presenter,
         renderer,
         camera: loaded.camera,
+        bounds: loaded.bounds,
         metrics,
         label: label.to_string(),
         bytes: loaded.bytes,

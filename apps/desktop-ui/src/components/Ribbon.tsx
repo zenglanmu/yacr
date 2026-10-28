@@ -79,7 +79,7 @@ export function runItem(shell: ShellValue, item: RibbonItem) {
  */
 export function unavailable(t: Translator, item: UnavailableItem, shell: ShellValue) {
   if (item.standardView) {
-    return t(standardViewUnavailableReasonKey(shell), { command: t(item.labelKey) });
+    return t(standardViewUnavailableReasonKey(shell, item.standardView), { command: t(item.labelKey) });
   }
   if (item.command !== undefined && DOCUMENT_SCOPED_COMMANDS.includes(item.command)
     && shell.status && !shell.loading && !shell.documentOpen) {
@@ -92,13 +92,14 @@ export function unavailable(t: Translator, item: UnavailableItem, shell: ShellVa
  * Whether `item` can run right now.
  *
  * Three gates, one per dispatch token: a shell action is always available, a
- * standard view needs a loaded status with an open drawing, and a command is
- * enabled only by router admission. Nothing is ever locally enabled — the mobile
- * drawer reads this same answer instead of re-deriving one.
+ * standard view needs a loaded status with an open drawing **and** (when the
+ * carrier declared a capability list) that list to name this very view, and a
+ * command is enabled only by router admission. Nothing is ever locally enabled —
+ * the mobile drawer reads this same answer instead of re-deriving one.
  */
 export function itemEnabled(shell: ShellValue, item: RibbonItem): boolean {
   return item.action ? true
-    : item.standardView ? standardViewAvailable(shell)
+    : item.standardView ? standardViewAvailable(shell, item.standardView)
       : item.command ? shell.canCommand(item.command)
         : false;
 }

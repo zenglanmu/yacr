@@ -110,8 +110,8 @@ test('the grid-snap affordance is a real admitted toggle next to GRID and ORTHO'
     'a command ribbon item must be enabled only through router admission (`canCommand`)',
   );
   assert.ok(
-    ribbon.includes('item.standardView ? standardViewAvailable(shell)'),
-    'a standard-view item must be enabled only through the typed-IPC session gate',
+    ribbon.includes('item.standardView ? standardViewAvailable(shell, item.standardView)'),
+    'a standard-view item must be enabled only through the typed-IPC session gate, per view',
   );
   assert.ok(ribbon.includes('disabled hint={unavailable(t, item, shell)}'), 'an unadmitted item renders disabled with the unsupported hint');
 });
@@ -430,6 +430,16 @@ test('admission mirrors cad_command: unsupported never reaches IPC, capability g
   assert.equal(admitCommandText('FIT', { status: loaded }).kind, 'admitted');
   assert.equal(admitCommandText('FIT', { status: empty }).kind, 'unavailable');
   assert.equal(admitCommandText('FIT', { status: null }).kind, 'unavailable');
+});
+
+test('FIT needs the refit capability, not an entity count the carrier may not have', () => {
+  // The browser/Android carrier releases the imported database, so it reports
+  // `entityCount: null` honestly; its `canFit` is the answer to "can a refit run".
+  const wasmCarrier = { ...loaded, entityCount: null, canFit: true };
+  assert.equal(admitCommandText('FIT', { status: wasmCarrier }).kind, 'admitted');
+  // Without the capability or without a drawing it stays refused.
+  assert.equal(admitCommandText('FIT', { status: { ...wasmCarrier, canFit: false } }).kind, 'unavailable');
+  assert.equal(admitCommandText('FIT', { status: { ...wasmCarrier, documentLabel: null } }).kind, 'unavailable');
 });
 
 test('Enter and Escape drive the active tool, but never while typing or without a tool', () => {

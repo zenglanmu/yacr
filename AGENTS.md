@@ -179,9 +179,17 @@ workspace 继承别名）；平台类型（`web-sys`/`android-activity`/`jni`/`n
   `canvas_runtime_failed` 映射到 wasm 会话，**其余命令一律 `unsupported-runtime: <command>` 拒绝**。
   `tauri`/`android` 运行时把两个 shell-only 命令（`canvas_session_status`、`canvas_runtime_failed`）
   在有 Tauri 桥时送给 Tauri，**其余（含全部 CAD 数据）**送 wasm adapter；`web` 运行时全走 adapter。
-  **适配器只许拒绝，不许伪造答案**；浏览器/移动载体**没有命令路由**（`shell_commands`/`shell_aliases`
-  为 `[]`），因此 chrome **禁用**命令入口而不是假装可用——该载体是**看 + 导航**（open/pan/zoom/
-  resize），不是可编辑的 CAD 产品。
+  **适配器只许拒绝，不许伪造答案**；浏览器/移动载体的命令词汇**只**是它真能执行的四个：会话侧
+  `FIT`/`ZOOMIN`/`ZOOMOUT`（保留的图形范围 + 固定缩放步，`shell_command` 执行后回
+  `{"accepted":true}`），传输侧 `OPEN`（文件选择器 + `open_bytes`，`cad_status.canOpen` 由适配器
+  抬成 `true`）。`cad_commands` = 会话列表 + `OPEN`（去重、稳定顺序），`shell_aliases` 只发布目标在
+  其中的桌面别名行。其余名字（`PAN`、图层、设置、测量、绘制…）仍按名字 `unsupported-runtime` 拒绝，
+  绝不空成功——该载体仍是**看 + 导航**（open/pan/zoom/resize），不是可编辑的 CAD 产品。
+  证据见 `docs/validation-web-commands-2026-10-28.md`；
+  **标准视图与 `OPEN` 选择器的 2026-10-28 修正**见 `docs/android-host.md` §5：
+  `cad_status.standardViews`（可选加法字段，缺省=旧行为、`[]`=该载体没有标准视图）决定七个视图是否
+  可点，wasm 会话报 `[]`；`OPEN` 的 `<input type=file>` **不再带 `accept`**（Android 上它会把意图
+  路由到媒体 Photo Picker）而是选中后按扩展名校验。
 - **每宿主产物互不共享**：桌面宿主 `apps/desktop-ui/dist`（`npm run build`）；Web
   `apps/app-web/dist-ui`（`bash scripts/build-web-ui.sh`，内部 `npm run build:web`）；
   Android `apps/app-android/dist`（`bash scripts/build-android-ui.sh`，内部 `npm run build:android`）。

@@ -31,7 +31,16 @@
  *     the live resize) no visible `[role="alert"]` carries text. The browser
  *     carrier serves no native input, so `probe_input` must never be forwarded
  *     there and no `unsupported-runtime: …` refusal may reach `setError`; the
- *     banner is asserted absent, never suppressed.
+ *     banner is asserted absent, never suppressed;
+ *   - the four commands the carrier really executes run **through the chrome**: one
+ *     labelled case types `ZOOMIN`, `FIT`, `ZOOMOUT` and `OPEN` into `#cad-command`
+ *     and presses Enter, then reads the session's own `shell_status()`: the camera
+ *     scale must move by exactly one zoom step, `FIT` must return it to the framing
+ *     the zoom moved away from, `ZOOMOUT` must apply the reciprocal step, and `OPEN`
+ *     must open the real file picker (Playwright's `filechooser`) — after which the
+ *     session's `documentLabel` is the chosen fixture's name and `importCount` grew.
+ *     Every step also asserts no `[role="alert"]` appeared. The vocabulary itself is
+ *     asserted to advertise `FIT`/`ZOOMIN`/`ZOOMOUT`.
  *
  * What it does NOT prove - and must never be read as:
  *   - anything about GPU hardware: this launch forces ANGLE/SwiftShader, so the
@@ -62,11 +71,12 @@
 'use strict';
 
 const fs = require('node:fs');
-const http = require('node:http');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const { measureCanvasPixels } = require('./canvas-pixels.cjs');
+const { runCommandCase } = require('./web-ui-command-case.cjs');
+const { stopServer, waitForServer } = require('./web-ui-server.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SERVER_SCRIPT = path.join(REPO_ROOT, 'scripts', 'serve-web.py');
@@ -185,77 +195,6 @@ function describe(value) {
   } catch (error) {
     return String(value);
   }
-}
-
-// --- static server ---------------------------------------------------------
-
-async function waitForServer(url, child, timeout, log) {
-  const deadline = Date.now() + timeout;
-  let lastError = 'no attempt was made';
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(
-        `the static server exited with code ${child.exitCode} before answering ${url}\n` +
-          log.slice(-20).join(''),
-      );
-    }
-    try {
-      const body = await httpGet(url, 2000);
-      // A foreign server on this port could answer too; the bundle marker is what
-      // says this is the page the script is about to measure.
-      if (body.includes('id="root"') && body.includes('/assets/')) {
-        // One extra request for the wasm artifact's MIME is not needed here: the
-        // page load itself fails loudly if `application/wasm` is wrong.
-        return;
-      }
-      lastError = 'the served index.html is not the built chrome bundle';
-    } catch (error) {
-      lastError = error.message;
-    }
-    await sleep(150);
-  }
-  throw new Error(`the static server never became ready at ${url}: ${lastError}`);
-}
-
-function httpGet(url, timeout) {
-  return new Promise((resolve, reject) => {
-    const request = http.get(url, { timeout }, response => {
-      if (response.statusCode !== 200) {
-        response.resume();
-        reject(new Error(`GET ${url} -> ${response.statusCode}`));
-        return;
-      }
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', chunk => { body += chunk; });
-      response.on('end', () => resolve(body));
-    });
-    request.on('timeout', () => request.destroy(new Error('request timed out')));
-    request.on('error', reject);
-  });
-}
-
-function sleep(ms) {
-  return new Promise(resolve => { setTimeout(resolve, ms); });
-}
-
-function waitForExit(child, timeout) {
-  if (child.exitCode !== null) return Promise.resolve(true);
-  return new Promise(resolve => {
-    const timer = setTimeout(() => resolve(false), timeout);
-    child.once('exit', () => {
-      clearTimeout(timer);
-      resolve(true);
-    });
-  });
-}
-
-async function stopServer(child) {
-  if (!child || child.exitCode !== null) return;
-  child.kill('SIGTERM');
-  if (await waitForExit(child, 3000)) return;
-  child.kill('SIGKILL');
-  await waitForExit(child, 2000);
 }
 
 // --- page helpers ----------------------------------------------------------
@@ -947,6 +886,12 @@ async function main() {
       results.push(await runViewportCase(browser, options, spec));
     }
     results.push(await runResizeCase(browser, options));
+    // The four commands the carrier executes (`FIT`/`ZOOMIN`/`ZOOMOUT` on the wasm
+    // session, `OPEN` through the host picker), driven through the real chrome.
+    // The case lives in `web-ui-command-case.cjs` with these page helpers.
+    results.push(await runCommandCase(browser, options, {
+      record, newPage, waitForSession, readErrorAlerts, checkNoErrorBanner, takeScreenshot,
+    }));
   } finally {
     if (browser !== null) await browser.close();
     await stopServer(child);

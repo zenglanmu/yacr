@@ -28,6 +28,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::budget::BudgetRefusal;
+use crate::view::{fit_camera, zoom_step, DrawingBounds};
 
 /// Stable names of the steps a failure can be attributed to. They are the only
 /// stable vocabulary in the status `step` field, so a host can key on them
@@ -138,6 +139,13 @@ pub(super) struct Session {
     /// The application camera. The render camera is derived from it through
     /// `camera2d_params()` on every frame, so the two cannot drift.
     pub(super) camera: cad_app::Camera,
+    /// The drawing extents the current camera fit was computed from, retained
+    /// through the open so `FIT` can refit without the (released) database.
+    ///
+    /// `None` when the imported database reported no bounds: the camera then
+    /// keeps the default 2D top view and `FIT` has nothing to frame, which the
+    /// shell status reports as `canFit: false` (never a claimed refit).
+    pub(super) bounds: Option<DrawingBounds>,
     pub(super) metrics: Metrics,
     /// The source file name this session was opened from (`status`/`document`).
     pub(super) label: String,
@@ -257,6 +265,43 @@ impl Session {
             z: self.camera.eye.z,
         };
         Ok(())
+    }
+
+    /// Refit the camera to the retained drawing extents at the session's
+    /// **current** logical size, then present the frame.
+    ///
+    /// This is the `FIT` selector. It calls the very same [`fit_camera`] the open
+    /// used — same centre, same axis-ratio/margin rule, same projection
+    /// constructor — with the bounds retained by [`Self::bounds`], so a refit
+    /// cannot disagree with the initial framing. No second fit rule, no synthetic
+    /// camera, and camera-only: nothing is re-parsed or re-uploaded.
+    ///
+    /// With no retained bounds there is nothing to frame and the failure is
+    /// explicit instead of silently pretending the view was reframed.
+    pub(super) fn fit_view(&mut self) -> Result<(), Failure> {
+        let bounds = self.bounds.ok_or_else(|| {
+            Failure::new(
+                STEP_NAVIGATION,
+                "FIT needs the drawing extents, and this session retained none",
+            )
+        })?;
+        self.camera = fit_camera(Some(bounds), [self.metrics.css.0, self.metrics.css.1]);
+        self.render_and_present()
+    }
+
+    /// One fixed zoom step (`ZOOMIN`/`ZOOMOUT`) about the viewport centre.
+    ///
+    /// Camera-only, like [`Self::fit_view`]: the resident scene stays uploaded and
+    /// the step is [`crate::view::zoom_step`], the same anchor/arithmetic the
+    /// desktop session uses for these two selectors.
+    pub(super) fn zoom_about_centre(&mut self, factor: f64) -> Result<(), Failure> {
+        zoom_step(
+            &mut self.camera,
+            factor,
+            [self.metrics.css.0, self.metrics.css.1],
+        )
+        .map_err(|error| Failure::new(STEP_NAVIGATION, error))?;
+        self.render_and_present()
     }
 
     /// Render the resident scene with the current camera and present it.

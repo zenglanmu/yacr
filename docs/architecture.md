@@ -88,9 +88,11 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   `tauri | web | android`（Vite `define`，默认 `tauri`）决定路由；**只有 `invoke.ts` import
   `@tauri-apps/api`**，`runtime.ts` 决定去向，`web-adapter.ts` 把 6 个命令映射到 wasm 会话的
   `shell_*` 导出，其余一律 `unsupported-runtime: <command>`。适配器**只拒绝、不伪造**：浏览器/移动
-  载体没有命令路由（`shell_commands`/`shell_aliases` 为 `[]`），chrome 因此禁用命令入口。这层是
-  **UI 侧**的路由，与 `cad-host`/`cad-platform` 的宿主编排分层正交（铁律 8 不变：wasm 会话是
-  `dom-canvas` 宿主上唯一的 `cad-db` 权威）。
+  载体的命令词汇**只**是它真正能执行的四个（会话侧 `FIT`/`ZOOMIN`/`ZOOMOUT`，传输侧 `OPEN` = 文件
+  选择器 + `open_bytes`），其余名字（含 `PAN`、图层、设置、测量、绘制）仍按名字拒绝；`cad_status`
+  的 `canOpen` 由适配器抬成 `true`（选择器是 DOM 能力），`canFit` 来自会话（保留的图形范围）。
+  这层是 **UI 侧**的路由，与 `cad-host`/`cad-platform` 的宿主编排分层正交（铁律 8 不变：wasm 会话是
+  `dom-canvas` 宿主上唯一的 `cad-db` 权威）。证据见 `docs/validation-web-commands-2026-10-28.md`。
 - **每宿主产物互不共享**：桌面 `apps/desktop-ui/dist`（`npm run build`）、Web
   `apps/app-web/dist-ui`（`scripts/build-web-ui.sh`）、Android `apps/app-android/dist`
   （`scripts/build-android-ui.sh`）。三者用不同运行时常量编译，**不得**互相覆盖，也**不得**把其中

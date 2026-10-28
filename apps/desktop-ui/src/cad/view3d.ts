@@ -13,6 +13,16 @@
 // or its refusal — surfaces later through `cad_status.error`. Nothing here may
 // present admission as completion, retry a request, or clamp a view name to a
 // neighbouring one.
+//
+// # Carrier capability: `cad_status.standardViews`
+//
+// A carrier that has no `cad_standard_view` mapping at all (the `dom-canvas`
+// wasm session, which is 2D-only) must not offer the seven views as live buttons:
+// the click would reach the transport and throw `unsupported-runtime:
+// cad_standard_view` from a control that looked enabled. `cad_status` may
+// therefore carry an additive `standardViews: readonly string[]` — **absent**
+// keeps the historic rule (an older host, and the desktop `native-below` hosts),
+// **present** is authoritative and a key outside it is refused here, before IPC.
 import { NO_DOCUMENT_KEY } from '../commands/commands.ts';
 import type { Translator } from '../i18n.ts';
 
@@ -101,37 +111,79 @@ export function standardViewName(view: unknown): StandardViewName | null {
  * The status of the shell as the standard-view admission rules read it.
  *
  * Structural and permissive: before the first `cad_status` answer the field may
- * be absent, and an older host may omit `loading`.
+ * be absent, and an older host may omit `loading` and the additive
+ * `standardViews` capability list.
  */
 export interface StandardViewContext {
-  readonly status?: { readonly loading?: unknown } | null;
+  readonly status?: { readonly loading?: unknown; readonly standardViews?: readonly string[] } | null;
   readonly documentOpen?: unknown;
+}
+
+/**
+ * The catalog key for "this carrier cannot run standard views at all".
+ *
+ * Distinct from `plot.no_document` on purpose: on a `dom-canvas` carrier a
+ * drawing **is** open (the wasm session carries it) while the carrier still has no
+ * 3D camera, so the "no drawing is open" sentence would be a plain lie there. The
+ * catalog states the carrier limitation instead, without naming a command (a whole
+ * panel shares it).
+ */
+export const STANDARD_VIEW_UNAVAILABLE_KEY = 'view.standard_unavailable';
+
+/**
+ * Whether the carrier declared a standard-view capability list **and** refuses
+ * `view`.
+ *
+ * `false` when the list is absent — an older host has declared nothing, and its
+ * historic rule below still applies. A present list is authoritative: a key it
+ * does not name is a view this carrier cannot execute.
+ */
+function carrierRefusesStandardView(status: StandardViewContext['status'], view: unknown): boolean {
+  const declared = status?.standardViews;
+  if (!Array.isArray(declared)) return false;
+  // A caller that did not name a view cannot be confirmed by a bare list, so an
+  // unnamed request on a declaring carrier is refused rather than guessed.
+  const name = standardViewName(view);
+  return name === null || !declared.includes(name);
 }
 
 /**
  * The catalog key for why the standard views cannot run right now.
  *
  * They need a live CAD session with a drawing: framing an empty session in a
- * perspective is meaningless. `plot.no_document` is the catalog's existing
- * wording for "no drawing is open" and is reused here instead of adding a
- * second sentence that says the same thing. Before the first `cad_status`
- * answer (and while an import is loading) the honest answer stays the generic
- * unsupported key, because the host has not told us anything yet.
+ * perspective is meaningless. The carrier's own capability list is consulted
+ * **first** (a declared list that omits the view is a carrier limitation, not a
+ * document state). `plot.no_document` is the catalog's existing wording for "no
+ * drawing is open" and is reused here instead of adding a second sentence that
+ * says the same thing. Before the first `cad_status` answer (and while an import
+ * is loading) the honest answer stays the generic unsupported key, because the
+ * host has not told us anything yet.
  */
-export function standardViewUnavailableReasonKey({ status = null, documentOpen = false }: StandardViewContext = {}): string {
+export function standardViewUnavailableReasonKey(
+  { status = null, documentOpen = false }: StandardViewContext = {},
+  view?: unknown,
+): string {
+  if (status && !status.loading && carrierRefusesStandardView(status, view)) return STANDARD_VIEW_UNAVAILABLE_KEY;
   if (status && !status.loading && !documentOpen) return NO_DOCUMENT_KEY;
   return 'command.unsupported';
 }
 
 /**
- * Whether the chrome may send a standard view at all.
+ * Whether the chrome may send `view` at all.
  *
- * Only a loaded status with an open drawing qualifies. A pending command is not
- * a reason to block: a standard view has its own bounded queue and must not
+ * Only a loaded status with an open drawing qualifies — and, when the carrier
+ * declared a capability list, only a view that list names. A pending command is
+ * not a reason to block: a standard view has its own bounded queue and must not
  * wait on an unrelated `cad_command`.
  */
-export function standardViewAvailable({ status = null, documentOpen = false }: StandardViewContext = {}): boolean {
-  return Boolean(status) && !status?.loading && Boolean(documentOpen);
+export function standardViewAvailable(
+  { status = null, documentOpen = false }: StandardViewContext = {},
+  view?: unknown,
+): boolean {
+  if (!(Boolean(status) && !status?.loading && Boolean(documentOpen))) return false;
+  // Absent list: exactly the historic answer above (desktop `native-below`, older
+  // hosts). Same bytes, same behaviour.
+  return !carrierRefusesStandardView(status, view);
 }
 
 /**

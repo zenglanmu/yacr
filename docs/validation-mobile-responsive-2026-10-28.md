@@ -36,9 +36,15 @@
   `cad_commands` / `cad_command_aliases` / `cad_command` / `canvas_session_status` /
   `canvas_runtime_failed` 映射到 wasm 会话，**其余命令一律以 `unsupported-runtime: <command>` 拒绝**
   （绝不空成功）。
-- **载体能力诚实**：wasm 会话的 `shell_commands`/`shell_aliases` 返回 `[]`
-  （`apps/app-web/src/shell.rs`）——浏览器载体**没有命令路由**，chrome 因此**禁用**每个命令入口而
-  不是伪造一个。浏览器/移动载体是**看 + 导航**（open/pan/zoom/resize），不是可编辑的 CAD 产品。
+- **载体能力诚实**：wasm 会话的 `shell_commands` 返回它**真正执行**的三个相机选择器
+  `["FIT","ZOOMIN","ZOOMOUT"]`，`shell_aliases` 只返回目标在其中的桌面别名行
+  （`ZOOM EXTENTS → FIT`）；`OPEN` 由 chrome 侧传输缝实现（文件选择器 + `open_bytes`），
+  因此 `cad_commands` = 会话列表 + `OPEN`，`cad_status.canOpen` 由适配器抬成 `true`。
+  其余名字仍一律 `<…> is not executable` 拒绝（`apps/app-web/src/shell.rs`）。
+  **2026-10-28 更早一轮**的记载（两份列表都为 `[]`、chrome 禁用每个命令入口）描述的是
+  接线之前的载体；当时的实测输出保留在本文件下文，未被改写。接线后的证据见
+  `docs/validation-web-commands-2026-10-28.md`。浏览器/移动载体仍是**看 + 导航**
+  （open/pan/zoom/resize），不是可编辑的 CAD 产品。
 - **Android 宿主内边距**：`--yacr-safe-bottom`（CSS px）由 Android 宿主发布，`.mobile-commandbar`
   唯一消费；实测与边界见 `docs/android-host.md`。
 

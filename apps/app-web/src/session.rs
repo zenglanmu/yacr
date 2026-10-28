@@ -268,6 +268,27 @@ pub(crate) fn zoom_at_impl(factor: f64, x: f64, y: f64) -> Result<String, JsValu
     })
 }
 
+/// One fixed zoom step about the **viewport centre** (`ZOOMIN`/`ZOOMOUT`).
+///
+/// A fixed step selector supplies no cursor, so the anchor is the centre of the
+/// live CSS viewport — the same rule `cad_ui_core`'s `ZOOMIN`/`ZOOMOUT` applies
+/// on the desktop session, using the same factors. Camera-only, like
+/// [`zoom_at_impl`]: the resident scene stays uploaded.
+pub(crate) fn zoom_step_impl(factor: f64) -> Result<String, JsValue> {
+    with_live(|session| {
+        session.zoom_about_centre(factor)?;
+        Ok(live_status(session))
+    })
+}
+
+/// Refit the camera to the retained drawing extents (`FIT`), then present.
+pub(crate) fn fit_view_impl() -> Result<String, JsValue> {
+    with_live(|session| {
+        session.fit_view()?;
+        Ok(live_status(session))
+    })
+}
+
 pub(crate) fn pan_impl(dx: f64, dy: f64) -> Result<String, JsValue> {
     with_live(|session| {
         if !(dx.is_finite() && dy.is_finite()) {
@@ -371,6 +392,9 @@ fn live_shell_facts(session: &Session) -> crate::shell::LiveSession {
                 scale: params.world_per_px,
             }
         }),
+        // `FIT` is executable exactly when the import measured bounds to refit
+        // to — the session's own fact, not a capability guess.
+        has_bounds: session.bounds.is_some(),
         error: session
             .last_error
             .as_ref()
@@ -485,6 +509,9 @@ fn live_status(session: &Session) -> String {
         "peak_batches_per_chunk": session.peak_batches_per_chunk,
         "heap_after_open": session.heap_after_open,
         "db_retained": session.db_retained,
+        // The extents the fit used are retained (two points), so `FIT` can refit
+        // without the released database. Reported so retention is never silent.
+        "bounds_retained": session.bounds.is_some(),
     });
     if let Some(failure) = &session.last_error {
         apply_failure(&mut status, failure);

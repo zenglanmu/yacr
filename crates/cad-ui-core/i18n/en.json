@@ -416,6 +416,7 @@
   "view.standard.left": "Left",
   "view.standard.right": "Right",
   "view.standard.isometric": "Isometric",
+  "view.standard_unavailable": "Standard views are not available on this carrier: it has no 3D camera.",
   "shell.tools": "Tools & panels",
   "shell.drawer": "Panels",
   "shell.nav": "Navigation",

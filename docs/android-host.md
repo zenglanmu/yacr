@@ -206,6 +206,52 @@ WebView `com.google.android.webview 124.0.6367.219`、`-gpu swiftshader_indirect
 我们自己的 blit 做 sRGB 编码 + 顶点阶段改为算术取角）**已在本轮完成并验证出图**，
 完整记录见 `docs/validation-android-present-2026-10-28.md`。
 
+### 命令接线缺陷修复：标准视图与 `OPEN` 选择器（2026-10-28 第二轮）
+
+**症状（设备实测，上一轮）**：View 面板的七个标准视图在浏览器/Android 载体上**显示为可用**，点按却抛
+`unsupported-runtime: cad_standard_view`；横幅**永不清除**（后续成功的 `FIT` 也清不掉，只能重启 App）。
+`OPEN` 的 `<input type="file" accept=".dwg,.dxf">` 在 Android/Chromium 上把 `.dwg` 解析成
+`image/vnd.dwg`，意图被路由到**媒体 Photo Picker**（"No photos or videos"），`/sdcard/Download`
+里的 DWG 根本选不到。
+
+**修复 1 — 能力显式化**：`cad_status` 增加**可选**字段 `standardViews?: readonly string[]`。
+**缺省** = 旧行为（老宿主、桌面 `native-below`）；**存在** = 该载体的权威列表，键不在列表里的视图在
+发出 IPC **之前**就被拒绝。wasm 会话报 `[]`（它是 2D presenter，没有 3D 相机、没有
+`cad_standard_view` 映射）。原因文案走新目录键 `view.standard_unavailable`（无 `{command}`
+占位，整面板共用一句，抽屉按面板说明只打一次）。
+
+**设备实测（本轮，同一 AVD/APK 重建后）**：经 WebView devtools socket 读取渲染后的 DOM ——
+`View` 抽屉的面板说明为 `Standard views are not available on this carrier: it has no 3D camera.`，
+七个单元（Top/Bottom/Front/Back/Left/Right/Isometric）**全部 `disabled=true`**；同一时刻
+`shell_status().standardViews` = **`[]`**、`surfaceMode` = `dom-canvas`、`documentLabel` =
+`synthetic-four-lines.dwg`。截图 `portrait-drawer-view.png`。
+
+**修复 2 — 选择器改为文档选择器**：`<input type="file">` **不再带 `accept`**（不再按媒体 MIME
+过滤），`multiple=false`；选中后按**扩展名**校验（`.dwg`/`.dxf`，大小写不敏感），类型不符则
+`web-adapter: cad_command: OPEN refused "<name>": only .dwg / .dxf files …` 显式拒绝，**不会**把任意
+字节交给导入器。
+
+**设备实测（本轮）**：点 `Open drawing` 后前台 Activity =
+`com.google.android.documentsui/com.android.documentsui.picker.PickActivity`
+（文档选择器，带 Images/Audio/Videos/Documents 类型页签与 "Browse files in other apps"），
+**不是** `com.google.android.providers.media.module/…photopicker.PhotoPickerGetContentActivity`
+（后者只作为**上一轮**的 `mLastPausedActivity` 留在历史里）。截图 `picker-documents.png`，
+`activities-after-picker.txt` 为 `dumpsys` 原始记录。返回键取消后命令栏无横幅、`Open drawing`
+重新可用（取消不是失败）。
+
+**本轮没做也不许当作已做**：
+
+- **真实选择文件仍未验证**：`/sdcard/Download/probe-open-check.dwg` 已推入并触发媒体扫描，但
+  模拟器里**无法无头驱动一次真实的文件选中**（选择器是系统 UI，需真实触摸；本轮点击由 CDP
+  `userGesture` 合成）。因此「选中 DWG 后真的打开」只在 **web** 侧
+  （`scripts/web-ui-smoke.cjs` 的 OPEN 用例）与本机单测里成立，**Android 上 NOT VERIFIED**。
+- **错误类型的设备内拒绝未验证**：只在本机单测里覆盖（`apps/desktop-ui/test/host-adapter.test.ts`
+  的 `OPEN refused "holiday.png"`），设备上未选过非图纸文件。
+- **其它 Android 版本/厂商 ROM/picker 实现**：只测本 AVD（API 35、WebView 124）。OEM 的
+  `ACTION_GET_CONTENT` 提供者、旧版 DocumentsUI、以及「最近」列表的媒体扫描行为**均未验证**。
+- **标准视图的真实 3D**：`[]` 是**能力缺失**的诚实答案，不是"以后会实现"的占位；本轮没有、也不
+  应该让 wasm 会话支持标准视图。
+
 ## 6. NOT VERIFIED（必须照写）
 
 - **真机**：未运行（没有 Android 设备）。模拟器 ≠ 真机（CPU 架构、GPU、驱动、WebView 版本全不同）。
@@ -226,6 +272,14 @@ WebView `com.google.android.webview 124.0.6367.219`、`-gpu swiftshader_indirect
 - **前后台/生命周期**（`onPause`/`onResume`、进程重建）、旋转时的 canvas 重建、分屏/多窗口：未验证。
 - **aarch64/armv7/i686 构建产物**：只构建并安装了 x86_64。
 - **release 签名**：仓库不含密钥；本轮用临时自签密钥安装，**不是**发布流程。
+- **`OPEN` 的真实选择**：只验证"点击 `Open drawing` 打开了**文档**选择器（DocumentsUI）"，**没有**
+  也能**不能**无头驱动一次真实的文件选中（见上文「命令接线缺陷修复」小节）：
+  "选中 Download 里的 DWG 并打开" 在 Android 上 **NOT VERIFIED**；
+  非图纸文件的设备内拒绝同样 NOT VERIFIED（只有单测）。
+- **标准视图**：`cad_status.standardViews = []` 是本载体的真实答案，七个单元在设备上**全部禁用**
+  并有面板说明；「点按它们会不会发 IPC」只在 **web** 侧验证（禁用按钮不挂 handler），
+  设备侧为同一份代码、但**未**逐键验证。
+- **标准视图与 picker 的其它环境**：只测本 AVD（API 35 / WebView 124 / DocumentsUI 自带）。
 - **Gradle/AGP 的可复现性**：本轮构建留下的 `gen/android` 是 CLI 生成的版本（AGP 9.3.1 /
   Gradle 9.6.1）；换 CLI 版本需要重新 `tauri android init` 并复核本文。
 

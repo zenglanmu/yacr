@@ -550,7 +550,13 @@ export function admitCommandText(text: unknown, { status = null, pending = false
       reasonKey: status.documentLabel === null ? NO_DOCUMENT_KEY : requirement.reasonKey,
     };
   }
-  if (id === 'FIT' && !(status.canFit && status.documentLabel !== null && status.entityCount !== null)) {
+  // `FIT` needs a host that can reframe **and** an open document to frame. It does
+  // not need `entityCount`: that is a count, and a carrier may honestly not have
+  // one — the browser/Android carrier releases the imported database and reports
+  // `entityCount: null`, while its `canFit` already answers exactly this question
+  // ("the extents are retained, so a refit can run"). Requiring the count here
+  // would disable a command that really executes.
+  if (id === 'FIT' && !(status.canFit && status.documentLabel !== null)) {
     return { kind: 'unavailable', command, reasonKey: 'command.unsupported' };
   }
   return { kind: 'admitted', command, reasonKey: null };

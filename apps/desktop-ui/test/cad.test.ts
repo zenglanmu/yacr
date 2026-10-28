@@ -75,6 +75,27 @@ test('status validates explicit empty document and rejects unknown or malformed 
   }
 });
 
+test('the standard-view capability list is validated: absent or an array of strings only', () => {
+  // Absent: the older-host / desktop `native-below` case is accepted unchanged.
+  assert.equal(parseCadStatus(empty), empty);
+  // A present list is carried as-is, empty included (`[]` is a real answer).
+  const emptyList = { ...empty, standardViews: [] };
+  assert.equal(parseCadStatus(emptyList), emptyList);
+  assert.deepEqual(parseCadStatus(emptyList).standardViews, []);
+  const someList = { ...empty, standardViews: ['top', 'isometric'] };
+  assert.equal(parseCadStatus(someList), someList);
+  assert.deepEqual(parseCadStatus(someList).standardViews, ['top', 'isometric']);
+  // Anything else is a contract violation, never a guessed capability: a truthy
+  // string or a one-key object would otherwise read as "some views work".
+  for (const standardViews of [null, '', 'top', {}, 7, true, ['top', 3], ['top', null], [{}]]) {
+    assert.throws(
+      () => parseCadStatus({ ...empty, standardViews }),
+      /CAD_STATUS_INVALID/,
+      `standardViews ${JSON.stringify(standardViews)}`,
+    );
+  }
+});
+
 test('import progress is validated and never rendered from a malformed block', () => {
   const bad = [
     { ...empty, importProgress: {} },
