@@ -23,8 +23,24 @@
 渲染尚未接入真会话（`RenderSessionHandle` 仍 `Detached`）：阶段 2 = `attach_device(CanvasPresenter::device_queue())`
 + 每帧 `tick`/`render(logical, scale)` + 用同一 presenter 呈现 `frame_texture()`，然后把真会话放到
 **同一批 wasm 导出**后面，并决定 ADR 0025 的输入/堆预算归属（`deliver_external_open` 目前**没有**
-预算门，直接替换会丢上限）。字体/图片资源仍是显式拒绝。**证据边界**：本轮无浏览器/wasm 运行时证据、
-无 GPU/像素证据，X11 运行时也未跑（只有源码/单测契约）。
+预算门，直接替换会丢上限）。字体/图片资源仍是显式拒绝。
+
+### 阶段 2 spike 结论（跑通，默认不进生产包）
+
+真会话（`CadSession` + 真 db + 真命令路由）在 wasm 里接管同一块 `<canvas>` **可行**：
+`debug_session_command("LINE")` + 两次 `handle_input` 指针 + `CONFIRM` 使 `entityCount` 4→5，
+新帧像素差 **0.755%**（阈值 0.05%），截图可见 (220,200)→(560,400) 的对角线；与生产 viewer
+会话在同一 wasm 实例内共存互不影响。**代价**：wasm 9,655,292 B → 13,409,586 B（+38.9%），
+因此 spike 挂在 cargo feature **`debug-session`**（`default = []`），默认产物体积不变。
+
+翻生产前的阻塞（逐条见 `docs/validation-phase2-session-canvas-spike-2026-10-28.md`）：
+① ADR 0025 的输入/堆预算未覆盖 `from_bytes`，且真会话**保留数据库**（viewer 是释放的），
+大图峰值需重测；② 字体/图片仍拒绝（真实图纸文字未整形）；③ 输入管线与 resize/rAF 帧循环；
+④ `shell_status`/`shell_command`/弹窗需要改投影真会话事实；⑤ `open_bytes` 要改成
+`deliver_external_open` 语义并先过预算；⑥ Worker 载体未验证。
+
+**证据边界**：生产路径仍无浏览器/wasm 运行时证据、无 GPU/像素证据，X11 运行时也未跑
+（只有源码/单测契约与 spike 的 SwiftShader 截图）。
 
 ## 2026-10-28 浏览器/Android 载体：标准视图能力显式化 + `OPEN` 文档选择器（缺陷修复）
 

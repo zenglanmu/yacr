@@ -9,6 +9,15 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = []
+# **SPIKE ONLY** (ADR 0024 stage ⑧ phase 2): the `debug_session_*` exports that put
+# the real `CadSession` on a page canvas. Off by default so a production wasm
+# bundle does not carry a second session (+38.9 % measured: 9.66 MB -> 13.41 MB).
+# Evidence builds: `cargo build -p app-web --target wasm32-unknown-unknown \
+# --release --locked --features debug-session`.
+debug-session = []
+
 [dependencies]
 # The **host-agnostic shell surface** (`src/shell.rs`): the frozen `cad_status`
 # snapshot the shared React chrome (`apps/desktop-ui`) validates, plus the command

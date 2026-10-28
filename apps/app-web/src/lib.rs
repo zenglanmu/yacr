@@ -298,6 +298,18 @@ pub mod shell;
 #[cfg(target_arch = "wasm32")]
 mod session;
 
+/// **SPIKE (ADR 0024 stage ⑧ phase 2): the real desktop session inside wasm.**
+///
+/// Additive debug surface only: it builds `cad_ui_core::session::CadSession` from
+/// the compiled-in fixture bytes over [`platform`], attaches the page canvas
+/// presenter's device to the session's `RenderSessionHandle`, and renders/presents
+/// through the existing `CanvasPresenter` blit. The production viewer
+/// ([`session`]) is untouched and both sessions coexist in this binary; nothing
+/// here is wired to the production exports. See the module docs for the exact
+/// seam and for what the spike does **not** prove.
+#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
+mod debug_session;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -590,4 +602,150 @@ pub fn document() -> String {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn last_import_ms() -> f64 {
     -1.0
+}
+
+// ---------------------------------------------------------------------------
+// SPIKE (ADR 0024 stage ⑧ phase 2): the real desktop session in wasm
+// ---------------------------------------------------------------------------
+//
+// Additive debug exports. They are **not** the production surface: `start`,
+// `open_bytes`, `pan`, `zoom_at`, `resize`, `status`, `document` and the
+// `shell_*` calls keep their exact behaviour, and the chrome does not know this
+// section exists. Everything below is a spike and is documented as such; the
+// production flip is a separate change (see `docs/handoff.md`).
+//
+// ```text
+// debug_session_start(canvas_id, css_w, css_h, dpr) -> JSON status (async)
+// debug_session_tick()                              -> JSON status
+// debug_session_command(text)                       -> JSON status
+// debug_session_pointer(phase, x, y)                -> JSON status
+// debug_session_status()                            -> JSON status
+// ```
+
+/// **SPIKE.** Start the real desktop CAD session
+/// (`cad_ui_core::session::CadSession`, built from the compiled-in fixture
+/// **bytes**) on the page canvas `canvas_id`, and attach the canvas presenter's
+/// device to the session's render handle.
+///
+/// This is the phase-2 question of ADR 0024 stage ⑧: can the session the native
+/// wayland host drives own a browser `<canvas>` and actually draw? The session is
+/// the real one — real command router, real `cad-db` authority, real
+/// `RenderSessionHandle` — over the browser's four platform contracts
+/// ([`platform`]); the only substitutions are the two seams the carrier forces:
+/// the device comes from `CanvasPresenter::device_queue()` and the surface
+/// metrics are the canvas' CSS size / `devicePixelRatio`.
+///
+/// Returns the debug status object (see the module docs). A second start while
+/// one is live is refused: one canvas has exactly one presenter.
+#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
+#[wasm_bindgen]
+pub async fn debug_session_start(
+    canvas_id: &str,
+    css_w: f64,
+    css_h: f64,
+    dpr: f64,
+) -> Result<String, JsValue> {
+    debug_session::start_impl(canvas_id, css_w, css_h, dpr).await
+}
+
+/// **SPIKE.** One frame attempt on the live debug session: the host tick, the
+/// staged scene upload (`apply_ready_updates`), the render, and the blit through
+/// the existing `CanvasPresenter`.
+///
+/// A `render` that returns no frame is a real wait (the scene is not committed
+/// yet) and is reported as `waited`, never as a presented frame.
+#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
+#[wasm_bindgen]
+pub fn debug_session_tick() -> Result<String, JsValue> {
+    debug_session::tick_impl()
+}
+
+/// **SPIKE.** Run one CAD command through the **real** router
+/// (`CadSession::command`) and answer the debug status.
+#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
+#[wasm_bindgen]
+pub fn debug_session_command(text: &str) -> Result<String, JsValue> {
+    debug_session::command_impl(text)
+}
+
+/// **SPIKE.** Feed one pointer event through the **real** input seam
+/// (`CadSession::handle_input` with a `ProbeInput`, the same wire shape the
+/// desktop `probe_input` IPC carries).
+///
+/// `phase` is `down` / `move` / `up`; `x`/`y` are canvas-local logical (CSS)
+/// pixels.
+#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
+#[wasm_bindgen]
+pub fn debug_session_pointer(phase: &str, x: f64, y: f64) -> Result<String, JsValue> {
+    debug_session::pointer_impl(phase, x, y)
+}
+
+/// **SPIKE.** The live debug session's status object, without advancing it.
+#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
+#[wasm_bindgen]
+pub fn debug_session_status() -> String {
+    debug_session::status_impl()
+}
+
+/// Native builds have no page canvas, so the debug session refuses explicitly
+/// rather than reporting a session that does not exist.
+#[cfg(all(not(target_arch = "wasm32"), feature = "debug-session"))]
+pub fn debug_session_start(
+    _canvas_id: &str,
+    _css_w: f64,
+    _css_h: f64,
+    _dpr: f64,
+) -> Result<String, String> {
+    Err(NOT_IMPLEMENTED.to_string())
+}
+
+/// Native builds have no debug session to advance (see [`debug_session_start`]).
+#[cfg(all(not(target_arch = "wasm32"), feature = "debug-session"))]
+pub fn debug_session_tick() -> Result<String, String> {
+    Err(NOT_IMPLEMENTED.to_string())
+}
+
+/// Native builds have no debug session to command (see [`debug_session_start`]).
+#[cfg(all(not(target_arch = "wasm32"), feature = "debug-session"))]
+pub fn debug_session_command(_text: &str) -> Result<String, String> {
+    Err(NOT_IMPLEMENTED.to_string())
+}
+
+/// Native builds have no debug session to feed input (see [`debug_session_start`]).
+#[cfg(all(not(target_arch = "wasm32"), feature = "debug-session"))]
+pub fn debug_session_pointer(_phase: &str, _x: f64, _y: f64) -> Result<String, String> {
+    Err(NOT_IMPLEMENTED.to_string())
+}
+
+/// Native builds have no debug session to report (see [`debug_session_start`]).
+#[cfg(all(not(target_arch = "wasm32"), feature = "debug-session"))]
+pub fn debug_session_status() -> String {
+    NOT_IMPLEMENTED.to_string()
+}
+
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "debug-session"))]
+mod spike_tests {
+    //! Contract test for the **native** side of the phase-2 spike surface.
+    //!
+    //! The spike itself can only run in a browser, so what is testable here is the
+    //! honesty rule: on a target with no page canvas every debug export refuses
+    //! with the explicit NOT IMPLEMENTED diagnostic. None of them may answer as if
+    //! a session existed, and the production exports keep their own answer.
+
+    use super::*;
+
+    #[test]
+    fn the_debug_surface_never_fabricates_a_session_off_wasm() {
+        let start = debug_session_start("cad-canvas", 800.0, 600.0, 1.0).unwrap_err();
+        let tick = debug_session_tick().unwrap_err();
+        let command = debug_session_command("LINE").unwrap_err();
+        let pointer = debug_session_pointer("down", 1.0, 2.0).unwrap_err();
+        for refusal in [&start, &tick, &command, &pointer] {
+            assert_eq!(refusal, NOT_IMPLEMENTED, "a native debug call must refuse");
+        }
+        assert_eq!(debug_session_status(), NOT_IMPLEMENTED);
+        // The production surface is unchanged by this spike.
+        assert!(status().contains("NOT IMPLEMENTED"));
+        assert!(document().contains("NOT IMPLEMENTED"));
+    }
 }
