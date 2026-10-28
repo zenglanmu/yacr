@@ -1,6 +1,21 @@
 // The `dom-canvas` transport (ADR 0024 D1/D3): the wasm CAD session owns the
-// pixels and the camera, this module owns the narrow seam between that session
-// and the one input element the chrome already has.
+// pixels **and** the camera, and this module owns the narrow seam between that
+// session and the one input element the chrome already has.
+//
+// What this module does, and what it deliberately does not:
+//
+// * it **loads** the generated wasm session and waits for its init;
+// * it **sizes** the session (`start` once, `resize` on a real size/DPR change)
+//   from the partition rect the chrome measures;
+// * it reports the session's own status and its first failure, once.
+//
+// It does **not** synthesize input. Pan, zoom, hover and every tool click travel
+// the shared lane (`cad/input.ts` → `probe_input` → the adapter), which is the
+// same code path the `native-below` hosts use, so a wheel notch or a middle-drag
+// means exactly the same thing on the page carrier as on the desktop. That is why
+// there is no second camera owner here any more: the session's own input seam
+// already owns it, and a second "zoom the camera from the transport" path could
+// only disagree with the first.
 //
 // How the session is loaded, and why it goes through a **public bootstrap module**:
 //
@@ -35,30 +50,23 @@
 //   `'unsafe-eval'`.
 //
 // `native-below` hosts (Linux native Wayland, Windows) never load any of this: the
-// loader is only reachable from the `dom-canvas` branch in `App.jsx`. The host
+// loader is only reachable from the `dom-canvas` branch in `App.tsx`. The host
 // shell must also allow WebAssembly instantiation in its CSP (`'wasm-unsafe-eval'`
 // under `script-src`); that file belongs to the host lane, and a CSP refusal
 // surfaces as this transport's load failure - never as a blank canvas.
 //
-// Everything that can be a pure function is one (`wheelZoomFactor`, `panDelta`,
-// `canvasCssSize`, `parseCanvasStatus`, `statusFailure`); the two DOM bindings at
-// the bottom add listeners to **exactly one** element, the caller's `.native-input`,
-// and to nothing else. The canvas node is a pixel surface: no listener
-// is ever attached to it here (ADR 0024 D3).
+// Everything that can be a pure function is one (`canvasCssSize`,
+// `parseCanvasStatus`, `statusFailure`); the one DOM binding at the bottom only
+// measures, coalesced to one animation frame. The canvas node is a pixel surface:
+// no listener is ever attached to it here (ADR 0024 D3).
 //
 // The generated session is **not** a source dependency of this package, so its
-// module namespace arrives as `unknown` and is narrowed here: the four exports
-// this transport calls are checked before the object is used.
-import { pointerPosition, rectFromElement } from './metrics.ts';
+// module namespace arrives as `unknown` and is narrowed here: the exports this
+// transport calls are checked before the object is used.
+import { rectFromElement } from './metrics.ts';
 
 /** The single canvas the wasm session presents on (ADR 0024 D3). */
 export const CANVAS_ID = 'cad-canvas';
-
-/** One wheel notch, matching the desktop session's zoom step. */
-export const ZOOM_STEP = 1.25;
-
-/** A DOM wheel notch is 120 px in `deltaMode` 0 (pixels). */
-export const WHEEL_NOTCH_PX = 120;
 
 /** The dist-root directory both generated artifact sets are served from. */
 export const CANVAS_BASE = '/canvas/';
@@ -103,19 +111,29 @@ export const CANVAS_STEP_UNREADABLE = 'ui-status-unreadable';
 /** A failure status that carries no step of its own. */
 export const CANVAS_STEP_UNCLASSIFIED = 'unclassified';
 
-/** The exports every wasm session module must provide. */
-export const CANVAS_EXPORTS = ['start', 'resize', 'zoom_at', 'pan'];
+/**
+ * The exports every wasm session module must provide for this transport.
+ *
+ * `frame` is here because the page carrier's loop is the **host's** (see
+ * `cad/frame-loop.ts`): nothing inside wasm starts a timer, so a session whose
+ * frame step cannot be called could never repaint and must be refused at load
+ * time rather than after a blank canvas.
+ */
+export const CANVAS_EXPORTS = ['start', 'resize', 'frame'];
 
 /**
  * The session's call surface, after validation. Every call answers with the
  * session's own status JSON (a string); a rejection is a transport failure.
+ *
+ * `frame()` answers a *frame* line (`{ok, presented, frames, waited, ticks,
+ * canvasFrames}`), not a status: it is driven by `cad/frame-loop.ts` and is not a
+ * status source here.
  */
 export interface CanvasModule {
   readonly ready?: unknown;
   start(canvasId: string, width: number, height: number, dpr: number): unknown;
   resize(width: number, height: number, dpr: number): unknown;
-  zoom_at(factor: number, x: number, y: number): unknown;
-  pan(dx: number, dy: number): unknown;
+  frame(): unknown;
 }
 
 /** The page global the loader runs against (`globalThis` in a host). */
@@ -145,12 +163,6 @@ export interface CanvasCssSize {
   readonly dpr: number;
 }
 
-/** One pointer-drag screen delta, in CSS px. */
-export interface PanDelta {
-  readonly dx: number;
-  readonly dy: number;
-}
-
 /**
  * The served directory both artifact sets live in.
  *
@@ -176,11 +188,7 @@ export function canvasWasmUrl(base: unknown = CANVAS_BASE): string {
   return `${canvasBaseDir(base)}${CANVAS_WASM_FILE}`;
 }
 
-/**
- * The bootstrap URL, by its historical name.
- *
- * Kept because `App.jsx` passes it straight to [`loadCanvasModule`].
- */
+/** The bootstrap URL, by its historical name (`App.tsx` passes it to the loader). */
 export function canvasModuleUrl(base: unknown = CANVAS_BASE): string {
   return canvasScriptUrl(base);
 }
@@ -243,9 +251,7 @@ function injectModuleScript(env: CanvasEnv, url: string): Promise<HTMLScriptElem
  *
  * One `<script>` tag, one wasm fetch, one init: the promise is cached per `env`
  * (the page's global), so a second caller - a remount, a second effect run - waits
- * on the first attempt instead of appending a second tag. A rejection is cached
- * too: the transport latches after its one reported failure, and the honest
- * recovery is a page reload, not a silent retry loop.
+ * on the first attempt instead of appending a second tag.
  */
 const bootstrapByEnv = new WeakMap<object, Promise<CanvasModule>>();
 
@@ -320,52 +326,6 @@ async function bootstrap(env: CanvasEnv, target: unknown): Promise<CanvasModule>
 }
 
 /**
- * Wheel delta -> zoom notches, mirroring `apps/app-web/web/main.js`:
- * `deltaMode` 1 counts lines (a third of a notch per line), `deltaMode` 2 counts
- * pages (one notch per page), anything else is pixels (`/120`).
- *
- * Returns `null` for a delta that is not a number or that lands exactly on zero:
- * a no-op zoom must not reach the session at all.
- */
-export function wheelZoomNotches(deltaY: unknown, deltaMode = 0): number | null {
-  if (typeof deltaY !== 'number' || !Number.isFinite(deltaY)) return null;
-  const scale = deltaMode === 1 ? 1 / 3 : deltaMode === 2 ? 1 : 1 / WHEEL_NOTCH_PX;
-  const notches = deltaY * scale;
-  if (!Number.isFinite(notches) || notches === 0) return null;
-  return notches;
-}
-
-/**
- * Wheel delta -> `zoom_at` factor. One notch away from the user (`deltaY < 0`,
- * wheel up) zooms **in** by [`ZOOM_STEP`], matching the desktop convention.
- *
- * Returns `null` when [`wheelZoomNotches`] has nothing to forward.
- */
-export function wheelZoomFactor(deltaY: unknown, deltaMode = 0): number | null {
-  const notches = wheelZoomNotches(deltaY, deltaMode);
-  return notches === null ? null : ZOOM_STEP ** -notches;
-}
-
-/**
- * Pointer drag delta in CSS px, `next - previous` (x right, y down).
- *
- * The sign is the pointer's, exactly like the reference shell: `pan(dx, dy)` is a
- * **screen** delta that the session converts with its own `world_per_px`. Returns
- * `null` for a degenerate pair (missing/non-finite coordinate) and for a no-op
- * (`0, 0`), so neither reaches the session.
- */
-export function panDelta(
-  from: { readonly x: number; readonly y: number } | null | undefined,
-  to: { readonly x: number; readonly y: number } | null | undefined,
-): PanDelta | null {
-  if (!from || !to) return null;
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null;
-  return dx === 0 && dy === 0 ? null : { dx, dy };
-}
-
-/**
  * The CSS size and DPR the session is configured with, from a partition rect.
  *
  * Mirrors the reference shell: a zero-sized element is reported as `1` CSS px
@@ -437,16 +397,12 @@ export interface CanvasTransportOptions {
   canvasId?: string;
 }
 
-/** The transport `App.jsx` drives from the partition rect. */
+/** The transport `App.tsx` drives from the partition rect. */
 export interface CanvasTransport {
   /** The `.native-input` element this transport belongs to (never the canvas). */
   readonly element: Element | null;
   /** Feed a new partition rect; starts once, resizes on a real size change. */
   update(rect: unknown): boolean;
-  /** Pan the camera by a CSS-pixel screen delta (pointer motion, x right). */
-  pan(dx: number, dy: number): boolean;
-  /** Zoom about a canvas-local CSS-pixel cursor (`factor > 1` zooms in). */
-  zoom(factor: number, x: number, y: number): boolean;
   /** Resolves when every queued call has settled (diagnostics and tests). */
   whenIdle(): Promise<void>;
   /** Whether a failure latched the transport shut. */
@@ -549,21 +505,6 @@ export function createCanvasTransport({
     element,
     /** Feed a new partition rect; starts once, resizes on a real size change. */
     update,
-    /** Pan the camera by a CSS-pixel screen delta (pointer motion, x right). */
-    pan(dx: number, dy: number): boolean {
-      if (!started || disposed || failed) return false;
-      if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return false;
-      call('pan', () => module.pan(dx, dy));
-      return true;
-    },
-    /** Zoom about a canvas-local CSS-pixel cursor (`factor > 1` zooms in). */
-    zoom(factor: number, x: number, y: number): boolean {
-      if (!started || disposed || failed) return false;
-      if (!Number.isFinite(factor) || factor <= 0) return false;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-      call('zoom_at', () => module.zoom_at(factor, x, y));
-      return true;
-    },
     /** Resolves when every queued call has settled (diagnostics and tests). */
     whenIdle(): Promise<void> {
       return chain;
@@ -575,97 +516,6 @@ export function createCanvasTransport({
     dispose(): void {
       disposed = true;
     },
-  };
-}
-
-/** The two navigations [`bindCanvasNavigation`] forwards. */
-export interface CanvasNavigation {
-  pan(dx: number, dy: number): void;
-  zoom(factor: number, x: number, y: number): void;
-}
-
-/**
- * Pointer-drag pan and wheel zoom on the existing `.native-input` element.
- *
- * Semantics mirror `apps/app-web/web/main.js`: primary button only, pointer
- * capture for the duration of the drag, `pointercancel`/`lostpointercapture`
- * end the drag without a pan, and only a non-zero finite delta is forwarded. The
- * element stays the **only** input surface - the `<canvas>` under it never gets a
- * listener, so the crosshair, hit-testing and `aria-label` ownership are unchanged
- * (ADR 0024 D3).
- *
- * Side-effect free until called: no listener exists before `bindCanvasNavigation`.
- * Returns the unbind function, which also releases a captured pointer.
- */
-export function bindCanvasNavigation(
-  element: Element | null | undefined,
-  { pan, zoom }: Partial<CanvasNavigation> = {},
-): () => void {
-  if (!element || typeof pan !== 'function' || typeof zoom !== 'function') {
-    throw new TypeError('bindCanvasNavigation: element, pan and zoom are required');
-  }
-  let drag: { id: number; x: number; y: number } | null = null;
-
-  const release = (id: number | null): void => {
-    if (id !== null && element.hasPointerCapture(id)) element.releasePointerCapture(id);
-  };
-  // Each handler is registered for one DOM event type; the cast is the only place
-  // that event-class mapping is stated.
-  const down = (event: Event): void => {
-    const pointer = event as PointerEvent;
-    if (pointer.button !== 0 || drag !== null) return;
-    const point = pointerPosition(element, pointer);
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-    drag = { id: pointer.pointerId, x: point.x, y: point.y };
-    element.setPointerCapture(pointer.pointerId);
-  };
-  const moving = (event: Event): void => {
-    const pointer = event as PointerEvent;
-    if (drag === null || pointer.pointerId !== drag.id) return;
-    const point = pointerPosition(element, pointer);
-    const delta = panDelta(drag, point);
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-    drag.x = point.x;
-    drag.y = point.y;
-    if (delta !== null) pan(delta.dx, delta.dy);
-  };
-  const endDrag = (event: Event): void => {
-    const pointer = event as PointerEvent;
-    if (drag === null || pointer.pointerId !== drag.id) return;
-    const id = drag.id;
-    drag = null;
-    release(id);
-  };
-  const wheel = (event: Event): void => {
-    const wheelEvent = event as WheelEvent;
-    // The partition owns its wheel: the chrome must not scroll under the CAD
-    // image, and the session is the only consumer (same as the IPC lane).
-    wheelEvent.preventDefault();
-    const factor = wheelZoomFactor(wheelEvent.deltaY, wheelEvent.deltaMode);
-    if (factor === null) return;
-    const point = pointerPosition(element, wheelEvent);
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-    // Canvas-local CSS px, which is the anchor the session expects.
-    zoom(factor, point.x, point.y);
-  };
-
-  const handlers: Record<string, (event: Event) => void> = {
-    pointerdown: down,
-    pointermove: moving,
-    pointerup: endDrag,
-    pointercancel: endDrag,
-    lostpointercapture: endDrag,
-    wheel,
-  };
-  for (const [type, handler] of Object.entries(handlers)) {
-    element.addEventListener(type, handler, { passive: false });
-  }
-  return () => {
-    if (drag !== null) release(drag.id);
-    drag = null;
-    for (const [type, handler] of Object.entries(handlers)) {
-      element.removeEventListener(type, handler);
-    }
   };
 }
 

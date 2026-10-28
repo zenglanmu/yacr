@@ -16,6 +16,7 @@ import {
   canvasSessionReport,
   clampCanvasLabel,
   createCanvasSessionReporter,
+  palettesOffered,
 } from '../src/cad/surface.ts';
 import { readAppSource, readCatalog, readModule } from './helpers.ts';
 import { offeredItems, offeredPanels, PALETTE_ACTIONS, PALETTE_COMMANDS, RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
@@ -261,10 +262,21 @@ test('a visible canvas drawing never becomes a host document for admission', asy
   for (const source of consumers) assert.ok(source.includes('shell.documentVisible'));
 });
 
-test('the palettes are not offered on the canvas carrier', async () => {
+test('the palettes are what the carrier reports, not what it is called', async () => {
   const app = await readModule('App.tsx');
-  // Derived from the reported carrier, never from a platform hint.
-  assert.ok(app.includes('const palettesAvailable = surfaceMode !== SURFACE_MODE_DOM_CANVAS;'));
+  // The flag is the carrier's own capability claim, read once through the helper -
+  // never derived from the carrier's name (`dom-canvas` used to mean "no palettes",
+  // which stopped being true when the page session became the real desktop session).
+  assert.ok(app.includes('const palettesAvailable = palettesOffered(status);'));
+  assert.ok(!app.includes('palettesAvailable = surfaceMode'));
+  assert.equal(palettesOffered({ palettesAvailable: true }), true);
+  assert.equal(palettesOffered({ palettesAvailable: false }), false);
+  // An absent flag is today's behaviour: available. Only an explicit `false` hides
+  // a panel, so an older host keeps every palette it always had.
+  assert.equal(palettesOffered({}), true);
+  assert.equal(palettesOffered(null), true);
+  assert.equal(palettesOffered({ status: {} }), true);
+  assert.equal(palettesOffered({ palettesAvailable: 'false' }), true);
 
   const workspace = await readModule('components/Workspace.tsx');
   // The carrier rule is one helper (`palettesOffered` in `surface.mjs`), asked by

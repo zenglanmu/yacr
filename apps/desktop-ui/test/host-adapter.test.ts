@@ -1,6 +1,6 @@
 // The host transport contract: the Rust<->TS status wire, the runtime routing
-// table, the browser adapter's command map, and the source/package structure
-// that keeps the Tauri import in exactly one place.
+// table, the browser adapter's **forwarding** rule, and the source/package
+// structure that keeps the Tauri import in exactly one place.
 //
 // Like every suite here this file is `.ts` by filename only: Node's type
 // stripping runs it, `tsc` never sees it. Assertions are behaviour (imported
@@ -14,12 +14,12 @@ import { RUNTIME, RUNTIMES, isTauri, runtimeFrom, usesWasmCad } from '../src/hos
 import { SHELL_ONLY_COMMANDS, createInvoke, invokeRoute } from '../src/host/invoke.ts';
 import {
   WEB_FAILURE_COMMAND,
+  WEB_INPUT_COMMAND,
   WEB_SESSION_COMMAND,
   WEB_UNAVAILABLE_PREFIX,
   createWebAdapter,
   isDrawingFileName,
   loadWebShellModule,
-  unsupportedRuntimeMessage,
 } from '../src/host/web-adapter.ts';
 
 const PKG_ROOT = new URL('../', import.meta.url);
@@ -32,24 +32,49 @@ const SRC_ROOT = new URL('../src/', import.meta.url);
 // stops sending one, this suite fails before a browser ever loads.
 // ---------------------------------------------------------------------------
 
-const STATUS_NO_SESSION = `{"adapter":null,"backend":null,"camera":null,"canFit":false,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":null,"entityCount":null,"error":null,"frameCount":0,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":0,"importProgress":null,"loading":false,"orthoEnabled":false,"palettesAvailable":false,"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"standardViews":[],"surfaceMode":"dom-canvas","tool":null}`;
+const STATUS_NO_SESSION = `{"adapter":null,"backend":null,"camera":null,"canFit":false,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":null,"entityCount":null,"error":null,"frameCount":0,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":0,"importProgress":null,"loading":false,"orthoEnabled":false,"palettesAvailable":true,"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"standardViews":[],"surfaceMode":"dom-canvas","tool":null}`;
 
-const STATUS_LIVE = `{"adapter":"webgl2: example adapter (wasm32 session)","backend":"webgl2","camera":{"center":[10.0,-5.0],"scale":0.25},"canFit":true,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"canvasSession":{"batches":4,"draws":4,"label":"synthetic-four-lines.dwg"},"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":"synthetic-four-lines.dwg","entityCount":null,"error":null,"frameCount":7,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":1,"importProgress":null,"loading":false,"orthoEnabled":false,"palettesAvailable":false,"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"standardViews":[],"surfaceMode":"dom-canvas","tool":null}`;
+const STATUS_LIVE = `{"adapter":"webgl2: example adapter (wasm32 session)","backend":"webgl2","camera":{"center":[10.0,-5.0],"scale":0.25},"canFit":true,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"canvasSession":{"batches":4,"draws":4,"label":"synthetic-four-lines.dwg"},"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":"synthetic-four-lines.dwg","entityCount":null,"error":null,"frameCount":7,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":1,"importProgress":null,"loading":false,"orthoEnabled":false,"palettesAvailable":true,"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"standardViews":[],"surfaceMode":"dom-canvas","tool":null}`;
 
-const REFUSAL = 'unsupported-runtime: cad_command: "PAN" is not executable — this carrier executes ["FIT", "ZOOMIN", "ZOOMOUT"] only';
+/** A session refusal, in the session's own words (rethrow-verbatim fixture). */
+const REFUSAL = 'cad_app: PAN: the tool needs a drawing';
 
-/** A stand-in wasm session module: the four exports, over the two fixtures. */
-function fakeModule({ status = STATUS_NO_SESSION, commands = '[]', aliases = '[]', reply = null, open = null } = {}) {
+/** The envelope the wasm `invoke` export answers with. */
+function ok(value) {
+  return JSON.stringify({ ok: true, value });
+}
+
+/** The envelope a refusal comes back as (never a throw on the wire). */
+function refuse(error) {
+  return JSON.stringify({ ok: false, error });
+}
+
+/**
+ * A stand-in wasm session module: the exports the transport calls, over the two
+ * status fixtures.
+ *
+ * `answers` maps a wire command name to either a JSON envelope string or a
+ * function of the argument JSON (so a test can assert what was forwarded).
+ */
+function fakeModule({ status = STATUS_NO_SESSION, commands = '[]', aliases = '[]', answers = {}, open = null, input = null } = {}) {
   const calls = [];
   const module = {
     ready: Promise.resolve(),
     shell_status() { calls.push('shell_status'); return status; },
     shell_commands() { calls.push('shell_commands'); return commands; },
     shell_aliases() { calls.push('shell_aliases'); return aliases; },
-    shell_command(command) {
-      calls.push(['shell_command', command]);
-      if (reply !== null) return reply;
-      throw REFUSAL;
+    invoke(name, argsJson) {
+      calls.push(['invoke', name, argsJson]);
+      const answer = answers[name];
+      if (typeof answer === 'function') return answer(argsJson, name);
+      if (answer !== undefined) return answer;
+      // The wire's own fallback for a name it does not serve.
+      return refuse(`unsupported-runtime: ${name}`);
+    },
+    probe_input(argsJson) {
+      calls.push(['probe_input', argsJson]);
+      if (input !== null) return input;
+      return JSON.stringify({ ok: true, accepted: true, sequence: 1, kind: 'pointer_down' });
     },
   };
   if (open !== null) {
@@ -177,10 +202,10 @@ test('createInvoke routes per call through the injected transports', async () =>
 });
 
 // ---------------------------------------------------------------------------
-// 3. The browser adapter's command map
+// 3. The browser adapter: one thin forwarder over the session's `invoke`
 // ---------------------------------------------------------------------------
 
-test('the adapter serves the four shell commands from the wasm module', async () => {
+test('the three shell reads answer from the session, and OPEN is the one host command', async () => {
   const fake = fakeModule({ commands: '["ZOOM"]', aliases: '[{"alias":"Z","command":"ZOOM"}]' });
   const adapter = createWebAdapter(fake.module);
 
@@ -189,6 +214,8 @@ test('the adapter serves the four shell commands from the wasm module', async ()
   assert.equal(status.documentLabel, null);
   // The session says it cannot open; the transport can, so it lifts the flag.
   assert.equal(status.canOpen, true);
+  // The palette capability is the session's own answer, passed through untouched.
+  assert.equal(status.palettesAvailable, true);
   assert.deepEqual(await adapter.invoke('cad_commands'), ['ZOOM', 'OPEN']);
   assert.deepEqual(await adapter.invoke('cad_command_aliases'), [{ alias: 'Z', command: 'ZOOM' }]);
   assert.deepEqual(fake.calls, ['shell_status', 'shell_commands', 'shell_aliases']);
@@ -213,32 +240,104 @@ test('the advertised vocabulary is the session list plus the host OPEN', async (
   await assert.rejects(createWebAdapter(broken.module).invoke('cad_commands'), /non-string command name/);
 });
 
-test('cad_command rethrows the session refusal verbatim', async () => {
-  const fake = fakeModule();
+test('every wire command is forwarded to the session verbatim, one name in', async () => {
+  // The same names the desktop `#[tauri::command]`s serve
+  // (`apps/app-web/src/direct.rs::WIRE_COMMANDS`), with the arguments the chrome
+  // really sends. No adapter table may answer one of them differently.
+  const args = {
+    cad_command: { command: 'LINE' },
+    cad_set_tool_parameter: { parameter: 'radius', number: 2.5 },
+    cad_set_tool_text: { text: 'PLAN' },
+    cad_set_selected_text: { text: 'PLAN' },
+    cad_set_selected_property: { key: 'layer', value: '0' },
+    cad_standard_view: { view: 'top' },
+    cad_settings: undefined,
+    cad_set_setting: { key: 'snapSpacing', value: 5 },
+    cad_layers: undefined,
+    cad_set_layer_visible: { name: '0', visible: false },
+    cad_restore_layers: undefined,
+    cad_set_active_layer: { name: 'walls' },
+    cad_create_layer: { name: 'walls' },
+    cad_rename_layer: { layer: 'walls', name: 'WALLS' },
+    cad_delete_layer: { layer: 'walls' },
+    cad_set_layer_property: { layer: 'walls', key: 'color', value: '#ff0000' },
+    cad_close_popup: undefined,
+  };
+  const answers = {};
+  for (const name of Object.keys(args)) answers[name] = name === 'cad_layers' ? ok({ layers: [] }) : ok({ accepted: true });
+  const fake = fakeModule({ answers });
   const adapter = createWebAdapter(fake.module);
-  // `PAN` is not implemented by either side: the session's own words come back.
+  for (const [name, value] of Object.entries(args)) {
+    const answer = await adapter.invoke(name, value);
+    assert.deepEqual(answer, name === 'cad_layers' ? { layers: [] } : { accepted: true }, name);
+  }
+  // One `invoke` per command, the name unchanged and the argument object as JSON.
+  assert.deepEqual(fake.calls, Object.entries(args).map(([name, value]) => [
+    'invoke', name, value === undefined ? '{}' : JSON.stringify(value),
+  ]));
+});
+
+test('cad_open_popup forwards the session ack (the overlay reads it)', async () => {
+  const fake = fakeModule({
+    answers: {
+      cad_open_popup: ok({ accepted: true, kind: 'about', popup_label: 'About', existing: false, payload: { version: '0.1.0' } }),
+    },
+  });
+  const adapter = createWebAdapter(fake.module);
+  assert.deepEqual(await adapter.invoke('cad_open_popup', { kind: 'about' }), {
+    accepted: true, kind: 'about', popup_label: 'About', existing: false, payload: { version: '0.1.0' },
+  });
+  assert.deepEqual(fake.calls, [['invoke', 'cad_open_popup', '{"kind":"about"}']]);
+});
+
+test('a refusal is rethrown verbatim: the chrome shows the host\'s own words', async () => {
+  const fake = fakeModule({ answers: { cad_command: refuse(REFUSAL) } });
+  const adapter = createWebAdapter(fake.module);
   await assert.rejects(adapter.invoke('cad_command', { command: 'PAN' }), error => {
     assert.ok(error instanceof Error);
     assert.equal(error.message, REFUSAL);
-    assert.ok(error.message.startsWith('unsupported-runtime: cad_command: '));
     return true;
   });
-  assert.deepEqual(fake.calls, [['shell_command', 'PAN']]);
+  assert.deepEqual(fake.calls, [['invoke', 'cad_command', '{"command":"PAN"}']]);
 });
 
-test('a non-OPEN command is forwarded unchanged', async () => {
-  const fake = fakeModule({ reply: '{"accepted":true}' });
+test('a name the carrier does not serve keeps the session\'s unsupported-runtime answer', async () => {
+  const fake = fakeModule();
   const adapter = createWebAdapter(fake.module);
-  for (const command of ['FIT', 'ZOOMIN', 'ZOOMOUT', '  zoomin ']) {
-    assert.deepEqual(await adapter.invoke('cad_command', { command }), { accepted: true });
-  }
-  // Exactly what the chrome sent reaches the session, including its whitespace.
-  assert.deepEqual(fake.calls, [
-    ['shell_command', 'FIT'],
-    ['shell_command', 'ZOOMIN'],
-    ['shell_command', 'ZOOMOUT'],
-    ['shell_command', '  zoomin '],
-  ]);
+  // The adapter holds no name list: the session answers for an unknown name, and
+  // its sentence reaches the caller unchanged.
+  await assert.rejects(adapter.invoke('cad_something_new', {}), error => {
+    assert.equal(error.message, 'unsupported-runtime: cad_something_new');
+    return true;
+  });
+  assert.deepEqual(fake.calls, [['invoke', 'cad_something_new', '{}']]);
+});
+
+test('probe_input feeds the session export with the ProbeInput body, not the envelope', async () => {
+  const fake = fakeModule({ input: JSON.stringify({ ok: true, accepted: true, sequence: 7, kind: 'pointer_down' }) });
+  const adapter = createWebAdapter(fake.module);
+  const body = { sequence: 7, kind: 'pointer_down', x: 10, y: 20, button: 0, shift: false };
+  assert.deepEqual(await adapter.invoke(WEB_INPUT_COMMAND, { input: body }), {
+    ok: true, accepted: true, sequence: 7, kind: 'pointer_down',
+  });
+  assert.deepEqual(fake.calls, [['probe_input', JSON.stringify(body)]]);
+  // A session refusal is an answer (`accepted: false`), not an exception: the ack
+  // is what the chrome (and the smoke suite) reads.
+  const refusing = fakeModule({ input: JSON.stringify({ ok: false, accepted: false, reason: 'popup.modal_open', step: 'input' }) });
+  assert.deepEqual(await createWebAdapter(refusing.module).invoke(WEB_INPUT_COMMAND, { input: body }), {
+    ok: false, accepted: false, reason: 'popup.modal_open', step: 'input',
+  });
+});
+
+test('an unreadable or shapeless answer is a loud failure, never a success', async () => {
+  const broken = fakeModule({ answers: { cad_command: 'not json', cad_layers: '{"value":1}' } });
+  const adapter = createWebAdapter(broken.module);
+  await assert.rejects(adapter.invoke('cad_command', { command: 'FIT' }), /web-adapter: cad_command:/);
+  // An envelope that is neither `ok:true` nor `ok:false` is not an answer.
+  await assert.rejects(adapter.invoke('cad_layers'), /not an \{ok, value\|error\} envelope/);
+  // A refusal with no reason cannot be rethrown as one, so it is a transport error.
+  const silent = fakeModule({ answers: { cad_layers: JSON.stringify({ ok: false }) } });
+  await assert.rejects(createWebAdapter(silent.module).invoke('cad_layers'), /refused without a reason/);
 });
 
 // --- the host OPEN flow (fake DOM: a real file picker cannot run in Node) ---
@@ -418,34 +517,35 @@ test('the two canvas reports are remembered and answered with no value', async (
   assert.deepEqual(adapter.lastSession, { label: null, batches: null, draws: null });
 });
 
-test('every command this carrier does not implement rejects with unsupported-runtime', async () => {
-  const adapter = createWebAdapter(fakeModule().module);
-  const unmapped = [
-    'probe_input',
-    'cad_standard_view',
-    'cad_settings',
-    'cad_set_setting',
-    'cad_layers',
-    'cad_set_layer_visible',
-    'cad_restore_layers',
-    'cad_set_active_layer',
-    'cad_create_layer',
-    'cad_rename_layer',
-    'cad_delete_layer',
-    'cad_set_tool_text',
-    'cad_set_selected_text',
-    'cad_set_tool_parameter',
-    'cad_set_selected_property',
-    'cad_open_popup',
-    'cad_close_popup',
+test('no command is refused by the adapter: the session is the only authority', async () => {
+  // The whole desktop command set reaches the session's `invoke`, including the
+  // ones the first browser transport refused by name (`probe_input` is a session
+  // export now, and every write is served). A refusal can only come from the
+  // session, with its own words.
+  const forwarded = [];
+  const fake = fakeModule({
+    answers: new Proxy({}, { get: () => ok({ accepted: true }) }),
+  });
+  const module = {
+    ...fake.module,
+    invoke(name, argsJson) { forwarded.push(name); return fake.module.invoke(name, argsJson); },
+  };
+  const adapter = createWebAdapter(module);
+  const served = [
+    'cad_command', 'cad_standard_view', 'cad_settings', 'cad_set_setting', 'cad_layers',
+    'cad_set_layer_visible', 'cad_restore_layers', 'cad_set_active_layer', 'cad_create_layer',
+    'cad_rename_layer', 'cad_delete_layer', 'cad_set_layer_property', 'cad_set_tool_text',
+    'cad_set_selected_text', 'cad_set_tool_parameter', 'cad_set_selected_property',
+    'cad_open_popup', 'cad_close_popup',
   ];
-  for (const command of unmapped) {
-    await assert.rejects(adapter.invoke(command, {}), error => {
-      assert.equal(error.message, unsupportedRuntimeMessage(command));
-      assert.ok(error.message.startsWith('unsupported-runtime: '));
-      return true;
-    });
+  for (const command of served) {
+    const args = command === 'cad_command' ? { command: 'FIT' } : {};
+    await adapter.invoke(command, args);
   }
+  assert.deepEqual(forwarded, served, 'every one is forwarded, none is short-circuited');
+  // `probe_input` is a session export, not a wire name: it also reaches the session.
+  await adapter.invoke(WEB_INPUT_COMMAND, { input: { kind: 'pointer_down', sequence: 1 } });
+  assert.equal(fake.calls.filter(([name]) => name === 'probe_input').length, 1);
 });
 
 test('an unreadable module answer is a loud failure, never an empty success', async () => {
@@ -494,7 +594,7 @@ function publishOnAppend(env, published, { fail = false } = {}) {
 
 /** The four navigation exports the `dom-canvas` loader also validates. */
 function sessionStubs() {
-  return { start() {}, resize() {}, zoom_at() {}, pan() {} };
+  return { start() {}, resize() {}, frame() { return '{"ok":true,"presented":false}'; } };
 }
 
 test('a page without the canvas module fails with the unavailable prefix', async () => {

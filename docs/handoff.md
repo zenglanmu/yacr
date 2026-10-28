@@ -1,3 +1,52 @@
+## 2026-10-28 前端换轨到单漏斗：`dom-canvas` 载体执行桌面命令集（输入/帧/弹窗/面板）
+
+### 结论
+
+浏览器 / Android WebView / X11 的 chrome 不再只执行四条命令：`web-adapter.ts` 变成**薄转发层**，
+19 条 wire 命令 + 任意陌生名字都直通 wasm `invoke(name, args_json)`（拆 `{ok,value}` / 原样抛
+`error`），适配器**没有自己的命令表**；`OPEN` 是唯一宿主专属行为（DOM 选择器 + `open_bytes`）。
+指针输入复用同一条 lane（`bindProbeInput` + `ProbeInput`），相机不再由传输层合成；帧由新的
+`cad/frame-loop.ts` rAF 泵按需驱动。证据（有界、软件渲染）：`docs/validation-web-funnel-parity-2026-10-28.md`。
+
+- `App.tsx`：`nativeInputLane` → `inputLaneReady = carrierKnown && (dom-canvas ⇒ canvasLive)`
+  （等会话 live 再建 lane，否则会吃到载体诚实的 `no live CAD session` 拒绝并常驻横幅）；lane 的
+  send 在成功后 pump 一次；被接受的命令 pump 一次；`cad_status` 轮询**内容变化**时 pump（这就是
+  调色板/设置/弹窗写入的统一重绘触发，不需要每个命令点各记）。
+- `cad/canvas-host.ts`：删除 `bindCanvasNavigation` / `wheelZoomFactor` / `wheelZoomNotches` /
+  `panDelta` / `ZOOM_STEP` 与 transport 的 `pan`/`zoom`；只剩 `start`/`resize`/一次性失败闩 +
+  `watchCanvasRect`（只测量）。`CANVAS_EXPORTS = ['start','resize','frame']`。
+- `cad/frame-loop.ts`（新）：`pump()` 起/续 rAF 链；`presented:true` 继续，连续
+  `FRAME_IDLE_STEPS=2` 步无 present 停，单次泵 `FRAME_MAX_STEPS=600` 上限；抛错则停并记
+  `lastError`（**不**走传输失败路径，避免同一次失败报两遍）。空闲不空转。
+- 能力字段：`palettesAvailable` 改为读宿主上报值（`palettesOffered(status)` 单一读点）；
+  `apps/app-web/src/shell.rs` 的该字段 `false` → `true`（**本轮唯一 Rust 改动**：这个载体就是真
+  桌面会话，自己服务 `cad_layers`/`cad_setting*`；旧 `false` 是"chrome 自行推导"时期的过渡值），
+  `CadStatus` 加可选字段 + `parseCadStatus` 校验，`shell/tests.rs` 断言同步。
+- 移动抽屉：结构未动；词汇 155 之后 Home 页 32 个格子可选、**面板级 "none of these tools can run
+  yet" 说明消失**（冒烟新增断言）。剩下的 per-cell 拒绝是真前置条件（选择集、3D 视图）或真能力缺失
+  （`NEW`/`SAVE`/`PLOT` 无文件系统）。
+
+### 验证（本机）
+
+- `cd apps/desktop-ui && npx tsc --noEmit && node --test test/*.test.ts` → **811 pass / 0 fail**
+  （新增 `test/frame-loop.test.ts` 9 项；`canvas-host`/`host-adapter`/`canvas-session` 三套契约改写）。
+- `bash scripts/build-web-ui.sh` → bundle 生成（wasm 13,566,623 B）。
+- `NODE_PATH=… node scripts/web-ui-smoke.cjs --url http://127.0.0.1:8090/ --verbose --evidence …`
+  → **PASS 8/8 cases (193/193 checks)**（SwiftShader 软件渲染）。
+  新用例：`LINE` 经 UI 两点拾取（`tool.points` 1→2）+ Enter（`CONFIRM`）→ `entityCount 4→5`、
+  非主色像素 `4875→8373`、canvas PNG 字节不同；`OPEN` 夹具 → label/`entityCount 4`/`importCount 1→2`；
+  `LAYER` → 图层面板列出会话的层；Options → `Apply` 写穿 `cad_set_setting`（`grid false→true`）；
+  About 覆盖层 + 会话回 `popup.modal_open`；390 宽抽屉无面板级拒绝说明。
+- `cargo test -p app-web --locked` → **74 passed / 0 failed**；`cargo fmt --all -- --check` ok。
+- 门禁：`check-i18n.py` / `check-file-size.py` / `check-architecture.py` 全 OK。
+
+### NOT RUN / NOT VERIFIED
+
+X11 宿主运行时（同一份 chrome，未跑 `apps/app-linux`）、Android 模拟器/真机、真实 GPU、
+WebKitGTK、worker/offscreen 载体迁移、视觉正确性（只证明"有帧且在变"）。`standardViews: []`
+仍是陈旧能力声明（七个标准视图按钮在 `dom-canvas` 上被前端禁用，而 `cad_standard_view` 已可执行）
+——**本轮未改**，需 Rust 侧补真实键集与契约测试。
+
 ## 2026-10-28 `dom-canvas` 生产翻面（wasm page 载体）：真 `CadSession` 拥有 page canvas
 
 ### 结论
@@ -36,8 +85,9 @@
 
 ### 仍未做（下一轮阻塞）
 
-① **前端换轨**：`apps/desktop-ui` 未改（本 lane 禁止），`web-adapter.ts` 仍只路由四条命令、
-`runtime.ts` 仍按载体路由，`frame()` 还没人调用（现有页面靠 resize/pan/zoom 各自 present 维持重绘）。
+① ~~**前端换轨**~~ **已由下一轮完成（2026-10-28，见文件顶部"前端换轨到单漏斗"条目）**：
+`web-adapter.ts` 已是薄转发层、输入走同一条 lane、`frame()` 由 `cad/frame-loop.ts` 的 rAF 泵驱动。
+（原文保留为历史状态。）
 ② **worker/offscreen 载体仍是 viewer**（无 `invoke`/`probe_input`/`shell_status` 事实）——ADR 0024
 阶段 ⑧ 的另一半。③ **峰值感知的堆预算**：当前 2.68 GiB 常驻下再开一张同量级图纸不会被拒绝，
 可能会撞 4 GiB abort（需要为下一次 open 预留或流式导入）。④ 真机/真 GPU/WebKitGTK/X11 运行未做；

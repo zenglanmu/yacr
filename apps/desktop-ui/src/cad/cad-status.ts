@@ -191,6 +191,17 @@ export interface CadStatus {
    * a standard view to do.
    */
   readonly standardViews?: readonly string[];
+  /**
+   * Whether this **carrier** offers the docked palettes (layers, properties,
+   * diagnostics).
+   *
+   * Additive and optional. Absent means "as every host has always behaved"
+   * (available); only an explicit `false` hides them (`cad/surface.ts`'s
+   * `palettesOffered` is the single reading). It is a capability the carrier
+   * reports, not a property of the carrier's name: the `dom-canvas` session is the
+   * real desktop session and therefore reports `true`.
+   */
+  readonly palettesAvailable?: boolean;
 }
 
 // Phase keys the backend reports (`cad_app::import_phase_key`). A phase outside
@@ -301,6 +312,12 @@ export function parseCadStatus(value: unknown): CadStatus {
       || !status.standardViews.every((key: unknown) => typeof key === 'string')) {
       throw Error('CAD_STATUS_INVALID');
     }
+  }
+  // The palette capability flag is optional too (absent = available, which is every
+  // older host). A present value must be a real boolean: a truthy non-boolean would
+  // decide "show the palettes" from a value no host ever reported.
+  if (status.palettesAvailable !== undefined && typeof status.palettesAvailable !== 'boolean') {
+    throw Error('CAD_STATUS_INVALID');
   }
   // The cursor's world coordinate is required: `null` (no reliable 2D cursor) or
   // exactly three finite numbers. Anything else is rejected outright — a

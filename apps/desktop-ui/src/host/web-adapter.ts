@@ -1,43 +1,49 @@
-// The browser transport: the four `shell_*` exports of the wasm CAD session
-// (`apps/app-web/src/shell.rs`), mapped onto the command names the shared chrome
-// already speaks (`cad_status`, `cad_commands`, `cad_command_aliases`,
-// `cad_command`).
+// The browser transport: a **thin forwarder** to the wasm CAD session
+// (`apps/app-web`), which serves the desktop command set in-process.
 //
-// This module is the **only** place where a browser-shaped command answer is
-// produced. Three rules shape every line of it:
+// The session on the page is the real one (`apps/app-web/src/page.rs`): a real
+// `CadSession`, the real command router, the real `cad-db`, the real input seam
+// and the real popup state machine. Its `invoke(name, args_json)` export serves
+// exactly the 20 wire commands the desktop `#[tauri::command]`s serve, answering
+// one envelope: `{"ok":true,"value":…}` or `{"ok":false,"error":"<reason>"}`. So
+// there is nothing to map here — one name in, one envelope out — and three rules
+// shape every line of this module:
 //
 // 1. **Nothing is invented.** The status, the command vocabulary and the alias
-//    table are the session's own JSON, parsed and handed on; a payload that
-//    cannot be read is a thrown `web-adapter:` error, never an empty object the
-//    chrome would render as "no document, nothing wrong".
-// 2. **No empty success.** The browser carrier is view/navigate only (open, pan,
-//    zoom, resize), so every other command - the layer writes, the settings, the
-//    view payloads, the popups, `probe_input` - rejects with
-//    `unsupported-runtime: <command>`. A resolved `undefined` would look like a
-//    completed write to the chrome and to any future caller.
-// 3. **The one command the transport owns is `OPEN`.** The wasm session cannot
-//    open a file: a picker is a DOM capability and the bytes come from the page,
-//    so `OPEN` is served here (a hidden `<input type="file">` plus the session's
-//    `open_bytes`), and the vocabulary this adapter advertises is the session's
-//    own list **plus** `OPEN`. `cad_status.canOpen` is lifted the same way and for
-//    the same reason: the session reports it `false` because the session cannot
-//    open, the transport reports `true` because it can. The input carries **no**
-//    `accept` filter (it sends Android to the media picker) and the selected file
-//    is validated by extension instead — see `pickDrawingFile`/`openThroughHost`.
+//    table are the session's own JSON, parsed and handed on; the command answers
+//    are the session's own `value`, and a payload that cannot be read is a thrown
+//    `web-adapter:` error, never an empty object the chrome would render as "no
+//    document, nothing wrong".
+// 2. **No empty success.** A refusal is `{ok:false,error}` and is rethrown
+//    **verbatim**, so the command line shows the host's own words
+//    (`unsupported-runtime: <name>` for a name the carrier does not serve,
+//    `popup.no_text_selection: …` for a refused dialog, …). An envelope that is
+//    neither shape is a loud failure, never a success.
+// 3. **One host-specific behaviour: `OPEN`.** The wasm session has no
+//    filesystem: a picker is a DOM capability and the bytes come from the page, so
+//    `OPEN` is intercepted here (a hidden `<input type="file">` plus the session's
+//    `open_bytes`) and everything else is forwarded. `cad_status.canOpen` is
+//    lifted the same way and for the same reason: the session reports it `false`
+//    because the session cannot open, the transport reports `true` because it can.
+//    The input carries **no** `accept` filter (it sends Android to the media
+//    picker) and the selected file is validated by extension instead — see
+//    `pickDrawingFile`/`openThroughHost`.
 //
-// The two other exceptions are reports the chrome *sends*, not asks for:
-// `canvas_session_status` (the session's own drawing identity) and
+// The two other names that are not forwarded are reports the chrome *sends*, not
+// asks for: `canvas_session_status` (the session's own drawing identity) and
 // `canvas_runtime_failed` (a failure step). On this carrier the session already
 // owns both facts, so there is nobody to relay them to: the adapter remembers
 // them (for diagnostics and tests) and resolves - which is not an empty success,
 // because the command has no answer by contract. The failure is also printed as
 // the stable marker line, so a dead session is loud in the console as well.
+// (`host/invoke.ts` prefers the Tauri bridge for these two when one exists, which
+// is where the X11 host's marker line and exit code live.)
 //
-// The module arrives as `unknown` from the page global the `dom-canvas`
-// bootstrap publishes (`src/cad/canvas-host.ts`), is awaited through its `ready`,
-// and its four exports are checked before anything is called. A rejected init or a
-// missing export fails loudly with `web-adapter: canvas module unavailable: …` -
-// the honest recovery is a page reload, never a fabricated status.
+// The module arrives as `unknown` from the page global the `dom-canvas` bootstrap
+// publishes (`src/cad/canvas-host.ts`), is awaited through its `ready`, and its
+// exports are checked before anything is called. A rejected init or a missing
+// export fails loudly with `web-adapter: canvas module unavailable: …` - the
+// honest recovery is a page reload, never a fabricated status.
 //
 // # Why this loader also publishes the bootstrap
 //
@@ -62,7 +68,7 @@ import {
 import type { CanvasEnv } from '../cad/canvas-host.ts';
 import { rectFromElement } from '../cad/metrics.ts';
 
-/** The four exports the browser transport calls, after validation. */
+/** The session exports this transport calls, after validation. */
 export interface WebShellModule {
   /** The wasm session's init promise (published by the bootstrap). */
   readonly ready?: unknown;
@@ -72,14 +78,28 @@ export interface WebShellModule {
   shell_commands(): string;
   /** JSON array of `{alias, command}` rows this carrier resolves. */
   shell_aliases(): string;
-  /** One command; refuses by throwing (`unsupported-runtime: cad_command: …`). */
-  shell_command(command: string): string;
+  /**
+   * The one wire entry: serve a Tauri command name in-process.
+   *
+   * Answers the `{"ok":true,"value":…}` / `{"ok":false,"error":…}` envelope as a
+   * JSON string (`apps/app-web/src/direct.rs`). The name set is the desktop's, so
+   * this transport needs no table of its own.
+   */
+  invoke(name: string, argsJson: string): unknown;
+  /**
+   * Feed one wire pointer input (the desktop `probe_input` body: the `ProbeInput`
+   * object itself, not an envelope).
+   *
+   * Answers a JSON ack; a *refusal* is an answer (`accepted: false` with a stable
+   * reason), and only a malformed argument object throws.
+   */
+  probe_input(argsJson: string): unknown;
   /**
    * Open caller-supplied DWG bytes, replacing the session's document.
    *
-   * Not part of the four `shell_*` exports: this is the canvas transport's own
-   * open (the `OPEN` command is served here, on top of it). Absent on a module
-   * that never got that far, which is why it is optional and checked per call.
+   * Not part of the wire command set: this is the canvas transport's own open
+   * (the `OPEN` command is served here, on top of it). Absent on a module that
+   * never got that far, which is why it is optional and checked per call.
    */
   open_bytes?(canvasId: string, label: string, cssW: number, cssH: number, dpr: number, bytes: Uint8Array): unknown;
 }
@@ -89,14 +109,18 @@ export interface WebModuleEnv {
   readonly __YACR_CANVAS_MODULE__?: unknown;
 }
 
-/** The four export names, in the order a missing one is reported. */
-export const WEB_SHELL_EXPORTS: readonly string[] = ['shell_status', 'shell_commands', 'shell_aliases', 'shell_command'];
+/** The export names, in the order a missing one is reported. */
+export const WEB_SHELL_EXPORTS: readonly string[] = [
+  'shell_status', 'shell_commands', 'shell_aliases', 'invoke', 'probe_input',
+];
 
 /** The command names this transport serves, spelled as the chrome sends them. */
 export const WEB_STATUS_COMMAND = 'cad_status';
 export const WEB_COMMANDS_COMMAND = 'cad_commands';
 export const WEB_ALIASES_COMMAND = 'cad_command_aliases';
 export const WEB_COMMAND_COMMAND = 'cad_command';
+/** One wire pointer input; the session's own `probe_input` export answers it. */
+export const WEB_INPUT_COMMAND = 'probe_input';
 /** A report the chrome sends; this carrier has nobody to relay it to. */
 export const WEB_SESSION_COMMAND = 'canvas_session_status';
 /** A failure report the chrome sends; printed and remembered, never answered. */
@@ -125,6 +149,12 @@ export const WEB_HOST_COMMANDS: readonly string[] = [WEB_OPEN_COMMAND];
  */
 export const WEB_OPEN_EXTENSIONS: readonly string[] = Object.freeze(['.dwg', '.dxf']);
 
+/** The stable prefix of every module-unavailable failure. */
+export const WEB_UNAVAILABLE_PREFIX = 'web-adapter: canvas module unavailable';
+
+/** The stable marker line a failed session prints (`yacr: unsupported-runtime: <step>`). */
+export const WEB_MARKER_PREFIX = 'yacr: unsupported-runtime: ';
+
 /** The lower-cased extension of `name` (including the dot), or `''`. */
 function fileExtension(name: unknown): string {
   if (typeof name !== 'string') return '';
@@ -147,20 +177,6 @@ export function isDrawingFileName(name: unknown): boolean {
 export function drawingFileRefusal(name: unknown): string {
   return `web-adapter: ${WEB_COMMAND_COMMAND}: OPEN refused ${JSON.stringify(String(name ?? ''))}:`
     + ` only ${WEB_OPEN_EXTENSIONS.join(' / ')} files can be opened on this carrier`;
-}
-
-/** The stable prefix of every command this carrier does not implement. */
-export const WEB_UNSUPPORTED_PREFIX = 'unsupported-runtime: ';
-
-/** The stable prefix of every module-unavailable failure. */
-export const WEB_UNAVAILABLE_PREFIX = 'web-adapter: canvas module unavailable';
-
-/** The stable marker line a failed session prints (`yacr: unsupported-runtime: <step>`). */
-export const WEB_MARKER_PREFIX = 'yacr: unsupported-runtime: ';
-
-/** A refusal one unmapped command rejects with. */
-export function unsupportedRuntimeMessage(command: string): string {
-  return `${WEB_UNSUPPORTED_PREFIX}${command}`;
 }
 
 /**
@@ -282,7 +298,14 @@ async function openThroughHost(module: WebShellModule, doc: Document | null): Pr
   // lives here: a wrong type is named and refused, never handed to the importer.
   if (!isDrawingFileName(file.name)) throw new Error(drawingFileRefusal(file.name));
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const status = await module.open_bytes(CANVAS_ID, file.name, size.width, size.height, size.dpr, bytes);
+  let status: unknown;
+  try {
+    status = await module.open_bytes(CANVAS_ID, file.name, size.width, size.height, size.dpr, bytes);
+  } catch (error) {
+    // A wasm `Result<_, JsValue>` rejects with a bare string; normalise it so the
+    // caller's `String(error)` shows the session's sentence, not `<object>`.
+    throw error instanceof Error ? error : new Error(String(error), { cause: error });
+  }
   // `open_bytes` answers with the session's own status JSON. A non-`ok` answer
   // would mean the document was not installed, which must not look accepted.
   const parsed = parseCanvasStatus(status);
@@ -308,16 +331,16 @@ function plainRecord(value: unknown): Record<string, unknown> | null {
  * loader to inject `/canvas/bootstrap.js` (see the module header for why the page
  * cannot have done it yet); everything else about the load is unchanged: `ready`
  * is awaited (a rejected wasm init must surface here, named, not as a random
- * export throw), then the four shell exports are checked. Every failure is
+ * export throw), then the exports are checked. Every failure is
  * `web-adapter: canvas module unavailable: …` plus the reason.
  */
 export async function loadWebShellModule(env: WebModuleEnv = globalThis): Promise<WebShellModule> {
   const scope = env as WebModuleEnv & Partial<CanvasEnv> & Record<string, unknown>;
   let published = scope[CANVAS_GLOBAL];
   if (plainRecord(published) === null) {
-    // One attempt, not a retry loop: `loadCanvasModule` caches its promise per
-    // page, so the pixel transport's later call joins this attempt instead of
-    // appending a second script tag, and a failed init stays failed.
+    // One attempt, not a retry loop: `loadCanvasModule` shares its in-flight
+    // promise per page, so the pixel transport's later call joins this attempt
+    // instead of appending a second script tag, and a failed init stays failed.
     try {
       await loadCanvasModule(undefined, scope as CanvasEnv);
     } catch (error) {
@@ -348,10 +371,10 @@ export async function loadWebShellModule(env: WebModuleEnv = globalThis): Promis
 /**
  * One command's JSON answer, parsed.
  *
- * `shape` is the JSON kind the wire contract promises (`object` for the status,
- * `array` for the two vocabularies). A non-string answer, unparsable JSON or the
- * wrong kind is a `web-adapter: <command>: …` error - the chrome never receives a
- * coerced or guessed payload.
+ * `shape` is the JSON kind the wire contract promises (`object` for the status and
+ * for every command envelope, `array` for the two vocabularies). A non-string
+ * answer, unparsable JSON or the wrong kind is a `web-adapter: <command>: …`
+ * error - the chrome never receives a coerced or guessed payload.
  */
 function parseJson(command: string, raw: unknown, shape: 'object' | 'array'): unknown {
   if (typeof raw !== 'string') {
@@ -368,6 +391,16 @@ function parseJson(command: string, raw: unknown, shape: 'object' | 'array'): un
     : parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
   if (!ok) throw new Error(`web-adapter: ${command}: expected a JSON ${shape} from the canvas module`);
   return parsed;
+}
+
+/** One argument object as the JSON string the session's `invoke` takes. */
+function commandArgs(args: unknown): string {
+  if (args === undefined || args === null) return '{}';
+  try {
+    return JSON.stringify(args) ?? '{}';
+  } catch (error) {
+    throw new Error(`web-adapter: the arguments are not JSON: ${String(error)}`, { cause: error });
+  }
 }
 
 /**
@@ -414,7 +447,7 @@ export interface WebAdapterDeps {
 
 /** The browser transport [`createWebAdapter`] returns. */
 export interface WebAdapter {
-  /** Serve one command; rejects loudly for everything this carrier cannot do. */
+  /** Serve one command; rejects loudly when the session refuses or the module cannot be read. */
   invoke(command: string, args?: unknown): Promise<unknown>;
   /** The last `canvas_session_status` report, or `null`. */
   readonly lastSession: CanvasSessionRelay | null;
@@ -433,9 +466,30 @@ function argRecord(args: unknown): Record<string, unknown> {
 }
 
 /**
+ * Forward one command to the session's `invoke` and unwrap its envelope.
+ *
+ * The session composes every word: a success yields the `value` the desktop
+ * `#[tauri::command]` would return, and a refusal throws its `error` **unchanged**
+ * (including the `unsupported-runtime: <name>` answer for a name this carrier does
+ * not serve, which is why this module needs no name list of its own). An answer
+ * that is neither shape - or a refusal with no reason at all - is a transport
+ * failure, never a success.
+ */
+async function forward(module: WebShellModule, command: string, args: unknown): Promise<unknown> {
+  const answer = parseJson(command, await module.invoke(command, commandArgs(args)), 'object') as Record<string, unknown>;
+  if (answer.ok === true) return answer.value;
+  if (answer.ok === false) {
+    const reason = answer.error;
+    if (typeof reason === 'string' && reason.length > 0) throw new Error(reason);
+    throw new Error(`web-adapter: ${command}: the session refused without a reason (${JSON.stringify(answer)})`);
+  }
+  throw new Error(`web-adapter: ${command}: the session answer is not an {ok, value|error} envelope`);
+}
+
+/**
  * The browser transport over one wasm session module.
  *
- * See the module header for the map and the two no-answer report commands.
+ * See the module header for the forwarding rule and the two no-answer reports.
  */
 export function createWebAdapter(source: WebShellSource, deps: WebAdapterDeps = {}): WebAdapter {
   const moduleOf: () => Promise<WebShellModule> = typeof source === 'function'
@@ -468,6 +522,14 @@ export function createWebAdapter(source: WebShellSource, deps: WebAdapterDeps = 
         }
         case WEB_ALIASES_COMMAND:
           return readJson(command, 'shell_aliases', 'array');
+        case WEB_INPUT_COMMAND: {
+          // The lane sends the desktop body (`{ input: ProbeInput }`); the session
+          // export takes the `ProbeInput` object itself.
+          const module = await moduleOf();
+          const wrapped = plainRecord(args);
+          const input = wrapped !== null && 'input' in wrapped ? wrapped.input : args;
+          return parseJson(command, module.probe_input(commandArgs(input)), 'object');
+        }
         case WEB_COMMAND_COMMAND: {
           const module = await moduleOf();
           const name = argRecord(args).command;
@@ -478,14 +540,7 @@ export function createWebAdapter(source: WebShellSource, deps: WebAdapterDeps = 
           if (name.trim().toUpperCase() === WEB_OPEN_COMMAND) {
             return openThroughHost(module, deps.document ?? globalThis.document ?? null);
           }
-          try {
-            // A refusal is the session's own message (`unsupported-runtime:
-            // cad_command: …`); it is rethrown **verbatim** so the command line
-            // shows the host's words, never a rewritten copy.
-            return parseJson(command, module.shell_command(name), 'object');
-          } catch (error) {
-            throw error instanceof Error ? error : new Error(String(error));
-          }
+          return forward(module, command, args);
         }
         case WEB_SESSION_COMMAND: {
           const record = argRecord(args);
@@ -505,7 +560,9 @@ export function createWebAdapter(source: WebShellSource, deps: WebAdapterDeps = 
           return undefined;
         }
         default:
-          throw new Error(unsupportedRuntimeMessage(command));
+          // Every wire command (and the honest `unsupported-runtime: <name>` for
+          // anything else) is the session's own answer.
+          return forward(await moduleOf(), command, args);
       }
     },
     get lastSession(): CanvasSessionRelay | null {

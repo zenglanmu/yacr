@@ -28,19 +28,20 @@
  *   - a **live** breakpoint crossing (no reload) flips the layout in both
  *     directions: a `window.__yacrProbe` marker set before the resize survives;
  *   - no error banner is painted: after load/settle (and after both crossings of
- *     the live resize) no visible `[role="alert"]` carries text. The browser
- *     carrier serves no native input, so `probe_input` must never be forwarded
- *     there and no `unsupported-runtime: …` refusal may reach `setError`; the
- *     banner is asserted absent, never suppressed;
- *   - the four commands the carrier really executes run **through the chrome**: one
- *     labelled case types `ZOOMIN`, `FIT`, `ZOOMOUT` and `OPEN` into `#cad-command`
- *     and presses Enter, then reads the session's own `shell_status()`: the camera
- *     scale must move by exactly one zoom step, `FIT` must return it to the framing
- *     the zoom moved away from, `ZOOMOUT` must apply the reciprocal step, and `OPEN`
- *     must open the real file picker (Playwright's `filechooser`) — after which the
- *     session's `documentLabel` is the chosen fixture's name and `importCount` grew.
- *     Every step also asserts no `[role="alert"]` appeared. The vocabulary itself is
- *     asserted to advertise `FIT`/`ZOOMIN`/`ZOOMOUT`.
+ *     the live resize) no visible `[role="alert"]` carries text. The canvas carrier
+ *     serves the whole desktop command set, so a refusal must never reach
+ *     `setError`; the banner is asserted absent, never suppressed;
+ *   - the desktop command set runs **through the chrome**: one labelled case types
+ *     `ZOOMIN`, `FIT`, `ZOOMOUT`, `LINE` and `OPEN` into `#cad-command` and presses
+ *     Enter, then reads the session's own `shell_status()`: the camera scale must
+ *     move by exactly one zoom step (`FIT` returns it, `ZOOMOUT` applies the
+ *     reciprocal), `LINE` must capture two real Playwright clicks on the CAD
+ *     partition (`tool.points` 1 → 2), grow `entityCount` and change the composited
+ *     canvas pixels, `OPEN` must open the real file picker (Playwright's
+ *     `filechooser`) — after which the session reports the chosen fixture's name,
+ *     its entity count and a larger `importCount` — and the About ribbon entry must
+ *     open the in-DOM overlay with the session's modal gate refusing CAD input.
+ *     Every step also asserts no `[role="alert"]` appeared.
  *
  * What it does NOT prove - and must never be read as:
  *   - anything about GPU hardware: this launch forces ANGLE/SwiftShader, so the
@@ -560,6 +561,30 @@ async function checkMobileInteraction(page, checks, options, screenshots) {
   record(checks, await drawer.isVisible(), 'menu button opens the drawer', drawerId);
   record(checks, (await menu.getAttribute('aria-expanded')) === 'true', 'aria-expanded flips to "true"', null);
 
+  // The drawing tab on the `dom-canvas` carrier: the session executes the desktop
+  // command set, so its cells are enabled and no panel-wide refusal note is painted.
+  // Before the vocabulary was served here every cell was refused and the drawer
+  // collapsed the panel into one "none of these tools can run yet" note; that note
+  // is the regression this pins (the remaining per-cell refusals are real
+  // preconditions — a selection, a 3D view — not a missing transport).
+  const drawerCells = await page.evaluate(() => ({
+    enabled: document.querySelectorAll('.mobile-drawer__item:not([disabled])').length,
+    disabled: document.querySelectorAll('.mobile-drawer__item[disabled]').length,
+    notes: [...document.querySelectorAll('.mobile-drawer__note')].map(node => node.textContent),
+  }));
+  record(
+    checks,
+    drawerCells.enabled >= 20,
+    'the drawer enables the drawing tools the session executes',
+    drawerCells,
+  );
+  record(
+    checks,
+    drawerCells.notes.length === 0,
+    'no panel-wide "none of these tools can run" note on the drawing tab',
+    drawerCells.notes,
+  );
+
   if (options.evidence) {
     const shot = await takeScreenshot(page, options.evidence, '390-drawer.png');
     screenshots.push(shot);
@@ -886,9 +911,10 @@ async function main() {
       results.push(await runViewportCase(browser, options, spec));
     }
     results.push(await runResizeCase(browser, options));
-    // The four commands the carrier executes (`FIT`/`ZOOMIN`/`ZOOMOUT` on the wasm
-    // session, `OPEN` through the host picker), driven through the real chrome.
-    // The case lives in `web-ui-command-case.cjs` with these page helpers.
+    // The desktop command set (`FIT`/`ZOOMIN`/`ZOOMOUT`/`LINE` on the wasm session,
+    // `OPEN` through the host picker, the About overlay through the ribbon), driven
+    // through the real chrome. The case lives in `web-ui-command-case.cjs` with these
+    // page helpers.
     results.push(await runCommandCase(browser, options, {
       record, newPage, waitForSession, readErrorAlerts, checkNoErrorBanner, takeScreenshot,
     }));

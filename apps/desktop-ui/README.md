@@ -103,7 +103,10 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 原生路径为 **DOM/WebView 在上、CAD surface 在下**（ADR 0023）。唯一输入漏斗是
 `.native-input` → `probe_input`；菜单与模态弹窗在同一 React 树内，不另建 Tauri 窗口。
 装饰面板使用 `pointer-events: none`，交互控件使用 `pointer-events: auto`。
-`dom-canvas` 路径的 canvas 传输在 `src/cad/canvas-host.ts`，WebGL2 缺失必须显式拒绝，
+`dom-canvas` 路径的 canvas 传输在 `src/cad/canvas-host.ts`（只做「加载 / 量尺寸 / 上报状态与首个
+失败」），帧由 `src/cad/frame-loop.ts` 的 rAF 泵按需驱动（输入、被接受的命令、状态内容变化各 kick
+一次；连续两步无 present 即停）。**相机不在这两层**：滚轮/中键拖拽与所有拾取都走上面那条唯一的
+`.native-input` → `probe_input` lane，页面载体与原生载体是同一套事件。WebGL2 缺失必须显式拒绝，
 不得以空白 canvas 或静默回退冒充成功。
 
 ### 载波（carrier）不是构建目标
@@ -120,6 +123,12 @@ shell-only 报告在有 Tauri 桥时仍回原生宿主。唯一例外是**引导
 `App.tsx` 把每份状态喂给 `observeCarrier(...)`，并在切到 `dom-canvas` 时重新加载命令词表与别名表
 （原生宿主先前回答的是它自己的桌面词表）。X11 原生侧的 `cad_commands`/`cad_command_aliases`
 在该载波上返回**空表**（`apps/app-linux/src/host/dispatch.rs`），作为纵深防御。
+
+`src/host/web-adapter.ts` 是**薄转发层**，不是第二套命令表：`cad_status`/`cad_commands`/
+`cad_command_aliases`/`probe_input` 各自转发到同名 wasm 导出，其余每条命令（含陌生名字）都是
+`invoke(name, JSON.stringify(args))` 后拆 `{ok,value}` / 原样抛 `{ok:false,error}`。唯一的宿主
+专属行为是 `OPEN`（DOM 文件选择器 + `open_bytes`，wasm 没有文件系统）。因此 chrome 在
+`dom-canvas` 上看到的拒绝就是会话自己的句子。
 
 `src/cad/metrics.ts` 负责 CAD 分区矩形、去重与有效性判断；`src/cad/input.ts`
 观察布局变化并上报 CSS 像素矩形与 DPR。面板停靠、功能区折叠、窗口尺寸与命令区变化

@@ -174,9 +174,14 @@ workspace 继承别名）；平台类型（`web-sys`/`android-activity`/`jni`/`n
   桌面与移动都从它渲染。Android 手势条由宿主发布 `--yacr-safe-bottom` 给 `.mobile-commandbar` 消费。
 - **宿主传输缝（`apps/desktop-ui/src/host/`，铁律）**：构建期常量 `__YACR_RUNTIME__` ∈
   `tauri | web | android`（Vite `define` 注入并校验，默认 `tauri`）。**`invoke.ts` 是唯一 import
-  `@tauri-apps/api` 的模块**；`runtime.ts` 决定路由；`web-adapter.ts` 把 `cad_status` /
-  `cad_commands` / `cad_command_aliases` / `cad_command` / `canvas_session_status` /
-  `canvas_runtime_failed` 映射到 wasm 会话，**其余命令一律 `unsupported-runtime: <command>` 拒绝**。
+  `@tauri-apps/api` 的模块**；`runtime.ts` 决定路由；`web-adapter.ts` 是**薄转发层**：
+  `cad_status`→`shell_status()`、`cad_commands`→`shell_commands()`、`cad_command_aliases`→
+  `shell_aliases()`、`probe_input`→wasm 的同名导出，**其余每条命令（19 条 wire 命令与任何陌生名字）
+  一律 `invoke(name, JSON.stringify(args))` 并原样拆 `{ok,value}` / 原样抛 `error`**——适配器
+  **没有自己的命令表**，拒绝永远来自会话本身（陌生名字得到会话的 `unsupported-runtime: <name>`）。
+  唯一的宿主专属行为是 `OPEN`（DOM 文件选择器 + `open_bytes`，因为 wasm 没有文件系统）；
+  `canvas_session_status` / `canvas_runtime_failed` 仍是"只上报"的两条（有 Tauri 桥时由
+  `invoke.ts` 送 Tauri）。
   **路由按宿主上报的载体决定，不按构建目标**：`__YACR_RUNTIME__` 只是初值（`web`/`android` 初值即
   `dom-canvas`，`tauri` 初值 `unknown`），每次 `cad_status.surfaceMode` 都喂给 `runtime.ts` 的载波
   状态；一旦是 `dom-canvas`，**后续所有 CAD 数据命令都走 wasm adapter 并重载命令词汇表**（首帧那次
@@ -185,17 +190,19 @@ workspace 继承别名）；平台类型（`web-sys`/`android-activity`/`jni`/`n
   在 `dom-canvas` 上**返回空词汇表**（不把桌面表冒充成该载体能执行的命令），`native-below` 不变。
   两个 shell-only 命令（`canvas_session_status`、`canvas_runtime_failed`）在有 Tauri 桥时仍送给
   Tauri（X11 的标记行/退出码 6 由它负责）。
-  **适配器只许拒绝，不许伪造答案**；`web-adapter.ts` 仍只路由四条：会话侧
-  `FIT`/`ZOOMIN`/`ZOOMOUT`（`shell_command` 执行后回 `{"accepted":true}`），传输侧 `OPEN`
-  （文件选择器 + `open_bytes`，`cad_status.canOpen` 由适配器抬成 `true`）。其余名字仍按名字
-  `unsupported-runtime` 拒绝，绝不空成功。
-  **但载体能力已翻面（2026-10-28，wasm page 载体）**：`apps/app-web` 的 page 载体跑的就是真
+  **适配器只许拒绝，不许伪造答案**（拒绝原样来自会话；`cad_status.canOpen` 是唯一被抬起的字段，
+  因为开图是传输层的 DOM 能力）。`OPEN` 之外的宿主专属映射为零。
+  **单漏斗已接线（2026-10-28，前端换轨完成）**：`apps/app-web` 的 page 载体跑的就是真
   `CadSession`，`invoke(name, args_json)` 服务**全部 20 条** wire 命令，`shell_commands()` =
   `admissible_names()`（155）、`shell_aliases()` = `alias_pairs()`（51），`shell_command` 走共享门 +
-  真路由器，`probe_input`/`frame()`/`cad_open_popup` 都是生产导出 ⇒ **能力缺口已不在会话侧，而在
-  前端路由**（`web-adapter.ts` 改成单漏斗 `invoke` + rAF 调 `frame()` 是下一轮前端的事）。同一
-  wasm 实例的 **worker/offscreen 载体仍是旧的 viewer 会话**（无 wire/输入/弹窗面，无 shell 事实），
-  迁移属 ADR 0024 阶段 ⑧ 剩余部分。证据见 `docs/validation-web-commands-2026-10-28.md` 与
+  真路由器，`probe_input`/`frame()`/`cad_open_popup` 都是生产导出；前端现在**真的走单漏斗**：
+  同一套 `bindProbeInput` + `ProbeInput` 事件在 `dom-canvas` 上也存在（`inputLaneReady`，等会话
+  live 后建 lane），相机不再由传输层合成（`bindCanvasNavigation`/`wheelZoomFactor`/`panDelta` 已删），
+  帧由 `cad/frame-loop.ts` 的 rAF 泵驱动（输入/命令/状态变化 kick，`presented:false` 连续
+  `FRAME_IDLE_STEPS` 停），`palettesAvailable` 改为**读宿主上报的字段**（wasm 报 `true`，
+  `palettesOffered` 是唯一读点）。同一 wasm 实例的 **worker/offscreen 载体仍是旧的 viewer 会话**
+  （无 wire/输入/弹窗面，无 shell 事实），迁移属 ADR 0024 阶段 ⑧ 剩余部分。证据见
+  `docs/validation-web-funnel-parity-2026-10-28.md`、`docs/validation-web-commands-2026-10-28.md` 与
   `docs/validation-dom-canvas-flip-2026-10-28.md`（后者含保留数据库的实测代价：`complex-test.dwg`
   常驻 **2.68 GiB** 与「安装后才超 3 GiB 上限时报测量值、不抬上限」的边界）；
   **标准视图与 `OPEN` 选择器的 2026-10-28 修正**见 `docs/android-host.md` §5：

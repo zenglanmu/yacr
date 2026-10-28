@@ -105,14 +105,22 @@ export function surfaceModeFromShell(shell: unknown): SurfaceMode {
  * Whether the docked palettes (layers, properties, diagnostics) exist on the
  * carrier the shell reported.
  *
- * `shell.palettesAvailable` is the one carrier flag: `false` only on a reported
- * `dom-canvas` host, which by design holds no host-side document state for the
- * palettes to project (AGENTS.md iron rule 8). This helper is the one reading of
- * that flag: every palette affordance — the ribbon entries, the status-bar chips,
- * the workspace panels and the nav-rail toggles — asks it, so a carrier without
- * the palettes hides all of them instead of leaving a button that toggles a panel
- * which is never rendered. An absent flag (older chrome state, no host answer)
- * keeps the palettes: "as today" is the default, never a guessed removal.
+ * `palettesAvailable` is the one carrier flag, and it is a **capability the
+ * carrier reports**, not a function of the carrier's name: the `dom-canvas` session
+ * is the real desktop session (layers, selection, settings, diagnostics), so the
+ * hosts that run it report `true`, and a `native-below` host keeps reporting
+ * nothing at all. The reading is deliberately absence-friendly: an absent flag (an
+ * older host, no host answer yet) keeps the palettes — "as today" is the default,
+ * never a guessed removal — and only an explicit `false` hides them. This helper is
+ * the one reading of that flag: every palette affordance — the ribbon entries, the
+ * status-bar chips, the workspace panels and the nav-rail toggles — asks it, so a
+ * carrier without the palettes hides all of them instead of leaving a button that
+ * toggles a panel which is never rendered.
+ *
+ * `shell` is either the chrome's shell value or the raw wire status
+ * (`cad_status`): both carry the flag under the same name, and `App.tsx` passes the
+ * status so the flag is read exactly once, at the point it becomes
+ * `ShellValue.palettesAvailable`.
  */
 export function palettesOffered(shell: unknown): boolean {
   return recordOf(shell)?.palettesAvailable !== false;

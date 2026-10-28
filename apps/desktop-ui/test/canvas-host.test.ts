@@ -4,9 +4,11 @@
 // against a hand-written element stub, or a **source-structure** assertion. There
 // is no DOM mount, no browser run, no wasm module and no pixel evidence in this
 // file; the mode is a data flag and the transport is a logic seam. What is pinned:
-// the wheel/pan arithmetic the session receives, the degenerate-input guards, the
-// one-shot failure routing, and the structural invariants that keep
-// `native-below` and `<canvas>` untouched.
+// the size/DPR the session is configured with, the degenerate-input guards, the
+// one-shot failure routing, and the structural invariants that keep `native-below`
+// and `<canvas>` untouched — plus the fact that the camera is **not** here at all
+// any more (pan/zoom are the shared input lane's, `test/input.test.ts` and
+// `test/frame-loop.test.ts` cover the rest).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -18,8 +20,6 @@ import {
   CANVAS_STEP_UNCLASSIFIED,
   CANVAS_STEP_UNREADABLE,
   CANVAS_WASM_FILE,
-  ZOOM_STEP,
-  bindCanvasNavigation,
   canvasBaseDir,
   canvasCssSize,
   canvasModuleUrl,
@@ -27,11 +27,9 @@ import {
   canvasWasmUrl,
   createCanvasTransport,
   loadCanvasModule,
-  panDelta,
   parseCanvasStatus,
   statusFailure,
-  wheelZoomFactor,
-  wheelZoomNotches,
+  watchCanvasRect,
 } from '../src/cad/canvas-host.ts';
 import { readFile } from 'node:fs/promises';
 import { readAppSource, readModule } from './helpers.ts';
@@ -77,86 +75,33 @@ function stubElement(box = { left: 40, top: 10, width: 320, height: 200 }) {
   };
 }
 
-function pointerEvent(overrides = {}) {
-  const event = {
-    pointerId: 7,
-    button: 0,
-    clientX: 0,
-    clientY: 0,
-    deltaY: 0,
-    deltaMode: 0,
-    prevented: false,
-    preventDefault() { event.prevented = true; },
-    ...overrides,
-  };
-  return event;
-}
-
 /** A wasm-session stub whose every export records its arguments. */
-function stubModule({ start = async () => OK_STATUS, resize = () => OK_STATUS } = {}) {
+function stubModule({ start = async () => OK_STATUS, resize = () => OK_STATUS, frame = () => '{"ok":true,"presented":false}' } = {}) {
   const calls = [];
   return {
     calls,
     start: (...args) => { calls.push(['start', ...args]); return start(); },
     resize: (...args) => { calls.push(['resize', ...args]); return resize(); },
-    zoom_at: (...args) => { calls.push(['zoom_at', ...args]); return OK_STATUS; },
-    pan: (...args) => { calls.push(['pan', ...args]); return OK_STATUS; },
+    frame: (...args) => { calls.push(['frame', ...args]); return frame(); },
   };
 }
 
-// --- wheel -> zoom ---------------------------------------------------------
+// --- no camera here --------------------------------------------------------
 
-test('one wheel notch zooms by exactly one ZOOM_STEP, in the desktop direction', () => {
-  assert.equal(ZOOM_STEP, 1.25);
-  // Wheel up (negative deltaY) zooms in: factor > 1, anchored by the session.
-  assert.equal(wheelZoomFactor(-120, 0), 1.25);
-  // Wheel down zooms out.
-  assert.equal(wheelZoomFactor(120, 0), 1 / ZOOM_STEP);
-  // Two notches compose multiplicatively, not additively.
-  assert.equal(wheelZoomFactor(-240, 0), ZOOM_STEP ** 2);
-  assert.equal(wheelZoomFactor(240, 0), 1 / (ZOOM_STEP ** 2));
-  // A fraction of a notch is a fraction of the zoom: `1.25 ** (60 / 120)`.
-  assert.equal(wheelZoomFactor(-60, 0), Math.sqrt(1.25));
-});
-
-test('line and page delta modes normalise to the same notch', () => {
-  // deltaMode 1 counts lines: three lines are one notch.
-  assert.equal(wheelZoomNotches(-3, 1), -1);
-  assert.equal(wheelZoomFactor(-3, 1), 1.25);
-  // deltaMode 2 counts pages: one page is one notch, whatever its height.
-  assert.equal(wheelZoomNotches(-1, 2), -1);
-  assert.equal(wheelZoomFactor(-1, 2), 1.25);
-  // Pixels (mode 0 and any unknown mode) use the 120 px notch.
-  assert.equal(wheelZoomNotches(-120, 0), -1);
-  assert.equal(wheelZoomNotches(-120), -1);
-  assert.equal(wheelZoomNotches(-120, 9), -1);
-});
-
-test('a wheel event with nothing to forward yields no zoom', () => {
-  for (const deltaY of [0, -0, NaN, Infinity, -Infinity]) {
-    assert.equal(wheelZoomNotches(deltaY, 0), null, `deltaY ${deltaY}`);
-    assert.equal(wheelZoomFactor(deltaY, 0), null, `deltaY ${deltaY}`);
+test('the transport module owns no camera: pan/zoom are the input lane\'s', async () => {
+  const transport = await readModule('cad/canvas-host.ts');
+  // The one camera owner on this carrier is the session itself, reached through
+  // the shared `probe_input` lane. A second "zoom the camera from the transport"
+  // path could only disagree with it, so it is gone: no wheel arithmetic, no drag
+  // delta, no navigation binding, and no export that moves the camera.
+  for (const name of ['bindCanvasNavigation', 'wheelZoomFactor', 'wheelZoomNotches', 'panDelta', 'ZOOM_STEP']) {
+    assert.ok(!transport.includes(name), `${name} must not be in the transport module`);
   }
-  assert.equal(wheelZoomFactor(undefined, 0), null);
-  assert.equal(wheelZoomFactor('120', 0), null);
-});
-
-// --- drag -> pan -----------------------------------------------------------
-
-test('a drag reports the pointer delta with the pointer sign', () => {
-  // Down-right is a positive screen delta (x right, y down).
-  assert.deepEqual(panDelta({ x: 10, y: 20 }, { x: 15, y: 12 }), { dx: 5, dy: -8 });
-  assert.deepEqual(panDelta({ x: 100, y: 100 }, { x: 90, y: 130 }), { dx: -10, dy: 30 });
-  // One CSS pixel of motion is one CSS pixel of delta: no scaling happens here.
-  assert.deepEqual(panDelta({ x: 0.5, y: 0.5 }, { x: 1.5, y: 0.5 }), { dx: 1, dy: 0 });
-});
-
-test('a degenerate or no-op drag reports nothing', () => {
-  assert.equal(panDelta({ x: 10, y: 10 }, { x: 10, y: 10 }), null);
-  assert.equal(panDelta(null, { x: 1, y: 1 }), null);
-  assert.equal(panDelta({ x: 1, y: 1 }, null), null);
-  assert.equal(panDelta({ x: 1, y: 1 }, { x: NaN, y: 1 }), null);
-  assert.equal(panDelta({ x: 1, y: 1 }, { x: 1, y: Infinity }), null);
+  assert.ok(!/\bpan\s*\(/.test(transport), 'no pan export');
+  assert.ok(!/\bzoom_at\b/.test(transport), 'no zoom_at call');
+  // The exports it does drive: one start, one resize per real size change, and the
+  // frame step the pump calls.
+  assert.deepEqual([...CANVAS_EXPORTS], ['start', 'resize', 'frame']);
 });
 
 // --- rect -> session size --------------------------------------------------
@@ -278,19 +223,16 @@ test('a degenerate rect makes no call at all', async () => {
   assert.equal(transport.failed, false);
 });
 
-test('pan and zoom forward their arguments and drop no-ops', async () => {
+test('the transport exposes no camera surface at all', async () => {
   const module = stubModule();
   const transport = createCanvasTransport({ module, rect: { width: 320, height: 200, dpr: 1 } });
-  assert.equal(transport.pan(0, 0), false);
-  assert.equal(transport.pan(10, -4), true);
-  assert.equal(transport.zoom(1.25, 100.5, 60.25), true);
-  assert.equal(transport.zoom(0, 10, 10), false);
-  assert.equal(transport.zoom(1.25, NaN, 10), false);
+  // `native-below` keeps its pan/zoom; on the page carrier the camera belongs to
+  // the session and is driven through `probe_input`, so a `pan`/`zoom` here would
+  // be a second owner. The type is the contract: nothing to call.
+  assert.equal('pan' in transport, false);
+  assert.equal('zoom' in transport, false);
   await transport.whenIdle();
-  assert.deepEqual(module.calls.slice(1), [
-    ['pan', 10, -4],
-    ['zoom_at', 1.25, 100.5, 60.25],
-  ]);
+  assert.deepEqual(module.calls, [['start', 'cad-canvas', 320, 200, 1]]);
 });
 
 test('a webgl2 start failure is reported once, with the marker, and latches the transport', async () => {
@@ -313,10 +255,8 @@ test('a webgl2 start failure is reported once, with the marker, and latches the 
   assert.deepEqual(statuses, []);
   assert.equal(transport.failed, true);
 
-  // No retry and no further calls, in either direction.
+  // No retry and no further calls.
   assert.equal(transport.update({ width: 400, height: 300, dpr: 1 }), false);
-  assert.equal(transport.pan(5, 5), false);
-  assert.equal(transport.zoom(1.25, 1, 1), false);
   await transport.whenIdle();
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(module.calls.length, 1);
@@ -352,67 +292,9 @@ test('an export that throws or an unreadable status is reported, not swallowed',
 test('a module without the export contract is refused up front', () => {
   assert.throws(() => createCanvasTransport({ module: null, rect: { width: 1, height: 1, dpr: 1 } }), TypeError);
   assert.throws(() => createCanvasTransport({ module: {}, rect: { width: 1, height: 1, dpr: 1 } }), TypeError);
-  assert.throws(() => bindCanvasNavigation({}, {}), TypeError);
-});
-
-// --- navigation binding (element stub, not a DOM mount) --------------------
-
-test('drag pan uses canvas-local CSS px and captures exactly one pointer', () => {
-  const element = stubElement({ left: 40, top: 10, width: 320, height: 200 });
-  const pans = [];
-  const unbind = bindCanvasNavigation(element, { pan: (dx, dy) => pans.push([dx, dy]), zoom: () => {} });
-
-  // A non-primary press never starts a drag.
-  element.dispatch('pointerdown', pointerEvent({ button: 2, clientX: 140, clientY: 60 }));
-  assert.equal(element.captured.size, 0);
-  element.dispatch('pointermove', pointerEvent({ clientX: 150, clientY: 70 }));
-  assert.deepEqual(pans, []);
-
-  element.dispatch('pointerdown', pointerEvent({ clientX: 140, clientY: 60 }));
-  assert.deepEqual([...element.captured], [7]);
-  element.dispatch('pointermove', pointerEvent({ clientX: 150, clientY: 70 }));
-  assert.deepEqual(pans, [[10, 10]]);
-  // A second move to the same place is a no-op, not pan(0, 0).
-  element.dispatch('pointermove', pointerEvent({ clientX: 150, clientY: 70 }));
-  element.dispatch('pointermove', pointerEvent({ clientX: 155, clientY: 66 }));
-  assert.deepEqual(pans, [[10, 10], [5, -4]]);
-
-  element.dispatch('pointercancel', pointerEvent({ clientX: 155, clientY: 66 }));
-  assert.equal(element.captured.size, 0);
-  // The cancelled gesture is over: later motion is not a pan.
-  element.dispatch('pointermove', pointerEvent({ clientX: 200, clientY: 100 }));
-  assert.deepEqual(pans, [[10, 10], [5, -4]]);
-  unbind();
-});
-
-test('wheel zoom is cursor-anchored in canvas-local CSS px and swallows the scroll', () => {
-  const element = stubElement({ left: 40, top: 10, width: 320, height: 200 });
-  const zooms = [];
-  const unbind = bindCanvasNavigation(element, { pan: () => {}, zoom: (...args) => zooms.push(args) });
-
-  const event = pointerEvent({ deltaY: -120, deltaMode: 0, clientX: 140, clientY: 60 });
-  element.dispatch('wheel', event);
-  assert.equal(event.prevented, true);
-  assert.deepEqual(zooms, [[1.25, 100, 50]]);
-
-  // A page-mode notch is one notch; a zero delta forwards nothing.
-  element.dispatch('wheel', pointerEvent({ deltaY: -1, deltaMode: 2, clientX: 40, clientY: 10 }));
-  element.dispatch('wheel', pointerEvent({ deltaY: 0, deltaMode: 0, clientX: 40, clientY: 10 }));
-  assert.deepEqual(zooms, [[1.25, 100, 50], [1.25, 0, 0]]);
-  unbind();
-});
-
-test('unbinding removes every listener it added and releases a captured pointer', () => {
-  const element = stubElement();
-  const unbind = bindCanvasNavigation(element, { pan: () => {}, zoom: () => {} });
-  assert.deepEqual([...element.listeners.keys()].sort(), [
-    'lostpointercapture', 'pointercancel', 'pointerdown', 'pointermove', 'pointerup', 'wheel',
-  ]);
-  element.dispatch('pointerdown', pointerEvent({ clientX: 50, clientY: 20 }));
-  assert.equal(element.captured.size, 1);
-  unbind();
-  assert.deepEqual([...element.listeners.keys()], []);
-  assert.equal(element.captured.size, 0);
+  // `frame` is part of the contract too: a session whose frame step is missing can
+  // never repaint, so it is refused at load time (see `CANVAS_EXPORTS`).
+  assert.ok(CANVAS_EXPORTS.includes('frame'));
 });
 
 // --- source structure: the two paths stay separate -------------------------
@@ -459,39 +341,48 @@ test('native-below never imports or loads the wasm module', async () => {
   assert.ok(guard > 0);
   assert.ok(app.indexOf('loadCanvasModule(canvasModuleUrl())') > guard);
   assert.ok(app.indexOf('createCanvasTransport({') > guard);
-  assert.ok(app.indexOf('bindCanvasNavigation(') > guard);
+  assert.ok(app.indexOf('createFrameLoop({ module })') > guard);
   assert.ok(app.indexOf('step: CANVAS_STEP_MODULE') > guard);
 });
 
-test('dom-canvas does not create the IPC input lane', async () => {
+test('one input lane serves both carriers, and the transport builds no second one', async () => {
   const app = await readModule('App.tsx');
-  // One lane, one transport: neither can be instantiated twice.
+  // One lane, one transport, one probe_input call site: none can exist twice, and
+  // `dom-canvas` is no exception any more - it forwards the same events to the
+  // session's own `probe_input` through the adapter.
   assert.equal([...app.matchAll(/createInputLane\(/g)].length, 1);
   assert.equal([...app.matchAll(/invoke\('probe_input'/g)].length, 1);
   assert.equal([...app.matchAll(/createCanvasTransport\(\{/g)].length, 1);
+  assert.equal([...app.matchAll(/createFrameLoop\(/g)].length, 1);
 
-  // The lane is gated on a **known** carrier. `nativeInputLane` is
-  // `carrierKnown && surfaceMode !== SURFACE_MODE_DOM_CANVAS`: neither the
-  // pre-answer default (which already sent one `resize` a `dom-canvas` runtime
-  // refuses with `unsupported-runtime: probe_input`) nor a reported DOM carrier
-  // may create one, and the effect names its dependency explicitly.
+  // The lane waits for a **known** carrier and, on the page carrier, for a live
+  // session: before that the wasm carrier's own "no live CAD session" refusal would
+  // land in the error banner, and on the unknown mount the pre-answer default is a
+  // compatibility guess rather than a fact.
   assert.ok(app.includes('const carrierKnown = status !== null;'));
-  assert.ok(app.includes('const nativeInputLane = carrierKnown && surfaceMode !== SURFACE_MODE_DOM_CANVAS;'));
-  const laneGuard = 'if (!nativeInputLane) return undefined;';
-  assert.ok(app.includes(laneGuard));
-  const laneEffect = app.slice(app.indexOf(laneGuard), app.indexOf('createInputLane('));
-  assert.ok(laneEffect.length > 0);
-  assert.match(app, /\}, \[nativeInputLane\]\);/);
-  // The partition binding re-runs with the lane: on `native-below` the lane is
-  // created a commit after the partition is measured, so without this dependency
-  // there would be a lane and nothing bound to it.
-  assert.match(app, /\}, \[surfaceNode, nativeInputLane\]\);/);
+  assert.ok(app.includes('const inputLaneReady = carrierKnown && (surfaceMode !== SURFACE_MODE_DOM_CANVAS || canvasLive);'));
+  assert.ok(app.includes('if (!inputLaneReady) return undefined;'));
+  assert.ok(app.includes('setCanvasLive(true);'));
+  assert.match(app, /\}, \[inputLaneReady\]\);/);
+  // The partition binding re-runs with the lane: the lane is created a commit after
+  // the partition is measured, so without this dependency there would be a lane and
+  // nothing bound to it.
+  assert.match(app, /\}, \[surfaceNode, inputLaneReady\]\);/);
+
+  // The suspension gate is untouched: still the two independent reasons, still one
+  // gate applied to the one binding.
+  assert.equal([...app.matchAll(/createSuspendGate\(/g)].length, 1);
+  assert.ok(app.includes("suspendGate.current!.set('popupOpen', popupOpen);"));
+  assert.ok(app.includes("suspendPointer: value => suspendGate.current!.set('textFocus', value),"));
 
   // The transport module never speaks the host IPC and never builds a lane.
   const transport = await readModule('cad/canvas-host.ts');
-  assert.ok(!transport.includes('probe_input'));
-  assert.ok(!transport.includes('createInputLane'));
-  assert.ok(!transport.includes('invoke('));
+  // Prose may *describe* the lane (the header explains why it is the only input
+  // path); the code must not reach it.
+  const transportCode = codeLines(transport);
+  assert.ok(!transportCode.includes('probe_input'));
+  assert.ok(!transportCode.includes('createInputLane'));
+  assert.ok(!transportCode.includes('invoke('));
 });
 
 // --- public bootstrap module loader (stubbed page, not a browser) ----------
@@ -642,14 +533,17 @@ test('.native-input is the only element with pointer listeners', async () => {
   const appTargets = [...app.matchAll(/(\w+)\.addEventListener\('pointer/g)].map(match => match[1]);
   assert.ok(appTargets.every(target => target === 'surfaceNode'), appTargets.join(','));
 
-  // Inside the navigation binding, the only listener target is the element it was
-  // handed - no query, no id lookup, no second surface.
-  const bindBody = transport.slice(
-    transport.indexOf('export function bindCanvasNavigation'),
-    transport.indexOf('export function watchCanvasRect'),
-  );
-  const bindTargets = [...bindBody.matchAll(/(\w+)\.addEventListener\(/g)].map(match => match[1]);
-  assert.deepEqual([...new Set(bindTargets)], ['element']);
+  // The transport hands no pointer listener out at all any more: navigation is the
+  // shared lane's, which binds `.native-input` (and only it). The rect watcher is
+  // the one DOM binding left here, and its only listener target is the window.
+  assert.ok(!transport.includes("addEventListener('pointer"));
+  assert.ok(!transport.includes("addEventListener('wheel"));
+  const watchBody = transport.slice(transport.indexOf('export function watchCanvasRect'));
+  const watchTargets = [...watchBody.matchAll(/(\w+)\.addEventListener\(/g)].map(match => match[1]);
+  // `env` is the window; `query` is the DPR `MediaQueryList` (a listener target of
+  // its own), never an element.
+  assert.deepEqual([...new Set(watchTargets)], ['query', 'env']);
+  // No second surface is ever looked up: the caller hands the element in.
   assert.ok(!/querySelector\(\s*['"][^'"]*cad-canvas/.test(transport));
   assert.ok(!transport.includes('getElementById'));
 

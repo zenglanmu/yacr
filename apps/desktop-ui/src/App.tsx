@@ -12,9 +12,11 @@ import type { Locale } from './i18n.ts';
 import { bindProbeInput, createInputLane, createSuspendGate } from './cad/input.ts';
 import type { InputLane, ProbeInputBinding, SuspendGate } from './cad/input.ts';
 import { rectFromElement } from './cad/metrics.ts';
-import { CANVAS_STEP_MODULE, bindCanvasNavigation, canvasModuleUrl, createCanvasTransport, loadCanvasModule, watchCanvasRect } from './cad/canvas-host.ts';
+import { CANVAS_STEP_MODULE, canvasModuleUrl, createCanvasTransport, loadCanvasModule, watchCanvasRect } from './cad/canvas-host.ts';
 import type { CanvasFailure, CanvasTransport } from './cad/canvas-host.ts';
-import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, reportedSurfaceMode, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
+import { createFrameLoop } from './cad/frame-loop.ts';
+import type { FrameLoop } from './cad/frame-loop.ts';
+import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, palettesOffered, reportedSurfaceMode, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
 import { queueCadCommand, startCadPolling } from './cad/cad-command.ts';
 import { reconcileToolParameterPending, setToolParameterFlag, setToolParameterNumber, stepToolParameterPending } from './tools/tool-parameters.ts';
 import { requestImportCancel } from './cad/cad-status.ts';
@@ -135,22 +137,30 @@ function Shell() {
   // document slot the host fills on a `native-below` carrier, and when it is
   // absent, unreadable or label-less the chrome keeps the start state it has today.
   const canvasSession = useMemo(() => canvasSessionFromShell({ status }), [status]);
-  // The docked palettes project host-side document state (selection rows, import
-  // identity, the host's own diagnostics). A `dom-canvas` shell holds none of that
-  // by design, so the palettes are not offered at all instead of shown empty. One
-  // carrier flag — never a platform check — and an absent flag means "as today".
-  const palettesAvailable = surfaceMode !== SURFACE_MODE_DOM_CANVAS;
+  // The docked palettes project the carrier's own document state (selection rows,
+  // layer table, settings, diagnostics). That is a **capability the carrier
+  // reports**, not a property of the carrier's name: since the `dom-canvas` session
+  // became the real desktop session it has all of them, and the X11/Web/Android
+  // hosts therefore report `palettesAvailable: true`. One reading site
+  // (`palettesOffered`), and an **absent** flag means "as today" (available).
+  const palettesAvailable = palettesOffered(status);
   // Whether the host has reported a carrier at all. Before the first `cad_status`
   // answer `surfaceModeFromShell` returns the `native-below` default, which is a
   // compatibility fallback for *older hosts* - not a fact the chrome may act on.
   const carrierKnown = status !== null;
-  // The one decision about the `probe_input` lane: it exists only on a **known**
-  // `native-below` carrier. Creating it on the unknown mount would forward a
-  // `resize` to a `dom-canvas` runtime that does not serve `probe_input`, and the
-  // refusal would paint a permanent error banner (the rejection lands in
-  // `setError`, which `displayError` never clears). Guarding here is the honest
-  // fix: the carrier is asked, not guessed, and `dom-canvas` still gets no lane.
-  const nativeInputLane = carrierKnown && surfaceMode !== SURFACE_MODE_DOM_CANVAS;
+  // Whether the page's own CAD session has answered at least one call. It is set
+  // by the transport effect below (the first successful `start`/`resize`), and it
+  // is what lets the pointer lane wait for a **live** session instead of sending a
+  // `probe_input` the wasm carrier would refuse with "no live CAD session".
+  const [canvasLive, setCanvasLive] = useState(false);
+  // The one decision about the `probe_input` lane: it exists on **every** known
+  // carrier. `native-below` forwards it to the host's input gate; `dom-canvas`
+  // forwards the very same `ProbeInput` events to the wasm session's own
+  // `probe_input` (one lane, one event vocabulary, two transports). On the page
+  // carrier it also waits for the session to be live (`canvasLive`), because a
+  // lane that starts before `start` resolves would paint a permanent error banner
+  // out of the carrier's honest "no live CAD session" refusal.
+  const inputLaneReady = carrierKnown && (surfaceMode !== SURFACE_MODE_DOM_CANVAS || canvasLive);
   // The validated payload of the **fresh** open (`cad_open_popup`'s additive
   // field). It is local UI state on purpose: the wire only carries the content
   // once, so an `existing: true` answer can never overwrite a rendered dialog.
@@ -191,6 +201,10 @@ function Shell() {
   // session's own numbers are never painted directly.
   const transportRef = useRef<CanvasTransport | null>(null);
   const canvasStatusRef = useRef<Record<string, unknown> | null>(null);
+  // The page carrier's frame pump (`cad/frame-loop.ts`), `null` on every other
+  // carrier: `frame()` is a `dom-canvas` export and there is nothing to drive on
+  // `native-below` (that host's own loop is already running).
+  const framesRef = useRef<FrameLoop | null>(null);
   // The CAD pointer lane has two *independent* suspension reasons (N5): the
   // command line owns the keyboard, or a host dialog is open. The lane is
   // suspended while either holds, and each owner may only clear its own reason
@@ -269,29 +283,43 @@ function Shell() {
     };
   }, []);
 
-  // One ordered IPC lane for the whole session: sequence stays monotonic even
+  // One ordered input lane for the whole session: sequence stays monotonic even
   // when the canvas element is remounted.
   //
-  // `dom-canvas` hosts have no native surface behind this window, so their input
-  // must not be forwarded to a host input gate: the wasm session receives it
-  // directly (the transport effect below) and **no** `probe_input` lane exists.
-  // The lane also waits for the carrier to be **known** (`nativeInputLane`, i.e.
-  // the first `cad_status` answer): the pre-answer default is a compatibility
-  // guess, and acting on it already sent one `resize` to a carrier that refuses
-  // it. `native-below` therefore starts its lane one status poll later and runs
-  // exactly the code it always did.
+  // **One lane, two transports.** `native-below` forwards every event to the host
+  // input gate (`probe_input` over IPC); `dom-canvas` forwards the very same
+  // `ProbeInput` object to the wasm session's own `probe_input` export (the web
+  // adapter's `invoke`). Nothing is forked: the same `bindProbeInput` binding, the
+  // same `QueueInput` events, the same suspension gate, the same sequence. That is
+  // what makes a wheel notch, a middle-drag pan or a tool click mean the same thing
+  // on the page carrier as on the desktop.
+  //
+  // The lane waits for the carrier to be **known** and, on the page carrier, for
+  // the session to be **live** (`inputLaneReady`): the pre-answer default is a
+  // compatibility guess, and a lane born before `start` resolved would paint a
+  // permanent error banner out of the carrier's honest "no live CAD session"
+  // refusal. `native-below` therefore starts its lane one status poll later and
+  // runs exactly the code it always did.
   useEffect(() => {
-    if (!nativeInputLane) return undefined;
-    const lane = createInputLane(input => invoke('probe_input', { input }), setError);
+    if (!inputLaneReady) return undefined;
+    const lane = createInputLane(input => {
+      const sent = invoke('probe_input', { input });
+      // Every forwarded input is repainted by the page carrier's own frame loop (a
+      // no-op on `native-below`, whose host loop already runs). The extra consumer
+      // never swallows the lane's own failure report below.
+      void sent.then(() => framesRef.current?.pump(), () => {});
+      return sent;
+    }, setError);
     laneRef.current = lane;
     return () => { lane.dispose(); laneRef.current = null; };
-  }, [nativeInputLane]);
+  }, [inputLaneReady]);
 
   // The `dom-canvas` transport (ADR 0024 D1/D2/D3). The wasm session is the single
-  // pixel carrier and the single camera owner; this component only measures the
-  // partition, hands the module a size, and forwards drag/zoom. `.native-input`
-  // stays the single input surface: navigation is bound to it and never to the
-  // canvas node, which receives no listener and no state.
+  // pixel carrier **and** the single camera owner, so this component only measures
+  // the partition, hands the module a size and drives its frames; the camera,
+  // the tools and every click belong to the shared input lane. `.native-input`
+  // stays the single input surface: the `<canvas>` receives no listener and no
+  // state.
   //
   // A module that cannot load (missing artifact, CSP without
   // `'wasm-unsafe-eval'`, broken instantiation) never reaches the session, so it
@@ -302,7 +330,7 @@ function Shell() {
     if (surfaceMode !== SURFACE_MODE_DOM_CANVAS || !surfaceNode) return undefined;
     let cancelled = false;
     let transport: CanvasTransport | null = null;
-    let unbindNavigation: (() => void) | null = null;
+    let frames: FrameLoop | null = null;
     let stopWatching: (() => void) | null = null;
     // The one channel that publishes *this* session's drawing identity to the
     // host. The native shell must not hold document state of its own (iron rule
@@ -334,25 +362,32 @@ function Shell() {
         onStatus: next => {
           canvasStatusRef.current = next;
           reporter.report(next);
+          // The first answered call is what makes the session live; the pointer
+          // lane and the frame pump both wait for exactly this fact.
+          setCanvasLive(true);
         },
       });
       transport = created;
       transportRef.current = created;
-      unbindNavigation = bindCanvasNavigation(surfaceNode, {
-        pan: (dx, dy) => created.pan(dx, dy),
-        zoom: (factor, x, y) => created.zoom(factor, x, y),
+      frames = createFrameLoop({ module });
+      framesRef.current = frames;
+      stopWatching = watchCanvasRect(surfaceNode, rect => {
+        created.update(rect);
+        frames?.pump();
       });
-      stopWatching = watchCanvasRect(surfaceNode, rect => created.update(rect));
+      frames.pump();
     }).catch(error => {
       if (cancelled) return;
       fail({ step: CANVAS_STEP_MODULE, detail: String(error), marker: null });
     });
     return () => {
       cancelled = true;
-      unbindNavigation?.();
       stopWatching?.();
+      frames?.dispose();
+      if (framesRef.current === frames) framesRef.current = null;
       transport?.dispose();
       if (transportRef.current === transport) transportRef.current = null;
+      setCanvasLive(false);
     };
   }, [surfaceMode, surfaceNode]);
 
@@ -360,11 +395,11 @@ function Shell() {
   // reports the partition rect immediately, and re-reports it on every resize,
   // DPR change and layout shift so the host's surface metrics never go stale.
   //
-  // `nativeInputLane` is a dependency, not just `surfaceNode`: the lane is
-  // created a commit *after* the partition is measured on `native-below` (it
-  // waits for the first `cad_status`), so without it there would be a lane and no
-  // binding. Effects run in declaration order, so the lane exists by the time this
-  // one re-runs; a carrier switch disposes both in the same commit.
+  // `inputLaneReady` is a dependency, not just `surfaceNode`: the lane is created a
+  // commit *after* the carrier is known (and, on `dom-canvas`, after the session is
+  // live), so without it there would be a lane and no binding. Effects run in
+  // declaration order, so the lane exists by the time this one re-runs; a carrier
+  // switch disposes both in the same commit.
   useEffect(() => {
     const lane = laneRef.current;
     if (!surfaceNode || !lane) return undefined;
@@ -374,17 +409,29 @@ function Shell() {
     // (a remount must not silently resume while text focus or a popup does).
     suspendGate.current!.sync();
     return () => { binding.dispose(); if (bindingRef.current === binding) bindingRef.current = null; };
-  }, [surfaceNode, nativeInputLane]);
+  }, [surfaceNode, inputLaneReady]);
 
   useEffect(() => {
     const sampler = createFpsSampler();
     let staleTimer: ReturnType<typeof setTimeout> | undefined;
+    // The status this poll last delivered, serialized: the page carrier's frame
+    // pump is kicked when the **session's model** changed (a new tool, a new entity,
+    // a moved camera, an opened document) and stays asleep otherwise. The poll is
+    // the one place that observes such a change for every command path - input,
+    // palette writes, settings, popups - so no command site has to remember to ask
+    // for a frame (and none can forget to).
+    let lastStatus = '';
     const resetFps = () => { clearTimeout(staleTimer); sampler.reset(); setFps(null); };
     document.addEventListener('visibilitychange', resetFps);
     const stopPolling = startCadPolling(invoke, next => {
       // Every received status feeds the carrier state (`host/runtime.ts`): this is
       // where an X11 host's `surfaceMode: "dom-canvas"` reaches the transport.
       if (next) observeCarrier(reportedSurfaceMode({ status: next }));
+      const serialized = next === null ? '' : JSON.stringify(next);
+      if (serialized !== lastStatus) {
+        lastStatus = serialized;
+        framesRef.current?.pump();
+      }
       setStatus(next);
       clearTimeout(staleTimer);
       setFps(sampler.sample(next?.frameCount ?? Number.NaN, performance.now(), Boolean(next && !next.error && !document.hidden)));
@@ -528,6 +575,9 @@ function Shell() {
         // no chrome-side failure line may stay on screen after it.
         setError('');
         setHistory(entries => pushHistory(entries, result.command));
+        // A command changes the model: ask the page carrier for frames now instead
+        // of waiting for the next status poll to notice (a no-op on `native-below`).
+        framesRef.current?.pump();
         if (result.kind === 'accepted' && options.fromInput) setCommand('');
       }
     } finally {

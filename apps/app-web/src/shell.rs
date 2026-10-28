@@ -38,15 +38,21 @@
 //! * `surfaceMode: "dom-canvas"` — the carrier
 //!   (`apps/desktop-ui/src/cad/surface.ts` selects the in-DOM canvas path on
 //!   exactly this string);
-//! * `palettesAvailable: false` — the chrome derives this flag from `surfaceMode`
-//!   (`App.tsx`: `surfaceMode !== SURFACE_MODE_DOM_CANVAS`), so a `true` here
-//!   would be ignored and would only misreport the carrier. The docked palettes
-//!   read `cad_layers`/`cad_properties`, which this carrier answers — enabling
-//!   them is the front-end lane's decision, not this field's;
-//! * `standardViews: []` — the standard-view capability list, **empty**: there is
-//!   no `cad_standard_view` transport here. The chrome reads a present list as
-//!   authoritative and disables the seven view buttons with their own reason; an
-//!   absent list would mean "the host declared nothing" and keep them enabled;
+//! * `palettesAvailable: true` — this carrier **is** the real desktop session, so
+//!   it has the layer table, the selection rows and the settings the docked
+//!   palettes read (`cad_layers`, `cad_setting*` are all served here). The chrome
+//!   reads this flag (`App.tsx` → `cad/surface.ts::palettesOffered`) and an absent
+//!   flag means "as today"; reporting `false` would hide panels this carrier can
+//!   fill;
+//! * `standardViews: []` — the standard-view capability list, still **empty** in
+//!   this round. The chrome reads a present list as authoritative and disables the
+//!   seven view buttons with their own reason; an absent list would mean "the host
+//!   declared nothing" and keep them enabled. The list is now **stale**: the
+//!   front-end funnel forwards `cad_standard_view` and the session's own router
+//!   would execute it, so the earlier "no transport" justification no longer holds.
+//!   Enabling them is a separate decision that needs its own acceptance (what a
+//!   3D-view selector means on this 2D presenter, per key), recorded as open in
+//!   `docs/validation-web-funnel-parity-2026-10-28.md` §4;
 //! * `canvasSession: {label, batches, draws}` — the session's own descriptor,
 //!   present only while a session is live. `batches` is the prepared scene's
 //!   resident batch count; `draws` is `null` because the session's engine owns the
@@ -139,13 +145,15 @@ pub fn status_json(status: &CadStatus, carrier: &Carrier) -> String {
     // The carrier flag the chrome dispatches on. It describes the carrier this
     // module implements, not a per-call measurement.
     object.insert("surfaceMode".to_string(), json!(SURFACE_MODE_DOM_CANVAS));
-    // The palettes are hidden by the chrome on this carrier because it derives the
-    // flag from `surfaceMode`; reporting `true` would only misreport the carrier.
-    object.insert("palettesAvailable".to_string(), json!(false));
-    // The standard-view capability list: **empty, on purpose** — this carrier has
-    // no `cad_standard_view` transport. `[]` makes the chrome disable the seven
-    // view buttons with their own reason instead of leaving a live-looking button
-    // that would throw `unsupported-runtime: cad_standard_view`.
+    // The palettes project this session's own layer table, selection rows and
+    // settings, all of which are served here (`cad_layers`, `cad_setting*`), so the
+    // honest answer is "available". The chrome reads this flag and treats an absent
+    // one as available, which is what every older host relies on.
+    object.insert("palettesAvailable".to_string(), json!(true));
+    // The standard-view capability list: **still empty, and now stale** — the
+    // funnel forwards `cad_standard_view`, so the "no transport" reason below is no
+    // longer true; enabling the seven views needs its own per-key acceptance (see
+    // the module docs). `[]` keeps the chrome's explicit, translated refusal.
     object.insert("standardViews".to_string(), json!([]));
     if let Some(session) = &carrier.canvas_session {
         object.insert(

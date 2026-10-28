@@ -77,7 +77,10 @@ fn the_status_is_the_frozen_wire_shape_plus_the_carrier_keys() {
         );
     }
     assert_eq!(object["surfaceMode"], json!(SURFACE_MODE_DOM_CANVAS));
-    assert_eq!(object["palettesAvailable"], json!(false));
+    // The session behind this carrier serves `cad_layers`/`cad_setting*` itself, so
+    // the palettes are a real capability here (the chrome hides them only on an
+    // explicit `false`).
+    assert_eq!(object["palettesAvailable"], json!(true));
     assert_eq!(object["standardViews"], json!([]));
     assert!(
         object["snapSpacing"]
