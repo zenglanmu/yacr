@@ -42,6 +42,7 @@ mod settings_gpu;
 mod snap_marker;
 mod text_tool;
 mod tolerance;
+mod zoom_window;
 
 // --- synthetic platform contracts -------------------------------------------
 

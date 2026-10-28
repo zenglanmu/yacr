@@ -155,6 +155,35 @@ pub enum CommandPayload {
         factor: f64,
         cursor: [f64; 2],
     },
+    /// `ZOOM WINDOW`: frame the picked two-corner rectangle **exactly** (margin
+    /// `1.0`, unlike `FIT`'s `1.05`).
+    ///
+    /// `rect_logical` is the two opposite corners in **canvas logical pixels**,
+    /// the same convention as [`CommandPayload::ZoomAt`] and
+    /// [`CommandPayload::BoxSelect`]; the corners may arrive in any order and are
+    /// canonicalised to `[min, max]` by the command (one rule, every producer).
+    /// A non-finite corner is `zoom.window.invalid_rect` and a rectangle with no
+    /// extent on either axis is `zoom.window.degenerate_rect` — both are
+    /// `InvalidInput` before any camera change, never a clamped fit.
+    ///
+    /// **2D orthographic only**: in a 3D observation the command refuses by name
+    /// (`zoom.window.requires_2d`) rather than faking a perspective fit.
+    /// View-only (allowed in Viewer mode): no database write, no revision bump,
+    /// no `cad-history` entry, and no `session.generation` bump.
+    ZoomWindow {
+        rect_logical: [[f64; 2]; 2],
+    },
+    /// `ZOOM PREVIOUS`: restore this viewport's last **discrete** view.
+    ///
+    /// Pops the per-viewport bounded view history (`cad_app::zoom_history`, cap
+    /// 16) and restores the camera, the 2D/3D mode and the plan work plane
+    /// exactly. Pans, wheel zooms and orbit drags never record a step — an
+    /// explicit divergence from AutoCAD, documented in that module.
+    ///
+    /// An empty history is **not an error**: the command changes nothing and
+    /// reports the `zoom.previous.empty` diagnostic. View-only; no database
+    /// write, no history entry, no generation bump.
+    ZoomPrevious,
     /// Target mode for [`CommandId::SetMode`] (audit U02).
     Mode(AppMode),
     /// The session grid-snap spacing for [`CommandId::SetSnapSpacing`] (the typed

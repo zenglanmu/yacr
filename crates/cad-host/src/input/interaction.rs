@@ -358,13 +358,9 @@ impl HostCore {
                             })?
                     }
                 };
-                self.immediate_command(
-                    CommandId::Zoom,
-                    CommandPayload::ZoomAt {
-                        factor: (1.0 + delta_logical[1] * 0.0015).clamp(0.2, 5.0),
-                        cursor: point,
-                    },
-                )?;
+                // A wheel notch is **continuous** navigation: it runs the same
+                // `ZoomAt` command but must not record a `ZOOM PREVIOUS` step.
+                self.zoom_continuously((1.0 + delta_logical[1] * 0.0015).clamp(0.2, 5.0), point)?;
                 InteractionOutcome::ScrollObserved
             }
         };
@@ -421,6 +417,12 @@ impl HostCore {
         // the latch is consumed, and a press resets it (see `pointer_down`), so a
         // drag that produced no click never swallows a later one.
         if self.navigation.suppress_click.replace(false) {
+            return Ok(());
+        }
+        // A `ZOOM WINDOW` capture is waiting for two corners: a bare click is
+        // not one, so it must not select either. The arm is deliberately kept —
+        // the next drag supplies the rectangle.
+        if self.zoom_window_armed() {
             return Ok(());
         }
         self.metrics()?;

@@ -182,6 +182,11 @@ impl Application {
                 // eye inside the model and clip it at the near plane.
                 let bounds = self.document_bounds(command.document);
                 let viewport = self.viewport_mut(&command)?;
+                // A discrete view change: record the pre-switch view first. The
+                // `enter_3d` below can still refuse a degenerate camera, in which
+                // case the recorded step restores the view already on screen —
+                // `ZOOM PREVIOUS` is then a no-op, never a fabricated view.
+                viewport.push_view_snapshot();
                 match viewport.camera.projection {
                     Projection::Orthographic { .. } => {
                         let saved = viewport.view_mode.saved_2d_camera();
@@ -199,6 +204,15 @@ impl Application {
             }
             CommandId::StandardView => {
                 if let CommandPayload::StandardView(view) = command.payload {
+                    // A standard view is a **discrete** view change: record the
+                    // pre-view state first. The plan view while already in 2D is
+                    // a documented no-op (it restores the very camera on screen),
+                    // so it records no step — otherwise `ZOOM PREVIOUS` would burn
+                    // a press on a view identical to the current one.
+                    let plan_noop = view.is_plan() && self.view_state_is_2d(&command.viewport);
+                    if !plan_noop {
+                        self.push_view_snapshot(&command.viewport)?;
+                    }
                     self.apply_standard_view(session, &command, view)?;
                     Ok(CommandOutcome::none())
                 } else {
@@ -210,6 +224,10 @@ impl Application {
             CommandId::ResetView => {
                 let viewport = self.viewport_mut(&command)?;
                 let camera = Camera::top_view_2d();
+                // A discrete view change: record the pre-reset view first, so
+                // `ZOOM PREVIOUS` can undo the reset (camera, mode **and** the
+                // plan work plane it also restores).
+                viewport.push_view_snapshot();
                 viewport.camera = camera;
                 viewport.view_mode = ViewMode2d3d::TwoD { saved: camera };
                 viewport.work_plane = xy_work_plane(0.0);
@@ -517,6 +535,9 @@ impl Application {
     ) -> CadResult<CommandOutcome> {
         let bounds = self.document_bounds(command.document);
         let viewport = self.viewport_mut(command)?;
+        // A discrete view change in both directions: record the pre-switch view
+        // first so `ZOOM PREVIOUS` can bring the observation back.
+        viewport.push_view_snapshot();
         let message = match viewport.view_mode.kind() {
             ProjectionKind::TwoD => {
                 let saved = viewport.camera;
@@ -685,67 +706,28 @@ impl Application {
         })
     }
 
-    /// Fit a viewport to the current document bounds. Hosts call this after an
-    /// import so the first frame is usable without a synthetic command.
+    /// Record the viewport's current view as one `ZOOM PREVIOUS` step.
     ///
-    /// Fitting always returns the viewport to the 2D plan view (audit F13), so a
-    /// fit is a deterministic reset-and-frame, not a 3D manipulation.
-    ///
-    /// Returns `false` when the drawing has no measurable extent: the camera is
-    /// left untouched and nothing is framed, so a caller can report that
-    /// explicitly instead of claiming success.
-    pub fn fit_viewport(
-        &mut self,
-        session: &mut SessionState,
-        viewport_id: &ViewportId,
-    ) -> CadResult<bool> {
-        let document = self
-            .workspace
-            .documents
-            .get(&session.document)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let bounds = document.drawing.bounds();
+    /// Called **before** each discrete view change (FIT, a zoom factor,
+    /// `ZOOM WINDOW`, `STANDARDVIEW`, `SWITCH2D3D`, `PROJECTION`, `RESETVIEW`);
+    /// see [`crate::zoom_history`] for the push rule and for why continuous
+    /// navigation never records a step.
+    pub(crate) fn push_view_snapshot(&mut self, viewport_id: &ViewportId) -> CadResult<()> {
         let viewport = self
             .workspace
             .viewports
             .get_mut(viewport_id)
             .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
-        let Some((min, max)) = bounds else {
-            // An empty drawing has nothing to frame. Fitting is a documented
-            // no-op (the camera and the session generation are left unchanged),
-            // never an error and never a fabricated view. The `false` return lets
-            // the caller report it explicitly.
-            return Ok(false);
-        };
-        let cx = (min.x + max.x) * 0.5;
-        let cy = (min.y + max.y) * 0.5;
-        let ex = (max.x - min.x).max(1e-6);
-        let ey = (max.y - min.y).max(1e-6);
-        let w = viewport.logical_size[0].max(1.0);
-        let h = viewport.logical_size[1].max(1.0);
-        let scale = ((ex / w).max(ey / h) * 1.05).max(camera::MIN_ORTHO_SCALE);
-        let camera = Camera {
-            eye: Point3 {
-                x: cx,
-                y: cy,
-                z: viewport.camera.eye.z,
-            },
-            target: Point3 {
-                x: cx,
-                y: cy,
-                z: 0.0,
-            },
-            up: Point3 {
-                x: 0.0,
-                y: 1.0,
-                z: 0.0,
-            },
-            projection: Projection::Orthographic { scale },
-        };
-        viewport.camera = camera;
-        viewport.view_mode = ViewMode2d3d::TwoD { saved: camera };
-        session.generation += 1;
-        Ok(true)
+        viewport.push_view_snapshot();
+        Ok(())
+    }
+
+    /// Whether a viewport is currently showing the 2D plan observation.
+    fn view_state_is_2d(&self, viewport_id: &ViewportId) -> bool {
+        self.workspace
+            .viewports
+            .get(viewport_id)
+            .is_some_and(|viewport| viewport.view_mode.kind() == ProjectionKind::TwoD)
     }
 
     /// Pan the view by a world-space delta.
@@ -786,14 +768,24 @@ impl Application {
 
     /// Zoom the view.
     ///
-    /// Two payloads are accepted for compatibility:
+    /// Four payloads are accepted, all view-only:
     /// * [`CommandPayload::ZoomAt`] — a factor plus the logical cursor to anchor
     ///   (the real zoom-to-cursor path used by both 2D and 3D).
     /// * [`CommandPayload::Points`] — the legacy factor-only zoom (no cursor),
     ///   retained for direct callers and the CLI.
+    /// * [`CommandPayload::ZoomWindow`] — `ZOOM WINDOW`, the exact two-corner fit
+    ///   (2D orthographic only; see [`Application::zoom_window`]).
+    /// * [`CommandPayload::ZoomPrevious`] — `ZOOM PREVIOUS`, the discrete view
+    ///   stack (see [`Application::zoom_previous`]).
+    ///
+    /// Every arm is a discrete view change except the two new ones' refusals: the
+    /// factors record one `ZOOM PREVIOUS` step in `zoom_at`; the window and the
+    /// previous restore record their own.
     pub(crate) fn zoom(&mut self, command: &Command) -> CadResult<CommandOutcome> {
         match &command.payload {
             CommandPayload::ZoomAt { factor, cursor } => self.zoom_at(command, *factor, *cursor),
+            CommandPayload::ZoomWindow { .. } => self.zoom_window(command),
+            CommandPayload::ZoomPrevious => self.zoom_previous(command),
             CommandPayload::Points(points) => {
                 let factor = points
                     .first()
@@ -804,12 +796,19 @@ impl Application {
                 self.zoom_at(command, factor, [size[0] * 0.5, size[1] * 0.5])
             }
             _ => Err(CadError::InvalidInput(
-                "Zoom needs a factor or a { factor, cursor } payload".into(),
+                "Zoom needs a factor, a { factor, cursor } payload, a ZOOM WINDOW rectangle or \
+                 ZOOM PREVIOUS"
+                    .into(),
             )),
         }
     }
 
     /// Apply a zoom factor anchored at a logical cursor in both projections.
+    ///
+    /// A real zoom is a **discrete** view change, so the pre-zoom view is
+    /// recorded as one `ZOOM PREVIOUS` step ([`crate::zoom_history`]) after the
+    /// factor is validated and before the camera moves; a refused factor records
+    /// nothing.
     pub(crate) fn zoom_at(
         &mut self,
         command: &Command,
@@ -823,6 +822,7 @@ impl Application {
         }
         let viewport = self.viewport_mut(command)?;
         let size = viewport.logical_size;
+        viewport.push_view_snapshot();
         viewport.camera.zoom_at(factor, cursor, size)?;
         if let ViewMode2d3d::TwoD { .. } = viewport.view_mode {
             viewport.view_mode = ViewMode2d3d::TwoD {

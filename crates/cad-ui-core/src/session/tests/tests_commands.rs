@@ -13,6 +13,7 @@ mod snap_grid;
 mod standard_view;
 mod status_projection;
 mod zoom_argument;
+mod zoom_window_previous;
 
 /// A committed synthetic, writer-produced AC1032 DWG with four LINE
 /// entities (`fixtures/manifest`). It is not a vendor sample.

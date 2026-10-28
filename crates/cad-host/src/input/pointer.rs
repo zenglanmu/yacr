@@ -16,6 +16,13 @@ const BOX_GAP_LOGICAL_PX: f64 = 5.0;
 /// edges on a large window and draw an *open* rectangle. For a perimeter within
 /// the bound the nominal 5 px dash / 5 px gap is preserved.
 const BOX_MAX_SEGMENTS: usize = 512;
+/// Minimum drag extent, in logical pixels, for a `ZOOM WINDOW` capture.
+///
+/// A drag thinner than this on either axis is a slip, not a window: it is
+/// refused by name in `finish_zoom_window_gesture` and dispatches nothing. The
+/// command layer refuses a degenerate rectangle too — this is the host's own
+/// threshold, so a one-pixel twitch never even reaches it.
+const ZOOM_WINDOW_MIN_DRAG_LOGICAL_PX: f64 = 2.0;
 
 impl HostCore {
     pub(super) fn pointer(
@@ -128,6 +135,7 @@ impl HostCore {
             // rubber band or a geometry edit.
             self.clear_box_gesture();
             self.cancel_grip_drag();
+            self.disarm_zoom_window();
             self.controller.borrow_mut().cancel_tool()?;
             self.navigation.dragged.set(true);
             self.navigation.navigating.set(true);
@@ -176,12 +184,17 @@ impl HostCore {
         // layer refuses, with no visible result (ADR 0014 B.6).
         if self.capturing() {
             self.clear_box_gesture();
+            // A `ZOOM WINDOW` arm cannot fire while a capture owns the pointer,
+            // so it is dropped instead of surviving the tool and hijacking a
+            // later drag.
+            self.disarm_zoom_window();
             return Ok(());
         }
         // A typed `ToolState::Panning` modal pan also owns the pointer (ADR 0014
         // B.2): a 2D primary drag must neither start a box nor keep a stale one.
         if self.pan_modal_active() {
             self.clear_box_gesture();
+            self.disarm_zoom_window();
         }
         // An active box gesture owns the single contact: track the live
         // rectangle. The camera must not move and no pan is emitted.
@@ -217,9 +230,13 @@ impl HostCore {
         }
         let from = nav.last.get().unwrap_or(point);
         if self.mode_is_3d() && pressed == Some(PointerButton::Primary) {
+            // A 3D orbit is navigation, never a window: an arm that predates the
+            // 3D switch is dropped rather than kept for some later 2D drag.
+            self.disarm_zoom_window();
             let (yaw, pitch) = orbit_delta(from, point);
             self.orbit(yaw, pitch)?;
         } else {
+            self.disarm_zoom_window();
             if !matches!(self.controller.borrow().session.tool, ToolState::Panning) {
                 self.controller.borrow_mut().session.begin_pan();
                 self.full_dirty.set(true);
@@ -327,6 +344,10 @@ impl HostCore {
     /// The anchor is the press position; `current` is the move that crossed the
     /// threshold. The hover tint is cleared so a gesture never shows a stale
     /// tint. No pan is emitted and `ToolState::Panning` is never entered.
+    ///
+    /// An armed `ZOOM WINDOW` capture ([`HostCore::begin_zoom_window`]) is
+    /// recorded on the gesture here — the single arbitration point — so the
+    /// release dispatches a zoom rectangle instead of a selection box.
     fn begin_box_gesture(&self, anchor: [f64; 2], current: [f64; 2]) {
         let shift = self
             .navigation
@@ -337,6 +358,7 @@ impl HostCore {
             anchor,
             current,
             shift,
+            window_zoom: self.navigation.zoom_window_armed.get(),
         });
         self.clear_hover();
     }
@@ -361,7 +383,14 @@ impl HostCore {
     /// A non-finite or degenerate rectangle is dropped rather than dispatched —
     /// the command would refuse it, and a rubber band of zero extent is not a
     /// selection.
+    ///
+    /// A gesture that started while a `ZOOM WINDOW` capture was armed is the
+    /// zoom rectangle instead (`finish_zoom_window_gesture`): one drag
+    /// means one gesture, never both.
     fn finish_box_gesture(&self, gesture: BoxGesture, modifiers: Modifiers) -> CadResult<()> {
+        if gesture.window_zoom {
+            return self.finish_zoom_window_gesture(gesture);
+        }
         let rect_logical = [gesture.anchor, gesture.current];
         if !rect_logical.iter().flatten().all(|value| value.is_finite()) {
             // ADR 0014 B.6: the command API refuses a non-finite rectangle with
@@ -398,6 +427,111 @@ impl HostCore {
         )
     }
 
+    /// Arm the **one-shot** `ZOOM WINDOW` two-corner capture.
+    ///
+    /// The typed `ZOOM WINDOW` line reaches this through the session
+    /// (`cad-ui-core`), never through a command payload: arming is transient
+    /// gesture state with no `CommandId` and no engine request of its own. The
+    /// next 2D primary drag then becomes the zoom rectangle and its release
+    /// dispatches exactly one [`CommandPayload::ZoomWindow`]
+    /// (`finish_zoom_window_gesture`); the drag path is the box-select
+    /// path, so the corners are **logical pixels** and no drafting constraint
+    /// (object snap, grid snap, `ORTHO`) can distort them.
+    ///
+    /// Refusals are explicit, never a silent arm that can never fire:
+    ///
+    /// * a 3D observation — `zoom.window.requires_2d` (a window is a plan
+    ///   rectangle; faking a perspective fit is not an option);
+    /// * no active viewport — `CadError::Cancelled`, the host's "no surface"
+    ///   shape;
+    /// * a draw/measurement capture or a modal pan that owns the pointer —
+    ///   `zoom.window.capture_busy` (nothing would ever start the rectangle).
+    pub fn begin_zoom_window(&self) -> CadResult<()> {
+        {
+            let c = self.controller.borrow();
+            let viewport = c
+                .application
+                .workspace
+                .viewports
+                .get(&c.viewport_id)
+                .ok_or(CadError::Cancelled)?;
+            if viewport.view_mode.kind() != cad_app::ProjectionKind::TwoD
+                || !viewport.camera.projection.is_orthographic()
+            {
+                return Err(CadError::InvalidInput(
+                    "zoom.window.requires_2d: ZOOM WINDOW is only defined in the 2D plan view; a \
+                     perspective view has no window to fit (switch back to 2D first)"
+                        .into(),
+                ));
+            }
+        }
+        if self.capturing() || self.pan_modal_active() {
+            return Err(CadError::InvalidInput(
+                "zoom.window.capture_busy: another capture owns the pointer; finish or cancel it \
+                 before picking a ZOOM WINDOW rectangle"
+                    .into(),
+            ));
+        }
+        if !self.navigation.zoom_window_armed.replace(true) {
+            // A fresh arm starts a fresh capture: a live band or hover tint from
+            // an earlier gesture would describe a rectangle that is gone.
+            self.clear_box_gesture();
+            self.clear_hover();
+        }
+        Ok(())
+    }
+
+    /// Whether the `ZOOM WINDOW` two-corner capture is currently armed.
+    pub fn zoom_window_armed(&self) -> bool {
+        self.navigation.zoom_window_armed.get()
+    }
+
+    /// Drop an armed `ZOOM WINDOW` capture without dispatching anything.
+    ///
+    /// One entry for every non-zoom terminal: a cancel, a gesture clear, a
+    /// multi-touch takeover, a capture/modal pan owning the pointer and a
+    /// pan/orbit drag. Pure state — nothing was written while armed.
+    fn disarm_zoom_window(&self) {
+        self.navigation.zoom_window_armed.set(false);
+    }
+
+    /// Dispatch the release of a `ZOOM WINDOW` drag as one `ZoomWindow` payload.
+    ///
+    /// The rectangle is the drag's two corners in canvas **logical** pixels,
+    /// canonicalised to `[min, max]` by the shared
+    /// [`cad_app::canonical_logical_rect`] rule (the same rule the command
+    /// validates with, so the host cannot disagree with it). A non-finite corner,
+    /// or a drag thinner than [`ZOOM_WINDOW_MIN_DRAG_LOGICAL_PX`] on either axis,
+    /// is **refused by name and dispatched not at all**: a one-pixel slip is not
+    /// a window, and the command would refuse a degenerate rectangle anyway. The
+    /// arm is consumed either way (one-shot capture).
+    fn finish_zoom_window_gesture(&self, gesture: BoxGesture) -> CadResult<()> {
+        self.disarm_zoom_window();
+        let rect_logical = [gesture.anchor, gesture.current];
+        if !rect_logical.iter().flatten().all(|value| value.is_finite()) {
+            let _ = self.set_external_status("zoom.window.invalid_rect: non-finite rectangle");
+            return Ok(());
+        }
+        let width = (gesture.current[0] - gesture.anchor[0]).abs();
+        let height = (gesture.current[1] - gesture.anchor[1]).abs();
+        if width < ZOOM_WINDOW_MIN_DRAG_LOGICAL_PX || height < ZOOM_WINDOW_MIN_DRAG_LOGICAL_PX {
+            let _ = self.set_external_status(format!(
+                "zoom.window.degenerate_rect: the drag is thinner than \
+                 {ZOOM_WINDOW_MIN_DRAG_LOGICAL_PX} logical pixels on an axis"
+            ));
+            return Ok(());
+        }
+        match cad_app::canonical_logical_rect(rect_logical) {
+            Ok(rect_logical) => {
+                self.immediate_command(CommandId::Zoom, CommandPayload::ZoomWindow { rect_logical })
+            }
+            Err(error) => {
+                let _ = self.set_external_status(crate::error_text(&error));
+                Ok(())
+            }
+        }
+    }
+
     /// The world-space rubber band for the live box gesture, or `None`.
     ///
     /// The rectangle's two logical corners are projected to the work plane with
@@ -423,7 +557,10 @@ impl HostCore {
             current,
             [anchor[0], current[1]],
         ];
-        let crossing = current[0] < anchor[0];
+        // A `ZOOM WINDOW` capture is always a solid WINDOW rectangle: the
+        // left-to-right CROSSING convention describes a *selection* semantic and
+        // has no meaning for a zoom, so it never dashes the zoom band.
+        let crossing = !gesture.window_zoom && current[0] < anchor[0];
         let mut segments: Vec<[Point3; 2]> = Vec::new();
         // The CROSSING dash/gap step is derived from the rectangle's
         // logical-pixel perimeter: the nominal 5 px dash / 5 px gap while the
@@ -526,6 +663,41 @@ impl HostCore {
             .viewports
             .get(&c.viewport_id)
             .is_some_and(|viewport| viewport.view_mode.kind() == cad_app::ProjectionKind::ThreeD)
+    }
+
+    /// Wheel zoom: the same `ZoomAt` payload as the discrete `ZOOMIN`/`ZOOMOUT`
+    /// steps, declared **continuous navigation**.
+    ///
+    /// The application cannot distinguish a wheel notch from a typed/discrete
+    /// step — both are one `ZoomAt` — so the host states the difference here, at
+    /// the single place that maps a scroll to a zoom: it remembers the history
+    /// length, runs the ordinary command, and drops the one `ZOOM PREVIOUS` step
+    /// that command recorded. A wheel notch is therefore never restorable by
+    /// `ZOOM PREVIOUS` (the declared divergence documented in
+    /// `cad_app::zoom_history`); pan and orbit need no such rule because they
+    /// never record a step at all.
+    pub(super) fn zoom_continuously(&self, factor: f64, cursor: [f64; 2]) -> CadResult<()> {
+        let before = self.view_zoom_history_len();
+        self.immediate_command(CommandId::Zoom, CommandPayload::ZoomAt { factor, cursor })?;
+        if self.view_zoom_history_len() > before {
+            let mut c = self.controller.borrow_mut();
+            let id = c.viewport_id;
+            if let Some(viewport) = c.application.workspace.viewports.get_mut(&id) {
+                viewport.discard_last_view_snapshot();
+            }
+        }
+        Ok(())
+    }
+
+    /// The active viewport's recorded `ZOOM PREVIOUS` depth (`0` without one).
+    fn view_zoom_history_len(&self) -> usize {
+        let c = self.controller.borrow();
+        c.application
+            .workspace
+            .viewports
+            .get(&c.viewport_id)
+            .map(|viewport| viewport.zoom_history_len())
+            .unwrap_or(0)
     }
 
     /// Pan the view by a logical-pixel delta, converted to world units.

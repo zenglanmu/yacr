@@ -169,7 +169,7 @@ fn an_argument_outside_the_grammar_is_refused_without_moving_the_camera() {
             .command(text)
             .expect_err(&format!("{text:?} must be refused"));
         assert!(
-            error.contains("ZOOM needs a positive factor, ALL or EXTENTS"),
+            error.contains("ZOOM needs a positive factor, ALL, EXTENTS, WINDOW or PREVIOUS"),
             "{text:?} must carry the named reason, got {error:?}"
         );
         assert!(

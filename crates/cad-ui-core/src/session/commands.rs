@@ -250,8 +250,8 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 /// second IPC for it. Every other selector stays name-only, so `LINE 2` is the
 /// ordinary unsupported-name refusal.
 ///
-/// * [`ARGUMENT_SELECTOR`] (`ZOOM`): a positive factor or `ALL`/`EXTENTS`
-///   ([`parse_zoom_argument`]);
+/// * [`ARGUMENT_SELECTOR`] (`ZOOM`): a positive factor or
+///   `ALL`/`EXTENTS`/`WINDOW`/`PREVIOUS` ([`parse_zoom_argument`]);
 /// * [`SNAPUNIT_SELECTOR`] (`SNAPUNIT`): a positive decimal spacing
 ///   ([`parse_snap_unit_argument`]);
 /// * [`PDMODE_SELECTOR`] (`PDMODE`): one integer in the `i16` range
@@ -268,7 +268,10 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
 /// AutoCAD's `ZOOM n` / `ZOOM ALL`: the first argument-taking selector.
 ///
 /// A positive factor reuses the `ZOOMIN`/`ZOOMOUT` step path (anchored at the
-/// viewport centre); `ALL`/`EXTENTS` dispatches the ordinary `FIT`.
+/// viewport centre); `ALL`/`EXTENTS` dispatches the ordinary `FIT`; `WINDOW`
+/// starts the two-corner capture and `PREVIOUS` restores the last discrete view
+/// (see [`ZoomArgument`]). The last two still carry **no** `CommandId` of their
+/// own: they ride [`CommandId::Zoom`] with their own payloads.
 pub const ARGUMENT_SELECTOR: &str = "ZOOM";
 
 /// AutoCAD's `SNAPUNIT <value>`: the session grid-snap spacing sysvar.
@@ -304,10 +307,22 @@ pub enum ZoomArgument {
     /// `ALL` (the written-out spelling) or `EXTENTS`: frame the whole drawing,
     /// i.e. the [`CommandId::FitDrawing`] path.
     Fit,
+    /// `WINDOW`: start the **two-corner** capture. The next 2D primary drag
+    /// supplies the rectangle (canvas logical pixels, through the host's
+    /// box-gesture path) and its release dispatches one
+    /// [`cad_app::CommandPayload::ZoomWindow`]. The camera does not move when the
+    /// argument is admitted — only when the rectangle is completed — and a 3D
+    /// view refuses by name (`zoom.window.requires_2d`).
+    Window,
+    /// `PREVIOUS`: restore this viewport's last **discrete** view immediately
+    /// (no capture), i.e. [`cad_app::CommandPayload::ZoomPrevious`]. An empty
+    /// history is a `zoom.previous.empty` diagnostic, not an error.
+    Previous,
 }
 
 /// Parse the argument of a `ZOOM` selector: a positive decimal factor, or
-/// `ALL` / `EXTENTS` (case-insensitive, surrounding whitespace ignored).
+/// `ALL` / `EXTENTS` / `WINDOW` / `PREVIOUS` (case-insensitive, surrounding
+/// whitespace ignored).
 ///
 /// The numeric grammar is deliberately narrow — ASCII digits with at most one
 /// `.` that has digits on **both** sides (`2`, `0.5`, `1.25`, `2.0`). Signs
@@ -315,10 +330,20 @@ pub enum ZoomArgument {
 /// all refused with `None`; the caller turns that into the stable refusal from
 /// [`invalid_zoom_argument_reason`]. Nothing is clamped and no default factor is
 /// invented.
+///
+/// The two word arguments are the **full** spellings only: no `W`/`P`
+/// abbreviation is admitted (this router never guesses at a partial word), and
+/// `ZOOM EXTENTS` is still resolved earlier by the pre-existing alias onto `FIT`.
 pub fn parse_zoom_argument(argument: &str) -> Option<ZoomArgument> {
     let key = argument.trim();
     if key.eq_ignore_ascii_case("ALL") || key.eq_ignore_ascii_case("EXTENTS") {
         return Some(ZoomArgument::Fit);
+    }
+    if key.eq_ignore_ascii_case("WINDOW") {
+        return Some(ZoomArgument::Window);
+    }
+    if key.eq_ignore_ascii_case("PREVIOUS") {
+        return Some(ZoomArgument::Previous);
     }
     parse_positive_decimal(key).map(ZoomArgument::Factor)
 }
@@ -402,7 +427,8 @@ pub fn typed_command_argument(text: &str) -> Option<(&'static str, &str)> {
 /// grammar is spelled out, so a refusal is never a silent ignore or a clamp.
 pub fn invalid_zoom_argument_reason(text: &str) -> String {
     format!(
-        "unsupported CAD command: {} (ZOOM needs a positive factor, ALL or EXTENTS)",
+        "unsupported CAD command: {} (ZOOM needs a positive factor, ALL, EXTENTS, WINDOW or \
+         PREVIOUS)",
         text.trim()
     )
 }

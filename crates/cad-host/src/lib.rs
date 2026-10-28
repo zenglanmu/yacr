@@ -326,6 +326,7 @@ impl HostCore {
         self.navigation.button.set(None);
         self.navigation.press_modifiers.set(None);
         *self.navigation.box_gesture.borrow_mut() = None;
+        self.navigation.zoom_window_armed.set(false);
         self.reset_grip_gesture();
         self.clear_hover();
     }

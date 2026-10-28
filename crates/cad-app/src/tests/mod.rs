@@ -60,6 +60,59 @@ fn point(x: f64, y: f64) -> Point3 {
     Point3 { x, y, z: 0.0 }
 }
 
+/// An application whose single document's bounds are exactly `min..max`.
+///
+/// Used by the view contracts (`FIT`, `ZOOM WINDOW`, `ZOOM PREVIOUS`), which need
+/// a real extent to frame rather than an empty drawing.
+fn application_with_bounds(min: Point3, max: Point3) -> (Application, SessionState) {
+    let (mut app, session) = application_with_document();
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_entity(cad_db::DbEntity {
+        object: cad_db::DbObject {
+            id: ObjectId(1),
+            type_key: "AcDbPolyline".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(1),
+        layer: LayerId(0),
+        space: SpaceId::Model,
+        geometry: SemanticGeometry::Polyline {
+            points: vec![
+                min,
+                Point3 {
+                    x: max.x,
+                    y: min.y,
+                    z: min.z,
+                },
+                max,
+                Point3 {
+                    x: min.x,
+                    y: max.y,
+                    z: min.z,
+                },
+            ],
+            bulges: Vec::new(),
+            closed: true,
+        },
+        draw_order: 0,
+    })
+    .unwrap();
+    let drawing = b.finish().unwrap();
+    app.workspace
+        .documents
+        .get_mut(&DocumentId(1))
+        .unwrap()
+        .drawing = Arc::new(drawing);
+    (app, session)
+}
+
 fn application_with_layouts() -> (Application, SessionState) {
     let (mut app, session) = application_with_document();
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
@@ -140,3 +193,5 @@ mod layers_previous;
 mod locked_layers;
 mod point_display_style;
 mod view_camera;
+mod zoom_previous;
+mod zoom_window;

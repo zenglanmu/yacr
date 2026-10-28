@@ -35,8 +35,9 @@ pub mod snap;
 pub mod tasks;
 pub mod tool_state;
 pub mod viewer_config;
+pub mod zoom_history;
 
-mod command_id;
+mod app_zoom;
 mod layer_history;
 mod space;
 
@@ -44,6 +45,7 @@ pub use api::{
     ApiOutcome, ApiRequest, ApiTarget, EntityEdit, NewEntity, RawCommandTrace, TracedCommandOutcome,
 };
 pub use app_measure_object::FULL_TURN_TOLERANCE_RADIANS;
+pub use app_zoom::{canonical_logical_rect, FIT_MARGIN, WINDOW_MARGIN};
 pub use cad_spatial::{
     BackFacePolicy, GeometryHit, PickItem, PickOptions, PickOutcome, PickReport, SkippedGeometry,
 };
@@ -51,7 +53,8 @@ pub use camera::{
     orthonormal_work_plane, xy_work_plane, Camera, Camera2dParams, Camera3dParams, Projection,
     ProjectionKind, StandardView, ViewBasis,
 };
-pub use command_id::*;
+pub mod command_id;
+pub use command_id::{AppMode, CommandId};
 pub use draw_tool::{
     circle_radius, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity, ToolParameter,
     ToolParameterStore, ToolValue, ToolValueKind, DEFAULT_POLYGON_SIDES,
@@ -85,6 +88,7 @@ pub use tasks::{
     ImportTerminal,
 };
 pub use tool_state::{DrawCapture, ToolSnapshot, ToolState};
+pub use zoom_history::{ViewSnapshot, ZoomHistory, ZOOM_HISTORY_CAP};
 
 use interaction::SelectionMode;
 
@@ -201,6 +205,10 @@ pub struct Viewport {
     pub dpi_scale: f64,
     pub clip: Option<Bounds3>,
     pub style: DisplayStyle,
+    /// Bounded history of discrete view snapshots for `ZOOM PREVIOUS`
+    /// ([`crate::zoom_history`]): per viewport, session state only, never
+    /// persisted.
+    pub zoom_history: ZoomHistory,
 }
 
 /// Whether the viewport observes the drawing in 2D (plan) or 3D.
@@ -247,6 +255,7 @@ impl Viewport {
             dpi_scale: 1.0,
             clip: None,
             style: DisplayStyle::Wireframe,
+            zoom_history: ZoomHistory::new(),
         }
     }
 

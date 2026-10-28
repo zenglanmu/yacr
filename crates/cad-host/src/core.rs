@@ -61,6 +61,11 @@ pub(crate) struct PendingSave {
 /// state — the host never writes the database, the revision or the history for
 /// it; the selection itself is computed by `cad_app`'s `SelectInBox` command on
 /// release.
+///
+/// The same record carries the **`ZOOM WINDOW`** capture: an armed window zoom
+/// ([`NavInner::zoom_window_armed`]) turns the drag into a two-corner zoom
+/// rectangle instead of a selection box, so both gestures share one arbitration
+/// site and one rubber band.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BoxGesture {
     /// The press anchor in canvas logical pixels.
@@ -69,6 +74,12 @@ pub(crate) struct BoxGesture {
     pub current: [f64; 2],
     /// Whether Shift was held on the press (the release merges, i.e. `Add`).
     pub shift: bool,
+    /// Whether this drag is a `ZOOM WINDOW` capture rather than a selection box.
+    ///
+    /// Recorded at gesture start from the armed flag, so the release can never
+    /// be re-classified by a later command and the rectangle's crossing/merging
+    /// semantics are not applied to a zoom.
+    pub window_zoom: bool,
 }
 
 /// A live grip drag: one handle of one entity, from its stored position to the
@@ -139,6 +150,17 @@ pub(crate) struct NavInner {
     /// drag that produced no click must never swallow a later one) and by every
     /// cancel/gesture-clear path.
     pub suppress_click: Cell<bool>,
+    /// Whether the one-shot `ZOOM WINDOW` two-corner capture is armed.
+    ///
+    /// Armed by the typed `ZOOM WINDOW` line ([`HostCore::begin_zoom_window`],
+    /// which refuses a 3D view by name) and consumed by the next 2D primary drag,
+    /// whose release dispatches exactly one `ZoomWindow` payload instead of a box
+    /// selection. Dropped by a cancel, a gesture clear (document/metrics/config
+    /// change), a multi-touch takeover, a capture or modal pan that owns the
+    /// pointer, and any pan/orbit gesture — so a stale arm can never hijack a
+    /// later selection. Pure transient gesture state: no command, no database
+    /// write, no history entry.
+    pub zoom_window_armed: Cell<bool>,
 }
 
 impl Default for NavInner {
@@ -155,6 +177,7 @@ impl Default for NavInner {
             box_gesture: RefCell::new(None),
             grip_drag: RefCell::new(None),
             suppress_click: Cell::new(false),
+            zoom_window_armed: Cell::new(false),
         }
     }
 }
