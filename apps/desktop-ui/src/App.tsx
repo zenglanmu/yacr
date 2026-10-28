@@ -5,6 +5,7 @@
 // Visual work lives in the region components.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from './host/invoke.ts';
+import { observeCarrier, subscribeCarrier, usesWasmCad } from './host/runtime.ts';
 import { CATALOGS } from './catalogs.ts';
 import { createTranslator, initialLocale, LOCALE_STORAGE_KEY, LOCALES, localeTag, storedLocale, storeLocale } from './i18n.ts';
 import type { Locale } from './i18n.ts';
@@ -13,7 +14,7 @@ import type { InputLane, ProbeInputBinding, SuspendGate } from './cad/input.ts';
 import { rectFromElement } from './cad/metrics.ts';
 import { CANVAS_STEP_MODULE, bindCanvasNavigation, canvasModuleUrl, createCanvasTransport, loadCanvasModule, watchCanvasRect } from './cad/canvas-host.ts';
 import type { CanvasFailure, CanvasTransport } from './cad/canvas-host.ts';
-import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
+import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, reportedSurfaceMode, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
 import { queueCadCommand, startCadPolling } from './cad/cad-command.ts';
 import { reconcileToolParameterPending, setToolParameterFlag, setToolParameterNumber, stepToolParameterPending } from './tools/tool-parameters.ts';
 import { requestImportCancel } from './cad/cad-status.ts';
@@ -125,6 +126,10 @@ function Shell() {
   // suggestion metadata only, so a failed load leaves it empty ("no aliases
   // known") and never blocks the command line.
   const [aliasPairs, setAliasPairs] = useState<readonly CommandAlias[]>(commandAliases);
+  // The carrier epoch (`host/runtime.ts`): bumped when the **observed** carrier
+  // becomes `dom-canvas` (a `tauri` build on X11, where the wasm session owns the
+  // CAD data). The vocabulary loader depends on it.
+  const [carrierEpoch, setCarrierEpoch] = useState(0);
 
   // The host's live dialog (`cad_status.popup`, ADR 0021 D1/D2): non-null while
   // one exists. The host applies the modal input gate; the chrome mirrors it as
@@ -394,6 +399,9 @@ function Shell() {
     const resetFps = () => { clearTimeout(staleTimer); sampler.reset(); setFps(null); };
     document.addEventListener('visibilitychange', resetFps);
     const stopPolling = startCadPolling(invoke, next => {
+      // Every received status feeds the carrier state (`host/runtime.ts`): this is
+      // where an X11 host's `surfaceMode: "dom-canvas"` reaches the transport.
+      if (next) observeCarrier(reportedSurfaceMode({ status: next }));
       setStatus(next);
       clearTimeout(staleTimer);
       setFps(sampler.sample(next?.frameCount ?? Number.NaN, performance.now(), Boolean(next && !next.error && !document.hidden)));
@@ -407,10 +415,16 @@ function Shell() {
     };
   }, []);
 
-  // Load the host's command vocabulary exactly once. It is the admission source
-  // of truth (`cad_commands` -> `cad_ui_core::session::admissible_names`), so a
-  // failed load keeps the catalog empty — every command is then explicitly
-  // unsupported — and surfaces the failure instead of pretending success.
+  // A carrier flip to `dom-canvas` invalidates what the native host answered: a
+  // vocabulary only its own CAD session could execute, and that carrier has none.
+  useEffect(() => subscribeCarrier(() => {
+    if (usesWasmCad()) setCarrierEpoch(epoch => epoch + 1);
+  }), []);
+
+  // Load the host's command vocabulary — and reload it when the carrier flips to
+  // `dom-canvas`. It is the admission source of truth (`cad_commands`), so a
+  // failed load keeps the catalog empty (every command explicitly unsupported)
+  // and surfaces the failure instead of pretending success.
   useEffect(() => {
     let cancelled = false;
     // Kept in a ref as well as acted on here: admission awaits it (see
@@ -429,10 +443,11 @@ function Shell() {
       setCatalogNames(setCommandCatalog([]));
       setError(`cad_commands: ${String(reason)}`);
     });
-    // The alias table is suggestion metadata, fetched once from the same Rust
-    // source (`cad_command_aliases`). A failure is deliberately **not** an error:
-    // the command line simply offers no shorthand rows and admission still works,
-    // because the host canonicalises whatever is typed. Nothing is fabricated.
+    // The alias table is suggestion metadata, fetched from the same source
+    // (`cad_command_aliases`) and reloaded with the vocabulary. A failure is
+    // deliberately **not** an error: the command line simply offers no shorthand
+    // rows and admission still works, because the host canonicalises whatever is
+    // typed. Nothing is fabricated.
     invoke('cad_command_aliases').then(answer => {
       if (cancelled) return;
       const pairs = answer as Iterable<CommandAliasInput>;
@@ -442,7 +457,7 @@ function Shell() {
       setAliasPairs(setCommandAliases([]));
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [carrierEpoch]);
 
   // Reconcile the numeric stepper's pending delta against every fresh status: it
   // resets the moment the host has caught up (the value changed), the tool

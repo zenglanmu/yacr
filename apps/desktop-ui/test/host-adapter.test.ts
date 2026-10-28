@@ -109,7 +109,7 @@ test('the runtime falls back to tauri when no build define is present', () => {
   // Node imports this module without Vite's `define`; that must be the desktop
   // build, and an unknown injected value must be rejected outright.
   assert.equal(RUNTIME, 'tauri');
-  assert.equal(usesWasmCad, false);
+  assert.equal(usesWasmCad(), false);
   assert.deepEqual([...RUNTIMES], ['tauri', 'web', 'android']);
   assert.equal(runtimeFrom('web'), 'web');
   assert.equal(runtimeFrom('android'), 'android');

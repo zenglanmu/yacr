@@ -72,6 +72,21 @@ function statusOf(shell: unknown): Record<string, unknown> | null {
 }
 
 /**
+ * The `surfaceMode` string the host reported, verbatim — or `undefined`.
+ *
+ * This is the raw wire value, not a decision: `"dom-canvas"` is the only spelling
+ * a carrier may use, and an older host simply has no field. It exists as its own
+ * function because two readers need the *reported* value rather than the
+ * collapsed one: [`surfaceModeFromShell`] (which mode this chrome models) and
+ * `host/runtime.ts`'s carrier state (who owns the CAD document). Both read it
+ * here, so they can never disagree about what the host said.
+ */
+export function reportedSurfaceMode(shell: unknown): string | undefined {
+  const value = statusOf(shell)?.surfaceMode;
+  return typeof value === 'string' ? value : undefined;
+}
+
+/**
  * The carrier named by the host shell state.
  *
  * Only the exact reported string `"dom-canvas"` selects the in-DOM carrier.
@@ -81,7 +96,7 @@ function statusOf(shell: unknown): Record<string, unknown> | null {
  * match or a platform hint.
  */
 export function surfaceModeFromShell(shell: unknown): SurfaceMode {
-  return statusOf(shell)?.surfaceMode === SURFACE_MODE_DOM_CANVAS
+  return reportedSurfaceMode(shell) === SURFACE_MODE_DOM_CANVAS
     ? SURFACE_MODE_DOM_CANVAS
     : SURFACE_MODE_NATIVE_BELOW;
 }

@@ -106,6 +106,21 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 `dom-canvas` 路径的 canvas 传输在 `src/cad/canvas-host.ts`，WebGL2 缺失必须显式拒绝，
 不得以空白 canvas 或静默回退冒充成功。
 
+### 载波（carrier）不是构建目标
+
+`__YACR_RUNTIME__` 只说**这份 bundle 是为谁编的**，不说进程实际跑在哪个载波上：Linux 宿主在 GTK
+启动前决议载波，并通过 `cad_status.surfaceMode` 上报（`apps/app-linux/src/host/surface.rs`：
+`dom-canvas` 上 `native_cad_session: false`）。因此 `src/host/runtime.ts` 维护一个小状态机
+`unknown | native-below | dom-canvas`：`web`/`android` 构建从 `dom-canvas` 起，`tauri` 构建从
+`unknown`（= 先按原生处理）起；只有收到**恰好** `"dom-canvas"` 才切到该载波，其余一律
+`native-below`（与 `cad/surface.ts` 同一条规则）。`src/host/invoke.ts` 的规则一句话：**谁拥有文档，
+数据命令就归谁**——`dom-canvas` 上 CAD 数据走 wasm 适配器（与浏览器/Android 完全一致），两个
+shell-only 报告在有 Tauri 桥时仍回原生宿主。唯一例外是**引导**：`tauri` 构建的第一次 `cad_status`
+必须能到原生宿主（X11 正是靠这条回答宣告载波），此后每次 `cad_status` 都来自适配器。
+`App.tsx` 把每份状态喂给 `observeCarrier(...)`，并在切到 `dom-canvas` 时重新加载命令词表与别名表
+（原生宿主先前回答的是它自己的桌面词表）。X11 原生侧的 `cad_commands`/`cad_command_aliases`
+在该载波上返回**空表**（`apps/app-linux/src/host/dispatch.rs`），作为纵深防御。
+
 `src/cad/metrics.ts` 负责 CAD 分区矩形、去重与有效性判断；`src/cad/input.ts`
 观察布局变化并上报 CSS 像素矩形与 DPR。面板停靠、功能区折叠、窗口尺寸与命令区变化
 都必须保持分区矩形与宿主度量同步。

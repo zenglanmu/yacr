@@ -30,13 +30,24 @@
 //!    native session already reports the document through the shared `cad_status`,
 //!    and a second status path must not exist.
 //!
+//! 4. **the vocabulary must describe *this* carrier**: `cad_commands` and
+//!    `cad_command_aliases` are shared commands, but their answer
+//!    ([`command_vocabulary`], [`command_aliases`]) is table-driven and describes
+//!    commands only the native `CadSession` can execute. On `dom-canvas` there is
+//!    no such session — every one of those names is refused by
+//!    [`native_session_refusal`] — so this host answers **empty** there. The chrome
+//!    then refuses by name (`unsupported-runtime: <command>`) exactly as it does
+//!    in a browser, instead of offering commands nothing can run.
+//!
 //! Registration is **not** duplicated: the shared handler is called for every
 //! command it owns, so a command added to `cad-desktop-shell` is automatically
 //! available here. Only the names in [`CANVAS_RUNTIME_FAILED_HOST_COMMAND`],
-//! [`super::canvas_session::CANVAS_SESSION_STATUS_COMMAND`], [`CAD_STATUS_COMMAND`]
-//! and [`NATIVE_SESSION_COMMANDS`] are decided here, and all of them are asserted
+//! [`super::canvas_session::CANVAS_SESSION_STATUS_COMMAND`], [`CAD_STATUS_COMMAND`],
+//! [`CAD_COMMANDS_COMMAND`], [`CAD_COMMAND_ALIASES_COMMAND`] and
+//! [`NATIVE_SESSION_COMMANDS`] are decided here, and all of them are asserted
 //! against the shared registry by a test.
 
+use cad_desktop_shell::commands::CadCommandAlias;
 use cad_ui_core::session::CadStatus;
 use tauri::ipc::Invoke;
 
@@ -63,6 +74,40 @@ pub const CANVAS_RUNTIME_FAILED_HOST_COMMAND: &str = "canvas_runtime_failed";
 /// `dom-canvas` carrier.
 pub const CAD_STATUS_COMMAND: &str = "cad_status";
 
+/// The shared vocabulary command, answered **empty** on `dom-canvas`.
+pub const CAD_COMMANDS_COMMAND: &str = "cad_commands";
+
+/// The shared alias-table command, answered **empty** on `dom-canvas`.
+pub const CAD_COMMAND_ALIASES_COMMAND: &str = "cad_command_aliases";
+
+/// The command vocabulary this host publishes on `mode`.
+///
+/// `native-below` is the shared table byte for byte
+/// (`cad_ui_core::session::admissible_names`). `dom-canvas` is **empty**, and that
+/// is a real answer, not a missing one: the desktop table describes commands only
+/// the native `CadSession` can execute, this carrier has none (iron rule 8), and
+/// every one of those names is refused by [`native_session_refusal`] anyway. An
+/// empty list makes the chrome refuse by name — the vocabulary a browser and an
+/// Android WebView already see, because theirs is the wasm session's.
+///
+/// Pure (no state, no environment), so the rule is unit-tested.
+pub fn command_vocabulary(mode: SurfaceMode) -> Vec<&'static str> {
+    match mode {
+        SurfaceMode::NativeBelow => cad_ui_core::session::admissible_names(),
+        SurfaceMode::DomCanvas => Vec::new(),
+    }
+}
+
+/// The alias table this host publishes on `mode`; empty on `dom-canvas` for the
+/// same reason as [`command_vocabulary`] (an alias is a suggestion that would
+/// resolve onto a command this carrier refuses).
+pub fn command_aliases(mode: SurfaceMode) -> Vec<CadCommandAlias> {
+    match mode {
+        SurfaceMode::NativeBelow => cad_desktop_shell::commands::cad_command_aliases_impl(),
+        SurfaceMode::DomCanvas => Vec::new(),
+    }
+}
+
 /// Shared commands that need the native `CadSession` this carrier does not have.
 ///
 /// They all answer `{accepted:true}` (or a session read) for work performed by the
@@ -71,10 +116,15 @@ pub const CAD_STATUS_COMMAND: &str = "cad_status";
 /// rejects them with [`native_session_refusal`]'s reason instead.
 ///
 /// Deliberately **not** in this list:
-/// * `cad_settings` / `cad_open_popup` / `cad_close_popup` / `cad_commands` — the
-///   shell's settings/popup-gate/vocabulary policy, which ADR 0024 D2 keeps on the
-///   host; without a session they already refuse explicitly (`cad_waiting`, or the
-///   `textEdit` payload derivation) rather than fabricating data;
+/// * `cad_settings` / `cad_open_popup` / `cad_close_popup` — the shell's
+///   settings/popup-gate policy, which ADR 0024 D2 keeps on the host; without a
+///   session they already refuse explicitly (`cad_waiting`, or the `textEdit`
+///   payload derivation) rather than fabricating data;
+/// * `cad_commands` / `cad_command_aliases` — shell policy too, but their answer is
+///   the **vocabulary**, so refusing would leave the chrome with no way to learn
+///   what this carrier cannot do. They are answered empty instead
+///   ([`command_vocabulary`]): a real "nothing here", which the chrome turns into a
+///   refusal by name;
 /// * `probe_input` — no input lane exists on this carrier (the wasm session takes
 ///   the pointer directly), and the shared path already refuses with `cad_waiting`.
 ///
@@ -196,12 +246,35 @@ pub fn canvas_session_status(request: tauri::ipc::Request<'_>) -> Result<CanvasS
     canvas_session::report_from_body(request.body())
 }
 
+/// `cad_commands` on this host: [`command_vocabulary`] for the installed carrier.
+///
+/// Registered here (not only in the shared handler) so the `dom-canvas` carrier
+/// can answer **empty** instead of advertising the desktop table. `native-below`
+/// answers exactly what the shared command answers.
+#[tauri::command]
+pub fn cad_commands() -> Vec<&'static str> {
+    command_vocabulary(surface_mode())
+}
+
+/// `cad_command_aliases` on this host: [`command_aliases`] for the installed
+/// carrier (empty on `dom-canvas`, see [`command_vocabulary`]).
+#[tauri::command]
+pub fn cad_command_aliases() -> Vec<CadCommandAlias> {
+    command_aliases(surface_mode())
+}
+
 /// The host-only commands of this module, as one handler.
 ///
 /// Separate so the `generate_handler!` closure has a concrete return type to
 /// infer its runtime parameter from.
 fn host_commands<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![canvas_runtime_failed, canvas_session_status, cad_status]
+    tauri::generate_handler![
+        canvas_runtime_failed,
+        canvas_session_status,
+        cad_status,
+        cad_commands,
+        cad_command_aliases
+    ]
 }
 
 /// Build the app's `invoke_handler`.
@@ -233,7 +306,13 @@ pub fn invoke_handler<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send 
                 invoke.resolver.reject(reason);
                 return true;
             }
-            if command == CAD_STATUS_COMMAND {
+            if command == CAD_STATUS_COMMAND
+                || command == CAD_COMMANDS_COMMAND
+                || command == CAD_COMMAND_ALIASES_COMMAND
+            {
+                // The status carries the carrier (and the session descriptor); the
+                // two vocabulary answers must describe this carrier, not the
+                // native one it does not have.
                 return host(invoke);
             }
         }
@@ -278,6 +357,7 @@ mod tests {
         for command in [
             "cad_status",
             "cad_commands",
+            "cad_command_aliases",
             "cad_settings",
             "cad_open_popup",
             "cad_close_popup",
@@ -298,6 +378,43 @@ mod tests {
     }
 
     #[test]
+    fn the_dom_canvas_carrier_advertises_no_vocabulary() {
+        // Defence in depth: the chrome now asks the wasm session as soon as the
+        // carrier is reported, but a caller that still asks this host must not get
+        // a catalogue of commands this carrier refuses (every desktop name is in
+        // `NATIVE_SESSION_COMMANDS`). Empty is the honest answer - the same shape
+        // a browser or an Android WebView receives.
+        assert!(command_vocabulary(SurfaceMode::DomCanvas).is_empty());
+        assert!(command_aliases(SurfaceMode::DomCanvas).is_empty());
+        // `native-below` stays byte for byte the shared table: the Wayland and
+        // Windows vocabulary is unchanged.
+        assert_eq!(
+            command_vocabulary(SurfaceMode::NativeBelow),
+            cad_ui_core::session::admissible_names()
+        );
+        assert_eq!(
+            command_aliases(SurfaceMode::NativeBelow),
+            cad_desktop_shell::commands::cad_command_aliases_impl()
+        );
+        assert!(!command_vocabulary(SurfaceMode::NativeBelow).is_empty());
+    }
+
+    #[test]
+    fn the_vocabulary_override_is_routed_only_on_dom_canvas() {
+        // Source contract: both names must reach the host handler *inside* the
+        // `dom-canvas` branch, so `native-below` keeps the shared command untouched
+        // (no duplicated registration on the carrier that has a native session).
+        let source = include_str!("dispatch.rs");
+        let branch = source
+            .split_once("if mode == SurfaceMode::DomCanvas {")
+            .expect("the carrier branch must exist")
+            .1;
+        assert!(branch.contains("command == CAD_COMMANDS_COMMAND"));
+        assert!(branch.contains("command == CAD_COMMAND_ALIASES_COMMAND"));
+        assert!(branch.contains("return host(invoke);"));
+    }
+
+    #[test]
     fn every_decided_command_exists_in_the_shared_registry() {
         // No drift: both lists name real shared commands (or the host-only
         // ones), so a rename in `cad-desktop-shell` breaks this test instead of
@@ -312,6 +429,8 @@ mod tests {
             CANVAS_RUNTIME_FAILED_HOST_COMMAND,
             CANVAS_SESSION_STATUS_COMMAND,
             CAD_STATUS_COMMAND,
+            CAD_COMMANDS_COMMAND,
+            CAD_COMMAND_ALIASES_COMMAND,
         ] {
             let host_only = command == CANVAS_RUNTIME_FAILED_HOST_COMMAND
                 || command == CANVAS_SESSION_STATUS_COMMAND;
@@ -321,6 +440,10 @@ mod tests {
             );
         }
         assert!(COMMAND_NAMES.contains(&CAD_STATUS_COMMAND));
+        // The two vocabulary commands are shared: this module only overrides the
+        // answer on the carrier that has no native session.
+        assert!(COMMAND_NAMES.contains(&CAD_COMMANDS_COMMAND));
+        assert!(COMMAND_NAMES.contains(&CAD_COMMAND_ALIASES_COMMAND));
         // `canvas_session_status` is host-only on purpose: it exists only on the
         // `dom-canvas` seam, so the shared registry must not own it.
         assert!(!COMMAND_NAMES.contains(&CANVAS_SESSION_STATUS_COMMAND));

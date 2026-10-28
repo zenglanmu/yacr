@@ -177,14 +177,22 @@ workspace 继承别名）；平台类型（`web-sys`/`android-activity`/`jni`/`n
   `@tauri-apps/api` 的模块**；`runtime.ts` 决定路由；`web-adapter.ts` 把 `cad_status` /
   `cad_commands` / `cad_command_aliases` / `cad_command` / `canvas_session_status` /
   `canvas_runtime_failed` 映射到 wasm 会话，**其余命令一律 `unsupported-runtime: <command>` 拒绝**。
-  `tauri`/`android` 运行时把两个 shell-only 命令（`canvas_session_status`、`canvas_runtime_failed`）
-  在有 Tauri 桥时送给 Tauri，**其余（含全部 CAD 数据）**送 wasm adapter；`web` 运行时全走 adapter。
+  **路由按宿主上报的载体决定，不按构建目标**：`__YACR_RUNTIME__` 只是初值（`web`/`android` 初值即
+  `dom-canvas`，`tauri` 初值 `unknown`），每次 `cad_status.surfaceMode` 都喂给 `runtime.ts` 的载波
+  状态；一旦是 `dom-canvas`，**后续所有 CAD 数据命令都走 wasm adapter 并重载命令词汇表**（首帧那次
+  native `cad_status` 是宿主宣告载体的唯一引导调用）。因此 **X11 与浏览器/Android 同构**（同一套
+  词汇与拒绝语义），`native-below`（Wayland/Windows）保持桌面词汇与 native 会话不变。`apps/app-linux`
+  在 `dom-canvas` 上**返回空词汇表**（不把桌面表冒充成该载体能执行的命令），`native-below` 不变。
+  两个 shell-only 命令（`canvas_session_status`、`canvas_runtime_failed`）在有 Tauri 桥时仍送给
+  Tauri（X11 的标记行/退出码 6 由它负责）。
   **适配器只许拒绝，不许伪造答案**；浏览器/移动载体的命令词汇**只**是它真能执行的四个：会话侧
   `FIT`/`ZOOMIN`/`ZOOMOUT`（保留的图形范围 + 固定缩放步，`shell_command` 执行后回
   `{"accepted":true}`），传输侧 `OPEN`（文件选择器 + `open_bytes`，`cad_status.canOpen` 由适配器
   抬成 `true`）。`cad_commands` = 会话列表 + `OPEN`（去重、稳定顺序），`shell_aliases` 只发布目标在
   其中的桌面别名行。其余名字（`PAN`、图层、设置、测量、绘制…）仍按名字 `unsupported-runtime` 拒绝，
   绝不空成功——该载体仍是**看 + 导航**（open/pan/zoom/resize），不是可编辑的 CAD 产品。
+  **两端功能对齐（把 `CadSession` 装进 wasm）属 ADR 0024 阶段 ⑧，尚未实现**；`LINE` 等命令在
+  Wayland 原生路径可用而 `dom-canvas` 载体不可用，是这条边界的直接结果，不是 UI 漏接线。
   证据见 `docs/validation-web-commands-2026-10-28.md`；
   **标准视图与 `OPEN` 选择器的 2026-10-28 修正**见 `docs/android-host.md` §5：
   `cad_status.standardViews`（可选加法字段，缺省=旧行为、`[]`=该载体没有标准视图）决定七个视图是否
