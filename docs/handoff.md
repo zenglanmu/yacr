@@ -1,3 +1,31 @@
+## 2026-10-28 载体一致性：传输按上报载体路由 + 冷加载可恢复 + wasm 会话底座（阶段 ⑧ 第 1 步）
+
+### 结论
+
+1. **传输不再按构建目标选，而按宿主上报的载体**（`apps/desktop-ui/src/host/runtime.ts` 的载波状态机）：
+   `__YACR_RUNTIME__` 只是初值，每次 `cad_status.surfaceMode` 都喂给状态机，一旦是 `dom-canvas`
+   后续 CAD 数据命令全走 wasm adapter 并**重载词汇表**（首帧的 native `cad_status` 是宿主宣告载体的
+   唯一引导调用）。因此 **X11 与浏览器/Android 同构**：文档标签来自 wasm 会话、只有
+   `OPEN`/`FIT`/`ZOOMIN`/`ZOOMOUT` 可点、其余**按名字拒绝**；`apps/app-linux` 在 `dom-canvas` 上
+   返回**空词汇表**（不把桌面表冒充成该载体能执行的命令），`native-below`（Wayland/Windows）不变。
+   修复前 X11 是"假可用"：按钮可用、命令进无人消费的队列、`documentLabel` 为空却画着图。
+2. **修掉一个会把"全部未接线"永久化的冷加载缺陷**：`loadCanvasModule` 过去把**失败的** bootstrap
+   promise 缓存在页面生命周期内，一次瞬时抖动就让词汇表永久为空；现在失败即丢缓存（下次重新尝试），
+   且词汇表请求按 250ms→4s 指数退避重试 6 次。仍失败则保持空目录并报错——不伪造词汇。
+3. **ADR 0024 阶段 ⑧ 第 1 步（wasm 会话底座）**：新增 `CadSession::from_bytes`（bytes 开图 + 注入
+   `RequestClock`，复用 `cad-host` 既有的同步安装路径，不复制导入管线）与 `apps/app-web/src/platform.rs`
+   的浏览器平台三件套（文件系统**显式拒绝**、内存 config、可上报 surface、按需拒绝的资源），
+   宿主单测里 **`LINE` 真正进入命令路由**；`cad-engine` 两处未加门禁的 `std::time::Instant` 改为
+   `web_time`（wasm 上是运行时 panic）。
+
+### 未做 / 下一步（阶段 2）
+
+渲染尚未接入真会话（`RenderSessionHandle` 仍 `Detached`）：阶段 2 = `attach_device(CanvasPresenter::device_queue())`
++ 每帧 `tick`/`render(logical, scale)` + 用同一 presenter 呈现 `frame_texture()`，然后把真会话放到
+**同一批 wasm 导出**后面，并决定 ADR 0025 的输入/堆预算归属（`deliver_external_open` 目前**没有**
+预算门，直接替换会丢上限）。字体/图片资源仍是显式拒绝。**证据边界**：本轮无浏览器/wasm 运行时证据、
+无 GPU/像素证据，X11 运行时也未跑（只有源码/单测契约）。
+
 ## 2026-10-28 浏览器/Android 载体：标准视图能力显式化 + `OPEN` 文档选择器（缺陷修复）
 
 ### 结论

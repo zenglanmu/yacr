@@ -264,7 +264,15 @@ const bootstrapByEnv = new WeakMap<object, Promise<CanvasModule>>();
 export function loadCanvasModule(target: unknown = CANVAS_BASE, env: CanvasEnv = globalThis): Promise<CanvasModule> {
   let pending = bootstrapByEnv.get(env);
   if (pending === undefined) {
-    pending = bootstrap(env, target);
+    // Single-flight while in flight, but a **failed** bootstrap is not cached: a
+    // transient script fetch or wasm instantiation error on a cold load would
+    // otherwise poison every later caller for the life of the page (the shell
+    // vocabulary then never loads and every command reports "not supported").
+    // The next caller simply starts a fresh attempt.
+    pending = bootstrap(env, target).catch(error => {
+      bootstrapByEnv.delete(env);
+      throw error;
+    });
     bootstrapByEnv.set(env, pending);
   }
   return pending;

@@ -5,7 +5,7 @@
 // Visual work lives in the region components.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from './host/invoke.ts';
-import { observeCarrier, subscribeCarrier, usesWasmCad } from './host/runtime.ts';
+import { observeCarrier } from './host/runtime.ts';
 import { CATALOGS } from './catalogs.ts';
 import { createTranslator, initialLocale, LOCALE_STORAGE_KEY, LOCALES, localeTag, storedLocale, storeLocale } from './i18n.ts';
 import type { Locale } from './i18n.ts';
@@ -27,9 +27,9 @@ import { setSelectedText } from './tools/textedit.ts';
 import { submitStandardView } from './cad/view3d.ts';
 import { createFpsSampler } from './fps.ts';
 import { bindBrowserDefaults, cadContextMenuRequest, isTextEntryTarget } from './defaults.ts';
-import { admitCommandText, commandAliases, commandCatalog, pushHistory, setCommandAliases, setCommandCatalog, toolCommandForKey, unavailableReasonKey } from './commands/commands.ts';
+import { admitCommandText, pushHistory, toolCommandForKey, unavailableReasonKey } from './commands/commands.ts';
 import { acceleratorDispatch } from './commands/accelerators.ts';
-import type { CommandAlias, CommandAliasInput } from './commands/commands.ts';
+import { useHostVocabulary } from './commands/use-host-vocabulary.ts';
 import type { ContextMenuModel } from './commands/context-menu.ts';
 import type { PopupKind, PopupPayload } from './popup/popup.ts';
 import { I18nContext, ShellContext } from './context.ts';
@@ -119,17 +119,6 @@ function Shell() {
   // | null`): the steps the host has queued but not yet echoed. It composes rapid
   // clicks without ever touching the displayed number.
   const [toolParameterPending, setToolParameterPending] = useState<ToolParameterPending | null>(null);
-  // The host command vocabulary (names the Rust router accepts). Empty until
-  // `cad_commands` answers; the state exists so the chrome re-renders once it does.
-  const [catalogNames, setCatalogNames] = useState<readonly string[]>(commandCatalog);
-  // The host's alias table (`cad_command_aliases`), held the same way: it is
-  // suggestion metadata only, so a failed load leaves it empty ("no aliases
-  // known") and never blocks the command line.
-  const [aliasPairs, setAliasPairs] = useState<readonly CommandAlias[]>(commandAliases);
-  // The carrier epoch (`host/runtime.ts`): bumped when the **observed** carrier
-  // becomes `dom-canvas` (a `tauri` build on X11, where the wasm session owns the
-  // CAD data). The vocabulary loader depends on it.
-  const [carrierEpoch, setCarrierEpoch] = useState(0);
 
   // The host's live dialog (`cad_status.popup`, ADR 0021 D1/D2): non-null while
   // one exists. The host applies the modal input gate; the chrome mirrors it as
@@ -217,12 +206,6 @@ function Shell() {
   // history the command line keeps — there is no second command log.
   const statusRef = useRef<CadStatus | null>(null);
   const historyRef = useRef<readonly string[]>([]);
-  // The one in-flight `cad_commands` request. On a `dom-canvas` carrier the host
-  // answer can only be produced after the wasm session module exists, so on a
-  // cold load (a 9.6 MB binary over the network) it may resolve *after* the first
-  // keystroke. `submitCommand` awaits it, which is what keeps an early `FIT` from
-  // being reported "not supported" while the vocabulary is still in flight.
-  const vocabularyRef = useRef<Promise<unknown> | null>(null);
   // The partition element itself, for two things the DOM event cannot carry: the
   // rect that turns the hook's partition-relative point into viewport px, and the
   // node that takes the keyboard back when the menu closes on Escape/Tab.
@@ -415,49 +398,10 @@ function Shell() {
     };
   }, []);
 
-  // A carrier flip to `dom-canvas` invalidates what the native host answered: a
-  // vocabulary only its own CAD session could execute, and that carrier has none.
-  useEffect(() => subscribeCarrier(() => {
-    if (usesWasmCad()) setCarrierEpoch(epoch => epoch + 1);
-  }), []);
-
-  // Load the host's command vocabulary — and reload it when the carrier flips to
-  // `dom-canvas`. It is the admission source of truth (`cad_commands`), so a
-  // failed load keeps the catalog empty (every command explicitly unsupported)
-  // and surfaces the failure instead of pretending success.
-  useEffect(() => {
-    let cancelled = false;
-    // Kept in a ref as well as acted on here: admission awaits it (see
-    // `submitCommand`) so a command typed before the host answers is admitted
-    // once the vocabulary arrives instead of being refused as "not supported".
-    const vocabulary = invoke('cad_commands');
-    vocabularyRef.current = vocabulary;
-    vocabulary.then(answer => {
-      if (cancelled) return;
-      // The vocabulary is validated by `setCommandCatalog` itself; the cast only
-      // states what the host answers with.
-      const names = answer as Iterable<unknown>;
-      setCatalogNames(setCommandCatalog(names));
-    }).catch(reason => {
-      if (cancelled) return;
-      setCatalogNames(setCommandCatalog([]));
-      setError(`cad_commands: ${String(reason)}`);
-    });
-    // The alias table is suggestion metadata, fetched from the same source
-    // (`cad_command_aliases`) and reloaded with the vocabulary. A failure is
-    // deliberately **not** an error: the command line simply offers no shorthand
-    // rows and admission still works, because the host canonicalises whatever is
-    // typed. Nothing is fabricated.
-    invoke('cad_command_aliases').then(answer => {
-      if (cancelled) return;
-      const pairs = answer as Iterable<CommandAliasInput>;
-      setAliasPairs(setCommandAliases(pairs));
-    }).catch(() => {
-      if (cancelled) return;
-      setAliasPairs(setCommandAliases([]));
-    });
-    return () => { cancelled = true; };
-  }, [carrierEpoch]);
+  // The host's command vocabulary + alias table (`commands/use-host-vocabulary.ts`):
+  // loaded once, reloaded when the carrier flips to `dom-canvas`, and the in-flight
+  // promise is what admission awaits so an early command is not refused.
+  const { catalogNames, aliasPairs, vocabulary: vocabularyRef } = useHostVocabulary(setError);
 
   // Reconcile the numeric stepper's pending delta against every fresh status: it
   // resets the moment the host has caught up (the value changed), the tool

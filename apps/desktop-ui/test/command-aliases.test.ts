@@ -204,12 +204,14 @@ test('the command line renders an alias row as entry + canonical target', async 
 });
 
 test('the app fetches the alias table once and tolerates a failure', async () => {
-  const source = await readModule('App.tsx');
+  // The fetch lives in `commands/use-host-vocabulary.ts` (extracted from
+  // `App.tsx` for the file-size ceiling); the contract is unchanged.
+  const source = await readModule('commands/use-host-vocabulary.ts');
   const calls = source.match(/invoke\('cad_command_aliases'\)/g) ?? [];
   assert.equal(calls.length, 1, 'exactly one startup fetch');
   const start = source.indexOf("invoke('cad_command_aliases')");
   const block = source.slice(start, source.indexOf('return () =>', start));
-  assert.ok(block.includes('setCommandAliases(pairs)'), 'the answer replaces the table');
+  assert.match(block, /setCommandAliases\(answer as Iterable<CommandAliasInput>\)/, 'the answer replaces the table');
   assert.ok(block.includes('setCommandAliases([])'), 'a failure leaves the table empty');
   // A missing alias table is not a startup error: the command line still admits
   // everything the router knows, it just offers no shorthand rows.

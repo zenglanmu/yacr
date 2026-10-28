@@ -26,6 +26,7 @@ import {
 } from '../src/host/runtime.ts';
 import { SHELL_ONLY_COMMANDS, createInvoke, invokeRoute } from '../src/host/invoke.ts';
 
+const HOOK_TS = new URL('../src/commands/use-host-vocabulary.ts', import.meta.url);
 const APP_TSX = new URL('../src/App.tsx', import.meta.url);
 
 /** Commands that read or write CAD document data: the adapter owns them on `dom-canvas`. */
@@ -277,26 +278,26 @@ test('a browser bundle never routes data to Tauri, even if a status said native-
 
 test('a carrier flip reloads the command vocabulary and the alias table', async () => {
   const app = await readFile(APP_TSX, 'utf8');
+  const hook = await readFile(HOOK_TS, 'utf8');
 
   // Every received status feeds the state machine, from the poll that receives it
   // (never from a render pass).
   assert.match(app, /observeCarrier\(reportedSurfaceMode\(\{ status: next \}\)\)/);
 
+  // The chrome reads the vocabulary through the hook (which owns the retry, the
+  // in-flight promise and the carrier subscription).
+  assert.match(app, /useHostVocabulary\(setError\)/);
+
   // The flip is observed through the published subscription, and only the wasm
   // carrier bumps the epoch: a first native report must reload nothing.
-  assert.match(app, /useEffect\(\(\) => subscribeCarrier\(\(\) => \{\n\s+if \(usesWasmCad\(\)\) setCarrierEpoch\(/);
+  assert.match(hook, /useEffect\(\(\) => subscribeCarrier\(\(\) => \{\n\s+if \(usesWasmCad\(\)\) setCarrierEpoch\(/);
 
   // The loader effect depends on that epoch, so it runs again on a flip. Without
   // this the X11 chrome would keep the desktop table the native host answered.
-  const loader = app.slice(app.indexOf('const vocabulary = invoke(\'cad_commands\');'));
-  assert.ok(loader.includes('vocabularyRef.current = vocabulary;'), 'the in-flight promise must be replaced');
-  const depsAt = app.indexOf('}, [carrierEpoch]);');
-  assert.ok(depsAt > 0, 'the vocabulary/alias loader must depend on the carrier epoch');
-  assert.ok(
-    app.indexOf('const vocabulary = invoke(\'cad_commands\');') < depsAt,
-    'the dependency belongs to the loader effect',
-  );
+  const loader = hook.slice(hook.indexOf("const pending = loadCommandVocabulary(() => invoke('cad_commands'));"));
+  assert.ok(loader.includes('vocabulary.current = pending;'), 'the in-flight promise must be replaced');
+  assert.ok(hook.includes('}, [carrierEpoch, onError]);'), 'the vocabulary/alias loader must depend on the carrier epoch');
 
-  // The no-op path stays a no-op: nothing else in the tree may bump the epoch.
-  assert.equal(app.split('setCarrierEpoch(').length - 1, 1, 'one bump site');
+  // The no-op path stays a no-op: nothing else in the hook may bump the epoch.
+  assert.equal(hook.split('setCarrierEpoch(').length - 1, 1, 'one bump site');
 });
