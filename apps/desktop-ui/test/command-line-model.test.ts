@@ -138,19 +138,22 @@ test('the history cursor walks back to the newest line and stops at the draft', 
   );
 });
 
-test('the mobile history sheet is newest-first and capped', () => {
+test('the mobile history sheet is newest-first and capped, refusals included', () => {
   assert.equal(MOBILE_HISTORY_ROWS, 12);
-  const history = Array.from({ length: 30 }, (_, index) => `CMD${index}`);
-  const rows = mobileHistoryRows(history);
+  // The sheet renders the one log: commands and refusal sentences alike.
+  const log = Array.from({ length: 30 }, (_, index) => ({ kind: index % 3 === 2 ? 'error' : 'command', text: `CMD${index}` }));
+  const rows = mobileHistoryRows(log);
   assert.equal(rows.length, MOBILE_HISTORY_ROWS);
-  assert.equal(rows[0], 'CMD29', 'newest first');
-  assert.equal(rows.at(-1), 'CMD18');
+  assert.equal(rows[0].text, 'CMD29', 'newest first');
+  assert.equal(rows.at(-1).text, 'CMD18');
+  assert.equal(rows[0].kind, 'error', 'the kind travels with the row');
+  assert.equal(rows[1].kind, 'command', 'a command row keeps its own kind');
   // The cap is a parameter, so a wider sheet can ask for more without a new rule.
-  assert.deepEqual(mobileHistoryRows(history, 2), ['CMD29', 'CMD28']);
-  assert.deepEqual(mobileHistoryRows(['A'], 0), []);
+  assert.deepEqual(mobileHistoryRows(log, 2).map(row => row.text), ['CMD29', 'CMD28']);
+  assert.deepEqual(mobileHistoryRows(log, 0), []);
   assert.deepEqual(mobileHistoryRows([], 5), []);
   // The full record is untouched: the sheet is a shortcut list, not the store.
-  assert.equal(history.length, 30);
+  assert.equal(log.length, 30);
 });
 
 test('the controller owns the command-line rules and both presentations render from it', async () => {

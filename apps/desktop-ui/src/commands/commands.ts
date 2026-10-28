@@ -456,6 +456,11 @@ export function defaultSuggestionIndex(suggestions: readonly CommandSuggestion[]
 /**
  * Step the history cursor. `null` means "the draft line". Up moves to older
  * entries, Down moves back toward the draft.
+ *
+ * The array is the **command-only** recall list (`commandOnly` in
+ * `commands/command-history.ts`), never the full log: a refusal sentence is a
+ * record, not something Enter may resend. The log itself is modelled in
+ * `command-history.ts`; this is the cursor rule over its derived commands.
  */
 export function stepHistoryCursor(history: readonly string[], index: number | null, direction: number): number | null {
   if (!history.length) return null;
@@ -472,14 +477,6 @@ export function stepHistoryCursor(history: readonly string[], index: number | nu
 /** Text for the current history cursor position. */
 export function historyText(history: readonly string[], index: number | null, draft: string): string {
   return index === null || index < 0 || index >= history.length ? draft : history[index];
-}
-
-/** Push `entry` onto a bounded history (newest last, no adjacent duplicates). */
-export function pushHistory(history: readonly string[], entry: unknown, limit = 64): readonly string[] {
-  const value = String(entry ?? '').trim();
-  if (!value) return history;
-  const withoutDuplicate = history.at(-1) === value ? history : [...history, value];
-  return withoutDuplicate.length > limit ? withoutDuplicate.slice(withoutDuplicate.length - limit) : withoutDuplicate;
 }
 
 /**

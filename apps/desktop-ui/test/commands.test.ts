@@ -9,7 +9,6 @@ import {
   isLocalChromeCommand,
   isSupportedCommand,
   normalizeCommandText,
-  pushHistory,
   setCommandCatalog,
   splitCommandText,
   stepHistoryCursor,
@@ -17,6 +16,7 @@ import {
   toolLabelKey,
   unavailableReasonKey,
 } from '../src/commands/commands.ts';
+import { appendCommand, commandOnly } from '../src/commands/command-history.ts';
 import {
   ARGUMENT_COMMANDS,
   CAPABILITY_GATES,
@@ -409,12 +409,15 @@ test('history cursor walks older entries then returns to the draft', () => {
 });
 
 test('command history is bounded and drops adjacent duplicates', () => {
-  assert.deepEqual(pushHistory([], 'OPEN'), ['OPEN']);
-  assert.deepEqual(pushHistory(['OPEN'], 'OPEN'), ['OPEN']);
-  assert.deepEqual(pushHistory(['OPEN'], '  '), ['OPEN']);
-  let history = [];
-  for (const id of ['A', 'B', 'C', 'D']) history = pushHistory(history, id, 2);
-  assert.deepEqual(history, ['C', 'D']);
+  // The string-shaped history is gone: the log lives in `commands/command-history.ts`
+  // and this is its command-only projection (see `test/command-history.test.ts`
+  // for the record itself, errors included).
+  assert.deepEqual(commandOnly(appendCommand([], 'OPEN')), ['OPEN']);
+  assert.deepEqual(commandOnly(appendCommand(appendCommand([], 'OPEN'), 'OPEN')), ['OPEN']);
+  assert.deepEqual(commandOnly(appendCommand(appendCommand([], 'OPEN'), '  ')), ['OPEN']);
+  let log = [];
+  for (const id of ['A', 'B', 'C', 'D']) log = appendCommand(log, id, 2);
+  assert.deepEqual(commandOnly(log), ['C', 'D']);
 });
 
 test('admission mirrors cad_command: unsupported never reaches IPC, capability gates apply', () => {

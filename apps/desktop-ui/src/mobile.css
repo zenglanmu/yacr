@@ -546,6 +546,21 @@
   cursor: pointer;
 }
 .mobile-sheet__row:hover { background: var(--hover); color: var(--text); }
+/* A refusal row of the same list: red, wrapping, and not tappable (no hover, no
+   44px hit area — nothing happens when it is pressed). It keeps the sheet's
+   sub-label size (12px on `--chrome` is 4.9:1) so a full sentence stays readable
+   on a phone instead of shrinking into the mono command face. */
+.mobile-sheet__row.is-error {
+  display: block;
+  min-height: 0;
+  padding: 9px 10px;
+  color: var(--danger);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  cursor: default;
+}
 .mobile-sheet__empty {
   padding: 12px;
   color: var(--text-muted);

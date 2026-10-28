@@ -50,7 +50,7 @@ test('a new command attempt clears the chrome line, and admission clears it agai
   const accepted = at("if (result.kind === 'accepted')", queued);
   const admission = accepted + "if (result.kind === 'accepted')".length;
   const clearedOnAdmission = source.indexOf("setError('')", admission);
-  const historyPush = source.indexOf('setHistory(', admission);
+  const historyPush = source.indexOf('commandHistory.appendCommand(', admission);
   assert.ok(clearedOnAdmission > admission, 'an admitted command must clear the chrome line');
   assert.ok(clearedOnAdmission < historyPush, 'the admission clear belongs to the same branch');
 });

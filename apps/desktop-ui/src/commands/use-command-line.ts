@@ -183,6 +183,15 @@ export function useCommandLine(): CommandLineController {
     setHighlight(index => ((index < 0 ? 0 : index) + delta + suggestions.length) % suggestions.length);
   }
 
+  // One sentence, two readers: the line under the field and the history log get
+  // the *same* string from this one call, so the record of a refusal can never
+  // word it differently from the line that was on screen. The live line is left
+  // exactly as it was — the log is the record, not a replacement.
+  function refuse(text: string) {
+    setTextMessage({ kind: 'error', text });
+    shell.recordHistoryError(text);
+  }
+
   function submitText() {
     if (draft.empty || draft.tooLong) return;
     void shell.submitToolText(textDraft).then(result => {
@@ -196,15 +205,12 @@ export function useCommandLine(): CommandLineController {
       // A host-side failure carries only its error text; a local refusal names
       // the bound it broke (see `setToolText`).
       if (result.kind === 'failed') {
-        setTextMessage({ kind: 'error', text: result.error });
+        refuse(result.error);
         return;
       }
-      setTextMessage({
-        kind: 'error',
-        text: result.reason === 'too_long'
-          ? t(TEXT_TOO_LONG_KEY, { max: TOOL_TEXT_MAX_LENGTH })
-          : result.error,
-      });
+      refuse(result.reason === 'too_long'
+        ? t(TEXT_TOO_LONG_KEY, { max: TOOL_TEXT_MAX_LENGTH })
+        : result.error);
     });
   }
 

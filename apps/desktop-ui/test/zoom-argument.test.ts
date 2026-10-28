@@ -12,11 +12,11 @@ import {
   admitCommandText,
   defaultSuggestionIndex,
   filterCommandSuggestions,
-  pushHistory,
   setCommandAliases,
   setCommandCatalog,
   splitCommandText,
 } from '../src/commands/commands.ts';
+import { appendCommand, commandOnly } from '../src/commands/command-history.ts';
 import { ARGUMENT_COMMANDS } from '../src/commands/gating.ts';
 import { queueCadCommand } from '../src/cad/cad-command.ts';
 import { HOST_NAMES, readModule } from './helpers.ts';
@@ -114,19 +114,19 @@ test('bare ZOOM stays the payload-refusal path, never a fabricated factor', asyn
 test('the full line is what reaches cad_command and what history stores', async () => {
   const calls = [];
   const invoke = async (...args) => { calls.push(args); return { accepted: true }; };
-  let history = [];
+  let log = [];
   for (const typed of ['ZOOM 2', ' zoom 0.5 ', 'ZOOM ALL']) {
     const result = await queueCadCommand(invoke, typed, loaded, false);
     assert.equal(result.kind, 'accepted', typed);
-    history = pushHistory(history, result.command);
+    log = appendCommand(log, result.command);
   }
   assert.deepEqual(calls, [
     ['cad_command', { command: 'ZOOM 2' }],
     ['cad_command', { command: 'ZOOM 0.5' }],
     ['cad_command', { command: 'ZOOM ALL' }],
   ]);
-  // `App.jsx` stores `result.command` — the full line with its argument.
-  assert.deepEqual(history, ['ZOOM 2', 'ZOOM 0.5', 'ZOOM ALL']);
+  // `App.tsx` stores `result.command` — the full line with its argument.
+  assert.deepEqual(commandOnly(log), ['ZOOM 2', 'ZOOM 0.5', 'ZOOM ALL']);
 
   // A refused argument never reaches IPC at all.
   const refused = await queueCadCommand(
@@ -168,7 +168,7 @@ test('Enter on a typed argument keeps the line instead of the bare suggestion', 
   );
   const app = await readModule('App.tsx');
   assert.ok(
-    app.includes('setHistory(entries => pushHistory(entries, result.command))'),
+    app.includes('commandHistory.appendCommand(result.command)'),
     'history stores the full admitted line',
   );
   assert.ok(

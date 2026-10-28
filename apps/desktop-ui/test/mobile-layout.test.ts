@@ -216,7 +216,7 @@ test('the compact regions exist and the top bar is the only control that takes w
   const bar = await readModule('components/MobileCommandBar.tsx');
   assert.ok(bar.includes('const line = useCommandLine();'), 'the shared command-line controller');
   assert.ok(bar.includes('<CommandField id="cad-command"'), 'the shared field');
-  assert.ok(bar.includes('mobileHistoryRows(shell.history)'), 'a capped history');
+  assert.ok(bar.includes('mobileHistoryRows(shell.historyEntries)'), 'a capped history of the one log');
   assert.ok(bar.includes('role="alert"'), 'refusals stay visible without a status bar');
   assert.ok(bar.includes('shell.displayedError'), 'the status bar\'s error slot moved here');
   assert.ok(bar.includes("releaseFocusOnOutsidePress("), 'the same focus hand-off as the docked field');

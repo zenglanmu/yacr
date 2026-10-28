@@ -821,6 +821,19 @@ button, input, select { font: inherit; color: inherit; }
   font-family: var(--font-mono);
 }
 .history-panel__entry:hover { background: var(--hover); color: var(--text); }
+/* A refusal row: the sentence the message line showed, kept as a record. It is
+   red, it is sentence-shaped (UI font, not the mono command face) and it is not a
+   control — there is no command in it to recall, so it has no hover and no
+   pointer cursor. 11.5px on `--chrome-3` is 6.3:1. */
+.history-panel__entry.is-error {
+  margin: 0;
+  color: var(--danger);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  cursor: default;
+}
 
 /* Status bar ------------------------------------------------------------- */
 .statusbar {

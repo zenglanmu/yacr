@@ -15,6 +15,8 @@
 // highlighted name.
 import { filterCommandSuggestions, splitCommandText, stepHistoryCursor } from './commands.ts';
 import type { CommandAlias, CommandSuggestion } from './commands.ts';
+import { historyRows } from './command-history.ts';
+import type { CommandHistoryEntry } from './command-history.ts';
 import { TEXT_PROMPT_KEY } from '../tools/text.ts';
 
 /** The catalog key the field's placeholder comes from. */
@@ -168,16 +170,18 @@ export function commandLineHistoryStep({ history, cursor, delta, draft }: Comman
 }
 
 /**
- * Visible history rows in the mobile sheet (newest first).
+ * Visible rows in the mobile sheet (newest first), commands and refusals alike.
  *
- * Capped so the upward sheet stays a sheet: a long session's 64-entry history
- * would otherwise run past the 45dvh cap and read as a wall. The oldest entries
- * are still in `shell.history` and remain step-able with Up/Down; the sheet is a
- * shortcut list, not the whole record.
+ * Capped so the upward sheet stays a sheet: a long session's 64-entry log would
+ * otherwise run past the 45dvh cap and read as a wall. The oldest entries are
+ * still in `shell.historyEntries` and remain step-able with Up/Down (the commands
+ * among them); the sheet is a shortcut list, not the whole record.
  */
 export const MOBILE_HISTORY_ROWS = 12;
 
-export function mobileHistoryRows(history: readonly string[], limit: number = MOBILE_HISTORY_ROWS): string[] {
-  const size = Number.isFinite(limit) ? Math.max(0, Math.trunc(limit)) : MOBILE_HISTORY_ROWS;
-  return [...history].reverse().slice(0, size);
+export function mobileHistoryRows(
+  entries: readonly CommandHistoryEntry[],
+  limit: number = MOBILE_HISTORY_ROWS,
+): CommandHistoryEntry[] {
+  return historyRows(entries, limit);
 }

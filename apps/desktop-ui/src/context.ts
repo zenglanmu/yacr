@@ -3,6 +3,7 @@
 // region only imports `useI18n()` / `useShell()`.
 import { createContext, useContext } from 'react';
 import type { Dispatch, RefCallback, SetStateAction } from 'react';
+import type { CommandHistoryEntry } from './commands/command-history.ts';
 import type { Locale, Translator } from './i18n.ts';
 
 /**
@@ -72,8 +73,16 @@ export interface ShellValue {
   readonly error: string;
   /** A polling failure, or `''`. */
   readonly pollError: string;
-  /** The typed command history, oldest first. */
+  /** The typed command history, command-only, oldest first (Up/Down recall). */
   readonly history: string[];
+  /**
+   * The whole history log, oldest first: admitted commands **and** the refusal
+   * sentences the message line showed. The panels render this; `history` is its
+   * derived command-only list, so a refusal can never reach the field.
+   */
+  readonly historyEntries: readonly CommandHistoryEntry[];
+  /** Write one refusal sentence into the log (the text the message line shows). */
+  readonly recordHistoryError: (text: string) => void;
   /** The command line's draft. */
   readonly command: string;
   readonly setCommand: Dispatch<SetStateAction<string>>;

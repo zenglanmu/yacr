@@ -35,7 +35,7 @@ export function MobileCommandBar() {
   // Read once: the hand-off effect depends on the boolean, not on the controller
   // object it is rebuilt into on every render.
   const focused = line.focused;
-  const historyRows = mobileHistoryRows(shell.history);
+  const historyRows = mobileHistoryRows(shell.historyEntries);
   const showHistory = shell.historyOpen && !line.textMode;
 
   // The same outside-press hand-off the docked field installs: a press on the
@@ -66,7 +66,7 @@ export function MobileCommandBar() {
                   icon="clearSelection"
                   size="sm"
                   label={t('command.clear_history')}
-                  disabled={!shell.history.length}
+                  disabled={shell.historyEntries.length === 0}
                   onClick={shell.clearHistory}
                 />
               ) : null}
@@ -82,16 +82,23 @@ export function MobileCommandBar() {
             historyRows.length === 0 ? (
               <div className="mobile-sheet__empty">{t('command.history_empty')}</div>
             ) : (
+              // The same log the docked panel renders, newest first and capped: a
+              // command row recalls into the field, a refusal row is red text and
+              // not a control (`.is-error`, styled in `mobile.css`).
               <ol className="mobile-sheet__rows mobile-sheet__list" aria-label={t('command.history')}>
                 {historyRows.map((entry, index) => (
-                  <li key={`${entry}-${index}`}>
-                    <button
-                      type="button"
-                      className="mobile-sheet__row"
-                      onClick={() => { line.choose(entry); shell.setHistoryOpen(false); }}
-                    >
-                      {entry}
-                    </button>
+                  <li key={`${entry.kind}-${index}`}>
+                    {entry.kind === 'command' ? (
+                      <button
+                        type="button"
+                        className="mobile-sheet__row"
+                        onClick={() => { line.choose(entry.text); shell.setHistoryOpen(false); }}
+                      >
+                        {entry.text}
+                      </button>
+                    ) : (
+                      <p className="mobile-sheet__row is-error">{entry.text}</p>
+                    )}
                   </li>
                 ))}
               </ol>
@@ -128,9 +135,12 @@ export function MobileCommandBar() {
         <Icon name={line.textMode ? 'text' : 'terminal'} size={16} className="mobile-commandbar__prompt" />
         <CommandField id="cad-command" className="mobile-commandbar__input" line={line} enterKeyHint="send" />
         {line.textMode ? null : (
+          // The history toggle for this presentation: same state, same log, same
+          // name ("history"). It opens the sheet above the bar and nothing else —
+          // the message lines below the row are separate elements and stay put.
           <IconButton
             icon="terminal"
-            label={t('command.history')}
+            label={t('command.toggle_history')}
             pressed={shell.historyOpen}
             onClick={() => shell.setHistoryOpen(!shell.historyOpen)}
           />

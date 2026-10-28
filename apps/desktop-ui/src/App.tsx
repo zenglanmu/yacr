@@ -29,7 +29,10 @@ import { setSelectedText } from './tools/textedit.ts';
 import { submitStandardView } from './cad/view3d.ts';
 import { createFpsSampler } from './fps.ts';
 import { bindBrowserDefaults, cadContextMenuRequest, isTextEntryTarget } from './defaults.ts';
-import { admitCommandText, pushHistory, toolCommandForKey, unavailableReasonKey } from './commands/commands.ts';
+import { admitCommandText, toolCommandForKey } from './commands/commands.ts';
+import { commandMessageFor } from './commands/command-message.ts';
+import type { CommandMessage } from './commands/command-message.ts';
+import { useCommandHistory } from './commands/use-command-history.ts';
 import { acceleratorDispatch } from './commands/accelerators.ts';
 import { useHostVocabulary } from './commands/use-host-vocabulary.ts';
 import type { ContextMenuModel } from './commands/context-menu.ts';
@@ -68,12 +71,6 @@ interface ContextMenuState {
   readonly menu: ContextMenuModel;
 }
 
-/** One line of the command line's confirmation/refusal banner. */
-interface CommandMessage {
-  readonly kind: string;
-  readonly text: string;
-}
-
 /**
  * The single UI document.
  *
@@ -95,7 +92,10 @@ function Shell() {
   const [fps, setFps] = useState<number | null>(null);
   const [command, setCommand] = useState('');
   const [commandResult, setCommandResult] = useState<CadCommandResult | null>(null);
-  const [history, setHistory] = useState<readonly string[]>([]);
+  // The command line's history log (`commands/use-command-history.ts`): admitted
+  // commands **and** the refusal sentences the message line showed. `commands` is
+  // its derived command-only list, which is what Up/Down and ranking may read.
+  const commandHistory = useCommandHistory();
   const [pending, setPending] = useState(false);
   const [ribbonTab, setRibbonTab] = useState('home');
   const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
@@ -237,21 +237,16 @@ function Shell() {
   // and it is cleared at the start of every new attempt so a stale sentence cannot
   // outlive the action that produced it (see `submitCommand`/`runStandardView`).
   const displayError = status?.error || error || pollError || '';
-  const commandMessage = useMemo<CommandMessage | null>(() => {
-    if (!commandResult) return null;
-    // The refusal sentence is the catalog key the admission itself reported
-    // (`reasonKey`), so a blocked command reads the same in the command line as
-    // in the disabled button that offers it — the busy sentence, "no drawing is
-    // open", the gesture hint, or "not supported yet".
-    if (commandResult.kind === 'unsupported') {
-      return { kind: 'error', text: t(commandResult.reasonKey ?? unavailableReasonKey(commandResult.command), { command: commandResult.command }) };
-    }
-    if (commandResult.kind === 'failed') {
-      if (commandResult.reasonKey) return { kind: 'error', text: t(commandResult.reasonKey, { command: commandResult.command }) };
-      return { kind: 'error', text: t('command.failed', { error: commandResult.error }) };
-    }
-    return null;
-  }, [commandResult, t]);
+  // The message line, built once by `commands/command-message.ts` so the log's
+  // error row and the line under the field are the same string.
+  const commandMessage = useMemo<CommandMessage | null>(() => commandMessageFor(commandResult, t), [commandResult, t]);
+  // Every sentence the message line shows is also written into the history log —
+  // the live line stays exactly where it was. The effect runs on the built text,
+  // so a re-render never re-appends and the log only holds what the user saw.
+  const recordHistoryError = commandHistory.recordError;
+  useEffect(() => {
+    if (commandMessage) recordHistoryError(commandMessage.text);
+  }, [commandMessage, recordHistoryError]);
 
   useEffect(() => {
     document.documentElement.lang = localeTag(locale);
@@ -574,7 +569,7 @@ function Shell() {
         // An admitted command is the strongest evidence the attempt went through:
         // no chrome-side failure line may stay on screen after it.
         setError('');
-        setHistory(entries => pushHistory(entries, result.command));
+        commandHistory.appendCommand(result.command);
         // A command changes the model: ask the page carrier for frames now instead
         // of waiting for the next status poll to notice (a no-op on `native-below`).
         framesRef.current?.pump();
@@ -584,7 +579,7 @@ function Shell() {
       submitting.current = false;
       setPending(false);
     }
-  }, [requestOpenPopup, status]);
+  }, [requestOpenPopup, status, commandHistory.appendCommand]);
 
   // The terminal text step (ADR 0019 A.1): one `cad_set_tool_text`, never a
   // `cad_command`. The result is returned to the command line so the draft can
@@ -728,7 +723,7 @@ function Shell() {
   // Feed the CAD shortcut-menu hook the state slices the chrome already has. It
   // is a ref, not a dependency, so polling never re-installs the guards below.
   useEffect(() => { statusRef.current = status; }, [status]);
-  useEffect(() => { historyRef.current = history; }, [history]);
+  useEffect(() => { historyRef.current = commandHistory.commands; }, [commandHistory.commands]);
 
   // Keep WebKitGTK's own commands out of the session. The native CAD surface is
   // input-transparent, so right-clicks and accelerators reach this DOM; the
@@ -802,9 +797,13 @@ function Shell() {
     errorText: displayError,
     error,
     pollError,
-    // `context.ts` declares the history mutable; the state stays `readonly`
-    // because `pushHistory` returns a readonly array and never mutates it.
-    history: history as string[],
+    // `context.ts` declares `history` mutable; the derived list is `readonly`
+    // because `commandOnly` never mutates the log.
+    history: commandHistory.commands as string[],
+    // The typed log itself (commands and refusal sentences). The panels render
+    // this; `history` above is its command-only projection.
+    historyEntries: commandHistory.entries,
+    recordHistoryError: commandHistory.recordError,
     command,
     setCommand,
     commandResult,
@@ -846,7 +845,7 @@ function Shell() {
     openOptionsPopup: () => requestOpenPopup('options'),
     historyOpen,
     setHistoryOpen,
-    clearHistory: () => setHistory([]),
+    clearHistory: commandHistory.clear,
     ribbonTab,
     setRibbonTab,
     ribbonCollapsed,

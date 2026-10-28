@@ -15,6 +15,7 @@ import { CommandField } from './CommandField.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { useCommandLine } from '../commands/use-command-line.ts';
 import { commandLogView } from '../commands/command-log.ts';
+import { historyRows } from '../commands/command-history.ts';
 import { unavailableReasonKey } from '../commands/commands.ts';
 import type { IconName } from '../icons.tsx';
 import { releaseFocusOnOutsidePress } from '../focus-release.ts';
@@ -122,12 +123,25 @@ export function CommandLine() {
           <span className="statusbar__tool-step" title={line.textStepKey ?? undefined}>{line.textStepKey ? t(line.textStepKey) : null}</span>
         ) : null}
         {line.textMode ? null : (
+          // The history toggle, and **only** the history toggle: it opens the log
+          // below this row and nothing else. The message lines are separate
+          // elements outside that panel, so pressing this never hides, moves or
+          // swallows the sentence the last attempt produced. The accessible name
+          // says "history" — the chevron alone read as "collapse the red line".
+          //
+          // `onMouseDown` keeps the press from blurring the field first: a blur
+          // closes the completion list, which shortens the region, shifts this
+          // row between the press and its release, and the browser then fires the
+          // click on an ancestor — the first press did nothing at all. Keeping
+          // focus makes one press open the log (the list closes by itself as soon
+          // as `historyOpen` is true).
           <IconButton
             icon={shell.historyOpen ? 'chevronDown' : 'chevronUp'}
             size="sm"
-            label={shell.historyOpen ? t('command.collapse') : t('command.expand')}
+            label={t('command.toggle_history')}
             pressed={shell.historyOpen}
-            title={`${t('command.expand')} (F2)`}
+            title={`${t('command.toggle_history')} (F2)`}
+            onMouseDown={event => event.preventDefault()}
             onClick={() => shell.setHistoryOpen(!shell.historyOpen)}
           />
         )}
@@ -172,22 +186,30 @@ export function CommandLine() {
         </div>
       ) : null}
       {shell.historyOpen ? (
+        // The log, newest first: admitted commands stay clickable (recall into the
+        // field), a refusal is red text and not a control — there is no command in
+        // it to run again. Both rows come from `shell.historyEntries`, so the panel
+        // and the mobile sheet can never describe the same session differently.
         <div className="history-panel" aria-label={t('command.history')}>
           <div className="history-panel__head">
             <span>{t('command.history')}</span>
-            <Button variant="plain" size="xs" icon="clearSelection" onClick={shell.clearHistory} disabled={!shell.history.length}>
+            <Button variant="plain" size="xs" icon="clearSelection" onClick={shell.clearHistory} disabled={shell.historyEntries.length === 0}>
               {t('command.clear_history')}
             </Button>
           </div>
-          {shell.history.length === 0 ? (
+          {shell.historyEntries.length === 0 ? (
             <div className="history-panel__empty">{t('command.history_empty')}</div>
           ) : (
             <ol className="history-panel__list">
-              {[...shell.history].reverse().map((entry, index) => (
-                <li key={`${entry}-${index}`}>
-                  <button type="button" className="history-panel__entry" onClick={() => shell.setCommand(entry)}>
-                    {entry}
-                  </button>
+              {historyRows(shell.historyEntries).map((entry, index) => (
+                <li key={`${entry.kind}-${index}`}>
+                  {entry.kind === 'command' ? (
+                    <button type="button" className="history-panel__entry" onClick={() => shell.setCommand(entry.text)}>
+                      {entry.text}
+                    </button>
+                  ) : (
+                    <p className="history-panel__entry is-error">{entry.text}</p>
+                  )}
                 </li>
               ))}
             </ol>
