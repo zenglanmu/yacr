@@ -2,9 +2,11 @@
 //
 // The field carries more wiring than a plain input: the accessible label changes
 // with the mode, the autocomplete/activedescendant attributes only exist while
-// the list is open, an over-long text step is `aria-invalid`, and its message is
-// `aria-describedby`-linked. Every one of those comes from the controller, so
-// the desktop region and the mobile bar cannot describe themselves differently.
+// the list is open, and an over-long text step is `aria-invalid`. Every one of
+// those comes from the controller, so the desktop region and the mobile bar
+// cannot describe themselves differently. There is no `aria-describedby` any
+// more: the sentence it pointed at was the refusal line under the field, and that
+// line is gone — the history holds the words now, not the field.
 //
 // `className` is the only visual input: the docked field and the 44px mobile
 // field are the same element with different CSS.
@@ -43,7 +45,6 @@ export function CommandField({ id, className, line, enterKeyHint }: CommandField
         aria-expanded={line.expanded}
         aria-activedescendant={line.activeOptionId}
         aria-invalid={line.invalid ? true : undefined}
-        aria-describedby={line.describedBy}
         onChange={event => line.onChange(event.target.value)}
         onFocus={line.onFocus}
         onBlur={line.onBlur}

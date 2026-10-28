@@ -2,19 +2,23 @@
 //
 // It replaces the desktop command line **and** the status bar. The bar holds the
 // same field (through the shared controller and `CommandField`), a send button
-// for the on-screen keyboard's own Enter-less habits, the message line, and the
-// suggestion/history lists — which open upward as one bounded sheet so the
-// drawing above stays visible.
+// for the on-screen keyboard's own Enter-less habits, and the suggestion/history
+// lists — which open upward as one bounded sheet so the drawing above stays
+// visible.
 //
 // Why a sheet and not the desktop's inline lists: the bar is the last thing on
 // the screen, so an inline list would have nowhere to go but over the drawing,
 // and the drawing is the point. The sheet is capped at 45dvh (`mobile.css`) and
 // the history is capped at `MOBILE_HISTORY_ROWS` entries, so it can never grow
-// into a second screen; it scrolls inside itself.
+// into a second screen; it scrolls inside itself. The desktop panel opens upward
+// for the same reason, which is why both presentations pop over the drawing and
+// neither reflows the shell.
 //
-// The error line is here for the same reason the status bar is missing: without
-// it a refused command, a failed canvas module or a polling failure would have no
-// visible surface on a phone. It is the host's own sentence, never invented copy.
+// **No refusal line under the field.** A refused command is reported once, in the
+// history (the red row of the same sheet, above this bar). One surface, one
+// sentence. The host's own error banner below is a different thing and stays: it
+// reports host failures (a failed canvas module, a failed poll), not a refusal
+// the command line produced.
 import React, { useEffect, useRef } from 'react';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
@@ -49,10 +53,11 @@ export function MobileCommandBar() {
     return releaseFocusOnOutsidePress(rootRef.current as unknown as FocusReleaseRoot | null, () => input?.blur());
   }, [focused]);
 
-  // The start hint shares the message slot: with no drawing on screen and nothing
-  // to report, the bar says what to do first instead of leaving an empty strip.
-  const showHint = !shell.documentVisible && !shell.loading
-    && !line.messageText && !shell.commandMessage && !shell.displayedError;
+  // The start hint is its own strip: with no drawing on screen and no host
+  // failure to report, the bar says what to do first instead of leaving an empty
+  // slot. A command-line refusal is not its business — that lives in the history
+  // sheet, so the hint is not suppressed by one.
+  const showHint = !shell.documentVisible && !shell.loading && !shell.displayedError;
 
   return (
     <div ref={rootRef} className="mobile-commandbar app-region">
@@ -136,8 +141,7 @@ export function MobileCommandBar() {
         <CommandField id="cad-command" className="mobile-commandbar__input" line={line} enterKeyHint="send" />
         {line.textMode ? null : (
           // The history toggle for this presentation: same state, same log, same
-          // name ("history"). It opens the sheet above the bar and nothing else —
-          // the message lines below the row are separate elements and stay put.
+          // name ("history"). It opens the sheet above the bar and nothing else.
           <IconButton
             icon="terminal"
             label={t('command.toggle_history')}
@@ -153,16 +157,6 @@ export function MobileCommandBar() {
           onClick={line.submit}
         />
       </div>
-      {line.messageText ? (
-        <p id="cad-command-message" className="mobile-commandbar__message error" role="alert">
-          {line.messageText}
-        </p>
-      ) : null}
-      {line.textMode ? null : shell.commandMessage ? (
-        <p className={['mobile-commandbar__message', shell.commandMessage.kind].join(' ')} role="alert">
-          {shell.commandMessage.text}
-        </p>
-      ) : null}
       {shell.displayedError ? (
         <p className="mobile-commandbar__message error" role="alert" title={shell.displayedError}>
           {shell.displayedError}

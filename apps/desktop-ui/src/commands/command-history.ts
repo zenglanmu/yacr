@@ -7,7 +7,7 @@
 // the desktop panel and the mobile sheet can show one honest list:
 //
 //   * `kind: 'command'` — an admitted command line, the only thing Up/Down recalls;
-//   * `kind: 'error'`   — the sentence the message line showed, verbatim.
+//   * `kind: 'error'`   — the refusal sentence, verbatim (the only surface it has).
 //
 // Two invariants keep it usable:
 //
@@ -80,11 +80,11 @@ export function appendCommand(
 }
 
 /**
- * Append the sentence the message line is showing.
+ * Append a refusal sentence.
  *
  * The caller passes the **built** sentence, not its inputs: `App` hands over the
- * `commandMessage` memo and the command line hands over the same string it puts
- * in `line.messageText`, so the record and the line cannot drift.
+ * `commandMessage` memo's text and the command line hands over the string its
+ * refusal path produced, so the record cannot drift from what was submitted.
  */
 export function appendError(
   entries: readonly CommandHistoryEntry[],

@@ -748,6 +748,14 @@ button, input, select { font: inherit; color: inherit; }
   padding: 4px 8px 5px;
   background: var(--chrome-2); border-top: 1px solid var(--line);
 }
+/* The region is the history popup's containing block. The popup is absolute and
+   opens *above* the input row, over the drawing: it is an overlay, so opening it
+   never reflows the shell (the status bar keeps its 26px and the window never
+   grows past the viewport). The z-index lifts the popup over the workspace; the
+   modal layer and the shortcut menu are portalled to `body` at 50–60, so they
+   still win, and the ribbon's own popovers live inside the band, which the popup
+   cannot reach. */
+.region--cmdline { position: relative; z-index: 30; }
 .commandline__row { display: flex; align-items: center; gap: 7px; }
 .commandline__prompt { color: var(--accent-text); }
 .commandline__input {
@@ -758,7 +766,6 @@ button, input, select { font: inherit; color: inherit; }
 }
 .commandline__input::placeholder { color: var(--text-muted); opacity: 1; }
 .commandline__input:disabled { color: var(--text-disabled); }
-.commandline__message { margin: 5px 0 0 24px; color: var(--danger); }
 /* Command-window echo (scrollback) --------------------------------------- */
 /* Above the input row and bounded to roughly seven lines: the list scrolls
    itself, so the echo never grows with the log and never reflows the ribbon. The
@@ -811,20 +818,73 @@ button, input, select { font: inherit; color: inherit; }
 .completion__id { font-family: var(--font-mono); }
 .completion__label { color: var(--text-muted); }
 .completion.is-supported .completion__id { color: var(--accent-text); }
-.history-panel { margin: 5px 0 0 24px; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--chrome-3); }
-.history-panel__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; }
+/* The history popup. Anchored to the command line and opening **upward** over the
+   drawing, never in flow below the input: the docked region is `position:
+   relative` (above), so `bottom: calc(100% + 6px)` puts the panel just clear of
+   the region's top edge and the region's own height never changes. `left/right:
+   8px` mirror the region's horizontal padding, so both borders are visible
+   inside the window instead of one running to the edge. The panel is capped at
+   40vh and the list is the scroller (see below), so a 64-row log stays a popup
+   and the status bar below the input never leaves the screen. */
+.history-panel {
+  position: absolute;
+  left: 8px; right: 8px;
+  bottom: calc(100% + 6px);
+  display: flex; flex-direction: column;
+  max-height: 40vh;
+  background: var(--chrome-3);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  /* It floats over an unpainted CAD partition, so it needs its own edge cue: the
+     chrome's own shadow step, the same one the mobile sheet and the shortcut menu
+     use. */
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .45);
+  overflow: hidden;
+  animation: rise var(--t-fast) both;
+}
+.history-panel__head { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; }
 .history-panel__empty { padding: 8px; color: var(--text-muted); }
-.history-panel__list { margin: 0; padding: 3px; list-style: none; max-height: 150px; overflow: auto; }
+/* The list is the scroller, with the same affordance the mobile sheet's scroller
+   uses (a thin `--line-soft` bar on a transparent track; the `*` rules at the top
+   of this file draw the WebKit thumb). The bottom pad means the last row can be
+   scrolled fully clear of the panel's edge instead of being sliced by it. */
+.history-panel__list {
+  flex: 1 1 auto; min-height: 0;
+  margin: 0; padding: 3px 3px 5px;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-soft) transparent;
+}
+/* "There is more under the fold". The thin scrollbar above is the same one the
+   mobile sheet's scroller declares, but an overlay scrollbar paints nothing at
+   rest in this WebView (the ribbon's scroller carries the same note), so the
+   popup adds the fade the mobile drawer already uses. It is driven by
+   `data-more-below` — set only while the list really has rows below — so a short
+   log is never dimmed. The 0-alpha stop is the same colour as the solid stop (the
+   drawer's own pattern; a plain `transparent` would grey the blend). */
+.history-panel::after {
+  content: '';
+  position: absolute; left: 1px; right: 1px; bottom: 1px;
+  height: 20px;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: linear-gradient(to bottom, rgba(43, 51, 63, 0) 0%, var(--chrome-3) 100%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-fast);
+}
+.history-panel[data-more-below='true']::after { opacity: 1; }
 .history-panel__entry {
   width: 100%; padding: 3px 8px; border: 0; border-radius: var(--radius);
   background: transparent; color: var(--text-dim); text-align: left; cursor: pointer;
   font-family: var(--font-mono);
 }
 .history-panel__entry:hover { background: var(--hover); color: var(--text); }
-/* A refusal row: the sentence the message line showed, kept as a record. It is
-   red, it is sentence-shaped (UI font, not the mono command face) and it is not a
-   control — there is no command in it to recall, so it has no hover and no
-   pointer cursor. 11.5px on `--chrome-3` is 6.3:1. */
+/* A refusal row: the sentence a refused submit produced, kept as the record — it
+   is the only place that sentence exists now. It is red, it is sentence-shaped
+   (UI font, not the mono command face) and it is not a control — there is no
+   command in it to recall, so it has no hover and no pointer cursor. 11.5px on
+   `--chrome-3` is 6.3:1. */
 .history-panel__entry.is-error {
   margin: 0;
   color: var(--danger);

@@ -380,6 +380,29 @@ test('the status-bar chip cannot wrap, overlap a neighbour or overflow its own b
   assert.ok(block('.statusbar__tool').includes('white-space: nowrap'));
 });
 
+test('the sheet is the only command-line surface on a phone, and it never reserves a gap', async () => {
+  const css = await readModule('mobile.css');
+  const block = (selector) => {
+    const start = css.indexOf(`${selector} {`);
+    assert.ok(start > 0, `${selector} must exist`);
+    return css.slice(start, css.indexOf('}', start));
+  };
+  const mobile = await readModule('components/MobileCommandBar.tsx');
+  // The sheet opens upward from the bar (the desktop panel uses the same shape),
+  // and it is capped so the drawing above stays visible.
+  assert.ok(css.includes('--mobile-sheet-h: 45dvh'));
+  assert.ok(block('.mobile-sheet').includes('position: absolute'));
+  assert.ok(block('.mobile-sheet').includes('bottom: calc(100% + 6px)'));
+  // The refusal line under the field is gone, so the bar must not keep a slot for
+  // it: the bar is a plain stacked flex column and only the host banner (its one
+  // remaining message element) can add height.
+  const bar = block('.mobile-commandbar');
+  assert.equal(/min-height/.test(bar), false, 'no reserved strip for a removed line');
+  assert.equal(/height:\s*\d+px/.test(bar), false, 'the bar is sized by its content');
+  assert.equal(mobile.split('mobile-commandbar__message').length - 1, 1, 'only the host banner remains');
+  assert.ok(mobile.includes('id="cad-command-message"') === false, 'no message element id survives');
+});
+
 test('the document reports a device-width viewport, so the breakpoint is CSS px', async () => {
   // Without `width=device-width` a phone lays the document out at ~980px and the
   // layout hook would resolve `desktop` on a 390px screen. `viewport-fit=cover`

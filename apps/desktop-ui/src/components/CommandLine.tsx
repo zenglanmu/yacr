@@ -1,14 +1,22 @@
 // Command line, docked bottom-left above the status bar. Autocomplete opens
-// inline *below* the input (never over the drawing area), the history panel
-// expands in the same row, and Up/Down step through recent commands.
+// inline *below* the input, the history opens as a popup *above* the row (over
+// the drawing, never in flow), and Up/Down step through recent commands.
 //
 // This file is the **docked presentation** and nothing else: the draft, the
 // suggestion rules, the history cursor, the text-step mode and the submit paths
 // are the shared controller in `commands/use-command-line.ts`, which the mobile
 // command bar renders from as well. What stays here is what only the desktop
 // region has — the command-window echo above the input, the inline suggestion
-// list, the history panel and the outside-press focus hand-off.
-import React, { useEffect, useMemo, useRef } from 'react';
+// list, the history popup and the outside-press focus hand-off.
+//
+// **No refusal line under the field.** A refused command used to be reported
+// twice: once as a red sentence in this region and once as the same sentence in
+// the history. The history log is the record now — the sentence a submit
+// produced is written there (red row) and nowhere else, so the line the user
+// reads and the line they scroll back to are one line, not a duplicate. The
+// host's own error banner (the status bar's, not this region's) is untouched:
+// that reports host failures, not command-line refusals.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../icons.tsx';
 import { Button, IconButton } from './primitives.tsx';
 import { CommandField } from './CommandField.tsx';
@@ -75,6 +83,20 @@ export function CommandLine() {
     logStick.current = node.scrollHeight - node.scrollTop - node.clientHeight <= 4;
   }
 
+  // The history popup's own scroller: is there more log under the fold? The list
+  // also declares a thin scrollbar, but this WebView draws an **overlay**
+  // scrollbar that shows nothing at rest (the ribbon's scroller has the same note),
+  // so the popup carries the fade the mobile drawer already uses — and only while
+  // there really is a row below, never over a list that fits.
+  const [moreBelow, setMoreBelow] = useState(false);
+  const panelListRef = useRef<HTMLOListElement | null>(null);
+  function overflowBelow(node: HTMLElement | null): boolean {
+    return node !== null && node.scrollHeight - node.scrollTop - node.clientHeight > 2;
+  }
+  useEffect(() => {
+    setMoreBelow(overflowBelow(panelListRef.current));
+  }, [shell.historyOpen, shell.historyEntries.length]);
+
   return (
     <div ref={rootRef} className="region region--cmdline commandline app-region">
       {/* The echo sits above the input row, inside the same region: the region
@@ -123,11 +145,12 @@ export function CommandLine() {
           <span className="statusbar__tool-step" title={line.textStepKey ?? undefined}>{line.textStepKey ? t(line.textStepKey) : null}</span>
         ) : null}
         {line.textMode ? null : (
-          // The history toggle, and **only** the history toggle: it opens the log
-          // below this row and nothing else. The message lines are separate
-          // elements outside that panel, so pressing this never hides, moves or
-          // swallows the sentence the last attempt produced. The accessible name
-          // says "history" — the chevron alone read as "collapse the red line".
+          // The history toggle, and **only** the history toggle: it opens the
+          // popup above this row and nothing else. It is the one place a refusal
+          // is read back from, so pressing it must never clear the record — the
+          // rows are the log itself, and opening the panel adds no second
+          // sentence anywhere. The accessible name says "history" — the chevron
+          // alone read as "collapse the red line".
           //
           // `onMouseDown` keeps the press from blurring the field first: a blur
           // closes the completion list, which shortens the region, shifts this
@@ -146,16 +169,6 @@ export function CommandLine() {
           />
         )}
       </div>
-      {line.messageText ? (
-        <p id="cad-command-message" className="commandline__message error" role="alert">
-          {line.messageText}
-        </p>
-      ) : null}
-      {line.textMode ? null : shell.commandMessage ? (
-        <p className={['commandline__message', shell.commandMessage.kind].join(' ')} role="alert">
-          {shell.commandMessage.text}
-        </p>
-      ) : null}
       {line.listOpen ? (
         <div className="completions" role="listbox" aria-label={t('command.completions')}>
           <div className="completions__title">{t('command.category.commands')}</div>
@@ -190,7 +203,14 @@ export function CommandLine() {
         // field), a refusal is red text and not a control — there is no command in
         // it to run again. Both rows come from `shell.historyEntries`, so the panel
         // and the mobile sheet can never describe the same session differently.
-        <div className="history-panel" aria-label={t('command.history')}>
+        //
+        // The panel is an overlay, not a row of the region: `style.css` pins it
+        // above the input (`position: absolute; bottom: calc(100% + 6px)`), caps
+        // it at `40vh` and scrolls the list inside itself. Opening it therefore
+        // never moves the status bar off-screen and never grows the window.
+        // `data-more-below` turns on the bottom fade (the mobile drawer's cue) when
+        // the scroller has rows under the fold.
+        <div className="history-panel" aria-label={t('command.history')} data-more-below={moreBelow ? 'true' : undefined}>
           <div className="history-panel__head">
             <span>{t('command.history')}</span>
             <Button variant="plain" size="xs" icon="clearSelection" onClick={shell.clearHistory} disabled={shell.historyEntries.length === 0}>
@@ -200,7 +220,7 @@ export function CommandLine() {
           {shell.historyEntries.length === 0 ? (
             <div className="history-panel__empty">{t('command.history_empty')}</div>
           ) : (
-            <ol className="history-panel__list">
+            <ol className="history-panel__list" ref={panelListRef} onScroll={event => setMoreBelow(overflowBelow(event.currentTarget))}>
               {historyRows(shell.historyEntries).map((entry, index) => (
                 <li key={`${entry.kind}-${index}`}>
                   {entry.kind === 'command' ? (

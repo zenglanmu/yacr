@@ -73,3 +73,25 @@ test('a refusal still reaches the banner (clearing is not suppression)', () => {
     'a refused standard view must still be reported, not swallowed by the clear',
   );
 });
+
+test('the banner is the host\'s, and it is not a command-line refusal line', async () => {
+  // The two things this suite pins are easy to confuse, so the split is asserted:
+  // the **host banner** (`displayedError` → the status bar on desktop, the error
+  // row on the mobile bar) stays, and the **command-line refusal line** under the
+  // field is gone (the history is its only surface — see
+  // `command-history.test.ts`). Removing the second must never take the first.
+  assert.ok(source.includes('displayedError: displayError'), 'the one derived banner value is still published');
+  assert.ok(source.includes('errorText: displayError'), 'the status bar still reads it');
+  // Both presentations still paint that banner, each in its own slot.
+  const statusbar = await readModule('components/StatusBar.tsx');
+  assert.ok(statusbar.includes('className="statusbar__error" role="alert"'), 'the desktop banner is a status-bar alert');
+  assert.ok(statusbar.includes('{shell.errorText}'), 'the desktop banner reads the host sentence');
+  const mobile = await readModule('components/MobileCommandBar.tsx');
+  assert.ok(mobile.includes('{shell.displayedError}'), 'the mobile bar still shows the host sentence');
+  // ...and neither paints the command-line refusal that used to sit under the
+  // input as a second copy of a history row.
+  for (const [name, presentation] of [['StatusBar.tsx', statusbar], ['MobileCommandBar.tsx', mobile]]) {
+    assert.equal(presentation.includes('shell.commandMessage'), false, `${name} paints no command refusal`);
+    assert.equal(presentation.includes('line.messageText'), false, `${name} paints no command refusal`);
+  }
+});

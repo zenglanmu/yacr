@@ -1,10 +1,10 @@
-// The one builder for the command line's message line.
+// The one builder for a refused command's sentence.
 //
-// The sentence under the field is built here, once, so its two readers can never
-// disagree: the line the user reads (`ShellValue.commandMessage`) and the entry
-// the history log records (`historyEntries`) are the *same string* from the
-// *same call*. A second builder would let the log word a refusal differently from
-// the line that was on screen when it happened — one catalog edit, two sentences.
+// It is built here, once, because the history row (`ShellValue.historyEntries`)
+// is the **only** place that sentence is shown: the red line under the field is
+// gone, so a second builder would be a second copy of the same fact. Every
+// refusal path — a command refused by admission, a host-side failure, a text
+// step `cad_set_tool_text` refused — reads its words from this one call.
 //
 // The rule is unchanged from the App-level memo this was extracted from: the
 // refusal sentence is the catalog key the admission itself reported (`reasonKey`),
@@ -15,18 +15,18 @@ import type { CadCommandResult } from '../cad/cad-command.ts';
 import type { Translator } from '../i18n.ts';
 import { unavailableReasonKey } from './commands.ts';
 
-/** One line of the command line's message line (only refusals are reported). */
+/** One refusal sentence (an admitted result reports nothing here). */
 export interface CommandMessage {
   readonly kind: string;
   readonly text: string;
 }
 
 /**
- * The message line for `result`, or `null` when there is nothing to report.
+ * The refusal sentence for `result`, or `null` when there is nothing to report.
  *
- * An accepted (or chrome-local) result produces no line: the host's next status
- * is the confirmation, and a fabricated "done" would claim completion the queue
- * admission never promised.
+ * An accepted (or chrome-local) result produces no sentence: the host's next
+ * status is the confirmation, and a fabricated "done" would claim completion the
+ * queue admission never promised — and an empty row in the log.
  */
 export function commandMessageFor(result: CadCommandResult | null, t: Translator): CommandMessage | null {
   if (!result) return null;

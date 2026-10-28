@@ -1,3 +1,73 @@
+## 2026-10-29 命令行拒绝只剩历史；历史面板改为向上弹出
+
+### 结论
+
+用户截图里的两个问题按"错误信息合并到命令历史错误"与"点击展开是往上弹"改掉了：
+
+- **删除输入框下方的两条拒绝横条**（桌面 `components/CommandLine.tsx` 的
+  `line.messageText` 条与 `shell.commandMessage` 条、移动 `MobileCommandBar.tsx` 的同两条）。
+  一句话只留一个出口：`commands/command-message.ts` 建出的句子仍由 `App.tsx` 的同一个 effect
+  写进 `historyEntries`（红行），桌面面板/移动 sheet 都渲染它。控制器不再发布
+  `messageText`/`describedBy`（`use-command-line.ts`），`CommandField` 去掉指向已删元素的
+  `aria-describedby`；`ShellValue.commandMessage` 这个只为旧横条存在的字段一并删除。
+  文本步超长/被拒的句子也走历史（`const tooLong = textMode && draft.tooLong` 的 effect，
+  相邻同句被 `appendError` 去重 ⇒ 一直超长也只有一行）。
+- **宿主横幅不动**：`shell.errorText`（桌面状态栏 `.statusbar__error`）与
+  `shell.displayedError`（移动 `.mobile-commandbar__message`）仍在，那报的是宿主失败
+  （canvas 模块、轮询、弹窗），不是命令行拒绝。移动端 `showHint` 因此只判
+  `!documentVisible && !loading && !displayedError`。
+- **桌面历史面板 = 向上弹的覆盖层**（`style.css`）：
+  `.region--cmdline { position: relative; z-index: 30 }` 作包含块，
+  `.history-panel { position: absolute; left: 8px; right: 8px; bottom: calc(100% + 6px);
+  max-height: 40vh; border: 1px solid var(--line-soft); box-shadow: 0 12px 28px rgba(0,0,0,.45);
+  overflow: hidden; animation: rise }`；列表是滚动体（`flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+  scrollbar-color: var(--line-soft) transparent; padding: 3px 3px 5px`），复用移动 sheet/抽屉
+  已用的细滚动条与"最后一行留出内边距"的做法。旧的 `margin: 5px 0 0 24px` 行内形态即
+  把状态栏挤出窗口的那条路，已删。移动 sheet 结构未动（本来就是绝对定位向上弹）。
+- **滚动可读性**：WebView 的 overlay 滚动条静止时不画（ribbon 滚动器早就有同样的注记），
+  所以面板补了移动抽屉那套"底部渐隐"（`.history-panel::after` + `data-more-below='true'`），
+  由列表自身几何驱动：22 行时面板高度恰好 320（=40vh）、`scrollHeight 495 / clientHeight 291`、
+  滚到底后末行完整可见（`605.16 ≤ 610.44`）；短日志（8 行）`overflow == 0` 时不加渐隐。
+
+### 同轮发现
+
+- "一次提交一条历史行"是真的成立：`App` 只有一个写入点（读 memo 的文本，不读原始 result），
+  `use-command-line.ts` 的 `refuse()` 只调一次 `recordHistoryError`，`appendError` 还会丢掉
+  相邻同 kind 同文的重写；React 双调用 effect、语言切换重算 memo 都不会多出一行。冒烟用
+  "恰好一条 `.history-panel__entry.is-error`" 钉住。
+- 打开历史时行内补全列表会自行关闭（`commandLineListOpen` 的 `historyOpen` 门），所以
+  **输入行的 y 会变**（列表让位），这是既有设计；几何断言因此钉"区域底边 == 状态栏顶边 /
+  状态栏没动 / 文档不超视口"，不钉行坐标。
+- 冒烟取证要在弹出动画结束后截图：`rise` 是 110ms，太早截图会抓到半透明首帧（本轮真的抓到过
+  一次，看起来像"画布盖住了面板"，实为面板 opacity 尚未到 1）。历史步骤现在等
+  `opacity === '1'` + 150ms 再量再拍。
+
+### 验证（本机）
+
+- `cd apps/desktop-ui && npx tsc --noEmit && node --test test/*.test.ts` → **825 pass / 0 fail**
+  （`command-history.test.ts` 新增"两条横条都不渲染""面板是向上弹的覆盖层""一次提交一行"，
+  并把"句子与 builder 一致"重指为 `commandMessageFor` 的输出；`text-tool.test.ts` 的超长用例
+  重指到历史；`error-banner.test.ts` 加"横幅是宿主的、不是命令行拒绝"）。
+- `bash scripts/build-web-ui.sh` → bundle 生成（wasm 13,566,623 B）。
+- `NODE_PATH=… node scripts/web-ui-smoke.cjs --url http://127.0.0.1:8090/ --verbose --evidence …`
+  → **PASS 8/8 cases (216/216 checks)**（SwiftShader 软件渲染）。新增步骤
+  `scripts/web-ui-history-case.cjs`（拆出前命令用例 1018 行、超门禁；拆出后 816 + 242）：拒绝后
+  `.commandline__message`/`#cad-command-message` 为 0、无可见 `[role=alert]`；打开历史后
+  恰好一条红行且含被拒命令名；1280×800 实测 panel `520.59..735`、区域顶 `740`、状态栏
+  `774..800`（26px 完整可见、y 未变）、`scrollHeight == 800`、panel `x 8..1272`、
+  高 `214.41 ≤ 40vh(320)`、最后一行底 `729 ≤ 734`、`data-more-below` 缺省（整份日志放得下）。
+- `python3 scripts/check-i18n.py` / `scripts/check-file-size.py` → OK（无新增文案键）。
+- 移动 390×844 手测（Playwright，软件渲染）：sheet `662.20..780`、bar row `792..836`；
+  拒绝后无横条、无 `[role=alert]`，红行在 sheet 内。
+
+### NOT RUN / NOT VERIFIED
+
+原生宿主（Tauri/Wayland/Windows）运行时、真实 GPU、真机 Android、WebKitGTK、像素正确性、
+真实 DPI/多显示器。桌面弹层的层序只在 Chromium + SwiftShader 上量过；弹层是否遮住
+dock 面板/布局标签条属于覆盖层语义（是覆盖），未做视觉验收。移动端提交被拒后，行内补全
+sheet 仍显示 "No matching commands"（既有行为，拒绝句要再点一次历史按钮才看到）——未改。
+
 ## 2026-10-28 前端换轨到单漏斗：`dom-canvas` 载体执行桌面命令集（输入/帧/弹窗/面板）
 
 ### 结论

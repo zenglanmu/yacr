@@ -25,7 +25,11 @@
  *     really was replaced;
  *   - **the About overlay opens from the ribbon** as an in-DOM dialog whose gate
  *     refuses CAD input: a canvas click while it is open changes nothing, and the
- *     session's own `probe_input` answer is `accepted: false` with the modal reason.
+ *     session's own `probe_input` answer is `accepted: false` with the modal reason;
+ *   - **a refused command has one surface**: no line under the field, exactly one
+ *     red row in the history popup, and that popup opens **above** the input row as
+ *     an overlay — measured, not assumed: the status bar is still fully on screen,
+ *     the workspace box does not move, and both popup edges are inside the window.
  *
  * What it does NOT prove: pixels as *visual correctness*, GPU behaviour,
  * performance, the X11 host or a shipped product. The run is SwiftShader (software
@@ -36,6 +40,7 @@
 const path = require('node:path');
 
 const { measureCanvasPixels } = require('./canvas-pixels.cjs');
+const { runHistoryPopupStep } = require('./web-ui-history-case.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 
@@ -81,6 +86,7 @@ const LINE_PICKS = Object.freeze([
 ]);
 
 const FIELD_ID = 'cad-command';
+
 
 /** The live session's own `shell_status()` snapshot, parsed (or `null`). */
 function readShellStatus(page) {
@@ -622,7 +628,7 @@ async function runCommandCase(browser, options, helpers) {
   const { record, newPage, waitForSession, readErrorAlerts, checkNoErrorBanner, takeScreenshot } = helpers;
   const checks = [];
   const bucket = { pageErrors: [], failedRequests: [], consoleLines: [] };
-  const name = 'commands FIT/ZOOMIN/ZOOMOUT, LINE, OPEN, LAYER, Options, About';
+  const name = 'commands FIT/ZOOMIN/ZOOMOUT, LINE, OPEN, LAYER, Options, About, refusal history';
   const screenshots = [];
   const observations = [];
   // `locale` is pinned so the ribbon's tab/item names are the English catalog's
@@ -763,6 +769,13 @@ async function runCommandCase(browser, options, helpers) {
 
     // About: the in-DOM dialog, and the modal gate that refuses CAD input.
     await runAboutStep(page, options, checks, record, helpers);
+
+    // The refusal path: one row, no line under the field, and the history popup
+    // as an upward overlay that leaves the status bar on screen. Its own module,
+    // so this one stays under the 1000-line bound.
+    await runHistoryPopupStep(page, options, {
+      checks, record, helpers, observations, typeCommand, fieldId: FIELD_ID,
+    });
 
     for (const text of [...alertsAfterZoom, ...alertsAfterFit, ...alertsAfterZoomOut, ...alertsAfterOpen]) {
       observations.push(`visible alert: ${text}`);

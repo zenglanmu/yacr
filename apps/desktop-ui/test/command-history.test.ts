@@ -10,17 +10,19 @@
 //
 //   * the **pure helpers** (`src/commands/command-history.ts`, plus the shared
 //     message builder in `src/commands/command-message.ts`): order, bound,
-//     dedupe, the command-only recall list, and the fact that the appended error
-//     text is byte-for-byte the sentence the message line shows;
-//   * **source contracts** on the two presentations, `App.tsx`, the controller
-//     and the catalogs — the toggle is named "history", the error rows carry the
-//     red class, the message line lives outside the panel, and clearing clears
-//     the whole log.
+//     dedupe, the command-only recall list, that the appended error text is
+//     byte-for-byte the sentence the builder produced, and that one submitted
+//     refusal is exactly one row;
+//   * **source contracts** on the two presentations, `App.tsx`, the controller,
+//     the stylesheets and the catalogs — the toggle is named "history", the error
+//     rows carry the red class, **no refusal line is rendered under either
+//     field** (the history is the only surface a refusal has), and the desktop
+//     panel is an absolute popup above the input row, not a row of the region.
 //
 // Nothing here mounts React: these are plain-Node assertions, not a DOM test.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readCatalog, readModule } from './helpers.ts';
+import { readCss, readCatalog, readModule } from './helpers.ts';
 import {
   COMMAND_HISTORY_LIMIT,
   appendCommand,
@@ -102,15 +104,16 @@ test('the recall list is commands only: a refusal can never reach the field', ()
   assert.deepEqual(commandOnly(rows), ['FIT']);
 });
 
-test('the appended error text is the sentence the message line shows', () => {
-  // The one builder both readers use: `App` puts its text in `commandMessage`
-  // (the live line) and hands the very same string to the log.
+test('the appended error text is the sentence the message builder produced', () => {
+  // The one builder the whole refusal path uses: `App` hands the memo's text to
+  // the log, which is now the *only* place a user reads it (the red line under
+  // the field is gone), so the record and the built sentence cannot drift.
   const unsupported = commandMessageFor({ kind: 'unsupported', command: 'NOPE', reasonKey: 'command.unsupported' }, t);
   assert.equal(unsupported.kind, 'error');
   assert.equal(unsupported.text, en['command.unsupported'].replace('{command}', 'NOPE'));
   let log = appendCommand([], 'NOPE');
   log = appendError(log, unsupported.text);
-  assert.equal(historyRows(log)[0].text, unsupported.text, 'the log records exactly what the line said');
+  assert.equal(historyRows(log)[0].text, unsupported.text, 'the log records exactly what the builder produced');
 
   const reason = commandMessageFor({ kind: 'failed', command: 'FIT', error: 'CAD_COMMAND_UNAVAILABLE', reasonKey: 'plot.no_document' }, t);
   assert.equal(reason.text, en['plot.no_document']);
@@ -146,22 +149,92 @@ test('both presentations render the one log and mark refusals as red rows', asyn
   assert.ok(mobile.includes('mobileHistoryRows(shell.historyEntries)'));
 });
 
-test('the message line stays outside the history panel', async () => {
-  const desktop = await readModule('components/CommandLine.tsx');
-  const panel = desktop.slice(desktop.indexOf('className="history-panel"'));
-  const panelEnd = panel.indexOf(') : null}');
-  const panelMarkup = panel.slice(0, panelEnd);
-  // The live sentences are rendered *before* the panel, as their own elements:
-  // opening or closing the log can never hide, move or swallow them.
-  assert.equal(panelMarkup.includes('commandline__message'), false, 'no message line inside the panel');
-  const messages = desktop.indexOf('className="commandline__message error"');
-  const panelStart = desktop.indexOf('className="history-panel"');
-  assert.ok(messages > 0 && messages < panelStart, 'the message line sits between the row and the panel');
-  // The mobile bar keeps its own three lines outside the sheet for the same reason.
+test('no refusal line is rendered under either command field', async () => {
+  // The duplicate the screenshots showed: the same sentence in a red line under
+  // the input **and** in the history. The history is the only surface now, so
+  // neither presentation may render a message element at all.
+  for (const name of ['components/CommandLine.tsx', 'components/MobileCommandBar.tsx']) {
+    const source = await readModule(name);
+    assert.equal(source.includes('commandline__message'), false, `${name} renders no docked refusal line`);
+    assert.equal(source.includes('line.messageText'), false, `${name} reads no controller message`);
+    assert.equal(source.includes('shell.commandMessage'), false, `${name} re-renders no command result`);
+    // Nothing hides the sentence behind a condition either: the element is gone,
+    // not merely styled out, so there is no `role="alert"` to find on refusal.
+    assert.equal(source.includes('cad-command-message'), false, `${name} has no message element id`);
+  }
+  // The mobile bar keeps exactly one message element, and it is the **host
+  // banner** (`shell.displayedError`): a failed canvas module or poll still needs
+  // a surface on a phone, and it is not a command-line refusal.
   const mobile = await readModule('components/MobileCommandBar.tsx');
-  const sheet = mobile.slice(mobile.indexOf('className="mobile-sheet"'), mobile.indexOf('className="mobile-commandbar__row"'));
-  assert.equal(sheet.includes('mobile-commandbar__message'), false, 'no message line inside the sheet');
-  assert.ok(mobile.indexOf('className="mobile-commandbar__message') > mobile.indexOf('className="mobile-commandbar__row"'));
+  assert.equal(mobile.split('mobile-commandbar__message').length - 1, 1, 'one message element, the host banner');
+  assert.ok(mobile.includes('{shell.displayedError}'), 'the banner still renders the host sentence');
+  assert.equal(mobile.includes('line.messageText'), false, 'no refusal line shares that slot');
+  // The controller no longer publishes a message (and so the field cannot point
+  // `aria-describedby` at an element that does not exist).
+  const hook = await readModule('commands/use-command-line.ts');
+  const field = await readModule('components/CommandField.tsx');
+  assert.equal(hook.includes('messageText'), false, 'the controller publishes no message text');
+  assert.equal(hook.includes('describedBy'), false, 'the controller publishes no described-by id');
+  assert.equal(field.includes('aria-describedby={'), false, 'the field points at no removed element');
+  // The mobile start hint is not suppressed by a refusal any more: it has one
+  // reason of its own (no drawing, no host failure).
+  const hint = mobile.slice(mobile.indexOf('const showHint'), mobile.indexOf(';', mobile.indexOf('const showHint')));
+  assert.equal(hint.includes('messageText'), false, 'the hint does not read the gone message');
+  assert.equal(hint.includes('commandMessage'), false, 'the hint does not read the gone message');
+  assert.ok(hint.includes('shell.displayedError'), 'the host banner still wins over the hint');
+});
+
+test('the desktop history panel is an upward popup over the drawing, not a row of the region', async () => {
+  const css = await readCss();
+  const block = (selector) => {
+    const start = css.indexOf(`${selector} {`);
+    assert.notEqual(start, -1, `${selector} must exist`);
+    return css.slice(start, css.indexOf('}', start));
+  };
+  // The region is the containing block; without it the popup would be positioned
+  // against the viewport (or the nearest ancestor) and land nowhere useful.
+  const region = block('.region--cmdline');
+  assert.match(region, /position:\s*relative/, 'the docked region anchors the popup');
+  assert.match(region, /z-index:\s*\d+/, 'the popup paints over the workspace');
+  // The panel itself: absolute, above the row (`bottom: calc(100% + 6px)`), inset
+  // by the region's own 8px so both borders stay visible.
+  const panel = block('.history-panel');
+  assert.match(panel, /position:\s*absolute/, 'the panel is an overlay, not in flow');
+  assert.match(panel, /bottom:\s*calc\(100% \+ 6px\)/, 'it opens above the input row');
+  assert.match(panel, /left:\s*8px/, 'the left border is inside the window');
+  assert.match(panel, /right:\s*8px/, 'the right border is inside the window');
+  assert.match(panel, /max-height:\s*40vh/, 'the popup is bounded');
+  assert.match(panel, /border:\s*1px solid var\(--line-soft\)/, 'it keeps the chrome border');
+  assert.match(panel, /box-shadow:/, 'a floating panel carries an edge cue');
+  assert.match(panel, /box-shadow:[^;]*rgba\(0, 0, 0, /, 'the shared shadow step, not a new one');
+  assert.match(panel, /overflow:\s*hidden/, 'the head stays pinned and the list scrolls');
+  // The old in-flow shape is gone: a top margin is exactly what used to push the
+  // status bar off-screen.
+  assert.equal(panel.includes('margin: 5px 0 0 24px'), false, 'the panel no longer sits in the flow below the row');
+  // Bounded, scrollable list with the affordance the mobile sheet's scroller
+  // uses (thin `--line-soft` bar), and a bottom pad so the newest row is
+  // reachable rather than sliced at the panel edge.
+  const list = block('.history-panel__list');
+  assert.match(list, /flex:\s*1 1 auto/, 'the list takes the popup\'s remaining height');
+  assert.match(list, /min-height:\s*0/, 'a flex child may shrink below its content');
+  assert.match(list, /overflow-y:\s*auto/, 'the list scrolls inside the popup');
+  assert.match(list, /overscroll-behavior:\s*contain/);
+  assert.match(list, /scrollbar-width:\s*thin/, 'the scroller is visible');
+  assert.match(list, /scrollbar-color:\s*var\(--line-soft\) transparent/);
+  assert.match(list, /padding: 3px 3px 5px/, 'the last row clears the edge');
+  assert.equal(list.includes('max-height: 150px'), false, 'the cap moved to the panel (40vh)');
+  // The visible "more below" cue is the mobile drawer's fade, not a new style, and
+  // it is driven by a data attribute so a short log is never dimmed.
+  assert.ok(css.includes('.history-panel::after'), 'the popup carries the drawer\'s bottom fade');
+  const fade = block('.history-panel::after');
+  assert.match(fade, /pointer-events:\s*none/, 'the fade never swallows a scroll');
+  assert.match(fade, /linear-gradient\(to bottom, rgba\(43, 51, 63, 0\) 0%, var\(--chrome-3\) 100%\)/, 'the drawer pattern');
+  assert.match(fade, /opacity:\s*0/, 'hidden until there is something below');
+  assert.ok(css.includes(".history-panel[data-more-below='true']::after { opacity: 1; }"), 'the cue is data-driven');
+  // The component sets that attribute from the scroller's own geometry.
+  const desktop = await readModule('components/CommandLine.tsx');
+  assert.ok(desktop.includes("data-more-below={moreBelow ? 'true' : undefined}"));
+  assert.ok(desktop.includes('node.scrollHeight - node.scrollTop - node.clientHeight > 2'));
 });
 
 test('the shell keeps one log: commands for recall, entries for the panels', async () => {
@@ -170,29 +243,65 @@ test('the shell keeps one log: commands for recall, entries for the panels', asy
   assert.ok(context.includes('readonly historyEntries: readonly CommandHistoryEntry[]'), 'the typed log is exposed');
   assert.ok(context.includes('readonly recordHistoryError: (text: string) => void'), 'the refusal writer is exposed');
   assert.ok(context.includes("import type { CommandHistoryEntry } from './commands/command-history.ts'"));
+  // The dead surface is gone: there is no shell value for a rendered message.
+  assert.equal(context.includes('commandMessage'), false, 'no message line state is exposed to the views');
 
   const app = await readModule('App.tsx');
   assert.ok(app.includes('useCommandHistory()'), 'App owns no history rule of its own');
-  assert.ok(app.includes('commandMessageFor(commandResult, t)'), 'the line and the log share one builder');
+  assert.ok(app.includes('commandMessageFor(commandResult, t)'), 'the log reads the one builder');
   assert.ok(app.includes('commandHistory.appendCommand(result.command)'), 'an admitted line is stored');
   assert.ok(
     app.includes('recordHistoryError(commandMessage.text)'),
-    'the refusal is stored with the text the line shows',
+    'the refusal is stored with the sentence the builder produced',
   );
   assert.ok(app.includes('history: commandHistory.commands as string[]'), 'recall reads the derived list');
   assert.ok(app.includes('historyEntries: commandHistory.entries'), 'the panels read the log');
   assert.ok(app.includes('recordHistoryError: commandHistory.recordError'), 'the hook writes through the shell');
   assert.ok(app.includes('clearHistory: commandHistory.clear'), 'clear clears the whole log');
 
-  // The text step's refusal takes the same one-string path.
+  // The text step's refusal takes the same one-row path, and only that path: the
+  // removed `setTextMessage` state would have been the second surface.
   const hook = await readModule('commands/use-command-line.ts');
-  assert.ok(hook.includes('shell.recordHistoryError(text)'), 'a text-step refusal reaches the log');
-  assert.ok(hook.includes('setTextMessage({ kind: \'error\', text })'), 'and the live line keeps the same text');
+  assert.ok(
+    hook.includes('const recordHistoryError = shell.recordHistoryError;'),
+    'the controller holds the one writer as a stable alias',
+  );
+  assert.ok(hook.includes('recordHistoryError(text);'), 'a text-step refusal reaches the log');
+  assert.equal(hook.includes('setTextMessage'), false, 'a text-step refusal is not stored twice');
   assert.equal(
     hook.includes('setTextMessage({ kind: \'error\', text: result.error })'),
     false,
     'no second wording of the same refusal',
   );
+});
+
+test('one submitted refusal is exactly one history row', async () => {
+  // Pure layer: the same sentence appended twice by the same submit is one row
+  // (an adjacent same-kind repeat is dropped), so a re-run of the recording
+  // effect — a re-render, a locale change, React's double-invoked effects — can
+  // never show the duplicate the screenshot had.
+  const sentence = commandMessageFor({ kind: 'unsupported', command: 'DSF.FDSAF' }, t).text;
+  let log = appendCommand([], 'COPYCLIP');
+  log = appendError(log, sentence);
+  const once = log;
+  log = appendError(log, sentence);
+  assert.equal(log, once, 'the second write is a no-op on the same reference');
+  assert.equal(historyRows(log).filter(entry => entry.kind === 'error').length, 1, 'one refusal, one red row');
+
+  // Source layer: exactly one writer per submit path. `App` records the memo's
+  // text in one effect, and the controller records a text-step refusal in one
+  // function; neither has a second call site that could append the same
+  // sentence again.
+  const app = await readModule('App.tsx');
+  assert.equal(app.split('recordHistoryError(commandMessage.text)').length - 1, 1, 'one recording site in App');
+  const hook = await readModule('commands/use-command-line.ts');
+  const refuseBody = hook.slice(hook.indexOf('function refuse('), hook.indexOf('function submitText('));
+  assert.equal(refuseBody.split('recordHistoryError(').length - 1, 1, 'a refusal is written exactly once');
+  assert.ok(refuseBody.includes('recordHistoryError(text);'));
+  // The refusal is built once per result and recorded once: the effect reads the
+  // memo, not the raw result.
+  assert.ok(app.includes('if (commandMessage) recordHistoryError(commandMessage.text);'));
+  assert.equal(app.includes('appendError('), false, 'App never appends an error behind the builder');
 });
 
 test('the toggle is labelled as history in both catalogs', () => {

@@ -41,7 +41,10 @@
  *     `filechooser`) — after which the session reports the chosen fixture's name,
  *     its entity count and a larger `importCount` — and the About ribbon entry must
  *     open the in-DOM overlay with the session's modal gate refusing CAD input.
- *     Every step also asserts no `[role="alert"]` appeared.
+ *     Every step also asserts no `[role="alert"]` appeared. A **refused** line is
+ *     the last step (`web-ui-history-case.cjs`): no line under the field, exactly
+ *     one red history row, and the history popup measured as an upward overlay
+ *     that leaves the workspace and the status bar where they were.
  *
  * What it does NOT prove - and must never be read as:
  *   - anything about GPU hardware: this launch forces ANGLE/SwiftShader, so the

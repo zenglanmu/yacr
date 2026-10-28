@@ -5,8 +5,8 @@
 // shell exposes:
 //
 //   * `appendCommand` — one admitted command line (`submitCommand`);
-//   * `recordError`   — one sentence the message line is showing, called with the
-//     already-built text so the record and the line cannot drift.
+//   * `recordError`   — one refusal sentence, called with the already-built text
+//     (the record is the only surface it has, so it is written once per submit).
 //
 // There is **one** log for both presentations: the desktop region and the mobile
 // bar read `ShellValue.history` (command-only, for Up/Down recall and ranking) and
@@ -27,7 +27,7 @@ export interface CommandHistoryState {
   readonly commands: readonly string[];
   /** Record one admitted command line. */
   readonly appendCommand: (text: string) => void;
-  /** Record one refusal sentence — pass the text the message line shows. */
+  /** Record one refusal sentence — pass the sentence the builder produced. */
   readonly recordError: (text: string) => void;
   /** Drop the whole log (the panel's clear button). */
   readonly clear: () => void;

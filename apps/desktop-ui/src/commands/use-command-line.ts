@@ -2,18 +2,23 @@
 //
 // `command-line-model.ts` owns every rule; this hook owns only the state that a
 // render actually needs (the focused flag, the highlighted row, the history
-// cursor, the text step's draft and its last refusal) plus the effects that keep
-// those in step with the host. Both command-line presentations render from the
-// returned controller:
+// cursor and the text step's draft) plus the effects that keep those in step with
+// the host. Both command-line presentations render from the returned controller:
 //
 //   * `components/CommandLine.tsx` — the desktop region, with its command-log
-//     echo, history panel and inline completions;
+//     echo, history popup and inline completions;
 //   * `components/MobileCommandBar.tsx` — the mobile bottom bar, with the same
 //     field and the same sheets opening upward instead of inline.
 //
 // Nothing here draws: the 44px row, the sheet position and the label sizes are
 // the presentations' business. Nothing here is duplicated either — a change to
 // Enter, Up/Down, Tab, Escape or the text step lands in both bars at once.
+//
+// **Refusals have one surface: the history.** A refused text step used to set a
+// message the presentations drew under the field *and* write the same sentence to
+// the history; the duplicate line is gone, so `refuse` here only writes the
+// record. `App.tsx` does the same for a refused command (one `appendError` from
+// the one `commandMessageFor` builder), which is why one submit is one row.
 //
 // The text step (ADR 0019 A.3) is the one mode with its own draft: while the host
 // reports `tool.awaiting_text` the field becomes a text prompt, Enter submits it
@@ -72,10 +77,6 @@ export interface CommandLineController {
   readonly expanded: boolean | undefined;
   /** `aria-activedescendant` for the highlighted row. */
   readonly activeOptionId: string | undefined;
-  /** `aria-describedby` for the text step's own message, when one is showing. */
-  readonly describedBy: string | undefined;
-  /** The story the text step reports (over-long draft or a refusal), or `null`. */
-  readonly messageText: string | null;
   /** Whether the field currently owns the keyboard. */
   readonly focused: boolean;
   /** Whether the suggestion list is offered. */
@@ -107,11 +108,11 @@ export function useCommandLine(): CommandLineController {
   const [focused, setFocused] = useState(false);
   const [highlight, setHighlight] = useState(-1);
   const [cursor, setCursor] = useState<number | null>(null);
-  // The text step's own draft and its last outcome message. The draft is never
-  // mirrored into `shell.command`: the command line keeps its content and gets
-  // it back once the tool ends.
+  // The text step's own draft. It is never mirrored into `shell.command`: the
+  // command line keeps its content and gets it back once the tool ends. The
+  // step's outcome is not state here — a refusal goes straight into the history
+  // (see `refuse`), which is the only surface that shows it.
   const [textDraft, setTextDraft] = useState('');
-  const [textMessage, setTextMessage] = useState<{ readonly kind: string; readonly text?: string } | null>(null);
   const tool = shell.status?.tool ?? null;
   const toolKey = typeof tool?.key === 'string' ? tool.key : null;
   const textMode = awaitingToolText(shell.status);
@@ -148,7 +149,6 @@ export function useCommandLine(): CommandLineController {
   useEffect(() => {
     if (textMode) return;
     setTextDraft('');
-    setTextMessage(null);
   }, [textMode]);
 
   // A new text step starts with the host's prefill — `TEXTEDIT` puts the current
@@ -159,7 +159,6 @@ export function useCommandLine(): CommandLineController {
   useEffect(() => {
     if (!textMode) return;
     setTextDraft(toolTextPrefill(tool) ?? '');
-    setTextMessage(null);
     inputRef.current?.focus();
     // Read on the step transition only: a later poll never re-seeds, so it can
     // never overwrite what the user has typed.
@@ -174,22 +173,29 @@ export function useCommandLine(): CommandLineController {
   }, [textMode, prefill]);
 
   const draft = textDraftState(textDraft);
-  // Over the bound, the limit itself is the only message worth showing; the
-  // draft is left exactly as typed (never truncated) and Enter sends nothing.
-  const tooLongText = draft.tooLong ? t(TEXT_TOO_LONG_KEY, { max: TOOL_TEXT_MAX_LENGTH }) : null;
-  const messageText = textMode ? (tooLongText ?? textMessage?.text ?? null) : null;
+  // Over the bound, the limit itself is the only sentence worth telling the user.
+  // It is a history row now, not a line under the field: the record is the one
+  // surface, and it stays **one** row while the draft is over the bound (the log
+  // drops an adjacent identical entry, so typing on does not stack copies). The
+  // draft is left exactly as typed — never truncated — and Enter sends nothing.
+  const recordHistoryError = shell.recordHistoryError;
+  const tooLong = textMode && draft.tooLong;
+  useEffect(() => {
+    if (!tooLong) return;
+    recordHistoryError(t(TEXT_TOO_LONG_KEY, { max: TOOL_TEXT_MAX_LENGTH }));
+  }, [tooLong, t, recordHistoryError]);
 
   function stepSuggestions(delta: number) {
     setHighlight(index => ((index < 0 ? 0 : index) + delta + suggestions.length) % suggestions.length);
   }
 
-  // One sentence, two readers: the line under the field and the history log get
-  // the *same* string from this one call, so the record of a refusal can never
-  // word it differently from the line that was on screen. The live line is left
-  // exactly as it was — the log is the record, not a replacement.
+  // A refusal has exactly one surface: the history row. The sentence is the one
+  // the catalog resolves at the moment of the refusal (the same string a refused
+  // command produces through `commandMessageFor`), written once for this submit —
+  // there is deliberately no second `setState` of it, because the duplicate line
+  // under the field is what the user asked to be gone.
   function refuse(text: string) {
-    setTextMessage({ kind: 'error', text });
-    shell.recordHistoryError(text);
+    recordHistoryError(text);
   }
 
   function submitText() {
@@ -197,7 +203,6 @@ export function useCommandLine(): CommandLineController {
     void shell.submitToolText(textDraft).then(result => {
       if (result.kind === 'accepted') {
         setTextDraft('');
-        setTextMessage(null);
         return;
       }
       // The first submit still owns the IPC; a re-entrant Enter is not an answer.
@@ -289,8 +294,6 @@ export function useCommandLine(): CommandLineController {
     autoComplete: textMode ? undefined : 'list',
     expanded: textMode ? undefined : listOpen && suggestions.length > 0,
     activeOptionId,
-    describedBy: messageText ? 'cad-command-message' : undefined,
-    messageText,
     focused,
     listOpen,
     suggestions,
@@ -305,7 +308,6 @@ export function useCommandLine(): CommandLineController {
     onChange: (next: string) => {
       if (textMode) {
         setTextDraft(next);
-        setTextMessage(null);
         return;
       }
       setCursor(null);

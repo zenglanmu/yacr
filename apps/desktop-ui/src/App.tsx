@@ -93,8 +93,8 @@ function Shell() {
   const [command, setCommand] = useState('');
   const [commandResult, setCommandResult] = useState<CadCommandResult | null>(null);
   // The command line's history log (`commands/use-command-history.ts`): admitted
-  // commands **and** the refusal sentences the message line showed. `commands` is
-  // its derived command-only list, which is what Up/Down and ranking may read.
+  // commands **and** refusal sentences. `commands` is its derived command-only
+  // list, which is what Up/Down and ranking may read.
   const commandHistory = useCommandHistory();
   const [pending, setPending] = useState(false);
   const [ribbonTab, setRibbonTab] = useState('home');
@@ -237,12 +237,12 @@ function Shell() {
   // and it is cleared at the start of every new attempt so a stale sentence cannot
   // outlive the action that produced it (see `submitCommand`/`runStandardView`).
   const displayError = status?.error || error || pollError || '';
-  // The message line, built once by `commands/command-message.ts` so the log's
-  // error row and the line under the field are the same string.
+  // A refused attempt's sentence, built once by `commands/command-message.ts`.
+  // The history log is its **only** reader now: the line under the command field
+  // that used to repeat it is gone, so the record is not a duplicate of anything.
   const commandMessage = useMemo<CommandMessage | null>(() => commandMessageFor(commandResult, t), [commandResult, t]);
-  // Every sentence the message line shows is also written into the history log —
-  // the live line stays exactly where it was. The effect runs on the built text,
-  // so a re-render never re-appends and the log only holds what the user saw.
+  // Written once per result. A re-render recomputes the memo but not the sentence,
+  // and `appendError` drops an adjacent repeat, so one submit is one row.
   const recordHistoryError = commandHistory.recordError;
   useEffect(() => {
     if (commandMessage) recordHistoryError(commandMessage.text);
@@ -807,7 +807,6 @@ function Shell() {
     command,
     setCommand,
     commandResult,
-    commandMessage,
     // The host's alias table (`cad_command_aliases`). It is suggestion metadata
     // only: the command line offers these rows, admission still goes through
     // `cad_command`, and an empty table just means "no aliases known".

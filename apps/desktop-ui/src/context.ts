@@ -77,19 +77,21 @@ export interface ShellValue {
   readonly history: string[];
   /**
    * The whole history log, oldest first: admitted commands **and** the refusal
-   * sentences the message line showed. The panels render this; `history` is its
-   * derived command-only list, so a refusal can never reach the field.
+   * sentences a submit produced. The panels render this; `history` is its derived
+   * command-only list, so a refusal can never reach the field.
    */
   readonly historyEntries: readonly CommandHistoryEntry[];
-  /** Write one refusal sentence into the log (the text the message line shows). */
+  /**
+   * Write one refusal sentence into the log. It is the **only** surface a refusal
+   * has (there is no message line under the field), so this is called once per
+   * submit — with the already-built sentence, never with its inputs.
+   */
   readonly recordHistoryError: (text: string) => void;
   /** The command line's draft. */
   readonly command: string;
   readonly setCommand: Dispatch<SetStateAction<string>>;
   /** The last `cad_command` answer, or `null`. */
   readonly commandResult: ShellRecord | null;
-  /** The message under the command line, or `null`. */
-  readonly commandMessage: ShellRecord | null;
   /** The host's alias table (`cad_command_aliases`), suggestion metadata only. */
   readonly commandAliases: readonly ShellRecord[];
   /** Submit typed command text through the one funnel. */

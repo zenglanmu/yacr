@@ -161,22 +161,27 @@ test('empty, whitespace-only and over-long text never reach IPC', async () => {
   }
 });
 
-test('over the bound the limit is shown, the draft is kept and nothing is truncated', async () => {
+test('over the bound the limit is recorded, the draft is kept and nothing is truncated', async () => {
   const draft = textDraftState('a'.repeat(TOOL_TEXT_MAX_LENGTH + 1));
   assert.deepEqual(draft, { length: TOOL_TEXT_MAX_LENGTH + 1, max: TOOL_TEXT_MAX_LENGTH, tooLong: true, empty: false });
   assert.equal(textDraftState('hello').tooLong, false);
   assert.equal(textDraftState('   ').empty, true);
   assert.equal(textDraftState('   ').tooLong, false);
   assert.equal(TOOL_TEXT_MAX_LENGTH, 1024);
-  // The draft and its bound live in the shared controller; the docked region only
-  // renders the message it reports.
+  // The draft and its bound live in the shared controller.
   const commandline = await readModule('commands/use-command-line.ts');
   const desktop = await readModule('components/CommandLine.tsx');
-  // The bound is rendered from the catalog with the real number, in both the
-  // live warning and the refusal message.
+  // The bound is reported from the catalog with the real number, into the one
+  // surface a refusal has: the history row. There is no line under the field any
+  // more (the duplicate the screenshots showed), so the region announces nothing.
   assert.ok(commandline.includes('t(TEXT_TOO_LONG_KEY, { max: TOOL_TEXT_MAX_LENGTH })'), 'the limit is shown from the catalog');
-  assert.ok(commandline.includes('const tooLongText = draft.tooLong'));
-  assert.ok(desktop.includes('role="alert"'), 'the limit/refusal is announced');
+  assert.ok(commandline.includes('const tooLong = textMode && draft.tooLong'));
+  assert.ok(
+    commandline.includes('recordHistoryError(t(TEXT_TOO_LONG_KEY, { max: TOOL_TEXT_MAX_LENGTH }))'),
+    'the limit goes into the history, the only surface left',
+  );
+  assert.equal(commandline.includes('messageText'), false, 'no controller message is published');
+  assert.equal(desktop.includes('role="alert"'), false, 'the region renders no second warning line');
   // No silent truncation: the field has no `maxLength`, and the draft is only
   // cleared on acceptance.
   assert.ok(!commandline.includes('maxLength'), 'the field must not truncate the draft');
@@ -184,7 +189,7 @@ test('over the bound the limit is shown, the draft is kept and nothing is trunca
   const accepted = commandline.indexOf("if (result.kind === 'accepted') {");
   const cleared = commandline.indexOf("setTextDraft('');", accepted);
   assert.ok(accepted !== -1 && cleared > accepted, 'the draft is cleared only after acceptance');
-  // An over-long draft is not sent at all: the visible limit is the answer.
+  // An over-long draft is not sent at all: the recorded limit is the answer.
   assert.ok(commandline.includes('if (draft.empty || draft.tooLong) return;'));
 });
 
