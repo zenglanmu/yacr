@@ -159,7 +159,7 @@
 | AutoCAD 名 | 状态 | 界 |
 |---|---|---|
 | `COPYCLIP` / `CUTCLIP` / `COPYBASE` / `CUTBASE` / `PASTECLIP` / `PASTEORIG` | 部分（**集群已实现**，`PASTEBLOCK` 缺） | **应用内**剪贴板：**不是** OS 剪贴板、不跨应用、替换文档即清空。**两个捕获形状**：`COPYCLIP`/`CUTCLIP`（`Ctrl+C`/`Ctrl+X`，**不记基点**；`COPYCLIP` 只读、Viewer 可用；`CUTCLIP` work-only）与 `COPYBASE`/`CUTBASE`（`Ctrl+Shift+C`/`Ctrl+Shift+X`，在预选择之上**再抓一个基点**存进剪贴板元数据；`COPYBASE` 只读、Viewer 可用；`CUTBASE` work-only，**先删除成功再提交剪贴板（含基点）**，失败的剪切不毁旧剪贴板）。**两个粘贴形状**：`PASTECLIP`（`Ctrl+V`，**单点插入点工具**，平移 `插入点 − 基点`，`base = clipboard_base.unwrap_or(世界原点)`，复用 COPY 的同一个 `cad_db` 变换——**不再是原坐标粘贴**）与 `PASTEORIG`（原坐标，忽略基点，等价改动前的 `PASTECLIP`）。所有权重走 `commands/accelerators.ts` → `admitCommandText` 的同一准入。**仍缺**：`PASTEBLOCK`（`Ctrl+Shift+V`）**未实现**——`cad-db` 没有块写 API，加速器表故意拒绝该 chord、不降级成 `PASTECLIP` |
-| `ZOOM` | 部分 | `ZOOM <factor>`（正十进制，锚定视口中心）、`ZOOM ALL`/`EXTENTS`（⇒ `FIT`）、`ZOOMIN`/`ZOOMOUT`；**无** `WINDOW`/`PREVIOUS`/`OBJECT`/`DYNAMIC`，也**无**图纸空间比例 `nXP` |
+| `ZOOM` | 部分 | `ZOOM <factor>`（正十进制，锚定视口中心）、`ZOOM ALL`/`EXTENTS`（⇒ `FIT`）、`ZOOMIN`/`ZOOMOUT`、**`ZOOM WINDOW`（2026-10-28）**、**`ZOOM PREVIOUS`（2026-10-28）**；**无** `OBJECT`/`DYNAMIC`，也**无**图纸空间比例 `nXP`。**`WINDOW`**：两角框选经宿主 box-gesture 路径（逻辑像素、实心带、点击不选择），矩形退化/非有限**不派发**；**仅 2D 正交**（3D 按名拒绝 `zoom.window.requires_2d`），另有 `zoom.window.capture_busy`（其它捕获/模态 pan 占着指针）；拟合用 **margin `1.0`**（FIT 是 `1.05`，**我们的选择**）、同一条「较紧轴」规则，`view_mode` 保持 2D，**不进历史、不 bump `session.generation`**。**`PREVIOUS`**：**每视口**一条上限 **16** 的快照栈（最旧丢弃），在每个**离散**视图变化**之前**记录（FIT/`ALL`/`EXTENTS`（真的取景时）、`ZOOM <factor>`/`ZOOMIN`/`ZOOMOUT`/旧 `Points` 载荷缩放、`ZOOM WINDOW`、`STANDARDVIEW`（2D 下的 plan 视图是 no-op、不记）、`SWITCH2D3D`、`PROJECTION`、`RESETVIEW`）；**pan/滚轮缩放/orbit 拖动不记录**（**声明的偏离**）；空栈 ⇒ 非错误诊断 `zoom.previous.empty`。快照 = camera + view_mode + work_plane。语法只认**全词**（`ZOOM W`/`ZOOM PREV` 拒绝），拒绝文案点名 「positive factor, ALL, EXTENTS, WINDOW or PREVIOUS」 |
 | `PAN` | 实现 | 视图平移（实时） |
 | `VIEW` | 部分 | 预设标准视图（top/bottom/front/back/left/right/isometric）经 IPC；**无**命名视图的保存/恢复/删除 |
 | `ORBIT` | 部分 | `{yaw, pitch}` 载荷，**仅三维视图**；无连续/受约束 orbit 交互 |
@@ -212,7 +212,7 @@
 
 > 其它已知缺口（不属上述名字，但读表时容易误判为已完整）：`MATCHPROP` 的 Settings 子集、
 > `ARRAY` 的 Path/关联编辑、`STRETCH` 的 HATCH 部分拉伸、
-> OS 剪贴板（真系统剪贴板）与 `PASTEBLOCK`（粘贴为块）、`ZOOM WINDOW/PREVIOUS`、命名视图、CTB/STB 打印样式、
+> OS 剪贴板（真系统剪贴板）与 `PASTEBLOCK`（粘贴为块）、命名视图、CTB/STB 打印样式、
 > 非均匀缩放与镜像的文字/`MULTILEADER`（域限制，非命令层缺失）。
 
 ---

@@ -98,6 +98,30 @@ orthographic ⇒ restored 2D).
 The legacy `CommandPayload::Points` factor-only zoom is retained for CLI/direct
 callers and uses the canvas centre as the cursor.
 
+## ZOOM WINDOW / ZOOM PREVIOUS (2026-10-28)
+
+Both are **typed argument forms of `ZOOM`** — no new `CommandId`, no second zoom path.
+
+* **`ZOOM WINDOW`** frames a two-corner rectangle **exactly**. The host arms its
+  box gesture (`begin_zoom_window`), the next 2D primary drag supplies the two
+  corners in canvas logical pixels, and the release dispatches one
+  `CommandPayload::ZoomWindow`. It is **2D orthographic only**: a 3D view is refused
+  by name (`zoom.window.requires_2d`) at arming, and a capture or modal pan that
+  already owns the pointer refuses with `zoom.window.capture_busy`. A degenerate or
+  non-finite rectangle dispatches **nothing**. The fit reuses `framing_rect`'s
+  tighter-axis rule with margin `WINDOW_MARGIN = 1.0` (FIT uses `1.05`; the padding
+  is **our choice**, AutoCAD's is undocumented), leaves `view_mode` in 2D, writes no
+  document history and does not bump `session.generation`.
+* **`ZOOM PREVIOUS`** restores this viewport's previous **discrete** view from a
+  per-viewport stack capped at `ZOOM_HISTORY_CAP = 16` (oldest dropped). A snapshot is
+  `camera + view_mode + work_plane`; it is pushed **before** each discrete change
+  (FIT/`ZOOM ALL`/`EXTENTS` when it really frames, `ZOOM <factor>`/`ZOOMIN`/`ZOOMOUT`/
+  legacy `Points`, `ZOOM WINDOW`, `STANDARDVIEW` except the no-op plan view while
+  already 2D, `SWITCH2D3D`, `PROJECTION`, `RESETVIEW`). **Pans, wheel zooms and orbit
+  drags never record a step** — a declared divergence from AutoCAD, whose history is
+  interactive. An empty stack is not an error: it reports the `zoom.previous.empty`
+  diagnostic and changes nothing.
+
 ## Work plane
 
 `camera::orthonormal_work_plane(origin, u, v)` (and `xy_work_plane(z)`) build the

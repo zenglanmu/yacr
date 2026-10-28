@@ -1,3 +1,67 @@
+## 2026-10-28 第 16 轮：`ZOOM WINDOW` / `ZOOM PREVIOUS`（都是 `ZOOM` 的参数写法）
+
+### 结论
+
+`ZOOM` 的两个词形参数落地：**`ZOOM WINDOW`**（两角框选、**仅 2D 正交**、精确框住矩形）与
+**`ZOOM PREVIOUS`**（**每视口**的**离散**视图栈，上限 16）。两者都骑在既有 `CommandId::Zoom` 上，
+**命令表仍 97**——没有新选择子、没有第二条缩放路径。
+
+### 做了什么
+
+**载荷与语法（`cad-app` / `cad-ui-core`）**
+
+- `CommandPayload::ZoomWindow { ... }` / `ZoomPrevious`；`parse_zoom_argument` 只认**全词**
+  `ALL`/`EXTENTS`/`WINDOW`/`PREVIOUS`（`ZOOM W`、`ZOOM PREV` 落回正十进制解析失败 ⇒ 稳定拒绝），
+  拒绝文案点名「positive factor, ALL, EXTENTS, WINDOW or PREVIOUS」。
+- `ZOOM PREVIOUS` **立即**派发一次 `ZoomPrevious`；`ZOOM WINDOW` **只 arm**，相机在准入时**不动**。
+
+**两角手势（`cad-host`）**
+
+- `HostCore::begin_zoom_window` arm 到既有 box-gesture 路径：逻辑像素、实心带、**点击不触发选择**；
+  **一次性**（松手或取消即消费）。arm 时就把 3D 挡掉——3D 按名拒绝 `zoom.window.requires_2d`，
+  所以**不存在死捕获**；另一捕获或模态 pan 占着指针时 `zoom.window.capture_busy`。
+  非有限矩形 `zoom.window.invalid_rect`、任一轴无延展 `zoom.window.degenerate_rect`，两者都
+  **什么都不派发**（也不是"空成功"）。
+
+**拟合（`app_zoom.rs`）**
+
+- 与 `FIT` **共用** `framing_rect`（同一条「较紧轴」规则），但 margin 是 `WINDOW_MARGIN = 1.0`
+  而 `FIT_MARGIN = 1.05`——**这是我们的选择**，AutoCAD 的 padding 无文档依据。结果 `view_mode`
+  保持 2D（`TwoD { saved: framed }`），**不进历史、不 bump `session.generation`**（FIT 会 bump）。
+
+**视图栈（`zoom_history.rs`）**
+
+- **每视口**一条 `VecDeque`，`ZOOM_HISTORY_CAP = 16`，满了**丢最旧**；快照 =
+  `camera + view_mode + work_plane`（`view_mode` 带 3D 出走的 2D 回程相机；`work_plane` 因为
+  `RESETVIEW`/标准视图会换平面）。
+- **只在离散变化之前压栈**：FIT/`ZOOM ALL`/`EXTENTS`（**真的取景时**——空图纸的 FIT 是 no-op，不压）、
+  `ZOOM <factor>`/`ZOOMIN`/`ZOOMOUT`/旧 `Points` 载荷缩放、`ZOOM WINDOW`、`STANDARDVIEW`
+  （**已在 2D 时的 plan 视图是 no-op，不压**）、`SWITCH2D3D`、`PROJECTION`、`RESETVIEW`。被拒绝的变化
+  同样不压（否则 `ZOOM PREVIOUS` 会把一次空按烧掉）。
+- `ZOOM PREVIOUS` **只弹不压**，所以连按单调回退；空栈**不是错误** ⇒ 诊断 `zoom.previous.empty`、
+  视图不动（与 `LAYERP` 的「没有上一状态」同型）。
+- **声明的偏离**：**pan、滚轮缩放、orbit 拖动不记录**。AutoCAD 的 `ZOOM Previous` 走交互累积的历史；
+  本构建只在离散命令上记，因为连续导航每帧一条命令，记下来会让 `ZOOM PREVIOUS` 变成「撤销我拖动里的一个像素」。
+
+### 证据（本机，2026-10-28）
+
+- `cargo test -p cad-app --locked` → **1379 / 0**（集成套件 4+11+18+15+5+2 全 0 failed，1 ignored）；
+  `-p cad-ui-core` → **302 / 0**；`-p cad-host` → **249 / 0**（1 ignored）。
+- `check-command-docs.py` → `OK: 0 mismatches`（`tables: 97/5/2/4`，`§2 rows: 59`）；
+  `check-i18n.py` → **889 keys / 2 目录**；`check-file-size.py` → **1090** 文件 ≤1000 行；
+  `check-architecture.py` → 28 packages 无环。
+
+### 仍未成立 / 边界（必须原样保留）
+
+1. **没有 GUI/像素/真实按键证据**：框选手势、实心带、按钮启用与提示都只有契约测试；**没有**在真实窗口
+   拖过、也没有截图。
+2. **`ZOOM WINDOW` 仅 2D 正交**；3D 下按名拒绝，不伪造透视框选。
+3. **`ZOOM PREVIOUS` 只回退离散视图**：pan/滚轮/orbit 不入栈（**声明的偏离**），所以历史可能比
+   AutoCAD 的更"老"。
+4. **margin `1.0` 是我们的选择**（`FIT` 的 `1.05` 不同），AutoCAD 的 padding 未查证。
+5. **wasm / `dom-canvas` 载体未跑**：框选走宿主 box-gesture 路径，`dom-canvas`（X11/web）上的归属**未验证**。
+6. **平台 NOT RUN**：全 workspace 矩阵、Windows/Android/macOS、真按键均未运行。
+
 ## 2026-10-28 第 15 轮：含弧段折线的 OFFSET（精确同心）
 
 ### 结论

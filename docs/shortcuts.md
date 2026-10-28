@@ -109,7 +109,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `SELECTALL` | 选择（全选可见模型空间对象） | 否 | — |
 | `PAN` | 导航 | 否 | `P` |
 | `FIT` | 导航（缩放到范围；`ZOOM EXTENTS` 是**真实别名**） | 否 | `ZOOM EXTENTS` |
-| `ZOOM` | 导航（参数形式 `ZOOM <factor>` 比例因子、锚定视口中心；`ZOOM ALL`/`ZOOM EXTENTS` 走 `FIT`，裸 `ZOOM` 显式拒绝） | 否 | `Z` |
+| `ZOOM` | 导航（参数形式 `ZOOM <factor>` / `ALL` / `EXTENTS` / **`WINDOW`** / **`PREVIOUS`**；裸 `ZOOM` 显式拒绝） | 否 | `Z` |
 | `ZOOMIN` | 导航（固定步进放大 `1.25×`，锚定视口中心） | 否 | — |
 | `ZOOMOUT` | 导航（固定步进缩小，步进为放大的倒数） | 否 | — |
 | `OPEN` | 宿主 | 否 | — |
@@ -136,7 +136,16 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
   `ZOOM ALL` 与 `ZOOM EXTENTS` 是 **`ZOOM` 的参数写法**（不是命令名），与别名 `ZOOM EXTENTS`→`FIT`
   都走 `FIT` 路径。命令名与参数之间允许一个或多个空格/制表符，行尾空格忽略，大小写不敏感；
   不带参数的裸 `ZOOM` 仍走既有的“该命令需要 payload”显式拒绝，不会编造一个默认因子。
-  这是**命令行参数**，不是新命令、不是新 IPC。
+  这是**命令行参数**，不是新命令、不是新 IPC（命令表仍 **97**）。
+- **`ZOOM WINDOW` / `ZOOM PREVIOUS`（2026-10-28，都是 `ZOOM` 的参数写法）**：
+  - `ZOOM WINDOW`：两角框选（宿主 box-gesture 路径，逻辑像素、实心带、**点击不会选择**），松手后**精确**框住该矩形
+    （margin **`1.0`**，FIT 是 `1.05`——**我们的选择**）；矩形退化/非有限**什么都不派发**；**仅 2D 正交**，3D 按名拒绝
+    （`zoom.window.requires_2d`），另一捕获或模态 pan 占着指针时 `zoom.window.capture_busy`。参数**只认全词**：`ZOOM W` 被拒。
+  - `ZOOM PREVIOUS`：**每视口**一条上限 **16** 的视图栈，最旧丢弃；在**离散**视图变化**之前**记录快照（camera + view_mode +
+    work_plane）——FIT/`ALL`/`EXTENTS`（真的取景时）、`ZOOM <factor>`/`ZOOMIN`/`ZOOMOUT`/旧 `Points` 缩放、`ZOOM WINDOW`、
+    `STANDARDVIEW`（2D 下的 plan 视图是 no-op、不记）、`SWITCH2D3D`、`PROJECTION`、`RESETVIEW`。**pan、滚轮缩放、orbit 拖动
+    **不记录**——这是**声明的偏离**（AutoCAD 会把这些也走一遍）。空栈不是错误：给 `zoom.previous.empty` 诊断、不动视图。
+    参数**只认全词**：`ZOOM PREV` 被拒。
 - `GRID` 只切换**显示栅格叠加**（会话状态；宿主还要 `view.overlays.grid` 偏好同时为真才真正绘制）。
   它与栅格**捕捉**（`SNAP`/F9）是两个独立开关，`GRID` 不移动任何点。
 - `SNAP` 切换**会话内的栅格捕捉**（默认**关**，与 AutoCAD 初始状态一致）：开启后每次取点把 **X 与 Y**

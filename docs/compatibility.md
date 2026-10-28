@@ -320,6 +320,7 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 
 ## 三维
 
+- **缩放与视图历史（2026-10-28）**：`ZOOM WINDOW`（两角框选，**仅 2D 正交**——3D 按名拒绝 `zoom.window.requires_2d`；另一捕获或模态 pan 占着指针时 `zoom.window.capture_busy`；退化/非有限矩形**不派发**；拟合 margin **`1.0`**、`FIT` 是 **`1.05`**（**我们的选择**）、同一条较紧轴规则；`view_mode` 保持 2D、**不进历史、不 bump `session.generation`**）与 `ZOOM PREVIOUS`（**每视口**一条上限 **16** 的**离散**视图栈，最旧丢弃；快照 = camera + view_mode + work_plane；在 FIT/`ALL`/`EXTENTS`/`ZOOM <factor>`/`ZOOMIN`/`ZOOMOUT`/旧 `Points`/`ZOOM WINDOW`/`STANDARDVIEW`（2D 下 plan 是 no-op）/`SWITCH2D3D`/`PROJECTION`/`RESETVIEW` **之前**记录；**pan、滚轮缩放、orbit 拖动不记录**——**声明的偏离**；空栈 ⇒ 非错误诊断 `zoom.previous.empty`）。两者都是 `ZOOM` 的**参数写法**（只认全词，`ZOOM W`/`ZOOM PREV` 拒绝；命令表仍 **97**）。**证据边界**：只有契约测试（`cad-app` / `cad-ui-core` / `cad-host`），**无 GUI/像素/真实按键证据**。
 - 观察（轨道/标准视图/正交-透视）：相机/投影/标准视图/轨道命令与宿主接线齐全
   （`crates/cad-app/src/camera/` → `cad-host/src/state.rs` 的 `ViewSnapshot` →
   `cad-engine` 按 `view_mode` 选 `render`(2D)/`render_3d`(`Camera3d`)）。
