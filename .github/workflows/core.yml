@@ -11,7 +11,8 @@ name: CI
 #                   migration contracts, workspace host debug compilation (required)
 #   wasm-check    : full-workspace wasm --lib check + a separate app-web check (required)
 #   i18n-contracts: bilingual catalog parity + no hardcoded chrome literals (required)
-#   android-check : aarch64 `app-android` placeholder check, capability-gated
+#   android-check : aarch64 `app-android` (real Tauri Android host) compile check,
+#                   capability-gated
 #
 # The retired platform build/deploy/release jobs live in `.github/workflows/build.yml`
 # and are hard-disabled (`if: false`) so they can never publish a stub. See docs/ci.md.
@@ -104,7 +105,7 @@ jobs:
           python3 scripts/test-package-windows-release.py
           python3 scripts/test-package-macos-release.py
           python3 scripts/test-fetch-fonts.py
-          python3 scripts/test-android-icon.py
+          python3 scripts/test-android-host.py
           python3 scripts/test-ui-migration-guards.py
       - name: Retained platform-neutral node contracts (no web shell)
         # scripts/test-web-pixels.mjs is the one web-era test kept because it is a
@@ -160,8 +161,16 @@ jobs:
     # Capability-dependent. GitHub-hosted runners do not ship the pinned JDK 17 /
     # Android SDK / NDK, so this job is disabled by default. When disabled it is
     # reported as SKIPPED, never as a pass, and the gap is recorded in
-    # docs/ci.md "NOT RUN". It compiles the retired `app-android` NOT IMPLEMENTED
-    # placeholder only; the deleted Slint UI crate is NOT part of the gate.
+    # docs/ci.md "NOT RUN". It compiles the **real** Android host
+    # (`apps/app-android/src-tauri`, a Tauri 2 WebView carrier around the wasm
+    # `dom-canvas` session) for an Android target — it does not build an APK, does
+    # not run Gradle and does not touch a device.
+    #
+    # `tauri::generate_context!` embeds `frontendDist`, so the compile needs the
+    # Android UI bundle on disk: the job builds it first (wasm session artifacts +
+    # `YACR_RUNTIME=android` chrome), exactly like the `linux-app` gate builds the
+    # desktop frontend. Without that step the check fails with a missing-dist panic
+    # instead of passing on a stub.
     #
     # To enable: set repository variable ANDROID_CI_ENABLED=true and point
     # ANDROID_RUNNER_LABEL at a provisioned runner/label (e.g. "android-ci").
@@ -174,6 +183,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: aarch64-linux-android
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - name: Cache cargo (registry / git / target)
         uses: actions/cache@v4
         with:
@@ -191,5 +203,32 @@ jobs:
           : "${JAVA_HOME:?JAVA_HOME (JDK 17) is not set: provision the runner per docs/build.md}"
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "JAVA_HOME=$JAVA_HOME"
-      - name: Android target check (retired placeholder)
+      - name: Install the pinned wasm-bindgen CLI and the UI build deps
+        # The Android bundle embeds the same wasm CAD session the browser bundle
+        # uses, so the CLI pin comes from the shared toolchain library and the
+        # prebuilt release is verified against its published SHA-256 — never taken
+        # from whatever happens to be on PATH.
+        run: |
+          set -euo pipefail
+          rustup target add wasm32-unknown-unknown
+          pin="$(sed -n 's/^readonly YACR_PINNED_WASM_BINDGEN="\(.*\)"$/\1/p' scripts/lib/wasm-toolchain.sh)"
+          test -n "$pin" || { echo "no wasm-bindgen pin in scripts/lib/wasm-toolchain.sh" >&2; exit 1; }
+          case "$pin" in
+            0.2.129)
+              sha="82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e" ;;
+            *)
+              echo "no verified download for wasm-bindgen $pin; add its release SHA-256 to this step" >&2
+              exit 1 ;;
+          esac
+          archive="wasm-bindgen-${pin}-x86_64-unknown-linux-musl"
+          curl -fsSL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${pin}/${archive}.tar.gz" \
+            -o "/tmp/${archive}.tar.gz"
+          echo "${sha}  /tmp/${archive}.tar.gz" | sha256sum -c -
+          tar -xzf "/tmp/${archive}.tar.gz" -C /tmp
+          install "/tmp/${archive}/wasm-bindgen" "$HOME/.cargo/bin/wasm-bindgen"
+          wasm-bindgen --version | grep -Fx "wasm-bindgen ${pin}"
+          ( cd apps/desktop-ui && npm ci )
+      - name: Build the Android UI bundle (the `frontendDist` generate_context! embeds)
+        run: bash scripts/build-android-ui.sh
+      - name: Android target check (real host, compile only)
         run: cargo check --target aarch64-linux-android -p app-android --locked

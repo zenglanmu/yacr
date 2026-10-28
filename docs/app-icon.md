@@ -19,10 +19,7 @@
 | `assets/yacr-icon.ico` | Windows 多分辨率图标（16–256） |
 | `assets/yacr-icon.icns` | macOS 多分辨率图标（16–1024） |
 | `assets/icons/yacr-<size>.png` | Linux hicolor、Web manifest、apple-touch |
-| `apps/app-android/res/mipmap-*/ic_launcher.png` | Android 传统启动图标（48dp 基准，各密度） |
-| `apps/app-android/res/mipmap-*/ic_launcher_foreground.png` | 自适应图标前景（108dp 画布，66dp 安全区） |
-| `apps/app-android/res/mipmap-anydpi-v26/ic_launcher.xml` | API 26+ 自适应图标定义 |
-| `apps/app-android/res/values/colors.xml` | 自适应图标背景色 `#08151D` |
+| `apps/app-android/src-tauri/icons/icon.png` | Android 宿主（Tauri 2）的 `bundle.icon` 源；`tauri android init` 由它生成 `gen/android` 的 mipmap。**不是** `generate-icons.py` 的输出：它是 `assets/icons/yacr-1024.png` 的副本，由 `scripts/test-android-host.py` 断言存在 |
 
 ## 各端接入
 
@@ -57,11 +54,12 @@
 
 - **已运行（合成/本地）**：`cargo check -p cad-ui-slint`；`cargo test -p cad-ui-slint
   --test app_icon_contract`（2 passed）；`node --test scripts/test-web-icon.mjs`；
-  `python3 scripts/test-android-icon.py`；三个 `test-package-*-release.py`；
-  `python3 scripts/generate-icons.py --check`。
-- **未运行**：真实 GPU/窗口管理器图标显示、Android APK 构建与真机启动图标、macOS `.app`
+  `python3 scripts/test-android-host.py`（Android 宿主图标路径 + `bundle.icon` 断言）；
+  三个 `test-package-*-release.py`；`python3 scripts/generate-icons.py --check`。
+- **未运行**：真实 GPU/窗口管理器图标显示、Android 真机启动图标外观、macOS `.app`
   图标。Windows `.exe` 内嵌图标经本机 GNU 交叉构建 + `check-pe-imports.py --has-icon`
   验证，MSVC 路径由 windows-release CI 构建时验证，均不证明真机外观。
+  Android 侧只验证了 APK 构建与模拟器安装（`docs/android-host.md`），**未**验证启动器图标外观。
 - **本地已运行（补充）**：`cargo build -p app-windows --target x86_64-pc-windows-gnu` +
   `python3 scripts/check-pe-imports.py --has-icon target/x86_64-pc-windows-gnu/debug/yacr.exe`。
 

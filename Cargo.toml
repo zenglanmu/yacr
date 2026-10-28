@@ -24,7 +24,7 @@ members = [
     "crates/cad-platform",
     "crates/cad-diagnostics",
     "crates/cad-cli-tools",
-    "apps/app-android",
+    "apps/app-android/src-tauri",
     "apps/app-web",
     "apps/app-linux",
     "apps/app-windows",

@@ -209,7 +209,7 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
 
 | 入口 | 状态 |
 |---|---|
-| `scripts/build-android.sh` | **RETIRED**——Android UI 未实现（`apps/app-android` 为占位）；非零退出 |
+| `scripts/build-android.sh` | **可用（2026-10-28）**——真机构建入口：`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（wasm 会话 + `YACR_RUNTIME=android` chrome）再 Gradle；**release APK 默认未签名**。CI 的 `android-apk`/`android-release` **仍硬禁用**（无签名密钥、无商店路径） |
 | `scripts/package-windows-release.sh` | **RETIRED**——无 Windows 发布流水线；非零退出（注意：`app-windows` **已是真实宿主**，退役的是**打包脚本**，不是 GUI 实现） |
 | `scripts/package-macos-release.sh` | **RETIRED**——macOS GUI 未实现（`apps/app-macos` 占位 `yacr-macos`）；非零退出 |
 
@@ -229,8 +229,12 @@ React/Tauri 宿主构建 **Flatpak** bundle（`bin/yacr` + committed `fonts/`，
   Wine 只做拒绝合同 smoke。见 `docs/windows-app.md`。
 - **macOS**：`apps/app-macos`（`yacr-macos`）仍是**显式 NOT IMPLEMENTED 失败桩**（打印诊断并
   `exit 1`）；CI `macos-check` 只做编译门禁，**不运行**，也不产出可分发 GUI。
-- **Android**：`apps/app-android` 是**显式 NOT IMPLEMENTED 占位**（打印退役诊断后 abort）；
-  旧的 APK 构建与部署全部退役。
+- **Android**：`apps/app-android` 是**真实 Tauri 2 宿主**（2026-10-28 起）——WebView/资源载体，
+  `surfaceMode: dom-canvas` 的 wasm 会话是唯一 CAD 权威，原生侧只注册两个 shell 报表命令。
+  本地构建 = `scripts/build-android.sh`（`tauri android build --apk`，release 未签名）；CI 的
+  `android-check` 仍是 capability-gated 的 **aarch64 编译门禁**（不跑 Gradle、不建 APK、不跑设备），
+  `android-apk`/`android-release` **仍硬禁用**。证据（模拟器 SwiftShader，x86_64）与
+  **NOT VERIFIED** 边界见 `docs/android-host.md`。
 - **Web**：`apps/app-web` 的 **wasm CAD 会话**（ADR 0024）在 CI 中端到端构建与冒烟：
   `web-build` → `apps/app-web/dist` artifact、`web-smoke` → Playwright Chromium（**SwiftShader
   软件渲染**）断言 `start: ok`，`web-deploy` → 仅 `v*` tag / 手工 dispatch 发布到 Cloudflare Pages

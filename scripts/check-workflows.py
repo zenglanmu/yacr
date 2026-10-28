@@ -85,6 +85,9 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "npm test",
         "npm run build",
         "node --test scripts/test-web-pixels.mjs",
+        # The Android host's static wiring contract (layout, Android-only `tauri`,
+        # the two shell-only commands, the webgl2 refusal, the UI bundle path).
+        "python3 scripts/test-android-host.py",
         "test-ui-migration-guards.py",
     ),
     "windows-check": (
@@ -107,8 +110,12 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "cargo test -p cad-render-wgpu --test wgsl_validation --locked",
     ),
     "android-check": (
-        # The retired Slint UI is dropped from the Android compile gate; only the
-        # explicit NOT IMPLEMENTED `app-android` placeholder is compiled.
+        # The **real** Android host (a Tauri 2 WebView carrier around the wasm
+        # `dom-canvas` session) is compiled for an Android target. `tauri::
+        # generate_context!` embeds `frontendDist`, so the Android UI bundle must be
+        # built first; dropping either half must be reported, not silently accepted.
+        "apps/desktop-ui",
+        "scripts/build-android-ui.sh",
         "cargo check --target aarch64-linux-android -p app-android --locked",
     ),
     "web-build": (

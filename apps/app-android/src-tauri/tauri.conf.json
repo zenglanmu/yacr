@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Yacr",
+  "version": "0.1.2",
+  "identifier": "dev.yacr.app",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "bash ../../scripts/build-android-ui.sh"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Yacr",
+        "width": 1024,
+        "height": 768,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "android": {
+      "minSdkVersion": 24
+    },
+    "icon": ["icons/icon.png"]
+  }
+}

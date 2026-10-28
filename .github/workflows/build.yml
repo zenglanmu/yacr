@@ -32,12 +32,15 @@ name: CI build layers
 #   linux-release   : was the Flatpak bundle (retired pending replacement packaging)
 #   windows-release : was the MSVC release zip
 #   macos-release   : was the universal Yacr.app tarball
-#   android-apk     : was the cargo-apk build (Android UI retired)
-#   android-release : was the release APK with fonts
+#   android-apk     : was the cargo-apk build (now: local `scripts/build-android.sh`)
+#   android-release : was the release APK with fonts (no CI publish path)
 #
 # The public entry points for the retired paths fail with NOT IMPLEMENTED:
-#   scripts/{build-android,package-linux-release,package-windows-release,
-#             package-macos-release}.sh
+#   scripts/{package-linux-release,package-windows-release,package-macos-release}.sh
+# `scripts/build-android.sh` is **not** in that list: since 2026-10-28 it builds the
+# real Tauri Android APK locally (`tauri android build`). What stays retired is the
+# CI *publish* path (`android-apk`/`android-release` above): there is no signing key
+# in CI and no store upload.
 #
 # `scripts/build-web.sh` and `scripts/deploy-cloudflare-pages.sh` are real entry
 # points again; the browser bundle is not a shipped product and its runtime
@@ -263,28 +266,31 @@ jobs:
           exit 1
 
   android-apk:
-    name: android-apk (RETIRED — Android UI NOT IMPLEMENTED)
-    # RETIRED (P3b): the Android UI was retired to a NOT IMPLEMENTED placeholder
-    # and scripts/build-android.sh exits non-zero. The plain compile gate lives in
-    # core.yml (`android-check`, capability-gated).
+    name: android-apk (RETIRED — no CI APK build/publish)
+    # RETIRED (P3b): this job never builds or uploads an APK. The Android host is
+    # real again (2026-10-28, `apps/app-android` = Tauri 2 carrier), but its build
+    # runs locally (`scripts/build-android.sh` → `tauri android build --apk`), needs
+    # the SDK/NDK/Gradle toolchain and produces an **unsigned** release APK unless a
+    # keystore is configured — none of which belongs in a publish-capable CI job.
+    # The plain compile gate lives in core.yml (`android-check`, capability-gated).
     if: false
     runs-on: ubuntu-latest
     steps:
       - name: Retired — no Android APK is built or uploaded
         run: |
-          echo "RETIRED: android-apk is NOT IMPLEMENTED; nothing is built."
+          echo "RETIRED: android-apk publishes nothing; build locally with scripts/build-android.sh."
           exit 1
 
   android-release:
-    name: android-release (RETIRED — Android UI NOT IMPLEMENTED)
-    # RETIRED (P3b): no release APK is produced; scripts/build-android.sh exits
-    # non-zero.
+    name: android-release (RETIRED — no CI APK build/publish)
+    # RETIRED (P3b): no release APK is produced or uploaded by CI; there is no
+    # signing key and no store path. See `android-apk` above.
     if: false
     runs-on: ubuntu-latest
     steps:
       - name: Retired — no Android release is built or uploaded
         run: |
-          echo "RETIRED: android-release is NOT IMPLEMENTED; nothing is built."
+          echo "RETIRED: android-release publishes nothing; build locally with scripts/build-android.sh."
           exit 1
 
   web-build:

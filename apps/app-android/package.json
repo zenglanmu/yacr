@@ -1,0 +1,17 @@
+{
+  "name": "yacr-android",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "android:init": "tauri android init",
+    "android:build": "tauri android build --apk",
+    "android:build:x86_64": "tauri android build --apk --target x86_64",
+    "android:build:aarch64": "tauri android build --apk --target aarch64",
+    "android:dev": "tauri android dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.3"
+  }
+}
