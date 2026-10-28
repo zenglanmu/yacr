@@ -17,6 +17,16 @@
 //!   or validated against session state here.
 //!
 //! `{accepted:true}` on the wire therefore means **queued**, never completed.
+//!
+//! # One rule, two store shapes
+//!
+//! Each channel's rule is a `check_*` function: it takes the **host gate inputs**
+//! (CAD mode, the modal gate, the occupancy of that channel) plus the parsed
+//! value, and returns the byte-identical refusal the desktop has always produced.
+//! The `admit_*` functions below are the concrete-queue store shape
+//! (`check_*` + push); [`crate::session::wire`] is the sink seam shape
+//! (`check_*` + `AdmissionTarget::…`). The rules — gate order, bounds and every
+//! diagnostic string — live here and only here.
 
 use std::collections::VecDeque;
 
@@ -54,6 +64,21 @@ pub fn parse_tool_parameter(
     }
 }
 
+/// The gate of the tool-parameter channel: CAD mode, then the bound.
+///
+/// Shared by [`admit_tool_parameter`] and
+/// [`crate::session::wire::set_tool_parameter`], so the desktop queue and a
+/// synchronous sink cannot diverge.
+pub(super) fn check_tool_parameter(cad_mode: bool, pending: usize) -> Result<(), String> {
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if pending >= CAD_TOOL_PARAMETER_CAP {
+        return Err("CAD tool-parameter queue is full".into());
+    }
+    Ok(())
+}
+
 /// Admit one typed tool parameter into the bounded main-thread queue.
 ///
 /// Pure and toolkit-free so the admission discipline (disabled CAD session,
@@ -68,12 +93,7 @@ pub fn admit_tool_parameter(
     parameter: ToolParameter,
     value: ToolValue,
 ) -> Result<(), String> {
-    if !cad_mode {
-        return Err("CAD is disabled in probe mode".into());
-    }
-    if queue.len() >= CAD_TOOL_PARAMETER_CAP {
-        return Err("CAD tool-parameter queue is full".into());
-    }
+    check_tool_parameter(cad_mode, queue.len())?;
     queue.push((parameter, value));
     Ok(())
 }
@@ -82,6 +102,67 @@ pub fn admit_tool_parameter(
 ///
 /// It reuses the CAD command queue's capacity so every admission shares one bound.
 pub const CAD_TOOL_TEXT_CAP: usize = CAD_COMMAND_CAP;
+
+/// The gate of the terminal tool-text channel: CAD mode, the bound, then the two
+/// **static** content rules (empty/whitespace-only and the length bound).
+///
+/// The refusal text names the IPC channel (`channel` is the `cad_set_…` name), so
+/// the two text channels keep their distinct, long-standing messages while
+/// sharing one implementation.
+fn check_text(
+    channel: &str,
+    cap: usize,
+    cad_mode: bool,
+    pending: usize,
+    pending_reason: &str,
+    text: &str,
+) -> Result<(), String> {
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if pending >= cap {
+        return Err(pending_reason.to_string());
+    }
+    if text.trim().is_empty() {
+        return Err(format!("tool.text_empty: {channel} needs a non-empty text"));
+    }
+    let characters = text.chars().count();
+    if characters > cad_app::MAX_TOOL_TEXT_CHARS {
+        return Err(format!(
+            "tool.text_too_long: {channel} allows at most {} characters, got {characters}",
+            cad_app::MAX_TOOL_TEXT_CHARS
+        ));
+    }
+    Ok(())
+}
+
+/// The gate of the `cad_set_tool_text` channel (see [`check_text`]).
+pub(super) fn check_tool_text(cad_mode: bool, pending: usize, text: &str) -> Result<(), String> {
+    check_text(
+        "cad_set_tool_text",
+        CAD_TOOL_TEXT_CAP,
+        cad_mode,
+        pending,
+        "CAD tool-text queue is full",
+        text,
+    )
+}
+
+/// The gate of the `cad_set_selected_text` channel (see [`check_text`]).
+pub(super) fn check_selected_text(
+    cad_mode: bool,
+    pending: usize,
+    text: &str,
+) -> Result<(), String> {
+    check_text(
+        "cad_set_selected_text",
+        CAD_SELECTED_TEXT_CAP,
+        cad_mode,
+        pending,
+        "CAD selected-text queue is full",
+        text,
+    )
+}
 
 /// Admit one terminal tool text into the bounded main-thread queue.
 ///
@@ -98,22 +179,7 @@ pub fn admit_tool_text(
     cad_mode: bool,
     text: String,
 ) -> Result<(), String> {
-    if !cad_mode {
-        return Err("CAD is disabled in probe mode".into());
-    }
-    if queue.len() >= CAD_TOOL_TEXT_CAP {
-        return Err("CAD tool-text queue is full".into());
-    }
-    if text.trim().is_empty() {
-        return Err("tool.text_empty: cad_set_tool_text needs a non-empty text".into());
-    }
-    let characters = text.chars().count();
-    if characters > cad_app::MAX_TOOL_TEXT_CHARS {
-        return Err(format!(
-            "tool.text_too_long: cad_set_tool_text allows at most {} characters, got {characters}",
-            cad_app::MAX_TOOL_TEXT_CHARS
-        ));
-    }
+    check_tool_text(cad_mode, queue.len(), &text)?;
     queue.push(text);
     Ok(())
 }
@@ -138,23 +204,7 @@ pub fn admit_selected_text(
     cad_mode: bool,
     text: String,
 ) -> Result<(), String> {
-    if !cad_mode {
-        return Err("CAD is disabled in probe mode".into());
-    }
-    if queue.len() >= CAD_SELECTED_TEXT_CAP {
-        return Err("CAD selected-text queue is full".into());
-    }
-    if text.trim().is_empty() {
-        return Err("tool.text_empty: cad_set_selected_text needs a non-empty text".into());
-    }
-    let characters = text.chars().count();
-    if characters > cad_app::MAX_TOOL_TEXT_CHARS {
-        return Err(format!(
-            "tool.text_too_long: cad_set_selected_text allows at most {} characters, got \
-             {characters}",
-            cad_app::MAX_TOOL_TEXT_CHARS
-        ));
-    }
+    check_selected_text(cad_mode, queue.len(), &text)?;
     queue.push(text);
     Ok(())
 }
@@ -181,6 +231,25 @@ pub fn parse_property_write(key: &str, value: &str) -> Result<(String, String), 
     Ok((key.to_string(), value.to_string()))
 }
 
+/// The gate of the selected-property channel: the modal popup gate, CAD mode,
+/// then the bound (the order [`admit_selected_property`] has always applied).
+pub(super) fn check_selected_property(
+    cad_mode: bool,
+    modal_open: bool,
+    pending: usize,
+) -> Result<(), String> {
+    if modal_open {
+        return Err(POPUP_MODAL_OPEN.into());
+    }
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if pending >= CAD_SELECTED_PROPERTY_CAP {
+        return Err("CAD selected-property queue is full".into());
+    }
+    Ok(())
+}
+
 /// Admit one property write for the **current selection** into the bounded
 /// main-thread queue.
 ///
@@ -204,15 +273,7 @@ pub fn admit_selected_property(
     key: String,
     value: String,
 ) -> Result<(), String> {
-    if modal_open {
-        return Err(POPUP_MODAL_OPEN.into());
-    }
-    if !cad_mode {
-        return Err("CAD is disabled in probe mode".into());
-    }
-    if queue.len() >= CAD_SELECTED_PROPERTY_CAP {
-        return Err("CAD selected-property queue is full".into());
-    }
+    check_selected_property(cad_mode, modal_open, queue.len())?;
     queue.push((key, value));
     Ok(())
 }
@@ -253,6 +314,25 @@ pub fn parse_standard_view(view: &str) -> Result<StandardView, String> {
         })
 }
 
+/// The gate of the standard-view channel: the modal popup gate, CAD mode, then
+/// the bound (the same order as [`crate::shell::admit_command`]).
+pub(super) fn check_standard_view(
+    cad_mode: bool,
+    modal_open: bool,
+    pending: usize,
+) -> Result<(), String> {
+    if modal_open {
+        return Err(POPUP_MODAL_OPEN.into());
+    }
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if pending >= CAD_STANDARD_VIEW_CAP {
+        return Err("CAD standard-view queue is full".into());
+    }
+    Ok(())
+}
+
 /// Admit one typed standard view into the bounded main-thread queue.
 ///
 /// Pure and toolkit-free, with the **same** gates as
@@ -268,15 +348,7 @@ pub fn admit_standard_view(
     modal_open: bool,
     view: StandardView,
 ) -> Result<(), String> {
-    if modal_open {
-        return Err(POPUP_MODAL_OPEN.into());
-    }
-    if !cad_mode {
-        return Err("CAD is disabled in probe mode".into());
-    }
-    if queue.len() >= CAD_STANDARD_VIEW_CAP {
-        return Err("CAD standard-view queue is full".into());
-    }
+    check_standard_view(cad_mode, modal_open, queue.len())?;
     queue.push_back(view);
     Ok(())
 }
@@ -306,6 +378,27 @@ pub fn drain_standard_views(
 /// It reuses the CAD command queue's capacity so every admission shares one bound.
 pub const CAD_SETTING_CAP: usize = CAD_COMMAND_CAP;
 
+/// The gate of the settings channel: the closed key table first (so an illegal
+/// value is refused before any host gate), then CAD mode, then the bound.
+///
+/// Deliberately **not** gated by the modal popup gate: the Options dialog runs
+/// open, and persisting a user preference is not CAD input.
+pub(super) fn check_setting(
+    cad_mode: bool,
+    pending: usize,
+    key: &CadSettingKey,
+    value: &CadSettingValue,
+) -> Result<(), String> {
+    key.validate(value).map_err(str::to_string)?;
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if pending >= CAD_SETTING_CAP {
+        return Err("settings queue is full".into());
+    }
+    Ok(())
+}
+
 /// Admit one typed setting into the bounded main-thread queue.
 ///
 /// Deliberately **not** gated by the modal popup gate: the Options dialog runs
@@ -318,13 +411,7 @@ pub fn admit_setting(
     key: CadSettingKey,
     value: CadSettingValue,
 ) -> Result<(), String> {
-    key.validate(&value).map_err(str::to_string)?;
-    if !cad_mode {
-        return Err("CAD is disabled in probe mode".into());
-    }
-    if queue.len() >= CAD_SETTING_CAP {
-        return Err("settings queue is full".into());
-    }
+    check_setting(cad_mode, queue.len(), &key, &value)?;
     queue.push_back((key, value));
     Ok(())
 }
@@ -357,6 +444,25 @@ pub fn parse_layer_property_write(
     Ok((layer.to_string(), key.to_string(), value.to_string()))
 }
 
+/// The gate of the layer-write channel: the modal popup gate, CAD mode, then the
+/// bound (the same order as [`admit_selected_property`]).
+pub(super) fn check_layer_write(
+    cad_mode: bool,
+    modal_open: bool,
+    pending: usize,
+) -> Result<(), String> {
+    if modal_open {
+        return Err(POPUP_MODAL_OPEN.into());
+    }
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if pending >= CAD_LAYER_WRITE_CAP {
+        return Err("CAD layer queue is full".into());
+    }
+    Ok(())
+}
+
 /// Admit one typed layer write into the bounded main-thread queue.
 ///
 /// The gates match [`admit_selected_property`]: the modal popup gate first (while
@@ -373,15 +479,7 @@ pub fn admit_layer_write(
     modal_open: bool,
     write: CadLayerWrite,
 ) -> Result<(), String> {
-    if modal_open {
-        return Err(POPUP_MODAL_OPEN.into());
-    }
-    if !cad_mode {
-        return Err("CAD is disabled in probe mode".into());
-    }
-    if queue.len() >= CAD_LAYER_WRITE_CAP {
-        return Err("CAD layer queue is full".into());
-    }
+    check_layer_write(cad_mode, modal_open, queue.len())?;
     queue.push_back(write);
     Ok(())
 }

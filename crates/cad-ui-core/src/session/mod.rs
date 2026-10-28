@@ -32,6 +32,7 @@ mod point_style;
 mod settings;
 mod snap_unit;
 mod status;
+pub mod wire;
 mod zoom;
 
 use std::cell::{Cell, RefCell};
@@ -90,6 +91,14 @@ pub use self::settings::{
 pub use self::status::{
     unsupported_status, CadCamera, CadImportProgress, CadPopup, CadSelection, CadSelectionRow,
     CadStatus, CadTool, CadToolParams,
+};
+pub use self::wire::{
+    aliases, close_popup, command, commands, create_layer, delete_layer, layers, open_popup,
+    parse_setting_request, rename_layer, restore_layers, set_active_layer, set_layer_property,
+    set_layer_visible, set_selected_property, set_selected_text, set_setting, set_tool_parameter,
+    set_tool_text, settings, standard_view, AdmissionTarget, CadCommandAck, CadCommandAlias,
+    Channel, ControlReads, NoPopups, PopupTarget, QueueFamily, QueueReads, QueueSink, CAD_WAITING,
+    POPUP_HOST_UNAVAILABLE,
 };
 
 /// Completions drained per poll. The queue's absolute capacity is 256, so this

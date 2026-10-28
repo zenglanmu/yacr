@@ -1,13 +1,27 @@
 //! Tauri IPC commands shared by every desktop host.
 //!
-//! These are the thin `#[tauri::command]` wrappers plus host-neutral wiring. The
-//! **rules** they apply — typed wire parsing, static content limits, gate order
-//! and queue bounds — live in `cad_ui_core::session` (`admission`) and
-//! `cad_ui_core::shell`; this module only maps them onto [`Shared`].
+//! These are thin `#[tauri::command]` wrappers. The **semantics** — wire argument
+//! parsing, the modal/probe-mode gates, the queue bounds, every refusal string and
+//! the `{accepted:true}` acknowledgement — live in `cad_ui_core::session::wire`
+//! (one function per command) on top of `cad_ui_core::session::admission` and
+//! `cad_ui_core::shell`; this module only moves the Tauri arguments into those
+//! functions and hands them [`Shared::queue_sink`] (the bounded-queue sink) or
+//! [`Shared::queue_reads`] (the owner-tick mirror). The same `wire::*` functions
+//! are what the `dom-canvas` (direct wasm) host calls, so the two hosts cannot
+//! answer differently for the same request.
 //!
 //! The renderer telemetry that `cad_status`/`probe_input` used to read directly
-//! is now behind [`ShellTelemetry`]; no `cad-render-wgpu`/`cad-engine` type is
-//! named here.
+//! is behind [`ShellTelemetry`]; no `cad-render-wgpu`/`cad-engine` type is named
+//! here.
+//!
+//! ## The queued shape
+//!
+//! `CadSession` is `!Send` and owned by the host main thread, so nothing here
+//! touches it: an admitted request is pushed onto a bounded queue and the owner
+//! tick applies it. `{accepted:true}` therefore means **queued**, never
+//! completed; the real outcome (including a session refusal) surfaces through
+//! `cad_status.error`. The two reads (`cad_settings`, `cad_layers`) answer from
+//! the tick's mirror for the same reason.
 //!
 //! ## Registration
 //!
@@ -18,18 +32,13 @@
 use std::sync::{Arc, Mutex};
 
 use cad_ui_core::protocol::{InputKind, ProbeInput, ProbeInputAck, ProbeStatus};
-use cad_ui_core::session::{
-    admit_layer_write, admit_selected_property, admit_setting, admit_standard_view,
-    admit_tool_parameter, admit_tool_text, parse_layer_property_write, parse_property_write,
-    parse_standard_view, parse_tool_parameter, CadLayerWrite, CadLayers, CadSettingKey,
-    CadSettingValue, CadSettings, CadStatus, SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
-};
+use cad_ui_core::session::{wire, CadLayers, CadSettings};
 use cad_ui_core::shell::{
-    admit_command, modal_gate_open, projected_popup, projected_status, queue_cad_input,
-    POPUP_MODAL_OPEN,
+    modal_gate_open, projected_popup, projected_status, queue_cad_input, POPUP_MODAL_OPEN,
 };
 use cad_ui_core::unsupported_status;
 
+use crate::popup::DesktopPopupTarget;
 use crate::state::{lock, ProbeShared, Shared};
 
 // Re-exported for the evidence driver, which must queue through the **same**
@@ -40,6 +49,9 @@ pub use cad_ui_core::session::drain_standard_views;
 // Re-exported for the owner tick, which drains the layer-write queue with the
 // shared rule (the React layer panel's three mutations).
 pub use cad_ui_core::session::drain_layer_writes;
+// The wire shapes moved into `cad_ui_core::session::wire` so both hosts answer
+// the identical JSON; these aliases keep every existing import path working.
+pub use cad_ui_core::session::wire::{parse_setting_request, CadCommandAck, CadCommandAlias};
 
 use cad_ui_core::popup::PopupAck;
 
@@ -57,27 +69,21 @@ pub fn probe_status_impl(shared: &Arc<Mutex<Shared>>) -> ProbeStatus {
     lock(shared).shell.status.clone()
 }
 
-/// Admission result of `cad_command`: queued, **not** completed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub struct CadCommandAck {
-    /// Always `true` for an admitted command; it never reports completion.
-    pub accepted: bool,
-}
-
 /// `cad_command` command: admit a known CAD command into the bounded main-thread
 /// queue.
 ///
 /// An unknown command is rejected immediately (never queued). `{accepted:true}`
 /// means the command was **queued**, not that it completed; the real outcome
-/// surfaces through `cad_status.error`/`loading`.
+/// surfaces through `cad_status.error`/`loading`. The gate order (modal popup
+/// gate, command vocabulary, probe mode, bound) and the one argument form
+/// (`ZOOM <argument>`) are [`wire::command`]'s.
 #[tauri::command]
 pub fn cad_command(
     shared: tauri::State<'_, ProbeShared>,
     command: String,
 ) -> Result<CadCommandAck, String> {
     let mut state = lock(&shared.0);
-    admit_command(&mut state.shell, &command)?;
-    Ok(CadCommandAck { accepted: true })
+    wire::command(&mut state.queue_sink(), &command)
 }
 
 /// `cad_set_tool_parameter` command: admit one typed tool parameter into the
@@ -91,9 +97,7 @@ pub fn cad_command(
 /// unknown key, or neither/both value fields) is refused immediately. No session
 /// state is touched off the main thread: the value is queued and the owner tick
 /// routes it through `CadSession::set_tool_parameter`, whose authoritative host
-/// validates the parameter's range/kind and Viewer mode. `{accepted:true}` means
-/// **queued**, not completed; the real outcome (including an explicit refusal)
-/// surfaces through `cad_status.error`.
+/// validates the parameter's range/kind and Viewer mode.
 #[tauri::command]
 pub fn cad_set_tool_parameter(
     shared: tauri::State<'_, ProbeShared>,
@@ -101,11 +105,8 @@ pub fn cad_set_tool_parameter(
     number: Option<f64>,
     flag: Option<bool>,
 ) -> Result<CadCommandAck, String> {
-    let (parameter, value) = parse_tool_parameter(&parameter, number, flag)?;
     let mut state = lock(&shared.0);
-    let cad_mode = state.shell.cad_mode;
-    admit_tool_parameter(&mut state.cad_tool_parameters, cad_mode, parameter, value)?;
-    Ok(CadCommandAck { accepted: true })
+    wire::set_tool_parameter(&mut state.queue_sink(), &parameter, number, flag)
 }
 
 /// `cad_set_tool_text` command: admit one **terminal** text into the bounded
@@ -114,22 +115,16 @@ pub fn cad_set_tool_parameter(
 /// This is the only string channel into the CAD session. It is a dedicated typed
 /// IPC and deliberately **not** an argument of `cad_command`: that funnel accepts
 /// a command *name* only, and parsing a text payload out of the command line was
-/// rejected earlier. The wire shape is `{ text: <string> }`.
-///
-/// `{accepted:true}` means **queued**, not completed: the owner tick routes it
-/// through `CadSession::set_tool_text`, which validates the live state and
-/// completes the command immediately (text is terminal). Any refusal
-/// (`tool.text_not_awaiting`, `tool.text_points_incomplete`, `tool.text_empty`,
-/// `tool.text_too_long`) surfaces through `cad_status.error`.
+/// rejected earlier. The wire shape is `{ text: <string> }`; the owner tick routes
+/// it through `CadSession::set_tool_text`, which validates the live state and
+/// completes the command immediately (text is terminal).
 #[tauri::command]
 pub fn cad_set_tool_text(
     shared: tauri::State<'_, ProbeShared>,
     text: String,
 ) -> Result<CadCommandAck, String> {
     let mut state = lock(&shared.0);
-    let cad_mode = state.shell.cad_mode;
-    admit_tool_text(&mut state.cad_tool_texts, cad_mode, text)?;
-    Ok(CadCommandAck { accepted: true })
+    wire::set_tool_text(&mut state.queue_sink(), &text)
 }
 
 /// `cad_set_selected_text` command: admit one replacement text for the current
@@ -140,21 +135,15 @@ pub fn cad_set_tool_text(
 /// time, so a UI can never retarget another object with a stale id. The field is
 /// refused with `textedit.selection_empty` / `textedit.selection_multiple` /
 /// `textedit.target_not_text` when the selection is not exactly one directly
-/// addressable `Text`; empty/over-long drafts are refused here with the same
+/// addressable `Text`; empty/over-long drafts are refused with the same
 /// `tool.text_empty` / `tool.text_too_long` names the text step uses.
-///
-/// `{accepted:true}` means **queued**, not completed: the owner tick routes it
-/// through `CadSession::set_selected_text`, and the real outcome (including any
-/// refusal) surfaces through `cad_status.error` / the next `selection.text`.
 #[tauri::command]
 pub fn cad_set_selected_text(
     shared: tauri::State<'_, ProbeShared>,
     text: String,
 ) -> Result<CadCommandAck, String> {
     let mut state = lock(&shared.0);
-    let cad_mode = state.shell.cad_mode;
-    admit_selected_text(&mut state.cad_selected_texts, cad_mode, text)?;
-    Ok(CadCommandAck { accepted: true })
+    wire::set_selected_text(&mut state.queue_sink(), &text)
 }
 
 /// `cad_set_selected_property` command: queue one property write for every
@@ -168,30 +157,14 @@ pub fn cad_set_selected_text(
 /// tables) rejects is refused by the host write path and surfaces through
 /// `cad_status.error` as `property.invalid_value` / `property.unknown_layer` /
 /// `property.unknown_linetype` / `property.ambiguous_name`.
-///
-/// `{accepted:true}` means **queued**, not completed: the owner tick routes it
-/// through `CadSession::set_selected_property`, and the real outcome (including
-/// any refusal) surfaces through `cad_status.error` and the next
-/// `cad_status.selection.rows` — the display-attribute rows are the canonical
-/// write grammar, so the written value reads back unchanged.
 #[tauri::command]
 pub fn cad_set_selected_property(
     shared: tauri::State<'_, ProbeShared>,
     key: String,
     value: String,
 ) -> Result<CadCommandAck, String> {
-    let (key, value) = parse_property_write(&key, &value)?;
     let mut state = lock(&shared.0);
-    let cad_mode = state.shell.cad_mode;
-    let modal_open = modal_gate_open(&state.shell);
-    admit_selected_property(
-        &mut state.cad_selected_properties,
-        cad_mode,
-        modal_open,
-        key,
-        value,
-    )?;
-    Ok(CadCommandAck { accepted: true })
+    wire::set_selected_property(&mut state.queue_sink(), &key, &value)
 }
 
 /// `cad_standard_view` command: admit one typed standard view into the bounded
@@ -202,25 +175,15 @@ pub fn cad_set_selected_property(
 /// cannot carry: that funnel queues a normalized name and the router refuses a
 /// payload-carrying variant. This dedicated typed IPC is the sanctioned channel
 /// for it (the same shape as `cad_set_tool_parameter`), deliberately **not** an
-/// argument added to `cad_command`.
-///
-/// The wire shape is `{ view: <key> }` with a stable key from
-/// [`cad_app::StandardView::ALL`] (`top`, `bottom`, `front`, `back`, `left`,
-/// `right`, `isometric`), matched case-insensitively. `{accepted:true}` means
-/// **queued**, not completed: the owner tick drains the queue through
-/// `CadSession::standard_view`, and the real outcome (including any refusal)
-/// surfaces through `cad_status.error` and the next camera block.
+/// argument added to `cad_command`. The wire shape is `{ view: <key> }` with a
+/// stable key from [`cad_app::StandardView::ALL`], matched case-insensitively.
 #[tauri::command]
 pub fn cad_standard_view(
     shared: tauri::State<'_, ProbeShared>,
     view: String,
 ) -> Result<CadCommandAck, String> {
-    let view = parse_standard_view(&view)?;
     let mut state = lock(&shared.0);
-    let cad_mode = state.shell.cad_mode;
-    let modal_open = modal_gate_open(&state.shell);
-    admit_standard_view(&mut state.cad_standard_views, cad_mode, modal_open, view)?;
-    Ok(CadCommandAck { accepted: true })
+    wire::standard_view(&mut state.queue_sink(), &view)
 }
 
 /// `cad_open_popup` command: open the allowlisted modal popup, or report the one
@@ -246,14 +209,8 @@ pub fn cad_open_popup(
     shared: tauri::State<'_, ProbeShared>,
     kind: String,
 ) -> Result<PopupAck, String> {
-    let popup_host = {
-        let state = lock(&shared.0);
-        state.popup_host.clone()
-    };
-    let Some(popup_host) = popup_host else {
-        return Err("popup.host_unavailable: no desktop popup host is registered".to_string());
-    };
-    popup_host.open(&shared.0, &kind)
+    let mut popups = DesktopPopupTarget::new(&shared.0)?;
+    wire::open_popup(&mut popups, &kind)
 }
 
 /// `cad_close_popup` command: close the open modal popup (ADR-0021 D1/D2, WP3).
@@ -264,67 +221,8 @@ pub fn cad_open_popup(
 /// the overlay and the gate belong to the same document.
 #[tauri::command]
 pub fn cad_close_popup(shared: tauri::State<'_, ProbeShared>) -> Result<CadCommandAck, String> {
-    let popup_host = {
-        let state = lock(&shared.0);
-        state.popup_host.clone()
-    };
-    let Some(popup_host) = popup_host else {
-        return Err("popup.host_unavailable: no desktop popup host is registered".to_string());
-    };
-    popup_host.close(&shared.0)?;
-    Ok(CadCommandAck { accepted: true })
-}
-
-/// Parse one `cad_set_setting` request into the typed key/value pair.
-///
-/// The wire is `{ key: <stable camelCase key>, value: <bool|string|number> }`.
-/// An unknown key is refused with `settings.unknown_key`; a wrong value shape is
-/// refused with `settings.invalid_value`; a `plotFormat` other than `svg`/`pdf`
-/// is refused by the key table's own validation, as is a colour that is not
-/// `#rrggbb`, a crosshair percentage outside `1..=100` and a GPU budget outside
-/// `10..=100` (the same authority the owner thread uses). Nothing is coerced and
-/// no file is touched here.
-///
-/// A JSON number has two typed shapes: a non-negative integer that fits `u32`
-/// becomes [`CadSettingValue::Number`]; a fractional one becomes
-/// [`CadSettingValue::Real`] (never truncated into the integer shape, so
-/// `snapSpacing: 2.5` cannot become `2`). Negative integers and integers outside
-/// `u32` stay refused at this boundary: no key accepts them, and widening them
-/// into `Real` would silently re-validate a value that was never a legal number.
-/// Which keys accept which shape — and that a float on a boolean-or-integer key
-/// is still [`SETTINGS_INVALID_VALUE`] — is [`CadSettingKey::validate`]'s
-/// decision, not this parser's.
-pub fn parse_setting_request(
-    key: &str,
-    value: &serde_json::Value,
-) -> Result<(CadSettingKey, CadSettingValue), String> {
-    let key = CadSettingKey::parse(key).ok_or_else(|| SETTINGS_UNKNOWN_KEY.to_string())?;
-    let value = match value {
-        serde_json::Value::Bool(enabled) => CadSettingValue::Bool(*enabled),
-        serde_json::Value::String(text) => CadSettingValue::Text(text.clone()),
-        serde_json::Value::Number(number) => {
-            if let Some(integer) = number
-                .as_u64()
-                .and_then(|number| u32::try_from(number).ok())
-            {
-                CadSettingValue::Number(integer)
-            } else if number.is_f64() {
-                // A real that is not a non-negative `u32` integer. A non-finite
-                // real cannot arrive from JSON, but the shape is refused rather
-                // than carried to the host as a special value.
-                match number.as_f64() {
-                    Some(real) if real.is_finite() => CadSettingValue::Real(real),
-                    _ => return Err(SETTINGS_INVALID_VALUE.to_string()),
-                }
-            } else {
-                // A negative or out-of-`u32` integer: no key accepts it.
-                return Err(SETTINGS_INVALID_VALUE.to_string());
-            }
-        }
-        _ => return Err(SETTINGS_INVALID_VALUE.to_string()),
-    };
-    key.validate(&value).map_err(str::to_string)?;
-    Ok((key, value))
+    let mut popups = DesktopPopupTarget::new(&shared.0)?;
+    wire::close_popup(&mut popups)
 }
 
 /// `cad_settings` command: the latest effective settings snapshot.
@@ -343,10 +241,7 @@ pub fn cad_settings(shared: tauri::State<'_, ProbeShared>) -> Result<CadSettings
 /// Split out so the wire-shape tests read the **same** snapshot the IPC path
 /// serves (no duplicated projection in tests).
 pub fn cad_settings_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadSettings, String> {
-    lock(shared)
-        .cad_settings
-        .clone()
-        .ok_or_else(|| "cad_waiting".to_string())
+    wire::settings(&lock(shared).queue_reads())
 }
 
 /// `cad_set_setting` command: admit one typed setting for the owner thread.
@@ -375,11 +270,8 @@ pub fn cad_set_setting_impl(
     key: &str,
     value: &serde_json::Value,
 ) -> Result<CadCommandAck, String> {
-    let (key, value) = parse_setting_request(key, value)?;
     let mut state = lock(shared);
-    let cad_mode = state.shell.cad_mode;
-    admit_setting(&mut state.cad_setting_writes, cad_mode, key, value)?;
-    Ok(CadCommandAck { accepted: true })
+    wire::set_setting(&mut state.queue_sink(), key, value)
 }
 
 /// `cad_layers` command: the layer-panel projection of the open drawing.
@@ -401,10 +293,7 @@ pub fn cad_layers(shared: tauri::State<'_, ProbeShared>) -> Result<CadLayers, St
 /// Split out so the wire-shape/golden tests can call the **same** implementation
 /// the IPC path runs (no duplicated projection in tests).
 pub fn cad_layers_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadLayers, String> {
-    lock(shared)
-        .cad_layers
-        .clone()
-        .ok_or_else(|| "cad_waiting".to_string())?
+    wire::layers(&lock(shared).queue_reads())
 }
 
 /// `cad_set_layer_visible` command: queue one **temporary** layer visibility.
@@ -415,18 +304,14 @@ pub fn cad_layers_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadLayers, String>
 /// layer that no longer exists (that is an explicit `layer.unknown` refusal). An
 /// unknown or ambiguous name changes nothing; the DWG layer-table flag is never
 /// written.
-///
-/// `{accepted:true}` means **queued**, not completed: the owner tick routes it
-/// through `CadSession::set_layer_visibility` (the ordinary `TOGGLELAYER`
-/// funnel), and the real outcome — including any refusal — surfaces through
-/// `cad_status.error` and the next `cad_layers` read.
 #[tauri::command]
 pub fn cad_set_layer_visible(
     shared: tauri::State<'_, ProbeShared>,
     name: String,
     visible: bool,
 ) -> Result<CadCommandAck, String> {
-    admit_shared_layer_write(&shared.0, CadLayerWrite::SetVisible { name, visible })
+    let mut state = lock(&shared.0);
+    wire::set_layer_visible(&mut state.queue_sink(), &name, visible)
 }
 
 /// `cad_restore_layers` command: queue a **restore** of every temporary layer
@@ -438,7 +323,8 @@ pub fn cad_set_layer_visible(
 /// explicitly (`layer.no_document`) instead of reporting a restore of nothing.
 #[tauri::command]
 pub fn cad_restore_layers(shared: tauri::State<'_, ProbeShared>) -> Result<CadCommandAck, String> {
-    admit_shared_layer_write(&shared.0, CadLayerWrite::Restore)
+    let mut state = lock(&shared.0);
+    wire::restore_layers(&mut state.queue_sink())
 }
 
 /// `cad_set_active_layer` command: queue one active-layer change.
@@ -447,33 +333,13 @@ pub fn cad_restore_layers(shared: tauri::State<'_, ProbeShared>) -> Result<CadCo
 /// host resolves it against the drawing's layer table on the owner thread and
 /// dispatches `SETACTIVELAYER`. An unknown or ambiguous name changes nothing and
 /// surfaces as `cad_status.error`.
-///
-/// `{accepted:true}` means **queued**, not completed: the next `cad_layers` read
-/// reports the new `active`/`current` row once the owner tick applied it.
 #[tauri::command]
 pub fn cad_set_active_layer(
     shared: tauri::State<'_, ProbeShared>,
     name: String,
 ) -> Result<CadCommandAck, String> {
-    admit_shared_layer_write(&shared.0, CadLayerWrite::SetActive { name })
-}
-
-/// Queue one typed layer write through the **one** layer-write channel.
-///
-/// Every layer command (the visibility override, the restore, the active-layer
-/// pick and the three structural table writes) shares this admission: the modal
-/// popup gate, then the probe-mode gate, then the bounded queue
-/// (`.cad_layer_writes`). There is deliberately no second write channel — the
-/// owner tick drains this one queue in admission order.
-fn admit_shared_layer_write(
-    shared: &Arc<Mutex<Shared>>,
-    write: CadLayerWrite,
-) -> Result<CadCommandAck, String> {
-    let mut state = lock(shared);
-    let cad_mode = state.shell.cad_mode;
-    let modal_open = modal_gate_open(&state.shell);
-    admit_layer_write(&mut state.cad_layer_writes, cad_mode, modal_open, write)?;
-    Ok(CadCommandAck { accepted: true })
+    let mut state = lock(&shared.0);
+    wire::set_active_layer(&mut state.queue_sink(), &name)
 }
 
 /// `cad_create_layer` command: queue one **layer table** write.
@@ -484,9 +350,6 @@ fn admit_shared_layer_write(
 /// AutoCAD-illegal character set, unique case-insensitively) and a refusal is the
 /// database's own stable reason (`layer.name_empty`, `layer.name_illegal_char`,
 /// `layer.duplicate_name`), never a repaired name.
-///
-/// `{accepted:true}` means **queued**, not completed: the panel re-reads
-/// `cad_layers` and sees the row only once the owner tick committed it.
 #[tauri::command]
 pub fn cad_create_layer(
     shared: tauri::State<'_, ProbeShared>,
@@ -500,7 +363,8 @@ pub fn cad_create_layer_impl(
     shared: &Arc<Mutex<Shared>>,
     name: String,
 ) -> Result<CadCommandAck, String> {
-    admit_shared_layer_write(shared, CadLayerWrite::Create { name })
+    let mut state = lock(shared);
+    wire::create_layer(&mut state.queue_sink(), &name)
 }
 
 /// `cad_rename_layer` command: queue one layer rename (`RENAMELAYER`).
@@ -511,9 +375,6 @@ pub fn cad_create_layer_impl(
 /// `layer.ambiguous_name` refusal) and `name` is the new name, validated by the
 /// same database rules as a create. Entity references are by id, so nothing is
 /// retargeted. Not undoable.
-///
-/// `{accepted:true}` means **queued**: the next `cad_layers` read shows the new
-/// name and no longer the old one.
 #[tauri::command]
 pub fn cad_rename_layer(
     shared: tauri::State<'_, ProbeShared>,
@@ -529,7 +390,8 @@ pub fn cad_rename_layer_impl(
     layer: String,
     name: String,
 ) -> Result<CadCommandAck, String> {
-    admit_shared_layer_write(shared, CadLayerWrite::Rename { layer, name })
+    let mut state = lock(shared);
+    wire::rename_layer(&mut state.queue_sink(), &layer, &name)
 }
 
 /// `cad_delete_layer` command: queue one layer delete (`DELETELAYER`).
@@ -553,7 +415,8 @@ pub fn cad_delete_layer_impl(
     shared: &Arc<Mutex<Shared>>,
     layer: String,
 ) -> Result<CadCommandAck, String> {
-    admit_shared_layer_write(shared, CadLayerWrite::Delete { layer })
+    let mut state = lock(shared);
+    wire::delete_layer(&mut state.queue_sink(), &layer)
 }
 
 /// `cad_set_layer_property` command: queue one **layer attribute** write
@@ -572,11 +435,6 @@ pub fn cad_delete_layer_impl(
 /// key — `plotstyle` is refused here because the writer only emits a style
 /// handle); the value is the owner thread's call, because it can depend on the
 /// drawing's linetype table (`layer.linetype_missing`).
-///
-/// `{accepted:true}` means **queued**, not completed: a real change is one
-/// revision bump and no undo entry (layer edits are not undoable), and the next
-/// `cad_layers` read shows the new attribute values. Only `off`/`frozen` change
-/// behaviour (they hide the layer through the existing `visible` path).
 #[tauri::command]
 pub fn cad_set_layer_property(
     shared: tauri::State<'_, ProbeShared>,
@@ -594,8 +452,8 @@ pub fn cad_set_layer_property_impl(
     key: String,
     value: String,
 ) -> Result<CadCommandAck, String> {
-    let (layer, key, value) = parse_layer_property_write(&layer, &key, &value)?;
-    admit_shared_layer_write(shared, CadLayerWrite::SetProperty { layer, key, value })
+    let mut state = lock(shared);
+    wire::set_layer_property(&mut state.queue_sink(), &layer, &key, &value)
 }
 
 /// `cad_status` command: the latest main-thread CAD snapshot, with the host-side
@@ -606,7 +464,7 @@ pub fn cad_set_layer_property_impl(
 /// even when the CadSession business error is `None`, and the business/open
 /// error is preserved when the host error clears.
 #[tauri::command]
-pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> CadStatus {
+pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> cad_ui_core::session::CadStatus {
     cad_status_impl(&shared.0)
 }
 
@@ -614,7 +472,7 @@ pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> CadStatus {
 ///
 /// Split out so the wire-output goldens can call the **same** implementation
 /// the IPC path runs (no duplicated projection in tests).
-pub fn cad_status_impl(shared: &Arc<Mutex<Shared>>) -> CadStatus {
+pub fn cad_status_impl(shared: &Arc<Mutex<Shared>>) -> cad_ui_core::session::CadStatus {
     let (status, popup, telemetry) = {
         let state = lock(shared);
         let host_error = state
@@ -660,23 +518,12 @@ pub fn cad_status_impl(shared: &Arc<Mutex<Shared>>) -> CadStatus {
 /// i.e. the canonical `COMMAND_TABLE` selectors plus their aliases, deduped). The
 /// frontend still owns an explicit, documented exclusion list for names the
 /// **React host** cannot service yet (native file-dialog/printer owners), but it
-/// no longer invents which names the router would accept.
+/// no longer invents which names the router would accept. The `dom-canvas` host
+/// serves the identical list from the same `wire::commands`, so the chrome sees
+/// one vocabulary everywhere.
 #[tauri::command]
 pub fn cad_commands() -> Vec<&'static str> {
-    cad_ui_core::session::admissible_names()
-}
-
-/// One AutoCAD-style abbreviation the router accepts, as the chrome consumes it.
-///
-/// `command` is the canonical selector the alias normalizes onto (never another
-/// alias), so a frontend can display the target without re-resolving anything.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CadCommandAlias {
-    /// The typed abbreviation, e.g. `L`.
-    pub alias: String,
-    /// The canonical selector it resolves to, e.g. `LINE`.
-    pub command: String,
+    wire::commands()
 }
 
 /// `cad_command_aliases` command: the alias table the chrome offers in its
@@ -693,13 +540,7 @@ pub fn cad_command_aliases() -> Vec<CadCommandAlias> {
 
 /// Command body of [`cad_command_aliases`], without the Tauri command wrapper.
 pub fn cad_command_aliases_impl() -> Vec<CadCommandAlias> {
-    cad_ui_core::session::alias_pairs()
-        .into_iter()
-        .map(|(alias, command)| CadCommandAlias {
-            alias: alias.to_string(),
-            command: command.to_string(),
-        })
-        .collect()
+    wire::aliases()
 }
 
 /// `probe_input` command: sequence-gate one frontend input and route it.

@@ -21,10 +21,49 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cad_ui_core::popup::{self as machine, PopupAck, PopupGate, PopupOps, PopupReset};
-use cad_ui_core::session::CadPopup;
+use cad_ui_core::session::wire::POPUP_HOST_UNAVAILABLE;
+use cad_ui_core::session::{CadPopup, PopupTarget};
 use cad_ui_core::shell::{note_host_error, HostErrorKind};
 
-use crate::state::Shared;
+use crate::state::{Shared, ShellPopupHost};
+
+/// The desktop [`cad_ui_core::session::PopupTarget`]: the platform half of the
+/// popup commands.
+///
+/// [`Shared::popup_host`] is the host-installed seam; the shared wire layer only
+/// knows the [`PopupTarget`] trait. Constructing the target clones the seam out
+/// **before** any other lock is taken (the command releases `Shared` first), so
+/// the platform implementation can marshal to its own main thread without the
+/// shell mutex held — the lock order documented in [`crate::state`].
+pub struct DesktopPopupTarget<'a> {
+    host: Arc<dyn ShellPopupHost>,
+    shared: &'a Arc<Mutex<Shared>>,
+}
+
+impl<'a> DesktopPopupTarget<'a> {
+    /// Bind the registered popup seam, or refuse with the shared reason.
+    ///
+    /// `None` means the host did not install a seam (probe mode, or a host
+    /// without popups): the explicit `popup.host_unavailable` refusal, never a
+    /// pretend acknowledgement.
+    pub fn new(shared: &'a Arc<Mutex<Shared>>) -> Result<Self, String> {
+        let host = lock(shared)
+            .popup_host
+            .clone()
+            .ok_or_else(|| POPUP_HOST_UNAVAILABLE.to_string())?;
+        Ok(Self { host, shared })
+    }
+}
+
+impl PopupTarget for DesktopPopupTarget<'_> {
+    fn open(&mut self, kind: &str) -> Result<PopupAck, String> {
+        self.host.open(self.shared, kind)
+    }
+
+    fn close(&mut self) -> Result<(), String> {
+        self.host.close(self.shared)
+    }
+}
 
 /// Stable diagnostic prefix for trigger ③ (`cad_status.error`).
 ///

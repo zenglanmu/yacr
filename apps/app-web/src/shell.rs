@@ -98,6 +98,15 @@
 //! | `ZOOMIN` | one [`cad_ui_core::session::ZOOM_IN_FACTOR`] step about the viewport centre |
 //! | `ZOOMOUT` | one [`cad_ui_core::session::ZOOM_OUT_FACTOR`] step about the viewport centre |
 //!
+//! **This list is the production viewer's**, not the desktop router's. The two
+//! coexist on purpose until the production flip: [`crate::direct`] serves
+//! `cad_commands`/`cad_command_aliases` from the **shared** tables
+//! (`cad_ui_core::session::wire`), i.e. the full desktop selector set, for a host
+//! that runs the real `CadSession`; [`commands_json`] keeps advertising only what
+//! the *viewer* session implements, so nothing the current page can render changes.
+//! Flipping the page to the `direct` transport replaces the short list with the full
+//! one in the same step — that is the production switch, not this module's job.
+//!
 //! `OPEN` is deliberately **not** in this list: opening a file here is
 //! [`open_bytes`](crate::open_bytes) — the canvas transport owns the bytes, the
 //! file picker and the canvas — so it is implemented by the page shell

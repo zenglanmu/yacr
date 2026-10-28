@@ -39,6 +39,11 @@ serde_json.workspace = true
 cad-domain.workspace = true
 cad-db.workspace = true
 cad-app.workspace = true
+# The `dom-canvas` wire transport (`src/direct.rs`) decodes `invoke` arguments
+# into the typed values the desktop `#[tauri::command]` signatures produce, so it
+# needs `serde`'s derive. `serde_json` is already a dependency (the shell status
+# serializes on every target); neither adds a platform, toolkit or GPU edge.
+serde.workspace = true
 
 # The **browser platform contracts** of the shared desktop CAD session
 # (`src/platform.rs`, ADR 0024 stage ⑧ phase 1). `cad-platform` is the host

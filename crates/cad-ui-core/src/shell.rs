@@ -204,23 +204,31 @@ pub fn bind_allowed(ready: bool, failed_generation: Option<u64>, owner_generatio
     !ready && failed_generation != Some(owner_generation)
 }
 
-/// Admit a command into the bounded main-thread queue (unknown refused first).
+/// The gate of the `cad_command` channel: the modal popup gate, the command
+/// vocabulary (a name outside it is refused before the queue is touched), CAD
+/// mode, then the bound.
 ///
-/// A name outside the command vocabulary is refused with a stable reason before
-/// the queue is touched; a disabled CAD session and a full queue are refused
-/// explicitly. The canonical selector is stored, so the queue never carries an
-/// alias.
+/// Returns the **normalized line to store** — the canonical selector, or
+/// `"<SELECTOR> <argument>"` for the one argument form — so the queue never
+/// carries an alias. Shared by [`admit_command`] and
+/// [`crate::session::wire::command`], so the desktop queue and a synchronous sink
+/// answer identically.
 ///
 /// The one argument form is `ZOOM <argument>` (AutoCAD's `ZOOM n` / `ZOOM ALL`):
 /// it is admitted by its base selector and queued **with** the argument, because
 /// the session — not this gate — validates the value (`0`, `-1`, `abc`, `2 3`
 /// are refused there with a reason recorded for `cad_status.error`). `LINE 2`
 /// stays an unsupported name: no other selector takes an argument.
-pub fn admit_command(state: &mut ShellState, command: &str) -> Result<(), String> {
+pub fn check_command(
+    cad_mode: bool,
+    modal_open: bool,
+    pending: usize,
+    command: &str,
+) -> Result<String, String> {
     // The modal gate comes first: while a popup owns input, *every* CAD command
     // is refused by name (even one the router would otherwise reject), and the
     // refusal never depends on the UI having stopped forwarding.
-    if modal_gate_open(state) {
+    if modal_open {
         return Err(POPUP_MODAL_OPEN.into());
     }
     let queued = if let Some(normalized) = canonical_command_name(command) {
@@ -230,12 +238,29 @@ pub fn admit_command(state: &mut ShellState, command: &str) -> Result<(), String
     } else {
         return Err(unsupported_command_reason(command));
     };
-    if !state.cad_mode {
+    if !cad_mode {
         return Err("CAD is disabled in probe mode".into());
     }
-    if state.cad_commands.len() >= CAD_COMMAND_CAP {
+    if pending >= CAD_COMMAND_CAP {
         return Err("CAD command queue is full".into());
     }
+    Ok(queued)
+}
+
+/// Admit a command into the bounded main-thread queue (unknown refused first).
+///
+/// A name outside the command vocabulary is refused with a stable reason before
+/// the queue is touched; a disabled CAD session and a full queue are refused
+/// explicitly. The canonical selector is stored, so the queue never carries an
+/// alias. See [`check_command`] for the exact gate order and the one argument
+/// form.
+pub fn admit_command(state: &mut ShellState, command: &str) -> Result<(), String> {
+    let queued = check_command(
+        state.cad_mode,
+        modal_gate_open(state),
+        state.cad_commands.len(),
+        command,
+    )?;
     state.cad_commands.push(queued);
     Ok(())
 }

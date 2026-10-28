@@ -154,6 +154,7 @@ dependencies = [
  "cad-scene",
  "cad-ui-core",
  "js-sys",
+ "serde",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -847,6 +848,7 @@ dependencies = [
  "cad-host",
  "cad-platform",
  "serde",
+ "serde_json",
  "web-time",
 ]
 

@@ -534,6 +534,23 @@ pub(crate) fn status_impl() -> String {
     })
 }
 
+/// Run `action` with the **live** session's `CadSession` (read-only), if any.
+///
+/// This is the seam the `dom-canvas` wire transport ([`crate::direct`]) uses: it
+/// hands out the session the desktop hosts drive, so `invoke` applies requests
+/// through the real command router instead of a second document. `None` means
+/// there is no live session (not started, still starting, or a frame holds the
+/// slot) — the caller turns that into an explicit refusal, never a fake success.
+pub(crate) fn with_session<T>(action: impl FnOnce(&CadSession) -> T) -> Option<T> {
+    DEBUG.with(|cell| match cell.try_borrow() {
+        Ok(state) => match &*state {
+            DebugState::Live(session) => Some(action(&session.session)),
+            DebugState::Idle | DebugState::Starting => None,
+        },
+        Err(_) => None,
+    })
+}
+
 /// The status object of "there is no live debug session": explicit nulls.
 fn no_session_status(message: &str) -> String {
     serde_json::json!({

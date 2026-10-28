@@ -298,6 +298,18 @@ pub mod shell;
 #[cfg(target_arch = "wasm32")]
 mod session;
 
+/// **The `dom-canvas` transport**: one `invoke(name, args_json)` entry over the
+/// shared command semantics (`cad_ui_core::session::wire`).
+///
+/// The desktop hosts serve the chrome through Tauri IPC; a browser has none, so
+/// the same JS call has to be served in-process. This module decodes the same
+/// arguments into the same typed values and calls the *same* `wire::*` function
+/// per command, so a name, an argument or a refusal cannot differ between host
+/// transports. Target-independent on purpose: the dispatch table, the argument
+/// structs and the vocabulary reads are asserted by `cargo test -p app-web`, and
+/// the equivalence matrix there runs both sinks side by side.
+pub mod direct;
+
 /// **SPIKE (ADR 0024 stage ⑧ phase 2): the real desktop session inside wasm.**
 ///
 /// Additive debug surface only: it builds `cad_ui_core::session::CadSession` from

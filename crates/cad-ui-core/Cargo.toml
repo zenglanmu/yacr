@@ -21,6 +21,11 @@ cad-engine.workspace = true
 cad-host.workspace = true
 cad-platform.workspace = true
 serde.workspace = true
+# The `cad_set_setting` wire value is a JSON value: the shared layer owns the
+# number-shape rule (an integer stays `Number`, a fractional real becomes `Real`,
+# never truncated), so the parser cannot live in a host. `serde_json` is pure
+# data, so it adds no platform, toolkit or GPU dependency.
+serde_json.workspace = true
 # `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web-time`
 # re-exports std elsewhere (no-op off wasm). See `src/shell.rs`.
 web-time.workspace = true

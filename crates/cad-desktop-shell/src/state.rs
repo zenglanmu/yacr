@@ -32,8 +32,11 @@ use cad_ui_core::launch::LaunchOptions;
 use cad_ui_core::layout::LayoutTracker;
 use cad_ui_core::popup::PopupAck;
 use cad_ui_core::protocol::InputKind;
-use cad_ui_core::session::{CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CadSettings};
-use cad_ui_core::shell::ShellState;
+use cad_ui_core::session::{
+    CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CadSettings, QueueFamily, QueueReads,
+    QueueSink,
+};
+use cad_ui_core::shell::{modal_gate_open, ShellState};
 
 /// The app-side render telemetry, exposed to the command layer through a narrow
 /// object-safe seam.
@@ -179,6 +182,41 @@ impl Shared {
             telemetry: None,
             popup_host: None,
         }
+    }
+
+    /// The **queue sink** over this host's own bounded queues.
+    ///
+    /// The IPC commands hand this to [`cad_ui_core::session::wire`], which applies
+    /// the shared gate and then pushes here. The gate inputs (`cad_mode`, the
+    /// modal popup gate) are read **once**, before the queues are borrowed — this
+    /// is the only place the desktop reads them, exactly like the per-command
+    /// bodies did before the shared wire layer existed.
+    pub fn queue_sink(&mut self) -> QueueSink<'_> {
+        let cad_mode = self.shell.cad_mode;
+        let modal_open = modal_gate_open(&self.shell);
+        QueueSink::new(
+            cad_mode,
+            modal_open,
+            QueueFamily {
+                commands: &mut self.shell.cad_commands,
+                tool_parameters: &mut self.cad_tool_parameters,
+                tool_texts: &mut self.cad_tool_texts,
+                selected_texts: &mut self.cad_selected_texts,
+                selected_properties: &mut self.cad_selected_properties,
+                standard_views: &mut self.cad_standard_views,
+                setting_writes: &mut self.cad_setting_writes,
+                layer_writes: &mut self.cad_layer_writes,
+            },
+        )
+    }
+
+    /// The [`cad_ui_core::session::ControlReads`] the desktop serves.
+    ///
+    /// Both answers are the **owner-tick mirror**: the session is `!Send`, so the
+    /// IPC thread never reads it. `None` before the first tick (or in probe mode)
+    /// is the explicit `cad_waiting` answer, never a fabricated default.
+    pub fn queue_reads(&self) -> QueueReads<'_> {
+        QueueReads::new(self.cad_settings.as_ref(), self.cad_layers.as_ref())
     }
 }
 
