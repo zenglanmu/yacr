@@ -203,7 +203,7 @@ impl CadRenderRuntime {
         }
         let pending = self.pending_upload.as_mut().unwrap();
         #[cfg(not(target_arch = "wasm32"))]
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         let mut slices = 0;
         let mut prepare_us = 0u64;
         let mut append_us = 0u64;
@@ -231,10 +231,10 @@ impl CadRenderRuntime {
                 vertices = next;
                 end += 1;
             }
-            let prepare_started = std::time::Instant::now();
+            let prepare_started = Instant::now();
             let piece = renderer.prepare_upload_batches(&batches[pending.offset..end])?;
             prepare_us += prepare_started.elapsed().as_micros() as u64;
-            let append_started = std::time::Instant::now();
+            let append_started = Instant::now();
             if let Some(prepared) = &mut pending.prepared {
                 prepared.append(piece)?;
             } else {
@@ -261,7 +261,9 @@ impl CadRenderRuntime {
                     pending.base_changed,
                 )
             };
-            // `started` only exists off wasm (no monotonic clock there); report 0.
+            // The per-pass budget is native-only (`started` is cfg-gated),
+            // so this reports an unmeasured 0 on wasm rather than a fabricated
+            // duration.
             #[cfg(not(target_arch = "wasm32"))]
             let total_us = started.elapsed().as_micros() as u64;
             #[cfg(target_arch = "wasm32")]
@@ -352,7 +354,8 @@ impl CadRenderRuntime {
             self.image_diagnostic.as_deref(),
             self.flags_diagnostic.as_deref(),
         );
-        // `started` only exists off wasm (no monotonic clock there); report 0.
+        // The per-pass budget is native-only (`started` is cfg-gated), so this
+        // reports an unmeasured 0 on wasm rather than a fabricated duration.
         #[cfg(not(target_arch = "wasm32"))]
         let total_us = started.elapsed().as_micros() as u64;
         #[cfg(target_arch = "wasm32")]

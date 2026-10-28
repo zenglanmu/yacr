@@ -81,9 +81,8 @@ mod zoom_anchor_tests;
 
 pub(crate) use core::{
     ActiveGuard, BoxGesture, FileAbort, HoverState, NavInner, PendingHover, PendingSave,
-    RequestClock,
 };
-pub use core::{HostCore, HostOptions, HostPlatform};
+pub use core::{HostCore, HostOptions, HostPlatform, RequestClock};
 #[cfg(not(target_arch = "wasm32"))]
 pub use fonts::DesktopResources;
 pub use fonts::{HostResources, UnsupportedResources};

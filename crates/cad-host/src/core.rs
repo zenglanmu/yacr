@@ -235,7 +235,12 @@ pub(crate) struct HoverState {
 pub(crate) type RequestWaker = Rc<dyn Fn()>;
 
 /// Monotonic millisecond clock source for the pump time budget.
-pub(crate) type RequestClock = Rc<dyn Fn() -> f64>;
+///
+/// Public because a host with **no** default clock (wasm32: `std::time::Instant`
+/// panics there, so [`HostCore::new`] installs none) must inject its own platform
+/// clock through [`HostCore::set_request_clock`]. Without one, queued work is
+/// refused explicitly instead of being given a fabricated elapsed time.
+pub type RequestClock = Rc<dyn Fn() -> f64>;
 
 /// Clone handle over the shared host orchestration state.
 #[derive(Clone)]

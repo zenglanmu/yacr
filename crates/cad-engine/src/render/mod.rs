@@ -16,7 +16,12 @@ use cad_representation::{FontEngine, SpaceSelection};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+// `std::time::Instant::now()` panics on wasm32-unknown-unknown ("time not
+// implemented on this platform"); `web-time` re-exports std off wasm, so this is
+// a no-op for every native host and the only monotonic source here.
+use web_time::Instant;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod preparation;

@@ -317,3 +317,53 @@ fn an_explicit_gpu_budget_cap_survives_a_percentage_change() {
         "only the percentage was replaced"
     );
 }
+
+/// Source/cfg contract: the render session must never reach for
+/// `std::time::Instant::now()`.
+///
+/// That call panics on `wasm32-unknown-unknown` ("time not implemented on this
+/// platform"), so a wasm host — the browser / Android `dom-canvas` carrier —
+/// would trap on the first upload-timing or camera-settle sample. The monotonic
+/// source here is `web_time::Instant`, which is a literal re-export of
+/// `std::time::Instant` off wasm: the native measurement behaviour is unchanged,
+/// the wasm32 build just stops panicking.
+///
+/// This is a **source** contract, not a runtime one: a native test binary cannot
+/// reproduce the wasm trap, so it is asserted against the exact sources the
+/// wasm32 build compiles. Comment lines are skipped (the rationale appears in
+/// them), which is why the scan is line-based instead of a substring count.
+#[test]
+fn render_session_time_source_is_wasm_safe() {
+    let sources = [
+        ("render/mod.rs", include_str!("mod.rs")),
+        ("render/session_impl.rs", include_str!("session_impl.rs")),
+        (
+            "render/runtime/session.rs",
+            include_str!("runtime/session.rs"),
+        ),
+    ];
+    for (name, source) in sources {
+        for (index, line) in source.lines().enumerate() {
+            let code = line.trim_start();
+            if code.starts_with("//") {
+                continue;
+            }
+            assert!(
+                !code.contains("std::time::Instant"),
+                "{name}:{} uses std::time::Instant, which panics on wasm32; use the \
+                 `web_time::Instant` alias: {line}",
+                index + 1
+            );
+        }
+    }
+    // The alias must actually be the one in scope (a module that simply dropped
+    // the import would fail to compile, but naming it keeps the contract local).
+    assert!(
+        include_str!("mod.rs").contains("use web_time::Instant;"),
+        "render/mod.rs must import the wasm-safe monotonic clock"
+    );
+    assert!(
+        include_str!("runtime/session.rs").contains("use web_time::Instant;"),
+        "render/runtime/session.rs must import the wasm-safe monotonic clock"
+    );
+}

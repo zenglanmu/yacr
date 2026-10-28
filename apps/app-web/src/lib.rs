@@ -260,6 +260,21 @@ pub mod budget;
 /// `cargo test -p app-web` rather than only in a browser. See the module docs.
 pub mod view;
 
+/// The four platform contracts the browser supplies to the **shared desktop CAD
+/// session** (`cad_ui_core::session::CadSession`), plus the bytes-based entry it
+/// is built with (ADR 0024 stage ⑧ phase 1).
+///
+/// Target-independent on purpose (no DOM, no wgpu, no session state): every
+/// refusal and every honest absence (no filesystem, non-persistent config,
+/// unmapped surface, no font/image package) is asserted by
+/// `cargo test -p app-web` on the host, including a session built from the
+/// synthetic fixture's **bytes** whose `LINE` command reaches the real router.
+///
+/// Nothing here is wired to an export yet: the existing `dom-canvas` viewer
+/// session ([`session`]) stays the fallback until phase 2 replaces it behind the
+/// same exports. See [`platform`] for the capability table and the honest limits.
+pub mod platform;
+
 /// Which isolation a browser can actually deliver (`worker_capability()`).
 ///
 /// Target-independent model ([`capability::Capability`]) plus a wasm-only probe, so

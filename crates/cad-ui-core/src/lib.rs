@@ -40,9 +40,9 @@ pub use protocol::{
 pub use session::{
     canonical_command_name, command_name, invalid_zoom_argument_reason, normalize_command,
     parse_zoom_argument, typed_command_argument, unsupported_command_reason, unsupported_status,
-    CadCamera, CadCommandLogEntry, CadCommandLogKind, CadLayer, CadLayers, CadMeasurementEcho,
-    CadSelection, CadSelectionRow, CadSession, CadSettingKey, CadSettingValue, CadSettings,
-    CadStatus, ZoomArgument, ARGUMENT_SELECTOR, COMMAND_ALIASES, COMMAND_TABLE,
+    BytesDocument, CadCamera, CadCommandLogEntry, CadCommandLogKind, CadLayer, CadLayers,
+    CadMeasurementEcho, CadSelection, CadSelectionRow, CadSession, CadSettingKey, CadSettingValue,
+    CadSettings, CadStatus, ZoomArgument, ARGUMENT_SELECTOR, COMMAND_ALIASES, COMMAND_TABLE,
     SETTINGS_INVALID_PLOT_FORMAT, SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
 pub use shell::{

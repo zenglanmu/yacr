@@ -22,6 +22,7 @@
 //! surface is an explicit `Cancelled`, never a fabricated canvas.
 
 mod admission;
+mod bytes;
 mod command_log;
 mod commands;
 mod diagnostics;
@@ -67,6 +68,7 @@ pub use self::admission::{
     parse_tool_parameter, CAD_LAYER_WRITE_CAP, CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP,
     CAD_SETTING_CAP, CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
 };
+pub use self::bytes::BytesDocument;
 pub use self::command_log::{
     CadCommandLogEntry, CadCommandLogKind, CadCommandLogPoint, CadMeasurementEcho,
 };
@@ -154,7 +156,14 @@ impl CadSession {
         core.install_fonts()?;
         core.install_images()?;
         core.open_configured_drawing()?;
-        Ok(Self {
+        Ok(Self::wrap(core))
+    }
+
+    /// Wrap an already-built host core: the one place the session's own
+    /// bookkeeping fields are initialised (shared by [`CadSession::new`] and
+    /// [`CadSession::from_bytes`], so the two entries cannot drift apart).
+    fn wrap(core: HostCore) -> Self {
+        Self {
             core,
             error: RefCell::new(None),
             resource_error: RefCell::new(None),
@@ -164,7 +173,7 @@ impl CadSession {
             pending: RefCell::new(VecDeque::new()),
             frames: Cell::new(0),
             press: RefCell::new(None),
-        })
+        }
     }
 
     /// The host-owned render session the GPU lane attaches and draws through.
