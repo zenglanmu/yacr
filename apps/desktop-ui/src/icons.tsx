@@ -193,6 +193,9 @@ const P = {
   // conventional printer silhouette (Plot and Publish tab of the Options dialog).
   printer: <><path d="M7 8V4h10v4" /><rect x="4" y="8" width="16" height="8" rx="1" /><path d="M7 16h10v4H7z" /></>,
   more: <><circle cx="6" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="18" cy="12" r="1.5" /></>,
+  // The mobile menu toggle: three rules, the conventional "this opens a panel"
+  // mark. Drawn rather than typed so it keeps the 1.6px stroke of every glyph.
+  menu: <><path d="M4 7h16M4 12h16M4 17h16" /></>,
   start: <><path d="M4 11 12 4l8 7" /><path d="M6 10v10h12V10" /></>,
   drawing: <><rect x="4" y="5" width="16" height="14" rx="1" /><path d="M4 16l4-4 3 3 3-4 6 6" /></>,
   alert: <><path d="M12 4 21 20H3z" /><path d="M12 10v5M12 17.6h.01" /></>,

@@ -177,15 +177,19 @@ test('an empty alias table changes nothing but the extra rows', () => {
 });
 
 test('the command line renders an alias row as entry + canonical target', async () => {
+  const model = await readModule('commands/command-line-model.ts');
+  const hook = await readModule('commands/use-command-line.ts');
   const source = await readModule('components/CommandLine.tsx');
-  // The host alias table is still the row source; TS only adds a readonly cast to
-  // the loose context field.
+  // The host alias table is still the row source. The rules were extracted into
+  // the shared controller (both .tsx presentations render from it), so the
+  // filter call lives in the model and the table is handed over by the hook.
   assert.match(
-    source,
-    /filterCommandSuggestions\(shell\.command, \{ history: shell\.history, aliases: shell\.commandAliases(?:\s+as\s+readonly \w+\[\])? \}\)/,
+    model,
+    /filterCommandSuggestions\(command, \{ history, aliases \}\)/,
     'the suggestion list must consume the host alias table',
   );
-  assert.ok(source.includes('shell.history, shell.commandAliases]'), 'the alias table is a memo dependency');
+  assert.ok(hook.includes('aliases: shell.commandAliases as readonly CommandAlias[]'), 'the alias table reaches the filter');
+  assert.ok(hook.includes('shell.history, shell.commandAliases]'), 'the alias table is a memo dependency');
   // The alias entry is the id and the canonical name is the row's secondary text;
   // canonical rows keep their translated label. No new classes/markup are added.
   // The row's label key still goes through the translator; TS pins the key's type
@@ -194,7 +198,7 @@ test('the command line renders an alias row as entry + canonical target', async 
   assert.ok(source.includes('<span className="completion__id">{suggestion.id}</span>'));
   // The multi-word alias (`ZOOM EXTENTS`) gets a space-free option id, so the
   // `aria-activedescendant` wiring still names the row.
-  assert.ok(source.includes("suggestion.id.replace(/\\s+/g, '-')"));
+  assert.ok(model.includes("suggestion.id.replace(/\\s+/g, '-')"));
   // The router-does-not-admit badge is unchanged for both row kinds.
   assert.ok(source.includes("t('command.badge.unwired')"));
 });

@@ -86,8 +86,9 @@ test('App wires status.popup as its own reason and text focus as the other', asy
   assert.match(app, /suspendGate\.current!?\.sync\(\)/);
 
   // The command line keeps its unconditional focus/blur calls — it just no
-  // longer owns the popup's reason.
-  const commandLine = await readModule('components/CommandLine.tsx');
+  // longer owns the popup's reason. Focus lives in the shared controller now, so
+  // the docked field and the mobile command bar suspend the lane identically.
+  const commandLine = await readModule('commands/use-command-line.ts');
   assert.ok(commandLine.includes('shell.suspendPointer(true)'));
   assert.ok(commandLine.includes('shell.suspendPointer(false)'));
   assert.equal(commandLine.includes("'popupOpen'"), false);

@@ -470,13 +470,22 @@ test('dom-canvas does not create the IPC input lane', async () => {
   assert.equal([...app.matchAll(/invoke\('probe_input'/g)].length, 1);
   assert.equal([...app.matchAll(/createCanvasTransport\(\{/g)].length, 1);
 
-  // The lane effect returns before creating anything when the host reports the
-  // DOM carrier, and re-runs when the reported mode changes.
-  const laneGuard = 'if (surfaceMode === SURFACE_MODE_DOM_CANVAS) return undefined;';
-  const laneEffect = app.slice(app.indexOf(laneGuard), app.indexOf('createInputLane('));
+  // The lane is gated on a **known** carrier. `nativeInputLane` is
+  // `carrierKnown && surfaceMode !== SURFACE_MODE_DOM_CANVAS`: neither the
+  // pre-answer default (which already sent one `resize` a `dom-canvas` runtime
+  // refuses with `unsupported-runtime: probe_input`) nor a reported DOM carrier
+  // may create one, and the effect names its dependency explicitly.
+  assert.ok(app.includes('const carrierKnown = status !== null;'));
+  assert.ok(app.includes('const nativeInputLane = carrierKnown && surfaceMode !== SURFACE_MODE_DOM_CANVAS;'));
+  const laneGuard = 'if (!nativeInputLane) return undefined;';
   assert.ok(app.includes(laneGuard));
+  const laneEffect = app.slice(app.indexOf(laneGuard), app.indexOf('createInputLane('));
   assert.ok(laneEffect.length > 0);
-  assert.match(app, /\}, \[surfaceMode\]\);/);
+  assert.match(app, /\}, \[nativeInputLane\]\);/);
+  // The partition binding re-runs with the lane: on `native-below` the lane is
+  // created a commit after the partition is measured, so without this dependency
+  // there would be a lane and nothing bound to it.
+  assert.match(app, /\}, \[surfaceNode, nativeInputLane\]\);/);
 
   // The transport module never speaks the host IPC and never builds a lane.
   const transport = await readModule('cad/canvas-host.ts');

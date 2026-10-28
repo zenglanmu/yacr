@@ -828,6 +828,10 @@ button, input, select { font: inherit; color: inherit; }
   height: 26px; padding: 0 8px;
   background: var(--chrome-3); border-top: 1px solid var(--line);
   color: var(--text-dim); font-size: 11px;
+  /* One fixed 26px row: it cannot wrap, so the squeeze order below is what keeps
+     controls from painting over one another, and anything that still does not fit
+     is clipped at the bar's edge instead of over the drawing. */
+  overflow: hidden;
 }
 .statusbar__coords { display: inline-flex; align-items: center; gap: 6px; min-width: 108px; color: var(--text-dim); }
 /* The active tool's parameter rows. HATCH alone owns ten of them now (four make a
@@ -848,23 +852,48 @@ button, input, select { font: inherit; color: inherit; }
 .statusbar__params::-webkit-scrollbar { display: none; }
 .statusbar__params.is-empty { display: none; }
 .mono { font-family: var(--font-mono); }
-.statusbar__state { color: var(--text-muted); }
+/* Squeeze order on a narrow window (no wrap is possible in a 26px bar):
+   1. the spacer, 2. the tool-parameter strip (its own scroller, `min-width: 0`),
+   3. this state word and the active-tool chip (bounded, then ellipsized),
+   4. the parameter chips' own value slots (`flex: 0 1 auto`). The chip groups are
+   `flex: 0 0 auto`, so a group never shrinks under its own chips — that is what
+   used to let a chip paint *outside* its group and over its neighbour — and the
+   chips themselves never wrap (`nowrap` + ellipsis). A bar that is still
+   over-subscribed clips at its own edge instead of over the drawing. */
+.statusbar__state {
+  min-width: 0;
+  max-width: 26ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
 /* Active-tool chip: the tool name, an optional per-step prompt (the named picks
    of the dimension family) and the captured count. The prompt is guidance, so it
    is tinted and bounded — a long prompt ellipsizes instead of pushing the
    right-side status group, and it never changes the fixed status-bar height. */
-.statusbar__tool { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.statusbar__tool { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; max-width: 40ch; white-space: nowrap; }
 .statusbar__tool-step {
   color: var(--accent-text);
-  max-width: 64ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.statusbar__group { display: flex; align-items: center; gap: 3px; }
+.statusbar__group { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
 .statusbar__spacer { flex: 1 1 auto; }
 .statusbar__error { display: inline-flex; align-items: center; gap: 5px; color: var(--danger); max-width: 44ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-toggle {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   height: 20px; padding: 0 9px;
   border: 1px solid var(--line-soft); border-radius: var(--radius);
   background: var(--field); color: var(--text-dim); cursor: pointer;
+  /* One line, always: a 20px chip that wraps paints its second line above and
+     below the chip's own border — which reads as the label being struck through
+     and spilling over its neighbours. Below the squeeze point the label
+     ellipsizes instead. */
+  white-space: nowrap;
+  text-overflow: ellipsis;
   transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
 }
 .status-toggle:hover:not(:disabled) { background: var(--hover); color: var(--text); }
@@ -875,11 +904,16 @@ button, input, select { font: inherit; color: inherit; }
    parameter of the active tool whose value the host projects. */
 .status-stepper {
   display: inline-flex; align-items: center; gap: 3px;
+  /* The one chip with a label *and* a value slot, so the one that can push its
+     field past its own border. The chip may shrink, its label may not, and the
+     field gives up width first (see `__label`/`__input` below). */
+  min-width: 0;
+  overflow: hidden;
   height: 20px; padding: 0 4px 0 7px;
   border: 1px solid var(--line-soft); border-radius: var(--radius);
   background: var(--field); color: var(--text-dim);
 }
-.status-stepper__label { color: var(--text-muted); }
+.status-stepper__label { flex: 0 0 auto; white-space: nowrap; color: var(--text-muted); }
 .status-stepper__button {
   display: inline-flex; align-items: center; justify-content: center;
   width: 16px; height: 16px; padding: 0;
@@ -889,7 +923,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .status-stepper__button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .status-stepper__button:disabled { color: var(--text-disabled); cursor: not-allowed; }
-.status-stepper__value { min-width: 26px; text-align: center; color: var(--text); }
+.status-stepper__value { flex: 0 1 auto; max-width: 100%; min-width: 26px; text-align: center; color: var(--text); }
 /* A typed length (the text height): the same value slot, now an input, so a
    decimal no fixed step can reach (1.75) is enterable. The chip keeps its 20px
    height; the field is transparent until focused, so the strip reads the same
@@ -897,7 +931,11 @@ button, input, select { font: inherit; color: inherit; }
    units — the hint says so — and `font-variant-numeric` keeps the digits from
    dancing while the value is retyped. */
 .status-stepper__input {
-  width: 48px; min-width: 26px; height: 16px; padding: 0 2px;
+  /* Width is a *preference*, not a demand: on a squeezed row the field is the
+     element that gives way (down to its 26px readable floor) instead of painting
+     past the chip and over the neighbouring control. */
+  flex: 0 1 auto;
+  width: 48px; min-width: 26px; max-width: 100%; height: 16px; padding: 0 2px;
   border: 1px solid transparent; border-radius: 2px;
   background: transparent; color: var(--text);
   font: inherit; font-size: 11px; font-variant-numeric: tabular-nums;
@@ -919,11 +957,12 @@ button, input, select { font: inherit; color: inherit; }
    can decode. */
 .status-choices {
   display: inline-flex; align-items: center; gap: 2px;
+  min-width: 0;
   height: 20px; padding: 0 2px 0 7px;
   border: 1px solid var(--line-soft); border-radius: var(--radius);
   background: var(--field); color: var(--text-dim);
 }
-.status-choices__label { color: var(--text-muted); margin-right: 2px; }
+.status-choices__label { flex: 0 0 auto; white-space: nowrap; color: var(--text-muted); margin-right: 2px; }
 .status-choices__choice {
   display: inline-flex; align-items: center;
   height: 16px; padding: 0 5px;
@@ -1046,6 +1085,17 @@ button, input, select { font: inherit; color: inherit; }
 }
 
 /* Narrow windows --------------------------------------------------------- */
+/* A status-bar row cannot wrap (26px), so the parameter chips give up their
+   labels before they give up their controls: the chip's accessible name stays on
+   the `role="group"`, and the same rule already drops the chooser/swatch labels
+   further down. 1180px is the width at which "Hover preview" + "Command line" +
+   "Clean screen" + a labelled parameter chip stop fitting beside each other with
+   an active tool and a long state word. */
+@media (max-width: 1180px) {
+  .status-stepper__label { display: none; }
+  .status-choices__label { display: none; }
+  .statusbar__tool-step { display: none; }
+}
 @media (max-width: 900px) {
   .workspace__left.is-open { width: 240px; }
   .titlebar__brand { display: none; }

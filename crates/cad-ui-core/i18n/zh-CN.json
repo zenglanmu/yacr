@@ -887,5 +887,10 @@
   "dialog.popup.body_failed": "此对话框的内容无法显示；请关闭后重试。",
   "toolbar.zoom_previous": "上一个视图",
   "toolbar.zoom_window.hint": "两个角点：在画布上拖出矩形框缩放。仅二维视图可用，三维视图会拒绝此命令。",
-  "toolbar.zoom_previous.hint": "返回上一个记录的视图。平移、滚轮缩放和三维环绕不记为一步。"
+  "toolbar.zoom_previous.hint": "返回上一个记录的视图。平移、滚轮缩放和三维环绕不记为一步。",
+  "mobile.menu": "菜单",
+  "mobile.drawer": "工具",
+  "mobile.close": "关闭",
+  "mobile.send": "执行",
+  "mobile.refusal.unsupported": "这些工具暂时都不能用：当前宿主没有提供它们的命令。"
 }

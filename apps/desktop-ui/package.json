@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "vite build",
+    "build:web": "YACR_RUNTIME=web vite build --outDir ../app-web/dist-ui --emptyOutDir",
+    "build:android": "YACR_RUNTIME=android vite build --outDir ../app-android/dist --emptyOutDir",
     "build:canvas-wasm": "bash ../../scripts/build-canvas-wasm.sh",
     "test": "tsc --noEmit && node --test test/*.test.ts",
     "typecheck": "tsc --noEmit"

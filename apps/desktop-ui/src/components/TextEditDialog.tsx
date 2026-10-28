@@ -26,7 +26,7 @@
 // shared `.commandline__input` tokens and the box metrics come from
 // `popup-layout.ts`, next to the other dialogs'.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../host/invoke.ts';
 import { Button } from './primitives.tsx';
 import { useI18n } from '../context.ts';
 import { setSelectedText } from '../tools/textedit.ts';

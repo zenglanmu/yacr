@@ -4,7 +4,7 @@
 // status polling, the command funnel (`cad_command`) and the keyboard shortcuts.
 // Visual work lives in the region components.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from './host/invoke.ts';
 import { CATALOGS } from './catalogs.ts';
 import { createTranslator, initialLocale, LOCALE_STORAGE_KEY, LOCALES, localeTag, storedLocale, storeLocale } from './i18n.ts';
 import type { Locale } from './i18n.ts';
@@ -42,6 +42,11 @@ import { CommandLine } from './components/CommandLine.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
 import { PopupOverlay } from './components/PopupOverlay.tsx';
 import { ContextMenu } from './components/ContextMenu.tsx';
+import { MobileCommandBar } from './components/MobileCommandBar.tsx';
+import { MOBILE_DRAWER_ID, MobileRibbonDrawer } from './components/MobileRibbonDrawer.tsx';
+import { MobileTopBar } from './components/MobileTopBar.tsx';
+import { MOBILE_DRAWER_CLOSED, mobileDrawerNext } from './layout/mobile-drawer.ts';
+import { useLayoutMode } from './layout/use-layout-mode.ts';
 import { openPopup } from './popup/popup.ts';
 import { isOptionsCommand } from './options/options.ts';
 import { isLayersCommand } from './layers/layers.ts';
@@ -141,10 +146,40 @@ function Shell() {
   // by design, so the palettes are not offered at all instead of shown empty. One
   // carrier flag — never a platform check — and an absent flag means "as today".
   const palettesAvailable = surfaceMode !== SURFACE_MODE_DOM_CANVAS;
+  // Whether the host has reported a carrier at all. Before the first `cad_status`
+  // answer `surfaceModeFromShell` returns the `native-below` default, which is a
+  // compatibility fallback for *older hosts* - not a fact the chrome may act on.
+  const carrierKnown = status !== null;
+  // The one decision about the `probe_input` lane: it exists only on a **known**
+  // `native-below` carrier. Creating it on the unknown mount would forward a
+  // `resize` to a `dom-canvas` runtime that does not serve `probe_input`, and the
+  // refusal would paint a permanent error banner (the rejection lands in
+  // `setError`, which `displayError` never clears). Guarding here is the honest
+  // fix: the carrier is asked, not guessed, and `dom-canvas` still gets no lane.
+  const nativeInputLane = carrierKnown && surfaceMode !== SURFACE_MODE_DOM_CANVAS;
   // The validated payload of the **fresh** open (`cad_open_popup`'s additive
   // field). It is local UI state on purpose: the wire only carries the content
   // once, so an `existing: true` answer can never overwrite a rendered dialog.
   const [popupPayload, setPopupPayload] = useState<PopupPayload | null>(null);
+
+  // The one width-based layout switch (CSS px, `matchMedia`, live on resize). The
+  // resolved value is written on `.shell` as `data-layout` so the stylesheet and
+  // the contract tests can target it; the hook also writes it on the document
+  // element for the overlays that are portalled outside this tree.
+  const layout = useLayoutMode();
+  const mobile = layout === 'mobile';
+  // The mobile ribbon drawer (compact layout only): one boolean, three named
+  // transitions (`layout/mobile-drawer.ts`). The selected tab is `ribbonTab`, so
+  // the drawer and the desktop band always agree about where the user is.
+  const [mobileDrawer, setMobileDrawer] = useState(MOBILE_DRAWER_CLOSED);
+  const toggleMobileDrawer = useCallback(() => setMobileDrawer(state => mobileDrawerNext(state, 'toggle')), []);
+  const closeMobileDrawer = useCallback(() => setMobileDrawer(state => mobileDrawerNext(state, 'close')), []);
+  // Leaving the compact layout closes the drawer: there is no drawer on the
+  // desktop band, and a resize back to mobile must not resurrect it open.
+  useEffect(() => {
+    if (mobile) return;
+    setMobileDrawer(state => mobileDrawerNext(state, 'close'));
+  }, [mobile]);
 
   const submitting = useRef(false);
   // The text-step submit has its own in-flight guard: it must not block a
@@ -240,14 +275,17 @@ function Shell() {
   // `dom-canvas` hosts have no native surface behind this window, so their input
   // must not be forwarded to a host input gate: the wasm session receives it
   // directly (the transport effect below) and **no** `probe_input` lane exists.
-  // `native-below` - including the mount before the host reports any mode - runs
+  // The lane also waits for the carrier to be **known** (`nativeInputLane`, i.e.
+  // the first `cad_status` answer): the pre-answer default is a compatibility
+  // guess, and acting on it already sent one `resize` to a carrier that refuses
+  // it. `native-below` therefore starts its lane one status poll later and runs
   // exactly the code it always did.
   useEffect(() => {
-    if (surfaceMode === SURFACE_MODE_DOM_CANVAS) return undefined;
+    if (!nativeInputLane) return undefined;
     const lane = createInputLane(input => invoke('probe_input', { input }), setError);
     laneRef.current = lane;
     return () => { lane.dispose(); laneRef.current = null; };
-  }, [surfaceMode]);
+  }, [nativeInputLane]);
 
   // The `dom-canvas` transport (ADR 0024 D1/D2/D3). The wasm session is the single
   // pixel carrier and the single camera owner; this component only measures the
@@ -321,6 +359,12 @@ function Shell() {
   // Bind (and re-bind) the input lane to the CAD partition element. The binding
   // reports the partition rect immediately, and re-reports it on every resize,
   // DPR change and layout shift so the host's surface metrics never go stale.
+  //
+  // `nativeInputLane` is a dependency, not just `surfaceNode`: the lane is
+  // created a commit *after* the partition is measured on `native-below` (it
+  // waits for the first `cad_status`), so without it there would be a lane and no
+  // binding. Effects run in declaration order, so the lane exists by the time this
+  // one re-runs; a carrier switch disposes both in the same commit.
   useEffect(() => {
     const lane = laneRef.current;
     if (!surfaceNode || !lane) return undefined;
@@ -330,7 +374,7 @@ function Shell() {
     // (a remount must not silently resume while text focus or a popup does).
     suspendGate.current!.sync();
     return () => { binding.dispose(); if (bindingRef.current === binding) bindingRef.current = null; };
-  }, [surfaceNode]);
+  }, [surfaceNode, nativeInputLane]);
 
   useEffect(() => {
     const sampler = createFpsSampler();
@@ -846,14 +890,30 @@ function Shell() {
   return (
     <I18nContext.Provider value={i18n}>
       <ShellContext.Provider value={shell}>
-        <main className={['shell', cleanScreen ? 'is-clean' : ''].filter(Boolean).join(' ')}>
-          {cleanScreen ? null : <TitleBar />}
-          {cleanScreen ? null : <Ribbon />}
-          {cleanScreen ? null : <DocTabs />}
+        <main className={['shell', cleanScreen ? 'is-clean' : ''].filter(Boolean).join(' ')} data-layout={layout}>
+          {/* Compact layout: the top bar (menu + drawing name) and the drawer it
+              opens. The drawer is a fixed overlay, so it costs the drawing no
+              height. The start panel, the dock, the nav rail, the tab strips and
+              the status bar are desktop chrome: they stay mounted for the desktop
+              layout only, and `.workspace__left`/`.navrail` are hidden by CSS on
+              mobile rather than unmounted — `<Workspace />` keeps its position in
+              this tree, so a live breakpoint crossing never remounts the CAD
+              session. */}
+          {mobile ? (
+            <>
+              <MobileTopBar menuOpen={mobileDrawer.open} onMenu={toggleMobileDrawer} drawerId={MOBILE_DRAWER_ID} />
+              <MobileRibbonDrawer open={mobileDrawer.open} onClose={closeMobileDrawer} />
+            </>
+          ) : cleanScreen ? null : <TitleBar />}
+          {mobile || cleanScreen ? null : <Ribbon />}
+          {mobile || cleanScreen ? null : <DocTabs />}
           <Workspace />
-          {cleanScreen ? null : <LayoutTabs />}
-          {commandLineOpen ? <CommandLine /> : null}
-          <StatusBar />
+          {mobile || cleanScreen ? null : <LayoutTabs />}
+          {/* One bottom component per layout: the docked command line below the
+              status bar on desktop, the command bar (which also carries errors
+              and history) on mobile. */}
+          {mobile ? <MobileCommandBar /> : commandLineOpen ? <CommandLine /> : null}
+          {mobile ? null : <StatusBar />}
         </main>
         {/* The CAD shortcut menu: one in-DOM overlay above the workspace. It has
             no backdrop, so the press that dismisses it still reaches whatever is

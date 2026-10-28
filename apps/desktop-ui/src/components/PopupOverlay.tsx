@@ -22,7 +22,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../host/invoke.ts';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
 import { IconButton } from './primitives.tsx';

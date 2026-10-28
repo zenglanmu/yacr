@@ -49,7 +49,14 @@ interface UnavailableItem {
   readonly standardView?: string;
 }
 
-function runItem(shell: ShellValue, item: RibbonItem) {
+/**
+ * Dispatch one ribbon item through the one funnel.
+ *
+ * Exported because the mobile ribbon drawer renders the same model: a tool
+ * tapped in the drawer must reach the host by exactly the path the desktop band
+ * uses, including the standard-view IPC that never rides `cad_command`.
+ */
+export function runItem(shell: ShellValue, item: RibbonItem) {
   if (item.action) return shell.runAction(item.action);
   // A standard view carries a payload, so it never rides the name-only command
   // funnel: the shell sends it on `cad_standard_view` through its own typed
@@ -66,8 +73,11 @@ function runItem(shell: ShellValue, item: RibbonItem) {
  * for a drag-only command, the catalog's own "no drawing is open" sentence for a
  * document-scoped selector or a standard view on the start page, and the generic
  * unsupported reason for a command the router does not admit.
+ *
+ * Shared with the mobile drawer, which has no hover: it renders this sentence as
+ * visible text under the disabled cell instead of a tooltip.
  */
-function unavailable(t: Translator, item: UnavailableItem, shell: ShellValue) {
+export function unavailable(t: Translator, item: UnavailableItem, shell: ShellValue) {
   if (item.standardView) {
     return t(standardViewUnavailableReasonKey(shell), { command: t(item.labelKey) });
   }
@@ -78,16 +88,25 @@ function unavailable(t: Translator, item: UnavailableItem, shell: ShellValue) {
   return t(unavailableReasonKey(item.command, { status: shell.status, pending: shell.pending }), { command: t(item.labelKey) });
 }
 
-function ItemButton({ item }: { readonly item: RibbonItem }) {
-  const { t } = useI18n();
-  const shell = useShell();
-  // Three gates, one per dispatch token: a shell action is always available, a
-  // standard view needs a loaded status with an open drawing, and a command is
-  // enabled only by router admission. Nothing is ever locally enabled.
-  const enabled = item.action ? true
+/**
+ * Whether `item` can run right now.
+ *
+ * Three gates, one per dispatch token: a shell action is always available, a
+ * standard view needs a loaded status with an open drawing, and a command is
+ * enabled only by router admission. Nothing is ever locally enabled — the mobile
+ * drawer reads this same answer instead of re-deriving one.
+ */
+export function itemEnabled(shell: ShellValue, item: RibbonItem): boolean {
+  return item.action ? true
     : item.standardView ? standardViewAvailable(shell)
       : item.command ? shell.canCommand(item.command)
         : false;
+}
+
+function ItemButton({ item }: { readonly item: RibbonItem }) {
+  const { t } = useI18n();
+  const shell = useShell();
+  const enabled = itemEnabled(shell, item);
   // The About dialog is a host window, so `cad_status.popup` is the only honest
   // "open" signal. The button reads pressed while it is open and stays
   // clickable: the host answers `existing: true` and focuses the live window.
@@ -137,7 +156,7 @@ function VariantMenu({ item, onClose }: { readonly item: RibbonItem; readonly on
   return (
     <div className="ribbon-panel__menu" role="menu" aria-label={t('ribbon.variants', { name: t(item.labelKey) })}>
       {(item.variants ?? []).map(variant => {
-        const enabled = variant.action ? true : variant.standardView ? standardViewAvailable(shell) : variant.command ? shell.canCommand(variant.command) : false;
+        const enabled = itemEnabled(shell, variant);
         return (
           <button
             key={variant.id}

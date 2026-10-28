@@ -25,7 +25,7 @@
 // the shared i18n context. The main window picks the value up through the
 // storage event and a focus-time re-read (see `App.tsx`).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../host/invoke.ts';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
 import { Button } from './primitives.tsx';
@@ -242,7 +242,7 @@ function OptionsRow({ field, error, first, t, children }: OptionsRowProps) {
   const ids = fieldIds(field);
   const labelStyle = error ? { ...OPTIONS_LABEL, ...OPTIONS_LABEL_INVALID } : OPTIONS_LABEL;
   return (
-    <div style={first ? OPTIONS_ROW : { ...OPTIONS_ROW, ...OPTIONS_ROW_RULE }}>
+    <div className="options-row" style={first ? OPTIONS_ROW : { ...OPTIONS_ROW, ...OPTIONS_ROW_RULE }}>
       {field.kind === 'readonly' ? (
         <span style={labelStyle}>
           {t(field.labelKey)}
@@ -590,11 +590,12 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
 
   return (
     <>
-      <div style={OPTIONS_BODY}>
+      <div className="options-body" style={OPTIONS_BODY}>
         <div
           role="tablist"
           aria-orientation="vertical"
           aria-label={label}
+          className="options-rail"
           style={OPTIONS_RAIL}
           onKeyDown={onRailKeyDown}
         >
@@ -609,7 +610,7 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
                 aria-selected={selected}
                 aria-controls={PANEL_ID}
                 tabIndex={selected ? 0 : -1}
-                className="ui-button"
+                className="ui-button options-tab"
                 style={selected ? { ...OPTIONS_TAB, ...OPTIONS_TAB_ACTIVE } : OPTIONS_TAB}
                 onClick={() => setActiveTab(entry.id)}
               >
@@ -625,6 +626,7 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
           aria-labelledby={tab ? `options-tab-${tab}` : undefined}
           aria-label={tab ? undefined : label}
           tabIndex={-1}
+          className="options-content"
           style={OPTIONS_CONTENT}
         >
           {phase.kind === 'loading' ? (

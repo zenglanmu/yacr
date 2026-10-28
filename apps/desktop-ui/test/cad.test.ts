@@ -282,9 +282,9 @@ test('React command copy is narrow and only accepted input is cleared', async ()
   const source = await readAppSource();
   assert.ok(source.includes("result.kind === 'accepted' && options.fromInput"));
   // The field's placeholder is catalog copy in both modes: the command prompt,
-  // or the text step's own prompt (`text-tool.test.mjs` pins that one).
-  assert.ok(source.includes("t('command.placeholder')"));
-  assert.ok(source.includes("t(TEXT_PROMPT_KEY)"));
+  // or the text step's own prompt (`text-tool.test.mjs` pins that one). The one
+  // chooser is the shared controller, so both command bars word it the same way.
+  assert.ok(source.includes("return textMode ? TEXT_PROMPT_KEY : 'command.placeholder';"));
   assert.ok(!source.includes("t('command.completed')"));
   assert.ok(!source.includes("t('command.prompt')"));
   assert.ok(!source.includes("t('status.scaffold')"));

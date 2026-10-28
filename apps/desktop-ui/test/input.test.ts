@@ -23,6 +23,78 @@ test('disconnected IPC reports each failure and does not swallow terminal input'
   assert.equal(lane.pending(), 0);
 });
 
+test('a live lane reports a failed send; a disposed lane reports nothing', async () => {
+  // Live: unchanged behaviour — the refusal reaches the sink.
+  const live = [];
+  const liveLane = createInputLane(async () => { throw Error('unsupported-runtime: probe_input'); }, error => live.push(error));
+  liveLane.push({ kind: 'resize' });
+  await settle();
+  assert.deepEqual(live, ['Error: unsupported-runtime: probe_input']);
+  liveLane.dispose();
+
+  // Disposed while the send is in flight: the rejection lands after `dispose()`
+  // (a carrier switch while a `resize` is on the wire) and must stay silent —
+  // reporting it paints an error banner for a lane nobody owns any more.
+  const silent = [];
+  let release;
+  let calls = 0;
+  const lane = createInputLane(async () => {
+    calls++;
+    await new Promise(resolve => { release = resolve; });
+    throw Error('unsupported-runtime: probe_input');
+  }, error => silent.push(error));
+  assert.equal(lane.push({ kind: 'resize' }), true);
+  assert.equal(lane.push({ kind: 'pointer_down' }), true);
+  lane.dispose();
+  release();
+  await settle();
+  await settle();
+  assert.deepEqual(silent, []);
+  // And a disposed lane accepts nothing more: no push, no gesture start, no send.
+  assert.equal(lane.push({ kind: 'pointer_down' }), false);
+  assert.equal(lane.canStart(), false);
+  assert.equal(calls, 1);
+});
+
+test('a disposed lane drops its queue without sending or reporting', async () => {
+  // Disposal happens while the first send is still on the wire: the queued
+  // successor is neither sent nor reported, and the in-flight failure is silent.
+  const errors = [];
+  const sent = [];
+  let release;
+  const lane = createInputLane(async input => {
+    sent.push(input.kind);
+    if (sent.length === 1) {
+      await new Promise(resolve => { release = resolve; });
+      throw Error('IPC_DISCONNECTED');
+    }
+  }, error => errors.push(error));
+  lane.push({ kind: 'pointer_down' });
+  lane.push({ kind: 'pointer_up' });
+  lane.dispose();
+  release();
+  await settle();
+  await settle();
+  assert.deepEqual(sent, ['pointer_down']);
+  assert.deepEqual(errors, []);
+  assert.equal(lane.pending(), 0);
+});
+
+test('disposed lane error sink is silent but live rejections still reach it', async () => {
+  // One sink, two lanes: the live lane's refusal is reported even though a
+  // sibling lane was disposed — silence is per lane, never global.
+  const errors = [];
+  const report = error => errors.push(error);
+  const disposedLane = createInputLane(async () => { throw Error('dead'); }, report);
+  const liveLane = createInputLane(async () => { throw Error('alive'); }, report);
+  disposedLane.push({ kind: 'resize' });
+  liveLane.push({ kind: 'resize' });
+  disposedLane.dispose();
+  await settle();
+  await settle();
+  assert.deepEqual(errors, ['Error: alive']);
+});
+
 test('ordered async lane coalesces moves without crossing down/up boundaries', async () => {
   const sent = [];
   let unblock;

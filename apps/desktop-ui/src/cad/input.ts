@@ -39,7 +39,7 @@ export interface InputLane {
   push(input: QueueInput): boolean;
   /** Messages still queued or in flight. */
   pending(): number;
-  /** Drop everything; later pushes are refused. */
+  /** Drop everything; later pushes are refused and in-flight failures go unreported. */
   dispose(): void;
 }
 
@@ -56,7 +56,17 @@ export function createInputLane(send: SendInput, onError: ReportError, capacity 
     while (queue.length && !disposed) {
       const input = queue.shift();
       if (input === undefined) break;
-      try { await send(input); } catch (error) { onError(String(error)); }
+      try {
+        await send(input);
+      } catch (error) {
+        // A **disposed** lane never reports. `dispose()` is what a carrier
+        // switch (or an unmount) does, and a send that was already in flight
+        // rejects *after* it — e.g. a `resize` on a `dom-canvas` host, where
+        // `probe_input` is not a command the runtime serves. Surfacing that as
+        // a UI error banner reports a refusal nobody asked for any more. A live
+        // lane keeps exactly today's behaviour.
+        if (!disposed) onError(String(error));
+      }
     }
     busy = false;
   }

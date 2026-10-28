@@ -168,12 +168,15 @@ test('over the bound the limit is shown, the draft is kept and nothing is trunca
   assert.equal(textDraftState('   ').empty, true);
   assert.equal(textDraftState('   ').tooLong, false);
   assert.equal(TOOL_TEXT_MAX_LENGTH, 1024);
-  const commandline = await readModule('components/CommandLine.tsx');
+  // The draft and its bound live in the shared controller; the docked region only
+  // renders the message it reports.
+  const commandline = await readModule('commands/use-command-line.ts');
+  const desktop = await readModule('components/CommandLine.tsx');
   // The bound is rendered from the catalog with the real number, in both the
   // live warning and the refusal message.
   assert.ok(commandline.includes('t(TEXT_TOO_LONG_KEY, { max: TOOL_TEXT_MAX_LENGTH })'), 'the limit is shown from the catalog');
   assert.ok(commandline.includes('const tooLongText = draft.tooLong'));
-  assert.ok(commandline.includes('role="alert"'), 'the limit/refusal is announced');
+  assert.ok(desktop.includes('role="alert"'), 'the limit/refusal is announced');
   // No silent truncation: the field has no `maxLength`, and the draft is only
   // cleared on acceptance.
   assert.ok(!commandline.includes('maxLength'), 'the field must not truncate the draft');
@@ -199,7 +202,9 @@ test('one Escape dismisses the text field and only the next one cancels', () => 
 });
 
 test('the Escape wiring keeps the two-step behaviour and never cancels from the field', async () => {
-  const commandline = await readModule('components/CommandLine.tsx');
+  // The field's own key handling is the shared controller's; the docked region and
+  // the mobile bar therefore take the focused press the same way.
+  const commandline = await readModule('commands/use-command-line.ts');
   const app = await readAppSource();
   // The field's own handler takes the focused press and hands the keyboard back.
   assert.ok(commandline.includes("textEscapeAction({ awaitingText: textMode, focused: true }) === 'dismiss'"));
@@ -245,20 +250,24 @@ test('an IME-composing Enter is ignored, and Enter submits once', () => {
 });
 
 test('typed characters stay in the field and Enter never also runs a command', async () => {
-  const commandline = await readModule('components/CommandLine.tsx');
+  const commandline = await readModule('commands/use-command-line.ts');
+  const desktop = await readModule('components/CommandLine.tsx');
   const app = await readAppSource();
-  // The text draft is local component state; typing it never dispatches an IPC.
-  assert.ok(commandline.includes('setTextDraft(event.target.value)'));
+  // The text draft is controller state; typing it never dispatches an IPC.
+  assert.ok(commandline.includes('setTextDraft(next)'));
   assert.ok(!commandline.includes("invoke("), 'the view never talks to the host directly');
+  assert.ok(!desktop.includes("invoke("), 'the docked region never talks to the host directly');
   // The text submit and the command submit are two distinct Enter paths, and the
-  // text one returns before the command/nav path can run.
-  const commandPath = commandline.indexOf('handleCommandKey(event, () => shell.submitCommand(effectiveText()));');
-  const textPath = commandline.indexOf('handleCommandKey(event, submitText);');
-  assert.ok(commandPath !== -1, 'the command Enter path must stay');
-  assert.ok(textPath !== -1, 'the text Enter path must exist');
-  assert.ok(textPath > commandPath);
-  assert.ok(commandline.slice(0, commandPath).includes('if (!textMode)'), 'the command path is command-mode only');
+  // text one sits behind the command branch's `return`.
+  const commandPath = commandline.indexOf('if (!textMode) {');
+  const textPath = commandline.indexOf("if (event.key === 'Escape') {");
+  assert.ok(commandPath !== -1, 'the command branch must stay');
+  assert.ok(textPath > commandPath, 'the text branch comes after it');
   assert.ok(commandline.slice(commandPath, textPath).includes('return;'), 'text mode never falls through to a command');
+  // Both modes end in the shared Enter rule (IME- and repeat-aware), and the one
+  // submit decides text-vs-command in a single place.
+  assert.equal((commandline.match(/handleCommandKey\(event, submit\);/g) ?? []).length, 2, 'one Enter rule, two modes');
+  assert.ok(commandline.includes('shell.submitCommand(commandLineSubmitText('), 'the command path is the one funnel');
   // One IPC for the text, from the shell, and nothing queued as a command.
   assert.ok(app.includes('setToolText(invoke, text)'));
   assert.ok(app.includes('submitToolText,'));
@@ -267,23 +276,28 @@ test('typed characters stay in the field and Enter never also runs a command', a
   // suspended), so a keystroke can never become a canvas shortcut.
   assert.ok(commandline.includes('shell.suspendPointer(true)'));
   assert.ok(commandline.includes('shell.suspendPointer(false)'));
-  // Awaiting text never disables the field mid-edit (that would drop focus).
-  assert.ok(commandline.includes('const disabledInput = !shell.cadReady || (shell.pending && !textMode);'));
+  // Awaiting text never disables the field mid-edit (that would drop focus); the
+  // rule is the shared model's, and the controller applies it.
+  const model = await readModule('commands/command-line-model.ts');
+  assert.ok(model.includes('return !cadReady || (pending && !textMode);'));
+  assert.ok(commandline.includes('commandLineDisabled({ cadReady: shell.cadReady, pending: shell.pending, textMode })'));
 });
 
 test('the command line is a text prompt only while the host says so, then returns to command names', async () => {
-  const commandline = await readModule('components/CommandLine.tsx');
+  const commandline = await readModule('commands/use-command-line.ts');
+  const model = await readModule('commands/command-line-model.ts');
   // The mode comes from the flag (through the shared reader) — no tool key and
   // no `points` may decide it.
   assert.ok(commandline.includes('awaitingToolText(shell.status)'));
   assert.ok(!commandline.includes('draw.text'), 'the mode must not be keyed to the TEXT tool');
   assert.ok(!commandline.includes('.points'), 'the mode must not be derived from the point count');
-  // Text mode: the prompt, the payload and the step name all come from the
-  // catalog, and the completion list is not offered.
-  assert.ok(commandline.includes("placeholder={textMode ? t(TEXT_PROMPT_KEY) : t('command.placeholder')}"));
-  assert.ok(commandline.includes("value={textMode ? textDraft : shell.command}"));
-  assert.ok(commandline.includes('t(TEXT_STEP_PROMPT_KEY)'));
-  assert.ok(commandline.includes('const listOpen = !textMode && focused'));
+  // Text mode: the prompt, the value and the step name all come from the
+  // catalog, through the model's one chooser; the completion list is not offered.
+  assert.ok(model.includes("return textMode ? TEXT_PROMPT_KEY : 'command.placeholder';"));
+  assert.ok(model.includes('return textMode ? textDraft : command;'));
+  assert.ok(model.includes('return !textMode && focused'));
+  assert.ok(commandline.includes('t(commandLinePlaceholderKey(textMode))'));
+  assert.ok(commandline.includes('textStepKey: textMode ? TEXT_STEP_PROMPT_KEY : null'));
   // Leaving the step clears the draft, so the field is a command line again.
   assert.ok(commandline.includes('if (textMode) return;'));
   assert.ok(commandline.includes('setTextDraft(\'\');'));

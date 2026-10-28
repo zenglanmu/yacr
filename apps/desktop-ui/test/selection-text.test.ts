@@ -424,7 +424,10 @@ test('TEXTEDIT prefill seeds the text step; a fresh TEXT still starts empty', ()
 });
 
 test('the command line seeds the field from the prefill and never overwrites typing', async () => {
-  const commandline = await readModule('components/CommandLine.tsx');
+  // The text step's draft lives in the shared controller now: both the docked
+  // field and the mobile command bar render it from there.
+  const commandline = await readModule('commands/use-command-line.ts');
+  const model = await readModule('commands/command-line-model.ts');
   // The step transition seeds from the prefill, so `TEXTEDIT` starts on the
   // current string and `TEXT` (no prefill) starts empty, exactly as before.
   assert.ok(commandline.includes('setTextDraft(toolTextPrefill(tool) ?? \'\');'));
@@ -435,9 +438,12 @@ test('the command line seeds the field from the prefill and never overwrites typ
   // The existing text-mode contract is untouched.
   assert.ok(commandline.includes('inputRef.current?.focus();'));
   assert.ok(commandline.includes('textEscapeAction({ awaitingText: textMode, focused: true }) === \'dismiss\''));
-  assert.ok(commandline.includes('handleCommandKey(event, submitText);'));
+  assert.ok(commandline.includes('handleCommandKey(event, submit);'));
   assert.ok(commandline.includes('if (draft.empty || draft.tooLong) return;'));
-  assert.ok(commandline.includes("value={textMode ? textDraft : shell.command}"));
+  // The displayed value is the model's single rule, so the two bars cannot show
+  // the draft and the command line differently.
+  assert.ok(model.includes('return textMode ? textDraft : command;'));
+  assert.ok(commandline.includes('commandLineValue(textMode, shell.command, textDraft)'));
 });
 
 // Every key the editor can render. The catalogs live in `crates/**`, which is the

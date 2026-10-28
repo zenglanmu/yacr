@@ -3,7 +3,7 @@
 // across the chrome/CAD edge so a real compositor capture can regress it.
 // Nothing here opens production native popups.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../host/invoke.ts';
 import { CATALOGS } from '../catalogs.ts';
 import { createTranslator, initialLocale, localeTag } from '../i18n.ts';
 import type { Locale } from '../i18n.ts';

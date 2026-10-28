@@ -158,12 +158,13 @@ test('the suggestion dropdown still filters on the base name', () => {
 });
 
 test('Enter on a typed argument keeps the line instead of the bare suggestion', async () => {
-  const commandline = await readModule('components/CommandLine.tsx');
-  // The completion row is a name; replacing the whole line would silently drop
-  // the argument (`ZOOM 2` would become `ZOOM` and lose the factor).
+  // The rule moved with the rest of the command line's decisions into the shared
+  // controller, so both the docked field and the mobile bar keep the argument.
+  const model = await readModule('commands/command-line-model.ts');
+  assert.ok(model.includes('export function commandLineSubmitText('));
   assert.ok(
-    commandline.includes('splitCommandText(shell.command).argument === null'),
-    'effectiveText must keep a typed argument',
+    model.includes('splitCommandText(command).argument === null'),
+    'the Enter line must keep a typed argument',
   );
   const app = await readModule('App.tsx');
   assert.ok(

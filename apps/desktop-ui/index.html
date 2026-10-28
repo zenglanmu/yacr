@@ -1,5 +1,14 @@
 <!doctype html>
 <html lang="en">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>yacr</title></head>
+  <head>
+    <meta charset="UTF-8" />
+    <!-- `viewport-fit=cover` is what makes the `env(safe-area-inset-*)` padding on
+         the compact top bar and command bar non-zero: without it a notched phone
+         reports zero insets and the bars would sit under the cutout. The drawing
+         area is deliberately allowed to run edge to edge; only the chrome is
+         padded. Zoom stays unrestricted (no `maximum-scale`). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>yacr</title>
+  </head>
   <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
 </html>

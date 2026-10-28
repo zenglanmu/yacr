@@ -59,7 +59,7 @@
 //    *does* is catalog copy (`layers.<flag>.hint`), never a claim only a comment
 //    makes.
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../host/invoke.ts';
 import { Icon } from '../icons.tsx';
 import { Button, IconButton } from './primitives.tsx';
 import { useI18n, useShell } from '../context.ts';

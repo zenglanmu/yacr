@@ -225,7 +225,8 @@ test('launching MLEADER walks arrow → landing → text, and the text field sta
   }
 
   // 5. The field is seeded from that prefill-read, so MLEADER lands on ''.
-  const commandline = await readModule('components/CommandLine.tsx');
+  // The controller (shared by the docked field and the mobile bar) owns the draft.
+  const commandline = await readModule('commands/use-command-line.ts');
   assert.ok(commandline.includes("const [textDraft, setTextDraft] = useState('')"), 'the draft starts empty');
   assert.ok(commandline.includes("setTextDraft(toolTextPrefill(tool) ?? '')"), 'the step seeds from the host prefill only');
   assert.ok(commandline.includes('awaitingToolText(shell.status)'), 'the mode is the host flag');
