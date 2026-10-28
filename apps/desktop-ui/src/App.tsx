@@ -212,6 +212,12 @@ function Shell() {
   // history the command line keeps — there is no second command log.
   const statusRef = useRef<CadStatus | null>(null);
   const historyRef = useRef<readonly string[]>([]);
+  // The one in-flight `cad_commands` request. On a `dom-canvas` carrier the host
+  // answer can only be produced after the wasm session module exists, so on a
+  // cold load (a 9.6 MB binary over the network) it may resolve *after* the first
+  // keystroke. `submitCommand` awaits it, which is what keeps an early `FIT` from
+  // being reported "not supported" while the vocabulary is still in flight.
+  const vocabularyRef = useRef<Promise<unknown> | null>(null);
   // The partition element itself, for two things the DOM event cannot carry: the
   // rect that turns the hook's partition-relative point into viewport px, and the
   // node that takes the keyboard back when the menu closes on Escape/Tab.
@@ -407,7 +413,12 @@ function Shell() {
   // unsupported — and surfaces the failure instead of pretending success.
   useEffect(() => {
     let cancelled = false;
-    invoke('cad_commands').then(answer => {
+    // Kept in a ref as well as acted on here: admission awaits it (see
+    // `submitCommand`) so a command typed before the host answers is admitted
+    // once the vocabulary arrives instead of being refused as "not supported".
+    const vocabulary = invoke('cad_commands');
+    vocabularyRef.current = vocabulary;
+    vocabulary.then(answer => {
       if (cancelled) return;
       // The vocabulary is validated by `setCommandCatalog` itself; the cast only
       // states what the host answers with.
@@ -542,6 +553,15 @@ function Shell() {
     // `FIT` until the app restarted). `status.error`/`pollError` are untouched.
     setError('');
     try {
+      // The host's vocabulary may still be in flight (a cold `dom-canvas` load
+      // resolves it only after the wasm module exists). Awaiting it here is what
+      // makes the *first* typed command work: admission reads the catalog, so
+      // without this an early `FIT` was refused as "not supported" and the user
+      // had to retype it. A failed load resolves here too — the command is then
+      // genuinely unsupported, which is what the loader's `catch` reported.
+      if (vocabularyRef.current) {
+        try { await vocabularyRef.current; } catch { /* reported by the loader */ }
+      }
       const result = await queueCadCommand(invoke, text, status, false);
       setCommandResult(result);
       if (result.kind === 'accepted') {
