@@ -9,7 +9,11 @@
  *     `start: ok` (never a silent blank canvas);
  *   - a real carrier is drawing: `target` is `html-canvas` or
  *     `offscreen-canvas`, the backing size is non-zero, and the document reports
- *     a non-zero `batches`/`draws`/`presented` frame counter.
+ *     a non-zero `batches` (the prepared scene's resident batches) and `presented`
+ *     (frames that reached the canvas) counter. `draws` is deliberately **not**
+ *     required: the production page session's engine owns the draw submission
+ *     count and does not publish it to this layer, so the field is `null` there —
+ *     asserting a number would force the carrier to invent one.
  *
  * What it does NOT prove — and must never be read as:
  *   - anything about GPU hardware or driver behaviour: CI has no GPU and the
@@ -205,7 +209,7 @@ async function main() {
     if (doc.label !== EXPECTED_LABEL) {
       fail(`the wasm document reports ${JSON.stringify(doc.label)} instead of ${EXPECTED_LABEL}`);
     }
-    for (const field of ['batches', 'draws', 'presented']) {
+    for (const field of ['batches', 'presented']) {
       if (!Number.isFinite(doc[field]) || doc[field] < 1) {
         fail(`the session reports no ${field} (${JSON.stringify(doc[field])})`, [
           `document: ${JSON.stringify(doc)}`,
@@ -237,7 +241,8 @@ async function main() {
     console.log(
       '[probe] web-smoke ok ' +
         `file=${label} target=${target} isolation=${isolation} physical=${physical} ` +
-        `batches=${doc.batches} draws=${doc.draws} presented=${doc.presented} ` +
+        `batches=${doc.batches} presented=${doc.presented} ` +
+        `draws=${doc.draws === undefined ? '-' : JSON.stringify(doc.draws)} ` +
         `gl_renderer=${JSON.stringify(measured.renderer ?? 'unknown')} rendering=${rendering}`,
     );
     if (software) {

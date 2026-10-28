@@ -68,11 +68,11 @@ use crate::budget;
 use import::{load, Loaded};
 use session_state::{
     begin_replace, begin_start, document_failure, ensure_not_starting, fail, install_live,
-    installed_documents, last_import_ms, record_import, wasm_heap_bytes, with_live, Failure,
-    Metrics, Session, State, NO_MEASUREMENT, STATE, STEP_INPUT, STEP_NAVIGATION, STEP_PRESENT,
-    STEP_STATE, STEP_VIEWPORT, STEP_WEBGL2, WEBGL2_MARKER,
+    last_import_ms, record_import, wasm_heap_bytes, with_live, Failure, Metrics, Session, State,
+    NO_MEASUREMENT, STATE, STEP_INPUT, STEP_NAVIGATION, STEP_PRESENT, STEP_STATE, STEP_VIEWPORT,
+    STEP_WEBGL2, WEBGL2_MARKER,
 };
-use surface::Surface;
+use surface::Offscreen;
 
 /// A committed, writer-produced AC1032 DWG with four LINE entities
 /// (`fixtures/manifest`). Not a vendor sample; wasm has no filesystem, so the
@@ -88,32 +88,27 @@ const SYNTHETIC_LABEL: &str = "synthetic-four-lines.dwg";
 // Exported entry points
 // ---------------------------------------------------------------------------
 
-pub(crate) async fn start_impl(
-    canvas_id: &str,
-    css_w: f64,
-    css_h: f64,
-    dpr: f64,
-) -> Result<String, JsValue> {
-    start_with(Surface::Page(canvas_id.to_string()), css_w, css_h, dpr).await
-}
-
-/// Worker entry: the same session on an `OffscreenCanvas` transferred into this
+/// Worker entry: this viewer session on an `OffscreenCanvas` transferred into this
 /// Worker.
 ///
-/// Identical pipeline to [`start_impl`] — the only difference is the carrier
-/// ([`Surface::Offscreen`]), so there is one session implementation with two
-/// carriers rather than a second copy of the import/build/upload path. Refused with
-/// `step: "isolation"` when called outside a Worker.
+/// The one carrier this module still opens. Refused with `step: "isolation"` when
+/// called outside a Worker (an `OffscreenCanvas` session opened from the page would
+/// compete with the page's own session).
 pub(crate) async fn start_offscreen_impl(
     canvas: web_sys::OffscreenCanvas,
     css_w: f64,
     css_h: f64,
     dpr: f64,
 ) -> Result<String, JsValue> {
-    start_with(Surface::Offscreen(canvas), css_w, css_h, dpr).await
+    start_with(Offscreen::resolve(canvas).map_err(fail)?, css_w, css_h, dpr).await
 }
 
-async fn start_with(surface: Surface, css_w: f64, css_h: f64, dpr: f64) -> Result<String, JsValue> {
+async fn start_with(
+    carrier: Offscreen,
+    css_w: f64,
+    css_h: f64,
+    dpr: f64,
+) -> Result<String, JsValue> {
     // Claim the start slot first: a concurrent `start` must not build a second
     // presenter for the same canvas.
     begin_start()?;
@@ -122,10 +117,6 @@ async fn start_with(surface: Surface, css_w: f64, css_h: f64, dpr: f64) -> Resul
     let physical = metrics
         .physical()
         .map_err(|message| fail(Failure::new(STEP_VIEWPORT, message)))?;
-    // Resolve the carrier before the geometry load: a missing element, a wrong
-    // element type or an `OffscreenCanvas` outside a Worker is a cheap, explicit
-    // refusal that must not cost a parse.
-    let carrier = surface.resolve().map_err(fail)?;
     let loaded = load_within_budget(
         SYNTHETIC_DWG,
         SYNTHETIC_LABEL,
@@ -150,8 +141,12 @@ async fn start_with(surface: Surface, css_w: f64, css_h: f64, dpr: f64) -> Resul
     Ok(status)
 }
 
-pub(crate) async fn open_bytes_impl(
-    canvas_id: &str,
+/// Worker entry: caller-supplied DWG bytes on the transferred `OffscreenCanvas`.
+///
+/// Same staged halves, same budgets, same chunked upload as the page carrier; the
+/// session implementation is this viewer's.
+pub(crate) async fn open_bytes_offscreen_impl(
+    canvas: web_sys::OffscreenCanvas,
     label: &str,
     css_w: f64,
     css_h: f64,
@@ -159,7 +154,7 @@ pub(crate) async fn open_bytes_impl(
     bytes: &[u8],
 ) -> Result<String, JsValue> {
     open_bytes_with(
-        Surface::Page(canvas_id.to_string()),
+        Offscreen::resolve(canvas).map_err(document_failure)?,
         label,
         css_w,
         css_h,
@@ -169,24 +164,8 @@ pub(crate) async fn open_bytes_impl(
     .await
 }
 
-/// Worker entry for [`open_bytes_impl`]: caller-supplied DWG bytes on the
-/// transferred `OffscreenCanvas`.
-///
-/// Same staged halves, same budgets, same chunked upload — the carrier is the only
-/// difference.
-pub(crate) async fn open_bytes_offscreen_impl(
-    canvas: web_sys::OffscreenCanvas,
-    label: &str,
-    css_w: f64,
-    css_h: f64,
-    dpr: f64,
-    bytes: &[u8],
-) -> Result<String, JsValue> {
-    open_bytes_with(Surface::Offscreen(canvas), label, css_w, css_h, dpr, bytes).await
-}
-
 async fn open_bytes_with(
-    surface: Surface,
+    carrier: Offscreen,
     label: &str,
     css_w: f64,
     css_h: f64,
@@ -207,9 +186,8 @@ async fn open_bytes_with(
     let physical = metrics
         .physical()
         .map_err(|message| document_failure(Failure::new(STEP_VIEWPORT, message)))?;
-    // The carrier is resolved (not created) before any state change: the previous
+    // The carrier was resolved (not created) before any state change: the previous
     // presenter is still live at this point.
-    let carrier = surface.resolve().map_err(document_failure)?;
     // Stage 1, before any state change: a bad, unsupported, empty or over-budget
     // file leaves a live session — and its canvas pixels — exactly as they were,
     // and the open document stays navigable.
@@ -268,19 +246,6 @@ pub(crate) fn zoom_at_impl(factor: f64, x: f64, y: f64) -> Result<String, JsValu
     })
 }
 
-/// One fixed zoom step about the **viewport centre** (`ZOOMIN`/`ZOOMOUT`).
-///
-/// A fixed step selector supplies no cursor, so the anchor is the centre of the
-/// live CSS viewport — the same rule `cad_ui_core`'s `ZOOMIN`/`ZOOMOUT` applies
-/// on the desktop session, using the same factors. Camera-only, like
-/// [`zoom_at_impl`]: the resident scene stays uploaded.
-pub(crate) fn zoom_step_impl(factor: f64) -> Result<String, JsValue> {
-    with_live(|session| {
-        session.zoom_about_centre(factor)?;
-        Ok(live_status(session))
-    })
-}
-
 /// Refit the camera to the retained drawing extents (`FIT`), then present.
 pub(crate) fn fit_view_impl() -> Result<String, JsValue> {
     with_live(|session| {
@@ -325,81 +290,6 @@ pub(crate) fn status_impl() -> String {
             "the session state is already borrowed",
         )),
     })
-}
-
-/// The shell surface's view of this session (`crate::shell::shell_status`).
-///
-/// Projects only facts the registry already holds: the label the session was opened
-/// with, its resident batch/draw counts, the frames that actually reached the
-/// canvas, the camera it would render with, the presenter's adapter descriptor, the
-/// last failure and the installed-document counter. Nothing here reads a file, a
-/// database or the document: after the open this crate has no query path (the
-/// imported database is released, [`crate::budget::DB_RETAINED`] is `false`), which
-/// is exactly why the shell status reports `entityCount: null` instead of a count.
-pub(crate) fn shell_facts() -> crate::shell::SessionFacts {
-    STATE.with(|cell| match cell.try_borrow() {
-        Ok(state) => match &*state {
-            // A start/open is genuinely in flight and no session exists yet, so
-            // `loading: true` is the real registry state, not a guess.
-            State::Starting => crate::shell::SessionFacts {
-                loading: true,
-                ..crate::shell::SessionFacts::default()
-            },
-            // A start failed before a session existed: report that failure instead
-            // of an empty status that would look healthy.
-            State::Failed(failure) => crate::shell::SessionFacts {
-                error: Some(format!("{}: {}", failure.step, failure.message)),
-                ..crate::shell::SessionFacts::default()
-            },
-            State::Live(session) => crate::shell::SessionFacts {
-                session: Some(live_shell_facts(session)),
-                loading: false,
-                import_count: installed_documents(),
-                error: None,
-            },
-            // Nothing has started (and, in practice, nothing has been installed):
-            // the honest empty facts.
-            State::Idle => crate::shell::SessionFacts::default(),
-        },
-        // A re-entrant borrow means a frame is being presented right now. A status
-        // poll must not panic on that: report "not observable" and let the next
-        // poll answer.
-        Err(_) => crate::shell::SessionFacts::default(),
-    })
-}
-
-/// The observable facts of one live session, for [`shell_facts`].
-fn live_shell_facts(session: &Session) -> crate::shell::LiveSession {
-    let info = session.presenter.adapter_info();
-    crate::shell::LiveSession {
-        label: session.label.clone(),
-        batches: session.batches as u64,
-        draws: session.draws,
-        presented: session.presenter.presented_frames(),
-        // Tagged with the session kind so a reader of the status knows which
-        // session reported it; `info.name` is the browser's own GL string, which
-        // may be masked and is never treated as a hardware claim.
-        adapter: format!(
-            "wasm32-webgl2 session: {} ({})",
-            info.name,
-            info.target.as_str()
-        ),
-        // The camera the renderer would use this frame; `None` when it is not a
-        // valid 2D view (never a placeholder centre/scale).
-        camera: session.camera.camera2d_params().ok().map(|params| {
-            cad_ui_core::session::CadCamera {
-                center: [params.center.x, params.center.y],
-                scale: params.world_per_px,
-            }
-        }),
-        // `FIT` is executable exactly when the import measured bounds to refit
-        // to — the session's own fact, not a capability guess.
-        has_bounds: session.bounds.is_some(),
-        error: session
-            .last_error
-            .as_ref()
-            .map(|failure| format!("{}: {}", failure.step, failure.message)),
-    }
 }
 
 /// What the open file is, as far as this session knows it.

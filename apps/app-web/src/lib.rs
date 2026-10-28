@@ -1,32 +1,29 @@
-//! Browser host: the **wasm CAD session + WebGL2 canvas** of the `dom-canvas`
+//! Browser host: the **real CAD session + WebGL2 canvas** of the `dom-canvas`
 //! runtime path (ADR 0024, `surfaceMode: dom-canvas`).
 //!
-//! This crate owns one CAD session **inside wasm**: it imports a drawing, builds
-//! the display scene, renders it with the renderer's offscreen frame texture and
-//! presents that frame on a web canvas through
+//! This crate owns one CAD session **inside wasm**: `cad_ui_core::session::CadSession`
+//! — the same owner-thread session the native hosts drive, with the real `cad-db`
+//! authority and the real command router — presenting through
 //! [`cad_render_wgpu::canvas::CanvasPresenter`]. It is not a second rendering
-//! mechanism next to the native presenter — it is the pixel carrier for hosts
-//! that have no native surface to draw on (the browser, and the Linux
-//! X11/XWayland `dom-canvas` path). The WebView/native shell still owns window
-//! lifetime, i18n and the admission policy; it must **not** hold a second CAD
-//! session or a copy of the document (ADR 0024 D2).
+//! mechanism next to the native presenter, and it is not a second document next to
+//! the chrome: the WebView/native shell owns window lifetime, i18n and the
+//! admission policy, and must **not** hold a CAD session or a copy of the document
+//! (ADR 0024 D2, `AGENTS.md` iron rule 8).
 //!
-//! # One session, two carriers (ADR 0024 stage ⑧)
+//! # One session, two carriers
 //!
-//! The same session implementation runs behind two carriers, selected only by which
-//! constructor is used:
+//! | entry point | canvas | runs in | session |
+//! |---|---|---|---|
+//! | [`start`] / [`open_bytes`] | the page's `<canvas id=...>` | the page's main thread | **the real [`CadSession`]** ([`live`] + [`page`]) |
+//! | [`start_offscreen`] / [`open_bytes_offscreen`] | an `OffscreenCanvas` transferred with `transferControlToOffscreen()` | a **Worker** | the viewer ([`session`]), unchanged |
 //!
-//! | entry point | canvas | runs in |
-//! |---|---|---|
-//! | [`start`] / [`open_bytes`] | the page's `<canvas id=...>` | the page's main thread |
-//! | [`start_offscreen`] / [`open_bytes_offscreen`] | an `OffscreenCanvas` transferred with `transferControlToOffscreen()` | a **Worker** |
-//!
-//! Everything downstream of the carrier — import, scene build, both memory budgets,
-//! the chunked upload, the frame path, pan/zoom — is the *same* code
-//! ([`session`]): there is exactly one session implementation. The carrier is
-//! resolved and created in [`session::surface`], and the status reports it as
-//! `target` (`html-canvas` | `offscreen-canvas`) plus `isolation` (`main-thread` |
-//! `worker`).
+//! The **page** carrier is the production flip of ADR 0024 stage ⑧: it applies the
+//! ADR 0025 budgets, keeps the database (it is the authority), answers the whole
+//! desktop wire vocabulary ([`direct::invoke`]) and runs the real input path. The
+//! **worker** carrier still runs the older viewer session — camera-only navigation
+//! over a released database — and is deliberately untouched by this change; it has
+//! no `invoke`/`probe_input`/`shell_*` surface yet (those refuse explicitly). Moving
+//! it onto the real session is the remaining half of stage ⑧ (`docs/handoff.md`).
 //!
 //! ## Measured capability split (2026-10-24)
 //!
@@ -42,29 +39,29 @@
 //!   with the explicit `webgl2` refusal (marker `yacr: unsupported-runtime: webgl2`)
 //!   instead of painting a blank canvas.
 //!
-//! [`worker_capability`] is how a host learns this *before* choosing: it returns
-//! `{ok, isolation, reason, context, webgl2_in_worker}`, so the page can state
-//! `isolation=main-thread (no WebGL2 in worker)` on WebKitGTK and run isolated on
-//! Chromium. A host must never guess isolation from a feature sniff
+//! [`worker_capability`] is how a host learns this *before* choosing A carrier: it
+//! returns `{ok, isolation, reason, context, webgl2_in_worker}`, so the page can
+//! state `isolation=main-thread (no WebGL2 in worker)` on WebKitGTK and run isolated
+//! on Chromium. A host must never guess isolation from a feature sniff
 //! (`OffscreenCanvas` exists on both engines).
 //!
 //! ## Single owner, enforced
 //!
-//! A canvas has exactly one session. [`start_offscreen`] is refused with
-//! `step: "isolation"` when it is called outside a Worker, because a page-side
-//! `OffscreenCanvas` session would compete with the page's own session for the one
-//! document; and the page shell creates **no** session at all on the isolated path
-//! (it does not even instantiate the wasm module: the Worker owns it). One canvas,
-//! one CAD session, one document.
+//! A canvas has exactly one session and a wasm instance has exactly one of them:
+//! [`start`] claims the page slot before the (async) presenter exists and refuses a
+//! second start, [`open_bytes`] **replaces the document in place**
+//! (`CadSession::open_bytes` → the host's own `deliver_external_open`), and
+//! `start_offscreen` is refused outside a Worker so a page-side `OffscreenCanvas`
+//! session can never compete with the page's own. The two carriers cannot both be
+//! live: the page path needs a page `<canvas>` (absent in a Worker) and the worker
+//! path needs an `OffscreenCanvas` in a Worker.
 //!
-//! # Exported API (the contract the X11 host lane is wired against)
+//! # Exported API (the contract the hosts are wired against)
 //!
 //! ```text
 //! start(canvas_id, css_w, css_h, dpr)                       -> JSON status (async)
 //! open_bytes(canvas_id, label, css_w, css_h, dpr, bytes)    -> JSON status (async)
-//! start_offscreen(canvas, css_w, css_h, dpr)                -> JSON status (async, Worker only)
-//! open_bytes_offscreen(canvas, label, css_w, css_h, dpr, bytes) -> JSON status (async, Worker only)
-//! worker_capability()                                       -> JSON capability report
+//! frame()                                                   -> JSON frame line
 //! resize(css_w, css_h, dpr)                                 -> JSON status
 //! zoom_at(factor, x, y)                                     -> JSON status (CSS px)
 //! pan(dx, dy)                                               -> JSON status (CSS px)
@@ -72,171 +69,97 @@
 //! status()                                                  -> JSON status
 //! document()                                                -> JSON document summary
 //! last_import_ms()                                          -> f64 milliseconds
+//! probe_input(args_json)                                    -> JSON pointer acknowledgement
+//! invoke(name, args_json) -> {"ok":true,"value":…} | {"ok":false,"error":…}
 //! shell_status()                                            -> JSON `cad_status` snapshot
-//! shell_commands()                                          -> JSON array of executable command names
+//! shell_commands()                                          -> JSON array of command names
 //! shell_aliases()                                           -> JSON array of `{alias, command}` rows
-//! shell_command(name)                                       -> `{"accepted":true}` or Err("unsupported-runtime: cad_command: …")
+//! shell_command(name)                                       -> `{"accepted":true}` or a refusal
+//! start_offscreen(canvas, css_w, css_h, dpr)                -> JSON status (async, Worker only)
+//! open_bytes_offscreen(canvas, label, css_w, css_h, dpr, bytes) -> JSON status (async, Worker only)
+//! worker_capability()                                       -> JSON capability report
 //! ```
 //!
 //! `resize`/`zoom_at`/`pan`/`fit_view`/`status`/`document`/`last_import_ms` are
-//! **carrier-agnostic**: they act on the one process-global session and never touch
-//! a canvas handle, so a Worker calls exactly the same exports as the page. Only the
-//! *opening* calls differ, because only they need a canvas.
+//! **carrier-agnostic**: they act on whichever carrier owns the session, so the page
+//! and the Worker call exactly the same exports. Only the *opening* calls differ,
+//! because only they need a canvas handle.
 //!
-//! Every status call returns the JSON status object on success and `Err(JsValue)`
-//! with a message naming the failing step on failure; the last failure is also
-//! kept so [`status()`] reports it. A status carries at least
-//! `{ ok, backend, adapter_name, format, target, isolation, physical: [w, h], label,
-//! bytes, batches, draws, presented, upload_chunks, peak_batches_per_chunk,
-//! heap_after_open, db_retained }`, plus `step`/`error` (and, for a `step` of
-//! `webgl2`, the stable `marker` `yacr: unsupported-runtime: webgl2`) on failure.
+//! # The frame loop is the host's, not wasm's
 //!
-//! `start` loads the compiled-in synthetic fixture with the stable label
-//! `synthetic-four-lines.dwg`; `open_bytes` opens **caller-supplied DWG bytes**
-//! (the browser shell reads them with the File API) and replaces a live session.
-//!
-//! # The shell surface: the shared React chrome without Tauri IPC
-//!
-//! The desktop hosts serve the chrome (`apps/desktop-ui`) through Tauri commands.
-//! A browser page (and an Android WebView) has no IPC, so [`shell`] exposes the
-//! **same four wire answers** directly: `shell_status()` is the frozen `cad_status`
-//! snapshot (`cad_ui_core::session::CadStatus`) overlaid with this session's **real**
-//! facts — its label, resident batch/draw counts, presented-frame count, camera,
-//! adapter, installed-document count and its `canFit` (a live session with retained
-//! bounds) — serialized with `surfaceMode: "dom-canvas"`, `palettesAvailable: false`
-//! and the session's own `canvasSession` descriptor; `shell_commands()`/
-//! `shell_aliases()` are the selectors this crate really executes (`FIT`, `ZOOMIN`,
-//! `ZOOMOUT`, plus the desktop alias rows that point at them); `shell_command(name)`
-//! runs one of those on the live session and answers `{"accepted":true}`, and refuses
-//! every other name with the stable `unsupported-runtime: cad_command` prefix. The
-//! chrome therefore renders with every capability it does not have turned **off**
-//! rather than with fabricated state (see [`shell`] for the per-field table).
-//! `OPEN` is not in this crate's vocabulary: the page's file picker owns it
-//! (`apps/desktop-ui/src/host/web-adapter.ts`), because a picker is a DOM capability
-//! and the bytes are the transport's.
+//! [`frame`] is **one** explicit step (tick → publish the prepared scene → render →
+//! blit on the canvas). The host calls it from `requestAnimationFrame`; nothing
+//! inside wasm starts a timer. The navigation exports present one frame themselves,
+//! so a chrome that predates [`frame`] (the current one) keeps repainting during a
+//! pan or a zoom.
 //!
 //! # Failure vocabulary (stable)
 //!
-//! - `import` — the importer rejected the bytes; the message is the importer's
-//!   own diagnostic, prefixed with the file label.
-//! - `empty-scene` — the file parsed but produced zero draw batches; a blank
-//!   canvas is never presented as a successful open.
-//! - `webgl2` — no usable WebGL2 context/surface (carries the refusal marker).
-//!   This includes the measured WebKitGTK worker case: an `OffscreenCanvas` in a
-//!   Worker has no WebGL2 context there.
-//! - `isolation` — `start_offscreen`/`open_bytes_offscreen` was called outside a
-//!   Worker, i.e. where it would be a second owner of the single session (see
-//!   [`session::surface`]).
-//! - `canvas-element` — the page has no such element / it is not a `<canvas>`.
-//! - `budget` — a **named memory budget** refused the file (see [`budget`]): the
-//!   input is larger than [`budget::MAX_INPUT_BYTES`], or the wasm heap after the
-//!   scene build exceeds [`budget::MAX_WASM_HEAP_BYTES`]. The message names the
-//!   budget, its limit and the measured value, and the status carries a structured
-//!   `budget: {name, limit_bytes, measured_bytes}`. The open document stays intact
-//!   and navigable — a refusal is never a blank canvas and never a silent
-//!   degradation.
+//! Every canvas export rejects with `Err(JsValue)` whose text is `step: message`,
+//! and the status carries the same `step`/`error`:
 //!
-//! `open_bytes` runs the geometry load (and both budgets) **before** it touches the
-//! session registry, so a bad/unsupported/empty/over-budget file leaves a live
-//! session (and its canvas pixels) intact; the failure is reported on the
-//! still-open session instead.
+//! - `import` — the importer rejected the bytes; the message is the importer's own
+//!   diagnostic, prefixed with the file label.
+//! - `webgl2` — no usable WebGL2 context/surface (carries the refusal marker
+//!   `yacr: unsupported-runtime: webgl2`, which the host turns into exit code 6).
+//!   This includes the measured WebKitGTK worker case.
+//! - `isolation` — `start_offscreen`/`open_bytes_offscreen` was called outside a
+//!   Worker, i.e. where it would be a second owner of the single session.
+//! - `canvas-element` — the page has no such element / it is not a `<canvas>`.
+//! - `viewport` — the CSS size / `devicePixelRatio` is not usable.
+//! - `budget` — a **named memory budget** refused the input (see [`budget`]): the
+//!   file is larger than [`budget::MAX_INPUT_BYTES`], or the wasm heap already
+//!   exceeds [`budget::MAX_WASM_HEAP_BYTES`] before another document is installed.
+//!   The message names the budget, its limit and the measured value, and the status
+//!   carries a structured `budget: {name, limit_bytes, measured_bytes}`. The open
+//!   document stays intact and navigable — a refusal is never a blank canvas and
+//!   never a silent degradation.
+//! - `input` — a pointer/command step the session refused (an unsupported button, a
+//!   stale metrics revision, the modal popup gate).
+//! - `state` — there is no live session for the call.
+//!
+//! [`open_bytes`] applies both budgets **before** the bytes reach the importer and
+//! replaces the document in place, so a bad/unsupported/over-budget file leaves the
+//! open document, its pixels and its camera exactly as they were.
 //!
 //! # Measurement surfaces (evidence, not performance claims)
 //!
-//! - `last_import_ms()` — the last completed import + scene build + GPU upload,
-//!   measured with `web_time::Instant` (never `std::time::Instant`, which panics
-//!   on `wasm32-unknown-unknown`). Negative until one open has completed.
+//! - `last_import_ms()` — the last completed build/import, measured with the
+//!   session's injected `web_time` clock (never `std::time` on this target).
 //! - `wasm_heap_bytes` — the module's own `WebAssembly.Memory` byte length at the
-//!   time of the call. It is the **wasm heap**, not process RSS: there is no
-//!   process to measure in a browser tab. It is also a high-water mark (wasm
-//!   memory never shrinks), which is why the release work below can only lower it
-//!   by keeping the *peak* down.
-//! - `heap_after_open` — the same measurement taken when an open completed (scene
-//!   uploaded, first frame presented); the number an improvement has to move.
-//! - `upload_chunks` / `peak_batches_per_chunk` — how many bounded
-//!   `prepare_upload_batches` calls the scene upload used, and the largest number
-//!   of batches any single call staged. A whole-scene upload would report
-//!   `upload_chunks: 1` with `peak_batches_per_chunk == batches`.
-//! - `db_retained` — whether the imported database was kept after the open. It is
-//!   `false` (see [`budget::DB_RETAINED`]); if a future capability needs the
-//!   database it must flip that and say `true`, never retain silently.
+//!   time of the call. It is the **wasm heap**, not process RSS, and it is a
+//!   high-water mark (wasm memory never shrinks).
+//! - `heap_after_open` — the same measurement taken when an open completed; with
+//!   [`live::DB_RETAINED`] `true` it includes the retained database, which is the
+//!   number that separates this carrier from the viewer's released one.
+//! - `batches` — the prepared scene's resident batch count; `draws` is `null` (the
+//!   session's engine owns the draw submission count and does not publish it here).
 //!
-//! # Honest limits (2026-10-24, this lane)
+//! # Honest limits (2026-10-28, this lane)
 //!
-//! - **Bytes in, one file.** `open_bytes` takes the DWG bytes from the caller;
-//!   there is no filesystem in wasm and no reading of a path. Import, proxy and
-//!   resource decoding are exactly what `cad-import-acadrust` does on this
-//!   target — no more.
+//! - **Bytes in, one file.** `open_bytes` takes the DWG bytes from the caller; there
+//!   is no filesystem in wasm and no reading of a path. Import, proxy and resource
+//!   decoding are exactly what `cad-import-acadrust` does on this target.
 //! - **WebGL2 only.** Neither target runtime exposes `navigator.gpu`, so the
 //!   presenter requests `Backends::GL`. A missing/broken WebGL2 context is an
-//!   explicit refusal (stable marker + status `step: "webgl2"`), never a blank
-//!   canvas.
-//! - **Worker isolation is Chromium-only in the measured set.** Chromium 141 renders
-//!   on a worker-side `OffscreenCanvas`; WebKitGTK 2.52.6 returns no WebGL2 context
-//!   there, so it runs the main-thread carrier and says so
-//!   (`isolation=main-thread (no WebGL2 in worker)`). No other engine is measured;
-//!   neither statement may be generalised to Firefox/Safari/Android or to a
-//!   different GPU/driver.
-//! - **Isolation does not make the wasm heap smaller.** The Worker has its own
-//!   `WebAssembly.Memory` (the page's is untouched), and the per-open peak is the
-//!   same work. `heap_after_open` therefore measures the Worker's heap when the
-//!   isolated carrier is used; it is not a claim about the tab's total memory.
-//! - **A shell status surface and the commands the session really owns.** [`shell`]
-//!   serves the shared chrome's frozen `cad_status` snapshot from wasm with no host
-//!   process behind it (see the section above), and it says exactly what this
-//!   carrier cannot do: `canNew`/`canOpen`/`canSave`/`canPlot` are `false`,
-//!   `entityCount` is `null` (the database is released), and the command vocabulary
-//!   is the three camera selectors it implements (`FIT`, `ZOOMIN`, `ZOOMOUT`).
-//!   Pan/zoom/fit are camera-only (a uniform change: no re-parse and no re-upload),
-//!   which is exactly what a viewport needs. There is no measurement, annotation,
-//!   editing or wire-protocol work here — `shell_command` refuses every other name
-//!   instead of faking one. The imported database stays released
-//!   ([`budget::DB_RETAINED`] is `false`); the only thing retained for a later
-//!   capability is the pair of world points the initial fit used, which is what
-//!   `FIT` refits to.
-//! - **Chunked upload, one atomic commit.** The scene is staged in bounded
-//!   `prepare_upload_batches` chunks (`upload_chunks`,
-//!   `peak_batches_per_chunk`) but published by a single `commit_upload`, so the
-//!   first presented frame is always the whole drawing. There is deliberately no
-//!   "present the uploaded part" path: a partial scene presented as success would
-//!   be a fake open. Chunk progress is a console trace
-//!   (`yacr: upload-progress:`), not a painted frame.
-//! - **A budget refusal is a refusal, not a fallback.** Over
-//!   [`budget::MAX_INPUT_BYTES`] (before parsing) or over
-//!   [`budget::MAX_WASM_HEAP_BYTES`] (after the build, before the upload) is
-//!   `step: "budget"` with the limit, the measurement and the budget name; the
-//!   previous document keeps its pixels and stays navigable. Neither check can
-//!   *predict* the footprint from the file size (~450× on the measured baseline),
-//!   so a file inside the byte cap can still be refused by the heap cap.
-//! - **No second session.** One process-global session: `start` refuses to build
-//!   a second one, and `open_bytes` disposes the previous renderer/presenter
-//!   before creating the replacement. The isolated carrier does not relax this: a
-//!   Worker's wasm module has its own session slot, the page never creates one on
-//!   that path (it runs no wasm at all), and `start_offscreen` is refused outside a
-//!   Worker (`step: "isolation"`).
-//! - **No browser run evidence from this lane.** The crate compiles for
-//!   `wasm32-unknown-unknown` and the shell under `apps/app-web/web/` is the
-//!   minimal page, but nothing here was executed in a browser for this change;
-//!   the heap/pixel evidence run belongs to the evidence lane. The `budget`
-//!   arithmetic and the chunk planner are unit-tested on the host instead
-//!   (`cargo test -p app-web`), which proves the numbers, not the browser.
-//! - **What this lane does not lower.** The measured 1.9 GB post-open heap for
-//!   `fixtures/complex-test.dwg` is dominated by the import/build peak *inside*
-//!   `cad-import-acadrust` + `cad-app::render_scene` (database + display
-//!   representation + `SceneDelta`), which this crate may not modify. What is
-//!   released here is what this crate owns: the imported database after the build
-//!   (`db_retained: false`), each chunk's CPU geometry after its buffers are on
-//!   the device, and whole-scene upload staging. Wasm memory never shrinks, so
-//!   `heap_after_open` can only improve if the *peak* improves — an honest partial
-//!   improvement, not a claim that a 4.2 MB file is now cheap.
-//!
-//! Native builds cannot present on a DOM canvas, so the session entry points below
-//! return the explicit NOT IMPLEMENTED diagnostic instead of a stub success. The
-//! **pure** answers keep their honest value there instead of refusing: the
-//! capability report ([`worker_capability`]) reports the native limitations it can
-//! see, and the shell surface ([`shell`]) reports the no-session status, the empty
-//! command vocabulary and the same `unsupported-runtime: cad_command` refusal —
-//! none of which needs a browser to be true.
+//!   explicit refusal, never a blank canvas.
+//! - **The carrier advertises no host-side New/Open/Save/Plot path**
+//!   ([`cad_platform::HostCapabilities::default`]): `canNew`/`canOpen`/`canSave`/
+//!   `canPlot` are `false` because there is no filesystem, no save dialog and no
+//!   plot export behind them. Opening is the transport's command (the page's file
+//!   picker), which lifts `canOpen` itself.
+//! - **No shaping fonts, no image decoder.** A drawing that requests a face or a
+//!   raster image still opens, and the resource install is reported as a
+//!   non-fatal diagnostic ([`platform`]) — its text is drawn unshaped and images
+//!   are not decoded. That gap is unchanged by this lane.
+//! - **The worker carrier is still the viewer.** It has no wire surface
+//!   (`invoke`/`probe_input`/`shell_*` refuse there), its status keeps the viewer's
+//!   fields, and it still releases the database after the display build.
+//! - **No browser run in this file's docs.** The runtime evidence for the flip is
+//!   `docs/validation-dom-canvas-flip-2026-10-28.md` (headless Chromium,
+//!   SwiftShader: layout/DOM/IPC evidence, **not** GPU, pixel-correctness or
+//!   performance acceptance), and the host-side acceptance is `cargo test -p
+//!   app-web` — a real session, no GPU, no DOM.
 
 /// The stable reason a native build has no canvas host.
 ///
@@ -245,41 +168,33 @@
 pub const NOT_IMPLEMENTED: &str =
     "web canvas host: NOT IMPLEMENTED on this target — build for wasm32-unknown-unknown";
 
-/// Named memory budgets and the bounded upload-chunk planner.
+/// Named memory budgets (ADR 0025), applied by the production session.
 ///
 /// Target-independent (no `web-sys`, no `wgpu`, no CAD type) so its arithmetic is
 /// unit-tested on the host, not only observable as a dead module in a browser.
 pub mod budget;
 
-/// The camera arithmetic of an open and of the `FIT`/`ZOOMIN`/`ZOOMOUT` selectors:
-/// the retained drawing bounds, **one** fit rule, and the fixed zoom step about the
-/// viewport centre.
+/// The camera arithmetic of the **viewer** carrier's open and `FIT` selector.
 ///
-/// Target-independent on purpose (no DOM, no GPU, no session state), so a refit
-/// restoring the framing a zoom step moved away from is asserted by
-/// `cargo test -p app-web` rather than only in a browser. See the module docs.
+/// Target-independent on purpose (no DOM, no GPU, no session state). The production
+/// page carrier does not use it: its fit and its zoom steps are the real session's
+/// (`CadSession::command("FIT")`, the same rule the desktop hosts run).
 pub mod view;
 
-/// The four platform contracts the browser supplies to the **shared desktop CAD
-/// session** (`cad_ui_core::session::CadSession`), plus the bytes-based entry it
-/// is built with (ADR 0024 stage ⑧ phase 1).
+/// The four platform contracts the browser supplies to the shared desktop CAD
+/// session, plus the bytes-based entry it is built with.
 ///
-/// Target-independent on purpose (no DOM, no wgpu, no session state): every
-/// refusal and every honest absence (no filesystem, non-persistent config,
-/// unmapped surface, no font/image package) is asserted by
-/// `cargo test -p app-web` on the host, including a session built from the
-/// synthetic fixture's **bytes** whose `LINE` command reaches the real router.
-///
-/// Nothing here is wired to an export yet: the existing `dom-canvas` viewer
-/// session ([`session`]) stays the fallback until phase 2 replaces it behind the
-/// same exports. See [`platform`] for the capability table and the honest limits.
+/// Target-independent on purpose (no DOM, no wgpu, no session state): every refusal
+/// and every honest absence (no filesystem, non-persistent config, unmapped surface,
+/// no font/image package) is asserted by `cargo test -p app-web` on the host. See
+/// [`platform`] for the capability table and the honest limits.
 pub mod platform;
 
 /// Which isolation a browser can actually deliver (`worker_capability()`).
 ///
 /// Target-independent model ([`capability::Capability`]) plus a wasm-only probe, so
 /// the decision matrix (Chromium 141 vs WebKitGTK 2.52.6) is unit tested on the
-/// host. Read the module docs for the measured capability split.
+/// host.
 pub mod capability;
 
 /// The **host-agnostic shell surface**: `shell_status`/`shell_commands`/
@@ -287,49 +202,63 @@ pub mod capability;
 /// vocabulary the shared React chrome (`apps/desktop-ui`) polls, served without
 /// Tauri IPC.
 ///
-/// Target-independent on purpose: the projection is a pure function of observed
-/// session facts ([`shell::status_json`]), so its exact wire shape — including that
-/// every capability the carrier does not have is `false` — is asserted by host unit
-/// tests rather than only in a browser. The vocabulary is exactly the selectors
-/// [`crate::session`] executes (`FIT`, `ZOOMIN`, `ZOOMOUT`) plus the alias rows that
-/// point at them; read the module docs for the per-field table.
+/// Target-independent on purpose: the status is the session's own
+/// `CadStatus` snapshot plus the four carrier keys, so its exact wire shape is
+/// asserted by host unit tests against a real session rather than only in a
+/// browser. Read the module docs for the per-field table.
 pub mod shell;
 
-#[cfg(target_arch = "wasm32")]
-mod session;
+/// **The production `dom-canvas` session** (`CadSession` behind the canvas
+/// exports): budgets, document replacement, input synthesis, the popup gate and
+/// both status projections.
+///
+/// Target-independent on purpose — the session state and every rule are plain Rust
+/// over `cad-host`/`cad-ui-core`, so the acceptance of the flip runs as
+/// `cargo test -p app-web` on the host. The pixel half (device, render, blit) is
+/// [`page`], which is wasm-only. Read [`live`] for the two things the real session
+/// changes (retained database, in-place replacement) and for where the budgets
+/// apply.
+pub mod live;
 
 /// **The `dom-canvas` transport**: one `invoke(name, args_json)` entry over the
 /// shared command semantics (`cad_ui_core::session::wire`).
 ///
-/// The desktop hosts serve the chrome through Tauri IPC; a browser has none, so
-/// the same JS call has to be served in-process. This module decodes the same
-/// arguments into the same typed values and calls the *same* `wire::*` function
-/// per command, so a name, an argument or a refusal cannot differ between host
-/// transports. Target-independent on purpose: the dispatch table, the argument
-/// structs and the vocabulary reads are asserted by `cargo test -p app-web`, and
-/// the equivalence matrix there runs both sinks side by side.
+/// The desktop hosts serve the chrome through Tauri IPC; a browser has none, so the
+/// same JS call is served in-process. This module decodes the same arguments into
+/// the same typed values and calls the *same* `wire::*` function per command, so a
+/// name, an argument or a refusal cannot differ between host transports.
+/// Target-independent on purpose: the dispatch table and the equivalence matrix are
+/// asserted by `cargo test -p app-web`.
 pub mod direct;
 
-/// **SPIKE (ADR 0024 stage ⑧ phase 2): the real desktop session inside wasm.**
-///
-/// Additive debug surface only: it builds `cad_ui_core::session::CadSession` from
-/// the compiled-in fixture bytes over [`platform`], attaches the page canvas
-/// presenter's device to the session's `RenderSessionHandle`, and renders/presents
-/// through the existing `CanvasPresenter` blit. The production viewer
-/// ([`session`]) is untouched and both sessions coexist in this binary; nothing
-/// here is wired to the production exports. See the module docs for the exact
-/// seam and for what the spike does **not** prove.
-#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
-mod debug_session;
+#[cfg(target_arch = "wasm32")]
+mod page;
+
+#[cfg(target_arch = "wasm32")]
+mod session;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+/// Route a carrier-agnostic export to whichever carrier owns the session.
+///
+/// The page carrier is the real session ([`page`]); the worker carrier is the
+/// viewer ([`session`]). They cannot both be live (see the module docs), so the
+/// question "is the page carrier engaged" is the whole dispatch.
+#[cfg(target_arch = "wasm32")]
+fn carrier<T>(page_carrier: impl FnOnce() -> T, worker_carrier: impl FnOnce() -> T) -> T {
+    if page::is_engaged() {
+        page_carrier()
+    } else {
+        worker_carrier()
+    }
+}
+
 /// Start the wasm CAD session on the **isolated carrier**: an `OffscreenCanvas`
 /// transferred into this Worker.
 ///
-/// This is the worker-side sibling of [`start`]: the same session, the same
-/// compiled-in synthetic fixture, the same budgets and upload — only the carrier
+/// This is the worker-side sibling of [`start`]: same viewer session, same
+/// compiled-in synthetic fixture, same budgets and upload — only the carrier
 /// differs. `canvas` must be an `OffscreenCanvas` this Worker owns, produced by the
 /// page with `HtmlCanvasElement.transferControlToOffscreen()` and delivered with
 /// `postMessage(message, [offscreen])`; the host must **not** keep using that canvas
@@ -386,8 +315,7 @@ pub async fn open_bytes_offscreen(
 /// `OffscreenCanvas`, WebKitGTK 2.52.6 returns `null`. Called from the worker this
 /// answers that question for real (`new OffscreenCanvas(1, 1).getContext("webgl2")`);
 /// called from the page it reports `isolation: "main-thread"` with the reason that
-/// the probe must run in a worker, because a page-side context says nothing about a
-/// worker's.
+/// the probe must run in a worker.
 ///
 /// A host uses it to choose a carrier **before** creating any session: it must not
 /// infer worker support from the presence of `OffscreenCanvas`/`transferControlToOffscreen`,
@@ -430,38 +358,44 @@ pub fn open_bytes_offscreen(
 pub fn worker_capability() -> String {
     capability::Capability::new(capability::Context::Window, false).to_json()
 }
-/// Start the wasm CAD session on the compiled-in synthetic fixture and present
-/// the first frame on `canvas_id`.
+
+/// Start the wasm CAD session on the compiled-in synthetic fixture and present the
+/// first frame on `canvas_id`.
 ///
-/// `css_w`/`css_h` are the canvas's CSS-pixel size and `dpr` its
-/// `devicePixelRatio`; the presenter is configured in physical pixels
-/// (`CSS px × dpr`), so a fractional-DPI display is not blurred. Sizes must be
-/// finite and positive. `canvas_id` must name an `HtmlCanvasElement` in the host
-/// page.
+/// The session is the **real** desktop session ([`live`]): `cad-db` authority,
+/// command router, the full wire vocabulary. `css_w`/`css_h` are the canvas's
+/// CSS-pixel size and `dpr` its `devicePixelRatio`; the presenter is configured in
+/// physical pixels (`CSS px × dpr`) and the session's canvas metrics are set from
+/// the same measurement, so a fractional-DPI display is not blurred and a
+/// canvas-local pointer coordinate is not scaled twice.
 ///
-/// Fails (and records the failure in [`status()`]) when the canvas is missing,
-/// when no usable WebGL2 context can be created, or when the fixture cannot be
-/// imported/uploaded/presented. A second `start` on a live session is refused:
-/// one canvas has exactly one presenter. Use [`open_bytes`] to open another file.
+/// The ADR 0025 budgets run before the bytes are parsed. A first frame that the
+/// engine has not prepared yet is reported as `waited` (see [`frame`]), never as a
+/// presented frame.
+///
+/// Fails (and records the failure in [`status()`]) when the canvas is missing, when
+/// no usable WebGL2 context can be created, when a budget refuses the fixture or
+/// when the fixture cannot be imported. A second `start` on a live session is
+/// refused: one canvas has exactly one presenter. Use [`open_bytes`] to open
+/// another file.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub async fn start(canvas_id: &str, css_w: f64, css_h: f64, dpr: f64) -> Result<String, JsValue> {
-    session::start_impl(canvas_id, css_w, css_h, dpr).await
+    page::start_impl(canvas_id, css_w, css_h, dpr).await
 }
 
 /// Open **caller-supplied DWG `bytes`** as the session document and present the
 /// first frame on `canvas_id`.
 ///
-/// `label` is the source file name shown by the host (`status()`/`document()`
-/// report it); it must not be empty. `css_w`/`css_h`/`dpr` follow [`start`].
+/// `label` is the source file name shown by the host (`status()`/`document()` report
+/// it); it must not be empty. `css_w`/`css_h`/`dpr` follow [`start`].
 ///
-/// Replaces a live session: the previous renderer and canvas presenter are
-/// disposed before the replacement presenter is created, so one canvas never has
-/// two presenters and no surface is leaked. A failure to import the bytes
-/// (`step: "import"`), a file with no drawable geometry (`step: "empty-scene"`) or
-/// a file a named memory budget refuses (`step: "budget"`, see [`budget`]) is
-/// reported **without** disturbing a live session: the open document keeps its
-/// pixels and stays navigable.
+/// A live session **replaces its document in place** (the desktop open path:
+/// `CadSession::open_bytes` → `HostCore::deliver_external_open`), so the device, the
+/// presenter, the platform adapters and the import counter survive. Both budgets run
+/// first, and a failure — an import refusal, a budget refusal — is reported
+/// **without** disturbing the live session: the open document keeps its pixels and
+/// stays navigable. With no session yet, this builds one exactly like [`start`].
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub async fn open_bytes(
@@ -472,85 +406,132 @@ pub async fn open_bytes(
     dpr: f64,
     bytes: &[u8],
 ) -> Result<String, JsValue> {
-    session::open_bytes_impl(canvas_id, label, css_w, css_h, dpr, bytes).await
+    page::open_bytes_impl(canvas_id, label, css_w, css_h, dpr, bytes).await
 }
 
-/// Reconfigure the canvas for a new CSS size / device pixel ratio and present a
-/// fresh frame at the new physical size.
+/// **One frame step** on the live page session.
+///
+/// The host calls this from its `requestAnimationFrame` loop (that is the whole
+/// loop; nothing inside wasm runs a timer): the session ticks (host pass, metrics,
+/// view sync, scene preparation), the prepared scene revision is published to the
+/// GPU, the frame is rendered and blitted onto the canvas.
+///
+/// Answers `{ok, presented, frames, waited, ticks, canvasFrames}`. `presented` is
+/// `false` when `render` reported no frame — a real wait for a scene that is not
+/// committed yet, counted in `waited`, **never** a presented frame.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn frame() -> Result<String, JsValue> {
+    page::frame_impl()
+}
+
+/// Reconfigure the canvas for a new CSS size / device pixel ratio, set the session's
+/// canvas metrics, and present a fresh frame at the new physical size.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn resize(css_w: f64, css_h: f64, dpr: f64) -> Result<String, JsValue> {
-    session::resize_impl(css_w, css_h, dpr)
+    carrier(
+        || page::resize_impl(css_w, css_h, dpr),
+        || session::resize_impl(css_w, css_h, dpr),
+    )
 }
 
 /// Zoom about a canvas-local CSS-pixel cursor, then present immediately.
 ///
-/// `factor > 1` zooms in. The world point under the cursor stays under it —
-/// the same `cad_app::Camera::zoom_at` rule the desktop session applies.
+/// `factor > 1` zooms in. On the page carrier this is **one wheel event** through
+/// the session's own input path (`handle_input`), synthesized from the factor with
+/// the host's `1 + delta × 0.0015` rule, so the world point under the cursor stays
+/// under it. A factor the host would clamp (`0.2..=5.0`) is refused instead of
+/// applied approximately.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn zoom_at(factor: f64, x: f64, y: f64) -> Result<String, JsValue> {
-    session::zoom_at_impl(factor, x, y)
+    carrier(
+        || page::zoom_at_impl(factor, x, y),
+        || session::zoom_at_impl(factor, x, y),
+    )
 }
 
 /// Pan the view by a CSS-pixel pointer delta, then present immediately.
 ///
-/// The delta is a **screen** delta (x right, y down); it is converted with the
-/// camera's own `world_per_px`, exactly like the desktop host's pointer pan.
+/// The delta is a **screen** delta (x right, y down). On the page carrier it is the
+/// **middle-button drag** the desktop host pans with: the press is retained across
+/// calls (anchored at the viewport centre) and the accumulated delta is moved, so
+/// the pan is exact and no pixel is lost to the drag threshold. The gesture ends at
+/// the next non-pan interaction (`probe_input`, a command, a resize).
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn pan(dx: f64, dy: f64) -> Result<String, JsValue> {
-    session::pan_impl(dx, dy)
+    carrier(|| page::pan_impl(dx, dy), || session::pan_impl(dx, dy))
 }
 
-/// Refit the camera to the drawing extents retained by the open, then present.
+/// Refit the camera to the drawing extents, then present.
 ///
-/// This is the `FIT` selector's implementation: the same fit rule the open used
-/// (centre, larger axis ratio, 1.05 margin, validated orthographic projection) run
-/// again at the session's **current** CSS size, from the `(min, max)` bounds the
-/// import kept. The imported database itself is still released
-/// ([`budget::DB_RETAINED`]), so this is not a second query path.
-///
-/// Fails explicitly when the session retained no bounds (nothing to frame) — never
-/// a silent no-op that would look like a refit.
+/// On the page carrier this is the `FIT` selector through the **real** router
+/// (`CadSession::command("FIT")`) — the same fit the desktop `FIT` button runs. It
+/// fails explicitly when the session holds no drawing; never a silent no-op that
+/// would look like a refit.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn fit_view() -> Result<String, JsValue> {
-    session::fit_view_impl()
+    carrier(|| page::fit_view_impl(), || session::fit_view_impl())
 }
 
 /// The JSON status object of the current session (or of the last failure).
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn status() -> String {
-    session::status_impl()
+    carrier(|| page::status_impl(), || session::status_impl())
 }
 
-/// The JSON summary of the open document:
-/// `{ ok, label, batches, draws, presented, bytes, import_ms, wasm_heap_bytes,
-/// heap_after_open, upload_chunks, peak_batches_per_chunk, db_retained }`.
+/// The JSON summary of the open document.
 ///
-/// With no live session it is `ok: false` with null/zero values — never a
-/// made-up file. `wasm_heap_bytes` is the module's own wasm linear memory (not
-/// process RSS) at the time of the call; `heap_after_open` is the same measurement
-/// taken when the open completed. `upload_chunks`/`peak_batches_per_chunk` prove
-/// the scene upload was staged in bounded chunks; `db_retained` states whether the
-/// imported database was kept (it is `false`, see [`budget::DB_RETAINED`]).
+/// Page carrier: `{ok, label, bytes, entityCount, batches, draws, presented, frames,
+/// importCount, import_ms, wasm_heap_bytes, heap_after_open, db_retained}` — the
+/// session's own facts, with `db_retained: true` because the real session keeps the
+/// document (`draws` is `null`: the engine does not publish a draw count here).
+///
+/// With no live session it is `ok: false` with null/zero values — never a made-up
+/// file.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn document() -> String {
-    session::document_impl()
+    carrier(|| page::document_impl(), || session::document_impl())
 }
 
-/// Import + display-representation build + GPU upload of the last completed open,
-/// in milliseconds, measured with `web_time::Instant`.
+/// Build/import (page carrier) or import + build + upload (viewer) of the last
+/// completed open, in milliseconds.
 ///
-/// Negative until one open has completed (no default or estimated number). This
-/// is a measurement surface for the evidence run, not a performance claim.
+/// Negative until one open has completed (no default or estimated number). This is
+/// a measurement surface for the evidence run, not a performance claim.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn last_import_ms() -> f64 {
-    session::last_import_ms_impl()
+    carrier(
+        || page::last_import_ms_impl(),
+        || session::last_import_ms_impl(),
+    )
+}
+
+/// Feed **one wire pointer input** to the live page session.
+///
+/// `args_json` is the same `ProbeInput` object the desktop `probe_input` IPC carries
+/// (`{sequence, kind, x, y, dx, dy, width, height, dpr, button, shift}`), and the
+/// effect is the session's own `handle_input` — the single input seam every carrier
+/// uses. `kind` is one of `pointer_down`/`pointer_move`/`pointer_up`/
+/// `pointer_cancel`/`wheel`/`resize`/`blur`/`pointer_leave`.
+///
+/// Answers `{ok, accepted, sequence, kind}`; a refusal is an answer with
+/// `accepted: false` and a stable `reason` (the modal popup gate refuses every CAD
+/// interaction by name, ADR-0021 D2). An argument object that is not a `ProbeInput`
+/// rejects instead: that is a transport error, not a session verdict.
+///
+/// The worker carrier has no input surface of its own: there this refuses with the
+/// explicit "no live CAD session on this carrier" message.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn probe_input(args_json: &str) -> Result<String, JsValue> {
+    page::probe_input_impl(args_json)
 }
 
 /// Native builds cannot run the browser canvas host; this is a platform
@@ -570,6 +551,12 @@ pub fn open_bytes(
     _dpr: f64,
     _bytes: &[u8],
 ) -> Result<String, String> {
+    Err(NOT_IMPLEMENTED.to_string())
+}
+
+/// Native builds have no frame loop (see [`NOT_IMPLEMENTED`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn frame() -> Result<String, String> {
     Err(NOT_IMPLEMENTED.to_string())
 }
 
@@ -616,148 +603,131 @@ pub fn last_import_ms() -> f64 {
     -1.0
 }
 
+/// Native builds have no page session to feed input to (see [`NOT_IMPLEMENTED`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn probe_input(_args_json: &str) -> Result<String, String> {
+    Err(NOT_IMPLEMENTED.to_string())
+}
+
 // ---------------------------------------------------------------------------
-// SPIKE (ADR 0024 stage ⑧ phase 2): the real desktop session in wasm
+// The shell surface (see [`shell`] for the per-field table)
 // ---------------------------------------------------------------------------
-//
-// Additive debug exports. They are **not** the production surface: `start`,
-// `open_bytes`, `pan`, `zoom_at`, `resize`, `status`, `document` and the
-// `shell_*` calls keep their exact behaviour, and the chrome does not know this
-// section exists. Everything below is a spike and is documented as such; the
-// production flip is a separate change (see `docs/handoff.md`).
-//
-// ```text
-// debug_session_start(canvas_id, css_w, css_h, dpr) -> JSON status (async)
-// debug_session_tick()                              -> JSON status
-// debug_session_command(text)                       -> JSON status
-// debug_session_pointer(phase, x, y)                -> JSON status
-// debug_session_status()                            -> JSON status
-// ```
 
-/// **SPIKE.** Start the real desktop CAD session
-/// (`cad_ui_core::session::CadSession`, built from the compiled-in fixture
-/// **bytes**) on the page canvas `canvas_id`, and attach the canvas presenter's
-/// device to the session's render handle.
+/// The JSON `cad_status` snapshot for the shared React chrome.
 ///
-/// This is the phase-2 question of ADR 0024 stage ⑧: can the session the native
-/// wayland host drives own a browser `<canvas>` and actually draw? The session is
-/// the real one — real command router, real `cad-db` authority, real
-/// `RenderSessionHandle` — over the browser's four platform contracts
-/// ([`platform`]); the only substitutions are the two seams the carrier forces:
-/// the device comes from `CanvasPresenter::device_queue()` and the surface
-/// metrics are the canvas' CSS size / `devicePixelRatio`.
+/// The session's own `CadStatus` snapshot plus the four `dom-canvas` carrier keys;
+/// see [`shell`] for every field's source. Without a live session it is the honest
+/// empty status.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn shell_status() -> String {
+    page::shell_status_impl()
+}
+
+/// The command vocabulary this carrier executes: the router's whole
+/// `admissible_names()` list, because the session behind it is the real one.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn shell_commands() -> String {
+    page::shell_commands_impl()
+}
+
+/// The alias table (`{alias, command}` rows), the desktop one.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn shell_aliases() -> String {
+    page::shell_aliases_impl()
+}
+
+/// Execute one command line through the **shared** wire layer, or refuse it.
 ///
-/// Returns the debug status object (see the module docs). A second start while
-/// one is live is refused: one canvas has exactly one presenter.
-#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
+/// Answers `{"accepted":true}` — the only shape `queueCadCommand` treats as
+/// accepted. A name the shared gate does not admit is refused with the stable
+/// `unsupported-runtime: cad_command` prefix followed by the gate's own sentence; a
+/// refusal the session makes is returned verbatim. The worker carrier (viewer
+/// session) answers the same refusal: it has no command router.
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub async fn debug_session_start(
-    canvas_id: &str,
-    css_w: f64,
-    css_h: f64,
-    dpr: f64,
-) -> Result<String, JsValue> {
-    debug_session::start_impl(canvas_id, css_w, css_h, dpr).await
+pub fn shell_command(command: &str) -> Result<String, JsValue> {
+    page::shell_command_impl(command).map_err(|message| JsValue::from_str(&message))
 }
 
-/// **SPIKE.** One frame attempt on the live debug session: the host tick, the
-/// staged scene upload (`apply_ready_updates`), the render, and the blit through
-/// the existing `CanvasPresenter`.
+/// Native builds have no browser registry to project: the honest empty status is
+/// the whole truth on that target (see [`shell`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn shell_status() -> String {
+    shell::status_json(&shell::empty_status(), &shell::Carrier::default())
+}
+
+/// The same vocabulary on every target: it is a property of the router, not of the
+/// build.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn shell_commands() -> String {
+    shell::commands_json()
+}
+
+/// The same alias table on every target (see [`shell::aliases_json`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn shell_aliases() -> String {
+    shell::aliases_json()
+}
+
+/// Resolve the name through the **shared** gate, then report the platform failure:
+/// a native build has no wasm session to run it on, so it must never answer
+/// `accepted`.
 ///
-/// A `render` that returns no frame is a real wait (the scene is not committed
-/// yet) and is reported as `waited`, never as a presented frame.
-#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
-#[wasm_bindgen]
-pub fn debug_session_tick() -> Result<String, JsValue> {
-    debug_session::tick_impl()
+/// An unadmitted name keeps the stable [`shell::SHELL_COMMAND_REFUSAL`] prefix plus
+/// the gate's own reason, exactly like a live carrier would refuse it.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn shell_command(command: &str) -> Result<String, String> {
+    match cad_ui_core::shell::check_command(true, false, 0, command) {
+        Ok(_) => Err(NOT_IMPLEMENTED.to_string()),
+        Err(reason) => Err(shell::refusal(&reason)),
+    }
 }
 
-/// **SPIKE.** Run one CAD command through the **real** router
-/// (`CadSession::command`) and answer the debug status.
-#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
-#[wasm_bindgen]
-pub fn debug_session_command(text: &str) -> Result<String, JsValue> {
-    debug_session::command_impl(text)
-}
-
-/// **SPIKE.** Feed one pointer event through the **real** input seam
-/// (`CadSession::handle_input` with a `ProbeInput`, the same wire shape the
-/// desktop `probe_input` IPC carries).
-///
-/// `phase` is `down` / `move` / `up`; `x`/`y` are canvas-local logical (CSS)
-/// pixels.
-#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
-#[wasm_bindgen]
-pub fn debug_session_pointer(phase: &str, x: f64, y: f64) -> Result<String, JsValue> {
-    debug_session::pointer_impl(phase, x, y)
-}
-
-/// **SPIKE.** The live debug session's status object, without advancing it.
-#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
-#[wasm_bindgen]
-pub fn debug_session_status() -> String {
-    debug_session::status_impl()
-}
-
-/// Native builds have no page canvas, so the debug session refuses explicitly
-/// rather than reporting a session that does not exist.
-#[cfg(all(not(target_arch = "wasm32"), feature = "debug-session"))]
-pub fn debug_session_start(
-    _canvas_id: &str,
-    _css_w: f64,
-    _css_h: f64,
-    _dpr: f64,
-) -> Result<String, String> {
-    Err(NOT_IMPLEMENTED.to_string())
-}
-
-/// Native builds have no debug session to advance (see [`debug_session_start`]).
-#[cfg(all(not(target_arch = "wasm32"), feature = "debug-session"))]
-pub fn debug_session_tick() -> Result<String, String> {
-    Err(NOT_IMPLEMENTED.to_string())
-}
-
-/// Native builds have no debug session to command (see [`debug_session_start`]).
-#[cfg(all(not(target_arch = "wasm32"), feature = "debug-session"))]
-pub fn debug_session_command(_text: &str) -> Result<String, String> {
-    Err(NOT_IMPLEMENTED.to_string())
-}
-
-/// Native builds have no debug session to feed input (see [`debug_session_start`]).
-#[cfg(all(not(target_arch = "wasm32"), feature = "debug-session"))]
-pub fn debug_session_pointer(_phase: &str, _x: f64, _y: f64) -> Result<String, String> {
-    Err(NOT_IMPLEMENTED.to_string())
-}
-
-/// Native builds have no debug session to report (see [`debug_session_start`]).
-#[cfg(all(not(target_arch = "wasm32"), feature = "debug-session"))]
-pub fn debug_session_status() -> String {
-    NOT_IMPLEMENTED.to_string()
-}
-
-#[cfg(all(test, not(target_arch = "wasm32"), feature = "debug-session"))]
-mod spike_tests {
-    //! Contract test for the **native** side of the phase-2 spike surface.
-    //!
-    //! The spike itself can only run in a browser, so what is testable here is the
-    //! honesty rule: on a target with no page canvas every debug export refuses
-    //! with the explicit NOT IMPLEMENTED diagnostic. None of them may answer as if
-    //! a session existed, and the production exports keep their own answer.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod native_tests {
+    //! The honesty rule of the native target: every browser-only export refuses
+    //! with the explicit NOT IMPLEMENTED diagnostic, and the **pure** answers keep
+    //! their honest value instead of refusing.
 
     use super::*;
 
     #[test]
-    fn the_debug_surface_never_fabricates_a_session_off_wasm() {
-        let start = debug_session_start("cad-canvas", 800.0, 600.0, 1.0).unwrap_err();
-        let tick = debug_session_tick().unwrap_err();
-        let command = debug_session_command("LINE").unwrap_err();
-        let pointer = debug_session_pointer("down", 1.0, 2.0).unwrap_err();
-        for refusal in [&start, &tick, &command, &pointer] {
-            assert_eq!(refusal, NOT_IMPLEMENTED, "a native debug call must refuse");
-        }
-        assert_eq!(debug_session_status(), NOT_IMPLEMENTED);
-        // The production surface is unchanged by this spike.
-        assert!(status().contains("NOT IMPLEMENTED"));
-        assert!(document().contains("NOT IMPLEMENTED"));
+    fn every_browser_only_export_refuses_explicitly() {
+        assert_eq!(
+            start("cad-canvas", 800.0, 600.0, 1.0).unwrap_err(),
+            NOT_IMPLEMENTED
+        );
+        assert_eq!(
+            open_bytes("cad-canvas", "a.dwg", 800.0, 600.0, 1.0, b"x").unwrap_err(),
+            NOT_IMPLEMENTED
+        );
+        assert_eq!(frame().unwrap_err(), NOT_IMPLEMENTED);
+        assert_eq!(resize(800.0, 600.0, 1.0).unwrap_err(), NOT_IMPLEMENTED);
+        assert_eq!(zoom_at(1.25, 1.0, 2.0).unwrap_err(), NOT_IMPLEMENTED);
+        assert_eq!(pan(3.0, 4.0).unwrap_err(), NOT_IMPLEMENTED);
+        assert_eq!(fit_view().unwrap_err(), NOT_IMPLEMENTED);
+        assert_eq!(probe_input("{}").unwrap_err(), NOT_IMPLEMENTED);
+        assert_eq!(status(), NOT_IMPLEMENTED);
+        assert_eq!(document(), NOT_IMPLEMENTED);
+        assert_eq!(last_import_ms(), -1.0);
+        assert_eq!(
+            start_offscreen((), 800.0, 600.0, 1.0).unwrap_err(),
+            NOT_IMPLEMENTED
+        );
+    }
+
+    #[test]
+    fn the_pure_answers_stay_honest_instead_of_refusing() {
+        // The isolation report is a real answer on any target.
+        let capability: serde_json::Value =
+            serde_json::from_str(&worker_capability()).expect("valid JSON");
+        assert_eq!(capability["isolation"], serde_json::json!("main-thread"));
+        // The vocabulary and the status are properties of the carrier, not of the
+        // target: `cargo test -p app-web` asserts their exact shape.
+        assert!(shell::commands_json().starts_with('['));
+        assert!(shell::aliases_json().starts_with('['));
     }
 }

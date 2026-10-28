@@ -25,16 +25,14 @@ use cad_domain::Point3;
 use cad_render_wgpu::canvas::CanvasPresenter;
 use cad_render_wgpu::{Camera2d, RenderTarget, Renderer};
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
 
 use crate::budget::BudgetRefusal;
-use crate::view::{fit_camera, zoom_step, DrawingBounds};
+use crate::view::{fit_camera, DrawingBounds};
 
 /// Stable names of the steps a failure can be attributed to. They are the only
 /// stable vocabulary in the status `step` field, so a host can key on them
 /// (browser console messages, Linux exit codes) without parsing prose.
 pub(super) const STEP_VIEWPORT: &str = "viewport";
-pub(super) const STEP_CANVAS: &str = "canvas-element";
 /// A carrier requested in a context where it cannot be the single owner of the
 /// session (an `OffscreenCanvas` outside a Worker). See [`super::surface`].
 pub(super) const STEP_ISOLATION: &str = "isolation";
@@ -126,10 +124,6 @@ thread_local! {
     /// The last completed import+build+upload duration (`web_time::Instant`), in
     /// milliseconds. Evidence surface only; see `last_import_ms_impl`.
     static LAST_IMPORT_MS: Cell<f64> = const { Cell::new(NO_MEASUREMENT) };
-    /// How many documents this wasm instance has **installed** (see
-    /// [`installed_documents`]). Incremented only by [`install_live`], i.e. after a
-    /// completed import + upload + first presented frame.
-    static INSTALLED_DOCUMENTS: Cell<u64> = const { Cell::new(0) };
 }
 
 /// The one CAD session: presenter + renderer + camera.
@@ -286,21 +280,6 @@ impl Session {
             )
         })?;
         self.camera = fit_camera(Some(bounds), [self.metrics.css.0, self.metrics.css.1]);
-        self.render_and_present()
-    }
-
-    /// One fixed zoom step (`ZOOMIN`/`ZOOMOUT`) about the viewport centre.
-    ///
-    /// Camera-only, like [`Self::fit_view`]: the resident scene stays uploaded and
-    /// the step is [`crate::view::zoom_step`], the same anchor/arithmetic the
-    /// desktop session uses for these two selectors.
-    pub(super) fn zoom_about_centre(&mut self, factor: f64) -> Result<(), Failure> {
-        zoom_step(
-            &mut self.camera,
-            factor,
-            [self.metrics.css.0, self.metrics.css.1],
-        )
-        .map_err(|error| Failure::new(STEP_NAVIGATION, error))?;
         self.render_and_present()
     }
 
@@ -481,28 +460,15 @@ pub(super) fn begin_replace() -> Result<(), JsValue> {
 
 /// Publish the new session as the one live session.
 ///
-/// This is also the single place an import is **counted**: the call happens after
-/// the geometry loaded, the upload committed and the first frame was presented, so
-/// the counter behind [`installed_documents`] can never include a refused, failed
-/// or partially uploaded open.
+/// Called only after the geometry loaded, the upload committed and the first frame
+/// was presented, so the registry can never hold a refused, failed or partially
+/// uploaded open.
 pub(super) fn install_live(session: Session) {
     STATE.with(|cell| {
         if let Ok(mut state) = cell.try_borrow_mut() {
             *state = State::Live(Box::new(session));
-            // Only a published session counts: a failed borrow above drops the
-            // session, so it must not increment anything either.
-            INSTALLED_DOCUMENTS.with(|count| count.set(count.get().saturating_add(1)));
         }
     });
-}
-
-/// How many documents this wasm instance has successfully installed.
-///
-/// A real observed count (see [`install_live`]) for the shell status's
-/// `importCount`; `0` before the first completed open — never an estimate from the
-/// presence of a session.
-pub(super) fn installed_documents() -> u64 {
-    INSTALLED_DOCUMENTS.with(Cell::get)
 }
 
 /// Publish one completed import measurement (see `last_import_ms_impl`).
@@ -551,19 +517,4 @@ pub(super) fn with_live<T>(
             "the session state is already borrowed",
         )),
     })
-}
-
-/// Resolve `canvas_id` to the page's `HtmlCanvasElement`, or explain why not.
-pub(super) fn canvas_element(canvas_id: &str) -> Result<web_sys::HtmlCanvasElement, String> {
-    let window =
-        web_sys::window().ok_or_else(|| "the host page has no window object".to_string())?;
-    let document = window
-        .document()
-        .ok_or_else(|| "the host page has no document".to_string())?;
-    let element = document
-        .get_element_by_id(canvas_id)
-        .ok_or_else(|| format!("no element with id {canvas_id:?} in the host page"))?;
-    element
-        .dyn_into::<web_sys::HtmlCanvasElement>()
-        .map_err(|_| format!("element #{canvas_id} is not an HtmlCanvasElement"))
 }

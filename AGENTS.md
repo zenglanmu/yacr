@@ -185,15 +185,19 @@ workspace 继承别名）；平台类型（`web-sys`/`android-activity`/`jni`/`n
   在 `dom-canvas` 上**返回空词汇表**（不把桌面表冒充成该载体能执行的命令），`native-below` 不变。
   两个 shell-only 命令（`canvas_session_status`、`canvas_runtime_failed`）在有 Tauri 桥时仍送给
   Tauri（X11 的标记行/退出码 6 由它负责）。
-  **适配器只许拒绝，不许伪造答案**；浏览器/移动载体的命令词汇**只**是它真能执行的四个：会话侧
-  `FIT`/`ZOOMIN`/`ZOOMOUT`（保留的图形范围 + 固定缩放步，`shell_command` 执行后回
-  `{"accepted":true}`），传输侧 `OPEN`（文件选择器 + `open_bytes`，`cad_status.canOpen` 由适配器
-  抬成 `true`）。`cad_commands` = 会话列表 + `OPEN`（去重、稳定顺序），`shell_aliases` 只发布目标在
-  其中的桌面别名行。其余名字（`PAN`、图层、设置、测量、绘制…）仍按名字 `unsupported-runtime` 拒绝，
-  绝不空成功——该载体仍是**看 + 导航**（open/pan/zoom/resize），不是可编辑的 CAD 产品。
-  **两端功能对齐（把 `CadSession` 装进 wasm）属 ADR 0024 阶段 ⑧，尚未实现**；`LINE` 等命令在
-  Wayland 原生路径可用而 `dom-canvas` 载体不可用，是这条边界的直接结果，不是 UI 漏接线。
-  证据见 `docs/validation-web-commands-2026-10-28.md`；
+  **适配器只许拒绝，不许伪造答案**；`web-adapter.ts` 仍只路由四条：会话侧
+  `FIT`/`ZOOMIN`/`ZOOMOUT`（`shell_command` 执行后回 `{"accepted":true}`），传输侧 `OPEN`
+  （文件选择器 + `open_bytes`，`cad_status.canOpen` 由适配器抬成 `true`）。其余名字仍按名字
+  `unsupported-runtime` 拒绝，绝不空成功。
+  **但载体能力已翻面（2026-10-28，wasm page 载体）**：`apps/app-web` 的 page 载体跑的就是真
+  `CadSession`，`invoke(name, args_json)` 服务**全部 20 条** wire 命令，`shell_commands()` =
+  `admissible_names()`（155）、`shell_aliases()` = `alias_pairs()`（51），`shell_command` 走共享门 +
+  真路由器，`probe_input`/`frame()`/`cad_open_popup` 都是生产导出 ⇒ **能力缺口已不在会话侧，而在
+  前端路由**（`web-adapter.ts` 改成单漏斗 `invoke` + rAF 调 `frame()` 是下一轮前端的事）。同一
+  wasm 实例的 **worker/offscreen 载体仍是旧的 viewer 会话**（无 wire/输入/弹窗面，无 shell 事实），
+  迁移属 ADR 0024 阶段 ⑧ 剩余部分。证据见 `docs/validation-web-commands-2026-10-28.md` 与
+  `docs/validation-dom-canvas-flip-2026-10-28.md`（后者含保留数据库的实测代价：`complex-test.dwg`
+  常驻 **2.68 GiB** 与「安装后才超 3 GiB 上限时报测量值、不抬上限」的边界）；
   **标准视图与 `OPEN` 选择器的 2026-10-28 修正**见 `docs/android-host.md` §5：
   `cad_status.standardViews`（可选加法字段，缺省=旧行为、`[]`=该载体没有标准视图）决定七个视图是否
   可点，wasm 会话报 `[]`；`OPEN` 的 `<input type=file>` **不再带 `accept`**（Android 上它会把意图
@@ -332,15 +336,20 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
   改为线性 present 目标 + blit 内 sRGB 编码 + 算术取角，见
   `docs/validation-android-present-2026-10-28.md`）。**模拟器 ≠ 真机**，真机/真实 GPU/其它
   WebView 版本/像素 golden/色彩空间一律 **NOT VERIFIED**；详见 `docs/android-host.md`。
-- **Web**（`apps/app-web`）：wasm CAD 会话（`surfaceMode: dom-canvas`，ADR 0024）是**真实**实现，
+- **Web**（`apps/app-web`）：wasm CAD 会话（`surfaceMode: dom-canvas`，ADR 0024）是**真实**实现；
+  **page 载体自 2026-10-28 起是真 `CadSession`**（`src/live.rs` + `src/page.rs`：真命令路由器、
+  真 `cad-db`、真输入缝、真弹窗状态机、全 20 条 `invoke`），**worker/offscreen 载体仍是旧 viewer**。
   `scripts/build-web.sh` 构建 `apps/app-web/dist`；CI `web-build` 构建并上传该 artifact、`web-smoke`
-  用 Playwright Chromium（**SwiftShader 软件渲染**，非 GPU/像素证据）断言 `start: ok`、
+  用 Playwright Chromium（**SwiftShader 软件渲染**，非 GPU/像素证据）断言 `start: ok` 与
+  `batches`/`presented`（`draws` 不再断言：page 载体的引擎不向这一层发布 draw 计数）、
   `web-deploy` 仅在 `v*` tag / 手工 `workflow_dispatch` 时把**共享 chrome bundle**
   （`web-ui-dist` → `apps/app-web/dist-ui`，`BUNDLE_KIND=ui`）发布到 Cloudflare Pages
   （`yacr-examples`）。
-  `app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳；浏览器侧真实渲染证据只到合成夹具
-  （`docs/validation-dom-canvas-wasm-2026-10-24.md`），**没有** GPU/golden/性能/浏览器矩阵结论，
-  也不得写成「web 已验收」。
+  `app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳；浏览器运行证据到合成夹具 + 一次外部
+  样本（`docs/validation-dom-canvas-wasm-2026-10-24.md`、`docs/validation-dom-canvas-flip-2026-10-28.md`：
+  Chromium 141 + SwiftShader、**软件渲染**，实测 `entityCount 4→5`、像素差 0.53 %、真 `PopupAck`，
+  且保留数据库使 `complex-test.dwg` 常驻 **2.68 GiB**），**没有** GPU/golden/性能/浏览器矩阵结论，
+  也不得写成「web 已验收」；前端尚未换轨到单漏斗 `invoke` + `frame()`。
 
 ## 真实 DWG 回归
 
@@ -402,7 +411,8 @@ X11/XWayland 实例下的 DOM-canvas 探针）。**仍然禁止**：① 起虚�
 `docs/windows-app.md`（Windows 宿主与 spike 判据）、`docs/android-host.md`（Android Tauri 载体、
 模拟器证据与 NOT VERIFIED 边界）、`docs/build.md`（构建与退役入口）、
 `docs/ci.md`（CI 分层与 NOT RUN）、`docs/validation*.md`（历史执行证据，含 NOT RUN 边界；
-DOM-on-top 生产记录 = `validation-dom-on-top-production-2026-10-23.md`）、
+DOM-on-top 生产记录 = `validation-dom-on-top-production-2026-10-23.md`；
+wasm page 载体翻面 = `validation-dom-canvas-flip-2026-10-28.md`）、
 `docs/compatibility.md`（能力表）、`docs/handoff.md`（逐轮交接）、
 `docs/adr/`（含 ADR 0010、0017–0025；**0023 = DOM-on-top 跨宿主合成**、
 **0024 = DOM-canvas / wasm CAD 路径（已实现首批）**、**0025 = wasm 内存预算/分块上传/Worker 隔离**、

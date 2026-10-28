@@ -59,7 +59,7 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 | 桌面壳共享层 | **cad-desktop-shell：唯一允许依赖 `tauri` 的共享层**——`#[tauri::command]` 薄壳与注册、主窗口/子 webview 构建（init scripts、`start_maximized`）、popup 命令到 `cad-ui-core::popup` 的接线、工具包无关 `threading`、通用证据驱动骨架、参数化平台实现（`ReactFiles`/`ReactSurface`/`ReactConfigStore`）；**禁止** gtk/gdk/gdkx11/ashpd/wgpu/cad-render-wgpu/cad-engine/slint/iced/acadrust |
 | 宿主编排 | cad-host：HostCore（命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink）；**不依赖任何 UI 工具包，也不依赖 slint/wgpu/web-sys/Android 类型** |
 | 宿主平台契约 | cad-platform：PlatformFiles/ConfigStore/SurfaceSource/FontLoader/Persistence/TaskExecutor/Clipboard/HostLifecycle/RenderHost |
-| 宿主组合根 | apps：app-linux（GTK/Wayland 平台缝 + 真实 Linux GUI）、app-windows（Win32/WebView2 平台缝，已实现、视觉未验证）、app-macos/app-android/app-web（显式 NOT IMPLEMENTED 占位）；**唯一桌面 React UI：`apps/desktop-ui`** |
+| 宿主组合根 | apps：app-linux（GTK/Wayland 平台缝 + 真实 Linux GUI）、app-windows（Win32/WebView2 平台缝，已实现、视觉未验证）、app-macos（显式 NOT IMPLEMENTED 占位）、app-android/app-web（Tauri/浏览器载体，wasm `dom-canvas` 会话）；**唯一桌面 React UI：`apps/desktop-ui`** |
 | 自动化 | cad-diagnostics：统计/脱敏报告；cad-cli-tools：共用 Application 命令路径 |
 
 ## 必须保持的边界
@@ -72,7 +72,12 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   也不直接依赖 wgpu；wgpu 类型仅由 renderer 通过其 API/re-export 提供。`cad-app` 不依赖 `cad-engine`。
 - `cad-ui-core` 位于 UI 无关的应用/宿主契约**之上**（它依赖 `cad-host`，会话包装 `HostCore`）、
   具体宿主**之下**；必须保持 UI 工具包与 GPU 无关（无 slint/wgpu/tauri/gtk/portal/平台类型），
-  由 `scripts/check-architecture.py` 强制。
+  由 `scripts/check-architecture.py` 强制。它同时是**命令语义的唯一权威**：
+  `session::wire` 一条命令一个函数（参数解析 → 共享门（`session::admission` /
+  `shell::check_command`）→ 交给宿主的 sink），`AdmissionTarget`/`ControlReads`/`PopupTarget`
+  是宿主唯一可插的缝；桌面宿主只提供**有界队列 sink + owner-thread 镜像读**，
+  `dom-canvas` 宿主提供**直接调用 `CadSession` 的 sink**。门禁顺序、上限与全部诊断字符串
+  都只在 `cad-ui-core`（宿主实现里没有策略）。
 - **`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层**，位于 `cad-ui-core` 之上、`app-*` 之下；
   非 Linux/Windows 目标编译为空壳（保住 wasm 门禁）。它不依赖 gtk/gdk/gdkx11/ashpd/wgpu/
   cad-render-wgpu/cad-engine/slint/iced/acadrust（脚本强制）。
@@ -93,6 +98,12 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   的 `canOpen` 由适配器抬成 `true`（选择器是 DOM 能力），`canFit` 来自会话（保留的图形范围）。
   这层是 **UI 侧**的路由，与 `cad-host`/`cad-platform` 的宿主编排分层正交（铁律 8 不变：wasm 会话是
   `dom-canvas` 宿主上唯一的 `cad-db` 权威）。证据见 `docs/validation-web-commands-2026-10-28.md`。
+  注意**载体侧**（2026-10-28 生产翻面）已不再受这四条限制：`apps/app-web` 的 **page 载体**跑的就是
+  真 `CadSession`（`src/live.rs` + `src/page.rs`），`invoke` 一条入口服务**全部 20 条** wire 命令，
+  `shell_commands()` = `admissible_names()`（155 个名字）、`shell_aliases()` = `alias_pairs()`（51 行），
+  所以**适配器**仍然只路由四条，但会话本身已能执行其余命令；把 `web-adapter.ts` 改成单漏斗
+  `invoke` 是**下一轮前端**的事（不是会话能力缺口）。同一 wasm 实例的 **worker/offscreen 载体**
+  仍是旧的 viewer 会话（无 wire/输入/弹窗面），见 `docs/validation-dom-canvas-flip-2026-10-28.md`。
 - **每宿主产物互不共享**：桌面 `apps/desktop-ui/dist`（`npm run build`）、Web
   `apps/app-web/dist-ui`（`scripts/build-web-ui.sh`）、Android `apps/app-android/dist`
   （`scripts/build-android-ui.sh`）。三者用不同运行时常量编译，**不得**互相覆盖，也**不得**把其中

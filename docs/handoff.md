@@ -1,3 +1,129 @@
+## 2026-10-28 `dom-canvas` 生产翻面（wasm page 载体）：真 `CadSession` 拥有 page canvas
+
+### 结论
+
+`apps/app-web` 的 **page 载体**不再是 viewer 会话：`start`/`open_bytes` 建/就地替换的是
+`cad_ui_core::session::CadSession`（与原生宿主同一个会话），所以命令路由器、`cad-db` 权威、
+输入缝、弹窗状态机、状态投影在浏览器里都是真的。证据（有界）：
+`docs/validation-dom-canvas-flip-2026-10-28.md`。
+
+- 新增 `apps/app-web/src/live.rs`（**与目标无关**：预算/就地替换/输入合成/弹窗门/两个状态投影）
+  与 `apps/app-web/src/page.rs`（**wasm-only**：registry + presenter + 帧步骤 + 各导出）。
+  `shell.rs` 改成「会话 `CadStatus` 快照 + 4 个载体键」的纯序列化；`direct.rs` 的 `invoke`
+  成为生产入口（删除 feature gate）；`debug_session.rs`（第二个会话）删除，feature 名保留为空。
+- **追加 API**：`cad_ui_core::session::CadSession::open_bytes(label, bytes)`（就地替换，走
+  `HostCore::deliver_external_open`，与桌面 open 同一漏斗）。
+- 导出：`frame()`（tick → `apply_ready_updates` → `render` → `present`，每 rAF 一次，wasm 内无定时器）
+  与 `probe_input(args_json)`（同一 `ProbeInput` → `handle_input`）为新增生产导出；
+  `pan`/`zoom_at` 用合成 `ProbeInput`（中键拖拽/一次滚轮）+ 各 present 一帧；
+  `resize` 同时更新 presenter 与 `set_canvas_metrics`；`status`/`document` 投影真会话。
+- **词汇翻面**：`shell_commands()` = `admissible_names()`（**155**）、`shell_aliases()` =
+  `alias_pairs()`（**51**）、`shell_command(name)` 走共享门 + 真路由器；`shell_status()` 的
+  `entityCount/tool/selection/commandLog/camera/snap*/commandLog` 全是会话自己的事实，
+  `canFit` 由会话投影，`canNew/canOpen/canSave/canPlot` 仍为 `false`（本载体确无
+  New/Open/Save/Plot 路径；`OPEN` 名字在词汇里，执行时按 `unsupported-filesystem` 拒绝）。
+- **弹窗**：`PopupTarget` 实现于 `live::LivePopups`（`cad_ui_core::popup` 同一状态机），
+  About 带 build payload，Options 无 payload（UI 自己读 `cad_settings`），TextEdit 读
+  `selected_text_edit()`；模态门同时拒绝 `cad_command` 与 `probe_input`。
+
+### 预算（ADR 0025）：位置变了，上限没变
+
+输入字节检查（64 MiB）在解析前；堆检查（3 GiB）在**安装之前**（`deliver_external_open` 是宿主
+原子替换，装完再拒绝无法回滚），安装后再**测一次并公开**（`heap_after_open` + `over_budget`）。
+上限、拒绝形状（`step:"budget"` + `budget:{name,limit_bytes,measured_bytes}`）与 viewer 相同。
+**实测保留代价**：`complex-test.dwg`（4 228 788 B）→ 44 591 实体 / 145 776 batches，
+安装后 587 MiB，**场景上传完成后 2.68 GiB**（viewer 口径峰值 1.91 GB、释放后 1.43 GB）。
+
+### 仍未做（下一轮阻塞）
+
+① **前端换轨**：`apps/desktop-ui` 未改（本 lane 禁止），`web-adapter.ts` 仍只路由四条命令、
+`runtime.ts` 仍按载体路由，`frame()` 还没人调用（现有页面靠 resize/pan/zoom 各自 present 维持重绘）。
+② **worker/offscreen 载体仍是 viewer**（无 `invoke`/`probe_input`/`shell_status` 事实）——ADR 0024
+阶段 ⑧ 的另一半。③ **峰值感知的堆预算**：当前 2.68 GiB 常驻下再开一张同量级图纸不会被拒绝，
+可能会撞 4 GiB abort（需要为下一次 open 预留或流式导入）。④ 真机/真 GPU/WebKitGTK/X11 运行未做；
+只有 Chromium 141 + SwiftShader 的软件渲染证据。
+
+### 证据边界
+
+- 跑过：`cargo test -p app-web -p cad-ui-core -p cad-desktop-shell --locked`（74 + 310 + 11 + 3 + 12 + 7 + 4 全绿）、
+  `cargo check --workspace --all-targets --locked`、
+  `cargo check -p app-web --target wasm32-unknown-unknown --locked`（**带与不带** `--features debug-session`）、
+  `cargo fmt --all -- --check`、`cargo clippy -p app-web -p cad-ui-core --all-targets -- -D warnings`、
+  `check-architecture.py` / `check-i18n.py` / `check-file-size.py`、`check-workflows.py` /
+  `check-fixture-manifest.py`。
+- 浏览器：`scripts/web-flip-evidence.cjs`（新增）**PASS 36/36**，截图与 `summary.json` 在
+  `/tmp/opencode/yacr-flip-20261028T-final2/`（软件渲染，本地未上传；`entityCount 4→5`、像素差
+  5442/1024000、真 `PopupAck`、`pan`/`zoom_at` 相机数值、外部样本 2.68 GiB 常驻都在里面）；
+  `scripts/web-smoke.cjs` 本地跑通（它走的是 **worker/viewer** 载体：
+  `target=offscreen-canvas isolation=worker`）。
+- **NOT RUN**：X11/WebKitGTK/Android/真机/真 GPU；`apps/desktop-ui` 的 `web-ui-smoke`；worker 载体上的真会话。
+- `scripts/web-smoke.cjs` 去掉对 `draws` 的数字断言（page 载体的引擎不向这一层发布 draw 计数，
+  留着会逼载体编一个数）；`batches` 仍断言（prepared scene 常驻批次数，真值）。
+
+## 2026-10-28 共享命令层：桌面 IPC 与 `dom-canvas` 直调走**同一套语义**（重构 + wasm 入口）
+
+### 结论
+
+**语义只有一份，差异只在传输**。新增 `cad-ui-core::session::wire`：**一条 wire 命令一个函数**
+（`command`/`set_tool_parameter`/`set_tool_text`/`set_selected_text`/`set_selected_property`/
+`standard_view`/`settings`/`set_setting`/`layers`/`set_layer_visible`/`restore_layers`/
+`set_active_layer`/`create_layer`/`rename_layer`/`delete_layer`/`set_layer_property`/
+`open_popup`/`close_popup`），函数体 = 参数解析 → **共享门** → 交给宿主 sink。
+`sink` 只有两种实现：桌面把请求**入队**（`QueueSink` 借用 `Shared` 的既有有界队列），
+`dom-canvas` **直接调用 `CadSession`**（`DirectSink`）。门的顺序、上限、以及**全部诊断字符串**
+仍只在 `cad-ui-core`（`session::admission` 的 `check_*` + `shell::check_command`），
+宿主实现里没有策略。
+
+- **`CadCommandAck`/`CadCommandAlias`/`parse_setting_request` 迁到 `session::wire`**，
+  `cad-desktop-shell::commands` **re-export** ⇒ 线形不变（wire goldens、`command_aliases.rs`
+  等既有桌面测试**零改动**通过）。
+- **23 个 `#[tauri::command]` 全部缩成 parse+delegate**：每条命令体 = 一次
+  `wire::*` + `Shared::queue_sink()`（或读路径的 `Shared::queue_reads()`）；`probe_input`/
+  `cad_status`/`cad_command_aliases`/`cad_commands` 的既有拆出函数保留原名原签名。
+- **wasm 入口一个导出**：`apps/app-web` 的 `#[wasm_bindgen] invoke(name, args_json)` 返回
+  `{"ok":true,"value":…}` / `{"ok":false,"error":"<原样拒绝>"}`；按名字派发到同一批 `wire::*`，
+  参数用每条命令一个 `serde` 结构解码成**与 Tauri 签名同样的类型值**；未知名字 →
+  `unsupported-runtime: <name>`。`cad_commands`/`cad_command_aliases` 走共享表
+  （`admissible_names()`/`alias_pairs()`），因此真 wasm 会话**宣称与桌面相同的词汇**。
+- **等价证明**（本轮验收）：`apps/app-web/src/direct/tests.rs` 用真 `CadSession`（合成夹具 bytes、
+  无 device）对**每条命令**跑 valid / malformed / 会话按名拒绝 + 共享门拒绝（probe 模式、模态门），
+  断言两条 sink 的**准入判定相同、ack 相同、会话拒绝字符串逐字节相同**，并断言矩阵**真的覆盖**
+  三类判定（否则"全都一致地拒绝"也能通过）。词汇/别名两路相同另测。
+
+### 队列形状 vs 直接应用（唯一被记录的不对称）
+
+桌面的 `CadSession` 是 `!Send`、只能由 owner 线程驱动，所以 `{accepted:true}` 在那里意味
+**已入队**，会话自己的拒绝（未知图层名、选区不是文字…）在**下一次** `cad_status.error` 出现；
+同步 sink 在同一次调用内应用，因此它的 `Ok` 意味**已应用**、拒绝立刻返回（同时仍被会话记录）。
+**准入判定完全一致**（同门、同序、同字符串）；差别只有"会话裁决何时可见"，属传输属性。
+本轮**没有**让直调路径把拒绝吞掉换成 `accepted`（`layer.no_document` 这类拒绝不会进
+`cad_status.error`，吞掉就是伪造成功，违反铁律 2）。
+
+### 证据边界
+
+- 跑过：`cargo test -p cad-ui-core -p cad-desktop-shell -p app-web`（308 + 11 + 3 + 12 + 7 + 4 + 58 全绿）、
+  `cargo check --workspace --all-targets --locked`、`cargo check -p app-web --target
+  wasm32-unknown-unknown --locked`（**带与不带** `--features debug-session`）、
+  `cargo fmt --all -- --check`、`cargo clippy -p cad-ui-core -p cad-desktop-shell -p app-web
+  -p app-linux -p app-windows --all-targets -- -D warnings`、`check-architecture.py`/
+  `check-file-size.py`/`check-i18n.py`。
+- **NOT RUN**：`cargo check --workspace --lib --target wasm32-unknown-unknown`（只跑了 `-p app-web`）；
+  任何浏览器/真机运行；`invoke` 在真实 wasm 里**未执行**（只有宿主契约 + `cargo check`）。
+  等价矩阵是**宿主目标、无 GPU、无 DOM** 的证据，不证明像素。
+- `--locked` 需 `Cargo.lock` 更新：`cad-ui-core` 新增 `serde_json`、`app-web` 新增 `serde`
+  （都是 workspace 内既有 crate，版本未变，只在锁文件里加两条边）。
+
+### 仍未做（翻生产前的阻塞，逐条）
+
+① 预算：`from_bytes`/`deliver_external_open` 仍未过 ADR 0025 的输入与堆预算；真会话**保留数据库**
+（viewer 释放），大图峰值未重测。② 输入管线：`probe_input` 等价通道（指针/滚轮/resize）尚未接到
+`DirectSink`，输入仍走 spike 的 `debug_session_pointer`。③ 帧循环：rAF + `tick`/`render`/blit 仍在
+spike，未进生产导出。④ 状态投影：`shell_status`/`shell_command` 仍报 viewer 的事实与
+**三个选择器**的词汇（本轮刻意不动，见 `apps/app-web/src/shell.rs` 模块文档）；翻生产时要一并换成
+真会话投影并改用 `invoke("cad_commands")` 的完整词汇。⑤ 弹窗：`DirectSink` 用 `NoPopups`
+（`popup.host_unavailable`），in-DOM 覆盖层未接线。⑥ `apps/desktop-ui/src/host/web-adapter.ts`
+仍映射四个命令；翻生产时改成单漏斗 `invoke`。⑦ Worker 隔离载体下的 `invoke` 未验证。
+
 ## 2026-10-28 载体一致性：传输按上报载体路由 + 冷加载可恢复 + wasm 会话底座（阶段 ⑧ 第 1 步）
 
 ### 结论

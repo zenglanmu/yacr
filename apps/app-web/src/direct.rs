@@ -47,15 +47,12 @@
 //!
 //! # Feature boundary
 //!
-//! The `CadSession`-backed path needs the phase-2 spike's live session
-//! ([`crate::debug_session`], `feature = "debug-session"`), because the production
-//! viewer ([`crate::session`]) is a *different* session and the production flip is
-//! a separate change. This module therefore compiles on both settings:
-//!
-//! * with the feature (wasm): the real desktop session answers;
-//! * without it: the vocabulary reads (`cad_commands`, `cad_command_aliases`) still
-//!   answer from the shared tables — they are pure — and every session-backed
-//!   command refuses with [`NO_SESSION`], never with a fabricated acknowledgement.
+//! There is none any more: the production session ([`crate::live`] /
+//! [`crate::page`]) is what serves this transport, so `invoke` exists on every
+//! wasm build and answers from the live session. A build (or a moment) with **no
+//! live session** still answers the two vocabulary reads from the shared tables —
+//! they are pure — and refuses every other known command with [`NO_SESSION`], never
+//! with a fabricated acknowledgement.
 
 use cad_app::{StandardView, ToolParameter, ToolValue};
 use cad_ui_core::session::wire::{self, AdmissionTarget, CadCommandAck, ControlReads, PopupTarget};
@@ -68,13 +65,12 @@ use serde_json::Value;
 /// Stable machine prefix of every name this transport does not serve.
 pub const UNSUPPORTED_RUNTIME: &str = "unsupported-runtime";
 
-/// Stable refusal of a session-backed command in a build with no CAD session.
+/// Stable refusal of a session-backed command when this carrier has no live CAD
+/// session (not started yet, still starting, or the failed state).
 ///
-/// The phase-2 spike owns the only `CadSession` this crate can reach; without its
-/// feature there is nothing to apply the request to, and pretending otherwise
-/// would be a fabricated capability.
-pub const NO_SESSION: &str =
-    "no CAD session in this build (rebuild with `--features debug-session`)";
+/// A caller must never read this as a success: the whole point of the envelope is
+/// that a request either ran on the session or says why it did not.
+pub const NO_SESSION: &str = "no live CAD session on this carrier (start the canvas session first)";
 
 /// The refusal of a name this transport has no wire command for.
 ///
@@ -97,8 +93,8 @@ pub fn unsupported_runtime(name: &str) -> String {
 /// `pending` is always `0`: a synchronous sink holds nothing between calls, so the
 /// queue bound (which exists for the desktop's cross-thread buffer) is never
 /// reached here. `cad_mode`/`modal_open` are the host's declared gate inputs — a
-/// live wasm session means CAD is enabled, and no popup can be open because this
-/// carrier has no popup seam at all.
+/// live wasm session means CAD is enabled, and `modal_open` is the projected popup
+/// gate ([`crate::live::PopupSlot::modal_open`]), exactly like the desktop's.
 pub struct DirectSink<'a> {
     session: &'a CadSession,
     cad_mode: bool,
@@ -109,7 +105,10 @@ pub struct DirectSink<'a> {
 }
 
 impl<'a> DirectSink<'a> {
-    /// The production sink: CAD enabled, no modal popup (this carrier has none).
+    /// The production sink: CAD enabled, no modal popup.
+    ///
+    /// [`Self::with_gates`] is what the production entry uses (it passes the live
+    /// popup gate); this constructor is the CAD-enabled/no-modal case on its own.
     pub fn new(session: &'a CadSession) -> Self {
         Self::with_gates(session, true, false)
     }
@@ -483,14 +482,13 @@ pub fn is_wire_command(name: &str) -> bool {
     WIRE_COMMANDS.contains(&name)
 }
 
-/// The answers a build **without** a live CAD session can still give honestly.
+/// The answers a carrier **without a live CAD session** can still give honestly.
 ///
 /// The two vocabulary reads are pure functions of the shared tables, so they are
 /// served; every other known command is the explicit [`NO_SESSION`] refusal and an
 /// unknown name keeps [`unsupported_runtime`]. Nothing is answered as a success
-/// that this build cannot perform.
-#[cfg(any(not(target_arch = "wasm32"), not(feature = "debug-session")))]
-fn without_session(name: &str) -> Result<Value, String> {
+/// that this carrier cannot perform.
+pub(crate) fn without_session(name: &str) -> Result<Value, String> {
     match name {
         "cad_commands" => Ok(serde_json::json!(wire::commands())),
         "cad_command_aliases" => Ok(serde_json::json!(wire::aliases())),
@@ -507,46 +505,18 @@ fn without_session(name: &str) -> Result<Value, String> {
 /// is `{"ok":true,"value":…}` on success and `{"ok":false,"error":"<reason>"}` on
 /// refusal — one shape for every command, so the transport decodes one thing.
 ///
-/// The request is served by the real desktop session owned by the phase-2 spike
-/// ([`crate::debug_session`]); the semantics are
-/// [`cad_ui_core::session::wire`]'s, i.e. the *same* functions the Tauri commands
-/// call, so a name, argument or refusal cannot differ between the two hosts.
-#[cfg(all(target_arch = "wasm32", feature = "debug-session"))]
+/// The request is served by the **real** desktop session the page carrier owns
+/// ([`crate::page`]); the semantics are [`cad_ui_core::session::wire`]'s, i.e. the
+/// *same* functions the Tauri commands call, so a name, an argument or a refusal
+/// cannot differ between the two hosts.
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub async fn invoke(name: &str, args_json: &str) -> String {
-    let served = crate::debug_session::with_session(|session| {
-        let mut sink = DirectSink::new(session);
-        let mut popups = wire::NoPopups;
-        dispatch(
-            name,
-            args_json,
-            &mut sink,
-            &DirectReads::new(session),
-            &mut popups,
-        )
-    });
-    match served {
-        Some(result) => envelope(result),
-        None => envelope(Err(format!(
-            "{UNSUPPORTED_RUNTIME}: {name}: no live CAD session (start the debug session first)"
-        ))),
-    }
+    crate::page::invoke_impl(name, args_json)
 }
 
-/// The same export in a build **without** the session feature.
-///
-/// The vocabulary reads still answer from the shared tables; every other command
-/// refuses with [`NO_SESSION`]. It compiles and answers, so a page can probe the
-/// carrier instead of crashing on a missing symbol.
-#[cfg(all(target_arch = "wasm32", not(feature = "debug-session")))]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub async fn invoke(name: &str, args_json: &str) -> String {
-    let _ = args_json;
-    envelope(without_session(name))
-}
-
-/// Native builds have no browser session at all, so they answer exactly like a
-/// wasm build without the session feature — and never fabricate an `ok: true`.
+/// Native builds have no browser session at all, so they answer exactly like a page
+/// that has not started one — and never fabricate an `ok: true`.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn invoke(name: &str, args_json: &str) -> String {
     let _ = args_json;

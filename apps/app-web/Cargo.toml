@@ -11,11 +11,13 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-# **SPIKE ONLY** (ADR 0024 stage ⑧ phase 2): the `debug_session_*` exports that put
-# the real `CadSession` on a page canvas. Off by default so a production wasm
-# bundle does not carry a second session (+38.9 % measured: 9.66 MB -> 13.41 MB).
-# Evidence builds: `cargo build -p app-web --target wasm32-unknown-unknown \
-# --release --locked --features debug-session`.
+# **RETIRED, EMPTY** (ADR 0024 stage ⑧, production flip). This feature used to
+# carry the phase-2 spike (`debug_session_*` exports), which ran a *second*
+# `CadSession` next to the production viewer. The flip made the production exports
+# (`start`/`open_bytes`/`frame`/`probe_input`/`invoke`) run the real session, the
+# spike module was deleted, and the binary no longer carries two sessions. The name
+# is kept so an existing evidence invocation (`--features debug-session`) still
+# compiles; it enables nothing.
 debug-session = []
 
 [dependencies]
