@@ -32,6 +32,10 @@ const P = {
   zoomIn: <><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.4-4.4M11 8.5v5M8.5 11h5" /></>,
   zoomOut: <><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.4-4.4M8.5 11h5" /></>,
   zoomWindow: <><rect x="4" y="4" width="10" height="8" /><circle cx="15" cy="15" r="4.5" /><path d="M20 20l-3-3" /></>,
+  // Previous view: the zoom family's lens with a left chevron inside it — the
+  // same lens stroke as `zoomIn`/`zoomOut`, so the three read as one set and the
+  // mark says "one view back" without borrowing the edit `undo` glyph.
+  zoomPrevious: <><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.4-4.4M13.3 8.6 10.9 11l2.4 2.4" /></>,
   pan: <><path d="M12 3v18M3 12h18" /><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" /></>,
   orbit: <><circle cx="12" cy="12" r="8" /><ellipse cx="12" cy="12" rx="8" ry="3.4" /><path d="M12 4v16" /></>,
   view: CUBE,

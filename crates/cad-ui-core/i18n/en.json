@@ -884,5 +884,8 @@
   "windows.picker_failed": "System file picker unavailable; use --open PATH instead: {error}",
   "dialog.popup.title": "Dialog",
   "dialog.popup.close": "Close",
-  "dialog.popup.body_failed": "This dialog's content could not be displayed. Close it and try again."
+  "dialog.popup.body_failed": "This dialog's content could not be displayed. Close it and try again.",
+  "toolbar.zoom_previous": "Zoom previous",
+  "toolbar.zoom_window.hint": "Two corners: drag a box on the canvas to frame it. 2D only — a 3D view refuses this.",
+  "toolbar.zoom_previous.hint": "Back to the last recorded view. Pan, wheel zoom and orbit are not recorded as steps."
 }

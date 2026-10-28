@@ -76,6 +76,15 @@ interface RibbonItemBase {
   readonly labelKey: string;
   readonly icon: string;
   readonly large?: boolean;
+  /**
+   * The item's own limit, in catalog words, shown as its tooltip **while it is
+   * enabled** (`zoom_window.hint` says "2D only", the previous-view form says
+   * what is not recorded). It is not the refusal sentence: a disabled item still
+   * words its reason through `unavailableReasonKey`, so one state never borrows
+   * the other's copy. Same convention as `layers.<flag>.hint` and
+   * `status.tool_parameter.*.hint`.
+   */
+  readonly hintKey?: string;
   /** The item's own popover (a small caret); its entries are items too. */
   readonly variants?: readonly RibbonItem[];
 }
@@ -632,8 +641,35 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         items: [
           { id: 'ZOOMIN', labelKey: 'toolbar.zoom_in', icon: 'zoomIn', command: 'ZOOMIN' },
           { id: 'ZOOMOUT', labelKey: 'toolbar.zoom_out', icon: 'zoomOut', command: 'ZOOMOUT' },
+          // `ZOOM WINDOW` (2026-10-28) sits at the end of the zoom-step run it
+          // refines: it is the same `ZOOM` selector with a word argument, not a
+          // command of its own (no new `CommandId`, and the host advertises no
+          // `ZOOM WINDOW` name). The dispatch token is therefore the **full
+          // line** and admission comes from the shared argument grammar
+          // (`ARGUMENT_COMMANDS.ZOOM`), which is what makes the button enabled
+          // exactly when `ZOOM` is — not from a local enable path. The tooltip is
+          // its own limit (`hintKey`): two corners, 2D only, 3D refused by name.
+          {
+            id: 'ZOOM WINDOW',
+            labelKey: 'toolbar.zoom_window',
+            icon: 'zoomWindow',
+            command: 'ZOOM WINDOW',
+            hintKey: 'toolbar.zoom_window.hint',
+          },
           { id: 'PAN', labelKey: 'toolbar.pan', icon: 'pan', command: 'PAN' },
           { id: 'FIT', labelKey: 'toolbar.fit', icon: 'fit', command: 'FIT' },
+          // `ZOOM PREVIOUS` closes the camera-restoring pair with RESETVIEW: it
+          // is the other argument form of `ZOOM` (same mechanism, same
+          // admission), and its `hintKey` states the honest limit — one discrete
+          // view step back, with pan/wheel/orbit deliberately not recorded, which
+          // is **not** AutoCAD parity.
+          {
+            id: 'ZOOM PREVIOUS',
+            labelKey: 'toolbar.zoom_previous',
+            icon: 'zoomPrevious',
+            command: 'ZOOM PREVIOUS',
+            hintKey: 'toolbar.zoom_previous.hint',
+          },
           // RESETVIEW closes the navigate cluster: it is the payload-free
           // `CommandId::ResetView` selector, so it travels on `cad_command` like
           // its neighbours and is enabled by router admission alone.

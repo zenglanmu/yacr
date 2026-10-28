@@ -64,7 +64,8 @@ function isDecimalNumber(text: string): boolean {
  * `ZOOM 0` that slipped through would be refused by the router and recorded for
  * `cad_status.error`, never clamped). `ZOOM` mirrors the host grammar —
  * a positive decimal scale factor (`> 1` zooms in, `< 1` zooms out), `ALL` or
- * `EXTENTS` (the `FIT` framing). `SNAPUNIT` is the session grid-snap spacing
+ * `EXTENTS` (the `FIT` framing), and the two word forms `WINDOW` / `PREVIOUS`
+ * (below). `SNAPUNIT` is the session grid-snap spacing
  * sysvar and accepts the same positive-decimal shape (`25`, `0.5`, `2.5`).
  * `PDMODE`/`PDSIZE` (2026-10-26) are the drawing's POINT display-style sysvars:
  * one plain decimal each (`PDMODE 3`, `PDSIZE 2.5`), zero and negative included
@@ -77,7 +78,27 @@ function isDecimalNumber(text: string): boolean {
  */
 export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.freeze({
   ZOOM: Object.freeze({
-    parse: (argument: string) => argument === 'ALL' || argument === 'EXTENTS' || isPositiveDecimal(argument),
+    /**
+     * `ZOOM WINDOW` and `ZOOM PREVIOUS` (2026-10-28) are **argument forms of the
+     * `ZOOM` selector**, not commands of their own: the host adds no `CommandId`
+     * and advertises no extra name, so the word is grammar here exactly like
+     * `ALL`/`EXTENTS` are, and the line still travels as one `cad_command`
+     * (`"ZOOM WINDOW"`). They are word alternatives in the same grammar as the
+     * decimal factor, so no word can ever be read as one (`isPositiveDecimal`
+     * already refuses letters) and no new selector row is needed.
+     *
+     * This table is the *only* place the two words are listed for admission: the
+     * command line admits them through the ordinary base-name path
+     * (`splitCommandText` reads `ZOOM` + `WINDOW`), and the ribbon's
+     * `shell.canCommand('ZOOM WINDOW')` is that same call — so the button is
+     * enabled iff `ZOOM` itself is admitted, with no second name list and no
+     * `HOST_NAMES` entry the host does not publish. Semantics stay the host's:
+     * a 3D view refuses `WINDOW` by name, and `PREVIOUS` with no recorded step is
+     * refused there too.
+     */
+    parse: (argument: string) => argument === 'ALL' || argument === 'EXTENTS'
+      || argument === 'WINDOW' || argument === 'PREVIOUS'
+      || isPositiveDecimal(argument),
   }),
   SNAPUNIT: Object.freeze({
     parse: isPositiveDecimal,

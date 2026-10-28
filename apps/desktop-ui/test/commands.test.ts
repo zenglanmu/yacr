@@ -11,12 +11,14 @@ import {
   normalizeCommandText,
   pushHistory,
   setCommandCatalog,
+  splitCommandText,
   stepHistoryCursor,
   toolCommandForKey,
   toolLabelKey,
   unavailableReasonKey,
 } from '../src/commands/commands.ts';
 import {
+  ARGUMENT_COMMANDS,
   CAPABILITY_GATES,
   GESTURE_ONLY_COMMANDS,
   LOCAL_CHROME_COMMANDS,
@@ -487,7 +489,20 @@ test('every ribbon command id and label key exists in the shared catalog', async
   const ids = ribbonCommandIds();
   assert.ok(ids.length >= 15, `ribbon should reference many commands, saw ${ids.length}`);
   const known = new Set(COMMAND_CATALOG.map(command => command.id));
-  for (const id of ids) assert.ok(known.has(id), `ribbon command ${id} is not in the catalog`);
+  for (const id of ids) {
+    if (known.has(id)) continue;
+    // The one other class a ribbon token may belong to is an **argument form**
+    // (`ZOOM WINDOW`, `ZOOM PREVIOUS`): the host advertises only the base
+    // selector (`ZOOM`), so there is deliberately **no catalog row** and no
+    // vocabulary entry for the word — a row here would be the second name list
+    // the command line must not have. Its authority is the argument table, which
+    // `splitCommandText` + `ARGUMENT_COMMANDS` is what this asserts.
+    const split = splitCommandText(id);
+    assert.notEqual(split.argument, null, `ribbon command ${id} is not in the catalog and carries no argument`);
+    const spec = ARGUMENT_COMMANDS[split.name];
+    assert.ok(spec, `${id}: ${split.name} takes no typed argument`);
+    assert.equal(spec.parse(split.argument), true, `${id}: the argument table refuses ${split.argument}`);
+  }
   for (const tab of RIBBON_TABS) {
     assert.equal(typeof zh[tab.labelKey], 'string', tab.labelKey);
     for (const panel of tab.panels) {

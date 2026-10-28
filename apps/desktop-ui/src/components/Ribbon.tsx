@@ -95,7 +95,9 @@ function ItemButton({ item }: { readonly item: RibbonItem }) {
   if (!enabled) {
     return <RibbonButton icon={item.icon as IconName} label={t(item.labelKey)} disabled hint={unavailable(t, item, shell)} />;
   }
-  return <RibbonButton icon={item.icon as IconName} label={t(item.labelKey)} active={active} onClick={() => runItem(shell, item)} />;
+  // Enabled: the tooltip is the item's **own limit** (`hintKey`), never the
+  // refusal sentence — a live button must not word a reason it does not have.
+  return <RibbonButton icon={item.icon as IconName} label={t(item.labelKey)} active={active} hint={item.hintKey ? t(item.hintKey) : undefined} onClick={() => runItem(shell, item)} />;
 }
 
 /** One item cell, plus the variant caret when the item has variants. */
@@ -143,7 +145,9 @@ function VariantMenu({ item, onClose }: { readonly item: RibbonItem; readonly on
             role="menuitem"
             className={['ribbon-menu-item', enabled ? '' : 'is-disabled'].filter(Boolean).join(' ')}
             disabled={!enabled}
-            title={enabled ? undefined : unavailable(t, variant, shell)}
+            title={enabled
+              ? (variant.hintKey ? t(variant.hintKey) : undefined)
+              : unavailable(t, variant, shell)}
             onClick={() => { runItem(shell, variant); onClose(); }}
           >
             <Icon name={(variant.icon ?? item.icon) as IconName} size={15} />

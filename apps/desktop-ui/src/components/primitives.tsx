@@ -109,7 +109,12 @@ export function IconButton({ icon, label, iconSize = 18, size = 'md', variant = 
 export interface RibbonButtonProps {
   readonly icon: IconName;
   readonly label: string;
-  /** The refusal sentence shown while the button is disabled. */
+  /**
+   * The button's tooltip: the refusal sentence while it is disabled, or the
+   * item's own limit while it is enabled (`RibbonItem.hintKey`). `undefined`
+   * means "no tooltip", which is the normal state of a live item with no limit
+   * worth stating.
+   */
   readonly hint?: string;
   readonly disabled?: boolean;
   readonly active?: boolean;
@@ -123,7 +128,7 @@ export function RibbonButton({ icon, label, hint, disabled, active, onClick }: R
       type="button"
       className={['ribbon-button', active ? 'is-active' : '', disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')}
       disabled={disabled}
-      title={disabled ? hint : undefined}
+      title={hint}
       aria-disabled={disabled || undefined}
       onClick={disabled ? undefined : onClick}
     >

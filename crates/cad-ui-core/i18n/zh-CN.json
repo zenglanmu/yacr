@@ -884,5 +884,8 @@
   "windows.picker_failed": "系统文件选择器不可用，请改用 --open PATH：{error}",
   "dialog.popup.title": "对话框",
   "dialog.popup.close": "关闭",
-  "dialog.popup.body_failed": "此对话框的内容无法显示；请关闭后重试。"
+  "dialog.popup.body_failed": "此对话框的内容无法显示；请关闭后重试。",
+  "toolbar.zoom_previous": "上一个视图",
+  "toolbar.zoom_window.hint": "两个角点：在画布上拖出矩形框缩放。仅二维视图可用，三维视图会拒绝此命令。",
+  "toolbar.zoom_previous.hint": "返回上一个记录的视图。平移、滚轮缩放和三维环绕不记为一步。"
 }

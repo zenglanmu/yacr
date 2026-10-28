@@ -120,9 +120,19 @@ test('the View tab navigation cluster holds only router command tokens', () => {
   // `RESETVIEW` joined ZOOMIN/ZOOMOUT/PAN/FIT: all five are payload-free router
   // selectors, so none may be a local `action` (which would bypass the shared
   // admission) and none may carry a typed payload the name-only funnel refuses.
+  //
+  // `ZOOM WINDOW` / `ZOOM PREVIOUS` (2026-10-28) join the same cluster as the two
+  // **argument forms** of `ZOOM`: their dispatch token is the full line
+  // (`'ZOOM WINDOW'`, `'ZOOM PREVIOUS'`), which the router resolves as one
+  // selector plus its word argument. They still ride `cad_command` — the same
+  // funnel as every neighbour — and they add no name the host advertises, so the
+  // command-string assertion below is the full line, not the item id.
   const navigate = RIBBON_TABS.find(tab => tab.id === 'view').panels.find(panel => panel.id === 'navigate');
   assert.ok(navigate, 'the View tab keeps its navigate panel');
-  assert.deepEqual(navigate.items.map(item => item.id), ['ZOOMIN', 'ZOOMOUT', 'PAN', 'FIT', 'RESETVIEW']);
+  assert.deepEqual(
+    navigate.items.map(item => item.id),
+    ['ZOOMIN', 'ZOOMOUT', 'ZOOM WINDOW', 'PAN', 'FIT', 'ZOOM PREVIOUS', 'RESETVIEW'],
+  );
   for (const item of navigate.items) {
     assert.equal(item.command, item.id, `${item.id} keeps its own selector`);
     assert.equal(item.action, undefined, `${item.id} must not be a local action`);
