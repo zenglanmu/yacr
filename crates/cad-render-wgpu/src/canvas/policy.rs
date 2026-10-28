@@ -265,35 +265,67 @@ pub fn check_physical_size(
 
 /// Pick the surface format to present with from the adapter's advertised formats.
 ///
-/// An sRGB format is preferred because the renderer's offscreen frame texture is
-/// `Rgba8UnormSrgb`: blitting an sRGB texture into a **linear** surface format
-/// would store the sRGB-decoded (linear) value and the display would encode it
-/// again, i.e. a visibly washed-out/wrong-contrast frame. No channel order is
-/// hardcoded — `Bgra8Unorm` is a native-only order and canvas formats are RGBA —
-/// the first advertised format is the fallback when no sRGB format is offered.
+/// # A **linear** format, on purpose (measured, Android WebView)
+///
+/// Both candidate formats present the same bytes, because the sRGB encode can
+/// happen in two places: the hardware's encoder when the target is an sRGB
+/// format, or this crate's blit fragment stage when it is linear (see
+/// [`crate::blit`]). The *linear* format is chosen because it is the only one
+/// whose wgpu-hal present path is a plain `blitFramebuffer` copy of the surface
+/// texture. wgpu-hal's **sRGB** present path instead draws a fullscreen triangle
+/// whose vertex stage reads `TRIANGLE_POS[gl_VertexID]` from a `const` array, and
+/// on `com.google.android.webview 124.0.6367.219` (emulator GLES translator +
+/// Google SwiftShader) a **dynamic array index in the vertex stage reads as zero
+/// for every element**: the triangle is degenerate, nothing reaches the canvas,
+/// and `present()` still reports success — a blank canvas with no error anywhere.
+/// Selecting a linear surface keeps that shader out of the path entirely, for
+/// every engine, with no per-engine special case.
+///
+/// Order: the linear sibling of the first advertised sRGB format (the canvas
+/// advertises `Rgba8Unorm` + `Rgba8UnormSrgb`), then any other linear format, then
+/// the first advertised one. No channel order is hardcoded — `Bgra8Unorm` is a
+/// native-only order and canvas formats are RGBA.
 pub fn preferred_present_format(formats: &[wgpu::TextureFormat]) -> Option<wgpu::TextureFormat> {
+    if let Some(srgb) = formats.iter().copied().find(|format| format.is_srgb()) {
+        let linear = srgb.remove_srgb_suffix();
+        if formats.contains(&linear) {
+            return Some(linear);
+        }
+    }
     formats
         .iter()
         .copied()
-        .find(|format| format.is_srgb())
+        .find(|format| !format.is_srgb())
         .or_else(|| formats.first().copied())
 }
 
-/// The blit performs no colour conversion of its own, so the presented frame
-/// texture must be the same format as the configured surface.
+/// The blit samples the renderer's frame texture and writes it into `surface`, so
+/// `source` must be the renderer's **sRGB** frame format and `surface` must be that
+/// format or its linear sibling.
 ///
-/// A mismatch is an explicit [`CanvasError::Blit`], never a silent tone shift.
+/// * `surface == source` (sRGB surface): the hardware encodes on write, the blit
+///   stage is a pass-through ([`crate::blit::TEXTURE_SHADER`]).
+/// * `surface == source.remove_srgb_suffix()` (linear surface): the blit stage
+///   encodes ([`crate::blit::TEXTURE_SHADER_LINEAR_TARGET`]) and wgpu-hal copies
+///   the result to the canvas unchanged — the presented bytes are identical.
+///
+/// Anything else would need a *decode* or a channel swizzle the blit does not
+/// perform (a linear source, or a different base format), so it is refused by name
+/// instead of being presented with a colour shift. A linear `source` is refused
+/// even against a linear surface: the shader would still encode it, and the
+/// contract here is the renderer's `Rgba8UnormSrgb` frame.
 pub fn check_present_format(
     source: wgpu::TextureFormat,
     surface: wgpu::TextureFormat,
 ) -> Result<(), CanvasError> {
-    if source == surface {
+    if source.is_srgb() && (surface == source || surface == source.remove_srgb_suffix()) {
         return Ok(());
     }
     Err(CanvasError::Blit(format!(
-        "present_texture: source frame format {source:?} does not match the configured surface \
-         format {surface:?}; the blit has no colour conversion, so the frame is refused instead \
-         of being presented with a colour shift"
+        "present_texture: source frame format {source:?} cannot be presented into the configured \
+         surface format {surface:?}; the frame must be the renderer's sRGB format and the surface \
+         either that format or its linear sibling - the blit encodes sRGB but never decodes it, so \
+         any other pairing would be presented with a colour shift"
     )))
 }
 

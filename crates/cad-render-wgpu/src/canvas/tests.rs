@@ -61,7 +61,7 @@ fn physical_size_at_the_limit_is_accepted() {
 }
 
 #[test]
-fn present_format_prefers_srgb_and_never_assumes_bgra() {
+fn present_format_prefers_a_linear_surface_and_never_assumes_bgra() {
     // The real WebGL2 capability order: linear RGBA first, sRGB second.
     let webgl2 = [
         wgpu::TextureFormat::Rgba8Unorm,
@@ -69,8 +69,23 @@ fn present_format_prefers_srgb_and_never_assumes_bgra() {
     ];
     assert_eq!(
         preferred_present_format(&webgl2),
-        Some(wgpu::TextureFormat::Rgba8UnormSrgb),
-        "an sRGB surface is required to match the renderer's sRGB frame texture"
+        Some(wgpu::TextureFormat::Rgba8Unorm),
+        "a linear surface is required: only that present path is a plain \
+         blitFramebuffer copy, and the blit stage owns the sRGB encode"
+    );
+    // An sRGB-only surface list still resolves (to the linear sibling when it is
+    // advertised, otherwise to what is offered).
+    assert_eq!(
+        preferred_present_format(&[wgpu::TextureFormat::Rgba8UnormSrgb]),
+        Some(wgpu::TextureFormat::Rgba8UnormSrgb)
+    );
+    assert_eq!(
+        preferred_present_format(&[
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            wgpu::TextureFormat::Bgra8Unorm,
+        ]),
+        Some(wgpu::TextureFormat::Bgra8Unorm),
+        "the linear sibling is picked whatever the channel order is"
     );
     // No sRGB offered: the first advertised format is used, whatever it is.
     assert_eq!(
@@ -192,22 +207,45 @@ fn present_size_mismatch_is_refused_and_names_both_sizes() {
 }
 
 #[test]
-fn present_format_mismatch_is_refused_and_names_both_formats() {
+fn present_format_accepts_the_srgb_pair_and_refuses_a_decode() {
+    // The renderer's frame is sRGB; both surface kinds it can be configured with
+    // present the same bytes, so both are accepted.
     assert_eq!(
         check_present_format(
             wgpu::TextureFormat::Rgba8UnormSrgb,
             wgpu::TextureFormat::Rgba8UnormSrgb
         ),
-        Ok(())
+        Ok(()),
+        "an sRGB surface is the hardware-encoded path"
     );
-    let error = check_present_format(
-        wgpu::TextureFormat::Rgba8UnormSrgb,
-        wgpu::TextureFormat::Rgba8Unorm,
-    )
-    .expect_err("a format mismatch must be refused");
-    let message = error.to_string();
-    assert!(message.contains("Rgba8UnormSrgb"), "{message}");
-    assert!(message.contains("Rgba8Unorm"), "{message}");
+    assert_eq!(
+        check_present_format(
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            wgpu::TextureFormat::Rgba8Unorm
+        ),
+        Ok(()),
+        "the linear sibling is the shader-encoded path"
+    );
+
+    // A different base format would need a channel swizzle the blit does not do.
+    for (source, surface) in [
+        (
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            wgpu::TextureFormat::Bgra8Unorm,
+        ),
+        // A linear source into an sRGB surface would need a *decode*.
+        (
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        ),
+    ] {
+        let error = check_present_format(source, surface)
+            .expect_err("an unsupported pairing must be refused");
+        let message = error.to_string();
+        assert!(message.contains(&format!("{source:?}")), "{message}");
+        assert!(message.contains(&format!("{surface:?}")), "{message}");
+        assert!(message.contains("colour shift"), "{message}");
+    }
 }
 
 #[test]

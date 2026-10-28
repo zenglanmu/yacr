@@ -216,6 +216,11 @@ impl CanvasPresenter {
         // opaque so the canvas must composite opaquely.
         config.present_mode = wgpu::PresentMode::Fifo;
         config.alpha_mode = wgpu::CompositeAlphaMode::Opaque;
+        // The **linear** sibling of the frame format, so the present is
+        // wgpu-hal's `blitFramebuffer` copy rather than its `gl_VertexID`-indexed
+        // sRGB present shader (measured to draw nothing on the Android WebView;
+        // see `preferred_present_format`). The sRGB encode then happens in our own
+        // blit stage, so the presented bytes do not change.
         if let Some(format) = preferred_present_format(&surface.get_capabilities(&adapter).formats)
         {
             config.format = format;
@@ -314,8 +319,9 @@ impl CanvasPresenter {
     /// Present the renderer's offscreen frame `texture` on the canvas.
     ///
     /// `texture` must live on the device from [`CanvasPresenter::device_queue`],
-    /// be the configured physical size, carry the same format as the configured
-    /// surface, and have `TEXTURE_BINDING` usage; each violation is an explicit
+    /// be the configured physical size, carry the configured surface's format or
+    /// its sRGB/linear sibling ([`check_present_format`]), and have
+    /// `TEXTURE_BINDING` usage; each violation is an explicit
     /// [`CanvasError::Blit`] naming the failed check rather than a stretched or
     /// colour-shifted frame.
     ///
