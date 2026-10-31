@@ -113,9 +113,9 @@ pub enum SurfaceMode {
     DomCanvas,
 }
 
-/// Wire value of [`SurfaceMode::NativeBelow`] (`cad_status.surfaceMode`).
+/// Wire value of [`SurfaceMode::NativeBelow`] (`cad_status.hostProfile.surfaceMode`).
 pub const NATIVE_BELOW: &str = "native-below";
-/// Wire value of [`SurfaceMode::DomCanvas`] (`cad_status.surfaceMode`).
+/// Wire value of [`SurfaceMode::DomCanvas`] (`cad_status.hostProfile.surfaceMode`).
 pub const DOM_CANVAS: &str = "dom-canvas";
 
 impl SurfaceMode {

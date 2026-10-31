@@ -793,6 +793,21 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 state.cad_settings = Some(settings);
             }
         }
+        // One cad-event flush per owner tick, at the same point the status mirror
+        // is final: the event's `status` is the exact `cad_status` payload (host
+        // error + projected popup included). The flush is deliberately outside the
+        // `Some(snapshot)` arm: producer/lazy-session ticks and a session-creation
+        // failure have no snapshot but still owe the chrome a status event.
+        // Gap recovery keeps reading `shell.cad_status`.
+        //
+        // Native-only: on this path the carrier is always `native-below` (the
+        // `dom-canvas`/X11 case returned above). There the wasm session's own
+        // `cad_event` stream is the only producer; the native host emits nothing.
+        let _ = cad_desktop_shell::events::flush_events_current(
+            shared,
+            &cad_ui_core::session::HostProfile::native_below(),
+            None::<String>,
+        );
         // The layer panel's own mirror (see `super::layers`).
         super::layers::mirror(shared);
         // Bounded CAD stage telemetry (diagnostics only): ONE aggregated line
@@ -963,5 +978,13 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 }
             }
         }
+        // Probe mode has no CAD session, but the host still owns the popup state
+        // `cad_status` reports. Flush the same projection so an open modal is not
+        // stranded behind the push channel.
+        let _ = cad_desktop_shell::events::flush_events_current(
+            shared,
+            &cad_ui_core::session::HostProfile::native_below(),
+            None::<String>,
+        );
     }
 }

@@ -316,7 +316,9 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
   "UI→宿主→命令→文档"的接线与结果，不构成 OS 级输入集成证据。**桌面端 `TRIM`/`EXTEND` 的取点已接线**（选择目标 + 边界两次实体拾取 → `CONFIRM`），旧文档中的
   `linux.trim`/`linux.extend` 显式 `Unsupported` **已不存在**；但当前唯一在库 DWG 夹具是四条**平行**竖线，
   因此"桌面端真的裁剪出几何改动"与本仓库的 EXTEND 演示**尚未取得真机证据**（命令层与宿主层有确定性测试，
-  见 `docs/handoff.md`）。Windows 宿主 2026-10-23 起已实现（Tier 0 编译 + Wine 拒绝合同，视觉/运行时未验收）；macOS/Android/Web 仍是 NOT IMPLEMENTED 占位，未运行验收。
+  见 `docs/handoff.md`）。Windows 宿主 2026-10-23 起已实现（Tier 0 编译 + Wine 拒绝合同，视觉/运行时未验收）；
+  macOS 宿主已实现但仅 CI 编译；Android 自 2026-11-01 起是原生 `native-below` 载体（编译级证据，
+  设备运行/Vulkan/像素 **NOT VERIFIED**）；Web 的 wasm 会话已实现，其 host target 仍是空壳。
 
 ## 三维
 
@@ -362,7 +364,7 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 | **Linux / X11 / XWayland** | **已实现 `dom-canvas` 载体**（`apps/app-linux`；退出码 4 已是历史合同） | **DOM-canvas**：wasm/WebGL2 CAD 会话画进 WebView 内 `<canvas>`（`surfaceMode: dom-canvas`），**无**原生 CAD 表面 | 有界运行：`surfaceMode=dom-canvas`、canvas 挂载 + backing `626×341`、合成 fixture 出图（Mutter ScreenCast 抓帧）；**用户手动确认**滚轮缩放/拖拽平移（用户报告，**无** agent 像素差证据）；WebGL2 缺失 → `yacr: unsupported-runtime: webgl2` + **退出码 6** | 仅 **XWayland + GNOME/Mutter + `scale=1`**；真 X11 服务器/WM、其它合成器、**硬件归属（NOT VERIFIED）**、DPR/多显示器、性能、vendor/golden 均无结论；agent 侧输入注入不可用 |
 | **Windows** | **已实现**（`apps/app-windows`，bin `yacr-windows`） | **DOM on top**：透明 WebView2（alpha 恰 0）在上，`WS_CHILD|WS_DISABLED` CAD child HWND 在下 | **Tier 0 编译门禁全 rc=0**（msvc clippy/check/build、mingw build、wasm 空壳 check）；**Wine 拒绝合同 smoke 3/3 rc=5** | **视觉/运行时全部 NOT RUN**；spike-1/4/5 **PENDING user real-Windows spike**；Wine 像素结论固定 `NOT VERIFIED (Wine limitation, bug 55432/58921)`；无发布打包 |
 | **macOS** | **已实现**（`apps/app-macos`，bin `yacr-macos`） | **DOM on top**：透明 WKWebView 在上，原生 CAD 子 `NSView`（`addSubview:positioned:relativeTo:` `.below`）在下；wgpu/Metal presenter | 仅 **CI `macos-check` 编译门禁**（`macos-latest`，前端构建后 `cargo check`，不运行） | **窗口/透明合成/层序/Retina/Metal present/对话框/像素/性能全部 NOT VERIFIED**；renderer crash 触发 ④ 未实现；无签名/打包/分发 |
-| **Android** | 显式 NOT IMPLEMENTED 占位（入口打印退役诊断后 abort） | — | 仅 `cargo check --target aarch64-linux-android` 编译门禁 | 旧模拟器/真机证据属已退役 UI，**不得**复用 |
+| **Android** | **原生 `native-below` 宿主**（2026-11-01 起，`apps/app-android`）：Tauri WebView + 共享 React chrome 在上，原生 `CadSession` 持有 `cad-db`，wgpu/Vulkan 呈现到 WebView 之下的 `SurfaceView`；wasm 会话不实例化 | **DOM on top**：`SurfaceView` 在 WebView 之下，WebView 背景清透明 | **仅编译级**：`cargo check --target aarch64-linux-android`、clippy、开发机契约测试、Kotlin 编译、`javap` 核对 JNI 符号 | **设备/模拟器运行、Vulkan adapter、像素、旋转/前后台、JNI 运行时链接全部 NOT VERIFIED**；v1 无文件/弹窗/持久配置，FIT 仍按全窗口取景；2026-10-28 的 `dom-canvas` 模拟器证据属已退役载体，不得复用 |
 | **Web** | **wasm CAD 会话已复活**（`apps/app-web`）；浏览器 bundle 本地可构建 | **DOM-canvas**：同一 wasm 会话画进 `<canvas>`（无第二份文档） | 本地运行（Chromium 141 + WebKitGTK 2.52.6）：合成 fixture 出图与缩放；真实 DWG（4.2 MB）在 wasm 内导入（1.43 GB 堆 / 11.2 s）；Chromium **Worker 隔离**（`isolation=worker`），WebKitGTK 显式 `main-thread (no WebGL2 in worker)`；bundle 由 `scripts/build-web.sh` 构建 | **CI/发布未恢复**；大图预算未达标（峰值由导入阶段决定）、浏览器矩阵、移动端、性能均 **NOT VERIFIED**；旧 Web（Slint）证据不得复用 |
 
 - 平台 I/O（文件、配置、表面度量、文件选择器）只存在于 `app-*`；共享层不含平台类型。

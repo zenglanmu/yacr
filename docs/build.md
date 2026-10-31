@@ -4,9 +4,10 @@
 `$HOME/.cargo/bin`。
 
 > **2026-10-16 迁移状态（2026-10-23 增补）**：桌面 UI 已由 Slint 迁移为 **React + Tauri 原生宿主**
-> （`apps/app-linux`，二进制 `yacr`）。`cad-ui-slint` 与所有 Slint 依赖已删除；macOS/Android/Web
-> 当时是**显式 NOT IMPLEMENTED 占位**（Web 的 wasm 会话已于 2026-10-24 复活，见下一条），
-> **不是可运行 GUI 产品**；旧的平台发布/打包脚本已退役或禁用。
+> （`apps/app-linux`，二进制 `yacr`）。`cad-ui-slint` 与所有 Slint 依赖已删除；迁移时 macOS/Android/Web
+> 是**显式 NOT IMPLEMENTED 占位**，此后 Web 的 wasm 会话于 2026-10-24 复活、Android 于 2026-11-01
+> 改为原生 `native-below` 载体（见下），二者都**不是**已验收的可运行 GUI；旧的平台发布/打包脚本已
+> 退役或禁用。
 > **2026-10-23 起**：Linux 只支持**原生 Wayland**（X11/XWayland 显式 Unsupported，退出码 4）；
 > 合成方向是 **DOM-on-top**（[ADR 0023](adr/0023-dom-on-top-cross-host-composition.md)）；
 > **Windows 宿主已实现**（`apps/app-windows`，Tier 0 编译 + Wine 拒绝 smoke，视觉未验证）。
@@ -212,7 +213,7 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
 
 | 入口 | 状态 |
 |---|---|
-| `scripts/build-android.sh` | **可用（2026-10-28）**——真机构建入口：`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（wasm 会话 + `YACR_RUNTIME=android` chrome）再 Gradle；**release APK 默认未签名**。CI 的 `android-apk`/`android-release` **仍硬禁用**（无签名密钥、无商店路径） |
+| `scripts/build-android.sh` | **可用（2026-10-28 起；2026-11-01 起构建原生 `native-below` 载体）**——真机构建入口：`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome；该脚本目前仍一并产出 wasm 会话产物，native 载体不加载）再 Gradle；**release APK 默认未签名**。CI 的 `android-apk`/`android-release` **仍硬禁用**（无签名密钥、无商店路径） |
 | `scripts/package-windows-release.sh` | **RETIRED**——无 Windows 发布流水线；非零退出（注意：`app-windows` **已是真实宿主**，退役的是**打包脚本**，不是 GUI 实现） |
 | `scripts/package-macos-release.sh` | **RETIRED**——退役的是**打包脚本**；`apps/app-macos` 已是真实 Tauri 宿主（只有 CI 编译门禁），但无签名/打包/分发；非零退出 |
 
@@ -236,12 +237,16 @@ React/Tauri 宿主构建 **Flatpak** bundle（`bin/yacr` + committed `fonts/`，
   `macos-latest` 上先构建前端再 `cargo check -p app-macos --all-targets --locked`（**只编译，不运行**）；
   窗口/Metal/层序/DPI/对话框/像素一律 **NOT VERIFIED**。`macos-release` 仍 `if: false`，
   `scripts/package-macos-release.sh` 仍非零——**没有可分发 GUI**。见 `docs/macos-app.md`。
-- **Android**：`apps/app-android` 是**真实 Tauri 2 宿主**（2026-10-28 起）——WebView/资源载体，
-  `surfaceMode: dom-canvas` 的 wasm 会话是唯一 CAD 权威，原生侧只注册两个 shell 报表命令。
-  本地构建 = `scripts/build-android.sh`（`tauri android build --apk`，release 未签名）；CI 的
-  `android-check` 仍是 capability-gated 的 **aarch64 编译门禁**（不跑 Gradle、不建 APK、不跑设备），
-  `android-apk`/`android-release` **仍硬禁用**。证据（模拟器 SwiftShader，x86_64）与
-  **NOT VERIFIED** 边界见 `docs/android-host.md`。
+- **Android**：`apps/app-android` 是**真实 Tauri 2 宿主 + 原生 `native-below` CAD 载体**
+  （2026-10-28 起是宿主，2026-11-01 起载体重写，ADR 0027）——共享 React chrome 跑在 WebView 里，
+  原生 `CadSession` 持有 `cad-db`，wgpu **Vulkan** 呈现到 WebView 之下的 `SurfaceView`；wasm 会话
+  **不实例化**。构建需要 SDK/NDK（`ndkVersion = "29.0.13846066"`）/JDK 17：本地
+  `bash scripts/build-android.sh --release --target aarch64`（release 未签名）或 `--debug --target
+  x86_64`；仓库 `fonts/` 作为 APK assets 打包。CI 的 `android-check` 仍是 capability-gated 的
+  **aarch64 编译门禁**（不跑 Gradle、不建 APK、不跑设备），`android-apk`/`android-release`
+  **仍硬禁用**。**本轮证据只有编译级**（`cargo check`、clippy、开发机契约测试、Kotlin 编译、
+  `javap` 核对 JNI 符号）；**没有设备/模拟器运行、没有 Vulkan adapter、没有像素、没有
+  旋转/前后台、没有 JNI 运行时链接——全部 NOT VERIFIED**。契约与边界见 `docs/android-host.md`。
 - **Web**：`apps/app-web` 的 **wasm CAD 会话**（ADR 0024）在 CI 中端到端构建与冒烟：
   `web-build` → `apps/app-web/dist` artifact、`web-smoke` → Playwright Chromium（**SwiftShader
   软件渲染**）断言 `start: ok`，`web-deploy` → 仅 `v*` tag / 手工 dispatch 发布到 Cloudflare Pages

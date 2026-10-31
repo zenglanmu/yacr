@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { commandEnabled, handleCommandKey, queueCadCommand, startCadPolling } from '../src/cad/cad-command.ts';
+import { commandEnabled, handleCommandKey, queueCadCommand } from '../src/cad/cad-command.ts';
 import { importProgressView, parseCadStatus, requestImportCancel } from '../src/cad/cad-status.ts';
 import { setCommandCatalog } from '../src/commands/commands.ts';
-import { readAppSource, readComponentsSource } from './helpers.ts';
+import { readAppSource, readComponentsSource, readModule } from './helpers.ts';
 
 // The admission vocabulary the host reports; without it every command would be
 // explicitly unsupported, so load a representative set once.
@@ -75,23 +75,74 @@ test('status validates explicit empty document and rejects unknown or malformed 
   }
 });
 
-test('the standard-view capability list is validated: absent or an array of strings only', () => {
-  // Absent: the older-host / desktop `native-below` case is accepted unchanged.
+test('the standard-view list is validated inside hostProfile: null or an array of strings', () => {
+  // Absent profile: the pre-P1 / desktop `native-below` case is accepted unchanged.
   assert.equal(parseCadStatus(empty), empty);
-  // A present list is carried as-is, empty included (`[]` is a real answer).
-  const emptyList = { ...empty, standardViews: [] };
+  // A `null` list is the declared "undeclared" answer and is carried as-is.
+  const nullList = { ...empty, hostProfile: { standardViews: null } };
+  assert.equal(parseCadStatus(nullList), nullList);
+  assert.equal(parseCadStatus(nullList).hostProfile.standardViews, null);
+  // A present array is carried as-is, empty included (`[]` is a real answer).
+  const emptyList = { ...empty, hostProfile: { standardViews: [] } };
   assert.equal(parseCadStatus(emptyList), emptyList);
-  assert.deepEqual(parseCadStatus(emptyList).standardViews, []);
-  const someList = { ...empty, standardViews: ['top', 'isometric'] };
+  assert.deepEqual(parseCadStatus(emptyList).hostProfile.standardViews, []);
+  const someList = { ...empty, hostProfile: { standardViews: ['top', 'isometric'] } };
   assert.equal(parseCadStatus(someList), someList);
-  assert.deepEqual(parseCadStatus(someList).standardViews, ['top', 'isometric']);
+  assert.deepEqual(parseCadStatus(someList).hostProfile.standardViews, ['top', 'isometric']);
   // Anything else is a contract violation, never a guessed capability: a truthy
   // string or a one-key object would otherwise read as "some views work".
-  for (const standardViews of [null, '', 'top', {}, 7, true, ['top', 3], ['top', null], [{}]]) {
+  for (const standardViews of ['', 'top', {}, 7, true, ['top', 3], ['top', null], [{}]]) {
     assert.throws(
-      () => parseCadStatus({ ...empty, standardViews }),
+      () => parseCadStatus({ ...empty, hostProfile: { standardViews } }),
       /CAD_STATUS_INVALID/,
       `standardViews ${JSON.stringify(standardViews)}`,
+    );
+  }
+});
+
+test('the carrier profile is validated strictly when present and optional as a whole', () => {
+  // The frozen wire shape: all four keys, `standardViews` either null or a list.
+  const profile = {
+    surfaceMode: 'dom-canvas',
+    documentOwner: 'wasm',
+    palettesAvailable: true,
+    standardViews: [],
+  };
+  const status = { ...empty, hostProfile: profile };
+  assert.equal(parseCadStatus(status), status);
+  assert.deepEqual(parseCadStatus(status).hostProfile, profile);
+  // The native shape is equally valid.
+  const nativeStatus = {
+    ...empty,
+    hostProfile: {
+      surfaceMode: 'native-below',
+      documentOwner: 'native',
+      palettesAvailable: true,
+      standardViews: null,
+    },
+  };
+  assert.equal(parseCadStatus(nativeStatus), nativeStatus);
+
+  // Bad enums and bad types are contract violations, never coerced.
+  const badProfiles = [
+    null,
+    [],
+    'dom-canvas',
+    { surfaceMode: 'DOM-CANVAS' },
+    { surfaceMode: null },
+    { surfaceMode: 7 },
+    { documentOwner: 'web' },
+    { documentOwner: null },
+    { palettesAvailable: 'true' },
+    { palettesAvailable: 1 },
+    { standardViews: 'top' },
+    { standardViews: [3] },
+  ];
+  for (const hostProfile of badProfiles) {
+    assert.throws(
+      () => parseCadStatus({ ...empty, hostProfile }),
+      /CAD_STATUS_INVALID/,
+      `hostProfile ${JSON.stringify(hostProfile)}`,
     );
   }
 });
@@ -267,36 +318,15 @@ test('keyboard submits once on Enter without trapping Tab, Escape or IME composi
   assert.equal(prevented, 1);
 });
 
-test('status polling is bounded, nonoverlapping, explicit on error and stops cleanly', async () => {
-  const tasks = new Map();
-  let sequence = 0;
-  const clock = { setTimeout(callback, delay) { tasks.set(++sequence, { callback, delay }); return sequence; }, clearTimeout(id) { tasks.delete(id); } };
-  let resolve;
-  let calls = 0;
-  const statuses = [];
-  const errors = [];
-  const stop = startCadPolling(async name => {
-    assert.equal(name, 'cad_status');
-    calls++;
-    if (calls === 1) return new Promise(done => { resolve = done; });
-    if (calls === 2) return {};
-    return loaded;
-  }, status => statuses.push(status), error => errors.push(error), clock);
-  assert.equal(calls, 1);
-  assert.equal(tasks.size, 0);
-  resolve(empty); await settle();
-  assert.equal(tasks.size, 1);
-  assert.equal([...tasks.values()][0].delay, 250);
-  const runTimer = async () => { const entry = [...tasks.entries()][0]; tasks.delete(entry[0]); await entry[1].callback(); };
-  await runTimer();
-  assert.equal(statuses.at(-1), null);
-  assert.match(errors[0], /CAD_STATUS_INVALID/);
-  assert.equal([...tasks.values()][0].delay, 1000);
-  await runTimer();
-  assert.equal(statuses.at(-1), loaded);
-  assert.equal([...tasks.values()][0].delay, 250);
-  stop();
-  assert.equal(tasks.size, 0);
+test('the status stream is push-only: cad-command schedules no timer and reads no status', async () => {
+  // The old bounded poll lived here. Its premise is now the opposite: the host
+  // pushes typed frames (`cad/cad-events.ts`), and this module only admits
+  // commands. A timer or a `cad_status` read reappearing here would bring the
+  // poll back under another name.
+  const source = await readModule('cad/cad-command.ts');
+  assert.equal(source.includes('setTimeout'), false);
+  assert.equal(source.includes('setInterval'), false);
+  assert.equal(source.includes('cad_status'), false);
 });
 
 test('React command copy is narrow and only accepted input is cleared', async () => {

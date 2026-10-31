@@ -7,13 +7,14 @@
 // pointer. A live flip must never reload the document: the CAD session, the
 // command history and the open drawer all live in this same tree.
 //
-// The hook is also the writer of the layout attribute, because it is the single
-// owner of the resolved value:
+// The hook is also the **only** writer of the layout attribute, because it is the
+// single owner of the resolved value:
 //
-//   * `document.documentElement[data-layout]` — read by overlays that are
-//     portalled outside the shell (the popup layer) and by the stylesheet's one
-//     mobile guard;
-//   * `App` writes the same value on `.shell` for the shell's own rules.
+//   * `document.documentElement[data-layout]` — read by the stylesheet (every
+//     compact rule is guarded by `:root[data-layout="mobile"]`) and by the
+//     overlays that are portalled outside the shell (the popup layer). `.shell`
+//     deliberately carries no copy: two writers of one attribute is how the two
+//     can disagree.
 //
 // `initialLayoutMode` is deliberately synchronous: the first paint must already
 // have the right layout, or a phone would flash the desktop chrome before the

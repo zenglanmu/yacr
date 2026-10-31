@@ -1,3 +1,58 @@
+## 2026-11-01 Android 改为原生 `native-below` 载体（P5）；共享命令注册表、`hostProfile` 与 push 事件通道统一
+
+### 结论
+
+- **Android 不再是 wasm `dom-canvas` 载体**（ADR 0027）。`apps/app-android` 现在运行原生 Rust
+  `cad_ui_core::session::CadSession`，它持有 `cad-db`；`cad-render-wgpu` 用 **Vulkan** 呈现到 Tauri
+  WebView **之下**的 `SurfaceView`（Kotlin 在 WebView 附着后插到父容器 index 0，`setZOrderOnTop(false)`）。
+  宿主上报 `surfaceMode: "native-below"`、`documentOwner: "native"`。**wasm 会话在 Android 上从不实例化**
+  （`App.tsx` 的 `dom-canvas` transport 以 `surfaceMode` 为门）。
+- **React chrome 不分叉**：同一棵 `apps/desktop-ui` 树，`native-below` 上渲染 `.native-input`、无 DOM
+  `<canvas>`。`android` 构建从 carrier `unknown` 起步，第一份 `cad_status` 经 Tauri 后定为
+  `native-below`；`adapterOwnsData = carrier === 'dom-canvas' || !tauriPresent()`，因此 Android 的每条
+  CAD 命令都走 Tauri。`web` 构建仍从 `dom-canvas` 起步。
+- **命令注册表统一**：Android 的 IPC handler = `cad_desktop_shell::commands::register_commands()`
+  （共享 `generate_handler!` 单一来源）+ 两个 shell 报表 `canvas_session_status`/
+  `canvas_runtime_failed`。原生命令语义 = `cad_ui_core::session::wire`，没有 Android 专属命令表。
+- **wire 统一**：`cad_status` 恒带 `hostProfile { surfaceMode, documentOwner, palettesAvailable,
+  standardViews }`；`standardViews: null` = 未声明，`[]` = 已声明无可用项。载体由数据标志声明，
+  不再靠键是否存在推断。
+- **事件通道统一为 push-only**：共享 `cad_event` 通道每次 flush/帧推送一条携带**完整状态**的
+  `status-changed`；语义事件为 `command-admitted`、`command-rejected`（仅批内相邻归因）、
+  `selection-changed`、`tool-step`、`document-opened`/`document-closed`、`error-raised`、
+  `popup-changed`、`events-dropped`。**前端不再轮询 `cad_status`**；`cad_status` 只用于
+  subscribe/bootstrap 与 `events-dropped` 后的恢复。
+- **Android v1 显式上限**：打开/新建/保存/出图全部 `CadError::Unsupported`（能力布尔 `false`）、
+  无弹窗宿主（命令拒绝 `no popup host registered`）、无持久配置（`NonPersistentConfigStore`）、
+  不伪造文件身份；会话从共享核心内置 demo 图纸启动（等同桌面不带 `--open`）。指针在 tick 内按 DOM
+  分区原点平移；`fit_camera` 仍按全窗口取景（follow-up）。
+- **表面契约**：4 个 JNI 符号 `nativeSurfaceCreated/Resized/Destroyed/AssetsReady`（包
+  `dev.yacr.app`）；字体/资源从 APK 解压到 `filesDir` 后公告；**只接受 Vulkan 硬件 adapter**，软件
+  Vulkan 显式拒绝 `yacr: unsupported-gpu: software-vulkan`，无 GLES/CPU 回退。Gradle
+  `ndkVersion = "29.0.13846066"`，仓库 `fonts/` 作为 assets；`scripts/test-android-host.py` 已断言
+  新接线。
+- **证据 = 编译级，设备 NOT RUN**：只跑了 `cargo check -p app-android --target aarch64-linux-android`、
+  clippy、开发机契约测试、Kotlin 编译、`javap` JNI 符号核对。**没有设备/模拟器运行、没有 Vulkan
+  adapter、没有像素、没有旋转/前后台、没有 JNI 运行时链接**。2026-10-28 的模拟器 DOM-canvas 出图
+  证据属**已退役载体**，不得复用。
+
+### 文档
+
+- 新增 `docs/adr/0027-android-native-below-carrier.md`（决策、取代 ADR 0024 D1/D2 在 Android 的适用与
+  ADR 0023 §5 的 Android 非目标、v1 上限、证据状态、follow-up）。
+- 重写 `docs/android-host.md`；更新 `docs/architecture.md`（载体表 + `cad-db` 权威 + push 事件）、
+  `docs/build.md`、`docs/ci.md`、`README.md`、`docs/compatibility.md`。
+- **`AGENTS.md` 未改**（不属本轮 lane）。铁律 8 仍把 Android 列为 `dom-canvas` 宿主；必须由当前
+  `AGENTS.md` 的持有者修订（该文件在本轮工作树里已处于修改状态）。`CAD_IMPLEMENTATION_SPEC.md`
+  §9.1/§21 也仍写 Android NOT IMPLEMENTED，属**未同步债务**。
+
+### 本轮未做 / NOT RUN
+
+- 设备/模拟器安装与启动、Vulkan adapter 枚举、像素/截图、旋转/`onPause`/`onResume`/进程重建、
+  `System.loadLibrary` 的 JNI 运行时链接：全部 **NOT RUN**。
+- 文件（SAF）、弹窗宿主、持久配置、FIT 分区子矩形：实现层面显式不支持或未接，**不**是本轮的证据缺口。
+- `scripts/build-android-ui.sh` 仍会产出 wasm 会话产物（native 载体不加载）；清理属构建 lane 的独立改动。
+
 ## 2026-10-29 命令行拒绝只剩历史；历史面板改为向上弹出
 
 ### 结论

@@ -5,8 +5,9 @@
 > **Early development; there is no shippable product yet.** yacr is a CAD system written from
 > scratch in Rust that targets DWG/DXF drawings. The desktop UI is a **React + Tauri native host**
 > (Linux first; migrated from Slint on 2026-10-16). The Windows and macOS desktop hosts are **real
-> Tauri hosts but compile-only** (no runtime/visual acceptance); the Android/Web carriers are
-> **real but bounded**. Current
+> Tauri hosts but compile-only** (no runtime/visual acceptance); the Web carrier has bounded local
+> evidence, and the Android host is a **native `native-below` carrier with compile-level evidence
+> only** (no device run, no Vulkan adapter, no pixels). Current
 > capabilities are backed by **contract/synthetic tests plus bounded real-GPU host runs on synthetic
 > fixtures**; there is **no** validated DWG compatibility, real-drawing, cross-vendor, golden-image
 > or performance acceptance. Do not treat it as a usable or production CAD application.
@@ -49,7 +50,8 @@ cad-host                                     platform-independent host orchestra
 cad-ui-core                                  wire protocol, logical layout, CAD session, shell, i18n
   ↑
 apps/app-linux / apps/app-windows / apps/app-macos (React + Tauri desktop hosts)
-apps/app-android / apps/app-web (Tauri WebView / browser carriers)
+apps/app-android (Tauri WebView + native-below CAD session)
+apps/app-web (browser carrier, wasm dom-canvas session)
 ```
 
 **Boundaries that must hold** (see `docs/architecture.md`, `docs/core-invariants.md`):
@@ -209,9 +211,11 @@ gates above are for explicit requests and pre-release acceptance. `NOT RUN` is a
 ### Other platforms
 
 The Windows and macOS desktop hosts are implemented but **compile-only** (CI compile gates, no runtime
-acceptance); the Android/Web carriers have bounded local evidence. Packaging/release scripts remain
+acceptance); the Web carrier has bounded local evidence, while the Android native `native-below`
+carrier has **compile-level evidence only** (no device/emulator run). Packaging/release scripts remain
 retired (non-zero) and the CI release jobs are hard-disabled. See `docs/build.md`, `docs/ci.md`,
-`docs/windows-app.md` and `docs/macos-app.md` — do not treat the retired scripts as working.
+`docs/windows-app.md`, `docs/macos-app.md` and `docs/android-host.md` — do not treat the retired scripts
+as working.
 
 ## Current progress
 
@@ -223,7 +227,7 @@ evidence in `docs/validation*.md` does **not** transfer to the React/Tauri host)
 | **Linux desktop (primary, current)** | `apps/app-linux` (`yacr`) | React/Tauri chrome + native GTK/wgpu CAD partition. **Only OPEN and FIT plus native navigation are wired**; every other control is explicitly disabled with a reason. Bounded local acceptance has run: React-migration P6 gate **ACCEPT-WITH-FIXES** (hardware-Vulkan real-window smoke on a synthetic fixture), and native-Wayland W3 **ACCEPT-WITH-LIMITATIONS** (GNOME/Mutter + Quadro P620, `scale=1`) — see `docs/validation-react-linux-migration-2026-10-16.md` and `docs/validation-native-wayland-2026-10-16.md`. **Bounded local-Linux acceptance only** — not a full CAD product / cross-platform / vendor / golden / performance approval. |
 | **Windows desktop** | `apps/app-windows` (`yacr-windows`) | **NOT IMPLEMENTED** failure stub (no Tauri dependency; prints a diagnostic and exits non-zero). CI only compiles it (`windows-check`); no runnable GUI. |
 | **macOS desktop** | `apps/app-macos` (`yacr-macos`) | **Real Tauri 2 host, compile-only**: transparent WKWebView above a native CAD child `NSView` presented by wgpu/Metal. CI compiles it (`macos-check`); window/Metal/z-order/DPI/dialog/pixel behaviour is **NOT VERIFIED** and there is no packaging. |
-| **Android** | `apps/app-android` | **NOT IMPLEMENTED** placeholder (retired UI; the native entry aborts with a diagnostic). |
+| **Android** | `apps/app-android` | **Native `native-below` carrier**: Tauri WebView runs the shared React chrome, a native Rust `CadSession` owns `cad-db`, and wgpu (Vulkan) presents to a `SurfaceView` below the WebView. **Compile-level evidence only** — no device/emulator run, no Vulkan adapter, no pixels, no rotation/lifecycle, no JNI runtime link (all NOT VERIFIED). v1 has no file open/save, no popup host and no durable config; it starts from the built-in demo drawing. See `docs/android-host.md`. |
 | **Web** | `apps/app-web` | **NOT IMPLEMENTED** placeholder (retired UI; the wasm entry returns an error). |
 | **Headless CLI** | `cad-cli-tools` | Kept: opens and plots headless through the shared application path. |
 

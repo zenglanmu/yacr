@@ -32,7 +32,7 @@ npm run dev     # http://127.0.0.1:1420
 | `src/components/` | 区域组件与共享控件（TSX） |
 | `src/stacking-regression/` | 层序回归夹具，不是产品开关 |
 | `src/App.tsx` | 单一 React 树的状态编排与接线，不按本次整理拆分 |
-| `src/main.tsx`、`src/style.css`、`src/mobile.css` | 入口与共享样式 token；`mobile.css` 是移动端增量（全部由 `[data-layout="mobile"]` 守卫） |
+| `src/main.tsx`、`src/style.css`、`src/mobile.css` | 入口与共享样式 token；`mobile.css` 是移动端增量（全部由 `:root[data-layout="mobile"]` 守卫） |
 | 根目录其他共享模块 | `icons.tsx`、`context.ts`、`catalogs.ts`、`i18n.ts`、`limits.ts`、`defaults.ts`、`focus-release.ts`、`fps.ts` |
 
 新增纯逻辑优先放入对应功能目录；区域 UI 放入 `components/`。只有确实跨功能共享的基础模块
@@ -48,7 +48,8 @@ npm run dev     # http://127.0.0.1:1420
 ## 紧凑布局（≤1024 CSS px，Web / Android / 桌面宿主共用同一 bundle）
 
 宽度是唯一判据：`src/layout/use-layout-mode.ts` 订阅 `matchMedia('(max-width: 1024px)')`，
-把结果同步写到 `.shell` 与 `document.documentElement` 的 `data-layout` 上。窗口实时改变宽度即切换，
+它是 `data-layout` 的**唯一写入者**，把结果写到 `document.documentElement`（即 `<html>`）上；
+`main.shell` 不再携带该属性，所有紧凑样式都用 `:root[data-layout="mobile"]` 守卫。窗口实时改变宽度即切换，
 不重新加载文档，也不重建 `<Workspace />`（它在两种布局里处于同一位置；停靠面板与导航栏在
 `mobile.css` 里隐藏而非卸载，因此 CAD 会话不会被重挂）。
 

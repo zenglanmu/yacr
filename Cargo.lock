@@ -101,7 +101,17 @@ name = "app-android"
 version = "0.1.2"
 dependencies = [
  "android_logger",
+ "cad-desktop-shell",
+ "cad-domain",
+ "cad-engine",
+ "cad-host",
+ "cad-platform",
+ "cad-render-wgpu",
+ "cad-ui-core",
+ "jni",
  "log",
+ "ndk",
+ "raw-window-handle",
  "tauri",
  "tauri-build",
 ]

@@ -145,6 +145,32 @@ pub trait ConfigStore {
     fn persist_preference(&self, text: &str) -> CadResult<()>;
 }
 
+/// A [`ConfigStore`] for a host with **no durable location**.
+///
+/// Reads answer [`ConfigLoad::Absent`] (a first run, not an error) and persistence
+/// refuses explicitly, so the session falls back to in-memory defaults and never
+/// claims a preference was stored. This is the shared contract the desktop hosts'
+/// `ReactConfigStore::non_persistent` and the Android host use: one behaviour, not
+/// three copies.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct NonPersistentConfigStore;
+
+impl ConfigStore for NonPersistentConfigStore {
+    fn load_config(&self) -> ConfigLoad {
+        ConfigLoad::Absent
+    }
+
+    fn load_preference(&self) -> ConfigLoad {
+        ConfigLoad::Absent
+    }
+
+    fn persist_preference(&self, _text: &str) -> CadResult<()> {
+        Err(cad_domain::CadError::Unsupported(
+            "no durable preference path; preference persistence is disabled".into(),
+        ))
+    }
+}
+
 /// The physical surface the CAD canvas is mapped onto.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SurfaceMetrics {

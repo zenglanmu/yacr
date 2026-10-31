@@ -1,6 +1,9 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.app_android" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- Same mechanism as values/themes.xml: WebView-level transparency over a
+             `SurfaceView` that sits behind the window, not Tauri's unsupported window
+             `transparent` flag. See that file for why `windowIsTranslucent` is not used. -->
+        <item name="android:windowBackground">@android:color/transparent</item>
     </style>
 </resources>

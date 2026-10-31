@@ -6,15 +6,14 @@
 //! The `dom-canvas` carrier needs two things that list cannot express, and both
 //! are host policy, not shared state rules:
 //!
-//! 1. **the carrier must reach the UI**: `cad_status` gains `surfaceMode` — but
-//!    only on this host path. The typed `CadStatus` (its frozen camelCase field
-//!    set) lives in `cad-ui-core`; the narrowest injection point is therefore this
-//!    host's own `cad_status` response, which **decorates the shared command's
-//!    output** ([`cad_desktop_shell::commands::cad_status_impl`], the same
-//!    projection the IPC path runs) with one extra key. On `native-below` the
-//!    dispatcher never reaches this wrapper, so Wayland/Windows bytes are
-//!    unchanged and the field is absent (the React side defaults to
-//!    `native-below`).
+//! 1. **the carrier must reach the UI**: every `cad_status` carries a typed
+//!    `hostProfile` object (`cad_ui_core::session::HostProfile`). This host's
+//!    `cad_status` answers the shared [`WireStatus`] envelope with
+//!    [`HostProfile::dom_canvas`] plus the wasm session's descriptor; the
+//!    `native-below` path answers the shared command's own envelope with
+//!    [`HostProfile::native_below`]. The old story ("the field is present only on
+//!    this carrier and absent on native-below") is dead: every carrier names
+//!    itself in the same key.
 //! 2. **a native-session command must refuse, not pretend**: on `dom-canvas` there
 //!    is no native `CadSession`, so a command that would queue work for it is
 //!    rejected **explicitly** (a rejected promise with a stable reason) instead of
@@ -48,7 +47,7 @@
 //! against the shared registry by a test.
 
 use cad_desktop_shell::commands::CadCommandAlias;
-use cad_ui_core::session::CadStatus;
+use cad_ui_core::session::{HostProfile, WireStatus};
 use tauri::ipc::Invoke;
 
 use crate::backend::{surface_mode, SurfaceMode};
@@ -65,13 +64,13 @@ use super::ProbeShared;
 /// refusal instead of Tauri's generic "command not found" (the release asset never
 /// calls it there, so the wire of a real run is unchanged).
 ///
-/// `cad_status` is routed **only** on `dom-canvas`, because that is the one host
-/// that must decorate it with `surfaceMode`; `native-below` keeps the shared typed
-/// response byte for byte.
+/// `cad_status` is routed **only** on `dom-canvas`, because this host answers it
+/// with the `dom-canvas` `hostProfile` plus the session descriptor; `native-below`
+/// keeps the shared envelope (its own `native-below` profile, no canvas).
 pub const CANVAS_RUNTIME_FAILED_HOST_COMMAND: &str = "canvas_runtime_failed";
 
-/// The shared command this module re-implements (with one extra key) on the
-/// `dom-canvas` carrier.
+/// The shared command this module re-implements on the `dom-canvas` carrier (the
+/// typed `hostProfile` plus the optional session descriptor).
 pub const CAD_STATUS_COMMAND: &str = "cad_status";
 
 /// The shared vocabulary command, answered **empty** on `dom-canvas`.
@@ -167,33 +166,8 @@ pub fn native_session_refusal(command: &str, mode: SurfaceMode) -> Option<String
     ))
 }
 
-/// The carrier report for `cad_status`: the shared projection, the carrier, and
-/// the wasm session's own descriptor (when it has reported one).
-///
-/// `#[serde(flatten)]` keeps the frozen `CadStatus` field set and order intact and
-/// appends only the carrier keys, so an existing consumer of this payload keeps
-/// reading the same shape. A `Value` round-trip was rejected on purpose: it would
-/// reorder the keys (and `serde_json`'s map is sorted), which would make the wire
-/// difference larger than the fields this carrier actually adds.
-#[derive(Debug, serde::Serialize)]
-pub struct DomCanvasStatus {
-    #[serde(flatten)]
-    status: CadStatus,
-    /// The carrier the host runs: always [`SurfaceMode::DomCanvas`] here.
-    #[serde(rename = "surfaceMode")]
-    surface_mode: &'static str,
-    /// The wasm session's reported descriptor, or **absent** before the first
-    /// report (never a fabricated null name).
-    ///
-    /// This is the session's own report relayed unchanged — not a mirrored
-    /// document, not derived geometry, not a second `cad-db` (iron rule 8). The
-    /// host only bounds it (see [`canvas_session`]) and hands it back.
-    #[serde(rename = "canvasSession", skip_serializing_if = "Option::is_none")]
-    canvas_session: Option<CanvasSessionDescriptor>,
-}
-
-/// `cad_status` on the `dom-canvas` carrier: the real host snapshot + the carrier
-/// + the session's reported descriptor.
+/// `cad_status` on the `dom-canvas` carrier: the real host snapshot + the typed
+/// carrier profile + the session's reported descriptor.
 ///
 /// The snapshot itself is the shared command's own output, so this wrapper cannot
 /// drift from it (no duplicated projection). There is no native CAD session on
@@ -201,13 +175,20 @@ pub struct DomCanvasStatus {
 /// reports what *it* knows; document state lives in the wasm session and is not
 /// mirrored here (ADR 0024 D2). `canvasSession` is that session's own report, not
 /// a host-side document read.
+///
+/// The envelope is [`WireStatus`] (the shared definition), so this host no longer
+/// keeps a look-alike `DomCanvasStatus`: the frozen `CadStatus` fields stay first,
+/// then the always-present `hostProfile` ([`HostProfile::dom_canvas`]), then the
+/// optional `canvasSession`. The old top-level `surfaceMode` key is gone.
 #[tauri::command]
-pub fn cad_status(shared: tauri::State<'_, ProbeShared>) -> DomCanvasStatus {
-    DomCanvasStatus {
-        status: cad_desktop_shell::commands::cad_status_impl(&shared.0),
-        surface_mode: SurfaceMode::DomCanvas.wire_name(),
-        canvas_session: canvas_session::current_descriptor(),
-    }
+pub fn cad_status(
+    shared: tauri::State<'_, ProbeShared>,
+) -> WireStatus<'static, CanvasSessionDescriptor> {
+    WireStatus::owned(
+        cad_desktop_shell::commands::cad_status_impl(&shared.0),
+        HostProfile::dom_canvas(),
+        canvas_session::current_descriptor(),
+    )
 }
 
 /// `canvas_runtime_failed` command: the `dom-canvas` transport cannot draw.
@@ -324,6 +305,7 @@ pub fn invoke_handler<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send 
 mod tests {
     use super::*;
     use cad_desktop_shell::commands::COMMAND_NAMES;
+    use cad_ui_core::session::WIRE_COMMAND_NAMES;
 
     #[test]
     fn native_session_commands_refuse_only_on_dom_canvas() {
@@ -420,9 +402,16 @@ mod tests {
         // ones), so a rename in `cad-desktop-shell` breaks this test instead of
         // silently turning a refusal into a pass-through.
         for command in NATIVE_SESSION_COMMANDS {
+            // The policy list is a **subset** of the shared registry: it may decide
+            // that a shared command is native-only on this carrier, but it must
+            // never name a command the registry does not own.
+            assert!(
+                WIRE_COMMAND_NAMES.contains(command),
+                "{command} is not in the shared wire registry"
+            );
             assert!(
                 COMMAND_NAMES.contains(command),
-                "{command} is not a registered shared command"
+                "{command} is not a registered desktop command"
             );
         }
         for command in [
@@ -450,26 +439,37 @@ mod tests {
     }
 
     #[test]
-    fn the_dom_canvas_status_adds_exactly_one_key() {
+    fn the_dom_canvas_status_uses_the_typed_host_profile() {
         let base = cad_ui_core::unsupported_status(None);
         let base_json = serde_json::to_value(&base).expect("status serializes");
-        let decorated = DomCanvasStatus {
-            status: base,
-            surface_mode: SurfaceMode::DomCanvas.wire_name(),
-            canvas_session: None,
-        };
+        let profile = HostProfile::dom_canvas();
+        let decorated: WireStatus<'_, CanvasSessionDescriptor> =
+            WireStatus::new(&base, &profile, None);
         let wire = serde_json::to_value(&decorated).expect("decorated status serializes");
 
         let wire_object = wire.as_object().expect("object");
         let base_object = base_json.as_object().expect("object");
+        // Exactly one carrier key on top of the untouched shared snapshot.
         assert_eq!(wire_object.len(), base_object.len() + 1);
         for (key, value) in base_object {
             assert_eq!(wire_object.get(key), Some(value), "key {key} changed");
         }
         assert_eq!(
-            wire_object.get("surfaceMode").and_then(|v| v.as_str()),
-            Some("dom-canvas")
+            wire_object.get("hostProfile"),
+            Some(&serde_json::json!({
+                "surfaceMode": "dom-canvas",
+                "documentOwner": "wasm",
+                "palettesAvailable": true,
+                "standardViews": [],
+            }))
         );
+        // The old top-level carrier keys are gone, not merely duplicated.
+        for key in ["surfaceMode", "palettesAvailable", "standardViews"] {
+            assert!(
+                !wire_object.contains_key(key),
+                "{key} must only appear inside hostProfile: {wire}"
+            );
+        }
         // Before the first report the session key is absent, not a null name.
         assert!(
             !wire_object.contains_key("canvasSession"),
@@ -479,31 +479,29 @@ mod tests {
         // frontend validates).
         assert!(wire_object.contains_key("documentLabel"));
         assert!(wire_object.contains_key("importProgress"));
-        assert!(wire_object.contains_key("surfaceMode"));
     }
 
     #[test]
     fn the_dom_canvas_status_relays_the_session_descriptor() {
         let base = cad_ui_core::unsupported_status(None);
         let base_json = serde_json::to_value(&base).expect("status serializes");
-        let decorated = DomCanvasStatus {
-            status: base,
-            surface_mode: SurfaceMode::DomCanvas.wire_name(),
-            canvas_session: Some(CanvasSessionDescriptor {
-                label: "plan.dwg".into(),
-                batches: 2,
-                draws: 5,
-            }),
+        let descriptor = CanvasSessionDescriptor {
+            label: "plan.dwg".into(),
+            batches: 2,
+            draws: 5,
         };
+        let profile = HostProfile::dom_canvas();
+        let decorated: WireStatus<'_, CanvasSessionDescriptor> =
+            WireStatus::new(&base, &profile, Some(&descriptor));
         let wire = serde_json::to_value(&decorated).expect("decorated status serializes");
 
         let wire_object = wire.as_object().expect("object");
         let base_object = base_json.as_object().expect("object");
-        // Exactly the two carrier keys on top of the untouched shared snapshot.
+        // Exactly the carrier keys on top of the untouched shared snapshot.
         assert_eq!(
             wire_object.len(),
             base_object.len() + 2,
-            "surfaceMode + canvasSession only: {wire}"
+            "hostProfile + canvasSession only: {wire}"
         );
         for (key, value) in base_object {
             assert_eq!(wire_object.get(key), Some(value), "key {key} changed");

@@ -14,15 +14,16 @@
 // present admission as completion, retry a request, or clamp a view name to a
 // neighbouring one.
 //
-// # Carrier capability: `cad_status.standardViews`
+// # Carrier capability: `cad_status.hostProfile.standardViews`
 //
 // A carrier that has no `cad_standard_view` mapping at all (the `dom-canvas`
 // wasm session, which is 2D-only) must not offer the seven views as live buttons:
 // the click would reach the transport and throw `unsupported-runtime:
-// cad_standard_view` from a control that looked enabled. `cad_status` may
-// therefore carry an additive `standardViews: readonly string[]` — **absent**
-// keeps the historic rule (an older host, and the desktop `native-below` hosts),
-// **present** is authoritative and a key outside it is refused here, before IPC.
+// cad_standard_view` from a control that looked enabled. `hostProfile` may
+// therefore carry a `standardViews` list — `null`/absent keeps the historic rule
+// (an older host, and the desktop `native-below` hosts), an **array** is
+// authoritative (including `[]`, which declares none) and a key outside it is
+// refused here, before IPC.
 import { NO_DOCUMENT_KEY } from '../commands/commands.ts';
 import type { Translator } from '../i18n.ts';
 
@@ -111,11 +112,13 @@ export function standardViewName(view: unknown): StandardViewName | null {
  * The status of the shell as the standard-view admission rules read it.
  *
  * Structural and permissive: before the first `cad_status` answer the field may
- * be absent, and an older host may omit `loading` and the additive
- * `standardViews` capability list.
+ * be absent, and an older (pre-P1) host may omit the whole `hostProfile` block.
  */
 export interface StandardViewContext {
-  readonly status?: { readonly loading?: unknown; readonly standardViews?: readonly string[] } | null;
+  readonly status?: {
+    readonly loading?: unknown;
+    readonly hostProfile?: { readonly standardViews?: unknown } | null;
+  } | null;
   readonly documentOpen?: unknown;
 }
 
@@ -139,7 +142,9 @@ export const STANDARD_VIEW_UNAVAILABLE_KEY = 'view.standard_unavailable';
  * does not name is a view this carrier cannot execute.
  */
 function carrierRefusesStandardView(status: StandardViewContext['status'], view: unknown): boolean {
-  const declared = status?.standardViews;
+  const declared = status?.hostProfile?.standardViews;
+  // `null` and an absent profile both mean "nothing was declared": the historic
+  // allow-all rule applies. Only an array is authoritative.
   if (!Array.isArray(declared)) return false;
   // A caller that did not name a view cannot be confirmed by a bare list, so an
   // unnamed request on a declaring carrier is refused rather than guessed.

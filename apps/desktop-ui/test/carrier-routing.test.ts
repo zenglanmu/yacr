@@ -6,9 +6,9 @@
 // at startup whether it runs `native-below` (native Wayland: a native CAD session
 // under the WebView) or `dom-canvas` (X11/XWayland: the wasm session in the page,
 // `apps/app-linux/src/host/surface.rs` `native_cad_session: false`) and reports it
-// through `cad_status.surfaceMode`. A `tauri` bundle must therefore be able to
-// **change its mind** about who serves CAD data; before this contract it kept the
-// desktop vocabulary on X11 and advertised commands nothing could execute.
+// through `cad_status.hostProfile.surfaceMode`. A `tauri` bundle must therefore be
+// able to **change its mind** about who serves CAD data; before this contract it
+// kept the desktop vocabulary on X11 and advertised commands nothing could execute.
 //
 // Same conventions as the rest of `test/`: `.ts` by filename only, Node's type
 // stripping runs it, `tsc` never sees it, and every assertion is behaviour or
@@ -28,6 +28,8 @@ import { SHELL_ONLY_COMMANDS, createInvoke, invokeRoute } from '../src/host/invo
 
 const HOOK_TS = new URL('../src/commands/use-host-vocabulary.ts', import.meta.url);
 const APP_TSX = new URL('../src/App.tsx', import.meta.url);
+const EVENTS_TS = new URL('../src/cad/use-cad-events.ts', import.meta.url);
+const INVOKE_TS = new URL('../src/host/invoke.ts', import.meta.url);
 
 /** Commands that read or write CAD document data: the adapter owns them on `dom-canvas`. */
 const DATA_COMMANDS = [
@@ -49,13 +51,14 @@ const DATA_COMMANDS = [
 // ---------------------------------------------------------------------------
 
 test('a build starts on the carrier it can prove', () => {
-  // The desktop bundle cannot know before the host answers - and its first
-  // `cad_status` is the question, so guessing "adapter" would deadlock the X11
-  // host out of ever announcing itself.
+  // The desktop and Android bundles cannot know before the host answers - and
+  // their first `cad_status` is the question, so guessing "adapter" would
+  // deadlock an X11 host out of ever announcing itself (and would keep an
+  // Android native session from serving a single command).
   assert.equal(initialCarrier('tauri'), 'unknown');
-  // The two carriers whose authority is decided by the build itself.
+  assert.equal(initialCarrier('android'), 'unknown');
+  // The browser bundle has no host to ask: its authority is the build itself.
   assert.equal(initialCarrier('web'), 'dom-canvas');
-  assert.equal(initialCarrier('android'), 'dom-canvas');
 
   // Node imports the module without Vite's define: the desktop build, still
   // unproven, so nothing is routed to the wasm session yet.
@@ -74,9 +77,10 @@ test('observeCarrier selects only the exact dom-canvas spelling', () => {
   // The same report twice is not a change: a poll must not churn the chrome.
   assert.equal(store.observe('dom-canvas'), false);
 
-  // Everything else resolves to `native-below`, exactly like
-  // `cad/surface.ts`'s `surfaceModeFromShell`: near misses are not matched
-  // loosely and a missing field (an older host) is the historic carrier.
+  // Everything else resolves to `native-below`: the carrier store keeps its
+  // bootstrap collapse unchanged, and `cad/surface.ts` is the stricter reader for
+  // the chrome's own surface decision. A missing profile (a pre-P1 host) is the
+  // historic carrier.
   for (const value of ['DOM-CANVAS', 'dom-canvas ', 'dom_canvas', 'domCanvas', '',
     'native-below', null, undefined, 7, {}, []]) {
     const probe = createCarrierStore('dom-canvas');
@@ -130,26 +134,37 @@ test('the module singleton is the same state machine', () => {
 // 2. The routing table
 // ---------------------------------------------------------------------------
 
-test('every build x observed carrier x command class resolves the same way', () => {
+test('every build x observed carrier x bridge x command class resolves the same way', () => {
   for (const command of DATA_COMMANDS) {
     // A `tauri` bundle routes data natively while the carrier is unproven or
-    // native, and to the adapter the moment the host reports `dom-canvas`.
-    assert.equal(invokeRoute('tauri', command, false, 'unknown'), 'tauri', `tauri/unknown/${command}`);
-    assert.equal(invokeRoute('tauri', command, true, 'unknown'), 'tauri', `tauri/unknown/${command} (bridge)`);
-    assert.equal(invokeRoute('tauri', command, false, 'native-below'), 'tauri', `tauri/native/${command}`);
-    assert.equal(invokeRoute('tauri', command, true, 'native-below'), 'tauri', `tauri/native/${command} (bridge)`);
+    // native **and the bridge is there**...
+    assert.equal(invokeRoute('tauri', command, true, 'unknown'), 'tauri', `tauri/unknown/${command}`);
+    assert.equal(invokeRoute('tauri', command, true, 'native-below'), 'tauri', `tauri/native/${command}`);
+    // ...and to the adapter as soon as the host reports `dom-canvas`...
     assert.equal(invokeRoute('tauri', command, true, 'dom-canvas'), 'web', `tauri/dom-canvas/${command}`);
+    // ...and on every carrier when there is no bridge to call at all. Shipping a
+    // bundle whose page has no Tauri IPC is a build mistake; the adapter's named
+    // `unsupported-runtime` refusal is the only honest answer, never a fake Tauri
+    // call into a missing object.
+    for (const carrier of ['unknown', 'native-below', 'dom-canvas']) {
+      assert.equal(invokeRoute('tauri', command, false, carrier), 'web', `tauri/${carrier}/${command} (no bridge)`);
+    }
 
-    // The browser and the Android carrier never answer CAD data out of Tauri,
-    // whatever was reported.
-    for (const runtime of ['web', 'android']) {
-      for (const carrier of ['dom-canvas', 'native-below', 'unknown']) {
-        assert.equal(
-          invokeRoute(runtime, command, true, carrier),
-          'web',
-          `${runtime}/${carrier}/${command}`,
-        );
-      }
+    // Android is the same client as `tauri` once its host reports a carrier: the
+    // native host owns the document, so the data commands are its own. The
+    // `dom-canvas` row stays possible for a host that reports it (the adapter
+    // then owns the data), and a bridge-less Android bundle can only refuse.
+    assert.equal(invokeRoute('android', command, true, 'unknown'), 'tauri', `android/unknown/${command}`);
+    assert.equal(invokeRoute('android', command, true, 'native-below'), 'tauri', `android/native/${command}`);
+    assert.equal(invokeRoute('android', command, true, 'dom-canvas'), 'web', `android/dom-canvas/${command}`);
+    for (const carrier of ['unknown', 'native-below', 'dom-canvas']) {
+      assert.equal(invokeRoute('android', command, false, carrier), 'web', `android/${carrier}/${command} (no bridge)`);
+    }
+
+    // The browser bundle never answers CAD data out of Tauri, whatever was
+    // reported and whether or not a bridge is somehow present.
+    for (const present of [true, false]) {
+      assert.equal(invokeRoute('web', command, present, 'dom-canvas'), 'web', `web/dom-canvas/${command}`);
     }
   }
 
@@ -158,20 +173,22 @@ test('every build x observed carrier x command class resolves the same way', () 
     // The two reports prefer an existing bridge on every carrier the adapter
     // owns data on - an Android WebView, and an X11 host (which is where the
     // marker line and exit code live).
-    assert.equal(invokeRoute('android', command, true, 'dom-canvas'), 'tauri', `android/${command}`);
-    assert.equal(invokeRoute('tauri', command, true, 'dom-canvas'), 'tauri', `tauri/${command}`);
+    assert.equal(invokeRoute('android', command, true, 'dom-canvas'), 'tauri', `android/dom-canvas/${command}`);
+    assert.equal(invokeRoute('android', command, true, 'native-below'), 'tauri', `android/native/${command}`);
+    assert.equal(invokeRoute('tauri', command, true, 'dom-canvas'), 'tauri', `tauri/dom-canvas/${command}`);
     // ...and stay on the adapter when there is no bridge to report to.
     assert.equal(invokeRoute('web', command, false, 'dom-canvas'), 'web', `web/${command}`);
     assert.equal(invokeRoute('tauri', command, false, 'dom-canvas'), 'web', `tauri/${command} (no bridge)`);
-    // `native-below` is untouched: Tauri for everything, bridge or not.
-    assert.equal(invokeRoute('tauri', command, false, 'native-below'), 'tauri', `native/${command}`);
+    assert.equal(invokeRoute('android', command, false, 'unknown'), 'web', `android/${command} (no bridge)`);
+    // `native-below` on a bridged `tauri` host is untouched: Tauri for everything.
+    assert.equal(invokeRoute('tauri', command, true, 'native-below'), 'tauri', `native/${command}`);
   }
 });
 
-test('a native-below carrier routes exactly what it always did', () => {
+test('a bridged native carrier routes exactly what it always did', () => {
   // Regression guard for the rule "no behaviour change on native-below": the
-  // default carrier of a `tauri` call is the build's initial one, so an
-  // unobserved call still reaches the native host.
+  // default carrier of a `tauri` call is the build's initial (`unknown`), which
+  // a bridged host answers the same way as an explicit `native-below` report.
   for (const command of [...DATA_COMMANDS, ...SHELL_ONLY_COMMANDS]) {
     assert.equal(invokeRoute('tauri', command, true), invokeRoute('tauri', command, true, 'native-below'));
     assert.equal(invokeRoute('tauri', command, true), 'tauri', command);
@@ -193,9 +210,9 @@ test('the first cad_status reaches the native host, every later one the adapter'
     tauri: async (command) => {
       calls.push(['tauri', command]);
       // What `apps/app-linux`'s `cad_status` answers on the `dom-canvas` carrier.
-      return { surfaceMode: 'dom-canvas', documentLabel: null };
+      return { hostProfile: { surfaceMode: 'dom-canvas' }, documentLabel: null };
     },
-    web: { invoke: async (command) => { calls.push(['web', command]); return { surfaceMode: 'dom-canvas' }; } },
+    web: { invoke: async (command) => { calls.push(['web', command]); return { hostProfile: { surfaceMode: 'dom-canvas' } }; } },
     tauriPresent: () => true,
     carrier: () => carrier.now(),
   });
@@ -204,7 +221,7 @@ test('the first cad_status reaches the native host, every later one the adapter'
   assert.deepEqual(calls, [['tauri', 'cad_status']]);
   // The chrome feeds the answer into the state machine (`App.tsx`), which is the
   // one place the flip can come from.
-  assert.equal(carrier.observe(first.surfaceMode), true);
+  assert.equal(carrier.observe(first.hostProfile?.surfaceMode), true);
   assert.equal(carrier.usesWasmCad(), true);
 
   await invoke('cad_status');
@@ -240,8 +257,8 @@ test('a native-below answer keeps the desktop transport for the whole session', 
     carrier: () => carrier.now(),
   });
   const first = await invoke('cad_status');
-  // An older host omits the field (and a native host does not add it either).
-  assert.equal(carrier.observe(first.surfaceMode), true);
+  // A pre-P1 host omits the profile (a current native host names `native-below`).
+  assert.equal(carrier.observe(first.hostProfile?.surfaceMode), true);
   assert.equal(carrier.usesWasmCad(), false);
   await invoke('cad_status');
   await invoke('cad_commands');
@@ -272,17 +289,94 @@ test('a browser bundle never routes data to Tauri, even if a status said native-
   ]);
 });
 
+test('an Android native session bootstraps natively and stays native', async () => {
+  // P5: the Android host runs a native Rust `CadSession` and reports
+  // `surfaceMode: "native-below"`, `documentOwner: "native"`. Its first
+  // `cad_status` is the same bootstrap a desktop host performs - and because the
+  // answer is `native-below`, the native transport is kept for the session.
+  const calls = [];
+  const carrier = createCarrierStore('unknown');
+  const invoke = createInvoke({
+    runtime: 'android',
+    tauri: async (command) => {
+      calls.push(['tauri', command]);
+      return command === 'cad_status'
+        ? { hostProfile: { surfaceMode: 'native-below', documentOwner: 'native' } }
+        : { accepted: true };
+    },
+    web: { invoke: async (command) => { calls.push(['web', command]); return {}; } },
+    tauriPresent: () => true,
+    carrier: () => carrier.now(),
+  });
+
+  // The bootstrap command (and any command before the first answer) is native.
+  assert.equal(invokeRoute('android', 'cad_command', true, carrier.now()), 'tauri');
+  const first = await invoke('cad_status');
+  assert.deepEqual(calls, [['tauri', 'cad_status']]);
+  assert.equal(carrier.observe(first.hostProfile?.surfaceMode), true);
+  assert.equal(carrier.now(), 'native-below');
+
+  // `cadEventRoute` is this very table asked about `cad_status`, so the event
+  // stream is native before and after the answer: the carrier never flips.
+  assert.equal(invokeRoute('android', 'cad_status', true, 'unknown'), 'tauri');
+  assert.equal(invokeRoute('android', 'cad_status', true, carrier.now()), 'tauri');
+
+  await invoke('cad_command', { command: 'FIT' });
+  await invoke('probe_input', { input: { kind: 'pointer_down', sequence: 1 } });
+  await invoke('canvas_session_status', { label: 'plan.dwg' });
+  assert.deepEqual(calls, [
+    ['tauri', 'cad_status'],
+    ['tauri', 'cad_command'],
+    ['tauri', 'probe_input'],
+    ['tauri', 'canvas_session_status'],
+  ]);
+});
+
+test('the event transport is the same routing table, android included', async () => {
+  // `cadEventRoute` must stay one delegation to `invokeRoute`, otherwise the
+  // Android bootstrap could subscribe to the wasm session while its commands go
+  // to the native host.
+  const source = await readFile(INVOKE_TS, 'utf8');
+  assert.match(
+    source,
+    /export function cadEventRoute\(\): InvokeRoute \{\n\s+return invokeRoute\(RUNTIME, 'cad_status', isTauri\(\), carrierNow\(\)\);/,
+  );
+});
+
+test('a bridgeless android bundle cannot serve a command', async () => {
+  // The explicit refusal path: no Tauri bridge means there is no host to ask, so
+  // the adapter answers - with `unsupported-runtime: cad_command` in a real page,
+  // never by calling the missing bridge.
+  const calls = [];
+  const invoke = createInvoke({
+    runtime: 'android',
+    tauri: async (command) => { calls.push(['tauri', command]); return {}; },
+    web: { invoke: async (command) => { calls.push(['web', command]); return {}; } },
+    tauriPresent: () => false,
+    carrier: () => 'unknown',
+  });
+  await invoke('cad_status');
+  await invoke('cad_command', { command: 'FIT' });
+  assert.deepEqual(calls, [
+    ['web', 'cad_status'],
+    ['web', 'cad_command'],
+  ]);
+});
+
 // ---------------------------------------------------------------------------
 // 4. The chrome's reaction: a flip reloads the vocabulary
 // ---------------------------------------------------------------------------
 
 test('a carrier flip reloads the command vocabulary and the alias table', async () => {
   const app = await readFile(APP_TSX, 'utf8');
+  const events = await readFile(EVENTS_TS, 'utf8');
   const hook = await readFile(HOOK_TS, 'utf8');
 
-  // Every received status feeds the state machine, from the poll that receives it
-  // (never from a render pass).
-  assert.match(app, /observeCarrier\(reportedSurfaceMode\(\{ status: next \}\)\)/);
+  // Every received status feeds the state machine from the one subscription
+  // (`cad/use-cad-events.ts`), exactly once per status frame — never from a
+  // render pass and never from a poll.
+  assert.match(events, /observeCarrier\(reportedSurfaceMode\(\{ status: frame\.status \}\)\)/);
+  assert.match(app, /useCadEvents\(/);
 
   // The chrome reads the vocabulary through the hook (which owns the retry, the
   // in-flight promise and the carrier subscription).

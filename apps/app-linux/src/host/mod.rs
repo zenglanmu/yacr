@@ -78,6 +78,18 @@ pub(crate) use cad_desktop_shell::state::lock;
 pub use cad_desktop_shell::state::new_shared;
 pub use cad_desktop_shell::state::{ProbeShared, Shared, ShellPopupHost, ShellTelemetry};
 
+/// The frozen `cad_status` snapshot for in-crate evidence drivers.
+///
+/// The IPC command now answers the `WireStatus` envelope (frozen fields plus the
+/// typed `hostProfile`); evidence code inspects the frozen `CadStatus` fields
+/// directly, so it reads the same shared projection the command wraps instead of
+/// unwrapping the envelope at every call site.
+pub(crate) fn cad_status_snapshot(
+    shared: tauri::State<'_, ProbeShared>,
+) -> cad_ui_core::session::CadStatus {
+    cad_desktop_shell::commands::cad_status_impl(&shared.0)
+}
+
 pub use init::init;
 pub use options::{
     LaunchOptions, ANIMATION_STEP, FRAME_INTERVAL, INITIAL_HEIGHT, INITIAL_WIDTH, WEBVIEW_LABEL,
@@ -85,8 +97,8 @@ pub use options::{
 };
 pub use popup::PopupAck;
 // The host's own `invoke_handler`: the shared command list plus the `dom-canvas`
-// seam (`surfaceMode` on `cad_status`, the runtime refusal channel and the
-// explicit native-session refusals). See [`dispatch`].
+// seam (the typed `hostProfile` on `cad_status`, the runtime refusal channel and
+// the explicit native-session refusals). See [`dispatch`].
 pub use dispatch::invoke_handler;
 // What the resolved `surfaceMode` may construct on the native side (ADR 0024
 // D1/D2). One pure value, read by `init` and `tick`.

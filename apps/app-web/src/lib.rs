@@ -197,6 +197,9 @@ pub mod platform;
 /// host.
 pub mod capability;
 
+/// The cad-event transport (`cad_subscribe`, per-export flush).
+pub mod events;
+
 /// The **host-agnostic shell surface**: `shell_status`/`shell_commands`/
 /// `shell_aliases`/`shell_command`, i.e. the `cad_status` snapshot and command
 /// vocabulary the shared React chrome (`apps/desktop-ui`) polls, served without

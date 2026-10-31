@@ -114,9 +114,9 @@ test('a kick while a chain runs continues it instead of starting a second one', 
 });
 
 test('a kick cannot clear the spin guard of a chain that is already running', () => {
-  // The page's status poll notices every presented frame, so a "kick on change"
-  // arrives continuously while a runaway session presents: if that reset the step
-  // budget the bound below would never be reached.
+  // The input lane pumps on every forwarded event, so a kick can arrive
+  // continuously while a runaway session presents: if that reset the step budget
+  // the bound below would never be reached.
   const module = stubModule(Array.from({ length: 40 }, () => true));
   const env = stubEnv();
   const loop = createFrameLoop({ module, env, maxSteps: 4 });

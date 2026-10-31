@@ -58,7 +58,7 @@
 | `web-build` | build.yml | `ubuntu-latest` | 安装钉住版本的 wasm-bindgen CLI（预编译 release + SHA-256 + `Cargo.lock` 对照）→ `bash scripts/build-web.sh` → 上传 `web-dist` artifact |
 | `web-smoke` | build.yml | `ubuntu-latest` | 下载 `web-dist` → `scripts/serve-web.py` → Playwright Chromium 打开页面，断言 `start: ok` / `target` / `physical` / `batches` / `draws` / `presented`；**SwiftShader 软件渲染**，非 GPU/像素证据 |
 | `web-deploy` | build.yml | `ubuntu-latest` | **仅 `v*` tag 或手工 dispatch**；`needs: web-build`，下载 `web-ui-dist`（`apps/app-web/dist-ui`）后 `scripts/deploy-cloudflare-pages.sh`（`SKIP_BUILD=1`、`BUNDLE_KIND=ui`）发布到 Cloudflare Pages |
-| `android-check` | core.yml | 能力相关（默认 SKIP） | `bash scripts/build-android-ui.sh`（wasm 会话 + `YACR_RUNTIME=android` chrome，因为 `tauri::generate_context!` 会内嵌 `frontendDist`）→ `cargo check --target aarch64-linux-android -p app-android --locked`（**真实 Android 宿主**的编译门禁；不跑 Gradle、不建 APK、不跑设备） |
+| `android-check` | core.yml | 能力相关（默认 SKIP） | `bash scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome bundle，因为 `tauri::generate_context!` 会内嵌 `frontendDist`；脚本目前仍一并产出 wasm 产物，`native-below` 载体不加载）→ `cargo check --target aarch64-linux-android -p app-android --locked`（**真实 Android 宿主 / 原生 `native-below` 载体**的编译门禁；不跑 Gradle、不建 APK、不跑设备） |
 
 `android-check` 是 capability-gated（`vars.ANDROID_CI_ENABLED`），`web-deploy` 是
 **event-gated**（`github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')`）；
@@ -78,10 +78,12 @@ Windows MSVC `clippy`/`check`/release `build`、MinGW GNU release `build`、`app
 
 `android-apk`、`android-release`、`linux-release`、`windows-release`、`macos-release`。
 
-含义：**Android 宿主自 2026-10-28 起重新是真实宿主**（`apps/app-android` = Tauri 2 WebView 载体 +
-wasm `dom-canvas` 会话），但 CI 仍**不**构建/签名/发布 APK——`android-apk`/`android-release` 保持硬禁用
+含义：**Android 宿主自 2026-10-28 起重新是真实宿主，2026-11-01 起是原生 `native-below` 载体**
+（`apps/app-android` = Tauri 2 WebView + 原生 `CadSession`/wgpu Vulkan → `SurfaceView`，ADR 0027；
+wasm 会话不实例化），但 CI 仍**不**构建/签名/发布 APK——`android-apk`/`android-release` 保持硬禁用
 （无签名密钥、无商店路径），APK 由本地 `scripts/build-android.sh` 产出；`android-check` 是
-capability-gated 的编译门禁。macOS GUI 仍是显式 NOT IMPLEMENTED 占位；Windows 宿主 2026-10-23 起已实现，
+capability-gated 的编译门禁。macOS 宿主是真实 Tauri 宿主，但只有 CI 编译门禁（无打包/签名，
+视觉/运行时 NOT VERIFIED）；Windows 宿主 2026-10-23 起已实现，
 `windows-check` 只是**编译门禁**（≠运行验收），`windows-release` 仍硬禁用。**Web job 已不在退役
 列表**（2026-10-25）：`web-build`/`web-smoke` 是必需的验证 job，`web-deploy` 是 event-gated 的真实
 发布 job（`secrets.…` + `v*` tag/dispatch）；`scripts/deploy-cloudflare-pages.sh` 也是真实发布入口，
@@ -119,9 +121,11 @@ runner 上恰好存在的 CLI。**本地** bundle 构建（`scripts/build-web.sh
 - 5 个退役 job：**永远不会**在受支持配置下运行（硬禁用）。
 - **CI 上的真实 GPU / 黄金图 / 浏览器矩阵 / Android 真机**：未运行。GitHub 托管 runner 无 GPU，
   软件渲染不能作为真实 GPU 证据。
-- **Android 设备**：CI **没有**设备/模拟器 job（`android-check` 只编译）。本地模拟器
-  （x86_64 + `-gpu swiftshader_indirect`）的一次有界运行记录在 `docs/android-host.md`；
-  它**不是**真机、真实 GPU 或像素验收。
+- **Android 设备**：CI **没有**设备/模拟器 job（`android-check` 只编译）。**2026-11-01 的
+  `native-below` 载体（P5）只有编译级证据**（`cargo check`/clippy/开发机契约测试/Kotlin 编译/`javap`
+  JNI 符号核对），**没有**安装、启动、Vulkan adapter、像素、旋转/前后台或 JNI 运行时链接记录。
+  2026-10-28 的模拟器（x86_64 + `-gpu swiftshader_indirect`）出图记录属于**已退役的 `dom-canvas`
+  载体**，不得作为 native 载体的证据；见 `docs/android-host.md` §8/§10。
 - **响应式 chrome：构建/发布已接线，*验收* 仍未接线**：`web-build` 现在同时构建
   `scripts/build-web-ui.sh`（→ `apps/app-web/dist-ui`），`web-deploy` 发布该 artifact；但
   `scripts/web-ui-smoke.cjs`（Chromium + SwiftShader 的布局/DOM 套件）与

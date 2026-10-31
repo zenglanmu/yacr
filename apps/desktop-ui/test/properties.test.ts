@@ -223,8 +223,10 @@ test('the typed PROPERTIES selector is chrome-local and never reaches the router
 
 test('Ctrl+1 toggles the palette after the defaultPrevented guard', async () => {
   const app = await readModule('App.tsx');
+  const runner = await readModule('layout/shell-shortcuts.ts');
   assert.ok(app.includes("event.key === '1'"));
-  assert.ok(app.includes('setPropertiesOpen(value => !value)'));
+  assert.ok(app.includes("runShortcut('properties')"));
+  assert.ok(runner.includes('setPropertiesOpen(value => !value)'));
   assert.ok(
     app.indexOf("event.key === '1'") > app.indexOf('event.defaultPrevented'),
     'a webview-default chord must win before Ctrl+1 is claimed',

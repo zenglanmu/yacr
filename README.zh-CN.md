@@ -4,8 +4,9 @@
 
 > **项目仍处于开发搭建阶段，尚无可交付的产品。** yacr 是一个用 Rust 从零实现的 CAD 系统，
 > 目标是打开 DWG/DXF 图纸。桌面 UI 是 **React + Tauri 原生宿主**（Linux 优先；2026-10-16 从 Slint
-> 迁移）。Windows/macOS 桌面宿主与 Android/Web UI 当前是**显式 NOT IMPLEMENTED 占位**，不是可运行
-> 产品。当前能力以**契约/合成测试 + 合成夹具上的有界真实 GPU 宿主运行**为证据；尚未完成任何已验收的
+> 迁移）。Windows/macOS 是真实 Tauri 宿主但只有编译/后端合同证据；Android 是原生 `native-below`
+> 宿主（仅编译级证据，设备 NOT VERIFIED）；Web 的 wasm 会话有有界本地 smoke 证据。当前能力以
+> **契约/合成测试 + 合成夹具上的有界真实 GPU 宿主运行**为证据；尚未完成任何已验收的
 > DWG 兼容性、真实图纸、vendor、golden 图像或性能验收。请勿把它当作可用或生产级的 CAD 软件。
 >
 > **范围变更**：用户批注（annotation）已于 2026-10-05 整体移除，本项目聚焦**查看 + 测量**；
@@ -178,8 +179,9 @@ cargo test --workspace --locked -- --test-threads=1   # GPU/CLI 用例串行跑
 
 ### 其他平台
 
-Windows/macOS/Android/Web 本轮 **NOT IMPLEMENTED**；其构建/打包/部署脚本非零失败（已退役），CI 发布
-job 已硬禁用。当前真实状态见 `docs/build.md` 与 `docs/ci.md`——**不要**把已退役脚本当作可用流程。
+Windows/macOS 为真实宿主但仅编译/合同证据；Android 为原生 `native-below` 载体（设备 NOT VERIFIED）；
+Web 的 wasm 会话真实、浏览器 smoke 为 SwiftShader 冒烟。发布/打包 job 多数已退役并硬禁用；当前真实
+状态见 `docs/build.md` 与 `docs/ci.md`——**不要**把已退役脚本当作可用流程。
 
 ## 现有进度
 
@@ -191,7 +193,7 @@ job 已硬禁用。当前真实状态见 `docs/build.md` 与 `docs/ci.md`——*
 | **Linux 桌面（首选，当前）** | `apps/app-linux`（`yacr`） | React/Tauri chrome + 原生 GTK/wgpu CAD 分区。**仅 OPEN 与 FIT + 原生导航接线**，其余控件一律显式禁用并标注原因。已做有界本地验收：React 迁移 P6 gate **ACCEPT-WITH-FIXES**（合成夹具上的硬件 Vulkan 真实窗口 smoke）、原生 Wayland W3 **ACCEPT-WITH-LIMITATIONS**（GNOME/Mutter + Quadro P620、`scale=1`）——见 `docs/validation-react-linux-migration-2026-10-16.md` 与 `docs/validation-native-wayland-2026-10-16.md`。**仅有界本地 Linux 验收**，**不是**完整 CAD 产品/跨平台/vendor/golden/性能验收。 |
 | **Windows 桌面** | `apps/app-windows`（`yacr-windows`） | **NOT IMPLEMENTED** 失败桩（无 Tauri 依赖；打印诊断并非零退出）。CI 只编译（`windows-check`）；无可运行 GUI。 |
 | **macOS 桌面** | `apps/app-macos`（`yacr-macos`） | **NOT IMPLEMENTED** 失败桩。CI 只编译（`macos-check`）；无可运行 GUI。 |
-| **Android** | `apps/app-android` | **NOT IMPLEMENTED** 占位（UI 已退役；原生入口打印诊断后 abort）。 |
+| **Android** | `apps/app-android` | **原生 `native-below` 载体**：Tauri WebView 跑共享 React chrome，原生 Rust `CadSession` 拥有 `cad-db`，wgpu(Vulkan) 呈现到 WebView 下方的 `SurfaceView`。**仅编译级证据**——无设备/模拟器运行、无 Vulkan adapter、无像素/旋转/生命周期、无 JNI 运行时链接（全部 NOT VERIFIED）。v1 无开图/保存、无 popup host、无持久配置，从内置 demo 图纸启动。见 `docs/android-host.md`。 |
 | **Web** | `apps/app-web` | **NOT IMPLEMENTED** 占位（UI 已退役；wasm 入口返回错误）。 |
 | **无头 CLI** | `cad-cli-tools` | 保留：经共享应用路径无头打开/出图。 |
 

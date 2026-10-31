@@ -1,12 +1,12 @@
 // The host-reported pixel carrier for the CAD partition (ADR 0024 D1/D3).
 //
 // There are two **modelled** carriers and the React tree never forks by
-// platform: the host reports a `surfaceMode` data flag and this module is the
-// only place that reads it. `native-below` (Linux native Wayland, Windows) is
-// today's compositing: the host puts its own wgpu surface under this WebView and
-// `.native-input` paints nothing. `dom-canvas` (the staged X11/XWayland and
-// browser path, **not implemented yet**) instead draws into a `<canvas>` inside
-// this same tree, so no second native surface exists.
+// platform: the host reports `cad_status.hostProfile.surfaceMode` and this module
+// is the only place that reads it. `native-below` (Linux native Wayland, Windows)
+// is today's compositing: the host puts its own wgpu surface under this WebView
+// and `.native-input` paints nothing. `dom-canvas` (the staged X11/XWayland and
+// browser path) instead draws into a `<canvas>` inside this same tree, so no
+// second native surface exists.
 //
 // The fallback policy is the same as every other optional host field the chrome
 // reads (`shell.status?.crosshair`): a missing field is **not** a capability
@@ -24,11 +24,25 @@
 /** The carrier the host reported, as this chrome models it. */
 export type SurfaceMode = 'native-below' | 'dom-canvas';
 
+/**
+ * What [`surfaceModeFromShell`] read: a modelled carrier, or an explicit
+ * `unknown` for a profile that carries a value outside the wire enum.
+ *
+ * `unknown` is deliberately not collapsed into `native-below`: a value the
+ * chrome does not understand is not evidence for the historic carrier, so the
+ * reader says so and lets its caller decide (the parser already rejects such a
+ * value on the validated path; this state exists for raw/unvalidated harnesses).
+ */
+export type SurfaceModeReading = SurfaceMode | 'unknown';
+
 /** The host composites its own surface below this DOM tree. */
 export const SURFACE_MODE_NATIVE_BELOW: SurfaceMode = 'native-below';
 
 /** The WebView composes the pixels itself, inside a DOM `<canvas>`. */
 export const SURFACE_MODE_DOM_CANVAS: SurfaceMode = 'dom-canvas';
+
+/** A present-but-unrecognised `hostProfile.surfaceMode` (never a fallback). */
+export const SURFACE_MODE_UNKNOWN: SurfaceModeReading = 'unknown';
 
 /** One `dom-canvas` session's drawing identity, as relayed by the host. */
 export interface CanvasSessionReport {
@@ -72,58 +86,82 @@ function statusOf(shell: unknown): Record<string, unknown> | null {
 }
 
 /**
- * The `surfaceMode` string the host reported, verbatim — or `undefined`.
+ * The `hostProfile` block of a shell state, when the host sent one.
+ *
+ * Accepts either the chrome's shell value (`{ status }`) or the raw wire status
+ * itself, because both are passed by callers: `App.tsx` reads the status before
+ * it is wrapped, while the regions read the shared shell value. One lookup keeps
+ * every carrier reader on the same object.
+ */
+function hostProfileOf(shell: unknown): Record<string, unknown> | null {
+  const outer = recordOf(shell);
+  if (outer === null) return null;
+  const direct = recordOf(outer.hostProfile);
+  if (direct !== null) return direct;
+  const status = recordOf(outer.status);
+  return status === null ? null : recordOf(status.hostProfile);
+}
+
+/**
+ * The `hostProfile.surfaceMode` string the host reported, verbatim — or
+ * `undefined`.
  *
  * This is the raw wire value, not a decision: `"dom-canvas"` is the only spelling
- * a carrier may use, and an older host simply has no field. It exists as its own
- * function because two readers need the *reported* value rather than the
- * collapsed one: [`surfaceModeFromShell`] (which mode this chrome models) and
- * `host/runtime.ts`'s carrier state (who owns the CAD document). Both read it
- * here, so they can never disagree about what the host said.
+ * a carrier may use, and an older (pre-P1) host simply has no `hostProfile` block.
+ * It exists as its own function because two readers need the *reported* value
+ * rather than the collapsed one: [`surfaceModeFromShell`] (which mode this chrome
+ * models) and `host/runtime.ts`'s carrier state (who owns the CAD document). Both
+ * read it here, so they can never disagree about what the host said.
  */
 export function reportedSurfaceMode(shell: unknown): string | undefined {
-  const value = statusOf(shell)?.surfaceMode;
+  const value = hostProfileOf(shell)?.surfaceMode;
   return typeof value === 'string' ? value : undefined;
 }
 
 /**
  * The carrier named by the host shell state.
  *
- * Only the exact reported string `"dom-canvas"` selects the in-DOM carrier.
- * Everything else — a missing `status`, a missing `surfaceMode` (an older host),
- * or an unrecognised value — resolves to `native-below`: a new mode must add its
- * own branch here (and its own carrier) rather than be inferred from a partial
- * match or a platform hint.
+ * Only the exact reported string `"dom-canvas"` selects the in-DOM carrier, and
+ * only the exact `"native-below"` names the native one. The fallback is reserved
+ * for *absence*: no status yet, no `hostProfile` block (a pre-P1 payload), or a
+ * profile without the key. A value the host **did** send but the chrome does not
+ * recognise resolves to [`SURFACE_MODE_UNKNOWN`], never to `native-below` — a
+ * new mode must add its own branch here (and its own carrier) rather than be
+ * inferred from a near miss or a platform hint.
  */
-export function surfaceModeFromShell(shell: unknown): SurfaceMode {
-  return reportedSurfaceMode(shell) === SURFACE_MODE_DOM_CANVAS
-    ? SURFACE_MODE_DOM_CANVAS
-    : SURFACE_MODE_NATIVE_BELOW;
+export function surfaceModeFromShell(shell: unknown): SurfaceModeReading {
+  const profile = hostProfileOf(shell);
+  if (profile === null) return SURFACE_MODE_NATIVE_BELOW;
+  const value = profile.surfaceMode;
+  if (value === undefined) return SURFACE_MODE_NATIVE_BELOW;
+  if (value === SURFACE_MODE_DOM_CANVAS) return SURFACE_MODE_DOM_CANVAS;
+  if (value === SURFACE_MODE_NATIVE_BELOW) return SURFACE_MODE_NATIVE_BELOW;
+  return SURFACE_MODE_UNKNOWN;
 }
 
 /**
  * Whether the docked palettes (layers, properties, diagnostics) exist on the
  * carrier the shell reported.
  *
- * `palettesAvailable` is the one carrier flag, and it is a **capability the
- * carrier reports**, not a function of the carrier's name: the `dom-canvas` session
- * is the real desktop session (layers, selection, settings, diagnostics), so the
- * hosts that run it report `true`, and a `native-below` host keeps reporting
- * nothing at all. The reading is deliberately absence-friendly: an absent flag (an
- * older host, no host answer yet) keeps the palettes — "as today" is the default,
- * never a guessed removal — and only an explicit `false` hides them. This helper is
- * the one reading of that flag: every palette affordance — the ribbon entries, the
+ * `hostProfile.palettesAvailable` is the one carrier flag, and it is a
+ * **capability the carrier reports**, not a function of the carrier's name: the
+ * `dom-canvas` session is the real desktop session (layers, selection, settings,
+ * diagnostics), so the hosts that run it report `true`. The reading is
+ * deliberately absence-friendly: an absent profile or key (a pre-P1 host, no host
+ * answer yet) keeps the palettes — "as today" is the default, never a guessed
+ * removal — and only an explicit `false` hides them. This helper is the one
+ * reading of that flag: every palette affordance — the ribbon entries, the
  * status-bar chips, the workspace panels and the nav-rail toggles — asks it, so a
  * carrier without the palettes hides all of them instead of leaving a button that
  * toggles a panel which is never rendered.
  *
  * `shell` is either the chrome's shell value or the raw wire status
- * (`cad_status`): both carry the flag under the same name, and `App.tsx` passes the
- * status so the flag is read exactly once, at the point it becomes
+ * (`cad_status`): [`hostProfileOf`] accepts both, and `App.tsx` passes the status
+ * so the flag is read exactly once, at the point it becomes
  * `ShellValue.palettesAvailable`.
  */
 export function palettesOffered(shell: unknown): boolean {
-  return recordOf(shell)?.palettesAvailable !== false;
+  return hostProfileOf(shell)?.palettesAvailable !== false;
 }
 
 /**

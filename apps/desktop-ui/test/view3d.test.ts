@@ -197,15 +197,20 @@ test('a declared carrier capability list decides which standard views are live',
   // `[]` is an affirmative "this carrier has no standard views" (the dom-canvas
   // wasm session): every view is refused, and with its own reason — the carrier
   // limitation, not the "no drawing is open" sentence (a drawing *is* open there).
-  const noViews = { ...loaded, standardViews: [] };
+  const noViews = { ...loaded, hostProfile: { standardViews: [] } };
   for (const view of EXPECTED_VIEWS) {
     assert.equal(standardViewAvailable({ status: noViews, documentOpen: true }, view), false, view);
     assert.equal(standardViewUnavailableReasonKey({ status: noViews, documentOpen: true }, view), STANDARD_VIEW_UNAVAILABLE_KEY, view);
   }
   assert.notEqual(STANDARD_VIEW_UNAVAILABLE_KEY, NO_DOCUMENT_KEY);
   assert.notEqual(STANDARD_VIEW_UNAVAILABLE_KEY, 'command.unsupported');
+  // A `null` list is the declared "nothing was declared" answer and keeps the
+  // historic allow-all rule, exactly like an absent profile.
+  const nullViews = { ...loaded, hostProfile: { standardViews: null } };
+  assert.equal(standardViewAvailable({ status: nullViews, documentOpen: true }, 'top'), true);
+  assert.equal(standardViewUnavailableReasonKey({ status: nullViews, documentOpen: true }, 'top'), 'command.unsupported');
   // A list that names the view keeps it live; a key outside it is refused.
-  const someViews = { ...loaded, standardViews: ['top', 'isometric'] };
+  const someViews = { ...loaded, hostProfile: { standardViews: ['top', 'isometric'] } };
   assert.equal(standardViewAvailable({ status: someViews, documentOpen: true }, 'top'), true);
   assert.equal(standardViewAvailable({ status: someViews, documentOpen: true }, 'isometric'), true);
   assert.equal(standardViewAvailable({ status: someViews, documentOpen: true }, 'front'), false);

@@ -167,10 +167,17 @@ def check(root: pathlib.Path) -> int:
     # child HWND) and `app-macos` the macOS host (Tauri/WKWebView + native CAD
     # child NSView): like `app-linux`, both consume the shared command/state
     # layer, so the edge is required rather than merely allowed.
+    #
+    # `app-android` is the Android `native-below` carrier (P5): the native
+    # `CadSession` owns `cad-db`, so its CAD commands (`cad_status`,
+    # `cad_command`, the settings/layers reads, `probe_input`) are served by the
+    # same shared registry — the edge is required, not optional. The JNI/NDK
+    # bindings stay in that app (the `cad-*` platform-leak rule below).
     require_dependency("cad-desktop-shell", "cad-ui-core")
     require_dependency("app-linux", "cad-desktop-shell")
     require_dependency("app-windows", "cad-desktop-shell")
     require_dependency("app-macos", "cad-desktop-shell")
+    require_dependency("app-android", "cad-desktop-shell")
     forbidden_desktop_shell_dependencies = {
         "gtk", "gdk", "gdkx11", "ashpd", "wgpu", "cad-render-wgpu", "cad-engine",
         "slint", "slint-build", "iced", "acadrust",

@@ -123,11 +123,38 @@ export interface CadPopup {
 }
 
 /**
+ * The host's carrier profile (`cad_status.hostProfile`), one always-present
+ * nested object on the current wire.
+ *
+ * The Rust host serialises all four keys on every status. They are `unknown`
+ * here because `cad/surface.ts` and `cad/view3d.ts` are the narrowing readers —
+ * the JSON contract is authoritative, not a second declaration of it.
+ *
+ * The object itself is optional on [`CadStatus`] (and in the parser) **only**
+ * for compatibility with a recorded pre-P1 payload (a captured wire sample or an
+ * external evidence ledger can predate the field): a status without this block
+ * must still parse and keep the documented legacy defaults (`native-below`,
+ * palettes available, standard views undeclared). In-repo fixtures all carry the
+ * block. A host that does send a profile is validated strictly for every key it
+ * carries.
+ */
+export interface CadHostProfile {
+  /** `native-below` or `dom-canvas` on the wire; readers narrow it. */
+  readonly surfaceMode?: unknown;
+  /** `native` or `wasm` on the wire; readers narrow it. */
+  readonly documentOwner?: unknown;
+  /** Whether this carrier renders the docked palettes (a real boolean). */
+  readonly palettesAvailable?: unknown;
+  /** `null` (undeclared) or the authoritative array of view keys. */
+  readonly standardViews?: unknown;
+}
+
+/**
  * The `cad_status` snapshot consumed by the chrome.
  *
  * Every field the validator below enforces is required; the additive blocks an
  * older host may omit (`hoverPreview`, `snapEnabled`, `snapKind`, `crosshair`,
- * `commandLog`, `popup`, `gripDrag`, `standardViews`) are optional, and the
+ * `commandLog`, `popup`, `gripDrag`, `hostProfile`) are optional, and the
  * consumers already read them tolerantly (`?? []`, `!= null`, `Boolean(...)`).
  */
 export interface CadStatus {
@@ -171,37 +198,14 @@ export interface CadStatus {
    */
   readonly gripDrag?: boolean;
   /**
-   * Standard-view machine keys this **carrier** can execute
-   * (`cad_ui_core::session::status` has no such block; the carriers add it).
+   * The carrier profile: which surface runs this chrome, who owns the CAD
+   * document, and the carrier's palette / standard-view capabilities.
    *
-   * Additive and optional, with a deliberate three-state meaning:
-   *
-   * * **absent** — the host never declared a capability list (an older host, and
-   *   every desktop `native-below` host today). The chrome then keeps its historic
-   *   rule: a standard view needs a loaded status and an open drawing.
-   * * **present** — the list is authoritative for the seven keys
-   *   (`apps/desktop-ui/src/cad/view3d.ts`). A key that is not in it is refused
-   *   *before* IPC, with its own reason, because the transport has no
-   *   `cad_standard_view` mapping and the click would otherwise throw
-   *   `unsupported-runtime: cad_standard_view` from a button that looked live.
-   *
-   * `[]` is therefore a real, affirmative answer — "this carrier has no standard
-   * views" — and never the same as absent. The `dom-canvas` carrier reports `[]`:
-   * the wasm session is a 2D presenter with no 3D camera, so there is nothing for
-   * a standard view to do.
+   * Optional **only** so a pre-P1 payload still parses (see [`CadHostProfile`]);
+   * the current Rust wire always sends it. When a key is absent the readers apply
+   * the historical defaults — never a guessed capability.
    */
-  readonly standardViews?: readonly string[];
-  /**
-   * Whether this **carrier** offers the docked palettes (layers, properties,
-   * diagnostics).
-   *
-   * Additive and optional. Absent means "as every host has always behaved"
-   * (available); only an explicit `false` hides them (`cad/surface.ts`'s
-   * `palettesOffered` is the single reading). It is a capability the carrier
-   * reports, not a property of the carrier's name: the `dom-canvas` session is the
-   * real desktop session and therefore reports `true`.
-   */
-  readonly palettesAvailable?: boolean;
+  readonly hostProfile?: CadHostProfile;
 }
 
 // Phase keys the backend reports (`cad_app::import_phase_key`). A phase outside
@@ -302,22 +306,41 @@ export function parseCadStatus(value: unknown): CadStatus {
   if (status.gripDrag !== undefined && typeof status.gripDrag !== 'boolean') {
     throw Error('CAD_STATUS_INVALID');
   }
-  // The standard-view capability list is optional (absent = the host declared
-  // nothing, which is today's desktop behaviour), but a present value must be an
-  // array of strings. `null`, a string or an array with holes would each be read
-  // as "some views are available" by a truthy check, so a malformed block is a
-  // contract violation rather than a guessed capability.
-  if (status.standardViews !== undefined) {
-    if (!Array.isArray(status.standardViews)
-      || !status.standardViews.every((key: unknown) => typeof key === 'string')) {
+  // The carrier profile. The block is optional as a whole: a recorded pre-P1
+  // payload has no `hostProfile` at all, and it must still parse — the readers
+  // then apply the documented legacy
+  // defaults (`native-below`, palettes available, standard views undeclared)
+  // rather than a guessed capability. When the block is present, every key it
+  // carries is validated against the frozen JSON contract: an unknown
+  // `surfaceMode`/`documentOwner`, a non-boolean palette flag or a non-array
+  // standard-view list is a contract violation, never a value to coerce.
+  const hostProfile = status.hostProfile;
+  if (hostProfile !== undefined) {
+    if (!hostProfile || typeof hostProfile !== 'object' || Array.isArray(hostProfile)) {
       throw Error('CAD_STATUS_INVALID');
     }
-  }
-  // The palette capability flag is optional too (absent = available, which is every
-  // older host). A present value must be a real boolean: a truthy non-boolean would
-  // decide "show the palettes" from a value no host ever reported.
-  if (status.palettesAvailable !== undefined && typeof status.palettesAvailable !== 'boolean') {
-    throw Error('CAD_STATUS_INVALID');
+    const profile = hostProfile as Record<string, unknown>;
+    if (profile.surfaceMode !== undefined
+      && profile.surfaceMode !== 'native-below' && profile.surfaceMode !== 'dom-canvas') {
+      throw Error('CAD_STATUS_INVALID');
+    }
+    if (profile.documentOwner !== undefined
+      && profile.documentOwner !== 'native' && profile.documentOwner !== 'wasm') {
+      throw Error('CAD_STATUS_INVALID');
+    }
+    if (profile.palettesAvailable !== undefined && typeof profile.palettesAvailable !== 'boolean') {
+      throw Error('CAD_STATUS_INVALID');
+    }
+    // `null` is the declared "no standard views are known" answer: it means the
+    // carrier never declared a list and keeps the historic allow-all rule. An
+    // array is authoritative (including `[]`, which declares none), so anything
+    // other than `null` or an array of strings is rejected here.
+    if (profile.standardViews !== undefined && profile.standardViews !== null) {
+      if (!Array.isArray(profile.standardViews)
+        || !profile.standardViews.every((key: unknown) => typeof key === 'string')) {
+        throw Error('CAD_STATUS_INVALID');
+      }
+    }
   }
   // The cursor's world coordinate is required: `null` (no reliable 2D cursor) or
   // exactly three finite numbers. Anything else is rejected outright — a

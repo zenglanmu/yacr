@@ -893,6 +893,7 @@
   "mobile.close": "Close",
   "mobile.send": "Run",
   "mobile.refusal.unsupported": "None of these tools can run yet: this host does not offer their commands.",
+  "mobile.refusal.docked_panel": "The {panel} panel needs a wider window.",
   "macos.picker_title": "Open a DWG or DXF drawing",
   "macos.picker_filter": "CAD drawings (DWG, DXF)",
   "macos.picker_empty": "The file picker returned no file",

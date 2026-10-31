@@ -25,7 +25,7 @@ const LABEL = 'synthetic-four-lines.dwg';
 
 /** A host shell that reports the in-DOM carrier. */
 function canvasShell(session, extra = {}) {
-  return { status: { surfaceMode: 'dom-canvas', canvasSession: session, ...extra } };
+  return { status: { hostProfile: { surfaceMode: 'dom-canvas' }, canvasSession: session, ...extra } };
 }
 
 /** One healthy session status, shaped like the wasm session's JSON. */
@@ -48,7 +48,7 @@ test('a relayed session is the drawing identity of a dom-canvas host', () => {
   );
   // The carrier and the relayed field are read from the live shell status only.
   assert.deepEqual(
-    canvasSessionFromShell({ status: { surfaceMode: 'dom-canvas', canvasSession: { label: LABEL } } }),
+    canvasSessionFromShell({ status: { hostProfile: { surfaceMode: 'dom-canvas' }, canvasSession: { label: LABEL } } }),
     { label: LABEL, batches: null, draws: null },
   );
 });
@@ -61,14 +61,14 @@ test('every other carrier keeps the start state: no identity is ever guessed', (
     {},
     { status: null },
     { status: {} },
-    // The field itself is not a capability hint: an older host that reports no
-    // carrier is `native-below`, and a `native-below` host has no session.
+    // The field itself is not a capability hint: a pre-P1 host that reports no
+    // profile is `native-below`, and a `native-below` host has no session.
     { status: { canvasSession: session } },
-    { status: { surfaceMode: 'native-below', canvasSession: session } },
+    { status: { hostProfile: { surfaceMode: 'native-below' }, canvasSession: session } },
     // Near misses are not matched loosely (same policy as `surfaceModeFromShell`).
-    { status: { surfaceMode: 'DOM-CANVAS', canvasSession: session } },
-    { status: { surfaceMode: 'dom-canvas ', canvasSession: session } },
-    { status: { surfaceMode: 'dom_canvas', canvasSession: session } },
+    { status: { hostProfile: { surfaceMode: 'DOM-CANVAS' }, canvasSession: session } },
+    { status: { hostProfile: { surfaceMode: 'dom-canvas ' }, canvasSession: session } },
+    { status: { hostProfile: { surfaceMode: 'dom_canvas' }, canvasSession: session } },
   ];
   for (const shell of shells) {
     assert.equal(canvasSessionFromShell(shell), null, `shell ${JSON.stringify(shell)} must name no drawing`);
@@ -269,14 +269,14 @@ test('the palettes are what the carrier reports, not what it is called', async (
   // which stopped being true when the page session became the real desktop session).
   assert.ok(app.includes('const palettesAvailable = palettesOffered(status);'));
   assert.ok(!app.includes('palettesAvailable = surfaceMode'));
-  assert.equal(palettesOffered({ palettesAvailable: true }), true);
-  assert.equal(palettesOffered({ palettesAvailable: false }), false);
+  assert.equal(palettesOffered({ status: { hostProfile: { palettesAvailable: true } } }), true);
+  assert.equal(palettesOffered({ status: { hostProfile: { palettesAvailable: false } } }), false);
   // An absent flag is today's behaviour: available. Only an explicit `false` hides
-  // a panel, so an older host keeps every palette it always had.
+  // a panel, so a pre-P1 host keeps every palette it always had.
   assert.equal(palettesOffered({}), true);
   assert.equal(palettesOffered(null), true);
   assert.equal(palettesOffered({ status: {} }), true);
-  assert.equal(palettesOffered({ palettesAvailable: 'false' }), true);
+  assert.equal(palettesOffered({ status: { hostProfile: { palettesAvailable: 'false' } } }), true);
 
   const workspace = await readModule('components/Workspace.tsx');
   // The carrier rule is one helper (`palettesOffered` in `surface.mjs`), asked by

@@ -11,8 +11,10 @@
 > **DOM/WebView 在上、CAD 原生子表面在下**（ADR 0023），React UI 归并到唯一包 `apps/desktop-ui`，
 > Tauri 薄壳下沉到新共享层 `cad-desktop-shell`；**X11/XWayland 自 2026-10-24 起走 DOM-canvas**
 > （wasm/WebGL2 CAD 会话画进 DOM `<canvas>`，ADR 0024；仅当 WebGL2 不可用才输出
-> `yacr: unsupported-runtime: webgl2` + 退出码 6，旧「`unsupported-backend: x11` + 退出码 4」为历史合同），
-> Windows 宿主已实现但视觉未验证。本文只描述**当前树中真实存在**的 crate 与契约。旧 Slint 合成
+> `yacr: unsupported-runtime: webgl2` + 退出码 6，旧「`unsupported-backend: x11` + 退出码 4」为历史合同）。
+> **2026-11-01 起 Android 退出 `dom-canvas` 集合**：`apps/app-android` 是原生 `native-below` 载体
+> （原生 `CadSession` 持有 `cad-db`，wgpu/Vulkan 呈现到 WebView 之下的 `SurfaceView`，wasm 会话不实例化；
+> ADR 0027）。Windows 宿主已实现但视觉未验证。本文只描述**当前树中真实存在**的 crate 与契约。旧 Slint 合成
 > （ADR 0002/0003）与实验宿主（ADR 0006）保留为历史记录，见各 ADR 顶部横幅；旧宿主验证证据见
 > `docs/validation*.md`（历史，含 NOT RUN 边界）。
 
@@ -59,8 +61,26 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 | 桌面壳共享层 | **cad-desktop-shell：唯一允许依赖 `tauri` 的共享层**——`#[tauri::command]` 薄壳与注册、主窗口/子 webview 构建（init scripts、`start_maximized`）、popup 命令到 `cad-ui-core::popup` 的接线、工具包无关 `threading`、通用证据驱动骨架、参数化平台实现（`ReactFiles`/`ReactSurface`/`ReactConfigStore`）；**禁止** gtk/gdk/gdkx11/ashpd/wgpu/cad-render-wgpu/cad-engine/slint/iced/acadrust |
 | 宿主编排 | cad-host：HostCore（命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink）；**不依赖任何 UI 工具包，也不依赖 slint/wgpu/web-sys/Android 类型** |
 | 宿主平台契约 | cad-platform：PlatformFiles/ConfigStore/SurfaceSource/FontLoader/Persistence/TaskExecutor/Clipboard/HostLifecycle/RenderHost |
-| 宿主组合根 | apps：app-linux（GTK/Wayland 平台缝 + 真实 Linux GUI）、app-windows（Win32/WebView2 平台缝，已实现、视觉未验证）、app-macos（AppKit/WKWebView + 原生 CAD 子 NSView + wgpu/Metal，已实现、仅 CI 编译门禁）、app-android/app-web（Tauri/浏览器载体，wasm `dom-canvas` 会话）；**唯一桌面 React UI：`apps/desktop-ui`** |
+| 宿主组合根 | apps：app-linux（GTK/Wayland 平台缝 + 真实 Linux GUI）、app-windows（Win32/WebView2 平台缝，已实现、视觉未验证）、app-macos（AppKit/WKWebView + 原生 CAD 子 NSView + wgpu/Metal，已实现、仅 CI 编译门禁）、app-android（Tauri WebView + 原生 `native-below` CAD 会话，仅编译级证据）、app-web（Tauri/浏览器载体，wasm `dom-canvas` 会话）；**唯一桌面 React UI：`apps/desktop-ui`** |
 | 自动化 | cad-diagnostics：统计/脱敏报告；cad-cli-tools：共用 Application 命令路径 |
+
+## 载体（carrier）与 `cad-db` 权威
+
+| `surfaceMode` | 宿主 | `documentOwner` | `cad-db` 唯一权威 | 像素 | 证据等级 |
+|---|---|---|---|---|---|
+| `native-below` | Linux 原生 Wayland、Windows、macOS、**Android（2026-11-01 起）** | `native` | 原生 `CadSession` | 原生 wgpu presenter 在 WebView/子表面之下（Android：Vulkan → `SurfaceView`） | Linux/Wayland 有界真实 GPU；Windows/macOS/Android 未验收（Android 仅编译级） |
+| `dom-canvas` | X11/XWayland、浏览器/Web | `wasm` | 页面内 wasm `CadSession` | wasm/WebGL2 画进 DOM `<canvas>`，无第二原生表面 | 合成夹具 + 有界运行；硬件归属 NOT VERIFIED |
+
+- 载体由 `cad_status.hostProfile { surfaceMode, documentOwner, palettesAvailable, standardViews }`
+  **显式声明**（恒在字段）；React 树按数据标志渲染，不按平台分叉。
+- **`cad-db` 权威每种载体只有一份**：`dom-canvas` 上 native 壳不得实例化第二份文档、不得镜像/缓存
+  文档状态（铁律 8）；`native-below` 上 wasm 会话不得运行（Android 的 `dom-canvas` transport 有
+  `surfaceMode` 门）。任何路径都不得同时有两个 presenter 画同一块像素。
+- **事件是 push**：共享 `cad_event` 通道每次 flush/帧推送一条携带完整状态的 `status-changed`，语义
+  事件（命令准入/拒绝、选择、工具步、文档、错误、弹窗、丢事件）另行推送；`cad_status` 只用于
+  订阅/bootstrap 与 gap 恢复，**前端不轮询**。
+- 既有不变量（输入单一漏斗、renderer-only wgpu、无整幅回读、单 presenter、弹窗模态围栏）在两种
+  载体上都成立，只是像素机制不同。
 
 ## 必须保持的边界
 
@@ -85,19 +105,24 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   in-DOM 弹窗/菜单；两个宿主的 `tauri.conf.json` 都指向 `../desktop-ui/dist`，**不得**再复制第二套 UI。
 - **移动端是同一棵 chrome 的呈现，不是第二套 UI**：桌面/移动**只按屏幕宽度**切换
   （`apps/desktop-ui/src/layout/layout-mode.ts` 的 `MOBILE_MAX_WIDTH = 1024`，`max-width` 含端点；
-  `data-layout` 写在 `<html>` 与 `main.shell` 上，由 live `matchMedia` 订阅驱动，resize 不 reload）。
+  `data-layout` 由 `use-layout-mode.ts` 单点写到 `document.documentElement`（`<html>`）上，由 live
+  `matchMedia` 订阅驱动，resize 不 reload；`main.shell` 不携带该属性，紧凑样式统一用
+  `:root[data-layout="mobile"]` 守卫）。
   组件、状态、命令规则、wire 契约全部共享（命令行规则只在 `src/commands/command-line-model.ts`
   一处）；差异限于呈现：移动树的顶栏 + ribbon drawer + 全幅 CAD 分区 + 底部命令栏。**禁止**为移动端
   另开文档状态、另建命令表或另写一套输入/命令解析。
 - **宿主传输缝在 chrome 侧（`apps/desktop-ui/src/host/`）**：构建期常量 `__YACR_RUNTIME__` ∈
   `tauri | web | android`（Vite `define`，默认 `tauri`）决定路由；**只有 `invoke.ts` import
   `@tauri-apps/api`**，`runtime.ts` 决定去向，`web-adapter.ts` 把 6 个命令映射到 wasm 会话的
-  `shell_*` 导出，其余一律 `unsupported-runtime: <command>`。适配器**只拒绝、不伪造**：浏览器/移动
+  `shell_*` 导出，其余一律 `unsupported-runtime: <command>`。适配器**只拒绝、不伪造**：`dom-canvas`
   载体的命令词汇**只**是它真正能执行的四个（会话侧 `FIT`/`ZOOMIN`/`ZOOMOUT`，传输侧 `OPEN` = 文件
   选择器 + `open_bytes`），其余名字（含 `PAN`、图层、设置、测量、绘制）仍按名字拒绝；`cad_status`
   的 `canOpen` 由适配器抬成 `true`（选择器是 DOM 能力），`canFit` 来自会话（保留的图形范围）。
   这层是 **UI 侧**的路由，与 `cad-host`/`cad-platform` 的宿主编排分层正交（铁律 8 不变：wasm 会话是
   `dom-canvas` 宿主上唯一的 `cad-db` 权威）。证据见 `docs/validation-web-commands-2026-10-28.md`。
+  **Android 不在这条适配器路径上**（2026-11-01，ADR 0027）：`android` 构建从 carrier `unknown` 起步，
+  第一份 `cad_status` 到达后定为 `native-below`，`adapterOwnsData = carrier === 'dom-canvas' ||
+  !tauriPresent()` 为 `false`，因此每条 CAD 命令都走 Tauri 的共享注册表。
   注意**载体侧**（2026-10-28 生产翻面）已不再受这四条限制：`apps/app-web` 的 **page 载体**跑的就是
   真 `CadSession`（`src/live.rs` + `src/page.rs`），`invoke` 一条入口服务**全部 20 条** wire 命令，
   `shell_commands()` = `admissible_names()`（155 个名字）、`shell_aliases()` = `alias_pairs()`（51 行），
@@ -154,10 +179,12 @@ traits 是契约草案（0.1），实现前可通过 ADR 修正不足，不代�
 - **合成/布局契约**：`.native-input` CAD 分区始终挂载并上报 `getBoundingClientRect()`（CSS px + DPR），
   宿主 `LayoutTracker` 据此更新 surface metrics——这是滚轮缩放锚定光标的前提。**生产透明不变量**：
   `.shell`/`.workspace`/`.workspace__canvas` 在 CAD 矩形内不得涂不透明底色（有结构性回归测试）。
-- **平台范围**（2026-10-26 更正）：**原生 Wayland** 是唯一生产 Linux 后端；**X11/XWayland 走
+- **平台范围**（2026-11-01 更正）：**原生 Wayland** 是唯一生产 Linux 后端；**X11/XWayland 走
   DOM-canvas**（ADR 0024，wasm/WebGL2 在 DOM `<canvas>`，WebGL2 缺失才拒绝 + 退出码 6）；Windows 宿主
-  已实现（Tier 0 编译 + Wine 拒绝 smoke，视觉 **PENDING user real-Windows spike**）；macOS/Android 是
-  显式 NOT IMPLEMENTED 占位；Web 的 wasm CAD 会话已实现，其 host target 仍是 NOT IMPLEMENTED 空壳。
+  已实现（Tier 0 编译 + Wine 拒绝 smoke，视觉 **PENDING user real-Windows spike**）；macOS 是真实 Tauri
+  宿主但**仅 CI 编译**；**Android 是原生 `native-below` 载体**（ADR 0027：原生 `CadSession` 持有
+  `cad-db`，wgpu/Vulkan → WebView 之下的 `SurfaceView`，wasm 会话不实例化），**证据仅编译级，设备运行
+  NOT VERIFIED**；Web 的 wasm CAD 会话已实现，其 host target 仍是 NOT IMPLEMENTED 空壳。
 - **支持范围**：命令面**不以 OPEN/FIT 为界**（见上一条更正），以 `docs/compatibility.md` 与宿主能力
   布尔为准；未接线的 UI 控件显式禁用并标注原因；原生导航按实际源码能力支持（缩放/平移/fit）。
   **不新增投机 IPC**；需要 payload 的命令经真实漏斗显式拒绝，绝不空成功。**不是完整 CAD 产品**。

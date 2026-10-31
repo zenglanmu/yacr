@@ -193,10 +193,13 @@ test('one carrier helper decides for every nav-rail palette toggle', async () =>
 test('the carrier flag itself keeps its one reading: absent means "as today"', () => {
   // Only an explicit `false` removes the palettes; a carrier that reports nothing
   // (every native-below host, and any older chrome state) keeps them.
-  assert.equal(palettesOffered({ palettesAvailable: false }), false);
-  assert.equal(palettesOffered({ palettesAvailable: true }), true);
-  assert.equal(palettesOffered({ palettesAvailable: undefined }), true);
+  assert.equal(palettesOffered({ status: { hostProfile: { palettesAvailable: false } } }), false);
+  assert.equal(palettesOffered({ status: { hostProfile: { palettesAvailable: true } } }), true);
+  assert.equal(palettesOffered({ status: { hostProfile: { palettesAvailable: undefined } } }), true);
+  assert.equal(palettesOffered({ status: { hostProfile: {} } }), true);
   assert.equal(palettesOffered({}), true);
+  assert.equal(palettesOffered(null), true);
+  assert.equal(palettesOffered(undefined), true);
   assert.equal(palettesOffered(null), true);
   assert.equal(palettesOffered(undefined), true);
 });

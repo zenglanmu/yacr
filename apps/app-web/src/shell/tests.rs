@@ -66,7 +66,7 @@ fn parse(wire: &str) -> Value {
 }
 
 #[test]
-fn the_status_is_the_frozen_wire_shape_plus_the_carrier_keys() {
+fn the_status_is_the_frozen_wire_shape_plus_the_host_profile() {
     let session = fixture_session();
     let wire = live_wire(&session);
     let object = wire.as_object().expect("a JSON object");
@@ -76,12 +76,24 @@ fn the_status_is_the_frozen_wire_shape_plus_the_carrier_keys() {
             "missing required key {key}: {wire}"
         );
     }
-    assert_eq!(object["surfaceMode"], json!(SURFACE_MODE_DOM_CANVAS));
-    // The session behind this carrier serves `cad_layers`/`cad_setting*` itself, so
-    // the palettes are a real capability here (the chrome hides them only on an
-    // explicit `false`).
-    assert_eq!(object["palettesAvailable"], json!(true));
-    assert_eq!(object["standardViews"], json!([]));
+    // The carrier is named inside one typed, always-present profile object.
+    assert_eq!(
+        object["hostProfile"],
+        json!({
+            "surfaceMode": SURFACE_MODE_DOM_CANVAS,
+            "documentOwner": "wasm",
+            "palettesAvailable": true,
+            "standardViews": [],
+        }),
+        "{wire}"
+    );
+    // The old top-level carrier keys must not survive next to it.
+    for key in ["surfaceMode", "palettesAvailable", "standardViews"] {
+        assert!(
+            !object.contains_key(key),
+            "{key} must only appear inside hostProfile: {wire}"
+        );
+    }
     assert!(
         object["snapSpacing"]
             .as_f64()
@@ -156,8 +168,16 @@ fn no_session_reports_nothing_invented() {
     assert_eq!(wire["canFit"], json!(false));
     // Absent, not null: "no session" must not look like "a session without a label".
     assert!(wire.get("canvasSession").is_none(), "{wire}");
-    // The carrier keys are always present (the chrome dispatches on them).
-    assert_eq!(wire["surfaceMode"], json!(SURFACE_MODE_DOM_CANVAS));
+    // The host profile is always present, even with no session.
+    assert_eq!(
+        wire["hostProfile"],
+        json!({
+            "surfaceMode": SURFACE_MODE_DOM_CANVAS,
+            "documentOwner": "wasm",
+            "palettesAvailable": true,
+            "standardViews": [],
+        })
+    );
 }
 
 #[test]

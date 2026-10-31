@@ -64,6 +64,7 @@ use std::cell::RefCell;
 use cad_engine::render::{BackendPreference, RenderSessionHandle};
 use cad_render_wgpu::canvas::CanvasPresenter;
 use cad_ui_core::protocol::ProbeInput;
+use cad_ui_core::session::{unsupported_status, CadStatus};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -368,6 +369,7 @@ pub(crate) async fn start_impl(
         Ok(page) => {
             let status = page_with_status(&page);
             install_live(page);
+            crate::events::flush_live();
             Ok(status)
         }
         Err(failure) => Err(fail_start(failure)),
@@ -388,7 +390,7 @@ pub(crate) async fn open_bytes_impl(
     if live_exists {
         let metrics = Metrics::new(css_w, css_h, dpr)
             .map_err(|message| document_failure(Failure::new(STEP_VIEWPORT, message)))?;
-        return with_live(|page| {
+        let outcome = with_live(|page| {
             let outcome = replace_document(page, label, bytes, metrics);
             match outcome {
                 Ok(()) => Ok(page_with_status(page)),
@@ -399,6 +401,8 @@ pub(crate) async fn open_bytes_impl(
             }
         })
         .unwrap_or_else(|| Err(reject(&no_session(live::STEP_IMPORT))));
+        crate::events::flush_live();
+        return outcome;
     }
     // No session yet: the first open builds one (the page may open a file before it
     // starts the fixture).
@@ -407,6 +411,7 @@ pub(crate) async fn open_bytes_impl(
         Ok(page) => {
             let status = page_with_status(&page);
             install_live(page);
+            crate::events::flush_live();
             Ok(status)
         }
         Err(failure) => Err(fail_start(failure)),
@@ -474,6 +479,38 @@ fn page_with_status(page: &PageSession) -> String {
     page.live.canvas_status_json(&facts(page), heap_gauge())
 }
 
+/// The status + serialized `canvasSession` a `status-changed` event carries.
+///
+/// `None` when no session is live (the flush points are state-mutating exports, so
+/// there is nothing to report). The status is the same projection `shell_status`
+/// uses, and the descriptor is the same object `shell::Carrier` embeds.
+pub(crate) fn event_snapshot() -> Option<(CadStatus, Option<String>)> {
+    with_live(|page| {
+        let status = page.live.cad_status(&facts(page));
+        let canvas = serde_json::to_string(&shell::CanvasSession {
+            label: page.live.label.clone(),
+            batches: page.live.batches(),
+            draws: None,
+        })
+        .ok();
+        (status, canvas)
+    })
+}
+
+/// The initial subscription snapshot: the live session's, or the honest empty /
+/// failed one `shell_status` would answer.
+pub(crate) fn event_snapshot_or_empty() -> (CadStatus, Option<String>) {
+    if let Some(snapshot) = event_snapshot() {
+        return snapshot;
+    }
+    let failure = STATE.with(|cell| match &*cell.borrow() {
+        State::Failed(failure) => Some(failure.describe()),
+        _ => None,
+    });
+    let status = failure.map_or_else(shell::empty_status, |error| unsupported_status(Some(error)));
+    (status, None)
+}
+
 /// An `open_bytes` failure that must not destroy a live session.
 fn document_failure(failure: Failure) -> JsValue {
     reject(&failure)
@@ -484,7 +521,7 @@ fn document_failure(failure: Failure) -> JsValue {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn frame_impl() -> Result<String, JsValue> {
-    with_live(|page| {
+    let result = with_live(|page| {
         let presented = frame_step(page);
         let present = facts(page);
         Ok(serde_json::json!({
@@ -497,11 +534,13 @@ pub(crate) fn frame_impl() -> Result<String, JsValue> {
         })
         .to_string())
     })
-    .unwrap_or_else(|| Err(reject(&no_session(STEP_STATE))))
+    .unwrap_or_else(|| Err(reject(&no_session(STEP_STATE))));
+    crate::events::flush_live();
+    result
 }
 
 pub(crate) fn resize_impl(css_w: f64, css_h: f64, dpr: f64) -> Result<String, JsValue> {
-    with_live(|page| {
+    let result = with_live(|page| {
         let metrics = Metrics::new(css_w, css_h, dpr)
             .map_err(|message| reject(&Failure::new(STEP_VIEWPORT, message)))?;
         let physical = metrics
@@ -516,40 +555,48 @@ pub(crate) fn resize_impl(css_w: f64, css_h: f64, dpr: f64) -> Result<String, Js
         frame_step(page);
         Ok(page_with_status(page))
     })
-    .unwrap_or_else(|| Err(reject(&no_session(STEP_VIEWPORT))))
+    .unwrap_or_else(|| Err(reject(&no_session(STEP_VIEWPORT))));
+    crate::events::flush_live();
+    result
 }
 
 pub(crate) fn pan_impl(dx: f64, dy: f64) -> Result<String, JsValue> {
-    with_live(|page| {
+    let result = with_live(|page| {
         page.live
             .pan_by([dx, dy])
             .map_err(|failure| reject(&failure))?;
         frame_step(page);
         Ok(page_with_status(page))
     })
-    .unwrap_or_else(|| Err(reject(&no_session(live::STEP_NAVIGATION))))
+    .unwrap_or_else(|| Err(reject(&no_session(live::STEP_NAVIGATION))));
+    crate::events::flush_live();
+    result
 }
 
 pub(crate) fn zoom_at_impl(factor: f64, x: f64, y: f64) -> Result<String, JsValue> {
-    with_live(|page| {
+    let result = with_live(|page| {
         page.live
             .zoom_about(factor, [x, y])
             .map_err(|failure| reject(&failure))?;
         frame_step(page);
         Ok(page_with_status(page))
     })
-    .unwrap_or_else(|| Err(reject(&no_session(live::STEP_NAVIGATION))))
+    .unwrap_or_else(|| Err(reject(&no_session(live::STEP_NAVIGATION))));
+    crate::events::flush_live();
+    result
 }
 
 pub(crate) fn fit_view_impl() -> Result<String, JsValue> {
-    with_live(|page| {
+    let result = with_live(|page| {
         page.live
             .command("FIT")
             .map_err(|failure| reject(&failure))?;
         frame_step(page);
         Ok(page_with_status(page))
     })
-    .unwrap_or_else(|| Err(reject(&no_session(live::STEP_NAVIGATION))))
+    .unwrap_or_else(|| Err(reject(&no_session(live::STEP_NAVIGATION))));
+    crate::events::flush_live();
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -618,7 +665,7 @@ pub(crate) fn probe_input_impl(args_json: &str) -> Result<String, JsValue> {
         .map_err(|error| JsValue::from_str(&format!("invalid-input: {error}")))?;
     let sequence = input.sequence;
     let kind = input.kind.as_str();
-    with_live(|page| match page.live.probe(&input) {
+    let result = with_live(|page| match page.live.probe(&input) {
         Ok(()) => Ok(serde_json::json!({
             "ok": true,
             "accepted": true,
@@ -636,7 +683,9 @@ pub(crate) fn probe_input_impl(args_json: &str) -> Result<String, JsValue> {
         })
         .to_string()),
     })
-    .unwrap_or_else(|| Err(reject(&no_session(live::STEP_INPUT))))
+    .unwrap_or_else(|| Err(reject(&no_session(live::STEP_INPUT))));
+    crate::events::flush_live();
+    result
 }
 
 /// The one `dom-canvas` wire entry: serve a Tauri command name in-process.
@@ -656,10 +705,12 @@ pub(crate) fn invoke_impl(name: &str, args_json: &str) -> String {
             &mut popups,
         )
     });
-    match served {
+    let result = match served {
         Some(result) => direct::envelope(result),
         None => direct::envelope(direct::without_session(name)),
-    }
+    };
+    crate::events::flush_live();
+    result
 }
 
 // ---------------------------------------------------------------------------

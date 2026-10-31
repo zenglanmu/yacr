@@ -114,7 +114,7 @@ pub(super) fn reopen_open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<Text
          len={payload_len} newline={newlines}"
     );
 
-    let during = crate::host::cad_status(app.state::<ProbeShared>());
+    let during = crate::host::cad_status_snapshot(app.state::<ProbeShared>());
     let during_text = describe_status_popup(&during);
     let expected = format!("{}:{}:true", ack.kind, ack.popup_label);
     eprintln!(
@@ -189,7 +189,7 @@ pub(super) fn reopen_status_after_step(
         );
         return;
     }
-    let status = crate::host::cad_status(app.state::<ProbeShared>());
+    let status = crate::host::cad_status_snapshot(app.state::<ProbeShared>());
     let text = describe_status_popup(&status);
     eprintln!(
         "[probe] popup textedit evidence: reopen status after close attempt={attempt} popup={text} \

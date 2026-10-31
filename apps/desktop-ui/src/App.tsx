@@ -5,7 +5,6 @@
 // Visual work lives in the region components.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from './host/invoke.ts';
-import { observeCarrier } from './host/runtime.ts';
 import { CATALOGS } from './catalogs.ts';
 import { createTranslator, initialLocale, LOCALE_STORAGE_KEY, LOCALES, localeTag, storedLocale, storeLocale } from './i18n.ts';
 import type { Locale } from './i18n.ts';
@@ -16,8 +15,9 @@ import { CANVAS_STEP_MODULE, canvasModuleUrl, createCanvasTransport, loadCanvasM
 import type { CanvasFailure, CanvasTransport } from './cad/canvas-host.ts';
 import { createFrameLoop } from './cad/frame-loop.ts';
 import type { FrameLoop } from './cad/frame-loop.ts';
-import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, palettesOffered, reportedSurfaceMode, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
-import { queueCadCommand, startCadPolling } from './cad/cad-command.ts';
+import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
+import { queueCadCommand } from './cad/cad-command.ts';
+import { useCadEvents } from './cad/use-cad-events.ts';
 import { reconcileToolParameterPending, setToolParameterFlag, setToolParameterNumber, stepToolParameterPending } from './tools/tool-parameters.ts';
 import { requestImportCancel } from './cad/cad-status.ts';
 import { draftingAcceleratorCommand } from './cad/cad.ts';
@@ -27,7 +27,6 @@ import type { ToolParameterPending } from './tools/tool-parameters.ts';
 import { awaitingToolText, setToolText } from './tools/text.ts';
 import { setSelectedText } from './tools/textedit.ts';
 import { submitStandardView } from './cad/view3d.ts';
-import { createFpsSampler } from './fps.ts';
 import { bindBrowserDefaults, cadContextMenuRequest, isTextEntryTarget } from './defaults.ts';
 import { admitCommandText, toolCommandForKey } from './commands/commands.ts';
 import { commandMessageFor } from './commands/command-message.ts';
@@ -53,6 +52,8 @@ import { MOBILE_DRAWER_ID, MobileRibbonDrawer } from './components/MobileRibbonD
 import { MobileTopBar } from './components/MobileTopBar.tsx';
 import { MOBILE_DRAWER_CLOSED, mobileDrawerNext } from './layout/mobile-drawer.ts';
 import { useLayoutMode } from './layout/use-layout-mode.ts';
+import { DOCKED_PANEL_REFUSAL_KEY, dockedPaletteOpenable } from './layout/layout-surfaces.ts';
+import { createShortcutRunner } from './layout/shell-shortcuts.ts';
 import { openPopup } from './popup/popup.ts';
 import { isOptionsCommand } from './options/options.ts';
 import { isLayersCommand } from './layers/layers.ts';
@@ -140,8 +141,9 @@ function Shell() {
   // The docked palettes project the carrier's own document state (selection rows,
   // layer table, settings, diagnostics). That is a **capability the carrier
   // reports**, not a property of the carrier's name: since the `dom-canvas` session
-  // became the real desktop session it has all of them, and the X11/Web/Android
-  // hosts therefore report `palettesAvailable: true`. One reading site
+  // became the real desktop session it has all of them, and the X11/Web hosts
+  // (and any Android host reporting that carrier) therefore report
+  // `palettesAvailable: true`. One reading site
   // (`palettesOffered`), and an **absent** flag means "as today" (available).
   const palettesAvailable = palettesOffered(status);
   // Whether the host has reported a carrier at all. Before the first `cad_status`
@@ -167,9 +169,9 @@ function Shell() {
   const [popupPayload, setPopupPayload] = useState<PopupPayload | null>(null);
 
   // The one width-based layout switch (CSS px, `matchMedia`, live on resize). The
-  // resolved value is written on `.shell` as `data-layout` so the stylesheet and
-  // the contract tests can target it; the hook also writes it on the document
-  // element for the overlays that are portalled outside this tree.
+  // resolved value is written on the document element by the hook — its single
+  // writer — so the stylesheet, the portalled overlays and the contract tests all
+  // read the one attribute; `.shell` deliberately carries no second copy.
   const layout = useLayoutMode();
   const mobile = layout === 'mobile';
   // The mobile ribbon drawer (compact layout only): one boolean, three named
@@ -406,39 +408,16 @@ function Shell() {
     return () => { binding.dispose(); if (bindingRef.current === binding) bindingRef.current = null; };
   }, [surfaceNode, inputLaneReady]);
 
-  useEffect(() => {
-    const sampler = createFpsSampler();
-    let staleTimer: ReturnType<typeof setTimeout> | undefined;
-    // The status this poll last delivered, serialized: the page carrier's frame
-    // pump is kicked when the **session's model** changed (a new tool, a new entity,
-    // a moved camera, an opened document) and stays asleep otherwise. The poll is
-    // the one place that observes such a change for every command path - input,
-    // palette writes, settings, popups - so no command site has to remember to ask
-    // for a frame (and none can forget to).
-    let lastStatus = '';
-    const resetFps = () => { clearTimeout(staleTimer); sampler.reset(); setFps(null); };
-    document.addEventListener('visibilitychange', resetFps);
-    const stopPolling = startCadPolling(invoke, next => {
-      // Every received status feeds the carrier state (`host/runtime.ts`): this is
-      // where an X11 host's `surfaceMode: "dom-canvas"` reaches the transport.
-      if (next) observeCarrier(reportedSurfaceMode({ status: next }));
-      const serialized = next === null ? '' : JSON.stringify(next);
-      if (serialized !== lastStatus) {
-        lastStatus = serialized;
-        framesRef.current?.pump();
-      }
-      setStatus(next);
-      clearTimeout(staleTimer);
-      setFps(sampler.sample(next?.frameCount ?? Number.NaN, performance.now(), Boolean(next && !next.error && !document.hidden)));
-      if (next && !next.error && !document.hidden) staleTimer = setTimeout(resetFps, 5000);
-      if (next) setPollError('');
-    }, setPollError);
-    return () => {
-      stopPolling();
-      clearTimeout(staleTimer);
-      document.removeEventListener('visibilitychange', resetFps);
-    };
-  }, []);
+  // The host's typed push stream (`cad/use-cad-events.ts`): one subscription is
+  // the only status producer. It owns the carrier bootstrap (native first, the
+  // wasm adapter after a `dom-canvas` answer), gap recovery and the FPS sampler;
+  // frames are pumped only on semantic events, never on a status frame.
+  useCadEvents({
+    setStatus,
+    setPollError,
+    setFps,
+    pump: () => framesRef.current?.pump(),
+  });
 
   // The host's command vocabulary + alias table (`commands/use-host-vocabulary.ts`):
   // loaded once, reloaded when the carrier flips to `dom-canvas`, and the in-flight
@@ -524,25 +503,19 @@ function Shell() {
       requestOpenPopup('options');
       return;
     }
-    // `PROPERTIES` is the docked palette's local selector, exactly like
-    // `OPTIONS`: opening it never reaches the router, so it is intercepted
-    // before the in-flight guard (a second Enter just re-opens/focuses it).
-    if (isPropertiesCommand(text)) {
+    // `PROPERTIES` / `LAYER` are the docked palettes' local selectors: they never
+    // reach the router. The compact layout renders no dock (`mobile.css` hides
+    // `.workspace__left`), so there the word is refused with the catalog's own
+    // sentence; on desktop a repeat `LAYER` still refreshes and focuses it.
+    if (isPropertiesCommand(text) || isLayersCommand(text)) {
       setCommandResult(null);
+      const layers = isLayersCommand(text);
+      if (!dockedPaletteOpenable(layout)) {
+        setError(t(DOCKED_PANEL_REFUSAL_KEY, { panel: t(layers ? 'layers.panel' : 'properties.panel') }));
+        return;
+      }
       if (options.fromInput) setCommand('');
-      setPropertiesOpen(true);
-      return;
-    }
-    // `LAYER` opens the docked layers palette through the same chrome-local path.
-    // The router has no payload-free `LAYER` (only the layer *operations*), so the
-    // text never reaches `cad_command`; the palette reads the host on mount and on
-    // every repeat, which is what makes a second `LAYER` a refresh rather than a
-    // no-op.
-    if (isLayersCommand(text)) {
-      setCommandResult(null);
-      if (options.fromInput) setCommand('');
-      setLayersOpen(true);
-      setLayersFocus(value => value + 1);
+      if (layers) { setLayersOpen(true); setLayersFocus(value => value + 1); } else setPropertiesOpen(true);
       return;
     }
     if (submitting.current) return;
@@ -579,7 +552,7 @@ function Shell() {
       submitting.current = false;
       setPending(false);
     }
-  }, [requestOpenPopup, status, commandHistory.appendCommand]);
+  }, [requestOpenPopup, status, commandHistory.appendCommand, layout, t]);
 
   // The terminal text step (ADR 0019 A.1): one `cad_set_tool_text`, never a
   // `cad_command`. The result is returned to the command line so the draft can
@@ -630,18 +603,28 @@ function Shell() {
   useEffect(() => {
     const isTyping = (target: unknown): target is HTMLElement => target instanceof HTMLElement
       && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName);
+    // One dispatch for the four chrome shortcuts: `layout-surfaces.ts` decides
+    // what each one means in the running layout, so this handler can never flip
+    // a flag whose surface is not rendered. `false` means "the shell takes no
+    // action" — it does not promise the platform acts either: WebKit's Ctrl+0
+    // zoom reset is separately suppressed in every layout (`defaults.ts`), so
+    // the compact layout's Ctrl+0 is deliberately inert rather than half-handled.
+    const runShortcut = createShortcutRunner(layout, textStep, t, {
+      setError, setCleanScreen, setPropertiesOpen, setCommandLineOpen, setHistoryOpen,
+    });
     const onKeyDown = (event: KeyboardEvent) => {
       // While a popup is open the overlay owns its one accelerator (Escape). The
       // shell must not also cancel a tool, toggle a panel or blur a field.
       if (popupOpen) return;
       // Ctrl+0 is both the app's clean-screen toggle and WebKit's zoom reset.
       // Handle it before the `defaultPrevented` check: the webview-default guard
-      // also prevents the browser action, and listener order between the two
-      // must not decide whether clean screen works. The guard never swallows an
-      // ordinary key, so this does not widen what the app intercepts.
+      // also prevents the browser action, and listener order must not decide
+      // whether clean screen works. The compact layout has no clean screen, so
+      // the shell does not claim clean-screen there; the browser zoom reset is
+      // suppressed separately in every layout (`defaults.ts`) because page zoom
+      // desyncs the host composite rect.
       if (event.ctrlKey && !event.metaKey && !event.altKey && event.key === '0') {
-        event.preventDefault();
-        setCleanScreen(value => !value);
+        if (runShortcut('cleanScreen')) event.preventDefault();
         return;
       }
       // The document accelerators resolve through the one pure table, and they
@@ -695,12 +678,12 @@ function Shell() {
         void submitCommand(toolCommand);
         return;
       }
-      if (event.ctrlKey && event.key === '9') { event.preventDefault(); setCommandLineOpen(value => !value); return; }
+      if (event.ctrlKey && event.key === '9') { if (runShortcut('commandLine')) event.preventDefault(); return; }
       // Ctrl+1 is AutoCAD's properties-palette toggle. It sits with Ctrl+9,
       // after the `defaultPrevented`/modifier guard, so a webview default that
       // already claimed the chord wins and no plain key is hijacked.
-      if (event.ctrlKey && event.key === '1') { event.preventDefault(); setPropertiesOpen(value => !value); return; }
-      if (event.key === 'F2') { event.preventDefault(); setHistoryOpen(value => !value); return; }
+      if (event.ctrlKey && event.key === '1') { if (runShortcut('properties')) event.preventDefault(); return; }
+      if (event.key === 'F2') { if (runShortcut('history')) event.preventDefault(); return; }
       // The drafting function keys (F3 object snap, F7 grid, F8 ortho) flip
       // session switches through the same command funnel every other affordance
       // uses; the mapping table lives in `cad.ts` so the status-bar chips and
@@ -718,7 +701,7 @@ function Shell() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [popupOpen, submitCommand, toolActive, gripDragActive, textStep, canCommand]);
+  }, [popupOpen, submitCommand, toolActive, gripDragActive, textStep, canCommand, layout, t]);
 
   // Feed the CAD shortcut-menu hook the state slices the chrome already has. It
   // is a ref, not a dependency, so polling never re-installs the guards below.
@@ -936,7 +919,7 @@ function Shell() {
   return (
     <I18nContext.Provider value={i18n}>
       <ShellContext.Provider value={shell}>
-        <main className={['shell', cleanScreen ? 'is-clean' : ''].filter(Boolean).join(' ')} data-layout={layout}>
+        <main className={['shell', cleanScreen ? 'is-clean' : ''].filter(Boolean).join(' ')}>
           {/* Compact layout: the top bar (menu + drawing name) and the drawer it
               opens. The drawer is a fixed overlay, so it costs the drawing no
               height. The start panel, the dock, the nav rail, the tab strips and

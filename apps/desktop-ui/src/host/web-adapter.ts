@@ -102,6 +102,14 @@ export interface WebShellModule {
    * never got that far, which is why it is optional and checked per call.
    */
   open_bytes?(canvasId: string, label: string, cssW: number, cssH: number, dpr: number, bytes: Uint8Array): unknown;
+  /**
+   * Push-status event bridge (P3). `cad_subscribe(cb)` returns the initial
+   * `status-changed` frame as JSON and forwards every later frame to `cb`;
+   * `cad_unsubscribe()` stops it. Optional because an older artifact has none -
+   * the event source then reports the missing export instead of faking events.
+   */
+  cad_subscribe?(callback: (json: string) => void): unknown;
+  cad_unsubscribe?(): unknown;
 }
 
 /** The page global the bootstrap publishes the module on. */

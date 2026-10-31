@@ -312,7 +312,7 @@ fn run_popup_evidence(app: tauri::AppHandle, hold: u64) {
 /// Step 1–3: status before, open through the host path, status while open, and
 /// the popup's in-DOM overlay identity.
 fn open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<PopupEvidence>>) {
-    let before = crate::host::cad_status(app.state::<ProbeShared>());
+    let before = crate::host::cad_status_snapshot(app.state::<ProbeShared>());
     let before_text = describe_status_popup(&before);
     eprintln!("[probe] popup evidence: status before popup={before_text} (expected -)");
 
@@ -338,7 +338,7 @@ fn open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<PopupEvidence>>) {
         ack.accepted, ack.existing
     ));
 
-    let during = crate::host::cad_status(app.state::<ProbeShared>());
+    let during = crate::host::cad_status_snapshot(app.state::<ProbeShared>());
     let during_text = describe_status_popup(&during);
     let expected = format!("{}:{}:true", ack.kind, ack.popup_label);
     eprintln!("[probe] popup evidence: status open popup={during_text} (expected {expected})");
@@ -476,7 +476,7 @@ fn status_after_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<PopupEvidence>
         lock_evidence(evidence).skip("status_after");
         return;
     }
-    let status = crate::host::cad_status(app.state::<ProbeShared>());
+    let status = crate::host::cad_status_snapshot(app.state::<ProbeShared>());
     let text = describe_status_popup(&status);
     eprintln!(
         "[probe] popup evidence: status after close attempt={attempt} popup={text} (expected -)"

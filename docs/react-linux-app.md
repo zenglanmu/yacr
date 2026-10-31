@@ -288,8 +288,9 @@ body 内，Escape/点击外部关闭）；DOM-on-top 之后这不再是硬约束
 `apps/desktop-ui` 仍是**一套 React 树**；桌面与移动只是**同一批组件的两种呈现**，**只按屏幕宽度**
 切换。单源：`apps/desktop-ui/src/layout/layout-mode.ts` 的 `MOBILE_MAX_WIDTH = 1024` /
 `MOBILE_MEDIA_QUERY = '(max-width: 1024px)'`（`max-width` **含端点**，1024 是最后一个 mobile 宽度）；
-`data-layout="mobile"|"desktop"` 同时写到 `<html>` 与 `main.shell`，由 live `matchMedia` 订阅驱动，
-**resize 即时翻转、不 reload**。
+`data-layout="mobile"|"desktop"` 只由 `use-layout-mode.ts` 写到 `document.documentElement`（`<html>`）
+一处，由 live `matchMedia` 订阅驱动，**resize 即时翻转、不 reload**；`main.shell` 不携带该属性，
+紧凑样式用 `:root[data-layout="mobile"]` 守卫。
 
 移动树：`.mobile-topbar`（最左菜单按钮）→ ribbon **drawer**（in-DOM 覆盖层：标签 chip + 2 列触摸
 网格、≤ `68dvh`、44 px 目标）→ 全幅 `Workspace` → `.mobile-commandbar`（唯一底部组件）；

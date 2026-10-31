@@ -8,9 +8,11 @@
 // * `web` - the browser bundle (`scripts/build-web-ui.sh` -> `apps/app-web/dist-ui`):
 //   there is **no** Tauri IPC at all; the wasm CAD session (`apps/app-web`) owns
 //   the document and its `shell_*` exports answer the chrome;
-// * `android` - the same browser bundle inside an Android WebView **with** the
-//   Tauri bridge present, so the wasm session owns the document while the two
-//   shell-only canvas reports still travel over IPC.
+// * `android` - the same React tree inside an Android WebView **with** the Tauri
+//   bridge present. The Android host runs a native Rust `CadSession` and reports
+//   `hostProfile: { surfaceMode: "native-below", documentOwner: "native" }`, so
+//   its CAD commands travel over IPC like a desktop host's; a host that reports
+//   `dom-canvas` instead still has its document served by the wasm session.
 //
 // The build value is injected by `vite.config.mjs` as a build-time `define`
 // (`__YACR_RUNTIME__`), validated there against [`RUNTIMES`], so in a production
@@ -23,33 +25,36 @@
 //
 // A build target says which **bundle** this is; it does not say which **carrier**
 // the process ended up running. The Linux host decides its carrier at startup
-// (`apps/app-linux/src/backend.rs`) and reports it through `cad_status.surfaceMode`:
+// (`apps/app-linux/src/backend.rs`) and reports it through
+// `cad_status.hostProfile.surfaceMode`:
 // native Wayland composites a native surface (`native-below`), while the
 // X11/XWayland host runs the browser's `dom-canvas` path with **no** native CAD
 // session at all (`apps/app-linux/src/host/surface.rs`, `native_cad_session: false`).
 //
 // That distinction is the whole point of [`Carrier`]: a `tauri` build on X11
 // serves no CAD data, so the chrome must route its CAD commands to the **wasm
-// adapter** exactly like the browser and the Android carrier do - otherwise it
-// offers a desktop vocabulary to a window where nothing drains the queue.
+// adapter** exactly like the browser does - otherwise it offers a desktop
+// vocabulary to a window where nothing drains the queue.
 //
 // The state machine has three states and one transition rule:
 //
 // ```text
-// initial: web/android -> dom-canvas      initial: tauri -> unknown
-// observe(mode): "dom-canvas" -> dom-canvas, anything else -> native-below
+// initial: web -> dom-canvas      initial: tauri/android -> unknown
+// observe(hostProfile.surfaceMode): "dom-canvas" -> dom-canvas, else -> native-below
 // ```
 //
-// `unknown` is therefore the honest "native until proven otherwise" state of a
-// `tauri` build: it routes to the native host (which is how the X11 host gets to
-// announce its carrier at all) and stops being reachable after the first report.
-// Only the exact string `"dom-canvas"` selects the wasm carrier - the same rule
-// `cad/surface.ts` uses to read the flag, so the two readings cannot disagree.
+// `unknown` is therefore the honest "not proven yet" state of a build that may
+// have a native host behind it (`tauri`, and `android` since the Android host
+// serves a native `CadSession`): it routes to the native host (which is how any
+// host gets to announce its carrier at all) and stops being reachable after the
+// first report. Only the exact string `"dom-canvas"` selects the wasm carrier -
+// the same rule `cad/surface.ts` uses to read the flag, so the two readings
+// cannot disagree.
 //
 // [`isTauri`] answers a different question - "does the Tauri IPC bridge exist in
 // this page right now" - and is deliberately **not** derived from the carrier: an
-// Android WebView carrier is a wasm document with a bridge, and `host/invoke.ts`
-// uses exactly that fact to route the two shell-only canvas reports.
+// Android WebView has a bridge, and `host/invoke.ts` uses exactly that fact to
+// route the two shell-only canvas reports.
 
 /** The hosts this one React tree is built for. */
 export type Runtime = 'tauri' | 'web' | 'android';
@@ -94,20 +99,22 @@ export const RUNTIME: Runtime = (() => {
 /**
  * The carrier this chrome is driving: who owns the CAD document.
  *
- * * `unknown` - a `tauri` build that has not received a `cad_status` answer yet.
- *   The native host is asked first, because its answer is the only way an X11
- *   host can announce the carrier it really runs. Nothing else is inferred from
- *   this state.
+ * * `unknown` - a `tauri`/`android` build that has not received a `cad_status`
+ *   answer yet. The native host is asked first, because its answer is the only
+ *   way a host can announce the carrier it really runs. Nothing else is inferred
+ *   from this state.
  * * `native-below` - the native host owns the document and the surface below the
- *   WebView (Linux native Wayland, Windows); every command is a Tauri command.
+ *   WebView (Linux native Wayland, Windows, an Android native session); every
+ *   command is a Tauri command.
  * * `dom-canvas` - the wasm session inside the page is the only CAD authority
- *   (browser, Android, X11/XWayland): the data commands belong to the adapter.
+ *   (browser, X11/XWayland; a host that reports it): the data commands belong to
+ *   the adapter.
  */
 export type Carrier = 'unknown' | 'native-below' | 'dom-canvas';
 
 /** The state a build starts in, before any host has reported a carrier. */
 export function initialCarrier(runtime: Runtime): Carrier {
-  return runtime === 'tauri' ? 'unknown' : 'dom-canvas';
+  return runtime === 'web' ? 'dom-canvas' : 'unknown';
 }
 
 /** A listener told about every **modelled** carrier change. */
@@ -118,16 +125,17 @@ export interface CarrierStore {
   /** The carrier right now. */
   now(): Carrier;
   /**
-   * Apply one reported `cad_status.surfaceMode` and report whether the modelled
-   * carrier **changed**.
+   * Apply one reported `cad_status.hostProfile.surfaceMode` and report whether
+   * the modelled carrier **changed**.
    *
-   * `"dom-canvas"` selects that carrier; anything else - a missing field on an
-   * older host, a `null`, an unrecognised string - resolves to `native-below`,
-   * exactly like `cad/surface.ts`'s `surfaceModeFromShell`. The answer is
-   * "the value is different now", so `unknown -> native-below` counts as a
-   * change: it is announced like any other transition (a listener that only
-   * acts on the wasm carrier ignores it, which is why the first native report
-   * cannot disturb a `native-below` host).
+   * `"dom-canvas"` selects that carrier; anything else - a missing profile on an
+   * older (pre-P1) host, a `null`, an unrecognised string - resolves to
+   * `native-below`, the bootstrap rule this store has always applied
+   * (`cad/surface.ts` is the stricter reader and marks a present-but-unknown
+   * value explicitly). The answer is "the value is different now", so
+   * `unknown -> native-below` counts as a change: it is announced like any other
+   * transition (a listener that only acts on the wasm carrier ignores it, which is
+   * why the first native report cannot disturb a `native-below` host).
    */
   observe(surfaceMode: unknown): boolean;
   /** Whether the wasm session owns the CAD document, i.e. the carrier is `dom-canvas`. */
@@ -173,7 +181,8 @@ export function carrierNow(): Carrier {
   return state.now();
 }
 
-/** Apply one reported `cad_status.surfaceMode`; `true` when the carrier changed. */
+/** Apply one reported `cad_status.hostProfile.surfaceMode`; `true` when the
+ * carrier changed. */
 export function observeCarrier(surfaceMode: unknown): boolean {
   return state.observe(surfaceMode);
 }
@@ -198,8 +207,8 @@ export interface TauriProbeScope {
  * Whether the Tauri IPC bridge is present in this document.
  *
  * This is a *probe*, never a capability claim: it says the bridge object exists,
- * not that any particular command is implemented. An Android WebView carrier
- * publishes it; the plain browser bundle does not. The default scope is
+ * not that any particular command is implemented. The Tauri hosts and an Android
+ * WebView publish it; the plain browser bundle does not. The default scope is
  * `globalThis` (which **is** `window` in a page) so the same call works in a
  * Node test double.
  */

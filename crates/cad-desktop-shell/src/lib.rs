@@ -20,23 +20,74 @@
 //! by `scripts/check-architecture.py`). Window creation, the GTK overlay
 //! bridge and renderer telemetry stay in the concrete host.
 //!
-//! **Target gating**: `tauri` is a Linux/Windows/macOS-target dependency, and
-//! every module is compiled out elsewhere. On wasm the crate is an empty shell, so
-//! `cargo check --workspace --lib --target wasm32-unknown-unknown` keeps
-//! validating isolation.
+//! **Target gating**: `tauri` is a Linux/Windows/macOS/Android-target dependency,
+//! and every module is compiled out elsewhere. On wasm the crate is an empty
+//! shell, so `cargo check --workspace --lib --target wasm32-unknown-unknown` keeps
+//! validating isolation. Android is included because the `native-below` host
+//! (`app-android`) serves its CAD commands from this shared registry; nothing here
+//! is desktop-only.
 
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
 pub mod commands;
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
+pub mod events;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
 pub mod popup;
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
 pub mod state;
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
 pub mod threading;
 
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
 pub use commands::{register_commands, CadCommandAck, CadCommandAlias, COMMAND_NAMES};
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
+pub use events::TauriEventSink;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
 pub use popup::DesktopPopupTarget;
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
 pub use state::{lock, new_shared, ProbeShared, Shared, ShellPopupHost, ShellTelemetry};

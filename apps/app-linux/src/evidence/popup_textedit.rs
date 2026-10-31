@@ -440,7 +440,7 @@ pub(super) fn schedule_textedit_phase(
 
 /// Step 1: read the real status and decide whether this phase can run at all.
 fn precondition_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<TextEditEvidence>>) {
-    let status = crate::host::cad_status(app.state::<ProbeShared>());
+    let status = crate::host::cad_status_snapshot(app.state::<ProbeShared>());
     let selection = &status.selection;
     eprintln!(
         "[probe] popup textedit evidence: precondition selection_count={} text_present={} \
@@ -559,7 +559,7 @@ fn open_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<TextEditEvidence>>) {
         payload.multiline
     );
 
-    let during = crate::host::cad_status(app.state::<ProbeShared>());
+    let during = crate::host::cad_status_snapshot(app.state::<ProbeShared>());
     let during_text = describe_status_popup(&during);
     let expected = format!("{}:{}:true", ack.kind, ack.popup_label);
     eprintln!(
@@ -638,7 +638,7 @@ fn verify_step(app: &tauri::AppHandle, evidence: &Arc<Mutex<TextEditEvidence>>) 
         lock_evidence(evidence).skip("verify");
         return;
     }
-    let status = crate::host::cad_status(app.state::<ProbeShared>());
+    let status = crate::host::cad_status_snapshot(app.state::<ProbeShared>());
     let selection = &status.selection;
     let text = selection.text.clone();
     let tool = status.tool.as_ref().map(|tool| tool.key.clone());
@@ -743,7 +743,7 @@ fn status_after_step(
         lock_evidence(evidence).skip("status_after");
         return;
     }
-    let status = crate::host::cad_status(app.state::<ProbeShared>());
+    let status = crate::host::cad_status_snapshot(app.state::<ProbeShared>());
     let text = describe_status_popup(&status);
     eprintln!(
         "[probe] popup textedit evidence: status after close attempt={attempt} popup={text} \

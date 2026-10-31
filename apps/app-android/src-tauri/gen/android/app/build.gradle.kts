@@ -16,6 +16,9 @@ val tauriProperties = Properties().apply {
 
 android {
     compileSdk = 37
+    // The documented repository NDK (`docs/android-host.md`, `scripts/build-android.sh`):
+    // pin it so a Gradle build cannot silently use whatever NDK happens to be installed.
+    ndkVersion = "29.0.13846066"
     namespace = "dev.yacr.app"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
@@ -56,6 +59,15 @@ android {
     }
     buildFeatures {
         buildConfig = true
+    }
+    sourceSets {
+        getByName("main") {
+            // The native carrier reads the repository's committed `fonts/` package
+            // (osifont.ttf + fonts.json) straight from APK assets; the generated
+            // project holds no second copy. Relative to gen/android/app, the
+            // repository root is six levels up.
+            assets.srcDir("../../../../../../fonts")
+        }
     }
 }
 

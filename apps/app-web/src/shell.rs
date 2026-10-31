@@ -32,32 +32,33 @@
 //! | `loading`/`importProgress` | the host's real import state | a synchronous install is never "loading" |
 //! | `snapSpacing`/`snapEnabled`/`gridEnabled`/`orthoEnabled`/`hoverPreview` | the session's own switches | real session state (F7/F8/F9 work here) |
 //!
-//! Four keys are added on top of the frozen `CadStatus` shape (the same way the
-//! Linux `dom-canvas` host adds them):
+//! One `hostProfile` object is added on top of the frozen `CadStatus` shape,
+//! plus the optional session descriptor — the same [`WireStatus`] envelope the
+//! Linux `dom-canvas` host returns (the wire is now identical on both):
 //!
-//! * `surfaceMode: "dom-canvas"` — the carrier
-//!   (`apps/desktop-ui/src/cad/surface.ts` selects the in-DOM canvas path on
-//!   exactly this string);
-//! * `palettesAvailable: true` — this carrier **is** the real desktop session, so
-//!   it has the layer table, the selection rows and the settings the docked
-//!   palettes read (`cad_layers`, `cad_setting*` are all served here). The chrome
-//!   reads this flag (`App.tsx` → `cad/surface.ts::palettesOffered`) and an absent
-//!   flag means "as today"; reporting `false` would hide panels this carrier can
-//!   fill;
-//! * `standardViews: []` — the standard-view capability list, still **empty** in
-//!   this round. The chrome reads a present list as authoritative and disables the
-//!   seven view buttons with their own reason; an absent list would mean "the host
-//!   declared nothing" and keep them enabled. The list is now **stale**: the
-//!   front-end funnel forwards `cad_standard_view` and the session's own router
-//!   would execute it, so the earlier "no transport" justification no longer holds.
-//!   Enabling them is a separate decision that needs its own acceptance (what a
-//!   3D-view selector means on this 2D presenter, per key), recorded as open in
+//! * `hostProfile` — the typed carrier description from
+//!   `cad_ui_core::session::HostProfile::dom_canvas()`:
+//!   `{"surfaceMode":"dom-canvas","documentOwner":"wasm","palettesAvailable":true,
+//!   "standardViews":[]}`. `surfaceMode` is what
+//!   `apps/desktop-ui/src/cad/surface.ts` selects the in-DOM canvas path on;
+//!   `palettesAvailable: true` is honest because this carrier **is** the real
+//!   desktop session, so it has the layer table, the selection rows and the
+//!   settings the docked palettes read (`cad_layers`, `cad_setting*` are all
+//!   served here). `standardViews: []` means **declared, none available** — the
+//!   chrome disables the seven view buttons with their own reason; this list is
+//!   now **stale** (the funnel forwards `cad_standard_view` and the session's own
+//!   router would execute it), so enabling them is a separate decision that needs
+//!   its own per-key acceptance, recorded as open in
 //!   `docs/validation-web-funnel-parity-2026-10-28.md` §4;
 //! * `canvasSession: {label, batches, draws}` — the session's own descriptor,
 //!   present only while a session is live. `batches` is the prepared scene's
 //!   resident batch count; `draws` is `null` because the session's engine owns the
 //!   draw submission count and does not publish it to this layer (never the same
 //!   number reported twice under two names).
+//!
+//! The old top-level `surfaceMode`/`palettesAvailable`/`standardViews` keys are
+//! gone: the carrier is named inside `hostProfile` on every host, so "absent key"
+//! no longer has to mean anything.
 //!
 //! # `shell_commands`/`shell_aliases`: the router's own vocabulary
 //!
@@ -88,10 +89,12 @@
 //! vocabulary is still the real one (it is a property of the router, not of the
 //! target).
 
-use cad_ui_core::session::{admissible_names, alias_pairs, CadCommandAlias, CadStatus};
+use cad_ui_core::session::{
+    admissible_names, alias_pairs, wire_status_json, CadCommandAlias, CadStatus, HostProfile,
+};
 use serde_json::{json, Value};
 
-/// The carrier this crate implements, as `cad_status.surfaceMode` spells it.
+/// The carrier this crate implements, as `cad_status.hostProfile.surfaceMode` spells it.
 ///
 /// `apps/desktop-ui/src/cad/surface.ts` selects the in-DOM canvas path on exactly
 /// this string, so it is a constant, not a computed value.
@@ -112,7 +115,7 @@ pub const BACKEND_WEBGL2: &str = "webgl2";
 pub const SHELL_COMMAND_REFUSAL: &str = "unsupported-runtime: cad_command";
 
 /// The session descriptor the chrome reads to name the open drawing.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CanvasSession {
     /// The label the session was opened with.
     pub label: String,
@@ -134,38 +137,17 @@ pub struct Carrier {
 ///
 /// `status` is the session's own snapshot (or
 /// [`cad_ui_core::session::unsupported_status`] when there is none); `carrier`
-/// carries only the four keys this carrier adds. See the module docs for the
-/// per-field table.
+/// carries the session's descriptor. The wire envelope is the shared
+/// [`cad_ui_core::session::WireStatus`] — frozen `CadStatus` fields first, then
+/// the always-present `hostProfile` ([`HostProfile::dom_canvas`]), then the
+/// optional `canvasSession` — so the field names/order cannot drift from the
+/// desktop `dom-canvas` host (see the module docs).
 pub fn status_json(status: &CadStatus, carrier: &Carrier) -> String {
-    let mut wire =
-        serde_json::to_value(status).expect("CadStatus is a plain struct of JSON values");
-    let object = wire
-        .as_object_mut()
-        .expect("a serialized CadStatus is a JSON object");
-    // The carrier flag the chrome dispatches on. It describes the carrier this
-    // module implements, not a per-call measurement.
-    object.insert("surfaceMode".to_string(), json!(SURFACE_MODE_DOM_CANVAS));
-    // The palettes project this session's own layer table, selection rows and
-    // settings, all of which are served here (`cad_layers`, `cad_setting*`), so the
-    // honest answer is "available". The chrome reads this flag and treats an absent
-    // one as available, which is what every older host relies on.
-    object.insert("palettesAvailable".to_string(), json!(true));
-    // The standard-view capability list: **still empty, and now stale** — the
-    // funnel forwards `cad_standard_view`, so the "no transport" reason below is no
-    // longer true; enabling the seven views needs its own per-key acceptance (see
-    // the module docs). `[]` keeps the chrome's explicit, translated refusal.
-    object.insert("standardViews".to_string(), json!([]));
-    if let Some(session) = &carrier.canvas_session {
-        object.insert(
-            "canvasSession".to_string(),
-            json!({
-                "label": session.label,
-                "batches": session.batches,
-                "draws": session.draws,
-            }),
-        );
-    }
-    wire.to_string()
+    wire_status_json(
+        status,
+        &HostProfile::dom_canvas(),
+        carrier.canvas_session.as_ref(),
+    )
 }
 
 /// The command names this carrier executes: the router's whole vocabulary.

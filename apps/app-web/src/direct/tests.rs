@@ -396,60 +396,28 @@ fn the_native_entry_refuses_a_session_command_and_answers_the_vocabulary() {
 }
 
 #[test]
-fn the_wire_command_set_is_the_desktop_command_set() {
-    // Every name this transport serves is a desktop command name, and every
-    // desktop CAD command name is served here.
-    let desktop: Vec<&str> = crate::direct::WIRE_COMMANDS.to_vec();
-    let shell: Vec<&str> = cad_desktop_command_names()
-        .into_iter()
-        // `cad_status` is the carrier's own status projection (`shell_status`),
-        // not a request-carrying command; see the test below.
-        .filter(|name| name.starts_with("cad_") && *name != "cad_status")
-        .collect();
-    let mut missing: Vec<&str> = shell
-        .into_iter()
-        .filter(|name| !desktop.contains(name))
-        .collect();
-    missing.sort_unstable();
-    assert!(
-        missing.is_empty(),
-        "these desktop commands have no dom-canvas wire entry: {missing:?}"
+fn the_wire_command_set_is_the_registrys_shared_set() {
+    // Both lists are generated from the one registry (`SHARED_WIRE_COMMAND_NAMES`
+    // here, `WIRE_COMMANDS` from the same rows in this module), so this test fails
+    // if either emitter drifts from the table.
+    assert_eq!(
+        crate::direct::WIRE_COMMANDS,
+        cad_ui_core::session::SHARED_WIRE_COMMAND_NAMES,
+        "the dom-canvas list must be the registry's shared rows, in order"
     );
-    for name in desktop {
+    for name in crate::direct::WIRE_COMMANDS {
         assert!(is_wire_command(name), "{name}");
+        assert!(
+            cad_ui_core::session::WIRE_COMMAND_NAMES.contains(name),
+            "{name} is not in the full registry"
+        );
     }
-}
-
-/// The desktop command names this crate mirrors, kept in one place.
-///
-/// The authoritative list is `cad_desktop_shell::COMMAND_NAMES`; that crate is a
-/// Tauri layer this host cannot depend on, so the list is spelled out here and the
-/// test above is what keeps it honest (an added desktop command that is not served
-/// here fails the test).
-fn cad_desktop_command_names() -> Vec<&'static str> {
-    vec![
-        "cad_command",
-        "cad_command_aliases",
-        "cad_status",
-        "cad_commands",
-        "cad_set_tool_parameter",
-        "cad_set_tool_text",
-        "cad_set_selected_text",
-        "cad_set_selected_property",
-        "cad_standard_view",
-        "cad_open_popup",
-        "cad_close_popup",
-        "cad_settings",
-        "cad_set_setting",
-        "cad_layers",
-        "cad_set_layer_visible",
-        "cad_restore_layers",
-        "cad_set_active_layer",
-        "cad_create_layer",
-        "cad_rename_layer",
-        "cad_delete_layer",
-        "cad_set_layer_property",
-    ]
+    // The three desktop-only rows are the difference between the two sets; none of
+    // them is a dom-canvas command (see the `cad_status` test below).
+    assert_eq!(
+        cad_ui_core::session::TAURI_ONLY_WIRE_COMMAND_NAMES,
+        &["probe_status", "probe_input", "cad_status"]
+    );
 }
 
 /// `cad_status` is deliberately **not** in this transport: it is a status
@@ -480,8 +448,10 @@ fn every_argument_struct_maps_to_the_tauri_signature_values() {
     assert_eq!(flag.number, None);
     assert_eq!(flag.flag, Some(true));
 
-    let text: TextArgs = serde_json::from_str(r#"{"text":"hi"}"#).expect("decodes");
+    let text: ToolTextArgs = serde_json::from_str(r#"{"text":"hi"}"#).expect("decodes");
     assert_eq!(text.text, "hi");
+    let selected: SelectedTextArgs = serde_json::from_str(r#"{"text":"hi"}"#).expect("decodes");
+    assert_eq!(selected.text, "hi");
 
     let property: PropertyArgs =
         serde_json::from_str(r#"{"key":"layer","value":"0"}"#).expect("decodes");
@@ -502,17 +472,19 @@ fn every_argument_struct_maps_to_the_tauri_signature_values() {
         serde_json::from_str(r#"{"name":"0","visible":false}"#).expect("decodes");
     assert_eq!((visible.name.as_str(), visible.visible), ("0", false));
 
-    let name: LayerNameArgs = serde_json::from_str(r#"{"name":"DOORS"}"#).expect("decodes");
+    let name: ActiveLayerArgs = serde_json::from_str(r#"{"name":"DOORS"}"#).expect("decodes");
     assert_eq!(name.name, "DOORS");
+    let create: CreateLayerArgs = serde_json::from_str(r#"{"name":"DOORS"}"#).expect("decodes");
+    assert_eq!(create.name, "DOORS");
 
-    let rename: LayerRenameArgs =
+    let rename: RenameLayerArgs =
         serde_json::from_str(r#"{"layer":"DOORS","name":"PARTITIONS"}"#).expect("decodes");
     assert_eq!(
         (rename.layer.as_str(), rename.name.as_str()),
         ("DOORS", "PARTITIONS")
     );
 
-    let layer: LayerArgs = serde_json::from_str(r#"{"layer":"0"}"#).expect("decodes");
+    let layer: DeleteLayerArgs = serde_json::from_str(r#"{"layer":"0"}"#).expect("decodes");
     assert_eq!(layer.layer, "0");
 
     let attribute: LayerPropertyArgs =

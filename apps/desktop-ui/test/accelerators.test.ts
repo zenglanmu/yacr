@@ -256,21 +256,21 @@ test('the shell dispatches the mapped name through submitCommand and prevents th
   assert.equal(block.includes('setHistoryOpen'), false, 'no chrome toggle is run by a document chord');
   // It runs through the one admission the chrome uses everywhere.
   assert.ok(app.includes('[status, pending, catalogNames]'), 'canCommand stays the shared admission');
-  assert.ok(app.includes('}, [popupOpen, submitCommand, toolActive, gripDragActive, textStep, canCommand]);'),
-    'the listener re-installs when the accelerator inputs change');
+  assert.ok(app.includes('}, [popupOpen, submitCommand, toolActive, gripDragActive, textStep, canCommand, layout, t]);'),
+    'the listener re-installs when the accelerator or layout inputs change');
   assert.ok(app.includes('const textStep = awaitingToolText(status);'));
 });
 
-test('the existing Ctrl+0/1/9, F2, drafting and Enter/Escape branches are unchanged', async () => {
+test('the four chrome chords are routed per layout, and the drafting/tool branches are unchanged', async () => {
   const app = await readModule('App.tsx');
   assert.ok(app.includes("if (event.ctrlKey && !event.metaKey && !event.altKey && event.key === '0')"));
-  assert.ok(app.includes('setCleanScreen(value => !value);'));
+  assert.ok(app.includes("if (runShortcut('cleanScreen')) event.preventDefault();"));
   assert.ok(app.includes("if (event.ctrlKey && event.key === '9')"));
-  assert.ok(app.includes('setCommandLineOpen(value => !value);'));
+  assert.ok(app.includes("if (runShortcut('commandLine')) event.preventDefault();"));
   assert.ok(app.includes("if (event.ctrlKey && event.key === '1')"));
-  assert.ok(app.includes('setPropertiesOpen(value => !value);'));
+  assert.ok(app.includes("if (runShortcut('properties')) event.preventDefault();"));
   assert.ok(app.includes("if (event.key === 'F2')"));
-  assert.ok(app.includes('setHistoryOpen(value => !value);'));
+  assert.ok(app.includes("if (runShortcut('history')) event.preventDefault();"));
   assert.ok(app.includes('const draftingCommand = draftingAcceleratorCommand(event.key);'));
   assert.ok(app.includes('if (draftingCommand) { event.preventDefault(); void submitCommand(draftingCommand); return; }'));
   assert.ok(app.includes('toolCommandForKey(event.key, {'));

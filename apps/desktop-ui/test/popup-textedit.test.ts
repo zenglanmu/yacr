@@ -511,7 +511,8 @@ test('a host refusal to open is shown as catalog copy, other failures verbatim',
 
 test('the textEdit document starts none of the shell global effects', async () => {
   const shared = [
-    'startCadPolling(',
+    'useCadEvents(',
+    'cadEventSource(',
     "'cad_status'",
     'bindBrowserDefaults(',
     'bindProbeInput(',

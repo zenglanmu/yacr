@@ -893,6 +893,7 @@
   "mobile.close": "关闭",
   "mobile.send": "执行",
   "mobile.refusal.unsupported": "这些工具暂时都不能用：当前宿主没有提供它们的命令。",
+  "mobile.refusal.docked_panel": "{panel}面板需要更宽的窗口。",
   "macos.picker_title": "打开 DWG 或 DXF 图纸",
   "macos.picker_filter": "CAD 图纸（DWG、DXF）",
   "macos.picker_empty": "文件选择器未返回文件",

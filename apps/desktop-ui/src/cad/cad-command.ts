@@ -1,9 +1,8 @@
-// The command funnel: admission of one typed line, the Enter funnel and the
-// `cad_status` poll. Split out of `cad.ts` (file-size ceiling); `cad.ts`
-// re-exports every symbol here so the chrome's import surface is unchanged.
+// The command funnel: admission of one typed line and the Enter funnel. Split
+// out of `cad.ts` (file-size ceiling). The status itself arrives through the
+// typed push event source (`cad/cad-events.ts`); there is no polling here.
 
 import { admitCommandText, isLocalChromeCommand } from '../commands/commands.ts';
-import { parseCadStatus } from './cad-status.ts';
 import type { CadStatus, Invoke } from './cad-status.ts';
 
 /**
@@ -89,35 +88,4 @@ export function handleCommandKey(event: CommandKeyEvent, submit: () => void): vo
   if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229 || event.repeat) return;
   event.preventDefault();
   void submit();
-}
-
-/** A timer handle of whichever clock drives the poll (browser or a test double). */
-type TimerHandle = ReturnType<typeof setTimeout>;
-
-/** The clock the poll schedules on (the global one, or a test double). */
-export interface PollClock {
-  setTimeout(callback: () => void, delay: number): TimerHandle;
-  clearTimeout(timer?: TimerHandle): void;
-}
-
-export function startCadPolling(
-  invoke: Invoke,
-  onStatus: (status: CadStatus | null) => void,
-  onError: (error: string) => void,
-  clock: PollClock = globalThis,
-): () => void {
-  let stopped = false;
-  let timer: TimerHandle | undefined;
-  let failures = 0;
-  async function poll(): Promise<void> {
-    try {
-      const status = parseCadStatus(await invoke('cad_status'));
-      if (!stopped) { failures = 0; onStatus(status); }
-    } catch (error) {
-      if (!stopped) { failures++; onStatus(null); onError(String(error)); }
-    }
-    if (!stopped) timer = clock.setTimeout(poll, failures ? Math.min(4000, 500 * 2 ** Math.min(failures, 3)) : 250);
-  }
-  void poll();
-  return () => { stopped = true; clock.clearTimeout(timer); };
 }

@@ -1,6 +1,14 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.app_android" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- Transparency is arranged at the **WebView** level, not with Tauri's window
+             `transparent` flag (which is unsupported on Android). `MainActivity` puts a
+             `SurfaceView` behind the WebView and calls `setBackgroundColor(TRANSPARENT)`
+             on the WebView itself, so the window must not paint an opaque layer
+             over the native surface. `windowIsTranslucent` is deliberately not used: it
+             makes the whole activity non-opaque (and changes task/recents behaviour);
+             the platform's normal `SurfaceView` hole-punch already exposes the layer
+             behind the window. Edge-to-edge (`enableEdgeToEdge()`) is unaffected. -->
+        <item name="android:windowBackground">@android:color/transparent</item>
     </style>
 </resources>

@@ -163,8 +163,8 @@ test('no refusal line is rendered under either command field', async () => {
     assert.equal(source.includes('cad-command-message'), false, `${name} has no message element id`);
   }
   // The mobile bar keeps exactly one message element, and it is the **host
-  // banner** (`shell.displayedError`): a failed canvas module or poll still needs
-  // a surface on a phone, and it is not a command-line refusal.
+  // banner** (`shell.displayedError`): a failed canvas module or status stream
+  // still needs a surface on a phone, and it is not a command-line refusal.
   const mobile = await readModule('components/MobileCommandBar.tsx');
   assert.equal(mobile.split('mobile-commandbar__message').length - 1, 1, 'one message element, the host banner');
   assert.ok(mobile.includes('{shell.displayedError}'), 'the banner still renders the host sentence');

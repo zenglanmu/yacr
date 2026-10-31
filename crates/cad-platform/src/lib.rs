@@ -15,8 +15,8 @@ pub type HostFuture<'a, T> = Pin<Box<dyn Future<Output = CadResult<T>> + 'a>>;
 /// futures and require no `Send`.
 pub mod files;
 pub use files::{
-    ConfigLoad, ConfigStore, FileEvent, FilePurpose, FileTarget, HostCapabilities, PlatformFiles,
-    SavePurpose, SurfaceMetrics, SurfaceSource,
+    ConfigLoad, ConfigStore, FileEvent, FilePurpose, FileTarget, HostCapabilities,
+    NonPersistentConfigStore, PlatformFiles, SavePurpose, SurfaceMetrics, SurfaceSource,
 };
 
 /// Host-side font fetching.

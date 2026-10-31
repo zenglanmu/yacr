@@ -23,7 +23,7 @@
 use std::sync::Arc;
 
 use cad_desktop_shell::commands::{
-    cad_status_impl, probe_input_impl, probe_status_impl, COMMAND_NAMES,
+    cad_status_wire_impl, probe_input_impl, probe_status_impl, COMMAND_NAMES,
 };
 use cad_desktop_shell::state::{lock, new_shared, Shared};
 use cad_ui_core::launch::LaunchOptions;
@@ -70,7 +70,7 @@ fn dump_status(name: &str, shared: &Arc<std::sync::Mutex<Shared>>) {
 }
 
 fn dump_cad_status(name: &str, shared: &Arc<std::sync::Mutex<Shared>>) {
-    let value = serde_json::to_value(cad_status_impl(shared)).expect("status");
+    let value = serde_json::to_value(cad_status_wire_impl(shared)).expect("status");
     assert_golden(name, &value);
 }
 
@@ -103,9 +103,13 @@ fn probe_status_is_byte_identical_to_the_pre_migration_host() {
     dump_status("probe_status_stopped.json", &stopped);
 }
 
+// `cad_status` is **not** byte-identical to the pre-P1 host: the additive
+// `hostProfile` object was a deliberate wire change (P1). This test pins the
+// current envelope; byte-identity to the pre-migration body holds only for the
+// two command pins above/below that the profile change did not touch.
 #[test]
 #[allow(deprecated)] // the frozen `cad_status` wire label is built by hand here
-fn cad_status_is_byte_identical_to_the_pre_migration_host() {
+fn cad_status_wire_matches_the_pinned_fixtures() {
     dump_cad_status("cad_status_probe_mode.json", &new_shared(probe_launch()));
     dump_cad_status(
         "cad_status_no_snapshot.json",
@@ -254,17 +258,20 @@ fn the_registered_command_set_equals_the_pre_migration_set() {
     let names: std::collections::BTreeSet<&str> = COMMAND_NAMES.iter().copied().collect();
     assert_eq!(names, expected, "registered command names changed");
 
-    // And the `generate_handler!` list really is that set, not just the constant.
-    let source = include_str!("../src/commands.rs");
-    let start = source
-        .find("generate_handler![")
-        .expect("one generate_handler! invocation");
-    let body = &source[start + "generate_handler![".len()..];
-    let end = body.find(']').expect("terminated list");
-    let registered: std::collections::BTreeSet<&str> = body[..end]
-        .split(',')
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .collect();
-    assert_eq!(registered, expected, "generate_handler! list changed");
+    // Both the constant and the generated `generate_handler!` list come from the
+    // one registry table; pin the constant to that table (order included) so an
+    // emitter that drops or reorders a row fails here.
+    assert_eq!(
+        COMMAND_NAMES,
+        cad_ui_core::session::WIRE_COMMAND_NAMES,
+        "the desktop command list must be the registry table, in order"
+    );
+
+    // The handler list cannot be read back at runtime, and a source-string check
+    // of the emitter template proves nothing about its expansion. The real
+    // protection is structural: `COMMAND_NAMES`, the generated wrappers and the
+    // `generate_handler!` entries all walk the same registry rows, so a row that
+    // is dropped, renamed or mis-grouped fails to compile (missing wrapper /
+    // unresolved `__cmd__*`). This test therefore stops at the constant equality
+    // above; do not cite a `contains` check as registration evidence.
 }

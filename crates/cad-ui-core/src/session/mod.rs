@@ -26,9 +26,12 @@ mod bytes;
 mod command_log;
 mod commands;
 mod diagnostics;
+pub mod events;
 mod input;
 mod layers;
 mod point_style;
+mod profile;
+pub mod registry;
 mod settings;
 mod snap_unit;
 mod status;
@@ -83,7 +86,18 @@ pub use self::commands::{
     MEASUREMENT_SELECTORS, PDMODE_SELECTOR, PDSIZE_SELECTOR, SNAPUNIT_SELECTOR, ZOOM_IN_FACTOR,
     ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
+pub use self::events::{
+    derive_batch, CadEvent, CadEventKind, CanvasJson, EventBus, EventSink, StatusFrame,
+    EVENT_RING_CAPACITY,
+};
 pub use self::layers::{CadLayer, CadLayerColor, CadLayerWrite, CadLayers};
+pub use self::profile::{
+    wire_status_json, DocumentOwner, HostProfile, HostSurfaceMode, WireStatus,
+};
+pub use self::registry::{
+    SHARED_WIRE_COMMAND_NAMES, TAURI_ONLY_WIRE_COMMAND_NAMES, WASM_EXPORT_WIRE_COMMAND_NAMES,
+    WIRE_COMMAND_NAMES,
+};
 pub use self::settings::{
     CadSettingKey, CadSettingValue, CadSettings, SETTINGS_INVALID_PLOT_FORMAT,
     SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,

@@ -18,13 +18,17 @@ is the wiring that makes such a run honest:
   * `app-android/package.json` keeps the pinned CLI and the `tauri` script the
     generated Gradle `rust` plugin invokes (`npm run tauri android
     android-studio-script`);
-  * the native side registers **exactly** the two shell-only canvas reports and no
-    CAD command, and pulls in no `cad-*` crate (no second document model);
+  * the native side is a **native-below** carrier: the Activity owns a `SurfaceView`
+    under the transparent WebView and bridges its lifecycle to the native wgpu
+    renderer through the frozen JNI symbols. The shared command set is registered by
+    the native host (the command registry, not this file, owns its exact membership);
+    the two shell-only reports stay present because the chrome still sends them;
   * the refusal contract: marker text, marker first, exit code `6` for `webgl2`;
   * the edge-to-edge gesture-bar inset: the Activity reads `WindowInsets` and
     publishes `--yacr-safe-bottom` on the page, and `mobile.css` is the consumer of
     that exact property name (the two halves of one contract, in two languages);
-  * the generated Gradle project is committed, and the build outputs are ignored.
+  * the generated Gradle project is committed, pinned to the documented NDK, packages
+    the repository `fonts/` assets, and its build outputs are ignored.
 
 Every check reports one problem string; `main` prints them and exits non-zero.
 Standard library only: this runs in the `core-quality` job, not on a runner with
@@ -50,8 +54,9 @@ GEN_ANDROID = SRC_TAURI / "gen" / "android"
 UI_PACKAGE = ROOT / "apps" / "desktop-ui" / "package.json"
 UI_SCRIPT = ROOT / "scripts" / "build-android-ui.sh"
 
-# The two shell-only reports `apps/desktop-ui/src/host/invoke.ts` sends to Tauri on
-# this carrier; the native host must register these and nothing else.
+# The shell-only reports `apps/desktop-ui/src/host/invoke.ts` still sends to Tauri on
+# this carrier. They stay registered; the full CAD command set is generated from the
+# shared registry and its exact membership is owned there, not pinned in this file.
 SHELL_ONLY_COMMANDS = ("canvas_session_status", "canvas_runtime_failed")
 MARKER = "yacr: unsupported-runtime: webgl2"
 
@@ -104,14 +109,12 @@ def check_manifest() -> list[str]:
     if "tauri-build" not in manifest.get("build-dependencies", {}):
         problems.append("src-tauri/Cargo.toml: `tauri-build` must be a build-dependency")
 
-    # Iron rule 8: the native carrier holds no document model.
-    for section in ("dependencies",):
-        for name in manifest.get(section, {}):
-            if name.startswith("cad-"):
-                problems.append(
-                    f"src-tauri/Cargo.toml: the Android carrier must not depend on '{name}' "
-                    "(the wasm session is the only CAD authority)"
-                )
+    # Iron rule 8 used to forbid every `cad-*` crate here because the wasm session was
+    # the only authority. The native-below carrier changes that: the native renderer
+    # now owns the document, so `cad-*` dependencies are expected. This file does not
+    # pin their names or placement (that is the Rust lane's/registry's contract); it
+    # only keeps the Android-only `tauri` scoping above so host/wasm checks still
+    # compile the documented empty shell.
     if "custom-protocol" not in manifest.get("features", {}):
         problems.append("src-tauri/Cargo.toml: the `custom-protocol` feature must stay declared (the CLI needs it)")
     return problems
@@ -165,6 +168,14 @@ def check_config() -> list[str]:
     return problems
 
 
+def has_native_cad_dependency() -> bool:
+    """Whether the Android crate now carries the shared native CAD crates."""
+    manifest = tomllib.loads(read(CARGO))
+    tables = [manifest.get("dependencies", {})]
+    tables.extend(table.get("dependencies", {}) for table in manifest.get("target", {}).values())
+    return any(name.startswith("cad-") for deps in tables for name in deps)
+
+
 def check_sources() -> list[str]:
     problems: list[str] = []
     for path in (LIB_RS, HOST_RS, REFUSAL_RS):
@@ -183,19 +194,46 @@ def check_sources() -> list[str]:
             "src/host.rs: run() must carry #[cfg_attr(mobile, tauri::mobile_entry_point)] "
             "(the generated Kotlin glue calls the `start_app` symbol it emits)"
         )
+    native_carrier = has_native_cad_dependency()
     registered = re.findall(r"#\[tauri::command\]\s*pub fn (\w+)", host)
-    if tuple(registered) != SHELL_ONLY_COMMANDS:
-        problems.append(
-            "src/host.rs: exactly the two shell-only reports must be #[tauri::command] "
-            f"(expected {SHELL_ONLY_COMMANDS}, found {tuple(registered)})"
-        )
+    if not native_carrier:
+        # Before the shared native crates land, the wasm-backed carrier must keep its
+        # two shell-only reports (the exact old contract). Once the native renderer
+        # owns the document, the shared registry owns the command set and these reports
+        # are no longer the whole story.
+        for command in SHELL_ONLY_COMMANDS:
+            if command not in registered:
+                problems.append(
+                    f"src/host.rs: the shell-only report '{command}' must stay a #[tauri::command]"
+                )
     handler = re.search(r"generate_handler!\[([^\]]*)\]", host)
     if handler is None:
         problems.append("src/host.rs: the invoke handler must be generated")
+        names = ()
     else:
         names = tuple(name.strip() for name in handler.group(1).split(",") if name.strip())
-        if names != SHELL_ONLY_COMMANDS:
-            problems.append(f"src/host.rs: generate_handler! must register exactly {SHELL_ONLY_COMMANDS} (got {names})")
+        if not names:
+            problems.append("src/host.rs: generate_handler! must register the carrier's command set")
+        if not native_carrier:
+            for command in SHELL_ONLY_COMMANDS:
+                if command not in names:
+                    problems.append(f"src/host.rs: generate_handler! must keep registering '{command}'")
+        elif "register_commands" in host:
+            # Native carrier: the shared registry handler IS registered, by name
+            # through `cad_desktop_shell::commands::register_commands()`, and the
+            # local `generate_handler!` deliberately holds only this crate's two
+            # shell reports (a `generate_handler!` list cannot splice another
+            # closure in). Both reports must still be present in that local list.
+            for command in SHELL_ONLY_COMMANDS:
+                if command not in names:
+                    problems.append(
+                        f"src/host.rs: the local handler must keep registering '{command}'"
+                    )
+        elif set(names).issubset(SHELL_ONLY_COMMANDS):
+            problems.append(
+                "src/host.rs: the native carrier depends on cad-* but registers only the "
+                f"shell reports (got {names}); register the shared command set"
+            )
     if "process::exit" not in host:
         problems.append("src/host.rs: the webgl2 refusal must end the process")
 
@@ -267,6 +305,94 @@ def check_gesture_bar_inset() -> list[str]:
     return problems
 
 
+def check_native_carrier() -> list[str]:
+    """The Kotlin half of the native-below carrier (P5).
+
+    Pixels come from the native wgpu renderer on a `SurfaceView` **behind** the
+    transparent WebView. The four `native*` symbols are the frozen Kotlin <-> Rust
+    contract; the surface lifecycle and asset extraction are the only native
+    responsibilities the Activity owns. Static wiring only: no APK is built and no
+    device/emulator is run here.
+    """
+    problems: list[str] = []
+    app = GEN_ANDROID / "app"
+    activity = app / "src" / "main" / "java" / "dev" / "yacr" / "app" / "MainActivity.kt"
+    if not activity.is_file():
+        return [f"missing {activity.relative_to(ROOT)}"]
+    kotlin = read(activity)
+
+    for signature in (
+        "external fun nativeSurfaceCreated(surface: Surface, width: Int, height: Int): Long",
+        "external fun nativeSurfaceResized(handle: Long, width: Int, height: Int)",
+        "external fun nativeSurfaceDestroyed(handle: Long)",
+        "external fun nativeAssetsReady(fontsDir: String, imagesDir: String)",
+    ):
+        if signature not in kotlin:
+            problems.append(f"MainActivity.kt: frozen JNI symbol missing: `{signature}`")
+
+    for fragment in (
+        "SurfaceView(this)",
+        "setZOrderOnTop(false)",
+        "setZOrderMediaOverlay(false)",
+        "holder.addCallback(",
+        "fun surfaceCreated(holder: SurfaceHolder)",
+        "fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int)",
+        "fun surfaceDestroyed(holder: SurfaceHolder)",
+        "addOnAttachStateChangeListener",
+        "setBackgroundColor(Color.TRANSPARENT)",
+        "ASSET_EXTRACT_MARKER",
+        "copyFlatFontAssets",
+        "nativeAssetsReady(fontsDir.absolutePath, imagesDir.absolutePath)",
+        "runOnUiThread",
+    ):
+        if fragment not in kotlin:
+            problems.append(f"MainActivity.kt: native carrier wiring missing '{fragment}'")
+    if "setZOrderOnTop(true)" in kotlin:
+        problems.append("MainActivity.kt: an on-top SurfaceView would cover the React chrome")
+    # Wry calls onWebViewCreate before setContentView(webview), so the surface must be
+    # inserted after attach, at index 0 of the WebView's parent, not from the hook.
+    if not re.search(r"parent\.addView\(\s*surface,\s*0,", kotlin, re.S):
+        problems.append("MainActivity.kt: insert the SurfaceView at index 0 of the WebView parent")
+
+    gradle = read(app / "build.gradle.kts")
+    if not re.search(r'ndkVersion\s*=\s*"29\.0\.13846066"', gradle):
+        problems.append('build.gradle.kts: ndkVersion must be the documented "29.0.13846066"')
+    source_set = re.search(r'assets\.srcDir\("([^"]*fonts)"\)', gradle)
+    if source_set is None:
+        problems.append("build.gradle.kts: the repository fonts/ package must be an assets srcDir")
+    else:
+        fonts_dir = (app / source_set.group(1)).resolve()
+        if not (fonts_dir / "fonts.json").is_file():
+            problems.append(
+                f"build.gradle.kts: assets srcDir '{source_set.group(1)}' does not resolve to the "
+                f"repository fonts/ package (tried {fonts_dir})"
+            )
+
+    for theme_name in ("values", "values-night"):
+        theme = read(app / "src" / "main" / "res" / theme_name / "themes.xml")
+        if "@android:color/transparent" not in theme:
+            problems.append(
+                f"res/{theme_name}/themes.xml: windowBackground must be transparent over the native surface"
+            )
+    theme = read(app / "src" / "main" / "res" / "values" / "themes.xml")
+    if "unsupported on Android" not in theme:
+        problems.append(
+            "res/values/themes.xml: document that WebView-level transparency is used because "
+            "Tauri's window `transparent` is unsupported on Android"
+        )
+
+    manifest = read(app / "src" / "main" / "AndroidManifest.xml")
+    config_changes = re.search(r'android:configChanges="([^"]*)"', manifest)
+    if config_changes is None:
+        problems.append("AndroidManifest.xml: configChanges must stay declared (rotation keeps the surface alive)")
+    else:
+        declared = set(config_changes.group(1).split("|"))
+        for flag in ("orientation", "screenSize", "smallestScreenSize", "uiMode"):
+            if flag not in declared:
+                problems.append(f"AndroidManifest.xml: configChanges must keep '{flag}'")
+    return problems
+
+
 def check_generated_project_and_ignores() -> list[str]:
     problems: list[str] = []
     gradle = GEN_ANDROID / "app" / "build.gradle.kts"
@@ -295,6 +421,7 @@ def main() -> int:
         check_sources,
         check_ui_bundle_wiring,
         check_gesture_bar_inset,
+        check_native_carrier,
         check_generated_project_and_ignores,
     ):
         try:
@@ -306,8 +433,8 @@ def main() -> int:
         for problem in problems:
             print(f"  - {problem}", file=sys.stderr)
         return 1
-    print("android-host OK: src-tauri layout, conf, Android-only tauri, shell-only commands, refusal contract, "
-          "gesture-bar inset publisher")
+    print("android-host OK: src-tauri layout, conf, Android-only tauri, shell reports, refusal contract, "
+          "gesture-bar inset publisher, native SurfaceView/JNI carrier, pinned NDK + fonts assets")
     return 0
 
 

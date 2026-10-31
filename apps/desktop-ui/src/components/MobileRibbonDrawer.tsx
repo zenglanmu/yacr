@@ -32,6 +32,7 @@ import type { Translator } from '../i18n.ts';
 import { ribbonTab } from '../ribbon/ribbon-model.ts';
 import type { RibbonItem } from '../ribbon/ribbon-model.ts';
 import { mobileRibbonDomId, mobileRibbonSections, mobileRibbonTabs, panelRefusalKey, sharedRefusal } from '../layout/mobile-ribbon.ts';
+import { ONE_LAYOUT_SPACE_KEY } from '../limits.ts';
 
 /** The drawer's DOM id: the top bar's `aria-controls` names it. */
 export const MOBILE_DRAWER_ID = 'cad-mobile-drawer';
@@ -178,6 +179,11 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const tab = ribbonTab(shell.ribbonTab);
+  // The compact layout's stand-in for the desktop model/layout strip: one active
+  // Model space and the layout affordance disabled for the same **structural**
+  // reason `LayoutTabs` gives (one layout space per drawing, `limits.ts`). No
+  // handler exists for either, because no shipped carrier reports a second space.
+  const spaceReason = t(ONE_LAYOUT_SPACE_KEY);
   // `false`: the compact layout never renders the docked palettes, so the drawer
   // drops their toggles with the panels — the same carrier rule a `dom-canvas`
   // host uses, and the reason no button here can open a surface that is hidden.
@@ -226,6 +232,24 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
         <div className="mobile-drawer__head">
           <span className="mobile-drawer__title">{t('mobile.drawer')}</span>
           <IconButton icon="close" label={t('mobile.close')} onClick={onClose} />
+        </div>
+        {/* The drawing-space strip: what `LayoutTabs` shows on the desktop band,
+            kept visible on the one mobile surface that can hold it. Both chips
+            mirror the desktop state exactly — Model is the active space and the
+            layout affordance is disabled for the structural reason below — so
+            the compact layout never implies a space switch it cannot perform. */}
+        <div className="mobile-drawer__space">
+          <span className="mobile-drawer__space-chip is-active">{t('layout.tab.model')}</span>
+          <button
+            type="button"
+            className="mobile-drawer__space-chip is-disabled"
+            disabled
+            title={spaceReason}
+          >
+            <Icon name="layers" size={13} />
+            {t('layout.panel')}
+          </button>
+          <span className="mobile-drawer__space-note">{spaceReason}</span>
         </div>
         <div className="mobile-drawer__tabs" role="tablist" aria-label={t('ribbon.tabs_label')}>
           {mobileRibbonTabs().map(entry => (

@@ -16,6 +16,12 @@
   "frameCount": 12,
   "gridEnabled": true,
   "gripDrag": false,
+  "hostProfile": {
+    "documentOwner": "native",
+    "palettesAvailable": true,
+    "standardViews": null,
+    "surfaceMode": "native-below"
+  },
   "hoverPreview": false,
   "importCount": 1,
   "importProgress": null,

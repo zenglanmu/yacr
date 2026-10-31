@@ -32,9 +32,10 @@ use cad_ui_core::launch::LaunchOptions;
 use cad_ui_core::layout::LayoutTracker;
 use cad_ui_core::popup::PopupAck;
 use cad_ui_core::protocol::InputKind;
+use cad_ui_core::session::events::EventBus;
 use cad_ui_core::session::{
-    CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CadSettings, QueueFamily, QueueReads,
-    QueueSink,
+    CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CadSettings, CadStatus, QueueFamily,
+    QueueReads, QueueSink,
 };
 use cad_ui_core::shell::{modal_gate_open, ShellState};
 
@@ -94,6 +95,13 @@ pub struct Shared {
     /// The main window handle the app tick polls for size/state. Kept here
     /// because the public `Manager` trait does not expose plain windows by label.
     pub window: Option<tauri::Window>,
+    /// The revisioned cad-event bus (semantic events + the per-frame
+    /// `status-changed`). Transport sinks are registered lazily from
+    /// [`crate::events`] once [`Self::window`] exists.
+    pub events: EventBus,
+    /// The previous flush's projected status, the baseline for
+    /// [`crate::events`]'s semantic diff.
+    pub events_prev: Option<CadStatus>,
     /// React-reported CAD layout (logical rect -> viewport insets), seq/generation
     /// guarded.
     pub layout: LayoutTracker,
@@ -166,6 +174,8 @@ impl Shared {
         Self {
             shell: ShellState::new(cad_mode),
             window: None,
+            events: EventBus::new(),
+            events_prev: None,
             layout: LayoutTracker::new(),
             layout_revalidate: false,
             layout_bounds: None,

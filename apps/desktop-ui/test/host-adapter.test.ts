@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { parseCadStatus } from '../src/cad/cad-status.ts';
-import { RUNTIME, RUNTIMES, isTauri, runtimeFrom, usesWasmCad } from '../src/host/runtime.ts';
+import { RUNTIME, RUNTIMES, initialCarrier, isTauri, runtimeFrom, usesWasmCad } from '../src/host/runtime.ts';
 import { SHELL_ONLY_COMMANDS, createInvoke, invokeRoute } from '../src/host/invoke.ts';
 import {
   WEB_FAILURE_COMMAND,
@@ -32,9 +32,9 @@ const SRC_ROOT = new URL('../src/', import.meta.url);
 // stops sending one, this suite fails before a browser ever loads.
 // ---------------------------------------------------------------------------
 
-const STATUS_NO_SESSION = `{"adapter":null,"backend":null,"camera":null,"canFit":false,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":null,"entityCount":null,"error":null,"frameCount":0,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":0,"importProgress":null,"loading":false,"orthoEnabled":false,"palettesAvailable":true,"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"standardViews":[],"surfaceMode":"dom-canvas","tool":null}`;
+const STATUS_NO_SESSION = `{"adapter":null,"backend":null,"camera":null,"canFit":false,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":null,"entityCount":null,"error":null,"frameCount":0,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":0,"importProgress":null,"loading":false,"orthoEnabled":false,"hostProfile":{"documentOwner":"wasm","palettesAvailable":true,"standardViews":[],"surfaceMode":"dom-canvas"},"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"tool":null}`;
 
-const STATUS_LIVE = `{"adapter":"webgl2: example adapter (wasm32 session)","backend":"webgl2","camera":{"center":[10.0,-5.0],"scale":0.25},"canFit":true,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"canvasSession":{"batches":4,"draws":4,"label":"synthetic-four-lines.dwg"},"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":"synthetic-four-lines.dwg","entityCount":null,"error":null,"frameCount":7,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":1,"importProgress":null,"loading":false,"orthoEnabled":false,"palettesAvailable":true,"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"standardViews":[],"surfaceMode":"dom-canvas","tool":null}`;
+const STATUS_LIVE = `{"adapter":"webgl2: example adapter (wasm32 session)","backend":"webgl2","camera":{"center":[10.0,-5.0],"scale":0.25},"canFit":true,"canNew":false,"canOpen":false,"canPlot":false,"canSave":false,"canvasSession":{"batches":4,"draws":4,"label":"synthetic-four-lines.dwg"},"commandLog":[],"crosshair":false,"cursorWorld":null,"documentLabel":"synthetic-four-lines.dwg","entityCount":null,"error":null,"frameCount":7,"gridEnabled":false,"gripDrag":false,"hoverPreview":false,"importCount":1,"importProgress":null,"loading":false,"orthoEnabled":false,"hostProfile":{"documentOwner":"wasm","palettesAvailable":true,"standardViews":[],"surfaceMode":"dom-canvas"},"popup":null,"selection":{"count":0,"empty":true,"mixedKeys":[],"rows":[],"text":null,"text_multiline":false},"snapEnabled":false,"snapGridEnabled":false,"snapKind":null,"snapSpacing":10.0,"tool":null}`;
 
 /** A session refusal, in the session's own words (rethrow-verbatim fixture). */
 const REFUSAL = 'cad_app: PAN: the tool needs a drawing';
@@ -92,7 +92,7 @@ function fakeModule({ status = STATUS_NO_SESSION, commands = '[]', aliases = '[]
 
 test('parseCadStatus accepts a real shell_status() with no session', () => {
   const status = parseCadStatus(JSON.parse(STATUS_NO_SESSION));
-  assert.equal(status.surfaceMode, 'dom-canvas');
+  assert.equal(status.hostProfile.surfaceMode, 'dom-canvas');
   assert.equal(status.documentLabel, null);
   assert.equal(status.backend, null);
   assert.equal(status.canOpen, false);
@@ -101,7 +101,7 @@ test('parseCadStatus accepts a real shell_status() with no session', () => {
 
 test('parseCadStatus accepts a real shell_status() with a live session', () => {
   const status = parseCadStatus(JSON.parse(STATUS_LIVE));
-  assert.equal(status.surfaceMode, 'dom-canvas');
+  assert.equal(status.hostProfile.surfaceMode, 'dom-canvas');
   assert.equal(status.documentLabel, 'synthetic-four-lines.dwg');
   assert.equal(status.backend, 'webgl2');
   assert.match(status.adapter, /wasm32 session/);
@@ -141,6 +141,11 @@ test('the runtime falls back to tauri when no build define is present', () => {
   assert.equal(runtimeFrom('tauri'), 'tauri');
   assert.equal(runtimeFrom('browser'), null);
   assert.equal(runtimeFrom(undefined), null);
+  // A host may be behind both the desktop and the Android bundle, so both start
+  // unproven; only the browser bundle has no host to ask.
+  assert.equal(initialCarrier('tauri'), 'unknown');
+  assert.equal(initialCarrier('android'), 'unknown');
+  assert.equal(initialCarrier('web'), 'dom-canvas');
 });
 
 test('isTauri probes the injected bridge object, not the build', () => {
@@ -150,28 +155,60 @@ test('isTauri probes the injected bridge object, not the build', () => {
   assert.equal(isTauri(null), false);
 });
 
-test('every runtime x command class resolves to adapter or Tauri', () => {
+test('every runtime x carrier x bridge x command class resolves to adapter or Tauri', () => {
   const shellOnly = 'canvas_runtime_failed';
   const shellOnlyOther = 'canvas_session_status';
   const ordinary = ['cad_status', 'cad_command', 'probe_input', 'cad_layers'];
 
-  // A `tauri` host is Tauri for everything, bridge probe irrelevant.
-  for (const present of [true, false]) {
-    for (const command of [...ordinary, shellOnly, shellOnlyOther]) {
-      assert.equal(invokeRoute('tauri', command, present), 'tauri', `tauri/${command}/${present}`);
+  // A bridged `tauri` host is Tauri for everything while its carrier is unproven
+  // or native; the observed `dom-canvas` carrier moves the data (not the two
+  // shell-only reports) to the adapter.
+  for (const command of [...ordinary, shellOnly, shellOnlyOther]) {
+    assert.equal(invokeRoute('tauri', command, true, 'unknown'), 'tauri', `tauri/unknown/${command}`);
+    assert.equal(invokeRoute('tauri', command, true, 'native-below'), 'tauri', `tauri/native/${command}`);
+  }
+  for (const command of ordinary) {
+    assert.equal(invokeRoute('tauri', command, true, 'dom-canvas'), 'web', `tauri/dom-canvas/${command}`);
+  }
+  for (const command of SHELL_ONLY_COMMANDS) {
+    assert.equal(invokeRoute('tauri', command, true, 'dom-canvas'), 'tauri', `tauri/dom-canvas/${command}`);
+  }
+
+  // Android is the same Tauri client once its native host is behind the page: its
+  // unproven and `native-below` carriers route exactly like a desktop host's.
+  for (const command of [...ordinary, shellOnly, shellOnlyOther]) {
+    assert.equal(invokeRoute('android', command, true, 'unknown'), 'tauri', `android/unknown/${command}`);
+    assert.equal(invokeRoute('android', command, true, 'native-below'), 'tauri', `android/native/${command}`);
+  }
+  // An Android host that reports `dom-canvas` gives the data to the adapter, and
+  // still reports the two shell-only names to its bridge.
+  for (const command of ordinary) {
+    assert.equal(invokeRoute('android', command, true, 'dom-canvas'), 'web', `android/dom-canvas/${command}`);
+  }
+  for (const command of SHELL_ONLY_COMMANDS) {
+    assert.equal(invokeRoute('android', command, true, 'dom-canvas'), 'tauri', `android/dom-canvas/${command}`);
+  }
+
+  // No bridge: nothing may reach Tauri, whatever the build or the carrier says.
+  for (const runtime of ['tauri', 'android']) {
+    for (const carrier of ['unknown', 'native-below', 'dom-canvas']) {
+      for (const command of [...ordinary, shellOnly, shellOnlyOther]) {
+        assert.equal(invokeRoute(runtime, command, false, carrier), 'web', `${runtime}/${carrier}/${command} (no bridge)`);
+      }
     }
   }
-  for (const runtime of ['web', 'android']) {
-    for (const command of ordinary) {
-      assert.equal(invokeRoute(runtime, command, true), 'web', `${runtime}/${command} (bridge)`);
-      assert.equal(invokeRoute(runtime, command, false), 'web', `${runtime}/${command} (no bridge)`);
-    }
-    // The two shell-only reports prefer an existing Tauri bridge.
-    for (const command of SHELL_ONLY_COMMANDS) {
-      assert.equal(invokeRoute(runtime, command, true), 'tauri', `${runtime}/${command} (bridge)`);
-      assert.equal(invokeRoute(runtime, command, false), 'web', `${runtime}/${command} (no bridge)`);
-    }
+
+  // The browser bundle has no host at all.
+  for (const command of [...ordinary, shellOnly, shellOnlyOther]) {
+    assert.equal(invokeRoute('web', command, false, 'dom-canvas'), 'web', `web/${command}`);
   }
+
+  // The default carrier is the build's initial one, so an unobserved bridged
+  // Android call is native and an unobserved browser call is the adapter.
+  assert.equal(invokeRoute('android', 'cad_command', true), 'tauri');
+  assert.equal(invokeRoute('web', 'cad_command', false), 'web');
+  assert.equal(invokeRoute('android', 'cad_command', false), 'web');
+
   assert.deepEqual([...SHELL_ONLY_COMMANDS], ['canvas_runtime_failed', 'canvas_session_status']);
 });
 
@@ -180,24 +217,33 @@ test('createInvoke routes per call through the injected transports', async () =>
   const tauri = async (command, args) => { calls.push(['tauri', command, args]); return 'from-tauri'; };
   const web = { invoke: async (command, args) => { calls.push(['web', command, args]); return 'from-web'; } };
 
-  const desktop = createInvoke({ runtime: 'tauri', tauri, web, tauriPresent: () => false });
+  const desktop = createInvoke({ runtime: 'tauri', tauri, web, tauriPresent: () => true });
   assert.equal(await desktop('cad_status'), 'from-tauri');
 
   const browser = createInvoke({ runtime: 'web', tauri, web, tauriPresent: () => false });
   assert.equal(await browser('cad_status'), 'from-web');
   assert.equal(await browser('canvas_runtime_failed', { step: 'webgl2' }), 'from-web');
 
-  // Android: the same document has the bridge, so the two reports go to Tauri.
-  const android = createInvoke({ runtime: 'android', tauri, web, tauriPresent: () => true });
-  assert.equal(await android('cad_status'), 'from-web');
+  // Android: the native host answers the bootstrap status, so a CAD command is
+  // its own; the two shell-only reports go to the same bridge.
+  const android = createInvoke({ runtime: 'android', tauri, web, tauriPresent: () => true, carrier: () => 'unknown' });
+  assert.equal(await android('cad_status'), 'from-tauri');
+  assert.equal(await android('cad_command', { command: 'FIT' }), 'from-tauri');
   assert.equal(await android('canvas_session_status', { label: 'x' }), 'from-tauri');
+
+  // A bundle whose page has no Tauri bridge can only reach the adapter, whose
+  // own refusal is the honest answer.
+  const bridgeless = createInvoke({ runtime: 'android', tauri, web, tauriPresent: () => false });
+  assert.equal(await bridgeless('cad_command', { command: 'FIT' }), 'from-web');
 
   assert.deepEqual(calls, [
     ['tauri', 'cad_status', undefined],
     ['web', 'cad_status', undefined],
     ['web', 'canvas_runtime_failed', { step: 'webgl2' }],
-    ['web', 'cad_status', undefined],
+    ['tauri', 'cad_status', undefined],
+    ['tauri', 'cad_command', { command: 'FIT' }],
     ['tauri', 'canvas_session_status', { label: 'x' }],
+    ['web', 'cad_command', { command: 'FIT' }],
   ]);
 });
 
@@ -210,12 +256,12 @@ test('the three shell reads answer from the session, and OPEN is the one host co
   const adapter = createWebAdapter(fake.module);
 
   const status = await adapter.invoke('cad_status');
-  assert.equal(status.surfaceMode, 'dom-canvas');
+  assert.equal(status.hostProfile.surfaceMode, 'dom-canvas');
   assert.equal(status.documentLabel, null);
   // The session says it cannot open; the transport can, so it lifts the flag.
   assert.equal(status.canOpen, true);
   // The palette capability is the session's own answer, passed through untouched.
-  assert.equal(status.palettesAvailable, true);
+  assert.equal(status.hostProfile.palettesAvailable, true);
   assert.deepEqual(await adapter.invoke('cad_commands'), ['ZOOM', 'OPEN']);
   assert.deepEqual(await adapter.invoke('cad_command_aliases'), [{ alias: 'Z', command: 'ZOOM' }]);
   assert.deepEqual(fake.calls, ['shell_status', 'shell_commands', 'shell_aliases']);
@@ -619,15 +665,15 @@ test('a page without the canvas module fails with the unavailable prefix', async
 });
 
 test('an unloaded page injects the canvas bootstrap instead of deadlocking', async () => {
-  // The chrome only learns `surfaceMode: "dom-canvas"` from `cad_status`, so the
-  // pixel transport cannot have injected the bootstrap yet: the first status poll
-  // is what brings it up. This is the browser's boot order, driven headlessly.
+  // The chrome only learns `hostProfile.surfaceMode: "dom-canvas"` from `cad_status`, so the
+  // pixel transport cannot have injected the bootstrap yet: the first status
+  // subscription is what brings it up. This is the browser's boot order, driven headlessly.
   const fake = fakeModule();
   const page = publishOnAppend({}, { ...sessionStubs(), ...fake.module });
   const adapter = createWebAdapter(async () => loadWebShellModule(page.env));
 
   const status = await adapter.invoke('cad_status');
-  assert.equal(status.surfaceMode, 'dom-canvas');
+  assert.equal(status.hostProfile.surfaceMode, 'dom-canvas');
   assert.equal(page.scripts.length, 1);
   assert.equal(page.scripts[0].src, '/canvas/bootstrap.js');
   assert.equal(page.scripts[0].type, 'module');
@@ -653,7 +699,7 @@ test('the lazy adapter loads the published module on first use', async () => {
   let loads = 0;
   const adapter = createWebAdapter(async () => { loads++; return loadWebShellModule(scope); });
   const status = await adapter.invoke('cad_status');
-  assert.equal(status.surfaceMode, 'dom-canvas');
+  assert.equal(status.hostProfile.surfaceMode, 'dom-canvas');
   assert.equal(loads, 1);
 });
 

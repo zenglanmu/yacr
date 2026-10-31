@@ -161,10 +161,11 @@ test('a shared refusal gets command-free panel wording, or keeps the per-cell co
 
 test('App renders the compact regions on mobile only and keeps the desktop regions gated', async () => {
   const app = await readModule('App.tsx');
-  // The single layout source, written on the shell root for CSS and tests.
+  // The single layout source. The hook owns the only `data-layout` write (on the
+  // document element), so the shell element carries no second copy.
   assert.ok(app.includes('const layout = useLayoutMode();'));
   assert.ok(app.includes("const mobile = layout === 'mobile';"));
-  assert.ok(app.includes('data-layout={layout}'));
+  assert.equal(app.includes('data-layout={'), false, 'one writer, on the document element');
   // Compact regions.
   assert.ok(app.includes('<MobileTopBar menuOpen={mobileDrawer.open}'));
   assert.ok(app.includes('<MobileRibbonDrawer open={mobileDrawer.open}'));
@@ -244,7 +245,7 @@ test('the mobile stylesheet is guarded by the one layout attribute and fits a ph
   // One guard, no second media query: the breakpoint exists in `layout-mode.ts`
   // only, so the stylesheet cannot drift from the hook.
   assert.equal(css.includes('@media'), false, 'mobile.css must not add a second breakpoint');
-  assert.ok(css.includes('[data-layout="mobile"] .shell'));
+  assert.ok(css.includes(':root[data-layout="mobile"] .shell'));
   assert.ok(css.includes('height: 100dvh'), 'the drawing follows the visual viewport');
   // Safe areas on both bars: the top bar pads the cutout, and the command bar
   // takes the larger of the platform inset and the host's own variable.
@@ -255,8 +256,8 @@ test('the mobile stylesheet is guarded by the one layout attribute and fits a ph
   );
   assert.ok(css.includes('--yacr-safe-bottom'), 'the host variable is named in the stylesheet');
   // The docked panels and the nav rail are hidden, not unmounted.
-  assert.ok(css.includes('[data-layout="mobile"] .workspace__left'));
-  assert.ok(css.includes('[data-layout="mobile"] .navrail'));
+  assert.ok(css.includes(':root[data-layout="mobile"] .workspace__left'));
+  assert.ok(css.includes(':root[data-layout="mobile"] .navrail'));
   // 44px touch targets on the menu button and the command bar controls.
   const menu = css.slice(css.indexOf('.mobile-topbar__menu {'), css.indexOf('.mobile-topbar__menu {') + 400);
   assert.ok(menu.includes('width: 44px') && menu.includes('height: 44px'));
@@ -264,10 +265,10 @@ test('the mobile stylesheet is guarded by the one layout attribute and fits a ph
   assert.ok(css.includes('--mobile-sheet-h: 45dvh'));
   assert.ok(css.includes('bottom: calc(100% + 6px)'));
   // Dialogs become full-width sheets that never exceed the viewport.
-  assert.ok(css.includes('[data-layout="mobile"] .popup-dialog'));
+  assert.ok(css.includes(':root[data-layout="mobile"] .popup-dialog'));
   assert.ok(css.includes('max-height: 100dvh'));
-  assert.ok(css.includes('[data-layout="mobile"] .options-rail'), 'the Options rail becomes a chip row');
-  assert.ok(css.includes('[data-layout="mobile"] .context-menu__item'), 'the shortcut menu keeps 44px rows');
+  assert.ok(css.includes(':root[data-layout="mobile"] .options-rail'), 'the Options rail becomes a chip row');
+  assert.ok(css.includes(':root[data-layout="mobile"] .context-menu__item'), 'the shortcut menu keeps 44px rows');
   // The desktop stylesheet keeps no compact breakpoint of its own.
   const desktop = await readModule('style.css');
   assert.equal(desktop.includes('768px'), false, 'the compact breakpoint lives in one place');
@@ -327,7 +328,7 @@ test('every compact control keeps a >= 44px touch target', async () => {
   assert.ok(block('.mobile-drawer__item').includes('min-height: 44px'));
   assert.ok(block('.mobile-drawer__variant').includes('min-height: 44px'));
   assert.ok(block('.mobile-drawer__variants-toggle').includes('min-height: 44px'));
-  assert.ok(block('[data-layout="mobile"] .context-menu__item').includes('min-height: 44px'));
+  assert.ok(block(':root[data-layout="mobile"] .context-menu__item').includes('min-height: 44px'));
 });
 
 test('refusal copy is readable: 11.5px on a compliant contrast token', async () => {

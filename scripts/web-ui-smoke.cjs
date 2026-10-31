@@ -5,7 +5,8 @@
  * What it proves (and only this):
  *   - the static server here serves the built chrome bundle, and the page loads
  *     with no uncaught error and no failed (non-favicon) request;
- *   - the layout switch (`MOBILE_MAX_WIDTH = 1024`, `matchMedia`, `data-layout`)
+ *   - the layout switch (`MOBILE_MAX_WIDTH = 1024`, `matchMedia`, `data-layout`
+ *     on `document.documentElement`)
  *     resolves to `mobile` at 390, 914 and 1024 CSS px (phone portrait, phone
  *     landscape, 4:3 tablet) and to `desktop` at the first width past the
  *     threshold, 1025, and at 1280;
@@ -218,12 +219,10 @@ function newPage(context, bucket) {
   });
 }
 
-/** The resolved layout attribute, on both owners (`main.shell` and `<html>`). */
+/** The resolved layout attribute, written once on `<html>` (`document.documentElement`). */
 function readLayout(page) {
   return page.evaluate(() => {
-    const shell = document.querySelector('main.shell');
     return {
-      shell: shell ? shell.getAttribute('data-layout') : null,
       documentElement: document.documentElement.getAttribute('data-layout') ?? null,
       viewport: {
         width: window.innerWidth,
@@ -247,7 +246,7 @@ function canvasMatchesCss() {
 }
 
 /**
- * Readiness: the shell has painted its layout attribute **and** the `dom-canvas`
+ * Readiness: `<html>` has painted its layout attribute **and** the `dom-canvas`
  * carrier is live (the `<canvas>` only mounts once the host reports
  * `surfaceMode: "dom-canvas"`, and it only has a backing store once the wasm
  * session started and was handed a size).
@@ -259,16 +258,16 @@ function canvasMatchesCss() {
  */
 async function waitForSession(page, timeout) {
   await page.waitForFunction(
-    () => document.querySelector('main.shell')?.hasAttribute('data-layout') === true,
+    () => document.documentElement.hasAttribute('data-layout'),
     undefined,
     { timeout },
   );
   await page.waitForFunction(canvasMatchesCss, undefined, { timeout });
   await page.waitForFunction(
     settleMs => {
-      const shell = document.querySelector('main.shell');
+      const root = document.documentElement;
       const canvas = document.getElementById('cad-canvas');
-      if (!shell || !canvas) return false;
+      if (!canvas) return false;
       const rect = canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       const probe = window;
@@ -276,7 +275,7 @@ async function waitForSession(page, timeout) {
       if (Math.abs(canvas.width - Math.round(rect.width * dpr)) > 1) return false;
       if (Math.abs(canvas.height - Math.round(rect.height * dpr)) > 1) return false;
       const key = [
-        shell.getAttribute('data-layout'),
+        root.getAttribute('data-layout'),
         rect.width.toFixed(2),
         rect.height.toFixed(2),
         canvas.width,
@@ -406,9 +405,9 @@ function checkCommon(checks, bucket, layoutInfo, surface, renderer, expectedLayo
   record(checks, bucket.failedRequests.length === 0, 'no failed non-favicon request', bucket.failedRequests);
   record(
     checks,
-    layoutInfo.shell === expectedLayout && layoutInfo.documentElement === expectedLayout,
-    `data-layout is ${expectedLayout} on main.shell and <html>`,
-    { shell: layoutInfo.shell, documentElement: layoutInfo.documentElement },
+    layoutInfo.documentElement === expectedLayout,
+    `data-layout is ${expectedLayout} on <html>`,
+    { documentElement: layoutInfo.documentElement },
   );
   record(
     checks,
@@ -684,15 +683,15 @@ async function crossTightBreakpoint(page, options, checks) {
     return readLayout(page);
   };
   const desktop = await at(MOBILE_MAX_WIDTH + 1, 900);
-  record(checks, desktop.shell === 'desktop' && desktop.documentElement === 'desktop',
+  record(checks, desktop.documentElement === 'desktop',
     `${MOBILE_MAX_WIDTH + 1}x900 stays desktop (1024 is the last mobile width)`,
-    { shell: desktop.shell, documentElement: desktop.documentElement });
+    { documentElement: desktop.documentElement });
   record(checks, await page.locator('.ribbon').isVisible(), 'the desktop ribbon is present at 1025', null);
 
   const mobile = await at(MOBILE_MAX_WIDTH, 900);
-  record(checks, mobile.shell === 'mobile' && mobile.documentElement === 'mobile',
+  record(checks, mobile.documentElement === 'mobile',
     `${MOBILE_MAX_WIDTH}x900 flips to mobile (max-width is inclusive)`,
-    { shell: mobile.shell, documentElement: mobile.documentElement });
+    { documentElement: mobile.documentElement });
   record(checks, await page.locator('.mobile-commandbar').isVisible(), 'the compact command bar is present at 1024', null);
   record(checks, (await page.locator('.ribbon').count()) === 0, 'the desktop ribbon is gone at 1024', null);
   const sizing = canvasSizing(await readSurface(page));
@@ -718,7 +717,7 @@ async function runResizeCase(browser, options) {
       throw new Error(`the bundle URL did not load: ${options.url} -> ${response?.status() ?? 'no response'}`);
     }
     await waitForSession(page, options.timeout);
-    record(checks, (await readLayout(page)).shell === 'desktop', 'starts in the desktop layout', null);
+    record(checks, (await readLayout(page)).documentElement === 'desktop', 'starts in the desktop layout', null);
     const alertsAtLoad = await readErrorAlerts(page);
 
     // The marker is the proof that no navigation happened: a reload would drop it.
@@ -730,9 +729,9 @@ async function runResizeCase(browser, options) {
     const mobileSurface = await readSurface(page);
     record(
       checks,
-      mobileLayout.shell === 'mobile' && mobileLayout.documentElement === 'mobile',
+      mobileLayout.documentElement === 'mobile',
       'resizing to 390x844 flips data-layout to mobile (live)',
-      { shell: mobileLayout.shell, documentElement: mobileLayout.documentElement },
+      { documentElement: mobileLayout.documentElement },
     );
     record(checks, await page.locator('.mobile-topbar').isVisible(), 'mobile top bar appears after the resize', null);
     record(checks, await page.locator('.mobile-commandbar').isVisible(), 'mobile command bar appears after the resize', null);
@@ -769,9 +768,9 @@ async function runResizeCase(browser, options) {
     const backLayout = await readLayout(page);
     record(
       checks,
-      backLayout.shell === 'desktop' && backLayout.documentElement === 'desktop',
+      backLayout.documentElement === 'desktop',
       'resizing back to 1280x800 restores the desktop layout',
-      { shell: backLayout.shell, documentElement: backLayout.documentElement },
+      { documentElement: backLayout.documentElement },
     );
     record(checks, await page.locator('.ribbon').isVisible(), 'the desktop ribbon is back', null);
     record(checks, await page.locator('.statusbar').isVisible(), 'the desktop status bar is back', null);
@@ -814,7 +813,7 @@ async function runResizeCase(browser, options) {
     await waitForSession(page, options.timeout);
     record(
       checks,
-      (await readLayout(page)).shell === 'desktop',
+      (await readLayout(page)).documentElement === 'desktop',
       'and back to 1280x800 leaves the desktop layout in place',
       null,
     );

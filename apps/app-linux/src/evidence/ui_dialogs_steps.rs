@@ -51,7 +51,9 @@ pub(super) fn read_status(
 ) -> Result<cad_ui_core::session::CadStatus, String> {
     let app_main = app.clone();
     on_main_thread(app, move || {
-        Ok(crate::host::cad_status(app_main.state::<ProbeShared>()))
+        Ok(crate::host::cad_status_snapshot(
+            app_main.state::<ProbeShared>(),
+        ))
     })
 }
 
@@ -322,7 +324,7 @@ pub(super) fn popup_handle(
     }
     let app_main = app.clone();
     let popup = on_main_thread(app, move || {
-        let status = crate::host::cad_status(app_main.state::<ProbeShared>());
+        let status = crate::host::cad_status_snapshot(app_main.state::<ProbeShared>());
         Ok(popup_detail(&status))
     })?;
     let (handle, xid) = super::popup::log_popup_overlay_handle("dialogs popup");

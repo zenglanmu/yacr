@@ -1,24 +1,69 @@
 //! Android host for the CAD viewer/measure/annotation app.
 //!
-//! The host is a **Tauri 2 WebView/asset carrier**: the shared React chrome
-//! (`apps/desktop-ui`, built with `YACR_RUNTIME=android` into `../dist`) runs in
-//! the Android WebView and the **wasm `dom-canvas` CAD session owns the document
-//! and the pixels** (ADR 0024; `AGENTS.md` iron rule 8). The native side holds no
-//! CAD state, opens no CAD file, instantiates no second session and registers no
-//! CAD command: it keeps WebView/Activity lifetime and the two shell-only reports
-//! the chrome sends on this carrier ([`host`]).
+//! The host is a **Tauri 2 WebView carrier with a native CAD surface below it**
+//! (P5, `surfaceMode = "native-below"`, `documentOwner = "native"`): the shared
+//! React chrome (`apps/desktop-ui`, built with `YACR_RUNTIME=android` into
+//! `../dist`) runs in the Android WebView and the **native Rust
+//! [`cad_ui_core::session::CadSession`] owns `cad-db`**, presented by
+//! `cad-render-wgpu` on the `SurfaceView` the Kotlin lane layers beneath the
+//! WebView. The wasm session must not run on this carrier and the native shell
+//! never instantiates a second document authority (`AGENTS.md` iron rule 8).
 //!
-//! On every other target this crate is a documented empty shell: `tauri` is an
-//! Android-only dependency, so a host `--all-targets` check and the
-//! `wasm32-unknown-unknown --lib` gate compile the module below instead of
+//! What the host owns:
+//!
+//! * [`host`] — the Tauri entry point, the shared command handler plus the two
+//!   shell-only reports, `Shared`/telemetry, and the `MainEventsCleared` tick
+//!   drive;
+//! * [`platform`] — the explicitly **unsupported** file contracts of Android v1
+//!   (no chooser, no save, no bytes), the DOM surface source, the non-persistent
+//!   config store and the `nativeAssetsReady` handshake;
+//! * [`surface`] — the frozen JNI surface callbacks and the
+//!   `SurfaceProbePresenter` lifecycle (Vulkan only, no GLES/software fallback);
+//! * [`policy`] — the target-independent, unit-tested refusal markers, capability
+//!   set and JNI symbol names;
+//! * [`input`] — the partition-local → canvas coordinate mapping for pointer/wheel
+//!   input (pure, unit-tested on the development host);
+//! * [`refusal`]/[`report`] — the `dom-canvas` refusal/report vocabulary, kept
+//!   because the chrome's shell reports remain valid on every carrier.
+//!
+//! On every other target this crate is a documented empty shell: `tauri` and the
+//! CAD crates are Android-only dependencies, so a host `--all-targets` check and
+//! the `wasm32-unknown-unknown --lib` gate compile the modules below instead of
 //! pretending an Android app can run there. [`start`] is the explicit
 //! NOT IMPLEMENTED answer for those targets, not an empty success.
 
+pub mod policy;
 pub mod refusal;
 pub mod report;
 
 #[cfg(target_os = "android")]
 pub mod host;
+#[cfg(target_os = "android")]
+pub mod surface;
+
+/// The explicit `cad-platform` contract set of this carrier.
+///
+/// Compiled on every non-wasm target so its refusal tests run on the development
+/// host (no device/emulator involved); it has no `tauri`/GPU dependency.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod platform;
+
+/// Partition-local DOM input → presented-canvas coordinates (see the module docs).
+///
+/// Pure, so it is compiled on every non-wasm target and its unit tests run on the
+/// development host: the offset arithmetic must not be validated only on a device.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod input;
+
+/// Source-structure contracts of the Android-only modules (`host/tick.rs`,
+/// `surface.rs`), compiled and run on the **development host**.
+///
+/// `host`/`surface` are `cfg(target_os = "android")`, so tests declared inside them
+/// never run on any gate (`cargo test -p app-android` builds for the host). These
+/// assertions read those files with `include_str!` instead, and the behavioural
+/// tests stay next to the code they exercise.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod contract;
 
 #[cfg(target_os = "android")]
 pub use host::run;
@@ -30,7 +75,7 @@ pub const NON_ANDROID_DIAGNOSTIC: &str =
 
 /// Explicit refusal for non-Android targets.
 ///
-/// There is no binary here, so nothing user-facing calls this: it exists so a
+/// There is no binary here, so nothing user-facing calls this; it exists so a
 /// future caller gets a modeled failure instead of an empty `Ok(())`.
 #[cfg(not(target_os = "android"))]
 pub fn start() -> Result<(), String> {

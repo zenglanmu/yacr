@@ -758,6 +758,15 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 state.cad_settings = Some(settings);
             }
         }
+        // One cad-event flush per owner tick, outside the `Some(snapshot)` arm:
+        // the lazy-session window and a creation failure have no snapshot but
+        // still owe the chrome the same `cad_status` payload. This carrier has no
+        // `canvasSession`.
+        let _ = cad_desktop_shell::events::flush_events_current(
+            shared,
+            &cad_ui_core::session::HostProfile::native_below(),
+            None::<String>,
+        );
         // The layer panel's own mirror (see `super::layers`).
         super::layers::mirror(shared);
     } else {
@@ -801,5 +810,13 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 }
             }
         }
+        // Probe mode has no CAD session, but the host still owns the popup state
+        // `cad_status` reports: flush the same projection so an open modal is not
+        // stranded behind the push channel.
+        let _ = cad_desktop_shell::events::flush_events_current(
+            shared,
+            &cad_ui_core::session::HostProfile::native_below(),
+            None::<String>,
+        );
     }
 }

@@ -37,9 +37,10 @@ export const MOBILE_MEDIA_QUERY = `(max-width: ${MOBILE_MAX_WIDTH}px)`;
 /**
  * The attribute carrying the resolved layout.
  *
- * It is written on the `.shell` root (so the shell's own rules can key on it) and
- * on `document.documentElement` (so overlays portalled outside the shell — the
- * popup layer — see the same value). One attribute name, one meaning.
+ * It is written **once**, on `document.documentElement`, by the layout hook. That
+ * is the one node every reader can see: the stylesheet's compact guards
+ * (`:root[data-layout="mobile"] ...`) and the overlays portalled outside the
+ * shell (the popup layer) both key on it, and `.shell` carries no second copy.
  */
 export const LAYOUT_ATTRIBUTE = 'data-layout';
 

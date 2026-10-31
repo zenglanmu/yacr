@@ -549,7 +549,7 @@ export function admitCommandText(text: unknown, { status = null, pending = false
   }
   // `FIT` needs a host that can reframe **and** an open document to frame. It does
   // not need `entityCount`: that is a count, and a carrier may honestly not have
-  // one — the browser/Android carrier releases the imported database and reports
+  // one — the `dom-canvas` session releases the imported database and reports
   // `entityCount: null`, while its `canFit` already answers exactly this question
   // ("the extents are retained, so a refit can run"). Requiring the count here
   // would disable a command that really executes.

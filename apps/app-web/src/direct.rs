@@ -55,11 +55,10 @@
 //! with a fabricated acknowledgement.
 
 use cad_app::{StandardView, ToolParameter, ToolValue};
-use cad_ui_core::session::wire::{self, AdmissionTarget, CadCommandAck, ControlReads, PopupTarget};
+use cad_ui_core::session::wire::{self, AdmissionTarget, ControlReads, PopupTarget};
 use cad_ui_core::session::{
     CadLayerWrite, CadLayers, CadSession, CadSettingKey, CadSettingValue, CadSettings,
 };
-use serde::Deserialize;
 use serde_json::Value;
 
 /// Stable machine prefix of every name this transport does not serve.
@@ -222,92 +221,146 @@ impl ControlReads for DirectReads<'_> {
 }
 
 // ---------------------------------------------------------------------------
-// Argument decoding (one struct per command, mirroring the Tauri signature)
+// Generated argument decoding and dispatch (one row per command in the registry)
 // ---------------------------------------------------------------------------
+//
+// Everything below is derived from `cad_ui_core::session::registry`. The desktop
+// `#[tauri::command]` wrappers are generated from the same rows, so an argument
+// key or a reply type can never differ between the two transports.
+//
+// `probe_input` and `cad_status` are **separate wasm exports** (see
+// `crate::probe_input` and `crate::shell_status`), not `dispatch` arms. The
+// registry marks those rows `wasm_export` for the documented name set only; this
+// transport keeps serving them through their own export so the pointer path and
+// the status projection keep their existing shapes.
 
-/// `cad_command(shared, command: String)`.
-#[derive(Debug, Deserialize)]
-pub struct CommandArgs {
-    pub command: String,
+/// Emit one `#[derive(Deserialize)]` argument struct for a registry row.
+macro_rules! wasm_wire_args_struct {
+    ($name:ident, { $($fields:tt)* }) => {
+        wasm_wire_args_struct!(@fields $name [] $($fields)*);
+    };
+    (@fields $name:ident [$($out:tt)*]) => {
+        #[derive(Debug, serde::Deserialize)]
+        pub struct $name { $($out)* }
+    };
+    (@fields $name:ident [$($out:tt)*] arg(req, $field:ident, $ty:ty) $($rest:tt)*) => {
+        wasm_wire_args_struct!(@fields $name [$($out)* pub $field: $ty,] $($rest)*);
+    };
+    (@fields $name:ident [$($out:tt)*] arg(opt, $field:ident, $ty:ty) $($rest:tt)*) => {
+        wasm_wire_args_struct!(@fields $name [$($out)* #[serde(default)] pub $field: $ty,] $($rest)*);
+    };
 }
 
-/// `cad_set_tool_parameter(shared, parameter: String, number: Option<f64>, flag:
-/// Option<bool>)`.
-#[derive(Debug, Deserialize)]
-pub struct ToolParameterArgs {
-    pub parameter: String,
-    #[serde(default)]
-    pub number: Option<f64>,
-    #[serde(default)]
-    pub flag: Option<bool>,
+/// Emit the structs of every shared row that carries arguments.
+macro_rules! wasm_wire_structs {
+    (@munch) => {};
+    (@munch @row(shared, $lane:ident, $args:ident, $name:ident, { }, $reply:ty, { $($body:tt)* }) $($rest:tt)*) => {
+        wasm_wire_structs!(@munch $($rest)*);
+    };
+    (@munch @row(shared, $lane:ident, $args:ident, $name:ident, { $($fields:tt)* }, $reply:ty, { $($body:tt)* }) $($rest:tt)*) => {
+        wasm_wire_args_struct!($args, { $($fields)* });
+        wasm_wire_structs!(@munch $($rest)*);
+    };
+    (@munch @row($($other:tt)*) $($rest:tt)*) => {
+        wasm_wire_structs!(@munch $($rest)*);
+    };
+    ($($rows:tt)*) => {
+        wasm_wire_structs!(@munch $($rows)*);
+    };
 }
 
-/// `cad_set_tool_text(shared, text: String)`.
-#[derive(Debug, Deserialize)]
-pub struct TextArgs {
-    pub text: String,
+/// A destructuring pattern for one generated argument struct.
+macro_rules! wasm_wire_pattern {
+    ($args:ident, { $($fields:tt)* }) => {
+        wasm_wire_pattern!(@fields $args [] $($fields)*)
+    };
+    (@fields $args:ident [$($out:ident),*]) => {
+        $args { $($out),* }
+    };
+    (@fields $args:ident [$($out:ident),*] arg(req, $field:ident, $ty:ty) $($rest:tt)*) => {
+        wasm_wire_pattern!(@fields $args [$($out,)* $field] $($rest)*)
+    };
+    (@fields $args:ident [$($out:ident),*] arg(opt, $field:ident, $ty:ty) $($rest:tt)*) => {
+        wasm_wire_pattern!(@fields $args [$($out,)* $field] $($rest)*)
+    };
 }
 
-/// `cad_set_selected_property(shared, key: String, value: String)`.
-#[derive(Debug, Deserialize)]
-pub struct PropertyArgs {
-    pub key: String,
-    pub value: String,
+/// Emit `dispatch` with one arm per shared row.
+///
+/// The parameter names are captured from the registry's `@context` header, so the
+/// row bodies (also written in the registry) resolve them without any per-row
+/// rebinding.
+macro_rules! wasm_wire_dispatch {
+    ($sink:ident, $reads:ident, $popups:ident, $name:ident, $args_json:ident; $($rows:tt)*) => {
+        wasm_wire_dispatch!(@munch [$sink] [$reads] [$popups] [$name] [$args_json] [] $($rows)*);
+    };
+    (@munch [$sink:ident] [$reads:ident] [$popups:ident] [$name:ident] [$args_json:ident] [$($arms:tt)*]) => {
+        /// Serve one wire command by name, exactly as the desktop command of that
+        /// name (generated from the shared registry).
+        pub fn dispatch(
+            $name: &str,
+            $args_json: &str,
+            $sink: &mut dyn AdmissionTarget,
+            $reads: &dyn ControlReads,
+            $popups: &mut dyn PopupTarget,
+        ) -> Result<Value, String> {
+            match $name {
+                $($arms)*
+                other => Err(unsupported_runtime(other)),
+            }
+        }
+    };
+    (@munch [$sink:ident] [$reads:ident] [$popups:ident] [$name:ident] [$args_json:ident] [$($arms:tt)*]
+        @row(shared, $lane:ident, $args:ident, $row_name:ident, { }, $reply:ty, { $($body:tt)* }) $($rest:tt)*) => {
+        wasm_wire_dispatch!(@munch [$sink] [$reads] [$popups] [$name] [$args_json] [
+            $($arms)*
+            stringify!($row_name) => wire_value($($body)*),
+        ] $($rest)*);
+    };
+    (@munch [$sink:ident] [$reads:ident] [$popups:ident] [$name:ident] [$args_json:ident] [$($arms:tt)*]
+        @row(shared, $lane:ident, $args:ident, $row_name:ident, { $(arg($kind:ident, $field:ident, $ty:ty))* }, $reply:ty, { $($body:tt)* }) $($rest:tt)*) => {
+        wasm_wire_dispatch!(@munch [$sink] [$reads] [$popups] [$name] [$args_json] [
+            $($arms)*
+            stringify!($row_name) => {
+                let wasm_wire_pattern!($args, { $(arg($kind, $field, $ty))* }) =
+                    args::<$args>($name, $args_json)?;
+                wire_value($($body)*)
+            },
+        ] $($rest)*);
+    };
+    (@munch [$sink:ident] [$reads:ident] [$popups:ident] [$name:ident] [$args_json:ident] [$($arms:tt)*]
+        @row($($other:tt)*) $($rest:tt)*) => {
+        wasm_wire_dispatch!(@munch [$sink] [$reads] [$popups] [$name] [$args_json] [$($arms)*] $($rest)*);
+    };
 }
 
-/// `cad_standard_view(shared, view: String)`.
-#[derive(Debug, Deserialize)]
-pub struct StandardViewArgs {
-    pub view: String,
+/// Emit `WIRE_COMMANDS` from the shared rows.
+macro_rules! wasm_wire_names {
+    (@munch [$($names:tt)*]) => {
+        /// Every wire command this transport serves, derived from the registry.
+        pub const WIRE_COMMANDS: &[&str] = &[$($names)*];
+    };
+    (@munch [$($names:tt)*] @row(shared, $lane:ident, $args:ident, $name:ident, { $($fields:tt)* }, $reply:ty, { $($body:tt)* }) $($rest:tt)*) => {
+        wasm_wire_names!(@munch [$($names)* stringify!($name),] $($rest)*);
+    };
+    (@munch [$($names:tt)*] @row($($other:tt)*) $($rest:tt)*) => {
+        wasm_wire_names!(@munch [$($names)*] $($rest)*);
+    };
+    ($($rows:tt)*) => {
+        wasm_wire_names!(@munch [] $($rows)*);
+    };
 }
 
-/// `cad_set_setting(shared, key: String, value: serde_json::Value)`.
-#[derive(Debug, Deserialize)]
-pub struct SettingArgs {
-    pub key: String,
-    pub value: Value,
+/// The `dom-canvas` emitter over the shared registry.
+macro_rules! emit_wasm_wire_registry {
+    (@context($sink:ident, $reads:ident, $popups:ident, $name:ident, $args_json:ident) $($rows:tt)*) => {
+        wasm_wire_structs!($($rows)*);
+        wasm_wire_dispatch!($sink, $reads, $popups, $name, $args_json; $($rows)*);
+        wasm_wire_names!($($rows)*);
+    };
 }
 
-/// `cad_set_layer_visible(shared, name: String, visible: bool)`.
-#[derive(Debug, Deserialize)]
-pub struct LayerVisibleArgs {
-    pub name: String,
-    pub visible: bool,
-}
-
-/// `cad_set_active_layer(shared, name: String)` / `cad_create_layer(shared,
-/// name: String)`.
-#[derive(Debug, Deserialize)]
-pub struct LayerNameArgs {
-    pub name: String,
-}
-
-/// `cad_rename_layer(shared, layer: String, name: String)`.
-#[derive(Debug, Deserialize)]
-pub struct LayerRenameArgs {
-    pub layer: String,
-    pub name: String,
-}
-
-/// `cad_delete_layer(shared, layer: String)`.
-#[derive(Debug, Deserialize)]
-pub struct LayerArgs {
-    pub layer: String,
-}
-
-/// `cad_set_layer_property(shared, layer: String, key: String, value: String)`.
-#[derive(Debug, Deserialize)]
-pub struct LayerPropertyArgs {
-    pub layer: String,
-    pub key: String,
-    pub value: String,
-}
-
-/// `cad_open_popup(shared, kind: String)`.
-#[derive(Debug, Deserialize)]
-pub struct PopupArgs {
-    pub kind: String,
-}
+cad_ui_core::cad_wire_registry!(emit_wasm_wire_registry);
 
 /// Decode one argument object, naming the command when it does not fit.
 ///
@@ -322,118 +375,15 @@ fn args<T: serde::de::DeserializeOwned>(name: &str, args_json: &str) -> Result<T
     serde_json::from_str(text).map_err(|error| format!("invalid-args: {name}: {error}"))
 }
 
-// ---------------------------------------------------------------------------
-// Dispatch
-// ---------------------------------------------------------------------------
-
-/// Serve one wire command by name, exactly as the desktop command of that name.
-///
-/// The name set is the desktop's: `cad_command`, `cad_command_aliases`,
-/// `cad_commands`, `cad_settings`, `cad_layers`, `cad_set_tool_parameter`,
-/// `cad_set_tool_text`, `cad_set_selected_text`, `cad_set_selected_property`,
-/// `cad_standard_view`, `cad_set_setting`, `cad_set_layer_visible`,
-/// `cad_restore_layers`, `cad_set_active_layer`, `cad_create_layer`,
-/// `cad_rename_layer`, `cad_delete_layer`, `cad_set_layer_property`,
-/// `cad_open_popup`, `cad_close_popup`.
-///
-/// Every mutation arm calls the `wire::*` function of the same name - the one the
-/// desktop `#[tauri::command]` calls - and answers with the same
-/// `{accepted:true}` object. A name outside the set is [`unsupported_runtime`],
-/// never an empty success.
-pub fn dispatch(
-    name: &str,
-    args_json: &str,
-    sink: &mut dyn AdmissionTarget,
-    reads: &dyn ControlReads,
-    popups: &mut dyn PopupTarget,
-) -> Result<Value, String> {
-    match name {
-        "cad_command" => admit(wire::command(
-            sink,
-            &args::<CommandArgs>(name, args_json)?.command,
-        )),
-        "cad_command_aliases" => Ok(serde_json::json!(wire::aliases())),
-        "cad_commands" => Ok(serde_json::json!(wire::commands())),
-        "cad_settings" => Ok(serde_json::json!(wire::settings(reads)?)),
-        "cad_layers" => Ok(serde_json::json!(wire::layers(reads)?)),
-        "cad_set_tool_parameter" => {
-            let parsed: ToolParameterArgs = args(name, args_json)?;
-            admit(wire::set_tool_parameter(
-                sink,
-                &parsed.parameter,
-                parsed.number,
-                parsed.flag,
-            ))
-        }
-        "cad_set_tool_text" => admit(wire::set_tool_text(
-            sink,
-            &args::<TextArgs>(name, args_json)?.text,
-        )),
-        "cad_set_selected_text" => admit(wire::set_selected_text(
-            sink,
-            &args::<TextArgs>(name, args_json)?.text,
-        )),
-        "cad_set_selected_property" => {
-            let parsed: PropertyArgs = args(name, args_json)?;
-            admit(wire::set_selected_property(
-                sink,
-                &parsed.key,
-                &parsed.value,
-            ))
-        }
-        "cad_standard_view" => admit(wire::standard_view(
-            sink,
-            &args::<StandardViewArgs>(name, args_json)?.view,
-        )),
-        "cad_set_setting" => {
-            let parsed: SettingArgs = args(name, args_json)?;
-            admit(wire::set_setting(sink, &parsed.key, &parsed.value))
-        }
-        "cad_set_layer_visible" => {
-            let parsed: LayerVisibleArgs = args(name, args_json)?;
-            admit(wire::set_layer_visible(sink, &parsed.name, parsed.visible))
-        }
-        "cad_restore_layers" => admit(wire::restore_layers(sink)),
-        "cad_set_active_layer" => admit(wire::set_active_layer(
-            sink,
-            &args::<LayerNameArgs>(name, args_json)?.name,
-        )),
-        "cad_create_layer" => admit(wire::create_layer(
-            sink,
-            &args::<LayerNameArgs>(name, args_json)?.name,
-        )),
-        "cad_rename_layer" => {
-            let parsed: LayerRenameArgs = args(name, args_json)?;
-            admit(wire::rename_layer(sink, &parsed.layer, &parsed.name))
-        }
-        "cad_delete_layer" => admit(wire::delete_layer(
-            sink,
-            &args::<LayerArgs>(name, args_json)?.layer,
-        )),
-        "cad_set_layer_property" => {
-            let parsed: LayerPropertyArgs = args(name, args_json)?;
-            admit(wire::set_layer_property(
-                sink,
-                &parsed.layer,
-                &parsed.key,
-                &parsed.value,
-            ))
-        }
-        "cad_open_popup" => {
-            let parsed: PopupArgs = args(name, args_json)?;
-            let popup = wire::open_popup(popups, &parsed.kind)?;
-            serde_json::to_value(popup).map_err(|error| error.to_string())
-        }
-        "cad_close_popup" => admit(wire::close_popup(popups)),
-        other => Err(unsupported_runtime(other)),
-    }
+/// Serialize one typed wire answer exactly once, into the `invoke` envelope value.
+fn wire_value<T: serde::Serialize>(result: Result<T, String>) -> Result<Value, String> {
+    let value = result?;
+    serde_json::to_value(value).map_err(|error| error.to_string())
 }
 
-/// The wire answer of a mutation: the shared `{accepted:true}` object.
-fn admit(ack: Result<CadCommandAck, String>) -> Result<Value, String> {
-    let ack = ack?;
-    serde_json::to_value(ack).map_err(|error| error.to_string())
-}
+// ---------------------------------------------------------------------------
+// Dispatch (generated above from the shared registry)
+// ---------------------------------------------------------------------------
 
 /// The `{"ok":...}` envelope of the `invoke` export.
 ///
@@ -449,35 +399,7 @@ pub fn envelope(result: Result<Value, String>) -> String {
 // The export
 // ---------------------------------------------------------------------------
 
-/// Every wire command this transport serves: exactly the desktop command set.
-///
-/// Kept as a list (not derived from the match arms) so the "no session in this
-/// build" refusal can tell a *known* command from an unknown name, and so a test
-/// can assert the two sets are the same.
-pub const WIRE_COMMANDS: [&str; 20] = [
-    "cad_command",
-    "cad_command_aliases",
-    "cad_commands",
-    "cad_settings",
-    "cad_layers",
-    "cad_set_tool_parameter",
-    "cad_set_tool_text",
-    "cad_set_selected_text",
-    "cad_set_selected_property",
-    "cad_standard_view",
-    "cad_set_setting",
-    "cad_set_layer_visible",
-    "cad_restore_layers",
-    "cad_set_active_layer",
-    "cad_create_layer",
-    "cad_rename_layer",
-    "cad_delete_layer",
-    "cad_set_layer_property",
-    "cad_open_popup",
-    "cad_close_popup",
-];
-
-/// Whether `name` is one of [`WIRE_COMMANDS`].
+/// Whether `name` is one of [`WIRE_COMMANDS`] (generated from the shared registry).
 pub fn is_wire_command(name: &str) -> bool {
     WIRE_COMMANDS.contains(&name)
 }
