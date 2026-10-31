@@ -15,8 +15,10 @@
 //!   shell-only reports, `Shared`/telemetry, and the `MainEventsCleared` tick
 //!   drive;
 //! * [`platform`] — the explicitly **unsupported** file contracts of Android v1
-//!   (no chooser, no save, no bytes), the DOM surface source, the non-persistent
-//!   config store and the `nativeAssetsReady` handshake;
+//!   (no chooser, no save, no bytes), the DOM surface source, the durable
+//!   `filesDir` config/preference store and the `nativeAssetsReady` handshake;
+//! * [`popup`] — the in-DOM popup seam (`PopupOps` payload + the `ShellPopupHost`
+//!   that marshals the shared lifecycle onto the loop thread);
 //! * [`surface`] — the frozen JNI surface callbacks and the
 //!   `SurfaceProbePresenter` lifecycle (Vulkan only, no GLES/software fallback);
 //! * [`policy`] — the target-independent, unit-tested refusal markers, capability
@@ -54,6 +56,14 @@ pub mod platform;
 /// development host: the offset arithmetic must not be validated only on a device.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod input;
+
+/// The popup seam (`ShellPopupHost` + the `textEdit` payload derivation).
+///
+/// Popups are in-DOM overlays and the seam is toolkit-neutral, so the `PopupOps`
+/// half is compiled on every non-wasm target (its refusal contract runs on the
+/// development host). The Tauri marshalling half is Android-only, like [`host`].
+#[cfg(not(target_arch = "wasm32"))]
+pub mod popup;
 
 /// Source-structure contracts of the Android-only modules (`host/tick.rs`,
 /// `surface.rs`), compiled and run on the **development host**.

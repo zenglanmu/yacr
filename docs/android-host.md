@@ -50,8 +50,8 @@
 | 打开 / 新建 / 保存 / 出图 | **不支持** | 全部 `CadError::Unsupported`；`canOpen`/`canNew`/`canSave`/`canPlot` 为 `false` |
 | 文件身份 | **不伪造** | 启动没有 `--open`，`drawing: None`；没有 path/URI/content 授权 |
 | 初始文档 | **共享核心内置 demo 图纸** | 与桌面宿主不带 `--open` 启动完全一致；不是导入结果 |
-| 弹窗宿主 | **未接** | `popup_host = None`；共享弹窗命令**显式拒绝**（`no popup host registered`） |
-| 持久配置/偏好 | **不支持** | `NonPersistentConfigStore`：读 `Absent`，写 `Unsupported` |
+| 弹窗宿主 | **已接（in-DOM）** | `AndroidPopupHost`：弹窗是 React 树内的覆盖层，无原生窗口；`open`/`close` 经 `cad_desktop_shell::popup` 的状态机与模态门，主线程跳转有界（5 s）。Options / About / text-edit 可用；`textEdit` 载荷取当前 `CadSession` 选区（无选区 → 共享 `popup.no_text_selection` 拒绝）。设备运行 **NOT VERIFIED** |
+| 持久配置/偏好 | **持久化到应用私有 `filesDir`** | `AndroidConfigStore`：`config.json` / `preference.json`，读 `Absent`/`Text`/`Unreadable` 与桌面一致，写为「建目录 + 临时文件 + `sync_all` + rename」。路径来自 `nativeAssetsReady`（`filesDir` = 公告 `fontsDir` 的父目录）；握手前保持非持久（读 `Absent`、写 `Unsupported`），不发明路径。设备侧落盘 **NOT VERIFIED** |
 | 渲染后端 | **Vulkan 硬件 only** | 软件 Vulkan → `yacr: unsupported-gpu: software-vulkan`；**无** GLES/CPU 回退 |
 | FIT / 视口 | **整窗取景** | `SurfaceView` 覆盖整个窗口；`fit_camera` 仍按全窗口取景，分区子矩形是 follow-up |
 | 指针 | **分区原点平移** | tick 内把 DOM 分区局部坐标按 origin 换算成 presented-canvas 坐标；不是第二条输入通道。鼠标/触摸/笔按每事件 `device` 在共享 `cad-host` 仲裁（touch：单指平移、tap 选择、双指 pinch 缩放；mouse/pen：中键平移、2D 主键框选、滚轮缩放） |
@@ -81,6 +81,8 @@ React chrome），`setZOrderMediaOverlay(false)` 一并固定。
 - `Long` 只是不透明原生 handle；Kotlin **不**持有 CAD 状态、不做坐标/命令逻辑。
 - 字体与资源从 APK assets 解压到 `filesDir` 后再公告；空字体目录显式拒绝（不伪造字体面）。资源公告
   可能晚于 Tauri `setup`，因此 tick 在会话建立前每轮重读。
+- **同一个 `filesDir` 也是持久配置的根**：`config.json` / `preference.json` 写在它下面（`fontsDir` 的
+  父目录），所以 JNI 契约不需改动；握手前 store 保持非持久而绝不猜路径。
 - GPU 只接受**硬件 Vulkan**。软件 Vulkan（SwiftShader / lavapipe / CPU）显式拒绝并打稳定标记行；
   不静默换成 GLES，也不接受「空白 canvas」为成功。
 - Android 没有 shell 退出码可判：**`logcat` 的稳定标记行是第一分类依据**。
@@ -97,9 +99,11 @@ React chrome），`setZOrderMediaOverlay(false)` 一并固定。
   双指 `pinch` = 以中点缩放（含中点平移），**touch 从不框选**；mouse/pen 中键拖拽 = 平移、2D 主键拖拽 =
   框选、滚轮 = 缩放。`pinch` 契约（一次 `pointer_cancel` 进入、连续 `{x,y,dx,dy,scale}`、不逐指针转发）
   见 `docs/react-linux-app.md`。
-- **Options / 持久化是 v1 上限**：无弹窗宿主（`popup_host = None`）且 `NonPersistentConfigStore` ⇒
-  `interaction.leftDragPans`（Options → Drafting「左键拖动平移」）等偏好**既不可达也不可保存**，运行的是
-  默认值（touch 平移、mouse/pen 框选）。**触摸硬件、手势与设备运行 NOT RUN**（§8）。
+- **Options / 持久化**：弹窗宿主已接（`AndroidPopupHost`，in-DOM 覆盖层），因此 Options / About /
+  text-edit 可用；`textEdit` 载荷由 loop 线程上的原生 `CadSession` 选区派生。`interaction.leftDragPans`
+  （Options → Drafting「左键拖动平移」）等偏好写入 `filesDir` 的 `preference.json`（`config.json` 为完整
+  viewer config），下次启动经同一 store 读回。**设备侧点击/落盘/重启后读回 NOT RUN**（§8）；源码与开发机
+  契约测试只证明接线与文件语义。
 - 指针/滚轮坐标由 tick 按 DOM 分区原点平移后交给共享输入管线；纯函数在开发机有单测。
 - `invoke.ts` 的 `adapterOwnsData = carrier === 'dom-canvas' || !tauriPresent()`：Android 上 Tauri 存在
   且 carrier 为 `native-below`，所有 CAD 命令走 Tauri；wasm 适配器不接管数据。`android` 构建从
@@ -119,9 +123,10 @@ apps/app-android/
     src/host.rs                Tauri entry + 共享命令 handler + 两个报表 + Shared/telemetry
     src/host/tick.rs           MainEventsCleared tick（输入映射、呈现、事件 flush）
     src/host/pump.rs           RedrawPump（只唤醒 loop，不做渲染工作）
+    src/popup.rs               弹窗接缝：PopupOps payload + AndroidPopupHost 主线程跳转
     src/surface.rs             JNI 表面回调 + SurfaceProbePresenter（Vulkan only）
     src/policy.rs              纯策略：标记行、能力布尔、JNI 符号名（可在开发机测试）
-    src/platform.rs            Android v1 的 Unsupported 文件契约、DOM surface、非持久 config
+    src/platform.rs            Unsupported 文件契约、DOM surface、filesDir 持久 config store
     src/input.rs               分区局部 → canvas 坐标（纯函数，开发机单测）
     src/refusal.rs             稳定标记行 / step / 历史 exit 6 词汇
     src/report.rs              报表行纯函数（一行、去控制字符、有界）
@@ -194,7 +199,11 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 - **JNI 运行时链接**：`System.loadLibrary` → 符号解析 → 回调未在设备上跑过。
 - **输入**：触摸、手势、软键盘、长按、双击、滚轮（如果有）均未验证。
 - **文件/SAF**：打开/保存/新建全不支持，也没有设备侧拒绝运行的记录。
-- **弹窗**：未接宿主；「命令显式拒绝」只有源码/单测证据。
+- **弹窗**：接缝已接（`AndroidPopupHost` + `AndroidPopupOps`），源码/开发机契约测试覆盖「注册、
+  路由到共享生命周期、无选区返回共享拒绝、主线程跳转有界」；**设备上打开 Options/About/text-edit、
+  输入文本、模态门** 未运行。
+- **偏好持久化**：`AndroidConfigStore` 的开发机测试覆盖 absent/unreadable/round-trip/原子覆盖/非持久
+  回退；**设备上的 `filesDir` 落盘、进程重建后读回** 未运行。
 - **多窗口/分屏/折叠屏/三键导航/侧边导航栏**：未验证。
 - **aarch64/armv7/i686 产物**：本轮没有构建/安装任一架构的 APK。
 - **release 签名/分发**：仓库不含密钥，不是发布流程。

@@ -34,6 +34,8 @@ const TICK: &str = include_str!("host/tick.rs");
 const SURFACE: &str = include_str!("surface.rs");
 /// The Tauri entry point and the seams it registers (Android only).
 const HOST: &str = include_str!("host.rs");
+/// The popup seam (toolkit-neutral `PopupOps` + the Android marshalling half).
+const POPUP: &str = include_str!("popup.rs");
 
 /// The slice of `source` between the `start` anchor and the next `end` anchor.
 ///
@@ -206,25 +208,67 @@ fn the_presenter_is_dropped_before_its_native_window_and_detaches_on_drop() {
 }
 
 #[test]
-fn the_popup_capability_gap_is_recorded_as_a_tracked_follow_up() {
-    // Android v1 registers no popup host, so the shared popup commands refuse. The
-    // chrome should hide those affordances instead; that needs a capability on the
-    // shared profile, which is a tracked follow-up rather than a platform change.
-    let at = HOST
-        .find("state.popup_host = None;")
-        .expect("the popup seam must be explicitly unset");
-    let before: Vec<&str> = HOST[..at].lines().rev().take(8).collect();
-    let context = before.join("\n");
+fn the_popup_seam_is_registered_and_routes_through_the_shared_lifecycle() {
+    // Registration: the seam is installed in `setup` with the app handle. The
+    // negative needle is assembled so this file's own text cannot satisfy it.
     assert!(
-        context.contains("popupAvailable"),
-        "the follow-up must name the missing `popupAvailable` capability"
+        HOST.contains("state.popup_host = Some(Arc::new(crate::popup::AndroidPopupHost::new("),
+        "the host must register the Android popup seam"
+    );
+    let unset = concat!("state.popup_host", " = None");
+    assert!(
+        !HOST.contains(unset),
+        "the popup seam must stay registered (the v1 gap is closed)"
     );
     assert!(
-        context.contains("tracked follow-up"),
-        "the popup capability gap must be stated as a tracked follow-up"
+        HOST.contains("register_seams(app.handle(), &setup_shared, &setup_telemetry);"),
+        "the seam must be registered during setup with a real app handle"
+    );
+
+    // Routing: both commands call the **shared** lifecycle, not a local copy of
+    // the gate, and the ops carried into `open` are the Android payload read.
+    assert!(
+        POPUP.contains("impl ShellPopupHost for AndroidPopupHost"),
+        "the seam must implement the shared trait"
+    );
+    let open = slice_between(POPUP, "fn open(&self, shared", "fn close(");
+    assert!(
+        open.contains("cad_desktop_shell::popup::open("),
+        "open must route through cad_desktop_shell::popup::open"
     );
     assert!(
-        context.contains("no popup host registered"),
-        "the refusal must stay explicit until the capability exists"
+        open.contains("&AndroidPopupOps"),
+        "open must derive the payload through the Android ops"
+    );
+    assert!(
+        POPUP.contains("cad_desktop_shell::popup::close(&shared)"),
+        "close must route through cad_desktop_shell::popup::close"
+    );
+
+    // Threading: the hop is bounded and probes the recorded loop thread; the
+    // `Shared` guard is never moved with it (only an `Arc` clone).
+    assert!(
+        POPUP.contains("run_on_main_thread_timeout("),
+        "the marshalling must use the bounded shared protocol"
+    );
+    assert!(
+        POPUP.contains("crate::host::on_loop_thread()"),
+        "the probe must ask the host which thread owns the session"
+    );
+    let marshalled = slice_between(POPUP, "fn open(&self, shared", "fn close(");
+    assert!(
+        !marshalled.contains(".lock("),
+        "the popup hop must not carry the shell mutex"
+    );
+
+    // The payload is the live session's, read on the owner thread; an off-thread
+    // call is an explicit refusal, never a fabricated payload.
+    assert!(
+        POPUP.contains("crate::host::CAD.with("),
+        "the textEdit payload must come from the live CAD session"
+    );
+    assert!(
+        POPUP.contains("return Err(OFF_OWNER_THREAD.to_string())"),
+        "an off-loop-thread read must refuse explicitly"
     );
 }

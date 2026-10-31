@@ -15,6 +15,7 @@
 //! success.
 
 use std::sync::mpsc;
+use std::time::Duration;
 
 /// The platform's explicit main-thread seam.
 ///
@@ -58,6 +59,45 @@ where
     receiver
         .recv()
         .map_err(|_| "host.main_thread_failed: the main thread dropped the request".to_string())?
+}
+
+/// Run `task` on the host's main thread and wait for it, but only `timeout`.
+///
+/// Same protocol and error vocabulary as [`run_on_main_thread`], with one extra
+/// guarantee: a caller that must not hang when the main thread is busy (the
+/// Android host marshals popup commands from the Tauri loop, which also drives
+/// rendering) gives up after `timeout` and reports
+/// `host.main_thread_failed: no answer within …` instead of blocking forever.
+/// The dispatched task still runs to completion on the main thread; only this
+/// caller stops waiting, so its result is dropped (never reported as success).
+pub fn run_on_main_thread_timeout<T, F>(
+    thread: &dyn MainThread,
+    task: F,
+    timeout: Duration,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    if thread.is_main_thread() {
+        return task();
+    }
+    let (sender, receiver) = mpsc::channel();
+    thread
+        .dispatch(Box::new(move || {
+            let _ = sender.send(task());
+        }))
+        .map_err(|error| format!("host.main_thread_failed: {error}"))?;
+    match receiver.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "host.main_thread_failed: no answer within {} ms",
+            timeout.as_millis()
+        )),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err("host.main_thread_failed: the main thread dropped the request".to_string())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -160,5 +200,54 @@ mod tests {
 
         let error = run_on_main_thread(&Dropping, || Ok(1)).expect_err("dropped request");
         assert!(error.contains("dropped the request"), "{error}");
+    }
+
+    /// A dispatcher that accepts the task but never runs it (the main thread is
+    /// busy elsewhere). The task is kept so the sender stays alive, which is what
+    /// makes the timed variant time out instead of seeing a disconnect.
+    #[derive(Default)]
+    struct Stalling {
+        kept: std::sync::Mutex<Vec<Box<dyn FnOnce() + Send>>>,
+    }
+
+    impl MainThread for Stalling {
+        fn is_main_thread(&self) -> bool {
+            false
+        }
+
+        fn dispatch(&self, task: Box<dyn FnOnce() + Send>) -> Result<(), String> {
+            self.kept.lock().unwrap().push(task);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_silent_main_thread_times_out_instead_of_blocking_forever() {
+        let thread = Stalling::default();
+        let error = run_on_main_thread_timeout(&thread, || Ok(1), Duration::from_millis(20))
+            .expect_err("a silent main thread must not be reported as success");
+        assert!(error.starts_with("host.main_thread_failed:"), "{error}");
+        assert!(error.contains("no answer within 20 ms"), "{error}");
+    }
+
+    #[test]
+    fn the_timed_variant_runs_inline_on_the_main_thread() {
+        let thread = FakeMain::new(true);
+        let value = run_on_main_thread_timeout(&thread, || Ok(9), Duration::from_secs(1))
+            .expect("inline result");
+        assert_eq!(value, 9);
+        assert_eq!(thread.dispatched.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn the_timed_variant_still_propagates_the_task_error_verbatim() {
+        let thread = FakeMain::new(false);
+        let error = run_on_main_thread_timeout(
+            &thread,
+            || Err::<(), String>("popup.no_text_selection: none".into()),
+            Duration::from_secs(1),
+        )
+        .expect_err("the task failed");
+        assert_eq!(error, "popup.no_text_selection: none");
     }
 }

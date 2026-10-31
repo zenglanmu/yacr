@@ -53,8 +53,10 @@
 
 ## 5. 诚实上限
 
-- **Android**：无弹窗宿主（`popup_host = None`）且配置不持久（`NonPersistentConfigStore`），
-  该选项**既不可达也不可保存**；运行的是默认关闭行为（touch 平移、mouse/pen 框选）。
+- **Android**：弹窗宿主已接（`AndroidPopupHost`，in-DOM 覆盖层，Options / About / text-edit 可用），
+  配置/偏好持久化在应用私有 `filesDir`（`config.json` / `preference.json`，路径来自
+  `nativeAssetsReady` 的 `fontsDir` 父目录）。因此该选项可经 Options 修改并在下次启动读回；
+  **设备侧点击/落盘/重启读回 NOT RUN**（源码与开发机契约测试只证明接线与文件语义）。
   触摸经共享 DOM → `probe_input` 漏斗，pinch 契约同上游（见 `docs/android-host.md` §5）。
 - **Web**：Options 可用，但只在**会话内**持久。
 - **证据**：仅源码/契约测试；真实触摸硬件、手势与设备运行 **NOT RUN / NOT VERIFIED**。

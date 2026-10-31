@@ -163,6 +163,12 @@ Android 的产品路径绑在 **WebView 的 GL 实现**上：
 | 视口/FIT | **整窗取景** | `SurfaceView` 是全窗口；分区子矩形取景未实现（follow-up） |
 | 指针 | **分区原点平移** | tick 内按 DOM 分区 origin 换算；不是独立输入通道 |
 
+> **2026-11-01 修订（追加，不改写上面的历史决定）**：表中「弹窗宿主 / 持久配置」两项已被后续实现
+> 取代。弹窗是 in-DOM 覆盖层，`AndroidPopupHost` 把共享生命周期跳到 loop 线程执行（有界 5 s），
+> Options / About / text-edit 可用；`AndroidConfigStore` 把 `config.json` / `preference.json` 写入
+> 应用私有 `filesDir`（公告 `fontsDir` 的父目录，JNI 契约未改），握手前保持非持久。其余各行
+> （文件/伪造身份/Vulkan 硬门槛/整窗 FIT）**仍然有效**。设备运行与落盘仍 **NOT VERIFIED**。
+
 ## 6. 失效条款清单（逐条对照）
 
 | 文档 | 位置 | 原表述（摘要） | 处置 |

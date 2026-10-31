@@ -48,7 +48,6 @@ android_logger = "0.14"
 # for the event loop — see `src/surface.rs` for the UI-thread hand-off).
 cad-desktop-shell.workspace = true
 cad-host.workspace = true
-cad-ui-core.workspace = true
 cad-render-wgpu.workspace = true
 cad-engine.workspace = true
 # Raw `AndroidNdkWindowHandle`/`AndroidDisplayHandle` for the renderer surface
@@ -70,6 +69,11 @@ ndk = { version = "0.9.0", features = ["nativewindow"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cad-domain.workspace = true
 cad-platform.workspace = true
+# The popup seam is toolkit-neutral: `popup.rs` only implements the shared
+# `PopupOps` contract (the `textEdit` payload + its shared refusal) and is
+# compiled on the dev host so that refusal is a real behavioural test. Android
+# targets are covered by this same `not(wasm32)` table.
+cad-ui-core.workspace = true
 log.workspace = true
 
 # `tauri-build` generates the Tauri context (and the `TAURI_ANDROID_PACKAGE_NAME_*`

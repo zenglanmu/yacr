@@ -28,8 +28,14 @@
 //!   one). Creating a session without a document is not an available API; if a
 //!   no-document-at-all carrier is required, that is a `cad-host` change, not
 //!   something this host may fake.
-//! * **No popup seam** is registered, so the shared popup commands refuse
-//!   explicitly instead of pretending a window exists.
+//! * **Popups are in-DOM overlays.** The host registers a real
+//!   `ShellPopupHost` ([`crate::popup`]) that marshals the shared lifecycle onto
+//!   this thread and derives the `textEdit` payload from the live session, so
+//!   Options/About/text-edit work here with the same modal gate as the desktop.
+//! * **Preferences persist in the app's private `filesDir`** once the
+//!   `nativeAssetsReady` handshake has announced it (`config.json` /
+//!   `preference.json`, atomic replace). Before that handshake the store keeps the
+//!   honest non-persistent behaviour; no path is invented.
 //! * **No probe marker path.** `YACR_PROBE_ONLY` disables CAD entirely (the same
 //!   "CAD is disabled" status as the desktop hosts) and presents nothing; the
 //!   desktop grid marker is not a product path and is not ported.

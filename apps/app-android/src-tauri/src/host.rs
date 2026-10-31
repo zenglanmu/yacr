@@ -22,6 +22,15 @@
 //! are the chrome's shell reports, and on `native-below` the chrome simply does not
 //! send them (it has no wasm runtime failure to report).
 //!
+//! # Popups
+//!
+//! The shared `cad_open_popup`/`cad_close_popup` commands are served by a real
+//! seam ([`crate::popup::AndroidPopupHost`]): popups are in-DOM overlays, so there
+//! is no native window — the seam only marshals the shared lifecycle onto the loop
+//! thread (bounded wait) and derives the `textEdit` payload from the live
+//! `CadSession` there. Options, About and text-edit are therefore available on
+//! this carrier, with the same admission gate as every desktop host.
+//!
 //! # Tick drive
 //!
 //! The tick runs on [`tauri::RunEvent::MainEventsCleared`], exactly like
@@ -53,7 +62,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::thread::ThreadId;
 use std::time::Instant;
 
 use cad_host::HostOptions;
@@ -118,6 +128,28 @@ thread_local! {
     pub(crate) static CAD: RefCell<Option<CadSession>> = const { RefCell::new(None) };
     /// The main-thread CAD platform pieces (see [`CadEnv`]).
     pub(crate) static CAD_ENV: RefCell<Option<CadEnv>> = const { RefCell::new(None) };
+}
+
+/// The Tauri/tao loop thread, recorded once by [`run`].
+///
+/// The native `CadSession`, `CAD_ENV` and the presenter are thread-locals of that
+/// thread, so "is the caller the owner thread?" must be a real recorded
+/// [`ThreadId`], never an assumption. On Android the loop thread is the one
+/// `tao`'s entry point spawns for the event loop, **not** the Android UI thread
+/// (where the `SurfaceHolder` callbacks arrive), so a toolkit probe like GTK's
+/// does not exist here; comparing the id is the honest equivalent.
+static LOOP_THREAD: OnceLock<ThreadId> = OnceLock::new();
+
+/// Record the calling thread as the Tauri loop thread (idempotent).
+fn record_loop_thread() {
+    let _ = LOOP_THREAD.set(std::thread::current().id());
+}
+
+/// Whether the caller is the Tauri loop thread that owns the `!Send` CAD state.
+pub(crate) fn on_loop_thread() -> bool {
+    LOOP_THREAD
+        .get()
+        .is_some_and(|loop_thread| *loop_thread == std::thread::current().id())
 }
 
 /// App-side render telemetry.
@@ -233,15 +265,22 @@ fn install_cad_env(shared: &Arc<Mutex<Shared>>) {
 }
 
 /// Register the app-side seams on the shared shell state.
-fn register_seams(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>) {
+///
+/// Called once during Tauri `setup`, before the frontend can invoke a command.
+/// The popup seam is a **real** host: popups are in-DOM overlays, so
+/// [`crate::popup::AndroidPopupHost`] only marshals the shared lifecycle onto the
+/// loop thread (where the `!Send` CAD selection lives) and derives the `textEdit`
+/// payload there. Options/About/text-edit therefore work exactly like on the
+/// desktop hosts; a failure is propagated verbatim, never turned into a pretend
+/// acknowledgement.
+fn register_seams(
+    app: &tauri::AppHandle,
+    shared: &Arc<Mutex<Shared>>,
+    telemetry: &Arc<Mutex<RenderTelemetry>>,
+) {
     let mut state = lock(shared);
     state.telemetry = Some(Arc::new(AppTelemetry(telemetry.clone())));
-    // No popup seam is wired on Android v1: the shared popup commands then refuse
-    // explicitly (`no popup host registered`) instead of pretending a window exists.
-    // TODO(popup-capability, tracked follow-up): a `popupAvailable` capability on
-    // `HostProfile` would let the chrome hide Options/About/text-edit instead of
-    // always refusing. Shared profile + chrome work, not a platform change.
-    state.popup_host = None;
+    state.popup_host = Some(Arc::new(crate::popup::AndroidPopupHost::new(app.clone())));
 }
 
 /// Ask the tick to stop and release the presenter (idempotent).
@@ -343,6 +382,10 @@ fn report_commands<R: tauri::Runtime>(
 /// `TAURI_ANDROID_PACKAGE_NAME_*` env vars `build.rs`/`tauri-build` exports.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The Tauri/tao loop thread owns every `!Send` CAD value. Record it before
+    // `build`/`run` so the popup seam's inline-vs-marshal probe has a real answer
+    // and an IPC handler can never mistake a worker thread for the owner.
+    record_loop_thread();
     init_logging();
     log::info!(
         "app-android: native-below carrier starting (surfaceMode={} documentOwner={}; the native \
@@ -384,7 +427,7 @@ pub fn run() {
                     MAIN_WINDOW_LABEL
                 ),
             }
-            register_seams(&setup_shared, &setup_telemetry);
+            register_seams(app.handle(), &setup_shared, &setup_telemetry);
             install_cad_env(&setup_shared);
             let wake_pending = lock_telemetry(&setup_telemetry).wake_pending.clone();
             let pump = pump::RedrawPump::spawn(app.handle(), wake_pending);

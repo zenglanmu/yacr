@@ -1,4 +1,55 @@
-## 2026-11-01 输入模态按设备仲裁：touch 平移/双指 pinch、`leftDragPans` 偏好
+## 2026-11-01 Android 弹窗接缝与持久配置（原有「Options 不可达 / 配置不持久」上限已解除；设备 NOT RUN）
+
+### 结论
+
+- **弹窗接缝已接**：Android 不再是 `popup_host = None`。新增 `apps/app-android/src-tauri/src/popup.rs`：
+  `AndroidPopupOps` 实现 `cad_ui_core::popup::PopupOps`（`textEdit` 载荷取 loop 线程上 `CAD` 的
+  `CadSession::selected_text_edit`，与 Linux 同一条共享装配；**非 loop 线程显式拒绝**
+  `popup.main_thread_required: …`，绝不返回伪造载荷）；`AndroidPopupHost` 实现
+  `cad_desktop_shell::state::ShellPopupHost`，把 `open`/`close` 经 `AppHandle::run_on_main_thread`
+  跳到 loop 线程再调用 `cad_desktop_shell::popup::{open,close}`，错误原样传播。`Shared` 只被 `Arc`
+  克隆，互斥锁不跨越跳转。Options / About / text-edit 因此可用，模态门与桌面宿主同一状态机。
+- **主线程探测**：`host.rs` 在 `run()` 入口记录 loop 线程 `ThreadId`（`OnceLock`），
+  `on_loop_thread()` 是唯一判据；Android 没有 GTK 式 toolkit probe，且 loop 线程 ≠ Android UI 线程。
+- **有界等待**：`cad-desktop-shell::threading` 新增 `run_on_main_thread_timeout`（同一通道协议，
+  `recv_timeout`），Android 用 5 s 上限；超时是 `host.main_thread_failed: no answer within …`，
+  不当作成功。原 `run_on_main_thread`（无限等待）行为不变，桌面宿主继续使用。
+- **持久配置已接**：`platform.rs` 的 `NonPersistentConfigStore` 换成 `AndroidConfigStore`。路径来自冻结
+  的 `nativeAssetsReady` 握手：`filesDir` = 公告 `fontsDir` 的父目录（Kotlin 侧
+  `File(filesDir, "fonts")`），JNI 契约与 Kotlin **未改**。`config.json` / `preference.json` 的读
+  区分 `Absent`/`Text`/`Unreadable`，写为「建目录 + 临时文件 + `sync_all` + rename + 目录 fsync
+  best-effort」。握手未到时保持非持久（读 `Absent`、写 `Unsupported`，`logcat` 只提示一次），
+  不发明路径；解析是**每次调用**做的，所以晚到的公告仍生效，同一个 store 实例同时服务启动读取与
+  设置写入（`host/tick.rs` 的 `HostPlatform.config_store`）。
+- **诚实上限**：设备/模拟器、真实 `filesDir` 落盘、进程重建后读回、Options/About/text-edit 的真实
+  点击与输入、模态门在设备上的行为、Vulkan adapter、像素——全部 **NOT RUN**。本轮证据只有编译门禁
+  与开发机单元/源码契约测试。
+
+### 代码 / 文档落点
+
+- 新增 `apps/app-android/src-tauri/src/popup.rs`；`lib.rs` 在 `not(wasm32)` 下导出（`PopupOps` 部分
+  在开发机编译并测试，`ShellPopupHost` 部分 `cfg(target_os = "android")`）。
+- `apps/app-android/src-tauri/src/host.rs`：`record_loop_thread`/`on_loop_thread`，`setup` 注册
+  `state.popup_host = Some(Arc::new(AndroidPopupHost::new(...)))`，删除旧 TODO/`None`。
+- `apps/app-android/src-tauri/src/platform.rs`：`AndroidConfigStore`（`with_files_dir` /
+  `from_handshake` / `non_persistent`）、`files_dir_from`、`atomic_replace`；`host/tick.rs` 文档同步。
+- `apps/app-android/src-tauri/Cargo.toml`：`cad-ui-core` 移到 `not(wasm32)` 依赖组（popup seam 需要，
+  开发机契约测试也要用到）。
+- `crates/cad-desktop-shell/src/threading.rs`：`run_on_main_thread_timeout` + 超时/内联/原样错误测试。
+- `contract.rs`：旧的「popup 能力缺口」测试替换为「seam 已注册 + 两个命令路由共享生命周期 + 有界跳转 +
+  不携带 shell 锁 + payload 来自实时会话」的源码契约。
+- 文档：`docs/android-host.md`（§3 能力表、§4 filesDir、§5 Options/持久化、§6 目录、§8 证据）、
+  `docs/compatibility.md`（平台行 + 输入模态上限段）、本文件。
+
+### 本轮未做 / NOT RUN
+
+- `cargo test -p app-android --locked`、`cargo check -p app-android --target aarch64-linux-android`、
+  `cargo check --workspace --all-targets`、fmt、两条 clippy、架构/文件大小/命令文档脚本：本轮已跑，
+  结果见会话报告。
+- **设备/模拟器、真实落盘与重启读回、弹窗点击/输入、像素**：全部 **NOT RUN**；不得把编译或开发机
+  测试结论引申为设备行为。
+
+
 
 ### 结论
 
