@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 40] = [
+    pub const ALL: [DrawToolKind; 41] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -99,6 +99,10 @@ impl DrawToolKind {
         DrawToolKind::CopyBase,
         DrawToolKind::CutBase,
         DrawToolKind::PasteClip,
+        // HATCHPOINT is appended for the same index-stability reason: it is a
+        // real kind started by its command selector (one internal point, no
+        // selection), not from the draw-tool selector list.
+        DrawToolKind::HatchPoint,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -144,6 +148,7 @@ impl DrawToolKind {
             Self::CopyBase => "copybase",
             Self::CutBase => "cutbase",
             Self::PasteClip => "pasteclip",
+            Self::HatchPoint => "hatchpoint",
         }
     }
 
@@ -191,6 +196,7 @@ impl DrawToolKind {
             "copybase" => Some(Self::CopyBase),
             "cutbase" => Some(Self::CutBase),
             "pasteclip" => Some(Self::PasteClip),
+            "hatchpoint" => Some(Self::HatchPoint),
             _ => None,
         }
     }
@@ -312,6 +318,11 @@ impl DrawToolKind {
             Self::CopyBase => "COPYBASE",
             Self::CutBase => "CUTBASE",
             Self::PasteClip => "PASTECLIP",
+            // HATCHPOINT uses a locale-neutral ASCII fallback label, exactly like
+            // HATCH and the other post-ADR-0015 kinds: the ADR fence forbids new
+            // CJK literals on the Rust side and the shell substitutes the catalog
+            // label for chrome anyway.
+            Self::HatchPoint => "HATCHPOINT",
         }
     }
 
@@ -357,7 +368,10 @@ impl DrawToolKind {
             // its one insertion point.
             | Self::CopyBase
             | Self::CutBase
-            | Self::PasteClip => PointArity::Exact(1),
+            | Self::PasteClip
+            // HATCHPOINT captures the one internal point the boundary is
+            // discovered from.
+            | Self::HatchPoint => PointArity::Exact(1),
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot, so its complement is
             // the zero-point exact arity (ready as soon as the selection is

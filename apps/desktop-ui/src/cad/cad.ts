@@ -294,6 +294,14 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
     'tool.prompt.mleader.arrow',
     'tool.prompt.mleader.landing',
   ],
+  // HATCHPOINT is a **one-point** capture like ID: the user picks the internal
+  // point, the host finds the containing closed boundary (with its nested islands)
+  // and hatches with the same fill parameters HATCH uses. Exactly one pick is
+  // named here — the list must stay at one entry — and the point is not an entity
+  // pick, so no preselection entry exists for it (see [`PRESELECT_PROMPTS`]).
+  'draw.hatchpoint': [
+    'tool.prompt.hatchpoint.pick_internal',
+  ],
   // ID (2026-10-26) is a **single-point** capture that commits itself: one pick,
   // then the host reports the coordinates. It therefore has exactly one step and
   // never reaches the ready state in practice (the capture is complete the moment
@@ -369,6 +377,13 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // (see [`toolStepPromptKey`]), so the field never appears before the host says
   // so.
   'draw.mleader': 'tool.prompt.mleader.type_text',
+  // HATCHPOINT's complement is its single internal point. Once it is captured the
+  // capture is complete, but the host has **not** searched for the boundary yet,
+  // so no copy here may claim one was found: the shared dimension ready sentence
+  // would also be false (nothing is dimensioned). This names the one honest state
+  // — point captured, Enter hatches — and is not positional, so it lives here
+  // rather than in the step list.
+  'draw.hatchpoint': 'tool.prompt.hatchpoint.ready',
   // ID's capture is complete after its single pick, so it commits itself and the
   // shared dimension ready copy ("Dimension defined; press Enter to confirm")
   // would be false twice over — nothing is dimensioned and there is nothing left

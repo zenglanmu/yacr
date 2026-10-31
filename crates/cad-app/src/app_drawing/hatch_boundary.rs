@@ -24,7 +24,7 @@ const ELLIPSE_SEGMENTS: usize = 64;
 /// The relative-plane tolerance: `1e-9` scaled by the boundary magnitude plus
 /// one, so large drawings are not rejected for floating-point noise and exact
 /// coincidences are still exact.
-fn plane_tolerance(magnitude: f64) -> f64 {
+pub(super) fn plane_tolerance(magnitude: f64) -> f64 {
     1e-9 * (1.0 + magnitude)
 }
 
@@ -706,7 +706,7 @@ fn segment_bulge(shape: &BoundaryShape, reversed: bool, plane: &HatchPlane) -> C
 ///
 /// Recovered through `HatchPlane::to_world`, so the loop frame can never disagree
 /// with the plane the fill and the display use.
-fn plane_projection(plane: &HatchPlane) -> impl Fn(Point3) -> [f64; 2] {
+pub(super) fn plane_projection(plane: &HatchPlane) -> impl Fn(Point3) -> [f64; 2] {
     let origin = plane.to_world([0.0, 0.0]);
     let axis_x = sub(plane.to_world([1.0, 0.0]), origin);
     let axis_y = sub(plane.to_world([0.0, 1.0]), origin);

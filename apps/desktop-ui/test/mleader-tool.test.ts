@@ -98,15 +98,15 @@ test('MLEADER sits between TEXT and HATCH on both draw panels, with no variant p
     const at = ids.indexOf(MLEADER.id);
     assert.ok(at !== -1, `${tabId}/draw must carry the MLEADER affordance`);
     // Annotation neighbours: MLEADER directly follows MTEXT, which directly
-    // follows TEXT, and HATCH still closes the group.
+    // follows TEXT; the HATCH pair still closes the group.
     assert.equal(ids[at - 1], 'MTEXT', `${tabId}: MLEADER follows MTEXT`);
     assert.equal(ids[at - 2], 'TEXT', `${tabId}: MTEXT follows TEXT`);
     assert.deepEqual(
-      ids.slice(-5),
-      ['OFFSET', 'TEXT', 'MTEXT', 'MLEADER', 'HATCH'],
+      ids.slice(-6),
+      ['OFFSET', 'TEXT', 'MTEXT', 'MLEADER', 'HATCH', 'HATCHPOINT'],
       `${tabId}: fixed tail order`,
     );
-    assert.equal(items.at(-1).id, 'HATCH', `${tabId}/draw still ends with HATCH`);
+    assert.equal(items.at(-1).id, 'HATCHPOINT', `${tabId}/draw still ends with HATCHPOINT`);
     assert.equal(items.filter(item => item.id === MLEADER.id).length, 1, `${tabId}: one MLEADER button`);
 
     const item = items[at];

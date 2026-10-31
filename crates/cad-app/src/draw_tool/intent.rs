@@ -295,6 +295,16 @@ pub enum DrawIntent {
     /// captures **no points** (the zero-point exact complement) and takes no
     /// in-command picks.
     Hatch,
+    /// HATCHPOINT: fill the smallest visible closed boundary containing `seed`.
+    ///
+    /// `seed` is the one captured internal point, exactly as clicked. The
+    /// boundary discovery (whole visible circle/full ellipse/closed polyline,
+    /// `+Z` same-elevation only), the island set and every refusal live in the
+    /// command layer; the fill parameters are the same session typed channel
+    /// [`DrawIntent::Hatch`] reads. The current selection is **not** part of this
+    /// intent (HATCHPOINT does not use it), and the boundary entities are
+    /// retained (no associativity).
+    HatchPoint { seed: Point3 },
     /// TEXT: place `text` at the captured insertion point (ADR 0019 F.1).
     ///
     /// The height and the rotation are the session typed channel

@@ -1,3 +1,63 @@
+## 2026-11-01 HATCH 内部点（`HATCHPOINT`）：按点填充落地，v1 有界
+
+### 结论
+
+- **关闭文档里标记为 M 的「HATCH 内部点求边界」缺口**（`docs/autocad-command-coverage.md` §4）。新增
+  **Work-only 选择子 `HATCHPOINT`**（本项目选择子，AutoCAD 的 `HATCH` 在内部点提示里做同一件事；入口独立，
+  **不**改写 `HATCH` 的预选形态）。`DrawToolKind::HatchPoint` 是 **1 点 arity**、`requires_selection = false`、
+  不取实体 pick；填充分配参数与 `HATCH` **完全相同**（同一 `ToolParameter` 通道，没有第二套参数）。
+- **v1 发现算法**：在**可见模型空间整实体**中只考虑 `Circle`、完整 `Ellipse`、闭合 `Polyline`；每个候选走与
+  `HATCH` 相同的 `boundary_shapes → stitch_boundary → resolve_plane → boundary_loops` 管线，取**最小面积包含边界**，
+  其余“环在它内部”的候选作为岛屿（所有嵌套深度；既有 even-odd / `HatchStyle` 决定孔洞）。最终环集再走一次同一管线，
+  交给**唯一** `HatchGeometry::new` 校验器；一条事务 / 一步撤销，活动图层，边界实体**保留**（无关联性）。
+- **种子落库**：内部点按 HATCH 平面 OCS 2D 写进 `HatchGeometry::seeds`，导出为 **DXF 组 98**；不新增实体字段。
+- **诚实拒绝（都在开事务之前）**：种子非有限（`hatch.boundary_invalid`）、非模型空间（`Unsupported`）、点在任一候选
+  边界上（`hatch.boundary_on_edge`）、没有可见闭合边界包含它（`hatch.boundary_not_found`）、两个包含边界面积相等
+  （`hatch.boundary_ambiguous`）。失败面不猜、不裁剪、不伪造空成功。
+- **v1 上限（必须按此读）**：`LINE`/`ARC` 边链**不自动发现**（既有 `stitch_boundary` 要求整个边集闭合，分支/残余边
+  会拒绝，不能直接喂全图；仍用 `HATCH` 预选）；当前选择**不参与**候选；只认 `+Z` 且与种子同标高；仅模型空间；
+  已有“创建校验基于弦、bulge 环弦间相切可能漏检”的盲点照旧。这些是**显式跳过**，不是静默投影。
+- **词表/文案**：`COMMAND_TABLE` **97 → 98**、`admissible_names()` **155 → 156**；i18n **+4 键**（两目录一致，总数
+  **906**）；React 目录/ribbon 在 `HATCH` 旁新增 **Hatch by point**（同一 `hatch` 字形，小按钮、无 variant 弹层）。
+
+### 代码 / 文档落点
+
+- Rust：新增 `crates/cad-app/src/app_drawing/hatch_internal_point.rs`（发现/选择/重建/诊断）与
+  `crates/cad-app/src/tests/drawing/hatch_internal_point.rs`（14 项契约）；`command_id.rs`、`command_payload.rs`、
+  `draw_tool/{kind,intent,mod}.rs`、`host/draw_intent_map.rs`、`session_state.rs`、`application.rs`、
+  `render_scene/overlay/preview.rs`、`app_drawing/{drawing_create,mod,hatch_boundary}.rs`；
+  `cad-ui-core` 的 `session/{commands,status}.rs` 与两处契约测试。
+- `cad-domain`：`HatchLoop::sampled_ring()` 公开（委托既有 bulge 采样器）、`hatch::{point_in_ring,ring_is_inside}` 公开
+  （不复制包含判定）。
+- React：`commands/catalog.ts`、`ribbon/ribbon-model.ts`、`cad/cad.ts`、`tools/tool-parameter-specs.ts` 与
+  `crates/cad-ui-core/i18n/{en,zh-CN}.json`；测试新增 `apps/desktop-ui/test/hatch-point.test.ts`，并同步
+  `hatch-tool`/`mleader-tool`/`text-tool`/`i18n`/`helpers` 的精确列表。
+- 文档：`docs/compatibility.md`（HATCH（创建）行）、`docs/autocad-command-coverage.md`（词表 98/156、HATCH 行、缺口行、
+  §5/§5b 期望输出）、`docs/shortcuts.md`（§2 行与计数、§4 剩余缺口）、`docs/dxf-entity-coverage.md`、
+  `docs/adr/0018-hatch-family.md`（文末 2026-11-01 补注，不改写历史）、本文件。
+
+### 验证（本轮实际运行）
+
+- `cargo fmt --all -- --check` → exit 0。
+- `cargo check --workspace --all-targets --locked` → exit 0（含 `app-web`/`app-windows`/`app-macos`）。
+- `cargo test -p cad-app -p cad-ui-core --locked -- --test-threads=1` → exit 0：`cad-app` lib **1395 passed / 0 failed**，
+  集成 targets 4/11/18/15/5/2 全绿（1 个外部 DWG 用例仍 **ignored**，不是已运行证据）；`cad-ui-core` **342 passed / 0 failed**。
+- `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` → exit 0（既有 dead-code 警告，非本轮引入）。
+- `cargo clippy -p cad-app -p cad-ui-core --all-targets --locked -- -D warnings` → exit 0。
+- `python3 scripts/{check-file-size,check-architecture,check-i18n,check-command-docs}.py` → 全 OK（i18n 906 键；
+  command-docs：98/5/2/4、51 aliases、105 canonical、§2 rows 60、0 mismatch）。
+- 前端：`npx tsc --noEmit && node --test test/*.test.ts` → **873 pass / 0 fail**；
+  `python3 scripts/check-i18n.py` → OK。
+
+### NOT RUN / NOT VERIFIED
+
+- **全 workspace 测试套件**（只跑了 `cad-app` + `cad-ui-core`）；`cargo doc`；真实 DWG 上的内部点发现。
+- **GUI / 真实 GPU / 像素 / 真窗口**：未运行 `scripts/run-react-linux.sh`、`collect-evidence.sh` 或任何截图；
+  13 个小按钮的 draw 面板是否在真机布局下不挤，**未做视觉验收**。
+- **v1 声明之外**：`LINE`/`ARC` 自动发现、当前选择作为候选、非 `+Z`/其它标高、图纸空间、关联性、`.pat`/`76=2`
+  图案名、AutoCAD 式模态图案对话框、实时填充预览——全部仍 **NOT IMPLEMENTED**。
+- 与 AutoCAD/vendor 的行为逐项对照：**未做**。
+
 ## 2026-11-01 Android 弹窗接缝与持久配置（原有「Options 不可达 / 配置不持久」上限已解除；设备 NOT RUN）
 
 ### 结论

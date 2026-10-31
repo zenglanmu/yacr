@@ -463,7 +463,10 @@ export type ToolParameterMap = Readonly<Record<string, ToolParameterOwner>>;
  * projects the value while that tool runs: `draw.polygon` (its side count),
  * `draw.hatch` (its ten fill parameters; HATCH captures no points) and
  * `draw.text` / `draw.mtext` (the one shared text height and the one shared
- * creation rotation, plus the MTEXT-only attachment). The other tools are
+ * creation rotation, plus the MTEXT-only attachment). HATCH's point-pick entry
+ * (`draw.hatchpoint`) reads the **same** ten keys under its own command — one
+ * parameter set, two ways to pick the boundary, so the two commands can never
+ * disagree about the fill. The other tools are
  * not implemented and the host projects no value for their parameters, so nothing
  * renders for them (a control appears only when the tool is active **and** its
  * value is projected). A later phase makes a tool live by adding one row here
@@ -480,6 +483,25 @@ export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
   // never moves the strip under the pointer.
   'draw.hatch': {
     command: 'HATCH',
+    keys: [
+      'hatchPatternType',
+      'hatchPattern',
+      'hatchGradientKind',
+      'hatchGradientAngle',
+      'hatchGradientColorA',
+      'hatchGradientColorB',
+      'hatchSpacing',
+      'hatchAngle',
+      'hatchDouble',
+      'hatchStyle',
+    ],
+  },
+  // HATCHPOINT takes one internal pick instead of a pre-selection, but the fill
+  // it creates is the same entity from the same ten host parameters. It therefore
+  // owns exactly HATCH's key list under its own command: no new control, and no
+  // second set of values the two entry points could drift apart on.
+  'draw.hatchpoint': {
+    command: 'HATCHPOINT',
     keys: [
       'hatchPatternType',
       'hatchPattern',

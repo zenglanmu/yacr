@@ -566,4 +566,30 @@ pub enum DrawToolKind {
     /// no editing of MLEADER/compound children or block-internal members (they
     /// have no addressable identity; ADR 0020 postpones MLEADER editing to P7b).
     TextEdit,
+    /// HATCHPOINT: pick **one internal point** and fill the smallest visible closed
+    /// boundary that contains it (project-specific selector, like
+    /// SELECTINBOX/GRIPSTRETCH).
+    ///
+    /// The capture is exactly one free point ([`DrawToolKind::arity`] is
+    /// `Exact(1)`); it takes no entity picks ([`DrawToolKind::picked_step_count`]
+    /// is `0`) and does not require a selection — the current selection is
+    /// deliberately **not** used, because the boundary is discovered from the
+    /// point. The command layer owns the discovery and every refusal.
+    ///
+    /// Declared v1 limits (do not read more into this kind):
+    ///
+    /// * only **whole visible** `Circle`, full `Ellipse` and closed `Polyline`
+    ///   entities are candidates; `LINE`/`ARC` edge chains are **not**
+    ///   auto-discovered (they need the stitched-loop discovery this v1 does not
+    ///   do), and the current selection is not consulted;
+    /// * only boundaries in the picked point's `+Z` plane (same elevation) are
+    ///   considered; other planes are skipped, never projected;
+    /// * nested closed boundaries become islands by containment; all other kinds
+    ///   are skipped, not refused;
+    /// * no associativity (the boundary entities are retained), and the existing
+    ///   `HatchGeometry::new` chord/bulge blind spot still applies.
+    ///
+    /// The fill parameters (pattern type/index, spacing, angle, double, style and
+    /// the gradient channel) are the **same** session typed channel HATCH reads.
+    HatchPoint,
 }

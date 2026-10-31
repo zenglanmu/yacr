@@ -90,6 +90,11 @@ export const HOST_NAMES = [
   // implemented, so nothing may admit or suggest it.
   'COPYBASE', 'CUTBASE', 'PASTEORIG',
   'OFFSET', 'SETACTIVELAYER', 'HOVERPREVIEW', 'GRID', 'SNAP', 'SNAPUNIT', 'OSNAP', 'ORTHO', 'HATCH',
+  // HATCHPOINT: HATCH's one-pick entry point (an internal point inside a closed
+  // boundary). It is a canonical selector of its own, not an alias of `HATCH`:
+  // the two take different input (a pick vs a pre-selection), so admitting one
+  // must never admit the other's capture.
+  'HATCHPOINT',
   // MATCHPROP: the selection-based property painter (`CommandId::MatchProp`,
   // `CommandPayload::None` — the selection's first entity is the source). No
   // dedicated IPC; the bare name is the whole input.

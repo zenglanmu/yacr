@@ -19,7 +19,11 @@ mod pattern;
 mod patterns;
 mod simplify;
 
-pub(crate) use common::{point_in_ring, ring_is_inside};
+// Shared containment helpers, re-exported because the HATCHPOINT point picker
+// (`cad-app`) must answer "which visible closed boundary contains this point"
+// with the **same** even-odd/probe rules the fill and style derivation use; a
+// second implementation would be a second truth.
+pub use common::{point_in_ring, ring_is_inside};
 
 /// A closed polygon in hatch-plane coordinates.
 pub type Loop = Vec<[f64; 2]>;

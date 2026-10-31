@@ -296,11 +296,20 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // constraint), and a caret here would imply choices the command does
           // not have.
           { id: 'MLEADER', labelKey: 'draw.kind.mleader', icon: 'mleader', command: 'MLEADER' },
-          // HATCH closes the draw group, the way AutoCAD's Draw panel puts Hatch
-          // at its end. It is a small button: unlike LINE/CIRCLE it is not a
-          // primary creation tool, and it has no variant popover (the unimplemented
-          // pattern-name/gradient forms must not appear as menu entries).
+          // HATCH is the draw group's select-objects-first command, the way
+          // AutoCAD's Draw panel puts Hatch at its end. It is a small button:
+          // unlike LINE/CIRCLE it is not a primary creation tool, and it has no
+          // variant popover (the unimplemented pattern-name/gradient forms must not
+          // appear as menu entries).
           { id: 'HATCH', labelKey: 'draw.kind.hatch', icon: 'hatch', command: 'HATCH' },
+          // HATCHPOINT is HATCH's point-pick entry and is appended after it, so
+          // no shipped row moves: one pick inside a closed boundary, then the host
+          // finds the containing boundary (with its nested islands) and hatches
+          // with the **same** ten fill parameters. It is a small button with no
+          // variant popover — there is no sub-prompt and no second parameter set —
+          // and it is deliberately not a pre-selection tool, so the button takes a
+          // pick while HATCH stays the select-objects-first command.
+          { id: 'HATCHPOINT', labelKey: 'draw.kind.hatchpoint', icon: 'hatch', command: 'HATCHPOINT' },
         ],
       },
       {
@@ -435,12 +444,16 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', command: 'SPLINE' },
           { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', command: 'OFFSET' },
           // Same draw-group tail on the Draw tab: TEXT and MTEXT, then MLEADER
-          // next to them, then Hatch last — the small-button decisions match the
-          // Home panel.
+          // next to them, then Hatch and its point-pick entry — the small-button
+          // decisions match the Home panel.
           { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', command: 'TEXT' },
           { id: 'MTEXT', labelKey: 'draw.kind.mtext', icon: 'mtext', command: 'MTEXT' },
           { id: 'MLEADER', labelKey: 'draw.kind.mleader', icon: 'mleader', command: 'MLEADER' },
           { id: 'HATCH', labelKey: 'draw.kind.hatch', icon: 'hatch', command: 'HATCH' },
+          // HATCH's point-pick entry, in the same slot as on the Home panel (see
+          // the Home/draw comment for the one-pick shape, the shared fill
+          // parameters and why it is a small button with no popover).
+          { id: 'HATCHPOINT', labelKey: 'draw.kind.hatchpoint', icon: 'hatch', command: 'HATCHPOINT' },
         ],
       },
       {

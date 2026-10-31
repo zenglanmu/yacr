@@ -86,6 +86,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("DIMBASELINE", CommandId::DimBaseline),
     ("DIMCONTINUE", CommandId::DimContinue),
     ("HATCH", CommandId::Hatch),
+    // HATCHPOINT is the project-specific **internal point** selector (like
+    // SELECTINBOX/GRIPSTRETCH): one picked point, then the command discovers the
+    // smallest visible closed boundary containing it. It is a real selector, not
+    // an alias of HATCH (the input and the discovery are different).
+    ("HATCHPOINT", CommandId::HatchPoint),
     ("MOVE", CommandId::MoveEntities),
     ("TRIM", CommandId::TrimEntity),
     ("EXTEND", CommandId::ExtendEntity),
@@ -829,6 +834,9 @@ pub(super) fn interaction_request_for(
         // HATCH has the pre-selection shape: its boundary is the current
         // selection, so the selector only starts the tool (no payload).
         CommandId::Hatch => Some(InteractionRequest::BeginDraw(DrawToolKind::Hatch)),
+        // HATCHPOINT captures one internal point; the command discovers the
+        // boundary from it (the selection is not its input).
+        CommandId::HatchPoint => Some(InteractionRequest::BeginDraw(DrawToolKind::HatchPoint)),
         CommandId::AlignEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Align)),
         CommandId::StretchEntities => Some(InteractionRequest::BeginDraw(DrawToolKind::Stretch)),
         CommandId::Measure => Some(InteractionRequest::BeginMeasurement(

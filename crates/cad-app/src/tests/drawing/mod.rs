@@ -293,6 +293,7 @@ mod grip;
 mod grip_fixture;
 mod hatch;
 mod hatch_gradient;
+mod hatch_internal_point;
 mod hatch_predefined;
 mod hatch_stitch;
 mod join;

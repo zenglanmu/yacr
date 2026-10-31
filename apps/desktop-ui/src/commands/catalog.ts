@@ -58,6 +58,12 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // one.
   { id: 'MLEADER', labelKey: 'draw.kind.mleader', icon: 'mleader', group: 'draw' },
   { id: 'HATCH', labelKey: 'draw.kind.hatch', icon: 'hatch', group: 'draw' },
+  // HATCHPOINT is HATCH's point-pick entry: one pick inside a closed boundary
+  // (circle, full ellipse, closed polyline) and the host finds the containing
+  // boundary with its nested islands. It reuses the `hatch` glyph — the icon set
+  // has no separate point mark, and the fill output is the same entity — and it
+  // sits directly after HATCH so no shipped row moves.
+  { id: 'HATCHPOINT', labelKey: 'draw.kind.hatchpoint', icon: 'hatch', group: 'draw' },
   { id: 'MOVE', labelKey: 'draw.kind.move', icon: 'move', group: 'modify' },
   { id: 'COPY', labelKey: 'draw.kind.copy', icon: 'copy', group: 'modify' },
   // Clipboard selectors with a base point (2026-10-27), placed directly after the

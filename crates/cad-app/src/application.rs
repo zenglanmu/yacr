@@ -431,6 +431,7 @@ impl Application {
             | CommandId::DimBaseline
             | CommandId::DimContinue
             | CommandId::Hatch
+            | CommandId::HatchPoint
             | CommandId::MoveEntities
             | CommandId::TrimEntity
             | CommandId::ExtendEntity

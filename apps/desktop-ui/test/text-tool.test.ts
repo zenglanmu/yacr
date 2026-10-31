@@ -326,9 +326,9 @@ test('TEXT is a draw affordance in the ribbon and the catalog, enabled only by r
     assert.equal(item.action, undefined, 'TEXT must dispatch through the router');
     assert.equal(item.large, undefined, 'TEXT is a small draw button, not a primary tile');
     assert.equal(item.variants, undefined, 'TEXT has no variant popover');
-    // HATCH still closes the draw group.
+    // HATCH still closes the draw run, with HATCHPOINT directly after it.
     const items = drawPanel(tabId).items;
-    assert.equal(items.at(-1).id, 'HATCH', `${tabId}/draw still ends with HATCH`);
+    assert.deepEqual(items.slice(-2).map(item => item.id), ['HATCH', 'HATCHPOINT'], `${tabId}/draw still ends with the HATCH pair`);
     assert.ok(ribbonCommandIds().includes('TEXT'));
   }
   // Router admission is the single enable gate.
@@ -448,8 +448,8 @@ test('MTEXT sits directly after TEXT in the catalog and both draw panels, with n
     // Rotation/attachment/line spacing/columns/background are NOT implemented, so
     // a variant popover here would offer choices the command does not have.
     assert.equal(item.variants, undefined, 'MTEXT has no variant popover');
-    // HATCH still closes the draw group.
-    assert.equal(items.at(-1).id, 'HATCH', `${tabId}/draw still ends with HATCH`);
+    // HATCH still closes the draw run, with HATCHPOINT directly after it.
+    assert.deepEqual(items.slice(-2).map(item => item.id), ['HATCH', 'HATCHPOINT'], `${tabId}/draw still ends with the HATCH pair`);
     assert.ok(ribbonCommandIds().includes('MTEXT'));
   }
   // Router admission is the single enable gate, exactly like TEXT.

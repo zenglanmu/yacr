@@ -185,8 +185,8 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
 - **接受**：`Circle`、`Ellipse`、**闭合** `Polyline`（含 bulge），每个实体各自成环；嵌套按 A.3 重算。
 - **拒绝（命名、且不开事务）**：非闭合/开放折线、`Line`/`Arc`（无拼接器）、样条边界、自交、相切/重复、部分重叠、
   退化面积、非共面、缺活动图层、Viewer。
-- **明确 NOT IMPLEMENTED（且 UI 不得暗示；2026-10-27 就地更正其中两项）**：**内部点求边界**（AutoCAD 主导工作流；
-  需场景包络搜索 + 岛屿选择，代码完全不存在）、绘制边界、`remove boundaries`、~~预定义/自定义图案名~~
+- **明确 NOT IMPLEMENTED（且 UI 不得暗示；2026-10-27 就地更正其中两项，2026-11-01 再更正一项）**：~~内部点求边界~~
+  （**2026-11-01 已由 `HATCHPOINT` v1 实现，见文末补注**；`LINE`/`ARC` 自动发现仍未）、绘制边界、`remove boundaries`、~~预定义/自定义图案名~~
   （**预定义名 2026-10-26 已兑现**：三项转录表按 1 基索引、状态栏按名 chip；自定义 `76=2`/`.pat` **仍未**）、
   ~~渐变创建~~（**2026-10-27 已兑现**：类型码 `3` 双色 LINEAR/SPHERICAL，见 §决策 G 的 P6c 补注）、关联性。
   未来路径记录为**用户自带 `.pat` 文件**（无再分发问题）。
@@ -264,7 +264,7 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
 | **P6a0** | **仅模块搬迁**：`cad-geometry/src/hatch/` → `cad-domain/src/hatch/`，四个调用点改路径、**不保留 re-export** | **零行为变更**：既有测试全绿 + 渲染逐字节不变 |
 | **P6a** | 域变体 + 导入迁移（保留字段、修**三处**既有缺陷）+ 导出真 `HATCH` + 显示按样式与定义重算 + 匹配点清单 | 往返保全（样式/`pattern_type`/种子/原始 `92` 位/图案行/渐变名与色标）+ **三种样式的填充分区与图案线总长**数值测试 + 导出组码断言（含 **`71` 恒 0** 与 **`47` 仅 derived**）+ **渲染变化声明** |
 | **P6b** | `HATCH` 创建：**预选闭合实体** → 环；`SOLID` + **用户自定义图案**（间距/角度/双线）+ 样式参数；一条事务 | 数值几何 + 拒绝面 + 导出往返 + 真机证据 |
-| ~~P6c~~ | 内部点求边界 / LINE 拼接 / 预定义图案名 / 渐变创建 / 关联性 / 用户自带 `.pat` | **NOT IMPLEMENTED**（显式记录；**预定义图案名 2026-10-26、渐变创建 2026-10-27 已兑现**，见下方补注） |
+| ~~P6c~~ | 内部点求边界 / LINE 拼接 / 预定义图案名 / 渐变创建 / 关联性 / 用户自带 `.pat` | **NOT IMPLEMENTED**（显式记录；**预定义图案名 2026-10-26、渐变创建 2026-10-27、内部点求边界 2026-11-01 已兑现**，见下方补注） |
 
 **P6c 补注（2026-10-26，追加，不改写上面历史行）**：已实现一张**极小的手工转录**预定义图案表
 （`ANSI31`/`ANSI32`/`ANSI37`，`cad-domain/src/hatch/patterns.rs`），由 `HATCH` 图案类型码 `2` +
@@ -410,7 +410,7 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
 3. **折线**须 `closed == true` 且 ≥3 顶点；3D 折线共面时接受；其自身 2D 点与 bulge 保留。
 4. **声明局限**：创建校验基于**弦**，两段 bulge 环的**弦之间**相切可能漏检（"精确圆接触但其内接正方形相切"会被拒绝并有测试）。
 5. **参数单位**：通道**度**、域**弧度**——与 P5e 的度/弧度事故同类陷阱，此处显式分层并在测试中钉住。
-6. **未实现项**（与决策 D 一致，且 UI 不得暗示）：内部点求边界、LINE 拼接、~~预定义图案名~~（**2026-10-26 已兑现**：三项转录表按 1 基索引；**2026-10-27 起**状态栏按名 chip，见决策 G 的 P6c 补注）、~~渐变创建~~（**2026-10-27 已兑现**：类型码 `3` 双色 LINEAR/SPHERICAL，四个 `Number` 参数，ACI-only；其 `SPHERICAL` 平色与 `76=1` 未查证约定仍声明）、关联性、
+6. **未实现项**（与决策 D 一致，且 UI 不得暗示）：~~内部点求边界~~（**2026-11-01 已兑现**：`HATCHPOINT` v1，见文末补注；LINE/ARC 自动发现仍未）、LINE 拼接、~~预定义图案名~~（**2026-10-26 已兑现**：三项转录表按 1 基索引；**2026-10-27 起**状态栏按名 chip，见决策 G 的 P6c 补注）、~~渐变创建~~（**2026-10-27 已兑现**：类型码 `3` 双色 LINEAR/SPHERICAL，四个 `Number` 参数，ACI-only；其 `SPHERICAL` 平色与 `76=1` 未查证约定仍声明）、关联性、
    **真正的填充预览**（`preview.rs` 对 `Hatch` 明确返回无预览链）。
 7. **i18n**：P6b **+14 键**（`draw.kind.hatch`、`tool.draw.hatch`、`tool.prompt.hatch.{select_boundary,ready}`、
    `status.tool_parameter.hatch_{pattern_type,spacing,angle,double,style}` + `.hint`），两目录一致；总数 **534**。
@@ -426,3 +426,24 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
 - **修复后的真机复验**（`…p6b-run3`，重建二进制，硬件 Vulkan / P620）：边界外环带 **0.0518 → 0.0000**、过冲
   **592 → 0 px**、越界射线 **109/537 → 0/537**、最远墨迹半径 **91.90 → 82.20 px**、边界迹 **720 单段 / 0 多段 / 0 空**；
   全局墨迹 **−3 501 px**（被移除的花瓣）。**填充分区逐区域计数未变** ⇒ 修复只动了边界迹，未动填充。
+
+## 2026-11-01 补注：`HATCHPOINT`（内部点）v1
+
+**不改写上面的历史决策**；本条只记录新增入口与仍然存在的上限。
+
+- **入口是独立选择子**：`HATCHPOINT`（`CommandId::HatchPoint`，本项目选择子；AutoCAD 的 `HATCH` 在内部点提示里做同一件事）。
+  `DrawToolKind::HatchPoint` 是 **1 点 arity**、`requires_selection = false`、不取实体 pick；`HATCH` 的预选形态不变。
+  命令表 **97 → 98**（2026-11-01）。
+- **发现算法（v1）**：在**可见的模型空间整实体**里只考虑 `Circle`、完整 `Ellipse`、闭合 `Polyline`；每个候选走
+  与 `HATCH` **完全相同**的 `boundary_shapes → stitch_boundary → resolve_plane → boundary_loops` 管线，取**最小面积包含边界**，
+  其余“环在它内部”的候选全部作为岛屿；最终环集再走一次同一管线并交给**唯一** `HatchGeometry::new` 校验器。
+- **诚实拒绝**：种子非有限（`hatch.boundary_invalid`）、非模型空间（`Unsupported`）、点在任一候选边界上
+  （`hatch.boundary_on_edge`）、没有可见闭合边界包含它（`hatch.boundary_not_found`）、两个包含边界面积相等
+  （`hatch.boundary_ambiguous`）。所有拒绝都在开事务之前。
+- **声明的 v1 上限**：`LINE`/`ARC` 边链**不自动发现**（仍用 `HATCH` 预选，既有 `stitch_boundary` 要求整个边集闭合、
+  分支/残余边会拒绝，不能直接喂全图）；当前选择**不参与**候选；只认 `+Z` 且与种子同标高；仅模型空间；
+  边界实体保留（无关联性）；已有“弦/ bulge”校验盲点照旧。
+- **种子落库**：内部点按 HATCH 平面 OCS 2D 存进 `HatchGeometry::seeds`，导出为 DXF 组 98；不新增实体字段。
+- **证据边界**：契约测试（`crates/cad-app/src/tests/drawing/hatch_internal_point.rs`，14 项）与
+  `cad-app`/`cad-ui-core` 门禁；**无**真实 DWG、GUI、像素或 vendor 对照。`LINE`/`ARC` 自动发现、非 `+Z` 平面、
+  图纸空间与关联性仍 **NOT IMPLEMENTED**。

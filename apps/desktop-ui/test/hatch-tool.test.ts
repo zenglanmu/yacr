@@ -115,17 +115,18 @@ function drawPanel(tabId) {
 test('HATCH closes the draw command group on both draw panels, as a router command', async () => {
   for (const tabId of ['home', 'draw']) {
     const panel = drawPanel(tabId);
-    // HATCH still closes the draw group. MTEXT (2026-10-26) and MLEADER
-    // (ADR 0019 P7c) are appended after TEXT — their annotation neighbours — so
-    // they join the tail without moving HATCH:
-    // `OFFSET` → `TEXT` → `MTEXT` → `MLEADER` → `HATCH` is the fixed order, and
-    // HATCH stays last.
+    // HATCH still closes the draw group's pre-selection run. MTEXT (2026-10-26)
+    // and MLEADER (ADR 0019 P7c) are appended after TEXT — their annotation
+    // neighbours — so they join the tail without moving HATCH, and HATCHPOINT is
+    // appended directly after HATCH (its point-pick entry) without moving it:
+    // `OFFSET` → `TEXT` → `MTEXT` → `MLEADER` → `HATCH` → `HATCHPOINT`.
     assert.deepEqual(
-      panel.items.slice(-5).map(item => item.id),
-      ['OFFSET', 'TEXT', 'MTEXT', 'MLEADER', 'HATCH'],
+      panel.items.slice(-6).map(item => item.id),
+      ['OFFSET', 'TEXT', 'MTEXT', 'MLEADER', 'HATCH', 'HATCHPOINT'],
       tabId,
     );
-    const item = panel.items.at(-1);
+    const item = panel.items.find(candidate => candidate.id === 'HATCH');
+    assert.ok(item, `${tabId}: HATCH stays a live button`);
     assert.equal(item.command, 'HATCH');
     assert.equal(item.labelKey, HATCH.labelKey);
     assert.equal(item.icon, HATCH.icon);
@@ -683,8 +684,13 @@ test('the hatch glyph is a dedicated boundary-with-fill icon, not a neighbour gl
     assert.equal(item.icon, HATCH.icon, tabId);
   }
   assert.equal(COMMAND_CATALOG.find(command => command.id === HATCH.id).icon, HATCH.icon);
-  // `hatch` belongs to HATCH alone: no other catalogued command reuses it.
-  assert.equal(COMMAND_CATALOG.filter(command => command.icon === HATCH.icon).length, 1);
+  // `hatch` is shared by exactly the hatch family: HATCH and its point-pick
+  // entry HATCHPOINT. No unrelated command may reuse it (the comment above locks
+  // the glyph's shape, so a second meaning would still read as a lie).
+  assert.deepEqual(
+    COMMAND_CATALOG.filter(command => command.icon === HATCH.icon).map(command => command.id),
+    ['HATCH', 'HATCHPOINT'],
+  );
   // Every draw-panel glyph is a real name, so no draw button falls back to a dot.
   for (const tabId of ['home', 'draw']) {
     for (const item of drawPanel(tabId).items) {

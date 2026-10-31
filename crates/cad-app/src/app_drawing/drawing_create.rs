@@ -32,6 +32,7 @@ impl Application {
             CommandId::DimBaseline => self.dim_baseline(session, command),
             CommandId::DimContinue => self.dim_continue(session, command),
             CommandId::Hatch => self.create_hatch(session, command),
+            CommandId::HatchPoint => self.create_hatch_point(session, command),
             CommandId::MoveEntities => self.move_entities(command),
             CommandId::TrimEntity => self.trim_entity(command),
             CommandId::ExtendEntity => self.extend_entity(command),

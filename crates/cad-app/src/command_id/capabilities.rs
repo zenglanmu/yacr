@@ -38,6 +38,7 @@ impl CommandId {
                 | Self::DimBaseline
                 | Self::DimContinue
                 | Self::Hatch
+                | Self::HatchPoint
                 | Self::MoveEntities
                 | Self::TrimEntity
                 | Self::ExtendEntity

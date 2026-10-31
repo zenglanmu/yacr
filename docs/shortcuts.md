@@ -36,7 +36,7 @@
 - **补全候选**（`apps/desktop-ui/src/components/CommandLine.tsx` + `commands.ts::filterCommandSuggestions`；
   旧文档指向的 `command-bar.slint` 已随 Slint 删除）：
   - 候选来源是 **`COMMAND_CATALOG`（显示目录）+ 宿主别名表**（`cad_command_aliases`），
-    **不是**全部 97 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
+    **不是**全部 98 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
     字母序（**不去重**，也**不是**纯字典序）。
   - 输入变化即时计算候选；候选只**填充**文本，**从不执行**命令。
   - `Tab`：**仅当有高亮行**时把命令行替换成该名字（**没有**“无高亮则第一项”的回退）。
@@ -55,10 +55,10 @@
 
 ## 2. 命令表（只列**有行为注解**的选择子）
 
-> **完整清单不在这里**：穷尽的 **97 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
+> **完整清单不在这里**：穷尽的 **98 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
 > `docs/autocad-command-coverage.md` §2；本节只保留**有行为注解**的行。
 > 选择子与别名的**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs`
-> （`COMMAND_TABLE` **97** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
+> （`COMMAND_TABLE` **98** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
 > `ARGUMENT_SELECTORS` **4** / `COMMAND_ALIASES` **51**）。
 > 本表的 **canonical 列**只出现**被准入的名字**，**别名列**只出现 `COMMAND_ALIASES` 里的真实行；
 > 键位、面板与 IPC 能力见 §2a，**不混进命令表**。
@@ -83,6 +83,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `JOIN` | 编辑（合并选择为**一个**实体：共线 `LINE` 或同心相续 `ARC`；一条事务、一步撤销，仅这两种几何） | 是 | — |
 | `FILLET POLYLINE` | 编辑（AutoCAD 的 **Polyline 模式**，独立选择子：**恰好 1 个**选中实体，每个**内顶点**用会话参数 `filletRadius` 换成两切点 + 一段圆弧；实体**原地重写**、一条事务/一步撤销；两线 `FILLET` 不变） | 是 | — |
 | `CHAMFER POLYLINE` | 编辑（同上选择式：`chamferDistanceA` 量在**入边**、`chamferDistanceB` 量在**出边**——**我们的规则**，不是 AutoCAD 提示顺序的复刻） | 是 | — |
+| `HATCHPOINT` | 绘制（**本项目选择子**：按内部点填充。在可见的**整实体闭合** `Circle` / 完整 `Ellipse` / 闭合 `Polyline` 中取**最小包含边界**，嵌套闭合实体作岛屿；**不**自动发现 `LINE`/`ARC` 链、**不**使用当前选择、只认 `+Z` 同标高；填充参数与 `HATCH` 完全相同） | 是 | — |
 | `LAYOFF` | 图层（关闭选择所在图层，当前层除外；会话覆盖，不写 DWG、不升 revision） | 否 | — |
 | `LAYERP` | 图层（恢复**上一次**覆盖状态；有界 16 步快照环，仅真实改动前压栈；会话内，不持久化） | 否 | — |
 | `LAYISO` | 图层（隐藏选择**不在**的图层 + 当前层保留；会话覆盖，不写 DWG、不升 revision） | 否 | — |
@@ -136,7 +137,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
   `ZOOM ALL` 与 `ZOOM EXTENTS` 是 **`ZOOM` 的参数写法**（不是命令名），与别名 `ZOOM EXTENTS`→`FIT`
   都走 `FIT` 路径。命令名与参数之间允许一个或多个空格/制表符，行尾空格忽略，大小写不敏感；
   不带参数的裸 `ZOOM` 仍走既有的“该命令需要 payload”显式拒绝，不会编造一个默认因子。
-  这是**命令行参数**，不是新命令、不是新 IPC（命令表仍 **97**）。
+  这是**命令行参数**，不是新命令、不是新 IPC（不新增选择子）。
 - **`ZOOM WINDOW` / `ZOOM PREVIOUS`（2026-10-28，都是 `ZOOM` 的参数写法）**：
   - `ZOOM WINDOW`：两角框选（宿主 box-gesture 路径，逻辑像素、实心带、**点击不会选择**），松手后**精确**框住该矩形
     （margin **`1.0`**，FIT 是 `1.05`——**我们的选择**）；矩形退化/非有限**什么都不派发**；**仅 2D 正交**，3D 按名拒绝
@@ -364,10 +365,10 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     其余未映射组合不拦截。
 - **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
   的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
-  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**97 个选择子**，与 `CommandId` 变体一一对应；
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**98 个选择子**，与 `CommandId` 变体一一对应；
   P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`/`LAYOFF`/
   `PDMODE`/`PDSIZE`，2026-10-27 再加 `LAYERP`/`AREA OBJECT`，**2026-10-28 再加 `COPYBASE`/`CUTBASE`/
-  `PASTEORIG`**——`ID` 是测量选择子、
+  `PASTEORIG`，2026-11-01 再加 `HATCHPOINT`**——`ID` 是测量选择子、
   `LAYUNISO`/`LAYON` 是既有 `RESTORELAYERS` 的别名，都不新增 `CommandId`；`LAYERP` **已不是**别名）；
   不在表内的名字在 chrome 侧就按 `command.unsupported` 拒绝（**`command.unknown` 这个键没有消费方**，
   见 §1）；宿主侧「认识这个名字、但该路径不可用」（如 `PLOT`/`SAVE` 的受限路径）同样报告
@@ -387,14 +388,19 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   **渐变创建已实现（2026-10-27）**：填充类型码 **`3`** + 四个参数（`hatchGradientKind`
   `0` Linear/`1` Spherical、`hatchGradientAngle` **度**、`hatchGradientColorA`/`B` **ACI 整数**），
   颜色**只有 ACI**（无真彩），ACI `0`（ByBlock）被拒，默认 1 红 / 5 蓝；`SPHERICAL` 在矩形/圆边界上
-  会读成平色（按三角化顶点烘焙，不是径向）。**HATCH 仍未实现**：**内部点求边界**、
-  **自定义（`76=2`）图案名与 `.pat` 加载**、**关联性**（其余拒绝面见 `docs/compatibility.md` 的 HATCH 行）。
+  会读成平色（按三角化顶点烘焙，不是径向）。**内部点求边界已实现（2026-11-01，`HATCHPOINT`，本项目选择子）**：
+  拾取一个内部点后，在**可见的整实体闭合** `Circle` / 完整 `Ellipse` / 闭合 `Polyline` 中取**最小包含边界**，
+  嵌套闭合实体作为岛屿，种子本身存进 HATCH 的 `seeds`（DXF 组 98）；**一条事务/一步撤销**，边界实体保留。
+  **v1 上限**：**不**自动发现 `LINE`/`ARC` 边链（仍请用 `HATCH` 预选）、**不**使用当前选择、只认 `+Z` 同标高、
+  仅模型空间；点落在边界上 / 找不到包含边界 / 两个等面积包含边界都是**具名拒绝**。
+  **HATCH 仍未实现**：**自定义（`76=2`）图案名与 `.pat` 加载**、**关联性**（其余拒绝面见
+  `docs/compatibility.md` 的 HATCH 行）。
 - **`TEXT`/`MTEXT` 创建的两个参数（2026-10-28）**：**`textRotation`**（通道**度**，任意有限、**不 wrap**、
   默认 `0`；TEXT 与 MTEXT 都读，创建时**一次** `.to_radians()` 存弧度）与 **`mtextAttachment`**
   （闭集 **`1..=9`**，默认 `1`，**只给 MTEXT**：`1..=3` top / `4..=6` middle / `7..=9` bottom，每行左/中/右——
   `h = (code−1) % 3`、`row = (code−1)/3`，**永不产出 `TextAlignV::Baseline`**）。越界 code 与非有限旋转**按名拒绝**，
   不钳制、不折到邻居；`0` 度是合法值，默认值永不触发提交期拒绝。两个参数都经 `cad_set_tool_parameter`
-  （**不新增选择子**，命令表仍 **97**）。**仍未实现**：MTEXT 的行距、分栏、背景填充、绘制方向、绘制流程内的
+  （**不新增选择子**）。**仍未实现**：MTEXT 的行距、分栏、背景填充、绘制方向、绘制流程内的
   MTEXT 对话框；`TEXT` 仍是**单行、在插入点**。
 - **`OFFSET` 的多边形范围**：支持 **LINE / CIRCLE / ARC / LWPOLYLINE（直线段与含弧段）**；拾取点同时决定
   **侧**与**距离**。**ARC 与 CIRCLE 共用同一距离模型**（新半径 = `|拾取点 − 圆心|`，`center`/`normal`/

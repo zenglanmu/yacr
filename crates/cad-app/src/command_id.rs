@@ -489,6 +489,34 @@ pub enum CommandId {
     /// and `.pat` loading, a pattern picker dialog, gradient creation, a live
     /// preview and a per-span dash phase reset are **NOT IMPLEMENTED**. Work-only.
     Hatch,
+    /// HATCHPOINT: create a HATCH from **one internal point** (project-specific
+    /// selector, like SELECTINBOX/GRIPSTRETCH). Payload is
+    /// `HatchPoint { seed }`.
+    ///
+    /// The command layer discovers the **smallest visible closed boundary** that
+    /// contains the picked point, includes every nested closed boundary as an
+    /// island, and fills with the same session typed channel
+    /// ([`crate::draw_tool::ToolParameter::HatchPatternType`] … `HatchStyle`) the
+    /// pre-selection HATCH reads.
+    ///
+    /// Declared v1 limits (the code does not claim more):
+    ///
+    /// * only **whole visible** `Circle`, full `Ellipse` and closed `Polyline`
+    ///   entities are candidates; `LINE`/`ARC` edge chains are **not**
+    ///   auto-discovered and the current selection is **not** used;
+    /// * only boundaries in the picked point's `+Z` plane (same elevation) are
+    ///   considered — other planes, hidden layers and unresolved refs are
+    ///   skipped, never projected or invented;
+    /// * the seed must be clearly inside or outside: on-edge, no-boundary and
+    ///   equal-area-ambiguous picks are explicit refusals (`hatch.boundary_on_edge`,
+    ///   `hatch.boundary_not_found`, `hatch.boundary_ambiguous`), never guesses;
+    /// * one transaction / one undo step on the active layer, boundary entities
+    ///   retained; **no associativity**;
+    /// * the existing `HatchGeometry::new` chord/bulge validation blind spot still
+    ///   applies to bulged loops.
+    ///
+    /// Work-only (Viewer mode refuses it at the command layer).
+    HatchPoint,
     /// Translate one or more selected entities by a world delta. Exactly one
     /// transaction and one undo step for the whole selection. Work-only.
     MoveEntities,

@@ -426,6 +426,13 @@ impl HostController {
                     refs: selection.to_vec(),
                 },
             ),
+            // HATCHPOINT: the one captured internal point travels on the payload;
+            // the boundary discovery, islands and the same HATCH parameter channel
+            // are the command layer's, so no selection is sent.
+            DrawIntent::HatchPoint { seed } => (
+                crate::CommandId::HatchPoint,
+                crate::CommandPayload::HatchPoint { seed },
+            ),
         };
         Ok(Command {
             schema_version: 1,

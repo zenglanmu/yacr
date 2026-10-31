@@ -438,6 +438,22 @@ pub enum CommandPayload {
     Hatch {
         refs: Vec<SelectionRef>,
     },
+    /// HATCHPOINT: create a hatch from **one internal point** (project-specific
+    /// selector).
+    ///
+    /// `seed` is the picked point (finite; model space only in v1). The command
+    /// discovers the smallest **whole visible** closed boundary containing it,
+    /// includes every nested closed boundary as an island, and fills with the
+    /// same session typed parameters HATCH reads
+    /// ([`crate::draw_tool::ToolParameter::HatchPatternType`] … `HatchStyle`).
+    ///
+    /// Declared v1 limits: `LINE`/`ARC` edge chains are **not** auto-discovered
+    /// and the current selection is **not** used — only whole visible `Circle`,
+    /// full `Ellipse` and closed `Polyline` entities are candidates. Only
+    /// boundaries in the seed's `+Z` plane (same elevation) are considered.
+    HatchPoint {
+        seed: Point3,
+    },
     /// `COPYBASE`: capture the refs into the in-process clipboard together with
     /// the picked base point (a read-only capture: no transaction, no history).
     ///

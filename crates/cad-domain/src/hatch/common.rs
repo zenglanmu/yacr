@@ -43,7 +43,7 @@ fn probe_points(ring: &[[f64; 2]]) -> Vec<[f64; 2]> {
     (0..count).map(|k| ring[k * len / count]).collect()
 }
 
-pub(crate) fn ring_is_inside(ring: &[[f64; 2]], container: &[[f64; 2]]) -> bool {
+pub fn ring_is_inside(ring: &[[f64; 2]], container: &[[f64; 2]]) -> bool {
     let Some(&first) = ring.first() else {
         return false;
     };
@@ -60,7 +60,7 @@ pub(crate) fn ring_is_inside(ring: &[[f64; 2]], container: &[[f64; 2]]) -> bool 
 }
 
 /// Even-odd point-in-polygon test.
-pub(crate) fn point_in_ring(p: [f64; 2], ring: &[[f64; 2]]) -> bool {
+pub fn point_in_ring(p: [f64; 2], ring: &[[f64; 2]]) -> bool {
     let n = ring.len();
     let mut inside = false;
     for i in 0..n {

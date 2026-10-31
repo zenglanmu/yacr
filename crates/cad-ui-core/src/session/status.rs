@@ -715,48 +715,49 @@ pub(super) fn cad_tool(
                 ),
                 // The six HATCH parameters are present **only** while a HATCH
                 // capture is active (ADR 0018 decision D, P6b): the tool captures
-                // no points, so these are its whole definition.
+                // no points, so these are its whole definition. HATCHPOINT reads
+                // the **same** ten parameters, so its capture projects them too.
                 hatch_pattern_type: number(
                     ToolParameter::HatchPatternType,
-                    preview.kind == DrawToolKind::Hatch,
+                    matches!(preview.kind, DrawToolKind::Hatch | DrawToolKind::HatchPoint),
                 ),
                 hatch_pattern: number(
                     ToolParameter::HatchPattern,
-                    preview.kind == DrawToolKind::Hatch,
+                    matches!(preview.kind, DrawToolKind::Hatch | DrawToolKind::HatchPoint),
                 ),
                 hatch_spacing: number(
                     ToolParameter::HatchSpacing,
-                    preview.kind == DrawToolKind::Hatch,
+                    matches!(preview.kind, DrawToolKind::Hatch | DrawToolKind::HatchPoint),
                 ),
                 hatch_angle: number(
                     ToolParameter::HatchAngle,
-                    preview.kind == DrawToolKind::Hatch,
+                    matches!(preview.kind, DrawToolKind::Hatch | DrawToolKind::HatchPoint),
                 ),
                 hatch_double: flag(
                     ToolParameter::HatchDouble,
-                    preview.kind == DrawToolKind::Hatch,
+                    matches!(preview.kind, DrawToolKind::Hatch | DrawToolKind::HatchPoint),
                 ),
                 hatch_style: number(
                     ToolParameter::HatchStyle,
-                    preview.kind == DrawToolKind::Hatch,
+                    matches!(preview.kind, DrawToolKind::Hatch | DrawToolKind::HatchPoint),
                 ),
                 // The four gradient parameters ride the same HATCH capture (they
                 // are only read when the pattern type is the gradient code `3`).
                 hatch_gradient_kind: number(
                     ToolParameter::HatchGradientKind,
-                    preview.kind == DrawToolKind::Hatch,
+                    matches!(preview.kind, DrawToolKind::Hatch | DrawToolKind::HatchPoint),
                 ),
                 hatch_gradient_angle: number(
                     ToolParameter::HatchGradientAngle,
-                    preview.kind == DrawToolKind::Hatch,
+                    matches!(preview.kind, DrawToolKind::Hatch | DrawToolKind::HatchPoint),
                 ),
                 hatch_gradient_color_a: number(
                     ToolParameter::HatchGradientColorA,
-                    preview.kind == DrawToolKind::Hatch,
+                    matches!(preview.kind, DrawToolKind::Hatch | DrawToolKind::HatchPoint),
                 ),
                 hatch_gradient_color_b: number(
                     ToolParameter::HatchGradientColorB,
-                    preview.kind == DrawToolKind::Hatch,
+                    matches!(preview.kind, DrawToolKind::Hatch | DrawToolKind::HatchPoint),
                 ),
                 // The text height is present **only** while a text-carrying
                 // creation capture is active (ADR 0019 decision F.1). TEXT and

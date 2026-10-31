@@ -39,6 +39,9 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("DIMANGULAR", "draw.dimangular"),
     ("DIMORDINATE", "draw.dimordinate"),
     ("HATCH", "draw.hatch"),
+    // HATCHPOINT captures one internal point (no selection; the boundary is
+    // discovered from the point).
+    ("HATCHPOINT", "draw.hatchpoint"),
     // The clipboard cluster's capture tools (`PASTECLIP` is insertion-point based
     // and `COPYBASE`/`CUTBASE` capture a base point over the selection).
     ("COPYBASE", "draw.copybase"),

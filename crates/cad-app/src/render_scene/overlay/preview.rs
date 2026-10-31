@@ -123,6 +123,10 @@ pub fn draw_preview_overlay(
         | DrawToolKind::ArrayRect
         | DrawToolKind::ArrayPolar
         | DrawToolKind::Hatch
+        // HATCHPOINT captures one internal point; its live preview is the existing
+        // cursor/chain. The boundary is discovered from the database at commit, so
+        // no candidate ring is fabricated here.
+        | DrawToolKind::HatchPoint
         // ALIGN captures four free points (two source/destination pairs); STRETCH
         // captures four free points (two window corners plus a base and a
         // displacement point). Both use the existing cursor/chain preview (no new

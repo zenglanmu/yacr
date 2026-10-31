@@ -33,7 +33,10 @@ pub(crate) fn authorizing_command(parameter: ToolParameter) -> CommandId {
         ToolParameter::AlignScale => CommandId::AlignEntities,
         // HATCH (P6b): every hatch parameter is authorized against the HATCH
         // create command, so a Viewer-mode set is refused exactly like the create
-        // commands.
+        // commands. HATCHPOINT (`hatch.internal_point`) reads the **same** channel
+        // and is Work-only too, so this one authorization is exactly the mode gate
+        // both captures need — there is no per-tool parameter gate and no second
+        // hatch parameter set.
         ToolParameter::HatchPatternType
         | ToolParameter::HatchPattern
         | ToolParameter::HatchSpacing

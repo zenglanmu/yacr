@@ -555,6 +555,14 @@ impl DrawTool {
         if self.kind == DrawToolKind::Hatch {
             return Ok(DrawIntent::Hatch);
         }
+        // HATCHPOINT captures exactly one internal point; the boundary discovery
+        // and every refusal belong to the command layer, so the intent is just
+        // that seed.
+        if self.kind == DrawToolKind::HatchPoint {
+            return Ok(DrawIntent::HatchPoint {
+                seed: self.points[0],
+            });
+        }
         let a = self.points[0];
         // One-point tools (OFFSET, ARRAYPOLAR) never index a second point;
         // `unwrap_or(a)` is a harmless placeholder only ever used when a kind's arm
@@ -842,6 +850,11 @@ impl DrawTool {
             // HATCH: handled by the early return above (zero captured points). The
             // arm is unreachable here but keeps the match exhaustive over kinds.
             DrawToolKind::Hatch => DrawIntent::Hatch,
+            // HATCHPOINT: handled by the early return above (the seed is the one
+            // captured point). Unreachable here; keeps the match exhaustive.
+            DrawToolKind::HatchPoint => DrawIntent::HatchPoint {
+                seed: self.points[0],
+            },
         })
     }
 }

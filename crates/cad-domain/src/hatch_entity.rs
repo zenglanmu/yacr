@@ -132,6 +132,18 @@ impl HatchLoop {
             source_edges: None,
         }
     }
+
+    /// Sample this loop's bulges into a dense closed 2D ring.
+    ///
+    /// The returned ring has no repeated last point and may contain more
+    /// vertices than [`Self::points`] when the loop carries bulges. It delegates
+    /// to the same sampler the fill/display derivation uses
+    /// (`hatch_entity::geometry::sample_loop`), so a caller never has to
+    /// re-implement the DXF bulge convention (circle bulge tests in `cad-app`
+    /// rely on this staying a single implementation).
+    pub fn sampled_ring(&self) -> Vec<[f64; 2]> {
+        sample_loop(self)
+    }
 }
 
 /// The hatch plane: the OCS normal (DXF group 210) and its elevation along that

@@ -40,7 +40,9 @@ fn required_points_and_selection_are_explicit_per_kind() {
             // point.
             | DrawToolKind::CopyBase
             | DrawToolKind::CutBase
-            | DrawToolKind::PasteClip => 1,
+            | DrawToolKind::PasteClip
+            // HATCHPOINT captures its one internal point.
+            | DrawToolKind::HatchPoint => 1,
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot. HATCH has the same
             // pre-selection shape: the selected entities are the boundary and the

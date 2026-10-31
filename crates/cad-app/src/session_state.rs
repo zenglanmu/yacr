@@ -590,6 +590,7 @@ impl SessionState {
             DrawToolKind::DimBaseline => CommandId::DimBaseline,
             DrawToolKind::DimContinue => CommandId::DimContinue,
             DrawToolKind::Hatch => CommandId::Hatch,
+            DrawToolKind::HatchPoint => CommandId::HatchPoint,
             DrawToolKind::Text => CommandId::CreateText,
             // MTEXT is the multiline create command (one `AcDbMText`).
             DrawToolKind::MText => CommandId::CreateMText,

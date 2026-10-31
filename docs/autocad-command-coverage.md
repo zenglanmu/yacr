@@ -20,10 +20,10 @@
 2. **显式点名的 AutoCAD 名字**（不可穷尽）：只包含本仓库文档/ADR 真正讨论过的名字，
    来源是 `docs/compatibility.md`、`docs/shortcuts.md` 与各 ADR。它们的状态是**逐条读过源码**后写的。
 
-> **禁止的读法**：不得把 `97`、`155` 或本表任何数字读成「已实现 AutoCAD 的 X%」。AutoCAD 的
+> **禁止的读法**：不得把 `98`、`156` 或本表任何数字读成「已实现 AutoCAD 的 X%」。AutoCAD 的
 > 命令总数取决于版本、产品（完整版/ LT / 工具集）、是否含扩展与第三方；我们没有那份清单，
 > 也**没有**逐条比对过绝大多数命令的语义（例如同名命令的选项、提示顺序、系统变量副作用）。
-> 任何 `97/N` 形式的百分比都是**编造**。本审计回答的是：**我们自己承诺的词表是否名实相符**，
+> 任何 `98/N` 形式的百分比都是**编造**。本审计回答的是：**我们自己承诺的词表是否名实相符**，
 > 以及**我们明确点过名的 AutoCAD 名字还缺什么**。
 
 ---
@@ -32,26 +32,27 @@
 
 | 表 | 数量 | 源码位置 | 断言 / 说明 |
 |---|---|---|---|
-| `COMMAND_TABLE` | **97** 个选择子 | `crates/cad-ui-core/src/session/commands.rs:11` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 97` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs:132`（并断言每变体在表中**恰好一次**、`COMMAND_TABLE.len()` 相等） |
+| `COMMAND_TABLE` | **98** 个选择子 | `crates/cad-ui-core/src/session/commands.rs:11` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 98` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs:133`（并断言每变体在表中**恰好一次**、`COMMAND_TABLE.len()` 相等） |
 | `MEASUREMENT_SELECTORS` | **5** | 同文件 `:207` | `DIST` / `MEASUREPOLYLINE` / `MEASUREANGLE` / `AREA` / `ID`；**交互专用**，没有自己的 `CommandId` |
 | `ZOOM_STEP_SELECTORS` | **2** | 同文件 `:234` | `ZOOMIN` / `ZOOMOUT`（固定步进因子 `1.25` 与倒数，锚定视口中心） |
 | `ARGUMENT_SELECTORS` | **4** | 同文件 `:252` | `ZOOM` / `SNAPUNIT` / `PDMODE` / `PDSIZE`——**接受命令行参数的基选择子**，不是新命令、不是第二条 IPC |
 | `COMMAND_ALIASES` | **51** 行 | 同文件 `:522` | 别名 + 全词同义词；只收录**目标选择子真实存在**的拼写 |
-| `admissible_names()` | **155** 个可输入拼写 | 同文件（`admissible_names` 函数） | 97 + 5 + 2 + 51，去重后仍为 155（无重名）；这是**拼写**数，**不是**命令数 |
+| `admissible_names()` | **156** 个可输入拼写 | 同文件（`admissible_names` 函数） | 98 + 5 + 2 + 51，去重后仍为 156（无重名）；这是**拼写**数，**不是**命令数 |
 
-> 这些数字是**当前源码表的长度**（本次复核：表 97 / 测量 5 / 缩放 2 / 参数 4 / 别名 51 / 拼写 155）。
+> 这些数字是**当前源码表的长度**（本次复核：表 98 / 测量 5 / 缩放 2 / 参数 4 / 别名 51 / 拼写 156）。
 > **组成**：92 → **95**（+`COPYBASE`/`CUTBASE`/`PASTEORIG`，剪贴板轮）→ **97**（+`CHAMFER POLYLINE`/
-> `FILLET POLYLINE`，同日另一 lane）。表一变，本表与 §5 的期望输出都要跟着改；**权威是 §5b 那道
-> 守门脚本的实跑输出**，不是这里的手抄值。
+> `FILLET POLYLINE`，同日另一 lane）→ **98**（+`HATCHPOINT`，2026-11-01 内部点 HATCH，本项目选择子）。
+> 表一变，本表与 §5 的期望输出都要跟着改；**权威是 §5b 那道守门脚本的实跑输出**，不是这里的手抄值。
 
-**为什么不把 155 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
+**为什么不把 156 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
 不改变行为；`ZOOMIN`/`ZOOMOUT` 与各测量选择子不携带 `CommandId`。命令的**行为**数上限是
-`CommandId` 变体数（= 97），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
+`CommandId` 变体数（= 98），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
 
 **本项目自己的名字（AutoCAD 无同名，或同名不同义）**，不计入 AutoCAD 覆盖：
 `RESETVIEW`、`SWITCHBACKEND`、`SWITCH2D3D`、`STANDARDVIEW`（AutoCAD 的 `VIEW` 是命名的视图管理）、
 `MODE`（Viewer/Work）、`RESOURCES`、`DIAGNOSTICS`、`SPACE`（模型/图纸空间切换）、
-`SELECTINBOX`、`CONFIRM`/`CANCELMEASURE`、`GRIPSTRETCH`、`HOVERPREVIEW`、`TOGGLELAYER`/
+`SELECTINBOX`、`CONFIRM`/`CANCELMEASURE`、`GRIPSTRETCH`、`HOVERPREVIEW`、
+`HATCHPOINT`（AutoCAD 的 `HATCH` 走内部点提示；本仓库把它拆成独立选择子，**v1 只发现整实体闭合边界**）、`TOGGLELAYER`/
 `SETLAYERS`/`RESTORELAYERS`/`SETACTIVELAYER`/`CREATELAYER`/`RENAMELAYER`/`DELETELAYER`/
 `SETLAYERPROPERTY`（AutoCAD 的对应物是 `-LAYER`/`LAYER` 子选项，语义不同）、
 `SETENTITYPROPERTY`、`MEASUREPOLYLINE`/`MEASUREANGLE`（AutoCAD 的 `PLINE` 现在是绘制命令，
@@ -85,7 +86,7 @@
 | `SPLINE` | 实现 | fit 点法（≥4 点）→ 三次/clamped/chord 插值 NURBS；无 `CV`/`Knots`/`Degree`/`Close`/`Tangency`/`Object` |
 | `POLYLINE` | **未实现** | 旧式 heavy 2D 折线实体（`AcDb2dPolyline` + 顶点子实体）。我们**只创建 LWPOLYLINE**；别名到 `PLINE` 会**凭空发明语义**，故不做 |
 | `XLINE`（含 `RAY`） | **未实现**（无创建命令；**导入**有有界降级） | 库里**没有无限直线几何**：导入期把 XLINE/RAY 压成**有限 `SemanticGeometry::Line`**，裁到**运行中的模型包围盒**（盒每边外扩对角线 5%、至少 1.0）⇒ 裁多长**取决于导入顺序**（先出现什么几何，盒就是什么）；还没有任何几何时用**默认 1000 单位盒**。判定：方向退化 → `Opaque` + `Partial`；裁不到盒内 → `Opaque` + `Partial`；否则 `Line` + **`Partial`**（原因是具名常量 `support::XLINE_SEGMENT_REASON` / `XLINE_DEFAULT_BOX_REASON`，并额外记一次 `import.construct_line`）。**导出**只能写 DXF `LINE`，报 `Converted`（`export.converted.line`，点名「不再是无限线」），**不是**精确往返。没有创建命令、没有无限表示。**规模**：命令 **M**（建在既有有界切片上）；真正的无限几何 **L / ADR 级**（见 §4） |
-| `HATCH` | 部分 | **先选闭合边界实体**（非内部点拾取）；填充类型 `0` 实体 / `1` 用户自定义 / `2` 预定义 / **`3` 渐变（2026-10-27）**；预定义图案**恰好** `ANSI31`/`ANSI32`/`ANSI37`（状态栏**按名**选，线上传 1 基索引）。**渐变创建**：双色两站（`stop 0.0` = `hatchGradientColorA`、`stop 1.0` = B），kind 只有 `LINEAR`/`SPHERICAL`（**从不**写 `CYLINDER`），角度**通道给度、实体存弧度**（一次 `.to_radians()`），颜色是 **ACI 整数 `1..=255`**（`0` 是 ByBlock 占位、无 sRGB，按名拒绝），默认 1 红 / 5 蓝；实体写 `HatchGradient::TwoColor { reserved: 0, shift: 0.0 }` + `pattern_type = Predefined`（`76=1`，**未查证的 vendor 约定**）。**界**：`SPHERICAL` 在矩形/圆这类「边界顶点同半径」的形状上**烘焙成平色/椭圆感、不是径向**（按三角化顶点取值）；只有 ACI 调色板（无真彩、无名/色簿）；stop 颜色下游还会被实体/图层 tint 乘；**无单色/tint 变体、无逐站命名**。无内部点求边界、无 `76=2`/`.pat`、无关联性、无实时预览 |
+| `HATCH` | 部分 | **两个入口（2026-11-01）**：`HATCH` **先选闭合边界实体**；`HATCHPOINT` **按内部点**（本项目选择子；在可见的**整实体闭合** `Circle` / 完整 `Ellipse` / 闭合 `Polyline` 中取**最小包含边界**，嵌套闭合实体作岛屿；**不**自动发现 `LINE`/`ARC` 链、不用当前选择、只认 `+Z` 同标高、仅模型空间；种子存 `seeds`/组 98）。填充类型 `0` 实体 / `1` 用户自定义 / `2` 预定义 / **`3` 渐变（2026-10-27）**；预定义图案**恰好** `ANSI31`/`ANSI32`/`ANSI37`（状态栏**按名**选，线上传 1 基索引）。**渐变创建**：双色两站（`stop 0.0` = `hatchGradientColorA`、`stop 1.0` = B），kind 只有 `LINEAR`/`SPHERICAL`（**从不**写 `CYLINDER`），角度**通道给度、实体存弧度**（一次 `.to_radians()`），颜色是 **ACI 整数 `1..=255`**（`0` 是 ByBlock 占位、无 sRGB，按名拒绝），默认 1 红 / 5 蓝；实体写 `HatchGradient::TwoColor { reserved: 0, shift: 0.0 }` + `pattern_type = Predefined`（`76=1`，**未查证的 vendor 约定**）。**界**：`SPHERICAL` 在矩形/圆这类「边界顶点同半径」的形状上**烘焙成平色/椭圆感、不是径向**（按三角化顶点取值）；只有 ACI 调色板（无真彩、无名/色簿）；stop 颜色下游还会被实体/图层 tint 乘；**无单色/tint 变体、无逐站命名**。内部点求边界已实现（`HATCHPOINT` v1，见上）；无 `76=2`/`.pat`、无关联性、无实时预览 |
 | `MLEADER` | 部分 | 单簇/单线/2 顶点/**仅直线**；无 `Options`（引线类型/内容类型/最多点数/角度约束）；狗腿/箭头/字高取 `Standard` 样式表（常量为债务） |
 | `TEXT` | 实现 | **单行**、1024 字符上限、**拒绝换行**；不解释 MTEXT 控制码（逐字存储）；**旋转取会话参数 `textRotation`**（通道**度**、任意有限、**不 wrap**、默认 `0`，创建时**一次** `.to_radians()` 存弧度；载荷本身没有旋转字段） |
 | `MTEXT` | 部分 | **两角宽度模型** + 终端文本；**旋转取 `textRotation`**（同上，度→弧度一次）、**附着取 `mtextAttachment`**（闭集 `1..=9` 的 3×3 网格：`1..=3` top / `4..=6` middle / `7..=9` bottom，每行左/中/右——`h = (code−1) % 3`、`row = (code−1)/3`，**永不产出 `TextAlignV::Baseline`**；默认 `1` 左上），越界 code 与非有限旋转**按名拒绝**、不钳制；**仍未实现**：行距、分栏、背景填充、绘制方向、绘制流程内 MTEXT 对话框 |
@@ -201,7 +202,7 @@
 | `IMPORT` | **L** | 依赖 acadrust 的格式能力与 `cad-import-acadrust` 的迁移策略；每个格式都要自己的 capability 表与拒绝面（DWG/DXF 的打开走 `OPEN`，不是 `IMPORT`） |
 | `PUBLISH` | **L** | 多布局/多图幅批量出图 + 设备/图幅/打印样式；`PLOT` 现在只到矢量单页 |
 | `DIMSTYLE` **编辑** | **M** | 表与变量子集已在 `cad-db`；缺的是命令/UI 与**追溯语义**决策（实体存已解析快照，改样式是否回写实体是产品决策，ADR-0017 B.1 定为**不追溯**） |
-| HATCH **内部点求边界** | **M** | 需要射线/环嵌套搜索 + 岛屿判定 + 与既有「预选边界」路径的**同一**校验器；失败面（未闭合、自交、相切）必须逐条具名 |
+| ~~HATCH **内部点求边界**~~ | **已关闭（2026-11-01，v1）** | `HATCHPOINT`（本项目选择子）拾取内部点，在**可见整实体闭合** `Circle`/完整 `Ellipse`/闭合 `Polyline` 中取**最小包含边界**，嵌套闭合实体作岛屿；复用 `HATCH` 的同一套 `boundary_shapes → stitch → resolve_plane → boundary_loops → HatchGeometry::new` 校验器；点落在边界上/找不到/等面积歧义都是具名拒绝。**仍未闭合**：`LINE`/`ARC` 边链的自动发现、当前选择作为候选、非 `+Z`/其它标高、图纸空间 |
 | HATCH 自定义 `76=2` / `.pat` 加载 | **M** | `.pat` 解析器（含 `*`/`;` 注释、角度/原点/偏移/虚线定义）+ 名称解析 + 缺失图案的显式拒绝；现在只有**我们转录**的三项内置表 |
 | ~~HATCH **渐变创建**~~ | **已关闭（2026-10-27）** | 双色 `LINEAR`/`SPHERICAL` 已实现（类型码 `3` + 四个参数，见 §3.1）。**仍未闭合**的是它的三个性质缺口，不再算「创建缺失」：`SPHERICAL` 在矩形/圆边界上烘焙成平色（需要按值细分内部三角形）、只有 ACI（无真彩/色簿）、`76=1` 的梯度约定**未用 vendor 文件核实** |
 | HATCH **关联性** | **L** | 需要边界→填充的持久引用（类似 `ACAD_DIMASSOC`），并定义边界编辑后的重生成/失效规则；与「实体非关联」的既有边界冲突，需 ADR |
@@ -238,9 +239,9 @@ aliases = [a for a, _ in re.findall(r'\("([^"]+)",\s*"([^"]+)"\)',
 names = list(dict.fromkeys(table + meas + zoom + aliases))   # = admissible_names() 的顺序
 print(len(table), len(meas), len(zoom), len(args), len(aliases), "admissible:", len(names))
 PY
-# 期望输出：97 5 2 4 51 admissible: 155
+# 期望输出：98 5 2 4 51 admissible: 156
 
-# 2) 钉住 97 的契约（变体数、表长、每变体恰好一次）
+# 2) 钉住 98 的契约（变体数、表长、每变体恰好一次）
 cargo test -p cad-ui-core --locked command_normalization_covers_every_variant
 cargo test -p cad-ui-core --locked admissible_names_cover_the_vocabulary_exactly_once
 
@@ -275,12 +276,12 @@ python3 scripts/test-check-command-docs.py   # 自测：注入伪造 canonical �
 **本次实测（仓库当前树）**：
 
 ```
-tables: 97/5/2/4 selectors, 51 aliases, 104 canonical selectors (aliases excluded)
-§2 rows: 59, §2b aliases: 51, §3.7 rows: 6, alias mentions: 1
+tables: 98/5/2/4 selectors, 51 aliases, 105 canonical selectors (aliases excluded)
+§2 rows: 60, §2b aliases: 51, §3.7 rows: 6, alias mentions: 1
 OK: 0 mismatches
 ```
 
-（`104` 是 **canonical 选择子**数：97 表 + 5 测量 + 2 缩放步进，**不含** 51 个别名；`155` 才是
+（`105` 是 **canonical 选择子**数：98 表 + 5 测量 + 2 缩放步进，**不含** 51 个别名；`156` 才是
 「可输入拼写」数，见 §2。两个数不要混用。）
 
 **它确实会失败**（同一个脚本，换输入就红）：
