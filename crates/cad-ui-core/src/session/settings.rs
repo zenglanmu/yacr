@@ -1,6 +1,6 @@
 //! Typed settings wire surface for the Options dialog.
 //!
-//! The session exposes the same closed seventeen-key surface the host persists; it
+//! The session exposes the same closed eighteen-key surface the host persists; it
 //! adds no second validation and no raw-JSON entry point. A UI writes one typed
 //! key/value pair, the host validates it against the closed table, persists the
 //! matching preference leaf and applies it to the live scene/session.
@@ -19,7 +19,7 @@ pub use cad_host::{
 ///
 /// A flat camelCase wire object (like the status/session types). `fontsDir` is
 /// read-only display data sourced from the host's `--fonts-dir`; the other
-/// seventeen fields correspond one-to-one with [`CadSettingKey`], the two
+/// eighteen fields correspond one-to-one with [`CadSettingKey`], the two
 /// backgrounds as canonical `#rrggbb` strings, the crosshair and the GPU memory
 /// budget as integer percentages, the pickbox/aperture as integer pixel counts,
 /// the snap spacing as a real number of drawing units and the graphics backend as
@@ -43,6 +43,10 @@ pub struct CadSettings {
     /// `SNAPUNIT` session spacing in drawing units, persisted as
     /// `interaction.snapSpacing`. Finite and strictly positive.
     pub snap_spacing: f64,
+    /// 2D input scheme: when `true`, a primary-button drag in the 2D view pans
+    /// instead of box-selecting. Persisted as `interaction.leftDragPans`,
+    /// default `false`.
+    pub left_drag_pans: bool,
     /// Model-space canvas background, canonical lower-case `#rrggbb`.
     pub background_model: String,
     /// Paper-space canvas background, canonical lower-case `#rrggbb`.
@@ -83,6 +87,7 @@ impl From<HostSettings> for CadSettings {
             grid_snap_enabled: value.grid_snap_enabled,
             ortho_enabled: value.ortho_enabled,
             snap_spacing: value.snap_spacing,
+            left_drag_pans: value.left_drag_pans,
             background_model: value.background_model,
             background_paper: value.background_paper,
             crosshair_percent: value.crosshair_percent,

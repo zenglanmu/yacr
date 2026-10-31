@@ -603,11 +603,13 @@ pub(super) fn probe_pointer_move(sequence: u64) -> ProbeInput {
         y: Some(PROBE_SURFACE_HEIGHT / 2.0),
         dx: None,
         dy: None,
+        scale: None,
         width: Some(PROBE_SURFACE_WIDTH),
         height: Some(PROBE_SURFACE_HEIGHT),
         dpr: None,
         button: None,
         shift: None,
+        device: None,
     }
 }
 

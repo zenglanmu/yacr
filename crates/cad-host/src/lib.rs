@@ -28,7 +28,8 @@ use cad_app::render_scene::{BoxSelectionPreview, OverlayInputs};
 use cad_app::{
     input::CanvasMetrics,
     interaction::{
-        InteractionRequest, Modifiers, PointInput, PointerButton, PointerId, SelectionMode,
+        InteractionRequest, Modifiers, PointInput, PointerButton, PointerId, PointerKind,
+        SelectionMode,
     },
     viewer_config::ViewerConfigStore,
     Command, CommandId, CommandOutcome, CommandPayload, ImportProgressSnapshot, ImportTerminal,
@@ -91,8 +92,9 @@ pub use fonts::{HostResources, UnsupportedResources};
 /// initial-open flags and the Options-dialog settings that have real behavioural
 /// backing (overlay visibility, the plot default, the five persisted interaction
 /// values — object snap, hover preview, `SNAP` grid snap, `ORTHO` and the
-/// `SNAPUNIT` spacing —, the model/paper backgrounds, the crosshair size and the
-/// pickbox/aperture sizes). A host `config.json` replaces this policy wholesale.
+/// `SNAPUNIT` spacing —, the 2D left-drag input scheme, the model/paper
+/// backgrounds, the crosshair size and the pickbox/aperture sizes). A host
+/// `config.json` replaces this policy wholesale.
 ///
 /// The settings leaves are listed individually (never a `view.overlays` prefix)
 /// so no other configuration field becomes user-writable by inheritance.
@@ -114,7 +116,8 @@ pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowe
     "interaction.hoverPreview",
     "interaction.gridSnapEnabled",
     "interaction.orthoEnabled",
-    "interaction.snapSpacing"
+    "interaction.snapSpacing",
+    "interaction.leftDragPans"
 ]}}}"#;
 
 /// A user-facing rendering of a command error.
@@ -323,6 +326,7 @@ impl HostCore {
         self.navigation.dragged.set(false);
         self.navigation.navigating.set(false);
         self.navigation.button.set(None);
+        self.navigation.contact_kind.set(None);
         self.navigation.press_modifiers.set(None);
         *self.navigation.box_gesture.borrow_mut() = None;
         self.navigation.zoom_window_armed.set(false);

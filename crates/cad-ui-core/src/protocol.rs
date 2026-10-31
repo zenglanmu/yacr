@@ -112,6 +112,56 @@ pub enum InputKind {
     /// `active === null`), so it never arrives mid-drag; the session nonetheless
     /// leaves any in-flight press untouched (`session::plan_input`).
     PointerLeave,
+    /// Two-finger pinch: midpoint pan plus incremental zoom.
+    ///
+    /// **Continuous**, like [`InputKind::Wheel`]: there is no terminal pinch
+    /// event. A pinch session starts when the second touch contact lands and ends
+    /// when the frontend sends `pointer_cancel` (the UI sends one once, when it
+    /// drops to fewer than two contacts).
+    ///
+    /// Fields (all in logical CSS pixels for `dx`/`dy`):
+    /// * `x`,`y` — the midpoint of the two contacts (canvas-local), the zoom
+    ///   anchor;
+    /// * `dx`,`dy` — the midpoint movement since the **previous pinch event**;
+    /// * `scale` — the **incremental** zoom multiplier since the previous event
+    ///   (`1.0` = no zoom, `> 1.0` = zoom in).
+    ///
+    /// Coalescing rule (if a carrier ever merges two consecutive pinch events it
+    /// must use this, and nothing may simply drop one): midpoint deltas **add**
+    /// and scale multipliers **multiply** —
+    /// `dx' = dx1 + dx2`, `dy' = dy1 + dy2`, `scale' = scale1 * scale2`. The
+    /// product, never the sum: applying the merged event must zoom exactly as
+    /// much as applying both in order (two `1.1` events are `1.21`, not `2.2`).
+    Pinch,
+}
+
+/// The physical device a pointer event came from.
+///
+/// Wire spellings are `mouse`, `touch` and `pen` ([`Self::as_str`]). The field is
+/// optional on [`ProbeInput`]; an absent `device` means [`Self::Mouse`], so every
+/// pre-existing frontend keeps mouse semantics byte-for-byte. `pen` behaves like
+/// `mouse` everywhere in the host (the contract's default rule).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeDevice {
+    /// Mouse (or trackpad/trackpoint): the default when `device` is omitted.
+    #[default]
+    Mouse,
+    /// Direct touch (finger): one-finger drag pans, a tap selects.
+    Touch,
+    /// Stylus/pen: mouse semantics.
+    Pen,
+}
+
+impl ProbeDevice {
+    /// Stable lowercase name, matching the wire value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mouse => "mouse",
+            Self::Touch => "touch",
+            Self::Pen => "pen",
+        }
+    }
 }
 
 impl InputKind {
@@ -120,7 +170,9 @@ impl InputKind {
     /// A **terminal** kind closes the input marker/sequence (`pointer_up`,
     /// `pointer_cancel`, `blur`). `pointer_leave` is deliberately **not**
     /// terminal: leaving the surface is transient and ends nothing, so the
-    /// marker/sequence policy stays open across it.
+    /// marker/sequence policy stays open across it. `pinch` is continuous and is
+    /// not terminal either: a pinch session ends with `pointer_cancel`, never
+    /// with a pinch event of its own.
     pub fn is_terminal(self) -> bool {
         matches!(self, Self::PointerUp | Self::PointerCancel | Self::Blur)
     }
@@ -136,6 +188,7 @@ impl InputKind {
             Self::Resize => "resize",
             Self::Blur => "blur",
             Self::PointerLeave => "pointer_leave",
+            Self::Pinch => "pinch",
         }
     }
 }
@@ -162,6 +215,15 @@ pub struct ProbeInput {
     /// Wheel delta Y, used to advance the marker.
     #[serde(default)]
     pub dy: Option<f32>,
+    /// Pinch scale: the **incremental** zoom multiplier since the previous pinch
+    /// event (`1.0` = no zoom, `> 1.0` = zoom in). Consumed by
+    /// [`InputKind::Pinch`] only; an absent value means `1.0` (no zoom).
+    ///
+    /// A present value must be finite and strictly positive; `0`, a negative
+    /// value and a non-finite value are refused explicitly (never treated as
+    /// "no zoom"), so a malformed pinch can never invert or destroy the view.
+    #[serde(default)]
+    pub scale: Option<f32>,
     /// Surface width, used to normalize `x` into a marker offset.
     #[serde(default)]
     pub width: Option<f32>,
@@ -200,6 +262,20 @@ pub struct ProbeInput {
     /// general modifier bundle.
     #[serde(default)]
     pub shift: Option<bool>,
+    /// The physical device of a pointer event (see [`ProbeDevice`]).
+    ///
+    /// Optional and additive: an omitted `device` (or an explicit `null`) means
+    /// [`ProbeDevice::Mouse`], so an old frontend/host keeps its exact mouse
+    /// behaviour. The wire values are `"mouse"`, `"touch"` and `"pen"`; any other
+    /// string is **refused by the decoder** (an unknown enum variant), never
+    /// silently mapped to a device.
+    ///
+    /// The value travels on every pointer phase (`pointer_down|pointer_move|
+    /// pointer_up|pointer_cancel`); the host records it at press time and uses
+    /// the recorded kind for the gesture, so a move that omits it cannot change
+    /// the device mid-gesture. Other kinds ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<ProbeDevice>,
 }
 
 /// The acknowledgement for `probe_input`.
@@ -301,6 +377,16 @@ impl InputTracker {
         if let Some(reason) = first_non_finite(input) {
             return reject(self, reason);
         }
+        // A pinch's incremental scale must be strictly positive. Zero and
+        // negative multipliers are refused by name rather than treated as "no
+        // zoom": they would silently discard a user gesture (or invert it).
+        if input.kind == InputKind::Pinch {
+            if let Some(scale) = input.scale {
+                if scale <= 0.0 {
+                    return reject(self, "invalid_pinch_scale");
+                }
+            }
+        }
         if let Some(last) = self.last_sequence {
             if input.sequence <= last {
                 return reject(self, "out_of_order_sequence");
@@ -335,6 +421,15 @@ impl InputTracker {
                     self.marker_offset = wrap01(self.marker_offset + dy * WHEEL_STEP);
                     self.dirty = true;
                 }
+            }
+            // A pinch is continuous, never terminal and never a press: it moves
+            // the marker to the midpoint of the two contacts (like a pointer
+            // position) and leaves the press state exactly as it found it. Its
+            // `dx`/`dy` are logical-pixel deltas (not part of the 1-D marker),
+            // and `scale` is the real zoom multiplier the session maps; the
+            // tracker validates the value and applies no zoom of its own.
+            InputKind::Pinch => {
+                self.set_marker_from_pointer(input);
             }
             InputKind::Resize => {
                 if let (Some(width), Some(height)) = (input.width, input.height) {
@@ -389,6 +484,7 @@ fn first_non_finite(input: &ProbeInput) -> Option<&'static str> {
         input.width,
         input.height,
         input.dpr,
+        input.scale,
     ];
     if values.into_iter().flatten().any(|value| !value.is_finite()) {
         Some("non_finite_parameter")
@@ -414,413 +510,4 @@ fn wrap01(value: f32) -> f32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde::de::{Deserializer, IntoDeserializer, Visitor};
-
-    fn input(sequence: u64, kind: InputKind) -> ProbeInput {
-        ProbeInput {
-            sequence,
-            kind,
-            x: None,
-            y: None,
-            dx: None,
-            dy: None,
-            width: None,
-            height: None,
-            dpr: None,
-            button: None,
-            shift: None,
-        }
-    }
-
-    #[test]
-    fn out_of_order_sequences_are_rejected_and_never_regress() {
-        let mut tracker = InputTracker::new();
-        let first = tracker.apply(&input(2, InputKind::PointerDown));
-        assert!(first.accepted, "first input is accepted");
-
-        let stale = tracker.apply(&input(1, InputKind::PointerDown));
-        assert!(!stale.accepted);
-        assert_eq!(stale.reason.as_deref(), Some("out_of_order_sequence"));
-
-        let duplicate = tracker.apply(&input(2, InputKind::PointerMove));
-        assert!(!duplicate.accepted, "an equal sequence is out of order");
-        assert_eq!(duplicate.reason.as_deref(), Some("out_of_order_sequence"));
-
-        let next = tracker.apply(&input(3, InputKind::PointerMove));
-        assert!(next.accepted);
-    }
-
-    #[test]
-    fn non_finite_parameters_are_rejected() {
-        let mut tracker = InputTracker::new();
-        let mut bad = input(1, InputKind::PointerDown);
-        bad.x = Some(f32::NAN);
-        bad.width = Some(100.0);
-        let ack = tracker.apply(&bad);
-        assert!(!ack.accepted);
-        assert_eq!(ack.reason.as_deref(), Some("non_finite_parameter"));
-
-        let mut bad_wheel = input(2, InputKind::Wheel);
-        bad_wheel.dy = Some(f32::INFINITY);
-        let ack = tracker.apply(&bad_wheel);
-        assert!(!ack.accepted);
-        assert_eq!(ack.reason.as_deref(), Some("non_finite_parameter"));
-
-        // A rejection must not consume the sequence number.
-        let ok = tracker.apply(&input(1, InputKind::PointerDown));
-        assert!(ok.accepted);
-    }
-
-    #[test]
-    fn terminal_events_report_terminal() {
-        for (kind, expect_terminal) in [
-            (InputKind::PointerUp, true),
-            (InputKind::PointerCancel, true),
-            (InputKind::Blur, true),
-            (InputKind::PointerDown, false),
-            (InputKind::PointerMove, false),
-            (InputKind::Wheel, false),
-            (InputKind::Resize, false),
-            (InputKind::PointerLeave, false),
-        ] {
-            let mut tracker = InputTracker::new();
-            let ack = tracker.apply(&input(1, kind));
-            assert!(ack.accepted, "{kind:?} is accepted");
-            assert_eq!(ack.terminal, expect_terminal, "{kind:?} terminal flag");
-        }
-    }
-
-    #[test]
-    fn pointer_down_and_move_set_the_marker_from_x_and_width() {
-        let mut tracker = InputTracker::new();
-        let mut down = input(1, InputKind::PointerDown);
-        down.x = Some(25.0);
-        down.width = Some(100.0);
-        let ack = tracker.apply(&down);
-        assert!(ack.accepted);
-        assert!((ack.marker_offset - 0.25).abs() < 1e-6);
-        assert!(tracker.take_dirty(), "input set the marker");
-        assert!(!tracker.take_dirty(), "dirty flag is consumed once");
-
-        // A move without width falls back to the last resize width.
-        let mut resize = input(2, InputKind::Resize);
-        resize.width = Some(200.0);
-        resize.height = Some(100.0);
-        assert!(tracker.apply(&resize).accepted);
-        let mut moving = input(3, InputKind::PointerMove);
-        moving.x = Some(100.0);
-        assert!(tracker.apply(&moving).accepted);
-        assert!((tracker.marker_offset() - 0.5).abs() < 1e-6);
-    }
-
-    #[test]
-    fn pointer_move_without_a_press_does_not_move_the_marker() {
-        let mut tracker = InputTracker::new();
-        let mut moving = input(1, InputKind::PointerMove);
-        moving.x = Some(50.0);
-        moving.width = Some(100.0);
-        assert!(tracker.apply(&moving).accepted);
-        assert!((tracker.marker_offset() - 0.0).abs() < 1e-6);
-        assert!(!tracker.take_dirty());
-    }
-
-    #[test]
-    fn wheel_and_animation_stay_in_the_unit_range() {
-        let mut tracker = InputTracker::new();
-        let mut wheel = input(1, InputKind::Wheel);
-        wheel.dy = Some(1000.0);
-        let ack = tracker.apply(&wheel);
-        assert!(ack.accepted);
-        assert!((0.0..1.0).contains(&ack.marker_offset));
-
-        for _ in 0..1000 {
-            tracker.advance_animation(0.03);
-            assert!((0.0..1.0).contains(&tracker.marker_offset()));
-        }
-    }
-
-    #[test]
-    fn resize_ignores_zero_and_negative_dimensions() {
-        let mut tracker = InputTracker::new();
-        let mut resize = input(1, InputKind::Resize);
-        resize.width = Some(0.0);
-        resize.height = Some(100.0);
-        assert!(tracker.apply(&resize).accepted);
-        // Falls back to no stored surface → pointer move cannot set the marker.
-        let mut moving = input(2, InputKind::PointerMove);
-        moving.x = Some(50.0);
-        assert!(tracker.apply(&moving).accepted);
-        assert!((tracker.marker_offset() - 0.0).abs() < 1e-6);
-    }
-
-    // --- the optional `button` payload (frozen wire contract) ----------------
-
-    /// One value of a decoded field map: just enough to drive `ProbeInput`'s
-    /// derive the way a JSON object does (an absent key takes the serde default,
-    /// a present one is decoded with its real type). Keeps this crate free of a
-    /// JSON dependency while still testing the wire contract itself.
-    enum Wire {
-        Text(&'static str),
-        U64(u64),
-        I32(i32),
-        Bool(bool),
-        Null,
-    }
-
-    struct WireDeserializer(Wire);
-
-    impl<'de> Deserializer<'de> for WireDeserializer {
-        type Error = serde::de::value::Error;
-
-        fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-            match self.0 {
-                Wire::Text(value) => value.into_deserializer().deserialize_any(visitor),
-                Wire::U64(value) => value.into_deserializer().deserialize_any(visitor),
-                Wire::I32(value) => value.into_deserializer().deserialize_any(visitor),
-                Wire::Bool(value) => value.into_deserializer().deserialize_any(visitor),
-                Wire::Null => ().into_deserializer().deserialize_any(visitor),
-            }
-        }
-
-        fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-            match self.0 {
-                Wire::Null => visitor.visit_none(),
-                other => visitor.visit_some(WireDeserializer(other)),
-            }
-        }
-
-        fn deserialize_enum<V: Visitor<'de>>(
-            self,
-            name: &'static str,
-            variants: &'static [&'static str],
-            visitor: V,
-        ) -> Result<V::Value, Self::Error> {
-            match self.0 {
-                Wire::Text(value) => value
-                    .into_deserializer()
-                    .deserialize_enum(name, variants, visitor),
-                other => WireDeserializer(other).deserialize_any(visitor),
-            }
-        }
-
-        serde::forward_to_deserialize_any! {
-            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-            bytes byte_buf unit unit_struct newtype_struct seq tuple tuple_struct
-            map struct identifier ignored_any
-        }
-    }
-
-    impl<'de> IntoDeserializer<'de, serde::de::value::Error> for Wire {
-        type Deserializer = WireDeserializer;
-
-        fn into_deserializer(self) -> WireDeserializer {
-            WireDeserializer(self)
-        }
-    }
-
-    /// Decode one input exactly like the JSON IPC layer: a field map where an
-    /// absent key is a missing JSON member.
-    fn decode(fields: Vec<(&'static str, Wire)>) -> Result<ProbeInput, serde::de::value::Error> {
-        ProbeInput::deserialize(serde::de::value::MapDeserializer::new(fields.into_iter()))
-    }
-
-    #[test]
-    fn a_caller_that_omits_button_still_decodes_and_defaults_to_primary() {
-        // A pre-existing JS caller sends no `button` member at all.
-        let omitted = decode(vec![
-            ("sequence", Wire::U64(1)),
-            ("kind", Wire::Text("pointer_down")),
-            ("x", Wire::I32(24)),
-            ("y", Wire::I32(12)),
-            ("width", Wire::I32(100)),
-        ])
-        .expect("an input without `button` decodes");
-        assert_eq!(omitted.kind, InputKind::PointerDown);
-        assert_eq!(omitted.button, None, "an absent button is no button report");
-        assert_eq!(omitted.x, Some(24.0));
-
-        // An explicit `null` behaves like the absent member.
-        let null = decode(vec![
-            ("sequence", Wire::U64(2)),
-            ("kind", Wire::Text("pointer_up")),
-            ("button", Wire::Null),
-        ])
-        .expect("a null button decodes");
-        assert_eq!(null.button, None);
-    }
-
-    #[test]
-    fn button_numbers_round_trip_through_the_input_payload() {
-        for (wire, expected) in [
-            (BUTTON_PRIMARY, 0),
-            (BUTTON_MIDDLE, 1),
-            (BUTTON_SECONDARY, 2),
-        ] {
-            let input = decode(vec![
-                ("sequence", Wire::U64(1)),
-                ("kind", Wire::Text("pointer_down")),
-                ("button", Wire::I32(wire)),
-            ])
-            .unwrap_or_else(|error| panic!("button {wire} must decode: {error}"));
-            assert_eq!(input.button, Some(expected));
-        }
-    }
-
-    #[test]
-    fn the_tracker_accepts_a_pointer_press_with_any_button_report() {
-        // The tracker owns sequence/marker state, not button policy: it must
-        // accept the event and keep its marker semantics unchanged. The session
-        // is the layer that refuses an undefined button explicitly.
-        for button in [None, Some(0), Some(1), Some(2), Some(7)] {
-            let mut tracker = InputTracker::new();
-            let mut down = input(1, InputKind::PointerDown);
-            down.x = Some(50.0);
-            down.width = Some(100.0);
-            down.button = button;
-            let ack = tracker.apply(&down);
-            assert!(ack.accepted, "button {button:?} is accepted by the tracker");
-            assert!((ack.marker_offset - 0.5).abs() < 1e-6);
-            assert!(tracker.is_active());
-            assert!(tracker.take_dirty());
-        }
-    }
-
-    // --- the optional `shift` payload (frozen wire contract) -----------------
-
-    #[test]
-    fn a_caller_that_omits_shift_still_decodes_and_defaults_to_not_held() {
-        // A pre-existing JS caller sends no `shift` member at all.
-        let omitted = decode(vec![
-            ("sequence", Wire::U64(1)),
-            ("kind", Wire::Text("pointer_down")),
-            ("x", Wire::I32(24)),
-            ("y", Wire::I32(12)),
-            ("button", Wire::I32(BUTTON_PRIMARY)),
-        ])
-        .expect("an input without `shift` decodes");
-        assert_eq!(omitted.kind, InputKind::PointerDown);
-        assert_eq!(omitted.shift, None, "an absent shift is no modifier report");
-
-        // An explicit `null` behaves like the absent member.
-        let null = decode(vec![
-            ("sequence", Wire::U64(2)),
-            ("kind", Wire::Text("pointer_up")),
-            ("shift", Wire::Null),
-        ])
-        .expect("a null shift decodes");
-        assert_eq!(null.shift, None);
-    }
-
-    #[test]
-    fn shift_booleans_round_trip_and_any_non_boolean_is_refused() {
-        for (wire, expected) in [(true, true), (false, false)] {
-            let input = decode(vec![
-                ("sequence", Wire::U64(1)),
-                ("kind", Wire::Text("pointer_down")),
-                ("shift", Wire::Bool(wire)),
-            ])
-            .unwrap_or_else(|error| panic!("shift {wire} must decode: {error}"));
-            assert_eq!(input.shift, Some(expected));
-        }
-
-        // A non-boolean value is never coerced: `"true"`, `1` and `0` all fail.
-        for wire in [Wire::Text("true"), Wire::I32(1), Wire::U64(0)] {
-            assert!(
-                decode(vec![
-                    ("sequence", Wire::U64(1)),
-                    ("kind", Wire::Text("pointer_down")),
-                    ("shift", wire),
-                ])
-                .is_err(),
-                "a non-boolean shift must be refused, never coerced"
-            );
-        }
-    }
-
-    #[test]
-    fn the_tracker_accepts_a_shift_report_without_disturbing_its_marker() {
-        let mut tracker = InputTracker::new();
-        let mut down = input(1, InputKind::PointerDown);
-        down.x = Some(25.0);
-        down.width = Some(100.0);
-        down.shift = Some(true);
-        let ack = tracker.apply(&down);
-        assert!(ack.accepted, "the tracker accepts a shift report");
-        assert!((ack.marker_offset - 0.25).abs() < 1e-6);
-    }
-
-    // --- the transient `pointer_leave` event --------------------------------
-
-    #[test]
-    fn pointer_leave_round_trips_and_is_not_terminal() {
-        // The wire string is the frozen contract the React lane sends.
-        let input = decode(vec![
-            ("sequence", Wire::U64(1)),
-            ("kind", Wire::Text("pointer_leave")),
-        ])
-        .expect("pointer_leave decodes");
-        assert_eq!(input.kind, InputKind::PointerLeave);
-        assert_eq!(input.kind.as_str(), "pointer_leave");
-        assert!(
-            !input.kind.is_terminal(),
-            "leaving the surface is transient: it ends no interaction"
-        );
-        // The stable lowercase spelling matches the wire value exactly.
-        for kind in [
-            InputKind::PointerDown,
-            InputKind::PointerMove,
-            InputKind::PointerUp,
-            InputKind::PointerCancel,
-            InputKind::Wheel,
-            InputKind::Resize,
-            InputKind::Blur,
-            InputKind::PointerLeave,
-        ] {
-            let decoded = decode(vec![
-                ("sequence", Wire::U64(1)),
-                ("kind", Wire::Text(kind.as_str())),
-            ])
-            .unwrap_or_else(|error| panic!("{:?} must decode: {error}", kind.as_str()));
-            assert_eq!(decoded.kind, kind, "{} round-trips", kind.as_str());
-        }
-    }
-
-    #[test]
-    fn the_tracker_accepts_a_pointer_leave_without_disturbing_its_state() {
-        let mut tracker = InputTracker::new();
-        let mut down = input(1, InputKind::PointerDown);
-        down.x = Some(25.0);
-        down.width = Some(100.0);
-        assert!(tracker.apply(&down).accepted);
-        assert!((tracker.marker_offset() - 0.25).abs() < 1e-6);
-        assert!(tracker.is_active());
-        assert!(tracker.take_dirty(), "the press set the marker");
-
-        // A leave in the middle of the stream is accepted, advances the
-        // sequence and is not terminal: it moves no marker, ends no press and
-        // marks nothing dirty.
-        let ack = tracker.apply(&input(2, InputKind::PointerLeave));
-        assert!(ack.accepted, "the tracker accepts a pointer leave");
-        assert!(!ack.terminal, "a leave is not a terminal event");
-        assert!(
-            (ack.marker_offset - 0.25).abs() < 1e-6,
-            "the marker is untouched"
-        );
-        assert!(tracker.is_active(), "the press state is untouched");
-        assert!(!tracker.take_dirty(), "a leave sets no dirty flag");
-
-        // Sequence ordering is upheld: the consumed sequence is respected, so a
-        // stale/duplicate event after it is refused and the stream continues.
-        let stale = tracker.apply(&input(2, InputKind::PointerUp));
-        assert!(!stale.accepted);
-        assert_eq!(stale.reason.as_deref(), Some("out_of_order_sequence"));
-        let next = tracker.apply(&input(3, InputKind::PointerUp));
-        assert!(next.accepted);
-        assert!(
-            !tracker.is_active(),
-            "the press still closes normally after the leave"
-        );
-    }
-}
+mod tests;

@@ -1,8 +1,11 @@
 //! Click-select, gesture classification and selection-block session tests.
 
-use super::super::input::{cancel_target, interaction_request, pointer_button, CancelTarget};
+use super::super::input::{
+    cancel_target, interaction_request, pointer_button, pointer_kind, CancelTarget,
+};
 use super::super::*;
 use super::test_support::*;
+use crate::protocol::ProbeDevice;
 
 #[test]
 fn cancel_target_keeps_the_host_cancel_out_of_an_active_capture() {
@@ -471,6 +474,196 @@ fn a_middle_drag_pans_without_selecting() {
         viewport_camera(&session),
         camera_before,
         "a middle drag pans the view"
+    );
+}
+
+#[test]
+fn device_maps_to_the_pointer_kind_and_absent_means_mouse() {
+    assert_eq!(pointer_kind(None), PointerKind::Mouse);
+    assert_eq!(pointer_kind(Some(ProbeDevice::Mouse)), PointerKind::Mouse);
+    assert_eq!(pointer_kind(Some(ProbeDevice::Touch)), PointerKind::Touch);
+    assert_eq!(pointer_kind(Some(ProbeDevice::Pen)), PointerKind::Pen);
+
+    // The mapping reaches every pointer phase's typed request, so the host can
+    // arbitrate by device. `pen` is deliberately its own kind (the host treats it
+    // as mouse-like); an absent report is exactly mouse.
+    for (device, expected) in [
+        (None, PointerKind::Mouse),
+        (Some(ProbeDevice::Mouse), PointerKind::Mouse),
+        (Some(ProbeDevice::Touch), PointerKind::Touch),
+        (Some(ProbeDevice::Pen), PointerKind::Pen),
+    ] {
+        let mut down = pointer_at(InputKind::PointerDown, 1, [10.0, 20.0], None);
+        down.device = device;
+        let (requests, _) = plan_input(None, &down, 7, false).unwrap();
+        match &requests[0] {
+            InteractionRequest::Pointer { kind, .. } => {
+                assert_eq!(*kind, expected, "device {device:?} maps to {expected:?}");
+            }
+            other => panic!("unexpected request: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn pinch_maps_to_a_typed_pinch_with_pointer_pan_signs() {
+    let mut pinch = probe(InputKind::Pinch);
+    pinch.x = Some(100.0);
+    pinch.y = Some(50.0);
+    pinch.dx = Some(5.0);
+    pinch.dy = Some(-4.0);
+    pinch.scale = Some(1.5);
+    let (requests, next) = plan_input(None, &pinch, 7, false).unwrap();
+    assert!(next.is_none(), "a pinch starts no press");
+    match &requests[0] {
+        InteractionRequest::Pinch {
+            position:
+                PointInput::CanvasLocal {
+                    logical_position,
+                    metrics_revision,
+                },
+            delta_logical,
+            scale,
+        } => {
+            assert_eq!(*logical_position, [100.0, 50.0]);
+            assert_eq!(*metrics_revision, 7);
+            assert_eq!(
+                *delta_logical,
+                [5.0, -4.0],
+                "the midpoint delta keeps the pointer/pan sign (y down), not the wheel's inverted dy"
+            );
+            assert_eq!(*scale, 1.5, "the incremental multiplier travels unchanged");
+        }
+        other => panic!("expected a Pinch request: {other:?}"),
+    }
+    // The stateless mapping agrees with the planned one.
+    assert!(matches!(
+        interaction_request(&pinch, 7).unwrap(),
+        InteractionRequest::Pinch { .. }
+    ));
+}
+
+#[test]
+fn pinch_refuses_a_non_positive_scale_a_missing_midpoint_and_a_bad_delta() {
+    for scale in [0.0f32, -0.5, f32::NAN, f32::INFINITY] {
+        let mut pinch = probe(InputKind::Pinch);
+        pinch.x = Some(10.0);
+        pinch.y = Some(10.0);
+        pinch.scale = Some(scale);
+        let error = plan_input(None, &pinch, 0, false).unwrap_err();
+        assert!(error.contains("pinch scale"), "scale {scale}: {error}");
+        assert!(interaction_request(&pinch, 0).is_err());
+    }
+
+    // The midpoint is mandatory (a zoom anchor cannot be invented).
+    let mut missing = probe(InputKind::Pinch);
+    missing.scale = Some(1.0);
+    assert!(plan_input(None, &missing, 0, false).is_err());
+
+    // A non-finite midpoint delta is refused too.
+    let mut bad_delta = probe(InputKind::Pinch);
+    bad_delta.x = Some(10.0);
+    bad_delta.y = Some(10.0);
+    bad_delta.dx = Some(f32::NAN);
+    let error = plan_input(None, &bad_delta, 0, false).unwrap_err();
+    assert!(error.contains("pinch midpoint delta"), "{error}");
+}
+
+#[test]
+fn a_touch_tap_still_selects_the_picked_entity() {
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let pixel = screen_of(&session, demo_circle_rim(&session));
+    let expected = {
+        let c = session.core.controller.borrow();
+        let drawing = c.drawing().expect("the demo document");
+        let viewport = &c.application.workspace.viewports[&c.viewport_id];
+        cad_app::picking::pick_at_screen(
+            &drawing,
+            c.document_id,
+            &viewport.camera,
+            pixel,
+            viewport.logical_size,
+            &cad_domain::TolerancePolicy::default(),
+            cad_app::BackFacePolicy::Cull,
+        )
+        .expect("the demo circle rim is pickable")
+        .hit
+        .expect("the demo circle rim is pickable")
+        .source
+    };
+    let camera_before = viewport_camera(&session);
+
+    // One finger: down/up with no movement is still a tap → select, never pan.
+    let mut down = pointer_at(InputKind::PointerDown, 1, pixel, None);
+    down.device = Some(ProbeDevice::Touch);
+    session
+        .handle_input(&down)
+        .expect("the touch press is admitted");
+    let mut up = pointer_at(InputKind::PointerUp, 2, pixel, None);
+    up.device = Some(ProbeDevice::Touch);
+    session
+        .handle_input(&up)
+        .expect("the touch release is admitted");
+    assert_eq!(session.snapshot(None, None, 0).error, None);
+
+    assert_eq!(
+        session
+            .core
+            .controller
+            .borrow()
+            .session
+            .selection
+            .refs()
+            .to_vec(),
+        vec![expected],
+        "a touch tap selects exactly the real pick"
+    );
+    assert_eq!(
+        viewport_camera(&session),
+        camera_before,
+        "a touch tap must not pan the view"
+    );
+}
+
+#[test]
+fn a_touch_drag_carries_its_device_kind_to_the_host_on_every_phase() {
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    // The session is the only place the wire `device` becomes `PointerKind`; a
+    // drag must keep it on the press, the move and the release, so the host can
+    // arbitrate a one-finger pan on all three.
+    let start = [100.0, 100.0];
+    let end = [160.0, 140.0];
+    let camera_before = viewport_camera(&session);
+    for (sequence, kind, position) in [
+        (1, InputKind::PointerDown, start),
+        (2, InputKind::PointerMove, end),
+        (3, InputKind::PointerUp, end),
+    ] {
+        let mut input = pointer_at(kind, sequence, position, None);
+        input.device = Some(ProbeDevice::Touch);
+        session
+            .handle_input(&input)
+            .unwrap_or_else(|error| panic!("{kind:?} refused: {error}"));
+    }
+    assert_eq!(session.snapshot(None, None, 0).error, None);
+    assert!(
+        session
+            .core
+            .controller
+            .borrow()
+            .session
+            .selection
+            .is_empty(),
+        "a one-finger drag pans; it must never box-select"
+    );
+    assert_ne!(
+        viewport_camera(&session),
+        camera_before,
+        "a one-finger touch drag pans the view"
     );
 }
 

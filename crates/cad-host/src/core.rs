@@ -131,6 +131,17 @@ pub(crate) struct NavInner {
     /// every other button pans. Recorded on the press because the UI reports no
     /// button change on a move.
     pub button: Cell<Option<PointerButton>>,
+    /// The physical device of the single contact, recorded at press time (the
+    /// wire `device` field; absent ⇒ [`PointerKind::Mouse`]).
+    ///
+    /// Gesture arbitration reads it: a `Touch` primary drag pans instead of
+    /// drawing a box (one-finger pan), while `Mouse`/`Pen` keep the box rule
+    /// (unless the `interaction.leftDragPans` preference is on). Recorded on the
+    /// press for the same reason as `button`: a move need not repeat it, and a
+    /// moving report could not change the device mid-gesture. Cleared with the
+    /// gesture, and never inherited by a surviving contact after a partial
+    /// release.
+    pub contact_kind: Cell<Option<PointerKind>>,
     /// The modifiers of the press, kept for the gesture. Only `shift` is used
     /// today (ADR 0014 B.4): the release maps it to `SelectionMode::Add`.
     pub press_modifiers: Cell<Option<Modifiers>>,
@@ -173,6 +184,7 @@ impl Default for NavInner {
             navigating: Cell::new(false),
             nav_last: Cell::new(None),
             button: Cell::new(None),
+            contact_kind: Cell::new(None),
             press_modifiers: Cell::new(None),
             box_gesture: RefCell::new(None),
             grip_drag: RefCell::new(None),

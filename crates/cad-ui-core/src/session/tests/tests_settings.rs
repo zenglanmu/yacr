@@ -25,6 +25,10 @@ fn session_settings_report_the_effective_defaults() {
         cad_app::DEFAULT_SNAP_SPACING,
         "the declared 10.0 drawing-unit spacing"
     );
+    assert!(
+        !settings.left_drag_pans,
+        "left drag box-selects until the user opts in"
+    );
     assert_eq!(settings.background_model, "#000000");
     assert_eq!(settings.background_paper, "#000000");
     assert_eq!(settings.crosshair_percent, 100);
@@ -307,6 +311,50 @@ fn session_refuses_invalid_drafting_values_with_stable_codes() {
     assert_eq!(after.grid_snap_enabled, before.grid_snap_enabled);
     assert_eq!(after.ortho_enabled, before.ortho_enabled);
     assert_eq!(after.snap_spacing, before.snap_spacing);
+}
+
+/// The persisted `interaction.leftDragPans` input scheme is a plain preference:
+/// `false` by default, reported after a write, camelCased on the wire, and a
+/// startup preference reaches the snapshot without any session seeding step.
+#[test]
+fn session_left_drag_pans_round_trips_and_reads_the_startup_preference() {
+    let session = plain_session();
+    assert!(!session.settings().left_drag_pans);
+    assert_eq!(
+        serde_json::to_value(session.settings()).expect("settings serialize")["leftDragPans"],
+        serde_json::json!(false),
+        "the default is reported under the camelCase wire key"
+    );
+
+    let settings = session
+        .apply_setting(CadSettingKey::LeftDragPans, CadSettingValue::Bool(true))
+        .expect("an allowed interaction write");
+    assert!(settings.left_drag_pans);
+    assert!(session.settings().left_drag_pans);
+    assert_eq!(
+        serde_json::to_value(&settings).expect("settings serialize")["leftDragPans"],
+        serde_json::json!(true)
+    );
+
+    // A wrong shape is the host's stable refusal and never rewrites the value.
+    let error = session
+        .apply_setting(
+            CadSettingKey::LeftDragPans,
+            CadSettingValue::Text("on".to_string()),
+        )
+        .unwrap_err();
+    assert_eq!(error, SETTINGS_INVALID_VALUE);
+    assert!(
+        session.settings().left_drag_pans,
+        "a refused write keeps the reported value"
+    );
+
+    // The startup preference is visible as soon as the config is loaded; the
+    // scheme is not session state, so it needs no seeding call to survive.
+    let seeded = session_with_config(Rc::new(StaticConfig::preference(
+        r#"{"interaction":{"leftDragPans":true}}"#,
+    )));
+    assert!(seeded.settings().left_drag_pans);
 }
 
 #[test]

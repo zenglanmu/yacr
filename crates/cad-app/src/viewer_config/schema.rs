@@ -425,6 +425,12 @@ pub struct InteractionConfig {
     /// `SNAPUNIT` session spacing in drawing units; `None` keeps the session
     /// default ([`crate::snap::DEFAULT_SNAP_SPACING`]).
     pub snap_spacing: Option<f64>,
+    /// AutoCAD-like input scheme: when on, a primary-button drag in the 2D view
+    /// pans instead of running a box selection. `false` keeps the default
+    /// (left drag = box select, middle drag = pan). Unlike the session switches
+    /// above this is a plain preference: the gesture reads the effective config
+    /// per dispatch, so there is no session state to seed.
+    pub left_drag_pans: bool,
 }
 impl Default for InteractionConfig {
     fn default() -> Self {
@@ -437,6 +443,7 @@ impl Default for InteractionConfig {
             grid_snap_enabled: None,
             ortho_enabled: None,
             snap_spacing: None,
+            left_drag_pans: false,
         }
     }
 }

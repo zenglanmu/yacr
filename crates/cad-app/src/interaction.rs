@@ -237,6 +237,21 @@ pub enum InteractionRequest {
         position: PointInput,
         modifiers: Modifiers,
     },
+    /// Continuous two-finger pinch: pan by the midpoint movement, then zoom by
+    /// the incremental multiplier about the midpoint.
+    ///
+    /// `delta_logical` is the midpoint movement since the previous pinch event in
+    /// canvas-local logical pixels, with the same sign convention as the pointer /
+    /// multi-touch pan (`x` right, `y` down) — **not** the inverted wheel
+    /// `deltaY`. `scale` is the incremental multiplier (`1.0` = no zoom, `> 1.0`
+    /// = zoom in) and must be finite and strictly positive; the host refuses
+    /// anything else instead of applying it. There is no terminal pinch request:
+    /// a pinch session ends with [`Self::Pointer`] `Cancel`.
+    Pinch {
+        position: PointInput,
+        delta_logical: [f64; 2],
+        scale: f64,
+    },
 }
 
 impl InteractionRequest {
@@ -253,6 +268,21 @@ impl InteractionRequest {
             } => {
                 if !delta_logical.iter().all(|value| value.is_finite()) {
                     return Err(CadError::InvalidInput("scroll delta must be finite".into()));
+                }
+                position.validate().map(|_| ())
+            }
+            Self::Pinch {
+                position,
+                delta_logical,
+                scale,
+            } => {
+                if !delta_logical.iter().all(|value| value.is_finite()) {
+                    return Err(CadError::InvalidInput("pinch delta must be finite".into()));
+                }
+                if !scale.is_finite() || *scale <= 0.0 {
+                    return Err(CadError::InvalidInput(
+                        "pinch scale must be finite and greater than zero".into(),
+                    ));
                 }
                 position.validate().map(|_| ())
             }
@@ -307,6 +337,40 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn synthetic_pinch_requires_a_finite_delta_and_a_positive_scale() {
+        let point = PointInput::CanvasLocal {
+            logical_position: [8.0, 21.0],
+            metrics_revision: 4,
+        };
+        assert!(InteractionRequest::Pinch {
+            position: point,
+            delta_logical: [3.0, -2.0],
+            scale: 1.25,
+        }
+        .validate()
+        .is_ok());
+
+        for (delta_logical, scale) in [
+            ([f64::NAN, 0.0], 1.0),
+            ([0.0, f64::INFINITY], 1.0),
+            ([0.0, 0.0], 0.0),
+            ([0.0, 0.0], -1.0),
+            ([0.0, 0.0], f64::INFINITY),
+        ] {
+            assert!(
+                InteractionRequest::Pinch {
+                    position: point,
+                    delta_logical,
+                    scale,
+                }
+                .validate()
+                .is_err(),
+                "pinch {delta_logical:?} scale {scale} must be refused"
+            );
+        }
     }
 
     #[test]

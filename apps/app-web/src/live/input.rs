@@ -142,11 +142,13 @@ impl InputState {
             y: Some(cursor[1] as f32),
             dx: None,
             dy: Some((-delta_logical) as f32),
+            scale: None,
             width: None,
             height: None,
             dpr: None,
             button: None,
             shift: None,
+            device: None,
         })
     }
 }
@@ -165,11 +167,13 @@ pub fn pointer(
         y: Some(position[1] as f32),
         dx: None,
         dy: None,
+        scale: None,
         width: None,
         height: None,
         dpr: None,
         button,
         shift: None,
+        device: None,
     }
 }
 

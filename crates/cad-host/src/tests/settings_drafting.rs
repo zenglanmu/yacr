@@ -51,8 +51,8 @@ fn the_drafting_settings_default_to_the_session_defaults() {
 fn the_three_drafting_keys_are_in_the_closed_table() {
     assert_eq!(
         CadSettingKey::ALL.len(),
-        17,
-        "three more writable keys on top of the fourteen documented ones"
+        18,
+        "three drafting keys plus the left-drag input scheme on top of the fourteen documented ones"
     );
     for (key, wire) in [
         (CadSettingKey::GridSnapEnabled, "gridSnapEnabled"),

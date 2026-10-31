@@ -114,6 +114,9 @@ pub enum InteractionOutcome {
     SelectionUpdated,
     PointerObserved,
     ScrollObserved,
+    /// A continuous two-finger pinch was applied (pan and/or zoom). Navigation
+    /// only: no tool captured anything and no box selection ran.
+    PinchObserved,
 }
 
 /// Semantic refusal/failure. Acceptance is not a claim that work executed.

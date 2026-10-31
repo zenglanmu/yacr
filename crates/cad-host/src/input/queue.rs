@@ -60,6 +60,7 @@ impl HostCore {
             self.navigation.dragged.set(false);
             self.navigation.navigating.set(false);
             self.navigation.button.set(None);
+            self.navigation.contact_kind.set(None);
             self.navigation.press_modifiers.set(None);
             *self.navigation.box_gesture.borrow_mut() = None;
             // A stale `Up`/`Cancel` closes the gesture exactly like the live one:
@@ -209,6 +210,7 @@ fn config_checked(request: &EngineRequest) -> bool {
                 | InteractionRequest::MoveCursor(_)
                 | InteractionRequest::Pointer { .. }
                 | InteractionRequest::Scroll { .. }
+                | InteractionRequest::Pinch { .. }
         )
     )
 }
@@ -221,6 +223,7 @@ fn request_metrics_revision(request: &EngineRequest) -> Option<u64> {
         EngineRequest::Interaction(InteractionRequest::SelectAt { point, .. }) => *point,
         EngineRequest::Interaction(InteractionRequest::Pointer { position, .. }) => *position,
         EngineRequest::Interaction(InteractionRequest::Scroll { position, .. }) => *position,
+        EngineRequest::Interaction(InteractionRequest::Pinch { position, .. }) => *position,
         _ => return None,
     };
     match point {

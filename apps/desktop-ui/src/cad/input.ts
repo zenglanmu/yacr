@@ -22,6 +22,7 @@ export interface QueueInput {
   sequence?: number;
   dx?: number;
   dy?: number;
+  scale?: number;
   [field: string]: unknown;
 }
 
@@ -48,7 +49,7 @@ export function createInputLane(send: SendInput, onError: ReportError, capacity 
   let busy = false;
   let sequence = 0;
   let disposed = false;
-  const continuous = new Set(['pointer_move', 'wheel']);
+  const continuous = new Set(['pointer_move', 'wheel', 'pinch']);
   const mergeable = new Set([...continuous, 'resize']);
   async function drain(): Promise<void> {
     if (busy || disposed) return;
@@ -80,6 +81,13 @@ export function createInputLane(send: SendInput, onError: ReportError, capacity 
         if (input.kind === 'wheel') {
           next.dx = (tail.dx ?? 0) + (input.dx ?? 0);
           next.dy = (tail.dy ?? 0) + (input.dy ?? 0);
+        } else if (input.kind === 'pinch') {
+          // Two pinch samples describe one cumulative gesture: positions are
+          // latest-wins (like a move), incremental deltas add up, and the
+          // incremental zoom multipliers compose by multiplication.
+          next.dx = (tail.dx ?? 0) + (input.dx ?? 0);
+          next.dy = (tail.dy ?? 0) + (input.dy ?? 0);
+          next.scale = (tail.scale ?? 1) * (input.scale ?? 1);
         }
         queue[queue.length - 1] = next;
         return true;
@@ -175,6 +183,48 @@ export function shiftField(event: { readonly shiftKey?: boolean } | null | undef
   return { shift: event?.shiftKey === true };
 }
 
+/** The pointer device a wire input reports (the DOM `pointerType`). */
+export type InputDevice = 'mouse' | 'touch' | 'pen';
+
+/** One pressed contact tracked by [`bindProbeInput`]. */
+interface Contact {
+  x: number;
+  y: number;
+  device?: InputDevice;
+}
+
+/** The pinch baseline: midpoint and finger distance in CSS px. */
+interface PinchState {
+  x: number;
+  y: number;
+  distance: number;
+}
+
+/**
+ * The `device` field of a wire pointer input.
+ *
+ * The DOM `pointerType` is read per event. Only the three devices the wire
+ * models travel; anything else (an empty string on a synthetic event, an
+ * unknown future type) omits the field entirely rather than guessing, and the
+ * host then reads the absence as `mouse` — exactly the old wire.
+ */
+export function deviceField(event: { readonly pointerType?: string } | null | undefined): { device?: InputDevice } {
+  const type = event?.pointerType;
+  return type === 'mouse' || type === 'touch' || type === 'pen' ? { device: type } : {};
+}
+
+/**
+ * Whether two contacts form a pinch.
+ *
+ * Touch always wins (`mouse` + `touch` is a hybrid laptop, not a second mouse
+ * press), a pen pair pins, and two mouse contacts stay the old "second press is
+ * ignored" case.
+ */
+function pinchPair(first: InputDevice | undefined, second: InputDevice | undefined): boolean {
+  if (first === 'touch' || second === 'touch') return true;
+  return first === 'pen' && second === 'pen';
+}
+
 /**
  * The window surface [`bindProbeInput`] needs. Structural, so the real `window`
  * and the fake environments the tests pass both fit.
@@ -201,7 +251,16 @@ export interface ProbeInputBinding {
 }
 
 export function bindProbeInput(element: HTMLElement, lane: InputLane, env: ProbeEnv = window): ProbeInputBinding {
-  let active: number | null = null;
+  // Every pressed contact, keyed by `pointerId`. A single entry is exactly the
+  // old single `active` pointer; a second touch/pen contact turns the map into a
+  // pinch. `mouse` contacts never pair with `mouse` (the old "second press is
+  // ignored" behaviour).
+  const contacts = new Map<number, Contact>();
+  let pinching = false;
+  // After a pinch ends, its remaining fingers are held until every one lifts:
+  // a late move/up must not become a stray pan, box select or tap.
+  let ignoring = false;
+  let pinchFrom: PinchState | null = null;
   let move: QueueInput | null = null;
   let frame: number | null = null;
   let timer: number | null = null;
@@ -228,29 +287,8 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
     if (move) lane.push(move);
     move = null;
   };
-  const release = (): void => {
-    const id = active;
-    active = null;
-    if (id !== null && element.hasPointerCapture(id)) element.releasePointerCapture(id);
-  };
-  const cancel = (): void => {
-    flush();
-    if (active !== null) { lane.push({ kind: 'pointer_cancel' }); release(); }
-  };
-  const down = (event: Event): void => {
-    const pointer = event as PointerEvent;
-    if (!accepting || active !== null || !lane.canStart()) return;
-    resize();
-    flush();
-    active = pointer.pointerId;
-    element.setPointerCapture(active);
-    lane.push({ kind: 'pointer_down', ...position(pointer), ...buttonField(pointer), ...shiftField(pointer) });
-  };
-  const moving = (event: Event): void => {
-    const pointer = event as PointerEvent;
-    if (!accepting || (active !== null && pointer.pointerId !== active)) return;
-    resize();
-    move = { kind: 'pointer_move', ...position(pointer) };
+  const bufferMove = (input: QueueInput): void => {
+    move = input;
     // Preferred flush: one coalescing frame for the whole move burst. The timer
     // is scheduled exactly once per dirty buffer (both handles are cleared by
     // `flush`), so at most one pending flush exists; whichever fires first wins
@@ -259,15 +297,169 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
     if (frame === null) frame = env.requestAnimationFrame(() => { frame = null; flush(); });
     if (timer === null) timer = env.setTimeout(flush, MOVE_FLUSH_FALLBACK_MS);
   };
-  const up = (event: Event): void => {
+  const release = (id: number): void => {
+    if (element.hasPointerCapture(id)) element.releasePointerCapture(id);
+  };
+  // The two oldest contacts own the pinch; a third contact is tracked (so its
+  // release still counts) without becoming part of the midpoint/distance.
+  const pair = (): [Contact, Contact] | null => {
+    const iterator = contacts.values();
+    const first = iterator.next();
+    const second = iterator.next();
+    if (first.done || second.done) return null;
+    return [first.value, second.value];
+  };
+  const pinchState = (): PinchState | null => {
+    const both = pair();
+    if (both === null) return null;
+    const [first, second] = both;
+    return {
+      x: (first.x + second.x) / 2,
+      y: (first.y + second.y) / 2,
+      distance: Math.hypot(second.x - first.x, second.y - first.y),
+    };
+  };
+  const beginPinch = (): void => {
+    pinching = true;
+    ignoring = false;
+    pinchFrom = pinchState();
+  };
+  // Ends a pinch without touching the remaining contacts: they stay in the map
+  // (and keep their capture) until each lifts, but every event they send is
+  // swallowed while `ignoring` is set.
+  const endPinch = (): void => {
+    pinching = false;
+    pinchFrom = null;
+    flush();
+    lane.push({ kind: 'pointer_cancel' });
+    ignoring = contacts.size > 0;
+  };
+  const cancel = (device?: { readonly pointerType?: string }): void => {
+    flush();
+    // A pinch is still a gesture the host owns until it sees its cancel; a
+    // post-pinch ignored contact is not, so a later blur must not cancel twice.
+    if (pinching || (!ignoring && contacts.size > 0)) {
+      lane.push({ kind: 'pointer_cancel', ...deviceField(device) });
+    }
+    const ids = [...contacts.keys()];
+    contacts.clear();
+    pinching = false;
+    ignoring = false;
+    pinchFrom = null;
+    for (const id of ids) release(id);
+  };
+  const down = (event: Event): void => {
     const pointer = event as PointerEvent;
-    if (pointer.pointerId !== active) return;
+    if (!accepting || ignoring) return;
+    const at = position(pointer);
+    const device = deviceField(pointer).device;
+    if (pinching) {
+      // A third finger neither starts a gesture nor joins the pair, but its
+      // release is tracked so the post-pinch ignore covers it too.
+      contacts.set(pointer.pointerId, { ...at, device });
+      return;
+    }
+    if (contacts.size === 0) {
+      if (!lane.canStart()) return;
+      resize();
+      flush();
+      contacts.set(pointer.pointerId, { ...at, device });
+      element.setPointerCapture(pointer.pointerId);
+      lane.push({ kind: 'pointer_down', ...at, ...buttonField(pointer), ...shiftField(pointer), ...deviceField(pointer) });
+      return;
+    }
+    const first = contacts.values().next();
+    if (first.done || !pinchPair(first.value.device, device)) return;
+    // The single-contact gesture/tool ends exactly once, then the two contacts
+    // become a pinch. No `pointer_down` is sent for the second finger.
     resize();
     flush();
-    lane.push({ kind: 'pointer_up', ...position(pointer), ...buttonField(pointer), ...shiftField(pointer) });
-    release();
+    contacts.set(pointer.pointerId, { ...at, device });
+    element.setPointerCapture(pointer.pointerId);
+    lane.push({ kind: 'pointer_cancel' });
+    beginPinch();
   };
-  const cancelled = (event: Event): void => { if ((event as PointerEvent).pointerId === active) cancel(); };
+  const moving = (event: Event): void => {
+    const pointer = event as PointerEvent;
+    if (!accepting) return;
+    const contact = contacts.get(pointer.pointerId);
+    const at = position(pointer);
+    if (pinching) {
+      if (contact === undefined) return;
+      contact.x = at.x;
+      contact.y = at.y;
+      resize();
+      const next = pinchState();
+      const previous = pinchFrom;
+      if (next === null) return;
+      pinchFrom = next;
+      if (previous === null) return;
+      lane.push({
+        kind: 'pinch',
+        x: next.x,
+        y: next.y,
+        dx: next.x - previous.x,
+        dy: next.y - previous.y,
+        // A degenerate baseline (two fingers on the same pixel) has no ratio;
+        // report the honest "no zoom" instead of a division by zero.
+        scale: previous.distance === 0 ? 1 : next.distance / previous.distance,
+      });
+      return;
+    }
+    if (ignoring) return;
+    if (contact === undefined) {
+      // No contact means hover; while a press owns the gesture another pointer's
+      // move is not hover and must not tint or drag.
+      if (contacts.size > 0) return;
+      resize();
+      bufferMove({ kind: 'pointer_move', ...at, ...deviceField(pointer) });
+      return;
+    }
+    if (contacts.size !== 1) return;
+    resize();
+    bufferMove({ kind: 'pointer_move', ...at, ...deviceField(pointer) });
+  };
+  const up = (event: Event): void => {
+    const pointer = event as PointerEvent;
+    const id = pointer.pointerId;
+    if (ignoring) {
+      if (contacts.delete(id)) release(id);
+      if (contacts.size === 0) ignoring = false;
+      return;
+    }
+    if (pinching) {
+      if (!contacts.has(id)) return;
+      contacts.delete(id);
+      release(id);
+      if (contacts.size < 2) endPinch();
+      else pinchFrom = pinchState();
+      return;
+    }
+    if (!contacts.has(id)) return;
+    resize();
+    flush();
+    lane.push({ kind: 'pointer_up', ...position(pointer), ...buttonField(pointer), ...shiftField(pointer), ...deviceField(pointer) });
+    contacts.delete(id);
+    release(id);
+  };
+  const cancelled = (event: Event): void => {
+    const pointer = event as PointerEvent;
+    const id = pointer.pointerId;
+    if (ignoring) {
+      if (contacts.delete(id)) release(id);
+      if (contacts.size === 0) ignoring = false;
+      return;
+    }
+    if (pinching) {
+      if (!contacts.has(id)) return;
+      contacts.delete(id);
+      release(id);
+      if (contacts.size < 2) endPinch();
+      else pinchFrom = pinchState();
+      return;
+    }
+    if (contacts.has(id)) cancel(pointer);
+  };
   // Leaving the surface clears the host's hover highlight. It carries no
   // position, button or metrics: the host only needs to know the pointer is
   // gone. A press owns the gesture (and a captured pointer should not report a
@@ -276,7 +468,7 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
   // in-flight move can never arrive *after* the leave and re-tint hover from a
   // stale in-surface position.
   const leave = (): void => {
-    if (active !== null) return;
+    if (contacts.size > 0) return;
     flush();
     lane.push({ kind: 'pointer_leave' });
   };

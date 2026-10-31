@@ -28,6 +28,7 @@ impl HostCore {
     pub(super) fn pointer(
         &self,
         id: PointerId,
+        kind: PointerKind,
         phase: PointerPhase,
         button: Option<PointerButton>,
         position: PointInput,
@@ -41,7 +42,7 @@ impl HostCore {
             self.cursor_logical.set(Some(point));
         }
         match phase {
-            PointerPhase::Down => self.pointer_down(id, button, point, modifiers),
+            PointerPhase::Down => self.pointer_down(id, kind, button, point, modifiers),
             PointerPhase::Move => self.pointer_move(id, button, point),
             PointerPhase::Up => self.pointer_up(id, point, modifiers),
             PointerPhase::Cancel => self.pointer_cancel(id),
@@ -90,6 +91,7 @@ impl HostCore {
     fn pointer_down(
         &self,
         id: PointerId,
+        kind: PointerKind,
         button: Option<PointerButton>,
         point: [f64; 2],
         modifiers: Modifiers,
@@ -109,10 +111,13 @@ impl HostCore {
             self.navigation.last.set(Some(point));
             self.navigation.dragged.set(false);
             self.navigation.navigating.set(false);
-            // Remember the button and modifiers for the single-contact gesture:
-            // the arbitration (box / orbit / pan) reads them, and the UI reports
-            // no button change on a move.
+            // Remember the button, device and modifiers for the single-contact
+            // gesture: the arbitration (box / orbit / pan) reads them, and the UI
+            // reports no button change on a move. The device is recorded here
+            // (absent on the wire ⇒ mouse) so a later move cannot change it
+            // mid-gesture.
             self.navigation.button.set(button);
+            self.navigation.contact_kind.set(Some(kind));
             self.navigation.press_modifiers.set(Some(modifiers));
             *self.navigation.box_gesture.borrow_mut() = None;
             // A pending click-suppression latch belongs to the previous gesture:
@@ -213,13 +218,19 @@ impl HostCore {
             }
             nav.dragged.set(true);
             nav.last.set(Some(anchor));
-            // The single winner for this gesture (ADR 0014 B.2): a 2D
-            // primary-button drag is a box selection, not a pan. A capture
-            // (handled above), a typed modal pan and 3D keep their own
-            // behaviour.
+            // The single winner for this gesture (ADR 0014 B.2, input-modality
+            // contract): a 2D primary-button **mouse/pen** drag is a box
+            // selection, while a **touch** drag pans (one-finger pan) — and the
+            // optional `interaction.leftDragPans` preference turns the
+            // mouse/pen drag into a pan too. A capture (handled above), a typed
+            // modal pan, an armed `ZOOM WINDOW` capture and 3D keep their own
+            // behaviour (their priority is unchanged).
+            let touch = nav.contact_kind.get() == Some(PointerKind::Touch);
+            let pans = (touch || self.left_drag_pans()) && !self.zoom_window_armed();
             if pressed == Some(PointerButton::Primary)
                 && !self.mode_is_3d()
                 && !self.pan_modal_active()
+                && !pans
             {
                 self.begin_box_gesture(anchor, point);
                 return Ok(());
@@ -261,13 +272,14 @@ impl HostCore {
             self.clear_box_gesture();
             self.navigation.anchor.set(None);
             self.navigation.nav_last.set(Some(point));
-            // The stored button/modifiers belong to the single-contact gesture
-            // whose contact has now left; a surviving contact must not inherit
-            // them (the UI reports no button change on a move), so a 2D
-            // primary-drag arbitration or a Shift merge can never leak from a
-            // released contact. A later single contact re-records them on its
-            // own press.
+            // The stored button/modifiers/device belong to the single-contact
+            // gesture whose contact has now left; a surviving contact must not
+            // inherit them (the UI reports no button change on a move), so a 2D
+            // primary-drag arbitration, a touch-pan rule or a Shift merge can
+            // never leak from a released contact. A later single contact
+            // re-records them on its own press.
             self.navigation.button.set(None);
+            self.navigation.contact_kind.set(None);
             self.navigation.press_modifiers.set(None);
             return Ok(());
         }
@@ -278,6 +290,7 @@ impl HostCore {
         self.navigation.nav_last.set(None);
         let box_gesture = self.navigation.box_gesture.borrow_mut().take();
         self.navigation.button.set(None);
+        self.navigation.contact_kind.set(None);
         self.navigation.press_modifiers.set(None);
         // A release that ends an armed grip drag commits exactly one
         // `GripStretch` (or nothing when the handle never moved) and claims the
@@ -326,14 +339,16 @@ impl HostCore {
             self.navigation.dragged.set(false);
             self.navigation.navigating.set(false);
             self.navigation.button.set(None);
+            self.navigation.contact_kind.set(None);
             self.navigation.press_modifiers.set(None);
             // An OS/browser pointer cancel must not leave an open tool behind.
             self.controller.borrow_mut().cancel_tool()?;
             self.full_dirty.set(true);
         } else {
             // A surviving contact must not inherit the cancelled contact's
-            // button/modifiers (see `pointer_up`).
+            // button/device/modifiers (see `pointer_up`).
             self.navigation.button.set(None);
+            self.navigation.contact_kind.set(None);
             self.navigation.press_modifiers.set(None);
         }
         Ok(())
@@ -491,7 +506,7 @@ impl HostCore {
     /// One entry for every non-zoom terminal: a cancel, a gesture clear, a
     /// multi-touch takeover, a capture/modal pan owning the pointer and a
     /// pan/orbit drag. Pure state — nothing was written while armed.
-    fn disarm_zoom_window(&self) {
+    pub(super) fn disarm_zoom_window(&self) {
         self.navigation.zoom_window_armed.set(false);
     }
 
@@ -704,7 +719,7 @@ impl HostCore {
     ///
     /// The same `world_per_px` the renderer uses converts the delta, so a pan
     /// keeps the picked world point under the pointer.
-    fn pan_by_logical_delta(&self, delta: [f64; 2]) -> CadResult<()> {
+    pub(super) fn pan_by_logical_delta(&self, delta: [f64; 2]) -> CadResult<()> {
         if delta == [0.0, 0.0] {
             return Ok(());
         }

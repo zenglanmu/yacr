@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bindProbeInput, createInputLane, shiftField } from '../src/cad/input.ts';
+import { bindProbeInput, createInputLane, deviceField, shiftField } from '../src/cad/input.ts';
 import { readAppSource, readCatalog } from './helpers.ts';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -614,5 +614,196 @@ test('the first move after an idle period is still delivered promptly by the fal
   assert.equal(timers.size, 1);
   env.runTimers();
   assert.deepEqual(inputs.at(-1), { kind: 'pointer_move', x: 101, y: 201 });
+  binding.dispose();
+});
+
+test('deviceField reads pointerType and never guesses', () => {
+  assert.deepEqual(deviceField({ pointerType: 'touch' }), { device: 'touch' });
+  assert.deepEqual(deviceField({ pointerType: 'pen' }), { device: 'pen' });
+  assert.deepEqual(deviceField({ pointerType: 'mouse' }), { device: 'mouse' });
+  // Absent/empty/unknown is not a guess: the field is omitted (host reads mouse).
+  for (const event of [undefined, null, {}, { pointerType: '' }, { pointerType: 'unknown' }]) {
+    assert.deepEqual(deviceField(event), {});
+  }
+});
+
+test('a touch pointer carries device on down/move/up; a missing or empty pointerType omits it', () => {
+  const { env, element } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  element.emit('pointerdown', { pointerId: 1, clientX: 5, clientY: 5, button: 0, pointerType: 'touch' });
+  assert.equal(inputs.at(-1).device, 'touch');
+  element.emit('pointermove', { pointerId: 1, clientX: 6, clientY: 5, button: -1, pointerType: 'touch' });
+  env.tick();
+  assert.equal(inputs.at(-1).device, 'touch');
+  element.emit('pointerup', { pointerId: 1, clientX: 6, clientY: 5, button: 0, pointerType: 'touch' });
+  assert.equal(inputs.at(-1).device, 'touch');
+  // Old hosts/synthetic events report no pointerType: no field, not a guessed one.
+  element.emit('pointerdown', { pointerId: 2, clientX: 1, clientY: 1, button: 0 });
+  assert.ok(!('device' in inputs.at(-1)));
+  element.emit('pointermove', { pointerId: 2, clientX: 2, clientY: 1, button: -1 });
+  env.tick();
+  assert.ok(!('device' in inputs.at(-1)));
+  element.emit('pointerup', { pointerId: 2, clientX: 2, clientY: 1, button: 0 });
+  assert.ok(!('device' in inputs.at(-1)));
+  // An explicitly empty pointerType is the same as absent.
+  element.emit('pointerdown', { pointerId: 3, clientX: 1, clientY: 1, button: 0, pointerType: '' });
+  assert.ok(!('device' in inputs.at(-1)));
+  element.emit('pointerup', { pointerId: 3, clientX: 1, clientY: 1, button: 0, pointerType: '' });
+  assert.ok(!('device' in inputs.at(-1)));
+  binding.dispose();
+});
+
+test('one touch contact behaves as before: down, coalesced move, up', () => {
+  const { env, element, frames } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  const before = inputs.length;
+  element.emit('pointerdown', { pointerId: 4, clientX: 100, clientY: 100, button: 0, pointerType: 'touch' });
+  for (let x = 101; x <= 120; x++) element.emit('pointermove', { pointerId: 4, clientX: x, clientY: 100, button: -1, pointerType: 'touch' });
+  assert.equal(frames.size, 1);
+  element.emit('pointerup', { pointerId: 4, clientX: 120, clientY: 100, button: 0, pointerType: 'touch' });
+  assert.deepEqual(inputs.slice(before), [
+    { kind: 'pointer_down', x: 100, y: 100, button: 0, shift: false, device: 'touch' },
+    { kind: 'pointer_move', x: 120, y: 100, device: 'touch' },
+    { kind: 'pointer_up', x: 120, y: 100, button: 0, shift: false, device: 'touch' },
+  ]);
+  binding.dispose();
+});
+
+test('a second touch contact cancels once, then pinch reports midpoint delta and distance ratio', () => {
+  const { env, element, frames } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  const before = inputs.length;
+  element.emit('pointerdown', { pointerId: 1, clientX: 100, clientY: 100, button: 0, pointerType: 'touch' });
+  element.emit('pointermove', { pointerId: 1, clientX: 100, clientY: 100, button: -1, pointerType: 'touch' });
+  assert.equal(frames.size, 1);
+  element.emit('pointerdown', { pointerId: 2, clientX: 200, clientY: 100, button: 0, pointerType: 'touch' });
+  // The pending single-contact move is flushed, the gesture ends exactly once,
+  // and no pointer_down is sent for the second finger.
+  assert.deepEqual(inputs.slice(before).map(input => input.kind), ['pointer_down', 'pointer_move', 'pointer_cancel']);
+  assert.equal(inputs.slice(before).filter(input => input.kind === 'pointer_cancel').length, 1);
+  assert.equal(frames.size, 0);
+  const afterSecond = inputs.length;
+  // Baseline: p1(100,100), p2(200,100) => midpoint (150,100), distance 100.
+  element.emit('pointermove', { pointerId: 2, clientX: 300, clientY: 100, button: -1, pointerType: 'touch' });
+  assert.deepEqual(inputs.at(-1), { kind: 'pinch', x: 200, y: 100, dx: 50, dy: 0, scale: 2 });
+  element.emit('pointermove', { pointerId: 1, clientX: 200, clientY: 100, button: -1, pointerType: 'touch' });
+  assert.deepEqual(inputs.at(-1), { kind: 'pinch', x: 250, y: 100, dx: 50, dy: 0, scale: 0.5 });
+  // Neither contact emits a pointer move/up while pinching.
+  assert.deepEqual(inputs.slice(afterSecond).map(input => input.kind), ['pinch', 'pinch']);
+  binding.dispose();
+});
+
+test('pinch end cancels once and ignores the remaining contact until it lifts', () => {
+  const { env, element } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  element.emit('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, button: 0, pointerType: 'touch' });
+  element.emit('pointerdown', { pointerId: 2, clientX: 100, clientY: 0, button: 0, pointerType: 'touch' });
+  assert.deepEqual(inputs.map(input => input.kind), ['resize', 'pointer_down', 'pointer_cancel']);
+  element.emit('pointermove', { pointerId: 2, clientX: 200, clientY: 0, button: -1, pointerType: 'touch' });
+  assert.equal(inputs.at(-1).kind, 'pinch');
+  element.emit('pointerup', { pointerId: 1, clientX: 0, clientY: 0, button: 0, pointerType: 'touch' });
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_cancel' });
+  const afterEnd = inputs.length;
+  // The remaining finger must not pan, move or select after the pinch ended.
+  element.emit('pointermove', { pointerId: 2, clientX: 400, clientY: 0, button: -1, pointerType: 'touch' });
+  element.emit('pointerup', { pointerId: 2, clientX: 400, clientY: 0, button: 0, pointerType: 'touch' });
+  assert.equal(inputs.length, afterEnd);
+  // Once every contact is released a fresh gesture starts cleanly.
+  element.emit('pointerdown', { pointerId: 3, clientX: 5, clientY: 6, button: 0, pointerType: 'touch' });
+  assert.equal(inputs.at(-1).kind, 'pointer_down');
+  assert.equal(inputs.at(-1).device, 'touch');
+  element.emit('pointerup', { pointerId: 3, clientX: 5, clientY: 6, button: 0, pointerType: 'touch' });
+  assert.equal(inputs.at(-1).kind, 'pointer_up');
+  binding.dispose();
+});
+
+test('a zero pinch baseline distance reports scale 1 instead of dividing by zero', () => {
+  const { env, element } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  element.emit('pointerdown', { pointerId: 1, clientX: 10, clientY: 10, button: 0, pointerType: 'touch' });
+  element.emit('pointerdown', { pointerId: 2, clientX: 10, clientY: 10, button: 0, pointerType: 'touch' });
+  element.emit('pointermove', { pointerId: 2, clientX: 30, clientY: 10, button: -1, pointerType: 'touch' });
+  assert.deepEqual(inputs.at(-1), { kind: 'pinch', x: 20, y: 10, dx: 10, dy: 0, scale: 1 });
+  binding.dispose();
+});
+
+test('the lane coalesces consecutive pinch samples by summing deltas and multiplying scale', async () => {
+  const sent = [];
+  let unblock;
+  const lane = createInputLane(async input => {
+    sent.push(input);
+    if (sent.length === 1) await new Promise(resolve => { unblock = resolve; });
+  }, assert.fail);
+  lane.push({ kind: 'pointer_down' });
+  lane.push({ kind: 'pinch', x: 1, y: 2, dx: 3, dy: 4, scale: 2 });
+  lane.push({ kind: 'pinch', x: 5, y: 6, dx: 7, dy: 8, scale: 0.5 });
+  unblock();
+  await settle();
+  assert.deepEqual(sent.map(input => input.kind), ['pointer_down', 'pinch']);
+  assert.equal(sent[1].x, 5);
+  assert.equal(sent[1].y, 6);
+  assert.equal(sent[1].dx, 10);
+  assert.equal(sent[1].dy, 12);
+  assert.equal(sent[1].scale, 1);
+});
+
+test('mouse and pen keep their single-contact semantics; a second mouse contact is ignored', () => {
+  const { env, element } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  element.emit('pointerdown', { pointerId: 1, clientX: 1, clientY: 2, button: 0, pointerType: 'mouse', shiftKey: true });
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_down', x: 1, y: 2, button: 0, shift: true, device: 'mouse' });
+  element.emit('pointermove', { pointerId: 1, clientX: 2, clientY: 2, button: -1, pointerType: 'mouse' });
+  env.tick();
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_move', x: 2, y: 2, device: 'mouse' });
+  // A second mouse press is still ignored (never a pinch, never a cancel).
+  element.emit('pointerdown', { pointerId: 2, clientX: 9, clientY: 9, button: 0, pointerType: 'mouse' });
+  assert.equal(inputs.at(-1).kind, 'pointer_move');
+  assert.equal(inputs.filter(input => input.kind === 'pointer_cancel').length, 0);
+  element.emit('pointerup', { pointerId: 1, clientX: 2, clientY: 2, button: 0, pointerType: 'mouse' });
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_up', x: 2, y: 2, button: 0, shift: false, device: 'mouse' });
+  // Pen is a mouse with its own device tag: middle press stays middle.
+  element.emit('pointerdown', { pointerId: 3, clientX: 3, clientY: 3, button: 1, pointerType: 'pen' });
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_down', x: 3, y: 3, button: 1, shift: false, device: 'pen' });
+  element.emit('pointerup', { pointerId: 3, clientX: 3, clientY: 3, button: 1, pointerType: 'pen' });
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_up', x: 3, y: 3, button: 1, shift: false, device: 'pen' });
+  binding.dispose();
+});
+
+test('a mouse plus touch prefers the touch contact and pinches', () => {
+  const { env, element } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  element.emit('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, button: 0, pointerType: 'mouse' });
+  element.emit('pointerdown', { pointerId: 2, clientX: 100, clientY: 0, button: 0, pointerType: 'touch' });
+  assert.deepEqual(inputs.map(input => input.kind), ['resize', 'pointer_down', 'pointer_cancel']);
+  // Baseline midpoint (50,0), distance 100; the touch finger drives the pinch.
+  element.emit('pointermove', { pointerId: 2, clientX: 200, clientY: 0, button: -1, pointerType: 'touch' });
+  assert.deepEqual(inputs.at(-1), { kind: 'pinch', x: 100, y: 0, dx: 50, dy: 0, scale: 2 });
+  // Lifting the finger ends the pinch; the leftover mouse press is not a tap.
+  element.emit('pointerup', { pointerId: 2, clientX: 200, clientY: 0, button: 0, pointerType: 'touch' });
+  assert.deepEqual(inputs.at(-1), { kind: 'pointer_cancel' });
+  const afterEnd = inputs.length;
+  element.emit('pointerup', { pointerId: 1, clientX: 0, clientY: 0, button: 0, pointerType: 'mouse' });
+  assert.equal(inputs.length, afterEnd);
+  binding.dispose();
+});
+
+test('wheel still reaches the lane when no gesture is active', () => {
+  const { env, element } = mockEnvironment();
+  const inputs = [];
+  const binding = bindProbeInput(element, { canStart: () => true, push: input => { inputs.push(input); return true; } }, env);
+  let prevented = false;
+  element.emit('wheel', {
+    clientX: 4, clientY: 5, deltaX: 0, deltaY: 3, deltaMode: 0,
+    preventDefault() { prevented = true; },
+  });
+  assert.equal(prevented, true);
+  assert.deepEqual(inputs.at(-1), { kind: 'wheel', x: 4, y: 5, dx: 0, dy: 3 });
   binding.dispose();
 });

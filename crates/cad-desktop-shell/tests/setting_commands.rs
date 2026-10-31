@@ -30,6 +30,7 @@ fn snapshot_with_snap_spacing(snap_spacing: f64) -> CadSettings {
         grid_snap_enabled: false,
         ortho_enabled: false,
         snap_spacing,
+        left_drag_pans: false,
         background_model: "#000000".to_string(),
         background_paper: "#ffffff".to_string(),
         crosshair_percent: 25,

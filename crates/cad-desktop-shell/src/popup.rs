@@ -189,11 +189,13 @@ mod tests {
             y: Some(2.0),
             dx: None,
             dy: None,
+            scale: None,
             width: None,
             height: None,
             dpr: None,
             button: None,
             shift: None,
+            device: None,
         }
     }
 

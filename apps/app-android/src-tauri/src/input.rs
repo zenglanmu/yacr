@@ -15,9 +15,10 @@
 //!
 //! The rule, implemented once here:
 //!
-//! * `pointer_down` / `pointer_move` / `pointer_up` / `wheel` carry a
+//! * `pointer_down` / `pointer_move` / `pointer_up` / `wheel` / `pinch` carry a
 //!   partition-local `x`/`y`, so the accepted layout rect's origin (the `x`/`y` of
-//!   the `CadMetrics` the chrome last reported, in CSS px) is added to both;
+//!   the `CadMetrics` the chrome last reported, in CSS px) is added to both
+//!   (`pinch`'s `x`/`y` is the midpoint of the two contacts);
 //! * `resize` carries the partition **rect** (its `x`/`y` *is* the origin), not a
 //!   position, so it is never moved — translating it would corrupt the very
 //!   origin every later input is mapped with;
@@ -53,7 +54,7 @@
 pub fn is_partition_positioned(kind: &str) -> bool {
     matches!(
         kind,
-        "pointer_down" | "pointer_move" | "pointer_up" | "wheel"
+        "pointer_down" | "pointer_move" | "pointer_up" | "wheel" | "pinch"
     )
 }
 
@@ -98,6 +99,12 @@ mod tests {
         );
         assert_eq!(
             canvas_position("pointer_up", RECT_ORIGIN, Some(10.0), Some(20.0)),
+            (Some(10.0), Some(116.0))
+        );
+        // A pinch's x/y is the two-finger midpoint in the same partition space,
+        // so its zoom anchor needs the same offset.
+        assert_eq!(
+            canvas_position("pinch", RECT_ORIGIN, Some(10.0), Some(20.0)),
             (Some(10.0), Some(116.0))
         );
     }

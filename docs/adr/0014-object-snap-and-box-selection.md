@@ -61,6 +61,16 @@
    - **3D**：主键拖拽 = 轨道旋转（维持现状，`pointer.rs:130-132`）；框选在 3D 不启用（显式 NOT IMPLEMENTED）。
    - 阈值仍是 `DRAG_THRESHOLD_LOGICAL_PX = 4.0`；低于阈值仍是单点 pick。
    - 这是**行为变更**（2D 主键拖拽由平移改为框选），必须在当前宿主文档 `docs/react-linux-app.md` 记录。
+
+   **修订（2026-11-01，不重写上面的历史决策）**：上面的「主键拖拽 = 框选」现按**设备**仲裁，
+   并被持久化偏好覆盖。React 输入层逐事件读取 `PointerEvent.pointerType`，在 `pointer_down/move/up/cancel`
+   上附带可选 `device: "mouse" | "touch" | "pen"`（缺失/未知 ⇒ mouse，旧宿主/旧前端不变）。
+   **Touch** 的主键/单指拖拽 = **平移**（从不框选，tap 仍是选择/取点）；**Mouse/Pen** 保持框选，
+   除非持久化 `interaction.leftDragPans`（默认 false，Options → Drafting「左键拖动平移」）为真 ⇒ 平移。
+   3D 主键拖拽（轨道旋转）与阈值不变。双指 `pinch` 是新的连续输入：宿主取消活动工具、按中点位移平移、
+   以中点为锚按距离比缩放，**不框选、不提交捕获**。仲裁仍只在共享 `cad-host`，原生与 wasm 载体一致；
+   Android 无弹窗宿主且配置不持久（选项不可达、只跑默认关闭行为），Web 只在会话内持久。
+   **证据上限**：仅源码/契约测试；真实触摸硬件/设备运行 **NOT RUN**。
 3. **语义（AutoCAD 对齐）**：左 → 右 = WINDOW（**完全包含**）；右 → 左 = CROSSING（**相交或包含**）。
 4. **契约形状**：`CommandPayload::BoxSelect { rect_logical: [[f64;2];2], crossing: bool, mode: SelectionMode }`，
    矩形用 **canvas 逻辑坐标**（与 `SelectAt`/`ZoomAt` 同约定），命令内经 viewport 投影到 work plane。

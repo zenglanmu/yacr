@@ -377,3 +377,225 @@ fn host_tick_preserves_the_deferred_camera_grid_refresh_across_a_pan_gesture() {
         "a bounds-preserving fit-on-resize must not bump the scene identity"
     );
 }
+
+// --- device-aware gesture arbitration (input-modality contract) -------------
+
+/// A single-contact touch phase with the session's primary-button report.
+///
+/// The session (`cad-ui-core`) always emits `Some(button)` on a pointer phase
+/// (an omitted wire button is primary), so this is the shape a real one-finger
+/// press/drag/release arrives in.
+fn touch_primary(
+    core: &HostCore,
+    id: u64,
+    phase: cad_app::interaction::PointerPhase,
+    position: [f64; 2],
+) -> InteractionRequest {
+    InteractionRequest::Pointer {
+        id: PointerId(id),
+        kind: cad_app::interaction::PointerKind::Touch,
+        phase,
+        button: Some(PointerButton::Primary),
+        position: PointInput::CanvasLocal {
+            logical_position: position,
+            metrics_revision: core.request_context().metrics_revision.unwrap(),
+        },
+        modifiers: cad_app::interaction::Modifiers::default(),
+    }
+}
+
+fn pinch_request(
+    core: &HostCore,
+    position: [f64; 2],
+    delta: [f64; 2],
+    scale: f64,
+) -> InteractionRequest {
+    InteractionRequest::Pinch {
+        position: PointInput::CanvasLocal {
+            logical_position: position,
+            metrics_revision: core.request_context().metrics_revision.unwrap(),
+        },
+        delta_logical: delta,
+        scale,
+    }
+}
+
+fn viewport_numbers(core: &HostCore, cursor: [f64; 2]) -> (Point3, f64, usize) {
+    let c = core.controller.borrow();
+    let viewport = &c.application.workspace.viewports[&c.viewport_id];
+    (
+        viewport
+            .screen_to_world(cursor, viewport.logical_size)
+            .unwrap(),
+        viewport.world_per_px(),
+        viewport.zoom_history_len(),
+    )
+}
+
+#[test]
+fn a_touch_primary_drag_pans_and_never_starts_a_box() {
+    let core = core();
+    let camera_before = active_camera(&core);
+    let anchor = [100.0, 100.0];
+    let current = [180.0, 140.0];
+
+    dispatch_pointer(
+        &core,
+        touch_primary(&core, 1, cad_app::interaction::PointerPhase::Down, anchor),
+    );
+    dispatch_pointer(
+        &core,
+        touch_primary(&core, 1, cad_app::interaction::PointerPhase::Move, current),
+    );
+    assert!(
+        core.navigation.box_gesture.borrow().is_none(),
+        "one-finger touch drag is a pan: it must never start a box gesture"
+    );
+    assert!(
+        core.render.overlays().selection_box.is_none(),
+        "no rubber band is drawn for a touch drag"
+    );
+
+    dispatch_pointer(
+        &core,
+        touch_primary(&core, 1, cad_app::interaction::PointerPhase::Up, current),
+    );
+    assert_ne!(
+        active_camera(&core),
+        camera_before,
+        "a one-finger drag pans the view"
+    );
+    assert!(
+        core.controller.borrow().session.selection.is_empty(),
+        "a touch drag never selects"
+    );
+}
+
+#[test]
+fn a_sub_threshold_touch_tap_does_not_navigate_and_still_allows_selection() {
+    let core = core();
+    let pixel = screen_of(&core, demo_circle_rim(&core));
+    let camera_before = active_camera(&core);
+
+    dispatch_pointer(
+        &core,
+        touch_primary(&core, 1, cad_app::interaction::PointerPhase::Down, pixel),
+    );
+    dispatch_pointer(
+        &core,
+        touch_primary(&core, 1, cad_app::interaction::PointerPhase::Up, pixel),
+    );
+    assert_eq!(
+        active_camera(&core),
+        camera_before,
+        "a sub-threshold touch tap must not pan"
+    );
+    assert!(
+        core.navigation.box_gesture.borrow().is_none(),
+        "a touch tap starts no box"
+    );
+
+    // The session emits this `SelectAt` for the tap (it is the tap classifier);
+    // the host must accept it exactly like a mouse click's selection.
+    let revision = core.request_context().metrics_revision.unwrap();
+    dispatch_pointer(
+        &core,
+        InteractionRequest::SelectAt {
+            point: PointInput::CanvasLocal {
+                logical_position: pixel,
+                metrics_revision: revision,
+            },
+            mode: SelectionMode::Replace,
+        },
+    );
+    assert_eq!(
+        core.controller.borrow().session.selection.refs(),
+        [picked_ref_at(&core, pixel)].as_slice(),
+        "a touch tap selects the real pick"
+    );
+}
+
+#[test]
+fn a_pinch_pans_by_the_midpoint_delta_and_zooms_about_the_midpoint() {
+    let core = core();
+    let cursor = [200.0, 150.0];
+    let (anchor_before, scale_before, history_before) = viewport_numbers(&core, cursor);
+    let outcome = EngineClient::dispatch(
+        &core,
+        EngineRequest::Interaction(pinch_request(&core, cursor, [30.0, 0.0], 1.5)),
+    )
+    .unwrap();
+    assert!(matches!(
+        outcome,
+        RequestResult::Interaction(InteractionOutcome::PinchObserved)
+    ));
+
+    let (anchor_after, scale_after, history_after) = viewport_numbers(&core, cursor);
+    assert!(
+        (scale_after / scale_before - 1.0 / 1.5).abs() < 1e-9,
+        "the incremental scale is the zoom factor (1.5 ⇒ world_per_px / 1.5), got {}",
+        scale_after / scale_before
+    );
+    assert_eq!(
+        history_after, history_before,
+        "a pinch is continuous navigation: it records no `ZOOM PREVIOUS` step"
+    );
+    // The midpoint pan runs **first** (contract order: pan, then zoom), so the
+    // world point under the midpoint shifts by the logical delta at the
+    // pre-zoom scale; the zoom then anchors at the midpoint and leaves it fixed.
+    assert!(
+        (anchor_after.x - (anchor_before.x - 30.0 * scale_before)).abs() < 1e-9,
+        "anchor_before={anchor_before:?} anchor_after={anchor_after:?} scale_before={scale_before}"
+    );
+    assert!((anchor_after.y - anchor_before.y).abs() < 1e-9);
+}
+
+#[test]
+fn a_pinch_cancels_an_active_tool_and_a_bad_scale_refuses_before_cancelling() {
+    let core = core();
+    let cursor = [200.0, 150.0];
+    core.controller
+        .borrow_mut()
+        .begin_draw_tool(DrawToolKind::Line)
+        .unwrap();
+    core.controller
+        .borrow_mut()
+        .capture_tool_point(p(1.0, 1.0))
+        .unwrap();
+    assert!(matches!(
+        core.controller.borrow().session.tool,
+        ToolState::Drawing(_)
+    ));
+
+    // A zero scale is refused explicitly *before* any state changes: the active
+    // tool is not cancelled by a malformed event.
+    let refused = EngineClient::dispatch(
+        &core,
+        EngineRequest::Interaction(pinch_request(&core, cursor, [5.0, 5.0], 0.0)),
+    );
+    assert!(matches!(
+        refused,
+        Err(RequestError::Execution(CadError::InvalidInput(_)))
+    ));
+    assert!(
+        matches!(core.controller.borrow().session.tool, ToolState::Drawing(_)),
+        "a refused pinch leaves the tool untouched"
+    );
+
+    // A valid pinch is a navigation takeover: the tool is cancelled, never
+    // committed, and no preview survives it.
+    let outcome = EngineClient::dispatch(
+        &core,
+        EngineRequest::Interaction(pinch_request(&core, cursor, [5.0, 5.0], 1.1)),
+    )
+    .unwrap();
+    assert!(matches!(
+        outcome,
+        RequestResult::Interaction(InteractionOutcome::PinchObserved)
+    ));
+    assert!(
+        matches!(core.controller.borrow().session.tool, ToolState::Idle),
+        "a pinch cancels the active tool"
+    );
+    assert!(core.controller.borrow().session.draw_preview().is_none());
+}

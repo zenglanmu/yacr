@@ -1,3 +1,50 @@
+## 2026-11-01 输入模态按设备仲裁：touch 平移/双指 pinch、`leftDragPans` 偏好
+
+### 结论
+
+- **按设备仲裁取代「主键拖拽恒框选」**：React 输入层按**每个事件**的 `PointerEvent.pointerType` 决定设备。
+  `PointerEvent` 缺失/未知一律按 **mouse**，旧宿主与旧前端行为不变；判定是逐事件的，所以触摸屏笔记本
+  上的鼠标仍走鼠标语义。仲裁全部在共享 `cad-host`，原生与 wasm 载体同行为，只有传输层不同。
+- **默认矩阵（所有目标一致）**：
+  - **mouse**：中键拖拽 = 平移，2D 主键拖拽（≥4 逻辑像素）= 框选（WINDOW/CROSSING，`Shift` 加选），
+    滚轮 = 缩放；
+  - **touch**：单指拖拽 = 平移，tap = 选择/取点，双指 pinch = 以中点缩放（含中点平移）；**touch 从不框选**；
+  - **pen**：mouse 语义。
+  - 3D 主键拖拽仍是轨道旋转；工具/捕获/夹点/`ZOOM WINDOW`/模态 pan 的优先级不变。
+- **pinch 是新的连续输入**：`{x,y,dx,dy,scale}`（中点 element-local CSS px、中点增量逻辑 px、距离比增量，
+  `1.0` = 不缩放）。第二个触点按下时前端发**一次** `pointer_cancel`，pinch 期间不逐指针转发 move/up；
+  触点数 <2 时再发一次 `pointer_cancel`。宿主只取消活动工具、按 `dx,dy` 平移、以中点为锚按 `scale`
+  缩放，**从不框选或提交捕获**。触控板 pinch 仍是 Ctrl+滚轮（原本已转发）。
+- **偏好**：持久化 `interaction.leftDragPans`（默认 false），Options → Drafting 布尔项 “Left-drag pans” /
+  「左键拖动平移」。开启后 mouse/pen 的 2D 主键拖拽改为平移。宿主每次派发从有效 viewer config 读取
+  （`HostCore::left_drag_pans()`）。
+- **honest limits**：Android 无弹窗宿主且配置不持久 ⇒ 选项不可达/不可保存（只跑默认关闭行为）；
+  Web 的 Options 可用但只在会话内持久。
+
+### wire / 代码落点
+
+- `ProbeInput` 新增可选 `device: "mouse" | "touch" | "pen"`（`pointer_down|move|up|cancel`）；新增
+  `InputKind::pinch`（字段 `x/y/dx/dy/scale`）。`resize|blur|pointer_leave|wheel` 不变。
+- `apps/desktop-ui/src/cad/input.ts` 改为按 `pointerId` 跟踪多触点，逐事件填 `device`，并实现 pinch 的
+  cancel/抑制规则；鼠标/笔原有逻辑不变。
+- `crates/cad-host/src/input/pointer.rs` 按 `device` 存 `PointerKind` 并做 2D 主键仲裁；
+  `interaction.leftDragPans` 进入 `cad-host` 的允许路径表与设置键。
+- 选项键 `leftDragPans` 进入 `CadSettingKey`/`CadSettings` 与 React Options 目录（label/help i18n 键）。
+
+### 文档
+
+- `docs/react-linux-app.md`（设备矩阵 + pinch + 选项）、新增 `docs/input-modality.md`（模态总览与
+  pinch/偏好契约）、`docs/shortcuts.md`（§3 指向新页）、
+  `docs/compatibility.md`（选项键 17→18、`leftDragPans`、输入模态注记）、
+  `docs/adr/0014-object-snap-and-box-selection.md`（§B.2 追加 2026-11-01 修订，不重写历史决策）、
+  `docs/android-host.md`（触摸走共享 DOM→`probe_input`、pinch、Options/持久化上限）。
+
+### 本轮未做 / NOT RUN
+
+- **真实触摸硬件、触摸屏笔记本、笔、Android 设备/模拟器手势、触控板 pinch**：全部 **NOT RUN**。
+- 证据只有 cad-ui-core/cad-host/cad-app/frontend 的单元/契约测试；**没有** GUI、设备或像素验收，
+  不得引申为真实设备行为或性能结论。
+
 ## 2026-11-01 Android 改为原生 `native-below` 载体（P5）；共享命令注册表、`hostProfile` 与 push 事件通道统一
 
 ### 结论

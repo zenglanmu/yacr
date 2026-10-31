@@ -315,6 +315,19 @@ export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[
     helpKey: 'options.help.apertureSize',
   },
   {
+    // The 2D input scheme: when on, a primary-button drag pans instead of
+    // box-selecting. The `cad_settings` field, the `cad_set_setting` key and the
+    // persisted leaf are the same camelCase `leftDragPans`, and the host
+    // re-validates every write.
+    id: 'leftDragPans',
+    tab: 'drafting',
+    kind: 'bool',
+    wire: 'leftDragPans',
+    key: 'leftDragPans',
+    labelKey: 'options.field.leftDragPans',
+    helpKey: 'options.help.leftDragPans',
+  },
+  {
     id: 'plotFormat',
     tab: 'plot',
     kind: 'select',

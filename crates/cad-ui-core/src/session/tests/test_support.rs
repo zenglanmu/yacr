@@ -292,11 +292,13 @@ pub(super) fn probe(kind: InputKind) -> ProbeInput {
         y: None,
         dx: None,
         dy: None,
+        scale: None,
         width: None,
         height: None,
         dpr: None,
         button: None,
         shift: None,
+        device: None,
     }
 }
 

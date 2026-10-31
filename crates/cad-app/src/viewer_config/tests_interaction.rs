@@ -22,6 +22,75 @@ fn store_with_drafting_paths() -> ViewerConfigStore {
     store
 }
 
+/// `interaction.leftDragPans` is a plain (non-nullable) switch, the same
+/// allowed-preference machinery `interaction.snapEnabled` uses: absent keeps the
+/// documented `false` default, an allowed preference fills the leaf, it
+/// serializes under the camelCase wire spelling and the projection carries it.
+#[test]
+fn left_drag_pans_defaults_to_false_and_projects_the_camel_case_leaf() {
+    let defaults = ViewerConfig::default().interaction;
+    assert!(
+        !defaults.left_drag_pans,
+        "the default scheme is left drag = box select"
+    );
+    let default_json = serde_json::to_value(ViewerConfig::default()).unwrap();
+    assert_eq!(default_json["interaction"]["leftDragPans"], json!(false));
+
+    let mut store = ViewerConfigStore::default();
+    store
+        .update_config(json!({
+            "ui": { "userCustomization": { "allowedPaths": [
+                "interaction.leftDragPans"
+            ] } }
+        }))
+        .unwrap();
+    assert!(!store.effective().interaction.left_drag_pans);
+    store
+        .apply_user_preference(json!({ "interaction": { "leftDragPans": true } }))
+        .unwrap();
+    assert!(store.effective().interaction.left_drag_pans);
+
+    // Parsing and serializing keep the value under the same wire key.
+    let parsed: ViewerConfig =
+        serde_json::from_str(r#"{"interaction":{"leftDragPans":true}}"#).unwrap();
+    parsed.validate().unwrap();
+    assert!(parsed.interaction.left_drag_pans);
+    assert_eq!(&parsed.interaction, &store.effective().interaction);
+    let roundtrip: ViewerConfig =
+        serde_json::from_str(&serde_json::to_string(store.effective()).unwrap()).unwrap();
+    assert!(roundtrip.interaction.left_drag_pans);
+    // A host config that names the leaf reproduces it.
+    let mut host = ViewerConfigStore::default();
+    host.set_config_json(r#"{"interaction":{"leftDragPans":true}}"#)
+        .unwrap();
+    assert!(host.effective().interaction.left_drag_pans);
+    // The projection a host may persist carries exactly this leaf.
+    let projected: serde_json::Value =
+        serde_json::from_str(&store.projected_user_preference_json()).unwrap();
+    assert_eq!(projected["interaction"]["leftDragPans"], json!(true));
+
+    // A non-boolean value is a type error naming the field, and the store keeps
+    // the previous value (atomic refusal).
+    for bad in [json!(1), json!("true"), json!(null)] {
+        let mut store = ViewerConfigStore::default();
+        store
+            .update_config(json!({
+                "ui": { "userCustomization": { "allowedPaths": [
+                    "interaction.leftDragPans"
+                ] } }
+            }))
+            .unwrap();
+        let error = store
+            .apply_user_preference(json!({ "interaction": { "leftDragPans": bad } }))
+            .unwrap_err();
+        assert_eq!(
+            error.path, "interaction.leftDragPans",
+            "{bad} must be refused by name"
+        );
+        assert!(!store.effective().interaction.left_drag_pans);
+    }
+}
+
 /// The three drafting leaves use the same nullable preference machinery as
 /// `snapEnabled`: absent is `None`, a value round-trips through the effective
 /// config and the projection, and a non-finite or non-positive spacing is refused

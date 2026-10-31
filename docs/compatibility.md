@@ -425,14 +425,24 @@ Distance/Angle/Delta X/Y/Z，点不足两个时只显示距离，`unit:null` 不
 `kind`、`options` 取图纸真实图层/线型表名，上限 256）与**写侧** `SETENTITYPROPERTY`（一次事务/
 一步撤销；`layer`、`color`=ByLayer/ByBlock/`aci:0..=256`/`#RRGGBB`、`linetype`、`lineweight`
 = 规范毫米列表、`transparency`=0..90 百分比→不透明度；非直接可寻址引用拒绝；无变化不产生撤销步）；
-**选项设置** 17 个类型化键（grid/axes/selectionHighlight/snapHints/plotFormat/snapEnabled/
+**选项设置** **18** 个类型化键（grid/axes/selectionHighlight/snapHints/plotFormat/snapEnabled/
 hoverPreview/gridSnapEnabled/orthoEnabled/snapSpacing/backgroundModel/backgroundPaper/
-crosshairSize/pickboxSize/apertureSize/gpuBudgetPercent/wgpu_backend），持久化到 `preference.json`、
-**实时生效**并在 open/替换后重新播种（五个 `interaction.*` 叶子：对象捕捉、悬停预览、`SNAP`、
-`ORTHO`、`SNAPUNIT` 间距）；**语言默认**按 `显式选择 > 宿主注入 > navigator > 英文`
+crosshairSize/pickboxSize/apertureSize/gpuBudgetPercent/wgpu_backend/leftDragPans），持久化到
+`preference.json`、**实时生效**并在 open/替换后重新播种（六个 `interaction.*` 叶子：对象捕捉、悬停预览、
+`SNAP`、`ORTHO`、`SNAPUNIT` 间距、左键拖动平移）；**语言默认**按 `显式选择 > 宿主注入 > navigator > 英文`
 （`zh-TW/zh-Hant` 无对应目录 ⇒ **英文**，不静默给简体）；**显示**：模型/图纸背景色 `#rrggbb`
 （sRGB→linear 在配置→渲染器接缝，真机核对 0.5 读回 188、遮罩内部同值）与十字光标 1..100%
 （100% 位级不变），均**即时**生效。
+
+**输入模态（2026-11-01，源码/契约测试证据；设备 NOT RUN）**：React 输入层按每个
+`PointerEvent.pointerType` 在指针事件上附带可选 `device: "mouse" | "touch" | "pen"`（缺失/未知 ⇒ mouse；
+逐事件判定）。默认手势：mouse 中键拖拽 = 平移、2D 主键拖拽 = 框选、滚轮 = 缩放；touch 单指拖拽 = 平移、
+tap = 选择/取点、双指 `pinch` = 以中点缩放（含中点平移），**touch 从不框选**；pen 同 mouse。`pinch` 是连续
+输入 `{x,y,dx,dy,scale}`，宿主任一时刻只取消活动工具并平移/缩放，不框选、不提交捕获；触控板 pinch 仍是
+Ctrl+滚轮。`interaction.leftDragPans`（默认 false，Options → Drafting「左键拖动平移」）开启后 mouse/pen 的
+2D 主键拖拽改为平移；仲裁在共享 `cad-host`，原生与 wasm 载体一致。**上限**：Android 无弹窗宿主且配置不持久，
+该选项不可达/不可保存（只跑默认关闭行为）；Web 的 Options 可用但只在会话内持久。真实触摸硬件、手势与
+设备运行 **NOT VERIFIED / NOT RUN**。
 
 **属性面板（2026-10-22）**：按 `entity/geometry/text/display` 分组；多选显示**共同键交集**并以
 `properties.mixed` 占位（写入作用于**整个选中集**）；`layer/color/linetype/lineweight/transparency`

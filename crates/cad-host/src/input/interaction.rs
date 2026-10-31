@@ -96,9 +96,9 @@ impl HostCore {
         // `DirtyScope::Overlay` inside their arms); every other interaction
         // changes derived shell state.
         let mut scope = match &request {
-            InteractionRequest::Pointer { .. } | InteractionRequest::Scroll { .. } => {
-                DirtyScope::Navigation
-            }
+            InteractionRequest::Pointer { .. }
+            | InteractionRequest::Scroll { .. }
+            | InteractionRequest::Pinch { .. } => DirtyScope::Navigation,
             _ => DirtyScope::Full,
         };
         let outcome = match request {
@@ -299,11 +299,11 @@ impl HostCore {
             }
             InteractionRequest::Pointer {
                 id,
+                kind,
                 phase,
                 button,
                 position,
                 modifiers,
-                ..
             } => {
                 // A grip drag owns the frame as an overlay-only change: the moved
                 // marker **is** the preview, so a press/move/release of a handle
@@ -312,7 +312,7 @@ impl HostCore {
                 // marks the derived state dirty there, exactly like any other
                 // write.
                 let grip_before = self.grip_drag_active();
-                if let Err(error) = self.pointer(id, phase, button, position, modifiers) {
+                if let Err(error) = self.pointer(id, kind, phase, button, position, modifiers) {
                     // A stale/invalid coordinate refuses the request before its
                     // phase runs; a refusal of an `Up`/`Cancel` must still clear
                     // the pointer life, exactly as the queue path's stale
@@ -362,6 +362,57 @@ impl HostCore {
                 // `ZoomAt` command but must not record a `ZOOM PREVIOUS` step.
                 self.zoom_continuously((1.0 + delta_logical[1] * 0.0015).clamp(0.2, 5.0), point)?;
                 InteractionOutcome::ScrollObserved
+            }
+            // Two-finger pinch: a navigation takeover, never a capture and never a
+            // box selection. The order is fixed by the contract: cancel the active
+            // tool (a pinch must not leave a half-captured command armed), then pan
+            // by the midpoint delta and zoom by the incremental multiplier about
+            // the midpoint. Both reuse the existing navigation helpers
+            // (`pan_by_logical_delta` / `zoom_continuously`), so a pinch never
+            // records a `ZOOM PREVIOUS` step either.
+            InteractionRequest::Pinch {
+                position,
+                delta_logical,
+                scale,
+            } => {
+                // `validate()` already refused these, but the check is repeated at
+                // the point of use so no future caller can bypass it and drive the
+                // camera with a non-finite/zero/negative factor.
+                if !scale.is_finite() || scale <= 0.0 {
+                    return Err(CadError::InvalidInput(
+                        "pinch scale must be finite and greater than zero".into(),
+                    ));
+                }
+                if !delta_logical.iter().all(|value| value.is_finite()) {
+                    return Err(CadError::InvalidInput("pinch delta must be finite".into()));
+                }
+                let point = self.cursor_logical_of(position)?;
+                // Whatever the gesture would otherwise win (box, grip drag, armed
+                // `ZOOM WINDOW`), navigation wins: the pinch is the recorded
+                // multi-contact takeover, made explicit instead of a second touch
+                // contact. A tool that was active is cancelled, never committed.
+                let tool_was_active =
+                    !matches!(self.controller.borrow().session.tool, ToolState::Idle);
+                self.clear_box_gesture();
+                self.reset_grip_gesture();
+                self.disarm_zoom_window();
+                self.controller.borrow_mut().cancel_tool()?;
+                self.render.set_draw_preview(None);
+                self.render.set_measurement_preview(None);
+                self.clear_hover();
+                if tool_was_active {
+                    // The tool generation/previews changed: republish the derived
+                    // state, not just the camera.
+                    scope = DirtyScope::Full;
+                }
+                self.cursor_logical.set(Some(point));
+                if delta_logical != [0.0, 0.0] {
+                    self.pan_by_logical_delta(delta_logical)?;
+                }
+                if scale != 1.0 {
+                    self.zoom_continuously(scale, point)?;
+                }
+                InteractionOutcome::PinchObserved
             }
         };
         match scope {

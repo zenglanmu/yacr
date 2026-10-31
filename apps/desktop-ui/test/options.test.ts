@@ -64,6 +64,8 @@ function snapshot(overrides = {}) {
     snapSpacing: 10,
     pickboxSize: 6,
     apertureSize: 12,
+    // The 2D input scheme: left drag box-selects by default.
+    leftDragPans: false,
     gpuBudgetPercent: 90,
     plotFormat: 'svg',
     fontsDir: '/usr/share/fonts',
@@ -116,7 +118,7 @@ test('every field sits on a declared tab exactly once and nothing else exists', 
     'snapHints', 'gpuBudgetPercent',
   ]);
   assert.deepEqual(fieldsForTab('drafting').map(field => field.id), [
-    'snapEnabled', 'hoverPreview', 'snapSpacing', 'pickboxSize', 'apertureSize',
+    'snapEnabled', 'hoverPreview', 'snapSpacing', 'pickboxSize', 'apertureSize', 'leftDragPans',
   ]);
   assert.deepEqual(fieldsForTab('plot').map(field => field.id), ['plotFormat']);
   assert.deepEqual(fieldsForTab('files').map(field => field.id), ['fontsDir']);
@@ -138,6 +140,7 @@ test('each control is the editor its backend value really needs', () => {
     snapSpacing: 'real',
     pickboxSize: 'number',
     apertureSize: 'number',
+    leftDragPans: 'bool',
     gpuBudgetPercent: 'number',
     plotFormat: 'select',
     fontsDir: 'readonly',
@@ -700,6 +703,62 @@ test('the snap spacing is a decimal drafting row, written through cad_set_settin
   assert.ok(dialog.includes("inputMode={decimal ? 'decimal' : 'numeric'}"));
   assert.ok(dialog.includes("step={decimal ? 'any' : undefined}"));
   assert.ok(dialog.includes('t(field.unitKey)'));
+});
+
+test('the left drag scheme is a generic boolean drafting row, written through cad_set_setting', async () => {
+  const field = fieldById('leftDragPans');
+  assert.equal(field.kind, 'bool');
+  assert.equal(field.tab, 'drafting');
+  // The snapshot field, the write key and the persisted leaf are the same
+  // camelCase spelling, so the three cannot drift apart.
+  assert.equal(field.wire, 'leftDragPans');
+  assert.equal(field.key, 'leftDragPans');
+  assert.equal(field.labelKey, 'options.field.leftDragPans');
+  assert.equal(field.helpKey, 'options.help.leftDragPans');
+  assert.ok(fieldsForTab('drafting').includes(field));
+
+  // Seeded from the host snapshot, never from a local default.
+  const wire = snapshot({ leftDragPans: true });
+  assert.equal(draftFromSettings(wire).leftDragPans, true);
+  assert.equal(draftFromSettings({}).leftDragPans, null);
+  // A host that does not report it: not dirty, never written.
+  assert.deepEqual(dirtyFields(draftFromSettings({}), {}), []);
+  assert.deepEqual(applyPayload(draftFromSettings({}), {}), []);
+  // An equal value is not a change.
+  assert.deepEqual(dirtyFields({ ...draftFromSettings(wire), leftDragPans: true }, wire), []);
+
+  // Changing it stages exactly one typed boolean write.
+  const draft = { ...draftFromSettings(wire), leftDragPans: false };
+  assert.deepEqual(applyPayload(draft, wire), [
+    { field: 'leftDragPans', key: 'leftDragPans', value: false },
+  ]);
+  const granted = recordingInvoke({ accepted: true });
+  assert.deepEqual(await writeAll(granted.invoke, applyPayload(draft, wire)), { kind: 'accepted' });
+  assert.deepEqual(granted.calls, [
+    { command: 'cad_set_setting', args: { key: 'leftDragPans', value: false } },
+  ]);
+  // The re-read check recognises the written boolean.
+  const entry = { field: 'leftDragPans', key: 'leftDragPans', value: false };
+  assert.equal(entryVisible(snapshot({ leftDragPans: false }), entry), true);
+  assert.equal(entryVisible(snapshot({ leftDragPans: true }), entry), false);
+
+  // A non-boolean is the host's stable refusal, mirrored here.
+  assert.equal(validateField('leftDragPans', true), null);
+  assert.equal(validateField('leftDragPans', false), null);
+  for (const bad of ['on', 'true', 1, null]) {
+    assert.equal(validateField('leftDragPans', bad), SETTINGS_ERROR.invalidValue, String(bad));
+  }
+
+  // Both catalogs carry the row's copy.
+  assert.equal(zh[field.labelKey], '左键拖动平移');
+  assert.equal(en[field.labelKey], 'Left-drag pans');
+  assert.ok(zh[field.helpKey].trim().length > 0);
+  assert.ok(en[field.helpKey].trim().length > 0);
+
+  // Rendered by the shared boolean editor: no per-field branch in the dialog.
+  const dialog = await readModule('components/OptionsDialog.tsx');
+  assert.ok(!dialog.includes('leftDragPans'), 'no special case for this field');
+  assert.ok(dialog.includes("case 'bool':"));
 });
 
 test('the GPU budget is a generic numeric row, never a bespoke control', async () => {

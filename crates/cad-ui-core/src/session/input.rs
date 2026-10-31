@@ -14,7 +14,9 @@ use cad_app::interaction::{
 
 #[allow(unused_imports)]
 use super::CadSession;
-use crate::protocol::{InputKind, ProbeInput, BUTTON_MIDDLE, BUTTON_PRIMARY, BUTTON_SECONDARY};
+use crate::protocol::{
+    InputKind, ProbeDevice, ProbeInput, BUTTON_MIDDLE, BUTTON_PRIMARY, BUTTON_SECONDARY,
+};
 
 /// The single pointer stream identity (the DOM protocol carries no id).
 pub(super) const POINTER_ID: PointerId = PointerId(1);
@@ -99,6 +101,19 @@ fn modifiers(input: &ProbeInput) -> Modifiers {
     }
 }
 
+/// Map the optional wire device report to the typed pointer kind.
+///
+/// An omitted report (`None`) means [`PointerKind::Mouse`], so every existing
+/// frontend/host keeps its exact mouse behaviour. The decoder has already
+/// refused an unknown device string, so this mapping is total and never guesses.
+pub(super) fn pointer_kind(device: Option<ProbeDevice>) -> PointerKind {
+    match device.unwrap_or(ProbeDevice::Mouse) {
+        ProbeDevice::Mouse => PointerKind::Mouse,
+        ProbeDevice::Touch => PointerKind::Touch,
+        ProbeDevice::Pen => PointerKind::Pen,
+    }
+}
+
 /// The typed pointer request for one phase at the input's position.
 fn pointer_request(
     input: &ProbeInput,
@@ -108,7 +123,7 @@ fn pointer_request(
 ) -> Result<InteractionRequest, String> {
     Ok(InteractionRequest::Pointer {
         id: POINTER_ID,
-        kind: PointerKind::Mouse,
+        kind: pointer_kind(input.device),
         phase,
         button,
         position: canvas_point(input, revision, true)?,
@@ -161,6 +176,12 @@ pub(super) fn cancel_target(capturing: bool) -> CancelTarget {
 ///   [`InteractionRequest::SelectAt`] replace-selection. Never both;
 /// * a drag or a non-primary button never captures a point and never selects;
 /// * `pointer_cancel`/`blur` end any press without capturing or selecting;
+/// * every pointer phase carries the device kind from the optional wire
+///   `device` field (absent ⇒ mouse; `pen` is mouse-like). The kind is not
+///   interpreted here — the host arbitrates the gesture from it, so one touch
+///   drag pans and a touch tap still selects;
+/// * `pinch` maps to [`InteractionRequest::Pinch`] with the midpoint movement
+///   and the incremental scale; it is continuous and ends no press;
 /// * `pointer_leave` clears the cursor overlay (the same
 ///   [`InteractionRequest::ClearCursor`] the existing clear path uses) without
 ///   ending or disturbing any press — it is transient and non-terminal, so a
@@ -266,10 +287,44 @@ pub(super) fn plan_input(
         // satisfy. The host classifies the resulting `ClearCursor` as
         // overlay-only, so leaving the surface schedules no full-state rebuild.
         InputKind::PointerLeave => Ok((vec![InteractionRequest::ClearCursor], press)),
+        // A pinch is continuous navigation, like a wheel: it never ends the
+        // retained press (the frontend sends `pointer_cancel` before it starts)
+        // and never selects/captures.
+        InputKind::Pinch => Ok((vec![pinch_request(input, revision)?], press)),
         InputKind::Wheel | InputKind::Resize => {
             Ok((vec![interaction_request(input, revision)?], press))
         }
     }
+}
+
+/// Map one continuous pinch event to its typed request.
+///
+/// Sign convention (documented so the wire cannot drift): `dx`/`dy` are the
+/// **midpoint movement in DOM logical pixels, y down** — exactly the pointer /
+/// multi-touch pan convention the host consumes with `pan_by_logical_delta`, so
+/// they are passed through unchanged. Only the wheel's `deltaY` is sign-flipped
+/// (`scroll_delta`), because the host turns *that* field into a zoom factor
+/// rather than a pan. `scale` is already the host's zoom factor (`> 1.0` zooms
+/// in), so it is passed through unchanged too.
+///
+/// `dx`/`dy` default to `0` and `scale` to `1.0` (no-op) when omitted; a present
+/// value must be finite, and `scale` strictly positive — a zero/negative or
+/// non-finite scale is refused by name, never silently applied or dropped.
+fn pinch_request(input: &ProbeInput, revision: u64) -> Result<InteractionRequest, String> {
+    let dx = input.dx.unwrap_or(0.0);
+    let dy = input.dy.unwrap_or(0.0);
+    if !dx.is_finite() || !dy.is_finite() {
+        return Err("pinch midpoint delta must be finite".to_string());
+    }
+    let scale = input.scale.unwrap_or(1.0);
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err("pinch scale must be finite and greater than zero".to_string());
+    }
+    Ok(InteractionRequest::Pinch {
+        delta_logical: [f64::from(dx), f64::from(dy)],
+        scale: f64::from(scale),
+        position: canvas_point(input, revision, true)?,
+    })
 }
 
 /// Map one DOM input to a typed interaction request (the stateless mapping).
@@ -297,7 +352,7 @@ pub(super) fn interaction_request(
         // cancel path ignores it.
         InputKind::PointerCancel | InputKind::Blur => Ok(InteractionRequest::Pointer {
             id: POINTER_ID,
-            kind: PointerKind::Mouse,
+            kind: pointer_kind(input.device),
             phase: PointerPhase::Cancel,
             button: None,
             position: canvas_point(input, revision, false)?,
@@ -316,6 +371,9 @@ pub(super) fn interaction_request(
             })
         }
         InputKind::Resize => Err("resize is applied through set_canvas_metrics".to_string()),
+        // A pinch is continuous navigation: one typed `Pinch` carrying the
+        // midpoint delta and the incremental zoom multiplier.
+        InputKind::Pinch => pinch_request(input, revision),
         // A pointer leave is a non-terminal, coordinate-free event: it clears
         // the cursor overlay. Any coordinates it happens to carry are ignored
         // (exactly like cancel/blur), so it makes no metrics-revision demand.

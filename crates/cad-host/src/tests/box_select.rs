@@ -878,3 +878,113 @@ fn a_window_drag_survives_a_canvas_resize_reported_with_the_press() {
         "a near-full-canvas WINDOW must select the four lines it contains"
     );
 }
+
+// --- pen: mouse semantics ---------------------------------------------------
+
+/// A single-contact pointer phase with an explicit device kind.
+fn kinded_press(
+    core: &HostCore,
+    kind: cad_app::interaction::PointerKind,
+    phase: cad_app::interaction::PointerPhase,
+    position: [f64; 2],
+) {
+    dispatch_pointer(
+        core,
+        InteractionRequest::Pointer {
+            id: PointerId(1),
+            kind,
+            phase,
+            button: Some(PointerButton::Primary),
+            position: PointInput::CanvasLocal {
+                logical_position: position,
+                metrics_revision: core.request_context().metrics_revision.unwrap(),
+            },
+            modifiers: cad_app::interaction::Modifiers::default(),
+        },
+    );
+}
+
+#[test]
+fn a_pen_primary_drag_boxes_like_a_mouse() {
+    let core = core();
+    let fixture = box_fixture(&core);
+    let camera_before = active_camera(&core);
+    let anchor = corner(&core, BOX_MIN);
+    let current = corner(&core, BOX_MAX);
+    let pen = cad_app::interaction::PointerKind::Pen;
+
+    kinded_press(&core, pen, cad_app::interaction::PointerPhase::Down, anchor);
+    kinded_press(
+        &core,
+        pen,
+        cad_app::interaction::PointerPhase::Move,
+        current,
+    );
+    assert!(
+        core.navigation.box_gesture.borrow().is_some(),
+        "pen follows mouse semantics: a 2D primary drag is a box, not a pan"
+    );
+    assert_eq!(
+        active_camera(&core),
+        camera_before,
+        "a pen box drag must not move the camera"
+    );
+
+    kinded_press(&core, pen, cad_app::interaction::PointerPhase::Up, current);
+    let inside = cad_app::selection::model_ref(fixture.document, fixture.inside);
+    assert!(
+        selected_refs(&core).contains(&inside),
+        "the pen WINDOW selection commits exactly like a mouse one"
+    );
+}
+
+#[test]
+fn the_left_drag_pans_preference_turns_a_mouse_primary_drag_into_a_pan() {
+    let core = core();
+    core.apply_setting(CadSettingKey::LeftDragPans, CadSettingValue::Bool(true))
+        .expect("the input scheme is a writable setting");
+    let _fixture = box_fixture(&core);
+    let camera_before = active_camera(&core);
+    let anchor = corner(&core, BOX_MIN);
+    let current = corner(&core, BOX_MAX);
+
+    press(
+        &core,
+        cad_app::interaction::PointerPhase::Down,
+        PointerButton::Primary,
+        anchor,
+        false,
+    );
+    press(
+        &core,
+        cad_app::interaction::PointerPhase::Move,
+        PointerButton::Primary,
+        current,
+        false,
+    );
+    assert!(
+        core.navigation.box_gesture.borrow().is_none(),
+        "the preference wins over the box rule: no rubber band starts"
+    );
+    assert!(
+        core.render.overlays().selection_box.is_none(),
+        "no box preview is published"
+    );
+
+    press(
+        &core,
+        cad_app::interaction::PointerPhase::Up,
+        PointerButton::Primary,
+        current,
+        false,
+    );
+    assert_ne!(
+        active_camera(&core),
+        camera_before,
+        "with `leftDragPans` on a mouse primary drag pans"
+    );
+    assert!(
+        selected_refs(&core).is_empty(),
+        "a pan gesture never runs a box selection"
+    );
+}

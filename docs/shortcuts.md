@@ -256,6 +256,9 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 
 ## 3. 固定键位（当前 React 宿主；Slint 时期契约另附）
 
+> 指针/手势导航（mouse/touch/pen、pinch、`interaction.leftDragPans`）见
+> [`docs/input-modality.md`](input-modality.md)。
+
 **键处理的真实位置（2026-10-27 更正，随文档加速器落地再次更新）**：全局 `keydown` 在
 `apps/desktop-ui/src/App.tsx::onKeyDown`；文档加速器的**纯映射表**在
 `apps/desktop-ui/src/commands/accelerators.ts`（`acceleratorCommand` / `acceleratorDispatch`）；

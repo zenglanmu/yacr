@@ -326,11 +326,33 @@ body 内，Escape/点击外部关闭）；DOM-on-top 之后这不再是硬约束
   open-cancel）；状态栏显示 `status.tool`（机器键 `draw.*`/`measure.*` + 已取点数 + 可确认性）。
   提交语义：**绘制/编辑工具不会自动提交**，必须显式 `CONFIRM`（`cad_app::SessionState::capture_point`
   对 `Drawing` 恒返回 `false`）；测量工具按自身 `auto_ready` 自动提交。
-- **鼠标手势（ADR-0014 决策 B，行为变更）**：**2D 左键拖拽（≥4 逻辑像素）= 框选**（左→右 WINDOW /
-  右→左 CROSSING，按住时画橡皮筋：走 **renderer overlay**，`BOX_SELECT_DRAW_ORDER`；WINDOW 蓝实线、
-  CROSSING 绿虚线）；`Shift` 拖拽 = 加选，否则替换；**中键拖拽 = 平移**（2D/3D），滚轮 = 缩放；
-  3D 左键拖拽仍是**轨道旋转**（3D 框选显式 NOT IMPLEMENTED）；阈值以下仍是单点 pick。Secondary/
-  Back/Forward 的拖拽行为本轮**未改**（仍为平移；AutoCAD 该位置是右键快捷菜单，未实现）。
+- **指针手势按设备仲裁（ADR-0014 决策 B + 2026-11-01 修订）**：前端按**每个事件**的
+  `PointerEvent.pointerType`，在 `pointer_down`/`pointer_move`/`pointer_up`/`pointer_cancel` 上附带可选
+  `device: "mouse" | "touch" | "pen"`；字段缺失或未知值一律按 **mouse**（旧宿主/旧前端行为不变）。
+  判定是**逐事件**的——触摸屏笔记本上用鼠标仍是鼠标语义。默认矩阵（所有载体一致，只有传输层不同）：
+
+  | 设备 | 主键 / 单指拖拽 | 平移 | 缩放 |
+  |---|---|---|---|
+  | mouse | 2D = 框选（左→右 WINDOW / 右→左 CROSSING） | 中键拖拽（2D/3D） | 滚轮 |
+  | touch | 单指拖拽 = 平移；tap（阈值以下）= 选择/取点 | 单指拖拽 | 双指 pinch |
+  | pen | 同 mouse | 中键拖拽 | 滚轮 |
+
+  框选（≥4 逻辑像素）按住时画橡皮筋：走 **renderer overlay**，`BOX_SELECT_DRAW_ORDER`；WINDOW 蓝实线、
+  CROSSING 绿虚线；`Shift` 拖拽 = 加选，否则替换。**默认框选只属于 mouse/pen**：`Touch` 的主键拖拽
+  **从不框选**。3D 左键拖拽仍是**轨道旋转**（3D 框选显式 NOT IMPLEMENTED）；阈值以下仍是单点 pick。
+  Secondary/Back/Forward 的拖拽行为仍**未改**（仍为平移；AutoCAD 该位置是右键快捷菜单，未实现）。
+- **双指 pinch（2026-11-01）**：第二个触点按下时前端发**一次** `pointer_cancel`（结束当前单指手势/工具），
+  此后连续发 `pinch` 输入 `{x, y, dx, dy, scale}`：`x,y` = 中点（element-local CSS px），`dx,dy` = 相对上一条
+  `pinch` 的中点位移（逻辑 px），`scale` = 距离比增量（`1.0` = 不缩放，`>1` = 放大）。触点数少于两个时
+  再发**一次** `pointer_cancel`；pinch 期间**不**逐指针转发 move/up（也不为第二根手指发 `pointer_down`）。
+  宿主收到 `pinch` 只做「取消活动工具 + 按 `dx,dy` 平移 + 以中点为锚按 `scale` 缩放」，**从不框选、
+  不提交捕获**。触控板 pinch 仍是 **Ctrl+滚轮**（原本已转发）。
+- **`interaction.leftDragPans` 偏好（默认 false）**：Options → Drafting 的布尔项 “Left-drag pans” /
+  「左键拖动平移」。开启后 **mouse/pen** 的 2D 主键拖拽改为平移（不再框选）；touch 本来就是平移。
+  宿主**每次派发**都从有效 viewer config 读取（`HostCore::left_drag_pans()`），因此原生与 wasm 载体行为一致。
+  **诚实上限**：Android 无弹窗宿主且配置不持久，选项既不可达也不可保存（只跑默认关闭行为）；Web 的
+  Options 可用，但只在会话内持久。真实触摸硬件/设备运行 **NOT RUN**（见 `docs/compatibility.md`）。
+  输入模态总览与完整契约见 [`docs/input-modality.md`](input-modality.md)。
 - **选择要求**：编辑类工具需要先有选择；空选择在确认时由 `cad_app`（`DrawTool::is_ready`）显式拒绝，
   UI 不预判、不静默丢弃。
 - **仍未接线**：`ZOOMIN`/`ZOOMOUT` 别名（router 名为 `ZOOM`）、测量子类型

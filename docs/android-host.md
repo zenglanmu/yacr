@@ -54,7 +54,7 @@
 | 持久配置/偏好 | **不支持** | `NonPersistentConfigStore`：读 `Absent`，写 `Unsupported` |
 | 渲染后端 | **Vulkan 硬件 only** | 软件 Vulkan → `yacr: unsupported-gpu: software-vulkan`；**无** GLES/CPU 回退 |
 | FIT / 视口 | **整窗取景** | `SurfaceView` 覆盖整个窗口；`fit_camera` 仍按全窗口取景，分区子矩形是 follow-up |
-| 指针 | **分区原点平移** | tick 内把 DOM 分区局部坐标按 origin 换算成 presented-canvas 坐标；不是第二条输入通道 |
+| 指针 | **分区原点平移** | tick 内把 DOM 分区局部坐标按 origin 换算成 presented-canvas 坐标；不是第二条输入通道。鼠标/触摸/笔按每事件 `device` 在共享 `cad-host` 仲裁（touch：单指平移、tap 选择、双指 pinch 缩放；mouse/pen：中键平移、2D 主键框选、滚轮缩放） |
 
 UI 侧对不支持能力的处理必须是**显式禁用/拒绝**（带原因），不得空成功、不得伪造文件选择结果。
 
@@ -91,6 +91,15 @@ React chrome），`setZOrderMediaOverlay(false)` 一并固定。
   Android 专属 UI。
 - `native-below` 上输入仍走 `.native-input` → `probe_input` IPC → 宿主准入门/队列；`<canvas>` 不
   存在，也不注册监听器。
+- **触摸输入走同一 DOM 漏斗**：鼠标/触摸/笔都由 DOM 的 `pointer*`/`wheel` 事件进入 `.native-input`；前端
+  逐事件按 `PointerEvent.pointerType` 附可选 `device: "mouse" | "touch" | "pen"`（缺失/未知 ⇒ mouse），
+  经 `probe_input` 交给共享 `cad-host` 仲裁。默认：**touch** 单指拖拽 = 平移、tap = 选择/取点、
+  双指 `pinch` = 以中点缩放（含中点平移），**touch 从不框选**；mouse/pen 中键拖拽 = 平移、2D 主键拖拽 =
+  框选、滚轮 = 缩放。`pinch` 契约（一次 `pointer_cancel` 进入、连续 `{x,y,dx,dy,scale}`、不逐指针转发）
+  见 `docs/react-linux-app.md`。
+- **Options / 持久化是 v1 上限**：无弹窗宿主（`popup_host = None`）且 `NonPersistentConfigStore` ⇒
+  `interaction.leftDragPans`（Options → Drafting「左键拖动平移」）等偏好**既不可达也不可保存**，运行的是
+  默认值（touch 平移、mouse/pen 框选）。**触摸硬件、手势与设备运行 NOT RUN**（§8）。
 - 指针/滚轮坐标由 tick 按 DOM 分区原点平移后交给共享输入管线；纯函数在开发机有单测。
 - `invoke.ts` 的 `adapterOwnsData = carrier === 'dom-canvas' || !tauriPresent()`：Android 上 Tauri 存在
   且 carrier 为 `native-below`，所有 CAD 命令走 Tauri；wasm 适配器不接管数据。`android` 构建从

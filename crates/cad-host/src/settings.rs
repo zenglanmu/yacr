@@ -5,10 +5,10 @@
 //! backgrounds and the crosshair size those frames really use, the
 //! `ui.export.plotFormat` default, the five persisted session interaction
 //! values (object snap, hover preview, `SNAP` grid snap, `ORTHO` and the
-//! `SNAPUNIT` spacing), the renderer backend preference (`wgpu_backend`, read by
-//! the next presenter construction), the GPU memory budget percentage the
-//! renderer lane reads (`view.gpuBudget.percent`) and the read-only `--fonts-dir`
-//! display value.
+//! `SNAPUNIT` spacing), the persisted 2D left-drag input scheme, the renderer
+//! backend preference (`wgpu_backend`, read by the next presenter construction),
+//! the GPU memory budget percentage the renderer lane reads
+//! (`view.gpuBudget.percent`) and the read-only `--fonts-dir` display value.
 //! Every write goes through the same validated store/persistence path as
 //! [`HostCore::apply_user_preference_json`] — the backend leaf is merged into the
 //! same durable preference document, see [`merge_wgpu_backend_into_preference`];
@@ -145,6 +145,9 @@ pub enum CadSettingKey {
     OrthoEnabled,
     /// `SNAPUNIT` session spacing in drawing units (`interaction.snapSpacing`).
     SnapSpacing,
+    /// 2D input scheme: a primary-button drag pans instead of box-selecting
+    /// (`interaction.leftDragPans`).
+    LeftDragPans,
     BackgroundModel,
     BackgroundPaper,
     CrosshairSize,
@@ -159,7 +162,7 @@ pub enum CadSettingKey {
 
 impl CadSettingKey {
     /// Every writable key, in a stable order.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Grid,
         Self::Axes,
         Self::SelectionHighlight,
@@ -170,6 +173,7 @@ impl CadSettingKey {
         Self::GridSnapEnabled,
         Self::OrthoEnabled,
         Self::SnapSpacing,
+        Self::LeftDragPans,
         Self::BackgroundModel,
         Self::BackgroundPaper,
         Self::CrosshairSize,
@@ -198,6 +202,7 @@ impl CadSettingKey {
             Self::GridSnapEnabled => "gridSnapEnabled",
             Self::OrthoEnabled => "orthoEnabled",
             Self::SnapSpacing => "snapSpacing",
+            Self::LeftDragPans => "leftDragPans",
             Self::BackgroundModel => "backgroundModel",
             Self::BackgroundPaper => "backgroundPaper",
             Self::CrosshairSize => "crosshairSize",
@@ -228,8 +233,8 @@ impl CadSettingKey {
     /// `10..=100` (all four rejected, never clamped), `snapSpacing` a finite
     /// spacing greater than zero drawing units (an integer or a real; `0`,
     /// negative, non-finite and a wrong shape are rejected, never defaulted), and
-    /// every switch (including `gridSnapEnabled` and `orthoEnabled`) is a
-    /// boolean.
+    /// every switch (including `gridSnapEnabled`, `orthoEnabled` and
+    /// `leftDragPans`) is a boolean.
     pub fn validate(self, value: &CadSettingValue) -> Result<(), &'static str> {
         match self {
             Self::WgpuBackend => match value {
@@ -300,7 +305,8 @@ impl CadSettingKey {
             | Self::SnapEnabled
             | Self::HoverPreview
             | Self::GridSnapEnabled
-            | Self::OrthoEnabled => match value {
+            | Self::OrthoEnabled
+            | Self::LeftDragPans => match value {
                 CadSettingValue::Bool(_) => Ok(()),
                 CadSettingValue::Text(_)
                 | CadSettingValue::Number(_)
@@ -345,6 +351,9 @@ pub struct HostSettings {
     /// `SNAPUNIT` session spacing in drawing units
     /// ([`cad_app::DEFAULT_SNAP_SPACING`] until the user sets one).
     pub snap_spacing: f64,
+    /// 2D input scheme: `true` means a primary-button drag pans instead of
+    /// box-selecting (`interaction.leftDragPans`, default `false`).
+    pub left_drag_pans: bool,
     /// Canonical lower-case `#rrggbb` of the model-space background.
     pub background_model: String,
     /// Canonical lower-case `#rrggbb` of the paper-space background.
@@ -399,6 +408,14 @@ impl HostCore {
                 effective.view.gpu_budget.percent,
             )
         };
+        // A plain preference (no session state): the gesture reads the effective
+        // config, so the snapshot reports it directly.
+        let left_drag_pans = self
+            .viewer_config
+            .borrow()
+            .effective()
+            .interaction
+            .left_drag_pans;
         let (snap_enabled, hover_preview, grid_snap_enabled, ortho_enabled, snap_spacing) = {
             let controller = self.controller.borrow();
             (
@@ -420,6 +437,7 @@ impl HostCore {
             grid_snap_enabled,
             ortho_enabled,
             snap_spacing,
+            left_drag_pans,
             background_model,
             background_paper,
             crosshair_percent,
@@ -451,6 +469,27 @@ impl HostCore {
             .tolerance_policy()
     }
 
+    /// The persisted 2D input scheme: `true` means a primary-button drag pans
+    /// instead of box-selecting (`interaction.leftDragPans`, default `false`).
+    ///
+    /// Read from the effective config per call — the same source the gesture
+    /// arbitration uses — so a settings write takes effect on the next drag
+    /// without reopening the document and there is no session state to seed. A
+    /// missing preference is the documented `false` default, never an invented
+    /// `true`.
+    ///
+    /// The gesture arbitration in `input/pointer.rs` is the consumer; it is the
+    /// one in-crate call site that does not exist yet, so the getter is allowed to
+    /// be unused until that lane lands its arbitration.
+    #[allow(dead_code)]
+    pub(crate) fn left_drag_pans(&self) -> bool {
+        self.viewer_config
+            .borrow()
+            .effective()
+            .interaction
+            .left_drag_pans
+    }
+
     /// Apply one typed setting: persist it under the allowed preference leaves
     /// and make it take effect on the live scene/session immediately.
     ///
@@ -473,6 +512,7 @@ impl HostCore {
                 self.apply_drafting_switch(key, &value)
             }
             CadSettingKey::SnapSpacing => self.apply_snap_spacing(&value),
+            CadSettingKey::LeftDragPans => self.apply_interaction_flag("leftDragPans", &value),
             CadSettingKey::BackgroundModel => self.apply_background_preference("model", &value),
             CadSettingKey::BackgroundPaper => self.apply_background_preference("paper", &value),
             CadSettingKey::CrosshairSize => self.apply_crosshair_size(&value),
@@ -675,6 +715,21 @@ impl HostCore {
             )?;
         }
         Ok(())
+    }
+
+    /// Persist one boolean `interaction.<leaf>` flag (`leftDragPans`).
+    ///
+    /// Unlike the F8/F9 switches this flag has no session state to drive: the
+    /// gesture arbitration reads the effective config per event, so persisting
+    /// the leaf is the live application. The write goes through
+    /// [`HostCore::apply_user_preference_json`], which persists the allowed
+    /// projection, so the choice survives a restart and the next drag honours it
+    /// without reopening the document.
+    fn apply_interaction_flag(&self, leaf: &str, value: &CadSettingValue) -> CadResult<()> {
+        let CadSettingValue::Bool(enabled) = value else {
+            return Err(CadError::InvalidInput(SETTINGS_INVALID_VALUE.into()));
+        };
+        self.apply_user_preference_json(&format!(r#"{{"interaction":{{"{leaf}":{enabled}}}}}"#))
     }
 
     /// Apply the persisted interaction values to the live session.
