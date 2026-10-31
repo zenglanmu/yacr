@@ -10907,3 +10907,53 @@ host/wasm/clippy + 4 static / diff **均 0**；`fmt` 仅既有陌生未跟踪 `d
 - **NOT RUN / NOT VERIFIED**：真实 GPU、真机、像素 golden、其它浏览器/Chromium 版本、WebKitGTK 上的
   该 7-case 套件、软键盘、性能、全 workspace 测试与平台矩阵。证据目录为 `/tmp/opencode/…`
   （**非持久、不上传**），按 `docs/validation-mobile-responsive-2026-10-28.md` §3 的命令重跑重建。
+
+## 2026-10-31：macOS 原生宿主（透明 WKWebView 在上 + CAD NSView 在下 + wgpu/Metal）
+
+- 基线 `253b610`，分支 `macos-native-host`；实现提交 `db40dec`，本提交修复 CI 夹具与
+  i18n 扫描范围并补文档。`apps/app-macos` 从显式 NOT IMPLEMENTED 桩变成真实 Tauri 2 宿主：
+  透明 WKWebView（React chrome、唯一 DOM 输入漏斗）在上，原生 CAD 子 `NSView`
+  （`addSubview:positioned:relativeTo:` `.below`）在下，渲染器仍是同一个 renderer-only wgpu
+  （macOS 走 **Metal**）。
+- 新增/完成：`entry`、`host/{init,mod,tick,popup,layers}`、`main_thread`、`redraw`、
+  `platform`（主线程 `NSOpenPanel` + `~/Library/Application Support/yacr` +
+  `--open` 读取 + 单飞/终态容量 1）、`macos_surface`（子视图层序、大小权威
+  `physical_content_size`、AppKit 左下原点换算、Fifo present、分类 present-error 标记、
+  `size_authority_verdict`）。`find_webview_view` 按 `isKindOfClass:WKWebView` 在 `setup`
+  同步定位锚点（Tauri 只在异步 `with_webview` 暴露 WKWebView 指针）。wry 的 macOS child
+  webview 是 `ViewMinYMargin` 固定尺寸，`auto_resize()` 无效 ⇒ `WindowEvent::Resized` 时显式
+  `webview.set_size()`。
+- 核心契约：`ProbeBackendPolicy` 增加 `Metal`（`"metal"`）；`Auto` 在 macOS = `Backends::METAL`
+  （其它平台仍是 `VULKAN | DX12`）；headless `Auto`/`WebGpu` 在 macOS 走 Metal；显式
+  `vulkan` 在 macOS 被 `UnsupportedBackendPolicy` 拒绝。Vulkan-only VRAM 探测
+  （`gpu_memory::vram`）在 macOS 显式 `None`（预算保持 `Unprobed`，不猜显存），`ash` 不再进入
+  macOS 构建。`cad-desktop-shell` 的 target 门禁加入 macOS。
+- CI：`build.yml` 的 `macos-check` 现在先 `npm ci && npm test && npm run build`，再
+  `cargo check -p app-macos --all-targets --locked`，并 `git diff --exit-code -- Cargo.lock`；
+  `core.yml` 的契约步骤新增 `python3 scripts/test-macos-host.py`。`macos-check` 在真实
+  `macos-latest` 上 **PASS**（run
+  [41186722245](https://github.com/zenglanmu/yacr/actions/runs/41186722245)，commit `db40dec`，
+  约 3m09s；同一 run 的 `linux-app`/`windows-check`/`web-build`/`web-smoke`/
+  `shader-validation` 均 PASS）。这是 **`cargo check` 编译证据**，不构建二进制、不运行。
+- 首轮 `core-quality` 在 `scripts/test-ui-migration-guards.py` 失败：该测试的**合成 workspace**
+  没有 `app-macos`，而新加的 `require_dependency("app-macos", "cad-desktop-shell")` 要求它存在；
+  本提交向 `ARCH_MEMBERS` 补 `apps/app-macos`，本地 18 tests PASS。另把
+  `apps/app-macos/src` 纳入 `check-i18n.py` 扫描范围（`macos.picker_*` 键已在双目录）。
+- 本机实际运行：`cargo fmt --all -- --check`、`cargo check --workspace --all-targets --locked`、
+  `cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings`、
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`、
+  `cargo check -p app-macos --all-targets --locked`（Linux 空壳）、
+  `cargo test -p cad-render-wgpu --lib native_presenter::tests`（33 passed）、
+  `cargo test -p cad-render-wgpu --lib gpu_memory`（41 passed）、
+  `cargo test -p cad-desktop-shell`、`check-architecture.py`、`check-workflows.py`、
+  `check-i18n.py`、`check-file-size.py`（1156 files < 1000）、`test-macos-host.py` 均 PASS。
+- **有界 macOS 目标类型检查（非 CI 证据）**：本机无 Apple SDK，`objc2-exception-helper` 的 C
+  步骤无法用宿主 `cc` 编译；用一个只把 `-Fo/-o` 输出写成空文件的假 `cc`（`cargo check` 不链接）
+  后，`cargo check/clippy -p app-macos --target aarch64-apple-darwin --all-targets -- -D warnings`
+  **PASS**（覆盖真实 tauri/wgpu/objc2 依赖）。这**不是** C 编译、链接或运行；CI `macos-check`
+  才是编译门禁。
+- **NOT VERIFIED / NOT RUN**：真实 Mac 上的窗口创建、透明合成、CAD 子视图层序、Retina/DPI、
+  Metal adapter/present、输入、`NSOpenPanel`、配置写入；像素/视觉/性能/功耗；Intel Mac 与其它
+  macOS 版本；renderer crash 触发 ④（tauri 2.12.3/wry 0.57 无 WKWebView 终止钩子，显式未实现）；
+  App Store 私有 API（wry `drawsBackground`）合规性；签名/notarization/打包（`macos-release` 仍
+  `if: false`）。本提交未暂存/未推送任何生成物（`apps/app-macos/gen/schemas/` 已加入 `.gitignore`）。

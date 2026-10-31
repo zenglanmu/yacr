@@ -96,6 +96,10 @@ ARCH_MEMBERS: dict[str, str] = {
         '[package]\nname = "app-windows"\nversion = "0.1.0"\n\n'
         '[dependencies]\ncad-desktop-shell = { path = "../../crates/cad-desktop-shell" }\n'
     ),
+    "apps/app-macos": (
+        '[package]\nname = "app-macos"\nversion = "0.1.0"\n\n'
+        '[dependencies]\ncad-desktop-shell = { path = "../../crates/cad-desktop-shell" }\n'
+    ),
 }
 
 

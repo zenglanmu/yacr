@@ -121,14 +121,16 @@ def catalog_paths(root: pathlib.Path) -> dict[str, pathlib.Path]:
 
 
 def rust_sources(root: pathlib.Path) -> list[pathlib.Path]:
-    # Every desktop host owns Rust UI code. `crates/cad-desktop-shell` and
-    # `apps/app-windows` are listed ahead of landing; a missing directory simply
-    # contributes no files, so the scan set stays correct as the tree grows.
+    # Every desktop host owns Rust UI code. `crates/cad-desktop-shell`,
+    # `apps/app-windows` and `apps/app-macos` are listed ahead of landing; a
+    # missing directory simply contributes no files, so the scan set stays
+    # correct as the tree grows.
     return [
         root / "crates" / "cad-ui-core" / "src",
         root / "crates" / "cad-desktop-shell" / "src",
         root / "apps" / "app-linux" / "src",
         root / "apps" / "app-windows" / "src",
+        root / "apps" / "app-macos" / "src",
     ]
 
 

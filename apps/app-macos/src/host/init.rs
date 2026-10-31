@@ -72,9 +72,10 @@ pub fn init(
             tauri::WebviewUrl::App("index.html".into()),
         )
         .transparent(true)
-        // Keep the WKWebView bounds proportional to the window client area; the
-        // CAD child view is framed independently from the accepted DOM rect.
-        .auto_resize()
+        // wry's macOS **child** webview sets `ViewMinYMargin` (fixed size), so
+        // `auto_resize()` is a no-op there; the window event below keeps the DOM
+        // viewport equal to the client area explicitly. The CAD child view is
+        // framed independently from the accepted DOM rect.
         // The host-resolved locale, handed to the chrome **before** the document
         // is parsed: the single system default for the React UI and the native
         // dialog labels (see `cad_ui_core::i18n`).
@@ -107,8 +108,18 @@ pub fn init(
     // before the window goes away.
     let events_shared = shared.clone();
     let events_telemetry = telemetry.clone();
+    let events_webview = webview.clone();
     window.on_window_event(move |event| match event {
         tauri::WindowEvent::Resized(size) => {
+            // wry's macOS child webview is created with `ViewMinYMargin` (fixed),
+            // so it does not follow the window on its own. Keep the single DOM
+            // viewport equal to the window client area; the CAD child view has
+            // its own geometry authority (the accepted React rect).
+            if let Err(error) =
+                events_webview.set_size(tauri::PhysicalSize::new(size.width, size.height))
+            {
+                eprintln!("[probe] NSWindow event: child webview resize failed: {error}");
+            }
             eprintln!(
                 "[probe] NSWindow event: window resized to {}x{}",
                 size.width, size.height

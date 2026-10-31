@@ -40,7 +40,12 @@ NSWindow (Tauri, transparent)
 - CAD 子视图用 `addSubview:positioned:relativeTo:` **插在 WKWebView 之下**
   （`NSWindowOrderingMode::Below`）；`ensure_order` 每 tick 幂等复查兄弟顺序，发现被 wry/主题
   重排后重新插到 webview 之下。CAD 视图不覆盖 responder、不装 gesture recognizer，**永不接收
-  OS 输入**；输入唯一漏斗仍是 `.native-input` → `probe_input` IPC。
+  OS 输入**；输入唯一漏斗仍是 `.native-input` → `probe_input` IPC。WKWebView 在 `setup` 中按
+  Objective-C 类名（`isKindOfClass:WKWebView`）定位：Tauri 只在**异步** `with_webview` 回调里
+  暴露其指针，而锚点必须在 `setup` 里同步获得。
+- wry 的 **child** webview 在 macOS 上使用 `ViewMinYMargin`（固定尺寸，不随窗口），因此
+  `auto_resize()` 在该路径无效：宿主在 `WindowEvent::Resized` 时显式 `webview.set_size()`，
+  让唯一 DOM 视口始终等于窗口客户区；CAD 子视图仍只服从 React CAD rect。
 - **表面尺寸**只来自 `cad_ui_core::layout::physical_content_size`（与 render session 同一
   `round(side · scale)` 公式），presenter 的 size guard 因此不会因独立取整拒绝每一帧。
 - **视图 frame** 用 AppKit 的**逻辑点**（左下原点）：DOM 的 top-left `y` 换算为
@@ -111,7 +116,12 @@ NSWindow (Tauri, transparent)
   token/`Auto` 平台映射与既有 Vulkan/DX12 行为契约均成立。
 - `python3 scripts/test-macos-host.py`、`check-architecture.py`、`check-workflows.py`、
   `check-i18n.py` 通过（源码/清单/工作流静态契约，**不是**运行时证据）。
-- GitHub `macos-check`：以本轮提交的分支运行结果为准（见交接记录；未运行前必须写 NOT RUN）。
+- **GitHub `macos-check` PASS**（2026-10-31，commit `db40dec`，run
+  [41186722245](https://github.com/zenglanmu/yacr/actions/runs/41186722245)，`macos-latest`，
+  约 3m09s）：前端构建后 `cargo check -p app-macos --all-targets --locked` 在**真实 macOS
+  runner** 上通过；同一 run 的 `linux-app`/`windows-check`/`web-build`/`web-smoke`/
+  `shader-validation` 也通过。**这只是编译证据**（`cargo check`，无 `cargo build`、不运行、
+  无 Mach-O/签名/打包），不是窗口/Metal/像素验收。
 
 **NOT VERIFIED / NOT RUN**
 
