@@ -5,9 +5,64 @@ edition.workspace = true
 license.workspace = true
 
 [[bin]]
+# Distinct from the Linux product binary (`app-linux` → `yacr`): every host
+# package compiles for the same host target during workspace checks, so a shared
+# name would make the packages compete for (or overwrite) one output artifact.
 name = "yacr-macos"
 path = "src/main.rs"
 
-# The macOS host is NOT IMPLEMENTED in this round (see src/main.rs); the binary
-# is an explicit failure stub with no runtime dependencies. The former
-# `app-linux` (shared Slint host) dependency is gone — that host is retired.
+# Native macOS desktop host for the CAD viewer/measure/annotation app: a
+# transparent WKWebView (React chrome) **above** an in-process native CAD child
+# `NSView` presented by wgpu/Metal. The DOM is the single input funnel
+# (`.native-input` → `probe_input`); the CAD view is display-only and installs no
+# responder overrides or gesture recognizers. The shared platform-independent
+# logic lives in `cad-ui-core`, the Tauri command/state layer in
+# `cad-desktop-shell`, and the renderer surface is created from raw
+# `AppKitWindowHandle`s with **no renderer changes** beyond enabling the Metal
+# backend.
+#
+# **macOS only**. `tauri`/`wry`/`tao`, the Objective-C bindings and the Metal
+# presenter are macOS-target dependencies; a workspace wasm (or other-target)
+# `--lib` check compiles an empty host instead. The binary returns an explicit
+# NOT IMPLEMENTED error elsewhere (`src/entry.rs`).
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri.workspace = true
+cad-render-wgpu.workspace = true
+# Raw `AppKitWindowHandle`/`AppKitDisplayHandle` for the renderer surface (the
+# presenter is built from the CAD child `NSView`, not from a Tauri window type).
+raw-window-handle.workspace = true
+
+cad-desktop-shell.workspace = true
+cad-app.workspace = true
+cad-engine.workspace = true
+cad-host.workspace = true
+cad-platform.workspace = true
+cad-resources.workspace = true
+cad-db.workspace = true
+cad-domain.workspace = true
+# Durable preference read (`wgpu_backend`) through the same JSON store the
+# shared UI writes; no new dependency version (workspace pin).
+serde_json.workspace = true
+
+# Objective-C bindings for the native child `NSView` (frame, subview ordering,
+# visibility) and the in-process `NSOpenPanel`. Pinned to the exact objc2 family
+# that `tauri 2.12.3`/`wry 0.57.0` already put in `Cargo.lock` (objc2 0.6.4 /
+# objc2-foundation 0.3.2 / objc2-app-kit 0.3.2), so no second binding set enters
+# the graph.
+objc2 = { version = "=0.6.4" }
+objc2-foundation = { version = "=0.3.2" }
+objc2-app-kit = { version = "=0.3.2" }
+
+# `platform` (the `cad-platform` file/config/surface contracts) is independent
+# of the macOS windowing layer, so its i18n lookup and unit tests also run on a
+# non-macOS host. It only pulls the UI-framework-free `cad-ui-core`.
+[dependencies]
+cad-ui-core.workspace = true
+
+# `tauri-build` generates the Tauri context and embeds the shared React bundle
+# for a macOS target. It is an ordinary build-dependency (compiled for the host)
+# because build scripts are host binaries; `build.rs` additionally checks the
+# *target* os at runtime before invoking it, so non-macOS targets compile an
+# empty host.
+[build-dependencies]
+tauri-build.workspace = true

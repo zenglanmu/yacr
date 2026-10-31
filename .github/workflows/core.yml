@@ -106,6 +106,7 @@ jobs:
           python3 scripts/test-package-macos-release.py
           python3 scripts/test-fetch-fonts.py
           python3 scripts/test-android-host.py
+          python3 scripts/test-macos-host.py
           python3 scripts/test-ui-migration-guards.py
       - name: Retained platform-neutral node contracts (no web shell)
         # scripts/test-web-pixels.mjs is the one web-era test kept because it is a

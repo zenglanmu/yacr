@@ -9,17 +9,18 @@ pub const DEFAULT_PREFERRED_ADAPTER_NAMES: &[&str] = &["P620"];
 /// Which wgpu backend(s) the native probe may use.
 ///
 /// This is the renderer half of the durable user preference `wgpu_backend`. The
-/// accepted wire values are **exactly** `"auto"`, `"vulkan"` and `"dx12"`;
-/// anything else — an absent value, an empty string, an unknown token — resolves
-/// to [`ProbeBackendPolicy::Auto`]. There is no silent third choice and no
-/// fallback from an explicit policy to another backend.
+/// accepted wire values are **exactly** `"auto"`, `"vulkan"`, `"dx12"` and
+/// `"metal"`; anything else — an absent value, an empty string, an unknown token
+/// — resolves to [`ProbeBackendPolicy::Auto`]. There is no silent third choice
+/// and no fallback from an explicit policy to another backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProbeBackendPolicy {
-    /// Vulkan and DX12, with Vulkan preferred inside a ranking tier.
+    /// The platform's native backends: Vulkan and DX12 on Linux/Windows, Metal
+    /// on macOS (the only one wgpu compiles there).
     ///
-    /// The default: on a target where one of the two backends is not compiled
-    /// in, wgpu simply has no adapters for it, so `auto` degrades to the
-    /// available one without pretending the other was tried.
+    /// The default: on a target where a backend is not compiled in, wgpu simply
+    /// has no adapters for it, so `auto` degrades to the available one without
+    /// pretending the other was tried.
     #[default]
     Auto,
     /// Vulkan only — the historical probe contract.
@@ -27,13 +28,16 @@ pub enum ProbeBackendPolicy {
     /// DirectX 12 only. Windows-only: any other target fails explicitly with
     /// [`ProbeError::UnsupportedBackendPolicy`] (never a silent Vulkan fallback).
     Dx12,
+    /// Metal only — the macOS native backend (wgpu compiles Metal on Apple
+    /// targets only). Elsewhere the probe refuses the policy by name.
+    Metal,
 }
 
 impl ProbeBackendPolicy {
     /// Parse the durable `wgpu_backend` value.
     ///
-    /// Accepted spellings are exactly `"vulkan"` and `"dx12"`; `"auto"`, an
-    /// absent value, an empty value and every unknown token are
+    /// Accepted spellings are exactly `"vulkan"`, `"dx12"` and `"metal"`;
+    /// `"auto"`, an absent value, an empty value and every unknown token are
     /// [`ProbeBackendPolicy::Auto`] (the documented default). Matching is
     /// case-sensitive: `"DX12"` is not a wire value and therefore resolves to
     /// `auto`, never to DX12 by accident.
@@ -41,25 +45,30 @@ impl ProbeBackendPolicy {
         match raw {
             Some("vulkan") => Self::Vulkan,
             Some("dx12") => Self::Dx12,
+            Some("metal") => Self::Metal,
             _ => Self::Auto,
         }
     }
 
-    /// The stable wire token (`auto`/`vulkan`/`dx12`), for logs and evidence.
+    /// The stable wire token (`auto`/`vulkan`/`dx12`/`metal`), for logs and
+    /// evidence.
     pub fn as_token(self) -> &'static str {
         match self {
             Self::Auto => "auto",
             Self::Vulkan => "vulkan",
             Self::Dx12 => "dx12",
+            Self::Metal => "metal",
         }
     }
 
     /// Human-readable policy summary used in the one-line startup log.
     pub fn summary(self) -> &'static str {
         match self {
+            Self::Auto if cfg!(target_os = "macos") => "metal (native)",
             Self::Auto => "vulkan preferred",
             Self::Vulkan => "vulkan only",
             Self::Dx12 => "dx12 only",
+            Self::Metal => "metal only",
         }
     }
 
@@ -67,9 +76,19 @@ impl ProbeBackendPolicy {
     /// enumeration.
     pub fn backends(self) -> wgpu::Backends {
         match self {
-            Self::Auto => wgpu::Backends::VULKAN | wgpu::Backends::DX12,
+            Self::Auto => {
+                #[cfg(target_os = "macos")]
+                {
+                    wgpu::Backends::METAL
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    wgpu::Backends::VULKAN | wgpu::Backends::DX12
+                }
+            }
             Self::Vulkan => wgpu::Backends::VULKAN,
             Self::Dx12 => wgpu::Backends::DX12,
+            Self::Metal => wgpu::Backends::METAL,
         }
     }
 
@@ -77,25 +96,40 @@ impl ProbeBackendPolicy {
     /// eligible under this policy.
     pub fn allows_backend(self, backend: &str) -> bool {
         match self {
-            Self::Auto => backend == "vulkan" || backend == "dx12",
+            Self::Auto => {
+                if cfg!(target_os = "macos") {
+                    backend == "metal"
+                } else {
+                    backend == "vulkan" || backend == "dx12"
+                }
+            }
             Self::Vulkan => backend == "vulkan",
             Self::Dx12 => backend == "dx12",
+            Self::Metal => backend == "metal",
         }
     }
 
     /// Fail explicitly when this policy cannot work on the current target.
     ///
-    /// Only [`ProbeBackendPolicy::Dx12`] has a target restriction: wgpu compiles
-    /// its DX12 backend on Windows only, so elsewhere the probe refuses the
-    /// policy by name instead of enumerating nothing or silently using Vulkan.
+    /// [`ProbeBackendPolicy::Dx12`] is Windows-only and
+    /// [`ProbeBackendPolicy::Metal`] is macOS-only; wgpu compiles each backend
+    /// for its own target family only. Elsewhere the probe refuses the policy by
+    /// name instead of enumerating nothing or silently using a different
+    /// backend. `Vulkan` is likewise refused on macOS, where wgpu does not
+    /// compile it and `auto` is Metal.
     pub(crate) fn ensure_supported(self) -> Result<(), ProbeError> {
-        match self {
-            Self::Dx12 if !cfg!(target_os = "windows") => {
-                Err(ProbeError::UnsupportedBackendPolicy {
-                    policy: self.as_token(),
-                })
-            }
-            _ => Ok(()),
+        let supported = match self {
+            Self::Dx12 => cfg!(target_os = "windows"),
+            Self::Metal => cfg!(target_os = "macos"),
+            Self::Vulkan => !cfg!(target_os = "macos"),
+            Self::Auto => true,
+        };
+        if supported {
+            Ok(())
+        } else {
+            Err(ProbeError::UnsupportedBackendPolicy {
+                policy: self.as_token(),
+            })
         }
     }
 }

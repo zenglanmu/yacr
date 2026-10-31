@@ -54,7 +54,7 @@
 | `shader-validation` | build.yml | `ubuntu-latest` | 离线 WGSL 解析/校验（naga，无需 GPU），失败红灯 |
 | `linux-app` | build.yml | `ubuntu-latest` | 安装 GTK/WebKitGTK 前置 + 构建并测试 React 前端 + `cargo check -p app-linux --all-targets --locked`，上传日志 |
 | `windows-check` | build.yml | `windows-latest` | 原生 MSVC `cargo check -p app-windows --all-targets --locked`（**真实 Windows 宿主**的编译门禁；不运行 exe、不是视觉验收） |
-| `macos-check` | build.yml | `macos-latest` | 原生 arm64 `cargo check -p app-macos --all-targets --locked`（占位桩，不运行） |
+| `macos-check` | build.yml | `macos-latest` | 先构建/测试 React 前端（`apps/desktop-ui`），再 `cargo check -p app-macos --all-targets --locked`（**真实 macOS 宿主**的编译门禁；不运行、不是视觉/Metal/DPI 验收） |
 | `web-build` | build.yml | `ubuntu-latest` | 安装钉住版本的 wasm-bindgen CLI（预编译 release + SHA-256 + `Cargo.lock` 对照）→ `bash scripts/build-web.sh` → 上传 `web-dist` artifact |
 | `web-smoke` | build.yml | `ubuntu-latest` | 下载 `web-dist` → `scripts/serve-web.py` → Playwright Chromium 打开页面，断言 `start: ok` / `target` / `physical` / `batches` / `draws` / `presented`；**SwiftShader 软件渲染**，非 GPU/像素证据 |
 | `web-deploy` | build.yml | `ubuntu-latest` | **仅 `v*` tag 或手工 dispatch**；`needs: web-build`，下载 `web-ui-dist`（`apps/app-web/dist-ui`）后 `scripts/deploy-cloudflare-pages.sh`（`SKIP_BUILD=1`、`BUNDLE_KIND=ui`）发布到 Cloudflare Pages |

@@ -172,9 +172,34 @@ pub fn probe_vram_bytes(_adapter: &wgpu::Adapter) -> Option<VramProbe> {
 /// * the backend reports zero heaps, or no device-local heap at all;
 /// * the loader cannot resolve `vkGetPhysicalDeviceMemoryProperties`.
 ///
+/// macOS has **no Vulkan backend at all**, so its implementation is an explicit
+/// `None` (see the macOS stub below): the budget policy stays
+/// `Unprobed`/unbudgeted rather than guessing a Metal memory total.
+///
 /// The result is a **point-in-time heap view**, not free memory: see the module
 /// docs.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "macos")]
+pub fn probe_vram_bytes(_adapter: &wgpu::Adapter) -> Option<VramProbe> {
+    // Metal exposes no wgpu/HAL memory-heap query: `wgpu::hal::api::Vulkan` is
+    // not even compiled on macOS. No guessed total; the percentage policy has no
+    // evidence on this backend.
+    None
+}
+
+/// Probe the adapter's device-local VRAM proxy (the largest device-local heap).
+///
+/// Returns `None` (never panics) when:
+///
+/// * the adapter is not Vulkan (the only backend whose memory heaps wgpu 30.0.1
+///   lets a caller read);
+/// * `Adapter::as_hal::<Vulkan>()` returns `None`;
+/// * no physical device is reachable;
+/// * the backend reports zero heaps, or no device-local heap at all;
+/// * the loader cannot resolve `vkGetPhysicalDeviceMemoryProperties`.
+///
+/// The result is a **point-in-time heap view**, not free memory: see the module
+/// docs.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))]
 pub fn probe_vram_bytes(adapter: &wgpu::Adapter) -> Option<VramProbe> {
     if adapter.get_info().backend != wgpu::Backend::Vulkan {
         return None;
@@ -198,9 +223,23 @@ pub fn probe_vram_bytes(adapter: &wgpu::Adapter) -> Option<VramProbe> {
 /// A host provides a `Device`/`Queue`, never an adapter (see
 /// [`Renderer::initialize_with_device`](crate::Renderer::initialize_with_device)),
 /// so the renderer has no adapter to ask; `wgpu_hal::vulkan::Device` exposes the
+/// same physical device and shared instance. Native Vulkan only (and `None` on a
+/// non-Vulkan device, exactly like [`probe_vram_bytes`]); the macOS stub returns
+/// `None` because there is no Vulkan HAL to ask.
+#[cfg(target_os = "macos")]
+pub(crate) fn probe_vram_bytes_from_device(_device: &wgpu::Device) -> Option<VramProbe> {
+    None
+}
+
+/// The same probe for a [`wgpu::Device`], so the renderer can resolve its budget
+/// from the device it was actually handed.
+///
+/// A host provides a `Device`/`Queue`, never an adapter (see
+/// [`Renderer::initialize_with_device`](crate::Renderer::initialize_with_device)),
+/// so the renderer has no adapter to ask; `wgpu_hal::vulkan::Device` exposes the
 /// same physical device and shared instance. Native only (and `None` on a
 /// non-Vulkan device, exactly like [`probe_vram_bytes`]).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))]
 pub(crate) fn probe_vram_bytes_from_device(device: &wgpu::Device) -> Option<VramProbe> {
     // SAFETY: identical rationale as `probe_vram_bytes`; the HAL guard borrows
     // `device` for this call only and every statement below is a read-only query.
@@ -220,7 +259,7 @@ pub(crate) fn probe_vram_bytes_from_device(device: &wgpu::Device) -> Option<Vram
 /// read out of `ash`'s pre-loaded table: a table slot whose load failed is a
 /// **panicking stub** in `ash` 0.38, so using it would abort instead of returning
 /// `None`. A `null` result from the loader is the honest "cannot answer".
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))]
 fn read_memory_properties(
     entry: &ash::Entry,
     instance: &ash::Instance,

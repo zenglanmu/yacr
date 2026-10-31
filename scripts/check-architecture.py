@@ -164,11 +164,13 @@ def check(root: pathlib.Path) -> int:
     # (telemetry stays app-side behind the `ShellTelemetry` seam).
     #
     # `app-windows` is the Windows desktop host (Tauri/WebView2 + native CAD
-    # child HWND): like `app-linux`, it consumes the shared command/state layer,
-    # so the edge is required rather than merely allowed.
+    # child HWND) and `app-macos` the macOS host (Tauri/WKWebView + native CAD
+    # child NSView): like `app-linux`, both consume the shared command/state
+    # layer, so the edge is required rather than merely allowed.
     require_dependency("cad-desktop-shell", "cad-ui-core")
     require_dependency("app-linux", "cad-desktop-shell")
     require_dependency("app-windows", "cad-desktop-shell")
+    require_dependency("app-macos", "cad-desktop-shell")
     forbidden_desktop_shell_dependencies = {
         "gtk", "gdk", "gdkx11", "ashpd", "wgpu", "cad-render-wgpu", "cad-engine",
         "slint", "slint-build", "iced", "acadrust",

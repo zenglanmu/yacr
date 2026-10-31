@@ -4,8 +4,9 @@
 
 > **Early development; there is no shippable product yet.** yacr is a CAD system written from
 > scratch in Rust that targets DWG/DXF drawings. The desktop UI is a **React + Tauri native host**
-> (Linux first; migrated from Slint on 2026-10-16). The Windows/macOS desktop hosts and the
-> Android/Web UIs are **explicit NOT IMPLEMENTED placeholders**, not runnable products. Current
+> (Linux first; migrated from Slint on 2026-10-16). The Windows and macOS desktop hosts are **real
+> Tauri hosts but compile-only** (no runtime/visual acceptance); the Android/Web carriers are
+> **real but bounded**. Current
 > capabilities are backed by **contract/synthetic tests plus bounded real-GPU host runs on synthetic
 > fixtures**; there is **no** validated DWG compatibility, real-drawing, cross-vendor, golden-image
 > or performance acceptance. Do not treat it as a usable or production CAD application.
@@ -47,7 +48,8 @@ cad-host                                     platform-independent host orchestra
   ↑
 cad-ui-core                                  wire protocol, logical layout, CAD session, shell, i18n
   ↑
-apps/app-linux (React + Tauri)   apps/app-{windows,macos,android,web} (NOT IMPLEMENTED placeholders)
+apps/app-linux / apps/app-windows / apps/app-macos (React + Tauri desktop hosts)
+apps/app-android / apps/app-web (Tauri WebView / browser carriers)
 ```
 
 **Boundaries that must hold** (see `docs/architecture.md`, `docs/core-invariants.md`):
@@ -206,9 +208,10 @@ gates above are for explicit requests and pre-release acceptance. `NOT RUN` is a
 
 ### Other platforms
 
-Windows/macOS/Android/Web are **NOT IMPLEMENTED** this round; their build/package/deploy scripts fail
-non-zero (retired) and the CI release jobs are hard-disabled. See `docs/build.md` and `docs/ci.md` —
-do not treat the retired scripts as working.
+The Windows and macOS desktop hosts are implemented but **compile-only** (CI compile gates, no runtime
+acceptance); the Android/Web carriers have bounded local evidence. Packaging/release scripts remain
+retired (non-zero) and the CI release jobs are hard-disabled. See `docs/build.md`, `docs/ci.md`,
+`docs/windows-app.md` and `docs/macos-app.md` — do not treat the retired scripts as working.
 
 ## Current progress
 
@@ -219,7 +222,7 @@ evidence in `docs/validation*.md` does **not** transfer to the React/Tauri host)
 |---|---|---|
 | **Linux desktop (primary, current)** | `apps/app-linux` (`yacr`) | React/Tauri chrome + native GTK/wgpu CAD partition. **Only OPEN and FIT plus native navigation are wired**; every other control is explicitly disabled with a reason. Bounded local acceptance has run: React-migration P6 gate **ACCEPT-WITH-FIXES** (hardware-Vulkan real-window smoke on a synthetic fixture), and native-Wayland W3 **ACCEPT-WITH-LIMITATIONS** (GNOME/Mutter + Quadro P620, `scale=1`) — see `docs/validation-react-linux-migration-2026-10-16.md` and `docs/validation-native-wayland-2026-10-16.md`. **Bounded local-Linux acceptance only** — not a full CAD product / cross-platform / vendor / golden / performance approval. |
 | **Windows desktop** | `apps/app-windows` (`yacr-windows`) | **NOT IMPLEMENTED** failure stub (no Tauri dependency; prints a diagnostic and exits non-zero). CI only compiles it (`windows-check`); no runnable GUI. |
-| **macOS desktop** | `apps/app-macos` (`yacr-macos`) | **NOT IMPLEMENTED** failure stub. CI only compiles it (`macos-check`); no runnable GUI. |
+| **macOS desktop** | `apps/app-macos` (`yacr-macos`) | **Real Tauri 2 host, compile-only**: transparent WKWebView above a native CAD child `NSView` presented by wgpu/Metal. CI compiles it (`macos-check`); window/Metal/z-order/DPI/dialog/pixel behaviour is **NOT VERIFIED** and there is no packaging. |
 | **Android** | `apps/app-android` | **NOT IMPLEMENTED** placeholder (retired UI; the native entry aborts with a diagnostic). |
 | **Web** | `apps/app-web` | **NOT IMPLEMENTED** placeholder (retired UI; the wasm entry returns an error). |
 | **Headless CLI** | `cad-cli-tools` | Kept: opens and plots headless through the shared application path. |
@@ -269,7 +272,7 @@ decisions: `docs/adr/` (ADR 0010 = React host replaces Slint, ADR 0011 = native 
 ADR 0012 = scene spatial index and interaction); headless rendering: `docs/headless-render.md`; CI
 layers: `docs/ci.md`; CLI: `docs/cli.md`; fonts: `docs/fonts.md`; app icon: `docs/app-icon.md`.
 Retired (historical, kept with notices): `docs/linux-app.md`, `docs/windows-app.md`,
-`docs/macos-app.md`, `docs/verify-ui.md`.
+`docs/verify-ui.md`. Current macOS host: `docs/macos-app.md`.
 
 **Capabilities & topics** — entity coverage: `docs/dxf-entity-coverage.md`; proxy support:
 `docs/proxy-support.md`; curve geometry: `docs/curve-geometry.md`; ACIS: `docs/kernel-acis.md`; 3D

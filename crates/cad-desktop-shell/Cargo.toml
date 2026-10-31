@@ -13,10 +13,11 @@ description = "Desktop host shell shared by the Tauri apps: IPC commands, shared
 # (enforced by `scripts/check-architecture.py`). `cad-app` is allowed: the shell
 # state names `cad_app::ToolParameter`/`StandardView` queue entries.
 #
-# Target gating mirrors `apps/app-linux`: on wasm (and macOS) every module is
+# Target gating mirrors the concrete desktop hosts (`app-linux`,
+# `app-windows`, `app-macos`): on wasm and every other target every module is
 # compiled out and the crate is an empty shell, so the workspace wasm `--lib`
 # check keeps validating isolation instead of failing on Tauri.
-[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
 tauri.workspace = true
 cad-ui-core.workspace = true
 cad-app.workspace = true

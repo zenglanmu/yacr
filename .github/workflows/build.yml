@@ -9,8 +9,9 @@ name: CI build layers
 #                      (frontend built first; no offscreen rendering)
 #   windows-check    : native MSVC debug compilation of the `app-windows` host
 #                      (windows-latest; compile gate only)
-#   macos-check      : native macOS debug compilation of the NOT IMPLEMENTED
-#                      `app-macos` placeholder (macos-latest)
+#   macos-check      : native macOS debug compilation of the real `app-macos`
+#                      host (transparent WKWebView + native CAD NSView + wgpu/
+#                      Metal), frontend built first; compile gate only
 #   shader-validation: offline naga WGSL test (no GPU needed; forced to fail on
 #                      a broken shader)
 #   web-build        : `scripts/build-web.sh` builds the real wasm CAD bundle
@@ -171,6 +172,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - name: Cache macOS debug check
         uses: actions/cache@v4
         with:
@@ -181,15 +185,26 @@ jobs:
           key: ${{ runner.os }}-cargo-macos-check-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-macos-check-
+      - name: Test and build the React frontend (apps/desktop-ui)
+        # `tauri::generate_context!` embeds `apps/desktop-ui/dist` at compile
+        # time, so the shared React bundle must exist before the Rust host is
+        # checked. The frontend suite runs first so this gate also exercises the
+        # React logic, exactly like `linux-app`.
+        working-directory: apps/desktop-ui
+        run: |
+          npm ci
+          npm test
+          npm run build
       - name: macOS host debug compilation (arm64)
         shell: bash
         run: |
           set -euo pipefail
           cargo check -p app-macos --all-targets --locked 2>&1 | tee macos-check.log
+          git diff --exit-code -- Cargo.lock
           {
             echo '## macOS host debug compilation'
-            echo 'The NOT IMPLEMENTED `app-macos` placeholder compiled for the arm64 macOS host; nothing was executed.'
-            echo 'This is not a real-Mac window, Metal-GPU or native-dialog acceptance.'
+            echo 'The React/Tauri macOS host (transparent WKWebView + native CAD NSView + wgpu/Metal) and its contract test code compiled; nothing was executed.'
+            echo 'This is not a real-Mac window, Metal-GPU, z-order, DPI, native-dialog or visual acceptance.'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload macOS compilation log (including failed runs)
         if: always()

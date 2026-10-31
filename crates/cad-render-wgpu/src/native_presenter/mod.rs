@@ -15,21 +15,26 @@
 //!   description, texture format, size, present mode) is exposed.
 //! - The instance's backend set and adapter enumeration come from the caller's
 //!   [`ProbeBackendPolicy`] (the renderer half of the durable user preference
-//!   `wgpu_backend`, wire values exactly `auto`/`vulkan`/`dx12`):
-//!   - `vulkan` = the historical contract: `Backends::VULKAN` only.
+//!   `wgpu_backend`, wire values exactly `auto`/`vulkan`/`dx12`/`metal`):
+//!   - `vulkan` = the historical contract: `Backends::VULKAN` only. Refused
+//!     explicitly on macOS, where wgpu does not compile Vulkan.
 //!   - `dx12` = `Backends::DX12` only. On targets where wgpu does not compile the
 //!     DX12 backend (anything but Windows) construction fails explicitly with
 //!     [`ProbeError::UnsupportedBackendPolicy`] naming the policy — there is no
 //!     fallback to Vulkan and no empty success.
+//!   - `metal` = `Backends::METAL` only, the macOS native backend; refused
+//!     explicitly on every other target (no fallback to Vulkan/GL).
 //!   - `auto` (the default, also used when the preference is absent, empty or
-//!     unknown) = `Backends::VULKAN | Backends::DX12`, with Vulkan preferred over
+//!     unknown) = the platform's native set: `Backends::METAL` on macOS and
+//!     `Backends::VULKAN | Backends::DX12` elsewhere, with Vulkan preferred over
 //!     DX12 inside a ranking tier. A backend not compiled for the target simply
 //!     has no adapters; it is never substituted for the other one.
 //! - Adapter selection rejects `cpu` (software/fallback) adapters. A preferred
 //!   adapter *name* (default `P620`) is only a preference, never a filter: any
 //!   eligible hardware adapter that can present to the surface is accepted. The
 //!   full order is: hardware before CPU, then preferred name, then Vulkan before
-//!   DX12, then discrete before integrated, then enumeration order.
+//!   DX12 (Metal alone on macOS), then discrete before integrated, then
+//!   enumeration order.
 //! - **Explicit, probe-only exception**: when the process environment contains
 //!   `YACR_PROBE_ALLOW_CPU_ADAPTER` (presence-based; the value is irrelevant),
 //!   CPU/software adapters become eligible too under every backend policy (for

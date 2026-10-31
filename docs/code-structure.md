@@ -97,8 +97,9 @@ Android 上打开/另存由 Java 垫片（`android/dev/yacr/app/YacrNativeActivi
 `ConfigStore`；`SurfaceSource`；`HostCapabilities`）。`apps/app-linux` 退化为薄封装：
 `src/host.rs` 保留 `LinuxApp`/`LinuxOptions` 公共 API 与事件循环 + 50ms 定时器（调用
 `core.tick()`），`src/host/platform.rs` 提供桌面实现（ashpd/rfd 选择器 + 读取 + 原子写 +
-dev/inode 源保护；XDG/APPDATA/Application-Support 配置；窗口表面）。`app-windows`/
-`app-macos` 仍只调用 `app-linux::entry::run`，未改动。
+dev/inode 源保护；XDG/APPDATA/Application-Support 配置；窗口表面）。`app-windows` 拥有
+自己的 Win32/WebView2 宿主；`app-macos` 拥有自己的 AppKit/WKWebView/Metal 宿主（透明
+WKWebView 在上、CAD 子 `NSView` 在下），两者都只复用共享的 `cad-desktop-shell`/`cad-ui-core`。
 
 `apps/app-web` 同样退化为薄封装：`browser/platform.rs` 提供 `WebFiles`/`WebConfigStore`/
 `WebSurface`，组合根用它们构造 `HostCore`（能力位 `open=true`、`new/save/plot=false`、

@@ -59,7 +59,7 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 | 桌面壳共享层 | **cad-desktop-shell：唯一允许依赖 `tauri` 的共享层**——`#[tauri::command]` 薄壳与注册、主窗口/子 webview 构建（init scripts、`start_maximized`）、popup 命令到 `cad-ui-core::popup` 的接线、工具包无关 `threading`、通用证据驱动骨架、参数化平台实现（`ReactFiles`/`ReactSurface`/`ReactConfigStore`）；**禁止** gtk/gdk/gdkx11/ashpd/wgpu/cad-render-wgpu/cad-engine/slint/iced/acadrust |
 | 宿主编排 | cad-host：HostCore（命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink）；**不依赖任何 UI 工具包，也不依赖 slint/wgpu/web-sys/Android 类型** |
 | 宿主平台契约 | cad-platform：PlatformFiles/ConfigStore/SurfaceSource/FontLoader/Persistence/TaskExecutor/Clipboard/HostLifecycle/RenderHost |
-| 宿主组合根 | apps：app-linux（GTK/Wayland 平台缝 + 真实 Linux GUI）、app-windows（Win32/WebView2 平台缝，已实现、视觉未验证）、app-macos（显式 NOT IMPLEMENTED 占位）、app-android/app-web（Tauri/浏览器载体，wasm `dom-canvas` 会话）；**唯一桌面 React UI：`apps/desktop-ui`** |
+| 宿主组合根 | apps：app-linux（GTK/Wayland 平台缝 + 真实 Linux GUI）、app-windows（Win32/WebView2 平台缝，已实现、视觉未验证）、app-macos（AppKit/WKWebView + 原生 CAD 子 NSView + wgpu/Metal，已实现、仅 CI 编译门禁）、app-android/app-web（Tauri/浏览器载体，wasm `dom-canvas` 会话）；**唯一桌面 React UI：`apps/desktop-ui`** |
 | 自动化 | cad-diagnostics：统计/脱敏报告；cad-cli-tools：共用 Application 命令路径 |
 
 ## 必须保持的边界

@@ -164,6 +164,10 @@ fn backend_policy_parsing_is_exact() {
         ProbeBackendPolicy::parse(Some("dx12")),
         ProbeBackendPolicy::Dx12
     );
+    assert_eq!(
+        ProbeBackendPolicy::parse(Some("metal")),
+        ProbeBackendPolicy::Metal
+    );
 }
 
 /// The wire token and the wgpu backend set are pinned per policy: the log line,
@@ -173,6 +177,12 @@ fn backend_policy_backends_and_tokens_are_pinned() {
     assert_eq!(ProbeBackendPolicy::Auto.as_token(), "auto");
     assert_eq!(ProbeBackendPolicy::Vulkan.as_token(), "vulkan");
     assert_eq!(ProbeBackendPolicy::Dx12.as_token(), "dx12");
+    assert_eq!(ProbeBackendPolicy::Metal.as_token(), "metal");
+    // `auto` is the platform's native backend set: Metal on macOS (the only
+    // backend wgpu compiles there), Vulkan+DX12 elsewhere.
+    #[cfg(target_os = "macos")]
+    assert_eq!(ProbeBackendPolicy::Auto.backends(), wgpu::Backends::METAL);
+    #[cfg(not(target_os = "macos"))]
     assert_eq!(
         ProbeBackendPolicy::Auto.backends(),
         wgpu::Backends::VULKAN | wgpu::Backends::DX12
@@ -182,11 +192,25 @@ fn backend_policy_backends_and_tokens_are_pinned() {
         wgpu::Backends::VULKAN
     );
     assert_eq!(ProbeBackendPolicy::Dx12.backends(), wgpu::Backends::DX12);
+    assert_eq!(ProbeBackendPolicy::Metal.backends(), wgpu::Backends::METAL);
     assert_eq!(ProbeBackendPolicy::default(), ProbeBackendPolicy::Auto);
-    assert!(ProbeBackendPolicy::Auto.allows_backend("vulkan"));
-    assert!(ProbeBackendPolicy::Auto.allows_backend("dx12"));
+    assert_eq!(
+        ProbeBackendPolicy::Auto.allows_backend("metal"),
+        cfg!(target_os = "macos")
+    );
+    assert_eq!(
+        ProbeBackendPolicy::Auto.allows_backend("vulkan"),
+        !cfg!(target_os = "macos")
+    );
+    assert_eq!(
+        ProbeBackendPolicy::Auto.allows_backend("dx12"),
+        !cfg!(target_os = "macos")
+    );
     assert!(!ProbeBackendPolicy::Vulkan.allows_backend("dx12"));
+    assert!(!ProbeBackendPolicy::Vulkan.allows_backend("metal"));
     assert!(!ProbeBackendPolicy::Dx12.allows_backend("vulkan"));
+    assert!(ProbeBackendPolicy::Metal.allows_backend("metal"));
+    assert!(!ProbeBackendPolicy::Metal.allows_backend("vulkan"));
 }
 
 /// DX12 is a Windows-only target capability: elsewhere the probe refuses the
@@ -201,7 +225,21 @@ fn dx12_policy_support_is_explicit_per_target() {
             ProbeBackendPolicy::Dx12.ensure_supported(),
             Err(ProbeError::UnsupportedBackendPolicy { policy: "dx12" })
         );
-        assert_eq!(ProbeBackendPolicy::Auto.ensure_supported(), Ok(()));
+    }
+    assert_eq!(ProbeBackendPolicy::Auto.ensure_supported(), Ok(()));
+    if cfg!(target_os = "macos") {
+        // Metal is the only backend wgpu compiles for Apple targets; an explicit
+        // Vulkan policy is refused by name instead of silently using Metal.
+        assert_eq!(ProbeBackendPolicy::Metal.ensure_supported(), Ok(()));
+        assert_eq!(
+            ProbeBackendPolicy::Vulkan.ensure_supported(),
+            Err(ProbeError::UnsupportedBackendPolicy { policy: "vulkan" })
+        );
+    } else {
+        assert_eq!(
+            ProbeBackendPolicy::Metal.ensure_supported(),
+            Err(ProbeError::UnsupportedBackendPolicy { policy: "metal" })
+        );
         assert_eq!(ProbeBackendPolicy::Vulkan.ensure_supported(), Ok(()));
     }
 }

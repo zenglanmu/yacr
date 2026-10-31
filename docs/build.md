@@ -214,7 +214,7 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
 |---|---|
 | `scripts/build-android.sh` | **可用（2026-10-28）**——真机构建入口：`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（wasm 会话 + `YACR_RUNTIME=android` chrome）再 Gradle；**release APK 默认未签名**。CI 的 `android-apk`/`android-release` **仍硬禁用**（无签名密钥、无商店路径） |
 | `scripts/package-windows-release.sh` | **RETIRED**——无 Windows 发布流水线；非零退出（注意：`app-windows` **已是真实宿主**，退役的是**打包脚本**，不是 GUI 实现） |
-| `scripts/package-macos-release.sh` | **RETIRED**——macOS GUI 未实现（`apps/app-macos` 占位 `yacr-macos`）；非零退出 |
+| `scripts/package-macos-release.sh` | **RETIRED**——退役的是**打包脚本**；`apps/app-macos` 已是真实 Tauri 宿主（只有 CI 编译门禁），但无签名/打包/分发；非零退出 |
 
 **Linux 打包（2026-10-17 重启，非 RETIRED）**：`scripts/package-linux-release.sh` 现在为
 React/Tauri 宿主构建 **Flatpak** bundle（`bin/yacr` + committed `fonts/`，运行时
@@ -230,8 +230,12 @@ React/Tauri 宿主构建 **Flatpak** bundle（`bin/yacr` + committed `fonts/`，
   **原生 MSVC 编译门禁**（不运行 exe）；`windows-release` 仍 `if: false` 退役，**无发布包**。
   视觉/运行时验收 = **PENDING user real-Windows spike**（判据见 `docs/windows-app.md`）；
   Wine 只做拒绝合同 smoke。见 `docs/windows-app.md`。
-- **macOS**：`apps/app-macos`（`yacr-macos`）仍是**显式 NOT IMPLEMENTED 失败桩**（打印诊断并
-  `exit 1`）；CI `macos-check` 只做编译门禁，**不运行**，也不产出可分发 GUI。
+- **macOS**：`apps/app-macos`（`yacr-macos`）是**真实 Tauri 2 宿主**（2026-10-31 起）——透明
+  WKWebView（React chrome）在上、原生 CAD 子 `NSView` 在下，渲染器走 wgpu/Metal；文件打开用
+  `NSOpenPanel`，配置在 `~/Library/Application Support/yacr`。CI `macos-check` 在
+  `macos-latest` 上先构建前端再 `cargo check -p app-macos --all-targets --locked`（**只编译，不运行**）；
+  窗口/Metal/层序/DPI/对话框/像素一律 **NOT VERIFIED**。`macos-release` 仍 `if: false`，
+  `scripts/package-macos-release.sh` 仍非零——**没有可分发 GUI**。见 `docs/macos-app.md`。
 - **Android**：`apps/app-android` 是**真实 Tauri 2 宿主**（2026-10-28 起）——WebView/资源载体，
   `surfaceMode: dom-canvas` 的 wasm 会话是唯一 CAD 权威，原生侧只注册两个 shell 报表命令。
   本地构建 = `scripts/build-android.sh`（`tauri android build --apk`，release 未签名）；CI 的

@@ -892,5 +892,10 @@
   "mobile.drawer": "工具",
   "mobile.close": "关闭",
   "mobile.send": "执行",
-  "mobile.refusal.unsupported": "这些工具暂时都不能用：当前宿主没有提供它们的命令。"
+  "mobile.refusal.unsupported": "这些工具暂时都不能用：当前宿主没有提供它们的命令。",
+  "macos.picker_title": "打开 DWG 或 DXF 图纸",
+  "macos.picker_filter": "CAD 图纸（DWG、DXF）",
+  "macos.picker_empty": "文件选择器未返回文件",
+  "macos.picker_local": "只能打开本地文件",
+  "macos.picker_failed": "系统文件选择器不可用，请改用 --open PATH：{error}"
 }

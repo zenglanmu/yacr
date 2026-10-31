@@ -9,8 +9,9 @@ Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + �
 > `cad-desktop-shell`；`cad-ui-slint` 与所有 Slint 依赖已删除。
 > **生产合成方向是 DOM/WebView 在上、wgpu CAD 原生表面在下**（[ADR 0023](docs/adr/0023-dom-on-top-cross-host-composition.md)）。
 > Linux **原生 Wayland** 是唯一生产路径；**X11/XWayland 显式拒绝**（标记行 + 退出码 4）。
-> **Windows 宿主已实现但视觉/运行时未验收**（上限 = Tier 0 编译 + Wine 拒绝合同；
-> 真 Windows spike-1/4/5 PENDING 用户自测）。macOS 是**显式 NOT IMPLEMENTED 占位**；
+> **Windows 与 macOS 宿主已实现但视觉/运行时未验收**（Windows 上限 = Tier 0 编译 + Wine 拒绝合同，
+> 真 Windows spike-1/4/5 PENDING 用户自测；macOS 上限 = `macos-check` 编译，窗口/Metal/层序/DPI/
+> 对话框一律 NOT VERIFIED）；
 > **Android 宿主是 Tauri 2 WebView 载体 + wasm `dom-canvas` 会话**（2026-10-28 起，`apps/app-android`），
 > 已在本地模拟器（x86_64、**SwiftShader 软件渲染**）跑通启动/布局/IPC/会话，并已修好 **CAD 像素全透明**
 > （根因：该 GLES 实现的**顶点阶段动态数组下标恒为 0**，命中 wgpu-hal 的 sRGB present 全屏三角形与
@@ -94,7 +95,7 @@ tauri 的共享层：命令注册、窗口    单一输入漏斗 `.native-input`
   ↑                              ↑
 apps/app-linux / apps/app-windows（Tauri 宿主：React chrome + 原生 CAD 分区 + renderer-only wgpu）
 apps/app-android（Tauri 2 WebView 载体：React chrome + wasm dom-canvas 会话，无原生 CAD 表面）
-apps/app-macos（显式 NOT IMPLEMENTED 占位）
+apps/app-macos（Tauri 宿主：透明 WKWebView + 原生 CAD 子 NSView + wgpu/Metal，编译门禁）
 apps/app-web（wasm CAD 会话 + WebGL2 canvas；host target 仍是 NOT IMPLEMENTED 空壳）
 ```
 
@@ -142,7 +143,8 @@ apps/app-web（wasm CAD 会话 + WebGL2 canvas；host target 仍是 NOT IMPLEMEN
   `canvas_runtime_failed` 两个 shell 报表命令（后者对 `webgl2` 打标记行后 `exit(6)`），
   **不**持有文档状态（铁律 8）；UI 产物由 `scripts/build-android-ui.sh` 写到
   `apps/app-android/dist`。证据与 **NOT VERIFIED** 见 `docs/android-host.md`。
-  `app-macos` 是显式 NOT IMPLEMENTED 占位；`app-web` 的 wasm CAD 会话已实现（见「平台状态」Web 条），
+  `app-macos` 是真实 macOS 宿主（透明 WKWebView + 原生 CAD 子 `NSView` + wgpu/Metal；只有 CI
+  编译门禁，运行时一律 **NOT VERIFIED**）；`app-web` 的 wasm CAD 会话已实现（见「平台状态」Web 条），
   其 host target 仍是 NOT IMPLEMENTED 空壳。平台 I/O（文件、配置、表面度量）只存在于 `app-*`。
 - **桌面窗口策略**：Linux 宿主默认以**最大化窗口**启动（`apps/app-linux/src/host.rs` 的
   `start_maximized` 默认 `true`，`WindowBuilder::maximized(true)`），**保留标题栏/系统面板**——
@@ -264,7 +266,9 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
 - **平台状态（2026-10-23）**：**Windows 宿主已实现**（Tauri 2 + 透明 WebView2 + Win32 child HWND +
   共享 `apps/desktop-ui`），但**视觉/运行时未验收**；CI `windows-check` 只做**编译门禁**
   （msvc/gnu/wasm 空壳），**不代表**可运行 GUI 或运行验收。`windows-release` 仍 `if: false`，
-  `scripts/package-windows-release.sh` 仍退役非零。**macOS** 是显式 NOT IMPLEMENTED 占位；
+  `scripts/package-windows-release.sh` 仍退役非零。**macOS（2026-10-31 起）是真实 Tauri 宿主**
+  （透明 WKWebView + 原生 CAD 子 `NSView` + wgpu/Metal），**只有 CI 编译门禁**，窗口/Metal/层序/
+  DPI/原生对话框/视觉一律 **NOT VERIFIED**，`macos-release` 仍 `if: false`；
   **Android（2026-10-28 起）与 Web 是真实宿主/会话，只保留编译与（Web 侧）CI 冒烟门禁**，
   不代表真机/真实 GPU 验收。旧平台发布/打包脚本已退役或禁用；Linux release 暂时不可用，
   等待替代打包验收。**不要**把已退役脚本当作可用流程。
@@ -331,8 +335,17 @@ cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 w
   视觉/运行时（spike-1/4/5、z-order、DPI、ProcessFailed、picker、runtime-present 出帧）**NOT RUN**。
   **禁止**写“Windows 已验收”；Wine 像素结论必须写
   `NOT VERIFIED (Wine limitation, bug 55432/58921)`。详见 `docs/windows-app.md`。
-- **macOS**（`apps/app-macos`）：显式 NOT IMPLEMENTED 失败桩（`yacr-macos`），只随
-  `--all-targets` 编译；不打可分发 GUI。
+- **macOS**（`apps/app-macos`，bin `yacr-macos`）：**真实 Tauri 2 宿主，已实现**——透明 WKWebView
+  （React chrome）**在上**、原生 CAD 子 `NSView` **在下**（`addSubview:positioned:relativeTo:`
+  `.below`），渲染器是同一个 renderer-only wgpu，macOS 走 **Metal**（`ProbeBackendPolicy` 新增
+  `metal`，`Auto` 在 macOS = Metal）。文件打开用主线程 `NSOpenPanel`，配置在
+  `~/Library/Application Support/yacr`。**验收上限 = CI `macos-check` 编译**（`macos-latest`，
+  前端构建后 `cargo check -p app-macos --all-targets --locked`，**不运行**）。窗口/透明合成/
+  层序/Retina/Metal present/弹窗/对话框/像素/性能**全部 NOT VERIFIED**；本机 Linux 无 Apple SDK，
+  只能用假 `cc` 跳过 ObjC helper 的 C 步骤做**类型检查**（`cargo check --target
+  aarch64-apple-darwin`；不链接、不产物），CI 编译门禁才是编译证据。打包仍退役非零。renderer crash
+  触发 ④
+  **显式未实现**（tauri 2.12.3/wry 0.57 无 WKWebView 终止钩子）。详见 `docs/macos-app.md`。
 - **Android**（`apps/app-android`）：**真实 Tauri 2 宿主**（2026-10-28 起，WebView/资源载体；
   `src-tauri/` 布局，`gen/android` 已提交）。wasm `dom-canvas` 会话是唯一 CAD 权威，原生侧只注册
   `canvas_session_status` / `canvas_runtime_failed`。构建 = `scripts/build-android.sh`

@@ -20,23 +20,23 @@
 //! by `scripts/check-architecture.py`). Window creation, the GTK overlay
 //! bridge and renderer telemetry stay in the concrete host.
 //!
-//! **Target gating**: `tauri` is a Linux/Windows-target dependency, and every
-//! module is compiled out elsewhere. On wasm the crate is an empty shell, so
+//! **Target gating**: `tauri` is a Linux/Windows/macOS-target dependency, and
+//! every module is compiled out elsewhere. On wasm the crate is an empty shell, so
 //! `cargo check --workspace --lib --target wasm32-unknown-unknown` keeps
 //! validating isolation.
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub mod commands;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub mod popup;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub mod state;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub mod threading;
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub use commands::{register_commands, CadCommandAck, CadCommandAlias, COMMAND_NAMES};
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub use popup::DesktopPopupTarget;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub use state::{lock, new_shared, ProbeShared, Shared, ShellPopupHost, ShellTelemetry};

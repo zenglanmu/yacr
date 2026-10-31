@@ -48,13 +48,21 @@ pub struct HeadlessGpu {
 
 /// The backends a preference is allowed to use.
 ///
-/// Native `Auto`/`WebGpu` accept Vulkan and GL (Vulkan is preferred when both
-/// are present); `WebGl2` is restricted to GL.
+/// Native `Auto`/`WebGpu` accept the platform's native backends: Vulkan and GL
+/// on Linux/Windows (Vulkan preferred when both are present), Metal on macOS
+/// (the only backend wgpu compiles there). `WebGl2` is restricted to GL.
 fn backends_for(preference: BackendPreference) -> wgpu::Backends {
     match preference {
         BackendPreference::WebGl2 => wgpu::Backends::GL,
         BackendPreference::Auto | BackendPreference::WebGpu => {
-            wgpu::Backends::VULKAN | wgpu::Backends::GL
+            #[cfg(target_os = "macos")]
+            {
+                wgpu::Backends::METAL
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                wgpu::Backends::VULKAN | wgpu::Backends::GL
+            }
         }
     }
 }
@@ -64,7 +72,14 @@ fn backend_priority(preference: BackendPreference) -> &'static [wgpu::Backend] {
     match preference {
         BackendPreference::WebGl2 => &[wgpu::Backend::Gl],
         BackendPreference::Auto | BackendPreference::WebGpu => {
-            &[wgpu::Backend::Vulkan, wgpu::Backend::Gl]
+            #[cfg(target_os = "macos")]
+            {
+                &[wgpu::Backend::Metal]
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                &[wgpu::Backend::Vulkan, wgpu::Backend::Gl]
+            }
         }
     }
 }

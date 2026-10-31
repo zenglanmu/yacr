@@ -1,132 +1,130 @@
 # macOS 宿主（`Yacr.app` / `yacr-macos`）
 
-> **已退役（2026-10-16）**：macOS GUI **未实现**。`apps/app-macos` 是显式 NOT IMPLEMENTED 失败桩
-> （bin `yacr-macos`，打印诊断并非零退出）；`scripts/package-macos-release.sh` 非零失败；
-> CI `macos-check` 只做编译。**没有可运行/可分发的 macOS GUI。** 当前桌面 UI 见
-> `docs/react-linux-app.md` 与 [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文保留为历史。
-
-> 状态：**构建路径为 GitHub Actions `macos-latest` 原生构建**（`macos-check` /
-> `macos-release`）。本仓库的开发主机是 Linux，**没有** Apple SDK/链接器，无法在本机
-> 产出 Mach-O 可执行文件（Slint 的 Cocoa/Metal 后端也无法真正跨平台链接），因此本机
-> 不产出 macOS 包。真实 Mac 上的窗口、Metal GPU、原生文件对话框与配置目录写入
-> **未验证**；CI job 也未在本环境运行（见「证据与限制」）。
+> **状态（2026-10-31）**：`apps/app-macos` 已是**真实实现的 Tauri 2 原生宿主**（不再是 NOT
+> IMPLEMENTED 失败桩）。合成方向与 Linux/Windows 相同：**透明 WKWebView（React chrome）在上、
+> 原生 CAD 子 `NSView` 在下**，渲染器仍是同一个 renderer-only wgpu（macOS 上走 **Metal**）。
+> **验收上限 = 编译**：`macos-check` 在 GitHub `macos-latest` 上做 `cargo check`（不运行）；
+> 窗口、Metal、透明合成、层序、DPI、原生对话框、配置写入与像素/视觉**全部 NOT VERIFIED**。
+> 打包仍未实现（`scripts/package-macos-release.sh` 非零退出）。
 
 ## 组成
 
-- `apps/app-macos`：macOS 二进制 `yacr-macos`。它是**薄封装**，直接调用
-  `apps/app-linux` 暴露的共享桌面入口 `app_linux::entry::run()`；控制器、Slint 桥、
-  测量/绘制/字体安装与 Linux/Windows 宿主编译同一份实现。
-- `apps/app-linux`：crate 名保留 `app-linux`，但宿主实现按
-  `cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))` 编译，
-  成为三个桌面宿主共享的实现层。平台差异只在 `src/host/` 内按 cfg 选择：
-  - 文件选择：Linux 走 XDG portal（`ashpd`）；Windows 与 macOS 走系统通用文件
-    对话框（`rfd`，Windows 用 Win32 通用对话框，macOS 用 `NSOpenPanel`）。
-  - 配置目录：Linux `$XDG_CONFIG_HOME/yacr` 或 `$HOME/.config/yacr`；
-    Windows `%APPDATA%\yacr`，回退 `%LOCALAPPDATA%\yacr`；macOS
-    `$HOME/Library/Application Support/yacr`（**不**读取 `XDG_CONFIG_HOME`，
-    避免 shell 变量重定向存储）。
-  - 系统默认字体：macOS 读取 `/System/Library/Fonts`（含 `Supplemental/`）与
-    `/Library/Fonts` 的常见 UI 面
-    （`cad-platform::fonts::local::system_default_candidates`）；没有 `fc-match`。
-- 渲染后端：Slint + 共享 CAD wgpu 渲染器（`renderer-femtovg-wgpu`）；macOS 上 wgpu
-  走 Metal。窗口适配器由 Slint 的 Cocoa 后端提供。
-- 无头离屏（`--headless --output DIR`）：离屏验证平台**强制软件 Vulkan**，macOS 没有
-  Vulkan，因此 `--headless` 在 macOS 上被显式报告为不支持（解析后立即返回错误），
-  不会静默降级或伪造成功。
+- `apps/app-macos`（bin `yacr-macos`）：唯一 macOS 宿主 crate。
+  - `src/entry.rs`：Tauri 应用 + 单事件循环；`MainEventsCleared` 驱动 `host::tick`，
+    `ExitRequested`/`Exit` 先释放 CAD 表面与弹窗模态再退出。非 macOS 目标返回显式
+    NOT IMPLEMENTED（二进制非零退出）。
+  - `src/host/{init,mod,tick,popup,layers}.rs`：窗口/子 webview 构建、共享状态与 telemetry、
+    每 tick 的 CAD 命令/输入/布局/出帧、in-DOM 弹窗生命周期、图层面板投影。
+  - `src/macos_surface.rs`：CAD 子 `NSView` + wgpu/Metal presenter 的生命周期与几何权威
+    （见下）。
+  - `src/platform.rs`：`cad-platform` 的 macOS 实现（文件打开、配置/偏好、DOM surface 度量）。
+  - `src/main_thread.rs` / `src/redraw.rs`：共享 `cad-desktop-shell` 主线程调度 seam 的 Tauri
+    适配器，以及让单事件循环保持唤醒的 redraw pump（与 Linux/Windows 同一协议）。
+- 共享层：`cad-ui-core`（协议/布局/CAD 会话/i18n）、`cad-desktop-shell`（`#[tauri::command]`
+  薄壳与共享状态）、`apps/desktop-ui`（唯一桌面 React UI，构建产物 `../desktop-ui/dist`）。
+  macOS 宿主直接 import，不保留 re-export 兼容层。
+- `cad-render-wgpu` 增加 **Metal** 后端选择：`ProbeBackendPolicy::Metal`（`"metal"`），并且
+  `Auto` 在 macOS 上等于 `Backends::METAL`（其他平台仍是 `VULKAN | DX12`）。显式
+  `vulkan` 策略在 macOS 上被拒绝（`UnsupportedBackendPolicy`），**没有**静默换后端。
+  headless 侧的 `BackendPreference::{Auto,WebGpu}` 在 macOS 同样走 Metal。
 
-## 打包
-
-`scripts/package-macos-release.sh`（**只能在 macOS 上运行**）产出：
+## 合成方向与几何
 
 ```
-target/macos/<arch>/dist/yacr-<version>-macos-<arch>.tar.gz   (+ .sha256)
+NSWindow (Tauri, transparent)
+└── contentView (window.ns_view())
+    ├── CAD child NSView          ← wgpu/Metal surface, display-only
+    └── WKWebView (webview.inner(), React chrome, single input funnel)
 ```
 
-`<arch>` 默认为 `universal`（同时构建 `aarch64-apple-darwin` 与
-`x86_64-apple-darwin`，用 `lipo -create` 合成通用二进制）；`MACOS_ARCH=arm64` 或
-`x86_64` 可只构建单一架构。压缩包内容：
+- CAD 子视图用 `addSubview:positioned:relativeTo:` **插在 WKWebView 之下**
+  （`NSWindowOrderingMode::Below`）；`ensure_order` 每 tick 幂等复查兄弟顺序，发现被 wry/主题
+  重排后重新插到 webview 之下。CAD 视图不覆盖 responder、不装 gesture recognizer，**永不接收
+  OS 输入**；输入唯一漏斗仍是 `.native-input` → `probe_input` IPC。
+- **表面尺寸**只来自 `cad_ui_core::layout::physical_content_size`（与 render session 同一
+  `round(side · scale)` 公式），presenter 的 size guard 因此不会因独立取整拒绝每一帧。
+- **视图 frame** 用 AppKit 的**逻辑点**（左下原点）：DOM 的 top-left `y` 换算为
+  `content_height − (y + height)`；Retina 缩放由层系统处理。
+- **Metal 层**：宿主不创建 `CAMetalLayer`。wgpu-hal（经 `raw-window-metal`）把子 `NSView`
+  设为 layer-backed 并插入/观察 `CAMetalLayer`，resize 与 backing scale 自动跟随；因此
+  表面创建**必须在主线程**完成（`raw-window-metal` 会 panic），`try_init_gpu` 在非主线程时
+  显式返回失败而不是 panic。
+- present mode 固定 **Fifo**：Metal 不保证广告 `Mailbox`，Windows 的
+  `MailboxElseImmediate` 会退到 `Immediate`，因此 macOS 不使用该策略。
+- 没有 DirectComposition 对应步骤：presenter 直接呈现到 layer-backed swapchain；成功初始化
+  后 `BridgeState::Ready`，布局变化在同一 tick 内 `resize` 到权威尺寸。
 
-- `Yacr.app/`：自包含 GUI 应用包。`Contents/MacOS/yacr-macos` 是通用 Mach-O 可执行
-  文件，`Contents/Info.plist` 声明 `CFBundleExecutable=yacr-macos`、`LSMinimumSystemVersion=11.0`
-  与 dwg/dxf Viewer 文档类型，`Contents/Resources/fonts/` 是 CAD 字体包；
-- `bin/cad-cli-tools`：release 无头 CLI（含 `render`）；
-- `bin/yacr-macos`：指向应用包内 GUI 可执行文件的符号链接（便于从终端运行）；
-- `fonts`：指向 `Yacr.app/Contents/Resources/fonts` 的符号链接，使同级 CLI 也能自动
-  加载同一份字体包（避免在压缩包里重复约 55 MiB 字体）；
-- `docs/`、`scripts/{fetch-test-dwg,render-smoke}.sh`、`LICENSE`、`README.md`、
-  `THIRD_PARTY_NOTICES.md`、`PACKAGE.txt`。
+## 文件、配置与弹窗
 
-打包脚本在打包内做以下**校验**（任一失败即中止，不产出半成品）：
+- **打开**：`NSOpenPanel`（AppKit）只允许本地 `.dwg`/`.dxf`；取消是 `FileEvent::Cancelled`，
+  读取失败是显式 `Failed`，从不伪造成功。AppKit 要求主线程，因此 `begin_open` 的 worker
+  用 `AppHandle::run_on_main_thread` 把面板送到宿主主线程并等待结果（单飞：一次只允许一个
+  打开请求，终态事件容量 1）。
+- **配置/偏好**：`$HOME/Library/Application Support/yacr/{config.json,preference.json}`；
+  `HOME` 不可解析时 store 明确拒绝持久化（回退内存默认），不静默写别处。
+  `wgpu_backend` 仍从同一 `preference.json` 读取（`auto`/`vulkan`/`dx12`/`metal`）。
+- **保存/导出**：`begin_save` / `write_atomic` 显式 `Unsupported`（与 Windows 宿主同一边界）。
+- **弹窗**：仍是同一 React 树的 in-DOM 覆盖层；共享 `cad-desktop-shell::popup` 的模态围栏与
+  `close`/`reload`/`exit` 触发保留。**renderer crash 触发 ④ 未实现**：tauri 2.12.3 / wry 0.57
+  没有暴露 WKWebView 内容进程终止事件，宿主只打印一条诚实缺口日志，不伪造崩溃通知。
+- **透明窗口**：`WindowBuilder::transparent(true)` + `WebviewBuilder::transparent(true)`；
+  Tauri 2.12.1+ 不再需要 `macOSPrivateApi`（该配置项为 no-op），本仓库也未启用它。
 
-- 两个可执行文件必须是 Mach-O（`file`），且 `lipo -archs` 打印目标架构；
-- `otool -L` 列出的每个动态依赖必须来自系统（`/usr/lib/`、`/System/Library/`、
-  `/System/iOSSupport/`）；出现 `@rpath`/Homebrew 等非系统库即报错，避免产出“只在构建机
-  能跑”的包；
-- 可选 `YACR_MACOS_SMOKE=1`：运行打包内 CLI `--help`，并断言 GUI 对 `--bogus value`
-  报告文档化的参数解析错误后退出 1（只验证参数解析，不打开窗口/GPU）。
+## 构建与 CI
 
-字体包默认 `WITH_FONTS=1`，经 `scripts/fetch-fonts.sh` 下载 mlightcad 全量目录并合并已
-提交的 QCAD `osifont.ttf`；`WITH_FONTS=0` 为离线构建，只带已提交字体（见 `docs/fonts.md`）。
+**唯一编译证据来自 GitHub Actions `macos-latest`**（`.github/workflows/build.yml`）：
 
-## 构建
-
-**主路径：GitHub Actions `macos-latest` 原生构建。** `.github/workflows/build.yml`：
-
-- `macos-check`（每次 push/PR）：`cargo check -p app-macos --all-targets --locked`
-  原生 arm64 macOS 编译门禁（不运行 app）。
-- `macos-release`（`workflow_dispatch` 或 `v*` tag）：安装
-  `aarch64-apple-darwin` + `x86_64-apple-darwin`，执行
-  `MACOS_ARCH=universal WITH_FONTS=1 bash scripts/package-macos-release.sh`，上传
-  `yacr-macos-release` artifact（tar.gz + sha256）。
-
-本机（Linux）无法复现该构建；但可以做**静态**交叉检查（不链接、不产出 Mach-O，仅类型
-检查 macOS 门控代码，需联网下载该 target 的 std 与 macOS 依赖 crate）：
-
-```bash
-rustup target add aarch64-apple-darwin
-cargo check -p app-macos --all-targets --target aarch64-apple-darwin --locked
-cargo clippy -p app-macos -p app-linux --all-targets --target aarch64-apple-darwin --locked -- -D warnings
-```
-
-这只能证明 macOS 门控代码在类型层面成立，**不**产出 Mach-O，也不代表任何运行/渲染结果。
-
-## 平台行为
-
-- 双击 `Yacr.app`（或 `./bin/yacr-macos --open /path/drawing.dwg`）启动 GUI；无
-  `--open` 时显示内置演示几何。
-- 「打开」按钮调用 `NSOpenPanel`，过滤 `*.dwg`/`*.dxf`；取消返回取消诊断，不伪造成功。
-- 字体：先读应用包内 `Contents/Resources/fonts/`（或同级 `fonts/`、`--fonts-dir`），
-  再合并 `--font NAME=PATH`，最后以系统默认面作为第一回退；缺字体回退到默认轮廓面，
-  不静默丢字。
-- 配置与偏好持久化到 `~/Library/Application Support/yacr/{config.json,preferences.json}`。
+- `macos-check`（每次 push/PR）：先 `npm ci && npm test && npm run build` 生成
+  `apps/desktop-ui/dist`（`tauri::generate_context!` 在编译期嵌入它），再执行
+  `cargo check -p app-macos --all-targets --locked`。**只编译，不运行**；日志上传为 artifact。
+- Linux 本机**没有 Apple SDK**，`objc2-exception-helper` 的 `try_catch.m` 不能用宿主 `cc`
+  编译。作为**类型检查的替代**（不是构建、不是链接），可以为该 C 步骤提供一个失败即无输出的
+  假 `cc`（`cargo check` 不链接），然后运行：
+  `CC_aarch64_apple_darwin=<shim> TARGET_CC=<shim> cargo check -p app-macos --target
+  aarch64-apple-darwin --all-targets --locked`。
+  **边界**：这会让真实 tauri/wgpu/objc2 依赖的 Rust 代码被完整类型检查（含 macOS 专属模块），
+  但 **没有** Apple SDK、没有 C 编译、没有链接、没有 Mach-O；**不得**冒充 `macos-check` 或任何
+  运行/视觉证据。
+- 本机可运行的非 macOS 证据：`cargo check -p app-macos`（空壳/显式拒绝分支）、
+  `python3 scripts/test-macos-host.py`（静态接线契约 + 自测）、`check-architecture.py`、
+  `check-workflows.py`、`check-i18n.py`。
+- **打包未实现**：`scripts/package-macos-release.sh` 仍非零退出；`macos-release` job 仍
+  `if: false` 的 RETIRED 占位。没有 `Yacr.app`、签名或 notarization。
 
 ## 证据与限制
 
-**已实测（本仓库，Linux 主机）**
+**已执行（本轮）**
 
-- `cargo check -p app-macos` 在 **Linux 主机**（`cfg(not(macos))` 分支）通过；这只是
-  证明新增 workspace 成员在非 macOS 上仍可编译。
-- **macOS 门控代码路径已用交叉 `cargo check` 类型检查**（Rust 1.99.0，本机 Linux，
-  `rustup target add aarch64-apple-darwin`）：`cargo check -p app-macos --all-targets
-  --target aarch64-apple-darwin --locked` 与
-  `cargo clippy -p app-macos -p app-linux --all-targets --target aarch64-apple-darwin
-  --locked -- -D warnings` 均通过。这只证明 macOS 分支（`NSOpenPanel`、`Application
-  Support`、`/System/Library/Fonts`、`entry.rs` 的 macOS 分支）在类型层面成立，**不**
-  链接、不产出 Mach-O、不运行。
-- `python3 scripts/check-architecture.py`、`scripts/check-workflows.py`、
-  `scripts/test-package-macos-release.py` 在 Linux 上通过：workspace DAG/边界、CI job
-  声明与打包脚本的静态/变异契约成立。
+- `cargo check -p app-macos --all-targets --locked`（Linux 主机，非 macOS 分支）通过。
+- **macOS 目标的完整类型检查（有界）**：用仅替换 ObjC helper C 步骤的假 `cc`
+  （`cargo check` 不链接）运行
+  `cargo check -p app-macos --target aarch64-apple-darwin --all-targets --locked` 与
+  `cargo clippy -p app-macos --target aarch64-apple-darwin --all-targets --locked -- -D warnings`
+  **均通过**。这覆盖真实 tauri/wgpu/objc2 依赖下的 `macos_surface`/`host`/`platform` 类型与
+  lint，但**不是** Apple SDK 构建、不是链接、不是运行证据；`macos-check` 才是编译门禁。
+- 为让 macOS 目标成立而修改的核心契约：`cad-render-wgpu` 增加 Metal 策略（`Auto` 在 macOS =
+  Metal），并把 Vulkan-only 的 VRAM 探测（`gpu_memory::vram`）在 macOS 上显式返回 `None`
+  （Metal 无该查询，预算保持 `Unprobed`，**不猜**显存）；`cad-desktop-shell` 的 target 门禁
+  加入 macOS。相关 Linux 侧 clippy/单测通过。
+- `cargo clippy -p cad-render-wgpu --all-targets --locked -- -D warnings` 与
+  `cargo test -p cad-render-wgpu --lib native_presenter::tests`（33 passed）通过：Metal 策略/
+  token/`Auto` 平台映射与既有 Vulkan/DX12 行为契约均成立。
+- `python3 scripts/test-macos-host.py`、`check-architecture.py`、`check-workflows.py`、
+  `check-i18n.py` 通过（源码/清单/工作流静态契约，**不是**运行时证据）。
+- GitHub `macos-check`：以本轮提交的分支运行结果为准（见交接记录；未运行前必须写 NOT RUN）。
 
-**NOT RUN / 未验证**
+**NOT VERIFIED / NOT RUN**
 
-- `macos-check` / `macos-release` GitHub Actions job 本身**未运行**（本环境无 macOS
-  runner）：真实 arm64 编译、universal `lipo`、`otool` 依赖校验与 artifact 上传尚无
-  job 证据。
-- macOS 门控代码路径**未链接、未在 macOS 上运行**（交叉 `cargo check` 只做类型检查，
-  不代替链接/运行）。
-- 真实 Mac 上的窗口、DPI/Retina、Metal 渲染与像素/视觉验收；原生文件对话框；
-  配置目录写入。
-- `--headless` 离屏出图：macOS 上显式不支持（无 Vulkan）。
-- 代码签名与 notarization 未做；Gatekeeper 可能对未签名应用给出警告。
+- 真实 Mac 上的窗口创建、透明合成（WKWebView `drawsBackground=NO` + 窗口非不透明）、
+  CAD 子视图层序（是否始终在 WKWebView 之下）、Retina/DPI、Metal adapter 选择、present、
+  像素/视觉、OCR/截图、输入事件、`NSOpenPanel`、配置写入。
+- 高 DPI 下 `physical_content_size` 与层 bounds/contentsScale 的像素一致性；窗口 resize 时
+  `Outdated`/reconfigure 的时延。
+- 渲染器 crash 触发 ④（显式未实现）；原生菜单/快捷键、辅助功能、App Store 私有 API
+  （wry 的 `drawsBackground`）合规性。
+- 性能、功耗（透明窗口在 macOS 上有已知合成开销）、跨 macOS 版本 / Intel Mac 行为。
+- 打包、签名、notarization、Gatekeeper。
+- 本机 macOS 交叉检查的**真实 C 编译/链接**（ObjC helper 用假 `cc` 跳过，见上）。
 
-以上限制不得推广为 macOS 兼容性或性能结论。
+以上均不得推广为 macOS 兼容性、视觉正确性或性能结论。历史 Slint 时期（`app-linux` 共享入口、
+`rfd`、`--headless` 强制 Vulkan）的实现与证据**已随 Slint 退役**，不得与当前 React/Tauri 宿主混用。

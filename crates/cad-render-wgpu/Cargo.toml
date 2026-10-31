@@ -36,16 +36,20 @@ cad-representation.workspace = true
 # Headless software-Vulkan path (native only): blocking on wgpu's async
 # adapter/device requests and PNG-encoding the readback for golden inspection.
 #
-# `ash` (native only, default feature set) is the exact Vulkan loader binding
-# wgpu-hal 30.0.1 already resolves — `Cargo.lock` must keep exactly one `ash`
-# version (0.38.0+1.3.281). It backs the single read-only
+# `png`/`futures-lite` are the shared native headless path. `ash` is the exact
+# Vulkan loader binding wgpu-hal 30.0.1 already resolves — `Cargo.lock` must keep
+# exactly one `ash` version (0.38.0+1.3.281). It backs the single read-only
 # `vkGetPhysicalDeviceMemoryProperties` query in `gpu_memory::vram` that wgpu
-# does not expose (wgpu-hal's own `MemoryProperties` type is private). It must
-# never become reachable from the wasm canvas path, which is why it lives on this
-# target-specific edge only.
+# does not expose (wgpu-hal's own `MemoryProperties` type is private).
+#
+# `ash` is **not** enabled for wasm (the canvas path has no HAL) or macOS (wgpu
+# does not compile its Vulkan HAL there and Metal exposes no memory-heap query),
+# so the crate never depends on a backend the target cannot use.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 png.workspace = true
 futures-lite.workspace = true
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))'.dependencies]
 ash = "=0.38.0"
 
 # The browser surface path lives here so wgpu stays inside the renderer crate

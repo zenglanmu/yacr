@@ -892,5 +892,10 @@
   "mobile.drawer": "Tools",
   "mobile.close": "Close",
   "mobile.send": "Run",
-  "mobile.refusal.unsupported": "None of these tools can run yet: this host does not offer their commands."
+  "mobile.refusal.unsupported": "None of these tools can run yet: this host does not offer their commands.",
+  "macos.picker_title": "Open a DWG or DXF drawing",
+  "macos.picker_filter": "CAD drawings (DWG, DXF)",
+  "macos.picker_empty": "The file picker returned no file",
+  "macos.picker_local": "Only local files can be opened",
+  "macos.picker_failed": "System file picker unavailable; use --open PATH instead: {error}"
 }

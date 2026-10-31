@@ -96,6 +96,9 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     ),
     "macos-check": (
         "cargo check -p app-macos --all-targets --locked",
+        "actions/setup-node@v4",
+        "apps/desktop-ui",
+        "npm run build",
         "actions/upload-artifact",
         "macos-check.log",
     ),
