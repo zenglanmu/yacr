@@ -241,6 +241,7 @@ impl Application {
                 transaction: change_set.transaction,
                 label: label.to_string(),
                 patches,
+                block_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

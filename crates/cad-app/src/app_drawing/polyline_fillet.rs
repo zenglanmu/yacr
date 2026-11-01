@@ -766,6 +766,7 @@ impl Application {
                 transaction: change_set.transaction,
                 label: label.to_string(),
                 patches: vec![drawing_patch(entity_id, Some(entity), Some(stored))],
+                block_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

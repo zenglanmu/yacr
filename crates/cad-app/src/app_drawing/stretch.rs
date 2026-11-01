@@ -519,6 +519,7 @@ impl Application {
                 transaction: change_set.transaction,
                 label: "stretch entities".into(),
                 patches,
+                block_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

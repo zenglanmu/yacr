@@ -196,6 +196,7 @@ impl Application {
                 transaction: change_set.transaction,
                 label: format!("match properties from {}", source.id.0),
                 patches,
+                block_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

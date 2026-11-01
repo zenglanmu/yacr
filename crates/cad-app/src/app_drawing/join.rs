@@ -245,6 +245,7 @@ impl Application {
                 transaction: change_set.transaction,
                 label: "join entities".into(),
                 patches,
+                block_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

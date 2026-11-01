@@ -78,6 +78,7 @@ impl Application {
                 transaction: change_set.transaction,
                 label: label.into(),
                 patches,
+                block_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
@@ -195,6 +196,7 @@ impl Application {
                 transaction: change_set.transaction,
                 label: "mirror entities".into(),
                 patches,
+                block_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

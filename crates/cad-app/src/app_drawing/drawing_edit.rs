@@ -109,6 +109,7 @@ impl Application {
                 transaction: change_set.transaction,
                 label: "move entities".into(),
                 patches,
+                block_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
@@ -220,6 +221,7 @@ impl Application {
                 transaction: change_set.transaction,
                 label: "erase entities".into(),
                 patches,
+                block_patches: Vec::new(),
                 merge_key: None,
             },
         )?;
@@ -415,6 +417,7 @@ impl Application {
                 transaction: change_set.transaction,
                 label: "copy entities".into(),
                 patches,
+                block_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

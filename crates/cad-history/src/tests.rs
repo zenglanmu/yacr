@@ -30,6 +30,7 @@ fn drawing_record(id: u128) -> DrawingUndoRecord {
         transaction: TransactionId(id),
         label: "create line".into(),
         patches: vec![drawing_patch(EntityId(id), None, Some(entity(id, 0.0)))],
+        block_patches: Vec::new(),
         merge_key: None,
     }
 }
@@ -77,6 +78,7 @@ fn merge_key_coalesces_records() {
             Some(entity(1, 0.0)),
             Some(entity(1, t)),
         )],
+        block_patches: Vec::new(),
         merge_key: Some("drag-1".into()),
     };
     history.record_drawing(r(1.0)).unwrap();
@@ -96,6 +98,7 @@ fn coalesced_creation_and_deletion_remove_the_entry() {
             transaction: TransactionId(1),
             label: "edit".into(),
             patches: vec![drawing_patch(EntityId(5), None, Some(entity(5, 1.0)))],
+            block_patches: Vec::new(),
             merge_key: Some("edit".into()),
         })
         .unwrap();
@@ -104,6 +107,7 @@ fn coalesced_creation_and_deletion_remove_the_entry() {
             transaction: TransactionId(2),
             label: "delete".into(),
             patches: vec![drawing_patch(EntityId(5), Some(entity(5, 1.0)), None)],
+            block_patches: Vec::new(),
             merge_key: Some("edit".into()),
         })
         .unwrap();
@@ -120,6 +124,7 @@ fn empty_record_is_rejected() {
         transaction: TransactionId(1),
         label: "noop".into(),
         patches: Vec::new(),
+        block_patches: Vec::new(),
         merge_key: None,
     });
     assert!(matches!(result, Err(CadError::InvalidInput(_))));
@@ -257,4 +262,154 @@ fn clear_discards_everything() {
     assert!(!history.can_undo());
     assert!(!history.can_redo());
     assert_eq!(history.used_bytes(), 0);
+}
+
+fn block_row(id: u128, name: &str, members: &[u128]) -> cad_db::BlockRow {
+    cad_db::BlockRow {
+        definition: cad_db::BlockDefinition {
+            id: BlockId(id),
+            entities: members.iter().copied().map(EntityId).collect(),
+            dynamic_visibility: None,
+        },
+        metadata: Some(cad_db::BlockMetadata {
+            name: name.into(),
+            base_point: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }),
+    }
+}
+
+fn block_patch(
+    id: u128,
+    before: Option<cad_db::BlockRow>,
+    after: Option<cad_db::BlockRow>,
+) -> cad_db::BlockPatch {
+    cad_db::BlockPatch {
+        id: BlockId(id),
+        before,
+        after,
+    }
+}
+
+/// A block-only record is a complete undo step: the definition row (and its
+/// metadata) is the whole edit, so no entity patch is required.
+#[test]
+fn block_only_record_is_accepted_and_round_trips() {
+    let mut history = History::default();
+    let record = DrawingUndoRecord {
+        transaction: TransactionId(9),
+        label: "create block".into(),
+        patches: Vec::new(),
+        block_patches: vec![block_patch(3, None, Some(block_row(3, "B1", &[1, 2])))],
+        merge_key: None,
+    };
+    history.record_drawing(record.clone()).unwrap();
+    assert_eq!(history.undo_depth(), 1);
+    assert!(history.used_bytes() > 0);
+
+    let back = history.begin_drawing_undo().unwrap();
+    assert_eq!(back, record, "the block patch is retained verbatim");
+    history.finish_drawing().unwrap();
+    let forward = history.begin_drawing_redo().unwrap();
+    assert_eq!(forward, record);
+    history.finish_drawing().unwrap();
+    assert_eq!(history.undo_depth(), 1);
+}
+
+#[test]
+fn block_patch_without_a_before_or_after_state_is_rejected() {
+    let mut history = History::default();
+    let mut record = drawing_record(1);
+    record.block_patches = vec![block_patch(3, None, None)];
+    assert!(matches!(
+        history.record_drawing(record),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(!history.can_undo());
+}
+
+#[test]
+fn duplicate_block_ids_are_rejected() {
+    let mut history = History::default();
+    let mut record = drawing_record(1);
+    record.block_patches = vec![
+        block_patch(3, None, Some(block_row(3, "B1", &[1]))),
+        block_patch(3, None, Some(block_row(3, "B2", &[2]))),
+    ];
+    assert!(matches!(
+        history.record_drawing(record),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(!history.can_undo());
+}
+
+/// Block changes are never coalesced: merging a definition into an earlier
+/// record could silently drop it, so a merge key is refused outright and the
+/// existing history stays byte-for-byte unchanged.
+#[test]
+fn merge_key_with_block_patches_is_refused_without_touching_history() {
+    let mut history = History::default();
+    history.record_drawing(drawing_record(1)).unwrap();
+    let bytes = history.used_bytes();
+
+    let mut merged = drawing_record(2);
+    merged.merge_key = Some("drag".into());
+    merged.block_patches = vec![block_patch(3, None, Some(block_row(3, "B1", &[1])))];
+
+    assert!(matches!(
+        history.record_drawing(merged.clone()),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert_eq!(history.undo_depth(), 1, "no record was merged or added");
+    assert_eq!(history.used_bytes(), bytes);
+    assert!(!history.can_redo());
+
+    // A block-only merged record is refused by the same rule.
+    let block_only = DrawingUndoRecord {
+        transaction: TransactionId(4),
+        label: "block".into(),
+        patches: Vec::new(),
+        block_patches: vec![block_patch(3, None, Some(block_row(3, "B1", &[1])))],
+        merge_key: Some("drag".into()),
+    };
+    assert!(matches!(
+        history.record_drawing(block_only),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert_eq!(history.undo_depth(), 1);
+}
+
+#[test]
+fn approx_bytes_counts_block_rows_members_and_metadata() {
+    let plain = drawing_record(1);
+    let mut with_block = drawing_record(1);
+    with_block.block_patches = vec![block_patch(3, None, Some(block_row(3, "B1", &[1])))];
+    assert!(
+        with_block.approx_bytes() > plain.approx_bytes(),
+        "a retained block row must be accounted for"
+    );
+
+    let mut more_members = with_block.clone();
+    more_members.block_patches[0]
+        .after
+        .as_mut()
+        .unwrap()
+        .definition
+        .entities
+        .extend([EntityId(2), EntityId(3)]);
+    assert!(more_members.approx_bytes() > with_block.approx_bytes());
+
+    let mut longer_name = with_block.clone();
+    longer_name.block_patches[0]
+        .after
+        .as_mut()
+        .unwrap()
+        .metadata
+        .as_mut()
+        .unwrap()
+        .name = "B".repeat(128);
+    assert!(longer_name.approx_bytes() > with_block.approx_bytes());
 }

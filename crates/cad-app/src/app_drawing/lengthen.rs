@@ -196,6 +196,7 @@ impl Application {
                 transaction: change_set.transaction,
                 label: "lengthen curve".into(),
                 patches: vec![drawing_patch(source_id, Some(before), Some(after))],
+                block_patches: Vec::new(),
                 merge_key: None,
             },
         )?;

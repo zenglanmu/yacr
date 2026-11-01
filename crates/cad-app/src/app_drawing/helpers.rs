@@ -569,16 +569,21 @@ pub(super) fn offset_arc(
 /// Apply a list of drawing patches to a database (used by undo/redo).
 ///
 /// `forward` selects the `after` side (redo); otherwise the `before` side is
-/// applied (undo). This goes through the database's single validated write path
-/// so a patch that no longer matches the store is refused, never silently
-/// force-written. A re-inserted side also restores its captured display state
-/// (render attributes + dynamic-visibility membership), which the delete path
-/// prunes and the entity alone does not carry.
+/// applied (undo). Both the entity batch and the block batch are selected the
+/// same way and committed through the database's single validated combined write
+/// path ([`DrawingDatabase::apply_drawing_changes_with_blocks`]), so a patch
+/// that no longer matches the store is refused, never silently force-written.
+/// That path owns the phase order (block creates before member moves, block
+/// deletes after the members leave), so undo and redo never reorder manually.
+/// A re-inserted side also restores its captured display state (render
+/// attributes + dynamic-visibility membership), which the delete path prunes and
+/// the entity alone does not carry.
 pub(crate) fn apply_drawing_patches(
     drawing: &mut DrawingDatabase,
     reason: &str,
     transaction: TransactionId,
     patches: &[DrawingPatch],
+    block_patches: &[cad_db::BlockPatch],
     forward: bool,
 ) -> CadResult<ChangeSet> {
     let changes: Vec<(EntityId, Option<DbEntity>)> = patches
@@ -594,7 +599,21 @@ pub(crate) fn apply_drawing_patches(
             )
         })
         .collect();
-    let mut change_set = drawing.apply_drawing_changes(reason, transaction, changes)?;
+    let block_changes: Vec<(BlockId, Option<cad_db::BlockRow>)> = block_patches
+        .iter()
+        .map(|p| {
+            (
+                p.id,
+                if forward {
+                    p.after.clone()
+                } else {
+                    p.before.clone()
+                },
+            )
+        })
+        .collect();
+    let mut change_set =
+        drawing.apply_drawing_changes_with_blocks(reason, transaction, &block_changes, changes)?;
     let mut restored: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
     for patch in patches {
         let (entity, state) = if forward {

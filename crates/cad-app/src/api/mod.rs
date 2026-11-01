@@ -404,6 +404,7 @@ impl Application {
             transaction: changes.transaction,
             label: "controlled API edits".into(),
             patches,
+            block_patches: Vec::new(),
             merge_key: None,
         };
         self.history

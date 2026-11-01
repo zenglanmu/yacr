@@ -71,13 +71,19 @@ pub fn drawing_patch_deleted(
 ///
 /// The patches carry the full before/after [`DbEntity`]; `transaction` is the
 /// id to reuse when the record is undone/redone so the resulting [`ChangeSet`]
-/// is traceable to the same logical edit. An empty `patches` is a caller bug
-/// and [`History`] rejects it, so a command can never record a silent no-op.
+/// is traceable to the same logical edit. An empty record (no entity and no
+/// block patch) is a caller bug and [`History`] rejects it, so a command can
+/// never record a silent no-op.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrawingUndoRecord {
     pub transaction: TransactionId,
     pub label: String,
     pub patches: Vec<DrawingPatch>,
+    /// Reversible block-table rows (definition + metadata) committed together
+    /// with `patches` as one revision. A future `BLOCK` command records the new
+    /// definition here and the member moves/reference insert as entity patches,
+    /// so undo/redo restores the whole edit atomically.
+    pub block_patches: Vec<cad_db::BlockPatch>,
     /// Records with an equal merge key may be coalesced (e.g. a drag). The
     /// drawing commands in `cad-app` deliberately pass `None` so each user
     /// action is exactly one undo step.
@@ -86,10 +92,31 @@ pub struct DrawingUndoRecord {
 
 impl DrawingUndoRecord {
     fn validate(&self) -> CadResult<()> {
-        if self.patches.is_empty() {
+        if self.patches.is_empty() && self.block_patches.is_empty() {
             return Err(CadError::InvalidInput(
-                "a drawing undo record needs at least one patch".into(),
+                "a drawing undo record needs at least one patch or block patch".into(),
             ));
+        }
+        // Block rows are not orthogonal per-key edits like a drag: coalescing
+        // them into the previous record could silently drop a definition or its
+        // members. Refuse the combination instead of guessing.
+        if self.merge_key.is_some() && !self.block_patches.is_empty() {
+            return Err(CadError::InvalidInput(
+                "a drawing undo record with block patches cannot be merged".into(),
+            ));
+        }
+        let mut block_ids = HashSet::new();
+        for patch in &self.block_patches {
+            if !block_ids.insert(patch.id) {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record cannot contain duplicate block ids".into(),
+                ));
+            }
+            if patch.before.is_none() && patch.after.is_none() {
+                return Err(CadError::InvalidInput(
+                    "a block patch needs a before or after state".into(),
+                ));
+            }
         }
         let mut ids = HashSet::new();
         for patch in &self.patches {
@@ -123,6 +150,16 @@ impl DrawingUndoRecord {
             }
             if let Some(e) = &p.after {
                 bytes += std::mem::size_of::<cad_db::DbEntity>() + e.object.type_key.len();
+            }
+        }
+        for p in &self.block_patches {
+            bytes += std::mem::size_of::<cad_db::BlockPatch>();
+            for row in p.before.iter().chain(p.after.iter()) {
+                bytes += std::mem::size_of::<cad_db::BlockRow>()
+                    + row.definition.entities.len() * std::mem::size_of::<EntityId>();
+                if let Some(metadata) = &row.metadata {
+                    bytes += metadata.name.len();
+                }
             }
         }
         bytes

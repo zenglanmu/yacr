@@ -36,6 +36,7 @@ impl Application {
             &format!("undo: {}", record.label),
             record.transaction,
             &record.patches,
+            &record.block_patches,
             false,
         ) {
             Ok(changes) => changes,
@@ -80,6 +81,7 @@ impl Application {
             &format!("redo: {}", record.label),
             record.transaction,
             &record.patches,
+            &record.block_patches,
             true,
         ) {
             Ok(changes) => changes,
