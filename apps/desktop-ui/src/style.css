@@ -748,13 +748,14 @@ button, input, select { font: inherit; color: inherit; }
   padding: 4px 8px 5px;
   background: var(--chrome-2); border-top: 1px solid var(--line);
 }
-/* The region is the history popup's containing block. The popup is absolute and
-   opens *above* the input row, over the drawing: it is an overlay, so opening it
-   never reflows the shell (the status bar keeps its 26px and the window never
-   grows past the viewport). The z-index lifts the popup over the workspace; the
-   modal layer and the shortcut menu are portalled to `body` at 50–60, so they
-   still win, and the ribbon's own popovers live inside the band, which the popup
-   cannot reach. */
+/* The region is the containing block for **both** overlays: the suggestion list
+   and the history popup. Neither is a row of the region any more, so the bar is
+   one 24px line (34px with its padding and top rule) and keeps that height while
+   a list is open or the history is expanded — the ribbon above it, the drawing
+   beside it and the status bar below it never move. The z-index lifts the
+   overlays over the workspace; the modal layer and the shortcut menu are
+   portalled to `body` at 50–60, so they still win, and the ribbon's own popovers
+   live inside the band, which these cannot reach. */
 .region--cmdline { position: relative; z-index: 30; }
 .commandline__row { display: flex; align-items: center; gap: 7px; }
 .commandline__prompt { color: var(--accent-text); }
@@ -766,45 +767,23 @@ button, input, select { font: inherit; color: inherit; }
 }
 .commandline__input::placeholder { color: var(--text-muted); opacity: 1; }
 .commandline__input:disabled { color: var(--text-disabled); }
-/* Command-window echo (scrollback) --------------------------------------- */
-/* Above the input row and bounded to roughly seven lines: the list scrolls
-   itself, so the echo never grows with the log and never reflows the ribbon. The
-   line boxes are the shared mono scale (11px) — no new step is introduced. It is
-   output, not a control: no hover states, no focus ring of its own. */
-.commandlog {
-  max-height: 120px;
-  margin: 0 0 4px;
-  padding: 3px 8px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  background: var(--chrome-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.45;
-}
-.commandlog__line { display: flex; align-items: baseline; min-width: 0; }
-/* The label keeps its trailing space (`Command: ` / `Delta X = `), so a wrapped
-   line still reads as label-then-value. */
-.commandlog__label { flex: none; color: var(--text-muted); white-space: pre; }
-.commandlog__text { min-width: 0; color: var(--text); overflow-wrap: anywhere; }
-.commandlog__unit { flex: none; color: var(--text-muted); white-space: pre; }
-.commandlog__line.is-command .commandlog__text { color: var(--text-dim); }
-.commandlog__line.is-delta .commandlog__text { color: var(--text-dim); }
-.commandlog__line.is-error .commandlog__text { color: var(--danger); }
-/* The precision token is meta, never an accuracy claim: the same quiet chip
-   treatment as the ribbon/completion badges, and only for a non-analytic value. */
-.commandlog__meta {
-  flex: none; margin-left: 6px; padding: 0 5px;
-  border: 1px solid var(--line-soft); border-radius: 999px;
-  color: var(--text-muted); font-family: var(--font-ui); font-size: 10px; font-style: normal;
-}
+/* The suggestion list floats **above** the input row, in the same containing
+   block as the history popup: `left: 24px` clears the prompt icon and `right:
+   8px` mirrors the region's padding, so both borders stay inside the window. It
+   is an overlay on purpose — as a flow child it added up to 176px *under* the row
+   and pushed the status bar off the screen on every keystroke; the bar's height is
+   a constant now and the list only ever covers the drawing. Its bounded scroller
+   and the shared `rise` are unchanged, and it carries the same edge cue as the
+   history popup for the same reason: it floats over an unpainted CAD partition. */
 .completions {
-  margin: 5px 0 0 24px; padding: 3px;
+  position: absolute;
+  left: 24px; right: 8px;
+  bottom: calc(100% + 4px);
+  margin: 0; padding: 3px;
   background: var(--chrome-3); border: 1px solid var(--line-soft); border-radius: var(--radius);
   max-height: 176px; overflow: auto;
+  overscroll-behavior: contain;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .45);
   animation: rise var(--t-fast) both;
 }
 .completions__title { padding: 3px 8px; color: var(--text-muted); font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase; }
@@ -818,19 +797,28 @@ button, input, select { font: inherit; color: inherit; }
 .completion__id { font-family: var(--font-mono); }
 .completion__label { color: var(--text-muted); }
 .completion.is-supported .completion__id { color: var(--accent-text); }
-/* The history popup. Anchored to the command line and opening **upward** over the
-   drawing, never in flow below the input: the docked region is `position:
-   relative` (above), so `bottom: calc(100% + 6px)` puts the panel just clear of
-   the region's top edge and the region's own height never changes. `left/right:
-   8px` mirror the region's horizontal padding, so both borders are visible
-   inside the window instead of one running to the edge. The panel is capped at
-   40vh and the list is the scroller (see below), so a 64-row log stays a popup
-   and the status bar below the input never leaves the screen. */
+/* The history popup: the session's **single** record. One row per command, with
+   the output that command produced underneath it, oldest first so the newest line
+   sits nearest the input — AutoCAD's order. Anchored to the command line and
+   opening **upward** over the drawing, never in flow: the docked region is
+   `position: relative` (above), so `bottom: calc(100% + 6px)` puts the panel just
+   clear of the region's top edge and the region's own height never changes.
+   `left/right: 8px` mirror the region's horizontal padding, so both borders are
+   visible inside the window instead of one running to the edge.
+
+   The height is **fixed**, never content-sized: a command window is a pane with a
+   stable frame, and a panel that grew with the log would move its own top edge on
+   every command and drag the reader's eye with it. `min(40vh, 340px)` is about a
+   dozen command groups on a laptop screen and always less than half the window
+   (`40vh` is the cap the acceptance case measures), so the popup stays over the
+   drawing and the status bar below the input never leaves the screen. The list is
+   the scroller (see below). */
 .history-panel {
   position: absolute;
   left: 8px; right: 8px;
   bottom: calc(100% + 6px);
   display: flex; flex-direction: column;
+  height: min(40vh, 340px);
   max-height: 40vh;
   background: var(--chrome-3);
   border: 1px solid var(--line-soft); border-radius: var(--radius);
@@ -841,17 +829,35 @@ button, input, select { font: inherit; color: inherit; }
   overflow: hidden;
   animation: rise var(--t-fast) both;
 }
-.history-panel__head { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; }
-.history-panel__empty { padding: 8px; color: var(--text-muted); }
+/* The head is a label, not a toolbar: the host's command log has no clear call, so
+   a clear button here would empty the typed rows and leave the host's own echoed
+   rows on screen — a control that lies. Do not add one. */
+.history-panel__head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px;
+}
+/* Nothing recorded yet. The pane keeps its frame (the height is fixed) and says so
+   at the top of the list, where the first row would be — not centred like a
+   splash, because the next command will start exactly there. */
+.history-panel__empty {
+  flex: 1 1 auto; min-height: 0;
+  padding: 10px 8px;
+  color: var(--text-muted); font-size: 11.5px;
+}
 /* The list is the scroller, with the same affordance the mobile sheet's scroller
    uses (a thin `--line-soft` bar on a transparent track; the `*` rules at the top
    of this file draw the WebKit thumb). The bottom pad means the last row can be
-   scrolled fully clear of the panel's edge instead of being sliced by it. */
+   scrolled fully clear of the panel's edge instead of being sliced by it.
+   `overflow-x: hidden` is deliberate: long lines wrap (`overflow-wrap` below) and a
+   wide meta chip must not turn the pane into a two-axis scroller. */
 .history-panel__list {
   flex: 1 1 auto; min-height: 0;
   margin: 0; padding: 3px 3px 5px;
   list-style: none;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--line-soft) transparent;
@@ -874,12 +880,25 @@ button, input, select { font: inherit; color: inherit; }
   transition: opacity var(--t-fast);
 }
 .history-panel[data-more-below='true']::after { opacity: 1; }
+/* One command and the output it produced, as one block. No rule between groups: at
+   11px mono a border per group would double the list's apparent density, and the
+   14px indent below is the grouping cue that costs no pixels. */
+.history-panel__row { margin: 0; }
 .history-panel__entry {
-  width: 100%; padding: 3px 8px; border: 0; border-radius: var(--radius);
+  display: block; width: 100%;
+  margin: 0; padding: 2px 8px;
+  border: 0; border-radius: var(--radius);
   background: transparent; color: var(--text-dim); text-align: left; cursor: pointer;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  overflow-wrap: anywhere;
 }
+/* The catalog's own `Command:` prefix is quiet; the line itself is the row's
+   subject but still one step below a measured value, because the value is what the
+   user opened the pane to read. */
+.history-panel__prompt { margin-right: 5px; color: var(--text-muted); }
+.history-panel__command { color: var(--text-dim); }
 .history-panel__entry:hover { background: var(--hover); color: var(--text); }
+.history-panel__entry:hover .history-panel__command { color: var(--text); }
 /* A refusal row: the sentence a refused submit produced, kept as the record — it
    is the only place that sentence exists now. It is red, it is sentence-shaped
    (UI font, not the mono command face) and it is not a control — there is no
@@ -893,6 +912,36 @@ button, input, select { font: inherit; color: inherit; }
   line-height: 1.4;
   overflow-wrap: anywhere;
   cursor: default;
+}
+.history-panel__entry.is-error:hover { background: transparent; color: var(--danger); }
+/* The command's own output — measured values, point coordinates, refusals — in the
+   echo's 11px mono scale, indented under its command so a group reads as a group
+   without looking like a nested list. The entry's own 8px text inset is the
+   baseline, so the 22px margin leaves a 14px (≈two mono cells) step at the glyphs.
+   Output is not a control: no hover, no cursor. */
+.history-panel__output {
+  margin: 0 8px 4px 22px;
+  color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+}
+.history-panel__line { display: flex; align-items: baseline; min-width: 0; }
+/* The label keeps its trailing space (`Command: ` / `Delta X = `), so a wrapped
+   line still reads as label-then-value. */
+.history-panel__label { flex: none; color: var(--text-muted); white-space: pre; }
+.history-panel__text { min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+.history-panel__unit { flex: none; color: var(--text-muted); white-space: pre; }
+/* Tones carried over from the deleted echo strip: the echoed command and the
+   deltas are context and stay dim, a measured value is the point (bright, above),
+   and a refusal inside an output block is red like the refusal rows. */
+.history-panel__line.is-command .history-panel__text { color: var(--text-dim); }
+.history-panel__line.is-delta .history-panel__text { color: var(--text-dim); }
+.history-panel__line.is-error .history-panel__text { color: var(--danger); }
+/* The precision token is meta, never an accuracy claim: the same quiet chip
+   treatment as the ribbon/completion badges, and only for a non-analytic value. */
+.history-panel__meta {
+  flex: none; margin-left: 6px; padding: 0 5px;
+  border: 1px solid var(--line-soft); border-radius: 999px;
+  color: var(--text-muted); font-family: var(--font-ui); font-size: 10px; font-style: normal;
 }
 
 /* Status bar ------------------------------------------------------------- */

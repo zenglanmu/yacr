@@ -431,37 +431,49 @@ test('every echo key exists in both catalogs with the same placeholders', () => 
   assert.equal(zh['command.log.unit_squared'], '{unit}\u00B2');
 });
 
-test('the command line renders the host log in a bounded, non-focusable scrollback', async () => {
+test('the expanded history renders the host echo inside the one record', async () => {
   const source = await readModule('components/CommandLine.tsx');
-  // The data is the host field, formatted by the new module — no parallel state.
+  // The data is the host field, folded into the typed record by `command-window.ts`
+  // — no parallel state, and no second list: the popup is the only surface.
   assert.ok(source.includes('shell.status?.commandLog'));
-  assert.ok(source.includes('commandLogView(logEntries, t)'));
+  assert.ok(source.includes('commandWindowRows(shell.historyEntries, logEntries, t)'));
+  assert.equal(source.includes('commandLogView(logEntries, t)'), false, 'the view does not format the echo itself');
+  assert.equal(source.includes('className="commandlog"'), false, 'the in-flow echo strip is gone');
   assert.ok(!source.includes('setCommandLog'), 'the echo is never mirrored in local state');
-  // Newest at the bottom, following only while the view is already at the bottom.
+  // Oldest first, newest nearest the input: follow it only while the view is
+  // already there, and start every open at the bottom.
   assert.ok(source.includes("node.scrollTop = node.scrollHeight"));
-  assert.ok(source.includes('logStick.current'));
-  assert.ok(source.includes('onScroll={trackLogScroll}'));
-  // Output, not a control: no tab stop, no focus ring, no clear affordance.
+  assert.ok(source.includes('stick.current'));
+  assert.ok(source.includes('onScroll={trackScroll}'));
+  // Output, not a control: the list is a log and the scrollback takes no tab stop.
   assert.ok(source.includes('role="log"'));
-  assert.ok(source.includes('className="commandlog"'));
   assert.ok(!source.includes('tabIndex'), 'the scrollback must stay unreachable by keyboard');
   assert.ok(!source.includes('commandLogClear'));
   assert.ok(!source.includes('command.log.clear'));
   // The diagnostic code survives only as the hover title.
-  assert.ok(source.includes("row.kind === 'error' ? row.code ?? undefined : undefined"));
-  assert.ok(source.includes('commandlog__meta'), 'the precision chip is rendered');
+  assert.ok(source.includes('title={row.code ?? undefined}'));
+  assert.ok(source.includes('history-panel__meta'), 'the precision chip is rendered');
 });
 
-test('the scrollback is bounded to a few mono lines and never reflows the ribbon', async () => {
+test('the history pane keeps the echo scales while the docked bar never grows', async () => {
   const css = await readCss();
-  const block = css.slice(css.indexOf('.commandlog {'), css.indexOf('.commandlog {') + 600);
-  assert.ok(block.includes('max-height: 120px'), 'a bounded height keeps the log from growing');
-  assert.ok(block.includes('overflow-y: auto'), 'the log scrolls itself');
-  assert.ok(block.includes('font-family: var(--font-mono)'));
-  assert.ok(block.includes('font-size: 11px'), 'the existing mono step, not a new one');
-  assert.ok(block.includes('background: var(--chrome-3)'));
-  assert.ok(block.includes('border: 1px solid var(--line)'));
-  const meta = css.slice(css.indexOf('.commandlog__meta {'), css.indexOf('.commandlog__meta {') + 400);
+  // The output block is the old scrollback's type, moved under its command: the
+  // echo's 11px mono step, indented so a group reads as a group.
+  const output = css.slice(css.indexOf('.history-panel__output {'), css.indexOf('.history-panel__output {') + 400);
+  assert.ok(css.includes('.history-panel__output {'), 'the output block exists');
+  assert.ok(output.includes('font-family: var(--font-mono)'));
+  assert.ok(output.includes('font-size: 11px'), 'the existing mono step, not a new one');
+  assert.ok(output.includes('margin: 0 8px 4px 22px'), 'output is indented under its command');
+  // The tone carried over: a refusal line inside the output stays red.
+  assert.ok(css.includes('.history-panel__line.is-error .history-panel__text { color: var(--danger); }'));
+  const meta = css.slice(css.indexOf('.history-panel__meta {'), css.indexOf('.history-panel__meta {') + 400);
   assert.ok(meta.includes('border: 1px solid var(--line-soft)'), 'the chip reuses the shared badge surface');
   assert.ok(meta.includes('font-size: 10px'), 'the existing badge step');
+  // The old in-flow strip left no orphan rules, and the suggestion list floats:
+  // the bar is one fixed-height row and nothing typed under it can push the
+  // status bar off the screen.
+  assert.equal(css.includes('.commandlog'), false, 'the echo block is deleted, not restyled');
+  const completions = css.slice(css.indexOf('.completions {'), css.indexOf('.completions {') + 400);
+  assert.ok(completions.includes('position: absolute'), 'suggestions float above the row');
+  assert.ok(completions.includes('bottom: calc(100% + 4px)'), 'and never reflow the region');
 });

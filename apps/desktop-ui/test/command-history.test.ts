@@ -142,9 +142,13 @@ test('both presentations render the one log and mark refusals as red rows', asyn
     // An error row is never a button: it is plain text carrying the red class.
     assert.match(source, /<(p|div)[^>]*className="[^"]*is-error[^"]*"/, `${name} renders refusals as text`);
   }
-  // Desktop: newest first from the shared rows helper, clear clears the log.
-  assert.ok(desktop.includes('historyRows(shell.historyEntries)'));
-  assert.ok(desktop.includes('disabled={shell.historyEntries.length === 0}'));
+  // Desktop: one record, the popup, folded from the typed log plus the host's own
+  // echo. The in-flow echo strip is gone, and so is the clear control: the host's
+  // command log has no clear call, so a button here would leave the host's rows on
+  // screen while emptying the typed ones — a control that lies.
+  assert.ok(desktop.includes('commandWindowRows(shell.historyEntries, logEntries, t)'));
+  assert.equal(desktop.includes('className="commandlog"'), false, 'the fixed echo strip is gone');
+  assert.equal(desktop.includes('shell.clearHistory'), false, 'no clear control over a host-owned log');
   // Mobile: the capped sheet of the same log.
   assert.ok(mobile.includes('mobileHistoryRows(shell.historyEntries)'));
 });
@@ -204,6 +208,9 @@ test('the desktop history panel is an upward popup over the drawing, not a row o
   assert.match(panel, /left:\s*8px/, 'the left border is inside the window');
   assert.match(panel, /right:\s*8px/, 'the right border is inside the window');
   assert.match(panel, /max-height:\s*40vh/, 'the popup is bounded');
+  // The expanded record is a pane with a stable frame, never a content-sized box:
+  // a panel that grew with the log would move its own top edge on every command.
+  assert.match(panel, /height:\s*min\(40vh, 340px\)/, 'the expanded history has a fixed height');
   assert.match(panel, /border:\s*1px solid var\(--line-soft\)/, 'it keeps the chrome border');
   assert.match(panel, /box-shadow:/, 'a floating panel carries an edge cue');
   assert.match(panel, /box-shadow:[^;]*rgba\(0, 0, 0, /, 'the shared shadow step, not a new one');

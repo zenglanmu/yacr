@@ -22,7 +22,7 @@ npm run dev     # http://127.0.0.1:1420
 | `src/cad/` | CAD 状态与命令接线、选择集协议、surface 模式、canvas 传输、输入、分区度量、坐标与 3D 视图 |
 | `src/cad/cad.ts` | 绘图辅助开关、快捷键映射、工具步骤 / 就绪 / 预选提示与捕捉标签；不再转导出其他模块的符号 |
 | `src/tools/` | 工具参数、开放步骤、文字输入与文字编辑 |
-| `src/commands/` | 命令目录与准入、命令历史（`command-history.ts` 纯规则：命令/拒绝两类条目的有界日志 + `use-command-history.ts` 状态）、消息行文案（`command-message.ts`，行与历史共用同一句）、右键菜单模型、命令行控制器（`command-line-model.ts` 纯规则 + `use-command-line.ts` 状态） |
+| `src/commands/` | 命令目录与准入、命令历史（`command-history.ts` 纯规则：命令/拒绝两类条目的有界日志 + `use-command-history.ts` 状态）、命令窗口合流（`command-window.ts`：把宿主 `commandLog` 的输出挂到对应输入行上，弹窗是唯一记录）、消息行文案（`command-message.ts`，行与历史共用同一句）、右键菜单模型、命令行控制器（`command-line-model.ts` 纯规则 + `use-command-line.ts` 状态） |
 | `src/ribbon/` | 功能区模型与溢出计算 |
 | `src/layout/` | 宽度布局开关（`matchMedia`，断点 1024 CSS px）、移动端抽屉状态与功能区折叠、共享拒绝句（按原因键折叠） |
 | `src/layers/` | 图层投影、属性与标签 |

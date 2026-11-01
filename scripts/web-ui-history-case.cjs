@@ -12,17 +12,23 @@
  *   - a refused command paints **no line under the field** — no
  *     `.commandline__message`, no `#cad-command-message`, no visible
  *     `[role="alert"]` (the duplicate the user reported is gone);
+ *   - the in-flow echo strip (`.commandlog`) is **gone**: the popup is the single
+ *     record, and the docked bar is one fixed-height row — its height and its row's
+ *     y are identical with the popup open and closed;
  *   - the history toggle opens the popup and it holds **exactly one** red row,
  *     carrying the refused line's sentence (the sentence itself is catalog copy,
  *     so the assertion is that the row exists, is red, and names the line — never
- *     a hardcoded English string);
+ *     a hardcoded English string); after a real `ID` pick the same list shows the
+ *     host's echoed point result as an output block under its command (a catalog
+ *     label plus a measured value), which is the reason the pane exists;
  *   - the popup is an **overlay above** the command line: its bottom edge is at or
  *     above the region's top edge, it overlaps the workspace (the drawing) and
  *     both of its edges are inside the window;
  *   - nothing is pushed: the workspace box is identical with the popup open and
  *     closed, the document does not grow past the viewport, and the status bar is
  *     still fully on screen;
- *   - the popup is bounded to 40vh and its scroller's last row is inside it.
+ *   - the popup is bounded to 40vh and its scroller's last row is inside it; the
+ *     pane keeps a fixed frame (`>= 200px`) even with only a few rows.
  *
  * What it does NOT prove: pixels as visual correctness, GPU behaviour, the native
  * hosts, or another browser. The run is SwiftShader (software rasterisation),
@@ -74,6 +80,7 @@ function popupGeometry(page) {
       moreBelow: document.querySelector('.history-panel')?.dataset.moreBelow ?? null,
       pageScroll: document.scrollingElement === null ? null : document.scrollingElement.scrollHeight,
       inlineRefusalBars: document.querySelectorAll('.commandline__message, #cad-command-message').length,
+      echoStrips: document.querySelectorAll('.commandlog').length,
     };
   });
 }
@@ -82,11 +89,12 @@ function popupGeometry(page) {
  * One refused command, one red row, no line under the field, popup above the row.
  *
  * `context` carries the command case's own machinery (`checks`, `record`,
- * `helpers`, `observations`, `typeCommand`, `fieldId`) so this module owns no
- * second harness and no second way to submit a line.
+ * `helpers`, `observations`, `typeCommand`, `fieldId`, plus the pointer helpers
+ * `partitionBox` / `clickPartition` / `waitForToolPoints`) so this module owns no
+ * second harness and no second way to submit a line or pick a point.
  */
 async function runHistoryPopupStep(page, options, context) {
-  const { checks, record, helpers, observations, typeCommand, fieldId } = context;
+  const { checks, record, helpers, observations, typeCommand, fieldId, partitionBox, clickPartition, waitForToolPoints } = context;
   const { checkNoErrorBanner, readErrorAlerts, takeScreenshot } = helpers;
   const closed = await popupGeometry(page);
 
@@ -110,8 +118,38 @@ async function runHistoryPopupStep(page, options, context) {
     alerts: document.querySelectorAll('[role="alert"]').length,
   }));
   record(checks, afterRefusal.bars === 0, 'a refused command paints no line under the field', afterRefusal);
+  // One record only: the in-flow echo strip that used to stack above the input is
+  // gone, so the popup is the single history surface.
+  record(checks, closed.echoStrips === 0, 'the docked echo strip is gone (one record only)', { echoStrips: closed.echoStrips });
 
-  // 2. Open the history from its own affordance (the row's toggle, named by the
+  // 2. A real measurement, so the expanded record has actual output to show: one
+  // pick on the drawing under `ID`, whose host echo is a point result. This is the
+  // user-visible promise — the command and the output it produced in one place.
+  const partition = await partitionBox();
+  const idEcho = await typeCommand(page, options, 'ID');
+  record(checks, idEcho === 'ID', 'the command field echoes ID', { typed: 'ID', echoed: idEcho });
+  if (partition !== null) {
+    await waitForToolPoints(page, 0, options.timeout);
+    await clickPartition(page, partition, { fx: 0.5, fy: 0.5 });
+  }
+  const pointEcho = await page
+    .waitForFunction(() => {
+      const module = window.__YACR_CANVAS_MODULE__;
+      if (!module || typeof module.shell_status !== 'function') return false;
+      let status;
+      try {
+        status = JSON.parse(module.shell_status());
+      } catch (error) {
+        return false;
+      }
+      const log = Array.isArray(status?.commandLog) ? status.commandLog : [];
+      return log.some(entry => entry && entry.kind === 'result' && entry.point);
+    }, undefined, { timeout: options.timeout })
+    .then(() => true)
+    .catch(() => false);
+  record(checks, pointEcho, 'ID echoes a point result into the host command log', null);
+
+  // 3. Open the history from its own affordance (the row's toggle, named by the
   // catalog). Structural locator: it is the row's only icon button.
   const toggle = page.locator('.commandline__row .ui-icon-button');
   record(checks, (await toggle.count()) === 1, 'the command row offers exactly one history toggle', null);
@@ -161,6 +199,33 @@ async function runHistoryPopupStep(page, options, context) {
   );
   record(checks, rows.commandCount >= 1, 'the adopted commands are still in the same list', { rows: rows.commandCount });
 
+  // The point of the pane: the host's echo of the `ID` pick, rendered as an output
+  // block under its command. The copy is catalog text, so the assertion stays
+  // structural — a label on every line and a measured value with digits — never a
+  // hardcoded English string.
+  const output = await page.evaluate(() => {
+    const blocks = [...document.querySelectorAll('.history-panel__output')];
+    const lines = blocks.flatMap(block => [...block.querySelectorAll('.history-panel__line')]);
+    return {
+      blocks: blocks.length,
+      lines: lines.length,
+      labels: lines.map(line => line.querySelector('.history-panel__label')?.textContent ?? ''),
+      values: lines.map(line => line.querySelector('.history-panel__text')?.textContent ?? ''),
+    };
+  });
+  record(
+    checks,
+    output.blocks >= 1 && output.lines >= 1,
+    'the expanded history renders the command output under its command',
+    output,
+  );
+  record(
+    checks,
+    output.values.some(value => /\d/.test(value)) && output.labels.every(label => label.trim().length > 0),
+    'the output line is a labelled, measured value (catalog copy, not invented)',
+    output,
+  );
+
   // Geometry: above the row, over the drawing, not pushing anything.
   const region = opened.region;
   const panelBox = opened.panel;
@@ -198,9 +263,32 @@ async function runHistoryPopupStep(page, options, context) {
     'the status bar did not move when the popup opened',
     { closed: closed.statusbar.y, opened: opened.statusbar.y },
   );
-  // Observed, not asserted: the input row and the workspace legitimately move when
-  // the inline completion list closes (the history toggle closes it by design) and
-  // when the host's command log lands. Printed so a reader can see the geometry.
+  // The bar is one fixed-height row: opening the history changes neither its own
+  // height nor its own top edge, so the drawing above it keeps its box.
+  record(
+    checks,
+    closed.region !== null && opened.region !== null && Math.abs(opened.region.height - closed.region.height) <= 1,
+    'the command bar keeps its height when the history opens',
+    { closed: closed.region === null ? null : closed.region.height, opened: opened.region === null ? null : opened.region.height },
+  );
+  // ...and the pane keeps its own frame with only a few rows: the expanded history
+  // is a stable AutoCAD-style window, not a content-sized tooltip.
+  record(
+    checks,
+    panelBox !== null && panelBox.height >= 200,
+    'the expanded history keeps a fixed frame instead of hugging its rows',
+    { height: panelBox === null ? null : panelBox.height },
+  );
+  // The row itself must not move either: the suggestion list and the popup are
+  // both overlays now, so nothing in the region is ever added or removed in flow.
+  record(
+    checks,
+    closed.row !== null && opened.row !== null && Math.abs(opened.row.y - closed.row.y) <= 1,
+    'the input row does not move when the history opens',
+    { closed: closed.row === null ? null : closed.row.y, opened: opened.row === null ? null : opened.row.y },
+  );
+  // Observed, not asserted: the workspace geometry, printed so a reader can see
+  // the drawing box the popup floats over.
   observations.push(
     `history popup geometry: row ${closed.row === null ? '?' : closed.row.y} -> ${opened.row === null ? '?' : opened.row.y}, ` +
       `workspace ${opened.workspace === null ? '?' : `${opened.workspace.y}/${opened.workspace.height}`}, ` +

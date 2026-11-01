@@ -1,3 +1,66 @@
+## 2026-11-01 桌面命令历史只保留弹窗：固定高度命令栏 + 展开的详细记录（含命令输出）
+
+用户截图与反馈：桌面布局同时存在**两份**命令历史——输入行上方固化的回显条（`.commandlog`）与
+chevron 弹出的 `.history-panel`；要求只保留弹窗，命令栏像 CAD 一样**固定高度**，点击展开后的
+详细历史**包含命令输出**。移动布局本来就只有一套 sheet（用户确认那边是对的），问题只在桌面。
+
+### 结论
+
+- **固化回显整体删除**：`components/CommandLine.tsx` 不再渲染 `.commandlog`，`style.css` 的
+  `.commandlog*` 规则整块删除（无孤儿规则）。命令区只剩一行（prompt 图标 + 字段 + 唯一的历史
+  按钮），高度恒为 34px。输入建议列表 `.completions` 改为绝对定位覆盖层
+  （`bottom: calc(100% + 4px)`），打字时也不再撑高命令栏。
+- **新增合流模块 `commands/command-window.ts`**（纯函数）：弹窗是唯一记录。**顺序**由输入记录
+  （`command-history.ts`，含宿主从未见过的本地拒绝句）决定；宿主 `status.commandLog` 只提供
+  **输出**——按 `sameCommandLine`（alias / 带参数 selector 归一化）找到对应的 `command` 行，
+  把它后面、下一条 `command` 之前的 result/error 行挂到该输入行下。匹配不到的宿主行**不会**
+  被猜位置插成一行；拒绝句是文本不是控件，也不吞宿主回显。
+- **弹窗形态**：`height: min(40vh, 340px)` 固定高度（不随内容收缩），列表 oldest → newest，
+  最新一行贴近输入行；打开即滚到底，用户向上滚后不再被拉回（`stick` ref），
+  `data-more-below` 底部渐隐保留。命令行为按钮（点击回填输入），拒绝行为红字非控件。
+- **删除「清空命令历史」按钮**：宿主 `commandLog` 没有 clear API，该按钮只会清掉输入记录、
+  把宿主回显行留在屏幕上——是会骗人的控件。移动 sheet 的同名按钮与 `shell.clearHistory` 未动。
+- **输出样式**：`.history-panel__output/__line/__label/__text/__unit/__meta` 沿用被删回显的
+  11px mono 尺度与 tone 颜色；输出相对命令行文本内缩 14px（`margin-left: 22px` − 命令行 8px
+  内边距），分组可读。`command-log.ts` 头注释同步为「展开历史里命令下的输出」。
+- **测试/文档**：新增 `test/command-window.test.ts`（9 项：输出挂接、分组边界、宿主 error+code、
+  alias/参数匹配、拒绝不吞回显、宿主独有回显不凭空成行、连续同名命令各取一段、空输入、迟到回显
+  的幂等重跑）。更新 `test/command-log.test.ts`、`test/command-line-model.test.ts`、
+  `test/command-history.test.ts` 的源码契约。`scripts/web-ui-history-case.cjs` 新增：无回显条、
+  命令栏开关高度不变（34→34）、输入行 y 不变、弹窗固定 320px、并用真实 `ID` 拾取证明展开后
+  能看到 `Point = 1.5000, 0.5000, 0.0000`（标签来自 catalog，断言不写死英文句子）。
+  `apps/desktop-ui/README.md` 目录表补 `command-window.ts`。
+
+### 验证（本机实际运行）
+
+- `cd apps/desktop-ui && npx tsc --noEmit && node --test test/*.test.ts` → **924 pass / 0 fail**
+  （基线 915 + 新增 9）。
+- `cd apps/desktop-ui && npm run build` → exit 0（582.03 kB bundle；chunk 大小警告为既有）。
+- `python3 scripts/check-i18n.py` / `check-file-size.py`（1222 文件 ≤1000 行）/ `check-architecture.py`
+  / `check-command-docs.py` → 全部 OK。
+- `bash scripts/build-web-ui.sh` → exit 0（wasm 13,858,035 B；未触碰 `apps/app-web/dist`）。
+- `NODE_PATH=/tmp/opencode/web-smoke/node_modules node scripts/web-ui-smoke.cjs --url
+  http://127.0.0.1:8090/ --verbose --evidence /tmp/opencode/web-cmd-history-235833`
+  → **PASS 8/8 cases (224/224 checks)**，其中命令历史用例：
+  `echoStrips: 0`；`region height 34 → 34`；`row y 745 → 745`；`panel 8..1272 × 320`
+  （=40vh）；`statusbar 774..800` 不动；`scrollHeight 800 = viewport`；1 条红拒绝行 + 8 条命令行；
+  展开后 `.history-panel__output` 1 块、`Point = 1.5000, 0.5000, 0.0000`。
+
+### 边界 / NOT RUN
+
+- 全部浏览器结论来自 **Chromium + SwiftShader 软件光栅 + 1280×800**：只是 DOM/布局证据，
+  **不是** GPU、像素、视觉验收或性能结论；截图为诊断产物。
+- 12 条以上的长历史滚动与底部渐隐**未被触发**（本次列表未溢出，`overflow: 0`、`moreBelow: null`）；
+  滚动/跟随只有单元级与源码契约覆盖。
+- zh-CN 文案未做浏览器视觉核对（smoke 固定 en）。
+- 原生宿主（Linux Wayland/X11、Windows、macOS、Android）的命令区**全部 NOT RUN**；
+  `cargo test --workspace`、全量门禁、fmt/clippy 本轮 **NOT RUN**（按 AGENTS.md 只验证改动范围，
+  且本轮无 Rust 改动）。
+- 宿主自己记录、但输入记录里没有对应行的命令（例如仅由宿主 `record_command` 记下的
+  `STANDARDVIEW`）不会出现在弹窗里：合流以输入记录为骨架，未匹配的宿主回显不猜位置。
+- 移动 sheet 仍是「输入记录 + 清空按钮、无输出明细」；桌面与移动在「发生过哪些行」上一致，
+  输出明细只在桌面展开面板。
+
 ## 2026-11-01 Web 端文件打开/保存：OPEN 能力丢失修复 + 浏览器下载（SAVE/PLOT）
 
 用户报告「web 端没有打开/保存文件功能」。**打开的上传路径本来就有**（`host/web-adapter.ts` 的

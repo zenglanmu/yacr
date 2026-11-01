@@ -775,6 +775,10 @@ async function runCommandCase(browser, options, helpers) {
     // so this one stays under the 1000-line bound.
     await runHistoryPopupStep(page, options, {
       checks, record, helpers, observations, typeCommand, fieldId: FIELD_ID,
+      // The pointer lane, so the expanded record can be shown with real output.
+      partitionBox: () => partitionBox(page),
+      clickPartition,
+      waitForToolPoints,
     });
 
     for (const text of [...alertsAfterZoom, ...alertsAfterFit, ...alertsAfterZoomOut, ...alertsAfterOpen]) {

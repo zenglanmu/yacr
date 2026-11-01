@@ -1,29 +1,38 @@
-// Command line, docked bottom-left above the status bar. Autocomplete opens
-// inline *below* the input, the history opens as a popup *above* the row (over
-// the drawing, never in flow), and Up/Down step through recent commands.
+// Command line, docked bottom-left above the status bar. Both things it can add
+// to the screen — the suggestion list and the command history — are **overlays
+// above the row**: the bar itself is one fixed-height line, and neither a
+// keystroke nor a click ever makes it taller.
+//
+// There used to be two records of the same session: an in-flow echo strip stacked
+// above the input (what the host reported) and the chevron popup (what was typed).
+// They drifted apart, and the strip grew and shrank with the log, so every command
+// moved the ribbon, the drawing and the status bar. There is one record now, the
+// popup, and it reads `commandWindowRows` — the module that folds the typed
+// history and the host's command window into a single oldest-first list — so a
+// command and the output it produced sit together and the bar's height depends on
+// neither.
 //
 // This file is the **docked presentation** and nothing else: the draft, the
 // suggestion rules, the history cursor, the text-step mode and the submit paths
 // are the shared controller in `commands/use-command-line.ts`, which the mobile
 // command bar renders from as well. What stays here is what only the desktop
-// region has — the command-window echo above the input, the inline suggestion
-// list, the history popup and the outside-press focus hand-off.
+// region has — the single row, the overlay suggestion list, the history popup and
+// the outside-press focus hand-off.
 //
 // **No refusal line under the field.** A refused command used to be reported
 // twice: once as a red sentence in this region and once as the same sentence in
-// the history. The history log is the record now — the sentence a submit
-// produced is written there (red row) and nowhere else, so the line the user
-// reads and the line they scroll back to are one line, not a duplicate. The
-// host's own error banner (the status bar's, not this region's) is untouched:
-// that reports host failures, not command-line refusals.
+// the history. The history log is the record now — the sentence a submit produced
+// is written there (red row) and nowhere else, so the line the user reads and the
+// line they scroll back to are one line, not a duplicate. The host's own error
+// banner (the status bar's, not this region's) is untouched: that reports host
+// failures, not command-line refusals.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../icons.tsx';
-import { Button, IconButton } from './primitives.tsx';
+import { IconButton } from './primitives.tsx';
 import { CommandField } from './CommandField.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { useCommandLine } from '../commands/use-command-line.ts';
-import { commandLogView } from '../commands/command-log.ts';
-import { historyRows } from '../commands/command-history.ts';
+import { commandWindowRows } from '../commands/command-window.ts';
 import { unavailableReasonKey } from '../commands/commands.ts';
 import type { IconName } from '../icons.tsx';
 import { releaseFocusOnOutsidePress } from '../focus-release.ts';
@@ -37,21 +46,32 @@ export function CommandLine() {
   // Read once so the hand-off effect depends on the boolean, not on the
   // controller object it is rebuilt into on every render.
   const focused = line.focused;
-  // The command-window echo: `status.commandLog`, oldest first, newest at the
-  // bottom. The host log is append-only (sequences are monotonic, a document
-  // replacement clears it, the ring drops from the front at capacity), so the
-  // length plus the newest sequence identifies its content exactly. The rows are
-  // memoized on that signature: the status is a fresh object every poll (4 Hz),
-  // and re-formatting up to 200 entries each time would be wasted work.
+
+  // The one record. Two sources are folded here and nowhere else: the typed log
+  // (`shell.historyEntries`, commands *and* refusals) and the host's command
+  // window (`status.commandLog`, echoed output). The merge is memoized on a
+  // signature because the status poll is 4 Hz and hands over a fresh array every
+  // time — re-folding up to 200 host entries and re-resolving every catalogue
+  // label per render would be wasted work. The host log is append-only, so length
+  // plus the newest sequence identifies its content exactly; `historyEntries` is
+  // immutable and replaced only when a line is appended, so its identity is its
+  // signature.
   const logEntries = shell.status?.commandLog ?? [];
   const logSignature = logEntries.length > 0
     ? `${logEntries.length}:${logEntries[logEntries.length - 1]?.sequence}`
     : '';
-  const logRows = useMemo(() => commandLogView(logEntries, t), [logSignature, t]);
-  const logRef = useRef<HTMLDivElement | null>(null);
-  // Whether new echoes should keep the view at the newest line. The user owns the
-  // position once they scroll up, and it is never yanked back.
-  const logStick = useRef(true);
+  const windowRows = useMemo(
+    () => commandWindowRows(shell.historyEntries, logEntries, t),
+    // `logEntries` is covered by `logSignature`; listing it would re-fold on
+    // every poll that carried the very same log.
+    [logSignature, shell.historyEntries, t],
+  );
+  // The rows, not the log: a refetch that changes nothing must not touch the
+  // scroll position, and a new command must move the view only when the user is
+  // already at the bottom.
+  const rowsSignature = windowRows.length > 0
+    ? `${windowRows.length}:${windowRows[windowRows.length - 1]?.key}`
+    : '';
 
   // A click that returns focus must also act. The browser changes focus as the
   // press's *default action*, after the event has been dispatched — too late for
@@ -69,73 +89,42 @@ export function CommandLine() {
     return releaseFocusOnOutsidePress(rootRef.current as unknown as FocusReleaseRoot | null, () => input?.blur());
   }, [focused]);
 
-  // Follow the newest echo when (and only when) the view is already at the
-  // bottom. This runs on the log signature, so a poll that repeats the same log
-  // never touches the scroll position.
-  useEffect(() => {
-    const node = logRef.current;
-    if (!node || !logStick.current) return;
-    node.scrollTop = node.scrollHeight;
-  }, [logSignature]);
-
-  function trackLogScroll(event: React.UIEvent<HTMLDivElement>) {
-    const node = event.currentTarget;
-    logStick.current = node.scrollHeight - node.scrollTop - node.clientHeight <= 4;
-  }
-
-  // The history popup's own scroller: is there more log under the fold? The list
-  // also declares a thin scrollbar, but this WebView draws an **overlay**
-  // scrollbar that shows nothing at rest (the ribbon's scroller has the same note),
-  // so the popup carries the fade the mobile drawer already uses — and only while
-  // there really is a row below, never over a list that fits.
-  const [moreBelow, setMoreBelow] = useState(false);
+  // The popup's scroller: the user owns the position once they scroll up, and it
+  // is never yanked back. Opening the panel always starts at the newest row (the
+  // list runs oldest → newest, so "newest" is the bottom — AutoCAD's order), and
+  // new rows follow the view only while it is already there.
   const panelListRef = useRef<HTMLOListElement | null>(null);
+  const stick = useRef(true);
   function overflowBelow(node: HTMLElement | null): boolean {
     return node !== null && node.scrollHeight - node.scrollTop - node.clientHeight > 2;
   }
+  // The visible "there is more under the fold" cue. This WebView draws an
+  // **overlay** scrollbar that paints nothing at rest (the ribbon's and the mobile
+  // drawer's scrollers carry the same note), so the popup carries the drawer's
+  // fade — and only while a row really sits below the edge.
+  const [moreBelow, setMoreBelow] = useState(false);
   useEffect(() => {
-    setMoreBelow(overflowBelow(panelListRef.current));
-  }, [shell.historyOpen, shell.historyEntries.length]);
+    const node = panelListRef.current;
+    if (!shell.historyOpen) {
+      // Whatever the last visit left behind, the next open starts at the bottom.
+      stick.current = true;
+      return;
+    }
+    if (node === null) return;
+    // Follow only while the view is already at the bottom; a reader who scrolled
+    // up keeps their place, but the fade still has to know what is under it now.
+    if (stick.current) node.scrollTop = node.scrollHeight;
+    setMoreBelow(overflowBelow(node));
+  }, [shell.historyOpen, rowsSignature]);
+
+  function trackScroll(event: React.UIEvent<HTMLOListElement>) {
+    const node = event.currentTarget;
+    stick.current = node.scrollHeight - node.scrollTop - node.clientHeight <= 4;
+    setMoreBelow(overflowBelow(node));
+  }
 
   return (
     <div ref={rootRef} className="region region--cmdline commandline app-region">
-      {/* The echo sits above the input row, inside the same region: the region
-          grows upward (the input keeps its distance from the status bar) and the
-          list is bounded with its own scrollbar, so a long log never pushes the
-          ribbon or the drawing area any further. It is output, not a control, so
-          the list is deliberately not focusable and offers no clear affordance
-          (the host exposes no clear API; the F2 history panel above is a
-          different, input-only record). */}
-      {logRows.length > 0 ? (
-        <div
-          ref={logRef}
-          className="commandlog"
-          role="log"
-          aria-label={t('command.log.label')}
-          onScroll={trackLogScroll}
-        >
-          {logRows.map((row, index) => (
-            <div
-              key={row.sequence ?? `entry-${index}`}
-              className={`commandlog__entry is-${row.kind}`}
-              title={row.kind === 'error' ? row.code ?? undefined : undefined}
-            >
-              {row.lines.map((logLine, lineIndex) => (
-                <div key={lineIndex} className={`commandlog__line is-${logLine.tone}`}>
-                  {logLine.label ? (
-                    <span className="commandlog__label">
-                      {logLine.tone === 'command' ? `${logLine.label} ` : `${logLine.label} = `}
-                    </span>
-                  ) : null}
-                  <span className="commandlog__text">{logLine.text}</span>
-                  {logLine.unit ? <span className="commandlog__unit">{` ${logLine.unit}`}</span> : null}
-                  {logLine.meta ? <span className="commandlog__meta">{logLine.meta}</span> : null}
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      ) : null}
       <div className="commandline__row">
         <Icon name={line.textMode ? 'text' : 'terminal'} size={15} className="commandline__prompt" />
         <CommandField id="cad-command" className="commandline__input" line={line} />
@@ -146,18 +135,15 @@ export function CommandLine() {
         ) : null}
         {line.textMode ? null : (
           // The history toggle, and **only** the history toggle: it opens the
-          // popup above this row and nothing else. It is the one place a refusal
-          // is read back from, so pressing it must never clear the record — the
-          // rows are the log itself, and opening the panel adds no second
-          // sentence anywhere. The accessible name says "history" — the chevron
-          // alone read as "collapse the red line".
+          // popup above this row and nothing else. It is the one place a refused
+          // command is read back from, so pressing it must never clear the record
+          // (the host's log has no clear call either). The accessible name says
+          // "history" — the chevron alone read as "collapse the red line".
           //
-          // `onMouseDown` keeps the press from blurring the field first: a blur
-          // closes the completion list, which shortens the region, shifts this
-          // row between the press and its release, and the browser then fires the
-          // click on an ancestor — the first press did nothing at all. Keeping
-          // focus makes one press open the log (the list closes by itself as soon
-          // as `historyOpen` is true).
+          // `onMouseDown` keeps the press from blurring the field: a blur closes
+          // the suggestion list, and a focus ring flickering off and on is a
+          // cheaper loss than dropping the press. The list is an overlay now, so
+          // the row cannot shift under the click — the `click` always lands here.
           <IconButton
             icon={shell.historyOpen ? 'chevronDown' : 'chevronUp'}
             size="sm"
@@ -170,6 +156,9 @@ export function CommandLine() {
         )}
       </div>
       {line.listOpen ? (
+        // An overlay above the row (see `style.css`), the same containing block as
+        // the popup: a flow child here would add up to 176px under the input and
+        // push the status bar off the screen on every keystroke.
         <div className="completions" role="listbox" aria-label={t('command.completions')}>
           <div className="completions__title">{t('command.category.commands')}</div>
           {line.suggestions.length === 0 ? (
@@ -199,39 +188,77 @@ export function CommandLine() {
         </div>
       ) : null}
       {shell.historyOpen ? (
-        // The log, newest first: admitted commands stay clickable (recall into the
-        // field), a refusal is red text and not a control — there is no command in
-        // it to run again. Both rows come from `shell.historyEntries`, so the panel
-        // and the mobile sheet can never describe the same session differently.
+        // The record: one row per command with the output it produced underneath,
+        // oldest first so the newest line sits nearest the input. An admitted
+        // command stays clickable (recall into the field); a refusal is red text
+        // and not a control — there is no command in it to run again. Both come
+        // from `commandWindowRows`, which folds the same typed log the mobile
+        // sheet reads, so the two surfaces cannot disagree about *which lines
+        // happened*; this one additionally shows the host echo under each line.
         //
-        // The panel is an overlay, not a row of the region: `style.css` pins it
-        // above the input (`position: absolute; bottom: calc(100% + 6px)`), caps
-        // it at `40vh` and scrolls the list inside itself. Opening it therefore
-        // never moves the status bar off-screen and never grows the window.
-        // `data-more-below` turns on the bottom fade (the mobile drawer's cue) when
-        // the scroller has rows under the fold.
+        // The panel is an overlay with a **fixed** height: `style.css` pins it
+        // above the input (`position: absolute; bottom: calc(100% + 6px)`), sets
+        // `height: min(40vh, 340px)` and scrolls the list inside itself. Opening
+        // it therefore never moves the status bar off-screen, never grows the
+        // window and never moves its own top edge as commands arrive.
+        // `data-more-below` turns on the bottom fade when the scroller has rows
+        // under the fold.
         <div className="history-panel" aria-label={t('command.history')} data-more-below={moreBelow ? 'true' : undefined}>
           <div className="history-panel__head">
             <span>{t('command.history')}</span>
-            <Button variant="plain" size="xs" icon="clearSelection" onClick={shell.clearHistory} disabled={shell.historyEntries.length === 0}>
-              {t('command.clear_history')}
-            </Button>
           </div>
-          {shell.historyEntries.length === 0 ? (
+          {windowRows.length === 0 ? (
             <div className="history-panel__empty">{t('command.history_empty')}</div>
           ) : (
-            <ol className="history-panel__list" ref={panelListRef} onScroll={event => setMoreBelow(overflowBelow(event.currentTarget))}>
-              {historyRows(shell.historyEntries).map((entry, index) => (
-                <li key={`${entry.kind}-${index}`}>
-                  {entry.kind === 'command' ? (
-                    <button type="button" className="history-panel__entry" onClick={() => shell.setCommand(entry.text)}>
-                      {entry.text}
-                    </button>
-                  ) : (
-                    <p className="history-panel__entry is-error">{entry.text}</p>
-                  )}
-                </li>
-              ))}
+            <ol
+              className="history-panel__list"
+              ref={panelListRef}
+              role="log"
+              aria-label={t('command.log.label')}
+              onScroll={trackScroll}
+            >
+              {windowRows.map(row => {
+                // A command row is abbreviated by dragging the text back into the
+                // field; a refusal has nothing to re-run, so it stays plain output.
+                const recall = row.recall;
+                return (
+                  <li key={row.key} className="history-panel__row">
+                    {row.kind === 'command' ? (
+                      <button
+                        type="button"
+                        className="history-panel__entry"
+                        title={row.code ?? undefined}
+                        onClick={() => { if (recall !== null) shell.setCommand(recall); }}
+                      >
+                        <span className="history-panel__prompt">{t('command.log.prompt')}</span>
+                        {' '}
+                        <span className="history-panel__command">{row.text}</span>
+                      </button>
+                    ) : (
+                      <p className="history-panel__entry is-error" title={row.code ?? undefined}>{row.text}</p>
+                    )}
+                    {row.lines.length > 0 ? (
+                      // The echoed output, indented under its own command so the
+                      // grouping reads at 11px mono: the same label / value / unit
+                      // / meta shape the echo strip used to have.
+                      <div className="history-panel__output">
+                        {row.lines.map((outputLine, index) => (
+                          <div key={index} className={`history-panel__line is-${outputLine.tone}`}>
+                            {outputLine.label ? (
+                              <span className="history-panel__label">
+                                {outputLine.tone === 'command' ? `${outputLine.label} ` : `${outputLine.label} = `}
+                              </span>
+                            ) : null}
+                            <span className="history-panel__text">{outputLine.text}</span>
+                            {outputLine.unit ? <span className="history-panel__unit">{` ${outputLine.unit}`}</span> : null}
+                            {outputLine.meta ? <span className="history-panel__meta">{outputLine.meta}</span> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ol>
           )}
         </div>

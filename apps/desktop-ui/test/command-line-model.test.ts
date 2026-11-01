@@ -200,9 +200,11 @@ test('the docked region keeps its visual identity while rendering the controller
   assert.ok(desktop.includes('className="commandline__row"'));
   assert.ok(desktop.includes('className="completions"'));
   assert.ok(desktop.includes('className="history-panel"'));
-  assert.ok(desktop.includes('className="commandlog"'));
-  // The docked region still owns its own echo/history/completion surfaces; those
-  // are the parts the mobile bar replaces with one bounded sheet.
-  assert.ok(desktop.includes('commandLogView(logEntries, t)'));
+  assert.equal(desktop.includes('className="commandlog"'), false, 'one record: the popup, not an in-flow echo');
+  // The docked region keeps the popup and the completion list; the popup is the
+  // merged record (typed rows in order, host echo output under them), and the
+  // completion list is an overlay so neither changes the bar's height. Those are
+  // the parts the mobile bar replaces with one bounded sheet.
+  assert.ok(desktop.includes('commandWindowRows(shell.historyEntries, logEntries, t)'));
   assert.equal(desktop.includes('useCommandLine'), true);
 });

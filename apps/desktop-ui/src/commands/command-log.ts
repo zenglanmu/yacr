@@ -1,12 +1,14 @@
-// Command-window echo formatting: the scrollback rendered above the command
-// input.
+// Command-window echo formatting: the output lines the expanded history renders
+// under their command.
 //
 // `cad_status.commandLog` is the only source: a bounded, typed and **text-free**
 // array (newest last), cleared by the host when the document is replaced and
-// capped at 200 entries. Nothing here reads CAD state or invents a value, a point
-// or a message: every label comes from the catalogs, an error's wording is looked
-// up by its stable code, and a `result` entry with neither a measurement nor a
-// point renders nothing at all.
+// capped at 200 entries. `commands/command-window.ts` folds these rows into the
+// typed record (the desktop popup); this module owns only the formatting of one
+// echoed result. Nothing here reads CAD state or invents a value, a point or a
+// message: every label comes from the catalogs, an error's wording is looked up
+// by its stable code, and a `result` entry with neither a measurement nor a point
+// renders nothing at all.
 //
 // Angle precedent: **none exists in the React chrome.** No module under
 // `apps/desktop-ui/src` formats a measured angle (measurement readouts do not
