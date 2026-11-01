@@ -83,6 +83,8 @@ jobs:
         run: cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
       - name: Architecture boundaries
         run: python3 scripts/check-architecture.py
+      - name: Tauri capability contracts (chrome core-plugin permissions)
+        run: python3 scripts/check-tauri-capabilities.py
       - name: Fixture manifest
         run: python3 scripts/check-fixture-manifest.py
       - name: Code file size (tracked code files must stay under the line ceiling)

@@ -70,6 +70,7 @@ cargo test --workspace --locked -- --test-threads=1
 cargo fmt --all -- --check
 cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
 python3 scripts/check-architecture.py
+python3 scripts/check-tauri-capabilities.py    # Tauri v2 core-plugin ACL 能力文件
 python3 scripts/check-fixture-manifest.py
 python3 scripts/check-file-size.py                 # 代码文件 ≤1000 行
 python3 scripts/check-command-docs.py && python3 scripts/test-check-command-docs.py

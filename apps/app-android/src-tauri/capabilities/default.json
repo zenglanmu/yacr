@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/android-schema.json",
+  "identifier": "default",
+  "description": "The React chrome's typed push stream on the Android main window: `plugin:event|listen`/`unlisten` for `cad_event`. Application commands are not ACL-gated, and no other core-plugin API is used.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

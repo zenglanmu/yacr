@@ -70,6 +70,9 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "cargo fmt --all -- --check",
         "cargo clippy",
         "check-architecture.py",
+        # Tauri v2 denies core-plugin commands without a capability file; the
+        # chrome only needs the `cad_event` listen/unlisten pair.
+        "python3 scripts/check-tauri-capabilities.py",
         "check-fixture-manifest.py",
         "check-file-size.py",
         # The command/alias docs gate: §2/§2b (docs/shortcuts.md) and §3.7

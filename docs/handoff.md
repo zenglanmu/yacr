@@ -1,3 +1,77 @@
+## 2026-11-01 Tauri capability 缺失导致 event 订阅被 ACL 拒绝（实机回归）
+
+### 根因
+
+- 35cbc4a（`host: unify wire profile/registry/events; native Android carrier`）把状态通道改成
+  **push-only** `cad_event`：chrome 经 `@tauri-apps/api/event` 的 `listen` 订阅，实际调用
+  `plugin:event|listen`。
+- 四个 Tauri 宿主（`app-linux`、`app-windows`、`app-macos`、`app-android/src-tauri`）**都没有**
+  `capabilities/` 目录；Tauri v2 对核心插件命令做 ACL 校验，`tauri-build` 因此生成 `{}` 空能力集，
+  `plugin:event|listen` 被运行期拒绝。
+- 后果链：无状态 → `inputLaneReady=false` → 不上报 CAD 矩形 → 原生 presenter 不初始化 →
+  `[probe] status backend=None adapter=None frames=0`；DOM 诊断仍挂载，但 CAD 层透明叠在桌面上。
+
+### 修法
+
+- 新增 4 个能力文件，只授予推送流需要的两个权限（**不含** `emit`、**不含** `core:default`；
+  应用自定义命令不经 ACL）：
+  - `apps/app-linux/capabilities/default.json` → `windows: ["probe-window"]`
+  - `apps/app-windows/capabilities/default.json` → `windows: ["probe-window"]`
+  - `apps/app-macos/capabilities/default.json` → `windows: ["probe-window"]`
+  - `apps/app-android/src-tauri/capabilities/default.json` → `windows: ["main"]`
+  - 权限均为 `core:event:allow-listen` + `core:event:allow-unlisten`；`probe-window` 的子
+    `probe-webview` 继承窗口能力，无需单独条目。
+- `app.security.capabilities` 保持缺失/`[]`，避免构建忽略能力文件。
+
+### 证据（修复前实机运行日志，摘录）
+
+UI 错误横幅（`Command plugin:event|listen not allowed by ACL`）+ 同一轮 stderr：
+
+```
+[probe] display backend policy=Auto resolved=Wayland
+[probe] status backend=None adapter=None frames=0
+```
+
+DOM 诊断（`[probe] DOM diag #1`）已挂载（`buttons` 存在、`errors:[]`），但始终没有
+`cad_status` 推送，`inputLaneReady=false`，没有 CAD 矩形。
+
+### 门禁
+
+- 新增 `scripts/check-tauri-capabilities.py`：检查每个宿主的 `capabilities/**/*.json` 存在且为
+  单对象能力；`WINDOW_LABEL`/`MAIN_WINDOW_LABEL` 与 Android `app.windows[*].label` 覆盖的每个窗口
+  都必须有匹配的 capability 授予 listen/unlisten（或 `core:event:default`/`core:default`）；
+  `app.security.capabilities` 必须缺失/`[]`；`apps/desktop-ui/src` 只允许 import
+  `@tauri-apps/api/{core,event}`。纯静态、无构建、无网络。
+- `.github/workflows/core.yml` 的 `core-quality` 在 "Architecture boundaries" 之后新增该步骤；
+  `scripts/check-workflows.py` 的 `REQUIRED_JOBS["core-quality"]` 固定该命令；`AGENTS.md` 全量门禁清单同步。
+
+### 验证（修复后实机运行，2026-11-01）
+
+- `cargo check -p app-linux --all-targets --locked` → exit 0；`target/debug/build/app-linux-*/out/capabilities.json`
+  由 `{}` 变为
+  `{"default":{...,"windows":["probe-window"],"permissions":["core:event:allow-listen","core:event:allow-unlisten"]}}`
+  （`tauri-build` 已解析并接受权限标识符）。
+- `cargo build --release --locked -p app-linux --bin yacr --features tauri/custom-protocol` → exit 0。
+- 真实 Wayland 运行（`YACR_PROBE_NO_MAXIMIZE=1 ./target/release/yacr --open
+  fixtures/dwg/synthetic-four-lines.dwg`）：
+  - `grep -c "not allowed by ACL"` = **0**（修复前同一 UI 横幅存在）；
+  - `[probe] bridge wayland presenter ready generation=1 backend=vulkan adapter=Quadro P620
+    device_type=discrete_gpu present_mode=Mailbox`；
+  - `[probe] status backend=Some("vulkan") adapter=Some("Quadro P620") size=1012x689
+    frames=… present_mode=Some("Mailbox") error=None`（连续帧，非零）；
+  - `[probe] input kind=resize … accepted=true`，窗口稳定后不再重复上报。
+- `YACR_PROBE_POSTLOAD_PAN=1` 另一轮：`[probe] input kind=pointer_down … accepted=true`
+  （输入漏斗已开）；但该有界驱动以 exit 3 结束，原因是 `concurrent resize during the pan`，
+  因此**不宣称 postload-pan 通过**。
+
+### NOT RUN / 边界
+
+- **像素/截图 NOT RUN**：`scripts/screencast-capture.py` 本轮返回
+  `org.freedesktop.DBus.Error.Failed: Session creation inhibited`（同 UID Mutter ScreenCast 被会话侧拒绝），
+  没有截图；视觉验收需在 ScreenCast 可用的会话里重跑。
+- Windows / macOS / Android 仅加了同形状能力文件，**未运行**（其宿主运行时仍 NOT VERIFIED）。
+- `scripts/check-tauri-capabilities.py` 只是静态文本/JSON 契约，不验证运行期 ACL。
+
 ## 2026-11-01 重新启用 5 个 release job（React/Tauri，event-gated artifact）
 
 ### 结论

@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/linux-schema.json",
+  "identifier": "default",
+  "description": "The React chrome's typed push stream: `plugin:event|listen`/`unlisten` for `cad_event` on the probe window (and its child webview). Application commands are not ACL-gated, and no other core-plugin API is used.",
+  "windows": ["probe-window"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

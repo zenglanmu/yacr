@@ -188,6 +188,36 @@ Vulkan-only；`dx12` 在 Linux **显式失败**（`ProbeError::UnsupportedBacken
   presenter 构造做有界 `catch_unwind`，诊断如实写 `presenter construction panicked: …`；仅在默认
   unwind（非 `panic = "abort"`）下有效，终态不重试。
 
+## Tauri v2 能力/ACL 契约（chrome 核心插件权限）
+
+Tauri v2 对**所有核心插件命令**做 ACL 校验：宿主没有 `capabilities/` 目录时，
+`tauri-build` 生成空能力集，`plugin:event|listen` 之类的调用会被运行期拒绝。这不是 GTK/后端
+问题，也不会自动回退。
+
+chrome 只需要一条 **push-only** 的 `cad_event` 流（`apps/desktop-ui/src/host/invoke.ts` 是唯一
+import `@tauri-apps/api` 的模块）：`@tauri-apps/api/event` 的 `listen`/`unlisten` 需要
+`core:event:allow-listen` + `core:event:allow-unlisten`；**不需要** `emit`，也**不需要**
+`core:default`。应用自定义命令（`cad_*`）不经 ACL，因此无需为它们添加权限。
+
+Linux 宿主的能力文件是 `apps/app-linux/capabilities/default.json`，`windows: ["probe-window"]`；
+窗口的子 webview（`probe-webview`）继承窗口能力，不需要单独条目。Windows/macOS/Android 宿主各有
+同名文件，Android 指向 `main` 窗口。`tauri.conf.json` 的 `app.security.capabilities` 必须保持
+缺失或 `[]`，否则构建可能改读配置、忽略能力文件。
+
+**回归签名**（能力文件缺失/权限被删时）：
+
+```
+Command plugin:event|listen not allowed by ACL
+```
+
+→ 前端拿不到状态 → `inputLaneReady=false` → 不上报 CAD 矩形 → 原生 presenter 不初始化 →
+`[probe] status backend=None ... frames=0` → 只剩**透明 CAD 层叠在桌面上**（DOM 诊断仍在，但无
+CAD 像素）。判据以稳定标记行为第一依据，退出码辅助。
+
+静态门禁 `scripts/check-tauri-capabilities.py` 检查四个宿主的窗口标签、能力文件形状、listen/
+unlisten 授权、`app.security.capabilities` 与 `@tauri-apps/api/*` 导入白名单；它**不**构建、不运行、
+不截图宿主，运行期 ACL 行为仍以实机证据为准。
+
 ## 原生 GTK/wgpu 分区与合成约束（DOM-on-top）
 
 宿主把原生 CAD surface 合成在 GTK `GtkOverlay` 内的中央分区上，React `WebView` 承载 **同一棵 UI 树**；
