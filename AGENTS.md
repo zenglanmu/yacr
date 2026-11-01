@@ -1,440 +1,166 @@
 # AGENTS.md
 
-Rust CAD 查看、测量与批注系统，**开发搭建中**：契约框架 + 合成测试，没有可交付产品。
-需求唯一权威是 `CAD_IMPLEMENTATION_SPEC.md`（v2.0，含 §21 桌面宿主增补）；`docs/handoff.md`
-是逐轮交接入口；桌面 UI 决策见 `docs/adr/0010-react-linux-host-replaces-slint.md`。
+Rust CAD **查看/测量**系统，**开发中，无可交付产品**。需求唯一权威是
+`CAD_IMPLEMENTATION_SPEC.md`（v2.0）；逐轮交接入口 `docs/handoff.md`；桌面 UI 决策见
+`docs/adr/0010-react-linux-host-replaces-slint.md`，合成方向见 ADR 0023，DOM-canvas 路径见
+ADR 0024。
 
-> **2026-10-23 合成状态**：桌面 UI 是 **React + Tauri 原生宿主**（`apps/app-linux` 二进制 `yacr`、
-> `apps/app-windows` `yacr-windows`），共享 React UI 在 `apps/desktop-ui`，Tauri 命令薄壳在
-> `cad-desktop-shell`；`cad-ui-slint` 与所有 Slint 依赖已删除。
-> **生产合成方向是 DOM/WebView 在上、wgpu CAD 原生表面在下**（[ADR 0023](docs/adr/0023-dom-on-top-cross-host-composition.md)）。
-> Linux **原生 Wayland** 是唯一生产路径；**X11/XWayland 显式拒绝**（标记行 + 退出码 4）。
-> **Windows 与 macOS 宿主已实现但视觉/运行时未验收**（Windows 上限 = Tier 0 编译 + Wine 拒绝合同，
-> 真 Windows spike-1/4/5 PENDING 用户自测；macOS 上限 = `macos-check` 编译，窗口/Metal/层序/DPI/
-> 对话框一律 NOT VERIFIED）；
-> **Android 宿主是 Tauri 2 WebView 载体 + wasm `dom-canvas` 会话**（2026-10-28 起，`apps/app-android`），
-> 已在本地模拟器（x86_64、**SwiftShader 软件渲染**）跑通启动/布局/IPC/会话，并已修好 **CAD 像素全透明**
-> （根因：该 GLES 实现的**顶点阶段动态数组下标恒为 0**，命中 wgpu-hal 的 sRGB present 全屏三角形与
-> 本仓库 blit；修复 = 线性 present 目标 + blit 内 sRGB 编码 + 顶点阶段算术取角，
-> 见 `docs/validation-android-present-2026-10-28.md`），出图为**有界模拟器证据**；真机与真实 GPU
-> **NOT VERIFIED**（见 `docs/android-host.md`）；
-> **Web** 的 wasm CAD 会话已实现，并由 CI `web-build` 构建 + `web-smoke`（Playwright Chromium，
-> **SwiftShader 软件渲染**）冒烟、`web-deploy` 仅在 `v*` tag / 手工 dispatch 时发布到 Cloudflare
-> Pages；`app-web` 的 host target 仍是 NOT IMPLEMENTED 空壳，浏览器侧仍不是可交付产品。
+> 当前形态：React + Tauri 原生宿主（`apps/app-linux` 二进制 `yacr`、`apps/app-windows`
+> `yacr-windows`、`apps/app-macos` `yacr-macos`），共享 React UI 在 `apps/desktop-ui`，
+> Tauri 薄壳在 `cad-desktop-shell`。Slint 已完全删除。Android/Web 是 Tauri WebView / 浏览器载体。
+> **大量“已通过”只是合成测试或有界环境证据**（模拟器、软件 GPU、无头浏览器），不是产品验收。
 
 ## 铁律（违反即返工）
 
-1. 不修改 acadrust 源码，不使用 Cargo patch（`check-architecture.py` 会拒绝）。
-2. 未支持/未验证能力必须显式建模（`Unsupported`/`Partial`/诊断），占位与假数据不计完成，
-   也**禁止**把失败改成空成功。
-3. 业务层只操作数据库/命令/事务；GPU 提交封装在渲染器内。
+1. 不改 acadrust 源码，不用 Cargo patch（`check-architecture.py` 拒绝）。
+2. 未支持/未验证能力必须显式建模（`Unsupported`/`Partial`/诊断/`pending(...)`）；占位与假数据
+   不计完成，**禁止**把失败改成空成功。
+3. 业务层只操作数据库/命令/事务；GPU 提交封装在渲染器内。`cad-db` 是唯一权威，UI 与渲染均为派生。
 4. 增量更新：ChangeSet → 依赖失效 → 显示表示重建，不重解析底图。
 5. 每项改动同步补契约测试与文档。
-6. 证据诚实：未运行就说未运行。README/handoff 中大量“已通过”注明仅为**合成测试**或
-   特定环境（模拟器/软件 GPU/无头浏览器），不得推广为真机、真实 GPU、vendor 兼容结论。
-   历史 Slint 宿主的证据不得冒充 React 宿主结论。**Windows 的 Tier 0 编译与 Wine 拒绝 smoke
-   不是真 Windows 验收**；Wine 像素结论必须写 `NOT VERIFIED (Wine limitation, bug 55432/58921)`。
-   Linux 合成结论只对 **GNOME/Mutter + P620 + `scale=1`** 成立；UI “DOM 测试”是源码结构/纯函数
-   契约，不是运行时挂载或像素证据。
-7. 不覆盖/删除陌生变更（并发实现常见）；先读源码和最新构建证据。
-8. **DOM-canvas 宿主（`surfaceMode: dom-canvas`）**：wasm 侧 CAD 会话是**唯一 `cad-db` 权威**，
-   native 壳**不得**实例化/镜像第二份文档状态，也**不得**把 native 显示表示当 wasm 数据源；
-   能力缺失必须**显式拒绝**（标记行 `yacr: unsupported-runtime: webgl2` + i18n 诊断 + **退出码 6**），
-   **禁止**空白 canvas、静默回退到 X11 native-child、静默软件渲染冒充硬件路径。
-   触发条件与判据：只要某项改动让 `dom-canvas` 宿主上出现第二个 CAD 会话实例（或让 native 持有
-   文档状态），或让 WebGL2 不可用变成空白窗口/静默回退，即返工。目标态与分阶段状态见
-   `docs/adr/0024-dom-canvas-wasm-cad-path.md`（**代码未开始**）。
+6. 证据诚实：未运行就写 NOT RUN；合成测试、模拟器、软件渲染、无头浏览器结论不得推广为真机/
+   真实 GPU/vendor/golden/性能结论；历史 Slint 证据不得冒充 React 宿主结论。
+7. 不覆盖/删除陌生变更（并发实现常见）；先读源码与最新构建证据。
+8. **`dom-canvas` 宿主**（X11、Android、Web）：wasm 侧 CAD 会话是唯一 `cad-db` 权威；native 壳
+   **不得**实例化第二份文档状态，也不得把 native 显示表示当 wasm 数据源。能力缺失必须显式拒绝
+   （`yacr: unsupported-runtime: webgl2` + 退出码 6），**禁止**空白 canvas 或静默回退。
 
-## 语言约定
+## 分层与边界（`scripts/check-architecture.py` 强制）
 
-代码标识、注释、测试名、commit message 用英文；`docs/`、`AGENTS.md` 用中文。
-用户可见文案只能来自**唯一权威目录** `crates/cad-ui-core/i18n/{zh-CN,en}.json`（键集必须一致，
-见 `scripts/check-i18n.py`），不得在 React TS/TSX 或 Rust UI 里硬编码中文。
-**该门禁的实际范围（2026-10-31 更正，勿按过度承诺理解）**：`check-i18n.py` 扫
-`crates/cad-ui-core/src`、`cad-desktop-shell/src`、`apps/app-linux/src`、`apps/app-windows/src`、
-`apps/app-macos/src`（Rust）与 `apps/desktop-ui/src`（TS/TSX）并拒绝其中的**硬编码 CJK**；
-**`crates/cad-app` 仍含用户可见中文字面量**（如 `measure_tool.rs` 的提示文案），它们由
-`crates/cad-app/src/tests/cjk_baseline.rs` **冻结**——只**禁止增长**，不是"已合规"。这是**已知债务**，
-新代码**不得**沿用该做法。
-
-**提交纪律（已发生两次，务必照做）**：后台 specialist lane 仍在写工作树时**禁止** `git add -A` / `git add .`；提交前必须 ①`git status --porcelain` **逐项**核对都属于本轮改动，②按**显式路径**暂存，③门禁命令**不得**用 `| tail -1` 之类的管道吞掉退出码（用 `${PIPESTATUS[0]}` 或 `set -o pipefail` 显式检查）。**已发生**：`git add -A` 两次扫入他人/lane 半成品；`clippy | tail -1` 一次把失败吞成"通过"。
-**机械规则（已发生三次，务必照做）**：在 `crates/cad-app/src/selection.rs` 新增 `PropertyRow::new("<key>")` 时，**必须同时**补两个 i18n 目录的 `properties.row.<key>` **与** `apps/desktop-ui/src/properties/property-labels.ts` 的 `propertyRowLabel` switch 分支；`apps/desktop-ui/test/properties.test.ts` 会扫源码字面量并要求两处齐全，否则失败。
-
-**前端语言（2026-10-26）**：`apps/desktop-ui/src` 已是 **TypeScript/TSX**（`tsc --noEmit` 为类型门禁，`npm test` = 类型检查 + `node --test test/*.test.ts`）。相对导入带显式 `.ts`/`.tsx` 扩展名（Node 24 类型剥离直接跑测试）；只用**可剥离语法**（禁 `enum`/`namespace`/参数属性），类型导入用 `import type`。`test/*.ts` 目前**不参与** `tsc` 类型检查（有意，见 `test/helpers.ts` 头注释），不得据此宣称测试已类型化。
-
-**前端目录（2026-10-26）**：纯逻辑按功能放入 `src/{cad,tools,commands,ribbon,layers,properties,popup,options}/`，保留原文件名；区域组件仍在 `src/components/`，回归夹具仍在 `src/stacking-regression/`。`App.tsx` 与入口、共享上下文、文案入口、样式等留在根目录；新文件优先放入所属功能目录，不新增桶式导出。职责表见 `apps/desktop-ui/README.md`。
-
-## 仓库结构
-
-Cargo workspace（`crates/cad-*` + `apps/app-linux`、`apps/app-android`、`apps/app-web`、
-`apps/app-windows`、`apps/app-macos`）。分层示意，**不可反转**；实际依赖以 manifests 与
-`scripts/check-architecture.py` 为准：
+唯一依赖：`cad-render-wgpu` → wgpu；`cad-import-acadrust` → acadrust（0.6.5，未修改）。
+架构规则：`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层（脚本强制的是 slint/iced 全局禁用
+与逐 crate 的 ban 列表，不正向断言 tauri 唯一性——不要因此绕过该规则）。平台类型
+（`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`；`Cargo.toml` 根 `[patch]` 被拒绝。
 
 ```
-cad-domain
-  ↑
-cad-db ── cad-dependencies ── cad-history
-  ↑
-cad-geometry ─ cad-kernel-adapter ─ cad-representation
-  ↑
-cad-spatial ─ cad-scene ─ cad-render-wgpu
-  ↑
-cad-proxy ─ cad-import-acadrust ─ cad-resources
-  ↑
-cad-measure ─ cad-query ─ cad-app
-  ↑
-cad-engine ─ cad-platform ─ cad-diagnostics ─ cad-cli-tools
-  ↑
-cad-host（HostCore：命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink；平台无关）
-  ↑
-cad-ui-core（protocol/layout/session/shell/popup/i18n；UI 框架与 GPU 无关）
-  ↑                              ↑
-cad-desktop-shell（唯一允许依赖   apps/desktop-ui（唯一桌面 React UI 包：单 React 树、
-tauri 的共享层：命令注册、窗口    单一输入漏斗 `.native-input`、in-DOM 弹窗/菜单；
-构建、threading、证据骨架）        构建产物被两个宿主嵌入）
-  ↑                              ↑
-apps/app-linux / apps/app-windows（Tauri 宿主：React chrome + 原生 CAD 分区 + renderer-only wgpu）
-apps/app-android（Tauri 2 WebView 载体：React chrome + wasm dom-canvas 会话，无原生 CAD 表面）
-apps/app-macos（Tauri 宿主：透明 WKWebView + 原生 CAD 子 NSView + wgpu/Metal，编译门禁）
-apps/app-web（wasm CAD 会话 + WebGL2 canvas；host target 仍是 NOT IMPLEMENTED 空壳）
+cad-domain → cad-db/dependencies/history → geometry/kernel-adapter/representation
+→ spatial/scene/render-wgpu → proxy/import-acadrust/resources → measure/query/app
+→ engine/platform/diagnostics/cli-tools → cad-host → cad-ui-core
+→ cad-desktop-shell + apps/desktop-ui（React）→ apps/app-{linux,windows,macos,android,web}
 ```
 
-- `cad-host` 是平台无关的宿主编排层，**不依赖任何 UI 工具包**（不依赖 slint/tauri/gtk/wgpu/
-  web-sys/Android 类型）；平台 I/O 一律走 `cad-platform` 契约（事件式、无 futures、无 `Send`）。
-- **`cad-ui-core`** 承载平台无关的 UI 逻辑（wire protocol、逻辑布局、CAD 会话、宿主 admission/
-  error 状态、popup 纯状态机、launch options、i18n 目录），位于 `cad-host` 之上、具体宿主之下。
-  它依赖 `cad-host`（会话包装 `HostCore`），必须保持 UI 工具包/GPU 无关。宿主通过显式
-  `state.shell.*` 访问共享状态、直接 `use cad_ui_core::…`，**不保留**过渡 re-export 别名。
-  React 前端直接 import `cad-ui-core/i18n`（唯一文案目录）。
-- **`cad-desktop-shell`** 是**唯一允许依赖 `tauri`** 的共享层：`#[tauri::command]` 薄壳与注册、
-  主窗口构建/init scripts/`start_maximized`、popup 命令到 `cad-ui-core::popup` 的接线、
-  工具包无关 `threading`、证据驱动骨架。**禁止** gtk/gdk/gdkx11/ashpd/wgpu/cad-render-wgpu/
-  cad-engine/slint/iced/acadrust（脚本强制）；非 Linux/Windows 目标编译为空壳（保 wasm 门禁）。
-- **`apps/desktop-ui`** 是**唯一桌面 React UI 包**：单 React 树、`.native-input` 单一漏斗、
-  in-DOM 弹窗/菜单；两个宿主的 `tauri.conf.json` 都指向 `../desktop-ui/dist`。
-  不得在 TS/TSX 里硬编码用户可见文案。
-- `cad-engine` 是 UI 无关的渲染会话协调库（`cad-app`/`cad-db`/`cad-domain`/`cad-render-wgpu`/
-  `cad-representation`）；`cad-app` 不依赖 `cad-engine`，`cad-engine` 不依赖 `cad-ui-core`/
-  `cad-host`/任何 UI 工具包或直接依赖 wgpu。
-- **合成方向（唯一）**：DOM/WebView 在上、CAD 原生表面在下且**不接收 OS 输入**。
-  - **Wayland**：app-owned `wl_subsurface` **无条件** `place_below(parent)`（`apps/app-linux/native/`
-    私有 C shim；`build.rs` 经 `cc`+`pkg-config wayland-client`，需 `libwayland-dev`）；
-    GTK toplevel 必须透明（空 opaque region + `Operator::Source` 清屏），否则 CAD 不可见。
-  - **Windows**：`WS_CHILD | WS_VISIBLE | WS_DISABLED | WS_CLIPSIBLINGS` 的 CAD child HWND 压在
-    wry 的 `WRY_WEBVIEW` 容器紧邻之下（`ensure_order` 幂等重排）；WebView2 背景 alpha 必须恰为 0。
-    **不使用** `WM_NCHITTEST`/`HTTRANSPARENT`，**不声称**原生点击穿透。
-  - **输入**：唯一漏斗 `.native-input` → `probe_input` IPC → host 准入门/队列；半透明装饰面板
-    `pointer-events: none` 穿透、面板内交互控件 `pointer-events: auto` 收回。
-  - **弹窗**：锚定菜单与居中模态都是同一 React 树的 in-DOM 覆盖层；第二 Tauri 窗口机制已退役；
-    host 侧 `ShellState.popup` 模态围栏保留，清除为四触发（close / reload / renderer crash / exit）。
-  - 业务层/渲染器不因此改变：单 presenter、renderer-only wgpu、无整幅回读。
-- **`apps/app-linux`** 是真实 Linux GUI（Tauri 2 WebView 中的 React chrome + GTK 中央原生 CAD
-  分区 + renderer-only wgpu），支持**原生 Wayland**（native-below 生产路径）与 **X11/XWayland**
-  （**DOM-canvas 载体**，ADR 0024）：后端由 `backend.rs` 在 GTK 启动前决议 `GDK_BACKEND` 与
-  `surfaceMode`；X11 上 wasm/WebGL2 CAD 会话画进 WebView 内 `<canvas>`，native 壳不建 CAD 会话；
-  WebGL2 不可用时输出稳定标记行 `yacr: unsupported-runtime: webgl2` + i18n 诊断 + **退出码 6**，
-  **无静默回退**（`yacr: unsupported-backend: x11` + 退出码 4 为**历史**合同）。非 Linux 目标上
-  它编译为空库、二进制返回显式 NOT IMPLEMENTED。
-- **`apps/app-windows`** 是真实 Windows 宿主（Tauri 2 + 透明 WebView2 + Win32 child HWND +
-  单一 DOM 漏斗），**已实现但视觉/运行时未验收**：WebView2 缺失 → 标记行
-  `yacr: unsupported-runtime: webview2` + i18n + **退出码 5**。
-- **`apps/app-android`** 是真实 Android 宿主（Tauri 2 WebView/资源载体）：`tauri` 仅作
-  `cfg(target_os = "android")` 依赖，原生侧**只**注册 `canvas_session_status` /
-  `canvas_runtime_failed` 两个 shell 报表命令（后者对 `webgl2` 打标记行后 `exit(6)`），
-  **不**持有文档状态（铁律 8）；UI 产物由 `scripts/build-android-ui.sh` 写到
-  `apps/app-android/dist`。证据与 **NOT VERIFIED** 见 `docs/android-host.md`。
-  `app-macos` 是真实 macOS 宿主（透明 WKWebView + 原生 CAD 子 `NSView` + wgpu/Metal；只有 CI
-  编译门禁，运行时一律 **NOT VERIFIED**）；`app-web` 的 wasm CAD 会话已实现（见「平台状态」Web 条），
-  其 host target 仍是 NOT IMPLEMENTED 空壳。平台 I/O（文件、配置、表面度量）只存在于 `app-*`。
-- **桌面窗口策略**：Linux 宿主默认以**最大化窗口**启动（`apps/app-linux/src/host.rs` 的
-  `start_maximized` 默认 `true`，`WindowBuilder::maximized(true)`），**保留标题栏/系统面板**——
-  这是**窗口管理器最大化**，**不是**全屏/无边框 kiosk（源码未调用 `fullscreen`/`decorations(false)`）。
-  仅验收/证据运行用 opt-out 环境变量 `YACR_PROBE_NO_MAXIMIZE`（**其存在**即退出最大化）；
-  `tauri.conf.json` 无窗口配置（`"windows": []`），不覆盖此默认。跨窗口管理器/平台的行为不保证
-  （见下方「构建与门禁」的 NOT VERIFIED 边界）。
-
-`check-architecture.py` 强制的边界：`cad-domain` 不依赖任何 CAD 包；`cad-db` 只依赖
-`cad-domain`；`cad-import-acadrust` 是**唯一**依赖 acadrust 的 crate；`cad-render-wgpu`
-是唯一依赖 wgpu 的 crate；`cad-ui-core` 不得依赖 slint/wgpu/tauri/gtk/portal/平台类型；
-**`cad-desktop-shell` 是唯一允许依赖 `tauri` 的 crate**，且不得依赖 gtk/gdk/gdkx11/ashpd/wgpu/
-cad-render-wgpu/cad-engine/slint/iced/acadrust；`apps/desktop-ui` 不是 Cargo 成员（静态资源包）；
-**全 workspace 禁止任何直接 `slint`/`slint-build`/`iced` 依赖**（含 build/dev 与 target 表、
-workspace 继承别名）；平台类型（`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`。
-`cad-db` 是唯一权威数据源；UI 与渲染均为派生。详见 `docs/architecture.md`。
-
-## 响应式 UI 与宿主传输缝
-
-- **移动端不是第二套 UI**：`apps/desktop-ui` 仍是**一套 React 树、一个站点**，桌面与移动只是同一批
-  组件/状态的两种**呈现**，**仅按屏幕宽度**切换。单源是 `apps/desktop-ui/src/layout/layout-mode.ts`
-  的 `MOBILE_MAX_WIDTH = 1024` / `MOBILE_MEDIA_QUERY = '(max-width: 1024px)'`（含端点：1024 是最后
-  一个 mobile 宽度）；`data-layout="mobile"|"desktop"` 同时写在 `<html>` 与 `main.shell` 上，由 live
-  `matchMedia` 订阅驱动 ⇒ **resize 即时翻转、不 reload**。移动树 = `.mobile-topbar`（最左菜单按钮
-  44×44）→ ribbon **drawer**（in-DOM 覆盖层：标签 chip + 2 列触摸网格、≤ `68dvh`、44 px 目标、
-  同因拒绝只给**一条**面板级说明）+ 全幅 `Workspace` + `.mobile-commandbar`（唯一底部组件）；
-  移动端**不渲染**标题栏、桌面 ribbon 带、文档/布局标签、状态栏、dock。命令行规则只抽一次
-  （`src/commands/command-line-model.ts` + `use-command-line.ts` + `components/CommandField.tsx`），
-  桌面与移动都从它渲染。Android 手势条由宿主发布 `--yacr-safe-bottom` 给 `.mobile-commandbar` 消费。
-- **宿主传输缝（`apps/desktop-ui/src/host/`，铁律）**：构建期常量 `__YACR_RUNTIME__` ∈
-  `tauri | web | android`（Vite `define` 注入并校验，默认 `tauri`）。**`invoke.ts` 是唯一 import
-  `@tauri-apps/api` 的模块**；`runtime.ts` 决定路由；`web-adapter.ts` 是**薄转发层**：
-  `cad_status`→`shell_status()`、`cad_commands`→`shell_commands()`、`cad_command_aliases`→
-  `shell_aliases()`、`probe_input`→wasm 的同名导出，**其余每条命令（19 条 wire 命令与任何陌生名字）
-  一律 `invoke(name, JSON.stringify(args))` 并原样拆 `{ok,value}` / 原样抛 `error`**——适配器
-  **没有自己的命令表**，拒绝永远来自会话本身（陌生名字得到会话的 `unsupported-runtime: <name>`）。
-  唯一的宿主专属行为是 `OPEN`（DOM 文件选择器 + `open_bytes`，因为 wasm 没有文件系统）；
-  `canvas_session_status` / `canvas_runtime_failed` 仍是"只上报"的两条（有 Tauri 桥时由
-  `invoke.ts` 送 Tauri）。
-  **路由按宿主上报的载体决定，不按构建目标**：`__YACR_RUNTIME__` 只是初值（`web`/`android` 初值即
-  `dom-canvas`，`tauri` 初值 `unknown`），每次 `cad_status.surfaceMode` 都喂给 `runtime.ts` 的载波
-  状态；一旦是 `dom-canvas`，**后续所有 CAD 数据命令都走 wasm adapter 并重载命令词汇表**（首帧那次
-  native `cad_status` 是宿主宣告载体的唯一引导调用）。因此 **X11 与浏览器/Android 同构**（同一套
-  词汇与拒绝语义），`native-below`（Wayland/Windows）保持桌面词汇与 native 会话不变。`apps/app-linux`
-  在 `dom-canvas` 上**返回空词汇表**（不把桌面表冒充成该载体能执行的命令），`native-below` 不变。
-  两个 shell-only 命令（`canvas_session_status`、`canvas_runtime_failed`）在有 Tauri 桥时仍送给
-  Tauri（X11 的标记行/退出码 6 由它负责）。
-  **适配器只许拒绝，不许伪造答案**（拒绝原样来自会话；`cad_status.canOpen` 是唯一被抬起的字段，
-  因为开图是传输层的 DOM 能力）。`OPEN` 之外的宿主专属映射为零。
-  **单漏斗已接线（2026-10-28，前端换轨完成）**：`apps/app-web` 的 page 载体跑的就是真
-  `CadSession`，`invoke(name, args_json)` 服务**全部 20 条** wire 命令，`shell_commands()` =
-  `admissible_names()`（155）、`shell_aliases()` = `alias_pairs()`（51），`shell_command` 走共享门 +
-  真路由器，`probe_input`/`frame()`/`cad_open_popup` 都是生产导出；前端现在**真的走单漏斗**：
-  同一套 `bindProbeInput` + `ProbeInput` 事件在 `dom-canvas` 上也存在（`inputLaneReady`，等会话
-  live 后建 lane），相机不再由传输层合成（`bindCanvasNavigation`/`wheelZoomFactor`/`panDelta` 已删），
-  帧由 `cad/frame-loop.ts` 的 rAF 泵驱动（输入/命令/状态变化 kick，`presented:false` 连续
-  `FRAME_IDLE_STEPS` 停），`palettesAvailable` 改为**读宿主上报的字段**（wasm 报 `true`，
-  `palettesOffered` 是唯一读点）。同一 wasm 实例的 **worker/offscreen 载体仍是旧的 viewer 会话**
-  （无 wire/输入/弹窗面，无 shell 事实），迁移属 ADR 0024 阶段 ⑧ 剩余部分。证据见
-  `docs/validation-web-funnel-parity-2026-10-28.md`、`docs/validation-web-commands-2026-10-28.md` 与
-  `docs/validation-dom-canvas-flip-2026-10-28.md`（后者含保留数据库的实测代价：`complex-test.dwg`
-  常驻 **2.68 GiB** 与「安装后才超 3 GiB 上限时报测量值、不抬上限」的边界）；
-  **标准视图与 `OPEN` 选择器的 2026-10-28 修正**见 `docs/android-host.md` §5：
-  `cad_status.standardViews`（可选加法字段，缺省=旧行为、`[]`=该载体没有标准视图）决定七个视图是否
-  可点，wasm 会话报 `[]`；`OPEN` 的 `<input type=file>` **不再带 `accept`**（Android 上它会把意图
-  路由到媒体 Photo Picker）而是选中后按扩展名校验。
-- **每宿主产物互不共享**：桌面宿主 `apps/desktop-ui/dist`（`npm run build`）；Web
-  `apps/app-web/dist-ui`（`bash scripts/build-web-ui.sh`，内部 `npm run build:web`）；
-  Android `apps/app-android/dist`（`bash scripts/build-android-ui.sh`，内部 `npm run build:android`）。
-  三者用不同运行时常量编译，**不得**互相覆盖；`apps/app-web/dist`（旧的独立 vanilla harness，
-  含 Worker 隔离）是**另一份**产物，由 `scripts/build-web.sh` 构建，未被上述脚本触动。
-- **验收入口是本地/手工，未接线 CI**：
-  `bash scripts/build-web-ui.sh` → `python3 scripts/serve-web.py --directory apps/app-web/dist-ui` →
-  `NODE_PATH=… node scripts/web-ui-smoke.cjs --url http://127.0.0.1:8090/ --verbose --evidence <dir>`
-  （Chromium + SwiftShader ⇒ **软件渲染，布局/DOM 证据**；最近一次 **PASS 7/7 cases、141/141 checks**，
-  退出码 0）；Android 侧 `bash scripts/build-android-ui.sh` / `bash scripts/build-android.sh --release`。
-  CI 的 `web-smoke` 仍只冒烟旧的 `apps/app-web/dist`（见 `docs/ci.md`），**不得**把本地这两条入口
-  冒充 CI 结果。证据与 **NOT VERIFIED** 见 `docs/validation-mobile-responsive-2026-10-28.md` 与
-  `docs/android-host.md`。
+- `cad-host` 不依赖任何 UI 工具包；平台 I/O 只存在于 `apps/app-*`（`cad-platform` 契约）。
+- `cad-ui-core` 框架/GPU 无关（wire protocol、layout、`CadSession`、`ShellState`、popup、i18n）。
+- `cad-app` 不依赖 `cad-engine`；`cad-engine` 不依赖 UI/宿主。
+- `apps/desktop-ui` 是**唯一桌面 React UI 包**（非 Cargo 成员），Linux/Windows/macOS 宿主的
+  `tauri.conf.json` 都指向 `../desktop-ui/dist`（Android 指向 `../dist`）。
 
 ## 构建与门禁
 
-工具链 1.99.0（`rust-toolchain.toml`）；若 `PATH` 无 cargo，加 `$HOME/.cargo/bin`。
-**验证范围（2026-10-15 用户决定，提效）**：日常功能开发与修复**只验证自己的改动范围**
-（改动 crate 的编译、自己的契约测试、自己文件的 fmt/clippy）。不要为小改动跑全量测试、
-全量门禁或平台编译矩阵。全量测试与全量门禁（下方命令块，CI 同款，见 `docs/ci.md`）只在
-两种情形运行：① 用户明确要求；② 发版/发布验收前。证据诚实规则不变：未运行必须标注
-NOT RUN，不得以旧证据冒充。CI workflow 仍按自身节奏运行，不受此本地策略影响。
+工具链 **1.99.0**（`rust-toolchain.toml`），`Cargo.lock` 必须 `--locked`；`cargo` 不在 PATH 时
+加 `$HOME/.cargo/bin`。
 
-**这**是日常提效策略，**不是永久免测**：Slint→React 迁移的**最终验证**（P6）**已执行（有界、分区）**，
-证据见 `docs/validation-react-linux-migration-2026-10-16.md`（编译/测试/门禁/硬件 GPU 完成；解析器
-一度被手工锁阻断，已按批准最小离线同步修复，仅改 `Cargo.lock`）。**Gate P6 attempt2：ACCEPT-WITH-FIXES
-（文档限定已应用）**，observer 终判已观察截图**无重大视觉缺陷**；**有界本地 Linux 迁移验收通过**，
-但**不是**完整 CAD 产品/跨平台/vendor/golden/性能验收。
-**DOM-on-top（WP1–WP5）沿用同一策略**：逐 WP 验证改动 crate 的编译/测试/门禁，**全 workspace 全量
-门禁 NOT RUN**；证据与 NOT RUN 边界见 `docs/validation-dom-on-top-production-2026-10-23.md`。
+**日常只验证自己的改动范围**（改动 crate 的编译、自己的契约测试、自己文件的 fmt/clippy）。
+全量门禁与全量测试只在用户明确要求或发版/发布验收前运行；未运行必须写 **NOT RUN**。
 
 ```bash
+# 单 crate / 单测试（GPU/CLI 用例串行）
+cargo test -p <crate> <test-name> --locked
+cargo check -p app-linux --all-targets --locked
+cargo test -p cad-render-wgpu --test wgsl_validation --locked   # 离线 WGSL，无需 GPU
+
+# 前端：npm test = tsc --noEmit + node --test test/*.test.ts
+(cd apps/desktop-ui && npm ci && npm test && npm run build)
+(cd apps/desktop-ui && node --test test/foo.test.ts)            # 单个前端测试
+
+# 全量测试（GPU/CLI 用例串行）
+cargo test --workspace --locked -- --test-threads=1
+
+# 全量门禁（CI core-quality + i18n-contracts 同款）
 cargo fmt --all -- --check
 cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
 python3 scripts/check-architecture.py
 python3 scripts/check-fixture-manifest.py
-python3 scripts/check-workflows.py
+python3 scripts/check-file-size.py                 # 代码文件 ≤1000 行
+python3 scripts/check-command-docs.py && python3 scripts/test-check-command-docs.py
 python3 scripts/check-i18n.py
-python3 scripts/check-file-size.py   # 代码文件 ≤1000 行（.rs/.js/.jsx/.mjs/.cjs/.ts/.tsx/.py；文档不计入）
 cargo check --workspace --all-targets --locked
-cargo check --workspace --lib --target wasm32-unknown-unknown --locked   # 全 workspace，含 UI/宿主
-(cd apps/desktop-ui && npm ci && npm test && npm run build)
+cargo check --workspace --lib --target wasm32-unknown-unknown --locked
 ```
 
-**代码文件行数上限**：任何**代码**文件不得超过 **1000 行**（`scripts/check-file-size.py`，含
-`scripts/test-check-file-size.py` 自测）。`.md` **不计入**（`docs/handoff.md` 等按设计就是长日志/清单）。
-文件接近上限时按模块拆分，**不要**加白名单豁免。
+`check-workflows.py` 及其 `scripts/test-*.py` 契约（linux/web-deploy/package/fetch-fonts/
+android-host/macos-host/ui-migration-guards）也是门禁的一部分，清单以 `.github/workflows/core.yml`
+为准。
 
-默认 Linux host workspace 编译包含 `app-android` 与 `app-web` 包的 host target；这不替代
-下方独立的 WASM 与 Android 原生目标编译门禁，也不代表这些平台的运行验收。clippy 仍按
-既有配置排除 `app-android` 与 `app-web`。
+**顺序陷阱**：`npm run build` 必须在 Rust 宿主编译之前，`tauri::generate_context!` 内嵌
+`apps/desktop-ui/dist`；Android 的 `cargo check -p app-android` 同理要先跑
+`bash scripts/build-android-ui.sh`。门禁命令**不得**用 `| tail -1` 之类管道吞退出码（用
+`set -o pipefail` 或 `${PIPESTATUS[0]}`）。
 
-- **平台状态（2026-10-23）**：**Windows 宿主已实现**（Tauri 2 + 透明 WebView2 + Win32 child HWND +
-  共享 `apps/desktop-ui`），但**视觉/运行时未验收**；CI `windows-check` 只做**编译门禁**
-  （msvc/gnu/wasm 空壳），**不代表**可运行 GUI 或运行验收。`windows-release` 仍 `if: false`，
-  `scripts/package-windows-release.sh` 仍退役非零。**macOS（2026-10-31 起）是真实 Tauri 宿主**
-  （透明 WKWebView + 原生 CAD 子 `NSView` + wgpu/Metal），**只有 CI 编译门禁**，窗口/Metal/层序/
-  DPI/原生对话框/视觉一律 **NOT VERIFIED**，`macos-release` 仍 `if: false`；
-  **Android（2026-10-28 起）与 Web 是真实宿主/会话，只保留编译与（Web 侧）CI 冒烟门禁**，
-  不代表真机/真实 GPU 验收。旧平台发布/打包脚本已退役或禁用；Linux release 暂时不可用，
-  等待替代打包验收。**不要**把已退役脚本当作可用流程。
-  **2026-10-23 立项 / 2026-10-24 第一批实现（[ADR 0024](docs/adr/0024-dom-canvas-wasm-cad-path.md)）**：
-  X11/XWayland 走 **DOM-canvas 路径**（wasm/WebGL2 CAD 会话画进 DOM `<canvas>`，
-  `surfaceMode: dom-canvas`），`apps/app-web` 的 wasm 会话共享**同一**路径；WebGL2 缺失 →
-  标记行 `yacr: unsupported-runtime: webgl2` + **退出码 6**（已实现）。**已取得的证据**
-  （`docs/validation-dom-canvas-wasm-2026-10-24.md`）：X11 宿主 `surfaceMode=dom-canvas` 启动、
-  canvas 挂载 + backing `626×341`、合成 fixture 出图（ScreenCast 抓帧）；**X11 上加/缩放平移经用户
-  手动确认**（用户报告，无 agent 像素差证据）；Chromium 141 与 WebKitGTK 2.52.6 本地出图与缩放。
-  **仍禁止**写成「X11 已验收」或「web 已验收」：真 X11 服务器/WM、其它合成器、**硬件归属
-  （NOT VERIFIED）**、DPR/多显示器、性能、vendor/golden、浏览器矩阵均未验证；agent 侧
-  输入注入在本机不可用。**2026-10-25 起** Web 侧已有 CI `web-build` + `web-smoke`（SwiftShader
-  软件渲染，carrier/status 冒烟）与 tag/dispatch `web-deploy`；这**不是** GPU/像素验收。**阶段 ⑧ 首批已实现**（[ADR 0025](docs/adr/0025-wasm-memory-budget-and-worker-isolation.md)）：
-  显式内存预算拒绝（`step:"budget"`，64 MiB 输入 / 3 GiB 堆）、分块但原子提交的上传、以及**按能力**
-  的 Worker 隔离（Chromium 实测 `isolation=worker`；WebKitGTK 实测 Worker 内无 WebGL2，显式报
-  `main-thread (no WebGL2 in worker)`）。`complex-test.dwg` 实测 heap **1.91 GB → 1.43 GB**、
-  开图 **14.1 s → 11.2 s**；**峰值仍由导入/建场景阶段决定**，大图预算仍未达标。
-  **GPU 侧同样有预算**（[ADR 0026](docs/adr/0026-gpu-memory-accounting-and-budget.md)）：渲染器按类目
-  记账（current/peak，drop guard 精确退费），预算基准是**显存百分比**（默认 **90 %**，选项对话框可改
-  10–100，持久化 `view.gpuBudget.percent`；`--gpu-budget-mb` 显式字节 > 百分比 > **无上限**），
-  VRAM 口径 = **最大单个 device-local heap**（Vulkan，ash；**不得**用堆求和，实测偏高 6 %）；
-  **探测不到显存就不设预算**（`budget_source=unprobed`，不再有 3 GiB 估算兜底），拒绝为
-  `RenderError::GpuMemory` + CLI **退出码 7** + 不写 PNG。实测授权样本常驻 **2.11 GB**
-  （驱动 allocator 交叉校验差 **0.07 %**），P620 上 `vram=4,294,967,296`（4.00 GiB）→ 90 % =
-  **3,865,470,566**；其中 **`stream` 1.70 GB** 为最大头（渲染器优化另立项）。
-  `memory_budget_thresholds` **只在 D3D12** 启用：Vulkan 上实测会让同进程第二个 device 首次 72 B
-  写入即 OOM，**不得**顺手打开。
-- **渲染/端到端验证优先真实硬件 GPU**：只要环境存在真实显示与显卡（本机为 Wayland 桌面 +
-  Intel UHD + Quadro P620，可用 `nvidia-smi`/DRM fdinfo 证明），验收**必须**走真实 GPU。
-  当前桌面宿主（React/Tauri）的**唯一生产后端是原生 Wayland**（决策/子表面桥见
-  `docs/adr/0011-native-wayland-subsurface.md` 与 [ADR 0023](docs/adr/0023-dom-on-top-cross-host-composition.md)；
-  有界原生证据见 `docs/validation-native-wayland-2026-10-16.md` 与
-  `docs/validation-dom-on-top-production-2026-10-23.md`）。**X11/XWayland 自 2026-10-24 起走
-  DOM-canvas**（[ADR 0024](docs/adr/0024-dom-canvas-wasm-cad-path.md)）：有界运行成立（合成 fixture
-  出图 + 用户手动确认缩放平移），但它**不是** native-below 的生产证据，且硬件归属、真 X11、性能均
-  **NOT VERIFIED**；历史拒绝合同（`yacr: unsupported-backend: x11` + 退出码 4）**不得**与当前
-  `webgl2` 码 6 混用。
-  真实 GPU 路线是 env-gated 证据驱动（`apps/app-linux/src/evidence.rs`：
-  `YACR_PROBE_EVIDENCE`/`YACR_PROBE_LIFECYCLE`）+ `scripts/collect-evidence.sh`
-  （原生 Wayland 用同 UID Mutter `ScreenCast` 抓合成帧）。W3 曾执行有界原生运行（CAD/输入/生命周期/
-  几何）并由 Observer 终态判定**有界截图视觉 PASS**；**最终 Oracle W3 attempt3 终判
-  ACCEPT-WITH-LIMITATIONS（无 blocker）**：有界本地验收（GNOME/Mutter + P620 + `scale=1`），
-  不得据此宣称完整原生支持或 vendor/精度/性能结论。该 W3 的 X11 运行回归属 **CAD-on-top 时期**；
-  自 DOM-on-top 起 X11 被拒绝，`apps/app-linux/scripts/x11-window-grab.c` 是**历史工具**，
-  **不得**冒充当前后端证据。
-  **旧 Slint 离屏/无头与真实 GPU 测试套件（`scripts/check-linux-app.sh`、`verify-ui.sh`、
-  `run-real-gpu-e2e.sh`）已随 Slint 退役，不再存在**。P6 已定义并**实际运行**替代的真实 GPU 程序
-  （硬件 Vulkan + 真实 GTK/XWayland 窗口 + env-gated 证据驱动；证据见
-  `docs/validation-react-linux-migration-2026-10-16.md` 与 `.slim/deepwork/replace-slint-ui/p6-real-gpu.md`）；
-  旧套件结果不得复用，也不得用软件后端冒充真实 GPU。
-  - **不得**用 SwiftShader/lavapipe 等软件后端产出"真实 GPU"结论；软件后端产出的数字/截图必须
-    显式标注为软件渲染。只有**确无显示/GPU** 的环境才回退软件渲染。
-  - **性能/CPU 测量同样适用真实 GPU 优先**；软件后端耗时不得用作性能结论。
-- Rust 单测试：`cargo test -p <crate> <name> --locked`。GPU/CLI 用例串行跑。
-- 需要真实 DWG 的测试设 `YACR_TEST_DWG=<绝对路径>`，否则跳过；跳过不是已运行证据。
-- 离线 WGSL 校验（无需 GPU）：`cargo test -p cad-render-wgpu --test wgsl_validation --locked`。
+## 运行与证据
 
-## 平台状态：占位与“已实现但未验收”
+- Linux 唯一可运行 GUI：`bash scripts/run-react-linux.sh --open <dwg>`（不强制 `GDK_BACKEND`）。
+  直跑先构建前端，再
+  `cargo run --release --locked -p app-linux --bin yacr --features tauri/custom-protocol -- --open <dwg>`。
+- 后端在 GTK 启动前由 `apps/app-linux/src/backend.rs` 决议，**无静默回退**：Wayland =
+  `native-below`（生产路径）；X11/XWayland = `dom-canvas`。
+- 一键证据：`bash scripts/collect-evidence.sh`（Wayland/X11 用同 UID Mutter ScreenCast 抓合成帧）。
+  `--probe` 是假打开，**不得**当作视觉/像素证据；证据运行必须显式前台目标窗口并每轮用新目录。
+- 桌面窗口默认**最大化但保留标题栏**（不是全屏/kiosk）；`YACR_PROBE_NO_MAXIMIZE` 仅用于证据运行。
+- Web/移动本地验收（手工，未接线 CI）：`bash scripts/build-web-ui.sh` →
+  `python3 scripts/serve-web.py --directory apps/app-web/dist-ui` →
+  `node scripts/web-ui-smoke.cjs --url http://127.0.0.1:8090/ --verbose --evidence <dir>`
+  （Chromium + SwiftShader ⇒ 软件渲染，只作布局/DOM 证据）。
+- 真实 DWG：`YACR_TEST_DWG=<绝对路径>`，否则用例跳过——**跳过不是已运行证据**。外部大样本放仓库外。
+- 有真实显示/GPU 时必须用真实 GPU。软件渲染（SwiftShader/lavapipe）产物必须显式标注，且不得
+  用作性能结论。
+- 退出码：`0` 成功、`1` 通用失败、`2` 后端策略错误、`3` postload-pan 驱动失败、`4` **历史** X11
+  拒绝（不再产生）、`5` Windows 缺 WebView2、`6` dom-canvas 缺 WebGL2、`7` GPU 预算拒绝。
+  分类以稳定标记行为第一依据。
 
-- **Windows**（`apps/app-windows`）：**真实宿主，已实现**——Tauri 2 + 透明 WebView2 + Win32
-  child HWND + 单一 DOM 输入漏斗；共享 UI 来自 `apps/desktop-ui`。**验收上限**：Tier 0 编译门禁
-  （msvc/gnu/wasm 空壳）+ Wine **拒绝合同** smoke（WebView2 缺失 → 标记行 + 退出码 5）。
-  视觉/运行时（spike-1/4/5、z-order、DPI、ProcessFailed、picker、runtime-present 出帧）**NOT RUN**。
-  **禁止**写“Windows 已验收”；Wine 像素结论必须写
-  `NOT VERIFIED (Wine limitation, bug 55432/58921)`。详见 `docs/windows-app.md`。
-- **macOS**（`apps/app-macos`，bin `yacr-macos`）：**真实 Tauri 2 宿主，已实现**——透明 WKWebView
-  （React chrome）**在上**、原生 CAD 子 `NSView` **在下**（`addSubview:positioned:relativeTo:`
-  `.below`），渲染器是同一个 renderer-only wgpu，macOS 走 **Metal**（`ProbeBackendPolicy` 新增
-  `metal`，`Auto` 在 macOS = Metal）。文件打开用主线程 `NSOpenPanel`，配置在
-  `~/Library/Application Support/yacr`。**验收上限 = CI `macos-check` 编译**（`macos-latest`，
-  前端构建后 `cargo check -p app-macos --all-targets --locked`，**不运行**）。窗口/透明合成/
-  层序/Retina/Metal present/弹窗/对话框/像素/性能**全部 NOT VERIFIED**；本机 Linux 无 Apple SDK，
-  只能用假 `cc` 跳过 ObjC helper 的 C 步骤做**类型检查**（`cargo check --target
-  aarch64-apple-darwin`；不链接、不产物），CI 编译门禁才是编译证据。打包仍退役非零。renderer crash
-  触发 ④
-  **显式未实现**（tauri 2.12.3/wry 0.57 无 WKWebView 终止钩子）。详见 `docs/macos-app.md`。
-- **Android**（`apps/app-android`）：**真实 Tauri 2 宿主**（2026-10-28 起，WebView/资源载体；
-  `src-tauri/` 布局，`gen/android` 已提交）。wasm `dom-canvas` 会话是唯一 CAD 权威，原生侧只注册
-  `canvas_session_status` / `canvas_runtime_failed`。构建 = `scripts/build-android.sh`
-  （`tauri android build --apk`，release 默认未签名）；`android-check` 仍需先跑
-  `scripts/build-android-ui.sh`（`generate_context!` 内嵌 `frontendDist`）。
-  **验收上限**：本地模拟器 x86_64 + **SwiftShader** 上启动/布局/IPC/会话成立，且**出图成立**
-  （修复了「CAD 像素全透明」：该 GLES 实现的顶点阶段动态数组下标恒为 0，present 全屏三角形退化；
-  改为线性 present 目标 + blit 内 sRGB 编码 + 算术取角，见
-  `docs/validation-android-present-2026-10-28.md`）。**模拟器 ≠ 真机**，真机/真实 GPU/其它
-  WebView 版本/像素 golden/色彩空间一律 **NOT VERIFIED**；详见 `docs/android-host.md`。
-- **Web**（`apps/app-web`）：wasm CAD 会话（`surfaceMode: dom-canvas`，ADR 0024）是**真实**实现；
-  **page 载体自 2026-10-28 起是真 `CadSession`**（`src/live.rs` + `src/page.rs`：真命令路由器、
-  真 `cad-db`、真输入缝、真弹窗状态机、全 20 条 `invoke`），**worker/offscreen 载体仍是旧 viewer**。
-  `scripts/build-web.sh` 构建 `apps/app-web/dist`；CI `web-build` 构建并上传该 artifact、`web-smoke`
-  用 Playwright Chromium（**SwiftShader 软件渲染**，非 GPU/像素证据）断言 `start: ok` 与
-  `batches`/`presented`（`draws` 不再断言：page 载体的引擎不向这一层发布 draw 计数）、
-  `web-deploy` 仅在 `v*` tag / 手工 `workflow_dispatch` 时把**共享 chrome bundle**
-  （`web-ui-dist` → `apps/app-web/dist-ui`，`BUNDLE_KIND=ui`）发布到 Cloudflare Pages
-  （`yacr-examples`）。
-  `app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳；浏览器运行证据到合成夹具 + 一次外部
-  样本（`docs/validation-dom-canvas-wasm-2026-10-24.md`、`docs/validation-dom-canvas-flip-2026-10-28.md`：
-  Chromium 141 + SwiftShader、**软件渲染**，实测 `entityCount 4→5`、像素差 0.53 %、真 `PopupAck`，
-  且保留数据库使 `complex-test.dwg` 常驻 **2.68 GiB**），**没有** GPU/golden/性能/浏览器矩阵结论，
-  也不得写成「web 已验收」；前端尚未换轨到单漏斗 `invoke` + `frame()`。
+## 前端约定（`apps/desktop-ui`）
 
-## 真实 DWG 回归
+- TypeScript/TSX，**只用可剥离语法**（禁 `enum`/`namespace`/参数属性），类型导入用 `import type`；
+  相对导入带显式 `.ts`/`.tsx`。`test/*.ts` **不参与** `tsc`（有意，见 `test/helpers.ts` 头注释）。
+- 纯逻辑按功能放 `src/{cad,commands,host,layout,layers,options,popup,properties,ribbon,tools,color}/`，
+  区域组件留在 `src/components/`；不新增桶式导出。职责表见 `apps/desktop-ui/README.md`。
+- 构建期 `__YACR_RUNTIME__` ∈ `tauri | web | android`（Vite `define` 注入并校验，默认 `tauri`）。
+- `src/host/invoke.ts` 是**唯一** import `@tauri-apps/api` 的模块；`web-adapter.ts` 是薄转发层，
+  **只许拒绝、不许伪造答案**（拒绝来自会话，如 `unsupported-runtime: <name>`）。
+- 载体路由按宿主上报的 `cad_status.surfaceMode`，不按构建目标；`dom-canvas` 上后续 CAD 命令
+  一律走 wasm adapter。
+- 移动端不是第二套 UI：同一 React 树，只按宽度切换。单源是
+  `src/layout/layout-mode.ts` 的 `MOBILE_MAX_WIDTH = 1024`（含端点）。
+- 三份产物**不得互相覆盖**：桌面 `apps/desktop-ui/dist`、Web `apps/app-web/dist-ui`、
+  Android `apps/app-android/dist`（分别由 `npm run build`、`scripts/build-web-ui.sh`、
+  `scripts/build-android-ui.sh` 生成）。`scripts/build-web.sh` 写的 `apps/app-web/dist` 是另一份
+  独立 harness 产物，也不要覆盖。
 
-流程见 `docs/testing-dwg.md` 与 `docs/react-linux-app.md`：**有真实显示/GPU 时以真实硬件 GPU
-为主**（React/Tauri 宿主经 `scripts/run-react-linux.sh` 启动，env-gated 证据驱动 +
-硬件 Vulkan）；**无显示环境**才回退原生离屏 wgpu + Mesa lavapipe
-（`cargo build -p cad-cli-tools --release`，`scripts/check-dwg-native.py`，用 lavapipe 时须显式
-`--software`）。必须分别记录「打开 / 出图 smoke / 视觉验收」三个结论；退出码 0、非空截图、
-`error=None` 都不能单独证明视觉正确。外部大样本默认放仓库外（默认 `~/sources/cad-test-files/`），
-也可用 `scripts/fetch-test-dwg.sh` 拉到 `/tmp/opencode`。**授权明确、可再分发的图纸与参考图
-可提交进 `fixtures/` 并记入 `fixtures/manifest`**，须在 `provenance` 记录来源 URL、下载
-日期、许可与 SHA-256；未授权或来源不明的用户/厂商数据仍不得提交。每轮用新输出目录，
-保留失败/超时记录，不用旧证据冒充本轮通过。
+## i18n（文案唯一权威）
 
-**自动证据采集（一键：构建 + 启动 + 截图 + 汇总）**：`scripts/collect-evidence.sh` 串起
-「前端构建 → `cargo build --release` 宿主 → 按后端启动真实 `yacr`（`--open` + `--fonts-dir`，
-**不用** `--probe` 假打开）→ 截图 → 汇总日志」。原生 Wayland 后端用 `scripts/screencast-capture.py`
-经同 UID `org.gnome.Mutter.ScreenCast` 抓合成帧；**X11 自 2026-10-24 起是真实运行**
-（`surfaceMode=dom-canvas`），同样用 ScreenCast 抓 `x11/x11-frame.png`；**拒绝合同**改为
-`webgl2` 能力缺失：稳定标记行 `yacr: unsupported-runtime: webgl2` + **退出码 6** → `UNSUPPORTED_RUNTIME`
-（标记行第一依据，退出码辅助）。历史 `UNSUPPORTED_BACKEND`（`yacr: unsupported-backend: x11` +
-退出码 4）解析保留，仅用于旧构建。X11 抓屏**不得**用 `ffmpeg -f x11grab`/`gnome-screenshot`
-（本会话在 Wayland 合成下全黑）；`apps/app-linux/scripts/x11-window-grab.c` 仍是**历史工具**，
-不得冒充证据。输出落
-`${YACR_EVIDENCE_ROOT:-/tmp/opencode}/yacr-evidence-<UTC>Z/`：`results.tsv` 逐后端记录
-`NATURAL_EXIT`/`PLANNED_TIMEOUT`/`SKIPPED`/`NO_DISPLAY`/`UNSUPPORTED_BACKEND`、真实退出码、
-截图 `captured`/`missing`；`README.md` 附授权边界。契约测试
-`python3 scripts/test-collect-evidence.py`。**DOM-on-top 回归夹具**只在真实 `--open` 会话 +
-`YACR_PROBE_STACKING=1`（严格 `"1"`）+ init-script `window.__YACR_STACKING_REGRESSION__ === true`
-时启用；`--probe`/`YACR_PROBE_ONLY` 同现拒绝；夹具不是产品开关，其帧**不是**视觉 PASS。
-**证据取景规则**：必须包含可见几何、捕获时确认目标窗口在前台（否则得到 wrong-window 帧）、
-夹具层序 ≠ 生产透明度、每轮新目录；**生产透明修复后的像素复采已执行（有界 PASS：几何满亮度、
-无蒙层；About 覆盖层 PASS）**，但 textEdit 编辑器内容与光标抑制确定性仍未闭环（见验证记录）。
-**授权边界（2026-10-23 用户授权放宽）**：允许 `sudo`/以 root 运行、允许解锁或切换会话、允许安装
-软件（浏览器 / Playwright / 测试与构建工具）、允许在**真实用户会话**中运行有显示的程序（含
-X11/XWayland 实例下的 DOM-canvas 探针）。**仍然禁止**：① 起虚拟/无头显示（Xvfb、虚拟合成器等）并把
-其产物冒充真机/真实会话证据；② 用软件渲染（llvmpipe/SwiftShader/lavapipe 等）冒充真实 GPU——
-软件渲染产物必须显式标注，且不得用作性能结论；③ 把无头或 **XWayland** 结论推广到真机、真 X11、
-其它窗口管理器/合成器、其它 vendor 或跨平台。无真实显示时仍**显式非零退出**而非假装成功；
-截图仅本地保存、不上传。Wayland 走用户**自身会话内**的 ScreenCast（有录制指示、不抑制），
-**不是**绕过授权；**Wayland 帧为整屏合成**（同 UID `RecordMonitor`），**会包含桌面上其它窗口**——
-仅供本地读判、不上传。截图只是窗口/合成像素，**不等于**视觉正确性、精度或 vendor 结论。
-> **历史（2026-10-23 之前的边界，保留不删）**：以当前会话同 UID 用户运行，**不提权、不以 root
-> 运行、不 `sudo`、不解锁/修改会话、不改 portal/ScreenCast 权限、不装包、不起虚拟/无头显示**。
-> 该限制**只描述旧授权**；`scripts/collect-evidence.sh` 内嵌的授权说明与 `docs/handoff.md` 的
-> 历史条目仍按旧边界书写，属**同步债务**（脚本不在本轮改动范围），阅读时以本段为准。
+- 唯一目录 `crates/cad-ui-core/i18n/{zh-CN,en}.json`，键集必须一致；React TS/TSX 与 Rust UI
+  不得硬编码中文（`scripts/check-i18n.py`）。
+- **机械规则**：在 `crates/cad-app/src/selection.rs` 新增 `PropertyRow::new("<key>")` 时，必须同时补
+  两个 i18n 文件的 `properties.row.<key>` **和**
+  `apps/desktop-ui/src/properties/property-labels.ts` 的 `propertyRowLabel` 分支；否则
+  `apps/desktop-ui/test/properties.test.ts` 失败。
+- `crates/cad-app` 仍有**冻结的用户可见中文债务**（`crates/cad-app/src/tests/cjk_baseline.rs`）：
+  只禁止增长，不是已合规；新代码不得沿用。
 
-## 交接点
+## 平台状态（勿过度承诺）
 
-用 `rg 'pending\(' crates apps` 查找显式占位（文件路径与标识对应实施单元）。替换 `pending`
-必须补验收测试，禁止改成空成功。已定义但仍需设计审查或未闭环的事项集中在
-`docs/handoff.md`「已定义，但尚需设计审查」与各 `docs/*.md` 的“未完成”小节。
-**注意**：ADR 0023 §5 **显式延期**「平台合成 ADR（RenderTarget/HostTexture token 所有权）」——
-它属 renderer 资源契约，与层序正交；handoff 中该条目**原样保留**，不得当作已被 DOM-on-top ADR 覆盖。
+| 平台 | 实际边界 |
+|---|---|
+| Linux | 唯一可运行 GUI；原生 Wayland 生产路径，X11 走 DOM-canvas。仅 GNOME/Mutter + P620 + `scale=1` 有界证据 |
+| Windows | 真实宿主但**仅**编译门禁 + Wine 拒绝合同（缺 WebView2 → 退出码 5）；视觉/运行时 NOT VERIFIED |
+| macOS | 真实 Tauri 宿主但**仅** CI 编译；窗口/Metal/层序/DPI/对话框/像素一律 NOT VERIFIED |
+| Android | Tauri WebView 载体 + wasm 会话；本地模拟器（SwiftShader）有界证据；真机/真实 GPU NOT VERIFIED |
+| Web | wasm 会话真实；CI `web-smoke` 是 SwiftShader 冒烟（非 GPU/像素）；`app-web` host target 仍是空壳 |
+| CLI | `cad-cli-tools` 保留，headless 开图/出图 |
 
-## 文档索引
+发布/打包 job 与脚本多数已退役或硬禁用（`if: false` / 非零退出）；**不要把退役脚本当可用流程**，
+也不要写“某平台已验收”。
 
-`docs/architecture.md`（边界与不变量）、`docs/react-linux-app.md`（当前 Linux 宿主与 DOM-on-top）、
-`docs/windows-app.md`（Windows 宿主与 spike 判据）、`docs/android-host.md`（Android Tauri 载体、
-模拟器证据与 NOT VERIFIED 边界）、`docs/build.md`（构建与退役入口）、
-`docs/ci.md`（CI 分层与 NOT RUN）、`docs/validation*.md`（历史执行证据，含 NOT RUN 边界；
-DOM-on-top 生产记录 = `validation-dom-on-top-production-2026-10-23.md`；
-wasm page 载体翻面 = `validation-dom-canvas-flip-2026-10-28.md`）、
-`docs/compatibility.md`（能力表）、`docs/handoff.md`（逐轮交接）、
-`docs/adr/`（含 ADR 0010、0017–0025；**0023 = DOM-on-top 跨宿主合成**、
-**0024 = DOM-canvas / wasm CAD 路径（已实现首批）**、**0025 = wasm 内存预算/分块上传/Worker 隔离**、
-0021 = 弹窗层（其第二窗口机制已被 0023 取代）、0022 = WIPEOUT 遮罩渲染）、
-`docs/testing-dwg.md`、`docs/app-icon.md`、`fixtures/manifest`。
+## 提交纪律（已发生两次）
+
+后台 specialist lane 仍在写工作树时**禁止** `git add -A` / `git add .`。提交前：①
+`git status --porcelain` 逐项核对都属于本轮改动；②按**显式路径**暂存；③门禁命令显式检查退出码。
+已发生：`git add -A` 扫入他人半成品；`clippy | tail -1` 把失败吞成“通过”。
+
+## 文档索引（按需读）
+
+`docs/architecture.md`（边界/不变量）、`docs/core-invariants.md`、`docs/handoff.md`（逐轮交接，
+最新事实优先）、`docs/compatibility.md`（能力表）、`docs/testing-dwg.md`、`docs/react-linux-app.md`、
+`docs/android-host.md`、`docs/windows-app.md`、`docs/macos-app.md`、`docs/ci.md`（部分历史条目已过期，
+以 workflow 与实际代码为准）、`docs/adr/`（0010、0017–0025）。`docs/linux-app.md`、`docs/verify-ui.md`
+与旧 Slint 验证记录是历史材料，不得作为当前证据。
