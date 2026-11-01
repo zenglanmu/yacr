@@ -80,6 +80,15 @@ web-sys = { workspace = true, features = [
   "Document",
   "Element",
   "HtmlCanvasElement",
+  # The browser download of SAVE/PLOT (`src/download.rs`): a `Blob` with the
+  # export's MIME, an object URL, and a synthetic `<a download>` click in the
+  # same user gesture. `Node` is the append/remove step, `HtmlElement` the click.
+  "Blob",
+  "BlobPropertyBag",
+  "Url",
+  "HtmlAnchorElement",
+  "HtmlElement",
+  "Node",
   # The isolated carrier (ADR 0024 stage ⑧): the Worker receives an
   # `OffscreenCanvas` the page transferred with `transferControlToOffscreen()`, and
   # `worker_capability()` probes a 1x1 `OffscreenCanvas` for a WebGL2 context.

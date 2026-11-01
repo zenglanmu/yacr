@@ -144,15 +144,18 @@ fn a_live_session_reports_its_own_document_tool_and_selection() {
 }
 
 #[test]
-fn every_capability_the_carrier_lacks_is_false_and_every_one_it_has_is_true() {
+fn the_capabilities_are_the_ones_the_carrier_really_keeps() {
     let session = fixture_session();
     let wire = live_wire(&session);
-    // No filesystem, no save dialog, no plot export: the carrier advertises none of
-    // them, so none of them may be `true`.
-    for key in ["canNew", "canOpen", "canSave", "canPlot"] {
+    // The session performs both exports and the download adapter owns the bytes.
+    for key in ["canSave", "canPlot"] {
+        assert_eq!(wire[key], json!(true), "{key} must be true: {wire}");
+    }
+    // No session-drivable file chooser and no New path: neither may be claimed.
+    for key in ["canNew", "canOpen"] {
         assert_eq!(wire[key], json!(false), "{key} must be false: {wire}");
     }
-    // …and the one it has: a live document can be refit.
+    // …and the one every live document has: a refit.
     assert_eq!(wire["canFit"], json!(true));
 }
 

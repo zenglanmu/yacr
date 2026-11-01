@@ -350,6 +350,76 @@ test('the wasm source gets its initial frame from cad_subscribe and status from 
   assert.equal(unsubscribe, 1);
 });
 
+test('the wasm transport lifts canOpen on the initial frame, every pushed frame and the recovery read', async () => {
+  const clock = fakeClock();
+  const frames = [];
+  let callback = null;
+  let unsubscribe = 0;
+  // The session's honest answer: it has no DOM, no picker and no file bytes.
+  const session = (overrides = {}) => status({ canOpen: false, canNew: false, canSave: false, ...overrides });
+  const module = {
+    cad_subscribe(handler) {
+      callback = handler;
+      return JSON.stringify({ revision: 2, type: 'status-changed', status: session() });
+    },
+    cad_unsubscribe() { unsubscribe += 1; },
+    shell_status() { return JSON.stringify(session({ frameCount: 11 })); },
+  };
+  const source = createWasmEventSource(module, { clock });
+  const subscription = source.subscribe(frame => frames.push(frame), () => {});
+  await settle();
+
+  // The initial frame the session hands back through `cad_subscribe`.
+  assert.equal(frames.length, 1);
+  assert.equal(frames[0].type, 'status-changed');
+  assert.equal(frames[0].revision, 2);
+  assert.equal(frames[0].status.canOpen, true, 'the page owns the DOM file picker');
+  assert.equal(frames[0].status.canSave, false, 'canSave stays the session\'s answer');
+  assert.equal(frames[0].status.canNew, false, 'canNew stays the session\'s answer');
+  assert.equal(frames[0].status.canPlot, false);
+  assert.equal(frames[0].status.canFit, false);
+
+  // A live pushed frame is a fresh session status; it must not reset the lift.
+  callback(JSON.stringify({ revision: 3, type: 'status-changed', status: session({ frameCount: 5 }) }));
+  assert.equal(frames.at(-1).status.frameCount, 5);
+  assert.equal(frames.at(-1).status.canOpen, true, 'a pushed frame keeps the transport capability');
+  assert.equal(frames.at(-1).status.canSave, false);
+  assert.equal(frames.at(-1).status.canNew, false);
+
+  // The `shell_status` recovery/refresh read goes through the same overlay.
+  await subscription.requestStatus();
+  assert.equal(frames.at(-1).type, 'status-changed');
+  assert.equal(frames.at(-1).status.frameCount, 11);
+  assert.equal(frames.at(-1).status.canOpen, true, 'the recovery read carries the overlay too');
+  assert.equal(frames.at(-1).status.canSave, false);
+  assert.equal(frames.at(-1).status.canNew, false);
+
+  subscription.close();
+  assert.equal(unsubscribe, 1);
+});
+
+test('the native transport relays canOpen exactly as the host reports it', async () => {
+  const clock = fakeClock();
+  const listener = fakeListener();
+  const inv = fakeInvoke(status({ canOpen: false, canNew: false, canSave: false }));
+  const source = createTauriEventSource(inv.invoke, listener.listenJson, { clock });
+  const frames = [];
+  source.subscribe(frame => frames.push(frame), () => {});
+  await settle();
+
+  // A native host owns its own open capability: nothing is lifted on this route.
+  assert.equal(frames.length, 1);
+  assert.equal(frames[0].status.canOpen, false);
+  assert.equal(frames[0].status.canSave, false);
+
+  // A pushed native frame is relayed verbatim as well.
+  listener.emit(JSON.stringify({ revision: 1, type: 'status-changed', status: status({ canOpen: false, canSave: true }) }));
+  assert.equal(frames.at(-1).status.canOpen, false);
+  assert.equal(frames.at(-1).status.canSave, true);
+
+  assert.equal(clock.size, 0, 'a healthy native transport schedules no timer');
+});
+
 test('a wasm module without cad_subscribe fails loudly instead of faking events', async () => {
   const clock = fakeClock();
   const source = createWasmEventSource({ shell_status() { return JSON.stringify(status()); } }, { clock });

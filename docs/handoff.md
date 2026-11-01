@@ -1,3 +1,71 @@
+## 2026-11-01 Web 端文件打开/保存：OPEN 能力丢失修复 + 浏览器下载（SAVE/PLOT）
+
+用户报告「web 端没有打开/保存文件功能」。**打开的上传路径本来就有**（`host/web-adapter.ts` 的
+隐藏 `<input type=file>` → `file.arrayBuffer()` → wasm `open_bytes`），但被 chrome 的命令门禁挡在
+前面；保存则从未实现。两件事都是真的，根因不同。
+
+### ① OPEN 被门禁拒绝（能力覆盖只走 invoke，没走 push 状态）
+
+- 复现（本机构建）：`scripts/web-ui-smoke.cjs` → `FAILED OPEN opens the host file picker`，
+  历史里多出 `Command OPEN is not supported yet.`；Start 面板「打开图纸」按钮 `disabled`，
+  `title="命令 打开图纸 暂不支持"`；页面内 `__YACR_CANVAS_MODULE__.shell_status()` 报 `canOpen:false`。
+- 根因：`web-adapter.ts` 只在 **`cad_status` invoke** 分支把 `canOpen` 抬成 `true`；而 chrome 稳态
+  状态来自 **push 流**（`cad_subscribe` → `cad-events.ts` → `use-cad-events.ts` → `setStatus`），
+  每一帧都带回会话诚实的 `canOpen:false`，把抬升覆盖掉；门禁
+  `commands.ts:530 if (id === 'OPEN' && !status.canOpen)` 因此拒绝。
+- 修法：新增 `apps/desktop-ui/src/host/transport-capabilities.ts` 的
+  `withTransportCapabilities(status)`（**只**抬 `canOpen`），由 `web-adapter.ts`（invoke）与
+  `cad-events.ts`（`StatusOverlay`：初始帧、每个 live 帧、`shell_status` 恢复读）共用。
+  native/Tauri 路由不覆盖——原生宿主自报真实 `canOpen`。
+
+### ② 保存：浏览器下载（wasm 侧补 `PlatformFiles`）
+
+- 根因：`apps/app-web/src/platform.rs` 的 `MemoryFiles` 对 `begin_save`/`write_atomic` 一律
+  `unsupported-filesystem`，且 `live.rs` 用 `HostCapabilities::default()` ⇒ `canSave`/`canPlot` 恒 false。
+- 修法：新增 `apps/app-web/src/download.rs`：`BrowserFiles<S: DownloadSink>` 按
+  `cad-host/src/save.rs` 已写明的设计**在 `begin_save` 内合成 `download://<name>` 目标**
+  （等同测试参考实现 `SyncSaveFiles`），使导出在同一手势内完成；`write_atomic` 交给 sink。
+  wasm sink `DomDownload` 用 `Blob` + object URL + `<a download>`（append → click → remove → revoke），
+  每步失败都返回 `download-failed`，**不吞错**；host 目标用 `RecordingSink` 记录 name+bytes 以支持契约测试。
+- 能力：`BROWSER_CAPABILITIES = { save: true, plot: true, open: false, new: false, import_worker: false }`。
+  会话自己完成导出并拥有下载，故 `save`/`plot` 为真；**选择文件属于页面 DOM**，会话仍诚实报
+  `canOpen: false`（由 ① 的传输覆盖补上）。`begin_open` 仍显式拒绝，指名字节经 `open_bytes` 进入。
+- 产物：`SAVE` → DXF（`crates/cad-host` 既有的 lossy 导出，**不是** DWG 回写）；`PLOT` → SVG/PDF。
+
+### 验证（本轮实际运行，仅本机）
+
+- `(cd apps/desktop-ui && npm test)` → `tsc --noEmit` + `915 pass / 0 fail`。
+- `cargo test -p app-web --locked` → `92 passed / 0 failed`，含
+  `platform::tests::a_real_save_command_publishes_one_dxf_download`、
+  `a_real_plot_command_publishes_one_svg_download`、
+  `the_browser_capabilities_advertise_save_and_plot_only`、
+  `open_operations_still_refuse_with_the_filesystem_prefix`。
+- `cargo check -p app-web --target wasm32-unknown-unknown --locked` → exit 0（wasm-only `DomDownload` 真正类型检查）。
+- `cargo fmt -p app-web -- --check` / `cargo clippy -p app-web --all-targets --locked -- -D warnings` → exit 0；
+  `python3 scripts/check-architecture.py`、`check-file-size.py`、`check-i18n.py` → OK。
+- 本机构建 `bash scripts/build-web-ui.sh` → exit 0，再 `python3 scripts/serve-web.py --directory apps/app-web/dist-ui`：
+  - `node scripts/web-ui-smoke.cjs --url http://127.0.0.1:8090/` → **PASS 8/8 cases (216/216 checks)**，
+    含 `OPEN` 的文件选择器用例（修复前为 7/8、209/212）。
+  - 端到端探针（Playwright，Chrome + SwiftShader）：`OPEN` 打开 `fixtures/dwg/synthetic-four-lines.dwg`
+    → `documentLabel=synthetic-four-lines.dwg`、`entityCount=4`；`SAVE` → 真实 `download` 事件
+    `synthetic-four-lines.dxf`、**48,206 B**，首尾为 `0 SECTION … EOF`；页面无未捕获错误。
+    **7/7 通过**。证据目录 `/tmp/opencode/web-files-evidence-*`（临时，非仓库资产）。
+
+### NOT RUN / 边界
+
+- 全量门禁与 `cargo test --workspace` **NOT RUN**（按 AGENTS.md 只验证改动范围）。
+- 上述浏览器结论全部来自 **本地 Chromium + SwiftShader 软件光栅**：只有 DOM/传输/布局证据，
+  **不是** GPU、像素、性能或真机验收。Firefox / Safari / WebKit / 移动端浏览器矩阵 **NOT RUN**。
+- `PLOT` 的浏览器级下载只有契约测试（`a_real_plot_command_publishes_one_svg_download`）覆盖，
+  **未**在浏览器里实际点过；且模型空间图纸没有图纸页时 `PLOT` 会如实拒绝（`plot.no_layout`）。
+- **未发布**：`https://yacr-examples.pages.dev` 仍是修复前的 bundle（`web-deploy` 只在 `v*` tag /
+  `workflow_dispatch` 运行），本轮没有 tag、没有重新部署。线上要拿到该功能需打新 tag。
+- DWG 回写仍是非目标（`CAD_IMPLEMENTATION_SPEC.md:57`），`SAVE` 只出 DXF。
+- **Worker 载体无下载**：`start_offscreen`/`open_bytes_offscreen` 的会话在 Worker 里没有 `window`，
+  `DomDownload` 会**显式**返回 `download-failed: … no window`（不是静默成功）。该载体目前只由
+  独立 harness `apps/app-web/web/main.js`（`apps/app-web/dist`）使用，共享 React chrome 只用页面
+  载体（`start`），所以不影响 Web UI；harness 本身也没有 SAVE 入口。
+
 ## 2026-11-01 v0.1.3 release 运行 + Android NDK 链接下限修复
 
 ### v0.1.3（tag → `.github/workflows/build.yml`，实际运行）

@@ -25,7 +25,7 @@
 //! | field | value here | why |
 //! |---|---|---|
 //! | `documentLabel`, `entityCount`, `camera`, `selection`, `tool`, `commandLog`, `popup` | the live session's own values | the real session is the `cad-db` authority; these are read from it, not mirrored |
-//! | `canNew`/`canOpen`/`canSave`/`canPlot` | `false` | the carrier advertises no host-side New/Open/Save/Plot path ([`cad_platform::HostCapabilities::default`]): there is no filesystem, no save dialog and no plot export, so a `true` would be a claim this carrier cannot keep. Opening is the **transport's** command (the page's file picker, `apps/desktop-ui/src/host/web-adapter.ts`), which lifts `canOpen` itself |
+//! | `canNew`/`canSave`/`canPlot`/`canOpen` | the session's capability answer | `canSave`/`canPlot` are `true`: the session performs both exports and `crate::download` publishes a real browser download. `canNew`/`canOpen` are `false`: a browser has no session-drivable file chooser. Opening is the **transport's** command (the page's file picker, `apps/desktop-ui/src/host/web-adapter.ts`), which lifts `canOpen` itself and delivers the bytes through `open_bytes` |
 //! | `canFit` | `has_document && !loading` | the session's own projection (a live document can be refit; nothing else can) |
 //! | `backend`/`adapter` | `webgl2` + the presenter's adapter name | only a live presenter proves the backend came up; the name is the browser's GL string (possibly masked) and is never a hardware claim |
 //! | `frameCount` | frames that actually reached the canvas | the presenter's own counter |

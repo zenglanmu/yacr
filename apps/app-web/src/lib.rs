@@ -143,11 +143,13 @@
 //! - **WebGL2 only.** Neither target runtime exposes `navigator.gpu`, so the
 //!   presenter requests `Backends::GL`. A missing/broken WebGL2 context is an
 //!   explicit refusal, never a blank canvas.
-//! - **The carrier advertises no host-side New/Open/Save/Plot path**
-//!   ([`cad_platform::HostCapabilities::default`]): `canNew`/`canOpen`/`canSave`/
-//!   `canPlot` are `false` because there is no filesystem, no save dialog and no
-//!   plot export behind them. Opening is the transport's command (the page's file
-//!   picker), which lifts `canOpen` itself.
+//! - **The carrier advertises the host-side operations it really performs**
+//!   ([`platform::BROWSER_CAPABILITIES`]): `canSave`/`canPlot` are `true` because
+//!   the session performs both exports and owns the browser download
+//!   ([`download`]); `canNew`/`canOpen` are `false` because a browser has no
+//!   session-drivable picker — opening is the transport's command (the page's file
+//!   picker), which lifts `canOpen` itself and delivers bytes through
+//!   [`open_bytes`].
 //! - **No shaping fonts, no image decoder.** A drawing that requests a face or a
 //!   raster image still opens, and the resource install is reported as a
 //!   non-fatal diagnostic ([`platform`]) — its text is drawn unshaped and images
@@ -185,10 +187,21 @@ pub mod view;
 /// session, plus the bytes-based entry it is built with.
 ///
 /// Target-independent on purpose (no DOM, no wgpu, no session state): every refusal
-/// and every honest absence (no filesystem, non-persistent config, unmapped surface,
-/// no font/image package) is asserted by `cargo test -p app-web` on the host. See
-/// [`platform`] for the capability table and the honest limits.
+/// and every honest absence (no filesystem for reading, non-persistent config,
+/// unmapped surface, no font/image package) is asserted by `cargo test -p app-web`
+/// on the host. See [`platform`] for the capability table and the honest limits.
 pub mod platform;
+
+/// The browser [`platform::PlatformFiles`]: **save/plot become real downloads**.
+///
+/// `begin_save` synthesizes the `download://` target the session exports into and
+/// `write_atomic` publishes those bytes through a [`download::DownloadSink`]. The
+/// wasm32 sink is a synchronous `Blob` + `<a download>` click (same user gesture as
+/// the SAVE/PLOT click); the host-target sink records name+bytes so the contract is
+/// asserted by `cargo test -p app-web` without a browser. Open is **not** part of
+/// this adapter: the page's file picker owns selection and the bytes arrive through
+/// the session's `open_bytes` entry.
+pub mod download;
 
 /// Which isolation a browser can actually deliver (`worker_capability()`).
 ///

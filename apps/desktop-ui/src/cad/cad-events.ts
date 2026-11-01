@@ -19,6 +19,7 @@
 
 import { parseCadStatus } from './cad-status.ts';
 import type { CadPopup, CadStatus, Invoke } from './cad-status.ts';
+import { withTransportCapabilities } from '../host/transport-capabilities.ts';
 
 /** The first retry delay of a broken transport (`500 ms * 2^n`). */
 export const CAD_EVENT_BACKOFF_BASE_MS = 500;
@@ -91,6 +92,19 @@ export interface WasmEventModule {
 
 /** The current snapshot reader both transports implement. */
 type StatusReader = () => Promise<CadStatus>;
+
+/**
+ * How one transport presents the host's status.
+ *
+ * A native host answers for itself and overlays nothing; the page carrier adds
+ * the capability only it serves (`host/transport-capabilities.ts`). Applied to
+ * the initial frame, every live frame and the recovery read alike, so a pushed
+ * frame can never undo the overlay.
+ */
+type StatusOverlay = (status: CadStatus) => CadStatus;
+
+/** The native (or any honest) transport: the status is the host's own answer. */
+const NO_STATUS_OVERLAY: StatusOverlay = status => status;
 
 /** A non-negative safe integer, or `false` (revision/count validation). */
 function isRevision(value: unknown): value is number {
@@ -222,6 +236,7 @@ function createEventSource(
   open: (report: (raw: unknown, initial: boolean) => void) => Promise<() => void>,
   readStatus: StatusReader,
   clock: CadEventClock,
+  overlayStatus: StatusOverlay = NO_STATUS_OVERLAY,
 ): CadEventSource {
   return {
     subscribe(onEvent, onError) {
@@ -249,10 +264,14 @@ function createEventSource(
         }
       };
 
+      /** One frame as the chrome sees it (a status frame carries the overlay). */
+      const lift = (frame: CadEventFrame): CadEventFrame =>
+        frame.type === 'status-changed' ? { ...frame, status: overlayStatus(frame.status) } : frame;
+
       const refresh = async (): Promise<void> => {
         if (closed || broken) return;
         try {
-          const status = await readStatus();
+          const status = overlayStatus(await readStatus());
           if (!closed && !broken) onEvent({ revision: lastRevision, type: 'status-changed', status });
         } catch (error) {
           fail(error);
@@ -289,7 +308,7 @@ function createEventSource(
           // is delivered at that cursor and never resets it to a synthetic 0,
           // which would look like a gap and force an extra `cad_status` pull.
           lastRevision = Math.max(lastRevision, parsed.revision);
-          if (parsed.frame !== null) onEvent({ ...parsed.frame, revision: lastRevision });
+          if (parsed.frame !== null) onEvent({ ...lift(parsed.frame), revision: lastRevision });
           return;
         }
         if (parsed.revision !== lastRevision + 1 && !resyncing) {
@@ -301,7 +320,7 @@ function createEventSource(
         // An unmodelled type still owns its revision, so the next known event
         // stays contiguous instead of looking like a second gap.
         lastRevision = parsed.revision;
-        if (parsed.frame !== null) onEvent(parsed.frame);
+        if (parsed.frame !== null) onEvent(lift(parsed.frame));
       };
 
       const start = async (): Promise<void> => {
@@ -375,6 +394,13 @@ export function createTauriEventSource(
 /**
  * The wasm transport: `cad_subscribe(cb)` returns the initial `status-changed`
  * frame and forwards every later frame to `cb`; `cad_unsubscribe()` stops it.
+ *
+ * Every status it produces - the initial frame, each live frame and the
+ * `shell_status` recovery read - goes through
+ * [`withTransportCapabilities`], because the page owns the DOM file picker the
+ * session honestly says it cannot serve (`canOpen: false`). Nothing else is
+ * lifted. The native transport above overlays nothing: a native host reports its
+ * own real `canOpen`.
  */
 export function createWasmEventSource(
   module: WasmEventModule | (() => Promise<WasmEventModule>),
@@ -413,5 +439,5 @@ export function createWasmEventSource(
     // The wasm export answers the session's own status JSON string (the adapter
     // parses exactly the same string); an object is accepted for test doubles.
     return parseCadStatus(typeof raw === 'string' ? JSON.parse(raw) : raw);
-  }, deps.clock ?? globalThis);
+  }, deps.clock ?? globalThis, withTransportCapabilities);
 }

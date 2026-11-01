@@ -21,6 +21,7 @@ import {
   isDrawingFileName,
   loadWebShellModule,
 } from '../src/host/web-adapter.ts';
+import { withTransportCapabilities } from '../src/host/transport-capabilities.ts';
 
 const PKG_ROOT = new URL('../', import.meta.url);
 const SRC_ROOT = new URL('../src/', import.meta.url);
@@ -254,17 +255,40 @@ test('createInvoke routes per call through the injected transports', async () =>
 test('the three shell reads answer from the session, and OPEN is the one host command', async () => {
   const fake = fakeModule({ commands: '["ZOOM"]', aliases: '[{"alias":"Z","command":"ZOOM"}]' });
   const adapter = createWebAdapter(fake.module);
+  const session = JSON.parse(STATUS_NO_SESSION);
 
   const status = await adapter.invoke('cad_status');
   assert.equal(status.hostProfile.surfaceMode, 'dom-canvas');
   assert.equal(status.documentLabel, null);
   // The session says it cannot open; the transport can, so it lifts the flag.
+  assert.equal(session.canOpen, false, 'the raw session answer is the honest one');
   assert.equal(status.canOpen, true);
+  // Every other capability is the session's own answer, passed through untouched:
+  // this transport serves the picker and nothing else.
+  for (const key of ['canNew', 'canSave', 'canPlot', 'canFit']) {
+    assert.equal(status[key], session[key], `${key} must stay the session's answer`);
+  }
   // The palette capability is the session's own answer, passed through untouched.
   assert.equal(status.hostProfile.palettesAvailable, true);
   assert.deepEqual(await adapter.invoke('cad_commands'), ['ZOOM', 'OPEN']);
   assert.deepEqual(await adapter.invoke('cad_command_aliases'), [{ alias: 'Z', command: 'ZOOM' }]);
   assert.deepEqual(fake.calls, ['shell_status', 'shell_commands', 'shell_aliases']);
+});
+
+test('the overlay lifts canOpen alone, never mutates its input, and is idempotent', () => {
+  const raw = parseCadStatus(JSON.parse(STATUS_LIVE));
+  assert.equal(raw.canOpen, false);
+
+  const lifted = withTransportCapabilities(raw);
+  assert.equal(lifted.canOpen, true);
+  for (const key of ['canNew', 'canSave', 'canPlot', 'canFit', 'documentLabel', 'frameCount']) {
+    assert.equal(lifted[key], raw[key], `${key} must stay the session's answer`);
+  }
+  assert.equal(raw.canOpen, false, 'the input status is never mutated');
+
+  // A native host (or an earlier overlay) that already says `true` is untouched.
+  const already = { ...raw, canOpen: true };
+  assert.equal(withTransportCapabilities(already), already);
 });
 
 test('the advertised vocabulary is the session list plus the host OPEN', async () => {

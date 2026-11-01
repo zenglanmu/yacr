@@ -25,6 +25,9 @@
 //    `open_bytes`) and everything else is forwarded. `cad_status.canOpen` is
 //    lifted the same way and for the same reason: the session reports it `false`
 //    because the session cannot open, the transport reports `true` because it can.
+//    The lift lives in `host/transport-capabilities.ts`, the one overlay both this
+//    adapter and the wasm push transport (`cad/cad-events.ts`) apply, so a pushed
+//    `status-changed` frame cannot reset it.
 //    The input carries **no** `accept` filter (it sends Android to the media
 //    picker) and the selected file is validated by extension instead — see
 //    `pickDrawingFile`/`openThroughHost`.
@@ -66,7 +69,9 @@ import {
   CANVAS_GLOBAL, CANVAS_ID, CANVAS_STEP_UNCLASSIFIED, canvasCssSize, loadCanvasModule, parseCanvasStatus,
 } from '../cad/canvas-host.ts';
 import type { CanvasEnv } from '../cad/canvas-host.ts';
+import type { CadStatus } from '../cad/cad-status.ts';
 import { rectFromElement } from '../cad/metrics.ts';
+import { withTransportCapabilities } from './transport-capabilities.ts';
 
 /** The session exports this transport calls, after validation. */
 export interface WebShellModule {
@@ -517,12 +522,12 @@ export function createWebAdapter(source: WebShellSource, deps: WebAdapterDeps = 
     async invoke(command: string, args?: unknown): Promise<unknown> {
       switch (command) {
         case WEB_STATUS_COMMAND: {
-          const status = await readJson(command, 'shell_status', 'object') as Record<string, unknown>;
-          // `canOpen` is lifted from the session's answer to this transport's:
-          // the session cannot open a file (no DOM, no picker, no bytes), this
-          // transport can ([`openThroughHost`]). Everything else — `canFit`
-          // included — stays exactly what the session reported.
-          return { ...status, canOpen: true };
+          // The session's own answer, plus the one capability this transport
+          // serves ([`withTransportCapabilities`]): the session cannot open a
+          // file (no DOM, no picker, no bytes), this transport can
+          // ([`openThroughHost`]). Everything else — `canFit` included — stays
+          // exactly what the session reported.
+          return withTransportCapabilities(await readJson(command, 'shell_status', 'object') as CadStatus);
         }
         case WEB_COMMANDS_COMMAND: {
           const names = await readJson(command, 'shell_commands', 'array') as unknown[];

@@ -69,15 +69,16 @@
 //!   here; [`Live`] is just the owned state.
 //! * **No pixels.** `render`/`present` are the caller's
 //!   ([`crate::page::present_once`]).
-//! * **No filesystem, no durable config, no font/image package**: the browser
-//!   contracts, see [`crate::platform`].
+//! * **No filesystem for reading, no durable config, no font/image package**: the
+//!   browser contracts, see [`crate::platform`]. Save/plot are the exception: the
+//!   session performs both exports and [`crate::download`] turns them into real
+//!   browser downloads.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use cad_engine::render::RenderSessionHandle;
 use cad_host::{HostOptions, RequestClock};
-use cad_platform::HostCapabilities;
 use cad_ui_core::popup::{self as popup_state, PopupAck, PopupGate, PopupOps, TextEditPayload};
 use cad_ui_core::session::wire::PopupTarget;
 use cad_ui_core::session::{BytesDocument, CadPopup, CadSession, CadStatus, CadTool};
@@ -91,7 +92,7 @@ pub use cad_ui_core::shell::POPUP_MODAL_OPEN;
 use serde_json::{json, Value};
 
 use crate::budget::{self, BudgetRefusal};
-use crate::platform::BrowserPlatform;
+use crate::platform::{BrowserPlatform, BROWSER_CAPABILITIES};
 
 /// Whether the production session keeps the imported database after an open.
 ///
@@ -324,7 +325,12 @@ impl Live {
         let started = clock();
         let session = CadSession::from_bytes(
             options(metrics),
-            platform.host_platform(HostCapabilities::default()),
+            // The browser carrier's real answer: the session performs the SAVE/PLOT
+            // export and owns the download (`crate::download`), while the file
+            // picker is the page's DOM capability, so the session still reports
+            // `canOpen: false` (the TS transport lifts that one and delivers bytes
+            // through `open_bytes`).
+            platform.host_platform(BROWSER_CAPABILITIES),
             render,
             Rc::clone(&clock),
             BytesDocument { label, bytes },

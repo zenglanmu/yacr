@@ -131,6 +131,12 @@ shell-only 报告在有 Tauri 桥时仍回原生宿主。唯一例外是**引导
 专属行为是 `OPEN`（DOM 文件选择器 + `open_bytes`，wasm 没有文件系统）。因此 chrome 在
 `dom-canvas` 上看到的拒绝就是会话自己的句子。
 
+`src/host/transport-capabilities.ts` 是**唯一**的能力覆盖点：只把 `canOpen` 从会话的 `false`
+抬成载波的 `true`（选择器与字节归页面所有），其余能力（`canNew`/`canSave`/`canPlot`/`canFit`）
+一律保持会话自己的回答。`web-adapter.ts` 的 `cad_status` 回答与 `cad/cad-events.ts` 的 wasm
+推送通道（首帧、每个实时帧、`shell_status` 恢复读）都经过它——否则推送帧会把抬升冲掉，
+`OPEN` 又会被 chrome 拒绝。原生宿主走自己的真实 `canOpen`，不经过该覆盖。
+
 `src/cad/metrics.ts` 负责 CAD 分区矩形、去重与有效性判断；`src/cad/input.ts`
 观察布局变化并上报 CSS 像素矩形与 DPR。面板停靠、功能区折叠、窗口尺寸与命令区变化
 都必须保持分区矩形与宿主度量同步。
