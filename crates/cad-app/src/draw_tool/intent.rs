@@ -140,6 +140,12 @@ pub enum DrawIntent {
     /// The translation (`insertion − clipboard base`) and the fresh ids are the
     /// command layer's; the intent is only the point the user clicked.
     PasteClip { insertion: Point3 },
+    /// `PASTEBLOCK`: the captured insertion point of a paste-as-block.
+    ///
+    /// The clipboard, the auto-generated block name, the fresh ids and the
+    /// `T(insertion) · T(−clipboard base)` reference transform are the command
+    /// layer's; the intent is only the point the user clicked.
+    PasteBlock { insertion: Point3 },
     /// CHAMFER the two picked straight lines (ADR 0016 decision C).
     ///
     /// `first`/`second` are the refs resolved at capture time, in pick order;

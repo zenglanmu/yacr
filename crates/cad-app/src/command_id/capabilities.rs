@@ -68,6 +68,8 @@ impl CommandId {
                 | Self::CutToClipboardBase
                 | Self::PasteFromClipboard
                 | Self::PasteOriginalCoordinates
+                // PASTEBLOCK writes the block table and inserts a reference.
+                | Self::PasteBlock
                 | Self::OffsetEntity
                 | Self::SetActiveLayer
                 | Self::CreateLayer

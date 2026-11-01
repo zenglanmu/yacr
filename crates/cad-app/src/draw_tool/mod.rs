@@ -787,6 +787,10 @@ impl DrawTool {
             // clipboard is the input and the translation + fresh ids are the
             // command layer's.
             DrawToolKind::PasteClip => DrawIntent::PasteClip { insertion: a },
+            // PASTEBLOCK: the single captured point is the insertion point; the
+            // clipboard becomes the new auto-named block definition and the
+            // reference transform is the command layer's.
+            DrawToolKind::PasteBlock => DrawIntent::PasteBlock { insertion: a },
             // CHAMFER/FILLET: the two resolved refs and the two raw pick points,
             // in pick order. The distances/radius are the session typed channel,
             // read by the command layer, so the intent stays the pure description

@@ -102,6 +102,7 @@ command_selector_contract! {
     CopyToClipboard => "COPYCLIP",
     CutToClipboard => "CUTCLIP",
     PasteFromClipboard => "PASTECLIP",
+    PasteBlock => "PASTEBLOCK",
     PasteOriginalCoordinates => "PASTEORIG",
     CopyToClipboardBase => "COPYBASE",
     CutToClipboardBase => "CUTBASE",
@@ -136,7 +137,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 104,
+        EXPECTED_COMMAND_COUNT, 105,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
@@ -813,6 +814,7 @@ fn clipboard_cluster_selectors_declare_their_required_mode() {
     assert!(CommandId::CutToClipboardBase.requires_work_mode());
     assert!(CommandId::PasteFromClipboard.requires_work_mode());
     assert!(CommandId::PasteOriginalCoordinates.requires_work_mode());
+    assert!(CommandId::PasteBlock.requires_work_mode());
 
     // The three new selectors are real vocabulary entries, not aliases of an
     // existing command.

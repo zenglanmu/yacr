@@ -188,6 +188,18 @@ test('the command catalog lists exactly the router-refused dead affordances, and
     { id: 'BLOCK', labelKey: 'draw.kind.blockdefine', icon: 'copy', group: 'draw' },
   );
   assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('BLOCK'), false, 'BLOCK is reachable');
+  // PASTEBLOCK (2026-11-01) is the clipboard's "paste as block" selector: one
+  // insertion point, an auto-named block plus a reference, clipboard kept. It is
+  // catalogued beside the other clipboard selectors and admitted by the router
+  // vocabulary, never as an alias of PASTECLIP (a block reference is not loose
+  // geometry). `HOST_NAMES` mirrors the Rust lane that adds the selector.
+  assert.equal(isSupportedCommand('PASTEBLOCK'), true, 'PASTEBLOCK is a router-admitted clipboard selector');
+  assert.equal(admitCommandText('PASTEBLOCK', { status: loaded }).kind, 'admitted');
+  assert.deepEqual(
+    { ...COMMAND_CATALOG.find(command => command.id === 'PASTEBLOCK') },
+    { id: 'PASTEBLOCK', labelKey: 'draw.kind.pasteblock', icon: 'copy', group: 'modify' },
+  );
+  assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('PASTEBLOCK'), false, 'PASTEBLOCK is reachable');
   // The fixed affordances are no longer dead.
   for (const id of ['DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ZOOMIN', 'ZOOMOUT']) {
     assert.equal(ROUTER_REFUSED_AFFORDANCES.includes(id), false, id);

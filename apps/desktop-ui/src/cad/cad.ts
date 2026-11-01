@@ -376,6 +376,16 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
   'draw.pasteclip': [
     'tool.prompt.pasteclip.insertion',
   ],
+  // PASTEBLOCK (2026-11-01) is the clipboard's "paste as block" shape: the same
+  // one **insertion point** as PASTECLIP, but the host creates a new auto-named
+  // block (`PasteBlock1`, `PasteBlock2`, …) plus one reference at that point
+  // instead of pasting loose geometry. There is no text step (the name is
+  // generated, not typed) and no parameter, so this list must stay at one entry
+  // and the tool must not be added to [`PRESELECT_PROMPTS`]: the pick is the
+  // input. The clipboard is deliberately **not** cleared by the host.
+  'draw.pasteblock': [
+    'tool.prompt.pasteblock.insertion',
+  ],
   // CUTBASE is the same one-base-point capture as COPYBASE, reported by the host
   // under its **own** machine key (`cutbase`, the cutting variant), so it needs its
   // own row: without it the chip would name no pick at all. The sentence is
@@ -462,6 +472,11 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // the host closed the tool) — the same override `measure.id` uses.
   'draw.copybase': 'tool.prompt.confirm',
   'draw.pasteclip': 'tool.prompt.confirm',
+  // PASTEBLOCK commits on its single insertion pick exactly like PASTECLIP, so the
+  // generic confirm sentence is the honest override for the one state a race can
+  // still expose (the pick counted before the host closed the tool). No copy here
+  // may claim a block was created yet — that is the host's report, not a prompt.
+  'draw.pasteblock': 'tool.prompt.confirm',
   'draw.cutbase': 'tool.prompt.confirm',
   // BREAK's complement is its two points, so "ready" is the state between them:
   // the span is captured but nothing has been cut yet. The shared dimension copy

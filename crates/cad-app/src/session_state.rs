@@ -618,6 +618,9 @@ impl SessionState {
             // PASTECLIP is work-only through its command (the capture itself needs
             // no selection).
             DrawToolKind::PasteClip => CommandId::PasteFromClipboard,
+            // PASTEBLOCK writes a new block definition plus its reference; the
+            // capture itself needs no selection (the clipboard is the input).
+            DrawToolKind::PasteBlock => CommandId::PasteBlock,
         };
         self.authorize(command)?;
         let selection = self.selection.refs().to_vec();

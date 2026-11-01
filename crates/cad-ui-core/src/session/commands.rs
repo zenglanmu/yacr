@@ -151,6 +151,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // inserts at the original coordinates, ignoring the base.
     ("PASTECLIP", CommandId::PasteFromClipboard),
     ("PASTEORIG", CommandId::PasteOriginalCoordinates),
+    // `PASTEBLOCK` turns the clipboard into a new auto-named block definition and
+    // inserts one reference at a picked point. It is **not** an alias of
+    // `PASTECLIP`: the paste shape (a block plus one reference) differs, so it
+    // starts the one-point `PasteBlock` capture instead.
+    ("PASTEBLOCK", CommandId::PasteBlock),
     // `COPYBASE`/`CUTBASE` are the base-point captures (`COPYCLIP`/`CUTCLIP`
     // record no base). Both start the same one-point capture over the current
     // selection: `COPYBASE` only captures (read-only, Viewer-legal), `CUTBASE`
@@ -866,6 +871,9 @@ pub(super) fn interaction_request_for(
         CommandId::PasteFromClipboard => {
             Some(InteractionRequest::BeginDraw(DrawToolKind::PasteClip))
         }
+        // PASTEBLOCK captures one insertion point over the clipboard and turns it
+        // into a new auto-named block definition; work-only through its command.
+        CommandId::PasteBlock => Some(InteractionRequest::BeginDraw(DrawToolKind::PasteBlock)),
         CommandId::TrimEntity => Some(InteractionRequest::BeginDraw(DrawToolKind::Trim)),
         CommandId::ExtendEntity => Some(InteractionRequest::BeginDraw(DrawToolKind::Extend)),
         // BREAK: the first click is the entity pick **and** the first break

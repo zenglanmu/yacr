@@ -53,17 +53,17 @@ export interface AcceleratorContext {
 /**
  * The `Ctrl`+letter chords that exist in their unshifted form **only**.
  *
- * `Ctrl+V` is the one clipboard chord left here: it has no shifted sibling,
- * because `PASTEBLOCK` (AutoCAD's `Ctrl+Shift+V`) is not implemented and must
- * stay unwired rather than degrade into a plain paste.
+ * `Ctrl+V` is the plain paste; its shifted sibling `Ctrl+Shift+V` is handled by
+ * name in the function below, because it is a different command (`PASTEBLOCK`,
+ * not a second spelling of `PASTECLIP`).
  *
  * Every letter with a shifted form is handled by name in the function below —
- * `Ctrl+Shift+S` is still `SAVE`, `Ctrl+Shift+Z` is `REDO`, and the clipboard
- * pair `Ctrl+Shift+C`/`Ctrl+Shift+X` are `COPYBASE`/`CUTBASE`.
+ * `Ctrl+Shift+S` is still `SAVE`, `Ctrl+Shift+Z` is `REDO`, the clipboard pair
+ * `Ctrl+Shift+C`/`Ctrl+Shift+X` are `COPYBASE`/`CUTBASE`, and `Ctrl+Shift+V` is
+ * `PASTEBLOCK`.
  */
 const CONTROL_LETTER_COMMANDS: Readonly<Record<string, string>> = Object.freeze({
   a: 'SELECTALL',
-  v: 'PASTECLIP',
   o: 'OPEN',
   n: 'NEW',
   p: 'PLOT',
@@ -89,9 +89,10 @@ const CONTROL_LETTER_COMMANDS: Readonly<Record<string, string>> = Object.freeze(
  * 6. `Ctrl+Home` → `FIT` (AutoCAD's zoom extents);
  * 7. otherwise the letters: `Ctrl+Z` → `UNDO`, `Ctrl+Shift+Z`/`Ctrl+Y` → `REDO`,
  *    `Ctrl+Shift+S`/`Ctrl+S` → `SAVE`, `Ctrl+Shift+C`/`Ctrl+C` →
- *    `COPYBASE`/`COPYCLIP`, `Ctrl+Shift+X`/`Ctrl+X` → `CUTBASE`/`CUTCLIP`, and
- *    the unshifted-only rows above (any other shifted letter is declined on
- *    purpose, `Ctrl+Shift+V` included).
+ *    `COPYBASE`/`COPYCLIP`, `Ctrl+Shift+X`/`Ctrl+X` → `CUTBASE`/`CUTCLIP`,
+ *    `Ctrl+Shift+V`/`Ctrl+V` → `PASTEBLOCK`/`PASTECLIP`, and the
+ *    unshifted-only rows above (any other shifted letter is declined on
+ *    purpose).
  */
 export function acceleratorCommand(
   event: AcceleratorKeyEvent = {},
@@ -119,12 +120,13 @@ export function acceleratorCommand(
   if (key === 'Home') return shift ? null : 'FIT';
   // 7. Letters. Only the documented shifted forms exist: `Ctrl+Shift+S` is still
   //    `SAVE`, `Ctrl+Shift+Z` is `REDO` (`Ctrl+Y` is the same redo), and the
-  //    clipboard pair follows AutoCAD — `Ctrl+Shift+C` copies **with a base
-  //    point** (`COPYBASE`), `Ctrl+Shift+X` cuts with one (`CUTBASE`). The
-  //    shifted forms are their own commands, never a silent fallback to plain
-  //    copy/cut: the plain form has no base point, so the two pastes that follow
-  //    are not interchangeable. `Ctrl+Shift+V` stays unwired (`PASTEBLOCK` is not
-  //    implemented), and every other shifted letter is declined as before.
+  //    clipboard family follows AutoCAD — `Ctrl+Shift+C` copies **with a base
+  //    point** (`COPYBASE`), `Ctrl+Shift+X` cuts with one (`CUTBASE`), and
+  //    `Ctrl+Shift+V` pastes the clipboard **as a block** (`PASTEBLOCK`). The
+  //    shifted forms are their own commands, never a silent fallback to the plain
+  //    form: the plain form has no base point, and a block paste produces a block
+  //    reference rather than loose geometry, so the pairs are not interchangeable.
+  //    Every other shifted letter is declined as before.
   if (key.length !== 1) return null;
   const letter = key.toLowerCase();
   if (letter === 'z') return shift ? 'REDO' : 'UNDO';
@@ -132,6 +134,7 @@ export function acceleratorCommand(
   if (letter === 'y') return shift ? null : 'REDO';
   if (letter === 'c') return shift ? 'COPYBASE' : 'COPYCLIP';
   if (letter === 'x') return shift ? 'CUTBASE' : 'CUTCLIP';
+  if (letter === 'v') return shift ? 'PASTEBLOCK' : 'PASTECLIP';
   if (shift) return null;
   return CONTROL_LETTER_COMMANDS[letter] ?? null;
 }

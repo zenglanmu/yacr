@@ -43,7 +43,7 @@ test('five sections in a fixed order, stable ids and i18n keys', () => {
   assert.deepEqual(CONTEXT_MENU_SECTIONS, menu.sections.map(section => section.id));
   assert.deepEqual(menu.sections.map(section => section.items.map(item => item.id)), [
     ['repeat.last'],
-    ['clipboard.cut', 'clipboard.cutbase', 'clipboard.copy', 'clipboard.copybase', 'clipboard.paste', 'clipboard.pasteorig'],
+    ['clipboard.cut', 'clipboard.cutbase', 'clipboard.copy', 'clipboard.copybase', 'clipboard.paste', 'clipboard.pasteorig', 'clipboard.pasteblock'],
     ['selection.all', 'selection.erase', 'selection.properties'],
     ['view.fit', 'view.pan'],
     ['edit.undo', 'edit.redo'],
@@ -51,12 +51,12 @@ test('five sections in a fixed order, stable ids and i18n keys', () => {
   assert.deepEqual(menuItems(menu).map(item => item.key), [
     'menu.repeat',
     'menu.clipboard.cut', 'menu.clipboard.cutbase', 'menu.clipboard.copy', 'menu.clipboard.copybase',
-    'menu.clipboard.paste', 'menu.clipboard.pasteorig',
+    'menu.clipboard.paste', 'menu.clipboard.pasteorig', 'menu.clipboard.pasteblock',
     'menu.selection.all', 'menu.selection.erase', 'menu.selection.properties',
     'menu.view.fit', 'menu.view.pan',
     'menu.edit.undo', 'menu.edit.redo',
   ]);
-  assert.equal(menuItems(menu).length, 14);
+  assert.equal(menuItems(menu).length, 15);
 });
 
 test('every item carries the command the shared funnel would run', () => {
@@ -69,6 +69,7 @@ test('every item carries the command the shared funnel would run', () => {
     'clipboard.copybase': 'COPYBASE',
     'clipboard.paste': 'PASTECLIP',
     'clipboard.pasteorig': 'PASTEORIG',
+    'clipboard.pasteblock': 'PASTEBLOCK',
     'selection.all': 'SELECTALL',
     'selection.erase': 'ERASE',
     // The chrome-local selector: the app's run path intercepts it exactly like a
@@ -116,12 +117,12 @@ test('nothing is hidden: each unavailable item is present and disabled', () => {
     disabledIn({ tool: { key: 'LINE', step: 1 } }),
     [
       'clipboard.cut', 'clipboard.cutbase', 'clipboard.copy', 'clipboard.copybase',
-      'clipboard.paste', 'clipboard.pasteorig', 'selection.erase',
+      'clipboard.paste', 'clipboard.pasteorig', 'clipboard.pasteblock', 'selection.erase',
     ],
   );
 });
 
-test('the clipboard section offers both base-point variants and both pastes', () => {
+test('the clipboard section offers both base-point variants and all three pastes', () => {
   const section = buildContextMenu(READY).sections.find(candidate => candidate.id === 'clipboard');
   assert.ok(section, 'the clipboard section exists');
   const items = section.items;
@@ -134,9 +135,12 @@ test('the clipboard section offers both base-point variants and both pastes', ()
     ['clipboard.copybase', 'COPYBASE', 'menu.clipboard.copybase'],
     ['clipboard.paste', 'PASTECLIP', 'menu.clipboard.paste'],
     ['clipboard.pasteorig', 'PASTEORIG', 'menu.clipboard.pasteorig'],
+    // PASTEBLOCK is the third paste shape: an insertion point, and the host makes
+    // an auto-named block plus a reference there (the clipboard is kept).
+    ['clipboard.pasteblock', 'PASTEBLOCK', 'menu.clipboard.pasteblock'],
   ]);
-  // Both pastes need only "no capture": the chrome holds no clipboard-length fact,
-  // so nothing here invents a gate the host does not publish.
+  // All three pastes need only "no capture": the chrome holds no clipboard-length
+  // fact, so nothing here invents a gate the host does not publish.
   for (const capturing of [false, true]) {
     const enabled = Object.fromEntries(
       buildContextMenu({ ...READY, tool: capturing ? { key: 'LINE', step: 1 } : null }).sections
@@ -145,15 +149,19 @@ test('the clipboard section offers both base-point variants and both pastes', ()
     );
     assert.equal(enabled['clipboard.paste'], !capturing);
     assert.equal(enabled['clipboard.pasteorig'], !capturing);
+    assert.equal(enabled['clipboard.pasteblock'], !capturing);
   }
-  // The menu names a paste that asks for an insertion point and one that puts the
-  // geometry back where it came from: the two are not the same claim.
+  // The menu names a paste that asks for an insertion point, one that puts the
+  // geometry back where it came from, and one that produces a block: the three are
+  // not the same claim.
   assert.notEqual(zh['menu.clipboard.paste'], zh['menu.clipboard.pasteorig']);
   assert.notEqual(en['menu.clipboard.paste'], en['menu.clipboard.pasteorig']);
   assert.match(en['menu.clipboard.pasteorig'], /original coordinates/i);
   assert.match(zh['menu.clipboard.pasteorig'], /原坐标/);
-  // PASTEBLOCK stays unwired: no menu row may offer it.
-  assert.equal(menuItems(buildContextMenu(READY)).some(item => item.command === 'PASTEBLOCK'), false);
+  assert.match(en['menu.clipboard.pasteblock'], /block/i);
+  assert.match(zh['menu.clipboard.pasteblock'], /块/);
+  assert.notEqual(en['menu.clipboard.pasteblock'], en['menu.clipboard.paste']);
+  assert.notEqual(zh['menu.clipboard.pasteblock'], zh['menu.clipboard.paste']);
 });
 
 test('a capturing tool keeps the same menu; only the blocked items change', () => {

@@ -741,6 +741,23 @@ pub enum CommandId {
     /// under its own AutoCAD name. Exactly one transaction / one undo step; an
     /// empty clipboard is an explicit refusal. Work-only.
     PasteOriginalCoordinates,
+    /// `PASTEBLOCK`: turn the in-process clipboard into a **new auto-named block
+    /// definition** and insert one reference at the picked insertion point.
+    ///
+    /// Payload is [`crate::CommandPayload::PasteBlock`] `{ insertion }`; the
+    /// interactive form is the one-point
+    /// [`crate::draw_tool::DrawToolKind::PasteBlock`] capture (the clipboard is the
+    /// input, so no selection is required). Every clipboard entry must be a
+    /// **model-space** entity (`pasteblock.not_model_space`); a nested `INSERT`
+    /// entry is allowed when its referenced block still exists
+    /// (`pasteblock.missing_block`). Member geometry is copied bit-for-bit into
+    /// [`cad_domain::SpaceId::Block`]`(new_id)` and the reference carries
+    /// `T(insertion) · T(−clipboard base)` (the world origin when the clipboard
+    /// has none), exactly like [`Self::PasteFromClipboard`]. The block is named
+    /// `PasteBlockN` (the first free suffix), the clipboard is **not** cleared,
+    /// and the definition, its members and the reference commit in one
+    /// transaction / one undo step. Work-only.
+    PasteBlock,
     /// Create an offset copy of a single LINE/CIRCLE source, at the distance and
     /// side given by the picked point. Another geometry kind is an explicit
     /// `Unsupported` refusal. Work-only.

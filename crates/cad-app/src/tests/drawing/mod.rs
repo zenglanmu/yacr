@@ -312,6 +312,7 @@ mod offset;
 mod offset_arc;
 mod offset_polyline;
 mod offset_polyline_bulge;
+mod paste_block;
 mod point;
 mod polygon;
 mod polyline_fillet;

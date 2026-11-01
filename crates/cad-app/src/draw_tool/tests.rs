@@ -37,10 +37,11 @@ fn required_points_and_selection_are_explicit_per_kind() {
             | DrawToolKind::Text
             | DrawToolKind::TextEdit
             // COPYBASE/CUTBASE capture their base point; PASTECLIP its insertion
-            // point.
+            // point. PASTEBLOCK has the same one-point shape.
             | DrawToolKind::CopyBase
             | DrawToolKind::CutBase
             | DrawToolKind::PasteClip
+            | DrawToolKind::PasteBlock
             // HATCHPOINT captures its one internal point.
             | DrawToolKind::HatchPoint
             // INSERT captures its one insertion point; the block name is the

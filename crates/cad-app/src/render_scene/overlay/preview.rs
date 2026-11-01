@@ -177,6 +177,9 @@ pub fn draw_preview_overlay(
         | DrawToolKind::CopyBase
         | DrawToolKind::CutBase
         | DrawToolKind::PasteClip
+        // PASTEBLOCK captures one insertion point over the clipboard; it uses the
+        // same cursor/chain preview (the block definition is built at commit).
+        | DrawToolKind::PasteBlock
         // INSERT captures its one insertion point; the block name is the terminal
         // typed text, so its live preview is the existing cursor/chain. BLOCK is
         // the same one-point shape: the selection becomes the members at commit,

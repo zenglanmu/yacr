@@ -167,6 +167,18 @@ pub enum DrawToolKind {
     /// clipboard entry by `insertion − clipboard base` in one transaction / one
     /// undo step. Work-only through [`crate::CommandId::PasteFromClipboard`].
     PasteClip,
+    /// `PASTEBLOCK`: one **insertion point**, no selection requirement, and the
+    /// clipboard becomes a new auto-named block definition instead of loose
+    /// entities.
+    ///
+    /// The clipboard is the input, so this kind does not require a selection; an
+    /// empty clipboard is refused by the command (never an empty success). Every
+    /// entry must be model space and a nested `INSERT` must still resolve. The
+    /// captured point is the insertion point; the new block is named `PasteBlockN`
+    /// and the reference carries `T(insertion) · T(−clipboard base)`. The
+    /// clipboard is **not** cleared. Work-only through
+    /// [`crate::CommandId::PasteBlock`].
+    PasteBlock,
     /// CHAMFER: two straight-line entity picks (ADR 0016 decision C).
     ///
     /// The two clicks are **entity picks** (the TRIM/EXTEND capture shape), not

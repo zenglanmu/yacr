@@ -161,11 +161,15 @@ export function buildContextMenu({
           { id: 'clipboard.copy', key: 'menu.clipboard.copy', command: 'COPYCLIP', enabled: editable },
           { id: 'clipboard.copybase', key: 'menu.clipboard.copybase', command: 'COPYBASE', enabled: editable },
           // `PASTECLIP` asks for an insertion point; `PASTEORIG` is the explicit
-          // "put it back where it came from" path and takes no pick. Neither is
-          // gated on the clipboard's length — the chrome has no such fact, and a
-          // locally invented gate would hide a paste the host can run.
+          // "put it back where it came from" path and takes no pick. `PASTEBLOCK`
+          // is the third paste: one insertion point, and the host makes a new
+          // auto-named block plus a reference there (the clipboard is kept, so it
+          // can be pasted again). None is gated on the clipboard's length — the
+          // chrome has no such fact, and a locally invented gate would hide a
+          // paste the host can run.
           { id: 'clipboard.paste', key: 'menu.clipboard.paste', command: 'PASTECLIP', enabled: !capturing },
           { id: 'clipboard.pasteorig', key: 'menu.clipboard.pasteorig', command: 'PASTEORIG', enabled: !capturing },
+          { id: 'clipboard.pasteblock', key: 'menu.clipboard.pasteblock', command: 'PASTEBLOCK', enabled: !capturing },
         ],
       },
       {

@@ -1,3 +1,58 @@
+## 2026-11-01 `PASTEBLOCK`：剪贴板 → 自动命名块 + 插入点参照（v1）
+
+### 结论
+
+- **`PASTEBLOCK` 落地（Work-only，v1）**：把**应用内**剪贴板变成一个新的自动命名块定义
+  （`PasteBlock1`、`PasteBlock2`…；**不是** AutoCAD 匿名 `*U` 名称，声明为我们的选择）并在**一个**拾取
+  插入点放一个参照。成员是剪贴板条目的**新 id 克隆**（几何逐位复制、显示属性在提交后恢复）；块基点 =
+  `clipboard_base`（`COPYBASE`/`CUTBASE`）或世界原点；参照变换 `T(插入点)·T(−基点)`。**一条事务/一步撤销**，
+  块级 `BlockPatch` 与成员/参照创建补丁一起走 `DrawingUndoRecord`；**剪贴板不清空**，成功后选中新参照。
+- **诚实拒绝（开事务前）**：空剪贴板（`pasteblock.empty_clipboard`）、非有限插入点、剪贴板条目不在
+  模型空间（块成员/图纸空间，`pasteblock.not_model_space`）、嵌套 `Insert` 指向不存在的块
+  （`pasteblock.missing_block`）、名称扫描 10 000 次仍无空位（`pasteblock.name_exhausted`）。
+- **v1 上限**：不是 OS 剪贴板；不复制嵌套块定义（嵌套 `Insert` 只引用本图已有块）；无块选择器/重命名；
+  剪贴板条目是块成员时**拒绝**而不是复制定义；名称自动生成、用户不可指定。
+- **词表/文案**：`COMMAND_TABLE` **104 → 105**、`admissible_names()` **167 → 168**；`COMMAND_ALIASES`
+  仍 56（`PASTEBLOCK` **无别名**，只有 `Ctrl+Shift+V` 加速器）；i18n **+4 键**（含
+  `menu.clipboard.pasteblock`，两目录一致，总数 **946**）；UI 在剪贴板/修改面板新增
+  **Paste as block**、右键菜单项与 `Ctrl+Shift+V`（走既有准入路径，不另立加速器表）。
+
+### 代码 / 文档落点
+
+- Rust：`crates/cad-app/src/app_drawing/paste_block.rs`（新）+ `tests/drawing/paste_block.rs`（9 项）；
+  `command_id.rs`、`command_payload.rs`、`draw_tool/{kind,kind/definition,intent,mod}.rs`、
+  `host/draw_intent_map.rs`、`session_state.rs`、`application.rs`、`app_drawing/{drawing_create,mod}.rs`、
+  `render_scene/overlay/preview.rs`；`cad-ui-core` 的 `session/{commands,mod}.rs`、`command_vocabulary.rs`、
+  `tests_tools.rs`。
+- React：`commands/{catalog,accelerators,context-menu}.ts`、`ribbon/ribbon-model.ts`、`cad/cad.ts` 与两本 i18n；
+  新 `apps/desktop-ui/test/paste-block.test.ts`，并同步 `accelerators`/`clipboard-paste-tools`/`commands`/
+  `context-menu`/`i18n`/`helpers` 的精确列表。
+- 文档：`docs/compatibility.md`（剪贴板行 + INSERT 行）、`docs/autocad-command-coverage.md`
+  （105/168/112、§3.6 剪贴板、§4 PASTEBLOCK 关闭/WBLOCK 剩余、§5/§5b）、`docs/shortcuts.md`
+  （PASTEBLOCK 行、`Ctrl+Shift+V`、计数）、`docs/architecture.md`（168/56）、本文件。
+
+### 验证（本轮实际运行，合并树）
+
+- `cargo fmt --all -- --check` → exit 0。
+- `cargo check --workspace --all-targets --locked` → exit 0。
+- `cargo test -p cad-app -p cad-db -p cad-history -p cad-ui-core --locked -- --test-threads=1` → exit 0：
+  `cad-app` **1488**、`cad-db` **168**、`cad-history` **17**、`cad-ui-core` **342**，集成 targets 全绿
+  （外部 DWG 用例仍 **ignored**）。
+- `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` → exit 0。
+- `cargo clippy -p cad-app -p cad-db -p cad-history -p cad-ui-core --all-targets --locked -- -D warnings` → exit 0。
+- 前端：`npx tsc --noEmit && node --test test/*.test.ts` → **902 pass / 0 fail**；`check-i18n.py` → **946 键**。
+- `python3 scripts/check-file-size.py` / `check-architecture.py` / `check-command-docs.py`（105/5/2/4、56 aliases、
+  112 canonical、§2 rows 67、0 mismatch）→ 全 OK。
+
+### NOT RUN / NOT VERIFIED
+
+- **全 workspace 测试套件**（只跑了上述四个 crate）；`cargo test -p cad-host`/其它 crate 的独立测试。
+- **GUI / 真实 GPU / 像素 / 真窗口**：未运行任何宿主或截图；`PASTEBLOCK` 的右键菜单/加速器/真实插入点
+  **未做视觉验收**。
+- **真实 DWG**：未在真实剪贴板/图纸上运行；证据是契约测试。
+- **v1 之外**：`WBLOCK`、OS 剪贴板、嵌套块定义复制、块成员剪贴板条目、块选择器/重命名、ATTDEF/ATTRIB、
+  动态块参数——**NOT IMPLEMENTED**。`tests_tools.rs` 已到 **1000 行上限**，下一个命令前必须拆分。
+
 ## 2026-11-01 `BLOCK`：从选择创建块定义（v1，块表首次运行时可写）
 
 ### 结论

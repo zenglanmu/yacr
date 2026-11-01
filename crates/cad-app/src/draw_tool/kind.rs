@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 47] = [
+    pub const ALL: [DrawToolKind; 48] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -123,6 +123,10 @@ impl DrawToolKind {
         // snapshot at start, one base point, then the block name through the
         // terminal text channel.
         DrawToolKind::BlockDefine,
+        // PASTEBLOCK is appended for the same index-stability reason: it is a
+        // real kind started by its command selector (one insertion point over the
+        // clipboard, no selection).
+        DrawToolKind::PasteBlock,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -175,6 +179,7 @@ impl DrawToolKind {
             Self::InsertBlock => "insertblock",
             Self::ScaleText => "scaletext",
             Self::BlockDefine => "blockdefine",
+            Self::PasteBlock => "pasteblock",
         }
     }
 
@@ -229,6 +234,7 @@ impl DrawToolKind {
             "insertblock" => Some(Self::InsertBlock),
             "scaletext" => Some(Self::ScaleText),
             "blockdefine" => Some(Self::BlockDefine),
+            "pasteblock" => Some(Self::PasteBlock),
             _ => None,
         }
     }
@@ -364,6 +370,8 @@ impl DrawToolKind {
             Self::InsertBlock => "INSERT",
             Self::ScaleText => "SCALETEXT",
             Self::BlockDefine => "BLOCK",
+            // PASTEBLOCK shares the locale-neutral ASCII fallback rule.
+            Self::PasteBlock => "PASTEBLOCK",
         }
     }
 
@@ -405,11 +413,12 @@ impl DrawToolKind {
             | Self::Text
             // TEXTEDIT's single captured step is its entity pick.
             | Self::TextEdit
-            // COPYBASE/CUTBASE capture their one base point; PASTECLIP captures
-            // its one insertion point.
+            // COPYBASE/CUTBASE capture their one base point; PASTECLIP and
+            // PASTEBLOCK capture their one insertion point.
             | Self::CopyBase
             | Self::CutBase
             | Self::PasteClip
+            | Self::PasteBlock
             // HATCHPOINT captures the one internal point the boundary is
             // discovered from.
             | Self::HatchPoint
@@ -507,8 +516,9 @@ impl DrawToolKind {
                 | Self::BlockDefine
                 // COPYBASE/CUTBASE capture the **selection** into the clipboard
                 // (a selection-less capture would be an empty success), so they
-                // need one before they are ready. PASTECLIP's input is the
-                // clipboard, not the selection, so it deliberately does not.
+                // need one before they are ready. PASTECLIP/PASTEBLOCK take their
+                // input from the clipboard, not the selection, so they
+                // deliberately do not.
                 | Self::CopyBase
                 | Self::CutBase
         )

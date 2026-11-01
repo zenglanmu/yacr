@@ -562,6 +562,21 @@ pub enum CommandPayload {
     PasteClip {
         insertion: Point3,
     },
+    /// `PASTEBLOCK`: turn the in-process clipboard into a new **auto-named block
+    /// definition** and insert one reference at `insertion` (one transaction /
+    /// one undo step).
+    ///
+    /// `insertion` is the captured insertion point (finite). Every clipboard
+    /// entry must be a model-space entity; a nested `INSERT` entry is allowed when
+    /// its referenced block still exists in the drawing. The new block is named
+    /// `PasteBlockN` (first free suffix), member geometry is copied bit-for-bit
+    /// into [`SpaceId::Block`]`(new_id)`, and the reference transform is
+    /// `T(insertion) · T(−clipboard base)` — the world origin when the clipboard
+    /// has no base, exactly like [`CommandPayload::PasteClip`]. The clipboard is
+    /// not cleared. Work-only.
+    PasteBlock {
+        insertion: Point3,
+    },
     /// A fully formed semantic geometry, used by `CreateLine` as the
     /// programmatic alternative to a point list.
     Geometry(Box<SemanticGeometry>),

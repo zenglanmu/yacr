@@ -86,9 +86,16 @@ export const HOST_NAMES = [
   // Clipboard-with-base-point family (2026-10-27): `COPYBASE`/`CUTBASE` put the
   // selection on the clipboard **with a base point**, so the following `PASTECLIP`
   // is placed relative to it, and `PASTEORIG` pastes at the coordinates the
-  // clipboard came from. `PASTEBLOCK` is deliberately **absent**: it is not
-  // implemented, so nothing may admit or suggest it.
-  'COPYBASE', 'CUTBASE', 'PASTEORIG',
+  // clipboard came from.
+  //
+  // `PASTEBLOCK` (2026-11-01) is the clipboard's "paste as block" selector: one
+  // insertion point, then the host creates an auto-named block plus a reference
+  // there and keeps the clipboard. It is its own canonical selector, never an
+  // alias of `PASTECLIP`, because the output is a block reference rather than
+  // loose geometry. The Rust lane adds the same name (`CommandId::PasteBlock`);
+  // this mirror stands in for the loaded `cad_commands` vocabulary because these
+  // tests run without a host, and it never proves the host advertises the name.
+  'COPYBASE', 'CUTBASE', 'PASTEORIG', 'PASTEBLOCK',
   'OFFSET', 'SETACTIVELAYER', 'HOVERPREVIEW', 'GRID', 'SNAP', 'SNAPUNIT', 'OSNAP', 'ORTHO', 'HATCH',
   // HATCHPOINT: HATCH's one-pick entry point (an internal point inside a closed
   // boundary). It is a canonical selector of its own, not an alias of `HATCH`:

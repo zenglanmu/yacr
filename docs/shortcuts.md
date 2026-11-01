@@ -36,7 +36,7 @@
 - **补全候选**（`apps/desktop-ui/src/components/CommandLine.tsx` + `commands.ts::filterCommandSuggestions`；
   旧文档指向的 `command-bar.slint` 已随 Slint 删除）：
   - 候选来源是 **`COMMAND_CATALOG`（显示目录）+ 宿主别名表**（`cad_command_aliases`），
-    **不是**全部 104 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
+    **不是**全部 105 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
     字母序（**不去重**，也**不是**纯字典序）。
   - 输入变化即时计算候选；候选只**填充**文本，**从不执行**命令。
   - `Tab`：**仅当有高亮行**时把命令行替换成该名字（**没有**“无高亮则第一项”的回退）。
@@ -55,10 +55,10 @@
 
 ## 2. 命令表（只列**有行为注解**的选择子）
 
-> **完整清单不在这里**：穷尽的 **104 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
+> **完整清单不在这里**：穷尽的 **105 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
 > `docs/autocad-command-coverage.md` §2；本节只保留**有行为注解**的行。
 > 选择子与别名的**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs`
-> （`COMMAND_TABLE` **104** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
+> （`COMMAND_TABLE` **105** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
 > `ARGUMENT_SELECTORS` **4** / `COMMAND_ALIASES` **56**）。
 > 本表的 **canonical 列**只出现**被准入的名字**，**别名列**只出现 `COMMAND_ALIASES` 里的真实行；
 > 键位、面板与 IPC 能力见 §2a，**不混进命令表**。
@@ -72,6 +72,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `ARC` | 绘制（三点弧） | 是 | `A` |
 | `INSERT` | 块参照创建（**点-后-名**：先拾取插入点，再输入**本图已有块**的名称；`T(插入点)·T(−块基点)`，type-key `AcDbBlockReference`；**无块表写入**、无比例/旋转/属性；一条事务/一步撤销） | 是 | `I` |
 | `BLOCK` | 块定义创建（**选择 → 基点 → 名称**：选中对象写入新块定义并移入 `SpaceId::Block`，几何**逐位保留**、只改空间；元数据存基点；参照为 identity `T(基点)·T(−基点)`，后续 `INSERT` 仍按 `T(I)·T(−基点)` 映射；一条事务/一步撤销，块级 undo 补丁） | 是 | `B` |
+| `PASTEBLOCK` | 剪贴板 → 块（单点插入点；自动命名 `PasteBlockN`，成员为剪贴板条目的新 id 克隆、保持原坐标与显示属性；块基点 = `clipboard_base` 或世界原点；参照 `T(插入点)·T(−基点)`；一条事务/一步撤销；剪贴板不清空，成功后选中新参照） | 是 | — |
 | `MOVE` | 编辑 | 是 | `M` |
 | `COPY` | 编辑 | 是 | `CO`、`CP` |
 | `ERASE` | 编辑 | 是 | `E` |
@@ -320,11 +321,12 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
   `contentEditable`，原生复制/粘贴/撤销/全选保持可用）→ ③ 宿主对话框开着（`cad_status.popup`）→
   ④ `toolActive || textStep || gripDragActive`（那三种情形归 Enter/Esc）→ ⑤ 按住 `Meta`/`Alt`
   或没有 `Ctrl` → ⑥ 查表（`Ctrl+Home`；字母里带 Shift 的形式只有 `Shift+C`/`Shift+S`/`Shift+X`/
-  `Shift+Z` 四个，因此 `Ctrl+Shift+V` 与 `Ctrl+Shift+Home` **不会被误降级**成粘贴/缩放到范围）。
+  `Shift+Z` 四个（`Ctrl+Shift+V` 自 2026-11-01 起映射到 `PASTEBLOCK`，见下），因此
+  `Ctrl+Shift+Home` **不会被误降级**成缩放到范围）。
 - **Viewer 模式仍是宿主侧拒绝**：加速器只做 UI 准入，`MODE` 为 Viewer 时 work-only 命令由命令层
   显式报错——键位不是第二道模式门，也不会静默改成 no-op。
 
-**仍然没有全局键的**：`Ctrl+Shift+V`（`PASTEBLOCK`，命令本身未实现）、`Ctrl+Shift+Home`，以及其余
+**仍然没有全局键的**：`Ctrl+Shift+Home`，以及其余
 未列出的 `Ctrl+<字母/数字>`——加速器表**故意**拒绝任何别的带 Shift 字母，所以它们不会被降级成
 非 Shift 的兄弟命令。这些键**不被本应用拦截**，webview 默认
 照旧；其中 `F5`/`Ctrl+R`/`Ctrl+Shift+R`（重载）与 `Ctrl+=`/`Ctrl+-`（页面缩放）被 `defaults.ts`
@@ -362,8 +364,8 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     `Ctrl+F`（对象捕捉）、`Ctrl+G`（栅格）、`Ctrl+H`（拾取样式）、`Ctrl+I`（坐标）、
     `Ctrl+J`/`Ctrl+M`（重复）、`Ctrl+L`（正交）、`Ctrl+R`（视口）、`Ctrl+T`（数字化仪）、
     `Ctrl+W`（选择循环）、`Ctrl+U`（极轴）、`Ctrl+Q`（退出）。
-  - 对象/超链接：`Ctrl+K`（超链接）未接线；`Ctrl+Shift+V`（**粘贴为块 `PASTEBLOCK`**）**仍未实现**
-    （`cad-db` 没有块写 API），所以加速器表**故意**拒绝它、也拒绝把它降级成 `PASTECLIP`。
+  - 对象/超链接：`Ctrl+K`（超链接）未接线；`Ctrl+Shift+V`（**粘贴为块 `PASTEBLOCK`**）**已接线**
+    （2026-11-01，v1：把**应用内**剪贴板变成自动命名的 `PasteBlockN` 块 + 一个插入点参照；不是 OS 剪贴板）。
     （`Ctrl+Shift+C`/`Ctrl+Shift+X` 已接线到 `COPYBASE`/`CUTBASE`，见 §3。）
   - 面板/组/约束：`Ctrl+Shift+H`（选项板）、`Ctrl+Shift+A`（组）、`Ctrl+Shift+I`（推断约束）、
     `Ctrl+Shift+L`（选择对象）、`Ctrl+Shift+P`（快速特性）、`Ctrl+Shift+W`（选择循环）。
@@ -373,10 +375,10 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     其余未映射组合不拦截。
 - **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
   的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
-  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**104 个选择子**，与 `CommandId` 变体一一对应；
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**105 个选择子**，与 `CommandId` 变体一一对应；
   P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`/`LAYOFF`/
   `PDMODE`/`PDSIZE`，2026-10-27 再加 `LAYERP`/`AREA OBJECT`，**2026-10-28 再加 `COPYBASE`/`CUTBASE`/
-  `PASTEORIG`，2026-11-01 再加 `HATCHPOINT`/`BREAK`/`DIVIDE`/`LENGTHEN`/`INSERT`/`SCALETEXT`/`BLOCK`**——`ID` 是测量选择子、
+  `PASTEORIG`，2026-11-01 再加 `HATCHPOINT`/`BREAK`/`DIVIDE`/`LENGTHEN`/`INSERT`/`SCALETEXT`/`BLOCK`/`PASTEBLOCK`**——`ID` 是测量选择子、
   `LAYUNISO`/`LAYON` 是既有 `RESTORELAYERS` 的别名，都不新增 `CommandId`；`LAYERP` **已不是**别名）；
   不在表内的名字在 chrome 侧就按 `command.unsupported` 拒绝（**`command.unknown` 这个键没有消费方**，
   见 §1）；宿主侧「认识这个名字、但该路径不可用」（如 `PLOT`/`SAVE` 的受限路径）同样报告
@@ -441,7 +443,9 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   **`PASTECLIP` 已改为插入点粘贴**（`Ctrl+V` 进入单点工具，平移 `插入点 − 基点`，无基点时基点为
   世界原点，复用 COPY 的同一个 `cad_db` 变换）；**要原坐标请用 `PASTEORIG`**——它就是改动前的
   `PASTECLIP`。`CUTBASE` 是「先删除成功、再提交剪贴板（含基点）」，失败的剪切不会毁掉旧剪贴板。
-  **`PASTEBLOCK`（`Ctrl+Shift+V`）仍未实现**（没有块写 API），`Ctrl+Shift+V` 保持不接线。
+  **`PASTEBLOCK`（`Ctrl+Shift+V`）已实现 v1**：把应用内剪贴板变成自动命名的 `PasteBlockN` 块定义 +
+  一个插入点参照（沿用剪贴板基点，无基点时世界原点），一条事务/一步撤销；**不是** OS 剪贴板，也不写
+  `*U` 匿名块。块成员/图纸空间条目按名拒绝。
 - **导出**：`SAVE` 是**有损 DXF 另存**（`Partial`，记录每次转换/丢弃），**不是** DWG 往返保存；
   `PLOT` 为矢量 SVG/PDF 导出。**真实图纸上的导出兼容性未验证**。
 - 任何未支持的能力都返回显式 `Unsupported`/`Partial` 或稳定诊断码，**绝不**把失败改写成空成功。

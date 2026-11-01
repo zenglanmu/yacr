@@ -106,9 +106,16 @@ test('the catalog carries the three clipboard selectors under a shared glyph fam
     assert.equal(isSupportedCommand(id), true, id);
     assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
   }
-  // PASTEBLOCK is unimplemented: it must not appear as a catalogued affordance.
-  assert.equal(COMMAND_CATALOG.some(command => command.id === 'PASTEBLOCK'), false);
-  assert.equal(HOST_NAMES.includes('PASTEBLOCK'), false, 'the vocabulary mirror stays honest');
+  // PASTEBLOCK joined the family (2026-11-01): it is now a real selector, so it is
+  // catalogued and admitted like the three above, and its own suite lives in
+  // `paste-block.test.ts`. Until the Rust lane advertises it, `HOST_NAMES` stands
+  // in for the router vocabulary.
+  const pasteBlock = COMMAND_CATALOG.find(command => command.id === 'PASTEBLOCK');
+  assert.ok(pasteBlock, 'PASTEBLOCK must be in the command catalog');
+  assert.equal(pasteBlock.labelKey, 'draw.kind.pasteblock');
+  assert.equal(pasteBlock.group, 'modify');
+  assert.equal(pasteBlock.icon, 'copy');
+  assert.equal(HOST_NAMES.includes('PASTEBLOCK'), true, 'the vocabulary mirror carries the new selector');
 });
 
 test('every new key exists in both catalogs, and both pastes stay distinguishable', () => {
@@ -122,8 +129,10 @@ test('every new key exists in both catalogs, and both pastes stay distinguishabl
     'tool.draw.copybase',
     'tool.draw.cutbase',
     'tool.draw.pasteclip',
+    'tool.draw.pasteblock',
     'tool.prompt.copybase.base',
     'tool.prompt.pasteclip.insertion',
+    'tool.prompt.pasteblock.insertion',
   ];
   for (const key of keys) {
     assert.equal(typeof zh[key], 'string', `zh-CN missing ${key}`);

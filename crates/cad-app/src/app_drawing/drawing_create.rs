@@ -65,6 +65,7 @@ impl Application {
             CommandId::PasteOriginalCoordinates => {
                 self.paste_original_coordinates(session, command)
             }
+            CommandId::PasteBlock => self.paste_block(session, command),
             CommandId::OffsetEntity => self.offset_entity(command),
             CommandId::SetActiveLayer => self.set_active_layer(session, command),
             CommandId::SetEntityProperty => self.set_entity_property(session, command),

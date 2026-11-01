@@ -270,6 +270,13 @@ impl HostController {
                 crate::CommandId::PasteFromClipboard,
                 crate::CommandPayload::PasteClip { insertion },
             ),
+            // PASTEBLOCK: the captured insertion point travels on the payload; the
+            // clipboard becomes a new auto-named block definition in the command
+            // layer.
+            DrawIntent::PasteBlock { insertion } => (
+                crate::CommandId::PasteBlock,
+                crate::CommandPayload::PasteBlock { insertion },
+            ),
             // CHAMFER/FILLET: the two captured refs and pick points travel on the
             // payload; the distances/radius are the session typed channel the
             // command layer reads, so they never ride the payload.

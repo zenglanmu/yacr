@@ -61,6 +61,7 @@ mod mleader;
 mod mtext_create;
 mod offset_polyline;
 mod offset_polyline_bulge;
+mod paste_block;
 mod point_style;
 mod polyline_fillet;
 mod properties;

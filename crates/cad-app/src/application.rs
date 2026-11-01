@@ -460,6 +460,7 @@ impl Application {
             | CommandId::CopyToClipboardBase
             | CommandId::CutToClipboardBase
             | CommandId::PasteOriginalCoordinates
+            | CommandId::PasteBlock
             | CommandId::OffsetEntity
             | CommandId::SetActiveLayer
             | CommandId::SetEntityProperty

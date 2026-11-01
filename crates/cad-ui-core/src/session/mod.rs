@@ -258,6 +258,7 @@ impl CadSession {
     /// | `STRETCH` | `BeginDraw(Stretch)` |
     /// | `COPYBASE` / `CUTBASE` | `BeginDraw(CopyBase)` / `BeginDraw(CutBase)` |
     /// | `PASTECLIP` | `BeginDraw(PasteClip)` (one insertion point) |
+    /// | `PASTEBLOCK` | `BeginDraw(PasteBlock)` (one insertion point) |
     /// | `PASTEORIG` | dispatched as a command (original coordinates) |
     /// | `MEASURE` / `DIST` | `BeginMeasurement(Distance)` |
     /// | `MEASUREPOLYLINE` | `BeginMeasurement(PolylineLength)` |

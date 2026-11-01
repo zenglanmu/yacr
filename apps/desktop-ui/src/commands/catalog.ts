@@ -97,13 +97,19 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // modify `COPY` they refine so no shipped row moves. `COPYBASE`/`CUTBASE` put
   // the selection on the clipboard **with a base point**, so the following
   // `PASTECLIP` is placed relative to that point; `PASTEORIG` pastes at the
-  // coordinates the clipboard came from and takes no insertion pick. `PASTEBLOCK`
-  // is deliberately **absent**: it is not implemented, so no row may suggest it.
-  // All three reuse the `copy` glyph — the icon set has no cut/paste mark, and
-  // they are the same clipboard family (the JOIN/AREA OBJECT precedent).
+  // coordinates the clipboard came from and takes no insertion pick.
+  //
+  // PASTEBLOCK (2026-11-01) closes the same run: it pastes the clipboard as a
+  // **new auto-named block** (`PasteBlock1`, `PasteBlock2`, …) plus one reference
+  // at a picked insertion point. It is a one-point capture like `PASTECLIP`, but
+  // it is its own selector: the output is a block reference, not loose geometry,
+  // and the clipboard is not cleared (so it may be pasted again). All four reuse
+  // the `copy` glyph — the icon set has no cut/paste/block-paste mark, and they
+  // are the same clipboard family (the JOIN/AREA OBJECT precedent).
   { id: 'COPYBASE', labelKey: 'draw.kind.copybase', icon: 'copy', group: 'modify' },
   { id: 'CUTBASE', labelKey: 'draw.kind.cutbase', icon: 'copy', group: 'modify' },
   { id: 'PASTEORIG', labelKey: 'draw.kind.pasteorig', icon: 'copy', group: 'modify' },
+  { id: 'PASTEBLOCK', labelKey: 'draw.kind.pasteblock', icon: 'copy', group: 'modify' },
   { id: 'TRIM', labelKey: 'draw.kind.trim', icon: 'trim', group: 'modify' },
   { id: 'EXTEND', labelKey: 'draw.kind.extend', icon: 'extend', group: 'modify' },
   // The three single-curve edits (2026-11-01) are listed directly after the

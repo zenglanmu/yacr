@@ -1,6 +1,7 @@
 // The documented AutoCAD control accelerators (Ctrl+A/C/X/V/Z/Y/Home/O/N/S/P, plus
-// Ctrl+Shift+C and Ctrl+Shift+X for the base-point clipboard pair), the one pure
-// mapping table behind them, and the one wiring point in the shell.
+// Ctrl+Shift+C/X/V for the base-point clipboard pair and the paste-as-block
+// command), the one pure mapping table behind them, and the one wiring point in
+// the shell.
 //
 // The table is exercised directly (it takes plain records, no DOM), and the
 // call site is asserted by source structure — the same contract style the other
@@ -49,6 +50,10 @@ test('every documented control accelerator resolves to its AutoCAD command', () 
     [ctrl('x', { shiftKey: true }), 'CUTBASE'],
     [ctrl('v'), 'PASTECLIP'],
     [ctrl('V'), 'PASTECLIP'],
+    // Ctrl+Shift+V pastes the clipboard as a new block (PASTEBLOCK), the
+    // clipboard's third paste shape.
+    [ctrl('v', { shiftKey: true }), 'PASTEBLOCK'],
+    [ctrl('V', { shiftKey: true }), 'PASTEBLOCK'],
     [ctrl('z'), 'UNDO'],
     [ctrl('Z'), 'UNDO'],
     [ctrl('y'), 'REDO'],
@@ -82,31 +87,33 @@ test('Ctrl+Shift+Z is REDO while Ctrl+Z is UNDO, and Ctrl+Y is the same REDO', (
   assert.equal(acceleratorCommand(ctrl('s', { shiftKey: true })), 'SAVE');
   assert.equal(acceleratorCommand(ctrl('c', { shiftKey: true })), 'COPYBASE');
   assert.equal(acceleratorCommand(ctrl('x', { shiftKey: true })), 'CUTBASE');
-  // Every other shifted letter is declined — Ctrl+Shift+V included, because
-  // PASTEBLOCK is not implemented and must stay unwired.
-  for (const key of ['a', 'v', 'o', 'n', 'p', 'y', 'b', 'e', 'l', 'm']) {
+  // Every other shifted letter is declined — Ctrl+Shift+V is no longer one of
+  // them, because PASTEBLOCK is implemented and keeps its own name.
+  for (const key of ['a', 'o', 'n', 'p', 'y', 'b', 'e', 'l', 'm']) {
     assert.equal(acceleratorCommand(ctrl(key, { shiftKey: true })), null, `Ctrl+Shift+${key}`);
   }
+  assert.equal(acceleratorCommand(ctrl('v', { shiftKey: true })), 'PASTEBLOCK');
   assert.equal(acceleratorCommand(ctrl('Home', { shiftKey: true })), null);
 });
 
-test('the shifted clipboard chords are COPYBASE/CUTBASE, and Ctrl+Shift+V stays unwired', () => {
+test('the shifted clipboard chords are COPYBASE/CUTBASE/PASTEBLOCK, never plain fallbacks', () => {
   // The letters are case-folded, so a caps-lock press resolves the same way.
   assert.equal(acceleratorCommand(ctrl('C', { shiftKey: true })), 'COPYBASE');
   assert.equal(acceleratorCommand(ctrl('X', { shiftKey: true })), 'CUTBASE');
+  assert.equal(acceleratorCommand(ctrl('V', { shiftKey: true })), 'PASTEBLOCK');
   // The unshifted forms keep their own names: a base point changes the paste that
-  // follows, so the two are not interchangeable and must not collapse.
+  // follows, and a block paste produces a block reference rather than loose
+  // geometry, so the pairs are not interchangeable and must not collapse.
   assert.equal(acceleratorCommand(ctrl('c')), 'COPYCLIP');
   assert.equal(acceleratorCommand(ctrl('x')), 'CUTCLIP');
+  assert.equal(acceleratorCommand(ctrl('v')), 'PASTECLIP');
   assert.notEqual(acceleratorCommand(ctrl('c', { shiftKey: true })), acceleratorCommand(ctrl('c')));
   assert.notEqual(acceleratorCommand(ctrl('x', { shiftKey: true })), acceleratorCommand(ctrl('x')));
-  // PASTEBLOCK (`Ctrl+Shift+V`) is unimplemented: the chord maps to nothing at all
-  // — no PASTECLIP fallback — and therefore cannot be dispatched or prevented.
-  assert.equal(acceleratorCommand(ctrl('v', { shiftKey: true })), null);
-  assert.equal(acceleratorCommand(ctrl('V', { shiftKey: true })), null);
-  assert.equal(acceleratorCommand(ctrl('v')), 'PASTECLIP');
+  assert.notEqual(acceleratorCommand(ctrl('v', { shiftKey: true })), acceleratorCommand(ctrl('v')));
+  // A declined shifted chord still maps to nothing at all and therefore cannot be
+  // dispatched or prevented — and it never asks the admission function.
   let asked = 0;
-  assert.equal(acceleratorDispatch(ctrl('v', { shiftKey: true }), {}, () => { asked += 1; return true; }), null);
+  assert.equal(acceleratorDispatch(ctrl('b', { shiftKey: true }), {}, () => { asked += 1; return true; }), null);
   assert.equal(asked, 0, 'a declined chord never asks the admission function');
 });
 
@@ -177,6 +184,7 @@ test('a chord whose command the shell does not admit is not dispatched', () => {
   for (const [event, expected] of [
     [ctrl('a'), 'SELECTALL'], [ctrl('c'), 'COPYCLIP'], [ctrl('x'), 'CUTCLIP'],
     [ctrl('c', { shiftKey: true }), 'COPYBASE'], [ctrl('x', { shiftKey: true }), 'CUTBASE'],
+    [ctrl('v', { shiftKey: true }), 'PASTEBLOCK'],
     [ctrl('v'), 'PASTECLIP'], [ctrl('z'), 'UNDO'], [ctrl('y'), 'REDO'],
     [ctrl('Home'), 'FIT'], [ctrl('o'), 'OPEN'], [ctrl('n'), 'NEW'],
     [ctrl('s'), 'SAVE'], [ctrl('p'), 'PLOT'],

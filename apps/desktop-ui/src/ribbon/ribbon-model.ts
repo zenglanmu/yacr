@@ -257,6 +257,16 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         items: [
           { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', command: 'SELECTALL', large: true },
           { id: 'COPY', labelKey: 'draw.kind.copy', icon: 'copy', command: 'COPY' },
+          // PASTEBLOCK (2026-11-01) is the clipboard's "paste as block" shape and
+          // sits directly beside `COPY` in this panel, the way AutoCAD keeps the
+          // clipboard family together. It is a small button with **no variant
+          // popover**: one insertion point is the whole input, and the block is
+          // auto-named (`PasteBlock1`, `PasteBlock2`, …) — there is no name step,
+          // no scale/rotation control and no parameter row, so a caret here would
+          // imply choices the command does not have. The plain pastes
+          // (`PASTECLIP`/`PASTEORIG`) have no ribbon row of their own in this
+          // build; they stay on the shortcut menu and their accelerators.
+          { id: 'PASTEBLOCK', labelKey: 'draw.kind.pasteblock', icon: 'copy', command: 'PASTEBLOCK' },
           { id: 'MOVE', labelKey: 'draw.kind.move', icon: 'move', command: 'MOVE' },
           { id: 'ROTATE', labelKey: 'draw.kind.rotate', icon: 'rotate', command: 'ROTATE' },
         ],
