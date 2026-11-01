@@ -412,6 +412,30 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
   'draw.cutbase': [
     'tool.prompt.copybase.base',
   ],
+  // The three circle definition modes (2026-11-01) are plain **point** captures
+  // under their own machine keys, so each lists its picks in order and nothing
+  // else: `CIRCLE 2P` two diameter endpoints, `CIRCLE 3P` three points on the
+  // circumference, `CIRCLE D` the centre and then a point whose distance from
+  // that centre is the **diameter**.
+  //
+  // The last one is the only place the halving is visible while a pick is live, so
+  // its second sentence states it outright ("the picked distance is the diameter,
+  // so the radius is half"): a reader must never expect a radius pick there. None
+  // of the three takes a parameter or starts from a selection — the picks are the
+  // whole input — so none may appear in [`PRESELECT_PROMPTS`].
+  'draw.circle2p': [
+    'tool.prompt.circle2p.first',
+    'tool.prompt.circle2p.second',
+  ],
+  'draw.circle3p': [
+    'tool.prompt.circle3p.first',
+    'tool.prompt.circle3p.second',
+    'tool.prompt.circle3p.third',
+  ],
+  'draw.circlediameter': [
+    'tool.prompt.circlediameter.center',
+    'tool.prompt.circlediameter.diameter',
+  ],
 });
 
 /**
@@ -508,6 +532,14 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // ("Dimension defined; press Enter to confirm") would be false twice over, so
   // this names the one honest state — both ends known, Enter breaks.
   'draw.break': 'tool.prompt.break.ready',
+  // The circle modes (2026-11-01) are complete once their exact complement is
+  // captured, and Enter creates the one circle. The shared dimension ready copy
+  // ("Dimension defined; press Enter to confirm") would be false — nothing is
+  // dimensioned — so each mode names its own captured definition instead. The
+  // state is not positional, so these live here rather than in the step list.
+  'draw.circle2p': 'tool.prompt.circle2p.ready',
+  'draw.circle3p': 'tool.prompt.circle3p.ready',
+  'draw.circlediameter': 'tool.prompt.circlediameter.ready',
 });
 
 /** A pre-selection tool's two prompts: waiting for a selection, and ready. */

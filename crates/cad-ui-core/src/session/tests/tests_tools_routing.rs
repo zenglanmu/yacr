@@ -14,6 +14,12 @@ use super::test_support::*;
 const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("LINE", "draw.line"),
     ("CIRCLE", "draw.circle"),
+    // The three CIRCLE construction options are their own multi-word selectors and
+    // their own captures (2P: diameter endpoints, 3P: three points, D: centre +
+    // diameter point).
+    ("CIRCLE 2P", "draw.circle2p"),
+    ("CIRCLE 3P", "draw.circle3p"),
+    ("CIRCLE D", "draw.circlediameter"),
     ("ARC", "draw.arc"),
     ("PLINE", "draw.polyline"),
     ("RECTANG", "draw.rectang"),

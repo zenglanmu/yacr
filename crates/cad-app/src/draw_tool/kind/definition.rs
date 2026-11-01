@@ -727,4 +727,31 @@ pub enum DrawToolKind {
     /// positive half misses the clip box is `ray.outside_bounds` rather than a
     /// fabricated line. Work-only.
     Ray,
+    /// `CIRCLE 2P`: two points that are the **opposite ends of a diameter**
+    /// (`PointArity::Exact(2)`).
+    ///
+    /// The first pick and the second pick span the circle, so the commit stores
+    /// the midpoint as the centre and half the pick distance as the radius (a
+    /// work-plane `+Z` circle). The construction is the command layer's
+    /// (`create_circle_2p`), so the capture never invents a centre or a radius;
+    /// a coincident or non-finite pair is `circle2p.degenerate`. Work-only.
+    Circle2P,
+    /// `CIRCLE 3P`: three points the circle passes through
+    /// (`PointArity::Exact(3)`).
+    ///
+    /// The circumcircle is the **same** construction ARC uses
+    /// ([`crate::draw_tool::arc_parameters`]), so the two commands cannot
+    /// disagree about the centre or radius for the same triple; the arc's
+    /// start/sweep are ignored here. A non-finite, coincident or collinear triple
+    /// is `circle3p.degenerate`. Work-only.
+    Circle3P,
+    /// `CIRCLE D`: a centre and a **diameter** point (`PointArity::Exact(2)`).
+    ///
+    /// The first pick is the centre and the second lies on the far side, so the
+    /// stored radius is **half** the picked distance (AutoCAD's Diameter option)
+    /// — this is the one difference from [`Self::Circle`], whose radius is the
+    /// full centre→edge distance. The construction is the command layer's
+    /// (`create_circle_diameter`); a coincident or non-finite pair is
+    /// `circlediameter.degenerate`. Work-only.
+    CircleDiameter,
 }

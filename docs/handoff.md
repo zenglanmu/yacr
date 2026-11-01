@@ -1,3 +1,54 @@
+## 2026-11-01 `CIRCLE 2P` / `CIRCLE 3P` / `CIRCLE D`：圆构造选项
+
+### 结论
+
+- **三个多词 canonical 选择子落地（Work-only）**：`CIRCLE 2P`（直径两端点 → 中点/半距）、
+  `CIRCLE 3P`（三点 → **复用 `arc_parameters`** 的唯一外接圆）与 `CIRCLE D`（圆心 + **直径距离点**；
+  拾取距离是**直径**，半径 = 距离/2）。每个只产一个 `SemanticGeometry::Circle`，活动图层/模型空间，
+  一条事务/一步撤销，诊断 `drawing.circle2p`/`drawing.circle3p`/`drawing.circlediameter`。
+- **拒绝（开事务前）**：重合端点/退化距离（`circle2p.degenerate`/`circlediameter.degenerate`）、
+  共线或重合三点（`circle3p.degenerate`，保留共享 `arc_parameters` 的底层原因）、非有限点。Viewer 由
+  Work-only 拒绝。
+- **词表/文案**：`COMMAND_TABLE` **107 → 110**、`admissible_names()` **171 → 174**；别名仍 57
+  （三个都是多词 canonical，无新别名）；i18n **+16 键**（两目录一致，总数 **974**）；UI 把 CIRCLE
+  变成四行 variant popover（默认 + 2P/3P/D），并给出 2/3/2 步提示与明确「距离是直径、半径一半」的文案。
+- **文件上限**：`command_id.rs` **974 → 957**（HATCH 长文档移到 `command_id/hatch.rs`）后再加三个变体；
+  仍在 1000 以内。
+
+### 代码 / 文档落点
+
+- Rust：`crates/cad-app/src/app_drawing/circle_options.rs`（新）+ `tests/drawing/circle_options.rs`（11 项）；
+  `command_id/{hatch.rs}`、`command_id.rs`、`command_id/capabilities.rs`、`draw_tool/{kind,kind/definition,
+  intent,mod}.rs`、`host/draw_intent_map.rs`、`session_state.rs`、`application.rs`、
+  `app_drawing/{drawing_create,mod}.rs`、`render_scene/overlay/preview.rs`；`cad-ui-core` 的
+  `session/commands.rs`、`command_vocabulary.rs`、`tests_tools_routing.rs`。
+- React：`commands/catalog.ts`、`ribbon/ribbon-model.ts`（CIRCLE_VARIANTS）、`cad/cad.ts` 与两本 i18n；
+  新 `apps/desktop-ui/test/circle-options.test.ts`，并同步 `commands`/`helpers`/`i18n` 的精确列表。
+- 文档：`docs/compatibility.md`（创建表）、`docs/autocad-command-coverage.md`（110/174/117、§3.1 CIRCLE 行、
+  §5/§5b）、`docs/shortcuts.md`（四行 CIRCLE、计数）、`docs/architecture.md`（174/57）、本文件。
+
+### 验证（本轮实际运行，合并树）
+
+- `cargo fmt --all -- --check` → exit 0。
+- `cargo check --workspace --all-targets --locked` → exit 0。
+- `cargo test -p cad-app -p cad-db -p cad-history -p cad-ui-core --locked -- --test-threads=1` → exit 0：
+  `cad-app` **1507**、`cad-db` **168**、`cad-history` **17**、`cad-ui-core` **342**，集成 targets 全绿
+  （外部 DWG 用例仍 **ignored**）。
+- `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` → exit 0。
+- `cargo clippy -p cad-app -p cad-db -p cad-history -p cad-ui-core --all-targets --locked -- -D warnings` → exit 0。
+- 前端：`npx tsc --noEmit && node --test test/*.test.ts` → **912 pass / 0 fail**；`check-i18n.py` → **974 键**。
+- `python3 scripts/check-file-size.py` / `check-architecture.py` / `check-command-docs.py`（110/5/2/4、57 aliases、
+  117 canonical、§2 rows 72、0 mismatch）→ 全 OK。
+
+### NOT RUN / NOT VERIFIED
+
+- **全 workspace 测试套件**（只跑了上述四个 crate）；`cargo test -p cad-host`/其它 crate 的独立测试。
+- **GUI / 真实 GPU / 像素 / 真窗口**：未运行任何宿主或截图；CIRCLE variant popover、2P/3P/D 的
+  实时圆预览与真实拾取**未做视觉验收**。
+- **真实 DWG**：未在真实图纸上运行；证据是契约测试。
+- **v1 之外**：`CIRCLE` 的其它 AutoCAD 子选项（如 `TTR` 相切-相切-半径）、3D/OCS 圆构造——
+  **NOT IMPLEMENTED**。
+
 ## 2026-11-01 `XLINE` / `RAY`：有界构造线创建（v1）
 
 ### 结论

@@ -90,6 +90,14 @@ export const HOST_NAMES = [
   // This mirror stands in for the loaded `cad_commands` vocabulary; the Rust lane
   // adds the same names, and this list never proves the host advertises them.
   'XLINE', 'RAY',
+  // Circle definition modes (2026-11-01): `CIRCLE 2P`, `CIRCLE 3P` and `CIRCLE D`
+  // are canonical **multi-word** selectors of their own — never aliases of
+  // `CIRCLE` — because each capture asks for different picks (two diameter
+  // endpoints; three points on the circumference; a centre, then a point whose
+  // distance from it is the diameter). The host canonicalises the whole trimmed
+  // line, so each stays one entry here. The Rust lane adds the same names in
+  // parallel; this mirror never proves the host advertises them.
+  'CIRCLE 2P', 'CIRCLE 3P', 'CIRCLE D',
   // Clipboard-with-base-point family (2026-10-27): `COPYBASE`/`CUTBASE` put the
   // selection on the clipboard **with a base point**, so the following `PASTECLIP`
   // is placed relative to it, and `PASTEORIG` pastes at the coordinates the

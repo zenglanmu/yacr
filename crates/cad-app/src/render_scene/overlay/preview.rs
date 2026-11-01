@@ -38,6 +38,34 @@ pub fn draw_preview_overlay(
     let mut order = options.draw_order;
     let geometry: Option<Vec<Point3>> = match preview.kind {
         DrawToolKind::Circle => circle_points(&preview.points, preview.cursor),
+        // CIRCLE 2P: the two picks are diameter endpoints, so the live ring is
+        // centred on their midpoint with half their distance as the radius (the
+        // same construction the commit uses). CIRCLE D: the first pick is the
+        // centre and the second (or the cursor) the diameter point, so the ring
+        // radius is half that distance. Both fall back to the chain while the pair
+        // is degenerate, never a fabricated circle.
+        DrawToolKind::Circle2P => {
+            circle_two_point_points(&preview.points, preview.cursor).or_else(|| {
+                let chain = preview_chain(&preview.points, preview.cursor);
+                (chain.len() >= 2).then_some(chain)
+            })
+        }
+        // CIRCLE 3P: the circumcircle of the captured points plus the live cursor,
+        // built by the **same** `arc_parameters` helper the commit uses (so the
+        // preview ring and the stored circle cannot disagree). Falls back to the
+        // chain while the triple is incomplete, collinear or coincident.
+        DrawToolKind::Circle3P => {
+            circle_three_point_points(&preview.points, preview.cursor).or_else(|| {
+                let chain = preview_chain(&preview.points, preview.cursor);
+                (chain.len() >= 2).then_some(chain)
+            })
+        }
+        DrawToolKind::CircleDiameter => {
+            circle_diameter_points(&preview.points, preview.cursor).or_else(|| {
+                let chain = preview_chain(&preview.points, preview.cursor);
+                (chain.len() >= 2).then_some(chain)
+            })
+        }
         DrawToolKind::Arc => arc_points(&preview.points, preview.cursor).or_else(|| {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
@@ -251,6 +279,62 @@ fn circle_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3
     let center = *points.first()?;
     let edge = points.get(1).copied().or(cursor)?;
     let radius = (edge.x - center.x).hypot(edge.y - center.y);
+    circle_ring_points(center, radius)
+}
+
+/// The `CIRCLE 2P` preview ring: the two picks are the opposite ends of a
+/// diameter, so the centre is their midpoint and the radius is half the span.
+///
+/// Uses the same midpoint/half-distance rule as `create_circle_2p`; `None` while
+/// fewer than two points are known or the pair is coincident/non-finite, so the
+/// caller can fall back to the rubber-band chain.
+fn circle_two_point_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3>> {
+    let first = *points.first()?;
+    let second = points.get(1).copied().or(cursor)?;
+    let center = Point3 {
+        x: (first.x + second.x) / 2.0,
+        y: (first.y + second.y) / 2.0,
+        z: (first.z + second.z) / 2.0,
+    };
+    let radius = (second.x - first.x)
+        .hypot(second.y - first.y)
+        .hypot(second.z - first.z)
+        / 2.0;
+    circle_ring_points(center, radius)
+}
+
+/// The `CIRCLE D` preview ring: the first pick is the centre and the second (or
+/// the live cursor) the diameter point, so the radius is **half** that distance
+/// (AutoCAD's Diameter option, exactly what `create_circle_diameter` stores).
+fn circle_diameter_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3>> {
+    let center = *points.first()?;
+    let diameter = points.get(1).copied().or(cursor)?;
+    let radius = (diameter.x - center.x)
+        .hypot(diameter.y - center.y)
+        .hypot(diameter.z - center.z)
+        / 2.0;
+    circle_ring_points(center, radius)
+}
+
+/// The `CIRCLE 3P` preview ring: the circumcircle through the captured points
+/// plus the live cursor, computed by the **same** pure helper the ARC command
+/// uses ([`crate::draw_tool::arc_parameters`]).
+///
+/// `None` while fewer than two points are known or the helper refuses (a
+/// non-coplanar, coincident or collinear triple), so the preview never fabricates
+/// a circumcircle.
+fn circle_three_point_points(points: &[Point3], cursor: Option<Point3>) -> Option<Vec<Point3>> {
+    let (first, second, third) = match points {
+        [a, b, c, ..] => (*a, *b, *c),
+        [a, b] => (*a, *b, cursor?),
+        _ => return None,
+    };
+    let parameters = crate::draw_tool::arc_parameters(first, second, third).ok()?;
+    circle_ring_points(parameters.center, parameters.radius)
+}
+
+/// A closed 64-segment ring used by every CIRCLE preview variant.
+fn circle_ring_points(center: Point3, radius: f64) -> Option<Vec<Point3>> {
     if !radius.is_finite() || radius < 1e-12 {
         return None;
     }

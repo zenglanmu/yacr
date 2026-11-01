@@ -608,6 +608,25 @@ impl DrawTool {
                 through: b,
             },
             DrawToolKind::Circle => DrawIntent::Circle { center: a, edge: b },
+            // CIRCLE 2P: the two diameter endpoints exactly as clicked; the
+            // midpoint/radius construction is the command layer's.
+            DrawToolKind::Circle2P => DrawIntent::Circle2P {
+                first: a,
+                second: b,
+            },
+            // CIRCLE 3P: the three clicked points; the circumcircle comes from the
+            // shared `arc_parameters` helper in the command layer.
+            DrawToolKind::Circle3P => DrawIntent::Circle3P {
+                first: a,
+                second: b,
+                third: self.points[2],
+            },
+            // CIRCLE D: the centre and the diameter point exactly as clicked; the
+            // half-distance radius is the command layer's.
+            DrawToolKind::CircleDiameter => DrawIntent::CircleDiameter {
+                center: a,
+                diameter: b,
+            },
             DrawToolKind::Arc => DrawIntent::Arc {
                 points: [a, b, self.points[2]],
             },

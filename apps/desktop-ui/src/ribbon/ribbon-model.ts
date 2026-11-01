@@ -208,6 +208,43 @@ export function panelLauncherCommand(panel: RibbonPanel | null | undefined): str
   return typeof command === 'string' && command.length > 0 ? command : null;
 }
 
+/**
+ * The Circle split button: the plain `CIRCLE` plus its three definition modes.
+ *
+ * The parent stays the ordinary CIRCLE button (centre, then radius) and keeps its
+ * `large` tile on both draw panels; the caret offers the three further modes the
+ * host advertises as **separate selectors** (`CIRCLE 2P`, `CIRCLE 3P`,
+ * `CIRCLE D`). The structure copies the `FIT` and `AREA` popovers: the first row
+ * repeats the parent's own selector so the menu is also a "what the button does"
+ * list.
+ *
+ * Every row is a router command with no parameter — the picks are the whole input
+ * — and every row reuses the `circle` glyph, because all four produce the same
+ * entity and the icon set has no per-mode badge; the label states the definition
+ * method instead. `CIRCLE D`'s second pick is a **distance from the centre that
+ * is the diameter**, so its label must say "diameter" and never imply a radius
+ * pick (the step prompt spells the halving out).
+ *
+ * One frozen value used by both draw panels: the two tabs must offer the same
+ * four modes, and a shared (frozen) object is the cheapest way to keep them
+ * identical.
+ */
+const CIRCLE_VARIANTS: readonly RibbonCommandItem[] = Object.freeze([
+  { id: 'CIRCLE', labelKey: 'draw.kind.circle', icon: 'circle', command: 'CIRCLE' },
+  { id: 'CIRCLE 2P', labelKey: 'draw.kind.circle2p', icon: 'circle', command: 'CIRCLE 2P' },
+  { id: 'CIRCLE 3P', labelKey: 'draw.kind.circle3p', icon: 'circle', command: 'CIRCLE 3P' },
+  { id: 'CIRCLE D', labelKey: 'draw.kind.circlediameter', icon: 'circle', command: 'CIRCLE D' },
+]);
+
+const CIRCLE_ITEM: RibbonCommandItem = Object.freeze({
+  id: 'CIRCLE',
+  labelKey: 'draw.kind.circle',
+  icon: 'circle',
+  command: 'CIRCLE',
+  large: true,
+  variants: CIRCLE_VARIANTS,
+});
+
 export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
   {
     id: 'file',
@@ -276,7 +313,11 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         titleKey: 'ribbon.panel.draw',
         items: [
           { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', command: 'LINE', large: true },
-          { id: 'CIRCLE', labelKey: 'draw.kind.circle', icon: 'circle', command: 'CIRCLE', large: true },
+          // The Circle split button: plain CIRCLE stays the parent and the caret
+          // offers the three definition modes as separate selectors (see
+          // `CIRCLE_ITEM` above for the shape, the shared glyphs and why `CIRCLE D`
+          // must word its distance as the diameter).
+          CIRCLE_ITEM,
           { id: 'ARC', labelKey: 'draw.kind.arc', icon: 'arc', command: 'ARC' },
           // XLINE and RAY (2026-11-01) sit directly after ARC, beside the
           // primitive they extend: each is a **two-point** capture (base, then
@@ -512,7 +553,9 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         titleKey: 'ribbon.panel.draw',
         items: [
           { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', command: 'LINE', large: true },
-          { id: 'CIRCLE', labelKey: 'draw.kind.circle', icon: 'circle', command: 'CIRCLE', large: true },
+          // Same split button as the Home panel (see `CIRCLE_ITEM`): the plain
+          // CIRCLE parent plus its three definition modes.
+          CIRCLE_ITEM,
           { id: 'ARC', labelKey: 'draw.kind.arc', icon: 'arc', command: 'ARC', large: true },
           // Same slot as on the Home panel: the two construction captures sit
           // directly after ARC (see the Home/draw comment for the two-pick

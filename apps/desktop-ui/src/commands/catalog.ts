@@ -35,6 +35,28 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'REDO', labelKey: 'toolbar.redo', icon: 'redo', group: 'modify' },
   { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', group: 'draw' },
   { id: 'CIRCLE', labelKey: 'draw.kind.circle', icon: 'circle', group: 'draw' },
+  // Circle definition modes (2026-11-01), listed directly after the `CIRCLE` they
+  // belong to: the same command line with a mode word (`CIRCLE 2P`, `CIRCLE 3P`,
+  // `CIRCLE D`). Each is a **canonical selector of its own**, never an alias of
+  // `CIRCLE`: the capture differs in what it asks for — two diameter endpoints,
+  // three points on the circumference, or a centre followed by a point whose
+  // distance from that centre is the **diameter** (so the radius is half of it) —
+  // and every mode commits exactly one circle.
+  //
+  // The ids are **multi-word**, exactly like `AREA OBJECT`: the host canonicalises
+  // the whole trimmed line, so the space is part of one name here and in the
+  // vocabulary mirror. Admission resolves the whole line before the
+  // base-plus-argument grammar, so a correctly advertised `CIRCLE 2P` is admitted
+  // as one selector instead of being refused as `CIRCLE` with a typed argument.
+  //
+  // No mode takes a parameter: the picks are the whole input, and no variant may
+  // imply a radius/diameter switch on the plain `CIRCLE`. All three reuse the
+  // `circle` glyph — every mode produces the same entity and the icon set has no
+  // per-mode badge; the label names the definition method (the `AREA` /
+  // `AREA OBJECT` precedent).
+  { id: 'CIRCLE 2P', labelKey: 'draw.kind.circle2p', icon: 'circle', group: 'draw' },
+  { id: 'CIRCLE 3P', labelKey: 'draw.kind.circle3p', icon: 'circle', group: 'draw' },
+  { id: 'CIRCLE D', labelKey: 'draw.kind.circlediameter', icon: 'circle', group: 'draw' },
   { id: 'ARC', labelKey: 'draw.kind.arc', icon: 'arc', group: 'draw' },
   // XLINE and RAY (2026-11-01) are the two **construction** captures, listed
   // directly after the primitives they belong with (LINE, CIRCLE, ARC), so no

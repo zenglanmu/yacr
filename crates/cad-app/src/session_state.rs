@@ -563,6 +563,11 @@ impl SessionState {
             DrawToolKind::XLine => CommandId::CreateXLine,
             DrawToolKind::Ray => CommandId::CreateRay,
             DrawToolKind::Circle => CommandId::CreateCircle,
+            // The three CIRCLE construction options are their own commands (the
+            // kind is what carries the construction choice).
+            DrawToolKind::Circle2P => CommandId::CreateCircle2P,
+            DrawToolKind::Circle3P => CommandId::CreateCircle3P,
+            DrawToolKind::CircleDiameter => CommandId::CreateCircleDiameter,
             DrawToolKind::Arc => CommandId::CreateArc,
             DrawToolKind::Polyline => CommandId::CreatePolyline,
             DrawToolKind::Rectang => CommandId::CreateRectangle,

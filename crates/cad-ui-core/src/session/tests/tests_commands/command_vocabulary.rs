@@ -55,6 +55,9 @@ command_selector_contract! {
     CreateXLine => "XLINE",
     CreateRay => "RAY",
     CreateCircle => "CIRCLE",
+    CreateCircle2P => "CIRCLE 2P",
+    CreateCircle3P => "CIRCLE 3P",
+    CreateCircleDiameter => "CIRCLE D",
     CreateArc => "ARC",
     CreatePolyline => "PLINE",
     CreateRectangle => "RECTANG",
@@ -139,7 +142,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 107,
+        EXPECTED_COMMAND_COUNT, 110,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

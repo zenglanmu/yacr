@@ -162,6 +162,31 @@ pub enum CommandId {
     /// Draw a CIRCLE with a centre and an edge point. The radius is the exact
     /// centre→edge distance and must be positive. Work-only.
     CreateCircle,
+    /// `CIRCLE 2P`: draw a CIRCLE through two **diameter endpoints**.
+    ///
+    /// Payload is `Points([first, second])`: the two clicks are the opposite ends
+    /// of a diameter, so the stored centre is their midpoint and the radius is
+    /// half the distance between them. A non-finite pair or a zero distance
+    /// is `circle2p.degenerate` and changes nothing. One entity / one transaction
+    /// / one undo step on the active layer. Work-only.
+    CreateCircle2P,
+    /// `CIRCLE 3P`: draw a CIRCLE through three points.
+    ///
+    /// Payload is `Points([first, second, third])`. The circumcircle comes from
+    /// the **one** construction ARC already uses
+    /// ([`crate::draw_tool::arc_parameters`]), so a CIRCLE 3P and an ARC through
+    /// the same three points share a centre and radius (the arc's start/sweep are
+    /// simply ignored). A non-finite, coincident or collinear triple is
+    /// `circle3p.degenerate` and changes nothing. Work-only.
+    CreateCircle3P,
+    /// `CIRCLE D`: draw a CIRCLE from a centre and a **diameter** point.
+    ///
+    /// Payload is `Points([center, diameter])`: unlike [`CommandId::CreateCircle`]
+    /// the second pick lies on the far side of the circle, so the stored radius
+    /// is **half** the centre→pick distance (AutoCAD's Diameter option). A
+    /// non-finite pair or a zero distance is `circlediameter.degenerate` and
+    /// changes nothing. Work-only.
+    CreateCircleDiameter,
     /// Draw an ARC through three points (start, a point on the arc, end) on the
     /// work plane. The three points must be non-collinear and finite; a
     /// degenerate input is an explicit refusal that changes nothing. Work-only.
@@ -442,52 +467,9 @@ pub enum CommandId {
     /// other refusal matches [`CommandId::DimBaseline`], and the N segments are
     /// inserted in one transaction / one undo step. Non-associative. Work-only.
     DimContinue,
-    /// HATCH: fill the **pre-selected** boundary entities (ADR 0018 decision D,
-    /// P6b). Payload is `Hatch { refs }` — the selection snapshot taken when the
-    /// tool started; the tool itself captures **no points** (its arity is the
-    /// zero-point exact complement, like ARRAYRECT) and takes no in-command picks.
-    ///
-    /// Each accepted selected entity becomes exactly one loop in the hatch
-    /// plane's OCS 2D frame: a `Circle` (an exact four-quarter-arc bulged loop),
-    /// a full `Ellipse` (sampled chords — declared, a true ellipse is not a
-    /// circular arc) or a **closed** `Polyline` (its own points and bulges,
-    /// including a 3D entity that lies in one plane).
-    ///
-    /// Selected `Line`/`Arc` entities (in any mix with the kinds above) are
-    /// **stitched** into one loop per closed chain: endpoints are matched at the
-    /// absolute `1e-6` world-unit tolerance, an edge may be consumed in either
-    /// direction, and every `Arc` stays an **exact bulge segment**
-    /// (`bulge = tan(sweep / 4)` — never sampled). A node where more than two
-    /// edges meet is refused as `hatch.boundary_branch` (no pairing is guessed),
-    /// edges left outside every loop as `hatch.boundary_open` (naming how many),
-    /// and a zero-length `Line` / zero-sweep `Arc` as
-    /// `hatch.boundary_degenerate`. An open polyline, spline, text, block,
-    /// dimension or any other kind is an explicit refusal that opens no
-    /// transaction; so is a selection that is not coplanar with a **single
-    /// consistent normal**.
-    ///
-    /// The fill, spacing, angle (degrees on the channel), double flag and style
-    /// are the session typed channel ([`crate::draw_tool::ToolParameter::HatchPatternType`]
-    /// … `HatchStyle`), read here so the session stays the single authority. A
-    /// user-defined pattern is synthesized from angle/spacing/double exactly like
-    /// the import path (one definition row at offset `(0, 1)` with the spacing as
-    /// the pattern scale) and recorded as
-    /// [`cad_domain::HatchPatternType::UserDefined`]; a solid fill is recorded as
-    /// `Predefined` (`76=1`, matching the committed SOLID fixtures). Pattern type
-    /// code `2` (predefined) takes the `hatchPattern` **1-based** index into the
-    /// implemented `ANSI31`/`ANSI32`/`ANSI37` table, records `Predefined` (`76=1`)
-    /// and refuses an index outside that table by name.
-    ///
-    /// The display is derived by the unique constructor `HatchGeometry::new`,
-    /// which rejects the ADR A.3 creation-path defects (self-intersecting,
-    /// touching/shared vertex, duplicate, partially overlapping, unclosed,
-    /// degenerate, non-finite) as a **whole-command** refusal. One entity
-    /// (`type_key`/`class_name` = `AcDbHatch`) is inserted through the shared
-    /// create funnel in one transaction / one undo step on the active layer.
-    /// Associativity, boundary-from-an-internal-point, self-intersecting boundary
-    /// loops (refused, never trimmed or repaired), custom (`76=2`) pattern names
-    /// and `.pat` loading, a pattern picker dialog, gradient creation, a live
-    /// preview and a per-span dash phase reset are **NOT IMPLEMENTED**. Work-only.
+    /// HATCH (Work-only): fill the **pre-selected** boundary entities with the
+    /// session pattern parameters; one `AcDbHatch` entity in one transaction. Full
+    /// contract: [`crate::command_id::hatch`].
     Hatch,
     /// HATCHPOINT: create a HATCH from **one internal point** (project-specific
     /// selector, like SELECTINBOX/GRIPSTRETCH). Payload is
@@ -970,5 +952,6 @@ pub mod area_object;
 pub mod block_define;
 pub mod construction_line;
 pub mod grip_stretch;
+pub mod hatch;
 pub mod match_prop;
 pub mod zoom;

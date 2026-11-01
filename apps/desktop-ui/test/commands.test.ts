@@ -530,6 +530,12 @@ test('a host tool selector maps to its catalog key', () => {
   assert.equal(toolLabelKey('draw.line'), 'tool.draw.line');
   assert.equal(toolLabelKey('draw.xline'), 'tool.draw.xline');
   assert.equal(toolLabelKey('draw.ray'), 'tool.draw.ray');
+  // The circle definition modes report their own machine keys, so the chip names
+  // the mode rather than the plain "Circle" the bare command shows.
+  assert.equal(toolLabelKey('draw.circle2p'), 'tool.draw.circle2p');
+  assert.equal(toolLabelKey('draw.circle3p'), 'tool.draw.circle3p');
+  assert.equal(toolLabelKey('draw.circlediameter'), 'tool.draw.circlediameter');
+  assert.equal(toolLabelKey('  draw.circlediameter '), 'tool.draw.circlediameter');
   assert.equal(toolLabelKey('measure.distance'), 'tool.measure.distance');
   assert.equal(toolLabelKey('  draw.arc '), 'tool.draw.arc');
   assert.equal(toolLabelKey(''), null);

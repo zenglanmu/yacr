@@ -64,6 +64,15 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("XLINE", CommandId::CreateXLine),
     ("RAY", CommandId::CreateRay),
     ("CIRCLE", CommandId::CreateCircle),
+    // The three CIRCLE construction options are canonical **multi-word**
+    // selectors, not aliases of `CIRCLE`: each names a different construction
+    // (two diameter endpoints, three points on the circle, a centre plus a
+    // diameter point), so they start their own capture and build one Circle
+    // through the same create funnel. The bare `C` abbreviation stays the
+    // centre+radius `CIRCLE`.
+    ("CIRCLE 2P", CommandId::CreateCircle2P),
+    ("CIRCLE 3P", CommandId::CreateCircle3P),
+    ("CIRCLE D", CommandId::CreateCircleDiameter),
     ("ARC", CommandId::CreateArc),
     ("PLINE", CommandId::CreatePolyline),
     ("RECTANG", CommandId::CreateRectangle),
@@ -815,6 +824,13 @@ pub(super) fn interaction_request_for(
         CommandId::CreateXLine => Some(InteractionRequest::BeginDraw(DrawToolKind::XLine)),
         CommandId::CreateRay => Some(InteractionRequest::BeginDraw(DrawToolKind::Ray)),
         CommandId::CreateCircle => Some(InteractionRequest::BeginDraw(DrawToolKind::Circle)),
+        // The CIRCLE construction options start their own captures: two diameter
+        // endpoints (2P), three points (3P) and a centre plus a diameter point (D).
+        CommandId::CreateCircle2P => Some(InteractionRequest::BeginDraw(DrawToolKind::Circle2P)),
+        CommandId::CreateCircle3P => Some(InteractionRequest::BeginDraw(DrawToolKind::Circle3P)),
+        CommandId::CreateCircleDiameter => {
+            Some(InteractionRequest::BeginDraw(DrawToolKind::CircleDiameter))
+        }
         CommandId::CreateArc => Some(InteractionRequest::BeginDraw(DrawToolKind::Arc)),
         CommandId::CreatePolyline => Some(InteractionRequest::BeginDraw(DrawToolKind::Polyline)),
         CommandId::CreateRectangle => Some(InteractionRequest::BeginDraw(DrawToolKind::Rectang)),

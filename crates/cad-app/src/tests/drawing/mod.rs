@@ -281,6 +281,7 @@ mod block_define;
 mod block_undo;
 mod break_curve;
 mod chamfer_fillet;
+mod circle_options;
 mod clipboard;
 mod construction_line;
 mod create_polyline;

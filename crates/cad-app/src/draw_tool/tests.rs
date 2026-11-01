@@ -25,6 +25,8 @@ fn required_points_and_selection_are_explicit_per_kind() {
             | DrawToolKind::Scale
             | DrawToolKind::DimLinear
             | DrawToolKind::DimAligned
+            // CIRCLE 3P is the three-point circumcircle.
+            | DrawToolKind::Circle3P
             | DrawToolKind::DimAngular => 3,
             DrawToolKind::Spline | DrawToolKind::Align | DrawToolKind::Stretch => 4,
             DrawToolKind::Offset

@@ -414,6 +414,9 @@ impl Application {
             }
             CommandId::CreateLine
             | CommandId::CreateCircle
+            | CommandId::CreateCircle2P
+            | CommandId::CreateCircle3P
+            | CommandId::CreateCircleDiameter
             | CommandId::CreateArc
             | CommandId::CreateXLine
             | CommandId::CreateRay

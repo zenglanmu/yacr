@@ -38,6 +38,26 @@ impl HostController {
                 crate::CommandId::CreateCircle,
                 crate::CommandPayload::Points(vec![center, edge]),
             ),
+            // The three CIRCLE construction options travel as `Points` (the same
+            // construction-input shape CreateCircle reads); the handler derives the
+            // midpoint/circumcentre/half-distance radius, so the payload carries
+            // exactly the clicks and nothing derived.
+            DrawIntent::Circle2P { first, second } => (
+                crate::CommandId::CreateCircle2P,
+                crate::CommandPayload::Points(vec![first, second]),
+            ),
+            DrawIntent::Circle3P {
+                first,
+                second,
+                third,
+            } => (
+                crate::CommandId::CreateCircle3P,
+                crate::CommandPayload::Points(vec![first, second, third]),
+            ),
+            DrawIntent::CircleDiameter { center, diameter } => (
+                crate::CommandId::CreateCircleDiameter,
+                crate::CommandPayload::Points(vec![center, diameter]),
+            ),
             DrawIntent::Arc { points } => (
                 crate::CommandId::CreateArc,
                 crate::CommandPayload::Points(points.to_vec()),

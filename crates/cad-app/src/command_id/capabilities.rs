@@ -17,6 +17,9 @@ impl CommandId {
                 | Self::Redo
                 | Self::CreateLine
                 | Self::CreateCircle
+                | Self::CreateCircle2P
+                | Self::CreateCircle3P
+                | Self::CreateCircleDiameter
                 | Self::CreateArc
                 | Self::CreatePolyline
                 | Self::CreateRectangle

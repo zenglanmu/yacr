@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 50] = [
+    pub const ALL: [DrawToolKind; 53] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -131,6 +131,12 @@ impl DrawToolKind {
         // free points (base, through), stored as one finite clipped segment.
         DrawToolKind::XLine,
         DrawToolKind::Ray,
+        // The three CIRCLE construction options are appended for the same
+        // index-stability reason: two diameter endpoints (2P), three points on the
+        // circle (3P), and a centre plus a diameter point (D).
+        DrawToolKind::Circle2P,
+        DrawToolKind::Circle3P,
+        DrawToolKind::CircleDiameter,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -186,6 +192,9 @@ impl DrawToolKind {
             Self::PasteBlock => "pasteblock",
             Self::XLine => "xline",
             Self::Ray => "ray",
+            Self::Circle2P => "circle2p",
+            Self::Circle3P => "circle3p",
+            Self::CircleDiameter => "circlediameter",
         }
     }
 
@@ -243,6 +252,9 @@ impl DrawToolKind {
             "pasteblock" => Some(Self::PasteBlock),
             "xline" => Some(Self::XLine),
             "ray" => Some(Self::Ray),
+            "circle2p" => Some(Self::Circle2P),
+            "circle3p" => Some(Self::Circle3P),
+            "circlediameter" => Some(Self::CircleDiameter),
             _ => None,
         }
     }
@@ -383,6 +395,11 @@ impl DrawToolKind {
             // XLINE/RAY share the same locale-neutral fallback rule.
             Self::XLine => "XLINE",
             Self::Ray => "RAY",
+            // The CIRCLE construction options share the same locale-neutral
+            // fallback rule; the canonical selectors are their labels.
+            Self::Circle2P => "CIRCLE 2P",
+            Self::Circle3P => "CIRCLE 3P",
+            Self::CircleDiameter => "CIRCLE D",
         }
     }
 
@@ -407,6 +424,9 @@ impl DrawToolKind {
             | Self::Scale
             | Self::DimLinear
             | Self::DimAligned
+            // CIRCLE 3P: three points on the circle (the circumcircle is the
+            // same construction ARC uses).
+            | Self::Circle3P
             // DIMANGULAR: two entity picks plus the dimension-arc location.
             | Self::DimAngular => PointArity::Exact(3),
             // ALIGN: the first source point, its destination, then the second
@@ -484,7 +504,11 @@ impl DrawToolKind {
             | Self::Break
             // XLINE/RAY: the base point and the through point (the direction).
             | Self::XLine
-            | Self::Ray => PointArity::Exact(2),
+            | Self::Ray
+            // CIRCLE 2P: the two diameter endpoints. CIRCLE D: the centre and the
+            // diameter point.
+            | Self::Circle2P
+            | Self::CircleDiameter => PointArity::Exact(2),
         }
     }
 

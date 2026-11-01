@@ -34,6 +34,7 @@ mod array;
 mod block_define;
 mod break_curve;
 mod chamfer_fillet;
+mod circle_options;
 mod clipboard;
 mod construction_line;
 mod dimension;

@@ -30,6 +30,30 @@ pub enum DrawIntent {
     Line { start: Point3, end: Point3 },
     /// Insert a CIRCLE centred at `center` through `edge` (radius = |edge−center|).
     Circle { center: Point3, edge: Point3 },
+    /// `CIRCLE 2P`: insert a CIRCLE whose **diameter endpoints** are `first` and
+    /// `second` (centre = midpoint, radius = |second−first| / 2).
+    ///
+    /// The two points are exactly the two clicks, in order; the construction is
+    /// the command layer's (`create_circle_2p`), so the capture never invents a
+    /// centre or a radius.
+    Circle2P { first: Point3, second: Point3 },
+    /// `CIRCLE 3P`: insert the circumcircle through `first`, `second` and `third`.
+    ///
+    /// The circumcentre/radius come from the **same** pure helper ARC uses
+    /// ([`crate::draw_tool::arc_parameters`]), so a CIRCLE 3P and an ARC through
+    /// the same triple cannot disagree; the start/sweep are ignored. Degenerate
+    /// triples are refused by the command layer.
+    Circle3P {
+        first: Point3,
+        second: Point3,
+        third: Point3,
+    },
+    /// `CIRCLE D`: insert a CIRCLE with `center` and radius = |diameter−center| / 2.
+    ///
+    /// `diameter` is the second click, a point on the **far side** of the circle
+    /// (AutoCAD's Diameter option); the construction is the command layer's
+    /// (`create_circle_diameter`).
+    CircleDiameter { center: Point3, diameter: Point3 },
     /// Insert an ARC through three points (start, on-arc, end).
     Arc { points: [Point3; 3] },
     /// Insert an open polyline through `points` (at least two), on the active
