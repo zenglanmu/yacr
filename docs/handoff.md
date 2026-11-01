@@ -1,3 +1,57 @@
+## 2026-11-01 `XLINE` / `RAY`：有界构造线创建（v1）
+
+### 结论
+
+- **`XLINE`/`RAY` 创建落地（Work-only，v1）**：两点（base/through）→ 方向 → 复用导入器同一条
+  有限段降级（`through − base`、模型包围盒外扩 5%/至少 1.0 或默认 1000 盒、`span = max(w,h)*4`、
+  `clip_segment_to_xy_rect`）→ 一条**有限** `SemanticGeometry::Line`，type-key 保留
+  `AcDbXline`/`AcDbRay`。**不是无限几何**；导出仍写 DXF `LINE`（`Converted`）。活动图层、模型空间、
+  一条事务/一步撤销，诊断 `drawing.xline`/`drawing.ray` 明说「有限段、按边界裁剪」。
+- **拒绝（开事务前）**：非有限点（`xline/ray.invalid_point`）、退化方向
+  （`xline/ray.degenerate_direction`）、裁剪不到包围盒（`xline/ray.outside_bounds`）。Viewer 由
+  Work-only 拒绝。
+- **词表/文案**：`COMMAND_TABLE` **105 → 107**、`COMMAND_ALIASES` **56 → 57**（`XL`）、
+  `admissible_names()` **168 → 171**；i18n **+12 键**（两目录一致，总数 **958**）；UI 在
+  `ARC` 后新增 `XLINE`/`RAY` 两个小按钮与专用字形，提示写明「有限线段、裁剪到模型边界、不会产生无限长几何」。
+- **文件上限已处理**：`command_id.rs` **987 → 974**（GripStretch 长文档移到
+  `command_id/grip_stretch.rs`）；`tests_tools.rs` **1000 → 923**（路由表/测试移到
+  `tests_tools_routing.rs`）。下一个命令仍要留意这两个文件与 `tests_tools.rs` 的余量。
+
+### 代码 / 文档落点
+
+- Rust：`crates/cad-app/src/app_drawing/construction_line.rs`（新）+ `tests/drawing/construction_line.rs`
+  （8 项）；`command_id/{construction_line,grip_stretch}.rs`、`command_id.rs`、`command_payload.rs`、
+  `draw_tool/{kind,kind/definition,intent,mod}.rs`、`host/draw_intent_map.rs`、`session_state.rs`、
+  `application.rs`、`app_drawing/{drawing_create,mod}.rs`、`render_scene/overlay/preview.rs`；
+  `cad-ui-core` 的 `session/commands.rs`、`command_vocabulary.rs`、`tests/{mod,tests_tools,tests_tools_routing}.rs`。
+- React：`commands/catalog.ts`、`ribbon/ribbon-model.ts`、`cad/cad.ts`、`icons.tsx` 与两本 i18n；
+  新 `apps/desktop-ui/test/construction-line.test.ts`，并同步 `commands`/`helpers`/`i18n` 的精确列表。
+- 文档：`docs/compatibility.md`（XLINE/RAY 读取行 + 绘制表）、`docs/autocad-command-coverage.md`
+  （107/171/114、§3.1 XLINE 行、§4 XLINE 命令关闭/无限几何仍 L、§5/§5b）、`docs/shortcuts.md`
+  （XLINE/RAY 行、`XL`、计数）、`docs/architecture.md`（171/57）、本文件。
+
+### 验证（本轮实际运行，合并树）
+
+- `cargo fmt --all -- --check` → exit 0。
+- `cargo check --workspace --all-targets --locked` → exit 0。
+- `cargo test -p cad-app -p cad-db -p cad-history -p cad-ui-core --locked -- --test-threads=1` → exit 0：
+  `cad-app` **1496**、`cad-db` **168**、`cad-history` **17**、`cad-ui-core` **342**，集成 targets 全绿
+  （外部 DWG 用例仍 **ignored**）。
+- `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` → exit 0。
+- `cargo clippy -p cad-app -p cad-db -p cad-history -p cad-ui-core --all-targets --locked -- -D warnings` → exit 0。
+- 前端：`npx tsc --noEmit && node --test test/*.test.ts` → **907 pass / 0 fail**；`check-i18n.py` → **958 键**。
+- `python3 scripts/check-file-size.py` / `check-architecture.py` / `check-command-docs.py`（107/5/2/4、57 aliases、
+  114 canonical、§2 rows 69、0 mismatch）→ 全 OK。
+
+### NOT RUN / NOT VERIFIED
+
+- **全 workspace 测试套件**（只跑了上述四个 crate）；`cargo test -p cad-host`/其它 crate 的独立测试。
+- **GUI / 真实 GPU / 像素 / 真窗口**：未运行任何宿主或截图；`XLINE`/`RAY` 的两点拾取、橡皮筋与
+  真实裁剪视觉效果**未做视觉验收**。
+- **真实 DWG**：未在真实图纸上运行；证据是契约测试。
+- **真正的无限几何**（新 `SemanticGeometry` 变体、TRIM/EXTEND 无限求交、出图裁剪）、3D/OCS 构造线——
+  **NOT IMPLEMENTED**，仍按 ADR 级 L 记录。
+
 ## 2026-11-01 `PASTEBLOCK`：剪贴板 → 自动命名块 + 插入点参照（v1）
 
 ### 结论

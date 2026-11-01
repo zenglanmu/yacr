@@ -278,6 +278,30 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', command: 'LINE', large: true },
           { id: 'CIRCLE', labelKey: 'draw.kind.circle', icon: 'circle', command: 'CIRCLE', large: true },
           { id: 'ARC', labelKey: 'draw.kind.arc', icon: 'arc', command: 'ARC' },
+          // XLINE and RAY (2026-11-01) sit directly after ARC, beside the
+          // primitive they extend: each is a **two-point** capture (base, then
+          // through) that commits one **finite bounded segment** clipped to the
+          // model bounds. The entity keeps its construction type key
+          // (`AcDbXline` / `AcDbRay`), but what either command draws is finite —
+          // that is why `hintKey` says the span is bounded and why neither
+          // button may read as "unbounded line" or "unbounded ray". Small
+          // buttons with **no variant popover**: there is no options sub-prompt
+          // and no parameter, and neither is a pre-selection tool (the two picks
+          // are the input).
+          {
+            id: 'XLINE',
+            labelKey: 'draw.kind.xline',
+            icon: 'xline',
+            command: 'XLINE',
+            hintKey: 'draw.kind.xline.hint',
+          },
+          {
+            id: 'RAY',
+            labelKey: 'draw.kind.ray',
+            icon: 'ray',
+            command: 'RAY',
+            hintKey: 'draw.kind.ray.hint',
+          },
           { id: 'PLINE', labelKey: 'draw.kind.polyline', icon: 'polyline', command: 'PLINE' },
           { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', command: 'RECTANG' },
           { id: 'ELLIPSE', labelKey: 'draw.kind.ellipse', icon: 'ellipse', command: 'ELLIPSE' },
@@ -490,6 +514,24 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', command: 'LINE', large: true },
           { id: 'CIRCLE', labelKey: 'draw.kind.circle', icon: 'circle', command: 'CIRCLE', large: true },
           { id: 'ARC', labelKey: 'draw.kind.arc', icon: 'arc', command: 'ARC', large: true },
+          // Same slot as on the Home panel: the two construction captures sit
+          // directly after ARC (see the Home/draw comment for the two-pick
+          // bounded-segment shape, the finite-span hint and why each is a small
+          // button with no popover).
+          {
+            id: 'XLINE',
+            labelKey: 'draw.kind.xline',
+            icon: 'xline',
+            command: 'XLINE',
+            hintKey: 'draw.kind.xline.hint',
+          },
+          {
+            id: 'RAY',
+            labelKey: 'draw.kind.ray',
+            icon: 'ray',
+            command: 'RAY',
+            hintKey: 'draw.kind.ray.hint',
+          },
           { id: 'PLINE', labelKey: 'draw.kind.polyline', icon: 'polyline', command: 'PLINE' },
           { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', command: 'RECTANG' },
           { id: 'ELLIPSE', labelKey: 'draw.kind.ellipse', icon: 'ellipse', command: 'ELLIPSE' },

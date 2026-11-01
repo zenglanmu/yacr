@@ -56,6 +56,23 @@ const P = {
   axes: <><path d="M6 18V6M6 18h12" /><path d="M6 6l-2.2 2.2M6 6l2.2 2.2M18 18l-2.2-2.2M18 18l-2.2 2.2" /></>,
   snap: <><path d="M12 3v6M12 15v6M3 12h6M15 12h6" /><rect x="9" y="9" width="6" height="6" /></>,
   line: <><circle cx="5" cy="19" r="2" /><circle cx="19" cy="5" r="2" /><path d="M6.6 17.4 17.4 6.6" /></>,
+  // Construction captures (XLINE / RAY). Both keep `line`'s diagonal and the same
+  // 1.6px stroke, so the three read as one family, and each changes exactly one
+  // thing so the triplet stays distinguishable at the 16px small-button size
+  // (checked by rasterising the three at 16px):
+  //
+  //   * `xline` — a solid shaft with a perpendicular tick across **each** end:
+  //     the two ticks mark where the captured span stops, which is what the
+  //     command really draws (a bounded segment, never an unbounded construction
+  //     line). A dashed shaft was tried and rejected: at 16px its dashes and the
+  //     two capture dots merged into beads.
+  //   * `ray` — one origin dot and a direction chevron at the far end: one
+  //     origin, one direction, like the `line` glyph with the near dot kept and
+  //     the far dot replaced by the direction mark. The chevron opens wide (+/-35°
+  //     off the shaft) so it survives 16px; nothing in it implies an unbounded
+  //     ray, and the copy states the span is clipped to the model bounds.
+  xline: <><path d="M4.4 19.6 19.6 4.4" /><path d="M2.4 17.6 6.4 21.6M17.6 2.4 21.6 6.4" /></>,
+  ray: <><circle cx="5" cy="19" r="2" /><path d="M6.8 17.2 20.6 3.4" /><path d="M20.6 3.4 15.9 4.3M20.6 3.4 19.7 8.1" /></>,
   circle: <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="1" /></>,
   arc: <><path d="M4 18A14 14 0 0 1 20 18" /><circle cx="4" cy="18" r="1.4" /><circle cx="20" cy="18" r="1.4" /></>,
   move: <><path d="M12 3v18M3 12h18" /><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" /></>,

@@ -938,31 +938,8 @@ pub enum CommandId {
     SetEntityProperty,
     /// `MATCHPROP` (Work-only): paint the first selection's properties onto the rest; see [`crate::command_id::match_prop`].
     MatchProp,
-    /// `GRIPSTRETCH`: apply **one** grip drag (one handle of one entity) as one
-    /// entity update, one transaction / one undo entry.
-    ///
-    /// Payload is [`crate::CommandPayload::GripStretch`] (boxed
-    /// [`crate::GripStretchCommand`] `{ id, to }`, where `id` is a
-    /// [`crate::grips::GripId`]). It is the **payload path of a pointer
-    /// gesture**: `cad_host` produces it, and only from the release of an armed
-    /// grip drag — its pointer routing aims at a handle of the current selection
-    /// at press time, tracks the drag and dispatches exactly one `GripStretch` on
-    /// release (a drag that did not move the handle dispatches nothing, and a
-    /// cancel drops the armed state without writing). This crate keeps no grip
-    /// gesture state and never fabricates one; 3D grip editing is NOT
-    /// IMPLEMENTED, and this doc records the code path, not a runtime or visual
-    /// acceptance. The bare `GRIPSTRETCH` selector carries no handle, so it is
-    /// refused explicitly (no fabricated drag).
-    ///
-    /// The handler re-reads `id.entity` (a missing entity is `grip.target_missing`
-    /// and a non-model-space one reuses `property.not_addressable`), then
-    /// re-validates the handle against the current geometry via
-    /// [`crate::grips::apply_grip`]. Every refusal — `grip.stale_handle`,
-    /// `grip.zero_displacement`, `grip.unsupported_kind`,
-    /// `grip.non_finite_target` — happens **before** the transaction is opened,
-    /// so nothing is written and no empty undo entry exists. It records history
-    /// (unlike the layer-table writes) and never routes through
-    /// [`CommandId::StretchEntities`]. Work-only.
+    /// `GRIPSTRETCH` (Work-only): apply one grip drag as one entity update; see
+    /// [`crate::command_id::grip_stretch`].
     GripStretch,
     /// `DIVIDE` (Work-only): arc-length POINT marks on the selected curve; see
     /// `crate::app_drawing::divide`.
@@ -977,11 +954,21 @@ pub enum CommandId {
     /// `BLOCK` (Work-only): define a named block from the selection at a picked
     /// base point. Full contract: [`crate::command_id::block_define`].
     DefineBlock,
+    /// `XLINE` (Work-only): an infinite construction line reduced to the finite
+    /// segment the database can store; see
+    /// [`crate::command_id::construction_line`].
+    CreateXLine,
+    /// `RAY` (Work-only): the positive half of an infinite construction line,
+    /// stored as a finite clipped segment; see
+    /// [`crate::command_id::construction_line`].
+    CreateRay,
 }
 
 mod capabilities;
 
 pub mod area_object;
 pub mod block_define;
+pub mod construction_line;
+pub mod grip_stretch;
 pub mod match_prop;
 pub mod zoom;

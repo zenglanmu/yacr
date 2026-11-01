@@ -32,7 +32,7 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | 对象 | 读取 | 语义 | 绘制 | 拾取 | 测量 |
 |---|---|---|---|---|---|
 | LINE | 实现 | 实现 | 实现(线) | 实现(AABB) | 实现(2D/3D) |
-| RAY / XLINE | **实现（有界降级，非无损）** | **部分**：库里**没有无限直线几何** ⇒ 压成有限 `SemanticGeometry::Line`（源类名 `AcDbRay`/`AcDbXline` 留在 `type_key`）。裁到**运行中的模型包围盒**（每边外扩对角线 5%、至少 1.0）⇒ **裁多长取决于导入顺序**；还没有任何几何时用**默认 1000 单位盒**。方向退化 ⇒ `Opaque` + `Partial`；**裁不到盒内** ⇒ `Opaque` + `Partial`；否则 `Line` + **`Partial`**（具名常量 `support::XLINE_SEGMENT_REASON`，无范围时 `XLINE_DEFAULT_BOX_REASON`），并额外记一次 `import.construct_line` | 按有限段绘制（缩放后也不会延伸）；**导出只能写 DXF `LINE`**，报 `Converted`（`export.converted.line`，点名「entity type changes / no longer infinite」），**不是** `Exact` | 按有限段（AABB） | 按有限段（同 `LINE`，但它只是裁剪结果；**没有创建命令**、没有无限表示——真正的无限几何是 ADR 级，见 `docs/autocad-command-coverage.md` §4） |
+| RAY / XLINE | **实现（有界降级，非无损）** | **部分**：库里**没有无限直线几何** ⇒ 压成有限 `SemanticGeometry::Line`（源类名 `AcDbRay`/`AcDbXline` 留在 `type_key`）。裁到**运行中的模型包围盒**（每边外扩对角线 5%、至少 1.0）⇒ **裁多长取决于导入顺序**；还没有任何几何时用**默认 1000 单位盒**。方向退化 ⇒ `Opaque` + `Partial`；**裁不到盒内** ⇒ `Opaque` + `Partial`；否则 `Line` + **`Partial`**（具名常量 `support::XLINE_SEGMENT_REASON`，无范围时 `XLINE_DEFAULT_BOX_REASON`），并额外记一次 `import.construct_line` | 按有限段绘制（缩放后也不会延伸）；**导出只能写 DXF `LINE`**，报 `Converted`（`export.converted.line`，点名「entity type changes / no longer infinite」），**不是** `Exact` | 按有限段（AABB） | 按有限段（同 `LINE`，但它只是裁剪结果；**有界创建命令 `XLINE`/`RAY`（2026-11-01）**、没有无限表示——真正的无限几何是 ADR 级，见 `docs/autocad-command-coverage.md` §4） |
 | LWPOLYLINE/POLYLINE(bulge) | 实现 | 实现 | 实现(含 bulge) | 实现 | 折线长度实现 |
 | CIRCLE / ARC / ELLIPSE | 实现 | 实现(保留 normal/OCS)；非均匀仿射重解为真椭圆 | 实现 | 实现 | 距离实现；面积限共面环 |
 | SPLINE | 实现 | 实现(保留 degree/knots/weights，真实 NURBS) | 弦高自适应离散 | 实现 | 解析/采样(与显示 LOD 解耦) |
@@ -226,6 +226,7 @@ Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增
 | 命令 | 能力 | 诚实边界 |
 |---|---|---|
 | LINE / CIRCLE / ARC | 创建（点捕获或几何直通） | 退化/共线/非有限输入显式拒绝 |
+| XLINE / RAY | 创建有界构造线：两点 → 有限 `Line`（type-key `AcDbXline`/`AcDbRay`），裁到模型包围盒（外扩 5%/至少 1.0）或默认 1000 盒；一条事务/一步撤销 | **不是无限几何**；方向退化/出界/非有限点按名拒绝；导出写 `LINE`（`Converted`）；无 3D/OCS 版本 |
 | INSERT | 创建块参照（**点-后-名**：先拾取插入点，再输入**本图已有块**的名称；`T(插入点)·T(−块基点)`，type-key `AcDbBlockReference`，活动图层/模型空间，一条事务/一步撤销） | **无块表写入**（只读块定义 + 名称/基点元数据）；无块选择器/palette、比例/旋转/属性值/动态块参数；未知名称/缺元数据/空名/换行/非有限点按名拒绝；`WBLOCK` 仍缺（`PASTEBLOCK` 已实现 v1） |
 | BLOCK | **选择 → 基点 → 名称**（终端文本）：选中模型空间顶层实体写入新块定义并移入 `SpaceId::Block`，几何**逐位保留**、只改空间；元数据存基点；参照为 identity `T(基点)·T(−基点)`，后续 `INSERT` 仍按 `T(I)·T(−基点)`；一条事务/一步撤销，块级 undo 补丁 | 无 ATTDEF/ATTRIB、动态块参数、retain/delete 选择、块选择器；重名（精确/ASCII 大小写不敏感）、实例路径/子元素、图纸空间/块成员、空/换行/非法名称、非有限基点、锁定图层按名拒绝 |
 | MOVE | 平移选择（折叠重复 ref） | 不可变换几何整条拒绝，不静默丢弃。**`SPLINE` 自 2026-10-26 起可平移**：NURBS 曲线是**仿射不变**的（映射每个控制点、`degree`/`knots`/`weights` 逐字复制 = 曲线的精确仿射像），`cad-db` 的 `transform_geometry` 不再按种类拒绝样条 |

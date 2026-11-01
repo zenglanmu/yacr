@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 48] = [
+    pub const ALL: [DrawToolKind; 50] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -127,6 +127,10 @@ impl DrawToolKind {
         // real kind started by its command selector (one insertion point over the
         // clipboard, no selection).
         DrawToolKind::PasteBlock,
+        // XLINE/RAY are appended last for the same index-stability reason: two
+        // free points (base, through), stored as one finite clipped segment.
+        DrawToolKind::XLine,
+        DrawToolKind::Ray,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -180,6 +184,8 @@ impl DrawToolKind {
             Self::ScaleText => "scaletext",
             Self::BlockDefine => "blockdefine",
             Self::PasteBlock => "pasteblock",
+            Self::XLine => "xline",
+            Self::Ray => "ray",
         }
     }
 
@@ -235,6 +241,8 @@ impl DrawToolKind {
             "scaletext" => Some(Self::ScaleText),
             "blockdefine" => Some(Self::BlockDefine),
             "pasteblock" => Some(Self::PasteBlock),
+            "xline" => Some(Self::XLine),
+            "ray" => Some(Self::Ray),
             _ => None,
         }
     }
@@ -372,6 +380,9 @@ impl DrawToolKind {
             Self::BlockDefine => "BLOCK",
             // PASTEBLOCK shares the locale-neutral ASCII fallback rule.
             Self::PasteBlock => "PASTEBLOCK",
+            // XLINE/RAY share the same locale-neutral fallback rule.
+            Self::XLine => "XLINE",
+            Self::Ray => "RAY",
         }
     }
 
@@ -470,7 +481,10 @@ impl DrawToolKind {
             | Self::MText
             // BREAK: the second break point (the first click is the entity pick
             // and the first break point in one step).
-            | Self::Break => PointArity::Exact(2),
+            | Self::Break
+            // XLINE/RAY: the base point and the through point (the direction).
+            | Self::XLine
+            | Self::Ray => PointArity::Exact(2),
         }
     }
 

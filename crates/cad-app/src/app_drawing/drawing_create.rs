@@ -10,6 +10,8 @@ impl Application {
     ) -> CadResult<CommandOutcome> {
         match command.id {
             CommandId::CreateLine => self.create_line(session, command),
+            CommandId::CreateXLine => self.create_xline(session, command),
+            CommandId::CreateRay => self.create_ray(session, command),
             CommandId::CreateCircle => self.create_circle(session, command),
             CommandId::CreateArc => self.create_arc(session, command),
             CommandId::CreatePolyline => self.create_polyline(session, command),

@@ -580,6 +580,34 @@ pub enum CommandPayload {
     /// A fully formed semantic geometry, used by `CreateLine` as the
     /// programmatic alternative to a point list.
     Geometry(Box<SemanticGeometry>),
+    /// `XLINE`: an infinite construction line through `base` and `through`,
+    /// stored as the finite segment clipped to the drawing's XY bounds (or the
+    /// default 1000-unit box around `base` when the drawing is empty).
+    ///
+    /// `cad-db` has no infinite-line geometry, so the stored
+    /// `SemanticGeometry::Line` is an approximation whose length follows the clip
+    /// box; the entity's `type_key` stays `AcDbXline` and export writes a LINE.
+    /// Both points must be finite and distinct (`xline.invalid_point` /
+    /// `xline.degenerate_direction`); a clip that misses the box is
+    /// `xline.outside_bounds`. Every refusal happens before the transaction.
+    /// See [`crate::command_id::construction_line`]. Work-only.
+    XLine {
+        base: Point3,
+        through: Point3,
+    },
+    /// `RAY`: the **positive half** of an infinite construction line from `base`
+    /// through `through`, stored as the finite segment clipped to the drawing's
+    /// XY bounds (or the default 1000-unit box when the drawing is empty).
+    ///
+    /// Same loss and same refusals as [`CommandPayload::XLine`], with the RAY
+    /// names (`ray.invalid_point`, `ray.degenerate_direction`,
+    /// `ray.outside_bounds`); the entity's `type_key` stays `AcDbRay` and export
+    /// writes a LINE. A RAY whose `+direction` never enters the clip box is
+    /// refused rather than drawn as an empty or negative-half line. Work-only.
+    Ray {
+        base: Point3,
+        through: Point3,
+    },
     /// INSERT: place a reference to an existing **named block** at one picked
     /// insertion point. The block must already exist in the drawing (this command
     /// never writes the block table); its stored name/base-point metadata and the

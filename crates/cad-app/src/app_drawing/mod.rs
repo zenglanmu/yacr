@@ -35,6 +35,7 @@ mod block_define;
 mod break_curve;
 mod chamfer_fillet;
 mod clipboard;
+mod construction_line;
 mod dimension;
 mod dimension_angular;
 mod dimension_chain;

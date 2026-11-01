@@ -52,6 +52,7 @@ test('both catalogs are complete, flat and placeholder-balanced', () => {
 test('the active-tool chip keys exist in both catalogs with matching placeholders', () => {
   const toolKeys = [
     'tool.draw.line', 'tool.draw.circle', 'tool.draw.arc', 'tool.draw.move', 'tool.draw.trim',
+    'tool.draw.xline', 'tool.draw.ray',
     'tool.draw.copy', 'tool.draw.extend', 'tool.draw.rotate', 'tool.draw.scale', 'tool.draw.mirror',
     'tool.draw.offset', 'tool.draw.rectang', 'tool.draw.ellipse',
     'tool.draw.chamfer', 'tool.draw.fillet',

@@ -558,6 +558,10 @@ impl SessionState {
         // payload (capture only vs capture **and** delete).
         let command = match kind {
             DrawToolKind::Line => CommandId::CreateLine,
+            // XLINE/RAY store one finite clipped segment each; the kind is what
+            // distinguishes the two commands (and their stored `type_key`).
+            DrawToolKind::XLine => CommandId::CreateXLine,
+            DrawToolKind::Ray => CommandId::CreateRay,
             DrawToolKind::Circle => CommandId::CreateCircle,
             DrawToolKind::Arc => CommandId::CreateArc,
             DrawToolKind::Polyline => CommandId::CreatePolyline,

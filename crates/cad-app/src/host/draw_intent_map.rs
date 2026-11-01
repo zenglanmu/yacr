@@ -23,6 +23,17 @@ impl HostController {
                 crate::CommandId::CreateLine,
                 crate::CommandPayload::Points(vec![start, end]),
             ),
+            // XLINE/RAY: the two captured points (base, through) travel on the
+            // dedicated payload; the clip box, span and finite-segment reduction
+            // are the command layer's, so the payload never carries a length.
+            DrawIntent::XLine { base, through } => (
+                crate::CommandId::CreateXLine,
+                crate::CommandPayload::XLine { base, through },
+            ),
+            DrawIntent::Ray { base, through } => (
+                crate::CommandId::CreateRay,
+                crate::CommandPayload::Ray { base, through },
+            ),
             DrawIntent::Circle { center, edge } => (
                 crate::CommandId::CreateCircle,
                 crate::CommandPayload::Points(vec![center, edge]),

@@ -36,6 +36,24 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', group: 'draw' },
   { id: 'CIRCLE', labelKey: 'draw.kind.circle', icon: 'circle', group: 'draw' },
   { id: 'ARC', labelKey: 'draw.kind.arc', icon: 'arc', group: 'draw' },
+  // XLINE and RAY (2026-11-01) are the two **construction** captures, listed
+  // directly after the primitives they belong with (LINE, CIRCLE, ARC), so no
+  // shipped row moves and the draw run still opens with the plain primitives.
+  //
+  // Both take exactly two points — a base and a through point — and commit **one
+  // finite bounded segment** clipped to the model bounds: the entity keeps its
+  // construction type key (`AcDbXline` / `AcDbRay`), but there is **no infinite
+  // geometry** anywhere in this build. That is why the labels name the type
+  // (`draw.kind.xline` says "construction line (XLINE)") and the hint says the
+  // drawn span is finite: a reader must never infer an unbounded line from the
+  // AutoCAD name.
+  //
+  // They carry no parameter: two picks are the whole input, there is no options
+  // sub-prompt, and neither is a pre-selection tool (the picks are the input).
+  // The glyphs are their own (`xline` / `ray`), drawn in the same 24px stroke
+  // language as `line` so the three read as one family.
+  { id: 'XLINE', labelKey: 'draw.kind.xline', icon: 'xline', group: 'draw' },
+  { id: 'RAY', labelKey: 'draw.kind.ray', icon: 'ray', group: 'draw' },
   { id: 'PLINE', labelKey: 'draw.kind.polyline', icon: 'polyline', group: 'draw' },
   { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', group: 'draw' },
   { id: 'ELLIPSE', labelKey: 'draw.kind.ellipse', icon: 'ellipse', group: 'draw' },

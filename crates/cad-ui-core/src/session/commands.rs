@@ -58,6 +58,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("PROJECTION", CommandId::SwitchProjection),
     ("MODE", CommandId::SetMode),
     ("LINE", CommandId::CreateLine),
+    // XLINE/RAY are the construction-line pair: two free points (base, through),
+    // stored as one finite segment clipped to the model bounds because `cad-db`
+    // has no infinite-line geometry. The bare selectors start their capture.
+    ("XLINE", CommandId::CreateXLine),
+    ("RAY", CommandId::CreateRay),
     ("CIRCLE", CommandId::CreateCircle),
     ("ARC", CommandId::CreateArc),
     ("PLINE", CommandId::CreatePolyline),
@@ -676,6 +681,9 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("TR", "TRIM"),
     ("U", "UNDO"),
     ("X", "EXPLODE"),
+    // AutoCAD's default abbreviation for XLINE. `RAY` deliberately has no alias:
+    // AutoCAD's `acad.pgp` defines none, and this table never invents spellings.
+    ("XL", "XLINE"),
     ("Z", "ZOOM"),
 ];
 
@@ -802,6 +810,10 @@ pub(super) fn interaction_request_for(
 
     match id {
         CommandId::CreateLine => Some(InteractionRequest::BeginDraw(DrawToolKind::Line)),
+        // XLINE/RAY start their two-point construction-line capture (base, then a
+        // through point); the commit stores one finite clipped segment.
+        CommandId::CreateXLine => Some(InteractionRequest::BeginDraw(DrawToolKind::XLine)),
+        CommandId::CreateRay => Some(InteractionRequest::BeginDraw(DrawToolKind::Ray)),
         CommandId::CreateCircle => Some(InteractionRequest::BeginDraw(DrawToolKind::Circle)),
         CommandId::CreateArc => Some(InteractionRequest::BeginDraw(DrawToolKind::Arc)),
         CommandId::CreatePolyline => Some(InteractionRequest::BeginDraw(DrawToolKind::Polyline)),

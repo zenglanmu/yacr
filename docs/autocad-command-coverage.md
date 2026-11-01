@@ -20,10 +20,10 @@
 2. **显式点名的 AutoCAD 名字**（不可穷尽）：只包含本仓库文档/ADR 真正讨论过的名字，
    来源是 `docs/compatibility.md`、`docs/shortcuts.md` 与各 ADR。它们的状态是**逐条读过源码**后写的。
 
-> **禁止的读法**：不得把 `105`、`168` 或本表任何数字读成「已实现 AutoCAD 的 X%」。AutoCAD 的
+> **禁止的读法**：不得把 `107`、`171` 或本表任何数字读成「已实现 AutoCAD 的 X%」。AutoCAD 的
 > 命令总数取决于版本、产品（完整版/ LT / 工具集）、是否含扩展与第三方；我们没有那份清单，
 > 也**没有**逐条比对过绝大多数命令的语义（例如同名命令的选项、提示顺序、系统变量副作用）。
-> 任何 `105/N` 形式的百分比都是**编造**。本审计回答的是：**我们自己承诺的词表是否名实相符**，
+> 任何 `107/N` 形式的百分比都是**编造**。本审计回答的是：**我们自己承诺的词表是否名实相符**，
 > 以及**我们明确点过名的 AutoCAD 名字还缺什么**。
 
 ---
@@ -32,24 +32,25 @@
 
 | 表 | 数量 | 源码位置 | 断言 / 说明 |
 |---|---|---|---|
-| `COMMAND_TABLE` | **105** 个选择子 | `crates/cad-ui-core/src/session/commands.rs:11` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 105` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs:140`（并断言每变体在表中**恰好一次**、`COMMAND_TABLE.len()` 相等） |
+| `COMMAND_TABLE` | **107** 个选择子 | `crates/cad-ui-core/src/session/commands.rs:11` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 107` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs:142`（并断言每变体在表中**恰好一次**、`COMMAND_TABLE.len()` 相等） |
 | `MEASUREMENT_SELECTORS` | **5** | 同文件 `:207` | `DIST` / `MEASUREPOLYLINE` / `MEASUREANGLE` / `AREA` / `ID`；**交互专用**，没有自己的 `CommandId` |
 | `ZOOM_STEP_SELECTORS` | **2** | 同文件 `:234` | `ZOOMIN` / `ZOOMOUT`（固定步进因子 `1.25` 与倒数，锚定视口中心） |
 | `ARGUMENT_SELECTORS` | **4** | 同文件 `:252` | `ZOOM` / `SNAPUNIT` / `PDMODE` / `PDSIZE`——**接受命令行参数的基选择子**，不是新命令、不是第二条 IPC |
-| `COMMAND_ALIASES` | **56** 行 | 同文件 `:585` | 别名 + 全词同义词；只收录**目标选择子真实存在**的拼写 |
-| `admissible_names()` | **168** 个可输入拼写 | 同文件（`admissible_names` 函数） | 105 + 5 + 2 + 56，去重后仍为 168（无重名）；这是**拼写**数，**不是**命令数 |
+| `COMMAND_ALIASES` | **57** 行 | 同文件 `:595` | 别名 + 全词同义词；只收录**目标选择子真实存在**的拼写 |
+| `admissible_names()` | **171** 个可输入拼写 | 同文件（`admissible_names` 函数） | 107 + 5 + 2 + 57，去重后仍为 171（无重名）；这是**拼写**数，**不是**命令数 |
 
-> 这些数字是**当前源码表的长度**（本次复核：表 105 / 测量 5 / 缩放 2 / 参数 4 / 别名 56 / 拼写 168）。
+> 这些数字是**当前源码表的长度**（本次复核：表 107 / 测量 5 / 缩放 2 / 参数 4 / 别名 57 / 拼写 171）。
 > **组成**：92 → **95**（+`COPYBASE`/`CUTBASE`/`PASTEORIG`，剪贴板轮）→ **97**（+`CHAMFER POLYLINE`/
 > `FILLET POLYLINE`，同日另一 lane）→ **98**（+`HATCHPOINT`，2026-11-01 内部点 HATCH，本项目选择子）→
 > **101**（+`BREAK`/`DIVIDE`/`LENGTHEN`，2026-11-01 单曲线编辑）→ **102**（+`INSERT`，2026-11-01
 > 已有块参照创建，v1）→ **103**（+`SCALETEXT`，2026-11-01 文字字高缩放）→ **104**（+`BLOCK`，
-> 2026-11-01 块定义创建，v1）→ **105**（+`PASTEBLOCK`，2026-11-01 剪贴板→自动命名块，v1）。
+> 2026-11-01 块定义创建，v1）→ **105**（+`PASTEBLOCK`，2026-11-01 剪贴板→自动命名块，v1）→
+> **107**（+`XLINE`/`RAY`，2026-11-01 有界构造线创建）。
 > 表一变，本表与 §5 的期望输出都要跟着改；**权威是 §5b 那道守门脚本的实跑输出**，不是这里的手抄值。
 
-**为什么不把 168 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
+**为什么不把 171 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
 不改变行为；`ZOOMIN`/`ZOOMOUT` 与各测量选择子不携带 `CommandId`。命令的**行为**数上限是
-`CommandId` 变体数（= 105），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
+`CommandId` 变体数（= 107），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
 
 **本项目自己的名字（AutoCAD 无同名，或同名不同义）**，不计入 AutoCAD 覆盖：
 `RESETVIEW`、`SWITCHBACKEND`、`SWITCH2D3D`、`STANDARDVIEW`（AutoCAD 的 `VIEW` 是命名的视图管理）、
@@ -88,7 +89,7 @@
 | `POINT` | 实现 | **单次放置**；显示走 `$PDMODE`/`$PDSIZE`（基础 `0`–`4`，周边 `32` 圆/`64` 方/`96` 两者，线段近似）；无 `Multiple` 重复放置 |
 | `SPLINE` | 实现 | fit 点法（≥4 点）→ 三次/clamped/chord 插值 NURBS；无 `CV`/`Knots`/`Degree`/`Close`/`Tangency`/`Object` |
 | `POLYLINE` | **未实现** | 旧式 heavy 2D 折线实体（`AcDb2dPolyline` + 顶点子实体）。我们**只创建 LWPOLYLINE**；别名到 `PLINE` 会**凭空发明语义**，故不做 |
-| `XLINE`（含 `RAY`） | **未实现**（无创建命令；**导入**有有界降级） | 库里**没有无限直线几何**：导入期把 XLINE/RAY 压成**有限 `SemanticGeometry::Line`**，裁到**运行中的模型包围盒**（盒每边外扩对角线 5%、至少 1.0）⇒ 裁多长**取决于导入顺序**（先出现什么几何，盒就是什么）；还没有任何几何时用**默认 1000 单位盒**。判定：方向退化 → `Opaque` + `Partial`；裁不到盒内 → `Opaque` + `Partial`；否则 `Line` + **`Partial`**（原因是具名常量 `support::XLINE_SEGMENT_REASON` / `XLINE_DEFAULT_BOX_REASON`，并额外记一次 `import.construct_line`）。**导出**只能写 DXF `LINE`，报 `Converted`（`export.converted.line`，点名「不再是无限线」），**不是**精确往返。没有创建命令、没有无限表示。**规模**：命令 **M**（建在既有有界切片上）；真正的无限几何 **L / ADR 级**（见 §4） |
+| `XLINE`（含 `RAY`） | **实现（有界创建，2026-11-01；导入有有界降级）** | **命令**：两点（base/through）经 `clip_segment_to_xy_rect` 裁到模型包围盒（外扩 5%、至少 1.0）或默认 1000 单位盒，生成一条有限 `Line`、type-key `AcDbXline`/`AcDbRay`，一条事务/一步撤销；**不是无限几何**，导出写 DXF `LINE`（`Converted`）。库里**没有无限直线几何**：导入期把 XLINE/RAY 压成**有限 `SemanticGeometry::Line`**，裁到**运行中的模型包围盒**（盒每边外扩对角线 5%、至少 1.0）⇒ 裁多长**取决于导入顺序**（先出现什么几何，盒就是什么）；还没有任何几何时用**默认 1000 单位盒**。判定：方向退化 → `Opaque` + `Partial`；裁不到盒内 → `Opaque` + `Partial`；否则 `Line` + **`Partial`**（原因是具名常量 `support::XLINE_SEGMENT_REASON` / `XLINE_DEFAULT_BOX_REASON`，并额外记一次 `import.construct_line`）。**导出**只能写 DXF `LINE`，报 `Converted`（`export.converted.line`，点名「不再是无限线」），**不是**精确往返。没有创建命令、没有无限表示。**规模**：命令 **M**（建在既有有界切片上）；真正的无限几何 **L / ADR 级**（见 §4） |
 | `HATCH` | 部分 | **两个入口（2026-11-01）**：`HATCH` **先选闭合边界实体**；`HATCHPOINT` **按内部点**（本项目选择子；在可见的**整实体闭合** `Circle` / 完整 `Ellipse` / 闭合 `Polyline` **以及可见 `LINE`/`ARC` 边链**中取**最小包含边界**，嵌套环作岛屿；`LINE`/`ARC` 用平面半边面行走、弧存**精确 bulge**；不用当前选择、只认 `+Z` 同标高、仅模型空间；种子存 `seeds`/组 98）。填充类型 `0` 实体 / `1` 用户自定义 / `2` 预定义 / **`3` 渐变（2026-10-27）**；预定义图案**恰好** `ANSI31`/`ANSI32`/`ANSI37`（状态栏**按名**选，线上传 1 基索引）。**渐变创建**：双色两站（`stop 0.0` = `hatchGradientColorA`、`stop 1.0` = B），kind 只有 `LINEAR`/`SPHERICAL`（**从不**写 `CYLINDER`），角度**通道给度、实体存弧度**（一次 `.to_radians()`），颜色是 **ACI 整数 `1..=255`**（`0` 是 ByBlock 占位、无 sRGB，按名拒绝），默认 1 红 / 5 蓝；实体写 `HatchGradient::TwoColor { reserved: 0, shift: 0.0 }` + `pattern_type = Predefined`（`76=1`，**未查证的 vendor 约定**）。**界**：`SPHERICAL` 在矩形/圆这类「边界顶点同半径」的形状上**烘焙成平色/椭圆感、不是径向**（按三角化顶点取值）；只有 ACI 调色板（无真彩、无名/色簿）；stop 颜色下游还会被实体/图层 tint 乘；**无单色/tint 变体、无逐站命名**。内部点求边界已实现（`HATCHPOINT` v1，见上）；无 `76=2`/`.pat`、无关联性、无实时预览 |
 | `MLEADER` | 部分 | 单簇/单线/2 顶点/**仅直线**；无 `Options`（引线类型/内容类型/最多点数/角度约束）；狗腿/箭头/字高取 `Standard` 样式表（常量为债务） |
 | `TEXT` | 实现 | **单行**、1024 字符上限、**拒绝换行**；不解释 MTEXT 控制码（逐字存储）；**旋转取会话参数 `textRotation`**（通道**度**、任意有限、**不 wrap**、默认 `0`，创建时**一次** `.to_radians()` 存弧度；载荷本身没有旋转字段） |
@@ -203,7 +204,7 @@
 | 缺口 | 规模 | 为什么不是「顺手补一下」 |
 |---|---|---|
 | `POLYLINE`（旧式 heavy 2D 折线**实体**）创建 | **M** | 需要写 `AcDb2dPolyline` + 顶点子实体（本仓库的唯一折线语义变体是 `Polyline`，类名不进域模型）；**不得**把 `POLYLINE` 别名到 `PLINE`——那会把 heavy 折线**假装**成 LWPOLYLINE，凭空发明语义 |
-| `XLINE`（含 `RAY`） | **M（命令）/ L（真正的无限几何）** | **命令（M）**只建在**既有有界切片**上：复用导入期的有限段降级 + 一条创建命令/工具，牵动 `TRIM`/`EXTEND` 的无限直线求交语义与出图裁剪，但不新增几何种类。**真正的无限几何（L，ADR 级）**要新增一个 `SemanticGeometry` 变体：约 **14 处**编译强制点（validate / bounds / transform / tessellate / engine / spatial pick·bounds / representation provider / measure snap / `geometry_kind` / 导出 / 选择属性行）＋约 **12 处**静默兜底（`intersect` 的 `_ => None`、extent 回退、grips 的 `_ => Vec::new()` 等）——而 `cad-domlib` 级的 bounds 累积会被无限线**毒化**成无限模型范围。这不是补丁 |
+| `XLINE`（含 `RAY`） | **命令已关闭（2026-11-01，v1）/ 真正的无限几何仍 L** | **命令已实现**：`XLINE`/`RAY` 两点创建、复用导入期的有限段降级、type-key `AcDbXline`/`AcDbRay`、一条事务/一步撤销；仍不新增几何种类。**真正的无限几何（L，ADR 级）**要新增一个 `SemanticGeometry` 变体：约 **14 处**编译强制点（validate / bounds / transform / tessellate / engine / spatial pick·bounds / representation provider / measure snap / `geometry_kind` / 导出 / 选择属性行）＋约 **12 处**静默兜底（`intersect` 的 `_ => None`、extent 回退、grips 的 `_ => Vec::new()` 等）——而 `cad-domlib` 级的 bounds 累积会被无限线**毒化**成无限模型范围。这不是补丁 |
 | `WBLOCK` | **L** | `BLOCK` v1 已提供运行时块定义写入口（名称/基点/成员/块级 undo），`PASTEBLOCK` v1 已复用该入口；剩余是 `WBLOCK` 的单文件写出（现有导出仍是整图 model space、会摊平 INSERT），需要块定义导出/`SavePurpose::WBlock`。 |
 | `XREF` | **L** | 外部文件解析、相对/绝对路径解析、循环深度（已只有预算钩子）、图层名前缀、绑定/重载语义；跨文件一致性属新契约面 |
 | `IMPORT` | **L** | 依赖 acadrust 的格式能力与 `cad-import-acadrust` 的迁移策略；每个格式都要自己的 capability 表与拒绝面（DWG/DXF 的打开走 `OPEN`，不是 `IMPORT`） |
@@ -246,9 +247,9 @@ aliases = [a for a, _ in re.findall(r'\("([^"]+)",\s*"([^"]+)"\)',
 names = list(dict.fromkeys(table + meas + zoom + aliases))   # = admissible_names() 的顺序
 print(len(table), len(meas), len(zoom), len(args), len(aliases), "admissible:", len(names))
 PY
-# 期望输出：105 5 2 4 56 admissible: 168
+# 期望输出：107 5 2 4 57 admissible: 171
 
-# 2) 钉住 105 的契约（变体数、表长、每变体恰好一次）
+# 2) 钉住 107 的契约（变体数、表长、每变体恰好一次）
 cargo test -p cad-ui-core --locked command_normalization_covers_every_variant
 cargo test -p cad-ui-core --locked admissible_names_cover_the_vocabulary_exactly_once
 
@@ -283,12 +284,12 @@ python3 scripts/test-check-command-docs.py   # 自测：注入伪造 canonical �
 **本次实测（仓库当前树）**：
 
 ```
-tables: 105/5/2/4 selectors, 56 aliases, 112 canonical selectors (aliases excluded)
-§2 rows: 67, §2b aliases: 56, §3.7 rows: 6, alias mentions: 1
+tables: 107/5/2/4 selectors, 57 aliases, 114 canonical selectors (aliases excluded)
+§2 rows: 69, §2b aliases: 57, §3.7 rows: 6, alias mentions: 1
 OK: 0 mismatches
 ```
 
-（`112` 是 **canonical 选择子**数：105 表 + 5 测量 + 2 缩放步进，**不含** 56 个别名；`168` 才是
+（`114` 是 **canonical 选择子**数：107 表 + 5 测量 + 2 缩放步进，**不含** 57 个别名；`171` 才是
 「可输入拼写」数，见 §2。两个数不要混用。）
 
 **它确实会失败**（同一个脚本，换输入就红）：

@@ -705,4 +705,26 @@ pub enum DrawToolKind {
     /// to `I`. The name arrives through the same `cad_set_tool_text` channel TEXT
     /// uses and is re-validated by the command. Work-only.
     BlockDefine,
+    /// XLINE: an infinite construction line through two picked points (base, then
+    /// a through point), stored as a **finite clipped segment**.
+    ///
+    /// `cad-db` has no infinite-line geometry, so the command reduces the line to
+    /// one `SemanticGeometry::Line` clipped to the drawing's XY model bounds (the
+    /// default 1000-unit box around `base` for an empty drawing), exactly like the
+    /// DWG importer. The entity keeps `type_key = "AcDbXline"` and export writes a
+    /// LINE; the command's `drawing.xline` diagnostic states the loss. Two free
+    /// points ([`PointArity::Exact`]`(2)`), no entity picks, no selection and no
+    /// typed text. Degenerate, non-finite and non-intersecting input is an
+    /// explicit named refusal that opens no transaction. Work-only.
+    XLine,
+    /// RAY: the **positive half** of an infinite construction line from a base
+    /// point through a second picked point, stored as a finite clipped segment.
+    ///
+    /// Same two-point capture and same loss as [`Self::XLine`] (the segment is
+    /// clipped to the model bounds/default box; `type_key = "AcDbRay"`; export
+    /// writes a LINE; `drawing.ray` diagnostic). The difference is geometric: the
+    /// line starts at `base` and extends only along `+direction`, so a RAY whose
+    /// positive half misses the clip box is `ray.outside_bounds` rather than a
+    /// fabricated line. Work-only.
+    Ray,
 }

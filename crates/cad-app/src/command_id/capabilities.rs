@@ -89,6 +89,9 @@ impl CommandId {
                 // BLOCK writes the block table, moves the selected entities into
                 // the new definition and inserts a reference.
                 | Self::DefineBlock
+                // XLINE/RAY write one finite clipped segment each.
+                | Self::CreateXLine
+                | Self::CreateRay
         )
     }
 }

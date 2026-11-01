@@ -178,6 +178,24 @@ test('the command catalog lists exactly the router-refused dead affordances, and
   assert.equal(isSupportedCommand('ANGLE'), false, 'ANGLE');
   assert.equal(isSupportedCommand('PLINE'), true, 'PLINE is a router-admitted draw selector');
   assert.equal(COMMAND_CATALOG.some(command => command.id === 'PLINE'), true, 'PLINE is catalogued');
+  // XLINE / RAY (2026-11-01) are the two construction captures: two picks each,
+  // one **finite bounded segment** clipped to the model bounds, with the
+  // construction type key kept on the entity. They are catalogued directly after
+  // ARC, so no shipped row moves, and they are admitted by the same router
+  // vocabulary (never as aliases of LINE).
+  for (const entry of [
+    { id: 'XLINE', labelKey: 'draw.kind.xline', icon: 'xline', group: 'draw' },
+    { id: 'RAY', labelKey: 'draw.kind.ray', icon: 'ray', group: 'draw' },
+  ]) {
+    assert.deepEqual({ ...COMMAND_CATALOG.find(command => command.id === entry.id) }, entry);
+    assert.equal(isSupportedCommand(entry.id), true, `${entry.id} is a router-admitted draw selector`);
+    assert.equal(admitCommandText(entry.id, { status: loaded }).kind, 'admitted', entry.id);
+    assert.equal(ROUTER_REFUSED_AFFORDANCES.includes(entry.id), false, `${entry.id} is reachable`);
+  }
+  const catalogOrder = COMMAND_CATALOG.map(command => command.id);
+  assert.equal(catalogOrder.indexOf('XLINE'), catalogOrder.indexOf('ARC') + 1);
+  assert.equal(catalogOrder.indexOf('RAY'), catalogOrder.indexOf('XLINE') + 1);
+  assert.ok(catalogOrder.indexOf('RAY') < catalogOrder.indexOf('PLINE'), 'the construction pair still precedes PLINE');
   // BLOCK (2026-11-01) is the block **definition** selector: catalogued in the
   // draw group beside INSERT and admitted by the same router vocabulary, never as
   // an alias of INSERT (which consumes a block that already exists).
@@ -510,6 +528,8 @@ test('an armed grip drag makes Escape cancel it and enables no other tool-only k
 
 test('a host tool selector maps to its catalog key', () => {
   assert.equal(toolLabelKey('draw.line'), 'tool.draw.line');
+  assert.equal(toolLabelKey('draw.xline'), 'tool.draw.xline');
+  assert.equal(toolLabelKey('draw.ray'), 'tool.draw.ray');
   assert.equal(toolLabelKey('measure.distance'), 'tool.measure.distance');
   assert.equal(toolLabelKey('  draw.arc '), 'tool.draw.arc');
   assert.equal(toolLabelKey(''), null);

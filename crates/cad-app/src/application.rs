@@ -415,6 +415,8 @@ impl Application {
             CommandId::CreateLine
             | CommandId::CreateCircle
             | CommandId::CreateArc
+            | CommandId::CreateXLine
+            | CommandId::CreateRay
             | CommandId::CreatePolyline
             | CommandId::CreateRectangle
             | CommandId::CreateEllipse

@@ -36,7 +36,7 @@
 - **补全候选**（`apps/desktop-ui/src/components/CommandLine.tsx` + `commands.ts::filterCommandSuggestions`；
   旧文档指向的 `command-bar.slint` 已随 Slint 删除）：
   - 候选来源是 **`COMMAND_CATALOG`（显示目录）+ 宿主别名表**（`cad_command_aliases`），
-    **不是**全部 105 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
+    **不是**全部 107 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
     字母序（**不去重**，也**不是**纯字典序）。
   - 输入变化即时计算候选；候选只**填充**文本，**从不执行**命令。
   - `Tab`：**仅当有高亮行**时把命令行替换成该名字（**没有**“无高亮则第一项”的回退）。
@@ -55,11 +55,11 @@
 
 ## 2. 命令表（只列**有行为注解**的选择子）
 
-> **完整清单不在这里**：穷尽的 **105 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
+> **完整清单不在这里**：穷尽的 **107 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
 > `docs/autocad-command-coverage.md` §2；本节只保留**有行为注解**的行。
 > 选择子与别名的**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs`
-> （`COMMAND_TABLE` **105** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
-> `ARGUMENT_SELECTORS` **4** / `COMMAND_ALIASES` **56**）。
+> （`COMMAND_TABLE` **107** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
+> `ARGUMENT_SELECTORS` **4** / `COMMAND_ALIASES` **57**）。
 > 本表的 **canonical 列**只出现**被准入的名字**，**别名列**只出现 `COMMAND_ALIASES` 里的真实行；
 > 键位、面板与 IPC 能力见 §2a，**不混进命令表**。
 
@@ -70,6 +70,8 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `LINE` | 绘制 | 是 | `L` |
 | `CIRCLE` | 绘制 | 是 | `C` |
 | `ARC` | 绘制（三点弧） | 是 | `A` |
+| `XLINE` | 绘制（构造线，两点；**有界**：生成的是一条按模型包围盒/默认 1000 盒裁剪的**有限线段**，type-key `AcDbXline`；不是无限几何；一条事务/一步撤销） | 是 | `XL` |
+| `RAY` | 绘制（射线，两点；**有界**：从起点到模型包围盒/默认盒方向上的**有限线段**，type-key `AcDbRay`；不是无限几何；一条事务/一步撤销） | 是 | — |
 | `INSERT` | 块参照创建（**点-后-名**：先拾取插入点，再输入**本图已有块**的名称；`T(插入点)·T(−块基点)`，type-key `AcDbBlockReference`；**无块表写入**、无比例/旋转/属性；一条事务/一步撤销） | 是 | `I` |
 | `BLOCK` | 块定义创建（**选择 → 基点 → 名称**：选中对象写入新块定义并移入 `SpaceId::Block`，几何**逐位保留**、只改空间；元数据存基点；参照为 identity `T(基点)·T(−基点)`，后续 `INSERT` 仍按 `T(I)·T(−基点)` 映射；一条事务/一步撤销，块级 undo 补丁） | 是 | `B` |
 | `PASTEBLOCK` | 剪贴板 → 块（单点插入点；自动命名 `PasteBlockN`，成员为剪贴板条目的新 id 克隆、保持原坐标与显示属性；块基点 = `clipboard_base` 或世界原点；参照 `T(插入点)·T(−基点)`；一条事务/一步撤销；剪贴板不清空，成功后选中新参照） | 是 | — |
@@ -192,7 +194,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 - `COPYCLIP` 是**只读**捕获，Viewer 亦可用；`CUTCLIP`/`PASTECLIP` 为 work-only。
 - `OPEN`/`NEW`/`SAVE`/`PLOT` 为**宿主自有**：宿主未提供能力时命令层返回显式 `Unsupported`
   （不会静默 no-op）。
-- 别名：**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs::COMMAND_ALIASES`（**56** 行），
+- 别名：**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs::COMMAND_ALIASES`（**57** 行），
   本页 §2b 是它的转写。旧文档引用的 `cad-ui-slint` 别名/同义词/未实现命令三张表**已随 Slint 退役删除**，
   不要再去仓库里找它们。
 
@@ -252,9 +254,9 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 
 全词同义词（同样在 `COMMAND_ALIASES` 内）：`EXPORT`/`PRINT`→`PLOT`、`SAVEAS`/`QSAVE`→`SAVE`、
 `ZOOM EXTENTS`→`FIT`、`ENTER`→`CONFIRM`、`DBA`→`DIMBASELINE`、`DCO`→`DIMCONTINUE`、
-`LAYUNISO`/`LAYON`→`RESTORELAYERS`、`NEWLAYER`→`CREATELAYER`、`LEN`→`LENGTHEN`、`I`→`INSERT`、`B`→`BLOCK`
-（项目同义词，非 `acad.pgp`）。
-本页缩写表 **42** 个 + 本句 **14** 个 = **56** 个，与 `COMMAND_ALIASES` 的长度一致。
+`LAYUNISO`/`LAYON`→`RESTORELAYERS`、`NEWLAYER`→`CREATELAYER`、`LEN`→`LENGTHEN`、`I`→`INSERT`、`B`→`BLOCK`、
+`XL`→`XLINE`（项目同义词，非 `acad.pgp`）。
+本页缩写表 **42** 个 + 本句 **15** 个 = **57** 个，与 `COMMAND_ALIASES` 的长度一致。
 
 诚实边界：这张表是**面向已实现命令的 AutoCAD `acad.pgp` 子集**，不是 `acad.pgp` 解析器，
 也**不支持用户自定义别名**；目标命令不存在的缩写一律不收录，绝不用别名凭空造出命令。
@@ -375,18 +377,17 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     其余未映射组合不拦截。
 - **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
   的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
-  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**105 个选择子**，与 `CommandId` 变体一一对应；
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**107 个选择子**，与 `CommandId` 变体一一对应；
   P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`/`LAYOFF`/
   `PDMODE`/`PDSIZE`，2026-10-27 再加 `LAYERP`/`AREA OBJECT`，**2026-10-28 再加 `COPYBASE`/`CUTBASE`/
-  `PASTEORIG`，2026-11-01 再加 `HATCHPOINT`/`BREAK`/`DIVIDE`/`LENGTHEN`/`INSERT`/`SCALETEXT`/`BLOCK`/`PASTEBLOCK`**——`ID` 是测量选择子、
+  `PASTEORIG`，2026-11-01 再加 `HATCHPOINT`/`BREAK`/`DIVIDE`/`LENGTHEN`/`INSERT`/`SCALETEXT`/`BLOCK`/`PASTEBLOCK`/`XLINE`/`RAY`**——`ID` 是测量选择子、
   `LAYUNISO`/`LAYON` 是既有 `RESTORELAYERS` 的别名，都不新增 `CommandId`；`LAYERP` **已不是**别名）；
   不在表内的名字在 chrome 侧就按 `command.unsupported` 拒绝（**`command.unknown` 这个键没有消费方**，
   见 §1）；宿主侧「认识这个名字、但该路径不可用」（如 `PLOT`/`SAVE` 的受限路径）同样报告
   `command.unsupported`。两者都是显式反馈，**不静默忽略**。
 - **仍未实现的 AutoCAD 名（据实）**：`POLYLINE`（旧式 heavy 2D 折线实体；我们只有 `PLINE` 创建的
-  LWPOLYLINE，**不**给它造别名）、`XLINE`、`BLOCK`、`WBLOCK`（`INSERT` 的**创建**侧已实现 v1：只能插入
-  **本图已有块**、无块表写入/比例/旋转/属性；`BLOCK`/`WBLOCK` 仍缺，见 `docs/compatibility.md`）、
-  `IMPORT`、`XREF`、`PUBLISH`、`DIMSTYLE`（样式**编辑**
+  LWPOLYLINE，**不**给它造别名）、`WBLOCK`（`INSERT`/`BLOCK`/`PASTEBLOCK` 已实现 v1；`WBLOCK` 仍缺，
+  见 `docs/compatibility.md`）、`IMPORT`、`XREF`、`PUBLISH`、`DIMSTYLE`（样式**编辑**
   命令未实现；DIMSTYLE **变量子集**与 `Standard` 样式表已实现）。**已实现**：`DIMLINEAR`/`DIMALIGNED`/
   `DIMRADIUS`/`DIMDIAMETER`/`DIMANGULAR`/`DIMORDINATE`/`DIMCENTER`，以及
   **`DIMBASELINE`/`DIMCONTINUE`**（2026-10-21 **解禁**并落地，P5f：**显式拾取基准线性标注**，命令

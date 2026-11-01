@@ -21,4 +21,5 @@ mod tests_settings;
 mod tests_stretch;
 mod tests_text;
 mod tests_tools;
+mod tests_tools_routing;
 mod tests_wire;

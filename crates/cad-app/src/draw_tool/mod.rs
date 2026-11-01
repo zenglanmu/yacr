@@ -596,6 +596,17 @@ impl DrawTool {
         let b = self.points.get(1).copied().unwrap_or(a);
         Ok(match self.kind {
             DrawToolKind::Line => DrawIntent::Line { start: a, end: b },
+            // XLINE/RAY: the base point and the through point exactly as clicked.
+            // The clip box, span and finite-segment reduction live in the command
+            // layer, so the capture never invents a length.
+            DrawToolKind::XLine => DrawIntent::XLine {
+                base: a,
+                through: b,
+            },
+            DrawToolKind::Ray => DrawIntent::Ray {
+                base: a,
+                through: b,
+            },
             DrawToolKind::Circle => DrawIntent::Circle { center: a, edge: b },
             DrawToolKind::Arc => DrawIntent::Arc {
                 points: [a, b, self.points[2]],

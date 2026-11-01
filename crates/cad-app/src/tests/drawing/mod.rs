@@ -282,6 +282,7 @@ mod block_undo;
 mod break_curve;
 mod chamfer_fillet;
 mod clipboard;
+mod construction_line;
 mod create_polyline;
 mod create_trim;
 mod dimension;

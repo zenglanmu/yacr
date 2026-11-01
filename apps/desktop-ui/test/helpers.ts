@@ -83,6 +83,13 @@ export const HOST_NAMES = [
   'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
   'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'DIMLINEAR', 'DIMALIGNED', 'DIMRADIUS', 'DIMDIAMETER', 'DIMCENTER', 'DIMANGULAR', 'DIMORDINATE', 'DIMBASELINE', 'DIMCONTINUE', 'MOVE', 'TRIM',
   'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'STRETCH', 'ERASE', 'EXPLODE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
+  // XLINE / RAY (2026-11-01): the two construction captures. Each is a canonical
+  // selector of its own — never an alias of `LINE`, because the capture records a
+  // construction type key and the committed geometry is a bounded segment clipped
+  // to the model bounds — so admitting one must not admit the other's capture.
+  // This mirror stands in for the loaded `cad_commands` vocabulary; the Rust lane
+  // adds the same names, and this list never proves the host advertises them.
+  'XLINE', 'RAY',
   // Clipboard-with-base-point family (2026-10-27): `COPYBASE`/`CUTBASE` put the
   // selection on the clipboard **with a base point**, so the following `PASTECLIP`
   // is placed relative to it, and `PASTEORIG` pastes at the coordinates the

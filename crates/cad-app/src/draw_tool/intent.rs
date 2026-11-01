@@ -423,4 +423,18 @@ pub enum DrawIntent {
     /// selection refs travel separately (the caller supplies the snapshot), so
     /// they never ride this intent.
     BlockDefine { base: Point3, name: String },
+    /// XLINE: an infinite construction line through `base` and `through`,
+    /// committed as one **finite clipped segment** on the active layer.
+    ///
+    /// The two points are exactly the two clicks, in order; the clip box, the
+    /// span, the reduction to `SemanticGeometry::Line` and every refusal live in
+    /// the command layer (`app_drawing::construction_line`), so the capture never
+    /// invents a length. The stored entity keeps `type_key = "AcDbXline"`.
+    XLine { base: Point3, through: Point3 },
+    /// RAY: the positive half of the construction line from `base` through
+    /// `through`, committed as one finite clipped segment on the active layer.
+    ///
+    /// Same shape and same loss as [`DrawIntent::XLine`]; the command layer stores
+    /// `type_key = "AcDbRay"` and only extends along `+direction`.
+    Ray { base: Point3, through: Point3 },
 }

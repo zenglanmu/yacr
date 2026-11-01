@@ -250,6 +250,23 @@ const ID_POINT_PROMPT_KEY = 'tool.prompt.point';
  * resolved from [`TOOL_READY_PROMPTS`] below.
  */
 export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  // XLINE and RAY (2026-11-01) are **two-point** captures: a base point and a
+  // through point. Both are finite captures that commit **one bounded segment**
+  // clipped to the model bounds (the entity keeps its construction type key,
+  // `AcDbXline` / `AcDbRay`), so the two sentences ask for the two picks and name
+  // nothing else — no `Options` sub-prompt exists, there is no parameter, and
+  // neither is a pre-selection tool (the picks are the input), so neither may
+  // appear in [`PRESELECT_PROMPTS`]. The wording differs per command because the
+  // first pick means different things: a point *on* the construction line for
+  // XLINE, the ray's origin for RAY.
+  'draw.xline': [
+    'tool.prompt.xline.base',
+    'tool.prompt.xline.through',
+  ],
+  'draw.ray': [
+    'tool.prompt.ray.base',
+    'tool.prompt.ray.through',
+  ],
   'draw.textedit': ['tool.prompt.textedit.select_entity'],
   'draw.dimlinear': [
     'tool.prompt.dim.origin_first',
@@ -414,6 +431,14 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
  * the shared dimension ready prompt.
  */
 export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freeze({
+  // XLINE and RAY (2026-11-01) are complete once both picks land: the span is
+  // captured and Enter commits it. The shared dimension copy ("Dimension
+  // defined; press Enter to confirm") would be false — nothing is dimensioned —
+  // so each names its own captured state. "Span captured" is deliberate: the two
+  // points define a **finite bounded segment** clipped to the model bounds, and
+  // no ready sentence may claim an unbounded construction line or ray exists.
+  'draw.xline': 'tool.prompt.xline.ready',
+  'draw.ray': 'tool.prompt.ray.ready',
   'draw.dimcenter': 'tool.prompt.dim.center_ready',
   // TEXT's complement is its point plus its text, so "ready" is only reached
   // between the two states: the shared dimension copy ("Dimension defined; press

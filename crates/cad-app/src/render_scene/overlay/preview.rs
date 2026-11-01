@@ -101,6 +101,11 @@ pub fn draw_preview_overlay(
         // host's capture tint plus the cursor/chain, never a fabricated geometry.
         | DrawToolKind::TextEdit
         | DrawToolKind::Line
+        // XLINE/RAY capture two free points (base, through); the live preview is
+        // the existing rubber-band chain through them and the cursor. The finite
+        // clipped segment is produced at commit, never fabricated here.
+        | DrawToolKind::XLine
+        | DrawToolKind::Ray
         | DrawToolKind::Polyline
         | DrawToolKind::Move
         | DrawToolKind::Trim
