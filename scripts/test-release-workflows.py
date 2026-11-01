@@ -166,6 +166,16 @@ class PublishWorkflowContracts(unittest.TestCase):
         self.assertIn("gh release create", text)
         self.assertIn("--verify-tag", text)
 
+    def test_publisher_stages_outside_the_tracked_assets_directory(self):
+        # The repository tracks its own `assets/` (icons). Staging there made
+        # `gh release create assets/*` try to upload `assets/icons` as an asset.
+        text = self.text()
+        self.assertIn("release-assets", text)
+        self.assertNotIn("mkdir -p assets", text)
+        self.assertNotRegex(text, r"(?<![\w-])assets/\*")
+        self.assertIn("release-assets/app-universal-debug.apk", text)
+        self.assertIn("release-assets/*.tar.gz", text)
+
     def test_publisher_never_builds_or_signs(self):
         text = self.text()
         for forbidden in (

@@ -72,13 +72,15 @@ jobs:
       - name: Flatten and verify the SHA-256 sidecars
         run: |
           set -euo pipefail
-          mkdir -p assets
-          find artifacts -type f -exec cp -t assets {} +
+          # Never stage into the repository's own tracked `assets/` (icons): it is
+          # checked out by actions/checkout and would end up in the asset glob.
+          rm -rf release-assets && mkdir -p release-assets
+          find artifacts -type f -exec cp -t release-assets {} +
           shopt -s nullglob
-          for sum in assets/*.sha256; do
-            ( cd assets && sha256sum -c "$(basename "$sum")" )
+          for sum in release-assets/*.sha256; do
+            ( cd release-assets && sha256sum -c "$(basename "$sum")" )
           done
-          ls -l assets
+          ls -l release-assets
       - name: Publish the tag's GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -87,8 +89,25 @@ jobs:
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
+          # Explicit deliverable allowlist: only regular release files, never a
+          # directory and never a repository file that happened to be checked out.
+          shopt -s nullglob
+          files=(
+            release-assets/*.flatpak release-assets/*.flatpak.sha256
+            release-assets/*.zip release-assets/*.zip.sha256
+            release-assets/*.tar.gz release-assets/*.tar.gz.sha256
+            release-assets/app-universal-debug.apk
+            release-assets/app-universal-release-unsigned.apk
+          )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no release assets matched under release-assets/" >&2
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            printf '%s\t%s\n' "$(stat -c %s "$f")" "$f"
+          done
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" assets/* --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
             edit_args=(--title "yacr $TAG")
             if [ -n "$NOTES_FILE" ]; then
               edit_args+=(--notes-file "$NOTES_FILE")
@@ -107,7 +126,7 @@ jobs:
             if [ "$PRERELEASE" = "true" ]; then
               args+=(--prerelease)
             fi
-            gh release create "$TAG" assets/* --repo "$GITHUB_REPOSITORY" "${args[@]}"
+            gh release create "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" "${args[@]}"
           fi
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
             --json url,isDraft,isPrerelease,assets \
