@@ -50,6 +50,7 @@ mod hatch_internal_point;
 mod hatch_parameters;
 mod hatch_stitch;
 mod helpers;
+mod insert_block;
 mod join;
 mod layer_edit;
 mod lengthen;

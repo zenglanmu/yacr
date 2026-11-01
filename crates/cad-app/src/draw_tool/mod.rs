@@ -627,6 +627,14 @@ impl DrawTool {
                     )
                 })?,
             },
+            // INSERT: the one captured insertion point plus the block name from the
+            // terminal text channel. Point-then-name: presence was enforced above,
+            // so `unwrap_or_default()` can never silently stand in for a missing
+            // name (the command re-validates an empty name as a named refusal).
+            DrawToolKind::InsertBlock => DrawIntent::InsertBlock {
+                insertion: a,
+                name: self.text.clone().unwrap_or_default(),
+            },
             // MLEADER: the two captured points (arrow, landing) plus the
             // submitted text. Every style value is resolved by the command layer
             // from the drawing's `MLeaderStyle` table, so nothing style-shaped

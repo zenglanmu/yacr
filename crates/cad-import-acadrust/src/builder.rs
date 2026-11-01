@@ -532,6 +532,14 @@ impl<'a> ImporterBuilder<'a> {
                 entities: Vec::new(),
                 dynamic_visibility: None,
             })?;
+            // Keep the name/base-point pair beside the definition so a command can
+            // create a reference from `T(insertion) · T(−base)` later. The name map
+            // above stays the import-time authority for expansion; an unnamed or
+            // non-finite-base block simply carries no metadata (never a zero base).
+            if is_finite_point(block.base_point) {
+                self.builder
+                    .set_block_metadata(id, &block.name, p3(block.base_point))?;
+            }
         }
         Ok(())
     }

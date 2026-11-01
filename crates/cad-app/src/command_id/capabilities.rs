@@ -79,6 +79,9 @@ impl CommandId {
                 | Self::SetEntityProperty
                 | Self::MatchProp
                 | Self::GripStretch
+                // INSERT writes one new block-reference entity; the block table
+                // itself is read-only here (no BLOCK/WBLOCK).
+                | Self::InsertBlock
         )
     }
 }

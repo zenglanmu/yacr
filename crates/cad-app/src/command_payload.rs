@@ -531,6 +531,18 @@ pub enum CommandPayload {
     /// A fully formed semantic geometry, used by `CreateLine` as the
     /// programmatic alternative to a point list.
     Geometry(Box<SemanticGeometry>),
+    /// INSERT: place a reference to an existing **named block** at one picked
+    /// insertion point. The block must already exist in the drawing (this command
+    /// never writes the block table); its stored name/base-point metadata and the
+    /// `T(insertion) · T(−base_point)` transform are the command layer's input.
+    /// `insertion` must be finite; `name` is trimmed, must be non-empty, single
+    /// line and at most [`crate::draw_tool::MAX_TOOL_TEXT_CHARS`] characters, and
+    /// is resolved exact-first then ASCII case-insensitively against the
+    /// drawing's block metadata. Work-only.
+    InsertBlock {
+        insertion: Point3,
+        name: String,
+    },
     /// TEXT: one single-line text entity (ADR 0019 F.1, P7a).
     ///
     /// `position` is the captured insertion point, `text` the typed string

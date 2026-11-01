@@ -835,24 +835,19 @@ pub enum CommandId {
     /// default. See [`crate::app_drawing`]'s `point_style` module.
     SetPointDisplayMode,
     /// `PDSIZE <n>`: write the drawing header's `$PDSIZE` (the drawing-global
-    /// POINT display size) from the command line.
-    ///
-    /// Payload is [`crate::CommandPayload::PointDisplaySize`] `f64`, stored
-    /// **raw**: `> 0` an absolute drawing-unit size, `0` the viewport-relative DWG
-    /// default, `< 0` a percentage of the viewport height. A non-finite value is
-    /// refused as `InvalidInput` by both this command and the database write, so
-    /// no value the display layer would have to sanitise can be stored.
+    /// POINT display size) from the command line. Payload is
+    /// [`crate::CommandPayload::PointDisplaySize`] `f64`, stored **raw**: `> 0` an
+    /// absolute drawing-unit size, `0` the viewport-relative DWG default, `< 0` a
+    /// percentage of the viewport height. A non-finite value is refused as
+    /// `InvalidInput` by both this command and the database write.
     ///
     /// One real write is one revision bump with no entity change (the display
     /// refresh signal, see [`CommandId::SetPointDisplayMode`]); the stored value is
-    /// a no-op (`(already stored, no change)`), and **no undo entry** is recorded
-    /// (no header patch kind — a documented exception to "one command = one undo
-    /// step"). The DXF exporter writes `$PDSIZE`, so a SAVE→OPEN cycle keeps it
-    /// (our writer + reader, internal consistency only).
+    /// a no-op, and **no undo entry** is recorded (no header patch kind). The DXF
+    /// exporter writes `$PDSIZE`, so a SAVE→OPEN cycle keeps it.
     ///
-    /// Work-only (a document mutation; Viewer is `PermissionDenied` by the same
-    /// rule as [`CommandId::SetPointDisplayMode`]). A bare `PDSIZE` is refused by
-    /// name.
+    /// Work-only (a document mutation; Viewer is `PermissionDenied`). A bare
+    /// `PDSIZE` is refused by name.
     SetPointDisplaySize,
     /// Flip the idle hover entity preview for this session. Session/display
     /// state only (no database write, no history, no ChangeSet), so it is
@@ -992,6 +987,9 @@ pub enum CommandId {
     Divide,
     /// `LENGTHEN` (Work-only): end-anchored change; see `crate::app_drawing::lengthen`.
     Lengthen,
+    /// `INSERT` (Work-only): place an existing named block at one picked point;
+    /// no block-table write. See `crate::app_drawing::insert_block`.
+    InsertBlock,
 }
 
 mod capabilities;

@@ -52,6 +52,9 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     // ready until a selection exists.
     ("DIVIDE", "draw.divide"),
     ("LENGTHEN", "draw.lengthen"),
+    // INSERT is point-then-name: one insertion point, then the existing block
+    // name through the terminal text channel (Work-only, no block-table write).
+    ("INSERT", "draw.insertblock"),
 ];
 
 fn fresh_session() -> CadSession {

@@ -478,3 +478,106 @@ fn a_degenerate_line_or_arc_is_refused_before_stitching() {
         &["hatch.boundary_degenerate", "zero sweep"],
     );
 }
+
+// ---------------------------------------------------------------------------
+// Planar face walk (HATCHPOINT edge-chain discovery, v1)
+// ---------------------------------------------------------------------------
+
+/// Drive HATCHPOINT on the same fixture builder the stitcher tests use.
+fn run_point(
+    app: &mut Application,
+    session: &mut SessionState,
+    seed: Point3,
+) -> CadResult<CommandOutcome> {
+    execute(
+        app,
+        session,
+        CommandId::HatchPoint,
+        CommandPayload::HatchPoint { seed },
+    )
+}
+
+#[test]
+fn a_mixed_direction_line_rectangle_walks_into_one_face() {
+    // The same rectangle with three edges stored against the walk direction: the
+    // face walk follows tangents, never the stored edge direction.
+    let edges = vec![
+        line(1, (0.0, 0.0), (10.0, 0.0)),
+        line(2, (10.0, 10.0), (10.0, 0.0)),
+        line(3, (0.0, 10.0), (10.0, 10.0)),
+        line(4, (0.0, 0.0), (0.0, 10.0)),
+    ];
+    let (mut app, mut session) = hatch_app(edges);
+    run_point(&mut app, &mut session, p3(5.0, 5.0, 0.0)).expect("the mixed rectangle hatches");
+    let hatch = the_hatch(&app);
+    assert_eq!(hatch.loops().len(), 1);
+    let loop_ = &hatch.loops()[0];
+    assert_eq!(
+        loop_.points,
+        vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+        "the counter-clockwise face walk, independent of stored directions"
+    );
+    assert_eq!(loop_.bulges, vec![0.0; 4]);
+    assert!((filled_area(hatch) - 100.0).abs() < 1e-6);
+}
+
+#[test]
+fn an_arc_only_face_is_exact_even_when_it_must_be_split() {
+    // Two exact half-circle ARCs form a disc with no LINE at all. The face has two
+    // half-edges, so one arc is split exactly into two quarters (the creation-path
+    // validator needs three vertices); every bulge stays exact.
+    let edges = vec![
+        arc(1, (5.0, 0.0), 5.0, 0.0, PI),
+        arc(2, (5.0, 0.0), 5.0, PI, PI),
+    ];
+    let (mut app, mut session) = hatch_app(edges);
+    // The seed's +X ray lands exactly on the two arcs' shared node, so the face
+    // locator must retry another direction before it can walk.
+    run_point(&mut app, &mut session, p3(5.0, 0.0, 0.0)).expect("the arc disc hatches");
+    let hatch = the_hatch(&app);
+    assert_eq!(hatch.loops().len(), 1);
+    let loop_ = &hatch.loops()[0];
+    assert_eq!(
+        loop_.points.len(),
+        3,
+        "one arc splits into two exact quarters"
+    );
+    assert_eq!(
+        loop_.bulges,
+        vec![FRAC_PI_8.tan(), FRAC_PI_8.tan(), FRAC_PI_4.tan()],
+        "quarters plus the second half-circle, all exact"
+    );
+    for (point, expected) in loop_
+        .points
+        .iter()
+        .zip([[10.0, 0.0], [5.0, 5.0], [0.0, 0.0]])
+    {
+        assert_point(*point, expected);
+    }
+    let area = filled_area(hatch);
+    let expected = PI * 25.0;
+    assert!(
+        (area - expected).abs() < 0.2,
+        "disc area {area} vs {expected}"
+    );
+}
+
+#[test]
+fn an_outward_spur_at_a_boundary_corner_is_pruned() {
+    // A degree-3 node at the corner: the spur chain is pruned before the walk, so
+    // the rectangle face is still exactly four edges.
+    let edges = vec![
+        line(1, (0.0, 0.0), (10.0, 0.0)),
+        line(2, (10.0, 0.0), (10.0, 10.0)),
+        line(3, (10.0, 10.0), (0.0, 10.0)),
+        line(4, (0.0, 10.0), (0.0, 0.0)),
+        line(5, (0.0, 0.0), (-5.0, -5.0)),
+    ];
+    let (mut app, mut session) = hatch_app(edges);
+    run_point(&mut app, &mut session, p3(5.0, 5.0, 0.0)).expect("the rectangle hatches");
+    let hatch = the_hatch(&app);
+    assert_eq!(hatch.loops().len(), 1);
+    assert_eq!(hatch.loops()[0].points.len(), 4, "the spur adds no vertex");
+    assert!((filled_area(hatch) - 100.0).abs() < 1e-6);
+    assert_eq!(entity_count(&app), 6, "the spur is retained");
+}

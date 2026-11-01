@@ -467,7 +467,8 @@ impl Application {
             | CommandId::CreateText
             | CommandId::CreateMText
             | CommandId::MLeader
-            | CommandId::TextEdit => {
+            | CommandId::TextEdit
+            | CommandId::InsertBlock => {
                 // Every edit runs through one funnel so the session selection is
                 // reconciled against the authoritative drawing afterwards: an
                 // edit that removed entities (ERASE, a deleting TRIM, CUT) leaves

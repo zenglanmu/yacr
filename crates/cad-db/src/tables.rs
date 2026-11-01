@@ -193,6 +193,26 @@ pub struct BlockDefinition {
     pub dynamic_visibility: Option<DynamicBlockVisibility>,
 }
 
+/// Import-time metadata of a named block definition.
+///
+/// Kept **beside** [`BlockDefinition`] in the database (map keyed by
+/// [`BlockId`]), exactly like
+/// [`EntityRenderAttributes`](crate::EntityRenderAttributes) live beside
+/// `DbEntity`, so adding the name/base-point pair never ripples into the many
+/// `BlockDefinition { .. }` literals across the workspace.
+///
+/// The importer bakes the base point into every reference transform
+/// (`transform = T(insertion) · T(−base_point)`), so a reference created by a
+/// command must use the same convention. A block with no metadata is simply not
+/// addressable by name; no zero base point is invented.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockMetadata {
+    /// The block's table name, trimmed. Never empty for a registered row.
+    pub name: String,
+    /// The block's insertion base point in block space.
+    pub base_point: Point3,
+}
+
 /// One named visibility state of a dynamic block definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DynamicBlockState {

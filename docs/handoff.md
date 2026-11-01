@@ -1,3 +1,63 @@
+## 2026-11-01 块参照创建 `INSERT`（已有块 v1）+ `HATCHPOINT` 边链自动发现
+
+### 结论
+
+- **`INSERT` 创建侧落地（Work-only，v1）**：先拾取插入点，再输入**本图已有块**的名称；块定义/名称/基点
+  在导入后不再丢失，命令用导入器同一约定 `T(插入点) · T(−块基点)` 生成 `AcDbBlockReference`。
+  **不写块表**（只读块定义 + 元数据），活动图层/模型空间，一条事务/一步撤销。无块选择器/palette、
+  比例/旋转/属性值/动态块参数；未知名称、缺元数据、空名/换行、非有限点都是具名拒绝。
+- **`HATCHPOINT` 边链自动发现**：除整实体闭合 `Circle`/完整 `Ellipse`/闭合 `Polyline` 外，现也在
+  **可见 `LINE`/`ARC` 边链**中找最小包含边界。新增平面半边（half-edge）面行走：端点按 `1e-6` 聚类、
+  按端点切线排序、解析射线定位种子所在面、面行走处理分支/悬挂边；最终环集仍交给唯一的
+  `HatchGeometry::new` 校验器，弧存**精确 `tan(sweep/4)` bulge**（不采样）。嵌套面作为岛屿。
+  v1 仍不支持：当前选择作为候选、`SPLINE`/椭圆弧边、非 `+Z`/其它标高、图纸空间、块成员边。
+- **词表/文案**：`COMMAND_TABLE` **101 → 102**（`INSERT`）、`COMMAND_ALIASES` **54 → 55**（`I`）、
+  `admissible_names()` **162 → 164**；i18n **+4 键**（两目录一致，总数 **932**）；UI 在 Draw 面板
+  `SPLINE` 后新增 `INSERT`（复用 `copy` 字形，点-后-名提示，明确说明没有块列表）。
+- **仍缺**：`BLOCK`/`WBLOCK`/`PASTEBLOCK`（需要运行时块表写入口 + 块级 undo 补丁）；`INSERT` 的
+  块选择器/比例/旋转/属性；`HATCHPOINT` 的选择/边类型/平面上限。
+
+### 代码 / 文档落点
+
+- 块元数据：`crates/cad-db/src/{tables,drawing/mod,drawing/access,builder}.rs`（`BlockMetadata{name, base_point}`、
+  `block_by_name` 精确后 ASCII 大小写不敏感、重复名 last-wins、空名不注册、`finish` 校验悬挂元数据）与
+  `crates/cad-import-acadrust/src/builder.rs::read_blocks`。`BlockDefinition` 未改字段（避免 ~50 个测试字面量）。
+- `INSERT`：`crates/cad-app/src/app_drawing/insert_block.rs`（新）+ `tests/drawing/insert_block.rs`（新）；
+  `command_id.rs`/`command_payload.rs`/`draw_tool/{kind,kind/definition,intent,mod}.rs`/`host/draw_intent_map.rs`/
+  `session_state.rs`/`render_scene/overlay/preview.rs`/`application.rs`/`app_drawing/{mod,drawing_create}.rs`；
+  `cad-ui-core` 的 `session/commands.rs`、`command_vocabulary.rs`、`tests_tools.rs`。
+- HATCH 边链：`crates/cad-app/src/app_drawing/hatch_stitch.rs`（平面半边面行走：端点聚类、切线扇排序、
+  面枚举、解析射线定位、精确 bulge）与 `hatch_internal_point.rs`（可见 LINE/ARC 收集 + 面候选合并）；
+  测试追加在既有 `tests/drawing/hatch_stitch.rs` 与 `hatch_internal_point.rs`（不新增模块）。
+- React：`commands/catalog.ts`、`ribbon/ribbon-model.ts`、`tools/text.ts`、`cad/cad.ts` 与两本 i18n；
+  新 `apps/desktop-ui/test/insert-block.test.ts`。
+- 文档：`docs/compatibility.md`（HATCH 行 + INSERT 行）、`docs/autocad-command-coverage.md`
+  （102/164/109、§3.4 INSERT、§3.1/§4 HATCH 边链、§5/§5b）、`docs/shortcuts.md`（INSERT 行、别名 `I`、计数）、
+  `docs/architecture.md`（164/55）、本文件。
+
+### 验证（本轮实际运行，合并树）
+
+- `cargo fmt --all -- --check` → exit 0。
+- `cargo check --workspace --all-targets --locked` → exit 0。
+- `cargo test -p cad-app -p cad-db -p cad-import-acadrust -p cad-ui-core --locked -- --test-threads=1` → exit 0：
+  `cad-app` **1456**、`cad-db` **161**、`cad-import-acadrust` **305**、`cad-ui-core` **342**，集成 targets 全绿
+  （外部 DWG 用例仍 **ignored**，不是已运行证据）。
+- `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` → exit 0（既有 dead-code 警告）。
+- `cargo clippy -p cad-app -p cad-ui-core -p cad-db -p cad-import-acadrust --all-targets --locked -- -D warnings` → exit 0。
+- 前端：`npx tsc --noEmit && node --test test/*.test.ts` → **886 pass / 0 fail**；`check-i18n.py` → **932 键**。
+- `python3 scripts/check-file-size.py` / `check-architecture.py` → OK；`check-command-docs.py` →
+  **102/5/2/4、55 aliases、109 canonical、§2 rows 64、0 mismatch**。
+
+### NOT RUN / NOT VERIFIED
+
+- **全 workspace 测试套件**（只跑了上述四个 crate）；`cargo test -p cad-host`/其它 crate 的独立测试。
+- **GUI / 真实 GPU / 像素 / 真窗口**：未运行任何宿主或截图；`INSERT` 的点-后-名输入、块选择器缺失的
+  真实交互、`HATCHPOINT` 边链的真实拾取都**未做视觉验收**。
+- **真实 DWG**：`INSERT` 未在真实带块图纸上运行；`HATCHPOINT` 边链未在真实图纸上运行；证据是契约测试。
+- **块写/后续**：`BLOCK`、`WBLOCK`、`PASTEBLOCK`、`INSERT` 的比例/旋转/属性/动态块、块选择器、
+  块级 undo 补丁——全部 **NOT IMPLEMENTED**。
+- **HATCHPOINT 边链之外**：当前选择作为候选、`SPLINE`/椭圆弧边、非 `+Z`/其它标高、图纸空间、块成员边——**NOT IMPLEMENTED**。
+
 ## 2026-11-01 单曲线编辑三件套：`BREAK` / `DIVIDE` / `LENGTHEN`
 
 ### 结论

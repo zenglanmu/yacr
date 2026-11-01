@@ -172,7 +172,10 @@ pub fn draw_preview_overlay(
         // command's, never a fabricated rubber-band geometry).
         | DrawToolKind::CopyBase
         | DrawToolKind::CutBase
-        | DrawToolKind::PasteClip => {
+        | DrawToolKind::PasteClip
+        // INSERT captures its one insertion point; the block name is the terminal
+        // typed text, so its live preview is the existing cursor/chain.
+        | DrawToolKind::InsertBlock => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }

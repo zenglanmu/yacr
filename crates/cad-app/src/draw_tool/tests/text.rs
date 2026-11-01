@@ -43,7 +43,8 @@ fn the_text_kind_metadata_is_explicit() {
             DrawToolKind::Text,
             DrawToolKind::TextEdit,
             DrawToolKind::MLeader,
-            DrawToolKind::MText
+            DrawToolKind::MText,
+            DrawToolKind::InsertBlock
         ]
     );
 }

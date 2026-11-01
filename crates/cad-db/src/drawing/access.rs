@@ -7,9 +7,9 @@ use crate::dim_style::DimStyle;
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::mleader_style::{MLeaderStyle, MLeaderStyleResolution};
 use crate::tables::{
-    ActiveAnnotationScale, BlockDefinition, DynamicBlockVisibility, Layer, LayerAttributes, Layout,
-    LineType, PlotMargins, PlotPaperUnits, PlotProvenance, PlotRotation, PlotSettingsRecord,
-    PlotType, Scale, Style,
+    ActiveAnnotationScale, BlockDefinition, BlockMetadata, DynamicBlockVisibility, Layer,
+    LayerAttributes, Layout, LineType, PlotMargins, PlotPaperUnits, PlotProvenance, PlotRotation,
+    PlotSettingsRecord, PlotType, Scale, Style,
 };
 
 /// Dynamic-visibility membership of one entity, snapshotted before a delete.
@@ -233,6 +233,59 @@ impl DrawingDatabase {
 
     pub fn blocks(&self) -> impl Iterator<Item = &BlockDefinition> {
         self.blocks.values()
+    }
+
+    /// The stored name/base-point metadata of a block, when it has any.
+    ///
+    /// `None` means the block is unnamed (or was built without the importer's
+    /// metadata): callers must not invent a zero base point.
+    pub fn block_metadata(&self, id: BlockId) -> Option<&BlockMetadata> {
+        self.block_metadata.get(&id)
+    }
+
+    /// The registered table name of a block, when it has one.
+    pub fn block_name(&self, id: BlockId) -> Option<&str> {
+        self.block_metadata(id)
+            .map(|metadata| metadata.name.as_str())
+    }
+
+    /// The insertion base point of a block, when it has metadata.
+    pub fn block_base_point(&self, id: BlockId) -> Option<Point3> {
+        self.block_metadata(id).map(|metadata| metadata.base_point)
+    }
+
+    /// Every block that has metadata, with its id.
+    pub fn block_metadata_entries(&self) -> impl Iterator<Item = (BlockId, &BlockMetadata)> {
+        self.block_metadata
+            .iter()
+            .map(|(id, metadata)| (*id, metadata))
+    }
+
+    /// Resolve a block definition by name, exact match first and then ASCII
+    /// case-insensitively, after trimming surrounding whitespace.
+    ///
+    /// Duplicate names are legal (the importer's own name map is last-wins), so
+    /// the **last registered** match wins within each phase. An empty/whitespace
+    /// name resolves to nothing: unnamed blocks are never addressable by name.
+    pub fn block_by_name(&self, name: &str) -> Option<&BlockDefinition> {
+        let name = name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        let exact = self
+            .block_name_order
+            .iter()
+            .rev()
+            .find(|(registered, _)| registered == name)
+            .map(|(_, id)| *id);
+        let id = exact.or_else(|| {
+            self.block_name_order
+                .iter()
+                .rev()
+                .find(|(registered, _)| registered.eq_ignore_ascii_case(name))
+                .map(|(_, id)| *id)
+        })?;
+        self.blocks.get(&id)
     }
 
     pub fn layout(&self, id: LayoutId) -> Option<&Layout> {

@@ -654,4 +654,17 @@ pub enum DrawToolKind {
     /// polylines, `SPLINE` and every other kind are explicit refusals), and
     /// AutoCAD's `DYnamic` drag mode is **NOT IMPLEMENTED**. Work-only.
     Lengthen,
+    /// INSERT: one insertion point, then the block **name** as the terminal typed
+    /// text (point-then-name order).
+    ///
+    /// The block must already exist in the drawing: this kind only creates a
+    /// reference, never a block definition (`BLOCK`/`WBLOCK` are not in this
+    /// build). The one captured point is the insertion point the block's stored
+    /// base point lands on (`T(insertion) · T(−base_point)`, the importer's own
+    /// convention); the name is submitted through the same terminal
+    /// `cad_set_tool_text` channel TEXT uses and is resolved by the command
+    /// layer exact-first then ASCII case-insensitively. An unknown name, a block
+    /// without metadata, a blank/newline/over-long name and a non-finite point
+    /// are named refusals that write nothing. Work-only.
+    InsertBlock,
 }

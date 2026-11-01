@@ -1,5 +1,12 @@
 import { MTEXT_STEP_PROMPT_KEY, MTEXT_STEP_PROMPT_KEYS } from '../tools/text.ts';
-import { TEXT_PICK_PROMPT_KEY, TEXT_STEP_PROMPT_KEY, textStepPromptKey, toolAwaitingText } from '../tools/text.ts';
+import {
+  INSERT_BLOCK_PICK_PROMPT_KEY,
+  INSERT_BLOCK_TEXT_PROMPT_KEY,
+  TEXT_PICK_PROMPT_KEY,
+  TEXT_STEP_PROMPT_KEY,
+  textStepPromptKey,
+  toolAwaitingText,
+} from '../tools/text.ts';
 import { OPEN_ENDED_PROMPTS } from '../tools/tool-open-ended.ts';
 import type { CadStatus, CadTool } from './cad-status.ts';
 
@@ -294,6 +301,19 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
     'tool.prompt.mleader.arrow',
     'tool.prompt.mleader.landing',
   ],
+  // INSERT (2026-11-01) is a **point-then-name** capture: the single pick is the
+  // insertion point of a reference to a block that already exists in the drawing,
+  // and the block name is the terminal text step (named from the host's
+  // `awaiting_text` flag by [`textStepPromptKey`], never by a count).
+  //
+  // Only the point belongs here, so this list must stay at one entry. It is not
+  // a pre-selection tool — the pick is the input — so it deliberately has **no**
+  // entry in [`PRESELECT_PROMPTS`]. The command has no block picker, no scale,
+  // no rotation and no attribute controls in v1: nothing in this step list may
+  // imply one.
+  'draw.insertblock': [
+    INSERT_BLOCK_PICK_PROMPT_KEY,
+  ],
   // HATCHPOINT is a **one-point** capture like ID: the user picks the internal
   // point, the host finds the containing closed boundary (with its nested islands)
   // and hatches with the same fill parameters HATCH uses. Exactly one pick is
@@ -389,6 +409,14 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // (see [`toolStepPromptKey`]), so the field never appears before the host says
   // so.
   'draw.mleader': 'tool.prompt.mleader.type_text',
+  // INSERT's complement is its single insertion point, so "ready" is the state
+  // between the pick and the name. No block has been resolved at that point — the
+  // user has not typed a name yet — so neither the shared dimension copy
+  // ("Dimension defined") nor anything claiming a block is available may be
+  // shown. This names the step that really comes next, the name of an existing
+  // block; the **input mode** still comes from the host's `awaiting_text` alone
+  // (see [`toolStepPromptKey`]), so the field never opens before the host says so.
+  'draw.insertblock': INSERT_BLOCK_TEXT_PROMPT_KEY,
   // HATCHPOINT's complement is its single internal point. Once it is captured the
   // capture is complete, but the host has **not** searched for the boundary yet,
   // so no copy here may claim one was found: the shared dimension ready sentence

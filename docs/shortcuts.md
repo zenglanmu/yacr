@@ -36,7 +36,7 @@
 - **补全候选**（`apps/desktop-ui/src/components/CommandLine.tsx` + `commands.ts::filterCommandSuggestions`；
   旧文档指向的 `command-bar.slint` 已随 Slint 删除）：
   - 候选来源是 **`COMMAND_CATALOG`（显示目录）+ 宿主别名表**（`cad_command_aliases`），
-    **不是**全部 101 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
+    **不是**全部 102 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
     字母序（**不去重**，也**不是**纯字典序）。
   - 输入变化即时计算候选；候选只**填充**文本，**从不执行**命令。
   - `Tab`：**仅当有高亮行**时把命令行替换成该名字（**没有**“无高亮则第一项”的回退）。
@@ -55,11 +55,11 @@
 
 ## 2. 命令表（只列**有行为注解**的选择子）
 
-> **完整清单不在这里**：穷尽的 **101 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
+> **完整清单不在这里**：穷尽的 **102 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
 > `docs/autocad-command-coverage.md` §2；本节只保留**有行为注解**的行。
 > 选择子与别名的**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs`
-> （`COMMAND_TABLE` **101** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
-> `ARGUMENT_SELECTORS` **4** / `COMMAND_ALIASES` **54**）。
+> （`COMMAND_TABLE` **102** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
+> `ARGUMENT_SELECTORS` **4** / `COMMAND_ALIASES` **55**）。
 > 本表的 **canonical 列**只出现**被准入的名字**，**别名列**只出现 `COMMAND_ALIASES` 里的真实行；
 > 键位、面板与 IPC 能力见 §2a，**不混进命令表**。
 
@@ -70,6 +70,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `LINE` | 绘制 | 是 | `L` |
 | `CIRCLE` | 绘制 | 是 | `C` |
 | `ARC` | 绘制（三点弧） | 是 | `A` |
+| `INSERT` | 块参照创建（**点-后-名**：先拾取插入点，再输入**本图已有块**的名称；`T(插入点)·T(−块基点)`，type-key `AcDbBlockReference`；**无块表写入**、无比例/旋转/属性；一条事务/一步撤销） | 是 | `I` |
 | `MOVE` | 编辑 | 是 | `M` |
 | `COPY` | 编辑 | 是 | `CO`、`CP` |
 | `ERASE` | 编辑 | 是 | `E` |
@@ -86,7 +87,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `JOIN` | 编辑（合并选择为**一个**实体：共线 `LINE` 或同心相续 `ARC`；一条事务、一步撤销，仅这两种几何） | 是 | — |
 | `FILLET POLYLINE` | 编辑（AutoCAD 的 **Polyline 模式**，独立选择子：**恰好 1 个**选中实体，每个**内顶点**用会话参数 `filletRadius` 换成两切点 + 一段圆弧；实体**原地重写**、一条事务/一步撤销；两线 `FILLET` 不变） | 是 | — |
 | `CHAMFER POLYLINE` | 编辑（同上选择式：`chamferDistanceA` 量在**入边**、`chamferDistanceB` 量在**出边**——**我们的规则**，不是 AutoCAD 提示顺序的复刻） | 是 | — |
-| `HATCHPOINT` | 绘制（**本项目选择子**：按内部点填充。在可见的**整实体闭合** `Circle` / 完整 `Ellipse` / 闭合 `Polyline` 中取**最小包含边界**，嵌套闭合实体作岛屿；**不**自动发现 `LINE`/`ARC` 链、**不**使用当前选择、只认 `+Z` 同标高；填充参数与 `HATCH` 完全相同） | 是 | — |
+| `HATCHPOINT` | 绘制（**本项目选择子**：按内部点填充。在可见的**整实体闭合** `Circle` / 完整 `Ellipse` / 闭合 `Polyline` **以及 `LINE`/`ARC` 边链**中取**最小包含边界**，嵌套环作岛屿；`LINE`/`ARC` 用平面半边面行走、弧存**精确 bulge**；**不**使用当前选择、只认 `+Z` 同标高、只支持模型空间；填充参数与 `HATCH` 完全相同） | 是 | — |
 | `LAYOFF` | 图层（关闭选择所在图层，当前层除外；会话覆盖，不写 DWG、不升 revision） | 否 | — |
 | `LAYERP` | 图层（恢复**上一次**覆盖状态；有界 16 步快照环，仅真实改动前压栈；会话内，不持久化） | 否 | — |
 | `LAYISO` | 图层（隐藏选择**不在**的图层 + 当前层保留；会话覆盖，不写 DWG、不升 revision） | 否 | — |
@@ -188,7 +189,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 - `COPYCLIP` 是**只读**捕获，Viewer 亦可用；`CUTCLIP`/`PASTECLIP` 为 work-only。
 - `OPEN`/`NEW`/`SAVE`/`PLOT` 为**宿主自有**：宿主未提供能力时命令层返回显式 `Unsupported`
   （不会静默 no-op）。
-- 别名：**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs::COMMAND_ALIASES`（**54** 行），
+- 别名：**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs::COMMAND_ALIASES`（**55** 行），
   本页 §2b 是它的转写。旧文档引用的 `cad-ui-slint` 别名/同义词/未实现命令三张表**已随 Slint 退役删除**，
   不要再去仓库里找它们。
 
@@ -248,9 +249,9 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 
 全词同义词（同样在 `COMMAND_ALIASES` 内）：`EXPORT`/`PRINT`→`PLOT`、`SAVEAS`/`QSAVE`→`SAVE`、
 `ZOOM EXTENTS`→`FIT`、`ENTER`→`CONFIRM`、`DBA`→`DIMBASELINE`、`DCO`→`DIMCONTINUE`、
-`LAYUNISO`/`LAYON`→`RESTORELAYERS`、`NEWLAYER`→`CREATELAYER`、`LEN`→`LENGTHEN`
+`LAYUNISO`/`LAYON`→`RESTORELAYERS`、`NEWLAYER`→`CREATELAYER`、`LEN`→`LENGTHEN`、`I`→`INSERT`
 （项目同义词，非 `acad.pgp`）。
-本页缩写表 **42** 个 + 本句 **12** 个 = **54** 个，与 `COMMAND_ALIASES` 的长度一致。
+本页缩写表 **42** 个 + 本句 **13** 个 = **55** 个，与 `COMMAND_ALIASES` 的长度一致。
 
 诚实边界：这张表是**面向已实现命令的 AutoCAD `acad.pgp` 子集**，不是 `acad.pgp` 解析器，
 也**不支持用户自定义别名**；目标命令不存在的缩写一律不收录，绝不用别名凭空造出命令。
@@ -370,17 +371,18 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     其余未映射组合不拦截。
 - **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
   的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
-  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**101 个选择子**，与 `CommandId` 变体一一对应；
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**102 个选择子**，与 `CommandId` 变体一一对应；
   P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`/`LAYOFF`/
   `PDMODE`/`PDSIZE`，2026-10-27 再加 `LAYERP`/`AREA OBJECT`，**2026-10-28 再加 `COPYBASE`/`CUTBASE`/
-  `PASTEORIG`，2026-11-01 再加 `HATCHPOINT`/`BREAK`/`DIVIDE`/`LENGTHEN`**——`ID` 是测量选择子、
+  `PASTEORIG`，2026-11-01 再加 `HATCHPOINT`/`BREAK`/`DIVIDE`/`LENGTHEN`/`INSERT`**——`ID` 是测量选择子、
   `LAYUNISO`/`LAYON` 是既有 `RESTORELAYERS` 的别名，都不新增 `CommandId`；`LAYERP` **已不是**别名）；
   不在表内的名字在 chrome 侧就按 `command.unsupported` 拒绝（**`command.unknown` 这个键没有消费方**，
   见 §1）；宿主侧「认识这个名字、但该路径不可用」（如 `PLOT`/`SAVE` 的受限路径）同样报告
   `command.unsupported`。两者都是显式反馈，**不静默忽略**。
 - **仍未实现的 AutoCAD 名（据实）**：`POLYLINE`（旧式 heavy 2D 折线实体；我们只有 `PLINE` 创建的
-  LWPOLYLINE，**不**给它造别名）、`XLINE`、`BLOCK`、`WBLOCK`、`INSERT` 的**创建**侧（块**引用**的读取/
-  显示/拾取已实现，见 `docs/compatibility.md`）、`IMPORT`、`XREF`、`PUBLISH`、`DIMSTYLE`（样式**编辑**
+  LWPOLYLINE，**不**给它造别名）、`XLINE`、`BLOCK`、`WBLOCK`（`INSERT` 的**创建**侧已实现 v1：只能插入
+  **本图已有块**、无块表写入/比例/旋转/属性；`BLOCK`/`WBLOCK` 仍缺，见 `docs/compatibility.md`）、
+  `IMPORT`、`XREF`、`PUBLISH`、`DIMSTYLE`（样式**编辑**
   命令未实现；DIMSTYLE **变量子集**与 `Standard` 样式表已实现）。**已实现**：`DIMLINEAR`/`DIMALIGNED`/
   `DIMRADIUS`/`DIMDIAMETER`/`DIMANGULAR`/`DIMORDINATE`/`DIMCENTER`，以及
   **`DIMBASELINE`/`DIMCONTINUE`**（2026-10-21 **解禁**并落地，P5f：**显式拾取基准线性标注**，命令
@@ -394,10 +396,12 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
   `0` Linear/`1` Spherical、`hatchGradientAngle` **度**、`hatchGradientColorA`/`B` **ACI 整数**），
   颜色**只有 ACI**（无真彩），ACI `0`（ByBlock）被拒，默认 1 红 / 5 蓝；`SPHERICAL` 在矩形/圆边界上
   会读成平色（按三角化顶点烘焙，不是径向）。**内部点求边界已实现（2026-11-01，`HATCHPOINT`，本项目选择子）**：
-  拾取一个内部点后，在**可见的整实体闭合** `Circle` / 完整 `Ellipse` / 闭合 `Polyline` 中取**最小包含边界**，
-  嵌套闭合实体作为岛屿，种子本身存进 HATCH 的 `seeds`（DXF 组 98）；**一条事务/一步撤销**，边界实体保留。
-  **v1 上限**：**不**自动发现 `LINE`/`ARC` 边链（仍请用 `HATCH` 预选）、**不**使用当前选择、只认 `+Z` 同标高、
-  仅模型空间；点落在边界上 / 找不到包含边界 / 两个等面积包含边界都是**具名拒绝**。
+  拾取一个内部点后，在**可见的整实体闭合** `Circle` / 完整 `Ellipse` / 闭合 `Polyline` **以及可见
+  `LINE`/`ARC` 边链**中取**最小包含边界**；`LINE`/`ARC` 用**平面半边面行走**（分支/悬挂边由面行走处理），
+  弧存**精确 bulge**、不采样；嵌套环作为岛屿，种子本身存进 HATCH 的 `seeds`（DXF 组 98）；
+  **一条事务/一步撤销**，边界实体保留。
+  **v1 上限**：**不**使用当前选择、只认 `+Z` 同标高、仅模型空间；`SPLINE`/椭圆弧边、块成员边仍不支持；
+  点落在边界上 / 找不到包含边界 / 两个等面积包含边界都是**具名拒绝**。
   **HATCH 仍未实现**：**自定义（`76=2`）图案名与 `.pat` 加载**、**关联性**（其余拒绝面见
   `docs/compatibility.md` 的 HATCH 行）。
 - **`TEXT`/`MTEXT` 创建的两个参数（2026-10-28）**：**`textRotation`**（通道**度**，任意有限、**不 wrap**、

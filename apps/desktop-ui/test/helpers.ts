@@ -108,6 +108,11 @@ export const HOST_NAMES = [
   // MLEADER (ADR 0019 P7c): the two-point leader whose text step uses the same
   // channel. Its own suite lives in `mleader-tool.test.mjs`.
   'MLEADER',
+  // INSERT (2026-11-01): the point-then-name block reference. One pick sets the
+  // insertion point, then the block name travels on the same terminal text step
+  // (`cad_set_tool_text`). It is a canonical selector of its own — never an alias
+  // of anything — so admitting it admits exactly this capture.
+  'INSERT',
   // Interaction-only selectors: one per measurement kind, plus fixed zoom steps.
   // ID (2026-10-26) joined the measurement kinds: one point pick, reported as
   // X/Y/Z plus the snap that produced it (`command.log.point`). `AREA OBJECT`

@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 44] = [
+    pub const ALL: [DrawToolKind; 45] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -113,6 +113,9 @@ impl DrawToolKind {
         // parameter channel (no captured point, no entity-pick step).
         DrawToolKind::Divide,
         DrawToolKind::Lengthen,
+        // INSERT is appended for the same index-stability reason: one insertion
+        // point then the block name through the terminal text channel.
+        DrawToolKind::InsertBlock,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -162,6 +165,7 @@ impl DrawToolKind {
             Self::Break => "break",
             Self::Divide => "divide",
             Self::Lengthen => "lengthen",
+            Self::InsertBlock => "insertblock",
         }
     }
 
@@ -213,6 +217,7 @@ impl DrawToolKind {
             "break" => Some(Self::Break),
             "divide" => Some(Self::Divide),
             "lengthen" => Some(Self::Lengthen),
+            "insertblock" => Some(Self::InsertBlock),
             _ => None,
         }
     }
@@ -345,6 +350,7 @@ impl DrawToolKind {
             // DIVIDE/LENGTHEN share the same locale-neutral fallback rule.
             Self::Divide => "DIVIDE",
             Self::Lengthen => "LENGTHEN",
+            Self::InsertBlock => "INSERT",
         }
     }
 
@@ -393,7 +399,10 @@ impl DrawToolKind {
             | Self::PasteClip
             // HATCHPOINT captures the one internal point the boundary is
             // discovered from.
-            | Self::HatchPoint => PointArity::Exact(1),
+            | Self::HatchPoint
+            // INSERT captures its one insertion point; the block name is the
+            // terminal typed text, not a point.
+            | Self::InsertBlock => PointArity::Exact(1),
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot, so its complement is
             // the zero-point exact arity (ready as soon as the selection is
@@ -541,7 +550,7 @@ impl DrawToolKind {
     pub fn requires_text(self) -> bool {
         matches!(
             self,
-            Self::Text | Self::TextEdit | Self::MLeader | Self::MText
+            Self::Text | Self::TextEdit | Self::MLeader | Self::MText | Self::InsertBlock
         )
     }
 }

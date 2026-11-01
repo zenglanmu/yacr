@@ -398,3 +398,143 @@ fn a_non_finite_or_non_positive_linetype_scale_sanitises_to_the_identity() {
     assert!(stored.is_nan(), "the stored factor is kept as read");
     assert_eq!(sanitize_linetype_scale(stored), 1.0);
 }
+
+/// An empty block definition (metadata is registered separately).
+fn empty_block(id: BlockId) -> BlockDefinition {
+    BlockDefinition {
+        id,
+        entities: Vec::new(),
+        dynamic_visibility: None,
+    }
+}
+
+#[test]
+fn block_metadata_round_trips_name_and_base_point() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_block(empty_block(BlockId(0))).unwrap();
+    b.set_block_metadata(BlockId(0), "  B  ", point(1.0, 0.0))
+        .unwrap();
+    let db = b.finish().unwrap();
+
+    let metadata = db.block_metadata(BlockId(0)).expect("stored metadata");
+    assert_eq!(metadata.name, "B", "the name is trimmed on registration");
+    assert_eq!(metadata.base_point, point(1.0, 0.0));
+    assert_eq!(db.block_name(BlockId(0)), Some("B"));
+    assert_eq!(db.block_base_point(BlockId(0)), Some(point(1.0, 0.0)));
+    assert_eq!(
+        db.block_metadata_entries()
+            .map(|(id, metadata)| (id, metadata.name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(BlockId(0), "B")]
+    );
+}
+
+#[test]
+fn block_by_name_prefers_exact_then_falls_back_to_ascii_case_insensitive() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_block(empty_block(BlockId(0))).unwrap();
+    b.insert_block(empty_block(BlockId(1))).unwrap();
+    b.set_block_metadata(BlockId(0), "Mix", point(0.0, 0.0))
+        .unwrap();
+    b.set_block_metadata(BlockId(1), "other", point(0.0, 0.0))
+        .unwrap();
+    let db = b.finish().unwrap();
+
+    assert_eq!(db.block_by_name("Mix").map(|b| b.id), Some(BlockId(0)));
+    assert_eq!(
+        db.block_by_name("  Mix  ").map(|b| b.id),
+        Some(BlockId(0)),
+        "lookup trims surrounding whitespace"
+    );
+    assert_eq!(
+        db.block_by_name("mIx").map(|b| b.id),
+        Some(BlockId(0)),
+        "lookup is ASCII case-insensitive"
+    );
+    assert_eq!(db.block_by_name("missing"), None);
+    assert_eq!(db.block_by_name("   "), None);
+}
+
+#[test]
+fn duplicate_block_names_are_last_registered_wins() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_block(empty_block(BlockId(0))).unwrap();
+    b.insert_block(empty_block(BlockId(1))).unwrap();
+    b.set_block_metadata(BlockId(0), "B", point(0.0, 0.0))
+        .unwrap();
+    b.set_block_metadata(BlockId(1), "b", point(1.0, 1.0))
+        .unwrap();
+    let db = b.finish().unwrap();
+
+    // The folded duplicate is the last registration, and an exact spelling still
+    // wins within the exact phase.
+    assert_eq!(db.block_by_name("b").map(|b| b.id), Some(BlockId(1)));
+    assert_eq!(db.block_by_name("B").map(|b| b.id), Some(BlockId(0)));
+}
+
+#[test]
+fn an_empty_block_name_is_not_registered() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_block(empty_block(BlockId(0))).unwrap();
+    b.set_block_metadata(BlockId(0), "   ", point(1.0, 0.0))
+        .unwrap();
+    let db = b.finish().unwrap();
+
+    assert!(db.block_metadata(BlockId(0)).is_none());
+    assert_eq!(db.block_name(BlockId(0)), None);
+    assert_eq!(db.block_base_point(BlockId(0)), None);
+    assert_eq!(db.block_by_name(""), None);
+}
+
+#[test]
+fn a_non_finite_block_base_point_is_refused() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_block(empty_block(BlockId(0))).unwrap();
+    let error = b
+        .set_block_metadata(
+            BlockId(0),
+            "B",
+            Point3 {
+                x: f64::NAN,
+                y: 0.0,
+                z: 0.0,
+            },
+        )
+        .unwrap_err();
+    assert!(matches!(error, CadError::InvalidInput(_)), "{error:?}");
+    assert!(b.finish().unwrap().block_metadata(BlockId(0)).is_none());
+}
+
+#[test]
+fn metadata_for_a_missing_block_is_rejected_by_finish() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.set_block_metadata(BlockId(7), "B", point(0.0, 0.0))
+        .unwrap();
+    let error = b.finish().unwrap_err();
+    assert!(matches!(error, CadError::Invariant(_)), "{error:?}");
+}
+
+#[test]
+fn an_unresolved_name_registration_exposes_no_metadata() {
+    // The builder never produces this state (a name and its metadata are written
+    // together), but the read API must not pretend a metadata row exists: the
+    // command layer treats it as `insert.block_metadata_missing` instead of
+    // inventing a zero base.
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_block(empty_block(BlockId(0))).unwrap();
+    b.set_block_metadata(BlockId(0), "B", point(1.0, 0.0))
+        .unwrap();
+    let mut db = b.finish().unwrap();
+    db.block_metadata.remove(&BlockId(0));
+
+    assert_eq!(
+        db.block_by_name("B").map(|block| block.id),
+        Some(BlockId(0)),
+        "the name registration still resolves the definition"
+    );
+    assert!(
+        db.block_metadata(BlockId(0)).is_none(),
+        "no base point is fabricated"
+    );
+    assert!(db.block_base_point(BlockId(0)).is_none());
+}

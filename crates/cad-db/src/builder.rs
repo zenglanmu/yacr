@@ -9,8 +9,8 @@ use crate::drawing::DrawingDatabase;
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::mleader_style::MLeaderStyle;
 use crate::tables::{
-    ActiveAnnotationScale, BlockDefinition, DynamicBlockVisibility, Layer, LayerAttributes, Layout,
-    LineType, PlotSettingsRecord, Scale, Style,
+    ActiveAnnotationScale, BlockDefinition, BlockMetadata, DynamicBlockVisibility, Layer,
+    LayerAttributes, Layout, LineType, PlotSettingsRecord, Scale, Style,
 };
 
 /// The only sanctioned way to construct a [`DrawingDatabase`].
@@ -31,6 +31,8 @@ impl DrawingDatabaseBuilder {
                 entities: BTreeMap::new(),
                 layers: BTreeMap::new(),
                 blocks: BTreeMap::new(),
+                block_metadata: BTreeMap::new(),
+                block_name_order: Vec::new(),
                 layouts: BTreeMap::new(),
                 styles: BTreeMap::new(),
                 linetypes: BTreeMap::new(),
@@ -114,6 +116,57 @@ impl DrawingDatabaseBuilder {
 
     pub fn insert_block(&mut self, block: BlockDefinition) -> CadResult<()> {
         self.database.blocks.insert(block.id, block);
+        Ok(())
+    }
+
+    /// Record a block's table name and insertion base point.
+    ///
+    /// The block must already have been inserted: metadata for an unknown block
+    /// is a caller bug and is rejected at [`Self::finish`] (block entities are
+    /// filled in after the definition is created, exactly like the dynamic
+    /// visibility descriptor).
+    ///
+    /// The name is trimmed. An empty/whitespace-only name is **not registered**
+    /// (the block stays unnamed and is not addressable by name) and leaves no
+    /// metadata behind, so no zero base point is ever invented. A non-finite base
+    /// point is refused. Duplicate names are allowed; [`DrawingDatabase::block_by_name`]
+    /// resolves the **last registered** duplicate, matching the importer's own
+    /// name map, so a duplicate is never an import abort.
+    pub fn set_block_metadata(
+        &mut self,
+        id: BlockId,
+        name: &str,
+        base_point: Point3,
+    ) -> CadResult<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            // An empty name means "leave the block unnamed": clear any previous
+            // registration for this id rather than keeping a stale spelling alive.
+            self.database.block_metadata.remove(&id);
+            self.database
+                .block_name_order
+                .retain(|(_, existing)| *existing != id);
+            return Ok(());
+        }
+        if !base_point.x.is_finite() || !base_point.y.is_finite() || !base_point.z.is_finite() {
+            return Err(CadError::InvalidInput(format!(
+                "block '{}' has a non-finite base point",
+                name
+            )));
+        }
+        self.database.block_metadata.insert(
+            id,
+            BlockMetadata {
+                name: name.to_string(),
+                base_point,
+            },
+        );
+        // A re-registration replaces the block's previous name completely, so no
+        // stale spelling can resolve to the new metadata.
+        self.database
+            .block_name_order
+            .retain(|(_, existing)| *existing != id);
+        self.database.block_name_order.push((name.to_string(), id));
         Ok(())
     }
 
@@ -452,6 +505,24 @@ impl DrawingDatabaseBuilder {
                         ));
                     }
                 }
+            }
+        }
+        // Block metadata must resolve to a real block and keep a finite base
+        // point: a dangling entry would never be addressable, and a non-finite
+        // one would poison every reference transform built from it.
+        for (id, metadata) in &self.database.block_metadata {
+            if !self.database.blocks.contains_key(id) {
+                self.errors
+                    .push(format!("block metadata for missing block {id:?}"));
+            }
+            if !metadata.base_point.x.is_finite()
+                || !metadata.base_point.y.is_finite()
+                || !metadata.base_point.z.is_finite()
+            {
+                self.errors.push(format!(
+                    "block {id:?} ('{}') has a non-finite base point",
+                    metadata.name
+                ));
             }
         }
         if !self.errors.is_empty() {

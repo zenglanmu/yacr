@@ -597,6 +597,9 @@ impl SessionState {
             DrawToolKind::Hatch => CommandId::Hatch,
             DrawToolKind::HatchPoint => CommandId::HatchPoint,
             DrawToolKind::Text => CommandId::CreateText,
+            // INSERT is point-then-name; the reference is created from existing
+            // block metadata, never by writing the block table.
+            DrawToolKind::InsertBlock => CommandId::InsertBlock,
             // MTEXT is the multiline create command (one `AcDbMText`).
             DrawToolKind::MText => CommandId::CreateMText,
             DrawToolKind::MLeader => CommandId::MLeader,

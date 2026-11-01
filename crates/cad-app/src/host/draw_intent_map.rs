@@ -73,6 +73,14 @@ impl HostController {
                 crate::CommandId::CreateSpline,
                 crate::CommandPayload::Points(fit_points),
             ),
+            // INSERT: the captured insertion point and the block name travel on
+            // the payload; the command resolves the name against the drawing's
+            // block metadata and composes the base-point transform. No block-table
+            // write and no selection are involved.
+            DrawIntent::InsertBlock { insertion, name } => (
+                crate::CommandId::InsertBlock,
+                crate::CommandPayload::InsertBlock { insertion, name },
+            ),
             // TEXT: the insertion point and the terminal text travel on the
             // payload; the height is the session typed channel
             // (`ToolParameter::TextHeight`), read here so the intent never carries

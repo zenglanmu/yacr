@@ -66,6 +66,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("POLYGON", CommandId::CreatePolygon),
     ("POINT", CommandId::CreatePoint),
     ("SPLINE", CommandId::CreateSpline),
+    // INSERT places a reference to an **existing** named block at one picked
+    // insertion point; the bare selector starts the point-then-name capture (the
+    // name arrives through the same terminal text channel TEXT uses). No
+    // block-table write is performed (`BLOCK`/`WBLOCK` are not implemented).
+    ("INSERT", CommandId::InsertBlock),
     ("TEXT", CommandId::CreateText),
     // MTEXT is the multiline create command **and** a real interactive tool
     // (2026-10-26): the bare selector starts the two-corner capture — first
@@ -632,6 +637,8 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("F", "FILLET"),
     ("GR", "GRID"),
     ("H", "HATCH"),
+    // AutoCAD's default abbreviation for INSERT (an existing block reference).
+    ("I", "INSERT"),
     ("L", "LINE"),
     ("LEN", "LENGTHEN"),
     ("M", "MOVE"),
@@ -787,6 +794,10 @@ pub(super) fn interaction_request_for(
         CommandId::CreatePolygon => Some(InteractionRequest::BeginDraw(DrawToolKind::Polygon)),
         CommandId::CreatePoint => Some(InteractionRequest::BeginDraw(DrawToolKind::Point)),
         CommandId::CreateSpline => Some(InteractionRequest::BeginDraw(DrawToolKind::Spline)),
+        // INSERT starts the point-then-name capture: one insertion point, then the
+        // block name through the same terminal `cad_set_tool_text` channel TEXT
+        // uses. The name resolves against the drawing's block metadata.
+        CommandId::InsertBlock => Some(InteractionRequest::BeginDraw(DrawToolKind::InsertBlock)),
         // TEXT starts the text tool: its point complement is one insertion
         // point, then the terminal text arrives through the dedicated
         // `cad_set_tool_text` channel (ADR 0019 decision A.1) — never through

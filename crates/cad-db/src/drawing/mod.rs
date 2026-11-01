@@ -13,8 +13,8 @@ use crate::dim_style::DimStyle;
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::mleader_style::MLeaderStyle;
 use crate::tables::{
-    ActiveAnnotationScale, BlockDefinition, Layer, LayerAttributes, Layout, LineType,
-    PlotSettingsRecord, Scale, Style,
+    ActiveAnnotationScale, BlockDefinition, BlockMetadata, Layer, LayerAttributes, Layout,
+    LineType, PlotSettingsRecord, Scale, Style,
 };
 
 mod access;
@@ -44,6 +44,15 @@ pub struct DrawingDatabase {
     pub(crate) entities: BTreeMap<EntityId, DbEntity>,
     pub(crate) layers: BTreeMap<LayerId, Layer>,
     pub(crate) blocks: BTreeMap<BlockId, BlockDefinition>,
+    /// Import-time name/base-point pair per named block, kept beside
+    /// [`Self::blocks`] so [`BlockDefinition`] itself stays the two-field row.
+    /// Absent entries mean "unnamed / metadata unknown", never a zero base.
+    pub(crate) block_metadata: BTreeMap<BlockId, BlockMetadata>,
+    /// Name registrations in registration order, used by
+    /// [`Self::block_by_name`] to resolve exact-first then
+    /// case-insensitively while still returning the **last** registered
+    /// duplicate. Empty names are never registered.
+    pub(crate) block_name_order: Vec<(String, BlockId)>,
     pub(crate) layouts: BTreeMap<LayoutId, Layout>,
     pub(crate) styles: BTreeMap<StyleId, Style>,
     /// Named linetype table entries (spec §3.2). Empty for hand-built

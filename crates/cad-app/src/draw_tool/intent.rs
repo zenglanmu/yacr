@@ -319,6 +319,15 @@ pub enum DrawIntent {
     /// intent (HATCHPOINT does not use it), and the boundary entities are
     /// retained (no associativity).
     HatchPoint { seed: Point3 },
+    /// INSERT: place a reference to the existing named block `name` so its stored
+    /// base point lands on `insertion` (point-then-name capture).
+    ///
+    /// The block table is **not** written; the command resolves the name against
+    /// the drawing's block metadata and composes
+    /// `T(insertion) · T(−base_point)` (the importer's own reference convention).
+    /// The name was submitted through the terminal text channel and is
+    /// re-validated by the command.
+    InsertBlock { insertion: Point3, name: String },
     /// TEXT: place `text` at the captured insertion point (ADR 0019 F.1).
     ///
     /// The height and the rotation are the session typed channel

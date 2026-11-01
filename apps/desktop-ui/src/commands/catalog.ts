@@ -42,6 +42,15 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'POLYGON', labelKey: 'draw.kind.polygon', icon: 'polygon', group: 'draw' },
   { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', group: 'draw' },
   { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', group: 'draw' },
+  // INSERT (2026-11-01) places a reference to a block that **already exists** in
+  // the drawing: one pick sets the insertion point, then the block name is typed
+  // as the terminal text step (the host commits after the text). It is listed at
+  // the end of the draw group's creation run, directly after SPLINE, so no
+  // shipped row moves. There is no block list/palette in v1 and no
+  // scale/rotation/attribute control, so no variant or option row may suggest
+  // one. The glyph is `copy` — the icon set has no insert mark, and the output is
+  // a reference to the block, the same as a copied definition.
+  { id: 'INSERT', labelKey: 'draw.kind.insertblock', icon: 'copy', group: 'draw' },
   // Single-line TEXT (ADR 0019 decision A): a point and then its text, which is
   // the command's terminal step and travels on `cad_set_tool_text`.
   { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', group: 'draw' },

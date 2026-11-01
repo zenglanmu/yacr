@@ -52,18 +52,42 @@ export const MTEXT_STEP_PROMPT_KEYS: readonly string[] = Object.freeze([
 export const MTEXT_STEP_PROMPT_KEY = 'tool.prompt.mtext.type_text';
 
 /**
+ * The catalog key of INSERT's single pick: the point the block reference is
+ * placed at (2026-11-01).
+ *
+ * `INSERT` is a **point-then-name** capture: the pick comes first and the block
+ * name is the terminal text step, so this key names a real point and never a
+ * block. Nothing here may promise a block preview, a scale or a rotation — the
+ * command has none of those in v1.
+ */
+export const INSERT_BLOCK_PICK_PROMPT_KEY = 'tool.prompt.insertblock.pick_point';
+
+/**
+ * The catalog key naming INSERT's terminal text step: the **name** of a block
+ * that already exists in the drawing.
+ *
+ * This is the text step, not a point step, so it is named from the host's
+ * `awaiting_text` flag alone (see [`textStepPromptKey`]). The copy states the
+ * v1 boundary — there is no block list or palette to pick from — instead of
+ * implying one exists.
+ */
+export const INSERT_BLOCK_TEXT_PROMPT_KEY = 'tool.prompt.insertblock.type_name';
+
+/**
  * The catalog key naming the **text step** of the active text-carrying tool.
  *
  * The host's `awaiting_text` flag decides *that* the step is open; this only
  * picks the wording. MTEXT gets its own copy because its text is multiline and
- * the prompt must not claim otherwise; every other text-carrying tool keeps the
+ * the prompt must not claim otherwise; INSERT gets its own because its text is a
+ * **block name**, not annotation text. Every other text-carrying tool keeps the
  * shared TEXT step key it had before. A missing or malformed tool block still
  * yields the shared key, never a guessed tool.
  */
 export function textStepPromptKey(tool: unknown): string {
-  return isRecord(tool) && tool.key === 'draw.mtext'
-    ? MTEXT_STEP_PROMPT_KEY
-    : TEXT_STEP_PROMPT_KEY;
+  if (!isRecord(tool)) return TEXT_STEP_PROMPT_KEY;
+  if (tool.key === 'draw.mtext') return MTEXT_STEP_PROMPT_KEY;
+  if (tool.key === 'draw.insertblock') return INSERT_BLOCK_TEXT_PROMPT_KEY;
+  return TEXT_STEP_PROMPT_KEY;
 }
 
 /** The catalog key of the length refusal, shown with the real bound. */
