@@ -268,6 +268,18 @@ impl DrawingDatabase {
     /// the **last registered** match wins within each phase. An empty/whitespace
     /// name resolves to nothing: unnamed blocks are never addressable by name.
     pub fn block_by_name(&self, name: &str) -> Option<&BlockDefinition> {
+        self.block_id_by_name(name)
+            .and_then(|id| self.blocks.get(&id))
+    }
+
+    /// The id [`Self::block_by_name`] resolves `name` to.
+    ///
+    /// One resolution rule for both the query and the write path: the **last**
+    /// registered exact match wins, else the **last** registered ASCII
+    /// case-insensitive match, after trimming; an empty name resolves to nothing.
+    /// Callers that need to reject a duplicate name read the id (a create must
+    /// not resolve to any id).
+    pub(crate) fn block_id_by_name(&self, name: &str) -> Option<BlockId> {
         let name = name.trim();
         if name.is_empty() {
             return None;
@@ -278,14 +290,13 @@ impl DrawingDatabase {
             .rev()
             .find(|(registered, _)| registered == name)
             .map(|(_, id)| *id);
-        let id = exact.or_else(|| {
+        exact.or_else(|| {
             self.block_name_order
                 .iter()
                 .rev()
                 .find(|(registered, _)| registered.eq_ignore_ascii_case(name))
                 .map(|(_, id)| *id)
-        })?;
-        self.blocks.get(&id)
+        })
     }
 
     pub fn layout(&self, id: LayoutId) -> Option<&Layout> {

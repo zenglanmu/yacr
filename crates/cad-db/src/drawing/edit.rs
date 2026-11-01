@@ -1,13 +1,10 @@
 //! The sanctioned controlled write paths for the drawing database.
 
-use std::collections::BTreeSet;
-
 use cad_domain::*;
 
 use super::{DrawingDatabase, DrawingTransaction};
 use crate::change::{ChangeMask, ChangeSet, ObjectChange};
 use crate::entity::DbEntity;
-use crate::validate::validate_entity;
 
 impl DrawingDatabase {
     /// Switch a dynamic block's active visibility state.
@@ -173,91 +170,18 @@ impl DrawingDatabase {
         transaction: TransactionId,
         changes: Vec<(EntityId, Option<DbEntity>)>,
     ) -> CadResult<ChangeSet> {
-        // Phase 1: validate everything. No mutation happens until this passes.
-        let mut seen = BTreeSet::new();
-        for (id, change) in &changes {
-            if !seen.insert(*id) {
-                return Err(CadError::Invariant(format!(
-                    "transaction {transaction:?} modifies entity {id:?} twice"
-                )));
-            }
-            // Layer locking: the authoritative gate. Every entity write in the
-            // build — command commits and history replay alike — ends up here.
-            self.ensure_change_allowed_on_locked_layer(*id, change.as_ref())?;
-            match change {
-                Some(entity) => validate_entity(self, *id, entity)?,
-                None => {
-                    if !self.entities.contains_key(id) {
-                        return Err(CadError::Invariant(format!("entity {id:?} does not exist")));
-                    }
-                }
-            }
-        }
-
-        let before = self.revision;
-        if changes.is_empty() {
-            return Ok(ChangeSet {
-                database: self.id,
-                before,
-                after: before,
-                transaction,
-                reason: reason.to_string(),
-                changes: Vec::new(),
-            });
-        }
-
-        // Phase 2: mutate. The batch is known-valid; keep the caller's order.
-        let mut ordered = Vec::with_capacity(changes.len());
-        for (id, change) in changes {
-            match change {
-                Some(entity) => {
-                    let mask = match self.entities.get(&id) {
-                        Some(previous) => ChangeMask::for_entity_update(previous, &entity),
-                        None => ChangeMask::GEOMETRY.union(ChangeMask::STYLE),
-                    };
-                    let existed = self.entities.contains_key(&id);
-                    if self
-                        .entities
-                        .get(&id)
-                        .is_some_and(|previous| previous.space != entity.space)
-                    {
-                        self.detach_block_membership(id);
-                    }
-                    self.entities.insert(id, entity);
-                    // Keep the allocator ahead of any explicitly supplied id so
-                    // a later allocation can never collide (history/undo replays
-                    // insert with their recorded ids through this same path).
-                    self.next_entity_id = self.next_entity_id.max(id.0.saturating_add(1));
-                    // A new block-member entity must appear in its block's
-                    // member list, or the geometry would exist but never be
-                    // reachable through the INSERT.
-                    self.attach_block_membership(id);
-                    if existed {
-                        ordered.push(ObjectChange::Update(ObjectId(id.0), mask));
-                    } else {
-                        ordered.push(ObjectChange::Insert(ObjectId(id.0)));
-                    }
-                }
-                None => {
-                    self.remove_entity(id);
-                    ordered.push(ObjectChange::Delete(ObjectId(id.0)));
-                }
-            }
-        }
-        let after = Revision(before.0 + 1);
-        self.revision = after;
-        Ok(ChangeSet {
-            database: self.id,
-            before,
-            after,
-            transaction,
-            reason: reason.to_string(),
-            changes: ordered,
-        })
+        // The entity-only batch is the combined block+entity path with no block
+        // rows. Keeping one implementation means validation, the layer-lock
+        // chokepoint, allocator bumps and change tracking cannot diverge between
+        // "entity only" and "entity plus block" writes.
+        self.apply_drawing_changes_with_blocks(reason, transaction, &[], changes)
     }
 
     /// Ensure entity `id` is listed as a member of its block, if it is in one.
-    fn attach_block_membership(&mut self, id: EntityId) {
+    ///
+    /// `pub(super)`: the combined block+entity apply path in the sibling
+    /// `block_edit` module performs the same mutation step.
+    pub(super) fn attach_block_membership(&mut self, id: EntityId) {
         let Some(entity) = self.entities.get(&id) else {
             return;
         };
@@ -278,7 +202,7 @@ impl DrawingDatabase {
     /// membership in any block member list are all removed. Dynamic-visibility
     /// state/member lists are pruned too, since they are keyed by entity id;
     /// leaving them would let a later switch name a nonexistent entity.
-    fn remove_entity(&mut self, id: EntityId) {
+    pub(super) fn remove_entity(&mut self, id: EntityId) {
         self.entities.remove(&id);
         self.render_attributes.remove(&id);
         self.detach_block_membership(id);
@@ -286,7 +210,7 @@ impl DrawingDatabase {
 
     /// Prune old block references on deletion or a change of owning space.
     /// Render attributes are retained when the entity itself still exists.
-    fn detach_block_membership(&mut self, id: EntityId) {
+    pub(super) fn detach_block_membership(&mut self, id: EntityId) {
         for definition in self.blocks.values_mut() {
             definition.entities.retain(|e| *e != id);
             if let Some(visibility) = definition.dynamic_visibility.as_mut() {

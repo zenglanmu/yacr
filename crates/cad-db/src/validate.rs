@@ -498,11 +498,34 @@ fn validate_mesh(mesh: &Mesh) -> CadResult<()> {
 ///   importer allocates both from the same counter);
 /// - the entity's layer exists;
 /// - the entity's space is a real space: `Model`, an existing `Paper` layout, or
-///   an existing `Block` definition.
+///   an existing `Block` definition;
+/// - an `INSERT` names an existing `Block` definition (a dangling block
+///   reference could never be expanded).
+///
+/// This is the plain, standalone check: an **empty** staged block set. The
+/// combined atomic block+entity write path uses [`validate_entity_in`] so a
+/// block created by the *same* batch is a valid target.
 pub fn validate_entity(
     db: &crate::DrawingDatabase,
     id: EntityId,
     entity: &DbEntity,
+) -> CadResult<()> {
+    validate_entity_in(db, id, entity, &std::collections::BTreeSet::new())
+}
+
+/// [`validate_entity`] with the block ids a combined batch stages.
+///
+/// `staged_blocks` are the definitions the *same* transaction creates/updates:
+/// they do not exist in `db` yet, so both `SpaceId::Block(id)` and
+/// `SemanticGeometry::Insert { block: id }` must accept them for the batch to be
+/// expressible in one revision. Every other reference still has to resolve
+/// against the stored table, so the staged set widens the check by exactly the
+/// batch, never by a guess.
+pub(crate) fn validate_entity_in(
+    db: &crate::DrawingDatabase,
+    id: EntityId,
+    entity: &DbEntity,
+    staged_blocks: &std::collections::BTreeSet<BlockId>,
 ) -> CadResult<()> {
     if entity.id != id {
         return Err(CadError::Invariant(format!(
@@ -533,11 +556,18 @@ pub fn validate_entity(
             }
         }
         SpaceId::Block(block) => {
-            if !db.blocks.contains_key(block) {
+            if !db.blocks.contains_key(block) && !staged_blocks.contains(block) {
                 return Err(CadError::Invariant(format!(
                     "entity {id:?} references missing block {block:?}"
                 )));
             }
+        }
+    }
+    if let SemanticGeometry::Insert { block, .. } = &entity.geometry {
+        if !db.blocks.contains_key(block) && !staged_blocks.contains(block) {
+            return Err(CadError::Invariant(format!(
+                "entity {id:?} references missing block {block:?}"
+            )));
         }
     }
     Ok(())

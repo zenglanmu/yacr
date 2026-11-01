@@ -50,6 +50,7 @@ impl DrawingDatabaseBuilder {
                 active_annotation_scale: None,
                 code_page: None,
                 next_entity_id: 1,
+                next_block_id: 1,
                 next_layer_id: 1,
                 bounds_cache: Default::default(),
             },
@@ -548,6 +549,12 @@ impl DrawingDatabaseBuilder {
             .max()
             .unwrap_or(0);
         self.database.next_entity_id = max_entity.saturating_add(1);
+        // Initialise the block-id allocator from the largest imported block id,
+        // so the first `allocate_block_id` can never collide with an imported
+        // definition (and a later delete of the largest row cannot make its id
+        // reusable).
+        let max_block = self.database.blocks.keys().map(|b| b.0).max().unwrap_or(0);
+        self.database.next_block_id = max_block.saturating_add(1);
         // Initialise the layer-id allocator the same way, from the largest
         // imported layer id, so the first `create_layer` can never collide and a
         // later delete of the largest row cannot make its id reusable.

@@ -18,6 +18,7 @@ use crate::tables::{
 };
 
 mod access;
+mod block_edit;
 mod bounds;
 mod edit;
 mod layer_edit;
@@ -30,6 +31,7 @@ mod transaction;
 mod test_support;
 
 pub use access::{EntityDisplayState, VisibilityMembership, VisibilityStateMembership};
+pub use block_edit::{BlockPatch, BlockRow};
 pub use layer_edit::{DEFAULT_LAYER_NAME, ILLEGAL_LAYER_NAME_CHARS};
 pub use layer_inherit::LayerScope;
 pub use transaction::DrawingTransaction;
@@ -130,6 +132,11 @@ pub struct DrawingDatabase {
     /// alias a new object). Initialised by the builder from the largest existing
     /// entity/block-member id.
     pub(crate) next_entity_id: u128,
+    /// Next block id to hand out. Monotonic like [`Self::next_entity_id`]: the
+    /// builder initialises it from `max(existing block id) + 1`, and neither a
+    /// delete nor a replay of a recorded id rewinds it, so a deleted block id is
+    /// never reused.
+    pub(crate) next_block_id: u128,
     /// Next layer id to hand out. Monotonic like [`Self::next_entity_id`]: it is
     /// initialised by the builder from `max(existing layer id) + 1` and never
     /// rewound by a delete, so a deleted layer id is never reused (a stale layer

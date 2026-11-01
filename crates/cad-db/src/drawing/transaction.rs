@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 use cad_domain::*;
 
+use super::block_edit::BlockRow;
 use super::DrawingDatabase;
 use crate::change::{ChangeMask, ChangeSet, ObjectChange};
 use crate::entity::{DbEntity, EntityRenderAttributes};
@@ -18,12 +19,16 @@ use crate::transform::transform_geometry;
 ///
 /// # Layer locking
 ///
-/// Every stager funnels through [`Self::stage`], which applies the drawing's
-/// layer-lock rule **before staging**: an entity on a locked layer cannot be
-/// inserted, updated, moved or deleted, and the call returns
+/// Every **entity** stager funnels through [`Self::stage`], which applies the
+/// drawing's layer-lock rule **before staging**: an entity on a locked layer
+/// cannot be inserted, updated, moved or deleted, and the call returns
 /// `CadError::InvalidInput` with the stable code `layer.locked`. Nothing is
 /// staged by a refused call, so `staged_len()` stays unchanged, the transaction
 /// stays empty, and the revision/history depth never move.
+///
+/// [`Self::stage_create_block`] stages a block **table** row, which has no
+/// layer: the lock rule applies to the member entities that row will own, and
+/// those are staged through the entity stagers above.
 ///
 /// `update_entity_display` is the documented exception: it stages the stored
 /// entity row **unchanged**, i.e. no effective change, so a display
@@ -37,6 +42,10 @@ pub struct DrawingTransaction<'a> {
     /// Staged changes in call order (so the published ChangeSet preserves the
     /// order in which the caller staged them, not id order).
     staged: Vec<(EntityId, Option<DbEntity>)>,
+    /// Block rows staged in this transaction (creates only in v1), committed
+    /// **with** the entity batch as one revision. See
+    /// [`Self::stage_create_block`].
+    staged_blocks: Vec<(BlockId, Option<BlockRow>)>,
     /// Ids whose staged change is an affine move; used to add
     /// [`ChangeMask::TRANSFORM`] to the resulting update. The shared apply path
     /// cannot infer "move" from the before/after pair alone.
@@ -68,6 +77,7 @@ impl<'a> DrawingTransaction<'a> {
             reason: reason.to_string(),
             transaction,
             staged: Vec::new(),
+            staged_blocks: Vec::new(),
             transformed: BTreeSet::new(),
             display: Vec::new(),
             seen: BTreeSet::new(),
@@ -75,8 +85,11 @@ impl<'a> DrawingTransaction<'a> {
     }
 
     /// Number of staged changes (used by tests and the UI status).
+    ///
+    /// Block rows staged by [`Self::stage_create_block`] count too: they are
+    /// part of the same commit.
     pub fn staged_len(&self) -> usize {
-        self.staged.len()
+        self.staged.len() + self.staged_blocks.len()
     }
 
     /// Stage insertion of a new entity, returning its id.
@@ -159,6 +172,38 @@ impl<'a> DrawingTransaction<'a> {
         Ok(())
     }
 
+    /// Stage creation of a block table row, returning its id.
+    ///
+    /// The row carries the definition (with its exact member list) and, for a
+    /// runtime create, the name/base-point metadata. The id must not already
+    /// exist and must not have been staged in this transaction; the id is
+    /// normally taken from [`DrawingDatabase::allocate_block_id`]. All
+    /// structural/name/membership validation runs at commit, together with the
+    /// entity batch, so the block and its members land in **one** revision.
+    ///
+    /// Members are moved with the ordinary
+    /// [`Self::update_entity`] stager and the reference is inserted with
+    /// [`Self::insert_entity`]; the existing lock chokepoint then refuses a
+    /// member on a locked layer before anything is staged.
+    ///
+    /// There is no public `stage_delete_block` in this version: block deletion
+    /// exists only through
+    /// [`DrawingDatabase::apply_drawing_changes_with_blocks`], for the future
+    /// history replay path.
+    pub fn stage_create_block(&mut self, row: BlockRow) -> CadResult<BlockId> {
+        let id = row.definition.id;
+        if self.database.blocks.contains_key(&id) {
+            return Err(CadError::Invariant(format!("block {id:?} already exists")));
+        }
+        if self.staged_blocks.iter().any(|(staged, _)| *staged == id) {
+            return Err(CadError::Invariant(format!(
+                "block {id:?} is created more than once in one transaction"
+            )));
+        }
+        self.staged_blocks.push((id, Some(row)));
+        Ok(id)
+    }
+
     /// Stage deletion of an existing entity.
     pub fn delete_entity(&mut self, id: EntityId) -> CadResult<()> {
         if !self.database.entities.contains_key(&id) {
@@ -223,11 +268,15 @@ impl<'a> DrawingTransaction<'a> {
     /// On failure the database is untouched.
     pub fn commit(mut self) -> CadResult<ChangeSet> {
         let staged = std::mem::take(&mut self.staged);
+        let staged_blocks = std::mem::take(&mut self.staged_blocks);
         let transformed = std::mem::take(&mut self.transformed);
         let display = std::mem::take(&mut self.display);
-        let mut changeset =
-            self.database
-                .apply_drawing_changes(&self.reason, self.transaction, staged)?;
+        let mut changeset = self.database.apply_drawing_changes_with_blocks(
+            &self.reason,
+            self.transaction,
+            &staged_blocks,
+            staged,
+        )?;
         // The apply path sees only before/after, so it cannot know a change was
         // a deliberate move. Add the TRANSFORM bit here for the moved ids; the
         // geometry/validation/mutation all happened in the shared path.

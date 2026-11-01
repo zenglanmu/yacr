@@ -314,6 +314,15 @@ pub(super) fn grip_app() -> (Application, SessionState) {
     // The block-reference fixture: `translate(7, -3, 2) * rotate(0.4 about Z) *
     // scale(2, 3, 4)`, i.e. the importer's placement order with the block base
     // point already folded in, so the reference's insertion point is `INSERT_AT`.
+    // The referenced definition must exist: the entity write path validates that
+    // an `Insert` names a real block (a dangling reference is a damaged document,
+    // not something a transaction may create).
+    b.insert_block(cad_db::BlockDefinition {
+        id: BlockId(3),
+        entities: Vec::new(),
+        dynamic_visibility: None,
+    })
+    .unwrap();
     b.insert_entity(ent(
         INSERT,
         SemanticGeometry::Insert {

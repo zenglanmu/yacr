@@ -15,12 +15,13 @@
 //! in `cad-db` at exactly two places, and **no command anywhere carries its own
 //! lock check**:
 //!
-//! * `DrawingTransaction::stage` — all five transaction stagers
+//! * `DrawingTransaction::stage` — all five entity stagers
 //!   (`insert_entity`, `update_entity`, `update_entity_display`, `delete_entity`,
 //!   `transform_entity`) funnel through it, so a refused write stages
 //!   **nothing**: the transaction stays empty, the revision and the history
 //!   depth are untouched, and the caller sees the error at the call that asked
-//!   for the write.
+//!   for the write. (`stage_create_block` stages a block table row, which has no
+//!   layer; its members are locked through these same entity stagers.)
 //! * [`DrawingDatabase::apply_drawing_changes`] — the single validated write
 //!   path. Every commit and every history replay goes through it, and it checks
 //!   the whole batch in its validation phase, **before** mutating anything. So a

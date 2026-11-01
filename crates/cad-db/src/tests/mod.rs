@@ -3,6 +3,7 @@
 use super::*;
 use cad_domain::*;
 
+mod block_edit;
 mod bounds;
 mod builder;
 mod drawing;
