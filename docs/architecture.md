@@ -125,7 +125,7 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   !tauriPresent()` 为 `false`，因此每条 CAD 命令都走 Tauri 的共享注册表。
   注意**载体侧**（2026-10-28 生产翻面）已不再受这四条限制：`apps/app-web` 的 **page 载体**跑的就是
   真 `CadSession`（`src/live.rs` + `src/page.rs`），`invoke` 一条入口服务**全部 20 条** wire 命令，
-  `shell_commands()` = `admissible_names()`（165 个名字）、`shell_aliases()` = `alias_pairs()`（55 行），
+  `shell_commands()` = `admissible_names()`（167 个名字）、`shell_aliases()` = `alias_pairs()`（56 行），
   所以**适配器**仍然只路由四条，但会话本身已能执行其余命令；把 `web-adapter.ts` 改成单漏斗
   `invoke` 是**下一轮前端**的事（不是会话能力缺口）。同一 wasm 实例的 **worker/offscreen 载体**
   仍是旧的 viewer 会话（无 wire/输入/弹窗面），见 `docs/validation-dom-canvas-flip-2026-10-28.md`。

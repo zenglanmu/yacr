@@ -31,6 +31,7 @@ use cad_history::{drawing_patch, drawing_patch_deleted, DrawingPatch, DrawingUnd
 
 mod align;
 mod array;
+mod block_define;
 mod break_curve;
 mod chamfer_fillet;
 mod clipboard;

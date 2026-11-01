@@ -178,8 +178,11 @@ pub fn draw_preview_overlay(
         | DrawToolKind::CutBase
         | DrawToolKind::PasteClip
         // INSERT captures its one insertion point; the block name is the terminal
-        // typed text, so its live preview is the existing cursor/chain.
-        | DrawToolKind::InsertBlock => {
+        // typed text, so its live preview is the existing cursor/chain. BLOCK is
+        // the same one-point shape: the selection becomes the members at commit,
+        // so no fabricated block preview is drawn here.
+        | DrawToolKind::InsertBlock
+        | DrawToolKind::BlockDefine => {
             let chain = preview_chain(&preview.points, preview.cursor);
             (chain.len() >= 2).then_some(chain)
         }

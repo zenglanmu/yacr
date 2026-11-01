@@ -578,6 +578,9 @@ impl SessionState {
             // SCALETEXT is the same zero-point pre-selection edit: the selection is
             // the input and the factor is the typed parameter channel.
             DrawToolKind::ScaleText => CommandId::ScaleText,
+            // BLOCK: the selection snapshot plus one base point and the terminal
+            // name define the new block definition and its reference.
+            DrawToolKind::BlockDefine => CommandId::DefineBlock,
             DrawToolKind::Rotate => CommandId::RotateEntities,
             DrawToolKind::Scale => CommandId::ScaleEntities,
             DrawToolKind::Mirror => CommandId::MirrorEntities,

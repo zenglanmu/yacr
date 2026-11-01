@@ -51,6 +51,17 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // one. The glyph is `copy` — the icon set has no insert mark, and the output is
   // a reference to the block, the same as a copied definition.
   { id: 'INSERT', labelKey: 'draw.kind.insertblock', icon: 'copy', group: 'draw' },
+  // BLOCK (2026-11-01) is the other half of the block pair and sits directly
+  // beside INSERT: it turns the **current selection** into a new block definition
+  // and replaces it with a reference placed at the picked base point. The flow is
+  // selection already made → pick base point → type a new block name (the
+  // terminal text step). It is not a pre-selection tool: the base pick is the
+  // input, so a preselection entry would hide it. v1 has no attributes, no
+  // dynamic-block options and no retain/delete choice — the selected objects move
+  // into the new block — so no variant row or option caret may imply otherwise.
+  // The glyph is the shared `copy` mark, like INSERT: the icon set has no
+  // block-specific name, and the output is a reference to the block definition.
+  { id: 'BLOCK', labelKey: 'draw.kind.blockdefine', icon: 'copy', group: 'draw' },
   // Single-line TEXT (ADR 0019 decision A): a point and then its text, which is
   // the command's terminal step and travels on `cad_set_tool_text`.
   { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', group: 'draw' },

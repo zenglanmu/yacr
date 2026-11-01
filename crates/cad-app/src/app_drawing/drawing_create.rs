@@ -23,6 +23,7 @@ impl Application {
             CommandId::MLeader => self.create_mleader(session, command),
             CommandId::TextEdit => self.edit_text(command),
             CommandId::InsertBlock => self.insert_block(session, command),
+            CommandId::DefineBlock => self.define_block(session, command),
             CommandId::DimLinear => self.dim_linear(session, command),
             CommandId::DimAligned => self.dim_aligned(session, command),
             CommandId::DimRadius => self.dim_radius(session, command),

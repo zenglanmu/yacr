@@ -59,6 +59,7 @@ test('the active-tool chip keys exist in both catalogs with matching placeholder
     'tool.draw.point', 'tool.draw.spline', 'tool.draw.dimlinear', 'tool.draw.dimaligned',
     'tool.draw.hatch', 'tool.draw.hatchpoint',
     'tool.draw.insertblock',
+    'tool.draw.blockdefine',
     'tool.draw.break', 'tool.draw.divide', 'tool.draw.lengthen',
     'tool.draw.scaletext',
     'tool.measure.distance', 'tool.measure.polyline', 'tool.measure.angle',

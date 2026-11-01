@@ -571,6 +571,16 @@ impl DrawTool {
         if self.kind == DrawToolKind::ScaleText {
             return Ok(DrawIntent::ScaleText);
         }
+        // BLOCK captures exactly one base point plus the block name from the
+        // terminal text channel (the `requires_text` gate above refuses a missing
+        // name). The selection snapshot travels separately through the confirmed
+        // intent mapping, so the intent carries only the pick and the name.
+        if self.kind == DrawToolKind::BlockDefine {
+            return Ok(DrawIntent::BlockDefine {
+                base: self.points[0],
+                name: self.text.clone().unwrap_or_default(),
+            });
+        }
         // HATCHPOINT captures exactly one internal point; the boundary discovery
         // and every refusal belong to the command layer, so the intent is just
         // that seed.
@@ -894,6 +904,12 @@ impl DrawTool {
             // SCALETEXT: handled by the early return above (zero captured points).
             // The arm is unreachable here but keeps the match exhaustive.
             DrawToolKind::ScaleText => DrawIntent::ScaleText,
+            // BLOCK: handled by the early return above (one base point plus the
+            // terminal name). Unreachable here; keeps the match exhaustive.
+            DrawToolKind::BlockDefine => DrawIntent::BlockDefine {
+                base: a,
+                name: self.text.clone().unwrap_or_default(),
+            },
         })
     }
 }

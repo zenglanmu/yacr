@@ -276,14 +276,24 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', command: 'SPLINE' },
           // INSERT (2026-11-01) is the point-then-name block reference: the pick
           // sets the insertion point of a block that **already exists** in the
-          // drawing, then the block name is the terminal text step. It closes the
-          // panel's creation run — directly after SPLINE, before OFFSET — so no
+          // drawing, then the block name is the terminal text step. It sits at the
+          // tail of the panel's creation run — directly after SPLINE, with the
+          // block definition command BLOCK beside it before OFFSET — so no
           // shipped row moves and the HATCH/HATCHPOINT tail keeps its slot. Small
           // button with **no variant popover**: v1 has no block picker/list and no
           // scale/rotation/attribute controls, so a caret would imply choices the
           // command does not have. Glyph `copy`: the icon set has no insert mark,
           // and the output is a reference to the block definition.
           { id: 'INSERT', labelKey: 'draw.kind.insertblock', icon: 'copy', command: 'INSERT' },
+          // BLOCK (2026-11-01) sits directly beside INSERT: it turns the current
+          // selection into a new block definition and replaces it with a reference
+          // at the picked base point, then takes the new block name as the terminal
+          // text step. Small button with **no variant popover**: v1 has no
+          // attributes, no dynamic-block options and no retain/delete choice (the
+          // selected objects move into the new block), and a caret here would imply
+          // choices the command does not have. Glyph `copy`, the same block mark
+          // INSERT uses.
+          { id: 'BLOCK', labelKey: 'draw.kind.blockdefine', icon: 'copy', command: 'BLOCK' },
           { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', command: 'OFFSET' },
           // Single-line TEXT (ADR 0019 decision A). It is a small button next to
           // OFFSET, before HATCH: like HATCH it is not a primary creation tool,
@@ -476,11 +486,16 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'POLYGON', labelKey: 'draw.kind.polygon', icon: 'polygon', command: 'POLYGON' },
           { id: 'POINT', labelKey: 'draw.kind.point', icon: 'point', command: 'POINT' },
           { id: 'SPLINE', labelKey: 'draw.kind.spline', icon: 'spline', command: 'SPLINE' },
-          // Same slot as on the Home panel: INSERT ends the creation run, one
-          // pick for the insertion point and then the block name as the terminal
-          // text step (see the Home/draw comment for the point-then-name shape,
-          // the absent block picker and why it is a small button with no popover).
+          // Same slot as on the Home panel: INSERT sits at the tail of the
+          // creation run, one pick for the insertion point and then the block
+          // name as the terminal text step (see the Home/draw comment for the
+          // absent block picker and why it is a small button with no popover).
           { id: 'INSERT', labelKey: 'draw.kind.insertblock', icon: 'copy', command: 'INSERT' },
+          // Same slot as on the Home panel: BLOCK sits directly beside INSERT and
+          // takes the current selection plus one base-point pick, then the new
+          // block name (see the Home/draw comment for the shape and why it is a
+          // small button with no popover).
+          { id: 'BLOCK', labelKey: 'draw.kind.blockdefine', icon: 'copy', command: 'BLOCK' },
           { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', command: 'OFFSET' },
           // Same draw-group tail on the Draw tab: TEXT and MTEXT, then MLEADER
           // next to them, then Hatch and its point-pick entry — the small-button

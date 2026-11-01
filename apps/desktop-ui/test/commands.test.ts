@@ -178,6 +178,16 @@ test('the command catalog lists exactly the router-refused dead affordances, and
   assert.equal(isSupportedCommand('ANGLE'), false, 'ANGLE');
   assert.equal(isSupportedCommand('PLINE'), true, 'PLINE is a router-admitted draw selector');
   assert.equal(COMMAND_CATALOG.some(command => command.id === 'PLINE'), true, 'PLINE is catalogued');
+  // BLOCK (2026-11-01) is the block **definition** selector: catalogued in the
+  // draw group beside INSERT and admitted by the same router vocabulary, never as
+  // an alias of INSERT (which consumes a block that already exists).
+  assert.equal(isSupportedCommand('BLOCK'), true, 'BLOCK is a router-admitted draw selector');
+  assert.equal(admitCommandText('BLOCK', { status: loaded }).kind, 'admitted');
+  assert.deepEqual(
+    { ...COMMAND_CATALOG.find(command => command.id === 'BLOCK') },
+    { id: 'BLOCK', labelKey: 'draw.kind.blockdefine', icon: 'copy', group: 'draw' },
+  );
+  assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('BLOCK'), false, 'BLOCK is reachable');
   // The fixed affordances are no longer dead.
   for (const id of ['DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'ZOOMIN', 'ZOOMOUT']) {
     assert.equal(ROUTER_REFUSED_AFFORDANCES.includes(id), false, id);

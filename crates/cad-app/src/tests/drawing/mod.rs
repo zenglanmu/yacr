@@ -277,6 +277,7 @@ fn line_and_opaque_app() -> Application {
 mod align;
 mod arc_extend;
 mod array;
+mod block_define;
 mod block_undo;
 mod break_curve;
 mod chamfer_fillet;

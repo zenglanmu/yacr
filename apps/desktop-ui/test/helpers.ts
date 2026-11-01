@@ -113,6 +113,13 @@ export const HOST_NAMES = [
   // (`cad_set_tool_text`). It is a canonical selector of its own — never an alias
   // of anything — so admitting it admits exactly this capture.
   'INSERT',
+  // BLOCK (2026-11-01): the block **definition** command. It starts from the
+  // current selection (the host begins it only with a non-empty selection), takes
+  // one base-point pick, then the new block name on the same terminal text step
+  // (`cad_set_tool_text`). It is a canonical selector of its own — never an alias
+  // of INSERT, which consumes a block that already exists — so admitting one
+  // admits exactly its own capture.
+  'BLOCK',
   // Interaction-only selectors: one per measurement kind, plus fixed zoom steps.
   // ID (2026-10-26) joined the measurement kinds: one point pick, reported as
   // X/Y/Z plus the snap that produced it (`command.log.point`). `AREA OBJECT`

@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 46] = [
+    pub const ALL: [DrawToolKind; 47] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -119,6 +119,10 @@ impl DrawToolKind {
         // SCALETEXT is appended for the same index-stability reason: it is the
         // zero-point pre-selection edit that scales the selected text glyphs.
         DrawToolKind::ScaleText,
+        // BLOCK is appended for the same index-stability reason: the selection
+        // snapshot at start, one base point, then the block name through the
+        // terminal text channel.
+        DrawToolKind::BlockDefine,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -170,6 +174,7 @@ impl DrawToolKind {
             Self::Lengthen => "lengthen",
             Self::InsertBlock => "insertblock",
             Self::ScaleText => "scaletext",
+            Self::BlockDefine => "blockdefine",
         }
     }
 
@@ -223,6 +228,7 @@ impl DrawToolKind {
             "lengthen" => Some(Self::Lengthen),
             "insertblock" => Some(Self::InsertBlock),
             "scaletext" => Some(Self::ScaleText),
+            "blockdefine" => Some(Self::BlockDefine),
             _ => None,
         }
     }
@@ -357,6 +363,7 @@ impl DrawToolKind {
             Self::Lengthen => "LENGTHEN",
             Self::InsertBlock => "INSERT",
             Self::ScaleText => "SCALETEXT",
+            Self::BlockDefine => "BLOCK",
         }
     }
 
@@ -407,8 +414,10 @@ impl DrawToolKind {
             // discovered from.
             | Self::HatchPoint
             // INSERT captures its one insertion point; the block name is the
-            // terminal typed text, not a point.
-            | Self::InsertBlock => PointArity::Exact(1),
+            // terminal typed text, not a point. BLOCK captures its one base
+            // point; the block name is the terminal typed text.
+            | Self::InsertBlock
+            | Self::BlockDefine => PointArity::Exact(1),
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot, so its complement is
             // the zero-point exact arity (ready as soon as the selection is
@@ -493,6 +502,9 @@ impl DrawToolKind {
                 // SCALETEXT rewrites the glyph height of the **selected** text
                 // entities, so an empty selection must never be confirmable.
                 | Self::ScaleText
+                // BLOCK defines its members from the **selected** entities, so
+                // an empty selection must never be confirmable.
+                | Self::BlockDefine
                 // COPYBASE/CUTBASE capture the **selection** into the clipboard
                 // (a selection-less capture would be an empty success), so they
                 // need one before they are ready. PASTECLIP's input is the
@@ -564,7 +576,12 @@ impl DrawToolKind {
     pub fn requires_text(self) -> bool {
         matches!(
             self,
-            Self::Text | Self::TextEdit | Self::MLeader | Self::MText | Self::InsertBlock
+            Self::Text
+                | Self::TextEdit
+                | Self::MLeader
+                | Self::MText
+                | Self::InsertBlock
+                | Self::BlockDefine
         )
     }
 }

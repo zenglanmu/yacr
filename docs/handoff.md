@@ -1,3 +1,63 @@
+## 2026-11-01 `BLOCK`：从选择创建块定义（v1，块表首次运行时可写）
+
+### 结论
+
+- **`BLOCK` 落地（Work-only，v1）**：**选择 → 基点 → 名称**（终端文本）。选中模型空间顶层实体写入新块定义：
+  成员**几何逐位保留**，只把 `space` 改为 `SpaceId::Block(new_id)`；`BlockMetadata` 存**基点**；新参照在
+  活动图层、`draw_order = max(成员 draw_order)`，变换为 identity `T(基点)·T(−基点)`。后续 `INSERT` 仍按
+  `T(I)·T(−基点)` 把块基点映射到插入点——**成员不做 `−基点` 平移**（否则后续 INSERT 会双扣）。
+- **块表首次运行时可写**：Lane A 的 `BlockRow`/`BlockPatch` + `apply_drawing_changes_with_blocks` +
+  `stage_create_block`，Lane B 的 `DrawingUndoRecord.block_patches` 与 block-aware `apply_drawing_patches`，
+  使「定义 + 成员空间移动 + 参照插入」在**一条事务/一个 revision/一步撤销**内完成；块行删除有引用安全门，
+  重名（精确/ASCII 大小写不敏感）在运行时拒绝（导入的 last-wins 不变）。
+- **`command_id.rs` 已拆分**：MATCHPROP 长文档移到 `command_id/match_prop.rs`，BLOCK 文档在
+  `command_id/block_define.rs`；枚举文件 **1000 → 970 行**。
+- **词表/文案**：`COMMAND_TABLE` **103 → 104**、`COMMAND_ALIASES` **55 → 56**（`B`）、
+  `admissible_names()` **165 → 167**；i18n **+4 键**（两目录一致，总数 **942**）；UI 在 `INSERT` 旁新增
+  `BLOCK` 小按钮（选择→基点→名称提示，明确说明属性/动态块/保留-删除未实现）。
+- **v1 上限**：无 ATTDEF/ATTRIB、动态块参数、retain/delete 选择、块选择器；实例路径/子元素/图纸空间/
+  块成员、空/换行/非法名称、非有限基点、锁定成员/活动图层都是具名拒绝。`PASTEBLOCK`/`WBLOCK` 仍缺。
+
+### 代码 / 文档落点
+
+- Lane A（`5336168`）：`crates/cad-db/src/drawing/block_edit.rs`（`BlockRow`/`BlockPatch`/allocator/combined apply）、
+  `drawing/{mod,edit,transaction}.rs`、`validate.rs`、`builder.rs`、`tests/block_edit.rs`；实体写路径现在拒绝
+  `Insert` 指向不存在的块（grip 夹具的悬空引用已补上定义）。
+- Lane B（`18a8d73`）：`crates/cad-history/src/lib.rs`（`block_patches`/validate/merge 拒绝/approx_bytes）、
+  `crates/cad-app/src/app_drawing/helpers.rs`、`app_history.rs`、全部 `DrawingUndoRecord` 字面量、
+  `tests/drawing/block_undo.rs`。
+- Lane C：`crates/cad-app/src/app_drawing/block_define.rs`（新）+ `tests/drawing/block_define.rs`（9 项）；
+  `command_id.rs`（拆分 970 行）、`command_id/{block_define,match_prop}.rs`、`command_payload.rs`、
+  `draw_tool/{kind,kind/definition,intent,mod}.rs`、`host/draw_intent_map.rs`、`session_state.rs`、`application.rs`、
+  `app_drawing/{drawing_create,mod}.rs`、`render_scene/overlay/preview.rs`；`cad-ui-core` 的
+  `session/commands.rs`、`command_vocabulary.rs`、`tests_tools.rs`。
+- Lane D：`apps/desktop-ui/src/{commands/catalog,ribbon/ribbon-model,tools/text,cad/cad}.ts` 与两本 i18n；
+  新 `apps/desktop-ui/test/block-define.test.ts`，并同步 `commands`/`helpers`/`i18n`/`insert-block` 的精确列表。
+- 文档：`docs/compatibility.md`、`docs/autocad-command-coverage.md`（104/167/111、§3.4 BLOCK、§4 WBLOCK/PASTEBLOCK）、
+  `docs/shortcuts.md`、`docs/architecture.md`、本文件。
+
+### 验证（本轮实际运行，合并树）
+
+- `cargo fmt --all -- --check` → exit 0。
+- `cargo check --workspace --all-targets --locked` → exit 0。
+- `cargo test -p cad-app -p cad-db -p cad-history -p cad-ui-core --locked -- --test-threads=1` → exit 0：
+  `cad-app` **1479**、`cad-db` **168**、`cad-history` **17**、`cad-ui-core` **342**，集成 targets 全绿
+  （外部 DWG 用例仍 **ignored**）。
+- `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` → exit 0。
+- `cargo clippy -p cad-app -p cad-db -p cad-history -p cad-ui-core --all-targets --locked -- -D warnings` → exit 0。
+- 前端：`npx tsc --noEmit && node --test test/*.test.ts` → **896 pass / 0 fail**；`check-i18n.py` → **942 键**。
+- `python3 scripts/check-file-size.py` / `check-architecture.py` / `check-command-docs.py`（104/5/2/4、56 aliases、
+  111 canonical、§2 rows 66、0 mismatch）→ 全 OK。
+
+### NOT RUN / NOT VERIFIED
+
+- **全 workspace 测试套件**（只跑了上述四个 crate）；`cargo test -p cad-host`/其它 crate 的独立测试。
+- **GUI / 真实 GPU / 像素 / 真窗口**：未运行任何宿主或截图；`BLOCK` 的基点/名称输入、块参照显示、选择清空
+  的真实交互**未做视觉验收**。
+- **真实 DWG**：未在真实带块图纸上运行；证据是契约测试。
+- **v1 之外**：`PASTEBLOCK`、`WBLOCK`、ATTDEF/ATTRIB、动态块参数、retain/delete、块选择器、块重定义/PURGE——
+  **NOT IMPLEMENTED**。
+
 ## 2026-11-01 `SCALETEXT`：按比例缩放文字字高
 
 ### 结论

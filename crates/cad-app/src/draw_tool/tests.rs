@@ -44,8 +44,10 @@ fn required_points_and_selection_are_explicit_per_kind() {
             // HATCHPOINT captures its one internal point.
             | DrawToolKind::HatchPoint
             // INSERT captures its one insertion point; the block name is the
-            // terminal typed text.
-            | DrawToolKind::InsertBlock => 1,
+            // terminal typed text. BLOCK captures its one base point; its name is
+            // also the terminal typed text.
+            | DrawToolKind::InsertBlock
+            | DrawToolKind::BlockDefine => 1,
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot. HATCH has the same
             // pre-selection shape: the selected entities are the boundary and the

@@ -84,6 +84,9 @@ impl CommandId {
                 | Self::InsertBlock
                 // SCALETEXT rewrites the selected text entities' glyph height.
                 | Self::ScaleText
+                // BLOCK writes the block table, moves the selected entities into
+                // the new definition and inserts a reference.
+                | Self::DefineBlock
         )
     }
 }

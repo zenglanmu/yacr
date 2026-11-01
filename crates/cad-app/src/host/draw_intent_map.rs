@@ -482,6 +482,17 @@ impl HostController {
                     refs: selection.to_vec(),
                 },
             ),
+            // BLOCK: the selection snapshot taken at tool start, the one captured
+            // base point and the terminal name travel on the payload; the command
+            // validates the whole set and commits one atomic transaction.
+            DrawIntent::BlockDefine { base, name } => (
+                crate::CommandId::DefineBlock,
+                crate::CommandPayload::DefineBlock {
+                    refs: selection.to_vec(),
+                    base,
+                    name,
+                },
+            ),
         };
         Ok(Command {
             schema_version: 1,

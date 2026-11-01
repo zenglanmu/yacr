@@ -408,4 +408,13 @@ pub enum DrawIntent {
     /// ([`super::ToolParameter::ScaleTextFactor`]) read by the command layer. This
     /// kind captures **no points** (the zero-point exact complement).
     ScaleText,
+    /// BLOCK: define a named block from the selection snapshot at `base`, with
+    /// the name submitted through the terminal text channel.
+    ///
+    /// `base` is the one captured base point, exactly as clicked; members keep
+    /// their geometry bit-for-bit and only change `space`, and the reference's
+    /// `T(base) · T(−base)` composition (identity) is the command layer's. The
+    /// selection refs travel separately (the caller supplies the snapshot), so
+    /// they never ride this intent.
+    BlockDefine { base: Point3, name: String },
 }

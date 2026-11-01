@@ -1,5 +1,7 @@
 import { MTEXT_STEP_PROMPT_KEY, MTEXT_STEP_PROMPT_KEYS } from '../tools/text.ts';
 import {
+  BLOCK_PICK_PROMPT_KEY,
+  BLOCK_TEXT_PROMPT_KEY,
   INSERT_BLOCK_PICK_PROMPT_KEY,
   INSERT_BLOCK_TEXT_PROMPT_KEY,
   TEXT_PICK_PROMPT_KEY,
@@ -314,6 +316,20 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
   'draw.insertblock': [
     INSERT_BLOCK_PICK_PROMPT_KEY,
   ],
+  // BLOCK (2026-11-01) starts from an existing selection — the host begins it
+  // only with a non-empty selection, exactly like COPYBASE — and captures **one
+  // point**: the base point of the new block definition. The new block's name is
+  // the terminal text step, named from the host's `awaiting_text` flag by
+  // [`textStepPromptKey`], never by a count.
+  //
+  // Only the point belongs here, so this list must stay at one entry. It is not a
+  // pre-selection tool — the pick is the input — so it deliberately has **no**
+  // entry in [`PRESELECT_PROMPTS`]. No attributes, no dynamic-block options and
+  // no retain/delete choice exist in v1, and the selected objects move into the
+  // new block: nothing in this step list may imply otherwise.
+  'draw.blockdefine': [
+    BLOCK_PICK_PROMPT_KEY,
+  ],
   // HATCHPOINT is a **one-point** capture like ID: the user picks the internal
   // point, the host finds the containing closed boundary (with its nested islands)
   // and hatches with the same fill parameters HATCH uses. Exactly one pick is
@@ -417,6 +433,14 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // block; the **input mode** still comes from the host's `awaiting_text` alone
   // (see [`toolStepPromptKey`]), so the field never opens before the host says so.
   'draw.insertblock': INSERT_BLOCK_TEXT_PROMPT_KEY,
+  // BLOCK's complement is its single base point, so "ready" is the state between
+  // the pick and the name. No block definition exists at that point — the user
+  // has not typed a name yet — so neither the shared dimension copy ("Dimension
+  // defined") nor anything claiming a block was created may be shown. This names
+  // the step that really comes next, the new block's name; the **input mode**
+  // still comes from the host's `awaiting_text` alone (see
+  // [`toolStepPromptKey`]), so the field never opens before the host says so.
+  'draw.blockdefine': BLOCK_TEXT_PROMPT_KEY,
   // HATCHPOINT's complement is its single internal point. Once it is captured the
   // capture is complete, but the host has **not** searched for the boundary yet,
   // so no copy here may claim one was found: the shared dimension ready sentence

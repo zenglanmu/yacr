@@ -682,4 +682,15 @@ pub enum DrawToolKind {
     /// rotation, alignment, style and font are preserved; an MTEXT `wrap_width` is
     /// scaled by the same factor. Work-only.
     ScaleText,
+    /// BLOCK: define a named block from the **pre-selected** entities at one
+    /// picked base point, then the block name as the terminal typed text.
+    ///
+    /// The selection snapshot is taken when the tool starts (so an empty
+    /// selection is never confirmable); the one captured point is the base. The
+    /// members keep their model-space geometry bit-for-bit and only change
+    /// `space`; the definition's base point is this pick and the reference uses
+    /// `T(base) · T(−base)` (identity), so a later `INSERT` at `I` maps the base
+    /// to `I`. The name arrives through the same `cad_set_tool_text` channel TEXT
+    /// uses and is re-validated by the command. Work-only.
+    BlockDefine,
 }

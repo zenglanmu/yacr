@@ -20,10 +20,10 @@
 2. **显式点名的 AutoCAD 名字**（不可穷尽）：只包含本仓库文档/ADR 真正讨论过的名字，
    来源是 `docs/compatibility.md`、`docs/shortcuts.md` 与各 ADR。它们的状态是**逐条读过源码**后写的。
 
-> **禁止的读法**：不得把 `103`、`165` 或本表任何数字读成「已实现 AutoCAD 的 X%」。AutoCAD 的
+> **禁止的读法**：不得把 `104`、`167` 或本表任何数字读成「已实现 AutoCAD 的 X%」。AutoCAD 的
 > 命令总数取决于版本、产品（完整版/ LT / 工具集）、是否含扩展与第三方；我们没有那份清单，
 > 也**没有**逐条比对过绝大多数命令的语义（例如同名命令的选项、提示顺序、系统变量副作用）。
-> 任何 `103/N` 形式的百分比都是**编造**。本审计回答的是：**我们自己承诺的词表是否名实相符**，
+> 任何 `104/N` 形式的百分比都是**编造**。本审计回答的是：**我们自己承诺的词表是否名实相符**，
 > 以及**我们明确点过名的 AutoCAD 名字还缺什么**。
 
 ---
@@ -32,23 +32,24 @@
 
 | 表 | 数量 | 源码位置 | 断言 / 说明 |
 |---|---|---|---|
-| `COMMAND_TABLE` | **103** 个选择子 | `crates/cad-ui-core/src/session/commands.rs:11` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 103` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs:138`（并断言每变体在表中**恰好一次**、`COMMAND_TABLE.len()` 相等） |
+| `COMMAND_TABLE` | **104** 个选择子 | `crates/cad-ui-core/src/session/commands.rs:11` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 104` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs:139`（并断言每变体在表中**恰好一次**、`COMMAND_TABLE.len()` 相等） |
 | `MEASUREMENT_SELECTORS` | **5** | 同文件 `:207` | `DIST` / `MEASUREPOLYLINE` / `MEASUREANGLE` / `AREA` / `ID`；**交互专用**，没有自己的 `CommandId` |
 | `ZOOM_STEP_SELECTORS` | **2** | 同文件 `:234` | `ZOOMIN` / `ZOOMOUT`（固定步进因子 `1.25` 与倒数，锚定视口中心） |
 | `ARGUMENT_SELECTORS` | **4** | 同文件 `:252` | `ZOOM` / `SNAPUNIT` / `PDMODE` / `PDSIZE`——**接受命令行参数的基选择子**，不是新命令、不是第二条 IPC |
-| `COMMAND_ALIASES` | **55** 行 | 同文件 `:576` | 别名 + 全词同义词；只收录**目标选择子真实存在**的拼写 |
-| `admissible_names()` | **165** 个可输入拼写 | 同文件（`admissible_names` 函数） | 103 + 5 + 2 + 55，去重后仍为 165（无重名）；这是**拼写**数，**不是**命令数 |
+| `COMMAND_ALIASES` | **56** 行 | 同文件 `:585` | 别名 + 全词同义词；只收录**目标选择子真实存在**的拼写 |
+| `admissible_names()` | **167** 个可输入拼写 | 同文件（`admissible_names` 函数） | 104 + 5 + 2 + 56，去重后仍为 167（无重名）；这是**拼写**数，**不是**命令数 |
 
-> 这些数字是**当前源码表的长度**（本次复核：表 103 / 测量 5 / 缩放 2 / 参数 4 / 别名 55 / 拼写 165）。
+> 这些数字是**当前源码表的长度**（本次复核：表 104 / 测量 5 / 缩放 2 / 参数 4 / 别名 56 / 拼写 167）。
 > **组成**：92 → **95**（+`COPYBASE`/`CUTBASE`/`PASTEORIG`，剪贴板轮）→ **97**（+`CHAMFER POLYLINE`/
 > `FILLET POLYLINE`，同日另一 lane）→ **98**（+`HATCHPOINT`，2026-11-01 内部点 HATCH，本项目选择子）→
 > **101**（+`BREAK`/`DIVIDE`/`LENGTHEN`，2026-11-01 单曲线编辑）→ **102**（+`INSERT`，2026-11-01
-> 已有块参照创建，v1）→ **103**（+`SCALETEXT`，2026-11-01 文字字高缩放）。
+> 已有块参照创建，v1）→ **103**（+`SCALETEXT`，2026-11-01 文字字高缩放）→ **104**（+`BLOCK`，
+> 2026-11-01 块定义创建，v1）。
 > 表一变，本表与 §5 的期望输出都要跟着改；**权威是 §5b 那道守门脚本的实跑输出**，不是这里的手抄值。
 
-**为什么不把 165 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
+**为什么不把 167 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
 不改变行为；`ZOOMIN`/`ZOOMOUT` 与各测量选择子不携带 `CommandId`。命令的**行为**数上限是
-`CommandId` 变体数（= 103），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
+`CommandId` 变体数（= 104），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
 
 **本项目自己的名字（AutoCAD 无同名，或同名不同义）**，不计入 AutoCAD 覆盖：
 `RESETVIEW`、`SWITCHBACKEND`、`SWITCH2D3D`、`STANDARDVIEW`（AutoCAD 的 `VIEW` 是命名的视图管理）、
@@ -140,7 +141,7 @@
 |---|---|---|
 | `INSERT`（**读取**侧） | 实现 | 块定义与实例分离、实例展开几何（嵌套有界，保留 instance path）、可拾取、插入点夹点可拖（仅 `native-below` 宿主） |
 | `INSERT`（**创建**侧） | **实现（v1，2026-11-01）** | **点-后-名**：先拾取插入点，再输入**本图已有块**的名称（终端文本通道）；`T(插入点)·T(−块基点)`，type-key `AcDbBlockReference`，活动图层/模型空间，一条事务/一步撤销。**无块表写入**（只读块定义 + 名称/基点元数据）；**无**块选择器/palette、比例/旋转/属性值/动态块参数；未知名称/缺元数据/空名/换行/非有限点按名拒绝。`BLOCK`/`WBLOCK`/`PASTEBLOCK` 仍缺 |
-| `BLOCK` | **未实现** | 无块定义创建命令（域与 DB 有块表，但不存在写入口令） |
+| `BLOCK` | **实现（v1，2026-11-01）** | **选择 → 基点 → 名称**（终端文本）：选中模型空间顶层实体写入新块定义并移入 `SpaceId::Block`，几何**逐位保留**、只改空间；元数据存基点；参照为 identity `T(基点)·T(−基点)`，后续 `INSERT` 仍按 `T(I)·T(−基点)`；**一条事务/一步撤销**，块级 undo 补丁；参照 draw_order = 成员最大 draw_order、参照在活动图层。**v1 上限**：无 ATTDEF/ATTRIB、动态块参数、retain/delete 选择、块选择器；重名（精确/ASCII 大小写不敏感）拒绝；实例路径/子元素/图纸空间/块成员拒绝；名称非法字符/空/换行拒绝 |
 | `WBLOCK` | **未实现** | 无「写块到文件」 |
 | `XREF` | **未实现** | 无附着/加载/重载/绑定；仓库里只有 `cad-resources` 的 **xref 深度预算**与图层的 `xref_dependent` 标记，**不是** xref 能力 |
 | `IMPORT` | **未实现** | 打开 DWG/DXF 是**打开管线**，不是 `IMPORT` 命令（无 `IMPORT` 选择子） |
@@ -203,7 +204,7 @@
 |---|---|---|
 | `POLYLINE`（旧式 heavy 2D 折线**实体**）创建 | **M** | 需要写 `AcDb2dPolyline` + 顶点子实体（本仓库的唯一折线语义变体是 `Polyline`，类名不进域模型）；**不得**把 `POLYLINE` 别名到 `PLINE`——那会把 heavy 折线**假装**成 LWPOLYLINE，凭空发明语义 |
 | `XLINE`（含 `RAY`） | **M（命令）/ L（真正的无限几何）** | **命令（M）**只建在**既有有界切片**上：复用导入期的有限段降级 + 一条创建命令/工具，牵动 `TRIM`/`EXTEND` 的无限直线求交语义与出图裁剪，但不新增几何种类。**真正的无限几何（L，ADR 级）**要新增一个 `SemanticGeometry` 变体：约 **14 处**编译强制点（validate / bounds / transform / tessellate / engine / spatial pick·bounds / representation provider / measure snap / `geometry_kind` / 导出 / 选择属性行）＋约 **12 处**静默兜底（`intersect` 的 `_ => None`、extent 回退、grips 的 `_ => Vec::new()` 等）——而 `cad-domlib` 级的 bounds 累积会被无限线**毒化**成无限模型范围。这不是补丁 |
-| `BLOCK` / `WBLOCK` / `PASTEBLOCK` | **L** | 块**定义写入口**（`cad-db` 仍无运行时 block CRUD）、基点、属性定义（ATTDEF/ATTRIB）、命名冲突、块级 undo 补丁、与 EXPLODE/夹点/STRETCH 的相互作用；`WBLOCK` 还要单独文件写出。**`INSERT` 创建侧已实现 v1**（只插入已有块，不写块表），见 §3.4 |
+| `WBLOCK` / `PASTEBLOCK` | **L** | `BLOCK` v1 已提供运行时块定义写入口（名称/基点/成员/块级 undo）；剩余是 `WBLOCK` 的单文件写出（现有导出仍是整图 model space、会摊平 INSERT）与 `PASTEBLOCK` 的剪贴板→定义映射（块成员/嵌套引用需逐条拒绝或复制定义）。 |
 | `XREF` | **L** | 外部文件解析、相对/绝对路径解析、循环深度（已只有预算钩子）、图层名前缀、绑定/重载语义；跨文件一致性属新契约面 |
 | `IMPORT` | **L** | 依赖 acadrust 的格式能力与 `cad-import-acadrust` 的迁移策略；每个格式都要自己的 capability 表与拒绝面（DWG/DXF 的打开走 `OPEN`，不是 `IMPORT`） |
 | `PUBLISH` | **L** | 多布局/多图幅批量出图 + 设备/图幅/打印样式；`PLOT` 现在只到矢量单页 |
@@ -213,7 +214,7 @@
 | ~~HATCH **渐变创建**~~ | **已关闭（2026-10-27）** | 双色 `LINEAR`/`SPHERICAL` 已实现（类型码 `3` + 四个参数，见 §3.1）。**仍未闭合**的是它的三个性质缺口，不再算「创建缺失」：`SPHERICAL` 在矩形/圆边界上烘焙成平色（需要按值细分内部三角形）、只有 ACI（无真彩/色簿）、`76=1` 的梯度约定**未用 vendor 文件核实** |
 | HATCH **关联性** | **L** | 需要边界→填充的持久引用（类似 `ACAD_DIMASSOC`），并定义边界编辑后的重生成/失效规则；与「实体非关联」的既有边界冲突，需 ADR |
 | ~~`FILLET`/`CHAMFER` 的 **Polyline 模式**~~ | **已关闭（2026-10-28）** | 两个独立选择子 `FILLET POLYLINE`/`CHAMFER POLYLINE`（选择式 `CommandPayload::None`、恰好 1 条开放直线段 `+Z` LWPOLYLINE、原地重写一条事务/一步撤销）；**仍未闭合**的是四条**声明偏差**：闭合环、含 bulge 段、非 `+Z` 平面都按名拒绝（不是 AutoCAD 的全功能子选项），`TRIMMODE` 不建模，AutoCAD 的**自动缩半径**不复刻，倒角的 `A`/`B` 方向是**我们的规则** |
-| `PASTEBLOCK`（`Ctrl+Shift+V`，粘贴为块） | **L** | 需要「把剪贴板实体包成一个块定义再插入」——`cad-db` **没有块写 API**（无 `BlockDefinition` 写入路径，现有 `insert_block` 只服务测试/导入构造器），要先有块定义写入口 + 命名/去重 + 与 EXPLODE/夹点/STRETCH 的交互；在它存在之前**不得**把 `Ctrl+Shift+V` 降级成 `PASTECLIP` |
+| `PASTEBLOCK`（`Ctrl+Shift+V`，粘贴为块） | **L** | 需要「把剪贴板实体包成一个块定义再插入」；`BLOCK` v1 已提供块定义写入口，但剪贴板条目可能是块成员/嵌套引用，需逐条拒绝或复制定义，并决定基点/名称策略；在实现之前**不得**把 `Ctrl+Shift+V` 降级成 `PASTECLIP` |
 | ~~OFFSET **含弧段折线**~~ | **已关闭（2026-10-28）** | 弧段现在**精确同心**偏移（`R' = R − s·sign(sweep)`），接点按最近交点 + 闭式相切求解，弧经 `bulge_arc_geometry` 回验。**仍未闭合**的是三条**声明偏差**：不做 AutoCAD 的弧段删除与邻居重接（半径耗尽即 `offset.arc_collapsed`）、**全局自交修剪未做**（只在顶点检局部塌缩）、**2 顶点（纯弧）或全弦共线带 bulge ⇒ `offset.ambiguous_plane`** |
 | OFFSET **`ELLIPSE`** | **L** | 等距偏移曲线**不是**椭圆（非圆二次曲线的高阶偏移），要么新增偏移曲线类型、要么折线近似并显式声明；两条都不是补丁 |
 
@@ -245,9 +246,9 @@ aliases = [a for a, _ in re.findall(r'\("([^"]+)",\s*"([^"]+)"\)',
 names = list(dict.fromkeys(table + meas + zoom + aliases))   # = admissible_names() 的顺序
 print(len(table), len(meas), len(zoom), len(args), len(aliases), "admissible:", len(names))
 PY
-# 期望输出：103 5 2 4 55 admissible: 165
+# 期望输出：104 5 2 4 56 admissible: 167
 
-# 2) 钉住 103 的契约（变体数、表长、每变体恰好一次）
+# 2) 钉住 104 的契约（变体数、表长、每变体恰好一次）
 cargo test -p cad-ui-core --locked command_normalization_covers_every_variant
 cargo test -p cad-ui-core --locked admissible_names_cover_the_vocabulary_exactly_once
 
@@ -282,12 +283,12 @@ python3 scripts/test-check-command-docs.py   # 自测：注入伪造 canonical �
 **本次实测（仓库当前树）**：
 
 ```
-tables: 103/5/2/4 selectors, 55 aliases, 110 canonical selectors (aliases excluded)
-§2 rows: 65, §2b aliases: 55, §3.7 rows: 6, alias mentions: 1
+tables: 104/5/2/4 selectors, 56 aliases, 111 canonical selectors (aliases excluded)
+§2 rows: 66, §2b aliases: 56, §3.7 rows: 6, alias mentions: 1
 OK: 0 mismatches
 ```
 
-（`110` 是 **canonical 选择子**数：103 表 + 5 测量 + 2 缩放步进，**不含** 55 个别名；`165` 才是
+（`111` 是 **canonical 选择子**数：104 表 + 5 测量 + 2 缩放步进，**不含** 56 个别名；`167` 才是
 「可输入拼写」数，见 §2。两个数不要混用。）
 
 **它确实会失败**（同一个脚本，换输入就红）：

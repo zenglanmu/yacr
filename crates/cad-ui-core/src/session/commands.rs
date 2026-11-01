@@ -68,9 +68,13 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("SPLINE", CommandId::CreateSpline),
     // INSERT places a reference to an **existing** named block at one picked
     // insertion point; the bare selector starts the point-then-name capture (the
-    // name arrives through the same terminal text channel TEXT uses). No
-    // block-table write is performed (`BLOCK`/`WBLOCK` are not implemented).
+    // name arrives through the same terminal text channel TEXT uses). `BLOCK`
+    // below writes the definition (`WBLOCK` is still not implemented).
     ("INSERT", CommandId::InsertBlock),
+    // BLOCK defines a named block from the current selection at one picked base
+    // point; the bare selector starts the selection-then-point-then-name
+    // capture. Work-only.
+    ("BLOCK", CommandId::DefineBlock),
     ("TEXT", CommandId::CreateText),
     // MTEXT is the multiline create command **and** a real interactive tool
     // (2026-10-26): the bare selector starts the two-corner capture — first
@@ -644,6 +648,8 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("H", "HATCH"),
     // AutoCAD's default abbreviation for INSERT (an existing block reference).
     ("I", "INSERT"),
+    // AutoCAD's default abbreviation for BLOCK (define a named block).
+    ("B", "BLOCK"),
     ("L", "LINE"),
     ("LEN", "LENGTHEN"),
     ("M", "MOVE"),
@@ -803,6 +809,10 @@ pub(super) fn interaction_request_for(
         // block name through the same terminal `cad_set_tool_text` channel TEXT
         // uses. The name resolves against the drawing's block metadata.
         CommandId::InsertBlock => Some(InteractionRequest::BeginDraw(DrawToolKind::InsertBlock)),
+        // BLOCK takes the current selection as its members, one base point, then
+        // the new block name through the same terminal `cad_set_tool_text`
+        // channel. Work-only.
+        CommandId::DefineBlock => Some(InteractionRequest::BeginDraw(DrawToolKind::BlockDefine)),
         // TEXT starts the text tool: its point complement is one insertion
         // point, then the terminal text arrives through the dedicated
         // `cad_set_tool_text` channel (ADR 0019 decision A.1) — never through

@@ -31,8 +31,9 @@ fn the_text_kind_metadata_is_explicit() {
     assert!(!DrawToolKind::Text.arity().is_open_ended());
     assert!(DrawToolKind::Text.requires_text());
     // `requires_text()` is the single authority: exactly the text kinds (TEXT,
-    // TEXTEDIT, the MLEADER whose last step is the same terminal text step, and
-    // MTEXT, whose two-corner capture is followed by the same step).
+    // TEXTEDIT, the MLEADER whose last step is the same terminal text step,
+    // MTEXT, whose two-corner capture is followed by the same step, INSERT's
+    // point-then-name capture and BLOCK's selection-then-base-then-name capture).
     let text_kinds: Vec<DrawToolKind> = DrawToolKind::ALL
         .into_iter()
         .filter(|kind| kind.requires_text())
@@ -44,7 +45,8 @@ fn the_text_kind_metadata_is_explicit() {
             DrawToolKind::TextEdit,
             DrawToolKind::MLeader,
             DrawToolKind::MText,
-            DrawToolKind::InsertBlock
+            DrawToolKind::InsertBlock,
+            DrawToolKind::BlockDefine
         ]
     );
 }

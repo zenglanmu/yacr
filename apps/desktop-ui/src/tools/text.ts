@@ -74,6 +74,29 @@ export const INSERT_BLOCK_PICK_PROMPT_KEY = 'tool.prompt.insertblock.pick_point'
 export const INSERT_BLOCK_TEXT_PROMPT_KEY = 'tool.prompt.insertblock.type_name';
 
 /**
+ * The catalog key of BLOCK's single pick: the **base point** of the new block
+ * definition (2026-11-01).
+ *
+ * `BLOCK` starts from an existing selection and is a **base-then-name** capture:
+ * the pick sets the base point the new block reference is placed at, and the new
+ * block's name is the terminal text step. This key names a real point and never a
+ * block name; there are no attributes, no dynamic-block options and no
+ * retain/delete choice in v1, so nothing here may promise one.
+ */
+export const BLOCK_PICK_PROMPT_KEY = 'tool.prompt.blockdefine.pick_base';
+
+/**
+ * The catalog key naming BLOCK's terminal text step: the **name of the new
+ * block** the selection is converted into.
+ *
+ * This is the text step, not a point step, so it is named from the host's
+ * `awaiting_text` flag alone (see [`textStepPromptKey`]). The copy states the v1
+ * boundary — no attributes, no dynamic-block options, no retain/delete choice,
+ * and the selected objects move into the new block — instead of implying them.
+ */
+export const BLOCK_TEXT_PROMPT_KEY = 'tool.prompt.blockdefine.type_name';
+
+/**
  * The catalog key naming the **text step** of the active text-carrying tool.
  *
  * The host's `awaiting_text` flag decides *that* the step is open; this only
@@ -87,6 +110,7 @@ export function textStepPromptKey(tool: unknown): string {
   if (!isRecord(tool)) return TEXT_STEP_PROMPT_KEY;
   if (tool.key === 'draw.mtext') return MTEXT_STEP_PROMPT_KEY;
   if (tool.key === 'draw.insertblock') return INSERT_BLOCK_TEXT_PROMPT_KEY;
+  if (tool.key === 'draw.blockdefine') return BLOCK_TEXT_PROMPT_KEY;
   return TEXT_STEP_PROMPT_KEY;
 }
 

@@ -329,6 +329,28 @@ pub enum CommandPayload {
     ScaleText {
         refs: Vec<SelectionRef>,
     },
+    /// `BLOCK` (Work-only): define a named block from `refs` at the picked
+    /// `base` point.
+    ///
+    /// `refs` is the selection snapshot taken when
+    /// [`crate::draw_tool::DrawToolKind::BlockDefine`] started. Every ref must be
+    /// a directly addressable model-space entity in this document; a member
+    /// keeps its geometry **bit-for-bit** and only moves into
+    /// [`cad_domain::SpaceId::Block`]`(new_id)` — the command never translates
+    /// member geometry. The stored metadata is `BlockMetadata { name,
+    /// base_point: base }`, and the new reference uses the same
+    /// `T(base) · T(−base)` composition as `INSERT`, i.e. the identity.
+    ///
+    /// `name` is trimmed and validated by the command (non-empty, single line,
+    /// at most [`crate::draw_tool::MAX_TOOL_TEXT_CHARS`] characters, no
+    /// AutoCAD-illegal character, no exact/case-insensitive duplicate). The
+    /// definition row, member space changes and reference insert commit in one
+    /// transaction / one undo step. See [`crate::app_drawing::block_define`].
+    DefineBlock {
+        refs: Vec<SelectionRef>,
+        base: Point3,
+        name: String,
+    },
     /// CHAMFER two straight lines (ADR 0016 decision C). The two picks and their
     /// raw click points travel in one boxed [`TwoLineCommand`] (boxed like
     /// [`CommandPayload::Geometry`] so the command enum stays small); the two

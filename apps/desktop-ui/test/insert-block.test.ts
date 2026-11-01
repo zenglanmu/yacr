@@ -62,10 +62,12 @@ test('INSERT is one small draw-panel button on both tabs, with no variant popove
     const ids = items.map(item => item.id);
     const at = ids.indexOf(INSERT.id);
     assert.ok(at !== -1, `${tabId}/draw must carry the INSERT affordance`);
-    // It ends the panel's creation run: directly after SPLINE and before OFFSET,
-    // so no shipped row moves and the HATCH/HATCHPOINT tail keeps its slot.
+    // INSERT sits at the tail of the creation run, directly after SPLINE, with
+    // the block **definition** command BLOCK beside it before OFFSET, so no
+    // shipped row moves and the HATCH/HATCHPOINT tail keeps its slot.
     assert.equal(ids[at - 1], 'SPLINE', `${tabId}: INSERT follows SPLINE`);
-    assert.equal(ids[at + 1], 'OFFSET', `${tabId}: INSERT precedes OFFSET`);
+    assert.equal(ids[at + 1], 'BLOCK', `${tabId}: INSERT precedes BLOCK`);
+    assert.equal(ids[at + 2], 'OFFSET', `${tabId}: BLOCK precedes OFFSET`);
     assert.deepEqual(
       ids.slice(-2),
       ['HATCH', 'HATCHPOINT'],

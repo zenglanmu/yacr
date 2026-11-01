@@ -58,6 +58,8 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     // INSERT is point-then-name: one insertion point, then the existing block
     // name through the terminal text channel (Work-only, no block-table write).
     ("INSERT", "draw.insertblock"),
+    // BLOCK is selection-then-base-then-name: define a block from the selection.
+    ("BLOCK", "draw.blockdefine"),
 ];
 
 fn fresh_session() -> CadSession {
