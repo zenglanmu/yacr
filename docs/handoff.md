@@ -31,10 +31,19 @@
 - `python3 scripts/test-android-host.py` → OK；`python3 scripts/check-file-size.py` → OK；
   `python3 -m py_compile scripts/test-android-host.py` → OK。
 
+### v0.1.4（Android 修复后重跑，实际运行）
+
+- `CI build layers` 全绿（run `41307807752`）：`linux-release` / `windows-release` /
+  `macos-release` / `android-apk` / `android-release` / `web-deploy` 与全部常规 check 均 success；
+  `CI`（core-quality / wasm-check / i18n-contracts）success，`android-check` 仍按变量门控 skipped。
+- artifact：`yacr-linux-release` 7.95 MB、`yacr-windows-release` 56.5 MB、`yacr-macos-release`
+  70.8 MB、`android-apk-debug` 143.5 MB、`android-release-unsigned` 14.8 MB、`web-ui-dist` 4.5 MB。
+
 ### NOT RUN / 边界
 
-- `v0.1.4` 重跑的 CI APK 结果以该 run 为准；API 24/25 真机/模拟器的安装与运行 **NOT RUN**。
-- 未做版本号 bump；release artifact 仍标 `0.1.2`。
+- API 24/25 真机/模拟器的安装与运行 **NOT RUN**；artifact 未签名、未公证、未发布商店。
+- 未做版本号 bump；release artifact 仍标 `0.1.2`（tag 是 `v0.1.3` / `v0.1.4`）。
+- `android-check` 仍被 `vars.ANDROID_CI_ENABLED` 门控（无 provisioned Android runner）。
 
 ## 2026-11-01 Tauri capability 缺失导致 event 订阅被 ACL 拒绝（实机回归）
 
