@@ -1,7 +1,7 @@
 # CI（GitHub Actions）分层工作流
 
 本文件描述仓库**当前**实际提供的 CI 运行层。命令权威仍是 `AGENTS.md`「构建与门禁」与
-`docs/build.md`；本文件只说明 workflow 如何镜像该门禁，以及哪些层次**已退役/未运行**。
+`docs/build.md`；本文件只说明 workflow 如何镜像该门禁，以及哪些层次**未运行 / 仅出 artifact**。
 
 工作流文件：`.github/workflows/core.yml`（核心质量层）与 `.github/workflows/build.yml`
 （构建/校验层）。校验脚本：`scripts/check-workflows.py`（必需 job 片段 + release job 事件门禁契约 +
