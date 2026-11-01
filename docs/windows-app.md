@@ -151,10 +151,10 @@ yacr: unsupported-runtime: webview2      ← 稳定标记行（第一行，证�
 
 **CI**：`.github/workflows/build.yml` 的 `windows-check` 在 `windows-latest` 上跑
 `cargo check -p app-windows --all-targets --locked`（原生 MSVC，编译门禁，不运行 exe）。
-`windows-release` 仍为 `if: false` 退役状态（`scripts/package-windows-release.sh` 非零退出），
-**没有 Windows 发布包流水线**。注意：workflow 里的 summary 文案仍沿用“NOT IMPLEMENTED
-placeholder”的旧措辞，与实际代码不符；它是**文案腐化**，不影响编译门禁本身，但不得据此认为
-Windows 仍是占位。
+`windows-release` 自 2026-11-01 起重新启用（仅 `v*` tag / 手工 dispatch）：
+`scripts/package-windows-release.sh` 先构建 React 前端，再以 MSVC 静态 CRT 构建
+`yacr-windows.exe`，校验 PE/图标/非系统 DLL 后上传未签名 zip artifact。**打包成功不是运行/视觉
+验收**；没有代码签名或发布通道。
 
 **本机（Linux，WP4 门禁实跑，日志在 `$HOME/.cache/yacr-wine/logs/`）**：
 
@@ -363,7 +363,8 @@ WP4 实跑（Wine 10.0，专用 64 位 prefix，prefix 内无 WebView2）：
   配置目录写入、真实 GPU（DX12/Vulkan）出帧与性能 —— 全部 **NOT RUN / PENDING user real-Windows
   spike**。
 - GitHub Actions 的 `windows-check` job 本环境**未运行**（无 runner）；只有本机 xwin/MSVC 编译证据。
-- Windows 发布打包（`scripts/package-windows-release.sh` 仍非零退役）；未做代码签名。
+- Windows 发布打包：脚本与 `windows-release` job 已重新启用（event-gated），但本环境**未运行**；
+  产物未代码签名，也没有运行/视觉证据。
 - 真实 OS 键盘/指针从未用于验证任何输入路径（所有宿主同此边界）。
 - **wgpu 30 的 present 状态盲区**：`Queue::present` 返回 `()`，`Ok` 状态被 API 丢弃，present 期间的
   validation 错误只会进未捕获错误处理器（panic）。本宿主因此把 present 包进显式 validation scope

@@ -6,8 +6,9 @@
 > **2026-10-16 迁移状态（2026-10-23 增补）**：桌面 UI 已由 Slint 迁移为 **React + Tauri 原生宿主**
 > （`apps/app-linux`，二进制 `yacr`）。`cad-ui-slint` 与所有 Slint 依赖已删除；迁移时 macOS/Android/Web
 > 是**显式 NOT IMPLEMENTED 占位**，此后 Web 的 wasm 会话于 2026-10-24 复活、Android 于 2026-11-01
-> 改为原生 `native-below` 载体（见下），二者都**不是**已验收的可运行 GUI；旧的平台发布/打包脚本已
-> 退役或禁用。
+> 改为原生 `native-below` 载体（见下），二者都**不是**已验收的可运行 GUI。**2026-11-01 起**
+> 平台打包脚本与 CI release job 已按 React/Tauri 宿主重新启用（event-gated，只出 artifact，
+> 不发布/不签名）。
 > **2026-10-23 起**：Linux 只支持**原生 Wayland**（X11/XWayland 显式 Unsupported，退出码 4）；
 > 合成方向是 **DOM-on-top**（[ADR 0023](adr/0023-dom-on-top-cross-host-composition.md)）；
 > **Windows 宿主已实现**（`apps/app-windows`，Tier 0 编译 + Wine 拒绝 smoke，视觉未验证）。
@@ -206,47 +207,43 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
   常规 push/PR 不发布。
 - 构建成功**不是**运行/GPU/像素证据。
 
-## 已退役 / 禁用的平台入口（勿当可用）
+## 平台打包入口（2026-11-01 重新启用）
 
-以下入口**不是可运行的构建路径**；脚本显式非零失败或在 CI 中 `if: false` 硬禁用。**不要**把它们
-当作可用的发布流程（例外：2026-10-17 重启的 `scripts/package-linux-release.sh`，见下；
-2026-10-25 恢复的 `scripts/deploy-cloudflare-pages.sh` + `web-build`/`web-smoke`/`web-deploy`，
-见「浏览器 bundle」一节）：
+以下入口都面向**当前 React/Tauri 宿主**（不是 Slint），并由 `.github/workflows/build.yml` 的
+release job 在 `v*` tag / 手工 `workflow_dispatch` 时调用；产物只上传为 workflow artifact，
+**不发布、不签名、不公证、不接触商店凭据**：
 
 | 入口 | 状态 |
 |---|---|
-| `scripts/build-android.sh` | **可用（2026-10-28 起；2026-11-01 起构建原生 `native-below` 载体）**——真机构建入口：`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome；该脚本目前仍一并产出 wasm 会话产物，native 载体不加载）再 Gradle；**release APK 默认未签名**。CI 的 `android-apk`/`android-release` **仍硬禁用**（无签名密钥、无商店路径） |
-| `scripts/package-windows-release.sh` | **RETIRED**——无 Windows 发布流水线；非零退出（注意：`app-windows` **已是真实宿主**，退役的是**打包脚本**，不是 GUI 实现） |
-| `scripts/package-macos-release.sh` | **RETIRED**——退役的是**打包脚本**；`apps/app-macos` 已是真实 Tauri 宿主（只有 CI 编译门禁），但无签名/打包/分发；非零退出 |
-
-**Linux 打包（2026-10-17 重启，非 RETIRED）**：`scripts/package-linux-release.sh` 现在为
-React/Tauri 宿主构建 **Flatpak** bundle（`bin/yacr` + committed `fonts/`，运行时
-`org.gnome.Platform//51`），产出 `target/release/dist/yacr-<version>-linux-<arch>.flatpak` + `.sha256`。
-它**不是**分发/发布流程：**未发布 Flathub**，CI 的 `linux-release` job（`.github/workflows/build.yml`）
-**仍是 `if: false` 硬禁用**（本轮**未**改 CI），因此没有可下载的发布包。见 `docs/flatpak.md`、
-`docs/validation-flatpak-linux-2026-10-17.md`。
+| `scripts/package-linux-release.sh` | **可用（2026-10-17 重启）**——Flatpak bundle（`bin/yacr` + committed `fonts/`，运行时 `org.gnome.Platform//51`），产出 `target/release/dist/yacr-<version>-linux-<arch>.flatpak` + `.sha256`。CI `linux-release` 已重新启用（event-gated）；**未发布 Flathub** |
+| `scripts/package-windows-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 `cargo build -p app-windows --features tauri/custom-protocol`（MSVC 静态 CRT），产出 `target/x86_64-pc-windows-msvc/release/dist/*.zip` + `.sha256`；PE 机器类型/图标/非系统 DLL 检查失败即中止。**未代码签名** |
+| `scripts/package-macos-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 universal `cargo build -p app-macos --features tauri/custom-protocol` + `lipo`，产出 `Yacr.app` 的 `*.tar.gz` + `.sha256`；Mach-O 只允许系统库，`CFBundleIdentifier=dev.yacr.app`。**未签名/未公证** |
+| `scripts/build-android.sh` | **可用（2026-10-28 起；2026-11-01 起构建原生 `native-below` 载体）**——`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome）再 Gradle；**release APK 默认未签名**。CI `android-apk`（debug）与 `android-release`（unsigned release）已重新启用（event-gated） |
 
 平台包状态（源码级）：
 
 - **Windows**：`apps/app-windows`（`yacr-windows`）**已是真实 Tauri/WebView2/Win32 宿主**
   （DOM-on-top；WebView2 缺失 → 标记行 + exit 5）。CI `windows-check` 在 `windows-latest` 上做
-  **原生 MSVC 编译门禁**（不运行 exe）；`windows-release` 仍 `if: false` 退役，**无发布包**。
+  **原生 MSVC 编译门禁**（不运行 exe）；`windows-release` 已重新启用（event-gated），构建
+  未签名的 MSVC release zip artifact。**打包成功 ≠ 运行/视觉验收**；
   视觉/运行时验收 = **PENDING user real-Windows spike**（判据见 `docs/windows-app.md`）；
   Wine 只做拒绝合同 smoke。见 `docs/windows-app.md`。
 - **macOS**：`apps/app-macos`（`yacr-macos`）是**真实 Tauri 2 宿主**（2026-10-31 起）——透明
   WKWebView（React chrome）在上、原生 CAD 子 `NSView` 在下，渲染器走 wgpu/Metal；文件打开用
   `NSOpenPanel`，配置在 `~/Library/Application Support/yacr`。CI `macos-check` 在
   `macos-latest` 上先构建前端再 `cargo check -p app-macos --all-targets --locked`（**只编译，不运行**）；
-  窗口/Metal/层序/DPI/对话框/像素一律 **NOT VERIFIED**。`macos-release` 仍 `if: false`，
-  `scripts/package-macos-release.sh` 仍非零——**没有可分发 GUI**。见 `docs/macos-app.md`。
+  窗口/Metal/层序/DPI/对话框/像素一律 **NOT VERIFIED**。`macos-release` 已重新启用（event-gated），
+  构建未签名/未公证的 universal `Yacr.app` tarball artifact；**打包 ≠ 可分发 GUI 验收**。
+  见 `docs/macos-app.md`。
 - **Android**：`apps/app-android` 是**真实 Tauri 2 宿主 + 原生 `native-below` CAD 载体**
   （2026-10-28 起是宿主，2026-11-01 起载体重写，ADR 0027）——共享 React chrome 跑在 WebView 里，
   原生 `CadSession` 持有 `cad-db`，wgpu **Vulkan** 呈现到 WebView 之下的 `SurfaceView`；wasm 会话
   **不实例化**。构建需要 SDK/NDK（`ndkVersion = "29.0.13846066"`）/JDK 17：本地
   `bash scripts/build-android.sh --release --target aarch64`（release 未签名）或 `--debug --target
   x86_64`；仓库 `fonts/` 作为 APK assets 打包。CI 的 `android-check` 仍是 capability-gated 的
-  **aarch64 编译门禁**（不跑 Gradle、不建 APK、不跑设备），`android-apk`/`android-release`
-  **仍硬禁用**。**本轮证据只有编译级**（`cargo check`、clippy、开发机契约测试、Kotlin 编译、
+  **aarch64 编译门禁**（不跑 Gradle、不建 APK、不跑设备）；`android-apk`（debug）与
+  `android-release`（unsigned release）已重新启用（event-gated），只构建并上传 APK artifact，
+  不签名/不发布。**证据仍只有编译级 + 打包级**（`cargo check`、clippy、开发机契约测试、Kotlin 编译、
   `javap` 核对 JNI 符号）；**没有设备/模拟器运行、没有 Vulkan adapter、没有像素、没有
   旋转/前后台、没有 JNI 运行时链接——全部 NOT VERIFIED**。契约与边界见 `docs/android-host.md`。
 - **Web**：`apps/app-web` 的 **wasm CAD 会话**（ADR 0024）在 CI 中端到端构建与冒烟：
@@ -257,10 +254,10 @@ React/Tauri 宿主构建 **Flatpak** bundle（`bin/yacr` + committed `fonts/`，
   像素/golden/浏览器矩阵证据，浏览器侧真实渲染证据只到合成夹具
   （`docs/validation-dom-canvas-wasm-2026-10-24.md`）。
 - **Linux release**：`dev.yacr.app` Flatpak bundle 可**本地构建并安装**（`scripts/package-linux-release.sh`，
-  2026-10-17 重启，见上）；但**没有受支持的发布通道**——未提交 Flathub、无分发产物，CI `linux-release`
-  job 仍硬禁用。本机实测细节见 `docs/flatpak.md`。
+  2026-10-17 重启，见上），CI `linux-release` 已重新启用（event-gated）并上传 artifact；
+  但**没有发布通道**——未提交 Flathub。本地实测细节见 `docs/flatpak.md`。
 
-CI 分层、被禁用的 job 清单与 NOT RUN 边界见 `docs/ci.md`。
+CI 分层、release job 的 event 门禁与 NOT RUN 边界见 `docs/ci.md`。
 
 **通用工具（保留）**：`scripts/serve-web.py` 是**通用静态文件服务器**（浏览器 UI 退役后**没有默认
 bundle**，必须显式 `--directory <bundle-dir>`，且目录须含 `index.html`）。它不再属于任何可用构建路径。

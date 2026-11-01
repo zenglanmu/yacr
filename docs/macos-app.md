@@ -5,7 +5,9 @@
 > 原生 CAD 子 `NSView` 在下**，渲染器仍是同一个 renderer-only wgpu（macOS 上走 **Metal**）。
 > **验收上限 = 编译**：`macos-check` 在 GitHub `macos-latest` 上做 `cargo check`（不运行）；
 > 窗口、Metal、透明合成、层序、DPI、原生对话框、配置写入与像素/视觉**全部 NOT VERIFIED**。
-> 打包仍未实现（`scripts/package-macos-release.sh` 非零退出）。
+> 打包入口自 2026-11-01 起为真实流水线（`scripts/package-macos-release.sh`，event-gated
+> `macos-release` job）；产物是**未签名/未公证**的 universal `Yacr.app` tarball artifact，
+> 不代表可分发产品或运行验收。
 
 ## 组成
 
@@ -93,8 +95,9 @@ NSWindow (Tauri, transparent)
 - 本机可运行的非 macOS 证据：`cargo check -p app-macos`（空壳/显式拒绝分支）、
   `python3 scripts/test-macos-host.py`（静态接线契约 + 自测）、`check-architecture.py`、
   `check-workflows.py`、`check-i18n.py`。
-- **打包未实现**：`scripts/package-macos-release.sh` 仍非零退出；`macos-release` job 仍
-  `if: false` 的 RETIRED 占位。没有 `Yacr.app`、签名或 notarization。
+- **打包已重新启用（仅 artifact）**：`scripts/package-macos-release.sh` 在 macOS runner 上构建
+  universal `Yacr.app` 并校验 Mach-O 只依赖系统库；`macos-release` job 仅在 `v*` tag / 手工
+  dispatch 运行并上传 tarball。**未签名、未公证、未分发**，不证明窗口/Metal/DPI/对话框可用。
 
 ## 证据与限制
 

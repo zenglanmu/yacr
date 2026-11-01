@@ -38,10 +38,9 @@
   资源段（缺失图标即构建失败，**不**静默产出无图标可执行文件）；`CARGO_CFG_TARGET_OS` 门禁
   保证非 Windows 目标不生成 Tauri context、不跑资源编译器。`apps/app-windows/icons/icon.ico`
   是同一资产的逐字节副本（`tauri.conf.json` 的 `bundle.icon` 指向它；契约测试
-  `scripts/test-package-windows-release.py` 断言两者一致）。**打包脚本已退役**，当前没有
-  可发布的 Windows 包，也没有 `check-pe-imports.py --has-icon` 的发布流水线证据；
-  `.exe` 内嵌图标只在本地 GNU 交叉构建下验证过，MSVC 路径仅由 `windows-check` **编译**门禁
-  覆盖（不是运行/外观证据）。
+  `scripts/test-package-windows-release.py` 断言两者一致）。打包脚本与 `windows-release` job
+  自 2026-11-01 起重新启用（event-gated），构建时用 `check-pe-imports.py --has-icon` 校验图标；
+  本环境**未运行**该 CI 打包，MSVC 产物也仍不构成运行/外观证据。
 - **Android**：`apps/app-android/Cargo.toml` 的 `[package.metadata.android] resources = "res"`
   与 `[package.metadata.android.application] icon/label`；`res/` 由上面的生成资产填充。
 - **Web**：当前的 `apps/app-web/web/index.html` **没有** icon/favicon 链接（也没有
@@ -58,7 +57,7 @@
   三个 `test-package-*-release.py`；`python3 scripts/generate-icons.py --check`。
 - **未运行**：真实 GPU/窗口管理器图标显示、Android 真机启动图标外观、macOS `.app`
   图标。Windows `.exe` 内嵌图标经本机 GNU 交叉构建 + `check-pe-imports.py --has-icon`
-  验证，MSVC 路径由 windows-release CI 构建时验证，均不证明真机外观。
+  验证；MSVC 路径由 windows-release CI 构建时校验，均不证明真机外观。
   Android 侧只验证了 APK 构建与模拟器安装（`docs/android-host.md`），**未**验证启动器图标外观。
 - **本地已运行（补充）**：`cargo build -p app-windows --target x86_64-pc-windows-gnu` +
   `python3 scripts/check-pe-imports.py --has-icon target/x86_64-pc-windows-gnu/debug/yacr.exe`。

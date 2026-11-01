@@ -1,3 +1,47 @@
+## 2026-11-01 重新启用 5 个 release job（React/Tauri，event-gated artifact）
+
+### 结论
+
+- 5 个原 `if: false`/`RETIRED` job 已改为真实 artifact builder，统一门禁
+  `github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')`：
+  `linux-release`（Flatpak）、`windows-release`（MSVC zip）、`macos-release`（universal
+  `Yacr.app` tarball）、`android-apk`（debug APK）、`android-release`（**unsigned** release APK）。
+  它们只上传 workflow artifact，**不签名、不公证、不发布、不接触商店凭据**。
+- 打包脚本按**当前 React/Tauri 宿主**重写，不复用 Slint 时代行为：
+  - `scripts/package-windows-release.sh`：先 `npm ci && npm run build`（`tauri::generate_context!`
+    内嵌 `apps/desktop-ui/dist`），再 `cargo build -p app-windows --features tauri/custom-protocol`
+    （MSVC 静态 CRT），产物 `bin/yacr-windows.exe` + CLI + fonts + 未签名 zip/sha256；PE 机器类型、
+    内嵌图标、非系统 DLL 任一异常即失败。
+  - `scripts/package-macos-release.sh`：同样先构建前端，再 universal `-p app-macos
+    --features tauri/custom-protocol` + `lipo`；`Yacr.app`（`CFBundleIdentifier=dev.yacr.app`）+
+    CLI + fonts，Mach-O 只允许系统库；未签名/未公证 tar.gz + sha256。
+  - `linux-release` 沿用 2026-10-17 的真实 Flatpak 脚本；workflow 安装
+    `org.gnome.Platform//51`/`Sdk//51` 与 `flatpak-builder`。
+  - Android 两个 job 在 ubuntu-latest 上 provision JDK 17、SDK platform 34、build-tools 34.0.0、
+    NDK `29.0.13846066` 与钉住 wasm-bindgen，再调用 `scripts/build-android.sh --debug|--release
+    --target aarch64`；`android-release` 明确标记 UNSIGNED。
+- 契约：`scripts/check-workflows.py` 的 `RETIRED_JOBS` 置空，5 个 job 进入 required + gated 集合；
+  `scripts/test-release-workflows.py`（新增）与 `test-package-{windows,macos}-release.py` 固定真实入口、
+  event 门禁、无 `if:false`/`continue-on-error`/`secrets.`/发布命令；`core-quality` 运行新契约测试。
+- 文档同步：`docs/ci.md`、`docs/build.md`、`docs/flatpak.md`、`docs/windows-app.md`、
+  `docs/macos-app.md`、`docs/android-host.md`、`docs/linux-app.md`、`docs/app-icon.md`、`AGENTS.md`。
+
+### 验证（本轮实际运行）
+
+- `python3 scripts/check-workflows.py` → OK（无 retired job，release job event-gated）。
+- `python3 scripts/test-release-workflows.py` → 10 tests OK。
+- `python3 scripts/test-package-windows-release.py` → 5 tests OK；`test-package-macos-release.py` → 7 tests OK。
+- `python3 scripts/test-package-linux-release.py` / `test-web-deploy-workflow.py` /
+  `test-linux-workflow.py` / `test-ui-migration-guards.py` → OK。
+- `bash -n scripts/package-{linux,windows,macos}-release.sh scripts/build-android.sh` → OK。
+
+### NOT RUN / 边界
+
+- **没有实际运行 5 个 release job**：本环境没有 Windows/macOS runner、Flatpak runtime 或 Android
+  SDK/NDK；首次真实打包结果以 GitHub Actions 为准。
+- Windows/MacOS/Android 宿主仍**没有**运行/视觉/GPU/设备验收；打包成功只是 artifact 证据。
+- 未代码签名、未公证、未发布 Flathub/商店；Android release APK 未签名。
+
 ## 2026-11-01 Web 部署入口收敛到 `pages.dev`
 
 ### 结论

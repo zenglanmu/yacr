@@ -23,8 +23,8 @@ What this file pins is the wiring that keeps such a compile gate honest:
       host check and the wasm `--lib` gate never generate a Tauri context;
   (e) `tauri.conf.json` points `frontendDist` at the one shared React bundle
       (`../desktop-ui/dist`) and keeps the wasm-capable CSP, with `windows: []`
-      (the window is built in code) and `bundle.active: false` (packaging stays
-      retired);
+      (the window is built in code) and `bundle.active: false` (Tauri's automatic
+      bundler stays off; release packaging is the manual, event-gated script);
   (f) `.github/workflows/build.yml`'s `macos-check` builds the frontend
       **before** `cargo check -p app-macos`, because `tauri::generate_context!`
       embeds `frontendDist` at compile time — exactly like `linux-app`.
@@ -210,7 +210,7 @@ def build_rs_problems(text: str) -> list[str]:
 
 
 def conf_problems(text: str, version: str) -> list[str]:
-    """Check (e): the shared React bundle, the wasm CSP, no window, no packaging."""
+    """Check (e): shared React bundle, wasm CSP, no window, no automatic Tauri bundling."""
     problems: list[str] = []
     try:
         conf = json.loads(text)
@@ -255,8 +255,9 @@ def conf_problems(text: str, version: str) -> list[str]:
     bundle = conf.get("bundle", {})
     if bundle.get("active") is not False:
         problems.append(
-            "tauri.conf.json: bundle.active must stay false — macOS packaging is "
-            "NOT IMPLEMENTED (scripts/package-macos-release.sh fails non-zero)"
+            "tauri.conf.json: bundle.active must stay false — release packaging is "
+            "done manually by scripts/package-macos-release.sh (event-gated artifact), "
+            "not by Tauri's automatic bundler"
         )
     icons = bundle.get("icon") or []
     if "icons/icon.png" not in icons:
@@ -441,7 +442,8 @@ def main() -> int:
     print(
         "macos-host OK: macOS-only tauri target table, `yacr-macos` binary, no CAD dep "
         "outside the macOS table, target-gated tauri-build, shared frontendDist + wasm CSP, "
-        "no packaging, macos-check builds the frontend before the compile (self-tests pass)"
+        "manual packaging (bundle.active false), macos-check builds the frontend "
+        "before the compile (self-tests pass)"
     )
     return 0
 

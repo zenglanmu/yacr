@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# build-android.sh — build the **Android host APK** (Tauri 2 carrier + wasm session).
+# build-android.sh — build the **Android host APK** (Tauri 2 WebView + native CAD).
 #
-# The Android host (`apps/app-android`) is a Tauri 2 WebView/asset carrier: the
-# shared React chrome runs in the Android WebView and the wasm `dom-canvas` CAD
-# session owns the document (ADR 0024, AGENTS.md iron rule 8). There is no native
-# CAD surface and no Java/`cargo-apk` shim any more — the previous retirement stub
+# The Android host (`apps/app-android`) is a Tauri 2 WebView carrier whose shared
+# React chrome sits **above** the native `native-below` CAD carrier (ADR 0027):
+# the native `CadSession` owns `cad-db`, wgpu/Vulkan presents to a `SurfaceView`
+# beneath the WebView, and the wasm `dom-canvas` session is **not** instantiated
+# (AGENTS.md iron rule 8). `scripts/build-android-ui.sh` still emits the wasm
+# artifacts as part of the shared bundle build; this carrier does not load them.
+# There is no Java/`cargo-apk` shim any more — the previous retirement stub
 # (non-zero "NOT IMPLEMENTED") is gone with the retired pipeline.
 #
 # What this entry point does:

@@ -35,22 +35,19 @@ name: CI build layers
 #                      bundle is still built and smoked but is not what the site
 #                      serves
 #
-# Retired platform build/release jobs — kept *declared* so the capability gap
-# stays visible, but hard-disabled with an unconditional `if: false` and a
-# `RETIRED` marker. They never carry a mutable `vars.…` switch or a `secrets.…`
-# publish path, so a stub can never be built, signed or published:
-#   linux-release   : was the Flatpak bundle (retired pending replacement packaging)
-#   windows-release : was the MSVC release zip
-#   macos-release   : was the universal Yacr.app tarball
-#   android-apk     : was the cargo-apk build (now: local `scripts/build-android.sh`)
-#   android-release : was the release APK with fonts (no CI publish path)
+# Release packaging jobs (re-enabled 2026-11-01) — event-gated to a `v*` tag or a
+# manual `workflow_dispatch`, never a routine push/PR. They build real artifacts
+# for the current React/Tauri hosts (no Slint anywhere) and upload them as
+# workflow artifacts; they do not publish, sign or notarize:
+#   linux-release   : Flatpak bundle (`scripts/package-linux-release.sh`)
+#   windows-release : MSVC release zip (`scripts/package-windows-release.sh`)
+#   macos-release   : universal Yacr.app tarball (`scripts/package-macos-release.sh`)
+#   android-apk     : debug APK (`scripts/build-android.sh --debug`)
+#   android-release : release APK, unsigned (`scripts/build-android.sh --release`)
 #
-# The public entry points for the retired paths fail with NOT IMPLEMENTED:
-#   scripts/{package-linux-release,package-windows-release,package-macos-release}.sh
-# `scripts/build-android.sh` is **not** in that list: since 2026-10-28 it builds the
-# real Tauri Android APK locally (`tauri android build`). What stays retired is the
-# CI *publish* path (`android-apk`/`android-release` above): there is no signing key
-# in CI and no store upload.
+# Each job provisions its own toolchain (Flatpak runtime/SDK, JDK 17 + Android
+# SDK/NDK, Node for the embedded React bundle). When the event gate is not met
+# GitHub reports the job as skipped, never as a pass.
 #
 # `scripts/build-web.sh` and `scripts/deploy-cloudflare-pages.sh` are real entry
 # points again; the browser bundle is not a shipped product and its runtime
@@ -251,71 +248,369 @@ jobs:
   # variable could accidentally re-enable a stub publish. See scripts/check-workflows.py.
 
   linux-release:
-    name: linux-release (RETIRED — packaging NOT IMPLEMENTED)
-    # RETIRED (P3b): the old Flatpak pipeline built the retired Slint headless
-    # host. Linux release packaging is disabled pending a validated replacement
-    # (scripts/package-linux-release.sh exits non-zero with NOT IMPLEMENTED).
-    if: false
+    name: linux-release (Flatpak — tags/dispatch only)
+    # Builds the real React/Tauri Linux host as a Flatpak bundle. The manifest
+    # installs a prebuilt payload against org.gnome.Platform//51, so the job
+    # installs that runtime/SDK and flatpak-builder. Artifact only: it is not
+    # published to Flathub and is not a runtime/GPU/pixel acceptance.
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
-      - name: Retired — no Linux package is built or uploaded
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Cache Linux release build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-linux-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-linux-release-
+      - name: Install Linux host deps and flatpak-builder
         run: |
-          echo "RETIRED: linux-release is NOT IMPLEMENTED; nothing is built."
-          exit 1
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkgconf libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev \
+            flatpak flatpak-builder
+      - name: Install the GNOME runtime and SDK used by the manifest
+        run: |
+          set -euo pipefail
+          flatpak remote-add --user --if-not-exists flathub \
+            https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub \
+            org.gnome.Platform//51 org.gnome.Sdk//51
+      - name: Prefetch crates for the locked release build
+        run: cargo fetch --locked
+      - name: Build and package the Linux Flatpak
+        env:
+          FLATPAK_REMOTE_DEPS: flathub
+          FLATPAK_REMOTE_BUILD: flathub
+        run: bash scripts/package-linux-release.sh
+      - name: Record packaging summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Linux release Flatpak'
+            echo 'Built dev.yacr.app from the React/Tauri host on ubuntu-latest.'
+            echo 'The bundle is not published to Flathub and is not window/GPU acceptance.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the Linux release Flatpak
+        uses: actions/upload-artifact@v4
+        with:
+          name: yacr-linux-release
+          path: |
+            target/release/dist/*.flatpak
+            target/release/dist/*.flatpak.sha256
+          if-no-files-found: error
+          retention-days: 30
 
   windows-release:
-    name: windows-release (RETIRED — Windows GUI NOT IMPLEMENTED)
-    # RETIRED (P3b): `apps/app-windows` is a NOT IMPLEMENTED stub; there is no
-    # GUI to package (scripts/package-windows-release.sh exits non-zero).
-    if: false
+    name: windows-release (MSVC zip — tags/dispatch only)
+    # Builds and packages the real React/Tauri Windows host. The script builds
+    # the frontend first (tauri::generate_context! embeds desktop-ui/dist) and
+    # links the MSVC CRT statically. Artifact only; not code-signed.
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: windows-latest
+    timeout-minutes: 90
     steps:
-      - name: Retired — no Windows package is built or uploaded
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache Windows release build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-windows-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-windows-release-
+      - name: Build and package the Windows release
+        shell: bash
+        env:
+          WITH_FONTS: "1"
+        run: bash scripts/package-windows-release.sh
+      - name: Record packaging summary
+        if: always()
         shell: bash
         run: |
-          echo "RETIRED: windows-release is NOT IMPLEMENTED; nothing is built."
-          exit 1
+          {
+            echo '## Windows release package (MSVC)'
+            echo 'Built and packaged the React/Tauri host on windows-latest; the CRT is linked statically.'
+            echo 'The zip is unsigned; window/GPU/native-dialog behaviour is not exercised.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the Windows release zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: yacr-windows-release
+          path: |
+            target/x86_64-pc-windows-msvc/release/dist/*.zip
+            target/x86_64-pc-windows-msvc/release/dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
 
   macos-release:
-    name: macos-release (RETIRED — macOS GUI NOT IMPLEMENTED)
-    # RETIRED (P3b): `apps/app-macos` is a NOT IMPLEMENTED stub; there is no GUI
-    # to package (scripts/package-macos-release.sh exits non-zero).
-    if: false
+    name: macos-release (universal Yacr.app — tags/dispatch only)
+    # Builds the real React/Tauri macOS host (WKWebView + native CAD NSView +
+    # wgpu/Metal) as a universal Yacr.app tarball. The script builds the frontend
+    # before cargo (generate_context! embeds desktop-ui/dist). Artifact only:
+    # unsigned and not notarized.
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: macos-latest
+    timeout-minutes: 120
     steps:
-      - name: Retired — no macOS package is built or uploaded
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache macOS release build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-macos-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-macos-release-
+      - name: Build and package the macOS release (universal)
+        shell: bash
+        env:
+          MACOS_ARCH: universal
+          WITH_FONTS: "1"
+        run: bash scripts/package-macos-release.sh
+      - name: Record packaging summary
+        if: always()
         shell: bash
         run: |
-          echo "RETIRED: macos-release is NOT IMPLEMENTED; nothing is built."
-          exit 1
+          {
+            echo '## macOS release package (universal)'
+            echo 'Built and packaged the React/Tauri host on macos-latest; Mach-O deps are checked to be system-only.'
+            echo 'The bundle is unsigned and not notarized; window/Metal/DPI behaviour is not exercised.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the macOS release tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: yacr-macos-release
+          path: |
+            target/macos/universal/dist/*.tar.gz
+            target/macos/universal/dist/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
 
   android-apk:
-    name: android-apk (RETIRED — no CI APK build/publish)
-    # RETIRED (P3b): this job never builds or uploads an APK. The Android host is
-    # real again (2026-10-28, `apps/app-android` = Tauri 2 carrier), but its build
-    # runs locally (`scripts/build-android.sh` → `tauri android build --apk`), needs
-    # the SDK/NDK/Gradle toolchain and produces an **unsigned** release APK unless a
-    # keystore is configured — none of which belongs in a publish-capable CI job.
-    # The plain compile gate lives in core.yml (`android-check`, capability-gated).
-    if: false
+    name: android-apk (debug APK — tags/dispatch only)
+    # Builds a real debug APK of the Tauri Android host (the debug keystore signs
+    # it). The native Gradle project is committed; this job provisions the pinned
+    # JDK 17 + SDK/NDK and the wasm-bindgen CLI the chrome bundle needs. Artifact
+    # only: no device/emulator and no store upload.
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
-      - name: Retired — no Android APK is built or uploaded
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: aarch64-linux-android, wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Cache cargo (registry / git / target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-android-apk-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-android-apk-
+      - name: Provision the pinned Android SDK/NDK
         run: |
-          echo "RETIRED: android-apk publishes nothing; build locally with scripts/build-android.sh."
-          exit 1
+          set -euo pipefail
+          ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_HOME
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
+          fi
+          [ -n "$SDKMANAGER" ] && [ -x "$SDKMANAGER" ] \
+            || { echo "::error::sdkmanager not found under $ANDROID_HOME" >&2; exit 1; }
+          set +o pipefail
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
+            "platform-tools" "platforms;android-34" \
+            "build-tools;34.0.0" "ndk;29.0.13846066"
+          set -o pipefail
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.13846066" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.13846066" >> "$GITHUB_ENV"
+      - name: Install the pinned wasm-bindgen CLI and npm deps
+        run: |
+          set -euo pipefail
+          pin="$(sed -n 's/^readonly YACR_PINNED_WASM_BINDGEN="\(.*\)"$/\1/p' scripts/lib/wasm-toolchain.sh)"
+          test -n "$pin" || { echo "no wasm-bindgen pin in scripts/lib/wasm-toolchain.sh" >&2; exit 1; }
+          case "$pin" in
+            0.2.129)
+              sha="82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e" ;;
+            *)
+              echo "no verified download for wasm-bindgen $pin; add its release SHA-256 to this step" >&2
+              exit 1 ;;
+          esac
+          archive="wasm-bindgen-${pin}-x86_64-unknown-linux-musl"
+          curl -fsSL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${pin}/${archive}.tar.gz" \
+            -o "/tmp/${archive}.tar.gz"
+          echo "${sha}  /tmp/${archive}.tar.gz" | sha256sum -c -
+          tar -xzf "/tmp/${archive}.tar.gz" -C /tmp
+          install "/tmp/${archive}/wasm-bindgen" "$HOME/.cargo/bin/wasm-bindgen"
+          wasm-bindgen --version | grep -Fx "wasm-bindgen ${pin}"
+          ( cd apps/desktop-ui && npm ci )
+          ( cd apps/app-android && npm ci )
+      - name: Build the debug APK
+        run: bash scripts/build-android.sh --debug --target aarch64
+      - name: Fail if Cargo.lock was rewritten
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- Cargo.lock
+      - name: Record artifact facts
+        if: always()
+        run: |
+          set -euo pipefail
+          find apps/app-android/src-tauri/gen/android/app/build/outputs/apk \
+            -type f -name '*.apk' -printf '%p %s bytes\n' || true
+          {
+            echo '## android-apk (debug)'
+            echo 'A debug APK artifact was built. No device/emulator was used and nothing was published.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-debug
+          path: apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
 
   android-release:
-    name: android-release (RETIRED — no CI APK build/publish)
-    # RETIRED (P3b): no release APK is produced or uploaded by CI; there is no
-    # signing key and no store path. See `android-apk` above.
-    if: false
+    name: android-release (unsigned APK — tags/dispatch only)
+    # Builds the release variant of the Tauri Android host. There is no signing
+    # key in CI, so the APK is UNSIGNED and must not be published; the artifact
+    # is packaging evidence only. No device/emulator and no store upload.
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
-      - name: Retired — no Android release is built or uploaded
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: aarch64-linux-android, wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Cache cargo (registry / git / target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-android-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-android-release-
+      - name: Provision the pinned Android SDK/NDK
         run: |
-          echo "RETIRED: android-release publishes nothing; build locally with scripts/build-android.sh."
-          exit 1
+          set -euo pipefail
+          ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_HOME
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
+          fi
+          [ -n "$SDKMANAGER" ] && [ -x "$SDKMANAGER" ] \
+            || { echo "::error::sdkmanager not found under $ANDROID_HOME" >&2; exit 1; }
+          set +o pipefail
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
+            "platform-tools" "platforms;android-34" \
+            "build-tools;34.0.0" "ndk;29.0.13846066"
+          set -o pipefail
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.13846066" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.13846066" >> "$GITHUB_ENV"
+      - name: Install the pinned wasm-bindgen CLI and npm deps
+        run: |
+          set -euo pipefail
+          pin="$(sed -n 's/^readonly YACR_PINNED_WASM_BINDGEN="\(.*\)"$/\1/p' scripts/lib/wasm-toolchain.sh)"
+          test -n "$pin" || { echo "no wasm-bindgen pin in scripts/lib/wasm-toolchain.sh" >&2; exit 1; }
+          case "$pin" in
+            0.2.129)
+              sha="82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e" ;;
+            *)
+              echo "no verified download for wasm-bindgen $pin; add its release SHA-256 to this step" >&2
+              exit 1 ;;
+          esac
+          archive="wasm-bindgen-${pin}-x86_64-unknown-linux-musl"
+          curl -fsSL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${pin}/${archive}.tar.gz" \
+            -o "/tmp/${archive}.tar.gz"
+          echo "${sha}  /tmp/${archive}.tar.gz" | sha256sum -c -
+          tar -xzf "/tmp/${archive}.tar.gz" -C /tmp
+          install "/tmp/${archive}/wasm-bindgen" "$HOME/.cargo/bin/wasm-bindgen"
+          wasm-bindgen --version | grep -Fx "wasm-bindgen ${pin}"
+          ( cd apps/desktop-ui && npm ci )
+          ( cd apps/app-android && npm ci )
+      - name: Build the release APK (unsigned)
+        run: bash scripts/build-android.sh --release --target aarch64
+      - name: Fail if Cargo.lock was rewritten
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- Cargo.lock
+      - name: Record artifact facts
+        if: always()
+        run: |
+          set -euo pipefail
+          find apps/app-android/src-tauri/gen/android/app/build/outputs/apk \
+            -type f -name '*.apk' -printf '%p %s bytes\n' || true
+          {
+            echo '## android-release (unsigned)'
+            echo 'A release APK artifact was built. It is UNSIGNED: sign it before installing or publishing.'
+            echo 'No device/emulator was used and nothing was published.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the unsigned release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-unsigned
+          path: apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
 
   web-build:
     name: web-build (wasm CAD bundle)

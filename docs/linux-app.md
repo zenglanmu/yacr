@@ -57,8 +57,9 @@ PNG：`initial.png`、`navigation.png`；报告：`report.json`。目录必须�
 >
 > **当前（2026-10-17）**：该打包流水线已为 **React + Tauri** 宿主（`apps/app-linux`，bin `yacr`）
 > **重新启用**，manifest 改用 `org.gnome.Platform//51`，bundle 内只有 GUI 宿主 + 字体（**不含** CLI），
-> 产出为**本地** `target/release/dist/yacr-<version>-linux-<arch>.flatpak`。**未发布 Flathub**，CI 的
-> `linux-release` job 仍硬禁用。当前 manifest、前置条件、构建/运行命令与实测结果见
+> 产出为 `target/release/dist/yacr-<version>-linux-<arch>.flatpak`。**未发布 Flathub**；CI 的
+> `linux-release` job 自 2026-11-01 起重新启用（仅 `v*` tag / 手工 dispatch），上传 Flatpak
+> artifact。当前 manifest、前置条件、构建/运行命令与实测结果见
 > **`docs/flatpak.md`** 与 **`docs/validation-flatpak-linux-2026-10-17.md`**；本节不再重复。
 
 ## 已接线范围与限制

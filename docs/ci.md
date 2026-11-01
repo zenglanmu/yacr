@@ -4,9 +4,10 @@
 `docs/build.md`；本文件只说明 workflow 如何镜像该门禁，以及哪些层次**已退役/未运行**。
 
 工作流文件：`.github/workflows/core.yml`（核心质量层）与 `.github/workflows/build.yml`
-（构建/校验层）。校验脚本：`scripts/check-workflows.py`（必需 job 片段 + 退役 job 硬禁用契约 +
+（构建/校验层）。校验脚本：`scripts/check-workflows.py`（必需 job 片段 + release job 事件门禁契约 +
 浏览器 build/smoke/deploy 入口契约）、`scripts/test-linux-workflow.py`（变异契约）、
 `scripts/test-web-deploy-workflow.py`（浏览器流水线变异契约）、
+`scripts/test-release-workflows.py`（5 个 release job 的事件门禁与入口契约）、
 `scripts/test-ui-migration-guards.py`（迁移守卫契约）、
 `scripts/check-command-docs.py`（§2/§2b/§3.7 的命令名与别名一致性，权威是
 `crates/cad-ui-core/src/session/commands.rs`）与它的自测
@@ -16,9 +17,10 @@
 > Slint 退役。编译门禁已加入 Tauri/GTK 前置（`libwebkit2gtk-4.1-dev`）与 React 前端构建
 > （`apps/desktop-ui`、`npm test`、`npm run build`）。**2026-10-23 起**：`windows-check` 编译的是
 > **真实 Windows 宿主**（不再是 NOT IMPLEMENTED 桩），但**仍只是编译门禁**；X11/XWayland 在
-> Linux 宿主中被显式拒绝（退出码 4），CI 不运行 GUI。5 个发布 job 以 `if: false`
-> **硬禁用**并以 `RETIRED` 标记，**不可通过仓库变量重新启用**，也不含 `secrets.…` 发布路径。
-> 见 ADR 0010 与 ADR 0023。
+> Linux 宿主中被显式拒绝（退出码 4），CI 不运行 GUI。**2026-11-01 起** 5 个发布 job
+> （`linux-release`/`windows-release`/`macos-release`/`android-apk`/`android-release`）已从
+> `if: false` 重新启用为 **event-gated artifact builder**：仅 `v*` tag 或手工 `workflow_dispatch`
+> 运行，仅上传 workflow artifact，不签名、不发布、不接触商店凭据。见 ADR 0010 与 ADR 0023。
 
 > **2026-10-25 增补（Web 流水线恢复）**：`apps/app-web` 的 wasm CAD 会话（ADR 0024）已在 CI 中
 > 端到端接线：`web-build` 用**钉住 SHA-256 的 wasm-bindgen 预编译 CLI** 构建
@@ -61,10 +63,16 @@
 | `web-smoke` | build.yml | `ubuntu-latest` | 下载 `web-dist` → `scripts/serve-web.py` → Playwright Chromium 打开页面，断言 `start: ok` / `target` / `physical` / `batches` / `draws` / `presented`；**SwiftShader 软件渲染**，非 GPU/像素证据 |
 | `web-deploy` | build.yml | `ubuntu-latest` | **仅 `v*` tag 或手工 dispatch**；`needs: web-build`，下载 `web-ui-dist`（`apps/app-web/dist-ui`）后 `scripts/deploy-cloudflare-pages.sh`（`SKIP_BUILD=1`、`BUNDLE_KIND=ui`）发布到 Cloudflare Pages |
 | `android-check` | core.yml | 能力相关（默认 SKIP） | `bash scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome bundle，因为 `tauri::generate_context!` 会内嵌 `frontendDist`；脚本目前仍一并产出 wasm 产物，`native-below` 载体不加载）→ `cargo check --target aarch64-linux-android -p app-android --locked`（**真实 Android 宿主 / 原生 `native-below` 载体**的编译门禁；不跑 Gradle、不建 APK、不跑设备） |
+| `linux-release` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；安装 GTK/WebKitGTK + `flatpak-builder` + `org.gnome.Platform//51`/`Sdk//51` → `bash scripts/package-linux-release.sh` → 上传 `.flatpak` + `.sha256`（不发布 Flathub） |
+| `windows-release` | build.yml | `windows-latest` | **仅 `v*` tag / 手工 dispatch**；先构建 React 前端 → `bash scripts/package-windows-release.sh`（MSVC 静态 CRT，PE/图标校验）→ 上传 `.zip` + `.sha256`（未签名） |
+| `macos-release` | build.yml | `macos-latest` | **仅 `v*` tag / 手工 dispatch**；先构建 React 前端 → `bash scripts/package-macos-release.sh`（universal + `lipo`，Mach-O 仅系统库）→ 上传 `.tar.gz` + `.sha256`（未签名/未公证） |
+| `android-apk` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；provision JDK 17 + SDK/NDK `29.0.13846066` + 钉住 wasm-bindgen → `bash scripts/build-android.sh --debug --target aarch64` → 上传 debug APK。无设备/模拟器 |
+| `android-release` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；同上但 `--release`，产出 **UNSIGNED** release APK artifact；无签名密钥、无商店上传 |
 
-`android-check` 是 capability-gated（`vars.ANDROID_CI_ENABLED`），`web-deploy` 是
-**event-gated**（`github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')`）；
-条件不满足时 GitHub 显示 **skipped（未运行）**，绝不显示为通过。`windows-check`/`macos-check`
+`android-check` 是 capability-gated（`vars.ANDROID_CI_ENABLED`）；`web-deploy` 与上面 5 个
+release job 是 **event-gated**（`github.event_name == 'workflow_dispatch' ||
+startsWith(github.ref, 'refs/tags/v')`）；条件不满足时 GitHub 显示 **skipped（未运行）**，
+绝不显示为通过。`windows-check`/`macos-check`
 **只证明编译**，不代表这些平台可运行；`windows-check` 的 step summary 文案**仍是旧的
 “NOT IMPLEMENTED placeholder”**，属**文案腐化**（实现已换成真实宿主），不得据此判断实现状态。
 
@@ -72,27 +80,30 @@
 Windows MSVC `clippy`/`check`/release `build`、MinGW GNU release `build`、`app-windows` wasm 空壳
 `check`——全部 rc=0。这些**不是** CI job 证据，也不代表 Windows 可运行。
 
-## 已退役的 job（硬禁用，`if: false` + `RETIRED`）
+## 发布打包 job（2026-11-01 重新启用，event-gated）
 
-下列 job **保留声明**、带无条件 `if: false` 与 `RETIRED` 注释，并含一个 `exit 1` 步骤；它们
-**不含** `vars.…` 开关、`secrets.…` 引用或 `continue-on-error: true`。删除禁用守卫、改成仓库变量
-或重新加入凭据都会被 `check-workflows.py` 判为硬错误：
+下列 job 不再是 `if: false` 退役占位；它们对**当前 React/Tauri 宿主**构建真实 artifact，并且只在
+`v*` tag 或手工 `workflow_dispatch` 运行。任何一次运行都只看 artifact 上传结果，不签名、不公证、
+不发布到 Flathub/商店：
 
-`android-apk`、`android-release`、`linux-release`、`windows-release`、`macos-release`。
+| Job | 产物 | 边界 |
+|---|---|---|
+| `linux-release` | `.flatpak` + `.sha256` | 未发布 Flathub；无窗口/GPU 验收 |
+| `windows-release` | `.zip` + `.sha256` | 未代码签名；无运行/GPU 验收 |
+| `macos-release` | `.tar.gz`（`Yacr.app`）+ `.sha256` | 未签名/未公证；无窗口/Metal/DPI 验收 |
+| `android-apk` | debug `.apk` | 无设备/模拟器；debug keystore 签名 |
+| `android-release` | **unsigned** release `.apk` | 无签名密钥、无商店上传；未安装运行 |
 
-含义：**Android 宿主自 2026-10-28 起重新是真实宿主，2026-11-01 起是原生 `native-below` 载体**
-（`apps/app-android` = Tauri 2 WebView + 原生 `CadSession`/wgpu Vulkan → `SurfaceView`，ADR 0027；
-wasm 会话不实例化），但 CI 仍**不**构建/签名/发布 APK——`android-apk`/`android-release` 保持硬禁用
-（无签名密钥、无商店路径），APK 由本地 `scripts/build-android.sh` 产出；`android-check` 是
-capability-gated 的编译门禁。macOS 宿主是真实 Tauri 宿主，但只有 CI 编译门禁（无打包/签名，
-视觉/运行时 NOT VERIFIED）；Windows 宿主 2026-10-23 起已实现，
-`windows-check` 只是**编译门禁**（≠运行验收），`windows-release` 仍硬禁用。**Web job 已不在退役
-列表**（2026-10-25）：`web-build`/`web-smoke` 是必需的验证 job，`web-deploy` 是 event-gated 的真实
-发布 job（`secrets.…` + `v*` tag/dispatch）；`scripts/deploy-cloudflare-pages.sh` 也是真实发布入口，
-发布前逐项校验 bundle 构件。`check-workflows.py` 仍会拒绝把 `web-deploy` 改成 `if: false` 或移除
-tag/dispatch 门禁。
-`linux-release` 的**脚本**已于 2026-10-17 重启（本地可构建，见 `docs/flatpak.md`），但该 CI job 仍
-**硬禁用**；它与其余 job 一样不会产出或发布任何产物。
+`scripts/check-workflows.py` 与 `scripts/test-release-workflows.py` 固定这些性质：job 必须存在、
+必须调用真实入口脚本、必须保留 `refs/tags/v` / `workflow_dispatch` 门禁、不得出现 `if: false`、
+`continue-on-error`、`secrets.…` 或发布命令。`RETIRED_JOBS` 机制保留为空元组，供未来再次退役时
+使用。
+
+Android：宿主自 2026-11-01 起是原生 `native-below` 载体（`apps/app-android` = Tauri 2 WebView +
+原生 `CadSession`/wgpu Vulkan → `SurfaceView`，ADR 0027；wasm 会话不实例化）。`android-check` 仍是
+capability-gated 的**编译门禁**；两个 APK job 只构建 artifact，**没有**设备/模拟器、Vulkan adapter、
+像素或 JNI 运行时链接证据。Windows/macOS 的 `*-release` 只证明**能在对应 runner 上打包**，
+不证明真实窗口/GPU/对话框/视觉行为。
 
 ## 锁定工具版本
 
@@ -120,7 +131,9 @@ runner 上恰好存在的 CLI。**本地** bundle 构建（`scripts/build-web.sh
 - **Windows 视觉/运行时**：CI **没有**也不应有 Windows 运行验收（`windows-check` 只编译）；
   spike-1/4/5 由用户在真 Windows 自测（`docs/windows-app.md`），CI 不得冒充。
 - **Linux X11/XWayland**：宿主显式拒绝（exit 4），CI 的 `linux-app` 只做编译/测试，不运行 GUI。
-- 5 个退役 job：**永远不会**在受支持配置下运行（硬禁用）。
+- 5 个 release job：workflow 已定义且 event-gated；**本环境没有运行它们**（无对应 runner /
+  Flatpak runtime / Android SDK/NDK），首次真实结果以 GitHub Actions 为准。它们只产出 artifact，
+  不发布、不签名。
 - **CI 上的真实 GPU / 黄金图 / 浏览器矩阵 / Android 真机**：未运行。GitHub 托管 runner 无 GPU，
   软件渲染不能作为真实 GPU 证据。
 - **Android 设备**：CI **没有**设备/模拟器 job（`android-check` 只编译）。**2026-11-01 的
@@ -129,11 +142,12 @@ runner 上恰好存在的 CLI。**本地** bundle 构建（`scripts/build-web.sh
   2026-10-28 的模拟器（x86_64 + `-gpu swiftshader_indirect`）出图记录属于**已退役的 `dom-canvas`
   载体**，不得作为 native 载体的证据；见 `docs/android-host.md` §8/§10。
 - **响应式 chrome：构建/发布已接线，*验收* 仍未接线**：`web-build` 现在同时构建
-  `scripts/build-web-ui.sh`（→ `apps/app-web/dist-ui`），`web-deploy` 发布该 artifact；但
-  `scripts/web-ui-smoke.cjs`（Chromium + SwiftShader 的布局/DOM 套件）与
-  `scripts/build-android-ui.sh` / `scripts/build-android.sh` 仍是**本地/手工**入口，**没有**对应
-  workflow。CI 的 `web-smoke` 只冒烟旧的 `apps/app-web/dist`（见下一条「浏览器 bundle」），不得据本地
-  结果宣称 CI 通过。本地有界记录见 `docs/validation-mobile-responsive-2026-10-28.md`。
+  `scripts/build-web-ui.sh`（→ `apps/app-web/dist-ui`），`web-deploy` 发布该 artifact；
+  `scripts/build-android-ui.sh` 由 `android-check` 与两个 APK job 调用。
+  `scripts/web-ui-smoke.cjs`（Chromium + SwiftShader 的布局/DOM 套件）仍是**本地/手工**入口，
+  **没有**对应 workflow。CI 的 `web-smoke` 只冒烟旧的 `apps/app-web/dist`（见下一条「浏览器
+  bundle」），不得据本地结果宣称 CI 通过。本地有界记录见
+  `docs/validation-mobile-responsive-2026-10-28.md`。
 - **浏览器 bundle**：`web-build` 在 CI 构建并上传 artifact；`web-smoke` 用 Playwright Chromium
   （SwiftShader 软件渲染）打开并断言 typed 状态行，因此**有** CI bundle 产物与 carrier/status 冒烟，
   但**没有**真实 GPU、像素/golden、性能或 WebKitGTK/其它浏览器矩阵证据；本地真实浏览器读数
@@ -143,9 +157,9 @@ runner 上恰好存在的 CLI。**本地** bundle 构建（`scripts/build-web.sh
   `web-ui-dist`（共享 chrome bundle，`BUNDLE_KIND=ui`）发布到 Cloudflare Pages（`yacr-examples`）；
   发布入口固定为项目的 `https://yacr-examples.pages.dev`（脚本只上传并打印该 URL，不管理自定义域名）。
   上传成功只是**发布证据**，不是运行/GPU/像素验收。常规 push/PR 没有发布路径。
-- **Linux 发布包**：CI 上仍没有受支持的流水线（`linux-release` 硬禁用）。`package-linux-release.sh`
-  已于 2026-10-17 重启，本地可构建并安装 `.flatpak`（证据见
-  `docs/validation-flatpak-linux-2026-10-17.md`）；**未**发布到 Flathub，也未在 CI 运行。
+- **Linux 发布包**：`linux-release` 已重新启用（event-gated），CI 会构建并上传 `.flatpak` artifact；
+  **未**发布到 Flathub。本轮**没有**在 GitHub runner 上实际运行该 job；本地 2026-10-17 的构建/安装
+  证据仍见 `docs/validation-flatpak-linux-2026-10-17.md`（历史证据，不代表 CI 已通过）。
 
 ## 本地复现（当前门禁）
 
@@ -171,6 +185,7 @@ python3 scripts/test-web-deploy-workflow.py
 python3 scripts/test-package-linux-release.py
 python3 scripts/test-package-windows-release.py
 python3 scripts/test-package-macos-release.py
+python3 scripts/test-release-workflows.py
 python3 scripts/test-fetch-fonts.py
 python3 scripts/test-android-host.py
 # 离线 WGSL 校验（无需 GPU）
@@ -195,25 +210,19 @@ node scripts/web-smoke.cjs --url http://127.0.0.1:8090/
 构件缺失/为空、wasm-bindgen pin 不符、工具链缺失都硬失败。`web-smoke` 在 CI 上走 SwiftShader
 软件渲染，只能证明 carrier/状态行成立，**不是** GPU/像素证据；截图只是调试产物。
 
-退役脚本的负向断言（每个应非零退出）：
-
-```bash
-for s in package-windows-release package-macos-release; do
-  bash "scripts/$s.sh"; echo "$s exit=$? (expect 1)"
-done
-```
-
-`scripts/build-android.sh` **不在**负向列表：2026-10-28 起它构建真实 APK（`tauri android build --apk`，
-需要 SDK/NDK/JDK 17，release 默认未签名），失败即非零退出，绝不产出桩。
-`scripts/build-web.sh`、`scripts/web-smoke.cjs` 与 `scripts/deploy-cloudflare-pages.sh` **不在**该
-列表：它们构建真实 bundle、驱动真实浏览器、发布经过校验的 bundle（后者需要 Cloudflare 凭据，
-且只在 tag/dispatch 由 CI 触发）；**不允许**用「退役桩」冒充成功。`package-linux-release.sh`
-**不在**负向列表：它已于 2026-10-17 重启，按退出码 0 完成构建（本地产物，无发布，见
-`docs/flatpak.md`）。
+发布打包入口现在都是真实流水线，**没有**「退役桩」负向列表：
+`scripts/package-linux-release.sh`、`scripts/package-windows-release.sh`、
+`scripts/package-macos-release.sh` 分别构建 Flatpak / MSVC zip / macOS tarball；
+`scripts/build-android.sh` 构建真实 APK（需要 SDK/NDK/JDK 17，release 默认未签名）；
+`scripts/build-web.sh`、`scripts/web-smoke.cjs`、`scripts/deploy-cloudflare-pages.sh` 构建/驱动/
+发布经过校验的 bundle。任何一步失败都必须非零退出，**不允许**伪造空成功。
+Linux Flatpak 的本地运行方式见 `docs/flatpak.md`；Windows/macOS 打包脚本只能在对应操作系统上
+真正执行（或按脚本支持的方式交叉构建），本环境未运行。
 
 `scripts/check-workflows.py` 有 PyYAML 时做真实解析，否则退化为结构化文本检查并如实说明；
-变异契约（`test-linux-workflow.py`、`test-web-deploy-workflow.py`、`test-package-*.py`）故意删除
-关键片段并断言检查**必然报错**，证明门禁不是摆设。它们都不触网、不部署、不执行 release。
+变异契约（`test-linux-workflow.py`、`test-web-deploy-workflow.py`、`test-release-workflows.py`、
+`test-package-*.py`）故意删除关键片段并断言检查**必然报错**，证明门禁不是摆设。它们都不触网、
+不部署、不执行 release。
 `test-web-deploy-workflow.py` 既证明 bundle/smoke/deploy 入口契约（pin 检查、wasm32 构建、输出目录、
 `start: ok` 断言、构件校验先于上传）会因回归而失败，也证明 `web-deploy` 的 tag/dispatch 门禁
 不能被改成「每次 push 都发布」。

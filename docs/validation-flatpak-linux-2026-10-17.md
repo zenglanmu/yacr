@@ -8,6 +8,9 @@
 **这不是**发布验收，**不是**视觉/精度/vendor 结论，**不是**跨平台结论：单机、单适配器、
 单会话（GNOME/Mutter + Quadro P620 + `scale=1`）、同 UID。`target/` 产物是**本地** artifact。
 
+> **2026-11-01 后续**：CI `linux-release` job 已重新启用（仅 `v*` tag / 手工 dispatch，上传
+> Flatpak artifact，不发布 Flathub）。本文件仍是 **2026-10-17 本地**证据，不代表 CI 已运行或通过。
+
 ## 环境与授权边界
 
 | 项 | 值（实测） |

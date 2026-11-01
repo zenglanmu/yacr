@@ -91,8 +91,10 @@ class WebPipelineWorkflowContracts(unittest.TestCase):
 
     def test_deploying_on_a_routine_push_fails_the_gate_contract(self):
         text = BUILD.read_text()
-        mutated = text.replace("refs/tags/v", "refs/heads/main", 1)
-        self.assertNotEqual(mutated, text)
+        block = self.block("web-deploy")
+        mutated_block = block.replace("refs/tags/v", "refs/heads/main", 1)
+        self.assertNotEqual(mutated_block, block)
+        mutated = text.replace(block, mutated_block, 1)
         errors = self.check_text(mutated)
         self.assertTrue(
             any("web-deploy" in error for error in errors),

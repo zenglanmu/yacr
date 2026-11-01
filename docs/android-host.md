@@ -220,8 +220,9 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 - `cargo check -p app-android --target aarch64-linux-android --locked`：真实编译门禁。
 - `bash scripts/build-android.sh`：真实 APK 构建，失败即非零。
 - CI：`android-check` 是 capability-gated（`vars.ANDROID_CI_ENABLED`）的 **aarch64 编译门禁**
-  （不跑 Gradle、不建 APK、不跑设备）；`android-apk`/`android-release` 仍硬禁用。**CI 没有设备 job。**
-  见 `docs/ci.md`。
+  （不跑 Gradle、不建 APK、不跑设备）。`android-apk`（debug）与 `android-release`（unsigned
+  release）自 2026-11-01 起重新启用，但只在 `v*` tag / 手工 dispatch 运行，且只构建并上传 APK
+  artifact；不签名、不发布、不安装运行。**CI 没有设备/模拟器 job。** 见 `docs/ci.md`。
 
 ## 10. 历史：已退役的 `dom-canvas` 载体（2026-10-28）
 

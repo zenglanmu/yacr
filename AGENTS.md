@@ -144,12 +144,13 @@ android-host/macos-host/ui-migration-guards）也是门禁的一部分，清单�
 | Linux | 唯一可运行 GUI；原生 Wayland 生产路径，X11 走 DOM-canvas。仅 GNOME/Mutter + P620 + `scale=1` 有界证据 |
 | Windows | 真实宿主但**仅**编译门禁 + Wine 拒绝合同（缺 WebView2 → 退出码 5）；视觉/运行时 NOT VERIFIED |
 | macOS | 真实 Tauri 宿主但**仅** CI 编译；窗口/Metal/层序/DPI/对话框/像素一律 NOT VERIFIED |
-| Android | Tauri WebView 载体 + wasm 会话；本地模拟器（SwiftShader）有界证据；真机/真实 GPU NOT VERIFIED |
+| Android | Tauri WebView + 原生 `native-below` 载体（wasm 会话不实例化）；APK 打包 event-gated artifact；真机/真实 GPU NOT VERIFIED |
 | Web | wasm 会话真实；CI `web-smoke` 是 SwiftShader 冒烟（非 GPU/像素）；`app-web` host target 仍是空壳 |
 | CLI | `cad-cli-tools` 保留，headless 开图/出图 |
 
-发布/打包 job 与脚本多数已退役或硬禁用（`if: false` / 非零退出）；**不要把退役脚本当可用流程**，
-也不要写“某平台已验收”。
+平台打包脚本与 5 个 release job 已于 2026-11-01 按 React/Tauri 宿主重新启用：仅 `v*` tag / 手工
+`workflow_dispatch` 运行，只上传 workflow artifact，**不签名、不发布、不接触商店凭据**。打包成功
+不等于运行/视觉/GPU 验收，也不要写“某平台已验收”。
 
 ## 提交纪律（已发生两次）
 

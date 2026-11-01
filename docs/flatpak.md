@@ -111,8 +111,9 @@ flatpak run dev.yacr.app --open /absolute/drawing.dwg
 
 ## 5. 未测 / 边界（不得省略）
 
-- **未发布 Flathub**（用户 2026-10-17 明确决定）：bundle 只是**本地** `target/` 产物，未提交、未审核、
-  无 CI 发布；`docs/build.md` 的 CI `linux-release` job 仍 `if: false` 硬禁用。
+- **未发布 Flathub**（用户 2026-10-17 明确决定）：bundle 未提交、未审核、无 Flathub 发布。
+  2026-11-01 起 CI `linux-release` 已重新启用（仅 `v*` tag / 手工 dispatch），会上传
+  `.flatpak` workflow artifact；**不是** Flathub 发布，也不代表本文件的本地运行证据已在 CI 复现。
 - **NOT RUN**：沙箱内 **X11**（`--socket=fallback-x11`）；沙箱内 `xdg-desktop-portal` 文件选择器；
   沙箱窗口的**视觉/截图像素**判读；原生 Wayland 子表面的视觉判读。
 - **NOT RUN**：本机之外的宿主（其它发行版/桌面/合成器）；其它 **GPU/vendor**；

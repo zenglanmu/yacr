@@ -12,16 +12,15 @@ checks:
     genuine compile/check gates that survive the UI replacement:
     ``core-quality``, ``wasm-check``, ``i18n-contracts``, ``shader-validation``,
     ``linux-app``, ``windows-check``, ``macos-check``, ``android-check``;
-  * every **retired** platform build/deploy/release job
-    (``web-build``, ``web-deploy``, ``web-smoke``, ``android-apk``,
-    ``android-release``, ``linux-release``, ``windows-release``,
-    ``macos-release``) is still *declared* so its absence stays visible, but is
-    hard-disabled with an unconditional ``if: false`` and a ``RETIRED`` marker,
-    and its only step fails non-zero (``exit 1``) if it is ever run. It must NOT
-    carry a mutable capability variable (``vars.…``): a repository variable that
-    could accidentally re-enable a stub publish is exactly the foot-gun this
-    check removes. The one still capability-gated job is the ``android-check``
-    compile gate, which cannot publish anything;
+  * the five release packaging jobs (``linux-release``, ``windows-release``,
+    ``macos-release``, ``android-apk``, ``android-release``) are declared,
+    call their real entry point, and keep the ``v*`` tag / manual-dispatch event
+    gate so a routine push can never build a release artifact. The retirement
+    machinery remains for future use, but no job is retired today;
+  * every **retired** job (none today) is still declared, hard-disabled with an
+    unconditional ``if: false`` and a ``RETIRED`` marker, and its only step
+    fails non-zero (``exit 1``) if it is ever run. It must NOT carry a mutable
+    capability variable (``vars.…``) or a ``secrets.…`` publish path;
   * no required or retired job declares ``continue-on-error: true`` (job-level or
     step-level);
   * the browser pipeline entry points (``scripts/build-web.sh`` plus the shared
@@ -91,6 +90,7 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         # the two shell-only commands, the webgl2 refusal, the UI bundle path).
         "python3 scripts/test-android-host.py",
         "test-ui-migration-guards.py",
+        "test-release-workflows.py",
     ),
     "windows-check": (
         "cargo check -p app-windows --all-targets --locked",
@@ -122,6 +122,52 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "apps/desktop-ui",
         "scripts/build-android-ui.sh",
         "cargo check --target aarch64-linux-android -p app-android --locked",
+    ),
+    # Release packaging jobs (re-enabled 2026-11-01): event-gated artifact
+    # builders for the current React/Tauri hosts. They never run on a routine
+    # push/PR and never publish, sign or notarize.
+    "linux-release": (
+        "refs/tags/v",
+        "workflow_dispatch",
+        "scripts/package-linux-release.sh",
+        "flatpak-builder",
+        "actions/upload-artifact",
+        "*.flatpak",
+    ),
+    "windows-release": (
+        "refs/tags/v",
+        "workflow_dispatch",
+        "scripts/package-windows-release.sh",
+        "actions/setup-node@v4",
+        "actions/upload-artifact",
+        "*.zip",
+    ),
+    "macos-release": (
+        "refs/tags/v",
+        "workflow_dispatch",
+        "scripts/package-macos-release.sh",
+        "actions/setup-node@v4",
+        "aarch64-apple-darwin",
+        "actions/upload-artifact",
+        "*.tar.gz",
+    ),
+    "android-apk": (
+        "refs/tags/v",
+        "workflow_dispatch",
+        "scripts/build-android.sh",
+        "--debug",
+        "ndk;29.0.13846066",
+        "actions/upload-artifact",
+        "*.apk",
+    ),
+    "android-release": (
+        "refs/tags/v",
+        "workflow_dispatch",
+        "scripts/build-android.sh",
+        "--release",
+        "ndk;29.0.13846066",
+        "actions/upload-artifact",
+        "*.apk",
     ),
     "web-build": (
         # The real wasm CAD bundle (ADR 0024): pinned CLI install, script build,
@@ -165,24 +211,32 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
 # guard so that when the condition is absent GitHub reports SKIPPED, never a pass.
 # `android-check` is capability-gated (no Android device/toolchain by default) and
 # `web-deploy` is event-gated (only `v*` tags or a manual dispatch may publish).
-GATED_JOBS: tuple[str, ...] = ("android-check", "web-deploy")
+GATED_JOBS: tuple[str, ...] = (
+    "android-check",
+    "web-deploy",
+    "linux-release",
+    "windows-release",
+    "macos-release",
+    "android-apk",
+    "android-release",
+)
 
 # `if:` fragment each gated job must retain (the capability/event switch).
 GATED_JOB_IF: dict[str, str] = {
     "android-check": "vars.ANDROID_CI_ENABLED",
     "web-deploy": "refs/tags/v",
+    "linux-release": "refs/tags/v",
+    "windows-release": "refs/tags/v",
+    "macos-release": "refs/tags/v",
+    "android-apk": "refs/tags/v",
+    "android-release": "refs/tags/v",
 }
 
-# Retired platform build/release jobs. They are kept declared (so the gap stays
-# visible) but must be hard-disabled: an unconditional `if: false` and a
-# `RETIRED` marker, never a mutable `vars.…` switch.
-RETIRED_JOBS: tuple[str, ...] = (
-    "android-apk",
-    "android-release",
-    "linux-release",
-    "windows-release",
-    "macos-release",
-)
+# No platform release job is retired any more (2026-11-01): the five release
+# jobs are real artifact builders gated to a `v*` tag or a manual dispatch. The
+# retirement machinery stays in the checker so a future backslide into an
+# `if: false` stub is still caught; the tuple is intentionally empty.
+RETIRED_JOBS: tuple[str, ...] = ()
 
 RETIRED_MARKER = "RETIRED"
 HARD_DISABLE_RE = re.compile(r"^    if:\s*false\s*(?:#.*)?$", re.MULTILINE)
@@ -713,8 +767,13 @@ def main() -> int:
             print(f"  - {error}")
         return 1
 
+    retired_note = (
+        "retired jobs hard-disabled"
+        if RETIRED_JOBS
+        else "no retired jobs (release jobs are event-gated artifact builders)"
+    )
     print(
-        "\nOK: required jobs present with commands intact, retired jobs hard-disabled, "
+        f"\nOK: required jobs present with commands intact, {retired_note}, "
         "browser build/smoke/deploy entry points real (deploy tag/dispatch gated), "
         "no continue-on-error: true"
     )
