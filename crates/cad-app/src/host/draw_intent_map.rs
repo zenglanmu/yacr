@@ -473,6 +473,15 @@ impl HostController {
                     refs: selection.to_vec(),
                 },
             ),
+            // SCALETEXT: the selection snapshot is the whole input (the tool
+            // captures no points); the factor is the session typed channel the
+            // command layer reads, so it never rides the payload.
+            DrawIntent::ScaleText => (
+                crate::CommandId::ScaleText,
+                crate::CommandPayload::ScaleText {
+                    refs: selection.to_vec(),
+                },
+            ),
         };
         Ok(Command {
             schema_version: 1,

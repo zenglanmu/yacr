@@ -55,7 +55,8 @@ fn required_points_and_selection_are_explicit_per_kind() {
             DrawToolKind::ArrayRect
             | DrawToolKind::Hatch
             | DrawToolKind::Divide
-            | DrawToolKind::Lengthen => 0,
+            | DrawToolKind::Lengthen
+            | DrawToolKind::ScaleText => 0,
             _ => 2,
         };
         assert_eq!(kind.required_points(), expected, "{kind:?}");

@@ -82,6 +82,8 @@ impl CommandId {
                 // INSERT writes one new block-reference entity; the block table
                 // itself is read-only here (no BLOCK/WBLOCK).
                 | Self::InsertBlock
+                // SCALETEXT rewrites the selected text entities' glyph height.
+                | Self::ScaleText
         )
     }
 }

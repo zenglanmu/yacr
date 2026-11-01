@@ -20,10 +20,10 @@
 2. **显式点名的 AutoCAD 名字**（不可穷尽）：只包含本仓库文档/ADR 真正讨论过的名字，
    来源是 `docs/compatibility.md`、`docs/shortcuts.md` 与各 ADR。它们的状态是**逐条读过源码**后写的。
 
-> **禁止的读法**：不得把 `102`、`164` 或本表任何数字读成「已实现 AutoCAD 的 X%」。AutoCAD 的
+> **禁止的读法**：不得把 `103`、`165` 或本表任何数字读成「已实现 AutoCAD 的 X%」。AutoCAD 的
 > 命令总数取决于版本、产品（完整版/ LT / 工具集）、是否含扩展与第三方；我们没有那份清单，
 > 也**没有**逐条比对过绝大多数命令的语义（例如同名命令的选项、提示顺序、系统变量副作用）。
-> 任何 `102/N` 形式的百分比都是**编造**。本审计回答的是：**我们自己承诺的词表是否名实相符**，
+> 任何 `103/N` 形式的百分比都是**编造**。本审计回答的是：**我们自己承诺的词表是否名实相符**，
 > 以及**我们明确点过名的 AutoCAD 名字还缺什么**。
 
 ---
@@ -32,23 +32,23 @@
 
 | 表 | 数量 | 源码位置 | 断言 / 说明 |
 |---|---|---|---|
-| `COMMAND_TABLE` | **102** 个选择子 | `crates/cad-ui-core/src/session/commands.rs:11` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 102` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs:137`（并断言每变体在表中**恰好一次**、`COMMAND_TABLE.len()` 相等） |
+| `COMMAND_TABLE` | **103** 个选择子 | `crates/cad-ui-core/src/session/commands.rs:11` | 与 `CommandId` 变体一一对应；`EXPECTED_COMMAND_COUNT = 103` 钉在 `crates/cad-ui-core/src/session/tests/tests_commands/command_vocabulary.rs:138`（并断言每变体在表中**恰好一次**、`COMMAND_TABLE.len()` 相等） |
 | `MEASUREMENT_SELECTORS` | **5** | 同文件 `:207` | `DIST` / `MEASUREPOLYLINE` / `MEASUREANGLE` / `AREA` / `ID`；**交互专用**，没有自己的 `CommandId` |
 | `ZOOM_STEP_SELECTORS` | **2** | 同文件 `:234` | `ZOOMIN` / `ZOOMOUT`（固定步进因子 `1.25` 与倒数，锚定视口中心） |
 | `ARGUMENT_SELECTORS` | **4** | 同文件 `:252` | `ZOOM` / `SNAPUNIT` / `PDMODE` / `PDSIZE`——**接受命令行参数的基选择子**，不是新命令、不是第二条 IPC |
 | `COMMAND_ALIASES` | **55** 行 | 同文件 `:576` | 别名 + 全词同义词；只收录**目标选择子真实存在**的拼写 |
-| `admissible_names()` | **164** 个可输入拼写 | 同文件（`admissible_names` 函数） | 102 + 5 + 2 + 55，去重后仍为 164（无重名）；这是**拼写**数，**不是**命令数 |
+| `admissible_names()` | **165** 个可输入拼写 | 同文件（`admissible_names` 函数） | 103 + 5 + 2 + 55，去重后仍为 165（无重名）；这是**拼写**数，**不是**命令数 |
 
-> 这些数字是**当前源码表的长度**（本次复核：表 102 / 测量 5 / 缩放 2 / 参数 4 / 别名 55 / 拼写 164）。
+> 这些数字是**当前源码表的长度**（本次复核：表 103 / 测量 5 / 缩放 2 / 参数 4 / 别名 55 / 拼写 165）。
 > **组成**：92 → **95**（+`COPYBASE`/`CUTBASE`/`PASTEORIG`，剪贴板轮）→ **97**（+`CHAMFER POLYLINE`/
 > `FILLET POLYLINE`，同日另一 lane）→ **98**（+`HATCHPOINT`，2026-11-01 内部点 HATCH，本项目选择子）→
 > **101**（+`BREAK`/`DIVIDE`/`LENGTHEN`，2026-11-01 单曲线编辑）→ **102**（+`INSERT`，2026-11-01
-> 已有块参照创建，v1）。
+> 已有块参照创建，v1）→ **103**（+`SCALETEXT`，2026-11-01 文字字高缩放）。
 > 表一变，本表与 §5 的期望输出都要跟着改；**权威是 §5b 那道守门脚本的实跑输出**，不是这里的手抄值。
 
-**为什么不把 164 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
+**为什么不把 165 当命令数**：别名只是把输入**归一化**到同一个选择子（`normalize_command`），
 不改变行为；`ZOOMIN`/`ZOOMOUT` 与各测量选择子不携带 `CommandId`。命令的**行为**数上限是
-`CommandId` 变体数（= 102），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
+`CommandId` 变体数（= 103），其中还有若干是**本项目自己的**名字（不是 AutoCAD 命令）。
 
 **本项目自己的名字（AutoCAD 无同名，或同名不同义）**，不计入 AutoCAD 覆盖：
 `RESETVIEW`、`SWITCHBACKEND`、`SWITCH2D3D`、`STANDARDVIEW`（AutoCAD 的 `VIEW` 是命名的视图管理）、
@@ -122,6 +122,7 @@
 | `BREAK` | 部分 | 两点打断：**第一次拾取实体同时是第一断点**，第二点确定移除区间；`LINE`/`ARC`/`CIRCLE`/`SPLINE` 走同一 `TargetCurve` 精确子曲线；`CIRCLE` 变 `ARC`（补集），源实体保留为第一段、第二段新 id，一条事务/一步撤销。**按名拒绝**：`LWPOLYLINE`/其它种类、两点同参数（`break.zero_span`）、整条曲线（`break.whole_curve`）、拾取投影出界（`break.pick_outside_span`）、块成员/子元素、非模型空间。**无 `F` 第一点覆盖、无多段打断** |
 | `DIVIDE` | 部分 | **选择式**：恰好 1 条 `LINE`/`ARC`/`CIRCLE`/**直线段** `LWPOLYLINE`，按**等弧长**放置 `POINT`；开放曲线 `N−1` 个、闭合曲线 `N` 个（含起始参数）；`divideSegments` 2–1024；源保留、一条事务/一步撤销。**按名拒绝**：`SPLINE`/椭圆/含 bulge 折线（`divide.bulged_segment`）/非有限或零长/选择数≠1 |
 | `LENGTHEN` | 部分 | **选择式**：恰好 1 条 `LINE`/`ARC`；`lengthenMode` `0` Delta / `1` Percent / `2` Total + `lengthenValue`，改**末端**长度（`LINE` 的 end、`ARC` 的 sweep），实体 id/图层/空间/draw order/`type_key` 保留；一条事务/一步撤销。**按名拒绝**：`CIRCLE`/`LWPOLYLINE`/`SPLINE`/其它、非正新长度、ARC 超过一整圈、选择数≠1。**只改末端、无逐端拾取**（声明的 v1 偏离） |
+| `SCALETEXT` | 实现 | **选择式**：一个或多个 `TEXT`/`MTEXT`；`scaleTextFactor` 有限 **> 0**，字高乘该值，MTEXT 的 `wrap_width: Some(w)` 同步乘；位置/旋转/对齐/样式逐位保留；混合/非文本整命令拒绝；`1.0` 为具名 no-op；一条事务/一步撤销 |
 | `OFFSET` | 部分 | `LINE` / `CIRCLE` / `ARC` / `LWPOLYLINE`（直线段**与含弧段**，后者 2026-10-28）；`ARC` 与 `CIRCLE` 共用 `\|p−c\|` 半径模型。**弧段同心**（`R' = R − s·sign(sweep)`；`R' <= tol` ⇒ `offset.arc_collapsed`，不删除不混合）；接点 = miter（line/line）/ 最近解析交点（line-circle、circle-circle；0 或两个等距 ⇒ `offset.join_failed`），相切闭式；弧 start/sweep 由接点重导并过 `bulge_arc_geometry`（`offset.arc_mismatch`）；闭合环含 wrap 角、开口弧端不封口。**按名拒绝**：`arc_collapsed`/`join_failed`/`ambiguous_plane`/`arc_mismatch`/`bulge_segment`（只剩非有限或不可构造）/`collapsed`/`non_planar` 与 `ELLIPSE`；**不做**弧段删除与邻居混合；**无全局自交修剪**；弧增长上限 `\|new\| <= \|old\| + π` |
 | `ARRAYRECT` / `ARRAYPOLAR` | 部分 | **独立副本**（非关联，有意偏离）；无 `Path`/`Levels`/`Total`/角度间隔输入/关联编辑；极坐标角度步长 `i·fill/items` 是**我们的规则**（与 AutoCAD 的 `fill/(items−1)` 不同，已测试） |
 | `STRETCH` | 部分 | 恒**交叉窗口**；逐顶点（折线）/控制点（样条）；`TEXT` 与 `MultiLeader` **整命令拒绝**；`HATCH` 部分包围不动 + 诊断；块参照只**刚性平移插入点**、不逐成员拉伸 |
@@ -244,9 +245,9 @@ aliases = [a for a, _ in re.findall(r'\("([^"]+)",\s*"([^"]+)"\)',
 names = list(dict.fromkeys(table + meas + zoom + aliases))   # = admissible_names() 的顺序
 print(len(table), len(meas), len(zoom), len(args), len(aliases), "admissible:", len(names))
 PY
-# 期望输出：102 5 2 4 55 admissible: 164
+# 期望输出：103 5 2 4 55 admissible: 165
 
-# 2) 钉住 102 的契约（变体数、表长、每变体恰好一次）
+# 2) 钉住 103 的契约（变体数、表长、每变体恰好一次）
 cargo test -p cad-ui-core --locked command_normalization_covers_every_variant
 cargo test -p cad-ui-core --locked admissible_names_cover_the_vocabulary_exactly_once
 
@@ -281,12 +282,12 @@ python3 scripts/test-check-command-docs.py   # 自测：注入伪造 canonical �
 **本次实测（仓库当前树）**：
 
 ```
-tables: 102/5/2/4 selectors, 55 aliases, 109 canonical selectors (aliases excluded)
-§2 rows: 64, §2b aliases: 55, §3.7 rows: 6, alias mentions: 1
+tables: 103/5/2/4 selectors, 55 aliases, 110 canonical selectors (aliases excluded)
+§2 rows: 65, §2b aliases: 55, §3.7 rows: 6, alias mentions: 1
 OK: 0 mismatches
 ```
 
-（`109` 是 **canonical 选择子**数：102 表 + 5 测量 + 2 缩放步进，**不含** 55 个别名；`164` 才是
+（`110` 是 **canonical 选择子**数：103 表 + 5 测量 + 2 缩放步进，**不含** 55 个别名；`165` 才是
 「可输入拼写」数，见 §2。两个数不要混用。）
 
 **它确实会失败**（同一个脚本，换输入就红）：

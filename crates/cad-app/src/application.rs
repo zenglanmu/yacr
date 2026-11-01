@@ -438,6 +438,7 @@ impl Application {
             | CommandId::Break
             | CommandId::Divide
             | CommandId::Lengthen
+            | CommandId::ScaleText
             | CommandId::ChamferLines
             | CommandId::FilletLines
             | CommandId::ChamferPolyline

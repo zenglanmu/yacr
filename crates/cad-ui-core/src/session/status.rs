@@ -304,6 +304,10 @@ pub struct CadToolParams {
     /// The LENGTHEN amount (finite, non-zero on the channel), projected only while
     /// a LENGTHEN capture is active.
     pub lengthen_value: Option<f64>,
+    /// The SCALETEXT glyph-height factor (finite and strictly positive on the
+    /// channel; default `1.0`), projected only while a SCALETEXT capture is
+    /// active.
+    pub scale_text_factor: Option<f64>,
 }
 
 /// The active interactive tool, projected from `cad_app`'s real capture state.
@@ -804,6 +808,12 @@ pub(super) fn cad_tool(
                     ToolParameter::LengthenValue,
                     preview.kind == DrawToolKind::Lengthen,
                 ),
+                // SCALETEXT owns its factor only while the matching zero-point
+                // capture is active.
+                scale_text_factor: number(
+                    ToolParameter::ScaleTextFactor,
+                    preview.kind == DrawToolKind::ScaleText,
+                ),
             },
         }),
         ToolSnapshot::Measuring(preview) => Some(CadTool {
@@ -846,6 +856,7 @@ pub(super) fn cad_tool(
                 divide_segments: None,
                 lengthen_mode: None,
                 lengthen_value: None,
+                scale_text_factor: None,
             },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,

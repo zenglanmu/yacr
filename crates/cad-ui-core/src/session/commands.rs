@@ -108,6 +108,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // capture and no payload is fabricated here.
     ("DIVIDE", CommandId::Divide),
     ("LENGTHEN", CommandId::Lengthen),
+    // SCALETEXT is the zero-point pre-selection text edit (2026-11-01): the
+    // selected Text/MText entities are the whole input and the factor is the
+    // session typed channel, so the bare selector only starts its capture and no
+    // payload is fabricated here. Work-only.
+    ("SCALETEXT", CommandId::ScaleText),
     ("CHAMFER", CommandId::ChamferLines),
     ("FILLET", CommandId::FilletLines),
     // The **Polyline mode** of the two corner commands. AutoCAD reaches it
@@ -860,6 +865,9 @@ pub(super) fn interaction_request_for(
         // curve is the whole input, so the selector only starts the tool.
         CommandId::Divide => Some(InteractionRequest::BeginDraw(DrawToolKind::Divide)),
         CommandId::Lengthen => Some(InteractionRequest::BeginDraw(DrawToolKind::Lengthen)),
+        // SCALETEXT is the same zero-point pre-selection shape: the selected text
+        // entities are the whole input, so the selector only starts the tool.
+        CommandId::ScaleText => Some(InteractionRequest::BeginDraw(DrawToolKind::ScaleText)),
         CommandId::ChamferLines => Some(InteractionRequest::BeginDraw(DrawToolKind::Chamfer)),
         CommandId::FilletLines => Some(InteractionRequest::BeginDraw(DrawToolKind::Fillet)),
         CommandId::ArrayRectangular => Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayRect)),

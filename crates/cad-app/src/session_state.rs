@@ -575,6 +575,9 @@ impl SessionState {
             // the settings are the typed parameter channel.
             DrawToolKind::Divide => CommandId::Divide,
             DrawToolKind::Lengthen => CommandId::Lengthen,
+            // SCALETEXT is the same zero-point pre-selection edit: the selection is
+            // the input and the factor is the typed parameter channel.
+            DrawToolKind::ScaleText => CommandId::ScaleText,
             DrawToolKind::Rotate => CommandId::RotateEntities,
             DrawToolKind::Scale => CommandId::ScaleEntities,
             DrawToolKind::Mirror => CommandId::MirrorEntities,

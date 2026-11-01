@@ -565,6 +565,12 @@ impl DrawTool {
         if self.kind == DrawToolKind::Lengthen {
             return Ok(DrawIntent::Lengthen);
         }
+        // SCALETEXT is the same zero-point pre-selection shape: the selected text
+        // entities are the input and the factor is the typed session parameter, so
+        // it never reads a point (return **before** the `points[0]` index below).
+        if self.kind == DrawToolKind::ScaleText {
+            return Ok(DrawIntent::ScaleText);
+        }
         // HATCHPOINT captures exactly one internal point; the boundary discovery
         // and every refusal belong to the command layer, so the intent is just
         // that seed.
@@ -885,6 +891,9 @@ impl DrawTool {
             // points). The arms are unreachable here but keep the match exhaustive.
             DrawToolKind::Divide => DrawIntent::Divide,
             DrawToolKind::Lengthen => DrawIntent::Lengthen,
+            // SCALETEXT: handled by the early return above (zero captured points).
+            // The arm is unreachable here but keeps the match exhaustive.
+            DrawToolKind::ScaleText => DrawIntent::ScaleText,
         })
     }
 }

@@ -316,6 +316,7 @@ mod polyline_fillet;
 mod properties;
 mod rectangle;
 mod reports;
+mod scale_text;
 mod selection_reconcile;
 mod spline;
 mod stretch;

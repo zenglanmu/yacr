@@ -297,6 +297,12 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // spacing/columns/background are NOT implemented, so a caret here would
           // imply choices the command does not have.
           { id: 'MTEXT', labelKey: 'draw.kind.mtext', icon: 'mtext', command: 'MTEXT' },
+          // SCALETEXT (2026-11-01) scales the **selected** Text/MTEXT objects, so
+          // it sits directly beside them and takes no pick at all: the selection
+          // is the whole input and `scaleTextFactor` is the shared tool-parameter
+          // row. Small button with **no variant popover** — there is no options
+          // sub-prompt, and the factor is already on the parameter strip.
+          { id: 'SCALETEXT', labelKey: 'draw.kind.scaletext', icon: 'scale', command: 'SCALETEXT' },
           // MLEADER (ADR 0019 decision F.2) is the other text-carrying
           // annotation tool, so it sits directly beside TEXT and before HATCH. It
           // captures exactly two points — the arrowhead position, then the
@@ -481,6 +487,10 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // decisions match the Home panel.
           { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', command: 'TEXT' },
           { id: 'MTEXT', labelKey: 'draw.kind.mtext', icon: 'mtext', command: 'MTEXT' },
+          // Same slot as on the Home panel: the zero-pick text scaler sits beside
+          // the two text-creation tools it edits (see the Home/draw comment for
+          // the selection-only shape and why it is a small button with no popover).
+          { id: 'SCALETEXT', labelKey: 'draw.kind.scaletext', icon: 'scale', command: 'SCALETEXT' },
           { id: 'MLEADER', labelKey: 'draw.kind.mleader', icon: 'mleader', command: 'MLEADER' },
           { id: 'HATCH', labelKey: 'draw.kind.hatch', icon: 'hatch', command: 'HATCH' },
           // HATCH's point-pick entry, in the same slot as on the Home panel (see

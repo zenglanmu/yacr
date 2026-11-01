@@ -487,6 +487,15 @@ export const PRESELECT_PROMPTS: Readonly<Record<string, PreselectPrompt>> = Obje
     idle: 'tool.prompt.lengthen.select_curve',
     ready: 'tool.prompt.lengthen.ready',
   }),
+  // SCALETEXT takes no pick either: the selected Text/MTEXT objects are the whole
+  // input and the one `scaleTextFactor` row is the only setting, so its two
+  // states are "nothing usable selected" and "the host can scale the selection".
+  // It must not also carry a step list: any entry there would invent a pick the
+  // command never takes.
+  'draw.scaletext': Object.freeze({
+    idle: 'tool.prompt.scaletext.select_text',
+    ready: 'tool.prompt.scaletext.ready',
+  }),
 });
 
 /** The shared ready prompt for a capture that produced a dimension entity. */

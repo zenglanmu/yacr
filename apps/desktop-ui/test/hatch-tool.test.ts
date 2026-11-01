@@ -118,11 +118,13 @@ test('HATCH closes the draw command group on both draw panels, as a router comma
     // HATCH still closes the draw group's pre-selection run. MTEXT (2026-10-26)
     // and MLEADER (ADR 0019 P7c) are appended after TEXT — their annotation
     // neighbours — so they join the tail without moving HATCH, and HATCHPOINT is
-    // appended directly after HATCH (its point-pick entry) without moving it:
-    // `OFFSET` → `TEXT` → `MTEXT` → `MLEADER` → `HATCH` → `HATCHPOINT`.
+    // appended directly after HATCH (its point-pick entry) without moving it.
+    // SCALETEXT (2026-11-01) sits between MTEXT and MLEADER, beside the text
+    // objects it edits: `OFFSET` → `TEXT` → `MTEXT` → `SCALETEXT` → `MLEADER` →
+    // `HATCH` → `HATCHPOINT`.
     assert.deepEqual(
-      panel.items.slice(-6).map(item => item.id),
-      ['OFFSET', 'TEXT', 'MTEXT', 'MLEADER', 'HATCH', 'HATCHPOINT'],
+      panel.items.slice(-7).map(item => item.id),
+      ['OFFSET', 'TEXT', 'MTEXT', 'SCALETEXT', 'MLEADER', 'HATCH', 'HATCHPOINT'],
       tabId,
     );
     const item = panel.items.find(candidate => candidate.id === 'HATCH');

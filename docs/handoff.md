@@ -1,3 +1,50 @@
+## 2026-11-01 `SCALETEXT`：按比例缩放文字字高
+
+### 结论
+
+- **`SCALETEXT` 落地（Work-only，选择式）**：选中一个或多个 `TEXT`/`MTEXT`，按会话参数
+  **`scaleTextFactor`**（有限、**> 0**）缩放字高；MTEXT 的 `wrap_width: Some(w)` 同步乘该比例，
+  `None` 保持 `None`。位置/旋转/对齐/样式/字体逐位保留。**一条事务/一步撤销**，活动图层不变。
+- **全有或全无**：选择为空、块成员/子元素、目标缺失、混合或非文本实体、因子 ≤0/非有限、
+  退化/超大结果（`MAX_TEXT_DIMENSION = 1e12`）都是**具名拒绝**，不部分写入。
+- **`1.0` 是具名 no-op**（`scaletext.unchanged`，不开事务）；`ToolParameter` 通道只拒绝 ≤0/非有限，
+  `1.0` 由命令层拒绝。UI 的 stepper 不把 `1.0` 作为可选目标（默认值仍可见，可步进到 0.9/1.1）。
+- **词表/参数/文案**：`COMMAND_TABLE` **102 → 103**、`admissible_names()` **164 → 165**、
+  `ToolParameter::COUNT` **28 → 29**；i18n **+6 键**（两目录一致，总数 **938**）；UI 在
+  `TEXT → MTEXT` 后新增 `SCALETEXT`（复用 `scale` 字形，预设选择提示 + `scaleTextFactor` 步进器）。
+
+### 代码 / 文档落点
+
+- Rust：`crates/cad-app/src/app_drawing/scale_text.rs`（新）+ `tests/drawing/scale_text.rs`（13 项）；
+  `command_id.rs`（**已到 1000 行上限**，后续必须拆分）、`command_payload.rs`、`draw_tool/{kind,kind/definition,
+  intent,mod,parameter}.rs`、`host/draw_intent_map.rs`、`session_state.rs`、`session_state/tool_authorization.rs`、
+  `render_scene/overlay/preview.rs`、`application.rs`、`app_drawing/{drawing_create,mod}.rs`；
+  `cad-ui-core` 的 `session/{commands,status}.rs`、`command_vocabulary.rs`、`tests_tools.rs`、`events/tests.rs`；
+  `apps/app-linux/src/host/tests.rs` 的 `CadToolParams` 字面量。
+- React：`commands/catalog.ts`、`ribbon/ribbon-model.ts`、`cad/cad.ts`、`tools/tool-parameter-specs.ts` 与两本 i18n；
+  新 `apps/desktop-ui/test/scale-text.test.ts`，并同步 `tool-parameters`/`text-parameters`/`i18n`/`helpers`/
+  `hatch-tool`/`mleader-tool` 的精确列表。
+- 文档：`docs/compatibility.md`（绘制/编辑表）、`docs/autocad-command-coverage.md`（103/165/110、§3.3 行、
+  §5/§5b）、`docs/shortcuts.md`（§2 行、计数）、`docs/architecture.md`（165/55）、本文件。
+
+### 验证（本轮实际运行，合并树）
+
+- `cargo fmt --all -- --check` → exit 0。
+- `cargo check --workspace --all-targets --locked` → exit 0。
+- `cargo test -p cad-app -p cad-ui-core --locked -- --test-threads=1` → exit 0：`cad-app` **1469**、
+  `cad-ui-core` **342**，集成 targets 全绿（外部 DWG 用例仍 **ignored**）。
+- `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` → exit 0。
+- `cargo clippy -p cad-app -p cad-ui-core --all-targets --locked -- -D warnings` → exit 0。
+- 前端：`npx tsc --noEmit && node --test test/*.test.ts` → **892 pass / 0 fail**；`check-i18n.py` → **938 键**。
+- `python3 scripts/check-file-size.py` / `check-architecture.py` → OK；`check-command-docs.py` 见提交前实跑。
+
+### NOT RUN / NOT VERIFIED
+
+- **全 workspace 测试套件**（只跑了 `cad-app` + `cad-ui-core`）；`cargo test -p cad-host`/其它 crate 的独立测试。
+- **GUI / 真实 GPU / 像素 / 真窗口**：未运行任何宿主或截图；`SCALETEXT` 的 stepper 与真实文字选择**未做视觉验收**。
+- **真实 DWG**：未在真实图纸上运行；证据是契约测试。
+- **v1 之外**：`Height`/`Matches` 子选项、逐实体不同高度、`JUSTIFYTEXT`/`TEXTFIT`、缩放位置/旋转——**NOT IMPLEMENTED**。
+
 ## 2026-11-01 块参照创建 `INSERT`（已有块 v1）+ `HATCHPOINT` 边链自动发现
 
 ### 结论

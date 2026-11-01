@@ -97,13 +97,14 @@ test('MLEADER sits between TEXT and HATCH on both draw panels, with no variant p
     const ids = items.map(item => item.id);
     const at = ids.indexOf(MLEADER.id);
     assert.ok(at !== -1, `${tabId}/draw must carry the MLEADER affordance`);
-    // Annotation neighbours: MLEADER directly follows MTEXT, which directly
-    // follows TEXT; the HATCH pair still closes the group.
-    assert.equal(ids[at - 1], 'MTEXT', `${tabId}: MLEADER follows MTEXT`);
-    assert.equal(ids[at - 2], 'TEXT', `${tabId}: MTEXT follows TEXT`);
+    // Annotation neighbours: MLEADER directly follows SCALETEXT, which follows
+    // MTEXT, which follows TEXT; the HATCH pair still closes the group.
+    assert.equal(ids[at - 1], 'SCALETEXT', `${tabId}: MLEADER follows SCALETEXT`);
+    assert.equal(ids[at - 2], 'MTEXT', `${tabId}: SCALETEXT follows MTEXT`);
+    assert.equal(ids[at - 3], 'TEXT', `${tabId}: MTEXT follows TEXT`);
     assert.deepEqual(
-      ids.slice(-6),
-      ['OFFSET', 'TEXT', 'MTEXT', 'MLEADER', 'HATCH', 'HATCHPOINT'],
+      ids.slice(-7),
+      ['OFFSET', 'TEXT', 'MTEXT', 'SCALETEXT', 'MLEADER', 'HATCH', 'HATCHPOINT'],
       `${tabId}: fixed tail order`,
     );
     assert.equal(items.at(-1).id, 'HATCHPOINT', `${tabId}/draw still ends with HATCHPOINT`);
@@ -136,10 +137,10 @@ test('MLEADER is a catalogued draw command enabled only by router admission', ()
   assert.equal(entry.icon, MLEADER.icon);
   assert.equal(entry.group, 'draw');
   assert.equal(entry.variants, undefined, 'the listing must not imply variants either');
-  // The listing keeps the draw family contiguous: TEXT, MTEXT, MLEADER, HATCH.
+  // The listing keeps the draw family contiguous: TEXT, MTEXT, SCALETEXT, MLEADER, HATCH.
   const order = COMMAND_CATALOG.map(command => command.id);
-  assert.equal(order.indexOf(MLEADER.id), order.indexOf('TEXT') + 2);
-  assert.equal(order.indexOf(MLEADER.id), order.indexOf('MTEXT') + 1);
+  assert.equal(order.indexOf(MLEADER.id), order.indexOf('TEXT') + 3);
+  assert.equal(order.indexOf(MLEADER.id), order.indexOf('SCALETEXT') + 1);
   assert.equal(order.indexOf(MLEADER.id), order.indexOf('HATCH') - 1);
 
   // Router admission is the single gate — the same as every other draw command.

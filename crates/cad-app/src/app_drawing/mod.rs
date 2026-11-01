@@ -63,6 +63,7 @@ mod offset_polyline_bulge;
 mod point_style;
 mod polyline_fillet;
 mod properties;
+mod scale_text;
 mod stretch;
 mod text_edit;
 // The single line-break / stored-type-key authority MTEXT creation and TEXTEDIT

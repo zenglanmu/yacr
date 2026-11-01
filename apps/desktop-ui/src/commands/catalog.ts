@@ -60,6 +60,13 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // has no variant entry: rotation/attachment/line spacing/columns/background are
   // deliberately not implemented, and nothing here may imply them.
   { id: 'MTEXT', labelKey: 'draw.kind.mtext', icon: 'mtext', group: 'draw' },
+  // SCALETEXT (2026-11-01) scales the glyph height of the **selected** Text/MTEXT
+  // objects (and the MTEXT wrap width) by one positive factor. It is a
+  // selection-based, **zero-point** command, so it is listed beside the text
+  // commands it edits, directly after MTEXT; the later creation and annotation
+  // rows keep their relative order. The glyph is the shared `scale` mark — the
+  // operation is a scale, applied to text rather than to picked geometry.
+  { id: 'SCALETEXT', labelKey: 'draw.kind.scaletext', icon: 'scale', group: 'draw' },
   // MLEADER (ADR 0019 decision F.2): two points — the arrowhead position, then
   // the landing point — and then that same terminal text step. It carries no
   // variant entry because the command has no `Options` sub-prompt (leader type /

@@ -52,6 +52,9 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     // ready until a selection exists.
     ("DIVIDE", "draw.divide"),
     ("LENGTHEN", "draw.lengthen"),
+    // SCALETEXT is the zero-point pre-selection text edit: the selected text
+    // entities are the whole input and the factor is the typed parameter channel.
+    ("SCALETEXT", "draw.scaletext"),
     // INSERT is point-then-name: one insertion point, then the existing block
     // name through the terminal text channel (Work-only, no block-table write).
     ("INSERT", "draw.insertblock"),

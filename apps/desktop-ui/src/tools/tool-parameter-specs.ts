@@ -444,6 +444,19 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     labelKey: 'status.tool_parameter.mtext_attachment',
     hintKey: 'status.tool_parameter.mtext_attachment.hint',
   },
+  // SCALETEXT's one factor (2026-11-01): the host accepts any finite value
+  // strictly above 0 and refuses 1.0 explicitly — 1.0 would be a no-op, so it is
+  // never offered as a **target**. It is still `projectable`, because 1.0 is the
+  // parameter's default and the row must be visible (and steppable away from it)
+  // while the tool runs. `offered` therefore excludes exactly that no-op value;
+  // every step is disabled rather than clamped when it lands on 1.0.
+  scaleTextFactor: {
+    kind: 'number', statusKey: 'scaleTextFactor', step: 0.1,
+    offered: (value: number): boolean => Number.isFinite(value) && value > 0 && value !== 1,
+    projectable: finiteAbove(0),
+    labelKey: 'status.tool_parameter.scale_text_factor',
+    hintKey: 'status.tool_parameter.scale_text_factor.hint',
+  },
   // --- single-curve edits (2026-11-01) --------------------------------------
   // DIVIDE's segment count is the one row the command reads: the host splits the
   // selected curve into N equal parts and places POINTs at the division
@@ -578,4 +591,9 @@ export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
   // the other rows here.
   'draw.divide': { command: 'DIVIDE', keys: ['divideSegments'] },
   'draw.lengthen': { command: 'LENGTHEN', keys: ['lengthenMode', 'lengthenValue'] },
+  // SCALETEXT (2026-11-01) is another zero-pick tool shape: the current
+  // selection (one or more Text/MTEXT objects) is the input and the single
+  // `scaleTextFactor` row is its only setting, so the command projects exactly
+  // that one value while it runs.
+  'draw.scaletext': { command: 'SCALETEXT', keys: ['scaleTextFactor'] },
 });

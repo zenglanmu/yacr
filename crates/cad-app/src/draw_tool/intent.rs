@@ -401,4 +401,11 @@ pub enum DrawIntent {
     /// [`super::ToolParameter::LengthenValue`]) read by the command layer. The
     /// command always moves the **end** endpoint (declared v1 deviation).
     Lengthen,
+    /// SCALETEXT the pre-selected Text/MText entities' glyph height.
+    ///
+    /// Carries no field for the same reason as [`DrawIntent::Divide`]: the
+    /// selection snapshot is the input and the factor is the session typed channel
+    /// ([`super::ToolParameter::ScaleTextFactor`]) read by the command layer. This
+    /// kind captures **no points** (the zero-point exact complement).
+    ScaleText,
 }

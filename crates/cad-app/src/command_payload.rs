@@ -317,6 +317,18 @@ pub enum CommandPayload {
     Lengthen {
         refs: Vec<SelectionRef>,
     },
+    /// `SCALETEXT` the selected Text/MText entities' glyph height (Work-only).
+    ///
+    /// The selection snapshot is the whole input (the capture is zero-point); the
+    /// factor is the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::ScaleTextFactor`]), read by the
+    /// handler. Every ref must resolve to a directly addressable model-space
+    /// `Text`/`MText`; a mixed or unsupported selection refuses the whole command
+    /// before any write, and every changed entity is staged in one transaction /
+    /// one undo step.
+    ScaleText {
+        refs: Vec<SelectionRef>,
+    },
     /// CHAMFER two straight lines (ADR 0016 decision C). The two picks and their
     /// raw click points travel in one boxed [`TwoLineCommand`] (boxed like
     /// [`CommandPayload::Geometry`] so the command enum stays small); the two

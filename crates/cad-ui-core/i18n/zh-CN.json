@@ -930,5 +930,11 @@
   "macos.picker_filter": "CAD 图纸（DWG、DXF）",
   "macos.picker_empty": "文件选择器未返回文件",
   "macos.picker_local": "只能打开本地文件",
-  "macos.picker_failed": "系统文件选择器不可用，请改用 --open PATH：{error}"
+  "macos.picker_failed": "系统文件选择器不可用，请改用 --open PATH：{error}",
+  "draw.kind.scaletext": "缩放文字",
+  "tool.draw.scaletext": "缩放文字",
+  "tool.prompt.scaletext.select_text": "选择要缩放的文字或多行文字对象",
+  "tool.prompt.scaletext.ready": "已选择文字；设置缩放比例后按回车",
+  "status.tool_parameter.scale_text_factor": "文字缩放比例",
+  "status.tool_parameter.scale_text_factor.hint": "有限且严格大于 0 的比例；按此比例缩放文字和多行文字的字高（以及多行文字的换行宽度）。1.0 不产生变化，会被宿主拒绝"
 }

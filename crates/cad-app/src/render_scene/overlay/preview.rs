@@ -131,6 +131,10 @@ pub fn draw_preview_overlay(
         | DrawToolKind::Hatch
         | DrawToolKind::Divide
         | DrawToolKind::Lengthen
+        // SCALETEXT is the same zero-point pre-selection shape: the selected text
+        // entities and the factor define the result, so no cursor geometry is
+        // fabricated.
+        | DrawToolKind::ScaleText
         // HATCHPOINT captures one internal point; its live preview is the existing
         // cursor/chain. The boundary is discovered from the database at commit, so
         // no candidate ring is fabricated here.

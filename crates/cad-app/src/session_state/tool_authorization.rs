@@ -70,5 +70,8 @@ pub(crate) fn authorizing_command(parameter: ToolParameter) -> CommandId {
         // like every other Work-only parameter and there is no second gate.
         ToolParameter::DivideSegments => CommandId::Divide,
         ToolParameter::LengthenMode | ToolParameter::LengthenValue => CommandId::Lengthen,
+        // SCALETEXT's factor is authorized against the SCALETEXT command, so a
+        // Viewer-mode set is refused exactly like every other Work-only parameter.
+        ToolParameter::ScaleTextFactor => CommandId::ScaleText,
     }
 }

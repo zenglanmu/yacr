@@ -990,6 +990,8 @@ pub enum CommandId {
     /// `INSERT` (Work-only): place an existing named block at one picked point;
     /// no block-table write. See `crate::app_drawing::insert_block`.
     InsertBlock,
+    /// `SCALETEXT` (Work-only): scale the glyph height of the selected Text/MText; see `crate::app_drawing::scale_text`.
+    ScaleText,
 }
 
 mod capabilities;

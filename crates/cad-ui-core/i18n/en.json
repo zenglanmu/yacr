@@ -930,5 +930,11 @@
   "macos.picker_filter": "CAD drawings (DWG, DXF)",
   "macos.picker_empty": "The file picker returned no file",
   "macos.picker_local": "Only local files can be opened",
-  "macos.picker_failed": "System file picker unavailable; use --open PATH instead: {error}"
+  "macos.picker_failed": "System file picker unavailable; use --open PATH instead: {error}",
+  "draw.kind.scaletext": "Scale text",
+  "tool.draw.scaletext": "Scale text",
+  "tool.prompt.scaletext.select_text": "Select one or more Text or MText objects to scale",
+  "tool.prompt.scaletext.ready": "Text selected; set the scale factor and press Enter to scale",
+  "status.tool_parameter.scale_text_factor": "Scale text factor",
+  "status.tool_parameter.scale_text_factor.hint": "A finite factor strictly greater than 0; it scales the glyph height of Text and MText objects (and the MText wrap width). 1.0 is a no-op and is refused by the host"
 }

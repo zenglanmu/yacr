@@ -148,6 +148,12 @@ export const HOST_NAMES = [
   // route into `TRIM`'s capture and `LENGTHEN` must not route into `EXTEND`'s,
   // because the picks and the parameters differ.
   'BREAK', 'DIVIDE', 'LENGTHEN',
+  // SCALETEXT (2026-11-01) is the selection-based text scaler: one or more
+  // Text/MTEXT objects plus one positive factor (`scaleTextFactor`), no picks. It
+  // is a canonical selector of its own, never an alias of `SCALE` (which picks a
+  // base point and acts on arbitrary geometry) — the two take different inputs
+  // and different parameters.
+  'SCALETEXT',
   // POINT display style sysvars (2026-10-26): `PDMODE` and `PDSIZE` are typed
   // command-line settings with one numeric argument each (like `SNAPUNIT`), not
   // buttons. This mirror is instructed locally, exactly like `SNAPUNIT` before

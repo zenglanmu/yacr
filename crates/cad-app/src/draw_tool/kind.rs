@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 45] = [
+    pub const ALL: [DrawToolKind; 46] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -116,6 +116,9 @@ impl DrawToolKind {
         // INSERT is appended for the same index-stability reason: one insertion
         // point then the block name through the terminal text channel.
         DrawToolKind::InsertBlock,
+        // SCALETEXT is appended for the same index-stability reason: it is the
+        // zero-point pre-selection edit that scales the selected text glyphs.
+        DrawToolKind::ScaleText,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -166,6 +169,7 @@ impl DrawToolKind {
             Self::Divide => "divide",
             Self::Lengthen => "lengthen",
             Self::InsertBlock => "insertblock",
+            Self::ScaleText => "scaletext",
         }
     }
 
@@ -218,6 +222,7 @@ impl DrawToolKind {
             "divide" => Some(Self::Divide),
             "lengthen" => Some(Self::Lengthen),
             "insertblock" => Some(Self::InsertBlock),
+            "scaletext" => Some(Self::ScaleText),
             _ => None,
         }
     }
@@ -351,6 +356,7 @@ impl DrawToolKind {
             Self::Divide => "DIVIDE",
             Self::Lengthen => "LENGTHEN",
             Self::InsertBlock => "INSERT",
+            Self::ScaleText => "SCALETEXT",
         }
     }
 
@@ -410,8 +416,13 @@ impl DrawToolKind {
             // the selected entities and the parameters are the typed channel, so
             // it captures no points either. DIVIDE/LENGTHEN are the same shape: the
             // one selected curve is the input and their settings are the typed
-            // channel, so they never capture a point.
-            Self::ArrayRect | Self::Hatch | Self::Divide | Self::Lengthen => PointArity::Exact(0),
+            // channel, so they never capture a point. SCALETEXT is the same
+            // zero-point pre-selection shape.
+            Self::ArrayRect
+            | Self::Hatch
+            | Self::Divide
+            | Self::Lengthen
+            | Self::ScaleText => PointArity::Exact(0),
             // Two endpoints, centre+radius point, two opposite rectangle
             // corners, a move/copy delta, target+boundary, or a rotate angle /
             // mirror axis.
@@ -479,6 +490,9 @@ impl DrawToolKind {
                 // exactly one ref and refuses by name).
                 | Self::Divide
                 | Self::Lengthen
+                // SCALETEXT rewrites the glyph height of the **selected** text
+                // entities, so an empty selection must never be confirmable.
+                | Self::ScaleText
                 // COPYBASE/CUTBASE capture the **selection** into the clipboard
                 // (a selection-less capture would be an empty success), so they
                 // need one before they are ready. PASTECLIP's input is the

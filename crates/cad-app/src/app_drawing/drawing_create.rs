@@ -40,6 +40,7 @@ impl Application {
             CommandId::Break => self.break_curve(command),
             CommandId::Divide => self.divide_curve(session, command),
             CommandId::Lengthen => self.lengthen_curve(session, command),
+            CommandId::ScaleText => self.scale_text(session, command),
             CommandId::ChamferLines => self.chamfer_lines(session, command),
             CommandId::FilletLines => self.fillet_lines(session, command),
             CommandId::ChamferPolyline => self.chamfer_polyline(session, command),

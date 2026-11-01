@@ -36,7 +36,7 @@
 - **补全候选**（`apps/desktop-ui/src/components/CommandLine.tsx` + `commands.ts::filterCommandSuggestions`；
   旧文档指向的 `command-bar.slint` 已随 Slint 删除）：
   - 候选来源是 **`COMMAND_CATALOG`（显示目录）+ 宿主别名表**（`cad_command_aliases`），
-    **不是**全部 102 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
+    **不是**全部 103 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
     字母序（**不去重**，也**不是**纯字典序）。
   - 输入变化即时计算候选；候选只**填充**文本，**从不执行**命令。
   - `Tab`：**仅当有高亮行**时把命令行替换成该名字（**没有**“无高亮则第一项”的回退）。
@@ -55,10 +55,10 @@
 
 ## 2. 命令表（只列**有行为注解**的选择子）
 
-> **完整清单不在这里**：穷尽的 **102 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
+> **完整清单不在这里**：穷尽的 **103 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
 > `docs/autocad-command-coverage.md` §2；本节只保留**有行为注解**的行。
 > 选择子与别名的**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs`
-> （`COMMAND_TABLE` **102** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
+> （`COMMAND_TABLE` **103** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
 > `ARGUMENT_SELECTORS` **4** / `COMMAND_ALIASES` **55**）。
 > 本表的 **canonical 列**只出现**被准入的名字**，**别名列**只出现 `COMMAND_ALIASES` 里的真实行；
 > 键位、面板与 IPC 能力见 §2a，**不混进命令表**。
@@ -88,6 +88,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `FILLET POLYLINE` | 编辑（AutoCAD 的 **Polyline 模式**，独立选择子：**恰好 1 个**选中实体，每个**内顶点**用会话参数 `filletRadius` 换成两切点 + 一段圆弧；实体**原地重写**、一条事务/一步撤销；两线 `FILLET` 不变） | 是 | — |
 | `CHAMFER POLYLINE` | 编辑（同上选择式：`chamferDistanceA` 量在**入边**、`chamferDistanceB` 量在**出边**——**我们的规则**，不是 AutoCAD 提示顺序的复刻） | 是 | — |
 | `HATCHPOINT` | 绘制（**本项目选择子**：按内部点填充。在可见的**整实体闭合** `Circle` / 完整 `Ellipse` / 闭合 `Polyline` **以及 `LINE`/`ARC` 边链**中取**最小包含边界**，嵌套环作岛屿；`LINE`/`ARC` 用平面半边面行走、弧存**精确 bulge**；**不**使用当前选择、只认 `+Z` 同标高、只支持模型空间；填充参数与 `HATCH` 完全相同） | 是 | — |
+| `SCALETEXT` | 编辑（选择式：一个或多个 `TEXT`/`MTEXT`，按 `scaleTextFactor`（有限 **> 0**）缩放字高；MTEXT 的 `wrap_width` 同步缩放；`1.0` 为 no-op 并按名拒绝；一条事务/一步撤销，位置/旋转/对齐/样式保留） | 是 | — |
 | `LAYOFF` | 图层（关闭选择所在图层，当前层除外；会话覆盖，不写 DWG、不升 revision） | 否 | — |
 | `LAYERP` | 图层（恢复**上一次**覆盖状态；有界 16 步快照环，仅真实改动前压栈；会话内，不持久化） | 否 | — |
 | `LAYISO` | 图层（隐藏选择**不在**的图层 + 当前层保留；会话覆盖，不写 DWG、不升 revision） | 否 | — |
@@ -371,10 +372,10 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     其余未映射组合不拦截。
 - **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
   的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
-  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**102 个选择子**，与 `CommandId` 变体一一对应；
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**103 个选择子**，与 `CommandId` 变体一一对应；
   P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`/`LAYOFF`/
   `PDMODE`/`PDSIZE`，2026-10-27 再加 `LAYERP`/`AREA OBJECT`，**2026-10-28 再加 `COPYBASE`/`CUTBASE`/
-  `PASTEORIG`，2026-11-01 再加 `HATCHPOINT`/`BREAK`/`DIVIDE`/`LENGTHEN`/`INSERT`**——`ID` 是测量选择子、
+  `PASTEORIG`，2026-11-01 再加 `HATCHPOINT`/`BREAK`/`DIVIDE`/`LENGTHEN`/`INSERT`/`SCALETEXT`**——`ID` 是测量选择子、
   `LAYUNISO`/`LAYON` 是既有 `RESTORELAYERS` 的别名，都不新增 `CommandId`；`LAYERP` **已不是**别名）；
   不在表内的名字在 chrome 侧就按 `command.unsupported` 拒绝（**`command.unknown` 这个键没有消费方**，
   见 §1）；宿主侧「认识这个名字、但该路径不可用」（如 `PLOT`/`SAVE` 的受限路径）同样报告

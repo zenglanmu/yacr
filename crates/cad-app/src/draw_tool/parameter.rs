@@ -255,11 +255,16 @@ pub enum ToolParameter {
     /// clamped to a no-op). Delta may be negative (shorten); Percent and Total
     /// additionally require a positive value, which the command refuses by name.
     LengthenValue,
+    /// SCALETEXT factor: a **finite, strictly positive** multiplier (`> 0`) for
+    /// the selected text glyph height (and an MTEXT wrap width, when set). `1.0`
+    /// and every factor that would leave all targets unchanged are refused by the
+    /// command as `scaletext.unchanged` (no transaction), never clamped.
+    ScaleTextFactor,
 }
 
 impl ToolParameter {
     /// Every member, in a fixed order (the key round-trip uses it).
-    pub const ALL: [ToolParameter; 28] = [
+    pub const ALL: [ToolParameter; 29] = [
         ToolParameter::PolygonSides,
         ToolParameter::FilletRadius,
         ToolParameter::ChamferDistanceA,
@@ -290,10 +295,13 @@ impl ToolParameter {
         ToolParameter::DivideSegments,
         ToolParameter::LengthenMode,
         ToolParameter::LengthenValue,
+        // SCALETEXT's factor is appended after every pre-existing member, so the
+        // frozen slots above never move.
+        ToolParameter::ScaleTextFactor,
     ];
 
     /// Number of members (the store's fixed width).
-    pub const COUNT: usize = 28;
+    pub const COUNT: usize = 29;
 
     /// The dense index of this member in [`Self::ALL`] (the store's slot).
     pub fn index(self) -> usize {
@@ -327,6 +335,7 @@ impl ToolParameter {
             Self::DivideSegments => 25,
             Self::LengthenMode => 26,
             Self::LengthenValue => 27,
+            Self::ScaleTextFactor => 28,
         }
     }
 
@@ -365,6 +374,7 @@ impl ToolParameter {
             Self::DivideSegments => "divideSegments",
             Self::LengthenMode => "lengthenMode",
             Self::LengthenValue => "lengthenValue",
+            Self::ScaleTextFactor => "scaleTextFactor",
         }
     }
 
@@ -428,6 +438,9 @@ impl ToolParameter {
     /// * `LengthenMode` **0 (Delta)** — the plain signed length change.
     /// * `LengthenValue` **1** — one world unit of delta (a *valid* non-zero
     ///   value, so the default never limps into a forced refusal at commit).
+    /// * `ScaleTextFactor` **1.0** — the identity factor (a *valid* strictly
+    ///   positive value; the command still refuses it as `scaletext.unchanged`
+    ///   rather than opening an empty transaction).
     ///
     /// Note the fill-angle range (ADR 0016 decision A): the legal values are
     /// `0 < |angle| <= 360`, so the full-circle **default 360 is re-settable** (a
@@ -463,6 +476,7 @@ impl ToolParameter {
             Self::DivideSegments => ToolValue::Number(2.0),
             Self::LengthenMode => ToolValue::Number(LENGTHEN_MODE_DELTA),
             Self::LengthenValue => ToolValue::Number(1.0),
+            Self::ScaleTextFactor => ToolValue::Number(1.0),
         }
     }
 
@@ -563,6 +577,13 @@ impl ToolParameter {
             // rather than clamped into a no-op; Delta may be negative (shorten),
             // while the command additionally requires `> 0` for Percent/Total.
             (Self::LengthenValue, ToolValue::Number(number)) => finite_non_zero(self, number),
+            // SCALETEXT factor: finite and **strictly positive**. `1.0` is a valid
+            // value at the channel (the command refuses it as `scaletext.unchanged`
+            // without a transaction); `0`, a negative value and NaN are refused
+            // here, never clamped.
+            (Self::ScaleTextFactor, ToolValue::Number(number)) => {
+                finite_greater_than(self, number, 0.0)
+            }
             // Any other pairing is a kind mismatch: a `Flag` for a numeric
             // parameter, or a `Number` for a flag parameter.
             _ => Err(CadError::InvalidInput(format!(

@@ -667,4 +667,19 @@ pub enum DrawToolKind {
     /// without metadata, a blank/newline/over-long name and a non-finite point
     /// are named refusals that write nothing. Work-only.
     InsertBlock,
+    /// SCALETEXT: scale the **glyph height** of the pre-selected Text/MText
+    /// entities (2026-11-01).
+    ///
+    /// Same zero-point pre-selection shape as [`Self::Divide`]/[`Self::Lengthen`]:
+    /// arity is [`PointArity::Exact`]`(0)`, no entity-pick steps
+    /// ([`Self::picked_step_count`] is `0`), a non-empty selection is required and
+    /// no typed text is captured. The factor is the session typed channel
+    /// [`super::ToolParameter::ScaleTextFactor`] (finite and strictly positive,
+    /// default `1.0`).
+    ///
+    /// Only `Text`/`MText` entities are supported; any other kind — or a mixed
+    /// selection — is a whole-command refusal with no partial writes. Position,
+    /// rotation, alignment, style and font are preserved; an MTEXT `wrap_width` is
+    /// scaled by the same factor. Work-only.
+    ScaleText,
 }
