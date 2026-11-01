@@ -32,9 +32,11 @@ checks:
     emits the ``--target web`` glue and writes the documented
     ``apps/app-web/dist`` directory it then prints; the smoke waits for the typed
     ``start: ok`` status and labels software rendering; the deploy entry point
-    validates every bundle artifact before it hands the directory to wrangler.
-    The ``web-build`` / ``web-smoke`` / ``web-deploy`` jobs are required jobs, and
-    ``web-deploy`` must stay gated to ``v*`` tags or a manual dispatch.
+    validates every bundle artifact before it hands the directory to wrangler and
+    publishes to the project's own ``pages.dev`` hostname (it must not manage a
+    custom domain). The ``web-build`` / ``web-smoke`` / ``web-deploy`` jobs are
+    required jobs, and ``web-deploy`` must stay gated to ``v*`` tags or a manual
+    dispatch.
 
 Each guarantee is enforced structurally (and, when PyYAML is importable, with a
 real parse as well) so a mutation that removes a fragment or a disable guard is
@@ -258,7 +260,9 @@ WEB_SMOKE_FRAGMENTS: tuple[str, ...] = (
 
 # Fragments the deploy entry point must keep. The artifact list is spelled out so
 # a missing/partial bundle is refused before wrangler runs; the credential names
-# and the wrangler invocation are the publish contract itself.
+# and the wrangler invocation are the publish contract itself. The reported URL
+# is the project's own `pages.dev` hostname: the deploy entry point must not grow
+# a custom-domain attach/detach path again.
 DEPLOY_FRAGMENTS: tuple[str, ...] = (
     "set -euo pipefail",
     "CLOUDFLARE_API_TOKEN",
@@ -277,7 +281,13 @@ DEPLOY_FRAGMENTS: tuple[str, ...] = (
     BUILD_WEB_OUT_DIR,
     "wrangler",
     "pages deploy",
+    "$PROJECT.pages.dev",
 )
+
+# A custom domain is Cloudflare-side configuration. The repository deployment
+# path is the project's `pages.dev` hostname only, so reintroducing a domain
+# attach switch (or its API call) is a contract error rather than a nice-to-have.
+CUSTOM_DOMAIN_RE = re.compile(r"CF_PAGES_DOMAIN|/projects/\$PROJECT/domains")
 
 
 def workflow_files() -> list[pathlib.Path]:
@@ -558,6 +568,11 @@ def deploy_script_errors(text: str) -> list[str]:
     for fragment in DEPLOY_FRAGMENTS:
         if fragment not in text:
             errors.append(f"{DEPLOY_SCRIPT}: missing required fragment {fragment!r}")
+    if CUSTOM_DOMAIN_RE.search(text):
+        errors.append(
+            f"{DEPLOY_SCRIPT}: manages a custom domain; the deployment target is "
+            "the project's pages.dev hostname only"
+        )
     # The artifact guard must run before the upload: a `pages deploy` invocation
     # that appears before any `[ -s "$DIST/…" ]` check would publish a partial
     # bundle.

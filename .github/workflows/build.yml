@@ -27,9 +27,13 @@ name: CI build layers
 #   web-deploy       : publishes the shared chrome bundle web-build uploaded
 #                      (`web-ui-dist`, `BUNDLE_KIND=ui`) to Cloudflare Pages —
 #                      only on `v*` tags or a manual dispatch, never on a routine
-#                      push/PR. Upload is deployment evidence only (no
-#                      runtime/GPU/pixel claim); the vanilla harness bundle is
-#                      still built and smoked but is not what the site serves
+#                      push/PR. The published entry point is the project's own
+#                      `pages.dev` hostname (`yacr-examples.pages.dev`); custom
+#                      domains are Cloudflare-side configuration this workflow
+#                      does not attach or manage. Upload is deployment evidence
+#                      only (no runtime/GPU/pixel claim); the vanilla harness
+#                      bundle is still built and smoked but is not what the site
+#                      serves
 #
 # Retired platform build/release jobs — kept *declared* so the capability gap
 # stays visible, but hard-disabled with an unconditional `if: false` and a
@@ -440,9 +444,11 @@ jobs:
   web-deploy:
     name: web-deploy (Cloudflare Pages — tags/dispatch only)
     # Publishes the exact artifact web-build uploaded, and only for a `v*` tag or
-    # a manual dispatch: a routine push/PR never goes public. The deploy script
-    # validates every bundle artifact before uploading, and a successful upload is
-    # deployment evidence only — the smoke job above stays software-rendering.
+    # a manual dispatch: a routine push/PR never goes public. The entry point is
+    # the project's own pages.dev hostname; the deploy script validates every
+    # bundle artifact before uploading and never manages a custom domain. A
+    # successful upload is deployment evidence only — the smoke job above stays
+    # software-rendering.
     needs: web-build
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest

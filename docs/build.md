@@ -17,7 +17,8 @@
 > `scripts/build-web.sh` 重新产出**真实可服务**的浏览器 bundle（`apps/app-web/dist/`，构建产物、git 忽略，
 > 见「浏览器 bundle」一节）。**2026-10-25 起 CI 也接线**：`web-build` 构建并上传 bundle、`web-smoke`
 > 用 Playwright Chromium（**SwiftShader 软件渲染**）断言 `start: ok`，`web-deploy` 仅在 `v*` tag /
-> 手工 dispatch 时发布到 Cloudflare Pages（`yacr-examples`）。**发布的是共享 chrome bundle**
+> 手工 dispatch 时发布到 Cloudflare Pages（`yacr-examples`），唯一入口是
+> `https://yacr-examples.pages.dev`（不 attach 自定义域名）。**发布的是共享 chrome bundle**
 > `apps/app-web/dist-ui`（`web-ui-dist`，`BUNDLE_KIND=ui`），不是独立的 vanilla harness。这仍**不是**
 > 可交付产品承诺：
 > `app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳，CI 浏览器只有软件渲染的
@@ -201,7 +202,8 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
   carrier / `physical` / `batches` / `draws` / `presented`（**不是** GPU/像素证据，截图仅调试用）、
   `web-deploy` 只在 `v*` tag 或手工 dispatch 时把共享 chrome bundle（`web-ui-dist` →
   `apps/app-web/dist-ui`，`BUNDLE_KIND=ui`）发到 Cloudflare Pages
-  （`yacr-examples`，上传成功≠运行/视觉验收）。常规 push/PR 不发布。
+  （`yacr-examples`，入口 `https://yacr-examples.pages.dev`；上传成功≠运行/视觉验收）。
+  常规 push/PR 不发布。
 - 构建成功**不是**运行/GPU/像素证据。
 
 ## 已退役 / 禁用的平台入口（勿当可用）
@@ -250,7 +252,8 @@ React/Tauri 宿主构建 **Flatpak** bundle（`bin/yacr` + committed `fonts/`，
 - **Web**：`apps/app-web` 的 **wasm CAD 会话**（ADR 0024）在 CI 中端到端构建与冒烟：
   `web-build` → `apps/app-web/dist` artifact、`web-smoke` → Playwright Chromium（**SwiftShader
   软件渲染**）断言 `start: ok`，`web-deploy` → 仅 `v*` tag / 手工 dispatch 发布到 Cloudflare Pages
-  （`yacr-examples`）。`app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳；CI 没有 GPU/
+  （`yacr-examples`，入口 `https://yacr-examples.pages.dev`，不管理自定义域名）。
+  `app-web` 的 **host target** 仍是显式 NOT IMPLEMENTED 空壳；CI 没有 GPU/
   像素/golden/浏览器矩阵证据，浏览器侧真实渲染证据只到合成夹具
   （`docs/validation-dom-canvas-wasm-2026-10-24.md`）。
 - **Linux release**：`dev.yacr.app` Flatpak bundle 可**本地构建并安装**（`scripts/package-linux-release.sh`，

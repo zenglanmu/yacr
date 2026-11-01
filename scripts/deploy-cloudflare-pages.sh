@@ -13,17 +13,19 @@
 # never edits the bundle, never substitutes a placeholder and never reports a
 # success it did not get from wrangler.
 #
+# The published entry point is the project's own `pages.dev` hostname
+# (`https://$CF_PAGES_PROJECT.pages.dev`). This script never attaches, detaches or
+# otherwise manages a custom domain: a custom-domain DNS record is Cloudflare-side
+# configuration, not part of the upload contract.
+#
 # Prerequisites:
-#   CLOUDFLARE_API_TOKEN   token with "Cloudflare Pages: Edit"; add "Zone: DNS:
-#                          Edit" for the target zone to let Pages create the
-#                          custom-domain DNS record automatically.
+#   CLOUDFLARE_API_TOKEN   token with "Cloudflare Pages: Edit".
 #   CLOUDFLARE_ACCOUNT_ID  account id.
 #
 # Usage: scripts/deploy-cloudflare-pages.sh
 # Env:
 #   CF_PAGES_PROJECT   Pages project (default: yacr-examples)
 #   CF_PAGES_BRANCH    production branch (default: main)
-#   CF_PAGES_DOMAIN    optional custom domain to attach, e.g. yacr.example.com
 #   WRANGLER_VERSION   npm version/dist-tag (default: 4)
 #   DIST               bundle to deploy (default: <repo>/apps/app-web/dist)
 #   BUNDLE_KIND        which bundle contract `DIST` must satisfy (default: harness)
@@ -48,7 +50,6 @@ DIST="${DIST:-$ROOT/apps/app-web/dist}"
 BUNDLE_KIND="${BUNDLE_KIND:-harness}"
 PROJECT="${CF_PAGES_PROJECT:-yacr-examples}"
 BRANCH="${CF_PAGES_BRANCH:-main}"
-DOMAIN="${CF_PAGES_DOMAIN:-}"
 WRANGLER_VERSION="${WRANGLER_VERSION:-4}"
 API="https://api.cloudflare.com/client/v4"
 
@@ -125,31 +126,6 @@ npx --yes "wrangler@$WRANGLER_VERSION" pages deploy "$DIST" \
   --project-name "$PROJECT" \
   --branch "$BRANCH" \
   --commit-dirty=true
-
-if [ -n "$DOMAIN" ]; then
-  echo "attaching custom domain '$DOMAIN'"
-  response="$(curl -sS "${auth[@]}" -H "Content-Type: application/json" -X POST \
-    --data "{\"name\":\"$DOMAIN\"}" \
-    "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/domains")"
-  python3 - "$response" <<'PY'
-import json, sys
-data = json.loads(sys.argv[1])
-if data.get("success"):
-    result = data.get("result") or {}
-    print(f"  domain: {result.get('name')} status={result.get('status', 'pending')}")
-    if result.get("validation_data"):
-        print(f"  validation: {result['validation_data']}")
-else:
-    print("  attach failed:", data.get("errors"), file=sys.stderr)
-    for error in data.get("errors") or []:
-        message = str(error.get("message", "")).lower()
-        if "already added" in message or "already exists" in message:
-            sys.exit(0)
-    sys.exit(1)
-PY
-  echo "  note: a domain whose zone is outside this account stays 'pending' until"
-  echo "  a CNAME to $PROJECT.pages.dev is added at the DNS provider."
-fi
 
 echo "done: https://$PROJECT.pages.dev"
 echo "note: an upload is deployment evidence only, not runtime/GPU/pixel evidence."

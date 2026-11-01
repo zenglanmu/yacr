@@ -194,6 +194,24 @@ class WebEntryPointScriptContracts(unittest.TestCase):
         mutated = text + "\n# NOT IMPLEMENTED\n"
         self.assertTrue(workflow.deploy_script_errors(mutated))
 
+    def test_deploy_targets_the_project_pages_dev_hostname(self):
+        text = self.read(workflow.DEPLOY_SCRIPT)
+        self.assertIn("$PROJECT.pages.dev", text)
+        self.assertNotIn("CF_PAGES_DOMAIN", text)
+        self.assertEqual(workflow.deploy_script_errors(text), [])
+
+    def test_reintroducing_custom_domain_management_fails(self):
+        text = self.read(workflow.DEPLOY_SCRIPT)
+        mutated = text.replace(
+            'echo "done:',
+            'DOMAIN="${CF_PAGES_DOMAIN:-}"\necho "done:',
+            1,
+        )
+        self.assertNotEqual(mutated, text)
+        self.assertTrue(
+            any("custom domain" in error for error in workflow.deploy_script_errors(mutated))
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

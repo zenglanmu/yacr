@@ -1,3 +1,28 @@
+## 2026-11-01 Web 部署入口收敛到 `pages.dev`
+
+### 结论
+
+- `scripts/deploy-cloudflare-pages.sh` 删除 `CF_PAGES_DOMAIN` 自定义域名 attach 路径（连同
+  `Zone: DNS: Edit` 前置说明）；唯一发布入口为项目自带的
+  `https://$CF_PAGES_PROJECT.pages.dev`（CI 的 `CF_PAGES_PROJECT=yacr-examples`）。
+  自定义域名是 Cloudflare 项目侧配置，仓库不再 attach/detach。
+- `scripts/check-workflows.py`：deploy 契约新增 `$PROJECT.pages.dev` 片段，并拒绝
+  `CF_PAGES_DOMAIN` / `pages/projects/$PROJECT/domains` 自定义域名管理路径。
+- `scripts/test-web-deploy-workflow.py` 增加正向断言与重新引入自定义域名的变异测试；
+  `docs/ci.md`、`docs/build.md`、`build.yml` 注释同步为 pages.dev 唯一入口。
+
+### 验证（本轮实际运行）
+
+- `python3 scripts/check-workflows.py` → OK（deploy 入口契约通过）。
+- `python3 scripts/test-web-deploy-workflow.py` → 18 tests OK。
+- `bash -n scripts/deploy-cloudflare-pages.sh` → exit 0。
+
+### NOT RUN / 未改变
+
+- **未实际部署**：本机未设置 `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`，没有上传或线上复验。
+- **未改 Cloudflare 项目侧**：`yacr-examples.snakeheartgo.top` 的绑定/DNS 不在仓库内，本轮未解绑；
+  文中历史 `snakeheartgo.top` 记录保持原样，仅不再作为部署入口。
+
 ## 2026-11-01 `CIRCLE 2P` / `CIRCLE 3P` / `CIRCLE D`：圆构造选项
 
 ### 结论

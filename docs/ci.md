@@ -26,7 +26,9 @@
 > Chromium 打开页面并断言 typed `start: ok` 状态行；同一 job 还构建**共享 chrome bundle**
 > （`scripts/build-web-ui.sh` → `apps/app-web/dist-ui`，上传为 `web-ui-dist`）。
 > `web-deploy` 只在 **`v*` tag 或手工 `workflow_dispatch`** 时把 `web-ui-dist`
-> （`BUNDLE_KIND=ui`）发布到 Cloudflare Pages（`yacr-examples`）。
+> （`BUNDLE_KIND=ui`）发布到 Cloudflare Pages（`yacr-examples`），唯一发布入口是项目自带的
+> `https://yacr-examples.pages.dev`；自定义域名属 Cloudflare 项目侧配置，workflow 与
+> `scripts/deploy-cloudflare-pages.sh` **不** attach/detach 任何自定义域名。
 > 常规 push/PR **不会**发布。CI runner 无 GPU：`web-smoke` 走 **SwiftShader 软件渲染**，
 > 因此它是 carrier/status 冒烟，**不是** GPU/像素/性能证据。CI 也未覆盖 WebKitGTK/其它浏览器
 > 矩阵（本地证据见 `docs/validation-dom-canvas-wasm-2026-10-24.md`）。
@@ -139,6 +141,7 @@ runner 上恰好存在的 CLI。**本地** bundle 构建（`scripts/build-web.sh
   `docs/validation-dom-canvas-wasm-2026-10-24.md`，属**本地**证据，不是 CI 证据。
 - **Web 发布**：`web-deploy` 只在 `v*` tag 或手工 dispatch 时运行，把该次 `web-build` 产出的
   `web-ui-dist`（共享 chrome bundle，`BUNDLE_KIND=ui`）发布到 Cloudflare Pages（`yacr-examples`）；
+  发布入口固定为项目的 `https://yacr-examples.pages.dev`（脚本只上传并打印该 URL，不管理自定义域名）。
   上传成功只是**发布证据**，不是运行/GPU/像素验收。常规 push/PR 没有发布路径。
 - **Linux 发布包**：CI 上仍没有受支持的流水线（`linux-release` 硬禁用）。`package-linux-release.sh`
   已于 2026-10-17 重启，本地可构建并安装 `.flatpak`（证据见
