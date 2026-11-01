@@ -105,6 +105,19 @@ capability-gated 的**编译门禁**；两个 APK job 只构建 artifact，**没
 像素或 JNI 运行时链接证据。Windows/macOS 的 `*-release` 只证明**能在对应 runner 上打包**，
 不证明真实窗口/GPU/对话框/视觉行为。
 
+## 公开发布（`publish-release.yml`，手工）
+
+GitHub Actions 的 workflow artifact 需要登录且会过期，**不能**作为公开下载入口。公开分发由单独的
+`.github/workflows/publish-release.yml` 完成：**仅 `workflow_dispatch`**，是唯一带
+`permissions: contents: write` 的 workflow（并显式 `actions: read` 下载 artifact——一旦声明
+`permissions:`，未列出的 scope 就是 `none`）。它**不构建/不签名/不打包**，只从指定的
+`CI build layers` run 拉取五个平台 artifact，校验 `.sha256` 后附加到该 tag 的 GitHub Release；
+release notes 来自仓库内文件（如 `docs/release-notes/v0.1.4.md`）。
+
+职责因此是分开的：`build.yml` 的 release job 仍只构建 + 上传 artifact（`contents: read`，
+`test-release-workflows.py` 禁止它们出现 `gh release`）；公开上传只发生在手工 dispatch 的
+publisher 里。publisher 全绿只代表 **artifact 上传成功**，不是运行/GPU/设备/视觉验收。
+
 ## 锁定工具版本
 
 `build.yml` 顶部 `env:` 与 `docs/build.md`、`Cargo.lock` 对齐：
@@ -131,9 +144,10 @@ runner 上恰好存在的 CLI。**本地** bundle 构建（`scripts/build-web.sh
 - **Windows 视觉/运行时**：CI **没有**也不应有 Windows 运行验收（`windows-check` 只编译）；
   spike-1/4/5 由用户在真 Windows 自测（`docs/windows-app.md`），CI 不得冒充。
 - **Linux X11/XWayland**：宿主显式拒绝（exit 4），CI 的 `linux-app` 只做编译/测试，不运行 GUI。
-- 5 个 release job：workflow 已定义且 event-gated；**本环境没有运行它们**（无对应 runner /
-  Flatpak runtime / Android SDK/NDK），首次真实结果以 GitHub Actions 为准。它们只产出 artifact，
-  不发布、不签名。
+- 5 个 release job：已在 GitHub Actions 真实运行两次（`v0.1.3` run `41304110619`：
+  Linux/Windows/macOS/web ✅、Android 两个 job 因 `-lnativewindow` ❌；`v0.1.4` run `41307807752`：
+  五个 release job + `web-deploy` 全部 ✅）。它们只产出 workflow artifact，不签名、不发布商店。
+  公开下载由手工 dispatch 的 `publish-release.yml` 负责（见上节）。
 - **CI 上的真实 GPU / 黄金图 / 浏览器矩阵 / Android 真机**：未运行。GitHub 托管 runner 无 GPU，
   软件渲染不能作为真实 GPU 证据。
 - **Android 设备**：CI **没有**设备/模拟器 job（`android-check` 只编译）。**2026-11-01 的

@@ -107,6 +107,19 @@
 - artifact：`yacr-linux-release` 7.95 MB、`yacr-windows-release` 56.5 MB、`yacr-macos-release`
   70.8 MB、`android-apk-debug` 143.5 MB、`android-release-unsigned` 14.8 MB、`web-ui-dist` 4.5 MB。
 
+### 公开发布（`publish-release.yml`）
+
+- GitHub Actions 的 workflow artifact 需要登录且会过期，**不能**作为公开下载入口。公开分发改由
+  手工 `workflow_dispatch` 的 `.github/workflows/publish-release.yml` 完成：唯一带
+  `permissions: contents: write` 的 workflow（并显式 `actions: read` 下载 artifact），从指定
+  build run 拉取五个平台 artifact、校验 `.sha256` 后附加到该 tag 的 GitHub Release；它**不构建、
+  不签名**。
+- `build.yml` 的 5 个 release job 保持 artifact-only（`contents: read`，
+  `test-release-workflows.py` 禁止它们出现 `gh release`）。release notes 放
+  `docs/release-notes/<tag>.md`；publisher 契约（仅手工、写 scope、五个 artifact、不构建/不签名）
+  由 `test-release-workflows.py` 固定。
+- 首次使用：`v0.1.4` + run `41307807752` → GitHub Release（公开）。
+
 ### NOT RUN / 边界
 
 - API 24/25 真机/模拟器的安装与运行 **NOT RUN**；artifact 未签名、未公证、未发布商店。

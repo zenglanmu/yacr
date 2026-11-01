@@ -1,0 +1,114 @@
+name: Publish release assets
+
+# Manual, explicit publication of an existing build's workflow artifacts to the
+# public GitHub Release for a tag. GitHub Actions artifacts themselves are never
+# publicly downloadable (they require authentication and expire), so a release is
+# the only public distribution surface.
+#
+# Division of responsibility:
+#   * `build.yml` release jobs stay `contents: read` and artifact-only - they
+#     build, verify and upload, and never publish/sign/notarize;
+#   * this workflow is the **single** writer: it downloads the five platform
+#     artifacts from a named build run and attaches them to the tag's release.
+#     It never builds anything, so a green run here is packaging/upload evidence
+#     only - not a runtime, GPU, device or visual acceptance.
+#
+# It is `workflow_dispatch`-only: a push, PR or tag can never publish by itself.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to publish (e.g. v0.1.4)
+        required: true
+        type: string
+      run_id:
+        description: "`CI build layers` run id whose artifacts to attach"
+        required: true
+        type: string
+      notes_file:
+        description: Release notes file in this repository (empty = generated notes)
+        required: false
+        default: ""
+        type: string
+      prerelease:
+        description: Mark the release as a prerelease
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish (artifacts -> public GitHub Release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the five platform artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          rm -rf artifacts && mkdir -p artifacts
+          for name in \
+            yacr-linux-release \
+            yacr-windows-release \
+            yacr-macos-release \
+            android-apk-debug \
+            android-release-unsigned
+          do
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n "$name" -D "artifacts/$name"
+          done
+          find artifacts -type f -printf '%s\t%p\n' | sort -k2
+      - name: Flatten and verify the SHA-256 sidecars
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          find artifacts -type f -exec cp -t assets {} +
+          shopt -s nullglob
+          for sum in assets/*.sha256; do
+            ( cd assets && sha256sum -c "$(basename "$sum")" )
+          done
+          ls -l assets
+      - name: Publish the tag's GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          NOTES_FILE: ${{ inputs.notes_file }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" assets/* --clobber --repo "$GITHUB_REPOSITORY"
+            edit_args=(--title "yacr $TAG")
+            if [ -n "$NOTES_FILE" ]; then
+              edit_args+=(--notes-file "$NOTES_FILE")
+            fi
+            if [ "$PRERELEASE" = "true" ]; then
+              edit_args+=(--prerelease)
+            fi
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" "${edit_args[@]}"
+          else
+            args=(--title "yacr $TAG" --verify-tag)
+            if [ -n "$NOTES_FILE" ]; then
+              args+=(--notes-file "$NOTES_FILE")
+            else
+              args+=(--generate-notes)
+            fi
+            if [ "$PRERELEASE" = "true" ]; then
+              args+=(--prerelease)
+            fi
+            gh release create "$TAG" assets/* --repo "$GITHUB_REPOSITORY" "${args[@]}"
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json url,isDraft,isPrerelease,assets \
+            --jq '{url,isDraft,isPrerelease,assets:[.assets[]|{name,size}]}'

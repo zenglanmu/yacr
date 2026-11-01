@@ -8,6 +8,10 @@ React/Tauri hosts as **event-gated artifact builders**: a ``v*`` tag or a manual
 ``workflow_dispatch`` may run them; a routine push/PR may not. They upload
 workflow artifacts and never publish, sign, notarize or touch a store.
 
+Publication is a **separate, manual** step: `publish-release.yml` (the only
+write-scoped workflow) downloads those artifacts from a named build run and
+attaches them to the tag's public GitHub Release. It never builds anything.
+
 These are text/mutation contracts: no runner, package toolchain or signature is
 exercised here.
 """
@@ -26,6 +30,15 @@ workflow = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(workflow)
 
 BUILD = ROOT / ".github/workflows/build.yml"
+PUBLISH = ROOT / ".github/workflows/publish-release.yml"
+
+PUBLISH_ARTIFACTS = (
+    "yacr-linux-release",
+    "yacr-windows-release",
+    "yacr-macos-release",
+    "android-apk-debug",
+    "android-release-unsigned",
+)
 
 RELEASE_JOBS = {
     "linux-release": "scripts/package-linux-release.sh",
@@ -126,6 +139,45 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertNotEqual(mutated, text)
         errors = self.check_text(mutated)
         self.assertTrue(any("windows-release" in error for error in errors), errors)
+
+
+class PublishWorkflowContracts(unittest.TestCase):
+    """The public-release publisher stays manual, write-scoped and build-free."""
+
+    def text(self):
+        self.assertTrue(PUBLISH.is_file(), f"missing {PUBLISH.relative_to(ROOT)}")
+        return PUBLISH.read_text()
+
+    def test_publisher_is_manual_only_and_write_scoped(self):
+        text = self.text()
+        self.assertIn("workflow_dispatch:", text)
+        self.assertNotRegex(text, r"(?m)^  push:")
+        self.assertNotRegex(text, r"(?m)^  pull_request:")
+        self.assertIn("contents: write", text)
+        # Downloading the run's artifacts needs the Actions scope explicitly:
+        # listing a `permissions:` block zeroes every unlisted scope.
+        self.assertIn("actions: read", text)
+
+    def test_publisher_attaches_every_platform_artifact(self):
+        text = self.text()
+        for name in PUBLISH_ARTIFACTS:
+            with self.subTest(artifact=name):
+                self.assertIn(name, text)
+        self.assertIn("gh release create", text)
+        self.assertIn("--verify-tag", text)
+
+    def test_publisher_never_builds_or_signs(self):
+        text = self.text()
+        for forbidden in (
+            "scripts/package-",
+            "cargo build",
+            "build-android.sh",
+            "wrangler",
+            "apksigner",
+            "codesign",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, text)
 
 
 if __name__ == "__main__":
