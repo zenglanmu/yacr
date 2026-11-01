@@ -47,6 +47,11 @@ const DRAW_SELECTORS: &[(&str, &str)] = &[
     ("COPYBASE", "draw.copybase"),
     ("CUTBASE", "draw.cutbase"),
     ("PASTECLIP", "draw.pasteclip"),
+    // DIVIDE/LENGTHEN are the zero-point pre-selection edits: the one selected
+    // curve is the whole input, so they start with no captured point and are not
+    // ready until a selection exists.
+    ("DIVIDE", "draw.divide"),
+    ("LENGTHEN", "draw.lengthen"),
 ];
 
 fn fresh_session() -> CadSession {

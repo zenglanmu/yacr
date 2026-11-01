@@ -330,6 +330,24 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // reads disabled with the sentence that names the rule.
           { id: 'MATCHPROP', labelKey: 'draw.kind.matchprop', icon: 'matchprop', command: 'MATCHPROP' },
           { id: 'EXTEND', labelKey: 'draw.kind.extend', icon: 'extend', command: 'EXTEND' },
+          // The three single-curve edits (2026-11-01) sit directly after the
+          // TRIM/EXTEND pair, the curve-editing commands they belong with; JOIN
+          // still closes the panel, so no shipped button moves.
+          //
+          // BREAK captures **two picks** — the first is both the curve pick and
+          // the first break point, the second is the other end of the removed
+          // span — so it is not a pre-selection tool: pressing it starts a
+          // capture the way TRIM does. Small button, no variant popover (the
+          // command has no options sub-prompt), glyph `trim`.
+          { id: 'BREAK', labelKey: 'draw.kind.break', icon: 'trim', command: 'BREAK' },
+          // DIVIDE and LENGTHEN take **zero picks**: they act on the current
+          // selection (exactly one curve) and their settings are the shared tool
+          // parameters, so they carry neither a pick prompt nor a caret here. The
+          // glyphs are borrowed (`point` for the marks DIVIDE creates, `scale`
+          // for the length LENGTHEN changes) — the icon set has no dedicated
+          // divide/lengthen mark.
+          { id: 'DIVIDE', labelKey: 'draw.kind.divide', icon: 'point', command: 'DIVIDE' },
+          { id: 'LENGTHEN', labelKey: 'draw.kind.lengthen', icon: 'scale', command: 'LENGTHEN' },
           { id: 'CHAMFER', labelKey: 'draw.kind.chamfer', icon: 'chamfer', command: 'CHAMFER' },
           { id: 'FILLET', labelKey: 'draw.kind.fillet', icon: 'fillet', command: 'FILLET' },
           // The Polyline modes sit directly after the two-pick pair they belong
@@ -471,6 +489,12 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'COPY', labelKey: 'draw.kind.copy', icon: 'copy', command: 'COPY' },
           { id: 'TRIM', labelKey: 'draw.kind.trim', icon: 'trim', command: 'TRIM' },
           { id: 'EXTEND', labelKey: 'draw.kind.extend', icon: 'extend', command: 'EXTEND' },
+          // Same slot as on the Home tab (see the Home/modify comment for the
+          // two-pick BREAK shape and the zero-pick DIVIDE/LENGTHEN pair), so both
+          // modify panels read in the same order.
+          { id: 'BREAK', labelKey: 'draw.kind.break', icon: 'trim', command: 'BREAK' },
+          { id: 'DIVIDE', labelKey: 'draw.kind.divide', icon: 'point', command: 'DIVIDE' },
+          { id: 'LENGTHEN', labelKey: 'draw.kind.lengthen', icon: 'scale', command: 'LENGTHEN' },
           { id: 'CHAMFER', labelKey: 'draw.kind.chamfer', icon: 'chamfer', command: 'CHAMFER' },
           { id: 'FILLET', labelKey: 'draw.kind.fillet', icon: 'fillet', command: 'FILLET' },
           // The Polyline modes sit directly after the two-pick pair they belong

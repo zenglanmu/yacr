@@ -149,6 +149,17 @@ pub const MTEXT_ATTACHMENT_MIN: f64 = 1.0;
 /// The highest MTEXT attachment code: `9`, bottom-right.
 pub const MTEXT_ATTACHMENT_MAX: f64 = 9.0;
 
+/// LENGTHEN mode `Delta` (AutoCAD's `DE` option): the amount is a signed
+/// length added to the current length (`new = old + value`); a negative amount
+/// shortens.
+pub const LENGTHEN_MODE_DELTA: f64 = 0.0;
+/// LENGTHEN mode `Percent` (`P`): the amount is a percentage of the current
+/// length (`new = old * value / 100`), so `150` means "one and a half times".
+pub const LENGTHEN_MODE_PERCENT: f64 = 1.0;
+/// LENGTHEN mode `Total` (`T`): the amount is the absolute new length
+/// (`new = value`).
+pub const LENGTHEN_MODE_TOTAL: f64 = 2.0;
+
 /// A session-scoped tool parameter with a stable machine key (ADR 0016 decision A).
 ///
 /// The member set and the machine keys are the frozen channel vocabulary: the
@@ -231,11 +242,24 @@ pub enum ToolParameter {
     /// `row = (code - 1) / 3` onto the domain's `TextAlignH`/`TextAlignV` pair,
     /// so `TextAlignV::Baseline` is never produced. MTEXT is the only consumer.
     MTextAttachment,
+    /// DIVIDE segment count: an **integer in `2..=1024`** (the same bounded range
+    /// POLYGON's side count uses). The curve is split into this many equal
+    /// arc-length parts, so a count of `1` would place no mark and `1025` is a
+    /// runaway count; both are refused by name, never clamped.
+    DivideSegments,
+    /// LENGTHEN mode: a **closed set** — `0` Delta, `1` Percent, `2` Total
+    /// (AutoCAD's three `LENGTHEN` modes). The amount's meaning depends on the
+    /// mode, so the codes are read **by name** rather than as a raw number.
+    LengthenMode,
+    /// LENGTHEN amount: **finite and non-zero** (a zero change is refused, never
+    /// clamped to a no-op). Delta may be negative (shorten); Percent and Total
+    /// additionally require a positive value, which the command refuses by name.
+    LengthenValue,
 }
 
 impl ToolParameter {
     /// Every member, in a fixed order (the key round-trip uses it).
-    pub const ALL: [ToolParameter; 25] = [
+    pub const ALL: [ToolParameter; 28] = [
         ToolParameter::PolygonSides,
         ToolParameter::FilletRadius,
         ToolParameter::ChamferDistanceA,
@@ -261,10 +285,15 @@ impl ToolParameter {
         ToolParameter::HatchGradientColorB,
         ToolParameter::TextRotation,
         ToolParameter::MTextAttachment,
+        // The single-curve edit pair (2026-11-01) is appended after every
+        // pre-existing member, so the frozen slots above never move.
+        ToolParameter::DivideSegments,
+        ToolParameter::LengthenMode,
+        ToolParameter::LengthenValue,
     ];
 
     /// Number of members (the store's fixed width).
-    pub const COUNT: usize = 25;
+    pub const COUNT: usize = 28;
 
     /// The dense index of this member in [`Self::ALL`] (the store's slot).
     pub fn index(self) -> usize {
@@ -294,6 +323,10 @@ impl ToolParameter {
             Self::HatchGradientColorB => 22,
             Self::TextRotation => 23,
             Self::MTextAttachment => 24,
+            // The single-curve edit pair keeps the appended order (slots 25-27).
+            Self::DivideSegments => 25,
+            Self::LengthenMode => 26,
+            Self::LengthenValue => 27,
         }
     }
 
@@ -329,6 +362,9 @@ impl ToolParameter {
             Self::HatchGradientColorB => "hatchGradientColorB",
             Self::TextRotation => "textRotation",
             Self::MTextAttachment => "mtextAttachment",
+            Self::DivideSegments => "divideSegments",
+            Self::LengthenMode => "lengthenMode",
+            Self::LengthenValue => "lengthenValue",
         }
     }
 
@@ -387,6 +423,11 @@ impl ToolParameter {
     /// * `MTextAttachment` **1 (top-left)** — [`MTEXT_ATTACHMENT_TOP_LEFT`],
     ///   AutoCAD's MTEXT default attachment and the exact pair MTEXT creation
     ///   stored before the parameter existed (Left/Top).
+    /// * `DivideSegments` **2** — the smallest accepted count above `1`: two
+    ///   equal parts (one interior mark on an open curve).
+    /// * `LengthenMode` **0 (Delta)** — the plain signed length change.
+    /// * `LengthenValue` **1** — one world unit of delta (a *valid* non-zero
+    ///   value, so the default never limps into a forced refusal at commit).
     ///
     /// Note the fill-angle range (ADR 0016 decision A): the legal values are
     /// `0 < |angle| <= 360`, so the full-circle **default 360 is re-settable** (a
@@ -419,6 +460,9 @@ impl ToolParameter {
             Self::HatchGradientColorB => ToolValue::Number(HATCH_GRADIENT_DEFAULT_ACI_B),
             Self::TextRotation => ToolValue::Number(TEXT_DEFAULT_ROTATION_DEGREES),
             Self::MTextAttachment => ToolValue::Number(MTEXT_ATTACHMENT_TOP_LEFT),
+            Self::DivideSegments => ToolValue::Number(2.0),
+            Self::LengthenMode => ToolValue::Number(LENGTHEN_MODE_DELTA),
+            Self::LengthenValue => ToolValue::Number(1.0),
         }
     }
 
@@ -498,6 +542,27 @@ impl ToolParameter {
             (Self::AlignScale, ToolValue::Flag(_))
             | (Self::ArrayRotateItems, ToolValue::Flag(_))
             | (Self::HatchDouble, ToolValue::Flag(_)) => Ok(()),
+            // DIVIDE: an integer in `2..=1024`. `1` would place no mark and
+            // `1025` is a runaway count; both are refused by name, never clamped.
+            (Self::DivideSegments, ToolValue::Number(number)) => {
+                integer_in_range(self, number, 2, 1024)
+            }
+            // LENGTHEN mode: the three documented codes, read by name in the
+            // refusal so a raw `7` cannot be mistaken for an amount.
+            (Self::LengthenMode, ToolValue::Number(number)) => closed_choice(
+                self,
+                number,
+                &[
+                    LENGTHEN_MODE_DELTA,
+                    LENGTHEN_MODE_PERCENT,
+                    LENGTHEN_MODE_TOTAL,
+                ],
+                "0 (Delta), 1 (Percent) or 2 (Total)",
+            ),
+            // LENGTHEN amount: finite and **non-zero**. A zero change is refused
+            // rather than clamped into a no-op; Delta may be negative (shorten),
+            // while the command additionally requires `> 0` for Percent/Total.
+            (Self::LengthenValue, ToolValue::Number(number)) => finite_non_zero(self, number),
             // Any other pairing is a kind mismatch: a `Flag` for a numeric
             // parameter, or a `Number` for a flag parameter.
             _ => Err(CadError::InvalidInput(format!(
@@ -567,6 +632,20 @@ fn finite_greater_than(parameter: ToolParameter, number: f64, low: f64) -> CadRe
     } else {
         Err(CadError::InvalidInput(format!(
             "tool parameter '{}' must be finite and > {low}, got {number}",
+            parameter.key()
+        )))
+    }
+}
+
+/// A finite value that is **not zero** (the LENGTHEN amount: a zero change is a
+/// no-op and is refused instead of being accepted silently). Both signs are
+/// legal at this level; the command narrows Percent/Total to positive values.
+fn finite_non_zero(parameter: ToolParameter, number: f64) -> CadResult<()> {
+    if number.is_finite() && number != 0.0 {
+        Ok(())
+    } else {
+        Err(CadError::InvalidInput(format!(
+            "tool parameter '{}' must be finite and non-zero, got {number}",
             parameter.key()
         )))
     }

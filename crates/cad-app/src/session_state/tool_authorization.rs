@@ -64,5 +64,11 @@ pub(crate) fn authorizing_command(parameter: ToolParameter) -> CommandId {
         // create command (`CreateMText` is Work-only, like every other parameter
         // command here).
         ToolParameter::MTextAttachment => CommandId::CreateMText,
+        // The single-curve edit pair (2026-11-01): DIVIDE's segment count is
+        // authorized against the DIVIDE command, and LENGTHEN's mode/amount
+        // against the LENGTHEN command, so a Viewer-mode set is refused exactly
+        // like every other Work-only parameter and there is no second gate.
+        ToolParameter::DivideSegments => CommandId::Divide,
+        ToolParameter::LengthenMode | ToolParameter::LengthenValue => CommandId::Lengthen,
     }
 }

@@ -42,6 +42,10 @@ impl CommandId {
                 | Self::MoveEntities
                 | Self::TrimEntity
                 | Self::ExtendEntity
+                | Self::Break
+                // The single-curve edit pair (2026-11-01): both write entities.
+                | Self::Divide
+                | Self::Lengthen
                 | Self::ChamferLines
                 | Self::FilletLines
                 | Self::ChamferPolyline

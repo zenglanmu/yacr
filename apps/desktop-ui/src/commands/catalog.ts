@@ -79,6 +79,27 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'PASTEORIG', labelKey: 'draw.kind.pasteorig', icon: 'copy', group: 'modify' },
   { id: 'TRIM', labelKey: 'draw.kind.trim', icon: 'trim', group: 'modify' },
   { id: 'EXTEND', labelKey: 'draw.kind.extend', icon: 'extend', group: 'modify' },
+  // The three single-curve edits (2026-11-01) are listed directly after the
+  // TRIM/EXTEND pair they belong with, so no shipped row moves.
+  //
+  // BREAK takes **two picks**: the first pick selects the curve *and* is the first
+  // break point, the second is the other end of the span that is removed. It is
+  // therefore **not** a pre-selection tool — the pick is the input. Its glyph is
+  // the `trim` mark (scissors), because the operation is a trim between two
+  // points; the icon set has no break-specific name.
+  //
+  // DIVIDE and LENGTHEN take **no point at all**: the one preselected curve is the
+  // whole input, exactly like HATCH, and their settings are the existing tool
+  // parameters (`divideSegments`; `lengthenMode` + `lengthenValue`) rather than a
+  // second settings surface. The glyphs are borrowed: `point` for the division
+  // marks DIVIDE creates, `scale` for the length change LENGTHEN makes (the icon
+  // set has no divide/lengthen mark; SCALE keeps its own row below).
+  //
+  // The host refuses a polyline for BREAK and anything beyond one LINE/ARC/CIRCLE/
+  // straight-polyline for the other two; nothing here may imply the wider set.
+  { id: 'BREAK', labelKey: 'draw.kind.break', icon: 'trim', group: 'modify' },
+  { id: 'DIVIDE', labelKey: 'draw.kind.divide', icon: 'point', group: 'modify' },
+  { id: 'LENGTHEN', labelKey: 'draw.kind.lengthen', icon: 'scale', group: 'modify' },
   { id: 'ROTATE', labelKey: 'draw.kind.rotate', icon: 'rotate', group: 'modify' },
   { id: 'SCALE', labelKey: 'draw.kind.scale', icon: 'scale', group: 'modify' },
   { id: 'MIRROR', labelKey: 'draw.kind.mirror', icon: 'mirror', group: 'modify' },

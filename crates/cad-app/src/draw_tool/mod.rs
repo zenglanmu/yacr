@@ -555,6 +555,16 @@ impl DrawTool {
         if self.kind == DrawToolKind::Hatch {
             return Ok(DrawIntent::Hatch);
         }
+        // DIVIDE/LENGTHEN are the same zero-point pre-selection shape: the one
+        // selected curve is the input and their settings are the typed session
+        // parameters, so they never read a point (return **before** the
+        // `points[0]` index below).
+        if self.kind == DrawToolKind::Divide {
+            return Ok(DrawIntent::Divide);
+        }
+        if self.kind == DrawToolKind::Lengthen {
+            return Ok(DrawIntent::Lengthen);
+        }
         // HATCHPOINT captures exactly one internal point; the boundary discovery
         // and every refusal belong to the command layer, so the intent is just
         // that seed.
@@ -684,6 +694,14 @@ impl DrawTool {
                 target: self.picks[0].clone(),
                 boundary: self.picks[1].clone(),
                 pick_point: a,
+            },
+            // BREAK: the first click resolved the target **and** is the first
+            // break point, so the ref comes from the one resolved pick and the
+            // two raw clicks are the two break points.
+            DrawToolKind::Break => DrawIntent::Break {
+                target: self.picks[0].clone(),
+                first: a,
+                second: b,
             },
             // ROTATE: the absolute direction angle from `base` to the second
             // point, measured about +Z from the +X axis. A zero-length direction
@@ -855,6 +873,10 @@ impl DrawTool {
             DrawToolKind::HatchPoint => DrawIntent::HatchPoint {
                 seed: self.points[0],
             },
+            // DIVIDE/LENGTHEN: handled by the early returns above (zero captured
+            // points). The arms are unreachable here but keep the match exhaustive.
+            DrawToolKind::Divide => DrawIntent::Divide,
+            DrawToolKind::Lengthen => DrawIntent::Lengthen,
         })
     }
 }

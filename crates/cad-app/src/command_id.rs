@@ -530,6 +530,21 @@ pub enum CommandId {
     /// approximate); anything else is an explicit refusal that changes nothing.
     /// Work-only.
     ExtendEntity,
+    /// `BREAK` one LINE/ARC/CIRCLE/SPLINE between two picked points and keep the
+    /// complementary piece(s) (Work-only). Payload is
+    /// [`crate::CommandPayload::Break`] `{ target, first, second }`: the first
+    /// click is both the entity pick and the first break point, the second click
+    /// is the second break point (no `F` override, no multiple-break mode). Picks
+    /// are projected onto the target's parameter space and the span between them
+    /// removed; the source is retained as the first piece and one fresh entity
+    /// (second piece / CIRCLE complement) is inserted when needed.
+    ///
+    /// Refusals (nothing written): `break.invalid_point`, `break.not_addressable`,
+    /// `break.target_missing`, `break.projection_failed`,
+    /// `break.pick_outside_span`, `break.zero_span`, `break.whole_curve`,
+    /// `break.degenerate_piece`; a LWPOLYLINE (or any other kind) is the shared
+    /// `Unsupported`. One transaction / one undo step.
+    Break,
     /// CHAMFER two straight lines: trim/extend both to the corner of the two
     /// infinite lines (when both distances are 0) or to the offset points, joining
     /// them with one new LINE (ADR 0016 decision C). The two picks are the two
@@ -972,6 +987,11 @@ pub enum CommandId {
     /// (unlike the layer-table writes) and never routes through
     /// [`CommandId::StretchEntities`]. Work-only.
     GripStretch,
+    /// `DIVIDE` (Work-only): arc-length POINT marks on the selected curve; see
+    /// `crate::app_drawing::divide`.
+    Divide,
+    /// `LENGTHEN` (Work-only): end-anchored change; see `crate::app_drawing::lengthen`.
+    Lengthen,
 }
 
 mod capabilities;

@@ -104,6 +104,10 @@ pub fn draw_preview_overlay(
         | DrawToolKind::Polyline
         | DrawToolKind::Move
         | DrawToolKind::Trim
+        // BREAK's first click is an entity pick and its second is a free point;
+        // the live preview is the existing cursor/chain rubber band (no new
+        // overlay channel).
+        | DrawToolKind::Break
         | DrawToolKind::Copy
         | DrawToolKind::Extend
         | DrawToolKind::Rotate
@@ -119,10 +123,14 @@ pub fn draw_preview_overlay(
         // yields nothing for it (no fabricated preview) — the array result depends
         // on the session parameters plus the selection, not on the cursor. HATCH
         // has the same zero-point pre-selection shape (ADR 0018 decision D), so it
-        // also yields no chain.
+        // also yields no chain. DIVIDE/LENGTHEN are the same zero-point shape: the
+        // one selected curve and the typed parameters define the result, so no
+        // cursor geometry is fabricated.
         | DrawToolKind::ArrayRect
         | DrawToolKind::ArrayPolar
         | DrawToolKind::Hatch
+        | DrawToolKind::Divide
+        | DrawToolKind::Lengthen
         // HATCHPOINT captures one internal point; its live preview is the existing
         // cursor/chain. The boundary is discovered from the database at commit, so
         // no candidate ring is fabricated here.

@@ -31,12 +31,14 @@ use cad_history::{drawing_patch, drawing_patch_deleted, DrawingPatch, DrawingUnd
 
 mod align;
 mod array;
+mod break_curve;
 mod chamfer_fillet;
 mod clipboard;
 mod dimension;
 mod dimension_angular;
 mod dimension_chain;
 mod dimension_ordinate;
+mod divide;
 mod drawing_create;
 mod drawing_edit;
 mod drawing_transform;
@@ -50,6 +52,7 @@ mod hatch_stitch;
 mod helpers;
 mod join;
 mod layer_edit;
+mod lengthen;
 mod match_prop;
 mod mirror_curves;
 mod mleader;

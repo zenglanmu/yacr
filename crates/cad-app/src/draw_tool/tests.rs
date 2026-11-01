@@ -46,8 +46,13 @@ fn required_points_and_selection_are_explicit_per_kind() {
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot. HATCH has the same
             // pre-selection shape: the selected entities are the boundary and the
-            // pattern parameters are the typed channel.
-            DrawToolKind::ArrayRect | DrawToolKind::Hatch => 0,
+            // pattern parameters are the typed channel. DIVIDE/LENGTHEN are the
+            // same zero-point pre-selection pair (the one selected curve is the
+            // input and their settings are typed parameters).
+            DrawToolKind::ArrayRect
+            | DrawToolKind::Hatch
+            | DrawToolKind::Divide
+            | DrawToolKind::Lengthen => 0,
             _ => 2,
         };
         assert_eq!(kind.required_points(), expected, "{kind:?}");

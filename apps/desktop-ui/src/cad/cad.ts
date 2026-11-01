@@ -302,6 +302,18 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
   'draw.hatchpoint': [
     'tool.prompt.hatchpoint.pick_internal',
   ],
+  // BREAK (2026-11-01) captures **two points** and the first one is also the
+  // entity pick: the host selects the curve under the first click and treats that
+  // click as the first end of the span to remove, so the tool reports one point
+  // per click from the very start. That is why the list is exactly two entries
+  // and why the first sentence says the pick is both the curve and the break
+  // point — a plain "select the curve" would hide that the click already placed a
+  // break point. It can never inherit a preselection entry: no selection exists
+  // when the capture starts.
+  'draw.break': [
+    'tool.prompt.break.select_entity',
+    'tool.prompt.break.second_point',
+  ],
   // ID (2026-10-26) is a **single-point** capture that commits itself: one pick,
   // then the host reports the coordinates. It therefore has exactly one step and
   // never reaches the ready state in practice (the capture is complete the moment
@@ -399,6 +411,11 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   'draw.copybase': 'tool.prompt.confirm',
   'draw.pasteclip': 'tool.prompt.confirm',
   'draw.cutbase': 'tool.prompt.confirm',
+  // BREAK's complement is its two points, so "ready" is the state between them:
+  // the span is captured but nothing has been cut yet. The shared dimension copy
+  // ("Dimension defined; press Enter to confirm") would be false twice over, so
+  // this names the one honest state — both ends known, Enter breaks.
+  'draw.break': 'tool.prompt.break.ready',
 });
 
 /** A pre-selection tool's two prompts: waiting for a selection, and ready. */
@@ -426,6 +443,21 @@ export const PRESELECT_PROMPTS: Readonly<Record<string, PreselectPrompt>> = Obje
   'draw.hatch': Object.freeze({
     idle: 'tool.prompt.hatch.select_boundary',
     ready: 'tool.prompt.hatch.ready',
+  }),
+  // DIVIDE (2026-11-01) takes no pick either: one preselected curve is the whole
+  // input, so its only two states are "nothing usable selected" and "the host can
+  // divide it". The ready copy names the next thing the user can act on (the
+  // segment count), because the capture itself has nothing left to click.
+  'draw.divide': Object.freeze({
+    idle: 'tool.prompt.divide.select_curve',
+    ready: 'tool.prompt.divide.ready',
+  }),
+  // LENGTHEN is the same zero-pick shape; its ready copy names both of its
+  // parameters (mode and value) rather than a point, and it never implies the
+  // start point moves — the host always lengthens the **end**.
+  'draw.lengthen': Object.freeze({
+    idle: 'tool.prompt.lengthen.select_curve',
+    ready: 'tool.prompt.lengthen.ready',
   }),
 });
 

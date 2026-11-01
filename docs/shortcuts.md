@@ -36,7 +36,7 @@
 - **补全候选**（`apps/desktop-ui/src/components/CommandLine.tsx` + `commands.ts::filterCommandSuggestions`；
   旧文档指向的 `command-bar.slint` 已随 Slint 删除）：
   - 候选来源是 **`COMMAND_CATALOG`（显示目录）+ 宿主别名表**（`cad_command_aliases`），
-    **不是**全部 98 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
+    **不是**全部 101 个选择子；上限 **8** 条；排序 = 前缀命中 → 别名前缀 → 中缀命中 → 历史使用频次 →
     字母序（**不去重**，也**不是**纯字典序）。
   - 输入变化即时计算候选；候选只**填充**文本，**从不执行**命令。
   - `Tab`：**仅当有高亮行**时把命令行替换成该名字（**没有**“无高亮则第一项”的回退）。
@@ -55,11 +55,11 @@
 
 ## 2. 命令表（只列**有行为注解**的选择子）
 
-> **完整清单不在这里**：穷尽的 **98 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
+> **完整清单不在这里**：穷尽的 **101 个 `COMMAND_TABLE` 选择子**（含源码位置与契约断言）见
 > `docs/autocad-command-coverage.md` §2；本节只保留**有行为注解**的行。
 > 选择子与别名的**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs`
-> （`COMMAND_TABLE` **98** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
-> `ARGUMENT_SELECTORS` **4** / `COMMAND_ALIASES` **51**）。
+> （`COMMAND_TABLE` **101** / `MEASUREMENT_SELECTORS` **5** / `ZOOM_STEP_SELECTORS` **2** /
+> `ARGUMENT_SELECTORS` **4** / `COMMAND_ALIASES` **54**）。
 > 本表的 **canonical 列**只出现**被准入的名字**，**别名列**只出现 `COMMAND_ALIASES` 里的真实行；
 > 键位、面板与 IPC 能力见 §2a，**不混进命令表**。
 
@@ -75,6 +75,9 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `ERASE` | 编辑 | 是 | `E` |
 | `TRIM` | 编辑 | 是 | `TR` |
 | `EXTEND` | 编辑 | 是 | `EX` |
+| `BREAK` | 编辑（两点打断：**第一次拾取实体同时是第一断点**，第二点确定移除区间；支持 LINE/ARC/CIRCLE/SPLINE，CIRCLE 变 ARC；**Polyline 按名拒绝**；源实体保留为第一段，第二段新 id，一条事务/一步撤销） | 是 | `BR` |
+| `DIVIDE` | 编辑（选择式：恰好 1 条 LINE/ARC/CIRCLE 或**直线段**折线，按**等弧长**放置 POINT 标记；开放曲线 N−1 个、闭合曲线 N 个（含起始参数）；`divideSegments` 2–1024；源保留，一条事务/一步撤销） | 是 | `DIV` |
+| `LENGTHEN` | 编辑（选择式：恰好 1 条 LINE/ARC，按 `lengthenMode` Delta/Percent/Total 与 `lengthenValue` 改**末端**长度；一条事务/一步撤销，实体 id/图层/空间/draw order 保留） | 是 | `LEN` |
 | `ROTATE` | 编辑 | 是 | `RO` |
 | `SCALE` | 编辑 | 是 | `SC` |
 | `MIRROR` | 编辑（保留原件） | 是 | `MI` |
@@ -185,7 +188,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 - `COPYCLIP` 是**只读**捕获，Viewer 亦可用；`CUTCLIP`/`PASTECLIP` 为 work-only。
 - `OPEN`/`NEW`/`SAVE`/`PLOT` 为**宿主自有**：宿主未提供能力时命令层返回显式 `Unsupported`
   （不会静默 no-op）。
-- 别名：**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs::COMMAND_ALIASES`（**51** 行），
+- 别名：**唯一权威**是 `crates/cad-ui-core/src/session/commands.rs::COMMAND_ALIASES`（**54** 行），
   本页 §2b 是它的转写。旧文档引用的 `cad-ui-slint` 别名/同义词/未实现命令三张表**已随 Slint 退役删除**，
   不要再去仓库里找它们。
 
@@ -241,11 +244,13 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `DAL` | `DIMALIGNED` | `DRA` | `DIMRADIUS` |
 | `DDI` | `DIMDIAMETER` | `DAN` | `DIMANGULAR` |
 | `DCE` | `DIMCENTER` | `MA` | `MATCHPROP` |
+| `BR` | `BREAK` | `DIV` | `DIVIDE` |
 
 全词同义词（同样在 `COMMAND_ALIASES` 内）：`EXPORT`/`PRINT`→`PLOT`、`SAVEAS`/`QSAVE`→`SAVE`、
 `ZOOM EXTENTS`→`FIT`、`ENTER`→`CONFIRM`、`DBA`→`DIMBASELINE`、`DCO`→`DIMCONTINUE`、
-`LAYUNISO`/`LAYON`→`RESTORELAYERS`、`NEWLAYER`→`CREATELAYER`（项目同义词，非 `acad.pgp`）。
-本页缩写表 40 行 + 本句 11 行 = **51** 行，与 `COMMAND_ALIASES` 的长度一致。
+`LAYUNISO`/`LAYON`→`RESTORELAYERS`、`NEWLAYER`→`CREATELAYER`、`LEN`→`LENGTHEN`
+（项目同义词，非 `acad.pgp`）。
+本页缩写表 **42** 个 + 本句 **12** 个 = **54** 个，与 `COMMAND_ALIASES` 的长度一致。
 
 诚实边界：这张表是**面向已实现命令的 AutoCAD `acad.pgp` 子集**，不是 `acad.pgp` 解析器，
 也**不支持用户自定义别名**；目标命令不存在的缩写一律不收录，绝不用别名凭空造出命令。
@@ -365,10 +370,10 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
     其余未映射组合不拦截。
 - **命令名的处理（2026-10-20 更正）**：此前本节引用 `crates/cad-ui-slint/src/command_line.rs`
   的 `UNSUPPORTED_COMMANDS` 表，**该 crate 已随 Slint→React 迁移删除**，此处据实改写。现行机制：命令名对照
-  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**98 个选择子**，与 `CommandId` 变体一一对应；
+  `crates/cad-ui-core/src/session/commands.rs` 的命令表（**101 个选择子**，与 `CommandId` 变体一一对应；
   P6b 后由 67 增加，2026-10-25 再加 `GRID`，`MATCHPROP` 批，**2026-10-26 再加 `JOIN`/`LAYISO`/`LAYOFF`/
   `PDMODE`/`PDSIZE`，2026-10-27 再加 `LAYERP`/`AREA OBJECT`，**2026-10-28 再加 `COPYBASE`/`CUTBASE`/
-  `PASTEORIG`，2026-11-01 再加 `HATCHPOINT`**——`ID` 是测量选择子、
+  `PASTEORIG`，2026-11-01 再加 `HATCHPOINT`/`BREAK`/`DIVIDE`/`LENGTHEN`**——`ID` 是测量选择子、
   `LAYUNISO`/`LAYON` 是既有 `RESTORELAYERS` 的别名，都不新增 `CommandId`；`LAYERP` **已不是**别名）；
   不在表内的名字在 chrome 侧就按 `command.unsupported` 拒绝（**`command.unknown` 这个键没有消费方**，
   见 §1）；宿主侧「认识这个名字、但该路径不可用」（如 `PLOT`/`SAVE` 的受限路径）同样报告

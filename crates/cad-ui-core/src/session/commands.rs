@@ -94,6 +94,15 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MOVE", CommandId::MoveEntities),
     ("TRIM", CommandId::TrimEntity),
     ("EXTEND", CommandId::ExtendEntity),
+    // BREAK is the two-point break selector (the first click is both the entity
+    // pick and the first break point); the bare selector starts its interactive
+    // capture, so no payload is fabricated here.
+    ("BREAK", CommandId::Break),
+    // DIVIDE and LENGTHEN are the zero-point single-curve edits (2026-11-01): the
+    // one selected curve is the whole input, so the bare selector starts its
+    // capture and no payload is fabricated here.
+    ("DIVIDE", CommandId::Divide),
+    ("LENGTHEN", CommandId::Lengthen),
     ("CHAMFER", CommandId::ChamferLines),
     ("FILLET", CommandId::FilletLines),
     // The **Polyline mode** of the two corner commands. AutoCAD reaches it
@@ -602,6 +611,8 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     // AutoCAD's `AR` is ARRAY; `ARRAYRECT` is the array command this build
     // implements, so the abbreviation points at the implemented selector.
     ("AR", "ARRAYRECT"),
+    // AutoCAD's `BR` is BREAK, this build's two-point break.
+    ("BR", "BREAK"),
     ("C", "CIRCLE"),
     ("CHA", "CHAMFER"),
     ("CO", "COPY"),
@@ -610,6 +621,9 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("DAN", "DIMANGULAR"),
     ("DCE", "DIMCENTER"),
     ("DDI", "DIMDIAMETER"),
+    // `DIV` / `LEN` are AutoCAD's abbreviations of the two zero-point single-curve
+    // edits implemented here (DIVIDE and LENGTHEN).
+    ("DIV", "DIVIDE"),
     ("DLI", "DIMLINEAR"),
     ("DRA", "DIMRADIUS"),
     ("E", "ERASE"),
@@ -619,6 +633,7 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("GR", "GRID"),
     ("H", "HATCH"),
     ("L", "LINE"),
+    ("LEN", "LENGTHEN"),
     ("M", "MOVE"),
     ("MA", "MATCHPROP"),
     ("MI", "MIRROR"),
@@ -827,6 +842,13 @@ pub(super) fn interaction_request_for(
         }
         CommandId::TrimEntity => Some(InteractionRequest::BeginDraw(DrawToolKind::Trim)),
         CommandId::ExtendEntity => Some(InteractionRequest::BeginDraw(DrawToolKind::Extend)),
+        // BREAK: the first click is the entity pick **and** the first break
+        // point, then the second break point.
+        CommandId::Break => Some(InteractionRequest::BeginDraw(DrawToolKind::Break)),
+        // DIVIDE/LENGTHEN are the zero-point pre-selection shape: the selected
+        // curve is the whole input, so the selector only starts the tool.
+        CommandId::Divide => Some(InteractionRequest::BeginDraw(DrawToolKind::Divide)),
+        CommandId::Lengthen => Some(InteractionRequest::BeginDraw(DrawToolKind::Lengthen)),
         CommandId::ChamferLines => Some(InteractionRequest::BeginDraw(DrawToolKind::Chamfer)),
         CommandId::FilletLines => Some(InteractionRequest::BeginDraw(DrawToolKind::Fillet)),
         CommandId::ArrayRectangular => Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayRect)),

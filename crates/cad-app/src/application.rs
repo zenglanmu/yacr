@@ -435,6 +435,9 @@ impl Application {
             | CommandId::MoveEntities
             | CommandId::TrimEntity
             | CommandId::ExtendEntity
+            | CommandId::Break
+            | CommandId::Divide
+            | CommandId::Lengthen
             | CommandId::ChamferLines
             | CommandId::FilletLines
             | CommandId::ChamferPolyline

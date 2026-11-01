@@ -135,6 +135,14 @@ export const HOST_NAMES = [
   // them in the canonical run, exactly as `cad_ui_core::session::COMMAND_TABLE`
   // now does.
   'CHAMFER POLYLINE', 'FILLET POLYLINE',
+  // The three single-curve edits (2026-11-01). `BREAK` is a **two-pick** capture
+  // (the first pick is the curve *and* the first break point); `DIVIDE` and
+  // `LENGTHEN` take no pick at all and act on the current selection, which is why
+  // they are pre-selection tools in `cad.ts` and own tool-parameter rows. All
+  // three are canonical selectors of their own, never aliases: `BREAK` must not
+  // route into `TRIM`'s capture and `LENGTHEN` must not route into `EXTEND`'s,
+  // because the picks and the parameters differ.
+  'BREAK', 'DIVIDE', 'LENGTHEN',
   // POINT display style sysvars (2026-10-26): `PDMODE` and `PDSIZE` are typed
   // command-line settings with one numeric argument each (like `SNAPUNIT`), not
   // buttons. This mirror is instructed locally, exactly like `SNAPUNIT` before

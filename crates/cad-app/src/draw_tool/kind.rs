@@ -48,7 +48,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 41] = [
+    pub const ALL: [DrawToolKind; 44] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -103,6 +103,16 @@ impl DrawToolKind {
         // real kind started by its command selector (one internal point, no
         // selection), not from the draw-tool selector list.
         DrawToolKind::HatchPoint,
+        // BREAK is appended for the same index-stability reason: it is a real
+        // kind started by its command selector (one entity pick that is also the
+        // first break point, then a second free point).
+        DrawToolKind::Break,
+        // The zero-point single-curve edit pair is appended for the same
+        // index-stability reason: DIVIDE/LENGTHEN are real kinds started by their
+        // command selectors and defined entirely by the selection plus the typed
+        // parameter channel (no captured point, no entity-pick step).
+        DrawToolKind::Divide,
+        DrawToolKind::Lengthen,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -149,6 +159,9 @@ impl DrawToolKind {
             Self::CutBase => "cutbase",
             Self::PasteClip => "pasteclip",
             Self::HatchPoint => "hatchpoint",
+            Self::Break => "break",
+            Self::Divide => "divide",
+            Self::Lengthen => "lengthen",
         }
     }
 
@@ -197,6 +210,9 @@ impl DrawToolKind {
             "cutbase" => Some(Self::CutBase),
             "pasteclip" => Some(Self::PasteClip),
             "hatchpoint" => Some(Self::HatchPoint),
+            "break" => Some(Self::Break),
+            "divide" => Some(Self::Divide),
+            "lengthen" => Some(Self::Lengthen),
             _ => None,
         }
     }
@@ -323,6 +339,12 @@ impl DrawToolKind {
             // CJK literals on the Rust side and the shell substitutes the catalog
             // label for chrome anyway.
             Self::HatchPoint => "HATCHPOINT",
+            // BREAK shares the same locale-neutral fallback rule (no new CJK on
+            // the Rust side; the catalog carries the chrome copy).
+            Self::Break => "BREAK",
+            // DIVIDE/LENGTHEN share the same locale-neutral fallback rule.
+            Self::Divide => "DIVIDE",
+            Self::Lengthen => "LENGTHEN",
         }
     }
 
@@ -377,8 +399,10 @@ impl DrawToolKind {
             // the zero-point exact arity (ready as soon as the selection is
             // non-empty). HATCH has the same pre-selection shape: its boundary is
             // the selected entities and the parameters are the typed channel, so
-            // it captures no points either.
-            Self::ArrayRect | Self::Hatch => PointArity::Exact(0),
+            // it captures no points either. DIVIDE/LENGTHEN are the same shape: the
+            // one selected curve is the input and their settings are the typed
+            // channel, so they never capture a point.
+            Self::ArrayRect | Self::Hatch | Self::Divide | Self::Lengthen => PointArity::Exact(0),
             // Two endpoints, centre+radius point, two opposite rectangle
             // corners, a move/copy delta, target+boundary, or a rotate angle /
             // mirror axis.
@@ -405,7 +429,10 @@ impl DrawToolKind {
             | Self::MLeader
             // MTEXT: the two opposite corners of the wrap rectangle; its text is
             // the terminal typed step, not a point.
-            | Self::MText => PointArity::Exact(2),
+            | Self::MText
+            // BREAK: the second break point (the first click is the entity pick
+            // and the first break point in one step).
+            | Self::Break => PointArity::Exact(2),
         }
     }
 
@@ -438,6 +465,11 @@ impl DrawToolKind {
                 | Self::ArrayPolar
                 | Self::Align
                 | Self::Hatch
+                // DIVIDE/LENGTHEN act on the pre-selected curve, so an empty
+                // selection must never be confirmable (the command requires
+                // exactly one ref and refuses by name).
+                | Self::Divide
+                | Self::Lengthen
                 // COPYBASE/CUTBASE capture the **selection** into the clipboard
                 // (a selection-less capture would be an empty success), so they
                 // need one before they are ready. PASTECLIP's input is the
@@ -469,6 +501,9 @@ impl DrawToolKind {
             | Self::DimCenter
             | Self::DimBaseline
             | Self::DimContinue => 1,
+            // BREAK's first click is the entity pick **and** the first break
+            // point; the second click is a free point.
+            Self::Break => 1,
             // TEXTEDIT picks the text entity it will edit as its only step.
             Self::TextEdit => 1,
             // DIMANGULAR's two-line form picks both lines; its third step is the

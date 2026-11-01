@@ -444,6 +444,45 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     labelKey: 'status.tool_parameter.mtext_attachment',
     hintKey: 'status.tool_parameter.mtext_attachment.hint',
   },
+  // --- single-curve edits (2026-11-01) --------------------------------------
+  // DIVIDE's segment count is the one row the command reads: the host splits the
+  // selected curve into N equal parts and places POINTs at the division
+  // parameters, so the same integer is both "how many pieces" and "how many
+  // marks". `2..=1024` is the host's own closed range (`ToolParameter::Divide`),
+  // and it is a count, never a length, so it steps by 1 and stays untyped.
+  divideSegments: {
+    kind: 'number', statusKey: 'divideSegments', step: 1,
+    offered: integerInRange(2, 1024),
+    labelKey: 'status.tool_parameter.divide_segments',
+    hintKey: 'status.tool_parameter.divide_segments.hint',
+  },
+  // LENGTHEN's mode is a **closed set of three codes** — `0` delta, `1` percent,
+  // `2` total — so the strip can only reach a code the host accepts, and the
+  // codes are read **by name** (a raw 0/1/2 stepper would be a number nobody
+  // decodes), the same treatment HATCH's fill kinds and MTEXT's attachment get.
+  lengthenMode: {
+    kind: 'number', statusKey: 'lengthenMode', step: 1,
+    ...closedSet(0, 1, 2),
+    choiceLabelKeys: Object.freeze({
+      0: 'status.tool_parameter.lengthen_mode.delta',
+      1: 'status.tool_parameter.lengthen_mode.percent',
+      2: 'status.tool_parameter.lengthen_mode.total',
+    }),
+    labelKey: 'status.tool_parameter.lengthen_mode',
+    hintKey: 'status.tool_parameter.lengthen_mode.hint',
+  },
+  // The amount is a **signed** quantity: delta may shorten as well as lengthen,
+  // so the host refuses only zero and non-finite values and offers both signs.
+  // Percent and total additionally require a positive number, which the host
+  // refuses by name; the row therefore offers the union (non-zero) rather than
+  // narrowing per mode, and its hint states the stricter rule — the same split
+  // HATCH's scoped rows use instead of hiding a row.
+  lengthenValue: {
+    kind: 'number', statusKey: 'lengthenValue', step: 1,
+    offered: (value: number): boolean => Number.isFinite(value) && value !== 0,
+    labelKey: 'status.tool_parameter.lengthen_value',
+    hintKey: 'status.tool_parameter.lengthen_value.hint',
+  },
 });
 
 /** Which parameters belong to an active tool, and the command that gates them. */
@@ -459,11 +498,13 @@ export type ToolParameterMap = Readonly<Record<string, ToolParameterOwner>>;
  * Which parameters belong to which active tool (`cad_status.tool.key`), and the
  * command whose admission gates the control (`shell.canCommand`).
  *
- * Three kinds are reachable today, and each is reachable because the host really
+ * Five kinds are reachable today, and each is reachable because the host really
  * projects the value while that tool runs: `draw.polygon` (its side count),
- * `draw.hatch` (its ten fill parameters; HATCH captures no points) and
+ * `draw.hatch` (its ten fill parameters; HATCH captures no points),
  * `draw.text` / `draw.mtext` (the one shared text height and the one shared
- * creation rotation, plus the MTEXT-only attachment). HATCH's point-pick entry
+ * creation rotation, plus the MTEXT-only attachment), and the two zero-pick curve
+ * edits `draw.divide` / `draw.lengthen` (2026-11-01: the segment count, and the
+ * mode plus the amount). HATCH's point-pick entry
  * (`draw.hatchpoint`) reads the **same** ten keys under its own command — one
  * parameter set, two ways to pick the boundary, so the two commands can never
  * disagree about the fill. The other tools are
@@ -529,4 +570,12 @@ export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
   // attachment).
   'draw.text': { command: 'TEXT', keys: ['textHeight', 'textRotation'] },
   'draw.mtext': { command: 'MTEXT', keys: ['textHeight', 'textRotation', 'mtextAttachment'] },
+  // DIVIDE and LENGTHEN (2026-11-01) are pre-selection tools: the one selected
+  // curve is the whole input, and the rows below are the only settings each
+  // command reads. DIVIDE owns the segment count alone; LENGTHEN owns the mode
+  // and the amount, in that order — the mode first because the amount's meaning
+  // depends on it. Their gating command is the running tool's own, exactly like
+  // the other rows here.
+  'draw.divide': { command: 'DIVIDE', keys: ['divideSegments'] },
+  'draw.lengthen': { command: 'LENGTHEN', keys: ['lengthenMode', 'lengthenValue'] },
 });

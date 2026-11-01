@@ -1,3 +1,50 @@
+## 2026-11-01 单曲线编辑三件套：`BREAK` / `DIVIDE` / `LENGTHEN`
+
+### 结论
+
+- **三个常用编辑命令落地（Work-only，选择式/拾取式按 AutoCAD 语义的 v1 子集）**：
+  - **`BREAK`**（别名 `BR`）：**第一次拾取实体同时是第一断点**，第二点确定移除区间。支持 `LINE`/`ARC`/`CIRCLE`/`SPLINE`，走与 TRIM/EXTEND **同一个** `TargetCurve` 参数模型；`CIRCLE` 变 `ARC`（补集）。源实体**保留为第一段**（同 id/图层/空间/draw order/显示 sidecar，只改几何与 `type_key`），第二段新 id 并复制源显示属性；一条事务/一步撤销。**Polyline 按名拒绝**；无 `F` 第一点覆盖、无多段打断。
+  - **`DIVIDE`**（别名 `DIV`）：**选择式**，恰好 1 条 `LINE`/`ARC`/`CIRCLE`/**直线段** `LWPOLYLINE`；按**等弧长**放 `POINT`（开放曲线 `N−1` 个、闭合曲线 `N` 个含起始参数），`divideSegments` **2–1024**；源保留、POINT 在活动图层、一条事务/一步撤销。`SPLINE`/椭圆/含 bulge 折线按名拒绝。
+  - **`LENGTHEN`**（别名 `LEN`）：**选择式**，恰好 1 条 `LINE`/`ARC`；`lengthenMode` `0` Delta / `1` Percent / `2` Total + `lengthenValue`，改**末端**长度（LINE 的 end、ARC 的 sweep），实体 id/图层/空间/draw order/`type_key` 保留；一条事务/一步撤销。**只改末端、无逐端拾取**是声明的 v1 偏离；CIRCLE/Polyline/Spline、非正新长度、ARC 超过一整圈按名拒绝。
+- 三个命令的所有拒绝都在开事务之前；Viewer 由 `requires_work_mode` 拒绝。成功诊断分别为
+  `drawing.break` / `drawing.divide` / `drawing.lengthen`。
+- **词表/参数**：`COMMAND_TABLE` **98 → 101**、`COMMAND_ALIASES` **51 → 54**、`admissible_names()` **156 → 162**；
+  `ToolParameter::COUNT` **25 → 28**（`divideSegments`、`lengthenMode`、`lengthenValue`）。i18n **+22 键**
+  （两目录一致，总数 **928**）；React 目录/ribbon 在 TRIM/EXTEND 后新增三个小按钮，复用 `trim`/`point`/`scale` 字形。
+
+### 代码 / 文档落点
+
+- Rust 新增：`app_drawing/{break_curve,divide,lengthen}.rs` 与 `tests/drawing/{break_curve,divide,lengthen}.rs`
+  （13 + 16 + 16 项契约）；`command_id.rs`、`command_payload.rs`、`draw_tool/{kind,kind/definition,intent,mod,parameter}.rs`、
+  `host/draw_intent_map.rs`、`session_state.rs`、`session_state/tool_authorization.rs`、`render_scene/overlay/preview.rs`、
+  `application.rs`、`app_drawing/{drawing_create,mod}.rs`；`cad-ui-core` 的 `session/{commands,status}.rs`、
+  `command_vocabulary.rs`、`tests_tools.rs`；`apps/app-linux/src/host/tests.rs` 的 `CadToolParams` 字面量。
+- React：`commands/catalog.ts`、`ribbon/ribbon-model.ts`、`cad/cad.ts`、`tools/tool-parameter-specs.ts` 与两本 i18n；
+  测试新增 `apps/desktop-ui/test/curve-edit-tools.test.ts`，并同步 `tool-parameters`/`i18n`/`commands`/`helpers`/
+  `command-aliases`/`text-parameters` 的精确列表。
+- 文档：`docs/compatibility.md`（绘制/编辑命令表）、`docs/autocad-command-coverage.md`（101/162/108、§3.3 三行、
+  §5/§5b 期望）、`docs/shortcuts.md`（§2 三行、§2b 别名、计数）、`docs/architecture.md`（162/54）、本文件。
+
+### 验证（本轮实际运行）
+
+- `cargo fmt --all -- --check` → exit 0。
+- `cargo check --workspace --all-targets --locked` → exit 0。
+- `cargo test -p cad-app -p cad-ui-core --locked -- --test-threads=1` → exit 0：`cad-app` **1440 passed / 0 failed**，
+  集成 targets 4/11/18/15/5/2 全绿（1 个外部 DWG 用例仍 **ignored**）；`cad-ui-core` **342 passed / 0 failed**。
+- `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` → exit 0（既有 dead-code 警告）。
+- `cargo clippy -p cad-app -p cad-ui-core --all-targets --locked -- -D warnings` → exit 0。
+- `python3 scripts/check-file-size.py` / `check-architecture.py` / `check-i18n.py`（928 键）/ `check-command-docs.py`
+  （101/5/2/4、54 aliases、108 canonical、§2 rows 63、0 mismatch）→ 全 OK。
+- 前端：`npx tsc --noEmit && node --test test/*.test.ts` → **882 pass / 0 fail**。
+
+### NOT RUN / NOT VERIFIED
+
+- **全 workspace 测试套件**（只跑了 `cad-app` + `cad-ui-core`）；`cargo test -p cad-host`/其它 crate 的独立测试。
+- **GUI / 真实 GPU / 像素 / 真窗口**：未运行任何宿主或截图；三个按钮在真机面板的布局、`BREAK` 的真实拾取、`DIVIDE`/`LENGTHEN` 的参数 stepper 都**未做视觉验收**。
+- **真实 DWG**：`BREAK`/`DIVIDE`/`LENGTHEN` 未在真实图纸上运行；全部证据是契约测试与源码结构。
+- **v1 之外**：`BREAK` 的 `F` 第一点覆盖/多段打断/Polyline；`DIVIDE` 的 SPLINE/椭圆/带 bulge 折线/块插入选项；`LENGTHEN` 的逐端拾取/CIRCLE/Polyline/Spline/Dynamic 模式——全部 **NOT IMPLEMENTED**。
+- 与 AutoCAD/vendor 的逐项行为对照：**未做**。
+
 ## 2026-11-01 HATCH 内部点（`HATCHPOINT`）：按点填充落地，v1 有界
 
 ### 结论

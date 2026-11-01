@@ -570,6 +570,11 @@ impl SessionState {
             DrawToolKind::Trim => CommandId::TrimEntity,
             DrawToolKind::Copy => CommandId::CopyEntities,
             DrawToolKind::Extend => CommandId::ExtendEntity,
+            DrawToolKind::Break => CommandId::Break,
+            // The zero-point single-curve edit pair: the selection is the input and
+            // the settings are the typed parameter channel.
+            DrawToolKind::Divide => CommandId::Divide,
+            DrawToolKind::Lengthen => CommandId::Lengthen,
             DrawToolKind::Rotate => CommandId::RotateEntities,
             DrawToolKind::Scale => CommandId::ScaleEntities,
             DrawToolKind::Mirror => CommandId::MirrorEntities,

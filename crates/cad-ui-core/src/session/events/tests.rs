@@ -518,6 +518,9 @@ fn cad_tool(key: &str, points: usize) -> super::super::status::CadTool {
             text_height: None,
             text_rotation: None,
             mtext_attachment: None,
+            divide_segments: None,
+            lengthen_mode: None,
+            lengthen_value: None,
         },
     }
 }

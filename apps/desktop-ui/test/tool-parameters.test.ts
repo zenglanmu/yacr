@@ -108,6 +108,13 @@ test('the per-tool map and the spec table stay consistent', () => {
     command: 'MTEXT',
     keys: ['textHeight', 'textRotation', 'mtextAttachment'],
   });
+  // The two zero-pick curve edits (2026-11-01): one row for DIVIDE, and the mode
+  // before the amount for LENGTHEN (the amount's meaning depends on the mode).
+  assert.deepEqual(TOOL_PARAMETERS['draw.divide'], { command: 'DIVIDE', keys: ['divideSegments'] });
+  assert.deepEqual(TOOL_PARAMETERS['draw.lengthen'], {
+    command: 'LENGTHEN',
+    keys: ['lengthenMode', 'lengthenValue'],
+  });
   // Every key a tool maps to has a spec, and every spec is reachable through the
   // map — so a later phase only adds a row (the specs already exist).
   const mapped = new Set();
@@ -122,10 +129,10 @@ test('the per-tool map and the spec table stay consistent', () => {
   assert.deepEqual(Object.keys(TOOL_PARAMETER_SPECS).sort(), [
     'alignScale', 'arrayColumnSpacing', 'arrayColumns', 'arrayFillAngle', 'arrayItems',
     'arrayRotateItems', 'arrayRowSpacing', 'arrayRows', 'chamferDistanceA',
-    'chamferDistanceB', 'filletRadius', 'hatchAngle', 'hatchDouble',
+    'chamferDistanceB', 'divideSegments', 'filletRadius', 'hatchAngle', 'hatchDouble',
     'hatchGradientAngle', 'hatchGradientColorA', 'hatchGradientColorB', 'hatchGradientKind',
-    'hatchPattern', 'hatchPatternType', 'hatchSpacing', 'hatchStyle', 'mtextAttachment',
-    'polygonSides', 'textHeight', 'textRotation',
+    'hatchPattern', 'hatchPatternType', 'hatchSpacing', 'hatchStyle', 'lengthenMode',
+    'lengthenValue', 'mtextAttachment', 'polygonSides', 'textHeight', 'textRotation',
   ]);
   assert.equal(TOOL_PARAMETER_SPECS.alignScale.kind, 'flag');
   assert.equal(TOOL_PARAMETER_SPECS.arrayRotateItems.kind, 'flag');

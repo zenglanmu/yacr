@@ -97,6 +97,20 @@ pub enum DrawIntent {
         boundary: SelectionRef,
         pick_point: Point3,
     },
+    /// `BREAK` `target` between `first` and `second`, keeping the complementary
+    /// piece(s).
+    ///
+    /// `target` is the ref resolved at capture time and `first` is the raw click
+    /// that resolved it (the first click is both the entity pick and the first
+    /// break point); `second` is the second click. The command layer projects both
+    /// onto the target's own parameter space, removes the span between them and
+    /// keeps the complementary piece(s) — the capture never invents a parameter or
+    /// a piece.
+    Break {
+        target: SelectionRef,
+        first: Point3,
+        second: Point3,
+    },
     /// Rotate the current selection about `base` by `angle` radians (about +Z).
     Rotate { base: Point3, angle: f64 },
     /// Scale the current selection about `base` by the positive `factor`.
@@ -361,4 +375,21 @@ pub enum DrawIntent {
     /// [`super::MAX_TOOL_TEXT_CHARS`] characters) and re-validated by the
     /// command.
     TextEdit { target: SelectionRef, text: String },
+    /// DIVIDE the one pre-selected curve into equal arc-length parts, placing
+    /// POINT marks at the division parameters (2026-11-01).
+    ///
+    /// Carries no field: the selection snapshot the caller supplies is the whole
+    /// input and the segment count is the session typed channel
+    /// ([`super::ToolParameter::DivideSegments`]), read by the command layer, so
+    /// the intent stays the pure description of what the user asked for. This
+    /// kind captures **no points** (the zero-point exact complement).
+    Divide,
+    /// LENGTHEN the one pre-selected LINE/ARC (2026-11-01).
+    ///
+    /// Carries no field for the same reason as [`DrawIntent::Divide`]: the
+    /// selection snapshot is the input and the mode/amount are the session typed
+    /// channel ([`super::ToolParameter::LengthenMode`] /
+    /// [`super::ToolParameter::LengthenValue`]) read by the command layer. The
+    /// command always moves the **end** endpoint (declared v1 deviation).
+    Lengthen,
 }

@@ -592,4 +592,66 @@ pub enum DrawToolKind {
     /// The fill parameters (pattern type/index, spacing, angle, double, style and
     /// the gradient channel) are the **same** session typed channel HATCH reads.
     HatchPoint,
+    /// BREAK: pick one LINE/ARC/CIRCLE/SPLINE (the first click is also the
+    /// **first break point**) and then click the second break point.
+    ///
+    /// The capture is exactly two points ([`PointArity::Exact(2)`]); only the
+    /// **first** step is an entity pick ([`DrawToolKind::picked_step_count`] is
+    /// `1`), so the first click resolves the target and is stored as `first`,
+    /// while the second click is a free point stored as `second`. The kind
+    /// requires no pre-selection and no typed text.
+    ///
+    /// The command layer projects both clicks onto the target's own parameter
+    /// space, removes the span between them and keeps the complementary piece(s).
+    /// The source entity is retained as the first piece and at most one new entity
+    /// is inserted (the second piece, or a CIRCLE's single ARC complement).
+    ///
+    /// Declared v1 limits (do not read more into this kind): a LWPOLYLINE (and
+    /// every other geometry kind) is an explicit refusal; AutoCAD's `F`
+    /// first-point override and multiple-break mode are **NOT IMPLEMENTED**.
+    /// Work-only.
+    Break,
+    /// DIVIDE: place POINT marks at equal arc-length divisions of the **one**
+    /// pre-selected curve (2026-11-01).
+    ///
+    /// This kind captures **no points** — its arity is the zero-point exact
+    /// complement ([`PointArity::Exact`]`(0)`), exactly like
+    /// [`Self::ArrayRect`]/[`Self::Hatch`] — and takes **no** in-command entity
+    /// picks ([`Self::picked_step_count`] is `0`). It requires a non-empty
+    /// selection ([`Self::requires_selection`]) because the one selected curve is
+    /// the whole input, and its only setting is the session typed channel
+    /// [`super::ToolParameter::DivideSegments`] (an integer in `2..=1024`, default
+    /// `2`). It is ready as soon as the selection is non-empty; the command layer
+    /// enforces "exactly one" and every geometry refusal.
+    ///
+    /// Divisions are by **equal arc length** (not parameter): `N − 1` interior
+    /// POINTs on an open LINE/ARC/straight polyline, and `N` POINTs on a periodic
+    /// CIRCLE or a closed straight polyline. The source curve is retained; the
+    /// marks are new entities on the active layer in one transaction / one undo
+    /// step.
+    ///
+    /// Declared v1 limits (do not read more into this kind): `SPLINE` and every
+    /// other kind is an explicit refusal (a spline's parameter is not arc length),
+    /// a **bulged** LWPOLYLINE is refused (straight segments only), and AutoCAD's
+    /// block-aligned `DIVIDE` (`B` option) is **NOT IMPLEMENTED**. Work-only.
+    Divide,
+    /// LENGTHEN: change the length of the **one** pre-selected LINE or ARC
+    /// (2026-11-01).
+    ///
+    /// Same zero-point pre-selection shape as [`Self::Divide`]: arity is
+    /// [`PointArity::Exact`]`(0)`, no entity-pick steps
+    /// ([`Self::picked_step_count`] is `0`), a non-empty selection is required and
+    /// no typed text is captured. The mode and amount are the session typed
+    /// channel [`super::ToolParameter::LengthenMode`] (`0` Delta, `1` Percent, `2`
+    /// Total) and [`super::ToolParameter::LengthenValue`] (finite, non-zero).
+    ///
+    /// **Declared v1 deviation**: AutoCAD lengthens the end nearest the pick;
+    /// this build always moves the **end** endpoint (a LINE's `end`, an ARC's
+    /// `start + sweep`) and keeps the other end/centre fixed. A sweep above one
+    /// full turn is refused rather than clamped; exactly one turn stays an `Arc`.
+    ///
+    /// Declared v1 limits: only `LINE` and `ARC` are supported (`CIRCLE`,
+    /// polylines, `SPLINE` and every other kind are explicit refusals), and
+    /// AutoCAD's `DYnamic` drag mode is **NOT IMPLEMENTED**. Work-only.
+    Lengthen,
 }

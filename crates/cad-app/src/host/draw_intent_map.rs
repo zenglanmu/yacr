@@ -188,6 +188,22 @@ impl HostController {
                     pick_point,
                 },
             ),
+            // BREAK: the ref resolved at capture time plus the two raw clicks
+            // (the first click is both the entity pick and the first break
+            // point). The projection onto the target's parameter space and the
+            // complementary piece construction live in the command layer.
+            DrawIntent::Break {
+                target,
+                first,
+                second,
+            } => (
+                crate::CommandId::Break,
+                crate::CommandPayload::Break {
+                    target,
+                    first,
+                    second,
+                },
+            ),
             DrawIntent::Rotate { base, angle } => (
                 crate::CommandId::RotateEntities,
                 crate::CommandPayload::Rotate {
@@ -432,6 +448,22 @@ impl HostController {
             DrawIntent::HatchPoint { seed } => (
                 crate::CommandId::HatchPoint,
                 crate::CommandPayload::HatchPoint { seed },
+            ),
+            // DIVIDE/LENGTHEN: the selection snapshot is the whole input (the
+            // tool captures no points); the segment count / mode+amount are the
+            // session typed channel the command layer reads, so they never ride
+            // the payload.
+            DrawIntent::Divide => (
+                crate::CommandId::Divide,
+                crate::CommandPayload::Divide {
+                    refs: selection.to_vec(),
+                },
+            ),
+            DrawIntent::Lengthen => (
+                crate::CommandId::Lengthen,
+                crate::CommandPayload::Lengthen {
+                    refs: selection.to_vec(),
+                },
             ),
         };
         Ok(Command {

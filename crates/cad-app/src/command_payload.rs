@@ -281,6 +281,42 @@ pub enum CommandPayload {
         boundary: Vec<SelectionRef>,
         pick_point: Point3,
     },
+    /// `BREAK` one LINE, ARC, CIRCLE or SPLINE between two picked points, keeping
+    /// the complementary piece(s) (Work-only).
+    ///
+    /// `target` is the entity pick resolved at capture time, and also the raw
+    /// click that is the **first** break point (`first`); `second` is the second
+    /// break point. Both picks are projected onto the target's own parameter space
+    /// by the handler; there is no `F` first-point override and no multiple-break
+    /// mode. The source is retained as the first piece and at most one new entity
+    /// (the second piece, or a CIRCLE's single ARC complement) is inserted.
+    Break {
+        target: SelectionRef,
+        first: Point3,
+        second: Point3,
+    },
+    /// `DIVIDE` the one selected curve into equal arc-length parts, placing POINT
+    /// marks at the division parameters (Work-only).
+    ///
+    /// The selection snapshot is the whole input (the capture is zero-point), and
+    /// the segment count is the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::DivideSegments`]), read by the handler.
+    /// The source curve is retained; the marks are new entities on the active
+    /// layer in one transaction / one undo step.
+    Divide {
+        refs: Vec<SelectionRef>,
+    },
+    /// `LENGTHEN` the one selected LINE/ARC (Work-only).
+    ///
+    /// The selection snapshot is the whole input (the capture is zero-point); the
+    /// mode and amount are the session typed channel
+    /// ([`crate::draw_tool::ToolParameter::LengthenMode`] /
+    /// [`crate::draw_tool::ToolParameter::LengthenValue`]), read by the handler.
+    /// The same entity id is updated (the **end** endpoint moves) in one
+    /// transaction / one undo step.
+    Lengthen {
+        refs: Vec<SelectionRef>,
+    },
     /// CHAMFER two straight lines (ADR 0016 decision C). The two picks and their
     /// raw click points travel in one boxed [`TwoLineCommand`] (boxed like
     /// [`CommandPayload::Geometry`] so the command enum stays small); the two

@@ -295,6 +295,15 @@ pub struct CadToolParams {
     /// The MTEXT attachment code — AutoCAD's closed set `1..=9` (`1` top-left,
     /// `5` centre-middle, `9` bottom-right) — or `null` for every other tool.
     pub mtext_attachment: Option<f64>,
+    /// The DIVIDE segment count (an integer in `2..=1024`), projected only while a
+    /// DIVIDE capture is active (2026-11-01).
+    pub divide_segments: Option<f64>,
+    /// The LENGTHEN mode (`0` Delta, `1` Percent, `2` Total), projected only while
+    /// a LENGTHEN capture is active.
+    pub lengthen_mode: Option<f64>,
+    /// The LENGTHEN amount (finite, non-zero on the channel), projected only while
+    /// a LENGTHEN capture is active.
+    pub lengthen_value: Option<f64>,
 }
 
 /// The active interactive tool, projected from `cad_app`'s real capture state.
@@ -780,6 +789,21 @@ pub(super) fn cad_tool(
                     ToolParameter::MTextAttachment,
                     preview.kind == DrawToolKind::MText,
                 ),
+                // The single-curve edit pair (2026-11-01) projects its own rows
+                // only while the matching zero-point capture is active: DIVIDE owns
+                // the segment count, LENGTHEN the mode and the amount.
+                divide_segments: number(
+                    ToolParameter::DivideSegments,
+                    preview.kind == DrawToolKind::Divide,
+                ),
+                lengthen_mode: number(
+                    ToolParameter::LengthenMode,
+                    preview.kind == DrawToolKind::Lengthen,
+                ),
+                lengthen_value: number(
+                    ToolParameter::LengthenValue,
+                    preview.kind == DrawToolKind::Lengthen,
+                ),
             },
         }),
         ToolSnapshot::Measuring(preview) => Some(CadTool {
@@ -819,6 +843,9 @@ pub(super) fn cad_tool(
                 text_height: None,
                 text_rotation: None,
                 mtext_attachment: None,
+                divide_segments: None,
+                lengthen_mode: None,
+                lengthen_value: None,
             },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,
