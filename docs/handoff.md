@@ -1,3 +1,41 @@
+## 2026-11-01 v0.1.3 release 运行 + Android NDK 链接下限修复
+
+### v0.1.3（tag → `.github/workflows/build.yml`，实际运行）
+
+- `linux-release`（Flatpak）/ `windows-release`（MSVC zip）/ `macos-release`（universal ✅）；
+  `web-deploy` ✅（**真实发布** `yacr-examples.pages.dev`，按 tag/dispatch 合同）；常规
+  `linux-app` / `windows-check` / `macos-check` / `web-build` / `web-smoke` / `shader-validation` ✅。
+- `android-apk` / `android-release` ❌：`ld.lld: error: unable to find library -lnativewindow`。
+- artifact 版本号仍为 `0.1.2`（`Cargo.toml` / `tauri.conf.json` 未 bump），tag 是 `v0.1.3`；
+  这些 job 只上传 workflow artifact，**不签名、不公证、不发布商店**，打包成功不等于运行/GPU/像素验收。
+
+### Android 根因与修法
+
+- `ndk 0.9` + `features = ["nativewindow"]` 让 `ndk-sys` 无条件
+  `#[link(name = "nativewindow")]`；NDK 的 `libnativewindow` stub 只从 **API 26** 开始提供，
+  而本应用 `minSdkVersion = 24`（NDK r27 / r29 行为一致，不是 r29 回归）。
+- 宿主只用到 `NativeWindow::from_surface`、`ptr`/`width`/`height`、`Clone`/`Drop`；这些在 API 24
+  由 `libandroid.so` 导出（`llvm-nm` 实测 9 个 `ANativeWindow_*` 符号）。因此关闭该 feature；
+  只有 API 26+ 的 `set_buffers_*` / `set_frame_rate*` / `try_allocate_buffers` 需要该库。
+- `scripts/test-android-host.py` 新增断言：`minSdk < 26` 时 `ndk` 不得启用 `nativewindow`
+  （正/负向都验证：把 feature 加回去会判红）。
+- `docs/android-host.md` 记录该链接下限。
+
+### 验证（本轮实际运行）
+
+- `cargo build --package app-android --manifest-path apps/app-android/src-tauri/Cargo.toml
+  --target aarch64-linux-android --lib --features tauri/custom-protocol --locked` → exit 0
+  （NDK `29.0.13846066`，linker `aarch64-linux-android24-clang`）。
+- `llvm-readelf -d target/aarch64-linux-android/debug/libapp_android.so` 的 `NEEDED` 为
+  `liblog` / `libandroid` / `libdl` / `libm` / `libc`，**没有** `libnativewindow`。
+- `python3 scripts/test-android-host.py` → OK；`python3 scripts/check-file-size.py` → OK；
+  `python3 -m py_compile scripts/test-android-host.py` → OK。
+
+### NOT RUN / 边界
+
+- `v0.1.4` 重跑的 CI APK 结果以该 run 为准；API 24/25 真机/模拟器的安装与运行 **NOT RUN**。
+- 未做版本号 bump；release artifact 仍标 `0.1.2`。
+
 ## 2026-11-01 Tauri capability 缺失导致 event 订阅被 ACL 拒绝（实机回归）
 
 ### 根因

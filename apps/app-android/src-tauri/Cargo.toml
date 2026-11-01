@@ -58,10 +58,14 @@ raw-window-handle.workspace = true
 # The frozen Kotlin -> Rust JNI contract (`MainActivity.native*`). Both are
 # already in `Cargo.lock` as transitive dependencies (jni 0.21.1 via Tauri,
 # ndk 0.9.0 via tao); the versions are pinned to those so no second JNI/NDK
-# binding set enters the graph. `nativewindow` is what turns an
-# `android.view.Surface` into the `ANativeWindow` wgpu presents to.
+# binding set enters the graph. `android.view.Surface` still becomes the
+# `ANativeWindow` wgpu presents to, but the `nativewindow` feature must stay
+# **off**: `ndk-sys` turns it into an unconditional `-lnativewindow`, and the
+# NDK only ships that stub from API 26 while this app's minSdk is 24. The
+# entry points used here (`NativeWindow::from_surface`, `ptr`/`width`/`height`,
+# `Clone`/`Drop`) are exported by `libandroid.so` on API 24.
 jni = "0.21.1"
-ndk = { version = "0.9.0", features = ["nativewindow"] }
+ndk = { version = "0.9.0" }
 
 # Target-independent contracts, compiled wherever the `platform` module is (the
 # dev host included) so the explicit-refusal unit tests actually run without a

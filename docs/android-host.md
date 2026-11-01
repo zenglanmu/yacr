@@ -141,6 +141,12 @@ apps/app-android/
   重新 `tauri android init` 会覆盖它；`scripts/test-android-host.py` 会判红。
 - Gradle `ndkVersion = "29.0.13846066"`（脚本断言）。仓库 `fonts/` 作为 assets `srcDir` 打包
   （`fonts.json` + 字体文件）。
+- **NDK 链接下限**：`ndk` crate 的 `nativewindow` feature 会无条件链接 `-lnativewindow`，
+  而 NDK 只在 **API ≥ 26** 提供该 stub；本应用 `minSdkVersion = 24`，所以该 feature 必须保持
+  **关闭**（`scripts/test-android-host.py` 断言）。实际使用的 `NativeWindow::from_surface`、
+  `ptr`/`width`/`height`、`Clone`/`Drop` 在 API 24 由 `libandroid.so` 导出；只有 API 26+ 的
+  `set_buffers_*`/`set_frame_rate*`/`try_allocate_buffers` 需要该库。API 24/25 真机运行时
+  **NOT VERIFIED**。
 - `scripts/build-android-ui.sh` 产出 `apps/app-android/dist`（`YACR_RUNTIME=android`，不覆盖桌面
   `apps/desktop-ui/dist`）。它目前仍会一并产出 wasm 会话产物；native 载体不加载它们（构建 lane 的
   独立清理项，不影响本契约）。

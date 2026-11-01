@@ -28,7 +28,9 @@ is the wiring that makes such a run honest:
     publishes `--yacr-safe-bottom` on the page, and `mobile.css` is the consumer of
     that exact property name (the two halves of one contract, in two languages);
   * the generated Gradle project is committed, pinned to the documented NDK, packages
-    the repository `fonts/` assets, and its build outputs are ignored.
+    the repository `fonts/` assets, and its build outputs are ignored;
+  * the NDK linker floor: `ndk`'s `nativewindow` feature is off while minSdk is 24,
+    because it emits `-lnativewindow` and the NDK only ships that stub from API 26.
 
 Every check reports one problem string; `main` prints them and exits non-zero.
 Standard library only: this runs in the `core-quality` job, not on a runner with
@@ -117,6 +119,28 @@ def check_manifest() -> list[str]:
     # compile the documented empty shell.
     if "custom-protocol" not in manifest.get("features", {}):
         problems.append("src-tauri/Cargo.toml: the `custom-protocol` feature must stay declared (the CLI needs it)")
+
+    # NDK linker floor: `ndk-sys`'s `nativewindow` feature emits an unconditional
+    # `-lnativewindow`, and the NDK only ships that stub from API 26 while this
+    # host's minSdk is 24. The ANativeWindow entry points the host actually uses
+    # (`from_surface`, `ptr`/`width`/`height`, Clone/Drop) are exported by
+    # `libandroid.so` at API 24, so the feature stays off unless the floor rises.
+    ndk = android_table.get("dependencies", {}).get("ndk")
+    ndk_features = ndk.get("features", []) if isinstance(ndk, dict) else []
+    min_sdk = 24
+    if CONF.is_file():
+        min_sdk = (
+            json.loads(read(CONF))
+            .get("bundle", {})
+            .get("android", {})
+            .get("minSdkVersion", 24)
+        )
+    if "nativewindow" in ndk_features and min_sdk < 26:
+        problems.append(
+            "src-tauri/Cargo.toml: the ndk `nativewindow` feature links -lnativewindow, "
+            f"whose NDK stub starts at API 26 (minSdk is {min_sdk}); drop the feature "
+            "or raise minSdk to 26"
+        )
     return problems
 
 
