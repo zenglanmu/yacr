@@ -1,10 +1,11 @@
 // Diagnostics palette: docked (resizes the drawing area) rather than floating,
 // because the host composites a native CAD surface in the central partition.
 // Every value is either real host data or an explicit blank.
-import React from 'react';
+import React, { useSyncExternalStore } from 'react';
 import { Icon } from '../icons.tsx';
 import { Button, IconButton } from './primitives.tsx';
 import { useI18n, useShell } from '../context.ts';
+import { volatileStatusStore } from '../cad/status-cadence.ts';
 
 function value(input: unknown): string {
   if (input === null || input === undefined) return '\u2014';
@@ -26,6 +27,17 @@ export function DiagnosticsPalette() {
   const { t } = useI18n();
   const shell = useShell();
   const status = shell.status;
+  // The frame rate is a per-frame field: reading it from the leaf store keeps
+  // the 60 Hz sampler out of the shell's React state (see
+  // `cad/status-cadence.ts`). The label still comes from the one catalog key.
+  const fps = useSyncExternalStore(
+    volatileStatusStore.subscribe,
+    volatileStatusStore.getFrameRate,
+    volatileStatusStore.getFrameRate,
+  );
+  const fpsText = fps === null || shell.displayedError
+    ? t('render.fps.unavailable')
+    : fps < 10 ? fps.toFixed(1) : String(Math.round(fps));
   return (
     <section className="palette diagnostics" aria-label={t('diagnostics.title')}>
       <header className="palette__head">
@@ -38,7 +50,7 @@ export function DiagnosticsPalette() {
         <dl className="kv">
           <Row label="backend">{value(status?.backend)}</Row>
           <Row label="adapter">{value(status?.adapter)}</Row>
-          <Row label={t('render.fps')}>{shell.fpsText}</Row>
+          <Row label={t('render.fps')}>{fpsText}</Row>
         </dl>
         <h3 className="palette__section">{t('diagnostics.section.document')}</h3>
         <dl className="kv">

@@ -1,6 +1,7 @@
 // A single ordered IPC lane. Continuous events may merge only at the tail,
 // never across a discrete gesture boundary. Capacity reserves terminal events.
 import { isReportableRect, metricsKey, pointerPosition, rectFromElement } from './metrics.ts';
+import type { PartitionRect } from './metrics.ts';
 
 // Upper bound (ms) on how long a coalesced `pointermove` may wait for the
 // animation frame. `requestAnimationFrame` is throttled or suspended in an
@@ -278,6 +279,14 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
   // the shared type is their common base (`PointerEvent`/`WheelEvent` are both
   // `MouseEvent`s).
   const position = (event: MouseEvent): { x: number; y: number } => pointerPosition(element, event);
+  // One layout read for a move: the point and the rect that sizes it come from
+  // the same `getBoundingClientRect()`. A pointermove must not force layout twice
+  // (50–120 events/s), so continuous moves use this instead of `position` plus
+  // `resize`.
+  const positionAndRect = (event: MouseEvent): { at: { x: number; y: number }; rect: PartitionRect } => {
+    const rect = rectFromElement(element, env.devicePixelRatio || 1);
+    return { at: { x: event.clientX - rect.x, y: event.clientY - rect.y }, rect };
+  };
   const buttonField = (event: PointerEvent): { button?: number } => (event.button >= 0 ? { button: event.button } : {});
   const flush = (): void => {
     if (frame !== null) env.cancelAnimationFrame(frame);
@@ -383,12 +392,12 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
     const pointer = event as PointerEvent;
     if (!accepting) return;
     const contact = contacts.get(pointer.pointerId);
-    const at = position(pointer);
+    const { at, rect } = positionAndRect(pointer);
     if (pinching) {
       if (contact === undefined) return;
       contact.x = at.x;
       contact.y = at.y;
-      resize();
+      reportRect(rect);
       const next = pinchState();
       const previous = pinchFrom;
       if (next === null) return;
@@ -411,12 +420,12 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
       // No contact means hover; while a press owns the gesture another pointer's
       // move is not hover and must not tint or drag.
       if (contacts.size > 0) return;
-      resize();
+      reportRect(rect);
       bufferMove({ kind: 'pointer_move', ...at, ...deviceField(pointer) });
       return;
     }
     if (contacts.size !== 1) return;
-    resize();
+    reportRect(rect);
     bufferMove({ kind: 'pointer_move', ...at, ...deviceField(pointer) });
   };
   const up = (event: Event): void => {
@@ -489,14 +498,18 @@ export function bindProbeInput(element: HTMLElement, lane: InputLane, env: Probe
   };
   const blur = (): void => { cancel(); lane.push({ kind: 'blur' }); };
   let lastMetrics = '';
-  const resize = (): void => {
-    const data = { kind: 'resize', ...rectFromElement(element, env.devicePixelRatio || 1) };
+  /** Publish a rect the caller already measured (one layout read per move). */
+  const reportRect = (rect: PartitionRect): void => {
+    const data = { kind: 'resize', ...rect };
     if (!isReportableRect(data)) return;
     const key = metricsKey(data);
     if (key !== lastMetrics) {
       flush();
       if (lane.push(data) !== false) lastMetrics = key;
     }
+  };
+  const resize = (): void => {
+    reportRect(rectFromElement(element, env.devicePixelRatio || 1));
   };
   const scheduleResize = (): void => {
     if (resizeFrame === null) resizeFrame = env.requestAnimationFrame(() => {

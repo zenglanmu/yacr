@@ -199,8 +199,12 @@ paper = (model - view_center) * paper_per_model + paper_center
 
 `cad-import-acadrust::read_layouts` 现在为每个纸空间布局的**内容视口**写入：
 
-1. **四角纸面矩形**：`clip = [c0, c1, c2, c3]`，即 `center ± (width/2, height/2)` 的四个
-   轴对齐角点（acadrust 的 `Viewport.center` / `width` / `height`）。
+1. **四角纸面矩形**：`clip = [c0, c1, c2, c3]`。没有 VPCLIP 边界时是
+   `center ± (width/2, height/2)` 的四个轴对齐角点（acadrust 的 `Viewport.center` /
+   `width` / `height`）。`clip_boundary_handle` 非空时解析其指向的实体：**只有**闭合、
+   无 bulge、世界 Z 且去重后正好是四个轴对齐矩形角的 `LWPOLYLINE` 才被接受，并使用该边界
+   矩形作为 `clip`（可能小于/偏移于视口矩形，这是 VPCLIP 的真实语义）。曲线、开放折线、
+   旋转/多角、倾斜 OCS、其他实体类型或悬空句柄仍按 §3 置 `Partial`，绝不强行摆正。
 2. **真实纸面→模型变换**：`model = (paper - paper_center) * model_per_paper + view_target`，
    其中 `model_per_paper = view_height / height`（acadrust 的 `view_height`、`height`、
    `center`、`view_target`）。本层由它恢复视图中心（`stored(paper_center)`）。
@@ -217,12 +221,18 @@ paper = (model - view_center) * paper_per_model + paper_center
 
 | 导入原因（`Completeness::Partial` 消息） | 映射原因码 |
 |---|---|
-| 非矩形裁剪（`clip_boundary_handle` 非空） | `viewport.complex_clip` |
+| 非矩形裁剪（`clip_boundary_handle` 非空，且边界实体无法证明为轴对齐矩形） | `viewport.complex_clip` |
 | 视线不垂直于纸面（`view_direction` 非世界 Z） | `viewport.off_plane_view` |
 | 视图扭转（`twist_angle != 0`） | `viewport.twisted_transform` |
 | 透视投影（`status.perspective`） | `viewport.perspective` |
 | `view_height` 缺失/零/非有限 | `viewport.scale` |
 | 几何非有限 | `viewport.non_finite` |
+
+矩形 VPCLIP 不是「复杂裁剪」：它的边界实体被解析成同一个四角轴对齐矩形后，
+`completeness` 保持 `Complete`，布局页签可用。真实图纸里大量内容视口都带一个与视口
+矩形重合的边界折线（例如 `fixtures/debug-default-fonts.dwg` 的 `开洞钢筋图`，15 个
+视口全部如此）；旧实现只看句柄非空就判 `Partial`，会把这类整页错误地禁用。无法证明
+为矩形的边界仍逐条保持 `Partial` 并显示稳定原因码。
 
 ### 3.2 INSERT / 块语义（审计 B31）
 

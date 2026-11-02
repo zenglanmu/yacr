@@ -532,7 +532,7 @@ impl<'a> ImporterBuilder<'a> {
             // The sheet viewport (`id == 1`) frames the paper itself, not
             // a model-space window, and an off viewport draws nothing;
             // neither is a content viewport (audit B22).
-            let Some(viewport) = paper_viewport(v) else {
+            let Some(viewport) = paper_viewport(v, self.acad) else {
                 continue;
             };
             if let Completeness::Partial(reasons) = &viewport.completeness {

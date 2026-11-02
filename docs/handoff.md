@@ -1,3 +1,93 @@
+## 2026-11-03 `debug-default-fonts.dwg`：矩形 VPCLIP 布局可用 + 鼠标移动帧节奏
+
+用户手测两条：① `开洞钢筋图` 布局页签点不动；② 鼠标在 CAD 区域移动有丢帧感（关闭
+HOVERPREVIEW 后仍存在）。本轮只做这两条，**没有**真实 GUI/GPU/截图证据（本环境无
+`DISPLAY`/`WAYLAND_DISPLAY`）；下面所有“通过”都是编译/契约测试或有界探测。
+
+### ① 布局页签不可点击：矩形 VPCLIP 被误判为复杂裁剪
+
+- **根因（有界探测）**：该 DWG 的唯一真实布局 `开洞钢筋图` 有 15 个内容视口；每个
+  `clip_boundary_handle` 都指向一条闭合、无 bulge、世界 Z 的轴对齐矩形 `LWPOLYLINE`
+  （7 个存储顶点，去重后 4 角，与视口矩形重合）。旧 `paper_viewport` 只看句柄非空就
+  写 `Partial("non-rectangular viewport clip is not applied")`，于是
+  `enumerate_layouts` 报 `supported=false`，`LayoutTabs` 按设计禁用页签。
+- **修复**：`cad-import-acadrust::geometry::paper_viewport(v, acad)` 解析边界实体；
+  只有**可证明**为闭合/无 bulge/世界 Z/去重后正好四角的轴对齐矩形才采用其矩形作为
+  `clip`（可小于或偏移于视口矩形，VPCLIP 真实语义）。曲线、开放折线、旋转/多角、
+  倾斜 OCS、其他实体、悬空句柄仍 `Partial`，绝不摆正。`model_to_paper` 仍以视口
+  中心/`view_target` 为锚，表示层的锚点恢复不变。
+- **探测结果**：同一夹具现在
+  `id=LayoutId(1) name="开洞钢筋图" supported=true reason="" viewports=15`。
+- **测试**：`cargo test -p cad-import-acadrust viewport --locked` → 12 passed；
+  `cargo test -p cad-import-acadrust --locked` → 345 passed / 4 ignored；`check`、
+  `fmt`、`clippy -D warnings` 均 exit 0。新增 8 个 viewport 契约（匹配/偏移矩形、
+  重复顶点、5 角、bulge、开放折线、倾斜 OCS、悬空句柄）。
+- 文档：`docs/layouts.md` §3.1/§3、`docs/compatibility.md` 布局行同步。
+- **布局首次绘制成本（有界、非验收）**：启用后该布局的纸面表示会包含 15 个视口的
+  模型内容。本机 debug 直接调 `build_paper_space`（`fixtures/debug-default-fonts.dwg`，
+  layout 1）→ **317.9 ms / 23,703 fragments**，`completeness=Partial`，43,710 条
+  `viewport.clip_unsupported_primitive`（逐视口重复；无字体时文本等原语无法裁剪，
+  显式省略，不伪造）。同一夹具 debug `plot --plot-format svg` 的 **367,668 paths /
+  24.9 s** 主要是 **SVG 序列化**，不是宿主 scene 构建路径。真实宿主首次切换的
+  墙钟/显存/视觉 **NOT RUN**；若后续体感不可接受，优化方向是跨视口复用 model
+  representation 缓存/按视口模型包围盒裁剪，以及去重这些重复诊断，而不是再次禁用页签。
+
+### ② 鼠标移动丢帧感：per-frame status 不再重绘整棵树 + 输入热节奏
+
+宿主侧逐移动处理实测很便宜（真实夹具 `HostCore` 两次 idle move 的 p50≈5µs、
+p95≈8µs），hover 关闭后也不再拾取；残余可疑项在 **WebKit 线程** 与 **帧门控**：
+
+- **status 分流**（`apps/desktop-ui/src/cad/status-cadence.ts`、`use-cad-events.ts`）：
+  `status-changed` 仍每帧到达、wire 形状不变，但只有**语义字段**变化才 `setStatus`
+  （整树重绘）；`cursorWorld` 走状态栏叶子 store，`frameCount` 直接喂 FPS 采样器。
+  `sameStatusIgnoringVolatile` 深比较除 `frameCount`/`cursorWorld` 外的全部字段，
+  语义变化（selection/tool/layouts/references/commandLog/error/capabilities/…）
+  仍立即生效。`StatusBar` 只订阅坐标 selector，`DiagnosticsPalette` 只订阅 FPS
+  selector（两个 selector 在对方字段变化时保持同一引用，React 因此不重绘）；
+  `fpsText` 从 `ShellContext` 移除，避免 FPS 浮点值触发 App 重绘。注意：wire 上
+  `status-changed` 仍按**渲染帧**产生，输入热帧 8ms 时可达 ~125 Hz；JS 只解析/深比较
+  和更新叶子 selector，不重绘整树。`frameCount`/FPS 是真实渲染帧数，热帧下可能显示
+  >60，不能当作显示器刷新率。
+- **输入热帧门控**（`apps/app-linux/src/host/options.rs`、`tick.rs`）：空闲仍是
+  `FRAME_INTERVAL=16ms`；有排队输入或最近 **32ms** 内有输入时降到
+  `FRAME_INTERVAL_ACTIVE=8ms`（与 redraw pump 同格）。目的：60 Hz 指针流下不再让
+  每次移动等 0–16ms 的门控相位，presenter 仍按显示节奏丢多余帧。**仅 Linux native
+  本轮改动**；Windows/macOS/Android 的 tick 仍用各自 16ms 语义（显式分歧，未静默
+  声称全平台一致）。
+- **每次移动一次布局读取**（`apps/desktop-ui/src/cad/input.ts`）：`positionAndRect`
+  让 `pointermove` 的坐标与 `resize` 指标共用同一次 `getBoundingClientRect()`。
+- **诊断日志**（`crates/cad-desktop-shell/src/commands.rs`）：`[probe] input …` 改为
+  既有 `YACR_PROBE_CAD_LOG` 门控；证据脚本本就设置该变量，正常会话不再按显示率写
+  stderr。
+
+### 验证（实际运行）
+
+- `(cd apps/desktop-ui && npm test)` → **949 pass / 0 fail**（含新增
+  `test/status-cadence.test.ts` 的 digest/leaf-store 契约、更新 `coords.test.ts`
+  的 StatusBar 源契约）；`npm run build` → exit 0（592.52 kB）。
+- `cargo test -p app-linux input_activity_opens --locked` → 1 passed；
+  `cargo check -p app-linux --all-targets --locked`、`clippy … -D warnings` → exit 0。
+- `cargo test -p cad-desktop-shell --locked` → 46 passed（6 个测试二进制）；
+  `clippy … -D warnings` → exit 0。
+- `python3 scripts/check-file-size.py` → OK（`App.tsx`/`tick.rs` 各 1000 行）。
+- **NOT RUN**：真实 GUI/窗口/GPU/像素/截图、真实鼠标轨迹、`present_mode`、
+  `input_age_us`/帧间隔分布、Windows/macOS/Android 载体。**不得**把本轮“帧节奏”
+  写成已验收的流畅性结论；hot gate 是依据代码路径和既有 telemetry 的修正，尚未在
+  用户机器上实测。
+
+### 用户侧复验（建议）
+
+```bash
+YACR_PROBE_CAD_LOG=1 bash scripts/run-react-linux.sh --open fixtures/debug-default-fonts.dwg \
+  2> /tmp/yacr-move.log
+```
+在 CAD 区域稳定画小圈 20 s，另做 5 s 静止 / 5 s 中键平移对照。看：
+`[probe] bridge presenter ready … present_mode=…`、
+`[probe] cad-frame presented … frame_us=… input_age_us=…` 与 `[probe] input kind=pointer_move`。
+若 `input_age_us` p95 仍 >8ms 或帧间隔仍出现 ≥24ms，下一步才是 status emit 侧的瘦帧
+（wire 契约改动，需同步 `cad-desktop-shell/src/events.rs` 契约测试）；若 `2>/dev/null`
+后卡顿消失，则说明 stderr 仍是本机瓶颈，hot gate 可单独保留。
+
 ## 2026-11-02 布局页签/SPACE 传输 + XREF 只读导入期合并（v1）
 
 本轮把 LAYOUT 页签/`SPACE` 从表示层接到共享 UI 与传输，并新增 **XREF v1**（此前只有深度

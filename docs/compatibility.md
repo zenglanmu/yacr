@@ -60,7 +60,7 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | 出图(打印) | 实现(PLOTSETTINGS/内嵌 Layout；plot-style 引用读取并显式 Unsupported) | 实现(纸张/边距/比例/旋转) | 光栅 PNG(host readback)；无矢量/CTB | — | — |
 | 异步导入 | 实现(进度阶段/取消) | 实现(唯一任务、过期丢弃) | — | — | — |
 | 天正/探索者代理 | 实现(仅公开缓存记录) | 仅 FillOff/UnicodeText 有证据 | 依解码结果 | 实现 | 标记缓存几何 |
-| 布局 / 视口 | 实现(矩形裁剪/比例；`tab_order` 顺序 + LAYOUT 显示名) | 复杂裁剪标记部分 | **实现（活动空间渲染已接线；`CadStatus.layouts`/`activeSpace` + `LayoutTabs`/`SPACE`，2026-11-02）** | 部分（不支持布局页签可见但禁用，只显示稳定原因码） | 纸空间测量显式禁用 |
+| 布局 / 视口 | 实现(矩形裁剪/比例；矩形 VPCLIP 边界实体可证明为轴对齐矩形时按其矩形裁剪；`tab_order` 顺序 + LAYOUT 显示名) | 复杂/非矩形裁剪标记部分 | **实现（活动空间渲染已接线；`CadStatus.layouts`/`activeSpace` + `LayoutTabs`/`SPACE`，2026-11-02）** | 部分（真正不支持的布局页签可见但禁用，只显示稳定原因码） | 纸空间测量显式禁用 |
 | **XREF（外部参照）** | **部分（仅导入期只读解析，2026-11-02）** | **实现：acadrust `BlockRecord` 的 xref 标志/`xref_path` + `INSERT`；无独立 `Xref` 对象；无 `XREF` 命令/ATTACH/DETACH/RELOAD/BIND/编辑** | **加载成功的模型空间内容合并进宿主 xref 块后按普通块绘制；未加载状态显式缺席，不画假内容** | 合并成员随普通实体拾取；无 xref 专用拾取 | 不支持 |
 
 ### 测量命令与 §3.3 的逐条对应（2026-10-26 对账补齐）

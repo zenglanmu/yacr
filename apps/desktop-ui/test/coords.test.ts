@@ -62,7 +62,10 @@ test('no reliable world coordinate renders the em dash, never zero or pixels', (
 test('the status bar renders the formatted world text and never the pixel fallback', async () => {
   const source = await readModule('components/StatusBar.tsx');
   // One pure formatter, fed by the host status (not by a DOM pointer event).
-  assert.ok(source.includes('formatWorldCursor(shell.status)'));
+  // The readout reads the per-frame leaf store so a moving cursor does not
+  // re-render the shell; the formatter itself stays the single source.
+  assert.ok(source.includes('volatileStatusStore.getCursor'));
+  assert.ok(source.includes('useSyncExternalStore'));
   assert.ok(source.includes('{worldCursor.text}'));
   // The title follows the real state: world hint vs the explicit "none" hint.
   assert.ok(source.includes('t(worldCursor.hintKey)'));

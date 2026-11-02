@@ -7,10 +7,14 @@
 //
 // # The rules this effect owns
 //
-// * **One producer.** Every `status-changed` frame feeds `setStatus`; a transport
-//   failure feeds `setPollError` (the historical slot name is kept so the banner
-//   precedence in `App.tsx` is unchanged). There is no timer that asks for status
-//   in steady state.
+// * **One producer, two cadences.** Every `status-changed` frame is consumed, but
+//   only a **semantic** change feeds `setStatus` (the whole shell tree); the two
+//   genuinely per-frame fields go to the leaf store
+//   (`cad/status-cadence.ts`): `cursorWorld` to the status-bar readout and
+//   `frameCount` to the FPS sampler. A frame that differs only in those two is
+//   not a shell re-render. A transport failure feeds `setPollError` (the
+//   historical slot name is kept so the banner precedence in `App.tsx` is
+//   unchanged). There is no timer that asks for status in steady state.
 // * **Carrier bootstrap, unchanged.** A `tauri` build subscribes through the
 //   native event source first; its first snapshot carries
 //   `hostProfile.surfaceMode`, which goes to `observeCarrier` once per status. If
@@ -32,6 +36,7 @@ import { cadEventPumpsFrames } from './cad-events.ts';
 import { observeCarrier } from '../host/runtime.ts';
 import { createFpsSampler } from '../fps.ts';
 import { reportedSurfaceMode } from './surface.ts';
+import { sameStatusIgnoringVolatile } from './status-cadence.ts';
 import type { InvokeRoute } from '../host/invoke.ts';
 import type { CadSubscription, CadEventFrame } from './cad-events.ts';
 import type { CadStatus } from './cad-status.ts';
@@ -40,6 +45,9 @@ import type { CadStatus } from './cad-status.ts';
 export interface CadEventHandlers {
   readonly setStatus: (status: CadStatus | null) => void;
   readonly setPollError: (error: string) => void;
+  /** Per-frame cursor slice: the status-bar leaf store, not the shell tree. */
+  readonly setCursor: (cursorWorld: CadStatus['cursorWorld']) => void;
+  /** Per-frame FPS slice: the diagnostics leaf store, not the shell tree. */
   readonly setFps: (fps: number | null) => void;
   readonly pump: () => void;
 }
@@ -61,6 +69,9 @@ export function useCadEvents(handlers: CadEventHandlers): void {
     let transport: InvokeRoute | null = null;
     let connecting = false;
     let staleTimer: ReturnType<typeof setTimeout> | undefined;
+    // The last status the shell tree actually received. Only a semantic change
+    // replaces it, so the per-frame volatile fields never churn React.
+    let lastApplied: CadStatus | null = null;
 
     const resetFps = (): void => {
       clearTimeout(staleTimer);
@@ -70,15 +81,21 @@ export function useCadEvents(handlers: CadEventHandlers): void {
     document.addEventListener('visibilitychange', resetFps);
 
     const setStatus = (next: CadStatus): void => {
-      live.current.setStatus(next);
       live.current.setPollError('');
       clearTimeout(staleTimer);
+      // The two per-frame fields go to their leaf readers every frame.
+      live.current.setCursor(next.cursorWorld);
       live.current.setFps(sampler.sample(
         next.frameCount,
         performance.now(),
         Boolean(next && !next.error && !document.hidden),
       ));
       if (!next.error && !document.hidden) staleTimer = setTimeout(resetFps, 5000);
+      // Everything else is semantic state: apply it immediately, and skip the
+      // full-shell re-render for a frame that differs only in the volatile pair.
+      if (sameStatusIgnoringVolatile(lastApplied, next)) return;
+      lastApplied = next;
+      live.current.setStatus(next);
     };
 
     const onEvent = (frame: CadEventFrame): void => {

@@ -18,6 +18,7 @@ import type { FrameLoop } from './cad/frame-loop.ts';
 import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
 import { queueCadCommand } from './cad/cad-command.ts';
 import { useCadEvents } from './cad/use-cad-events.ts';
+import { volatileStatusStore } from './cad/status-cadence.ts';
 import { reconcileToolParameterPending, setToolParameterFlag, setToolParameterNumber, stepToolParameterPending } from './tools/tool-parameters.ts';
 import { requestImportCancel } from './cad/cad-status.ts';
 import { draftingAcceleratorCommand } from './cad/cad.ts';
@@ -92,7 +93,6 @@ function Shell() {
   const [status, setStatus] = useState<CadStatus | null>(null);
   const [pollError, setPollError] = useState('');
   const [error, setError] = useState('');
-  const [fps, setFps] = useState<number | null>(null);
   const [command, setCommand] = useState('');
   const [commandResult, setCommandResult] = useState<CadCommandResult | null>(null);
   // The command line's history log (`commands/use-command-history.ts`): admitted
@@ -418,7 +418,9 @@ function Shell() {
   useCadEvents({
     setStatus,
     setPollError,
-    setFps,
+    // Per-frame volatile fields go to their leaf stores, not React state.
+    setCursor: volatileStatusStore.setCursor,
+    setFps: volatileStatusStore.setFrameRate,
     pump: () => framesRef.current?.pump(),
   });
 
@@ -790,7 +792,6 @@ function Shell() {
     // affordance reads as pressed, and clicking it again asks the host to focus
     // the open window rather than create a duplicate.
     popupOpen,
-    fpsText: fps === null || displayError ? t('render.fps.unavailable') : fps < 10 ? fps.toFixed(1) : String(Math.round(fps)),
     displayedError: displayError,
     errorText: displayError,
     error,

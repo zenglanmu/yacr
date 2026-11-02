@@ -347,6 +347,15 @@ pub fn probe_input(shared: tauri::State<'_, ProbeShared>, input: ProbeInput) -> 
     probe_input_impl(&shared.0, input)
 }
 
+/// Whether the diagnostic input line is enabled.
+///
+/// Shares the host's existing evidence gate (`YACR_PROBE_CAD_LOG`) rather than
+/// adding a second switch: evidence drivers already set it, and normal sessions
+/// keep their stderr free of one line per pointer move.
+fn input_trace_enabled() -> bool {
+    std::env::var_os("YACR_PROBE_CAD_LOG").is_some()
+}
+
 /// Command body of [`probe_input`], without the Tauri state wrapper.
 ///
 /// Split out so the wire-output goldens can call the **same** implementation
@@ -365,10 +374,12 @@ pub fn probe_input_impl(shared: &Arc<Mutex<Shared>>, input: ProbeInput) -> Probe
             modal_gate_open(&state.shell).then(|| state.shell.input.marker_offset())
         };
         if let Some(marker_offset) = refused {
-            eprintln!(
-                "[probe] input kind={} seq={sequence} accepted=false reason={POPUP_MODAL_OPEN}",
-                kind.as_str()
-            );
+            if input_trace_enabled() {
+                eprintln!(
+                    "[probe] input kind={} seq={sequence} accepted=false reason={POPUP_MODAL_OPEN}",
+                    kind.as_str()
+                );
+            }
             return ProbeInputAck {
                 accepted: false,
                 sequence,
@@ -381,21 +392,26 @@ pub fn probe_input_impl(shared: &Arc<Mutex<Shared>>, input: ProbeInput) -> Probe
     let ack = lock(shared).shell.input.apply(&input);
     // Evidence line: shows the real IPC path (invoke -> command -> tracker).
     // x/y/dx/dy/width are logged so the accepted input can be tied to real OS
-    // coordinates (diagnosis only; identifiers stay English).
-    eprintln!(
-        "[probe] input kind={} seq={} accepted={} marker={:.3} terminal={} reason={:?} x={:?} y={:?} dx={:?} dy={:?} width={:?}",
-        kind.as_str(),
-        sequence,
-        ack.accepted,
-        ack.marker_offset,
-        ack.terminal,
-        ack.reason,
-        input.x,
-        input.y,
-        input.dx,
-        input.dy,
-        input.width,
-    );
+    // coordinates (diagnosis only; identifiers stay English). Gated exactly like
+    // the other probe evidence: a pointer move arrives at up to display rate, so
+    // an always-on `eprintln!` is both log spam and avoidable main/IPC-thread work
+    // in normal use. Evidence runs already set `YACR_PROBE_CAD_LOG=1`.
+    if input_trace_enabled() {
+        eprintln!(
+            "[probe] input kind={} seq={} accepted={} marker={:.3} terminal={} reason={:?} x={:?} y={:?} dx={:?} dy={:?} width={:?}",
+            kind.as_str(),
+            sequence,
+            ack.accepted,
+            ack.marker_offset,
+            ack.terminal,
+            ack.reason,
+            input.x,
+            input.y,
+            input.dx,
+            input.dy,
+            input.width,
+        );
+    }
     if !ack.accepted {
         return ack;
     }

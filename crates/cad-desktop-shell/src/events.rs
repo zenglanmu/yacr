@@ -32,6 +32,12 @@
 //! `status-changed` per frame and nothing else. There is **no polling timer** here
 //! — the owner tick is the only producer.
 //!
+//! The wire shape is unchanged, but the React consumer **digests** it
+//! (`apps/desktop-ui/src/cad/use-cad-events.ts`): only a semantic change calls
+//! `setStatus`, while `cursorWorld` and `frameCount` go to two leaf stores
+//! (`cad/status-cadence.ts`). A status frame is therefore not, by itself, a
+//! whole-shell re-render; the emitter still sends one per rendered frame.
+//!
 //! # Status bytes
 //!
 //! The flushed `status-changed.status` is projected exactly like `cad_status`:

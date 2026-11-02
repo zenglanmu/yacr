@@ -63,8 +63,6 @@ export interface ShellValue {
   readonly palettesAvailable: boolean;
   /** Whether the host reports a live dialog. */
   readonly popupOpen: boolean;
-  /** The rendered frame-rate label (`render.fps.unavailable` when unknown). */
-  readonly fpsText: string;
   /** The error the banner shows, or `''`. */
   readonly displayedError: string;
   /** The same banner line (the status bar reads this name). */

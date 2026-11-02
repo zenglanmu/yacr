@@ -1,7 +1,7 @@
 // Status bar: coordinate readout, drafting-aid toggles (only the ones this build
 // really has — unavailable aids stay visibly off), and the right-side utilities
 // including the real clean-screen / command-line view toggles.
-import React from 'react';
+import React, { useSyncExternalStore } from 'react';
 import { Icon } from '../icons.tsx';
 import { Button, Toggle } from './primitives.tsx';
 import { ParameterChoices, ParameterFlag, ParameterGridChoices, ParameterStepper, ParameterSwatch } from './ParameterControls.tsx';
@@ -11,7 +11,7 @@ import type { ToolParameterPending } from '../tools/tool-parameters.ts';
 import { toolLabelKey } from '../commands/commands.ts';
 import { palettesOffered } from '../cad/surface.ts';
 import { OPTIONS_KEYS } from '../options/options.ts';
-import { formatWorldCursor } from '../cad/coords.ts';
+import { volatileStatusStore } from '../cad/status-cadence.ts';
 import { dispatchGrid, dispatchGridSnap, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, gridSnapToggle, gridToggle, hoverPreviewToggle, objectSnapToggle, orthoToggle, snapKindLabelKey, toolStepPromptKey } from '../cad/cad.ts';
 import { importProgressView } from '../cad/cad-status.ts';
 import { toolParameterViews } from '../tools/tool-parameters.ts';
@@ -33,7 +33,15 @@ export function StatusBar() {
   // em-dash placeholder when there is no reliable 2D cursor. The DOM pointer's
   // CSS pixels are deliberately **not** a fallback — they are not drawing
   // coordinates, so they must never appear under the "coordinates" label.
-  const worldCursor = formatWorldCursor(shell.status);
+  //
+  // `cursorWorld` changes every frame while the pointer moves, so it is read
+  // from the leaf store rather than the shell status: this component re-renders
+  // on a real text change, and the rest of the tree does not.
+  const worldCursor = useSyncExternalStore(
+    volatileStatusStore.subscribe,
+    volatileStatusStore.getCursor,
+    volatileStatusStore.getCursor,
+  );
   const progress = importProgressView(shell.importProgress as CadImportProgress | null, t);
   // The interactive tool the host reports as active (`status.tool`:
   // `{key, points, ready} | null`). A missing/null block means no tool, so
