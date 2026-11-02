@@ -17,8 +17,9 @@ use acadrust::{DwgReadOptions, DwgReader, DxfReader, EntityType, ReadStats};
 use cad_db::{
     sanitize_linetype_scale, BlockDefinition, DbEntity, DbObject, DrawingDatabase,
     DrawingDatabaseBuilder, EntityColor, EntityLineType, EntityLineWeight, EntityRenderAttributes,
-    EntityTransparency, Layer, LayerAttributes, LayerColor, LayerLineWeight, Layout,
-    LineType as DbLineType, LinetypePattern, PaperViewport, Style,
+    EntityTransparency, ExternalReference, ExternalReferenceStatus, Layer, LayerAttributes,
+    LayerColor, LayerLineWeight, Layout, LineType as DbLineType, LinetypePattern, PaperViewport,
+    Style,
 };
 use cad_domain::hatch::GradientStop;
 use cad_domain::*;
@@ -64,6 +65,14 @@ pub struct ImportRequest {
     pub bytes: Arc<[u8]>,
     pub limits: ImportLimits,
     pub generation: u64,
+    /// External-reference loading policy and host file access.
+    ///
+    /// `None` means this import may not read referenced files: every xref block
+    /// is recorded as `BrowserUnavailable` (never as a silently empty block).
+    /// The host supplies a [`XrefOptions`] with a [`cad_resources::XrefFileSource`]
+    /// to make xref content available. This is import-only; loaded xref content
+    /// is merged into the host database and never re-read afterwards.
+    pub xref: Option<Arc<XrefOptions>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -406,6 +415,62 @@ struct ImporterBuilder<'a> {
     /// is refused by the guard in `dimension_semantics` rather than recursing
     /// without bound (review B3).
     dimension_picture_stack: Vec<String>,
+    /// XREF block records detected in [`ImporterBuilder::read_blocks`], keyed
+    /// by their host block id. Kept beside the table rows so expansion and
+    /// status resolution never have to guess from a name.
+    xref_blocks: HashMap<BlockId, XrefBlock>,
+    /// Terminal or in-flight status of every xref block. A non-`Loaded` entry
+    /// seeds [`ImporterBuilder::resolve_block_status`] so a missing reference
+    /// can never settle as `Verified`.
+    xref_block_status: HashMap<BlockId, ExternalReferenceStatus>,
+    /// Every inserted entity that references a block definition, recorded at
+    /// push/splice time so the post-resolution pass can re-evaluate the final
+    /// block-status fixpoint (including display-tree INSERTs).
+    insert_chains: Vec<InsertChain>,
+    /// Non-loaded xref cause keyed by the block that owns it: host xref blocks
+    /// and the spliced blocks of a nested reference. Used to name the real
+    /// reference in `import.xref_insert_missing` instead of guessing.
+    xref_causes: HashMap<BlockId, XrefCause>,
+    /// Xref blocks whose status is only a `Missing` placeholder until
+    /// [`ImporterBuilder::resolve_xrefs`] runs. Expansion treats them as known
+    /// blocks (not as a missing reference) so a successfully loaded reference is
+    /// not reported as missing before it is attached.
+    xref_pending: BTreeSet<BlockId>,
+    /// Xref blocks whose provenance row was already inserted, keyed by
+    /// [`BlockId`] (not by name: a nested namespaced name may legitimately
+    /// collide with a host name). The builder accepts an external reference
+    /// exactly once; an unresolved xref inserts its terminal row when
+    /// resolution finishes.
+    xref_recorded: BTreeSet<BlockId>,
+    /// Next unused host block id. Initialised after [`ImporterBuilder::read_blocks`]
+    /// and shared by every spliced xref so a referenced id is never reused.
+    next_block: u128,
+    /// Next unused host layer id for spliced xref layers. Initialised after
+    /// [`ImporterBuilder::read_layers`].
+    next_layer: u128,
+    /// Host layer target name -> layer id for xref-dependent rows, including
+    /// rows the host drawing already declared. A later splice reuses the row
+    /// (VISRETAIN-like host override) instead of duplicating or overwriting it.
+    xref_layer_names: HashMap<String, LayerId>,
+    /// Materialised member ids of each host block, used when an xref block's
+    /// definition is replaced with the merged member list.
+    block_entities: HashMap<BlockId, Vec<EntityId>>,
+}
+
+/// Source facts of one external-reference block.
+///
+/// Kept beside the imported table row so status resolution and INSERT expansion
+/// can answer without re-reading the acadrust document.
+#[derive(Debug, Clone)]
+struct XrefBlock {
+    /// Block table name (the external-reference map key).
+    name: String,
+    /// Path exactly as the source declared it, before any trimming/folding.
+    raw_path: String,
+    /// Source marked this attachment as an overlay (as opposed to attach).
+    overlay: bool,
+    /// Source marked the attachment as currently unloaded.
+    unloaded: bool,
 }
 
 /// A block child classified for display, before nesting is resolved.
@@ -415,6 +480,28 @@ struct BlockMember {
     /// Block definitions referenced by this child (one per array cell), so
     /// nesting resolves through MINSERT arrays too.
     insert_blocks: Vec<BlockId>,
+}
+
+/// One inserted entity that reaches block definitions (directly, through an
+/// array, or through a display tree such as a dimension picture block).
+///
+/// Recorded so [`ImporterBuilder::reclassify_xref_inserts`] can apply the
+/// **final** block-status fixpoint to the report/capabilities; entity
+/// classification runs before xref resolution and therefore cannot see it.
+#[derive(Debug, Clone)]
+struct InsertChain {
+    object: ObjectId,
+    class_name: String,
+    space: SpaceId,
+    insert_blocks: Vec<BlockId>,
+}
+
+/// A non-loaded external reference reachable through a block.
+#[derive(Debug, Clone)]
+struct XrefCause {
+    name: String,
+    path: String,
+    status: ExternalReferenceStatus,
 }
 
 mod builder;
@@ -429,6 +516,10 @@ mod plot;
 mod primitives;
 mod style;
 mod support;
+mod xref;
+
+pub use xref::XrefOptions;
+use xref::{xref_current_depth, xref_support_status};
 
 mod annotative;
 
@@ -462,3 +553,5 @@ mod tests_multileader_created;
 mod tests_multileader_export;
 #[cfg(test)]
 mod tests_multileader_fixtures;
+#[cfg(test)]
+mod tests_xref;

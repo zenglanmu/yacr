@@ -39,12 +39,45 @@ impl<'a> ImporterBuilder<'a> {
             completeness =
                 Completeness::Missing(vec![format!("insert references unknown block '{name}'")]);
         }
+        // An xref block with a terminal non-loaded status owns no geometry: the
+        // INSERT must report the reference's real state instead of an empty
+        // `Complete` success. A pending placeholder is deliberately not treated
+        // as missing here (it may still be attached before the status fixpoint);
+        // a `Loaded` reference is an ordinary known block.
+        if !matches!(completeness, Completeness::Missing(_)) {
+            if let Some(block) = self.block_ids.get(&name).copied() {
+                if !self.xref_pending.contains(&block) {
+                    if let Some(reference) = self.xref_blocks.get(&block) {
+                        let status = self
+                            .xref_block_status
+                            .get(&block)
+                            .copied()
+                            .unwrap_or(ExternalReferenceStatus::Missing);
+                        if !status.is_loaded() {
+                            let detail = if reference.raw_path.trim().is_empty() {
+                                "no path".to_string()
+                            } else {
+                                reference.raw_path.clone()
+                            };
+                            completeness = Completeness::Missing(vec![format!(
+                                "xref '{}' {}: {detail}",
+                                reference.name,
+                                status.as_str()
+                            )]);
+                        }
+                    }
+                }
+            }
+        }
         let columns = i.column_count.max(1) as usize;
         let rows = i.row_count.max(1) as usize;
         // A non-finite spacing cannot produce distinct cells; drawing them all on
         // top of each other would hide the state, so report it.
         let spacing_bad = |s: f64| !s.is_finite();
-        if columns * rows > 1 && (spacing_bad(i.column_spacing) || spacing_bad(i.row_spacing)) {
+        if !matches!(completeness, Completeness::Missing(_))
+            && columns * rows > 1
+            && (spacing_bad(i.column_spacing) || spacing_bad(i.row_spacing))
+        {
             completeness = Completeness::Partial(vec![
                 "insert array has a non-finite row/column spacing".into(),
             ]);

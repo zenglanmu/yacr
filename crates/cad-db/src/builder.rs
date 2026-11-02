@@ -12,6 +12,7 @@ use crate::tables::{
     ActiveAnnotationScale, BlockDefinition, BlockMetadata, DynamicBlockVisibility, Layer,
     LayerAttributes, Layout, LineType, PlotSettingsRecord, Scale, Style,
 };
+use crate::xref::ExternalReference;
 
 /// The only sanctioned way to construct a [`DrawingDatabase`].
 ///
@@ -52,6 +53,7 @@ impl DrawingDatabaseBuilder {
                 next_entity_id: 1,
                 next_block_id: 1,
                 next_layer_id: 1,
+                external_references: BTreeMap::new(),
                 bounds_cache: Default::default(),
             },
             errors: Vec::new(),
@@ -117,6 +119,35 @@ impl DrawingDatabaseBuilder {
 
     pub fn insert_block(&mut self, block: BlockDefinition) -> CadResult<()> {
         self.database.blocks.insert(block.id, block);
+        Ok(())
+    }
+
+    /// Record one external reference's metadata and provenance.
+    ///
+    /// The name is the xref block name and is the map key, so it must be
+    /// unique: a duplicate is an import error rather than a silent replace,
+    /// because replacing would make the earlier attachment's provenance
+    /// unreachable. If `block` names an xref-owned block, that block is
+    /// validated for existence at [`Self::finish`] (block definitions are often
+    /// created after their table row).
+    ///
+    /// This is import-only storage: it raises no revision and produces no
+    /// [`crate::ChangeSet`]. External references cannot be edited through a
+    /// transaction in this build.
+    pub fn insert_external_reference(&mut self, reference: ExternalReference) -> CadResult<()> {
+        if self
+            .database
+            .external_references
+            .contains_key(&reference.name)
+        {
+            return Err(CadError::InvalidInput(format!(
+                "duplicate external reference name '{}'",
+                reference.name
+            )));
+        }
+        self.database
+            .external_references
+            .insert(reference.name.clone(), reference);
         Ok(())
     }
 
@@ -524,6 +555,19 @@ impl DrawingDatabaseBuilder {
                     "block {id:?} ('{}') has a non-finite base point",
                     metadata.name
                 ));
+            }
+        }
+        // An external reference's provenance block must exist: a dangling id
+        // would make `external_reference_for_block`/`is_xref_block` point at a
+        // block that was never imported.
+        for reference in self.database.external_references.values() {
+            if let Some(block) = reference.block {
+                if !self.database.blocks.contains_key(&block) {
+                    self.errors.push(format!(
+                        "external reference '{}' references missing block {block:?}",
+                        reference.name
+                    ));
+                }
             }
         }
         if !self.errors.is_empty() {

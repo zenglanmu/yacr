@@ -62,7 +62,7 @@ impl<'a> ImporterBuilder<'a> {
                 .or_default()
                 .push(BlockMember {
                     render,
-                    insert_blocks,
+                    insert_blocks: insert_blocks.clone(),
                 });
         }
         if matches!(&space, SpaceId::Model) {
@@ -79,6 +79,15 @@ impl<'a> ImporterBuilder<'a> {
         self.next_entity += 1;
         self.next_object += 1;
         self.entity_total += 1;
+
+        if !insert_blocks.is_empty() {
+            self.insert_chains.push(InsertChain {
+                object: object_id,
+                class_name: class_name.clone(),
+                space: space.clone(),
+                insert_blocks: insert_blocks.clone(),
+            });
+        }
 
         self.note_capability(&class_name, &geometry, &completeness, render, pick);
 

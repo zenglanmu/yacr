@@ -14,13 +14,15 @@
 //! * [`host`] — the Tauri entry point, the shared command handler plus the two
 //!   shell-only reports, `Shared`/telemetry, and the `MainEventsCleared` tick
 //!   drive;
-//! * [`platform`] — the explicitly **unsupported** file contracts of Android v1
-//!   (no chooser, no save, no bytes), the DOM surface source, the durable
+//! * [`platform`] — the SAF-backed file contracts (open + DXF-export save;
+//!   New/Plot still refuse by capability), the DOM surface source, the durable
 //!   `filesDir` config/preference store and the `nativeAssetsReady` handshake;
 //! * [`popup`] — the in-DOM popup seam (`PopupOps` payload + the `ShellPopupHost`
 //!   that marshals the shared lifecycle onto the loop thread);
 //! * [`surface`] — the frozen JNI surface callbacks and the
 //!   `SurfaceProbePresenter` lifecycle (Vulkan only, no GLES/software fallback);
+//! * [`saf`] — the Storage Access Framework JNI bridge (Android only): the
+//!   Activity `document*` methods behind the platform file contracts;
 //! * [`policy`] — the target-independent, unit-tested refusal markers, capability
 //!   set and JNI symbol names;
 //! * [`input`] — the partition-local → canvas coordinate mapping for pointer/wheel
@@ -40,6 +42,8 @@ pub mod report;
 
 #[cfg(target_os = "android")]
 pub mod host;
+#[cfg(target_os = "android")]
+pub mod saf;
 #[cfg(target_os = "android")]
 pub mod surface;
 

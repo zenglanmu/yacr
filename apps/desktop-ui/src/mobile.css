@@ -212,40 +212,52 @@
 }
 /* Drawing space ---------------------------------------------------------- */
 /* The desktop model/layout strip (`LayoutTabs`) is not rendered on the compact
-   layout. This is its honest stand-in in the drawer: the same active space and
-   the same structural limit ("one layout space per drawing"), which the desktop
-   shows as a disabled tab's tooltip and a phone cannot hover — so the reason is
-   printed. The chips are indicators, not controls (the space is fixed by the
-   drawing), so they keep the desktop's 24px height rather than claim a 44px
-   touch target nothing can act on. */
+   layout. This is its honest stand-in in the drawer and it reads the very same
+   `layoutTabsView` rows: a supported tab dispatches the same `SPACE` line, and
+   an unsupported layout stays visible but disabled. A phone cannot hover a
+   tooltip, so the stable reason is printed below the scroller. The chips are
+   real controls now, so they get the 44px touch height the other drawer chips
+   use; the row scrolls horizontally instead of squeezing many layouts. */
 .mobile-drawer__space {
   flex: 0 0 auto;
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 10px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 10px 6px;
   border-bottom: 1px solid var(--line);
 }
+.mobile-drawer__space-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.mobile-drawer__space-scroll::-webkit-scrollbar { display: none; }
 .mobile-drawer__space-chip {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex: none;
   gap: 5px;
-  height: 24px;
-  padding: 0 10px;
+  min-height: 44px;
+  padding: 0 12px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
-  background: transparent;
+  background: var(--field);
   color: var(--text-dim);
-  font-size: 11.5px;
+  font-size: 12px;
   white-space: nowrap;
+  cursor: pointer;
 }
 .mobile-drawer__space-chip.is-active {
   background: var(--on);
   border-color: var(--on);
   color: #fff;
 }
-.mobile-drawer__space-chip.is-disabled { border-style: dashed; color: var(--text-muted); }
+.mobile-drawer__space-chip.is-action { color: var(--accent-text); }
+.mobile-drawer__space-chip.is-disabled { border-style: dashed; color: var(--text-muted); cursor: not-allowed; }
 .mobile-drawer__space-note {
   margin: 0;
   color: var(--text-dim);
@@ -614,6 +626,47 @@
   min-height: 44px;
   padding: 0 10px;
   font-size: 12.5px;
+}
+
+/* References sheet ------------------------------------------------------- */
+/* The compact layout renders no left dock, so the same `ReferencesPanel` becomes
+   a bottom sheet in this tree. It sits above the drawer layer (which closes
+   before it opens) and below the host-owned popup layer (60). */
+:root[data-layout="mobile"] .references-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 56;
+  display: flex;
+  align-items: flex-end;
+}
+:root[data-layout="mobile"] .references-layer__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(0, 0, 0, .48);
+}
+:root[data-layout="mobile"] .references--floating {
+  position: relative;
+  width: 100%;
+  max-height: min(72dvh, 620px);
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 8px 8px 0 0;
+  border: 1px solid var(--line-soft);
+  border-bottom: 0;
+  box-shadow: 0 -12px 34px rgba(0, 0, 0, .48);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px));
+  animation: mobile-rise var(--t-med) both;
+}
+:root[data-layout="mobile"] .references--floating .palette__head { height: 44px; padding: 0 6px 0 12px; }
+:root[data-layout="mobile"] .references--floating .palette__body { padding: 8px 10px 14px; }
+:root[data-layout="mobile"] .references__row { padding: 10px; }
+:root[data-layout="mobile"] .references__name { font-size: 13px; }
+:root[data-layout="mobile"] .references__path,
+:root[data-layout="mobile"] .references__reason { font-size: 11.5px; }
+@keyframes mobile-rise {
+  from { transform: translateY(18px); opacity: .4; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 /* Dialogs and the shortcut menu on a phone ------------------------------- */

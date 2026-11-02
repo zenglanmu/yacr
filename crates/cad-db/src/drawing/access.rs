@@ -11,6 +11,7 @@ use crate::tables::{
     LayerAttributes, Layout, LineType, PlotMargins, PlotPaperUnits, PlotProvenance, PlotRotation,
     PlotSettingsRecord, PlotType, Scale, Style,
 };
+use crate::xref::ExternalReference;
 
 /// Dynamic-visibility membership of one entity, snapshotted before a delete.
 ///
@@ -259,6 +260,39 @@ impl DrawingDatabase {
         self.block_metadata
             .iter()
             .map(|(id, metadata)| (*id, metadata))
+    }
+
+    /// External-reference metadata, in xref-name order.
+    ///
+    /// Empty for a drawing with no xrefs. This is read-only import provenance;
+    /// there is no transaction path that mutates it.
+    pub fn external_references(&self) -> impl Iterator<Item = &ExternalReference> {
+        self.external_references.values()
+    }
+
+    /// One external reference by its xref block name (exact match).
+    ///
+    /// The name is the key recorded at import; this lookup does not guess a
+    /// case-insensitive spelling, so a caller comparing source names must use
+    /// the same spelling the importer used.
+    pub fn external_reference(&self, name: &str) -> Option<&ExternalReference> {
+        self.external_references.get(name)
+    }
+
+    /// The external reference whose provenance block is `id`, if any.
+    ///
+    /// At most one reference should own a block; should a malformed import
+    /// record two, the first by name order is returned rather than inventing a
+    /// merge.
+    pub fn external_reference_for_block(&self, id: BlockId) -> Option<&ExternalReference> {
+        self.external_references
+            .values()
+            .find(|reference| reference.block == Some(id))
+    }
+
+    /// Whether `id` is a block whose members are owned by an external reference.
+    pub fn is_xref_block(&self, id: BlockId) -> bool {
+        self.external_reference_for_block(id).is_some()
     }
 
     /// Resolve a block definition by name, exact match first and then ASCII

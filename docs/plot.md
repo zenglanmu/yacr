@@ -150,7 +150,7 @@ cad-cli-tools plot <input.dwg> [--layout <name>] [--dpi <f64>|--width <u32> --he
 {
   "schema_version": 1,
   "operation": "plot",
-  "layout": { "id": 1, "name": "*Paper_Space", "synthetic": false },
+  "layout": { "id": 1, "name": "Layout1", "synthetic": false },
   "width": 320,
   "height": 452,
   "dpi": 38.7,

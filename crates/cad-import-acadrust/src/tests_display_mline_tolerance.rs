@@ -9,6 +9,7 @@ fn make_request() -> ImportRequest {
         bytes: Arc::from(Vec::<u8>::new().into_boxed_slice()),
         limits: ImportLimits::default(),
         generation: 0,
+        xref: None,
     }
 }
 

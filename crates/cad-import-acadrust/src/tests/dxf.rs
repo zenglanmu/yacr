@@ -10,6 +10,7 @@ fn ascii_dxf_enters_shared_database_and_truncation_is_not_empty_success() {
         bytes: Arc::from(bytes.as_slice()),
         limits: ImportLimits::default(),
         generation: 0,
+        xref: None,
     };
     let drawing = AcadrustImporter::default()
         .import(&request, &|| false)
@@ -31,6 +32,7 @@ fn ascii_dxf_enters_shared_database_and_truncation_is_not_empty_success() {
         database: request.database,
         limits: request.limits,
         generation: 0,
+        xref: None,
     };
     let binary_drawing = AcadrustImporter::default()
         .import(&binary_request, &|| false)

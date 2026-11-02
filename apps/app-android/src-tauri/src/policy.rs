@@ -41,16 +41,17 @@ pub const DOCUMENT_OWNER: &str = "native";
 /// vocabulary with the X11/Web carriers; unchanged by P5).
 pub const UNSUPPORTED_RUNTIME_PREFIX: &str = "yacr: unsupported-runtime: ";
 
-/// Android v1 has **no** file access: no document chooser, no save target and no
-/// bytes to read. The shell must not advertise the capability.
-pub const CAN_OPEN: bool = false;
-/// No document can be created (no file access, no second document authority).
+/// Open a drawing through the Storage Access Framework (`documentLaunchOpen` +
+/// `documentReadUri`). The bytes are read by the Kotlin lane and delivered as a
+/// platform event; the tick never opens a document itself.
+pub const CAN_OPEN: bool = true;
+/// No document can be created (no New funnel, no second document authority).
 pub const CAN_NEW: bool = false;
-/// No save target and no atomic write.
-pub const CAN_SAVE: bool = false;
-/// No plot/vector export.
+/// DXF Save As through `documentLaunchSave` + `documentWriteUri` (lossy export).
+pub const CAN_SAVE: bool = true;
+/// No plot/vector export (SVG/PDF) on this carrier yet.
 pub const CAN_PLOT: bool = false;
-/// No background import worker (nothing can be handed to one yet).
+/// No background import worker: the platform read completes before delivery.
 pub const IMPORT_WORKER: bool = false;
 
 /// The four frozen JNI symbols the Kotlin lane links against.
@@ -66,14 +67,17 @@ pub const JNI_SYMBOLS: [&str; 4] = [
     "Java_dev_yacr_app_MainActivity_nativeAssetsReady",
 ];
 
-/// The explicit reason a file operation is refused on this carrier.
+/// The explicit reason a file operation is refused by a **non-Android build**.
 ///
 /// Named by the operation so a refusal is self-describing in the session's error
-/// (`cad_status.error`), never a generic "failed".
+/// (`cad_status.error`), never a generic "failed". The real Android build routes
+/// these operations through `crate::saf`; this wording is the honest fallback
+/// for the development-host build of the crate, which does not compile the JNI
+/// bridge.
 pub fn file_refusal(operation: &str) -> String {
     format!(
-        "{operation} is not supported by the Android host: this carrier has no file access \
-         (no document chooser, no save target, no drawing bytes) yet"
+        "{operation} is not supported by this build of the Android host: the SAF bridge \
+         (Storage Access Framework) is only compiled for the Android target"
     )
 }
 
@@ -172,20 +176,32 @@ mod tests {
     }
 
     #[test]
-    fn every_capability_android_v1_cannot_serve_is_false() {
+    fn open_and_dxf_save_are_advertised_new_and_plot_are_not() {
         // The mirror of the `HostCapabilities` the tick passes to `CadSession::new`:
-        // a fabricated capability would make the chrome offer a dead action.
-        for capability in [CAN_OPEN, CAN_NEW, CAN_SAVE, CAN_PLOT, IMPORT_WORKER] {
-            assert!(!capability);
+        // a fabricated capability would make the chrome offer a dead action, and a
+        // missing one would hide a real SAF path. Values are read through a binding
+        // pair so the assertion checks behaviour, not a literal.
+        let advertised = [
+            ("open", CAN_OPEN, true),
+            ("save", CAN_SAVE, true),
+            ("new", CAN_NEW, false),
+            ("plot", CAN_PLOT, false),
+            ("import_worker", IMPORT_WORKER, false),
+        ];
+        for (name, available, expected) in advertised {
+            assert_eq!(available, expected, "{name} capability");
         }
     }
 
     #[test]
     fn file_refusals_name_the_operation_and_say_unsupported() {
+        // This wording is the non-Android build fallback; the Android target
+        // routes the same operations through `saf::launch_open`/`launch_save`.
         for operation in ["open", "open target", "save", "atomic write"] {
             let reason = file_refusal(operation);
             assert!(reason.starts_with(operation), "{reason}");
             assert!(reason.contains("not supported"), "{reason}");
+            assert!(reason.contains("SAF bridge"), "{reason}");
         }
         assert!(config_persist_refusal().contains("not supported"));
     }

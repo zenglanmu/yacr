@@ -710,6 +710,7 @@ fn offset_bulged_polyline_result_round_trips_through_the_dxf_export() {
         bytes: Arc::from(bytes.into_boxed_slice()),
         limits: ImportLimits::default(),
         generation: 0,
+        xref: None,
     };
     let imported = AcadrustImporter::new()
         .import(&request, &|| false)

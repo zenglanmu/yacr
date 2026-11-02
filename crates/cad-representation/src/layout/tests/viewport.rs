@@ -338,6 +338,39 @@ fn enumeration_reports_ids_names_and_support() {
 }
 
 #[test]
+fn enumeration_follows_database_id_order_and_uses_display_names() {
+    // The importer assigns ids in the drawing's tab order and stores the
+    // user-visible layout name. Insertion order here is deliberately reversed
+    // to prove enumeration follows the id (BTreeMap) order, not insertion, and
+    // that the descriptor carries the display name rather than a block name.
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layout(cad_db::Layout {
+        id: LayoutId(2),
+        name: "Layout2".into(),
+        viewports: Vec::new(),
+    })
+    .unwrap();
+    b.insert_layout(cad_db::Layout {
+        id: LayoutId(1),
+        name: "Layout1".into(),
+        viewports: Vec::new(),
+    })
+    .unwrap();
+    let db = b.finish().unwrap();
+
+    let layouts = enumerate_layouts(&db);
+    assert_eq!(
+        layouts
+            .iter()
+            .map(|layout| (layout.id, layout.name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(LayoutId(1), "Layout1"), (LayoutId(2), "Layout2")]
+    );
+    assert!(layouts.iter().all(|layout| layout.supported));
+    assert!(layouts.iter().all(|layout| layout.viewport_count == 0));
+}
+
+#[test]
 fn empty_database_has_no_layouts() {
     let db = DrawingDatabaseBuilder::new(DatabaseId(1)).finish().unwrap();
     assert!(enumerate_layouts(&db).is_empty());

@@ -181,6 +181,7 @@ fn the_degrees_to_radians_conversion_survives_export_and_reimport() {
         bytes: Arc::from(bytes.into_boxed_slice()),
         limits: ImportLimits::default(),
         generation: 0,
+        xref: None,
     };
     let imported = AcadrustImporter::new()
         .import(&request, &|| false)

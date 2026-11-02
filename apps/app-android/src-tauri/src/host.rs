@@ -243,8 +243,9 @@ impl cad_desktop_shell::state::ShellTelemetry for AppTelemetry {
 /// thread and may arrive after `setup`, so the tick re-reads the announcement every
 /// tick **until the session exists** (see [`crate::host::tick`]); once the session is
 /// built its `HostOptions` are fixed and a later announcement no longer applies.
-/// `drawing` is deliberately always `None`: the Android carrier has no `--open`
-/// argument and no file access, so no opened-file identity is fabricated.
+/// `drawing` is deliberately always `None`: there is no `--open` argument. A
+/// document arrives after startup through the SAF picker (`OPEN` or an external
+/// VIEW intent), never as a fabricated startup path.
 fn install_cad_env(shared: &Arc<Mutex<Shared>>) {
     let launch = lock(shared).launch.clone();
     let (fonts_dir, images_dir) = platform::option_dirs();
@@ -396,10 +397,10 @@ pub fn run() {
 
     // No `--open` on Android: the process is started by the Activity manager, so the
     // launch options are the defaults (no drawing, no explicit resource dirs) plus
-    // the evidence-only probe switch. A document can only arrive once file access
-    // exists, so `can_open` stays false and no opened-file identity or drawing bytes
-    // are invented (the session starts from the shared host core's built-in document,
-    // exactly like a desktop host launched without `--open`).
+    // the evidence-only probe switch. The session starts from the shared host core's
+    // built-in document (exactly like a desktop host launched without `--open`); a
+    // user document arrives later through the SAF picker (`OPEN` or an external VIEW
+    // intent), so no opened-file identity or drawing bytes are invented at startup.
     let launch = cad_ui_core::launch::LaunchOptions {
         probe_only: std::env::var_os("YACR_PROBE_ONLY").is_some(),
         ..cad_ui_core::launch::LaunchOptions::default()

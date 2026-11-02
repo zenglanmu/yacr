@@ -8,10 +8,13 @@ mod alias_table;
 mod command_vocabulary;
 mod import_accounting;
 mod input_and_lifecycle;
+mod layout_status;
 mod point_style;
 mod snap_grid;
+mod space_argument;
 mod standard_view;
 mod status_projection;
+mod xref_status;
 mod zoom_argument;
 mod zoom_window_previous;
 

@@ -15,7 +15,8 @@ use acadrust::CadDocument;
 use cad_db::{DbEntity, DimStyle as DbDimStyle};
 use cad_domain::*;
 
-use super::entity::{common_for, emit, v3, EntityContext, ExportAccumulator};
+use super::common::{common_for, v3};
+use super::entity::{emit, EntityContext, ExportAccumulator};
 use super::report::MappingOutcome;
 use super::tables::ensure_text_style;
 

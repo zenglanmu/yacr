@@ -17,6 +17,7 @@ mod mleader_style;
 mod tables;
 mod transform;
 mod validate;
+mod xref;
 
 pub use bounds::*;
 pub use builder::*;
@@ -29,6 +30,7 @@ pub use mleader_style::*;
 pub use tables::*;
 pub use transform::*;
 pub use validate::*;
+pub use xref::*;
 
 #[cfg(test)]
 mod tests;

@@ -18,6 +18,7 @@ mod spline_transform;
 mod spline_validation;
 mod text_transform;
 mod visibility;
+mod xref;
 
 fn point(x: f64, y: f64) -> Point3 {
     Point3 { x, y, z: 0.0 }

@@ -21,7 +21,10 @@
 use cad_app::{CommandId, CommandPayload};
 
 use super::diagnostics::cad_error_text;
-use super::{CadSession, ARGUMENT_SELECTOR, PDMODE_SELECTOR, PDSIZE_SELECTOR, SNAPUNIT_SELECTOR};
+use super::{
+    CadSession, ARGUMENT_SELECTOR, PDMODE_SELECTOR, PDSIZE_SELECTOR, SNAPUNIT_SELECTOR,
+    SPACE_SELECTOR,
+};
 
 impl CadSession {
     /// Dispatch one typed `SELECTOR <argument>` line to its own command path.
@@ -42,6 +45,10 @@ impl CadSession {
             PDMODE_SELECTOR | PDSIZE_SELECTOR => {
                 self.point_style_argument(selector, argument, text)
             }
+            // `SPACE <argument>`: a tab click is one ordinary typed line, not a
+            // new IPC. Bare `SPACE` never reaches here (it keeps the name-only
+            // payload refusal).
+            SPACE_SELECTOR => self.space_argument(argument),
             _ => {
                 debug_assert_eq!(selector, ARGUMENT_SELECTOR);
                 self.typed_argument_command(selector, argument, text)
@@ -99,7 +106,9 @@ impl CadSession {
     }
 
     /// Record a stable argument refusal and return it (nothing changes).
-    fn refuse_argument(&self, reason: String) -> Result<(), String> {
+    ///
+    /// Shared by every typed-argument selector module (`point_style`, `space`).
+    pub(super) fn refuse_argument(&self, reason: String) -> Result<(), String> {
         *self.error.borrow_mut() = Some(reason.clone());
         Err(reason)
     }

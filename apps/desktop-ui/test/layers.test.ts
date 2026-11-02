@@ -663,7 +663,7 @@ test('the palette is docked next to the other palettes and opened by a shell act
   assert.ok(workspace.includes('const showLayers = palettesAvailable && Boolean(shell.layersOpen);'));
   assert.ok(workspace.includes('{showLayers ? <LayersPalette /> : null}'));
   // It contributes to the dock being open, and never paints over the partition.
-  assert.ok(workspace.includes('const leftOpen = showStart || showProperties || showDiagnostics || showLayers;'));
+  assert.ok(workspace.includes('const leftOpen = showStart || showProperties || showDiagnostics || showLayers || showReferences;'));
 
   const app = await readModule('App.tsx');
   assert.ok(app.includes("import { isLayersCommand } from './layers/layers.ts';"));

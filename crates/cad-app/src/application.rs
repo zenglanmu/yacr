@@ -1,6 +1,8 @@
 //! Command dispatch and view/camera commands for [`Application`].
 use super::*;
 
+use crate::app_zoom::FitResult;
+
 impl Application {
     pub fn new() -> Self {
         Application {
@@ -139,8 +141,42 @@ impl Application {
                         .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
                         .drawing;
                     validate_space_id(drawing, &space)?;
+                    let previous = session.active_space.clone();
                     session.active_space = space;
-                    Ok(CommandOutcome::none())
+                    // A space switch is session state only: no database write,
+                    // no `cad-history` entry and no `ChangeSet`. The camera is
+                    // moved to the target space so a sheet is not shown at the
+                    // model's off-sheet coordinates. The automatic fit records
+                    // no `ZOOM PREVIOUS` step: switching tabs is the user
+                    // action, not a discrete zoom.
+                    let fit = match self.fit_active_space(session, &command.viewport, false) {
+                        Ok(fit) => fit,
+                        Err(error) => {
+                            // A fit that cannot even reach the viewport leaves
+                            // the switch failed: keep the space the user was in.
+                            session.active_space = previous;
+                            return Err(error);
+                        }
+                    };
+                    let diagnostics = match fit {
+                        FitResult::EmptyLayout(layout) => vec![Diagnostic {
+                            object: None,
+                            code: "layout.fit_empty".into(),
+                            message: format!(
+                                "layout {} has no drawable paper geometry and no usable paper \
+                                 size; the camera is unchanged",
+                                layout.0
+                            ),
+                        }],
+                        FitResult::Framed | FitResult::EmptyModel => Vec::new(),
+                    };
+                    Ok(CommandOutcome {
+                        objects: Vec::new(),
+                        changes: None,
+                        diagnostics,
+                        measurement: None,
+                        point_report: None,
+                    })
                 } else {
                     Err(CadError::InvalidInput(
                         "SwitchSpace needs a space payload".into(),
@@ -699,24 +735,42 @@ impl Application {
         session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        if self.fit_viewport(session, &command.viewport)? {
-            return Ok(CommandOutcome::none());
+        match self.fit_active_space(session, &command.viewport, true)? {
+            FitResult::Framed => Ok(CommandOutcome::none()),
+            // Model space has nothing to frame: report an informational
+            // diagnostic instead of a generic success. `fit.empty` is the
+            // stable code the host resolves to its localized message; the CLI
+            // sees the same code, so the machine path is unchanged.
+            FitResult::EmptyModel => Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![Diagnostic {
+                    object: None,
+                    code: "fit.empty".into(),
+                    message: "fit.empty".into(),
+                }],
+                measurement: None,
+                point_report: None,
+            }),
+            // A paper sheet with no geometry and no usable paper size must not
+            // pretend it was framed. The layout id is part of the message so a
+            // host can point at the tab the user switched to.
+            FitResult::EmptyLayout(layout) => Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![Diagnostic {
+                    object: None,
+                    code: "layout.fit_empty".into(),
+                    message: format!(
+                        "layout {} has no drawable paper geometry and no usable paper size; the \
+                         camera is unchanged",
+                        layout.0
+                    ),
+                }],
+                measurement: None,
+                point_report: None,
+            }),
         }
-        // Nothing to frame: report an informational diagnostic instead of a
-        // generic success. `fit.empty` is the stable code the host resolves to
-        // its localized message; the CLI sees the same code, so the machine path
-        // is unchanged.
-        Ok(CommandOutcome {
-            objects: Vec::new(),
-            changes: None,
-            diagnostics: vec![Diagnostic {
-                object: None,
-                code: "fit.empty".into(),
-                message: "fit.empty".into(),
-            }],
-            measurement: None,
-            point_report: None,
-        })
     }
 
     /// Record the viewport's current view as one `ZOOM PREVIOUS` step.

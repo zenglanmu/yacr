@@ -19,3 +19,14 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# JNI contract: `libapp_android.so` calls these Activity instance methods by
+# exact name and descriptor (`apps/app-android/src-tauri/src/saf.rs`). R8 must
+# not rename, inline away, or remove them; without this block a release APK
+# fails at runtime with NoSuchMethodError even though the debug build works.
+-keepclassmembers class dev.yacr.app.MainActivity {
+    public void documentLaunchOpen();
+    public void documentLaunchSave(java.lang.String);
+    public void documentReadUri(java.lang.String);
+    public void documentWriteUri(java.lang.String, byte[]);
+    public java.lang.Object[] documentSnapshot();
+}

@@ -118,6 +118,9 @@ export interface ShellValue {
   readonly setCleanScreen: Dispatch<SetStateAction<boolean>>;
   readonly diagnosticsOpen: boolean;
   readonly setDiagnosticsOpen: Dispatch<SetStateAction<boolean>>;
+  /** Whether the external-references panel is open (docked or compact sheet). */
+  readonly referencesOpen: boolean;
+  readonly setReferencesOpen: Dispatch<SetStateAction<boolean>>;
   readonly propertiesOpen: boolean;
   readonly setPropertiesOpen: Dispatch<SetStateAction<boolean>>;
   readonly layersOpen: boolean;

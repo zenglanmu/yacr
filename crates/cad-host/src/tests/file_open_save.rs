@@ -1,5 +1,7 @@
 use super::*;
 
+use std::path::Path;
+
 // --- file contracts: open/save/plot -----------------------------------------
 
 #[test]
@@ -288,5 +290,134 @@ fn synchronous_delivered_open_arms_the_guard_with_the_platform_target() {
         files.source.borrow().as_ref(),
         Some(&target),
         "the guard arms with the platform's opaque handle, not the display name"
+    );
+}
+
+// --- external-reference wiring ----------------------------------------------
+
+// Hand-written minimal AC1015 DXF (no vendor sample): one xref block named BASE
+// with the xref flag (70 = 4) and path group 1, plus one model-space INSERT.
+const HOST_XREF_DXF: &str = "\
+0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n\
+0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nBLOCK_RECORD\n5\n1\n100\nAcDbSymbolTable\n70\n1\n\
+0\nBLOCK_RECORD\n5\n1F\n100\nAcDbSymbolTableRecord\n100\nAcDbBlockTableRecord\n2\n*Model_Space\n70\n0\n\
+0\nBLOCK_RECORD\n5\n1B\n100\nAcDbSymbolTableRecord\n100\nAcDbBlockTableRecord\n2\nBASE\n70\n0\n\
+0\nENDTAB\n0\nENDSEC\n\
+0\nSECTION\n2\nBLOCKS\n\
+0\nBLOCK\n5\n21\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockBegin\n2\nBASE\n70\n4\n10\n0.0\n20\n0.0\n30\n0.0\n3\nBASE\n1\nbase.dxf\n\
+0\nENDBLK\n5\n22\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockEnd\n0\nENDSEC\n\
+0\nSECTION\n2\nENTITIES\n\
+0\nINSERT\n5\n20\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockReference\n2\nBASE\n10\n0.0\n20\n0.0\n30\n0.0\n\
+0\nENDSEC\n0\nEOF\n";
+
+// A minimal referenced drawing with a single model-space LINE.
+const REFERENCED_LINE_DXF: &str = "\
+0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n\
+0\nSECTION\n2\nTABLES\n0\nENDSEC\n\
+0\nSECTION\n2\nBLOCKS\n0\nENDSEC\n\
+0\nSECTION\n2\nENTITIES\n\
+0\nLINE\n5\n20\n100\nAcDbEntity\n8\n0\n100\nAcDbLine\n10\n0.0\n20\n0.0\n30\n0.0\n11\n1.0\n21\n0.0\n31\n0.0\n\
+0\nENDSEC\n0\nEOF\n";
+
+fn xref_temp_dir(label: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "yacr-host-xref-{label}-{}-{nanos}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    dir
+}
+
+/// Write a host drawing and its sibling referenced file; returns the host path.
+fn write_xref_pair(dir: &Path) -> PathBuf {
+    std::fs::write(dir.join("base.dxf"), REFERENCED_LINE_DXF).expect("write referenced file");
+    let host = dir.join("host.dxf");
+    std::fs::write(&host, HOST_XREF_DXF).expect("write host drawing");
+    host
+}
+
+fn reference_status(core: &HostCore) -> cad_db::ExternalReferenceStatus {
+    core.controller
+        .borrow()
+        .drawing()
+        .expect("a drawing is open")
+        .external_reference("BASE")
+        .expect("the reference is recorded")
+        .status
+}
+
+#[test]
+fn a_synchronous_open_resolves_xrefs_from_the_drawing_directory() {
+    use cad_db::ExternalReferenceStatus;
+
+    let dir = xref_temp_dir("sync");
+    let host = write_xref_pair(&dir);
+    let bytes: Arc<[u8]> = Arc::from(HOST_XREF_DXF.as_bytes().to_vec().into_boxed_slice());
+
+    let files = Rc::new(FakeFiles::default());
+    let core = core_with(files, false);
+    core.deliver_external_open(FileTarget::from_path(&host.to_string_lossy()), bytes)
+        .expect("the synchronous open succeeds");
+    assert_eq!(reference_status(&core), ExternalReferenceStatus::Loaded);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_async_open_resolves_xrefs_from_the_drawing_directory() {
+    use cad_db::ExternalReferenceStatus;
+
+    let dir = xref_temp_dir("async");
+    let host = write_xref_pair(&dir);
+    let bytes: Arc<[u8]> = Arc::from(HOST_XREF_DXF.as_bytes().to_vec().into_boxed_slice());
+
+    let files = Rc::new(FakeFiles::default());
+    let core = core_with(files, true);
+    core.deliver_external_open(FileTarget::from_path(&host.to_string_lossy()), bytes)
+        .expect("the async open starts");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    // Wait for the import job itself (not the render presentation): the fake
+    // render session never becomes "current", so `loading()` could keep a
+    // presentation flag set even after the database publishes.
+    while core
+        .controller
+        .borrow()
+        .async_open_snapshot()
+        .is_some_and(|snapshot| snapshot.running)
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "import worker did not finish"
+        );
+        core.poll_loading().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(reference_status(&core), ExternalReferenceStatus::Loaded);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_open_without_a_real_path_keeps_references_unavailable() {
+    use cad_db::ExternalReferenceStatus;
+
+    let bytes: Arc<[u8]> = Arc::from(HOST_XREF_DXF.as_bytes().to_vec().into_boxed_slice());
+    let files = Rc::new(FakeFiles::default());
+    let core = core_with(files, false);
+    core.deliver_external_open(
+        FileTarget {
+            display_name: "host.dxf".into(),
+            opaque: String::new(),
+        },
+        bytes,
+    )
+    .expect("the path-less open succeeds");
+    assert_eq!(
+        reference_status(&core),
+        ExternalReferenceStatus::BrowserUnavailable
     );
 }

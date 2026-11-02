@@ -87,6 +87,10 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 - 底图只能由 Builder 导入；领域修改只能通过事务正式提交。会话导航不使文档变脏。
 - Document 共享不可变底图；Viewport 保存独立相机，不复制数据库。
 - GPU/内核/UI 工具包/平台类型不得进入 domain/db；第三方类型不随意 re-export。
+- **外部参照（XREF）按导入期资源处理**：加载器 trait 在 `cad-resources`
+  （`XrefFileSource`/`check_xref_path`），桌面文件系统读取与 canonical 包含检查在
+  `cad-platform`（`FsXrefSource`），importer 保持无文件系统/wasm-clean，`cad-db` 只保存
+  导入期元数据（`ExternalReference`），不做 I/O 或路径解析。
 - `cad-engine` 是 UI 无关的渲染会话协调层：直接依赖 `cad-app`、`cad-db`、`cad-domain`、
   `cad-render-wgpu` 与 `cad-representation`；不依赖 `cad-ui-core`/`cad-host`/任何 UI 工具包，
   也不直接依赖 wgpu；wgpu 类型仅由 renderer 通过其 API/re-export 提供。`cad-app` 不依赖 `cad-engine`。

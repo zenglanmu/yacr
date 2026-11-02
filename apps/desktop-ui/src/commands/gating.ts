@@ -115,6 +115,17 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   PDSIZE: Object.freeze({
     parse: isDecimalNumber,
   }),
+  /**
+   * `SPACE` carries the target space as one argument, matching the host's own
+   * grammar: `MODEL`, `#<numeric LayoutId>`, or a layout display name (the whole
+   * remainder, spaces included). The name is resolved against the authoritative
+   * drawing by the host — exact first, then a unique case-insensitive match —
+   * and an unknown or ambiguous name is a named refusal. The chrome therefore
+   * only requires a non-empty argument; it must not reject a real layout name.
+   */
+  SPACE: Object.freeze({
+    parse: (argument: string) => argument.trim().length > 0,
+  }),
 });
 
 /**
@@ -248,9 +259,9 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
 
 /**
  * Selectors the **chrome** answers itself, before the router. They have a real
- * command-line entry (typing the word works) but no Rust command: `PROPERTIES`
- * opens the docked inspector and `LAYER` opens the docked layers palette, both
- * through the shell action of the same name.
+ * command-line entry (typing the word works) but no reason to reach a router
+ * selector: `PROPERTIES` opens the docked inspector, `LAYER` opens the docked
+ * layers palette and `RESOURCES` opens the References panel.
  *
  * They are deliberately admitted regardless of the loaded host vocabulary (and
  * of whether a drawing is open): they touch no CAD state, exactly like the
@@ -258,5 +269,8 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
  * router name at all — the router knows the layer *operations*
  * (`TOGGLELAYER`/`SETLAYERS`/`RESTORELAYERS`/`SETACTIVELAYER`), which the palette
  * drives through its own dedicated commands (`cad_layers` and friends).
+ * `RESOURCES` is a router name (it builds a host-side report), but the References
+ * panel reads the references the status already carries, so the UI selector
+ * opens that panel and sends nothing: no second source and no fabricated load.
  */
-export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze(['PROPERTIES', 'LAYER']);
+export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze(['PROPERTIES', 'LAYER', 'RESOURCES']);

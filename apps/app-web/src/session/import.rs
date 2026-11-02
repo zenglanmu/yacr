@@ -79,6 +79,7 @@ pub(super) fn load(bytes: &[u8], label: &str, logical: [f64; 2]) -> Result<Loade
                 bytes: Arc::from(bytes),
                 limits: ImportLimits::default(),
                 generation: 0,
+                xref: None,
             },
             &|| false,
         )

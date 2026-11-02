@@ -104,7 +104,7 @@ test('both labels and both range hints exist in both catalogs', async () => {
 });
 
 test('the argument table keeps one numeric grammar per selector', () => {
-  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE']);
+  assert.deepEqual(Object.keys(ARGUMENT_COMMANDS), ['ZOOM', 'SNAPUNIT', 'PDMODE', 'PDSIZE', 'SPACE']);
   for (const { id, accepted } of SYNVARS) {
     const { parse } = ARGUMENT_COMMANDS[id];
     for (const admitted of accepted) assert.equal(parse(admitted), true, `${id} ${admitted}`);

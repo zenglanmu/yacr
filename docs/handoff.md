@@ -1,3 +1,99 @@
+## 2026-11-02 布局页签/SPACE 传输 + XREF 只读导入期合并（v1）
+
+本轮把 LAYOUT 页签/`SPACE` 从表示层接到共享 UI 与传输，并新增 **XREF v1**（此前只有深度
+预算钩子，没有外部参照解析能力）：打开图纸时只读解析、导入期合并、References 面板显示。
+两者都只有合成契约测试，**不是**真实 DWG、AutoCAD、GUI/GPU 或浏览器视觉验收。
+
+### 结论
+
+- **LAYOUT**：`cad_status.layouts`（真实 LAYOUT 表的 id/显示名/支持/原因/视口数）与
+  `cad_status.activeSpace`（`{kind:"model"}` / `{kind:"paper", id}`）已上线；桌面 `LayoutTabs`
+  与移动抽屉共用同一投影，点击发 `SPACE MODEL|#<id>|<显示名>`，走既有 `cad_command` 漏斗。
+  切换成功后按**活动空间**取景（模型 bounds / 纸面实体+视口矩形 / 纸尺寸回退，空布局报
+  `layout.fit_empty` 且相机不动）。不支持的布局页签仍可见但禁用并只显示稳定原因码。
+- **XREF v1**：acadrust 只有 `BlockRecord` 的 `is_xref`/`is_xref_overlay`/`is_xref_unloaded`/
+  `xref_path` 与指向 xref 块的 `INSERT`，**没有独立 Xref 对象**。打开时按路径策略读取、解析并
+  把**模型空间**合并进宿主 xref 块；纸空间跳过，图层/块做命名空间，未加载状态显式保留。
+  没有 `XREF` 命令，也没有 ATTACH/DETACH/RELOAD/BIND/编辑/xref 编写。
+
+### 关键决策
+
+- **merge-at-import**：导入完成后 `cad-db` 是唯一权威，不保留活动链接、不在后续重读参照文件。
+  宿主 `INSERT` 的放置变换保留；参照成员坐标逐位复制，**不发明单位缩放**。
+- **raw path 原样保留**：`ExternalReference.raw_path` 是源文件里的原始拼写；清洗/折叠只在词法
+  策略里发生，拒绝诊断可对照原文。`resolved_path` 只在真正读取成功后由宿主记录。
+- **状态是契约**：`loaded` / `missing` / `browser-unavailable` / `refused-path` / `unloaded` /
+  `cycle` / `depth-exceeded` / `skipped-overlay` / `unsupported` 一一显式，配套
+  `import.xref_*` 诊断；失败不改成空成功。参照图纸没有模型空间几何时仍是 `loaded` +
+  `import.xref_empty` 信息诊断。
+- **浏览器提示而非猜测**：web 打开传 `xref: None`，每个参照记 `browser-unavailable`，
+  References 面板明确提示浏览器不能读本机文件、需在桌面端打开；**不 fetch、不猜路径**。
+  真正的 host bridge **未实现**。
+- **导出拒绝摊平**：DXF 另存对 xref 拥有的块拒绝展开，报 `export.xref_content_dropped`；
+  没有 `INSERT` 的 xref 定义报 `export.xref_definition_not_written`。v1 不写 xref 记录/路径，
+  没有 xref 往返。
+- **布局显示名与页签顺序**：导入按 LAYOUT `tab_order` 排序、用 LAYOUT `name` 作显示名并分配
+  `LayoutId(index + 1)`；无 LAYOUT 对象的纸块按稳定块名顺序追加；只有完全没有纸布局时才写
+  合成 `LayoutId(0)` `"Model"`。UI 不重排、不改名。
+- **命名空间是查看器方案**：图层 `xref|layer`（嵌套 `outer|inner|Layer`），块
+  `xref$0$name`（含匿名块；嵌套 `outer$0$inner$0$Name`），宿主同名图层优先且新图层标
+  `xref_dependent`。不声称这些名字能还原 AutoCAD 的 xref 图。
+
+### 文件 / 区域
+
+- 导入/资源：`crates/cad-import-acadrust/src/xref.rs`、`builder.rs`、
+  `export/{mod,entity}.rs`、`tests_xref.rs`、`tests/layout_order.rs`；
+  `crates/cad-resources/src/{xref_path,xref_source}.rs`；
+  `crates/cad-platform/src/xref_loader.rs`；`crates/cad-db/src/xref.rs`。
+- UI/传输：`crates/cad-ui-core/src/session/{layout_tabs,reference_status,space}.rs` 及
+  `session/{mod,status}.rs`；`apps/desktop-ui/src/components/{LayoutTabs,ReferencesPanel}.tsx`、
+  `src/layout/layout-tabs.ts`、`src/references/references.ts`；移动抽屉复用同一投影。
+- 文档：新增 `docs/xref.md`；更新 `docs/layouts.md`、`docs/compatibility.md`、
+  `docs/autocad-command-coverage.md`、`docs/architecture.md`。
+
+### 验证（lane 日志实际运行，非产品验收）
+
+- `cargo test -p cad-resources` → **47 passed / 0 failed**（含 `xref_path` 13 项词法策略）。
+- `cargo test -p cad-db` → **173 passed / 0 failed**（含 5 项 xref 元数据/状态契约）。
+- `cargo test -p cad-import-acadrust` → **326 passed / 1 ignored / 0 failed**（lane 日志含 xref
+  合并/状态/循环/overlay 契约与 3 项导出拒绝；布局 `tab_order` 用例在修复后
+  `test-import2` 记录 **307 passed / 0 failed / 1 ignored**）。
+- `cargo test -p cad-ui-core` → **352 passed / 0 failed**（含 `layout_status`、`space_argument`、
+  `xref_status` 契约）。
+- `cargo test -p cad-app`（layout lane worktree）→ lib **1509 passed / 0 failed**，另有
+  contracts/selection 等集成集全部通过（`pick_index_real_fixture` 1 ignored）。
+- `cargo test -p cad-representation` → **232 passed / 0 failed**。
+- `(cd apps/desktop-ui && npm test)` → **942 pass / 0 fail**；`npm run build` → exit 0
+  （591.17 kB bundle；chunk 警告为既有）。
+- `cargo check -p app-web`、`cargo check -p cad-import-acadrust --target wasm32-unknown-unknown`
+  与 lane 的 workspace wasm 检查 → exit 0；`cad-platform` 在 wasm 检查中有 2 条
+  unused-import 警告（非失败）。
+- lane 的 clippy（改动 crate 子集）→ exit 0。`python3 scripts/check-i18n.py` 在 lane 记录
+  **i18n OK（990 keys）**。
+- **本轮集成后实际运行（不是 lane 子集）**：
+  `cargo fmt --all -- --check`、workspace clippy（`-D warnings`）、
+  `cargo check --workspace --all-targets --locked`、
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked` 全部 exit 0；
+  `cargo test --workspace --locked -- --test-threads=1` → **exit 0**（真实 DWG/GPU 用例仍按
+  `ignored` 跳过）；`(cd apps/desktop-ui && npm test && npm run build)` → **942 pass / 0 fail**、
+  build exit 0；`check-architecture.py`、`check-tauri-capabilities.py`、`check-fixture-manifest.py`、
+  `check-file-size.py`、`check-command-docs.py`、`test-check-command-docs.py`、`check-i18n.py`
+  全部 OK。新增的 `cad_status` 字段同步更新了 `cad-desktop-shell/tests/fixtures/cad_status_*.json`
+  wire golden（仅新增 `activeSpace`/`layouts`/`references`，无既有字段变化）。
+
+### 边界 / NOT RUN
+
+- **真实 DWG xref 样本 NOT RUN**；AutoCAD 的 xref 命名（`$0$`/匿名块/嵌套）、`VISRETAIN`、
+  `XCLIP`、单位/比例、图层属性继承**未对照**，不得写成“兼容 AutoCAD xref”。
+- **Windows / 大小写不敏感文件系统 NOT RUN**；Windows 盘符策略只有单元/编译级覆盖。
+- **真实 GUI / GPU / 桌面窗口 NOT RUN**；**Web/移动浏览器 xref/布局 smoke NOT RUN**
+  （没有本轮 SwiftShader/无头浏览器证据）。合成测试不能推广为视觉/像素/性能结论。
+- **macOS / Android 真机 NOT RUN**；Android 是否有真实 xref 文件源未验证。
+- **全量门禁与 `cargo test --workspace --locked -- --test-threads=1` 已在本轮集成后运行并通过**
+  （见“验证”）；`ignored` 的真实 DWG/真实 GPU 用例仍未运行，不能当作已验收。
+- **XREF 命令面仍缺**：无 ATTACH/DETACH/RELOAD/BIND，无 xref 记录/路径往返，无 XCLIP/完整
+  VISRETAIN；这些不是“已支持”。
+
 ## 2026-11-01 桌面命令历史只保留弹窗：固定高度命令栏 + 展开的详细记录（含命令输出）
 
 用户截图与反馈：桌面布局同时存在**两份**命令历史——输入行上方固化的回显条（`.commandlog`）与
@@ -11878,3 +11974,45 @@ host/wasm/clippy + 4 static / diff **均 0**；`fmt` 仅既有陌生未跟踪 `d
   macOS 版本；renderer crash 触发 ④（tauri 2.12.3/wry 0.57 无 WKWebView 终止钩子，显式未实现）；
   App Store 私有 API（wry `drawsBackground`）合规性；签名/notarization/打包（`macos-release` 仍
   `if: false`）。本提交未暂存/未推送任何生成物（`apps/app-macos/gen/schemas/` 已加入 `.gitignore`）。
+
+## 2026-11-02：Android 打开 + 另存（DXF 导出）与外部「打开方式」
+
+- **能力变化**：`apps/app-android` 的 `native-below` 宿主从「文件全部 Unsupported」改为
+  **打开 + DXF 另存**。`src-tauri/src/policy.rs`：`CAN_OPEN = true`、`CAN_SAVE = true`、
+  `CAN_NEW = false`、`CAN_PLOT = false`、`IMPORT_WORKER = false`；tick 把它们作为
+  `HostCapabilities` 上报，New/Plot 仍由 UI 显式禁用/拒绝。`cad-db` 仍只有原生 `CadSession`
+  一份权威，Kotlin 不持有文档状态。
+- **打开**：新增 Android-only `src/saf.rs`（JNI 桥）与 `gen/android/.../DocumentPicker.kt`；
+  `ACTION_OPEN_DOCUMENT` + `CATEGORY_OPENABLE` + `*/*` + 读/persistable 授权（宽 MIME 是刻意的：
+  `.dwg` 常被 provider 报成 `application/octet-stream`）。Kotlin 在 worker 线程按 64 KiB 分块读完整
+  字节，Rust 轮询 `documentSnapshot` 后以 `FileEvent::Opened` 交给共享 `PlatformFiles` 漏斗；没有
+  第二条打开路径。`MainActivity` 新增五个实例方法
+  （`documentLaunchOpen`/`documentLaunchSave`/`documentReadUri`/`documentWriteUri`/`documentSnapshot`）
+  委派给 `DocumentPicker`；快照状态 `NONE=0`/`LOADING=1`/`OK=2`/`CANCELLED=3`/`FAILED=4`，终态只消费
+  一次，取消不是失败。
+- **另存**：`ACTION_CREATE_DOCUMENT`（`application/octet-stream` + `EXTRA_TITLE`）选目标后，共享保存
+  路径把 **DXF** 字节经 `write_atomic` → `ContentResolver.openOutputStream(uri, "wt")` 截断写入。
+  这是**导出副本**，不是原地覆盖：打开来源的同一 URI 被 `refuses_source_overwrite` 拒绝；**DWG 保存
+  仍显式延后**（`save.dwg_deferred`），`CAN_PLOT` 保持 `false`。
+- **外部「打开方式」**：`tauri.conf.json` 的 `bundle.fileAssociations` 声明 `.dwg`，mime 覆盖
+  `image/vnd.dwg`、`application/acad`、`application/dwg`、`application/x-dwg`、
+  `application/autocad_dwg` 与 `application/octet-stream`；tauri-build 在构建期把 VIEW intent-filter
+  注入已提交的 `AndroidManifest.xml`（`tauri-file-associations. AUTO-GENERATED` 块）。`MainActivity`
+  处理冷启动 `onCreate` 与热启动 `onNewIntent` + `setIntent`，两者投递到同一个读槽。
+- **已知限制**：`content://` 目标没有文件系统目录，sidecar xref/栅格不可用——
+  `crates/cad-host/src/open.rs::xref_options_for` 对含 `://` 的句柄返回 `None`（引用按不可用报告）。
+  导入仍同步在 tick 线程（`IMPORT_WORKER = false`），超大 DWG 会阻塞渲染，未测量。
+- **Pinch/比例修复**：Android tick 改用 `crate::input::canvas_scale` 从 WebView `devicePixelRatio`
+  取画布比例，不再用 `tao` 的 `window.scale_factor()`；不一致会把输入空间整体缩放、pinch 锚点偏离
+  手指。首个带 DOM rect 的 tick 打一行 `[probe] canvas scale: window.scale_factor=… webview.dpr=… using=…`。
+- **R8**：`gen/android/app/proguard-rules.pro` 用 `-keepclassmembers class dev.yacr.app.MainActivity`
+  固定五个 `document*` 方法。这是实际缺陷修复：没有该规则时 release `classes.dex` 里没有
+  `documentLaunchOpen`（Rust 是唯一调用方），运行期会 `NoSuchMethodError`；已在验证中捕获。
+- **测试证据（已运行）**：`cargo test -p app-android --locked` **48 passed**；
+  `cargo check -p app-android --target aarch64-linux-android --locked` PASS；host clippy PASS；
+  `python3 scripts/test-android-host.py`（新增 SAF/五方法/文件关联/ProGuard 断言）、
+  `check-file-size.py`、`check-architecture.py`、`check-tauri-capabilities.py`、`check-i18n.py` PASS；
+  release APK 构建并本地签名，R8 dex 已核对五个方法存在。
+- **NOT RUN / NOT VERIFIED**：设备/模拟器上的 DocumentsUI 打开与创建、SAF 读/写、persistable grant、
+  取消/失败路径、外部「打开方式」的冷/热投递、Rust→Kotlin JNI 运行时链接、设备上的 pinch 与比例、
+  Vulkan adapter、像素、旋转/前后台、同步导入在超大 DWG 上的停顿。**签名仅本地，未分发。**

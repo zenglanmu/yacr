@@ -27,13 +27,17 @@ mod command_log;
 mod commands;
 mod diagnostics;
 pub mod events;
+mod import_progress;
 mod input;
 mod layers;
+mod layout_tabs;
 mod point_style;
 mod profile;
+mod reference_status;
 pub mod registry;
 mod settings;
 mod snap_unit;
+mod space;
 mod status;
 pub mod wire;
 mod zoom;
@@ -83,8 +87,8 @@ pub use self::commands::{
     normalize_command, parse_pdmode_argument, parse_pdsize_argument, parse_snap_unit_argument,
     parse_zoom_argument, typed_command_argument, unsupported_command_reason, zoom_step_factor,
     ZoomArgument, ARGUMENT_SELECTOR, ARGUMENT_SELECTORS, COMMAND_ALIASES, COMMAND_TABLE,
-    MEASUREMENT_SELECTORS, PDMODE_SELECTOR, PDSIZE_SELECTOR, SNAPUNIT_SELECTOR, ZOOM_IN_FACTOR,
-    ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
+    MEASUREMENT_SELECTORS, PDMODE_SELECTOR, PDSIZE_SELECTOR, SNAPUNIT_SELECTOR, SPACE_SELECTOR,
+    ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
 pub use self::events::{
     derive_batch, CadEvent, CadEventKind, CanvasJson, EventBus, EventSink, StatusFrame,
@@ -103,8 +107,8 @@ pub use self::settings::{
     SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
 pub use self::status::{
-    unsupported_status, CadCamera, CadImportProgress, CadPopup, CadSelection, CadSelectionRow,
-    CadStatus, CadTool, CadToolParams,
+    unsupported_status, CadActiveSpace, CadCamera, CadImportProgress, CadLayoutTab, CadPopup,
+    CadReferenceStatus, CadSelection, CadSelectionRow, CadStatus, CadTool, CadToolParams,
 };
 pub use self::wire::{
     aliases, close_popup, command, commands, create_layer, delete_layer, layers, open_popup,
@@ -625,7 +629,7 @@ impl CadSession {
     ) -> CadStatus {
         self.observe_import();
         self.observe_resources();
-        let (drawing, label, camera, selection) = {
+        let (drawing, label, camera, selection, layouts, active_space) = {
             let c = self.core.controller.borrow();
             let drawing = c.drawing();
             let label = c.document_name_hint.clone();
@@ -644,9 +648,46 @@ impl CadSession {
                 .selection_properties()
                 .map(|properties| CadSelection::from_properties(&properties))
                 .unwrap_or_else(|_| CadSelection::refs_only(c.selection().len()));
-            (drawing, label, camera, selection)
+            // One tab per **paper-space** layout, in the authoritative
+            // descriptor order. The synthetic `LayoutId(0)` "Model" descriptor
+            // is filtered out: model space is its own tab, represented by
+            // `CadActiveSpace::Model`, not a paper sheet.
+            let layouts: Vec<CadLayoutTab> = drawing
+                .as_ref()
+                .map(|database| {
+                    cad_app::render_scene::layout_descriptors(database.as_ref())
+                        .into_iter()
+                        .filter(|descriptor| descriptor.id.0 != 0)
+                        .map(|descriptor| {
+                            CadLayoutTab::new(
+                                descriptor.id.0,
+                                descriptor.name,
+                                descriptor.supported,
+                                descriptor.reason,
+                                descriptor.viewport_count,
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            // The session's real active space through the controller's pure
+            // getter — the one projection point, never a UI-side "current tab".
+            let active_space = CadActiveSpace::from_space_id(&c.active_space());
+            (drawing, label, camera, selection, layouts, active_space)
         };
         let has_document = drawing.is_some();
+        // The authoritative xref metadata, read in the drawing's stable
+        // reference-name (`BTreeMap`) order. No document means no references;
+        // a reference that could not be loaded keeps its real status/reason.
+        let references: Vec<CadReferenceStatus> = drawing
+            .as_ref()
+            .map(|database| {
+                database
+                    .external_references()
+                    .map(CadReferenceStatus::from_reference)
+                    .collect()
+            })
+            .unwrap_or_default();
         let entity_count = drawing
             .as_ref()
             .map(|database| database.entity_count() as u64);
@@ -745,6 +786,8 @@ impl CadSession {
             // The host's own gesture state: an armed grip drag is real even
             // though `tool` is still `null` (a drag is not a tool).
             self.core.grip_drag_active(),
+            layouts,
+            active_space,
         );
         // Real live open progress (running only) from the host snapshot, so the
         // chrome can show a determinate/indeterminate bar without inventing data.
@@ -753,6 +796,9 @@ impl CadSession {
             .import_snapshot()
             .as_ref()
             .and_then(CadImportProgress::from_snapshot);
+        // The authoritative xref rows projected above: always carried, never
+        // omitted, and empty for a document that declares none.
+        status.references = references;
         // The real bounded command echo (observational only). Cleared by the host
         // on a verified document replacement, so this never mixes drawings.
         status.command_log = self

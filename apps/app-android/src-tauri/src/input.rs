@@ -58,6 +58,26 @@ pub fn is_partition_positioned(kind: &str) -> bool {
     )
 }
 
+/// The CSS scale used for the surface's logical size and every input position.
+///
+/// The WebView's `devicePixelRatio` is the authoritative physical/logical ratio:
+/// it is exactly the factor the chrome used to turn pointer coordinates into the
+/// CSS pixels sent on the wire. `window.scale_factor()` comes from `tao`'s
+/// reported display density, which need not be the same value on a device (and
+/// is `1.0` when the platform did not report one). Using it when it disagrees
+/// scales every position around the surface origin — a pinch anchor then lands
+/// away from the fingers even though the pinch math itself is correct.
+///
+/// The DOM dpr wins whenever a layout rect has been accepted; the window scale
+/// remains the fallback only until the chrome reports one (no session exists
+/// then, so no input can be mapped with it).
+pub fn canvas_scale(window_scale: f64, dom_dpr: Option<f32>) -> f64 {
+    match dom_dpr {
+        Some(dpr) if dpr.is_finite() && dpr >= 0.1 => f64::from(dpr),
+        _ => window_scale.max(0.1),
+    }
+}
+
 /// Move one partition-local position into canvas space, when the kind has one.
 ///
 /// `origin` is the `.native-input` rect origin in CSS px (`(0.0, 0.0)` when no
@@ -168,5 +188,21 @@ mod tests {
             canvas_position("wheel", RECT_ORIGIN, Some(4.0), None),
             (Some(4.0), None)
         );
+    }
+
+    #[test]
+    fn the_webview_dpr_is_the_canvas_scale() {
+        // The chrome computed the wire positions with this exact ratio, so the
+        // camera viewport must use it too: a `tao` density that disagrees would
+        // scale every position (and the pinch anchor) around the origin.
+        assert_eq!(canvas_scale(1.0, Some(2.625)), 2.625);
+        assert_eq!(canvas_scale(3.0, Some(2.0)), 2.0);
+        // Until a layout rect exists the window scale is the only answer.
+        assert_eq!(canvas_scale(1.5, None), 1.5);
+        // Degenerate DOM values never become the canvas scale.
+        assert_eq!(canvas_scale(2.0, Some(0.0)), 2.0);
+        assert_eq!(canvas_scale(2.0, Some(f32::NAN)), 2.0);
+        // The fallback itself is clamped away from zero.
+        assert_eq!(canvas_scale(0.0, None), 0.1);
     }
 }

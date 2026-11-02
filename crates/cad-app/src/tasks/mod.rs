@@ -35,7 +35,7 @@ use std::thread::JoinHandle;
 use cad_domain::{CadError, CadResult, DocumentId, TaskStamp};
 use cad_import_acadrust::{
     AcadrustImporter, ImportPhase, ImportProgress, ImportProgressSink, ImportRequest,
-    ImportedDrawing, Importer,
+    ImportedDrawing, Importer, XrefOptions,
 };
 use cad_platform::CancellationToken;
 
@@ -488,7 +488,26 @@ impl HostController {
     /// [`HostController::poll_async_open`] publishes a current result. Starting a
     /// second open supersedes and cancels the first, so only the latest document
     /// can be published.
+    ///
+    /// External references are not read through this entry: it is the
+    /// path-less/browser shape (`xref: None`). Hosts with a real source path use
+    /// [`HostController::begin_async_open_with_xref`].
     pub fn begin_async_open(&mut self, bytes: Arc<[u8]>, label: &str) -> TaskStamp {
+        self.begin_async_open_with_xref(bytes, label, None)
+    }
+
+    /// Start importing `bytes` with an external-reference policy.
+    ///
+    /// The options travel to the worker inside the [`ImportRequest`] itself (no
+    /// new IPC surface): the same single-job supersession/cancel/terminal rules
+    /// as [`HostController::begin_async_open`] apply. `None` keeps the
+    /// path-less behaviour where every reference is `browser-unavailable`.
+    pub fn begin_async_open_with_xref(
+        &mut self,
+        bytes: Arc<[u8]>,
+        label: &str,
+        xref: Option<Arc<XrefOptions>>,
+    ) -> TaskStamp {
         self.pending_open_guard = self.drawing();
         let request = ImportRequest {
             document: self.document_id,
@@ -496,6 +515,7 @@ impl HostController {
             bytes,
             limits: cad_import_acadrust::ImportLimits::default(),
             generation: self.session.generation,
+            xref,
         };
         self.pending_open_label = Some(label.to_string());
         // Reset the UI snapshot to a fresh, tick-less running state so a stale

@@ -208,6 +208,7 @@ fn stale_stamp_is_discarded_by_the_job_guard() {
         bytes: dwg_bytes(),
         limits: cad_import_acadrust::ImportLimits::default(),
         generation: 0,
+        xref: None,
     };
     manager.start(request);
     let deadline = Instant::now() + Duration::from_secs(30);

@@ -5,8 +5,8 @@
 > wasm 会话在 Android 上**不再实例化**。此前 2026-10-28 的 `dom-canvas` 形态已退役（见 §10）。
 >
 > 本文记录契约、构建方式、**已运行的证据**与**未验证边界**。证据只到**编译级 / 开发机契约测试**；
-> **设备运行、Vulkan adapter、像素、旋转/前后台、JNI 运行时链接全部 NOT VERIFIED**。请勿把它读成
-> 「Android 已验收」。
+> **设备运行、Vulkan adapter、像素、旋转/前后台、JNI 运行时链接、SAF 选择器/读写、外部「打开方式」
+> 全部 NOT VERIFIED**。请勿把它读成「Android 已验收」。
 
 ## 1. 载体契约（不许改变的部分）
 
@@ -47,16 +47,23 @@
 
 | 能力 | 状态 | 实际表现 |
 |---|---|---|
-| 打开 / 新建 / 保存 / 出图 | **不支持** | 全部 `CadError::Unsupported`；`canOpen`/`canNew`/`canSave`/`canPlot` 为 `false` |
-| 文件身份 | **不伪造** | 启动没有 `--open`，`drawing: None`；没有 path/URI/content 授权 |
-| 初始文档 | **共享核心内置 demo 图纸** | 与桌面宿主不带 `--open` 启动完全一致；不是导入结果 |
+| 打开 | **支持（SAF，设备 NOT RUN）** | `OPEN` → Kotlin `ACTION_OPEN_DOCUMENT`（`CATEGORY_OPENABLE`、`*/*`、读 + persistable 授权）；worker 线程读完整字节，经 `documentSnapshot` 以 `FileEvent::Opened` 交给共享 `PlatformFiles` 漏斗。`canOpen = true`。宽 MIME 是刻意的：`.dwg` 供应方常报 `application/octet-stream`，窄过滤器会把要打开的文件变灰 |
+| 新建 | **不支持** | `canNew = false`；没有 New 漏斗，也不建第二份文档权威 |
+| 保存 | **支持（DXF 导出，设备 NOT RUN）** | `SAVE` → Kotlin `ACTION_CREATE_DOCUMENT`（`application/octet-stream`、`EXTRA_TITLE`）；共享保存路径把 **DXF** 字节经 `write_atomic` → `ContentResolver.openOutputStream(uri, "wt")` 写入（SAF 实现是截断写，没有临时文件 + rename）。`canSave = true`。这是**导出一份副本**，不是原地覆盖：打开来源的同一 URI 被 `refuses_source_overwrite` 拒绝。**DWG 保存仍是共享路径的显式延后拒绝**（`save.dwg_deferred`） |
+| 出图 | **不支持** | `canPlot = false`；没有 SVG/PDF 导出 |
+| 文件身份 | **SAF URI，不伪造** | 身份 = `content://` opaque 句柄 + `OpenableColumns.DISPLAY_NAME`（缺列时回退 URI 末段）；没有 `--open` 启动参数。`content://` 目标**没有**文件系统目录，sidecar xref/栅格不可用：`xref_options_for` 对含 `://` 的句柄返回 `None`，引用按不可用报告，不派生假根目录 |
+| 外部「打开方式」 | **已接（设备 NOT RUN）** | `bundle.fileAssociations`（`dwg`；mime 含 `application/octet-stream`）由 tauri-build 在构建期注入 manifest 的 VIEW intent-filter；`MainActivity` 冷启动（`onCreate`）与热启动（`onNewIntent` + `setIntent`，`singleTask`）都投递到同一个读槽 |
+| 导入线程 | **同步（tick 线程）** | `importWorker = false`：DWG 在 tick 线程同步导入；极大图纸会阻塞渲染，属**已记录限制**，不是挂起或假成功 |
+| 初始文档 | **共享核心内置 demo 图纸** | 与桌面宿主不带 `--open` 启动完全一致；外部打开到达后由共享打开漏斗替换 |
 | 弹窗宿主 | **已接（in-DOM）** | `AndroidPopupHost`：弹窗是 React 树内的覆盖层，无原生窗口；`open`/`close` 经 `cad_desktop_shell::popup` 的状态机与模态门，主线程跳转有界（5 s）。Options / About / text-edit 可用；`textEdit` 载荷取当前 `CadSession` 选区（无选区 → 共享 `popup.no_text_selection` 拒绝）。设备运行 **NOT VERIFIED** |
 | 持久配置/偏好 | **持久化到应用私有 `filesDir`** | `AndroidConfigStore`：`config.json` / `preference.json`，读 `Absent`/`Text`/`Unreadable` 与桌面一致，写为「建目录 + 临时文件 + `sync_all` + rename」。路径来自 `nativeAssetsReady`（`filesDir` = 公告 `fontsDir` 的父目录）；握手前保持非持久（读 `Absent`、写 `Unsupported`），不发明路径。设备侧落盘 **NOT VERIFIED** |
 | 渲染后端 | **Vulkan 硬件 only** | 软件 Vulkan → `yacr: unsupported-gpu: software-vulkan`；**无** GLES/CPU 回退 |
 | FIT / 视口 | **整窗取景** | `SurfaceView` 覆盖整个窗口；`fit_camera` 仍按全窗口取景，分区子矩形是 follow-up |
 | 指针 | **分区原点平移** | tick 内把 DOM 分区局部坐标按 origin 换算成 presented-canvas 坐标；不是第二条输入通道。鼠标/触摸/笔按每事件 `device` 在共享 `cad-host` 仲裁（touch：单指平移、tap 选择、双指 pinch 缩放；mouse/pen：中键平移、2D 主键框选、滚轮缩放） |
 
-UI 侧对不支持能力的处理必须是**显式禁用/拒绝**（带原因），不得空成功、不得伪造文件选择结果。
+UI 侧对能力布尔为 `false` 的项（New / Plot，以及共享路径判定为延后的 DWG 保存）必须**显式禁用/拒绝**
+（带原因），不得空成功、不得伪造文件选择结果或路径。`canOpen`/`canSave` 由本载体的 tick 按
+`policy.rs` 的常量上报，不在 React 侧按平台猜测。
 
 ## 4. 原生表面（`SurfaceView` + JNI）
 
@@ -79,6 +86,40 @@ React chrome），`setZOrderMediaOverlay(false)` 一并固定。
 | `nativeAssetsReady(fontsDir, imagesDir)` | Kotlin → Rust | 公告从 APK 解压到 `filesDir` 的字体/资源目录 |
 
 - `Long` 只是不透明原生 handle；Kotlin **不**持有 CAD 状态、不做坐标/命令逻辑。
+
+**反向（Rust → Kotlin）的 5 个实例方法**：`src/saf.rs` 按精确名字/描述符调用
+`dev.yacr.app.MainActivity` 上的实例方法（`Java_dev_yacr_app_MainActivity_document*`），这也是
+`proguard-rules.pro` 必须固定它们的原因。
+
+| 方法 | 职责 |
+|---|---|
+| `documentLaunchOpen()` | 启动 `ACTION_OPEN_DOCUMENT`，清空并武装唯一交互槽 |
+| `documentLaunchSave(String)` | 启动 `ACTION_CREATE_DOCUMENT`，`defaultName` 作为建议标题 |
+| `documentReadUri(String)` | 启动 Kotlin worker 读；槽立即进入 `LOADING` |
+| `documentWriteUri(String, byte[])` | 同步截断写入；失败抛 `IOException`，调用方报真实错误 |
+| `documentSnapshot()` | 返回 `[Int state, String? uri, String? name, String? error, ByteArray? bytes]` |
+
+`documentSnapshot()` 的状态码与 Kotlin `DocumentPicker.STATE_*` 一一对应：
+
+| 码 | 名称 | 语义 |
+|---|---|---|
+| `0` | `NONE` | 没有进行中的交互 |
+| `1` | `LOADING` | 读在途；**不消费**，下次仍可能返回 `LOADING` |
+| `2` | `OK` | 读完成（带 `bytes`）或已选保存目标（`bytes == null`）；**消费** |
+| `3` | `CANCELLED` | 用户取消选择器，不是失败；**消费** |
+| `4` | `FAILED` | 交互失败，`error` 说明原因；**消费** |
+
+- 终态（`OK`/`CANCELLED`/`FAILED`）**只交付一次**：`documentSnapshot` 在返回前把槽复位为 `NONE`，
+  旧结果不能回答新请求。`bytes != null` 是唯一可用的 open/save 判别式（保存目标没有字节）；
+  目的（`FilePurpose`）由 Rust 侧武装，Kotlin 只记 `pendingSave`，两侧不会互相串线。
+- 线程：启动走 `runOnUiThread`（JNI 可能来自 tick 线程）；读在
+  `yacr-document-read` worker 上完成（64 KiB 分块，不截断）；写按调用线程同步执行。槽访问加锁，
+  并用单调 `generation` 丢弃过期的选择器/读取结果，不让旧结果覆盖新交互。
+- Activity 对象来自冻结回调的隐式 `this`（`capture` 只存一次 `JavaVM` + global ref）；没有
+  `FindClass`、没有第二个 Java 辅助类。每次交互一个 bounded local frame，JNI 失败先清 pending
+  exception，再以 `Err(String)`/`Failed` 返回——**没有空成功**。稳定 logcat 前缀为 `yacr: saf`。
+- 非 Android target 不编译 SAF 桥；`AndroidFiles` 的对应入口显式返回 `policy::file_refusal(...)`，
+  开发机据此跑拒绝契约测试，而不是伪造选择器结果。
 - 字体与资源从 APK assets 解压到 `filesDir` 后再公告；空字体目录显式拒绝（不伪造字体面）。资源公告
   可能晚于 Tauri `setup`，因此 tick 在会话建立前每轮重读。
 - **同一个 `filesDir` 也是持久配置的根**：`config.json` / `preference.json` 写在它下面（`fontsDir` 的
@@ -99,6 +140,11 @@ React chrome），`setZOrderMediaOverlay(false)` 一并固定。
   双指 `pinch` = 以中点缩放（含中点平移），**touch 从不框选**；mouse/pen 中键拖拽 = 平移、2D 主键拖拽 =
   框选、滚轮 = 缩放。`pinch` 契约（一次 `pointer_cancel` 进入、连续 `{x,y,dx,dy,scale}`、不逐指针转发）
   见 `docs/react-linux-app.md`。
+- **画布比例取 WebView 的 `devicePixelRatio`**：tick 用 `crate::input::canvas_scale` 从已接受的布局
+  矩形取 `dpr`，而不是 `tao` 的 `window.scale_factor()`；两者不一致会把整个输入空间按错误比例缩放，
+  pinch 锚点会落在手指之外。首个带 DOM rect 的 tick 打一行
+  `[probe] canvas scale: window.scale_factor=… webview.dpr=… using=…`。开发机纯函数测试覆盖取值/回退；
+  **设备上的 pinch 与比例确认 NOT RUN**。
 - **Options / 持久化**：弹窗宿主已接（`AndroidPopupHost`，in-DOM 覆盖层），因此 Options / About /
   text-edit 可用；`textEdit` 载荷由 loop 线程上的原生 `CadSession` 选区派生。`interaction.leftDragPans`
   （Options → Drafting「左键拖动平移」）等偏好写入 `filesDir` 的 `preference.json`（`config.json` 为完整
@@ -125,8 +171,9 @@ apps/app-android/
     src/host/pump.rs           RedrawPump（只唤醒 loop，不做渲染工作）
     src/popup.rs               弹窗接缝：PopupOps payload + AndroidPopupHost 主线程跳转
     src/surface.rs             JNI 表面回调 + SurfaceProbePresenter（Vulkan only）
-    src/policy.rs              纯策略：标记行、能力布尔、JNI 符号名（可在开发机测试）
-    src/platform.rs            Unsupported 文件契约、DOM surface、filesDir 持久 config store
+    src/saf.rs                 Android-only SAF JNI 桥：5 个 document* 实例方法；非 Android 目标不编译
+    src/policy.rs              纯策略：标记行、能力布尔（open/save=true，new/plot=false）、JNI 符号名（可在开发机测试）
+    src/platform.rs            SAF 文件契约（AndroidFiles）、DOM surface、filesDir 持久 config store
     src/input.rs               分区局部 → canvas 坐标（纯函数，开发机单测）
     src/refusal.rs             稳定标记行 / step / 历史 exit 6 词汇
     src/report.rs              报表行纯函数（一行、去控制字符、有界）
@@ -138,7 +185,18 @@ apps/app-android/
 - `gen/android` **提交**：它由 CLI 版本决定；重新生成会随 CLI 漂移，提交后构建可复现。
   `app/src/main/assets/tauri.conf.json`、`jniLibs/*.so` 等生成物由 `gen/android/app/.gitignore` 忽略。
 - `gen/android/app/src/main/java/dev/yacr/app/MainActivity.kt` 是**手写且提交**的宿主 Activity。
-  重新 `tauri android init` 会覆盖它；`scripts/test-android-host.py` 会判红。
+  重新 `tauri android init` 会覆盖它；`scripts/test-android-host.py` 会判红。它只把五个 `document*`
+  实例方法委派给 `DocumentPicker`，自身不持有 CAD 文档。
+- `gen/android/app/src/main/java/dev/yacr/app/DocumentPicker.kt` 是**手写且提交**的 SAF 中介：选择器、
+  worker 读、单槽快照；只保存一次交互的结果，不保存文档（铁律 8）。
+- `gen/android/app/proguard-rules.pro` 的 `-keepclassmembers class dev.yacr.app.MainActivity` 固定
+  五个 `document*` 方法的名字与描述符。**这不是预防性规则**：没有它时 release R8 会把
+  `documentLaunchOpen` 从 `classes.dex` 移除（Rust 是唯一调用方），运行期必抛 `NoSuchMethodError`；
+  该缺陷已在验证中实际捕获。
+- `tauri.conf.json` 的 `bundle.fileAssociations` 声明 `.dwg`（含 `image/vnd.dwg`、`application/acad`、
+  `application/dwg`、`application/x-dwg`、`application/autocad_dwg`、`application/octet-stream`）。
+  `AndroidManifest.xml` 里的 `tauri-file-associations. AUTO-GENERATED` 块由 tauri-build 在构建期注入；
+  **改关联请改配置**，不要手写 manifest。
 - Gradle `ndkVersion = "29.0.13846066"`（脚本断言）。仓库 `fonts/` 作为 assets `srcDir` 打包
   （`fonts.json` + 字体文件）。
 - **NDK 链接下限**：`ndk` crate 的 `nativewindow` feature 会无条件链接 `-lnativewindow`，
@@ -164,8 +222,8 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 
 ## 7. 运行与观测
 
-- **`logcat` tag 是 `yacr`**：`adb logcat -s yacr`。宿主启动行、表面生命周期、资源公告、页面几何都
-  打在这个 tag 上。
+- **`logcat` tag 是 `yacr`**：`adb logcat -s yacr`。宿主启动行、表面生命周期、资源公告、页面几何、
+  SAF 选择/读写（失败带 `yacr: saf` 前缀）都打在这个 tag 上。
 - **证据运行必须显式记录标记行**。Android 没有 shell 退出状态；`canvas_runtime_failed` 的 `webgl2`
   step 仍保留退出码 6 的**历史**契约，但当前载体不产生该失败。
 - **边缘到边缘（edge-to-edge）与手势条内边距**：`MainActivity` 调 `enableEdgeToEdge()`，系统手势条
@@ -188,31 +246,44 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 
 **已运行（编译级 / 开发机）**：
 
+- `cargo test -p app-android --locked`：**48 passed**（`policy`/`platform`（含 SAF 事件解码与来源覆盖
+  守卫）/`input`/`report`/`refusal`/`contract`/源码结构；**不是**设备证据）；
 - `cargo check -p app-android --target aarch64-linux-android --locked`（需要 `apps/app-android/dist`
   存在，`tauri::generate_context!` 会内嵌 `frontendDist`）；
-- Android lane clippy；
-- 开发机可运行契约测试：`cargo test -p app-android --locked`（`policy`/`platform`/`input`/`report`/
-  `refusal`/`contract`/源码结构；**不是**设备证据）；
+- Android lane clippy（host target）；
 - Kotlin 编译（提交的 Gradle 工程）；
-- `javap` 核对 4 个 JNI 导出符号。
+- `javap` 核对 4 个 Kotlin→Rust JNI 导出符号；
+- `python3 scripts/test-android-host.py`：新增断言 `DocumentPicker.kt` 的 SAF 接线（open/save 动作、
+  `ContentResolver`、`"wt"`、64 KiB 读、`STATE_* = 0..4`、终态消费）、`MainActivity` 的五个委派方法、
+  `onNewIntent` + `setIntent`、`fileAssociations` 的 dwg mime 集，以及 ProGuard 的五行 keep；
+- `python3 scripts/check-file-size.py`、`check-architecture.py`、`check-tauri-capabilities.py`、
+  `check-i18n.py` 通过；
+- **release APK 构建并本地签名**（签名仅供本地验证，不是发布流程；**未安装运行**）；R8 release
+  `classes.dex` 已核对五个 `document*` 方法存在（ProGuard keep 规则就是这次修复）。
 
 **NOT VERIFIED（全部未运行）**：
 
 - **设备/模拟器**：未安装、未启动 APK（本轮没有任何 `adb` 运行）。
+- **文件选择器 / SAF 读写**：DocumentsUI 打开与创建、provider 授权、persistable grant、worker 读、
+  `write_atomic` 写入 `content://`、取消/失败路径、大文件与超时均**未在设备上运行**。
+- **外部「打开方式」**：VIEW intent 是否被系统匹配、冷启动 `onCreate` 与热启动 `onNewIntent` 的投递
+  均未在设备上验证。
 - **Vulkan adapter**：未枚举，未创建 device/queue，未验证硬件/软件归属。
 - **像素**：无帧、无截图、无 golden、无色域/色彩空间结论。
 - **旋转 / `onPause`/`onResume` / 进程重建 / `SurfaceView` 重建**：未验证。
-- **JNI 运行时链接**：`System.loadLibrary` → 符号解析 → 回调未在设备上跑过。
-- **输入**：触摸、手势、软键盘、长按、双击、滚轮（如果有）均未验证。
-- **文件/SAF**：打开/保存/新建全不支持，也没有设备侧拒绝运行的记录。
+- **JNI 运行时链接**：`System.loadLibrary` → 符号解析 → 回调、以及 Rust→Kotlin 的五个 `document*`
+  调用均未在设备上跑过；静态符号/dex 核对不等于运行时链接。
+- **输入**：触摸、手势、软键盘、长按、双击、滚轮（如果有）均未验证；pinch 与
+  `devicePixelRatio` 比例只在开发机纯函数测试覆盖，**设备确认 NOT RUN**。
 - **弹窗**：接缝已接（`AndroidPopupHost` + `AndroidPopupOps`），源码/开发机契约测试覆盖「注册、
   路由到共享生命周期、无选区返回共享拒绝、主线程跳转有界」；**设备上打开 Options/About/text-edit、
   输入文本、模态门** 未运行。
 - **偏好持久化**：`AndroidConfigStore` 的开发机测试覆盖 absent/unreadable/round-trip/原子覆盖/非持久
   回退；**设备上的 `filesDir` 落盘、进程重建后读回** 未运行。
 - **多窗口/分屏/折叠屏/三键导航/侧边导航栏**：未验证。
-- **aarch64/armv7/i686 产物**：本轮没有构建/安装任一架构的 APK。
-- **release 签名/分发**：仓库不含密钥，不是发布流程。
+- **架构产物**：aarch64 release APK 已构建但**未安装运行**；armv7/i686/x86_64 未构建、未安装。
+- **性能**：同步导入（`importWorker = false`）在超大 DWG 上的渲染停顿未测量。
+- **release 签名/分发**：仅本地签名；仓库不含发布密钥，不是发布流程。
 
 ## 9. 门禁
 
@@ -220,8 +291,11 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
   `.gitignore` 检查外，`check_native_carrier` 断言：4 个冻结 JNI 签名、`SurfaceView` 在 WebView 父容器
   index 0、`setZOrderOnTop(false)`/`setZOrderMediaOverlay(false)`、holder 回调、
   `nativeAssetsReady(...)`、`ndkVersion = "29.0.13846066"`、`fonts/` 作为 assets `srcDir`、透明主题、
-  `configChanges` 保留 `orientation|screenSize|smallestScreenSize|uiMode`。**无变异即失败**：把表面改成
-  on-top、去掉一个 JNI 符号或换掉 NDK 版本都会判红。**注意：这些是静态接线，不是设备/像素证据。**
+  `configChanges` 保留 `orientation|screenSize|smallestScreenSize|uiMode`；
+  `check_document_picker_wiring` 另外断言 SAF 打开/另存、五个 `document*` 实例方法、外部
+  `onNewIntent`、`.dwg` 关联 mime 集与 ProGuard keep 行。**无变异即失败**：把表面改成 on-top、去掉一个
+  JNI 符号、换掉 NDK 版本、改回 `ACTION_GET_CONTENT` 或删掉 keep 规则都会判红。**注意：这些是静态
+  接线，不是设备/像素/SAF 运行证据。**
 - `cargo test -p app-android --locked`：纯函数与源码结构契约（host target 上运行）。
 - `cargo check -p app-android --target aarch64-linux-android --locked`：真实编译门禁。
 - `bash scripts/build-android.sh`：真实 APK 构建，失败即非零。
@@ -239,4 +313,5 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 
 **不得复用**：那些像素/命令/选择器结论属于**已退役载体**，不能证明 native `SurfaceView`、Vulkan
 adapter、JNI 链接、旋转/生命周期或 native 命令语义。当前 Android 的最高诚实表述是
-**「native `native-below` 载体已实现并接线，编译级契约通过；设备运行与视觉证据均为 NOT RUN」**。
+**「native `native-below` 载体已实现并接线，文件打开/DXF 另存与外部「打开方式」已接，编译级契约通过；
+设备运行、SAF 实际读写、外部 intent 投递与视觉证据均为 NOT RUN」**。

@@ -15,6 +15,7 @@ import { StartPanel } from './StartPanel.tsx';
 import { LayersPalette } from './LayersPalette.tsx';
 import { PropertiesPalette } from './PropertiesPalette.tsx';
 import { DiagnosticsPalette } from './DiagnosticsPalette.tsx';
+import { ReferencesPanel } from './ReferencesPanel.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../cad/surface.ts';
 
@@ -34,12 +35,15 @@ export function Workspace() {
   // geometry is unchanged until the user opens it.
   const showProperties = palettesAvailable && shell.propertiesOpen && !showStart;
   const showDiagnostics = palettesAvailable && Boolean(shell.diagnosticsOpen);
+  // The references panel is a document-wide list like the layers palette: it
+  // reads the host's `cad_status.references` rows and is docked on the desktop.
+  const showReferences = palettesAvailable && Boolean(shell.referencesOpen);
   // The layers palette is a document-wide list, not a selection projection, so it
   // is offered on the start page too: with no session the host answers the empty
   // list and the panel says "no layers" rather than disappearing after `LAYER`.
   // Closed by default, so the startup partition geometry is unchanged.
   const showLayers = palettesAvailable && Boolean(shell.layersOpen);
-  const leftOpen = showStart || showProperties || showDiagnostics || showLayers;
+  const leftOpen = showStart || showProperties || showDiagnostics || showLayers || showReferences;
   // The host hides the system cursor over the CAD partition only while it is
   // drawing its own crosshair (a 2D view with a pointer on the surface). A 3D
   // view reports `false`, so the system arrow stays and the pointer is never
@@ -57,6 +61,7 @@ export function Workspace() {
         {showLayers ? <LayersPalette /> : null}
         {showProperties ? <PropertiesPalette /> : null}
         {showDiagnostics ? <DiagnosticsPalette /> : null}
+        {showReferences ? <ReferencesPanel /> : null}
       </div>
       <div className="workspace__canvas">
         {/* dom-canvas only: the in-DOM pixel carrier. It fills exactly the rect

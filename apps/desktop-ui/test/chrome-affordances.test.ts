@@ -10,8 +10,9 @@
 //   * one carrier helper (`palettesOffered`) decides for **every** nav-rail palette
 //     toggle, so a `dom-canvas` carrier cannot show a toggle for a panel that is
 //     never rendered;
-//   * the doc-tab `+` and the layout tabs are disabled for a stated limitation, not
-//     with "unsupported" or "not wired";
+//   * the doc-tab `+` is disabled for a stated limitation, not with
+//     "unsupported" or "not wired", while the layout strip renders the host's
+//     real tabs and dispatches `SPACE` instead of a one-space placeholder;
 //   * the catalog keys those sentences need are declared in one place, so the gap
 //     is reportable instead of being filled with invented copy.
 import test from 'node:test';
@@ -23,7 +24,7 @@ import {
 import { admitCommandText } from '../src/commands/commands.ts';
 import { LOCAL_CHROME_COMMANDS } from '../src/commands/gating.ts';
 import {
-  ONE_DOCUMENT_KEY, ONE_LAYOUT_SPACE_KEY, PANEL_DIALOG_MISSING_KEY, PENDING_CATALOG_KEYS,
+  ONE_DOCUMENT_KEY, PANEL_DIALOG_MISSING_KEY, PENDING_CATALOG_KEYS,
 } from '../src/limits.ts';
 import { palettesOffered } from '../src/cad/surface.ts';
 
@@ -221,26 +222,24 @@ test('the doc-tab "+" states the one-drawing limit instead of nothing', async ()
   assert.equal(tabs.includes('ribbon.command_unsupported'), false);
 });
 
-test('the layout tabs state the one-space limit, not "not wired"', async () => {
+test('the layout strip renders real tabs instead of a one-space placeholder', async () => {
   const tab = await readModule('components/LayoutTabs.tsx');
-  assert.ok(tab.includes("import { ONE_LAYOUT_SPACE_KEY } from '../limits.ts';"));
-  assert.equal((tab.match(/title=\{reason\}/g) ?? []).length, 2, 'both layout affordances say why');
-  assert.ok(tab.includes('const reason = t(ONE_LAYOUT_SPACE_KEY);'));
-  // The old key claimed a wiring gap ("host provides no space selection") for a
-  // design decision, so it must not be rendered again.
-  assert.equal(tab.includes("t('layout.switch_unwired')"), false);
-  assert.equal(tab.includes("t('command.unsupported')"), false);
-  // Still disabled, still labelled — the limitation is stated, not hidden.
-  assert.ok(tab.includes("aria-label={t('layout.tab.add')}"));
-  assert.ok(tab.includes('className="layout-tab is-disabled" disabled title={reason}'));
-  const addBlock = tab.slice(tab.indexOf('className="layouttabs__add"'), tab.indexOf('>', tab.indexOf('className="layouttabs__add"')));
-  assert.ok(addBlock.includes('\n        disabled'), 'the new-layout button stays disabled');
+  assert.ok(tab.includes("import { layoutTabsView, layoutUnsupportedTitle } from '../layout/layout-tabs.ts';"));
+  assert.equal(tab.includes('ONE_LAYOUT_SPACE_KEY'), false, 'the one-space claim is gone');
+  assert.equal(tab.includes('layout.tab.add'), false, 'no dead new-layout button');
+  // The same three states the old placeholder could not express: model, a real
+  // active paper layout, and a disabled tab with its stable reason.
+  assert.ok(tab.includes('const tabs = layoutTabsView(shell.status);'));
+  assert.ok(tab.includes('role="tablist"'));
+  assert.ok(tab.includes('aria-selected={tab.active}'));
+  assert.ok(tab.includes('disabled={disabled}'));
+  assert.ok(tab.includes('layoutUnsupportedTitle(t, tab)'));
+  assert.ok(tab.includes('shell.runCommand(command)'));
 });
 
 test('the copy keys these disabled affordances need are declared in one place', async () => {
   assert.deepEqual([...PENDING_CATALOG_KEYS].sort(), [
     'doctabs.one_document',
-    'layout.one_space',
     'ribbon.panel_dialog_missing',
   ]);
   // They are referenced as constants (never as inline literals), which is what lets
@@ -270,7 +269,6 @@ test('the pending keys are named by the module that owns the limits', async () =
   ).test(limits);
   // One place to read what the chrome still needs from the catalog.
   assert.ok(declares('ONE_DOCUMENT_KEY', 'doctabs.one_document'));
-  assert.ok(declares('ONE_LAYOUT_SPACE_KEY', 'layout.one_space'));
   assert.ok(declares('PANEL_DIALOG_MISSING_KEY', 'ribbon.panel_dialog_missing'));
   assert.ok(limits.includes('export const PENDING_CATALOG_KEYS'));
 });

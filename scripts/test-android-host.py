@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Static contracts for the Tauri 2 **Android host** (`apps/app-android`).
 
-The host is an asset/WebView carrier: the shared React chrome runs in the Android
-WebView and the wasm `dom-canvas` CAD session owns the document (ADR 0024,
-`AGENTS.md` iron rule 8). Nothing in this file builds an APK or runs a device;
+The host is a Tauri 2 WebView carrier with a **native `native-below`** CAD surface:
+the shared React chrome runs in the Android WebView and the native Rust
+`CadSession` owns the document, presenting through a `SurfaceView` layered beneath
+the WebView (ADR 0027; the wasm `dom-canvas` session does not run on Android).
+Nothing in this file builds an APK or runs a device;
 that is `scripts/build-android.sh` plus a real emulator/device run. What it pins
 is the wiring that makes such a run honest:
 
@@ -23,6 +25,11 @@ is the wiring that makes such a run honest:
     renderer through the frozen JNI symbols. The shared command set is registered by
     the native host (the command registry, not this file, owns its exact membership);
     the two shell-only reports stay present because the chrome still sends them;
+  * the SAF document contract: `DocumentPicker.kt` launches `ACTION_OPEN_DOCUMENT` /
+    `ACTION_CREATE_DOCUMENT` and does every read/write through `ContentResolver`,
+    while `MainActivity` exposes the five `document*` instance-JNI entry points Rust
+    calls (plus `onNewIntent` for external "Open with"). `bundle.fileAssociations`
+    declares `.dwg` so tauri-build can inject the VIEW intent filters;
   * the refusal contract: marker text, marker first, exit code `6` for `webgl2`;
   * the edge-to-edge gesture-bar inset: the Activity reads `WindowInsets` and
     publishes `--yacr-safe-bottom` on the page, and `mobile.css` is the consumer of
@@ -417,6 +424,174 @@ def check_native_carrier() -> list[str]:
     return problems
 
 
+def check_document_picker_wiring() -> list[str]:
+    """The Kotlin half of the SAF document contract (open + save/export).
+
+    The native host drives Kotlin through instance JNI on `MainActivity`:
+    `documentLaunchOpen()`, `documentLaunchSave(defaultName)`,
+    `documentReadUri(uri)`, `documentWriteUri(uri, bytes)` and
+    `documentSnapshot()`. `DocumentPicker.kt` must own the picker/read plumbing so
+    the Activity keeps holding no document state (iron rule 8), and the picker must
+    be registered through `registerForActivityResult` — never `onActivityResult`.
+    What is pinned here is only the wiring: no APK is built and no device is run.
+
+    `bundle.fileAssociations` is pinned as well: tauri-build turns each entry into
+    the activity's VIEW intent filters at build time, so the committed
+    `AndroidManifest.xml` deliberately has no hand-edited association block.
+    """
+    problems: list[str] = []
+    java_dir = GEN_ANDROID / "app" / "src" / "main" / "java" / "dev" / "yacr" / "app"
+    activity_path = java_dir / "MainActivity.kt"
+    picker_path = java_dir / "DocumentPicker.kt"
+    if not activity_path.is_file():
+        return [f"missing {activity_path.relative_to(ROOT)}"]
+    if not picker_path.is_file():
+        return [
+            f"missing {picker_path.relative_to(ROOT)} "
+            "(the SAF picker/read slot must not be folded into MainActivity)"
+        ]
+    activity = read(activity_path)
+    picker = read(picker_path)
+
+    # Picker plumbing lives in DocumentPicker.kt.
+    for fragment in (
+        "Intent.ACTION_OPEN_DOCUMENT",
+        "Intent.ACTION_CREATE_DOCUMENT",
+        "Intent.CATEGORY_OPENABLE",
+        "contentResolver.openInputStream(",
+        "contentResolver.openOutputStream(",
+        '"wt"',
+        "takePersistableUriPermission(",
+        "FLAG_GRANT_READ_URI_PERMISSION",
+        "FLAG_GRANT_WRITE_URI_PERMISSION",
+        "FLAG_GRANT_PERSISTABLE_URI_PERMISSION",
+        "registerForActivityResult(",
+        "ActivityResultContracts.StartActivityForResult()",
+        "ActivityResultLauncher<Intent>",
+        "Intent.EXTRA_TITLE",
+        '"application/octet-stream"',
+        '"*/*"',
+        "OpenableColumns.DISPLAY_NAME",
+        "generation",
+    ):
+        if fragment not in picker:
+            problems.append(f"DocumentPicker.kt: SAF wiring missing '{fragment}'")
+    if "Intent.ACTION_GET_CONTENT" in picker:
+        problems.append(
+            "DocumentPicker.kt: use ACTION_OPEN_DOCUMENT (SAF grant), never ACTION_GET_CONTENT"
+        )
+    if "override fun onActivityResult" in activity or "override fun onActivityResult" in picker:
+        problems.append(
+            "MainActivity.kt: picker results must arrive through registerForActivityResult, "
+            "not an onActivityResult override"
+        )
+    # 64 KiB read buffer: the whole document is streamed, never a truncated read.
+    if not re.search(r"64 \* 1024", picker):
+        problems.append("DocumentPicker.kt: document reads must use a 64 KiB buffer")
+    # The state codes are the cross-language transport contract (NONE..FAILED).
+    for name, value in (
+        ("STATE_NONE", 0),
+        ("STATE_LOADING", 1),
+        ("STATE_OK", 2),
+        ("STATE_CANCELLED", 3),
+        ("STATE_FAILED", 4),
+    ):
+        if not re.search(rf"const val {name} = {value}\b", picker):
+            problems.append(f"DocumentPicker.kt: `const val {name} = {value}` must stay declared")
+    # Terminal results are consumed exactly once; a poll must not replay them.
+    if "slot = EMPTY" not in picker:
+        problems.append("DocumentPicker.kt: terminal snapshot results must be consumed (slot = EMPTY)")
+
+    # The five JNI entry points are on the Activity (that is what Rust calls).
+    for signature in (
+        "fun documentLaunchOpen()",
+        "fun documentLaunchSave(defaultName: String)",
+        "fun documentReadUri(uri: String)",
+        "fun documentWriteUri(uri: String, bytes: ByteArray)",
+        "fun documentSnapshot(): Array<Any?>",
+    ):
+        if signature not in activity:
+            problems.append(f"MainActivity.kt: Rust-facing document entry point missing: `{signature}`")
+    for delegation in (
+        "documentPicker.documentLaunchOpen()",
+        "documentPicker.documentLaunchSave(defaultName)",
+        "documentPicker.documentReadUri(uri)",
+        "documentPicker.documentWriteUri(uri, bytes)",
+        "documentPicker.documentSnapshot()",
+    ):
+        if delegation not in activity:
+            problems.append(f"MainActivity.kt: the document entry points must delegate to DocumentPicker ({delegation})")
+    # External "Open with": onCreate and onNewIntent both arm the same read slot.
+    if "override fun onNewIntent(intent: Intent)" not in activity:
+        problems.append("MainActivity.kt: external 'Open with' must be handled in onNewIntent")
+    if "setIntent(intent)" not in activity:
+        problems.append("MainActivity.kt: onNewIntent must setIntent(intent) so the carrier sees the document")
+    if activity.count("handleIncomingIntent(intent)") < 2:
+        problems.append(
+            "MainActivity.kt: both onCreate and onNewIntent must arm the incoming-document read"
+        )
+
+    # fileAssociations -> tauri-build injects the VIEW filters into the manifest.
+    conf = json.loads(read(CONF))
+    associations = conf.get("bundle", {}).get("fileAssociations") or []
+    if not associations:
+        problems.append("tauri.conf.json: bundle.fileAssociations must declare the .dwg association")
+    else:
+        dwg = [
+            association
+            for association in associations
+            if "dwg" in [str(ext).lstrip(".") for ext in association.get("ext") or []]
+        ]
+        if not dwg:
+            problems.append("tauri.conf.json: bundle.fileAssociations must include ext 'dwg'")
+        for association in dwg:
+            actions = [str(action).lower() for action in association.get("androidIntentActionFilters") or []]
+            if "view" not in actions:
+                problems.append(
+                    "tauri.conf.json: each .dwg association must filter on ACTION_VIEW "
+                    "(`androidIntentActionFilters: [\"view\"]`)"
+                )
+        mime_types = {association.get("mimeType") for association in dwg}
+        for expected in (
+            "image/vnd.dwg",
+            "application/acad",
+            "application/dwg",
+            "application/x-dwg",
+            "application/autocad_dwg",
+            # Providers commonly report .dwg as octet-stream; without this entry the
+            # "Open with" filter would never match those files.
+            "application/octet-stream",
+        ):
+            if expected not in mime_types:
+                problems.append(
+                    f"tauri.conf.json: the .dwg file associations must keep mimeType '{expected}'"
+                )
+
+    # Release R8 obfuscation: the five Java methods are called from Rust by exact
+    # name/descriptor, so they must be pinned. This is not theoretical: a release
+    # build without the keep block silently removed `documentLaunchOpen` from
+    # classes.dex (R8 saw no Java caller) and every picker call would fail at
+    # runtime with NoSuchMethodError.
+    proguard = read(GEN_ANDROID / "app" / "proguard-rules.pro")
+    if "-keepclassmembers class dev.yacr.app.MainActivity" not in proguard:
+        problems.append(
+            "gen/android/app/proguard-rules.pro: the JNI document methods need a "
+            "-keepclassmembers class dev.yacr.app.MainActivity block"
+        )
+    for descriptor in (
+        "void documentLaunchOpen();",
+        "void documentLaunchSave(java.lang.String);",
+        "void documentReadUri(java.lang.String);",
+        "void documentWriteUri(java.lang.String, byte[]);",
+        "java.lang.Object[] documentSnapshot();",
+    ):
+        if descriptor not in proguard:
+            problems.append(
+                f"proguard-rules.pro: JNI method must be kept verbatim: `{descriptor}`"
+            )
+    return problems
+
+
 def check_generated_project_and_ignores() -> list[str]:
     problems: list[str] = []
     gradle = GEN_ANDROID / "app" / "build.gradle.kts"
@@ -446,6 +621,7 @@ def main() -> int:
         check_ui_bundle_wiring,
         check_gesture_bar_inset,
         check_native_carrier,
+        check_document_picker_wiring,
         check_generated_project_and_ignores,
     ):
         try:
@@ -458,7 +634,8 @@ def main() -> int:
             print(f"  - {problem}", file=sys.stderr)
         return 1
     print("android-host OK: src-tauri layout, conf, Android-only tauri, shell reports, refusal contract, "
-          "gesture-bar inset publisher, native SurfaceView/JNI carrier, pinned NDK + fonts assets")
+          "gesture-bar inset publisher, native SurfaceView/JNI carrier, SAF document picker/read slot, "
+          "dwg file associations, pinned NDK + fonts assets")
     return 0
 
 

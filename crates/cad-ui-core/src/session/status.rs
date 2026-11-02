@@ -8,7 +8,12 @@ use serde::Serialize;
 
 use cad_app::ToolSnapshot;
 
+pub use super::layout_tabs::{CadActiveSpace, CadLayoutTab};
+
 use super::command_log::CadCommandLogEntry;
+
+pub use super::import_progress::CadImportProgress;
+pub use super::reference_status::CadReferenceStatus;
 
 /// Camera block of the frontend status (`{center, scale}`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -17,47 +22,6 @@ pub struct CadCamera {
     pub center: [f64; 2],
     /// World units per logical pixel (strictly positive).
     pub scale: f64,
-}
-
-/// Live import progress for the frontend progress affordance.
-///
-/// Present **only while an import is genuinely running**: a terminal snapshot
-/// (opened/cancelled/failed) is never projected here, so an idle or finished
-/// document carries `importProgress: null` and the chrome shows no bar. Every
-/// field is a real observed value — `entities_total`/`bytes` stay `null` when
-/// the importer did not expose them, which the UI renders as an indeterminate
-/// bar without a byte count; nothing is extrapolated to 100%.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CadImportProgress {
-    /// Stable machine key of the latest phase (e.g. `"entities"`); `null` before
-    /// the first progress tick. The UI maps it to a catalog label.
-    pub phase: Option<String>,
-    /// Real entities normalised/inserted so far (`0` before the first tick).
-    pub entities_done: u64,
-    /// Total entities expected, or `null` when the format does not expose it.
-    pub entities_total: Option<u64>,
-    /// Source bytes measured so far, only when actually known.
-    pub bytes: Option<u64>,
-    /// Whether a cancel request can still be issued for this import.
-    pub cancellable: bool,
-}
-
-impl CadImportProgress {
-    /// Project a running [`cad_app::ImportProgressSnapshot`]; a terminal snapshot
-    /// maps to `None`, so the affordance is only ever driven by a live import.
-    pub(super) fn from_snapshot(snapshot: &cad_app::ImportProgressSnapshot) -> Option<Self> {
-        if !snapshot.running {
-            return None;
-        }
-        Some(CadImportProgress {
-            phase: snapshot.phase_key().map(str::to_string),
-            entities_done: snapshot.entities_done as u64,
-            entities_total: snapshot.entities_total.map(|total| total as u64),
-            bytes: snapshot.bytes,
-            cancellable: snapshot.cancellable,
-        })
-    }
 }
 
 /// One row of the [`CadSelection`] block: a value plus its **stable machine
@@ -451,6 +415,18 @@ pub struct CadStatus {
     pub camera: Option<CadCamera>,
     /// The current selection; always present, never `null`.
     pub selection: CadSelection,
+    /// One tab per **paper-space** layout, in the authoritative descriptor
+    /// order; always present, never `null`. The synthetic `LayoutId(0)` "Model"
+    /// descriptor is excluded because model space is its own tab.
+    pub layouts: Vec<CadLayoutTab>,
+    /// The session's real active drawing space (model or one paper layout).
+    pub active_space: CadActiveSpace,
+    /// One row per authoritative external reference (XREF), in the drawing's
+    /// stable reference-name (`BTreeMap`) order; always present, never `null`.
+    /// Empty when there is no document or the drawing declares no xrefs. A
+    /// reference that could not be loaded stays visible with its real status
+    /// and reason instead of being dropped.
+    pub references: Vec<CadReferenceStatus>,
     /// The active draw/measurement tool, or `null` when no capture is active.
     pub tool: Option<CadTool>,
     /// Whether idle pointer movement previews (tints) the entity under the
@@ -591,6 +567,13 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         adapter: None,
         camera: None,
         selection: CadSelection::empty(),
+        // No authoritative document means no paper layouts at all, and the only
+        // honest space is model space (never an invented "current" tab).
+        layouts: Vec::new(),
+        active_space: CadActiveSpace::Model,
+        // A session without a document declares no xrefs: the honest empty
+        // block, never an omitted key.
+        references: Vec::new(),
         tool: None,
         hover_preview: false,
         snap_enabled: false,
@@ -941,6 +924,8 @@ pub(super) fn assemble_status(
     crosshair: bool,
     cursor_world: Option<[f64; 3]>,
     grip_drag: bool,
+    layouts: Vec<CadLayoutTab>,
+    active_space: CadActiveSpace,
 ) -> CadStatus {
     CadStatus {
         document_label: has_document.then_some(label),
@@ -957,6 +942,11 @@ pub(super) fn assemble_status(
         adapter,
         camera: if has_document { camera } else { None },
         selection,
+        layouts,
+        active_space,
+        // The session owns the drawing: `CadSession::snapshot` projects the
+        // authoritative references onto this field (never inferred here).
+        references: Vec::new(),
         tool,
         hover_preview,
         snap_enabled,

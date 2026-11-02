@@ -29,7 +29,8 @@ use cad_domain::{
     HatchPatternType, HatchStyle,
 };
 
-use super::entity::{common_for, v3, EntityContext, ExportAccumulator};
+use super::common::{common_for, v3};
+use super::entity::{EntityContext, ExportAccumulator};
 use super::report::MappingOutcome;
 
 /// Write one hatch as a real `HATCH` and record every conversion it makes.

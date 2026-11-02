@@ -145,7 +145,7 @@
 | `INSERT`（**创建**侧） | **实现（v1，2026-11-01）** | **点-后-名**：先拾取插入点，再输入**本图已有块**的名称（终端文本通道）；`T(插入点)·T(−块基点)`，type-key `AcDbBlockReference`，活动图层/模型空间，一条事务/一步撤销。**无块表写入**（只读块定义 + 名称/基点元数据）；**无**块选择器/palette、比例/旋转/属性值/动态块参数；未知名称/缺元数据/空名/换行/非有限点按名拒绝。`BLOCK`/`WBLOCK`/`PASTEBLOCK` 仍缺 |
 | `BLOCK` | **实现（v1，2026-11-01）** | **选择 → 基点 → 名称**（终端文本）：选中模型空间顶层实体写入新块定义并移入 `SpaceId::Block`，几何**逐位保留**、只改空间；元数据存基点；参照为 identity `T(基点)·T(−基点)`，后续 `INSERT` 仍按 `T(I)·T(−基点)`；**一条事务/一步撤销**，块级 undo 补丁；参照 draw_order = 成员最大 draw_order、参照在活动图层。**v1 上限**：无 ATTDEF/ATTRIB、动态块参数、retain/delete 选择、块选择器；重名（精确/ASCII 大小写不敏感）拒绝；实例路径/子元素/图纸空间/块成员拒绝；名称非法字符/空/换行拒绝 |
 | `WBLOCK` | **未实现** | 无「写块到文件」 |
-| `XREF` | **未实现** | 无附着/加载/重载/绑定；仓库里只有 `cad-resources` 的 **xref 深度预算**与图层的 `xref_dependent` 标记，**不是** xref 能力 |
+| `XREF` | **部分（只读显示/导入期合并，v1，2026-11-02）** | **无 `XREF` 命令**：无附着/卸载/重载（RELOAD）/绑定（BIND）/编辑/xref 编写。打开图纸时按路径策略读取并合并被参照图纸的模型空间到宿主 xref 块，图层 `xref\|layer`、块 `xref$0$name` 命名空间，状态见 `docs/xref.md`。浏览器无文件系统 ⇒ 显式 `browser-unavailable` 提示，**不 fetch/不猜**；DXF 另存拒绝摊平 xref 内容（`export.xref_content_dropped`），无 xref 记录/路径往返 |
 | `IMPORT` | **未实现** | 打开 DWG/DXF 是**打开管线**，不是 `IMPORT` 命令（无 `IMPORT` 选择子） |
 | `PUBLISH` | **未实现** | 无多布局批量出图 |
 
@@ -207,7 +207,7 @@
 | `POLYLINE`（旧式 heavy 2D 折线**实体**）创建 | **M** | 需要写 `AcDb2dPolyline` + 顶点子实体（本仓库的唯一折线语义变体是 `Polyline`，类名不进域模型）；**不得**把 `POLYLINE` 别名到 `PLINE`——那会把 heavy 折线**假装**成 LWPOLYLINE，凭空发明语义 |
 | `XLINE`（含 `RAY`） | **命令已关闭（2026-11-01，v1）/ 真正的无限几何仍 L** | **命令已实现**：`XLINE`/`RAY` 两点创建、复用导入期的有限段降级、type-key `AcDbXline`/`AcDbRay`、一条事务/一步撤销；仍不新增几何种类。**真正的无限几何（L，ADR 级）**要新增一个 `SemanticGeometry` 变体：约 **14 处**编译强制点（validate / bounds / transform / tessellate / engine / spatial pick·bounds / representation provider / measure snap / `geometry_kind` / 导出 / 选择属性行）＋约 **12 处**静默兜底（`intersect` 的 `_ => None`、extent 回退、grips 的 `_ => Vec::new()` 等）——而 `cad-domlib` 级的 bounds 累积会被无限线**毒化**成无限模型范围。这不是补丁 |
 | `WBLOCK` | **L** | `BLOCK` v1 已提供运行时块定义写入口（名称/基点/成员/块级 undo），`PASTEBLOCK` v1 已复用该入口；剩余是 `WBLOCK` 的单文件写出（现有导出仍是整图 model space、会摊平 INSERT），需要块定义导出/`SavePurpose::WBlock`。 |
-| `XREF` | **L** | 外部文件解析、相对/绝对路径解析、循环深度（已只有预算钩子）、图层名前缀、绑定/重载语义；跨文件一致性属新契约面 |
+| `XREF` | **L（命令面仍缺；只读导入期已落地 v1）** | **已落地**：外部文件读取、相对/绝对路径策略 + canonical 包含检查、循环/深度/总字节预算、图层前缀与块命名空间、显式状态（missing/browser-unavailable/refused-path/unloaded/cycle/depth-exceeded/skipped-overlay/unsupported）、浏览器提示与 DXF 导出拒绝摊平。**仍未做**：`XREF` 命令/附着/卸载/重载/绑定、xref 记录与路径往返、`XCLIP`/完整 `VISRETAIN`、AutoCAD 命名与单位保真；这些仍是新契约面，见 `docs/xref.md` |
 | `IMPORT` | **L** | 依赖 acadrust 的格式能力与 `cad-import-acadrust` 的迁移策略；每个格式都要自己的 capability 表与拒绝面（DWG/DXF 的打开走 `OPEN`，不是 `IMPORT`） |
 | `PUBLISH` | **L** | 多布局/多图幅批量出图 + 设备/图幅/打印样式；`PLOT` 现在只到矢量单页 |
 | `DIMSTYLE` **编辑** | **M** | 表与变量子集已在 `cad-db`；缺的是命令/UI 与**追溯语义**决策（实体存已解析快照，改样式是否回写实体是产品决策，ADR-0017 B.1 定为**不追溯**） |

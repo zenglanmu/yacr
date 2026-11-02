@@ -618,12 +618,16 @@ fn next_generation() -> u64 {
 /// then releases the old presenter before building the new one.
 #[no_mangle]
 pub extern "system" fn Java_dev_yacr_app_MainActivity_nativeSurfaceCreated<'local>(
-    env: jni::JNIEnv<'local>,
+    mut env: jni::JNIEnv<'local>,
     _this: jni::objects::JObject<'local>,
     surface: jni::objects::JObject<'local>,
     width: jni::sys::jint,
     height: jni::sys::jint,
 ) -> jni::sys::jlong {
+    // The Activity object is only available as the implicit `this` of a frozen
+    // callback; capture it here so the SAF bridge has a target for its
+    // `document*` methods. Idempotent and panic-free.
+    crate::saf::capture(&mut env, &_this);
     if width <= 0 || height <= 0 {
         log::error!(
             "nativeSurfaceCreated: unusable surface frame {width}x{height}; no handle returned"

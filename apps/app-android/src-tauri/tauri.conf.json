@@ -26,6 +26,38 @@
     "android": {
       "minSdkVersion": 24
     },
+    "fileAssociations": [
+      {
+        "ext": ["dwg"],
+        "mimeType": "image/vnd.dwg",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["dwg"],
+        "mimeType": "application/acad",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["dwg"],
+        "mimeType": "application/dwg",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["dwg"],
+        "mimeType": "application/x-dwg",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["dwg"],
+        "mimeType": "application/autocad_dwg",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["dwg"],
+        "mimeType": "application/octet-stream",
+        "androidIntentActionFilters": ["view"]
+      }
+    ],
     "icon": ["icons/icon.png"]
   }
 }

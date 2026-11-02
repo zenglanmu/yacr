@@ -192,6 +192,7 @@ const P = {
   selectAll: <><path d="M4 4h6M14 4h6M4 20h6M14 20h6M4 4v6M4 14v6M20 4v6M20 14v6" /><path d="M9 12.5l2.4 2.4L16 10" /></>,
   clearSelection: <><circle cx="12" cy="12" r="8" strokeDasharray="3 2" /><path d="M9 9l6 6M15 9l-6 6" /></>,
   diagnostics: <><path d="M3 12h3.5l2-5.5L12 18l2-7 1.5 1H21" /></>,
+  reference: <><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1" /><path d="M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1" /></>,
   settings: <><circle cx="12" cy="12" r="3" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4" /></>,
   search: <><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.4-4.4" /></>,
   close: <><path d="M6 6l12 12M18 6 6 18" /></>,

@@ -331,6 +331,7 @@ fn assert_imports_as_tessellated_cube(bytes: &[u8]) {
         bytes: Arc::from(bytes.to_vec().into_boxed_slice()),
         limits: ImportLimits::default(),
         generation: 1,
+        xref: None,
     };
     let drawing = AcadrustImporter::new()
         .import(&request, &|| false)

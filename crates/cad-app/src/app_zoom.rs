@@ -37,9 +37,77 @@
 
 use super::*;
 
+use cad_db::{BoundsAccumulator, DrawingDatabase};
+use cad_representation::{viewport_transform, ViewportState};
+
 /// The `FIT` breathing-room factor around the framed bounds (see the module
 /// docs). Kept at the historical value so existing framing is unchanged.
 pub const FIT_MARGIN: f64 = 1.05;
+
+/// What the active space offered to a fit.
+enum ActiveSpaceFrame {
+    /// A real world rectangle to frame.
+    Rect { min: Point3, max: Point3 },
+    /// Model space has no geometry.
+    EmptyModel,
+    /// The paper layout has neither paper geometry nor a usable paper size.
+    EmptyLayout(LayoutId),
+}
+
+/// The outcome of fitting the active space.
+///
+/// A caller that has a diagnostic channel (the `FIT` command and a space
+/// switch) can report the two empty cases by name instead of treating a no-op
+/// as success. `Framed` is the only case that moved the camera.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FitResult {
+    Framed,
+    EmptyModel,
+    EmptyLayout(LayoutId),
+}
+
+impl FitResult {
+    /// Whether the camera was changed.
+    pub(crate) fn framed(self) -> bool {
+        matches!(self, FitResult::Framed)
+    }
+}
+
+/// Bounds of one paper layout: its own sheet entities plus every viewport's
+/// paper rectangle.
+///
+/// Viewport paper rectangles come from the representation layer's verified
+/// `ViewportTransform` when the viewport is drawable. An unsupported viewport
+/// still occupies paper area, so its raw clip extent is used: a four-corner clip
+/// contributes all four corners, while the legacy three-point form contributes
+/// only its two opposite paper corners (the third point is a *model* view
+/// centre and must not inflate a paper fit).
+fn paper_layout_bounds(
+    database: &DrawingDatabase,
+    layout_id: LayoutId,
+) -> Option<(Point3, Point3)> {
+    let layout = database.layout(layout_id)?;
+    let mut acc = BoundsAccumulator::new();
+    for entity in database.layout_entities(layout_id) {
+        acc.add_geometry(&entity.geometry);
+    }
+    for viewport in &layout.viewports {
+        match viewport_transform(viewport) {
+            ViewportState::Supported(transform) => {
+                for corner in transform.paper_corners.iter() {
+                    acc.add_point(*corner);
+                }
+            }
+            ViewportState::Unsupported(_) => {
+                let corners = if viewport.clip.len() == 4 { 4 } else { 2 };
+                for corner in viewport.clip.iter().take(corners) {
+                    acc.add_point(*corner);
+                }
+            }
+        }
+    }
+    acc.finish()
+}
 
 /// The `ZOOM WINDOW` margin: the picked rectangle fills the viewport exactly
 /// (see the module docs for why this is our declared choice).
@@ -123,15 +191,104 @@ impl Application {
         }
     }
 
-    /// Fit a viewport to the current document bounds. Hosts call this after an
+    /// The rectangle the session's **active space** should frame.
+    ///
+    /// Model space frames the model geometry. A paper layout frames its sheet
+    /// entities plus its viewport paper rectangles; when that is empty it falls
+    /// back to the layout's plot paper size (`plot_settings_for`, including its
+    /// documented A4 default page). Only when even that size is unusable does
+    /// the paper case report `EmptyLayout` — never a fabricated view.
+    fn active_space_frame(&self, session: &SessionState) -> CadResult<ActiveSpaceFrame> {
+        let document = self
+            .workspace
+            .documents
+            .get(&session.document)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        match session.active_space {
+            SpaceId::Model => Ok(match document.drawing.bounds() {
+                Some((min, max)) => ActiveSpaceFrame::Rect { min, max },
+                None => ActiveSpaceFrame::EmptyModel,
+            }),
+            SpaceId::Paper(layout) => {
+                if document.drawing.layout(layout).is_none() {
+                    return Ok(ActiveSpaceFrame::EmptyLayout(layout));
+                }
+                if let Some((min, max)) = paper_layout_bounds(&document.drawing, layout) {
+                    return Ok(ActiveSpaceFrame::Rect { min, max });
+                }
+                // A sheet with no drawable geometry is still sized by its plot
+                // configuration. The default page is explicit, not a guess.
+                let (width, height) = document.drawing.plot_settings_for(layout).rotated_size();
+                if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
+                    Ok(ActiveSpaceFrame::Rect {
+                        min: Point3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                        max: Point3 {
+                            x: width,
+                            y: height,
+                            z: 0.0,
+                        },
+                    })
+                } else {
+                    Ok(ActiveSpaceFrame::EmptyLayout(layout))
+                }
+            }
+            // `SwitchSpace` refuses block-definition space (it is only reached
+            // through an INSERT); a session that carries it anyway has no
+            // observation rectangle to frame.
+            SpaceId::Block(_) => Ok(ActiveSpaceFrame::EmptyModel),
+        }
+    }
+
+    /// Fit the active space, optionally recording a `ZOOM PREVIOUS` step.
+    ///
+    /// `record_history` is the one difference between the `FIT` command (a
+    /// discrete view change, so the pre-fit view is recorded) and the automatic
+    /// fit after a space switch (which must not burn a zoom step: the switch
+    /// itself is the user action).
+    pub(crate) fn fit_active_space(
+        &mut self,
+        session: &mut SessionState,
+        viewport_id: &ViewportId,
+        record_history: bool,
+    ) -> CadResult<FitResult> {
+        let frame = self.active_space_frame(session)?;
+        let (min, max) = match frame {
+            ActiveSpaceFrame::Rect { min, max } => (min, max),
+            ActiveSpaceFrame::EmptyModel => return Ok(FitResult::EmptyModel),
+            ActiveSpaceFrame::EmptyLayout(layout) => return Ok(FitResult::EmptyLayout(layout)),
+        };
+        let viewport = self
+            .workspace
+            .viewports
+            .get_mut(viewport_id)
+            .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
+        let (centre, scale) = Self::framing_rect(min, max, viewport.logical_size, FIT_MARGIN);
+        let camera = Self::plan_camera(centre, scale, viewport.camera.eye.z);
+        if record_history {
+            viewport.push_view_snapshot();
+        }
+        viewport.camera = camera;
+        viewport.view_mode = ViewMode2d3d::TwoD { saved: camera };
+        session.generation += 1;
+        Ok(FitResult::Framed)
+    }
+
+    /// Fit a viewport to the current **active space**. Hosts call this after an
     /// import so the first frame is usable without a synthetic command.
     ///
     /// Fitting always returns the viewport to the 2D plan view (audit F13), so a
-    /// fit is a deterministic reset-and-frame, not a 3D manipulation.
+    /// fit is a deterministic reset-and-frame, not a 3D manipulation. In model
+    /// space it frames the model bounds; in paper space it frames the sheet (its
+    /// entities plus viewport paper rectangles, or the plot paper size when the
+    /// sheet has no content).
     ///
-    /// Returns `false` when the drawing has no measurable extent: the camera is
-    /// left untouched and nothing is framed, so a caller can report that
-    /// explicitly instead of claiming success.
+    /// Returns `false` when the active space has no measurable extent: the
+    /// camera is left untouched and nothing is framed, so a caller can report
+    /// that explicitly instead of claiming success.
     ///
     /// A real fit is a **discrete** view change, so the pre-fit view is recorded
     /// as one `ZOOM PREVIOUS` step first ([`crate::zoom_history`]); a fit that
@@ -141,31 +298,7 @@ impl Application {
         session: &mut SessionState,
         viewport_id: &ViewportId,
     ) -> CadResult<bool> {
-        let document = self
-            .workspace
-            .documents
-            .get(&session.document)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let bounds = document.drawing.bounds();
-        let viewport = self
-            .workspace
-            .viewports
-            .get_mut(viewport_id)
-            .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
-        let Some((min, max)) = bounds else {
-            // An empty drawing has nothing to frame. Fitting is a documented
-            // no-op (the camera and the session generation are left unchanged),
-            // never an error and never a fabricated view. The `false` return lets
-            // the caller report it explicitly.
-            return Ok(false);
-        };
-        let (centre, scale) = Self::framing_rect(min, max, viewport.logical_size, FIT_MARGIN);
-        let camera = Self::plan_camera(centre, scale, viewport.camera.eye.z);
-        viewport.push_view_snapshot();
-        viewport.camera = camera;
-        viewport.view_mode = ViewMode2d3d::TwoD { saved: camera };
-        session.generation += 1;
-        Ok(true)
+        Ok(self.fit_active_space(session, viewport_id, true)?.framed())
     }
 
     /// `ZOOM WINDOW`: frame the picked two-corner rectangle **exactly**.

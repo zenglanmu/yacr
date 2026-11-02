@@ -304,12 +304,15 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 /// * [`PDMODE_SELECTOR`] (`PDMODE`): one integer in the `i16` range
 ///   ([`parse_pdmode_argument`]);
 /// * [`PDSIZE_SELECTOR`] (`PDSIZE`): one finite decimal size
-///   ([`parse_pdsize_argument`]).
+///   ([`parse_pdsize_argument`]);
+/// * [`SPACE_SELECTOR`] (`SPACE`): `MODEL`, `#<u128>` or a layout display name,
+///   resolved against the authoritative drawing by the session.
 pub const ARGUMENT_SELECTORS: &[&str] = &[
     ARGUMENT_SELECTOR,
     SNAPUNIT_SELECTOR,
     PDMODE_SELECTOR,
     PDSIZE_SELECTOR,
+    SPACE_SELECTOR,
 ];
 
 /// AutoCAD's `ZOOM n` / `ZOOM ALL`: the first argument-taking selector.
@@ -342,6 +345,16 @@ pub const PDMODE_SELECTOR: &str = "PDMODE";
 /// percentage of the viewport height. A document write like
 /// [`PDMODE_SELECTOR`], not session state.
 pub const PDSIZE_SELECTOR: &str = "PDSIZE";
+
+/// The `SPACE <argument>` selector: switch the active drawing space.
+///
+/// This is the same [`CommandId::SwitchSpace`] command the IPC/panel path uses;
+/// the typed argument only saves a second IPC for a layout-tab click. `MODEL`
+/// selects model space, `#<u128>` names a `LayoutId` directly, and any other
+/// whole argument is resolved as a layout **display name** (exact match first,
+/// then a unique case-insensitive one). A bare `SPACE` keeps the existing
+/// explicit "needs a space payload" refusal.
+pub const SPACE_SELECTOR: &str = "SPACE";
 
 /// One parsed argument of the `ZOOM` selector.
 #[derive(Debug, Clone, Copy, PartialEq)]

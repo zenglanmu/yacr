@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod builder_support;
+
 /// How many walked source entities pass between entity-batch progress ticks.
 ///
 /// A bounded batch keeps a million-entity drawing from emitting a million
@@ -59,6 +61,16 @@ impl<'a> ImporterBuilder<'a> {
             model_render_types: BTreeSet::new(),
             model_bounds: None,
             dimension_picture_stack: Vec::new(),
+            xref_blocks: HashMap::new(),
+            xref_block_status: HashMap::new(),
+            insert_chains: Vec::new(),
+            xref_causes: HashMap::new(),
+            xref_pending: BTreeSet::new(),
+            xref_recorded: BTreeSet::new(),
+            next_block: 0,
+            next_layer: 0,
+            xref_layer_names: HashMap::new(),
+            block_entities: HashMap::new(),
         }
     }
 
@@ -118,7 +130,19 @@ impl<'a> ImporterBuilder<'a> {
             self.entity_total,
             Some(self.entity_total_expected()),
         ));
+        // Attach referenced drawings *before* the status fixpoint and before
+        // the database is finished, so nested INSERTs and model bounds see the
+        // merged members. A reference that cannot be loaded keeps its explicit
+        // non-loaded status; nothing becomes an empty success.
+        self.resolve_xrefs()?;
+        self.check_cancelled()?;
         self.resolve_block_status();
+        self.check_cancelled()?;
+        // Entity classification ran before resolution, so a pending xref looked
+        // like an ordinary empty block then. Apply the final fixpoint to the
+        // report and capabilities now; the fixpoint alone is not observable in
+        // the final report.
+        self.reclassify_xref_inserts();
         self.check_cancelled()?;
         self.progress.report(ImportProgress::at(
             ImportPhase::Finishing,
@@ -259,6 +283,13 @@ impl<'a> ImporterBuilder<'a> {
             let id = LayerId(index as u128);
             self.layer_ids.insert(layer.name.clone(), id);
             self.layer_linetypes.insert(id, layer.line_type.clone());
+            // An xref-dependent row declared by the host drawing is a host
+            // override of referenced layer content. Remember it by its exact
+            // target name so a later splice reuses it and keeps its attributes
+            // (VISRETAIN-like: the host wins).
+            if layer.flags.xref_dependent {
+                self.xref_layer_names.insert(layer.name.clone(), id);
+            }
             let visible = !layer.flags.off && !layer.flags.frozen;
             self.builder.insert_layer(Layer {
                 id,
@@ -282,6 +313,9 @@ impl<'a> ImporterBuilder<'a> {
             self.builder
                 .set_layer_attributes(id, layer_attributes(layer))?;
         }
+        // Splices allocate after every source layer; the source ids are exactly
+        // the table positions, so the count is the first free id.
+        self.next_layer = self.acad.layers.iter().count() as u128;
         Ok(())
     }
 
@@ -366,44 +400,112 @@ impl<'a> ImporterBuilder<'a> {
         Ok(())
     }
 
+    /// Read the drawing's paper layouts in **display order**.
+    ///
+    /// acadrust exposes the user-visible sheet as an `ObjectType::Layout`
+    /// (`name`, `tab_order`) linked to its `*Paper_Space*` block record by
+    /// handle. The block record's internal name (`*Paper_Space0`) is an
+    /// implementation detail and must never be the layout's display name.
+    ///
+    /// The database id is the tab position (`LayoutId(index + 1)`), so
+    /// [`cad_db::DrawingDatabase::layouts`] enumerates sheets in the same order
+    /// the user sees. Model space is excluded by resolving the block record and
+    /// checking [`acadrust::tables::BlockRecord::is_model_space`], not by
+    /// comparing the layout's display name.
+    ///
+    /// A paper-space block with no matching `Layout` object is still a real
+    /// sheet (some older writers omit the object); it is appended after the
+    /// ordered layouts in stable block-name order and keeps the block name as
+    /// its display name. The synthetic `LayoutId(0)` "Model" row is inserted
+    /// **only** when the drawing has no paper layouts at all — existing
+    /// consumers filter that id.
     pub(crate) fn read_layouts(&mut self) -> CadResult<()> {
+        // Resolve every layout object to its backing block record. The record
+        // is the authority for model-vs-paper; the names are unrelated.
+        let (ordered, blocks_with_layout) = {
+            let mut record_by_handle: HashMap<acadrust::Handle, &acadrust::tables::BlockRecord> =
+                HashMap::new();
+            let mut name_by_handle: HashMap<acadrust::Handle, String> = HashMap::new();
+            for record in self.acad.block_records.iter() {
+                record_by_handle.insert(record.handle, record);
+                name_by_handle.insert(record.handle, record.name.clone());
+            }
+
+            // (tab order, display name, block name) for every paper Layout.
+            let mut ordered: Vec<(i16, String, String)> = Vec::new();
+            for object in self.acad.objects.values() {
+                let acadrust::objects::ObjectType::Layout(layout) = object else {
+                    continue;
+                };
+                let Some(record) = record_by_handle.get(&layout.block_record) else {
+                    continue;
+                };
+                if record.is_model_space() || !record.is_paper_space() {
+                    continue;
+                }
+                let Some(block_name) = name_by_handle.get(&layout.block_record) else {
+                    continue;
+                };
+                ordered.push((layout.tab_order, layout.name.clone(), block_name.clone()));
+            }
+            // Tab order is the display order; the display name and block name
+            // break ties deterministically (the object map itself is unordered).
+            ordered.sort_by(|a, b| {
+                a.0.cmp(&b.0)
+                    .then_with(|| a.1.cmp(&b.1))
+                    .then_with(|| a.2.cmp(&b.2))
+            });
+            // One layout object per block record; keep the first in display
+            // order if a malformed file carries duplicates.
+            let mut seen = BTreeSet::new();
+            ordered.retain(|(_, _, block_name)| seen.insert(block_name.clone()));
+            let mapped: BTreeSet<String> = ordered
+                .iter()
+                .map(|(_, _, block_name)| block_name.clone())
+                .collect();
+            (ordered, mapped)
+        };
+
         let mut order = 0u128;
-        for block in self.acad.block_records.iter() {
-            if !is_paper_space_name(&block.name) {
+        for (_tab_order, display_name, block_name) in ordered {
+            let id = LayoutId(order + 1);
+            order += 1;
+            self.layout_ids.insert(block_name.clone(), id);
+            let viewports = self.read_layout_viewports(&block_name);
+            self.builder.insert_layout(Layout {
+                id,
+                name: display_name,
+                viewports,
+            })?;
+        }
+
+        // Paper blocks whose Layout object is missing (or whose block record the
+        // object could not resolve) are still real sheets. Append them after
+        // the ordered list in stable name order.
+        let mut fallback: Vec<String> = self
+            .acad
+            .block_records
+            .iter()
+            .filter(|record| record.is_paper_space())
+            .map(|record| record.name.clone())
+            .filter(|name| !blocks_with_layout.contains(name))
+            .collect();
+        fallback.sort();
+        for block_name in fallback {
+            if self.layout_ids.contains_key(&block_name) {
                 continue;
             }
             let id = LayoutId(order + 1);
             order += 1;
-            self.layout_ids.insert(block.name.clone(), id);
-            let mut viewports = Vec::new();
-            for entity in self.acad.entities_in_block(&block.name) {
-                if let EntityType::Viewport(v) = entity {
-                    // The sheet viewport (`id == 1`) frames the paper itself, not
-                    // a model-space window, and an off viewport draws nothing;
-                    // neither is a content viewport (audit B22).
-                    let Some(viewport) = paper_viewport(v) else {
-                        continue;
-                    };
-                    if let Completeness::Partial(reasons) = &viewport.completeness {
-                        let why = reasons
-                            .first()
-                            .cloned()
-                            .unwrap_or_else(|| "unsupported viewport state".to_string());
-                        self.diagnostics.push(Diagnostic {
-                            object: None,
-                            code: "import.viewport_unsupported".into(),
-                            message: format!("layout {} viewport {}: {why}", block.name, v.id),
-                        });
-                    }
-                    viewports.push(viewport);
-                }
-            }
+            self.layout_ids.insert(block_name.clone(), id);
+            let viewports = self.read_layout_viewports(&block_name);
             self.builder.insert_layout(Layout {
                 id,
-                name: block.name.clone(),
+                name: block_name,
                 viewports,
             })?;
         }
+
         if self.layout_ids.is_empty() {
             let id = LayoutId(0);
             self.builder.insert_layout(Layout {
@@ -414,6 +516,39 @@ impl<'a> ImporterBuilder<'a> {
             self.model_layout = id;
         }
         Ok(())
+    }
+
+    /// Content viewports of one paper-space block.
+    ///
+    /// Kept separate so `read_layouts` can order layouts without duplicating the
+    /// viewport rules. The diagnostic message deliberately keeps the block name
+    /// (it is the stable correlation key used elsewhere in the importer).
+    fn read_layout_viewports(&mut self, block_name: &str) -> Vec<PaperViewport> {
+        let mut viewports = Vec::new();
+        for entity in self.acad.entities_in_block(block_name) {
+            let EntityType::Viewport(v) = entity else {
+                continue;
+            };
+            // The sheet viewport (`id == 1`) frames the paper itself, not
+            // a model-space window, and an off viewport draws nothing;
+            // neither is a content viewport (audit B22).
+            let Some(viewport) = paper_viewport(v) else {
+                continue;
+            };
+            if let Completeness::Partial(reasons) = &viewport.completeness {
+                let why = reasons
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "unsupported viewport state".to_string());
+                self.diagnostics.push(Diagnostic {
+                    object: None,
+                    code: "import.viewport_unsupported".into(),
+                    message: format!("layout {block_name} viewport {}: {why}", v.id),
+                });
+            }
+            viewports.push(viewport);
+        }
+        viewports
     }
 
     /// Read each layout's plot configuration into the database.
@@ -532,6 +667,54 @@ impl<'a> ImporterBuilder<'a> {
                 entities: Vec::new(),
                 dynamic_visibility: None,
             })?;
+            // An xref block is kept in the table like every other block (its
+            // name must still resolve for INSERT), but it owns no source
+            // entities: its members come from a referenced drawing, or stay
+            // explicitly absent when loading is unavailable.
+            let flags = block.flags;
+            let is_xref = flags.is_xref || flags.is_xref_overlay || flags.is_xref_unloaded;
+            if is_xref {
+                let status = if flags.is_xref_unloaded {
+                    // The user disabled this attachment: never read its file.
+                    ExternalReferenceStatus::Unloaded
+                } else if self.request.xref.is_none() {
+                    // No loader policy at all (for example a browser carrier
+                    // without a host bridge). This is terminal and explicit.
+                    ExternalReferenceStatus::BrowserUnavailable
+                } else {
+                    // A placeholder until `resolve_xrefs` either attaches the
+                    // referenced drawing or records the real failure.
+                    ExternalReferenceStatus::Missing
+                };
+                if status != ExternalReferenceStatus::Missing {
+                    // Nested imports run while the parent's session is active,
+                    // so the stack length is the host-relative depth.
+                    let depth = xref_current_depth();
+                    self.builder.insert_external_reference(ExternalReference {
+                        name: block.name.clone(),
+                        raw_path: block.xref_path.clone(),
+                        resolved_path: None,
+                        block: Some(id),
+                        overlay: flags.is_xref_overlay,
+                        depth: depth as u32,
+                        status,
+                        reason: None,
+                    })?;
+                    self.xref_recorded.insert(id);
+                } else {
+                    self.xref_pending.insert(id);
+                }
+                self.xref_blocks.insert(
+                    id,
+                    XrefBlock {
+                        name: block.name.clone(),
+                        raw_path: block.xref_path.clone(),
+                        overlay: flags.is_xref_overlay,
+                        unloaded: flags.is_xref_unloaded,
+                    },
+                );
+                self.xref_block_status.insert(id, status);
+            }
             // Keep the name/base-point pair beside the definition so a command can
             // create a reference from `T(insertion) · T(−base)` later. The name map
             // above stays the import-time authority for expansion; an unnamed or
@@ -541,6 +724,9 @@ impl<'a> ImporterBuilder<'a> {
                     .set_block_metadata(id, &block.name, p3(block.base_point))?;
             }
         }
+        // Every splice allocates from here, so a referenced block id can never
+        // alias a host block.
+        self.next_block = next;
         Ok(())
     }
 
@@ -587,6 +773,7 @@ impl<'a> ImporterBuilder<'a> {
                 }
             }
             self.check_cancelled()?;
+            self.block_entities.insert(id, entity_ids.clone());
             self.builder.insert_block(BlockDefinition {
                 id,
                 entities: entity_ids,
@@ -637,106 +824,34 @@ impl<'a> ImporterBuilder<'a> {
         Ok(())
     }
 
-    /// Attach a dynamic visibility descriptor to an imported block, when the
-    /// source carries an `AcDbBlockVisibilityParameter` for its definition.
-    ///
-    /// The descriptor is optional: a block with no visibility parameter is left
-    /// untouched. A parameter that cannot be mapped exactly (dangling member
-    /// handles, or an active state that cannot be resolved from the members'
-    /// visibility flags) is recorded with a stable `Partial` reason and an
-    /// explicit diagnostic; the active state is never guessed.
-    pub(crate) fn record_dynamic_visibility(
-        &mut self,
-        def_handle: acadrust::Handle,
-        id: BlockId,
-        member_ids: &BTreeMap<u64, EntityId>,
-        member_visible: &BTreeMap<u64, bool>,
-    ) {
-        let Some(param) = self.acad.block_visibility_param_for_def(def_handle) else {
-            return;
-        };
-        self.attach_dynamic_visibility(id, param, member_ids, member_visible);
-    }
-
-    /// Attach a dynamic visibility descriptor resolved through an INSERT.
-    ///
-    /// A real evaluated dynamic block stores the visibility parameter on the
-    /// dynamic *definition*, reachable from the INSERT through an
-    /// `AcDbBlockRepresentationData` object. The INSERT expands the block record
-    /// it references (the evaluated anonymous block), whose members the
-    /// parameter governs, so the descriptor is mapped against that block's
-    /// members. Blocks are always read before entity space, so the member maps
-    /// are available here.
-    pub(crate) fn record_insert_dynamic_visibility(&mut self, insert: &acadrust::entities::Insert) {
-        let insert_handle = insert.common.handle;
-        let Some((_def_block, param)) = self.acad.dynamic_visibility_for_insert(insert_handle)
-        else {
-            return;
-        };
-        let Some(id) = self.block_ids.get(&insert.block_name).copied() else {
-            return;
-        };
-        // Resolve with an immutable borrow of the stored member maps, then
-        // release it before recording (which needs `&mut self`).
-        let mapped = {
-            let (Some(member_ids), Some(member_visible)) = (
-                self.block_member_ids.get(&id),
-                self.block_member_visible.get(&id),
-            ) else {
-                return;
-            };
-            map_visibility(param, member_ids, member_visible)
-        };
-        self.attach_mapped(id, mapped);
-    }
-
-    /// Map a resolved parameter onto a block and record it, reporting any
-    /// partial mapping as an explicit diagnostic.
-    fn attach_dynamic_visibility(
-        &mut self,
-        id: BlockId,
-        param: &acadrust::objects::BlockVisibilityParameter,
-        member_ids: &BTreeMap<u64, EntityId>,
-        member_visible: &BTreeMap<u64, bool>,
-    ) {
-        let mapped = map_visibility(param, member_ids, member_visible);
-        self.attach_mapped(id, mapped);
-    }
-
-    fn attach_mapped(&mut self, id: BlockId, mapped: MappedVisibility) {
-        if let Completeness::Partial(reasons) = &mapped.completeness {
-            self.diagnostics.push(Diagnostic {
-                object: None,
-                code: "import.dynamic_block_visibility".into(),
-                message: format!(
-                    "block {:?} dynamic visibility is partial: {}",
-                    id,
-                    reasons.join(", ")
-                ),
-            });
-        }
-        if let Err(e) = self
-            .builder
-            .set_block_dynamic_visibility(id, mapped.descriptor)
-        {
-            self.diagnostics.push(Diagnostic {
-                object: None,
-                code: "import.dynamic_block_failed".into(),
-                message: e.to_string(),
-            });
-        }
-    }
-
     /// Resolve each block's render status from its children, iterating to a
     /// fixpoint so nested INSERTs are accounted for. Cycles settle at
     /// `Unverified` instead of looping.
     pub(crate) fn resolve_block_status(&mut self) {
-        let ids: Vec<BlockId> = self.block_members.keys().copied().collect();
+        // Xref blocks with no source-owned members still need a status: an
+        // unresolved reference must weaken every INSERT that reaches it. The
+        // set is deduplicated so an xref block with members is visited once.
+        let ids: Vec<BlockId> = self
+            .block_members
+            .keys()
+            .chain(self.xref_block_status.keys())
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
         for _ in 0..=ids.len() {
             let mut changed = false;
             for id in &ids {
                 let members = self.block_members.get(id).cloned().unwrap_or_default();
-                let mut status = SupportStatus::Verified;
+                // Seed from the xref's own terminal state before folding its
+                // children. `Loaded` (and a normal block) starts at Verified;
+                // every other xref status is an explicit loss.
+                let mut status = match self.xref_block_status.get(id) {
+                    Some(reference_status) if !reference_status.is_loaded() => {
+                        xref_support_status(*reference_status)
+                    }
+                    _ => SupportStatus::Verified,
+                };
                 for member in &members {
                     // A member that references blocks inherits the weakest of
                     // its dependencies; a plain member uses its own status.

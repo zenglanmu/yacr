@@ -2,11 +2,14 @@
 //!
 //! This is the **explicitly limited** platform set of the Android v1 carrier:
 //!
-//! * [`AndroidFiles`] — [`cad_platform::PlatformFiles`] with **no** file access at
-//!   all. Every entry point refuses with `CadError::Unsupported` naming the
-//!   operation; `poll()` is empty. Nothing fabricates a document, a save target or
-//!   an opened byte buffer, so the session's own `can_open`/`can_save` stay false
-//!   (the chrome then offers no dead action).
+//! * [`AndroidFiles`] — [`cad_platform::PlatformFiles`] over the Storage Access
+//!   Framework. On the Android target it drives the Kotlin `document*` picker /
+//!   reader / writer through the JNI bridge (`crate::saf`) and queues the
+//!   outcome as a [`FileEvent`]; the interaction purpose is owned here (armed),
+//!   so an open result is never written as a save target and vice versa. On any
+//!   other target every entry point is an explicit `CadError::Unsupported`
+//!   naming the operation (the SAF bridge is Android-only) and `poll()` is empty.
+//!   Nothing fabricates a document, a save target or an opened byte buffer.
 //! * [`AndroidSurface`] — [`cad_platform::SurfaceSource`]: the CAD content
 //!   rectangle and scale the React layout reports through `probe_input`, shared
 //!   through an `Rc<Cell<..>>` exactly like the desktop `ReactSurface`. The native
@@ -33,27 +36,37 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(any(target_os = "android", test))]
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use cad_domain::{CadError, CadResult};
 use cad_platform::{
-    ConfigLoad, ConfigStore, FileEvent, FileTarget, PlatformFiles, SavePurpose, SurfaceMetrics,
-    SurfaceSource,
+    ConfigLoad, ConfigStore, FileEvent, FilePurpose, FileTarget, PlatformFiles, SavePurpose,
+    SurfaceMetrics, SurfaceSource,
 };
 
+#[cfg(not(target_os = "android"))]
 use crate::policy;
 
-/// File access on the Android v1 carrier: every operation is an explicit refusal.
+/// File selection/read/write over the Android Storage Access Framework.
 ///
-/// There is no chooser, no Storage Access Framework wiring and no drawing bytes, so
-/// the honest answer is `Unsupported` for each entry point. `poll()` never returns
-/// a fabricated event, and `refuses_source_overwrite` is `false` because no open
-/// can ever install a source (the core calls `set_source` only after a successful
-/// install).
+/// The interaction is event-based, exactly like the desktop host: `begin_*`
+/// arms one purpose and starts the Kotlin picker/reader, and `poll()` drains the
+/// outcome into a [`FileEvent`]. The purpose is owned **here**, not in Kotlin, so
+/// an open-chosen URI can never be handed back as a save target.
+///
+/// Off the Android target every entry point refuses explicitly (the SAF bridge
+/// is only compiled for Android) and `poll()` is empty; the refusal tests run on
+/// the development host.
 pub struct AndroidFiles {
-    /// Set only if a future open path installs a source. Kept so the guard has an
-    /// honest implementation instead of a silent "always false by accident".
-    source: RefCell<Option<PathBuf>>,
+    /// Events queued by this platform (never fabricated; `poll` only drains this).
+    events: RefCell<Vec<FileEvent>>,
+    /// The successfully-opened source target, armed by the core only on success.
+    source: RefCell<Option<FileTarget>>,
+    /// The one SAF interaction in flight (Android only).
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    armed: Cell<Option<FilePurpose>>,
 }
 
 impl Default for AndroidFiles {
@@ -63,45 +76,225 @@ impl Default for AndroidFiles {
 }
 
 impl AndroidFiles {
-    /// Files for the Android v1 carrier (no file access).
+    /// Files for the Android host (SAF on the Android target).
     pub fn new() -> Self {
         Self {
+            events: RefCell::new(Vec::new()),
             source: RefCell::new(None),
+            armed: Cell::new(None),
         }
+    }
+
+    /// Refuse a second concurrent interaction: the single armed purpose would be
+    /// overwritten and the results cross-wired.
+    #[cfg(target_os = "android")]
+    fn arm(&self, purpose: FilePurpose) -> CadResult<()> {
+        if self.armed.get().is_some() {
+            return Err(CadError::Unsupported(
+                "a file interaction is already in progress".into(),
+            ));
+        }
+        self.armed.set(Some(purpose));
+        Ok(())
     }
 }
 
 impl PlatformFiles for AndroidFiles {
     fn begin_open(&self) -> CadResult<()> {
-        Err(CadError::Unsupported(policy::file_refusal("open")))
+        #[cfg(target_os = "android")]
+        {
+            self.arm(FilePurpose::Open)?;
+            if let Err(error) = crate::saf::launch_open() {
+                self.armed.set(None);
+                return Err(CadError::Unsupported(format!(
+                    "the Android SAF open picker could not be started: {error}"
+                )));
+            }
+            Ok(())
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            Err(CadError::Unsupported(policy::file_refusal("open")))
+        }
     }
 
-    fn begin_open_target(&self, _target: &FileTarget) -> CadResult<()> {
-        // No path, no URI and no SAF grant is read on this carrier: a target is
-        // exactly as unsupported as the chooser (never a partial success).
-        Err(CadError::Unsupported(policy::file_refusal("open target")))
+    fn begin_open_target(&self, target: &FileTarget) -> CadResult<()> {
+        #[cfg(target_os = "android")]
+        {
+            self.arm(FilePurpose::Open)?;
+            if let Err(error) = crate::saf::read_uri_async(&target.opaque) {
+                self.armed.set(None);
+                return Err(CadError::Unsupported(format!(
+                    "the Android SAF document read could not be started: {error}"
+                )));
+            }
+            Ok(())
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = target;
+            Err(CadError::Unsupported(policy::file_refusal("open target")))
+        }
     }
 
-    fn begin_save(&self, _purpose: SavePurpose, _default_name: &str) -> CadResult<()> {
-        Err(CadError::Unsupported(policy::file_refusal("save")))
+    fn begin_save(&self, purpose: SavePurpose, default_name: &str) -> CadResult<()> {
+        #[cfg(target_os = "android")]
+        {
+            self.arm(FilePurpose::Save(purpose))?;
+            if let Err(error) = crate::saf::launch_save(default_name) {
+                self.armed.set(None);
+                return Err(CadError::Unsupported(format!(
+                    "the Android SAF save picker could not be started: {error}"
+                )));
+            }
+            Ok(())
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (purpose, default_name);
+            Err(CadError::Unsupported(policy::file_refusal("save")))
+        }
     }
 
-    fn write_atomic(&self, _target: &FileTarget, _bytes: &[u8]) -> CadResult<()> {
-        Err(CadError::Unsupported(policy::file_refusal("atomic write")))
+    fn write_atomic(&self, target: &FileTarget, bytes: &[u8]) -> CadResult<()> {
+        #[cfg(target_os = "android")]
+        {
+            crate::saf::write_uri(&target.opaque, bytes).map_err(|error| {
+                CadError::InvalidInput(format!("writing {} failed: {error}", target.display_name))
+            })
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (target, bytes);
+            Err(CadError::Unsupported(policy::file_refusal("atomic write")))
+        }
     }
 
-    fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
-        // No open ever succeeds, so there is no installed source to guard. The
-        // stored value is returned verbatim (never invented).
-        self.source.borrow().is_some()
+    fn refuses_source_overwrite(&self, target: &FileTarget) -> bool {
+        // SAF URI identity: Android offers no device/inode pair, so the opaque
+        // URI is the only honest source identity.
+        self.source
+            .borrow()
+            .as_ref()
+            .is_some_and(|source| source.opaque == target.opaque)
     }
 
     fn set_source(&self, target: Option<&FileTarget>) {
-        *self.source.borrow_mut() = target.map(|target| PathBuf::from(&target.opaque));
+        *self.source.borrow_mut() = target.cloned();
     }
 
     fn poll(&self) -> Vec<FileEvent> {
-        Vec::new()
+        #[cfg(target_os = "android")]
+        {
+            // Read the platform result and translate it here; the core only ever
+            // sees this queue (no event is fabricated).
+            let result = crate::saf::poll();
+            match self.armed.get() {
+                Some(purpose) => {
+                    // Pending keeps the purpose armed; a terminal clears it.
+                    if let Some(event) = saf_event(purpose, result) {
+                        self.armed.set(None);
+                        self.events.borrow_mut().push(event);
+                    }
+                }
+                None => {
+                    // Nothing armed: only an external/cold-start open is accepted.
+                    if let Some(event) = cold_event(result) {
+                        self.events.borrow_mut().push(event);
+                    }
+                }
+            }
+        }
+        std::mem::take(&mut *self.events.borrow_mut())
+    }
+}
+
+/// The terminal/pending outcome of one SAF interaction.
+///
+/// Defined here (behind the same `cfg` as [`saf_event`]) so the purpose→event
+/// mapping is unit-testable on the development host; the Android-only
+/// `crate::saf` module produces it.
+#[cfg(any(target_os = "android", test))]
+#[derive(Debug)]
+pub(crate) enum SafState {
+    /// The picker/read has not completed (state `NONE`/`LOADING`).
+    Pending,
+    /// The user dismissed the picker (distinct from a failure).
+    Cancelled,
+    /// The interaction failed; the string is the raw (untranslated) reason.
+    Failed(String),
+    /// An open target was chosen and its bytes read.
+    Opened {
+        uri: String,
+        name: String,
+        bytes: Vec<u8>,
+    },
+    /// A save target was chosen (no bytes; writing happens later).
+    SaveTarget { uri: String, name: String },
+}
+
+/// Map an armed purpose and a SAF result to the event to queue.
+///
+/// `None` means "still pending, queue nothing". A result whose kind does not
+/// match the armed purpose is an explicit [`FileEvent::Failed`] — never a
+/// fabricated open/save (an open-chosen URI must never be written as a DXF).
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn saf_event(purpose: FilePurpose, result: SafState) -> Option<FileEvent> {
+    match (purpose, result) {
+        (_, SafState::Pending) => None,
+        (purpose, SafState::Cancelled) => Some(FileEvent::Cancelled { purpose }),
+        (purpose, SafState::Failed(reason)) => Some(FileEvent::Failed { purpose, reason }),
+        (FilePurpose::Open, SafState::Opened { uri, name, bytes }) => Some(FileEvent::Opened {
+            target: FileTarget {
+                display_name: name,
+                opaque: uri,
+            },
+            bytes: Arc::from(bytes.into_boxed_slice()),
+        }),
+        (FilePurpose::Save(save), SafState::SaveTarget { uri, name }) => {
+            Some(FileEvent::SaveTarget {
+                purpose: save,
+                target: FileTarget {
+                    display_name: name,
+                    opaque: uri,
+                },
+            })
+        }
+        (FilePurpose::Open, SafState::SaveTarget { .. }) => Some(FileEvent::Failed {
+            purpose: FilePurpose::Open,
+            reason: "the document picker returned a save target for an open request".into(),
+        }),
+        (FilePurpose::Save(_), SafState::Opened { .. }) => Some(FileEvent::Failed {
+            purpose,
+            reason: "the document picker returned an open target for a save request".into(),
+        }),
+    }
+}
+
+/// Map a result with **nothing armed** (an external/cold-start delivery).
+///
+/// Only an opened document is accepted without an armed request; a save target
+/// in that position is an explicit `Failed { Open }` (there is no save request it
+/// could belong to), and a cancel is ignored.
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn cold_event(result: SafState) -> Option<FileEvent> {
+    match result {
+        SafState::Pending | SafState::Cancelled => None,
+        SafState::Opened { uri, name, bytes } => Some(FileEvent::Opened {
+            target: FileTarget {
+                display_name: name,
+                opaque: uri,
+            },
+            bytes: Arc::from(bytes.into_boxed_slice()),
+        }),
+        SafState::SaveTarget { .. } => Some(FileEvent::Failed {
+            purpose: FilePurpose::Open,
+            reason: "a save target was delivered without an armed save request".into(),
+        }),
+        SafState::Failed(reason) => Some(FileEvent::Failed {
+            purpose: FilePurpose::Open,
+            reason,
+        }),
     }
 }
 
@@ -424,10 +617,14 @@ pub fn option_dirs() -> (Option<PathBuf>, Option<PathBuf>) {
 #[no_mangle]
 pub extern "system" fn Java_dev_yacr_app_MainActivity_nativeAssetsReady<'local>(
     mut env: jni::JNIEnv<'local>,
-    _this: jni::objects::JObject<'local>,
+    this: jni::objects::JObject<'local>,
     fonts_dir: jni::objects::JString<'local>,
     images_dir: jni::objects::JString<'local>,
 ) {
+    // The Activity object is only available as the implicit `this` of a frozen
+    // callback; capturing it here as well as in `nativeSurfaceCreated` keeps the
+    // SAF bridge available regardless of which handshake runs first.
+    crate::saf::capture(&mut env, &this);
     let fonts = env.get_string(&fonts_dir).map(String::from);
     let images = env.get_string(&images_dir).map(String::from);
     match (fonts, images) {
@@ -638,5 +835,164 @@ mod tests {
         let error = set_asset_dirs(PathBuf::new(), PathBuf::from("/tmp/images"))
             .expect_err("an empty font directory must not be stored");
         assert!(matches!(error, CadError::InvalidInput(_)));
+    }
+
+    fn opened(uri: &str, name: &str, bytes: &[u8]) -> SafState {
+        SafState::Opened {
+            uri: uri.to_string(),
+            name: name.to_string(),
+            bytes: bytes.to_vec(),
+        }
+    }
+
+    fn save_target(uri: &str, name: &str) -> SafState {
+        SafState::SaveTarget {
+            uri: uri.to_string(),
+            name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn an_armed_open_only_accepts_an_opened_document() {
+        let event = saf_event(
+            FilePurpose::Open,
+            opened("content://d/1", "plan.dwg", b"bytes"),
+        )
+        .expect("a completed open must produce an event");
+        match event {
+            FileEvent::Opened { target, bytes } => {
+                assert_eq!(target.opaque, "content://d/1");
+                assert_eq!(target.display_name, "plan.dwg");
+                assert_eq!(&*bytes, b"bytes");
+            }
+            other => panic!("expected Opened, got {other:?}"),
+        }
+        // A save target delivered to an open request is an explicit failure, never
+        // an open with an empty body and never a save.
+        match saf_event(FilePurpose::Open, save_target("content://d/2", "plan.dxf"))
+            .expect("a kind mismatch must be an explicit failure")
+        {
+            FileEvent::Failed { purpose, reason } => {
+                assert_eq!(purpose, FilePurpose::Open);
+                assert!(reason.contains("save target"), "{reason}");
+            }
+            other => panic!("expected an explicit Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_armed_save_only_accepts_a_save_target() {
+        match saf_event(
+            FilePurpose::Save(SavePurpose::SaveDxf),
+            save_target("content://d/3", "plan.dxf"),
+        )
+        .expect("a completed save chooser must produce an event")
+        {
+            FileEvent::SaveTarget { purpose, target } => {
+                assert_eq!(purpose, SavePurpose::SaveDxf);
+                assert_eq!(target.opaque, "content://d/3");
+            }
+            other => panic!("expected SaveTarget, got {other:?}"),
+        }
+        match saf_event(
+            FilePurpose::Save(SavePurpose::SaveDxf),
+            opened("content://d/4", "plan.dwg", b"bytes"),
+        )
+        .expect("a kind mismatch must be an explicit failure")
+        {
+            FileEvent::Failed { purpose, reason } => {
+                assert_eq!(purpose, FilePurpose::Save(SavePurpose::SaveDxf));
+                assert!(reason.contains("open target"), "{reason}");
+            }
+            other => panic!("expected an explicit Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pending_queues_nothing_and_cancelled_stays_distinct() {
+        for purpose in [FilePurpose::Open, FilePurpose::Save(SavePurpose::SaveDxf)] {
+            assert!(
+                saf_event(purpose, SafState::Pending).is_none(),
+                "a pending picker must not queue an event"
+            );
+            match saf_event(purpose, SafState::Cancelled)
+                .expect("a cancel must be delivered, not dropped")
+            {
+                FileEvent::Cancelled { purpose: cancelled } => assert_eq!(cancelled, purpose),
+                other => panic!("expected Cancelled, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_failure_is_delivered_for_the_armed_purpose_only() {
+        match saf_event(FilePurpose::Open, SafState::Failed("provider died".into()))
+            .expect("a failure must be delivered")
+        {
+            FileEvent::Failed { purpose, reason } => {
+                assert_eq!(purpose, FilePurpose::Open);
+                assert_eq!(reason, "provider died");
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+        match saf_event(
+            FilePurpose::Save(SavePurpose::Plot),
+            SafState::Failed("no writer".into()),
+        )
+        .expect("a save failure must carry the save purpose")
+        {
+            FileEvent::Failed { purpose, .. } => {
+                assert_eq!(purpose, FilePurpose::Save(SavePurpose::Plot))
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_cold_start_accepts_only_an_opened_document() {
+        match cold_event(opened("content://d/5", "cold.dwg", b"cold"))
+            .expect("a cold-start open is a real delivery")
+        {
+            FileEvent::Opened { target, .. } => assert_eq!(target.opaque, "content://d/5"),
+            other => panic!("expected Opened, got {other:?}"),
+        }
+        // A save target with nothing armed has no save request to belong to.
+        match cold_event(save_target("content://d/6", "plan.dxf"))
+            .expect("an unarmed save target is an explicit failure")
+        {
+            FileEvent::Failed { purpose, reason } => {
+                assert_eq!(purpose, FilePurpose::Open);
+                assert!(reason.contains("save target"), "{reason}");
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+        // Cold-start failures are open failures; a cancel is ignored.
+        assert!(matches!(
+            cold_event(SafState::Failed("gone".into())),
+            Some(FileEvent::Failed {
+                purpose: FilePurpose::Open,
+                ..
+            })
+        ));
+        assert!(cold_event(SafState::Cancelled).is_none());
+        assert!(cold_event(SafState::Pending).is_none());
+    }
+
+    #[test]
+    fn the_source_guard_compares_saf_uri_identity() {
+        let files = AndroidFiles::new();
+        let source = FileTarget {
+            display_name: "plan.dwg".to_string(),
+            opaque: "content://com.android/document/1".to_string(),
+        };
+        files.set_source(Some(&source));
+        assert!(files.refuses_source_overwrite(&source));
+        // Same display name, different document: not the opened source.
+        assert!(!files.refuses_source_overwrite(&FileTarget {
+            display_name: "plan.dwg".to_string(),
+            opaque: "content://com.android/document/2".to_string(),
+        }));
+        files.set_source(None);
+        assert!(!files.refuses_source_overwrite(&source));
     }
 }

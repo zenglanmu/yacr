@@ -14,11 +14,15 @@ mod bundle;
 mod font;
 mod image;
 mod resolver;
+mod xref_path;
+mod xref_source;
 
 pub use bundle::*;
 pub use font::*;
 pub use image::*;
 pub use resolver::*;
+pub use xref_path::*;
+pub use xref_source::*;
 
 #[cfg(test)]
 mod tests;

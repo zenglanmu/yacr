@@ -15,6 +15,7 @@ mod hatch;
 mod hatch_pattern_table;
 mod insert;
 mod layer_attributes;
+mod layout_order;
 mod linetype_weight_provenance;
 mod mesh;
 mod mtext;
@@ -33,6 +34,7 @@ fn request(bytes: Vec<u8>) -> ImportRequest {
         bytes: Arc::from(bytes.into_boxed_slice()),
         limits: ImportLimits::default(),
         generation: 0,
+        xref: None,
     }
 }
 

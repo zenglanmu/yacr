@@ -56,6 +56,7 @@ fn load() -> Option<(Application, SessionState)> {
         bytes,
         limits: ImportLimits::default(),
         generation: 0,
+        xref: None,
     };
     let imported = AcadrustImporter::new()
         .import(&request, &|| false)

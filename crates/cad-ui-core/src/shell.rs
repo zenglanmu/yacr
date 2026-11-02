@@ -296,7 +296,7 @@ pub fn queue_cad_input(state: &mut ShellState, input: &ProbeInput) -> Result<(),
 mod tests {
     use super::*;
     use crate::protocol::InputKind;
-    use crate::session::CadSelection;
+    use crate::session::{CadActiveSpace, CadSelection};
 
     fn input(kind: InputKind) -> ProbeInput {
         ProbeInput {
@@ -332,6 +332,9 @@ mod tests {
             adapter: Some("P600".into()),
             camera: None,
             selection: CadSelection::empty(),
+            layouts: Vec::new(),
+            active_space: CadActiveSpace::Model,
+            references: Vec::new(),
             tool: None,
             hover_preview: false,
             snap_enabled: false,

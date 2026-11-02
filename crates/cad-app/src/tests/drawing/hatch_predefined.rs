@@ -312,6 +312,7 @@ fn a_created_predefined_hatch_round_trips_its_name_rows_and_76_one() {
         bytes: Arc::from(bytes.into_boxed_slice()),
         limits: ImportLimits::default(),
         generation: 0,
+        xref: None,
     };
     let imported = AcadrustImporter::new()
         .import(&request, &|| false)

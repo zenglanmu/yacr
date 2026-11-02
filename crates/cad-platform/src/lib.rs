@@ -41,6 +41,11 @@ pub trait FontLoader {
 mod font_keys;
 pub mod fonts;
 pub mod images;
+pub mod xref_loader;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use xref_loader::FsXrefSource;
+pub use xref_loader::NoXrefSource;
 
 #[cfg(test)]
 mod dimension_font_tests;

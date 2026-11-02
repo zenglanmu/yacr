@@ -14,9 +14,7 @@ use cad_domain::*;
 use cad_import_acadrust::export::{
     export, ExportFormat, ExportLimits, ExportReport, ExportRequest, ExportSpace,
 };
-use cad_import_acadrust::{
-    AcadrustImporter, ImportLimits, ImportRequest, ImportedDrawing, Importer,
-};
+use cad_import_acadrust::ImportedDrawing;
 use cad_measure::{MeasurementEngine, SnapCandidate, SnapTarget};
 
 use crate::{
@@ -29,6 +27,7 @@ mod display_switches;
 mod draw_create;
 mod draw_intent_map;
 mod draw_pick;
+mod open_import;
 mod properties;
 mod tolerance;
 
@@ -40,6 +39,12 @@ mod tests;
 /// Re-exported so host-side code and contract tests can name the report they
 /// read (the type itself lives in the importer and is unchanged here).
 pub use cad_import_acadrust::ImportReport;
+/// External-reference loading policy and host file access.
+///
+/// Re-exported because [`HostController::open_bytes_with_xref`] and
+/// [`HostController::begin_async_open_with_xref`] take it: host-side code should
+/// not need a direct `cad-import-acadrust` dependency to pass the policy.
+pub use cad_import_acadrust::XrefOptions;
 pub use databases::{
     blank_database, demo_database, snap_candidates_near, snap_candidates_near_uncached,
     snap_candidates_near_with_policy,
@@ -292,30 +297,6 @@ impl HostController {
         export(&request)
     }
 
-    /// Import a DWG byte stream through the single importer boundary.
-    ///
-    /// Only a successful import replaces the document. On success the session,
-    /// history, selection, layer overrides and active tool are rebuilt for the
-    /// new content so the previous drawing's undo records and references can
-    /// never act on it (audit B05). A failure leaves the current document and
-    /// session untouched.
-    pub fn open_bytes(&mut self, bytes: Arc<[u8]>, label: &str) -> CadResult<OpenedDrawing> {
-        let request = ImportRequest {
-            document: self.document_id,
-            database: DatabaseId(1),
-            bytes,
-            limits: ImportLimits::default(),
-            generation: self.session.generation,
-        };
-        let importer = AcadrustImporter::new();
-        let imported = importer.import(&request, &|| false)?;
-        self.pending_open_label = Some(label.to_string());
-        self.publish_imported(
-            imported,
-            &TaskStamp::new(self.document_id, self.session.generation),
-        )
-    }
-
     /// Publish an imported drawing into the current document slot.
     ///
     /// The whole imported database is built before this point, so publication is
@@ -512,6 +493,15 @@ impl HostController {
         self.application
             .fit_viewport(&mut self.session, &self.viewport_id)
             .map(|_| ())
+    }
+
+    /// The session's active drawing space.
+    ///
+    /// Pure getter: reading it dispatches no command and mutates nothing. It is
+    /// the projection point for a UI that must show the current tab (for
+    /// example `cad-ui-core`'s shell state) without reaching into the session.
+    pub fn active_space(&self) -> SpaceId {
+        self.session.active_space.clone()
     }
 
     /// Set the session's active drawing layer through the command path.

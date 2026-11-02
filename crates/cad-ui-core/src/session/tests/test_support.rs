@@ -245,6 +245,119 @@ pub(super) fn session_with_platform(host_platform: HostPlatform) -> CadSession {
         .expect("session builds")
 }
 
+/// A session whose authoritative drawing carries the given paper layouts.
+///
+/// Each entry is `(layout id, display name, partial reason)`: `None` creates a
+/// drawable layout with **no** viewports (supported), while `Some(reason)` adds
+/// one `Partial` viewport so `layout_descriptors` reports its own stable,
+/// code-prefixed reason. The drawing is installed directly (tests only); the
+/// session's document slot stays the same.
+pub(super) fn session_with_layouts(layouts: &[(u128, &str, Option<&str>)]) -> CadSession {
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let mut builder = cad_db::DrawingDatabaseBuilder::new(cad_domain::DatabaseId(1));
+    for (id, name, partial) in layouts {
+        let viewports = partial
+            .map(|reason| {
+                vec![cad_db::PaperViewport {
+                    clip: vec![
+                        cad_domain::Point3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                        cad_domain::Point3 {
+                            x: 100.0,
+                            y: 50.0,
+                            z: 0.0,
+                        },
+                        cad_domain::Point3 {
+                            x: 100.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                    ],
+                    model_to_paper: cad_domain::Transform3::scale(100.0),
+                    completeness: cad_domain::Completeness::Partial(vec![(*reason).to_string()]),
+                }]
+            })
+            .unwrap_or_default();
+        builder
+            .insert_layout(cad_db::Layout {
+                id: cad_domain::LayoutId(*id),
+                name: (*name).to_string(),
+                viewports,
+            })
+            .expect("layout fixture inserts");
+    }
+    let drawing = builder.finish().expect("layout fixture builds");
+    {
+        let mut controller = session.core.controller.borrow_mut();
+        let document_id = controller.document_id;
+        controller
+            .application
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .expect("the session's document")
+            .drawing = Arc::new(drawing);
+    }
+    session
+}
+
+/// A session whose authoritative drawing carries the given external references.
+///
+/// Each entry is `(name, raw path, resolved path, status, reason, overlay,
+/// depth)`. The drawing is installed directly (tests only); the session's
+/// document slot stays the same.
+pub(super) type ReferenceFixture<'a> = (
+    &'a str,
+    &'a str,
+    Option<&'a str>,
+    cad_db::ExternalReferenceStatus,
+    Option<&'a str>,
+    bool,
+    u32,
+);
+
+/// Build a session over a drawing carrying the given xref metadata.
+pub(super) fn session_with_references(references: &[ReferenceFixture<'_>]) -> CadSession {
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let mut builder = cad_db::DrawingDatabaseBuilder::new(cad_domain::DatabaseId(1));
+    for (name, raw_path, resolved_path, status, reason, overlay, depth) in references {
+        builder
+            .insert_external_reference(cad_db::ExternalReference {
+                name: (*name).to_string(),
+                raw_path: (*raw_path).to_string(),
+                resolved_path: resolved_path.map(str::to_string),
+                // Fixtures carry no xref-owned block: the projection does not
+                // read provenance, only the metadata fields.
+                block: None,
+                overlay: *overlay,
+                depth: *depth,
+                status: *status,
+                reason: reason.map(str::to_string),
+            })
+            .expect("xref fixture inserts");
+    }
+    let drawing = builder.finish().expect("xref fixture builds");
+    {
+        let mut controller = session.core.controller.borrow_mut();
+        let document_id = controller.document_id;
+        controller
+            .application
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .expect("the session's document")
+            .drawing = Arc::new(drawing);
+    }
+    session
+}
+
 /// A session with the idle hover preview explicitly pinned ON (it now defaults
 /// on, but the pin keeps these contracts independent of the default) and the
 /// dwell disabled, so the existing hover contracts observe the immediate

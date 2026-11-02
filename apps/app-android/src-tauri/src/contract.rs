@@ -32,6 +32,10 @@ use crate::policy;
 const TICK: &str = include_str!("host/tick.rs");
 /// The surface/presenter module (Android only).
 const SURFACE: &str = include_str!("surface.rs");
+/// The Android file contracts (compiled on the development host too).
+const PLATFORM: &str = include_str!("platform.rs");
+/// The SAF JNI bridge (Android only).
+const SAF: &str = include_str!("saf.rs");
 /// The Tauri entry point and the seams it registers (Android only).
 const HOST: &str = include_str!("host.rs");
 /// The popup seam (toolkit-neutral `PopupOps` + the Android marshalling half).
@@ -79,17 +83,56 @@ fn the_carrier_never_fabricates_a_document_or_an_open_funnel() {
     let open_funnel = concat!("open_configured", "_drawing");
     assert!(
         !TICK.contains(from_bytes),
-        "Android v1 must not fabricate a document from bytes"
+        "the tick must not fabricate a document from bytes"
     );
     assert!(
         !TICK.contains(open_funnel),
-        "Android v1 has no `--open` funnel to call"
+        "the tick must not call a configured-drawing open funnel"
     );
     // The environment's drawing is `None`: the session starts from the shared host
-    // core's built-in document, never from invented file bytes.
+    // core's built-in document, never from invented file bytes. A real open arrives
+    // as a platform `FileEvent`, not as a startup drawing.
     assert!(
         HOST.contains("drawing: None"),
         "the Android composition must not open a drawing it cannot read"
+    );
+}
+
+#[test]
+fn the_open_funnel_is_the_platform_and_never_the_tick() {
+    // The only open funnel is `AndroidFiles` -> the SAF bridge. The tick cannot
+    // open bytes itself; it drains the platform queue.
+    assert!(
+        PLATFORM.contains("saf::launch_open"),
+        "begin_open must launch the SAF picker through the platform"
+    );
+    assert!(
+        SAF.contains("documentLaunchOpen"),
+        "the platform funnel must reach the Kotlin documentLaunchOpen method"
+    );
+    assert!(
+        SAF.contains("documentReadUri"),
+        "the opened bytes must come from the Kotlin documentReadUri method"
+    );
+}
+
+#[test]
+fn the_file_poll_only_drains_the_platform_queue() {
+    // `poll` must translate a real platform result and return the queue; it must
+    // never construct an empty `Vec` (a fake "nothing happened" success is not an
+    // event, and a fabricated event is forbidden).
+    let body = slice_between(PLATFORM, "fn poll(&self) -> Vec<FileEvent> {", "\n    }\n}");
+    assert!(
+        body.contains("saf::poll"),
+        "the Android poll must read the SAF bridge result"
+    );
+    assert!(
+        body.contains("std::mem::take(&mut *self.events.borrow_mut())"),
+        "poll must return the platform-owned event queue"
+    );
+    assert!(
+        !body.contains("Vec::new()"),
+        "poll must not fabricate an empty success"
     );
 }
 
@@ -118,6 +161,13 @@ fn the_tick_moves_partition_local_input_into_canvas_space_before_the_session() {
     assert!(
         drain.contains("partition_origin"),
         "the translation must use the accepted layout rect's origin"
+    );
+    // Input positions are CSS px measured with the WebView's dpr; the camera
+    // viewport must use that same ratio. Falling back to `tao`'s separately
+    // reported density scales the whole input space and moves the pinch anchor.
+    assert!(
+        TICK.contains("crate::input::canvas_scale("),
+        "the tick must derive the canvas scale from the WebView dpr (canvas_scale)"
     );
 }
 

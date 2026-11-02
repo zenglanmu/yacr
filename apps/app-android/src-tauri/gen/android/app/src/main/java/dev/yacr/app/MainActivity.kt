@@ -2,6 +2,7 @@ package dev.yacr.app
 
 import android.content.res.AssetManager
 import android.content.res.Configuration
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
@@ -77,6 +78,12 @@ class MainActivity : TauriActivity() {
   private var safeBottomCssPx = NO_INSET
   /** The value a write has been **confirmed** against the live document with. */
   private var appliedCssPx = NO_INSET
+  /**
+   * SAF open/save mediation. It owns only one pending picker/read result, never a
+   * document (`AGENTS.md` iron rule 8). Lazy so an early JNI call cannot hit an
+   * uninitialised property; the only setup step is `register()` in `onCreate`.
+   */
+  private val documentPicker: DocumentPicker by lazy { DocumentPicker(this) }
 
   companion object {
     private const val TAG = "yacr"
@@ -128,6 +135,14 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
     // `super.onCreate(...)` has already initialised the `Rust` object, which loads
     // `libapp_android.so`, so the JNI calls below can resolve.
+    //
+    // The SAF launcher must be registered while the activity is CREATED — after
+    // `super.onCreate` and before STARTED — and never through `onActivityResult`.
+    documentPicker.register()
+    // An external "Open with" (VIEW) intent handled by this same launch: the async
+    // read runs independently, so it works even before the Rust CAD session exists;
+    // Rust simply polls the slot when it starts.
+    documentPicker.handleIncomingIntent(intent)
     extractBundledAssetsOnce()
     // The content frame is the activity's own root: it sees the window insets even
     // before (and independently of) the WebView being attached, and it returns them
@@ -171,6 +186,18 @@ class MainActivity : TauriActivity() {
     super.onConfigurationChanged(newConfig)
     window?.decorView?.requestApplyInsets()
     webView?.let { view -> view.postDelayed({ logLayout(view) }, 600) }
+  }
+
+  /**
+   * An "Open with" (VIEW) intent that arrives while this activity is already
+   * running: the manifest is `singleTask`, so the document is delivered here rather
+   * than through a new launch. Same slot as `onCreate`: the read starts immediately
+   * and Rust consumes the result whenever it polls.
+   */
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    documentPicker.handleIncomingIntent(intent)
   }
 
   /**
@@ -511,4 +538,44 @@ class MainActivity : TauriActivity() {
       }
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Rust -> Kotlin document contract (SAF open/save)
+  //
+  // The native host calls these on **this** activity by exact name (instance JNI:
+  // `Java_dev_yacr_app_MainActivity_documentLaunchOpen`, …), mirroring the frozen
+  // Kotlin -> Rust `native*` symbols above in the other direction. They carry no
+  // document state: `DocumentPicker` holds only one in-flight picker result and the
+  // bytes of one read, and every terminal state is consumed by
+  // `documentSnapshot()`. Nothing here invents a document, a path or a success.
+  // ---------------------------------------------------------------------------
+
+  /** Launches `ACTION_OPEN_DOCUMENT` and arms the slot for the picked document. */
+  fun documentLaunchOpen() {
+    documentPicker.documentLaunchOpen()
+  }
+
+  /** Launches `ACTION_CREATE_DOCUMENT` with `defaultName` as the suggested title. */
+  fun documentLaunchSave(defaultName: String) {
+    documentPicker.documentLaunchSave(defaultName)
+  }
+
+  /** Starts an async read of `uri`; poll [documentSnapshot] for LOADING -> OK/FAILED. */
+  fun documentReadUri(uri: String) {
+    documentPicker.documentReadUri(uri)
+  }
+
+  /**
+   * Synchronous truncating write of `bytes` to `uri`. Throws `IOException` on any
+   * failure (the JNI caller reports it); it never reports an empty success.
+   */
+  fun documentWriteUri(uri: String, bytes: ByteArray) {
+    documentPicker.documentWriteUri(uri, bytes)
+  }
+
+  /**
+   * `[Int state, String? uri, String? name, String? error, ByteArray? bytes]`.
+   * Terminal states (OK / CANCELLED / FAILED) are consumed by this call.
+   */
+  fun documentSnapshot(): Array<Any?> = documentPicker.documentSnapshot()
 }

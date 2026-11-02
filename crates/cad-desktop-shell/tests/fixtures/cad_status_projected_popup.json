@@ -1,4 +1,7 @@
 {
+  "activeSpace": {
+    "kind": "model"
+  },
   "adapter": null,
   "backend": null,
   "camera": null,
@@ -25,6 +28,7 @@
   "hoverPreview": false,
   "importCount": 0,
   "importProgress": null,
+  "layouts": [],
   "loading": false,
   "orthoEnabled": false,
   "popup": {
@@ -32,6 +36,7 @@
     "label": "popup-1",
     "modal": true
   },
+  "references": [],
   "selection": {
     "count": 0,
     "empty": true,

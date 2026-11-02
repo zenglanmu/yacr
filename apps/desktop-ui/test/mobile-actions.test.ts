@@ -107,18 +107,26 @@ test('data-layout has one writer, on the document element', async () => {
   assert.equal(roots.length, guards.length, 'every guard starts at :root');
 });
 
-test('the drawer keeps the model/layout strip the desktop band would show', async () => {
+test('the drawer keeps the real model/layout strip the desktop band shows', async () => {
   const drawer = await readModule('components/MobileRibbonDrawer.tsx');
   assert.ok(drawer.includes('mobile-drawer__space'), 'a compact space strip exists');
-  assert.ok(drawer.includes('ONE_LAYOUT_SPACE_KEY'), 'the structural reason is the desktop one');
-  assert.ok(drawer.includes("t('layout.tab.model')"), 'the active space keeps the desktop label');
-  assert.ok(drawer.includes("t('layout.panel')"), 'the layout affordance keeps the desktop label');
-  assert.ok(drawer.includes('disabled'), 'the layout affordance stays disabled, as on the desktop');
-  // The reason has one source: the same limit key `LayoutTabs` reads.
+  assert.equal(drawer.includes('ONE_LAYOUT_SPACE_KEY'), false, 'the one-space claim is gone');
+  // Both layouts read the same projection from the same `cad_status`: no second
+  // source, no hand-built chip list.
+  assert.ok(drawer.includes("import { layoutTabsView, layoutUnsupportedTitle } from '../layout/layout-tabs.ts';"));
+  assert.ok(drawer.includes('const spaces = layoutTabsView(shell.status);'));
+  assert.ok(drawer.includes("t('layout.tab.model')"), 'the model space keeps the desktop label');
+  assert.ok(drawer.includes('layoutUnsupportedTitle(t, space)'), 'unsupported reasons are the desktop ones');
+  assert.ok(drawer.includes('shell.runCommand(command)'), 'a supported tab dispatches the same SPACE line');
+  // References is reachable on the compact layout without a dock.
+  assert.ok(drawer.includes('shell.setReferencesOpen(true)'), 'the drawer opens the references sheet');
+
   const tabs = await readModule('components/LayoutTabs.tsx');
-  assert.ok(tabs.includes('ONE_LAYOUT_SPACE_KEY'));
+  assert.ok(tabs.includes('layoutTabsView(shell.status)'), 'the desktop strip reads the same projection');
 
   const css = await readModule('mobile.css');
   assert.ok(css.includes('.mobile-drawer__space-chip'), 'the strip has its compact styling');
   assert.ok(css.includes('.mobile-drawer__space-note'), 'the reason is visible text, not a tooltip');
+  assert.ok(css.includes('.mobile-drawer__space-scroll'), 'many layouts scroll instead of shrinking');
+  assert.ok(css.includes('.references--floating'), 'the compact references sheet has its styling');
 });

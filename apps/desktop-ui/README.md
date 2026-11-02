@@ -27,6 +27,7 @@ npm run dev     # http://127.0.0.1:1420
 | `src/layout/` | 宽度布局开关（`matchMedia`，断点 1024 CSS px）、移动端抽屉状态与功能区折叠、共享拒绝句（按原因键折叠） |
 | `src/layers/` | 图层投影、属性与标签 |
 | `src/properties/` | 实体属性投影、显示模型与标签 |
+| `src/references/` | 外部引用投影（宿主状态码、稳定原因码）与 `RESOURCES` 本地选择器 |
 | `src/popup/` | 弹窗状态、布局度量与文字编辑接线 |
 | `src/options/` | 选项模型 |
 | `src/components/` | 区域组件与共享控件（TSX） |
@@ -91,7 +92,7 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 | 功能区 | `Ribbon.tsx`，模型在 `src/ribbon/ribbon-model.ts` |
 | 图纸标签 | `DocTabs.tsx` |
 | 工作区 | `Workspace.tsx` |
-| 开始页 / 诊断 | `StartPanel.tsx`、`DiagnosticsPalette.tsx` |
+| 开始页 / 诊断 / 外部引用 | `StartPanel.tsx`、`DiagnosticsPalette.tsx`、`ReferencesPanel.tsx` |
 | 导航栏 | `NavRail.tsx` |
 | 模型 / 布局标签 | `LayoutTabs.tsx` |
 | 命令行 | `CommandLine.tsx`（桌面停靠区），控制器在 `src/commands/use-command-line.ts`；历史日志见 `src/commands/command-history.ts` |

@@ -27,6 +27,7 @@ mod layers;
 mod point_style;
 mod report_limits;
 mod writer;
+mod xref;
 
 /// Import bytes through the single acadrust boundary (test-local helper).
 fn import_bytes(bytes: &[u8]) -> DrawingDatabase {
@@ -36,6 +37,7 @@ fn import_bytes(bytes: &[u8]) -> DrawingDatabase {
         bytes: Arc::from(bytes.to_vec().into_boxed_slice()),
         limits: ImportLimits::default(),
         generation: 0,
+        xref: None,
     };
     AcadrustImporter::new()
         .import(&request, &|| false)

@@ -872,6 +872,7 @@ name = "cad-ui-core"
 version = "0.1.2"
 dependencies = [
  "cad-app",
+ "cad-db",
  "cad-domain",
  "cad-engine",
  "cad-host",

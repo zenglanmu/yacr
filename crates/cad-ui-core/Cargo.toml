@@ -16,6 +16,10 @@ description = "UI-framework-independent shared layer: wire protocol, layout, CAD
 # are forbidden here and enforced by `scripts/check-architecture.py`.
 [dependencies]
 cad-app.workspace = true
+# The authoritative database is a lower, pure-data layer: the session projects
+# its read-only external-reference metadata onto the wire. It adds no toolkit,
+# GPU or platform dependency.
+cad-db.workspace = true
 cad-domain.workspace = true
 cad-engine.workspace = true
 cad-host.workspace = true

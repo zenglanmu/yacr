@@ -168,6 +168,12 @@ Android 的产品路径绑在 **WebView 的 GL 实现**上：
 > Options / About / text-edit 可用；`AndroidConfigStore` 把 `config.json` / `preference.json` 写入
 > 应用私有 `filesDir`（公告 `fontsDir` 的父目录，JNI 契约未改），握手前保持非持久。其余各行
 > （文件/伪造身份/Vulkan 硬门槛/整窗 FIT）**仍然有效**。设备运行与落盘仍 **NOT VERIFIED**。
+>
+> **2026-11-02 更新（追加，不改写上面的历史决定）**：表中「打开 / 保存」已由 SAF 实现，不再是不支持：
+> `canOpen`/`canSave` 为 `true`，打开走 `ACTION_OPEN_DOCUMENT`，另存走 `ACTION_CREATE_DOCUMENT` 并导出
+> **DXF**（DWG 保存仍显式延后 `save.dwg_deferred`，且不原地覆盖来源 URI）。**新建 / 出图仍不支持**
+> （`canNew`/`canPlot` 为 `false`）；「伪造文件身份」与「Vulkan 硬门槛 / 整窗 FIT」两行仍有效。
+> 设备/模拟器上的选择器、读写与外部「打开方式」**NOT RUN**。
 
 ## 6. 失效条款清单（逐条对照）
 
@@ -214,11 +220,19 @@ Android 的产品路径绑在 **WebView 的 GL 实现**上：
 2. **弹窗能力标志**：在 `hostProfile` 或能力布尔里显式声明「本载体无弹窗宿主」，让 UI 在发 IPC
    **之前**禁用相关控件（当前是命令到达后拒绝）。
 3. **SAF 文件访问**：用 Android Storage Access Framework 接入打开/保存；在此之前 `canOpen`/`canSave`
-   必须保持 `false`，不得用私有路径伪造文件身份。
+   必须保持 `false`，不得用私有路径伪造文件身份。**（已实现 2026-11-02：`canOpen`/`canSave` 现为
+   `true`；实现与 NOT RUN 边界见下方补记。）**
 4. **设备 CI job**：真实设备或硬件加速模拟器上的安装/启动/像素/Vulkan adapter 断言；在它存在之前，
    CI 的 `android-check` 仍只是编译门禁。
 5. **构建产物清理**：`scripts/build-android-ui.sh` 目前仍会产出 wasm 会话产物（本载体不加载）；
    是否删除属构建 lane 的独立改动，本文只记录事实。
+
+> **2026-11-02 补记（追加）**：第 3 项 SAF 已落地——新的 Android-only `src/saf.rs` + 手写提交的
+> `DocumentPicker.kt` / `MainActivity` 五个 `document*` 实例方法实现了打开（`ACTION_OPEN_DOCUMENT`，
+> `*/*`，worker 读后以 `FileEvent::Opened` 交给共享漏斗）与 DXF 另存（`ACTION_CREATE_DOCUMENT`，
+> `ContentResolver.openOutputStream(uri, "wt")`）；`bundle.fileAssociations` 提供外部「打开方式」。
+> `canNew`/`canPlot` 仍为 `false`，DWG 保存仍是 `save.dwg_deferred`。**设备/模拟器上的选择器、
+> 实际读写、外部 intent 与 JNI 运行时均 NOT RUN**，本轮证据只到开发机契约测试与编译级。
 
 ## 9. 历史保留（不抹、不改写）
 

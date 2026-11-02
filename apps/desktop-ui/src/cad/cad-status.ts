@@ -122,6 +122,54 @@ export interface CadPopup {
   readonly modal: boolean;
 }
 
+/** One layout tab the drawing exposes (`cad_status.layouts[]`). */
+export interface CadLayoutTab {
+  /** The stable `LayoutId` the host resolves `SPACE #<id>` against. */
+  readonly id: number;
+  /** The drawing's own layout name (never invented for an unnamed layout). */
+  readonly name: string;
+  /** Whether this build can draw the layout's viewports. */
+  readonly supported: boolean;
+  /** `"<stable-code>: <message>"` when unsupported, `null` when supported. */
+  readonly reason: string | null;
+  /** Real viewport count from the layout table. */
+  readonly viewportCount: number;
+}
+
+/** The drawing space the host is currently showing (`cad_status.activeSpace`). */
+export type CadActiveSpace =
+  | { readonly kind: 'model' }
+  | { readonly kind: 'paper'; readonly id: number };
+
+/** The closed set of external-reference states the host can report. */
+export type CadReferenceKind =
+  | 'loaded'
+  | 'missing'
+  | 'browser-unavailable'
+  | 'refused-path'
+  | 'unloaded'
+  | 'cycle'
+  | 'depth-exceeded'
+  | 'skipped-overlay'
+  | 'unsupported';
+
+/** One external reference (`cad_status.references[]`). */
+export interface CadReferenceStatus {
+  /** The reference name stored in the drawing. */
+  readonly name: string;
+  /** The raw path stored in the drawing (never rewritten by the chrome). */
+  readonly path: string;
+  /** The path the host really opened, when it did. */
+  readonly resolvedPath: string | null;
+  readonly status: CadReferenceKind;
+  /** `"<stable-code>: <message>"`, or `null` when the host gave no reason. */
+  readonly reason: string | null;
+  /** Whether the reference is an overlay rather than an attached reference. */
+  readonly overlay: boolean;
+  /** Nesting depth of the reference in the drawing's reference graph. */
+  readonly depth: number;
+}
+
 /**
  * The host's carrier profile (`cad_status.hostProfile`), one always-present
  * nested object on the current wire.
@@ -206,11 +254,38 @@ export interface CadStatus {
    * the historical defaults — never a guessed capability.
    */
   readonly hostProfile?: CadHostProfile;
+  /** Layout tabs of the open drawing; absent on an older host means `[]`. */
+  readonly layouts?: readonly CadLayoutTab[];
+  /** The active drawing space; absent on an older host means model space. */
+  readonly activeSpace?: CadActiveSpace;
+  /** External references of the open drawing; absent means `[]`. */
+  readonly references?: readonly CadReferenceStatus[];
+}
+
+/** The open drawing's layout tabs; an older host's omission is an empty list. */
+export function layoutTabsOf(status: Partial<CadStatus> | null | undefined): readonly CadLayoutTab[] {
+  return status?.layouts ?? [];
+}
+
+/** The active space; an older host's omission means model space. */
+export function activeSpaceOf(status: Partial<CadStatus> | null | undefined): CadActiveSpace {
+  return status?.activeSpace ?? { kind: 'model' };
+}
+
+/** The open drawing's external references; an omission is an empty list. */
+export function referencesOf(status: Partial<CadStatus> | null | undefined): readonly CadReferenceStatus[] {
+  return status?.references ?? [];
 }
 
 // Phase keys the backend reports (`cad_app::import_phase_key`). A phase outside
 // this set is a contract violation, not a runtime surprise.
 const IMPORT_PHASES = new Set(['reading', 'parsing', 'tables', 'entities', 'resolving', 'finishing']);
+
+/** The closed external-reference state set (`cad_ui_core` reference status). */
+const REFERENCE_KINDS = new Set([
+  'loaded', 'missing', 'browser-unavailable', 'refused-path', 'unloaded', 'cycle',
+  'depth-exceeded', 'skipped-overlay', 'unsupported',
+]);
 
 /** Whether `raw` is a non-negative safe integer (a real count, never a guess). */
 function nonNegativeInteger(raw: unknown): boolean {
@@ -247,6 +322,31 @@ function isCamera(value: unknown): value is CadCamera {
   return Array.isArray(camera.center) && camera.center.length === 2
     && camera.center.every(Number.isFinite)
     && typeof camera.scale === 'number' && Number.isFinite(camera.scale) && camera.scale > 0;
+}
+
+/** Whether `value` is one well-formed `layouts[]` row. */
+function isLayoutTab(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const tab = value as Record<string, unknown>;
+  return nonNegativeInteger(tab.id)
+    && typeof tab.name === 'string'
+    && typeof tab.supported === 'boolean'
+    && (tab.reason === null || typeof tab.reason === 'string')
+    && nonNegativeInteger(tab.viewportCount);
+}
+
+/** Whether `value` is one well-formed `references[]` row. */
+function isReferenceStatus(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const reference = value as Record<string, unknown>;
+  return typeof reference.name === 'string'
+    && typeof reference.path === 'string'
+    && (reference.resolvedPath === null || typeof reference.resolvedPath === 'string')
+    && typeof reference.status === 'string'
+    && REFERENCE_KINDS.has(reference.status)
+    && (reference.reason === null || typeof reference.reason === 'string')
+    && typeof reference.overlay === 'boolean'
+    && nonNegativeInteger(reference.depth);
 }
 
 export function parseCadStatus(value: unknown): CadStatus {
@@ -341,6 +441,28 @@ export function parseCadStatus(value: unknown): CadStatus {
         throw Error('CAD_STATUS_INVALID');
       }
     }
+  }
+  // The additive layout/reference blocks: absent is the older-host answer
+  // (`[]` / model / `[]`), but a present block is validated strictly so a
+  // malformed row can never become a guessed tab or reference state.
+  if (status.layouts !== undefined
+    && (!Array.isArray(status.layouts) || !status.layouts.every(isLayoutTab))) {
+    throw Error('CAD_STATUS_INVALID');
+  }
+  if (status.activeSpace !== undefined) {
+    const space = status.activeSpace;
+    if (!space || typeof space !== 'object' || Array.isArray(space)) {
+      throw Error('CAD_STATUS_INVALID');
+    }
+    const kind = (space as Record<string, unknown>).kind;
+    if (kind !== 'model' && kind !== 'paper') throw Error('CAD_STATUS_INVALID');
+    if (kind === 'paper' && !nonNegativeInteger((space as Record<string, unknown>).id)) {
+      throw Error('CAD_STATUS_INVALID');
+    }
+  }
+  if (status.references !== undefined
+    && (!Array.isArray(status.references) || !status.references.every(isReferenceStatus))) {
+    throw Error('CAD_STATUS_INVALID');
   }
   // The cursor's world coordinate is required: `null` (no reliable 2D cursor) or
   // exactly three finite numbers. Anything else is rejected outright — a

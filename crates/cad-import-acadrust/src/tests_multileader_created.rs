@@ -107,6 +107,7 @@ fn import_bytes(bytes: &[u8]) -> cad_db::DrawingDatabase {
         bytes: Arc::from(bytes.to_vec().into_boxed_slice()),
         limits: ImportLimits::default(),
         generation: 0,
+        xref: None,
     };
     AcadrustImporter::new()
         .import(&request, &|| false)

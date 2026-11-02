@@ -16,6 +16,7 @@ use crate::tables::{
     ActiveAnnotationScale, BlockDefinition, BlockMetadata, Layer, LayerAttributes, Layout,
     LineType, PlotSettingsRecord, Scale, Style,
 };
+use crate::xref::ExternalReference;
 
 mod access;
 mod block_edit;
@@ -142,6 +143,13 @@ pub struct DrawingDatabase {
     /// rewound by a delete, so a deleted layer id is never reused (a stale layer
     /// reference could otherwise alias a newly created layer).
     pub(crate) next_layer_id: u128,
+    /// External-reference metadata/provenance, keyed by the xref block name.
+    ///
+    /// Import-only, like every other table: it is populated by
+    /// [`crate::DrawingDatabaseBuilder::insert_external_reference`] and never
+    /// mutated by a transaction after [`crate::DrawingDatabaseBuilder::finish`].
+    /// Empty for hand-built databases and drawings without xrefs.
+    pub(crate) external_references: BTreeMap<String, ExternalReference>,
     /// Cache of [`Self::bounds`] tagged with the [`Revision`] it was computed
     /// at. Interior mutability is required because `bounds` takes `&self` (the
     /// scene-preparation worker shares one `Arc<DrawingDatabase>` across

@@ -9,6 +9,7 @@
 //! survives the round trip. The caller (host/CLI) owns file I/O; this module only
 //! produces bytes.
 
+mod common;
 mod dimension;
 mod entity;
 
@@ -122,18 +123,39 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
     }
 
     // Block definitions not reached by any INSERT expansion are reported, so a
-    // block's content is never silently missing from the output.
+    // block's content is never silently missing from the output. Xref-owned
+    // definitions are a separate case: their members are an external drawing,
+    // and an INSERT of one is already refused with `export.xref_content_dropped`
+    // (and marked expanded). A definition with no INSERT still must not be
+    // called a generic unreferenced block, because the reason it is not written
+    // is that v1 cannot emit an xref record/path at all.
     for block in request.database.blocks() {
-        if !acc.expanded_blocks.contains(&block.id) {
-            acc.record(
-                None,
-                "unreferenced_block",
-                MappingOutcome::Dropped(vec![format!(
-                    "unreferenced block definition {:?} is not exported",
-                    block.id
-                )]),
-            );
+        if acc.expanded_blocks.contains(&block.id) {
+            continue;
         }
+        if let Some(reference) = request.database.external_reference_for_block(block.id) {
+            acc.record_dropped_code(
+                None,
+                "export.xref_definition_not_written",
+                vec![format!(
+                    "external reference '{}' (raw path '{}', status '{}') block {:?} is not \
+                     written: the v1 DXF exporter emits no xref attachment record or path",
+                    reference.name,
+                    reference.raw_path,
+                    reference.status.as_str(),
+                    block.id
+                )],
+            );
+            continue;
+        }
+        acc.record(
+            None,
+            "unreferenced_block",
+            MappingOutcome::Dropped(vec![format!(
+                "unreferenced block definition {:?} is not exported",
+                block.id
+            )]),
+        );
     }
 
     report.entries.extend(acc.entries);

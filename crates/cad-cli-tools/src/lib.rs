@@ -20,7 +20,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use cad_app::host::HostController;
+use cad_app::host::{HostController, XrefOptions};
 use cad_app::{Command, CommandId, CommandPayload};
 use cad_domain::*;
 #[cfg(not(target_arch = "wasm32"))]

@@ -700,6 +700,7 @@ fn created_rows_round_trip_through_the_dxf_export() {
                 bytes: Arc::from(bytes.into_boxed_slice()),
                 limits: ImportLimits::default(),
                 generation: 0,
+                xref: None,
             },
             &|| false,
         )

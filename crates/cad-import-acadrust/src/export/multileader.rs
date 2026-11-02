@@ -69,7 +69,8 @@ use acadrust::CadDocument;
 use cad_db::DbEntity;
 use cad_domain::*;
 
-use super::entity::{common_for, v3, EntityContext, ExportAccumulator};
+use super::common::{common_for, v3};
+use super::entity::{EntityContext, ExportAccumulator};
 use super::report::MappingOutcome;
 use super::tables::ensure_text_style;
 

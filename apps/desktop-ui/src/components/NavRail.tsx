@@ -62,6 +62,16 @@ export function NavRail() {
           >
             <Icon name="diagnostics" size={18} />
           </button>
+          <button
+            type="button"
+            className={['navrail__button', shell.referencesOpen ? 'is-on' : ''].filter(Boolean).join(' ')}
+            aria-pressed={Boolean(shell.referencesOpen)}
+            title={t('resources.references')}
+            aria-label={t('resources.references')}
+            onClick={() => shell.setReferencesOpen(!shell.referencesOpen)}
+          >
+            <Icon name="reference" size={18} />
+          </button>
         </>
       ) : null}
     </div>

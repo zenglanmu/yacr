@@ -1,5 +1,151 @@
 use super::*;
 
+/// The active viewport's camera.
+fn camera(app: &Application) -> Camera {
+    app.workspace.viewports[&ViewportId(1)].camera
+}
+
+/// The active viewport's orthographic world-units-per-pixel scale.
+fn ortho_scale(app: &Application) -> f64 {
+    match camera(app).projection {
+        Projection::Orthographic { scale } => scale,
+        Projection::Perspective { .. } => panic!("expected the 2D plan projection"),
+    }
+}
+
+fn line_entity(id: u128, space: SpaceId, start: Point3, end: Point3) -> cad_db::DbEntity {
+    cad_db::DbEntity {
+        object: cad_db::DbObject {
+            id: ObjectId(id),
+            type_key: "AcDbLine".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(id),
+        layer: LayerId(0),
+        space,
+        geometry: SemanticGeometry::Line { start, end },
+        draw_order: 0,
+    }
+}
+
+/// Two drawable sheets plus model geometry. Model bounds are 400×300; sheet 1
+/// has a viewport rectangle 0..100 × 0..50 **and** a paper entity extending it
+/// to 300×100, so the paper fit proves both sources are framed.
+fn application_with_spaces() -> (Application, SessionState) {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_entity(line_entity(
+        1,
+        SpaceId::Model,
+        point(0.0, 0.0),
+        point(400.0, 300.0),
+    ))
+    .unwrap();
+    let sheet_viewport = || PaperViewport {
+        clip: vec![
+            point(0.0, 0.0),
+            point(100.0, 0.0),
+            point(100.0, 50.0),
+            point(0.0, 50.0),
+        ],
+        model_to_paper: Transform3::scale(100.0),
+        completeness: Completeness::Complete,
+    };
+    b.insert_layout(Layout {
+        id: LayoutId(1),
+        name: "Sheet1".into(),
+        viewports: vec![sheet_viewport()],
+    })
+    .unwrap();
+    b.insert_entity(line_entity(
+        2,
+        SpaceId::Paper(LayoutId(1)),
+        point(200.0, 0.0),
+        point(300.0, 100.0),
+    ))
+    .unwrap();
+    b.insert_layout(Layout {
+        id: LayoutId(2),
+        name: "Sheet2".into(),
+        viewports: vec![sheet_viewport()],
+    })
+    .unwrap();
+
+    let drawing = b.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([0u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    (app, SessionState::new(DocumentId(1), AppMode::Work))
+}
+
+/// One drawable-but-empty sheet whose stored plot size is unusable (zero), so
+/// neither paper geometry nor a paper-size fallback can frame it.
+fn application_with_unframable_layout() -> (Application, SessionState) {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_layout(Layout {
+        id: LayoutId(1),
+        name: "EmptySheet".into(),
+        viewports: Vec::new(),
+    })
+    .unwrap();
+    b.set_plot_settings(cad_db::PlotSettingsRecord {
+        layout: LayoutId(1),
+        paper_size_name: "unusable".into(),
+        paper_width: 0.0,
+        paper_height: 0.0,
+        margins: cad_db::PlotMargins::default(),
+        rotation: cad_db::PlotRotation::None,
+        scale_numerator: 1.0,
+        scale_denominator: 1.0,
+        plot_type: cad_db::PlotType::Layout,
+        paper_units: cad_db::PlotPaperUnits::Millimeters,
+        provenance: cad_db::PlotProvenance::Imported,
+    })
+    .unwrap();
+
+    let drawing = b.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([0u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    (app, SessionState::new(DocumentId(1), AppMode::Work))
+}
+
 #[test]
 fn validate_space_distinguishes_unknown_from_unsupported() {
     let (app, _) = application_with_layouts();
@@ -102,6 +248,82 @@ fn switch_space_does_not_mutate_the_drawing_or_open_a_change_set() {
     assert_eq!(
         app.workspace.documents[&DocumentId(1)].drawing.revision(),
         before
+    );
+}
+
+#[test]
+fn switch_space_fits_the_target_space_then_model_again() {
+    let (mut app, mut session) = application_with_spaces();
+    // Model: 400×300 framed in 800×600 with the FIT margin.
+    let model_scale = 0.5 * FIT_MARGIN;
+    assert!((ortho_scale(&app) - 1.0).abs() < 1e-12);
+
+    app.execute(
+        &mut session,
+        command(
+            CommandId::SwitchSpace,
+            CommandPayload::Space(SpaceId::Paper(LayoutId(1))),
+        ),
+    )
+    .unwrap();
+    assert_eq!(session.active_space, SpaceId::Paper(LayoutId(1)));
+    let paper = camera(&app);
+    // Paper bounds: viewport 0..100×0..50 plus the paper entity 200..300×0..100
+    // => 300×100, centred at (150, 50).
+    assert!((paper.target.x - 150.0).abs() < 1e-9, "{paper:?}");
+    assert!((paper.target.y - 50.0).abs() < 1e-9, "{paper:?}");
+    assert!(
+        (ortho_scale(&app) - 0.375 * FIT_MARGIN).abs() < 1e-12,
+        "paper scale {} != {}",
+        ortho_scale(&app),
+        0.375 * FIT_MARGIN
+    );
+
+    app.execute(
+        &mut session,
+        command(
+            CommandId::SwitchSpace,
+            CommandPayload::Space(SpaceId::Model),
+        ),
+    )
+    .unwrap();
+    assert_eq!(session.active_space, SpaceId::Model);
+    let model = camera(&app);
+    assert!((model.target.x - 200.0).abs() < 1e-9, "{model:?}");
+    assert!((model.target.y - 150.0).abs() < 1e-9, "{model:?}");
+    assert!(
+        (ortho_scale(&app) - model_scale).abs() < 1e-12,
+        "model scale {} != {model_scale}",
+        ortho_scale(&app)
+    );
+}
+
+#[test]
+fn switch_space_to_an_unframable_layout_reports_fit_empty_and_keeps_the_camera() {
+    let (mut app, mut session) = application_with_unframable_layout();
+    let before = camera(&app);
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::SwitchSpace,
+                CommandPayload::Space(SpaceId::Paper(LayoutId(1))),
+            ),
+        )
+        .unwrap();
+    assert_eq!(session.active_space, SpaceId::Paper(LayoutId(1)));
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "layout.fit_empty"),
+        "{:?}",
+        outcome.diagnostics
+    );
+    assert_eq!(
+        camera(&app),
+        before,
+        "an empty sheet must not move the camera"
     );
 }
 

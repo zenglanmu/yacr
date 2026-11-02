@@ -32,7 +32,7 @@ import type { Translator } from '../i18n.ts';
 import { ribbonTab } from '../ribbon/ribbon-model.ts';
 import type { RibbonItem } from '../ribbon/ribbon-model.ts';
 import { mobileRibbonDomId, mobileRibbonSections, mobileRibbonTabs, panelRefusalKey, sharedRefusal } from '../layout/mobile-ribbon.ts';
-import { ONE_LAYOUT_SPACE_KEY } from '../limits.ts';
+import { layoutTabsView, layoutUnsupportedTitle } from '../layout/layout-tabs.ts';
 
 /** The drawer's DOM id: the top bar's `aria-controls` names it. */
 export const MOBILE_DRAWER_ID = 'cad-mobile-drawer';
@@ -179,11 +179,10 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const tab = ribbonTab(shell.ribbonTab);
-  // The compact layout's stand-in for the desktop model/layout strip: one active
-  // Model space and the layout affordance disabled for the same **structural**
-  // reason `LayoutTabs` gives (one layout space per drawing, `limits.ts`). No
-  // handler exists for either, because no shipped carrier reports a second space.
-  const spaceReason = t(ONE_LAYOUT_SPACE_KEY);
+  // The compact layout's stand-in for the desktop model/layout strip. It reads
+  // the very same projection (`layoutTabsView`) from the same `cad_status`, so
+  // the drawer can never show a different space or a different reason.
+  const spaces = layoutTabsView(shell.status);
   // `false`: the compact layout never renders the docked palettes, so the drawer
   // drops their toggles with the panels — the same carrier rule a `dom-canvas`
   // host uses, and the reason no button here can open a surface that is hidden.
@@ -233,23 +232,57 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
           <span className="mobile-drawer__title">{t('mobile.drawer')}</span>
           <IconButton icon="close" label={t('mobile.close')} onClick={onClose} />
         </div>
-        {/* The drawing-space strip: what `LayoutTabs` shows on the desktop band,
-            kept visible on the one mobile surface that can hold it. Both chips
-            mirror the desktop state exactly — Model is the active space and the
-            layout affordance is disabled for the structural reason below — so
-            the compact layout never implies a space switch it cannot perform. */}
+        {/* The drawing-space strip: the same `layoutTabsView` rows the desktop
+            strip renders. A supported tab dispatches the same `SPACE` line; an
+            unsupported layout stays visible, disabled, with its stable reason
+            printed below because a phone has no hover tooltip. */}
         <div className="mobile-drawer__space">
-          <span className="mobile-drawer__space-chip is-active">{t('layout.tab.model')}</span>
-          <button
-            type="button"
-            className="mobile-drawer__space-chip is-disabled"
-            disabled
-            title={spaceReason}
-          >
-            <Icon name="layers" size={13} />
-            {t('layout.panel')}
-          </button>
-          <span className="mobile-drawer__space-note">{spaceReason}</span>
+          <div className="mobile-drawer__space-scroll">
+            {spaces.map(space => {
+              const label = space.id === null
+                ? t('layout.tab.model')
+                : (space.name?.trim() || t('layout.tab.unnamed'));
+              const command = space.command;
+              const unavailable = command !== null && !shell.canCommand(command);
+              const disabled = !space.supported || unavailable;
+              return (
+                <button
+                  key={space.id === null ? 'model' : `layout-${space.id}`}
+                  type="button"
+                  className={[
+                    'mobile-drawer__space-chip',
+                    space.active ? 'is-active' : '',
+                    space.supported ? '' : 'is-unsupported',
+                    disabled ? 'is-disabled' : '',
+                  ].filter(Boolean).join(' ')}
+                  disabled={disabled}
+                  aria-pressed={space.active}
+                  title={!space.supported
+                    ? layoutUnsupportedTitle(t, space)
+                    : unavailable
+                      ? t('command.unsupported', { command: 'SPACE' })
+                      : undefined}
+                  onClick={command === null ? undefined : () => { shell.runCommand(command); onClose(); }}
+                >
+                  {space.id === null ? null : <Icon name="layers" size={13} />}
+                  {label}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              className="mobile-drawer__space-chip is-action"
+              onClick={() => { shell.setReferencesOpen(true); onClose(); }}
+            >
+              <Icon name="reference" size={13} />
+              {t('resources.references')}
+            </button>
+          </div>
+          {spaces.filter(space => !space.supported).map(space => (
+            <span className="mobile-drawer__space-note" key={`reason-${space.id}`}>
+              {layoutUnsupportedTitle(t, space)}
+            </span>
+          ))}
         </div>
         <div className="mobile-drawer__tabs" role="tablist" aria-label={t('ribbon.tabs_label')}>
           {mobileRibbonTabs().map(entry => (

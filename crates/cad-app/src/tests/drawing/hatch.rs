@@ -730,6 +730,7 @@ fn a_created_user_defined_hatch_exports_and_reimports_as_a_hatch() {
         bytes: Arc::from(bytes.into_boxed_slice()),
         limits: ImportLimits::default(),
         generation: 0,
+        xref: None,
     };
     let imported = AcadrustImporter::new()
         .import(&request, &|| false)

@@ -67,7 +67,12 @@ pub struct LayoutDescriptor {
 
 /// Build the ordered layout list a space-switch affordance offers.
 ///
-/// The order is the database's own (a `BTreeMap`, so deterministic by id).
+/// The order is the database's own: `layouts` is a `BTreeMap`, so iteration is
+/// deterministic by [`LayoutId`]. The importer assigns ids in the drawing's
+/// display order (the LAYOUT `tab_order`), so this list is the sheet tab order.
+/// `name` is the layout's user-visible display name, never the internal
+/// `*Paper_Space*` block name.
+///
 /// Model space is *not* included: it is always available and is represented by
 /// [`SpaceSelection::Model`]. A layout with no viewports is still `supported`
 /// (it simply draws its own paper geometry).

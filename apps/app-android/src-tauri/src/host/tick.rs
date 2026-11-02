@@ -18,16 +18,18 @@
 //!
 //! # Honest limits of v1
 //!
-//! * **No document can arrive.** Android v1 has no file access
-//!   ([`crate::platform::AndroidFiles`] refuses every operation), there is no
-//!   `--open` argument and no fixture funnel, so the session is created with
-//!   `HostOptions.drawing = None` and reports `canOpen=false`. No opened-file
-//!   identity and no drawing bytes are invented. What the session then holds is
-//!   the **shared host core's built-in starting document** (`HostCore::new`
-//!   always builds it; every desktop host launched without `--open` shows the same
-//!   one). Creating a session without a document is not an available API; if a
-//!   no-document-at-all carrier is required, that is a `cad-host` change, not
-//!   something this host may fake.
+//! * **Documents arrive through the platform picker, never `--open`.** There is
+//!   no `--open` argument and no fixture funnel, so the session is created with
+//!   `HostOptions.drawing = None`: it starts from the **shared host core's
+//!   built-in starting document** (`HostCore::new` always builds it; every
+//!   desktop host launched without `--open` shows the same one). After startup,
+//!   `OPEN` and an external VIEW intent are served by the SAF picker
+//!   ([`crate::platform::AndroidFiles`] + [`crate::saf`]); those bytes come from
+//!   a real user choice, and Kotlin holds no document state. `canOpen` is
+//!   advertised because that funnel exists; `NEW`/`PLOT` remain explicitly
+//!   unsupported. Creating a session without a document is not an available API;
+//!   if a no-document-at-all carrier is required, that is a `cad-host` change,
+//!   not something this host may fake.
 //! * **Popups are in-DOM overlays.** The host registers a real
 //!   `ShellPopupHost` ([`crate::popup`]) that marshals the shared lifecycle onto
 //!   this thread and derives the `textEdit` payload from the live session, so
@@ -72,7 +74,7 @@
 //! generation, the next tick rebuilds the presenter and re-attaches the **same**
 //! session, so the drawing survives a rotation or a background/foreground cycle.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -131,12 +133,25 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             log_status_line(&state, telemetry.last_timings);
         }
 
-        state
+        let window_scale = state
             .window
             .as_ref()
             .and_then(|window| window.scale_factor().ok())
-            .unwrap_or(1.0)
-            .max(0.1)
+            .unwrap_or(1.0);
+        // The chrome measured every wire position with `devicePixelRatio`, so that
+        // ratio — not `tao`'s separately-reported density — is the physical/logical
+        // scale the camera and input must share. A disagreement here scales the
+        // whole input space and puts a pinch anchor away from the fingers.
+        let dom_dpr = state.shell.input.last_rect().map(|rect| rect.dpr);
+        let scale = crate::input::canvas_scale(window_scale, dom_dpr);
+        static SCALE_LOGGED: AtomicBool = AtomicBool::new(false);
+        if dom_dpr.is_some() && !SCALE_LOGGED.swap(true, Ordering::Relaxed) {
+            log::info!(
+                "[probe] canvas scale: window.scale_factor={window_scale:.4} \
+                 webview.dpr={dom_dpr:?} using={scale:.4}"
+            );
+        }
+        scale
     };
 
     if !lock(shared).shell.cad_mode {

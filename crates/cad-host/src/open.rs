@@ -1,7 +1,58 @@
 //! The open pipeline: picker/read → begin_async_open (or sync) → poll → install.
 use super::*;
+use cad_app::host::XrefOptions;
 use cad_app::AsyncOpenPoll;
+#[cfg(not(target_arch = "wasm32"))]
+use cad_platform::FsXrefSource;
 use cad_platform::{FileEvent, FilePurpose};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+/// Default total byte budget for every external reference in one open (1 GiB).
+#[cfg(not(target_arch = "wasm32"))]
+const XREF_TOTAL_BYTES_BUDGET: u64 = 1024 * 1024 * 1024;
+
+/// Build the import-only external-reference policy for a delivered target.
+///
+/// Only a native open from a real filesystem path gets a loader. The allowed
+/// root is the host drawing's own directory — never the home directory or the
+/// process current directory; an absolute reference outside it is refused by
+/// the importer's lexical path policy, and the loader's canonical containment
+/// check stops a symlink inside that root from escaping. Browser/external-byte
+/// opens without a path keep `None` (every reference is `browser-unavailable`).
+#[cfg(not(target_arch = "wasm32"))]
+fn xref_options_for(target: &FileTarget) -> Option<Arc<XrefOptions>> {
+    if target.opaque.is_empty() {
+        return None;
+    }
+    // A non-filesystem opaque handle (a SAF `content://` URI, a browser handle)
+    // has no filesystem directory to root an xref loader at. Deriving a `Path`
+    // from it would invent a bogus containment root, so the honest answer is "no
+    // xref policy" (every reference is reported unavailable).
+    if target.opaque.contains("://") {
+        return None;
+    }
+    let dir = Path::new(&target.opaque).parent()?;
+    if dir.as_os_str().is_empty() || !dir.is_dir() {
+        return None;
+    }
+    let dir = dir.to_path_buf();
+    let source: Arc<dyn cad_resources::XrefFileSource> =
+        Arc::new(FsXrefSource::new(vec![dir.clone()]));
+    Some(Arc::new(XrefOptions {
+        source,
+        drawing_dir: dir.clone(),
+        roots: vec![dir],
+        max_depth: cad_resources::ResourceLimits::default().max_xref_depth,
+        total_bytes_budget: XREF_TOTAL_BYTES_BUDGET,
+    }))
+}
+
+/// A wasm carrier has no filesystem handle for an open target: no policy.
+#[cfg(target_arch = "wasm32")]
+fn xref_options_for(_target: &FileTarget) -> Option<Arc<XrefOptions>> {
+    None
+}
 
 impl HostCore {
     /// Arm the supersession guard for a new open attempt.
@@ -102,6 +153,10 @@ impl HostCore {
             self.full_dirty.set(true);
             return Ok(());
         }
+        // Import-only external-reference policy for this delivery: a real host
+        // path gets the native filesystem carrier rooted at the drawing's own
+        // directory; a path-less (browser/external-byte) open gets `None`.
+        let xref = xref_options_for(&target);
         if self.capabilities.import_worker {
             self.presenting_open.set(true);
             self.full_dirty.set(true);
@@ -111,17 +166,19 @@ impl HostCore {
             // This attempt now owns the controller's async report: mark it before
             // starting the job so its running/terminal state is eligible.
             self.async_report_attempt.set(Some(self.open_attempt.get()));
-            self.controller
-                .borrow_mut()
-                .begin_async_open(bytes, &target.display_name);
+            self.controller.borrow_mut().begin_async_open_with_xref(
+                bytes,
+                &target.display_name,
+                xref,
+            );
             return Ok(());
         }
         // Synchronous (headless/CLI-style) install.
-        let opened = match self
-            .controller
-            .borrow_mut()
-            .open_bytes(bytes, &target.display_name)
-        {
+        let opened = match self.controller.borrow_mut().open_bytes_with_xref(
+            bytes,
+            &target.display_name,
+            xref,
+        ) {
             Ok(opened) => opened,
             Err(error) => {
                 // A real failure keeps an explicit terminal; never a fake success.
@@ -366,5 +423,35 @@ impl HostCore {
             self.set_catalog_status("fonts.failed", &[("error", error)])?;
         }
         Ok(())
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    fn target(opaque: &str) -> FileTarget {
+        FileTarget {
+            display_name: "plan.dwg".to_string(),
+            opaque: opaque.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_uri_opaque_handle_has_no_filesystem_xref_policy() {
+        // A SAF `content://` URI (or any other scheme handle) is not a path: the
+        // loader must not be rooted at a directory derived from it.
+        for opaque in [
+            "content://com.android.providers.downloads.documents/document/1",
+            "https://example.com/plan.dwg",
+            "file:///tmp/plan.dwg",
+        ] {
+            assert!(
+                xref_options_for(&target(opaque)).is_none(),
+                "a scheme handle must not produce an xref policy: {opaque}"
+            );
+        }
+        // A path-less handle stays `None` exactly as before.
+        assert!(xref_options_for(&target("")).is_none());
     }
 }

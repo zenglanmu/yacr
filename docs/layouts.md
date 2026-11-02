@@ -1,9 +1,9 @@
 # 布局与纸空间（F04）
 
-本文描述**表示层与桥接层**已经做到的模型/纸空间切换、纸空间视口几何（四角矩形、
-视图变换、比例），以及明确的未支持边界。规范条款：§3.3「纸空间支持基本布局、视口
-矩形裁剪、视图变换和比例，复杂视口裁剪等必须按样本标记能力」，F04「不支持的视口
-状态显式报告」。
+本文描述**表示层、桥接层与共享 UI/传输层**已经做到的模型/纸空间切换、纸空间视口几何（四角矩形、
+视图变换、比例）、布局页签与 `SPACE` 命令、活动空间取景，以及明确的未支持边界。规范条款：
+§3.3「纸空间支持基本布局、视口矩形裁剪、视图变换和比例，复杂视口裁剪等必须按样本标记能力」，
+F04「不支持的视口状态显式报告」。
 
 ## 1. 空间选择
 
@@ -30,6 +30,13 @@ pub fn enumerate_layouts(db: &DrawingDatabase) -> Vec<LayoutDescriptor>;
 前缀是机器可读的稳定原因码（见 §3）。模型空间不出现在列表里——它始终可用，用
 `SpaceSelection::Model` 表示。
 
+导入器按图纸页签顺序（acadrust `Layout.tab_order`）分配 `LayoutId(index + 1)`，并以
+LAYOUT 对象的 `name` 作为显示名，绝不使用内部块名 `*Paper_Space0`。`DrawingDatabase`
+的布局表按键有序，因此 `enumerate_layouts` 的顺序就是用户在页签上看到的顺序。只在
+图纸完全没有纸空间布局时才写入合成的 `LayoutId(0)` `"Model"` 记录（既有消费方过滤
+该 id）。没有对应 LAYOUT 对象的 `*PAPER_SPACE*` 块仍按稳定块名顺序追加，并以块名作
+显示名。
+
 桥接层导出：
 
 ```rust
@@ -46,6 +53,39 @@ pub fn build_scene_with_space(
 
 `build_scene` / `build_scene_with_fonts` / `build_scene_with_overrides` 保持原签名，
 内部等价于 `SpaceSelection::Model`，因此既有模型空间入口不受影响。
+
+### 1.1 共享 UI 与传输（2026-11-02 已接线）
+
+- **`CadStatus.layouts`**：`Vec<CadLayoutTab>`，由
+  `cad_app::render_scene::layout_descriptors` 的真实描述符投影，过滤合成的 `LayoutId(0)`
+  （模型空间是独立页签，不是纸空间布局）。每项携带 `id`（`LayoutId` 的 `u128`）、`name`
+  （LAYOUT 显示名）、`supported`、`viewport_count`，以及**仅在不支持时**的稳定 `reason`。
+- **`CadStatus.activeSpace`**：线上形状 `{kind:"model"}` 或 `{kind:"paper", id:<u128>}`，
+  来自会话真实的 `SpaceId`；`SpaceId::Block` 不作为可观察空间（`cad-app` 的
+  `validate_space_id` 拒绝），投影时防御性归到 Model，绝不新造变体。
+- **`SPACE` 文本命令**：页签点击复用既有 `cad_command` 漏斗，只发一条普通命令行文本：
+  `SPACE MODEL`（大小写不敏感）、`SPACE #<u128>` 或 `SPACE <布局显示名>`。名称解析顺序是
+  **精确匹配优先，其次唯一的 ASCII 大小写不敏感匹配**；未知/歧义分别按名拒绝
+  （`unknown layout: …` / `ambiguous layout: …`），不猜一个 layout id；整行剩余部分都是名称，
+  因此 `SPACE Sheet One` 可用。成功时命令日志只回显准入的选择子名，失败不派发。
+  这与 IPC 的 `CommandPayload::Space` 是**同一个**切换命令，没有第二条写路径。
+- **`LayoutTabs`**（桌面绘图区左下）与紧凑布局的移动抽屉共用
+  `src/layout/layout-tabs.ts` 的 `layoutTabsView`：同一份 `cad_status.layouts` +
+  `activeSpace`、同一组 `SPACE` 命令字符串。当前活动页签没有命令（点击不派发）；**不支持的
+  布局仍可见但禁用**，标题只显示目录里的 `unsupported` 标记 + 宿主稳定原因码，不发明句子。点击只是
+  **队列准入**，活动态仍来自下一帧 `activeSpace`，UI 不抢先声明切换成功。
+- **`ReferencesPanel`** 同样只读 `cad_status.references`（桌面 docked、紧凑布局 floating，
+  同一组件、同一宿主行）；它不解析路径、不重试、不提供 Reload/Locate。XREF 语义见
+  `docs/xref.md`。
+- **活动空间 FIT**：切换成功后的自动取景与 `FIT` 使用**同一个**活动空间规则。模型空间取
+  `drawing.bounds()`；纸空间取纸面实体与视口纸面矩形的并集，为空时退回
+  `plot_settings_for` 的纸尺寸矩形；连纸尺寸也不可用时相机保持不动并显式报告
+  `layout.fit_empty`。自动适配不记 `ZOOM PREVIOUS` 步骤、不写库、不产生 `cad-history`
+  条目或 `ChangeSet`。
+- **多布局导入**：导入器按 LAYOUT 对象的 `tab_order` 排序，以 LAYOUT 的 `name` 作显示名，
+  并分配 `LayoutId(index + 1)`；没有对应 LAYOUT 对象的 `*Paper_Space*` 块仍按稳定块名顺序
+  追加并保留块名。只有图纸完全没有纸空间布局时才写入合成 `LayoutId(0)` `"Model"` 记录。
+  页签顺序与显示名都来自图纸表，UI 不重排、不改名。
 
 ## 2. 视口几何：四角矩形 + 视图变换
 
@@ -237,10 +277,17 @@ world = OCS(normal) · translate(insert_point) · R(rotation) · S(x_scale, y_sc
 - **打印输出**：无 plot/打印路径。布局绘制是屏幕显示，不是可交付的图纸输出。
 - **倾斜/扭转/透视视口、非矩形裁剪、非均匀视口、注释性缩放、动态块**：导入时置
   `Partial` 并给出原因，本层以稳定原因码显式 `Unsupported`，按样本标记，不假装支持。
-- **布局切换 UI 控件接线**：`LayoutPanelState`（`cad-ui-slint`）**已随 Slint 退役删除，无同名替代**；
-  当前桌面宿主的布局页签是 `apps/desktop-ui/src/components/LayoutTabs.tsx`。`cad-app` 提供并测试了
-  校验与切换命令（`SwitchSpace` 校验真实布局表、失败保留原空间、不修改图纸、不产生
-  `ChangeSet`）。
+- **布局切换 UI/传输已接线（2026-11-02）**：`LayoutPanelState`（`cad-ui-slint`）已随 Slint 退役
+  删除；当前桌面用 `apps/desktop-ui/src/components/LayoutTabs.tsx`，移动抽屉复用同一
+  `layout/layout-tabs.ts` 投影，数据来自 `cad_status.layouts` / `activeSpace`，点击发
+  `SPACE MODEL|#<id>`（见 §1.1）。`cad-app` 仍提供并测试校验与切换命令（`SwitchSpace` 校验
+  真实布局表、失败保留原空间、不修改图纸、不产生 `ChangeSet`）。切换成功后只做视图适配：
+  `FIT`/切换都按**活动空间**取景——模型空间取 `drawing.bounds()`；纸空间取纸面实体与视口
+  纸面矩形的并集，为空时退回 `plot_settings_for` 的纸尺寸矩形。若连纸尺寸也不可用，相机保持
+  不动并显式报告 `layout.fit_empty`（不是伪造的空成功）。自动适配不记 `ZOOM PREVIOUS` 步骤、
+  不写库、不产生 `cad-history` 条目或 `ChangeSet`。**仍未支持**的是 §3 列出的视口能力
+  （非矩形/复杂裁剪、扭转/倾斜/透视、非均匀、镜像、缺比例等）：布局页签仍可见但禁用并显示
+  稳定原因码，不绘制猜出来的视口。
 
 ## 5. 测试
 
@@ -262,19 +309,31 @@ world = OCS(normal) · translate(insert_point) · R(rotation) · S(x_scale, y_sc
   图像变换保留 UV、以及纸空间集成（模型网格逐三角裁剪后仍为 `Complete`；未 shape
   的 Text 保留为 `Partial` 且带 `viewport.clip_text_font_dependent`；图像经视口
   裁剪后 UV 正确）；
-- 布局枚举：真实布局表的 id/名称/支持/原因（原因以稳定码开头），空库为空；
+- 布局枚举：真实布局表的 id/名称/支持/原因（原因以稳定码开头），按键序（即导入器
+  分配的页签顺序）返回并携带显示名，空库为空；
 - 纸空间构建：模型几何映射并裁剪、不支持视口显式 `Partial` 且不绘制、纸面实体直接
   绘制、缺失布局为 `Missing`、可见性谓词生效。
 
 `cargo test -p cad-app` 覆盖布局校验与切换（未知 → `InvalidInput`、已知但不可绘 →
-`Unsupported`、失败保留原空间、成功不修改图纸且无 `ChangeSet`），以及
-`viewport_measurement_space` 提供已验证逆变换 / 不可支持时禁用模型测量。
+`Unsupported`、失败保留原空间、成功不修改图纸且无 `ChangeSet`），切换后的活动空间取景
+（纸空间取纸面实体 + 视口矩形，切回模型取模型 bounds，不可取景的空布局报
+`layout.fit_empty` 且相机不动），以及 `viewport_measurement_space` 提供已验证逆变换 /
+不可支持时禁用模型测量。
 
 `cargo test -p cad-import-acadrust` 覆盖：1:100 视口四角与纸面→模型变换、图纸/关闭视口
-不写入、扭转/倾斜/复杂裁剪视口为 `Partial`；INSERT 基点相减、正值逆时针旋转、OCS normal
-提升、数组单元为 pre-scale 行主序、未知块为 `Missing`；SOLID 边界顶点序（面积守恒）与
-非 Z 挤出提升；倾斜 OCS 折线长度守恒。
+不写入、扭转/倾斜/复杂裁剪视口为 `Partial`；布局按 LAYOUT `tab_order` 排序、显示名来自
+LAYOUT 对象、纸空间实体与视口仍关联到正确布局 id、无 LAYOUT 对象的纸块按块名追加；
+INSERT 基点相减、正值逆时针旋转、OCS normal 提升、数组单元为 pre-scale 行主序、未知块为
+`Missing`；SOLID 边界顶点序（面积守恒）与非 Z 挤出提升；倾斜 OCS 折线长度守恒。
+
+`cargo test -p cad-ui-core` 覆盖布局页签与活动空间投影、`SPACE` 参数解析：`cad_status.layouts`
+与 `layout_descriptors` 一致（过滤模型空间合成 id）、`activeSpace` 来自真实会话、`SPACE MODEL`/
+`#<id>`/精确或唯一大小写不敏感显示名都能切换，未知/歧义名称按名拒绝且不派发、失败保留原空间；
+`CadStatus` 无文档时为空的 layouts/references 且不省略字段。`apps/desktop-ui` 的
+`layout-tabs.test.ts` 覆盖页签渲染顺序、活动态、点击只发一条 `SPACE`、不支持页签可见但禁用
+且只带稳定原因码、缺少/畸形 status 块被拒绝而不篡改。
 
 `cad-ui-slint` 的桥接测试与 `LayoutPanelState` 测试**已随 Slint 退役删除**（该 runner 在仓库中
-**不存在，也没有当前对应物**）；本节有效的验证是上面两条 `cargo test -p cad-app` 与
-`-p cad-import-acadrust`。
+不存在）；对应能力现在由 `LayoutTabs`/`layout-tabs.ts` 与上述 `cad-ui-core` 测试承接。本节有效
+验证是 `cargo test -p cad-representation`、`-p cad-app`、`-p cad-import-acadrust`、
+`-p cad-ui-core` 与 `apps/desktop-ui` 的 `npm test`。

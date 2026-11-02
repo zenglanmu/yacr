@@ -73,10 +73,12 @@ fn committed_qcad_flange_scan_reports_millimetres_and_partial() {
     );
 }
 
-/// The flange fixture has an **empty** first paper layout (`*Paper_Space`) and a
-/// **populated** second one (`*Paper_Space1`). `plot` must default to the
-/// populated sheet, render it, and report the paper in millimetres (the locked
-/// acadrust reader leaves `group 72` unapplied; the name carries the unit).
+/// The flange fixture has an **empty** paper layout (block record
+/// `*Paper_Space`, display name `Layout2`) and a **populated** one (block record
+/// `*Paper_Space1`, display name `Layout`, tab order 1). `plot` must default to
+/// the populated sheet, render it, and report the paper in millimetres (the
+/// locked acadrust reader leaves `group 72` unapplied; the name carries the
+/// unit). The reported name is the LAYOUT display name, not the block name.
 #[test]
 fn flange_plot_defaults_to_the_populated_paper_layout() {
     let icd = std::env::var_os("VK_ICD_FILENAMES")
@@ -102,7 +104,7 @@ fn flange_plot_defaults_to_the_populated_paper_layout() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("plot JSON");
-    assert_eq!(value["layout"]["name"], "*Paper_Space1", "{value}");
+    assert_eq!(value["layout"]["name"], "Layout", "{value}");
     assert_eq!(value["paper"]["units"], "millimeters", "{value}");
     // acadrust 0.6.3 applies the LAYOUT `group 72`/`group 73` fields: this sample
     // declares `group 73 = 1` (90° rotation) on an A4 portrait sheet, so the

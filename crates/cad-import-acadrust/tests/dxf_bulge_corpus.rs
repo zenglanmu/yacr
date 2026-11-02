@@ -103,6 +103,7 @@ fn import(path: &Path) -> cad_db::DrawingDatabase {
         bytes,
         limits: ImportLimits::default(),
         generation: 1,
+        xref: None,
     };
     AcadrustImporter::new()
         .import(&request, &|| false)

@@ -611,6 +611,7 @@ fn a_created_multileader_exports_as_a_real_multileader_and_reimports() {
         bytes: Arc::from(bytes.into_boxed_slice()),
         limits: ImportLimits::default(),
         generation: 0,
+        xref: None,
     };
     let imported = AcadrustImporter::new()
         .import(&request, &|| false)

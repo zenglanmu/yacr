@@ -43,6 +43,7 @@ import { Ribbon } from './components/Ribbon.tsx';
 import { DocTabs } from './components/DocTabs.tsx';
 import { Workspace } from './components/Workspace.tsx';
 import { LayoutTabs } from './components/LayoutTabs.tsx';
+import { ReferencesPanel } from './components/ReferencesPanel.tsx';
 import { CommandLine } from './components/CommandLine.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
 import { PopupOverlay } from './components/PopupOverlay.tsx';
@@ -58,6 +59,7 @@ import { openPopup } from './popup/popup.ts';
 import { isOptionsCommand } from './options/options.ts';
 import { isLayersCommand } from './layers/layers.ts';
 import { isPropertiesCommand, setSelectedProperty } from './properties/properties.ts';
+import { isResourcesCommand } from './references/references.ts';
 import { textEditOpenError } from './popup/popup-textedit.ts';
 
 /** The options `submitCommand` accepts from a region (`fromInput` keeps a draft). */
@@ -102,6 +104,7 @@ function Shell() {
   const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
   const [cleanScreen, setCleanScreen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [referencesOpen, setReferencesOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(false);
   // The layers palette. Closed on the start page (the dock keeps the start panel),
   // opened by `LAYER` / the ribbon / the toggle. `layersFocus` is bumped by every
@@ -503,6 +506,15 @@ function Shell() {
       requestOpenPopup('options');
       return;
     }
+    // `RESOURCES` opens the References panel and never reaches the router: the
+    // panel renders the references the status already carries, so sending the
+    // host's report selector would only start a second, unused report.
+    if (isResourcesCommand(text)) {
+      setCommandResult(null);
+      if (options.fromInput) setCommand('');
+      setReferencesOpen(true);
+      return;
+    }
     // `PROPERTIES` / `LAYER` are the docked palettes' local selectors: they never
     // reach the router. The compact layout renders no dock (`mobile.css` hides
     // `.workspace__left`), so there the word is refused with the catalog's own
@@ -696,7 +708,10 @@ function Shell() {
       if (event.key === 'Escape') {
         setHistoryOpen(false);
         if (isTyping(event.target)) event.target.blur();
-        else setDiagnosticsOpen(false);
+        else {
+          setDiagnosticsOpen(false);
+          setReferencesOpen(false);
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -836,6 +851,8 @@ function Shell() {
     setCleanScreen,
     diagnosticsOpen,
     setDiagnosticsOpen,
+    referencesOpen,
+    setReferencesOpen,
     propertiesOpen,
     setPropertiesOpen,
     // The layers palette: the same open/close plumbing as its two neighbours. The
@@ -944,6 +961,15 @@ function Shell() {
           {mobile ? <MobileCommandBar /> : commandLineOpen ? <CommandLine /> : null}
           {mobile ? null : <StatusBar />}
         </main>
+        {/* The compact References sheet: the same panel the desktop docks, as an
+            in-DOM overlay because the compact layout renders no left dock. It
+            reads the same `cad_status.references` rows and adds no second state. */}
+        {mobile && referencesOpen ? (
+          <div className="references-layer">
+            <button type="button" className="references-layer__backdrop" aria-label={t('resources.close')} onClick={() => setReferencesOpen(false)} />
+            <ReferencesPanel variant="floating" />
+          </div>
+        ) : null}
         {/* The CAD shortcut menu: one in-DOM overlay above the workspace. It has
             no backdrop, so the press that dismisses it still reaches whatever is
             underneath — the CAD partition keeps forwarding every press to the
