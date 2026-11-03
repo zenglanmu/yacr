@@ -79,7 +79,9 @@ cad-test-files/
   或授权不明的样本仍放仓库外（`~/sources/cad-test-files/` 或 `/tmp/opencode`）。不要为了
   测试修改 acadrust 或添加 Cargo patch。
 - 字体目录与图纸目录分开。原字体缺失时显式注明使用了哪个回退字体；
-  不能把回退排版说成原字体正确。字体来源/授权见 [fonts.md](fonts.md)。
+  不能把回退排版说成原字体正确。默认面是提交的 `Noto Sans CJK SC`（`osifont` 次选），它也是
+  CJK locale 的最后一项；宿主实际加载/失败/缺失以只读 `cad_fonts` 报告（桌面/移动/Web 的
+  `FONTS` 字体管理器）为准。字体来源/授权见 [fonts.md](fonts.md)。
 - 已提交的开源 QCAD `flange` DXF 及其参考图见 `fixtures/dxf/qcad-flange/`；DXF 离屏
   渲染与参考对照用 `scripts/check-dxf-reference.py`，本轮证据见
   [validation-dxf-flange.md](validation-dxf-flange.md)。
@@ -125,7 +127,8 @@ python3 scripts/check-dwg-native.py "$CORPUS" "$RUN/native" \
 这是 canteen 的显式回退组合，不是所有图纸通用的精确字体配置。按样本增减重复的
 `--font name=path`。不传 `--font` 可隔离几何问题，但不包含文字渲染验收。
 原生 CLI 还会自动加载可执行文件同级的 `fonts/` 目录（若无 `--font` 时图纸字体缺失，
-回退默认轮廓面；仓库根即含 `fonts/`），见 `docs/fonts.md`。
+默认面是 `Noto Sans CJK SC`，`osifont` 次选；仓库根 `fonts/` 含两者），见 `docs/fonts.md`。
+打开后可用 `FONTS` 查看只读报告（`cad_fonts` 的 loaded/failed/unresolved；不重试、不写字体）。
 
 脚本依次独立执行 `scan` → `build-representation` → `render`，每阶段重新导入；
 默认 2160×1520，可用 `--width 1080 --height 760` 降低调试分辨率。
@@ -198,47 +201,48 @@ cargo test -p cad-render-wgpu --locked -- --test-threads=1
 「挂起 ≠ 失败」的判读方式。看到 `accelerated_tier` 长时间无输出时应先按串行形式重跑，再判断
 是否真有回归。
 
-## 4. 第二层：WASM + Playwright 浏览器
+## 4. 第二层：WASM + 浏览器（`dom-canvas`）
 
-> **2026-10-24 更正（本节注意）：** Web 入口已复活为**本地** wasm 会话（`apps/app-web`，ADR 0024）：
-> `scripts/build-web.sh` 现在**成功**产出可服务 bundle（`apps/app-web/dist/`），命令与边界见
-> [build.md](build.md)「浏览器 bundle」。但 **CI/发布仍未恢复**（`web-build`/`web-deploy`/`web-smoke`
-> 仍 `if: false`），且下面这段带 `DIST=`/`WITH_FONTS=` 的流程属**旧 Slint web 宿主**（两个变量已不存在），
-> **不能照抄**。当前本地浏览器读数（合成夹具、Chromium/WebKitGTK + 真实 GPU）见
-> [validation-dom-canvas-wasm-2026-10-24.md](validation-dom-canvas-wasm-2026-10-24.md)。
+> **2026-10-24 的历史注记**：本节曾记录旧 Slint web 宿主与已删除的 `DIST=`/`WITH_FONTS=`
+> 流程。当前 Web 载体见 ADR 0024、[build.md](build.md)「浏览器 bundle」与 `AGENTS.md`；
+> CI 的 `web-smoke` 是 SwiftShader 冒烟，`web-deploy` 是发布 job；两者都不是 GPU/像素验收。
 
-只在原生调试收敛后执行；前提为 wasm target、匹配锁文件的 wasm-bindgen CLI、
-外部安装的 Playwright/Chromium。浏览器环境配置参考 [validation-web.md](validation-web.md)。
-
-```bash
-# build-web.sh 会重建 DIST；只能指向本轮专用输出目录，不能指向语料/字体目录。
-DIST="$RUN/web-dist" WITH_FONTS=0 scripts/build-web.sh
-cp -R "$FONT_DIR" "$RUN/web-dist/fonts"
-# 在单独终端运行服务器，测试结束后 Ctrl-C 停止；端口占用时更换端口。
-python3 scripts/serve-web.py --directory "$RUN/web-dist" --port 8106
-```
-
-另一个终端沿用相同 `RUN`/`CORPUS`，从原生 `<name>-scan.json` 读取 `entities`
-作为最后一个参数（不是 `model_entities`）：
+只在原生调试收敛后执行；前提为 wasm target、匹配锁文件的 wasm-bindgen CLI 与外部 Chromium。
+Web 默认产物**不含字体**：页面在 `open_bytes` 之后按需从同源 `fonts/` 取；发布站点由
+`scripts/deploy-cloudflare-pages.sh` 用 `scripts/fetch-fonts.sh` 组装该目录（mlightcad 全量 +
+提交的 osifont/Noto）再上传 Pages CDN。
 
 ```bash
-PLAYWRIGHT_MODULE="$HOME/.local/share/headless-browser/node_modules/playwright-core/index.js" \
-  node scripts/check-web-dwg.mjs http://127.0.0.1:8106/ \
-  "$CORPUS/anteen.dwg" "$RUN/browser" 29212
+# 默认 dist-ui 无 fonts/；页面在打开后懒加载。
+bash scripts/build-web-ui.sh
+
+# 本地没有 CDN 时的可选字体来源（二选一）：
+#   a) 只 staging 提交子集（本地专用，不是发布路径）：
+#      YACR_WEB_FONTS=1 bash scripts/build-web-ui.sh
+#   b) 组装完整目录并把 __YACR_FONT_BASE_URL__ 指到该基址（例如另起静态服务器）。
+
+# 单独终端运行；端口占用时更换端口。
+python3 scripts/serve-web.py --directory apps/app-web/dist-ui --port 8106
+
+# 另一个终端：Chromium 软件渲染验收 + 证据目录。
+node scripts/web-ui-smoke.cjs --url http://127.0.0.1:8106/ --verbose --evidence "$RUN/browser"
 ```
 
-`PLAYWRIGHT_MODULE` 按本机安装路径替换；Playwright 不是项目运行依赖。
-脚本默认以真实 GPU（headful Chromium）运行，经真实 `#file-input` 打开文件，等待字体加载、
-检查实体数/错误/**导入后 CAD 帧更新**，截取 CAD 区域并核查非空像素；`browser.json` 记录
-实际 GL renderer 字符串。仅当显式设置 `YACR_SOFTWARE_GPU=1` 时才回退 SwiftShader 软件后端，
-该运行会被标注为 SOFTWARE，不能当作真实 GPU 证据。检测到软件后端却未显式开启时脚本会明显失败。
-输出 `browser.json`、`browser-cad.png`；错误/超时非零退出。
-默认操作超时 120 秒，可通过 `WEB_DWG_TIMEOUT`（毫秒）调整；不能靠无限等待隐藏失败。
+`web-ui-smoke.cjs` 强制 ANGLE/SwiftShader，运行标注 `rendering=software`；它检查页面无未捕获
+错误/失败请求、布局断点、CAD canvas 非单色与命令链，但**不是** GPU、性能或像素正确性证据。
+证据目录里的截图只能辅助定位，不能当视觉 golden。
 
-必须人工确认截图是所测图纸而非演示图/上一文件。读取 `fonts` 中计划、注册、失败数：
-未知字体可能被跳过，故 `failed=0` 不代表字体齐全，`registered=0` 的有字图纸不能判视觉通过。
-记录实际后端；WebGPU 不可用而回退 WebGL2 的 warning 不表示 WebGPU 已验证。
-CLI 显式回退字体与 Web 按目录自动加载的策略不同，应分别描述两端文字结果。
+打开真实图纸后读取 `cad_fonts`（`FONTS` 面板）：
+
+- `requested` 是去重后的命名面，`textNeeded` 表示有字但未命名面；两者都空时页面不 fetch 任何
+  字体字节。
+- `defaultFace` 为 `NotoSansCJKsc-Regular.otf` 时表示默认面已注册；`localeMissing=null` 只表示
+  宿主找到了 locale 面，不表示字形视觉正确。
+- `failed=0` 不代表字体齐全（未知名会被跳过）；`registered=0` 的有字图纸不能判视觉通过。
+- 懒加载失败发布在 `__YACR_FONT_PACKAGE_ERROR__`，且 `cad_fonts` 保留 `fonts.failed`；图纸仍
+  打开，但文字不应按“已正确排版”验收。
+
+CLI 的显式 `--font`/同级 `fonts/` 与 Web 的 CDN 懒加载策略不同，应分别描述两端文字结果。
 
 ## 5. 证据采集的持久规则（DOM-on-top 教训，2026-10-23）
 

@@ -180,6 +180,8 @@ dependencies = [
  "cad-import-acadrust",
  "cad-platform",
  "cad-render-wgpu",
+ "cad-representation",
+ "cad-resources",
  "cad-scene",
  "cad-ui-core",
  "js-sys",

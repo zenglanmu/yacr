@@ -308,7 +308,7 @@ test('LAYERP sits beside LAYUNISO in the Layers panel and rides the palette filt
 
   // The state it restores is only named in the palette, so the button is dropped
   // with it: no live affordance that changes layer visibility invisibly.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON']);
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'FONTS']);
   assert.deepEqual(offeredItems(layers.items, false), []);
   assert.equal(offeredItems(layers.items, true), layers.items);
   assert.equal(

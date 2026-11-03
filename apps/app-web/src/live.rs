@@ -69,10 +69,11 @@
 //!   here; [`Live`] is just the owned state.
 //! * **No pixels.** `render`/`present` are the caller's
 //!   ([`crate::page::present_once`]).
-//! * **No filesystem for reading, no durable config, no font/image package**: the
-//!   browser contracts, see [`crate::platform`]. Save/plot are the exception: the
-//!   session performs both exports and [`crate::download`] turns them into real
-//!   browser downloads.
+//! * **No filesystem for reading and no durable config**: the browser contracts,
+//!   see [`crate::platform`]. The committed font package is real when the page
+//!   staged it ([`crate::fonts`]); save/plot are the other exception: the session
+//!   performs both exports and [`crate::download`] turns them into real browser
+//!   downloads.
 
 use std::cell::RefCell;
 use std::rc::Rc;

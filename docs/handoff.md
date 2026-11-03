@@ -1,3 +1,109 @@
+## 2026-11-03 字体包统一：提交 Noto Sans CJK SC、全载体加载与只读 Font Manager
+
+本轮把“缺 CJK 字体”从“报未解析字体”收敛为一个可提交、可加载、可报告的包。实现已在工作树；
+下面区分**契约/编译/产物证据**与**软件渲染运行时证据**，不把后者写成 GPU/像素验收。
+
+### 包与授权
+
+- `fonts/NotoSansCJKsc-Regular.otf` 已提交：Noto Sans CJK SC Regular，**CFF OTF**，
+  **16,437,364 B**，SHA-256
+  `2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b`，**OFL-1.1**，原样
+  未修改（RFN `Source` 来自 Adobe，无需改名）。来源固定为 `notofonts/noto-cjk` 提交
+  `f8d157532fbfaeda587e826d4cd5b21a49186f7c` 的
+  `Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf`。
+- `fonts/fonts.json` 同时保留 `osifont`；`fonts/SOURCE.md`、`fonts/NotoSansCJK-OFL.txt`、
+  `THIRD_PARTY_NOTICES.md` 记录来源/哈希/许可。
+- `mlightcad/cad-data` 字体仍未提交；`scripts/fetch-fonts.sh` 只在发布打包、Web CDN 包组装与
+  测试语料时下载并合并提交包，再分发授权归部署者。
+
+### 回退与诊断
+
+- `cad-platform::fonts::DEFAULT_FALLBACK_NAMES` 现为
+  `noto sans cjk sc → osifont → arial → simplex`：Noto 是**统一默认面**，覆盖拉丁/CJK；
+  需要默认面时优先加载它，`default_face` 即 `NotoSansCJKsc-Regular.otf`。
+- `cad-platform::fonts::requested_fonts` 按大小写不敏感去重：同一张 1 万标签的图纸报 7 个名称，而不是
+  4,849 个；`cad_fonts.requested` 与 Web 懒加载选择都基于这个去重集合。
+- `TextLocale::preferred_faces` 对 `zh-Hans`/`zh-Hant`/`ja`/`ko` 都以
+  `noto sans cjk sc` 结尾；包内 Noto 加载后 CJK locale 缺口闭合。无 locale 面时每次加载/打开
+  只报一条 `font.locale_fallback_missing`（locale + 候选，ASCII 机器细节）。
+- 其他稳定信号不变：`text.glyph_missing`（真实缺字）、`text.sfnt_fill_partial`（nonzero/even-odd
+  无法证明等价，保留边界线）、`fonts.failed`（资源安装失败，图纸仍可打开）。
+- CFF OTF 的注册与中文轮廓由 `cad-representation` 契约
+  `committed_noto_cjk_cff_face_outlines_chinese_glyphs` 覆盖，不是“能读文件头”即成功。
+
+### 宿主与 UI
+
+- **原生**（Linux/Windows/macOS/Android/CLI）：`cad-platform::fonts::local` 从
+  可执行文件同级/父级 `fonts/`、macOS `Contents/Resources/fonts`、或显式 `--fonts-dir`（不存在
+  即错误）读包；Android 由 Gradle 把仓库 `fonts/` 放进 APK assets，Kotlin 解压到
+  `filesDir/fonts/` 并写标记 **`.yacr-assets-v2-complete`**，再经 `nativeAssetsReady` 交给
+  native 会话。
+- **Web**（`dom-canvas`）：**bundle 里不带字体，也不预加载**。`build-web-ui.sh` / `build-web.sh`
+  只产出页面 + wasm；站点根 `fonts/` 由 `deploy-cloudflare-pages.sh` 用 `fetch-fonts.sh` 组装
+  （mlightcad 全量 + osifont/Noto + OFL/GPL 文本）后再上传。
+  默认产出无字体包；`YACR_WEB_FONTS=1` 只把提交子集 staging 到 `dist-ui/fonts`（本地专用）。
+  `vite-font-package.mjs` 只给 tauri 桌面 `dist` 复制 `fonts/`（X11/XWayland 离线）；
+  web/android 跳过。发布时 `deploy-cloudflare-pages.sh` 用 `fetch-fonts.sh` 把 mlightcad 全量 +
+  提交的 osifont/Noto 组装到 `$DIST/fonts`（`SKIP_FONTS=1` 复用）再上传 Pages CDN。
+  页面在 `open_bytes` **之后**由 `ensureFontPackage()` 读 `cad_fonts`
+  （`requested` / `textNeeded` / `locale`），只取本图需要的目录项，调用 `set_font_package`，
+  再 `apply_font_package()` → `CadSession::reinstall_fonts()` + 一帧；`ready`/`start` 不等待
+  字体。无包时显式 `unsupported-resources: fonts`，失败发布到
+  `__YACR_FONT_PACKAGE_ERROR__`；Worker 载体显式 `unsupported-runtime: fonts`。
+- 新只读命令 `cad_fonts`（`docs/commands.md`）返回 `available/reason/fontsDir/catalogEntries/
+  locale/defaultFace/localeMissing/requested/textNeeded/faces[]`；React Font Manager（`FONTS`，
+  `apps/desktop-ui/src/fonts/` + `components/FontsPanel.tsx`）桌面停靠、移动端浮动，不提供
+  注册/删除/重载。
+
+### 验证（实际运行）
+
+测试数字是本轮**早先**的运行；lazy Web 打包与 `requested`/`textNeeded` 改动后未全部重跑，
+行内单独标注 **NOT RUN**。
+
+| 命令 | 结果 |
+|---|---|
+| `cargo test -p cad-representation committed_noto_cjk_cff_face_outlines_chinese_glyphs --locked` | 1 passed |
+| `cargo test -p cad-platform fonts --locked` | 34 passed |
+| `cargo test -p cad-host fonts --locked` | 8 passed |
+| `cargo test -p app-web fonts --locked` | 7 passed |
+| `cargo test -p cad-ui-core fonts --locked` | 3 passed |
+| `cargo test -p cad-desktop-shell --test font_commands --locked` | 6 passed |
+| `(cd apps/desktop-ui && node --test test/fonts.test.ts test/vite-font-package.test.ts)` | 14 pass / 0 fail |
+| `bash scripts/build-web-ui.sh` | exit 0；默认 `dist-ui/fonts` 不存在（`fonts/*` 报 `not bundled (lazy CDN fonts/)`）；`YACR_WEB_FONTS=1` 才放提交子集（本地专用）。 |
+| `python3 scripts/check-i18n.py` | exit 0（1009 keys，2 catalogs，无硬编码 CJK） |
+| `python3 scripts/check-command-docs.py` | exit 0（0 mismatches） |
+| `python3 scripts/check-file-size.py` | exit 0（1253 files，limit 1000） |
+
+### Web 运行时证据（lazy 包，软件渲染，非 GPU/像素验收）
+
+lazy 改动后，本地对 `apps/app-web/dist-ui` 做无头浏览器检查（**软件渲染**），字体由 override
+base 提供：
+
+- 打开前 **0 个字体请求**：`ready` / `start` 不等待字体。
+- 打开 `fixtures/debug-default-fonts.dwg` 后恰好 **3 个**请求：`fonts.json`、`osifont.ttf`、
+  `NotoSansCJKsc-Regular.otf`（只取本图需要的目录项）。
+- `cad_fonts`：`defaultFace=NotoSansCJKsc-Regular.otf`、`localeMissing=null`、`requested` 7 个
+  去重名称；`shell_status().error=null`；页面无错误。
+
+软件渲染产物只能作布局/DOM/加载路径证据；**不得**写成真实 GPU、像素、视觉 golden 或浏览器
+产品验收。上一轮 W2 的 `web-ui-smoke` 是 SwiftShader；完整 mlightcad CDN 包的实际下载/运行时
+与真实 Cloudflare Pages 上传均 **NOT RUN**，不构成本轮 CDN 证据。
+
+### NOT VERIFIED / NOT RUN
+
+- 完整 mlightcad CDN 包的下载与浏览器运行时、真实 Cloudflare Pages 上传：**NOT RUN**。
+- 真实 GPU（硬件 Vulkan/Metal/D3D）与真实浏览器像素/视觉验收：**NOT RUN**。
+- Android 真机/模拟器上的资产解压、Noto 注册与设备字形：**NOT RUN**；只有编译/契约级证据。
+- Windows/macOS 运行时字体目录发现、系统面注册：**NOT RUN**（仅编译门禁/历史 Wine 参数 smoke）。
+- Linux 桌面真实窗口的 `FONTS`/Noto 渲染截图：**NOT RUN**。
+- 16.4 MB Noto 的体积/内存/加载耗时基准：**NOT RUN**；“不需要默认面/命名面时不取字节”
+  只有代码路径依据。
+- 全量 `cargo check --workspace`、全量 workspace 测试、真实 `web-ui-smoke` 的 GPU 变体：本轮
+  未重跑。
+
+文档：重写 `docs/fonts.md`、`docs/font-host-loading.md`；同步 `README.md`、`docs/testing-dwg.md`、
+`docs/commands.md`、`apps/desktop-ui/README.md`。
+
 ## 2026-11-03 `debug-default-fonts.dwg`：矩形 VPCLIP 布局可用 + 鼠标移动帧节奏
 
 用户手测两条：① `开洞钢筋图` 布局页签点不动；② 鼠标在 CAD 区域移动有丢帧感（关闭

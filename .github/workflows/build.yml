@@ -744,6 +744,12 @@ jobs:
     # bundle artifact before uploading and never manages a custom domain. A
     # successful upload is deployment evidence only — the smoke job above stays
     # software-rendering.
+    #
+    # The uploaded bundle carries **no fonts**: the site fetches them lazily from
+    # same-origin `fonts/` after a document opens. The deploy step therefore needs
+    # outbound network (the runner has it) to assemble the full CDN package with
+    # `scripts/fetch-fonts.sh` into `apps/app-web/dist-ui/fonts` before uploading;
+    # that package is part of the published site, not of the build artifact.
     needs: web-build
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
@@ -757,7 +763,10 @@ jobs:
         with:
           name: web-ui-dist
           path: apps/app-web/dist-ui
-      - name: Publish the shared chrome bundle to Cloudflare Pages
+      - name: Publish the shared chrome bundle and the CDN font package to Cloudflare Pages
+        # `scripts/deploy-cloudflare-pages.sh` downloads the font package itself
+        # (`scripts/fetch-fonts.sh`); `SKIP_FONTS` stays unset so a failed download
+        # fails the deploy instead of publishing a site whose `fonts/` is missing.
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -277,6 +277,14 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
               <Icon name="reference" size={13} />
               {t('resources.references')}
             </button>
+            <button
+              type="button"
+              className="mobile-drawer__space-chip is-action"
+              onClick={() => { shell.setFontsOpen(true); onClose(); }}
+            >
+              <Icon name="font" size={13} />
+              {t('resources.fonts')}
+            </button>
           </div>
           {spaces.filter(space => !space.supported).map(space => (
             <span className="mobile-drawer__space-note" key={`reason-${space.id}`}>

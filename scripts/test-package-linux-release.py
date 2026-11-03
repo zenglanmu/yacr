@@ -22,6 +22,7 @@ access. It is *not* evidence that a bundle was (or can be) built.
 """
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -36,6 +37,7 @@ METAINFO = FLATPAK_DIR / "dev.yacr.app.metainfo.xml"
 
 APP_ID = "dev.yacr.app"
 BINARY = "yacr"
+CJK_FALLBACK = "NotoSansCJKsc-Regular.otf"
 
 
 def check_manifest(text: str) -> list[str]:
@@ -214,6 +216,17 @@ class PackageLinuxReleaseContracts(unittest.TestCase):
         self.assertEqual(exec_line.split()[0], "Exec=" + BINARY)
         self.assertIn(f"command: {BINARY}", self.manifest_text)
         self.assertIn(f"<binary>{BINARY}</binary>", self.metainfo_text)
+
+    def test_payload_stages_the_committed_cjk_fallback(self) -> None:
+        # The Flatpak payload is the committed fonts/ package copied whole, so
+        # the bundled missing-CJK face must be in that catalogue and on disk.
+        entries = json.loads(
+            (ROOT / "fonts" / "fonts.json").read_text(encoding="utf-8")
+        )
+        self.assertIn(CJK_FALLBACK, {entry.get("file") for entry in entries})
+        self.assertTrue((ROOT / "fonts" / CJK_FALLBACK).is_file())
+        self.assertIn("cp -a fonts/. /app/fonts/", self.manifest_text)
+        self.assertIn('cp -a fonts/. "${PAYLOAD}/fonts/"', self.script_text)
 
 
 if __name__ == "__main__":

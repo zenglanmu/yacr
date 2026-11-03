@@ -265,9 +265,11 @@ test('App mounts the overlay, dispatches through the shared funnel and closes on
   // One dispatch path: the same `runCommand` the ribbon and command line use.
   assert.match(app, /if \(item\.command\) shell\.runCommand\(item\.command\);/);
   // `PROPERTIES` is not re-implemented in the menu: the intercept stays in the
-  // one submit path (exactly one call site in App.jsx).
+  // one submit path (the local-selector table is imported once by App).
   const appModule = await readModule('App.tsx');
-  assert.equal((appModule.match(/isPropertiesCommand\(/g) ?? []).length, 1, 'the local selector is reused, not duplicated');
+  const selectors = await readModule('commands/local-selectors.ts');
+  assert.equal((appModule.match(/useLocalSelectors\(/g) ?? []).length, 1, 'the local selector is reused, not duplicated');
+  assert.equal((selectors.match(/isPropertiesCommand\(/g) ?? []).length, 1, 'one selector rule, one table');
   // Repeat reads the command line's own history — there is no second history.
   assert.match(app, /lastCommand: historyRef\.current\.at\(-1\) \?\? null/);
   // The state is still the one hook from `defaults.mjs`.

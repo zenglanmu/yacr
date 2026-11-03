@@ -14,11 +14,27 @@ it is not evidence that a catalogue was downloaded.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts/fetch-fonts.sh"
+COMMITTED_FONTS = ROOT / "fonts"
+COMMITTED_CATALOG = COMMITTED_FONTS / "fonts.json"
+
+# The one bundled missing-font fallback every host must receive, with every
+# alias `cad-resources::FontCatalog` resolves. `fetch-fonts.sh` merges the
+# committed catalogue by file name, so a same-named remote entry cannot drop it.
+CJK_FALLBACK = "NotoSansCJKsc-Regular.otf"
+CJK_FALLBACK_NAMES = (
+    "Noto Sans CJK SC",
+    "NotoSansCJKsc",
+    "NotoSansCJKsc-Regular",
+    "Noto Sans CJK",
+    "Noto Sans SC",
+    "noto sans cjk sc",
+)
 
 # (human label, fragment that must appear in the script).
 REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
@@ -30,6 +46,11 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("missing font fails the build", "sys.exit(1)"),
     ("fallback download source", "FONT_FALLBACK_BASE_URL"),
     ("committed default face merge", 'extra / "fonts.json"'),
+    (
+        "merge by file name (a remote same-name entry cannot duplicate or drop "
+        "the committed CJK fallback)",
+        'all(str(e.get("file")) != str(x.get("file")) for x in entries)',
+    ),
 )
 
 
@@ -70,6 +91,47 @@ class FetchFontsContracts(unittest.TestCase):
         problems = check_script(mutated)
         self.assertTrue(problems)
         self.assertTrue(any("fails the build" in problem for problem in problems))
+
+    def test_committed_catalog_lists_the_cjk_fallback(self) -> None:
+        entries = json.loads(COMMITTED_CATALOG.read_text(encoding="utf-8"))
+        self.assertTrue(entries, "committed fonts.json must not be empty")
+        self.assertEqual(
+            entries[0].get("file"),
+            "osifont.ttf",
+            "osifont must stay the first (default) committed face",
+        )
+        matches = [entry for entry in entries if entry.get("file") == CJK_FALLBACK]
+        self.assertEqual(
+            len(matches), 1, f"committed fonts.json must list {CJK_FALLBACK} exactly once"
+        )
+        entry = matches[0]
+        self.assertEqual(entry.get("type"), "mesh")
+        for name in CJK_FALLBACK_NAMES:
+            self.assertIn(name, entry.get("name") or [], f"missing alias {name!r}")
+        self.assertTrue(
+            (COMMITTED_FONTS / CJK_FALLBACK).is_file(),
+            f"committed catalogue entry has no file: fonts/{CJK_FALLBACK}",
+        )
+
+    def test_merge_keeps_the_committed_fallback_on_a_filename_collision(self) -> None:
+        # Mirror the inline merge: drop committed entries whose file name is
+        # already in the destination catalogue, then extend it. A same-named
+        # remote entry must still leave exactly one resolvable entry, so the
+        # fallback cannot disappear from the staged catalogue.
+        committed = json.loads(COMMITTED_CATALOG.read_text(encoding="utf-8"))
+        remote = [{"file": CJK_FALLBACK, "name": ["remote"], "type": "mesh"}]
+        merged = remote + [
+            entry
+            for entry in committed
+            if all(
+                str(entry.get("file")) != str(existing.get("file"))
+                for existing in remote
+            )
+        ]
+        files = [entry.get("file") for entry in merged]
+        self.assertEqual(files.count(CJK_FALLBACK), 1)
+        self.assertIn("osifont.ttf", files)
+        self.assertTrue((COMMITTED_FONTS / CJK_FALLBACK).is_file())
 
 
 if __name__ == "__main__":

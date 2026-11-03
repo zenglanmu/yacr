@@ -26,8 +26,14 @@ use cad_resources::{face_url, plan_fonts, plan_fonts_report, FontCatalog};
 use super::{FontLoader, HostFuture};
 
 mod locale;
+mod memory;
+mod record;
 
 pub use locale::{locale_gap, LocaleFallbackGap, TextLocale};
+pub use memory::MemoryFontLoader;
+pub use record::{FontFaceRecord, FontFaceSource, FontFaceStatus};
+
+use record::kind_label;
 
 /// Reserved engine key for a host-supplied default fallback face.
 ///
@@ -38,10 +44,13 @@ pub const DEFAULT_FALLBACK_KEY: &str = "__yacr_default__";
 
 /// Catalogue names tried, in order, for the last-resort default outline face.
 ///
-/// `osifont` is the committed QCAD ISO 3098 face (web bundles ship it);
-/// `arial`/`simplex` mirror the explicit catalog fallbacks below so a CDN-only
-/// build still has a usable default when the drawing's own font is missing.
-pub const DEFAULT_FALLBACK_NAMES: &[&str] = &["osifont", "arial", "simplex"];
+/// `noto sans cjk sc` is the committed OFL Noto Sans CJK SC face
+/// (`fonts/NotoSansCJKsc-Regular.otf`) and the **default fallback** for every
+/// host: it covers Latin, kana and CJK, so a drawing whose own font is missing
+/// does not silently lose CJK glyphs. `osifont` (QCAD ISO 3098) and the
+/// `arial`/`simplex` catalog fallbacks remain after it so a package that lacks
+/// Noto still has a usable outline face.
+pub const DEFAULT_FALLBACK_NAMES: &[&str] = &["noto sans cjk sc", "osifont", "arial", "simplex"];
 
 /// Outcome of one catalog-driven loading pass.
 ///
@@ -73,6 +82,12 @@ pub struct FontLoadReport {
     /// supply. Callers surface [`Self::diagnostics`] so a Chinese drawing with no
     /// CJK face is a named gap, not a silent Latin substitution.
     pub locale_missing: Option<LocaleFallbackGap>,
+    /// Every face this load touched, in discovery order, for a UI list.
+    ///
+    /// Additive to `registered`/`failed`/`unresolved`; rows are deduplicated by
+    /// `(file, status)` so a face registered as default and again as the locale
+    /// face appears once.
+    pub faces: Vec<FontFaceRecord>,
 }
 
 impl FontLoadReport {
@@ -91,6 +106,25 @@ impl FontLoadReport {
             .map(LocaleFallbackGap::diagnostic)
             .into_iter()
             .collect()
+    }
+
+    /// Append a face record unless an equivalent row is already present.
+    ///
+    /// Rows that resolved to a file dedupe by `(file, status)`, so the planned,
+    /// default and locale-preferred passes cannot record the same face twice.
+    /// Rows without a file (unresolved names) dedupe by `(key, status)` so two
+    /// different missing names stay two rows.
+    pub fn push_face(&mut self, face: FontFaceRecord) {
+        let duplicate = self.faces.iter().any(|existing| {
+            existing.status == face.status
+                && match (&existing.file, &face.file) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => existing.key == face.key,
+                }
+        });
+        if !duplicate {
+            self.faces.push(face);
+        }
     }
 
     /// One-line, platform-neutral summary for diagnostics.
@@ -183,17 +217,72 @@ pub fn load_font_engine_for_locale<'a>(
             locale,
             ..FontLoadReport::default()
         };
+        // Every requested name is accounted for in `faces`, including the two
+        // cases the key lists only summarise.
+        for key in report.unresolved.clone() {
+            report.push_face(FontFaceRecord {
+                key: key.clone(),
+                file: None,
+                kind: "unknown".to_string(),
+                source: FontFaceSource::Package,
+                status: FontFaceStatus::Unresolved,
+                detail: None,
+            });
+        }
+        for name in &resolution.unsupported {
+            let face = catalog.get(name);
+            report.push_face(FontFaceRecord {
+                key: name.clone(),
+                file: face.map(|face| face.file.clone()),
+                kind: face
+                    .map(|face| kind_label(&face.kind))
+                    .unwrap_or_else(|| "unknown".to_string()),
+                source: FontFaceSource::Package,
+                status: FontFaceStatus::Unsupported,
+                detail: Some("unsupported font technology".to_string()),
+            });
+        }
         for font in &plan {
             report.planned.push(font.file.clone());
             match loader.load_font(&font.url).await {
                 Ok(bytes) => {
                     match engine.register_with_encoding(&font.file, bytes, font.encoding.as_deref())
                     {
-                        Ok(()) => report.registered.push(font.file.clone()),
-                        Err(e) => report.failed.push(format!("{}: {e}", font.file)),
+                        Ok(()) => {
+                            report.registered.push(font.file.clone());
+                            report.push_face(FontFaceRecord {
+                                key: font.request.clone(),
+                                file: Some(font.file.clone()),
+                                kind: kind_label(&font.kind),
+                                source: FontFaceSource::Package,
+                                status: FontFaceStatus::Loaded,
+                                detail: None,
+                            });
+                        }
+                        Err(e) => {
+                            report.failed.push(format!("{}: {e}", font.file));
+                            report.push_face(FontFaceRecord {
+                                key: font.request.clone(),
+                                file: Some(font.file.clone()),
+                                kind: kind_label(&font.kind),
+                                source: FontFaceSource::Package,
+                                status: FontFaceStatus::Failed,
+                                detail: Some(e.to_string()),
+                            });
+                        }
                     }
                 }
-                Err(e) => report.failed.push(format!("{}: {e}", font.file)),
+                Err(e) => {
+                    report.failed.push(format!("{}: {e}", font.file));
+                    report.push_face(FontFaceRecord {
+                        key: font.request.clone(),
+                        file: Some(font.file.clone()),
+                        kind: kind_label(&font.kind),
+                        source: FontFaceSource::Package,
+                        status: FontFaceStatus::Failed,
+                        detail: Some(e.to_string()),
+                    });
+                }
             }
         }
         // Guarantee a default outline face whenever a requested font could not
@@ -216,6 +305,14 @@ pub fn load_font_engine_for_locale<'a>(
                 };
                 if report.registered.iter().any(|file| file == &face.file) {
                     report.default_face = Some(face.file.clone());
+                    report.push_face(FontFaceRecord {
+                        key: (*name).to_string(),
+                        file: Some(face.file.clone()),
+                        kind: kind_label(&face.kind),
+                        source: FontFaceSource::Package,
+                        status: FontFaceStatus::Loaded,
+                        detail: None,
+                    });
                     break;
                 }
                 if attempted.contains(&face.file) {
@@ -233,12 +330,40 @@ pub fn load_font_engine_for_locale<'a>(
                             Ok(()) => {
                                 report.registered.push(face.file.clone());
                                 report.default_face = Some(face.file.clone());
+                                report.push_face(FontFaceRecord {
+                                    key: (*name).to_string(),
+                                    file: Some(face.file.clone()),
+                                    kind: kind_label(&face.kind),
+                                    source: FontFaceSource::Package,
+                                    status: FontFaceStatus::Loaded,
+                                    detail: None,
+                                });
                                 break;
                             }
-                            Err(e) => report.failed.push(format!("{}: {e}", face.file)),
+                            Err(e) => {
+                                report.failed.push(format!("{}: {e}", face.file));
+                                report.push_face(FontFaceRecord {
+                                    key: (*name).to_string(),
+                                    file: Some(face.file.clone()),
+                                    kind: kind_label(&face.kind),
+                                    source: FontFaceSource::Package,
+                                    status: FontFaceStatus::Failed,
+                                    detail: Some(e.to_string()),
+                                });
+                            }
                         }
                     }
-                    Err(e) => report.failed.push(format!("{}: {e}", face.file)),
+                    Err(e) => {
+                        report.failed.push(format!("{}: {e}", face.file));
+                        report.push_face(FontFaceRecord {
+                            key: (*name).to_string(),
+                            file: Some(face.file.clone()),
+                            kind: kind_label(&face.kind),
+                            source: FontFaceSource::Package,
+                            status: FontFaceStatus::Failed,
+                            detail: Some(e.to_string()),
+                        });
+                    }
                 }
             }
         }
@@ -248,49 +373,110 @@ pub fn load_font_engine_for_locale<'a>(
         // first one that registers (so a full CJK package is not fetched whole).
         // A locale with nothing available is recorded as a named gap.
         if locale != TextLocale::Latin && text_needed {
-            let mut tried = Vec::new();
-            for name in locale.preferred_faces() {
-                tried.push((*name).to_string());
-                let Some(face) = catalog.get(name) else {
-                    continue;
-                };
-                if let Some(registered) = report
+            // A preferred face may already be registered: the default pass now
+            // tries Noto first, and Noto covers every CJK locale. Reuse it
+            // instead of fetching the earlier candidates, so a lazy package that
+            // carries only the requested + default faces does not report the
+            // available-but-unfetched locale faces as failures.
+            let already_preferred = locale.preferred_faces().iter().find_map(|name| {
+                let face = catalog.get(name)?;
+                report
                     .registered
                     .iter()
-                    .find(|file| file.as_str() == face.file)
-                    .map(|file| (*file).clone())
-                {
-                    report.locale_faces.push(registered);
-                    break;
-                }
-                if attempted.contains(&face.file) {
-                    // Already planned and either registered above (handled by the
-                    // find) or reported as failed; never fetch it twice.
-                    continue;
-                }
-                match loader.load_font(&face_url(base, face)).await {
-                    Ok(bytes) => {
-                        match engine.register_with_encoding(
-                            &face.file,
-                            bytes,
-                            face.encoding.as_deref(),
-                        ) {
-                            Ok(()) => {
-                                report.registered.push(face.file.clone());
-                                report.locale_faces.push(face.file.clone());
-                                break;
+                    .any(|file| file.as_str() == face.file)
+                    .then_some((*name, &face.file, &face.kind))
+            });
+            if let Some((name, file, kind)) = already_preferred {
+                report.locale_faces.push(file.clone());
+                report.push_face(FontFaceRecord {
+                    key: name.to_string(),
+                    file: Some(file.clone()),
+                    kind: kind_label(kind),
+                    source: FontFaceSource::Package,
+                    status: FontFaceStatus::Loaded,
+                    detail: None,
+                });
+            } else {
+                let mut tried = Vec::new();
+                for name in locale.preferred_faces() {
+                    tried.push((*name).to_string());
+                    let Some(face) = catalog.get(name) else {
+                        continue;
+                    };
+                    if let Some(registered) = report
+                        .registered
+                        .iter()
+                        .find(|file| file.as_str() == face.file)
+                        .map(|file| (*file).clone())
+                    {
+                        report.locale_faces.push(registered);
+                        report.push_face(FontFaceRecord {
+                            key: (*name).to_string(),
+                            file: Some(face.file.clone()),
+                            kind: kind_label(&face.kind),
+                            source: FontFaceSource::Package,
+                            status: FontFaceStatus::Loaded,
+                            detail: None,
+                        });
+                        break;
+                    }
+                    if attempted.contains(&face.file) {
+                        // Already planned and either registered above (handled by the
+                        // find) or reported as failed; never fetch it twice.
+                        continue;
+                    }
+                    match loader.load_font(&face_url(base, face)).await {
+                        Ok(bytes) => {
+                            match engine.register_with_encoding(
+                                &face.file,
+                                bytes,
+                                face.encoding.as_deref(),
+                            ) {
+                                Ok(()) => {
+                                    report.registered.push(face.file.clone());
+                                    report.locale_faces.push(face.file.clone());
+                                    report.push_face(FontFaceRecord {
+                                        key: (*name).to_string(),
+                                        file: Some(face.file.clone()),
+                                        kind: kind_label(&face.kind),
+                                        source: FontFaceSource::Package,
+                                        status: FontFaceStatus::Loaded,
+                                        detail: None,
+                                    });
+                                    break;
+                                }
+                                Err(e) => {
+                                    report.failed.push(format!("{}: {e}", face.file));
+                                    report.push_face(FontFaceRecord {
+                                        key: (*name).to_string(),
+                                        file: Some(face.file.clone()),
+                                        kind: kind_label(&face.kind),
+                                        source: FontFaceSource::Package,
+                                        status: FontFaceStatus::Failed,
+                                        detail: Some(e.to_string()),
+                                    });
+                                }
                             }
-                            Err(e) => report.failed.push(format!("{}: {e}", face.file)),
+                        }
+                        Err(e) => {
+                            report.failed.push(format!("{}: {e}", face.file));
+                            report.push_face(FontFaceRecord {
+                                key: (*name).to_string(),
+                                file: Some(face.file.clone()),
+                                kind: kind_label(&face.kind),
+                                source: FontFaceSource::Package,
+                                status: FontFaceStatus::Failed,
+                                detail: Some(e.to_string()),
+                            });
                         }
                     }
-                    Err(e) => report.failed.push(format!("{}: {e}", face.file)),
                 }
-            }
-            if report.locale_faces.is_empty() {
-                report.locale_missing = Some(LocaleFallbackGap {
-                    locale,
-                    candidates: tried,
-                });
+                if report.locale_faces.is_empty() {
+                    report.locale_missing = Some(LocaleFallbackGap {
+                        locale,
+                        candidates: tried,
+                    });
+                }
             }
         }
         // A registered face stands in for any missing one so text is not
@@ -328,477 +514,7 @@ pub fn register_default_face(engine: &mut FontEngine, bytes: Arc<[u8]>) -> CadRe
 /// a packaged client needs no network. Kept out of wasm builds, which use the
 /// browser network stack instead.
 #[cfg(not(target_arch = "wasm32"))]
-pub mod local {
-    use std::path::{Path, PathBuf};
-    use std::sync::Arc;
-
-    use cad_domain::{CadError, CadResult};
-
-    use super::*;
-    use crate::block_on;
-
-    /// A [`FontLoader`] rooted at a font directory.
-    ///
-    /// The base handed to [`load_font_engine`] is the directory itself, so the
-    /// catalog and face URLs `cad-resources` builds are already paths under it.
-    pub struct DirFontLoader {
-        root: PathBuf,
-    }
-
-    impl DirFontLoader {
-        pub fn new(root: PathBuf) -> Self {
-            Self { root }
-        }
-
-        fn path_for(&self, url: &str) -> CadResult<PathBuf> {
-            let root = self.root.to_string_lossy();
-            // `face_url` percent-encodes, but catalog parsing guarantees a bare
-            // file name; the prefix check is defence in depth against a caller
-            // passing a URL that points outside the granted directory.
-            if !url.starts_with(root.as_ref()) {
-                return Err(CadError::InvalidInput(format!(
-                    "font path escapes the font directory: {url}"
-                )));
-            }
-            Ok(PathBuf::from(url))
-        }
-    }
-
-    impl FontLoader for DirFontLoader {
-        fn load_font(&self, url: &str) -> HostFuture<'_, Arc<[u8]>> {
-            let path = self.path_for(url);
-            Box::pin(async move {
-                let path = path?;
-                std::fs::read(&path)
-                    .map(|bytes| Arc::from(bytes.into_boxed_slice()))
-                    .map_err(|e| {
-                        CadError::ResourceMissing(format!(
-                            "font read failed for {}: {e}",
-                            path.display()
-                        ))
-                    })
-            })
-        }
-    }
-
-    /// Candidate `fonts/` directories for an executable path, most specific
-    /// first: next to the binary, next to its `bin/` parent, under a macOS
-    /// `.app` bundle's `Contents/Resources/`, then the working directory.
-    pub fn font_dir_candidates(exe: &Path) -> Vec<PathBuf> {
-        let mut out = Vec::new();
-        if let Some(dir) = exe.parent() {
-            out.push(dir.join("fonts"));
-            if let Some(parent) = dir.parent() {
-                out.push(parent.join("fonts"));
-                // macOS `.app` layout: `Contents/MacOS/<exe>` with the font
-                // package at `Contents/Resources/fonts`. Harmless on other
-                // platforms (the path simply does not exist).
-                out.push(parent.join("Resources").join("fonts"));
-            }
-        }
-        if let Ok(cwd) = std::env::current_dir() {
-            out.push(cwd.join("fonts"));
-        }
-        out
-    }
-
-    /// Resolve the font directory to use.
-    ///
-    /// An explicit path must exist (a typo is an error, not a silent fallback);
-    /// otherwise the first existing candidate for `exe` is used, or `None`.
-    pub fn resolve_font_dir(explicit: Option<&Path>, exe: &Path) -> CadResult<Option<PathBuf>> {
-        match explicit {
-            Some(dir) => {
-                if dir.is_dir() {
-                    Ok(Some(dir.to_path_buf()))
-                } else {
-                    Err(CadError::InvalidInput(format!(
-                        "font directory does not exist: {}",
-                        dir.display()
-                    )))
-                }
-            }
-            None => Ok(font_dir_candidates(exe)
-                .into_iter()
-                .find(|dir| dir.is_dir())),
-        }
-    }
-
-    /// Ask fontconfig for the file backing `family`; `None` when fontconfig is
-    /// absent or the family resolves to nothing.
-    ///
-    /// Unix (and Android) only: Windows and macOS resolve their own system fonts
-    /// from the font directories instead of `fc-match`.
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    fn fc_match(family: &str) -> Option<String> {
-        let output = std::process::Command::new("fc-match")
-            .args(["-f", "%{file}", family])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let path = String::from_utf8(output.stdout).ok()?;
-        let path = path.trim();
-        (!path.is_empty()).then(|| path.to_string())
-    }
-
-    /// Best-effort system default face bytes, most specific first.
-    ///
-    /// Entries the shaping engine cannot parse (for example a `.ttc` collection)
-    /// are skipped by the caller; this only collects candidate bytes.
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    pub fn system_default_candidates() -> Vec<Arc<[u8]>> {
-        let mut out = Vec::new();
-        let mut push = |path: &str| {
-            if let Ok(bytes) = std::fs::read(path) {
-                out.push(Arc::from(bytes.into_boxed_slice()));
-            }
-        };
-        for family in [
-            "sans-serif",
-            "DejaVu Sans",
-            "Liberation Sans",
-            "Noto Sans",
-            "Arial",
-        ] {
-            if let Some(path) = fc_match(family) {
-                push(&path);
-            }
-        }
-        for path in [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        ] {
-            push(path);
-        }
-        out
-    }
-
-    /// Windows: read the usual UI faces from the system font directory.
-    ///
-    /// There is no `fc-match`; `%WINDIR%\Fonts` is the machine-wide directory and
-    /// `%LOCALAPPDATA%\Microsoft\Windows\Fonts` holds per-user installs. Only the
-    /// byte candidates are collected here; the shaping engine skips anything it
-    /// cannot parse (for example a `.ttc` collection).
-    #[cfg(target_os = "windows")]
-    pub fn system_default_candidates() -> Vec<Arc<[u8]>> {
-        let mut out = Vec::new();
-        let mut push = |path: &Path| {
-            if let Ok(bytes) = std::fs::read(path) {
-                out.push(Arc::from(bytes.into_boxed_slice()));
-            }
-        };
-        let mut dirs = Vec::new();
-        if let Some(windir) = std::env::var_os("WINDIR") {
-            dirs.push(PathBuf::from(windir).join("Fonts"));
-        }
-        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            dirs.push(
-                PathBuf::from(local)
-                    .join("Microsoft")
-                    .join("Windows")
-                    .join("Fonts"),
-            );
-        }
-        for dir in dirs {
-            for name in [
-                "segoeui.ttf",
-                "arial.ttf",
-                "calibri.ttf",
-                "tahoma.ttf",
-                "verdana.ttf",
-                "consola.ttf",
-            ] {
-                push(&dir.join(name));
-            }
-        }
-        out
-    }
-
-    /// macOS: read the usual UI faces from the system font directories.
-    ///
-    /// There is no `fc-match`; the machine-wide faces live in
-    /// `/System/Library/Fonts` (with supplemental faces under
-    /// `Supplemental/`) and the administrator-installed faces in `/Library/Fonts`.
-    /// Only the byte candidates are collected here; the shaping engine skips
-    /// anything it cannot parse (for example the many `.ttc` collections and the
-    /// variable-axis `SFNS.ttf`). System Integrity Protection guarantees these
-    /// paths exist and are readable on a stock install.
-    #[cfg(target_os = "macos")]
-    pub fn system_default_candidates() -> Vec<Arc<[u8]>> {
-        let mut out = Vec::new();
-        let mut push = |path: &str| {
-            if let Ok(bytes) = std::fs::read(path) {
-                out.push(Arc::from(bytes.into_boxed_slice()));
-            }
-        };
-        for path in [
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-            "/System/Library/Fonts/Helvetica.ttf",
-            "/System/Library/Fonts/Geneva.ttf",
-            "/System/Library/Fonts/Supplemental/Verdana.ttf",
-            "/Library/Fonts/Arial.ttf",
-        ] {
-            push(path);
-        }
-        out
-    }
-
-    /// Cached [`system_default_candidates`] for the process.
-    ///
-    /// Reading a large system collection (`NotoSansCJK.ttc` is ~19 MiB) on every
-    /// document open would be wasteful, so the candidates are materialised once.
-    pub fn cached_system_default_candidates() -> &'static Vec<Arc<[u8]>> {
-        static CACHE: std::sync::OnceLock<Vec<Arc<[u8]>>> = std::sync::OnceLock::new();
-        CACHE.get_or_init(system_default_candidates)
-    }
-
-    /// Build a shaping engine from the `fonts/` package, explicit entries and a
-    /// system default, or `None` when nothing is needed.
-    ///
-    /// `requested` are the drawing's font keys, `text_needed` whether the drawing
-    /// contains text that must be shaped even though it names no font, `explicit`
-    /// the `--font` entries and `system_default` the ordered default-face
-    /// candidates. A drawing with neither text nor a named font installs nothing;
-    /// a text-bearing drawing always gets an engine so its glyphs resolve through
-    /// the fallback chain instead of being silently dropped.
-    ///
-    /// This variant assumes [`TextLocale::Latin`]; use [`load_engine_report`]
-    /// with the locale derived from the drawing's code page.
-    pub fn load_engine(
-        font_dir: Option<&Path>,
-        requested: &[String],
-        text_needed: bool,
-        explicit: &[(String, PathBuf)],
-        system_default: &[Arc<[u8]>],
-    ) -> CadResult<Option<Arc<FontEngine>>> {
-        Ok(load_engine_report(
-            font_dir,
-            requested,
-            text_needed,
-            explicit,
-            system_default,
-            TextLocale::Latin,
-        )?
-        .0)
-    }
-
-    /// Like [`load_engine`], but for a document whose text locale is known, and
-    /// with the load report (locale gap included) returned to the caller.
-    ///
-    /// A locale with no preferred face available still installs the Latin chain
-    /// and reports the gap; it never fails the open and never silently pretends
-    /// the locale was satisfied.
-    pub fn load_engine_report(
-        font_dir: Option<&Path>,
-        requested: &[String],
-        text_needed: bool,
-        explicit: &[(String, PathBuf)],
-        system_default: &[Arc<[u8]>],
-        locale: TextLocale,
-    ) -> CadResult<(Option<Arc<FontEngine>>, FontLoadReport)> {
-        let mut report = FontLoadReport {
-            locale,
-            ..FontLoadReport::default()
-        };
-        if requested.is_empty() && explicit.is_empty() && !text_needed {
-            return Ok((None, report));
-        }
-        let mut engine = match font_dir {
-            Some(dir) => {
-                let base = dir.to_string_lossy().to_string();
-                let loader = DirFontLoader::new(dir.to_path_buf());
-                let (loaded, loaded_report) = block_on(load_font_engine_for_locale(
-                    &loader,
-                    requested,
-                    text_needed,
-                    &base,
-                    locale,
-                ))?;
-                report = loaded_report;
-                // `load_font_engine_for_locale` returns a uniquely owned engine;
-                // unwrapping it lets the explicit/system registrations below
-                // extend the same set.
-                Arc::try_unwrap(loaded)
-                    .map_err(|_| CadError::Invariant("font engine unexpectedly shared".into()))?
-            }
-            None => {
-                // No package to resolve the locale's faces from: the gap is
-                // known here rather than after a fetch attempt.
-                if locale != TextLocale::Latin && text_needed {
-                    report.locale_missing = Some(LocaleFallbackGap {
-                        locale,
-                        candidates: locale
-                            .preferred_faces()
-                            .iter()
-                            .map(|name| (*name).to_string())
-                            .collect(),
-                    });
-                }
-                FontEngine::new()
-            }
-        };
-        let mut fallback = engine.fallback_keys().to_vec();
-        for (name, path) in explicit {
-            let bytes = std::fs::read(path)
-                .map_err(|e| CadError::InvalidInput(format!("font '{}': {e}", path.display())))?;
-            engine.register(name, Arc::from(bytes.into_boxed_slice()))?;
-            if !fallback.iter().any(|key| key == name) {
-                fallback.push(name.clone());
-            }
-        }
-        engine.set_fallback(fallback);
-        // The first parseable system face becomes the preferred default; a `.ttc`
-        // that the engine rejects is simply skipped.
-        for bytes in system_default {
-            if register_default_face(&mut engine, bytes.clone()).is_ok() {
-                break;
-            }
-        }
-        if engine.is_empty() {
-            return Ok((None, report));
-        }
-        engine.set_locale_tag(locale.as_str());
-        // An explicit/`--font` CJK face also satisfies the locale; the gap is
-        // only real when the engine truly has none of the preferred faces.
-        if report.locale_missing.is_some()
-            && locale
-                .preferred_faces()
-                .iter()
-                .any(|name| engine.contains(name))
-        {
-            report.locale_missing = None;
-        }
-        Ok((Some(Arc::new(engine)), report))
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn candidates_prefer_the_binary_side_fonts_dir() {
-            let exe = Path::new("/opt/yacr/bin/yacr-linux");
-            let candidates = font_dir_candidates(exe);
-            assert_eq!(candidates[0], PathBuf::from("/opt/yacr/bin/fonts"));
-            assert_eq!(candidates[1], PathBuf::from("/opt/yacr/fonts"));
-            // macOS `.app` layout: `Contents/MacOS/<exe>` -> `Contents/Resources/fonts`.
-            let app_exe = Path::new("/opt/Yacr.app/Contents/MacOS/yacr-macos");
-            let app_candidates = font_dir_candidates(app_exe);
-            assert_eq!(
-                app_candidates[0],
-                PathBuf::from("/opt/Yacr.app/Contents/MacOS/fonts")
-            );
-            assert_eq!(
-                app_candidates[1],
-                PathBuf::from("/opt/Yacr.app/Contents/fonts")
-            );
-            assert_eq!(
-                app_candidates[2],
-                PathBuf::from("/opt/Yacr.app/Contents/Resources/fonts")
-            );
-        }
-
-        #[test]
-        fn explicit_missing_font_dir_is_an_error_not_a_silent_fallback() {
-            let missing = Path::new("/definitely/not/a/font/dir");
-            let result = resolve_font_dir(Some(missing), Path::new("/opt/yacr/bin/yacr-linux"));
-            assert!(matches!(result, Err(CadError::InvalidInput(_))));
-        }
-
-        #[test]
-        fn nothing_requested_and_no_explicit_fonts_installs_nothing() {
-            let engine = load_engine(None, &[], false, &[], &[]).unwrap();
-            assert!(engine.is_none());
-        }
-
-        #[test]
-        fn text_with_no_named_font_installs_a_fallback_engine() {
-            // A drawing can hold text whose style names no font. It still needs
-            // shaping, so the default face must be installed instead of returning
-            // `None`; the glyphs then come from the fallback chain.
-            let engine = load_engine(None, &[], true, &[], &[Arc::from(synthetic_shx())])
-                .unwrap()
-                .expect("text without a named font installs an engine");
-            assert_eq!(
-                engine.fallback_keys().first().map(String::as_str),
-                Some(DEFAULT_FALLBACK_KEY)
-            );
-        }
-
-        #[test]
-        fn text_without_a_named_font_loads_the_font_package_default() {
-            // `--fonts-dir` (or the sibling package) alone must rescue text with
-            // no named font: the catalog default is registered even though
-            // `requested` is empty.
-            let dir =
-                std::env::temp_dir().join(format!("yacr-font-package-test-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(
-                dir.join("fonts.json"),
-                br#"[{ "file": "osifont.shx", "name": ["osifont"], "type": "shx" }]"#,
-            )
-            .unwrap();
-            std::fs::write(dir.join("osifont.shx"), synthetic_shx()).unwrap();
-            let engine = load_engine(Some(&dir), &[], true, &[], &[])
-                .unwrap()
-                .expect("the package default installs an engine");
-            assert!(engine.contains("osifont.shx"));
-            let _ = std::fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn explicit_font_is_registered_and_used_as_fallback() {
-            let dir = std::env::temp_dir().join(format!("yacr-font-test-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("explicit.shx");
-            std::fs::write(&path, synthetic_shx()).unwrap();
-            let engine = load_engine(
-                None,
-                &["missing.shx".to_string()],
-                false,
-                &[("MyFont".to_string(), path.clone())],
-                &[],
-            )
-            .unwrap()
-            .expect("explicit font installs an engine");
-            assert!(engine.contains("MyFont"));
-            let _ = std::fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn system_default_becomes_the_first_fallback() {
-            let engine = load_engine(
-                None,
-                &["missing.shx".to_string()],
-                false,
-                &[],
-                &[Arc::from(synthetic_shx())],
-            )
-            .unwrap()
-            .expect("a system default installs an engine");
-            assert_eq!(
-                engine.fallback_keys().first().map(String::as_str),
-                Some(DEFAULT_FALLBACK_KEY)
-            );
-            assert!(engine.contains(DEFAULT_FALLBACK_KEY));
-        }
-
-        /// Minimal but parseable compiled SHX shape font bytes.
-        fn synthetic_shx() -> Vec<u8> {
-            let mut bytes = b"AutoCAD-86 shapes 1.0\r\n\x1a".to_vec();
-            let info = b"Synthetic\0\x15\x07\x02\0";
-            for value in [0u16, 0, 1, 0, info.len() as u16] {
-                bytes.extend(value.to_le_bytes());
-            }
-            bytes.extend(info);
-            bytes
-        }
-    }
-}
+pub mod local;
 
 #[cfg(test)]
 mod tests;

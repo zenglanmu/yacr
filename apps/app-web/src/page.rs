@@ -14,6 +14,7 @@
 //! status() / document()                                  -> JSON objects
 //! probe_input(args_json)                                 -> JSON pointer ack
 //! invoke(name, args_json)                                -> {"ok":...} envelope
+//! apply_font_package()                                   -> JSON status (lazy fonts)
 //! shell_status() / shell_commands() / shell_aliases() / shell_command(name)
 //! ```
 //!
@@ -709,6 +710,54 @@ pub(crate) fn invoke_impl(name: &str, args_json: &str) -> String {
         Some(result) => direct::envelope(result),
         None => direct::envelope(direct::without_session(name)),
     };
+    crate::events::flush_live();
+    result
+}
+
+// ---------------------------------------------------------------------------
+// The lazy font package
+// ---------------------------------------------------------------------------
+
+/// The refusal step of [`crate::apply_font_package`] (see the crate docs).
+const STEP_FONTS: &str = "font";
+
+/// Re-run the shaping-font install on the **live** session from the package the
+/// page installed with `set_font_package`, then present one frame.
+///
+/// The lazy Web path: the page opens a document first, reads what the drawing
+/// needs from `cad_fonts`, fetches those faces and installs them, and only then
+/// asks the live session to shape the document it already holds. Nothing about
+/// the document, the camera or the presenter changes.
+///
+/// Refusals are named (`font.package_missing`, `font.no_session`,
+/// `font.reinstall_failed`), never a status that claims fonts loaded.
+pub(crate) fn apply_font_package_impl() -> Result<String, JsValue> {
+    if crate::fonts::current().is_none() {
+        return Err(reject(&Failure::new(
+            STEP_FONTS,
+            "font.package_missing: no font package is installed on this wasm instance; \
+             call set_font_package with the fetched package first",
+        )));
+    }
+    let result = with_live(|page| {
+        page.live.session.reinstall_fonts().map_err(|error| {
+            reject(&Failure::new(
+                STEP_FONTS,
+                format!("font.reinstall_failed: {error}"),
+            ))
+        })?;
+        // One frame so the re-shaped text reaches the canvas; a not-yet-committed
+        // scene is a real wait (see `frame_step`), never a presented frame.
+        frame_step(page);
+        Ok(page_with_status(page))
+    })
+    .unwrap_or_else(|| {
+        Err(reject(&Failure::new(
+            STEP_FONTS,
+            "font.no_session: apply_font_package needs a live canvas session; \
+             open a document (or start) first",
+        )))
+    });
     crate::events::flush_live();
     result
 }

@@ -308,6 +308,18 @@ pub struct HostCore {
     pub(crate) last_status: Rc<RefCell<Option<StatusMessage>>>,
     /// Last raster-image loading outcome, surfaced by the diagnostics drawer.
     pub(crate) last_image_report: Rc<RefCell<Option<cad_platform::images::ImageLoadReport>>>,
+    /// Last shaping-font loading outcome (the real per-face report), surfaced by
+    /// the read-only Font Manager and the diagnostics drawer.
+    ///
+    /// Document-scoped: cleared when the authoritative document is replaced.
+    pub(crate) last_font_report: Rc<RefCell<Option<cad_platform::fonts::FontLoadReport>>>,
+    /// The real load that produced the currently installed font engine.
+    ///
+    /// Engine-scoped and deliberately kept across a document replacement: the
+    /// installed engine is host-wide, so a document that reuses it must still be
+    /// able to publish the faces that were actually loaded instead of an empty
+    /// report (or invented rows).
+    pub(crate) engine_font_report: Rc<RefCell<Option<cad_platform::fonts::FontLoadReport>>>,
     /// The real terminal snapshot of a *synchronous* deliver (no worker): the
     /// opened entity count or the original failure. Composed by
     /// [`Self::import_snapshot`] under the real async snapshot; cleared by a new

@@ -378,6 +378,18 @@ def check_native_carrier() -> list[str]:
     ):
         if fragment not in kotlin:
             problems.append(f"MainActivity.kt: native carrier wiring missing '{fragment}'")
+    # The extraction marker is versioned: bumping it is how an existing install
+    # re-extracts the assets after the bundled font package gains a file (v2 adds
+    # the Noto Sans CJK SC fallback). The old unversioned marker must not return.
+    if '".yacr-assets-v2-complete"' not in kotlin:
+        problems.append(
+            "MainActivity.kt: ASSET_EXTRACT_MARKER must be the versioned "
+            "'.yacr-assets-v2-complete' so existing installs re-extract the new fonts"
+        )
+    if ".yacr-assets-complete" in kotlin:
+        problems.append(
+            "MainActivity.kt: the unversioned '.yacr-assets-complete' marker must stay retired"
+        )
     if "setZOrderOnTop(true)" in kotlin:
         problems.append("MainActivity.kt: an on-top SurfaceView would cover the React chrome")
     # Wry calls onWebViewCreate before setContentView(webview), so the surface must be

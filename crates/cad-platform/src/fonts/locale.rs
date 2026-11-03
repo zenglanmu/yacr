@@ -116,15 +116,26 @@ impl TextLocale {
     /// These are the faces that supply the locale's own script; the Latin tail
     /// ([`DEFAULT_FALLBACK_NAMES`]) is appended by [`Self::fallback_chain`] and
     /// is never reported as a missing locale candidate.
+    ///
+    /// Every CJK locale ends with `noto sans cjk sc`, the committed OFL
+    /// `fonts/NotoSansCJKsc-Regular.otf` face and the unified last resort for
+    /// all four scripts. It stays last so the lighter per-locale faces are
+    /// preferred when a package actually ships them.
     pub fn preferred_faces(self) -> &'static [&'static str] {
         match self {
             TextLocale::Latin => &[],
-            TextLocale::SimplifiedChinese => {
-                &["gbcbig", "hztxt", "chineset", "bigfont", "simhei", "simsun"]
-            }
-            TextLocale::TraditionalChinese => &["chineset", "bigfont"],
-            TextLocale::Japanese => &["bigfont"],
-            TextLocale::Korean => &["bigfont"],
+            TextLocale::SimplifiedChinese => &[
+                "gbcbig",
+                "hztxt",
+                "chineset",
+                "bigfont",
+                "simhei",
+                "simsun",
+                "noto sans cjk sc",
+            ],
+            TextLocale::TraditionalChinese => &["chineset", "bigfont", "noto sans cjk sc"],
+            TextLocale::Japanese => &["bigfont", "noto sans cjk sc"],
+            TextLocale::Korean => &["bigfont", "noto sans cjk sc"],
         }
     }
 
@@ -155,7 +166,7 @@ impl TextLocale {
         let mut out: Vec<String> = Vec::new();
         for candidate in self.preferred_faces() {
             for key in available {
-                if face_stem(key) == *candidate && !out.iter().any(|existing| existing == key) {
+                if face_matches(candidate, key) && !out.iter().any(|existing| existing == key) {
                     out.push(key.clone());
                 }
             }
@@ -167,6 +178,58 @@ impl TextLocale {
         }
         out
     }
+}
+
+/// Style suffixes a family file may append to the bare family name.
+const STYLE_SUFFIXES: &[&str] = &[
+    "regular", "bold", "italic", "oblique", "light", "medium", "book", "semibold", "black", "thin",
+    "roman",
+];
+
+/// Case-folded alphanumeric form, ignoring separators (`Noto Sans CJK SC` ->
+/// `notosanscjksc`).
+fn face_compact(name: &str) -> String {
+    name.chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect()
+}
+
+/// Whether a registered key supplies the preferred face `candidate`.
+///
+/// A catalog name carries spaces (`noto sans cjk sc`) while the file it maps to
+/// carries the family plus a style suffix (`NotoSansCJKsc-Regular.otf`), so
+/// exact stem equality is not enough for the unified Noto fallback. Compare on
+/// the compact form and accept a known style suffix appended to the family.
+fn face_matches(candidate: &str, key: &str) -> bool {
+    let candidate_stem = face_stem(candidate);
+    let key_stem = face_stem(key);
+    if key_stem == candidate_stem {
+        return true;
+    }
+    let candidate_compact = face_compact(&candidate_stem);
+    if candidate_compact.is_empty() {
+        return false;
+    }
+    let key_compact = face_compact(&key_stem);
+    key_compact == candidate_compact
+        || key_compact
+            .strip_prefix(&candidate_compact)
+            .is_some_and(|suffix| STYLE_SUFFIXES.contains(&suffix))
+}
+
+/// Whether the engine has any face matching a preferred `name`.
+///
+/// `engine.contains` only probes the exact key/stem, so a registered file name
+/// such as `NotoSansCJKsc-Regular.otf` would not answer for the catalog name
+/// `noto sans cjk sc`. The loader sets the fallback chain to every registered
+/// key, so that chain is checked with the same family match.
+fn engine_has_face(engine: &FontEngine, name: &str) -> bool {
+    engine.contains(name)
+        || engine
+            .fallback_keys()
+            .iter()
+            .any(|key| face_matches(name, key))
 }
 
 /// The bare, lowercased stem of a font key (`fonts/GBCBIG.SHX` -> `gbcbig`).
@@ -228,7 +291,7 @@ pub fn locale_gap(
     if locale
         .preferred_faces()
         .iter()
-        .any(|name| engine.contains(name))
+        .any(|name| engine_has_face(engine, name))
     {
         return None;
     }
@@ -300,27 +363,104 @@ mod tests {
         assert_eq!(
             TextLocale::SimplifiedChinese.fallback_chain(),
             vec![
-                "gbcbig", "hztxt", "chineset", "bigfont", "simhei", "simsun", "osifont", "arial",
+                "gbcbig",
+                "hztxt",
+                "chineset",
+                "bigfont",
+                "simhei",
+                "simsun",
+                "noto sans cjk sc",
+                "osifont",
+                "arial",
                 "simplex",
             ]
         );
         assert_eq!(
             TextLocale::TraditionalChinese.fallback_chain(),
-            vec!["chineset", "bigfont", "osifont", "arial", "simplex"]
+            vec![
+                "chineset",
+                "bigfont",
+                "noto sans cjk sc",
+                "osifont",
+                "arial",
+                "simplex",
+            ]
         );
         assert_eq!(
             TextLocale::Japanese.fallback_chain(),
-            vec!["bigfont", "osifont", "arial", "simplex"]
+            vec!["bigfont", "noto sans cjk sc", "osifont", "arial", "simplex"]
         );
         assert_eq!(
             TextLocale::Korean.fallback_chain(),
-            vec!["bigfont", "osifont", "arial", "simplex"]
+            vec!["bigfont", "noto sans cjk sc", "osifont", "arial", "simplex"]
         );
         // Latin is exactly the historical default list, unchanged.
         assert_eq!(
             TextLocale::Latin.fallback_chain(),
             DEFAULT_FALLBACK_NAMES.to_vec()
         );
+    }
+
+    #[test]
+    fn every_cjk_locale_ends_with_the_noto_last_resort() {
+        for locale in [
+            TextLocale::SimplifiedChinese,
+            TextLocale::TraditionalChinese,
+            TextLocale::Japanese,
+            TextLocale::Korean,
+        ] {
+            assert_eq!(
+                locale.preferred_faces().last().copied(),
+                Some("noto sans cjk sc"),
+                "{} must fall back to Noto last",
+                locale.as_str()
+            );
+        }
+        // Latin has no locale preference; its chain is exactly the shared
+        // default list, so Noto is only *fetched* when the default loop needs it.
+        assert!(TextLocale::Latin.preferred_faces().is_empty());
+        assert_eq!(
+            TextLocale::Latin.fallback_chain(),
+            DEFAULT_FALLBACK_NAMES.to_vec()
+        );
+    }
+
+    #[test]
+    fn a_registered_noto_file_satisfies_the_locale_gap_and_is_promoted() {
+        // The catalog name has spaces; the committed file is
+        // `NotoSansCJKsc-Regular.otf`. Matching must bridge the two.
+        let mut engine = FontEngine::new();
+        engine
+            .register("NotoSansCJKsc-Regular.otf", synthetic_shx())
+            .unwrap();
+        engine.set_fallback(vec![
+            "osifont.shx".to_string(),
+            "NotoSansCJKsc-Regular.otf".into(),
+        ]);
+
+        assert!(
+            locale_gap(&engine, TextLocale::SimplifiedChinese, true).is_none(),
+            "a registered Noto face must clear the CJK locale gap"
+        );
+        assert_eq!(
+            TextLocale::SimplifiedChinese.ordered_fallback(engine.fallback_keys()),
+            vec![
+                "NotoSansCJKsc-Regular.otf".to_string(),
+                "osifont.shx".to_string()
+            ],
+            "Noto must be promoted ahead of the Latin default"
+        );
+    }
+
+    /// Minimal but parseable compiled SHX shape font bytes.
+    fn synthetic_shx() -> std::sync::Arc<[u8]> {
+        let mut bytes = b"AutoCAD-86 shapes 1.0\r\n\x1a".to_vec();
+        let info = b"Synthetic\0\x15\x07\x02\0";
+        for value in [0u16, 0, 1, 0, info.len() as u16] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(info);
+        std::sync::Arc::from(bytes)
     }
 
     #[test]

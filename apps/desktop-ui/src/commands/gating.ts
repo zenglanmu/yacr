@@ -261,7 +261,8 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
  * Selectors the **chrome** answers itself, before the router. They have a real
  * command-line entry (typing the word works) but no reason to reach a router
  * selector: `PROPERTIES` opens the docked inspector, `LAYER` opens the docked
- * layers palette and `RESOURCES` opens the References panel.
+ * layers palette, `FONTS` opens the read-only Font Manager and `RESOURCES` opens
+ * the References panel.
  *
  * They are deliberately admitted regardless of the loaded host vocabulary (and
  * of whether a drawing is open): they touch no CAD state, exactly like the
@@ -272,5 +273,7 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
  * `RESOURCES` is a router name (it builds a host-side report), but the References
  * panel reads the references the status already carries, so the UI selector
  * opens that panel and sends nothing: no second source and no fabricated load.
+ * `FONTS` owns its own report command (`cad_fonts`), which the panel reads
+ * directly; the selector only opens the panel.
  */
-export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze(['PROPERTIES', 'LAYER', 'RESOURCES']);
+export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze(['PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES']);

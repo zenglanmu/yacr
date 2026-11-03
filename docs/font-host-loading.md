@@ -1,95 +1,100 @@
-# 宿主字体取字节（Web / Android）
+# 宿主字体加载（native / Android / Web）
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
-> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+本文只描述**当前** React/Tauri/wasm 载体如何把字体字节变成 `FontEngine`。字体来源、授权、
+格式、回退顺序与 `cad_fonts` 字段见 [fonts.md](fonts.md)；逐宿主平台状态见
+[android-host.md](android-host.md)、[windows-app.md](windows-app.md)、[macos-app.md](macos-app.md)。
 
-本文记录 F10「宿主持有字体字节」的实现接线与验证边界。契约与字形来源见
-`docs/fonts.md`；平台组装见 `docs/adr/0003-web-composition.md`。
-
-## 分层
+## 共同契约
 
 ```
-图纸 (DrawingDatabase)
-  └─ requested_fonts()            cad-platform::fonts：只读收集引用键
-       └─ plan_fonts()            cad-resources：名称 → 目录 face → URL
-            └─ FontLoader          cad-platform：主机取字节
-                 └─ FontEngine      cad-representation：按 encoding 注册
-                      └─ set_fonts  cad-ui-slint：桥接重建场景并整形文字
+DrawingDatabase
+  └─ requested_fonts() / needs_text_shaping() / code_page()
+       └─ plan_fonts()          cad-resources：名称 → 目录 face → URL
+            └─ FontLoader       cad-platform：宿主提供字节
+                 └─ FontEngine  cad-representation：按 encoding 注册
+                      └─ set_fonts(Some(engine)) / set_fonts(None)
 ```
 
-`cad-platform::fonts::load_font_engine` 是 Web 与 Android 共用的编排；两个宿主只提供
-`FontLoader` 实现，不复制计划/注册/回退逻辑（规范 §4.2 单一业务路径）。当图纸字体缺失
-或拉取失败时它会注册一个**默认轮廓回退面**（`DEFAULT_FALLBACK_NAMES`：
-`osifont` → `arial` → `simplex`），`FontLoadReport.default_face` 记录实际注册项。
+`cad-platform::fonts::load_font_engine_for_locale` 是共同编排：读 `fonts.json`、计划、取字节、
+注册、按 locale 建回退链，返回 `(Arc<FontEngine>, FontLoadReport)`。宿主只负责取字节；计划/
+注册/回退不在各平台重写。**空引擎用 `set_fonts(None)`**，不安装一个所有字形都会失败的空引擎。
 
-Linux 桌面/CLI 宿主复用同一个 `load_font_engine`，只是 `FontLoader` 换成
-`cad-platform::fonts::local::DirFontLoader`（读取可执行文件同级 `fonts/` 目录）；
-随后把 `--font` 显式字体与系统默认字体（`register_default_face`）并入同一引擎。
+## 原生宿主（Linux / Windows / macOS 桌面与 CLI）
 
-## Web（`apps/app-web`）
+`cad-host` 的字体策略：
 
-- `WebFontLoader`：`window.fetch(url)` → 检查 `response.ok()` → `response.arrayBuffer()`
-  → `Uint8Array::to_vec()`，转 `Arc<[u8]>`。CDN 跨域依赖其 CORS 头；非 2xx 记为
-  `ResourceMissing`，绝不返回空字节。
-- 目录：`cad_resources::DEFAULT_FONT_BASE_URL`（jsDelivr `mlightcad/cad-data`）。
-- 触发：`open_document` 成功后 `spawn_font_load()`（`spawn_local`）异步加载；加载期间若
-  又打开了别的图纸，用 `SceneIdentity` 比对丢弃过期结果（`StaleResult`）。
-- 对外：`load_web_fonts()`（wasm-bindgen async，返回 `FontLoadReport::summary()`）与
-  `font_load_report()`（最近一次结果）。`web/main.js` 暴露 `window.yacr.load_fonts()`
-  与 `font_load_report()`，供无头验证真正等待下载完成。
-- 注册为空 → `clear_fonts()`；否则 `set_fonts(engine)`。
+1. 从 `cad-db` 只读收集本图纸的 `requested_fonts`、`needs_text_shaping` 与
+   `TextLocale::from_code_page(code_page())`。
+2. 若当前 installed engine 的 locale 匹配、覆盖所有请求面且无 locale 缺口，直接复用；否则若新
+   locale 的优先面已在 engine 中，就地重定向回退顺序；否则重建。
+3. 重建时：
+   - `cad-platform::fonts::local::resolve_font_dir(options.fonts_dir, current_exe())`：
+     显式 `--fonts-dir` 必须存在；否则依次找可执行文件同级 `fonts/`、父级 `fonts/`、macOS
+     `Contents/Resources/fonts`、CWD `fonts/`。
+   - `DirFontLoader` 从该目录读字节；`load_engine_report` 再注册 `--font NAME=PATH`，最后注册
+     第一个可解析的系统默认面（`fc-match`；Windows/macOS 从系统字体目录收集候选）。
+   - 无字体目录时仍会按 locale 记录缺口（`font.locale_fallback_missing`），不把“没目录”伪装成
+     已满足。
+4. `FontLoadReport` 同时发布给 `cad_fonts`；失败面保留真实状态。
 
-## Android（`apps/app-android`）
+CLI（`cad-cli-tools`）复用同一 `local` 模块：`--font name=path` + 可执行文件同级 `fonts/`；
+`build-representation` / `render` / `plot` 都注入同一个引擎。
 
-- `android_main` 在任何 Slint 调用前 `app.asset_manager()`，存入线程局部；说明见
-  android-activity 文档（返回的 manager 在进程内有效）。
-- `AssetFontLoader`：`AssetManager::open(CStr)` → `read_to_end`。基址 `asset://fonts/`，
-  目录 `asset://fonts/fonts.json`，即 APK 的 `assets/fonts/`。
-- 触发：`open_drawing` 成功后同步加载（资产读取立即就绪，用 no-op waker 的执行器，
-  不是通用 runtime）。
-- **不打包 mlightcad 字体**：许可原因（`docs/fonts.md`「授权」），未放 `assets/fonts/` 时返回
-  `ResourceMissing`（`font asset not packaged …`），状态栏报告，绝不伪造。但
-  `scripts/fetch-fonts.sh` 会把提交的 `fonts/`（QCAD osifont，GPL-3+例外）合并进
-  `assets/fonts/`，保证 APK 至少自带给默认轮廓回退面。
+## Android（`native-below`）
 
-## Linux 桌面 / CLI（`cad-platform::fonts::local`）
+- Gradle 将仓库 `fonts/` 作为 APK asset 根；`MainActivity.kt` 在后台把
+  `assets/fonts/…`（或 asset 根）复制到 `filesDir/fonts/`，完成后写
+  `.yacr-assets-v2-complete`。标记存在且 `fonts.json` 存在时后续启动跳过复制；v2 标记确保旧安装
+  在加入 Noto 后重新解压。
+- 复制成功后通过冻结的 JNI `nativeAssetsReady(fontsDir, imagesDir)` 把**真实文件系统路径**交给
+  Rust；`HostOptions.fonts_dir` 指向它。没有字体资产时只记录显式诊断，**不**调用 JNI 传入空包。
+- Rust 侧与桌面相同：`cad-platform::fonts::local` 读该目录，按图纸 locale 构建引擎。Android 上
+  **没有** wasm `CadSession`，也不会走 Web 的 `set_font_package`。
 
-- 启动（桌面）或每次打开图纸后（两者都）重新收集 `requested_fonts`，按序组装引擎：
-  1. 可执行文件同级的 `fonts/` 目录（`fonts.json` + 文件；发布包由
-     `scripts/package-linux-release.sh` 经平台无关的 `fetch-fonts.sh` 组装 mlightcad
-     全量 + 提交的 osifont；`--fonts-dir` 可显式指定，显式目录不存在是错误，不静默回退）；
-  2. `--font NAME=PATH` 显式注册；
-  3. 系统默认字体（fontconfig `fc-match`，跳过 `.ttc` 等无法解析的候选，`__yacr_default__`
-     为第一回退）。
-- 空结果 → `clear_fonts()`；否则 `set_fonts`。没有可用字体时文本保持不可绘的 `Text`，
-  绝不伪装成已渲染。
-- 打包：`scripts/package-linux-release.sh` 把 `fonts/` 放在发布包根（`bin/` 的父级），
-  CLI 与 GUI 都经 `font_dir_candidates` 命中同级/父级 `fonts/`。
+## Web（`dom-canvas`，wasm 会话）
+
+Web **不在 bundle 里带字体，也不预加载**：包在文档打开**之后**按需从同源 `fonts/` 取。
+`HostResources::install_fonts` 仍是**同步**的，所以页面必须先取字节再装包；懒加载把这一步移到
+`open_bytes` 之后，再由 `apply_font_package` 在已打开的会话上重跑安装。
+
+1. **构建期**：`scripts/build-web-ui.sh`（`dist-ui`）与 `scripts/build-web.sh`（独立 harness
+   `dist`）只产出页面 + wasm，默认没有 `fonts/`。`apps/desktop-ui/vite-font-package.mjs` 只在
+   `__YACR_RUNTIME__=tauri` 时把仓库 `fonts/` 复制到 `apps/desktop-ui/dist/fonts`
+   （X11/XWayland `dom-canvas` 的离线包）；web/android 都跳过。`YACR_WEB_FONTS=1` 只用于本地把
+   提交包 staging 到 `dist-ui/fonts`（本地专用，不是发布路径）。
+2. **发布包**：`scripts/deploy-cloudflare-pages.sh` 在上传前调用 `scripts/fetch-fonts.sh` 把
+   mlightcad 全量目录 + 提交的 osifont/Noto 组装到 `$DIST/fonts`，两种 bundle 都适用；
+   `SKIP_FONTS=1` 复用已有目录、完全不下载。站点根因此始终有同源 `fonts/`。
+3. **打开与懒加载**：页面先 `open_bytes`（此时无包；图纸需要文字时如实留下
+   `unsupported-resources: fonts`），随后 `ensureFontPackage()`：
+   - `invoke('cad_fonts')` 读 `requested`（已按大小写不敏感去重）、`textNeeded`、`locale`；
+     无文字且无命名面时直接返回，不 fetch。
+   - 从 `fonts/`（默认同源，`__YACR_FONT_BASE_URL__` 可覆盖）取 `fonts.json`，只保留本图需要的
+     目录项（自身名称 + `DEFAULT_FALLBACK_NAMES` + locale 优先面），再取这些面的字节。
+   - `set_font_package(catalogText, files)` → `app_web::fonts::install_package` 校验目录可解析、
+     目录/文件非空、无重名后换入 `MemoryFontLoader`。**包可以只携带部分面**：目录里其余面
+     没有字节不算错误，`plan_fonts` 选中缺失面时由 `load_package` 记为具名 `ResourceMissing`。
+   - `apply_font_package()` → `CadSession::reinstall_fonts()` 重建引擎并呈现一帧；返回真实
+     会话状态。拒绝按名：`font.package_missing` / `font.no_session` / `font.reinstall_failed`。
+4. **失败**：fetch、校验或重装失败发布到 `__YACR_FONT_PACKAGE_ERROR__`，图纸保持打开、状态行
+   保留，`cad_fonts` 保留 `fonts.failed`；下一次打开重试（失败不被记忆）。Worker 载体没有
+   `CadSession`，对 `fonts` 请求返回 `unsupported-runtime: fonts`。
+
+`MemoryFontLoader` 的 base 是 `memory://fonts/`，只作诊断标识，永不 fetch；查找按裸文件名
+大小写不敏感。包不持久化：页面刷新后由下一次打开重新取。
 
 ## 验证
 
-- 单元测试：`crates/cad-platform/src/fonts.rs`（`cargo test -p cad-platform`）覆盖
-  - `requested_fonts` 收集 TEXT `font` 与样式 `resource_keys`；
-  - `catalog_url` 规范化；
-  - 目录/字体取字节可注入：注册失败被逐项报告而非计成功；
-  - 未知名跳过（不伪造）；
-  - 目录获取失败向上传播（`ResourceMissing`）。
-- 编译：`cargo check --workspace --lib --target wasm32-unknown-unknown --locked`；
-  `cargo check --target aarch64-linux-android -p app-android --locked`。
-- **浏览器内编排运行**（web 工作流，2026-10-02，SwiftShader WebGL2）：在真实 headless
-  Chromium 中调用 `window.yacr.load_fonts()` → `load_web_fonts()`；演示图未引用 CAD
-  文本字体，返回 `catalog=0 requested=0 planned=0 registered=0 failed=0`，宿主路径可
-  解析。明细见 `docs/validation-web.md`。
-- 未做：浏览器内**真实** `fetch` 与 Android 真机资产读取的运行验证。上面的浏览器运行
-  走的是“图纸未引用字体”分支，因此未真正下载 jsDelivr 目录/字体字节，也不构成 Android
-  或 CDN 的验证。因此**不宣称** F10 已验收，只宣称代码路径已实现并编译、纯逻辑有测试、
-  宿主编排在浏览器中可运行。
+| 命令 | 覆盖 |
+|---|---|
+| `cargo test -p cad-platform fonts --locked` | `requested_fonts` 去重、`catalog_url`、计划/注册/失败逐项报告、默认面与 Noto 默认面、locale 链与缺口 |
+| `cargo test -p cad-host fonts --locked` | 原生安装/复用/重定向、locale 缺口每文档一次 |
+| `cargo test -p app-web fonts --locked` | `set_font_package` 校验、提交包/部分包安装、CJK 文本同时注册 osifont + Noto |
+| `cargo test -p cad-desktop-shell --test font_commands --locked` | `cad_fonts` 命令注册、camelCase 序列化、无会话显式拒绝 |
+| `(cd apps/desktop-ui && node --test test/fonts.test.ts test/vite-font-package.test.ts)` | 严格解析、只读行分组、`FONTS` 选择器、Vite 插件仅 tauri 复制、web/android 跳过 |
+| `bash scripts/build-web-ui.sh` | exit 0；默认**不** staging 字体；`YACR_WEB_FONTS=1` 只作本地提交子集 staging（本地专用） |
 
-## 已知限制
-
-1. Android 只实现 asset 路径，运行时 HTTP 未实现。
-2. Web 依赖 CDN CORS 与网络可达；离线时报告取字节失败，文本保持不可绘（不会静默丢字，
-   因为未注册时桥接不注入字体）。
-3. 缓存：当前每次打开重新取字节；按 URL 的跨会话缓存/持久化（IndexedDB 等）未实现。
+**边界**：上述均为契约/编译/产物级证据。完整 mlightcad CDN 包的下载与浏览器运行时、真实
+Cloudflare Pages 上传、真实 GPU 像素、Android 真机解压与 Noto 设备渲染、Windows/macOS
+运行时均 **NOT RUN**。Web 的本地软件渲染证据见
+[fonts.md](fonts.md#验证与证据边界)，不能升级为 GPU/像素结论。

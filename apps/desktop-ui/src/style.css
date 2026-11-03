@@ -435,6 +435,58 @@ button, input, select { font: inherit; color: inherit; }
 .references__hint { margin: 2px 0 0; color: var(--text-dim); font-size: 11px; line-height: 1.4; }
 .references__meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; color: var(--text-muted); font-size: 10px; }
 
+/* Font Manager palette --------------------------------------------------- */
+/* Read-only report: a summary block over three dense sections. Rows reuse the
+   references card language (left rule = state, badge = status, monospace for the
+   host's own values); only the grouping and the summary need new rules. */
+.fonts__body { display: flex; flex-direction: column; gap: 10px; }
+.fonts__summary {
+  display: flex; flex-direction: column; gap: 5px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--line-soft);
+}
+.fonts__stats {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+  margin: 0; color: var(--text-dim); font-size: 10.5px;
+}
+.fonts__stats code { font-family: var(--font-mono); color: var(--accent-text); }
+.fonts__locale {
+  padding: 1px 6px;
+  border: 1px solid var(--line-soft); border-radius: 999px;
+  color: var(--text-muted); font-family: var(--font-mono);
+  font-size: 9.5px; letter-spacing: .4px;
+}
+.fonts__counts { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; font-size: 10px; }
+.fonts__counts .is-ok { color: var(--ok); }
+.fonts__counts .is-error { color: var(--danger); }
+.fonts__counts .is-muted { color: var(--text-muted); }
+.fonts__dir { display: flex; align-items: baseline; gap: 6px; min-width: 0; margin: 0; }
+.fonts__dir > span { flex: 0 0 auto; color: var(--text-muted); font-size: 10px; }
+.fonts__dir code {
+  min-width: 0; font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--text-dim); overflow-wrap: anywhere;
+}
+.fonts__warning {
+  display: flex; align-items: flex-start; gap: 6px;
+  margin: 0; padding: 5px 7px;
+  background: var(--field); border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--danger); border-radius: var(--radius);
+  color: var(--text-dim); font-size: 11px; line-height: 1.4;
+}
+.fonts__warning svg { flex: 0 0 auto; color: var(--danger); margin-top: 1px; }
+.fonts__unavailable {
+  padding: 6px 8px;
+  background: var(--field); border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--danger); border-radius: var(--radius);
+}
+.fonts__tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.fonts__kind {
+  padding: 0 5px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  color: var(--text-muted); font-family: var(--font-mono);
+  font-size: 9.5px; text-transform: uppercase;
+}
+.fonts__source { color: var(--text-muted); font-size: 10px; }
+
 /* Properties palette ----------------------------------------------------- */
 /* The inspector is a compact two-column property grid: category heading, then
    one row per property (label left, editor right). Only the label/value wrap and

@@ -95,6 +95,7 @@ macro_rules! cad_wire_registry {
             @row(shared, reads, NoArgs, cad_settings, { }, $crate::session::CadSettings, { $crate::session::wire::settings(reads) })
             @row(shared, sink, SettingArgs, cad_set_setting, { arg(req, key, String) arg(req, value, $crate::session::registry::RegistryJsonValue) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_setting(sink, &key, &value) })
             @row(shared, reads, NoArgs, cad_layers, { }, $crate::session::CadLayers, { $crate::session::wire::layers(reads) })
+            @row(shared, reads, NoArgs, cad_fonts, { }, $crate::session::CadFonts, { $crate::session::wire::fonts(reads) })
             @row(shared, sink, LayerVisibleArgs, cad_set_layer_visible, { arg(req, name, String) arg(req, visible, bool) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_layer_visible(sink, &name, visible) })
             @row(shared, sink, NoArgs, cad_restore_layers, { }, $crate::session::wire::CadCommandAck, { $crate::session::wire::restore_layers(sink) })
             @row(shared, sink, ActiveLayerArgs, cad_set_active_layer, { arg(req, name, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_active_layer(sink, &name) })

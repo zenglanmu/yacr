@@ -110,8 +110,13 @@ class MainActivity : TauriActivity() {
     private const val IMAGE_ASSET_DIR = "images"
     /** The catalogue the native font loader requires next to the faces. */
     private const val FONT_CATALOG = "fonts.json"
-    /** Written after a complete copy; presence + catalog makes extraction a no-op. */
-    private const val ASSET_EXTRACT_MARKER = ".yacr-assets-complete"
+    /**
+     * Written after a complete copy; presence + catalog makes extraction a no-op
+     * for this asset version. Bump the version whenever the bundled package gains
+     * a file, so existing installs re-extract instead of serving the old set (v2
+     * adds the Noto Sans CJK SC fallback).
+     */
+    private const val ASSET_EXTRACT_MARKER = ".yacr-assets-v2-complete"
     /** Font-package files when Gradle exposes the repository's `fonts/` as an asset root. */
     private val FONT_SUFFIXES = listOf(".ttf", ".otf", ".ttc", ".woff", ".woff2", ".shx", ".cxf")
   }

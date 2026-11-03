@@ -111,6 +111,20 @@ fn collects_font_and_style_resource_keys() {
 }
 
 #[test]
+fn default_fallback_names_start_with_the_noto_cjk_face() {
+    assert_eq!(
+        DEFAULT_FALLBACK_NAMES.first().copied(),
+        Some("noto sans cjk sc"),
+        "Noto Sans CJK SC is the unified default fallback"
+    );
+    assert_eq!(
+        &DEFAULT_FALLBACK_NAMES[1..],
+        &["osifont", "arial", "simplex"],
+        "the historical outlines remain after Noto"
+    );
+}
+
+#[test]
 fn catalog_url_normalises_trailing_slash() {
     assert_eq!(catalog_url("https://x/fonts"), "https://x/fonts/fonts.json");
     assert_eq!(
@@ -397,6 +411,12 @@ const LATIN_ONLY_PACKAGE: &str = r#"[
     { "file": "osifont.shx", "name": ["osifont"], "type": "shx" }
 ]"#;
 
+const NOTO_FIRST_PACKAGE: &str = r#"[
+    { "file": "NotoSansCJKsc-Regular.otf", "name": ["Noto Sans CJK SC", "noto sans cjk sc"], "type": "mesh" },
+    { "file": "gbcbig.shx", "name": ["gbcbig"], "type": "shx", "encoding": "gbk" },
+    { "file": "osifont.shx", "name": ["osifont"], "type": "shx" }
+]"#;
+
 fn load(
     dir: &Path,
     requested: &[&str],
@@ -572,4 +592,165 @@ fn locale_gap_reports_a_reused_engine_without_a_locale_face() {
     // No text means no shaping requirement and therefore no gap.
     assert!(locale_gap(&engine, TextLocale::SimplifiedChinese, false).is_none());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// Rich per-face report and the unified Noto CJK last resort
+// ---------------------------------------------------------------------------
+
+const NOTO_CATALOG: &str = r#"[
+    {
+        "file": "NotoSansCJKsc-Regular.otf",
+        "name": ["Noto Sans CJK SC", "NotoSansCJKsc", "NotoSansCJKsc-Regular"],
+        "type": "mesh"
+    }
+]"#;
+
+/// A real sfnt used as stand-in bytes for the (not yet committed) Noto face:
+/// the catalog entry supplies the name, the engine only needs parseable bytes.
+const SYNTHETIC_MESH: &[u8] = include_bytes!("../../../../fonts/osifont.ttf");
+
+#[test]
+fn unresolved_cjk_request_registers_noto_as_the_locale_face_and_records_it_once() {
+    let loader = FakeLoader {
+        catalog: Arc::from(NOTO_CATALOG.as_bytes()),
+        files: Mutex::new(HashMap::from([(
+            "https://example/fonts/NotoSansCJKsc-Regular.otf".to_string(),
+            Ok(Arc::from(SYNTHETIC_MESH)),
+        )])),
+        seen: Mutex::new(Vec::new()),
+    };
+    let requested = vec!["missing-cjk.shx".to_string()];
+    let (engine, report) = block_on(load_font_engine_for_locale(
+        &loader,
+        &requested,
+        true,
+        "https://example/fonts",
+        TextLocale::SimplifiedChinese,
+    ))
+    .unwrap();
+
+    assert_eq!(report.unresolved, requested);
+    assert!(
+        report.locale_missing.is_none(),
+        "{:?}",
+        report.locale_missing
+    );
+    assert_eq!(
+        report.locale_faces,
+        vec!["NotoSansCJKsc-Regular.otf".to_string()]
+    );
+    assert!(engine.contains("NotoSansCJKsc-Regular.otf"));
+    assert_eq!(
+        engine.fallback_keys().first().map(String::as_str),
+        Some("NotoSansCJKsc-Regular.otf"),
+        "the CJK fallback must be promoted ahead of the Latin defaults"
+    );
+
+    // The missing drawing font is an explicit unresolved row, not a silent gap.
+    let unresolved = report
+        .faces
+        .iter()
+        .find(|face| face.status == FontFaceStatus::Unresolved)
+        .expect("the missing request has a row");
+    assert_eq!(unresolved.key, "missing-cjk.shx");
+    assert_eq!(unresolved.file, None);
+    assert_eq!(unresolved.kind, "unknown");
+    assert_eq!(unresolved.source, FontFaceSource::Package);
+
+    // Default + locale registration of the same file must not duplicate the row.
+    let noto: Vec<_> = report
+        .faces
+        .iter()
+        .filter(|face| face.file.as_deref() == Some("NotoSansCJKsc-Regular.otf"))
+        .collect();
+    assert_eq!(
+        noto.len(),
+        1,
+        "planned/default/locale must not duplicate a face: {:?}",
+        report.faces
+    );
+    assert_eq!(noto[0].status, FontFaceStatus::Loaded);
+    assert_eq!(noto[0].source, FontFaceSource::Package);
+    assert_eq!(noto[0].kind, "mesh");
+}
+
+#[test]
+fn explicit_and_system_default_faces_report_their_sources() {
+    let dir = temp_font_dir("explicit-system");
+    let path = dir.join("explicit.shx");
+    std::fs::write(&path, synthetic_ascii_shx()).unwrap();
+    let (engine, report) = super::local::load_engine_report(
+        None,
+        &[],
+        false,
+        &[("MyFont".to_string(), path.clone())],
+        &[synthetic_shx()],
+        TextLocale::Latin,
+    )
+    .unwrap();
+    let engine = engine.expect("an explicit font installs an engine");
+    assert!(engine.contains("MyFont"));
+
+    let explicit = report
+        .faces
+        .iter()
+        .find(|face| face.source == FontFaceSource::Explicit)
+        .expect("the explicit font has a row");
+    assert_eq!(explicit.key, "MyFont");
+    assert_eq!(explicit.file.as_deref(), Some("explicit.shx"));
+    assert_eq!(explicit.kind, "shx");
+    assert_eq!(explicit.status, FontFaceStatus::Loaded);
+    assert_eq!(explicit.detail, None);
+
+    let system = report
+        .faces
+        .iter()
+        .find(|face| face.source == FontFaceSource::System)
+        .expect("the system default has a row");
+    assert_eq!(system.key, DEFAULT_FALLBACK_KEY);
+    assert_eq!(system.kind, "system");
+    assert_eq!(system.status, FontFaceStatus::Loaded);
+    // The synthetic bytes are not a cached system candidate, so no file name is
+    // invented for them; real hosts pass `cached_system_default_candidates()`.
+    assert_eq!(system.file, None);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn default_noto_is_reused_for_the_locale_without_fetching_earlier_candidates() {
+    let dir = temp_font_dir("noto-locale-reuse");
+    write_package(
+        &dir,
+        NOTO_FIRST_PACKAGE,
+        &[
+            ("NotoSansCJKsc-Regular.otf", synthetic_ascii_shx()),
+            ("gbcbig.shx", synthetic_gbk_bigfont()),
+            ("osifont.shx", synthetic_ascii_shx()),
+        ],
+    );
+    let (engine, report) = load(&dir, &[], TextLocale::SimplifiedChinese);
+    let engine = engine.expect("the package installs an engine");
+    assert_eq!(
+        report.default_face.as_deref(),
+        Some("NotoSansCJKsc-Regular.otf")
+    );
+    assert_eq!(
+        report.locale_faces,
+        vec!["NotoSansCJKsc-Regular.otf".to_string()]
+    );
+    assert!(report.locale_missing.is_none());
+    assert!(
+        engine.contains("NotoSansCJKsc-Regular.otf"),
+        "the default Noto face is the locale face"
+    );
+    assert!(
+        !engine.contains("gbcbig.shx"),
+        "an earlier locale candidate must not be fetched once Noto is registered"
+    );
+    assert!(
+        !engine.contains("osifont.shx"),
+        "the default pass stops at Noto; osifont is not loaded"
+    );
 }

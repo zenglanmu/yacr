@@ -348,6 +348,71 @@ fn empty_import_report() -> cad_app::host::ImportReport {
 }
 
 #[test]
+fn a_font_install_publishes_its_faces_and_retires_a_stale_failure() {
+    let dir = locale_font_package("font-report", true);
+    let core = core_with_fonts_dir(&dir);
+    // Nothing loaded yet: the read is explicitly absent, not an empty registry.
+    assert!(core.last_font_report().is_none());
+
+    install_drawing(&core, Arc::new(text_drawing(Some("ANSI_1252"))));
+    core.install_fonts().expect("font installation");
+    let report = core
+        .last_font_report()
+        .expect("a real load publishes its report");
+    assert!(
+        !report.faces.is_empty(),
+        "the loaded faces must be kept: {report:?}"
+    );
+    assert!(report
+        .faces
+        .iter()
+        .any(|face| face.status == cad_platform::fonts::FontFaceStatus::Loaded));
+
+    // Fail-then-success reopen: a previous document's `fonts.failed` status must
+    // not survive a successful install, or the session's stale-resource guard
+    // would clear the freshly installed engine and `cad_status.error` would stay
+    // stale. A real failure keeps its status (the install below returns Ok, so
+    // only the stale one is retired).
+    core.set_catalog_status("fonts.failed", &[("error", "missing")])
+        .expect("catalog status");
+    core.install_fonts().expect("font reinstallation");
+    assert!(
+        core.last_status().is_none(),
+        "a successful install retires the stale failure: {:?}",
+        core.last_status()
+    );
+    assert!(core.last_font_report().is_some());
+
+    // Replacing the document clears the document-scoped report ...
+    core.request_new().expect("a new blank document");
+    assert!(
+        core.last_font_report().is_none(),
+        "a replaced document has no font report of its own"
+    );
+    // ... and installing for a text-less document publishes the explicit empty
+    // report rather than the previous document's rows.
+    core.install_fonts().expect("font installation");
+    let blank = core
+        .last_font_report()
+        .expect("the empty report is a report");
+    assert!(blank.faces.is_empty(), "{:?}", blank.faces);
+
+    // A reused engine republishes the faces it actually loaded (never invented).
+    install_drawing(&core, Arc::new(text_drawing(Some("ANSI_1252"))));
+    core.install_fonts().expect("font installation");
+    let reused = core.last_font_report().expect("the reused engine's report");
+    assert!(
+        !reused.faces.is_empty(),
+        "the reused engine must keep the real faces: {reused:?}"
+    );
+
+    // Closing drops both copies.
+    core.clear_last_font_report();
+    assert!(core.last_font_report().is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn opening_a_drawing_retargets_the_chain_to_its_own_text_locale() {
     let dir = locale_font_package("retarget", true);
     let core = core_with_fonts_dir(&dir);

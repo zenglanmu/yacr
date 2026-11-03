@@ -235,10 +235,10 @@ test('Ctrl+1 toggles the palette after the defaultPrevented guard', async () => 
 
 test('typed PROPERTIES is intercepted before the in-flight command guard', async () => {
   const app = await readModule('App.tsx');
-  const intercept = app.indexOf('isPropertiesCommand(text)');
-  assert.ok(intercept > 0);
-  assert.ok(intercept < app.indexOf('submitting.current = true'), 'a second Enter must still open the palette');
-  assert.ok(app.includes('setPropertiesOpen(true)'));
+  const selectors = await readModule('commands/local-selectors.ts');
+  assert.ok(selectors.includes('isPropertiesCommand(text)'));
+  assert.ok(app.indexOf('runLocalSelector(text') < app.indexOf('submitting.current = true'), 'a second Enter must still open the palette');
+  assert.ok(app.includes('openProperties: () => setPropertiesOpen(true)'));
 });
 
 test('the shell exposes the one property write and the palette action', async () => {

@@ -21,6 +21,13 @@ pub trait HostResources {
     fn install_images(&self, core: &HostCore, render: &RenderSessionHandle) -> CadResult<()>;
 }
 
+/// The host status key for a font/image installation failure.
+///
+/// One stable key for both resource kinds: the UI localises by key, so the
+/// budget/failure text never leaks platform prose. A successful font install
+/// retires a stale occurrence of this key (see [`HostCore::install_fonts`]).
+const RESOURCE_FAILED_STATUS: &str = "fonts.failed";
+
 /// A strategy for a host that resolves resources through its own path (or does
 /// not model them yet). Installing is refused explicitly, never a silent no-op.
 pub struct UnsupportedResources;
@@ -41,8 +48,68 @@ impl HostResources for UnsupportedResources {
 
 impl HostCore {
     /// (Re)load shaping fonts through the host strategy.
+    ///
+    /// A **successful** install supersedes an earlier `fonts.failed` status: that
+    /// status is what the session's stale-resource guard watches, so leaving it
+    /// behind after a later document's fonts loaded would clear the freshly
+    /// installed engine and keep `cad_status.error` stale. A failed install keeps
+    /// its explicit status (the strategy or the open funnel records it).
     pub fn install_fonts(&self) -> CadResult<()> {
-        self.resources.install_fonts(self, &self.render)
+        let outcome = self.resources.install_fonts(self, &self.render);
+        if outcome.is_ok() {
+            self.clear_stale_font_failure();
+        }
+        outcome
+    }
+
+    /// Replace a stale `fonts.failed` catalog status after a successful load.
+    ///
+    /// Only that one key is retired: a command/open failure recorded by another
+    /// path is a different fact and stays visible.
+    fn clear_stale_font_failure(&self) {
+        let stale = matches!(
+            self.last_status(),
+            Some(StatusMessage::Catalog { ref key, .. }) if key == RESOURCE_FAILED_STATUS
+        );
+        if stale {
+            self.clear_last_status();
+        }
+    }
+
+    /// The last real shaping-font load outcome for the **open document**, if any.
+    ///
+    /// Public so a host outside this crate (the `dom-canvas` browser host
+    /// resolves its own fonts) can publish the report it actually loaded. A
+    /// document replacement clears it; the engine-scoped rows survive internally
+    /// so a reused engine can republish them ([`Self::reused_font_report`]).
+    pub fn last_font_report(&self) -> Option<cad_platform::fonts::FontLoadReport> {
+        self.last_font_report.borrow().clone()
+    }
+
+    /// Publish the real shaping-font load outcome (see [`Self::last_font_report`]).
+    ///
+    /// This is the **document-scoped** projection; the engine-scoped copy that a
+    /// reused engine republishes is written only by a real load.
+    pub fn set_last_font_report(&self, report: cad_platform::fonts::FontLoadReport) {
+        *self.last_font_report.borrow_mut() = Some(report);
+    }
+
+    /// Remember the real load that produced the installed engine.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn set_engine_font_report(&self, report: cad_platform::fonts::FontLoadReport) {
+        *self.engine_font_report.borrow_mut() = Some(report);
+    }
+
+    /// Drop the published font report (document replaced/closed).
+    pub fn clear_last_font_report(&self) {
+        *self.last_font_report.borrow_mut() = None;
+        *self.engine_font_report.borrow_mut() = None;
+    }
+
+    /// Clear the document-scoped report only, keeping the installed engine's own
+    /// real load for reuse after the replacement.
+    pub(crate) fn clear_document_font_report(&self) {
+        *self.last_font_report.borrow_mut() = None;
     }
 
     /// (Re)load the drawing's raster images through the host strategy.
@@ -109,6 +176,11 @@ impl HostResources for DesktopResources {
                 render.set_fonts(None);
             }
         }
+        // Keep the real per-face outcome, including a drawing with no text and no
+        // named font (that report is the honest "nothing was needed/loaded", not
+        // a stale previous document's rows). `load_font_engine` already published
+        // it on every path; this keeps the strategy self-contained.
+        core.set_last_font_report(report.clone());
         // A locale with no available face is a named gap (stable code), never a
         // silent Latin substitution. Recorded once per open, deduplicated.
         core.record_font_diagnostics(&report);
@@ -178,13 +250,27 @@ impl HostCore {
         Option<Arc<cad_representation::FontEngine>>,
         cad_platform::fonts::FontLoadReport,
     )> {
-        use cad_platform::fonts::{FontLoadReport, TextLocale};
+        use cad_platform::fonts::TextLocale;
         let locale = self
             .controller
             .borrow()
             .drawing()
             .map(|drawing| TextLocale::from_code_page(drawing.code_page()))
             .unwrap_or(TextLocale::Latin);
+        // A drawing that needs no shaping at all has no face rows to report. The
+        // installed engine (if any) is left untouched — it is host-wide — but the
+        // document's report is the explicit empty one, mirroring the empty-request
+        // image install and the platform loader's own early return. An explicit
+        // `--font` registration still loads (it is host configuration, not a
+        // drawing reference), so it falls through.
+        if requested.is_empty() && self.options.fonts.is_empty() && !text_needed {
+            let report = cad_platform::fonts::FontLoadReport {
+                locale,
+                ..cad_platform::fonts::FontLoadReport::default()
+            };
+            self.set_last_font_report(report.clone());
+            return Ok((self.render.fonts(), report));
+        }
         // Same locale and every named face already parsed: reuse the installed
         // engine instead of re-reading the package for every document.
         if let Some(existing) = self.render.fonts() {
@@ -197,10 +283,8 @@ impl HostCore {
                 && covers
                 && cad_platform::fonts::locale_gap(&existing, locale, text_needed).is_none()
             {
-                let report = FontLoadReport {
-                    locale,
-                    ..FontLoadReport::default()
-                };
+                let report = self.reused_font_report(locale, &existing, text_needed);
+                self.set_last_font_report(report.clone());
                 return Ok((Some(existing), report));
             }
             // The locale changed, but the new locale's preferred face is already
@@ -221,15 +305,8 @@ impl HostCore {
                 let mut retargeted =
                     existing.with_fallback(locale.ordered_fallback(existing.fallback_keys()));
                 retargeted.set_locale_tag(locale.as_str());
-                let report = FontLoadReport {
-                    locale,
-                    locale_missing: cad_platform::fonts::locale_gap(
-                        &retargeted,
-                        locale,
-                        text_needed,
-                    ),
-                    ..FontLoadReport::default()
-                };
+                let report = self.reused_font_report(locale, &retargeted, text_needed);
+                self.set_last_font_report(report.clone());
                 return Ok((Some(Arc::new(retargeted)), report));
             }
         }
@@ -237,14 +314,45 @@ impl HostCore {
         let font_dir =
             cad_platform::fonts::local::resolve_font_dir(self.options.fonts_dir.as_deref(), &exe)?;
         let system_default = cad_platform::fonts::local::cached_system_default_candidates();
-        cad_platform::fonts::local::load_engine_report(
+        let loaded = cad_platform::fonts::local::load_engine_report(
             font_dir.as_deref(),
             requested,
             text_needed,
             &self.options.fonts,
             system_default,
             locale,
-        )
+        );
+        if let Ok((_, report)) = &loaded {
+            self.set_engine_font_report(report.clone());
+            self.set_last_font_report(report.clone());
+        }
+        loaded
+    }
+
+    /// The report a **reused/retargeted** engine publishes.
+    ///
+    /// The installed chain was not reloaded, so the real per-face rows are the
+    /// ones the host stored when it built it. Only the document-specific facts are
+    /// refreshed: the locale the chain now serves and the locale gap for *this*
+    /// document's text (a reused CJK-less chain still reports the missing face).
+    fn reused_font_report(
+        &self,
+        locale: cad_platform::fonts::TextLocale,
+        engine: &cad_representation::FontEngine,
+        text_needed: bool,
+    ) -> cad_platform::fonts::FontLoadReport {
+        // The engine-scoped copy is the real load that built the installed
+        // chain; the document-scoped copy is the fallback for a host that only
+        // published a report (for example the browser carrier).
+        let mut report = self
+            .engine_font_report
+            .borrow()
+            .clone()
+            .or_else(|| self.last_font_report())
+            .unwrap_or_default();
+        report.locale = locale;
+        report.locale_missing = cad_platform::fonts::locale_gap(engine, locale, text_needed);
+        report
     }
 
     /// Surface font-load diagnostics on the document's diagnostic list.

@@ -19,7 +19,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readCatalog, readComponentsSource, readModule } from './helpers.ts';
 import {
-  offeredPanels, PALETTE_COMMANDS, panelLauncherCommand, RIBBON_TABS,
+  offeredItems, offeredPanels, PALETTE_COMMANDS, panelLauncherCommand, RIBBON_TABS,
 } from '../src/ribbon/ribbon-model.ts';
 import { admitCommandText } from '../src/commands/commands.ts';
 import { LOCAL_CHROME_COMMANDS } from '../src/commands/gating.ts';
@@ -112,9 +112,14 @@ test('every launcher target is a chrome-local command, so admission always answe
   // commands ride the same filter (`2026-10-26`: the isolate pair, then the off/on
   // pair): the layers palette is the only surface that shows what they did, so
   // those buttons are not offered where it never renders.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON']);
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'FONTS']);
   assert.equal(offeredPanels(RIBBON_TABS.find(tab => tab.id === 'home').panels, false)
     .some(panel => panel.id === 'layers' || panel.id === 'properties'), false);
+  // The Font Manager is the same kind of docked surface: its Annotate entry is
+  // dropped with the palettes instead of opening a panel the carrier never mounts.
+  const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate').panels.find(panel => panel.id === 'annotation');
+  assert.equal(annotate.items.some(item => item.id === 'FONTS'), true);
+  assert.equal(offeredItems(annotate.items, false).some(item => item.id === 'FONTS'), false);
 });
 
 test('the View tab navigation cluster holds only router command tokens', () => {

@@ -121,6 +121,11 @@ fallback**. See ADR 0010 and ADR 0011.
     print-style tables (CTB).
   - **Large-drawing protection**: hard scene batch/vertex budgets; exceeding them **fails explicitly**
     instead of OOM.
+  - **Fonts**: `Noto Sans CJK SC` (committed, OFL-1.1) is the default face, with `osifont` second.
+    Native hosts package the committed `fonts/` (APK assets, release payloads); the Web page bundles
+    no fonts and lazy-loads only the faces an open drawing needs from the site's same-origin `fonts/`
+    (Pages CDN). Every host reports the real shaping-font load: the read-only Font Manager (`FONTS`,
+    backed by `cad_fonts`) lists loaded/failed/unresolved faces; there is no font-write command.
 
 ## Build from source
 
@@ -185,9 +190,9 @@ flatpak install --user target/release/dist/yacr-<version>-linux-<arch>.flatpak
 flatpak run dev.yacr.app --open /absolute/drawing.dwg
 ```
 
-This builds a single-file Flatpak bundle (`bin/yacr` + committed `fonts/`, runtime
-`org.gnome.Platform//51`). It is **not** a distribution channel: nothing is published to Flathub and
-the CI `linux-release` job stays hard-disabled. See `docs/flatpak.md`.
+This builds a single-file Flatpak bundle (`bin/yacr` + committed `fonts/`: `osifont` and
+`Noto Sans CJK SC`, runtime `org.gnome.Platform//51`). It is **not** a distribution channel: nothing
+is published to Flathub and the CI `linux-release` job stays hard-disabled. See `docs/flatpak.md`.
 
 ### Full gates (CI-equivalent; run before release)
 
@@ -228,7 +233,7 @@ evidence in `docs/validation*.md` does **not** transfer to the React/Tauri host)
 | **Windows desktop** | `apps/app-windows` (`yacr-windows`) | **NOT IMPLEMENTED** failure stub (no Tauri dependency; prints a diagnostic and exits non-zero). CI only compiles it (`windows-check`); no runnable GUI. |
 | **macOS desktop** | `apps/app-macos` (`yacr-macos`) | **Real Tauri 2 host, compile-only**: transparent WKWebView above a native CAD child `NSView` presented by wgpu/Metal. CI compiles it (`macos-check`); window/Metal/z-order/DPI/dialog/pixel behaviour is **NOT VERIFIED** and there is no packaging. |
 | **Android** | `apps/app-android` | **Native `native-below` carrier**: Tauri WebView runs the shared React chrome, a native Rust `CadSession` owns `cad-db`, and wgpu (Vulkan) presents to a `SurfaceView` below the WebView. **Compile-level evidence only** — no device/emulator run, no Vulkan adapter, no pixels, no rotation/lifecycle, no JNI runtime link (all NOT VERIFIED). v1 has no file open/save, no popup host and no durable config; it starts from the built-in demo drawing. See `docs/android-host.md`. |
-| **Web** | `apps/app-web` | **NOT IMPLEMENTED** placeholder (retired UI; the wasm entry returns an error). |
+| **Web** | `apps/app-web` | **Browser carrier (`dom-canvas`)**: wasm `CadSession` + DOM canvas; OPEN is a page upload, SAVE/PLOT are browser downloads (DXF/SVG/PDF, no DWG write-back). No fonts in the bundle: after a document opens, the page fetches only the needed faces from the site's same-origin `fonts/` CDN package (assembled by `scripts/deploy-cloudflare-pages.sh`); `cad_fonts`/`FONTS` reports the real load. Only bounded local evidence (headless Chromium, **software rendering**) — no real-GPU, pixel or device acceptance. |
 | **Headless CLI** | `cad-cli-tools` | Kept: opens and plots headless through the shared application path. |
 
 Recent work (2026-10-17/18) hardened the renderer and picking path under real use: a scene spatial
@@ -274,7 +279,8 @@ compatibility matrix: `docs/compatibility.md`; validation evidence: `docs/valida
 `docs/react-linux-app.md`; Linux Flatpak (local bundle, not published): `docs/flatpak.md`;
 decisions: `docs/adr/` (ADR 0010 = React host replaces Slint, ADR 0011 = native Wayland subsurface,
 ADR 0012 = scene spatial index and interaction); headless rendering: `docs/headless-render.md`; CI
-layers: `docs/ci.md`; CLI: `docs/cli.md`; fonts: `docs/fonts.md`; app icon: `docs/app-icon.md`.
+layers: `docs/ci.md`; CLI: `docs/cli.md`; fonts: `docs/fonts.md` and
+`docs/font-host-loading.md`; app icon: `docs/app-icon.md`.
 Retired (historical, kept with notices): `docs/linux-app.md`, `docs/windows-app.md`,
 `docs/verify-ui.md`. Current macOS host: `docs/macos-app.md`.
 
@@ -290,5 +296,5 @@ observation: `docs/view-3d.md`; draw order: `docs/render-order.md`; render backe
 ## License and third parties
 
 Released under **AGPL-3.0** (`LICENSE`). Sources and licenses of dependencies and bundled resources
-(acadrust, wgpu/Tauri/GTK, QCAD samples, osifont, mlightcad fonts, etc.) are documented in
-`THIRD_PARTY_NOTICES.md` and `fonts/SOURCE.md`.
+(acadrust, wgpu/Tauri/GTK, QCAD samples, osifont, Noto Sans CJK SC (OFL-1.1), mlightcad fonts,
+etc.) are documented in `THIRD_PARTY_NOTICES.md` and `fonts/SOURCE.md`.

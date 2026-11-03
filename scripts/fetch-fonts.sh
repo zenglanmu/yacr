@@ -161,9 +161,9 @@ if failures:
     sys.exit(1)
 PY
 
-# Merge the committed font package (`fonts/`, currently QCAD osifont.ttf) into
-# the target directory so it carries the default outline face even when the
-# catalogue does not.
+# Merge the committed font package (`fonts/`, QCAD osifont + Noto Sans CJK SC)
+# into the target directory so it carries the default faces and their licence
+# texts even when the catalogue does not.
 if [ -d "$ROOT/fonts" ]; then
   "$PYTHON" - "$DEST" "$ROOT/fonts" <<'PY'
 import json, pathlib, sys
@@ -185,5 +185,13 @@ if extra_catalog.exists():
         if src.exists():
             (dest / str(font["file"])).write_bytes(src.read_bytes())
             print(f"  merged {'':<22} {font['file']} ({src.stat().st_size} bytes)")
+# The OFL/GPL texts are part of the redistribution terms, not optional payload:
+# every assembled package (Windows/macOS release, Web CDN, local staging) must
+# carry them next to the faces even though they are not catalogue entries.
+for name in ("NotoSansCJK-OFL.txt", "COPYING.GPL-3", "SOURCE.md", "README.md"):
+    src = extra / name
+    if src.exists():
+        (dest / name).write_bytes(src.read_bytes())
+        print(f"  merged {'':<22} {name} ({src.stat().st_size} bytes)")
 PY
 fi

@@ -68,6 +68,11 @@ export const PALETTE_COMMANDS: readonly string[] = Object.freeze([
   'LAYERP',
   'LAYOFF',
   'LAYON',
+  // `FONTS` opens the read-only Font Manager, which is a docked palette on the
+  // desktop (and a floating sheet on the compact layout). A carrier that never
+  // renders the dock has no surface for that report, so the button is dropped
+  // with it instead of opening a panel that is not mounted.
+  'FONTS',
 ]);
 
 /** The facts every ribbon item carries. */
@@ -753,6 +758,12 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'DIMCONTINUE', labelKey: 'draw.kind.dimcontinue', icon: 'dimcontinue', command: 'DIMCONTINUE', large: true },
           { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', action: 'properties', large: true },
           { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER', large: true },
+          // The read-only font report sits beside the other annotation palettes.
+          // `FONTS` is chrome-local (it opens the panel; the panel reads
+          // `cad_fonts`), so it rides the command funnel exactly like LAYER and is
+          // dropped with the docked palettes on a carrier that never renders them
+          // (`PALETTE_COMMANDS`).
+          { id: 'FONTS', labelKey: 'resources.fonts', icon: 'font', command: 'FONTS', large: true },
           { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', command: 'SELECTALL' },
         ],
       },

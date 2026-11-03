@@ -15,9 +15,14 @@
 #                           exactly the `./pkg/` the shell's docs tell you to
 #                           build when serving `apps/app-web/web/` directly.
 #   apps/app-web/dist/      the deployable bundle: `index.html`, `main.js`,
-#                           `style.css`, `pkg/app_web.js`, `pkg/app_web_bg.wasm`
-#                           (generated, git-ignored). Serve it over HTTP — `file://`
-#                           cannot instantiate wasm:
+#                           `worker.js`, `style.css`, `pkg/app_web.js`,
+#                           `pkg/app_web_bg.wasm` (generated, git-ignored).
+#                           **No fonts**: they are not part of this artifact and
+#                           are not preloaded. The page fetches the faces it needs
+#                           lazily, after a document opens, from the site's
+#                           same-origin `fonts/` (the project Pages CDN, assembled
+#                           by `scripts/deploy-cloudflare-pages.sh`). Serve it over
+#                           HTTP — `file://` cannot instantiate wasm:
 #                             python3 scripts/serve-web.py --directory apps/app-web/dist
 #
 # The wasm build, the wasm-bindgen pin check and the artifact reporting are
@@ -92,6 +97,11 @@ done
 cp -- "$PKG_DIR/$PKG_JS" "$OUT_DIR/pkg/$PKG_JS"
 cp -- "$PKG_DIR/$PKG_WASM" "$OUT_DIR/pkg/$PKG_WASM"
 
+# No fonts are staged: the harness artifact is exactly the shell + the wasm
+# module. The page fetches only the faces the open drawing needs, lazily, from the
+# site's same-origin `fonts/` (the Pages CDN package assembled by
+# `scripts/deploy-cloudflare-pages.sh`).
+
 # Every artifact must exist and be non-empty; a partial bundle is never reported
 # as a success.
 expected=(
@@ -122,14 +132,27 @@ grep -qF "./pkg/$PKG_JS" "$OUT_DIR/main.js" \
 [ -s "$OUT_DIR/worker.js" ] || die "$OUT_DIR/worker.js missing; isolation would silently degrade"
 grep -qF "$PKG_WASM" "$OUT_DIR/pkg/$PKG_JS" \
   || die "$OUT_DIR/pkg/$PKG_JS does not reference $PKG_WASM; the emitted module is incomplete"
+# The main-thread carrier must install the package lazily, after an open: a shell
+# that dropped the loader would leave every text drawing `unsupported-resources: fonts`.
+grep -qF "ensureFontPackage" "$OUT_DIR/main.js" \
+  || die "$OUT_DIR/main.js has no lazy ensureFontPackage()"
+grep -qF "set_font_package" "$OUT_DIR/main.js" \
+  || die "$OUT_DIR/main.js does not call set_font_package; text would be unshaped"
+grep -qF "apply_font_package" "$OUT_DIR/main.js" \
+  || die "$OUT_DIR/main.js does not call apply_font_package"
+if grep -qF "await loadFontPackage()" "$OUT_DIR/main.js"; then
+  die "$OUT_DIR/main.js still preloads the font package before start"
+fi
 
 # --- report ----------------------------------------------------------------
 
 printf 'artifacts in %s\n' "$OUT_DIR"
 yacr_report_artifact "$OUT_DIR/index.html" "index.html"
 yacr_report_artifact "$OUT_DIR/main.js" "main.js"
+yacr_report_artifact "$OUT_DIR/worker.js" "worker.js"
 yacr_report_artifact "$OUT_DIR/style.css" "style.css"
 yacr_report_artifact "$OUT_DIR/pkg/$PKG_JS" "pkg/$PKG_JS"
 yacr_report_artifact "$OUT_DIR/pkg/$PKG_WASM" "pkg/$PKG_WASM"
+printf '  %-28s %s\n' "fonts/*" "not bundled (lazy CDN fonts/)"
 printf 'serve with: python3 scripts/serve-web.py --directory %s\n' "$OUT_DIR"
 printf 'note: a built bundle is not runtime, GPU or pixel evidence; CI drives it headlessly under software rendering and publishes only on tags/dispatch.\n'

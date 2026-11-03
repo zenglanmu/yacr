@@ -205,9 +205,10 @@ fn the_control_reads_are_explicit_before_and_after_a_mirror_exists() {
     let empty = QueueReads::default();
     assert_eq!(wire::settings(&empty).unwrap_err(), wire::CAD_WAITING);
     assert_eq!(wire::layers(&empty).unwrap_err(), wire::CAD_WAITING);
+    assert_eq!(wire::fonts(&empty).unwrap_err(), wire::CAD_WAITING);
 
     let refusal: Result<CadLayers, String> = Err("layer.projection_failed: boom".to_string());
-    let reads = QueueReads::new(None, Some(&refusal));
+    let reads = QueueReads::new(None, Some(&refusal), None);
     assert_eq!(
         wire::layers(&reads).expect_err("relayed, not replaced"),
         "layer.projection_failed: boom"

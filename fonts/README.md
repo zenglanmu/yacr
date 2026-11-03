@@ -15,9 +15,15 @@ the single source the hosts copy next to their output:
   font exception). This is the default outline face used when a drawing's own
   font cannot be resolved. Provenance, source URLs and hashes are in
   `SOURCE.md`.
+- `NotoSansCJKsc-Regular.otf` — Noto Sans CJK SC Regular, the single bundled
+  fallback face for missing CJK text on every host. SIL Open Font License 1.1,
+  shipped unmodified from the pinned `notofonts/noto-cjk` commit. Size and
+  SHA-256 are in `SOURCE.md`; the licence text is `NotoSansCJK-OFL.txt`.
 - `fonts.json` — the catalogue in the `mlightcad/cad-data` JSON format
   (`{ file, name[], type }`) so `cad-resources::FontCatalog` can index it.
 - `COPYING.GPL-3` — the licence text shipped with `osifont.ttf`.
+- `NotoSansCJK-OFL.txt` — the SIL Open Font License 1.1 shipped with
+  `NotoSansCJKsc-Regular.otf`.
 
 ## Scope and limits
 

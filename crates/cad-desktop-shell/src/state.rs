@@ -34,8 +34,8 @@ use cad_ui_core::popup::PopupAck;
 use cad_ui_core::protocol::InputKind;
 use cad_ui_core::session::events::EventBus;
 use cad_ui_core::session::{
-    CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CadSettings, CadStatus, QueueFamily,
-    QueueReads, QueueSink,
+    CadFonts, CadLayerWrite, CadLayers, CadSettingKey, CadSettingValue, CadSettings, CadStatus,
+    QueueFamily, QueueReads, QueueSink,
 };
 use cad_ui_core::shell::{modal_gate_open, ShellState};
 
@@ -157,6 +157,12 @@ pub struct Shared {
     /// `Some(Err(..))` carries the session's own projection refusal rather than
     /// serving stale rows.
     pub cad_layers: Option<Result<CadLayers, String>>,
+    /// Latest read-only font-registry report mirrored from the owner-thread
+    /// session, so the worker-thread `cad_fonts` read never touches the `!Send`
+    /// session. `None` before the first tick (the read refuses with
+    /// `cad_waiting`); `Some(Err(..))` carries the session's own projection
+    /// refusal rather than an empty registry.
+    pub cad_fonts: Option<Result<CadFonts, String>>,
     /// The app-side render telemetry seam (see [`ShellTelemetry`]). `None`
     /// before the host registers it and in unit tests; `cad_status` then reports
     /// the same `"-"` token a host with no pulled state would.
@@ -189,6 +195,7 @@ impl Shared {
             cad_settings: None,
             cad_layer_writes: VecDeque::new(),
             cad_layers: None,
+            cad_fonts: None,
             telemetry: None,
             popup_host: None,
         }
@@ -222,11 +229,15 @@ impl Shared {
 
     /// The [`cad_ui_core::session::ControlReads`] the desktop serves.
     ///
-    /// Both answers are the **owner-tick mirror**: the session is `!Send`, so the
+    /// Every answer is the **owner-tick mirror**: the session is `!Send`, so the
     /// IPC thread never reads it. `None` before the first tick (or in probe mode)
     /// is the explicit `cad_waiting` answer, never a fabricated default.
     pub fn queue_reads(&self) -> QueueReads<'_> {
-        QueueReads::new(self.cad_settings.as_ref(), self.cad_layers.as_ref())
+        QueueReads::new(
+            self.cad_settings.as_ref(),
+            self.cad_layers.as_ref(),
+            self.cad_fonts.as_ref(),
+        )
     }
 }
 

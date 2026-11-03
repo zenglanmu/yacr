@@ -20,8 +20,8 @@
 //! touches it: an admitted request is pushed onto a bounded queue and the owner
 //! tick applies it. `{accepted:true}` therefore means **queued**, never
 //! completed; the real outcome (including a session refusal) surfaces through
-//! `cad_status.error`. The two reads (`cad_settings`, `cad_layers`) answer from
-//! the tick's mirror for the same reason.
+//! `cad_status.error`. The reads (`cad_settings`, `cad_layers`, `cad_fonts`)
+//! answer from the tick's mirror for the same reason.
 //!
 //! ## Registration
 //!
@@ -34,7 +34,7 @@
 use std::sync::{Arc, Mutex};
 
 use cad_ui_core::protocol::{InputKind, ProbeInput, ProbeInputAck, ProbeStatus};
-use cad_ui_core::session::{wire, CadLayers, CadSettings, HostProfile, WireStatus};
+use cad_ui_core::session::{wire, CadFonts, CadLayers, CadSettings, HostProfile, WireStatus};
 use cad_ui_core::shell::{modal_gate_open, queue_cad_input, POPUP_MODAL_OPEN};
 
 use crate::popup::DesktopPopupTarget;
@@ -218,6 +218,15 @@ pub fn cad_set_setting_impl(
 /// the IPC path runs (no duplicated projection in tests).
 pub fn cad_layers_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadLayers, String> {
     wire::layers(&lock(shared).queue_reads())
+}
+
+/// Command body of `cad_fonts`, without the Tauri state wrapper.
+///
+/// Split out so the wire test can call the **same** implementation the IPC path
+/// runs; the answer is the owner-tick mirror, never a read of the `!Send`
+/// session.
+pub fn cad_fonts_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadFonts, String> {
+    wire::fonts(&lock(shared).queue_reads())
 }
 
 /// Command body of `cad_create_layer`, without the Tauri state wrapper.

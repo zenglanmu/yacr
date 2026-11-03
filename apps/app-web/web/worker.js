@@ -27,7 +27,8 @@
  *
  * # Message contract (page -> worker)
  *
- *   {id, type: 'capability'}                              -> {capability: JSON string}
+ *   {id, type: 'capability'}                              -> {capability: JSON string,
+ *                                                              fontPackage: refusal}
  *   {id, type: 'init', canvas, cssW, cssH, dpr}            -> {status: JSON string}
  *   {id, type: 'open', label, bytes, cssW, cssH, dpr}      -> {status: JSON string}
  *   {id, type: 'resize', cssW, cssH, dpr}                  -> {status: JSON string}
@@ -36,11 +37,24 @@
  *   {id, type: 'status'}                                   -> {status: JSON string}
  *   {id, type: 'document'}                                 -> {document: JSON string}
  *   {id, type: 'lastImportMs'}                             -> {importMs: number}
+ *   {id, type: 'fonts'}                                    -> named refusal
  *
  * Every reply echoes `id` and is either `{id, ok: true, ...}` or
  * `{id, ok: false, error}`. `canvas` must be transferred in the `init` message's
  * transfer list; `bytes` may be transferred in `open`'s.
  */
+
+/**
+ * The worker carrier is the **viewer** session: it has no `CadSession`, so it has
+ * no `HostResources` and no shaping-font install. Loading a font package here
+ * would be a fake (the bytes would never reach a shaping engine), so the refusal
+ * is explicit and named. The font-bearing production session runs on the main
+ * thread.
+ */
+const FONT_PACKAGE_REFUSAL =
+  'unsupported-runtime: fonts (worker carrier is the viewer session; it has no CadSession and does not load the font package)';
+
+globalThis.__YACR_FONT_PACKAGE_ERROR__ = FONT_PACKAGE_REFUSAL;
 
 import init, {
   open_bytes_offscreen,
@@ -99,8 +113,14 @@ async function handle(message) {
   switch (message.type) {
     case 'capability':
       // Answered in this Worker: the WebGL2 question only means something here.
-      reply(message.id, { capability: worker_capability() });
+      // The font package is explicitly not this carrier's job (see the constant).
+      reply(message.id, {
+        capability: worker_capability(),
+        fontPackage: FONT_PACKAGE_REFUSAL,
+      });
       return;
+    case 'fonts':
+      throw new Error(FONT_PACKAGE_REFUSAL);
     case 'init': {
       const { canvas, cssW, cssH, dpr } = message;
       if (typeof OffscreenCanvas === 'undefined' || !(canvas instanceof OffscreenCanvas)) {

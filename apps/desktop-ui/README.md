@@ -28,6 +28,7 @@ npm run dev     # http://127.0.0.1:1420
 | `src/layers/` | 图层投影、属性与标签 |
 | `src/properties/` | 实体属性投影、显示模型与标签 |
 | `src/references/` | 外部引用投影（宿主状态码、稳定原因码）与 `RESOURCES` 本地选择器 |
+| `src/fonts/` | 字体报告投影：严格 `cad_fonts` 解析（不把坏载荷折成空成功）、loaded/failed/unresolved 只读分组与 `FONTS` 本地选择器 |
 | `src/popup/` | 弹窗状态、布局度量与文字编辑接线 |
 | `src/options/` | 选项模型 |
 | `src/components/` | 区域组件与共享控件（TSX） |
@@ -43,8 +44,12 @@ npm run dev     # http://127.0.0.1:1420
 
 ## 区域栈（自上而下）
 
-`标题/QAT · 功能区 · 图纸标签 · 工作区（停靠面板 | CAD 分区 | 导航栏）
+`标题/QAT · 功能区 · 图纸标签 · 工作区（停靠面板：图层/属性/外部引用/字体 | CAD 分区 | 导航栏）
 · 模型/布局标签 · 命令行 · 状态栏`
+
+`FONTS` 是本地选择器，打开与图层/外部引用同列的只读字体管理器（`FontsPanel.tsx`）：它只展示
+`cad_fonts` 报告的面，不注册、不删除、不重载；`available:false` 显示宿主命名原因，空列表是
+宿主真实回答，两者不混同。
 
 ## 紧凑布局（≤1024 CSS px，Web / Android / 桌面宿主共用同一 bundle）
 
@@ -92,7 +97,7 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 | 功能区 | `Ribbon.tsx`，模型在 `src/ribbon/ribbon-model.ts` |
 | 图纸标签 | `DocTabs.tsx` |
 | 工作区 | `Workspace.tsx` |
-| 开始页 / 诊断 / 外部引用 | `StartPanel.tsx`、`DiagnosticsPalette.tsx`、`ReferencesPanel.tsx` |
+| 开始页 / 诊断 / 外部引用 / 字体管理器 | `StartPanel.tsx`、`DiagnosticsPalette.tsx`、`ReferencesPanel.tsx`、`FontsPanel.tsx` |
 | 导航栏 | `NavRail.tsx` |
 | 模型 / 布局标签 | `LayoutTabs.tsx` |
 | 命令行 | `CommandLine.tsx`（桌面停靠区），控制器在 `src/commands/use-command-line.ts`；历史日志见 `src/commands/command-history.ts` |

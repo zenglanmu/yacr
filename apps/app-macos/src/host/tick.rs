@@ -800,6 +800,8 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         );
         // The layer panel's own mirror (see `super::layers`).
         super::layers::mirror(shared);
+        // The Font Manager's own mirror (see `super::fonts`).
+        super::fonts::mirror(shared);
     } else {
         // ---- probe frame (marker path; `--probe` mode only) ----
         let outcome = SURFACE.with(|cell| {

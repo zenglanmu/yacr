@@ -131,7 +131,8 @@ pub fn command_aliases(mode: SurfaceMode) -> Vec<CadCommandAlias> {
 /// three session-only ones plus the create/rename/delete table writes and the
 /// `cad_set_layer_property` attribute write) are performed by the native
 /// `CadSession` on the owner tick, and this carrier has none (the wasm session in
-/// the WebView is the only CAD authority there).
+/// the WebView is the only CAD authority there). `cad_fonts` is here for the same
+/// reason: the face registry lives on the native session.
 pub const NATIVE_SESSION_COMMANDS: &[&str] = &[
     "cad_command",
     "cad_set_tool_parameter",
@@ -141,6 +142,7 @@ pub const NATIVE_SESSION_COMMANDS: &[&str] = &[
     "cad_standard_view",
     "cad_set_setting",
     "cad_layers",
+    "cad_fonts",
     "cad_set_layer_visible",
     "cad_restore_layers",
     "cad_set_active_layer",

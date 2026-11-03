@@ -13,7 +13,7 @@
 //!    and drain the shell queues into it;
 //! 5. one `CadSession::tick`;
 //! 6. draw/present one CAD frame (or explicitly wait);
-//! 7. mirror the status/settings/layers into [`Shared`] and push one event batch
+//! 7. mirror the status/settings/layers/fonts into [`Shared`] and push one event batch
 //!    with the shared `native-below` profile.
 //!
 //! # Honest limits of v1
@@ -577,6 +577,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
     });
     let settings = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.settings()));
     let layers = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.layers()));
+    let fonts = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.fonts()));
     {
         let mut state = lock(shared);
         if let Some(snapshot) = &snapshot {
@@ -589,6 +590,11 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             // A projection error is mirrored as the error itself, never replaced by
             // stale rows.
             state.cad_layers = Some(layers);
+        }
+        if let Some(fonts) = fonts {
+            // The read-only Font Manager's mirror: the session's real report,
+            // never an invented row.
+            state.cad_fonts = Some(fonts);
         }
     }
     if presented {

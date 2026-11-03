@@ -830,10 +830,10 @@ test('the model is pure and the dialog owns no IPC text of its own', async () =>
 
 test('all three entry points open the same host-owned popup', async () => {
   const app = await readModule('App.tsx');
+  const selectors = await readModule('commands/local-selectors.ts');
   // The typed word is intercepted before the command is admitted.
-  const intercept = app.indexOf('isOptionsCommand(text)');
-  assert.ok(intercept > 0, 'the command line must intercept OPTIONS');
-  assert.ok(intercept < app.indexOf('submitting.current = true'), 'the intercept runs first');
+  assert.ok(selectors.includes('isOptionsCommand(text)'), 'the command line must intercept OPTIONS');
+  assert.ok(app.indexOf('runLocalSelector(text') < app.indexOf('submitting.current = true'), 'the intercept runs first');
   assert.ok(app.includes("requestOpenPopup('options')"));
   assert.ok(app.includes("openOptionsPopup: () => requestOpenPopup('options')"));
   assert.ok(app.includes("action === 'options'"));

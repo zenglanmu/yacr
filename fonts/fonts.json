@@ -3,5 +3,10 @@
     "file": "osifont.ttf",
     "name": ["osifont", "osifont.ttf", "osifont-iso3098"],
     "type": "mesh"
+  },
+  {
+    "file": "NotoSansCJKsc-Regular.otf",
+    "name": ["Noto Sans CJK SC", "NotoSansCJKsc", "NotoSansCJKsc-Regular", "Noto Sans CJK", "Noto Sans SC", "noto sans cjk sc"],
+    "type": "mesh"
   }
 ]

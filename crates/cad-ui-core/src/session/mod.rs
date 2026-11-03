@@ -27,6 +27,7 @@ mod command_log;
 mod commands;
 mod diagnostics;
 pub mod events;
+mod fonts;
 mod import_progress;
 mod input;
 mod layers;
@@ -94,6 +95,7 @@ pub use self::events::{
     derive_batch, CadEvent, CadEventKind, CanvasJson, EventBus, EventSink, StatusFrame,
     EVENT_RING_CAPACITY,
 };
+pub use self::fonts::{CadFont, CadFonts};
 pub use self::layers::{CadLayer, CadLayerColor, CadLayerWrite, CadLayers};
 pub use self::profile::{
     wire_status_json, DocumentOwner, HostProfile, HostSurfaceMode, WireStatus,
@@ -111,7 +113,7 @@ pub use self::status::{
     CadReferenceStatus, CadSelection, CadSelectionRow, CadStatus, CadTool, CadToolParams,
 };
 pub use self::wire::{
-    aliases, close_popup, command, commands, create_layer, delete_layer, layers, open_popup,
+    aliases, close_popup, command, commands, create_layer, delete_layer, fonts, layers, open_popup,
     parse_setting_request, rename_layer, restore_layers, set_active_layer, set_layer_property,
     set_layer_visible, set_selected_property, set_selected_text, set_setting, set_tool_parameter,
     set_tool_text, settings, standard_view, AdmissionTarget, CadCommandAck, CadCommandAlias,

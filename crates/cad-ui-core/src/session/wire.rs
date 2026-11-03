@@ -59,13 +59,15 @@ use super::admission::{
     parse_property_write, parse_standard_view, parse_tool_parameter,
 };
 use super::commands::{admissible_names, alias_pairs};
+use super::fonts::CadFonts;
 use super::layers::{CadLayerWrite, CadLayers};
 use super::settings::{CadSettingKey, CadSettingValue, CadSettings};
 
 /// The stable reason a per-host read answers before any CAD state exists.
 ///
-/// Shared so the desktop (`cad_settings`/`cad_layers` before the first owner tick)
-/// and any other host answer the same word for "no snapshot yet".
+/// Shared so the desktop (`cad_settings`/`cad_layers`/`cad_fonts` before the
+/// first owner tick) and any other host answer the same word for "no snapshot
+/// yet".
 pub const CAD_WAITING: &str = "cad_waiting";
 
 /// The stable refusal when a host has no modal-popup seam registered.
@@ -186,27 +188,31 @@ pub trait AdmissionTarget {
     fn layer_write(&mut self, write: CadLayerWrite) -> Result<(), String>;
 }
 
-/// The **read seam** for the two control-panel reads (`cad_settings`,
-/// `cad_layers`).
+/// The **read seam** for the control-panel reads (`cad_settings`,
+/// `cad_layers`, `cad_fonts`).
 ///
 /// These are not sink methods: they are projections, and each host serves them
 /// from the only source it has.
 ///
-/// * Desktop: the owner tick mirrors `CadSession::settings()`/`layers()` into
-///   `Shared`, because the session is `!Send` and the IPC thread must never touch
-///   it. `None` before the first tick — the read then answers [`CAD_WAITING`].
+/// * Desktop: the owner tick mirrors `CadSession::settings()`/`layers()`/
+///   `fonts()` into `Shared`, because the session is `!Send` and the IPC thread
+///   must never touch it. `None` before the first tick — the read then answers
+///   [`CAD_WAITING`].
 /// * `dom-canvas`: the session lives in the same thread as the caller, so the
-///   answer is the session's own `settings()`/`layers()` call.
+///   answer is the session's own `settings()`/`layers()`/`fonts()` call.
 ///
-/// [`layers`] keeps the desktop's existing `Option<Result<..>>` shape: `None`
-/// means "no snapshot yet" ([`CAD_WAITING`]) while `Some(Err(..))` relays the
-/// session's own projection refusal instead of serving stale rows.
+/// [`layers`] and [`fonts`] keep the desktop's existing `Option<Result<..>>`
+/// shape: `None` means "no snapshot yet" ([`CAD_WAITING`]) while `Some(Err(..))`
+/// relays the session's own projection refusal instead of serving stale rows.
 pub trait ControlReads {
     /// The effective settings snapshot, or `None` before any exists.
     fn settings(&self) -> Option<CadSettings>;
 
     /// The layer projection, or `None` before any exists.
     fn layers(&self) -> Option<Result<CadLayers, String>>;
+
+    /// The read-only font-registry projection, or `None` before any exists.
+    fn fonts(&self) -> Option<Result<CadFonts, String>>;
 }
 
 /// The seam the two popup commands go through.
@@ -358,6 +364,8 @@ pub struct QueueReads<'a> {
     pub settings: Option<&'a CadSettings>,
     /// `Shared::cad_layers`.
     pub layers: Option<&'a Result<CadLayers, String>>,
+    /// `Shared::cad_fonts`.
+    pub fonts: Option<&'a Result<CadFonts, String>>,
 }
 
 impl<'a> QueueReads<'a> {
@@ -365,8 +373,13 @@ impl<'a> QueueReads<'a> {
     pub fn new(
         settings: Option<&'a CadSettings>,
         layers: Option<&'a Result<CadLayers, String>>,
+        fonts: Option<&'a Result<CadFonts, String>>,
     ) -> Self {
-        Self { settings, layers }
+        Self {
+            settings,
+            layers,
+            fonts,
+        }
     }
 }
 
@@ -377,6 +390,10 @@ impl ControlReads for QueueReads<'_> {
 
     fn layers(&self) -> Option<Result<CadLayers, String>> {
         self.layers.cloned()
+    }
+
+    fn fonts(&self) -> Option<Result<CadFonts, String>> {
+        self.fonts.cloned()
     }
 }
 
@@ -528,6 +545,14 @@ pub fn set_setting(
 /// A mirror refusal (`Some(Err(..))`) is relayed, never replaced by stale rows.
 pub fn layers(reads: &dyn ControlReads) -> Result<CadLayers, String> {
     reads.layers().ok_or_else(|| CAD_WAITING.to_string())?
+}
+
+/// `cad_fonts`: the read-only font-report projection, or [`CAD_WAITING`].
+///
+/// Same shape as [`layers`]: `cad_waiting` until the host has a snapshot, and a
+/// mirror refusal is relayed rather than replaced by an empty registry.
+pub fn fonts(reads: &dyn ControlReads) -> Result<CadFonts, String> {
+    reads.fonts().ok_or_else(|| CAD_WAITING.to_string())?
 }
 
 /// `cad_set_layer_visible`: queue one temporary layer visibility.

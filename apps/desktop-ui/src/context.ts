@@ -126,6 +126,9 @@ export interface ShellValue {
   readonly toggleLayers: () => void;
   /** Bumped by every `LAYER`: an open palette re-reads and takes the keyboard. */
   readonly layersFocus: number;
+  /** Whether the read-only Font Manager is open (docked or compact sheet). */
+  readonly fontsOpen: boolean;
+  readonly setFontsOpen: Dispatch<SetStateAction<boolean>>;
   readonly commandLineOpen: boolean;
   readonly setCommandLineOpen: Dispatch<SetStateAction<boolean>>;
   /** The CAD surface node's ref callback (also used to restore focus). */

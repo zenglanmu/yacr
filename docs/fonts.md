@@ -1,256 +1,231 @@
-# 字体来源与目录
+# 字体来源、打包与加载
 
-> **历史文档（Slint 桌面已退役，2026-10-16）**：本文描述的是**迁移前**的 Slint 桌面/web 宿主；
-> 其中 `cad-ui-slint`、`yacr-linux`、旧脚本命令均已退役（部分脚本改为非零 NOT IMPLEMENTED）。
-> 当前架构与构建见 `docs/architecture.md`、`docs/react-linux-app.md`、`docs/build.md`、
-> [ADR 0010](adr/0010-react-linux-host-replaces-slint.md)。下文仅作历史记录。
+本文记录当前 React/Tauri/wasm 载体下的 CAD 文本字体：提交了哪些字体、各自授权、各宿主如何
+取字节、回退顺序、诊断、支持的格式、产物布局与验证边界。规范依据：§7.3（逻辑键，非平台路径）、
+§10（资源）、§16.2。宿主的逐条接线见 [font-host-loading.md](font-host-loading.md)，只读报告
+`cad_fonts` 的 wire 形状见 [commands.md](commands.md)。
 
-本文记录 CAD 文本/字体资源从哪里来、如何编目、如何随客户端输出打包，以及当前的
-实现边界。规范依据：§7.3（逻辑键，非平台路径）、§10（资源）、§16.2。
+## 唯一提交的字体包：`fonts/`
 
-## 来源
+仓库根 `fonts/` 是**唯一提交的 CAD 字体包**。各宿主把它复制/打包到自己的产物或站点字体目录，
+不各自维护第二份字体目录。
 
-字体来源有两个项目：
+| 文件 | 内容 |
+|---|---|
+| `NotoSansCJKsc-Regular.otf` | Noto Sans CJK SC Regular，CFF OTF，**16,437,364 B**，SHA-256 `2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b` |
+| `osifont.ttf` | QCAD 的 ISO 3098 技术制图字体，**116,512 B** |
+| `fonts.json` | 目录清单，按 `mlightcad/cad-data` 的 `{ file, name[], type }` 格式；当前 2 个 `mesh` 面 |
+| `NotoSansCJK-OFL.txt` | Noto 的 SIL Open Font License 1.1 文本 |
+| `COPYING.GPL-3` | osifont 的 GPLv3 文本 |
+| `SOURCE.md` | 两个字体的上游 URL、固定提交、字节数与 SHA-256 |
 
-- **`mlightcad/cad-data`**（运行时/构建时获取，**不入库**）：默认字体集与
-  `mlightcad/cad-viewer` 网页版一致，经 jsDelivr CDN 提供：
-  - 默认根：`https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts/`
-    （对应 cad-viewer 的 `DEFAULT_BASE_URL = 'https://cdn.jsdelivr.net/gh/mlightcad/cad-data'`
-    加 `fonts/`；见 `packages/cad-simple-viewer/src/app/AcApDocManager.ts`）。
-  - 目录清单：`fonts/fonts.json`（截至 2026-10-01，
-    sha256 `cb2344fa2f91648f3cb44b7f5a1e75342da5fa578d640de8e0500b12697246a0`，
-    99 个字体：86 个 `.shx` + 13 个 outline/WOFF）。
-  - outline 字体示例：`simsun.woff`、`simhei.woff`、`simkai.woff`、`msyh.woff`、
-    `msgothic.woff`、`noto-sans-kr.woff`、`arial.woff`、`tahoma.woff`、`verdana.woff`、
-    `gbgdt.woff`、`SJQY.woff`、`AIGDT.ttf`、`simsun.ttf`。
-  - SHX 字体示例：`simplex.shx`、`txt.shx`、`romans.shx`、`isocp.shx`、`bigfont.shx`、
-    `hztxt.shx`、`gbcbig.shx` 等。
-- **QCAD（`fonts/` 目录，授权入库）**：ISO 3098 技术制图字体
-  `osifont.ttf`（GPL-3 + 字体例外）已提交到仓库 `fonts/`（来源/哈希/授权见
-  `fonts/SOURCE.md`），作为**默认轮廓回退面**随客户端输出分发。QCAD 的 `.cxf`
-  编译字体当前引擎不支持，显式记为 Unsupported（见「字形渲染」）。
+### 来源与授权
 
-`fonts.json` 条目结构：
+- **Noto Sans CJK SC**：来自 `notofonts/noto-cjk`，固定提交
+  `f8d157532fbfaeda587e826d4cd5b21a49186f7c`，路径
+  `Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf`。以 **OFL-1.1** 原样分发、未修改；
+  OFL 保留字体名（RFN）为 `Source`（继承自 Adobe Source Han Sans），本仓库不改字体，因此无需改名。
+  它是所有宿主上的**统一默认面**（`default_face`）：同时覆盖拉丁、假名与 CJK，也是四个 CJK
+  locale 优先面的最后一项。
+- **osifont**：QCAD 仓库的 `fonts/osifont.ttf` 副本，原始项目为
+  <https://github.com/hikikomori82/osifont>，授权为 **GPL-3 + 字体例外**（嵌入文档不传染 GPL；
+  本仓库 AGPL-3 可与 GPL 组件组合）。它是 Noto 之后的**次选轮廓回退面**。
+- **`mlightcad/cad-data` 字体不入库**：其目录与字体由 `scripts/fetch-fonts.sh` 在需要时下载，
+  供发布打包、CDN 包组装与测试语料使用；再分发授权由部署者负责。Web 运行时的同源 `fonts/`
+  就是 `scripts/deploy-cloudflare-pages.sh` 用该脚本组装并上传到项目 Pages CDN 的包。
+- QCAD 的编译字体 `.cxf` 未提交也不支持；引擎只处理 SHX 与 sfnt/WOFF1。
 
-```json
-{ "file": "simplex.shx", "name": ["simplex"], "type": "shx" }
-{ "file": "@extfont2.shx", "name": ["@extfont2"], "type": "shx", "encoding": "shift-jis" }
-{ "file": "simsun.woff", "name": ["SimSun", "宋体"], "type": "mesh" }
-```
+## 各宿主的加载路径
 
-## 字体包与输出布局
+共同契约（`cad-platform::fonts`）：
 
-仓库级 `fonts/` 是**唯一提交的 CAD 字体包**（`fonts.json` + `osifont.ttf` +
-`COPYING.GPL-3` + `SOURCE.md`），各宿主把它复制到自己的输出旁：
+1. `requested_fonts(drawing)` 只读收集图纸引用的字体键（TEXT 的 `font`、样式的
+   `resource_keys`），并按大小写不敏感去重（1 万标签的图纸报 7 个名称，而不是 4,849 个）；
+   `needs_text_shaping(drawing)` 判断图纸是否含文字；`code_page()` 经
+   `TextLocale::from_code_page` 得到 `latin | zh-Hans | zh-Hant | ja | ko`。
+2. `plan_fonts` 把名称解析为目录条目/URL；未知名跳过、不伪造。
+3. 宿主 `FontLoader` 提供字节，`FontEngine::register_with_encoding` 注册；随后
+   `render.set_fonts(engine)`（空引擎则 `set_fonts(None)`，不安装“所有字形都会失败”的空引擎）。
+4. `FontLoadReport` 逐项记录目录条目、请求、计划、注册、失败与每个 `FontFaceRecord`；失败不折成
+   成功。
 
-- **Linux 桌面/CLI（发布包）**：`scripts/package-linux-release.sh` 默认
-  `WITH_FONTS=1`，用同一个 `scripts/fetch-fonts.sh` 把 mlightcad 全量字库 + 提交的
-  `fonts/` 组装到发布包 `fonts/`（可执行文件 `bin/` 同级）；`WITH_FONTS=0` 只打包
-  提交的 `fonts/`（osifont）。宿主启动时自动扫描 `fonts/fonts.json` 并按需加载
-  （见「主机接线」）。
-- **Web**：`scripts/build-web.sh`/`scripts/fetch-fonts.sh` 把提交的 `fonts/` 合并进
-  `web-dist/fonts/`（并与下载的 mlightcad 目录清单合并且去重），浏览器宿主优先用
-  同源 `fonts/`，未发布本地包时回落到 CDN。
-- **Android**：`scripts/fetch-fonts.sh` 把提交的 `fonts/` 合并进
-  `assets/fonts/`（该目录本身仍 gitignore，不入库）。
+### Linux / Windows / macOS 桌面与 CLI（`native-below` 与 CLI）
 
-`scripts/fetch-fonts.sh <DEST> [FONTS...]` 是**平台无关的唯一打包入口**：下载 mlightcad
-目录清单与指定面（无参数则为全部）、合并提交的 `fonts/`、写 `DEST/fonts.json`。Web /
-Android / Linux 发布包都只是传不同的 `DEST`，本身不含任何平台逻辑（旧
-`fetch-web-fonts.sh`、`fetch-android-fonts.sh` 已并入它并删除）。mlightcad 字体是第三方，
-随发布包内置于任何平台时都由打包方负责其再分发授权。
+- 共用 `cad-platform::fonts::local`。`resolve_font_dir` 先看显式 `--fonts-dir`（目录不存在是
+  错误，不静默回退），否则按顺序找：可执行文件同级 `fonts/`、其父级 `fonts/`、macOS
+  `.app` 的 `Contents/Resources/fonts`、当前工作目录 `fonts/`。
+- `DirFontLoader` 从该目录读 `fonts.json` 与面字节；`load_engine_report` 再注册 `--font
+  NAME=PATH` 显式字体，最后把系统默认字体（`fc-match` / `%WINDIR%\Fonts` /
+  `/System/Library/Fonts` 等候选）作为首回退。`.ttc` 等无法解析的候选被跳过，不伪造。
+- 宿主在 `cad-host` 里按图纸 locale 复用/重定向已安装引擎；同一语言且面齐全时不重复读包。
+- CLI 的 `--font <name=path>` 与同级 `fonts/` 自动加载同样走这条路径；`render` / `plot` 也会注入。
 
-## 实现
+### Android（`native-below`）
 
-`cad-resources` 提供纯数据目录，不做任何网络/文件系统访问：
+- Gradle 把仓库 `fonts/` 作为 APK asset 根（`assets.srcDir(.../fonts)`）。
+- `MainActivity.kt` 在后台把 APK assets 解压到应用私有 `filesDir/fonts/`，完整复制后写标记
+  **`.yacr-assets-v2-complete`**（v2 加入 Noto；升级包后旧安装会重新解压）。没有字体资产时打印
+  显式诊断，**不**用“看起来有效但为空”的路径调用 JNI。
+- 解压完成后经冻结的 `nativeAssetsReady(fontsDir, imagesDir)` 把真实文件系统路径交给 Rust；
+  `HostOptions.fonts_dir` 指向它，之后走与桌面相同的 `cad-platform::fonts::local`。
+- wasm 会话在 Android 上**不实例化**；字体由 native 会话持有。
 
-- `DEFAULT_FONT_BASE_URL`：上述 CDN 根。
-- `FontKind::{Shx, Mesh, Other}`、`FontFace { file, names, kind, encoding }`。
-- `FontCatalog::from_json`：解析 `fonts.json`，按**名称、文件名、文件主名**
-  建立大小写不敏感索引（处理 `fonts/SIMPLEX.SHX` 之类引用）。
-- `FontCatalog::get(name)`：命中返回 face，未命中返回 `None`（不伪造字体）。
-- `face_url(base, face)` / `default_font_url(face)`：生成下载 URL，空格编码为 `%20`。
+### Web（`dom-canvas`，wasm 会话）
 
-主机负责真正取字节：把字体下载/读取后经 `MapResolver::grant` 授权，再用现有
-`ResolverChain`（用户包 → 文档映射 → 内置集）解析。安全策略不变：路径/URL 引用先经
-`is_safe_reference` 与 `bare_name` 收敛为裸文件名。
+- **默认构建产物不含字体，也不预加载**。`scripts/build-web-ui.sh`（`dist-ui`）与
+  `scripts/build-web.sh`（独立 harness `dist`）只产出页面 + wasm；`YACR_WEB_FONTS=1` 只用于
+  本地把提交包 staging 到 `dist-ui/fonts`，**不是**发布路径。
+  `apps/desktop-ui/vite-font-package.mjs` 只在 `__YACR_RUNTIME__=tauri` 时把仓库 `fonts/`
+  复制到 `apps/desktop-ui/dist/fonts`（X11/XWayland `dom-canvas` 的离线包）；web/android 都跳过。
+- **发布包**：`scripts/deploy-cloudflare-pages.sh` 在上传前用 `scripts/fetch-fonts.sh` 把
+  mlightcad 全量目录 + 提交的 osifont/Noto 组装到 `$DIST/fonts`（两种 bundle 都适用），站点根
+  因此始终提供同源 `fonts/`；`SKIP_FONTS=1` 复用已有目录而不下载。该脚本同时把
+  `NotoSansCJK-OFL.txt`、`COPYING.GPL-3`、`SOURCE.md` 复制到同一目录；OFL/GPL 文本不是可选
+  payload，缺少时部署直接失败。Windows/macOS 的 `WITH_FONTS=1` 打包也走同一合并路径。
+- **懒加载发生在 `open_bytes` 之后**：`bootstrap.js`（共享 canvas 引导）与
+  `apps/app-web/web/main.js` 的 `ensureFontPackage()` 先读 `cad_fonts` 的 `requested`、
+  `textNeeded`、`locale`；无文字且无命名面时不取任何字节。需要时从同源 `fonts/`（Web 为项目
+  Pages CDN，X11/XWayland 为 tauri 包内 `dist/fonts`；`__YACR_FONT_BASE_URL__` 可覆盖基址）
+  只取 `fonts.json` 与本图需要的目录项，调用
+  `set_font_package`，再调用 `apply_font_package()` → `CadSession::reinstall_fonts()` + 一帧。
+  `ready` / `start` **从不等待**字体。
+- **部分包是正常情况**：页面只取本次需要的面，目录里其余面没有字节不算错误；`plan_fonts`
+  选中缺失面时由 `load_package` 记为具名 `ResourceMissing` 行，不静默空面。
+- `set_font_package` 先校验：目录可解析、目录与文件非空、无重名、每个实际携带的文件字节非空。
+  校验通过才把 `MemoryFontLoader` 换入线程局部槽；坏包不会替换已安装的好包。返回
+  `{ok, catalog_entries, files, bytes}`（`catalog_entries` 是整份目录，`files` 是本次携带的面）。
+- 打开时若还没有包且图纸需要字体/文字整形，`BrowserResources::install_fonts` 显式留下
+  `unsupported-resources: fonts`（打开漏斗记为 `fonts.failed`，图纸仍打开、文字诚实不整形）；
+  包到达后 `apply_font_package` 在**已打开**的会话上重跑安装并重绘。
+- 加载失败发布到 `__YACR_FONT_PACKAGE_ERROR__`，不伪造成功；图纸与状态行保持。
+- 隔离 Worker 载体没有 `CadSession`，对字体请求显式拒绝
+  `unsupported-runtime: fonts`，不假装加载。
 
-## 授权
+## 回退顺序与诊断
 
-`mlightcad/cad-data` 未声明仓库级许可证，且其中的 `.shx`/`.ttf`/`.woff` 各自有字体
-授权（多为 Autodesk/微软/开源字体的再分发）。因此：
+### 默认面与 locale 面
 
-- **本仓库不内置 mlightcad 字体**；只在运行时/构建时按需下载，再分发的授权由部署者负责。
-- 使用前必须核实目标字体的授权，不能默认可再分发。
-- **例外（用户指定）**：QCAD 的 `osifont.ttf` 以 GPL-3 + 字体例外授权，已提交到
-  `fonts/`（`fonts/SOURCE.md` 记录来源、哈希与许可；本仓库为 AGPL-3，可与 GPL 组件
-  组合）。QCAD 的 `.cxf` 未提交也未支持。
+- `DEFAULT_FALLBACK_NAMES`（`cad-platform::fonts`）当前为：
 
-## 字形渲染（已实现：sfnt + SHX）
+  ```
+  noto sans cjk sc → osifont → arial → simplex
+  ```
 
-`cad-representation` 的 `FontEngine` 把文本转成世界坐标表示，`cad-scene` 按线/网格批绘：
+  只在需要默认面时（图纸有文字但没注册到任何面，或有未解析/失败的面）按顺序尝试，
+  **注册第一个可用者**为 `default_face` 并停止。Noto Sans CJK SC 是统一默认面：它同时覆盖
+  拉丁、假名与 CJK，因此缺字图纸不会静默丢失中文；代价是首次需要默认面时会加载 16.4 MB
+  的 Noto 文件。`osifont` 仍在其后，供没有 Noto 的包使用。
+- `TextLocale::preferred_faces()` 为 CJK locale 附加 locale 面；四个 CJK locale 的**最后一项**
+  都是 `noto sans cjk sc`：
 
-- **SFNT**：TTF/OTF 原始 sfnt，以及 **WOFF1**（`woff_to_sfnt` 用 flate2 解压重建 sfnt）；
-  字形轮廓按 glyph 整组处理。由于 SFNT 采用 nonzero winding，而现有
-  `cad-geometry::fill_rings` 是 even-odd，填充前会验证轮廓简单、互不相交/重叠，且严格嵌套时
-  绕向逐层交替；只有证明两种规则等价才调用填充器。成功时输出禁用边 overlay 的 mesh，字腔
-  保留且不暴露三角内部边。无法证明等价或填充器失败时保留边界线、返回 Partial 并附
-  `text.sfnt_fill_partial` 诊断，不静默错误填洞。纯 `outline()` API 仍返回 SFNT 全部轮廓；空白
-  glyph/MTEXT（包括 `\P`、`\~` 和只有空格的格式 run）合法且不产生伪缺图报告。实际缺字会附
-  `text.glyph_missing` 诊断。拒收
-  **WOFF2**（记为 `Unsupported`，可被回退取代）。注册时校验可解析，坏字节报错。
-- **SHX**：移植自 MIT 的 `@mlightcad/shx-parser`，支持编译 shape 字体的三种内容布局
-  `shapes` / `unifont` / `bigfont`（含八分圆/分数/凸度圆弧、子形状、缩放与进退笔），
-  按 `encoding`（gbk/shift-jis/…）把 Unicode 映射回字体码；继续输出 SHX 线稿，不尝试面填充。
-- **网格边 overlay**：一般网格继续使用现有边 overlay；SFNT glyph mesh 显式关闭 overlay，scene 不生成
-  边数据，renderer 不生成边索引 buffer/不提交 wireframe draw。该优化不改变 mesh 三角 fill draw。
-- **回退链**：`FontEngine::set_fallback(keys)`。图纸引用的字体未注册、或注册了但不可解码
-  （如 WOFF2/不支持的 SHX 类型）时，按顺序改用可用的回退字体，**不会静默丢弃文本**；
-  全部不可用才报告错误。`resolve_face` 可查询实际使用的字体。
-- **默认轮廓回退面**：`cad-platform::fonts::load_font_engine` 在图纸字体缺失/拉取失败时
-  保证注册一个默认轮廓面（`DEFAULT_FALLBACK_NAMES`，顺序 `osifont` → `arial` → `simplex`），
-  并写入 `FontLoadReport.default_face`。桌面/CLI 宿主还可把**系统默认字体**（fontconfig
-  `fc-match`）注册为第一回退（`register_default_face`，保留键 `__yacr_default__`）。
-  浏览器无法读取系统字体字节，故 Web 用目录里的默认面（CDN 构建为 `arial`，自托管构建为
-  已提交的 `osifont`）承担同一角色；QCAD `.cxf`、WOFF2 等不支持技术仍显式报告，不伪造。
-- 键匹配：注册键 + 文件主名。图纸引用 `arial.ttf`、库只有 `arial.woff` 时按主名 `arial` 命中。
-- 排版：按字形 advance 前进（SHX 用 ink-width + cell 边距策略；TTF 应用 `kern` 字距），
-  `\n`/`\P` 换行。`cad-representation::text` 现在把 MTEXT/TEXT 控制内容解析为结构化 run
-  列表（`parse_mtext`）并逐 run 排版（`FontEngine::shape`）：字体 `\f`/`\F`、绝对/相对字高
-  `\H`、宽度因子 `\W`、倾斜 `\Q`、颜色 `\C`/`\c`、堆叠分数 `\S`、分组 `{}`、`\~`、`%%`
-  特殊字符与 `\U+XXXX` 均被保留；无法忠实渲染的项（颜色/装饰/堆叠/`\A`/`\T` 等）会以
-  `TextFormatIssue` 显式报告并计入 `Partial`，不静默忽略。详见 `docs/mtext.md`。
-- **对齐**：TEXT 的 `horizontal_alignment`/`vertical_alignment`（含 `alignment_point`）与
-  MTEXT 的 `attachment_point` 映射为 `TextAlignH/TextAlignV`，在排版时按行宽/行高偏移；
-  `Aligned/Fit` 按左对齐处理（不拉伸）。
-- 主机通过 `RepresentationContext::with_fonts(Arc<FontEngine>)` 注入；CLI 用
-  `--font <name=path>`（可重复），并自动把所有已注册字体设为回退。未注入字体时文本仍为
-  不可绘的 `DisplayPrimitive::Text`。
+  | locale | 优先面（最后统一为 Noto） |
+  |---|---|
+  | `zh-Hans` | `gbcbig` → `hztxt` → `chineset` → `bigfont` → `simhei` → `simsun` → `noto sans cjk sc` |
+  | `zh-Hant` | `chineset` → `bigfont` → `noto sans cjk sc` |
+  | `ja` | `bigfont` → `noto sans cjk sc` |
+  | `ko` | `bigfont` → `noto sans cjk sc` |
 
-## 主机接线
+  加载器只注册**第一个可用**的 locale 面。最终回退链由
+  `TextLocale::ordered_fallback(registered)` 生成：CJK 把已注册的 locale 优先面前移，其余面保持
+  注册顺序，未注册的名称不会凭空出现。默认面循环已先注册 Noto 时，locale 循环会复用它，
+  `default_face` 与 locale 面都是 Noto；包内没有 Noto 时才继续尝试 SHX/locale 面。
+- 显式 `--font` 或系统默认面可补足 locale 面；引擎会按 locale 重新排序回退链。
 
-- **清单与计划**：`cad-resources::plan_fonts(catalog, requested, base)` 把图纸引用的字体名
-  解析为 `PlannedFont { request, file, kind, encoding, url }`，按文件去重，未知名跳过。
-- **加载契约**：`cad-platform::FontLoader::load_font(url) -> HostFuture<Arc<[u8]>>`（另有
-  默认实现 `load_catalog(url)`，可按字节流覆写目录获取）。核心只生成 URL，主机负责网络/资源访问、
-  授权与缓存。
-- **共用宿主编排**（`cad-platform::fonts`，Web 与 Android 共用）：
-  - `requested_fonts(&DrawingDatabase)`：只读地收集图纸引用的字体键——`TEXT` 几何的 `font`
-    字段与文本样式的 `Style::resource_keys`（导入器写入该样式的 SHX/BigFont/TTF 名）。只做
-    名称收集，不查目录、不联网、不做路径解析。
-  - `catalog_url(base)`：`{base}/fonts.json`。
-  - `load_font_engine(loader, requested, base)`：取目录 JSON → `FontCatalog::from_json` →
-    `plan_fonts` → 逐个 `load_font` → `FontEngine::register_with_encoding(file, bytes, encoding)`
-    → `set_fallback(已注册键)`；返回 `(Arc<FontEngine>, FontLoadReport)`。
-    `FontLoadReport` 逐项记录目录条目、请求、计划、注册、失败（含原因），不把失败折成成功。
-- **显示**：主机把加载到的字节经上述流程注册后调用 `CadView::set_fonts(Arc<FontEngine>)`；
-  注册为空时调用 `CadView::clear_fonts()`（而不是安装一个所有字形都会失败的空引擎）。
-  桥接下一帧重建场景并整形文字（字体到达后也会重建）。
-- 典型流程：`fonts.json` → `requested_fonts` → `plan_fonts` → 主机按 `url` 取字节 →
-  `register_with_encoding` → `set_fonts`。
-  - **Web**（`apps/app-web`）：`WebFontLoader` 用 `fetch().arrayBuffer()` 取字节，目录为
-    `DEFAULT_FONT_BASE_URL`；`open_document` 后 `spawn_font_load()` 异步加载，过期结果
-    （期间换了图纸）以 `StaleResult` 丢弃。导出 `load_web_fonts()` / `font_load_report()`
-    供 JS 宿主与无头验证等待并读取 `FontLoadReport::summary()`。
-  - **Android**（`apps/app-android`）：`AssetFontLoader` 从活动 `AssetManager` 读
-    `assets/fonts/…`（基址 `asset://fonts/`），目录为 `asset://fonts/fonts.json`。
-    走同一个 `load_font_engine`。mlightcad 字体**不入库**（授权，见上），未打包时报告
-    `ResourceMissing`（`font asset not packaged …`），不伪造空字体集；但
-    `scripts/fetch-fonts.sh` 会把提交的 `fonts/`（osifont）合并进资产集，保证 APK
-    自带默认轮廓面。
-  - **Linux / Windows / macOS 桌面与 CLI**（`app-linux`、`app-windows`、`app-macos`、
-    `cad-cli-tools`）：共用 `cad-platform::fonts::local`。启动（或每次打开图纸）时扫描可
-    执行文件同级的 `fonts/`（或 `--fonts-dir`；macOS `.app` 还会扫描
-    `Contents/Resources/fonts`）目录，用同一套 `load_font_engine` 从本地读字节；
-    之后注册 `--font` 显式字体；最后把系统默认字体注册为第一回退（Linux 用
-    `fc-match`，Windows 读 `%WINDIR%\Fonts` / `%LOCALAPPDATA%\Microsoft\Windows\Fonts`，
-    macOS 读 `/System/Library/Fonts` / `/Library/Fonts`）。没有 `fonts/` 也没有系统字体时
-    文本保持不可绘，绝不伪装。
+### 稳定诊断
 
-## Web 自托管（发布包）
+| 代码 / 状态 | 含义 |
+|---|---|
+| `font.locale_fallback_missing` | 非拉丁 locale 且有文字，但没有任何 locale 优先面注册成功。每次加载/打开只报一次，消息是 ASCII 机器细节（locale + 尝试过的候选），UI 按 code 本地化。 |
+| `text.glyph_missing` | 整形时实际缺字（字体已注册但该 glyph 不存在）。空白 glyph / 仅空格 run 不产生伪缺图。 |
+| `text.sfnt_fill_partial` | SFNT 轮廓无法证明 nonzero winding 与现有 even-odd 填充器等价，或填充器失败；保留边界线并记 `Partial`，不静默错误填洞。 |
+| `fonts.failed` | 宿主字体资源安装失败（如 Web 无 staged package 的 `unsupported-resources: fonts`）；是会话状态/诊断，不把图纸打开折成失败。 |
 
-浏览器宿主在编译期读 `YACR_FONT_BASE_URL`（`apps/app-web/src/browser.rs`）决定目录/字体基址：
-未设置时回退到 `DEFAULT_FONT_BASE_URL`（jsDelivr）。`scripts/build-web.sh` 默认
-`YACR_FONT_BASE_URL=fonts/`（相对页面），并在打包时调用 `scripts/fetch-fonts.sh`
-把 `mlightcad/cad-data` 的 `fonts.json` 与全部字体下载进 `web-dist/fonts/`，所以
-**发布包自包含、不跨域**。
+`cad_fonts` 的 `faces[].status` 另用稳定小写标签 `loaded | failed | unresolved | unsupported`，
+`source` 为 `package | explicit | system`；`detail` 是宿主原始失败原因。失败面保留在列表中，
+读取不重试、不编造。
 
-`fetch-fonts.sh` 默认先用 jsDelivr（`FONT_BASE_URL`）；单个文件失败时按
-`FONT_RETRIES`（默认 3）退避重试，仍失败再回退到 `FONT_FALLBACK_BASE_URL`
-（默认 `https://raw.githubusercontent.com/mlightcad/cad-data/main/fonts`，GitHub
-Actions 的共享出口 IP 常被 jsDelivr 限流，但可访问 raw 源）。每个文件记录实际来源；
-两个源都失败才整体退出 1（不把缺字体折成成功）。需要回到 CDN 时：
+## 支持的字体格式
 
-```bash
-YACR_FONT_BASE_URL=https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts/ \
-  WITH_FONTS=0 scripts/build-web.sh
-```
+| 格式 | 状态 |
+|---|---|
+| SHX（`shapes` / `unifont` / `bigfont`） | 支持，含八分圆/分数/凸度圆弧、子形状、缩放与进退笔；按 encoding（gbk/shift-jis/…）映射回 Unicode。输出线稿，不做面填充。 |
+| 原始 SFNT：TTF / OTF（含 **CFF** 轮廓） | 支持。CFF 由 `ttf-parser` 解析；提交的 Noto CFF OTF 有专门契约测试验证注册与中文轮廓输出。 |
+| WOFF1 | 支持：`woff_to_sfnt` 用 flate2 解压重建 sfnt。 |
+| WOFF2 | **不支持**，显式记为 `Unsupported`（可被回退面替代），不伪造。 |
+| TTC / 字体集合 | 不是一等格式：注册只解析集合的 **index 0**，集合内其他面不可寻址；系统候选中的 `.ttc` 若解析失败会被跳过，不当作已加载。 |
+| QCAD `.cxf` | **不支持**，未提交。 |
 
-mlightcad 字体文件仍不提交仓库（`/web-dist/` 已 ignore）；下载与再分发的授权由部署者负责。
-仓库提交的 `fonts/`（QCAD osifont）由 `fetch-fonts.sh` 在打包时合并进 `web-dist/fonts/`。
-Cloudflare Pages 发布见 `scripts/deploy-cloudflare-pages.sh`。
+SFNT glyph 的填充仍走安全路径：只有证明 nonzero winding 与 even-odd 在轮廓简单、互不相交/
+重叠且严格嵌套绕向交替时等价，才生成 mesh；否则保留边界线并报 `text.sfnt_fill_partial`。
+成功时关闭该 glyph 的 mesh edge overlay，字腔保留且不暴露三角内部边。
 
-## 主机取字节实现现状
+## 打包产物
 
-| 宿主 | 目录来源 | 字体字节来源 | 状态 |
-|---|---|---|---|
-| Web (wasm) | `DEFAULT_FONT_BASE_URL/fonts.json`（jsDelivr，CORS）；自托管构建为同源 `fonts/` | `fetch().arrayBuffer()` | 代码完成；本环境**未跑浏览器验证** |
-| Android | `asset://fonts/fonts.json`（APK assets，含提交的 osifont） | `AssetManager` | 代码完成并编译；本环境**无真机/无打包字体资产** |
-| CLI | 发布包 `fonts/`（`fetch-fonts.sh` 组装 mlightcad 全量 + osifont）+ `--font name=path` | 本地文件 | 已实现（`cad-platform::fonts::local`；本机差分 smoke 见下） |
-| Linux 桌面 | 可执行文件同级 `fonts/`（或 `--fonts-dir`）+ `--font` | 本地文件 + 系统默认字体（`fc-match`） | 已实现并编译；离屏/桌面运行见 `docs/linux-app.md` |
-| Windows 桌面 | 可执行文件同级 `fonts/`（或 `--fonts-dir`）+ `--font` | 本地文件 + 系统默认字体（`%WINDIR%\Fonts`） | 交叉编译并 Wine 参数解析 smoke；真实 Windows/GPU 未验证，见 `docs/windows-app.md` |
+同一提交包按载体落到不同位置，互不覆盖：
 
-Web 的 `fetch` 依赖 CDN 的 CORS 头；非 2xx 响应记为 `ResourceMissing`，不当作空字节。
-Android 若未把字体目录放进 `assets/fonts/`（含 `fonts.json`），打开带文本的图纸会以缺资源
-报告，属预期而非缺陷。取字节的**浏览器/真机行为尚未在本仓库验证**。
-
-
-实测（`docs/validation.md` 语料；注册 `simplex/txt/romans.shx` + `arial.woff` 并启用回退）：
-
-| 样本 | 无字体 lines/texts | 有字体 lines/texts |
+| 载体 | 产物位置 | 来源 |
 |---|---|---|
-| AutoCAD_2000（SHX） | 19 / 11 | 55 / 0 |
-| AutoCAD_2013 | 0 / 3 | 30 / 0 |
-| baseline-sample | 1021 / 60 | 3298 / 0 |
-| lockers | 1796 / 33 | 2747 / 0 |
-| map-of-uae | 173 / 32 | 545 / 0 |
-| korean-DBCS-hangul | 2 / 3 | 96 / 0 |
-| canteen（GOST，靠回退） | 42749 / 323 | 44964 / 0 |
+| 桌面（Tauri，含 X11/XWayland `dom-canvas`） | `apps/desktop-ui/dist/fonts/` | 仅 tauri：Vite 插件 `vite-font-package.mjs`；页面懒读同源 `fonts/` |
+| Web `dist-ui` | **不打包字体**；站点根 `fonts/` | `scripts/deploy-cloudflare-pages.sh` → `scripts/fetch-fonts.sh` 组装后上传 Pages CDN；页面懒加载 |
+| Web 独立 harness `dist` | **不打包字体**；同一站点根 `fonts/` | 同上 |
+| Android | APK `assets/fonts/` → 运行时 `filesDir/fonts/` | Gradle `assets.srcDir(repo/fonts)` + Kotlin 解压（标记 `.yacr-assets-v2-complete`） |
+| Linux Flatpak | payload `fonts/`（`bin/` 同级） | `scripts/package-linux-release.sh`，只放提交包 |
+| Windows / macOS 发布包 | `fonts/` | `WITH_FONTS=1` 时 `scripts/fetch-fonts.sh` 组装 mlightcad 全量并合并提交包；`0` 只放提交包 |
+| CLI | 可执行文件同级 `fonts/` 或 `--font` | `cad-platform::fonts::local` |
 
-2026-10-09 CLI 差分 smoke（本机，软件环境，非视觉验收）：`entities.dxf`（94 个
-TEXT/MTEXT）在可执行文件同级的 `fonts/` 不可见时 `build-representation` 为
-`lines=1443`；在仓库根（`./fonts` 命中）或仅 osifont 的发布包（`bin/../fonts` 命中）
-运行时为 `lines=1497`、`texts=0`——缺字体时默认轮廓面（osifont + 系统 DejaVu）把
-文字整形成线段，而不是丢弃。加入 mlightcad 全量字库的发布包（`WITH_FONTS=1`，
-101 个文件）从无关 CWD 运行同样 `texts=0`、`lines=1395`——图纸引用的目录字体在本机
-解析成形，不再依赖回退或网络。
+本地 Web 调试若没有 CDN，`YACR_WEB_FONTS=1 bash scripts/build-web-ui.sh` 只把提交子集放进
+`dist-ui/fonts`（本地专用）；要测完整目录，再用 `scripts/fetch-fonts.sh <dir>` 组装一份同源
+`fonts/`，或把 `__YACR_FONT_BASE_URL__` 指到有该包的基址。
 
-## 未完成
+`scripts/fetch-fonts.sh <DEST> [FONTS...]` 是平台无关的“下载第三方目录 + 合并提交包”打包
+入口：发布打包、Windows/macOS `WITH_FONTS=1` 与 Web CDN 包都调用它，但它本身不产生 Web 构建
+产物。mlightcad 字体仍不提交，再分发授权由部署者负责。
 
-1. **排版完备性**：复杂文字整形（bidi/上下文 shaping）与列/真正制表位仍缺；MTEXT 全格式码
-   现由 `parse_mtext` 解析为 run 列表（见 `docs/mtext.md`），但颜色、下划线/上划线/删除线、
-   堆叠分数、`\A`/`\T`/`\p` 等只能近似或仅解析，`shape` 以 `TextFormatIssue` 显式报告；
-   精确行距/垂直对齐仍为近似（行距 = 1.2×该行最高 run 字高）。
-2. **平台验证**：`FontLoader`/`plan_fonts`/`set_fonts` 契约与 Web/Android 取字节代码均已
-   实现并编译（见上表），但**浏览器与真机上的实际下载/整形/重绘尚未在本仓库验证**；
-   Android 也仍未真正随 APK 打包并安装验证。
-3. **Android 网络路径**：当前只实现 asset 路径；运行时 HTTP 下载（含授权与缓存策略）未实现。
-4. **桌面/CLI 的系统默认面**：`fc-match` 结果随系统而异（本机 `sans-serif` 返回 `.ttc`，
-   会被引擎跳过后再试 `DejaVu Sans`）；不同桌面得到不同的默认字形，属预期但不是确定值。
-   浏览器端无法读取系统字体字节，Web 的「默认」是目录/CDN 里的轮廓面，不等价于浏览器
-   内建字体。
-5. **CJK 面字形验收**：SFNT 合成契约以仓库已授权 `fonts/osifont.ttf` 验证带洞拉丁字形；本地
-    Android 资源目录中的 CJK 字体未提交、未作为 fixture。Linux 专项真 GPU 测试要求显式提供
-    `YACR_CJK_FONT`，其截图/硬件证据必须单独执行记录；契约测试不等于 CJK 字体覆盖、真实 GPU
-    或真实图纸验收。当前保守判定会拒绝自交、相交/重叠 contour，或嵌套绕向不交替的合法/特殊
-    SFNT glyph；此时明确退化为边界线并报告 Partial，尚未实现完整 nonzero winding tessellator。
-    最终 Linux 真 GPU 专项已用 Quadro P620/Vulkan、Noto TTC 和合成 DXF 执行；observer 确认截图中
-    中文字形实心留洞且无可见三角边。证据目录：`/tmp/opencode/yacr-cjk-final-20261012-114326/`。
-    这是合成图纸的真 GPU 视觉证据，不代表真实 DWG 或更广泛的字体/vendor/平台兼容验收。
+## 验证与证据边界
 
-含文本的图纸在导入报告里不会被报告为 `Complete`（导入阶段不知道宿主是否有字体）；
-在 `build-representation` 注入字体后文本即可绘。
+### 本轮实际运行（2026-11-03）
 
-2026-10-03 真实图纸回归修复：CLI `render` / `plot` 也将 `--font` 注入表示上下文，
-不再仅在 `build-representation` / `benchmark` 生效。无字体时仍保留不可绘 Text，
-不把文字缺失当作完整渲染。canteen 原生/浏览器的差异见 `validation-dwg.md`。
+下列契约测试/构建数字是本轮**早先**的运行；lazy Web 打包与 `requested`/`textNeeded` 改动后
+没有全部重跑（见 NOT RUN），重跑数字可能变化。
+
+| 命令 | 结果 |
+|---|---|
+| `cargo test -p cad-representation committed_noto_cjk_cff_face_outlines_chinese_glyphs --locked` | 1 passed（CFF OTF 注册 + `中文` 轮廓/mesh 输出） |
+| `cargo test -p cad-platform fonts --locked` | 34 passed（`requested_fonts` 去重、默认面顺序、Noto 默认面、locale 链、缺口诊断、本地目录/系统面） |
+| `cargo test -p app-web fonts --locked` | 7 passed（提交包/部分包安装、坏包拒绝、CJK 文本注册 osifont + Noto） |
+| `cargo test -p cad-host fonts --locked` | 8 passed（原生安装/复用/重定向/locale 缺口） |
+| `cargo test -p cad-ui-core fonts --locked` | 3 passed（`cad_fonts` wire 投影） |
+| `cargo test -p cad-desktop-shell --test font_commands --locked` | 6 passed（`cad_fonts` 命令注册/序列化/无会话拒绝） |
+| `(cd apps/desktop-ui && node --test test/fonts.test.ts test/vite-font-package.test.ts)` | 14 pass / 0 fail（严格解析、行分组、`FONTS` 选择器、Vite 插件仅 tauri 复制、web/android 跳过） |
+| `bash scripts/build-web-ui.sh` | exit 0；默认不 staging 字体（`fonts/*` 报 `not bundled (lazy CDN fonts/)`），`YACR_WEB_FONTS=1` 才放提交子集（本地专用）。 |
+
+### Web 运行时证据（软件渲染，非 GPU/像素验收）
+
+lazy 改动后，本地对 `apps/app-web/dist-ui` 做无头浏览器检查（**软件渲染**），字体由 override
+base 提供：
+
+- 打开前 **0 个字体请求**：`ready` / `start` 不等待字体。
+- 打开 `fixtures/debug-default-fonts.dwg` 后恰好 **3 个**请求：`fonts.json`、`osifont.ttf`、
+  `NotoSansCJKsc-Regular.otf`（只取本图需要的目录项）。
+- `cad_fonts`：`defaultFace=NotoSansCJKsc-Regular.otf`、`localeMissing=null`、`requested` 7 个
+  去重名称；`shell_status().error=null`；页面无错误。
+- 这是软件渲染路径，只能作布局/DOM/加载路径证据；**不是**真实 GPU、像素、视觉 golden
+  或浏览器产品验收。
+
+**未覆盖**：完整 mlightcad CDN 包的实际下载/运行时（需要网络）与真实 Cloudflare Pages 上传
+（需要凭据）均 **NOT RUN**。上一轮 W2 的 `web-ui-smoke` 是 SwiftShader，也不构成本轮 CDN
+运行时证据；真实 Noto 字形在这些截图中的视觉正确性未单独判定。
+
+### NOT RUN / 未验证
+
+- 完整 mlightcad CDN 包的下载与浏览器运行时、真实 Cloudflare Pages 上传：**NOT RUN**。
+- 真实 GPU（硬件 Vulkan/Metal/D3D）与真实浏览器像素/视觉验收：**NOT RUN**。
+- Android 真机/模拟器上的 Noto 解压、注册与实际字形：**NOT RUN**；只有编译/契约级证据。
+- Windows/macOS 运行时、字体目录发现、系统面注册：**NOT RUN**（仅编译门禁/历史 Wine 参数
+  smoke，见平台文档）。
+- Linux 桌面真实窗口的字体面板/Noto 渲染截图：**NOT RUN**。
+- 性能、内存与包体积影响未做基准；默认面是 Noto，只有真需要默认面/命名字体的图纸才取字节，
+  但“不需要时零成本”只有代码路径依据，没有测量结论。
+
+历史材料（旧 Slint 宿主、2026-10 的 CLI/CJK 专项）保留在 `docs/handoff.md` 与历史 validation
+文档中，不作为本轮 React/Tauri/wasm 载体的证据。

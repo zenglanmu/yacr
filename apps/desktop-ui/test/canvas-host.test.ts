@@ -511,10 +511,14 @@ test('the build script generates the bootstrap module with the explicit wasm URL
   const script = await readFile(BUILD_SCRIPT, 'utf8');
   const code = script.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
   assert.match(script, /BOOTSTRAP_JS="bootstrap\.js"/);
-  // The exact three-line content the loader depends on.
+  // The exact bootstrap content the loader depends on: `ready` is the init
+  // promise (fonts never gate it) and the published object wraps `open_bytes`
+  // for the lazy CDN package.
   assert.ok(script.includes("import init, * as mod from './app_web.js';"));
-  assert.ok(script.includes("new URL('./app_web_bg.wasm', import.meta.url).href"));
-  assert.ok(script.includes('globalThis.__YACR_CANVAS_MODULE__ = { ready, ...mod };'));
+  assert.ok(script.includes("init(new URL('./app_web_bg.wasm', import.meta.url).href)"));
+  assert.ok(script.includes('globalThis.__YACR_CANVAS_MODULE__ = { ready: wasm, ...session, ensureFontPackage };'));
+  assert.ok(script.includes('session.open_bytes = async (...args) =>'));
+  assert.ok(script.includes('await ensureFontPackage();'));
   // One binding only: the no-modules target is not emitted any more (WebKitGTK
   // leaves `document.currentScript` undefined, which breaks that glue's TDZ).
   assert.ok(!/no-modules/.test(code), 'no no-modules emission');

@@ -169,6 +169,11 @@ const P = {
   // glyph (extension lines with a dimension line, ticks or arrowheads) even at
   // 16 px, where only the A's two legs and the baseline survive.
   text: <><path d="M8 14.5 12 4.5l4 10" /><path d="M9.6 11h4.8" /><path d="M4 19.5h16" /></>,
+  // Font manager: a capital A and a lowercase a on one baseline — the picture of
+  // a typeface, not of a piece of text. It stays apart from `text` (one A over a
+  // baseline) and `mtext` (an A over two baselines) because of the second
+  // letterform, so the Font Manager button never reads as "insert text".
+  font: <><path d="M3 18 6.6 7h1.2L11.4 18" /><path d="M4.7 14h4.8" /><circle cx="17.2" cy="14.8" r="2.6" /><path d="M19.8 12.2V18" /><path d="M2 20.5h20" /></>,
   // Multiline text: the same capital A as `text`, but standing over **two**
   // baselines, the second one shorter — the picture of a paragraph rather than a
   // single line. It stays apart from `text` (one baseline) and from `mleader`

@@ -32,6 +32,14 @@
  *   cargo build -p app-web --target wasm32-unknown-unknown --release
  *   wasm-bindgen --target web --out-dir apps/app-web/web/pkg \
  *       target/wasm32-unknown-unknown/release/app_web.wasm
+ *
+ * The font package is **not** bundled or preloaded. It is served by the project's
+ * Pages CDN at same-origin `fonts/` and fetched lazily, after a document opens,
+ * only when the drawing needs text or names a face: `cad_fonts` says what the
+ * open document needs, the matching catalogue faces are fetched, installed with
+ * `set_font_package`, and `apply_font_package` re-runs the install on the live
+ * session. The isolated Worker carrier has no `CadSession`, so it refuses font
+ * loading by name instead of pretending (see `worker.js`).
  */
 
 import init, {
@@ -42,6 +50,10 @@ import init, {
   pan,
   document as cadDocument,
   last_import_ms as lastImportMs,
+  frame as presentFrame,
+  set_font_package,
+  apply_font_package,
+  invoke,
 } from './pkg/app_web.js';
 
 const canvas = document.getElementById('cad-canvas');
@@ -230,6 +242,12 @@ async function probeWorkerIsolation() {
     );
     const report = JSON.parse(reply.capability ?? 'null');
     if (report !== null && report.ok === true && report.isolation === 'worker') {
+      // The worker owns the viewer session, which has no CadSession and therefore
+      // no font install. The worker names that refusal; keep it visible instead of
+      // letting this page imply the package was loaded there.
+      if (typeof reply.fontPackage === 'string') {
+        globalThis.__YACR_FONT_PACKAGE_ERROR__ = reply.fontPackage;
+      }
       return { bridge };
     }
     const reason =
@@ -447,6 +465,15 @@ async function openFile(file) {
       ready = true;
       report(`open ${file.name}`, status);
       line = statusLine.textContent;
+      // Lazy fonts: the document is open, so now (and only now) fetch the faces
+      // it actually needs and re-run the install on the live session. A failure
+      // keeps the open document and the status line; it is published on
+      // `__YACR_FONT_PACKAGE_ERROR__` rather than shown as a successful load.
+      try {
+        await ensureFontPackage();
+      } catch (error) {
+        console.error(`yacr: fonts not installed for ${file.name}:`, error);
+      }
     }
   } catch (error) {
     line = `open ${file.name} failed: ${String(error)}`;
@@ -551,9 +578,152 @@ window.__YACR_CANVAS__ = {
   isolation: isolationText,
 };
 
+/**
+ * Lazily install the font package the open document needs.
+ *
+ * Nothing is fetched before a document opens, and nothing is fetched for a
+ * drawing with no text and no named font. The catalogue and faces live on the
+ * project's Pages CDN (`fonts/` next to the page) unless a host overrides
+ * `__YACR_FONT_BASE_URL__`.
+ *
+ * `set_font_package` is synchronous and copies the bytes into the wasm heap;
+ * `apply_font_package` then re-runs the host resource install on the live session
+ * and presents one frame. A failure is published on
+ * `__YACR_FONT_PACKAGE_ERROR__` and is never turned into a success: the session
+ * keeps its explicit `unsupported-resources: fonts` diagnostic.
+ */
+const DEFAULT_FONT_FALLBACK_NAMES = ['noto sans cjk sc', 'osifont', 'arial', 'simplex'];
+
+function fontBaseUrl() {
+  const configured = globalThis.__YACR_FONT_BASE_URL__;
+  if (typeof configured === 'string' && configured.trim() !== '') {
+    return configured.endsWith('/') ? configured : `${configured}/`;
+  }
+  return new URL('fonts/', document.baseURI).href;
+}
+
+/** The `cad_fonts` projection of the live session, normalised. */
+async function readFontState() {
+  const raw = await invoke('cad_fonts', '{}');
+  let envelope;
+  try {
+    envelope = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`cad_fonts: unreadable answer (${String(error)})`);
+  }
+  if (envelope === null || typeof envelope !== 'object') {
+    throw new Error('cad_fonts: answer is not an object');
+  }
+  if (envelope.ok !== true) {
+    throw new Error(`cad_fonts: ${envelope.error ?? 'refused without a reason'}`);
+  }
+  const value = envelope.value;
+  if (value === null || typeof value !== 'object') {
+    throw new Error('cad_fonts: value is not an object');
+  }
+  return {
+    faces: Array.isArray(value.faces) ? value.faces : [],
+    catalogEntries: Number(value.catalogEntries ?? 0),
+    requested: Array.isArray(value.requested)
+      ? value.requested.filter((key) => typeof key === 'string' && key !== '')
+      : [],
+    textNeeded: value.textNeeded === true,
+    locale: typeof value.locale === 'string' ? value.locale.toLowerCase() : '',
+  };
+}
+
+/** Every catalogue key one entry can be matched by (`file`, stem, `name[]`). */
+function fontEntryKeys(entry) {
+  const keys = [];
+  if (entry === null || typeof entry !== 'object') return keys;
+  if (typeof entry.file === 'string' && entry.file !== '') {
+    keys.push(entry.file);
+    const dot = entry.file.lastIndexOf('.');
+    if (dot > 0) keys.push(entry.file.slice(0, dot));
+  }
+  if (Array.isArray(entry.name)) {
+    for (const name of entry.name) {
+      if (typeof name === 'string' && name !== '') keys.push(name);
+    }
+  }
+  return keys.map((key) => key.toLowerCase());
+}
+
+/** The catalogue entries this drawing can use (its names + default/locale ones). */
+function selectFontEntries(entries, requested) {
+  const wanted = new Set(DEFAULT_FONT_FALLBACK_NAMES);
+  for (const key of requested) wanted.add(key.toLowerCase());
+  return entries.filter((entry) => {
+    if (entry === null || typeof entry !== 'object') return false;
+    if (typeof entry.file !== 'string' || entry.file === '') return false;
+    return fontEntryKeys(entry).some((key) => wanted.has(key));
+  });
+}
+
+/** Fetch the needed faces, install them, and re-run the install on the session. */
+async function installFontPackage() {
+  const state = await readFontState();
+  if (state.catalogEntries > 0 || state.faces.some((face) => face && face.status === 'loaded')) {
+    return globalThis.__YACR_FONT_PACKAGE__ ?? null;
+  }
+  if (!state.textNeeded && state.requested.length === 0) return null;
+
+  const base = fontBaseUrl();
+  const catalogUrl = new URL('fonts.json', base);
+  const catalogResponse = await fetch(catalogUrl);
+  if (!catalogResponse.ok) {
+    throw new Error(`${catalogUrl.href}: HTTP ${catalogResponse.status}`);
+  }
+  const catalogText = await catalogResponse.text();
+  const entries = JSON.parse(catalogText);
+  if (!Array.isArray(entries)) {
+    throw new Error('fonts.json must be a JSON array');
+  }
+  const selected = selectFontEntries(entries, state.requested);
+  if (selected.length === 0) {
+    throw new Error("fonts.json carries no entry for this drawing's font needs");
+  }
+  const files = {};
+  for (const entry of selected) {
+    const name = entry.file;
+    const url = new URL(encodeURIComponent(name), base);
+    const response = await fetch(url);
+    if (!response.ok) {
+      // A catalogue face the package promises but cannot be fetched is a loud
+      // failure, never dropped so the drawing silently shapes with less.
+      throw new Error(`${url.href}: HTTP ${response.status}`);
+    }
+    files[name] = new Uint8Array(await response.arrayBuffer());
+  }
+  const summary = JSON.parse(set_font_package(catalogText, files));
+  const sessionStatus = JSON.parse(apply_font_package());
+  presentFrame();
+  const result = { ...summary, sessionStatus };
+  globalThis.__YACR_FONT_PACKAGE__ = result;
+  delete globalThis.__YACR_FONT_PACKAGE_ERROR__;
+  return result;
+}
+
+/** One in-flight/successful load; a failure is not memoised so the next open retries. */
+let fontPackageLoad = null;
+
+function ensureFontPackage() {
+  if (fontPackageLoad === null) {
+    fontPackageLoad = installFontPackage().catch((error) => {
+      fontPackageLoad = null;
+      globalThis.__YACR_FONT_PACKAGE_ERROR__ = String(error);
+      console.error('yacr: font package failed to load:', error);
+      throw error;
+    });
+  }
+  return fontPackageLoad;
+}
+
 async function startMainThread() {
   const size = cssSize();
   await init();
+  // No font preload: `ready` (and `start`) never wait on the package. It is
+  // fetched lazily after a document opens (see `ensureFontPackage`).
   // `start` loads the compiled-in synthetic fixture and reports its own status
   // (including a failure with the failing step and, for a missing WebGL2
   // context, the marker `yacr: unsupported-runtime: webgl2`). A real host maps

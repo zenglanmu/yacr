@@ -21,7 +21,20 @@ pub fn requested_fonts(database: &DrawingDatabase) -> Vec<String> {
     for entity in database.entities() {
         collect_fonts(database, &entity.geometry, &mut out);
     }
-    out
+    dedupe_font_keys(out)
+}
+
+/// Collapse repeated names case-insensitively, keeping the first spelling/order.
+///
+/// `collect_fonts` visits every text entity, so a drawing with thousands of
+/// labels repeats the same name thousands of times. Plans and reports want the
+/// distinct set (a 10k-label drawing otherwise reports 4,849 "requested faces"
+/// for seven names).
+fn dedupe_font_keys(keys: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    keys.into_iter()
+        .filter(|key| seen.insert(key.to_ascii_lowercase()))
+        .collect()
 }
 
 /// Whether the drawing contains text that needs shaping, even when it names no

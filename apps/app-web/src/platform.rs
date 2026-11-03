@@ -22,20 +22,20 @@
 //! | [`PlatformFiles`] | **save/plot are real downloads** ([`crate::download`]): `begin_save` synthesizes a `download://<name>` target, `write_atomic` publishes the finished bytes through the carrier's [`DownloadSink`](crate::download::DownloadSink) — a DOM download on wasm32, a recording sink on the host target; **open** still refuses with [`UNSUPPORTED_FILESYSTEM`] because the page's file picker owns selection and the bytes arrive through the session's `open_bytes` entry; `refuses_source_overwrite` is `false` (no inode identity) |
 //! | [`ConfigStore`] | in-memory only: readable for the rest of this session, **never** durable — a reload starts from `Absent` ([`MemoryConfigStore::PERSISTENT`] is `false`) |
 //! | [`SurfaceSource`] | the metrics the host feeds it (CSS logical size + scale), `None` before the first report |
-//! | [`HostResources`] | no shaping fonts and no raster images are installed: a document that requests **none** is a real no-op success, a document that requests some is refused with [`UNSUPPORTED_RESOURCES`] |
+//! | [`HostResources`] | the committed font package is installed from memory when the page staged it ([`crate::fonts`]); a drawing that requests nothing is a real no-op success, a drawing that requests faces before any package was staged is refused with [`UNSUPPORTED_RESOURCES`] (never a silent empty success) |
 //!
 //! ## What actually works today
 //!
 //! The compiled-in synthetic fixture (`fixtures/dwg/synthetic-four-lines.dwg`)
 //! has no text and no raster image, so it opens through these adapters
 //! unchanged — the command router, snapshots and ticks are live. A **real**
-//! drawing that references text still opens (the open funnel treats a resource
-//! install failure as a non-fatal `fonts.failed` status, never as a failed open),
-//! but no shaping engine is installed for it: this phase makes **no claim** about
-//! those glyphs, and any later step that needs shaping
+//! drawing that references text also opens; when the page staged the committed
+//! font package through [`crate::set_font_package`], [`BrowserResources`] installs
+//! the real shaping engine from that package ([`crate::fonts`]). Without a staged
+//! package the open funnel reports a non-fatal `fonts.failed` status and the text
+//! is honestly unshaped, and any later step that needs shaping
 //! (`ensure_fonts_for_text` on the first created text entity) refuses explicitly.
-//! Images are not decoded at all. Closing that gap needs a real browser font
-//! fetch / image decode strategy — deliberately **not** part of this phase.
+//! Images are not decoded at all.
 //!
 //! ## What is wired, and what is not
 //!
@@ -202,19 +202,22 @@ impl SurfaceSource for ReportedSurface {
     }
 }
 
-/// The browser [`HostResources`] strategy: nothing is resolved.
+/// The browser [`HostResources`] strategy: the staged in-memory font package.
 ///
 /// The decision is the drawing's **own** request, read with the same pure
 /// platform helpers the desktop strategy uses (`requested_fonts`,
 /// `needs_text_shaping`, `requested_images`):
 ///
-/// * a drawing that requests no face and needs no text shaping → a real no-op
-///   (nothing is installed, nothing is claimed);
-/// * a drawing that requests a face / needs shaping → [`UNSUPPORTED_RESOURCES`],
-///   naming how many faces were requested. The open funnel reports this as a
-///   `fonts.failed` status (a real diagnostic), so the drawing still opens and its
-///   text is honestly unshaped;
-/// * the same for raster images.
+/// * a package staged by [`crate::set_font_package`] → load the requested faces
+///   (plus the catalog fallback and the drawing's locale face) from memory and
+///   install the real engine ([`crate::fonts::load_package`]);
+/// * no staged package and the drawing requests no face / needs no shaping → a
+///   real no-op (nothing is installed, nothing is claimed);
+/// * no staged package and the drawing requests a face / needs shaping →
+///   [`UNSUPPORTED_RESOURCES`], naming how many faces were requested. The open
+///   funnel reports this as a `fonts.failed` status (a real diagnostic), so the
+///   drawing still opens and its text is honestly unshaped;
+/// * the same for raster images (still no decoder).
 pub struct BrowserResources;
 
 impl BrowserResources {
@@ -225,7 +228,7 @@ impl BrowserResources {
         }
         Err(CadError::Unsupported(format!(
             "{UNSUPPORTED_RESOURCES}: fonts: {} requested face(s), text_shaping={text_needed}; \
-             no font package is wired for this carrier (text is drawn unshaped)",
+             no font package was staged before this session started (text is drawn unshaped)",
             requested.len()
         )))
     }
@@ -245,7 +248,7 @@ impl BrowserResources {
 
 impl HostResources for BrowserResources {
     fn install_fonts(&self, core: &HostCore, render: &RenderSessionHandle) -> CadResult<()> {
-        let (requested, text_needed) = core
+        let (requested, text_needed, locale) = core
             .controller
             .borrow()
             .drawing()
@@ -253,13 +256,34 @@ impl HostResources for BrowserResources {
                 (
                     cad_platform::fonts::requested_fonts(drawing.as_ref()),
                     cad_platform::fonts::needs_text_shaping(drawing.as_ref()),
+                    cad_platform::fonts::TextLocale::from_code_page(drawing.code_page()),
                 )
             })
-            .unwrap_or_default();
-        Self::fonts_decision(&requested, text_needed)?;
-        // Nothing requested: clear any previous document's engine so it can never
-        // be presented as if this drawing had resolved it.
-        render.set_fonts(None);
+            .unwrap_or((Vec::new(), false, cad_platform::fonts::TextLocale::Latin));
+        let Some(package) = crate::fonts::current() else {
+            // No package was staged before this session started: keep the
+            // explicit refusal (never a silent empty success) and ensure a
+            // previous document's engine is not presented as this one's.
+            Self::fonts_decision(&requested, text_needed)?;
+            render.set_fonts(None);
+            core.clear_last_font_report();
+            return Ok(());
+        };
+        let (engine, report) =
+            crate::fonts::load_package(package.as_ref(), &requested, text_needed, locale)?;
+        match engine {
+            Some(engine) => {
+                render.set_fonts(Some(engine));
+            }
+            None => {
+                render.set_fonts(None);
+            }
+        }
+        // The real per-face outcome, the same authority the desktop strategy
+        // publishes. `HostCore::install_fonts` also retires a stale
+        // `fonts.failed` status on a successful install, so the session's
+        // stale-resource guard cannot clear the engine we just installed.
+        core.set_last_font_report(report);
         Ok(())
     }
 

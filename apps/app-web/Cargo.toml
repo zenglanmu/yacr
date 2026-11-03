@@ -60,6 +60,15 @@ serde.workspace = true
 cad-platform.workspace = true
 cad-host.workspace = true
 cad-engine.workspace = true
+# `src/fonts.rs` names the `FontEngine` that `cad_platform::fonts` returns (the
+# same type the desktop host's own font install uses). It is a plain
+# representation type with no platform/GPU edge, so this stays an app -> cad
+# arrow and the wasm target keeps compiling.
+cad-representation.workspace = true
+# `src/fonts.rs` parses the staged `fonts.json` with the shared catalog type
+# (`FontCatalog`), so the web package accepts exactly the catalog format the
+# desktop/Android loaders consume. Pure data + planning, no platform edge.
+cad-resources.workspace = true
 
 # The browser host is the wasm CAD session of the `dom-canvas` runtime
 # (`surfaceMode: dom-canvas`, ADR 0024): it imports caller-supplied DWG bytes (or

@@ -917,3 +917,45 @@ fn shapes_mtext_runs_and_reports_approximations_when_font_provided() {
         "2x MTEXT run height {tall_height} should exceed plain glyph height {plain_height}"
     );
 }
+
+#[test]
+fn committed_noto_cjk_cff_face_outlines_chinese_glyphs() {
+    // The committed fallback face is a CFF-flavoured OTF (no `glyf` table).
+    // Registration and outlining must accept it and produce real CJK contours,
+    // not an empty success.
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fonts/NotoSansCJKsc-Regular.otf"
+    );
+    let bytes = std::fs::read(path).expect("committed Noto Sans CJK SC face is present");
+    let mut engine = FontEngine::new();
+    engine
+        .register("NotoSansCJKsc-Regular.otf", Arc::from(bytes.as_slice()))
+        .expect("CFF OTF must register with ttf-parser");
+    engine.set_fallback(vec!["NotoSansCJKsc-Regular.otf".into()]);
+    let shaped = engine
+        .shape(
+            "NotoSansCJKsc-Regular.otf",
+            "中文",
+            Point3::default(),
+            20.0,
+            0.0,
+            TextAlignH::Left,
+            TextAlignV::Baseline,
+            None,
+        )
+        .expect("CJK text must shape through the committed face");
+    assert!(shaped.has_renderable_content, "CJK run must be renderable");
+    assert!(
+        !shaped.outlines.is_empty(),
+        "CFF glyph outlines must be emitted"
+    );
+    assert!(
+        !shaped.meshes.is_empty(),
+        "CJK glyphs must fill (not degrade to an outline-only success)"
+    );
+    assert!(
+        shaped.polylines.is_empty(),
+        "a fully filled CJK run must not emit wireframe polylines"
+    );
+}

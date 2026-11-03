@@ -24,6 +24,27 @@
   own font is missing, so bundled desktop/web output can shape text without a
   network fetch. See `docs/fonts.md`.
 
+## `NotoSansCJKsc-Regular.otf`
+
+- **Upstream project**: Noto Sans CJK (Simplified Chinese) —
+  <https://github.com/notofonts/noto-cjk>.
+- **Pinned source**: commit `f8d157532fbfaeda587e826d4cd5b21a49186f7c`, path
+  `Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf`.
+  Raw URL:
+  <https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf>
+- **Size / SHA-256**:
+  - committed file: `16437364` bytes,
+    `2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b`.
+- **Licence**: SIL Open Font License 1.1 (OFL-1.1), shipped as
+  `NotoSansCJK-OFL.txt`. The file is redistributed **unmodified**; the OFL
+  Reserved Font Name clause therefore requires no rename (the RFN is `Source`,
+  inherited from Adobe's Source Han Sans; this repository does not modify the
+  font).
+- **Why it is here**: it is the single bundled fallback face for CJK text whose
+  own drawing font is missing, on every host (Linux, Windows, macOS, Android,
+  Web). Without it a CJK label would be reported as an unresolved font instead of
+  being shaped. See `docs/fonts.md`.
+
 ## Not committed
 
 QCAD's `.cxf` (CAM Expert Font) files are not committed or supported: the

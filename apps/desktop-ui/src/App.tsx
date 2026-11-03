@@ -45,6 +45,7 @@ import { DocTabs } from './components/DocTabs.tsx';
 import { Workspace } from './components/Workspace.tsx';
 import { LayoutTabs } from './components/LayoutTabs.tsx';
 import { ReferencesPanel } from './components/ReferencesPanel.tsx';
+import { FontsPanel } from './components/FontsPanel.tsx';
 import { CommandLine } from './components/CommandLine.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
 import { PopupOverlay } from './components/PopupOverlay.tsx';
@@ -54,13 +55,10 @@ import { MOBILE_DRAWER_ID, MobileRibbonDrawer } from './components/MobileRibbonD
 import { MobileTopBar } from './components/MobileTopBar.tsx';
 import { MOBILE_DRAWER_CLOSED, mobileDrawerNext } from './layout/mobile-drawer.ts';
 import { useLayoutMode } from './layout/use-layout-mode.ts';
-import { DOCKED_PANEL_REFUSAL_KEY, dockedPaletteOpenable } from './layout/layout-surfaces.ts';
 import { createShortcutRunner } from './layout/shell-shortcuts.ts';
 import { openPopup } from './popup/popup.ts';
-import { isOptionsCommand } from './options/options.ts';
-import { isLayersCommand } from './layers/layers.ts';
-import { isPropertiesCommand, setSelectedProperty } from './properties/properties.ts';
-import { isResourcesCommand } from './references/references.ts';
+import { useLocalSelectors } from './commands/local-selectors.ts';
+import { setSelectedProperty } from './properties/properties.ts';
 import { textEditOpenError } from './popup/popup-textedit.ts';
 
 /** The options `submitCommand` accepts from a region (`fromInput` keeps a draft). */
@@ -112,6 +110,8 @@ function Shell() {
   // re-reads the host — a no-op otherwise.
   const [layersOpen, setLayersOpen] = useState(false);
   const [layersFocus, setLayersFocus] = useState(0);
+  // The read-only Font Manager: opened by `FONTS`, the ribbon or the compact drawer.
+  const [fontsOpen, setFontsOpen] = useState(false);
   const [commandLineOpen, setCommandLineOpen] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [surfaceNode, setSurfaceNode] = useState<HTMLDivElement | null>(null);
@@ -498,40 +498,27 @@ function Shell() {
     });
   }, []);
 
+  // Chrome-local selectors are answered here, before the router (table and layout
+  // rule in `commands/local-selectors.ts`); a router line falls through.
+  const runLocalSelector = useLocalSelectors({
+    layout,
+    translate: t,
+    clearResult: () => setCommandResult(null),
+    clearDraft: () => setCommand(''),
+    requestOptions: () => requestOpenPopup('options'),
+    openResources: () => setReferencesOpen(true),
+    openProperties: () => setPropertiesOpen(true),
+    openLayers: () => { setLayersOpen(true); setLayersFocus(value => value + 1); },
+    openFonts: () => setFontsOpen(true),
+    reportError: setError,
+  });
+
   const submitCommand = useCallback(async (text: string, options: SubmitOptions = {}) => {
-    // `OPTIONS` is a local chrome selector, not a router command: open the
-    // dialog and never forward the text. Intercepted before the in-flight guard
-    // so a second Enter still reaches the host (which focuses the open window).
-    if (isOptionsCommand(text)) {
-      setCommandResult(null);
-      if (options.fromInput) setCommand('');
-      requestOpenPopup('options');
-      return;
-    }
-    // `RESOURCES` opens the References panel and never reaches the router: the
-    // panel renders the references the status already carries, so sending the
-    // host's report selector would only start a second, unused report.
-    if (isResourcesCommand(text)) {
-      setCommandResult(null);
-      if (options.fromInput) setCommand('');
-      setReferencesOpen(true);
-      return;
-    }
-    // `PROPERTIES` / `LAYER` are the docked palettes' local selectors: they never
-    // reach the router. The compact layout renders no dock (`mobile.css` hides
-    // `.workspace__left`), so there the word is refused with the catalog's own
-    // sentence; on desktop a repeat `LAYER` still refreshes and focuses it.
-    if (isPropertiesCommand(text) || isLayersCommand(text)) {
-      setCommandResult(null);
-      const layers = isLayersCommand(text);
-      if (!dockedPaletteOpenable(layout)) {
-        setError(t(DOCKED_PANEL_REFUSAL_KEY, { panel: t(layers ? 'layers.panel' : 'properties.panel') }));
-        return;
-      }
-      if (options.fromInput) setCommand('');
-      if (layers) { setLayersOpen(true); setLayersFocus(value => value + 1); } else setPropertiesOpen(true);
-      return;
-    }
+    // Chrome-local selectors are answered before the in-flight guard, so a second
+    // Enter can still open (or focus) a panel while a command is queued. The
+    // table, the compact-layout refusal and the draft handling live in
+    // `commands/local-selectors.ts`; a router line falls through unchanged.
+    if (runLocalSelector(text, options.fromInput === true)) return;
     if (submitting.current) return;
     submitting.current = true;
     setPending(true);
@@ -566,7 +553,7 @@ function Shell() {
       submitting.current = false;
       setPending(false);
     }
-  }, [requestOpenPopup, status, commandHistory.appendCommand, layout, t]);
+  }, [runLocalSelector, status, commandHistory.appendCommand]);
 
   // The terminal text step (ADR 0019 A.1): one `cad_set_tool_text`, never a
   // `cad_command`. The result is returned to the command line so the draft can
@@ -713,6 +700,7 @@ function Shell() {
         else {
           setDiagnosticsOpen(false);
           setReferencesOpen(false);
+          setFontsOpen(false);
         }
       }
     };
@@ -863,6 +851,10 @@ function Shell() {
     toggleLayers: () => setLayersOpen(value => !value),
     // Bumped by every `LAYER` (open + focus + re-read); the palette watches it.
     layersFocus,
+    // The read-only Font Manager. Its panel reads `cad_fonts`; this side only owns
+    // whether it is docked (desktop) or a floating sheet (compact layout).
+    fontsOpen,
+    setFontsOpen,
     commandLineOpen,
     setCommandLineOpen,
     surfaceRef,
@@ -969,6 +961,13 @@ function Shell() {
           <div className="references-layer">
             <button type="button" className="references-layer__backdrop" aria-label={t('resources.close')} onClick={() => setReferencesOpen(false)} />
             <ReferencesPanel variant="floating" />
+          </div>
+        ) : null}
+        {/* The compact Font Manager sheet: the same panel, as an in-DOM bottom sheet. */}
+        {mobile && fontsOpen ? (
+          <div className="fonts-layer">
+            <button type="button" className="fonts-layer__backdrop" aria-label={t('fonts.close')} onClick={() => setFontsOpen(false)} />
+            <FontsPanel variant="floating" />
           </div>
         ) : null}
         {/* The CAD shortcut menu: one in-DOM overlay above the workspace. It has

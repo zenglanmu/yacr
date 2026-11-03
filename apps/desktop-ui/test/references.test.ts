@@ -133,8 +133,9 @@ test('the panel renders the shared rows and offers no unsupported action', async
   assert.equal(panel.includes('LOCATE'), false, 'no invented locate action');
 
   const app = await readModule('App.tsx');
-  assert.ok(app.includes('if (isResourcesCommand(text))'), 'RESOURCES is a chrome-local selector');
-  assert.ok(app.includes('setReferencesOpen(true)'), 'it opens the panel');
+  const selectors = await readModule('commands/local-selectors.ts');
+  assert.ok(selectors.includes('if (isResourcesCommand(text))'), 'RESOURCES is a chrome-local selector');
+  assert.ok(app.includes('openResources: () => setReferencesOpen(true)'), 'it opens the panel');
   const drawer = await readModule('components/MobileRibbonDrawer.tsx');
   assert.ok(drawer.includes('shell.setReferencesOpen(true)'), 'the compact layout reaches the same panel');
 });

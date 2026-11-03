@@ -632,20 +632,23 @@
 /* The compact layout renders no left dock, so the same `ReferencesPanel` becomes
    a bottom sheet in this tree. It sits above the drawer layer (which closes
    before it opens) and below the host-owned popup layer (60). */
-:root[data-layout="mobile"] .references-layer {
+:root[data-layout="mobile"] .references-layer,
+:root[data-layout="mobile"] .fonts-layer {
   position: fixed;
   inset: 0;
   z-index: 56;
   display: flex;
   align-items: flex-end;
 }
-:root[data-layout="mobile"] .references-layer__backdrop {
+:root[data-layout="mobile"] .references-layer__backdrop,
+:root[data-layout="mobile"] .fonts-layer__backdrop {
   position: absolute;
   inset: 0;
   border: 0;
   background: rgba(0, 0, 0, .48);
 }
-:root[data-layout="mobile"] .references--floating {
+:root[data-layout="mobile"] .references--floating,
+:root[data-layout="mobile"] .fonts--floating {
   position: relative;
   width: 100%;
   max-height: min(72dvh, 620px);
@@ -658,12 +661,17 @@
   padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px));
   animation: mobile-rise var(--t-med) both;
 }
-:root[data-layout="mobile"] .references--floating .palette__head { height: 44px; padding: 0 6px 0 12px; }
-:root[data-layout="mobile"] .references--floating .palette__body { padding: 8px 10px 14px; }
+:root[data-layout="mobile"] .references--floating .palette__head,
+:root[data-layout="mobile"] .fonts--floating .palette__head { height: 44px; padding: 0 6px 0 12px; }
+:root[data-layout="mobile"] .references--floating .palette__body,
+:root[data-layout="mobile"] .fonts--floating .palette__body { padding: 8px 10px 14px; }
 :root[data-layout="mobile"] .references__row { padding: 10px; }
 :root[data-layout="mobile"] .references__name { font-size: 13px; }
 :root[data-layout="mobile"] .references__path,
 :root[data-layout="mobile"] .references__reason { font-size: 11.5px; }
+/* The compact sheet's only control is its close button, and it is a 44px target:
+   a phone cannot rely on the 26px desktop head. */
+:root[data-layout="mobile"] .fonts--floating .ui-icon-button { width: 44px; height: 44px; }
 @keyframes mobile-rise {
   from { transform: translateY(18px); opacity: .4; }
   to { transform: translateY(0); opacity: 1; }

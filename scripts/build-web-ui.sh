@@ -16,7 +16,13 @@
 #                                    (`app_web.js`, `app_web_bg.wasm`,
 #                                    `bootstrap.js`)
 #   apps/app-web/dist-ui/            the chrome bundle: `index.html`, `assets/*`,
-#                                    and a verbatim copy of `canvas/`
+#                                    a verbatim copy of `canvas/`. **No fonts**:
+#                                    the page fetches them lazily from the site's
+#                                    same-origin `fonts/` (the project Pages CDN,
+#                                    assembled by
+#                                    `scripts/deploy-cloudflare-pages.sh`). Set
+#                                    `YACR_WEB_FONTS=1` only to stage the
+#                                    committed subset for a local run.
 #
 # `apps/app-web/dist/` (the standalone vanilla harness) is **not** touched: it is
 # a different artifact built by `scripts/build-web.sh`, and the two must not
@@ -48,6 +54,11 @@
 #   CARGO        cargo binary to use (passed through to the wasm build)
 #   WASM_BINDGEN wasm-bindgen binary to use (passed through to the wasm build)
 #   NPM          npm binary to use (default: `npm` on PATH)
+#   YACR_WEB_FONTS
+#                1 additionally stages the committed font package under
+#                `dist-ui/fonts` **for local testing only**. The deployed site
+#                gets its fonts from the Pages CDN; the default bundle carries
+#                none.
 set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -56,14 +67,35 @@ YACR_SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 
 readonly UI_DIR="$REPO_ROOT/apps/desktop-ui"
 readonly OUT_DIR="$REPO_ROOT/apps/app-web/dist-ui"
+readonly FONT_SRC="$REPO_ROOT/fonts"
 readonly ESM_JS="app_web.js"
 readonly WASM_ARTIFACT="app_web_bg.wasm"
 readonly BOOTSTRAP_JS="bootstrap.js"
 readonly NPM_BIN="${NPM:-npm}"
+# Opt-in local font staging (never the default: see the header).
+readonly STAGE_FONTS="${YACR_WEB_FONTS:-0}"
 
 die() {
   printf '%s: %s\n' "$YACR_SCRIPT_NAME" "$*" >&2
   exit 1
+}
+
+# Print one catalog `file` per line. The catalog is the single source of which
+# committed faces a bundle stages; malformed JSON is a hard error.
+read_font_files() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    entries = json.load(handle)
+if not isinstance(entries, list):
+    raise SystemExit("font catalog must be a JSON array")
+for entry in entries:
+    name = entry.get("file") if isinstance(entry, dict) else None
+    if isinstance(name, str) and name:
+        print(name)
+PY
 }
 
 report_artifact() {
@@ -81,6 +113,10 @@ report_artifact() {
 [ -d "$UI_DIR/node_modules" ] \
   || die "dependencies not installed: $UI_DIR/node_modules (run 'npm ci' in $UI_DIR; this script does not use the network)"
 command -v "$NPM_BIN" >/dev/null 2>&1 || die "$NPM_BIN not found on PATH (set NPM)"
+if [ "$STAGE_FONTS" = "1" ]; then
+  command -v python3 >/dev/null 2>&1 \
+    || die "python3 not found on PATH (needed to read fonts/fonts.json for YACR_WEB_FONTS=1)"
+fi
 grep -qF '"build:web"' "$UI_DIR/package.json" \
   || die "$UI_DIR/package.json has no build:web script (this entry point would build nothing)"
 
@@ -101,6 +137,39 @@ printf '==> React chrome, runtime=web (npm run build:web)\n'
   cd "$UI_DIR"
   "$NPM_BIN" run build:web
 ) || die "npm run build:web failed; no UI bundle was produced"
+
+# --- 2b. optional local font package (opt-in) ------------------------------
+
+# The published site does **not** bundle fonts: its `/fonts/` package is
+# assembled by `scripts/deploy-cloudflare-pages.sh` (mlightcad catalogue +
+# committed osifont/Noto) and fetched lazily by the page after a document opens.
+# `YACR_WEB_FONTS=1` stages the committed subset here for local testing only.
+#
+# Vite empties `outDir`, so staging has to happen **after** the chrome build.
+font_file_count=0
+if [ "$STAGE_FONTS" = "1" ]; then
+  printf '==> staged font package (YACR_WEB_FONTS=1, %s -> %s/fonts)\n' "$FONT_SRC" "$OUT_DIR"
+  [ -s "$FONT_SRC/fonts.json" ] || die "font catalog missing or empty: $FONT_SRC/fonts.json"
+  [ -s "$FONT_SRC/NotoSansCJKsc-Regular.otf" ] \
+    || die "committed CJK fallback missing or empty: $FONT_SRC/NotoSansCJKsc-Regular.otf"
+  mkdir -p -- "$OUT_DIR/fonts"
+  cp -- "$FONT_SRC/fonts.json" "$OUT_DIR/fonts/fonts.json"
+  while IFS= read -r font_file; do
+    [ -n "$font_file" ] || continue
+    case "$font_file" in
+      */*|*\\*|..*) die "font catalog file must be a bare name: $font_file" ;;
+    esac
+    [ -s "$FONT_SRC/$font_file" ] \
+      || die "committed font file missing or empty: $FONT_SRC/$font_file"
+    cp -- "$FONT_SRC/$font_file" "$OUT_DIR/fonts/$font_file"
+    font_file_count=$((font_file_count + 1))
+  done < <(read_font_files "$FONT_SRC/fonts.json")
+  [ "$font_file_count" -ge 1 ] \
+    || die "font catalog names no files (or cannot be read); the package would be empty"
+  [ -s "$OUT_DIR/fonts/fonts.json" ] || die "staged font catalog missing or empty: $OUT_DIR/fonts/fonts.json"
+else
+  printf '==> no font package staged (served lazily from the site CDN fonts/; YACR_WEB_FONTS=1 stages the committed subset)\n'
+fi
 
 # --- 3. artifact guards ----------------------------------------------------
 
@@ -135,6 +204,13 @@ report_artifact "$OUT_DIR/index.html" "index.html"
 report_artifact "$OUT_DIR/canvas/$ESM_JS" "canvas/$ESM_JS"
 report_artifact "$OUT_DIR/canvas/$WASM_ARTIFACT" "canvas/$WASM_ARTIFACT"
 report_artifact "$OUT_DIR/canvas/$BOOTSTRAP_JS" "canvas/$BOOTSTRAP_JS"
+if [ "$STAGE_FONTS" = "1" ]; then
+  report_artifact "$OUT_DIR/fonts/fonts.json" "fonts/fonts.json"
+  report_artifact "$OUT_DIR/fonts/NotoSansCJKsc-Regular.otf" "fonts/NotoSansCJKsc-Regular.otf"
+  printf '  %-28s %s file(s) (YACR_WEB_FONTS=1, local only)\n' "fonts/*" "$((font_file_count + 1))"
+else
+  printf '  %-28s %s\n' "fonts/*" "not bundled (lazy CDN fonts/)"
+fi
 printf '  %-28s %s file(s)\n' "assets/*.js" "$asset_count"
 printf 'serve with: python3 scripts/serve-web.py --directory apps/app-web/dist-ui\n'
 printf 'note: a built bundle is not runtime, GPU or pixel evidence, and not a browser acceptance.\n'

@@ -6,8 +6,7 @@
 //! All platform I/O is expressed through the `cad-platform` contracts
 //! ([`cad_platform::PlatformFiles`], [`cad_platform::ConfigStore`],
 //! [`cad_platform::SurfaceSource`]); this crate never imports `wgpu`, a UI
-//! framework, `web-sys` or any Android type, and carries no `cfg` for a host
-//! platform.
+//! framework, `web-sys` or any Android type, and carries no host `cfg`.
 //!
 //! The database remains authoritative; application commands and host-owned file
 //! operations share one synchronous dispatch boundary.
@@ -209,6 +208,8 @@ impl HostCore {
             drawing_path: Rc::new(RefCell::new(None)),
             last_status: Rc::new(RefCell::new(None)),
             last_image_report: Rc::new(RefCell::new(None)),
+            last_font_report: Rc::new(RefCell::new(None)),
+            engine_font_report: Rc::new(RefCell::new(None)),
             sync_terminal: Rc::new(RefCell::new(None)),
             open_attempt: Rc::new(Cell::new(0)),
             async_report_attempt: Rc::new(Cell::new(None)),
@@ -358,6 +359,10 @@ impl HostCore {
                 .set(self.document_epoch.get().saturating_add(1));
             *self.last_document.borrow_mut() = current;
             self.clear_gestures();
+            // The document-scoped font report belongs to the replaced drawing.
+            // The engine-scoped copy is kept: a reused engine republishes the
+            // faces it actually loaded on the next install.
+            self.clear_document_font_report();
             // The command echo belongs to one drawing: a verified replacement
             // (open/new) clears it so no entry from another drawing survives.
             // The sequence counter is kept monotonic across the clear.
@@ -392,6 +397,17 @@ impl HostCore {
         *self.last_status.borrow_mut() = Some(status);
         self.status_dirty.set(true);
         Ok(())
+    }
+
+    /// Retire the last status so a superseded fact no longer surfaces.
+    ///
+    /// Used by the font funnel after a successful load retires a stale
+    /// `fonts.failed` status; the dirty bit is set only when something was
+    /// actually cleared, so an already-empty slot publishes no update.
+    pub(crate) fn clear_last_status(&self) {
+        if self.last_status.borrow_mut().take().is_some() {
+            self.status_dirty.set(true);
+        }
     }
 
     pub fn set_catalog_status(&self, key: &str, values: &[(&str, &str)]) -> CadResult<()> {

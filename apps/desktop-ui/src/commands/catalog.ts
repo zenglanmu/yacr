@@ -278,6 +278,11 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // and `LAYON` keep meaning "clear every override"; this one does not, which is
   // why it never borrows `layers.restore` or `draw.kind.layon` as its label.
   { id: 'LAYERP', labelKey: 'layers.previous', icon: 'eye', group: 'annotate' },
+  // FONTS opens the read-only Font Manager (`cad_fonts`). It is a chrome-local
+  // selector like LAYER/PROPERTIES, so the command line and the ribbon open the
+  // panel without the router ever seeing the word. It closes the annotation run
+  // (typefaces are an annotation property) without moving the layer run above it.
+  { id: 'FONTS', labelKey: 'resources.fonts', icon: 'font', group: 'annotate' },
   { id: 'PROPERTIES', labelKey: 'properties.panel', icon: 'properties', group: 'annotate' },
   { id: 'SELECTALL', labelKey: 'selection.all', icon: 'selectAll', group: 'annotate' },
   { id: 'ZOOMIN', labelKey: 'toolbar.zoom_in', icon: 'zoomIn', group: 'view' },

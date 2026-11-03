@@ -34,12 +34,20 @@
 #                        ui      — `scripts/build-web-ui.sh`: index.html,
 #                                  assets/*.js, canvas/app_web.js|wasm, bootstrap
 #   SKIP_BUILD=1       deploy the existing bundle without rebuilding it
+#   SKIP_FONTS=1       reuse an existing $DIST/fonts instead of downloading it
+#
+# Fonts are **not** part of either build artifact: the page fetches the faces it
+# needs lazily, after a document opens, from same-origin `fonts/`. This script
+# therefore assembles the full CDN package into `$DIST/fonts` with
+# `scripts/fetch-fonts.sh` (mlightcad catalogue + faces, plus the committed
+# osifont/Noto) before anything is validated or uploaded — for both bundle kinds,
+# so the site root always serves `fonts/`.
 #
 # Honesty rules:
 #   * every expected artifact is asserted non-empty before anything is uploaded,
 #     and the exact directory that passed those checks is the one deployed;
-#   * a missing credential, a missing bundle or a wrangler failure is a loud
-#     non-zero exit — there is no "probably fine" path;
+#   * a missing credential, a missing bundle, a failed font download or a wrangler
+#     failure is a loud non-zero exit — there is no "probably fine" path;
 #   * a successful upload is **deployment** evidence only. It is not runtime,
 #     GPU or pixel evidence: CI's browser smoke runs separately and under
 #     software rendering (see `.github/workflows/build.yml`).
@@ -59,6 +67,28 @@ API="https://api.cloudflare.com/client/v4"
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
   "$ROOT/scripts/build-web.sh"
 fi
+
+# --- the CDN font package --------------------------------------------------
+
+# Neither bundle carries fonts: the page loads them lazily from same-origin
+# `fonts/` after a document opens. Assemble the **full** package (mlightcad
+# catalogue + every face, merged with the committed osifont/Noto) at the site
+# root, so both bundle kinds publish the same `fonts/` URL space.
+FONT_DEST="$DIST/fonts"
+NOTO_FILE="NotoSansCJKsc-Regular.otf"
+if [ "${SKIP_FONTS:-0}" = "1" ]; then
+  echo "SKIP_FONTS=1: reusing the existing $FONT_DEST (no download)"
+else
+  echo "assembling the font package into $FONT_DEST (scripts/fetch-fonts.sh)"
+  "$ROOT/scripts/fetch-fonts.sh" "$FONT_DEST" \
+    || { echo "font package assembly failed; refusing to publish without fonts/" >&2; exit 1; }
+fi
+[ -s "$FONT_DEST/fonts.json" ] \
+  || { echo "missing or empty $FONT_DEST/fonts.json; the page cannot resolve any face" >&2; exit 1; }
+[ -s "$FONT_DEST/$NOTO_FILE" ] \
+  || { echo "missing or empty $FONT_DEST/$NOTO_FILE; the default CJK fallback would be absent" >&2; exit 1; }
+[ -s "$FONT_DEST/NotoSansCJK-OFL.txt" ] \
+  || { echo "missing or empty $FONT_DEST/NotoSansCJK-OFL.txt; the OFL text must ship with the face" >&2; exit 1; }
 
 # The two bundle contracts. Exactly these files, each non-empty: a stale or
 # partial directory must never be published.

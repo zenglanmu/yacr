@@ -60,6 +60,8 @@
 //!
 //! ```text
 //! start(canvas_id, css_w, css_h, dpr)                       -> JSON status (async)
+//! set_font_package(catalog_json, files)                     -> JSON summary (lazy, after an open)
+//! apply_font_package()                                      -> JSON status (lazy, reinstalls on the live session)
 //! open_bytes(canvas_id, label, css_w, css_h, dpr, bytes)    -> JSON status (async)
 //! frame()                                                   -> JSON frame line
 //! resize(css_w, css_h, dpr)                                 -> JSON status
@@ -117,6 +119,9 @@
 //! - `input` — a pointer/command step the session refused (an unsupported button, a
 //!   stale metrics revision, the modal popup gate).
 //! - `state` — there is no live session for the call.
+//! - `font` — [`apply_font_package`] had no package (`font.package_missing`), no
+//!   live session (`font.no_session`) or could not build the engine
+//!   (`font.reinstall_failed`).
 //!
 //! [`open_bytes`] applies both budgets **before** the bytes reach the importer and
 //! replaces the document in place, so a bad/unsupported/over-budget file leaves the
@@ -150,10 +155,16 @@
 //!   session-drivable picker — opening is the transport's command (the page's file
 //!   picker), which lifts `canOpen` itself and delivers bytes through
 //!   [`open_bytes`].
-//! - **No shaping fonts, no image decoder.** A drawing that requests a face or a
-//!   raster image still opens, and the resource install is reported as a
-//!   non-fatal diagnostic ([`platform`]) — its text is drawn unshaped and images
-//!   are not decoded. That gap is unchanged by this lane.
+//! - **Shaping fonts are fetched lazily from the CDN; images have no decoder.**
+//!   Nothing is preloaded: after a document opens, the page reads `cad_fonts`
+//!   (`requested`/`textNeeded`), fetches only the catalogue entries the drawing
+//!   can use from the project's Pages CDN (same-origin `fonts/`), installs them
+//!   with [`set_font_package`] and re-runs the install on the live session with
+//!   [`apply_font_package`]. Until that finishes — or when the CDN is unreachable
+//!   — a drawing that requests a face still opens, and the resource install is
+//!   reported as a non-fatal `unsupported-resources: fonts` diagnostic
+//!   ([`platform`]); its text is drawn unshaped, never silently claimed. Raster
+//!   images are still not decoded.
 //! - **The worker carrier is still the viewer.** It has no wire surface
 //!   (`invoke`/`probe_input`/`shell_*` refuse there), its status keeps the viewer's
 //!   fields, and it still releases the database after the display build.
@@ -191,6 +202,22 @@ pub mod view;
 /// unmapped surface, no font/image package) is asserted by `cargo test -p app-web`
 /// on the host. See [`platform`] for the capability table and the honest limits.
 pub mod platform;
+
+/// The **font package** the browser carrier receives from the page: an in-memory
+/// [`cad_platform::fonts::MemoryFontLoader`] plus the synchronous engine build
+/// `HostResources::install_fonts` needs.
+///
+/// Fonts are **not** bundled and **not** preloaded: after a document opens, the
+/// page asks `cad_fonts` what the drawing needs, fetches those catalogue entries
+/// from the project's Pages CDN (same-origin `fonts/`), installs them through
+/// [`set_font_package`], and calls [`apply_font_package`] to re-run the install on
+/// the live session. The package may be partial; a catalog face without bytes is
+/// reported as a named `ResourceMissing` row when planned. Its slot is a
+/// thread-local (one wasm instance, one owner thread) and a refused package never
+/// replaces a good one. Target-independent so `cargo test -p app-web` drives it on
+/// the host; the JS fetch lives in `scripts/build-canvas-wasm.sh` and
+/// `web/main.js`.
+pub mod fonts;
 
 /// The browser [`platform::PlatformFiles`]: **save/plot become real downloads**.
 ///
@@ -373,6 +400,128 @@ pub fn open_bytes_offscreen(
 #[cfg(not(target_arch = "wasm32"))]
 pub fn worker_capability() -> String {
     capability::Capability::new(capability::Context::Window, false).to_json()
+}
+
+/// Native builds have no JS context and therefore no way to receive the package
+/// bytes; a native font package is the desktop `fonts/` directory, not this entry
+/// point. Refused with the explicit NOT IMPLEMENTED diagnostic.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn set_font_package(_catalog_json: &str, _files: ()) -> Result<String, String> {
+    Err(NOT_IMPLEMENTED.to_string())
+}
+
+/// Install the **font package** (`fonts.json` + the faces the page fetched) into
+/// the wasm session.
+///
+/// `catalog_json` is the parsed-as-text content of the catalogue; `files`
+/// is a plain JS object `{fileName: Uint8Array | ArrayBuffer}` (a `Map` with the
+/// same keys/values is accepted too). The bytes are copied into the wasm heap and
+/// validated before the package replaces whatever was installed: a bad or empty
+/// catalogue, a zero-length file or a duplicate name is rejected with a message,
+/// never installed as an empty success.
+///
+/// The package may be **partial**: the Web page fetches only the faces the open
+/// drawing can use (its requested names plus the default and locale fallbacks), so
+/// a catalogue face without bytes is not an error here. If a later plan selects
+/// such a face, the load reports it as a named `ResourceMissing` row.
+///
+/// The Web carrier calls this **lazily, after a document is open** (nothing is
+/// preloaded before `start`), then calls [`apply_font_package`] to install the
+/// engine on the live session. Calling it before [`start`]/[`open_bytes`] still
+/// works and makes the first open shape text directly.
+///
+/// Answers the JSON summary `{ok, catalog_entries, files, bytes}`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_font_package(catalog_json: &str, files: JsValue) -> Result<String, JsValue> {
+    let entries = js_font_package_entries(&files).map_err(|message| JsValue::from_str(&message))?;
+    fonts::install_package(catalog_json, entries)
+        .map(fonts::PackageSummary::to_json)
+        .map_err(|message| JsValue::from_str(&message))
+}
+
+/// Re-run the session's shaping-font install from the package most recently
+/// installed by [`set_font_package`].
+///
+/// This is the second half of the lazy Web font path. The page opens a document
+/// without any package (so the open funnel records its honest
+/// `unsupported-resources: fonts` diagnostic), asks `cad_fonts` what the drawing
+/// needs, fetches those faces from the same-origin CDN, installs them with
+/// [`set_font_package`] and then calls this to shape the **already open**
+/// document. The document and the camera are untouched: only the shaping engine
+/// is rebuilt, and one frame is presented so the re-shaped text reaches the
+/// canvas.
+///
+/// Refused by name, never with a fake success:
+///
+/// * `font.package_missing` — no package has been installed on this wasm
+///   instance (`set_font_package` was never called or was refused);
+/// * `font.no_session` — no live page session to reinstall into (nothing is open,
+///   or the start failed);
+/// * `font.reinstall_failed` — the package was installed but the engine could not
+///   be built (the underlying reason is included).
+///
+/// Answers the session status JSON (the same object [`status`] returns), so the
+/// caller sees the real post-install resource state.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn apply_font_package() -> Result<String, JsValue> {
+    page::apply_font_package_impl()
+}
+
+/// Native builds have no JS context and therefore no staged package to apply;
+/// the same explicit NOT IMPLEMENTED refusal as [`set_font_package`].
+#[cfg(not(target_arch = "wasm32"))]
+pub fn apply_font_package() -> Result<String, String> {
+    Err(NOT_IMPLEMENTED.to_string())
+}
+
+/// Read `{name: Uint8Array|ArrayBuffer}` (or the same `Map`) into owned bytes.
+#[cfg(target_arch = "wasm32")]
+fn js_font_package_entries(files: &JsValue) -> Result<Vec<(String, Vec<u8>)>, String> {
+    if !files.is_object() {
+        return Err("font package must be an object or Map of file names to bytes".to_string());
+    }
+    // A `Map` is iterable; a plain object is not. `try_iter` therefore tells the
+    // two apart without guessing from a constructor name.
+    if let Some(iter) = js_sys::try_iter(files)
+        .map_err(|error| format!("font package is not iterable: {error:?}"))?
+    {
+        let mut out = Vec::new();
+        for entry in iter {
+            let entry = entry.map_err(|error| format!("font package entry: {error:?}"))?;
+            let pair = js_sys::Array::from(&entry);
+            let name = pair
+                .get(0)
+                .as_string()
+                .ok_or_else(|| "font package keys must be strings".to_string())?;
+            out.push((name, js_font_bytes(pair.get(1))?));
+        }
+        return Ok(out);
+    }
+    let entries = js_sys::Object::entries(files.unchecked_ref());
+    let mut out = Vec::with_capacity(entries.length() as usize);
+    for entry in entries.iter() {
+        let pair = js_sys::Array::from(&entry);
+        let name = pair
+            .get(0)
+            .as_string()
+            .ok_or_else(|| "font package keys must be strings".to_string())?;
+        out.push((name, js_font_bytes(pair.get(1))?));
+    }
+    Ok(out)
+}
+
+/// Copy a `Uint8Array`/`ArrayBuffer` value; anything else is refused by name.
+#[cfg(target_arch = "wasm32")]
+fn js_font_bytes(value: JsValue) -> Result<Vec<u8>, String> {
+    if value.is_instance_of::<js_sys::Uint8Array>() {
+        Ok(js_sys::Uint8Array::from(value).to_vec())
+    } else if value.is_instance_of::<js_sys::ArrayBuffer>() {
+        Ok(js_sys::Uint8Array::new(&value).to_vec())
+    } else {
+        Err("font package values must be Uint8Array or ArrayBuffer".to_string())
+    }
 }
 
 /// Start the wasm CAD session on the compiled-in synthetic fixture and present the
@@ -733,6 +882,8 @@ mod native_tests {
             start_offscreen((), 800.0, 600.0, 1.0).unwrap_err(),
             NOT_IMPLEMENTED
         );
+        assert_eq!(set_font_package("[]", ()).unwrap_err(), NOT_IMPLEMENTED);
+        assert_eq!(apply_font_package().unwrap_err(), NOT_IMPLEMENTED);
     }
 
     #[test]

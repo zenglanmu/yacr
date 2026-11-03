@@ -26,6 +26,7 @@ script refuses to run anywhere but macOS.
 """
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -36,6 +37,7 @@ SCRIPT = ROOT / "scripts/package-macos-release.sh"
 
 APP_ID = "dev.yacr.app"
 BINARY = "yacr-macos"
+CJK_FALLBACK = "NotoSansCJKsc-Regular.otf"
 
 # Each (label, literal) pair is a required fragment of the live pipeline. The
 # mutation tests delete them one at a time, so a silent regression is reported.
@@ -153,6 +155,19 @@ class PackageMacosReleaseLiveContracts(unittest.TestCase):
             any("before cargo build" in problem for problem in problems),
             f"ordering mutation not detected: {problems}",
         )
+
+    def test_staged_fonts_expect_the_committed_cjk_fallback(self) -> None:
+        # The app bundle's Resources/fonts is filled from the committed package
+        # (WITH_FONTS=1 merges the fetched catalogue into it, WITH_FONTS=0 copies
+        # it offline), so the Noto CJK fallback must be in that package.
+        entries = json.loads(
+            (ROOT / "fonts" / "fonts.json").read_text(encoding="utf-8")
+        )
+        self.assertIn(CJK_FALLBACK, {entry.get("file") for entry in entries})
+        self.assertTrue((ROOT / "fonts" / CJK_FALLBACK).is_file())
+        self.assertIn("fetch-fonts.sh", self.script)
+        self.assertIn('cp -R "${ROOT}/fonts/." "$FONTS_STAGE/"', self.script)
+        self.assertIn('[ -s "${FONTS_STAGE}/fonts.json" ]', self.script)
 
 
 if __name__ == "__main__":

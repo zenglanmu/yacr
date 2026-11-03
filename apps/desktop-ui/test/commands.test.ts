@@ -171,9 +171,11 @@ test('the command catalog lists exactly the router-refused dead affordances, and
   assert.equal(admitCommandText('LAYER', { status: null, pending: true }).kind, 'admitted');
   assert.equal(isLocalChromeCommand('layer'), true, 'the selector is case-insensitive');
   // `RESOURCES` opens the References panel from the status rows, so it is a
-  // chrome-local selector too (it sends no second host report).
+  // chrome-local selector too (it sends no second host report). `FONTS` opens the
+  // read-only Font Manager and owns its report (`cad_fonts`), never a router line.
   assert.equal(isLocalChromeCommand('resources'), true, 'the selector is case-insensitive');
-  assert.deepEqual([...LOCAL_CHROME_COMMANDS], ['PROPERTIES', 'LAYER', 'RESOURCES']);
+  assert.equal(isLocalChromeCommand('fonts'), true, 'the selector is case-insensitive');
+  assert.deepEqual([...LOCAL_CHROME_COMMANDS], ['PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES']);
   // `PLINE` is now a real (draw) selector, so it is neither reserved nor dead:
   // `ANGLE` (not an AutoCAD command) stays absent from the catalog and refused.
   assert.equal(ROUTER_REFUSED_AFFORDANCES.includes('ANGLE'), false, 'ANGLE');
@@ -594,9 +596,10 @@ test('every ribbon command id and label key exists in the shared catalog', async
 test('every chrome-local selector is admitted without the host vocabulary and has a dispatch path', async () => {
   const { readModule } = await import('./helpers.ts');
   // The set, in one place: PROPERTIES opens the docked inspector, LAYER opens the
-  // docked layers palette, RESOURCES opens the References panel. All three are
-  // answered by the chrome before the router and none needs a document.
-  assert.deepEqual([...LOCAL_CHROME_COMMANDS].sort(), ['LAYER', 'PROPERTIES', 'RESOURCES']);
+  // docked layers palette, FONTS opens the read-only Font Manager and RESOURCES
+  // opens the References panel. All four are answered by the chrome before the
+  // router and none needs a document.
+  assert.deepEqual([...LOCAL_CHROME_COMMANDS].sort(), ['FONTS', 'LAYER', 'PROPERTIES', 'RESOURCES']);
   for (const id of LOCAL_CHROME_COMMANDS) {
     assert.equal(isLocalChromeCommand(id), true, id);
     assert.equal(isLocalChromeCommand(id.toLowerCase()), true, id);
@@ -613,12 +616,18 @@ test('every chrome-local selector is admitted without the host vocabulary and ha
   assert.equal(isLocalChromeCommand('LAYERS'), false);
   assert.equal(LOCAL_CHROME_COMMANDS.includes('LAYERSTATE'), false);
   // The app answers each selector in the command funnel, before the in-flight
-  // guard, and never forwards the text to `cad_command`.
+  // guard, and never forwards the text to `cad_command`. The table itself lives in
+  // `commands/local-selectors.ts`, so this suite reads both modules.
   const app = await readModule('App.tsx');
+  const selectors = await readModule('commands/local-selectors.ts');
   const guard = app.indexOf('submitting.current = true');
-  for (const call of ['isOptionsCommand(text)', 'isResourcesCommand(text)', 'isPropertiesCommand(text)', 'isLayersCommand(text)']) {
-    assert.ok(app.includes(call), `${call} must be intercepted`);
-    assert.ok(app.indexOf(call) < guard, `${call} must run before the in-flight guard`);
+  assert.ok(
+    app.includes('if (runLocalSelector(text, options.fromInput === true)) return;'),
+    'the one local-selector interceptor runs in the submit path',
+  );
+  assert.ok(app.indexOf('runLocalSelector(text') < guard, 'it must run before the in-flight guard');
+  for (const call of ['isOptionsCommand(text)', 'isResourcesCommand(text)', 'isPropertiesCommand(text)', 'isLayersCommand(text)', 'isFontsCommand(text)']) {
+    assert.ok(selectors.includes(call), `${call} must be resolved by the local-selector table`);
   }
 });
 

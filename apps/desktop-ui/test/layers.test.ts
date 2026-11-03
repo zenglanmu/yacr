@@ -663,10 +663,11 @@ test('the palette is docked next to the other palettes and opened by a shell act
   assert.ok(workspace.includes('const showLayers = palettesAvailable && Boolean(shell.layersOpen);'));
   assert.ok(workspace.includes('{showLayers ? <LayersPalette /> : null}'));
   // It contributes to the dock being open, and never paints over the partition.
-  assert.ok(workspace.includes('const leftOpen = showStart || showProperties || showDiagnostics || showLayers || showReferences;'));
+  assert.ok(workspace.includes('const leftOpen = showStart || showProperties || showDiagnostics || showLayers || showReferences || showFonts;'));
 
   const app = await readModule('App.tsx');
-  assert.ok(app.includes("import { isLayersCommand } from './layers/layers.ts';"));
+  const selectors = await readModule('commands/local-selectors.ts');
+  assert.ok(selectors.includes("import { isLayersCommand } from '../layers/layers.ts';"));
   assert.ok(app.includes('const [layersOpen, setLayersOpen] = useState(false);'),
     'closed by default, so the start page keeps its geometry');
   assert.ok(app.includes('const [layersFocus, setLayersFocus] = useState(0);'));
@@ -674,9 +675,9 @@ test('the palette is docked next to the other palettes and opened by a shell act
   assert.ok(app.includes('layersOpen,'));
   assert.ok(app.includes('toggleLayers: () => setLayersOpen(value => !value)'));
   // The selector is intercepted before the in-flight guard, like OPTIONS/PROPERTIES.
-  const intercept = app.indexOf('isLayersCommand(text)');
+  const intercept = selectors.indexOf('isLayersCommand(text)');
   assert.ok(intercept > 0);
-  assert.ok(intercept < app.indexOf('submitting.current = true'));
+  assert.ok(app.indexOf('runLocalSelector(text') < app.indexOf('submitting.current = true'));
 
   const palette = await readModule('components/LayersPalette.tsx');
   assert.ok(palette.includes('useSyncExternalStore'), 'the panel subscribes to the store, not to polls');
@@ -693,7 +694,7 @@ test('LAYER is not offered as a ribbon affordance on a carrier without palettes'
   // The layer-state commands ride the same carrier filter: a carrier that never
   // renders the layers palette has no surface for the isolation, previous-state or
   // off/on state.
-  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON']);
+  assert.deepEqual([...PALETTE_COMMANDS], ['LAYER', 'LAYISO', 'LAYUNISO', 'LAYERP', 'LAYOFF', 'LAYON', 'FONTS']);
   const layer = { id: 'LAYER', labelKey: 'layers.panel', command: 'LAYER' };
   const properties = { id: 'PROPERTIES', labelKey: 'properties.panel', action: 'properties' };
   const items = [layer, properties, { id: 'OPEN', command: 'OPEN' }];

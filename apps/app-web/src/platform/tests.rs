@@ -10,10 +10,15 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 
-use cad_domain::CadError;
+use cad_db::{DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer, Style};
+use cad_domain::{
+    CadError, DatabaseId, EntityId, LayerId, ObjectId, Point3, Revision, SemanticGeometry, SpaceId,
+    StyleId, TextAlignH, TextAlignV,
+};
 use cad_engine::render::{BackendPreference, RenderSessionHandle};
-use cad_host::{HostOptions, RequestClock};
+use cad_host::{HostCore, HostOptions, RequestClock};
 use cad_platform::{
     ConfigLoad, ConfigStore, FileEvent, FileTarget, HostCapabilities, PlatformFiles, SavePurpose,
     SurfaceSource,
@@ -404,6 +409,182 @@ fn resources_refuse_only_when_the_drawing_asks_for_something() {
     };
     assert!(reason.starts_with(UNSUPPORTED_RESOURCES), "{reason}");
     assert!(reason.contains("logo") || reason.contains('1'), "{reason}");
+}
+
+// ------------------------------------------------------- font package install
+
+fn p(x: f64, y: f64) -> Point3 {
+    Point3 { x, y, z: 0.0 }
+}
+
+/// A drawing with one text entity and no named font: the exact draw-then-install
+/// case the browser package has to resolve through its fallback chain.
+fn text_drawing() -> DrawingDatabase {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_style(Style {
+            id: StyleId(0),
+            name: "Standard".into(),
+            resource_keys: Vec::new(),
+        })
+        .unwrap();
+    builder
+        .insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "AcDbText".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Text {
+                text: "hello".into(),
+                position: p(0.0, 0.0),
+                style: StyleId(0),
+                height: 2.5,
+                rotation: 0.0,
+                font: None,
+                h_align: TextAlignH::Left,
+                v_align: TextAlignV::Baseline,
+                wrap_width: None,
+            },
+            draw_order: 0,
+        })
+        .unwrap();
+    builder.finish().unwrap()
+}
+
+/// A host core over the browser platform whose document is the text drawing.
+///
+/// `HostCore` owns its controller, so this is the same state the real session
+/// reaches after an open; no GPU is attached.
+fn core_with_text_drawing() -> HostCore {
+    let platform = BrowserPlatform::new();
+    let core = HostCore::new(
+        options(),
+        platform.host_platform(BROWSER_CAPABILITIES),
+        RenderSessionHandle::new(BackendPreference::WebGl2),
+    )
+    .expect("the browser host core builds");
+    {
+        let mut controller = core.controller.borrow_mut();
+        let document = controller.document_id;
+        controller
+            .application
+            .workspace
+            .documents
+            .get_mut(&document)
+            .expect("the host always has a document")
+            .drawing = Arc::new(text_drawing());
+    }
+    core
+}
+
+fn committed_font_package() -> (String, Vec<(String, Vec<u8>)>) {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("fonts");
+    let catalog = std::fs::read_to_string(dir.join("fonts.json")).expect("committed catalog");
+    let parsed = cad_resources::FontCatalog::from_json(&catalog).expect("catalog parses");
+    let files = parsed
+        .faces()
+        .map(|face| {
+            let path = dir.join(&face.file);
+            let bytes = std::fs::read(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            (face.file.clone(), bytes)
+        })
+        .collect();
+    (catalog, files)
+}
+
+#[test]
+fn without_a_package_a_text_drawing_is_refused_explicitly() {
+    crate::fonts::clear();
+    let core = core_with_text_drawing();
+
+    let error = core
+        .install_fonts()
+        .expect_err("no staged package must refuse a text drawing");
+    let CadError::Unsupported(reason) = error else {
+        panic!("the refusal stays a real Unsupported diagnostic");
+    };
+    assert!(reason.starts_with(UNSUPPORTED_RESOURCES), "{reason}");
+    assert!(
+        core.render.fonts().is_none(),
+        "the refusal installs no engine"
+    );
+    assert!(
+        core.last_font_report().is_none(),
+        "nothing was loaded, so nothing is reported as loaded"
+    );
+}
+
+#[test]
+fn an_installed_package_resolves_the_text_drawing_and_retires_stale_failure() {
+    crate::fonts::clear();
+    let (catalog, files) = committed_font_package();
+    let summary = crate::fonts::install_package(&catalog, files).expect("package installs");
+    assert_eq!(summary.catalog_entries, 2);
+    let core = core_with_text_drawing();
+
+    // A previous document's failure is the status the session's stale-resource
+    // guard watches; a successful install must not leave it behind.
+    core.set_catalog_status("fonts.failed", &[("error", "stale")])
+        .expect("status records");
+
+    core.install_fonts()
+        .expect("the staged package resolves text");
+
+    let engine = core
+        .render
+        .fonts()
+        .expect("a text-bearing drawing installs the package engine");
+    assert!(
+        engine.contains("NotoSansCJKsc-Regular.otf"),
+        "the published engine holds the default face: {:?}",
+        engine.fallback_keys()
+    );
+    let report = core
+        .last_font_report()
+        .expect("the real per-face report is published");
+    assert!(
+        report
+            .registered
+            .iter()
+            .any(|file| file == "NotoSansCJKsc-Regular.otf"),
+        "{:?}",
+        report.registered
+    );
+    assert!(
+        !matches!(core.last_status(), Some(cad_engine::protocol::StatusMessage::Catalog { ref key, .. }) if key == "fonts.failed"),
+        "a successful install retires the stale fonts.failed status"
+    );
+    crate::fonts::clear();
+}
+
+#[test]
+fn a_drawing_without_text_is_still_a_real_no_op_with_a_package_installed() {
+    crate::fonts::clear();
+    let (catalog, files) = committed_font_package();
+    crate::fonts::install_package(&catalog, files).expect("package installs");
+    let (_platform, session) = open(BROWSER_CAPABILITIES);
+
+    // The session's fixture has no text, so the engine stays absent even though
+    // the package is available: install nothing rather than an empty engine.
+    let render = session.render_session();
+    assert!(render.fonts().is_none());
+    crate::fonts::clear();
 }
 
 // ------------------------------------------------------------ the session entry

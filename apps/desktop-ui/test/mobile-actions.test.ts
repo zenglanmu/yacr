@@ -67,16 +67,19 @@ test('App routes every shortcut through the layout table', async () => {
 
 test('a typed PROPERTIES / LAYER is refused on mobile and opens the dock on desktop', async () => {
   const app = await readModule('App.tsx');
-  // Both selectors go through the one chrome-local branch.
-  assert.ok(app.includes('if (isPropertiesCommand(text) || isLayersCommand(text))'));
-  const guardAt = app.indexOf('if (!dockedPaletteOpenable(layout))');
-  const openAt = app.indexOf('setPropertiesOpen(true)');
-  assert.ok(guardAt > 0, 'the layout check is the first thing the branch does');
-  assert.ok(openAt > guardAt, 'the palette is opened only after the layout check');
+  const selectors = await readModule('commands/local-selectors.ts');
+  // Both selectors go through the one chrome-local table.
+  assert.ok(app.includes('if (runLocalSelector(text, options.fromInput === true)) return;'));
+  assert.ok(selectors.includes('if (isPropertiesCommand(text))'));
+  assert.ok(selectors.includes('if (isLayersCommand(text))'));
+  const guardAt = selectors.indexOf('dockedPaletteOpenable(layout)');
+  assert.ok(guardAt > 0, 'the layout check is paired with each docked panel');
+  assert.ok(selectors.includes('LOCAL_SELECTOR_PANEL_KEYS.properties'));
+  assert.ok(selectors.includes('LOCAL_SELECTOR_PANEL_KEYS.layers'));
   assert.ok(app.includes('setLayersFocus(value => value + 1)'), 'the desktop LAYER refresh is unchanged');
   // The refusal is the catalog's own sentence, naming the panel that is missing.
-  assert.ok(app.includes('DOCKED_PANEL_REFUSAL_KEY'), 'the typed path uses the one refusal key');
-  assert.ok(app.includes("t(layers ? 'layers.panel' : 'properties.panel')"), 'and the panel label');
+  assert.ok(selectors.includes('DOCKED_PANEL_REFUSAL_KEY'), 'the typed path uses the one refusal key');
+  assert.ok(selectors.includes('panel: translate(result.panelKey)'), 'and the panel label');
 });
 
 test('the refusal copy is one catalog sentence in both languages', async () => {
@@ -118,8 +121,10 @@ test('the drawer keeps the real model/layout strip the desktop band shows', asyn
   assert.ok(drawer.includes("t('layout.tab.model')"), 'the model space keeps the desktop label');
   assert.ok(drawer.includes('layoutUnsupportedTitle(t, space)'), 'unsupported reasons are the desktop ones');
   assert.ok(drawer.includes('shell.runCommand(command)'), 'a supported tab dispatches the same SPACE line');
-  // References is reachable on the compact layout without a dock.
+  // References and the Font Manager are reachable on the compact layout without
+  // a dock: both are in-DOM sheets in this tree.
   assert.ok(drawer.includes('shell.setReferencesOpen(true)'), 'the drawer opens the references sheet');
+  assert.ok(drawer.includes('shell.setFontsOpen(true)'), 'the drawer opens the Font Manager sheet');
 
   const tabs = await readModule('components/LayoutTabs.tsx');
   assert.ok(tabs.includes('layoutTabsView(shell.status)'), 'the desktop strip reads the same projection');
@@ -129,4 +134,6 @@ test('the drawer keeps the real model/layout strip the desktop band shows', asyn
   assert.ok(css.includes('.mobile-drawer__space-note'), 'the reason is visible text, not a tooltip');
   assert.ok(css.includes('.mobile-drawer__space-scroll'), 'many layouts scroll instead of shrinking');
   assert.ok(css.includes('.references--floating'), 'the compact references sheet has its styling');
+  assert.ok(css.includes('.fonts--floating'), 'the compact Font Manager sheet has its styling');
+  assert.ok(css.includes('.fonts--floating .ui-icon-button'), 'the sheet close control is a 44px target');
 });

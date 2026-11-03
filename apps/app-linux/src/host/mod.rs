@@ -50,6 +50,7 @@ mod admission;
 pub(crate) mod canvas_session;
 mod dispatch;
 mod dom;
+mod fonts;
 mod init;
 mod layers;
 mod locale;

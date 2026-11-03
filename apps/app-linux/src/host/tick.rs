@@ -813,6 +813,8 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         );
         // The layer panel's own mirror (see `super::layers`).
         super::layers::mirror(shared);
+        // The Font Manager's own mirror (see `super::fonts`).
+        super::fonts::mirror(shared);
         // Bounded CAD stage telemetry (diagnostics only): ONE aggregated line
         // when an upload work unit staged/committed, or the host frame was slow
         // (> 50 ms). Both observations are taken (consumed) at most once, so a

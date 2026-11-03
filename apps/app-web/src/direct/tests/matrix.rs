@@ -337,8 +337,10 @@ fn the_control_reads_answer_the_same_object_on_both_paths() {
     let session = session();
     let settings = session.settings();
     let layers = session.layers();
+    let fonts = session.fonts();
     let projected = layers.clone().expect("the fixture projects its layers");
-    let mirrored = QueueReads::new(Some(&settings), Some(&layers));
+    let projected_fonts = fonts.clone().expect("the fixture projects its fonts");
+    let mirrored = QueueReads::new(Some(&settings), Some(&layers), Some(&fonts));
     let direct = DirectReads::new(&session);
 
     assert_eq!(
@@ -349,11 +351,22 @@ fn the_control_reads_answer_the_same_object_on_both_paths() {
         wire::layers(&mirrored).expect("a mirrored projection"),
         wire::layers(&direct).expect("the session's own projection")
     );
+    assert_eq!(
+        wire::fonts(&mirrored).expect("a mirrored font registry"),
+        wire::fonts(&direct).expect("the session's own font registry")
+    );
 
     // The dispatcher serves the same JSON for both sources.
     let mut queues = Queues::new(true, false);
     let mut popups = NoPopups;
-    let (mirrored_settings, direct_settings, mirrored_layers, direct_layers) = {
+    let (
+        mirrored_settings,
+        direct_settings,
+        mirrored_layers,
+        direct_layers,
+        mirrored_fonts,
+        direct_fonts,
+    ) = {
         let mut sink = queues.sink();
         (
             dispatch("cad_settings", "{}", &mut sink, &mirrored, &mut popups)
@@ -364,10 +377,15 @@ fn the_control_reads_answer_the_same_object_on_both_paths() {
                 .expect("the mirrored layers read"),
             dispatch("cad_layers", "{}", &mut sink, &direct, &mut popups)
                 .expect("the direct layers read"),
+            dispatch("cad_fonts", "{}", &mut sink, &mirrored, &mut popups)
+                .expect("the mirrored font read"),
+            dispatch("cad_fonts", "{}", &mut sink, &direct, &mut popups)
+                .expect("the direct font read"),
         )
     };
     assert_eq!(mirrored_settings, direct_settings);
     assert_eq!(mirrored_layers, direct_layers);
+    assert_eq!(mirrored_fonts, direct_fonts);
     assert_eq!(
         direct_settings,
         serde_json::to_value(&settings).expect("serializes")
@@ -375,6 +393,10 @@ fn the_control_reads_answer_the_same_object_on_both_paths() {
     assert_eq!(
         direct_layers,
         serde_json::to_value(&projected).expect("serializes")
+    );
+    assert_eq!(
+        direct_fonts,
+        serde_json::to_value(&projected_fonts).expect("serializes")
     );
 }
 
@@ -391,13 +413,17 @@ fn the_mirrorless_read_answers_cad_waiting() {
         wire::layers(&empty).unwrap_err(),
         cad_ui_core::session::CAD_WAITING
     );
+    assert_eq!(
+        wire::fonts(&empty).unwrap_err(),
+        cad_ui_core::session::CAD_WAITING
+    );
 }
 
 /// A mirror refusal is relayed, never replaced by stale rows.
 #[test]
 fn a_mirror_refusal_is_relayed() {
     let refused: Result<CadLayers, String> = Err("layer.projection_failed: boom".to_string());
-    let reads = QueueReads::new(None, Some(&refused));
+    let reads = QueueReads::new(None, Some(&refused), None);
     assert_eq!(
         wire::layers(&reads).unwrap_err(),
         "layer.projection_failed: boom"

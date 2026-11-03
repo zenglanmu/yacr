@@ -21,12 +21,14 @@ byte-identical copy of that shared asset.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts/package-windows-release.sh"
+CJK_FALLBACK = "NotoSansCJKsc-Regular.otf"
 
 # (label, exact fragment). Each must appear in the packaging script, and deleting
 # every occurrence of it must be reported as a missing guarantee.
@@ -107,6 +109,19 @@ class PackageWindowsReleasePipelineContracts(unittest.TestCase):
         self.assertTrue(
             any("old Slint GUI binary name" in problem for problem in problems), problems
         )
+
+    def test_staged_fonts_expect_the_committed_cjk_fallback(self) -> None:
+        # Both branches stage the committed fonts/ package: WITH_FONTS=1 merges
+        # the fetched catalogue into it via fetch-fonts.sh, WITH_FONTS=0 copies
+        # it offline. The Noto CJK fallback must be part of that package.
+        entries = json.loads(
+            (ROOT / "fonts" / "fonts.json").read_text(encoding="utf-8")
+        )
+        self.assertIn(CJK_FALLBACK, {entry.get("file") for entry in entries})
+        self.assertTrue((ROOT / "fonts" / CJK_FALLBACK).is_file())
+        self.assertIn("fetch-fonts.sh", self.script)
+        self.assertIn('cp -R "$ROOT"/fonts/. "$STAGE/fonts/"', self.script)
+        self.assertIn('[ -s "$STAGE/fonts/fonts.json" ]', self.script)
 
     def test_window_binary_build_script_embeds_the_shared_icon(self) -> None:
         # Still-valid source contract on the Windows host: `tauri-build` embeds

@@ -20,9 +20,9 @@
 //!   the calling thread: it **applies** each already-admitted request through the
 //!   `CadSession` method the desktop owner tick would call, and returns the
 //!   session's own refusal verbatim;
-//! * [`DirectReads`] serves `cad_settings`/`cad_layers` from the session itself
-//!   (the desktop serves them from the owner-tick mirror, because there the
-//!   session is `!Send`).
+//! * [`DirectReads`] serves `cad_settings`/`cad_layers`/`cad_fonts` from the
+//!   session itself (the desktop serves them from the owner-tick mirror, because
+//!   there the session is `!Send`).
 //!
 //! Nothing here decides *what* a command means, and nothing here may turn a
 //! refusal into a success: the admission verdict, the gate order, the queue
@@ -36,10 +36,10 @@
 //! ```
 //!
 //! `value` is the answer the desktop command returns for the same name (`{accepted:
-//! true}` for a mutation, the `cad_settings`/`cad_layers` object for the reads, the
-//! `PopupAck` for `cad_open_popup`). `error` is byte-identical to the desktop
-//! refusal for a malformed request; for a request the **session** refuses, it is
-//! the session's own text (see the crate docs of
+//! true}` for a mutation, the `cad_settings`/`cad_layers`/`cad_fonts` object for
+//! the reads, the `PopupAck` for `cad_open_popup`). `error` is byte-identical to
+//! the desktop refusal for a malformed request; for a request the **session**
+//! refuses, it is the session's own text (see the crate docs of
 //! `cad_ui_core::session::wire` for the queued-vs-applied timing difference).
 //!
 //! An unknown name is refused with `unsupported-runtime: <name>` — the stable
@@ -57,7 +57,7 @@
 use cad_app::{StandardView, ToolParameter, ToolValue};
 use cad_ui_core::session::wire::{self, AdmissionTarget, ControlReads, PopupTarget};
 use cad_ui_core::session::{
-    CadLayerWrite, CadLayers, CadSession, CadSettingKey, CadSettingValue, CadSettings,
+    CadFonts, CadLayerWrite, CadLayers, CadSession, CadSettingKey, CadSettingValue, CadSettings,
 };
 use serde_json::Value;
 
@@ -197,9 +197,10 @@ impl AdmissionTarget for DirectSink<'_> {
 
 /// The [`ControlReads`] of a host that owns its session on this thread.
 ///
-/// Both answers are the session's own; there is no mirror to keep in step and no
+/// Every answer is the session's own; there is no mirror to keep in step and no
 /// `None` state (a synchronous carrier has a session whenever it can answer at
-/// all). `layers()` relays the session's own projection refusal unchanged.
+/// all). `layers()`/`fonts()` relay the session's own projection refusal
+/// unchanged.
 pub struct DirectReads<'a> {
     session: &'a CadSession,
 }
@@ -217,6 +218,10 @@ impl ControlReads for DirectReads<'_> {
 
     fn layers(&self) -> Option<Result<CadLayers, String>> {
         Some(self.session.layers())
+    }
+
+    fn fonts(&self) -> Option<Result<CadFonts, String>> {
+        Some(self.session.fonts())
     }
 }
 

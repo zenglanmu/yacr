@@ -13,6 +13,15 @@
   操作者代理下载；字节数与 SHA-256 见同目录 `SOURCE.md`）。QCAD `LICENSE.txt` 声明 QCAD 3
   源码为 GPLv3（附加例外）、图标与文档为 CC BY 3.0；`examples/` 无逐文件声明，按上述条款
   使用并保留本署名。仅作渲染回归输入与人工参考，不表示与 QCAD/RibbonSoft 存在关联或背书。
+- `fonts/NotoSansCJKsc-Regular.otf`：Noto Sans CJK SC Regular，来自
+  <https://github.com/notofonts/noto-cjk> 固定提交
+  `f8d157532fbfaeda587e826d4cd5b21a49186f7c` 的
+  `Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf`，原样分发、未修改。
+  字节数 16437364，SHA-256
+  `2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b`，
+  SIL Open Font License 1.1（文本见 `fonts/NotoSansCJK-OFL.txt`），版权行
+  `Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.`。
+  未修改即无需按 RFN 改名；仅作为缺字时的默认 CJK 回退轮廓面随发布包分发。
 - 未捆绑用户图纸、厂商插件或专有字体；已捆绑的开源 QCAD 样本来源与许可独立核对，
   不由主仓库许可推断。
 - `fonts/osifont.ttf`：QCAD（<https://github.com/qcad/qcad>）`fonts/osifont.ttf` 的副本，

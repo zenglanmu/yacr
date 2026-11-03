@@ -16,6 +16,7 @@ import { LayersPalette } from './LayersPalette.tsx';
 import { PropertiesPalette } from './PropertiesPalette.tsx';
 import { DiagnosticsPalette } from './DiagnosticsPalette.tsx';
 import { ReferencesPanel } from './ReferencesPanel.tsx';
+import { FontsPanel } from './FontsPanel.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../cad/surface.ts';
 
@@ -38,12 +39,15 @@ export function Workspace() {
   // The references panel is a document-wide list like the layers palette: it
   // reads the host's `cad_status.references` rows and is docked on the desktop.
   const showReferences = palettesAvailable && Boolean(shell.referencesOpen);
+  // The Font Manager is a document-wide read-only report like the references
+  // panel, so it is docked in the same column and gated by the same carrier flag.
+  const showFonts = palettesAvailable && Boolean(shell.fontsOpen);
   // The layers palette is a document-wide list, not a selection projection, so it
   // is offered on the start page too: with no session the host answers the empty
   // list and the panel says "no layers" rather than disappearing after `LAYER`.
   // Closed by default, so the startup partition geometry is unchanged.
   const showLayers = palettesAvailable && Boolean(shell.layersOpen);
-  const leftOpen = showStart || showProperties || showDiagnostics || showLayers || showReferences;
+  const leftOpen = showStart || showProperties || showDiagnostics || showLayers || showReferences || showFonts;
   // The host hides the system cursor over the CAD partition only while it is
   // drawing its own crosshair (a 2D view with a pointer on the surface). A 3D
   // view reports `false`, so the system arrow stays and the pointer is never
@@ -62,6 +66,7 @@ export function Workspace() {
         {showProperties ? <PropertiesPalette /> : null}
         {showDiagnostics ? <DiagnosticsPalette /> : null}
         {showReferences ? <ReferencesPanel /> : null}
+        {showFonts ? <FontsPanel /> : null}
       </div>
       <div className="workspace__canvas">
         {/* dom-canvas only: the in-DOM pixel carrier. It fills exactly the rect

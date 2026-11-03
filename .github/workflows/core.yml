@@ -106,7 +106,9 @@ jobs:
           python3 scripts/test-package-linux-release.py
           python3 scripts/test-package-windows-release.py
           python3 scripts/test-package-macos-release.py
+          python3 scripts/check-font-assets.py
           python3 scripts/test-fetch-fonts.py
+          python3 scripts/test-web-font-package.py
           python3 scripts/test-android-host.py
           python3 scripts/test-macos-host.py
           python3 scripts/test-ui-migration-guards.py

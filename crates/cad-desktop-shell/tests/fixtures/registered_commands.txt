@@ -4,6 +4,7 @@ cad_command_aliases
 cad_commands
 cad_create_layer
 cad_delete_layer
+cad_fonts
 cad_layers
 cad_open_popup
 cad_rename_layer

@@ -177,6 +177,34 @@ fn note_frame_is_the_actual_present_count() {
 }
 
 #[test]
+fn a_successful_font_install_retires_a_stale_failure_before_the_guard_runs() {
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    // A previous document's install failed and recorded the resource status.
+    session
+        .core
+        .set_catalog_status(RESOURCE_FAILED_STATUS, &[("error", "no resolver")])
+        .unwrap();
+    assert!(session.core.last_status().is_some());
+
+    // Reopening with resolvable fonts is a real success: the stale status is
+    // retired, so the guard below cannot clear the newly installed engine (and
+    // `cad_status.error` cannot stay stale).
+    session.core.install_fonts().expect("the reopen installs");
+    assert!(
+        session.core.last_status().is_none(),
+        "a successful install must retire the stale failure"
+    );
+    session.guard_stale_resources();
+    assert_eq!(
+        session.resource_guard.get(),
+        None,
+        "the guard must not touch a successfully installed engine"
+    );
+}
+
+#[test]
 fn stale_resource_guard_clears_caches_once_per_generation() {
     let session = session(Rc::new(FakeFiles {
         events: RefCell::new(Vec::new()),
