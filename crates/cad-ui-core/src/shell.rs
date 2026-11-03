@@ -15,6 +15,8 @@
 // `std::time::Instant::now()` panics on wasm32-unknown-unknown ("time not
 // implemented on this platform"); `web-time` re-exports std elsewhere, so this
 // is a no-op off wasm.
+use std::time::Duration;
+
 use web_time::Instant;
 
 use crate::protocol::{InputTracker, ProbeInput, ProbeStatus};
@@ -27,6 +29,42 @@ use crate::session::{
 pub const CAD_COMMAND_CAP: usize = 256;
 /// Bounded ordered main-thread CAD input queue capacity.
 pub const CAD_INPUT_CAP: usize = 512;
+
+/// Minimum interval between presented frames while the host is **idle**
+/// (bounds CPU/GPU work to ~60 fps).
+pub const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+/// Minimum interval while pointer/command input is active.
+///
+/// A 16 ms gate is 62.5 Hz: against a 60 Hz display every ~10th frame lands in
+/// the same refresh, and the input queue can wait a full gate (0–16 ms) before
+/// the crosshair moves. Matching each native host's 8 ms redraw pump while input
+/// is live gives the presenter a fresh cursor position for every refresh (the
+/// presenter still drops surplus frames), and the queue wait drops to ≤8 ms.
+/// Idle frames keep the 16 ms cap, so a still window is unchanged.
+pub const FRAME_INTERVAL_ACTIVE: Duration = Duration::from_millis(8);
+/// How long after the last admitted input the host stays on the active cadence.
+///
+/// Two idle frame periods: a 60 Hz pointer stream arrives every ~16.7 ms, so
+/// this keeps the gate open for the whole gesture without staying hot forever.
+pub const INPUT_ACTIVE_WINDOW: Duration = Duration::from_millis(32);
+
+/// Whether input currently owns the frame cadence: queued work or an input
+/// admitted within [`INPUT_ACTIVE_WINDOW`].
+///
+/// Pure so every native carrier's tick gate is contract-testable without an
+/// event loop.
+pub fn input_active(pending: bool, last_input_age: Option<Duration>) -> bool {
+    pending || last_input_age.is_some_and(|age| age <= INPUT_ACTIVE_WINDOW)
+}
+
+/// The frame gate for this tick (active vs idle).
+pub fn frame_interval(active: bool) -> Duration {
+    if active {
+        FRAME_INTERVAL_ACTIVE
+    } else {
+        FRAME_INTERVAL
+    }
+}
 
 /// Stable refusal reason while a modal popup holds the host input gate
 /// (ADR-0021 D2). The gate is host-owned: it is **not** the UI's
@@ -144,6 +182,20 @@ impl ShellState {
             cad_bind_failed_generation: None,
             popup: None,
         }
+    }
+
+    /// Whether input currently owns the frame cadence for this shell: queued CAD
+    /// work, or an input admitted within [`INPUT_ACTIVE_WINDOW`] of `now`.
+    ///
+    /// This is the shared input-hot frame gate every native carrier's tick uses;
+    /// the rule itself lives in the free [`input_active`] (one implementation).
+    pub fn input_active(&self, now: Instant) -> bool {
+        let pending = !self.cad_inputs.is_empty() || !self.cad_commands.is_empty();
+        let last_age = self
+            .cad_input_recv
+            .last()
+            .map(|(_, received)| now.saturating_duration_since(*received));
+        input_active(pending, last_age)
     }
 }
 
@@ -297,6 +349,53 @@ mod tests {
     use super::*;
     use crate::protocol::InputKind;
     use crate::session::{CadActiveSpace, CadSelection};
+
+    #[test]
+    fn input_activity_opens_the_faster_frame_gate_only_for_live_input() {
+        // Idle: no queued work and no recent input keeps the 16 ms cap.
+        assert!(!input_active(false, None));
+        assert_eq!(frame_interval(false), FRAME_INTERVAL);
+
+        // Pending work is active regardless of age.
+        assert!(input_active(true, None));
+        assert!(input_active(
+            true,
+            Some(INPUT_ACTIVE_WINDOW + Duration::from_secs(1))
+        ));
+
+        // The exact window boundary is still active; one nanosecond past it is
+        // idle (the rule is inclusive).
+        assert!(input_active(false, Some(INPUT_ACTIVE_WINDOW)));
+        assert!(!input_active(
+            false,
+            Some(INPUT_ACTIVE_WINDOW + Duration::from_nanos(1))
+        ));
+
+        // The active cadence is strictly faster than idle (and matches the pump).
+        assert_eq!(frame_interval(true), FRAME_INTERVAL_ACTIVE);
+        assert!(
+            FRAME_INTERVAL_ACTIVE < FRAME_INTERVAL,
+            "input must never be slower than idle"
+        );
+    }
+
+    #[test]
+    fn shell_input_active_reads_the_real_queues_and_receive_times() {
+        let mut state = ShellState::new(true);
+        let now = Instant::now();
+        assert!(!state.input_active(now));
+
+        // A queued command/input is pending regardless of receive age.
+        state.cad_commands.push("OPEN".into());
+        assert!(state.input_active(now));
+        state.cad_commands.clear();
+
+        // A recent admitted input keeps the gate open until the window elapses.
+        state.cad_input_recv.push((1, now));
+        assert!(state.input_active(now));
+        let past_window = now + INPUT_ACTIVE_WINDOW + Duration::from_nanos(1);
+        assert!(!state.input_active(past_window));
+    }
 
     fn input(kind: InputKind) -> ProbeInput {
         ProbeInput {

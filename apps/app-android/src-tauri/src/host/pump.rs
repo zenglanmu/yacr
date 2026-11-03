@@ -25,8 +25,9 @@ use std::time::Duration;
 
 /// How often the pump considers waking the main loop.
 ///
-/// 125 Hz; the tick still throttles to ~60 fps (`host::tick::FRAME_INTERVAL`), so
-/// this only prevents the loop from going idle.
+/// 125 Hz; the tick still throttles to ~60 fps (the shared
+/// `cad_ui_core::shell::FRAME_INTERVAL`), so this only prevents the loop from
+/// going idle.
 const PUMP_INTERVAL: Duration = Duration::from_millis(8);
 
 /// Owns the pump thread's stop flag; dropping it stops the pump.

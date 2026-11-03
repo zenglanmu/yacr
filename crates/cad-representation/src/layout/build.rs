@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use cad_db::{DbEntity, DrawingDatabase};
 use cad_domain::*;
 
@@ -14,18 +16,23 @@ use super::image::{
 use super::selection::{ClipRefusal, ViewportState};
 use super::view::viewport_transform;
 
-/// Rebuild a fragment with a new primitive, preserving all source/style fields.
-fn fragment_with(fragment: DisplayFragment, primitive: DisplayPrimitive) -> DisplayFragment {
+/// Rebuild a borrowed fragment with a new primitive, preserving all source/style
+/// fields.
+///
+/// The model representation is built once and reused by every supported
+/// viewport, so its fragments cannot be moved; the borrowing form is the one
+/// the per-viewport pass uses.
+fn fragment_like(fragment: &DisplayFragment, primitive: DisplayPrimitive) -> DisplayFragment {
     DisplayFragment {
-        source: fragment.source,
-        geometry_source: fragment.geometry_source,
-        precision: fragment.precision,
+        source: fragment.source.clone(),
+        geometry_source: fragment.geometry_source.clone(),
+        precision: fragment.precision.clone(),
         alpha: fragment.alpha,
         color: fragment.color,
         color_unresolved: fragment.color_unresolved,
         lineweight: fragment.lineweight,
         lineweight_unresolved: fragment.lineweight_unresolved,
-        linetype: fragment.linetype,
+        linetype: fragment.linetype.clone(),
         linetype_unresolved: fragment.linetype_unresolved,
         linetype_scale: fragment.linetype_scale,
         draw_order: fragment.draw_order,
@@ -33,10 +40,36 @@ fn fragment_with(fragment: DisplayFragment, primitive: DisplayPrimitive) -> Disp
     }
 }
 
+/// Append a diagnostic unless an identical one (same code, message and source
+/// object) is already present.
+///
+/// The source object is part of the key so two different entities that emit the
+/// same generic explanation are both reported; only a truly repeated diagnostic
+/// is collapsed.
+fn push_unique_diagnostic(
+    out: &mut DisplayRepresentation,
+    seen: &mut BTreeSet<(String, String, Option<ObjectId>)>,
+    diagnostic: Diagnostic,
+) {
+    let key = (
+        diagnostic.code.clone(),
+        diagnostic.message.clone(),
+        diagnostic.object,
+    );
+    if seen.insert(key) {
+        out.diagnostics.push(diagnostic);
+    }
+}
+
 /// Record a clip degradation on the paper build: weaken completeness and attach
 /// a diagnostic naming the stable reason.
+///
+/// The same clip limitation is reported once per layout build, not once per
+/// viewport: the first viewport that hits it is the one named in the message.
+/// Completeness weakening stays unconditional (it is idempotent).
 fn report_clip_degradation(
     out: &mut DisplayRepresentation,
+    seen: &mut BTreeSet<(String, String)>,
     refusal: &ClipRefusal,
     layout_id: LayoutId,
     viewport_index: usize,
@@ -46,20 +79,34 @@ fn report_clip_degradation(
         &out.completeness,
         &Completeness::Partial(vec![reason.clone()]),
     );
-    out.diagnostics.push(Diagnostic {
-        object: None,
-        code: "representation.viewport_clip_partial".into(),
-        message: format!("layout {} viewport {viewport_index}: {reason}", layout_id.0),
-    });
+    if seen.insert((refusal.reason.to_string(), refusal.message.clone())) {
+        out.diagnostics.push(Diagnostic {
+            object: None,
+            code: "representation.viewport_clip_partial".into(),
+            message: format!("layout {} viewport {viewport_index}: {reason}", layout_id.0),
+        });
+    }
 }
 
 /// Build the display representation for one paper-space layout (spec §3.3, F04).
+///
+/// This is an **on-demand** entry point: the host calls it when it switches to
+/// the layout. Nothing here precomputes or caches representations for other
+/// layouts, and no paper layout is built at import time; each call rebuilds only
+/// the requested sheet from the database (the single authority).
 ///
 /// The result contains, in this order:
 ///
 /// 1. the layout's own paper-space entities, drawn as-is;
 /// 2. for each **supported** rectangular viewport, the model-space entities
 ///    mapped onto the sheet and clipped to the viewport rectangle.
+///
+/// Each visible model entity is built **once** per call and the same
+/// representation is reused by every supported viewport, so tessellation and
+/// provider diagnostics are not repeated per viewport. Identical diagnostics
+/// (same code, message and source object) are reported once; a clip limitation
+/// shared by several viewports is reported once, naming the first viewport that
+/// hit it.
 ///
 /// A viewport whose state cannot be drawn exactly contributes no geometry and a
 /// `Partial` report plus a `representation.viewport_unsupported` diagnostic
@@ -107,6 +154,9 @@ pub fn build_paper_space(
         completeness: Completeness::Complete,
         diagnostics: Vec::new(),
     };
+    let mut diagnostic_seen: BTreeSet<(String, String, Option<ObjectId>)> = BTreeSet::new();
+    let mut clip_seen: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut unsupported_seen: BTreeSet<(String, String)> = BTreeSet::new();
 
     // 1. The sheet's own geometry, already in paper coordinates.
     for entity in database.layout_entities(layout_id) {
@@ -114,13 +164,16 @@ pub fn build_paper_space(
             continue;
         }
         let rep = registry.build_expanded(database, entity, context)?;
-        merge(&mut out, rep);
+        merge(&mut out, &mut diagnostic_seen, rep);
     }
 
-    // 2. Each viewport's window into model space.
+    // 2. Resolve each viewport once. An unsupported viewport contributes no
+    // model geometry; identical unsupported reasons across viewports are
+    // reported once, naming the first such viewport.
+    let mut supported_viewports = Vec::new();
     for (index, viewport) in layout.viewports.iter().enumerate() {
-        let transform = match viewport_transform(viewport) {
-            ViewportState::Supported(t) => t,
+        match viewport_transform(viewport) {
+            ViewportState::Supported(t) => supported_viewports.push((index, t)),
             ViewportState::Unsupported(why) => {
                 // The sheet itself is still drawable, so the layout is Partial,
                 // not Missing; the viewport's content is simply absent.
@@ -128,25 +181,53 @@ pub fn build_paper_space(
                     &out.completeness,
                     &Completeness::Partial(vec![why.to_string()]),
                 );
-                out.diagnostics.push(Diagnostic {
-                    object: None,
-                    code: "representation.viewport_unsupported".into(),
-                    message: format!("layout {} viewport {index}: {why}", layout_id.0),
-                });
-                continue;
+                let key = (
+                    "representation.viewport_unsupported".to_string(),
+                    why.to_string(),
+                );
+                if unsupported_seen.insert(key) {
+                    out.diagnostics.push(Diagnostic {
+                        object: None,
+                        code: "representation.viewport_unsupported".into(),
+                        message: format!("layout {} viewport {index}: {why}", layout_id.0),
+                    });
+                }
             }
-        };
+        }
+    }
+
+    // 3. Build each visible model entity once, only when at least one viewport
+    // can actually show it. With no supported viewport the model contributes no
+    // geometry and no diagnostics, exactly as before.
+    let model_reps: Vec<DisplayRepresentation> = if supported_viewports.is_empty() {
+        Vec::new()
+    } else {
+        database
+            .model_space()
+            .into_iter()
+            .filter(|entity| visible(entity))
+            .map(|entity| registry.build_expanded(database, entity, context))
+            .collect::<CadResult<Vec<_>>>()?
+    };
+
+    for rep in &model_reps {
+        out.completeness = weaker(&out.completeness, &rep.completeness);
+        for diagnostic in rep.diagnostics.iter().cloned() {
+            push_unique_diagnostic(&mut out, &mut diagnostic_seen, diagnostic);
+        }
+    }
+
+    // 4. Each supported viewport's window into model space, reusing the model
+    // representations above. Output order is sheet, viewport, model entity,
+    // fragment.
+    for (index, transform) in &supported_viewports {
+        let index = *index;
+        let transform = transform.as_ref();
         let matrix = transform.as_transform3();
         let center = transform.paper_center;
         let half = transform.paper_half;
-        for entity in database.model_space() {
-            if !visible(entity) {
-                continue;
-            }
-            let rep = registry.build_expanded(database, entity, context)?;
-            out.completeness = weaker(&out.completeness, &rep.completeness);
-            out.diagnostics.extend(rep.diagnostics);
-            for fragment in rep.fragments {
+        for rep in &model_reps {
+            for fragment in &rep.fragments {
                 let transformed = fragment.primitive.transformed(&matrix);
                 match transformed {
                     DisplayPrimitive::LineSegments(points) => {
@@ -162,44 +243,22 @@ pub fn build_paper_space(
                             }
                         }
                         if !clipped.is_empty() {
-                            out.fragments.push(DisplayFragment {
-                                source: fragment.source,
-                                geometry_source: fragment.geometry_source,
-                                precision: fragment.precision,
-                                alpha: fragment.alpha,
-                                color: fragment.color,
-                                color_unresolved: fragment.color_unresolved,
-                                lineweight: fragment.lineweight,
-                                lineweight_unresolved: fragment.lineweight_unresolved,
-                                linetype: fragment.linetype,
-                                linetype_unresolved: fragment.linetype_unresolved,
-                                linetype_scale: fragment.linetype_scale,
-                                draw_order: fragment.draw_order,
-                                primitive: DisplayPrimitive::LineSegments(std::sync::Arc::from(
+                            out.fragments.push(fragment_like(
+                                fragment,
+                                DisplayPrimitive::LineSegments(std::sync::Arc::from(
                                     clipped.into_boxed_slice(),
                                 )),
-                            });
+                            ));
                         }
                     }
                     DisplayPrimitive::Lines(points) => {
                         for run in clip_polyline_to_rect(&points, center, half) {
-                            out.fragments.push(DisplayFragment {
-                                source: fragment.source.clone(),
-                                geometry_source: fragment.geometry_source.clone(),
-                                precision: fragment.precision.clone(),
-                                alpha: fragment.alpha,
-                                color: fragment.color,
-                                color_unresolved: fragment.color_unresolved,
-                                lineweight: fragment.lineweight,
-                                lineweight_unresolved: fragment.lineweight_unresolved,
-                                linetype: fragment.linetype.clone(),
-                                linetype_unresolved: fragment.linetype_unresolved,
-                                linetype_scale: fragment.linetype_scale,
-                                draw_order: fragment.draw_order,
-                                primitive: DisplayPrimitive::Lines(std::sync::Arc::from(
+                            out.fragments.push(fragment_like(
+                                fragment,
+                                DisplayPrimitive::Lines(std::sync::Arc::from(
                                     run.into_boxed_slice(),
                                 )),
-                            });
+                            ));
                         }
                     }
                     DisplayPrimitive::Mesh(mesh)
@@ -207,7 +266,7 @@ pub fn build_paper_space(
                         let overlay = matches!(&fragment.primitive, DisplayPrimitive::Mesh(_));
                         match clip_mesh_to_rect(&mesh, center, half) {
                             Ok(Some(clipped)) => {
-                                out.fragments.push(fragment_with(
+                                out.fragments.push(fragment_like(
                                     fragment,
                                     if overlay {
                                         DisplayPrimitive::Mesh(std::sync::Arc::new(clipped))
@@ -222,8 +281,14 @@ pub fn build_paper_space(
                             // omission, not a degradation.
                             Ok(None) => {}
                             Err(refusal) => {
-                                report_clip_degradation(&mut out, &refusal, layout_id, index);
-                                out.fragments.push(fragment_with(
+                                report_clip_degradation(
+                                    &mut out,
+                                    &mut clip_seen,
+                                    &refusal,
+                                    layout_id,
+                                    index,
+                                );
+                                out.fragments.push(fragment_like(
                                     fragment,
                                     if overlay {
                                         DisplayPrimitive::Mesh(mesh)
@@ -247,8 +312,14 @@ pub fn build_paper_space(
                             clip_reason::TEXT_FONT_DEPENDENT,
                             "unshaped text glyph geometry depends on a font; the viewport cannot clip it exactly",
                         );
-                        report_clip_degradation(&mut out, &refusal, layout_id, index);
-                        out.fragments.push(fragment_with(
+                        report_clip_degradation(
+                            &mut out,
+                            &mut clip_seen,
+                            &refusal,
+                            layout_id,
+                            index,
+                        );
+                        out.fragments.push(fragment_like(
                             fragment,
                             DisplayPrimitive::Text {
                                 text,
@@ -306,7 +377,11 @@ pub fn build_paper_space(
                                             "a non-convex image clip cannot be intersected with the viewport window exactly; the entity clip is kept unclipped",
                                         );
                                         report_clip_degradation(
-                                            &mut out, &refusal, layout_id, index,
+                                            &mut out,
+                                            &mut clip_seen,
+                                            &refusal,
+                                            layout_id,
+                                            index,
                                         );
                                         Some(Some(entity_clip))
                                     }
@@ -314,7 +389,7 @@ pub fn build_paper_space(
                                     Some(Some(std::sync::Arc::from(vertices.into_boxed_slice())))
                                 };
                             if let Some(clip) = effective {
-                                out.fragments.push(fragment_with(
+                                out.fragments.push(fragment_like(
                                     fragment,
                                     DisplayPrimitive::Image {
                                         resource,
@@ -325,8 +400,14 @@ pub fn build_paper_space(
                             }
                         }
                         Err(refusal) => {
-                            report_clip_degradation(&mut out, &refusal, layout_id, index);
-                            out.fragments.push(fragment_with(
+                            report_clip_degradation(
+                                &mut out,
+                                &mut clip_seen,
+                                &refusal,
+                                layout_id,
+                                index,
+                            );
+                            out.fragments.push(fragment_like(
                                 fragment,
                                 DisplayPrimitive::Image {
                                     resource,
@@ -343,8 +424,14 @@ pub fn build_paper_space(
                             clip_reason::UNSUPPORTED_PRIMITIVE,
                             "this primitive cannot be clipped against the viewport window",
                         );
-                        report_clip_degradation(&mut out, &refusal, layout_id, index);
-                        out.fragments.push(fragment_with(fragment, other));
+                        report_clip_degradation(
+                            &mut out,
+                            &mut clip_seen,
+                            &refusal,
+                            layout_id,
+                            index,
+                        );
+                        out.fragments.push(fragment_like(fragment, other));
                     }
                 }
             }
@@ -354,9 +441,15 @@ pub fn build_paper_space(
     Ok(out)
 }
 
-fn merge(out: &mut DisplayRepresentation, rep: DisplayRepresentation) {
+fn merge(
+    out: &mut DisplayRepresentation,
+    seen: &mut BTreeSet<(String, String, Option<ObjectId>)>,
+    rep: DisplayRepresentation,
+) {
     out.completeness = weaker(&out.completeness, &rep.completeness);
-    out.diagnostics.extend(rep.diagnostics);
+    for diagnostic in rep.diagnostics {
+        push_unique_diagnostic(out, seen, diagnostic);
+    }
     out.fragments.extend(rep.fragments);
 }
 

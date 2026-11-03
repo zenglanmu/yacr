@@ -1,7 +1,8 @@
 use super::*;
 use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer, PaperViewport};
+use std::sync::Arc;
 
-use crate::{DisplayPrimitive, ImageVertex, ProviderRegistry};
+use crate::{ConicStats, DisplayPrimitive, ImageVertex, ProviderRegistry};
 
 // ---- paper build -------------------------------------------------------
 
@@ -370,4 +371,209 @@ fn transformed_image_clip_maps_positions_but_keeps_uvs() {
         }
         _ => panic!("expected a clipped image primitive"),
     }
+}
+
+// ---- one model build, reused by every viewport -------------------------
+
+/// A four-corner 1:100 viewport whose (0,0)-(100,50) paper rectangle starts at
+/// `min_x`, still looking at model centre (10, 20). Two of these see the same
+/// model geometry through different paper windows.
+fn four_corner_viewport_at(min_x: f64) -> PaperViewport {
+    let paper_center_x = min_x + 50.0;
+    let translation = Point3 {
+        x: 10.0 - 100.0 * paper_center_x,
+        y: 20.0 - 100.0 * 25.0,
+        z: 0.0,
+    };
+    PaperViewport {
+        clip: vec![
+            p(min_x, 0.0),
+            p(min_x + 100.0, 0.0),
+            p(min_x + 100.0, 50.0),
+            p(min_x, 50.0),
+        ],
+        model_to_paper: stored_view(100.0, translation),
+        completeness: Completeness::Complete,
+    }
+}
+
+fn model_entity(id: u128, geometry: SemanticGeometry, draw_order: i64) -> DbEntity {
+    DbEntity {
+        object: DbObject {
+            id: ObjectId(id),
+            type_key: match &geometry {
+                SemanticGeometry::Circle { .. } => "AcDbCircle",
+                SemanticGeometry::Text { .. } => "AcDbText",
+                _ => "AcDbLine",
+            }
+            .into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(id),
+        layer: LayerId(0),
+        space: SpaceId::Model,
+        geometry,
+        draw_order,
+    }
+}
+
+#[test]
+fn paper_build_reuses_one_model_representation_across_viewports() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    // The analytic circle is the observable build: every `build_expanded` call
+    // records one produced conic.
+    b.insert_entity(model_entity(
+        1,
+        SemanticGeometry::Circle {
+            center: p(10.0, 20.0),
+            normal: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            radius: 5.0,
+        },
+        0,
+    ))
+    .unwrap();
+    // A line the viewport clip actually cuts, so each viewport's own paper
+    // window is observable as a separate fragment.
+    b.insert_entity(model_entity(
+        2,
+        SemanticGeometry::Line {
+            start: p(5.0, 20.0),
+            end: p(15.0, 20.0),
+        },
+        1,
+    ))
+    .unwrap();
+    b.insert_layout(cad_db::Layout {
+        id: LayoutId(1),
+        name: "L1".into(),
+        viewports: vec![four_corner_viewport_at(0.0), four_corner_viewport_at(200.0)],
+    })
+    .unwrap();
+    let db = b.finish().unwrap();
+
+    let registry = ProviderRegistry::with_default_provider();
+    let stats = Arc::new(ConicStats::new());
+    let ctx = context().with_conic_stats(stats.clone());
+    let rep = build_paper_space(&registry, &db, LayoutId(1), &ctx, &|_| true).unwrap();
+
+    // The model entity is built once even though two viewports see it; the old
+    // per-viewport loop recorded two produced conics.
+    assert_eq!(stats.produced(), 1, "one model build feeds both viewports");
+
+    // Both viewports still emit their own clipped copy of the same model line:
+    // paper centre x = 50 and 250 respectively, scale 1:100.
+    let lines: Vec<_> = rep
+        .fragments
+        .iter()
+        .filter_map(|f| match &f.primitive {
+            DisplayPrimitive::Lines(points) => Some(points.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(lines.len(), 2, "one clipped line per viewport");
+    for (points, expected_start) in lines.iter().zip([49.95_f64, 249.95]) {
+        assert_eq!(points.len(), 2);
+        assert!(
+            (points[0].x - expected_start).abs() < 1e-9,
+            "got {:?}",
+            points[0]
+        );
+        assert!(
+            (points[1].x - (expected_start + 0.1)).abs() < 1e-9,
+            "got {:?}",
+            points[1]
+        );
+    }
+
+    // The single built circle is transformed independently into both windows.
+    let conics = rep
+        .fragments
+        .iter()
+        .filter(|f| matches!(f.primitive, DisplayPrimitive::Conic(_)))
+        .count();
+    assert_eq!(
+        conics, 2,
+        "the same built circle is placed in both viewports"
+    );
+}
+
+#[test]
+fn paper_build_dedups_repeated_clip_diagnostics() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    // An unshaped model text placeholder cannot be clipped exactly, so every
+    // viewport that draws it would report the same limitation.
+    b.insert_entity(model_entity(
+        1,
+        SemanticGeometry::Text {
+            text: "A".into(),
+            position: p(10.0, 20.0),
+            style: StyleId(0),
+            height: 2.5,
+            rotation: 0.0,
+            font: None,
+            h_align: TextAlignH::Left,
+            v_align: TextAlignV::Baseline,
+            wrap_width: None,
+        },
+        0,
+    ))
+    .unwrap();
+    b.insert_layout(cad_db::Layout {
+        id: LayoutId(1),
+        name: "L1".into(),
+        viewports: vec![four_corner_viewport_at(0.0), four_corner_viewport_at(200.0)],
+    })
+    .unwrap();
+    let db = b.finish().unwrap();
+
+    let registry = ProviderRegistry::with_default_provider();
+    let rep = build_paper_space(&registry, &db, LayoutId(1), &context(), &|_| true).unwrap();
+
+    assert!(matches!(rep.completeness, Completeness::Partial(_)));
+    let clip_diagnostics: Vec<_> = rep
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "representation.viewport_clip_partial")
+        .collect();
+    // Same (reason, message) for both viewports: reported once, naming the
+    // first viewport that hit it.
+    assert_eq!(
+        clip_diagnostics.len(),
+        1,
+        "a shared clip limitation is reported once per layout build"
+    );
+    assert!(clip_diagnostics[0]
+        .message
+        .contains(clip_reason::TEXT_FONT_DEPENDENT));
+    assert!(
+        clip_diagnostics[0].message.contains("viewport 0"),
+        "got {}",
+        clip_diagnostics[0].message
+    );
+
+    // Deduplicating the report never drops geometry: both viewports still draw
+    // their own unclipped placeholder.
+    let texts = rep
+        .fragments
+        .iter()
+        .filter(|f| matches!(f.primitive, DisplayPrimitive::Text { .. }))
+        .count();
+    assert_eq!(texts, 2, "both viewports keep their unclipped text");
 }

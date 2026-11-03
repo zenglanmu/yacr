@@ -25,12 +25,13 @@ HOVERPREVIEW 后仍存在）。本轮只做这两条，**没有**真实 GUI/GPU/
 - 文档：`docs/layouts.md` §3.1/§3、`docs/compatibility.md` 布局行同步。
 - **布局首次绘制成本（有界、非验收）**：启用后该布局的纸面表示会包含 15 个视口的
   模型内容。本机 debug 直接调 `build_paper_space`（`fixtures/debug-default-fonts.dwg`，
-  layout 1）→ **317.9 ms / 23,703 fragments**，`completeness=Partial`，43,710 条
-  `viewport.clip_unsupported_primitive`（逐视口重复；无字体时文本等原语无法裁剪，
-  显式省略，不伪造）。同一夹具 debug `plot --plot-format svg` 的 **367,668 paths /
-  24.9 s** 主要是 **SVG 序列化**，不是宿主 scene 构建路径。真实宿主首次切换的
-  墙钟/显存/视觉 **NOT RUN**；若后续体感不可接受，优化方向是跨视口复用 model
-  representation 缓存/按视口模型包围盒裁剪，以及去重这些重复诊断，而不是再次禁用页签。
+  layout 1）：跨视口复用/去重前 **317.9 ms / 23,703 fragments / 43,710 diagnostics**；
+  复用后 **83.4 ms / 23,703 fragments / 518 diagnostics**（同一台机器、同一 debug
+  构建；`viewport_clip_partial` 由逐视口重复降为 **2** 条不同原因）。`completeness`
+  仍为 `Partial`（无字体时文本等原语无法精确裁剪，显式省略，不伪造）。同一夹具 debug
+  `plot --plot-format svg` 的 **367,668 paths / 24.9 s** 主要是 **SVG 序列化**，不是
+  宿主 scene 构建路径。真实宿主首次切换的墙钟/显存/视觉 **NOT RUN**；后续若仍重，
+  优化方向是按视口模型包围盒裁剪，而不是再次禁用页签。
 
 ### ② 鼠标移动丢帧感：per-frame status 不再重绘整棵树 + 输入热节奏
 
@@ -48,32 +49,66 @@ p95≈8µs），hover 关闭后也不再拾取；残余可疑项在 **WebKit 线
   `status-changed` 仍按**渲染帧**产生，输入热帧 8ms 时可达 ~125 Hz；JS 只解析/深比较
   和更新叶子 selector，不重绘整树。`frameCount`/FPS 是真实渲染帧数，热帧下可能显示
   >60，不能当作显示器刷新率。
-- **输入热帧门控**（`apps/app-linux/src/host/options.rs`、`tick.rs`）：空闲仍是
-  `FRAME_INTERVAL=16ms`；有排队输入或最近 **32ms** 内有输入时降到
-  `FRAME_INTERVAL_ACTIVE=8ms`（与 redraw pump 同格）。目的：60 Hz 指针流下不再让
-  每次移动等 0–16ms 的门控相位，presenter 仍按显示节奏丢多余帧。**仅 Linux native
-  本轮改动**；Windows/macOS/Android 的 tick 仍用各自 16ms 语义（显式分歧，未静默
-  声称全平台一致）。
+- **输入热帧门控（共享实现，2026-11-03 统一）**：`crates/cad-ui-core/src/shell.rs`
+  是唯一实现（`FRAME_INTERVAL=16ms`、`FRAME_INTERVAL_ACTIVE=8ms`、
+  `INPUT_ACTIVE_WINDOW=32ms`、`input_active`/`frame_interval`、
+  `ShellState::input_active(now)`）。Linux/Windows/macOS/Android 四个 native tick 都
+  调用同一个 `frame_interval(state.shell.input_active(now))`；空闲仍是 16ms，有排队
+  输入或最近 32ms 内有输入时降到 8ms（与各宿主 8ms redraw pump 同格）。目的：60 Hz
+  指针流下不再让每次移动等 0–16ms 的门控相位，presenter 仍按显示节奏丢多余帧。
+  `dom-canvas`/web 没有 native tick，不引入第二套。Windows 已用
+  `x86_64-pc-windows-msvc` 交叉检查、Android 已用 `aarch64-linux-android` + NDK
+  check；macOS host 因本机无 Apple SDK **NOT RUN**，不声称已验证。
 - **每次移动一次布局读取**（`apps/desktop-ui/src/cad/input.ts`）：`positionAndRect`
   让 `pointermove` 的坐标与 `resize` 指标共用同一次 `getBoundingClientRect()`。
 - **诊断日志**（`crates/cad-desktop-shell/src/commands.rs`）：`[probe] input …` 改为
   既有 `YACR_PROBE_CAD_LOG` 门控；证据脚本本就设置该变量，正常会话不再按显示率写
   stderr。
 
+### ③ 跨视口复用 + 诊断去重（仍按需/懒加载）
+
+- **跨视口复用**：`cad_representation::build_paper_space` 每次调用先解析受支持视口；
+  每个**可见模型实体只 `build_expanded` 一次**，所有受支持视口复用同一份表示，各自
+  应用视图变换与矩形裁剪。几何仍逐视口输出（每个窗口的裁剪结果不同），但 tessellation/
+  provider 只做一次。没有受支持视口时不构建模型表示，保持旧行为。
+- **诊断去重**：模型/纸面实体诊断按 `(code, message, object)` 去重（不同对象的问题
+  仍保留）；同一裁剪限制按 `(reason, message)` 每个布局只报一次，消息保留首个视口索引；
+  相同 `representation.viewport_unsupported` 原因也只报一次。`completeness` 仍按真实
+  缺口置 `Partial`，去重只减少重复叙述，不改变缺失几何或支持状态。
+- **懒加载**：`build_paper_space` 仍只在宿主切到该布局时由 render preparation 调用
+  （preparation key 含 active `space`）；没有 import-time 全布局预计算，也没有为其他
+  布局预先建缓存。`cad_status.layouts` 的 `layout_descriptors` 只检查视口可绘性，不
+  触达 `build_paper_space`。
+- **实测（debug、同一夹具 layout 1）**：复用/去重前 **317.9 ms / 23,703 fragments /
+  43,710 diagnostics**；之后 **83.4 ms / 23,703 fragments / 518 diagnostics**，
+  `viewport_clip_partial` 由逐视口重复降为 **2** 条不同原因。真实宿主 timing/显存/
+  视觉 **NOT RUN**。
+
 ### 验证（实际运行）
 
-- `(cd apps/desktop-ui && npm test)` → **949 pass / 0 fail**（含新增
-  `test/status-cadence.test.ts` 的 digest/leaf-store 契约、更新 `coords.test.ts`
-  的 StatusBar 源契约）；`npm run build` → exit 0（592.52 kB）。
-- `cargo test -p app-linux input_activity_opens --locked` → 1 passed；
-  `cargo check -p app-linux --all-targets --locked`、`clippy … -D warnings` → exit 0。
-- `cargo test -p cad-desktop-shell --locked` → 46 passed（6 个测试二进制）；
-  `clippy … -D warnings` → exit 0。
-- `python3 scripts/check-file-size.py` → OK（`App.tsx`/`tick.rs` 各 1000 行）。
-- **NOT RUN**：真实 GUI/窗口/GPU/像素/截图、真实鼠标轨迹、`present_mode`、
-  `input_age_us`/帧间隔分布、Windows/macOS/Android 载体。**不得**把本轮“帧节奏”
-  写成已验收的流畅性结论；hot gate 是依据代码路径和既有 telemetry 的修正，尚未在
-  用户机器上实测。
+- `(cd apps/desktop-ui && npm test)` → **950 pass / 0 fail**；`npm run build` → exit 0。
+- `cargo test -p cad-ui-core --locked` → **354 passed / 0 failed**（含共享
+  `input_active`/`frame_interval`/`ShellState::input_active` 契约）。
+- `cargo test -p cad-representation --locked` → **234 passed / 0 failed**（含跨视口
+  复用与裁剪诊断去重两项新契约）。
+- `cargo test -p cad-app --locked` → **1567 passed / 0 failed / 1 ignored**。
+- `cargo check -p app-linux --all-targets --locked`、
+  `clippy -p cad-ui-core -p app-linux --all-targets -- -D warnings` → exit 0。
+- `cargo check -p app-windows --target x86_64-pc-windows-msvc --locked` → exit 0
+  （需 `PATH=/usr/lib/llvm-21/bin:$PATH` 供 `tauri-winres`）；该 target 真正编译
+  `host/tick.rs`。
+- `cargo check -p app-android --target aarch64-linux-android --locked` → exit 0
+  （`NDK_HOME=/home/zenglanmu/android-sdk/ndk/27.0.12077973`）。
+- `cargo check -p cad-ui-core -p cad-representation -p cad-app --target wasm32-unknown-unknown --locked`
+  → exit 0；`cargo check -p app-macos --all-targets --locked` → exit 0（仅 Linux 上的
+  host stub，不代表 macOS host 已编译）。
+- `cargo fmt -p cad-ui-core -p cad-representation -p app-linux -p app-windows -p app-macos -p app-android -- --check`
+  → exit 0；`python3 scripts/check-file-size.py` → OK。
+- **NOT RUN**：macOS host 交叉编译（本机无 Apple SDK；`cargo check -p app-macos
+  --target x86_64-apple-darwin` 失败于 `objc2-exception-helper`/SDK，不是本轮代码）；
+  真实 GUI/窗口/GPU/像素/截图、真实鼠标轨迹、`present_mode`、`input_age_us`/帧间隔
+  分布、真实 Android 设备、Windows/macOS 运行时。**不得**把本轮“帧节奏”写成已验收
+  的流畅性结论；hot gate 是依据代码路径和既有 telemetry 的修正，尚未在用户机器上实测。
 
 ### 用户侧复验（建议）
 

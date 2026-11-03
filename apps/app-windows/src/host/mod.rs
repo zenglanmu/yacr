@@ -53,8 +53,6 @@ pub use tick::tick;
 pub const WINDOW_LABEL: &str = "probe-window";
 /// Label of the child webview that hosts the React frontend.
 pub const WEBVIEW_LABEL: &str = "probe-webview";
-/// Minimum interval between presented frames (bounds CPU/GPU work to ~60 fps).
-pub const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 /// Fixed animation step applied to the marker on frames without input.
 pub const ANIMATION_STEP: f32 = 0.01;
 

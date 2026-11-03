@@ -234,6 +234,15 @@ paper = (model - view_center) * paper_per_model + paper_center
 视口全部如此）；旧实现只看句柄非空就判 `Partial`，会把这类整页错误地禁用。无法证明
 为矩形的边界仍逐条保持 `Partial` 并显示稳定原因码。
 
+**跨视口复用与诊断去重（2026-11-03）**：`build_paper_space` 是**按需**入口，只在宿主
+切换到该布局时调用；没有 import-time 的全布局预计算，也没有为其他布局预先建缓存。
+同一次调用内，每个可见模型实体只 `build_expanded` 一次，所有受支持视口复用同一份
+表示并各自应用视图变换与矩形裁剪（几何仍是逐视口的，因为每个窗口的裁剪结果不同）。
+诊断去重：模型/纸面实体诊断按 `(code, message, object)` 保留不同对象的不同问题；
+同一裁剪限制按 `(reason, message)` 每个布局只报一次（消息保留首个视口索引）；相同
+`viewport_unsupported` 原因也只报一次。`completeness` 仍按真实缺口置 `Partial`，
+去重只影响重复叙述，不影响缺席的几何或支持状态。
+
 ### 3.2 INSERT / 块语义（审计 B31）
 
 块展开在本层（`ProviderRegistry::build_expanded`）完成，导入侧负责把每个 `INSERT` 的

@@ -18,7 +18,7 @@ use super::admission::{
     cad_present_admission, layout_needs_revalidate, BindStep, CadPresentAdmission,
 };
 use super::dom::run_dom_diag;
-use super::options::{frame_interval, input_active, ANIMATION_STEP};
+use super::options::{frame_interval, ANIMATION_STEP};
 use super::postload::{drive_postload_pan, ActualRenderSummary};
 use super::presenter::release_presenter;
 use super::telemetry::{
@@ -58,14 +58,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             // Input owns a faster gate: queued work or a move within two idle
             // periods keeps the 8 ms cadence so the crosshair gets a fresh
             // position each refresh; a still window keeps the 16 ms cap.
-            let pending =
-                !state.shell.cad_inputs.is_empty() || !state.shell.cad_commands.is_empty();
-            let last_input_age = state
-                .shell
-                .cad_input_recv
-                .last()
-                .map(|(_, received)| now.duration_since(*received));
-            if now.duration_since(last) < frame_interval(input_active(pending, last_input_age)) {
+            if now.duration_since(last) < frame_interval(state.shell.input_active(now)) {
                 return;
             }
         }

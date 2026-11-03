@@ -14,12 +14,14 @@ use cad_host::HostPlatform;
 use cad_platform::HostCapabilities;
 use cad_ui_core::layout::{surface_metrics, LayoutError};
 use cad_ui_core::session::CadSession;
-use cad_ui_core::shell::{bind_allowed, clear_host_error, note_host_error, HostErrorKind};
+use cad_ui_core::shell::{
+    bind_allowed, clear_host_error, frame_interval, note_host_error, HostErrorKind,
+};
 use cad_ui_core::unsupported_status;
 
 use super::{
     lock, lock_telemetry, release_presenter, RenderTelemetry, Shared, ANIMATION_STEP, CAD, CAD_ENV,
-    FRAME_INTERVAL, SURFACE,
+    SURFACE,
 };
 use crate::win32_surface::{BridgeState, CadPresentClass, CadPresentError};
 
@@ -81,7 +83,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
 
         let now = Instant::now();
         if let Some(last) = telemetry.last_frame {
-            if now.duration_since(last) < FRAME_INTERVAL {
+            if now.duration_since(last) < frame_interval(state.shell.input_active(now)) {
                 return;
             }
         }

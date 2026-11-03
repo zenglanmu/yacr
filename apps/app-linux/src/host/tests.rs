@@ -1,8 +1,5 @@
 use super::admission::{cad_present_admission, layout_needs_revalidate, CadPresentAdmission};
-use super::options::{
-    frame_interval, input_active, start_maximized, FRAME_INTERVAL, FRAME_INTERVAL_ACTIVE,
-    INPUT_ACTIVE_WINDOW,
-};
+use super::options::start_maximized;
 use super::postload::{
     label_file_name, pan_report_matches_run, parse_pan_report, parse_pan_run_id,
     postload_pan_camera_changed, postload_pan_final_ok, postload_pan_gesture_complete,
@@ -21,39 +18,6 @@ fn start_maximized_defaults_true_and_opts_out_explicitly() {
     assert!(
         !start_maximized(true),
         "the acceptance-only env opts out of maximize"
-    );
-}
-
-#[test]
-fn input_activity_opens_the_faster_frame_gate_only_for_live_input() {
-    // Idle: no queued work and no recent input keeps the 16 ms cap.
-    assert!(!input_active(false, None));
-    assert_eq!(frame_interval(false), FRAME_INTERVAL);
-
-    // Pending work is active regardless of age.
-    assert!(input_active(true, None));
-    assert!(input_active(
-        true,
-        Some(INPUT_ACTIVE_WINDOW + std::time::Duration::from_secs(1))
-    ));
-
-    // A gesture (60 Hz moves ≈ every 16.7 ms) stays active across the window,
-    // and goes idle once the window has fully elapsed.
-    assert!(input_active(false, Some(INPUT_ACTIVE_WINDOW)));
-    assert!(input_active(
-        false,
-        Some(INPUT_ACTIVE_WINDOW - std::time::Duration::from_millis(1))
-    ));
-    assert!(!input_active(
-        false,
-        Some(INPUT_ACTIVE_WINDOW + std::time::Duration::from_nanos(1))
-    ));
-
-    // The active cadence is strictly faster than idle (and matches the pump).
-    assert_eq!(frame_interval(true), FRAME_INTERVAL_ACTIVE);
-    assert!(
-        FRAME_INTERVAL_ACTIVE < FRAME_INTERVAL,
-        "input must never be slower than idle"
     );
 }
 

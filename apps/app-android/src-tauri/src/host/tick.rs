@@ -83,16 +83,15 @@ use cad_host::HostPlatform;
 use cad_platform::HostCapabilities;
 use cad_ui_core::protocol::ProbeInput;
 use cad_ui_core::session::CadSession;
-use cad_ui_core::shell::{bind_allowed, clear_host_error, note_host_error, HostErrorKind};
+use cad_ui_core::shell::{
+    bind_allowed, clear_host_error, frame_interval, note_host_error, HostErrorKind,
+};
 use cad_ui_core::{session::HostProfile, unsupported_status};
 
 use crate::policy;
 use crate::surface::{FrameOutcome, SurfaceStep};
 
 use super::{lock, lock_telemetry, RenderTelemetry, Shared, CAD, CAD_ENV};
-
-/// Minimum interval between presented frames (~60 fps).
-pub const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 /// One owner tick. Runs on the Tauri/tao loop thread (not the Android UI thread).
 pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>) {
@@ -118,7 +117,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
 
         let now = Instant::now();
         if let Some(last) = telemetry.last_frame {
-            if now.duration_since(last) < FRAME_INTERVAL {
+            if now.duration_since(last) < frame_interval(state.shell.input_active(now)) {
                 return;
             }
         }
