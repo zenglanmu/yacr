@@ -64,6 +64,10 @@ apps/app-web/dist-ui/
 fixtures/complex-test.dwg
 fixtures/debug-default-fonts.dwg
 
+# Confidential Tianzheng (TCH_*) sample drawings. Never commit; tests read an
+# externally supplied path via `YACR_TEST_DWG` (a skip is not evidence).
+fixtures/test-tangent*
+
 # Loop-command scratch state (session-local, never committed)
 loop.txt
 
