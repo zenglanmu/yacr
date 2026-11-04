@@ -347,6 +347,22 @@ $DIMAPOST
   1
 
   9
+$DIMTXSTY
+  7
+Standard
+  9
+$DIMLTYPE
+  6
+ByBlock
+  9
+$DIMLTEX1
+  6
+ByBlock
+  9
+$DIMLTEX2
+  6
+ByBlock
+  9
 $DIMSTYLE
   2
 Standard
@@ -438,6 +454,14 @@ $DIMTFAC
 $DIMFXL
  40
 1.0
+  9
+$DIMFXLON
+ 70
+     0
+  9
+$DIMARCSYM
+ 70
+     0
   9
 $DIMJOGANG
  40
@@ -583,6 +607,10 @@ $TDINDWG
  40
 0.0
   9
+$UNITMODE
+ 70
+     0
+  9
 $UCSORG
  10
 0.0
@@ -715,7 +743,7 @@ MESH
   2
 AcDbSubDMesh
   3
-AcDbSubDMesh|Description: AutoCAD subD mesh
+AcDbSubDMesh|Description: ACAD subD mesh
  90
   4095
  91
@@ -747,7 +775,7 @@ WIPEOUT
   2
 AcDbWipeout
   3
-WipeOut|AutoCAD Express Tool|www.autodesk.com
+WipeOut|ACAD Express Tool|www.autodesk.com
  90
    127
  91
@@ -1019,7 +1047,7 @@ ARCALIGNEDTEXT
   2
 AcDbArcAlignedText
   3
-AutoCAD Express Tools
+ACAD Express Tools
  90
    127
  91
@@ -1035,7 +1063,7 @@ RTEXT
   2
 AcDbRText
   3
-AutoCAD Express Tools
+ACAD Express Tools
  90
    127
  91
@@ -4523,7 +4551,7 @@ WIPEOUTVARIABLES
   2
 AcDbWipeoutVariables
   3
-WipeOut|AutoCAD Express Tool|www.autodesk.com
+WipeOut|ACAD Express Tool|www.autodesk.com
  90
      0
  91
@@ -5386,6 +5414,8 @@ BLOCK
 AcDbEntity
   8
 0
+  8
+0
 100
 AcDbBlockBegin
   2
@@ -5422,6 +5452,8 @@ BLOCK
 18
 100
 AcDbEntity
+  8
+0
  67
      1
   8

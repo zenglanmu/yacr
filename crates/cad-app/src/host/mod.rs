@@ -81,6 +81,14 @@ pub struct HostController {
     pub document_name_hint: String,
     /// Report of the most recent successful open, for diagnostics/CLI.
     pub last_import_report: Option<ImportReport>,
+    /// Vendor records copied by the most recent successful import, waiting for
+    /// the owner tick to hand them to the WebView plugin pass. Not document
+    /// state: empty after the tick takes them, and never written to `cad-db`.
+    last_vendor_records: Vec<crate::VendorRecord>,
+    /// Whether a published document has not had its vendor records taken yet.
+    /// Set on every publish (even with zero records) so a replacement document
+    /// with no vendor objects still clears the previous pass.
+    vendor_records_pending: bool,
     /// The single current background import (spec F01). Empty until a host
     /// starts an asynchronous open; the synchronous path never uses it.
     pub(crate) import_manager: crate::tasks::ImportManager,
@@ -136,6 +144,8 @@ impl HostController {
             last_status: "就绪（内置演示几何，非兼容性声明）".to_string(),
             document_name_hint: "yacr-demo".to_string(),
             last_import_report: None,
+            last_vendor_records: Vec::new(),
+            vendor_records_pending: false,
             import_manager: crate::tasks::ImportManager::new(document_id),
             pending_open_label: None,
             pending_open_guard: None,
@@ -263,6 +273,21 @@ impl HostController {
         Ok(traced)
     }
 
+    /// Take the vendor records copied by the most recent successful import.
+    ///
+    /// The owner tick calls this exactly once per published document and hands
+    /// the bytes to the WebView vendor pass. `Some([])` is a real answer — the new
+    /// document carries no `TCH_*` objects — and the caller must clear the
+    /// previous pass so a stale token cannot settle into it. `None` means "no new
+    /// document since the last call".
+    pub fn take_vendor_records(&mut self) -> Option<Vec<crate::VendorRecord>> {
+        if !self.vendor_records_pending {
+            return None;
+        }
+        self.vendor_records_pending = false;
+        Some(std::mem::take(&mut self.last_vendor_records))
+    }
+
     /// The current immutable drawing, for the render/composition pipeline.
     pub fn drawing(&self) -> Option<Arc<DrawingDatabase>> {
         self.application
@@ -306,9 +331,10 @@ impl HostController {
     /// called it would still be rejected by the stamp guard at the call site.
     pub(crate) fn publish_imported(
         &mut self,
-        imported: ImportedDrawing,
+        mut imported: ImportedDrawing,
         _stamp: &TaskStamp,
     ) -> CadResult<OpenedDrawing> {
+        let vendor_records = std::mem::take(&mut imported.vendor_records);
         let opened = OpenedDrawing {
             entities: imported.database.entity_count(),
             completeness_label: imported.report.completeness_label(),
@@ -334,6 +360,8 @@ impl HostController {
         self.reset_for_new_content();
         self.document_name_hint = label.clone();
         self.last_import_report = Some(imported.report.clone());
+        self.last_vendor_records = vendor_records;
+        self.vendor_records_pending = true;
         self.last_status = format!("已打开 {label}: {}", opened.completeness_label);
         Ok(opened)
     }
@@ -394,6 +422,10 @@ impl HostController {
         self.reset_for_new_content();
         self.document_name_hint = "untitled".to_string();
         self.last_import_report = None;
+        self.last_vendor_records = Vec::new();
+        // `Some([])` on the next tick clears any previous vendor pass; a blank
+        // document must not leave an old token settleable.
+        self.vendor_records_pending = true;
         // Fresh-document default plan view anchored at the origin. This is NOT a
         // fabricated fit: the blank drawing has no extent, so the previous
         // drawing's framing must not linger.

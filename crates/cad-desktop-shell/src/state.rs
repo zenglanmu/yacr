@@ -171,6 +171,16 @@ pub struct Shared {
     /// registers it; the popup commands then refuse explicitly instead of
     /// pretending a window exists.
     pub popup_host: Option<Arc<dyn ShellPopupHost>>,
+    /// The WebView vendor-decoding pass (pending → records → apply). Host
+    /// transport state, not document state: it carries a token and bounded
+    /// diagnostics, never geometry or a second `cad-db`.
+    pub vendor: crate::vendor::VendorStore,
+    /// A settled derived-representation snapshot waiting for the owner tick to
+    /// install it on the render session. Display-only; never written to `cad-db`.
+    pub vendor_pending_representations: Option<crate::vendor::PendingVendorRepresentation>,
+    /// Set by the next `set_vendor_representations(None)` the tick must apply
+    /// (a new document has no derived geometry yet).
+    pub vendor_representations_clear: bool,
 }
 
 impl Shared {
@@ -198,6 +208,9 @@ impl Shared {
             cad_fonts: None,
             telemetry: None,
             popup_host: None,
+            vendor: crate::vendor::VendorStore::default(),
+            vendor_pending_representations: None,
+            vendor_representations_clear: false,
         }
     }
 

@@ -120,6 +120,14 @@ test('the frame union parses every modelled type and ignores an unknown one', ()
   );
   assert.deepEqual(parseCadEventFrame({ ...base, type: 'popup-changed', popup: null }), { revision: 3, type: 'popup-changed', popup: null });
   assert.deepEqual(
+    parseCadEventFrame({ ...base, type: 'vendor-pending', token: 4, generation: 4, entities: 0 }),
+    { revision: 3, type: 'vendor-pending', token: 4, generation: 4, entities: 0 },
+  );
+  assert.deepEqual(
+    parseCadEventFrame({ ...base, type: 'vendor-settled', token: 4, applied: 0, diagnostics: ['vendor.unsupported'] }),
+    { revision: 3, type: 'vendor-settled', token: 4, applied: 0, diagnostics: ['vendor.unsupported'] },
+  );
+  assert.deepEqual(
     parseCadEventFrame({ ...base, type: 'events-dropped', count: 3 }),
     { revision: 3, type: 'events-dropped', count: 3 },
   );
@@ -132,6 +140,8 @@ test('the frame union parses every modelled type and ignores an unknown one', ()
     // The producer never emits a nameless refusal or a missing/empty code;
     // those shapes must stay loud instead of tearing down the status channel.
     { revision: 1, type: 'command-rejected', command: 'ZOOM' },
+    { revision: 1, type: 'vendor-pending', token: -1, generation: 1, entities: 0 },
+    { revision: 1, type: 'vendor-settled', token: 1, applied: 0, diagnostics: [1] },
     { revision: 1, type: 'command-rejected', command: 'ZOOM', code: null },
     { revision: 1, type: 'command-rejected', command: 'ZOOM', code: '' },
     { revision: 1, type: 'command-rejected', command: '', code: 'zoom.argument_required' },

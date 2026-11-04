@@ -77,6 +77,9 @@
 //! shell_commands()                                          -> JSON array of command names
 //! shell_aliases()                                           -> JSON array of `{alias, command}` rows
 //! shell_command(name)                                       -> `{"accepted":true}` or a refusal
+//! vendor_records(token)                                     -> binary ABI v4 records frame
+//! vendor_apply(token, generation, payload_b64)              -> JSON `VendorAck` (flushes the pass)
+//! vendor_status()                                           -> JSON `VendorStatus`
 //! start_offscreen(canvas, css_w, css_h, dpr)                -> JSON status (async, Worker only)
 //! open_bytes_offscreen(canvas, label, css_w, css_h, dpr, bytes) -> JSON status (async, Worker only)
 //! worker_capability()                                       -> JSON capability report
@@ -239,6 +242,16 @@ pub mod capability;
 
 /// The cad-event transport (`cad_subscribe`, per-export flush).
 pub mod events;
+
+/// The **`dom-canvas` vendor pass**: the carrier-neutral
+/// [`cad_ui_core::session::vendor::VendorStore`] behind the three
+/// `cad_vendor_*` commands, plus the staging call the open path makes.
+///
+/// Target-independent on purpose (no DOM, no GPU, no `wasm-bindgen` type in the
+/// state): the token/framing rules are the shared ones the native hosts drive, and
+/// their `vendor.*` refusals are asserted by `cargo test -p app-web` on the host.
+/// The three wasm exports are the only target-specific half.
+pub mod vendor;
 
 /// The **host-agnostic shell surface**: `shell_status`/`shell_commands`/
 /// `shell_aliases`/`shell_command`, i.e. the `cad_status` snapshot and command

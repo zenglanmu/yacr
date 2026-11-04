@@ -244,6 +244,16 @@ impl DrawingDatabase {
         self.block_metadata.get(&id)
     }
 
+    /// Resolve a block definition by the DWG object handle it was imported from.
+    ///
+    /// This is what a vendor derived representation uses: the plugin sees only
+    /// the handle stored in the TCH object, never the block table name. `None`
+    /// means the handle names no imported block; callers must report that
+    /// instead of expanding an empty block.
+    pub fn block_by_source_handle(&self, handle: u64) -> Option<BlockId> {
+        self.block_source_handles.get(&handle).copied()
+    }
+
     /// The registered table name of a block, when it has one.
     pub fn block_name(&self, id: BlockId) -> Option<&str> {
         self.block_metadata(id)

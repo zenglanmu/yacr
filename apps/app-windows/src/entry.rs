@@ -52,6 +52,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("[probe] startup drawing: {}", path.display());
     }
     let shared = crate::host::new_shared(launch);
+    // This carrier is always `native-below`, and the entry above registered the
+    // vendor transport: the store may emit `vendor-pending` safely.
+    cad_desktop_shell::state::lock(&shared).vendor.enable();
     let telemetry = crate::host::new_render_telemetry();
     let setup_shared = shared.clone();
     let setup_telemetry = telemetry.clone();
@@ -60,7 +63,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = tauri::Builder::default()
         .manage(crate::host::ProbeShared(shared.clone()))
-        .invoke_handler(cad_desktop_shell::commands::register_commands())
+        .invoke_handler(cad_desktop_shell::vendor::register_commands_with_vendor())
         .setup(move |app| {
             crate::host::init(app, &setup_shared, &setup_telemetry)?;
             Ok(())

@@ -79,6 +79,7 @@ mod tests;
 #[cfg(test)]
 mod zoom_anchor_tests;
 
+pub use cad_app::{VendorRecord, VendorSource};
 pub(crate) use core::{
     ActiveGuard, BoxGesture, FileAbort, HoverState, NavInner, PendingHover, PendingSave,
 };
@@ -782,9 +783,8 @@ impl HostCore {
     /// 1. the controller's real async snapshot (a worker job, running or its
     ///    retained terminal) always wins, so a synchronous terminal can never
     ///    pollute an active worker;
-    /// 2. otherwise the Host's own synchronous terminal (real opened entity
-    ///    count, or the original failure) so a completed sync deliver stays
-    ///    observable after `loading()` goes false;
+    /// 2. otherwise the Host's own synchronous terminal (real opened entity count, or
+    ///    the original failure) so a completed sync deliver stays observable after `loading()` goes false;
     /// 3. otherwise, while a platform read is in flight (picker/read, no job
     ///    yet) a synthesized running snapshot whose `cancellable` reflects the
     ///    abort flag; idle reports `None`.

@@ -12,7 +12,7 @@
 //! The shared React chrome is unchanged: on `native-below` it renders
 //! `.native-input` (the single input funnel) and no `<canvas>`, and it routes every
 //! CAD command to the native host through the shared
-//! [`cad_desktop_shell::commands::register_commands`] handler.
+//! [`cad_desktop_shell::vendor::register_commands_with_vendor`] handler.
 //!
 //! # Commands
 //!
@@ -349,13 +349,13 @@ pub fn canvas_runtime_failed(step: String, detail: String) -> Result<(), String>
 
 /// The one IPC handler: the shared desktop command set plus this carrier's reports.
 ///
-/// `cad_desktop_shell::commands::register_commands` is generated from the shared
-/// registry (one list, one source of truth); the two reports are local to this
-/// crate. Dispatch is by command name, so the shared handler receives every name it
+/// `cad_desktop_shell::vendor::register_commands_with_vendor` composes the shared
+/// registry (one list, one source of truth) with the vendor transport; the two
+/// reports are local to this crate. Dispatch is by command name, so the shared handler receives every name it
 /// owns unchanged and the local handler only ever sees its own two names.
 pub fn invoke_handler<R: tauri::Runtime>(
 ) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
-    let shared = cad_desktop_shell::commands::register_commands::<R>();
+    let shared = cad_desktop_shell::vendor::register_commands_with_vendor::<R>();
     let reports = report_commands::<R>();
     move |invoke| {
         if REPORT_COMMANDS.contains(&invoke.message.command()) {
@@ -368,7 +368,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
 
 /// The two shell-only reports as one typed handler.
 ///
-/// Generic over the runtime like [`cad_desktop_shell::commands::register_commands`],
+/// Generic over the runtime like [`cad_desktop_shell::vendor::register_commands_with_vendor`],
 /// so the outer dispatch closure stays monomorphic and the shared handler's type is
 /// never guessed.
 fn report_commands<R: tauri::Runtime>(
@@ -406,6 +406,9 @@ pub fn run() {
         ..cad_ui_core::launch::LaunchOptions::default()
     };
     let shared = cad_desktop_shell::state::new_shared(launch);
+    // This carrier is always `native-below` and registers the vendor transport
+    // through `invoke_handler`, so the store may emit `vendor-pending`.
+    cad_desktop_shell::state::lock(&shared).vendor.enable();
     let telemetry = new_render_telemetry();
 
     let setup_shared = shared.clone();

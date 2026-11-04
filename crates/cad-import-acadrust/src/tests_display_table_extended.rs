@@ -497,7 +497,7 @@ fn extended_point_cloud_extents_box_is_partial() {
     let reasons = partial_reasons(&completeness);
     assert_eq!(
         reasons,
-        vec!["point data is not available from acadrust 0.6.3; extents box shown".to_string()]
+        vec!["point data is not available from acadrust 0.6.8; extents box shown".to_string()]
     );
 }
 
@@ -595,4 +595,176 @@ fn convert_routes_non_proxy_extended_to_its_semantics() {
             if reasons.iter().any(|r| r == "arc-aligned placement approximated as linear text")),
         "{completeness:?}"
     );
+}
+
+// ---- ACAD Architecture (AEC): acadrust 0.6.8 `ExtendedEntityData::Arch` ----
+
+fn arch_entity(
+    profiles: Vec<Vec<acadrust::types::Vector3>>,
+) -> acadrust::classes::arch::ArchEntityData {
+    acadrust::classes::arch::ArchEntityData {
+        dxf_name: "AEC_WALL".into(),
+        cpp_class_name: "AecDbWall".into(),
+        kind: acadrust::classes::arch::ArchKind::Wall,
+        profiles,
+        dwg_type_code: 0,
+        dwg_handle_bits: 0,
+        dwg_source_version: None,
+        raw_dwg_data: None,
+        raw_dxf_codes: None,
+        fields: Vec::new(),
+        preview: Vec::new(),
+    }
+}
+
+#[test]
+fn extended_aec_arch_draws_each_proxy_profile_as_a_polyline_partial() {
+    let acad = acadrust::CadDocument::new();
+    let req = make_request();
+    let builder = ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
+
+    let square = vec![
+        acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+        acadrust::types::Vector3::new(4.0, 0.0, 0.0),
+        acadrust::types::Vector3::new(4.0, 3.0, 0.0),
+        acadrust::types::Vector3::new(0.0, 3.0, 0.0),
+        acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+    ];
+    let short = vec![acadrust::types::Vector3::new(9.0, 0.0, 0.0)];
+    let entity = extended(ExtendedEntityData::Arch(arch_entity(vec![square, short])));
+    let (geometry, completeness) = builder.extended_semantics(&entity);
+
+    let SemanticGeometry::Compound(children) = &geometry else {
+        panic!("expected a compound, got {geometry:?}");
+    };
+    assert_eq!(children.len(), 1, "a one-point profile is not drawn");
+    let SemanticGeometry::Polyline {
+        points,
+        bulges,
+        closed,
+    } = &children[0]
+    else {
+        panic!("expected a polyline, got {:?}", children[0]);
+    };
+    assert_eq!(points.len(), 5);
+    assert!(bulges.is_empty());
+    // The encoded profile carries no closure flag; an open polyline whose last
+    // point repeats the first renders identically, so it must not be invented.
+    assert!(!closed);
+    assert!((points[1].x - 4.0).abs() < 1e-12 && (points[1].y - 0.0).abs() < 1e-12);
+
+    let reasons = partial_reasons(&completeness);
+    assert!(
+        reasons
+            .iter()
+            .any(|r| r.contains("proxy-graphics preview profile")),
+        "{reasons:?}"
+    );
+}
+
+#[test]
+fn extended_aec_arch_without_profiles_is_opaque_and_named() {
+    let acad = acadrust::CadDocument::new();
+    let req = make_request();
+    let builder = ImporterBuilder::new(&req, &acad, ReadStats::default(), compute_identity(&[]));
+
+    let entity = extended(ExtendedEntityData::Arch(arch_entity(Vec::new())));
+    let (geometry, completeness) = builder.extended_semantics(&entity);
+
+    let SemanticGeometry::Opaque { type_key, .. } = &geometry else {
+        panic!("expected opaque, got {geometry:?}");
+    };
+    assert_eq!(type_key, "AEC_WALL");
+    let reasons = partial_reasons(&completeness);
+    assert!(
+        reasons
+            .iter()
+            .any(|r| r.contains("no decodable proxy-graphics profile")),
+        "{reasons:?}"
+    );
+}
+
+// ---- AEC straight walls: native start/end/thickness footprint ----
+
+fn wall(
+    start: acadrust::Vector3,
+    end: acadrust::Vector3,
+    width: f64,
+) -> acadrust::classes::arch::StraightWallGeometry {
+    acadrust::classes::arch::StraightWallGeometry {
+        start,
+        end,
+        width,
+        height: 3.0,
+    }
+}
+
+/// Absolute shoelace area of a closed point ring (first point == last).
+fn shoelace_area(points: &[Point3]) -> f64 {
+    let mut twice = 0.0;
+    for pair in points.windows(2) {
+        twice += pair[0].x * pair[1].y - pair[1].x * pair[0].y;
+    }
+    (twice * 0.5).abs()
+}
+
+#[test]
+fn aec_straight_wall_footprint_is_an_oriented_rectangle() {
+    let geometry = wall(
+        acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+        acadrust::types::Vector3::new(10.0, 0.0, 0.0),
+        2.0,
+    );
+    let outline =
+        ImporterBuilder::wall_footprint_for_test(&geometry).expect("a straight wall footprint");
+    assert_eq!(outline.len(), 5, "{outline:?}");
+    assert_eq!(outline[0], outline[4], "the ring repeats its first point");
+    assert!(
+        (shoelace_area(&outline) - 20.0).abs() < 1e-9,
+        "10 long times 2 thick: {outline:?}"
+    );
+    let distinct = &outline[..4];
+    let cx = distinct.iter().map(|p| p.x).sum::<f64>() / 4.0;
+    let cy = distinct.iter().map(|p| p.y).sum::<f64>() / 4.0;
+    assert!(
+        (cx - 5.0).abs() < 1e-9 && cy.abs() < 1e-9,
+        "centroid must be the baseline midpoint: ({cx}, {cy})"
+    );
+}
+
+#[test]
+fn aec_diagonal_wall_footprint_stays_perpendicular() {
+    let geometry = wall(
+        acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+        acadrust::types::Vector3::new(10.0, 10.0, 0.0),
+        2.0,
+    );
+    let outline =
+        ImporterBuilder::wall_footprint_for_test(&geometry).expect("a straight wall footprint");
+    assert_eq!(outline.len(), 5, "{outline:?}");
+    // The baseline is (0,0)-(10,10), so it is sqrt(200) long and a width-2
+    // rectangle covers sqrt(200) * 2, not 20.
+    let expected_area = 200f64.sqrt() * 2.0;
+    assert!(
+        (shoelace_area(&outline) - expected_area).abs() < 1e-9,
+        "{outline:?}"
+    );
+    // The baseline is y == x, so half the thickness is the perpendicular
+    // distance |y - x| / sqrt(2). An axis-aligned rectangle would be off by
+    // sqrt(2) here instead.
+    for point in &outline {
+        let distance = (point.y - point.x).abs() / std::f64::consts::SQRT_2;
+        assert!(
+            (distance - 1.0).abs() < 1e-9,
+            "point {point:?} is {distance} from the baseline, not half the thickness"
+        );
+    }
+}
+
+#[test]
+fn aec_wall_footprint_rejects_non_positive_width() {
+    let start = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
+    let end = acadrust::types::Vector3::new(10.0, 0.0, 0.0);
+    assert!(ImporterBuilder::wall_footprint_for_test(&wall(start, end, 0.0)).is_none());
+    assert!(ImporterBuilder::wall_footprint_for_test(&wall(start, end, -1.0)).is_none());
 }

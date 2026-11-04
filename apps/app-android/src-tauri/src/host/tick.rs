@@ -517,6 +517,18 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             None => {}
         }
     }
+    // Hand the importer's vendor records to the WebView pass exactly once
+    // per published document (an empty list clears a previous pass).
+    let vendor_records =
+        CAD.with(|cell| cell.borrow().as_ref().and_then(|s| s.take_vendor_records()));
+    cad_desktop_shell::vendor::stage_from_tick(shared, vendor_records);
+    // Apply the derived snapshot on the owner thread, where `CadSession` lives
+    // (the command only stored it). Display-only: no `cad-db` write.
+    CAD.with(|cell| {
+        if let Some(session) = cell.borrow().as_ref() {
+            cad_desktop_shell::vendor::apply_pending_representations(shared, session);
+        }
+    });
 
     // ---- one CAD frame (tick thread, no shared lock held across GPU work) ----
     let mut presented = false;

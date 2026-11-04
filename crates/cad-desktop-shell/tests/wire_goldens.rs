@@ -1,5 +1,13 @@
 //! Wire contract pins for the WP1b command/state migration (behaviour-invariant).
 //!
+//! **Key order is canonicalized, not byte-pinned.** `acadrust` 0.6.8 enables
+//! `serde_json/preserve_order` through its `import` feature, and Cargo feature
+//! unification applies that to every crate in the workspace. `to_string_pretty`
+//! therefore follows struct insertion order instead of the sorted order the
+//! fixtures were captured with. JSON object order is not semantic, so the
+//! assertion compares a recursively key-sorted form; a field value change still
+//! fails. The fixtures themselves are unchanged.
+//!
 //! Provenance (honest record, WP1 gate finding 1): the fixtures were produced
 //! by a temporary `wire_golden_capture` harness that ran the pre-migration
 //! bodies in `apps/app-linux/src/host/commands.rs` and was removed with that
@@ -40,8 +48,26 @@ fn probe_launch() -> LaunchOptions {
     }
 }
 
+/// Recursively sort object keys so a fixture comparison does not depend on
+/// whether `serde_json` was built with `preserve_order`.
+fn canonical(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            let mut sorted = serde_json::Map::new();
+            for key in keys {
+                sorted.insert(key.clone(), canonical(&map[key]));
+            }
+            Value::Object(sorted)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(canonical).collect()),
+        other => other.clone(),
+    }
+}
+
 fn assert_golden(name: &str, value: &Value) {
-    let actual = serde_json::to_string_pretty(value).expect("serialize") + "\n";
+    let actual = serde_json::to_string_pretty(&canonical(value)).expect("serialize") + "\n";
     let expected = match name {
         "probe_status_fresh.json" => include_str!("fixtures/probe_status_fresh.json"),
         "probe_status_populated.json" => include_str!("fixtures/probe_status_populated.json"),
@@ -57,6 +83,8 @@ fn assert_golden(name: &str, value: &Value) {
         "probe_input_acks.json" => include_str!("fixtures/probe_input_acks.json"),
         other => panic!("unknown golden {other}"),
     };
+    let expected: Value = serde_json::from_str(expected).expect("golden parses");
+    let expected = serde_json::to_string_pretty(&canonical(&expected)).expect("serialize") + "\n";
     assert_eq!(actual, expected, "wire golden mismatch: {name}");
 }
 
@@ -75,7 +103,7 @@ fn dump_cad_status(name: &str, shared: &Arc<std::sync::Mutex<Shared>>) {
 }
 
 #[test]
-fn probe_status_is_byte_identical_to_the_pre_migration_host() {
+fn probe_status_matches_the_pre_migration_golden() {
     dump_status(
         "probe_status_fresh.json",
         &new_shared(LaunchOptions::default()),
@@ -165,7 +193,7 @@ fn cad_status_wire_matches_the_pinned_fixtures() {
 
 #[test]
 #[allow(deprecated)] // the frozen `cad_status` wire label is built by hand here
-fn probe_input_acks_are_byte_identical_to_the_pre_migration_host() {
+fn probe_input_acks_match_the_pre_migration_golden() {
     let mut cases = Vec::new();
 
     let waiting = new_shared(LaunchOptions::default());

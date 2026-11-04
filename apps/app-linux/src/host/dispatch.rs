@@ -1,8 +1,13 @@
 //! Host-owned IPC registration: the shared command list plus the `dom-canvas`
 //! seam (ADR 0024 D1/D2/D5).
 //!
-//! Every desktop host registers `cad_desktop_shell::commands::register_commands()`
-//! — the one `generate_handler!` list, with its own `COMMAND_NAMES` registry test.
+//! Every desktop host registers the shared command list
+//! (`cad_desktop_shell::commands::register_commands()`); a host whose every carrier
+//! is `native-below` registers `vendor::register_commands_with_vendor()` instead,
+//! which composes the same list with the three vendor commands. This host needs the
+//! split because its `dom-canvas` branch must route those names to the wasm session
+//! and refuse the native ones.
+//!
 //! The `dom-canvas` carrier needs two things that list cannot express, and both
 //! are host policy, not shared state rules:
 //!
@@ -56,6 +61,7 @@ use super::canvas_session::{
     self, CanvasSessionAck, CanvasSessionDescriptor, CANVAS_SESSION_STATUS_COMMAND,
 };
 use super::ProbeShared;
+use cad_desktop_shell::vendor::is_vendor_command;
 
 /// Commands this module answers itself, with the carrier they are routed on.
 ///
@@ -256,7 +262,10 @@ fn host_commands<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Syn
         canvas_session_status,
         cad_status,
         cad_commands,
-        cad_command_aliases
+        cad_command_aliases,
+        cad_desktop_shell::vendor::cad_vendor_records,
+        cad_desktop_shell::vendor::cad_vendor_apply,
+        cad_desktop_shell::vendor::cad_vendor_status
     ]
 }
 
@@ -280,6 +289,18 @@ pub fn invoke_handler<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send 
             // Routed on every carrier for the same reason: it stores the wasm
             // session's descriptor on `dom-canvas` and refuses explicitly on
             // `native-below` (no silent success, no second status path).
+            return host(invoke);
+        }
+        if is_vendor_command(&command) {
+            if mode == SurfaceMode::DomCanvas {
+                // That carrier's wasm session serves the same pass from
+                // `apps/app-web`; a native command here would have no document.
+                invoke.resolver.reject(format!(
+                    "unsupported_on_surface_mode: {command} is a native vendor pass command,                      and surfaceMode={} has none (the wasm session owns the document there)",
+                    mode.wire_name()
+                ));
+                return true;
+            }
             return host(invoke);
         }
         if mode == SurfaceMode::DomCanvas {
@@ -307,6 +328,9 @@ pub fn invoke_handler<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send 
 mod tests {
     use super::*;
     use cad_desktop_shell::commands::COMMAND_NAMES;
+    use cad_desktop_shell::vendor::{
+        CAD_VENDOR_APPLY_COMMAND, CAD_VENDOR_RECORDS_COMMAND, CAD_VENDOR_STATUS_COMMAND,
+    };
     use cad_ui_core::session::WIRE_COMMAND_NAMES;
 
     #[test]
@@ -422,9 +446,15 @@ mod tests {
             CAD_STATUS_COMMAND,
             CAD_COMMANDS_COMMAND,
             CAD_COMMAND_ALIASES_COMMAND,
+            CAD_VENDOR_RECORDS_COMMAND,
+            CAD_VENDOR_APPLY_COMMAND,
+            CAD_VENDOR_STATUS_COMMAND,
         ] {
             let host_only = command == CANVAS_RUNTIME_FAILED_HOST_COMMAND
-                || command == CANVAS_SESSION_STATUS_COMMAND;
+                || command == CANVAS_SESSION_STATUS_COMMAND
+                || command == CAD_VENDOR_RECORDS_COMMAND
+                || command == CAD_VENDOR_APPLY_COMMAND
+                || command == CAD_VENDOR_STATUS_COMMAND;
             assert!(
                 host_only || COMMAND_NAMES.contains(&command),
                 "{command} is neither host-only nor shared"

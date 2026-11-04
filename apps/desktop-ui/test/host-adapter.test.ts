@@ -760,13 +760,14 @@ test('only host/invoke.ts imports the Tauri API', async () => {
 
 test('the package declares the web and android builds next to the tauri one', async () => {
   const pkg = JSON.parse(await readFile(new URL('package.json', PKG_ROOT), 'utf8'));
-  assert.equal(pkg.scripts.build, 'vite build');
-  assert.equal(pkg.scripts['build:web'], 'YACR_RUNTIME=web vite build --outDir ../app-web/dist-ui --emptyOutDir');
+  // Every carrier builds the standalone plugin module before its app bundle.
+  assert.equal(pkg.scripts.build, 'npm run build:plugins && vite build');
+  assert.equal(pkg.scripts['build:web'], 'npm run build:plugins && YACR_RUNTIME=web vite build --outDir ../app-web/dist-ui --emptyOutDir');
   // The Android host embeds its own artifact (`apps/app-android/dist`); it must
   // never overwrite the desktop hosts' `dist/`.
-  assert.equal(pkg.scripts['build:android'], 'YACR_RUNTIME=android vite build --outDir ../app-android/dist --emptyOutDir');
-  // The test gate stays typecheck + node tests.
-  assert.equal(pkg.scripts.test, 'tsc --noEmit && node --test test/*.test.ts');
+  assert.equal(pkg.scripts['build:android'], 'npm run build:plugins && YACR_RUNTIME=android vite build --outDir ../app-android/dist --emptyOutDir');
+  // The test gate stays typecheck (app + plugin) + node tests.
+  assert.equal(pkg.scripts.test, 'tsc --noEmit && tsc -p ../../plugins/tch/tsconfig.json --noEmit && node --test test/*.test.ts');
 });
 
 test('vite.config.mjs injects and validates __YACR_RUNTIME__', async () => {

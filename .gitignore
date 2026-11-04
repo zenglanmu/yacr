@@ -66,3 +66,9 @@ fixtures/debug-default-fonts.dwg
 
 # Loop-command scratch state (session-local, never committed)
 loop.txt
+
+# Generated vendor plugin bundle (built by `npm run build:plugins`).
+apps/desktop-ui/public/plugins/
+
+# Vendor plugin build output (standalone package).
+plugins/tch/dist/

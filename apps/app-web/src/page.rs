@@ -230,6 +230,20 @@ fn fail_start(failure: Failure) -> JsValue {
     error
 }
 
+/// Install one settled vendor derived-representation snapshot.
+///
+/// Called by the wasm `vendor_apply` export on the same thread that owns the
+/// session. Display-only: the next `frame()` preparation rebuilds the base with
+/// the primitives; no `cad-db` entity is created.
+pub(crate) fn apply_vendor_representations(
+    store: std::sync::Arc<cad_app::vendor::VendorRepresentationStore>,
+) -> bool {
+    with_live(|page| {
+        page.live.session.set_vendor_representations(Some(store));
+    })
+    .is_some()
+}
+
 /// Run `action` on the live page session, or answer `None` when there is none.
 fn with_live<T>(action: impl FnOnce(&mut PageSession) -> T) -> Option<T> {
     STATE.with(|cell| match cell.try_borrow_mut() {

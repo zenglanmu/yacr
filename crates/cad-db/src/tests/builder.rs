@@ -538,3 +538,24 @@ fn an_unresolved_name_registration_exposes_no_metadata() {
     );
     assert!(db.block_base_point(BlockId(0)).is_none());
 }
+
+#[test]
+fn a_block_source_handle_resolves_to_its_definition() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_block(empty_block(BlockId(3))).unwrap();
+    b.set_block_source_handle(BlockId(3), 0x3DD82);
+    // A zero handle is never registered: "handle 0" must not alias a block.
+    b.set_block_source_handle(BlockId(3), 0);
+    let db = b.finish().unwrap();
+    assert_eq!(db.block_by_source_handle(0), None);
+    assert_eq!(db.block_by_source_handle(0x3DD82), Some(BlockId(3)));
+}
+
+#[test]
+fn a_nonzero_block_source_handle_round_trips() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_block(empty_block(BlockId(3))).unwrap();
+    b.set_block_source_handle(BlockId(3), 0x3DD82);
+    let db = b.finish().unwrap();
+    assert_eq!(db.block_by_source_handle(0x3DD82), Some(BlockId(3)));
+}

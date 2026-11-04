@@ -34,6 +34,7 @@ impl DrawingDatabaseBuilder {
                 blocks: BTreeMap::new(),
                 block_metadata: BTreeMap::new(),
                 block_name_order: Vec::new(),
+                block_source_handles: BTreeMap::new(),
                 layouts: BTreeMap::new(),
                 styles: BTreeMap::new(),
                 linetypes: BTreeMap::new(),
@@ -200,6 +201,21 @@ impl DrawingDatabaseBuilder {
             .retain(|(_, existing)| *existing != id);
         self.database.block_name_order.push((name.to_string(), id));
         Ok(())
+    }
+
+    /// Record the source DWG handle of an imported block definition.
+    ///
+    /// Vendor derived representations (for example a Tianzheng door symbol)
+    /// carry a block handle, not a table name; this map is what turns that
+    /// handle back into a [`BlockId`]. A zero handle is ignored so no "handle 0
+    /// is the first block" shortcut can ever appear. Re-registering a handle
+    /// replaces the previous owner (the last imported definition wins, exactly
+    /// like duplicate block names).
+    pub fn set_block_source_handle(&mut self, id: BlockId, handle: u64) {
+        if handle == 0 {
+            return;
+        }
+        self.database.block_source_handles.insert(handle, id);
     }
 
     /// Attach (or replace) a block's dynamic-block visibility descriptor.

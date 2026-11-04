@@ -42,6 +42,15 @@
 // (`host/invoke.ts` prefers the Tauri bridge for these two when one exists, which
 // is where the X11 host's marker line and exit code live.)
 //
+// The three **vendor** names (`cad_vendor_records` / `cad_vendor_apply` /
+// `cad_vendor_status`) are forwarded too, but to the session's own exports rather
+// than its `invoke` envelope: the wasm session owns the carrier-neutral pass
+// (`apps/app-web/src/vendor.rs`), so there is no Tauri command to reach. The
+// adapter only validates the argument shape, converts the `u64` pass numbers to
+// the `bigint` wasm-bindgen requires, and hands the records frame on as a real
+// `ArrayBuffer`; a module without those exports refuses **by name**
+// (`unsupported-runtime: cad_vendor_records: …`), never with an empty frame.
+//
 // The module arrives as `unknown` from the page global the `dom-canvas` bootstrap
 // publishes (`src/cad/canvas-host.ts`), is awaited through its `ready`, and its
 // exports are checked before anything is called. A rejected init or a missing
@@ -115,6 +124,21 @@ export interface WebShellModule {
    */
   cad_subscribe?(callback: (json: string) => void): unknown;
   cad_unsubscribe?(): unknown;
+
+  // -- the vendor pass (see `vendor/vendor-pass.ts`) -------------------------
+  //
+  // `token`/`generation` are `u64` on the session side, and wasm-bindgen maps a
+  // `u64` parameter to a JS `bigint` (the WebAssembly `i64` rule). The wire
+  // events carry plain numbers, so the transport converts at this boundary
+  // (`passNumber`); a module that never got that far simply has no export and
+  // is refused by name.
+
+  /** The ABI v4 records frame (`Uint8Array`/`ArrayBuffer`), or a `vendor.*` rejection. */
+  vendor_records?(token: number | bigint): unknown;
+  /** Settle one pass; answers the JSON `VendorAck`, or a `vendor.*` rejection. */
+  vendor_apply?(token: number | bigint, generation: number | bigint, payload: string): unknown;
+  /** The active pass descriptor as JSON (`{token, generation, entities}`, nulls allowed). */
+  vendor_status?(): unknown;
 }
 
 /** The page global the bootstrap publishes the module on. */
@@ -138,6 +162,19 @@ export const WEB_INPUT_COMMAND = 'probe_input';
 export const WEB_SESSION_COMMAND = 'canvas_session_status';
 /** A failure report the chrome sends; printed and remembered, never answered. */
 export const WEB_FAILURE_COMMAND = 'canvas_runtime_failed';
+
+/**
+ * The three vendor-pass commands (`vendor/vendor-pass.ts`).
+ *
+ * The carrier-neutral state machine is `cad_ui_core::session::vendor`; on this
+ * carrier the wasm session owns it (`apps/app-web/src/vendor.rs`), so the adapter
+ * forwards to the session's exports instead of a Tauri command. The names are
+ * identical to the native hosts' `#[tauri::command]`s, which is what lets one
+ * chrome run the same pass on every carrier.
+ */
+export const WEB_VENDOR_RECORDS_COMMAND = 'cad_vendor_records';
+export const WEB_VENDOR_APPLY_COMMAND = 'cad_vendor_apply';
+export const WEB_VENDOR_STATUS_COMMAND = 'cad_vendor_status';
 
 /**
  * The command the **transport** implements, on top of the wasm session's own
@@ -417,6 +454,88 @@ function commandArgs(args: unknown): string {
 }
 
 /**
+ * One vendor pass number (`token`/`generation`) as the `bigint` the wasm export
+ * takes.
+ *
+ * The wire event carries a plain JSON number, and the export signature is `u64` -
+ * which wasm-bindgen maps to JS `bigint` (the WebAssembly `i64` rule, not a
+ * choice). A non-number, a negative value or a value outside the safe-integer
+ * range is refused here instead of being rounded into a token the host never
+ * issued.
+ */
+function passNumber(command: string, field: string, value: unknown): bigint {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`web-adapter: ${command}: ${field} must be a non-negative safe integer`);
+  }
+  return BigInt(value);
+}
+
+/**
+ * The vendor records frame as an `ArrayBuffer`.
+ *
+ * The session answers a `Uint8Array` (wasm-bindgen's `Vec<u8>`), but the plugin
+ * contract is `ArrayBuffer`, and a test double (or an older artifact) may hand
+ * back a view, an `ArrayBuffer` or a plain byte array. Anything else is a named
+ * failure: a refused or stale token must never look like an empty frame.
+ */
+function asBinary(command: string, value: unknown): ArrayBuffer {
+  if (value instanceof ArrayBuffer) return value;
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView;
+    return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
+  }
+  if (Array.isArray(value)) {
+    const bytes = value as unknown[];
+    if (!bytes.every(byte => typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255)) {
+      throw new Error(`web-adapter: ${command}: the record frame is not a byte array`);
+    }
+    return Uint8Array.from(bytes as number[]).buffer;
+  }
+  throw new Error(`unsupported-runtime: ${command}: the canvas module answered with ${typeof value}, not binary records`);
+}
+
+/**
+ * The `vendor_records` / `vendor_apply` / `vendor_status` cases.
+ *
+ * Split out of the `switch` only to keep `invoke` readable; it is the same code
+ * path. A module without the export refuses **by name** (`unsupported-runtime:
+ * <command>: …`), never with an empty frame or an invented ack - that would turn
+ * "the pass cannot run here" into a fake settled pass.
+ */
+async function invokeVendor(module: WebShellModule, command: string, args: unknown): Promise<unknown> {
+  switch (command) {
+    case WEB_VENDOR_RECORDS_COMMAND: {
+      const token = passNumber(command, 'token', argRecord(args).token);
+      if (typeof module.vendor_records !== 'function') {
+        throw new Error(`unsupported-runtime: ${command}: the canvas module has no vendor_records export`);
+      }
+      return asBinary(command, await module.vendor_records(token));
+    }
+    case WEB_VENDOR_APPLY_COMMAND: {
+      const record = argRecord(args);
+      const token = passNumber(command, 'token', record.token);
+      const generation = passNumber(command, 'generation', record.generation);
+      const payload = record.payload;
+      if (typeof payload !== 'string') {
+        throw new Error(`web-adapter: ${command}: payload must be the base64 result frame`);
+      }
+      if (typeof module.vendor_apply !== 'function') {
+        throw new Error(`unsupported-runtime: ${command}: the canvas module has no vendor_apply export`);
+      }
+      return parseJson(command, await module.vendor_apply(token, generation, payload), 'object');
+    }
+    case WEB_VENDOR_STATUS_COMMAND: {
+      if (typeof module.vendor_status !== 'function') {
+        throw new Error(`unsupported-runtime: ${command}: the canvas module has no vendor_status export`);
+      }
+      return parseJson(command, module.vendor_status(), 'object');
+    }
+    default:
+      throw new Error(`web-adapter: ${command}: not a vendor command`);
+  }
+}
+
+/**
  * The source a [`createWebAdapter`] call takes.
  *
  * A validated module (tests, and any caller that already loaded one) or a
@@ -564,6 +683,10 @@ export function createWebAdapter(source: WebShellSource, deps: WebAdapterDeps = 
           };
           return undefined;
         }
+        case WEB_VENDOR_RECORDS_COMMAND:
+        case WEB_VENDOR_APPLY_COMMAND:
+        case WEB_VENDOR_STATUS_COMMAND:
+          return invokeVendor(await moduleOf(), command, args);
         case WEB_FAILURE_COMMAND: {
           const record = argRecord(args);
           const step = typeof record.step === 'string' && record.step.length > 0 ? record.step : CANVAS_STEP_UNCLASSIFIED;

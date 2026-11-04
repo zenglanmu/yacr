@@ -2,6 +2,7 @@
 use super::*;
 use cad_app::background::LatestTask;
 use cad_app::render_scene::{CadSceneController, DecodedImageCache, OverlayInputs};
+use cad_app::vendor::VendorRepresentationStore;
 use cad_domain::CadError;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -12,6 +13,7 @@ struct InputKey {
     space: SpaceSelection,
     fonts_generation: u64,
     images_generation: u64,
+    vendor: Option<u64>,
     layers: u64,
     overlays: u64,
 }
@@ -25,6 +27,7 @@ pub(super) struct PreparationInput {
     pub images: Option<Arc<DecodedImageCache>>,
     pub fonts_generation: u64,
     pub images_generation: u64,
+    pub vendor: Option<Arc<VendorRepresentationStore>>,
     pub layers: LayerOverrideSet,
     pub overlays: OverlayInputs,
 }
@@ -44,6 +47,7 @@ impl PreparationInput {
             space: self.space,
             fonts_generation: self.fonts_generation,
             images_generation: self.images_generation,
+            vendor: self.vendor.as_ref().map(|store| store.revision()),
             layers: self.layers.fingerprint(),
             overlays: controller::overlay_fingerprint(&self.overlays),
         }
@@ -90,6 +94,7 @@ impl NativePreparation {
                         controller.fonts_changed();
                     }
                     fonts_generation = input.fonts_generation;
+                    controller.set_vendor_representations(input.vendor.clone());
                     controller.prepare_shared_with_overlays_and_images(
                         input.drawing,
                         input.document,
@@ -164,6 +169,7 @@ mod tests {
             images: None,
             fonts_generation: 0,
             images_generation: 0,
+            vendor: None,
             layers: LayerOverrideSet::new(),
             overlays: OverlayInputs::default(),
         }

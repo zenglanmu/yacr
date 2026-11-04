@@ -40,6 +40,7 @@ mod settings;
 mod snap_unit;
 mod space;
 mod status;
+pub mod vendor;
 pub mod wire;
 mod zoom;
 
@@ -623,6 +624,14 @@ impl CadSession {
     /// the host's projected resource state ([`HostCore::take_updates`]) to
     /// report missing/partial images; a partial resource set is surfaced as a
     /// technical `error`, never as a silent "complete".
+    /// Take the vendor records copied by the last successful import.
+    ///
+    /// Transport state, not document state (`Some([])` = a new document with no
+    /// vendor objects; `None` = nothing new).
+    pub fn take_vendor_records(&self) -> Option<Vec<cad_host::VendorRecord>> {
+        self.core.take_vendor_records()
+    }
+
     pub fn snapshot(
         &self,
         backend: Option<String>,

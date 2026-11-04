@@ -3,6 +3,7 @@
 //! The crate-private controller lives here; the unit tests are split into the
 //! sibling `tests` module so this file stays navigable.
 use crate::layers::LayerOverrideSet;
+use crate::vendor::VendorRepresentationStore;
 use cad_db::DrawingDatabase;
 use cad_domain::{CadResult, DocumentId, Point3, SceneIdentity, SelectionRef, TaskStamp};
 use cad_representation::{FontEngine, SpaceSelection};
@@ -10,6 +11,8 @@ use std::sync::Arc;
 mod assembly;
 pub use assembly::*;
 mod overlay;
+#[cfg(test)]
+mod vendor_tests;
 pub use overlay::*;
 
 /// Decoded raster-image cache fed to the base scene build, re-exported so the UI
@@ -33,6 +36,10 @@ struct SceneVersion {
     /// new pointer, so an image cache installed after the base was built still
     /// rebuilds the image batches.
     images: usize,
+    /// Revision of the vendor derived-representation snapshot. A new plugin pass
+    /// rebuilds the base so its primitives become visible without touching
+    /// `cad-db`.
+    vendor: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -88,6 +95,8 @@ pub struct CadSceneController {
     /// Decoded raster-image cache fed to the base build, stored so a later
     /// [`PreparedScene`] carries it to the renderer. `None` = no image context.
     images: Option<Arc<DecodedImageCache>>,
+    /// Derived vendor display snapshot (display-only; never `cad-db` state).
+    vendor: Option<Arc<VendorRepresentationStore>>,
     /// Visible POINT positions derived from the displayed drawing
     /// (ADR 0015 decision E). Cached because they can only change when the base
     /// changes; a camera-only overlay rebuild reuses them instead of rescanning
@@ -106,6 +115,14 @@ impl CadSceneController {
     /// navigation. Retaining the Arc prevents pointer reuse from hiding a new
     /// open, even when database id/revision/bounds happen to match.
     #[allow(clippy::too_many_arguments)]
+    /// Install the derived vendor snapshot that the next base build must merge.
+    ///
+    /// The caller replaces the whole snapshot; the controller compares its
+    /// revision in [`SceneVersion`] so an unchanged store is free.
+    pub fn set_vendor_representations(&mut self, vendor: Option<Arc<VendorRepresentationStore>>) {
+        self.vendor = vendor;
+    }
+
     pub fn prepare_shared(
         &mut self,
         doc: Option<Arc<DrawingDatabase>>,
@@ -253,6 +270,7 @@ impl CadSceneController {
                 .images
                 .as_ref()
                 .map_or(0, |cache| Arc::as_ptr(cache) as usize),
+            vendor: self.vendor.as_ref().map(|store| store.revision()),
         });
         if let Some(db) = doc {
             crate::validate_space(db, space)?;
@@ -302,13 +320,14 @@ impl CadSceneController {
         // edit keeps the base `Arc` (and its GPU revisions) unchanged.
         let base = if base_changed {
             Arc::new(match doc {
-                Some(db) => build_scene_with_space_and_images(
+                Some(db) => build_scene_with_space_and_images_and_vendor(
                     db,
                     stamp.clone(),
                     fonts.clone(),
                     self.images.clone(),
                     layers,
                     space,
+                    self.vendor.as_deref(),
                 )?,
                 None => SceneDelta {
                     stamp: stamp.clone(),

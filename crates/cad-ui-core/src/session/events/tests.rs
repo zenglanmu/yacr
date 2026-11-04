@@ -49,6 +49,8 @@ fn kinds(events: &[CadEventKind]) -> Vec<&'static str> {
             CadEventKind::DocumentClosed => "document-closed",
             CadEventKind::ErrorRaised { .. } => "error-raised",
             CadEventKind::PopupChanged { .. } => "popup-changed",
+            CadEventKind::VendorPending { .. } => "vendor-pending",
+            CadEventKind::VendorSettled { .. } => "vendor-settled",
             CadEventKind::EventsDropped { .. } => "events-dropped",
         })
         .collect()

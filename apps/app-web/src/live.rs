@@ -341,6 +341,16 @@ impl Live {
         session
             .set_canvas_metrics(metrics.css, metrics.dpr)
             .map_err(|message| Failure::new(STEP_VIEWPORT, message))?;
+        // Hand the importer's vendor records to the pass exactly once, after the
+        // open is known to have succeeded. `Some([])` means "a new document with no
+        // vendor objects" and clears any previous pass, so an old token can never
+        // settle into this document. The export's own flush announces it.
+        let records = session.take_vendor_records();
+        if records.is_some() {
+            // The previous document's derived display is not this document's.
+            session.set_vendor_representations(None);
+        }
+        crate::vendor::stage(records);
         let measured = heap();
         Ok(Self {
             session,
@@ -390,6 +400,14 @@ impl Live {
         self.session
             .open_bytes(label, bytes)
             .map_err(|error| Failure::new(STEP_IMPORT, error.to_string()))?;
+        // Same rule as `Live::install`: stage only after the replacement really
+        // happened, so a refused open leaves the previous pass (and the previous
+        // document) untouched.
+        let records = self.session.take_vendor_records();
+        if records.is_some() {
+            self.session.set_vendor_representations(None);
+        }
+        crate::vendor::stage(records);
         self.import_ms = (self.clock_now() - started).max(0.0);
         self.label = label.to_string();
         self.bytes = bytes.len();

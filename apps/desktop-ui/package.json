@@ -4,13 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
-    "build": "vite build",
-    "build:web": "YACR_RUNTIME=web vite build --outDir ../app-web/dist-ui --emptyOutDir",
-    "build:android": "YACR_RUNTIME=android vite build --outDir ../app-android/dist --emptyOutDir",
+    "build:plugins": "bash ../../scripts/build-vendor-plugin.sh",
+    "dev": "npm run build:plugins && vite --host 127.0.0.1 --port 1420 --strictPort",
+    "build": "npm run build:plugins && vite build",
+    "build:web": "npm run build:plugins && YACR_RUNTIME=web vite build --outDir ../app-web/dist-ui --emptyOutDir",
+    "build:android": "npm run build:plugins && YACR_RUNTIME=android vite build --outDir ../app-android/dist --emptyOutDir",
     "build:canvas-wasm": "bash ../../scripts/build-canvas-wasm.sh",
-    "test": "tsc --noEmit && node --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "test": "tsc --noEmit && tsc -p ../../plugins/tch/tsconfig.json --noEmit && node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit && tsc -p ../../plugins/tch/tsconfig.json --noEmit"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.3",

@@ -62,6 +62,13 @@ pub mod state;
     target_os = "android"
 ))]
 pub mod threading;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
+pub mod vendor;
 
 #[cfg(any(
     target_os = "linux",

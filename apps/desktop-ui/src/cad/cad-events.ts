@@ -46,6 +46,8 @@ export type CadEventFrame =
   | { readonly revision: number; readonly type: 'document-closed' }
   | { readonly revision: number; readonly type: 'error-raised'; readonly error: string }
   | { readonly revision: number; readonly type: 'popup-changed'; readonly popup: CadPopup | null }
+  | { readonly revision: number; readonly type: 'vendor-pending'; readonly token: number; readonly generation: number; readonly entities: number }
+  | { readonly revision: number; readonly type: 'vendor-settled'; readonly token: number; readonly applied: number; readonly diagnostics: readonly string[] }
   | { readonly revision: number; readonly type: 'events-dropped'; readonly count: number };
 
 /**
@@ -172,6 +174,42 @@ export function parseCadEvent(value: unknown): ParsedCadEvent {
       if (popup !== null && plainRecord(popup) === null) throw new Error('CAD_EVENT_INVALID');
       return { revision, frame: { revision, type, popup: popup as CadPopup | null } };
     }
+    case 'vendor-pending':
+      if (!isRevision(record.token) || !isRevision(record.generation) || !isRevision(record.entities)) {
+        throw new Error('CAD_EVENT_INVALID');
+      }
+      return {
+        revision,
+        frame: {
+          revision,
+          type,
+          token: record.token,
+          generation: record.generation,
+          entities: record.entities,
+        },
+      };
+    case 'vendor-settled': {
+      const diagnostics = record.diagnostics;
+      if (
+        !isRevision(record.token) ||
+        !isRevision(record.applied) ||
+        !Array.isArray(diagnostics) ||
+        diagnostics.length > 16 ||
+        diagnostics.some(item => typeof item !== 'string')
+      ) {
+        throw new Error('CAD_EVENT_INVALID');
+      }
+      return {
+        revision,
+        frame: {
+          revision,
+          type,
+          token: record.token,
+          applied: record.applied,
+          diagnostics: diagnostics as string[],
+        },
+      };
+    }
     case 'events-dropped':
       if (!isRevision(record.count)) throw new Error('CAD_EVENT_INVALID');
       return { revision, frame: { revision, type, count: record.count } };
@@ -211,6 +249,10 @@ export function cadEventPumpsFrames(type: CadEventFrame['type']): boolean {
   switch (type) {
     case 'status-changed':
     case 'events-dropped':
+    // The vendor pass does not change the model yet: geometry insertion is a
+    // later milestone, so these frames must not pump the page carrier.
+    case 'vendor-pending':
+    case 'vendor-settled':
       return false;
     default:
       return true;

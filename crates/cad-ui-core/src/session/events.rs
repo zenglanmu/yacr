@@ -230,6 +230,30 @@ pub enum CadEventKind {
         /// The projected popup, or `null`.
         popup: Option<CadPopup>,
     },
+    /// A vendor-decoding pass was armed for the newly opened document.
+    ///
+    /// The frontend fetches the binary records with `cad_vendor_records(token)`,
+    /// decodes them in the WebView plugin, and posts the result with
+    /// `cad_vendor_apply`. `entities` is the number of vendor records the host
+    /// found (zero while the record extractor is not wired).
+    VendorPending {
+        /// Monotonic pass token; a newer document always gets a new token.
+        token: u64,
+        /// The document epoch the pass belongs to (echoed by the result frame).
+        generation: u64,
+        /// Vendor records available (bounded by the host).
+        entities: u32,
+    },
+    /// A vendor pass settled (accepted or rejected) and is ready for the chrome.
+    VendorSettled {
+        /// The pass token this result belongs to.
+        token: u64,
+        /// Primitives the host actually wrote (zero until geometry insertion is
+        /// wired; a non-zero claim is rejected before this event).
+        applied: u32,
+        /// Stable diagnostics, bounded by the host.
+        diagnostics: Vec<String>,
+    },
     /// The in-process ring dropped events (bounded-buffer marker).
     EventsDropped {
         /// How many events were dropped since the previous marker.

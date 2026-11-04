@@ -420,3 +420,23 @@ impl Drop for ActiveGuard<'_> {
         self.flag.set(false);
     }
 }
+
+impl HostCore {
+    /// Take the vendor records copied by the last successful import.
+    ///
+    /// The owner tick is the only caller: it stages them into the WebView pass.
+    /// `Some([])` is a new document with no vendor objects (the caller clears the
+    /// previous pass); `None` means no document was published since the last call.
+    pub fn take_vendor_records(&self) -> Option<Vec<VendorRecord>> {
+        self.controller.borrow_mut().take_vendor_records()
+    }
+
+    /// Install the vendor derived-representation snapshot and invalidate the
+    /// scene when it changed. Display-only: `cad-db` is never touched.
+    pub fn set_vendor_representations(
+        &self,
+        store: Option<Arc<cad_app::vendor::VendorRepresentationStore>>,
+    ) {
+        self.render.set_vendor_representations(store);
+    }
+}

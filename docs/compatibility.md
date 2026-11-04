@@ -51,6 +51,7 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | RASTERIMAGE | 实现(相对路径解析 + PNG/JPEG 解码) | 实现(`SemanticGeometry::Image`) | 实现(GPU 纹理：每键去重/UV 方向/裁剪多边形；缺纹理 frame+`Partial`) | 经边框 | 不支持 |
 | WIPEOUT | 实现(`Mask` 边界 + `inverted`) | 部分 | **非 `inverted`：真遮罩**——无颜色 `Mask` 图元，渲染器**末 pass**（`depth_compare: Always`、不写深度、**clear 颜色**），**凹形用 even-odd 填充**；**`inverted` 亦已渲染**（视口覆盖环 + 边界做 even-odd 补集；正交视口环**精确**、透视下为**宽松估计**）；矢量出图**跳过并具名**；不与更高 `draw_order` 交错（遮罩恒最后） | 经边界 | 不支持 |
 | EXTENDED(RTEXT/ARCALIGNEDTEXT/GEOPOSITIONMARKER/SECTIONOBJECT/POINTCLOUD) | 实现(基础字段) | 部分 | 基础表示(Text/圆/折线/范围盒) | 部分 | 不支持 |
+| **AEC Arch（AEC_WALL/DOOR/WINDOW/STAIR/SPACE/…，2026-11-03）** | **实现（acadrust 0.6.8 已类型化）**：`ExtendedEntityData::Arch` 携带 `ArchKind`、类名、**proxy-graphics 预览轮廓（世界坐标）**与原始 DWG/DXF 体 | **部分**：只有轮廓是真实的；开洞、3D 体量、类参数、样式/锚点对象未建模 | 每个 ≥2 点轮廓画成**开放折线**（记录无闭合标志，不臆造 `closed`）；无轮廓 ⇒ `Opaque` + 具名 `Partial` | 按折线 | 不支持 |
 | CAMERA / 动态块参数与夹点 / OLEFRAME / LAYOUTPRINTCONFIG / FORMAT / LEGACY / REGISTEREDCLASS | 实现(仅 common 或无语义) | 显式无显示 | 不绘制(`Opaque`/`Unverified`) | — | — |
 | 3DSOLID / BODY / REGION / SURFACE (ACIS) | 实现(acadrust 解析 SAT/SAB；**导入期离散**为中性网格) | 中性网格（**源 ACIS 不保留**） | **会绘制**：导入期经 `cad-kernel-adapter` 离散，容差 = 包围盒对角线的 **0.1 %**，恒 `Partial` 并声明「离散近似不随缩放细化 + 源不保留」；超出子集/原始 SAT/SAB 被拒 ⇒ 仍 `Opaque` + 内核具名码 | 经网格 | 不支持 |
 | TEXT/MTEXT 格式 | 实现(格式 run 解析) | 部分(堆叠分数/颜色/装饰/行对齐为显式 Partial) | 按 run 整形/换行 | — | — |
@@ -168,23 +169,50 @@ P5a 让标注成为一级域实体并迁入两分支导入 + 导出；**P5b** �
 | i18n | P5b **0 新键**；P5c **+9 键** | P5b **无 UI 表面**（无命令/面板/状态投影），诚实计数为**零**（计划里 P5c 行写的 "+ i18n" 指 **P5b**）；**P5c** 新增 9 键：`tool.prompt.dim.{origin_first,origin_second,location_linear,location_aligned,ready}`、`tool.draw.{dimlinear,dimaligned}`、`draw.kind.{dimlinear,dimaligned}` |
 
 
-## acadrust 依赖能力（0.6.5）
+## acadrust 依赖能力（0.6.8）
 
-`acadrust` 已由 0.5.5 → 0.6.3 → **0.6.5**（features `serde` + `import`，registry `rsproxy`；无
+`acadrust` 已由 0.5.5 → 0.6.3 → 0.6.5 → **0.6.8**（features `serde` + `import`，registry `rsproxy`；无
 `[patch]`、未修改上游）。`cad-import-acadrust` 是唯一消费方；`cad-proxy` 不依赖 acadrust，只消费
 原始字节。下表为源码核对后的能力增量，「本项目处理」一列说明 yacr 当前的读取/建模，不改变任何
-Unsupported 语义。**0.6.3 → 0.6.5 的差异**单列在表后的「0.6.5 增量」小节；只有被我们**实际执行**过的
+Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增量」小节；只有被我们**实际执行**过的
 能力才写"已接入/已验证"，其余明确标注"上游已提供、本项目未消费"。
 
-| 能力 | acadrust 0.6.5 | 本项目处理 |
+| 能力 | acadrust 0.6.8 | 本项目处理 |
 |---|---|---|
 | STYLE xdata 字体面 | **支持（已类型化）**：`TextStyle.true_type_font` / `true_type_font_flags`；DXF 读 `1001 ACAD`/`1000`，DWG 经 `io/dwg/typeface_eed.rs` 按 APPID 名解析 | 已接入字体解析，链为 `类型化 true_type_font > group 3/4 声明字体 > 字节扫描`（`read_styles` 对 DXF/DWG 统一，DWG 经此通道自动生效）；字节扫描自身仍不覆盖 group 3/4 |
-| LAYOUT `group 72`/`group 73` | **支持**：`read_layout`/`read_plot_settings` 映射到 `Layout.plot_paper_units`/`plot_rotation`（0.5.5 亦然，旧文档「未暴露」有误） | `record_from_layout` 直接读取这两个字段；标准纸名带单位记号时仍优先用纸名（不伪造），仅当文件未声明旋转时才按视口范围推断 |
-| plot-style 解析值 | **不支持**：`PlotSettings` 只有 `current_style_sheet` 与标志，无颜色/线宽/alpha；引用名已类型化 | 显式 Unsupported：`cad-import-acadrust::plot` 读取 `current_style_sheet`/`Layout.plot_style_sheet` 与非缺省 shade plot，各产出 `import.plot_style_unsupported`/`import.shade_plot_unsupported` 诊断；颜色/线宽/alpha 仍不应用（`docs/render-order.md`、`docs/plot.md`） |
-| 代理记录 opcode | **不支持**：`proxy_graphics.rs` 与 0.5.5 字节一致，仅 FillOff(21, 空 payload)/UnicodeText(36)/Unknown | 显式 Unsupported：仅证据支持的记录被解码，其余保留原字节（`docs/proxy-support.md`） |
-| DWG xdata（实体/对象） | **部分**：实体 EED 仅在 APPID 句柄经 `document.app_ids` 解析时解码，否则保留 `raw_dwg_eed`；新增 `document.object_xdata`（对象 EED 解码，但为 crate-private，未向消费者暴露） | 显式 Partial：未解码 EED 保留原字节，不猜测 |
-| DXF 已知实体上的未知码 | **不支持（DXF）**：未知码不保留 | 显式 Unsupported；DWG 侧新增 `EntityCommon.raw_record`（仅 DWG、可变访问即失效）与 `layer_handle`，本项目暂未使用 |
-| UnknownEntity 原始 DWG 数据 | 不变 | 现有 raw 保留路径不变 |
+| LAYOUT `group 72`/`group 73` | **支持**：`read_layout`/`read_plot_settings` 映射到 `Layout.plot_paper_units`/`plot_rotation` | `record_from_layout` 直接读取这两个字段；标准纸名带单位记号时仍优先用纸名（不伪造），仅当文件未声明旋转时才按视口范围推断 |
+| plot-style 解析值 | **不支持**：`PlotSettings` 只有 `current_style_sheet` 与标志，无颜色/线宽/alpha；引用名已类型化（0.6.8 未变） | 显式 Unsupported：`cad-import-acadrust::plot` 读取 `current_style_sheet`/`Layout.plot_style_sheet` 与非缺省 shade plot，各产出 `import.plot_style_unsupported`/`import.shade_plot_unsupported` 诊断；颜色/线宽/alpha 仍不应用（`docs/render-order.md`、`docs/plot.md`） |
+| 代理记录 opcode | **不支持（0.6.8 未变）**：`proxy_graphics.rs` 与 0.6.5 **逐字节相同**，仅 FillOff(21, 空 payload)/UnicodeText(36)/Unknown | 显式 Unsupported：仅证据支持的记录被解码，其余保留原字节（`docs/proxy-support.md`） |
+| DWG xdata（实体/对象） | **部分**：实体 EED 仅在 APPID 句柄经 `document.app_ids` 解析时解码，否则保留 `raw_dwg_eed`。**0.6.8 起对象 EED 可读**：`CadDocument::object_xdata(handle) -> Option<&ExtendedData>` 公开，另有 `set_object_xdata_record`/`remove_object_xdata_record`（0.6.5 的 `document.object_xdata` 字段是 crate-private） | 实体 xdata 仍为显式 Partial（未解码 EED 保留原字节，不猜测）。**对象 EED 已读入报告（2026-11-03）**：`ImportReport.object_xdata: Vec<ObjectXdataApplication>`（按应用名排序、`objects` 为“携带该应用的**对象数**”，同一对象重复记录不重复计数）+ 一条 `xdata.object_ignored` 诊断（最多列 5 个应用名）。**只报告、不应用**到几何/图层/任何导入状态 |
+| DXF 已知实体上的未知码 | **不支持（0.6.8 未变）**：未知码不保留；`EntityCommon.raw_record` 仍只由 DWG 读取器填充 | 显式 Unsupported；DWG 侧 `raw_record`（可变访问即失效）与 `layer_handle` 本项目仍未使用 |
+| UnknownEntity 原始数据 | 不变（仅 `Entity` trait 形状改变） | 现有 raw 保留路径不变 |
+| **ACAD Architecture（AEC）实体** | **新支持（0.6.8）**：`ExtendedEntityData::Arch(ArchEntityData)`；`classes::arch` 提供 `ArchKind`（wall/door/window/stair/space/…）、**已解码的 `profiles: Vec<Vec<Vector3>>`（世界坐标，取自 proxy-graphics 预览）**、`DecodedAec`（`decode()`：placement/strings/handles）、`straight_wall_geometry()`（仅 AC1032 `AEC_WALL` 的直墙帧）、以及创建/编辑 API | **已接入读取（2026-11-03）**：① **直墙优先用原生参数**——`straight_wall_geometry()`（仅 AC1032 DWG 且类体为直墙参数布局的 `AEC_WALL`）存在时，用 `continuous_wall_outline([start, end], width)` 画**闭合定向轮廓**（矩形足迹），具名声明“高度不画、开洞不切、共享端点不做 miter（每段方头）”；② 否则每个 ≥2 点的 profile 画成**开放折线**（编码记录本身没有闭合标志；首尾重合的开放折线与闭合轮廓渲染等价，不臆造 `closed`），恒 `Partial` 并声明“只有 proxy-graphics 预览轮廓；开洞、3D 体量、类参数与样式对象未建模”；③ 无原生几何且无 profile ⇒ `Opaque` + `Partial` 具名原因。**不消费**创建/编辑/连续墙链级 miter |
+| 导入资源上限 | **新支持（0.6.8）**：`DwgReadOptions` 新增 `max_mesh_faces` / `max_mesh_face_indices` / `max_decompressed_bytes`（默认全 `None`） | **已接入（2026-11-03）**：`ImportLimits` 新增同三字段（`Option<usize>`，默认全 `None`），经 `dwg_read_options()` 逐字传入 DWG 读取器。默认 `None` = acadrust 自身行为，因此**不静默改变**接受/拒绝；宿主设 `Some(n)` 才收紧。**证据边界**：契约测试只证明选项透传，未用带 MESH 的 DWG 验证截断语义 |
+
+
+### 0.6.5 → 0.6.8 增量（源码核对，2026-11-03）
+
+升级由 `Cargo.toml`/`Cargo.lock` 完成（`acadrust 0.6.8`，无 `[patch]`、未改上游）。上游在该区间新增
+**ACAD Architecture（AEC）类实体**、文档级镜像/旋转/展开助手、DWG 读取资源预算，以及若干实体级
+修复；同时做了一次 **`Entity` trait 重构**。逐项：
+
+| 变更 | acadrust 0.6.8 行为 | 对 yacr 的影响 |
+|---|---|---|
+| **`Entity` trait 重构（破坏性）** | trait 不再有 `handle()`/`set_layer()`/`color()`… 逐字段方法，改为 `common() -> &EntityCommon` + `common_mut()`；各实体只实现这两个 | **源码级破坏**：本仓库唯一受影响的是测试里的 `.common()` 调用（需 trait 在作用域或直接用 `common` 字段）。业务代码不消费旧访问器 ⇒ 无行为变化 |
+| **ACAD Arch（AEC）实体** | 新增 `ExtendedEntityData::Arch` 变体与 `classes::arch` 模块：`ArchKind`（wall/door/window/opening/stair/railing/slab/roof/space/curtain wall/…）、`profiles`（proxy-graphics 预览轮廓，世界坐标）、`DecodedAec`（placement/strings/handles）、`straight_wall_geometry()`、创建与参数编辑 API、`continuous_wall_outline`、`decode_profiles`/`polyline_from_type6` | **已接入读取**（见上表 AEC 行）：直墙原生参数 → 闭合定向足迹；其余 profile → 开放折线；恒 `Partial`；创建/编辑/链级 miter 不消费 |
+| **DXF 组 70 位 32（维度）** | `write_dimension_base` **无条件**把组 70 的 32 位置位（`type_flags` OR `0x20`，“block 仅被本标注引用”）；`text_user_positioned` 时仍写 `0xA0` | **导出字节变化**：aligned/linear 为 `1+32`/`0+32`（即 33/32），angular 为 `34`/`37`。本仓库为每条标注生成独占 `*D` 块 ⇒ 该位正确；ADR-0017 的“位 32 不写”作废（见该 ADR 的 0.6.8 复核小节） |
+| **角度标注构造函数单位** | `DimensionAngular2Ln::new` / `DimensionAngular3Pt::new` 的 `actual_measurement` 由**度**改成**弧度**（与文件单位一致）；新增 `Dimension::stored_measurement()` | **无影响**：本仓库从不调用这两个构造函数，组 42 一直自己写弧度（P5e 已修） |
+| **DWG 读取资源预算** | `DwgReadOptions` 新增 `max_mesh_faces`/`max_mesh_face_indices`/`max_decompressed_bytes`（默认 `None` = 旧行为），另加 `with_mesh_limits`/`with_unlimited_mesh`/`with_max_decompressed_bytes`/`mesh_budget`/`set_mesh_budget` | **已接入 `ImportLimits`**（默认 `None` 保持旧行为）；透传由 `dwg_read_options_copies_import_limits` 钉住，截断语义未用 MESH 夹具验证 |
+| **对象 EED 公开** | `CadDocument::object_xdata(handle)` 现为公开访问器（0.6.5 为 crate-private 字段），另有 set/remove；`ExtendedData::records()` 给出按应用名分组的记录 | **已读入报告**：`ImportReport.object_xdata` + `xdata.object_ignored` 诊断；**只报告、不应用**。实体 xdata 仍为显式 Partial |
+| **文档级几何助手** | 新增 `CadDocument::mirror_entity`/`mirror_entity_with_options`（尊重 `$MIRRTEXT`）、`rotate3d` 系列、`rename_layer`、`restore_constraint_vertex_ids`；实体级 `Transform`/`Mirror`/`MirrorOptions` 移至 `entities/modification` | **未消费**：yacr 的 MIRROR/ROTATE 走自己的 `cad-db::transform_geometry`（且明确拒绝 Text 镜像；上游的 `$MIRRTEXT` 语义不改变我们的声明） |
+| **R11/R12 识别与代码页保真** | 新增 `is_r11_r12`/`r11_r12`、`code_page_is_faithful`/`dwg_code_page_is_known`、`decode_cif_escapes_in`/`decode_legacy_escapes_in` | **已接入诊断（2026-11-03）**：`format.r11_r12`（源为 AC1009 家族）与 `format.code_page_approximate`（无精确解码表）。两码**故意不带 `import.` 前缀**——它们不证明内容丢失，不得伪造 `Partial`；契约测试钉住“与基线 completeness 相同”。R12 **写出**仍不支持 |
+| **导出写出的头变量** | 新建文档多写 `$DIMTXSTY`/`$DIMLTYPE`/`$DIMLTEX1`/`$DIMLTEX2`/`$DIMFXLON`/`$DIMARCSYM`/`$UNITMODE`；类描述串把 `AutoCAD` 改成 `ACAD`（Express Tools/subD mesh 等） | **仅字节差异，无语义变化**：已重新生成提交的 `fixtures/dxf/synthetic-acis-cube.dxf`（+37/−5 行）并复核仍是一实体立方体、可离散 |
+| **ACIS 解析器/写出器** | `acis/{parser,sab,types,writer}.rs` 有改动（含 SAT/SAB 读写细化） | **未重新验证**：本仓库仍只用 `cube.sat` 夹具的离散路径；没有新的 vendor SAT/SAB 证据，**不得**宣称 ACIS 兼容性提高 |
+| **依赖** | `acadrust` 新增 `serde_json` 依赖；`windows-core`/`windows-link` 去重 | `Cargo.lock` 相应变化；无新的直接依赖、无 `[patch]` |
+
+**仍未改变**（0.6.8 源码核对，逐项）：代理记录 opcode（`proxy_graphics.rs` 逐字节相同）、
+`PlotSettings` 的逐 ACI 颜色/线宽/alpha、`DIMCONTINUEMODE` 建模、DXF 已知实体未知码保留、
+点云点数据（仍只有元数据/范围）、独立 `Xref` 对象（仍只有 `BlockRecord` 标志 + `xref_path`）。
 
 ### 0.6.3 → 0.6.5 增量（源码核对，2026-10-20）
 
@@ -654,6 +682,6 @@ Web/Android 宿主未接图像加载器；**`draw_order` 已贯通到场景批�
 但**渲染器仍按上传顺序绘制、遮罩恒最后**（opaque mesh 还跨批次拍平，分段交错未实现）；
 **WIPEOUT 掩码已实现**（非 `inverted` 与 `inverted` 都渲染；不与更高 `draw_order` 交错、矢量出图跳过并具名）。**外部内容** PDF/DWF/DGN
 underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、ACIS 全内核（3DSOLID/REGION/
-BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「ACIS 实体显示状态」）、点云点数据（acadrust 0.6.5 仍只暴露元数据/范围，未暴露点数据）均不加载/不实现，显式
+BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「ACIS 实体显示状态」）、点云点数据（acadrust 0.6.8 仍只暴露元数据/范围，未暴露点数据）均不加载/不实现，显式
 `Partial`/`Unsupported`，不计入完成。代理 opcode 厂商记录仍按用户要求排除（见
 `docs/proxy-support.md`）。图元逐项状态见 `docs/dxf-entity-coverage.md`。

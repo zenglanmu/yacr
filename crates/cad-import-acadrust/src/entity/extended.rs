@@ -178,6 +178,11 @@ impl<'a> ImporterBuilder<'a> {
             ExtendedEntityData::PointCloudEx(d) => {
                 point_cloud_box("ACDBPOINTCLOUDEX", d.extents_min, d.extents_max)
             }
+            // New in acadrust 0.6.8: ACAD Architecture (AEC) entities carry the
+            // profiles decoded from their proxy-graphics preview. Those profiles
+            // are world coordinates, so they can be drawn directly; the class
+            // parameters (openings, 3D massing, style objects) stay unmodeled.
+            ExtendedEntityData::Arch(d) => arch_semantics(x.class_name(), d),
             // No display path by design, or content that is not loaded from a
             // drawing file: kept explicit Opaque/Unverified rather than faked.
             ExtendedEntityData::Camera { .. }
@@ -244,9 +249,119 @@ fn rtext_unhandled_flags(flags: i16) -> Vec<String> {
     out
 }
 
+/// ACAD Architecture (AEC) entity geometry.
+///
+/// A straight AEC wall is drawn from its **native** parameters when acadrust can
+/// decode them (`ArchEntityData::straight_wall_geometry`, DWG 2027 layout only):
+/// the oriented footprint from [`wall_footprint`] replaces the preview profile.
+///
+/// Otherwise acadrust 0.6.8 decodes the entity's proxy-graphics preview into
+/// profiles in **world coordinates** (`ArchEntityData::profiles`), and each
+/// profile with at least two points is drawn as an open polyline. An open
+/// polyline whose last point repeats the first renders exactly like the closed
+/// profile, so closure needs no invented flag: the encoded record carries none.
+///
+/// Everything else the class body holds — openings cut out of walls, door and
+/// window bodies, 3D massing, style/anchor objects — is **not** modeled here and
+/// is reported by name instead of being faked.
+fn arch_semantics(
+    class_name: &str,
+    data: &acadrust::classes::arch::ArchEntityData,
+) -> (SemanticGeometry, Completeness) {
+    // Native straight-wall parameters are authored geometry, unlike the
+    // proxy-graphics preview profile, so they win when present.
+    if let Some(geometry) = data.straight_wall_geometry() {
+        if let Some(outline) = wall_footprint(&geometry) {
+            return (
+                SemanticGeometry::Compound(vec![polyline_semantics(outline, true)]),
+                Completeness::Partial(vec![
+                    "wall footprint is computed from the native start/end and thickness; height \
+                     is not drawn, openings are not cut, and shared-endpoint miters are not \
+                     applied (each wall keeps square ends)"
+                        .into(),
+                ]),
+            );
+        }
+    }
+    let mut children: Vec<SemanticGeometry> = Vec::new();
+    for profile in &data.profiles {
+        if profile.len() < 2 {
+            continue;
+        }
+        children.push(polyline_semantics(
+            profile.iter().map(|point| p3(*point)).collect(),
+            false,
+        ));
+    }
+    if children.is_empty() {
+        return (
+            SemanticGeometry::Opaque {
+                type_key: class_name.to_string(),
+                version: 1,
+                payload: Vec::new(),
+            },
+            Completeness::Partial(vec![
+                "AEC arch entity has no decodable proxy-graphics profile; only its class name is \
+                 preserved and no geometry is drawn"
+                    .into(),
+            ]),
+        );
+    }
+    (
+        SemanticGeometry::Compound(children),
+        Completeness::Partial(vec![
+            "AEC arch geometry is the proxy-graphics preview profile only; openings, 3D massing, \
+             class parameters and style objects are not modeled"
+                .into(),
+        ]),
+    )
+}
+
+/// Oriented footprint of a straight AEC wall from its native parameters.
+///
+/// The outline is the squared ribbon around the stored baseline
+/// (`geometry.start` → `geometry.end`), offset half the full `geometry.width`
+/// to each side, with the first point repeated at the end (so the caller must
+/// treat it as closed). This is the authored footprint; the stored
+/// proxy-graphics preview profile is not used when this exists. Returns `None`
+/// when acadrust cannot build a finite outline (degenerate baseline, non-positive
+/// thickness, non-finite coordinates).
+pub(crate) fn wall_footprint(
+    geometry: &acadrust::classes::arch::StraightWallGeometry,
+) -> Option<Vec<Point3>> {
+    let outline = acadrust::classes::arch::continuous_wall_outline(
+        &[geometry.start, geometry.end],
+        geometry.width,
+    )?;
+    if outline.len() < 4 {
+        return None;
+    }
+    let points: Vec<Point3> = outline.iter().map(|point| p3(*point)).collect();
+    points
+        .iter()
+        .all(|point| cad_geometry::is_finite(*point))
+        .then_some(points)
+}
+
+/// Test access to [`wall_footprint`].
+///
+/// This module is private to `entity` and the glob re-export there is not
+/// `pub(crate)`, so the shared display-closure test module (declared at the crate
+/// root) cannot name the free function. Inherent methods are reachable
+/// through the crate-visible type, so this `cfg(test)` shim keeps the contract
+/// tests in `tests_display_table_extended.rs` without widening the module graph.
+#[cfg(test)]
+impl<'a> ImporterBuilder<'a> {
+    pub(crate) fn wall_footprint_for_test(
+        geometry: &acadrust::classes::arch::StraightWallGeometry,
+    ) -> Option<Vec<Point3>> {
+        wall_footprint(geometry)
+    }
+}
+
 /// A point-cloud extents box as its twelve edges.
 ///
-/// The scan points themselves are not carried by acadrust 0.6.3, so only the
+/// The scan points themselves are not carried by acadrust 0.6.8, so only the
 /// stored extents are drawn; the result is honestly `Partial`.
 fn point_cloud_box(
     class_name: &str,
@@ -283,14 +398,14 @@ fn point_cloud_box(
                 version: 1,
                 payload: Vec::new(),
             },
-            "point data is not available from acadrust 0.6.3; the stored extents are degenerate, \
+            "point data is not available from acadrust 0.6.8; the stored extents are degenerate, \
              so no box is drawn"
                 .to_string(),
         )
     } else {
         (
             SemanticGeometry::Compound(children),
-            "point data is not available from acadrust 0.6.3; extents box shown".to_string(),
+            "point data is not available from acadrust 0.6.8; extents box shown".to_string(),
         )
     };
     (geometry, Completeness::Partial(vec![reason]))

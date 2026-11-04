@@ -115,6 +115,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("[probe] startup drawing: {}", path.display());
     }
     let shared = crate::host::new_shared(launch);
+    // `native-below` registers the vendor transport; `dom-canvas` serves the same
+    // pass from the wasm session (`apps/app-web`), so the native store stays
+    // disabled there instead of emitting a pending event nothing can answer.
+    if crate::backend::surface_mode() == SurfaceMode::NativeBelow {
+        cad_desktop_shell::state::lock(&shared).vendor.enable();
+    }
     let telemetry = crate::host::new_render_telemetry();
     let setup_shared = shared.clone();
     let setup_telemetry = telemetry.clone();

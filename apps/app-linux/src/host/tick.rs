@@ -796,6 +796,9 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 state.cad_settings = Some(settings);
             }
         }
+        // Hand the importer's records to the pass and install a settled derived
+        // snapshot on this owner thread (display-only; no `cad-db` write).
+        super::vendor::tick(shared);
         // One cad-event flush per owner tick, at the same point the status mirror
         // is final: the event's `status` is the exact `cad_status` payload (host
         // error + projected popup included). The flush is deliberately outside the

@@ -62,6 +62,7 @@ mod surface;
 mod telemetry;
 mod tick;
 mod tick_evidence;
+mod vendor;
 
 #[cfg(test)]
 mod tests;

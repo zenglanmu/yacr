@@ -3,11 +3,17 @@
 use std::sync::Arc;
 
 use crate::layers::LayerOverrideSet;
+use crate::vendor::{VendorPrimitive, VendorRepresentationStore};
 use cad_db::DrawingDatabase;
-use cad_domain::{CadResult, TaskStamp, TolerancePolicy};
+use cad_db::LinetypePattern;
+use cad_domain::{
+    CadResult, Completeness, GeometrySource, InstancePath, Point3, Precision, SelectionRef,
+    TaskStamp, TextAlignH, TextAlignV, TolerancePolicy,
+};
 use cad_representation::layout::{build_paper_space, enumerate_layouts};
 use cad_representation::{
-    FontEngine, LayoutDescriptor, ProviderRegistry, RepresentationContext, SpaceSelection,
+    ConicSegment, DisplayFragment, DisplayPrimitive, FontEngine, LayoutDescriptor,
+    ProviderRegistry, RepresentationContext, SpaceSelection, DEFAULT_LINEWEIGHT_MM,
 };
 use cad_resources::DecodedImageCache;
 use cad_scene::{RenderBatch, RenderTopology, SceneBudget, SceneCache, SceneDelta};
@@ -111,6 +117,21 @@ pub fn build_scene_with_space_and_images(
     build_scene_stats(database, stamp, fonts, images, overrides, space).map(|(delta, _stats)| delta)
 }
 
+/// Like [`build_scene_with_space_and_images`] but also merges vendor primitives.
+#[allow(clippy::too_many_arguments)]
+pub fn build_scene_with_space_and_images_and_vendor(
+    database: &DrawingDatabase,
+    stamp: TaskStamp,
+    fonts: Option<Arc<FontEngine>>,
+    images: Option<Arc<DecodedImageCache>>,
+    overrides: &LayerOverrideSet,
+    space: SpaceSelection,
+    vendor: Option<&VendorRepresentationStore>,
+) -> CadResult<SceneDelta> {
+    build_scene_stats_with_vendor(database, stamp, fonts, images, overrides, space, vendor)
+        .map(|(delta, _stats)| delta)
+}
+
 /// Like [`build_scene_with_space_and_images`] but also returns read-only
 /// [`SceneAssemblyStats`] (fragments in vs. draw items out). Purely additive
 /// reporting: the returned [`SceneDelta`] is byte-for-byte the same as the
@@ -124,12 +145,29 @@ pub fn build_scene_stats(
     overrides: &LayerOverrideSet,
     space: SpaceSelection,
 ) -> CadResult<(SceneDelta, SceneAssemblyStats)> {
+    build_scene_stats_with_vendor(database, stamp, fonts, images, overrides, space, None)
+}
+
+/// Like [`build_scene_stats`] but also merges the vendor derived representation.
+///
+/// The store is display-only: a fragment it contributes still carries the source
+/// entity's id, so picking/selection keeps targeting the original `TCH_*` entity.
+#[allow(clippy::too_many_arguments)]
+pub fn build_scene_stats_with_vendor(
+    database: &DrawingDatabase,
+    stamp: TaskStamp,
+    fonts: Option<Arc<FontEngine>>,
+    images: Option<Arc<DecodedImageCache>>,
+    overrides: &LayerOverrideSet,
+    space: SpaceSelection,
+    vendor: Option<&VendorRepresentationStore>,
+) -> CadResult<(SceneDelta, SceneAssemblyStats)> {
     let registry = ProviderRegistry::with_default_provider();
     let mut context =
         RepresentationContext::new(stamp.document, TolerancePolicy::default(), stamp.clone())
             .with_packed_line_segments();
-    if let Some(fonts) = fonts {
-        context = context.with_fonts(fonts);
+    if let Some(fonts) = &fonts {
+        context = context.with_fonts(Arc::clone(fonts));
     }
     if let Some(images) = images {
         context = context.with_images(images);
@@ -146,7 +184,17 @@ pub fn build_scene_stats(
     match space {
         SpaceSelection::Model => {
             for entity in crate::layers::visible_model_entities(database, overrides) {
-                let representation = registry.build_expanded(database, entity, &context)?;
+                let mut representation = registry.build_expanded(database, entity, &context)?;
+                append_vendor_fragments(
+                    &mut representation,
+                    database,
+                    &registry,
+                    &context,
+                    entity,
+                    stamp.document,
+                    vendor,
+                    fonts.as_deref(),
+                );
                 stats.fragments_in += representation.fragments.len();
                 let delta = cache.build_compact(&representation, stamp.clone())?;
                 stats.batches_out += delta.added.len() + delta.images.len() + delta.masks.len();
@@ -190,6 +238,280 @@ pub fn model_scene_merge_stats(
         SpaceSelection::Model,
     )?;
     Ok(stats)
+}
+
+/// Append the derived fragments for one entity's source handle.
+///
+/// The fragments use the entity's own id and draw order, so selection, layer
+/// visibility and paint order keep pointing at the authoritative `DbEntity`.
+#[allow(clippy::too_many_arguments)]
+fn append_vendor_fragments(
+    representation: &mut cad_representation::DisplayRepresentation,
+    database: &DrawingDatabase,
+    registry: &ProviderRegistry,
+    context: &RepresentationContext,
+    entity: &cad_db::DbEntity,
+    document: cad_domain::DocumentId,
+    vendor: Option<&VendorRepresentationStore>,
+    fonts: Option<&cad_representation::FontEngine>,
+) {
+    let Some(store) = vendor else {
+        return;
+    };
+    let Some(handle) = entity.object.source_handle.as_deref() else {
+        return;
+    };
+    let Some(primitives) = store.for_source_handle(handle) else {
+        return;
+    };
+    let source = SelectionRef {
+        document,
+        entity: entity.id,
+        instance: InstancePath::default(),
+        sub_element: None,
+    };
+    // Derived fragments inherit the source entity's layer appearance. The
+    // entity's own explicit style is not copied here; a TCH entity is opaque and
+    // the reference representation (Tianzheng's own display) uses the layer
+    // appearance for these bodies.
+    let layer = database.layer_attributes(entity.layer);
+    let color = [
+        layer.color.rgb[0] as f32 / 255.0,
+        layer.color.rgb[1] as f32 / 255.0,
+        layer.color.rgb[2] as f32 / 255.0,
+    ];
+    let (lineweight, lineweight_unresolved) = match layer.lineweight {
+        cad_db::LayerLineWeight::Hundredths(value) => (value as f32 / 100.0, false),
+        cad_db::LayerLineWeight::Default | cad_db::LayerLineWeight::ByLayer => {
+            (DEFAULT_LINEWEIGHT_MM, true)
+        }
+    };
+    let mut vendor_issue: Option<String> = None;
+    for primitive in primitives {
+        if let VendorPrimitive::Text(text) = primitive {
+            let Some(engine) = fonts else {
+                vendor_issue = Some("vendor text has no font engine".to_string());
+                continue;
+            };
+            let (h_align, v_align) = text_align(text.attachment);
+            let shaped = engine.shape_unstyled(
+                &text.text,
+                text.origin,
+                text.height,
+                text.rotation,
+                h_align,
+                v_align,
+                text.wrap_width,
+            );
+            match shaped {
+                Ok(shaped) => {
+                    for mesh in shaped.meshes {
+                        representation.fragments.push(DisplayFragment {
+                            source: source.clone(),
+                            geometry_source: GeometrySource::ProxyCache,
+                            precision: Precision::Approximate { error_bound: None },
+                            alpha: layer.opacity,
+                            color,
+                            color_unresolved: false,
+                            lineweight,
+                            lineweight_unresolved,
+                            linetype: LinetypePattern::continuous(),
+                            linetype_unresolved: true,
+                            linetype_scale: 1.0,
+                            draw_order: entity.draw_order,
+                            primitive: DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(mesh)),
+                        });
+                    }
+                    for polyline in shaped.polylines {
+                        if polyline.len() >= 2 {
+                            representation.fragments.push(DisplayFragment {
+                                source: source.clone(),
+                                geometry_source: GeometrySource::ProxyCache,
+                                precision: Precision::Approximate { error_bound: None },
+                                alpha: layer.opacity,
+                                color,
+                                color_unresolved: false,
+                                lineweight,
+                                lineweight_unresolved,
+                                linetype: LinetypePattern::continuous(),
+                                linetype_unresolved: true,
+                                linetype_scale: 1.0,
+                                draw_order: entity.draw_order,
+                                primitive: DisplayPrimitive::Lines(Arc::from(
+                                    polyline.into_boxed_slice(),
+                                )),
+                            });
+                        }
+                    }
+                    if !shaped.has_renderable_content {
+                        vendor_issue = Some("vendor text has no renderable glyphs".to_string());
+                    }
+                }
+                Err(error) => {
+                    vendor_issue = Some(format!("vendor text shape: {error}"));
+                }
+            }
+            continue;
+        }
+        if let VendorPrimitive::Block {
+            block,
+            origin,
+            scale,
+            rotation,
+        } = primitive
+        {
+            let Some(block_id) = database.block_by_source_handle(*block) else {
+                vendor_issue = Some(format!(
+                    "vendor block handle {:X} is not an imported block",
+                    block
+                ));
+                continue;
+            };
+            let base = database.block_base_point(block_id).unwrap_or_default();
+            let (sin, cos) = rotation.sin_cos();
+            // Rotation and per-axis scale in one linear map, then the block's
+            // insertion base point is removed before the insertion point is
+            // applied — the same convention an imported INSERT uses.
+            let transform = cad_domain::Transform3 {
+                matrix: [
+                    [cos * scale.x, -sin * scale.y, 0.0, origin.x],
+                    [sin * scale.x, cos * scale.y, 0.0, origin.y],
+                    [0.0, 0.0, scale.z, origin.z],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+            }
+            .matrix_mul(&cad_domain::Transform3::translation(Point3 {
+                x: -base.x,
+                y: -base.y,
+                z: -base.z,
+            }));
+            // A throwaway INSERT row: it is never written to `cad-db`, it only
+            // lets the existing block expansion produce the child geometry.
+            let insert = cad_db::DbEntity {
+                object: cad_db::DbObject {
+                    id: entity.object.id,
+                    type_key: "INSERT".to_string(),
+                    revision: entity.object.revision,
+                    source_handle: entity.object.source_handle.clone(),
+                },
+                id: entity.id,
+                layer: entity.layer,
+                space: entity.space.clone(),
+                geometry: cad_domain::SemanticGeometry::Insert {
+                    block: block_id,
+                    transform,
+                },
+                draw_order: entity.draw_order,
+            };
+            match registry.build_expanded(database, &insert, context) {
+                Ok(expanded) => {
+                    if matches!(expanded.completeness, Completeness::Missing(_)) {
+                        vendor_issue =
+                            Some("vendor block reference resolves to no geometry".to_string());
+                    }
+                    for mut fragment in expanded.fragments {
+                        // The derived display belongs to the TCH source entity,
+                        // not to a real INSERT row, so the instance path stays
+                        // empty and picking never resolves a non-existent chain.
+                        fragment.source = source.clone();
+                        fragment.geometry_source = GeometrySource::ProxyCache;
+                        fragment.precision = Precision::Approximate { error_bound: None };
+                        representation.fragments.push(fragment);
+                    }
+                }
+                Err(error) => {
+                    vendor_issue = Some(format!("vendor block expansion: {error}"));
+                }
+            }
+            continue;
+        }
+        let primitive = match primitive {
+            VendorPrimitive::Lines(points) => {
+                DisplayPrimitive::Lines(Arc::from(points.clone().into_boxed_slice()))
+            }
+            VendorPrimitive::Segments(points) => {
+                DisplayPrimitive::LineSegments(Arc::from(points.clone().into_boxed_slice()))
+            }
+            VendorPrimitive::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => DisplayPrimitive::Conic(Arc::new(ConicSegment {
+                center: *center,
+                major: Point3 {
+                    x: *radius,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                minor: Point3 {
+                    x: 0.0,
+                    y: *radius,
+                    z: 0.0,
+                },
+                start: *start,
+                sweep: *sweep,
+                full: false,
+            })),
+            VendorPrimitive::Circle { center, radius } => {
+                DisplayPrimitive::Conic(Arc::new(ConicSegment {
+                    center: *center,
+                    major: Point3 {
+                        x: *radius,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    minor: Point3 {
+                        x: 0.0,
+                        y: *radius,
+                        z: 0.0,
+                    },
+                    start: 0.0,
+                    sweep: std::f64::consts::TAU,
+                    full: true,
+                }))
+            }
+            VendorPrimitive::Text(_) => unreachable!("text handled above"),
+            VendorPrimitive::Block { .. } => unreachable!("block handled above"),
+        };
+        representation.fragments.push(DisplayFragment {
+            source: source.clone(),
+            geometry_source: GeometrySource::ProxyCache,
+            precision: Precision::Approximate { error_bound: None },
+            alpha: layer.opacity,
+            color,
+            color_unresolved: false,
+            lineweight,
+            lineweight_unresolved,
+            linetype: LinetypePattern::continuous(),
+            linetype_unresolved: true,
+            linetype_scale: 1.0,
+            draw_order: entity.draw_order,
+            primitive,
+        });
+    }
+    if !primitives.is_empty() {
+        // The semantic entity is still opaque; only its display is derived. Keep
+        // the honest `Partial` note rather than claiming a complete semantic
+        // representation.
+        let note = vendor_issue.unwrap_or_else(|| "vendor derived display (display-only)".into());
+        representation.completeness = Completeness::Partial(vec![note]);
+    }
+}
+
+/// Map MTEXT attachment numbering (1..9) to the text engine's alignment pair.
+fn text_align(attachment: u8) -> (TextAlignH, TextAlignV) {
+    let h = match attachment {
+        1 | 4 | 7 => TextAlignH::Left,
+        2 | 5 | 8 => TextAlignH::Center,
+        _ => TextAlignH::Right,
+    };
+    let v = match attachment {
+        1..=3 => TextAlignV::Top,
+        4..=6 => TextAlignV::Middle,
+        _ => TextAlignV::Baseline,
+    };
+    (h, v)
 }
 
 /// Whether two render batches share every draw-relevant style attribute, so an

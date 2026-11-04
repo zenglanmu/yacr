@@ -101,9 +101,34 @@ pub fn flush_events_current<C: Serialize>(
         let mut state = lock(shared);
         state.ensure_event_sink();
         let status = project_current_status(&state);
+        let batch = derive_batch(state.events_prev.as_ref(), &status);
+        let closed = batch
+            .iter()
+            .any(|kind| matches!(kind, CadEventKind::DocumentClosed));
         let mut emitted = Vec::new();
-        for kind in derive_batch(state.events_prev.as_ref(), &status) {
+        for kind in batch {
             emitted.extend(state.events.push_quiet(kind));
+        }
+        if closed {
+            state.vendor.clear();
+            state.vendor_pending_representations = None;
+            state.vendor_representations_clear = true;
+        }
+        // The owner tick stages the records copied by the import; the flush only
+        // announces them once. A drawing with no TCH records has no pass.
+        if let Some((token, generation, entities)) = state.vendor.announce_pending() {
+            emitted.extend(state.events.push_quiet(CadEventKind::VendorPending {
+                token,
+                generation,
+                entities,
+            }));
+        }
+        if let Some((token, ack)) = state.vendor.take_unreported() {
+            emitted.extend(state.events.push_quiet(CadEventKind::VendorSettled {
+                token,
+                applied: ack.applied,
+                diagnostics: ack.diagnostics,
+            }));
         }
         let frame = StatusFrame::new(status.clone(), profile.clone())
             .with_canvas(canvas.map(CanvasJson::new));
@@ -182,6 +207,8 @@ mod tests {
                 CadEventKind::DocumentClosed => "document-closed",
                 CadEventKind::ErrorRaised { .. } => "error-raised",
                 CadEventKind::PopupChanged { .. } => "popup-changed",
+                CadEventKind::VendorPending { .. } => "vendor-pending",
+                CadEventKind::VendorSettled { .. } => "vendor-settled",
                 CadEventKind::EventsDropped { .. } => "events-dropped",
                 _ => "unknown",
             })
@@ -290,6 +317,76 @@ mod tests {
         let events = flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
         assert_eq!(kinds(&events), ["status-changed"]);
         assert_eq!(*seen.lock().expect("sink lock"), vec![1]);
+    }
+
+    #[test]
+    fn a_staged_pass_is_announced_once_and_a_settled_ack_is_emitted_once() {
+        use cad_app::{VendorRecord, VendorSource};
+
+        let shared = shared();
+        lock(&shared).vendor.enable();
+        flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
+
+        lock(&shared)
+            .vendor
+            .stage(vec![VendorRecord {
+                class_name: "TCH_WALL".to_string(),
+                handle: 0x2c,
+                dwg_version: 1027,
+                source: VendorSource::UnknownEntity,
+                main: vec![0x06],
+                main_bits: 8,
+                text: Vec::new(),
+                text_bits: 0,
+                handle_stream: Vec::new(),
+                handle_bits: 0,
+                main_skip_bits: 0,
+                text_skip_bits: 0,
+                handle_skip_bits: 0,
+                references: Vec::new(),
+            }])
+            .expect("stages");
+        let first = flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
+        assert!(kinds(&first).contains(&"vendor-pending"), "{first:?}");
+        let pending = first
+            .iter()
+            .find_map(|event| match &event.kind {
+                CadEventKind::VendorPending {
+                    token,
+                    generation,
+                    entities,
+                } => Some((*token, *generation, *entities)),
+                _ => None,
+            })
+            .expect("one pending event");
+        assert_eq!(pending.1, pending.0, "v2 uses the token as the generation");
+        assert_eq!(pending.2, 1, "the staged record count");
+
+        // A second flush must not announce the same pass again.
+        let second = flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
+        assert!(!kinds(&second).contains(&"vendor-pending"), "{second:?}");
+
+        // Settle the pass the way `cad_vendor_apply` does, then let the tick emit
+        // exactly one `vendor-settled`.
+        let (token, generation) = lock(&shared).vendor.active().expect("active");
+        use crate::vendor::{RESULT_MAGIC, VENDOR_ABI_VERSION};
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&RESULT_MAGIC.to_le_bytes());
+        frame.extend_from_slice(&VENDOR_ABI_VERSION.to_le_bytes());
+        frame.extend_from_slice(&token.to_le_bytes());
+        frame.extend_from_slice(&generation.to_le_bytes());
+        frame.extend_from_slice(&1u32.to_le_bytes()); // unsupported
+        frame.extend_from_slice(&0u32.to_le_bytes()); // applied
+        frame.extend_from_slice(&0u32.to_le_bytes()); // diagnostics
+        frame.extend_from_slice(&0u32.to_le_bytes()); // entity groups
+        lock(&shared)
+            .vendor
+            .settle_bytes(token, generation, &frame)
+            .expect("settles");
+        let third = flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
+        assert!(kinds(&third).contains(&"vendor-settled"), "{third:?}");
+        let fourth = flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
+        assert!(!kinds(&fourth).contains(&"vendor-settled"), "{fourth:?}");
     }
 
     #[test]

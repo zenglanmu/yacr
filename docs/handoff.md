@@ -1,3 +1,155 @@
+## 2026-11-04 天正 vendor 插件：base-6 墙/柱/文字/门窗解码 + 派生表示（ABI v4）
+
+本轮把通道从“契约骨架”推进到**真实显示**：插件按真实样本的 base 6 / 保护标记 9 解出
+`TCH_WALL` / `TCH_COLUMN`，宿主用 `VendorRepresentationStore` 把 primitives 作为派生表示
+挂到源实体上，**不写 `cad-db`**。插件仍是 WebView 内 TypeScript 模块（仓库根
+`plugins/tch/src/index.ts` → `public/plugins/tch.js`），native/web 共用，CLI 不使用。
+详见 `docs/vendor-plugin.md`。
+
+- **状态机只有一份**：`cad-ui-core::session::vendor::VendorStore`（每文档一个
+  token/generation pass，ABI v3 帧、上限、base64、失败闭合与诊断）。native 宿主经
+  `cad-desktop-shell::vendor` 复用，`dom-canvas` 经 `apps/app-web::vendor` 复用。
+- **真实解码**：base-6 wall（84 字节 XOR 保护几何 + joins + 材料/保温字段，20/20 样本
+  精确读完）、base-6 column（`ReadTchBase` v5 头 + property bag + 轮廓/bulge，30/30
+  精确读完）、`TCH_TEXT`/`TCH_MTEXT`（1,258 条）与 `TCH_OPENING`（墙断口 1,734 个，
+  门/窗 2D 图块 1,711 个，洞口侧线 18 个）。真实样本 `test-tangent-real.dwg`：
+  `status=0`, `applied=8512`, `TCH_WALL=4525`, `TCH_COLUMN=1000`, `TCH_TEXT=876`,
+  `TCH_MTEXT=382`, `TCH_OPENING=1729`；同一 result 帧由 Rust `VendorStore` 解析并断言
+  `applied == primitive 总数`。
+- **所有 native 宿主**（Linux `native-below`、Windows、macOS、Android）都注册
+  `cad_vendor_records`（`Response`/`ArrayBuffer`）、`cad_vendor_apply`（base64，Android 无
+  raw request）、`cad_vendor_status`；owner tick 统一调用
+  `cad_desktop_shell::vendor::stage_from_tick`。空记录会清掉上一 pass，避免旧 token
+  进入新文档。
+- **`dom-canvas`（X11/XWayland、Web）**：wasm 导出 `vendor_records` / `vendor_apply` /
+  `vendor_status`，由 `web-adapter` 接入同一前端 `vendor-pass.ts`；pending/settled 走
+  wasm `cad_subscribe` 事件流。Linux `dispatch` 在 `dom-canvas` 上拒绝 native 同名命令，
+  避免第二份状态。
+- 插件源码已从 `apps/desktop-ui/plugins/` 提升到仓库根 `plugins/tch/`（`src/index.ts`），
+  构建脚本 `scripts/build-vendor-plugin.sh` 产出 `plugins/tch/dist/index.js` 并复制到
+  `apps/desktop-ui/public/plugins/tch.js`；待提供远端 URL 后执行 `git submodule add`。
+- 前端新增 `src/vendor/vendor-pass.ts`（script 注入加载插件、失败转 unsupported 帧）与
+  `cad-events.ts` 的两个事件解析；`plugins/tch/src/index.ts` 只导出 `abiVersion` + `decode`。
+- **records 提取（ABI v4）**：`cad-import-acadrust::vendor::extract_vendor_records`
+  同时处理 `EntityType::Unknown(TCH_*)`（拆 main/text/handle + common-data skip）和
+  `ACAD_PROXY_ENTITY`（`dxf_subclass` / `class_id → TCH_*`，直接用 payload/text_payload）；
+  经 `HostController → HostCore → CadSession` 交给 owner tick 的 `VendorStore::stage`。
+- **派生表示**：`cad-app::vendor::VendorRepresentationStore` 按 `(pass revision, source handle)`
+  索引；`build_scene_stats_with_vendor` 在 `build_expanded` 后追加 `DisplayFragment`，
+  `source` 仍是原实体 id，`geometry_source=ProxyCache`、`precision=Approximate`。native
+  command 把 store 放进 `Shared`，owner tick 安装到 `RenderSessionHandle`；wasm `vendor_apply`
+  直接安装并 `flush_live()`。新文档先清空快照。
+- **证据边界**：真实样本抽取计数（含块内实体）：`test-tangent-real` 10,612 条、`-3` 210、
+  `-4` 43、`-5` 77、`-6` 4，均为 `skipped=0`。插件对未覆盖类只出
+  `vendor.tch.unsupported` 诊断。已补 `TCH_OPENING` → 墙断口：真实样本应用 1,734 个
+  opening cut（1,219 个 wall primitive 超过 8 点，最大 144 点），34 面带 openings 的墙没有
+  匹配记录，70 个 opening 被显式跳过。门/窗 2D 图块已按 opening 记录的 2D block 句柄接入：
+  ABI v4 新增 kind 5 `block insert`（handle/origin/scale/rotation），宿主用
+  `DrawingDatabase::block_by_source_handle` 解析已导入块定义后按
+  `T(origin)·R·S·T(-base)` 展开；真实样本 1,711 个门/窗图块、18 个洞口侧线。组合门窗
+  （kind 8，5 条）、带形窗（kind 5）、门门槛线（flags 0x200/0x400）仍显式不画。
+  文字已接入：`TCH_TEXT=876`、`TCH_MTEXT=382`，宿主 `FontEngine` 成形为线条/网格；
+  `TCH_MTEXTNEW` 与 TCH 文字宽度/上标规则未实现。抽取器已修正 `text_skip_bits`：此前 common
+  data 的 text 计量被算成整个 text stream，导致类体文字丢失；现在 text 记录可读到真实字符串。
+  插件已拆分并改用 rolldown 打包（`plugins/tch/src/*.ts`，均远低于 1000 行）。
+  弧墙 10 面、wall header mismatch 147 面、column version 1 条仍被显式跳过。
+  真实模型空间墙
+  `handle 0x572C6` 同时出现在导入 DB 与插件 result 中；`cad-app` 定向测试证明场景批次
+  的 `sources` 仍指向源实体 id，且真实 2D 块句柄 `0x3DD82` / `0x3E6F4` 可从导入 DB 解析并
+  展开（fragments 615114 → 615119）。**这是契约/CPU 证据，不是 GUI/像素证据**。TCH 在 CLI
+  侧仍不支持。
+- **载体证据边界**：Windows/Android 只有交叉目标 `cargo check` 证据；macOS 交叉检查因本机
+  无 macOS SDK（`objc2-exception-helper` 的 `cc` 失败）**NOT RUN**；Web 只有 wasm 编译 +
+  adapter/单测证据；worker（OffscreenCanvas）载体没有页面侧 vendor 通道，保持显式不支持。
+  没有真实 GUI/WebView/真机/GPU 端到端运行证据。
+- 已运行（Linux）：`cargo test -p cad-db --lib`（175）、`cad-ui-core --lib`（371）、
+  `cad-desktop-shell --lib`（23）、`cad-app --lib`（1519）、`cad-engine --lib`（108）、
+  `cad-host --lib`（264）、`app-linux --lib`（175）、`app-web`（109）、`npm test`（999）、
+  `npm run build`；`YACR_TEST_DWG=fixtures/test-tangent-real.dwg` 的真实 frame 由插件解码为
+  `applied=8512`，同一 result 帧由 `cargo test -p cad-ui-core parses_a_real_plugin_result`
+  断言 `applied == primitives`（定向、`#[ignore]` + env）。`cargo check --workspace
+  --all-targets`、`cargo check -p app-web
+  --target wasm32-unknown-unknown`、`app-windows --target x86_64-pc-windows-msvc`、
+  `app-android --target aarch64-linux-android` 均通过；fmt/clippy/file-size/
+  architecture/i18n 均通过。`cad-desktop-shell` 全量测试（lib 23 + 5 个集成测试 32，含 `wire_goldens` 4）通过：`acadrust` 0.6.8 的 `serde_json/preserve_order` 特性统一使
+  `to_string_pretty` 改按结构体字段顺序输出，3 个 golden 断言已改为**递归键排序后的 canonical
+  JSON** 比较（fixture 与字段值未改）；字节序不再是契约，字段值变化仍会失败。
+
+## 2026-11-03 acadrust 0.6.5 → 0.6.8：升级、编译适配与"此前受限能力"复核
+
+本轮把唯一 CAD 解析依赖从 **0.6.5** 升到 **0.6.8**（`Cargo.toml`/`Cargo.lock`，registry `rsproxy`，
+features `serde` + `import`，**未修改上游、无 `[patch]`**），并按源码 diff 复核此前记为
+Unsupported/Partial 的项是否有新支持。证据只到**编译 + 契约测试 + 我们自己的写入器字节**；
+没有新的真机、vendor 或真实图纸兼容证据。
+
+### 升级与编译适配
+
+- `DwgReadOptions` 新增 `max_mesh_faces`/`max_mesh_face_indices`/`max_decompressed_bytes`
+  （默认 `None`）。`ImportLimits` 已加同三字段（默认 `None`），经 `dwg_read_options()` 逐字透传：
+  **默认不改变 0.6.5 的接受/拒绝行为**，宿主显式设 `Some(n)` 才收紧。
+- `ExtendedEntityData` 新增 `Arch` 变体 ⇒ 穷尽匹配必须处理。**已接成真实读取**，见下。
+- `Entity` trait 重构（`common()`/`common_mut()`）：业务代码不用旧访问器；只有测试里的
+  `.common()` 需要改（本轮新测试直接走 `extended_semantics`）。
+- 依赖面：acadrust 新增 `serde_json`，`windows-core`/`windows-link` 去重；无新的直接依赖。
+
+### 新支持（本轮真正接线的）
+
+- **ACAD Architecture（AEC）实体**（`ExtendedEntityData::Arch`）：
+  - **直墙用原生参数**：`straight_wall_geometry()`（仅 AC1032 DWG 且类体为直墙参数布局的 `AEC_WALL`）存在时，
+    用 `continuous_wall_outline([start, end], width)` 画**闭合定向足迹**（不是轴对齐预览）；
+    具名 `Partial`："高度不画、开洞不切、共享端点不做 miter（每段方头）"。
+  - 其余 AEC：每个 ≥2 点的 `profiles`（世界坐标预览轮廓）画成**开放折线**，具名 `Partial`；
+    无原生几何且无轮廓 ⇒ `Opaque` + 具名 `Partial`。
+  - 实现：`crates/cad-import-acadrust/src/entity/extended.rs::{arch_semantics, wall_footprint}`；
+    契约测试 `tests_display_table_extended.rs::extended_aec_arch_*`（2）+ `aec_*`（3）。
+- **对象级 EED（XDATA）读取**：`ImportReport.object_xdata: Vec<ObjectXdataApplication>`
+  （按应用名排序，`objects` = 携带该应用的对象数，同对象重复记录不重复计数）+ 一条
+  `xdata.object_ignored` 诊断（最多列 5 个应用名）。**只报告、不应用**到几何/图层/导入状态。
+- **格式与代码页保真诊断**：`format.r11_r12`（AC1009 家族）与 `format.code_page_approximate`
+  （无精确解码表）。两码**故意不带 `import.` 前缀**：它们不证明内容丢失，不能伪造 `Partial`；
+  契约测试断言“与基线 completeness 相同”。
+- **DWG 读取资源预算**：`ImportLimits` 三字段 → `DwgReadOptions`，默认 `None` = 旧行为。
+
+### 上游已提供、本项目**仍未消费**（不得写成已支持）
+
+- 文档级 `mirror_entity`/`mirror_entity_with_options`（尊重 `$MIRRTEXT`）、`rotate3d` 系列、
+  `rename_layer`——yacr 仍走 `cad-db::transform_geometry`，Text 镜像仍显式拒绝。
+- 连续墙**链级** miter（`continuous_walls` 分组）——本版每条直墙独立方头足迹。
+- ACIS 解析器/写出器改动——未重新验证；**不宣称 ACIS 兼容性提高**。
+- 实体级 xdata 未解码时的 `raw_dwg_eed` 仍只保留原字节（显式 `Partial`）。
+
+### 行为变化与更新过的断言
+
+- **维度导出组 70 位 32**：0.6.8 写入器**无条件**置位 0x20（"block 仅被本标注引用"）。我们为每条
+  标注生成独占 `*D` 块 ⇒ 正确。aligned/linear 现为 `1|32`/`0|32`，angular 为 `34`/`37`。
+  契约测试已更新；`docs/adr/0017-dimension-family.md` 追加 0.6.8 复核小节（决策文本不改）。
+- **角度标注构造函数**改为存弧度；本仓库不调用它们（组 42 一直自己写弧度）⇒ 无影响。
+- **提交夹具字节**：新建文档多写 `$DIMTXSTY`/`$DIMLTYPE`/`$DIMLTEX1`/`$DIMLTEX2`/`$DIMFXLON`/
+  `$DIMARCSYM`/`$UNITMODE`，类描述 `AutoCAD`→`ACAD`。已用 `regenerate_synthetic_acis_cube_dxf`
+  重新生成 `fixtures/dxf/synthetic-acis-cube.dxf`（+37/−5 行），并复核仍是一实体立方体、可离散。
+
+### 复核结论：仍**没有**新支持的项（0.6.8 源码核对）
+
+代理记录 opcode（`proxy_graphics.rs` 与 0.6.5 逐字节相同）、`PlotSettings` 的逐 ACI 颜色/线宽/alpha、
+`DIMCONTINUEMODE`、DXF 已知实体未知码保留、点云点数据（仍只有元数据/范围）、独立 `Xref` 对象
+（仍只有 `BlockRecord` 标志 + `xref_path`）。详见 `docs/compatibility.md` 的「0.6.8 增量」。
+
+### 证据
+
+- `cargo check -p cad-import-acadrust -p cad-host --all-targets --locked` → exit 0；
+  `cargo test -p cad-import-acadrust --locked` → lib **350 passed / 1 ignored**，集成 targets 全绿。
+- `cargo test -p cad-app -p cad-host --locked` → cad-app **1512 passed**、cad-host **264 passed**，
+  0 failed。
+- `cargo check --workspace --all-targets --locked` → exit 0；
+  `cargo check -p app-web --target wasm32-unknown-unknown --locked` → exit 0。
+- `cargo clippy -p cad-import-acadrust -p cad-host --all-targets --locked -- -D warnings` → exit 0；
+  `cargo fmt --all -- --check` → exit 0；
+  `python3 scripts/check-architecture.py`、`python3 scripts/check-file-size.py` → OK。
+- 备注：本轮验证前 `/home` 已 100% 满（`target/debug` 174G），删除 `target/debug/incremental`
+  后恢复；这是构建缓存清理，不涉及源码。
+- **NOT RUN**：全量 `cargo test --workspace`、全量门禁、真机 GUI、真实 DWG/AEC 夹具（仓库无 AEC
+  夹具，AEC 契约只用构造数据）、Windows/macOS/Android 载体、vendor/AutoCAD 对照。
+
 ## 2026-11-03 字体包统一：提交 Noto Sans CJK SC、全载体加载与只读 Font Manager
 
 本轮把“缺 CJK 字体”从“报未解析字体”收敛为一个可提交、可加载、可报告的包。实现已在工作树；

@@ -127,6 +127,27 @@ impl RenderSessionHandle {
         false
     }
 
+    /// Install the vendor derived-representation snapshot.
+    ///
+    /// A changed snapshot advances the scene input so the next preparation
+    /// rebuilds the base with its primitives; an unchanged `Arc` is free.
+    pub fn set_vendor_representations(
+        &self,
+        vendor: Option<Arc<cad_app::vendor::VendorRepresentationStore>>,
+    ) -> bool {
+        let mut state = self.0.borrow_mut();
+        let changed = match (&state.vendor, &vendor) {
+            (Some(current), Some(next)) => !Arc::ptr_eq(current, next),
+            (None, None) => false,
+            _ => true,
+        };
+        if changed {
+            state.vendor = vendor;
+            state.advance_input();
+        }
+        changed
+    }
+
     pub fn set_images(&self, images: Option<Arc<DecodedImageCache>>) -> bool {
         let mut state = self.0.borrow_mut();
         if state.images.as_ref().map(Arc::as_ptr) != images.as_ref().map(Arc::as_ptr) {

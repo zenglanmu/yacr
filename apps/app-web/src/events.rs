@@ -5,8 +5,9 @@
 //! `cad_ui_core::session::events`; this module is the browser-side transport:
 //!
 //! * [`EventHub`] owns the revisioned [`EventBus`] and the previous snapshot, and
-//!   turns one status projection into `derive_batch` + **one** `status-changed`
-//!   (semantic events first, snapshot last — the frozen ordering).
+//!   turns one status projection into `derive_batch` + (the vendor pass's own
+//!   events) + **one** `status-changed` (semantic events first, vendor events
+//!   next, snapshot last — the frozen ordering).
 //! * `cad_subscribe(callback)` registers the JS callback and returns the initial
 //!   `status-changed` frame JSON for the current snapshot/profile/revision.
 //! * `cad_unsubscribe()` drops the callback.
@@ -30,7 +31,7 @@
 
 use std::cell::{Cell, RefCell};
 
-use cad_ui_core::session::events::{derive_batch, CadEvent, EventBus, StatusFrame};
+use cad_ui_core::session::events::{derive_batch, CadEvent, CadEventKind, EventBus, StatusFrame};
 use cad_ui_core::session::{CadStatus, HostProfile};
 
 /// The pure half of the wasm transport: revisioned bus + previous snapshot.
@@ -93,8 +94,32 @@ impl EventHub {
         profile: &HostProfile,
         canvas: Option<String>,
     ) -> Vec<CadEvent> {
+        self.flush_with_vendor(status, profile, canvas, Vec::new)
+    }
+
+    /// One flush that also carries transport-owned events (the vendor pass).
+    ///
+    /// Order per flush, and it is the frozen one: the derived semantic events,
+    /// then whatever `vendor` takes (at most one `vendor-pending`, then at most
+    /// one `vendor-settled`; see [`crate::vendor::take_event_kinds`]), then
+    /// **exactly one** `status-changed`. The vendor kinds are pushed **before**
+    /// the snapshot so a consumer that reacts to `vendor-pending` by calling
+    /// `cad_vendor_records` never sees a stale status first.
+    ///
+    /// `vendor` is called once per flush with the hub already borrowed; it must
+    /// only take from a store (no re-entrant flush, no bus access).
+    pub fn flush_with_vendor(
+        &mut self,
+        status: &CadStatus,
+        profile: &HostProfile,
+        canvas: Option<String>,
+        vendor: impl FnOnce() -> Vec<CadEventKind>,
+    ) -> Vec<CadEvent> {
         let mut emitted = Vec::new();
         for kind in derive_batch(self.prev.as_ref(), status) {
+            emitted.extend(self.bus.push(kind));
+        }
+        for kind in vendor() {
             emitted.extend(self.bus.push(kind));
         }
         emitted.extend(
@@ -155,8 +180,12 @@ pub(crate) fn flush_live() {
         return;
     };
     let events = HUB.with(|hub| {
-        hub.borrow_mut()
-            .flush(&status, &HostProfile::dom_canvas(), canvas)
+        hub.borrow_mut().flush_with_vendor(
+            &status,
+            &HostProfile::dom_canvas(),
+            canvas,
+            crate::vendor::take_event_kinds,
+        )
     });
     let callback = CALLBACK.with(|callback| callback.borrow().clone());
     let Some(callback) = callback else {
@@ -267,5 +296,65 @@ mod tests {
         drop(first);
         let again = begin_flush().expect("the guard clears on drop");
         drop(again);
+    }
+
+    #[test]
+    fn a_vendor_flush_orders_semantic_then_vendor_then_status() {
+        let mut hub = EventHub::new();
+        hub.initial(&status(), &HostProfile::dom_canvas(), None);
+
+        let mut next = status();
+        next.selection.count = 2;
+        let events = hub.flush_with_vendor(&next, &HostProfile::dom_canvas(), None, || {
+            vec![
+                CadEventKind::VendorPending {
+                    token: 7,
+                    generation: 7,
+                    entities: 3,
+                },
+                CadEventKind::VendorSettled {
+                    token: 7,
+                    applied: 0,
+                    diagnostics: vec!["vendor.unsupported_layout".to_string()],
+                },
+            ]
+        });
+        let kinds: Vec<_> = events
+            .iter()
+            .map(|event| match &event.kind {
+                CadEventKind::SelectionChanged { .. } => "selection-changed",
+                CadEventKind::VendorPending { .. } => "vendor-pending",
+                CadEventKind::VendorSettled { .. } => "vendor-settled",
+                CadEventKind::StatusChanged { .. } => "status-changed",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "selection-changed",
+                "vendor-pending",
+                "vendor-settled",
+                "status-changed"
+            ]
+        );
+        // Exactly one snapshot, and it is last: a consumer reacting to the pending
+        // frame never reads a status that predates it.
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.kind, CadEventKind::StatusChanged { .. }))
+                .count(),
+            1
+        );
+        // Revisions stay strictly +1 across the whole batch.
+        assert_eq!(events.first().expect("events").revision, 2);
+        assert_eq!(events.last().expect("events").revision, 5);
+
+        // `flush` itself still carries no vendor kinds: it is the wrapper a caller
+        // with no store uses.
+        let plain = hub.flush(&next, &HostProfile::dom_canvas(), None);
+        assert_eq!(plain.len(), 1);
+        assert!(matches!(plain[0].kind, CadEventKind::StatusChanged { .. }));
     }
 }

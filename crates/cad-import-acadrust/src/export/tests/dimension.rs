@@ -586,9 +586,14 @@ fn flange_dimension_display_is_the_synthesis_of_its_own_definition() {
     }
 }
 
-/// ADR 0017 A.5 / F.1: group 70 carries the subtype flag with bit 32 absent and
-/// the 0x80 (text user-positioned) bit clear — our creations never user-position
-/// text.
+/// ADR 0017 A.5 / F.1: group 70 carries the subtype flag with the 0x80 (text
+/// user-positioned) bit clear — our creations never user-position text.
+///
+/// acadrust **0.6.8** now always sets bit 32 (0x20) for a dimension it writes:
+/// its comment says "the dimension's block is referenced by this dimension
+/// only". That is true of the `*D…` content block this exporter generates for
+/// every dimension, so the bit is correct, not a deviation. (0.6.5 had no way to
+/// set it; ADR 0017 A.5 "bit 32 is not written" is superseded by this writer.)
 #[test]
 fn dimension_group_70_flags() {
     // The acadrust writer's per-kind constants: Aligned = 1, Linear = 0.
@@ -602,7 +607,11 @@ fn dimension_group_70_flags() {
     let (bytes, _report) = export_one(SemanticGeometry::Dimension(Box::new(aligned)));
     let flags = dimension_group_70(&bytes);
     assert_eq!(flags & 0x0F, 1, "aligned subtype flag: {flags:#x}");
-    assert_eq!(flags & 0x20, 0, "bit 32 must be absent: {flags:#x}");
+    assert_eq!(
+        flags & 0x20,
+        0x20,
+        "bit 32 marks the dimension-owned block: {flags:#x}"
+    );
     assert_eq!(flags & 0x80, 0, "0x80 must be clear: {flags:#x}");
 
     let mut linear_definition = aligned_definition();
@@ -617,13 +626,17 @@ fn dimension_group_70_flags() {
     let (bytes, _report) = export_one(SemanticGeometry::Dimension(Box::new(linear)));
     let flags = dimension_group_70(&bytes);
     assert_eq!(flags & 0x0F, 0, "linear subtype flag: {flags:#x}");
-    assert_eq!(flags & 0x20, 0, "bit 32 must be absent: {flags:#x}");
+    assert_eq!(
+        flags & 0x20,
+        0x20,
+        "bit 32 marks the dimension-owned block: {flags:#x}"
+    );
     assert_eq!(flags & 0x80, 0, "0x80 must be clear: {flags:#x}");
 
     // Angular subtypes are the ones AutoCAD writes as 34/37 (2|32, 5|32) when
-    // the dimension owns its `*D` block. The acadrust 0.6.5 writer still has no
-    // way to set bit 32, so the recorded deviation (ADR 0017 A.5 / decision D.4)
-    // holds: the emitted flag is exactly 2 or 5.
+    // the dimension owns its `*D` block. Since acadrust 0.6.8 the writer sets
+    // bit 32 itself, so the emitted flag is exactly 34 or 37 — the same shape
+    // the old deviation record predicted.
     let angular_2ln = DimensionGeometry::synthesized(
         DimensionDefinition {
             kind: DimensionKind::Angular2Ln,
@@ -645,7 +658,10 @@ fn dimension_group_70_flags() {
     .expect("synthesized");
     let (bytes, _report) = export_one(SemanticGeometry::Dimension(Box::new(angular_2ln)));
     let flags = dimension_group_70(&bytes);
-    assert_eq!(flags, 2, "angular two-line subtype flag: {flags:#x}");
+    assert_eq!(
+        flags, 34,
+        "angular two-line subtype flag (2|32): {flags:#x}"
+    );
 
     let angular_3pt = DimensionGeometry::synthesized(
         angular_definition(),
@@ -656,7 +672,10 @@ fn dimension_group_70_flags() {
     .expect("synthesized");
     let (bytes, _report) = export_one(SemanticGeometry::Dimension(Box::new(angular_3pt)));
     let flags = dimension_group_70(&bytes);
-    assert_eq!(flags, 5, "angular three-point subtype flag: {flags:#x}");
+    assert_eq!(
+        flags, 37,
+        "angular three-point subtype flag (5|32): {flags:#x}"
+    );
 }
 
 /// P5e: group 42 is the DXF measurement unit. For an angular dimension that is

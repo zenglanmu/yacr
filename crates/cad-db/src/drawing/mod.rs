@@ -56,6 +56,12 @@ pub struct DrawingDatabase {
     /// case-insensitively while still returning the **last** registered
     /// duplicate. Empty names are never registered.
     pub(crate) block_name_order: Vec<(String, BlockId)>,
+    /// DWG object handle of each imported block definition, when the source
+    /// exposed one. Vendor derived representations reference block definitions
+    /// by their **source handle** (the plugin has no table name), so this map
+    /// is the only bridge from a vendor primitive back to a `BlockId`.
+    /// Hand-built databases leave it empty; no zero handle is ever invented.
+    pub(crate) block_source_handles: BTreeMap<u64, BlockId>,
     pub(crate) layouts: BTreeMap<LayoutId, Layout>,
     pub(crate) styles: BTreeMap<StyleId, Style>,
     /// Named linetype table entries (spec §3.2). Empty for hand-built

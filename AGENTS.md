@@ -32,10 +32,16 @@ ADR 0027。
    第二份文档状态，也不得把显示表示当数据源。能力缺失必须显式拒绝
    （`yacr: unsupported-runtime: webgl2` + 退出码 6；浏览器侧是命名拒绝），**禁止**空白 canvas
    或静默回退。
+9. **跨载体的能力按所有宿主建模**（天正/vendor 插件与任何用户可见通道都适用）：先在共享层
+   （`cad-ui-core`/`cad-desktop-shell`/前端 adapter）定义一份载体无关的契约与测试，再按
+   `surfaceMode`/`documentOwner` 接线；**不得**把 Linux（或任一单一宿主）的实现当成通用实现。
+   某一载体暂时不能支持时必须显式拒绝（稳定的 `unsupported-runtime: ...` / `vendor.*` 原因），
+   不得静默成功。当前只在 Linux 环境做运行/契约验证；Windows/macOS/Android/Web 的结论只能写
+   “仅编译 / 仅契约 / NOT VERIFIED”，不得写成已验收。
 
 ## 分层与边界（`scripts/check-architecture.py` 强制）
 
-唯一依赖：`cad-render-wgpu` → wgpu；`cad-import-acadrust` → acadrust（0.6.5，未修改）。
+唯一依赖：`cad-render-wgpu` → wgpu；`cad-import-acadrust` → acadrust（0.6.8，未修改）。
 架构规则：`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层（脚本强制的是 slint/iced 全局禁用
 与逐 crate 的 ban 列表，不正向断言 tauri 唯一性——不要因此绕过该规则）。平台类型
 （`web-sys`/`android-activity`/`jni`/`ndk`）不得进入 `cad-*`；`Cargo.toml` 根 `[patch]` 被拒绝。

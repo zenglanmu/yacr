@@ -11,6 +11,7 @@ mod basics;
 mod colour_provenance;
 mod dimension;
 mod dxf;
+mod format_report;
 mod hatch;
 mod hatch_pattern_table;
 mod insert;

@@ -3,6 +3,7 @@ use cad_app::layers::LayerOverrideSet;
 use cad_app::recovery::{ActiveBackendKind, BackendFailure, BackendOutcome};
 use cad_app::render_scene as controller;
 use cad_app::render_scene::{CadSceneController, DecodedImageCache, OverlayInputs, SnapHint};
+use cad_app::vendor::VendorRepresentationStore;
 use cad_app::{Camera, MeasurementPreview, ProjectionKind, SelectionSet};
 use cad_db::DrawingDatabase;
 use cad_domain::{CadError, CadResult, DocumentId, Point3, SpaceId};
@@ -187,6 +188,8 @@ struct State {
     view: ViewSnapshot,
     fonts: Option<Arc<FontEngine>>,
     images: Option<Arc<DecodedImageCache>>,
+    /// Derived vendor display snapshot (display-only; never `cad-db` state).
+    vendor: Option<Arc<VendorRepresentationStore>>,
     fonts_generation: u64,
     images_generation: u64,
     layers: LayerOverrideSet,
@@ -267,6 +270,7 @@ impl Default for State {
             view: ViewSnapshot::default(),
             fonts: None,
             images: None,
+            vendor: None,
             fonts_generation: 0,
             images_generation: 0,
             layers: LayerOverrideSet::new(),
@@ -537,6 +541,7 @@ fn preparation_input(state: &State) -> PreparationInput {
         images: state.images.clone(),
         fonts_generation: state.fonts_generation,
         images_generation: state.images_generation,
+        vendor: state.vendor.clone(),
         layers: state.layers.clone(),
         overlays: state.overlays.clone(),
     }
@@ -547,6 +552,7 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
     state.observe_drawing();
     let input = preparation_input(state);
     let mut candidate = state.controller.clone();
+    candidate.set_vendor_representations(input.vendor.clone());
     candidate.prepare_shared_with_overlays_and_images(
         input.drawing.clone(),
         input.document,
@@ -566,6 +572,7 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
     state.observe_drawing();
     let token = state.content_revision;
     let mut candidate = state.controller.clone();
+    candidate.set_vendor_representations(state.vendor.clone());
     candidate.prepare_shared_with_overlays_and_images(
         state.incoming.borrow().clone(),
         state.view.document,

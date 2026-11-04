@@ -153,6 +153,8 @@ impl<'a> ImporterBuilder<'a> {
         // Capture everything we need before the builder is consumed.
         self.read_code_page();
         self.read_point_display_style();
+        self.report_format_fidelity();
+        let object_xdata = self.read_object_xdata();
         let units = self.read_units();
         let capabilities: Vec<EntityCapability> = {
             let mut v: Vec<_> = std::mem::take(&mut self.capabilities)
@@ -208,7 +210,9 @@ impl<'a> ImporterBuilder<'a> {
                 completeness,
                 diagnostics,
                 parse_ms: None,
+                object_xdata,
             },
+            vendor_records: Vec::new(),
         })
     }
 
@@ -667,6 +671,10 @@ impl<'a> ImporterBuilder<'a> {
                 entities: Vec::new(),
                 dynamic_visibility: None,
             })?;
+            // Vendor derived representations reference a block by its source
+            // DWG handle (the WebView plugin never sees table names).
+            self.builder
+                .set_block_source_handle(id, block.handle.value());
             // An xref block is kept in the table like every other block (its
             // name must still resolve for INSERT), but it owns no source
             // entities: its members come from a referenced drawing, or stay

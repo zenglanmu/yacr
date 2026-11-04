@@ -40,6 +40,8 @@ pub use solid::{
 };
 
 pub mod export;
+pub mod vendor;
+pub use vendor::{VendorExtraction, VendorRecord, VendorSource};
 
 /// Bounds applied to an untrusted drawing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +49,23 @@ pub struct ImportLimits {
     pub max_file_bytes: usize,
     pub max_entities: usize,
     pub max_block_depth: usize,
+    /// Faces retained from one MESH entity by the DWG reader.
+    ///
+    /// `None` means acadrust's own behaviour (its system-derived budget), so the
+    /// default does not silently change what is accepted or rejected. A host that
+    /// wants a tighter bound sets `Some(n)`; `Some(usize::MAX)` removes the cap.
+    pub max_mesh_faces: Option<usize>,
+    /// Face-corner indices retained from one MESH entity by the DWG reader.
+    ///
+    /// `None` means acadrust's own behaviour (its system-derived budget); see
+    /// [`ImportLimits::max_mesh_faces`].
+    pub max_mesh_face_indices: Option<usize>,
+    /// Upper bound on the decompressed bytes one DWG read may allocate for its
+    /// sections and system pages.
+    ///
+    /// `None` means acadrust's own behaviour (per-section allocation, no shared
+    /// budget), so the default does not silently change what is accepted.
+    pub max_decompressed_bytes: Option<usize>,
 }
 
 impl Default for ImportLimits {
@@ -55,7 +74,23 @@ impl Default for ImportLimits {
             max_file_bytes: 512 * 1024 * 1024,
             max_entities: 2_000_000,
             max_block_depth: 32,
+            max_mesh_faces: None,
+            max_mesh_face_indices: None,
+            max_decompressed_bytes: None,
         }
+    }
+}
+
+/// Translate import limits into acadrust's DWG read options.
+///
+/// The three resource fields are copied verbatim: a `None` limit stays `None`,
+/// which is acadrust's own behaviour rather than an invented budget.
+pub(crate) fn dwg_read_options(limits: &ImportLimits) -> DwgReadOptions {
+    DwgReadOptions {
+        failsafe: true,
+        max_mesh_faces: limits.max_mesh_faces,
+        max_mesh_face_indices: limits.max_mesh_face_indices,
+        max_decompressed_bytes: limits.max_decompressed_bytes,
     }
 }
 
@@ -169,6 +204,19 @@ impl ImportProgressSink for NoopProgress {
 /// `Option` at each poll site.
 pub(crate) static NEVER_CANCELLED: fn() -> bool = || false;
 
+/// One application name found on object-level EED (XDATA) in the source.
+///
+/// This is read-only metadata decoded by acadrust: yacr reports it so a host can
+/// see what an object carried, but it is **not** applied to geometry, layers or
+/// any other imported state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectXdataApplication {
+    /// Registered application name (`1001` group).
+    pub application: String,
+    /// Number of objects that carry at least one record for this application.
+    pub objects: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct ImportReport {
     pub identity: DocumentIdentity,
@@ -177,6 +225,11 @@ pub struct ImportReport {
     pub diagnostics: Vec<Diagnostic>,
     /// Wall-clock parse/normalise time in milliseconds, when measured.
     pub parse_ms: Option<f64>,
+    /// Decoded object-level EED (XDATA) applications, sorted by name.
+    ///
+    /// Reported only: the import never applies these values to geometry. Empty
+    /// when the source carries no object xdata.
+    pub object_xdata: Vec<ObjectXdataApplication>,
 }
 
 impl ImportReport {
@@ -195,6 +248,12 @@ pub struct ImportedDrawing {
     pub database: DrawingDatabase,
     pub units: UnitContext,
     pub report: ImportReport,
+    /// `TCH_*` / TCH-proxy records copied for the WebView vendor pass.
+    ///
+    /// Empty when the drawing carries no Tianzheng objects. These bytes are not
+    /// interpreted here and never enter `cad-db`; the plugin decodes them and the
+    /// host validates the result.
+    pub vendor_records: Vec<vendor::VendorRecord>,
 }
 
 pub trait Importer {
@@ -282,7 +341,11 @@ impl Importer for AcadrustImporter {
 
         let outcome = if dwg {
             let mut reader = DwgReader::from_stream(Cursor::new(request.bytes.to_vec()));
-            reader.options = DwgReadOptions { failsafe: true };
+            // acadrust 0.6.8 exposes read resource limits on `DwgReadOptions`
+            // (`max_mesh_faces`, `max_mesh_face_indices`, `max_decompressed_bytes`).
+            // They are threaded through `ImportLimits` here; a `None` limit keeps
+            // acadrust's own behaviour, so the defaults stay unchanged.
+            reader.options = dwg_read_options(&request.limits);
             reader.read_with_stats()
         } else {
             // DXF defaults to strict reading: malformed records must not become empty success.
@@ -327,10 +390,25 @@ impl Importer for AcadrustImporter {
             message: None,
         });
 
+        let vendor::VendorExtraction {
+            records: vendor_records,
+            skipped: vendor_skipped,
+            truncated: vendor_truncated,
+        } = vendor::extract_vendor_records(&outcome.document);
         let builder = ImporterBuilder::new(request, &outcome.document, outcome.stats, identity)
             .with_progress(cancelled, progress);
-        builder.run().map(|mut drawing| {
+        builder.run().map(move |mut drawing| {
             drawing.report.parse_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+            drawing.vendor_records = vendor_records;
+            if vendor_skipped > 0 || vendor_truncated {
+                drawing.report.diagnostics.push(Diagnostic {
+                    object: None,
+                    code: "vendor.record_skipped".to_string(),
+                    message: format!(
+                        "{vendor_skipped} vendor record(s) skipped (truncated={vendor_truncated})"
+                    ),
+                });
+            }
             drawing
         })
     }
@@ -509,6 +587,7 @@ mod construct_line;
 mod dimension;
 mod dynamic;
 mod entity;
+mod format_report;
 mod geometry;
 mod hatch;
 mod mleader_style;
