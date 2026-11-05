@@ -268,7 +268,9 @@ impl Renderer {
     }
 
     pub(super) fn ensure_target(&mut self, target: &RenderTarget) -> Result<(), RenderError> {
-        if self.target.is_some() && self.target_size == (target.width.max(1), target.height.max(1))
+        if self.target.is_some()
+            && self.overlay_target.is_some()
+            && self.target_size == (target.width.max(1), target.height.max(1))
         {
             return Ok(());
         }
@@ -290,26 +292,31 @@ impl Renderer {
                 size.width, size.height
             )));
         }
-        // Budget gate **before** either target exists: a refused frame size costs
-        // no allocation and the previous target keeps rendering (see `gpu_memory`).
+        // Budget gate **before** any target exists: a refused frame size costs no
+        // allocation and the previous targets keep rendering (see `gpu_memory`).
+        // All four attachments are admitted in one call, so a refusal can never
+        // publish a partially allocated base/overlay pair.
         let colour_request = gpu_memory::texture_alloc_bytes(self.target_format, size, 1, 1);
         let depth_request = gpu_memory::texture_alloc_bytes(DEPTH_FORMAT, size, 1, 1);
         self.try_admit_gpu_memory(&[
+            (GpuMemoryCategory::ColorTarget, colour_request),
+            (GpuMemoryCategory::DepthTarget, depth_request),
             (GpuMemoryCategory::ColorTarget, colour_request),
             (GpuMemoryCategory::DepthTarget, depth_request),
         ])?;
         let texture = self.create_texture_checked(
             device,
             &wgpu::TextureDescriptor {
-                label: Some("cad-target"),
+                label: Some("cad-base-target"),
                 size,
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: self.target_format,
-                // COPY_SRC lets the headless evidence path read the frame back to a
-                // buffer (`Renderer::read_target_rgba`); production composition never
-                // does a per-frame GPU→CPU copy.
+                // COPY_SRC lets the base be copied into the presented overlay
+                // every frame. The headless evidence path reads the *overlay*
+                // (presented) texture back to a buffer; production composition
+                // never does a per-frame GPU→CPU copy.
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                     | wgpu::TextureUsages::TEXTURE_BINDING
                     | wgpu::TextureUsages::COPY_SRC,
@@ -321,7 +328,7 @@ impl Renderer {
         let depth = self.create_texture_checked(
             device,
             &wgpu::TextureDescriptor {
-                label: Some("cad-depth"),
+                label: Some("cad-base-depth"),
                 size,
                 mip_level_count: 1,
                 sample_count: 1,
@@ -333,10 +340,51 @@ impl Renderer {
             GpuMemoryCategory::DepthTarget,
             depth_request,
         )?;
-        // Replace the charges with the new targets': dropping the previous pair
+        // The presented target: `copy(base colour)` then the transient overlay,
+        // composited with its own depth (cleared every frame). COPY_DST receives
+        // the base copy; COPY_SRC serves the headless readback and the host's
+        // presentation path.
+        let overlay_texture = self.create_texture_checked(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("cad-overlay-target"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.target_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            GpuMemoryCategory::ColorTarget,
+            colour_request,
+        )?;
+        let overlay_depth = self.create_texture_checked(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("cad-overlay-depth"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            },
+            GpuMemoryCategory::DepthTarget,
+            depth_request,
+        )?;
+        // Replace the charges with the new targets': dropping the previous set
         // releases exactly the bytes the old offscreen targets held.
         self.target_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
         self.depth_view = Some(depth.create_view(&wgpu::TextureViewDescriptor::default()));
+        self.overlay_view =
+            Some(overlay_texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        self.overlay_depth_view =
+            Some(overlay_depth.create_view(&wgpu::TextureViewDescriptor::default()));
         self.target_charge = Some(self.gpu_charge(
             GpuMemoryCategory::ColorTarget,
             gpu_memory::texture_bytes(&texture),
@@ -345,7 +393,17 @@ impl Renderer {
             GpuMemoryCategory::DepthTarget,
             gpu_memory::texture_bytes(&depth),
         ));
+        self.overlay_target_charge = Some(self.gpu_charge(
+            GpuMemoryCategory::ColorTarget,
+            gpu_memory::texture_bytes(&overlay_texture),
+        ));
+        self.overlay_depth_charge = Some(self.gpu_charge(
+            GpuMemoryCategory::DepthTarget,
+            gpu_memory::texture_bytes(&overlay_depth),
+        ));
         self.target = Some(texture);
+        self.overlay_target = Some(overlay_texture);
+        self.overlay_depth = Some(overlay_depth);
         self.texture_revision += 1;
         self.target_size = (size.width, size.height);
         Ok(())

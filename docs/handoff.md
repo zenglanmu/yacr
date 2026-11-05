@@ -1,4 +1,73 @@
-## 2026-11-04 天正 vendor 插件：base-6 墙/柱/文字/门窗解码 + 派生表示（ABI v4）
+## 2026-11-05 渐进渲染闪烁：base/overlay 分离（后缀提交不再触碰 base）
+
+用户实测（真实 GUI，142,399 ordered batches）鼠标移动 / hover 时每帧 `prog` 回到小
+cursor、`complete=false`，画面闪烁（天正插件场景可见）。根因：`Renderer::render` 在
+`progressive_frame == None` 时把 cursor 归零并**同时清空颜色与 depth**，随后只画第 0 页；
+而 `set_pick_key_flags`（hover/选中 tint，含 `set_selection_flags_enabled`）与任意
+`commit_upload`（含 `keep_prefix > 0` 的仅后缀覆盖层提交）都会丢掉缓存帧。多页场景因此
+每个这样的变更后第一帧只剩第 0 页，后续页要再过几帧才回来。
+
+架构（`crates/cad-render-wgpu` + `cad-engine` runtime）：
+
+- **base/overlay 分离（两层，鼠标与 CAD 图脱离）**：`base_end` 之前是持久 base——
+  `cad-db` 场景本身（实体、栅格图像、wipeout mask）；之后是瞬态 overlay——参考网格/轴、
+  POINT 标记、子元素高亮、grip、测量预览、**绘制预览（line/pline 等尚未提交到 db 的
+  橡皮筋）**、框选矩形、捕捉提示、光标十字 + pickbox。base 有自己的 color/depth target；
+  overlay 有独立 color/depth，overlay color 就是**呈现目标**。鼠标移动 / 绘图预览只改
+  overlay，CAD 图所在的 base 纹理既不清空也不重新分页。
+- **每帧合成**：先把 base color 拷到 overlay color，再在 overlay 的 color/depth 上画
+  overlay（overlay depth 每帧清空；base depth 不被触碰）。因此 `frame_texture()` /
+  `read_target_rgba()` 始终是合成后的呈现帧；即使 base 正在分页，光标也画在最新一页之上。
+- **仅后缀提交**：只改 overlay batches；base target 与 base 分页游标都不动
+  （`progressive_frame` 保留，pacing 知识保留）。旧的 `full_frame_once`“单帧上限重绘”
+  路径已删除。
+- **flag/tint 变化**：只重置 base 分页游标（load 颜色、清 depth），overlay 每帧重新合成，
+  所以光标保持可见。已知代价：该周期内 base 的半透明几何会与保留像素重复混合，直到重绘
+  走完；不透明图元（本 bug 的天正场景）不受影响，这是显式取舍，不是“已完美”。
+- **相机/base 变化**：base 从第 0 页渐进重绘，overlay 从每个部分 base 页重新合成。
+- runtime：base group 用转换后的 staging，overlay group 用
+  `prepare_upload_batches_legacy`（纯 legacy 顶点/索引，overlay pass 只需 per-batch
+  uniform）；提交用 `commit_upload_with_base(prepared, keep_prefix, base_end)`。
+- 内存代价：多一个 color + 一个 depth target（与 base 同尺寸，按 GPU 预算记账），四个
+  附件在同一次 `try_admit_gpu_memory` 中准入。
+
+证据：`cargo test -p cad-render-wgpu --test progressive_restart_flash`（Quadro P620 +
+Vulkan：6 批 = 6 页；flag 更新后单帧 6 条 base 线全部仍在、重绘完成后最后一条变为 tint；
+仅后缀提交后单帧 base + overlay 全部仍在、`frame_progress()` 仍为 `(6,6)`；另有“后缀提交
+不改 base 像素”的逐像素相等用例）与 `pacing_commit_suffix` 契约。修复前的真实 GUI 日志
+（142,399 batches，每次 hover/suffix 都 `prog` 归零）是**缺陷观察证据**。
+
+**绘制预览（未提交 db）专项**：`crates/cad-engine/src/render/contracts/draw_preview.rs`
+（Quadro P620 + Vulkan，`--ignored` 硬件用例）直接构造一个 `DrawPreview`（LINE，1 个已捕获点
++ 活动光标，未写 db）并断言：每次预览变更恰好 **1 次 overlay-suffix commit**；base batch
+前缀、applied base revision、base 逐像素均不变；预览段像素可见且不等于背景/基准线颜色；
+base 分页始终保持 `(N,N)` 完成且无 pending；清空预览后 suffix 被截断回基准 batch 数、原预览
+像素恢复背景。即“line 的中间状态只进 overlay，绝不进 base，也不触发 base 重绘”。
+
+**修复后真实 GUI 复测**（Linux Wayland + 原生窗口 + Quadro P620，`test-tangent-real.dwg`，
+放大到约 1:6 的局部，3 轮 hover/suffix 轨迹，最终 release 在文件拆分之后重建）：
+553 个 `actual-render` 样本中，每次 `uploads_started` 递增时 `prog` 保持
+`142396/142396 complete=true`，**没有一次 suffix 提交把 cursor 归零**
+（`budget_scale=1.000` 的 suffix 重置计数 = 0）；274 个合成器帧的 CAD 区域均值亮度
+中位数 20.83、最低 20.07，无清屏帧；平面图与十字光标全程可见。录屏在
+`/tmp/opencode/zoom-sweep-after.webm`（临时证据，不是仓库资产）。这只覆盖本机/本样张/
+本轮运行，不是像素 golden 或产品验收；每帧一次全尺寸 base→overlay 拷贝的真实成本未测。
+
+**绘制预览真实 GUI 复测**（同一台 P620/Wayland，真实 release，`test-tangent-real.dwg` 放大到
+可见平面图后，从命令栏启动 `LINE`、落 1 个点，14 秒内 2 轮鼠标扫动，随后未提交）：
+`resident_batches` 全程 `142396`，该阶段所有 `cad-stages` 提交均 `base_changed=false`，
+`uploads_started` 24→36（cursor/preview 的 suffix 提交）；206 个合成器帧中 CAD 区域均值亮度
+中位数 25.48、最低 25.14、最高 25.73，**无清屏帧**，最大相邻帧差 0.14；截图中状态栏为
+“直线 1 个点”，黄色橡皮筋压在完整平面图上（见 `/tmp/opencode/frames-line/f-0060.png`、
+`f-0110.png`，录屏 `/tmp/opencode/line-live.webm`）。这是“未提交绘图状态只进 overlay”的
+真实渲染证据；输入是真实的 ydotool 鼠标，不是合成 DOM 事件。
+
+NOT VERIFIED：其他载体（Windows / macOS / Android / Web）的运行时与像素结论；真实 GPU
+之外环境；每帧全纹理拷贝与大图显存占用的生产测量；产品级像素/视觉 golden；相机变化
+（缩放/平移）仍会清空 base 并渐进重绘，本轮只证明鼠标、flag/tint 与绘制预览不再清 base。
+**不得**写成已视觉验收/跨平台验收。
+
+## 2026-11-04 天正 vendor 插件：base-6 墙/柱/文字/门窗解码 + 派生表示（ABI v1）
 
 本轮把通道从“契约骨架”推进到**真实显示**：插件按真实样本的 base 6 / 保护标记 9 解出
 `TCH_WALL` / `TCH_COLUMN`，宿主用 `VendorRepresentationStore` 把 primitives 作为派生表示
@@ -30,7 +99,7 @@
   `apps/desktop-ui/public/plugins/tch.js`；待提供远端 URL 后执行 `git submodule add`。
 - 前端新增 `src/vendor/vendor-pass.ts`（script 注入加载插件、失败转 unsupported 帧）与
   `cad-events.ts` 的两个事件解析；`plugins/tch/src/index.ts` 只导出 `abiVersion` + `decode`。
-- **records 提取（ABI v4）**：`cad-import-acadrust::vendor::extract_vendor_records`
+- **records 提取（ABI v1）**：`cad-import-acadrust::vendor::extract_vendor_records`
   同时处理 `EntityType::Unknown(TCH_*)`（拆 main/text/handle + common-data skip）和
   `ACAD_PROXY_ENTITY`（`dxf_subclass` / `class_id → TCH_*`，直接用 payload/text_payload）；
   经 `HostController → HostCore → CadSession` 交给 owner tick 的 `VendorStore::stage`。
@@ -44,7 +113,7 @@
   `vendor.tch.unsupported` 诊断。已补 `TCH_OPENING` → 墙断口：真实样本应用 1,734 个
   opening cut（1,219 个 wall primitive 超过 8 点，最大 144 点），34 面带 openings 的墙没有
   匹配记录，70 个 opening 被显式跳过。门/窗 2D 图块已按 opening 记录的 2D block 句柄接入：
-  ABI v4 新增 kind 5 `block insert`（handle/origin/scale/rotation），宿主用
+  ABI v1 新增 kind 5 `block insert`（handle/origin/scale/rotation），宿主用
   `DrawingDatabase::block_by_source_handle` 解析已导入块定义后按
   `T(origin)·R·S·T(-base)` 展开；真实样本 1,711 个门/窗图块、18 个洞口侧线。组合门窗
   （kind 8，5 条）、带形窗（kind 5）、门门槛线（flags 0x200/0x400）仍显式不画。
@@ -12399,3 +12468,67 @@ host/wasm/clippy + 4 static / diff **均 0**；`fmt` 仅既有陌生未跟踪 `d
 - **NOT RUN / NOT VERIFIED**：设备/模拟器上的 DocumentsUI 打开与创建、SAF 读/写、persistable grant、
   取消/失败路径、外部「打开方式」的冷/热投递、Rust→Kotlin JNI 运行时链接、设备上的 pinch 与比例、
   Vulkan adapter、像素、旋转/前后台、同步导入在超大 DWG 上的停顿。**签名仅本地，未分发。**
+
+## 2026-11-04：天正插件扩到 22 类 + 派生测量 + 块内 TCH；真实样本端到端
+
+- **插件覆盖**（`plugins/tch/src/*.ts`，ABI 仍为 **1**）：在原有 墙/柱/文字/门窗 之上新增
+  `TCH_ELEVATION`、`TCH_ARROW`、`TCH_MULTILEADER`、`TCH_DIMENSION2`、`TCH_AXIS_LABEL`、
+  `TCH_RADIUSDIM`、`TCH_LINESTAIR`、`TCH_RECTSTAIR`、`TCH_BLOCK_INSERT`、`TCH_RUPTURE`、
+  `TCH_MODI`、`TCH_DRAWINGINDEX`、`TCH_DRAWINGNAME`、`TCH_NORTHTHUMB`、`TCH_SYMB_SECTION`、
+  `TCH_INDEXPOINTER`、`TCH_CORNER_WINDOW` 的 base-6 明文解码器，并按 MiniCAD 的
+  `Build*` 端口生成派生图元。门窗补齐门槛线（`flags 0x200/0x400`）、带形窗（kind 5）、
+  组合门窗（kind 8，真实样本 5 组 / 15 个 part，第二种 87 bit 内嵌头是实测布局，仍按位严格匹配）。
+  布局真值：`/home/zenglanmu/sources/rust/MiniCAD/src/Import/Tch*.h`。
+- **真实样本收敛**：`fixtures/test-tangent-real.dwg`（10,612 条 vendor 记录）→
+  `status=0, entities=9889, applied=14911`；primitive kinds `{0:1590, 1:5897, 2:1499, 3:249,
+  4:3730, 5:1946}`（kind 5 = 1,726 门窗 + 220 `TCH_BLOCK_INSERT`）。逐类：
+  WALL 4525、OPENING 1734、COLUMN 1000、TEXT 870、MTEXT 339、ELEVATION 358、BLOCK_INSERT 220、
+  DIMENSION2 173、RUPTURE 140、ARROW 138、MULTILEADER 127、LINESTAIR 116、RECTSTAIR 54、
+  MODI 44、AXIS_LABEL 20、RADIUSDIM 11、DRAWINGINDEX 5、SYMB_SECTION 5、INDEXPOINTER 5、
+  DRAWINGNAME 2、CORNER_WINDOW 2、NORTHTHUMB 1。Rust 解析同一 result 帧：
+  `applied=14911 entities=9889 primitives=14911 diagnostics=16`。
+- **共享文本流 sentinel 修复（真实缺陷）**：AC1027 的类文本流在属性包字符串后带一个
+  `TDBXDATAMAP_BLOCK_BEGIN_ … _END_` 块；此前所有解码器直接读原始字符串，真实帧里
+  **751 个文字 primitive 是 sentinel**（876 条 `TCH_TEXT` 全部如此）。`base6.ts` 新增
+  `ClassText`（每个记录一个游标，首个字符串是 datamap 时跳过整块），7 个解码模块统一改用。
+  修复后结果帧中 sentinel 文字 **0**，样例真实文本：`AC`、`2AC`、`西冉中路`、
+  `检查口800*800`。代价：49 条 TEXT/MTEXT 记录的文本流只有空 datamap（本来就没有文字），
+  现在显式拒绝（`vendor.tch.text_geometry_invalid: 49`），不再伪造 sentinel。
+- **覆盖账目**：index.ts 现在把每条记录归入 `decoded` / `unsupported` / `no_display` 三桶之一，
+  并输出 `vendor.tch.no_display`；三者之和 ≠ 记录数时追加 `vendor.tch.unaccounted`
+  （真实样本：9706→9889 实体、914→723 unsupported、26 no_display，合计 10,612）。
+  诊断仍受帧契约 16 条上限约束，超出部分按排序截断。
+- **块内 TCH**：`crates/cad-app/src/render_scene/assembly.rs` 新增
+  `append_block_vendor_fragments`，沿 INSERT/Compound 递归，应用
+  `T(origin)·R·S·T(-base)` 组合变换并把片段重新挂到成员实体 + 真实实例路径；
+  深度/环路由 `MAX_INSTANCE_DEPTH` 限制。合成测试 + 真实 `#[ignore]` 测试
+  （member `0x3E556`，insert `EntityId(74094)`）。
+- **派生测量/查询**：`crates/cad-app/src/app_measure_vendor.rs` 把派生图元连成一个闭合平面环，
+  直线用鞋带公式、圆弧加精确弓形项 `½r²(θ−sinθ)`，单圆 `πr²`；记录
+  `ProxyCache` + `Approximate`；文字/块/混合 circle/非平面/开口/多环以
+  `area.object.vendor_outline` 具名拒绝。`HostController` 的选择属性追加只读
+  `vendor_derived` / `vendor_primitives` / `vendor_revision`（i18n + `property-labels.ts`）。
+- **块句柄解析**：220 条 `TCH_BLOCK_INSERT` 的 40 个不同块句柄**全部**由导入 DB 的
+  `block_by_source_handle` 解析到有成员的块定义（探针实测 40/40，探针已删）。
+- **GUI/GPU 证据边界**：Wayland `native-below` + Vulkan **Quadro P620（真实 GPU）** 运行
+  `target/release/yacr` 打开真实样本成功，`resident_batches=178077`、无 TCH panic。
+  但打开后相机仍是 `camera_center=0,000 camera_scale=1.000`（该图 bounds 跨数百万单位），
+  视口里看不到 TCH 模型；尝试用 `ydotool` 注入 `FIT` 未能聚焦命令框。随后 Mutter ScreenCast
+  返回 `Session creation inhibited`、GNOME Shell 截图 `AccessDenied`，**像素/视觉证据 NOT RUN**。
+  `--probe` 是假打开，不得当视觉证据。
+- **仍未解码（显式）**：`TCH_SPACE` 383（MiniCAD 无此类解码器，布局未验证）、
+  `TCH_WALL` 157（147 条头字段不匹配 + 10 条弧墙）、`TCH_OPENING` 70（39 条 body version 64、
+  31 条 wall=0）、`TCH_DIMENSION` 35（旧类，参考实现只支持 DIMENSION2）、`TCH_SHEET` 1、
+  `TCH_ERRORMSG` 1；合法无几何 26 条 `TCH_ARROW` 进 `no_display`。
+- **测试（已运行）**：`apps/desktop-ui npm test` 1,064 passed（含新增
+  annotation/dimension/stair/opening-symbols/block-insert/break-line/annotation-symbol/
+  index-symbol/datamap 契约测试），`npm run build` PASS；`cargo test -p cad-app -p cad-host
+  -p cad-ui-core` 1,523 + 264 + 371 passed（0 failed）；`cargo test -p app-web` 109 passed；
+  `cargo check -p app-web --target wasm32-unknown-unknown` PASS；Rust 真实 result 帧解析
+  `applied=14911 entities=9889 primitives=14911 diagnostics=16`（bundle 与源码同结果）。
+- **门禁（已运行）**：`cargo fmt --all -- --check`、`cargo clippy -p cad-app -p cad-host
+  -p cad-ui-core --all-targets --locked -- -D warnings`、`cargo check --workspace
+  --all-targets --locked`、`check-file-size.py`、`check-i18n.py`（1,012 keys）、
+  `check-architecture.py` 全部 PASS。
+- **NOT RUN**：`cargo test --workspace --all-targets`（全量）与 Linux GUI 像素证据；
+  Windows/macOS/Android/Web 仍只有编译/契约证据，没有真机或 GPU 验收。

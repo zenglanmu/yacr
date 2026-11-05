@@ -381,9 +381,12 @@ pub struct FrameStats {
     /// is measurable and not guessed.
     pub uniform_writes: u64,
     pub uploaded_bytes: u64,
-    /// Vertices submitted this frame (post-budget).
+    /// Base-page vertices submitted this frame (post-budget). The transient
+    /// overlay is composited outside the page budget and is **not** included;
+    /// see [`FrameStats::draw_calls`] for the whole presented frame.
     pub vertices: usize,
-    /// Triangles submitted this frame (post-budget).
+    /// Base-page triangles submitted this frame (post-budget). The transient
+    /// overlay is not included.
     pub triangles: usize,
     /// Present when part of the scene was held back because the frame budget
     /// was crossed. The caller must surface this; batches are never silently
@@ -413,11 +416,13 @@ pub struct FrameStats {
     /// completion, static budget) or `"at-ceiling"` (non-progressive frame
     /// planned against the un-paced ceiling).
     pub pacing: &'static str,
-    /// Opaque batches submitted this frame.
+    /// Opaque batches submitted this frame (base page + transient overlay).
     pub opaque_batches: usize,
-    /// Transparent batches (`0 < alpha < 1`) submitted after the opaque pass.
+    /// Transparent batches (`0 < alpha < 1`) submitted after the opaque pass
+    /// (base page + transient overlay).
     pub transparent_batches: usize,
-    /// Batches skipped because `alpha <= 0`. Reported, never silently drawn.
+    /// Batches skipped because `alpha <= 0` (base page + transient overlay).
+    /// Reported, never silently drawn.
     pub invisible_batches: usize,
     /// Raster image quads submitted this frame, after opaque geometry.
     ///
@@ -478,8 +483,8 @@ pub struct FrameStats {
     /// `RenderPass::set_index_buffer` calls actually issued this frame
     /// (post-dedup).
     pub set_index_buffer_calls: u64,
-    /// Uniform arena slots used this frame (accepted geometry batches + drawn
-    /// images).
+    /// Uniform arena slots used this frame (accepted base geometry batches +
+    /// drawn images + transient overlay batches).
     pub uniform_slots: usize,
     /// Times the progressive frame cursor was reset this frame because the
     /// camera/attachment key changed (0 for a non-progressive renderer).

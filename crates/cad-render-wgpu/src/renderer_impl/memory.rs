@@ -224,6 +224,8 @@ impl Renderer {
         self.unit_quad_charge = None;
         self.target_charge = None;
         self.depth_charge = None;
+        self.overlay_target_charge = None;
+        self.overlay_depth_charge = None;
         self.pick_target_charge = None;
         self.pick_depth_charge = None;
         self.flags_texture_charge = None;

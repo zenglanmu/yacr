@@ -344,80 +344,6 @@ pub(crate) struct GpuMask {
     vertex_charge: Option<GpuCharge>,
 }
 
-/// An axis-aligned world-XY rectangle.
-///
-/// Used to describe both the visible world rect of a frame and the region an
-/// inverted mask's complement fill covers. `min`/`max` are per-axis bounds in
-/// world units.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct MaskCoverage {
-    pub min: [f64; 2],
-    pub max: [f64; 2],
-}
-
-impl MaskCoverage {
-    pub(crate) fn new(min: [f64; 2], max: [f64; 2]) -> Self {
-        Self { min, max }
-    }
-
-    /// A square of half-extent `radius` centred on `center` (world XY).
-    pub(crate) fn around(center: [f64; 2], radius: f64) -> Self {
-        Self {
-            min: [center[0] - radius, center[1] - radius],
-            max: [center[0] + radius, center[1] + radius],
-        }
-    }
-
-    /// Axis-aligned bounds of `boundary`; a square of half-extent 1 at the origin
-    /// when the boundary has no finite extent (never used to clip, only to grow a
-    /// ring, so the fallback is harmless and non-finite values cannot escape).
-    pub(crate) fn boundary(boundary: &[Point3]) -> Self {
-        let mut min = [f64::INFINITY; 2];
-        let mut max = [f64::NEG_INFINITY; 2];
-        for point in boundary {
-            if !(point.x.is_finite() && point.y.is_finite()) {
-                return Self::around([0.0, 0.0], 1.0);
-            }
-            min[0] = min[0].min(point.x);
-            min[1] = min[1].min(point.y);
-            max[0] = max[0].max(point.x);
-            max[1] = max[1].max(point.y);
-        }
-        if min[0] > max[0] || min[1] > max[1] {
-            return Self::around([0.0, 0.0], 1.0);
-        }
-        Self { min, max }
-    }
-
-    pub(crate) fn union(self, other: Self) -> Self {
-        Self {
-            min: [self.min[0].min(other.min[0]), self.min[1].min(other.min[1])],
-            max: [self.max[0].max(other.max[0]), self.max[1].max(other.max[1])],
-        }
-    }
-
-    /// Whether `other` lies entirely inside `self` (inclusive bounds).
-    pub(crate) fn contains(self, other: Self) -> bool {
-        self.min[0] <= other.min[0]
-            && self.min[1] <= other.min[1]
-            && self.max[0] >= other.max[0]
-            && self.max[1] >= other.max[1]
-    }
-
-    pub(crate) fn expanded(self, margin: f64) -> Self {
-        Self {
-            min: [self.min[0] - margin, self.min[1] - margin],
-            max: [self.max[0] + margin, self.max[1] + margin],
-        }
-    }
-
-    pub(crate) fn is_finite(self) -> bool {
-        [self.min[0], self.min[1], self.max[0], self.max[1]]
-            .iter()
-            .all(|value| value.is_finite())
-    }
-}
-
 /// One accelerated line storage segment: a bind group over a
 /// `VERTEX | STORAGE` buffer holding the [`PulledLine`] records of a run of
 /// whole instance streams. A real scene can exceed
@@ -640,9 +566,24 @@ pub struct Renderer {
     target: Option<wgpu::Texture>,
     target_view: Option<wgpu::TextureView>,
     depth_view: Option<wgpu::TextureView>,
+    /// The **base** scene target: persistent drawing + reference grid. It is
+    /// never cleared by a transient overlay update; only a base/flag cycle
+    /// touches it.
+    ///
+    /// The presented frame is the overlay target below, composited as
+    /// `copy(base) + overlay` on every render.
+    overlay_target: Option<wgpu::Texture>,
+    overlay_view: Option<wgpu::TextureView>,
+    overlay_depth: Option<wgpu::Texture>,
+    overlay_depth_view: Option<wgpu::TextureView>,
     target_size: (u32, u32),
     target_format: wgpu::TextureFormat,
     batches: Vec<GpuBatch>,
+    /// Number of resident **base** batches: base indices are `[0, base_end)`,
+    /// the transient overlay is `[base_end, batch_count)`. Set by
+    /// [`Renderer::commit_upload_with_base`]; a suffix-only commit never changes
+    /// it, so the base walk survives an overlay update.
+    base_end: usize,
     /// Device-resident instanced line streams. Uploaded once per scene change;
     /// never rewritten on pan/zoom. Garbage-collected (and re-based) on commit.
     instance_streams: Vec<InstanceStream>,
@@ -794,6 +735,11 @@ pub struct Renderer {
     draw_calls: u64,
     progressive: bool,
     progressive_frame: Option<ProgressiveFrame>,
+    /// Set by a flag-row/tint update that restarts the progressive walk at
+    /// cursor 0 without invalidating the retained colour target: the restart
+    /// loads colour (clears only depth) so already-drawn pages never vanish.
+    /// Consumed by the cycle-start frame that acts on it.
+    preserve_color_on_restart: bool,
     /// Camera-independent draw-order partition over `batches`. Rebuilt lazily
     /// when the batch set changes (upload/clear/device-loss) and, per frame,
     /// only its transparent slice is re-sorted for the camera. `None` means
@@ -922,6 +868,12 @@ pub struct Renderer {
     depth_charge: Option<GpuCharge>,
     // Held only for its `Drop` impl, which releases the ledger charge.
     #[allow(dead_code)]
+    overlay_target_charge: Option<GpuCharge>,
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
+    overlay_depth_charge: Option<GpuCharge>,
+    // Held only for its `Drop` impl, which releases the ledger charge.
+    #[allow(dead_code)]
     pick_target_charge: Option<GpuCharge>,
     // Held only for its `Drop` impl, which releases the ledger charge.
     #[allow(dead_code)]
@@ -955,6 +907,8 @@ mod plan;
 mod renderer_impl;
 
 pub(crate) use cull::{ChunkCull, WorldAabb};
+mod mask_coverage;
+pub(crate) use mask_coverage::MaskCoverage;
 pub(crate) use plan::*;
 
 // Private accelerated-tier GPU contracts for the pulled-prefix fast path. Test

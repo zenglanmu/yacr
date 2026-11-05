@@ -24,6 +24,11 @@ impl Renderer {
         self.target = None;
         self.target_view = None;
         self.depth_view = None;
+        self.overlay_target = None;
+        self.overlay_view = None;
+        self.overlay_depth = None;
+        self.overlay_depth_view = None;
+        self.base_end = 0;
         self.batches.clear();
         self.images.clear();
         self.image_textures.clear();
@@ -119,6 +124,11 @@ impl Renderer {
         self.target = None;
         self.target_view = None;
         self.depth_view = None;
+        self.overlay_target = None;
+        self.overlay_view = None;
+        self.overlay_depth = None;
+        self.overlay_depth_view = None;
+        self.base_end = 0;
         self.batches.clear();
         self.images.clear();
         self.image_textures.clear();

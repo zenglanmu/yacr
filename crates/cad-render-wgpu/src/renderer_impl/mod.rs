@@ -21,13 +21,17 @@ mod images;
 mod init;
 mod masks;
 mod memory;
+mod overlay;
 mod pipelines;
+mod progressive;
 mod pulled_plan;
 mod pulled_rebuild;
 mod render;
+mod render_camera;
 mod state;
 mod types;
 mod upload;
+mod upload_prepare;
 
 #[cfg(test)]
 mod pick_table_incremental_tests;
@@ -42,5 +46,4 @@ pub(crate) use alloc::{
     pulled_capacity_fits, pulled_payload_bytes, pulled_skip_state, PulledAllocationError,
     PulledAllocationVerdict,
 };
-pub(crate) use encode::EncodeOutcome;
 pub(crate) use types::{prefix_outcome, CheckpointFacts, IncomingResources, PrefixOutcome};

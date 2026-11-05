@@ -44,9 +44,14 @@ impl Renderer {
             target: None,
             target_view: None,
             depth_view: None,
+            overlay_target: None,
+            overlay_view: None,
+            overlay_depth: None,
+            overlay_depth_view: None,
             target_size: (1, 1),
             target_format: wgpu::TextureFormat::Rgba8UnormSrgb,
             batches: Vec::new(),
+            base_end: 0,
             instance_streams: Vec::new(),
             arc_streams: Vec::new(),
             mesh_chunks: Vec::new(),
@@ -103,6 +108,7 @@ impl Renderer {
             draw_calls: 0,
             progressive: false,
             progressive_frame: None,
+            preserve_color_on_restart: false,
             draw_plan: None,
             batch_facts: plan::BatchFacts::default(),
             encode_emit_mask: plan::EncodeEmitMask::default(),
@@ -154,6 +160,8 @@ impl Renderer {
             unit_quad_charge: None,
             target_charge: None,
             depth_charge: None,
+            overlay_target_charge: None,
+            overlay_depth_charge: None,
             pick_target_charge: None,
             pick_depth_charge: None,
             flags_texture_charge: None,
@@ -629,6 +637,11 @@ impl Renderer {
         self.target = None;
         self.target_view = None;
         self.depth_view = None;
+        self.overlay_target = None;
+        self.overlay_view = None;
+        self.overlay_depth = None;
+        self.overlay_depth_view = None;
+        self.base_end = 0;
         self.target_size = (0, 0);
         self.draw_plan = None;
         self.device = Some(device);

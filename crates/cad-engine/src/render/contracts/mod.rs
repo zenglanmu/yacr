@@ -359,6 +359,7 @@ fn entity_flag_keys(session: &RenderSessionHandle) -> Vec<u32> {
 }
 
 mod cursor_moves;
+mod draw_preview;
 mod gpu_base;
 mod gpu_flags;
 mod gpu_selection;

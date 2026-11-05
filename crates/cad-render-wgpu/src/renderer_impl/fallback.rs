@@ -54,6 +54,16 @@ impl Renderer {
 
     pub fn clear_batches(&mut self) {
         self.progressive_frame = None;
+        self.preserve_color_on_restart = false;
+        self.base_end = 0;
+        // Drop the presented overlay targets/views; `ensure_target` recreates all
+        // four attachments on the next render. The base target is left as-is.
+        self.overlay_target = None;
+        self.overlay_view = None;
+        self.overlay_depth = None;
+        self.overlay_depth_view = None;
+        self.overlay_target_charge = None;
+        self.overlay_depth_charge = None;
         self.draw_plan = None;
         self.reset_pacing();
         self.batches.clear();

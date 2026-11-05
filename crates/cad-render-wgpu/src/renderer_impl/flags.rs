@@ -167,9 +167,14 @@ impl Renderer {
     /// per-batch uniforms.
     pub fn set_selection_flags_enabled(&mut self, enabled: bool) {
         self.flags_enabled = enabled;
-        // Toggling the tint changes the output: drop any completed progressive
-        // frame so the next render redraws instead of reusing the cached pixels.
-        self.progressive_frame = None;
+        // Toggling the tint changes the shaded output but not the geometry, so
+        // the retained colour target is still valid: restart the walk at cursor
+        // 0 and redraw over the loaded colour (clear depth only). Dropping the
+        // frame would clear the colour and present page 0 alone.
+        if let Some(frame) = self.progressive_frame.as_mut() {
+            frame.cursor = 0;
+            self.preserve_color_on_restart = true;
+        }
         let queue = self.queue.clone();
         if let Some(queue) = queue.as_ref() {
             self.write_flags_ctl(queue);
@@ -248,12 +253,16 @@ impl Renderer {
         );
         self.flags_upload_bytes += aligned as u64;
         self.flags_upload_count += 1;
-        // A flag change alters the shaded output, so a *completed* progressive
-        // frame must not be reused: `render` with an unchanged frame key would
-        // otherwise draw nothing and keep the pre-flag pixels (a selection would
-        // not tint until the camera moved). Dropping the cached plan forces the
-        // next render to redraw from the resident buffers — no geometry re-upload.
-        self.progressive_frame = None;
+        // A flag change alters the shaded output, so the page walk must redraw:
+        // restart it at cursor 0. The geometry and camera are unchanged, so the
+        // retained colour target is still valid — keep it and load colour
+        // (clearing only depth). Dropping the plan instead would clear the
+        // colour and present page 0 alone, vanishing every later page until the
+        // walk catches up (the hover flash).
+        if let Some(frame) = self.progressive_frame.as_mut() {
+            frame.cursor = 0;
+            self.preserve_color_on_restart = true;
+        }
         Ok(())
     }
 

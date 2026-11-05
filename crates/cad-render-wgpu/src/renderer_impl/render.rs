@@ -1,138 +1,6 @@
 use super::*;
 
 impl Renderer {
-    /// Render one frame into the offscreen target using a 2D camera.
-    ///
-    /// The error is explicit: callers can tell a device loss from a rejected
-    /// frame via [`RenderError::is_device_loss`].
-    pub fn render(
-        &mut self,
-        camera: Camera2d,
-        target: &RenderTarget,
-    ) -> Result<FrameStats, RenderError> {
-        let w = target.width.max(1) as f64;
-        let h = target.height.max(1) as f64;
-        let sx = 2.0 / (w * camera.world_per_px);
-        // CAD and clip space are both Y-up. wgpu's viewport maps positive
-        // clip Y to the top of the image; negating here mirrors the drawing
-        // and disagrees with the host's screen-to-world picking transform.
-        let sy = 2.0 / (h * camera.world_per_px);
-        // The depth band comes from the resident geometry's world-z extent, so a
-        // solid's whole extent lands inside the [0, 1] clip range instead of being
-        // clipped by a one-unit slab (see `OrthoDepth`).
-        let projection = FrameProjection::Ortho {
-            sx,
-            sy,
-            center: [camera.center.x, camera.center.y, camera.center.z],
-            z_plane: camera.z_plane,
-            depth: self.ortho_depth(),
-            world_per_px: camera.world_per_px,
-        };
-        // Camera-only world→clip matrix, column-major (WGSL `mat4x4<f32>`). It
-        // is the per-batch transform with the batch origin removed, so image
-        // vertices (already in world space) can share the same camera uniform;
-        // its z row is read back from the projection so the two can never drift.
-        let (z_scale, z_offset) = projection
-            .ortho_camera_z()
-            .expect("an Ortho projection has a depth row");
-        let camera_matrix = [
-            sx as f32,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            sy as f32,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            z_scale,
-            0.0,
-            (sx * -camera.center.x) as f32,
-            (sy * -camera.center.y) as f32,
-            z_offset,
-            1.0,
-        ];
-        self.render_with_projection(
-            projection,
-            camera_matrix,
-            [
-                camera.center.x as f32,
-                camera.center.y as f32,
-                camera.center.z as f32,
-            ],
-            // 2D keeps its world-Z headlight, so the diffuse term stays `n.z`.
-            [0.0, 0.0, 1.0, 0.0],
-            target,
-        )
-    }
-
-    /// World-z band covering every resident batch, mapped onto the depth range.
-    ///
-    /// The union is taken over the batch `z_range`s captured at upload, so the
-    /// band always contains the geometry the frame can draw (a culled batch only
-    /// widens it, which is conservative). An empty scene falls back to a unit
-    /// band around the origin ([`OrthoDepth::default`]).
-    fn ortho_depth(&self) -> OrthoDepth {
-        let mut lo = f64::INFINITY;
-        let mut hi = f64::NEG_INFINITY;
-        for batch in &self.batches {
-            lo = lo.min(f64::from(batch.z_range[0]));
-            hi = hi.max(f64::from(batch.z_range[1]));
-        }
-        OrthoDepth::covering(lo, hi)
-    }
-
-    /// Render one frame into the offscreen target using a 3D camera.
-    ///
-    /// Returns [`RenderError::Frame`] (no GPU work submitted) when the camera
-    /// projection is degenerate.
-    pub fn render_3d(
-        &mut self,
-        camera: Camera3d,
-        target: &RenderTarget,
-    ) -> Result<FrameStats, RenderError> {
-        let aspect = target.width.max(1) as f64 / target.height.max(1) as f64;
-        let Some(vp) = camera.view_projection(aspect) else {
-            return Err(RenderError::Frame(
-                "camera has no usable 3D projection".into(),
-            ));
-        };
-        // Per-batch uniform = VP * T(batch origin).
-        // Camera-only VP, column-major flat, for image vertices that are already
-        // in world space.
-        let mut camera_matrix = [0.0f32; 16];
-        for col in 0..4 {
-            for row in 0..4 {
-                camera_matrix[col * 4 + row] = vp[col][row];
-            }
-        }
-        let eye = [
-            camera.eye.x as f32,
-            camera.eye.y as f32,
-            camera.eye.z as f32,
-        ];
-        // Camera-relative key light for 3D (see `Camera3d::headlight`): the
-        // light follows the orbit but sits a fixed offset above-left of the view
-        // axis, so a solid's faces (including a symmetric isometric view's
-        // three) no longer all collapse to one shade. The fallback is
-        // unreachable after the projection check above; it is world-`+Z` like
-        // the 2D light.
-        let light = camera
-            .headlight()
-            .map_or([0.0, 0.0, 1.0, 0.0], |[r, g, b]| [r, g, b, 0.0]);
-        self.render_with_projection(
-            FrameProjection::Perspective {
-                vp,
-                world_per_px: camera.world_per_px_at_target(target.height),
-            },
-            camera_matrix,
-            eye,
-            light,
-            target,
-        )
-    }
-
     pub(super) fn render_with_projection(
         &mut self,
         projection: FrameProjection,
@@ -209,40 +77,7 @@ impl Renderer {
             target_size: self.target_size,
             texture_revision: self.texture_revision,
         };
-        if self.progressive
-            && self
-                .progressive_frame
-                .as_ref()
-                .is_none_or(|frame| frame.key != frame_key)
-        {
-            progressive_restarts += 1;
-            // Reuse the previous frame's `ordered` and page-index allocations:
-            // the restart replaces them, so the old Vecs are cleared and refilled
-            // instead of freshly collected per camera move.
-            let (mut ordered, mut page_index) = self
-                .progressive_frame
-                .take()
-                .map(|frame| (frame.ordered, frame.page_index))
-                .unwrap_or_default();
-            let cache = self.draw_plan.as_mut().expect("draw plan cache");
-            cache.sort_transparent(Some(camera_position));
-            let opaque_count = cache.opaque().len();
-            let invisible = cache.invisible().len();
-            ordered.clear();
-            ordered.extend(cache.opaque().iter().chain(cache.transparent()).copied());
-            // Fuse the segmented planner's per-`ordered` index into the same
-            // sweep that (re)builds `ordered`, so it is derived from that one
-            // truth and rebuilt exactly when the order is.
-            page_index.rebuild(&self.batch_facts.upload_bytes, &ordered);
-            self.progressive_frame = Some(ProgressiveFrame {
-                key: frame_key,
-                ordered,
-                opaque_count,
-                invisible,
-                cursor: 0,
-                page_index,
-            });
-        }
+        progressive_restarts += self.restart_progressive_frame(frame_key, camera_position);
         // Cloned so the shared uniform arena can be mutated (grown/filled) while
         // this frame is encoded without fighting the borrow checker over `self`.
         let queue = self
@@ -319,6 +154,16 @@ impl Renderer {
                 "renderer depth target missing".into(),
             ));
         };
+        let Some(overlay_view) = self.overlay_view.as_ref() else {
+            return Err(RenderError::NotInitialized(
+                "renderer overlay view missing".into(),
+            ));
+        };
+        let Some(overlay_depth_view) = self.overlay_depth_view.as_ref() else {
+            return Err(RenderError::NotInitialized(
+                "renderer overlay depth target missing".into(),
+            ));
+        };
         let Some(layout) = self.layout.as_ref() else {
             return Err(RenderError::NotInitialized(
                 "renderer uniform layout missing".into(),
@@ -336,6 +181,7 @@ impl Renderer {
         // The active page budget this frame's plan uses. Captured before planning
         // so the reported `FrameStats::budget_*` fields describe exactly what the
         // plan used, and so the controller can sample this frame afterwards.
+        // Only the base page is budgeted; the overlay is always drawn whole.
         let active_budget = self.active_frame_budget();
         let pacing_mode = self.pacing_mode();
         // Chunk-level view culling (backlog §P1): build the frame's mask once,
@@ -387,14 +233,23 @@ impl Renderer {
         // so a page split must never drop it. Geometry then fills what is left of
         // the active page budget. Visual order is unchanged (images still draw
         // last, in ascending `draw_order` among themselves).
-        let clear = self
+        // The first page of a cycle normally clears the colour target. A
+        // flag/tint restart reuses the retained colour (the geometry and camera
+        // are unchanged), so it clears only depth and loads colour; already-drawn
+        // pages survive the restart. Images are composited only on a cycle that
+        // actually clears colour, so a preserve-colour cycle never recomposites
+        // them (that would accumulate a transparent image's opacity).
+        let cycle_start = self
             .progressive_frame
             .as_ref()
             .is_none_or(|frame| frame.cursor == 0);
+        let preserve_color = cycle_start && std::mem::take(&mut self.preserve_color_on_restart);
+        let clear_color = cycle_start && !preserve_color;
+        let clear_depth = cycle_start;
         let mut image_usage = cad_scene::FrameUsage::default();
         let mut draw_images: Vec<usize> = Vec::new();
         let mut image_over_budget = None;
-        if clear {
+        if clear_color {
             // Reserve the full image charge before geometry, against the active
             // page budget. When the paced page cannot hold every image, fall
             // back to the un-paced ceiling instead of dropping images: they draw
@@ -470,15 +325,38 @@ impl Renderer {
             transparent.extend_from_slice(&plan.accepted[split..]);
             (plan, frame.invisible)
         } else {
-            let plan = plan_from_gpu(&self.batches, &active_budget, image_usage, &cull);
+            // Non-progressive: plan the **base** slice only (upload order). The
+            // overlay never enters the base plan; it is composited separately.
+            let base_end = self.base_end;
+            let plan = {
+                let base_batches = &self.batches[..base_end];
+                plan_from_gpu(base_batches, &active_budget, image_usage, &cull)
+            };
             let cache = self.draw_plan.as_mut().expect("draw plan cache");
             cache.sort_transparent(Some(camera_position));
-            if plan.accepted.len() == self.batches.len() {
+            if plan.accepted.len() == base_end {
                 // Full acceptance keeps upload order, so the cached
-                // camera-sorted partition over all batches is exact.
-                opaque.extend_from_slice(cache.opaque());
-                transparent.extend_from_slice(cache.transparent());
-                (plan, cache.invisible().len())
+                // camera-sorted partition over the base prefix is exact.
+                opaque.extend(
+                    cache
+                        .opaque()
+                        .iter()
+                        .copied()
+                        .filter(|&index| index < base_end),
+                );
+                transparent.extend(
+                    cache
+                        .transparent()
+                        .iter()
+                        .copied()
+                        .filter(|&index| index < base_end),
+                );
+                let invisible = cache
+                    .invisible()
+                    .iter()
+                    .filter(|&&index| index < base_end)
+                    .count();
+                (plan, invisible)
             } else {
                 // Over budget: `accepted` is an upload-order prefix. Fall
                 // back to the fresh plan over that prefix; this path is rare
@@ -526,6 +404,15 @@ impl Renderer {
         // mutation (`rebuild_lineweight_cache`), so the frame path only clones
         // the small cached Vec instead of scanning every resident batch.
         let lineweight_not_drawn: Vec<LineweightNotDrawn> = self.lineweight_not_drawn.clone();
+
+        // The transient overlay: every batch after the base prefix, drawn in the
+        // scene's visual order (opaque then transparent) and never page-budgeted.
+        // It is recomposited on top of the copied base on **every** render,
+        // including base page continuations, so a cursor/preview stays visible
+        // over a partially drawn base. Overlay batches are staged legacy
+        // (`prepare_upload_batches_legacy`), so each needs exactly one per-batch
+        // uniform slot; the overlay pass binds no stream/chunk/arc slots.
+        let overlay_plan = self.plan_overlay(camera_position);
 
         // Decide whether this frame uses the accelerated per-class draw
         // organization. It requires: the accelerated tier is live; the pulled
@@ -601,7 +488,8 @@ impl Renderer {
             + stream_slot_count
             + chunk_slot_count
             + arc_slot_count
-            + self.masks.len();
+            + self.masks.len()
+            + overlay_plan.drawn_batches();
         self.uniforms
             .ensure_slots(max_slots, device, layout, &self.gpu_memory);
 
@@ -743,14 +631,28 @@ impl Renderer {
         // background (ADR 0022 D1) and the representation layer never names a
         // colour. `key_flags` is zero: a mask carries no pick key.
         let mut mask_slots: Vec<u32> = Vec::with_capacity(self.masks.len());
-        let clear_color = target.clear_color();
+        let clear_color_value = target.clear_color();
         for mask in &self.masks {
             mask_slots.push(next_slot as u32);
             let matrix = projection.batch_matrix_f64(mask.origin);
-            let uniform = uniform_bytes(&matrix, clear_color, [0, 0, 0, 0], light);
+            let uniform = uniform_bytes(&matrix, clear_color_value, [0, 0, 0, 0], light);
             self.uniforms.write_slot(next_slot, &uniform);
             next_slot += 1;
         }
+        // Overlay uniforms: one slot per overlay batch, after every base slot.
+        // The overlay is legacy geometry (no runs), so the legacy per-batch
+        // `draw_batch` path is its only reader; the shape is identical to the
+        // base legacy loop above so the same shaders/tint apply.
+        next_slot = Self::write_overlay_uniforms(
+            &self.batches,
+            &mut self.frame_slots,
+            &mut self.uniforms,
+            &projection,
+            light,
+            line_wpp_bits,
+            next_slot,
+            &overlay_plan,
+        );
         // One `Queue::write_buffer` per page (vs. one per batch), reported as
         // `FrameStats::uniform_writes`. Only the compacted slot count is flushed.
         let total_slots = next_slot;
@@ -792,23 +694,13 @@ impl Renderer {
             }
         }
 
-        let EncodeOutcome {
-            encoder,
-            encode_state,
-            instanced_draws,
-            instanced_batches,
-            mesh_draws,
-            merged_mesh_batches,
-            arc_draws,
-            arc_batches,
-            converted_batches,
-            encode_ms,
-        } = self.encode_frame(
+        let base_outcome = self.encode_frame(
             device,
             view,
             depth_view,
-            clear,
             clear_color,
+            clear_depth,
+            clear_color_value,
             use_pulled,
             &opaque,
             &transparent,
@@ -830,7 +722,7 @@ impl Renderer {
             image_pipeline,
             unit_quad_buffer,
         );
-        let mut encoder = encoder;
+        let mut encoder = base_outcome.encoder;
         // Capture the split sizes before the scratch Vecs are returned to `self`
         // below.
         let opaque_batches = opaque.len();
@@ -838,30 +730,86 @@ impl Renderer {
         // Converted batches own no per-batch draw; they contribute coalesced
         // instanced draws and/or merged mesh draws instead (a batch over a cap
         // contributes one draw per run). Everything else stays one draw per batch.
-        let legacy_opaque = opaque_batches.saturating_sub(converted_batches);
+        let legacy_opaque = opaque_batches.saturating_sub(base_outcome.converted_batches);
         // Every resident mask is one draw in the frame's final pass, whatever the
         // page, so the count is included in `draw_calls`.
         let mask_draws = self.masks.len() as u64;
-        let draw_calls = (legacy_opaque
-            + instanced_draws as usize
-            + mesh_draws as usize
-            + arc_draws as usize
-            + transparent_batches
-            + draw_images.len()
-            + mask_draws as usize) as u64;
+
+        // Present the copy of the base plus the transient overlay (see
+        // `overlay.rs`). The copy runs on every render, even when the base page
+        // is a continuation and even when there is no overlay.
+        self.copy_base_to_overlay(&mut encoder);
 
         let submit_started = Instant::now();
         // Measurement-only: close the bracket, resolve the two queries and copy
-        // the ticks into the reusable `MAP_READ` buffer — all on the **same**
+        // the ticks into the reusable `MAP_READ` buffer — all on the base
         // encoder/submission (no extra submit). The copy perturbs the frame; it
-        // exists only under the explicit opt-in.
+        // exists only under the explicit opt-in. The overlay pass below runs in a
+        // later submission and is not part of the measured bracket.
         if let Some(gpu_time) = self.gpu_time.as_ref() {
             encoder.write_timestamp(&gpu_time.query_set, 1);
             encoder.resolve_query_set(&gpu_time.query_set, 0..2, &gpu_time.resolve, 0);
             encoder.copy_buffer_to_buffer(&gpu_time.resolve, 0, &gpu_time.readback, 0, 16);
         }
-        let submission = queue.submit(Some(encoder.finish()));
+        // Submission 1: base page (or retained base) + the base→overlay copy.
+        queue.submit(Some(encoder.finish()));
+
+        // Submission 2: composite the transient overlay into the presented
+        // target (queue order guarantees the copied base is visible first).
+        let overlay = self.encode_overlay_pass(
+            &queue,
+            device,
+            overlay_view,
+            overlay_depth_view,
+            clear_color_value,
+            &overlay_plan,
+            line_pipeline,
+            line_instanced_pipeline,
+            arc_pipeline,
+            mesh_pipeline,
+            mesh_pipeline_mirrored,
+            mesh_pipeline_transparent,
+            mesh_pipeline_mirrored_transparent,
+            mesh_pipeline_merged,
+            mesh_pipeline_merged_mirrored,
+            image_pipeline,
+            unit_quad_buffer,
+        );
+        let submission = overlay.submission;
         let submit_ms = submit_started.elapsed().as_secs_f64() * 1000.0;
+        // Overlay batches are staged legacy, so each is exactly one per-batch
+        // draw (its class is 0). Adding them keeps the documented
+        // `legacy_opaque_draws + arc + instanced + mesh + transparent + images ==
+        // draw_calls` identity true for the presented frame.
+        let draw_calls = (legacy_opaque
+            + base_outcome.instanced_draws as usize
+            + base_outcome.mesh_draws as usize
+            + base_outcome.arc_draws as usize
+            + transparent_batches
+            + draw_images.len()
+            + mask_draws as usize
+            + overlay.draw_calls) as u64;
+        let encode_ms = base_outcome.encode_ms + overlay.encode_ms;
+        // Every state-setting call actually issued this frame (both passes).
+        // `legacy_opaque_draws` includes the overlay's per-batch draws.
+        let set_pipeline_calls =
+            base_outcome.encode_state.tally.set_pipeline_calls + overlay.set_pipeline_calls;
+        let set_bind_group_calls =
+            base_outcome.encode_state.tally.set_bind_group_calls + overlay.set_bind_group_calls;
+        let set_vertex_buffer_calls = base_outcome.encode_state.tally.set_vertex_buffer_calls
+            + overlay.set_vertex_buffer_calls;
+        let set_index_buffer_calls =
+            base_outcome.encode_state.tally.set_index_buffer_calls + overlay.set_index_buffer_calls;
+        let legacy_opaque_draws = (legacy_opaque + overlay.opaque_batches) as u64;
+        let opaque_batches = opaque_batches + overlay.opaque_batches;
+        let transparent_batches = transparent_batches + overlay.transparent_batches;
+        let invisible_batches = invisible_batches + overlay.invisible_batches;
+        let instanced_draws = base_outcome.instanced_draws;
+        let instanced_batches = base_outcome.instanced_batches;
+        let mesh_draws = base_outcome.mesh_draws;
+        let merged_mesh_batches = base_outcome.merged_mesh_batches;
+        let arc_draws = base_outcome.arc_draws;
+        let arc_batches = base_outcome.arc_batches;
         // Request the timestamp readback mapping before the blocking poll below,
         // so that poll completes it (blocking readback strategy: no second poll).
         if let Some(gpu_time) = self.gpu_time.as_ref() {
@@ -932,7 +880,7 @@ impl Renderer {
             gpu_ms,
             gpu_time: self.gpu_time_state,
             draw_calls,
-            legacy_opaque_draws: legacy_opaque as u64,
+            legacy_opaque_draws,
             uniform_writes,
             uploaded_bytes: self.uploaded_bytes,
             vertices: budget_plan.usage.vertices,
@@ -958,10 +906,10 @@ impl Renderer {
             encode_ms,
             submit_ms,
             wait_ms,
-            set_pipeline_calls: encode_state.tally.set_pipeline_calls,
-            set_bind_group_calls: encode_state.tally.set_bind_group_calls,
-            set_vertex_buffer_calls: encode_state.tally.set_vertex_buffer_calls,
-            set_index_buffer_calls: encode_state.tally.set_index_buffer_calls,
+            set_pipeline_calls,
+            set_bind_group_calls,
+            set_vertex_buffer_calls,
+            set_index_buffer_calls,
             uniform_slots: total_slots,
             progressive_restarts,
             instanced_draws,

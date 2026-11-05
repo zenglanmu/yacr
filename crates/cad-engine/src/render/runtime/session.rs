@@ -232,7 +232,18 @@ impl CadRenderRuntime {
                 end += 1;
             }
             let prepare_started = Instant::now();
-            let piece = renderer.prepare_upload_batches(&batches[pending.offset..end])?;
+            // Group 0 is the persistent base: the database scene (entities,
+            // raster images, wipeout masks). Group 1 is the transient overlay
+            // (reference grid/axes, POINT markers, sub-element highlight, grips,
+            // measurement/draw previews, box selection, snap hints, cursor).
+            // Group 0 converts to the stream/chunk/arc classes; group 1 is staged
+            // **legacy** so the overlay pass can draw it with per-batch uniforms
+            // only, without base stream/chunk/arc slots.
+            let piece = if pending.group == 0 {
+                renderer.prepare_upload_batches(&batches[pending.offset..end])?
+            } else {
+                renderer.prepare_upload_batches_legacy(&batches[pending.offset..end])?
+            };
             prepare_us += prepare_started.elapsed().as_micros() as u64;
             let append_started = Instant::now();
             if let Some(prepared) = &mut pending.prepared {
@@ -289,14 +300,16 @@ impl CadRenderRuntime {
             None => renderer.prepare_upload_batches(&[])?,
         };
         let commit_started = Instant::now();
-        renderer.commit_upload(
-            prepared,
-            if pending.base_changed {
-                0
-            } else {
-                self.base_batches
-            },
-        )?;
+        // Base/overlay split: `[0, base_end)` is the persistent base, the rest is
+        // the transient overlay. On a base change the base is exactly the staged
+        // base group; on a suffix-only commit the resident base prefix is
+        // unchanged and the newly staged pieces are all overlay.
+        let (keep_prefix, base_end) = if pending.base_changed {
+            (0, pending.scene.base.added.len())
+        } else {
+            (self.base_batches, self.base_batches)
+        };
+        renderer.commit_upload_with_base(prepared, keep_prefix, base_end)?;
         let commit_us = commit_started.elapsed().as_micros() as u64;
         let commit_timing = renderer.last_commit_timing();
         // A suffix-only commit re-uploads (or truncates) the transient overlay

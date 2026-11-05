@@ -251,6 +251,8 @@ fn suffix_commit_after_an_over_target_observation_keeps_the_shrunk_budget() {
         .commit_upload(overlay, resident)
         .expect("commit the overlay suffix");
 
+    // A suffix commit must not force a ceiling frame: the very next frame uses
+    // the preserved (shrunk) adaptive budget.
     let stats = renderer.render(camera_2d(), &target).unwrap();
     assert_eq!(
         stats.pacing, "active",

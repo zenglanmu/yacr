@@ -85,8 +85,10 @@ impl Renderer {
         }
     }
 
+    /// The **presented** (composited) frame texture: base copy + transient
+    /// overlay. `None` before the first render created the attachments.
     pub fn frame_texture(&self) -> Option<&wgpu::Texture> {
-        self.target.as_ref()
+        self.overlay_target.as_ref()
     }
 
     pub fn device_generation(&self) -> u64 {

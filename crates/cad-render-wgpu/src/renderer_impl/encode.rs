@@ -23,8 +23,9 @@ impl Renderer {
         device: &wgpu::Device,
         view: &wgpu::TextureView,
         depth_view: &wgpu::TextureView,
-        clear: bool,
-        clear_color: [f32; 4],
+        clear_color: bool,
+        clear_depth: bool,
+        background: [f32; 4],
         use_pulled: bool,
         opaque: &[usize],
         transparent: &[usize],
@@ -51,10 +52,10 @@ impl Renderer {
         // is the caller's (default [`crate::CAD_CLEAR_COLOR`]); this pass only
         // converts the plain channels once for `wgpu`.
         let clear_value = wgpu::Color {
-            r: f64::from(clear_color[0]),
-            g: f64::from(clear_color[1]),
-            b: f64::from(clear_color[2]),
-            a: f64::from(clear_color[3]),
+            r: f64::from(background[0]),
+            g: f64::from(background[1]),
+            b: f64::from(background[2]),
+            a: f64::from(background[3]),
         };
         // Coalesced-instanced bookkeeping (kept outside the render-pass block).
         let mut instanced_draws = 0u64;
@@ -85,7 +86,7 @@ impl Renderer {
                     view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: if clear {
+                        load: if clear_color {
                             wgpu::LoadOp::Clear(clear_value)
                         } else {
                             wgpu::LoadOp::Load
@@ -97,7 +98,7 @@ impl Renderer {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: depth_view,
                     depth_ops: Some(wgpu::Operations {
-                        load: if clear {
+                        load: if clear_depth {
                             wgpu::LoadOp::Clear(1.0)
                         } else {
                             wgpu::LoadOp::Load
@@ -691,9 +692,11 @@ impl Renderer {
             // page, so the last page still ends with every mask on top.
             if !self.masks.is_empty() {
                 if let Some(mask_pipeline) = self.mask_pipeline.as_ref() {
-                    for (index, mask) in self.masks.iter().enumerate() {
-                        let (bind_group, offset) =
-                            self.uniforms.binding(mask_slots[index] as usize);
+                    // `mask_slots` is one slot per resident mask on the base page
+                    // (masks belong to the base target). The overlay pass passes
+                    // an empty slice: masks are never recomposited there.
+                    for (mask, &slot) in self.masks.iter().zip(mask_slots.iter()) {
+                        let (bind_group, offset) = self.uniforms.binding(slot as usize);
                         encode_state.set_pipeline(&mut pass, mask_pipeline);
                         masks::draw_mask(&mut pass, &mut encode_state, mask, bind_group, offset);
                     }

@@ -554,8 +554,9 @@ fn aligned_bytes_per_row(width: u32) -> u32 {
 }
 
 impl Renderer {
-    /// Copy the current offscreen target (`frame_texture`) to a buffer and
-    /// return a tightly packed RGBA8 image.
+    /// Copy the current **presented** overlay target (`frame_texture`: the base
+    /// copy plus the transient overlay) to a buffer and return a tightly packed
+    /// RGBA8 image.
     ///
     /// Returns [`RenderError::NotInitialized`] when no frame has been rendered
     /// yet (the target texture only exists after the first `render`/`render_3d`).
@@ -572,7 +573,7 @@ impl Renderer {
                 "no GPU queue initialized".into(),
             ));
         };
-        let Some(texture) = self.target.as_ref() else {
+        let Some(texture) = self.overlay_target.as_ref() else {
             return Err(RenderError::NotInitialized(
                 "no rendered frame to read back".into(),
             ));

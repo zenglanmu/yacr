@@ -6,6 +6,7 @@ impl Renderer {
     pub fn set_progressive_rendering(&mut self, enabled: bool) {
         self.progressive = enabled;
         self.progressive_frame = None;
+        self.preserve_color_on_restart = false;
     }
 
     /// Override the adaptive page-budget target (`cpu_ms + wait_ms`, default
