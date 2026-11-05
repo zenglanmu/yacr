@@ -28,7 +28,12 @@
 #   * the artifact is a **build** result: it is not device, runtime, GPU or pixel
 #     evidence, and an emulator run is not a real-device acceptance;
 #   * no signing key is committed. `--debug` produces an installable debug APK
-#     (signed with the local debug keystore); a release APK needs its own key.
+#     (signed with the local debug keystore); a release APK needs its own key
+#     and is left unsigned here. CI is the only place that signs a release APK:
+#     `.github/workflows/build.yml` (android-release) zipaligns this output and
+#     runs `apksigner` with a keystore decoded from the
+#     `ANDROID_KEYSTORE_BASE64` secret (repository self-signed key). This script
+#     neither reads that secret nor signs anything.
 #
 # Usage:
 #   bash scripts/build-android.sh [--debug] [--target <aarch64|armv7|i686|x86_64>] [-- <extra tauri args>]

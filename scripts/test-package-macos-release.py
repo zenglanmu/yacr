@@ -84,6 +84,10 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("checksum", "sha256"),
     ("unsigned disclosure", "unsigned"),
     ("notarization disclosure", "not notarized"),
+    ("application sigining", "codesign --force --sign"),
+    ("signing identity override", "MACOS_SIGN_IDENTITY"),
+    ("ad-hoc disclosure", "ad-hoc"),
+    ("signature verification", "codesign --verify --strict"),
     ("packaging manifest", "PACKAGE.txt"),
 )
 

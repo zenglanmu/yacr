@@ -4,9 +4,9 @@
 #
 # `scripts/package-windows-release.sh` builds and stages the release tree; this
 # script is the single place that writes `yacr-<version>-windows-x86_64.zip` and
-# its `.sha256`. CI runs it after SignPath has signed (or declined to sign) the
-# staged executables, so the local UNSIGNED path and the CI SIGNED path cannot
-# drift apart.
+# its `.sha256`. CI signs the staged executables itself with the repository
+# SELF-SIGNED PFX (no SignPath, no public CA) and then calls this finalizer, so
+# the local UNSIGNED path and the CI SIGNED path cannot drift apart.
 #
 # It also fills the `Code signing` section of `PACKAGE.txt`, which the package
 # script stages with the `@@YACR_SIGNING_NOTE@@` placeholder: an archive that
@@ -30,7 +30,7 @@ cd "$ROOT"
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 PLACEHOLDER='@@YACR_SIGNING_NOTE@@'
-SIGNED_NOTE='The executables in bin/ carry a SignPath Authenticode signature. Verify with signtool/Get-AuthenticodeSignature. The ZIP container itself is not Authenticode-signed.'
+SIGNED_NOTE='The executables in bin/ carry a SELF-SIGNED Authenticode signature from a repository-issued certificate -- NOT a public CA and not an EV/OV certificate. Windows shows an "unknown publisher" warning unless bin/yacr-dev-codesign.cer is imported into Trusted Root Certification Authorities (or Trusted Publishers); importing it is a manual, per-machine trust decision. Verify with signtool or Get-AuthenticodeSignature (Status must be Valid and the signer thumbprint must match the shipped certificate). The ZIP container itself is not Authenticode-signed.'
 UNSIGNED_NOTE='This archive is UNSIGNED -- it is NOT code-signed. Windows SmartScreen may show an "unknown publisher" warning on first launch.'
 
 case "${1:-}" in
@@ -125,7 +125,7 @@ echo "artifact : ${ZIP}"
 echo "size     : $(wc -c < "$ZIP") bytes"
 echo "sha256   : $(cut -d' ' -f1 "$SHA")"
 if [ "$MODE" = "signed" ]; then
-  echo "signing  : SignPath Authenticode (bin/*.exe)"
+  echo "signing  : SELF-SIGNED Authenticode (bin/*.exe; repository cert, NOT a public CA)"
 else
   echo "signing  : UNSIGNED"
 fi

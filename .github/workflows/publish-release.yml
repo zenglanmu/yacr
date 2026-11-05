@@ -7,10 +7,12 @@ name: Publish release assets
 #
 # Division of responsibility:
 #   * `build.yml` release jobs stay `contents: read` and artifact-only - they
-#     build, verify and upload. When credentials exist they may also **sign**
-#     (Windows/Android through SignPath, the Linux Flatpak through a repository
-#     GPG key) and then upload the signed artifact; without credentials they
-#     upload an explicitly `*-unsigned` fallback. They never publish;
+#     build, verify and upload. When repository credentials exist they may also
+#     **sign** with LOCAL SELF-SIGNED material (a Windows PFX secret applied by
+#     signtool, an Android keystore secret applied by the Android signer, macOS
+#     ad-hoc signing) and the Linux Flatpak through a repository GPG key; without
+#     credentials they upload an explicitly `*-unsigned` fallback. None of that is
+#     public-CA trust and nothing is notarized. They never publish;
 #   * this workflow is the **single** writer: it downloads the platform
 #     artifacts from a named build run and attaches them to the tag's release.
 #     It never builds or signs anything, so a green run here is packaging/upload

@@ -10,7 +10,8 @@ assemble fonts plus the release documents, and stage a release tree whose
 ``PACKAGE.txt`` still carries the ``@@YACR_SIGNING_NOTE@@`` placeholder.
 
 The zip + sha256 are written by ``scripts/finalize-windows-release.sh``, which CI
-runs *after* SignPath has signed (or explicitly left unsigned) the staged
+runs *after* the repository self-signed PFX has signed (or explicitly left
+unsigned) the staged
 executables. Both scripts are pinned here so the local UNSIGNED path and the CI
 SIGNED path cannot drift apart.
 
@@ -66,7 +67,7 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
 )
 
 # The zip/checksum fragments moved into the finalize script; CI runs it after the
-# SignPath step so the archive it writes is the one that ships.
+# self-signed Authenticode step so the archive it writes is the one that ships.
 FINALIZE_REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("fail-closed shell options", "set -euo pipefail"),
     ("zip writing", "zipfile.ZipFile"),
@@ -75,6 +76,8 @@ FINALIZE_REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("signed mode", "--signed"),
     ("unsigned mode", "--unsigned"),
     ("package manifest", "PACKAGE.txt"),
+    ("self-signed disclosure", "SELF-SIGNED"),
+    ("shipped public certificate", "yacr-dev-codesign.cer"),
 )
 
 FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (

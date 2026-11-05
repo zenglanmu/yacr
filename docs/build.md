@@ -216,24 +216,24 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
 
 以下入口都面向**当前 React/Tauri 宿主**（不是 Slint），并由 `.github/workflows/build.yml` 的
 release job 在 `v*` tag / 手工 `workflow_dispatch` 时调用；产物只上传为 workflow artifact，
-**不发布、不公证、不接触商店凭据**。Windows/Android 在 SignPath 凭据存在时签名、Flatpak 在
-GPG 凭据存在时签 OSTree commit；凭据缺失时显式产出 `unsigned` artifact，绝不谎称已签名
-（运行手册见 `docs/code-signing.md`）：
+**不发布、不公证、不接触商店凭据**。Windows/Android 用仓库自持密钥自签名、macOS 做 ad-hoc
+`codesign`、Flatpak 在 GPG 凭据存在时签 OSTree commit；凭据缺失时显式产出 `unsigned`
+artifact，绝不谎称已签名（运行手册见 `docs/code-signing.md`）：
 
 | 入口 | 状态 |
 |---|---|
 | `scripts/package-linux-release.sh` | **可用（2026-10-17 重启）**——Flatpak bundle（`bin/yacr` + committed `fonts/`，运行时 `org.gnome.Platform//51`），产出 `target/release/dist/yacr-<version>-linux-<arch>.flatpak` + `.sha256`。CI `linux-release` 已重新启用（event-gated）；配置 `FLATPAK_GPG_*` 时对 OSTree commit 做 GPG 签名并附 `*.flatpak.gpg`，否则未签名。**未发布 Flathub** |
-| `scripts/package-windows-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 `cargo build -p app-windows --features tauri/custom-protocol`（MSVC 静态 CRT），产出 `target/x86_64-pc-windows-msvc/release/dist/*.zip` + `.sha256`；PE 机器类型/图标/非系统 DLL 检查失败即中止。CI `windows-release` 在 SignPath 凭据存在时对 `bin/yacr-windows.exe`、`bin/cad-cli-tools.exe` 做 Authenticode 签名（artifact `yacr-windows-release`），否则上传 `yacr-windows-release-unsigned`；**打包/签名 ≠ 运行/视觉验收** |
-| `scripts/package-macos-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 universal `cargo build -p app-macos --features tauri/custom-protocol` + `lipo`，产出 `Yacr.app` 的 `*.tar.gz` + `.sha256`；Mach-O 只允许系统库，`CFBundleIdentifier=io.github.zenglanmu.yacr`。**未签名/未公证** |
-| `scripts/build-android.sh` | **可用（2026-10-28 起；2026-11-01 起构建原生 `native-below` 载体）**——`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome）再 Gradle；**本地 release APK 默认未签名**。CI `android-apk`（debug）与 `android-release`（release；SignPath 凭据存在时签名 `zipalign` 后的 APK，否则 `android-release-unsigned`）已重新启用（event-gated） |
+| `scripts/package-windows-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 `cargo build -p app-windows --features tauri/custom-protocol`（MSVC 静态 CRT），产出 `target/x86_64-pc-windows-msvc/release/dist/*.zip` + `.sha256`；PE 机器类型/图标/非系统 DLL 检查失败即中止。CI `windows-release` 在自签 PFX 存在时用 `signtool` 对 `bin/yacr-windows.exe`、`bin/cad-cli-tools.exe` 做 Authenticode 签名并附 `bin/yacr-dev-codesign.cer`（artifact `yacr-windows-release`），否则上传 `yacr-windows-release-unsigned`；**打包/签名 ≠ 运行/视觉验收** |
+| `scripts/package-macos-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 universal `cargo build -p app-macos --features tauri/custom-protocol` + `lipo`，产出 `Yacr.app` 的 `*.tar.gz` + `.sha256`；Mach-O 只允许系统库，`CFBundleIdentifier=io.github.zenglanmu.yacr`。**ad-hoc 签名（`MACOS_SIGN_IDENTITY` 可覆盖）/未公证** |
+| `scripts/build-android.sh` | **可用（2026-10-28 起；2026-11-01 起构建原生 `native-below` 载体）**——`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome）再 Gradle；**本地 release APK 默认未签名**。CI `android-apk`（debug）与 `android-release`（release；自持 keystore 存在时签名 `zipalign` 后的 APK，否则 `android-release-unsigned`）已重新启用（event-gated） |
 
 平台包状态（源码级）：
 
 - **Windows**：`apps/app-windows`（`yacr-windows`）**已是真实 Tauri/WebView2/Win32 宿主**
   （DOM-on-top；WebView2 缺失 → 标记行 + exit 5）。CI `windows-check` 在 `windows-latest` 上做
   **原生 MSVC 编译门禁**（不运行 exe）；`windows-release` 已重新启用（event-gated），构建
-  MSVC release zip artifact：SignPath 凭据存在时对两个 `.exe` 做 Authenticode 签名
-  （`yacr-windows-release`），否则 `yacr-windows-release-unsigned`。**打包/签名 ≠ 运行/视觉验收**；
+  MSVC release zip artifact：自签 PFX 存在时对两个 `.exe` 做 Authenticode 签名并附
+  `bin/yacr-dev-codesign.cer`（`yacr-windows-release`），否则 `yacr-windows-release-unsigned`。**打包/签名 ≠ 运行/视觉验收**；
   视觉/运行时验收 = **PENDING user real-Windows spike**（判据见 `docs/windows-app.md`）；
   Wine 只做拒绝合同 smoke。见 `docs/windows-app.md`。
 - **macOS**：`apps/app-macos`（`yacr-macos`）是**真实 Tauri 2 宿主**（2026-10-31 起）——透明
@@ -241,7 +241,7 @@ GPG 凭据存在时签 OSTree commit；凭据缺失时显式产出 `unsigned` ar
   `NSOpenPanel`，配置在 `~/Library/Application Support/yacr`。CI `macos-check` 在
   `macos-latest` 上先构建前端再 `cargo check -p app-macos --all-targets --locked`（**只编译，不运行**）；
   窗口/Metal/层序/DPI/对话框/像素一律 **NOT VERIFIED**。`macos-release` 已重新启用（event-gated），
-  构建未签名/未公证的 universal `Yacr.app` tarball artifact；**打包 ≠ 可分发 GUI 验收**。
+  构建 ad-hoc 签名、未公证的 universal `Yacr.app` tarball artifact；**打包 ≠ 可分发 GUI 验收**。
   见 `docs/macos-app.md`。
 - **Android**：`apps/app-android` 是**真实 Tauri 2 宿主 + 原生 `native-below` CAD 载体**
   （2026-10-28 起是宿主，2026-11-01 起载体重写，ADR 0027）——共享 React chrome 跑在 WebView 里，
@@ -250,7 +250,7 @@ GPG 凭据存在时签 OSTree commit；凭据缺失时显式产出 `unsigned` ar
   `bash scripts/build-android.sh --release --target aarch64`（release 未签名）或 `--debug --target
   x86_64`；仓库 `fonts/` 作为 APK assets 打包。CI 的 `android-check` 仍是 capability-gated 的
   **aarch64 编译门禁**（不跑 Gradle、不建 APK、不跑设备）；`android-apk`（debug）与
-  `android-release`（release；SignPath 凭据存在时签名，否则 `android-release-unsigned`）已重新
+  `android-release`（release；自持 keystore 存在时签名，否则 `android-release-unsigned`）已重新
   启用（event-gated），只构建并上传 APK artifact，不发布。**签名 ≠ 设备/GPU/像素验收**，证据仍
   只有编译级 + 打包级（`cargo check`、clippy、开发机契约测试、Kotlin 编译、
   `javap` 核对 JNI 符号）；**没有设备/模拟器运行、没有 Vulkan adapter、没有像素、没有

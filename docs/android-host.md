@@ -217,8 +217,9 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 ```
 
 - **本地 release APK 默认未签名**（`app-universal-release-unsigned.apk`）；仓库不含签名密钥。本地安装可用
-  `--debug` 或自行 `apksigner sign`。CI `android-release` 在 SignPath 凭据存在时对 `zipalign` 后的
-  APK 签名并上传 `android-release`（APK + `.idsig` + `.sha256`），否则 `android-release-unsigned`；
+  `--debug` 或自行 `apksigner sign`。CI `android-release` 在 `ANDROID_KEYSTORE_BASE64` 存在时对
+  `zipalign` 后的 APK 签名并上传 `android-release`（APK + `SIGNING.txt` + `.sha256`），否则
+  `android-release-unsigned`；
   **签名 ≠ 设备/GPU/像素验收**，见 `docs/code-signing.md`。
 - `scripts/build-android.sh` 先跑 `build-android-ui.sh`，再 `tauri android build --apk`。
 
@@ -285,8 +286,8 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 - **多窗口/分屏/折叠屏/三键导航/侧边导航栏**：未验证。
 - **架构产物**：aarch64 release APK 已构建但**未安装运行**；armv7/i686/x86_64 未构建、未安装。
 - **性能**：同步导入（`importWorker = false`）在超大 DWG 上的渲染停顿未测量。
-- **release 签名/分发**：本地签名仅供验证；CI 在 SignPath 凭据存在时才签名，否则显式
-  `android-release-unsigned`；真实 SignPath 请求与设备安装/分发均 **NOT RUN**。签名不是设备/GPU/
+- **release 签名/分发**：本地签名仅供验证；CI 在自持 keystore 存在时才签名，否则显式
+  `android-release-unsigned`；真实签名请求与设备安装/分发均 **NOT RUN**。签名不是设备/GPU/
   像素验收，见 `docs/code-signing.md`。
 
 ## 9. 门禁
@@ -305,7 +306,7 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 - `bash scripts/build-android.sh`：真实 APK 构建，失败即非零。
 - CI：`android-check` 是 capability-gated（`vars.ANDROID_CI_ENABLED`）的 **aarch64 编译门禁**
   （不跑 Gradle、不建 APK、不跑设备）。`android-apk`（debug）与 `android-release`（release；
-  SignPath 凭据存在时签名，否则 `android-release-unsigned`）自 2026-11-01 起重新启用，但只在
+  自持 keystore 存在时签名，否则 `android-release-unsigned`）自 2026-11-01 起重新启用，但只在
   `v*` tag / 手工 dispatch 运行，且只构建并上传 APK artifact；发布 job 本身不发布，签名缺失时
   显式产出 unsigned；不安装运行。**签名 ≠ 设备/GPU/像素验收**，见 `docs/code-signing.md`。
   **CI 没有设备/模拟器 job。** 见 `docs/ci.md`。

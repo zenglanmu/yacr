@@ -1,12 +1,16 @@
 <!--
   SignPath artifact configuration for the Windows release stage.
 
-  The CI job uploads the staged Windows release tree as a GitHub Actions
-  artifact (`actions/upload-artifact` always wraps it in a ZIP), so the root
-  element is `<zip-file>` and paths are relative to that ZIP.
+  NOT WIRED INTO CI since the repository switched to SELF-SIGNED release
+  signing (2026-11-05, see .github/workflows/build.yml windows-release). CI now
+  imports a repository PFX secret and signs bin/*.exe with signtool; nothing
+  uploads a stage for signing. This file is kept only as a template for a future
+  SignPath Foundation application -- it is not consumed by any workflow.
 
-  This file is a reviewable copy. The authoritative configuration lives in the
-  SignPath project; the workflow references it by the slug stored in the
+  If it is ever re-enabled, note that `actions/upload-artifact` wraps the tree in
+  a ZIP, so the root element is `<zip-file>` and paths are relative to that ZIP.
+  The authoritative configuration lives in the SignPath project; the workflow
+  used to reference it by the slug stored in the
   `SIGNPATH_WINDOWS_ARTIFACT_CONFIGURATION_SLUG` repository variable.
 
   SignPath Foundation may additionally require PE metadata restrictions

@@ -6,8 +6,8 @@
 > **验收上限 = 编译**：`macos-check` 在 GitHub `macos-latest` 上做 `cargo check`（不运行）；
 > 窗口、Metal、透明合成、层序、DPI、原生对话框、配置写入与像素/视觉**全部 NOT VERIFIED**。
 > 打包入口自 2026-11-01 起为真实流水线（`scripts/package-macos-release.sh`，event-gated
-> `macos-release` job）；产物是**未签名/未公证**的 universal `Yacr.app` tarball artifact，
-> 不代表可分发产品或运行验收。
+> `macos-release` job）；产物是 **ad-hoc 签名、未公证**的 universal `Yacr.app` tarball artifact
+> （Gatekeeper 仍会拦），不代表可分发产品或运行验收。
 
 ## 组成
 
@@ -97,7 +97,8 @@ NSWindow (Tauri, transparent)
   `check-workflows.py`、`check-i18n.py`。
 - **打包已重新启用（仅 artifact）**：`scripts/package-macos-release.sh` 在 macOS runner 上构建
   universal `Yacr.app` 并校验 Mach-O 只依赖系统库；`macos-release` job 仅在 `v*` tag / 手工
-  dispatch 运行并上传 tarball。**未签名、未公证、未分发**，不证明窗口/Metal/DPI/对话框可用。
+  dispatch 运行并上传 tarball。**ad-hoc 签名（`MACOS_SIGN_IDENTITY` 可覆盖）、未公证、未分发**，
+  不证明窗口/Metal/DPI/对话框可用；Gatekeeper 仍会拒绝。
 
 ## 证据与限制
 
@@ -136,7 +137,7 @@ NSWindow (Tauri, transparent)
 - 渲染器 crash 触发 ④（显式未实现）；原生菜单/快捷键、辅助功能、App Store 私有 API
   （wry 的 `drawsBackground`）合规性。
 - 性能、功耗（透明窗口在 macOS 上有已知合成开销）、跨 macOS 版本 / Intel Mac 行为。
-- 打包、签名、notarization、Gatekeeper。
+- notarization、Developer ID、Gatekeeper 放行（ad-hoc 签名已接线但未验证）。
 - 本机 macOS 交叉检查的**真实 C 编译/链接**（ObjC helper 用假 `cc` 跳过，见上）。
 
 以上均不得推广为 macOS 兼容性、视觉正确性或性能结论。历史 Slint 时期（`app-linux` 共享入口、

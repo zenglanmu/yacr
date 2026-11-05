@@ -26,6 +26,12 @@
 #   WITH_FONTS     1 (default) assembles the full CAD font catalogue with
 #                  `scripts/fetch-fonts.sh` (network); 0 stages only the
 #                  committed `fonts/` package (offline).
+#   MACOS_SIGN_IDENTITY
+#                  code-signing identity passed to `codesign --sign`. Default `-`
+#                  (AD-HOC signing: not a Developer ID, not notarized). Unset or
+#                  empty (an unset GitHub `vars.MACOS_SIGN_IDENTITY` arrives as
+#                  empty) selects the ad-hoc default; a whitespace-only value is
+#                  refused. `codesign` must exist, which is always true on macOS.
 #   FONT_BASE_URL / FONT_FALLBACK_BASE_URL / FONT_RETRIES  passed to fetch-fonts.sh.
 #
 # Artifacts (under target/, which is gitignored):
@@ -48,9 +54,28 @@ if [ "$(uname -s)" != "Darwin" ]; then
   exit 1
 fi
 
-for tool in cargo rustc rustup lipo otool file tar; do
+for tool in cargo rustc rustup lipo otool file tar codesign; do
   command -v "$tool" >/dev/null 2>&1 || die "required tool '$tool' is not on PATH"
 done
+
+# Ad-hoc signing (`-`) is the default: it is NOT a Developer ID signature and the
+# package is NOT notarized. An explicitly empty value is indistinguishable from
+# an unset one in the environment (CI passes an unset `vars.*` as empty), so
+# empty means the ad-hoc default; a whitespace-only identity is refused because
+# `codesign --sign ' '` would produce a confusing Apple error instead.
+case "${MACOS_SIGN_IDENTITY:-}" in
+  '') MACOS_SIGN_IDENTITY='-' ;;
+  *[![:space:]]*) ;;
+  *) die "MACOS_SIGN_IDENTITY is blank; omit it for ad-hoc signing ('-') or name a real identity" ;;
+esac
+
+if [ "$MACOS_SIGN_IDENTITY" = "-" ]; then
+  SIGNING_NOTE='The executables and Yacr.app are AD-HOC signed (codesign --sign -). This is NOT a Developer ID signature and the package is NOT notarized. Gatekeeper therefore blocks a quarantined copy and treats it as effectively unsigned. First launch on another Mac: right-click Yacr.app and choose Open, or run `xattr -dr com.apple.quarantine Yacr.app` before launching. Verify locally with `codesign --verify --strict --verbose=2 Yacr.app`. Ad-hoc signing is local integrity only -- it is not public trust.'
+  SIGNING_SHORT="ad-hoc (codesign --sign -; not a Developer ID, not notarized)"
+else
+  SIGNING_NOTE="The executables and Yacr.app are signed with the identity '${MACOS_SIGN_IDENTITY}' (codesign --force --sign). This script does NOT notarize or staple the package, so Gatekeeper assessment on other Macs is not guaranteed; notarization and distribution are the deployer's job. Verify locally with \`codesign --verify --strict --verbose=2 Yacr.app\`. Signing is not a compatibility or performance claim."
+  SIGNING_SHORT="identity '${MACOS_SIGN_IDENTITY}' (not notarized by this script)"
+fi
 
 case "${MACOS_ARCH:-universal}" in
   universal) TARGETS=(aarch64-apple-darwin x86_64-apple-darwin); ARCH_LABEL="universal" ;;
@@ -317,15 +342,14 @@ Quick start
 Runtime notes (not a compatibility claim)
 -----------------------------------------
   * The GUI needs a Mac with a Metal-capable GPU (wgpu's Metal backend).
-  * macOS may warn on first launch while the bundle is unsigned (below).
+  * macOS may warn on first launch: the bundle is code-signed but never
+    notarized. See "Signature status" below for the exact signing state.
   * The shared React bundle is embedded in the executable at build time; the
     .app does not load a frontend from disk.
 
 Signature status
 ----------------
-This package is unsigned and not notarized. Gatekeeper may warn until the
-deployer signs and notarizes it; producing a signed distribution is the
-deployer's job.
+${SIGNING_NOTE}
 
 No unlicensed user DWG samples or golden images are bundled. The mlightcad/cad-data
 fonts are third-party and vendored at packaging time (scripts/fetch-fonts.sh); only
@@ -336,6 +360,22 @@ EOF
 
 TARBALL="${DIST}/${NAME}.tar.gz"
 SHA256="${TARBALL}.sha256"
+
+# Sign only after the bundle is fully staged (fonts, icon, Info.plist, symlinks
+# and PACKAGE.txt are all in place) and before the tarball is created, so the
+# signature seals the final tree. No `--deep` (nothing nested needs it) and no
+# hardened-runtime/entitlements: notarization is explicitly not attempted here.
+echo "==> code-signing (identity: ${MACOS_SIGN_IDENTITY}; ${SIGNING_SHORT})"
+codesign --force --sign "$MACOS_SIGN_IDENTITY" "$CLI_BUILT"
+codesign --force --sign "$MACOS_SIGN_IDENTITY" "${STAGE}/Yacr.app"
+echo "==> verifying the code signatures"
+codesign --verify --strict --verbose=2 "$CLI_BUILT"
+codesign --verify --strict --verbose=2 "${STAGE}/Yacr.app"
+[ -L "${STAGE}/bin/yacr-macos" ] || die "bin/yacr-macos symlink disappeared before signing verification"
+[ -x "${STAGE}/bin/yacr-macos" ] || die "bin/yacr-macos does not resolve after signing"
+# The symlink target is the bundle executable, so this also re-checks the seal.
+codesign --verify --strict --verbose=2 "${STAGE}/bin/yacr-macos"
+
 echo "==> creating ${TARBALL}"
 rm -f "$TARBALL" "$SHA256"
 # COPYFILE_DISABLE stops bsdtar from adding AppleDouble `._*` resource-fork

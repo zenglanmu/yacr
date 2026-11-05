@@ -1,3 +1,18 @@
+## 2026-11-05 签名策略切换为仓库自签名（Windows / Android / macOS / Flatpak）
+
+- **Windows**：移除 SignPath 分支；`WINDOWS_SELF_SIGNED_PFX_BASE64` +
+  `WINDOWS_SELF_SIGNED_PFX_PASSWORD` 存在时用 `signtool` 签两个 `.exe`，并把公开证书导出到
+  `bin/yacr-dev-codesign.cer`；缺失时仍上传 `yacr-windows-release-unsigned`。
+- **Android**：移除 SignPath 分支；`ANDROID_KEYSTORE_BASE64` / `ANDROID_KEYSTORE_PASSWORD` /
+  `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD` 存在时在 `zipalign` 后用 `apksigner` 签名并发布
+  `SIGNING.txt` 证书指纹；不再产生 `.idsig`。
+- **macOS**：`package-macos-release.sh` 在 staging 后、打包前 `codesign`（默认 ad-hoc，可由
+  `MACOS_SIGN_IDENTITY` 覆盖），修掉 `lipo` 后签名失效的问题；workflow 解 tar 后再次
+  `codesign --verify --strict`。
+- **Flatpak**：GPG OSTree 签名不变。
+- 自签名**没有公共信任**：SmartScreen/Gatekeeper 仍会拦；真实签名本轮 **NOT RUN**，见
+  `docs/code-signing.md`。
+
 ## 2026-11-05 包名统一 + SignPath/GPG 签名接线
 
 - **包标识统一为 `io.github.zenglanmu.yacr`**：Tauri `identifier`（Linux/Windows/macOS/Android）、

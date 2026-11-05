@@ -7,9 +7,10 @@ during the Slint removal. They are re-enabled (2026-11-01) for the current
 React/Tauri hosts as **event-gated artifact builders**: a ``v*`` tag or a manual
 ``workflow_dispatch`` may run them; a routine push/PR may not. They upload
 workflow artifacts and never publish, notarize or touch a store. With
-credentials they may **sign** what they build (SignPath for the Windows
-executables and the Android release APK, a repository GPG key for the Flatpak
-OSTree commit); without them they upload an explicit ``*-unsigned`` fallback.
+credentials they may **sign** what they build with repository-held
+**self-signed** material (a Windows PFX, an Android keystore, ad-hoc macOS
+``codesign``, a repository GPG key for the Flatpak OSTree commit); without them
+they upload an explicit ``*-unsigned`` fallback.
 
 Publication is a **separate, manual** step: `publish-release.yml` (the only
 write-scoped workflow) downloads those artifacts from a named build run and
@@ -47,11 +48,17 @@ PUBLISH_ARTIFACTS = (
     "android-release-unsigned",
 )
 
-# The only repository secrets a release job may read: the SignPath API token and
-# the Flatpak signing key material. Everything else belongs to another workflow.
+# The only repository secrets a release job may read: the self-signed Windows
+# PFX, the Android release keystore material and the Flatpak signing key.
+# Everything else belongs to another workflow. `ANDROID_KEY_ALIAS` is a
+# repository *variable*, not a secret.
 ALLOWED_RELEASE_SECRETS = frozenset(
     {
-        "SIGNPATH_API_TOKEN",
+        "WINDOWS_SELF_SIGNED_PFX_BASE64",
+        "WINDOWS_SELF_SIGNED_PFX_PASSWORD",
+        "ANDROID_KEYSTORE_BASE64",
+        "ANDROID_KEYSTORE_PASSWORD",
+        "ANDROID_KEY_PASSWORD",
         "FLATPAK_GPG_PRIVATE_KEY",
         "FLATPAK_GPG_PASSPHRASE",
     }
@@ -117,38 +124,51 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                         f"release job '{job}' reads an unexpected secret: {secret}",
                     )
 
-    def test_windows_release_signs_with_signpath_and_verifies_locally(self):
+    def test_windows_release_signs_with_the_repository_pfx(self):
         block = self.block("windows-release")
-        self.assertIn("signpath/github-action-submit-signing-request@v3", block)
-        self.assertIn(
-            "github-artifact-id: ${{ steps.upload-windows-stage.outputs.artifact-id }}",
-            block,
-        )
-        self.assertIn("output-artifact-directory: target/windows-signed", block)
+        self.assertNotIn("signpath/", block)
+        self.assertIn("WINDOWS_SELF_SIGNED_PFX_BASE64", block)
+        self.assertIn("Import-PfxCertificate", block)
+        self.assertIn("Export-Certificate", block)
+        self.assertIn("bin/yacr-dev-codesign.cer", block)
+        self.assertIn("signtool sign", block)
         self.assertIn("Get-AuthenticodeSignature", block)
-        self.assertIn("wait-for-completion-timeout-in-seconds: 3600", block)
+        self.assertIn("Cert:\\CurrentUser\\Root", block)
         self.assertIn("finalize-windows-release.sh --signed", block)
         self.assertIn("finalize-windows-release.sh --unsigned", block)
+        # Never present the runner-local chain trust as public trust.
+        self.assertIn("SELF-SIGNED", block)
 
-    def test_android_release_signs_with_signpath_and_verifies_locally(self):
+    def test_android_release_signs_with_the_repository_keystore(self):
         block = self.block("android-release")
-        self.assertIn("signpath/github-action-submit-signing-request@v3", block)
-        self.assertIn(
-            "github-artifact-id: ${{ steps.upload-android-unsigned.outputs.artifact-id }}",
-            block,
-        )
-        self.assertIn("output-artifact-directory: target/android-signed", block)
-        self.assertIn("apksigner", block)
+        self.assertNotIn("signpath/", block)
+        self.assertIn("ANDROID_KEYSTORE_BASE64", block)
+        self.assertIn('"$APKSIGNER" sign', block)
+        self.assertIn("--ks-pass env:ANDROID_KEYSTORE_PASSWORD", block)
+        self.assertIn("--key-pass env:ANDROID_KEY_PASSWORD", block)
+        self.assertIn("target/android-signed", block)
+        self.assertIn("SIGNING.txt", block)
         self.assertIn("app-universal-release.apk", block)
-        self.assertIn("wait-for-completion-timeout-in-seconds: 3600", block)
         self.assertIn("zipalign", block)
+        self.assertNotIn(".idsig", block)
+
+    def test_macos_release_signs_ad_hoc_and_verifies_the_tarball(self):
+        block = self.block("macos-release")
+        self.assertIn("MACOS_SIGN_IDENTITY", block)
+        self.assertIn("codesign --verify --strict", block)
+        self.assertIn("Signature=adhoc", block)
+        self.assertIn("not notarized", block.lower())
 
     def test_signing_steps_gate_on_env_not_on_secrets(self):
-        for job in ("windows-release", "android-release"):
+        gates = {
+            "windows-release": "WINDOWS_SELF_SIGNED_PFX_BASE64",
+            "android-release": "ANDROID_KEYSTORE_BASE64",
+        }
+        for job, variable in gates.items():
             with self.subTest(job=job):
                 block = self.block(job)
-                self.assertIn("if: env.SIGNPATH_API_TOKEN != ''", block)
-                self.assertIn("if: env.SIGNPATH_API_TOKEN == ''", block)
+                self.assertIn(f"if: env.{variable} != ''", block)
+                self.assertIn(f"if: env.{variable} == ''", block)
                 # Job-level `if:` cannot read secrets and neither should any step
                 # condition: expose the secret in `env:` and compare that.
                 for line in block.splitlines():

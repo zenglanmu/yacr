@@ -16,9 +16,10 @@ checks:
     ``macos-release``, ``android-apk``, ``android-release``) are declared,
     call their real entry point, and keep the ``v*`` tag / manual-dispatch event
     gate so a routine push can never build a release artifact. When credentials
-    exist they may **sign** the artifact they build (SignPath for the Windows
-    executables and the Android release APK, a repository GPG key for the Flatpak
-    OSTree commit); they still never publish. The retirement machinery remains
+    exist they may **sign** the artifact they build with repository-held
+    **self-signed** material (a Windows PFX, an Android keystore, ad-hoc macOS
+    ``codesign``, a repository GPG key for the Flatpak OSTree commit); they still
+    never publish. The retirement machinery remains
     for future use, but no job is retired today;
   * every **retired** job (none today) is still declared, hard-disabled with an
     unconditional ``if: false`` and a ``RETIRED`` marker, and its only step
@@ -137,7 +138,9 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     # Release packaging jobs (re-enabled 2026-11-01): event-gated artifact
     # builders for the current React/Tauri hosts. They never run on a routine
     # push/PR and never publish; when credentials exist they sign the artifact
-    # they build (SignPath / Flatpak GPG), otherwise they upload `*-unsigned`.
+    # they build with repository self-signed material (Windows PFX / Android
+    # keystore / macOS ad-hoc codesign / Flatpak GPG), otherwise they upload
+    # `*-unsigned`.
     "linux-release": (
         "refs/tags/v",
         "workflow_dispatch",
@@ -157,10 +160,12 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "actions/setup-node@v4",
         "actions/upload-artifact",
         "*.zip",
-        # SignPath signing of the staged executables, then local verification and
-        # the shared zip/checksum finalizer.
-        "signpath/github-action-submit-signing-request@v3",
-        "github-artifact-id",
+        # Repository-PFX Authenticode signing of the staged executables, then
+        # local verification and the shared zip/checksum finalizer.
+        "WINDOWS_SELF_SIGNED_PFX_BASE64",
+        "Import-PfxCertificate",
+        "signtool",
+        "yacr-dev-codesign.cer",
         "finalize-windows-release.sh",
         "Get-AuthenticodeSignature",
     ),
@@ -172,6 +177,9 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "aarch64-apple-darwin",
         "actions/upload-artifact",
         "*.tar.gz",
+        # Ad-hoc codesign (or an explicit identity), verified after packaging.
+        "MACOS_SIGN_IDENTITY",
+        "codesign --verify --strict",
     ),
     "android-apk": (
         "refs/tags/v",
@@ -190,10 +198,10 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "ndk;29.0.13846066",
         "actions/upload-artifact",
         "*.apk",
-        # Aligned APK submitted to SignPath, then verified locally.
-        "signpath/github-action-submit-signing-request@v3",
-        "github-artifact-id",
+        # Aligned APK signed with the repository keystore, then verified locally.
+        "ANDROID_KEYSTORE_BASE64",
         "apksigner",
+        "SIGNING.txt",
         "app-universal-release.apk",
     ),
     "web-build": (

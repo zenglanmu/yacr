@@ -41,8 +41,8 @@
 #                 required in both modes.
 #   SKIP_UI_BUILD 1 to reuse an existing apps/desktop-ui/dist (only accepted
 #                 when dist/index.html exists and is non-empty).
-#   SKIP_ZIP      1 to build and stage only, without zipping (CI signs the staged
-#                 executables first and then runs
+#   SKIP_ZIP      1 to build and stage only, without zipping (CI then signs the
+#                 staged executables with the repository SELF-SIGNED PFX and runs
 #                 scripts/finalize-windows-release.sh --signed). The default 0
 #                 finalizes the stage as UNSIGNED via the same script.
 #   CARGO_XWIN    1 to build an MSVC target on Linux through `cargo xwin`.
@@ -371,12 +371,13 @@ fi
 # --- zip + checksum ---------------------------------------------------------
 # The zip (and its .sha256) is produced by scripts/finalize-windows-release.sh so
 # the local and CI paths share one implementation. CI builds with SKIP_ZIP=1,
-# signs the staged exes, and finalizes them as signed; this script finalizes as
-# UNSIGNED because nothing here has a signature.
+# signs the staged exes with a repository SELF-SIGNED PFX (no SignPath, no public
+# CA), and finalizes them as signed; this script finalizes as UNSIGNED because
+# nothing here has a signature.
 if [ "${SKIP_ZIP:-0}" = "1" ]; then
   echo
   echo "stage    : ${STAGE}"
-  echo "note     : SKIP_ZIP=1 -- CI signs bin/*.exe before zipping;"
+  echo "note     : SKIP_ZIP=1 -- CI signs bin/*.exe with the self-signed PFX before zipping;"
   echo "           run scripts/finalize-windows-release.sh --signed|--unsigned to package."
   exit 0
 fi

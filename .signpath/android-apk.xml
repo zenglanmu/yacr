@@ -1,16 +1,17 @@
 <!--
   SignPath artifact configuration for the Android release APK.
 
-  The CI job aligns the unsigned release APK with `zipalign`, uploads it as a
-  GitHub Actions artifact (`actions/upload-artifact` wraps it in a ZIP), and
-  submits that artifact. `<apk-file>` must be nested in `<zip-file>` because
-  the v4 signature is emitted as a sibling `<apk>.idsig` file.
+  NOT WIRED INTO CI since the repository switched to SELF-SIGNED release
+  signing (2026-11-05, see .github/workflows/build.yml android-release). CI now
+  decodes a repository keystore secret and signs the zipaligned APK with
+  `apksigner`; nothing uploads an APK for signing and no `.idsig` is produced.
+  This file is kept only as a template for a future SignPath Foundation
+  application -- it is not consumed by any workflow.
 
-  This file is a reviewable copy. The authoritative configuration lives in the
-  SignPath project; the workflow references it by the slug stored in the
-  `SIGNPATH_ANDROID_ARTIFACT_CONFIGURATION_SLUG` repository variable.
-
-  Keep the APK and its `.idsig` together; do not rename the APK after signing.
+  If it is ever re-enabled: `actions/upload-artifact` wraps the APK in a ZIP, and
+  `<apk-file>` must be nested in `<zip-file>` because a v4 signature is emitted
+  as a sibling `<apk>.idsig` file. Keep the APK and its `.idsig` together; do
+  not rename the APK after signing.
 -->
 <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
   <zip-file>
