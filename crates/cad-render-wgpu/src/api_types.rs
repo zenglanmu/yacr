@@ -363,20 +363,26 @@ pub struct FrameStats {
     pub gpu_time: gpu_time::GpuTimeState,
     /// Draw submissions this frame, derived from the plan's batch/run accounting
     /// (non-converted opaque batches + coalesced instanced runs + coalesced
-    /// merged-mesh runs + transparent batches + drawn images) rather than by
-    /// intercepting every `draw`/`draw_indexed` call. It is a batch-collapse
-    /// metric: a converted batch is represented by the coalesced runs it joins,
-    /// and each run contributes one entry however many member batches it covers.
+    /// merged-mesh runs + transparent batches + drawn images + the renderer-owned
+    /// transient cursor draw) rather than by intercepting every
+    /// `draw`/`draw_indexed` call. It is a batch-collapse metric: a converted
+    /// batch is represented by the coalesced runs it joins, and each run
+    /// contributes one entry however many member batches it covers.
     pub draw_calls: u64,
+    /// Renderer-owned transient cursor draws this frame (`0` or `1`; see ADR
+    /// 0028). It is **only** folded into [`FrameStats::draw_calls`]: it is not a
+    /// committed scene batch, so it is excluded from the opaque/legacy/instanced/
+    /// mesh/transparent/image counters and from `vertices`/`triangles`.
+    pub transient_draws: u64,
     /// Opaque batches drawn as a legacy per-batch draw this frame, i.e.
     /// `opaque_batches - converted_batches`. This is the `legacy_opaque` term of
     /// [`FrameStats::draw_calls`]: every other term of that sum is an explicit
     /// field (`arc_draws`, `instanced_draws`, `mesh_draws`) or `transparent`.
     /// The identity
     /// `legacy_opaque_draws + arc_draws + instanced_draws + mesh_draws +
-    /// transparent_batches + image_batches == draw_calls` holds by construction
-    /// (see `renderer_impl.rs`, the `draw_calls` expression). Diagnostics only;
-    /// no behaviour depends on it.
+    /// transparent_batches + image_batches + transient_draws == draw_calls` holds
+    /// by construction (see `renderer_impl.rs`, the `draw_calls` expression).
+    /// Diagnostics only; no behaviour depends on it.
     pub legacy_opaque_draws: u64,
     /// Number of `Queue::write_buffer` calls issued for this frame's uniforms.
     ///

@@ -90,6 +90,10 @@ impl Renderer {
             masks: Vec::new(),
             mask_skips: Vec::new(),
             image_textures: HashMap::new(),
+            cursor_transient: None,
+            cursor_transient_buffer: None,
+            cursor_transient_dirty: false,
+            cursor_transient_packed: Vec::new(),
             uniforms: UniformArena::new(&wgpu::Limits::default()),
             frame_slots: Vec::new(),
             image_slots: Vec::new(),
@@ -624,6 +628,11 @@ impl Renderer {
         self.instance_streams.clear();
         self.arc_streams.clear();
         self.mesh_chunks.clear();
+        // The transient cursor is CPU-owned input, not scene state: keep it across
+        // the device generation change and only drop/recreate its GPU buffer on the
+        // next render (dirty forces the re-upload of the retained packed bytes).
+        self.cursor_transient_buffer = None;
+        self.cursor_transient_dirty = self.cursor_transient.is_some();
         self.pulled_lines = None;
         self.pulled_mesh = None;
         self.invalidate_pulled_prefix();

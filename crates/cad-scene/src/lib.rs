@@ -25,10 +25,12 @@ pub use highlight::{
 mod batch;
 mod budget;
 mod cache;
+mod transient;
 
 pub use batch::*;
 pub use budget::*;
 pub use cache::*;
+pub use transient::*;
 
 #[cfg(test)]
 mod tests;

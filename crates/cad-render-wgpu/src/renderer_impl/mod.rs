@@ -34,6 +34,8 @@ mod upload;
 mod upload_prepare;
 
 #[cfg(test)]
+mod cursor_transient_tests;
+#[cfg(test)]
 mod pick_table_incremental_tests;
 #[cfg(test)]
 mod pulled_budget_tests;

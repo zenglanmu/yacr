@@ -2,6 +2,14 @@
 
 use super::*;
 
+/// Sentinel overlay index for the renderer-owned transient cursor (ADR 0028).
+///
+/// It is appended to the overlay draw-order list (never to `batches`), so the
+/// sort can place it exactly at its `draw_order` (between preview and snap
+/// hints). Every consumer that walks an overlay list must recognise it before
+/// indexing the resident batch array.
+pub(crate) const TRANSIENT_CURSOR: usize = usize::MAX;
+
 mod frame_plan;
 mod images;
 mod pack_arc;

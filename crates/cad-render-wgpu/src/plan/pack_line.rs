@@ -79,6 +79,49 @@ pub(crate) fn line_instance_bytes(instances: &[LineInstance]) -> Vec<u8> {
     bytemuck::cast_slice(instances).to_vec()
 }
 
+/// Pack one transient cursor into line instances (ADR 0028 D3).
+///
+/// The reference origin is the first segment's start (`segments[0][0]`): every
+/// stored coordinate is the world position reduced against it in `f64` and then
+/// narrowed to `f32`, exactly like a scene batch's `local_origin` vertices. Each
+/// segment is one instance; the set is truncated to
+/// [`cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS`] (a caller that violates the
+/// bounded-geometry contract can never overrun the fixed GPU buffer).
+///
+/// The instance carries **pick key `0`** (a transient is never resolvable), the
+/// opaque instance flag, no lineweight, and the sanitised cursor colour/alpha.
+pub(crate) fn pack_transient_cursor(cursor: &cad_scene::TransientCursor) -> Vec<LineInstance> {
+    let Some(first) = cursor.segments.first() else {
+        return Vec::new();
+    };
+    let origin = first[0];
+    let [r, g, b] = renderer_color([cursor.color[0], cursor.color[1], cursor.color[2]]);
+    let rgba = [r, g, b, clamp_alpha(cursor.color[3])];
+    let local = |point: &cad_domain::Point3| -> [f32; 3] {
+        [
+            (point.x - origin.x) as f32,
+            (point.y - origin.y) as f32,
+            (point.z - origin.z) as f32,
+        ]
+    };
+    cursor
+        .segments
+        .iter()
+        .take(cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS)
+        .map(|[start, end]| {
+            let p0 = local(start);
+            let p1 = local(end);
+            LineInstance {
+                // No lineweight: the transient uses the configured AA ramp width.
+                p0_width: [p0[0], p0[1], p0[2], 0.0],
+                p1_pad: [p1[0], p1[1], p1[2], 0.0],
+                rgba,
+                id_flags: [0, INSTANCE_FLAG_OPAQUE],
+            }
+        })
+        .collect()
+}
+
 /// Per-instance vertex-buffer layout (slot 1 of the instanced line pipeline).
 ///
 /// `shader_location` 1..=4 so the shared unit segment keeps `@location(0)`.

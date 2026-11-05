@@ -694,6 +694,22 @@ pub struct Renderer {
     /// image quad that references it. Bounded to the keys of the current image
     /// set (unreferenced entries are pruned on upload).
     image_textures: HashMap<ResourceKey, GpuTexture>,
+    /// Renderer-owned transient cursor (ADR 0028): a per-frame crosshair/pickbox
+    /// that is **not** scene content. Never in `batches`/`draw_plan`/`BatchFacts`,
+    /// never pick-keyed, never drawn by the id/pick pass. Kept across device loss
+    /// (CPU input survives; only the GPU buffer is recreated).
+    cursor_transient: Option<cad_scene::TransientCursor>,
+    /// Fixed-size `VERTEX | COPY_DST` instance buffer for the transient cursor
+    /// (`MAX_TRANSIENT_CURSOR_SEGMENTS` × `LINE_INSTANCE_STRIDE` bytes). Created
+    /// lazily, reused across moves (stable handle), dropped on device
+    /// loss/rebuild/init.
+    cursor_transient_buffer: Option<wgpu::Buffer>,
+    /// Set by [`Renderer::set_cursor_transient`] or a buffer reset; the buffer is
+    /// (re)written only while this is set.
+    cursor_transient_dirty: bool,
+    /// Packed [`LineInstance`] bytes of the current transient cursor (≤ 336 B),
+    /// retained so a recreated buffer can be re-uploaded without new CPU input.
+    cursor_transient_packed: Vec<u8>,
     /// Shared per-frame uniform arena (one slot per accepted batch/image).
     uniforms: UniformArena,
     /// Per-batch uniform slot assigned this frame, in accepted order.
@@ -931,6 +947,8 @@ pub(crate) use plan::*;
 // Private accelerated-tier GPU contracts for the pulled-prefix fast path. Test
 // only (it reads private renderer state and needs a real device); native only,
 // like `headless`.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod cursor_transient_gpu_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod pulled_budget_gpu_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]

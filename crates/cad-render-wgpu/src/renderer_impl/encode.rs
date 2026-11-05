@@ -13,6 +13,8 @@ pub(crate) struct EncodeOutcome {
     pub(crate) arc_draws: u64,
     pub(crate) arc_batches: usize,
     pub(crate) converted_batches: usize,
+    /// Renderer-owned transient cursor draws issued by this encode (0 or 1).
+    pub(crate) transient_draws: u64,
     pub(crate) encode_ms: f64,
 }
 
@@ -35,6 +37,7 @@ impl Renderer {
         chunk_slots: &[u32],
         arc_slots: &[u32],
         mask_slots: &[u32],
+        transient: Option<(&wgpu::Buffer, u32, u32)>,
         line_pipeline: &wgpu::RenderPipeline,
         line_instanced_pipeline: &wgpu::RenderPipeline,
         arc_pipeline: &wgpu::RenderPipeline,
@@ -69,6 +72,8 @@ impl Renderer {
         // converted to the line path and/or the merged mesh path. A mesh batch
         // with an instanced overlay counts once here.
         let mut converted_batches = 0usize;
+        // Renderer-owned transient cursor draws (0 or 1; overlay pass only).
+        let mut transient_draws = 0u64;
         let encode_started = Instant::now();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("cad-encoder"),
@@ -168,6 +173,16 @@ impl Renderer {
                 // counters remain, and they read the cache-resident class byte
                 // instead of the ~200-byte `GpuBatch`.
                 for &i in opaque {
+                    if i == plan::TRANSIENT_CURSOR {
+                        // The transient cursor is only planned for the overlay pass,
+                        // which always passes `use_pulled == false`; the sentinel is
+                        // not a resident batch and the pulled path cannot draw it.
+                        debug_assert!(
+                            transient.is_none(),
+                            "the pulled path must never carry the transient sentinel"
+                        );
+                        continue;
+                    }
                     // `batch_facts` is base-only, but `encode_frame` is also the
                     // overlay pass's encoder and its `opaque` holds absolute
                     // overlay indices. Overlay batches are run-free (enforced at
@@ -324,6 +339,69 @@ impl Renderer {
                 let mut pending_mesh: Option<(usize, u32, u32)> = None;
                 let mut pending_arc: Option<(usize, u32, u32)> = None;
                 for &i in opaque {
+                    if i == plan::TRANSIENT_CURSOR {
+                        // Renderer-owned transient cursor (ADR 0028): not a resident
+                        // batch, so flush every pending coalesced run first (its
+                        // sorted position is between those batches), then draw its
+                        // own instanced run. It is opaque-only and carries pick key
+                        // 0, so the id/pick pass (which never sees this list) can
+                        // never resolve it.
+                        let Some((buffer, count, slot)) =
+                            transient.filter(|(_, count, _)| *count > 0)
+                        else {
+                            continue;
+                        };
+                        if flush_pending_mesh(
+                            &mut pass,
+                            &mut encode_state,
+                            &mut pending_mesh,
+                            &self.uniforms,
+                            chunk_slots,
+                            &self.mesh_chunks,
+                            mesh_pipeline_merged,
+                            mesh_pipeline_merged_mirrored,
+                        ) {
+                            mesh_draws += 1;
+                        }
+                        if flush_pending_arc(
+                            &mut pass,
+                            &mut encode_state,
+                            &mut pending_arc,
+                            &self.uniforms,
+                            arc_slots,
+                            &self.arc_streams,
+                            unit_quad_buffer,
+                            arc_pipeline,
+                        ) {
+                            arc_draws += 1;
+                        }
+                        if flush_pending_run(
+                            &mut pass,
+                            &mut encode_state,
+                            &mut pending,
+                            &self.uniforms,
+                            stream_slots,
+                            &self.instance_streams,
+                            unit_quad_buffer,
+                            line_instanced_pipeline,
+                        ) {
+                            instanced_draws += 1;
+                        }
+                        let (bind_group, offset) = self.uniforms.binding(slot as usize);
+                        draw_instance_run(
+                            &mut pass,
+                            &mut encode_state,
+                            unit_quad_buffer,
+                            buffer,
+                            bind_group,
+                            offset,
+                            0,
+                            count,
+                            line_instanced_pipeline,
+                        );
+                        transient_draws += 1;
+                        continue;
+                    }
                     // Skip a batch that provably emits nothing this frame: it owns
                     // runs, none of which survives the cull, so its per-class branch
                     // below is a pure no-op (no draw, no pending-run flush). The
@@ -723,6 +801,7 @@ impl Renderer {
             arc_draws,
             arc_batches,
             converted_batches,
+            transient_draws,
             encode_ms,
         }
     }

@@ -65,6 +65,10 @@ pub const DEFAULT_CROSSHAIR_PERCENT: u32 = 100;
 /// `crosshair_percent` sizes the crosshair (see [`crosshair_arms`]);
 /// `pickbox_logical_pixels` sizes the pickbox (the configured `PICKBOX`, see
 /// [`pickbox_half_side`]) and is deliberately independent of the crosshair.
+///
+/// This is the legacy committed-overlay shape: Phase 2a keeps it live while the
+/// renderer-owned transient path ([`cursor_geometry`]) is introduced. It is now a
+/// thin adapter over that pure geometry function, so the two can never disagree.
 pub fn cursor_overlay(
     cursor: Option<Point3>,
     viewport_bounds: Option<(Point3, Point3)>,
@@ -74,17 +78,64 @@ pub fn cursor_overlay(
     document: DocumentId,
 ) -> VisualOverlay {
     let mut out = VisualOverlay::default();
-    let Some(cursor) = cursor else {
+    let Some(geometry) = cursor_geometry(
+        cursor,
+        viewport_bounds,
+        view_scale,
+        pickbox_logical_pixels,
+        crosshair_percent,
+    ) else {
         return out;
     };
-    let Some((min, max)) = viewport_bounds else {
-        return out;
-    };
+    // Flatten the bounded `[start, end]` pairs into the `Lines` vertex list the
+    // batch path consumes. `line_batch` re-bases on the first point, which is
+    // exactly the transient's first segment start, so both carriers produce the
+    // identical batch.
+    let mut points: Vec<Point3> = Vec::with_capacity(geometry.segments.len() * 2);
+    for [start, end] in &geometry.segments {
+        points.push(*start);
+        points.push(*end);
+    }
+    if let Some(batch) = line_batch(
+        &points,
+        [geometry.color[0], geometry.color[1], geometry.color[2]],
+        document,
+        geometry.draw_order,
+        "overlay.cursor",
+    ) {
+        out.batches.push(batch);
+    }
+    out
+}
+
+/// The renderer-owned transient cursor geometry for `cursor` (ADR 0028 D2).
+///
+/// Same guards and the same crosshair/pickbox construction as
+/// [`cursor_overlay`]: a missing cursor, a missing view rectangle (a 3D view has
+/// none), a degenerate rectangle or a non-finite cursor yields `None` (an
+/// explicit empty, never a fabricated cursor). A degenerate view scale still
+/// draws the crosshair but omits the pickbox.
+///
+/// The returned segments are **world-space** `[start, end]` pairs: two crosshair
+/// arms plus up to four pickbox sides (at most
+/// [`cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS`]). `color` carries the same
+/// sanitised `CURSOR_COLOR` and opaque alpha the legacy batch used, and
+/// `draw_order` is [`CURSOR_DRAW_ORDER`], so the transient merges into the
+/// overlay sort between the tool preview and the snap hints.
+pub fn cursor_geometry(
+    cursor: Option<Point3>,
+    viewport_bounds: Option<(Point3, Point3)>,
+    view_scale: Option<f64>,
+    pickbox_logical_pixels: f64,
+    crosshair_percent: u32,
+) -> Option<cad_scene::TransientCursor> {
+    let cursor = cursor?;
+    let (min, max) = viewport_bounds?;
     // A non-finite cursor, or a view rectangle with no extent, is not a valid
     // view: emit nothing rather than a zero-length or NaN batch.
     if !is_finite(cursor) || !is_finite(min) || !is_finite(max) || max.x <= min.x || max.y <= min.y
     {
-        return out;
+        return None;
     }
     let mut points: Vec<Point3> = Vec::with_capacity(12);
     // Crosshair: two lines through the cursor whose arms are the configured
@@ -127,17 +178,18 @@ pub fn cursor_overlay(
             points.push(end);
         }
     }
-    // One bounded batch; `line_batch` rejects fewer than two vertices.
-    if let Some(batch) = line_batch(
-        &points,
-        CURSOR_COLOR,
-        document,
-        CURSOR_DRAW_ORDER,
-        "overlay.cursor",
-    ) {
-        out.batches.push(batch);
-    }
-    out
+    let mut segments: Vec<[Point3; 2]> = points
+        .chunks_exact(2)
+        .map(|pair| [pair[0], pair[1]])
+        .collect();
+    debug_assert!(segments.len() <= cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS);
+    segments.truncate(cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS);
+    let [r, g, b] = cad_scene::sanitize_color(CURSOR_COLOR);
+    Some(cad_scene::TransientCursor {
+        segments,
+        color: [r, g, b, 1.0],
+        draw_order: CURSOR_DRAW_ORDER,
+    })
 }
 
 /// The two ends of the horizontal (or vertical) crosshair line through `cursor`.
@@ -520,5 +572,190 @@ mod tests {
             DocumentId(1)
         )
         .is_empty());
+    }
+}
+
+#[cfg(test)]
+mod geometry_tests {
+    use super::*;
+
+    fn p(x: f64, y: f64) -> Point3 {
+        Point3 { x, y, z: 0.0 }
+    }
+
+    fn view() -> Option<(Point3, Point3)> {
+        Some((p(-50.0, -30.0), p(50.0, 30.0)))
+    }
+
+    /// The transient geometry and the legacy committed batch must describe the
+    /// exact same segment set, colour and draw order (bit-identical vertices).
+    #[test]
+    fn cursor_geometry_matches_the_legacy_batch_exactly() {
+        let cases = [
+            (Some(p(1.0, 2.0)), view(), Some(0.5), 3.0, 100),
+            (Some(p(-49.0, 29.0)), view(), Some(1.0), 3.0, 37),
+            (Some(p(0.0, 0.0)), view(), Some(0.5), 6.0, 50),
+            // Degenerate scale: crosshair only, no pickbox.
+            (Some(p(0.0, 0.0)), view(), None, 3.0, 100),
+            // Invalid pickbox size: crosshair only.
+            (Some(p(1.0, 2.0)), view(), Some(0.5), 0.0, 100),
+        ];
+        for (cursor, bounds, scale, pickbox, percent) in cases {
+            let overlay = cursor_overlay(cursor, bounds, scale, pickbox, percent, DocumentId(1));
+            let geometry = cursor_geometry(cursor, bounds, scale, pickbox, percent)
+                .expect("a valid 2D cursor has transient geometry");
+            assert_eq!(overlay.drawn(), 1, "the legacy batch still exists");
+            let batch = &overlay.batches[0];
+
+            assert_eq!(batch.draw_order, geometry.draw_order);
+            assert_eq!(batch.local_origin, geometry.segments[0][0]);
+            assert_eq!(batch.vertices.len(), geometry.segments.len() * 2);
+            assert!(geometry.segments.len() <= cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS);
+
+            let [r, g, b] = cad_scene::sanitize_color(CURSOR_COLOR);
+            assert_eq!(geometry.color, [r, g, b, 1.0]);
+            assert_eq!(batch.color, [r, g, b]);
+            assert_eq!(batch.alpha, 1.0);
+
+            let origin = batch.local_origin;
+            for (index, [start, end]) in geometry.segments.iter().enumerate() {
+                for (offset, expected) in [start, end].into_iter().enumerate() {
+                    let vertex = batch.vertices[index * 2 + offset];
+                    assert_eq!(
+                        vertex,
+                        [
+                            (expected.x - origin.x) as f32,
+                            (expected.y - origin.y) as f32,
+                            (expected.z - origin.z) as f32,
+                        ],
+                        "segment {index} endpoint {offset} must match the legacy vertex"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every guard the legacy overlay applies must return an explicit `None`
+    /// geometry (never a fabricated cursor).
+    #[test]
+    fn cursor_geometry_is_absent_for_every_invalid_input() {
+        assert!(cursor_geometry(None, view(), Some(0.5), 3.0, 100).is_none());
+        // A 3D view has no planar view rectangle.
+        assert!(cursor_geometry(Some(p(0.0, 0.0)), None, Some(0.5), 3.0, 100).is_none());
+        // Degenerate rectangles are not a valid view.
+        for bounds in [
+            Some((p(1.0, 0.0), p(1.0, 0.0))),
+            Some((p(5.0, 0.0), p(0.0, 1.0))),
+            Some((p(0.0, 5.0), p(1.0, 0.0))),
+        ] {
+            assert!(cursor_geometry(Some(p(0.0, 0.0)), bounds, Some(0.5), 3.0, 100).is_none());
+        }
+        // Non-finite cursor/bounds are refused.
+        assert!(cursor_geometry(
+            Some(Point3 {
+                x: f64::NAN,
+                y: 0.0,
+                z: 0.0
+            }),
+            view(),
+            Some(0.5),
+            3.0,
+            100
+        )
+        .is_none());
+        assert!(cursor_geometry(
+            Some(p(0.0, 0.0)),
+            Some((p(f64::NEG_INFINITY, 0.0), p(1.0, 1.0))),
+            Some(0.5),
+            3.0,
+            100
+        )
+        .is_none());
+        // A degenerate scale / invalid pickbox still draws the crosshair.
+        for (scale, pickbox) in [
+            (None, 3.0),
+            (Some(0.0), 3.0),
+            (Some(-1.0), 3.0),
+            (Some(f64::NAN), 3.0),
+            (Some(0.5), 0.0),
+            (Some(0.5), -3.0),
+            (Some(0.5), f64::NAN),
+        ] {
+            let geometry = cursor_geometry(Some(p(0.0, 0.0)), view(), scale, pickbox, 100)
+                .expect("the crosshair still draws");
+            assert_eq!(
+                geometry.segments.len(),
+                2,
+                "crosshair only for {scale:?}/{pickbox}"
+            );
+        }
+    }
+
+    /// Deterministic LCG fuzz: whatever the inputs, the geometry is bounded by
+    /// `MAX_TRANSIENT_CURSOR_SEGMENTS` and every emitted coordinate is finite.
+    #[test]
+    fn cursor_geometry_is_always_bounded_and_finite() {
+        let mut state = 0x9E37_79B9u32;
+        let mut next = move || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            state
+        };
+        for _ in 0..2000 {
+            let coord = |next: &mut dyn FnMut() -> u32| (f64::from(next() % 2000) - 1000.0) / 10.0;
+            let cursor = p(coord(&mut next), coord(&mut next));
+            let (x0, y0) = (coord(&mut next), coord(&mut next));
+            let (mut x1, mut y1) = (coord(&mut next), coord(&mut next));
+            // Deliberately let some rectangles be degenerate.
+            if next() % 4 != 0 {
+                x1 = x1.max(x0 + 0.1);
+                y1 = y1.max(y0 + 0.1);
+            }
+            let scale = match next() % 6 {
+                0 => None,
+                1 => Some(0.0),
+                2 => Some(-1.0),
+                3 => Some(f64::NAN),
+                _ => Some(f64::from(next() % 100) / 10.0 + 0.01),
+            };
+            let pickbox = match next() % 6 {
+                0 => 0.0,
+                1 => -3.0,
+                2 => f64::NAN,
+                _ => f64::from(next() % 500) / 20.0,
+            };
+            let percent = match next() % 4 {
+                0 => 0,
+                1 => 101,
+                2 => u32::MAX,
+                _ => next() % 101,
+            };
+            if let Some(geometry) = cursor_geometry(
+                Some(cursor),
+                Some((p(x0, y0), p(x1, y1))),
+                scale,
+                pickbox,
+                percent,
+            ) {
+                assert!(!geometry.segments.is_empty());
+                assert!(
+                    geometry.segments.len() <= cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS,
+                    "bounded segment count"
+                );
+                assert!(
+                    matches!(geometry.segments.len(), 2 | 6),
+                    "crosshair (2) or crosshair + pickbox (6), got {}",
+                    geometry.segments.len()
+                );
+                for [a, b] in &geometry.segments {
+                    for point in [a, b] {
+                        assert!(
+                            point.x.is_finite() && point.y.is_finite() && point.z.is_finite(),
+                            "finite geometry"
+                        );
+                    }
+                }
+                assert_eq!(geometry.draw_order, CURSOR_DRAW_ORDER);
+            }
+        }
     }
 }

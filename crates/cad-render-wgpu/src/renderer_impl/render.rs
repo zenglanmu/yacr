@@ -29,6 +29,11 @@ impl Renderer {
         // CPU work.
         let cpu_started = Instant::now();
         self.ensure_target(target)?;
+        // The renderer-owned transient cursor's fixed-size instance buffer: create
+        // it lazily and write it only while dirty (a move) or after a recreation
+        // (device loss/rebuild). It is never a scene batch, so this sits outside
+        // the upload/commit/pacing/plan paths.
+        self.sync_cursor_transient_buffer();
         // The selection-flags table must cover the live key space before the
         // shaders address it by key. It only ever grows, so this is a no-op on a
         // steady scene.
@@ -417,8 +422,10 @@ impl Renderer {
         // including base page continuations, so a cursor/preview stays visible
         // over a partially drawn base. Overlay batches are staged legacy
         // (`prepare_upload_batches_legacy`), so each needs exactly one per-batch
-        // uniform slot; the overlay pass binds no stream/chunk/arc slots.
-        let overlay_plan = self.plan_overlay(camera_position);
+        // uniform slot; the overlay pass binds no stream/chunk/arc slots. The
+        // renderer-owned cursor merges into the same sort at its `draw_order`
+        // (preview < cursor < snap), not forced last.
+        let overlay_plan = self.plan_overlay(camera_position, self.cursor_transient.as_ref());
 
         // Decide whether this frame uses the accelerated per-class draw
         // organization. It requires: the accelerated tier is live; the pulled
@@ -495,7 +502,10 @@ impl Renderer {
             + chunk_slot_count
             + arc_slot_count
             + self.masks.len()
-            + overlay_plan.drawn_batches();
+            + overlay_plan.drawn_batches()
+            // The renderer-owned cursor's single uniform slot (not an overlay
+            // batch; `drawn_batches()` excludes it).
+            + usize::from(overlay_plan.transient);
         self.uniforms
             .ensure_slots(max_slots, device, layout, &self.gpu_memory);
 
@@ -650,8 +660,9 @@ impl Renderer {
         // Overlay uniforms: one slot per overlay batch, after every base slot.
         // The overlay is legacy geometry (no runs), so the legacy per-batch
         // `draw_batch` path is its only reader; the shape is identical to the
-        // base legacy loop above so the same shaders/tint apply.
-        next_slot = Self::write_overlay_uniforms(
+        // base legacy loop above so the same shaders/tint apply. The transient
+        // sentinel is skipped and gets its own single slot.
+        let (next_after_overlay, overlay_transient_slot) = Self::write_overlay_uniforms(
             &self.batches,
             &mut self.frame_slots,
             &mut self.uniforms,
@@ -660,7 +671,9 @@ impl Renderer {
             line_wpp_bits,
             next_slot,
             &overlay_plan,
+            self.cursor_transient.as_ref(),
         );
+        next_slot = next_after_overlay;
         // One `Queue::write_buffer` per page (vs. one per batch), reported as
         // `FrameStats::uniform_writes`. Only the compacted slot count is flushed.
         let total_slots = next_slot;
@@ -718,6 +731,8 @@ impl Renderer {
             &chunk_slots,
             &arc_slots,
             &mask_slots,
+            // The base pass never draws the renderer-owned transient cursor.
+            None,
             line_pipeline,
             line_instanced_pipeline,
             arc_pipeline,
@@ -764,6 +779,19 @@ impl Renderer {
 
         // Submission 2: composite the transient overlay into the presented
         // target (queue order guarantees the copied base is visible first).
+        // The renderer-owned cursor contributes exactly one instanced draw when
+        // present (one instance per packed segment, bounded to 6).
+        let transient_draw = match (
+            overlay_transient_slot,
+            self.cursor_transient_buffer.as_ref(),
+        ) {
+            (Some(slot), Some(buffer)) if overlay_plan.transient => {
+                let count = (self.cursor_transient_packed.len()
+                    / plan::LINE_INSTANCE_STRIDE as usize) as u32;
+                (count > 0).then_some((buffer, count, slot))
+            }
+            _ => None,
+        };
         let overlay = self.encode_overlay_pass(
             &queue,
             device,
@@ -771,6 +799,7 @@ impl Renderer {
             overlay_depth_view,
             clear_color_value,
             &overlay_plan,
+            transient_draw,
             line_pipeline,
             line_instanced_pipeline,
             arc_pipeline,
@@ -786,9 +815,10 @@ impl Renderer {
         let submission = overlay.submission;
         let submit_ms = submit_started.elapsed().as_secs_f64() * 1000.0;
         // Overlay batches are staged legacy, so each is exactly one per-batch
-        // draw (its class is 0). Adding them keeps the documented
-        // `legacy_opaque_draws + arc + instanced + mesh + transparent + images ==
-        // draw_calls` identity true for the presented frame.
+        // draw (its class is 0). The renderer-owned transient cursor adds one
+        // instanced draw. Adding both keeps the documented
+        // `legacy_opaque_draws + arc + instanced + mesh + transparent + images +
+        // transient == draw_calls` identity true for the presented frame.
         let draw_calls = (legacy_opaque
             + base_outcome.instanced_draws as usize
             + base_outcome.mesh_draws as usize
@@ -796,7 +826,8 @@ impl Renderer {
             + transparent_batches
             + draw_images.len()
             + mask_draws as usize
-            + overlay.draw_calls) as u64;
+            + overlay.draw_calls
+            + overlay.transient_draws as usize) as u64;
         let encode_ms = base_outcome.encode_ms + overlay.encode_ms;
         // Every state-setting call actually issued this frame (both passes).
         // `legacy_opaque_draws` includes the overlay's per-batch draws.
@@ -888,6 +919,7 @@ impl Renderer {
             gpu_ms,
             gpu_time: self.gpu_time_state,
             draw_calls,
+            transient_draws: overlay.transient_draws,
             legacy_opaque_draws,
             uniform_writes,
             uploaded_bytes: self.uploaded_bytes,

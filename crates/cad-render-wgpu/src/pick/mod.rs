@@ -454,6 +454,11 @@ impl Renderer {
         // pan happened to use. It is also **not culled**: chunk-level view
         // culling is a color-frame optimization and must never change a pick
         // result, so the identity mask (culls nothing) is passed here.
+        //
+        // The renderer-owned transient cursor is structurally excluded: it is not
+        // in `self.batches`, has no pick key, and its instance buffer is only ever
+        // bound by the colour overlay pass. A click through the crosshair
+        // therefore hits the entity behind it (contract: `cursor_transient_*`).
         let cull = ChunkCull::all_visible();
         let plan = plan_from_gpu(
             &self.batches,

@@ -32,6 +32,10 @@ impl Renderer {
         self.batches.clear();
         self.images.clear();
         self.image_textures.clear();
+        // Drop only the transient cursor's device buffer; the CPU cursor/packed
+        // bytes survive and are re-uploaded after the host re-initializes.
+        self.cursor_transient_buffer = None;
+        self.cursor_transient_dirty = self.cursor_transient.is_some();
         self.uniforms.reset();
         self.frame_slots.clear();
         self.image_slots.clear();
@@ -132,6 +136,10 @@ impl Renderer {
         self.batches.clear();
         self.images.clear();
         self.image_textures.clear();
+        // The transient cursor survives a device loss as CPU input; only its
+        // buffer belonged to the lost device.
+        self.cursor_transient_buffer = None;
+        self.cursor_transient_dirty = self.cursor_transient.is_some();
         self.uniforms.reset();
         self.frame_slots.clear();
         self.image_slots.clear();
