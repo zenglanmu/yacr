@@ -1,3 +1,16 @@
+## 2026-11-05 Android release 改为只发布签名 APK
+
+- 生成仓库自持 Android release keystore（RSA 4096 / 10000 天 / PKCS12，alias `yacr`），
+  证书 SHA-256 指纹 `B3:FF:85:00:A1:2E:02:A8:9A:5F:DC:6D:A4:1B:07:F5:F2:C4:8D:79:D4:4F:E1:D3:5E:44:90:3E:7A:9A:C3:3B`；
+  secrets 为 `ANDROID_KEYSTORE_BASE64`/`ANDROID_KEYSTORE_PASSWORD`/`ANDROID_KEY_PASSWORD`，
+  variable `ANDROID_KEY_ALIAS=yacr`。私钥备份在 `~/.config/yacr/android-signing/`（0600）。
+- `android-release` 增加预检：任一 keystore 变量缺失即失败；删除 unsigned 回退步骤，只上传
+  `android-release`（APK + `SIGNING.txt` + `.sha256`）。
+- `publish-release.yml` 只下载/发布 `android-release`，不再接受 `android-release-unsigned`。
+- Windows 仍保留签名/unsigned 回退；契约测试与文档同步。
+- 本机已用该 keystore 对旧 unsigned APK 试签并通过 `apksigner verify`（v2/v3 true）；真实 CI
+  签名需要下一次 run 的 artifact 证据。
+
 ## 2026-11-05 发布矩阵收缩：移除 CI debug APK，Flatpak 改为仓库 GPG 自签
 
 - **移除 `android-apk`（debug）CI job**：debug APK 只保留为本地

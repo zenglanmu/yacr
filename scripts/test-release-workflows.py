@@ -44,7 +44,6 @@ PUBLISH_ARTIFACTS = (
     "yacr-windows-release-unsigned",
     "yacr-macos-release",
     "android-release",
-    "android-release-unsigned",
 )
 
 # The only repository secrets a release job may read: the self-signed Windows
@@ -148,6 +147,8 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("SIGNING.txt", block)
         self.assertIn("app-universal-release.apk", block)
         self.assertIn("zipalign", block)
+        self.assertIn("Fail if the release keystore is not configured", block)
+        self.assertNotIn("android-release-unsigned", block)
         self.assertNotIn(".idsig", block)
 
     def test_macos_release_signs_ad_hoc_and_verifies_the_tarball(self):
@@ -158,15 +159,16 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("not notarized", block.lower())
 
     def test_signing_steps_gate_on_env_not_on_secrets(self):
-        gates = {
-            "windows-release": "WINDOWS_SELF_SIGNED_PFX_BASE64",
-            "android-release": "ANDROID_KEYSTORE_BASE64",
-        }
-        for job, variable in gates.items():
+        # Windows keeps a signed/unsigned pair; Android fails closed without a
+        # keystore because only a signed APK may be published.
+        windows = self.block("windows-release")
+        self.assertIn("if: env.WINDOWS_SELF_SIGNED_PFX_BASE64 != ''", windows)
+        self.assertIn("if: env.WINDOWS_SELF_SIGNED_PFX_BASE64 == ''", windows)
+        android = self.block("android-release")
+        self.assertIn("Fail if the release keystore is not configured", android)
+        self.assertNotIn("if: env.ANDROID_KEYSTORE_BASE64 == ''", android)
+        for job, block in (("windows-release", windows), ("android-release", android)):
             with self.subTest(job=job):
-                block = self.block(job)
-                self.assertIn(f"if: env.{variable} != ''", block)
-                self.assertIn(f"if: env.{variable} == ''", block)
                 # Job-level `if:` cannot read secrets and neither should any step
                 # condition: expose the secret in `env:` and compare that.
                 for line in block.splitlines():
@@ -194,7 +196,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("ndk;29.0.13846066", block)
         self.assertIn("setup-java@v4", block)
         self.assertIn("java-version: \"17\"", block)
-        self.assertIn("UNSIGNED", block)
+        self.assertNotIn("android-release-unsigned", build)
 
     def test_windows_and_macos_build_the_react_frontend_first(self):
         # The packaging scripts build desktop-ui/dist, which tauri::generate_context!
@@ -256,15 +258,13 @@ class PublishWorkflowContracts(unittest.TestCase):
         self.assertIn("gh release create", text)
         self.assertIn("--verify-tag", text)
 
-    def test_publisher_accepts_signed_and_unsigned_fallbacks(self) -> None:
+    def test_publisher_accepts_the_windows_unsigned_fallback(self) -> None:
         text = self.text()
         for name in (
             "yacr-windows-release",
             "yacr-windows-release-unsigned",
             "android-release",
-            "android-release-unsigned",
             "app-universal-release.apk",
-            "app-universal-release-unsigned.apk",
             "*.apk.sha256",
             "*.flatpak.gpg",
         ):

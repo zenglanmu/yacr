@@ -197,14 +197,14 @@ and uploads a workflow artifact. See `docs/flatpak.md`.
 
 ### Code signing
 
-Release artifacts are signed only when the repository credentials are configured; otherwise the jobs
-produce explicitly `unsigned` artifacts and never claim a signature:
+Release artifacts are signed with repository-held credentials and never claim public trust:
 
 - **Windows / Android / macOS** — repository-held **self-signed** material: Authenticode for the
   Windows `.exe` files (PFX + exported `.cer`), APK signing for Android (keystore), and ad-hoc
   `codesign` for the macOS bundle. These signatures are **not** publicly trusted: SmartScreen and
-  Gatekeeper still warn. Without the credentials the release artifact names carry the `-unsigned`
-  suffix; the macOS tarball is always ad-hoc signed but never notarized.
+  Gatekeeper still warn. Windows falls back to a `-unsigned` artifact when its PFX is absent; the
+  Android release job **fails closed** without a keystore (it only publishes a signed APK); the
+  macOS tarball is always ad-hoc signed but never notarized.
 - **Flatpak (Linux)** — optional OSTree/GPG commit signing via the `FLATPAK_GPG_*`
   secrets/variables; a signed bundle ships with a matching `*.flatpak.gpg`.
 

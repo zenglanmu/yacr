@@ -72,10 +72,10 @@ jobs:
           do
             gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n "$name" -D "artifacts/$name"
           done
-          # Windows and Android may be signed or the explicit unsigned fallback
-          # from the same run. Resolve the artifact *name* from the run's
-          # artifact list first, so a transient download failure is never
-          # mistaken for "the signed artifact is absent".
+          # Windows may be signed or the explicit unsigned fallback from the
+          # same run; the Android release job only publishes a signed APK.
+          # Resolve the artifact *name* from the run's artifact list first, so a
+          # transient download failure is not mistaken for an absent artifact.
           artifact_names="$(gh api --paginate \
             "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" \
             --jq '.artifacts[].name')"
@@ -91,7 +91,7 @@ jobs:
             return 1
           }
           windows_artifact="$(pick_artifact yacr-windows-release yacr-windows-release-unsigned)"
-          android_artifact="$(pick_artifact android-release android-release-unsigned)"
+          android_artifact="$(pick_artifact android-release)"
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
             -n "$windows_artifact" -D artifacts/windows
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
@@ -119,8 +119,8 @@ jobs:
           set -euo pipefail
           # Explicit deliverable allowlist: only regular release files, never a
           # directory and never a repository file that happened to be checked out.
-          # Signed and unsigned-fallback names are both listed; only one of each
-          # pair is uploaded by a given build run.
+          # Windows signed/unsigned names are both listed; only one of them is
+          # uploaded by a given build run. Android is always signed.
           shopt -s nullglob
           files=(
             release-assets/*.flatpak release-assets/*.flatpak.sha256
@@ -130,7 +130,6 @@ jobs:
             release-assets/app-universal-release.apk
             release-assets/*.apk.sha256
             release-assets/SIGNING.txt
-            release-assets/app-universal-release-unsigned.apk
           )
           if [ "${#files[@]}" -eq 0 ]; then
             echo "no release assets matched under release-assets/" >&2

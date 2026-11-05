@@ -70,7 +70,7 @@
 | `linux-release` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；安装 GTK/WebKitGTK + `flatpak-builder` + `org.gnome.Platform//51`/`Sdk//51` → `bash scripts/package-linux-release.sh` → 上传 `.flatpak` + `.sha256`（配置 `FLATPAK_GPG_*` 时对 OSTree commit 签名并附 `*.flatpak.gpg`；不发布 Flathub） |
 | `windows-release` | build.yml | `windows-latest` | **仅 `v*` tag / 手工 dispatch**；先构建 React 前端 → `bash scripts/package-windows-release.sh`（MSVC 静态 CRT，PE/图标校验）→ 自签 PFX 存在时对两个 `.exe` 做 Authenticode 签名（附 `bin/yacr-dev-codesign.cer`）并上传 `yacr-windows-release`，否则上传 `yacr-windows-release-unsigned` |
 | `macos-release` | build.yml | `macos-latest` | **仅 `v*` tag / 手工 dispatch**；先构建 React 前端 → `bash scripts/package-macos-release.sh`（universal + `lipo`，Mach-O 仅系统库）→ 默认 ad-hoc `codesign`（`MACOS_SIGN_IDENTITY` 可覆盖）后上传 `.tar.gz` + `.sha256`（未公证；`spctl` 仍会拒绝） |
-| `android-release` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；同上但 `--release`，`zipalign` 后用仓库 keystore 签名（`ANDROID_KEYSTORE_BASE64` 存在时）并上传 `android-release`（APK + `SIGNING.txt` + `.sha256`），否则 `android-release-unsigned`；无商店上传 |
+| `android-release` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；同上但 `--release`，`zipalign` 后用仓库 keystore 签名（keystore 缺失时预检直接失败）并上传 `android-release`（APK + `SIGNING.txt` + `.sha256`），不产出 unsigned；无商店上传 |
 
 `android-check` 是 capability-gated（`vars.ANDROID_CI_ENABLED`）；`web-deploy` 与上面 4 个
 release job 是 **event-gated**（`github.event_name == 'workflow_dispatch' ||
@@ -95,7 +95,7 @@ Windows MSVC `clippy`/`check`/release `build`、MinGW GNU release `build`、`app
 | `linux-release` | `.flatpak` + `.sha256`（配置 `FLATPAK_GPG_*` 时另附 `.flatpak.gpg`） | 凭据缺失时未签名；未发布 Flathub；无窗口/GPU 验收 |
 | `windows-release` | `yacr-windows-release`（`.zip` + `.sha256`）；无凭据时 `yacr-windows-release-unsigned` | 自签 PFX 配置时签名（非公共信任）；无运行/GPU 验收 |
 | `macos-release` | `.tar.gz`（`Yacr.app`）+ `.sha256` | ad-hoc 签名（或配置的 identity）/未公证；无窗口/Metal/DPI 验收 |
-| `android-release` | `android-release`（APK + `SIGNING.txt` + `.sha256`）；无凭据时 `android-release-unsigned` | 自持 keystore 配置时签名；无商店上传；未安装运行；签名 ≠ 设备/GPU 验收 |
+| `android-release` | `android-release`（APK + `SIGNING.txt` + `.sha256`） | **必须有自持 keystore，缺失时 job 失败**；无商店上传；未安装运行；签名 ≠ 设备/GPU 验收 |
 
 `scripts/check-workflows.py` 与 `scripts/test-release-workflows.py` 固定这些性质：job 必须存在、
 必须调用真实入口脚本、必须保留 `refs/tags/v` / `workflow_dispatch` 门禁、不得出现 `if: false`、
@@ -115,8 +115,8 @@ GitHub Actions 的 workflow artifact 需要登录且会过期，**不能**作为
 `.github/workflows/publish-release.yml` 完成：**仅 `workflow_dispatch`**，是唯一带
 `permissions: contents: write` 的 workflow（并显式 `actions: read` 下载 artifact——一旦声明
 `permissions:`，未列出的 scope 就是 `none`）。它**不构建/不打包/不签名**，只从指定的
-`CI build layers` run 拉取四个平台 artifact：优先选择 `yacr-windows-release` / `android-release`，
-缺失时回退到 `*-unsigned`；Flatpak artifact 若含 `*.flatpak.gpg` 则一并分发。校验 `.sha256` 后
+`CI build layers` run 拉取四个平台 artifact：`android-release` 直接取签名 APK；Windows 优先
+`yacr-windows-release`，缺失时回退 `yacr-windows-release-unsigned`；Flatpak artifact 若含 `*.flatpak.gpg` 则一并分发。校验 `.sha256` 后
 附加到该 tag 的 GitHub Release；release notes 来自仓库内文件（如 `docs/release-notes/v0.1.4.md`）。
 **签名只发生在 build job（自签名/GPG），publisher 从不签名。**
 

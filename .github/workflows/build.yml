@@ -656,21 +656,21 @@ jobs:
           retention-days: 30
 
   android-release:
-    name: android-release (signed/unsigned APK — tags/dispatch only)
+    name: android-release (signed APK — tags/dispatch only)
     # Builds the release variant of the Tauri Android host, aligns the unsigned
-    # APK with zipalign and (with a repository keystore) signs it with apksigner;
+    # APK with zipalign and signs it with the repository keystore via apksigner;
     # the signed APK is verified with apksigner and checksummed, and the signer
-    # certificates are published as SIGNING.txt. Without a keystore the aligned
-    # APK is uploaded as `android-release-unsigned` and the summary says
-    # UNSIGNED. No device/emulator and no store upload.
+    # certificate transcript is published as SIGNING.txt. This job REFUSES to run
+    # without a keystore: it only publishes a signed APK. No device/emulator and
+    # no store upload.
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     # Build + signing/packaging.
     timeout-minutes: 180
     env:
-      # Secrets cannot be read in a job-level `if:`, so expose them here and gate
-      # every signing step on `env.ANDROID_KEYSTORE_BASE64`. Empty = unsigned
-      # build. The keystore is a repository self-signed key, not a Play key.
+      # The release keystore is mandatory: a missing key fails the preflight
+      # step below instead of producing an unsigned APK. It is a repository
+      # self-signed key, not a Play upload key.
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
@@ -679,6 +679,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Fail if the release keystore is not configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] \
+            || { echo "::error::ANDROID_KEYSTORE_BASE64 is not configured; android-release only publishes a signed APK" >&2; exit 1; }
+          [ -n "${ANDROID_KEYSTORE_PASSWORD:-}" ] \
+            || { echo "::error::ANDROID_KEYSTORE_PASSWORD is not configured" >&2; exit 1; }
+          [ -n "${ANDROID_KEY_ALIAS:-}" ] \
+            || { echo "::error::ANDROID_KEY_ALIAS is not configured" >&2; exit 1; }
+          [ -n "${ANDROID_KEY_PASSWORD:-}" ] \
+            || { echo "::error::ANDROID_KEY_PASSWORD is not configured" >&2; exit 1; }
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -765,7 +777,6 @@ jobs:
             || { echo "::error::zipalign produced no APK" >&2; exit 1; }
       - name: Sign the aligned APK with the repository keystore
         id: sign-android
-        if: env.ANDROID_KEYSTORE_BASE64 != ''
         shell: bash
         run: |
           set -euo pipefail
@@ -801,31 +812,12 @@ jobs:
           ( cd target/android-signed \
               && sha256sum app-universal-release.apk > app-universal-release.apk.sha256 )
       - name: Upload the signed Android release APK
-        if: env.ANDROID_KEYSTORE_BASE64 != ''
         uses: actions/upload-artifact@v4
         with:
           name: android-release
           path: target/android-signed/**
           if-no-files-found: error
           retention-days: 30
-      - name: Stage the unsigned APK for upload
-        if: env.ANDROID_KEYSTORE_BASE64 == ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          cp target/android-signing/app-universal-release.apk \
-             target/android-signing/app-universal-release-unsigned.apk
-          ( cd target/android-signing && sha256sum app-universal-release-unsigned.apk > app-universal-release-unsigned.apk.sha256 )
-      - name: Upload the unsigned release APK
-        if: env.ANDROID_KEYSTORE_BASE64 == ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-release-unsigned
-          path: |
-            target/android-signing/app-universal-release-unsigned.apk
-            target/android-signing/app-universal-release-unsigned.apk.sha256
-          if-no-files-found: error
-          retention-days: 14
       - name: Record artifact facts
         if: always()
         run: |
@@ -837,7 +829,7 @@ jobs:
             if [ "${{ steps.sign-android.outcome }}" = "success" ]; then
               echo 'The aligned release APK was signed with the repository self-signed keystore using apksigner; SIGNING.txt carries the `apksigner verify --print-certs` transcript and the APK SHA-256 is published alongside. This is not a Play/upload key and imposes no store acceptance.'
             else
-              echo 'UNSIGNED or signing did not complete: the uploaded release APK is the explicit unsigned fallback, or the job failed.'
+              echo 'SIGNING DID NOT COMPLETE: this job only publishes a signed APK, and a missing keystore fails the preflight step.'
             fi
             echo 'No device/emulator was used and nothing was published.'
           } >> "$GITHUB_STEP_SUMMARY"

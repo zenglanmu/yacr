@@ -103,7 +103,7 @@ gpg --armor --export-secret-keys <KEY_ID> > flatpak-private.asc
 |---|---|---|
 | `WINDOWS_SELF_SIGNED_PFX_BASE64` | Secret | 单行 base64 的 PFX；缺失时 Windows 走 `*-unsigned` |
 | `WINDOWS_SELF_SIGNED_PFX_PASSWORD` | Secret | PFX 口令；为空时签名步骤显式失败 |
-| `ANDROID_KEYSTORE_BASE64` | Secret | 单行 base64 的 release keystore；缺失时 Android 走 `*-unsigned` |
+| `ANDROID_KEYSTORE_BASE64` | Secret | 单行 base64 的 release keystore；缺失时 `android-release` 在预检步骤**直接失败** |
 | `ANDROID_KEYSTORE_PASSWORD` | Secret | keystore 口令 |
 | `ANDROID_KEY_ALIAS` | Variable | key alias（不是密钥） |
 | `ANDROID_KEY_PASSWORD` | Secret | key 口令（PKCS12 通常与 store 口令相同） |
@@ -159,8 +159,8 @@ gh variable set ANDROID_KEY_ALIAS --body yacr
    - 生成 `.sha256`；
 4. 上传 `android-release`。
 
-未配置 keystore 时上传 `android-release-unsigned`（`app-universal-release-unsigned.apk`
-+ `.sha256`）。签名后再改名会被视为不同包，禁止重命名已签名 APK。
+keystore 缺失时 job 在预检步骤**直接失败**，不再产出 unsigned APK：CI 只允许签名版 release。
+签名后再改名会被视为不同包，禁止重命名已签名 APK。
 
 ### 4.3 `macos-release`
 

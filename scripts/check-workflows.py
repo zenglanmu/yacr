@@ -139,8 +139,8 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     # builders for the current React/Tauri hosts. They never run on a routine
     # push/PR and never publish; when credentials exist they sign the artifact
     # they build with repository self-signed material (Windows PFX / Android
-    # keystore / macOS ad-hoc codesign / Flatpak GPG), otherwise they upload
-    # `*-unsigned`.
+    # Windows falls back to a `*-unsigned` artifact when its PFX is absent; the
+    # Android release job fails closed without a keystore.
     "linux-release": (
         "refs/tags/v",
         "workflow_dispatch",
@@ -191,6 +191,7 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "*.apk",
         # Aligned APK signed with the repository keystore, then verified locally.
         "ANDROID_KEYSTORE_BASE64",
+        "Fail if the release keystore is not configured",
         "apksigner",
         "SIGNING.txt",
         "app-universal-release.apk",

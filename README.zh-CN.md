@@ -162,13 +162,13 @@ flatpak run io.github.zenglanmu.yacr --open /absolute/drawing.dwg
 
 ### 代码签名
 
-只有在仓库凭据已配置时发布产物才会签名；缺失凭据时 job 显式产出 `unsigned` artifact，绝不
-把「跳过」写成「已签名」：
+发布产物使用仓库自持凭据自签名，绝不声称公共信任：
 
 - **Windows / Android / macOS**——仓库自持密钥的**自签名**：Windows 两个 `.exe` 做 Authenticode
   （PFX，并随包导出 `.cer`）、Android 用 keystore 签 APK、macOS 用 ad-hoc `codesign`。这些签名
-  **没有公共信任**，SmartScreen 与 Gatekeeper 仍会拦；缺凭据时 release artifact 名称带
-  `-unsigned` 后缀（macOS tarball 始终 ad-hoc 签名但从不公证）。
+  **没有公共信任**，SmartScreen 与 Gatekeeper 仍会拦；Windows 缺 PFX 时回退 `-unsigned`，
+  Android release 缺 keystore 时**直接失败**（只发布签名 APK），macOS tarball 始终 ad-hoc 签名
+  但从不公证。
 - **Flatpak（Linux）**——可选 OSTree/GPG commit 签名（`FLATPAK_GPG_*` secrets/variables），
   签名 bundle 会附带匹配的 `*.flatpak.gpg`。
 
