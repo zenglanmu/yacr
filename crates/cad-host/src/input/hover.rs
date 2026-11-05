@@ -177,7 +177,7 @@ impl HostCore {
                 .get(&c.viewport_id)
                 .ok_or(CadError::Cancelled)?;
             let drawing = c.drawing().ok_or(CadError::Cancelled)?;
-            let report = cad_app::picking::pick_at_screen_with_visibility(
+            let report = cad_app::picking::pick_at_screen_with_visibility_and_vendor(
                 &drawing,
                 c.document_id,
                 &viewport.camera,
@@ -186,6 +186,9 @@ impl HostCore {
                 &policy,
                 cad_app::BackFacePolicy::Cull,
                 &c.session.layer_overrides,
+                // Hover shares the click catalogue, so a vendor-backed opaque
+                // entity highlights exactly as it selects (ADR-0028 D2).
+                c.application.vendor_representations.as_deref(),
             );
             report.map(|report| report.hit.map(|hit| hit.source))
         };

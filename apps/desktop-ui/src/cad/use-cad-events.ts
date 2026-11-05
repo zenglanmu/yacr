@@ -38,6 +38,7 @@ import { createFpsSampler } from '../fps.ts';
 import { reportedSurfaceMode } from './surface.ts';
 import { sameStatusIgnoringVolatile } from './status-cadence.ts';
 import { runVendorPass } from '../vendor/vendor-pass.ts';
+import { dispatchCadStatus, ensurePluginRegistered } from '../plugins/host.ts';
 import type { InvokeRoute } from '../host/invoke.ts';
 import type { CadSubscription, CadEventFrame } from './cad-events.ts';
 import type { CadStatus } from './cad-status.ts';
@@ -105,6 +106,9 @@ export function useCadEvents(handlers: CadEventHandlers): void {
         // The only carrier observation, exactly once per status snapshot.
         observeCarrier(reportedSurfaceMode({ status: frame.status }));
         setStatus(frame.status);
+        // Every snapshot reaches the registered plugin providers verbatim; a
+        // handler error is isolated inside the host and never fails the stream.
+        dispatchCadStatus(frame.status);
         // Observe first: an X11 host's first answer moves the route to the wasm
         // adapter, and the live subscription must follow in the same turn.
         connect();
@@ -140,6 +144,13 @@ export function useCadEvents(handlers: CadEventHandlers): void {
       // changed the route; follow it now instead of waiting for the next frame.
       if (!disposed && cadEventRoute() !== transport) connect();
     }
+
+    // Load and register the vendor plugin once. Its optional `register` is the
+    // only startup-provider channel (ADR 0028 D3); a missing module or a throwing
+    // `register` is one diagnostic line, never a crash or a blank session.
+    void ensurePluginRegistered().catch((error: unknown) => {
+      if (!disposed) live.current.setPollError(`vendor-plugin: ${String(error)}`);
+    });
 
     connect();
     return () => {

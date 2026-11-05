@@ -491,7 +491,7 @@ impl HostCore {
         // The same configured pickbox the hover path and the cursor overlay use,
         // so a click and the box drawn around it can never disagree.
         let policy = self.tolerance_policy();
-        let report = cad_app::picking::pick_at_screen_with_visibility(
+        let report = cad_app::picking::pick_at_screen_with_visibility_and_vendor(
             &drawing,
             c.document_id,
             &viewport.camera,
@@ -500,6 +500,9 @@ impl HostCore {
             &policy,
             cad_app::BackFacePolicy::Cull,
             &c.session.layer_overrides,
+            // Vendor-backed opaque entities are part of the clickable catalogue
+            // (ADR-0028 D2); `None` is the exact pre-plugin behaviour.
+            c.application.vendor_representations.as_deref(),
         )?;
         let hit = report.hit.map(|hit| hit.source);
         let mut refs = c.session.selection.refs().to_vec();

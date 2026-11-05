@@ -21,6 +21,12 @@
 - 宿主用 `<script type="module" src="plugins/tch.js">` 加载（与 canvas bootstrap 同一模式），
   插件把唯一门面注册到 `globalThis.__YACR_VENDOR_PLUGIN__ = { abiVersion, decode }`。
 - 插件只做 **字节 → 图元**；它不读写 `cad-db`、不调用 Tauri `invoke`、不碰文件系统。
+- **可选注册扩展（ABI 仍为 1，二进制帧不变；ADR 0028）**：模块可导出
+  `register(host)`，宿主在启动时调用一次；插件用
+  `host.on('properties' | 'command' | 'cad-status', handler)` 注册。未导出/注册抛错只失去
+  属性面板与编辑拦截，`decode` 不受影响。插件把 `decode` 解析出的 `VendorRecord[]` 保存在模块作用域
+  （≤64 MiB records frame；流是同一 `ArrayBuffer` 的视图，不复制载荷），按 `source_handle`
+  回答属性/命令询问。插件输出仍是 display-only，不写 `cad-db`。
 - native 与 web 共用同一份 `.js`；CLI/headless **没有 WebView**，因此 CLI 不使用插件，
   TCH 在 CLI 侧保持显式不支持。
 - 生成物 `plugins/tch/dist/` 与 `apps/desktop-ui/public/plugins/` 被 `.gitignore` 忽略；`npm run build`、
@@ -181,6 +187,51 @@ class body 在 skip 后首字节为 6；R2000 代理样本首字节为 `0x0e`。
 - 选择属性面板追加只读的 `vendor_derived` / `vendor_primitives` / `vendor_revision`
   （i18n：`properties.row.vendor_*`）。
 
+## 5.2 拾取/选择（ADR 0028，2026-11-05）
+
+`TCH_*` 在 `cad-db` 里仍是 `Opaque`；插件解出的 primitive 不落库。为了让“看得见”与“点得中”一致，
+CPU 拾取目录在 **存在已 settle 的 vendor 快照** 时，把 `Opaque` 实体替换为一份**派生 analytic 几何**
+（`SemanticGeometry::Compound`），但 `source` 仍是原实体的 `SelectionRef`：
+
+- `Lines` → 开放 `Polyline`；`Segments` → 多条 `Line`；`Arc`/`Circle` → 对应 analytic 变体；
+  `Text` → 其 origin 的 `Point`（只保证锚点可点，不伪造字形轮廓）；
+  `Block` **不展开**（只有 block primitive 的 TCH 实体仍不可点，保留 `skipped = opaque`）。
+- INSERT 内部成员沿用既有累计实例变换；图层可见性按源实体判断；`geometry_source = ProxyCache`。
+- 点击、hover、`SELECTALL`、框选共用同一目录；`PickIndex` 缓存键包含 vendor 快照 revision，
+  插件 settle 后索引会失效重建。
+- **没有 vendor 快照 / 没有派生 primitive** 的 `Opaque` 行为不变：精细拾取
+  `PickOutcome::Unsupported("opaque")`，并在 `PickReport.skipped` 里保留原因。不得把不可点实体
+  算作已支持，也不得为其伪造 `EntityId`/handle。
+
+> 注意：导入期的 `EntityCapability.pick` 对 `Opaque` 仍是 `Unsupported`（那是按 class 的静态
+> 能力，且在 vendor pass 之前就已确定）；运行时可点性由 settle 后的 vendor 快照决定。两者不要
+> 混写：能力报告仍说“该 class 的语义/拾取未建模”，交互拾取只是对“有派生表示”的实例生效。
+
+**handle 语义**：可选中性以 **已提交进 `cad-db` 的实体** 为准，不以 source handle 为准。导入实体有
+handle；API/编辑/COPY 创建并提交的实体有 `EntityId` 但 `source_handle = None`（属性面板显示
+`handle = none`）。transient overlay（绘制/测量预览、框选、捕捉提示、grip marker、光标）只有合成
+哈希 id，**没有**真实 `EntityId` 或 handle；`DrawingTransaction` 中 staged 未 commit 的实体不在
+`cad-db`，也不可选中。这与 AutoCAD “已加入数据库即可选择、transient 不可选择”的行为一致，只是本项目
+的 handle 额外承担“源文件出处”语义。
+
+## 5.3 插件属性/命令提供者（ADR 0028，2026-11-05）
+
+- `PROPERTIES` 仍是 chrome-local selector（不触发 `cad_command`、不写 DB）。chrome 在打开属性 dock 前
+  询问已注册的 `properties` 提供者，传入**当前** `cad_event`/`status-changed` 的 `selection`：
+  - 返回 panel descriptor → 在属性 dock 中显示宿主渲染的只读天正面板（插件只给分组 rows，不操作 DOM）；
+  - 返回 `null` / 插件未就绪 / handler 抛错 → 继续原有 `PropertiesPalette`。
+- panel 形状：`{ kind, handle, groups: [{ key, rows: [{ key, value }] }] }`。row key 是稳定机器键，
+  宿主按 `properties.tch.<key>` 翻译；未知键显示原键。插件不硬编码中文。
+- `command` 提供者在命令准入后、`cad_command` 之前被询问；天正插件对当前单选（且 handle 命中
+  records 缓存）的 `MOVE/COPY/ERASE/ROTATE/SCALE/MIRROR/STRETCH/TRIM/EXTEND/OFFSET/EXPLODE/ARRAY/
+  PEDIT/FILLET/CHAMFER` 返回 `{ handled: true, messageKey: 'vendor.editing.unsupported' }`，
+  chrome 显示模态说明并**不发送** `cad_command`。普通图元编辑、未选中天正实体、普通绘制命令不受影响。
+- **多选限制**：`cad_status.selection` 是多选**交集行**，没有逐实体列表；插件只对
+  `count == 1` 且 `handle` 行非 mixed 的选择可靠接管。多选一律 pass-through；如需多选接管，必须先
+  扩展 wire，不在当前范围。
+- 插件仍是同权 module script（§6.3）；命令拦截只发生在 chrome 漏斗，**不是**安全边界；Rust 命令仍可被
+  其他入口直接调用。
+
 ## 6. 已知缺口
 
 0. **载体验证边界**：命令与事件在全部五个宿主上已按同一契约接线；但只有 Linux 做了运行/
@@ -231,6 +282,14 @@ class body 在 skip 后首字节为 6；R2000 代理样本首字节为 `0x0e`。
    - 尺寸样式：ABI 不携带图纸标注样式，统一用 MiniCAD 默认 `TchDimStyle` 并报
      `vendor.tch.dimension_style_defaults`。
 
+7. **属性/命令接管边界（ADR 0028）**：多选没有逐实体列表，插件只接管 `count == 1` 且
+   `handle` 行非 mixed 的选择；只有 block primitive 的 TCH 实体仍不可点；`Text` 只按 origin
+   锚点可点，不伪造字形轮廓。插件 records 缓存随每次 `decode` 替换，解码失败即清空，因此 settle 前
+   选中 TCH 只会走默认面板/放行命令。
+8. **插件面板不是自由 UI**：插件只返回 `{kind, handle, groups, rows}` 只读 descriptor，由 React
+   宿主渲染；插件不能注入 HTML/脚本、不能改选择、不能写 DB。面板 row 文案由宿主 i18n 提供，插件只给
+   稳定的 `properties.tch.*` 机器键。
+
 ## 7. 测试
 
 - Rust：`crates/cad-ui-core/src/session/vendor.rs` + `vendor_tests.rs` 的 ABI v1 帧/token/
@@ -243,6 +302,13 @@ class body 在 skip 后首字节为 6；R2000 代理样本首字节为 `0x0e`。
   洞口侧线、弧墙/profile 诊断、截断/坏 magic、bulge→arc），以及每个新类的合成契约测试
   （annotation / dimension / stair / opening-symbols / block-insert / break-line /
   annotation-symbol / index-symbol / datamap）；`web-adapter.test.ts`（wasm 命令转发/拒绝）。
+- 前端（ADR 0028）：`vendor-plugin-properties.test.ts`（合成 TCH_WALL records → `decode` →
+  `register` → 属性行/未知 handle/多选/编辑命令接管）；`plugin-interop.test.ts`（提供者顺序、
+  null 清理、异常放行、非法 panel/多选拒绝、notice store）；`plugin-command.test.ts`（`blocked`
+  在 IPC 前返回、null 放行、chrome-local 不拦截、`blocked` 文案）。
+- Rust 拾取（ADR 0028）：`crates/cad-app` 的拾取测试覆盖已提交/ staged/transient 身份、
+  `Opaque` + vendor store 命中、无 store 时 `skipped = opaque`、vendor revision 使 `PickIndex`
+  失效、`SELECTALL`/框选包含 vendor 派生实体。
 - 真实样本：`test-tangent-real.dwg` → plugin `status=0, applied=14911, entities=9889`，
   TEXT 870 / MTEXT 339 / WALL 4525 / COLUMN 1000 / OPENING 1734 / BLOCK_INSERT 220 /
   ELEVATION 358 / DIMENSION2 173 / ARROW 138 / MULTILEADER 127 / LINESTAIR 116 /

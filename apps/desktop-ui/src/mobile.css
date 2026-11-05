@@ -731,6 +731,35 @@
      shrink inside the fixed-height card instead of pushing the footer off. */
   min-height: 0;
 }
+
+/* Vendor panel and refusal notice on a phone ------------------------------ */
+/* The dock is not rendered on the compact layout (`.workspace__left` is
+   hidden), so a carrier that offers vendor properties here mounts the same panel
+   as a bottom sheet, exactly like the references/fonts palettes. These rules
+   give it that sheet's surface, touch heights and wrapping; the 300px desktop
+   dock never sees them. */
+:root[data-layout="mobile"] .plugin-properties {
+  width: 100%;
+  max-height: min(72dvh, 620px);
+  overflow: hidden;
+  background: var(--chrome-3);
+  border: 1px solid var(--line-soft);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 -12px 34px rgba(0, 0, 0, .48);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px));
+  animation: mobile-rise var(--t-med) both;
+}
+:root[data-layout="mobile"] .plugin-properties .palette__head { height: 44px; padding: 0 12px; }
+:root[data-layout="mobile"] .plugin-properties .palette__body { padding: 10px 12px 14px; }
+:root[data-layout="mobile"] .plugin-properties__row { grid-template-columns: 92px minmax(0, 1fr); }
+:root[data-layout="mobile"] .plugin-properties__footer { padding: 8px 12px; }
+/* Both panel actions and the notice's one action are the sheet's only controls,
+   so they get a finger-sized height instead of the 20-24px desktop one. */
+:root[data-layout="mobile"] .plugin-properties__footer .ui-button,
+:root[data-layout="mobile"] .plugin-notice__footer .ui-button { height: 44px; }
+:root[data-layout="mobile"] .plugin-properties__footer .ui-button { font-size: 13px; }
+:root[data-layout="mobile"] .plugin-notice__message { font-size: 13px; }
 /* The shortcut menu is measured and clamped by `placeContextMenu`, so it only
    needs to fit the viewport and to offer a finger-sized row. */
 :root[data-layout="mobile"] .context-menu {

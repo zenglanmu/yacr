@@ -9,14 +9,15 @@
 //! follows the containing `INSERT`'s layer, `cad_db::LayerScope`), through the
 //! same walk that decides picking (`crate::picking::ref_visibility`).
 //! No promise is made about visibility flags lost before database import.
-//! Paper space, opaque geometry, nested compound INSERTs, unresolved dynamic
-//! states and truncated/cyclic expansion are refused, never empty successes.
+//! Paper space, opaque geometry with no vendor-derived stand-in, nested compound
+//! INSERTs, unresolved dynamic states and truncated/cyclic expansion are
+//! refused, never empty successes. An opaque entity **is** enumerable when the
+//! settled vendor snapshot yields primitives for its source handle — the same
+//! catalogue predicate click/hover/box use (ADR-0028 D2).
 
-use crate::picking::ref_visibility;
-use crate::{
-    drawing_pick_items, Application, Command, CommandOutcome, CommandPayload, SelectionSet,
-    SessionState,
-};
+use crate::picking::{drawing_pick_items_with_vendor, ref_visibility};
+use crate::vendor::VendorRepresentationStore;
+use crate::{Application, Command, CommandOutcome, CommandPayload, SelectionSet, SessionState};
 use cad_db::{DbEntity, DrawingDatabase, LayerScope, MAX_INSTANCE_DEPTH};
 use cad_domain::{BlockId, CadError, CadResult, SemanticGeometry, SpaceId};
 
@@ -43,6 +44,9 @@ impl Application {
             ));
         }
         let database = &document.drawing;
+        // SELECTALL reads the same catalogue click/hover/box use, including the
+        // vendor stand-in for an opaque entity (ADR-0028 D2).
+        let vendor = self.vendor_representations.as_deref();
         // One layer-table scan per command: the preflight walk and the selection
         // walk both carry it, so a block member is judged on its effective layer
         // everywhere and the table is never rescanned per entity.
@@ -50,10 +54,10 @@ impl Application {
         // The existing pick builder skips cycles/depth limits without a report.
         // Preflight the visible tree before trusting its catalogue or publishing.
         for entity in database.model_space() {
-            validate_branch(database, session, entity, scope, &mut Vec::new())?;
+            validate_branch_with_vendor(database, session, entity, scope, &mut Vec::new(), vendor)?;
         }
         let mut selection = SelectionSet::new();
-        for item in drawing_pick_items(database, command.document) {
+        for item in drawing_pick_items_with_vendor(database, command.document, vendor) {
             let visible = ref_visibility(database, &session.layer_overrides, scope, &item.source)
                 .ok_or(CadError::StaleResult)?;
             if visible {
@@ -66,12 +70,30 @@ impl Application {
     }
 }
 
+/// The vendor-agnostic preflight: no opaque entity can be enumerated.
 pub(crate) fn validate_branch(
     database: &DrawingDatabase,
     session: &SessionState,
     entity: &DbEntity,
     scope: LayerScope,
     stack: &mut Vec<BlockId>,
+) -> CadResult<()> {
+    validate_branch_with_vendor(database, session, entity, scope, stack, None)
+}
+
+/// The catalogue preflight shared by `SELECTALL` and box selection.
+///
+/// An `Opaque` entity is accepted **only** when the settled vendor snapshot can
+/// synthesize at least one analytic primitive for its source handle — the exact
+/// predicate the pick catalogue applies — so a truly unsupported opaque payload
+/// is still an explicit refusal, never an empty success (ADR-0028 §4).
+pub(crate) fn validate_branch_with_vendor(
+    database: &DrawingDatabase,
+    session: &SessionState,
+    entity: &DbEntity,
+    scope: LayerScope,
+    stack: &mut Vec<BlockId>,
+    vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<()> {
     let effective = scope.effective_layer(entity.layer);
     if !session
@@ -108,16 +130,24 @@ pub(crate) fn validate_branch(
         stack.push(*block);
         let child_scope = scope.child_scope(effective);
         for child in database.block_entities(*block) {
-            validate_branch(database, session, child, child_scope, stack)?;
+            validate_branch_with_vendor(database, session, child, child_scope, stack, vendor)?;
         }
         stack.pop();
         Ok(())
     } else {
-        validate_geometry(&entity.geometry)
+        validate_geometry(&entity.geometry, vendor_backed(entity, vendor))
     }
 }
 
-fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
+/// Whether this entity's opaque payload has a non-empty vendor stand-in.
+///
+/// The exact predicate the pick catalogue uses (same helper), so "SELECTALL
+/// accepts it" and "the catalogue contains it" cannot drift apart.
+fn vendor_backed(entity: &DbEntity, vendor: Option<&VendorRepresentationStore>) -> bool {
+    vendor.is_some_and(|store| crate::picking::vendor_backed_entity(entity, store))
+}
+
+fn validate_geometry(geometry: &SemanticGeometry, opaque_is_vendor_backed: bool) -> CadResult<()> {
     match geometry {
         SemanticGeometry::Mesh(mesh) if mesh.triangles.is_empty() => Err(CadError::Unsupported(
             "SelectAll cannot pick an empty mesh".into(),
@@ -128,6 +158,10 @@ fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
         SemanticGeometry::Spline { control_points, .. } if control_points.len() < 2 => Err(
             CadError::Unsupported("SelectAll cannot pick an empty spline".into()),
         ),
+        // Only a top-level opaque payload with a real vendor stand-in is
+        // enumerable; an opaque **child** of a compound is never covered by it
+        // (the catalogue would not replace that child either).
+        SemanticGeometry::Opaque { .. } if opaque_is_vendor_backed => Ok(()),
         SemanticGeometry::Opaque { .. } | SemanticGeometry::Insert { .. } => {
             Err(CadError::Unsupported(
                 "SelectAll cannot enumerate opaque geometry or compound INSERTs".into(),
@@ -135,7 +169,7 @@ fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
         }
         SemanticGeometry::Compound(children) => {
             for child in children {
-                validate_geometry(child)?;
+                validate_geometry(child, false)?;
             }
             if children.is_empty() {
                 return Err(CadError::Unsupported(
@@ -148,7 +182,7 @@ fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
         // a compound (ADR 0017 A.8).
         SemanticGeometry::Dimension(dimension) => {
             for child in dimension.display() {
-                validate_geometry(child)?;
+                validate_geometry(child, false)?;
             }
             if dimension.display().is_empty() {
                 return Err(CadError::Unsupported(
@@ -162,7 +196,7 @@ fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
         // wildcard silently skipped this check.
         SemanticGeometry::Hatch(hatch) => {
             for child in hatch.display() {
-                validate_geometry(child)?;
+                validate_geometry(child, false)?;
             }
             if hatch.display().is_empty() {
                 return Err(CadError::Unsupported(
@@ -175,7 +209,7 @@ fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
         // the compound it used to be (ADR 0019 decision G).
         SemanticGeometry::MultiLeader(multileader) => {
             for child in multileader.display() {
-                validate_geometry(child)?;
+                validate_geometry(child, false)?;
             }
             if multileader.display().is_empty() {
                 return Err(CadError::Unsupported(

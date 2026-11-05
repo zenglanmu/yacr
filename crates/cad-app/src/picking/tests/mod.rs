@@ -648,3 +648,4 @@ fn filter_by_index_narrows_a_ray_that_misses_every_item() {
     assert!(filter_by_index(&index, &ray, 1e-6).unwrap().is_empty());
 }
 mod differential;
+mod vendor_pick;

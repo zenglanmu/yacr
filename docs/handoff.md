@@ -1,3 +1,52 @@
+## 2026-11-05 天正图元拾取 + 插件属性/编辑拦截（ADR 0028）
+
+- **可选中性（D1）**：以**已提交进 `cad-db`** 的实体为准，不以 source handle 为准。transient overlay
+  （绘制/测量预览、框选、捕捉提示、grip、光标）只有合成哈希 id，没有真实 `EntityId`/handle；
+  `DrawingTransaction` staged 未 commit 的实体不在 DB，也不可选中。导入实体有 handle；API/编辑/
+  COPY 创建并提交的实体有 `EntityId` 但 `source_handle = None`（面板显示 `handle = none`，不伪造）。
+  这与 AutoCAD “已加入数据库即可选择、transient 不可选择”的行为一致；本项目的 handle 额外承担
+  “源文件出处”语义。
+- **拾取（D2）**：`crates/cad-app/src/picking/vendor.rs` 在存在已 settle 的 `VendorRepresentationStore`
+  时，把 `Opaque` 实体替换为派生的 analytic `Compound`（Lines→Polyline、Segments→Lines、
+  Arc/Circle→analytic、Text→origin Point；Block 不展开），`source` 仍是原实体 `SelectionRef`，
+  使用同一累计 INSERT 变换，`GeometrySource::ProxyCache`。点击/hover/`SELECTALL`/框选共用该目录；
+  `PickIndex` 缓存键加入 vendor revision；`select_all`/`select_box` 的 preflight 只接受真正
+  vendor-backed 的 `Opaque`。无快照/只有 block primitive 时仍 `skipped = opaque`，不伪造命中。
+- **插件注册（D3）**：`plugins/tch` 保持 ABI v1、二进制帧不变；新增可选 `register(host)`，注册
+  `properties` / `command` / `cad-status` handler。插件缓存 `decode` 解析的 `VendorRecord[]`
+  （≤64 MiB frame），按 `source_handle` 回答；解码失败清空缓存。属性面板是宿主渲染的只读 descriptor
+  （`{kind, handle, groups:[{key, rows:[{key,value}]}]}`），row key 走 `properties.tch.*`。
+- **属性命令（D4）**：`PROPERTIES` 仍是 chrome-local selector；chrome 先询问 `properties` 提供者，
+  返回 panel 时 `PropertiesDock` 显示 `PluginPropertiesPalette`，否则原 `PropertiesPalette`。
+  事件源是既有 `cad_event` 的 `status-changed.selection`，**没有新增 Rust 命令/事件**。
+- **编辑拦截（D5）**：`queueCadCommand` 在准入后、`cad_command` 前询问 `command` 提供者；天正插件对
+  单选且命中 records 缓存的 `MOVE/COPY/ERASE/ROTATE/SCALE/MIRROR/STRETCH/TRIM/EXTEND/OFFSET/
+  EXPLODE/ARRAY/PEDIT/FILLET/CHAMFER` 返回 `{handled:true, messageKey:'vendor.editing.unsupported'}`，
+  chrome 显示 `PluginNotice` 并跳过 IPC。普通图元/普通绘制不受影响；拦截只是 chrome 漏斗，不是
+  安全边界。
+- **前端**：`apps/desktop-ui/src/plugins/{types,host}.ts`、`PropertiesDock`、`PluginNoticeHost`、
+  `PluginPropertiesPalette`、`PluginNotice`；`App.tsx` 保持 999 行；i18n 新增 37 键（1047 keys）。
+- **验证（本轮已运行）**：
+  - `cargo fmt --all -- --check`；`cargo check -p cad-app --all-targets --locked`；
+    `cargo check -p cad-host --all-targets --locked`；`cargo clippy -p cad-app -p cad-host
+    --all-targets --locked -- -D warnings`。
+  - `cargo test -p cad-app --lib picking::tests::vendor_pick`（5 pass，含 staged/committed、
+    vendor-backed、block-only、index revision、SELECTALL）；`transient_identity`（1 pass）；
+    `host::tests::properties`（5 pass）；`cargo test -p cad-app --test select_all --test select_box`
+    （18 + 15 pass）；`cargo test -p cad-host --lib hover/select`（36 select pass）。
+  - `(cd apps/desktop-ui && npm test)` → 1079/1079；`npm run build` → Vite/rolldown 成功；
+    `check-i18n.py` → 1047 keys；`check-file-size.py` → OK（`picking/mod.rs` 948、
+    `picking/vendor.rs` 249、`App.tsx` 999）；`check-architecture.py` → OK。
+  - 插件：`node --test test/vendor-plugin-properties.test.ts`（3 pass）；既有 vendor 插件回归 45 pass。
+  - **NOT RUN / 证据边界**：真实 GUI/GPU/真实 DWG 点击与属性面板、Windows/macOS/Android/Web
+    运行时、全 workspace 测试、像素/性能；不得把契约/合成测试写成真机验收。
+- **已知限制**：多选没有逐实体列表，插件只接管 `count==1` 且 `handle` 非 mixed；只有 block primitive
+  的 TCH 实体仍不可点；`Text` 只按 origin 锚点可点；插件仍是同权 module script。
+- **submodule 状态**：`plugins/tch` 是独立 git 仓库。本轮已在 submodule 内用显式路径提交为
+  `7ecb6d8`（分支 `feat/property-provider`，9 files，509+/32-），父仓库工作树的 gitlink 现指向该
+  commit（`git diff -- plugins/tch` 可见）。**尚未 push 到 `zenglanmu/tangent-ts`**；在父仓库提交/
+  CI 使用前必须先 push，否则新 clone 取不到该 commit。
+
 ## 2026-11-05 Android release 改为只发布签名 APK
 
 - 生成仓库自持 Android release keystore（RSA 4096 / 10000 天 / PKCS12，alias `yacr`），
