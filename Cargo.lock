@@ -697,6 +697,7 @@ dependencies = [
  "cad-domain",
  "cad-render-wgpu",
  "cad-representation",
+ "cad-scene",
  "web-time",
 ]
 

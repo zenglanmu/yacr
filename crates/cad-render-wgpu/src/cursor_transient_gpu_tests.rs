@@ -229,8 +229,12 @@ fn cursor_transient_moves_without_touching_base_pixels_and_picks_through() {
         .expect("the transient buffer is created lazily");
     assert_eq!(
         buffer_a.size(),
-        u64::from(LINE_INSTANCE_STRIDE) * cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS as u64,
-        "{WHAT}: the buffer is the fixed maximum size"
+        if renderer.render_tier() == crate::RenderTier::Accelerated {
+            64
+        } else {
+            u64::from(LINE_INSTANCE_STRIDE)
+        } * cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS as u64,
+        "{WHAT}: the buffer is the fixed maximum size at the live pipeline stride"
     );
 
     // Pick-through: the crosshair covers the band pixel but has no pick key, so

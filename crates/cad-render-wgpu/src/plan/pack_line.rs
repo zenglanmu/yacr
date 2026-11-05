@@ -79,6 +79,26 @@ pub(crate) fn line_instance_bytes(instances: &[LineInstance]) -> Vec<u8> {
     bytemuck::cast_slice(instances).to_vec()
 }
 
+/// Pack transient-cursor instances at the **pipeline's** instance stride.
+///
+/// The instanced line pipeline's slot-1 stride is tier-dependent: 56 bytes on the
+/// universal tier ([`LINE_INSTANCE_STRIDE`]) and 64 on the accelerated tier
+/// ([`PULLED_LINE_STRIDE`], because the same geometry buffers double as pulled
+/// storage). The attribute offsets are identical; only the trailing padding
+/// differs, so a 64-stride record is the 56-byte [`LineInstance`] followed by 8
+/// zero bytes. `size` must equal `instances.len() * stride`.
+pub(crate) fn transient_instance_bytes(instances: &[LineInstance], stride: u32) -> Vec<u8> {
+    let stride = stride as usize;
+    debug_assert!(stride >= std::mem::size_of::<LineInstance>());
+    let mut bytes = vec![0u8; instances.len() * stride];
+    for (index, instance) in instances.iter().enumerate() {
+        let start = index * stride;
+        let record = bytemuck::bytes_of(instance);
+        bytes[start..start + record.len()].copy_from_slice(record);
+    }
+    bytes
+}
+
 /// Pack one transient cursor into line instances (ADR 0028 D3).
 ///
 /// The reference origin is the first segment's start (`segments[0][0]`): every

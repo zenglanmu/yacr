@@ -157,6 +157,29 @@ fn packing_is_bounded_and_uses_the_declared_instance_layout() {
 }
 
 #[test]
+fn transient_instance_bytes_match_the_pipeline_stride() {
+    let instances = plan::pack_transient_cursor(&cursor(2_500_000));
+    let universal = plan::transient_instance_bytes(&instances, plan::LINE_INSTANCE_STRIDE);
+    let accelerated = plan::transient_instance_bytes(&instances, plan::PULLED_LINE_STRIDE);
+    let record = plan::LINE_INSTANCE_STRIDE as usize;
+    let padded = plan::PULLED_LINE_STRIDE as usize;
+    assert_eq!(universal.len(), instances.len() * record);
+    assert_eq!(accelerated.len(), instances.len() * padded);
+    // The attributes (first 56 bytes) are byte-identical; only 8 zero pad bytes
+    // per instance are added for the accelerated (pulled-storage) layout.
+    for index in 0..instances.len() {
+        assert_eq!(
+            &universal[index * record..(index + 1) * record],
+            &accelerated[index * padded..index * padded + record]
+        );
+        assert_eq!(
+            &accelerated[index * padded + record..(index + 1) * padded],
+            &[0u8; 8]
+        );
+    }
+}
+
+#[test]
 fn setter_packs_and_marks_dirty_only_on_change() {
     let mut renderer = Renderer::default();
     assert!(renderer.cursor_transient.is_none());

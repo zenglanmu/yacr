@@ -158,26 +158,16 @@ fn session_display_settings_reach_the_live_render_inputs() {
         .apply_setting(CadSettingKey::CrosshairSize, CadSettingValue::Number(30))
         .expect("an in-range crosshair size");
     assert_eq!(settings.crosshair_percent, 30);
-    assert_eq!(
-        session.render_session().overlays().crosshair_percent,
-        30,
-        "the overlay input the cursor builder consumes carries the new size"
-    );
 
-    // The pickbox is the box the same builder draws: its pixel size is the
-    // configured value, and the crosshair stays untouched by it.
+    // The pointer cursor is a renderer transient now (ADR 0028); the host feeds
+    // `cursor_geometry` from these effective settings (covered by the cad-host
+    // transient contracts). Here the settings projection is the authority.
     let settings = session
         .apply_setting(CadSettingKey::PickboxSize, CadSettingValue::Number(6))
         .expect("an in-range pickbox size");
     assert_eq!(settings.pickbox_size, 6);
     assert_eq!(
-        session.render_session().overlays().pickbox_logical_pixels,
-        6.0,
-        "the cursor overlay sizes its box from the configured pickbox"
-    );
-    assert_eq!(
-        session.render_session().overlays().crosshair_percent,
-        30,
+        settings.crosshair_percent, 30,
         "the pickbox never changes the crosshair"
     );
 
@@ -186,8 +176,7 @@ fn session_display_settings_reach_the_live_render_inputs() {
         .expect("an in-range aperture size");
     assert_eq!(settings.aperture_size, 24);
     assert_eq!(
-        session.render_session().overlays().pickbox_logical_pixels,
-        6.0,
+        settings.pickbox_size, 6,
         "the aperture never changes the pickbox"
     );
 }

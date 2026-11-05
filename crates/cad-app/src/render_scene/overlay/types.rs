@@ -215,7 +215,7 @@ impl PartialEq for PointDisplayStyle {
 /// All fields are pure session state; none of them writes the database. An
 /// empty selection and a `None` preview produce no overlay batches, which is
 /// an explicit empty overlay rather than an error.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct OverlayInputs {
     pub selection: SelectionSet,
     /// Entity-level hovered refs.
@@ -244,8 +244,8 @@ pub struct OverlayInputs {
     /// Resolved object-snap hints (the markers the measurement snap engine
     /// reports), drawn as a distinct overlay. Empty by default, so a host that
     /// never feeds snaps gets no snap-hint batch. Gated by
-    /// `visibility.snap_hints` separately from the pointer-cursor crosses in
-    /// [`preview_overlay`]; the two are different concepts.
+    /// `visibility.snap_hints` separately from the pointer-cursor transient (a
+    /// renderer-owned overlay, ADR 0028); the two are different concepts.
     pub snap_hints_input: Vec<SnapHint>,
     /// Which derived overlays the host wants drawn. Defaults to all-on
     /// ([`OverlayVisibility::default`]) so a caller that never manages overlay
@@ -294,65 +294,25 @@ pub struct OverlayInputs {
     /// Current view scale in **world units per logical pixel** of the active 2D
     /// view (the same quantity `Viewport::world_per_px` reports), used to size
     /// the screen-relative overlays — the object-snap markers
-    /// ([`PreviewOptions::for_view_scale`]) and the pointer cursor crosshair and
-    /// pickbox (`cursor_overlay`) — from a fixed logical-pixel size. `None` in a
-    /// 3D view or with no valid view, so a screen-relative size has no domain.
+    /// ([`PreviewOptions::for_view_scale`]) — from a fixed logical-pixel size.
+    /// `None` in a 3D view or with no valid view, so a screen-relative size has no
+    /// domain.
     ///
     /// It is derived from the camera, so it changes exactly when
     /// [`Self::viewport_bounds`] does; it is therefore deliberately **not** part
     /// of [`overlay_fingerprint`] (the bounds already track a camera change, so
     /// the overlay still rebuilds on zoom without adding a second camera signal).
+    ///
+    /// The pointer cursor is **not** part of these inputs (ADR 0028): the
+    /// renderer owns it as a transient fed by the host, so a cursor move never
+    /// changes this struct or the overlay fingerprint.
     pub view_scale: Option<f64>,
-    /// The pointer cursor's world position on the work plane, or `None` when
-    /// there is no cursor (the pointer is not on the surface, or the view is 3D
-    /// and has no planar cursor). Drawn as a viewport-spanning crosshair with a
-    /// square pickbox at this point (see `cursor_overlay`); `None` produces no
-    /// cursor batch — an explicit empty overlay, never a fabricated one. It is
-    /// part of [`overlay_fingerprint`], so a moved cursor rebuilds the transient
-    /// overlay so the crosshair follows it.
-    pub cursor: Option<Point3>,
-    /// Crosshair arm length as an integer percentage of each arm's full
-    /// cursor-to-edge span ([`DEFAULT_CROSSHAIR_PERCENT`] is the historical
-    /// full-viewport crosshair). The pickbox is deliberately unaffected: it is
-    /// the pick tolerance, not a display preference. Part of
-    /// [`overlay_fingerprint`], so a resized crosshair rebuilds the overlay.
-    pub crosshair_percent: u32,
-    /// Pickbox half-side in logical pixels
-    /// ([`cad_domain::TolerancePolicy::pickbox_logical_pixels`], the AutoCAD
-    /// `PICKBOX` analogue). It is the configured pickbox size, mapped from the
-    /// effective `view.pickbox.sizePixels` by the host, so the drawn box and the
-    /// click predicate can never disagree. Part of [`overlay_fingerprint`], so a
-    /// resized pickbox rebuilds the overlay.
-    pub pickbox_logical_pixels: f64,
-}
-
-impl Default for OverlayInputs {
-    fn default() -> Self {
-        Self {
-            selection: SelectionSet::default(),
-            hovered: SelectionSet::default(),
-            hidden: SelectionSet::default(),
-            measurement: None,
-            draw_preview: None,
-            selection_box: None,
-            snap_hints_input: Vec::new(),
-            visibility: OverlayVisibility::default(),
-            viewport_bounds: None,
-            point_markers: Vec::new(),
-            point_display_style: PointDisplayStyle::default(),
-            grip_markers: Vec::new(),
-            view_scale: None,
-            cursor: None,
-            crosshair_percent: DEFAULT_CROSSHAIR_PERCENT,
-            pickbox_logical_pixels: cad_domain::TolerancePolicy::default().pickbox_logical_pixels,
-        }
-    }
 }
 
 impl OverlayInputs {
     /// Whether every overlay input is empty (no highlight, no hover/hidden
     /// flags, no preview, no box selection, no resolved snap hints, no visible
-    /// POINT markers, no grip markers, no pointer cursor).
+    /// POINT markers, no grip markers).
     pub fn is_empty(&self) -> bool {
         self.selection.is_empty()
             && self.hovered.is_empty()
@@ -363,7 +323,6 @@ impl OverlayInputs {
             && self.snap_hints_input.is_empty()
             && self.point_markers.is_empty()
             && self.grip_markers.is_empty()
-            && self.cursor.is_none()
     }
 }
 

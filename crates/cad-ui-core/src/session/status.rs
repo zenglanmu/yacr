@@ -494,17 +494,18 @@ pub struct CadStatus {
     /// this is `true`, so the system arrow never sits on top of the drawn
     /// crosshair — and, just as important, a **3D view keeps the system arrow**
     /// (the crosshair is 2D-only, so blanking it there would leave no pointer at
-    /// all). Derived from the same overlay input the renderer draws from, never
-    /// from a guess about the view mode.
+    /// all). Derived from the host's single cursor source
+    /// (`HostCore::cursor_world`), the same derivation fed to the renderer
+    /// transient, never from a guess about the view mode.
     pub crosshair: bool,
     /// The cursor's position in **world (drawing) coordinates**, or `null`.
     ///
     /// Wire shape: `cursorWorld: [x, y, z] | null`, always present. It is the
     /// very same [`cad_app::Point3`] the renderer draws the crosshair from —
-    /// `cad_engine::render::RenderSessionHandle::overlays().cursor`, which the
-    /// host only publishes for a valid 2D view with a pointer on the surface —
-    /// never a re-derived pointer guess, so the readout can never disagree with
-    /// the drawn crosshair.
+    /// `HostCore::cursor_world`, the single host cursor source that is also fed to
+    /// `RenderSessionHandle::set_cursor_transient` and is only non-`None` for a
+    /// valid 2D view with a pointer on the surface — never a re-derived pointer
+    /// guess, so the readout can never disagree with the drawn crosshair.
     ///
     /// `null` means "no reliable world coordinate" (a 3D view, a pointer outside
     /// the surface, or no session at all). It is **not** the origin: a session

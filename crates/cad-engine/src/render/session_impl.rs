@@ -186,8 +186,8 @@ impl RenderSessionHandle {
             probe.viewport_bounds = overlays.viewport_bounds;
             // `view_scale` is camera-derived exactly like the bounds, so it is
             // re-scoped with them: a zoom must re-size the screen-relative
-            // overlay batches (snap markers, cursor pickbox) through the cheap
-            // content path, not through a full input advance.
+            // overlay batches (snap markers) through the cheap content path, not
+            // through a full input advance.
             probe.view_scale = overlays.view_scale;
             probe == overlays
         };
@@ -205,12 +205,14 @@ impl RenderSessionHandle {
             state.advance_content();
         } else if visual_changed {
             // Real overlay batches changed (sub-element highlight, previews,
-            // snap hints, cursor crosshair/pickbox, visibility): today's full
-            // immediate path. When the same change also moves the entity-level
-            // hover/selection/hidden set, resolve that flags delta synchronously
-            // first: the pending frame then pushes it via the runtime's flags
-            // catch-up instead of waiting for the publication, so the tint never
-            // lags a moving cursor (and never reverts to an older set).
+            // snap hints, visibility): today's full immediate path. The pointer
+            // cursor is **not** one of these inputs (ADR 0028: a renderer
+            // transient), so a pure move never reaches this branch. When the same
+            // change also moves the entity-level hover/selection/hidden set,
+            // resolve that flags delta synchronously first: the pending frame then
+            // pushes it via the runtime's flags catch-up instead of waiting for
+            // the publication, so the tint never lags a moving cursor (and never
+            // reverts to an older set).
             if flags_changed {
                 state.refresh_flags_only();
             }
@@ -228,6 +230,30 @@ impl RenderSessionHandle {
             state.advance_input();
         }
         true
+    }
+
+    /// Set (or clear) the renderer-owned transient cursor (ADR 0028).
+    ///
+    /// A plain cursor move is **not** a scene mutation: this only stores the
+    /// bounded geometry and invalidates the frame (`dirty.invalidate()`), so the
+    /// next render updates the renderer's transient instance buffer. It never
+    /// calls `advance_input`/`advance_content`, never schedules preparation, never
+    /// publishes a scene revision and never commits. Returns whether the stored
+    /// state changed.
+    pub fn set_cursor_transient(&self, cursor: Option<cad_scene::TransientCursor>) -> bool {
+        let mut state = self.0.borrow_mut();
+        let cursor = cursor.filter(|cursor| !cursor.segments.is_empty());
+        if state.runtime.cursor_transient == cursor {
+            return false;
+        }
+        state.runtime.cursor_transient = cursor;
+        state.runtime.dirty.invalidate();
+        true
+    }
+
+    /// The transient cursor currently stored by [`Self::set_cursor_transient`].
+    pub fn cursor_transient(&self) -> Option<cad_scene::TransientCursor> {
+        self.0.borrow().runtime.cursor_transient.clone()
     }
 
     /// CPU-only scene preparation; safe to drive without constructing a UI.
@@ -738,15 +764,15 @@ impl RenderSessionHandle {
                 );
             }
         }
-        // The strict gate is not met: newer transient overlay inputs (cursor
-        // crosshair/pickbox, snap hints, previews, sub-element highlight, grid
-        // extent) are still being prepared. Present the **resident** scene — the
-        // whole thing, suffix included — over the latest camera and label it
-        // honestly. A plain cursor move must never truncate the overlay suffix it
-        // is updating: that dropped the cursor and reverted the hover tint to an
-        // older set for one frame, which is the entity flicker this path used to
-        // cause. Only a base that is not resident is a strict wait (never a
-        // new/uncommitted base).
+        // The strict gate is not met: newer transient overlay inputs (snap
+        // hints, previews, sub-element highlight, grid extent) are still being
+        // prepared. Present the **resident** scene — the whole thing, suffix
+        // included — over the latest camera and label it honestly. A hovering or
+        // previewing update must never truncate the overlay suffix it is updating:
+        // that reverted the hover tint to an older set for one frame, which is the
+        // entity flicker this path used to cause. The pointer cursor is not part of
+        // these inputs (ADR 0028: renderer transient). Only a base that is not
+        // resident is a strict wait (never a new/uncommitted base).
         if resident_scene_presentable(&state) {
             return state.runtime.render_if_dirty(
                 &view,

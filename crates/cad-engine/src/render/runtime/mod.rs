@@ -353,6 +353,11 @@ pub struct CadRenderRuntime {
     /// Cumulative overlay-suffix commits (suffix-only uploads). A camera-only
     /// navigation must leave this flat.
     overlay_suffix_commits: u64,
+    /// The renderer-owned transient cursor (ADR 0028). This is **not** scene
+    /// content: it never enters `OverlayInputs`, preparation/publication or a
+    /// commit. A move only stores it and invalidates the frame, so the next
+    /// render writes the renderer's small instance buffer.
+    pub cursor_transient: Option<cad_scene::TransientCursor>,
     /// The last committed overlay delta, retained by strong reference.
     ///
     /// An entity-only selection change republishes the scene with the **same**
@@ -410,6 +415,7 @@ impl Default for CadRenderRuntime {
             pending_upload: None,
             presented_revision: None,
             overlay_suffix_commits: 0,
+            cursor_transient: None,
             applied_highlight: None,
             image_diagnostic: None,
             flags_diagnostic: None,

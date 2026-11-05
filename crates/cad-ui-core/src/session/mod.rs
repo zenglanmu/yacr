@@ -738,16 +738,13 @@ impl CadSession {
         // view with a pointer position on the surface. The frontend hides the
         // system cursor exactly when this is true, so a 3D view (which draws no
         // crosshair) keeps the system arrow instead of being left pointerless.
-        // Read from the same overlay input the renderer draws the crosshair from
-        // (`HostCore::sync_render` only publishes it for a valid 2D view), never
-        // from a guess about the view mode. The very same point is projected as
-        // the status-bar world coordinate, so the readout and the drawn crosshair
-        // can never disagree.
+        // Read from the host's cursor source (the same derivation the renderer
+        // transient uses), never from a guess about the view mode. The very same
+        // point is projected as the status-bar world coordinate, so the readout and
+        // the drawn crosshair can never disagree.
         let cursor_world = self
             .core
-            .render
-            .overlays()
-            .cursor
+            .cursor_world()
             .map(|point| [point.x, point.y, point.z]);
         let crosshair = cursor_world.is_some();
         // Technical error sources, in priority order: a host status failure

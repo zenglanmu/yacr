@@ -427,7 +427,7 @@ impl CadSceneController {
                         overlay.merge(box_selection_overlay(selection_box, document));
                     }
                     // Resolved object-snap hint markers are a separate concept
-                    // from the pointer-cursor crosses above: distinct shapes
+                    // from the renderer-owned pointer cursor: distinct shapes
                     // encoding the snap kind, at their own draw order. Only
                     // built when the host fed hints in *and* the overlay flag is
                     // on; otherwise no batch, never an empty fabricated one.
@@ -438,19 +438,6 @@ impl CadSceneController {
                             &preview_options,
                         ));
                     }
-                    // The pointer cursor crosshair + pickbox (renderer-only; the
-                    // CAD partition has no DOM overlay). Drawn last, at the
-                    // highest `draw_order`, so it is never occluded by geometry
-                    // or the transient chrome above. An absent cursor or a 3D
-                    // view yields no batch (an explicit empty overlay).
-                    overlay.merge(cursor_overlay(
-                        overlays.cursor,
-                        overlays.viewport_bounds,
-                        overlays.view_scale,
-                        overlays.pickbox_logical_pixels,
-                        overlays.crosshair_percent,
-                        document,
-                    ));
                 }
                 let delta = Arc::new(SceneDelta {
                     stamp: stamp.clone(),

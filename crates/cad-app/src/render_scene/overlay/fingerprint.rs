@@ -87,22 +87,6 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
         }
         None => 0u8.hash(&mut hasher),
     }
-    // The pointer cursor is overlay geometry: a moved cursor must rebuild the
-    // transient overlay so the crosshair follows it. `view_scale` is deliberately
-    // not hashed: it is camera-derived and changes exactly when the bounds above
-    // do, so the bounds already invalidate the overlay on any zoom. The crosshair
-    // percentage **is** hashed: it changes the crosshair's own geometry. The
-    // pickbox size is hashed for the same reason (its box is overlay geometry).
-    5u8.hash(&mut hasher);
-    inputs.crosshair_percent.hash(&mut hasher);
-    inputs.pickbox_logical_pixels.to_bits().hash(&mut hasher);
-    match inputs.cursor {
-        Some(point) => {
-            1u8.hash(&mut hasher);
-            hash_point(&mut hasher, point);
-        }
-        None => 0u8.hash(&mut hasher),
-    }
     // Visible POINT markers are overlay geometry: a changed point set (a new or
     // erased POINT, or a different drawing) must rebuild the transient overlay.
     // The marker size is derived from `viewport_bounds` (hashed above), so a

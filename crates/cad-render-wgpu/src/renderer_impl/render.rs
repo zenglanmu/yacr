@@ -787,7 +787,7 @@ impl Renderer {
         ) {
             (Some(slot), Some(buffer)) if overlay_plan.transient => {
                 let count = (self.cursor_transient_packed.len()
-                    / plan::LINE_INSTANCE_STRIDE as usize) as u32;
+                    / self.transient_line_stride() as usize) as u32;
                 (count > 0).then_some((buffer, count, slot))
             }
             _ => None,

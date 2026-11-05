@@ -900,28 +900,47 @@ fn clear_hover_drops_the_pending_dwell_as_well_as_the_applied_tint() {
     assert!(core.hover.pending.borrow().is_none());
 }
 
-// --- pointer cursor overlay input (crosshair + pickbox) ----------------------
+// --- pointer cursor transient (renderer-owned, ADR 0028) ---------------------
 
 #[test]
-fn an_idle_move_publishes_the_pointer_cursor_overlay_input() {
+fn an_idle_move_feeds_the_renderer_cursor_transient() {
     let core = hover_core();
     core.controller.borrow_mut().fit().expect("the demo fits");
     let pixel = [200.0, 150.0];
     assert!(
-        core.render.overlays().cursor.is_none(),
-        "no cursor overlay before any move"
+        core.render.cursor_transient().is_none(),
+        "no cursor transient before any move"
     );
+    assert!(core.cursor_world().is_none());
 
+    let suffix_before = core.render.overlay_suffix_commits();
     dispatch_pointer(&core, hover_cursor(&core, pixel));
 
-    let overlays = core.render.overlays();
-    let cursor = overlays
-        .cursor
-        .expect("a move publishes the cursor world point");
-    let scale = overlays
-        .view_scale
-        .expect("a 2D view publishes the view scale");
-    assert!(scale.is_finite() && scale > 0.0);
+    assert_eq!(
+        core.render.overlay_suffix_commits(),
+        suffix_before,
+        "a pure move feeds the transient only: no scene suffix commit"
+    );
+    let cursor_world = core
+        .cursor_world()
+        .expect("a 2D pointer move publishes the cursor world point");
+    let transient = core
+        .render
+        .cursor_transient()
+        .expect("the same sync feeds the renderer-owned transient cursor");
+    assert_eq!(
+        transient.draw_order,
+        cad_app::render_scene::CURSOR_DRAW_ORDER,
+        "the transient uses the pointer draw order (between preview and snap)"
+    );
+    assert_eq!(
+        transient.segments.len(),
+        6,
+        "crosshair + pickbox in a 2D view"
+    );
+    // The crosshair passes through exactly the status/readout world point.
+    assert!((transient.segments[0][0].y - cursor_world.y).abs() < 1e-9);
+    assert!((transient.segments[1][0].x - cursor_world.x).abs() < 1e-9);
     // The world point is the viewport's own screen_to_world of the pixel.
     let expected = {
         let c = core.controller.borrow();
@@ -930,10 +949,12 @@ fn an_idle_move_publishes_the_pointer_cursor_overlay_input() {
             .screen_to_world(pixel, viewport.logical_size)
             .expect("the 2D plan view projects the pixel")
     };
-    assert!((cursor.x - expected.x).abs() < 1e-9);
-    assert!((cursor.y - expected.y).abs() < 1e-9);
+    assert!((cursor_world.x - expected.x).abs() < 1e-9);
+    assert!((cursor_world.y - expected.y).abs() < 1e-9);
 
-    // Leaving the surface clears the cursor overlay input (never a stale one).
+    // Leaving the surface clears both the transient and the readout (never a
+    // stale cursor).
     dispatch_pointer(&core, InteractionRequest::ClearCursor);
-    assert!(core.render.overlays().cursor.is_none());
+    assert!(core.render.cursor_transient().is_none());
+    assert!(core.cursor_world().is_none());
 }

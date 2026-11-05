@@ -854,11 +854,11 @@ fn snap_marker_size_is_a_fixed_screen_size_through_the_scene_assembly() {
     );
 }
 
-/// The pointer cursor crosshair + pickbox is built by the scene assembly from the
-/// cursor world point and the view scale, at the highest draw order, and is
-/// absent when either is missing (defect #1).
+/// The pointer cursor is a **renderer transient**, not scene content (ADR
+/// 0028): the scene assembly must emit no `CURSOR_DRAW_ORDER` batch, while the
+/// pure `cursor_geometry` still produces the legacy segment pairs/colour/order.
 #[test]
-fn the_cursor_overlay_is_built_from_the_cursor_and_the_view() {
+fn the_pointer_cursor_is_a_renderer_transient_not_a_scene_batch() {
     use cad_domain::Point3;
     let db = db_with_line();
     let layers = LayerOverrideSet::new();
@@ -879,11 +879,10 @@ fn the_cursor_overlay_is_built_from_the_cursor_and_the_view() {
         y: 2.0,
         z: 0.0,
     };
-    let build = |cursor: Option<Point3>, view_scale: Option<f64>| {
+    let prepare = |bounds, view_scale| {
         let overlays = OverlayInputs {
             viewport_bounds: bounds,
             view_scale,
-            cursor,
             visibility: OverlayVisibility {
                 axes: false,
                 grid: false,
@@ -902,51 +901,89 @@ fn the_cursor_overlay_is_built_from_the_cursor_and_the_view() {
                 &overlays,
             )
             .unwrap();
-        let ready = controller.ready.as_ref().unwrap().clone();
+        controller.ready.as_ref().unwrap().clone()
+    };
+
+    // Even a 2D view with bounds and a scale no longer commits a cursor batch:
+    // the renderer owns that geometry now.
+    let ready = prepare(bounds, Some(0.25));
+    assert!(
         ready
             .highlight
             .added
             .iter()
-            .filter(|batch| batch.draw_order == crate::render_scene::CURSOR_DRAW_ORDER)
-            .cloned()
-            .collect::<Vec<_>>()
-    };
-
-    let batches = build(Some(cursor), Some(0.25));
-    assert_eq!(batches.len(), 1, "one bounded cursor batch");
-    // Crosshair (2 segments = 4 vertices) + pickbox (4 segments = 8 vertices).
-    assert_eq!(batches[0].vertices.len(), 12);
-    assert_eq!(batches[0].color, crate::render_scene::CURSOR_COLOR);
-    assert!(
-        batches[0].draw_order > crate::render_scene::PREVIEW_DRAW_ORDER,
-        "the cursor draws above every other overlay"
-    );
-    // The pickbox half-side is the pick tolerance × the view scale.
-    let half = {
-        let tail = &batches[0].vertices[batches[0].vertices.len() - 8..];
-        let xs: Vec<f64> = tail
-            .iter()
-            .map(|v| batches[0].local_origin.x + f64::from(v[0]))
-            .collect();
-        (xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
-            - xs.iter().cloned().fold(f64::INFINITY, f64::min))
-            * 0.5
-    };
-    let expected = cad_domain::TolerancePolicy::default().pickbox_logical_pixels * 0.25;
-    assert!(
-        (half - expected).abs() < 1e-6,
-        "pickbox half-side must be PICKBOX × scale: {half} vs {expected}"
+            .all(|batch| batch.draw_order != crate::render_scene::CURSOR_DRAW_ORDER),
+        "the pointer cursor must not be a scene/preparation/commit batch"
     );
 
-    // No cursor position produces no cursor batch; a missing view scale still
-    // draws the crosshair but omits the pickbox (a screen-relative size has no
-    // domain), never a fabricated box.
-    assert!(build(None, Some(0.25)).is_empty());
-    let no_scale = build(Some(cursor), None);
-    assert_eq!(no_scale.len(), 1);
+    // The pure geometry still describes the historical batch exactly: two
+    // crosshair arms spanning the view + four pickbox sides at the pick radius.
+    let geometry = crate::render_scene::cursor_geometry(
+        Some(cursor),
+        bounds,
+        Some(0.25),
+        cad_domain::TolerancePolicy::default().pickbox_logical_pixels,
+        100,
+    )
+    .expect("a valid 2D cursor has transient geometry");
+    assert_eq!(geometry.draw_order, crate::render_scene::CURSOR_DRAW_ORDER);
+    let [r, g, b] = cad_scene::sanitize_color(crate::render_scene::CURSOR_COLOR);
+    assert_eq!(geometry.color, [r, g, b, 1.0]);
+    assert_eq!(geometry.segments.len(), 6);
     assert_eq!(
-        no_scale[0].vertices.len(),
-        4,
-        "crosshair only, no pickbox, when the view scale is missing"
+        [geometry.segments[0][0].x, geometry.segments[0][0].y],
+        [-10.0, 2.0],
+        "crosshair arm 1 starts at the view's min x"
     );
+    assert_eq!(
+        [geometry.segments[0][1].x, geometry.segments[0][1].y],
+        [10.0, 2.0],
+        "crosshair arm 1 ends at the view's max x"
+    );
+    assert_eq!(
+        [geometry.segments[1][0].x, geometry.segments[1][0].y],
+        [1.0, -5.0]
+    );
+    assert_eq!(
+        [geometry.segments[1][1].x, geometry.segments[1][1].y],
+        [1.0, 5.0]
+    );
+    // Pickbox half-side = 3 px × 0.25 world/px = 0.75 around the cursor.
+    let pickbox_xs: Vec<f64> = geometry
+        .segments
+        .iter()
+        .skip(2)
+        .flat_map(|segment| segment.iter().map(|point| point.x))
+        .collect();
+    let half = (pickbox_xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+        - pickbox_xs.iter().cloned().fold(f64::INFINITY, f64::min))
+        * 0.5;
+    assert!(
+        (half - 0.75).abs() < 1e-9,
+        "pinned pickbox geometry: {half}"
+    );
+
+    // No cursor point or no view rectangle is an explicit empty, never a batch.
+    assert!(crate::render_scene::cursor_geometry(
+        None,
+        bounds,
+        Some(0.25),
+        cad_domain::TolerancePolicy::default().pickbox_logical_pixels,
+        100
+    )
+    .is_none());
+    assert!(crate::render_scene::cursor_geometry(
+        Some(cursor),
+        None,
+        Some(0.25),
+        cad_domain::TolerancePolicy::default().pickbox_logical_pixels,
+        100
+    )
+    .is_none());
+    // A 3D view (no bounds) still commits no cursor batch either.
+    assert!(prepare(None, None)
+        .highlight
+        .added
+        .iter()
+        .all(|batch| batch.draw_order != crate::render_scene::CURSOR_DRAW_ORDER));
 }

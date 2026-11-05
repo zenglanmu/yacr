@@ -571,9 +571,10 @@ fn a_3d_view_keeps_the_system_cursor() {
 // --- status-bar world coordinate (the drawing-unit readout) -----------------
 
 /// The status bar's coordinate readout is the **very same** world point the
-/// renderer draws the crosshair from: a 2D pointer publishes one overlay cursor,
-/// and the status projects exactly that point (`cursorWorld`), never a
-/// re-derived pointer guess that could disagree with the drawn crosshair.
+/// renderer draws the crosshair from: a 2D pointer publishes one host cursor
+/// source (`HostCore::cursor_world`, also fed to the renderer transient), and the
+/// status projects exactly that point (`cursorWorld`), never a re-derived pointer
+/// guess that could disagree with the drawn crosshair.
 #[test]
 fn the_world_cursor_is_exactly_the_overlay_cursor() {
     let session = fresh_session();
@@ -586,16 +587,19 @@ fn the_world_cursor_is_exactly_the_overlay_cursor() {
     session
         .handle_input(&move_input(200.0, 150.0))
         .expect("the 2D move is admitted");
-    let overlay = session
-        .render_session()
-        .overlays()
-        .cursor
-        .expect("a 2D pointer move publishes the overlay cursor");
+    let world = session
+        .core
+        .cursor_world()
+        .expect("a 2D pointer move publishes the host cursor source");
+    assert!(
+        session.render_session().cursor_transient().is_some(),
+        "the same sync feeds the renderer-owned transient cursor"
+    );
     let status = session.snapshot(None, None, 0);
     assert_eq!(
         status.cursor_world,
-        Some([overlay.x, overlay.y, overlay.z]),
-        "the readout must be the overlay cursor itself, field for field"
+        Some([world.x, world.y, world.z]),
+        "the readout must be the host cursor source itself, field for field"
     );
     assert_eq!(
         status.cursor_world.is_some(),

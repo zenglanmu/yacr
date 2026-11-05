@@ -1,3 +1,35 @@
+## 2026-11-06 光标移出场景提交链：renderer transient cursor（ADR 0028，Phase 2）
+
+Phase 1（commit `ca18512`）把 run-free suffix commit 的 O(场景) 工作去掉后，光标仍属于
+`OverlayInputs`，每次移动仍是一次场景准备 + suffix commit。本轮按 ADR 0028 把 crosshair/pickbox
+改成 renderer transient：
+
+- **2a（commit `363cabf`）**：`cad_scene::TransientCursor` +
+  `cad_app::render_scene::cursor_geometry`；renderer 固定 6 个 line instance 的
+  `VERTEX|COPY_DST` 缓冲（pick key 0），以 `CURSOR_DRAW_ORDER = 2_500_000` 合并进 overlay 排序
+  （preview < cursor < snap），一个 transient uniform slot；`FrameStats.transient_draws` 只计入
+  `draw_calls`；id/pick pass 不绑定它。2a 保持旧光标路径 live，行为不变。
+- **2b**：`RenderSessionHandle::set_cursor_transient` 只存值 + `dirty.invalidate()`；`render_frame`
+  在 dirty 分支喂 renderer；host `sync_render` 用 `cursor_geometry` 喂 transient；状态
+  `cursorWorld`/`crosshair` 改读 `HostCore::cursor_world()`；删除
+  `OverlayInputs.{cursor,crosshair_percent,pickbox_logical_pixels}`、fingerprint 段、
+  `render_scene` merge 与 `cursor_overlay`。snap hints/preview 仍是 committed overlay。
+- **2a 的 latent bug（真实 GPU 首跑发现并修）**：transient 缓冲最初固定 56 B stride，但
+  accelerated tier 的 `line_instanced_pipeline` 用 64 B pulled-store layout；>1 instance 会错读。
+  现按 tier 补 8 个零字节（336/384 B），引擎多段光标 GPU 契约覆盖。
+- **实测**（真实 P620/Vulkan/Wayland，`complex-test.dwg`；合成 DOM pointermove，非真鼠标；
+  80 s 延迟确保 base commit 已完成）：173 次 host 接收的 `pointer_move`，该窗口内 **0 次
+  `upload=seq=`、0 次 suffix commit**；`suffix_commits` 1→1、`uploads_started` 3→3、
+  `gc_skipped=1`、`pulled_suffix_skips=1`、`draw_plan_rebuilds=2` 全部不变。`actual-render`
+  174 次，`frame_us` p50 **4.09 ms**（p90 14.10，max 15.65），`cpu_ms` p50 3.6、`plan_ms` 0.3、
+  `wait_ms` 4.1；`prog=173665/173665 complete=true`。窗口内有一次非 cursor 的 ready 发布
+  （`applied_rev` 3→4，无 upload），不影响上述持久计数。
+- **证据边界**：真实 GPU 契约（P620/Vulkan）证明 offscreen base 像素不变、cursor 像素移动/清除、
+  buffer identity、pick-through、设备重建；host/ui-core 测试证明 transient feed 与
+  `cursorWorld`/`crosshair` 同源。**没有**真实鼠标、截屏/像素验收或视觉确认；其他载体未编译/
+  未运行，NOT VERIFIED；工具态 snap-hint churn 仍会 suffix commit（本轮范围外）。
+- **下一步**：Phase 3 状态事件节流（语义化 `status-changed` + 轻量 `cursor-changed`）。
+
 ## 2026-11-05 鼠标移动卡顿：run-free overlay suffix 快速路径（Phase 1）
 
 用户报告：`complex-test.dwg`、关闭 hover preview、开启对象捕捉后，移动鼠标仍有迟滞；底图明明

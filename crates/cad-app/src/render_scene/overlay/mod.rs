@@ -32,7 +32,7 @@
 //! | grip markers ([`GRIP_MARKER_DRAW_ORDER`]) | `950_000` |
 //! | box-selection rubber band ([`BOX_SELECT_DRAW_ORDER`]) | `1_750_000` |
 //! | tool preview ([`PREVIEW_DRAW_ORDER`]) | `2_000_000` |
-//! | pointer cursor crosshair + pickbox ([`CURSOR_DRAW_ORDER`]) | `2_500_000` |
+//! | pointer cursor transient, renderer-owned ([`CURSOR_DRAW_ORDER`]) | `2_500_000` |
 //! | object-snap hints ([`SNAP_HINT_DRAW_ORDER`]) | `3_000_000` |
 //!
 //! A selection is a transient decoration; a tool preview is the live feedback
@@ -43,12 +43,14 @@
 //! **selected** entities, so they draw immediately above the selection
 //! highlight — a handle must stay legible on the tinted entity it belongs to —
 //! while still sitting below the box-selection band and every live gesture
-//! overlay. The pointer cursor crosshair and its pickbox are the pointer itself,
-//! so they draw above the preview — the rubber band the user is dragging must
-//! never hide the pointer it is anchored to. The object-snap hints draw **above
-//! the crosshair**: the snap marker is what the user reads at the snap point,
-//! and when the pointer sits on the snap target the crosshair's pickbox would
-//! otherwise be painted over it, hiding the snap type exactly when it matters.
+//! overlay. The pointer cursor crosshair and its pickbox are a renderer-owned
+//! transient (ADR 0028) merged into this order at `CURSOR_DRAW_ORDER`, so they
+//! draw above the preview — the rubber band the user is dragging must never hide
+//! the pointer it is anchored to. The object-snap hints (still committed overlay
+//! batches) draw **above the crosshair**: the snap marker is what the user reads
+//! at the snap point, and when the pointer sits on the snap target the crosshair's
+//! pickbox would otherwise be painted over it, hiding the snap type exactly when
+//! it matters.
 //!
 //! The implementation is split across the submodules of this directory; every
 //! moved item is re-exported here under its original name, so the module path
@@ -95,5 +97,4 @@ pub use preview::*;
 pub use selection::*;
 pub use types::*;
 
-use preview::line_batch;
 use types::SNAP_HINT_CIRCLE_SEGMENTS;

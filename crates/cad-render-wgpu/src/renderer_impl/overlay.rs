@@ -53,6 +53,17 @@ pub(super) struct OverlayOutcome {
 }
 
 impl Renderer {
+    /// The instanced-line slot-1 stride of the live pipeline: 56 B on the
+    /// universal tier, 64 B on the accelerated tier (the same buffers double as
+    /// pulled storage). The transient cursor's buffer/packing must match it.
+    pub(super) fn transient_line_stride(&self) -> u32 {
+        if self.render_tier == RenderTier::Accelerated {
+            plan::PULLED_LINE_STRIDE
+        } else {
+            plan::LINE_INSTANCE_STRIDE
+        }
+    }
+
     /// Set (or clear) the renderer-owned transient cursor.
     ///
     /// Returns whether the stored state changed. An empty segment list is
@@ -68,13 +79,21 @@ impl Renderer {
         if self.cursor_transient == cursor {
             return false;
         }
-        self.cursor_transient_packed = cursor
-            .as_ref()
-            .map(|cursor| line_instance_bytes(&plan::pack_transient_cursor(cursor)))
-            .unwrap_or_default();
+        self.repack_cursor_transient(&cursor);
         self.cursor_transient = cursor;
         self.cursor_transient_dirty = true;
         true
+    }
+
+    /// Pack `cursor`'s instances at the live pipeline stride.
+    fn repack_cursor_transient(&mut self, cursor: &Option<cad_scene::TransientCursor>) {
+        let stride = self.transient_line_stride();
+        self.cursor_transient_packed = cursor
+            .as_ref()
+            .map(|cursor| {
+                plan::transient_instance_bytes(&plan::pack_transient_cursor(cursor), stride)
+            })
+            .unwrap_or_default();
     }
 
     /// The transient cursor last set by [`Self::set_cursor_transient`].
@@ -98,8 +117,15 @@ impl Renderer {
         let (Some(device), Some(queue)) = (self.device.clone(), self.queue.clone()) else {
             return;
         };
-        let size =
-            u64::from(plan::LINE_INSTANCE_STRIDE) * cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS as u64;
+        let stride = self.transient_line_stride();
+        // A device generation change keeps the CPU cursor but marks it dirty: the
+        // live tier's pipeline stride is only known after attach, so repack here
+        // (56 B universal / 64 B accelerated) before uploading.
+        if self.cursor_transient_dirty {
+            let cursor = self.cursor_transient.clone();
+            self.repack_cursor_transient(&cursor);
+        }
+        let size = u64::from(stride) * cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS as u64;
         let created = match self.cursor_transient_buffer.as_ref() {
             Some(buffer) if buffer.size() >= size => false,
             _ => {

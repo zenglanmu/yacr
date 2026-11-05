@@ -149,9 +149,16 @@ fn live_draw_preview_is_an_overlay_suffix_and_never_touches_the_base() {
     });
     // A still cursor away from every probe (and from every preview midpoint
     // below), so the baseline contains only the two base lines plus the cursor.
-    let mut overlays = session.overlays();
-    overlays.cursor = Some(p(-150.0, 100.0));
-    assert!(session.set_overlays(overlays));
+    // ADR 0028: the pointer cursor is a renderer transient now, fed directly.
+    assert!(
+        session.set_cursor_transient(cad_app::render_scene::cursor_geometry(
+            Some(p(-150.0, 100.0)),
+            Some((p(-200.0, -120.0), p(200.0, 120.0))),
+            Some(1.0),
+            3.0,
+            100,
+        ))
+    );
     session.prepare().unwrap();
     drive_uploads(&session);
     session.apply_ready_updates().unwrap();

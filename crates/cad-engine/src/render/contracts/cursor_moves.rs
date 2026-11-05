@@ -1,13 +1,14 @@
 use super::*;
 
 // ---------------------------------------------------------------------------
-// A plain cursor move is not a scene mutation (real adapter).
+// A plain cursor move is a renderer transient, not a scene mutation (real
+// adapter). ADR 0028 phase 2b: the cursor left the scene/preparation/commit
+// chain entirely; only `set_cursor_transient` + a frame invalidation remain.
 // ---------------------------------------------------------------------------
 
 /// Four lines forming a frame: entity 1 is the bottom horizontal (the one the
-/// cursor hovers), 2 the top horizontal, 3/4 the verticals. They are far enough
-/// apart that one pixel per entity is unambiguous at 400x240 with
-/// `world_per_px = 1.0`.
+/// cursor hovers), 2 the top horizontal, 3/4 the verticals. At 400x240 with
+/// `world_per_px = 1.0` they sit on unambiguous pixels.
 #[cfg(not(target_arch = "wasm32"))]
 fn db_with_four_lines() -> DrawingDatabase {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
@@ -17,45 +18,49 @@ fn db_with_four_lines() -> DrawingDatabase {
         visible: true,
     })
     .unwrap();
-    b.insert_entity(line_entity(
-        1,
-        SpaceId::Model,
-        p(-80.0, -40.0),
-        p(80.0, -40.0),
-    ))
-    .unwrap();
-    b.insert_entity(line_entity(
-        2,
-        SpaceId::Model,
-        p(-80.0, 40.0),
-        p(80.0, 40.0),
-    ))
-    .unwrap();
-    b.insert_entity(line_entity(
-        3,
-        SpaceId::Model,
-        p(-80.0, -40.0),
-        p(-80.0, 40.0),
-    ))
-    .unwrap();
-    b.insert_entity(line_entity(
-        4,
-        SpaceId::Model,
-        p(80.0, -40.0),
-        p(80.0, 40.0),
-    ))
-    .unwrap();
+    for (id, (a, b_)) in [
+        (1u128, (p(-80.0, -40.0), p(80.0, -40.0))),
+        (2, (p(-80.0, 40.0), p(80.0, 40.0))),
+        (3, (p(-80.0, -40.0), p(-80.0, 40.0))),
+        (4, (p(80.0, -40.0), p(80.0, 40.0))),
+    ] {
+        b.insert_entity(line_entity(id, SpaceId::Model, a, b_))
+            .unwrap();
+    }
     b.finish().unwrap()
 }
 
-/// One pixel per probe: the hovered bottom line, the three untouched base lines
-/// (top horizontal, left/right verticals) and empty background.
+/// Probe points: the hovered bottom line, the three untouched base lines and
+/// empty background.
 #[cfg(not(target_arch = "wasm32"))]
 const BOTTOM_LINE: [f64; 2] = [60.0, -40.0];
 #[cfg(not(target_arch = "wasm32"))]
 const BASE_PROBES: [[f64; 2]; 3] = [[60.0, 40.0], [-80.0, 0.0], [80.0, 0.0]];
 #[cfg(not(target_arch = "wasm32"))]
 const BACKGROUND: [f64; 2] = [0.0, 20.0];
+
+/// The 400x240 view's exact world rectangle at `world_per_px = 1.0`.
+#[cfg(not(target_arch = "wasm32"))]
+fn view_bounds() -> (Point3, Point3) {
+    (p(-200.0, -120.0), p(200.0, 120.0))
+}
+
+/// The renderer transient geometry a host would feed for a 2D view: the same
+/// `cursor_geometry` call the host makes, at 20 % crosshair arms so the drawn
+/// pixels are local to the cursor (a full-view crosshair would cover every
+/// probe).
+#[cfg(not(target_arch = "wasm32"))]
+fn cursor_at(world: [f64; 2]) -> cad_scene::TransientCursor {
+    let (min, max) = view_bounds();
+    cad_app::render_scene::cursor_geometry(
+        Some(p(world[0], world[1])),
+        Some((min, max)),
+        Some(1.0),
+        3.0,
+        20,
+    )
+    .expect("a valid 2D cursor has transient geometry")
+}
 
 /// The last rendered colour target's RGBA pixels.
 #[cfg(not(target_arch = "wasm32"))]
@@ -83,79 +88,45 @@ fn pixel_at(frame: &(u32, u32, Vec<u8>), world: [f64; 2]) -> [u8; 4] {
     ]
 }
 
-/// Renderer commit/draw-plan diagnostics for the run-free suffix contract:
-/// `(draw_plan_rebuilds, gc_skipped_commits, pulled_suffix_skips, accelerated)`.
+/// Whether a pixel window around a world point contains ink (anti-aliased 1 px
+/// strokes can land on either side of the analytic coordinate).
 #[cfg(not(target_arch = "wasm32"))]
-fn suffix_skip_diagnostics(session: &RenderSessionHandle) -> (u64, u64, u64, bool) {
+fn has_ink(frame: &(u32, u32, Vec<u8>), world: [f64; 2]) -> bool {
+    let (x, y) = world_to_pixel_2d(frame.0, frame.1, world);
+    for dy in -1i32..=1 {
+        for dx in -1i32..=1 {
+            let px = (i64::from(x) + i64::from(dx)).clamp(0, i64::from(frame.0) - 1) as u32;
+            let py = (i64::from(y) + i64::from(dy)).clamp(0, i64::from(frame.1) - 1) as u32;
+            let index = ((py * frame.0 + px) * 4) as usize;
+            if u32::from(frame.2[index])
+                + u32::from(frame.2[index + 1])
+                + u32::from(frame.2[index + 2])
+                > 0
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Renderer commit/draw-plan counters that a pure transient move must not move:
+/// `(draw_plan_rebuilds, gc_skipped_commits, pulled_suffix_skips)`.
+#[cfg(not(target_arch = "wasm32"))]
+fn freeze_counters(session: &RenderSessionHandle) -> (u64, u64, u64) {
     let state = session.0.borrow();
     let renderer = state.runtime.renderer.as_ref().expect("attached renderer");
     (
         renderer.draw_plan_rebuilds(),
         renderer.gc_skipped_commits(),
         renderer.pulled_suffix_skips(),
-        renderer.render_tier() == cad_render_wgpu::RenderTier::Accelerated,
     )
 }
 
-/// One host tick that processed a plain cursor move, in the host's real order:
-/// the input pump publishes the move (`set_overlays`), then the frame is applied
-/// and presented (`apply_ready_updates` + `render`, see
-/// `apps/app-linux/src/gtk_bridge/present.rs`).
+/// A session with the four-line fixture attached and committed; axes/grid off so
+/// the only overlay pixels are the ones each test adds.
 #[cfg(not(target_arch = "wasm32"))]
-fn move_tick(
-    session: &RenderSessionHandle,
-    cursor: Option<[f64; 2]>,
-    hovered: &[SelectionRef],
-) -> (FrameCompleteness, (u32, u32, Vec<u8>)) {
-    let mut overlays = session.overlays();
-    overlays.cursor = cursor.map(|[x, y]| p(x, y));
-    overlays.hovered = SelectionSet::from_refs(hovered.iter().cloned());
-    assert!(
-        session.set_overlays(overlays),
-        "a move with a new cursor/hover changes the overlay inputs"
-    );
-    session.apply_ready_updates().unwrap();
-    let frame = session
-        .render([400.0, 240.0], 1.0)
-        .unwrap()
-        .expect("a frame is presented for the move tick");
-    (frame.completeness, target_pixels(session))
-}
-
-/// One **settled** host tick: publish the inputs, let the preparation land, commit
-/// it, then present. This is the reference frame the move ticks are compared to.
-#[cfg(not(target_arch = "wasm32"))]
-fn settled_tick(
-    session: &RenderSessionHandle,
-    cursor: Option<[f64; 2]>,
-    hovered: &[SelectionRef],
-) -> (FrameCompleteness, (u32, u32, Vec<u8>)) {
-    let mut overlays = session.overlays();
-    overlays.cursor = cursor.map(|[x, y]| p(x, y));
-    overlays.hovered = SelectionSet::from_refs(hovered.iter().cloned());
-    session.set_overlays(overlays);
-    session.prepare().unwrap();
-    drive_uploads(session);
-    session.apply_ready_updates().unwrap();
-    let frame = session
-        .render([400.0, 240.0], 1.0)
-        .unwrap()
-        .expect("a settled frame");
-    (frame.completeness, target_pixels(session))
-}
-
-/// **Regression fence (entity flicker on plain mouse movement).**
-///
-/// A plain cursor move (no press, no pan/zoom) changes exactly one thing: the
-/// transient overlay suffix (cursor crosshair/pickbox), plus — when the hover
-/// resolves — the entity-flag tint. It is *not* a scene mutation. Presenting the
-/// move must therefore never truncate the overlay suffix and never revert the
-/// hover tint to an older flag set: the old base-only fallback did both for one
-/// frame per move, which is why the hovered entity blinked.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-#[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
-fn cursor_moves_never_drop_the_tint_or_the_overlay_suffix() {
+fn committed_session() -> RenderSessionHandle {
     let session = RenderSessionHandle::new(BackendPreference::Auto);
     let gpu = headless_gpu();
     session.attach_device(gpu.device, gpu.queue).unwrap();
@@ -167,9 +138,43 @@ fn cursor_moves_never_drop_the_tint_or_the_overlay_suffix() {
     });
     session.prepare().unwrap();
     drive_uploads(&session);
+    session.apply_ready_updates().unwrap();
+    session
+}
 
-    // Baseline: a still cursor, nothing hovered.
-    let (baseline_completeness, baseline) = settled_tick(&session, Some([-10.0, -20.0]), &[]);
+/// One frame with the transient set (a move tick presents without preparing,
+/// applying or committing anything).
+#[cfg(not(target_arch = "wasm32"))]
+fn present_transient(
+    session: &RenderSessionHandle,
+    cursor: cad_scene::TransientCursor,
+) -> (FrameCompleteness, (u32, u32, Vec<u8>)) {
+    assert!(
+        session.set_cursor_transient(Some(cursor)),
+        "a moved cursor changes the transient state"
+    );
+    let completeness = session
+        .render([400.0, 240.0], 1.0)
+        .unwrap()
+        .expect("a dirty transient presents a frame")
+        .completeness;
+    (completeness, target_pixels(session))
+}
+
+/// **ADR 0028 contract (real adapter).** Eight plain cursor moves:
+/// * each presents `CurrentScene` without preparing/applying/committing,
+/// * `overlay_suffix_commits` stays flat and no upload observation is produced,
+/// * GC/pulled/draw-plan counters stay flat,
+/// * the committed base pixels never change and the cursor pixels move,
+/// * a click through the crosshair still picks the entity behind it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
+fn plain_cursor_move_is_a_renderer_transient_not_a_suffix_commit() {
+    let session = committed_session();
+
+    // Baseline cursor position and frame.
+    let (baseline_completeness, baseline) = present_transient(&session, cursor_at([-10.0, -20.0]));
     assert_eq!(baseline_completeness, FrameCompleteness::CurrentScene);
     let plain_line = pixel_at(&baseline, BOTTOM_LINE);
     let base_pixels: Vec<[u8; 4]> = BASE_PROBES
@@ -181,45 +186,44 @@ fn cursor_moves_never_drop_the_tint_or_the_overlay_suffix() {
         [0, 0, 0, 255],
         "the probe outside every line must be background"
     );
+
     let full_batches = renderer_batch_count(&session);
     let suffix_commits = session.overlay_suffix_commits();
+    let counters = freeze_counters(&session);
+    // Drain any observation the fixture's base commit left behind.
+    let _ = session.take_upload_timing_observation();
 
-    // The tint the renderer produces for a hovered entity (a tint, not the plain
-    // line colour).
-    let (tinted_completeness, tinted_pixels) =
-        settled_tick(&session, Some([-10.0, -20.0]), &[model_entity(1)]);
-    assert_eq!(tinted_completeness, FrameCompleteness::CurrentScene);
-    let tinted_line = pixel_at(&tinted_pixels, BOTTOM_LINE);
-    assert_ne!(
-        tinted_line, plain_line,
-        "the hover must tint the bottom line (fixture sanity)"
-    );
-    let suffix_commits_tinted = session.overlay_suffix_commits();
-    // Read the renderer's own upload counters, never through a throwaway render
-    // (that would replace the session's target texture).
-    let counters_tinted = renderer_counters(&session);
-    let full_batches_tinted = renderer_batch_count(&session);
-    assert_eq!(
-        full_batches_tinted, full_batches,
-        "no batch churn on a hover"
-    );
-    assert_eq!(
-        suffix_commits_tinted, suffix_commits,
-        "a hover is a flags-only change: it commits no suffix"
-    );
-
-    // The mouse now moves: eight ticks, each one carrying a moved cursor while
-    // the hover stays on the bottom line.
-    let mut cursor_x = -10.0;
+    let mut cursor_x = -70.0;
+    let mut cursor_y = -20.0;
     for step in 0..8 {
-        cursor_x += 4.0;
-        let (completeness, pixels) =
-            move_tick(&session, Some([cursor_x, -20.0]), &[model_entity(1)]);
+        // Move farther than the pickbox half-side (3 px) + AA so the previous
+        // position's pixels are provably cleared.
+        cursor_x += 12.0;
+        cursor_y += 6.0;
+        let (completeness, pixels) = present_transient(&session, cursor_at([cursor_x, cursor_y]));
         assert_eq!(
-            pixel_at(&pixels, BOTTOM_LINE),
-            tinted_line,
-            "step {step}: the hover tint must never revert while the cursor moves \
-             (frame {completeness:?})"
+            completeness,
+            FrameCompleteness::CurrentScene,
+            "step {step}: a transient move presents the current scene"
+        );
+        assert_eq!(
+            session.overlay_suffix_commits(),
+            suffix_commits,
+            "step {step}: a pure move must not commit a suffix"
+        );
+        assert!(
+            session.take_upload_timing_observation().is_none(),
+            "step {step}: a pure move must not stage or commit an upload"
+        );
+        assert_eq!(
+            freeze_counters(&session),
+            counters,
+            "step {step}: no GC/pulled/draw-plan work may be counted"
+        );
+        assert_eq!(
+            renderer_batch_count(&session),
+            full_batches,
+            "step {step}: the resident batch set is untouched"
         );
         for (probe, expected) in BASE_PROBES.iter().zip(base_pixels.iter()) {
             assert_eq!(
@@ -229,137 +233,123 @@ fn cursor_moves_never_drop_the_tint_or_the_overlay_suffix() {
             );
         }
         assert_eq!(
-            renderer_batch_count(&session),
-            full_batches,
-            "step {step}: the overlay suffix must stay resident (never truncated)"
+            pixel_at(&pixels, BOTTOM_LINE),
+            plain_line,
+            "step {step}: the committed line colour is unchanged"
         );
-        assert_eq!(
-            session.overlay_suffix_commits(),
-            suffix_commits_tinted,
-            "step {step}: a pending overlay input must not commit the suffix"
+        // The cursor is drawn at its new position.
+        assert!(
+            has_ink(&pixels, [cursor_x, cursor_y]),
+            "step {step}: the transient crosshair/pickbox is drawn at the new cursor"
         );
+        // ...and the previous cursor position is cleared again (overlay recopy +
+        // depth clear). Asserted on the exact old pixel, which is outside the
+        // moved pickbox/arms.
         assert_eq!(
-            renderer_counters(&session),
-            counters_tinted,
-            "step {step}: presenting a pending move must upload nothing"
+            pixel_at(&pixels, [cursor_x - 12.0, cursor_y - 6.0]),
+            [0, 0, 0, 255],
+            "step {step}: the previous cursor pixels must not linger"
         );
     }
 
-    // The mouse stops: the pending overlay publishes and commits. The whole
-    // scene is still there, the tint is still the same, and nothing was restored
-    // because nothing was ever dropped.
-    //
-    // The commit-side contract (base_changed=false and the GC/pulled skip
-    // counters) lives in `cursor_move_suffix_commit_reports_the_run_free_skips`
-    // below: this pixel fence has an independent pre-existing step-0 failure on
-    // the current host, so any counter assertion placed after it would be dead
-    // and could never be cited as evidence.
-    session.prepare().unwrap();
-    drive_uploads(&session);
-    session.apply_ready_updates().unwrap();
-    let settled = session
-        .render([400.0, 240.0], 1.0)
-        .unwrap()
-        .expect("settled frame");
-    assert_eq!(settled.completeness, FrameCompleteness::CurrentScene);
-    let settled_pixels = target_pixels(&session);
+    // Pick-through: park the crosshair on the bottom line and pick there. The
+    // cursor has no pick key, so the id pass resolves the line behind it.
+    let _ = present_transient(&session, cursor_at(BOTTOM_LINE));
+    let (px, py) = world_to_pixel_2d(400, 240, BOTTOM_LINE);
+    let hit = {
+        let mut state = session.0.borrow_mut();
+        state
+            .runtime
+            .renderer
+            .as_mut()
+            .expect("attached renderer")
+            .pick_at(px, py)
+            .expect("pick")
+    };
+    let hit = hit.expect("the committed line under the crosshair is pickable");
     assert_eq!(
-        pixel_at(&settled_pixels, BOTTOM_LINE),
-        tinted_line,
-        "the settled frame keeps the same tint"
-    );
-    for (probe, expected) in BASE_PROBES.iter().zip(base_pixels.iter()) {
-        assert_eq!(pixel_at(&settled_pixels, *probe), *expected);
-    }
-    assert_eq!(
-        renderer_batch_count(&session),
-        full_batches,
-        "the settled commit replaces the suffix, it never changes the batch count"
-    );
-    assert_eq!(
-        session.overlay_suffix_commits(),
-        suffix_commits_tinted + 1,
-        "the settled cursor position is one real suffix commit"
-    );
-    assert_eq!(
-        renderer_counters(&session),
-        counters_tinted,
-        "the settled cursor commit re-uploads the transient suffix only: no \
-         instanced/mesh stream and no flags row changes"
+        hit.source.map(|source| source.entity),
+        Some(EntityId(1)),
+        "a click through the crosshair must pick the entity behind it"
     );
 }
 
-/// The engine's cursor move path is the renderer's run-free suffix fast path: the
-/// settled suffix commit reports `base_changed == false` and bumps the GC/pulled
-/// skip counters while leaving the base-only draw plan intact.
-///
-/// Split out from the pixel fence above because that fence has an independent
-/// pre-existing pixel failure on this host; this contract exercises only the
-/// commit counters.
+/// A live LINE preview with one captured point (a committed overlay batch).
+#[cfg(not(target_arch = "wasm32"))]
+fn line_preview(cursor: [f64; 2]) -> cad_app::DrawPreview {
+    cad_app::DrawPreview {
+        kind: cad_app::DrawToolKind::Line,
+        points: vec![p(-100.0, 0.0)],
+        picks: Vec::new(),
+        cursor: Some(p(cursor[0], cursor[1])),
+        candidate: None,
+        remaining: 1,
+        selection_count: 0,
+        ready: false,
+        polygon_sides: None,
+        awaiting_text: false,
+        text_prefill: None,
+    }
+}
+
+/// **ADR 0028 non-material case (real adapter).** A committed overlay batch (a
+/// draw-preview rubber band) and the renderer transient cursor co-exist in one
+/// frame: the preview stays a committed suffix batch, the cursor is drawn on top
+/// without adding a commit or changing the suffix.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 #[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
-fn cursor_move_suffix_commit_reports_the_run_free_skips() {
-    let session = RenderSessionHandle::new(BackendPreference::Auto);
-    let gpu = headless_gpu();
-    session.attach_device(gpu.device, gpu.queue).unwrap();
-    session.sync_drawing(Some(Arc::new(db_with_four_lines())));
-    session.set_overlay_visibility(OverlayVisibility {
-        axes: false,
-        grid: false,
-        ..OverlayVisibility::default()
-    });
+fn committed_overlay_and_transient_cursor_share_a_frame() {
+    let session = committed_session();
+    let batches_before = renderer_batch_count(&session);
+    // Publish a committed draw-preview overlay (a rubber band near x <= -20).
+    assert!(session.set_draw_preview(Some(line_preview([-20.0, 60.0]))));
     session.prepare().unwrap();
     drive_uploads(&session);
     session.apply_ready_updates().unwrap();
-
-    // Settle a first position: the suffix is live and the base plan is built.
-    let _ = settled_tick(&session, Some([-10.0, -20.0]), &[]);
-    let (plan_before, gc_before, pulled_before, accelerated) = suffix_skip_diagnostics(&session);
-    eprintln!("cursor suffix skip contract: accelerated={accelerated}");
-    // Non-vacuous pin: the base-only draw plan must have been built at least
-    // once, so the "kept across the suffix commit" comparison below cannot pass
-    // by comparing a never-incremented zero.
+    let suffix_after_preview = session.overlay_suffix_commits();
+    let batches_after_preview = renderer_batch_count(&session);
     assert!(
-        plan_before >= 1,
-        "the base-only draw plan must be built before the suffix-kept assertion \
-         (counter was {plan_before})"
+        batches_after_preview > batches_before,
+        "the committed draw-preview overlay suffix must be resident \
+         (before {batches_before}, after {batches_after_preview})"
     );
 
-    // A plain move: publish, prepare, commit the transient suffix, present.
-    let _ = settled_tick(&session, Some([-6.0, -20.0]), &[]);
-    let commit = session
-        .take_upload_timing_observation()
-        .expect("the settled cursor move is observed");
+    // One frame: the committed preview AND the transient cursor are visible.
+    let (completeness, pixels) = present_transient(&session, cursor_at([0.0, -20.0]));
+    assert_eq!(completeness, FrameCompleteness::CurrentScene);
     assert!(
-        commit.committed,
-        "the cursor move must commit the transient suffix"
+        has_ink(&pixels, [0.0, -20.0]),
+        "the transient cursor is drawn in the same frame"
     );
-    assert!(
-        !commit.base_changed,
-        "a cursor move is still a suffix commit, never a base change"
+    // The preview's first segment midpoint (captured (-100, 0) -> cursor (-20, 60)).
+    const PREVIEW_PROBE: [f64; 2] = [-60.0, 30.0];
+    let preview_pixel = pixel_at(&pixels, PREVIEW_PROBE);
+    assert_ne!(
+        preview_pixel,
+        [0, 0, 0, 255],
+        "the committed draw-preview batch is drawn in the same frame"
     );
 
-    let (plan_after, gc_after, pulled_after, _) = suffix_skip_diagnostics(&session);
+    // A further pure move does not touch the committed overlay suffix.
+    let (_, moved) = present_transient(&session, cursor_at([20.0, -10.0]));
     assert_eq!(
-        plan_after, plan_before,
-        "a suffix commit must keep the base-only draw plan (no rebuild)"
+        session.overlay_suffix_commits(),
+        suffix_after_preview,
+        "moving the transient must not commit or replace the overlay suffix"
     );
     assert_eq!(
-        gc_after,
-        gc_before + 1,
-        "the run-free suffix commit must skip exactly one GC scan"
+        renderer_batch_count(&session),
+        batches_after_preview,
+        "the batch set is unchanged by the move"
     );
-    if accelerated {
-        assert_eq!(
-            pulled_after,
-            pulled_before + 1,
-            "the accelerated tier must skip exactly one pulled rebuild"
-        );
-    } else {
-        assert_eq!(
-            pulled_after, pulled_before,
-            "the universal tier has no pulled organisation to skip"
-        );
-    }
+    assert_eq!(
+        pixel_at(&moved, PREVIEW_PROBE),
+        preview_pixel,
+        "the committed preview batch's pixels are unchanged"
+    );
+    assert!(
+        has_ink(&moved, [20.0, -10.0]),
+        "the moved transient is still drawn"
+    );
 }

@@ -235,7 +235,9 @@ impl CadRenderRuntime {
             // Group 0 is the persistent base: the database scene (entities,
             // raster images, wipeout masks). Group 1 is the transient overlay
             // (reference grid/axes, POINT markers, sub-element highlight, grips,
-            // measurement/draw previews, box selection, snap hints, cursor).
+            // measurement/draw previews, box selection, snap hints). The pointer
+            // cursor is a renderer transient (ADR 0028) and never enters either
+            // group.
             // Group 0 converts to the stream/chunk/arc classes; group 1 is staged
             // **legacy** so the overlay pass can draw it with per-batch uniforms
             // only, without base stream/chunk/arc slots.
@@ -668,7 +670,9 @@ impl CadRenderRuntime {
     /// latest published scene is committed, [`FrameCompleteness::PendingOverlayInputs`]
     /// when newer transient overlay inputs are still preparing. The frame always
     /// shows the **whole** resident scene — the overlay suffix is never truncated
-    /// (a plain cursor move must not drop the cursor/tint it is updating).
+    /// (a snapshot/preview update must not drop the tint it is updating). The
+    /// renderer-owned cursor is fed separately (see [`Self::render_frame`]) and is
+    /// never part of that suffix.
     pub fn render_if_dirty(
         &mut self,
         view: &ViewSnapshot,
@@ -705,6 +709,11 @@ impl CadRenderRuntime {
         // An attachment can change at the same size. Its identity is inspected
         // for presentation even when CAD pixels do not need redrawing.
         if self.dirty.dirty() {
+            // Feed the renderer-owned transient cursor (ADR 0028) before the
+            // camera/render call. This is the only per-move renderer input: it
+            // writes the tiny transient instance buffer and never touches the
+            // committed batches, revisions, planning or pacing.
+            renderer.set_cursor_transient(self.cursor_transient.clone());
             let target = RenderTarget::new(size.0, size.1).with_clear_color(view.clear_color);
             let stats = match view.mode {
                 ProjectionKind::TwoD => {

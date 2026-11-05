@@ -1,7 +1,9 @@
 # ADR 0028：光标 crosshair/pickbox 作为 renderer transient overlay
 
-- 状态：**Proposed（2026-11-05）**；实现未完成。本文只冻结架构决策；Phase 1（suffix commit
-  快速止血）已独立落地，**不**由本文宣称已验收。
+- 状态：**Accepted（2026-11-05）**；Phase 2a（renderer transient）与 Phase 2b（engine/host/status
+  接线 + `OverlayInputs` 移除）已落地。证据只到**编译/纯契约 + P620/Vulkan 有界 GPU 契约 + 合成 DOM
+  sweep**；真实鼠标、截屏/像素验收、Windows/macOS/Android/Web 运行仍 **NOT VERIFIED**（见 §4）。
+  Phase 1（suffix commit 快速止血）是独立提交，不由本文宣称已验收。
 - 日期：2026-11-05。
 - 相关 ADR：[ADR-0012](0012-picking-and-selection.md)（pickbox/悬停/拾取语义）、
   [ADR-0023](0023-dom-on-top-cross-host-composition.md)（跨宿主合成与输入漏斗）、

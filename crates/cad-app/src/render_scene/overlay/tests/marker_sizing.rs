@@ -1,12 +1,8 @@
-//! Screen-space marker sizing (defect #2) and the pointer-cursor overlay input
-//! fingerprints. Split out of `overlay/tests.rs` so that file stays under the
+//! Screen-space marker sizing (defect #2) and the overlay-fingerprint
+//! exclusions. Split out of `overlay/tests.rs` so that file stays under the
 //! 1000-line code limit.
 
 use super::*;
-
-fn p(x: f64, y: f64) -> Point3 {
-    Point3 { x, y, z: 0.0 }
-}
 
 #[test]
 fn preview_marker_size_tracks_the_view_scale() {
@@ -50,69 +46,12 @@ fn preview_marker_size_is_finite_and_positive_for_a_degenerate_scale() {
 }
 
 #[test]
-fn overlay_fingerprint_tracks_the_crosshair_percentage() {
-    assert_eq!(
-        OverlayInputs::default().crosshair_percent,
-        DEFAULT_CROSSHAIR_PERCENT,
-        "a host that never sets it keeps the full-viewport crosshair"
-    );
-    let baseline = overlay_fingerprint(&OverlayInputs::default());
-    let shorter = OverlayInputs {
-        crosshair_percent: 50,
-        ..OverlayInputs::default()
-    };
-    assert_ne!(
-        baseline,
-        overlay_fingerprint(&shorter),
-        "a resized crosshair is overlay geometry and must rebuild it"
-    );
-    // The percentage alone does not make an otherwise empty overlay non-empty.
-    assert!(shorter.is_empty());
-    assert_eq!(overlay_fingerprint(&OverlayInputs::default()), baseline);
-}
-
-#[test]
-fn overlay_fingerprint_tracks_the_pickbox_size() {
-    assert_eq!(
-        OverlayInputs::default().pickbox_logical_pixels,
-        cad_domain::TolerancePolicy::default().pickbox_logical_pixels,
-        "a host that never sets it keeps the historical 3 px pickbox"
-    );
-    let baseline = overlay_fingerprint(&OverlayInputs::default());
-    let larger = OverlayInputs {
-        pickbox_logical_pixels: 6.0,
-        ..OverlayInputs::default()
-    };
-    assert_ne!(
-        baseline,
-        overlay_fingerprint(&larger),
-        "a resized pickbox is overlay geometry and must rebuild it"
-    );
-    // The size alone does not make an otherwise empty overlay non-empty.
-    assert!(larger.is_empty());
-}
-
-#[test]
-fn overlay_fingerprint_tracks_the_pointer_cursor_but_not_the_view_scale() {
+fn overlay_fingerprint_ignores_the_view_scale() {
+    // `view_scale` stays an overlay input for the screen-relative snap markers,
+    // but it is camera-derived (the bounds already track it), so it adds no second
+    // camera signal to the fingerprint. The pointer cursor is no longer an overlay
+    // input at all (ADR 0028: renderer transient).
     let baseline = OverlayInputs::default();
-    let with_cursor = OverlayInputs {
-        cursor: Some(p(1.0, 2.0)),
-        ..OverlayInputs::default()
-    };
-    assert_ne!(
-        overlay_fingerprint(&baseline),
-        overlay_fingerprint(&with_cursor)
-    );
-    assert_ne!(
-        overlay_fingerprint(&with_cursor),
-        overlay_fingerprint(&OverlayInputs {
-            cursor: Some(p(3.0, 4.0)),
-            ..OverlayInputs::default()
-        }),
-        "a moved cursor invalidates the overlay"
-    );
-    // The view scale is camera-derived (the bounds already track it), so it adds
-    // no second camera signal to the fingerprint.
     assert_eq!(
         overlay_fingerprint(&baseline),
         overlay_fingerprint(&OverlayInputs {

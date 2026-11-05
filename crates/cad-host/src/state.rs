@@ -62,21 +62,13 @@ impl HostCore {
                 canvas_size: viewport.logical_size,
                 clear_color,
             };
-            // The pointer-cursor overlay input: the cursor's world point on the
-            // work plane plus the view scale (world units per logical pixel),
-            // both only for a 2D view with a cursor present. A 3D view has no
-            // planar cursor and no view rectangle, and an absent cursor is an
-            // explicit empty overlay rather than a fabricated one.
-            let two_d = viewport.view_mode.kind() == cad_app::ProjectionKind::TwoD;
-            let (cursor, view_scale) = match (two_d, self.cursor_logical.get()) {
-                (true, Some(logical)) => {
-                    match viewport.screen_to_world(logical, viewport.logical_size) {
-                        Some(world) => (Some(world), Some(viewport.world_per_px())),
-                        None => (None, None),
-                    }
-                }
-                _ => (None, None),
-            };
+            // The pointer-cursor geometry: the cursor's world point on the work
+            // plane plus the view scale (world units per logical pixel), both only
+            // for a 2D view with a cursor present. `cursor_world` is the **single**
+            // derivation shared with the status-bar `cursorWorld`/`crosshair`, so
+            // the readout and the drawn transient can never disagree.
+            let cursor = self.cursor_world();
+            let view_scale = cursor.is_some().then(|| viewport.world_per_px());
             (
                 c.drawing(),
                 view,
@@ -149,7 +141,7 @@ impl HostCore {
                 visibility,
                 view.crosshair.size_percent,
                 // The same policy the pick/hover paths use, so the drawn box is
-                // exactly the click radius (see `cursor_overlay`).
+                // exactly the click radius (see `cursor_geometry`).
                 view.tolerance_policy().pickbox_logical_pixels,
             )
         };
@@ -176,15 +168,24 @@ impl HostCore {
             // is armed the dragged entry is the current drag target, so the moved
             // marker **is** the drag preview.
             grip_markers: self.grip_marker_positions(),
-            // Screen-space sizing for the transient overlays (snap markers, the
-            // cursor crosshair/pickbox): world units per logical pixel of the 2D
-            // view, and the cursor's world point.
+            // Screen-space sizing for the transient overlays (snap markers):
+            // world units per logical pixel of the 2D view. The pointer cursor is
+            // no longer part of this scene/preparation chain; it is fed to the
+            // renderer as a transient after `set_overlays` (ADR 0028).
             view_scale,
-            cursor,
-            crosshair_percent,
-            pickbox_logical_pixels,
         };
         self.render.set_overlays(overlays);
+        // The renderer-owned cursor transient: same pure geometry as the old
+        // committed overlay batch, but written outside the scene/preparation/
+        // commit chain. A move only invalidates the frame.
+        self.render
+            .set_cursor_transient(cad_app::render_scene::cursor_geometry(
+                cursor,
+                self.canvas_bounds(),
+                view_scale,
+                pickbox_logical_pixels,
+                crosshair_percent,
+            ));
         let _ = self.render.request_preparation()?;
         Ok(())
     }
@@ -235,6 +236,23 @@ impl HostCore {
     /// axis over all four corners. Passing the top-left/bottom-right pair
     /// straight through as `(a, b)` left `min.y > max.y`, which collapsed every
     /// horizontal overlay/grid line (the vertical ones happened to survive).
+    /// The pointer's world-space work-plane point for the active 2D view.
+    ///
+    /// `None` when there is no active viewport, the view is 3D (no planar cursor)
+    /// or the pointer is not on the surface. This is the single derivation the
+    /// renderer transient (`cursor_geometry`) and the status-bar
+    /// `cursorWorld`/`crosshair` both read, so the readout and the drawn crosshair
+    /// can never disagree.
+    pub fn cursor_world(&self) -> Option<Point3> {
+        let c = self.controller.borrow();
+        let viewport = c.application.workspace.viewports.get(&c.viewport_id)?;
+        if viewport.view_mode.kind() != cad_app::ProjectionKind::TwoD {
+            return None;
+        }
+        let logical = self.cursor_logical.get()?;
+        viewport.screen_to_world(logical, viewport.logical_size)
+    }
+
     fn canvas_bounds(&self) -> Option<(Point3, Point3)> {
         let c = self.controller.borrow();
         let viewport = c.application.workspace.viewports.get(&c.viewport_id)?;

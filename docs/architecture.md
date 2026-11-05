@@ -199,8 +199,13 @@ traits 是契约草案（0.1），实现前可通过 ADR 修正不足，不代�
   `DrawOrderCache`/`BatchFacts`；run-free（无 instance/arc/mesh run）的后缀提交保留 base plan、
   跳过 stream/chunk/arc GC 与整幅 pulled 重建，只做 suffix 上传 + pick 增量。计数器
   `draw_plan_rebuilds`/`gc_skipped_commits`/`pulled_suffix_skips` 经 `RuntimeDiagnostics` 与
-  `[probe] pan-wait` 暴露。光标此时**仍**是 `OverlayInputs` 场景内容（每次移动仍是一次 suffix
-  commit）；把它移出场景/发布链见 ADR 0028（Proposed，未实现）。
+  `[probe] pan-wait` 暴露。
+- **光标 transient（ADR 0028，2026-11-05）**：crosshair/pickbox 由
+  `cad_app::render_scene::cursor_geometry` 生成 `cad_scene::TransientCursor`，经
+  `RenderSessionHandle::set_cursor_transient` 只标脏；renderer 用固定 6-instance 缓冲在 overlay
+  pass 按 `CURSOR_DRAW_ORDER` 合并绘制。它**不**进入 `OverlayInputs`/场景准备/发布/commit，也**不**
+  进入 id/pick pass。纯光标移动因此是 0 suffix commit；snap hints 仍是 committed overlay
+  （工具态 churn 仍会提交）。
 
 ## 历史（已退役 / 被取代）
 

@@ -1,5 +1,48 @@
 use super::*;
 
+/// World units per logical pixel of the active 2D view.
+fn view_scale_of(core: &HostCore) -> f64 {
+    let c = core.controller.borrow();
+    c.application.workspace.viewports[&c.viewport_id].world_per_px()
+}
+
+/// The world-space X span of the active 2D view.
+fn view_span_x(core: &HostCore) -> f64 {
+    let c = core.controller.borrow();
+    let viewport = &c.application.workspace.viewports[&c.viewport_id];
+    viewport.world_per_px() * viewport.logical_size[0]
+}
+
+/// Place the pointer at the viewport centre and sync; returns the renderer-owned
+/// transient cursor segments the host fed (ADR 0028).
+fn place_cursor(core: &HostCore) -> Vec<[cad_domain::Point3; 2]> {
+    let pixel = {
+        let c = core.controller.borrow();
+        let viewport = &c.application.workspace.viewports[&c.viewport_id];
+        [
+            viewport.logical_size[0] * 0.5,
+            viewport.logical_size[1] * 0.5,
+        ]
+    };
+    core.cursor_logical.set(Some(pixel));
+    core.sync_render().expect("the cursor sync succeeds");
+    core.render
+        .cursor_transient()
+        .expect("a 2D cursor produces transient geometry")
+        .segments
+}
+
+/// The horizontal crosshair arm length (segment 0).
+fn crosshair_width(segments: &[[cad_domain::Point3; 2]]) -> f64 {
+    (segments[0][1].x - segments[0][0].x).abs()
+}
+
+/// The length of the first pickbox side (segment 2).
+fn pickbox_side(segments: &[[cad_domain::Point3; 2]]) -> f64 {
+    let [a, b] = segments[2];
+    ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt()
+}
+
 // --- typed settings surface -------------------------------------------------
 
 /// A config store with a fixed config/preference text and a record of every
@@ -528,11 +571,17 @@ fn the_display_settings_apply_to_the_next_frame_live() {
         [1.0, 0.0, 0.0, 1.0]
     );
 
-    // The crosshair size is the value the overlay builder consumes.
-    assert_eq!(core.render.overlays().crosshair_percent, 100);
+    // The crosshair size reaches the renderer transient (ADR 0028).
+    let at_100 = place_cursor(&core);
+    let width_100 = crosshair_width(&at_100);
     core.apply_setting(CadSettingKey::CrosshairSize, CadSettingValue::Number(40))
         .unwrap();
-    assert_eq!(core.render.overlays().crosshair_percent, 40);
+    let at_40 = place_cursor(&core);
+    let width_40 = crosshair_width(&at_40);
+    assert!(
+        (width_40 / width_100 - 0.4).abs() < 1e-9,
+        "a 40% crosshair is 0.4x the full span: {width_40} vs {width_100}"
+    );
 }
 
 #[test]
@@ -611,7 +660,15 @@ fn the_display_settings_survive_a_restart() {
             .unwrap()
             .to_linear_rgba()
     );
-    assert_eq!(reloaded.render.overlays().crosshair_percent, 75);
+    // The reloaded crosshair size reaches the renderer transient on the first
+    // sync (75% of the view's world span).
+    let segments = place_cursor(&reloaded);
+    let expected = 0.75 * view_span_x(&reloaded);
+    assert!(
+        (crosshair_width(&segments) - expected).abs() < 1e-9,
+        "the reloaded 75% crosshair must size the transient: {} vs {expected}",
+        crosshair_width(&segments)
+    );
 }
 
 // --- pickbox / aperture (AutoCAD PICKBOX + APERTURE options) -----------------
@@ -640,12 +697,13 @@ fn the_pickbox_and_aperture_default_to_the_historical_values() {
         policy.interaction_logical_pixels.to_bits(),
         default.interaction_logical_pixels.to_bits()
     );
-    // The render input the cursor builder consumes carries the same number.
-    core.sync_render().unwrap();
-    assert_eq!(
-        core.render.overlays().pickbox_logical_pixels,
-        3.0,
-        "the cursor overlay draws the pick predicate's radius"
+    // The renderer transient the host feeds draws the pick predicate's radius.
+    let segments = place_cursor(&core);
+    let expected = 3.0 * view_scale_of(&core) * 2.0;
+    assert!(
+        (pickbox_side(&segments) - expected).abs() < 1e-9,
+        "the transient pickbox side must be 2 x 3 px x scale: {} vs {expected}",
+        pickbox_side(&segments)
     );
 }
 
@@ -746,9 +804,15 @@ fn the_pickbox_and_aperture_settings_survive_a_restart() {
     assert_eq!(reloaded.settings(), core.settings());
     assert_eq!(reloaded.settings().pickbox_size, 20);
     assert_eq!(reloaded.settings().aperture_size, 50);
-    // The reloaded values reach the live inputs on the first sync, and startup
-    // seeding installed them on the session as well.
-    assert_eq!(reloaded.render.overlays().pickbox_logical_pixels, 20.0);
+    // The reloaded values reach the renderer transient on the first sync, and
+    // startup seeding installed them on the session as well.
+    let segments = place_cursor(&reloaded);
+    let expected = 20.0 * view_scale_of(&reloaded) * 2.0;
+    assert!(
+        (pickbox_side(&segments) - expected).abs() < 1e-9,
+        "the reloaded 20 px pickbox must size the transient: {} vs {expected}",
+        pickbox_side(&segments)
+    );
     assert_eq!(
         reloaded
             .controller
@@ -818,8 +882,14 @@ fn the_configured_pickbox_drives_the_pick_tolerance_live() {
         (after - before * 2.0).abs() < 1e-12,
         "doubling the pickbox doubles the pick tolerance: {before} vs {after}"
     );
-    // The cursor overlay reads the same doubled value on the next sync.
-    assert_eq!(core.render.overlays().pickbox_logical_pixels, 6.0);
+    // The renderer transient reads the same doubled value on the next sync.
+    let segments = place_cursor(&core);
+    let expected = 6.0 * view_scale_of(&core) * 2.0;
+    assert!(
+        (pickbox_side(&segments) - expected).abs() < 1e-9,
+        "the doubled pickbox must size the transient: {} vs {expected}",
+        pickbox_side(&segments)
+    );
 }
 
 #[test]
