@@ -19,6 +19,9 @@ export function propertyRowLabel(t: CatalogTranslate, key: string): string {
     case 'space': return t('properties.row.space');
     case 'draw_order': return t('properties.row.draw_order');
     case 'instance': return t('properties.row.instance');
+    case 'vendor_derived': return t('properties.row.vendor_derived');
+    case 'vendor_primitives': return t('properties.row.vendor_primitives');
+    case 'vendor_revision': return t('properties.row.vendor_revision');
     case 'sub_element': return t('properties.row.sub_element');
     case 'status': return t('properties.row.status');
     case 'start': return t('properties.row.start');

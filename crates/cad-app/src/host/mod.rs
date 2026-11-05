@@ -30,6 +30,7 @@ mod draw_pick;
 mod open_import;
 mod properties;
 mod tolerance;
+mod vendor_properties;
 
 #[cfg(test)]
 mod tests;
@@ -952,10 +953,9 @@ impl HostController {
     /// Read-only property projection for the current selection.
     pub fn selection_properties(&self) -> CadResult<crate::SelectionProperties> {
         let drawing = self.drawing_required()?;
-        Ok(crate::SelectionProperties::extract(
-            drawing,
-            &self.session.selection,
-        ))
+        let mut properties = crate::SelectionProperties::extract(drawing, &self.session.selection);
+        self.append_vendor_property_rows(drawing, &mut properties);
+        Ok(properties)
     }
 
     /// The host-derived target of the popup text editor (ADR-0021 D4).

@@ -1,13 +1,16 @@
 # Vendor plugin pass（Tianzheng / TCH_*）
 
-> 状态：**真实 base-6 解码 + 派生表示（ABI v4）**。插件已能从真实
-> `test-tangent-real.dwg` 解出 `TCH_WALL` / `TCH_COLUMN` / `TCH_TEXT` / `TCH_MTEXT` /
-> `TCH_OPENING` 的显示图元（4,525 墙 + 1,000 柱 + 1,258 文字 + 1,711 门/窗 2D 图块 +
-> 18 洞口 = 8,512 个 primitives），并用 `TCH_OPENING` 的 Wall 句柄切出 1,734 个墙断口；
-> 宿主把结果放入 `VendorRepresentationStore`，在场景装配时挂到源实体上，文字用宿主
-> `FontEngine` 成形为线条/网格，门/窗按 opening 的 **2D 图块句柄**解析已导入的块定义并展开，
-> **不写 `cad-db`**。其余 TCH 类、门/窗门槛线、弧墙/带轮廓墙、尺寸/轴号/符号仍显式列为
-> unsupported；`applied` 必须等于帧内 primitive 总数，空成功会被拒绝。
+> 状态：**真实 base-6 解码 + 派生表示（ABI v1）**。插件从真实
+> `test-tangent-real.dwg`（10,612 条 vendor 记录）解出 9,889 个实体 / 14,911 个 primitive，
+> 覆盖 22 个 TCH 类：墙 / 柱 / 文字 / 门窗 / 标高 / 箭头 / 多行引线 / 尺寸 / 轴号 / 半径标注 /
+> 直线梯与矩形梯 / 剖面符号 / 索引符号 / 转角窗 / 天正图块插入 / 折断线 / 修订云线 /
+> 图名 / 图号 / 指北针；并用 `TCH_OPENING` 的 Wall 句柄切出 1,734 个墙断口。宿主把结果放入
+> `VendorRepresentationStore`，在场景装配时挂到源实体上（块内 TCH 成员按实例变换合并），
+> 文字用宿主 `FontEngine` 成形为线条/网格，块引用按 **source handle** 解析已导入块定义后展开，
+> **不写 `cad-db`**。其余类（`TCH_SPACE` 383、不匹配墙头/弧墙 157、未知版本或空墙的
+> `TCH_OPENING` 70、旧 `TCH_DIMENSION` 35、`TCH_SHEET` 1、`TCH_ERRORMSG` 1）显式列在
+> `vendor.tch.unsupported`；合法但无可见几何的记录列在 `vendor.tch.no_display`；
+> `applied` 必须等于帧内 primitive 总数，空成功会被拒绝。
 
 ## 1. 形态
 
@@ -68,13 +71,13 @@
 - 两种载体共用同一 `VendorStore` 的 token/generation/ABI/`applied` 规则，不产生第二份文档
   权威。
 
-## 4. 二进制帧（ABI v4）
+## 4. 二进制帧（ABI v1）
 
 Records（宿主 → 插件，little-endian）：
 
 ```
 u32 magic = 0x59414E44 ("YAND")
-u32 abi   = 4
+u32 abi   = 1
 u64 token
 u64 generation
 u32 record_count
@@ -97,7 +100,7 @@ Result（插件 → 宿主，little-endian）：
 
 ```
 u32 magic = 0x59414E52 ("YANR")
-u32 abi   = 4
+u32 abi   = 1
 u64 token
 u64 generation
 u32 status            // 0 ok, 1 unsupported
@@ -167,9 +170,16 @@ class body 在 skip 后首字节为 6；R2000 代理样本首字节为 `0x0e`。
 - 保存/导出：`cad-db` 里没有新实体，vendor 对象仍按原样（Opaque）存在；派生几何不参与
   保存/导出。若将来要“分解成普通图元”，必须做成显式命令，而不是打开时自动物化。
 
-因此不会出现“打开一次多一批图元”的 explode 效果。代价是：测量/查询若只读 `cad-db`
-语义几何，仍会把 vendor 实体视为不支持；派生几何的可测量性需要后续在 measure/query
-层按 source handle 接一条派生通道。
+因此不会出现“打开一次多一批图元”的 explode 效果。代价是：`cad-db` 语义几何里没有这层
+轮廓。`AREA OBJECT` 已按 source handle 接了一条**派生测量**通道（`cad-app/src/app_measure_vendor.rs`）：
+
+- 派生图元连成**一个闭合平面环**时，直线段用鞋带公式、圆弧段加精确弓形项
+  `½ r²(θ − sin θ)`（遍历反向时取负）；单个 `Circle` 直接 `π r²`；
+- 记录来源标记为 `GeometrySource::ProxyCache` + `Precision::Approximate`，不冒充解析值；
+- 文字、块引用、混合 circle、非平面、开口环、多环一律以
+  `area.object.vendor_outline` 具名拒绝，不做采样估计；
+- 选择属性面板追加只读的 `vendor_derived` / `vendor_primitives` / `vendor_revision`
+  （i18n：`properties.row.vendor_*`）。
 
 ## 6. 已知缺口
 
@@ -177,40 +187,69 @@ class body 在 skip 后首字节为 6；R2000 代理样本首字节为 `0x0e`。
    契约测试。Windows/macOS/Android 为编译证据，Web 为 wasm 编译 + adapter/单测证据。
    **worker（OffscreenCanvas）隔离载体没有页面侧的 vendor 通道**：该 carrier 的 wasm 实例
    在 Worker 内，页面 adapter 不访问它；这一限制必须在状态/文档中保持显式。
-1. **解码覆盖**：当前解 base-6 明文 `TCH_WALL`（直墙；弧墙/带 profile 墙跳过）、
-   `TCH_COLUMN`（版本 6）、`TCH_TEXT` / `TCH_MTEXT`（宿主字体成形）及 `TCH_OPENING` 的
-   **墙断口 + 门/窗 2D 图块 + 洞口侧线**。门/窗图块以 opening 记录里的 2D block 句柄
-   （ABI kind 5）交给宿主，由 `DrawingDatabase::block_by_source_handle` 解析为已导入的块定义
-   后展开；句柄不存在时只报 `vendor.tch.opening_block_missing`，不画替代符号。门槛线
-   （door flags 0x200/0x400）、组合门窗（kind 8）和带形窗（kind 5）仍不绘制；
-   轴号、尺寸、楼梯、符号、表格、机电等仍未解码，
-   只进 `vendor.tch.unsupported` 诊断。`TCH_MTEXTNEW` 显式不支持；TCH 文字的 `_TCH`
-   宽度因子/中西文分段/上标规则未复刻，只按宿主字体引擎的 MTEXT 排版成形。宿主没有可用
-   fallback 字体时，文字 primitive 不产生可绘制片段（不会伪造字形）。
+1. **解码覆盖**：22 个 base-6 明文类已解（见 §1 状态与 `plugins/tch/README.md` 表）。
+   仍未解码/显式拒绝：
+   - `TCH_SPACE`（383）：参考实现（MiniCAD）没有该类解码器，布局未验证；
+   - `TCH_WALL` 中 157 条：147 条头字段不匹配已验证布局（`vendor.tch.wall_header_mismatch`）、
+     10 条弧墙（`vendor.tch.wall_arc_unsupported`）；
+   - `TCH_OPENING` 70 条：39 条 body 版本 64 未知、31 条 wall 句柄为 0；
+   - `TCH_DIMENSION`（35，旧类；MiniCAD 也只支持 `TCH_DIMENSION2`）、`TCH_SHEET`（1）、
+     `TCH_ERRORMSG`（1）；
+   - 合法但无可见几何的记录进 `vendor.tch.no_display`（真实样本：26 条 `TCH_ARROW`）。
+   覆盖证明：`decoded + unsupported + no_display == 记录数`，否则追加
+   `vendor.tch.unaccounted`；诊断上限 16 条，超出的稳定 reason 会被截断（帧契约如此）。
+   `TCH_MTEXTNEW` 显式不支持；TCH 文字的 `_TCH` 宽度因子/中西文分段/上标规则未复刻，
+   只按宿主字体引擎的 MTEXT 排版成形。宿主没有可用 fallback 字体时，文字 primitive
+   不产生可绘制片段（不会伪造字形）。
 2. **派生表示范围**：`VendorRepresentationStore` 按 `source_handle` 索引，在模型空间顶层
-   实体的 `build_expanded` 之后追加片段；块定义内/INSERT 展开中的 TCH 实体尚未合并。
-   派生片段带源实体 id、`GeometrySource::ProxyCache`、`Precision::Approximate`，因此拾取
-   仍指向原 `TCH_*` 实体；块图元的子片段也强制挂回 opening 源实体并清空 instance path，
-   不会把临时 INSERT 暴露给拾取。测量/查询仍按 `cad-db` 语义几何，暂不识别派生几何。
+   实体的 `build_expanded` 之后追加片段；**块定义内的 TCH 成员**由
+   `append_block_vendor_fragments` 沿 INSERT/Compound 递归合并（组合变换
+   `T(origin)·R·S·T(-base)`，深度/环路由 `MAX_INSTANCE_DEPTH` 限制），片段改挂到成员实体
+   并带真实实例路径。派生片段带源实体 id、`GeometrySource::ProxyCache`、
+   `Precision::Approximate`，因此拾取仍指向原 `TCH_*` 实体；块图元的子片段也强制挂回源实体。
+   纸张空间（`build_paper_space`）目前不调用该 walk。
 3. **插件隔离**：当前是普通 module script，和页面同权；不可信插件应改为 Worker/wasm
    或 sandboxed iframe。
 4. **真实格式版本**：本实现按真实样本的 base 6 / 保护标记 9 逆向；R2000 代理样本的
    `0x0e` payload、T30 基类 9–14 仍未在插件中实现。
+5. **文本流共享块**：AC1027 文本流在属性包字符串之后有一个
+   `TDBXDATAMAP_BLOCK_BEGIN_ … _END_` 块。所有解码器必须用 `base6.ts` 的 `ClassText`
+   读类字符串；直接 `readText` 会把 sentinel 当成图面文字（曾发生，真实帧 751 条）。
+   端到端断言：结果帧中不含 `TDBXDATAMAP` 文字。
+6. **实测布局与参考实现（MiniCAD）的已知偏差**（都按真实样本位精确验证，不是猜测）：
+   - `TCH_BLOCK_INSERT`：`AcDbBlockReference` 前缀 + version/mode 之后还有 94 bit 的
+     TCH base-6 尾（base 6、scale 150、空属性包）；MiniCAD 用 `PositionInBits() > MainBits`
+     容忍，我们显式消费该尾再要求精确结束；无尾的合成记录同样接受。
+   - `TCH_RECTSTAIR`：真实记录 body version 为 **5**（MiniCAD 只收 4），在 4 的字段后
+     多一个未使用的 `BitShort`；其他版本显式拒绝。
+   - `TCH_OPENING` 组合（kind 8）：真实第 5 组使用 **87 bit** 内嵌头（37 bit 样本 + 50 bit
+     中间段），两种观测头都按位严格匹配，其他位型拒绝。
+   - `TCH_DIMENSION2`：4 条真实记录 `spanCount == 0`（MiniCAD 拒绝 `<1`）；接受并只画
+     起止引出线，否则覆盖率停在 169/173。
+   - `TCH_ARROW`：26 条记录位布局合法但顶点 <2 或已闭合，MiniCAD 也不画 → `[]` +
+     `vendor.tch.no_display`，不是失败。
+   - 尺寸样式：ABI 不携带图纸标注样式，统一用 MiniCAD 默认 `TchDimStyle` 并报
+     `vendor.tch.dimension_style_defaults`。
 
 ## 7. 测试
 
-- Rust：`crates/cad-ui-core/src/session/vendor.rs` 的 v4 帧/token/`applied`/primitive 边界
-  测试；`crates/cad-desktop-shell/src/events.rs` 的 staged-once 与 settled-once 测试；
-  `apps/app-web/src/vendor.rs` 的 wasm 侧 stage/settle/清空测试；
-  `crates/cad-app/src/render_scene/vendor_tests.rs` 的源实体合并测试；
+- Rust：`crates/cad-ui-core/src/session/vendor.rs` + `vendor_tests.rs` 的 ABI v1 帧/token/
+  `applied`/primitive/诊断上限测试；`crates/cad-desktop-shell/src/events.rs` 的 staged-once
+  与 settled-once 测试；`apps/app-web/src/vendor.rs` 的 wasm 侧 stage/settle/清空测试；
+  `crates/cad-app/src/render_scene/vendor_tests.rs` 的源实体合并 + 块内成员 + 派生面积测试；
+  `crates/cad-app/src/host/tests/properties.rs` 的 `vendor_*` 属性行；
   `crates/cad-import-acadrust/src/vendor.rs` 的 `YACR_TEST_DWG` 抽取测试。
-- 前端：`apps/desktop-ui/test/vendor-plugin.test.ts`（v4 帧、base-6 墙/柱/文字/门窗、
-  块图元、洞口侧线、弧墙/profile 诊断、截断/坏 magic、bulge→arc）；
-  `apps/desktop-ui/test/web-adapter.test.ts`（wasm vendor 命令转发/拒绝）。
-- 真实样本：`test-tangent-real.dwg` → plugin `status=0, applied=8512,
-  TCH_WALL=4525, TCH_COLUMN=1000, TCH_TEXT=876, TCH_MTEXT=382, TCH_OPENING=1729`，
-  kind 5 block 图元 1,711，opening cut 1,734，洞口侧线 18；Rust 解析同一 result 帧并断言
-  `applied == primitives`。真实 2D 块（`0x3DD82`、`0x3E6F4`）可由导入 DB 的
-  `block_by_source_handle` 解析并展开（定向 `#[ignore]` 测试）。
+- 前端：`apps/desktop-ui/test/vendor-plugin.test.ts`（ABI v1 帧、墙/柱/文字/门窗、块图元、
+  洞口侧线、弧墙/profile 诊断、截断/坏 magic、bulge→arc），以及每个新类的合成契约测试
+  （annotation / dimension / stair / opening-symbols / block-insert / break-line /
+  annotation-symbol / index-symbol / datamap）；`web-adapter.test.ts`（wasm 命令转发/拒绝）。
+- 真实样本：`test-tangent-real.dwg` → plugin `status=0, applied=14911, entities=9889`，
+  TEXT 870 / MTEXT 339 / WALL 4525 / COLUMN 1000 / OPENING 1734 / BLOCK_INSERT 220 /
+  ELEVATION 358 / DIMENSION2 173 / ARROW 138 / MULTILEADER 127 / LINESTAIR 116 /
+  RUPTURE 140 / RECTSTAIR 54 / MODI 44 / AXIS_LABEL 20 / RADIUSDIM 11 / 其余小类；
+  kind 5 block 1,946（1,726 门窗 + 220 图块插入）。Rust 解析同一 result 帧并断言
+  `applied == primitives`（14,911）。40 个 `TCH_BLOCK_INSERT` 块句柄全部由导入 DB 的
+  `block_by_source_handle` 解析到有成员的块定义（探针实测 40/40）；
+  真实 2D 块（`0x3DD82`、`0x3E6F4`）同理由定向 `#[ignore]` 测试覆盖。
 - 构建：`npm run build:plugins` → `scripts/build-vendor-plugin.sh` 产出 `plugins/tch/dist/index.js`
   并复制到 `public/plugins/tch.js`；`npm test` 同时 typecheck 插件。

@@ -1,4 +1,4 @@
-// Contract tests for the vendor plugin frame (ABI v4).
+// Contract tests for the vendor plugin frame (ABI v1).
 //
 // These run with `node --test` (type stripping), against the **plugin source**
 // that is built into `public/plugins/tch.js`. They pin the binary header, the
@@ -17,7 +17,7 @@ import {
 } from './vendor-plugin-fixtures.ts';
 
 // ---------------------------------------------------------------------------
-// ABI v4 result frame parser
+// ABI v1 result frame parser
 // ---------------------------------------------------------------------------
 
 interface ParsedPoint {
@@ -195,11 +195,11 @@ function hasDiagnostic(result: ParsedResult, prefix: string): boolean {
 // Frame-level tests
 // ---------------------------------------------------------------------------
 
-test('an empty v4 batch settles as unsupported without primitives', () => {
+test('an empty v1 batch settles as unsupported without primitives', () => {
   const result = readResult(decode(buildRecordsFrame(7n, 7n, [])));
   assert.equal(result.magic, RESULT_MAGIC);
   assert.equal(result.abi, abiVersion);
-  assert.equal(result.abi, 4);
+  assert.equal(result.abi, 1);
   assert.equal(result.token, 7n);
   assert.equal(result.generation, 7n);
   assert.equal(result.status, 1);
@@ -513,7 +513,7 @@ test('a hole emits jamb segments across both wall faces', () => {
   assert.ok(hasDiagnostic(result, 'vendor.tch.opening_holes: 1'));
 });
 
-test('a group opening is reported and emits no symbol', () => {
+test('a group opening without its part payload fails loudly', () => {
   const handles = new BitWriter();
   const main = openingWriter({
     position: [0, 0, 0], width: 2, wall: 0x999n, handles, kind: 8,
@@ -523,7 +523,7 @@ test('a group opening is reported and emits no symbol', () => {
   assert.equal(result.status, 1);
   assert.equal(result.applied, 0);
   assert.equal(result.entityCount, 0);
-  assert.ok(hasDiagnostic(result, 'vendor.tch.opening_symbol_group_unsupported: 1'));
+  assert.ok(hasDiagnostic(result, 'vendor.tch.opening_truncated: 1'));
   assert.ok(!result.entities.some(item => item.handle === 0x402n));
 });
 

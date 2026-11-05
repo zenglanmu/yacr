@@ -133,7 +133,7 @@ export interface WebShellModule {
   // (`passNumber`); a module that never got that far simply has no export and
   // is refused by name.
 
-  /** The ABI v4 records frame (`Uint8Array`/`ArrayBuffer`), or a `vendor.*` rejection. */
+  /** The ABI v1 records frame (`Uint8Array`/`ArrayBuffer`), or a `vendor.*` rejection. */
   vendor_records?(token: number | bigint): unknown;
   /** Settle one pass; answers the JSON `VendorAck`, or a `vendor.*` rejection. */
   vendor_apply?(token: number | bigint, generation: number | bigint, payload: string): unknown;

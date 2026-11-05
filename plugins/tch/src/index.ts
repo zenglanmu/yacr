@@ -5,23 +5,30 @@
 // module to `apps/desktop-ui/public/plugins/tch.js`. The host only knows the
 // `decode(ArrayBuffer) -> ArrayBuffer` shape registered on a stable global.
 //
-// ABI v4 keeps the v2 **records** frame unchanged and extends the **result**
+// ABI v1 keeps the v2 **records** frame unchanged and extends the **result**
 // frame with derived primitives. Decoders live in `bit-reader.ts`, `wall.ts`,
 // `column.ts`, `opening.ts` and `text.ts`; this file owns records parsing,
 // two-pass dispatch, diagnostics and the result frame. Openings cut wall gaps
 // and reference their imported 2D block for real door/window symbols; unknown
 // layouts are reported, never guessed.
 
+import { decodeArrow, decodeElevation, decodeMultiLeader } from './annotation.ts';
+import { decodeDrawingIndex, decodeDrawingName, decodeNorthThumb } from './annotation-symbol.ts';
+import { decodeBlockInsert } from './block-insert.ts';
+import { decodeModi, decodeRupture } from './break-line.ts';
 import { decodeColumn } from './column.ts';
 import { bump } from './diagnostics.ts';
+import { decodeAxisLabel, decodeDimension2, decodeRadiusDim } from './dimension.ts';
+import { decodeCornerWindow, decodeIndexPointer, decodeSection } from './index-symbol.ts';
 import { decodeOpening, openingPrimitives } from './opening.ts';
 import type { OpeningCut, OpeningData } from './opening.ts';
 import type { DecodedEntity, Primitive, VendorRecord } from './types.ts';
+import { decodeLineStair, decodeRectStair } from './stair.ts';
 import { decodeText } from './text.ts';
 import { parseWall, wallPrimitives } from './wall.ts';
 import type { WallData } from './wall.ts';
 
-export const abiVersion = 4;
+export const abiVersion = 1;
 
 /** Records frame magic (`"YAND"`), little-endian. */
 export const RECORDS_MAGIC = 0x59414e44;
@@ -130,6 +137,7 @@ function decodeRecords(
 ): ArrayBuffer {
   const decoded = new Map<string, number>();
   const unsupported = new Map<string, number>();
+  const noDisplay = new Map<string, number>();
   const reasons = new Map<string, number>();
   const walls = new Map<VendorRecord, WallData>();
   const wallByHandle = new Map<bigint, WallData>();
@@ -192,7 +200,12 @@ function decodeRecords(
       let primitives: Primitive[] | null = null;
       if (record.className === 'TCH_WALL') {
         const data = walls.get(record);
-        if (!data) continue;
+        if (!data) {
+          // Already explained by a `vendor.tch.wall_*` reason in phase 1; the
+          // record still has no display, so it belongs to the refused bucket.
+          bump(unsupported, 'TCH_WALL');
+          continue;
+        }
         primitives = wallPrimitives(data, byWall.get(record.handle) ?? [], reasons);
       } else if (record.className === 'TCH_COLUMN') {
         primitives = decodeColumn(record, reasons);
@@ -201,31 +214,99 @@ function decodeRecords(
       } else if (record.className === 'TCH_OPENING') {
         const opening = openingsByRecord.get(record);
         if (!opening) continue;
-        primitives = openingPrimitives(opening, wallByHandle.get(opening.wall), reasons);
-      } else {
+        primitives = openingPrimitives(opening, wallByHandle, reasons);
+      } else if (record.className === 'TCH_ELEVATION') {
+        primitives = decodeElevation(record, reasons);
+      } else if (record.className === 'TCH_ARROW') {
+        primitives = decodeArrow(record, reasons);
+      } else if (record.className === 'TCH_MULTILEADER') {
+        primitives = decodeMultiLeader(record, reasons);
+      } else if (record.className === 'TCH_DIMENSION2') {
+        primitives = decodeDimension2(record, reasons);
+      } else if (record.className === 'TCH_AXIS_LABEL') {
+        primitives = decodeAxisLabel(record, reasons);
+      } else if (record.className === 'TCH_RADIUSDIM') {
+        primitives = decodeRadiusDim(record, reasons);
+      } else if (record.className === 'TCH_LINESTAIR') {
+        primitives = decodeLineStair(record, reasons);
+      } else if (record.className === 'TCH_RECTSTAIR') {
+        primitives = decodeRectStair(record, reasons);
+      } else if (record.className === 'TCH_RUPTURE') {
+        primitives = decodeRupture(record, reasons);
+      } else if (record.className === 'TCH_MODI') {
+        primitives = decodeModi(record, reasons);
+      } else if (record.className === 'TCH_DRAWINGINDEX') {
+        primitives = decodeDrawingIndex(record, reasons);
+      } else if (record.className === 'TCH_DRAWINGNAME') {
+        primitives = decodeDrawingName(record, reasons);
+      } else if (record.className === 'TCH_NORTHTHUMB') {
+        primitives = decodeNorthThumb(record, reasons);
+      } else if (record.className === 'TCH_BLOCK_INSERT') {
+        primitives = decodeBlockInsert(record, reasons);
+      } else if (record.className === 'TCH_SYMB_SECTION') {
+        primitives = decodeSection(record, reasons);
+      } else if (record.className === 'TCH_INDEXPOINTER') {
+        primitives = decodeIndexPointer(record, reasons);
+      } else if (record.className === 'TCH_CORNER_WINDOW') {
+        primitives = decodeCornerWindow(record, reasons);
+      }
+      // Every record lands in exactly one bucket: it produced display
+      // primitives, it is valid but draws nothing (for example a revision-cloud
+      // or arrow record with no usable vertices), or it is refused. The
+      // coverage line below proves the three buckets add up to the record count.
+      if (primitives === null) {
         bump(unsupported, record.className);
         continue;
       }
-      if (primitives !== null && primitives.length > 0) {
-        entities.push({ handle: record.handle, primitives });
-        bump(decoded, record.className);
+      if (primitives.length === 0) {
+        bump(noDisplay, record.className);
+        continue;
       }
+      entities.push({ handle: record.handle, primitives });
+      bump(decoded, record.className);
     } catch (error) {
-      const prefix = record.className === 'TCH_WALL'
-        ? 'vendor.tch.wall'
-        : record.className === 'TCH_COLUMN'
-          ? 'vendor.tch.column'
-          : record.className === 'TCH_OPENING'
-            ? 'vendor.tch.opening'
-            : 'vendor.tch.text';
-      bump(reasons, failure(prefix, error));
+      bump(reasons, failure(failurePrefix(record.className), error));
     }
   }
 
   const applied = entities.reduce((sum, entity) => sum + entity.primitives.length, 0);
   const status = entities.length > 0 ? RESULT_STATUS_OK : RESULT_STATUS_UNSUPPORTED;
-  const diagnostics = buildDiagnostics(entities.length, decoded, unsupported, reasons);
+  const diagnostics = buildDiagnostics(
+    entities.length,
+    records.length,
+    decoded,
+    unsupported,
+    noDisplay,
+    reasons,
+  );
   return buildResult(token, generation, status, applied, entities, diagnostics);
+}
+
+/** Stable diagnostic prefix for one class; unknown classes keep their name. */
+function failurePrefix(className: string): string {
+  switch (className) {
+    case 'TCH_WALL': return 'vendor.tch.wall';
+    case 'TCH_COLUMN': return 'vendor.tch.column';
+    case 'TCH_OPENING': return 'vendor.tch.opening';
+    case 'TCH_ELEVATION': return 'vendor.tch.elevation';
+    case 'TCH_ARROW': return 'vendor.tch.arrow';
+    case 'TCH_MULTILEADER': return 'vendor.tch.multileader';
+    case 'TCH_DIMENSION2': return 'vendor.tch.dimension';
+    case 'TCH_AXIS_LABEL': return 'vendor.tch.axis';
+    case 'TCH_RADIUSDIM': return 'vendor.tch.radiusdim';
+    case 'TCH_LINESTAIR': return 'vendor.tch.linestair';
+    case 'TCH_RECTSTAIR': return 'vendor.tch.rectstair';
+    case 'TCH_RUPTURE': return 'vendor.tch.rupture';
+    case 'TCH_MODI': return 'vendor.tch.modi';
+    case 'TCH_DRAWINGINDEX': return 'vendor.tch.drawingindex';
+    case 'TCH_DRAWINGNAME': return 'vendor.tch.drawingname';
+    case 'TCH_NORTHTHUMB': return 'vendor.tch.norththumb';
+    case 'TCH_BLOCK_INSERT': return 'vendor.tch.block_insert';
+    case 'TCH_SYMB_SECTION': return 'vendor.tch.section';
+    case 'TCH_INDEXPOINTER': return 'vendor.tch.indexpointer';
+    case 'TCH_CORNER_WINDOW': return 'vendor.tch.cornerwindow';
+    default: return 'vendor.tch.text';
+  }
 }
 
 function failure(prefix: string, error: unknown): string {
@@ -238,14 +319,26 @@ function isTruncated(error: unknown): boolean {
 
 function buildDiagnostics(
   entityCount: number,
+  recordCount: number,
   decoded: Map<string, number>,
   unsupported: Map<string, number>,
+  noDisplay: Map<string, number>,
   reasons: Map<string, number>,
 ): string[] {
   const messages: string[] = [];
   if (entityCount === 0) messages.push('vendor.decoder_no_supported_entities');
   if (decoded.size > 0) messages.push(`vendor.tch.decoded: ${formatCounts(decoded)}`);
   if (unsupported.size > 0) messages.push(`vendor.tch.unsupported: ${formatCounts(unsupported)}`);
+  if (noDisplay.size > 0) messages.push(`vendor.tch.no_display: ${formatCounts(noDisplay)}`);
+  const sum = (counts: Map<string, number>): number => {
+    let total = 0;
+    for (const value of counts.values()) total += value;
+    return total;
+  };
+  const accounted = sum(decoded) + sum(unsupported) + sum(noDisplay);
+  if (accounted !== recordCount) {
+    messages.push(`vendor.tch.unaccounted: ${recordCount - accounted}`);
+  }
   for (const reason of [...reasons.keys()].sort()) {
     messages.push(`${reason}: ${reasons.get(reason) ?? 0}`);
   }

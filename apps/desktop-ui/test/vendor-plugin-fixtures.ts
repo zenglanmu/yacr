@@ -373,6 +373,13 @@ export function openingWriter(options: {
   handles?: BitWriter;
   mirror?: number;
   kind?: number;
+  label?: string;
+  labelX?: number;
+  labelY?: number;
+  labelHeight?: number;
+  flags?: number;
+  segments?: readonly { x1: number; y1: number; x2: number; y2: number; bulge: number }[];
+  bodyVersion?: number;
 }): BitWriter {
   const writer = new BitWriter();
   const baseHandles = options.baseHandles ?? [];
@@ -381,8 +388,10 @@ export function openingWriter(options: {
   writer.bitDouble(0);
   writer.byte(baseHandles.length > 0 ? 1 : 0);
   if (baseHandles.length > 0) writer.byte(baseHandles.length);
-  writeBag(writer, options.text ?? new BitWriter(), options.bag ?? []);
-  writer.byte(5); // opening version
+  const text = options.text ?? new BitWriter();
+  writeBag(writer, text, options.bag ?? []);
+  const version = options.bodyVersion ?? 5;
+  writer.byte(version);
   writer.bitDouble(options.position[0]);
   writer.bitDouble(options.position[1]);
   writer.bitDouble(options.position[2]);
@@ -390,14 +399,57 @@ export function openingWriter(options: {
   writer.bitDouble(options.thickness ?? 0.2);
   writer.bitDouble(options.height ?? 2);
   writer.bitDouble(options.angle ?? 0);
-  writer.byte(options.mirror ?? 0);
-  writer.byte(options.kind ?? 0);
+  const mirror = options.mirror ?? 0;
+  const kind = options.kind ?? 0;
+  writer.byte(mirror);
+  writer.byte(kind);
+  writer.bitDouble(0); // unused value after kind
+  if (options.text) writeText(text, options.label ?? '');
+  writer.bitDouble(options.labelX ?? 0);
+  writer.bitDouble(options.labelY ?? 0);
+  writer.bitDouble(0);
+  const flags = options.flags ?? 0;
+  writer.bitShort(flags);
+  if ((flags & 1) !== 0 || kind === 10) {
+    writer.bitDouble(0);
+    writer.bitDouble(0);
+  }
+  if (kind === 4) {
+    writer.byte(0);
+    writer.bitDouble(0);
+    writer.bitDouble(0);
+    writer.bitDouble(0);
+    if (version > 4) writer.bitDouble(0);
+  } else if (kind === 6 || kind === 7) {
+    writer.bitDouble(0);
+    if (kind === 6) writer.bitDouble(0);
+  }
+  writer.bitDouble(options.labelHeight ?? 3.5);
+  writer.bitDouble(0);
+  writer.bitDouble(0);
+  writer.bitDouble(0);
+  const segments = options.segments ?? [];
+  writer.bitShort(segments.length);
+  for (const segment of segments) {
+    writer.rawDouble(segment.x1);
+    writer.rawDouble(segment.y1);
+    writer.rawDouble(segment.x2);
+    writer.rawDouble(segment.y2);
+    writer.bitDouble(segment.bulge);
+  }
+  writer.bitLong(0);
+  writer.bitShort(0);
+  writer.pushBit(0);
+  if (options.text) writeText(text, '');
+  for (let index = 0; index < 4; index += 1) writer.bitDouble(0);
   writer.bitDouble(0);
   const handles = options.handles ?? new BitWriter();
   for (const handle of baseHandles) writeHandle(handles, handle);
   writeHandle(handles, options.block2d ?? 0n);
   writeHandle(handles, options.block3d ?? 0n);
   writeHandle(handles, options.wall);
+  // style + four trailing slots (empty handles still occupy a slot)
+  for (let index = 0; index < 5; index += 1) writeHandle(handles, 0n);
   return writer;
 }
 

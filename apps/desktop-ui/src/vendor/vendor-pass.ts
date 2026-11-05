@@ -33,7 +33,7 @@ export interface VendorPluginModule {
   decode(records: ArrayBuffer): ArrayBuffer;
 }
 
-const VENDOR_ABI_VERSION = 4;
+const VENDOR_ABI_VERSION = 1;
 const RESULT_MAGIC = 0x59414e52;
 const RESULT_STATUS_UNSUPPORTED = 1;
 
@@ -107,7 +107,7 @@ function asArrayBuffer(value: unknown): ArrayBuffer {
   throw new Error('vendor.records_not_binary');
 }
 
-/** An ABI v4 result frame carrying one unsupported diagnostic. */
+/** An ABI v1 result frame carrying one unsupported diagnostic. */
 export function unsupportedResult(token: number, generation: number, message: string): ArrayBuffer {
   const diagnostics = [message];
   const encoder = new TextEncoder();
@@ -130,7 +130,7 @@ export function unsupportedResult(token: number, generation: number, message: st
     new Uint8Array(buffer, offset, bytes.byteLength).set(bytes);
     offset += bytes.byteLength;
   }
-  // ABI v4: zero entity groups. An unsupported result must never look like a
+  // ABI v1: zero entity groups. An unsupported result must never look like a
   // truncated frame or claim primitives it does not carry.
   view.setUint32(offset, 0, true);
   return buffer;

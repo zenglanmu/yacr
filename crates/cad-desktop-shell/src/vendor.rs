@@ -1,6 +1,6 @@
 //! Vendor transport for every **native** Tauri carrier.
 //!
-//! The carrier-neutral state machine (tokens, ABI v4 frames, `applied` rules and
+//! The carrier-neutral state machine (tokens, ABI v1 frames, `applied` rules and
 //! the `vendor.*` refusals) lives in
 //! [`cad_ui_core::session::vendor`]. This module only adds the two things a
 //! Tauri host owns:
@@ -108,7 +108,7 @@ pub fn apply_pending_representations(shared: &Arc<Mutex<Shared>>, session: &CadS
     }
 }
 
-/// `cad_vendor_records`: return the ABI v4 records frame as raw bytes.
+/// `cad_vendor_records`: return the ABI v1 records frame as raw bytes.
 ///
 /// The response is a `tauri::ipc::Response`, so the frontend receives an
 /// `ArrayBuffer` instead of a JSON number array (see the Tauri v2 raw-response

@@ -624,3 +624,109 @@ fn area_object_is_work_only_like_the_other_measurements() {
     assert!(matches!(error, CadError::PermissionDenied), "{error:?}");
     assert!(session.last_measurement().is_none());
 }
+
+const VENDOR_ENTITY: u128 = 20;
+
+/// Replace the fixture drawing with one opaque entity that has vendor-derived
+/// geometry, and install a settled snapshot for its source handle.
+fn vendor_app(primitives: Vec<crate::vendor::VendorPrimitive>) -> (Application, SessionState) {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    let mut opaque = entity(
+        VENDOR_ENTITY,
+        SemanticGeometry::Opaque {
+            type_key: "TCH_COLUMN".into(),
+            version: 0,
+            payload: Vec::new(),
+        },
+    );
+    opaque.object.source_handle = Some("2C".into());
+    b.insert_entity(opaque).unwrap();
+    let drawing = b.finish().unwrap();
+
+    let (mut app, session) = app_with_objects();
+    app.workspace
+        .documents
+        .get_mut(&DocumentId(1))
+        .unwrap()
+        .drawing = std::sync::Arc::new(drawing);
+    app.set_vendor_representations(Some(std::sync::Arc::new(
+        crate::vendor::VendorRepresentationStore::new(
+            7,
+            vec![crate::vendor::VendorEntityPrimitives {
+                handle: 0x2C,
+                primitives,
+            }],
+        ),
+    )));
+    (app, session)
+}
+
+fn square() -> Vec<crate::vendor::VendorPrimitive> {
+    vec![crate::vendor::VendorPrimitive::Lines(vec![
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 4.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 4.0,
+            y: 3.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 0.0,
+            y: 3.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    ])]
+}
+
+#[test]
+fn a_vendor_derived_closed_outline_reports_its_exact_area() {
+    let (mut app, mut session) = vendor_app(square());
+    let value = measure_one(&mut app, &mut session, VENDOR_ENTITY).expect("area");
+    assert!((value - 12.0).abs() < 1e-9, "4×3 derived ring, got {value}");
+    let record = session
+        .last_measurement()
+        .expect("the derived area is recorded");
+    assert_eq!(record.source, GeometrySource::ProxyCache);
+    assert!(matches!(record.precision, Precision::Approximate { .. }));
+    assert_eq!(record.inputs.len(), 4, "one start vertex per edge");
+}
+
+#[test]
+fn a_vendor_derived_open_outline_is_refused_by_name() {
+    let (mut app, mut session) = vendor_app(vec![crate::vendor::VendorPrimitive::Lines(vec![
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    ])]);
+    let error = measure_one(&mut app, &mut session, VENDOR_ENTITY).expect_err("open outline");
+    assert!(
+        format!("{error:?}").contains("area.object.vendor_outline"),
+        "{error:?}"
+    );
+}

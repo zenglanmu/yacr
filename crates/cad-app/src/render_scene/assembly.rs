@@ -7,8 +7,8 @@ use crate::vendor::{VendorPrimitive, VendorRepresentationStore};
 use cad_db::DrawingDatabase;
 use cad_db::LinetypePattern;
 use cad_domain::{
-    CadResult, Completeness, GeometrySource, InstancePath, Point3, Precision, SelectionRef,
-    TaskStamp, TextAlignH, TextAlignV, TolerancePolicy,
+    CadResult, Completeness, EntityId, GeometrySource, InstancePath, Point3, Precision,
+    SelectionRef, TaskStamp, TextAlignH, TextAlignV, TolerancePolicy,
 };
 use cad_representation::layout::{build_paper_space, enumerate_layouts};
 use cad_representation::{
@@ -194,6 +194,27 @@ pub fn build_scene_stats_with_vendor(
                     stamp.document,
                     vendor,
                     fonts.as_deref(),
+                );
+                let block_vendor = BlockVendorContext {
+                    database,
+                    registry: &registry,
+                    context: &context,
+                    document: stamp.document,
+                    vendor,
+                    fonts: fonts.as_deref(),
+                };
+                let placement = InstancePlacement {
+                    transform: cad_domain::Transform3::identity(),
+                    path: InstancePath::default(),
+                };
+                append_block_vendor_fragments(
+                    &mut representation,
+                    &block_vendor,
+                    &entity.geometry,
+                    entity.id,
+                    &placement,
+                    0,
+                    &mut Vec::new(),
                 );
                 stats.fragments_in += representation.fragments.len();
                 let delta = cache.build_compact(&representation, stamp.clone())?;
@@ -496,6 +517,116 @@ fn append_vendor_fragments(
         // representation.
         let note = vendor_issue.unwrap_or_else(|| "vendor derived display (display-only)".into());
         representation.completeness = Completeness::Partial(vec![note]);
+    }
+}
+
+/// Shared inputs for the block-member vendor walk.
+struct BlockVendorContext<'a> {
+    database: &'a DrawingDatabase,
+    registry: &'a ProviderRegistry,
+    context: &'a RepresentationContext,
+    document: cad_domain::DocumentId,
+    vendor: Option<&'a VendorRepresentationStore>,
+    fonts: Option<&'a cad_representation::FontEngine>,
+}
+
+/// One composed placement while walking nested INSERTs.
+struct InstancePlacement {
+    transform: cad_domain::Transform3,
+    path: InstancePath,
+}
+
+/// Append derived fragments for vendor entities that live **inside** blocks.
+///
+/// `build_expanded` already recurses through block geometry, but the vendor
+/// merge only runs for the top-level entity. This walk mirrors the INSERT
+/// expansion: every member entity with a vendor source handle contributes its
+/// derived fragments, transformed by the composed instance transform and
+/// sourced to that member with the real instance path. Nested INSERTs recurse
+/// with the same depth/cycle bounds as the representation provider. Paper-space
+/// expansion (`build_paper_space`) does not call this yet; model space is the
+/// path the TCH fixture uses.
+#[allow(clippy::too_many_arguments)]
+fn append_block_vendor_fragments(
+    out: &mut cad_representation::DisplayRepresentation,
+    vendor: &BlockVendorContext<'_>,
+    geometry: &cad_domain::SemanticGeometry,
+    owner: EntityId,
+    placement: &InstancePlacement,
+    depth: usize,
+    stack: &mut Vec<cad_domain::BlockId>,
+) {
+    match geometry {
+        cad_domain::SemanticGeometry::Insert { block, transform } => {
+            if depth >= cad_representation::MAX_INSTANCE_DEPTH || stack.contains(block) {
+                return;
+            }
+            let Some(definition) = vendor.database.block(*block) else {
+                return;
+            };
+            let composed = placement.transform.matrix_mul(transform);
+            let mut child = InstancePlacement {
+                transform: composed,
+                path: placement.path.clone(),
+            };
+            child.path.0.push(owner);
+            stack.push(*block);
+            for member_id in definition.entities.clone() {
+                let Some(member) = vendor.database.entity(member_id) else {
+                    continue;
+                };
+                if let Some(handle) = member.object.source_handle.as_deref() {
+                    if vendor
+                        .vendor
+                        .is_some_and(|store| store.for_source_handle(handle).is_some())
+                    {
+                        let mut local = cad_representation::DisplayRepresentation {
+                            fragments: Vec::new(),
+                            completeness: Completeness::Complete,
+                            diagnostics: Vec::new(),
+                        };
+                        append_vendor_fragments(
+                            &mut local,
+                            vendor.database,
+                            vendor.registry,
+                            vendor.context,
+                            member,
+                            vendor.document,
+                            vendor.vendor,
+                            vendor.fonts,
+                        );
+                        for mut fragment in local.fragments {
+                            fragment.source = SelectionRef {
+                                document: vendor.document,
+                                entity: member.id,
+                                instance: child.path.clone(),
+                                sub_element: None,
+                            };
+                            fragment.primitive = fragment.primitive.transformed(&child.transform);
+                            fragment.geometry_source = GeometrySource::ProxyCache;
+                            fragment.precision = Precision::Approximate { error_bound: None };
+                            out.fragments.push(fragment);
+                        }
+                    }
+                }
+                append_block_vendor_fragments(
+                    out,
+                    vendor,
+                    &member.geometry,
+                    member.id,
+                    &child,
+                    depth + 1,
+                    stack,
+                );
+            }
+            stack.pop();
+        }
+        cad_domain::SemanticGeometry::Compound(children) => {
+            for child in children {
+                append_block_vendor_fragments(out, vendor, child, owner, placement, depth, stack);
+            }
+        }
+        _ => {}
     }
 }
 

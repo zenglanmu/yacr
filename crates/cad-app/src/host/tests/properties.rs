@@ -119,3 +119,79 @@ fn host_applies_a_display_attribute_to_every_selected_entity() {
     }
     assert_eq!(controller.selection().len(), 2);
 }
+
+#[test]
+fn selection_properties_report_vendor_derived_rows() {
+    let mut controller = demo();
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "TCH_COLUMN".into(),
+                revision: Revision(0),
+                source_handle: Some("2C".into()),
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Opaque {
+                type_key: "TCH_COLUMN".into(),
+                version: 0,
+                payload: Vec::new(),
+            },
+            draw_order: 0,
+        })
+        .unwrap();
+    controller
+        .application
+        .workspace
+        .documents
+        .get_mut(&controller.document_id)
+        .unwrap()
+        .drawing = Arc::new(builder.finish().unwrap());
+    controller
+        .application
+        .set_vendor_representations(Some(Arc::new(
+            crate::vendor::VendorRepresentationStore::new(
+                5,
+                vec![crate::vendor::VendorEntityPrimitives {
+                    handle: 0x2C,
+                    primitives: vec![crate::vendor::VendorPrimitive::Lines(vec![
+                        cad_domain::Point3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                        cad_domain::Point3 {
+                            x: 1.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                    ])],
+                }],
+            ),
+        )));
+
+    controller
+        .set_selection(vec![ref_for(&controller, 1)])
+        .expect("select the vendor entity");
+    let properties = controller.selection_properties().expect("properties");
+    let value = |key: &str| {
+        properties
+            .rows
+            .iter()
+            .find(|row| row.key == key)
+            .and_then(|row| row.value.clone())
+    };
+    assert_eq!(value("vendor_derived").as_deref(), Some("true"));
+    assert_eq!(value("vendor_primitives").as_deref(), Some("1"));
+    assert_eq!(value("vendor_revision").as_deref(), Some("5"));
+}

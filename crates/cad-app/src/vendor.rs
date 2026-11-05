@@ -28,7 +28,7 @@ use crate::VendorRecord;
 ///
 /// v4 extends the result frame with primitive kind 5 (block insert). The
 /// records-frame layout is unchanged from v3.
-pub const VENDOR_ABI_VERSION: u32 = 4;
+pub const VENDOR_ABI_VERSION: u32 = 1;
 
 /// Records frame magic (`"YAND"`, little-endian).
 pub const RECORDS_MAGIC: u32 = 0x5941_4e44;
@@ -174,7 +174,7 @@ impl VendorRepresentationStore {
     }
 }
 
-/// Encode one ABI v4 records frame (host → plugin).
+/// Encode one ABI v1 records frame (host → plugin).
 pub fn encode_records_frame(
     token: u64,
     generation: u64,

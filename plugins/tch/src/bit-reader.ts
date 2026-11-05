@@ -55,6 +55,28 @@ export class BitReader {
     const code = this.readBits(2);
     return code === 0 ? this.readRawDouble() : code === 1 ? 1.0 : 0.0;
   }
+  /**
+   * DWG `ReadBitDoubleWithDefault`. `def` starts as its little-endian bytes:
+   * code 1 replaces the low 4 bytes, code 2 replaces bytes 4/5 then 0..3, and
+   * code 3 reads a full raw double.
+   */
+  readBitDoubleWithDefault(def: number): number {
+    const view = new DataView(new ArrayBuffer(8));
+    view.setFloat64(0, def, true);
+    const bytes = new Uint8Array(view.buffer);
+    const code = this.readBits(2);
+    if (code === 0) return def;
+    if (code === 1) {
+      for (let index = 0; index < 4; index += 1) bytes[index] = this.readByte();
+    } else if (code === 2) {
+      bytes[4] = this.readByte();
+      bytes[5] = this.readByte();
+      for (let index = 0; index < 4; index += 1) bytes[index] = this.readByte();
+    } else {
+      return this.readRawDouble();
+    }
+    return view.getFloat64(0, true);
+  }
   read3BitDouble(): Point3 { return { x: this.readBitDouble(), y: this.readBitDouble(), z: this.readBitDouble() }; }
   /** DWG handle: nibble form, big-endian value bytes, reference-relative codes. */
   readHandle(reference: bigint): bigint {

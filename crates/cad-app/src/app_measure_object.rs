@@ -138,10 +138,19 @@ impl Application {
             plane: measured.plane,
             value,
             units,
-            // The value is the entity's analytic geometry, not a set of picked
-            // points: `Analytic`, exactly, with no approximation flag.
-            source: GeometrySource::Analytic,
-            precision: Precision::Analytic,
+            // A semantic entity measures its own analytic geometry; a vendor
+            // derived outline is display cache, so it says so instead of
+            // claiming analytic precision.
+            source: if measured.derived {
+                GeometrySource::ProxyCache
+            } else {
+                GeometrySource::Analytic
+            },
+            precision: if measured.derived {
+                Precision::Approximate { error_bound: None }
+            } else {
+                Precision::Analytic
+            },
         };
         session.set_last_measurement(record.clone());
         Ok(CommandOutcome {
@@ -269,6 +278,7 @@ impl Application {
                 )
                 .map_err(|error| polyline_refusal(entity, error))?;
                 Ok(MeasuredObjectArea {
+                    derived: false,
                     kind: "closed polyline",
                     value: ring.area,
                     // The ring's own stored vertices, in world coordinates — never
@@ -277,30 +287,42 @@ impl Application {
                     plane: Some(ring.plane),
                 })
             }
-            other => Err(CadError::Unsupported(format!(
-                "area.object.unsupported_kind: AREA OBJECT measures one closed CIRCLE, ELLIPSE or \
-                 closed POLYLINE; entity {} is {}",
-                entity.id.0,
-                geometry_kind(other)
-            ))),
+            other => {
+                if let Some(result) = self.measure_vendor_area(entity) {
+                    return result;
+                }
+                Err(CadError::Unsupported(format!(
+                    "area.object.unsupported_kind: AREA OBJECT measures one closed CIRCLE, ELLIPSE \
+                     or closed POLYLINE (or a closed vendor-derived outline); entity {} is {}",
+                    entity.id.0,
+                    geometry_kind(other)
+                )))
+            }
         }
     }
 }
 
 /// One measured object area, before it is wrapped in a [`MeasurementRecord`].
-struct MeasuredObjectArea {
+pub(crate) struct MeasuredObjectArea {
+    /// Whether the value came from a vendor-derived outline rather than the
+    /// entity's own semantic geometry (which selects the record's source).
+    pub(crate) derived: bool,
     /// The kind named in the diagnostic (`circle`, `ellipse`, `closed polyline`).
-    kind: &'static str,
-    value: f64,
+    pub(crate) kind: &'static str,
+    pub(crate) value: f64,
     /// The ring's own vertices; empty for a closed curve (no vertices exist).
-    inputs: Vec<Point3>,
+    pub(crate) inputs: Vec<Point3>,
     /// The ring's own plane; `None` for a closed curve (nothing to project).
-    plane: Option<WorkPlane>,
+    pub(crate) plane: Option<WorkPlane>,
 }
 
 impl MeasuredObjectArea {
     /// A closed-curve result: no input vertices, no plane, and a finite value.
-    fn curve(entity: &cad_db::DbEntity, kind: &'static str, value: f64) -> CadResult<Self> {
+    pub(crate) fn curve(
+        entity: &cad_db::DbEntity,
+        kind: &'static str,
+        value: f64,
+    ) -> CadResult<Self> {
         if !value.is_finite() {
             return Err(degenerate(
                 entity,
@@ -314,6 +336,7 @@ impl MeasuredObjectArea {
             )));
         }
         Ok(Self {
+            derived: false,
             kind,
             value,
             inputs: Vec::new(),

@@ -385,6 +385,12 @@ pub struct Application {
     pub history: BTreeMap<DocumentId, History>,
     pub measurement: MeasurementEngine,
     pub query: QueryService,
+    /// Latest settled vendor derived-representation snapshot.
+    ///
+    /// Display and measurement both read this same immutable store; it is not
+    /// document state and is replaced/cleared with the pass. `None` means the
+    /// carrier has no settled vendor pass (or the document was replaced).
+    pub vendor_representations: Option<Arc<crate::vendor::VendorRepresentationStore>>,
 }
 
 impl Default for Application {
@@ -424,6 +430,7 @@ mod app_drawing;
 mod app_history;
 mod app_measure;
 mod app_measure_object;
+mod app_measure_vendor;
 mod application;
 mod layers_isolate;
 

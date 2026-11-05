@@ -3,7 +3,7 @@
 //!
 //! # Why this module is thin
 //!
-//! The state machine (tokens, ABI v4 framing, `applied` rules, `vendor.*`
+//! The state machine (tokens, ABI v1 framing, `applied` rules, `vendor.*`
 //! refusals) lives in [`cad_ui_core::session::vendor`], the same type the native
 //! `app-linux`/`app-windows`/`app-macos`/`app-android` hosts drive through
 //! `cad-desktop-shell`. This module only adds the two things a wasm session owns:
@@ -115,7 +115,7 @@ pub(crate) fn take_event_kinds() -> Vec<CadEventKind> {
     })
 }
 
-/// The ABI v4 records frame for `token`, or the store's stable refusal.
+/// The ABI v1 records frame for `token`, or the store's stable refusal.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // native: tests only
 pub(crate) fn records_frame(token: u64) -> Result<Vec<u8>, String> {
     with_store(|store| store.records_frame(token))
@@ -149,7 +149,7 @@ pub(crate) fn status_json() -> String {
     serde_json::to_string(&status).expect("VendorStatus is a plain JSON value")
 }
 
-/// `cad_vendor_records`: the ABI v4 record frame, or a stable `vendor.*` reason.
+/// `cad_vendor_records`: the ABI v1 record frame, or a stable `vendor.*` reason.
 ///
 /// Answers a `Uint8Array` on the JS side (wasm-bindgen's mapping of `Vec<u8>`),
 /// which the browser transport converts to an `ArrayBuffer` for the plugin. It
@@ -340,7 +340,7 @@ mod tests {
         );
         assert!(take_event_kinds().is_empty(), "announced exactly once");
 
-        // The records frame is the active pass's own frame (ABI v4 header).
+        // The records frame is the active pass's own frame (ABI v1 header).
         let frame = records_frame(token).expect("the active token serves its frame");
         assert_eq!(&frame[0..4], &0x5941_4e44u32.to_le_bytes());
         assert_eq!(&frame[4..8], &VENDOR_ABI_VERSION.to_le_bytes());

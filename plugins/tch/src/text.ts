@@ -1,5 +1,6 @@
 // `TCH_TEXT` / `TCH_MTEXT`: base-6 text fields. `TCH_MTEXTNEW` is unsupported.
 import { readText, reader, skipPropertyBag } from './bit-reader.ts';
+import { ClassText } from './base6.ts';
 import { bump } from './diagnostics.ts';
 import type { Primitive, VendorRecord } from './types.ts';
 
@@ -46,7 +47,7 @@ export function decodeText(
   // Base text slots come first; the text value is the next string.
   const text = reader(record.text, record.textBits, record.textSkipBits);
   for (let index = 0; index < bag.texts; index += 1) readText(text);
-  const value = readText(text);
+  const value = new ClassText(text).next();
 
   const x = main.readBitDouble();
   const y = main.readBitDouble();

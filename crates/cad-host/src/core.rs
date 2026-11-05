@@ -437,6 +437,13 @@ impl HostCore {
         &self,
         store: Option<Arc<cad_app::vendor::VendorRepresentationStore>>,
     ) {
+        // Display and measurement/query share one snapshot. The application copy
+        // is what `AREA OBJECT` and selection properties read; the render session
+        // keeps the same `Arc`.
+        self.controller
+            .borrow_mut()
+            .application
+            .set_vendor_representations(store.clone());
         self.render.set_vendor_representations(store);
     }
 }
