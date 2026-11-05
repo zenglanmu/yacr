@@ -63,6 +63,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "[probe] display backend policy={:?} resolved={:?} source={source}",
                 plan.policy, plan.resolved
             );
+            // Must stay here, before GTK/WebKit/EGL initialize: the NVIDIA
+            // explicit-sync workaround sets an environment variable those
+            // libraries read at first initialization (docs/flatpak.md §6).
+            crate::nvidia_quirk::apply(plan.resolved);
             // The carrier is fixed here, once, before the webview exists (ADR
             // 0024 D4: no hot switching). Wayland keeps the native subsurface
             // path unchanged; X11/XWayland runs the wasm `dom-canvas` carrier.

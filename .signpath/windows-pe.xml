@@ -1,0 +1,25 @@
+<!--
+  SignPath artifact configuration for the Windows release stage.
+
+  The CI job uploads the staged Windows release tree as a GitHub Actions
+  artifact (`actions/upload-artifact` always wraps it in a ZIP), so the root
+  element is `<zip-file>` and paths are relative to that ZIP.
+
+  This file is a reviewable copy. The authoritative configuration lives in the
+  SignPath project; the workflow references it by the slug stored in the
+  `SIGNPATH_WINDOWS_ARTIFACT_CONFIGURATION_SLUG` repository variable.
+
+  SignPath Foundation may additionally require PE metadata restrictions
+  (`product-name`, `product-version`, ...). Add them in SignPath after
+  inspecting the actual PE version resource; do not guess values here.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="bin/yacr-windows.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="bin/cad-cli-tools.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

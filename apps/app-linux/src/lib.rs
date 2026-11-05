@@ -43,6 +43,8 @@ pub mod host;
 #[cfg(target_os = "linux")]
 mod main_thread;
 #[cfg(target_os = "linux")]
+mod nvidia_quirk;
+#[cfg(target_os = "linux")]
 pub mod platform;
 #[cfg(target_os = "linux")]
 pub mod redraw;

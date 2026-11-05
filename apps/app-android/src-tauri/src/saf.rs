@@ -1,6 +1,6 @@
 //! Storage Access Framework (SAF) bridge — **Android only**.
 //!
-//! The Kotlin lane (`dev.yacr.app.MainActivity`) owns the `ACTION_OPEN_DOCUMENT`
+//! The Kotlin lane (`io.github.zenglanmu.yacr.MainActivity`) owns the `ACTION_OPEN_DOCUMENT`
 //! / `ACTION_CREATE_DOCUMENT` pickers and the `ContentResolver` transfer, and
 //! exposes the interaction through five **instance** methods:
 //!
@@ -47,7 +47,7 @@ use jni::{JNIEnv, JavaVM};
 use crate::platform::SafState;
 
 /// The Java class that carries the SAF methods (also the manifest's Activity).
-const ACTIVITY_CLASS: &str = "dev.yacr.app.MainActivity";
+const ACTIVITY_CLASS: &str = "io.github.zenglanmu.yacr.MainActivity";
 
 /// Stable logcat prefix of every SAF failure/warning from this module.
 const LOG_PREFIX: &str = "yacr: saf";

@@ -23,7 +23,7 @@
 # exact name and descriptor (`apps/app-android/src-tauri/src/saf.rs`). R8 must
 # not rename, inline away, or remove them; without this block a release APK
 # fails at runtime with NoSuchMethodError even though the debug build works.
--keepclassmembers class dev.yacr.app.MainActivity {
+-keepclassmembers class io.github.zenglanmu.yacr.MainActivity {
     public void documentLaunchOpen();
     public void documentLaunchSave(java.lang.String);
     public void documentReadUri(java.lang.String);

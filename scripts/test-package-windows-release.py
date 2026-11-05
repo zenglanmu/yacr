@@ -6,7 +6,13 @@
 at compile time by ``tauri::generate_context!``. The packaging script must
 therefore build the UI first, cross-build both release executables, verify the
 PE32+ machine and embedded icon, bundle or reject non-system runtime DLLs,
-assemble fonts plus the release documents, and emit a zip with a sha256 file.
+assemble fonts plus the release documents, and stage a release tree whose
+``PACKAGE.txt`` still carries the ``@@YACR_SIGNING_NOTE@@`` placeholder.
+
+The zip + sha256 are written by ``scripts/finalize-windows-release.sh``, which CI
+runs *after* SignPath has signed (or explicitly left unsigned) the staged
+executables. Both scripts are pinned here so the local UNSIGNED path and the CI
+SIGNED path cannot drift apart.
 
 Every guarantee is checked by **removing it in turn** from the script text and
 requiring the checker to report it, so the pipeline cannot silently drift back
@@ -22,12 +28,14 @@ byte-identical copy of that shared asset.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts/package-windows-release.sh"
+FINALIZE_SCRIPT = ROOT / "scripts/finalize-windows-release.sh"
 CJK_FALLBACK = "NotoSansCJKsc-Regular.otf"
 
 # (label, exact fragment). Each must appear in the packaging script, and deleting
@@ -51,9 +59,21 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("font manifest", "fonts/fonts.json"),
     ("release output root", "target/${TARGET}/release"),
     ("staging directory", 'DIST="${RELEASE}/dist"'),
+    ("stage-only signing handoff", "SKIP_ZIP"),
+    ("shared finalize step", "finalize-windows-release.sh"),
+    ("package manifest", "PACKAGE.txt"),
+    ("signing note placeholder", "@@YACR_SIGNING_NOTE@@"),
+)
+
+# The zip/checksum fragments moved into the finalize script; CI runs it after the
+# SignPath step so the archive it writes is the one that ships.
+FINALIZE_REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
+    ("fail-closed shell options", "set -euo pipefail"),
     ("zip writing", "zipfile.ZipFile"),
     ("checksum file", ".zip.sha256"),
     ("sha256 digest", "sha256"),
+    ("signed mode", "--signed"),
+    ("unsigned mode", "--unsigned"),
     ("package manifest", "PACKAGE.txt"),
 )
 
@@ -76,6 +96,15 @@ def check_pipeline(text: str) -> list[str]:
     for label, pattern in FORBIDDEN_PATTERNS:
         if pattern.search(text):
             problems.append(f"must not contain {label}: {pattern.pattern!r}")
+    return problems
+
+
+def check_finalize(text: str) -> list[str]:
+    """Return every guarantee the finalize script text is missing."""
+    problems: list[str] = []
+    for label, fragment in FINALIZE_REQUIRED_FRAGMENTS:
+        if fragment not in text:
+            problems.append(f"missing {label}: {fragment!r}")
     return problems
 
 
@@ -110,6 +139,30 @@ class PackageWindowsReleasePipelineContracts(unittest.TestCase):
         self.assertTrue(
             any("old Slint GUI binary name" in problem for problem in problems), problems
         )
+
+    def test_finalize_script_implements_the_zip_step(self) -> None:
+        self.assertTrue(
+            FINALIZE_SCRIPT.is_file(), f"missing {FINALIZE_SCRIPT.relative_to(ROOT)}"
+        )
+        self.assertEqual(
+            check_finalize(FINALIZE_SCRIPT.read_text(encoding="utf-8")), []
+        )
+
+    def test_finalize_script_is_executable(self) -> None:
+        self.assertTrue(
+            os.access(FINALIZE_SCRIPT, os.X_OK),
+            "scripts/finalize-windows-release.sh must be executable",
+        )
+
+    def test_each_finalize_fragment_is_required(self) -> None:
+        text = FINALIZE_SCRIPT.read_text(encoding="utf-8")
+        for label, fragment in FINALIZE_REQUIRED_FRAGMENTS:
+            with self.subTest(fragment=label):
+                problems = check_finalize(text.replace(fragment, ""))
+                self.assertTrue(
+                    any(fragment in problem for problem in problems),
+                    f"removing {label} was not reported: {problems}",
+                )
 
     def test_staged_fonts_expect_the_committed_cjk_fallback(self) -> None:
         # Both branches stage the committed fonts/ package: WITH_FONTS=1 merges

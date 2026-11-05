@@ -188,7 +188,7 @@ cat > "${STAGE}/Yacr.app/Contents/Info.plist" <<EOF
 <dict>
   <key>CFBundleName</key><string>Yacr</string>
   <key>CFBundleDisplayName</key><string>Yacr</string>
-  <key>CFBundleIdentifier</key><string>dev.yacr.app</string>
+  <key>CFBundleIdentifier</key><string>io.github.zenglanmu.yacr</string>
   <key>CFBundleVersion</key><string>${VERSION}</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleExecutable</key><string>yacr-macos</string>

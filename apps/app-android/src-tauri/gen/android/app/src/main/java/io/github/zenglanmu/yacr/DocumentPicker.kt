@@ -1,4 +1,4 @@
-package dev.yacr.app
+package io.github.zenglanmu.yacr
 
 import android.app.Activity
 import android.content.Intent

@@ -156,8 +156,8 @@ def check_config() -> list[str]:
     if not CONF.is_file():
         return [f"missing {CONF.relative_to(ROOT)}"]
     conf = json.loads(read(CONF))
-    if conf.get("identifier") != "dev.yacr.app":
-        problems.append("tauri.conf.json: identifier must be 'dev.yacr.app'")
+    if conf.get("identifier") != "io.github.zenglanmu.yacr":
+        problems.append("tauri.conf.json: identifier must be 'io.github.zenglanmu.yacr'")
     if conf.get("productName") != "Yacr":
         problems.append("tauri.conf.json: productName must be 'Yacr'")
     version = workspace_version()
@@ -318,7 +318,7 @@ def check_gesture_bar_inset() -> list[str]:
     the pill to the middle of the command field (measured 2026-10-28).
     """
     problems: list[str] = []
-    activity = GEN_ANDROID / "app" / "src" / "main" / "java" / "dev" / "yacr" / "app" / "MainActivity.kt"
+    activity = GEN_ANDROID / "app" / "src" / "main" / "java" / "io" / "github" / "zenglanmu" / "yacr" / "MainActivity.kt"
     if not activity.is_file():
         return [f"missing {activity.relative_to(ROOT)} (the host must publish the gesture-bar inset)"]
     kotlin = read(activity)
@@ -347,7 +347,7 @@ def check_native_carrier() -> list[str]:
     """
     problems: list[str] = []
     app = GEN_ANDROID / "app"
-    activity = app / "src" / "main" / "java" / "dev" / "yacr" / "app" / "MainActivity.kt"
+    activity = app / "src" / "main" / "java" / "io" / "github" / "zenglanmu" / "yacr" / "MainActivity.kt"
     if not activity.is_file():
         return [f"missing {activity.relative_to(ROOT)}"]
     kotlin = read(activity)
@@ -452,7 +452,7 @@ def check_document_picker_wiring() -> list[str]:
     `AndroidManifest.xml` deliberately has no hand-edited association block.
     """
     problems: list[str] = []
-    java_dir = GEN_ANDROID / "app" / "src" / "main" / "java" / "dev" / "yacr" / "app"
+    java_dir = GEN_ANDROID / "app" / "src" / "main" / "java" / "io" / "github" / "zenglanmu" / "yacr"
     activity_path = java_dir / "MainActivity.kt"
     picker_path = java_dir / "DocumentPicker.kt"
     if not activity_path.is_file():
@@ -585,10 +585,10 @@ def check_document_picker_wiring() -> list[str]:
     # classes.dex (R8 saw no Java caller) and every picker call would fail at
     # runtime with NoSuchMethodError.
     proguard = read(GEN_ANDROID / "app" / "proguard-rules.pro")
-    if "-keepclassmembers class dev.yacr.app.MainActivity" not in proguard:
+    if "-keepclassmembers class io.github.zenglanmu.yacr.MainActivity" not in proguard:
         problems.append(
             "gen/android/app/proguard-rules.pro: the JNI document methods need a "
-            "-keepclassmembers class dev.yacr.app.MainActivity block"
+            "-keepclassmembers class io.github.zenglanmu.yacr.MainActivity block"
         )
     for descriptor in (
         "void documentLaunchOpen();",
@@ -611,8 +611,8 @@ def check_generated_project_and_ignores() -> list[str]:
         problems.append("src-tauri/gen/android: the generated Gradle project must be committed")
     else:
         text = read(gradle)
-        if "dev.yacr.app" not in text:
-            problems.append("gen/android/app/build.gradle.kts: namespace must be dev.yacr.app")
+        if "io.github.zenglanmu.yacr" not in text:
+            problems.append("gen/android/app/build.gradle.kts: namespace must be io.github.zenglanmu.yacr")
         if not re.search(r"minSdk\s*=\s*24", text):
             problems.append("gen/android/app/build.gradle.kts: minSdk must be 24")
 

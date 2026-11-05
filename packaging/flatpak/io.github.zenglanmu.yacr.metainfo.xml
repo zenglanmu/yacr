@@ -5,7 +5,7 @@
   real name/summary/icon and so `flatpak-builder` has consistent metadata.
 -->
 <component type="desktop-application">
-  <id>dev.yacr.app</id>
+  <id>io.github.zenglanmu.yacr</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>AGPL-3.0</project_license>
   <name>Yacr</name>
@@ -24,7 +24,7 @@
       角度与多边形面积。
     </p>
   </description>
-  <launchable type="desktop-id">dev.yacr.app.desktop</launchable>
+  <launchable type="desktop-id">io.github.zenglanmu.yacr.desktop</launchable>
   <provides>
     <binary>yacr</binary>
     <mediatype>image/vnd.dwg</mediatype>

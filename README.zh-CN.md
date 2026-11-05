@@ -153,11 +153,25 @@ cargo build -p cad-cli-tools --release --locked
 bash scripts/package-linux-release.sh
 # → target/release/dist/yacr-<version>-linux-<arch>.flatpak  (+ .sha256)
 flatpak install --user target/release/dist/yacr-<version>-linux-<arch>.flatpak
-flatpak run dev.yacr.app --open /absolute/drawing.dwg
+flatpak run io.github.zenglanmu.yacr --open /absolute/drawing.dwg
 ```
 
 它构建单文件 Flatpak bundle（`bin/yacr` + committed `fonts/`，runtime `org.gnome.Platform//51`）。
-**不是**发布通道：未上 Flathub，CI 的 `linux-release` job 仍硬禁用。见 `docs/flatpak.md`。
+**不是**发布通道：未上 Flathub；CI 的 `linux-release` job 只在 `v*` tag 或手工 dispatch 时运行，
+只上传 workflow artifact。见 `docs/flatpak.md`。
+
+### 代码签名
+
+只有在仓库凭据已配置时发布产物才会签名；缺失凭据时 job 显式产出 `unsigned` artifact，绝不
+把「跳过」写成「已签名」：
+
+- **Windows / Android**——配置 SignPath secrets/variables 后，Windows 做 Authenticode PE 签名、
+  Android 做 APK 签名；未配置时 release artifact 名称带 `-unsigned` 后缀。
+- **Flatpak（Linux）**——可选 OSTree/GPG commit 签名（`FLATPAK_GPG_*` secrets/variables），
+  签名 bundle 会附带匹配的 `*.flatpak.gpg`。
+
+SignPath 不支持 Flatpak。真实 SignPath 与 GPG 签名请求在凭据存在前一律 **NOT RUN**。运行手册、
+所需 secrets 与证据边界见 `docs/code-signing.md`。
 
 ### 全量门禁（CI 同款；发版前运行）
 
@@ -180,8 +194,9 @@ cargo test --workspace --locked -- --test-threads=1   # GPU/CLI 用例串行跑
 ### 其他平台
 
 Windows/macOS 为真实宿主但仅编译/合同证据；Android 为原生 `native-below` 载体（设备 NOT VERIFIED）；
-Web 的 wasm 会话真实、浏览器 smoke 为 SwiftShader 冒烟。发布/打包 job 多数已退役并硬禁用；当前真实
-状态见 `docs/build.md` 与 `docs/ci.md`——**不要**把已退役脚本当作可用流程。
+Web 的 wasm 会话真实、浏览器 smoke 为 SwiftShader 冒烟。发布/打包脚本是真实入口；CI release job
+仅在 `v*` tag / 手工 dispatch 运行并上传 workflow artifact（凭据存在时可选签名）。当前真实状态见
+`docs/build.md` 与 `docs/ci.md`；打包/签名不等于运行或 GPU 验收。
 
 ## 现有进度
 

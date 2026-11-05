@@ -615,7 +615,7 @@ pub fn option_dirs() -> (Option<PathBuf>, Option<PathBuf>) {
 /// empty package.
 #[cfg(target_os = "android")]
 #[no_mangle]
-pub extern "system" fn Java_dev_yacr_app_MainActivity_nativeAssetsReady<'local>(
+pub extern "system" fn Java_io_github_zenglanmu_yacr_MainActivity_nativeAssetsReady<'local>(
     mut env: jni::JNIEnv<'local>,
     this: jni::objects::JObject<'local>,
     fonts_dir: jni::objects::JString<'local>,
@@ -813,12 +813,12 @@ mod tests {
         // `fontsDir` is `File(filesDir, "fonts")` in the frozen Kotlin contract, so
         // the app's private files directory is its parent — never guessed.
         let dirs = AssetDirs {
-            fonts: PathBuf::from("/data/user/0/dev.yacr.app/files/fonts"),
-            images: PathBuf::from("/data/user/0/dev.yacr.app/files/images"),
+            fonts: PathBuf::from("/data/user/0/io.github.zenglanmu.yacr/files/fonts"),
+            images: PathBuf::from("/data/user/0/io.github.zenglanmu.yacr/files/images"),
         };
         assert_eq!(
             files_dir_from(Some(&dirs)),
-            Some(PathBuf::from("/data/user/0/dev.yacr.app/files"))
+            Some(PathBuf::from("/data/user/0/io.github.zenglanmu.yacr/files"))
         );
         // No announcement, or an unusable one, is `None` (the store then stays
         // non-persistent) rather than an invented location.

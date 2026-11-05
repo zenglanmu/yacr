@@ -56,7 +56,7 @@
 | 导入线程 | **同步（tick 线程）** | `importWorker = false`：DWG 在 tick 线程同步导入；极大图纸会阻塞渲染，属**已记录限制**，不是挂起或假成功 |
 | 初始文档 | **共享核心内置 demo 图纸** | 与桌面宿主不带 `--open` 启动完全一致；外部打开到达后由共享打开漏斗替换 |
 | 弹窗宿主 | **已接（in-DOM）** | `AndroidPopupHost`：弹窗是 React 树内的覆盖层，无原生窗口；`open`/`close` 经 `cad_desktop_shell::popup` 的状态机与模态门，主线程跳转有界（5 s）。Options / About / text-edit 可用；`textEdit` 载荷取当前 `CadSession` 选区（无选区 → 共享 `popup.no_text_selection` 拒绝）。设备运行 **NOT VERIFIED** |
-| 持久配置/偏好 | **持久化到应用私有 `filesDir`** | `AndroidConfigStore`：`config.json` / `preference.json`，读 `Absent`/`Text`/`Unreadable` 与桌面一致，写为「建目录 + 临时文件 + `sync_all` + rename」。路径来自 `nativeAssetsReady`（`filesDir` = 公告 `fontsDir` 的父目录）；握手前保持非持久（读 `Absent`、写 `Unsupported`），不发明路径。设备侧落盘 **NOT VERIFIED** |
+| 持久配置/偏好 | **持久化到应用私有 `filesDir`**（`/data/user/0/io.github.zenglanmu.yacr/files`） | `AndroidConfigStore`：`config.json` / `preference.json`，读 `Absent`/`Text`/`Unreadable` 与桌面一致，写为「建目录 + 临时文件 + `sync_all` + rename」。路径来自 `nativeAssetsReady`（`filesDir` = 公告 `fontsDir` 的父目录）；握手前保持非持久（读 `Absent`、写 `Unsupported`），不发明路径。设备侧落盘 **NOT VERIFIED** |
 | 渲染后端 | **Vulkan 硬件 only** | 软件 Vulkan → `yacr: unsupported-gpu: software-vulkan`；**无** GLES/CPU 回退 |
 | FIT / 视口 | **整窗取景** | `SurfaceView` 覆盖整个窗口；`fit_camera` 仍按全窗口取景，分区子矩形是 follow-up |
 | 指针 | **分区原点平移** | tick 内把 DOM 分区局部坐标按 origin 换算成 presented-canvas 坐标；不是第二条输入通道。鼠标/触摸/笔按每事件 `device` 在共享 `cad-host` 仲裁（touch：单指平移、tap 选择、双指 pinch 缩放；mouse/pen：中键平移、2D 主键框选、滚轮缩放） |
@@ -76,7 +76,7 @@ React chrome），`setZOrderMediaOverlay(false)` 一并固定。
 `activity.setContentView(webview)` **之前**运行，那时 WebView 还没有父容器。因此插入动作挂在
 `addOnAttachStateChangeListener` 上，而不是 `onWebViewCreate` 里。
 
-冻结的 4 个 JNI 符号（包 `dev.yacr.app`，实现于同一 `libapp_android.so`）：
+冻结的 4 个 JNI 符号（包 / Kotlin namespace `io.github.zenglanmu.yacr`，实现于同一 `libapp_android.so`）：
 
 | 符号 | 方向 | 职责 |
 |---|---|---|
@@ -88,7 +88,7 @@ React chrome），`setZOrderMediaOverlay(false)` 一并固定。
 - `Long` 只是不透明原生 handle；Kotlin **不**持有 CAD 状态、不做坐标/命令逻辑。
 
 **反向（Rust → Kotlin）的 5 个实例方法**：`src/saf.rs` 按精确名字/描述符调用
-`dev.yacr.app.MainActivity` 上的实例方法（`Java_dev_yacr_app_MainActivity_document*`），这也是
+`io.github.zenglanmu.yacr.MainActivity` 上的实例方法（`Java_io_github_zenglanmu_yacr_MainActivity_document*`），这也是
 `proguard-rules.pro` 必须固定它们的原因。
 
 | 方法 | 职责 |
@@ -184,12 +184,12 @@ apps/app-android/
 
 - `gen/android` **提交**：它由 CLI 版本决定；重新生成会随 CLI 漂移，提交后构建可复现。
   `app/src/main/assets/tauri.conf.json`、`jniLibs/*.so` 等生成物由 `gen/android/app/.gitignore` 忽略。
-- `gen/android/app/src/main/java/dev/yacr/app/MainActivity.kt` 是**手写且提交**的宿主 Activity。
+- `gen/android/app/src/main/java/io/github/zenglanmu/yacr/MainActivity.kt` 是**手写且提交**的宿主 Activity。
   重新 `tauri android init` 会覆盖它；`scripts/test-android-host.py` 会判红。它只把五个 `document*`
   实例方法委派给 `DocumentPicker`，自身不持有 CAD 文档。
-- `gen/android/app/src/main/java/dev/yacr/app/DocumentPicker.kt` 是**手写且提交**的 SAF 中介：选择器、
+- `gen/android/app/src/main/java/io/github/zenglanmu/yacr/DocumentPicker.kt` 是**手写且提交**的 SAF 中介：选择器、
   worker 读、单槽快照；只保存一次交互的结果，不保存文档（铁律 8）。
-- `gen/android/app/proguard-rules.pro` 的 `-keepclassmembers class dev.yacr.app.MainActivity` 固定
+- `gen/android/app/proguard-rules.pro` 的 `-keepclassmembers class io.github.zenglanmu.yacr.MainActivity` 固定
   五个 `document*` 方法的名字与描述符。**这不是预防性规则**：没有它时 release R8 会把
   `documentLaunchOpen` 从 `classes.dex` 移除（Rust 是唯一调用方），运行期必抛 `NoSuchMethodError`；
   该缺陷已在验证中实际捕获。
@@ -216,8 +216,10 @@ bash scripts/build-android.sh --release --target aarch64     # 真机构建（�
 bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug 已签名）
 ```
 
-- **release APK 默认未签名**（`app-universal-release-unsigned.apk`）；仓库不含签名密钥。本地安装可用
-  `--debug` 或自行 `apksigner sign`。
+- **本地 release APK 默认未签名**（`app-universal-release-unsigned.apk`）；仓库不含签名密钥。本地安装可用
+  `--debug` 或自行 `apksigner sign`。CI `android-release` 在 SignPath 凭据存在时对 `zipalign` 后的
+  APK 签名并上传 `android-release`（APK + `.idsig` + `.sha256`），否则 `android-release-unsigned`；
+  **签名 ≠ 设备/GPU/像素验收**，见 `docs/code-signing.md`。
 - `scripts/build-android.sh` 先跑 `build-android-ui.sh`，再 `tauri android build --apk`。
 
 ## 7. 运行与观测
@@ -283,7 +285,9 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 - **多窗口/分屏/折叠屏/三键导航/侧边导航栏**：未验证。
 - **架构产物**：aarch64 release APK 已构建但**未安装运行**；armv7/i686/x86_64 未构建、未安装。
 - **性能**：同步导入（`importWorker = false`）在超大 DWG 上的渲染停顿未测量。
-- **release 签名/分发**：仅本地签名；仓库不含发布密钥，不是发布流程。
+- **release 签名/分发**：本地签名仅供验证；CI 在 SignPath 凭据存在时才签名，否则显式
+  `android-release-unsigned`；真实 SignPath 请求与设备安装/分发均 **NOT RUN**。签名不是设备/GPU/
+  像素验收，见 `docs/code-signing.md`。
 
 ## 9. 门禁
 
@@ -300,9 +304,11 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 - `cargo check -p app-android --target aarch64-linux-android --locked`：真实编译门禁。
 - `bash scripts/build-android.sh`：真实 APK 构建，失败即非零。
 - CI：`android-check` 是 capability-gated（`vars.ANDROID_CI_ENABLED`）的 **aarch64 编译门禁**
-  （不跑 Gradle、不建 APK、不跑设备）。`android-apk`（debug）与 `android-release`（unsigned
-  release）自 2026-11-01 起重新启用，但只在 `v*` tag / 手工 dispatch 运行，且只构建并上传 APK
-  artifact；不签名、不发布、不安装运行。**CI 没有设备/模拟器 job。** 见 `docs/ci.md`。
+  （不跑 Gradle、不建 APK、不跑设备）。`android-apk`（debug）与 `android-release`（release；
+  SignPath 凭据存在时签名，否则 `android-release-unsigned`）自 2026-11-01 起重新启用，但只在
+  `v*` tag / 手工 dispatch 运行，且只构建并上传 APK artifact；发布 job 本身不发布，签名缺失时
+  显式产出 unsigned；不安装运行。**签名 ≠ 设备/GPU/像素验收**，见 `docs/code-signing.md`。
+  **CI 没有设备/模拟器 job。** 见 `docs/ci.md`。
 
 ## 10. 历史：已退役的 `dom-canvas` 载体（2026-10-28）
 

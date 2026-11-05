@@ -38,12 +38,18 @@ name: CI build layers
 # Release packaging jobs (re-enabled 2026-11-01) — event-gated to a `v*` tag or a
 # manual `workflow_dispatch`, never a routine push/PR. They build real artifacts
 # for the current React/Tauri hosts (no Slint anywhere) and upload them as
-# workflow artifacts; they do not publish, sign or notarize:
+# workflow artifacts. When the matching credentials exist they also **sign**:
+# Windows/Android through SignPath (Artifact Signing requests, manual approval)
+# and the Linux Flatpak through a repository GPG key (OSTree commit signature).
+# Without credentials the steps are skipped and the uploaded artifact is named
+# `*-unsigned`. Publishing, notarization and store uploads stay out of this file:
+# `publish-release.yml` is the only write-scoped publisher.
 #   linux-release   : Flatpak bundle (`scripts/package-linux-release.sh`)
 #   windows-release : MSVC release zip (`scripts/package-windows-release.sh`)
 #   macos-release   : universal Yacr.app tarball (`scripts/package-macos-release.sh`)
 #   android-apk     : debug APK (`scripts/build-android.sh --debug`)
-#   android-release : release APK, unsigned (`scripts/build-android.sh --release`)
+#   android-release : release APK (`scripts/build-android.sh --release`), aligned
+#                     and optionally SignPath-signed
 #
 # Each job provisions its own toolchain (Flatpak runtime/SDK, JDK 17 + Android
 # SDK/NDK, Node for the embedded React bundle). When the event gate is not met
@@ -60,9 +66,11 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Least privilege: read-only. Artifact upload needs no repo write permission.
+# Least privilege: read-only. Artifact upload needs no repo write permission;
+# `actions: read` lets a signing step read the artifact it uploaded.
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -264,6 +272,12 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      # Optional Flatpak OSTree/GPG signing. Secrets cannot be read in a job-level
+      # `if:`, so they are exposed here and the steps gate on the env instead.
+      FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+      FLATPAK_GPG_PASSPHRASE: ${{ secrets.FLATPAK_GPG_PASSPHRASE }}
+      FLATPAK_GPG_KEY_ID: ${{ vars.FLATPAK_GPG_KEY_ID }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -288,7 +302,7 @@ jobs:
           sudo apt-get install -y \
             pkgconf libgtk-3-dev libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev \
-            flatpak flatpak-builder
+            flatpak flatpak-builder ostree gnupg
       - name: Install the GNOME runtime and SDK used by the manifest
         run: |
           set -euo pipefail
@@ -298,18 +312,72 @@ jobs:
             org.gnome.Platform//51 org.gnome.Sdk//51
       - name: Prefetch crates for the locked release build
         run: cargo fetch --locked
+      - name: Fail if a Flatpak signing key id is configured without a key
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${FLATPAK_GPG_KEY_ID:-}" ] && [ -z "${FLATPAK_GPG_PRIVATE_KEY:-}" ]; then
+            echo "::error::FLATPAK_GPG_KEY_ID is set but FLATPAK_GPG_PRIVATE_KEY is empty; refusing to build a Flatpak that cannot be signed" >&2
+            exit 1
+          fi
+      - name: Import the Flatpak GPG signing key
+        if: env.FLATPAK_GPG_PRIVATE_KEY != '' && env.FLATPAK_GPG_KEY_ID != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/gnupg"
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          # gpg-preset-passphrase only works when the agent is told so up front.
+          printf '%s\n' 'allow-preset-passphrase' > "$GNUPGHOME/gpg-agent.conf"
+          gpg-connect-agent reloadagent /bye >/dev/null
+          printf '%s\n' "$FLATPAK_GPG_PRIVATE_KEY" | gpg --batch --import
+          if [ -n "${FLATPAK_GPG_PASSPHRASE:-}" ]; then
+            preset="$(command -v gpg-preset-passphrase || true)"
+            for candidate in "$preset" \
+                             /usr/lib/gnupg/gpg-preset-passphrase \
+                             /usr/libexec/gpg-preset-passphrase; do
+              if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+                preset="$candidate"
+                break
+              fi
+            done
+            [ -n "$preset" ] || { echo "::error::gpg-preset-passphrase not found" >&2; exit 1; }
+            while IFS= read -r grip; do
+              [ -n "$grip" ] || continue
+              "$preset" --preset "$grip" <<< "$FLATPAK_GPG_PASSPHRASE"
+            done < <(gpg --batch --with-colons --with-keygrip --list-secret-keys \
+                       "${FLATPAK_GPG_KEY_ID:-}" \
+                       | grep '^grp:' | cut -d: -f10)
+          fi
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          echo "FLATPAK_GPG_HOMEDIR=$GNUPGHOME" >> "$GITHUB_ENV"
       - name: Build and package the Linux Flatpak
+        id: build-linux
         env:
           FLATPAK_REMOTE_DEPS: flathub
           FLATPAK_REMOTE_BUILD: flathub
-        run: bash scripts/package-linux-release.sh
+        run: |
+          set -euo pipefail
+          if [ -n "${FLATPAK_GPG_KEY_ID:-}" ]; then
+            echo "signing: package-linux-release.sh passes --gpg-sign=${FLATPAK_GPG_KEY_ID} to flatpak-builder"
+          else
+            echo "signing: FLATPAK_GPG_KEY_ID is not set; the bundle will be UNSIGNED"
+          fi
+          bash scripts/package-linux-release.sh
       - name: Record packaging summary
         if: always()
         shell: bash
         run: |
           {
             echo '## Linux release Flatpak'
-            echo 'Built dev.yacr.app from the React/Tauri host on ubuntu-latest.'
+            echo 'Built io.github.zenglanmu.yacr from the React/Tauri host on ubuntu-latest.'
+            if [ "${{ steps.build-linux.outcome }}" = "success" ] \
+               && [ -n "${FLATPAK_GPG_KEY_ID:-}" ] \
+               && ls target/release/dist/*.flatpak.gpg >/dev/null 2>&1; then
+              echo 'The OSTree commit is GPG-signed; verify with `flatpak install --user --gpg-file=<bundle>.gpg <bundle>`.'
+            else
+              echo 'UNSIGNED or signing did not complete: no verified GPG-signed Flatpak was published.'
+            fi
             echo 'The bundle is not published to Flathub and is not window/GPU acceptance.'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload the Linux release Flatpak
@@ -319,6 +387,7 @@ jobs:
           path: |
             target/release/dist/*.flatpak
             target/release/dist/*.flatpak.sha256
+            target/release/dist/*.flatpak.gpg
           if-no-files-found: error
           retention-days: 30
 
@@ -326,10 +395,21 @@ jobs:
     name: windows-release (MSVC zip — tags/dispatch only)
     # Builds and packages the real React/Tauri Windows host. The script builds
     # the frontend first (tauri::generate_context! embeds desktop-ui/dist) and
-    # links the MSVC CRT statically. Artifact only; not code-signed.
+    # links the MSVC CRT statically. With SignPath credentials the staged exes
+    # are Authenticode-signed before zipping; without them the zip is explicitly
+    # UNSIGNED. The ZIP container is never Authenticode-signed.
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: windows-latest
-    timeout-minutes: 90
+    # Build + a possible 3600 s SignPath manual-approval wait.
+    timeout-minutes: 150
+    env:
+      # Secrets cannot be read in a job-level `if:`, so expose them here and gate
+      # every signing step on `env.SIGNPATH_API_TOKEN`. Empty = unsigned build.
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+      SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+      SIGNPATH_WINDOWS_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_WINDOWS_SIGNING_POLICY_SLUG }}
+      SIGNPATH_WINDOWS_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_WINDOWS_ARTIFACT_CONFIGURATION_SLUG }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -351,21 +431,93 @@ jobs:
           key: ${{ runner.os }}-cargo-windows-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-windows-release-
-      - name: Build and package the Windows release
+      - name: Build and stage the Windows release (no zip yet)
         shell: bash
         env:
           WITH_FONTS: "1"
-        run: bash scripts/package-windows-release.sh
-      - name: Record packaging summary
+          # CI signs bin/*.exe first; scripts/finalize-windows-release.sh writes
+          # the zip afterwards so the archive carries the real signing state.
+          SKIP_ZIP: "1"
+        run: |
+          set -euo pipefail
+          bash scripts/package-windows-release.sh
+          DIST="target/x86_64-pc-windows-msvc/release/dist"
+          rm -rf target/windows-signed
+          stage="$(find "$DIST" -maxdepth 1 -type d -name 'yacr-*-windows-x86_64' | head -1)"
+          test -n "$stage" \
+            || { echo "::error::no yacr-*-windows-x86_64 stage directory under $DIST" >&2; exit 1; }
+          echo "WINDOWS_STAGE=$stage" >> "$GITHUB_ENV"
+          echo "staged: $stage"
+      - name: Upload the unsigned Windows stage for SignPath
+        id: upload-windows-stage
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: yacr-windows-stage-unsigned
+          # `/**` makes the stage directory the least common ancestor, so the
+          # artifact root is `bin/`, `docs/`, ... (matching .signpath/windows-pe.xml).
+          path: ${{ env.WINDOWS_STAGE }}/**
+          if-no-files-found: error
+          retention-days: 7
+      - name: Submit the Windows stage for SignPath Authenticode signing
+        id: sign-windows
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ env.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ env.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ env.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ env.SIGNPATH_WINDOWS_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ env.SIGNPATH_WINDOWS_ARTIFACT_CONFIGURATION_SLUG }}
+          # v3 takes the artifact *id* (the upload step's output), not its name.
+          github-artifact-id: ${{ steps.upload-windows-stage.outputs.artifact-id }}
+          github-token: ${{ github.token }}
+          wait-for-completion: true
+          # SignPath Foundation requires manual approval per release.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: target/windows-signed
+      - name: Record the SignPath signing request
         if: always()
         shell: bash
         run: |
-          {
-            echo '## Windows release package (MSVC)'
-            echo 'Built and packaged the React/Tauri host on windows-latest; the CRT is linked statically.'
-            echo 'The zip is unsigned; window/GPU/native-dialog behaviour is not exercised.'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload the Windows release zip
+          url="${{ steps.sign-windows.outputs.signing-request-web-url }}"
+          if [ -n "$url" ]; then
+            {
+              echo '## SignPath signing request (Windows)'
+              echo "- request: $url"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Copy the signed executables back into the stage
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          for exe in yacr-windows.exe cad-cli-tools.exe; do
+            found="$(find target/windows-signed -type f -name "$exe" | head -1)"
+            test -n "$found" \
+              || { echo "::error::signed $exe is missing under target/windows-signed" >&2; exit 1; }
+            cp "$found" "$WINDOWS_STAGE/bin/$exe"
+          done
+      - name: Verify the Authenticode signatures
+        id: verify-windows
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: pwsh
+        run: |
+          foreach ($exe in @(
+              (Join-Path $env:WINDOWS_STAGE 'bin/yacr-windows.exe'),
+              (Join-Path $env:WINDOWS_STAGE 'bin/cad-cli-tools.exe'))) {
+            $sig = Get-AuthenticodeSignature -FilePath $exe
+            if ($sig.Status -ne 'Valid') {
+              throw "Authenticode signature is not valid for ${exe}: $($sig.Status)"
+            }
+            Write-Host "$exe signed by $($sig.SignerCertificate.Subject)"
+          }
+      - name: Finalize the signed Windows release zip
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: bash
+        run: bash scripts/finalize-windows-release.sh --signed "$WINDOWS_STAGE" target/x86_64-pc-windows-msvc/release/dist
+      - name: Upload the signed Windows release zip
+        if: env.SIGNPATH_API_TOKEN != ''
         uses: actions/upload-artifact@v4
         with:
           name: yacr-windows-release
@@ -374,6 +526,34 @@ jobs:
             target/x86_64-pc-windows-msvc/release/dist/*.zip.sha256
           if-no-files-found: error
           retention-days: 30
+      - name: Finalize the unsigned Windows release zip
+        if: env.SIGNPATH_API_TOKEN == ''
+        shell: bash
+        run: bash scripts/finalize-windows-release.sh --unsigned "$WINDOWS_STAGE" target/x86_64-pc-windows-msvc/release/dist
+      - name: Upload the unsigned Windows release zip
+        if: env.SIGNPATH_API_TOKEN == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: yacr-windows-release-unsigned
+          path: |
+            target/x86_64-pc-windows-msvc/release/dist/*.zip
+            target/x86_64-pc-windows-msvc/release/dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+      - name: Record packaging summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Windows release package (MSVC)'
+            echo 'Built and packaged the React/Tauri host on windows-latest; the CRT is linked statically.'
+            if [ "${{ steps.verify-windows.outcome }}" = "success" ]; then
+              echo 'The executables were submitted to SignPath for Authenticode signing and verified with Get-AuthenticodeSignature. The ZIP container itself is not Authenticode-signed.'
+            else
+              echo 'UNSIGNED or signing did not complete: no verified SignPath-signed Windows zip was published.'
+            fi
+            echo 'window/GPU/native-dialog behaviour is not exercised.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   macos-release:
     name: macos-release (universal Yacr.app — tags/dispatch only)
@@ -532,13 +712,24 @@ jobs:
           retention-days: 14
 
   android-release:
-    name: android-release (unsigned APK — tags/dispatch only)
-    # Builds the release variant of the Tauri Android host. There is no signing
-    # key in CI, so the APK is UNSIGNED and must not be published; the artifact
-    # is packaging evidence only. No device/emulator and no store upload.
+    name: android-release (signed/unsigned APK — tags/dispatch only)
+    # Builds the release variant of the Tauri Android host, aligns the unsigned
+    # APK with zipalign and (with SignPath credentials) submits it for APK
+    # signing; the signed APK is verified with apksigner and checksummed. Without
+    # credentials the aligned APK is uploaded as `android-release-unsigned` and
+    # the summary says UNSIGNED. No device/emulator and no store upload.
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # Build + a possible 3600 s SignPath manual-approval wait.
+    timeout-minutes: 180
+    env:
+      # Secrets cannot be read in a job-level `if:`, so expose them here and gate
+      # every signing step on `env.SIGNPATH_API_TOKEN`. Empty = unsigned build.
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+      SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+      SIGNPATH_ANDROID_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_ANDROID_SIGNING_POLICY_SLUG }}
+      SIGNPATH_ANDROID_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_ANDROID_ARTIFACT_CONFIGURATION_SLUG }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -611,6 +802,109 @@ jobs:
         run: |
           set -euo pipefail
           git diff --exit-code -- Cargo.lock
+      - name: Align the unsigned release APK for signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIPALIGN="$ANDROID_HOME/build-tools/34.0.0/zipalign"
+          test -x "$ZIPALIGN" \
+            || { echo "::error::zipalign not found at $ZIPALIGN" >&2; exit 1; }
+          SRC="apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk"
+          test -f "$SRC" || { echo "::error::unsigned release APK missing: $SRC" >&2; exit 1; }
+          # A cached `target/` may still hold a previous signed/unsigned APK.
+          rm -rf target/android-signing target/android-signed
+          mkdir -p target/android-signing
+          # zipalign must run BEFORE signing; re-aligning afterwards breaks v2+.
+          "$ZIPALIGN" -p -f 4 "$SRC" target/android-signing/app-universal-release.apk
+          test -s target/android-signing/app-universal-release.apk \
+            || { echo "::error::zipalign produced no APK" >&2; exit 1; }
+      - name: Upload the aligned unsigned APK for SignPath
+        id: upload-android-unsigned
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-input
+          path: target/android-signing/app-universal-release.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Submit the APK for SignPath signing
+        id: sign-android
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ env.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ env.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ env.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ env.SIGNPATH_ANDROID_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ env.SIGNPATH_ANDROID_ARTIFACT_CONFIGURATION_SLUG }}
+          # v3 takes the artifact *id* (the upload step's output), not its name.
+          github-artifact-id: ${{ steps.upload-android-unsigned.outputs.artifact-id }}
+          github-token: ${{ github.token }}
+          wait-for-completion: true
+          # SignPath Foundation requires manual approval per release.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: target/android-signed
+      - name: Record the SignPath signing request
+        if: always()
+        shell: bash
+        run: |
+          url="${{ steps.sign-android.outputs.signing-request-web-url }}"
+          if [ -n "$url" ]; then
+            {
+              echo '## SignPath signing request (Android)'
+              echo "- request: $url"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Verify the signed APK
+        id: verify-android
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          test -x "$APKSIGNER" \
+            || { echo "::error::apksigner not found at $APKSIGNER" >&2; exit 1; }
+          apk="$(find target/android-signed -type f -name 'app-universal-release.apk' | head -1)"
+          test -n "$apk" \
+            || { echo "::error::signed app-universal-release.apk missing under target/android-signed" >&2; exit 1; }
+          "$APKSIGNER" verify --verbose --print-certs "$apk"
+      - name: Checksum the signed APK
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Never rename the signed APK: the app identity lives in the signature
+          # and SignPath may emit a sibling `.idsig` for v4.
+          apk="$(find target/android-signed -type f -name 'app-universal-release.apk' | head -1)"
+          test -n "$apk" \
+            || { echo "::error::signed app-universal-release.apk missing under target/android-signed" >&2; exit 1; }
+          ( cd "$(dirname "$apk")" && sha256sum app-universal-release.apk > app-universal-release.apk.sha256 )
+      - name: Upload the signed Android release APK
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: target/android-signed/**
+          if-no-files-found: error
+          retention-days: 30
+      - name: Stage the unsigned APK for upload
+        if: env.SIGNPATH_API_TOKEN == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp target/android-signing/app-universal-release.apk \
+             target/android-signing/app-universal-release-unsigned.apk
+          ( cd target/android-signing && sha256sum app-universal-release-unsigned.apk > app-universal-release-unsigned.apk.sha256 )
+      - name: Upload the unsigned release APK
+        if: env.SIGNPATH_API_TOKEN == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-unsigned
+          path: |
+            target/android-signing/app-universal-release-unsigned.apk
+            target/android-signing/app-universal-release-unsigned.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
       - name: Record artifact facts
         if: always()
         run: |
@@ -618,17 +912,14 @@ jobs:
           find apps/app-android/src-tauri/gen/android/app/build/outputs/apk \
             -type f -name '*.apk' -printf '%p %s bytes\n' || true
           {
-            echo '## android-release (unsigned)'
-            echo 'A release APK artifact was built. It is UNSIGNED: sign it before installing or publishing.'
+            echo '## android-release'
+            if [ "${{ steps.verify-android.outcome }}" = "success" ]; then
+              echo 'The aligned release APK was submitted to SignPath and verified with apksigner.'
+            else
+              echo 'UNSIGNED or signing did not complete: the uploaded release APK is the explicit unsigned fallback, or the job failed.'
+            fi
             echo 'No device/emulator was used and nothing was published.'
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload the unsigned release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-release-unsigned
-          path: apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
-          if-no-files-found: error
-          retention-days: 14
 
   web-build:
     name: web-build (wasm CAD bundle)

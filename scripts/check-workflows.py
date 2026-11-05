@@ -15,8 +15,11 @@ checks:
   * the five release packaging jobs (``linux-release``, ``windows-release``,
     ``macos-release``, ``android-apk``, ``android-release``) are declared,
     call their real entry point, and keep the ``v*`` tag / manual-dispatch event
-    gate so a routine push can never build a release artifact. The retirement
-    machinery remains for future use, but no job is retired today;
+    gate so a routine push can never build a release artifact. When credentials
+    exist they may **sign** the artifact they build (SignPath for the Windows
+    executables and the Android release APK, a repository GPG key for the Flatpak
+    OSTree commit); they still never publish. The retirement machinery remains
+    for future use, but no job is retired today;
   * every **retired** job (none today) is still declared, hard-disabled with an
     unconditional ``if: false`` and a ``RETIRED`` marker, and its only step
     fails non-zero (``exit 1``) if it is ever run. It must NOT carry a mutable
@@ -133,7 +136,8 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
     ),
     # Release packaging jobs (re-enabled 2026-11-01): event-gated artifact
     # builders for the current React/Tauri hosts. They never run on a routine
-    # push/PR and never publish, sign or notarize.
+    # push/PR and never publish; when credentials exist they sign the artifact
+    # they build (SignPath / Flatpak GPG), otherwise they upload `*-unsigned`.
     "linux-release": (
         "refs/tags/v",
         "workflow_dispatch",
@@ -141,6 +145,10 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "flatpak-builder",
         "actions/upload-artifact",
         "*.flatpak",
+        # Optional OSTree/GPG commit signing.
+        "FLATPAK_GPG_KEY_ID",
+        "--gpg-sign",
+        ".flatpak.gpg",
     ),
     "windows-release": (
         "refs/tags/v",
@@ -149,6 +157,12 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "actions/setup-node@v4",
         "actions/upload-artifact",
         "*.zip",
+        # SignPath signing of the staged executables, then local verification and
+        # the shared zip/checksum finalizer.
+        "signpath/github-action-submit-signing-request@v3",
+        "github-artifact-id",
+        "finalize-windows-release.sh",
+        "Get-AuthenticodeSignature",
     ),
     "macos-release": (
         "refs/tags/v",
@@ -176,6 +190,11 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "ndk;29.0.13846066",
         "actions/upload-artifact",
         "*.apk",
+        # Aligned APK submitted to SignPath, then verified locally.
+        "signpath/github-action-submit-signing-request@v3",
+        "github-artifact-id",
+        "apksigner",
+        "app-universal-release.apk",
     ),
     "web-build": (
         # The real wasm CAD bundle (ADR 0024): pinned CLI install, script build,

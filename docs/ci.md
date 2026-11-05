@@ -20,7 +20,9 @@
 > Linux 宿主中被显式拒绝（退出码 4），CI 不运行 GUI。**2026-11-01 起** 5 个发布 job
 > （`linux-release`/`windows-release`/`macos-release`/`android-apk`/`android-release`）已从
 > `if: false` 重新启用为 **event-gated artifact builder**：仅 `v*` tag 或手工 `workflow_dispatch`
-> 运行，仅上传 workflow artifact，不签名、不发布、不接触商店凭据。见 ADR 0010 与 ADR 0023。
+> 运行，仅上传 workflow artifact，不发布、不接触商店凭据；Windows/Android 在 SignPath 凭据存在时
+> 签名、Flatpak 在 GPG 凭据存在时签 OSTree commit，缺失时显式产出 `unsigned` artifact
+> （见 `docs/code-signing.md`）。见 ADR 0010 与 ADR 0023。
 
 > **2026-10-25 增补（Web 流水线恢复）**：`apps/app-web` 的 wasm CAD 会话（ADR 0024）已在 CI 中
 > 端到端接线：`web-build` 用**钉住 SHA-256 的 wasm-bindgen 预编译 CLI** 构建
@@ -41,8 +43,9 @@
 ## 触发、权限与并发
 
 - 触发：`push`、`pull_request`、`workflow_dispatch`。
-- 权限：顶层 `permissions: contents: read`。只有 `web-deploy` 使用
-  `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`（仓库 secrets），且仅在 `v*` tag 或手工
+- 权限：顶层 `permissions: contents: read`。发布凭据只在对应 job 使用：`web-deploy` 用
+  `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`；`windows-release`/`android-release` 在配置时
+  用 SignPath secrets/variables；`linux-release` 用 `FLATPAK_GPG_*`。它们都仅在 `v*` tag 或手工
   dispatch 时运行；其余 job 不接触发布凭据。
 - 并发：`concurrency.group = <workflow>-<ref>`，`cancel-in-progress: true`。
 
@@ -63,11 +66,11 @@
 | `web-smoke` | build.yml | `ubuntu-latest` | 下载 `web-dist` → `scripts/serve-web.py` → Playwright Chromium 打开页面，断言 `start: ok` / `target` / `physical` / `batches` / `draws` / `presented`；**SwiftShader 软件渲染**，非 GPU/像素证据 |
 | `web-deploy` | build.yml | `ubuntu-latest` | **仅 `v*` tag 或手工 dispatch**；`needs: web-build`，下载 `web-ui-dist`（`apps/app-web/dist-ui`）后 `scripts/deploy-cloudflare-pages.sh`（`SKIP_BUILD=1`、`BUNDLE_KIND=ui`）发布到 Cloudflare Pages |
 | `android-check` | core.yml | 能力相关（默认 SKIP） | `bash scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome bundle，因为 `tauri::generate_context!` 会内嵌 `frontendDist`；脚本目前仍一并产出 wasm 产物，`native-below` 载体不加载）→ `cargo check --target aarch64-linux-android -p app-android --locked`（**真实 Android 宿主 / 原生 `native-below` 载体**的编译门禁；不跑 Gradle、不建 APK、不跑设备） |
-| `linux-release` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；安装 GTK/WebKitGTK + `flatpak-builder` + `org.gnome.Platform//51`/`Sdk//51` → `bash scripts/package-linux-release.sh` → 上传 `.flatpak` + `.sha256`（不发布 Flathub） |
-| `windows-release` | build.yml | `windows-latest` | **仅 `v*` tag / 手工 dispatch**；先构建 React 前端 → `bash scripts/package-windows-release.sh`（MSVC 静态 CRT，PE/图标校验）→ 上传 `.zip` + `.sha256`（未签名） |
+| `linux-release` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；安装 GTK/WebKitGTK + `flatpak-builder` + `org.gnome.Platform//51`/`Sdk//51` → `bash scripts/package-linux-release.sh` → 上传 `.flatpak` + `.sha256`（配置 `FLATPAK_GPG_*` 时对 OSTree commit 签名并附 `*.flatpak.gpg`；不发布 Flathub） |
+| `windows-release` | build.yml | `windows-latest` | **仅 `v*` tag / 手工 dispatch**；先构建 React 前端 → `bash scripts/package-windows-release.sh`（MSVC 静态 CRT，PE/图标校验）→ SignPath 凭据存在时对两个 `.exe` 做 Authenticode 签名并上传 `yacr-windows-release`，否则上传 `yacr-windows-release-unsigned` |
 | `macos-release` | build.yml | `macos-latest` | **仅 `v*` tag / 手工 dispatch**；先构建 React 前端 → `bash scripts/package-macos-release.sh`（universal + `lipo`，Mach-O 仅系统库）→ 上传 `.tar.gz` + `.sha256`（未签名/未公证） |
 | `android-apk` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；provision JDK 17 + SDK/NDK `29.0.13846066` + 钉住 wasm-bindgen → `bash scripts/build-android.sh --debug --target aarch64` → 上传 debug APK。无设备/模拟器 |
-| `android-release` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；同上但 `--release`，产出 **UNSIGNED** release APK artifact；无签名密钥、无商店上传 |
+| `android-release` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；同上但 `--release`，`zipalign` 后由 SignPath 签名（凭据存在时）并上传 `android-release`（APK + `.idsig` + `.sha256`），否则 `android-release-unsigned`；无商店上传 |
 
 `android-check` 是 capability-gated（`vars.ANDROID_CI_ENABLED`）；`web-deploy` 与上面 5 个
 release job 是 **event-gated**（`github.event_name == 'workflow_dispatch' ||
@@ -83,40 +86,45 @@ Windows MSVC `clippy`/`check`/release `build`、MinGW GNU release `build`、`app
 ## 发布打包 job（2026-11-01 重新启用，event-gated）
 
 下列 job 不再是 `if: false` 退役占位；它们对**当前 React/Tauri 宿主**构建真实 artifact，并且只在
-`v*` tag 或手工 `workflow_dispatch` 运行。任何一次运行都只看 artifact 上传结果，不签名、不公证、
-不发布到 Flathub/商店：
+`v*` tag 或手工 `workflow_dispatch` 运行。发布 job 本身**不发布**；在 SignPath/GPG 凭据存在时
+签名，缺失时显式产出 `unsigned` artifact，绝不写成「已签名」。任何一次运行都只看 artifact
+上传结果，不公证、不发布到 Flathub/商店：
 
 | Job | 产物 | 边界 |
 |---|---|---|
-| `linux-release` | `.flatpak` + `.sha256` | 未发布 Flathub；无窗口/GPU 验收 |
-| `windows-release` | `.zip` + `.sha256` | 未代码签名；无运行/GPU 验收 |
+| `linux-release` | `.flatpak` + `.sha256`（配置 `FLATPAK_GPG_*` 时另附 `.flatpak.gpg`） | 凭据缺失时未签名；未发布 Flathub；无窗口/GPU 验收 |
+| `windows-release` | `yacr-windows-release`（`.zip` + `.sha256`）；无凭据时 `yacr-windows-release-unsigned` | SignPath 配置时签名；无运行/GPU 验收 |
 | `macos-release` | `.tar.gz`（`Yacr.app`）+ `.sha256` | 未签名/未公证；无窗口/Metal/DPI 验收 |
 | `android-apk` | debug `.apk` | 无设备/模拟器；debug keystore 签名 |
-| `android-release` | **unsigned** release `.apk` | 无签名密钥、无商店上传；未安装运行 |
+| `android-release` | `android-release`（APK + `.idsig` + `.sha256`）；无凭据时 `android-release-unsigned` | SignPath 配置时签名；无商店上传；未安装运行；签名 ≠ 设备/GPU 验收 |
 
 `scripts/check-workflows.py` 与 `scripts/test-release-workflows.py` 固定这些性质：job 必须存在、
 必须调用真实入口脚本、必须保留 `refs/tags/v` / `workflow_dispatch` 门禁、不得出现 `if: false`、
-`continue-on-error`、`secrets.…` 或发布命令。`RETIRED_JOBS` 机制保留为空元组，供未来再次退役时
-使用。
+`continue-on-error` 或发布命令；签名步骤只在 SignPath/GPG 凭据存在时运行，缺失时产出显式
+`unsigned` artifact。`RETIRED_JOBS` 机制保留为空元组，供未来再次退役时使用。
 
 Android：宿主自 2026-11-01 起是原生 `native-below` 载体（`apps/app-android` = Tauri 2 WebView +
 原生 `CadSession`/wgpu Vulkan → `SurfaceView`，ADR 0027；wasm 会话不实例化）。`android-check` 仍是
-capability-gated 的**编译门禁**；两个 APK job 只构建 artifact，**没有**设备/模拟器、Vulkan adapter、
-像素或 JNI 运行时链接证据。Windows/macOS 的 `*-release` 只证明**能在对应 runner 上打包**，
-不证明真实窗口/GPU/对话框/视觉行为。
+capability-gated 的**编译门禁**；两个 APK job 只构建 artifact（release 在 SignPath 凭据存在时签名），
+**没有**设备/模拟器、Vulkan adapter、像素或 JNI 运行时链接证据。Windows/macOS 的 `*-release` 只证明
+**能在对应 runner 上打包**，不证明真实窗口/GPU/对话框/视觉行为。所需 secrets/variables 与验证方式见
+`docs/code-signing.md`。
 
 ## 公开发布（`publish-release.yml`，手工）
 
 GitHub Actions 的 workflow artifact 需要登录且会过期，**不能**作为公开下载入口。公开分发由单独的
 `.github/workflows/publish-release.yml` 完成：**仅 `workflow_dispatch`**，是唯一带
 `permissions: contents: write` 的 workflow（并显式 `actions: read` 下载 artifact——一旦声明
-`permissions:`，未列出的 scope 就是 `none`）。它**不构建/不签名/不打包**，只从指定的
-`CI build layers` run 拉取五个平台 artifact，校验 `.sha256` 后附加到该 tag 的 GitHub Release；
-release notes 来自仓库内文件（如 `docs/release-notes/v0.1.4.md`）。
+`permissions:`，未列出的 scope 就是 `none`）。它**不构建/不打包/不签名**，只从指定的
+`CI build layers` run 拉取五个平台 artifact：优先选择 `yacr-windows-release` / `android-release`，
+缺失时回退到 `*-unsigned`；Flatpak artifact 若含 `*.flatpak.gpg` 则一并分发。校验 `.sha256` 后
+附加到该 tag 的 GitHub Release；release notes 来自仓库内文件（如 `docs/release-notes/v0.1.4.md`）。
+**签名只发生在 build job（SignPath/GPG），publisher 从不签名。**
 
-职责因此是分开的：`build.yml` 的 release job 仍只构建 + 上传 artifact（`contents: read`，
-`test-release-workflows.py` 禁止它们出现 `gh release`）；公开上传只发生在手工 dispatch 的
-publisher 里。publisher 全绿只代表 **artifact 上传成功**，不是运行/GPU/设备/视觉验收。
+职责因此是分开的：`build.yml` 的 release job 构建 + 上传 artifact（在凭据存在时签名；
+`contents: read`，`test-release-workflows.py` 禁止它们出现 `gh release`）；公开上传只发生在手工
+dispatch 的 publisher 里。publisher 全绿只代表 **artifact 上传成功**，不是签名/运行/GPU/设备/
+视觉验收。
 
 ## 锁定工具版本
 
@@ -146,7 +154,8 @@ runner 上恰好存在的 CLI。**本地** bundle 构建（`scripts/build-web.sh
 - **Linux X11/XWayland**：宿主显式拒绝（exit 4），CI 的 `linux-app` 只做编译/测试，不运行 GUI。
 - 5 个 release job：已在 GitHub Actions 真实运行两次（`v0.1.3` run `41304110619`：
   Linux/Windows/macOS/web ✅、Android 两个 job 因 `-lnativewindow` ❌；`v0.1.4` run `41307807752`：
-  五个 release job + `web-deploy` 全部 ✅）。它们只产出 workflow artifact，不签名、不发布商店。
+  五个 release job + `web-deploy` 全部 ✅）。它们只产出 workflow artifact，不发布商店；签名在
+  SignPath/GPG 凭据存在时进行，缺失时显式产出 `unsigned` artifact（真实签名请求本轮 **NOT RUN**）。
   公开下载由手工 dispatch 的 `publish-release.yml` 负责（见上节）。
 - **CI 上的真实 GPU / 黄金图 / 浏览器矩阵 / Android 真机**：未运行。GitHub 托管 runner 无 GPU，
   软件渲染不能作为真实 GPU 证据。
@@ -171,9 +180,10 @@ runner 上恰好存在的 CLI。**本地** bundle 构建（`scripts/build-web.sh
   `web-ui-dist`（共享 chrome bundle，`BUNDLE_KIND=ui`）发布到 Cloudflare Pages（`yacr-examples`）；
   发布入口固定为项目的 `https://yacr-examples.pages.dev`（脚本只上传并打印该 URL，不管理自定义域名）。
   上传成功只是**发布证据**，不是运行/GPU/像素验收。常规 push/PR 没有发布路径。
-- **Linux 发布包**：`linux-release` 已重新启用（event-gated），CI 会构建并上传 `.flatpak` artifact；
-  **未**发布到 Flathub。本轮**没有**在 GitHub runner 上实际运行该 job；本地 2026-10-17 的构建/安装
-  证据仍见 `docs/validation-flatpak-linux-2026-10-17.md`（历史证据，不代表 CI 已通过）。
+- **Linux 发布包**：`linux-release` 已重新启用（event-gated），CI 会构建并上传 `.flatpak` artifact
+  （配置 `FLATPAK_GPG_*` 时对 OSTree commit 签名并附 `*.flatpak.gpg`，否则未签名）；**未**发布到
+  Flathub。本轮**没有**在 GitHub runner 上实际运行该 job；本地 2026-10-17 的构建/安装证据仍见
+  `docs/validation-flatpak-linux-2026-10-17.md`（历史证据，不代表 CI 已通过）。
 
 ## 本地复现（当前门禁）
 

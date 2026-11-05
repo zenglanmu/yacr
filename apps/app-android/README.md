@@ -44,10 +44,10 @@ Modules:
 - `src-tauri/src/policy.rs`, `input.rs`, `refusal.rs`, `report.rs`, `contract.rs`
   — pure policy, canvas scale / coordinate mapping, stable markers, report lines
   and source-structure contracts (all host-testable).
-- `src-tauri/gen/android/app/src/main/java/dev/yacr/app/MainActivity.kt` — the
+- `src-tauri/gen/android/app/src/main/java/io/github/zenglanmu/yacr/MainActivity.kt` — the
   hand-written, committed Activity (SurfaceView underneath the WebView, insets,
   asset extraction, `document*` delegators).
-- `src-tauri/gen/android/app/src/main/java/dev/yacr/app/DocumentPicker.kt` — the
+- `src-tauri/gen/android/app/src/main/java/io/github/zenglanmu/yacr/DocumentPicker.kt` — the
   committed SAF picker/read slot; it holds at most one interaction result and
   never a document.
 - `src-tauri/gen/android/app/proguard-rules.pro` — R8 keep rule for the five

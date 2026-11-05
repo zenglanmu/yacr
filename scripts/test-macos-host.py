@@ -217,8 +217,8 @@ def conf_problems(text: str, version: str) -> list[str]:
     except json.JSONDecodeError as error:
         return [f"tauri.conf.json: invalid JSON: {error}"]
 
-    if conf.get("identifier") != "dev.yacr.app":
-        problems.append("tauri.conf.json: identifier must be 'dev.yacr.app'")
+    if conf.get("identifier") != "io.github.zenglanmu.yacr":
+        problems.append("tauri.conf.json: identifier must be 'io.github.zenglanmu.yacr'")
     if conf.get("productName") != "Yacr":
         problems.append("tauri.conf.json: productName must be 'Yacr'")
     if conf.get("version") != version:

@@ -7,11 +7,14 @@ name: Publish release assets
 #
 # Division of responsibility:
 #   * `build.yml` release jobs stay `contents: read` and artifact-only - they
-#     build, verify and upload, and never publish/sign/notarize;
-#   * this workflow is the **single** writer: it downloads the five platform
+#     build, verify and upload. When credentials exist they may also **sign**
+#     (Windows/Android through SignPath, the Linux Flatpak through a repository
+#     GPG key) and then upload the signed artifact; without credentials they
+#     upload an explicitly `*-unsigned` fallback. They never publish;
+#   * this workflow is the **single** writer: it downloads the platform
 #     artifacts from a named build run and attaches them to the tag's release.
-#     It never builds anything, so a green run here is packaging/upload evidence
-#     only - not a runtime, GPU, device or visual acceptance.
+#     It never builds or signs anything, so a green run here is packaging/upload
+#     evidence only - not a runtime, GPU, device or visual acceptance.
 #
 # It is `workflow_dispatch`-only: a push, PR or tag can never publish by itself.
 
@@ -54,7 +57,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Download the five platform artifacts
+      - name: Download the platform artifacts
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ inputs.run_id }}
@@ -63,13 +66,35 @@ jobs:
           rm -rf artifacts && mkdir -p artifacts
           for name in \
             yacr-linux-release \
-            yacr-windows-release \
             yacr-macos-release \
-            android-apk-debug \
-            android-release-unsigned
+            android-apk-debug
           do
             gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n "$name" -D "artifacts/$name"
           done
+          # Windows and Android may be signed or the explicit unsigned fallback
+          # from the same run. Resolve the artifact *name* from the run's
+          # artifact list first, so a transient download failure is never
+          # mistaken for "the signed artifact is absent".
+          artifact_names="$(gh api --paginate \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" \
+            --jq '.artifacts[].name')"
+          pick_artifact() {
+            local name
+            for name in "$@"; do
+              if printf '%s\n' "$artifact_names" | grep -qxF "$name"; then
+                printf '%s\n' "$name"
+                return 0
+              fi
+            done
+            echo "::error::none of the expected artifacts exists in run $RUN_ID: $*" >&2
+            return 1
+          }
+          windows_artifact="$(pick_artifact yacr-windows-release yacr-windows-release-unsigned)"
+          android_artifact="$(pick_artifact android-release android-release-unsigned)"
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            -n "$windows_artifact" -D artifacts/windows
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            -n "$android_artifact" -D artifacts/android
           find artifacts -type f -printf '%s\t%p\n' | sort -k2
       - name: Flatten and verify the SHA-256 sidecars
         run: |
@@ -93,12 +118,18 @@ jobs:
           set -euo pipefail
           # Explicit deliverable allowlist: only regular release files, never a
           # directory and never a repository file that happened to be checked out.
+          # Signed and unsigned-fallback names are both listed; only one of each
+          # pair is uploaded by a given build run.
           shopt -s nullglob
           files=(
             release-assets/*.flatpak release-assets/*.flatpak.sha256
+            release-assets/*.flatpak.gpg
             release-assets/*.zip release-assets/*.zip.sha256
             release-assets/*.tar.gz release-assets/*.tar.gz.sha256
             release-assets/app-universal-debug.apk
+            release-assets/app-universal-release.apk
+            release-assets/*.apk.idsig
+            release-assets/*.apk.sha256
             release-assets/app-universal-release-unsigned.apk
           )
           if [ "${#files[@]}" -eq 0 ]; then

@@ -11,7 +11,7 @@
 
 ## 1. 设计
 
-- **app-id / 运行时**：`dev.yacr.app`，`runtime: org.gnome.Platform//51`，
+- **app-id / 运行时**：`io.github.zenglanmu.yacr`，`runtime: org.gnome.Platform//51`，
   `sdk: org.gnome.Sdk//51`，`command: yacr`。运行时由构建用的 SDK 同代提供（见 §2 前置条件）。
 - **打包方式：预构建二进制**。`scripts/package-linux-release.sh` 先构建 React 前端
   （`apps/desktop-ui`：`npm ci` + `npm run build`），再以
@@ -37,9 +37,9 @@
 |---|---|
 | `/app/bin/yacr` | GUI 宿主（React chrome + 原生 CAD 分区） |
 | `/app/fonts/` | CAD 字体包（二进制解析 `<exe dir>/fonts`，无需 `--fonts-dir`） |
-| `/app/share/applications/dev.yacr.app.desktop` | 桌面项（`Exec=yacr %F`） |
-| `/app/share/metainfo/dev.yacr.app.metainfo.xml` | AppStream 元数据（AGPL-3.0 / CC0-1.0） |
-| `/app/share/icons/hicolor/{scalable,256x256}/apps/dev.yacr.app.{svg,png}` | 图标 |
+| `/app/share/applications/io.github.zenglanmu.yacr.desktop` | 桌面项（`Exec=yacr %F`） |
+| `/app/share/metainfo/io.github.zenglanmu.yacr.metainfo.xml` | AppStream 元数据（AGPL-3.0 / CC0-1.0） |
+| `/app/share/icons/hicolor/{scalable,256x256}/apps/io.github.zenglanmu.yacr.{svg,png}` | 图标 |
 
 ### `Exec` 必须是 `%F`
 
@@ -78,8 +78,13 @@ scripts/package-linux-release.sh
 
 # 安装与运行
 flatpak install --user target/release/dist/yacr-0.1.2-linux-x86_64.flatpak
-flatpak run dev.yacr.app --open /absolute/drawing.dwg
+flatpak run io.github.zenglanmu.yacr --open /absolute/drawing.dwg
 ```
+
+配置 `FLATPAK_GPG_KEY_ID` / `FLATPAK_GPG_PRIVATE_KEY` / `FLATPAK_GPG_PASSPHRASE` 后，
+`package-linux-release.sh` 会签 OSTree commit，并把公钥嵌入 bundle；此时上面的 `flatpak install`
+会验证 commit 签名，同时产物旁会多一个 `*.flatpak.gpg` 供显式 `--gpg-file=` 使用。未配置时
+bundle 是未签名的，CI summary 会明确写 `UNSIGNED`。
 
 - 脚本接受 `FLATPAK_REMOTE_DEPS` / `FLATPAK_REMOTE_BUILD`（默认 `flathub-mirror`）；缺少
   `cargo`/`node`/`npm`/`flatpak`/`flatpak-builder`/`python3` 或 runtime/SDK 时**非零失败**，不产出包。
@@ -89,6 +94,9 @@ flatpak run dev.yacr.app --open /absolute/drawing.dwg
   任一项失败即中止，不产出半成品。
 
 ## 4. 实测结果（2026-10-17，本机 GNOME/Mutter + Quadro P620 + `scale=1`）
+
+> **历史 app-id 说明**：下表是 2026-10-17 的实测记录，当时 app-id 仍为 `dev.yacr.app`。
+> 当前 app-id 已统一为 `io.github.zenglanmu.yacr`；历史命令/输出不改写，避免伪造证据。
 
 | 项 | 结果（实测） |
 |---|---|
@@ -119,3 +127,28 @@ flatpak run dev.yacr.app --open /absolute/drawing.dwg
 - **NOT RUN**：本机之外的宿主（其它发行版/桌面/合成器）；其它 **GPU/vendor**；
   Flatpak on 非 x86_64；GNOME 50 运行时的加载失败（只做算术推论）。
 - 本文件不构成视觉正确性、精度、性能或 vendor 兼容结论；单机、单适配器、`scale=1`。
+
+## 6. 已知崩溃：NVIDIA + Wayland + 运行时 WebKitGTK 2.54.1 显式同步
+
+- **现象**：真机 5K/`scale=2` NVIDIA Wayland 宿主机上，启动时或窗口移动到 2×（5K）输出时，
+  GDK 打印 `Gdk-Message: ... Error 71 (Protocol error) dispatching to Wayland display`
+  （中文环境为“协议错误”），客户端被杀、应用退出。
+- **原因**：`org.gnome.Platform//51` 当前携带 **WebKitGTK 2.54.1**（2026-11-05 沙箱内
+  `webkit_get_major_version = 2.54.1` 实测）。其 DMA-BUF 渲染器启用了 Wayland 显式同步
+  （`wp_linux_drm_syncobj`），但提交时没有设置 acquire point；Mutter 以
+  `wl_display.error(..., 4, no_acquire_point)` 拒绝该提交。宿主 WebKitGTK **2.52.6** 不复现。
+  上游：WebKit bug 280210。
+- **立即可用的命令**（优先保留 DMA-BUF/加速）：
+  - 首选：`flatpak run --env=__NV_DISABLE_EXPLICIT_SYNC=1 io.github.zenglanmu.yacr --open <dwg>`
+  - 回退：`flatpak run --env=WEBKIT_DISABLE_DMABUF_RENDERER=1 io.github.zenglanmu.yacr --open <dwg>`
+- **应用内护栏**：`apps/app-linux/src/nvidia_quirk.rs` 在 GTK/WebKit/EGL 初始化前，仅当
+  `resolved == Wayland`、检测到 NVIDIA 驱动（读 `/proc/driver/nvidia/version`，沙箱内可见）且用户
+  未设置四个覆盖变量（`WEBKIT_DISABLE_DMABUF_RENDERER`、`__NV_DISABLE_EXPLICIT_SYNC`、
+  `WEBKIT_DISABLE_COMPOSITING_MODE`、`WEBKIT_DMABUF_RENDERER_FORCE_SHM`）之一时，设置
+  `__NV_DISABLE_EXPLICIT_SYNC=1` 并打印稳定探针行
+  `[probe] nvidia-quirk: __NV_DISABLE_EXPLICIT_SYNC=1 reason=wayland+nvidia+webkit-explicit-sync (upstream WebKitGTK bug 280210)`；
+  有覆盖时只打印 `[probe] nvidia-quirk: not applied (webkit/nvidia env override present)`。原生与
+  Flatpak 运行都生效。
+- **证据诚实**：崩溃来自真实 5K/scale-2 NVIDIA 宿主报告；在无头 Mutter + 虚拟显示器（scale 1→2）
+  下**未复现**。因此该 workaround 在失败的真机配置上仍是 **NOT VERIFIED**，直到按上面的命令重测；
+  本文件不把它写成“已修复”。

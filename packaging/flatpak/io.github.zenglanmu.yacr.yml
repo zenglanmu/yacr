@@ -1,4 +1,4 @@
-# Flatpak manifest for yacr (dev.yacr.app) — React + Tauri Linux desktop host.
+# Flatpak manifest for yacr (io.github.zenglanmu.yacr) — React + Tauri Linux desktop host.
 #
 # This manifest packages a *prebuilt* payload. Nothing is compiled inside the
 # sandbox: `scripts/package-linux-release.sh` builds the React frontend, builds
@@ -16,7 +16,7 @@
 #   scripts/package-linux-release.sh
 # Output:
 #   target/release/dist/yacr-<version>-linux-<arch>.flatpak
-app-id: dev.yacr.app
+app-id: io.github.zenglanmu.yacr
 runtime: org.gnome.Platform
 runtime-version: '51'
 sdk: org.gnome.Sdk
@@ -45,18 +45,18 @@ modules:
       - install -Dm755 bin/yacr /app/bin/yacr
       - mkdir -p /app/fonts
       - cp -a fonts/. /app/fonts/
-      - install -Dm644 dev.yacr.app.desktop /app/share/applications/dev.yacr.app.desktop
-      - install -Dm644 dev.yacr.app.metainfo.xml /app/share/metainfo/dev.yacr.app.metainfo.xml
-      - install -Dm644 yacr-icon.svg /app/share/icons/hicolor/scalable/apps/dev.yacr.app.svg
-      - install -Dm644 yacr-256.png /app/share/icons/hicolor/256x256/apps/dev.yacr.app.png
+      - install -Dm644 io.github.zenglanmu.yacr.desktop /app/share/applications/io.github.zenglanmu.yacr.desktop
+      - install -Dm644 io.github.zenglanmu.yacr.metainfo.xml /app/share/metainfo/io.github.zenglanmu.yacr.metainfo.xml
+      - install -Dm644 yacr-icon.svg /app/share/icons/hicolor/scalable/apps/io.github.zenglanmu.yacr.svg
+      - install -Dm644 yacr-256.png /app/share/icons/hicolor/256x256/apps/io.github.zenglanmu.yacr.png
     sources:
       # Prebuilt release payload: bin/yacr + fonts/ (committed font package).
       - type: dir
         path: ../../target/flatpak/payload
       - type: file
-        path: dev.yacr.app.desktop
+        path: io.github.zenglanmu.yacr.desktop
       - type: file
-        path: dev.yacr.app.metainfo.xml
+        path: io.github.zenglanmu.yacr.metainfo.xml
       - type: file
         path: ../../assets/yacr-icon.svg
       - type: file

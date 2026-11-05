@@ -187,12 +187,28 @@ a structured error. See `docs/cli.md`.
 bash scripts/package-linux-release.sh
 # → target/release/dist/yacr-<version>-linux-<arch>.flatpak  (+ .sha256)
 flatpak install --user target/release/dist/yacr-<version>-linux-<arch>.flatpak
-flatpak run dev.yacr.app --open /absolute/drawing.dwg
+flatpak run io.github.zenglanmu.yacr --open /absolute/drawing.dwg
 ```
 
 This builds a single-file Flatpak bundle (`bin/yacr` + committed `fonts/`: `osifont` and
 `Noto Sans CJK SC`, runtime `org.gnome.Platform//51`). It is **not** a distribution channel: nothing
-is published to Flathub and the CI `linux-release` job stays hard-disabled. See `docs/flatpak.md`.
+is published to Flathub; the CI `linux-release` job is event-gated (`v*` tag or manual dispatch)
+and uploads a workflow artifact. See `docs/flatpak.md`.
+
+### Code signing
+
+Release artifacts are signed only when the repository credentials are configured; otherwise the jobs
+produce explicitly `unsigned` artifacts and never claim a signature:
+
+- **Windows / Android** — Windows Authenticode PE signing and Android APK signing through SignPath
+  when the SignPath secrets/variables are set. Without them the release artifact names carry the
+  `-unsigned` suffix.
+- **Flatpak (Linux)** — optional OSTree/GPG commit signing via the `FLATPAK_GPG_*`
+  secrets/variables; a signed bundle ships with a matching `*.flatpak.gpg`.
+
+SignPath cannot sign Flatpak. Real SignPath and GPG signing requests are **NOT RUN** until those
+credentials exist. The runbook, required secrets and evidence boundaries are in
+`docs/code-signing.md`.
 
 ### Full gates (CI-equivalent; run before release)
 
@@ -217,10 +233,11 @@ gates above are for explicit requests and pre-release acceptance. `NOT RUN` is a
 
 The Windows and macOS desktop hosts are implemented but **compile-only** (CI compile gates, no runtime
 acceptance); the Web carrier has bounded local evidence, while the Android native `native-below`
-carrier has **compile-level evidence only** (no device/emulator run). Packaging/release scripts remain
-retired (non-zero) and the CI release jobs are hard-disabled. See `docs/build.md`, `docs/ci.md`,
-`docs/windows-app.md`, `docs/macos-app.md` and `docs/android-host.md` — do not treat the retired scripts
-as working.
+carrier has **compile-level evidence only** (no device/emulator run). Packaging/release scripts are
+real entry points; the CI release jobs are event-gated (`v*` tag or manual dispatch) and upload
+workflow artifacts (optionally signed when credentials exist). See `docs/build.md`, `docs/ci.md`,
+`docs/windows-app.md`, `docs/macos-app.md` and `docs/android-host.md`; packaging/signing is not
+runtime/GPU acceptance.
 
 ## Current progress
 

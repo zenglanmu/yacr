@@ -1,3 +1,27 @@
+## 2026-11-05 包名统一 + SignPath/GPG 签名接线
+
+- **包标识统一为 `io.github.zenglanmu.yacr`**：Tauri `identifier`（Linux/Windows/macOS/Android）、
+  Flatpak app-id 与 `packaging/flatpak/io.github.zenglanmu.yacr.{yml,desktop,metainfo.xml}`、Android
+  `applicationId` / Kotlin namespace 一致。Kotlin 源码移到
+  `apps/app-android/src-tauri/gen/android/app/src/main/java/io/github/zenglanmu/yacr/`；JNI 符号变为
+  `Java_io_github_zenglanmu_yacr_MainActivity_*`；Android 数据目录为
+  `/data/user/0/io.github.zenglanmu.yacr/files/...`。
+- **Windows release 签名**：`.signpath/windows-pe.xml` 对 `bin/yacr-windows.exe` 与
+  `bin/cad-cli-tools.exe` 做 Authenticode；workflow 用 `github-artifact-id` 提交，人工审批超时
+  3600 s。签好后再 zip：签名 artifact 为 `yacr-windows-release`，无凭据回退
+  `yacr-windows-release-unsigned`。
+- **Android release 签名**：unsigned APK 先 `zipalign` 再交 SignPath；签名 artifact 为
+  `android-release`（APK + `.idsig` + `.sha256`），无凭据回退 `android-release-unsigned`。
+- **Flatpak GPG（可选）**：`FLATPAK_GPG_KEY_ID` / `FLATPAK_GPG_HOMEDIR` /
+  `FLATPAK_GPG_PRIVATE_KEY` / `FLATPAK_GPG_PASSPHRASE` 配置后签 OSTree commit，bundle 附带
+  `*.flatpak.gpg`；**SignPath 不支持 Flatpak**。`publish-release.yml` 仍是唯一公开上传者、从不签名，
+  优先选签名 artifact，缺失时回退 `*-unsigned`。
+- **证据边界**：详细 secrets/variables、artifact configuration、验证命令与身份警告见
+  `docs/code-signing.md`。**NOT RUN**：本环境没有 SignPath 账号/secrets，也没有真实 GPG 密钥，
+  Windows/Android/GPG 的真实签名请求均未运行；缺失凭据时只产出显式 `unsigned`，不谎称已签名。
+  SignPath Foundation 资格不保证（仓库仍标“开发中”），若使用其托管 Android key，APK 应用身份即
+  绑定该证书。另：`cargo test -p app-android` 本轮因磁盘满被阻塞（未通过）。
+
 ## 2026-11-05 天正插件独立仓库 `tangent-ts` + submodule + 打包接线
 
 - `plugins/tch` 从内联源码改为 **git submodule**：

@@ -153,8 +153,10 @@ yacr: unsupported-runtime: webview2      ← 稳定标记行（第一行，证�
 `cargo check -p app-windows --all-targets --locked`（原生 MSVC，编译门禁，不运行 exe）。
 `windows-release` 自 2026-11-01 起重新启用（仅 `v*` tag / 手工 dispatch）：
 `scripts/package-windows-release.sh` 先构建 React 前端，再以 MSVC 静态 CRT 构建
-`yacr-windows.exe`，校验 PE/图标/非系统 DLL 后上传未签名 zip artifact。**打包成功不是运行/视觉
-验收**；没有代码签名或发布通道。
+`yacr-windows.exe`，校验 PE/图标/非系统 DLL。SignPath 凭据存在时由 SignPath 对
+`bin/yacr-windows.exe`、`bin/cad-cli-tools.exe` 做 Authenticode 签名并上传
+`yacr-windows-release`；凭据缺失时显式上传 `yacr-windows-release-unsigned`。**打包/签名不是运行/
+视觉验收**；没有发布通道。签名接线与验证方式见 `docs/code-signing.md`。
 
 **本机（Linux，WP4 门禁实跑，日志在 `$HOME/.cache/yacr-wine/logs/`）**：
 
@@ -364,7 +366,8 @@ WP4 实跑（Wine 10.0，专用 64 位 prefix，prefix 内无 WebView2）：
   spike**。
 - GitHub Actions 的 `windows-check` job 本环境**未运行**（无 runner）；只有本机 xwin/MSVC 编译证据。
 - Windows 发布打包：脚本与 `windows-release` job 已重新启用（event-gated），但本环境**未运行**；
-  产物未代码签名，也没有运行/视觉证据。
+  SignPath 签名仅在凭据存在时接线，缺失时显式产出 `yacr-windows-release-unsigned`；真实 SignPath
+  请求与运行/视觉证据均 **NOT RUN**（签名不是运行/视觉验收）。
 - 真实 OS 键盘/指针从未用于验证任何输入路径（所有宿主同此边界）。
 - **wgpu 30 的 present 状态盲区**：`Queue::present` 返回 `()`，`Ok` 状态被 API 丢弃，present 期间的
   validation 错误只会进未捕获错误处理器（panic）。本宿主因此把 present 包进显式 validation scope

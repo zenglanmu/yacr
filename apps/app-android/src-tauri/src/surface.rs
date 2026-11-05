@@ -5,7 +5,7 @@
 //!
 //! The Kotlin lane inserts a `SurfaceView` at index `0` of the content frame
 //! (behind the WebView, `setZOrderOnTop(false)`) and hands its
-//! `android.view.Surface` to [`Java_dev_yacr_app_MainActivity_nativeSurfaceCreated`].
+//! `android.view.Surface` to [`Java_io_github_zenglanmu_yacr_MainActivity_nativeSurfaceCreated`].
 //! This module turns that `Surface` into an `ANativeWindow`, keeps it alive, and
 //! builds the renderer surface from raw `AndroidNdkWindowHandle`s
 //! ([`SurfaceProbePresenter::new_from_raw_handles`]) — the renderer's own
@@ -601,7 +601,7 @@ fn next_generation() -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// Frozen JNI surface contract (Kotlin `dev.yacr.app.MainActivity`)
+// Frozen JNI surface contract (Kotlin `io.github.zenglanmu.yacr.MainActivity`)
 //
 // All four symbols are defined once, with the exact names the Kotlin lane links;
 // `policy::JNI_SYMBOLS` is the tested copy of that list. These three arrive on the
@@ -617,7 +617,7 @@ fn next_generation() -> u64 {
 /// replacement without a destroy simply supersedes the slot, and the tick thread
 /// then releases the old presenter before building the new one.
 #[no_mangle]
-pub extern "system" fn Java_dev_yacr_app_MainActivity_nativeSurfaceCreated<'local>(
+pub extern "system" fn Java_io_github_zenglanmu_yacr_MainActivity_nativeSurfaceCreated<'local>(
     mut env: jni::JNIEnv<'local>,
     _this: jni::objects::JObject<'local>,
     surface: jni::objects::JObject<'local>,
@@ -667,7 +667,7 @@ pub extern "system" fn Java_dev_yacr_app_MainActivity_nativeSurfaceCreated<'loca
 /// A handle mismatch is an explicit `logcat` warning and changes nothing: the tick
 /// resizes the presenter from the platform size on the next frame.
 #[no_mangle]
-pub extern "system" fn Java_dev_yacr_app_MainActivity_nativeSurfaceResized<'local>(
+pub extern "system" fn Java_io_github_zenglanmu_yacr_MainActivity_nativeSurfaceResized<'local>(
     _env: jni::JNIEnv<'local>,
     _this: jni::objects::JObject<'local>,
     handle: jni::sys::jlong,
@@ -701,7 +701,7 @@ pub extern "system" fn Java_dev_yacr_app_MainActivity_nativeSurfaceResized<'loca
 /// presenter's own `ANativeWindow` reference still alive until it is dropped, which
 /// is the frozen presenter-before-window order.
 #[no_mangle]
-pub extern "system" fn Java_dev_yacr_app_MainActivity_nativeSurfaceDestroyed<'local>(
+pub extern "system" fn Java_io_github_zenglanmu_yacr_MainActivity_nativeSurfaceDestroyed<'local>(
     _env: jni::JNIEnv<'local>,
     _this: jni::objects::JObject<'local>,
     handle: jni::sys::jlong,

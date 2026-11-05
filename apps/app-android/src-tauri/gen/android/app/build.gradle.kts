@@ -19,10 +19,10 @@ android {
     // The documented repository NDK (`docs/android-host.md`, `scripts/build-android.sh`):
     // pin it so a Gradle build cannot silently use whatever NDK happens to be installed.
     ndkVersion = "29.0.13846066"
-    namespace = "dev.yacr.app"
+    namespace = "io.github.zenglanmu.yacr"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "dev.yacr.app"
+        applicationId = "io.github.zenglanmu.yacr"
         minSdk = 24
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()

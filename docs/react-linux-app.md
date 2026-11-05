@@ -180,7 +180,9 @@ Vulkan-only；`dx12` 在 Linux **显式失败**（`ProbeError::UnsupportedBacken
 - **空 input region**：child 的 input region 为空，使 CAD 区域的指针/滚轮事件**穿透到 DOM**（`NULL`
   表示全表面输入，禁止）。输入本来就全部走 DOM；空 region 是**防御纵深**（CAD 绝不吞事件后无人转发）。
 - **整数 DPR**：buffer scale 取 GTK 的整数 `scale_factor`；**只测过 `scale=1`**，DPR>1 与分/分数缩放
-  **不支持、未验证**（显式）。
+  **不支持、未验证**（显式）。真机 `scale=2` 另见 `docs/flatpak.md` §6 的
+  NVIDIA + Wayland + WebKitGTK 2.54.1 显式同步 workaround（`apps/app-linux/src/nvidia_quirk.rs`）：
+  workaround 已实现，但 `scale=2` 真机复测**仍未进行**（PENDING）。
 - **生命周期不变量**：释放顺序 **presenter → subsurface → child surface**，且**早于** GTK parent
   unrealize；`Ready` 时每帧/resize 前做原生健康检查（shim/display 错误 + 当前 GDK 父 `wl_surface`
   身份），不健康则有序释放，绝不提交陈旧帧。

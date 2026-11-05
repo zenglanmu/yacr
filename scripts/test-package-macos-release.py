@@ -12,7 +12,7 @@ that pipeline coherent:
 * the React frontend is built before ``cargo build`` because
   ``tauri::generate_context!`` embeds ``apps/desktop-ui/dist`` at compile time;
 * ``cargo build --release --locked`` for ``cad-cli-tools`` and ``app-macos``;
-* ``Yacr.app`` staging with ``dev.yacr.app``, ``yacr-macos``, dwg/dxf document
+* ``Yacr.app`` staging with ``io.github.zenglanmu.yacr``, ``yacr-macos``, dwg/dxf document
   types and macOS 11.0;
 * Mach-O architecture checks via ``lipo -archs`` and system-only linkage via
   ``otool -L`` (no ``@rpath``/Homebrew dylibs);
@@ -35,7 +35,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts/package-macos-release.sh"
 
-APP_ID = "dev.yacr.app"
+APP_ID = "io.github.zenglanmu.yacr"
 BINARY = "yacr-macos"
 CJK_FALLBACK = "NotoSansCJKsc-Regular.otf"
 
@@ -126,7 +126,7 @@ class PackageMacosReleaseLiveContracts(unittest.TestCase):
         problems = check_live_script(self.script + "\n# Slint host\n")
         self.assertTrue(any("Slint" in problem for problem in problems))
 
-    def test_cf_bundle_identifier_must_stay_dev_yacr_app(self) -> None:
+    def test_cf_bundle_identifier_must_stay_io_github_zenglanmu_yacr(self) -> None:
         mutated = self.script.replace(APP_ID, "invalid.example.yacr")
         problems = check_live_script(mutated)
         self.assertNotEqual(problems, [])

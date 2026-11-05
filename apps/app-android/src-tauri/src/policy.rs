@@ -56,15 +56,15 @@ pub const IMPORT_WORKER: bool = false;
 
 /// The four frozen JNI symbols the Kotlin lane links against.
 ///
-/// The **names are the contract**: `dev.yacr.app.MainActivity` declares
+/// The **names are the contract**: `io.github.zenglanmu.yacr.MainActivity` declares
 /// `private external fun <name>` for each one, and the Kotlin lane is a parallel
 /// implementation. The unit test in this module pins that the crate defines
 /// exactly these symbols (a rename breaks the contract, not just a build).
 pub const JNI_SYMBOLS: [&str; 4] = [
-    "Java_dev_yacr_app_MainActivity_nativeSurfaceCreated",
-    "Java_dev_yacr_app_MainActivity_nativeSurfaceResized",
-    "Java_dev_yacr_app_MainActivity_nativeSurfaceDestroyed",
-    "Java_dev_yacr_app_MainActivity_nativeAssetsReady",
+    "Java_io_github_zenglanmu_yacr_MainActivity_nativeSurfaceCreated",
+    "Java_io_github_zenglanmu_yacr_MainActivity_nativeSurfaceResized",
+    "Java_io_github_zenglanmu_yacr_MainActivity_nativeSurfaceDestroyed",
+    "Java_io_github_zenglanmu_yacr_MainActivity_nativeAssetsReady",
 ];
 
 /// The explicit reason a file operation is refused by a **non-Android build**.
@@ -244,14 +244,14 @@ mod tests {
         // Exactly these four: a fifth surface symbol would mean the frozen Kotlin
         // contract grew without the Kotlin lane.
         let surface_symbols = surface
-            .matches("fn Java_dev_yacr_app_MainActivity_")
+            .matches("fn Java_io_github_zenglanmu_yacr_MainActivity_")
             .count();
         assert_eq!(
             surface_symbols, 3,
             "surface.rs must define exactly the three surface symbols"
         );
         let platform_symbols = platform
-            .matches("fn Java_dev_yacr_app_MainActivity_")
+            .matches("fn Java_io_github_zenglanmu_yacr_MainActivity_")
             .count();
         assert_eq!(
             platform_symbols, 1,

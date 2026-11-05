@@ -8,7 +8,7 @@
 #      built `ui/dist` is embedded — without that feature the binary expects the
 #      Vite dev server and cannot run standalone;
 #   3. stage target/flatpak/payload/{bin/yacr,fonts/} (committed fonts/ only);
-#   4. run flatpak-builder against packaging/flatpak/dev.yacr.app.yml;
+#   4. run flatpak-builder against packaging/flatpak/io.github.zenglanmu.yacr.yml;
 #   5. export a single-file bundle to target/release/dist/.
 #
 # Env (defaults keep the repo environment working without hardcoding one mirror
@@ -19,25 +19,32 @@
 #   FLATPAK_REMOTE_BUILD  remote that must provide org.gnome.Platform//51 and
 #                         org.gnome.Sdk//51 and is named in the install hint
 #                         (default: flathub-mirror, same as above).
+#   FLATPAK_GPG_KEY_ID    optional GPG key id/fingerprint. When set, the OSTree
+#                         commit is signed by flatpak-builder and the public key
+#                         is exported to <bundle>.gpg.
+#   FLATPAK_GPG_HOMEDIR   GnuPG home holding that key
+#                         (default: ${GNUPGHOME:-$HOME/.gnupg}).
 #
 # Every missing prerequisite is a hard, actionable failure: this script never
-# falls back to a partial or unverified artifact.
+# falls back to a partial or unverified artifact. With FLATPAK_GPG_KEY_ID unset
+# the bundle is produced UNSIGNED and the status line says so.
 #
 # Artifacts (under target/, which is gitignored):
 #   target/flatpak/payload/                                     staged input
 #   target/release/dist/yacr-<version>-linux-<arch>.flatpak
 #   target/release/dist/yacr-<version>-linux-<arch>.flatpak.sha256
+#   target/release/dist/yacr-<version>-linux-<arch>.flatpak.gpg  (signed only)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 export PATH="$HOME/.cargo/bin:$PATH"
 
-APP_ID="dev.yacr.app"
+APP_ID="io.github.zenglanmu.yacr"
 RUNTIME_VERSION="51"
 RUNTIME_REF="org.gnome.Platform//${RUNTIME_VERSION}"
 SDK_REF="org.gnome.Sdk//${RUNTIME_VERSION}"
-MANIFEST="packaging/flatpak/dev.yacr.app.yml"
+MANIFEST="packaging/flatpak/io.github.zenglanmu.yacr.yml"
 UI_DIR="apps/desktop-ui"
 TAURI_CONF="apps/app-linux/tauri.conf.json"
 PAYLOAD="target/flatpak/payload"
@@ -46,6 +53,8 @@ REPO="target/flatpak/repo"
 DIST="target/release/dist"
 REMOTE_DEPS="${FLATPAK_REMOTE_DEPS:-flathub-mirror}"
 REMOTE_BUILD="${FLATPAK_REMOTE_BUILD:-flathub-mirror}"
+FLATPAK_GPG_KEY_ID="${FLATPAK_GPG_KEY_ID:-}"
+FLATPAK_GPG_HOMEDIR="${FLATPAK_GPG_HOMEDIR:-${GNUPGHOME:-$HOME/.gnupg}}"
 
 ARCH="$(uname -m)"
 
@@ -68,6 +77,10 @@ need python3 "python3 not found; it is used to read the version from ${TAURI_CON
 [ -f "$MANIFEST" ] || die "manifest missing: ${MANIFEST}"
 [ -f "${UI_DIR}/package-lock.json" ] || die "${UI_DIR}/package-lock.json missing; 'npm ci' needs a committed lockfile."
 [ -d fonts ] || die "committed fonts/ directory missing; the manifest installs it to /app/fonts."
+if [ -n "$FLATPAK_GPG_KEY_ID" ]; then
+    need gpg "FLATPAK_GPG_KEY_ID is set but gpg not found; install gnupg (it signs the OSTree commit)."
+    need ostree "FLATPAK_GPG_KEY_ID is set but ostree not found; install ostree (it verifies the commit signature)."
+fi
 
 VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$TAURI_CONF")"
 [ -n "$VERSION" ] || die "could not read the version from ${TAURI_CONF}"
@@ -153,26 +166,67 @@ cp -a fonts/. "${PAYLOAD}/fonts/"
 # --- 4. flatpak-builder ----------------------------------------------------
 echo "==> building the Flatpak (${MANIFEST})"
 rm -rf "$BUILD" "$REPO"
-flatpak-builder \
-    --force-clean \
-    --user \
-    --install-deps-from="$REMOTE_DEPS" \
-    --repo="$REPO" \
-    "$BUILD" \
-    "$MANIFEST"
+BUILDER_ARGS=(
+    --force-clean
+    --user
+    --install-deps-from="$REMOTE_DEPS"
+    --repo="$REPO"
+)
+if [ -n "$FLATPAK_GPG_KEY_ID" ]; then
+    # Sign the OSTree commit itself. `flatpak build-bundle --gpg-sign` only signs
+    # the OCI path, so a normal single-file bundle must carry an already signed
+    # commit (this is also what `flatpak install` verifies).
+    BUILDER_ARGS+=(
+        --gpg-sign="$FLATPAK_GPG_KEY_ID"
+        --gpg-homedir="$FLATPAK_GPG_HOMEDIR"
+    )
+fi
+flatpak-builder "${BUILDER_ARGS[@]}" "$BUILD" "$MANIFEST"
 
 # --- 5. bundle -------------------------------------------------------------
 echo "==> exporting ${BUNDLE}"
+# Start from a clean dist: a cached `target/` may still hold an older bundle.
+rm -rf "$DIST"
 mkdir -p "$DIST"
-rm -f "$BUNDLE" "${BUNDLE}.sha256"
-flatpak build-bundle "$REPO" "$BUNDLE" "$APP_ID"
+PUBKEY="${BUNDLE}.gpg"
+BUNDLE_ARGS=()
+if [ -n "$FLATPAK_GPG_KEY_ID" ]; then
+    echo "==> exporting the Flatpak signing public key to ${PUBKEY}"
+    # Binary keyring data: this is what `flatpak build-bundle --gpg-keys` and
+    # `flatpak install --gpg-file` consume.
+    gpg --homedir "$FLATPAK_GPG_HOMEDIR" --export "$FLATPAK_GPG_KEY_ID" > "$PUBKEY"
+    [ -s "$PUBKEY" ] || die "failed to export the signing key ${FLATPAK_GPG_KEY_ID} to ${PUBKEY}"
+    # Embed the public key so a plain `flatpak install ./bundle` verifies the
+    # commit signature instead of silently trusting an unverified source.
+    BUNDLE_ARGS+=(--gpg-keys="$PUBKEY")
+fi
+flatpak build-bundle "${BUNDLE_ARGS[@]}" "$REPO" "$BUNDLE" "$APP_ID"
 [ -s "$BUNDLE" ] || die "flatpak build-bundle produced no bundle: ${BUNDLE}"
 ( cd "$DIST" && sha256sum "$(basename "$BUNDLE")" > "$(basename "$BUNDLE").sha256" )
+
+# --- 6. verify the signed commit -------------------------------------------
+if [ -n "$FLATPAK_GPG_KEY_ID" ]; then
+    # OSTree stores GPG commit signatures in detached metadata under
+    # `ostree.gpgsigs`; `ostree show --print-signatures` is not available in all
+    # supported versions, so assert the detached-metadata key instead.
+    detached_keys="$(ostree --repo="$REPO" show --list-detached-metadata-keys \
+        "app/${APP_ID}/${ARCH}/master")" \
+        || die "cannot read the OSTree detached metadata from ${REPO}"
+    printf '%s\n' "$detached_keys" | grep -qx 'ostree.gpgsigs' \
+        || die "OSTree commit app/${APP_ID}/${ARCH}/master carries no GPG signature"
+fi
 
 echo
 echo "artifact : ${BUNDLE}"
 echo "size     : $(wc -c < "$BUNDLE") bytes"
 echo "sha256   : $(cut -d' ' -f1 "${BUNDLE}.sha256")"
+if [ -n "$FLATPAK_GPG_KEY_ID" ]; then
+    echo "signing  : GPG-signed OSTree commit (key ${FLATPAK_GPG_KEY_ID})"
+    echo "public key: ${PUBKEY}"
+    echo "verify   : flatpak install --user --gpg-file=$(basename "$PUBKEY") $(basename "$BUNDLE")"
+else
+    echo "signing  : UNSIGNED (FLATPAK_GPG_KEY_ID is not set)"
+fi
 echo "install  : flatpak install --user ${BUNDLE}"
 echo "run      : flatpak run ${APP_ID}"
 echo

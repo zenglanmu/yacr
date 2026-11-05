@@ -41,6 +41,10 @@
 #                 required in both modes.
 #   SKIP_UI_BUILD 1 to reuse an existing apps/desktop-ui/dist (only accepted
 #                 when dist/index.html exists and is non-empty).
+#   SKIP_ZIP      1 to build and stage only, without zipping (CI signs the staged
+#                 executables first and then runs
+#                 scripts/finalize-windows-release.sh --signed). The default 0
+#                 finalizes the stage as UNSIGNED via the same script.
 #   CARGO_XWIN    1 to build an MSVC target on Linux through `cargo xwin`.
 #   PYTHON        python interpreter (default: python3, then python).
 #   YACR_WINDOWS_SMOKE  1 to run the packaged CLI under Wine (Linux only).
@@ -95,7 +99,7 @@ if [ -z "${PYTHON:-}" ]; then
     fi
   done
 fi
-[ -n "${PYTHON:-}" ] || die "python3 (or python) is required for the PE checks and the zip step"
+[ -n "${PYTHON:-}" ] || die "python3 (or python) is required for the PE import/icon checks"
 export PYTHON
 
 # MSVC: statically link the CRT so a stock Windows 10/11 install runs the
@@ -156,7 +160,8 @@ CLI_PATH="${RELEASE}/${CLI}"
 
 # --- staging ----------------------------------------------------------------
 step "staging ${STAGE}"
-rm -rf "$STAGE"
+# Start from a clean dist: a cached `target/` may still hold a previous zip.
+rm -rf "$DIST"
 mkdir -p "$STAGE/bin" "$STAGE/docs" "$STAGE/scripts" "$STAGE/fonts"
 cp "$GUI_PATH" "$STAGE/bin/$GUI"
 cp "$CLI_PATH" "$STAGE/bin/$CLI"
@@ -345,8 +350,7 @@ Runtime notes (not a compatibility claim)
 
 Code signing
 ------------
-This archive is UNSIGNED -- it is NOT code-signed. Windows SmartScreen may show
-an "unknown publisher" warning on first launch.
+@@YACR_SIGNING_NOTE@@
 
 No unlicensed user DWG samples or golden images are bundled. The mlightcad/cad-data
 fonts in fonts/ are third-party and vendored by the deployer at packaging time
@@ -365,46 +369,16 @@ if [ "${YACR_WINDOWS_SMOKE:-0}" = "1" ]; then
 fi
 
 # --- zip + checksum ---------------------------------------------------------
-ZIP="${DIST}/${NAME}.zip"
-step "creating ${ZIP}"
-rm -f "$ZIP" "${ZIP}.sha256"
-"$PYTHON" - "$DIST" "$NAME" <<'PY'
-import hashlib
-import pathlib
-import sys
-import zipfile
+# The zip (and its .sha256) is produced by scripts/finalize-windows-release.sh so
+# the local and CI paths share one implementation. CI builds with SKIP_ZIP=1,
+# signs the staged exes, and finalizes them as signed; this script finalizes as
+# UNSIGNED because nothing here has a signature.
+if [ "${SKIP_ZIP:-0}" = "1" ]; then
+  echo
+  echo "stage    : ${STAGE}"
+  echo "note     : SKIP_ZIP=1 -- CI signs bin/*.exe before zipping;"
+  echo "           run scripts/finalize-windows-release.sh --signed|--unsigned to package."
+  exit 0
+fi
 
-dist, name = pathlib.Path(sys.argv[1]), sys.argv[2]
-root = dist / name
-out = dist / f"{name}.zip"
-if not (root / "bin" / "yacr-windows.exe").is_file():
-    raise SystemExit(f"refusing to zip: {root}/bin/yacr-windows.exe is missing")
-with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-    for path in sorted(root.rglob("*")):
-        archive.write(path, path.relative_to(dist).as_posix())
-digest = hashlib.sha256(out.read_bytes()).hexdigest()
-(out.parent / f"{name}.zip.sha256").write_text(f"{digest}  {name}.zip\n")
-print(f"zip: {out.name} ({out.stat().st_size} bytes)")
-PY
-
-[ -s "$ZIP" ] || die "no zip was produced at $ZIP"
-[ -s "${ZIP}.sha256" ] || die "no checksum was produced at ${ZIP}.sha256"
-"$PYTHON" - "$ZIP" "${ZIP}.sha256" <<'PY'
-import hashlib
-import pathlib
-import re
-import sys
-
-zip_path, sha_path = (pathlib.Path(arg) for arg in sys.argv[1:3])
-expected = sha_path.read_text(encoding="utf-8").split()[0]
-if not re.fullmatch(r"[0-9a-f]{64}", expected):
-    raise SystemExit(f"{sha_path}: not a sha256 digest: {expected!r}")
-actual = hashlib.sha256(zip_path.read_bytes()).hexdigest()
-if actual != expected:
-    raise SystemExit(f"{sha_path}: digest does not match {zip_path.name}")
-PY
-
-echo
-echo "artifact : ${ZIP}"
-echo "size     : $(wc -c < "$ZIP") bytes"
-echo "sha256   : $(cut -d' ' -f1 "${ZIP}.sha256")"
+"$ROOT/scripts/finalize-windows-release.sh" --unsigned "$STAGE" "$DIST"

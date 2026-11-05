@@ -120,7 +120,7 @@ while IFS= read -r -d '' apk; do
 done < <(find "$apk_dir" -maxdepth 1 -type f -name '*.apk' -print0)
 [ "$apk_count" -ge 1 ] || die "no .apk in $apk_dir (the build produced nothing installable)"
 
-printf 'note: install with `adb install -r <apk>`; package id is dev.yacr.app.\n'
+printf 'note: install with `adb install -r <apk>`; package id is io.github.zenglanmu.yacr.\n'
 if [ "$profile" = "release" ]; then
   printf 'note: a release APK is UNSIGNED unless a keystore is configured; sign it before installing.\n'
 fi

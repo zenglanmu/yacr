@@ -7,7 +7,7 @@ with a *prebuilt payload* manifest, so these tests pin the properties that make
 the path coherent:
 
 * ``packaging/flatpak`` exists with manifest + desktop entry + AppStream data;
-* the manifest targets ``dev.yacr.app``, runtime ``org.gnome.Platform`` 51 and
+* the manifest targets ``io.github.zenglanmu.yacr``, runtime ``org.gnome.Platform`` 51 and
   ``command: yacr``, ships the payload to ``/app/bin/yacr`` + ``/app/fonts``
   (the host auto-loads ``<exe dir>/../fonts``), and packages no source tree;
 * the desktop entry launches ``yacr %F`` and claims the DWG/DXF media types
@@ -31,11 +31,11 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts/package-linux-release.sh"
 FLATPAK_DIR = ROOT / "packaging/flatpak"
-MANIFEST = FLATPAK_DIR / "dev.yacr.app.yml"
-DESKTOP = FLATPAK_DIR / "dev.yacr.app.desktop"
-METAINFO = FLATPAK_DIR / "dev.yacr.app.metainfo.xml"
+MANIFEST = FLATPAK_DIR / "io.github.zenglanmu.yacr.yml"
+DESKTOP = FLATPAK_DIR / "io.github.zenglanmu.yacr.desktop"
+METAINFO = FLATPAK_DIR / "io.github.zenglanmu.yacr.metainfo.xml"
 
-APP_ID = "dev.yacr.app"
+APP_ID = "io.github.zenglanmu.yacr"
 BINARY = "yacr"
 CJK_FALLBACK = "NotoSansCJKsc-Regular.otf"
 
@@ -128,6 +128,16 @@ def check_script(text: str) -> list[str]:
         ".flatpak",
         "FLATPAK_REMOTE_DEPS",
         "FLATPAK_REMOTE_BUILD",
+        # Optional OSTree/GPG commit signing: without these the bundle is
+        # explicitly UNSIGNED instead of silently unsigned.
+        "FLATPAK_GPG_KEY_ID",
+        "FLATPAK_GPG_HOMEDIR",
+        "--gpg-sign",
+        "--gpg-homedir",
+        "--gpg-keys",
+        ".flatpak.gpg",
+        "ostree",
+        "ostree.gpgsigs",
     )
     for fragment in required:
         if fragment not in text:
@@ -207,6 +217,13 @@ class PackageLinuxReleaseContracts(unittest.TestCase):
     def test_script_requires_custom_protocol(self) -> None:
         mutated = self.script_text.replace("--features tauri/custom-protocol", "")
         self.assertNotEqual(check_script(mutated), [])
+
+    def test_script_reports_a_removed_gpg_signature(self) -> None:
+        mutated = self.script_text.replace("--gpg-sign", "")
+        problems = check_script(mutated)
+        self.assertTrue(
+            any("--gpg-sign" in problem for problem in problems), problems
+        )
 
     def test_binary_names_agree_across_files(self) -> None:
         # command / Exec / <binary> must name the same executable, else the

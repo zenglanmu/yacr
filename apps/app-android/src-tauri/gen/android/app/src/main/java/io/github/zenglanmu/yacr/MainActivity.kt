@@ -1,4 +1,4 @@
-package dev.yacr.app
+package io.github.zenglanmu.yacr
 
 import android.content.res.AssetManager
 import android.content.res.Configuration
@@ -125,7 +125,7 @@ class MainActivity : TauriActivity() {
   // Frozen Kotlin -> Rust JNI contract (implemented in `libapp_android.so` by the
   // native renderer lane; names and signatures must not change here).
   //
-  // JNI symbols are `Java_dev_yacr_app_MainActivity_<name>` with an instance
+  // JNI symbols are `Java_io_github_zenglanmu_yacr_MainActivity_<name>` with an instance
   // receiver (`this`). Surface callbacks run on the main thread, so the calls are
   // synchronous; the asset handshake is posted to the main thread after extraction.
   // ---------------------------------------------------------------------------
@@ -548,7 +548,7 @@ class MainActivity : TauriActivity() {
   // Rust -> Kotlin document contract (SAF open/save)
   //
   // The native host calls these on **this** activity by exact name (instance JNI:
-  // `Java_dev_yacr_app_MainActivity_documentLaunchOpen`, …), mirroring the frozen
+  // `Java_io_github_zenglanmu_yacr_MainActivity_documentLaunchOpen`, …), mirroring the frozen
   // Kotlin -> Rust `native*` symbols above in the other direction. They carry no
   // document state: `DocumentPicker` holds only one in-flight picker result and the
   // bytes of one read, and every terminal state is consumed by
