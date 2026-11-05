@@ -28,5 +28,6 @@ description = "Desktop host shell shared by the Tauri apps: IPC commands, shared
 tauri.workspace = true
 cad-ui-core.workspace = true
 cad-app.workspace = true
+cad-platform.workspace = true
 serde.workspace = true
 serde_json.workspace = true

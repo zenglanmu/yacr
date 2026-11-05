@@ -170,3 +170,23 @@ test('the File tab keeps NEW/SAVE/PLOT as command tokens enabled by admission', 
   const ribbon = await readModule('components/Ribbon.tsx');
   assert.ok(ribbon.includes(': item.command ? shell.canCommand(item.command)'));
 });
+
+test('the File tab exposes Plugins as a shell action with catalog copy', async () => {
+  const { RIBBON_TABS, ribbonCommandIds } = await import('../src/ribbon/ribbon-model.ts');
+  const file = RIBBON_TABS.find(tab => tab.id === 'file').panels.find(panel => panel.id === 'utilities');
+  const plugins = file.items.find(item => item.id === 'plugins');
+  assert.ok(plugins, 'File > utilities must carry the Plugins entry');
+  assert.equal(plugins.labelKey, 'file.plugins');
+  assert.equal(plugins.icon, 'settings');
+  // A shell action, never a file/router command: the entry opens a dialog page
+  // and must not appear in the command vocabulary the ribbon offers.
+  assert.equal(plugins.action, 'plugins');
+  assert.equal(plugins.command, undefined);
+  assert.equal(ribbonCommandIds().includes('plugins'), false);
+
+  const { readCatalog } = await import('./helpers.ts');
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  assert.equal(zh['file.plugins'], '插件');
+  assert.equal(en['file.plugins'], 'Plugins');
+});

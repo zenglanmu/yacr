@@ -177,6 +177,22 @@ export const WEB_VENDOR_APPLY_COMMAND = 'cad_vendor_apply';
 export const WEB_VENDOR_STATUS_COMMAND = 'cad_vendor_status';
 
 /**
+ * The five shell plugin-registry commands.
+ *
+ * The registry belongs to the **native shell** (it owns the config directory
+ * and the installed files), so a page carrier has nothing to forward them to.
+ * They are refused by name below, never answered with an empty plugin list that
+ * would look like "no plugins installed".
+ */
+export const WEB_PLUGIN_COMMANDS: readonly string[] = [
+  'cad_plugin_status',
+  'cad_plugin_install',
+  'cad_plugin_enable',
+  'cad_plugin_uninstall',
+  'cad_plugin_read_entry',
+];
+
+/**
  * The command the **transport** implements, on top of the wasm session's own
  * vocabulary.
  *
@@ -687,6 +703,15 @@ export function createWebAdapter(source: WebShellSource, deps: WebAdapterDeps = 
         case WEB_VENDOR_APPLY_COMMAND:
         case WEB_VENDOR_STATUS_COMMAND:
           return invokeVendor(await moduleOf(), command, args);
+        case 'cad_plugin_status':
+        case 'cad_plugin_install':
+        case 'cad_plugin_enable':
+        case 'cad_plugin_uninstall':
+        case 'cad_plugin_read_entry':
+          // The plugin registry is the native shell's; this carrier has no
+          // registry to read or mutate. The named refusal is the whole answer,
+          // never an empty list or a fabricated mutation.
+          throw new Error(`unsupported-runtime: ${command}`);
         case WEB_FAILURE_COMMAND: {
           const record = argRecord(args);
           const step = typeof record.step === 'string' && record.step.length > 0 ? record.step : CANVAS_STEP_UNCLASSIFIED;

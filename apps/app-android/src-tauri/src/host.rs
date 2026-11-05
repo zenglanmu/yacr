@@ -406,9 +406,15 @@ pub fn run() {
         ..cad_ui_core::launch::LaunchOptions::default()
     };
     let shared = cad_desktop_shell::state::new_shared(launch);
-    // This carrier is always `native-below` and registers the vendor transport
-    // through `invoke_handler`, so the store may emit `vendor-pending`.
-    cad_desktop_shell::state::lock(&shared).vendor.enable();
+    // This carrier is always `native-below`, so it serves the plugin manager and
+    // registers the five commands through `register_commands_with_vendor`. The
+    // lazy store resolves `filesDir` after the `nativeAssetsReady` handshake; the
+    // vendor pass is enabled only when the persisted policy selects a decoder.
+    cad_desktop_shell::plugins::configure_startup(
+        &shared,
+        Some(Arc::new(crate::plugin_store::AndroidPluginStore)),
+        true,
+    );
     let telemetry = new_render_telemetry();
 
     let setup_shared = shared.clone();

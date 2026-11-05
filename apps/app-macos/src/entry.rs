@@ -36,9 +36,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let shared = crate::host::new_shared(launch);
-    // This carrier is always `native-below`, and the entry above registered the
-    // vendor transport: the store may emit `vendor-pending` safely.
-    cad_desktop_shell::state::lock(&shared).vendor.enable();
+    // This carrier is always `native-below`, so it serves the plugin manager. The
+    // store lives next to the config file; when no `$HOME` exists the explicit
+    // non-persistent store keeps `tch` working and refuses installs rather than
+    // inventing a path. The vendor pass is enabled only when a decoder is active.
+    let (config, _) = crate::platform::config_paths();
+    let plugin_store: std::sync::Arc<dyn cad_platform::plugins::PluginStore> =
+        match config.as_ref().and_then(|path| path.parent()) {
+            Some(dir) => std::sync::Arc::new(cad_platform::plugins::FsPluginStore::new(
+                dir.join(cad_platform::plugins::PLUGIN_DIRECTORY),
+            )),
+            None => std::sync::Arc::new(cad_platform::plugins::NonPersistentPluginStore),
+        };
+    cad_desktop_shell::plugins::configure_startup(&shared, Some(plugin_store), true);
     let telemetry = crate::host::new_render_telemetry();
     let setup_shared = shared.clone();
     let setup_telemetry = telemetry.clone();

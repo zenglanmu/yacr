@@ -57,6 +57,7 @@ import { MOBILE_DRAWER_CLOSED, mobileDrawerNext } from './layout/mobile-drawer.t
 import { useLayoutMode } from './layout/use-layout-mode.ts';
 import { createShortcutRunner } from './layout/shell-shortcuts.ts';
 import { openPopup } from './popup/popup.ts';
+import { openOptionsDialog } from './options/open-options.ts';
 import { useLocalSelectors } from './commands/local-selectors.ts';
 import { setSelectedProperty } from './properties/properties.ts';
 import { textEditOpenError } from './popup/popup-textedit.ts';
@@ -505,7 +506,7 @@ function Shell() {
     translate: t,
     clearResult: () => setCommandResult(null),
     clearDraft: () => setCommand(''),
-    requestOptions: () => requestOpenPopup('options'),
+    requestOptions: () => openOptionsDialog(requestOpenPopup),
     openResources: () => setReferencesOpen(true),
     openProperties: () => setPropertiesOpen(true),
     openLayers: () => { setLayersOpen(true); setLayersFocus(value => value + 1); },
@@ -828,7 +829,7 @@ function Shell() {
     },
     // The Options dialog (the same in-DOM overlay layer). One instance: a second
     // request is answered as `existing: true`, which is not a failure.
-    openOptionsPopup: () => requestOpenPopup('options'),
+    openOptionsPopup: () => openOptionsDialog(requestOpenPopup),
     historyOpen,
     setHistoryOpen,
     clearHistory: commandHistory.clear,
@@ -913,11 +914,9 @@ function Shell() {
       else if (action === 'about') {
         requestOpenPopup('about');
       }
-      // The Options dialog is the same overlay layer. Opening it twice is a
-      // success: the host reports the single instance as existing.
-      else if (action === 'options') {
-        requestOpenPopup('options');
-      }
+      // File > Plugins is the same dialog with one page selected.
+      else if (action === 'options') openOptionsDialog(requestOpenPopup);
+      else if (action === 'plugins') openOptionsDialog(requestOpenPopup, 'plugins');
     },
     // Suspend the CAD pointer lane while chrome (command line) owns the keyboard.
     // This is the **textFocus** reason only: a blur clears it and leaves a

@@ -12,6 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  WEB_PLUGIN_COMMANDS,
   WEB_VENDOR_APPLY_COMMAND,
   WEB_VENDOR_RECORDS_COMMAND,
   WEB_VENDOR_STATUS_COMMAND,
@@ -129,6 +130,23 @@ test('vendor_apply forwards token, generation and payload, and parses the ack', 
     adapter.invoke(WEB_VENDOR_APPLY_COMMAND, { token: 7, generation: 9 }),
     /payload must be the base64 result frame/,
   );
+});
+
+test('the five shell plugin commands are refused by name on this carrier', async () => {
+  // The registry lives in the native shell; this page has none. A named refusal
+  // is the whole answer: an empty plugin list would look like "nothing installed".
+  assert.deepEqual([...WEB_PLUGIN_COMMANDS], [
+    'cad_plugin_status', 'cad_plugin_install', 'cad_plugin_enable', 'cad_plugin_uninstall', 'cad_plugin_read_entry',
+  ]);
+  const calls = [];
+  const module = {
+    invoke(name) { calls.push(name); return JSON.stringify({ ok: true, value: [] }); },
+  };
+  const adapter = createWebAdapter(module);
+  for (const command of WEB_PLUGIN_COMMANDS) {
+    await assert.rejects(adapter.invoke(command, {}), new RegExp(`^Error: unsupported-runtime: ${command}$`));
+  }
+  assert.deepEqual(calls, [], 'nothing reaches the wasm session');
 });
 
 test('vendor_status answers the session\'s parsed descriptor', async () => {

@@ -61,6 +61,7 @@ use super::canvas_session::{
     self, CanvasSessionAck, CanvasSessionDescriptor, CANVAS_SESSION_STATUS_COMMAND,
 };
 use super::ProbeShared;
+use cad_desktop_shell::plugins::is_plugin_command;
 use cad_desktop_shell::vendor::is_vendor_command;
 
 /// Commands this module answers itself, with the carrier they are routed on.
@@ -265,7 +266,12 @@ fn host_commands<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Syn
         cad_command_aliases,
         cad_desktop_shell::vendor::cad_vendor_records,
         cad_desktop_shell::vendor::cad_vendor_apply,
-        cad_desktop_shell::vendor::cad_vendor_status
+        cad_desktop_shell::vendor::cad_vendor_status,
+        cad_desktop_shell::plugins::cad_plugin_status,
+        cad_desktop_shell::plugins::cad_plugin_install,
+        cad_desktop_shell::plugins::cad_plugin_enable,
+        cad_desktop_shell::plugins::cad_plugin_uninstall,
+        cad_desktop_shell::plugins::cad_plugin_read_entry
     ]
 }
 
@@ -289,6 +295,13 @@ pub fn invoke_handler<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send 
             // Routed on every carrier for the same reason: it stores the wasm
             // session's descriptor on `dom-canvas` and refuses explicitly on
             // `native-below` (no silent success, no second status path).
+            return host(invoke);
+        }
+        if is_plugin_command(&command) {
+            // Routed on every carrier: the command itself answers
+            // `supported:false` / `accepted:false` with the stable carrier reason
+            // on `dom-canvas`, so the chrome gets the frontend wire shape rather
+            // than a Tauri "command not found".
             return host(invoke);
         }
         if is_vendor_command(&command) {
@@ -328,6 +341,10 @@ pub fn invoke_handler<R: tauri::Runtime>() -> impl Fn(Invoke<R>) -> bool + Send 
 mod tests {
     use super::*;
     use cad_desktop_shell::commands::COMMAND_NAMES;
+    use cad_desktop_shell::plugins::{
+        CAD_PLUGIN_ENABLE_COMMAND, CAD_PLUGIN_INSTALL_COMMAND, CAD_PLUGIN_READ_ENTRY_COMMAND,
+        CAD_PLUGIN_STATUS_COMMAND, CAD_PLUGIN_UNINSTALL_COMMAND,
+    };
     use cad_desktop_shell::vendor::{
         CAD_VENDOR_APPLY_COMMAND, CAD_VENDOR_RECORDS_COMMAND, CAD_VENDOR_STATUS_COMMAND,
     };
@@ -449,12 +466,18 @@ mod tests {
             CAD_VENDOR_RECORDS_COMMAND,
             CAD_VENDOR_APPLY_COMMAND,
             CAD_VENDOR_STATUS_COMMAND,
+            CAD_PLUGIN_STATUS_COMMAND,
+            CAD_PLUGIN_INSTALL_COMMAND,
+            CAD_PLUGIN_ENABLE_COMMAND,
+            CAD_PLUGIN_UNINSTALL_COMMAND,
+            CAD_PLUGIN_READ_ENTRY_COMMAND,
         ] {
             let host_only = command == CANVAS_RUNTIME_FAILED_HOST_COMMAND
                 || command == CANVAS_SESSION_STATUS_COMMAND
                 || command == CAD_VENDOR_RECORDS_COMMAND
                 || command == CAD_VENDOR_APPLY_COMMAND
-                || command == CAD_VENDOR_STATUS_COMMAND;
+                || command == CAD_VENDOR_STATUS_COMMAND
+                || is_plugin_command(command);
             assert!(
                 host_only || COMMAND_NAMES.contains(&command),
                 "{command} is neither host-only nor shared"
@@ -468,6 +491,34 @@ mod tests {
         // `canvas_session_status` is host-only on purpose: it exists only on the
         // `dom-canvas` seam, so the shared registry must not own it.
         assert!(!COMMAND_NAMES.contains(&CANVAS_SESSION_STATUS_COMMAND));
+    }
+
+    #[test]
+    fn every_plugin_command_is_host_owned_and_routed_on_both_carriers() {
+        for command in [
+            CAD_PLUGIN_STATUS_COMMAND,
+            CAD_PLUGIN_INSTALL_COMMAND,
+            CAD_PLUGIN_ENABLE_COMMAND,
+            CAD_PLUGIN_UNINSTALL_COMMAND,
+            CAD_PLUGIN_READ_ENTRY_COMMAND,
+        ] {
+            assert!(is_plugin_command(command));
+            // Shell capability, not a CAD wire command: the shared registry must
+            // not grow a second registration for it.
+            assert!(!COMMAND_NAMES.contains(&command));
+            assert!(!WIRE_COMMAND_NAMES.contains(&command));
+            // It is not part of the native-session refusal table either; the
+            // command answers the frontend wire shape itself on `dom-canvas`.
+            assert_eq!(
+                native_session_refusal(command, SurfaceMode::DomCanvas),
+                None
+            );
+        }
+        // Source contract: the dispatcher forwards the five names to the host
+        // handler before the vendor/native branches, on every carrier.
+        let source = include_str!("dispatch.rs");
+        assert!(source.contains("if is_plugin_command(&command) {"));
+        assert!(source.contains("return host(invoke);"));
     }
 
     #[test]

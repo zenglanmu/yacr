@@ -9,6 +9,8 @@
 //!   and the frozen lock-order invariant (`Shared` before render telemetry).
 //! - [`commands`]: every `#[tauri::command]` IPC function plus the single
 //!   `generate_handler!` registration (`commands::register_commands`).
+//! - [`plugins`]: the five native plugin-manager commands, the durable store
+//!   seam and the startup gate (persist now, apply next launch).
 //! - [`popup`]: the shared modal-popup lifecycle (gate mapping and the
 //!   four-trigger clear contract); popups are in-DOM overlays, so it owns no
 //!   window.
@@ -41,6 +43,13 @@ pub mod commands;
     target_os = "android"
 ))]
 pub mod events;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
+pub mod plugins;
 #[cfg(any(
     target_os = "linux",
     target_os = "windows",

@@ -122,3 +122,103 @@ reason when the status is `failed`.
 `cad_fonts` is a report, not an action: there is no font-write command. A face
 that failed stays visible in `faces` with its real status; nothing is silently
 dropped, and nothing is retried on read.
+
+## `cad_plugin_*` (vendor plugin registry, native shell only)
+
+These five commands belong to the **shell**, not to a CAD document. They are not
+`COMMAND_TABLE` selectors, so `scripts/check-command-docs.py` does not admit
+them as CAD command names; the contract below and
+`docs/vendor-plugin.md` §8 are their documentation. `host/invoke.ts` lists them
+as shell-only. A carrier without the registry refuses them by name
+(`unsupported-runtime: cad_plugin_<name>`, Web) or answers a `supported: false`
+frame with `plugin.unsupported_carrier: dom-canvas` (Linux X11/XWayland).
+
+All five serve the same `native-below` registry. One decoder is active at a
+time; changes persist immediately but take effect on the next launch
+(`restartRequired = activeDecoder != sessionActiveDecoder`).
+
+| command | arguments | reply |
+| --- | --- | --- |
+| `cad_plugin_status` | — | `PluginStatusFrame` |
+| `cad_plugin_install` | `{ filename: string, payload: string (base64), meta?: { id?, name?, version? } }` | `PluginMutationResult` |
+| `cad_plugin_enable` | `{ id: string, enabled: boolean }` | `PluginMutationResult` |
+| `cad_plugin_uninstall` | `{ id: string }` | `PluginMutationResult` |
+| `cad_plugin_read_entry` | `{ id: string }` | `{ payload: string (base64), entry: "plugin.js" }`; the built-in id is refused |
+
+`PluginStatusFrame`:
+
+```json
+{
+  "supported": true,
+  "carrier": "native-below",
+  "plugins": [
+    {
+      "id": "tch",
+      "name": "Tianzheng TCH",
+      "version": "0.1.0",
+      "abi": 1,
+      "source": "builtin",
+      "enabled": true,
+      "sessionActive": true,
+      "status": "ok"
+    }
+  ],
+  "activeDecoder": "tch",
+  "sessionActiveDecoder": "tch",
+  "restartRequired": false,
+  "diagnostics": []
+}
+```
+
+`PluginMutationResult` carries the registry snapshot after the attempt, so a
+refusal is never an empty success:
+
+```json
+{
+  "accepted": false,
+  "reason": "plugin.unsupported_carrier: dom-canvas",
+  "restartRequired": false,
+  "status": {
+    "supported": false,
+    "carrier": "dom-canvas",
+    "plugins": [
+      {
+        "id": "tch",
+        "name": "Tianzheng TCH",
+        "version": "0.1.0",
+        "abi": 1,
+        "source": "builtin",
+        "enabled": true,
+        "sessionActive": true,
+        "status": "ok"
+      }
+    ],
+    "activeDecoder": "tch",
+    "sessionActiveDecoder": "tch",
+    "restartRequired": false,
+    "diagnostics": ["plugin.unsupported_carrier: dom-canvas"]
+  }
+}
+```
+
+- `payload`/`filename` install path: the id is the module-provided `id` when it
+  is valid, otherwise the basename derived slug (`.js`/`.mjs`). The reserved id
+  `tch` and an already-installed id are refused (`plugin.reserved_id` /
+  `plugin.already_installed`), and the entry is capped at 4 MiB. `name`/`version`
+  default to the id and `0.0.0`.
+- `cad_plugin_enable` is radio semantics: `enabled: true` makes `id` the active
+  decoder; `enabled: false` clears it only when it is active (disabling a
+  non-active row is an accepted no-op).
+- `cad_plugin_uninstall` deletes the plugin directory; uninstalling the active
+  decoder also writes `activeDecoder: null`. The built-in `tch` cannot be
+  uninstalled.
+- `cad_plugin_read_entry` returns the installed bundle bytes for the vendor
+  loader; the built-in refuses because its bundle comes from the application's
+  own URL.
+- A malformed policy is reported (`plugin.policy_invalid`) and status falls back
+  to the built-in default, but mutations refuse rather than overwrite it.
+
+**Evidence scope**: this is the implemented `native-below` contract
+(Linux contract tests plus shared-layer static wiring). Windows/macOS/Android
+runtime, device, real GUI/browser, GPU and pixel behaviour are
+**NOT VERIFIED**.

@@ -54,6 +54,10 @@ pub mod surface;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod platform;
 
+/// Durable plugin storage that resolves `filesDir` after the asset handshake.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod plugin_store;
+
 /// Partition-local DOM input → presented-canvas coordinates (see the module docs).
 ///
 /// Pure, so it is compiled on every non-wasm target and its unit tests run on the

@@ -40,6 +40,20 @@ Wine 只承担 smoke/诊断级；**任何 Wine 像素/截图结论必须写
 | `src/host/popup.rs` | 渲染进程失败（`ProcessFailed`）→ 复位 modal gate + `HostErrorKind::Renderer` 诊断 |
 | `src/redraw.rs` | Win32 `InvalidateRect` redraw pump（与 GTK `queue_draw` 对应） |
 
+### 插件目录（Options → Plugins，2026-11-05）
+
+Windows 宿主始终是 `native-below`，因此按契约提供插件管理器（五个 `cad_plugin_*` 命令）：
+
+- 策略：`%APPDATA%\yacr\plugins.json`；插件：`%APPDATA%\yacr\plugins\<id>\{plugin.js,manifest.json\}`。
+  `APPDATA` 不可解析时使用 `NonPersistentPluginStore`：内置 `tch` 仍工作，安装/写入返回
+  `unsupported-runtime: plugin-store-unavailable`，不发明路径。
+- 安装/启用/禁用/卸载立即持久化，**下次启动才生效**；`restartRequired` 由 `activeDecoder` 与
+  `sessionActiveDecoder` 的差异计算，没有热重载/热卸载。卸载会删除插件目录。
+- 外部解码器通过 Blob URL ES module 导入，`tauri.conf.json` 的 `script-src` 因此包含 `blob:`
+  （已记录的 CSP 取舍；插件仍是与应用同权的普通 module）。
+- **证据边界**：以上只有源码/共享层契约；本轮**没有**运行 Windows 构建、WebView2 运行时、
+  Options 交互或像素验证（**NOT RUN / NOT VERIFIED**）。
+
 **空壳规则**：非 Windows 目标上 `host`/`win32_surface`/`platform`/`redraw` 不编译（crate 是空壳，
 保住 workspace wasm `--lib` 门禁）；二进制返回显式
 `yacr-windows: … this platform is NOT IMPLEMENTED` 并以非零退出——**不是**静默空 GUI。

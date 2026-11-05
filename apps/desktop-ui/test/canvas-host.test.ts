@@ -318,7 +318,17 @@ test('native-below never imports or loads the wasm module', async () => {
   // HTTP 500 for a public-dir file. The public bootstrap module replaced it.
   // (Whole-line comments are skipped, because the header *describes* that rewrite.)
   assert.ok(!/\bimport\s*\(/.test(codeLines(transport)), 'the loader must not use a dynamic import');
-  assert.ok(!/import\s*\(/.test(codeLines(shipped)), 'no dynamic import of the canvas artifact anywhere');
+  // A Blob URL import is allowed only with `@vite-ignore`: without it Vite would
+  // rewrite the call into `import(__vite__injectQuery(url, 'import'))`, which the
+  // dev server answers with HTTP 500. The canvas artifact itself is never
+  // dynamically imported (the injected public bootstrap replaced that path).
+  for (const match of codeLines(shipped).matchAll(/.{0,48}\bimport\s*\(.{0,48}/g)) {
+    assert.match(match[0], /@vite-ignore/, 'every dynamic import must opt out of Vite rewriting');
+  }
+  assert.ok(
+    !/\bimport\s*\([^)]*(?:canvas|bootstrap)/i.test(codeLines(shipped)),
+    'the canvas artifact is never dynamically imported',
+  );
   // The module loader: one injected tag, one cached promise, an awaited `ready`.
   assert.match(transport, /export function loadCanvasModule/);
   assert.equal([...transport.matchAll(/createElement\('script'\)/g)].length, 1);

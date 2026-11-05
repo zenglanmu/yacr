@@ -90,14 +90,20 @@ function recordingInvoke(handler) {
 // --- the control table -----------------------------------------------------
 
 test('the tabs are AutoCAD order and each one owns at least one real control', () => {
-  assert.deepEqual(OPTIONS_TABS.map(tab => tab.id), ['display', 'drafting', 'plot', 'files', 'user']);
+  assert.deepEqual(OPTIONS_TABS.map(tab => tab.id), ['display', 'drafting', 'plot', 'files', 'user', 'plugins']);
   assert.deepEqual(tabById('drafting').labelKey, 'options.tab.drafting');
   assert.equal(tabById('nope'), null);
-  // Every declared tab has a field, so nothing is rendered as an empty page;
-  // a tab that lost its last control would be dropped by `optionsTabs()`.
+  // Every settings tab has a field, so nothing is rendered as an empty page; a
+  // tab that lost its last control would be dropped by `optionsTabs()`. The
+  // Plugins tab is the one self-rendered page: it owns no `OptionsField` and is
+  // kept by its own flag instead.
   const rendered = optionsTabs();
-  assert.deepEqual(rendered.map(tab => tab.id), ['display', 'drafting', 'plot', 'files', 'user']);
+  assert.deepEqual(rendered.map(tab => tab.id), ['display', 'drafting', 'plot', 'files', 'user', 'plugins']);
   for (const tab of rendered) {
+    if (tab.selfRendered) {
+      assert.deepEqual(fieldsForTab(tab.id), [], `${tab.id} must not also own settings fields`);
+      continue;
+    }
     assert.ok(fieldsForTab(tab.id).length > 0, `${tab.id} would be empty`);
   }
   assert.deepEqual(fieldsForTab('no-such-tab'), []);
@@ -828,20 +834,34 @@ test('the model is pure and the dialog owns no IPC text of its own', async () =>
   assert.ok(!/['"]Escape['"]/.test(dialog), 'the dialog must not handle Escape itself');
 });
 
-test('all three entry points open the same host-owned popup', async () => {
+test('every entry point opens the same host-owned popup, and Plugins selects its page', async () => {
   const app = await readModule('App.tsx');
   const selectors = await readModule('commands/local-selectors.ts');
   // The typed word is intercepted before the command is admitted.
   assert.ok(selectors.includes('isOptionsCommand(text)'), 'the command line must intercept OPTIONS');
   assert.ok(app.indexOf('runLocalSelector(text') < app.indexOf('submitting.current = true'), 'the intercept runs first');
-  assert.ok(app.includes("requestOpenPopup('options')"));
-  assert.ok(app.includes("openOptionsPopup: () => requestOpenPopup('options')"));
+  // One opener for the dialog: a plain open clears the deep-link slot, so a
+  // stale File > Plugins request can never hijack it.
+  assert.ok(app.includes("import { openOptionsDialog } from './options/open-options.ts'"));
+  assert.ok(app.includes('requestOptions: () => openOptionsDialog(requestOpenPopup)'));
+  assert.ok(app.includes('openOptionsPopup: () => openOptionsDialog(requestOpenPopup)'));
   assert.ok(app.includes("action === 'options'"));
+  assert.ok(app.includes("action === 'plugins'"));
+  // File > Plugins is the only caller that carries a page, and it opens the very
+  // same Options dialog (never a second popup kind).
+  assert.ok(app.includes("openOptionsDialog(requestOpenPopup, 'plugins')"));
+  assert.equal(app.includes("requestOpenPopup('plugins')"), false);
+  assert.ok(app.indexOf("action === 'plugins'") < app.indexOf("openOptionsDialog(requestOpenPopup, 'plugins')"));
 
   const ribbon = await readModule('ribbon/ribbon-model.ts');
   assert.ok(ribbon.includes("options: 'options'"));
+  assert.ok(ribbon.includes("plugins: 'plugins'"));
   assert.ok(ribbon.includes('labelKey: OPTIONS_KEYS.ribbonEntry'));
   assert.ok(ribbon.includes("action: 'options'"));
+  // The Plugins entry is a File-tab action with its own label key, never a
+  // router command (the dialog and its page selection are chrome-local).
+  assert.ok(ribbon.includes("labelKey: 'file.plugins'"));
+  assert.ok(ribbon.includes('action: SHELL_ACTIONS.plugins'));
 
   const status = await readModule('components/StatusBar.tsx');
   assert.ok(status.includes('shell.openOptionsPopup'));

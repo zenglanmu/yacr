@@ -28,7 +28,8 @@
   不再靠「哪些键存在」推断。
 - `app.windows` **必须**有一条窗口配置：`tauri::app::setup` 从 `app.windows` 创建移动 WebView，
   空数组合法但会**什么都不显示**（这是与桌面 `app.windows: []` + 手建窗口的区别）。
-- CSP 保留 `script-src 'self' 'wasm-unsafe-eval'`（bundle 仍包含 wasm 产物）与
+- CSP 为 `script-src 'self' 'wasm-unsafe-eval' blob:`（bundle 仍包含 wasm 产物；`blob:` 用于
+  插件管理器导入用户安装/校验的 ES module）与
   `connect-src 'self' ipc: http://ipc.localhost`（Tauri IPC）。
 
 ## 2. 事件、状态与命令语义
@@ -57,6 +58,7 @@
 | 初始文档 | **共享核心内置 demo 图纸** | 与桌面宿主不带 `--open` 启动完全一致；外部打开到达后由共享打开漏斗替换 |
 | 弹窗宿主 | **已接（in-DOM）** | `AndroidPopupHost`：弹窗是 React 树内的覆盖层，无原生窗口；`open`/`close` 经 `cad_desktop_shell::popup` 的状态机与模态门，主线程跳转有界（5 s）。Options / About / text-edit 可用；`textEdit` 载荷取当前 `CadSession` 选区（无选区 → 共享 `popup.no_text_selection` 拒绝）。设备运行 **NOT VERIFIED** |
 | 持久配置/偏好 | **持久化到应用私有 `filesDir`**（`/data/user/0/io.github.zenglanmu.yacr/files`） | `AndroidConfigStore`：`config.json` / `preference.json`，读 `Absent`/`Text`/`Unreadable` 与桌面一致，写为「建目录 + 临时文件 + `sync_all` + rename」。路径来自 `nativeAssetsReady`（`filesDir` = 公告 `fontsDir` 的父目录）；握手前保持非持久（读 `Absent`、写 `Unsupported`），不发明路径。设备侧落盘 **NOT VERIFIED** |
+| 插件管理器（2026-11-05） | **契约支持（`native-below`），设备 NOT VERIFIED** | Options → Plugins 的五个 `cad_plugin_*` 命令由共享 `cad-desktop-shell` 注册。策略/插件位于应用私有 `filesDir`：`filesDir/plugins.json` 与 `filesDir/plugins/<id>/{plugin.js,manifest.json}`；`AndroidPluginStore` 每次调用惰性解析 `filesDir`，`nativeAssetsReady` 握手前返回 `unsupported-runtime: plugin-store-unavailable`，不缓存启动时的空路径。安装/启用/禁用/卸载立即持久化、**下次启动才生效**（无热重载/热卸载）；卸载真删目录。外部解码器经 Blob URL 导入，故 CSP 含 `blob:`。设备/模拟器运行、目录落盘、插件执行与像素 **NOT VERIFIED** |
 | 渲染后端 | **Vulkan 硬件 only** | 软件 Vulkan → `yacr: unsupported-gpu: software-vulkan`；**无** GLES/CPU 回退 |
 | FIT / 视口 | **整窗取景** | `SurfaceView` 覆盖整个窗口；`fit_camera` 仍按全窗口取景，分区子矩形是 follow-up |
 | 指针 | **分区原点平移** | tick 内把 DOM 分区局部坐标按 origin 换算成 presented-canvas 坐标；不是第二条输入通道。鼠标/触摸/笔按每事件 `device` 在共享 `cad-host` 仲裁（touch：单指平移、tap 选择、双指 pinch 缩放；mouse/pen：中键平移、2D 主键框选、滚轮缩放） |
@@ -174,6 +176,7 @@ apps/app-android/
     src/saf.rs                 Android-only SAF JNI 桥：5 个 document* 实例方法；非 Android 目标不编译
     src/policy.rs              纯策略：标记行、能力布尔（open/save=true，new/plot=false）、JNI 符号名（可在开发机测试）
     src/platform.rs            SAF 文件契约（AndroidFiles）、DOM surface、filesDir 持久 config store
+    src/plugin_store.rs        插件管理器持久化：惰性解析 filesDir 的 AndroidPluginStore（委托 FsPluginStore）
     src/input.rs               分区局部 → canvas 坐标（纯函数，开发机单测）
     src/refusal.rs             稳定标记行 / step / 历史 exit 6 词汇
     src/report.rs              报表行纯函数（一行、去控制字符、有界）

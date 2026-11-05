@@ -181,6 +181,15 @@ pub struct Shared {
     /// Set by the next `set_vendor_representations(None)` the tick must apply
     /// (a new document has no derived geometry yet).
     pub vendor_representations_clear: bool,
+    /// Durable plugin registry (policy + installed bundles). `None` before the
+    /// host wires it, when the host has no config directory, or on a carrier
+    /// that does not serve the plugin manager.
+    pub plugin_store: Option<Arc<dyn cad_platform::plugins::PluginStore>>,
+    /// Whether this **carrier** serves the plugin manager (`native-below` only).
+    pub plugins_supported: bool,
+    /// The decoder enabled when this process launched. Mutations persist the
+    /// policy but never change this; the status compares the two.
+    pub plugins_session_active: Option<String>,
 }
 
 impl Shared {
@@ -211,6 +220,9 @@ impl Shared {
             vendor: crate::vendor::VendorStore::default(),
             vendor_pending_representations: None,
             vendor_representations_clear: false,
+            plugin_store: None,
+            plugins_supported: false,
+            plugins_session_active: None,
         }
     }
 

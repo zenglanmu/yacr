@@ -179,7 +179,7 @@ def check_config() -> list[str]:
         )
 
     csp = str(conf.get("app", {}).get("security", {}).get("csp", ""))
-    for fragment in ("default-src 'self'", "script-src 'self' 'wasm-unsafe-eval'", "worker-src 'self'",
+    for fragment in ("default-src 'self'", "script-src 'self' 'wasm-unsafe-eval' blob:", "worker-src 'self'",
                      "connect-src 'self' ipc: http://ipc.localhost", "img-src 'self' data: blob:",
                      "style-src 'self' 'unsafe-inline'"):
         if fragment not in csp:

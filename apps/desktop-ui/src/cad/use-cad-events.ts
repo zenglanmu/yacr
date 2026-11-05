@@ -38,6 +38,7 @@ import { createFpsSampler } from '../fps.ts';
 import { reportedSurfaceMode } from './surface.ts';
 import { sameStatusIgnoringVolatile } from './status-cadence.ts';
 import { runVendorPass } from '../vendor/vendor-pass.ts';
+import { recordVendorSettled } from '../plugins/plugin-manager.ts';
 import type { InvokeRoute } from '../host/invoke.ts';
 import type { CadSubscription, CadEventFrame } from './cad-events.ts';
 import type { CadStatus } from './cad-status.ts';
@@ -118,6 +119,12 @@ export function useCadEvents(handlers: CadEventHandlers): void {
           if (text.includes('vendor.stale_token') || text.includes('vendor.no_pending_pass')) return;
           if (!disposed) live.current.setPollError(`vendor-pass: ${text}`);
         });
+        return;
+      }
+      if (frame.type === 'vendor-settled') {
+        // The host settled the pass it armed. Remember applied/diagnostics for
+        // the plugin manager's readers; this is an observation, not a pump.
+        recordVendorSettled(frame.applied, [...frame.diagnostics]);
         return;
       }
       if (cadEventPumpsFrames(frame.type)) live.current.pump();

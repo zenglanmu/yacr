@@ -1,3 +1,39 @@
+## 2026-11-05 厂商插件管理器（File/Options → Plugins，仅 `native-below`）
+
+- **新页签**：`apps/desktop-ui/src/components/OptionsPlugins.tsx` + `src/options/plugins-view.ts`
+  + `src/plugins/plugin-manager.ts`。列出内置 `tch` 与用户安装的解码器；**同一时间只有一个
+  active decoder**（radio 语义）；同页显示上一轮 `vendor-settled` 的 applied 数/诊断与插件扫描
+  诊断。`src/cad/use-cad-events.ts` 现在记录 `vendor-settled`。
+- **持久化**：`<config-dir>/plugins.json`（`{"version":1,"activeDecoder":"tch"|<id>|null}`）+
+  `<config-dir>/plugins/<id>/{plugin.js,manifest.json}`。Linux `$XDG_CONFIG_HOME/yacr` 或
+  `~/.config/yacr`；Windows `%APPDATA%\yacr`；macOS `~/Library/Application Support/yacr`；
+  Android `filesDir`（`nativeAssetsReady` 后惰性解析）。Web 无持久存储。
+- **安装**：隐藏 file input 接受 `.js`/`.mjs`，≤4 MiB；前端用 Blob URL 导入一次并校验
+  ABI v1（`abiVersion === 1` + `decode(ArrayBuffer)->ArrayBuffer`），随后
+  `cad_plugin_install({filename,payload(base64),meta?})`。安装校验会运行插件代码，UI 明示
+  “与应用其余部分同权限”。目录 id 取模块提供的合法 `id`，缺失才由文件名派生；`tch` 为保留 id，
+  已占用 id 拒绝安装（不覆盖）。
+- **重启语义**：所有安装/启用/禁用/卸载立即写盘，但**下次启动才生效**；
+  `restartRequired = activeDecoder != sessionActiveDecoder`。没有热重载/热卸载；当前会话保持
+  已加载解码器。卸载是真正的目录删除；卸载 active 会把策略写为 `null`。
+- **分层**：`crates/cad-platform/src/plugins.rs` 定义 `PluginStore`（原始 JSON/字节 + 路径安全/
+  原子写）；`crates/cad-ui-core/src/session/plugins.rs` 是纯 wire 模型/manifest/policy；
+  `crates/cad-desktop-shell/src/plugins.rs` 提供五个命令。Linux `apps/app-linux/src/host/plugins.rs`，
+  Android `apps/app-android/src-tauri/src/plugin_store.rs`。
+- **载体**：只有 `native-below` 支持。Linux X11/XWayland 的 `dom-canvas` 返回
+  `supported:false` + `plugin.unsupported_carrier: dom-canvas`，mutations 全部拒绝；纯 Web
+  由 adapter 按名拒绝 `unsupported-runtime: cad_plugin_*`；两种载体的内置 `tch` 仍 always-on。
+- **CSP**：四个 native `tauri.conf.json` 的 `script-src` 加入 `blob:` 以导入外部 ES module；
+  Web CSP 不变。这是已记录的取舍（安装本来就执行任意插件代码），插件隔离仍是 open gap。
+- **验证（实现轮次）**：`npm test` 1096/1096 pass；`cargo test -p cad-ui-core -p cad-platform
+  -p cad-desktop-shell --locked` pass；`cargo check -p app-linux --all-targets --locked` pass；
+  `check-architecture`/`check-file-size`/`check-i18n` pass。**NOT RUN / NOT VERIFIED**：
+  Windows/macOS/Android 真实目标运行、Android 设备、真实 GUI（Options 交互/像素）、真实浏览器、
+  GPU/像素、CSP 真机行为；无热重载/热卸载（设计如此）。
+- **文档**：`docs/vendor-plugin.md` §8、`docs/commands.md`、`docs/compatibility.md`、
+  `docs/architecture.md`、`docs/react-linux-app.md`、`docs/windows-app.md`、`docs/macos-app.md`、
+  `docs/android-host.md`、`docs/adr/0028-plugin-manager.md`。
+
 ## 2026-11-05 Android release 改为只发布签名 APK
 
 - 生成仓库自持 Android release keystore（RSA 4096 / 10000 天 / PKCS12，alias `yacr`），

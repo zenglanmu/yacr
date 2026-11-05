@@ -24,6 +24,12 @@ export const SHELL_ACTIONS = Object.freeze({
   // `action` token and never a router command (`OPTIONS` has no Rust command;
   // the command line intercepts it locally).
   options: 'options',
+  // Opens the Options dialog on its Plugins page. This is the direct entry a
+  // user looks for in the File tab: the page exists, but a plain Options open
+  // always starts on the first settings tab. Like Options it is a shell action
+  // with no router command and no host payload; the tab handoff is chrome-local
+  // (`options.ts`'s pending-tab slot).
+  plugins: 'plugins',
   // Toggles the docked properties palette. Like OPTIONS it is chrome-local:
   // `PROPERTIES` has no Rust command, so the ribbon must not send `cad_command`.
   properties: 'properties',
@@ -285,6 +291,11 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // Its label is the dialog's own title key, so the ribbon entry and the
           // window title can never drift apart.
           { id: 'options', labelKey: OPTIONS_KEYS.ribbonEntry, icon: 'settings', action: 'options' },
+          // A direct File > Plugins entry, beside the Options dialog that owns
+          // the page. It is an `action` token (never `cad_command`): the dialog
+          // is chrome-local, and the tab it should start on is a chrome-local
+          // handoff, so nothing here may reach the CAD router.
+          { id: 'plugins', labelKey: 'file.plugins', icon: 'settings', action: SHELL_ACTIONS.plugins },
         ],
       },
     ],
