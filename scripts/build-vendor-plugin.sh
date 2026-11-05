@@ -10,6 +10,12 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+src="$root/plugins/tch/src/index.ts"
+if [[ ! -f "$src" ]]; then
+  echo "vendor plugin source missing at $src" >&2
+  echo "initialize the submodule: git submodule update --init --recursive" >&2
+  exit 1
+fi
 rolldown_bin="$root/apps/desktop-ui/node_modules/.bin/rolldown"
 if [[ ! -x "$rolldown_bin" ]]; then
   echo "vendor plugin build requires rolldown at $rolldown_bin" >&2
@@ -20,7 +26,8 @@ public_dir="$root/apps/desktop-ui/public/plugins"
 out="$root/plugins/tch/dist/index.js"
 mkdir -p "$(dirname "$out")"
 rm -f "$public_dir/tch.js"
-"$rolldown_bin" "$root/plugins/tch/src/index.ts" \
+"$rolldown_bin" "$src" \
   --format esm --platform browser --file "$out"
+[[ -s "$out" ]] || { echo "vendor plugin bundle is missing or empty: $out" >&2; exit 1; }
 mkdir -p "$public_dir"
 cp "$out" "$public_dir/tch.js"

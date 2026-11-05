@@ -1,3 +1,21 @@
+## 2026-11-05 天正插件独立仓库 `tangent-ts` + submodule + 打包接线
+
+- `plugins/tch` 从内联源码改为 **git submodule**：
+  <https://github.com/zenglanmu/tangent-ts>（AGPL-3.0，ABI v1，22 类 `TCH_*`）。
+  独立仓库含 `src/`、`README.md`、`docs/abi-v1.md`、`package.json`、`tsconfig.json`；
+  单独 `npm run check`（tsc + rolldown）已通过。
+- `scripts/build-vendor-plugin.sh` 缺 submodule 时显式失败；bundle 仍写到
+  `plugins/tch/dist/index.js` 并复制到 `apps/desktop-ui/public/plugins/tch.js`。
+- 打包接线：所有 GitHub `actions/checkout` 加 `submodules: recursive`
+  （`check-workflows.py` 新增硬门禁）；Linux Flatpak / Windows zip / macOS tar.gz /
+  Android APK / Web `dist-ui` 均要求产物含 `plugins/tch.js`，缺插件即失败；
+  Cloudflare Pages `BUNDLE_KIND=ui` 也把它列入必需 artifact。
+- 验证（本地）：`bash scripts/build-vendor-plugin.sh`、`tsc -p plugins/tch/tsconfig.json`、
+  `node --test test/vendor-plugin.test.ts test/stacking-regression.test.ts`（37 pass）、
+  `npm run build`（`dist/plugins/tch.js` 与源 bundle 同 sha256）、
+  `check-workflows.py` 与 package/workflow 契约测试全部通过。
+- **NOT RUN**：GitHub Actions 实际运行、各平台 release 产物、真实 GPU/真机验收。
+
 ## 2026-11-05 渐进渲染闪烁：base/overlay 分离（后缀提交不再触碰 base）
 
 用户实测（真实 GUI，142,399 ordered batches）鼠标移动 / hover 时每帧 `prog` 回到小

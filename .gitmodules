@@ -1,0 +1,3 @@
+[submodule "plugins/tch"]
+	path = plugins/tch
+	url = https://github.com/zenglanmu/tangent-ts.git

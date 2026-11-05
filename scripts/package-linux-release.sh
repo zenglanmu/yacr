@@ -114,6 +114,8 @@ echo "==> building the React frontend (${UI_DIR})"
     npm run build
 )
 [ -f "${UI_DIR}/dist/index.html" ] || die "${UI_DIR}/dist/index.html missing after 'npm run build'"
+[ -s "${UI_DIR}/dist/plugins/tch.js" ] \
+    || die "${UI_DIR}/dist/plugins/tch.js missing after 'npm run build'; the Tianzheng vendor plugin would not be embedded (is the plugins/tch submodule initialized?)"
 
 # --- 2. release binary -----------------------------------------------------
 # `tauri/custom-protocol` embeds ui/dist; a plain release build embeds the dev

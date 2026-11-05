@@ -344,6 +344,9 @@ DEPLOY_FRAGMENTS: tuple[str, ...] = (
     "canvas/app_web.js",
     "canvas/app_web_bg.wasm",
     "canvas/bootstrap.js",
+    # The Tianzheng vendor plugin is part of the shared chrome bundle; a site
+    # without it would silently lose vendor-derived geometry.
+    "plugins/tch.js",
     BUILD_WEB_OUT_DIR,
     "wrangler",
     "pages deploy",
@@ -714,6 +717,30 @@ def entry_point_pass() -> tuple[list[str], list[str]]:
     return ok, errors
 
 
+def submodule_checkout_errors(files: list[pathlib.Path]) -> list[str]:
+    """Every checkout must fetch the `plugins/tch` submodule.
+
+    The Tianzheng decoder lives in its own repository and is mounted at
+    ``plugins/tch``. A job that checks out the superproject without submodules
+    compiles/tests against an empty directory (or, worse, a stale build output),
+    so every ``actions/checkout`` step must set ``submodules``.
+    """
+    errors: list[str] = []
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            if "uses: actions/checkout@" not in line:
+                continue
+            block = "\n".join(lines[index : index + 6])
+            if not re.search(r"^\s+submodules:\s*(?:recursive|true)\s*$", block, re.MULTILINE):
+                errors.append(
+                    f"{path.relative_to(ROOT)}:{index + 1}: actions/checkout does not "
+                    "set submodules; plugins/tch would be empty"
+                )
+    return errors
+
+
 def main() -> int:
     files = workflow_files()
     if not files:
@@ -726,6 +753,7 @@ def main() -> int:
 
     yaml_module = load_yaml()
     declared, retired_declared, errors = structural_pass(files)
+    errors.extend(submodule_checkout_errors(files))
     if yaml_module is not None:
         mode = "PyYAML parse + structural pass"
         yaml_declared, yaml_retired, yaml_errors = yaml_pass(files)

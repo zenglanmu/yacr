@@ -37,6 +37,7 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("frontend dependency install", "npm ci"),
     ("frontend build", "npm run build"),
     ("React UI bundle location", "apps/desktop-ui/dist"),
+    ("vendor plugin bundle", "plugins/tch.js"),
     ("release build invocation", "cargo build --release --locked"),
     ("embedded frontend protocol", "tauri/custom-protocol"),
     ("windows host package", "-p app-windows"),

@@ -54,6 +54,7 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
     ("frontend build", "npm run build"),
     ("frontend reuse guard", "SKIP_UI_BUILD"),
     ("frontend entry point", "index.html"),
+    ("vendor plugin bundle", "plugins/tch.js"),
     ("locked release build", "cargo build --release --locked"),
     ("embedded frontend protocol", "tauri/custom-protocol"),
     ("macOS host crate", "-p app-macos"),

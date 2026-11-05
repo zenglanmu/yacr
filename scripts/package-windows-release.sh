@@ -132,6 +132,9 @@ else
   ( cd "$UI_DIR" && npm ci && npm run build )
   [ -s "$UI_INDEX" ] || die "React UI build produced no apps/desktop-ui/dist/index.html"
 fi
+UI_PLUGIN="$UI_DIR/dist/plugins/tch.js"
+[ -s "$UI_PLUGIN" ] \
+  || die "$UI_PLUGIN is missing or empty; the Tianzheng vendor plugin would not be embedded (is the plugins/tch submodule initialized?)"
 
 # --- build ------------------------------------------------------------------
 step "building $GUI and $CLI (release, locked, $TARGET)"

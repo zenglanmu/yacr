@@ -117,6 +117,7 @@ def check_script(text: str) -> list[str]:
         "set -euo pipefail",
         "npm ci",
         "npm run build",
+        "plugins/tch.js",
         "cargo build --release --locked -p app-linux --bin yacr",
         "--features tauri/custom-protocol",
         "flatpak-builder",

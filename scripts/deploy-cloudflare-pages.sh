@@ -32,7 +32,8 @@
 #                        harness — `scripts/build-web.sh`: index.html, main.js,
 #                                  worker.js, style.css, pkg/app_web.js|wasm
 #                        ui      — `scripts/build-web-ui.sh`: index.html,
-#                                  assets/*.js, canvas/app_web.js|wasm, bootstrap
+#                                  assets/*.js, canvas/app_web.js|wasm, bootstrap,
+#                                  plugins/tch.js
 #   SKIP_BUILD=1       deploy the existing bundle without rebuilding it
 #   SKIP_FONTS=1       reuse an existing $DIST/fonts instead of downloading it
 #
@@ -109,6 +110,7 @@ ui_required=(
   canvas/app_web.js
   canvas/app_web_bg.wasm
   canvas/bootstrap.js
+  plugins/tch.js
 )
 case "$BUNDLE_KIND" in
   harness) artifacts=("${required[@]}") ;;

@@ -113,6 +113,8 @@ printf '==> React chrome, runtime=android (npm run build:android)\n'
 [ -s "$OUT_DIR/canvas/$ESM_JS" ] || die "canvas module missing or empty: $OUT_DIR/canvas/$ESM_JS"
 [ -s "$OUT_DIR/canvas/$WASM_ARTIFACT" ] || die "canvas binary missing or empty: $OUT_DIR/canvas/$WASM_ARTIFACT"
 [ -s "$OUT_DIR/canvas/$BOOTSTRAP_JS" ] || die "canvas bootstrap missing or empty: $OUT_DIR/canvas/$BOOTSTRAP_JS"
+[ -s "$OUT_DIR/plugins/tch.js" ] \
+  || die "vendor plugin missing or empty: $OUT_DIR/plugins/tch.js (is the plugins/tch submodule initialized?)"
 
 # The desktop artifact must not have been rebuilt by accident: a bundle that
 # wrote `apps/desktop-ui/dist` would route the two canvas reports to a Tauri host
@@ -142,5 +144,6 @@ report_artifact "$OUT_DIR/index.html" "index.html"
 report_artifact "$OUT_DIR/canvas/$ESM_JS" "canvas/$ESM_JS"
 report_artifact "$OUT_DIR/canvas/$WASM_ARTIFACT" "canvas/$WASM_ARTIFACT"
 report_artifact "$OUT_DIR/canvas/$BOOTSTRAP_JS" "canvas/$BOOTSTRAP_JS"
+report_artifact "$OUT_DIR/plugins/tch.js" "plugins/tch.js"
 printf '  %-28s %s file(s)\n' "assets/*.js" "$asset_count"
 printf 'note: a built bundle is not runtime, device, GPU or pixel evidence, and not an Android acceptance.\n'

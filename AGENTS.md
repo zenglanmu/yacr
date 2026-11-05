@@ -67,6 +67,11 @@ cad-domain → cad-db/dependencies/history → geometry/kernel-adapter/represent
 工具链 **1.99.0**（`rust-toolchain.toml`），`Cargo.lock` 必须 `--locked`；`cargo` 不在 PATH 时
 加 `$HOME/.cargo/bin`。
 
+`plugins/tch` 是天正插件（`tangent-ts`，<https://github.com/zenglanmu/tangent-ts>）的 **git
+submodule**；克隆后必须 `git submodule update --init --recursive`，否则前端构建会因插件源码/
+`plugins/tch.js` 缺失而显式失败。插件 bundle 会进入所有载体产物（桌面 `dist`、Web
+`dist-ui`、Android `dist`、Flatpak/zip/tar.gz/APK）。
+
 **日常只验证自己的改动范围**（改动 crate 的编译、自己的契约测试、自己文件的 fmt/clippy）。
 全量门禁与全量测试只在用户明确要求或发版/发布验收前运行；未运行必须写 **NOT RUN**。
 

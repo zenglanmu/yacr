@@ -3,6 +3,11 @@
 工具链 1.99.0（`rust-toolchain.toml`）、`Cargo.lock` 已锁定。若 `PATH` 无 cargo，加入
 `$HOME/.cargo/bin`。
 
+`plugins/tch` 是天正插件（`tangent-ts`，<https://github.com/zenglanmu/tangent-ts>）的 git
+submodule；克隆后先 `git submodule update --init --recursive`。缺少插件源码时
+`scripts/build-vendor-plugin.sh` 与各打包脚本会显式失败，不会产出不含 `plugins/tch.js` 的
+bundle。
+
 > **2026-10-16 迁移状态（2026-10-23 增补）**：桌面 UI 已由 Slint 迁移为 **React + Tauri 原生宿主**
 > （`apps/app-linux`，二进制 `yacr`）。`cad-ui-slint` 与所有 Slint 依赖已删除；迁移时 macOS/Android/Web
 > 是**显式 NOT IMPLEMENTED 占位**，此后 Web 的 wasm 会话于 2026-10-24 复活、Android 于 2026-11-01

@@ -93,6 +93,8 @@ else
 fi
 
 [ -s "${UI_DIST}/index.html" ] || die "frontend build produced no ${UI_DIST}/index.html"
+[ -s "${UI_DIST}/plugins/tch.js" ] \
+  || die "frontend build produced no ${UI_DIST}/plugins/tch.js; the Tianzheng vendor plugin would not be embedded (is the plugins/tch submodule initialized?)"
 
 echo "==> building cad-cli-tools and yacr-macos (release, locked): ${TARGETS[*]}"
 for target in "${TARGETS[@]}"; do

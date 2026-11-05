@@ -178,6 +178,8 @@ fi
 [ -s "$OUT_DIR/canvas/$ESM_JS" ] || die "canvas module missing or empty: $OUT_DIR/canvas/$ESM_JS"
 [ -s "$OUT_DIR/canvas/$WASM_ARTIFACT" ] || die "canvas binary missing or empty: $OUT_DIR/canvas/$WASM_ARTIFACT"
 [ -s "$OUT_DIR/canvas/$BOOTSTRAP_JS" ] || die "canvas bootstrap missing or empty: $OUT_DIR/canvas/$BOOTSTRAP_JS"
+[ -s "$OUT_DIR/plugins/tch.js" ] \
+  || die "vendor plugin missing or empty: $OUT_DIR/plugins/tch.js (is the plugins/tch submodule initialized?)"
 
 # At least one emitted JS asset: the bundle itself. A build that only copied the
 # public directory would render nothing.
@@ -204,6 +206,7 @@ report_artifact "$OUT_DIR/index.html" "index.html"
 report_artifact "$OUT_DIR/canvas/$ESM_JS" "canvas/$ESM_JS"
 report_artifact "$OUT_DIR/canvas/$WASM_ARTIFACT" "canvas/$WASM_ARTIFACT"
 report_artifact "$OUT_DIR/canvas/$BOOTSTRAP_JS" "canvas/$BOOTSTRAP_JS"
+report_artifact "$OUT_DIR/plugins/tch.js" "plugins/tch.js"
 if [ "$STAGE_FONTS" = "1" ]; then
   report_artifact "$OUT_DIR/fonts/fonts.json" "fonts/fonts.json"
   report_artifact "$OUT_DIR/fonts/NotoSansCJKsc-Regular.otf" "fonts/NotoSansCJKsc-Regular.otf"
