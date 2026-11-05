@@ -52,6 +52,18 @@ impl Renderer {
     /// its geometry is never stream/chunk/conic-converted).
     pub(super) fn plan_overlay(&self, camera_position: [f32; 3]) -> OverlayPlan {
         let overlay: Vec<usize> = (self.base_end..self.batches.len()).collect();
+        // Every resident overlay batch was staged legacy and admitted by the
+        // commit's overlay-run rejection; the base-only `batch_facts` (built over
+        // `[0, base_end)`) therefore describes no overlay batch, and the overlay
+        // encode pass safely looks a missing class up as `0`.
+        debug_assert!(
+            self.batches[self.base_end..].iter().all(|batch| {
+                batch.instanced.is_empty()
+                    && batch.mesh_runs.is_empty()
+                    && batch.arc_runs.is_empty()
+            }),
+            "overlay batches must be run-free (staged legacy)"
+        );
         let entries: Vec<BatchOrderEntry> = overlay
             .iter()
             .map(|&index| {

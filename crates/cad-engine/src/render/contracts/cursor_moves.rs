@@ -83,6 +83,20 @@ fn pixel_at(frame: &(u32, u32, Vec<u8>), world: [f64; 2]) -> [u8; 4] {
     ]
 }
 
+/// Renderer commit/draw-plan diagnostics for the run-free suffix contract:
+/// `(draw_plan_rebuilds, gc_skipped_commits, pulled_suffix_skips, accelerated)`.
+#[cfg(not(target_arch = "wasm32"))]
+fn suffix_skip_diagnostics(session: &RenderSessionHandle) -> (u64, u64, u64, bool) {
+    let state = session.0.borrow();
+    let renderer = state.runtime.renderer.as_ref().expect("attached renderer");
+    (
+        renderer.draw_plan_rebuilds(),
+        renderer.gc_skipped_commits(),
+        renderer.pulled_suffix_skips(),
+        renderer.render_tier() == cad_render_wgpu::RenderTier::Accelerated,
+    )
+}
+
 /// One host tick that processed a plain cursor move, in the host's real order:
 /// the input pump publishes the move (`set_overlays`), then the frame is applied
 /// and presented (`apply_ready_updates` + `render`, see
@@ -234,6 +248,12 @@ fn cursor_moves_never_drop_the_tint_or_the_overlay_suffix() {
     // The mouse stops: the pending overlay publishes and commits. The whole
     // scene is still there, the tint is still the same, and nothing was restored
     // because nothing was ever dropped.
+    //
+    // The commit-side contract (base_changed=false and the GC/pulled skip
+    // counters) lives in `cursor_move_suffix_commit_reports_the_run_free_skips`
+    // below: this pixel fence has an independent pre-existing step-0 failure on
+    // the current host, so any counter assertion placed after it would be dead
+    // and could never be cited as evidence.
     session.prepare().unwrap();
     drive_uploads(&session);
     session.apply_ready_updates().unwrap();
@@ -267,4 +287,79 @@ fn cursor_moves_never_drop_the_tint_or_the_overlay_suffix() {
         "the settled cursor commit re-uploads the transient suffix only: no \
          instanced/mesh stream and no flags row changes"
     );
+}
+
+/// The engine's cursor move path is the renderer's run-free suffix fast path: the
+/// settled suffix commit reports `base_changed == false` and bumps the GC/pulled
+/// skip counters while leaving the base-only draw plan intact.
+///
+/// Split out from the pixel fence above because that fence has an independent
+/// pre-existing pixel failure on this host; this contract exercises only the
+/// commit counters.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "hardware GPU: run explicitly on a real adapter (P620/Vulkan)"]
+fn cursor_move_suffix_commit_reports_the_run_free_skips() {
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    let gpu = headless_gpu();
+    session.attach_device(gpu.device, gpu.queue).unwrap();
+    session.sync_drawing(Some(Arc::new(db_with_four_lines())));
+    session.set_overlay_visibility(OverlayVisibility {
+        axes: false,
+        grid: false,
+        ..OverlayVisibility::default()
+    });
+    session.prepare().unwrap();
+    drive_uploads(&session);
+    session.apply_ready_updates().unwrap();
+
+    // Settle a first position: the suffix is live and the base plan is built.
+    let _ = settled_tick(&session, Some([-10.0, -20.0]), &[]);
+    let (plan_before, gc_before, pulled_before, accelerated) = suffix_skip_diagnostics(&session);
+    eprintln!("cursor suffix skip contract: accelerated={accelerated}");
+    // Non-vacuous pin: the base-only draw plan must have been built at least
+    // once, so the "kept across the suffix commit" comparison below cannot pass
+    // by comparing a never-incremented zero.
+    assert!(
+        plan_before >= 1,
+        "the base-only draw plan must be built before the suffix-kept assertion \
+         (counter was {plan_before})"
+    );
+
+    // A plain move: publish, prepare, commit the transient suffix, present.
+    let _ = settled_tick(&session, Some([-6.0, -20.0]), &[]);
+    let commit = session
+        .take_upload_timing_observation()
+        .expect("the settled cursor move is observed");
+    assert!(
+        commit.committed,
+        "the cursor move must commit the transient suffix"
+    );
+    assert!(
+        !commit.base_changed,
+        "a cursor move is still a suffix commit, never a base change"
+    );
+
+    let (plan_after, gc_after, pulled_after, _) = suffix_skip_diagnostics(&session);
+    assert_eq!(
+        plan_after, plan_before,
+        "a suffix commit must keep the base-only draw plan (no rebuild)"
+    );
+    assert_eq!(
+        gc_after,
+        gc_before + 1,
+        "the run-free suffix commit must skip exactly one GC scan"
+    );
+    if accelerated {
+        assert_eq!(
+            pulled_after,
+            pulled_before + 1,
+            "the accelerated tier must skip exactly one pulled rebuild"
+        );
+    } else {
+        assert_eq!(
+            pulled_after, pulled_before,
+            "the universal tier has no pulled organisation to skip"
+        );
+    }
 }

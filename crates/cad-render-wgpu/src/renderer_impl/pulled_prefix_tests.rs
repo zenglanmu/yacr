@@ -372,3 +372,97 @@ fn incoming_resources_must_be_disjoint_from_the_retained_prefix() {
     // No retained resources: everything is disjoint.
     assert!(shared_mesh.disjoint_from(0, 0, 0));
 }
+
+#[test]
+fn run_free_suffix_predicate_matches_every_commit_shape() {
+    // The engine's suffix commit: keep_prefix == base_end == the old base_end,
+    // no converted runs staged.
+    assert!(Renderer::run_free_suffix(7, 7, 7, false));
+    // `keep_prefix ∈ (0, base_end)` keeps only part of the base: a base change.
+    assert!(!Renderer::run_free_suffix(3, 7, 7, false));
+    // A zero prefix is a full replacement.
+    assert!(!Renderer::run_free_suffix(0, 0, 0, false));
+    // A changed base boundary is a base change.
+    assert!(!Renderer::run_free_suffix(7, 9, 7, false));
+    assert!(!Renderer::run_free_suffix(7, 7, 5, false));
+    // A staged suffix with runs still needs GC / the pulled rebuild.
+    assert!(!Renderer::run_free_suffix(7, 7, 7, true));
+}
+
+#[test]
+fn commit_base_change_discriminator_counts_partial_keeps_as_base_changes() {
+    // Only the true suffix commit leaves the base alone.
+    assert!(!Renderer::commit_changes_base(7, 7, 7));
+    // An empty first commit (`keep_prefix == 0`, `base_end == 0`, previous base
+    // 0) is deliberately NOT a base change: there is no resident base state to
+    // invalidate, so there is nothing to drop. The formula's accepted
+    // empty-scene behavior (not a special case): the first **non-empty** commit
+    // is a base change.
+    assert!(!Renderer::commit_changes_base(0, 0, 0));
+    // Full replacement, first non-empty base, and a changed boundary.
+    assert!(Renderer::commit_changes_base(0, 0, 7));
+    assert!(Renderer::commit_changes_base(0, 4, 0));
+    assert!(Renderer::commit_changes_base(7, 9, 7));
+    // Every partial keep inside the base (`keep_prefix ∈ (0, base_end)`) is a
+    // base change even though a prefix survives.
+    for (keep_prefix, base_end) in [(1, 2), (3, 7), (6, 7), (1, 100)] {
+        assert!(
+            Renderer::commit_changes_base(keep_prefix, base_end, base_end),
+            "partial keep {keep_prefix} of {base_end} must be a base change"
+        );
+    }
+}
+
+#[test]
+fn run_free_suffix_skips_the_pulled_rebuild_only_when_coherent() {
+    // Pure coherence matrix: accelerated iff each pulled class exists exactly
+    // when its resident source class does.
+    assert!(Renderer::pulled_state_coherent(
+        true, true, true, true, true
+    ));
+    assert!(Renderer::pulled_state_coherent(
+        true, false, false, false, false
+    ));
+    // Accelerated with a resident class but no pulled storage (post-fallback /
+    // post-rebuild): must fall through, never skip.
+    assert!(!Renderer::pulled_state_coherent(
+        true, false, true, true, true
+    ));
+    assert!(!Renderer::pulled_state_coherent(
+        true, true, true, false, true
+    ));
+    // A universal tier never takes the skip.
+    assert!(!Renderer::pulled_state_coherent(
+        false, false, false, false, false
+    ));
+
+    // A coherent accelerated renderer keeps the retained checkpoint/pulled state
+    // and counts the skip; it never claims a reuse or a rebuild.
+    let mut renderer = Renderer {
+        render_tier: RenderTier::Accelerated,
+        pulled_prefix_checkpoint: Some(mk_checkpoint(10, 4, 4, 2, 2)),
+        ..Renderer::default()
+    };
+    assert!(renderer.pulled_suffix_skip_admits());
+    assert!(renderer.try_skip_pulled_rebuild(true));
+    assert_eq!(renderer.pulled_suffix_skips(), 1);
+    assert_eq!(renderer.pulled_prefix_reuses(), 0);
+    assert_eq!(renderer.pulled_prefix_rebuilds(), 0);
+    assert!(
+        renderer.pulled_prefix_checkpoint.is_some(),
+        "a skipped suffix commit must keep the retained pulled checkpoint"
+    );
+    // A converted suffix never skips.
+    assert!(!renderer.try_skip_pulled_rebuild(false));
+    assert_eq!(renderer.pulled_suffix_skips(), 1);
+
+    // A universal state (fallback) falls through to the Full/Reuse path.
+    let mut universal = Renderer {
+        pulled_prefix_checkpoint: Some(mk_checkpoint(10, 4, 4, 2, 2)),
+        ..Renderer::default()
+    };
+    assert!(!universal.pulled_suffix_skip_admits());
+    assert!(!universal.try_skip_pulled_rebuild(true));
+    assert_eq!(universal.pulled_suffix_skips(), 0);
+    assert!(universal.pulled_prefix_checkpoint.is_some());
+}

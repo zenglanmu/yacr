@@ -106,6 +106,52 @@ impl Renderer {
         self.pulled_prefix_checkpoint = None;
     }
 
+    /// Whether a run-free suffix commit may skip [`Renderer::rebuild_pulled`].
+    ///
+    /// The pulled buffers/segments/chunk table/bind groups are a pure function of
+    /// the resident streams/chunks. A run-free suffix appends no stream/chunk,
+    /// drops only run-free batches and renumbers nothing (the base prefix is
+    /// untouched), so the retained pulled organisation stays exactly valid.
+    ///
+    /// Falls through (returns `false`) whenever the retained state is not provably
+    /// coherent — a post-fallback, post-device-rebuild or universal-tier state —
+    /// so the caller takes the existing Full/Reuse path. This is a perf-only
+    /// admission: a `false` costs a rebuild, never correctness.
+    pub(super) fn pulled_suffix_skip_admits(&self) -> bool {
+        Self::pulled_state_coherent(
+            self.render_tier == RenderTier::Accelerated,
+            self.pulled_lines.is_some(),
+            !self.instance_streams.is_empty(),
+            self.pulled_mesh.is_some(),
+            !self.mesh_chunks.is_empty(),
+        )
+    }
+
+    /// Pure coherence check for [`Renderer::pulled_suffix_skip_admits`]: the
+    /// accelerated tier is live, and each pulled class exists **iff** its resident
+    /// source class does.
+    pub(super) fn pulled_state_coherent(
+        accelerated: bool,
+        pulled_lines: bool,
+        has_line_class: bool,
+        pulled_mesh: bool,
+        has_mesh_class: bool,
+    ) -> bool {
+        accelerated && pulled_lines == has_line_class && pulled_mesh == has_mesh_class
+    }
+
+    /// Apply the pulled-skip decision for a commit: when admitted, count the skip
+    /// and report `true` so the caller must not call [`Renderer::rebuild_pulled`].
+    /// Never touches the retained pulled state or the checkpoint.
+    pub(super) fn try_skip_pulled_rebuild(&mut self, run_free_suffix: bool) -> bool {
+        if run_free_suffix && self.pulled_suffix_skip_admits() {
+            self.pulled_suffix_skips += 1;
+            true
+        } else {
+            false
+        }
+    }
+
     /// First-encounter renumbering of a resource-index sequence: `Some(count)`
     /// only when the sequence is identity (`k`-th distinct index == `k`), which is
     /// exactly the condition under which the generic GC is a no-op and the

@@ -732,6 +732,18 @@ pub struct Renderer {
     pulled_prefix_reuses: u64,
     /// Diagnostics: full pulled rebuilds that (re)established a checkpoint.
     pulled_prefix_rebuilds: u64,
+    /// Diagnostics: run-free suffix commits that **skipped** the pulled rebuild
+    /// entirely (the retained pulled buffers/segments/chunk table/bind groups are
+    /// still valid because nothing was appended, renumbered or removed).
+    pulled_suffix_skips: u64,
+    /// Diagnostics: commits that skipped the stream/mesh/arc GC scan because the
+    /// commit was a run-free suffix (nothing became unreferenced and no run index
+    /// could be renumbered).
+    gc_skipped_commits: u64,
+    /// Diagnostics: rebuilds of the base-only draw-order cache / batch facts in
+    /// the frame path. A suffix-only commit keeps them; a base change rebuilds
+    /// exactly once on the next render.
+    draw_plan_rebuilds: u64,
     draw_calls: u64,
     progressive: bool,
     progressive_frame: Option<ProgressiveFrame>,
@@ -740,15 +752,20 @@ pub struct Renderer {
     /// loads colour (clears only depth) so already-drawn pages never vanish.
     /// Consumed by the cycle-start frame that acts on it.
     preserve_color_on_restart: bool,
-    /// Camera-independent draw-order partition over `batches`. Rebuilt lazily
-    /// when the batch set changes (upload/clear/device-loss) and, per frame,
-    /// only its transparent slice is re-sorted for the camera. `None` means
-    /// "stale, rebuild from `batches`".
+    /// Camera-independent draw-order partition over the **base** batches
+    /// `[0, base_end)`. Rebuilt lazily when the base batch set changes
+    /// (upload base change/clear/device-loss) and, per frame, only its transparent
+    /// slice is re-sorted for the camera. A suffix-only commit (the transient
+    /// overlay changed, the base prefix did not) keeps it. `None` means "stale,
+    /// rebuild from the base prefix".
     draw_plan: Option<DrawOrderCache>,
     /// Batch-set facts for the segmented page planner (per-class chunk→batch
     /// lists, the always-active set) plus the once-per-batch-set class flags.
-    /// Rebuilt in the **same** block that rebuilds `draw_plan`, so it shares that
-    /// single invalidation (`draw_plan = None`) and is never a second truth.
+    /// Built over the **base** batches `[0, base_end)` only, in the **same** block
+    /// that rebuilds `draw_plan`, so it shares that single invalidation
+    /// (`draw_plan = None`) and is never a second truth. Overlay batches are
+    /// run-free (enforced at commit), so they contribute no facts; consumers that
+    /// can see an absolute overlay index use a safe lookup.
     batch_facts: plan::BatchFacts,
     /// This frame's set of batches that participate in the encode pass (own no
     /// runs, or own a run that survives the cull). Rebuilt per frame from

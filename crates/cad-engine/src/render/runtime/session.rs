@@ -588,6 +588,18 @@ impl CadRenderRuntime {
                 .renderer
                 .as_ref()
                 .map_or(0, |renderer| renderer.pulled_prefix_rebuilds()),
+            pulled_suffix_skips: self
+                .renderer
+                .as_ref()
+                .map_or(0, |renderer| renderer.pulled_suffix_skips()),
+            gc_skipped_commits: self
+                .renderer
+                .as_ref()
+                .map_or(0, |renderer| renderer.gc_skipped_commits()),
+            draw_plan_rebuilds: self
+                .renderer
+                .as_ref()
+                .map_or(0, |renderer| renderer.draw_plan_rebuilds()),
             frames_rendered: self.frames_rendered,
             uploads_started: self.uploads_started,
             upload_revision_resets: self.upload_revision_resets,

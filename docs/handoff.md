@@ -1,3 +1,30 @@
+## 2026-11-05 鼠标移动卡顿：run-free overlay suffix 快速路径（Phase 1）
+
+用户报告：`complex-test.dwg`、关闭 hover preview、开启对象捕捉后，移动鼠标仍有迟滞；底图明明
+不需要重画。
+
+- **根因**：base/overlay 两层只避免底图重绘；光标仍是 `OverlayInputs.cursor`，每次移动都改
+  overlay 指纹 → 新场景准备 → 一次 suffix commit。该提交无条件执行 O(全场景) 的
+  `gc_*`、`rebuild_pulled` 与 `draw_plan`/`BatchFacts` 重建。
+- **修复**：新增唯一 `run_free_suffix` 谓词（`keep_prefix == base_end == old base_end` 且
+  prepared 无 instance/arc/mesh runs）。成立时：保留 base-only draw plan/facts、跳过三路 GC、
+  跳过整幅 pulled 重建；base 变化/设备重建/fallback 仍走原路径。计数器
+  `draw_plan_rebuilds`/`gc_skipped_commits`/`pulled_suffix_skips` 进入 `CommitTiming`、
+  `RuntimeDiagnostics` 与 `[probe] pan-wait`。
+- **实测**（真实 Quadro P620/Vulkan/Wayland，`complex-test.dwg`；合成 DOM pointermove，非真鼠标；
+  169 次 run-free suffix commit）：`commit_us` p50 19.95 ms → **2.16 ms**；`gc` 10.8 ms → **0**；
+  `pulled` 0.53 ms/首次 1.8 s → **0/0**；提交后 `plan_ms` 34.0 → **0.4 ms**；`render_us`
+  41.6 → **7.3 ms**；`frame_total_us` 62.8 → **10.5 ms**；`gc_skipped=170`、
+  `pulled_suffix_skips=170`、`draw_plan_rebuilds` 稳定在 2。扫描窗口混入一次
+  `base_changed=true` 的初始 base commit（3.4 s，加载成本），已从 suffix 统计排除。
+- **契约**：base-only plan/facts 等价 fuzz、谓词/判别测试、pulled skip/fallback 纯测试、
+  新 GPU suffix skip 契约、`cursor_moves` 拆分计数契约（P620/Vulkan ok）。已知既有失败：
+  `cursor_moves_never_drop_the_tint_or_the_overlay_suffix` 的 step-0 像素断言在 clean HEAD
+  同样失败，与本轮无关，不作为证据。
+- **边界**：只验证 Linux/P620/Wayland + 合成 DOM 输入；未做真鼠标、截屏/像素验收、Windows/
+  macOS/Android/Web 运行结论。光标仍未脱离场景提交，下一步见
+  `docs/adr/0028-transient-cursor-overlay.md`（Proposed）；状态事件的 wire 节流另列。
+
 ## 2026-11-05 Android release 改为只发布签名 APK
 
 - 生成仓库自持 Android release keystore（RSA 4096 / 10000 天 / PKCS12，alias `yacr`），

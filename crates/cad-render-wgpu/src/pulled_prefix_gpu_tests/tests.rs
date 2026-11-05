@@ -557,3 +557,115 @@ fn device_reinit_rejects_a_stale_upload_and_rebuilds_on_the_new_generation() {
         "{WHAT}: a full replacement rebuilds the pulled geometry"
     );
 }
+
+// ---------------------------------------------------------------------------
+// 4. A run-free suffix commit (the real cursor/overlay shape) skips GC and the
+//    pulled rebuild, and leaves the retained base buffers untouched.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn run_free_suffix_commits_skip_gc_and_the_pulled_rebuild() {
+    const WHAT: &str = "run_free_suffix_skip";
+    let Some(gpu) = gpu_or_skip(WHAT) else {
+        return;
+    };
+    if !accelerated_supported(&gpu, WHAT) {
+        return;
+    }
+    let mut renderer = init_accelerated(&gpu, WHAT);
+    let target = RenderTarget::new(64, 64);
+    let base = base_batches();
+    let base_len = base.len();
+
+    commit(&mut renderer, &base, 0);
+    assert!(
+        renderer.pulled_lines.is_some() && renderer.pulled_mesh.is_some(),
+        "{WHAT}: the accelerated base commit must build both pulled classes"
+    );
+
+    let gc_before = renderer.gc_skipped_commits();
+    let skips_before = renderer.pulled_suffix_skips();
+    let reuses_before = renderer.pulled_prefix_reuses();
+    let rebuilds_before = renderer.pulled_prefix_rebuilds();
+    let lines_before = line_buffers(&renderer);
+    let meshes_before = mesh_buffers(&renderer);
+    let streams_before = renderer.instance_stream_count();
+    let chunks_before = renderer.mesh_chunk_count();
+
+    // Every cursor/overlay suffix the engine stages is **run-free** (legacy).
+    let mut overlay_len = 0;
+    for (round, entity) in [10u128, 20, 30].into_iter().enumerate() {
+        let overlay = suffix_batches(entity, 0.75 - round as f32 * 0.2);
+        overlay_len = overlay.len();
+        let staged = renderer
+            .prepare_upload_batches_legacy(&overlay)
+            .expect("stage a run-free overlay");
+        renderer
+            .commit_upload_with_base(staged, base_len, base_len)
+            .expect("commit the run-free suffix");
+    }
+
+    assert_eq!(
+        renderer.gc_skipped_commits(),
+        gc_before + 3,
+        "{WHAT}: every run-free suffix commit must skip the stream/mesh/arc GC"
+    );
+    assert_eq!(
+        renderer.pulled_suffix_skips(),
+        skips_before + 3,
+        "{WHAT}: every run-free suffix commit must skip the pulled rebuild"
+    );
+    assert_eq!(
+        renderer.pulled_prefix_reuses(),
+        reuses_before,
+        "{WHAT}: a skip is not a reuse"
+    );
+    assert_eq!(
+        renderer.pulled_prefix_rebuilds(),
+        rebuilds_before,
+        "{WHAT}: a skip is not a rebuild"
+    );
+    assert_eq!(
+        renderer.instance_stream_count(),
+        streams_before,
+        "{WHAT}: a run-free suffix appends no instance stream"
+    );
+    assert_eq!(
+        renderer.mesh_chunk_count(),
+        chunks_before,
+        "{WHAT}: a run-free suffix appends no mesh chunk"
+    );
+    assert_eq!(
+        line_buffers(&renderer),
+        lines_before,
+        "{WHAT}: the retained pulled line buffers must be the same handles"
+    );
+    assert_eq!(
+        mesh_buffers(&renderer),
+        meshes_before,
+        "{WHAT}: the retained pulled mesh buffers must be the same handles"
+    );
+    assert_eq!(
+        renderer.batch_count(),
+        base_len + overlay_len,
+        "{WHAT}: the suffix replaced (not accumulated) the overlay range"
+    );
+
+    // The scene still draws (base + overlay) and picks after the skips.
+    assert_draws_and_picks(&mut renderer, &target, WHAT);
+
+    // A base change is not a suffix and must still run the GC/pulled path.
+    let gc_skips = renderer.gc_skipped_commits();
+    let pulled_skips = renderer.pulled_suffix_skips();
+    commit(&mut renderer, &base, 0);
+    assert_eq!(
+        renderer.gc_skipped_commits(),
+        gc_skips,
+        "{WHAT}: a base change must not skip the GC"
+    );
+    assert_eq!(
+        renderer.pulled_suffix_skips(),
+        pulled_skips,
+        "{WHAT}: a base change must not take the pulled suffix skip"
+    );
+}

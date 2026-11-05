@@ -18,6 +18,8 @@ mod uniforms;
 #[cfg(test)]
 mod accelerated_tier_tests;
 #[cfg(test)]
+mod base_only_plan_tests;
+#[cfg(test)]
 mod instanced_line_tests;
 #[cfg(test)]
 mod mesh_merge_tests;

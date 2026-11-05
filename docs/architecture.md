@@ -195,6 +195,12 @@ traits 是契约草案（0.1），实现前可通过 ADR 修正不足，不代�
 - **不变量不变**：单 presenter per drawable、renderer-only wgpu、db 唯一权威、无整幅回读；
   overlay 后缀**不再截断**（2026-10-25 更正）：新输入未提交时呈现完整 resident 场景并以
   `FrameCompleteness::PendingOverlayInputs` 显式标记（非静默）；实体 flags 经独立 catch-up 增量。
+- **overlay suffix 快速路径（2026-11-05）**：`base_end` 之前的 base 才进入
+  `DrawOrderCache`/`BatchFacts`；run-free（无 instance/arc/mesh run）的后缀提交保留 base plan、
+  跳过 stream/chunk/arc GC 与整幅 pulled 重建，只做 suffix 上传 + pick 增量。计数器
+  `draw_plan_rebuilds`/`gc_skipped_commits`/`pulled_suffix_skips` 经 `RuntimeDiagnostics` 与
+  `[probe] pan-wait` 暴露。光标此时**仍**是 `OverlayInputs` 场景内容（每次移动仍是一次 suffix
+  commit）；把它移出场景/发布链见 ADR 0028（Proposed，未实现）。
 
 ## 历史（已退役 / 被取代）
 

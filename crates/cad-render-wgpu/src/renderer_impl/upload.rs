@@ -1,6 +1,45 @@
 use super::*;
 
 impl Renderer {
+    /// The single run-free-suffix predicate shared by every commit fast path (A1
+    /// keeps the base draw plan/facts, A2 skips GC, A3 skips the pulled rebuild).
+    ///
+    /// `is_run_free_suffix_commit(keep_prefix, base_end, prepared)` is
+    /// `keep_prefix > 0 && keep_prefix >= base_end_before_commit && base_end ==
+    /// base_end_before_commit && prepared.instances/arcs/mesh_chunks are empty`.
+    /// The engine's suffix commit produces
+    /// `keep_prefix == base_end == the old base_end`; a partial keep inside the
+    /// base (`keep_prefix ∈ (0, base_end)`) is a base change, not a suffix.
+    ///
+    /// `prepared_has_runs` is the defensive `!prepared.instances.is_empty() ||
+    /// !prepared.arcs.is_empty() || !prepared.mesh_chunks.is_empty()` check: even
+    /// though a true suffix can only carry run-free overlay batches (converted
+    /// overlay batches are rejected above), a future staging change can never make
+    /// a run-carrying upload take the GC/pulled skip.
+    pub(super) fn run_free_suffix(
+        keep_prefix: usize,
+        base_end: usize,
+        base_end_before_commit: usize,
+        prepared_has_runs: bool,
+    ) -> bool {
+        keep_prefix > 0
+            && keep_prefix >= base_end_before_commit
+            && base_end == base_end_before_commit
+            && !prepared_has_runs
+    }
+
+    /// Whether this commit touches the resident base prefix. The engine's suffix
+    /// commit (`keep_prefix == base_end == the old base_end`) is the only false
+    /// case; a partial keep inside the base (`keep_prefix < base_end`) and any
+    /// changed base boundary are base changes.
+    pub(super) fn commit_changes_base(
+        keep_prefix: usize,
+        base_end: usize,
+        base_end_before_commit: usize,
+    ) -> bool {
+        keep_prefix < base_end || base_end != base_end_before_commit
+    }
+
     // Upload CPU batches as static GPU buffers (once per change).
     //
     // Mesh batches get an index buffer and a repaired normal buffer; line
@@ -74,6 +113,23 @@ impl Renderer {
                     .into(),
             ));
         }
+        // The base end **before** this commit. A base change is anything that
+        // touches the resident base prefix: a partial keep inside the base
+        // (`keep_prefix < base_end`), or a different base boundary. The engine's
+        // suffix commit is exactly `keep_prefix == base_end == the old base_end`;
+        // `keep_prefix ∈ (0, base_end)` is a base change even though a prefix is
+        // kept.
+        let base_end_before_commit = self.base_end;
+        // The single run-free-suffix predicate every fast path below shares (A1
+        // keeps the base draw plan, A2 skips GC, A3 skips the pulled rebuild).
+        let run_free_suffix = Self::run_free_suffix(
+            keep_prefix,
+            base_end,
+            base_end_before_commit,
+            !prepared.instances.is_empty()
+                || !prepared.arcs.is_empty()
+                || !prepared.mesh_chunks.is_empty(),
+        );
         // `commit_started` covers the incoming reference collection and the
         // admission (prefix scans/allocs) below plus the staging/append/commit, so
         // `CommitTiming::total_us >= the sum of the substages` (it additionally
@@ -117,8 +173,16 @@ impl Renderer {
                 .collect(),
         };
         // Admission is computed **before** any mutation, from the renderer's own
-        // retained state (never from the caller's `base_changed` alone).
-        let fast = self.pulled_fastpath_plan(keep_prefix, &incoming);
+        // retained state (never from the caller's `base_changed` alone). A
+        // run-free suffix with a coherent retained pulled state skips the whole
+        // pulled rebuild: nothing was appended/renumbered/removed, so the
+        // retained segments/chunk table/bind groups stay valid.
+        let skip_pulled = self.try_skip_pulled_rebuild(run_free_suffix);
+        let fast = if skip_pulled {
+            None
+        } else {
+            Some(self.pulled_fastpath_plan(keep_prefix, &incoming))
+        };
         // Re-base the prepared streams' run indices onto the existing streams so
         // a kept prefix's converted batches keep pointing at valid buffers.
         let rebase_started = Instant::now();
@@ -162,12 +226,31 @@ impl Renderer {
         self.batches.extend(prepared.batches);
         let append_us = append_started.elapsed().as_micros() as u64;
         let gc_started = Instant::now();
-        self.gc_instance_streams();
-        self.gc_arc_streams();
-        self.gc_mesh_chunks();
+        if run_free_suffix {
+            // A run-free suffix append/truncates only batches that own no runs: no
+            // stream/chunk/arc becomes unreferenced and no run index can be
+            // renumbered, so the GC scan (O(all runs) + a full `vec![None; n]`) is
+            // a provable no-op. The guard also requires `prepared.*` empty (part of
+            // the shared predicate), and overlay batches with runs are rejected
+            // above, so skipping never hides a stale reference.
+            self.gc_skipped_commits += 1;
+        } else {
+            self.gc_instance_streams();
+            self.gc_arc_streams();
+            self.gc_mesh_chunks();
+        }
         let gc_us = gc_started.elapsed().as_micros() as u64;
         let pulled_started = Instant::now();
-        self.rebuild_pulled(fast);
+        match fast {
+            Some(fast) => self.rebuild_pulled(fast),
+            // The skip was admitted (and counted) before any mutation; the
+            // retained pulled organisation is still exactly valid. Never skip on
+            // doubt: `fast` is only `None` when the skip was admitted.
+            None => assert!(
+                skip_pulled,
+                "pulled rebuild skipped without an admitted run-free suffix"
+            ),
+        }
         let pulled_us = pulled_started.elapsed().as_micros() as u64;
         let pick_started = Instant::now();
         self.rebuild_pick_table(Some((keep_prefix, retired_pick_keys)))?;
@@ -175,17 +258,20 @@ impl Renderer {
         // Base/overlay split of the new resident scene. A true suffix commit
         // leaves the base prefix untouched, so the cached progressive walk
         // (`ordered` is base-only, indices are stable) stays valid and is *not*
-        // reset; only `draw_plan`/`batch_facts` are rebuilt on the next render
-        // because the overlay suffix changed. A base change (a full replacement,
-        // or a base count change) invalidates the walk.
-        let base_changed = keep_prefix == 0 || base_end != self.base_end;
+        // reset, and the base-only `draw_plan`/`batch_facts` are kept: only the
+        // transient overlay suffix changed. A base change (a full replacement, a
+        // partial keep inside the base, or a base count change) invalidates both.
+        let base_changed = Self::commit_changes_base(keep_prefix, base_end, base_end_before_commit);
         self.base_end = base_end;
         if base_changed {
             self.progressive_frame = None;
             // Geometry changed, so any retained-colour exception is void.
             self.preserve_color_on_restart = false;
+            // The base prefix changed: the base-only draw-order cache AND the
+            // segmented planner's facts are stale. They share this one
+            // invalidation and are rebuilt together on the next render.
+            self.draw_plan = None;
         }
-        self.draw_plan = None;
         // Page-cost knowledge is scene-specific, so a commit that replaces the
         // scene resets the controller. A **suffix-only** commit (a true prefix is
         // kept: `keep_prefix > 0`, the same discriminator the pick table's
@@ -218,6 +304,9 @@ impl Renderer {
             pick_us,
             lineweight_us,
             total_us: commit_started.elapsed().as_micros() as u64,
+            draw_plan_rebuilds: self.draw_plan_rebuilds,
+            gc_skipped_commits: self.gc_skipped_commits,
+            pulled_suffix_skips: self.pulled_suffix_skips,
         });
         Ok(())
     }

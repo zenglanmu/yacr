@@ -166,6 +166,10 @@ pub(crate) struct EncodeEmitMask {
     /// The bitset stays empty and [`EncodeEmitMask::participates`] returns true.
     all: bool,
     bits: Vec<u64>,
+    /// Number of batches the mask describes (the base-only `BatchFacts` length).
+    /// An index at or past it is an overlay batch, which the mask intentionally
+    /// admits; see [`EncodeEmitMask::participates`].
+    len: usize,
 }
 
 impl Default for EncodeEmitMask {
@@ -175,6 +179,7 @@ impl Default for EncodeEmitMask {
         EncodeEmitMask {
             all: true,
             bits: Vec::new(),
+            len: 0,
         }
     }
 }
@@ -186,6 +191,9 @@ pub(super) fn set_bit(bits: &mut [u64], index: u32) {
 impl EncodeEmitMask {
     /// Rebuild the mask for this frame's `cull`, reusing `self.bits`.
     pub(crate) fn rebuild(&mut self, facts: &BatchFacts, cull: &ChunkCull) {
+        // The mask describes exactly the base-only facts; any larger index is an
+        // overlay batch and is admitted by `participates`.
+        self.len = facts.class.len();
         if !cull.any_culled() {
             // Nothing was removed, so every run survives and every batch
             // participates: skip building the mask entirely.
@@ -230,8 +238,19 @@ impl EncodeEmitMask {
     }
 
     /// Whether batch `index` participates in the encode pass this frame.
+    ///
+    /// The mask describes the **base-only** [`BatchFacts`] (indices
+    /// `0..len`), but the same encoder also serves the **overlay** pass with
+    /// absolute overlay indices (`>= len`). An index past the table is an overlay
+    /// batch: overlay batches are staged legacy (run-free), always participate,
+    /// and must never panic or read out of bounds here.
     pub(crate) fn participates(&self, index: usize) -> bool {
-        self.all || (self.bits[index / 64] >> (index % 64)) & 1 == 1
+        self.all
+            || index >= self.len
+            || match self.bits.get(index / 64) {
+                Some(word) => (word >> (index % 64)) & 1 == 1,
+                None => true,
+            }
     }
 }
 

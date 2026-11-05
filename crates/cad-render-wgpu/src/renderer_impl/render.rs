@@ -54,11 +54,14 @@ impl Renderer {
         // Times the frame-key mismatch reset the progressive cursor this frame.
         let mut progressive_restarts = 0u64;
         // The draw-order partition is camera-independent, so it survives camera
-        // moves. Rebuild it only when the batch set changed (the mutation paths
-        // that clear or replace `batches` set `draw_plan = None`).
+        // moves. It is built over the **base** prefix only (`[0, base_end)`): the
+        // transient overlay is recomposited separately and never enters the base
+        // plan. Rebuild it only when the base batch set changed (the mutation
+        // paths that change the base set `draw_plan = None`); a suffix-only commit
+        // keeps it.
         if self.draw_plan.is_none() {
-            let entries = self
-                .batches
+            let base_batches = &self.batches[..self.base_end];
+            let entries = base_batches
                 .iter()
                 .map(|batch| BatchOrderEntry {
                     draw_order: batch.draw_order,
@@ -69,7 +72,10 @@ impl Renderer {
             self.draw_plan = Some(DrawOrderCache::new(entries));
             // The segmented planner's batch-set facts share this single
             // invalidation (`draw_plan = None`): no second invalidation truth.
-            self.batch_facts = plan::BatchFacts::build(&self.batches);
+            // Base-only, exactly like the cache: overlay batches are run-free
+            // (enforced at commit), so they contribute nothing.
+            self.batch_facts = plan::BatchFacts::build(base_batches);
+            self.draw_plan_rebuilds += 1;
         }
         let frame_key = FrameKey {
             camera_matrix,
@@ -524,6 +530,8 @@ impl Renderer {
             // its runs (stream/chunk/arc slots) and a fully-culled one emits
             // nothing at all, so both are skipped. `class` is a cache-resident byte
             // instead of the ~200-byte `GpuBatch` the old scan read per batch.
+            // `accepted` is a base-only prefix (`< base_end`), exactly the range
+            // `batch_facts` describes.
             if self.batch_facts.class[index] != 0 {
                 continue;
             }

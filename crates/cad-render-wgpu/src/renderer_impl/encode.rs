@@ -168,7 +168,12 @@ impl Renderer {
                 // counters remain, and they read the cache-resident class byte
                 // instead of the ~200-byte `GpuBatch`.
                 for &i in opaque {
-                    let class = self.batch_facts.class[i];
+                    // `batch_facts` is base-only, but `encode_frame` is also the
+                    // overlay pass's encoder and its `opaque` holds absolute
+                    // overlay indices. Overlay batches are run-free (enforced at
+                    // commit), so a missing entry is correctly class `0`; never
+                    // index the base-only table directly.
+                    let class = self.batch_facts.class.get(i).copied().unwrap_or(0);
                     if class & plan::CLASS_INSTANCED != 0 {
                         instanced_batches += 1;
                     }
@@ -325,8 +330,11 @@ impl Renderer {
                     // reporting counters still fold it in — they count accepted
                     // converted batches, not emitted draws. `class` is one
                     // cache-resident byte, so the skipped entries cost almost
-                    // nothing (the old scan read the ~200-byte `GpuBatch`).
-                    let class = self.batch_facts.class[i];
+                    // nothing (the old scan read the ~200-byte `GpuBatch`). The
+                    // table is base-only; the overlay pass also calls this encoder
+                    // with absolute overlay indices, and those batches are
+                    // run-free, so a missing entry is class `0`.
+                    let class = self.batch_facts.class.get(i).copied().unwrap_or(0);
                     if class != 0 {
                         converted_batches += 1;
                         if class & plan::CLASS_MESH != 0 {

@@ -183,6 +183,25 @@ impl Renderer {
             .map_or(0, |pulled| pulled.segments.len())
     }
 
+    /// Diagnostics: cumulative base-only draw-order cache / batch-facts rebuilds.
+    /// A run-free suffix commit keeps the base plan, so this does not move for it.
+    pub fn draw_plan_rebuilds(&self) -> u64 {
+        self.draw_plan_rebuilds
+    }
+
+    /// Diagnostics: cumulative commits that skipped the stream/mesh/arc GC scan
+    /// (the commit was a run-free suffix).
+    pub fn gc_skipped_commits(&self) -> u64 {
+        self.gc_skipped_commits
+    }
+
+    /// Diagnostics: cumulative run-free suffix commits that skipped
+    /// `rebuild_pulled` entirely (the retained pulled organisation was still
+    /// valid).
+    pub fn pulled_suffix_skips(&self) -> u64 {
+        self.pulled_suffix_skips
+    }
+
     /// Override the maximum vertices per merged mesh chunk (default
     /// [`plan::MAX_VERTICES_PER_MESH_STREAM`]). A batch with more vertices is
     /// split across several chunks. Test hook. Takes effect on the next upload.

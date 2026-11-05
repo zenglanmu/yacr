@@ -206,6 +206,17 @@ pub struct RuntimeDiagnostics {
     /// Cumulative pulled-prefix **rebuilds** (a full pulled rebuild that
     /// (re)established a checkpoint), `0` when no renderer is attached.
     pub pulled_prefix_rebuilds: u64,
+    /// Cumulative run-free suffix commits that **skipped** the pulled rebuild
+    /// entirely (the retained pulled organisation was still valid), `0` when no
+    /// renderer is attached.
+    pub pulled_suffix_skips: u64,
+    /// Cumulative commits that skipped the stream/mesh/arc GC scan because the
+    /// commit was a run-free suffix, `0` when no renderer is attached.
+    pub gc_skipped_commits: u64,
+    /// Cumulative base-only draw-order cache / batch-facts rebuilds, `0` when no
+    /// renderer is attached. A run-free suffix commit keeps the base plan, so this
+    /// does not move for it.
+    pub draw_plan_rebuilds: u64,
     /// Cumulative frames the renderer actually produced (`frames_rendered`).
     pub frames_rendered: u64,
     /// Uploads started from scratch (no prior pending upload).

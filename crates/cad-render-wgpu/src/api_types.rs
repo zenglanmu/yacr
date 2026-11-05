@@ -334,6 +334,13 @@ pub struct CommitTiming {
     pub lineweight_us: u64,
     /// Total `commit_upload` wall time.
     pub total_us: u64,
+    /// Cumulative base-only draw-plan/facts rebuilds at this commit. A run-free
+    /// suffix commit keeps the plan, so this does not move for it.
+    pub draw_plan_rebuilds: u64,
+    /// Cumulative commits that skipped the stream/mesh/arc GC (run-free suffix).
+    pub gc_skipped_commits: u64,
+    /// Cumulative run-free suffix commits that skipped the pulled rebuild.
+    pub pulled_suffix_skips: u64,
 }
 
 pub struct FrameStats {
