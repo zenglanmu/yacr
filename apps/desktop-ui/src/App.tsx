@@ -18,6 +18,7 @@ import type { FrameLoop } from './cad/frame-loop.ts';
 import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
 import { queueCadCommand } from './cad/cad-command.ts';
 import { useCadEvents } from './cad/use-cad-events.ts';
+import { pluginCommand, requestProperties, showPluginNotice } from './plugins/host.ts';
 import { volatileStatusStore } from './cad/status-cadence.ts';
 import { reconcileToolParameterPending, setToolParameterFlag, setToolParameterNumber, stepToolParameterPending } from './tools/tool-parameters.ts';
 import { requestImportCancel } from './cad/cad-status.ts';
@@ -63,9 +64,7 @@ import { setSelectedProperty } from './properties/properties.ts';
 import { textEditOpenError } from './popup/popup-textedit.ts';
 
 /** The options `submitCommand` accepts from a region (`fromInput` keeps a draft). */
-interface SubmitOptions {
-  readonly fromInput?: boolean;
-}
+interface SubmitOptions { readonly fromInput?: boolean; }
 
 /** The CAD shortcut menu while one is open (`null` when closed). */
 interface ContextMenuState {
@@ -74,14 +73,7 @@ interface ContextMenuState {
   readonly menu: ContextMenuModel;
 }
 
-/**
- * The single UI document.
- *
- * There is no second document and no boot switch: since WP3 every popup is an
- * in-DOM overlay rendered by [`Shell`] over this same tree. `Shell` owns the
- * shell effects (status polling, shortcuts, the webview-default guards, the
- * input lane) and the overlay; the host owns the modal gate.
- */
+/** The single UI document: one in-DOM overlay tree; the host owns the modal gate. */
 export function App() {
   return <Shell />;
 }
@@ -499,8 +491,13 @@ function Shell() {
     });
   }, []);
 
-  // Chrome-local selectors are answered here, before the router (table and layout
-  // rule in `commands/local-selectors.ts`); a router line falls through.
+  // The one properties-open path: ask plugin providers, then open the dock.
+  const openProperties = useCallback(() => {
+    requestProperties(status?.selection ?? null);
+    setPropertiesOpen(true);
+  }, [status]);
+
+  // Chrome-local selectors are answered here; a router line falls through.
   const runLocalSelector = useLocalSelectors({
     layout,
     translate: t,
@@ -508,17 +505,15 @@ function Shell() {
     clearDraft: () => setCommand(''),
     requestOptions: () => openOptionsDialog(requestOpenPopup),
     openResources: () => setReferencesOpen(true),
-    openProperties: () => setPropertiesOpen(true),
+    openProperties,
     openLayers: () => { setLayersOpen(true); setLayersFocus(value => value + 1); },
     openFonts: () => setFontsOpen(true),
     reportError: setError,
   });
 
   const submitCommand = useCallback(async (text: string, options: SubmitOptions = {}) => {
-    // Chrome-local selectors are answered before the in-flight guard, so a second
-    // Enter can still open (or focus) a panel while a command is queued. The
-    // table, the compact-layout refusal and the draft handling live in
-    // `commands/local-selectors.ts`; a router line falls through unchanged.
+    // Chrome-local selectors are answered before the in-flight guard; a router
+    // line falls through unchanged (`commands/local-selectors.ts`).
     if (runLocalSelector(text, options.fromInput === true)) return;
     if (submitting.current) return;
     submitting.current = true;
@@ -538,9 +533,14 @@ function Shell() {
       if (vocabularyRef.current) {
         try { await vocabularyRef.current; } catch { /* reported by the loader */ }
       }
-      const result = await queueCadCommand(invoke, text, status, false);
+      const result = await queueCadCommand(invoke, text, status, false,
+        command => pluginCommand(command, status?.selection ?? null),
+      );
       setCommandResult(result);
-      if (result.kind === 'accepted') {
+      if (result.kind === 'blocked') {
+        // A veto is explained in its own modal; the history row keeps the attempt.
+        showPluginNotice(result.messageKey, { command: result.command });
+      } else if (result.kind === 'accepted') {
         // An admitted command is the strongest evidence the attempt went through:
         // no chrome-side failure line may stay on screen after it.
         setError('');
@@ -906,7 +906,7 @@ function Shell() {
       if (action === 'diagnostics') setDiagnosticsOpen(value => !value);
       else if (action === 'cleanScreen') setCleanScreen(value => !value);
       else if (action === 'commandLine') setCommandLineOpen(value => !value);
-      else if (action === 'properties') setPropertiesOpen(true);
+      else if (action === 'properties') openProperties();
       else if (action === 'language') setLocale(value => (value === 'zh-CN' ? 'en' : 'zh-CN'));
       // Dialogs are in-DOM overlays (ADR 0021 D1/D2). The host still owns the
       // modal gate and admission; `existing: true` means the same dialog is

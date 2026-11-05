@@ -17,7 +17,14 @@
 
 import { invoke } from '../host/invoke.ts';
 import { bytesFromBase64, BUILTIN_PLUGIN_ID, readPluginStatus } from '../plugins/plugin-manager.ts';
-import type { PluginImporter, PluginInvoke, PluginStatusFrame } from '../plugins/types.ts';
+import type {
+  PluginImporter,
+  PluginInvoke,
+  PluginStatusFrame,
+  VendorPluginModule,
+} from '../plugins/types.ts';
+
+export type { VendorPluginModule };
 
 /** The `vendor-pending` frame the host emits after a document opens. */
 export interface VendorPendingFrame {
@@ -33,11 +40,9 @@ export interface VendorAck {
   readonly diagnostics: readonly string[];
 }
 
-/** The plugin module shape (the only exports the host relies on). */
-export interface VendorPluginModule {
-  readonly abiVersion: number;
-  decode(records: ArrayBuffer): ArrayBuffer;
-}
+// The plugin module shape lives in `plugins/types.ts` (ABI v1: required
+// `decode`, optional startup `register`). It is re-exported above so the pass
+// keeps one public module type.
 
 const VENDOR_ABI_VERSION = 1;
 const RESULT_MAGIC = 0x59414e52;
@@ -66,6 +71,11 @@ interface VendorGlobal {
 
 function validated(candidate: Partial<VendorPluginModule> | undefined): VendorPluginModule {
   if (!candidate || typeof candidate.decode !== 'function' || typeof candidate.abiVersion !== 'number') {
+    throw new Error('vendor.plugin_contract');
+  }
+  // `register` is optional (ADR 0028 D3), but a present value must be callable:
+  // a truthy non-function is a contract violation, never "no providers".
+  if (candidate.register !== undefined && typeof candidate.register !== 'function') {
     throw new Error('vendor.plugin_contract');
   }
   return candidate as VendorPluginModule;

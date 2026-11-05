@@ -286,7 +286,7 @@ test('the palettes are what the carrier reports, not what it is called', async (
   assert.ok(workspace.includes('const showProperties = palettesAvailable && shell.propertiesOpen && !showStart;'));
   assert.ok(workspace.includes('const showDiagnostics = palettesAvailable && Boolean(shell.diagnosticsOpen);'));
   // Both panels render from the gated flags, so no empty panel is possible.
-  assert.ok(workspace.includes('{showProperties ? <PropertiesPalette /> : null}'));
+  assert.ok(workspace.includes('{showProperties ? <PropertiesDock /> : null}'));
   assert.ok(workspace.includes('{showDiagnostics ? <DiagnosticsPalette /> : null}'));
   assert.ok(!workspace.includes('{shell.diagnosticsOpen ?'));
 

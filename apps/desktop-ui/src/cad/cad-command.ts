@@ -25,8 +25,18 @@ export function commandEnabled(
 export type CadCommandResult =
   | { readonly kind: 'accepted'; readonly command: string }
   | { readonly kind: 'local'; readonly command: string }
+  | { readonly kind: 'blocked'; readonly command: string; readonly messageKey: string }
   | { readonly kind: 'unsupported'; readonly command: string; readonly reasonKey: string | null }
   | { readonly kind: 'failed'; readonly command?: string; readonly error: string; readonly reasonKey?: string | null };
+
+/**
+ * A plugin veto asked after admission and before IPC.
+ *
+ * `null` means "not handled, let the router run it"; a `messageKey` becomes a
+ * `blocked` result and no `cad_command` is sent. A chrome-local selector is
+ * never offered here (it has no router command to veto).
+ */
+export type CadCommandInterceptor = (command: string) => { readonly messageKey: string } | null | undefined;
 
 /**
  * Admit `text` through `cad_command`.
@@ -45,6 +55,7 @@ export async function queueCadCommand(
   text: string,
   status: Partial<CadStatus> | null | undefined,
   pending: boolean,
+  intercept?: CadCommandInterceptor,
 ): Promise<CadCommandResult> {
   const admission = admitCommandText(text, { status, pending });
   const command = admission.command;
@@ -55,8 +66,16 @@ export async function queueCadCommand(
   }
   // A chrome-local selector has no router command. Returning it as `local`
   // keeps this funnel honest instead of sending a name the router would refuse
-  // (the command line intercepts it before it ever gets here).
+  // (the command line intercepts it before it ever gets here). It is also never
+  // offered to a plugin interceptor: there is nothing for the router to refuse.
   if (isLocalChromeCommand(command)) return { kind: 'local', command };
+  // A plugin veto is advisory interop, not admission: a throwing interceptor is
+  // "not handled" and the command still reaches the router.
+  let veto: { readonly messageKey: string } | null | undefined;
+  try { veto = intercept?.(command); } catch { veto = null; }
+  if (veto && typeof veto.messageKey === 'string' && veto.messageKey !== '') {
+    return { kind: 'blocked', command, messageKey: veto.messageKey };
+  }
   try {
     const response = await invoke('cad_command', { command });
     if (!response || (response as { accepted?: unknown }).accepted !== true) throw Error('CAD_COMMAND_NOT_ACCEPTED');

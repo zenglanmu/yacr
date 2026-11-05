@@ -238,7 +238,8 @@ test('typed PROPERTIES is intercepted before the in-flight command guard', async
   const selectors = await readModule('commands/local-selectors.ts');
   assert.ok(selectors.includes('isPropertiesCommand(text)'));
   assert.ok(app.indexOf('runLocalSelector(text') < app.indexOf('submitting.current = true'), 'a second Enter must still open the palette');
-  assert.ok(app.includes('openProperties: () => setPropertiesOpen(true)'));
+  assert.ok(app.includes('requestProperties(status?.selection ?? null)'), 'the plugin chain is asked before the dock opens');
+  assert.ok(app.includes('openProperties,'), 'the local selector and the action share the one open path');
 });
 
 test('the shell exposes the one property write and the palette action', async () => {
@@ -267,7 +268,7 @@ test('both ribbon PROPERTIES entries dispatch the shell action, and LAYER stays 
 test('the properties palette is docked in the workspace and toggled from the status bar', async () => {
   const workspace = await readModule('components/Workspace.tsx');
   const statusbar = await readModule('components/StatusBar.tsx');
-  assert.ok(workspace.includes('PropertiesPalette'));
+  assert.ok(workspace.includes('PropertiesDock'));
   assert.ok(workspace.includes('shell.propertiesOpen'));
   assert.ok(statusbar.includes('shell.setPropertiesOpen'));
   // The native CAD partition stays a childless node whose CSS we do not change.
