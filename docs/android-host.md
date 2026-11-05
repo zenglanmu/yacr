@@ -21,8 +21,9 @@
 - **命令集共享**：`cad_desktop_shell::commands::register_commands()`（共享 `generate_handler!` 注册表）
   加上本载体保留的两个 shell 报表 `canvas_session_status` / `canvas_runtime_failed`。原生命令语义 =
   `cad_ui_core::session::wire`，与桌面同一套解析/准入/错误码；没有 Android 专属命令表。
-- **事件是 push-only**：唯一通道是 `cad_event`。每次 flush/帧推送一条携带**完整状态**的
-  `status-changed`（含 `hostProfile`），语义事件另行推送（见 §2）。**前端不轮询 `cad_status`**。
+- **事件是 push-only**：唯一通道是 `cad_event`。`status-changed` 只在首次 flush / 语义字段变化时
+  携带**完整状态**（含 `hostProfile`）；`frameCount`/`cursorWorld` 走轻量 `cursor-changed`，语义事件
+  另行推送（见 §2）。**前端不轮询 `cad_status`**。
 - **`hostProfile` 恒在**：`cad_status` 与 `status-changed` 都带
   `hostProfile { surfaceMode, documentOwner, palettesAvailable, standardViews }`。载体由这个对象声明，
   不再靠「哪些键存在」推断。
@@ -35,10 +36,10 @@
 
 | 项目 | 契约 |
 |---|---|
-| 状态推送 | 每 flush/帧一次 `status-changed`，携带完整 `CadStatus` + `hostProfile`（+ 可选 `canvasSession`）；`frameCount`/`cursorWorld` 搭这条事件 |
+| 状态推送 | `status-changed` 只在首次 flush / 语义字段变化时发送，携带完整 `CadStatus` + `hostProfile`（+ 可选 `canvasSession`）；`frameCount`/`cursorWorld` 走轻量 `cursor-changed` |
 | 语义事件 | `command-admitted`、`command-rejected`、`selection-changed`、`tool-step`、`document-opened`/`document-closed`、`error-raised`、`popup-changed`、`events-dropped` |
 | `command-rejected` 归因 | **仅批内相邻**：`Error` 必须直接跟在被准入的 `Command` 之后、且两者同批；跨 flush 的错误只经 `status.error` 到达 |
-| 排序 | 同一 flush 里语义事件先、`status-changed` 后（命令结果先于包含它的快照） |
+| 排序 | 同一 flush 里语义事件先、可选 `cursor-changed` 次之、可选 `status-changed` 最后（命令结果先于包含它的快照） |
 | `cad_status` | 只用于订阅/bootstrap 与丢事件（`events-dropped`）后的恢复；**不是**轮询源 |
 | 命令语义 | `cad_ui_core::session::wire`；准入/上限/诊断字符串只在 `cad-ui-core` |
 | tick 驱动 | `tauri::RunEvent::MainEventsCleared`，由 `RedrawPump` 唤醒；所有 GPU/`CadSession` 调用都在同一条 Tauri loop 线程（**源码阅读结论，未在设备上运行**） |

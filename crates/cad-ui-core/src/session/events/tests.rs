@@ -52,6 +52,7 @@ fn kinds(events: &[CadEventKind]) -> Vec<&'static str> {
             CadEventKind::VendorPending { .. } => "vendor-pending",
             CadEventKind::VendorSettled { .. } => "vendor-settled",
             CadEventKind::EventsDropped { .. } => "events-dropped",
+            CadEventKind::CursorChanged { .. } => "cursor-changed",
         })
         .collect()
 }
@@ -526,4 +527,81 @@ fn cad_tool(key: &str, points: usize) -> super::super::status::CadTool {
             scale_text_factor: None,
         },
     }
+}
+
+#[test]
+fn volatile_fields_do_not_make_a_status_semantically_different() {
+    let previous = status();
+    let mut volatile = status();
+    volatile.frame_count = 99;
+    volatile.cursor_world = Some([1.5, -2.25, 0.0]);
+    assert!(same_status_ignoring_volatile(&previous, &volatile));
+    assert!(same_status_ignoring_volatile(&volatile, &previous));
+    assert!(cursor_changed(&previous, &volatile));
+    // A volatile-only diff derives no semantic event.
+    assert!(derive_batch(Some(&previous), &volatile).is_empty());
+
+    // Every semantic field is still a difference.
+    for mutate in [
+        |status: &mut CadStatus| status.loading = true,
+        |status: &mut CadStatus| status.error = Some("boom".to_string()),
+        |status: &mut CadStatus| status.document_label = Some("plan.dwg".to_string()),
+        |status: &mut CadStatus| status.entity_count = Some(4),
+        |status: &mut CadStatus| status.selection.count = 2,
+    ] {
+        let mut next = previous.clone();
+        mutate(&mut next);
+        if next == previous {
+            continue;
+        }
+        assert!(
+            !same_status_ignoring_volatile(&previous, &next),
+            "a semantic change must still require a full status: {next:?}"
+        );
+    }
+
+    // One volatile field alone is enough for cursor-changed.
+    let mut frames = previous.clone();
+    frames.frame_count += 1;
+    assert!(cursor_changed(&previous, &frames));
+    let mut moved = previous.clone();
+    moved.cursor_world = Some([5.0, 6.0, 7.0]);
+    assert!(cursor_changed(&previous, &moved));
+    assert!(!cursor_changed(&previous, &previous));
+}
+
+#[test]
+fn a_cursor_changed_event_has_the_frozen_field_names_and_tag() {
+    let event = CadEvent {
+        revision: 17,
+        kind: CadEventKind::CursorChanged {
+            cursor_world: Some([1.0, 2.0, 0.5]),
+            frame_count: 42,
+        },
+    };
+    assert_eq!(
+        serde_json::to_value(&event).expect("serializes"),
+        serde_json::json!({
+            "revision": 17,
+            "type": "cursor-changed",
+            "cursorWorld": [1.0, 2.0, 0.5],
+            "frameCount": 42,
+        })
+    );
+    let absent = CadEvent {
+        revision: 18,
+        kind: CadEventKind::CursorChanged {
+            cursor_world: None,
+            frame_count: 43,
+        },
+    };
+    assert_eq!(
+        serde_json::to_value(&absent).expect("serializes"),
+        serde_json::json!({
+            "revision": 18,
+            "type": "cursor-changed",
+            "cursorWorld": null,
+            "frameCount": 43,
+        })
+    );
 }

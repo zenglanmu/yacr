@@ -14,6 +14,9 @@
   **不**改变：单一 React 树、`.native-input` 单一输入漏斗、renderer-only wgpu、importer-only acadrust、
   单 presenter per drawable、无逐帧整幅回读、`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层。
 
+> **2026-11-06 更新**：事件 cadence 已改为“语义 `status-changed` + 轻量 `cursor-changed`”
+> （ADR 0028 Phase 3）；本文第 2 节里“每帧一份 `status-changed`”只描述当时的基线。
+
 ---
 
 ## 1. 问题

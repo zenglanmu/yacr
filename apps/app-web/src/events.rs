@@ -6,8 +6,9 @@
 //!
 //! * [`EventHub`] owns the revisioned [`EventBus`] and the previous snapshot, and
 //!   turns one status projection into `derive_batch` + (the vendor pass's own
-//!   events) + **one** `status-changed` (semantic events first, vendor events
-//!   next, snapshot last — the frozen ordering).
+//!   events) + at most one `cursor-changed` (the volatile pair) + at most one
+//!   `status-changed` (first flush or a semantic change). Order: semantic, vendor,
+//!   cursor, snapshot.
 //! * `cad_subscribe(callback)` registers the JS callback and returns the initial
 //!   `status-changed` frame JSON for the current snapshot/profile/revision.
 //! * `cad_unsubscribe()` drops the callback.
@@ -31,7 +32,10 @@
 
 use std::cell::{Cell, RefCell};
 
-use cad_ui_core::session::events::{derive_batch, CadEvent, CadEventKind, EventBus, StatusFrame};
+use cad_ui_core::session::events::{
+    cursor_changed, derive_batch, same_status_ignoring_volatile, CadEvent, CadEventKind, EventBus,
+    StatusFrame,
+};
 use cad_ui_core::session::{CadStatus, HostProfile};
 
 /// The pure half of the wasm transport: revisioned bus + previous snapshot.
@@ -87,7 +91,8 @@ impl EventHub {
             .expect("one status event is pushed")
     }
 
-    /// One flush: semantic events first, then exactly one `status-changed`.
+    /// One flush: semantic events, then at most one `cursor-changed`, then at
+    /// most one `status-changed` (first flush or semantic change).
     pub fn flush(
         &mut self,
         status: &CadStatus,
@@ -101,10 +106,12 @@ impl EventHub {
     ///
     /// Order per flush, and it is the frozen one: the derived semantic events,
     /// then whatever `vendor` takes (at most one `vendor-pending`, then at most
-    /// one `vendor-settled`; see [`crate::vendor::take_event_kinds`]), then
-    /// **exactly one** `status-changed`. The vendor kinds are pushed **before**
-    /// the snapshot so a consumer that reacts to `vendor-pending` by calling
-    /// `cad_vendor_records` never sees a stale status first.
+    /// one `vendor-settled`; see [`crate::vendor::take_event_kinds`]), then at
+    /// most one `cursor-changed` for the volatile pair, then at most one
+    /// `status-changed` (the first flush, or a semantic change). The vendor kinds
+    /// are pushed **before** the snapshot so a consumer that reacts to
+    /// `vendor-pending` by calling `cad_vendor_records` never sees a stale status
+    /// first.
     ///
     /// `vendor` is called once per flush with the hub already borrowed; it must
     /// only take from a store (no re-entrant flush, no bus access).
@@ -122,12 +129,28 @@ impl EventHub {
         for kind in vendor() {
             emitted.extend(self.bus.push(kind));
         }
-        emitted.extend(
-            self.bus.push_status(
-                StatusFrame::new(status.clone(), profile.clone())
-                    .with_canvas(canvas.map(cad_ui_core::session::events::CanvasJson::new)),
-            ),
-        );
+        let volatile = self
+            .prev
+            .as_ref()
+            .is_some_and(|prev| cursor_changed(prev, status));
+        let semantic = self
+            .prev
+            .as_ref()
+            .is_none_or(|prev| !same_status_ignoring_volatile(prev, status));
+        if volatile {
+            emitted.extend(self.bus.push(CadEventKind::CursorChanged {
+                cursor_world: status.cursor_world,
+                frame_count: status.frame_count,
+            }));
+        }
+        if semantic {
+            emitted.extend(
+                self.bus.push_status(
+                    StatusFrame::new(status.clone(), profile.clone())
+                        .with_canvas(canvas.map(cad_ui_core::session::events::CanvasJson::new)),
+                ),
+            );
+        }
         self.prev = Some(status.clone());
         emitted
     }
@@ -252,11 +275,9 @@ mod tests {
             value["status"]["hostProfile"]["surfaceMode"],
             serde_json::json!("dom-canvas")
         );
-        // The baseline is recorded: an unchanged first flush derives nothing.
+        // The baseline is recorded: an unchanged first flush emits nothing.
         let flush = hub.flush(&status(), &HostProfile::dom_canvas(), None);
-        assert_eq!(flush.len(), 1);
-        assert_eq!(flush[0].revision, 2);
-        assert!(matches!(flush[0].kind, CadEventKind::StatusChanged { .. }));
+        assert!(flush.is_empty(), "{flush:?}");
     }
 
     #[test]
@@ -351,10 +372,91 @@ mod tests {
         assert_eq!(events.first().expect("events").revision, 2);
         assert_eq!(events.last().expect("events").revision, 5);
 
-        // `flush` itself still carries no vendor kinds: it is the wrapper a caller
-        // with no store uses.
+        // `flush` itself carries no vendor kinds; the next tick is unchanged, so
+        // it emits nothing at all (semantic status was already delivered).
         let plain = hub.flush(&next, &HostProfile::dom_canvas(), None);
-        assert_eq!(plain.len(), 1);
-        assert!(matches!(plain[0].kind, CadEventKind::StatusChanged { .. }));
+        assert!(plain.is_empty(), "{plain:?}");
+    }
+
+    #[test]
+    fn a_volatile_only_flush_emits_one_cursor_changed_and_no_status() {
+        let mut hub = EventHub::new();
+        hub.initial(&status(), &HostProfile::dom_canvas(), None);
+
+        let mut next = status();
+        next.frame_count = 21;
+        next.cursor_world = Some([1.0, -2.5, 0.0]);
+        let events = hub.flush(&next, &HostProfile::dom_canvas(), None);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].revision, 2);
+        assert!(matches!(
+            &events[0].kind,
+            CadEventKind::CursorChanged {
+                cursor_world: Some([1.0, -2.5, 0.0]),
+                frame_count: 21
+            }
+        ));
+        let json = serde_json::to_value(&events[0]).expect("serializes");
+        assert_eq!(json["type"], serde_json::json!("cursor-changed"));
+        assert_eq!(json["cursorWorld"], serde_json::json!([1.0, -2.5, 0.0]));
+        assert_eq!(json["frameCount"], serde_json::json!(21));
+
+        // The same volatile pair again: nothing new.
+        assert!(hub
+            .flush(&next, &HostProfile::dom_canvas(), None)
+            .is_empty());
+    }
+
+    #[test]
+    fn a_semantic_plus_volatile_flush_orders_derived_cursor_then_status() {
+        let mut hub = EventHub::new();
+        hub.initial(&status(), &HostProfile::dom_canvas(), None);
+
+        let mut next = status();
+        next.selection.count = 2;
+        next.frame_count = 30;
+        next.cursor_world = Some([4.0, 5.0, 0.0]);
+        let events = hub.flush(&next, &HostProfile::dom_canvas(), None);
+        let kinds: Vec<_> = events
+            .iter()
+            .map(|event| match &event.kind {
+                CadEventKind::SelectionChanged { .. } => "selection-changed",
+                CadEventKind::CursorChanged { .. } => "cursor-changed",
+                CadEventKind::StatusChanged { .. } => "status-changed",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            ["selection-changed", "cursor-changed", "status-changed"]
+        );
+        assert_eq!(events[0].revision, 2);
+        assert_eq!(events[2].revision, 4);
+    }
+
+    #[test]
+    fn a_flush_with_vendor_orders_cursor_changed_before_the_optional_status() {
+        let mut hub = EventHub::new();
+        hub.initial(&status(), &HostProfile::dom_canvas(), None);
+
+        let mut next = status();
+        next.frame_count = 7;
+        let events = hub.flush_with_vendor(&next, &HostProfile::dom_canvas(), None, || {
+            vec![CadEventKind::VendorPending {
+                token: 3,
+                generation: 3,
+                entities: 1,
+            }]
+        });
+        let kinds: Vec<_> = events
+            .iter()
+            .map(|event| match &event.kind {
+                CadEventKind::VendorPending { .. } => "vendor-pending",
+                CadEventKind::CursorChanged { .. } => "cursor-changed",
+                CadEventKind::StatusChanged { .. } => "status-changed",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, ["vendor-pending", "cursor-changed"]);
     }
 }

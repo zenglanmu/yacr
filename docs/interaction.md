@@ -119,8 +119,8 @@ snap），**不**进入 `OverlayInputs`/场景准备/发布/commit，也**不**�
 **系统光标置空的条件**：**只在宿主确实在画十字时**。`cad_status.crosshair: bool` 取自宿主的单一
 2D cursor 源 `HostCore::cursor_world()`（与喂给 `cursor_geometry` 的源相同，ADR 0028），React 侧据此加
 `.is-crosshair` 类；缺失该字段时**保留箭头**（不猜）。**3D 视图永远保留系统箭头**——transient 没有 2D
-工作平面，`cursor_world()` 返回 `None`，故**不**画十字，也**不**置空。状态通过 push 事件到达（当前每
-tick 一份 `status-changed`；语义化 + `cursor-changed` 的节流是后续独立改动）。
+工作平面，`cursor_world()` 返回 `None`，故**不**画十字，也**不**置空。状态通过 push 事件到达：
+`status-changed` 只在语义变化时发送，`cursorWorld`/`frameCount` 走 `cursor-changed`。
 
 **对象捕捉标记**：**按像素**定尺寸（`SNAP_MARKER_HALF_EXTENT_PIXELS = 9.0` ⇒ 字形 18 逻辑像素；`PreviewOptions::for_view_scale` 在构造点换算，非有限/非正视图比例回退到文档化的世界默认，**永不**产出 0/NaN）。拾取框 6 px ⇒ **3:1**（与 AutoCAD 同量级：捕捉字形是"大形状"、拾取框是小方块）。**字形按 AutoCAD 约定**：端点=方块、**中点=三角**、圆心=圆、**象限=菱形**、**垂足=⊥**、交点=X（每种类型的精确线段集合由 `snap_marker_glyphs_match_autocad_per_kind` 钉住，将来再对调会失败）。**绘制层级高于十字**（`SNAP_HINT_DRAW_ORDER = 3_000_000` > 光标 2_500 000），因为**标记才是用户在捕捉点要读的东西**；十字仍在工具预览（2 000 000）之上，故橡皮筋不会挡住它锚定的指针。
 

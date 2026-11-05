@@ -14,6 +14,7 @@
 //! {"revision": 14, "type": "error-raised", "error": "<verbatim host string>"}
 //! {"revision": 15, "type": "popup-changed", "popup": null}
 //! {"revision": 16, "type": "events-dropped", "count": 3}
+//! {"revision": 17, "type": "cursor-changed", "cursorWorld": [1, 2, 0], "frameCount": 42}
 //! ```
 //!
 //! [`CadEvent`] flattens [`CadEventKind`], which is internally tagged by `type`
@@ -21,13 +22,17 @@
 //! The enum is `#[non_exhaustive]`: a consumer must ignore an unknown `type`
 //! instead of failing on it, which is what lets a later event be additive.
 //!
-//! # `status-changed` is per rendered frame, not a diff
+//! # `status-changed` is semantic; `cursor-changed` is the volatile cadence
 //!
-//! Per the frozen decision, every flush emits **one** `status-changed` carrying
-//! the complete status envelope ([`StatusFrame`]: the flattened [`CadStatus`] plus
-//! `hostProfile` and the optional `canvasSession`, byte-identical to `cad_status`).
-//! There is deliberately no diff gate: `frameCount`/`cursorWorld` ride this event,
-//! so no separate `frame-advanced`/`cursor-moved` events exist.
+//! The first flush (subscribe / first owner tick) emits **one full
+//! `status-changed`** carrying the complete status envelope ([`StatusFrame`]: the
+//! flattened [`CadStatus`] plus `hostProfile` and the optional `canvasSession`,
+//! byte-identical to `cad_status`). Every later flush emits a full status only
+//! when something **other than** `frame_count`/`cursor_world` changed (see
+//! [`same_status_ignoring_volatile`]); the two per-frame fields ride a small
+//! [`CadEventKind::CursorChanged`] event instead. That keeps the wire shape of
+//! `status-changed` unchanged while a purely visual move no longer re-renders a
+//! whole shell.
 //!
 //! [`derive_batch`] is the *other* half: it derives the semantic/lifecycle events
 //! (command, selection, tool, document, error, popup) from two status snapshots.
@@ -179,6 +184,20 @@ pub enum CadEventKind {
         /// The `WireStatus`-shaped status (flattened `CadStatus` + `hostProfile`
         /// + optional `canvasSession`).
         status: Box<StatusFrame>,
+    },
+    /// The two per-frame volatile fields changed (`cursorWorld` / `frameCount`).
+    ///
+    /// Emitted after the first full status and **instead of** a `status-changed`
+    /// when nothing semantic changed. Consumers update their leaf stores (cursor
+    /// readout / FPS sampler); it never pumps a frame and never replaces the shell
+    /// status. Never produced by [`derive_batch`].
+    CursorChanged {
+        /// The pointer's world position, or `null` when it is off the surface.
+        #[serde(rename = "cursorWorld")]
+        cursor_world: Option<[f64; 3]>,
+        /// The renderer's monotonic frame counter.
+        #[serde(rename = "frameCount")]
+        frame_count: u64,
     },
     /// A named selector was admitted (recorded in the host command log).
     ///
@@ -444,6 +463,28 @@ impl EventBus {
             sink.deliver(event);
         }
     }
+}
+
+/// Whether `previous` and `next` are identical apart from the two per-frame
+/// volatile fields (`frame_count`, `cursor_world`).
+///
+/// This is the Rust mirror of the frontend's `sameStatusIgnoringVolatile`: the
+/// shell/proxy uses it to decide whether a full `status-changed` is still needed
+/// after the first flush. A normalized clone is compared (no JSON round-trip), so
+/// field additions participate automatically.
+pub fn same_status_ignoring_volatile(previous: &CadStatus, next: &CadStatus) -> bool {
+    let mut previous = previous.clone();
+    let mut next = next.clone();
+    previous.frame_count = 0;
+    next.frame_count = 0;
+    previous.cursor_world = None;
+    next.cursor_world = None;
+    previous == next
+}
+
+/// Whether either per-frame volatile field changed.
+pub fn cursor_changed(previous: &CadStatus, next: &CadStatus) -> bool {
+    previous.cursor_world != next.cursor_world || previous.frame_count != next.frame_count
 }
 
 /// Derive the semantic/lifecycle events from two status snapshots.

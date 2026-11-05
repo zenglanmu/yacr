@@ -1,3 +1,24 @@
+## 2026-11-06 状态事件节流：语义 status-changed + cursor-changed（Phase 3）
+
+- **问题**：`StatusFrame` 以前每 tick/每 flush 都发一次完整 `CadStatus`（含 `hostProfile`），
+  `frameCount`/`cursorWorld` 搭这条事件；大图时 WebView 每帧解析/深比较整份 status，和
+  `pointermove` 争同一线程。
+- **实现**：
+  - Rust `same_status_ignoring_volatile(prev, next)`（排除 `frame_count`/`cursor_world`）+
+    `cursor_changed(prev, next)`；native `flush_events_current` 与 wasm `EventHub::flush_with_vendor`
+    统一规则：语义事件 → 可选 `cursor-changed` → 可选 `status-changed`（首次 flush 仍发完整
+    status；语义不变时不发 status；volatile 变化时才发 cursor-changed）。`StatusFrame` 形状/
+    `derive_batch`/订阅首帧/gap 恢复不变。
+  - `CadEventKind::CursorChanged { cursorWorld, frameCount }`（wire `cursor-changed`）。
+  - React `cad-events.ts` 解析/校验新帧；`use-cad-events.ts` 只更新状态栏坐标与 FPS leaf store，
+    重置 5 s stale timer，**不** `setStatus`/`observeCarrier`/pump。`status-changed` 仍走语义门。
+- **契约**：native/wasm 均有“unchanged tick 不发事件 / volatile-only 只发 cursor-changed /
+  语义+volatile 顺序”测试；parser accept/reject；hook 只触 leaf store；`StatusFrame` byte-identical
+  （wire goldens 4/4）。
+- **边界**：NOT RUN 完整 workspace、真实 GUI/web smoke；FPS 在真正静态窗口（无帧）仍会在 5 s 后
+  变 stale，这是诚实读数。revision 现在按**事件**递增，空 tick 不占 revision（旧日志里的“每帧
+  status”是历史证据）。
+
 ## 2026-11-06 光标移出场景提交链：renderer transient cursor（ADR 0028，Phase 2）
 
 Phase 1（commit `ca18512`）把 run-free suffix commit 的 O(场景) 工作去掉后，光标仍属于

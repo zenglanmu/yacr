@@ -8,35 +8,37 @@
 //!   [`Shared::window`] (set by each host's `host/init.rs`), emitting the
 //!   `"cad_event"` event the React listener subscribes to.
 //! * [`flush_events_current`] is the session-independent flush the owner tick
-//!   calls: it derives the semantic batch against the previous flush, pushes
-//!   those **first**, then exactly one `status-changed`, releases the lock, and
-//!   only then delivers every event. It projects the same status `cad_status`
-//!   answers (host error + live popup included) even before a session exists, so
-//!   probe mode, the lazy-session window and a creation failure all keep the push
-//!   channel truthful.
+//!   calls. It derives the semantic batch against the previous flush, pushes
+//!   those **first**, then (after the vendor events) a small `cursor-changed`
+//!   when only the volatile pair changed, then the full `status-changed` only on
+//!   the first flush or a semantic change; it releases the lock and only then
+//!   delivers every event. It projects the same status `cad_status` answers (host
+//!   error + live popup included) even before a session exists, so probe mode, the
+//!   lazy-session window and a creation failure all keep the push channel
+//!   truthful.
 //!
-//! # Acceptance of the `emit` cost
+//! # Cadence (ADR 0028 phase 3)
 //!
-//! Emitting the **full** status every rendered frame (≈60 Hz on the native hosts)
-//! is deliberate: the alternative was a subscription-gating Tauri command, which
-//! would need a second IPC round-trip and a host-side subscriber registry. One
-//! `status-changed` is ≈2–25 KB of JSON (the command log and selection rows are
-//! the variable part), so a steady 60 Hz stream is ≈0.1–1.5 MB/s of webview IPC.
-//! The in-process ring retains the last
-//! [`EVENT_RING_CAPACITY`](cad_ui_core::session::events::EVENT_RING_CAPACITY) full events
-//! (≈0.5–6 MB) as a replay window; it is not the webview queue.
+//! The **first** flush emits one full `status-changed` (the wire shape is
+//! unchanged: ≈2–25 KB of JSON, command log/selection rows are the variable part).
+//! Later flushes emit:
 //!
-//! The per-frame status is emitted even when nothing changed: that is how
-//! `frameCount`/`cursorWorld` travel. An unchanged status derives **no** semantic
-//! events (`derive_batch` sees identical public fields), so the idle case is one
-//! `status-changed` per frame and nothing else. There is **no polling timer** here
-//! — the owner tick is the only producer.
+//! * semantic events from [`derive_batch`] (unchanged),
+//! * at most one `cursor-changed { cursorWorld, frameCount }` when either
+//!   volatile field moved,
+//! * at most one `status-changed` only when something **semantic** changed
+//!   ([`same_status_ignoring_volatile`]).
 //!
-//! The wire shape is unchanged, but the React consumer **digests** it
-//! (`apps/desktop-ui/src/cad/use-cad-events.ts`): only a semantic change calls
-//! `setStatus`, while `cursorWorld` and `frameCount` go to two leaf stores
-//! (`cad/status-cadence.ts`). A status frame is therefore not, by itself, a
-//! whole-shell re-render; the emitter still sends one per rendered frame.
+//! An idle renderer therefore emits a tiny `cursor-changed` per presented frame,
+//! not a full status; a truly static tick emits nothing. The in-process ring
+//! retains the last
+//! [`EVENT_RING_CAPACITY`](cad_ui_core::session::events::EVENT_RING_CAPACITY)
+//! events as a replay window; it is not the webview queue. There is **no polling
+//! timer** here — the owner tick is the only producer.
+//!
+//! The React consumer (`apps/desktop-ui/src/cad/use-cad-events.ts`) applies a
+//! semantic status to the shell and feeds `cursorWorld`/`frameCount` from
+//! `cursor-changed` to two leaf stores (`cad/status-cadence.ts`).
 //!
 //! # Status bytes
 //!
@@ -50,7 +52,8 @@
 use std::sync::{Arc, Mutex};
 
 use cad_ui_core::session::events::{
-    derive_batch, CadEvent, CadEventKind, CanvasJson, EventSink, StatusFrame,
+    cursor_changed, derive_batch, same_status_ignoring_volatile, CadEvent, CadEventKind,
+    CanvasJson, EventSink, StatusFrame,
 };
 use cad_ui_core::session::{unsupported_status, CadStatus, HostProfile};
 use cad_ui_core::shell::{projected_popup, projected_status};
@@ -101,7 +104,17 @@ pub fn flush_events_current<C: Serialize>(
         let mut state = lock(shared);
         state.ensure_event_sink();
         let status = project_current_status(&state);
-        let batch = derive_batch(state.events_prev.as_ref(), &status);
+        // Clone the baseline so the pushes below can borrow `state` mutably.
+        let previous = state.events_prev.clone();
+        let batch = derive_batch(previous.as_ref(), &status);
+        // The volatile pair rides its own small event; a full status is only
+        // needed on the first flush or a semantic change (ADR 0028 phase 3).
+        let volatile = previous
+            .as_ref()
+            .is_some_and(|prev| cursor_changed(prev, &status));
+        let semantic = previous
+            .as_ref()
+            .is_none_or(|prev| !same_status_ignoring_volatile(prev, &status));
         let closed = batch
             .iter()
             .any(|kind| matches!(kind, CadEventKind::DocumentClosed));
@@ -130,11 +143,20 @@ pub fn flush_events_current<C: Serialize>(
                 diagnostics: ack.diagnostics,
             }));
         }
-        let frame = StatusFrame::new(status.clone(), profile.clone())
-            .with_canvas(canvas.map(CanvasJson::new));
-        emitted.extend(state.events.push_quiet(CadEventKind::StatusChanged {
-            status: Box::new(frame),
-        }));
+        // Order: derived semantic events, vendor events, cursor-changed, status.
+        if volatile {
+            emitted.extend(state.events.push_quiet(CadEventKind::CursorChanged {
+                cursor_world: status.cursor_world,
+                frame_count: status.frame_count,
+            }));
+        }
+        if semantic {
+            let frame = StatusFrame::new(status.clone(), profile.clone())
+                .with_canvas(canvas.map(CanvasJson::new));
+            emitted.extend(state.events.push_quiet(CadEventKind::StatusChanged {
+                status: Box::new(frame),
+            }));
+        }
         state.events_prev = Some(status);
         (emitted, state.events.sink_handles())
     };
@@ -210,6 +232,7 @@ mod tests {
                 CadEventKind::VendorPending { .. } => "vendor-pending",
                 CadEventKind::VendorSettled { .. } => "vendor-settled",
                 CadEventKind::EventsDropped { .. } => "events-dropped",
+                CadEventKind::CursorChanged { .. } => "cursor-changed",
                 _ => "unknown",
             })
             .collect()
@@ -234,10 +257,72 @@ mod tests {
         assert!(status.document_label.is_none());
         assert_eq!(status.entity_count, None);
 
-        // An unchanged second tick: exactly one per-frame `status-changed`.
+        // An unchanged second tick emits nothing: the first flush already
+        // delivered the full status (`frameCount`/`cursorWorld` ride a separate
+        // `cursor-changed` only when they actually change).
         let second = flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
-        assert_eq!(kinds(&second), ["status-changed"]);
-        assert_eq!(second[0].revision, 2);
+        assert!(
+            second.is_empty(),
+            "an unchanged tick emits no event: {second:?}"
+        );
+    }
+
+    #[test]
+    fn a_volatile_only_tick_emits_one_cursor_changed_and_no_status() {
+        let shared = shared();
+        flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
+
+        let mut next = unsupported_status(None);
+        next.frame_count = 9;
+        next.cursor_world = Some([1.5, -2.0, 0.0]);
+        lock(&shared).shell.cad_status = Some(next.clone());
+        let events = flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
+        assert_eq!(kinds(&events), ["cursor-changed"], "{events:?}");
+        assert!(matches!(
+            &events[0].kind,
+            CadEventKind::CursorChanged {
+                cursor_world: Some([1.5, -2.0, 0.0]),
+                frame_count: 9
+            }
+        ));
+        assert_eq!(events[0].revision, 2);
+
+        // The same volatile pair again: nothing new to report.
+        let again = flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
+        assert!(again.is_empty(), "{again:?}");
+    }
+
+    #[test]
+    fn a_semantic_plus_volatile_tick_orders_semantic_then_cursor_then_status() {
+        let shared = shared();
+        flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
+
+        let mut next = unsupported_status(None);
+        next.frame_count = 12;
+        next.cursor_world = Some([3.0, 4.0, 5.0]);
+        next.selection.count = 2;
+        next.selection.empty = false;
+        next.error = Some("boom".to_string());
+        lock(&shared).shell.cad_status = Some(next.clone());
+        let events = flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
+        assert_eq!(
+            kinds(&events),
+            [
+                "selection-changed",
+                "error-raised",
+                "cursor-changed",
+                "status-changed"
+            ]
+        );
+        // Revisions are strictly +1 and the full status is last (byte-identical
+        // `StatusFrame`, same projection as `cad_status`).
+        assert!(events
+            .windows(2)
+            .all(|pair| pair[0].revision + 1 == pair[1].revision));
+        let frame = status_of(&events);
+        assert_eq!(frame.status.selection.count, 2);
+        assert_eq!(frame.status.error.as_deref(), Some("boom"));
+        assert_eq!(frame.status.frame_count, 12);
     }
 
     #[test]

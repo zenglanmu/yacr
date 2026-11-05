@@ -93,8 +93,8 @@ pub use self::commands::{
     ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
 pub use self::events::{
-    derive_batch, CadEvent, CadEventKind, CanvasJson, EventBus, EventSink, StatusFrame,
-    EVENT_RING_CAPACITY,
+    cursor_changed, derive_batch, same_status_ignoring_volatile, CadEvent, CadEventKind,
+    CanvasJson, EventBus, EventSink, StatusFrame, EVENT_RING_CAPACITY,
 };
 pub use self::fonts::{CadFont, CadFonts};
 pub use self::layers::{CadLayer, CadLayerColor, CadLayerWrite, CadLayers};

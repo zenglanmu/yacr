@@ -76,9 +76,11 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 - **`cad-db` 权威每种载体只有一份**：`dom-canvas` 上 native 壳不得实例化第二份文档、不得镜像/缓存
   文档状态（铁律 8）；`native-below` 上 wasm 会话不得运行（Android 的 `dom-canvas` transport 有
   `surfaceMode` 门）。任何路径都不得同时有两个 presenter 画同一块像素。
-- **事件是 push**：共享 `cad_event` 通道每次 flush/帧推送一条携带完整状态的 `status-changed`，语义
-  事件（命令准入/拒绝、选择、工具步、文档、错误、弹窗、丢事件）另行推送；`cad_status` 只用于
-  订阅/bootstrap 与 gap 恢复，**前端不轮询**。
+- **事件是 push**：共享 `cad_event` 通道推送语义事件与 `status-changed`；`status-changed` 现在只在
+  **首次 flush / 语义字段变化**时发送完整状态，`frameCount`/`cursorWorld` 这两个每帧字段改走轻量
+  `cursor-changed`。语义事件（命令准入/拒绝、选择、工具步、文档、错误、弹窗、丢事件）另行推送；
+  `cad_status` 只用于订阅/bootstrap 与 gap 恢复，**前端不轮询**。revision 现在按**事件**递增，空
+  tick 不占 revision。
 - 既有不变量（输入单一漏斗、renderer-only wgpu、无整幅回读、单 presenter、弹窗模态围栏）在两种
   载体上都成立，只是像素机制不同。
 

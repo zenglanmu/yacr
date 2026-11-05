@@ -7,14 +7,14 @@
 //
 // # The rules this effect owns
 //
-// * **One producer, two cadences.** Every `status-changed` frame is consumed, but
-//   only a **semantic** change feeds `setStatus` (the whole shell tree); the two
-//   genuinely per-frame fields go to the leaf store
-//   (`cad/status-cadence.ts`): `cursorWorld` to the status-bar readout and
-//   `frameCount` to the FPS sampler. A frame that differs only in those two is
-//   not a shell re-render. A transport failure feeds `setPollError` (the
-//   historical slot name is kept so the banner precedence in `App.tsx` is
-//   unchanged). There is no timer that asks for status in steady state.
+// * **One producer, two cadences.** A `status-changed` frame is semantic: it feeds
+//   `setStatus` (the whole shell tree) and the leaf stores. The per-frame volatile
+//   pair travels on its own tiny `cursor-changed` frame instead
+//   (`cursorWorld` to the status-bar readout, `frameCount` to the FPS sampler via
+//   `cad/status-cadence.ts`); it never feeds `setStatus`, the carrier, or the pump.
+//   A transport failure feeds `setPollError` (the historical slot name is kept so
+//   the banner precedence in `App.tsx` is unchanged). There is no timer that asks
+//   for status in steady state.
 // * **Carrier bootstrap, unchanged.** A `tauri` build subscribes through the
 //   native event source first; its first snapshot carries
 //   `hostProfile.surfaceMode`, which goes to `observeCarrier` once per status. If
@@ -24,12 +24,13 @@
 //   native `CadSession` and answers `native-below`, so nothing flips); a `web`
 //   build starts on the wasm route. Both are routed by the same table.
 // * **Frames are pumped only by semantic events.** A per-frame `status-changed`
-//   event plus a pump would keep asking for frames forever; frames are pumped by
-//   commands, selection, tool steps, document changes, host errors and popups -
-//   never by a status frame.
-// * **FPS reads the snapshot.** `status.frameCount` arrives with every frame's
-//   status, so the sampler keeps its own cadence; an unchanged counter is handled
-//   by `createFpsSampler`, and five seconds without a status resets the reading.
+//   or `cursor-changed` event plus a pump would keep asking for frames forever;
+//   frames are pumped by commands, selection, tool steps, document changes, host
+//   errors and popups - never by the status/cursor cadence.
+// * **FPS reads the volatile cadence.** `frameCount` arrives with every
+//   `cursor-changed` (and the first status), so the sampler keeps its own
+//   cadence; an unchanged counter is handled by `createFpsSampler`, and five
+//   seconds without a status/cursor frame resets the reading.
 import { useEffect, useRef } from 'react';
 import { cadEventRoute, cadEventSource } from '../host/invoke.ts';
 import { cadEventPumpsFrames } from './cad-events.ts';
@@ -81,17 +82,26 @@ export function useCadEvents(handlers: CadEventHandlers): void {
     };
     document.addEventListener('visibilitychange', resetFps);
 
+    /** Publish the two volatile fields to their leaf stores (never the shell). */
+    const publishVolatile = (
+      cursorWorld: CadStatus['cursorWorld'],
+      frameCount: number,
+      active: boolean,
+    ): void => {
+      live.current.setCursor(cursorWorld);
+      live.current.setFps(sampler.sample(frameCount, performance.now(), active));
+      clearTimeout(staleTimer);
+      if (active) staleTimer = setTimeout(resetFps, 5000);
+    };
+
     const setStatus = (next: CadStatus): void => {
       live.current.setPollError('');
-      clearTimeout(staleTimer);
-      // The two per-frame fields go to their leaf readers every frame.
-      live.current.setCursor(next.cursorWorld);
-      live.current.setFps(sampler.sample(
+      // The two per-frame fields go to their leaf readers every status frame.
+      publishVolatile(
+        next.cursorWorld,
         next.frameCount,
-        performance.now(),
         Boolean(next && !next.error && !document.hidden),
-      ));
-      if (!next.error && !document.hidden) staleTimer = setTimeout(resetFps, 5000);
+      );
       // Everything else is semantic state: apply it immediately, and skip the
       // full-shell re-render for a frame that differs only in the volatile pair.
       if (sameStatusIgnoringVolatile(lastApplied, next)) return;
@@ -108,6 +118,12 @@ export function useCadEvents(handlers: CadEventHandlers): void {
         // Observe first: an X11 host's first answer moves the route to the wasm
         // adapter, and the live subscription must follow in the same turn.
         connect();
+        return;
+      }
+      if (frame.type === 'cursor-changed') {
+        // Volatile-only cadence: leaf stores and the stale timer, nothing else.
+        // It never touches the shell status, the carrier route or the frame pump.
+        publishVolatile(frame.cursorWorld, frame.frameCount, !document.hidden);
         return;
       }
       if (frame.type === 'vendor-pending') {

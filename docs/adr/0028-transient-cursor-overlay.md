@@ -111,5 +111,6 @@ suffix commit 的 `commit_us` p50 从 19.95 ms 降到 2.16 ms，`frame_total` p5
 ## 5. 未决
 
 - snap hints 是否同批 transient 化（先测量，再单独 ADR/契约）。
-- 状态事件的 wire 节流（`status-changed` 语义化 + `cursor-changed` 轻量事件）是独立改动，
-  不在本 ADR 的实现范围。
+- 状态事件的 wire 节流（`status-changed` 语义化 + `cursor-changed` 轻量事件）已在 Phase 3 独立落地：
+  首次 flush/语义变化发完整 status，`frameCount`/`cursorWorld` 走 `cursor-changed`；wire `StatusFrame`
+  形状不变。本 ADR 只负责 cursor 的所有权与绘制路径。

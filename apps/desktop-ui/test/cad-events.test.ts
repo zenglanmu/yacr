@@ -131,6 +131,14 @@ test('the frame union parses every modelled type and ignores an unknown one', ()
     parseCadEventFrame({ ...base, type: 'events-dropped', count: 3 }),
     { revision: 3, type: 'events-dropped', count: 3 },
   );
+  assert.deepEqual(
+    parseCadEventFrame({ ...base, type: 'cursor-changed', cursorWorld: [1, 2.5, -3], frameCount: 42 }),
+    { revision: 3, type: 'cursor-changed', cursorWorld: [1, 2.5, -3], frameCount: 42 },
+  );
+  assert.deepEqual(
+    parseCadEventFrame({ ...base, type: 'cursor-changed', cursorWorld: null, frameCount: 0 }),
+    { revision: 3, type: 'cursor-changed', cursorWorld: null, frameCount: 0 },
+  );
   // A newer host may add a frame: the type is ignored, and this build keeps going.
   assert.equal(parseCadEventFrame({ revision: 4, type: 'layer-changed', layer: '0' }), null);
   // Malformed known frames are loud, never coerced into a plausible value.
@@ -147,6 +155,13 @@ test('the frame union parses every modelled type and ignores an unknown one', ()
     { revision: 1, type: 'command-rejected', command: '', code: 'zoom.argument_required' },
     { revision: 1, type: 'command-admitted', command: '' },
     { revision: 1, type: 'status-changed', status: {} },
+    // `cursor-changed`: exactly 3 finite coordinates or null, safe frame count.
+    { revision: 1, type: 'cursor-changed', cursorWorld: [1, 2], frameCount: 3 },
+    { revision: 1, type: 'cursor-changed', cursorWorld: [1, NaN, 3], frameCount: 3 },
+    { revision: 1, type: 'cursor-changed', cursorWorld: ['1', 2, 3], frameCount: 3 },
+    { revision: 1, type: 'cursor-changed', cursorWorld: [1, 2, 3], frameCount: -1 },
+    { revision: 1, type: 'cursor-changed', cursorWorld: [1, 2, 3], frameCount: 1.5 },
+    { revision: 1, type: 'cursor-changed', cursorWorld: [1, 2, 3] },
   ]) {
     assert.throws(() => parseCadEventFrame(bad), /CAD_EVENT_INVALID|CAD_STATUS_INVALID/);
   }
@@ -315,8 +330,9 @@ test('a malformed event is a transport error (close + backoff), never a silent s
   assert.equal(frames.length, 1, 'no fabricated frame from the broken payload');
 });
 
-test('status frames never pump; every semantic frame does', () => {
+test('status and cursor frames never pump; every semantic frame does', () => {
   assert.equal(cadEventPumpsFrames('status-changed'), false);
+  assert.equal(cadEventPumpsFrames('cursor-changed'), false);
   assert.equal(cadEventPumpsFrames('events-dropped'), false);
   for (const type of [
     'command-admitted', 'command-rejected', 'selection-changed', 'tool-step',
@@ -460,4 +476,43 @@ test('the carrier flip closes the native subscription and re-subscribes through 
   // the event listener - the same table, not a second one.
   assert.match(seam, /return invokeRoute\(RUNTIME, 'cad_status', isTauri\(\), carrierNow\(\)\);/);
   assert.match(seam, /route === 'tauri'[\s\S]*createTauriEventSource\(invoke, listenCadEvents\)[\s\S]*createWasmEventSource\(\(\) => loadWebShellModule\(\)\)/);
+});
+
+test('cursor-changed drives only the leaf stores, never the shell, carrier or pump', async () => {
+  const hook = await readFile(new URL('../src/cad/use-cad-events.ts', import.meta.url), 'utf8');
+  assert.equal(cadEventPumpsFrames('cursor-changed'), false);
+
+  const marker = "if (frame.type === 'cursor-changed')";
+  const start = hook.indexOf(marker);
+  assert.ok(start > 0, 'the hook handles cursor-changed');
+  const end = hook.indexOf("if (frame.type === 'vendor-pending')", start);
+  assert.ok(end > start, 'the branch precedes the vendor handler');
+  const branch = hook.slice(start, end);
+  assert.match(branch, /publishVolatile\(frame\.cursorWorld, frame\.frameCount, !document\.hidden\)/);
+  assert.ok(branch.includes('return;'), 'the branch returns before the pump check');
+  for (const forbidden of ['setStatus(', 'observeCarrier', 'connect(', 'pump(']) {
+    assert.ok(!branch.includes(forbidden), `cursor-changed must not call ${forbidden}`);
+  }
+  assert.ok(
+    start < hook.indexOf('cadEventPumpsFrames(frame.type)'),
+    'cursor-changed is handled before the pump check',
+  );
+  // `status-changed` keeps its semantic gate, and the volatile helper resets the
+  // same 5 s stale timer used by the status path.
+  assert.ok(hook.includes('sameStatusIgnoringVolatile(lastApplied, next)'));
+  const helperStart = hook.indexOf('const publishVolatile');
+  const helperEnd = hook.indexOf('const setStatus', helperStart);
+  assert.ok(helperStart > 0 && helperEnd > helperStart, 'one shared volatile publisher');
+  const helper = hook.slice(helperStart, helperEnd);
+  assert.ok(helper.includes('live.current.setCursor(cursorWorld)'));
+  assert.ok(helper.includes('sampler.sample(frameCount, performance.now(), active)'));
+  assert.ok(helper.includes('staleTimer = setTimeout(resetFps, 5000)'));
+  assert.ok(helper.includes('if (active)'), 'the timer is armed only while visible/healthy');
+  // A truly static window therefore lets `resetFps` clear the reading after 5 s.
+  const resetStart = hook.indexOf('const resetFps');
+  const resetEnd = hook.indexOf('document.addEventListener', resetStart);
+  const reset = hook.slice(resetStart, resetEnd);
+  assert.ok(reset.includes('sampler.reset()'));
+  assert.ok(reset.includes('live.current.setFps(null)'));
+  assert.ok(hook.includes('document.addEventListener(\'visibilitychange\', resetFps)'));
 });
