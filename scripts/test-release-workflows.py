@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Contract tests for the re-enabled release packaging jobs.
 
-The five platform release jobs (``linux-release``, ``windows-release``,
-``macos-release``, ``android-apk``, ``android-release``) were hard-disabled
+The four platform release jobs (``linux-release``, ``windows-release``,
+``macos-release``, ``android-release``) were hard-disabled
 during the Slint removal. They are re-enabled (2026-11-01) for the current
 React/Tauri hosts as **event-gated artifact builders**: a ``v*`` tag or a manual
 ``workflow_dispatch`` may run them; a routine push/PR may not. They upload
@@ -43,7 +43,6 @@ PUBLISH_ARTIFACTS = (
     "yacr-windows-release",
     "yacr-windows-release-unsigned",
     "yacr-macos-release",
-    "android-apk-debug",
     "android-release",
     "android-release-unsigned",
 )
@@ -68,7 +67,6 @@ RELEASE_JOBS = {
     "linux-release": "scripts/package-linux-release.sh",
     "windows-release": "scripts/package-windows-release.sh",
     "macos-release": "scripts/package-macos-release.sh",
-    "android-apk": "scripts/build-android.sh",
     "android-release": "scripts/build-android.sh",
 }
 
@@ -184,16 +182,19 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn(".flatpak.gpg", block)
         self.assertIn("UNSIGNED", block)
 
-    def test_android_jobs_build_the_intended_variant(self):
-        self.assertIn("--debug", self.block("android-apk"))
-        self.assertIn("--release", self.block("android-release"))
-        for job in ("android-apk", "android-release"):
-            with self.subTest(job=job):
-                block = self.block(job)
-                self.assertIn("ndk;29.0.13846066", block)
-                self.assertIn("setup-java@v4", block)
-                self.assertIn("java-version: \"17\"", block)
-        self.assertIn("UNSIGNED", self.block("android-release"))
+    def test_the_only_ci_android_artifact_is_the_release_variant(self):
+        # The debug APK stays a local `build-android.sh --debug` product; a CI
+        # debug job doubles build time without a verification claim.
+        build = BUILD.read_text()
+        self.assertNotIn("android-apk:", build)
+        self.assertNotIn("android-apk-debug", build)
+        self.assertNotIn("--debug --target aarch64", build)
+        block = self.block("android-release")
+        self.assertIn("--release", block)
+        self.assertIn("ndk;29.0.13846066", block)
+        self.assertIn("setup-java@v4", block)
+        self.assertIn("java-version: \"17\"", block)
+        self.assertIn("UNSIGNED", block)
 
     def test_windows_and_macos_build_the_react_frontend_first(self):
         # The packaging scripts build desktop-ui/dist, which tauri::generate_context!
@@ -264,7 +265,6 @@ class PublishWorkflowContracts(unittest.TestCase):
             "android-release-unsigned",
             "app-universal-release.apk",
             "app-universal-release-unsigned.apk",
-            "*.apk.idsig",
             "*.apk.sha256",
             "*.flatpak.gpg",
         ):
@@ -285,7 +285,9 @@ class PublishWorkflowContracts(unittest.TestCase):
         self.assertIn("release-assets", text)
         self.assertNotIn("mkdir -p assets", text)
         self.assertNotRegex(text, r"(?<![\w-])assets/\*")
-        self.assertIn("release-assets/app-universal-debug.apk", text)
+        self.assertIn("release-assets/app-universal-release.apk", text)
+        self.assertIn("release-assets/SIGNING.txt", text)
+        self.assertNotIn("app-universal-debug.apk", text)
         self.assertIn("release-assets/*.tar.gz", text)
 
     def test_publisher_never_builds_or_signs(self):

@@ -225,7 +225,7 @@ artifact，绝不谎称已签名（运行手册见 `docs/code-signing.md`）：
 | `scripts/package-linux-release.sh` | **可用（2026-10-17 重启）**——Flatpak bundle（`bin/yacr` + committed `fonts/`，运行时 `org.gnome.Platform//51`），产出 `target/release/dist/yacr-<version>-linux-<arch>.flatpak` + `.sha256`。CI `linux-release` 已重新启用（event-gated）；配置 `FLATPAK_GPG_*` 时对 OSTree commit 做 GPG 签名并附 `*.flatpak.gpg`，否则未签名。**未发布 Flathub** |
 | `scripts/package-windows-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 `cargo build -p app-windows --features tauri/custom-protocol`（MSVC 静态 CRT），产出 `target/x86_64-pc-windows-msvc/release/dist/*.zip` + `.sha256`；PE 机器类型/图标/非系统 DLL 检查失败即中止。CI `windows-release` 在自签 PFX 存在时用 `signtool` 对 `bin/yacr-windows.exe`、`bin/cad-cli-tools.exe` 做 Authenticode 签名并附 `bin/yacr-dev-codesign.cer`（artifact `yacr-windows-release`），否则上传 `yacr-windows-release-unsigned`；**打包/签名 ≠ 运行/视觉验收** |
 | `scripts/package-macos-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 universal `cargo build -p app-macos --features tauri/custom-protocol` + `lipo`，产出 `Yacr.app` 的 `*.tar.gz` + `.sha256`；Mach-O 只允许系统库，`CFBundleIdentifier=io.github.zenglanmu.yacr`。**ad-hoc 签名（`MACOS_SIGN_IDENTITY` 可覆盖）/未公证** |
-| `scripts/build-android.sh` | **可用（2026-10-28 起；2026-11-01 起构建原生 `native-below` 载体）**——`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome）再 Gradle；**本地 release APK 默认未签名**。CI `android-apk`（debug）与 `android-release`（release；自持 keystore 存在时签名 `zipalign` 后的 APK，否则 `android-release-unsigned`）已重新启用（event-gated） |
+| `scripts/build-android.sh` | **可用（2026-10-28 起；2026-11-01 起构建原生 `native-below` 载体）**——`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome）再 Gradle；**本地 release APK 默认未签名**。CI 只保留 `android-release`（release；自持 keystore 存在时签名 `zipalign` 后的 APK，否则 `android-release-unsigned`）；debug APK 仅本地 `--debug` 构建 |
 
 平台包状态（源码级）：
 
@@ -249,8 +249,8 @@ artifact，绝不谎称已签名（运行手册见 `docs/code-signing.md`）：
   **不实例化**。构建需要 SDK/NDK（`ndkVersion = "29.0.13846066"`）/JDK 17：本地
   `bash scripts/build-android.sh --release --target aarch64`（release 未签名）或 `--debug --target
   x86_64`；仓库 `fonts/` 作为 APK assets 打包。CI 的 `android-check` 仍是 capability-gated 的
-  **aarch64 编译门禁**（不跑 Gradle、不建 APK、不跑设备）；`android-apk`（debug）与
-  `android-release`（release；自持 keystore 存在时签名，否则 `android-release-unsigned`）已重新
+  **aarch64 编译门禁**（不跑 Gradle、不建 APK、不跑设备）；`android-release`（release；
+  自持 keystore 存在时签名，否则 `android-release-unsigned`）已重新
   启用（event-gated），只构建并上传 APK artifact，不发布。**签名 ≠ 设备/GPU/像素验收**，证据仍
   只有编译级 + 打包级（`cargo check`、clippy、开发机契约测试、Kotlin 编译、
   `javap` 核对 JNI 符号）；**没有设备/模拟器运行、没有 Vulkan adapter、没有像素、没有

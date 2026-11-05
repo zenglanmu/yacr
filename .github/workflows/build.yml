@@ -57,7 +57,8 @@ name: CI build layers
 #   linux-release   : Flatpak bundle (`scripts/package-linux-release.sh`)
 #   windows-release : MSVC release zip (`scripts/package-windows-release.sh`)
 #   macos-release   : universal Yacr.app tarball (`scripts/package-macos-release.sh`)
-#   android-apk     : debug APK (`scripts/build-android.sh --debug`)
+#   (a debug APK is still produced locally by `scripts/build-android.sh --debug`;
+#    it is deliberately not a CI release artifact)
 #   android-release : release APK (`scripts/build-android.sh --release`), aligned
 #                     and optionally apksigner-signed from the repository keystore
 #
@@ -653,105 +654,6 @@ jobs:
             target/macos/universal/dist/*.tar.gz.sha256
           if-no-files-found: error
           retention-days: 30
-
-  android-apk:
-    name: android-apk (debug APK — tags/dispatch only)
-    # Builds a real debug APK of the Tauri Android host (the debug keystore signs
-    # it). The native Gradle project is committed; this job provisions the pinned
-    # JDK 17 + SDK/NDK and the wasm-bindgen CLI the chrome bundle needs. Artifact
-    # only: no device/emulator and no store upload.
-    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          targets: aarch64-linux-android, wasm32-unknown-unknown
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - name: Cache cargo (registry / git / target)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-android-apk-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-android-apk-
-      - name: Provision the pinned Android SDK/NDK
-        run: |
-          set -euo pipefail
-          ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          export ANDROID_HOME
-          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
-          SDKMANAGER="$(command -v sdkmanager || true)"
-          if [ -z "$SDKMANAGER" ]; then
-            SDKMANAGER="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
-          fi
-          [ -n "$SDKMANAGER" ] && [ -x "$SDKMANAGER" ] \
-            || { echo "::error::sdkmanager not found under $ANDROID_HOME" >&2; exit 1; }
-          set +o pipefail
-          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
-          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
-            "platform-tools" "platforms;android-34" \
-            "build-tools;34.0.0" "ndk;29.0.13846066"
-          set -o pipefail
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.13846066" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.13846066" >> "$GITHUB_ENV"
-      - name: Install the pinned wasm-bindgen CLI and npm deps
-        run: |
-          set -euo pipefail
-          pin="$(sed -n 's/^readonly YACR_PINNED_WASM_BINDGEN="\(.*\)"$/\1/p' scripts/lib/wasm-toolchain.sh)"
-          test -n "$pin" || { echo "no wasm-bindgen pin in scripts/lib/wasm-toolchain.sh" >&2; exit 1; }
-          case "$pin" in
-            0.2.129)
-              sha="82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e" ;;
-            *)
-              echo "no verified download for wasm-bindgen $pin; add its release SHA-256 to this step" >&2
-              exit 1 ;;
-          esac
-          archive="wasm-bindgen-${pin}-x86_64-unknown-linux-musl"
-          curl -fsSL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${pin}/${archive}.tar.gz" \
-            -o "/tmp/${archive}.tar.gz"
-          echo "${sha}  /tmp/${archive}.tar.gz" | sha256sum -c -
-          tar -xzf "/tmp/${archive}.tar.gz" -C /tmp
-          install "/tmp/${archive}/wasm-bindgen" "$HOME/.cargo/bin/wasm-bindgen"
-          wasm-bindgen --version | grep -Fx "wasm-bindgen ${pin}"
-          ( cd apps/desktop-ui && npm ci )
-          ( cd apps/app-android && npm ci )
-      - name: Build the debug APK
-        run: bash scripts/build-android.sh --debug --target aarch64
-      - name: Fail if Cargo.lock was rewritten
-        run: |
-          set -euo pipefail
-          git diff --exit-code -- Cargo.lock
-      - name: Record artifact facts
-        if: always()
-        run: |
-          set -euo pipefail
-          find apps/app-android/src-tauri/gen/android/app/build/outputs/apk \
-            -type f -name '*.apk' -printf '%p %s bytes\n' || true
-          {
-            echo '## android-apk (debug)'
-            echo 'A debug APK artifact was built. No device/emulator was used and nothing was published.'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload the debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-apk-debug
-          path: apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk
-          if-no-files-found: error
-          retention-days: 14
 
   android-release:
     name: android-release (signed/unsigned APK — tags/dispatch only)

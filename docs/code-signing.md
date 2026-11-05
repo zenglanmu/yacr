@@ -16,7 +16,9 @@
 | Android release APK | APK Signature Scheme v1–v3，仓库自持 keystore | GitHub Secrets（keystore + 口令） | `app-universal-release.apk` + `SIGNING.txt` + `.sha256` | ⚠️ Android 只校验签名一致性，不要求公共 CA |
 | macOS release | `codesign`，默认 ad-hoc（`-`） | 无（ad-hoc 不需要密钥）；可用 `MACOS_SIGN_IDENTITY` 覆盖 | `Yacr.app` + `bin/cad-cli-tools`（tar.gz 内） | ❌ Gatekeeper 仍会拦，未公证 |
 | Linux Flatpak | OSTree/GPG commit signature | GitHub Secrets（GPG 私钥） | `*.flatpak` + `.flatpak.gpg` | ❌ 用户需导入公钥 |
-| Android debug APK | 本地 debug keystore | 构建机 | `android-apk-debug` | ❌ 仅调试 |
+
+本地 `scripts/build-android.sh --debug` 仍会用构建机的 debug keystore 产生仅供调试的 APK；
+它不是 CI release artifact，也不会被发布。
 
 自签名的含义要分清：
 

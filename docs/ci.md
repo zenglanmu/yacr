@@ -7,7 +7,7 @@
 （构建/校验层）。校验脚本：`scripts/check-workflows.py`（必需 job 片段 + release job 事件门禁契约 +
 浏览器 build/smoke/deploy 入口契约）、`scripts/test-linux-workflow.py`（变异契约）、
 `scripts/test-web-deploy-workflow.py`（浏览器流水线变异契约）、
-`scripts/test-release-workflows.py`（5 个 release job 的事件门禁与入口契约）、
+`scripts/test-release-workflows.py`（4 个 release job 的事件门禁与入口契约）、
 `scripts/test-ui-migration-guards.py`（迁移守卫契约）、
 `scripts/check-command-docs.py`（§2/§2b/§3.7 的命令名与别名一致性，权威是
 `crates/cad-ui-core/src/session/commands.rs`）与它的自测
@@ -17,8 +17,8 @@
 > Slint 退役。编译门禁已加入 Tauri/GTK 前置（`libwebkit2gtk-4.1-dev`）与 React 前端构建
 > （`apps/desktop-ui`、`npm test`、`npm run build`）。**2026-10-23 起**：`windows-check` 编译的是
 > **真实 Windows 宿主**（不再是 NOT IMPLEMENTED 桩），但**仍只是编译门禁**；X11/XWayland 在
-> Linux 宿主中被显式拒绝（退出码 4），CI 不运行 GUI。**2026-11-01 起** 5 个发布 job
-> （`linux-release`/`windows-release`/`macos-release`/`android-apk`/`android-release`）已从
+> Linux 宿主中被显式拒绝（退出码 4），CI 不运行 GUI。**2026-11-01 起** 4 个发布 job
+> （`linux-release`/`windows-release`/`macos-release`/`android-release`）已从
 > `if: false` 重新启用为 **event-gated artifact builder**：仅 `v*` tag 或手工 `workflow_dispatch`
 ] 运行，仅上传 workflow artifact，不发布、不接触商店凭据；Windows/Android/macOS 用仓库自持
 > 密钥自签名（Windows PFX、Android keystore、macOS ad-hoc）、Flatpak 在 GPG 凭据存在时签
@@ -70,10 +70,9 @@
 | `linux-release` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；安装 GTK/WebKitGTK + `flatpak-builder` + `org.gnome.Platform//51`/`Sdk//51` → `bash scripts/package-linux-release.sh` → 上传 `.flatpak` + `.sha256`（配置 `FLATPAK_GPG_*` 时对 OSTree commit 签名并附 `*.flatpak.gpg`；不发布 Flathub） |
 | `windows-release` | build.yml | `windows-latest` | **仅 `v*` tag / 手工 dispatch**；先构建 React 前端 → `bash scripts/package-windows-release.sh`（MSVC 静态 CRT，PE/图标校验）→ 自签 PFX 存在时对两个 `.exe` 做 Authenticode 签名（附 `bin/yacr-dev-codesign.cer`）并上传 `yacr-windows-release`，否则上传 `yacr-windows-release-unsigned` |
 | `macos-release` | build.yml | `macos-latest` | **仅 `v*` tag / 手工 dispatch**；先构建 React 前端 → `bash scripts/package-macos-release.sh`（universal + `lipo`，Mach-O 仅系统库）→ 默认 ad-hoc `codesign`（`MACOS_SIGN_IDENTITY` 可覆盖）后上传 `.tar.gz` + `.sha256`（未公证；`spctl` 仍会拒绝） |
-| `android-apk` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；provision JDK 17 + SDK/NDK `29.0.13846066` + 钉住 wasm-bindgen → `bash scripts/build-android.sh --debug --target aarch64` → 上传 debug APK。无设备/模拟器 |
 | `android-release` | build.yml | `ubuntu-latest` | **仅 `v*` tag / 手工 dispatch**；同上但 `--release`，`zipalign` 后用仓库 keystore 签名（`ANDROID_KEYSTORE_BASE64` 存在时）并上传 `android-release`（APK + `SIGNING.txt` + `.sha256`），否则 `android-release-unsigned`；无商店上传 |
 
-`android-check` 是 capability-gated（`vars.ANDROID_CI_ENABLED`）；`web-deploy` 与上面 5 个
+`android-check` 是 capability-gated（`vars.ANDROID_CI_ENABLED`）；`web-deploy` 与上面 4 个
 release job 是 **event-gated**（`github.event_name == 'workflow_dispatch' ||
 startsWith(github.ref, 'refs/tags/v')`）；条件不满足时 GitHub 显示 **skipped（未运行）**，
 绝不显示为通过。`windows-check`/`macos-check`
@@ -96,7 +95,6 @@ Windows MSVC `clippy`/`check`/release `build`、MinGW GNU release `build`、`app
 | `linux-release` | `.flatpak` + `.sha256`（配置 `FLATPAK_GPG_*` 时另附 `.flatpak.gpg`） | 凭据缺失时未签名；未发布 Flathub；无窗口/GPU 验收 |
 | `windows-release` | `yacr-windows-release`（`.zip` + `.sha256`）；无凭据时 `yacr-windows-release-unsigned` | 自签 PFX 配置时签名（非公共信任）；无运行/GPU 验收 |
 | `macos-release` | `.tar.gz`（`Yacr.app`）+ `.sha256` | ad-hoc 签名（或配置的 identity）/未公证；无窗口/Metal/DPI 验收 |
-| `android-apk` | debug `.apk` | 无设备/模拟器；debug keystore 签名 |
 | `android-release` | `android-release`（APK + `SIGNING.txt` + `.sha256`）；无凭据时 `android-release-unsigned` | 自持 keystore 配置时签名；无商店上传；未安装运行；签名 ≠ 设备/GPU 验收 |
 
 `scripts/check-workflows.py` 与 `scripts/test-release-workflows.py` 固定这些性质：job 必须存在、
@@ -117,7 +115,7 @@ GitHub Actions 的 workflow artifact 需要登录且会过期，**不能**作为
 `.github/workflows/publish-release.yml` 完成：**仅 `workflow_dispatch`**，是唯一带
 `permissions: contents: write` 的 workflow（并显式 `actions: read` 下载 artifact——一旦声明
 `permissions:`，未列出的 scope 就是 `none`）。它**不构建/不打包/不签名**，只从指定的
-`CI build layers` run 拉取五个平台 artifact：优先选择 `yacr-windows-release` / `android-release`，
+`CI build layers` run 拉取四个平台 artifact：优先选择 `yacr-windows-release` / `android-release`，
 缺失时回退到 `*-unsigned`；Flatpak artifact 若含 `*.flatpak.gpg` 则一并分发。校验 `.sha256` 后
 附加到该 tag 的 GitHub Release；release notes 来自仓库内文件（如 `docs/release-notes/v0.1.4.md`）。
 **签名只发生在 build job（自签名/GPG），publisher 从不签名。**

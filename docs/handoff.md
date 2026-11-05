@@ -1,3 +1,14 @@
+## 2026-11-05 发布矩阵收缩：移除 CI debug APK，Flatpak 改为仓库 GPG 自签
+
+- **移除 `android-apk`（debug）CI job**：debug APK 只保留为本地
+  `scripts/build-android.sh --debug` 产物；CI 只构建 `android-release`。`publish-release.yml` 不再
+  下载/上传 `android-apk-debug`，也不再列出 `.apk.idsig`，改为随 APK 发布 `SIGNING.txt`。
+- **Flatpak 自签**：`linux-release` 用仓库持有的 GPG key 对 OSTree commit 签名，并把二进制公钥
+  导出为 `*.flatpak.gpg`；私钥/口令通过 `FLATPAK_GPG_PRIVATE_KEY` / `FLATPAK_GPG_PASSPHRASE`
+  secrets 与 `FLATPAK_GPG_KEY_ID` variable 注入，不再依赖外部 CA。
+- 契约测试、`check-workflows.py` 与 `docs/ci.md`、`docs/build.md`、`docs/android-host.md`、
+  `docs/code-signing.md` 同步；真实签名仍需 CI 运行证据。
+
 ## 2026-11-05 签名策略切换为仓库自签名（Windows / Android / macOS / Flatpak）
 
 - **Windows**：移除 SignPath 分支；`WINDOWS_SELF_SIGNED_PFX_BASE64` +

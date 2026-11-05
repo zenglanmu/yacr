@@ -12,8 +12,8 @@ checks:
     genuine compile/check gates that survive the UI replacement:
     ``core-quality``, ``wasm-check``, ``i18n-contracts``, ``shader-validation``,
     ``linux-app``, ``windows-check``, ``macos-check``, ``android-check``;
-  * the five release packaging jobs (``linux-release``, ``windows-release``,
-    ``macos-release``, ``android-apk``, ``android-release``) are declared,
+  * the four release packaging jobs (``linux-release``, ``windows-release``,
+    ``macos-release``, ``android-release``) are declared,
     call their real entry point, and keep the ``v*`` tag / manual-dispatch event
     gate so a routine push can never build a release artifact. When credentials
     exist they may **sign** the artifact they build with repository-held
@@ -181,15 +181,6 @@ REQUIRED_JOBS: dict[str, tuple[str, ...]] = {
         "MACOS_SIGN_IDENTITY",
         "codesign --verify --strict",
     ),
-    "android-apk": (
-        "refs/tags/v",
-        "workflow_dispatch",
-        "scripts/build-android.sh",
-        "--debug",
-        "ndk;29.0.13846066",
-        "actions/upload-artifact",
-        "*.apk",
-    ),
     "android-release": (
         "refs/tags/v",
         "workflow_dispatch",
@@ -252,7 +243,6 @@ GATED_JOBS: tuple[str, ...] = (
     "linux-release",
     "windows-release",
     "macos-release",
-    "android-apk",
     "android-release",
 )
 
@@ -263,11 +253,10 @@ GATED_JOB_IF: dict[str, str] = {
     "linux-release": "refs/tags/v",
     "windows-release": "refs/tags/v",
     "macos-release": "refs/tags/v",
-    "android-apk": "refs/tags/v",
     "android-release": "refs/tags/v",
 }
 
-# No platform release job is retired any more (2026-11-01): the five release
+# No platform release job is retired any more (2026-11-01): the four release
 # jobs are real artifact builders gated to a `v*` tag or a manual dispatch. The
 # retirement machinery stays in the checker so a future backslide into an
 # `if: false` stub is still caught; the tuple is intentionally empty.

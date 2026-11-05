@@ -68,8 +68,7 @@ jobs:
           rm -rf artifacts && mkdir -p artifacts
           for name in \
             yacr-linux-release \
-            yacr-macos-release \
-            android-apk-debug
+            yacr-macos-release
           do
             gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n "$name" -D "artifacts/$name"
           done
@@ -128,10 +127,9 @@ jobs:
             release-assets/*.flatpak.gpg
             release-assets/*.zip release-assets/*.zip.sha256
             release-assets/*.tar.gz release-assets/*.tar.gz.sha256
-            release-assets/app-universal-debug.apk
             release-assets/app-universal-release.apk
-            release-assets/*.apk.idsig
             release-assets/*.apk.sha256
+            release-assets/SIGNING.txt
             release-assets/app-universal-release-unsigned.apk
           )
           if [ "${#files[@]}" -eq 0 ]; then
