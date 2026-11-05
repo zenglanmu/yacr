@@ -2,6 +2,22 @@
 
 use super::*;
 
+/// Most CLI operation functions return `Result<_, CliError>`, so the error
+/// variant must stay below clippy's 128-byte `result_large_err` ceiling.
+///
+/// `serde_json::Value` is 72 bytes in this workspace (`preserve_order` is
+/// unified in through the dependency graph), which put `CliError` at exactly 128
+/// bytes until `context` was boxed. This fence exists so re-growing the error
+/// fails here instead of only in CI clippy.
+#[test]
+fn cli_error_stays_below_the_large_err_ceiling() {
+    assert!(
+        std::mem::size_of::<CliError>() < 128,
+        "CliError is {} bytes; box any large field instead of raising the clippy ceiling",
+        std::mem::size_of::<CliError>()
+    );
+}
+
 #[test]
 fn cli_operation_names_parse() {
     for name in [

@@ -410,7 +410,12 @@ pub const EXIT_GPU_MEMORY_REFUSED: u8 = 7;
 pub struct CliError {
     pub code: String,
     pub message: String,
-    pub context: serde_json::Value,
+    /// Boxed because `serde_json::Value` is 72 bytes in this workspace
+    /// (`preserve_order`/`indexmap` is unified in through the dependency graph),
+    /// which would make the error variant exactly the 128-byte
+    /// `clippy::result_large_err` ceiling. The JSON document is unchanged; only
+    /// the in-memory layout differs.
+    pub context: Box<serde_json::Value>,
     /// Locale for the human-facing `message` line only.
     pub locale: Locale,
 }
@@ -420,13 +425,13 @@ impl CliError {
         CliError {
             code: code.into(),
             message: message.into(),
-            context: serde_json::Value::Null,
+            context: Box::new(serde_json::Value::Null),
             locale: Locale::default(),
         }
     }
 
     pub fn with_context(mut self, context: serde_json::Value) -> Self {
-        self.context = context;
+        self.context = Box::new(context);
         self
     }
 
@@ -455,7 +460,7 @@ impl CliError {
             "error": {
                 "code": self.code,
                 "message": self.message,
-                "context": self.context,
+                "context": self.context.as_ref(),
             }
         })
     }
