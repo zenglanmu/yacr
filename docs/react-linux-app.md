@@ -140,6 +140,26 @@ Vulkan-only；`dx12` 在 Linux **显式失败**（`ProbeError::UnsupportedBacken
 **配置目录迁移（有意）**：由旧的 `~/.config/yacr-react/` 改为 `~/.config/yacr/`；**不做自动迁移**，
 用户需自行迁移（或接受默认值）。
 
+### 插件目录与 File/Options → Plugins（2026-11-05）
+
+- File 选项卡的 **Plugins** 项直接打开 Options 的 Plugins 页签；也可从 Options 对话框进入。
+  页签列出内置 `tch` 与用户安装的解码器，同一时间只有
+  一个 active decoder。安装接受 `.js`/`.mjs`（≤4 MiB），会先运行一次插件代码做 ABI v1 校验，
+  因此 UI 明示“插件与应用其余部分同权限”。
+- 目录（与 `config.json`/`preference.json` 同级）：
+  `$XDG_CONFIG_HOME/yacr/plugins.json`（或 `~/.config/yacr/plugins.json`）以及
+  `$XDG_CONFIG_HOME/yacr/plugins/<id>/{plugin.js,manifest.json}`。
+- **安装/启用/禁用/卸载立即写盘，但下次启动才生效**；`restartRequired` 由
+  `activeDecoder` 与 `sessionActiveDecoder` 的差异计算。没有热重载/热卸载，当前会话继续使用启动
+  时加载的解码器。卸载是真正的目录删除；内置 `tch` 不能卸载。
+- **载体限制**：只有原生 Wayland（`native-below`）支持插件管理器。X11/XWayland 走
+  `dom-canvas`，`cad_plugin_status` 返回 `supported:false`、`carrier:"dom-canvas"` 和
+  `plugin.unsupported_carrier: dom-canvas`，安装/启用/卸载全部拒绝；内置 `tch` 在 wasm 会话里
+  仍 always-on。
+- **证据边界**：以上是源码/契约事实；本轮**没有**运行真实 GUI 的 Options → Plugins 交互或
+  像素验证（**NOT RUN**）。契约测试与门禁结果见 `docs/vendor-plugin.md` §8.9 与
+  `docs/adr/0029-plugin-manager.md`。
+
 ## 后端策略与原生 Wayland 子表面
 
 `GDK_BACKEND` 由 `apps/app-linux/src/backend.rs` 在 GTK 启动前显式决议（**无静默回退**）：

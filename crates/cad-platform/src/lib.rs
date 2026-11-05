@@ -19,6 +19,17 @@ pub use files::{
     NonPersistentConfigStore, PlatformFiles, SavePurpose, SurfaceMetrics, SurfaceSource,
 };
 
+/// Durable plugin storage (policy, installed bundles, entry reads).
+///
+/// The wire model lives in `cad_ui_core::session::plugins`; this lower contract
+/// only transports raw JSON text/bytes so the dependency direction stays acyclic.
+pub mod plugins;
+pub use plugins::{
+    FsPluginStore, InstalledPluginRecord, NonPersistentPluginStore, PluginScan, PluginStore,
+    MAX_PLUGIN_BYTES, PLUGIN_DIRECTORY, PLUGIN_ENTRY_FILE, PLUGIN_MANIFEST_FILE,
+    PLUGIN_POLICY_FILE,
+};
+
 /// Host-side font fetching.
 ///
 /// The core only builds catalog URLs (`cad-resources::plan_fonts`); the host

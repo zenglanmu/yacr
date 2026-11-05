@@ -70,6 +70,14 @@ NSWindow (Tauri, transparent)
 - **配置/偏好**：`$HOME/Library/Application Support/yacr/{config.json,preference.json}`；
   `HOME` 不可解析时 store 明确拒绝持久化（回退内存默认），不静默写别处。
   `wgpu_backend` 仍从同一 `preference.json` 读取（`auto`/`vulkan`/`dx12`/`metal`）。
+- **插件（Options → Plugins，2026-11-05）**：macOS 始终是 `native-below`，按契约提供插件管理器。
+  策略在 `$HOME/Library/Application Support/yacr/plugins.json`，插件在
+  `.../yacr/plugins/<id>/{plugin.js,manifest.json}`；`HOME` 不可解析时使用
+  `NonPersistentPluginStore`（内置 `tch` 仍工作，安装/写入以
+  `unsupported-runtime: plugin-store-unavailable` 拒绝）。安装/启用/禁用/卸载立即持久化、
+  **下次启动才生效**；没有热重载/热卸载，卸载是真删目录。外部解码器经 Blob URL 导入，
+  `tauri.conf.json` 的 `script-src` 含 `blob:`。**真实 macOS 运行、WKWebView 行为、Options
+  交互/像素均 NOT VERIFIED**；本轮**没有**运行 macOS 构建（只有源码/静态契约）。
 - **保存/导出**：`begin_save` / `write_atomic` 显式 `Unsupported`（与 Windows 宿主同一边界）。
 - **弹窗**：仍是同一 React 树的 in-DOM 覆盖层；共享 `cad-desktop-shell::popup` 的模态围栏与
   `close`/`reload`/`exit` 触发保留。**renderer crash 触发 ④ 未实现**：tauri 2.12.3 / wry 0.57

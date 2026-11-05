@@ -60,7 +60,7 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 | 共享 UI 层 | **cad-ui-core：平台无关的 wire protocol、逻辑布局（layout）、CAD 会话（session，`CadSession`/`CadStatus`/44-command 表）、宿主 admission/error 状态（shell，`ShellState`）、**弹窗纯状态机（popup，`PopupKind`/`PopupAck`/`CadPopup`/allowlist/四触发）**、launch options、i18n 目录；UI 框架与 GPU 无关 |
 | 桌面壳共享层 | **cad-desktop-shell：唯一允许依赖 `tauri` 的共享层**——`#[tauri::command]` 薄壳与注册、主窗口/子 webview 构建（init scripts、`start_maximized`）、popup 命令到 `cad-ui-core::popup` 的接线、工具包无关 `threading`、通用证据驱动骨架、参数化平台实现（`ReactFiles`/`ReactSurface`/`ReactConfigStore`）；**禁止** gtk/gdk/gdkx11/ashpd/wgpu/cad-render-wgpu/cad-engine/slint/iced/acadrust |
 | 宿主编排 | cad-host：HostCore（命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink）；**不依赖任何 UI 工具包，也不依赖 slint/wgpu/web-sys/Android 类型** |
-| 宿主平台契约 | cad-platform：PlatformFiles/ConfigStore/SurfaceSource/FontLoader/Persistence/TaskExecutor/Clipboard/HostLifecycle/RenderHost |
+| 宿主平台契约 | cad-platform：PlatformFiles/ConfigStore/SurfaceSource/FontLoader/Persistence/TaskExecutor/Clipboard/HostLifecycle/RenderHost/**PluginStore** |
 | 宿主组合根 | apps：app-linux（GTK/Wayland 平台缝 + 真实 Linux GUI）、app-windows（Win32/WebView2 平台缝，已实现、视觉未验证）、app-macos（AppKit/WKWebView + 原生 CAD 子 NSView + wgpu/Metal，已实现、仅 CI 编译门禁）、app-android（Tauri WebView + 原生 `native-below` CAD 会话，仅编译级证据）、app-web（Tauri/浏览器载体，wasm `dom-canvas` 会话）；**唯一桌面 React UI：`apps/desktop-ui`** |
 | 自动化 | cad-diagnostics：统计/脱敏报告；cad-cli-tools：共用 Application 命令路径 |
 
@@ -83,6 +83,34 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
   tick 不占 revision。
 - 既有不变量（输入单一漏斗、renderer-only wgpu、无整幅回读、单 presenter、弹窗模态围栏）在两种
   载体上都成立，只是像素机制不同。
+
+### 厂商插件管理器（2026-11-05）
+
+插件管理器管理的是**离线解码器 bundle**（内置 `tch` + 用户安装），不是 CAD 文档，也不产生第二份
+`cad-db` 或第二套显示权威：
+
+- **`cad-platform::plugins::PluginStore` 是持久化缝**：trait 只传原始 JSON 文本与入口字节，
+  不做 wire 解析；路径解析、id 包含检查、symlink 拒绝、4 MiB 上限与原子写（临时文件/目录 +
+  rename）都在这一层。`FsPluginStore` 是文件系统实现，`NonPersistentPluginStore` 对每个读写
+  返回稳定拒绝 `unsupported-runtime: plugin-store-unavailable`（不发明路径、不伪装成功）。
+  这样 `cad-ui-core`（在 `cad-platform` 之上）不需要触碰文件系统，也不产生依赖环。
+- **`cad-ui-core::session::plugins` 是纯 wire 模型**：`PluginPolicy`（`version:1` +
+  `activeDecoder: "tch" | <id> | null`）、`PluginManifest`（合成/校验）、行/状态/变更结果、
+  id 与文件名派生、base64 大小检查、稳定 reason。它没有文件系统、Tauri 或 GPU 访问；manifest
+  的 `abi`/`entry`/id 一致性在这里判定。
+- **`cad-desktop-shell::plugins` 只做五个命令与启动选择**：它把 `PluginStore` 与纯模型组合成
+  `cad_plugin_status/install/enable/uninstall/read_entry`，并根据启动时读到的策略选择
+  `sessionActiveDecoder`。没有第三份状态：状态命令和每个变更结果都走同一投影。
+- **单解码器、持久化后重启**：策略里只有一个 active decoder；安装/启用/禁用/卸载立即写盘，
+  但**不改当前会话**，`restartRequired = activeDecoder != sessionActiveDecoder`。没有热重载、
+  没有 live unload；前端只显示宿主返回的 `restartRequired`，不自行猜测。
+- **载体权威不变**：只有 `native-below` 提供插件注册表。`dom-canvas`（Linux X11/XWayland、Web）
+  的 `cad_plugin_status` 是 `supported:false` + `plugin.unsupported_carrier: dom-canvas`，
+  变更拒绝；纯 Web 由 adapter 按名拒绝。两种载体的内置 `tch` 仍 always-on，**不**因插件管理器
+  缺位而关闭厂商解析。
+- **调用方**：`apps/desktop-ui` 的 `plugins/plugin-manager.ts` 是唯一前端 wire 调用点；
+  `host/invoke.ts` 把五个名字列为 shell-only，`web-adapter.ts` 只拒绝、不伪造。安装时的
+  Blob URL 导入属于**插件字节校验**，不读 `cad-db`、不改变当前文档。
 
 ## 必须保持的边界
 

@@ -277,3 +277,20 @@ test('the pending keys are named by the module that owns the limits', async () =
   assert.ok(declares('PANEL_DIALOG_MISSING_KEY', 'ribbon.panel_dialog_missing'));
   assert.ok(limits.includes('export const PENDING_CATALOG_KEYS'));
 });
+
+test('the File tab Plugins entry stays a chrome-local action, never a launcher target', () => {
+  const file = RIBBON_TABS.find(tab => tab.id === 'file');
+  const utilities = file.panels.find(panel => panel.id === 'utilities');
+  const plugins = utilities.items.find(item => item.id === 'plugins');
+  assert.ok(plugins, 'the File utilities panel carries the direct Plugins entry');
+  assert.equal(plugins.labelKey, 'file.plugins');
+  assert.equal(plugins.action, 'plugins');
+  assert.equal(plugins.icon, 'settings');
+  // No router token and no view payload: the Options dialog and its selected
+  // page are chrome-local, so nothing here can leak into `cad_command`.
+  assert.equal(plugins.command, undefined);
+  assert.equal(plugins.standardView, undefined);
+  // The utilities panel keeps no launcher arrow: an entry inside it never
+  // becomes a target, so no launcher can point at a non-command page.
+  assert.equal(panelLauncherCommand(utilities), null);
+});

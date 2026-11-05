@@ -172,7 +172,7 @@ test('Enter on a typed argument keeps the line instead of the bare suggestion', 
     'history stores the full admitted line',
   );
   assert.ok(
-    app.includes('queueCadCommand(invoke, text, status, false)'),
+    app.includes('queueCadCommand(invoke, text, status, false,'),
     'the typed line reaches the host unchanged',
   );
 });

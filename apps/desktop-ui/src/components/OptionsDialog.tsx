@@ -29,6 +29,7 @@ import { invoke } from '../host/invoke.ts';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';
 import { Button } from './primitives.tsx';
+import { OptionsPlugins } from './OptionsPlugins.tsx';
 import { useI18n } from '../context.ts';
 import type { Locale, Translator } from '../i18n.ts';
 import type { CSSProperties } from 'react';
@@ -48,6 +49,7 @@ import {
   optionsTabs,
   readSettings,
   settleSettings,
+  takeOptionsTab,
   validateDraft,
   validateField,
   writeAll,
@@ -295,7 +297,13 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
   const [draft, setDraft] = useState<OptionsDraft | null>(null);
   const [baselineLocale, setBaselineLocale] = useState<Locale>(locale);
-  const [activeTab, setActiveTab] = useState<string | null>(() => tabs[0]?.id ?? null);
+  // A shell entry (File > Plugins) can ask for one page before this dialog
+  // mounts. The request is read once, and an id this build does not know falls
+  // back to the first tab instead of rendering an empty panel.
+  const [activeTab, setActiveTab] = useState<string | null>(() => {
+    const requested = takeOptionsTab();
+    return requested && tabs.some(entry => entry.id === requested) ? requested : tabs[0]?.id ?? null;
+  });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<{ readonly code?: string; readonly text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -586,6 +594,20 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
   };
 
   const panelHeading = tab ? tabs.find(entry => entry.id === tab)?.labelKey : null;
+  const pluginsTab = tab === 'plugins';
+  const heading = panelHeading ? (
+    <p
+      style={{
+        margin: '0 0 2px',
+        fontSize: 10.5,
+        letterSpacing: '.5px',
+        textTransform: 'uppercase',
+        color: 'var(--text-muted)',
+      }}
+    >
+      {t(panelHeading)}
+    </p>
+  ) : null;
   const label = t(OPTIONS_KEYS.title);
 
   return (
@@ -629,7 +651,12 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
           className="options-content"
           style={OPTIONS_CONTENT}
         >
-          {phase.kind === 'loading' ? (
+          {pluginsTab ? (
+            <>
+              {heading}
+              <OptionsPlugins />
+            </>
+          ) : phase.kind === 'loading' ? (
             <div style={OPTIONS_STATE} role="status" aria-live="polite">
               <Icon name="spinner" size={20} className="spin" />
               <p style={{ margin: 0, fontSize: 12, color: 'var(--text-dim)' }}>
@@ -646,19 +673,7 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
             </div>
           ) : (
             <>
-              {panelHeading ? (
-                <p
-                  style={{
-                    margin: '0 0 2px',
-                    fontSize: 10.5,
-                    letterSpacing: '.5px',
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
-                  }}
-                >
-                  {t(panelHeading)}
-                </p>
-              ) : null}
+              {heading}
               {fields.map((field, index) => {
                 const error = fieldErrors[field.id] ? optionsErrorView(fieldErrors[field.id], t) : null;
                 return (
@@ -681,6 +696,12 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
           >
             {failure.text}
           </p>
+        ) : pluginsTab && dirtyCount === 0 ? (
+          // Plugin changes are already saved on the host; with no staged
+          // settings edits the only pending fact is the next launch. A staged
+          // edit from another tab still shows its count below, so switching to
+          // this tab can never hide unapplied work.
+          <p style={OPTIONS_FOOT_NOTE}>{t('plugins.restartShort')}</p>
         ) : (
           <p style={OPTIONS_FOOT_NOTE}>
             {dirtyCount > 0
@@ -693,6 +714,9 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
         <Button
           icon="check"
           iconSize={14}
+          // Apply stays the global staged-settings action. On the Plugins tab
+          // it is disabled only because no settings draft is dirty; it is never
+          // repurposed to apply plugin changes (those are already saved).
           disabled={!ready || busy || dirtyCount === 0 || hasLocalErrors}
           aria-busy={busy || undefined}
           onClick={() => { void commit('apply'); }}
@@ -701,9 +725,20 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
         </Button>
         <Button
           variant="solid"
-          disabled={!ready || busy}
+          // OK keeps closing when the settings snapshot could not be read: the
+          // Plugins tab is usable on its own and must not trap the dialog open.
+          disabled={busy || (!pluginsTab && !ready)}
           aria-busy={busy || undefined}
-          onClick={() => { void commit('close'); }}
+          onClick={() => {
+            // The Plugins tab is usable while `cad_settings` is still loading or
+            // failed; `commit` would return early with no draft and leave the
+            // dialog open forever, so that case closes directly.
+            if (pluginsTab && !ready) {
+              onClose();
+              return;
+            }
+            void commit('close');
+          }}
         >
           {t(OPTIONS_KEYS.ok)}
         </Button>

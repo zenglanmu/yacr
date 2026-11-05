@@ -36,10 +36,10 @@ use cad_domain::{
 use cad_representation::{clip_polyline_to_rect, ConicSegment};
 use cad_spatial::pick_world_bounds;
 
-use crate::picking::ref_visibility;
+use crate::picking::{drawing_pick_items_with_vendor, ref_visibility};
 use crate::{
-    api::apply_selection, drawing_pick_items, Application, Command, CommandOutcome, CommandPayload,
-    SessionState, ToolState,
+    api::apply_selection, Application, Command, CommandOutcome, CommandPayload, SessionState,
+    ToolState,
 };
 
 /// Which predicate produced a match. Reported in the `select.box.count`
@@ -199,18 +199,21 @@ impl Application {
         }
 
         let database = document.drawing.as_ref();
+        // Box selection reads the same catalogue click/hover/SELECTALL use,
+        // including the vendor stand-in for an opaque entity (ADR-0028 D2).
+        let vendor = self.vendor_representations.as_deref();
         // One layer-table scan per command, shared by the preflight walk and the
         // selection walk (block members are judged on their effective layer).
         let scope = database.root_layer_scope();
         // The pick builder silently skips cycles/depth limits; preflight the same
         // visible tree `select_all` refuses on before trusting its catalogue.
         for entity in database.model_space() {
-            validate_branch(database, session, entity, scope, &mut Vec::new())?;
+            validate_branch_with_vendor(database, session, entity, scope, &mut Vec::new(), vendor)?;
         }
 
         let mut matched: Vec<_> = Vec::new();
         let mut path_counts = [0usize; 3]; // exact, approximate, aabb
-        for item in drawing_pick_items(database, command.document) {
+        for item in drawing_pick_items_with_vendor(database, command.document, vendor) {
             let visible = ref_visibility(database, &session.layer_overrides, scope, &item.source)
                 .ok_or(CadError::StaleResult)?;
             if !visible {
@@ -571,15 +574,18 @@ fn normalize(a: Point3) -> Point3 {
 }
 
 /// Same preflight `select_all` performs: refuse cyclic, over-deep, missing-block
-/// or opaque/unsupported trees instead of publishing a partial catalogue.
-fn validate_branch(
+/// or opaque/unsupported trees instead of publishing a partial catalogue. A
+/// vendor-backed opaque entity is accepted by that shared preflight (ADR-0028
+/// D2), so box selection and `SELECTALL` agree on what is enumerable.
+fn validate_branch_with_vendor(
     database: &DrawingDatabase,
     session: &SessionState,
     entity: &DbEntity,
     scope: cad_db::LayerScope,
     stack: &mut Vec<BlockId>,
+    vendor: Option<&crate::vendor::VendorRepresentationStore>,
 ) -> CadResult<()> {
-    crate::select_all::validate_branch(database, session, entity, scope, stack)
+    crate::select_all::validate_branch_with_vendor(database, session, entity, scope, stack, vendor)
 }
 
 #[cfg(test)]

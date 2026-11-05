@@ -13,7 +13,8 @@ import React from 'react';
 import { NavRail } from './NavRail.tsx';
 import { StartPanel } from './StartPanel.tsx';
 import { LayersPalette } from './LayersPalette.tsx';
-import { PropertiesPalette } from './PropertiesPalette.tsx';
+import { PropertiesDock } from './PropertiesDock.tsx';
+import { PluginNoticeHost } from './PluginNoticeHost.tsx';
 import { DiagnosticsPalette } from './DiagnosticsPalette.tsx';
 import { ReferencesPanel } from './ReferencesPanel.tsx';
 import { FontsPanel } from './FontsPanel.tsx';
@@ -63,7 +64,7 @@ export function Workspace() {
       <div className={['workspace__left', leftOpen ? 'is-open' : ''].filter(Boolean).join(' ')}>
         {showStart ? <StartPanel /> : null}
         {showLayers ? <LayersPalette /> : null}
-        {showProperties ? <PropertiesPalette /> : null}
+        {showProperties ? <PropertiesDock /> : null}
         {showDiagnostics ? <DiagnosticsPalette /> : null}
         {showReferences ? <ReferencesPanel /> : null}
         {showFonts ? <FontsPanel /> : null}
@@ -88,6 +89,7 @@ export function Workspace() {
         />
       </div>
       <NavRail />
+      <PluginNoticeHost />
     </div>
   );
 }

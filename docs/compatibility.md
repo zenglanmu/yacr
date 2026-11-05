@@ -60,7 +60,7 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | 渐变 HATCH | 实现(gradient_color) | 部分(LINEAR/SPHERICAL/CYLINDER **按原值烘焙**；其余显式 Partial) | 逐顶点颜色烘焙，裁剪于边界。**角度组 460 = 弧度（已核实）**：DXF 参考、acadrust 字段文档（`HatchGradientPattern.angle`，"Gradient angle in radians"）与本仓方向回读测试（`gradient_angle_is_stored_in_radians_not_degrees`：存 `FRAC_PI_6` ⇒ 烘焙斜坡 30°）一致；`angle_raw` 按原值往返、**不做度/弧度换算**，旋转时随几何同向旋转（`angle_raw += delta`，`transform_rotates_the_gradient_ramp_with_the_geometry` 钉住）。**残余**：仍**无** vendor 产出的非零角度渐变文件往返证据；`color_name`/`book_name` **不可写**（声明损失）；ADR-0018 U-13 已解决 | 经边界 | 不支持 |
 | 出图(打印) | 实现(PLOTSETTINGS/内嵌 Layout；plot-style 引用读取并显式 Unsupported) | 实现(纸张/边距/比例/旋转) | 光栅 PNG(host readback)；无矢量/CTB | — | — |
 | 异步导入 | 实现(进度阶段/取消) | 实现(唯一任务、过期丢弃) | — | — | — |
-| 天正/探索者代理 | 实现(仅公开缓存记录) | 仅 FillOff/UnicodeText 有证据 | 依解码结果 | 实现 | 标记缓存几何 |
+| 天正/探索者代理 | 实现(仅公开缓存记录；派生 primitive 可拾取，2026-11-05 ADR 0030) | 仅 FillOff/UnicodeText 有证据；属性面板/编辑拦截为契约级 | 依解码结果；`Opaque` 有派生几何时进入拾取目录（Lines/Segments/Arc/Circle/Text 锚点；Block 不展开） | 实现（源实体 id；无派生几何仍显式 `skipped=opaque`） | 标记缓存几何 |
 | 布局 / 视口 | 实现(矩形裁剪/比例；矩形 VPCLIP 边界实体可证明为轴对齐矩形时按其矩形裁剪；`tab_order` 顺序 + LAYOUT 显示名) | 复杂/非矩形裁剪标记部分 | **实现（活动空间渲染已接线；`CadStatus.layouts`/`activeSpace` + `LayoutTabs`/`SPACE`，2026-11-02）** | 部分（真正不支持的布局页签可见但禁用，只显示稳定原因码） | 纸空间测量显式禁用 |
 | **XREF（外部参照）** | **部分（仅导入期只读解析，2026-11-02）** | **实现：acadrust `BlockRecord` 的 xref 标志/`xref_path` + `INSERT`；无独立 `Xref` 对象；无 `XREF` 命令/ATTACH/DETACH/RELOAD/BIND/编辑** | **加载成功的模型空间内容合并进宿主 xref 块后按普通块绘制；未加载状态显式缺席，不画假内容** | 合并成员随普通实体拾取；无 xref 专用拾取 | 不支持 |
 
@@ -403,6 +403,25 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | **macOS** | **已实现**（`apps/app-macos`，bin `yacr-macos`） | **DOM on top**：透明 WKWebView 在上，原生 CAD 子 `NSView`（`addSubview:positioned:relativeTo:` `.below`）在下；wgpu/Metal presenter | 仅 **CI `macos-check` 编译门禁**（`macos-latest`，前端构建后 `cargo check`，不运行） | **窗口/透明合成/层序/Retina/Metal present/对话框/像素/性能全部 NOT VERIFIED**；renderer crash 触发 ④ 未实现；无签名/打包/分发 |
 | **Android** | **原生 `native-below` 宿主**（2026-11-01 起，`apps/app-android`）：Tauri WebView + 共享 React chrome 在上，原生 `CadSession` 持有 `cad-db`，wgpu/Vulkan 呈现到 WebView 之下的 `SurfaceView`；wasm 会话不实例化 | **DOM on top**：`SurfaceView` 在 WebView 之下，WebView 背景清透明 | **编译级 + 开发机契约**：`cargo test -p app-android`（48 passed）、`cargo check --target aarch64-linux-android`、clippy、Kotlin 编译、`javap` 核对 JNI 符号、`test-android-host.py`（SAF/五方法/关联/ProGuard 静态断言）；release APK 已构建并本地签名（R8 `classes.dex` 核对），未安装 | **设备/模拟器运行、Vulkan adapter、像素、旋转/前后台、JNI 运行时链接、SAF 选择器与实际读写、外部「打开方式」全部 NOT VERIFIED**；**打开** = `ACTION_OPEN_DOCUMENT`（`*/*`）→ worker 读 → 共享 `FileEvent::Opened`；**另存** = `ACTION_CREATE_DOCUMENT` 导出 **DXF**（DWG 仍 `save.dwg_deferred`；拒绝覆盖来源 URI，属导出副本）；**New/Plot 不支持**；`content://` 无 sidecar xref/栅格；导入同步在 tick（`importWorker=false`，超大 DWG 停顿未测量）；弹窗接缝已接（in-DOM，Options/About/text-edit 可用，源码/契约级）且偏好持久化到应用 `filesDir`（设备落盘 NOT VERIFIED）；FIT 仍按全窗口取景；2026-10-28 的 `dom-canvas` 模拟器证据属已退役载体，不得复用 |
 | **Web** | **wasm CAD 会话已复活**（`apps/app-web`）；浏览器 bundle 本地可构建 | **DOM-canvas**：同一 wasm 会话画进 `<canvas>`（无第二份文档） | 本地运行（Chromium + WebKitGTK 2.52.6）：合成 fixture 出图与缩放；真实 DWG（4.2 MB）在 wasm 内导入（1.43 GB 堆 / 11.2 s）；Chromium **Worker 隔离**（`isolation=worker`），WebKitGTK 显式 `main-thread (no WebGL2 in worker)`；共享 chrome 由 `scripts/build-web-ui.sh` 构建。**文件访问（2026-11-01）**：`OPEN` = 浏览器上传（隐藏 `<input type=file>` → bytes → wasm `open_bytes`，页面 transport 抬 `canOpen`，会话本身仍报 `canOpen:false`）；`SAVE` = 浏览器下载 **DXF**（`BrowserFiles` 在 `begin_save` 内合成 `download://<name>`，`DomDownload` 用 `Blob`+`<a download>`），`PLOT` = **SVG/PDF** 下载（仅契约测试）。本机 Chromium+SwiftShader：smoke 8/8 (216/216)、端到端 `OPEN`→4 实体、`SAVE`→48,206 B DXF (`0 SECTION…EOF`) | CI `web-build`/`web-smoke`(SwiftShader)/`web-deploy` 已按 tag/dispatch 合同运行（v0.1.4 发布成功，线上 `yacr-examples.pages.dev` **是修复前 bundle**，需新 tag 才带上文件保存）；大图预算未达标（峰值由导入阶段决定）、Firefox/Safari/WebKit/移动端矩阵、GPU、像素、性能均 **NOT VERIFIED**；`PLOT` 无浏览器级证据；旧 Web（Slint）证据不得复用 |
+
+### 插件管理器载体矩阵（2026-11-05）
+
+插件管理器管理离线厂商解码器（`tch` + 用户安装），**不是**第二份 CAD 文档权威。所有行都是
+契约/源码级判定，除 Linux 契约测试外没有运行证据。
+
+| 载体 | `surfaceMode` | 插件管理器 | 拒绝 / 存储 |
+|---|---|---|---|
+| Linux 原生 Wayland | `native-below` | **支持** | `$XDG_CONFIG_HOME/yacr`（或 `~/.config/yacr`）的 `plugins.json` + `plugins/<id>/` |
+| Linux X11/XWayland | `dom-canvas` | **不支持** | `supported:false` + `plugin.unsupported_carrier: dom-canvas`；mutations `accepted:false`；内置 `tch` 仍 always-on |
+| Windows | `native-below` | **契约支持** | `%APPDATA%\yacr\plugins.json` + `plugins/<id>/`；`APPDATA` 缺失时 `NonPersistentPluginStore`（安装/写入拒绝） |
+| macOS | `native-below` | **契约支持** | `$HOME/Library/Application Support/yacr/plugins.json` + `plugins/<id>/`；`HOME` 缺失时同上 |
+| Android | `native-below` | **契约支持** | 应用私有 `filesDir` 下 `plugins.json` + `plugins/<id>/`；`nativeAssetsReady` 前 `unsupported-runtime: plugin-store-unavailable` |
+| Web | `dom-canvas` | **不支持（无持久存储）** | adapter 按名拒绝 `unsupported-runtime: cad_plugin_*`；内置 `tch` 仍随 bundle 提供 |
+
+插件改动**立即持久化、下次启动生效**（`restartRequired = activeDecoder != sessionActiveDecoder`）；
+没有热重载/热卸载。当前证据只有 `native-below` 的 Linux 契约测试与共享层静态接线；
+Windows/macOS/Android 真机运行、真实 GUI/浏览器、GPU/像素均 **NOT VERIFIED**，见
+`docs/vendor-plugin.md` §8 与 `docs/adr/0029-plugin-manager.md`。
 
 - 平台 I/O（文件、配置、表面度量、文件选择器）只存在于 `app-*`；共享层不含平台类型。
 - **单一 React UI**：`apps/desktop-ui`（两个桌面宿主共用）。DOM 侧“测试”是 node:test 的源码

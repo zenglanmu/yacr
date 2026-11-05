@@ -23,11 +23,17 @@
 
 use crate::camera::{Camera, Projection};
 use crate::layers::LayerOverrideSet;
+use crate::vendor::VendorRepresentationStore;
 use cad_db::{DrawingDatabase, LayerScope, MAX_INSTANCE_DEPTH};
 use cad_domain::*;
 use cad_spatial::{BackFacePolicy, ChunkGridIndex, PickItem, PickOptions, PickReport};
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Instant;
+
+mod vendor;
+
+pub use vendor::drawing_pick_items_with_vendor;
 
 fn pick_profile_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -241,93 +247,12 @@ fn walk_ref_chain(
 /// distinct refs. Expansion is bounded by [`MAX_INSTANCE_DEPTH`] and cuts
 /// cycles, exactly like [`DrawingDatabase::bounds`]; a truncated or cyclic
 /// branch is skipped rather than producing a wrong hit.
+///
+/// This is the vendor-agnostic entry: an `Opaque` entity produces an `Opaque`
+/// item and stays unpickable. Hosts that hold a settled vendor snapshot use
+/// [`drawing_pick_items_with_vendor`] (see [`vendor`]).
 pub fn drawing_pick_items(database: &DrawingDatabase, document: DocumentId) -> Vec<PickItem> {
-    borrowed_pick_items(database, document)
-        .into_iter()
-        .map(|(source, geometry, transform)| PickItem {
-            source,
-            geometry: geometry.clone(),
-            transform,
-            geometry_source: match geometry {
-                SemanticGeometry::Mesh(_) => GeometrySource::DirectMesh,
-                _ => GeometrySource::Analytic,
-            },
-        })
-        .collect()
-}
-
-fn borrowed_pick_items(
-    database: &DrawingDatabase,
-    document: DocumentId,
-) -> Vec<(SelectionRef, &SemanticGeometry, Transform3)> {
-    let mut items = Vec::new();
-    let mut stack: Vec<BlockId> = Vec::new();
-    for entity in database.model_space() {
-        collect_items(
-            database,
-            entity.id,
-            &entity.geometry,
-            document,
-            &Transform3::identity(),
-            &[],
-            0,
-            &mut stack,
-            &mut items,
-        );
-    }
-    items
-}
-
-#[allow(clippy::too_many_arguments)]
-fn collect_items<'a>(
-    database: &'a DrawingDatabase,
-    entity: EntityId,
-    geometry: &'a SemanticGeometry,
-    document: DocumentId,
-    transform: &Transform3,
-    path: &[EntityId],
-    depth: usize,
-    stack: &mut Vec<BlockId>,
-    out: &mut Vec<(SelectionRef, &'a SemanticGeometry, Transform3)>,
-) {
-    if let SemanticGeometry::Insert {
-        block,
-        transform: insert,
-    } = geometry
-    {
-        if depth >= MAX_INSTANCE_DEPTH || stack.contains(block) {
-            return;
-        }
-        let composed = transform.matrix_mul(insert);
-        let mut child_path = path.to_vec();
-        child_path.push(entity);
-        stack.push(*block);
-        for child in database.block_entities(*block) {
-            collect_items(
-                database,
-                child.id,
-                &child.geometry,
-                document,
-                &composed,
-                &child_path,
-                depth + 1,
-                stack,
-                out,
-            );
-        }
-        stack.pop();
-        return;
-    }
-    out.push((
-        SelectionRef {
-            document,
-            entity,
-            instance: InstancePath(path.to_vec()),
-            sub_element: None,
-        },
-        geometry,
-        *transform,
-    ));
+    drawing_pick_items_with_vendor(database, document, None)
 }
 
 /// Resolve one selection ref to its accumulated world transform, walking
@@ -429,6 +354,12 @@ pub fn resolve_pick_transform(
 pub struct PickIndex {
     scene: SceneIdentity,
     document: DocumentId,
+    /// Pass token of the vendor snapshot this index was built against (`None`
+    /// when it was built without a store). A vendor pass changes without a
+    /// database revision, so this is part of the cache key (ADR-0028 D2);
+    /// otherwise a pick after the plugin settles would reuse the old broad
+    /// phase and miss (or keep) an entity the new snapshot moved.
+    vendor_revision: Option<u64>,
     /// Every expanded item's identity, in expansion order (`ordinal -> ref`).
     items: Vec<SelectionRef>,
     /// Bounded items: their ordinal and conservative world AABB.
@@ -440,16 +371,28 @@ pub struct PickIndex {
 }
 
 impl PickIndex {
-    /// Expand the drawing and build its broad phase.
+    /// Expand the drawing and build its broad phase (no vendor snapshot).
     ///
     /// Fails only if the caller hands the index a non-finite box, which
     /// [`cad_spatial::pick_world_bounds`] never produces; a family that cannot
     /// be bounded conservatively is stored as an always-candidate instead.
     pub fn build(database: &DrawingDatabase, document: DocumentId) -> CadResult<Self> {
+        Self::build_with_vendor(database, document, None)
+    }
+
+    /// The vendor-aware counterpart of [`Self::build`].
+    ///
+    /// A vendor-backed opaque entity is bounded by its synthesized analytic
+    /// stand-in, so the broad phase narrows it exactly like ordinary geometry.
+    pub fn build_with_vendor(
+        database: &DrawingDatabase,
+        document: DocumentId,
+        vendor: Option<&VendorRepresentationStore>,
+    ) -> CadResult<Self> {
         let profile = pick_profile_enabled();
         let rss_before = if profile { process_rss_kb() } else { None };
         let started = profile.then(Instant::now);
-        let borrowed = borrowed_pick_items(database, document);
+        let borrowed = vendor::borrowed_pick_items(database, document, vendor);
         if let Some(started) = started {
             eprintln!(
                 "YACR_PROFILE_PICK borrowed_pick_items count={} elapsed_ms={:.3}",
@@ -461,12 +404,12 @@ impl PickIndex {
         let mut items = Vec::with_capacity(borrowed.len());
         let mut entries: Vec<(u32, Bounds3)> = Vec::with_capacity(borrowed.len());
         let mut unbounded = Vec::new();
-        for (ordinal, (source, geometry, transform)) in borrowed.into_iter().enumerate() {
+        for (ordinal, item) in borrowed.into_iter().enumerate() {
             let ordinal = u32::try_from(ordinal).map_err(|_| {
                 CadError::InvalidInput("pick expansion exceeds the index ordinal space".into())
             })?;
-            items.push(source);
-            match cad_spatial::pick_world_bounds(geometry, &transform) {
+            items.push(item.source);
+            match cad_spatial::pick_world_bounds(item.geometry.as_ref(), &item.transform) {
                 Some((min, max)) => entries.push((ordinal, Bounds3 { min, max })),
                 None => unbounded.push(ordinal),
             }
@@ -507,6 +450,7 @@ impl PickIndex {
         Ok(PickIndex {
             scene: database.scene_identity(),
             document,
+            vendor_revision: vendor.map(VendorRepresentationStore::revision),
             items,
             broad,
             unbounded,
@@ -521,6 +465,11 @@ impl PickIndex {
     /// The document this index's refs name.
     pub fn document(&self) -> DocumentId {
         self.document
+    }
+
+    /// The vendor snapshot pass token this index was built against.
+    pub fn vendor_revision(&self) -> Option<u64> {
+        self.vendor_revision
     }
 
     /// Expanded pick items in the drawing.
@@ -556,23 +505,34 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// The cached index for `database`/`document`, building it on a miss.
+/// The cached index for `database`/`document`/vendor snapshot, building it on a
+/// miss.
 ///
-/// `None` means the caller must use the exhaustive fallback: the index was
-/// explicitly disabled (`YACR_PICK_EXHAUSTIVE`) or could not be built. The
-/// reason is always logged, never silently swallowed.
-fn cached_pick_index(database: &DrawingDatabase, document: DocumentId) -> Option<Arc<PickIndex>> {
+/// The vendor revision is part of the key because a plugin pass replaces the
+/// snapshot without touching the database revision (ADR-0028 D2). `None` means
+/// the caller must use the exhaustive fallback: the index was explicitly
+/// disabled (`YACR_PICK_EXHAUSTIVE`) or could not be built. The reason is
+/// always logged, never silently swallowed.
+fn cached_pick_index(
+    database: &DrawingDatabase,
+    document: DocumentId,
+    vendor: Option<&VendorRepresentationStore>,
+) -> Option<Arc<PickIndex>> {
     if exhaustive_forced() {
         return None;
     }
     let scene = database.scene_identity();
+    let vendor_revision = vendor.map(VendorRepresentationStore::revision);
     let cached = PICK_INDEX_CACHE.with(|cell| cell.borrow().clone());
     if let Some(index) = cached {
-        if index.scene == scene && index.document == document {
+        if index.scene == scene
+            && index.document == document
+            && index.vendor_revision == vendor_revision
+        {
             return Some(index);
         }
     }
-    match PickIndex::build(database, document) {
+    match PickIndex::build_with_vendor(database, document, vendor) {
         Ok(index) => {
             let index = Arc::new(index);
             PICK_INDEX_CACHE.with(|cell| *cell.borrow_mut() = Some(index.clone()));
@@ -596,7 +556,22 @@ pub fn pick_ray(
     ray: &Ray3,
     options: &PickOptions,
 ) -> CadResult<PickReport> {
-    pick_ray_filtered(database, document, ray, options, None)
+    pick_ray_filtered(database, document, ray, options, None, None)
+}
+
+/// The vendor-aware counterpart of [`pick_ray`].
+///
+/// An opaque entity with a settled derived representation is offered as its
+/// synthesized analytic geometry instead of being skipped as `opaque`
+/// (ADR-0028 D2). The item identity is still the committed `cad-db` entity.
+pub fn pick_ray_with_vendor(
+    database: &DrawingDatabase,
+    document: DocumentId,
+    ray: &Ray3,
+    options: &PickOptions,
+    vendor: Option<&VendorRepresentationStore>,
+) -> CadResult<PickReport> {
+    pick_ray_filtered(database, document, ray, options, None, vendor)
 }
 
 /// The layer-visibility-aware counterpart of [`pick_ray`].
@@ -615,7 +590,7 @@ pub fn pick_ray_with_visibility(
     options: &PickOptions,
     overrides: &LayerOverrideSet,
 ) -> CadResult<PickReport> {
-    pick_ray_filtered(database, document, ray, options, Some(overrides))
+    pick_ray_filtered(database, document, ray, options, Some(overrides), None)
 }
 
 fn pick_ray_filtered(
@@ -624,8 +599,9 @@ fn pick_ray_filtered(
     ray: &Ray3,
     options: &PickOptions,
     overrides: Option<&LayerOverrideSet>,
+    vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<PickReport> {
-    let index = cached_pick_index(database, document);
+    let index = cached_pick_index(database, document, vendor);
     pick_ray_with_index_filtered(
         database,
         document,
@@ -633,6 +609,7 @@ fn pick_ray_filtered(
         options,
         index.as_deref(),
         overrides,
+        vendor,
     )
 }
 
@@ -647,7 +624,7 @@ pub fn pick_ray_exhaustive(
     ray: &Ray3,
     options: &PickOptions,
 ) -> CadResult<PickReport> {
-    pick_ray_exhaustive_filtered(database, document, ray, options, None)
+    pick_ray_exhaustive_filtered(database, document, ray, options, None, None)
 }
 
 fn pick_ray_exhaustive_filtered(
@@ -656,10 +633,11 @@ fn pick_ray_exhaustive_filtered(
     ray: &Ray3,
     options: &PickOptions,
     overrides: Option<&LayerOverrideSet>,
+    vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<PickReport> {
     let profile = pick_profile_enabled();
     let started = profile.then(Instant::now);
-    let items = borrowed_pick_items(database, document);
+    let items = vendor::borrowed_pick_items(database, document, vendor);
     // Drop the hidden candidates before the precise stage (the same predicate
     // the indexed path applies), so the exhaustive fallback and the index agree
     // on the visible set. Without overrides the list is untouched.
@@ -669,8 +647,8 @@ fn pick_ray_exhaustive_filtered(
             let scope = database.root_layer_scope();
             items
                 .into_iter()
-                .filter(|(source, _, _)| {
-                    ref_visibility(database, overrides, scope, source) == Some(true)
+                .filter(|item| {
+                    ref_visibility(database, overrides, scope, &item.source) == Some(true)
                 })
                 .collect()
         }
@@ -693,7 +671,7 @@ fn pick_ray_exhaustive_filtered(
         ray,
         items
             .iter()
-            .map(|(source, geometry, transform)| (source, *geometry, transform)),
+            .map(|item| (&item.source, item.geometry.as_ref(), &item.transform)),
         options,
     );
     if let Some(started) = started {
@@ -749,7 +727,7 @@ pub fn pick_ray_with_index(
     options: &PickOptions,
     index: Option<&PickIndex>,
 ) -> CadResult<PickReport> {
-    pick_ray_with_index_filtered(database, document, ray, options, index, None)
+    pick_ray_with_index_filtered(database, document, ray, options, index, None, None)
 }
 
 fn pick_ray_with_index_filtered(
@@ -759,9 +737,10 @@ fn pick_ray_with_index_filtered(
     options: &PickOptions,
     index: Option<&PickIndex>,
     overrides: Option<&LayerOverrideSet>,
+    vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<PickReport> {
     let Some(index) = index else {
-        return pick_ray_exhaustive_filtered(database, document, ray, options, overrides);
+        return pick_ray_exhaustive_filtered(database, document, ray, options, overrides, vendor);
     };
     let profile = pick_profile_enabled();
     let started = profile.then(Instant::now);
@@ -790,8 +769,11 @@ fn pick_ray_with_index_filtered(
     });
     // Resolve only the candidates' geometry and accumulated transform from the
     // database; the item's identity (entity + instance path) is preserved
-    // exactly, so two insert instances stay separable.
-    let mut resolved: Vec<(&SelectionRef, &SemanticGeometry, Transform3)> =
+    // exactly, so two insert instances stay separable. A vendor-backed opaque
+    // entity is resolved to its synthesized analytic stand-in here, with the
+    // primitives kept in local coordinates and the same accumulated transform
+    // the expansion produced (no double transform).
+    let mut resolved: Vec<(&SelectionRef, Cow<'_, SemanticGeometry>, Transform3)> =
         Vec::with_capacity(candidate_count);
     for source in &candidates {
         let Some(entity) = database.entity(source.entity) else {
@@ -800,14 +782,18 @@ fn pick_ray_with_index_filtered(
         let Some(transform) = item_transform(database, source) else {
             continue;
         };
-        resolved.push((source, &entity.geometry, transform));
+        let geometry = match vendor.and_then(|store| vendor::vendor_pick_geometry(entity, store)) {
+            Some(synthesized) => Cow::Owned(synthesized),
+            None => Cow::Borrowed(&entity.geometry),
+        };
+        resolved.push((source, geometry, transform));
     }
     let started = profile.then(Instant::now);
     let result = cad_spatial::pick_closest_borrowed(
         ray,
         resolved
             .iter()
-            .map(|(source, geometry, transform)| (*source, *geometry, transform)),
+            .map(|(source, geometry, transform)| (*source, geometry.as_ref(), transform)),
         options,
     );
     if let Some(started) = started {
@@ -841,6 +827,7 @@ pub fn pick_at_screen(
         policy,
         back_faces,
         None,
+        None,
     )
 }
 
@@ -870,6 +857,39 @@ pub fn pick_at_screen_with_visibility(
         policy,
         back_faces,
         Some(overrides),
+        None,
+    )
+}
+
+/// The vendor-aware counterpart of [`pick_at_screen_with_visibility`].
+///
+/// This is what a host calls for click-select and hover once a plugin pass has
+/// settled: the same screen→ray→pick funnel and visibility rule, with
+/// vendor-backed opaque entities offered as their synthesized analytic
+/// geometry (ADR-0028 D2). The cache key includes the snapshot's revision, so a
+/// fresh pass is never served a stale broad phase.
+#[allow(clippy::too_many_arguments)]
+pub fn pick_at_screen_with_visibility_and_vendor(
+    database: &DrawingDatabase,
+    document: DocumentId,
+    camera: &Camera,
+    logical: [f64; 2],
+    logical_size: [f64; 2],
+    policy: &TolerancePolicy,
+    back_faces: BackFacePolicy,
+    overrides: &LayerOverrideSet,
+    vendor: Option<&VendorRepresentationStore>,
+) -> CadResult<PickReport> {
+    pick_at_screen_filtered(
+        database,
+        document,
+        camera,
+        logical,
+        logical_size,
+        policy,
+        back_faces,
+        Some(overrides),
+        vendor,
     )
 }
 
@@ -883,6 +903,7 @@ fn pick_at_screen_filtered(
     policy: &TolerancePolicy,
     back_faces: BackFacePolicy,
     overrides: Option<&LayerOverrideSet>,
+    vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<PickReport> {
     let profile = pick_profile_enabled();
     let total_started = profile.then(Instant::now);
@@ -898,7 +919,7 @@ fn pick_at_screen_filtered(
             started.elapsed().as_secs_f64() * 1000.0
         );
     }
-    let result = pick_ray_filtered(database, document, &ray, &options, overrides);
+    let result = pick_ray_filtered(database, document, &ray, &options, overrides, vendor);
     if let Some(started) = total_started {
         eprintln!(
             "YACR_PROFILE_PICK pick_at_screen_total elapsed_ms={:.3}",
@@ -921,5 +942,7 @@ pub fn filter_by_index(
 ) -> CadResult<Vec<SelectionRef>> {
     index.ray_candidates(ray, tolerance)
 }
+pub(crate) use vendor::vendor_backed_entity;
+
 #[cfg(test)]
 mod tests;

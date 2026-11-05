@@ -168,7 +168,10 @@ test('every build x observed carrier x bridge x command class resolves the same 
     }
   }
 
-  assert.deepEqual([...SHELL_ONLY_COMMANDS], ['canvas_runtime_failed', 'canvas_session_status']);
+  assert.deepEqual([...SHELL_ONLY_COMMANDS], [
+    'canvas_runtime_failed', 'canvas_session_status',
+    'cad_plugin_status', 'cad_plugin_install', 'cad_plugin_enable', 'cad_plugin_uninstall', 'cad_plugin_read_entry',
+  ]);
   for (const command of SHELL_ONLY_COMMANDS) {
     // The two reports prefer an existing bridge on every carrier the adapter
     // owns data on - an Android WebView, and an X11 host (which is where the

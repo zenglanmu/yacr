@@ -55,6 +55,7 @@ mod init;
 mod layers;
 mod locale;
 mod options;
+mod plugins;
 mod popup;
 mod postload;
 mod presenter;
@@ -102,6 +103,8 @@ pub use popup::PopupAck;
 // seam (the typed `hostProfile` on `cad_status`, the runtime refusal channel and
 // the explicit native-session refusals). See [`dispatch`].
 pub use dispatch::invoke_handler;
+// Plugin startup composition (store + carrier gate + vendor enable).
+pub(crate) use plugins::configure as configure_plugins;
 // What the resolved `surfaceMode` may construct on the native side (ADR 0024
 // D1/D2). One pure value, read by `init` and `tick`.
 pub(crate) use surface::current as surface_plan;

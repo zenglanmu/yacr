@@ -24,7 +24,7 @@ test('the vocabulary loader keeps its in-flight promise', async () => {
 test('admission awaits the vocabulary before reading the catalog', async () => {
   const source = await readFile(APP, 'utf8');
   const awaitAt = source.indexOf('await vocabularyRef.current');
-  const admissionAt = source.indexOf('queueCadCommand(invoke, text, status, false)');
+  const admissionAt = source.indexOf('queueCadCommand(invoke, text, status, false,');
   assert.ok(awaitAt > 0, 'submitCommand does not await the vocabulary load');
   assert.ok(admissionAt > awaitAt, 'admission happens before the vocabulary is awaited');
   // A rejected load must not turn into an unhandled rejection: the loader reports

@@ -18,11 +18,19 @@
   由 `scripts/build-vendor-plugin.sh`（`rolldown` 打包为单个 ESM）构建为
   `plugins/tch/dist/index.js`，再复制到 `apps/desktop-ui/public/plugins/tch.js`；
   Vite 把它复制到各载体的 `dist/plugins/tch.js`。
-- 宿主用 `<script type="module" src="plugins/tch.js">` 加载（与 canvas bootstrap 同一模式），
-  插件把唯一门面注册到 `globalThis.__YACR_VENDOR_PLUGIN__ = { abiVersion, decode }`。
+- 内置 `tch` 由宿主用 `<script type="module" src="plugins/tch.js">` 加载（与 canvas bootstrap
+  同一模式）。经插件管理器安装的外部解码器由 `cad_plugin_read_entry` 读出 base64 字节，再用
+  Blob URL 以 ES module 导入（§8）。两条路径都把唯一门面注册到
+  `globalThis.__YACR_VENDOR_PLUGIN__ = { abiVersion, decode }`。
 - 插件只做 **字节 → 图元**；它不读写 `cad-db`、不调用 Tauri `invoke`、不碰文件系统。
-- native 与 web 共用同一份 `.js`；CLI/headless **没有 WebView**，因此 CLI 不使用插件，
-  TCH 在 CLI 侧保持显式不支持。
+- 内置 `tch` 的 `.js` 由 native 与 web 共用；**外部安装的解码器只在 `native-below` 上加载**
+  （§8）。CLI/headless **没有 WebView**，因此 CLI 不使用插件，TCH 在 CLI 侧保持显式不支持。
+- **可选注册扩展（ABI 仍为 1，二进制帧不变；ADR 0030）**：模块可导出
+  `register(host)`，宿主在启动时调用一次；插件用
+  `host.on('properties' | 'command' | 'cad-status', handler)` 注册。未导出/注册抛错只失去
+  属性面板与编辑拦截，`decode` 不受影响。插件把 `decode` 解析出的 `VendorRecord[]` 保存在模块作用域
+  （≤64 MiB records frame；流是同一 `ArrayBuffer` 的视图，不复制载荷），按 `source_handle`
+  回答属性/命令询问。插件输出仍是 display-only，不写 `cad-db`。
 - 生成物 `plugins/tch/dist/` 与 `apps/desktop-ui/public/plugins/` 被 `.gitignore` 忽略；`npm run build`、
   `build:web`、`build:android`、`dev` 都会先执行 `build:plugins`。
 - **所有 native 宿主共用 `cad-desktop-shell` 的同一套命令**：`app-linux`（`native-below`）、
@@ -181,12 +189,60 @@ class body 在 skip 后首字节为 6；R2000 代理样本首字节为 `0x0e`。
 - 选择属性面板追加只读的 `vendor_derived` / `vendor_primitives` / `vendor_revision`
   （i18n：`properties.row.vendor_*`）。
 
+## 5.2 拾取/选择（ADR 0030，2026-11-05）
+
+`TCH_*` 在 `cad-db` 里仍是 `Opaque`；插件解出的 primitive 不落库。为了让“看得见”与“点得中”一致，
+CPU 拾取目录在 **存在已 settle 的 vendor 快照** 时，把 `Opaque` 实体替换为一份**派生 analytic 几何**
+（`SemanticGeometry::Compound`），但 `source` 仍是原实体的 `SelectionRef`：
+
+- `Lines` → 开放 `Polyline`；`Segments` → 多条 `Line`；`Arc`/`Circle` → 对应 analytic 变体；
+  `Text` → 其 origin 的 `Point`（只保证锚点可点，不伪造字形轮廓）；
+  `Block` **不展开**（只有 block primitive 的 TCH 实体仍不可点，保留 `skipped = opaque`）。
+- INSERT 内部成员沿用既有累计实例变换；图层可见性按源实体判断；`geometry_source = ProxyCache`。
+- 点击、hover、`SELECTALL`、框选共用同一目录；`PickIndex` 缓存键包含 vendor 快照 revision，
+  插件 settle 后索引会失效重建。
+- **没有 vendor 快照 / 没有派生 primitive** 的 `Opaque` 行为不变：精细拾取
+  `PickOutcome::Unsupported("opaque")`，并在 `PickReport.skipped` 里保留原因。不得把不可点实体
+  算作已支持，也不得为其伪造 `EntityId`/handle。
+
+> 注意：导入期的 `EntityCapability.pick` 对 `Opaque` 仍是 `Unsupported`（那是按 class 的静态
+> 能力，且在 vendor pass 之前就已确定）；运行时可点性由 settle 后的 vendor 快照决定。两者不要
+> 混写：能力报告仍说“该 class 的语义/拾取未建模”，交互拾取只是对“有派生表示”的实例生效。
+
+**handle 语义**：可选中性以 **已提交进 `cad-db` 的实体** 为准，不以 source handle 为准。导入实体有
+handle；API/编辑/COPY 创建并提交的实体有 `EntityId` 但 `source_handle = None`（属性面板显示
+`handle = none`）。transient overlay（绘制/测量预览、框选、捕捉提示、grip marker、光标）只有合成
+哈希 id，**没有**真实 `EntityId` 或 handle；`DrawingTransaction` 中 staged 未 commit 的实体不在
+`cad-db`，也不可选中。这与 AutoCAD “已加入数据库即可选择、transient 不可选择”的行为一致，只是本项目
+的 handle 额外承担“源文件出处”语义。
+
+## 5.3 插件属性/命令提供者（ADR 0030，2026-11-05）
+
+- `PROPERTIES` 仍是 chrome-local selector（不触发 `cad_command`、不写 DB）。chrome 在打开属性 dock 前
+  询问已注册的 `properties` 提供者，传入**当前** `cad_event`/`status-changed` 的 `selection`：
+  - 返回 panel descriptor → 在属性 dock 中显示宿主渲染的只读天正面板（插件只给分组 rows，不操作 DOM）；
+  - 返回 `null` / 插件未就绪 / handler 抛错 → 继续原有 `PropertiesPalette`。
+- panel 形状：`{ kind, handle, groups: [{ key, rows: [{ key, value }] }] }`。row key 是稳定机器键，
+  宿主按 `properties.tch.<key>` 翻译；未知键显示原键。插件不硬编码中文。
+- `command` 提供者在命令准入后、`cad_command` 之前被询问；天正插件对当前单选（且 handle 命中
+  records 缓存）的 `MOVE/COPY/ERASE/ROTATE/SCALE/MIRROR/STRETCH/TRIM/EXTEND/OFFSET/EXPLODE/ARRAY/
+  PEDIT/FILLET/CHAMFER` 返回 `{ handled: true, messageKey: 'vendor.editing.unsupported' }`，
+  chrome 显示模态说明并**不发送** `cad_command`。普通图元编辑、未选中天正实体、普通绘制命令不受影响。
+- **多选限制**：`cad_status.selection` 是多选**交集行**，没有逐实体列表；插件只对
+  `count == 1` 且 `handle` 行非 mixed 的选择可靠接管。多选一律 pass-through；如需多选接管，必须先
+  扩展 wire，不在当前范围。
+- 插件仍是同权 module script（§6.3）；命令拦截只发生在 chrome 漏斗，**不是**安全边界；Rust 命令仍可被
+  其他入口直接调用。
+
 ## 6. 已知缺口
 
 0. **载体验证边界**：命令与事件在全部五个宿主上已按同一契约接线；但只有 Linux 做了运行/
    契约测试。Windows/macOS/Android 为编译证据，Web 为 wasm 编译 + adapter/单测证据。
    **worker（OffscreenCanvas）隔离载体没有页面侧的 vendor 通道**：该 carrier 的 wasm 实例
    在 Worker 内，页面 adapter 不访问它；这一限制必须在状态/文档中保持显式。
+   **插件管理器只在 `native-below` 可用**（§8）：Linux X11/XWayland 的 `dom-canvas` 返回
+   `plugin.unsupported_carrier: dom-canvas`，纯 Web 按名拒绝 `cad_plugin_*`；两者的内置 `tch`
+   仍是 always-on，管理器不能禁用或替换它。
 1. **解码覆盖**：22 个 base-6 明文类已解（见 §1 状态与 `plugins/tch/README.md` 表）。
    仍未解码/显式拒绝：
    - `TCH_SPACE`（383）：参考实现（MiniCAD）没有该类解码器，布局未验证；
@@ -208,8 +264,10 @@ class body 在 skip 后首字节为 6；R2000 代理样本首字节为 `0x0e`。
    并带真实实例路径。派生片段带源实体 id、`GeometrySource::ProxyCache`、
    `Precision::Approximate`，因此拾取仍指向原 `TCH_*` 实体；块图元的子片段也强制挂回源实体。
    纸张空间（`build_paper_space`）目前不调用该 walk。
-3. **插件隔离**：当前是普通 module script，和页面同权；不可信插件应改为 Worker/wasm
-   或 sandboxed iframe。
+3. **插件隔离（仍未闭合）**：当前是普通 module script，和页面同权；外部插件在安装校验时
+   （§8）也会在页面里执行一次。不可信插件应改为 Worker/wasm 或 sandboxed iframe。安装界面
+   明示“插件拥有与应用其余部分相同的权限”，但**没有**签名、权限清单或进程隔离；`id/name/version`
+   元数据只用于显示，宿主只记录字节，不做来源证明。
 4. **真实格式版本**：本实现按真实样本的 base 6 / 保护标记 9 逆向；R2000 代理样本的
    `0x0e` payload、T30 基类 9–14 仍未在插件中实现。
 5. **文本流共享块**：AC1027 文本流在属性包字符串之后有一个
@@ -231,6 +289,14 @@ class body 在 skip 后首字节为 6；R2000 代理样本首字节为 `0x0e`。
    - 尺寸样式：ABI 不携带图纸标注样式，统一用 MiniCAD 默认 `TchDimStyle` 并报
      `vendor.tch.dimension_style_defaults`。
 
+7. **属性/命令接管边界（ADR 0030）**：多选没有逐实体列表，插件只接管 `count == 1` 且
+   `handle` 行非 mixed 的选择；只有 block primitive 的 TCH 实体仍不可点；`Text` 只按 origin
+   锚点可点，不伪造字形轮廓。插件 records 缓存随每次 `decode` 替换，解码失败即清空，因此 settle 前
+   选中 TCH 只会走默认面板/放行命令。
+8. **插件面板不是自由 UI**：插件只返回 `{kind, handle, groups, rows}` 只读 descriptor，由 React
+   宿主渲染；插件不能注入 HTML/脚本、不能改选择、不能写 DB。面板 row 文案由宿主 i18n 提供，插件只给
+   稳定的 `properties.tch.*` 机器键。
+
 ## 7. 测试
 
 - Rust：`crates/cad-ui-core/src/session/vendor.rs` + `vendor_tests.rs` 的 ABI v1 帧/token/
@@ -243,6 +309,13 @@ class body 在 skip 后首字节为 6；R2000 代理样本首字节为 `0x0e`。
   洞口侧线、弧墙/profile 诊断、截断/坏 magic、bulge→arc），以及每个新类的合成契约测试
   （annotation / dimension / stair / opening-symbols / block-insert / break-line /
   annotation-symbol / index-symbol / datamap）；`web-adapter.test.ts`（wasm 命令转发/拒绝）。
+- 前端（ADR 0030）：`vendor-plugin-properties.test.ts`（合成 TCH_WALL records → `decode` →
+  `register` → 属性行/未知 handle/多选/编辑命令接管）；`plugin-interop.test.ts`（提供者顺序、
+  null 清理、异常放行、非法 panel/多选拒绝、notice store）；`plugin-command.test.ts`（`blocked`
+  在 IPC 前返回、null 放行、chrome-local 不拦截、`blocked` 文案）。
+- Rust 拾取（ADR 0030）：`crates/cad-app` 的拾取测试覆盖已提交/ staged/transient 身份、
+  `Opaque` + vendor store 命中、无 store 时 `skipped = opaque`、vendor revision 使 `PickIndex`
+  失效、`SELECTALL`/框选包含 vendor 派生实体。
 - 真实样本：`test-tangent-real.dwg` → plugin `status=0, applied=14911, entities=9889`，
   TEXT 870 / MTEXT 339 / WALL 4525 / COLUMN 1000 / OPENING 1734 / BLOCK_INSERT 220 /
   ELEVATION 358 / DIMENSION2 173 / ARROW 138 / MULTILEADER 127 / LINESTAIR 116 /
@@ -253,3 +326,161 @@ class body 在 skip 后首字节为 6；R2000 代理样本首字节为 `0x0e`。
   真实 2D 块（`0x3DD82`、`0x3E6F4`）同理由定向 `#[ignore]` 测试覆盖。
 - 构建：`npm run build:plugins` → `scripts/build-vendor-plugin.sh` 产出 `plugins/tch/dist/index.js`
   并复制到 `public/plugins/tch.js`；`npm test` 同时 typecheck 插件。
+
+## 8. 插件管理器（2026-11-05，仅 `native-below`）
+
+### 8.1 范围与入口
+
+Options 对话框新增 **Plugins / 插件** 页签；File 选项卡的 **Plugins** 项可直接打开该页签。
+它列出**内置 `tch` 解码器**和用户安装的解码器，
+并在同一页显示上一轮 `vendor-settled`（应用对象数 + 诊断）与插件扫描诊断。实现位置：
+
+- `apps/desktop-ui/src/components/OptionsPlugins.tsx`：页签 UI（即时提交，不参与其它 Options
+  页的 draft/Apply 模型）；
+- `apps/desktop-ui/src/options/plugins-view.ts`：纯视图模型（行状态、动作可用性、文件预检、
+  `vendor-settled` 摘要）；
+- `apps/desktop-ui/src/plugins/plugin-manager.ts`：前端 wire 调用、Blob 导入校验、安装流程；
+- `crates/cad-platform/src/plugins.rs`：`PluginStore` 持久化契约；
+- `crates/cad-ui-core/src/session/plugins.rs`：纯 wire 模型/策略/manifest；
+- `crates/cad-desktop-shell/src/plugins.rs`：五个 Tauri 命令与启动时解码器选择。
+
+插件管理器管理的是**离线解码器 bundle**，不是 CAD 文档状态：它不实例化第二份 `cad-db`，
+不改变当前会话的文档，也不把显示表示当数据源。
+
+### 8.2 单解码器规则（radio 语义）
+
+- **同一时间只有一个 active decoder**。策略文件里只有一个 `activeDecoder` 字段
+  （`"tch" | "<id>" | null`）；`null` 表示“全部禁用”。
+- 没有任何策略文件时（首次运行），内置 `tch` 是默认 active。
+- 安装一个用户插件会把它写成 active；启用另一个会替换当前 active；禁用**当前 active** 会把
+  策略写成 `null`；禁用非 active 的插件是幂等 no-op（仍返回 `accepted:true`）。
+- `tch` 是保留 id：不能安装同名插件，不能卸载内置插件，`cad_plugin_read_entry("tch")` 拒绝
+  （内置 bundle 由应用自己的 URL 提供）。内置 `tch` **可以**被禁用（下次启动厂商解析关闭）。
+- 每行有两个独立事实：`enabled`（已保存的选择）与 `sessionActive`（本进程启动时实际加载的
+  解码器）。两者不一致就是“需要重启”，不由计时器或刚发出的请求猜测。
+
+### 8.3 持久化布局
+
+`<config-dir>` 与 `config.json`/`preference.json` 同一目录：
+
+```
+<config-dir>/plugins.json                         # 策略
+<config-dir>/plugins/<id>/plugin.js               # 解码器 bundle（入口固定为 plugin.js）
+<config-dir>/plugins/<id>/manifest.json           # 宿主合成/校验的 manifest
+```
+
+策略（`version` 必须为 `1`；缺 `activeDecoder` 键是非法策略，不是静默禁用）：
+
+```json
+{"version":1,"activeDecoder":"tch"}
+```
+
+`activeDecoder` 也可以是用户插件 id 或 `null`。manifest 字段：
+`manifestVersion`、`id`、`name`、`version`、`abi`、`sourceFilename`、`entry`、`installedAt`
+（UTC RFC 3339）；`manifestVersion`/`abi` 只接受 `1`，`entry` 只接受 `plugin.js`，`id` 必须与
+目录名一致。`installedAt` 由宿主按系统时钟生成。
+
+- **id 语法**：`[a-z0-9][a-z0-9_-]{0,63}`。前端校验通过后，模块注册对象上的 `id` 若存在且合法，
+  就是目录 id；缺失时才由文件名派生（`My Tools.js` → `my-tools`；`.js`/`.mjs` 大小写不敏感）。
+  保留 id `tch` 与已存在的目录都显式拒绝（`plugin.reserved_id` / `plugin.already_installed`），
+  不覆盖、不静默改名。
+- **写入**：插件目录用同文件系统的临时目录 + `rename` 原子落盘；策略文件同样临时文件 +
+  `rename`。安装后若策略写入失败，宿主删除刚写入的插件目录，避免“已安装但无法激活”的半成品。
+- **路径安全**：id 先过上面的语法；插件目录或入口/manifest 是 symlink 时拒绝
+  （`plugin.unsafe_path`）；越界 id（`..`、`a/b`）拒绝；入口读取与写入都有 4 MiB 上限。
+- **扫描**：插件根不存在是空列表；不可读目录是 `plugin.scan_failed` 诊断，不是空成功。
+  manifest 缺失/非法仍以行显示（`manifest_missing`/`manifest_invalid`），并保留稳定诊断。
+- 策略文件损坏时，状态投影回退到内置默认并附 `plugin.policy_invalid` 诊断；**写操作拒绝**，
+  不覆盖一个看不懂的策略。
+
+### 8.4 安装流程
+
+1. 页面上的隐藏 `<input type=file>`（由可见的“安装插件…”按钮驱动）接受 `.js`/`.mjs`；
+   扩展名与 **4 MiB（4,194,304 B）** 上限在读取文件内容**之前**预检。
+2. 前端把源码放进 `Blob`，用 Blob URL 以 ES module 导入**一次**做 ABI 校验：
+   `globalThis.__YACR_VENDOR_PLUGIN__.abiVersion === 1` 且 `decode` 是函数。
+   导入前后保存/恢复该全局，校验不会替换正在使用的解码器；Blob URL 无论成败都撤销。
+   校验失败给稳定原因 `plugin.contract_invalid` / `plugin.abi_mismatch: <n>`。
+3. 校验通过后调用 `cad_plugin_install({ filename, payload, meta? })`，`payload` 是文件原始字节
+   的 base64（不是文本重编码）。宿主重新检查文件名/扩展名、base64、大小和保留 id，然后写
+   `<id>/plugin.js` + `manifest.json`，并把 `activeDecoder` 设为新 id。
+4. 变更立即持久化；**当前会话不热加载**。成功安装只意味着“下次启动会用这个解码器”，页面
+   通过重新读取 `cad_plugin_status` 显示新行和 `restartRequired`。
+
+**信任警告（UI 明示）**：安装校验会先运行一次插件代码；插件拥有与应用其余部分相同的权限，
+因此只应安装可信文件。宿主只记录字节，没有签名验证；`name/version` 是显示元数据，
+`id` 是安装身份（宿主校验语法与保留/占用，但无法从字节重新验证它）。
+
+### 8.5 重启语义（无热重载、无热卸载）
+
+- 安装 / 启用 / 禁用 / 卸载都**立即写策略**，但**只在下次应用启动时生效**。没有 hot reload、
+  没有 live unload、没有自动重启；当前进程继续使用启动时加载的解码器。
+- `restartRequired` 由宿主计算为 `activeDecoder != sessionActiveDecoder`；页签顶部据此显示
+  “插件改动将在下次启动后生效”横幅。`accepted:true` 只表示宿主已保存，不表示已生效。
+- 下次启动读取策略：`tch` → 内置 bundle；其他 id → 校验 manifest 后通过
+  `cad_plugin_read_entry` 读入口并用 Blob URL 导入；`null` 或配置的 id 已不存在 → 不启用解码器，
+  厂商解析以 `vendor.decoder_disabled` 形成真实的 unsupported 结果（不挂起、不伪造成功）。
+- 卸载是真正的目录删除（不是隐藏/禁用）：删除 `<config-dir>/plugins/<id>/`；若它正是 active，
+  策略同时写为 `null`。内置插件没有卸载路径。
+
+### 8.6 命令（五个，native shell only）
+
+这些是 **shell IPC 命令**，不是 CAD 选择子，不进入 `COMMAND_TABLE`；同名表也记录在
+`docs/commands.md`。线格式为 camelCase。
+
+| 命令 | 参数 | 返回 |
+|---|---|---|
+| `cad_plugin_status` | — | `{ supported, carrier, plugins[], activeDecoder, sessionActiveDecoder, restartRequired, diagnostics[] }` |
+| `cad_plugin_install` | `{ filename: string, payload: string(base64), meta?: { id?, name?, version? } }` | `PluginMutationResult` |
+| `cad_plugin_enable` | `{ id: string, enabled: boolean }` | `PluginMutationResult` |
+| `cad_plugin_uninstall` | `{ id: string }` | `PluginMutationResult` |
+| `cad_plugin_read_entry` | `{ id: string }` | `{ payload: string(base64), entry: "plugin.js" }`；内置 id 拒绝 |
+
+`PluginMutationResult` = `{ accepted: boolean, reason?: string, restartRequired: boolean,
+status: PluginStatusFrame }`。拒绝不是异常也不是空成功：它带 `accepted:false`、稳定 `reason`
+和**当前真实**的 registry 快照。`PluginRow` = `{ id, name, version, abi, source:
+"builtin"|"user", enabled, sessionActive, status: "ok"|"manifest_missing"|"manifest_invalid",
+installedAt? }`。
+
+页签把行投影为四种状态：`active`、`pendingRestart`、`disabled`、`invalid`（任何非 `ok` 的
+宿主状态）。只有 `user` 行有卸载按钮；只有 `enabled` 行有禁用按钮。
+
+### 8.7 载体支持与拒绝
+
+| 载体 | 插件管理器 | 存储 / 行为 |
+|---|---|---|
+| Linux 原生 Wayland（`native-below`） | **支持** | `$XDG_CONFIG_HOME/yacr`（未设时 `~/.config/yacr`）下的 `plugins.json` + `plugins/` |
+| Linux X11/XWayland（`dom-canvas`） | **不支持** | `cad_plugin_status` 返回 `supported:false`、`carrier:"dom-canvas"`、诊断 `plugin.unsupported_carrier: dom-canvas`；安装/启用/卸载返回 `accepted:false`（同一 reason），`read_entry` 返回同一 reason 的错误。内置 `tch` 在 wasm 会话中仍然 always-on |
+| Windows（`native-below`） | **契约支持** | `%APPDATA%\yacr\plugins.json` + `%APPDATA%\yacr\plugins\<id>\`；`APPDATA` 不可解析时用 `NonPersistentPluginStore`：`tch` 仍可用，安装/写入以 `unsupported-runtime: plugin-store-unavailable` 拒绝 |
+| macOS（`native-below`） | **契约支持** | `$HOME/Library/Application Support/yacr/plugins.json` + `plugins/<id>/`；`HOME` 不可解析时同上 |
+| Android（`native-below`） | **契约支持** | 应用私有 `filesDir` 下的 `plugins.json` + `plugins/<id>/`（当前包名 `/data/user/0/io.github.zenglanmu.yacr/files`）；路径在 `nativeAssetsReady` 后惰性解析，握手前返回 `unsupported-runtime: plugin-store-unavailable` |
+| Web（`dom-canvas`） | **不支持（无持久存储）** | `web-adapter` 对五个名字逐个抛 `unsupported-runtime: cad_plugin_<name>`；内置 `tch` 仍由打包的 `plugins/tch.js` 提供 |
+
+`cad-desktop-shell` 在 `native-below` 上注册五个命令；Linux 的 `dom-canvas` 仍把命令路由到
+native handler，由 handler 给出上述**线格式拒绝**（避免 Tauri “command not found”）。纯 Web
+没有 Tauri bridge，由前端 adapter 按名拒绝。
+
+### 8.8 CSP 与安全取舍
+
+四个 native `tauri.conf.json`（Linux / Windows / macOS / Android）的 `script-src` 增加了
+`blob:`，用于导入用户安装的 ES module；Web 的 CSP 不变。**这是一个明确的取舍**：`blob:` 让
+所有 native 用户页面的 CSP 对脚本来源更宽松。之所以接受，是因为安装流程本来就要在页面里
+执行任意插件代码，且没有 worker/sandbox 隔离；它不使插件变得可信，只是让“已安装插件”的
+加载路径成立。
+
+仍未闭合：插件隔离（普通 module script，与应用同权）、签名/权限清单、热重载/热卸载。
+内置 `tch` 仍是打包文件；外部插件只有 `native-below` 能安装。
+
+### 8.9 证据（实现轮次，2026-11-05）
+
+- `npm test`：**1096/1096 pass**（含 `plugin-manager.test.ts`、`options-plugins.test.ts`、
+  `web-adapter.test.ts` 的按名拒绝、`carrier-routing`/`host-adapter` 的 shell-only 路由）。
+- `cargo test -p cad-ui-core -p cad-platform -p cad-desktop-shell --locked`：通过（wire 模型/
+  manifest/policy、`FsPluginStore` 原子写/越界/symlink/超限、五个命令的 install→status→read→
+  uninstall、dom-canvas 拒绝、restart 语义）。
+- `cargo check -p app-linux --all-targets --locked`：通过。
+- `python3 scripts/check-architecture.py`、`scripts/check-file-size.py`、`scripts/check-i18n.py`：
+  通过（本条按实现轮次记录）。
+- **NOT RUN / NOT VERIFIED**：Windows/macOS/Android 真实目标运行、Android 设备、真实 GUI
+  （Options → Plugins 的实际交互/像素）、真实浏览器、GPU/像素、CSP 在真机 WebView 的行为。
+  本轮文档改动只重跑了 `check-command-docs.py`、`check-i18n.py` 与 `git diff --check`。

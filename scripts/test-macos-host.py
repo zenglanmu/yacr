@@ -242,7 +242,7 @@ def conf_problems(text: str, version: str) -> list[str]:
     csp = str(app.get("security", {}).get("csp", ""))
     for fragment in (
         "default-src 'self'",
-        "script-src 'self' 'wasm-unsafe-eval'",
+        "script-src 'self' 'wasm-unsafe-eval' blob:",
         "style-src 'self' 'unsafe-inline'",
         "connect-src 'self' ipc: http://ipc.localhost",
     ):

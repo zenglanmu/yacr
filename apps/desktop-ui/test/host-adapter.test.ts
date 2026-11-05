@@ -210,7 +210,10 @@ test('every runtime x carrier x bridge x command class resolves to adapter or Ta
   assert.equal(invokeRoute('web', 'cad_command', false), 'web');
   assert.equal(invokeRoute('android', 'cad_command', false), 'web');
 
-  assert.deepEqual([...SHELL_ONLY_COMMANDS], ['canvas_runtime_failed', 'canvas_session_status']);
+  assert.deepEqual([...SHELL_ONLY_COMMANDS], [
+    'canvas_runtime_failed', 'canvas_session_status',
+    'cad_plugin_status', 'cad_plugin_install', 'cad_plugin_enable', 'cad_plugin_uninstall', 'cad_plugin_read_entry',
+  ]);
 });
 
 test('createInvoke routes per call through the injected transports', async () => {

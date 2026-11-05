@@ -58,14 +58,15 @@
 // and, if an Android host ever reports `dom-canvas`, moves everything to the
 // adapter exactly like X11.
 //
-// The two shell-only names are *reports the chrome sends*. On a browser carrier
-// the wasm session already owns those facts, so the web adapter remembers them
-// and resolves; on an Android WebView (and on an X11 host, whose `dom-canvas`
-// carrier still maps a failure step to its marker line and exit code) the
-// document has the Tauri bridge, and the native host is the one that acts on the
-// report. That is why the rule is "route these two to Tauri **when the bridge is
-// present**", not "route them by carrier": a plain browser has no bridge and must
-// never call one.
+// The shell-only names are shell capabilities and *reports the chrome sends*. On
+// a browser carrier the wasm session owns the canvas facts, so the web adapter
+// remembers them and resolves; on an Android WebView (and on an X11 host, whose
+// `dom-canvas` carrier still maps a failure step to its marker line and exit
+// code) the document has the Tauri bridge, and the native host is the one that
+// acts on the report. The `cad_plugin_*` commands likewise belong to the shell's
+// plugin registry, never to the wasm session. That is why the rule is "route
+// these to Tauri **when the bridge is present**", not "route them by carrier": a
+// plain browser has no bridge and must never call one.
 //
 // A `native-below` carrier is byte-for-byte the previous behaviour: the same
 // `@tauri-apps/api` function, the same command names, the same arguments object
@@ -101,12 +102,23 @@ export type InvokeArgs = Record<string, unknown> | Uint8Array | number[] | Array
 export type InvokeRoute = 'tauri' | 'web';
 
 /**
- * The shell-only canvas reports: commands the chrome *sends*, with no answer.
+ * The shell-only commands: shell capabilities and reports the chrome *sends*.
  *
  * They are the only names that prefer Tauri while an adapter owns the CAD data,
- * and only when the bridge is actually there (see the module header).
+ * and only when the bridge is actually there (see the module header). The two
+ * canvas reports have no answer; the five `cad_plugin_*` commands read or mutate
+ * the **shell's** plugin registry, which is not CAD document data and therefore
+ * never belongs to the wasm session.
  */
-export const SHELL_ONLY_COMMANDS: readonly string[] = ['canvas_runtime_failed', 'canvas_session_status'];
+export const SHELL_ONLY_COMMANDS: readonly string[] = [
+  'canvas_runtime_failed',
+  'canvas_session_status',
+  'cad_plugin_status',
+  'cad_plugin_install',
+  'cad_plugin_enable',
+  'cad_plugin_uninstall',
+  'cad_plugin_read_entry',
+];
 
 /** The Tauri callable this module routes to (injectable for tests). */
 export type TauriTransport = (command: string, args?: InvokeArgs) => Promise<unknown>;

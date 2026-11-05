@@ -393,3 +393,191 @@ export const OPTIONS_STATE: CSSProperties = Object.freeze({
   maxWidth: '46ch',
   textAlign: 'center',
 });
+
+// --- Plugins tab ----------------------------------------------------------
+// The Plugins tab is a list, not the settings grid: the 148px label column has
+// nothing to name, so every row spends the whole 499px content width on the
+// plugin's identity and its own actions. The state pill is the only right-aligned
+// element on the first line, which makes active / restart-required / invalid read
+// as one column down the list.
+//
+// Rows keep a 2-line shape (name + identity; actions) at 12/10.5px. A 560px card
+// leaves ~420px above the footer, enough for four plugins plus the install strip
+// and the last-pass block without scrolling; beyond that the content column's own
+// `overflow: auto` takes over.
+
+/** One section's uppercase caption ("Active decoder", "Last vendor pass"). */
+export const OPTIONS_SECTION_LABEL: CSSProperties = Object.freeze({
+  margin: 0,
+  fontSize: 10.5,
+  letterSpacing: '.5px',
+  textTransform: 'uppercase',
+  color: 'var(--text-muted)',
+});
+
+/** The plugin rows: one sheet, hairline between rows, no per-row boxes. */
+export const OPTIONS_PLUGIN_LIST: CSSProperties = Object.freeze({
+  margin: 0,
+  padding: 0,
+  listStyle: 'none',
+  border: '1px solid var(--line-soft)',
+  borderRadius: 'var(--radius)',
+  overflow: 'hidden',
+});
+
+/** One row: radio, identity block, actions. */
+export const OPTIONS_PLUGIN_ROW: CSSProperties = Object.freeze({
+  display: 'grid',
+  gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+  alignItems: 'start',
+  gap: '0 9px',
+  padding: '8px 10px',
+});
+
+/** Hairline between rows (never before the first). */
+export const OPTIONS_PLUGIN_ROW_RULE: CSSProperties = Object.freeze({
+  borderTop: '1px solid var(--line)',
+});
+
+export const OPTIONS_PLUGIN_NAME: CSSProperties = Object.freeze({
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  minWidth: 0,
+  minHeight: 18,
+  fontSize: 12,
+  lineHeight: 1.35,
+  color: 'var(--text)',
+});
+
+/** The name is the radio's label; it ellipsizes rather than widening the row. */
+export const OPTIONS_PLUGIN_NAME_TEXT: CSSProperties = Object.freeze({
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  cursor: 'pointer',
+});
+
+/** Identity line: mono, quiet, one wrapping run of `id · version · ABI`. */
+export const OPTIONS_PLUGIN_META: CSSProperties = Object.freeze({
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: '0 10px',
+  minWidth: 0,
+  fontFamily: 'var(--font-mono)',
+  fontSize: 10.5,
+  lineHeight: 1.45,
+  color: 'var(--text-muted)',
+});
+
+/** The value half of one identity pair, one step brighter than its label. */
+export const OPTIONS_PLUGIN_META_VALUE: CSSProperties = Object.freeze({
+  color: 'var(--text-dim)',
+  overflowWrap: 'anywhere',
+});
+
+export const OPTIONS_PLUGIN_ACTIONS: CSSProperties = Object.freeze({
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'flex-end',
+  gap: 4,
+  paddingTop: 1,
+});
+
+export const OPTIONS_PLUGIN_BUTTONS: CSSProperties = Object.freeze({
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+});
+
+/** A state pill: the shared badge shape, tinted per state (see the variants). */
+export const OPTIONS_PILL: CSSProperties = Object.freeze({
+  display: 'inline-flex',
+  alignItems: 'center',
+  height: 18,
+  padding: '0 6px',
+  border: '1px solid var(--line-soft)',
+  borderRadius: 999,
+  fontSize: 10.5,
+  letterSpacing: '.2px',
+  whiteSpace: 'nowrap',
+  color: 'var(--text-muted)',
+});
+
+export const OPTIONS_PILL_ACTIVE: CSSProperties = Object.freeze({
+  color: 'var(--ok)',
+  borderColor: 'var(--ok)',
+});
+
+export const OPTIONS_PILL_PENDING: CSSProperties = Object.freeze({
+  color: 'var(--accent-text)',
+  borderColor: 'var(--accent-text)',
+});
+
+export const OPTIONS_PILL_INVALID: CSSProperties = Object.freeze({
+  color: 'var(--danger)',
+  borderColor: 'var(--danger)',
+});
+
+/** The persistent restart banner: an accent edge, never a red error. */
+export const OPTIONS_BANNER: CSSProperties = Object.freeze({
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: 8,
+  padding: '8px 10px',
+  background: 'var(--field)',
+  border: '1px solid var(--line-soft)',
+  borderLeft: '2px solid var(--accent)',
+  borderRadius: 'var(--radius)',
+});
+
+export const OPTIONS_BANNER_TEXT: CSSProperties = Object.freeze({
+  margin: 0,
+  fontSize: 11,
+  lineHeight: 1.45,
+  color: 'var(--text-dim)',
+});
+
+/** An inline confirmation (install, uninstall): one sentence, then the buttons. */
+export const OPTIONS_CONFIRM: CSSProperties = Object.freeze({
+  display: 'flex',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: 8,
+  marginTop: 6,
+  padding: '7px 8px',
+  border: '1px solid var(--line-soft)',
+  borderRadius: 'var(--radius)',
+  background: 'var(--field)',
+});
+
+export const OPTIONS_CONFIRM_TEXT: CSSProperties = Object.freeze({
+  margin: 0,
+  flex: '1 1 180px',
+  minWidth: 0,
+  fontSize: 11,
+  lineHeight: 1.45,
+  color: 'var(--text-dim)',
+});
+
+/** The last-pass block: monospace because every line can be a machine message. */
+export const OPTIONS_DIAGNOSTICS: CSSProperties = Object.freeze({
+  margin: 0,
+  padding: '8px 10px',
+  border: '1px solid var(--line)',
+  borderRadius: 'var(--radius)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 10.5,
+  lineHeight: 1.5,
+  color: 'var(--text-dim)',
+  overflowWrap: 'anywhere',
+});
+
+export const OPTIONS_DIAGNOSTICS_LIST: CSSProperties = Object.freeze({
+  margin: '4px 0 0',
+  padding: 0,
+  listStyle: 'none',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+});

@@ -85,12 +85,26 @@ export interface OptionTab {
   readonly id: string;
   readonly labelKey: string;
   readonly icon: string;
+  /**
+   * The tab draws its own content instead of the staged settings list.
+   *
+   * `plugins` is the one such tab: its rows are not `cad_settings` keys, its
+   * actions take effect on the host immediately, and it owns its loading /
+   * unsupported / failed states. Without this flag [`optionsTabs`] would drop it
+   * for owning no field and the rail would silently lose the tab.
+   */
+  readonly selfRendered?: boolean;
 }
 
 /**
  * The tab rail, AutoCAD order. `fields` are resolved from [`OPTIONS_FIELDS`] so
  * a control cannot appear in two places; see [`optionsTabs`] for the filtered
- * list the dialog actually renders (empty tabs are dropped).
+ * list the dialog actually renders (empty tabs are dropped, except the
+ * self-rendered Plugins tab).
+ *
+ * Plugins sits last, after the settings tabs: it is the only tab whose changes
+ * are not staged and restart-gated, so it must not read as one more settings
+ * page.
  */
 export const OPTIONS_TABS: readonly OptionTab[] = Object.freeze<OptionTab[]>([
   { id: 'display', labelKey: 'options.tab.display', icon: 'grid' },
@@ -98,6 +112,7 @@ export const OPTIONS_TABS: readonly OptionTab[] = Object.freeze<OptionTab[]>([
   { id: 'plot', labelKey: 'options.tab.plot', icon: 'printer' },
   { id: 'files', labelKey: 'options.tab.files', icon: 'open' },
   { id: 'user', labelKey: 'options.tab.user', icon: 'language' },
+  { id: 'plugins', labelKey: 'options.tab.plugins', icon: 'settings', selfRendered: true },
 ]);
 
 /**
@@ -405,11 +420,12 @@ export function fieldsForTab(tabId: string): OptionField[] {
 }
 
 /**
- * The tabs the dialog renders: only tabs that own at least one field. A tab
+ * The tabs the dialog renders: tabs that own at least one field, plus the
+ * self-rendered tabs (`plugins`), which draw their own content. A settings tab
  * with no backend control is dropped, never shown as an empty page.
  */
 export function optionsTabs(): OptionTab[] {
-  return OPTIONS_TABS.filter(tab => fieldsForTab(tab.id).length > 0);
+  return OPTIONS_TABS.filter(tab => tab.selfRendered === true || fieldsForTab(tab.id).length > 0);
 }
 
 /** The initial draft for a settings snapshot (string-valued text controls). */
@@ -816,4 +832,36 @@ export async function settleSettings(
  */
 export function isOptionsCommand(text: unknown): boolean {
   return String(text ?? '').trim().toUpperCase() === 'OPTIONS';
+}
+
+/**
+ * The Options page a shell entry asked for, handed to the next dialog mount.
+ *
+ * `cad_open_popup` carries no payload for Options (`popupView` drops injected
+ * fields on purpose), so a deep link cannot travel on the wire. One module-level
+ * slot is enough: the only writer is the same chrome that immediately opens the
+ * dialog, and the dialog consumes it exactly once. A plain Options open writes
+ * `null` first, so a stale request can never hijack it.
+ */
+let pendingOptionsTab: string | null = null;
+
+/** Ask the next OptionsDialog mount to start on `id`; `null` clears the request. */
+export function requestOptionsTab(id: string | null): void {
+  pendingOptionsTab = typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+/**
+ * Read and clear the pending page. `null` means "no request", and the dialog
+ * falls back to its first tab; an id this build does not know also falls back,
+ * so a newer entry can never render an empty panel.
+ */
+export function takeOptionsTab(): string | null {
+  const id = pendingOptionsTab;
+  pendingOptionsTab = null;
+  return id;
+}
+
+/** Test seam: forget any pending request (never called by the app). */
+export function resetOptionsTabForTests(): void {
+  pendingOptionsTab = null;
 }

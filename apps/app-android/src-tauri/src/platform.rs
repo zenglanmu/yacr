@@ -398,7 +398,7 @@ static HANDSHAKE_NOTICE: AtomicBool = AtomicBool::new(false);
 /// The frozen Kotlin contract announces `fontsDir = File(filesDir, "fonts")`, so
 /// `filesDir` is exactly its parent. It is **never** guessed: no announcement (or
 /// an unusable one) answers `None` and the store stays non-persistent.
-fn handshake_files_dir() -> Option<PathBuf> {
+pub(crate) fn handshake_files_dir() -> Option<PathBuf> {
     files_dir_from(asset_dirs().as_ref())
 }
 

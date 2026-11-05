@@ -18,6 +18,7 @@ import type { FrameLoop } from './cad/frame-loop.ts';
 import { canvasSessionFromShell, canvasSessionPayload, createCanvasSessionReporter, palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
 import { queueCadCommand } from './cad/cad-command.ts';
 import { useCadEvents } from './cad/use-cad-events.ts';
+import { pluginCommand, requestProperties, showPluginNotice } from './plugins/host.ts';
 import { volatileStatusStore } from './cad/status-cadence.ts';
 import { reconcileToolParameterPending, setToolParameterFlag, setToolParameterNumber, stepToolParameterPending } from './tools/tool-parameters.ts';
 import { requestImportCancel } from './cad/cad-status.ts';
@@ -57,14 +58,13 @@ import { MOBILE_DRAWER_CLOSED, mobileDrawerNext } from './layout/mobile-drawer.t
 import { useLayoutMode } from './layout/use-layout-mode.ts';
 import { createShortcutRunner } from './layout/shell-shortcuts.ts';
 import { openPopup } from './popup/popup.ts';
+import { openOptionsDialog } from './options/open-options.ts';
 import { useLocalSelectors } from './commands/local-selectors.ts';
 import { setSelectedProperty } from './properties/properties.ts';
 import { textEditOpenError } from './popup/popup-textedit.ts';
 
 /** The options `submitCommand` accepts from a region (`fromInput` keeps a draft). */
-interface SubmitOptions {
-  readonly fromInput?: boolean;
-}
+interface SubmitOptions { readonly fromInput?: boolean; }
 
 /** The CAD shortcut menu while one is open (`null` when closed). */
 interface ContextMenuState {
@@ -73,14 +73,7 @@ interface ContextMenuState {
   readonly menu: ContextMenuModel;
 }
 
-/**
- * The single UI document.
- *
- * There is no second document and no boot switch: since WP3 every popup is an
- * in-DOM overlay rendered by [`Shell`] over this same tree. `Shell` owns the
- * shell effects (status polling, shortcuts, the webview-default guards, the
- * input lane) and the overlay; the host owns the modal gate.
- */
+/** The single UI document: one in-DOM overlay tree; the host owns the modal gate. */
 export function App() {
   return <Shell />;
 }
@@ -498,26 +491,29 @@ function Shell() {
     });
   }, []);
 
-  // Chrome-local selectors are answered here, before the router (table and layout
-  // rule in `commands/local-selectors.ts`); a router line falls through.
+  // The one properties-open path: ask plugin providers, then open the dock.
+  const openProperties = useCallback(() => {
+    requestProperties(status?.selection ?? null);
+    setPropertiesOpen(true);
+  }, [status]);
+
+  // Chrome-local selectors are answered here; a router line falls through.
   const runLocalSelector = useLocalSelectors({
     layout,
     translate: t,
     clearResult: () => setCommandResult(null),
     clearDraft: () => setCommand(''),
-    requestOptions: () => requestOpenPopup('options'),
+    requestOptions: () => openOptionsDialog(requestOpenPopup),
     openResources: () => setReferencesOpen(true),
-    openProperties: () => setPropertiesOpen(true),
+    openProperties,
     openLayers: () => { setLayersOpen(true); setLayersFocus(value => value + 1); },
     openFonts: () => setFontsOpen(true),
     reportError: setError,
   });
 
   const submitCommand = useCallback(async (text: string, options: SubmitOptions = {}) => {
-    // Chrome-local selectors are answered before the in-flight guard, so a second
-    // Enter can still open (or focus) a panel while a command is queued. The
-    // table, the compact-layout refusal and the draft handling live in
-    // `commands/local-selectors.ts`; a router line falls through unchanged.
+    // Chrome-local selectors are answered before the in-flight guard; a router
+    // line falls through unchanged (`commands/local-selectors.ts`).
     if (runLocalSelector(text, options.fromInput === true)) return;
     if (submitting.current) return;
     submitting.current = true;
@@ -537,9 +533,14 @@ function Shell() {
       if (vocabularyRef.current) {
         try { await vocabularyRef.current; } catch { /* reported by the loader */ }
       }
-      const result = await queueCadCommand(invoke, text, status, false);
+      const result = await queueCadCommand(invoke, text, status, false,
+        command => pluginCommand(command, status?.selection ?? null),
+      );
       setCommandResult(result);
-      if (result.kind === 'accepted') {
+      if (result.kind === 'blocked') {
+        // A veto is explained in its own modal; the history row keeps the attempt.
+        showPluginNotice(result.messageKey, { command: result.command });
+      } else if (result.kind === 'accepted') {
         // An admitted command is the strongest evidence the attempt went through:
         // no chrome-side failure line may stay on screen after it.
         setError('');
@@ -828,7 +829,7 @@ function Shell() {
     },
     // The Options dialog (the same in-DOM overlay layer). One instance: a second
     // request is answered as `existing: true`, which is not a failure.
-    openOptionsPopup: () => requestOpenPopup('options'),
+    openOptionsPopup: () => openOptionsDialog(requestOpenPopup),
     historyOpen,
     setHistoryOpen,
     clearHistory: commandHistory.clear,
@@ -905,7 +906,7 @@ function Shell() {
       if (action === 'diagnostics') setDiagnosticsOpen(value => !value);
       else if (action === 'cleanScreen') setCleanScreen(value => !value);
       else if (action === 'commandLine') setCommandLineOpen(value => !value);
-      else if (action === 'properties') setPropertiesOpen(true);
+      else if (action === 'properties') openProperties();
       else if (action === 'language') setLocale(value => (value === 'zh-CN' ? 'en' : 'zh-CN'));
       // Dialogs are in-DOM overlays (ADR 0021 D1/D2). The host still owns the
       // modal gate and admission; `existing: true` means the same dialog is
@@ -913,11 +914,9 @@ function Shell() {
       else if (action === 'about') {
         requestOpenPopup('about');
       }
-      // The Options dialog is the same overlay layer. Opening it twice is a
-      // success: the host reports the single instance as existing.
-      else if (action === 'options') {
-        requestOpenPopup('options');
-      }
+      // File > Plugins is the same dialog with one page selected.
+      else if (action === 'options') openOptionsDialog(requestOpenPopup);
+      else if (action === 'plugins') openOptionsDialog(requestOpenPopup, 'plugins');
     },
     // Suspend the CAD pointer lane while chrome (command line) owns the keyboard.
     // This is the **textFocus** reason only: a blur clears it and leaves a

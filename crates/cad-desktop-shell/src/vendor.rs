@@ -162,19 +162,26 @@ pub fn register_vendor_commands<R: tauri::Runtime>(
     tauri::generate_handler![cad_vendor_records, cad_vendor_apply, cad_vendor_status]
 }
 
-/// The shared command set **plus** the vendor transport.
+/// The shared command set **plus** the vendor transport and plugin manager.
 ///
 /// This is what a host whose every carrier is `native-below` registers. The
-/// command name is read before `invoke` is moved, so the vendor handler only ever
-/// sees its own three names and the shared handler stays byte-for-byte unchanged.
+/// command name is read before `invoke` is moved, so each handler only sees its
+/// own names and the shared handler stays byte-for-byte unchanged. The five
+/// plugin commands are shell capability (not CAD wire commands), so they are
+/// composed here rather than added to the shared registry.
 pub fn register_commands_with_vendor<R: tauri::Runtime>(
 ) -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
     let shared = crate::commands::register_commands::<R>();
     let vendor = register_vendor_commands::<R>();
+    let plugins = crate::plugins::register_plugin_commands::<R>();
     move |invoke: Invoke<R>| {
         let command = invoke.message.command().to_string();
         if is_vendor_command(&command) {
             vendor(invoke)
+        } else if crate::plugins::is_plugin_command(&command) {
+            // The plugin registry is a shell capability too, but its five
+            // commands are not part of the shared CAD wire registry.
+            plugins(invoke)
         } else {
             shared(invoke)
         }

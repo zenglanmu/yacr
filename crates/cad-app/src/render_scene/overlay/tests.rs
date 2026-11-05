@@ -511,6 +511,8 @@ fn cancelling_a_preview_makes_it_disappear() {
     assert!(cancelled.is_empty());
 }
 
+mod transient_identity;
+
 #[test]
 fn overlay_fingerprint_tracks_sub_element_selection_and_cursor() {
     let mut a = OverlayInputs::default();

@@ -629,7 +629,11 @@ impl<'a> Cursor<'a> {
     }
 }
 
-fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
+/// Decode standard base64 (padding optional, standard alphabet).
+///
+/// Public so the plugin manager can reuse the session's dependency-free codec
+/// instead of adding a crate or a second implementation.
+pub fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
     const TABLE: [i8; 128] = {
         let mut table = [-1i8; 128];
         let mut index = 0usize;
@@ -677,6 +681,35 @@ fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
         return Err("too much padding".to_string());
     }
     Ok(output)
+}
+
+/// Encode bytes as standard base64 with padding.
+///
+/// Public counterpart of [`decode_base64`]; shared by the plugin manager's
+/// `read_entry` result so no base64 crate is needed.
+pub fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let mut buffer = 0u32;
+        for (index, byte) in chunk.iter().enumerate() {
+            buffer |= (*byte as u32) << (16 - index * 8);
+        }
+        let chars = match chunk.len() {
+            1 => 2,
+            2 => 3,
+            _ => 4,
+        };
+        for index in 0..4 {
+            if index < chars {
+                let shift = 18 - index * 6;
+                output.push(TABLE[((buffer >> shift) & 0x3f) as usize] as char);
+            } else {
+                output.push('=');
+            }
+        }
+    }
+    output
 }
 
 impl fmt::Display for VendorAck {

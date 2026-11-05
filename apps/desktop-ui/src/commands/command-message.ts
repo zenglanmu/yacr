@@ -30,6 +30,9 @@ export interface CommandMessage {
  */
 export function commandMessageFor(result: CadCommandResult | null, t: Translator): CommandMessage | null {
   if (!result) return null;
+  if (result.kind === 'blocked') {
+    return { kind: 'error', text: t(result.messageKey, { command: result.command }) };
+  }
   if (result.kind === 'unsupported') {
     return {
       kind: 'error',

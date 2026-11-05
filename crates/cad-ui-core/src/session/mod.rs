@@ -32,6 +32,7 @@ mod import_progress;
 mod input;
 mod layers;
 mod layout_tabs;
+pub mod plugins;
 mod point_style;
 mod profile;
 mod reference_status;
@@ -43,7 +44,6 @@ mod status;
 pub mod vendor;
 pub mod wire;
 mod zoom;
-
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 

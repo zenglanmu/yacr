@@ -666,6 +666,7 @@ name = "cad-desktop-shell"
 version = "0.1.2"
 dependencies = [
  "cad-app",
+ "cad-platform",
  "cad-ui-core",
  "serde",
  "serde_json",
