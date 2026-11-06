@@ -31,7 +31,10 @@ fn session_settings_report_the_effective_defaults() {
     );
     assert_eq!(settings.background_model, "#000000");
     assert_eq!(settings.background_paper, "#000000");
-    assert_eq!(settings.crosshair_percent, 100);
+    assert_eq!(
+        settings.crosshair_percent, 5,
+        "the AutoCAD CURSORSIZE initial value"
+    );
     assert_eq!(
         settings.pickbox_size, 3,
         "the AutoCAD PICKBOX initial value"
@@ -111,8 +114,8 @@ fn session_rejects_bad_values_with_stable_codes() {
             .unwrap_err();
         assert_eq!(error, SETTINGS_INVALID_VALUE);
     }
-    // AutoCAD's own ranges: pickbox 1..=20, aperture 1..=50.
-    for pixels in [0, 21] {
+    // AutoCAD's own ranges: pickbox 1..=50 (0 rejected), aperture 1..=50.
+    for pixels in [0, 51] {
         let error = session
             .apply_setting(CadSettingKey::PickboxSize, CadSettingValue::Number(pixels))
             .unwrap_err();
@@ -130,7 +133,7 @@ fn session_rejects_bad_values_with_stable_codes() {
     assert!(!settings.grid);
     assert_eq!(settings.plot_format, "svg");
     assert_eq!(settings.background_model, "#000000");
-    assert_eq!(settings.crosshair_percent, 100);
+    assert_eq!(settings.crosshair_percent, 5);
     assert_eq!(settings.pickbox_size, 3);
     assert_eq!(settings.aperture_size, 12);
 }

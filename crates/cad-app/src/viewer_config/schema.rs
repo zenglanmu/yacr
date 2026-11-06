@@ -269,19 +269,22 @@ impl Default for ViewBackground {
     }
 }
 
-/// Crosshair sizing for the 2D pointer overlay.
+/// Crosshair sizing for the 2D pointer overlay: the AutoCAD `CURSORSIZE` option.
+///
+/// `sizePercent` is the **total** crosshair span as an integer percentage of the
+/// viewport dimension, split into two equal arms about the cursor and clipped at
+/// the viewport edges. `5` is AutoCAD's initial value; `100` spans the whole
+/// viewport and reproduces the historical full-view crosshair exactly.
+/// Out-of-range values are rejected by [`ViewerConfig::validate`], never
+/// clamped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct ViewCrosshair {
-    /// Arm length as an integer percentage of the cursor-to-edge distance, so
-    /// `100` is the full-viewport crosshair this repository has always drawn.
-    /// Out-of-range values are rejected by [`ViewerConfig::validate`], never
-    /// clamped.
     pub size_percent: u32,
 }
 impl Default for ViewCrosshair {
     fn default() -> Self {
-        Self { size_percent: 100 }
+        Self { size_percent: 5 }
     }
 }
 
@@ -292,9 +295,11 @@ impl Default for ViewCrosshair {
 /// is this value in logical pixels converted to world units by the view scale, so
 /// the box circumscribes exactly the region a click can hit. AutoCAD reports the
 /// option in pixels and so do we (logical, device-independent pixels, the unit
-/// the whole overlay/pointer contract uses). `1..=20` is AutoCAD's own range for
-/// the option; the default `3` is both AutoCAD's initial value and the value this
-/// project has always picked with, so the geometry is unchanged until a user
+/// the whole overlay/pointer contract uses). `1..=50` mirrors AutoCAD's own
+/// `0..=50` range except that `0` is deliberately rejected: "no pickbox /
+/// selection preview off" is not modelled here, and accepting `0` would silently
+/// disable picking. The default `3` is both AutoCAD's initial value and the value
+/// this project has always picked with, so the geometry is unchanged until a user
 /// overrides it. Out-of-range and non-integer values are rejected by
 /// [`ViewerConfig::validate`], never clamped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -309,8 +314,9 @@ impl Default for ViewPickbox {
 }
 
 impl ViewPickbox {
-    /// AutoCAD's range for the Options ▸ Selection pickbox size, in pixels.
-    pub const RANGE: std::ops::RangeInclusive<u32> = 1..=20;
+    /// AutoCAD's accepted pickbox range here: `1..=50` (AutoCAD allows `0`, but
+    /// "selection preview off" is not modelled, so `0` is rejected).
+    pub const RANGE: std::ops::RangeInclusive<u32> = 1..=50;
 }
 
 /// Object-snap aperture sizing: the AutoCAD `APERTURE` range (Options ▸ Drafting

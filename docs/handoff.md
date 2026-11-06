@@ -24,6 +24,73 @@
   复用，但本轮没有跨载体运行证据。`palette-layer` 不改变分区矩形是由**结构**（绝对定位、非布局项）
   与源码/CSS 契约保证的，**没有**做 headless 的 `getBoundingClientRect` 实测。
 
+## 2026-11-06 十字光标改为 AutoCAD CURSORSIZE 语义，拾取框范围扩到 1–50
+
+- **几何**（`crates/cad-app/src/render_scene/overlay/cursor.rs`）：`crosshair_arms` 改为**对称**语义——
+  总跨度 = `sizePercent`% × 视图尺寸，以光标为中心分成等长两臂并裁到视图边缘；`100` 仍位级返回
+  `min..max`。`DEFAULT_CROSSHAIR_PERCENT = 5`（AutoCAD `CURSORSIZE` 初值）。
+- **配置/默认值**（`crates/cad-app/src/viewer_config/schema.rs`）：`ViewCrosshair::default()`
+  的 `size_percent = 5`；`ViewPickbox::RANGE = 1..=50`（AutoCAD 0–50，`0`＝关闭拾取框/选择预览
+  未建模，显式拒绝），默认仍为 3；`TolerancePolicy` 默认未动。
+- **设置/前端/i18n**：`cad-host`/`cad-ui-core` 文档与默认断言同步为 5；Options
+  `pickboxSize.max = 50`；`options.help.crosshairSize`/`pickboxSize` 两语言同步（键集不变）。
+- **文档**：`docs/interaction.md` §4、`docs/compatibility.md`、ADR 0028 更新语义，并修掉
+  “拾取框取 `TolerancePolicy::default()`”的过期说法（实际为配置的 `view.pickbox.sizePixels`）。
+- **验证（已运行）**：
+  - `cargo test -p cad-app --lib --locked` → 1574 passed; 0 failed; 3 ignored。
+  - `cargo test -p cad-engine --lib --locked` → 114 passed; 0 failed; 15 ignored。
+  - `cargo test -p cad-host --lib --locked` → 266 passed; 0 failed。
+  - `cargo test -p cad-ui-core --lib --locked` → 384 passed; 0 failed; 1 ignored。
+  - `cargo check -p app-linux --all-targets --locked` → 通过。
+  - `(cd apps/desktop-ui && node --test test/options.test.ts && npx tsc --noEmit)` →
+    29 tests pass；`tsc` 无输出。
+  - `python3 scripts/check-i18n.py` → `i18n OK: 1095 keys, 2 catalogs ...`。
+- **复核（orchestrator，最终状态）**：
+  - `cargo fmt --all -- --check` → 通过（先 `cargo fmt --all` 修正了本文件的 rustfmt 折行）。
+  - 分别运行 `cargo test -p cad-app --lib --locked`、`-p cad-host`、`-p cad-ui-core`、`-p cad-engine`
+    → 1574 / 266 / 384 / 114 passed，0 failed。
+  - `cargo clippy -p cad-app -p cad-host -p cad-ui-core -p cad-engine --all-targets --locked -- -D warnings`
+    → 通过。
+  - `(cd apps/desktop-ui && node --test test/options.test.ts test/vendor-plugin-properties.test.ts && npx tsc --noEmit)`
+    → 33 tests pass；`tsc` 通过。
+- **NOT RUN**：全工作区门禁/`cargo test --workspace`、全工作区 clippy、GUI/真实 GPU/真实 DWG 证据、
+  截图/像素/性能；`cursor_moves` 的 GPU 契约测试继续 `#[ignore]`，未在真实适配器上运行。
+  Windows/macOS/Android/Web 未编译/未验证。
+
+## 2026-11-06 天正 TCH_WALL 属性面板补齐宽度/角度/材料/保温与类型标题
+
+- **插件行**（`plugins/tch/src/properties.ts::wallRows`）：几何组顺序改为
+  `wall.start → wall.end → wall.length → wall.width → wall.thickness_left →
+  wall.thickness_right → wall.height → wall.angle → wall.material → wall.insulation →
+  wall.openings`。`wall.width = left + right`；`wall.angle` 由起点→终点方向计算
+  `atan2(dy, dx)` 转角度并归一化到 `[0, 360)`；`wall.material` / `wall.insulation`
+  取自 `parseWall`。全部复用现有 `pushNumber`/`pushPoint`（≤3 位小数、去尾零）。
+- **解析器**（`plugins/tch/src/wall.ts`）：`WallData` 增加 `angle/material/insulation`；
+  `parseWall` 不再丢弃 material 字节（原 `main.readByte(); // material`）。几何有效性、
+  `angle !== 0` 拒绝、flags 拒绝、`patches/insulation/joins` 校验**未改动**。
+- **面板标题**（`apps/desktop-ui/src/components/PluginPropertiesPalette.tsx`）：
+  新增 `kindLabel(kind, t)`，按 `properties.tch.class.<kind>` 查表，未命中回退原始 kind
+  （与 `groupLabel` 同规则）；用于标题 `<span>` 文本与 section `aria-label`
+  （`properties.vendor.subtitle`）。`title` 与 `identity.class` 行仍保留原始 kind（来源信息）。
+- **i18n**（`crates/cad-ui-core/i18n/{zh-CN,en}.json`，两文件同序同键集）：新增
+  `properties.tch.wall.{width,angle,material,insulation}` 与
+  `properties.tch.class.{TCH_WALL,TCH_COLUMN,TCH_OPENING,TCH_TEXT,TCH_MTEXT}`。
+  插件源码不含中文，不接触 `cad-db`。
+- **测试**（`apps/desktop-ui/test/vendor-plugin-properties.test.ts`）：`setup()` 参数化，
+  复用 `wallWriter` fixture；`TCH_WALL` 用例断言 `wall.width === '3'`、
+  `wall.angle === '0'`、`wall.material === '10'`、`wall.insulation === '80.08'`；
+  新增 `[0,0,0] → [0,10,0]` 用例断言 `wall.angle === '90'` 并锁定几何组行顺序。
+- **验证（已运行）**：
+  - `cd apps/desktop-ui && node --test test/vendor-plugin-properties.test.ts`
+    → 4 tests, 4 pass, 0 fail。
+  - `cd apps/desktop-ui && npx tsc --noEmit` → 通过（无输出）。
+  - `cd apps/desktop-ui && npx tsc -p ../../plugins/tch/tsconfig.json --noEmit` → 通过（无输出）。
+  - `python3 scripts/check-i18n.py` → `i18n OK: 1095 keys, 2 catalogs ...`。
+- **NOT RUN**：全工作区门禁/全量测试、`cargo` 编译、前端 bundler 构建；本仓库**没有**
+  `PluginPropertiesPalette` 的宿主渲染测试，因此未新增 DOM 测试（按要求不新造 harness），
+  标题翻译仅有 type-level/查表契约，无渲染断言。本轮未打开 GUI、未使用真实 DWG、无 GPU /
+  像素 / 性能证据。
+
 ## 2026-11-06 原地更新准入改为「足迹」：GEOMETRY/STYLE 编辑不再整基重建
 
 - **旧规则（已推翻）**：`crates/cad-app/src/render_scene/edit.rs::update_candidate` 要求单个实体

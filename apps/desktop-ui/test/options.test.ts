@@ -156,7 +156,7 @@ test('each control is the editor its backend value really needs', () => {
   // Number controls carry the host's own range and a unit suffix, never a clamp.
   assert.deepEqual(
     OPTIONS_FIELDS.filter(field => field.kind === 'number').map(field => [field.id, field.min, field.max]),
-    [['crosshairSize', 1, 100], ['gpuBudgetPercent', 10, 100], ['pickboxSize', 1, 20], ['apertureSize', 1, 50]],
+    [['crosshairSize', 1, 100], ['gpuBudgetPercent', 10, 100], ['pickboxSize', 1, 50], ['apertureSize', 1, 50]],
   );
   for (const field of OPTIONS_FIELDS.filter(entry => entry.kind === 'number' || entry.kind === 'real')) {
     assert.ok(field.unitKey, `${field.id} needs a unit`);
@@ -243,8 +243,8 @@ test('the validation table matches the host ranges and codes', () => {
     ['crosshairSize', '', SETTINGS_ERROR.invalidValue],
     ['crosshairSize', '4.5', SETTINGS_ERROR.invalidValue],
     ['pickboxSize', '1', null],
-    ['pickboxSize', '20', null],
-    ['pickboxSize', '21', SETTINGS_ERROR.invalidValue],
+    ['pickboxSize', '50', null],
+    ['pickboxSize', '51', SETTINGS_ERROR.invalidValue],
     ['apertureSize', '50', null],
     ['apertureSize', '51', SETTINGS_ERROR.invalidValue],
     // The snap spacing is a real: a fraction is legal (the host's

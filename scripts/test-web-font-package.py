@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""Contract check: the Web bundles ship **no** fonts; the site serves a lazy CDN package.
+"""Contract check: both local Web bundles stage the full CAD font catalogue by default.
 
-The browser carrier does not bundle or preload a font package. After a document
-opens, the page asks ``cad_fonts`` what the drawing needs (``requested`` /
-``textNeeded``), fetches only those catalogue faces from same-origin ``fonts/``
-(the project Pages CDN), installs them with ``set_font_package`` and re-runs the
-install on the live session with ``apply_font_package``.
+The browser carrier still installs fonts **lazily**: after a document opens, the
+page asks ``cad_fonts`` what the drawing needs (``requested`` / ``textNeeded``),
+fetches only those catalogue faces from the same-origin ``fonts/``, installs them
+with ``set_font_package`` and re-runs the install on the live session with
+``apply_font_package``. What changed is the sourcing: a local bundle
+(``scripts/build-web.sh`` -> ``apps/app-web/dist`` and ``scripts/build-web-ui.sh``
+-> ``apps/app-web/dist-ui``) now carries that package under its own ``fonts/`` by
+default — the full mlightcad catalogue merged with the committed ``fonts/``
+(``WITH_FONTS=1``), with ``WITH_FONTS=0`` (committed package only, offline) and
+``FONTS_DIR=<dir>`` (reuse a prepared package) as explicit alternatives. The
+deployed site is unchanged: ``scripts/deploy-cloudflare-pages.sh`` still runs
+``fetch-fonts.sh`` as the authoritative merge/verification step at the site root
+(it skips files that already exist).
 
-That split is easy to regress silently: a build script that starts copying the
-package again would ship multi-MB faces on every page load; a bootstrap/main that
+That split is easy to regress silently: a build script that stages fonts
+**before** the Vite build has them deleted with ``outDir``; a bootstrap/main that
 fetches before ``ready``/``start`` would block the session on the network; a
 bootstrap/main that drops ``apply_font_package`` would leave the open document
-unshaped with only a ``unsupported-resources: fonts`` diagnostic. This check pins
-all three, plus the deploy script that assembles the CDN package.
+unshaped with only an ``unsupported-resources: fonts`` diagnostic. This check
+pins all three, the harness bundle whitelist, and the deploy package.
 
 Standard library only; run directly:
 
@@ -81,62 +89,71 @@ def check_catalog(files: list[str]) -> list[str]:
 
 
 def check_build_web_ui() -> list[str]:
-    """The chrome bundle stages nothing by default; `YACR_WEB_FONTS=1` is opt-in."""
+    """The chrome bundle stages the package with the shared helper, after the build."""
     label = "scripts/build-web-ui.sh"
     text = read(BUILD_WEB_UI)
     problems = require_tokens(
         label,
         text,
         (
-            "YACR_WEB_FONTS",
-            "STAGE_FONTS",
-            "no font package staged",
-            # The opt-in staging must still exist for local runs.
-            'cp -- "$FONT_SRC/fonts.json"',
+            "scripts/lib/font-package.sh",
+            "yacr_stage_fonts",
+            "WITH_FONTS",
+            "FONTS_DIR",
+            'yacr_stage_fonts "$OUT_DIR/fonts"',
+            "fonts/fonts.json",
         ),
     )
-    guard = text.find('if [ "$STAGE_FONTS" = "1" ]')
-    stage = text.find('mkdir -p -- "$OUT_DIR/fonts"')
+    for forbidden in ("YACR_WEB_FONTS", "no font package staged"):
+        if forbidden in text:
+            problems.append(
+                f"{label}: still carries the opt-in/no-font contract ({forbidden!r})"
+            )
+    stage = text.find('yacr_stage_fonts "$OUT_DIR/fonts"')
     build = text.find("npm run build:web")
     if stage < 0:
-        problems.append(f"{label}: no opt-in staging block for YACR_WEB_FONTS=1")
-    elif guard < 0 or guard > stage:
-        problems.append(
-            f"{label}: stages fonts without the YACR_WEB_FONTS guard (default must not)"
-        )
-    if build >= 0 and stage >= 0 and stage < build:
+        problems.append(f"{label}: no yacr_stage_fonts call for $OUT_DIR/fonts")
+    elif build >= 0 and stage < build:
         problems.append(f"{label}: stages fonts before the Vite build (outDir is emptied)")
     return problems
 
 
 def check_build_web() -> list[str]:
-    """The harness bundle carries exactly the shell + module, never fonts."""
+    """The harness bundle stages the same package and whitelists its files."""
     label = "scripts/build-web.sh"
     text = read(BUILD_WEB)
-    problems: list[str] = []
-    for forbidden in (
-        "FONT_SRC",
-        "read_font_files",
-        "OUT_DIR/fonts",
-        "fonts/fonts.json",
-        "NotoSansCJKsc-Regular.otf",
-    ):
-        if forbidden in text:
-            problems.append(f"{label}: still stages fonts ({forbidden!r})")
-    # The exact file-count contract must be restored to the six real artifacts.
+    problems = require_tokens(
+        label,
+        text,
+        (
+            "scripts/lib/font-package.sh",
+            "yacr_stage_fonts",
+            "WITH_FONTS",
+            "FONTS_DIR",
+            'yacr_stage_fonts "$OUT_DIR/fonts"',
+            "fonts/fonts.json",
+            "yacr_font_package_faces",
+            "ensureFontPackage",
+        ),
+    )
+    # The exact-file-count guard became a whitelist: the six shell/pkg artifacts
+    # plus anything under `fonts/`. Any other path must fail the build.
     problems.extend(
         require_tokens(
             label,
             text,
             (
-                'file_count="$(find "$OUT_DIR" -type f -printf \'.\' | wc -c)"',
-                '"${#expected[@]}"',
-                "ensureFontPackage",
+                'find "$OUT_DIR" -type f -print0',
+                'rel="${path#"$OUT_DIR"/}"',
+                "fonts/*",
+                "unexpected file in $OUT_DIR",
             ),
         )
     )
     if "expected+=(" in text:
-        problems.append(f"{label}: appends extra expected files; the bundle is six files")
+        problems.append(
+            f"{label}: appends extra expected files; the bundle is the six artifacts plus fonts/"
+        )
     return problems
 
 
@@ -274,9 +291,11 @@ def main() -> int:
         return 1
     print(
         "web-font-package OK: "
-        f"{len(files)} committed catalog file(s) stay out of both bundles; "
-        "deploy assembles the full CDN package; bootstrap/main install lazily after "
-        "open (set_font_package + apply_font_package); worker refuses by name"
+        f"{len(files)} committed catalog file(s); both local bundles stage the "
+        "package after the build (WITH_FONTS=1 full catalogue, WITH_FONTS=0 "
+        "committed, FONTS_DIR reuse); deploy still assembles/merges the site "
+        "package; bootstrap/main install lazily after open (set_font_package + "
+        "apply_font_package); worker refuses by name"
     )
     return 0
 

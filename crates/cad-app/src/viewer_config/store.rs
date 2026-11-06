@@ -36,7 +36,7 @@ impl ViewerConfig {
         if !ViewPickbox::RANGE.contains(&self.view.pickbox.size_pixels) {
             return Err(ConfigError::new(
                 "view.pickbox.sizePixels",
-                "pickbox size must be an integer pixel count from 1 to 20",
+                "pickbox size must be an integer pixel count from 1 to 50",
             ));
         }
         if !ViewAperture::RANGE.contains(&self.view.aperture.size_pixels) {

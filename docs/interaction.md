@@ -106,10 +106,15 @@ hidden 图层对象既不高亮也不可点选；2D 左键拖拽=框选（橡皮
 **背景**：人工复测报告两处缺陷——视口仍是**系统默认箭头**（无十字/拾取框），且**捕捉标记过小、形状不可辨**。勘察确认：仓库**从未设置过光标**（无 GTK cursor 代码、视口无 cursor CSS 规则）；捕捉标记的尺寸参数 `PreviewOptions::marker_size` 文档为**世界单位**且**宿主从未覆盖**（三处构造均用 `PreviewOptions::default()`）⇒ 屏幕尺寸随缩放漂移。另外字形**与 AutoCAD 对调**（中点/象限），且**标记与拾取框同级重叠、拾取框绘制在其上**。
 
 **十字光标 + 拾取框**：由 renderer **transient** 绘制（ADR 0028；几何在
-`cad_app::render_scene::cursor_geometry`，`CURSOR_DRAW_ORDER = 2_500_000`）。贯穿视口的两条线取
-`viewport_bounds`（与网格同一矩形），拾取框半边长 = `cad_domain::TolerancePolicy::default().pickbox_logical_pixels`
-（**3**，与 `cad_app::picking::pick_tolerance` 同一常量）× 视图比例 ⇒ **拾取框的内接圆恰是一次点击能
-命中的范围**（该常量在本仓库是**半径**语义，故框边 = 2×3 逻辑像素）。**颜色偏离 AutoCAD 的白**：
+`cad_app::render_scene::cursor_geometry`，`CURSOR_DRAW_ORDER = 2_500_000`）。两条线取
+`viewport_bounds`（与网格同一矩形）：**总跨度 = `view.crosshair.sizePercent`% × 视图尺寸**，
+以光标为中心分成**等长两臂**并裁到视图边缘（AutoCAD `CURSORSIZE` 语义；默认 **5**，`100` 为
+整个视图并与历史全视图十字位级一致）。拾取框半边长 = 配置的 `view.pickbox.sizePixels`
+（**默认 3**；经 `ViewConfig::tolerance_policy` 映射为
+`TolerancePolicy::pickbox_logical_pixels`，与 `cad_app::picking::pick_tolerance` 同值）× 视图比例 ⇒
+**拾取框的内接圆恰是一次点击能命中的范围**（该值在拾取谓词里是**半径**语义，故框边 =
+2×N 逻辑像素）。`view.pickbox.sizePixels` 采用 AutoCAD `PICKBOX` 的 `1..=50`；AutoCAD 允许
+`0`（关闭拾取框/选择预览），本项目未建模该状态，故显式拒绝 `0`。**颜色偏离 AutoCAD 的白**：
 `CURSOR_COLOR = [0.72, 0.75, 0.80]`（冷中灰）——白色在默认纯白几何（`cad_scene` 默认 `[1,1,1]`）上不可见；
 中灰在黑背景与白几何上都可读，且与既有 overlay 色（琥珀捕捉、品红预览、青测量、淡蓝 POINT、蓝/绿框选）
 都不冲突。transient 固定 6 个 line instance，按 draw order 与已提交 overlay 合并（preview < cursor <

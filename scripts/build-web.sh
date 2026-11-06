@@ -16,12 +16,13 @@
 #                           build when serving `apps/app-web/web/` directly.
 #   apps/app-web/dist/      the deployable bundle: `index.html`, `main.js`,
 #                           `worker.js`, `style.css`, `pkg/app_web.js`,
-#                           `pkg/app_web_bg.wasm` (generated, git-ignored).
-#                           **No fonts**: they are not part of this artifact and
-#                           are not preloaded. The page fetches the faces it needs
-#                           lazily, after a document opens, from the site's
-#                           same-origin `fonts/` (the project Pages CDN, assembled
-#                           by `scripts/deploy-cloudflare-pages.sh`). Serve it over
+#                           `pkg/app_web_bg.wasm` and a staged `fonts/` package
+#                           (the full mlightcad catalogue merged with the
+#                           committed `fonts/`; `WITH_FONTS=1` by default,
+#                           generated, git-ignored). The page still fetches only
+#                           the faces the open drawing needs, lazily, from this
+#                           same-origin `fonts/` — bundling removes the CDN
+#                           dependency, it does not add a preload. Serve it over
 #                           HTTP — `file://` cannot instantiate wasm:
 #                             python3 scripts/serve-web.py --directory apps/app-web/dist
 #
@@ -36,6 +37,10 @@
 #     non-zero exit;
 #   * it never emits a partial or stub bundle: the bundle directory is recreated
 #     from scratch and every expected artifact is asserted non-empty afterwards;
+#   * fonts: `WITH_FONTS=1` (default) downloads the full mlightcad catalogue via
+#     `scripts/fetch-fonts.sh` (network); `WITH_FONTS=0` stages the committed
+#     `fonts/` only (offline) and `FONTS_DIR=<dir>` reuses a prepared package
+#     (must contain `fonts.json`) with no download;
 #   * a successful build is **not** runtime, GPU or pixel evidence. It says the
 #     bundle exists, nothing about a browser, a GPU, or that the drawing renders.
 #     CI builds this bundle (`web-build`) and drives it headlessly under software
@@ -49,13 +54,23 @@
 # Environment:
 #   CARGO        cargo binary to use (default: `cargo` on PATH, else ~/.cargo/bin)
 #   WASM_BINDGEN wasm-bindgen binary to use (default: PATH, else ~/.cargo/bin)
+#   WITH_FONTS   1 (default) stage the full CAD catalogue (needs network);
+#                0 stage the committed `fonts/` only (offline)
+#   FONTS_DIR    reuse a prepared font package directory (must contain
+#                `fonts.json`); overrides WITH_FONTS and performs no download
+#   FONT_BASE_URL / FONT_FALLBACK_BASE_URL / FONT_RETRIES
+#                inherited by `scripts/fetch-fonts.sh` when downloading
 set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 readonly REPO_ROOT
 YACR_SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
+YACR_REPO_ROOT="$REPO_ROOT"
+readonly YACR_REPO_ROOT
 # shellcheck source=scripts/lib/wasm-toolchain.sh
 . "$REPO_ROOT/scripts/lib/wasm-toolchain.sh"
+# shellcheck source=scripts/lib/font-package.sh
+. "$REPO_ROOT/scripts/lib/font-package.sh"
 
 # Committed shell sources.
 readonly WEB_SRC="$REPO_ROOT/apps/app-web/web"
@@ -97,13 +112,27 @@ done
 cp -- "$PKG_DIR/$PKG_JS" "$OUT_DIR/pkg/$PKG_JS"
 cp -- "$PKG_DIR/$PKG_WASM" "$OUT_DIR/pkg/$PKG_WASM"
 
-# No fonts are staged: the harness artifact is exactly the shell + the wasm
-# module. The page fetches only the faces the open drawing needs, lazily, from the
-# site's same-origin `fonts/` (the Pages CDN package assembled by
-# `scripts/deploy-cloudflare-pages.sh`).
+# Both local Web bundles carry the same package the deployed site serves at its
+# root: the full mlightcad catalogue merged with the committed `fonts/`
+# (`WITH_FONTS=1`, default) or the committed package only (`WITH_FONTS=0`), or a
+# prepared `FONTS_DIR`. The page still resolves `cad_fonts` lazily after an open
+# and fetches only the needed faces from this same-origin `fonts/`.
+printf '==> bundled font package (%s -> %s/fonts)\n' \
+  "${FONTS_DIR:-WITH_FONTS=${WITH_FONTS:-1}}" "$OUT_DIR"
+rm -rf -- "$OUT_DIR/fonts"
+yacr_stage_fonts "$OUT_DIR/fonts" "web fonts" \
+  || die "font package staging failed (WITH_FONTS=${WITH_FONTS:-1}${FONTS_DIR:+, FONTS_DIR=$FONTS_DIR})"
+font_face_count="$(yacr_font_package_faces "$OUT_DIR/fonts")"
+if [ -n "${FONTS_DIR:-}" ]; then
+  font_source="prepared package $FONTS_DIR (no download)"
+elif [ "${WITH_FONTS:-1}" = "0" ]; then
+  font_source="committed fonts/ only (WITH_FONTS=0, offline)"
+else
+  font_source="full CAD catalogue (scripts/fetch-fonts.sh)"
+fi
 
 # Every artifact must exist and be non-empty; a partial bundle is never reported
-# as a success.
+# as a success. The fixed artifacts are the six shell/module files.
 expected=(
   "$OUT_DIR/index.html"
   "$OUT_DIR/main.js"
@@ -116,12 +145,29 @@ for artifact in "${expected[@]}"; do
   [ -s "$artifact" ] || die "bundle artifact missing or empty: $artifact"
 done
 
-# Nothing else may sit in the bundle: a stale/extra file would be served without
-# anyone noticing it is not part of this build.
-file_count="$(find "$OUT_DIR" -type f -printf '.' | wc -c)"
-if [ "$file_count" -ne "${#expected[@]}" ]; then
-  die "bundle contains $file_count files, expected ${#expected[@]} (unexpected file in $OUT_DIR): $(find "$OUT_DIR" -type f -printf '%P ')"
-fi
+# The bundle is a whitelist: the six artifacts above plus anything under
+# `fonts/`. A stale/extra file anywhere else is served without anyone noticing
+# it is not part of this build, so it is a hard error.
+while IFS= read -r -d '' path; do
+  rel="${path#"$OUT_DIR"/}"
+  case "$rel" in
+    index.html | main.js | worker.js | style.css) ;;
+    "pkg/$PKG_JS" | "pkg/$PKG_WASM") ;;
+    fonts/*) ;;
+    *)
+      die "unexpected file in $OUT_DIR: $rel (bundle is the six shell/pkg artifacts plus fonts/)"
+      ;;
+  esac
+  [ -s "$path" ] || die "bundle artifact missing or empty: $path"
+done < <(find "$OUT_DIR" -type f -print0)
+
+# The font package is part of the bundle now: the catalog and at least one face
+# must be present (the helper already refused an empty package, this guards the
+# copy that landed in the bundle).
+[ -s "$OUT_DIR/fonts/fonts.json" ] \
+  || die "font package catalog missing or empty: $OUT_DIR/fonts/fonts.json"
+[ "${font_face_count:-0}" -gt 0 ] \
+  || die "font package contains no face files: $OUT_DIR/fonts"
 
 # The shell must actually reference the module this build emitted, otherwise the
 # bundle is deployable but blank.
@@ -153,6 +199,6 @@ yacr_report_artifact "$OUT_DIR/worker.js" "worker.js"
 yacr_report_artifact "$OUT_DIR/style.css" "style.css"
 yacr_report_artifact "$OUT_DIR/pkg/$PKG_JS" "pkg/$PKG_JS"
 yacr_report_artifact "$OUT_DIR/pkg/$PKG_WASM" "pkg/$PKG_WASM"
-printf '  %-28s %s\n' "fonts/*" "not bundled (lazy CDN fonts/)"
+printf '  %-28s %s face(s) (%s)\n' "fonts/*" "$font_face_count" "$font_source"
 printf 'serve with: python3 scripts/serve-web.py --directory %s\n' "$OUT_DIR"
 printf 'note: a built bundle is not runtime, GPU or pixel evidence; CI drives it headlessly under software rendering and publishes only on tags/dispatch.\n'

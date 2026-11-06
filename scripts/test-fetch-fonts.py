@@ -9,13 +9,18 @@ catalogue is always read and written as UTF-8, that a failed download still fail
 the build, and that the committed default face is merged.
 
 Each guarantee is deleted in turn and the checker must report it, so the contract
-cannot silently degrade into an empty success. This checks the script text only;
-it is not evidence that a catalogue was downloaded.
+cannot silently degrade into an empty success. The cache test runs the real script
+against a `file://` catalogue, so it needs no network. This checks script
+behaviour, not that the public catalogue was downloaded.
 """
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -51,6 +56,9 @@ REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
         "the committed CJK fallback)",
         'all(str(e.get("file")) != str(x.get("file")) for x in entries)',
     ),
+    ("shared download cache", "FONT_CACHE_DIR"),
+    ("cache/face writes are atomic", "os.replace(temporary, path)"),
+    ("cache reuse is reported", "font cache:"),
 )
 
 
@@ -132,6 +140,68 @@ class FetchFontsContracts(unittest.TestCase):
         self.assertEqual(files.count(CJK_FALLBACK), 1)
         self.assertIn("osifont.ttf", files)
         self.assertTrue((COMMITTED_FONTS / CJK_FALLBACK).is_file())
+
+
+def run_fetch(
+    script: pathlib.Path,
+    dest: pathlib.Path,
+    remote: pathlib.Path,
+    cache: pathlib.Path,
+    force: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.update(
+        {
+            "FONT_BASE_URL": remote.as_uri(),
+            "FONT_FALLBACK_BASE_URL": (remote.parent / "missing-source").as_uri(),
+            "FONT_RETRIES": "1",
+            "FONT_CACHE_DIR": str(cache),
+            "FONTS": "",
+            "FORCE": "1" if force else "",
+        }
+    )
+    return subprocess.run(
+        ["bash", str(script), str(dest)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+
+
+@unittest.skipUnless(shutil.which("bash"), "bash is required to run fetch-fonts.sh")
+class FetchFontsCacheBehaviour(unittest.TestCase):
+    """The shared cache really avoids a second download (file:// source)."""
+
+    def test_faces_are_downloaded_once_and_reused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            remote = root / "remote"
+            remote.mkdir()
+            name = "cache-probe.ttf"
+            (remote / "fonts.json").write_text(
+                json.dumps([{"file": name, "name": ["cache-probe"], "type": "mesh"}]),
+                encoding="utf-8",
+            )
+            (remote / name).write_bytes(b"PROBE-FACE")
+            cache = root / "cache"
+
+            first = run_fetch(SCRIPT, root / "dest1", remote, cache)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertTrue((cache / name).is_file(), "downloaded face must enter the cache")
+            self.assertEqual((root / "dest1" / name).read_bytes(), b"PROBE-FACE")
+            self.assertIn("1 downloaded", first.stdout)
+
+            # The source is gone; only the cache can satisfy the next package.
+            (remote / name).unlink()
+            second = run_fetch(SCRIPT, root / "dest2", remote, cache)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual((root / "dest2" / name).read_bytes(), b"PROBE-FACE")
+            self.assertIn("1 reused", second.stdout)
+
+            # FORCE must bypass the cache and fail loudly when the source is gone.
+            forced = run_fetch(SCRIPT, root / "dest3", remote, cache, force=True)
+            self.assertNotEqual(forced.returncode, 0, "FORCE must bypass the cache")
 
 
 if __name__ == "__main__":

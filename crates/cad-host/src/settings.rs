@@ -228,7 +228,7 @@ impl CadSettingKey {
     /// [`SETTINGS_INVALID_VALUE`] — never coerced to `auto`), the two backgrounds
     /// accept only a canonical `#rrggbb` colour, `crosshairSize` accepts only an
     /// integer percentage in `1..=100`, `pickboxSize` an integer pixel count in
-    /// `1..=20`, `apertureSize` an integer pixel count in `1..=50` and
+    /// `1..=50`, `apertureSize` an integer pixel count in `1..=50` and
     /// `gpuBudgetPercent` an integer percentage of the graphics card's memory in
     /// `10..=100` (all four rejected, never clamped), `snapSpacing` a finite
     /// spacing greater than zero drawing units (an integer or a real; `0`,
@@ -358,9 +358,10 @@ pub struct HostSettings {
     pub background_model: String,
     /// Canonical lower-case `#rrggbb` of the paper-space background.
     pub background_paper: String,
-    /// Crosshair arm length as an integer percentage (`1..=100`).
+    /// Crosshair total span as an integer percentage of the viewport
+    /// (`1..=100`); equal arms about the cursor, clipped at the edges.
     pub crosshair_percent: u32,
-    /// Pickbox half-side in logical pixels (`1..=20`, the AutoCAD `PICKBOX`
+    /// Pickbox half-side in logical pixels (`1..=50`, the AutoCAD `PICKBOX`
     /// option).
     pub pickbox_size: u32,
     /// Object-snap aperture in logical pixels (`1..=50`, the AutoCAD `APERTURE`

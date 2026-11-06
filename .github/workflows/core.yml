@@ -242,7 +242,18 @@ jobs:
           install "/tmp/${archive}/wasm-bindgen" "$HOME/.cargo/bin/wasm-bindgen"
           wasm-bindgen --version | grep -Fx "wasm-bindgen ${pin}"
           ( cd apps/desktop-ui && npm ci )
+      - name: Cache the downloaded CAD font catalogue
+        # scripts/fetch-fonts.sh caches per file under ~/.cache/yacr/fonts;
+        # restore the newest run's cache so this job does not re-download it.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yacr/fonts
+          key: ${{ runner.os }}-yacr-fonts-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-yacr-fonts-
       - name: Build the Android UI bundle (the `frontendDist` generate_context! embeds)
+        env:
+          WITH_FONTS: "1"
         run: bash scripts/build-android-ui.sh
       - name: Android target check (real host, compile only)
         run: cargo check --target aarch64-linux-android -p app-android --locked

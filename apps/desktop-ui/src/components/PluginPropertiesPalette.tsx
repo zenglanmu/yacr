@@ -40,6 +40,13 @@ function groupLabel(key: string, t: Translator): string {
   return label === catalogKey ? key : label;
 }
 
+/** Translated class name for the header; unknown classes fall back to the raw kind. */
+function kindLabel(kind: string, t: Translator): string {
+  const catalogKey = `properties.tch.class.${kind}`;
+  const label = t(catalogKey);
+  return label === catalogKey ? kind : label;
+}
+
 function rowLabel(key: string, t: Translator): string {
   const catalogKey = `properties.tch.${key}`;
   const label = t(catalogKey);
@@ -55,12 +62,14 @@ export function PluginPropertiesPalette({ panel, onClose, onShowDefault }: Plugi
   return (
     <section
       className="palette properties plugin-properties"
-      aria-label={t('properties.vendor.subtitle', { kind: panel.kind })}
+      aria-label={t('properties.vendor.subtitle', { kind: kindLabel(panel.kind, t) })}
     >
       <header className="palette__head plugin-properties__head">
         <h2 className="plugin-properties__title">
           <Icon name="properties" size={15} />
-          <span className="plugin-properties__kind" title={panel.kind}>{panel.kind}</span>
+          <span className="plugin-properties__kind" title={panel.kind}>
+            {kindLabel(panel.kind, t)}
+          </span>
           <span className="plugin-properties__badge">{t('properties.vendor.title')}</span>
         </h2>
       </header>

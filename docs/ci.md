@@ -49,6 +49,10 @@
   用自签名 secrets/variables（`macos-release` 无密钥，ad-hoc）；`linux-release` 用 `FLATPAK_GPG_*`。它们都仅在 `v*` tag 或手工
   dispatch 时运行；其余 job 不接触发布凭据。
 - 并发：`concurrency.group = <workflow>-<ref>`，`cancel-in-progress: true`。
+- 字体缓存：`scripts/fetch-fonts.sh` 按文件缓存到 `${XDG_CACHE_HOME:-$HOME/.cache}/yacr/fonts`；
+  `linux-release` / `windows-release` / `macos-release` / `android-release` / `web-build` /
+  `android-check` 用 `actions/cache`（`key: <os>-yacr-fonts-<run_id>` + 前缀 restore）跨 run 复用，
+  避免重复下载 mlightcad 全量目录。缓存只是传输层复用，未改变下载失败仍然硬失败。
 
 ## 必需的 job（genuine gates）
 

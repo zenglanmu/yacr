@@ -442,12 +442,15 @@ fn install_paper_layout(core: &HostCore) {
 }
 
 #[test]
-fn display_settings_default_to_black_backgrounds_and_a_full_crosshair() {
+fn display_settings_default_to_black_backgrounds_and_a_five_percent_crosshair() {
     let core = core();
     let settings = core.settings();
     assert_eq!(settings.background_model, "#000000");
     assert_eq!(settings.background_paper, "#000000");
-    assert_eq!(settings.crosshair_percent, 100);
+    assert_eq!(
+        settings.crosshair_percent, 5,
+        "AutoCAD CURSORSIZE initial value"
+    );
     // The defaults are the effective config's, not a second source.
     let effective = core.config_snapshot().effective;
     assert_eq!(
@@ -571,7 +574,10 @@ fn the_display_settings_apply_to_the_next_frame_live() {
         [1.0, 0.0, 0.0, 1.0]
     );
 
-    // The crosshair size reaches the renderer transient (ADR 0028).
+    // The crosshair size reaches the renderer transient (ADR 0028): the total
+    // span is the percentage of the view's world span, split into equal arms.
+    core.apply_setting(CadSettingKey::CrosshairSize, CadSettingValue::Number(100))
+        .unwrap();
     let at_100 = place_cursor(&core);
     let width_100 = crosshair_width(&at_100);
     core.apply_setting(CadSettingKey::CrosshairSize, CadSettingValue::Number(40))
@@ -626,7 +632,7 @@ fn invalid_display_values_are_refused_without_writing() {
     let settings = core.settings();
     assert_eq!(settings.background_model, "#000000");
     assert_eq!(settings.background_paper, "#000000");
-    assert_eq!(settings.crosshair_percent, 100);
+    assert_eq!(settings.crosshair_percent, 5);
 }
 
 #[test]
@@ -661,7 +667,7 @@ fn the_display_settings_survive_a_restart() {
             .to_linear_rgba()
     );
     // The reloaded crosshair size reaches the renderer transient on the first
-    // sync (75% of the view's world span).
+    // sync (a 75 % total span of the view's world width, split into equal arms).
     let segments = place_cursor(&reloaded);
     let expected = 0.75 * view_span_x(&reloaded);
     assert!(
@@ -740,9 +746,10 @@ fn the_pickbox_and_aperture_keys_are_persisted_and_reported() {
 fn out_of_range_pickbox_and_aperture_writes_are_refused_without_writing() {
     let (core, config) = settings_core();
 
-    // AutoCAD's ranges: pickbox 1..=20, aperture 1..=50. Both bounds are accepted
-    // and everything outside is refused, never clamped.
-    for pixels in [0, 21, 1000] {
+    // AutoCAD's ranges: pickbox 1..=50 (0 rejected as "no pickbox" is not
+    // modelled), aperture 1..=50. Both bounds are accepted and everything
+    // outside is refused, never clamped.
+    for pixels in [0, 51, 1000] {
         let error = core
             .apply_setting(CadSettingKey::PickboxSize, CadSettingValue::Number(pixels))
             .unwrap_err();
@@ -792,7 +799,7 @@ fn out_of_range_pickbox_and_aperture_writes_are_refused_without_writing() {
 #[test]
 fn the_pickbox_and_aperture_settings_survive_a_restart() {
     let (core, config) = settings_core();
-    core.apply_setting(CadSettingKey::PickboxSize, CadSettingValue::Number(20))
+    core.apply_setting(CadSettingKey::PickboxSize, CadSettingValue::Number(50))
         .unwrap();
     core.apply_setting(CadSettingKey::ApertureSize, CadSettingValue::Number(50))
         .unwrap();
@@ -802,15 +809,15 @@ fn the_pickbox_and_aperture_settings_survive_a_restart() {
     reloaded.load_startup();
     reloaded.sync_render().unwrap();
     assert_eq!(reloaded.settings(), core.settings());
-    assert_eq!(reloaded.settings().pickbox_size, 20);
+    assert_eq!(reloaded.settings().pickbox_size, 50);
     assert_eq!(reloaded.settings().aperture_size, 50);
     // The reloaded values reach the renderer transient on the first sync, and
     // startup seeding installed them on the session as well.
     let segments = place_cursor(&reloaded);
-    let expected = 20.0 * view_scale_of(&reloaded) * 2.0;
+    let expected = 50.0 * view_scale_of(&reloaded) * 2.0;
     assert!(
         (pickbox_side(&segments) - expected).abs() < 1e-9,
-        "the reloaded 20 px pickbox must size the transient: {} vs {expected}",
+        "the reloaded 50 px pickbox must size the transient: {} vs {expected}",
         pickbox_side(&segments)
     );
     assert_eq!(

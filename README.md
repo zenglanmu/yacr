@@ -121,11 +121,14 @@ fallback**. See ADR 0010 and ADR 0011.
     print-style tables (CTB).
   - **Large-drawing protection**: hard scene batch/vertex budgets; exceeding them **fails explicitly**
     instead of OOM.
-  - **Fonts**: `Noto Sans CJK SC` (committed, OFL-1.1) is the default face, with `osifont` second.
-    Native hosts package the committed `fonts/` (APK assets, release payloads); the Web page bundles
-    no fonts and lazy-loads only the faces an open drawing needs from the site's same-origin `fonts/`
-    (Pages CDN). Every host reports the real shaping-font load: the read-only Font Manager (`FONTS`,
-    backed by `cad_fonts`) lists loaded/failed/unresolved faces; there is no font-write command.
+  - **Fonts**: two sources. The committed `fonts/` package ships `Noto Sans CJK SC`
+    (OFL-1.1, the default face) and `osifont` (GPL-3 + font exception); the optional full
+    `mlightcad/cad-data` catalogue is downloaded at packaging time by `scripts/fetch-fonts.sh`
+    (not committed). Native hosts, the Android APK and both Web bundles stage the assembled package
+    (`WITH_FONTS=1` by default; `WITH_FONTS=0`/`FONTS_DIR` are the offline paths), and the Web page
+    still lazy-loads only the faces an open drawing needs from its same-origin `fonts/`. Every host
+    reports the real shaping-font load: the read-only Font Manager (`FONTS`, backed by `cad_fonts`)
+    lists loaded/failed/unresolved faces; there is no font-write command.
 
 ## Build from source
 
@@ -190,8 +193,12 @@ flatpak install --user target/release/dist/yacr-<version>-linux-<arch>.flatpak
 flatpak run io.github.zenglanmu.yacr --open /absolute/drawing.dwg
 ```
 
-This builds a single-file Flatpak bundle (`bin/yacr` + committed `fonts/`: `osifont` and
-`Noto Sans CJK SC`, runtime `org.gnome.Platform//51`). It is **not** a distribution channel: nothing
+This builds a single-file Flatpak bundle (`bin/yacr` plus a font package, runtime
+`org.gnome.Platform//51`). By default (`WITH_FONTS=1`) the payload fonts are assembled on the host by
+`scripts/fetch-fonts.sh` — the full `mlightcad/cad-data` catalogue merged with the committed
+`fonts/` (`osifont` and `Noto Sans CJK SC`) — so drawings resolve more than the two shipped faces.
+`WITH_FONTS=0` stages only the committed package and `FONTS_DIR=<dir>` reuses an already assembled
+directory; both need no network during packaging. It is **not** a distribution channel: nothing
 is published to Flathub; the CI `linux-release` job is event-gated (`v*` tag or manual dispatch)
 and uploads a workflow artifact. See `docs/flatpak.md`.
 
@@ -231,6 +238,88 @@ Daily development only verifies the changed scope (that crate's compile/tests/fm
 gates above are for explicit requests and pre-release acceptance. `NOT RUN` is always stated as
 `NOT RUN` — old evidence is never presented as a current result.
 
+### Packaging and running per platform (local)
+
+Every entry point is real and fails loudly when a prerequisite is missing — no partial artifact, no
+silent fallback. Frontend builds share the same prerequisites: the `plugins/tch` submodule
+(`git submodule update --init --recursive`; a missing `dist/plugins/tch.js` is a hard failure),
+Node/npm, and the pinned Rust toolchain. Fonts come from `scripts/fetch-fonts.sh`: `WITH_FONTS=1`
+(default) downloads the full mlightcad catalogue, `WITH_FONTS=0` stages the committed package offline,
+and `FONTS_DIR=<dir>` reuses a prepared directory. Downloads are cached per file under
+`${XDG_CACHE_HOME:-$HOME/.cache}/yacr/fonts` (`FONT_CACHE_DIR` overrides it; an explicit empty value
+disables the cache; `FORCE=1` refreshes it), so repeated packaging does not download the same faces
+again. **A produced package is not runtime, GPU, device or pixel acceptance.**
+
+| Platform | Command (repo root) | Artifact |
+|---|---|---|
+| Linux (Flatpak) | `bash scripts/package-linux-release.sh` | `target/release/dist/yacr-<version>-linux-<arch>.flatpak` + `.sha256` |
+| Windows (zip) | `bash scripts/package-windows-release.sh` | `target/<target>/release/dist/yacr-<version>-windows-x86_64.zip` + `.sha256` |
+| macOS (tar.gz) | `bash scripts/package-macos-release.sh` | `target/macos/<arch>/dist/yacr-<version>-macos-<arch>.tar.gz` + `.sha256` |
+| Android (APK) | `bash scripts/build-android.sh --release --target aarch64` | `apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk` |
+| Web (bundle) | `bash scripts/build-web.sh` / `bash scripts/build-web-ui.sh` | `apps/app-web/dist/` / `apps/app-web/dist-ui/` |
+
+Linux is the only runnable GUI; the Flatpak commands, install and run steps are in
+[Local Flatpak bundle (Linux)](#local-flatpak-bundle-linux) above.
+
+**Windows zip.** Runs on Windows with plain `cargo` (native MSVC, static CRT), and locally on Linux
+through MinGW-w64 or `cargo xwin`:
+
+```bash
+bash scripts/package-windows-release.sh                                  # Windows (MSVC)
+TARGET=x86_64-pc-windows-gnu bash scripts/package-windows-release.sh     # Linux + MinGW-w64
+CARGO_XWIN=1 TARGET=x86_64-pc-windows-msvc bash scripts/package-windows-release.sh  # Linux + xwin
+```
+
+The local zip is **UNSIGNED** (`WITH_FONTS=1` fetches the full font catalogue, `0` stages the committed
+`fonts/` offline). CI signs the staged executables instead: `SKIP_ZIP=1` → `signtool` →
+`bash scripts/finalize-windows-release.sh --signed <stage> <dist>`. Run
+`bin/yacr-windows.exe --open <dwg>`; without WebView2 it prints a diagnostic and exits 5.
+
+**macOS tar.gz.** Must run on macOS — Mach-O needs Apple's SDK/linker and cannot be cross-built from
+Linux:
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin   # universal build (default)
+bash scripts/package-macos-release.sh                        # universal
+MACOS_ARCH=arm64 bash scripts/package-macos-release.sh       # or x86_64
+```
+
+The bundle is **ad-hoc signed** by default (`MACOS_SIGN_IDENTITY`, default `-`) and **not notarized**;
+on another Mac unquarantine it (`xattr -dr com.apple.quarantine Yacr.app`) or right-click → Open.
+Run with `open ./Yacr.app --args --open /absolute/drawing.dwg`.
+
+**Android APK.** Requires `ANDROID_HOME`, `NDK_HOME` (`ndk/29.0.13846066`) and JDK 17 in `JAVA_HOME`:
+
+```bash
+bash scripts/build-android.sh --release --target aarch64   # real devices; release APK is UNSIGNED
+bash scripts/build-android.sh --debug   --target x86_64    # local emulator; debug-signed
+adb install -r apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk
+```
+
+A local release APK must be signed (`apksigner`) before it can be installed; CI is the only place that
+signs one.
+
+The script runs `scripts/build-android-ui.sh` first (`YACR_RUNTIME=android`) and then Gradle. That step
+also assembles the APK font package into the generated `apps/app-android/font-assets/` (full mlightcad
+catalogue merged with the committed faces by default; `WITH_FONTS=0` keeps the committed package,
+`FONTS_DIR=<dir>` reuses a prepared one), which Gradle exposes as assets. The wasm `dom-canvas` session
+is **not** instantiated in this `native-below` carrier.
+
+**Web bundle.** Two separate, non-overlapping artifacts:
+
+```bash
+bash scripts/build-web.sh       # standalone vanilla harness → apps/app-web/dist
+bash scripts/build-web-ui.sh    # shared React chrome → apps/app-web/dist-ui
+python3 scripts/serve-web.py --directory apps/app-web/dist-ui --port 8090
+# open http://127.0.0.1:8090/ ; file:// cannot instantiate wasm
+```
+
+Both bundles stage the font package into `fonts/` by default: `WITH_FONTS=1` assembles the full
+mlightcad catalogue with `scripts/fetch-fonts.sh` (network), `WITH_FONTS=0` keeps the committed package
+(offline) and `FONTS_DIR=<dir>` reuses a prepared one. The page still resolves fonts lazily, after a
+document opens, from that same-origin `fonts/`. Wasm builds additionally need the
+`wasm32-unknown-unknown` target and the pinned `wasm-bindgen 0.2.129`.
+
 ### Other platforms
 
 The Windows and macOS desktop hosts are implemented but **compile-only** (CI compile gates, no runtime
@@ -249,10 +338,10 @@ evidence in `docs/validation*.md` does **not** transfer to the React/Tauri host)
 | Platform | Host | Actual status |
 |---|---|---|
 | **Linux desktop (primary, current)** | `apps/app-linux` (`yacr`) | React/Tauri chrome + native GTK/wgpu CAD partition. **Only OPEN and FIT plus native navigation are wired**; every other control is explicitly disabled with a reason. Bounded local acceptance has run: React-migration P6 gate **ACCEPT-WITH-FIXES** (hardware-Vulkan real-window smoke on a synthetic fixture), and native-Wayland W3 **ACCEPT-WITH-LIMITATIONS** (GNOME/Mutter + Quadro P620, `scale=1`) — see `docs/validation-react-linux-migration-2026-10-16.md` and `docs/validation-native-wayland-2026-10-16.md`. **Bounded local-Linux acceptance only** — not a full CAD product / cross-platform / vendor / golden / performance approval. |
-| **Windows desktop** | `apps/app-windows` (`yacr-windows`) | **NOT IMPLEMENTED** failure stub (no Tauri dependency; prints a diagnostic and exits non-zero). CI only compiles it (`windows-check`); no runnable GUI. |
-| **macOS desktop** | `apps/app-macos` (`yacr-macos`) | **Real Tauri 2 host, compile-only**: transparent WKWebView above a native CAD child `NSView` presented by wgpu/Metal. CI compiles it (`macos-check`); window/Metal/z-order/DPI/dialog/pixel behaviour is **NOT VERIFIED** and there is no packaging. |
+| **Windows desktop** | `apps/app-windows` (`yacr-windows`) | **Real Tauri/WebView2 host, `native-below`**: transparent WebView over a Win32 child HWND. CI compiles it (`windows-check`) and packages a release zip (`windows-release`, event-gated; self-signed Authenticode or `-unsigned`). Visual/runtime/real-Windows acceptance is **NOT VERIFIED** (Wine only covers the missing-WebView2 refusal contract, exit 5); packaging is not runtime evidence. |
+| **macOS desktop** | `apps/app-macos` (`yacr-macos`) | **Real Tauri 2 host, compile-only**: transparent WKWebView above a native CAD child `NSView` presented by wgpu/Metal. CI compiles it (`macos-check`) and packages an ad-hoc signed, non-notarized universal tarball (`macos-release`, event-gated). Window/Metal/z-order/DPI/dialog/pixel behaviour is **NOT VERIFIED**; packaging is not runtime evidence. |
 | **Android** | `apps/app-android` | **Native `native-below` carrier**: Tauri WebView runs the shared React chrome, a native Rust `CadSession` owns `cad-db`, and wgpu (Vulkan) presents to a `SurfaceView` below the WebView. **Compile-level evidence only** — no device/emulator run, no Vulkan adapter, no pixels, no rotation/lifecycle, no JNI runtime link (all NOT VERIFIED). v1 has no file open/save, no popup host and no durable config; it starts from the built-in demo drawing. See `docs/android-host.md`. |
-| **Web** | `apps/app-web` | **Browser carrier (`dom-canvas`)**: wasm `CadSession` + DOM canvas; OPEN is a page upload, SAVE/PLOT are browser downloads (DXF/SVG/PDF, no DWG write-back). No fonts in the bundle: after a document opens, the page fetches only the needed faces from the site's same-origin `fonts/` CDN package (assembled by `scripts/deploy-cloudflare-pages.sh`); `cad_fonts`/`FONTS` reports the real load. Only bounded local evidence (headless Chromium, **software rendering**) — no real-GPU, pixel or device acceptance. |
+| **Web** | `apps/app-web` | **Browser carrier (`dom-canvas`)**: wasm `CadSession` + DOM canvas; OPEN is a page upload, SAVE/PLOT are browser downloads (DXF/SVG/PDF, no DWG write-back). Both bundles stage the full font package into `fonts/` by default (`WITH_FONTS=0`/`FONTS_DIR` offline); after a document opens, the page still fetches only the needed faces from that same-origin `fonts/`; `cad_fonts`/`FONTS` reports the real load. Only bounded local evidence (headless Chromium, **software rendering**) — no real-GPU, pixel or device acceptance. |
 | **Headless CLI** | `cad-cli-tools` | Kept: opens and plots headless through the shared application path. |
 
 Recent work (2026-10-17/18) hardened the renderer and picking path under real use: a scene spatial

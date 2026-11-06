@@ -7,7 +7,9 @@
 #   2. build the release binary with `--features tauri/custom-protocol` so the
 #      built `ui/dist` is embedded — without that feature the binary expects the
 #      Vite dev server and cannot run standalone;
-#   3. stage target/flatpak/payload/{bin/yacr,fonts/} (committed fonts/ only);
+#   3. stage target/flatpak/payload/{bin/yacr,fonts/} (full catalogue via
+#      scripts/fetch-fonts.sh by default; committed fonts/ only with
+#      WITH_FONTS=0 or a prepared FONTS_DIR);
 #   4. run flatpak-builder against packaging/flatpak/io.github.zenglanmu.yacr.yml;
 #   5. export a single-file bundle to target/release/dist/.
 #
@@ -24,6 +26,16 @@
 #                         is exported to <bundle>.gpg.
 #   FLATPAK_GPG_HOMEDIR   GnuPG home holding that key
 #                         (default: ${GNUPGHOME:-$HOME/.gnupg}).
+#   WITH_FONTS    1 (default) to assemble the full CAD font catalogue into the
+#                 payload with scripts/fetch-fonts.sh (mlightcad catalogue +
+#                 committed fonts/; needs network); 0 for an offline build that
+#                 ships only the committed fonts/.
+#   FONTS_DIR     optional prepared font directory (must contain fonts.json).
+#                 When set, the download is skipped and this directory is copied
+#                 into the payload instead, so the packaging step itself needs no
+#                 network. Overrides WITH_FONTS.
+#   FONT_BASE_URL / FONT_FALLBACK_BASE_URL / FONT_RETRIES  passed through to
+#                 scripts/fetch-fonts.sh.
 #
 # Every missing prerequisite is a hard, actionable failure: this script never
 # falls back to a partial or unverified artifact. With FLATPAK_GPG_KEY_ID unset
@@ -55,6 +67,9 @@ REMOTE_DEPS="${FLATPAK_REMOTE_DEPS:-flathub-mirror}"
 REMOTE_BUILD="${FLATPAK_REMOTE_BUILD:-flathub-mirror}"
 FLATPAK_GPG_KEY_ID="${FLATPAK_GPG_KEY_ID:-}"
 FLATPAK_GPG_HOMEDIR="${FLATPAK_GPG_HOMEDIR:-${GNUPGHOME:-$HOME/.gnupg}}"
+WITH_FONTS="${WITH_FONTS:-1}"
+FONTS_DIR="${FONTS_DIR:-}"
+FONT_STAGE="target/flatpak/fonts"
 
 ARCH="$(uname -m)"
 
@@ -67,6 +82,11 @@ need() {
     command -v "$1" >/dev/null 2>&1 || die "$2"
 }
 
+export YACR_REPO_ROOT="$ROOT"
+export YACR_SCRIPT_NAME="package-linux-release"
+# shellcheck source=scripts/lib/font-package.sh
+. "$ROOT/scripts/lib/font-package.sh"
+
 # --- preflight -------------------------------------------------------------
 need cargo "cargo not found; install the Rust toolchain (rust-toolchain.toml) or add \$HOME/.cargo/bin to PATH."
 need npm "npm not found; install Node.js + npm (the React frontend is built with Vite)."
@@ -76,7 +96,7 @@ need flatpak-builder "flatpak-builder not found; install the distro package, or 
 need python3 "python3 not found; it is used to read the version from ${TAURI_CONF}."
 [ -f "$MANIFEST" ] || die "manifest missing: ${MANIFEST}"
 [ -f "${UI_DIR}/package-lock.json" ] || die "${UI_DIR}/package-lock.json missing; 'npm ci' needs a committed lockfile."
-[ -d fonts ] || die "committed fonts/ directory missing; the manifest installs it to /app/fonts."
+[ -d fonts ] || die "committed fonts/ directory missing; the font package merges it into the payload."
 if [ -n "$FLATPAK_GPG_KEY_ID" ]; then
     need gpg "FLATPAK_GPG_KEY_ID is set but gpg not found; install gnupg (it signs the OSTree commit)."
     need ostree "FLATPAK_GPG_KEY_ID is set but ostree not found; install ostree (it verifies the commit signature)."
@@ -93,6 +113,11 @@ echo "    app-id    : ${APP_ID} ${VERSION}"
 echo "    arch      : ${ARCH}"
 echo "    runtime   : ${RUNTIME_REF} (sdk ${SDK_REF})"
 echo "    remotes   : deps=${REMOTE_DEPS} runtime=${REMOTE_BUILD}"
+if [ -n "$FONTS_DIR" ]; then
+    echo "    fonts     : prepared directory ${FONTS_DIR} (no download)"
+else
+    echo "    fonts     : ${WITH_FONTS} (1 = full catalogue via scripts/fetch-fonts.sh, 0 = committed fonts/ only)"
+fi
 echo "    cargo     : $(cargo --version)"
 echo "    node/npm  : $(node --version) / $(npm --version)"
 echo "    flatpak   : $(flatpak --version) / builder $(flatpak-builder --version)"
@@ -119,7 +144,14 @@ if [ "${#missing_refs[@]}" -gt 0 ]; then
     exit 1
 fi
 
-# --- 1. frontend -----------------------------------------------------------
+# --- 1. fonts --------------------------------------------------------------
+# Assembled once on the host and reused twice: the embedded UI bundle
+# (X11/XWayland `dom-canvas` reads `/fonts/` from it) and `/app/fonts`.
+rm -rf "$FONT_STAGE"
+yacr_stage_fonts "$FONT_STAGE" "flatpak fonts" || die "font package staging failed"
+export YACR_FONT_PACKAGE_DIR="${ROOT}/${FONT_STAGE}"
+
+# --- 2. frontend -----------------------------------------------------------
 echo "==> building the React frontend (${UI_DIR})"
 (
     cd "$UI_DIR"
@@ -130,7 +162,7 @@ echo "==> building the React frontend (${UI_DIR})"
 [ -s "${UI_DIR}/dist/plugins/tch.js" ] \
     || die "${UI_DIR}/dist/plugins/tch.js missing after 'npm run build'; the Tianzheng vendor plugin would not be embedded (is the plugins/tch submodule initialized?)"
 
-# --- 2. release binary -----------------------------------------------------
+# --- 3. release binary -----------------------------------------------------
 # `tauri/custom-protocol` embeds ui/dist; a plain release build embeds the dev
 # URL and would not run outside `npm run dev`.
 echo "==> building the release binary (custom-protocol)"
@@ -153,17 +185,21 @@ grep -aqF 'tauri://localhost' "$BINARY" \
     || die "${BINARY} does not reference tauri://localhost; unexpected Tauri build configuration."
 echo "    embedded assets verified: ${#DIST_ASSETS[@]} file(s)"
 
-# --- 3. payload ------------------------------------------------------------
+# --- 4. payload ------------------------------------------------------------
 echo "==> staging the prebuilt payload in ${PAYLOAD}"
 rm -rf "$PAYLOAD"
 mkdir -p "${PAYLOAD}/bin" "${PAYLOAD}/fonts"
 install -m755 "$BINARY" "${PAYLOAD}/bin/yacr"
-cp -a fonts/. "${PAYLOAD}/fonts/"
+
+if [ ! -f "${FONT_STAGE}/fonts.json" ]; then
+    die "staged font package incomplete: ${FONT_STAGE}/fonts.json missing"
+fi
+cp -a -- "${FONT_STAGE}/." "${PAYLOAD}/fonts/"
 
 [ -x "${PAYLOAD}/bin/yacr" ] || die "payload binary missing or not executable: ${PAYLOAD}/bin/yacr"
 [ -f "${PAYLOAD}/fonts/fonts.json" ] || die "payload font package incomplete: ${PAYLOAD}/fonts/fonts.json missing"
 
-# --- 4. flatpak-builder ----------------------------------------------------
+# --- 5. flatpak-builder ----------------------------------------------------
 echo "==> building the Flatpak (${MANIFEST})"
 rm -rf "$BUILD" "$REPO"
 BUILDER_ARGS=(
@@ -183,7 +219,7 @@ if [ -n "$FLATPAK_GPG_KEY_ID" ]; then
 fi
 flatpak-builder "${BUILDER_ARGS[@]}" "$BUILD" "$MANIFEST"
 
-# --- 5. bundle -------------------------------------------------------------
+# --- 6. bundle -------------------------------------------------------------
 echo "==> exporting ${BUNDLE}"
 # Start from a clean dist: a cached `target/` may still hold an older bundle.
 rm -rf "$DIST"
@@ -204,7 +240,7 @@ flatpak build-bundle "${BUNDLE_ARGS[@]}" "$REPO" "$BUNDLE" "$APP_ID"
 [ -s "$BUNDLE" ] || die "flatpak build-bundle produced no bundle: ${BUNDLE}"
 ( cd "$DIST" && sha256sum "$(basename "$BUNDLE")" > "$(basename "$BUNDLE").sha256" )
 
-# --- 6. verify the signed commit -------------------------------------------
+# --- 7. verify the signed commit -------------------------------------------
 if [ -n "$FLATPAK_GPG_KEY_ID" ]; then
     # OSTree stores GPG commit signatures in detached metadata under
     # `ostree.gpgsigs`; `ostree show --print-signatures` is not available in all

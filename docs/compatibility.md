@@ -513,7 +513,7 @@ crosshairSize/pickboxSize/apertureSize/gpuBudgetPercent/wgpu_backend/leftDragPan
 `SNAP`、`ORTHO`、`SNAPUNIT` 间距、左键拖动平移）；**语言默认**按 `显式选择 > 宿主注入 > navigator > 英文`
 （`zh-TW/zh-Hant` 无对应目录 ⇒ **英文**，不静默给简体）；**显示**：模型/图纸背景色 `#rrggbb`
 （sRGB→linear 在配置→渲染器接缝，真机核对 0.5 读回 188、遮罩内部同值）与十字光标 1..100%
-（100% 位级不变），均**即时**生效。
+（默认 5、以光标为中心对称、按视图尺寸计算；100% 位级不变），均**即时**生效。
 
 **输入模态（2026-11-01，源码/契约测试证据；设备 NOT RUN）**：React 输入层按每个
 `PointerEvent.pointerType` 在指针事件上附带可选 `device: "mouse" | "touch" | "pen"`（缺失/未知 ⇒ mouse；
@@ -533,7 +533,8 @@ Ctrl+滚轮。`interaction.leftDragPans`（默认 false，Options → Drafting�
 code 只进 `title`）；`Ctrl+1` 与命令行 `PROPERTIES` 均可开关（Chrome 本地命令，**不进** Rust 路由）。
 **选项弹窗（2026-10-22）**：独立弹窗（ADR-0021），五个页签、12 个写键 + 语言 + 只读字体目录；
 Apply/OK/Cancel 为 AutoCAD 语义（本地暂存、只发 diff、写失败标字段）；入口三处（File 页、
-`OPTIONS` 命令行拦截、状态栏设置按钮）。**拾取框/孔径**：`view.pickbox.sizePixels`(1..=20, 默认 3)
+`OPTIONS` 命令行拦截、状态栏设置按钮）。**拾取框/孔径**：`view.pickbox.sizePixels`(1..=50, 默认 3；
+AutoCAD 的 0＝关闭拾取框/选择预览未建模，故拒绝 0)
 与 `view.aperture.sizePixels`(1..=50, 默认 12) 已接线到 hover/拾取/光标/捕捉四条路径，实时生效。
 
 **GUI 验收（2026-10-22，有界）**：真实 GPU（Vulkan + Quadro P620）下已实拍主界面、属性面板

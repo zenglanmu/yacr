@@ -31,7 +31,9 @@
   <https://github.com/hikikomori82/osifont>，授权为 **GPL-3 + 字体例外**（嵌入文档不传染 GPL；
   本仓库 AGPL-3 可与 GPL 组件组合）。它是 Noto 之后的**次选轮廓回退面**。
 - **`mlightcad/cad-data` 字体不入库**：其目录与字体由 `scripts/fetch-fonts.sh` 在需要时下载，
-  供发布打包、CDN 包组装与测试语料使用；再分发授权由部署者负责。Web 运行时的同源 `fonts/`
+  供发布打包、CDN 包组装与测试语料使用；再分发授权由部署者负责。下载按文件缓存到
+  `FONT_CACHE_DIR`（默认 `${XDG_CACHE_HOME:-$HOME/.cache}/yacr/fonts`），重复打包与两个 Web
+  bundle 复用同一份；`FORCE=1` 强制刷新，显式空值关闭缓存。Web 运行时的同源 `fonts/`
   就是 `scripts/deploy-cloudflare-pages.sh` 用该脚本组装并上传到项目 Pages CDN 的包。
 - QCAD 的编译字体 `.cxf` 未提交也不支持；引擎只处理 SHX 与 sfnt/WOFF1。
 
@@ -72,11 +74,14 @@
 
 ### Web（`dom-canvas`，wasm 会话）
 
-- **默认构建产物不含字体，也不预加载**。`scripts/build-web-ui.sh`（`dist-ui`）与
-  `scripts/build-web.sh`（独立 harness `dist`）只产出页面 + wasm；`YACR_WEB_FONTS=1` 只用于
-  本地把提交包 staging 到 `dist-ui/fonts`，**不是**发布路径。
-  `apps/desktop-ui/vite-font-package.mjs` 只在 `__YACR_RUNTIME__=tauri` 时把仓库 `fonts/`
-  复制到 `apps/desktop-ui/dist/fonts`（X11/XWayland `dom-canvas` 的离线包）；web/android 都跳过。
+- **构建期就把字体包 staged 进 bundle，但仍然懒加载**。`scripts/build-web-ui.sh`（`dist-ui`）与
+  `scripts/build-web.sh`（独立 harness `dist`）默认（`WITH_FONTS=1`）经 `scripts/lib/font-package.sh`
+  调用 `scripts/fetch-fonts.sh`，把 mlightcad 全量目录 + 提交包放进 bundle 的 `fonts/`；
+  `WITH_FONTS=0` 只放提交包、`FONTS_DIR=<dir>` 复用预置目录（两者都不联网）。页面仍只在
+  `open_bytes` 之后按需从同源 `fonts/` 取面，不预加载。
+  `apps/desktop-ui/vite-font-package.mjs` 只在 `__YACR_RUNTIME__=tauri` 时把字体包复制到
+  `apps/desktop-ui/dist/fonts`（X11/XWayland `dom-canvas` 的离线包）；发布打包用
+  `YACR_FONT_PACKAGE_DIR` 换成全量目录；web/android 都跳过。
 - **发布包**：`scripts/deploy-cloudflare-pages.sh` 在上传前用 `scripts/fetch-fonts.sh` 把
   mlightcad 全量目录 + 提交的 osifont/Noto 组装到 `$DIST/fonts`（两种 bundle 都适用），站点根
   因此始终提供同源 `fonts/`；`SKIP_FONTS=1` 复用已有目录而不下载。该脚本同时把
@@ -165,21 +170,23 @@ SFNT glyph 的填充仍走安全路径：只有证明 nonzero winding 与 even-o
 
 | 载体 | 产物位置 | 来源 |
 |---|---|---|
-| 桌面（Tauri，含 X11/XWayland `dom-canvas`） | `apps/desktop-ui/dist/fonts/` | 仅 tauri：Vite 插件 `vite-font-package.mjs`；页面懒读同源 `fonts/` |
-| Web `dist-ui` | **不打包字体**；站点根 `fonts/` | `scripts/deploy-cloudflare-pages.sh` → `scripts/fetch-fonts.sh` 组装后上传 Pages CDN；页面懒加载 |
-| Web 独立 harness `dist` | **不打包字体**；同一站点根 `fonts/` | 同上 |
-| Android | APK `assets/fonts/` → 运行时 `filesDir/fonts/` | Gradle `assets.srcDir(repo/fonts)` + Kotlin 解压（标记 `.yacr-assets-v2-complete`） |
-| Linux Flatpak | payload `fonts/`（`bin/` 同级） | `scripts/package-linux-release.sh`，只放提交包 |
+| 桌面（Tauri，含 X11/XWayland `dom-canvas`） | `apps/desktop-ui/dist/fonts/` | Vite 插件 `vite-font-package.mjs`：默认提交包；发布打包导出 `YACR_FONT_PACKAGE_DIR` 时改用 `scripts/fetch-fonts.sh` 组装的全量包（X11/XWayland 页面懒读同源 `fonts/`） |
+| Web `dist-ui` | bundle 内 `fonts/`（默认全量）＋站点根 `fonts/` | `scripts/build-web-ui.sh` 经 `scripts/lib/font-package.sh` staged（`WITH_FONTS=1` 默认走 `scripts/fetch-fonts.sh`；`0`/`FONTS_DIR` 离线）；页面打开图纸后懒加载 |
+| Web 独立 harness `dist` | bundle 内 `fonts/`（默认全量）＋站点根 `fonts/` | `scripts/build-web.sh` 同上；`web-deploy` 上传前再用 `scripts/fetch-fonts.sh` 合并/校验站点根包 |
+| Android | APK `assets/fonts/` → 运行时 `filesDir/fonts/` | `scripts/build-android-ui.sh` 经共享 `scripts/lib/font-package.sh` 组装 `apps/app-android/font-assets`（默认 mlightcad 全量 + 提交包；`WITH_FONTS=0`/`FONTS_DIR` 离线）+ Gradle `assets.srcDir(font-assets)` + Kotlin 按 `fonts.json` 解压（标记 `.yacr-assets-v3-complete`） |
+| Linux Flatpak | payload `fonts/`（`bin/` 同级） | `scripts/package-linux-release.sh`：默认 `WITH_FONTS=1` 用 `scripts/fetch-fonts.sh` 组装 mlightcad 全量并合并提交包；`WITH_FONTS=0` 只放提交包；`FONTS_DIR=<dir>` 用预置目录、打包步骤免联网 |
 | Windows / macOS 发布包 | `fonts/` | `WITH_FONTS=1` 时 `scripts/fetch-fonts.sh` 组装 mlightcad 全量并合并提交包；`0` 只放提交包 |
 | CLI | 可执行文件同级 `fonts/` 或 `--font` | `cad-platform::fonts::local` |
 
-本地 Web 调试若没有 CDN，`YACR_WEB_FONTS=1 bash scripts/build-web-ui.sh` 只把提交子集放进
-`dist-ui/fonts`（本地专用）；要测完整目录，再用 `scripts/fetch-fonts.sh <dir>` 组装一份同源
-`fonts/`，或把 `__YACR_FONT_BASE_URL__` 指到有该包的基址。
+本地 Web 构建默认（`WITH_FONTS=1`）就把 mlightcad 全量目录 staged 到 bundle 的 `fonts/`；
+`WITH_FONTS=0` 只放提交包，`FONTS_DIR=<dir>` 复用已组装目录（两者都不联网）。页面仍然只在打开
+图纸后从同源 `fonts/` 懒加载需要的面，不预加载、不阻塞 `ready`/`start`。
 
 `scripts/fetch-fonts.sh <DEST> [FONTS...]` 是平台无关的“下载第三方目录 + 合并提交包”打包
-入口：发布打包、Windows/macOS `WITH_FONTS=1` 与 Web CDN 包都调用它，但它本身不产生 Web 构建
-产物。mlightcad 字体仍不提交，再分发授权由部署者负责。
+入口，`scripts/lib/font-package.sh` 是各宿主共用的选择策略（`WITH_FONTS`/`FONTS_DIR`）。调用方：
+Linux Flatpak、Windows/macOS 发布包、Android APK（`build-android-ui.sh`）、Web 本地 bundle
+（`build-web.sh`/`build-web-ui.sh`）与 Web CDN 包（`deploy-cloudflare-pages.sh`）。它本身不产生
+Web 构建产物。mlightcad 字体仍不提交，再分发授权由部署者负责。
 
 ## 验证与证据边界
 
@@ -197,7 +204,7 @@ SFNT glyph 的填充仍走安全路径：只有证明 nonzero winding 与 even-o
 | `cargo test -p cad-ui-core fonts --locked` | 3 passed（`cad_fonts` wire 投影） |
 | `cargo test -p cad-desktop-shell --test font_commands --locked` | 6 passed（`cad_fonts` 命令注册/序列化/无会话拒绝） |
 | `(cd apps/desktop-ui && node --test test/fonts.test.ts test/vite-font-package.test.ts)` | 14 pass / 0 fail（严格解析、行分组、`FONTS` 选择器、Vite 插件仅 tauri 复制、web/android 跳过） |
-| `bash scripts/build-web-ui.sh` | exit 0；默认不 staging 字体（`fonts/*` 报 `not bundled (lazy CDN fonts/)`），`YACR_WEB_FONTS=1` 才放提交子集（本地专用）。 |
+| `bash scripts/build-web-ui.sh` | exit 0；**2026-11-03 记录**：当时默认不 staging 字体（`fonts/*` 报 `not bundled (lazy CDN fonts/)`），`YACR_WEB_FONTS=1` 才放提交子集。当前默认（`WITH_FONTS=1`）已改为 staged 全量，未重跑。 |
 
 ### Web 运行时证据（软件渲染，非 GPU/像素验收）
 

@@ -363,11 +363,24 @@ jobs:
           fi
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
           echo "FLATPAK_GPG_HOMEDIR=$GNUPGHOME" >> "$GITHUB_ENV"
+      - name: Cache the downloaded CAD font catalogue
+        # scripts/fetch-fonts.sh caches per file under ~/.cache/yacr/fonts;
+        # restore the newest run's cache so this job does not re-download it.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yacr/fonts
+          key: ${{ runner.os }}-yacr-fonts-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-yacr-fonts-
       - name: Build and package the Linux Flatpak
         id: build-linux
         env:
           FLATPAK_REMOTE_DEPS: flathub
           FLATPAK_REMOTE_BUILD: flathub
+          # Full mlightcad catalogue staged through scripts/fetch-fonts.sh, the
+          # same path Windows/macOS release packaging uses; WITH_FONTS=0 keeps
+          # only the committed fonts/ for an offline build.
+          WITH_FONTS: "1"
         run: |
           set -euo pipefail
           if [ -n "${FLATPAK_GPG_KEY_ID:-}" ]; then
@@ -442,6 +455,15 @@ jobs:
           key: ${{ runner.os }}-cargo-windows-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-windows-release-
+      - name: Cache the downloaded CAD font catalogue
+        # scripts/fetch-fonts.sh caches per file under ~/.cache/yacr/fonts;
+        # restore the newest run's cache so this job does not re-download it.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yacr/fonts
+          key: ${{ runner.os }}-yacr-fonts-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-yacr-fonts-
       - name: Build and stage the Windows release (no zip yet)
         shell: bash
         env:
@@ -590,6 +612,15 @@ jobs:
           key: ${{ runner.os }}-cargo-macos-release-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-macos-release-
+      - name: Cache the downloaded CAD font catalogue
+        # scripts/fetch-fonts.sh caches per file under ~/.cache/yacr/fonts;
+        # restore the newest run's cache so this job does not re-download it.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yacr/fonts
+          key: ${{ runner.os }}-yacr-fonts-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-yacr-fonts-
       - name: Build and package the macOS release (universal)
         shell: bash
         env:
@@ -753,7 +784,20 @@ jobs:
           wasm-bindgen --version | grep -Fx "wasm-bindgen ${pin}"
           ( cd apps/desktop-ui && npm ci )
           ( cd apps/app-android && npm ci )
+      - name: Cache the downloaded CAD font catalogue
+        # scripts/fetch-fonts.sh caches per file under ~/.cache/yacr/fonts;
+        # restore the newest run's cache so this job does not re-download it.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yacr/fonts
+          key: ${{ runner.os }}-yacr-fonts-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-yacr-fonts-
       - name: Build the release APK (unsigned)
+        env:
+          # Full mlightcad catalogue staged by scripts/build-android-ui.sh
+          # (the APK's assets/fonts); WITH_FONTS=0 keeps the committed subset.
+          WITH_FONTS: "1"
         run: bash scripts/build-android.sh --release --target aarch64
       - name: Fail if Cargo.lock was rewritten
         run: |
@@ -887,7 +931,18 @@ jobs:
           wasm-bindgen --version | grep -Fx "wasm-bindgen ${pin}"
           grep -A2 'name = "wasm-bindgen"' Cargo.lock | grep -q "version = \"${pin}\"" \
             || { echo "Cargo.lock wasm-bindgen does not match the installed CLI pin $pin" >&2; exit 1; }
+      - name: Cache the downloaded CAD font catalogue
+        # scripts/fetch-fonts.sh caches per file under ~/.cache/yacr/fonts;
+        # restore the newest run's cache so this job does not re-download it.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yacr/fonts
+          key: ${{ runner.os }}-yacr-fonts-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-yacr-fonts-
       - name: Build the browser bundle
+        env:
+          WITH_FONTS: "1"
         run: bash scripts/build-web.sh
       - name: Upload the browser bundle
         uses: actions/upload-artifact@v4
@@ -905,6 +960,8 @@ jobs:
       - name: Build the shared chrome bundle (browser + Android runtime)
         # Same wasm session, but the React chrome compiled with
         # `__YACR_RUNTIME__=web`; `apps/app-web/dist` above stays untouched.
+        env:
+          WITH_FONTS: "1"
         run: bash scripts/build-web-ui.sh
       - name: Upload the shared chrome bundle
         uses: actions/upload-artifact@v4

@@ -17,6 +17,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import java.io.File
 import kotlin.math.roundToInt
+import org.json.JSONArray
 
 /**
  * The Android host activity: a Tauri 2 WebView carrier for the shared React chrome.
@@ -104,7 +105,7 @@ class MainActivity : TauriActivity() {
     /** Bounded wait for React to mount its shell before a layout snapshot is logged. */
     private const val MAX_LOG_ATTEMPTS = 25
 
-    /** Asset directory packaged from the repository's committed `fonts/` package. */
+    /** Asset directory the extracted font package lives in (generated at build time). */
     private const val FONT_ASSET_DIR = "fonts"
     /** Optional asset directory for CAD raster resources (absent in this repo today). */
     private const val IMAGE_ASSET_DIR = "images"
@@ -114,11 +115,21 @@ class MainActivity : TauriActivity() {
      * Written after a complete copy; presence + catalog makes extraction a no-op
      * for this asset version. Bump the version whenever the bundled package gains
      * a file, so existing installs re-extract instead of serving the old set (v2
-     * adds the Noto Sans CJK SC fallback).
+     * added the Noto Sans CJK SC fallback; v3 ships the full mlightcad catalogue,
+     * so v2 installs must not keep their handful of faces).
      */
-    private const val ASSET_EXTRACT_MARKER = ".yacr-assets-v2-complete"
-    /** Font-package files when Gradle exposes the repository's `fonts/` as an asset root. */
-    private val FONT_SUFFIXES = listOf(".ttf", ".otf", ".ttc", ".woff", ".woff2", ".shx", ".cxf")
+    private const val ASSET_EXTRACT_MARKER = ".yacr-assets-v3-complete"
+    /**
+     * Package files that are not faces and therefore not guaranteed to appear in
+     * `fonts.json`: the committed licenses/readme the other hosts also ship. They
+     * are copied only when the APK actually carries them.
+     */
+    private val FONT_PACKAGE_EXTRAS = listOf(
+      "COPYING.GPL-3",
+      "NotoSansCJK-OFL.txt",
+      "SOURCE.md",
+      "README.md",
+    )
   }
 
   // ---------------------------------------------------------------------------
@@ -385,9 +396,10 @@ class MainActivity : TauriActivity() {
       copyAssetTree(assets, FONT_ASSET_DIR, fontsDir)
       true
     } else {
-      // `assets.srcDir(<repo>/fonts)` makes the repository's package an asset
-      // *root*, so its files appear flat under `assets/`. Copy only the package
-      // files, never unrelated APK assets such as `tauri.conf.json`.
+      // `assets.srcDir(".../font-assets")` makes the generated font package an
+      // asset *root*, so its files appear flat under `assets/`. Copy only the
+      // files the packaged `fonts.json` names, never unrelated APK assets such as
+      // `tauri.conf.json`.
       copyFlatFontAssets(assets, fontsDir)
     }
     if (!copied || !catalog.isFile) return false
@@ -396,17 +408,46 @@ class MainActivity : TauriActivity() {
   }
 
   private fun copyFlatFontAssets(assets: AssetManager, fontsDir: File): Boolean {
-    val root = assets.list("") ?: return false
-    val fontFiles = root.filter { name ->
-      name == FONT_CATALOG ||
-        FONT_SUFFIXES.any { suffix -> name.endsWith(suffix, ignoreCase = true) } ||
-        name.startsWith("COPYING", ignoreCase = true) ||
-        name.startsWith("SOURCE", ignoreCase = true)
-    }
+    // The packaged `fonts.json` is the authority for what the native loader needs:
+    // the full catalogue is not limited to the face extensions this class used to
+    // hard-code, so the file names are read from the catalogue instead of guessed.
+    val catalogFiles = readFlatCatalogFiles(assets) ?: return false
+    val root = assets.list("").orEmpty()
+    val fontFiles = LinkedHashSet(catalogFiles)
+    fontFiles.add(FONT_CATALOG)
+    for (extra in FONT_PACKAGE_EXTRAS) if (extra in root) fontFiles.add(extra)
     if (fontFiles.isEmpty()) return false
     fontsDir.mkdirs()
     for (name in fontFiles) copyAssetFile(assets, name, File(fontsDir, name))
     return true
+  }
+
+  /**
+   * The asset names the packaged `fonts.json` declares, or `null` when the
+   * catalogue is absent or unparseable.
+   *
+   * Each entry's `file` is accepted only as a bare name (no `/`, no `\`, non-empty)
+   * so a malformed catalogue can never make this write outside [FONT_ASSET_DIR].
+   * A missing/unreadable catalogue is a hard failure: the caller logs it and never
+   * calls `nativeAssetsReady` with a package that only *looks* valid.
+   */
+  private fun readFlatCatalogFiles(assets: AssetManager): List<String>? {
+    val names = LinkedHashSet<String>()
+    try {
+      assets.open(FONT_CATALOG).use { input ->
+        val entries = JSONArray(input.readBytes().toString(Charsets.UTF_8))
+        for (index in 0 until entries.length()) {
+          val entry = entries.optJSONObject(index) ?: continue
+          val file = entry.optString("file", "")
+          if (file.isEmpty() || file.contains('/') || file.contains('\\')) continue
+          names.add(file)
+        }
+      }
+    } catch (error: Exception) {
+      Log.e(TAG, "bundled CAD fonts: $FONT_CATALOG is missing or unparseable: ${error.message}")
+      return null
+    }
+    return names.toList()
   }
 
   private fun ensureImagesExtracted(assets: AssetManager, imagesDir: File) {

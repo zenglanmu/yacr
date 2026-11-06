@@ -34,8 +34,10 @@ is the wiring that makes such a run honest:
   * the edge-to-edge gesture-bar inset: the Activity reads `WindowInsets` and
     publishes `--yacr-safe-bottom` on the page, and `mobile.css` is the consumer of
     that exact property name (the two halves of one contract, in two languages);
-  * the generated Gradle project is committed, pinned to the documented NDK, packages
-    the repository `fonts/` assets, and its build outputs are ignored;
+  * the generated Gradle project is committed, pinned to the documented NDK, exposes
+    the **generated** full CAD font package (apps/app-android/font-assets, staged by
+    `scripts/build-android-ui.sh` via the shared `scripts/lib/font-package.sh`), and
+    its build outputs are ignored;
   * the NDK linker floor: `ndk`'s `nativewindow` feature is off while minSdk is 24,
     because it emits `-lnativewindow` and the NDK only ships that stub from API 26.
 
@@ -379,12 +381,13 @@ def check_native_carrier() -> list[str]:
         if fragment not in kotlin:
             problems.append(f"MainActivity.kt: native carrier wiring missing '{fragment}'")
     # The extraction marker is versioned: bumping it is how an existing install
-    # re-extracts the assets after the bundled font package gains a file (v2 adds
-    # the Noto Sans CJK SC fallback). The old unversioned marker must not return.
-    if '".yacr-assets-v2-complete"' not in kotlin:
+    # re-extracts the assets after the bundled font package changes (v2 added the
+    # Noto Sans CJK SC fallback, v3 ships the full mlightcad catalogue). The old
+    # unversioned marker must not return.
+    if '".yacr-assets-v3-complete"' not in kotlin:
         problems.append(
             "MainActivity.kt: ASSET_EXTRACT_MARKER must be the versioned "
-            "'.yacr-assets-v2-complete' so existing installs re-extract the new fonts"
+            "'.yacr-assets-v3-complete' so existing installs re-extract the full catalogue"
         )
     if ".yacr-assets-complete" in kotlin:
         problems.append(
@@ -400,15 +403,26 @@ def check_native_carrier() -> list[str]:
     gradle = read(app / "build.gradle.kts")
     if not re.search(r'ndkVersion\s*=\s*"29\.0\.13846066"', gradle):
         problems.append('build.gradle.kts: ndkVersion must be the documented "29.0.13846066"')
-    source_set = re.search(r'assets\.srcDir\("([^"]*fonts)"\)', gradle)
-    if source_set is None:
-        problems.append("build.gradle.kts: the repository fonts/ package must be an assets srcDir")
-    else:
-        fonts_dir = (app / source_set.group(1)).resolve()
-        if not (fonts_dir / "fonts.json").is_file():
+    # The APK's font assets are *generated*: `scripts/build-android-ui.sh` stages the
+    # shared package (full catalogue by default) into `apps/app-android/font-assets`,
+    # and the Gradle project exposes that directory. The directory must NOT be
+    # required to exist in a clean checkout — only the build creates it.
+    if 'assets.srcDir("../../../../font-assets")' not in gradle:
+        problems.append(
+            'build.gradle.kts: the generated font package must be an assets srcDir: '
+            'assets.srcDir("../../../../font-assets")'
+        )
+    script = read(UI_SCRIPT)
+    for fragment in (
+        'scripts/lib/font-package.sh',
+        'apps/app-android/font-assets',
+        "yacr_stage_fonts",
+        "WITH_FONTS",
+    ):
+        if fragment not in script:
             problems.append(
-                f"build.gradle.kts: assets srcDir '{source_set.group(1)}' does not resolve to the "
-                f"repository fonts/ package (tried {fonts_dir})"
+                f"scripts/build-android-ui.sh: must keep '{fragment}' "
+                "(the APK font package comes from the shared staging policy)"
             )
 
     for theme_name in ("values", "values-night"):
@@ -647,7 +661,7 @@ def main() -> int:
         return 1
     print("android-host OK: src-tauri layout, conf, Android-only tauri, shell reports, refusal contract, "
           "gesture-bar inset publisher, native SurfaceView/JNI carrier, SAF document picker/read slot, "
-          "dwg file associations, pinned NDK + fonts assets")
+          "dwg file associations, pinned NDK + generated full font package")
     return 0
 
 

@@ -213,13 +213,9 @@ Web 默认产物**不含字体**：页面在 `open_bytes` 之后按需从同源 
 提交的 osifont/Noto）再上传 Pages CDN。
 
 ```bash
-# 默认 dist-ui 无 fonts/；页面在打开后懒加载。
+# 默认会把字体包（mlightcad 全量 + 提交包）staged 到 dist-ui/fonts；
+# 页面仍然在打开后按需懒加载。离线：WITH_FONTS=0（只放提交包）。
 bash scripts/build-web-ui.sh
-
-# 本地没有 CDN 时的可选字体来源（二选一）：
-#   a) 只 staging 提交子集（本地专用，不是发布路径）：
-#      YACR_WEB_FONTS=1 bash scripts/build-web-ui.sh
-#   b) 组装完整目录并把 __YACR_FONT_BASE_URL__ 指到该基址（例如另起静态服务器）。
 
 # 单独终端运行；端口占用时更换端口。
 python3 scripts/serve-web.py --directory apps/app-web/dist-ui --port 8106

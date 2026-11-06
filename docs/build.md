@@ -196,8 +196,14 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
 ```
 
 - 产物：`apps/app-web/web/pkg/{app_web.js,app_web_bg.wasm}`（wasm-bindgen `--target web`，用于直接
-  serve `apps/app-web/web/`）与 `apps/app-web/dist/{index.html,main.js,style.css,pkg/*}`（可部署
-  bundle）。两者都被 git 忽略，**不要提交**。
+  serve `apps/app-web/web/`）与 `apps/app-web/dist/{index.html,main.js,style.css,pkg/*,fonts/*}`
+  （可部署 bundle）。两者都被 git 忽略，**不要提交**。
+- 字体：`scripts/build-web.sh` 与 `scripts/build-web-ui.sh` 默认（`WITH_FONTS=1`）用
+  `scripts/fetch-fonts.sh` 把 mlightcad 全量 + 提交包 staged 到 bundle 的 `fonts/`；`WITH_FONTS=0`
+  只放提交包（离线），`FONTS_DIR=<dir>` 复用预置目录。下载缓存默认在
+  `${XDG_CACHE_HOME:-$HOME/.cache}/yacr/fonts`，两次构建不会重复下载。页面仍然只在打开图纸后从
+  同源 `fonts/` 懒加载需要的面，`ready`/`start` 不等待字体。`web-deploy` 仍在上传前用同一脚本
+  合并/校验站点根 `fonts/`（已存在的文件跳过下载）。
 - 与桌面 `dom-canvas` 共用**同一条** wasm 构建链：`scripts/build-canvas-wasm.sh` 与
   `scripts/build-web.sh` 都经 `scripts/lib/wasm-toolchain.sh`（wasm-bindgen CLI 必须与 `Cargo.toml`
   的 `=0.2.129` 钉住**完全一致**，否则硬失败）。产物目录每次从零重建，构件缺失/为空即非零退出，
@@ -222,10 +228,10 @@ artifact，绝不谎称已签名（运行手册见 `docs/code-signing.md`）：
 
 | 入口 | 状态 |
 |---|---|
-| `scripts/package-linux-release.sh` | **可用（2026-10-17 重启）**——Flatpak bundle（`bin/yacr` + committed `fonts/`，运行时 `org.gnome.Platform//51`），产出 `target/release/dist/yacr-<version>-linux-<arch>.flatpak` + `.sha256`。CI `linux-release` 已重新启用（event-gated）；配置 `FLATPAK_GPG_*` 时对 OSTree commit 做 GPG 签名并附 `*.flatpak.gpg`，否则未签名。**未发布 Flathub** |
+| `scripts/package-linux-release.sh` | **可用（2026-10-17 重启）**——Flatpak bundle（`bin/yacr` + 字体包；默认 `WITH_FONTS=1` 在 host 侧用 `scripts/fetch-fonts.sh` 组装 mlightcad 全量并合并提交包，`WITH_FONTS=0`/`FONTS_DIR` 离线；运行时 `org.gnome.Platform//51`），产出 `target/release/dist/yacr-<version>-linux-<arch>.flatpak` + `.sha256`。CI `linux-release` 已重新启用（event-gated）；配置 `FLATPAK_GPG_*` 时对 OSTree commit 做 GPG 签名并附 `*.flatpak.gpg`，否则未签名。**未发布 Flathub** |
 | `scripts/package-windows-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 `cargo build -p app-windows --features tauri/custom-protocol`（MSVC 静态 CRT），产出 `target/x86_64-pc-windows-msvc/release/dist/*.zip` + `.sha256`；PE 机器类型/图标/非系统 DLL 检查失败即中止。CI `windows-release` 在自签 PFX 存在时用 `signtool` 对 `bin/yacr-windows.exe`、`bin/cad-cli-tools.exe` 做 Authenticode 签名并附 `bin/yacr-dev-codesign.cer`（artifact `yacr-windows-release`），否则上传 `yacr-windows-release-unsigned`；**打包/签名 ≠ 运行/视觉验收** |
 | `scripts/package-macos-release.sh` | **可用（2026-11-01 重启）**——先构建 React 前端，再 universal `cargo build -p app-macos --features tauri/custom-protocol` + `lipo`，产出 `Yacr.app` 的 `*.tar.gz` + `.sha256`；Mach-O 只允许系统库，`CFBundleIdentifier=io.github.zenglanmu.yacr`。**ad-hoc 签名（`MACOS_SIGN_IDENTITY` 可覆盖）/未公证** |
-| `scripts/build-android.sh` | **可用（2026-10-28 起；2026-11-01 起构建原生 `native-below` 载体）**——`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome）再 Gradle；**本地 release APK 默认未签名**。CI 只保留 `android-release`（release；自持 keystore 签名 `zipalign` 后的 APK；keystore 缺失时 job 失败，不产出 unsigned）；debug APK 仅本地 `--debug` 构建 |
+| `scripts/build-android.sh` | **可用（2026-10-28 起；2026-11-01 起构建原生 `native-below` 载体）**——`tauri android build --apk`，先跑 `scripts/build-android-ui.sh`（`YACR_RUNTIME=android` chrome + 字体包 → `apps/app-android/font-assets`）再 Gradle；**本地 release APK 默认未签名**。CI 只保留 `android-release`（release；自持 keystore 签名 `zipalign` 后的 APK；keystore 缺失时 job 失败，不产出 unsigned）；debug APK 仅本地 `--debug` 构建 |
 
 平台包状态（源码级）：
 

@@ -24,7 +24,13 @@
 #                           GitHub Actions, where jsDelivr throttles shared IPs)
 #   FONT_RETRIES            attempts per source before falling back (default: 3)
 #   FONTS                   optional space-separated subset (same as positional args)
-#   FORCE                   1 to re-download files that already exist
+#   FORCE                   1 to re-download files that already exist (and refresh
+#                           the cache entry)
+#   FONT_CACHE_DIR          shared download cache (default:
+#                           ${XDG_CACHE_HOME:-$HOME/.cache}/yacr/fonts). A non-empty
+#                           cached face is copied instead of re-downloaded, so
+#                           repeated packaging runs (and the two Web bundles) reuse
+#                           one download. An explicitly empty value disables it.
 #
 # Licensing: the mlightcad fonts are third-party and are NOT committed to this
 # repository; downloading and redistributing them is the deployer's
@@ -38,6 +44,9 @@ shift || true
 export FONT_BASE_URL="${FONT_BASE_URL:-https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/fonts}"
 export FONT_FALLBACK_BASE_URL="${FONT_FALLBACK_BASE_URL:-https://raw.githubusercontent.com/mlightcad/cad-data/main/fonts}"
 export FONT_RETRIES="${FONT_RETRIES:-3}"
+# `-` (not `:-`): an explicitly empty FONT_CACHE_DIR disables the shared cache.
+FONT_CACHE_DIR="${FONT_CACHE_DIR-${XDG_CACHE_HOME:-$HOME/.cache}/yacr/fonts}"
+export FONT_CACHE_DIR
 
 if [ -z "${PYTHON:-}" ]; then
   for candidate in python3 python; do
@@ -58,24 +67,28 @@ fi
 
 mkdir -p "$DEST"
 
-"$PYTHON" - "$FONT_BASE_URL" "$FONT_FALLBACK_BASE_URL" "$FONT_RETRIES" "$DEST" <<'PY'
+"$PYTHON" - "$FONT_BASE_URL" "$FONT_FALLBACK_BASE_URL" "$FONT_RETRIES" "$DEST" "$FONT_CACHE_DIR" <<'PY'
 import concurrent.futures
 import json
 import os
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.request
 
-primary, fallback, retries, dest = (
+primary, fallback, retries, dest, cache = (
     sys.argv[1].rstrip("/"),
     sys.argv[2].rstrip("/"),
     int(sys.argv[3]),
     sys.argv[4],
+    sys.argv[5].rstrip("/") if len(sys.argv) > 5 else "",
 )
 bases = [base for base in (primary, fallback) if base]
 only = set(os.environ.get("FONTS", "").split())
 force = os.environ.get("FORCE", "") == "1"
+if cache:
+    os.makedirs(cache, exist_ok=True)
 
 
 def fetch(path: str):
@@ -99,6 +112,29 @@ def fetch(path: str):
     raise RuntimeError("; ".join(errors))
 
 
+def write_atomic(path: str, blob: bytes) -> None:
+    """Write through a temp file: a killed build never leaves a truncated face."""
+    directory = os.path.dirname(path) or "."
+    handle_fd, temporary = tempfile.mkstemp(
+        dir=directory, prefix=".yacr-font-", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(handle_fd, "wb") as handle:
+            handle.write(blob)
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def safe_name(name: str) -> bool:
+    """A catalogue entry must be a bare file name (never a path)."""
+    return bool(name) and "/" not in name and "\\" not in name and name not in (".", "..")
+
+
 catalog_bytes, catalog_base = fetch("fonts.json")
 catalog = json.loads(catalog_bytes)
 entries = [e for e in catalog if isinstance(e, dict) and str(e.get("file", "")).strip()]
@@ -120,21 +156,38 @@ with open(os.path.join(dest, "fonts.json"), "wb") as handle:
 
 def download(entry):
     name = entry["file"]
+    if not safe_name(name):
+        return name, 0, "FAIL", f"invalid catalogue file name: {name!r}"
     target = os.path.join(dest, name)
+    cached = os.path.join(cache, name) if cache else None
     if os.path.exists(target) and not force:
-        return name, os.path.getsize(target), "cached", None
+        return name, os.path.getsize(target), "present", None
+    if cached and not force:
+        try:
+            with open(cached, "rb") as handle:
+                blob = handle.read()
+        except OSError:
+            blob = b""
+        if blob:
+            write_atomic(target, blob)
+            return name, len(blob), "cache", cached
     try:
         blob, base = fetch(name)
     except Exception as exc:  # surfaced, never folded into a success
         return name, 0, "FAIL", str(exc)
-    with open(target, "wb") as handle:
-        handle.write(blob)
+    if cached:
+        # Refresh the shared cache too, so the next run/destination is offline.
+        write_atomic(cached, blob)
+    write_atomic(target, blob)
     return name, len(blob), "ok", base
 
 
 total = 0
 failures = []
 sources = {}
+from_cache = 0
+already_staged = 0
+downloaded = 0
 with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
     for name, size, status, detail in pool.map(download, entries):
         total += size
@@ -142,13 +195,23 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
             failures.append(f"{name}: {detail}")
             print(f"  {status:<24} {name}", file=sys.stderr)
         else:
-            if status == "ok":
+            if status == "cache":
+                from_cache += 1
+            elif status == "ok":
+                downloaded += 1
                 sources[detail] = sources.get(detail, 0) + 1
+            else:
+                already_staged += 1
             print(f"  {status:<24} {name} ({size} bytes)")
     if len(entries) == 0:
         print("  (no entries matched FONTS)", file=sys.stderr)
 
 print(f"fonts: {len(entries)} files, {round(total / 1024 / 1024, 2)} MiB -> {dest}")
+if cache:
+    print(
+        f"font cache: {cache} "
+        f"({from_cache} reused, {already_staged} already staged, {downloaded} downloaded)"
+    )
 if sources:
     for base, count in sorted(sources.items()):
         print(f"font source: {base} ({count} files)")

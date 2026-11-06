@@ -37,12 +37,14 @@
 #   SKIP_BUILD=1       deploy the existing bundle without rebuilding it
 #   SKIP_FONTS=1       reuse an existing $DIST/fonts instead of downloading it
 #
-# Fonts are **not** part of either build artifact: the page fetches the faces it
-# needs lazily, after a document opens, from same-origin `fonts/`. This script
-# therefore assembles the full CDN package into `$DIST/fonts` with
-# `scripts/fetch-fonts.sh` (mlightcad catalogue + faces, plus the committed
-# osifont/Noto) before anything is validated or uploaded — for both bundle kinds,
-# so the site root always serves `fonts/`.
+# Fonts: the local build scripts now stage the full package under the bundle's
+# own `fonts/` by default, so an uploaded bundle may already carry it. The page
+# still fetches the faces it needs lazily, after a document opens, from
+# same-origin `fonts/`. This script keeps running `scripts/fetch-fonts.sh` as the
+# **authoritative** merge/verification step at the site root (mlightcad catalogue
+# + faces, plus the committed osifont/Noto): it skips files that already exist,
+# so a pre-staged bundle is completed rather than duplicated, and `SKIP_FONTS=1`
+# keeps its meaning (reuse an existing `$DIST/fonts` with no download).
 #
 # Honesty rules:
 #   * every expected artifact is asserted non-empty before anything is uploaded,
@@ -71,10 +73,11 @@ fi
 
 # --- the CDN font package --------------------------------------------------
 
-# Neither bundle carries fonts: the page loads them lazily from same-origin
-# `fonts/` after a document opens. Assemble the **full** package (mlightcad
-# catalogue + every face, merged with the committed osifont/Noto) at the site
-# root, so both bundle kinds publish the same `fonts/` URL space.
+# Both bundle kinds may already carry `fonts/` from their build. This step stays
+# authoritative: assemble the **full** package (mlightcad catalogue + every face,
+# merged with the committed osifont/Noto) at the site root, skipping files that
+# already exist, so both bundle kinds publish the same complete `fonts/` URL
+# space.
 FONT_DEST="$DIST/fonts"
 NOTO_FILE="NotoSansCJKsc-Regular.otf"
 if [ "${SKIP_FONTS:-0}" = "1" ]; then

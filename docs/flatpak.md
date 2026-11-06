@@ -16,8 +16,14 @@
 - **打包方式：预构建二进制**。`scripts/package-linux-release.sh` 先构建 React 前端
   （`apps/desktop-ui`：`npm ci` + `npm run build`），再以
   `cargo build --release --locked -p app-linux --bin yacr --features tauri/custom-protocol` 构建
-  宿主，然后把 `bin/yacr` 与 **已提交的** `fonts/` 落到 `target/flatpak/payload`；manifest 以
+  宿主，然后把 `bin/yacr` 与字体包落到 `target/flatpak/payload`；manifest 以
   `type: dir` source 安装进 `/app`。**沙箱内不编译、不联网下载字体**。
+- **字体包**：默认 `WITH_FONTS=1` 在 **host 侧**调用 `scripts/fetch-fonts.sh`，把
+  `mlightcad/cad-data` 全量目录与提交的 `fonts/`（osifont + Noto Sans CJK SC）合并进 payload
+  （需要网络）；`FONTS_DIR=<dir>` 复用预置目录（CI 缓存/离线），`WITH_FONTS=0` 只放提交包
+  （离线）。下载失败是硬失败，**不产出“看起来有字体”的空包**。同一个暂存目录还通过
+  `YACR_FONT_PACKAGE_DIR` 交给 Vite，嵌入二进制里的 `dist/fonts`（X11/XWayland 的
+  `dom-canvas` 页面从 `/fonts/` 懒加载）与 `/app/fonts` 因此是**同一份**全量包。
 - **UI 不单独发运**：`ui/dist` 在构建时**嵌入**二进制；`--features tauri/custom-protocol` 是**必需**
   的（否则二进制指向 Vite dev server，无法独立运行）。脚本按 `ui/dist/assets` 里的 **hashed 文件名**
   验证嵌入；**不**用 `http://localhost:1420` 当判据（嵌入的 `tauri.conf.json` 在 dev 与 release 都带
@@ -65,6 +71,10 @@
   脚本的 `FLATPAK_REMOTE_DEPS` / `FLATPAK_REMOTE_BUILD` 默认即 `flathub-mirror`，可用别处配置的远端覆盖。
   摘要签名以官方 key 校验通过（subkey `562702E9E3ED7EE8`，属 Flathub Repo Signing Key
   `4184DD4D907A7CAE`）⇒ 这是**传输镜像**，不是替代信任根。
+- **字体下载（打包期，host 侧）**：默认 `WITH_FONTS=1` 访问 `FONT_BASE_URL`（默认 jsDelivr）与
+  `FONT_FALLBACK_BASE_URL`（默认 raw.githubusercontent.com）。下载按文件缓存在 `FONT_CACHE_DIR`
+  （默认 `${XDG_CACHE_HOME:-$HOME/.cache}/yacr/fonts`），重复打包复用；`FORCE=1` 刷新缓存。
+  离线或受限网络用 `FONTS_DIR=<已组装目录>` 或 `WITH_FONTS=0`（只放提交包），二者都不联网。
 
 ## 3. 构建 / 安装 / 运行
 
@@ -73,8 +83,12 @@
 # 用本机配置的远端（脚本默认 flathub-mirror；有官方 flathub 远端时也可用 flathub）
 flatpak install --user <remote> org.gnome.Platform//51 org.gnome.Sdk//51
 
-# 打包（前端 + release 宿主 + flatpak-builder + build-bundle）
+# 打包（前端 + release 宿主 + 字体全量组装 + flatpak-builder + build-bundle）
 scripts/package-linux-release.sh
+
+# 离线 / 预置字体包
+WITH_FONTS=0 scripts/package-linux-release.sh            # 只放提交的 fonts/
+FONTS_DIR=/path/to/fonts scripts/package-linux-release.sh  # 复用已组装目录，打包步骤免联网
 
 # 安装与运行
 flatpak install --user target/release/dist/yacr-0.1.2-linux-x86_64.flatpak
@@ -88,6 +102,9 @@ bundle 是未签名的，CI summary 会明确写 `UNSIGNED`。
 
 - 脚本接受 `FLATPAK_REMOTE_DEPS` / `FLATPAK_REMOTE_BUILD`（默认 `flathub-mirror`）；缺少
   `cargo`/`node`/`npm`/`flatpak`/`flatpak-builder`/`python3` 或 runtime/SDK 时**非零失败**，不产出包。
+- 字体：默认 `WITH_FONTS=1` 在 host 侧跑 `scripts/fetch-fonts.sh`（需网络，体量随全量目录增长）；
+  `WITH_FONTS=0` 只放提交的 `osifont` + `Noto Sans CJK SC`；`FONTS_DIR=<dir>` 用已组装目录
+  （目录必须含 `fonts.json`），此时打包步骤不联网。非法 `WITH_FONTS` 值直接失败。
 - 若本机没有系统 `flatpak-builder`，可用 `flatpak run --command=flatpak-builder org.flatpak.Builder`
   的包装脚本（脚本只要求 `flatpak-builder` 在 `PATH` 上）。
 - 脚本自检包括：前端产物存在、**hashed asset 已嵌入二进制**、payload 的 `fonts/fonts.json` 存在；
@@ -97,6 +114,8 @@ bundle 是未签名的，CI summary 会明确写 `UNSIGNED`。
 
 > **历史 app-id 说明**：下表是 2026-10-17 的实测记录，当时 app-id 仍为 `dev.yacr.app`。
 > 当前 app-id 已统一为 `io.github.zenglanmu.yacr`；历史命令/输出不改写，避免伪造证据。
+> 该轮 payload 字体为提交包；当前默认 `WITH_FONTS=1` 会额外打入 mlightcad 全量目录，bundle 体积
+> 会明显大于下表，下表数字**不可**当作当前产物体积。
 
 | 项 | 结果（实测） |
 |---|---|

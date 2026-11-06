@@ -44,7 +44,7 @@ cad-host                                     平台无关宿主编排（不依�
   ↑
 cad-ui-core                                  wire protocol、逻辑布局、CAD 会话、shell、i18n
   ↑
-apps/app-linux（React + Tauri）   apps/app-{windows,macos,android,web}（NOT IMPLEMENTED 占位）
+apps/app-linux（React + Tauri）   apps/app-{windows,macos,android}（Tauri 宿主）   apps/app-web（wasm 浏览器载体）
 ```
 
 **必须保持的边界**（详见 `docs/architecture.md`、`docs/core-invariants.md`）：
@@ -156,7 +156,10 @@ flatpak install --user target/release/dist/yacr-<version>-linux-<arch>.flatpak
 flatpak run io.github.zenglanmu.yacr --open /absolute/drawing.dwg
 ```
 
-它构建单文件 Flatpak bundle（`bin/yacr` + committed `fonts/`，runtime `org.gnome.Platform//51`）。
+它构建单文件 Flatpak bundle（`bin/yacr` + 字体包，runtime `org.gnome.Platform//51`）。默认
+（`WITH_FONTS=1`）在 host 侧用 `scripts/fetch-fonts.sh` 把 mlightcad 全量目录与提交的
+`fonts/`（`osifont` + `Noto Sans CJK SC`）合并进 payload，图纸能解析的不止提交的两个面；
+`WITH_FONTS=0` 只放提交包，`FONTS_DIR=<dir>` 复用已组装目录，两者打包时都不联网。
 **不是**发布通道：未上 Flathub；CI 的 `linux-release` job 只在 `v*` tag 或手工 dispatch 时运行，
 只上传 workflow artifact。见 `docs/flatpak.md`。
 
@@ -193,6 +196,81 @@ cargo test --workspace --locked -- --test-threads=1   # GPU/CLI 用例串行跑
 日常开发只验证改动范围（改动 crate 的编译/测试/fmt/clippy）；上述全量门禁用于明确要求与发版验收。
 未运行一律标注 `NOT RUN`，绝不用旧证据冒充当前结果。
 
+### 各平台打包与运行（本地）
+
+所有打包入口都是真实入口：缺前置条件时**非零失败**，不产出半成品、不静默回退。所有前端构建共用
+前置：`plugins/tch` submodule（`git submodule update --init --recursive`；缺 `dist/plugins/tch.js`
+即硬失败）、Node/npm 与钉住的 Rust 工具链。字体统一来自 `scripts/fetch-fonts.sh`：`WITH_FONTS=1`
+（默认）下载 mlightcad 全量目录，`WITH_FONTS=0` 离线只放提交包，`FONTS_DIR=<dir>` 复用预置目录。
+下载按文件缓存到 `${XDG_CACHE_HOME:-$HOME/.cache}/yacr/fonts`（`FONT_CACHE_DIR` 可覆盖；显式空值
+关闭缓存；`FORCE=1` 刷新），重复打包不会重复下载。**产物不等于运行 / GPU / 设备 / 像素验收。**
+
+| 平台 | 命令（仓库根目录） | 产物 |
+|---|---|---|
+| Linux（Flatpak） | `bash scripts/package-linux-release.sh` | `target/release/dist/yacr-<version>-linux-<arch>.flatpak` + `.sha256` |
+| Windows（zip） | `bash scripts/package-windows-release.sh` | `target/<target>/release/dist/yacr-<version>-windows-x86_64.zip` + `.sha256` |
+| macOS（tar.gz） | `bash scripts/package-macos-release.sh` | `target/macos/<arch>/dist/yacr-<version>-macos-<arch>.tar.gz` + `.sha256` |
+| Android（APK） | `bash scripts/build-android.sh --release --target aarch64` | `apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk` |
+| Web（bundle） | `bash scripts/build-web.sh` / `bash scripts/build-web-ui.sh` | `apps/app-web/dist/` / `apps/app-web/dist-ui/` |
+
+Linux 是唯一可运行 GUI；Flatpak 的打包、安装与运行命令见上文
+[本地 Flatpak bundle（Linux）](#本地-flatpak-bundlelinux)。
+
+**Windows zip。** 在 Windows 上用原生 MSVC + 普通 `cargo`（静态 CRT）；在本机 Linux 上可经
+MinGW-w64 或 `cargo xwin` 交叉构建：
+
+```bash
+bash scripts/package-windows-release.sh                                  # Windows（MSVC）
+TARGET=x86_64-pc-windows-gnu bash scripts/package-windows-release.sh     # Linux + MinGW-w64
+CARGO_XWIN=1 TARGET=x86_64-pc-windows-msvc bash scripts/package-windows-release.sh  # Linux + xwin
+```
+
+本地 zip 是**未签名**的（`WITH_FONTS=1` 联网抓完整字体目录，`0` 只用已提交的 `fonts/` 离线打包）。
+CI 走签名路径：`SKIP_ZIP=1` → `signtool` →
+`bash scripts/finalize-windows-release.sh --signed <stage> <dist>`。运行
+`bin/yacr-windows.exe --open <dwg>`；缺 WebView2 时打印诊断并退出码 5。
+
+**macOS tar.gz。** 必须在 macOS 上运行——Mach-O 需要 Apple SDK/链接器，Linux 无法交叉产出：
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin   # universal（默认）
+bash scripts/package-macos-release.sh                        # universal
+MACOS_ARCH=arm64 bash scripts/package-macos-release.sh       # 或 x86_64
+```
+
+默认 **ad-hoc 签名**（`MACOS_SIGN_IDENTITY`，缺省 `-`），**不公证**；换机首次启动需
+`xattr -dr com.apple.quarantine Yacr.app` 或右键 → 打开。运行
+`open ./Yacr.app --args --open /absolute/drawing.dwg`。
+
+**Android APK。** 需要 `ANDROID_HOME`、`NDK_HOME`（`ndk/29.0.13846066`）与 `JAVA_HOME` 指向 JDK 17：
+
+```bash
+bash scripts/build-android.sh --release --target aarch64   # 真机；release APK 未签名
+bash scripts/build-android.sh --debug   --target x86_64    # 本地模拟器；debug 签名
+adb install -r apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk
+```
+
+本地 release APK 需先用 `apksigner` 签名才能安装；CI 是唯一会签 release APK 的地方。
+
+脚本先跑 `scripts/build-android-ui.sh`（`YACR_RUNTIME=android`）再跑 Gradle。该步骤还会把 APK
+字体包组装到生成的 `apps/app-android/font-assets/`（默认 `scripts/fetch-fonts.sh` 的 mlightcad
+全量 + 提交包；`WITH_FONTS=0` 只放提交包，`FONTS_DIR=<dir>` 复用预置目录），Gradle 把它作为
+assets；该 `native-below` 载体**不实例化** wasm `dom-canvas` 会话。
+
+**Web bundle。** 两份互不覆盖的产物：
+
+```bash
+bash scripts/build-web.sh       # 独立 vanilla harness → apps/app-web/dist
+bash scripts/build-web-ui.sh    # 共享 React chrome → apps/app-web/dist-ui
+python3 scripts/serve-web.py --directory apps/app-web/dist-ui --port 8090
+# 浏览器打开 http://127.0.0.1:8090/ ；file:// 不能实例化 wasm
+```
+
+两份 bundle 默认都把字体包 staged 到 `fonts/`：`WITH_FONTS=1` 用 `scripts/fetch-fonts.sh` 组装
+mlightcad 全量（需网络），`WITH_FONTS=0` 只放提交包（离线），`FONTS_DIR=<dir>` 复用预置目录。
+页面仍在打开图纸后从同源 `fonts/` 懒加载。wasm 构建另需 `wasm32-unknown-unknown` target 与钉住的
+`wasm-bindgen 0.2.129`。
+
 ### 其他平台
 
 Windows/macOS 为真实宿主但仅编译/合同证据；Android 为原生 `native-below` 载体（设备 NOT VERIFIED）；
@@ -208,10 +286,10 @@ Web 的 wasm 会话真实、浏览器 smoke 为 SwiftShader 冒烟。发布/打�
 | 平台 | 宿主 | 当前实际状态 |
 |---|---|---|
 | **Linux 桌面（首选，当前）** | `apps/app-linux`（`yacr`） | React/Tauri chrome + 原生 GTK/wgpu CAD 分区。**仅 OPEN 与 FIT + 原生导航接线**，其余控件一律显式禁用并标注原因。已做有界本地验收：React 迁移 P6 gate **ACCEPT-WITH-FIXES**（合成夹具上的硬件 Vulkan 真实窗口 smoke）、原生 Wayland W3 **ACCEPT-WITH-LIMITATIONS**（GNOME/Mutter + Quadro P620、`scale=1`）——见 `docs/validation-react-linux-migration-2026-10-16.md` 与 `docs/validation-native-wayland-2026-10-16.md`。**仅有界本地 Linux 验收**，**不是**完整 CAD 产品/跨平台/vendor/golden/性能验收。 |
-| **Windows 桌面** | `apps/app-windows`（`yacr-windows`） | **NOT IMPLEMENTED** 失败桩（无 Tauri 依赖；打印诊断并非零退出）。CI 只编译（`windows-check`）；无可运行 GUI。 |
-| **macOS 桌面** | `apps/app-macos`（`yacr-macos`） | **NOT IMPLEMENTED** 失败桩。CI 只编译（`macos-check`）；无可运行 GUI。 |
+| **Windows 桌面** | `apps/app-windows`（`yacr-windows`） | **真实 Tauri/WebView2 `native-below` 宿主**：透明 WebView 覆盖在 Win32 子 HWND 之上。CI 编译（`windows-check`）并打包 release zip（`windows-release`，event-gated；自签 Authenticode 或 `-unsigned`）。视觉/运行时/真 Windows **NOT VERIFIED**（Wine 只覆盖缺 WebView2 的拒绝合同，退出码 5）；打包不等于运行验收。 |
+| **macOS 桌面** | `apps/app-macos`（`yacr-macos`） | **真实 Tauri 2 宿主，仅编译**：透明 WKWebView 在上、原生 CAD 子 `NSView`（wgpu/Metal）在下。CI 编译（`macos-check`）并打包 ad-hoc 签名、未公证的 universal tarball（`macos-release`，event-gated）。窗口/Metal/层序/DPI/对话框/像素一律 **NOT VERIFIED**；打包不等于运行验收。 |
 | **Android** | `apps/app-android` | **原生 `native-below` 载体**：Tauri WebView 跑共享 React chrome，原生 Rust `CadSession` 拥有 `cad-db`，wgpu(Vulkan) 呈现到 WebView 下方的 `SurfaceView`。**仅编译级证据**——无设备/模拟器运行、无 Vulkan adapter、无像素/旋转/生命周期、无 JNI 运行时链接（全部 NOT VERIFIED）。v1 无开图/保存、无 popup host、无持久配置，从内置 demo 图纸启动。见 `docs/android-host.md`。 |
-| **Web** | `apps/app-web` | **NOT IMPLEMENTED** 占位（UI 已退役；wasm 入口返回错误）。 |
+| **Web** | `apps/app-web` | **浏览器载体（`dom-canvas`）**：wasm `CadSession` + DOM canvas；OPEN 走页面上传，SAVE/PLOT 走浏览器下载（DXF/SVG/PDF，不回写 DWG）。两份 bundle 默认把全量字体包 staged 到 `fonts/`（`WITH_FONTS=0`/`FONTS_DIR` 离线）；打开图纸后仍只从同源 `fonts/` 懒加载需要的面；`cad_fonts`/`FONTS` 报告真实加载。仅有界本地证据（无头 Chromium，**软件渲染**）——无真实 GPU/像素/设备验收。 |
 | **无头 CLI** | `cad-cli-tools` | 保留：经共享应用路径无头打开/出图。 |
 
 近期（2026-10-17/18）在真实使用下打磨了渲染与拾取路径：CPU 拾取接入场景空间索引（ADR 0012，S4；

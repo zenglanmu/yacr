@@ -58,7 +58,11 @@ suffix commit 的 `commit_us` p50 从 19.95 ms 降到 2.16 ms，`frame_total` p5
 - `cad-app` 提供纯函数
   `cursor_geometry(cursor, viewport_bounds, view_scale, pickbox_logical_pixels, crosshair_percent)
   -> Option<TransientCursor>`，从现有 `cursor_overlay` 的几何逻辑抽出；3D/无 bounds/
-  不可投影时返回 `None`（显式空，不伪造）。
+  不可投影时返回 `None`（显式空，不伪造）。其中 `crosshair_percent` 采用 AutoCAD `CURSORSIZE`
+  语义：**总跨度 = 百分比 × 视图尺寸**，以光标为中心分成**等长两臂**并裁到视图边缘；默认 **5**，
+  `100` 为整个视图（位级等于历史全视图十字）。`pickbox_logical_pixels` 是配置的
+  `view.pickbox.sizePixels`（`1..=50`，默认 3；AutoCAD 的 `0`＝关闭拾取框未建模，故显式拒绝），
+  不是 `TolerancePolicy::default()` 常量。
 - `cad-engine` 只做传输：`RenderSessionHandle::set_cursor_transient(Option<TransientCursor>)`
   更新 runtime 状态并标脏；不进入 `OverlayInputs`、不触发 preparation。
 - `cad-host::sync_render` 计算世界坐标/plot 参数并喂给上述入口；`ClearCursor`/`pointer_leave`

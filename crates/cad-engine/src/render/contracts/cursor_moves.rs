@@ -46,9 +46,9 @@ fn view_bounds() -> (Point3, Point3) {
 }
 
 /// The renderer transient geometry a host would feed for a 2D view: the same
-/// `cursor_geometry` call the host makes, at 20 % crosshair arms so the drawn
-/// pixels are local to the cursor (a full-view crosshair would cover every
-/// probe).
+/// `cursor_geometry` call the host makes, at 20 % of the viewport dimension total
+/// (10 % per arm) so the drawn pixels are local to the cursor (a full-view
+/// crosshair would cover every probe).
 #[cfg(not(target_arch = "wasm32"))]
 fn cursor_at(world: [f64; 2]) -> cad_scene::TransientCursor {
     let (min, max) = view_bounds();

@@ -312,7 +312,7 @@ export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[
     wire: 'pickboxSize',
     key: 'pickboxSize',
     min: 1,
-    max: 20,
+    max: 50,
     unitKey: 'options.unit.pixel',
     labelKey: 'options.field.pickboxSize',
     helpKey: 'options.help.pickboxSize',

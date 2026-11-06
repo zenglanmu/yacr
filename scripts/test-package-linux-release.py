@@ -30,6 +30,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts/package-linux-release.sh"
+FONT_LIB = ROOT / "scripts/lib/font-package.sh"
 FLATPAK_DIR = ROOT / "packaging/flatpak"
 MANIFEST = FLATPAK_DIR / "io.github.zenglanmu.yacr.yml"
 DESKTOP = FLATPAK_DIR / "io.github.zenglanmu.yacr.desktop"
@@ -138,6 +139,15 @@ def check_script(text: str) -> list[str]:
         ".flatpak.gpg",
         "ostree",
         "ostree.gpgsigs",
+        # Fonts: the full mlightcad catalogue is assembled on the host through
+        # the shared policy/helper; WITH_FONTS=0 / FONTS_DIR are the explicit
+        # offline and prepared-directory paths, and the same staged directory is
+        # embedded into the UI bundle for X11/XWayland.
+        "scripts/lib/font-package.sh",
+        "yacr_stage_fonts",
+        "YACR_FONT_PACKAGE_DIR",
+        "WITH_FONTS",
+        "FONTS_DIR",
     )
     for fragment in required:
         if fragment not in text:
@@ -235,16 +245,30 @@ class PackageLinuxReleaseContracts(unittest.TestCase):
         self.assertIn(f"command: {BINARY}", self.manifest_text)
         self.assertIn(f"<binary>{BINARY}</binary>", self.metainfo_text)
 
-    def test_payload_stages_the_committed_cjk_fallback(self) -> None:
-        # The Flatpak payload is the committed fonts/ package copied whole, so
-        # the bundled missing-CJK face must be in that catalogue and on disk.
+    def test_payload_stages_the_font_catalogue(self) -> None:
+        # One staged package feeds both the embedded UI bundle (X11/XWayland
+        # dom-canvas) and /app/fonts. The bundled missing-CJK face must be in the
+        # committed catalogue and on disk.
         entries = json.loads(
             (ROOT / "fonts" / "fonts.json").read_text(encoding="utf-8")
         )
         self.assertIn(CJK_FALLBACK, {entry.get("file") for entry in entries})
         self.assertTrue((ROOT / "fonts" / CJK_FALLBACK).is_file())
         self.assertIn("cp -a fonts/. /app/fonts/", self.manifest_text)
-        self.assertIn('cp -a fonts/. "${PAYLOAD}/fonts/"', self.script_text)
+        self.assertIn('yacr_stage_fonts "$FONT_STAGE"', self.script_text)
+        self.assertIn('cp -a -- "${FONT_STAGE}/." "${PAYLOAD}/fonts/"', self.script_text)
+        self.assertIn('export YACR_FONT_PACKAGE_DIR=', self.script_text)
+        # The embedded package must be ready before the Vite build that copies it.
+        stage_at = self.script_text.find('yacr_stage_fonts "$FONT_STAGE"')
+        build_at = self.script_text.find("npm run build", stage_at if stage_at >= 0 else 0)
+        self.assertGreaterEqual(stage_at, 0, "no font staging call in the packaging script")
+        self.assertGreater(build_at, stage_at, "fonts must be staged before the UI build")
+
+    def test_font_helper_rejects_invalid_inputs(self) -> None:
+        lib = FONT_LIB.read_text(encoding="utf-8")
+        self.assertIn("WITH_FONTS must be 0 or 1", lib)
+        self.assertIn("FONTS_DIR must contain fonts.json", lib)
+        self.assertIn("no font face files landed", lib)
 
 
 if __name__ == "__main__":

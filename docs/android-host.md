@@ -201,8 +201,11 @@ apps/app-android/
   `application/dwg`、`application/x-dwg`、`application/autocad_dwg`、`application/octet-stream`）。
   `AndroidManifest.xml` 里的 `tauri-file-associations. AUTO-GENERATED` 块由 tauri-build 在构建期注入；
   **改关联请改配置**，不要手写 manifest。
-- Gradle `ndkVersion = "29.0.13846066"`（脚本断言）。仓库 `fonts/` 作为 assets `srcDir` 打包
-  （`fonts.json` + 字体文件）。
+- Gradle `ndkVersion = "29.0.13846066"`（脚本断言）。`scripts/build-android-ui.sh` 把字体包
+  staged 到**生成的** `apps/app-android/font-assets`，Gradle 把该目录作为 assets `srcDir` 打包：
+  默认 `WITH_FONTS=1` 是 mlightcad 全量 + 提交包，`WITH_FONTS=0` 只放提交包（离线），
+  `FONTS_DIR=<dir>` 复用预置目录。`MainActivity` 按 `fonts.json` 的 `file` 列表逐项解压到
+  `filesDir/fonts`（不再按扩展名猜测），标记 `.yacr-assets-v3-complete`。
 - **NDK 链接下限**：`ndk` crate 的 `nativewindow` feature 会无条件链接 `-lnativewindow`，
   而 NDK 只在 **API ≥ 26** 提供该 stub；本应用 `minSdkVersion = 24`，所以该 feature 必须保持
   **关闭**（`scripts/test-android-host.py` 断言）。实际使用的 `NativeWindow::from_surface`、
@@ -299,7 +302,8 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 - `python3 scripts/test-android-host.py`：静态契约。除既有的 workspace/manifest/config/UI 产物/
   `.gitignore` 检查外，`check_native_carrier` 断言：4 个冻结 JNI 签名、`SurfaceView` 在 WebView 父容器
   index 0、`setZOrderOnTop(false)`/`setZOrderMediaOverlay(false)`、holder 回调、
-  `nativeAssetsReady(...)`、`ndkVersion = "29.0.13846066"`、`fonts/` 作为 assets `srcDir`、透明主题、
+  `nativeAssetsReady(...)`、`ndkVersion = "29.0.13846066"`、生成的 `font-assets` 作为 assets
+  `srcDir`（且 `scripts/build-android-ui.sh` 经共享 `scripts/lib/font-package.sh` staged）、透明主题、
   `configChanges` 保留 `orientation|screenSize|smallestScreenSize|uiMode`；
   `check_document_picker_wiring` 另外断言 SAF 打开/另存、五个 `document*` 实例方法、外部
   `onNewIntent`、`.dwg` 关联 mime 集与 ProGuard keep 行。**无变异即失败**：把表面改成 on-top、去掉一个

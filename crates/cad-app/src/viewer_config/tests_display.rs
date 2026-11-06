@@ -83,11 +83,14 @@ fn hex_colour_decodes_to_the_renderers_linear_channels() {
 }
 
 #[test]
-fn display_defaults_are_black_backgrounds_and_a_full_crosshair() {
+fn display_defaults_are_black_backgrounds_and_a_five_percent_crosshair() {
     let config = ViewerConfig::default();
     assert_eq!(config.view.background.model.to_hex(), "#000000");
     assert_eq!(config.view.background.paper.to_hex(), "#000000");
-    assert_eq!(config.view.crosshair.size_percent, 100);
+    assert_eq!(
+        config.view.crosshair.size_percent, 5,
+        "AutoCAD CURSORSIZE initial value"
+    );
     // The pickbox/aperture defaults are the values this project has always used,
     // so a configuration that never set them changes no geometry.
     assert_eq!(config.view.pickbox.size_pixels, 3);
@@ -135,9 +138,9 @@ fn the_default_policy_is_bit_identical_to_the_domain_default() {
 
 #[test]
 fn the_pickbox_and_aperture_sizes_are_validated_not_clamped() {
-    // AutoCAD's own option ranges: pickbox 1..=20, aperture 1..=50. The bounds are
-    // accepted as-is...
-    for pixels in [1, 20] {
+    // AutoCAD's own option ranges: pickbox 1..=50 (0 deliberately rejected),
+    // aperture 1..=50. The bounds are accepted as-is...
+    for pixels in [1, 50] {
         let mut store = ViewerConfigStore::default();
         store
             .update_config(json!({ "view": { "pickbox": { "sizePixels": pixels } } }))
@@ -153,7 +156,7 @@ fn the_pickbox_and_aperture_sizes_are_validated_not_clamped() {
     }
 
     // ...and anything outside is a path-named refusal, never a clamped value.
-    for pixels in [0, 21, 400] {
+    for pixels in [0, 51, 400] {
         let mut store = ViewerConfigStore::default();
         let error = store
             .update_config(json!({ "view": { "pickbox": { "sizePixels": pixels } } }))
@@ -234,7 +237,7 @@ fn the_crosshair_percentage_is_validated_not_clamped() {
             .update_config(json!({ "view": { "crosshair": { "sizePercent": percent } } }))
             .unwrap_err();
         assert_eq!(error.path, "view.crosshair.sizePercent");
-        assert_eq!(store.effective().view.crosshair.size_percent, 100);
+        assert_eq!(store.effective().view.crosshair.size_percent, 5);
     }
     for percent in [1, 50, 100] {
         let mut store = ViewerConfigStore::default();
@@ -259,7 +262,7 @@ fn a_non_integer_crosshair_percentage_is_refused() {
             store.update_config(patch).is_err(),
             "a non-integer percentage must be refused"
         );
-        assert_eq!(store.effective().view.crosshair.size_percent, 100);
+        assert_eq!(store.effective().view.crosshair.size_percent, 5);
     }
 }
 
@@ -336,7 +339,7 @@ fn an_allowed_preference_fills_the_display_leaves() {
     // An out-of-range preference is refused by the same schema validation, never
     // clamped, and leaves the effective config untouched.
     let error = store
-        .apply_user_preference(json!({ "view": { "pickbox": { "sizePixels": 21 } } }))
+        .apply_user_preference(json!({ "view": { "pickbox": { "sizePixels": 51 } } }))
         .unwrap_err();
     assert_eq!(error.path, "view.pickbox.sizePixels");
     assert_eq!(store.effective().view.pickbox.size_pixels, 8);

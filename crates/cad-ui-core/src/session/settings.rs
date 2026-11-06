@@ -51,9 +51,10 @@ pub struct CadSettings {
     pub background_model: String,
     /// Paper-space canvas background, canonical lower-case `#rrggbb`.
     pub background_paper: String,
-    /// Crosshair arm length as an integer percentage of the viewport (`1..=100`).
+    /// Crosshair total span as an integer percentage of the viewport (`1..=100`),
+    /// split into equal arms about the cursor and clipped at the edges.
     pub crosshair_percent: u32,
-    /// Pickbox half-side in logical pixels (`1..=20`, the AutoCAD `PICKBOX`
+    /// Pickbox half-side in logical pixels (`1..=50`, the AutoCAD `PICKBOX`
     /// option).
     pub pickbox_size: u32,
     /// Object-snap aperture in logical pixels (`1..=50`, the AutoCAD `APERTURE`

@@ -62,11 +62,14 @@ android {
     }
     sourceSets {
         getByName("main") {
-            // The native carrier reads the repository's committed `fonts/` package
-            // (osifont.ttf + fonts.json) straight from APK assets; the generated
-            // project holds no second copy. Relative to gen/android/app, the
-            // repository root is six levels up.
-            assets.srcDir("../../../../../../fonts")
+            // The font package the native carrier reads out of APK assets is
+            // *generated*, not checked in: `scripts/build-android-ui.sh` (this
+            // project's `beforeBuildCommand` wrapper) assembles the full CAD
+            // catalogue into `apps/app-android/font-assets` (the shared
+            // `scripts/lib/font-package.sh` policy; mlightcad by default). Relative
+            // to gen/android/app that is four levels up; a clean checkout has no
+            // such directory until the UI build has run.
+            assets.srcDir("../../../../font-assets")
         }
     }
 }

@@ -58,10 +58,12 @@ Web **不在 bundle 里带字体，也不预加载**：包在文档打开**之�
 `open_bytes` 之后，再由 `apply_font_package` 在已打开的会话上重跑安装。
 
 1. **构建期**：`scripts/build-web-ui.sh`（`dist-ui`）与 `scripts/build-web.sh`（独立 harness
-   `dist`）只产出页面 + wasm，默认没有 `fonts/`。`apps/desktop-ui/vite-font-package.mjs` 只在
-   `__YACR_RUNTIME__=tauri` 时把仓库 `fonts/` 复制到 `apps/desktop-ui/dist/fonts`
-   （X11/XWayland `dom-canvas` 的离线包）；web/android 都跳过。`YACR_WEB_FONTS=1` 只用于本地把
-   提交包 staging 到 `dist-ui/fonts`（本地专用，不是发布路径）。
+   `dist`）默认（`WITH_FONTS=1`）经共享 `scripts/lib/font-package.sh` 调用
+   `scripts/fetch-fonts.sh`，把 mlightcad 全量 + 提交包 staged 到 bundle 的 `fonts/`；
+   `WITH_FONTS=0` 只放提交包、`FONTS_DIR=<dir>` 复用预置目录（都不联网）。页面仍在 `open_bytes`
+   之后才按需取面。`apps/desktop-ui/vite-font-package.mjs` 只在 `__YACR_RUNTIME__=tauri` 时把
+   字体包复制到 `apps/desktop-ui/dist/fonts`（X11/XWayland `dom-canvas` 的离线包）；发布打包用
+   `YACR_FONT_PACKAGE_DIR` 换成全量目录；web/android 的 UI bundle 都跳过。
 2. **发布包**：`scripts/deploy-cloudflare-pages.sh` 在上传前调用 `scripts/fetch-fonts.sh` 把
    mlightcad 全量目录 + 提交的 osifont/Noto 组装到 `$DIST/fonts`，两种 bundle 都适用；
    `SKIP_FONTS=1` 复用已有目录、完全不下载。站点根因此始终有同源 `fonts/`。
@@ -92,7 +94,7 @@ Web **不在 bundle 里带字体，也不预加载**：包在文档打开**之�
 | `cargo test -p app-web fonts --locked` | `set_font_package` 校验、提交包/部分包安装、CJK 文本同时注册 osifont + Noto |
 | `cargo test -p cad-desktop-shell --test font_commands --locked` | `cad_fonts` 命令注册、camelCase 序列化、无会话显式拒绝 |
 | `(cd apps/desktop-ui && node --test test/fonts.test.ts test/vite-font-package.test.ts)` | 严格解析、只读行分组、`FONTS` 选择器、Vite 插件仅 tauri 复制、web/android 跳过 |
-| `bash scripts/build-web-ui.sh` | exit 0；默认**不** staging 字体；`YACR_WEB_FONTS=1` 只作本地提交子集 staging（本地专用） |
+| `bash scripts/build-web-ui.sh` | exit 0；默认 staged mlightcad 全量 + 提交包到 `dist-ui/fonts`（`WITH_FONTS=0`/`FONTS_DIR` 为离线路径）。 |
 
 **边界**：上述均为契约/编译/产物级证据。完整 mlightcad CDN 包的下载与浏览器运行时、真实
 Cloudflare Pages 上传、真实 GPU 像素、Android 真机解压与 Noto 设备渲染、Windows/macOS

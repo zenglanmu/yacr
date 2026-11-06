@@ -9,20 +9,23 @@
 //! cursor only re-feeds this geometry to the renderer's transient buffer.
 //!
 //! The crosshair spans the view through the cursor as two world-space lines
-//! (derived from [`OverlayInputs::viewport_bounds`]): each arm is a configured
-//! percentage of its cursor-to-edge span, so the default 100 % is the historical
-//! full-viewport crosshair and a smaller value draws a shorter cross. The pickbox
-//! is a square centred on the cursor whose **half-side** equals the configured
-//! pickbox size (the effective `view.pickbox.sizePixels`, which is exactly
-//! [`cad_domain::TolerancePolicy::pickbox_logical_pixels`], the AutoCAD `PICKBOX`
-//! analogue this project's click predicate uses) converted to world units by the
-//! current view scale, so the box circumscribes the region a click can actually
-//! hit. The crosshair size never changes it.
+//! (derived from [`OverlayInputs::viewport_bounds`]): the **total** span is the
+//! configured percentage of the viewport dimension, split into two equal arms
+//! about the cursor and clipped at the viewport edges (the AutoCAD `CURSORSIZE`
+//! semantics). The default `5` is AutoCAD's own initial value; `100` reproduces
+//! the historical full-viewport crosshair exactly. The pickbox is a square
+//! centred on the cursor whose **half-side** equals the configured pickbox size
+//! (the effective `view.pickbox.sizePixels`, which the configuration maps onto
+//! [`cad_domain::TolerancePolicy::pickbox_logical_pixels`], the AutoCAD
+//! `PICKBOX` analogue this project's click predicate uses) converted to world
+//! units by the current view scale, so the box circumscribes the region a click
+//! can actually hit. The crosshair size never changes it.
 //!
-//! The whole geometry is bounded: two full-extent crosshair segments plus, when
-//! the view scale is usable, four closed pickbox segments (at most
-//! [`cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS`]). The geometry is consumed by the
-//! renderer's transient overlay (ADR 0028); it is not a committed scene batch.
+//! The whole geometry is bounded: two crosshair segments (up to the full view
+//! extent at 100 %) plus, when the view scale is usable, four closed pickbox
+//! segments (at most [`cad_scene::MAX_TRANSIENT_CURSOR_SEGMENTS`]). The geometry
+//! is consumed by the renderer's transient overlay (ADR 0028); it is not a
+//! committed scene batch.
 
 use super::*;
 
@@ -49,9 +52,9 @@ pub const CURSOR_DRAW_ORDER: i64 = 2_500_000;
 /// box-selection band.
 pub const CURSOR_COLOR: [f32; 3] = [0.72, 0.75, 0.80];
 
-/// The crosshair percentage that reproduces the historical full-viewport
-/// crosshair: every arm reaches its view rectangle edge.
-pub const DEFAULT_CROSSHAIR_PERCENT: u32 = 100;
+/// The AutoCAD `CURSORSIZE` default: the crosshair spans 5 % of the viewport
+/// dimension, split into equal arms about the cursor.
+pub const DEFAULT_CROSSHAIR_PERCENT: u32 = 5;
 
 /// The renderer-owned transient cursor geometry for `cursor` (ADR 0028 D2).
 ///
@@ -82,9 +85,10 @@ pub fn cursor_geometry(
         return None;
     }
     let mut points: Vec<Point3> = Vec::with_capacity(12);
-    // Crosshair: two lines through the cursor whose arms are the configured
-    // percentage of the cursor-to-edge span. `Lines` topology pairs consecutive
-    // vertices, so each line is one explicit pair.
+    // Crosshair: two lines through the cursor whose total span is the configured
+    // percentage of the viewport dimension, split into equal clipped arms.
+    // `Lines` topology pairs consecutive vertices, so each line is one explicit
+    // pair.
     let (x0, x1) = crosshair_arms(min.x, cursor.x, max.x, crosshair_percent);
     let (y0, y1) = crosshair_arms(min.y, cursor.y, max.y, crosshair_percent);
     points.push(Point3 {
@@ -138,27 +142,27 @@ pub fn cursor_geometry(
 
 /// The two ends of the horizontal (or vertical) crosshair line through `cursor`.
 ///
-/// Each arm is `percent` per cent of its own full cursor-to-edge span, so the
-/// two arms are symmetric about the cursor only when the cursor is centred —
-/// which is exactly what keeps `100` identical to the historical
-/// full-viewport line (`min..max`, returned verbatim, not a recomputed
-/// near-equal).
+/// The **total** span is `percent` per cent of the viewport dimension
+/// (`max - min`), split into two **equal** arms about the cursor and clipped at
+/// the viewport edges. The arms are therefore symmetric even when the cursor is
+/// off-centre — the key difference from this module's previous per-arm reading —
+/// and a cursor near an edge simply loses the clipped part of one arm.
+///
+/// `100` is the exact full-viewport line (`min..max`, returned verbatim, not a
+/// recomputed near-equal), which pins the pre-existing geometry bit for bit.
 ///
 /// The percentage is authoritative on the configuration side: the schema
 /// (`view.crosshair.sizePercent`) and the host's closed settings table reject
 /// values outside `1..=100` instead of clamping. This pure geometry helper still
-/// floors/ceils a direct caller so it can never emit a zero-length or inverted
-/// line; that defence is not a configuration policy.
+/// floors a direct caller at `1` (and ceils at `100`) so it can never emit a
+/// zero-length line; that defence is not a configuration policy.
 fn crosshair_arms(min: f64, cursor: f64, max: f64, percent: u32) -> (f64, f64) {
     let percent = percent.clamp(1, 100);
     if percent == 100 {
         return (min, max);
     }
-    let factor = f64::from(percent) / 100.0;
-    (
-        cursor + (min - cursor) * factor,
-        cursor + (max - cursor) * factor,
-    )
+    let half = (max - min) * f64::from(percent) / 200.0;
+    ((cursor - half).max(min), (cursor + half).min(max))
 }
 
 /// The pickbox half-side in world units, or `None` when the scale is degenerate.
@@ -275,15 +279,21 @@ mod tests {
     }
 
     #[test]
-    fn a_half_crosshair_halves_each_arm_about_the_cursor() {
+    fn a_half_crosshair_spans_half_the_viewport_symmetrically() {
         let cursor = geometry(Some(p(1.0, 2.0)), Some(0.5), 3.0, 50);
-        // Each arm is half of its cursor-to-edge span: -51..49 becomes
-        // -25.5..24.5 around the cursor's x = 1.
-        assert!((endpoint(&cursor, 0)[0] - -24.5).abs() < 1e-6);
-        assert!((endpoint(&cursor, 1)[0] - 25.5).abs() < 1e-6);
-        // -32..28 becomes -16..14 around the cursor's y = 2.
-        assert!((endpoint(&cursor, 2)[1] - -14.0).abs() < 1e-6);
-        assert!((endpoint(&cursor, 3)[1] - 16.0).abs() < 1e-6);
+        // Total span is 50 % of the 100-unit view width: 25 units per arm around
+        // the cursor's x = 1, i.e. -24..26.
+        assert!((endpoint(&cursor, 0)[0] - -24.0).abs() < 1e-6);
+        assert!((endpoint(&cursor, 1)[0] - 26.0).abs() < 1e-6);
+        assert!(((endpoint(&cursor, 1)[0] - endpoint(&cursor, 0)[0]) - 50.0).abs() < 1e-6);
+        // The 60-unit view height gives a 30-unit total span: 15 per arm around
+        // y = 2 -> -13..17.
+        assert!((endpoint(&cursor, 2)[1] - -13.0).abs() < 1e-6);
+        assert!((endpoint(&cursor, 3)[1] - 17.0).abs() < 1e-6);
+        assert!(((endpoint(&cursor, 3)[1] - endpoint(&cursor, 2)[1]) - 30.0).abs() < 1e-6);
+        // Equal arms on each axis (cursor x = 1 is not the view centre).
+        assert!((endpoint(&cursor, 1)[0] - 1.0 - (1.0 - endpoint(&cursor, 0)[0])).abs() < 1e-6);
+        assert!((endpoint(&cursor, 3)[1] - 2.0 - (2.0 - endpoint(&cursor, 2)[1])).abs() < 1e-6);
         // The centre is unchanged and the pickbox is untouched.
         assert!((endpoint(&cursor, 0)[1] - 2.0).abs() < 1e-6);
         assert!((endpoint(&cursor, 2)[0] - 1.0).abs() < 1e-6);
@@ -291,12 +301,47 @@ mod tests {
     }
 
     #[test]
-    fn a_one_percent_crosshair_is_a_minimal_centred_cross() {
+    fn the_default_crosshair_percent_is_five_percent_of_the_viewport() {
+        assert_eq!(DEFAULT_CROSSHAIR_PERCENT, 5);
+        let cursor = geometry(Some(p(1.0, 2.0)), Some(0.5), 3.0, DEFAULT_CROSSHAIR_PERCENT);
+        // 5 % of the 100-unit view width is a 5-unit total span: 2.5 per arm.
+        assert!((endpoint(&cursor, 0)[0] - -1.5).abs() < 1e-6);
+        assert!((endpoint(&cursor, 1)[0] - 3.5).abs() < 1e-6);
+        assert!(((endpoint(&cursor, 1)[0] - endpoint(&cursor, 0)[0]) - 5.0).abs() < 1e-6);
+        // 5 % of the 60-unit height is a 3-unit total span: 1.5 per arm.
+        assert!((endpoint(&cursor, 2)[1] - 0.5).abs() < 1e-6);
+        assert!((endpoint(&cursor, 3)[1] - 3.5).abs() < 1e-6);
+        assert!(((endpoint(&cursor, 3)[1] - endpoint(&cursor, 2)[1]) - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn an_off_centre_cursor_keeps_equal_arms_until_an_edge_clips_one() {
+        // 20 % of the 100-unit width is a 10-unit arm on each side. The old
+        // per-arm reading would have produced 12 left / 8 right at x = 10.
+        let equal = geometry(Some(p(10.0, 2.0)), Some(0.5), 3.0, 20);
+        assert!((endpoint(&equal, 0)[0] - 0.0).abs() < 1e-6);
+        assert!((endpoint(&equal, 1)[0] - 20.0).abs() < 1e-6);
+        assert!((endpoint(&equal, 1)[0] - 10.0 - (10.0 - endpoint(&equal, 0)[0])).abs() < 1e-6);
+
+        // Near the right edge the right arm is clipped at max (25 requested, 5
+        // available); the left arm keeps its full 25 units and nothing exceeds
+        // the viewport.
+        let clipped = geometry(Some(p(45.0, 28.0)), Some(0.5), 3.0, 50);
+        assert!((endpoint(&clipped, 0)[0] - 20.0).abs() < 1e-6);
+        assert!((endpoint(&clipped, 1)[0] - 50.0).abs() < 1e-6);
+        assert!((endpoint(&clipped, 2)[1] - 13.0).abs() < 1e-6);
+        assert!((endpoint(&clipped, 3)[1] - 30.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_one_percent_crosshair_is_a_minimal_symmetric_cross() {
         let cursor = geometry(Some(p(1.0, 2.0)), Some(0.5), 3.0, 1);
-        assert!((endpoint(&cursor, 0)[0] - 0.49).abs() < 1e-6);
-        assert!((endpoint(&cursor, 1)[0] - 1.49).abs() < 1e-6);
-        assert!((endpoint(&cursor, 2)[1] - 1.68).abs() < 1e-6);
-        assert!((endpoint(&cursor, 3)[1] - 2.28).abs() < 1e-6);
+        // 1 % of 100 is 1 unit total: 0.5 per arm around x = 1.
+        assert!((endpoint(&cursor, 0)[0] - 0.5).abs() < 1e-6);
+        assert!((endpoint(&cursor, 1)[0] - 1.5).abs() < 1e-6);
+        // 1 % of 60 is 0.6 total: 0.3 per arm around y = 2.
+        assert!((endpoint(&cursor, 2)[1] - 1.7).abs() < 1e-6);
+        assert!((endpoint(&cursor, 3)[1] - 2.3).abs() < 1e-6);
         // Still a real cross through the cursor, with the unchanged pickbox.
         assert!((endpoint(&cursor, 0)[1] - 2.0).abs() < 1e-6);
         assert!((endpoint(&cursor, 2)[0] - 1.0).abs() < 1e-6);
@@ -304,19 +349,21 @@ mod tests {
     }
 
     #[test]
-    fn an_out_of_range_percent_is_floored_to_a_visible_cross() {
+    fn an_out_of_range_percent_is_floored_to_one_and_capped_at_full_view() {
         // The configuration/settings layer rejects these; this pure helper only
-        // guarantees it never emits a zero-length or inverted line.
-        for percent in [0, 101, u32::MAX] {
+        // guarantees it never emits a zero-length line. `0` floors at 1 %, while
+        // `101`/`u32::MAX` resolve to the exact full viewport.
+        let one = geometry(Some(p(1.0, 2.0)), Some(0.5), 3.0, 1);
+        let zero = geometry(Some(p(1.0, 2.0)), Some(0.5), 3.0, 0);
+        for vertex in 0..4 {
+            assert_eq!(endpoint(&zero, vertex), endpoint(&one, vertex));
+        }
+        for percent in [101, u32::MAX] {
             let cursor = geometry(Some(p(1.0, 2.0)), Some(0.5), 3.0, percent);
-            assert!(
-                endpoint(&cursor, 0)[0] < 1.0 && endpoint(&cursor, 1)[0] > 1.0,
-                "{percent}% is a real x arm"
-            );
-            assert!(
-                endpoint(&cursor, 2)[1] < 2.0 && endpoint(&cursor, 3)[1] > 2.0,
-                "{percent}% is a real y arm"
-            );
+            assert_eq!(endpoint(&cursor, 0), [-50.0, 2.0]);
+            assert_eq!(endpoint(&cursor, 1), [50.0, 2.0]);
+            assert_eq!(endpoint(&cursor, 2), [1.0, -30.0]);
+            assert_eq!(endpoint(&cursor, 3), [1.0, 30.0]);
         }
     }
 
