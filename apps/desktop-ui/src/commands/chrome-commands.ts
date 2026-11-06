@@ -16,7 +16,9 @@
 // one host-owned About window); this module only recognises the typed word.
 // `CLEANSCREENON` turns on the same clean-screen state the File tab's toggle
 // flips — it sets it, never toggles it. `CLEANSCREENOFF` leaves that same state
-// the same way: an explicit set, never a toggle.
+// the same way: an explicit set, never a toggle. `PROPERTIESCLOSE` closes the
+// properties window the palette's own close button closes; closing an already
+// closed window is an idempotent success, never a refusal.
 
 /** The typed word that opens the existing About dialog. */
 export const ABOUT_COMMAND = 'ABOUT';
@@ -26,6 +28,9 @@ export const CLEANSCREENON_COMMAND = 'CLEANSCREENON';
 
 /** The typed word that leaves clean-screen mode (sets it, never toggles it). */
 export const CLEANSCREENOFF_COMMAND = 'CLEANSCREENOFF';
+
+/** The typed word that closes the properties window (a no-op when already closed). */
+export const PROPERTIESCLOSE_COMMAND = 'PROPERTIESCLOSE';
 
 /** One chrome-local selector: its canonical word and how typed text matches it. */
 export interface ChromeCommandSelector {
@@ -53,6 +58,11 @@ export function isCleanScreenOffCommand(text: unknown): boolean {
   return normalized(text) === CLEANSCREENOFF_COMMAND;
 }
 
+/** Whether typed text is the bare `PROPERTIESCLOSE` selector (`propertiesclose` included). */
+export function isPropertiesCloseCommand(text: unknown): boolean {
+  return normalized(text) === PROPERTIESCLOSE_COMMAND;
+}
+
 /**
  * Every chrome-local selector this module owns, in append order.
  *
@@ -65,6 +75,7 @@ export const CHROME_COMMANDS: readonly ChromeCommandSelector[] = Object.freeze([
   { name: ABOUT_COMMAND, matches: isAboutCommand },
   { name: CLEANSCREENON_COMMAND, matches: isCleanScreenOnCommand },
   { name: CLEANSCREENOFF_COMMAND, matches: isCleanScreenOffCommand },
+  { name: PROPERTIESCLOSE_COMMAND, matches: isPropertiesCloseCommand },
 ]);
 
 /** The bare names of [`CHROME_COMMANDS`], for exhaustive admission tests. */

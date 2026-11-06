@@ -329,4 +329,9 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // never toggles), sending nothing to the router. Appended last so no shipped
   // row moves; it reuses the `cleanScreen` glyph and the same shared state.
   { id: 'CLEANSCREENOFF', labelKey: 'status.clean_screen_off', icon: 'cleanScreen', group: 'view' },
+  // PROPERTIESCLOSE (AutoCAD 2026) closes the properties window the palette's own
+  // close button closes, sending nothing to the router. It is appended last so no
+  // shipped row moves, and it reuses the `close` glyph and the `properties.close`
+  // label the window's own close control already uses.
+  { id: 'PROPERTIESCLOSE', labelKey: 'properties.close', icon: 'close', group: 'annotate' },
 ]);

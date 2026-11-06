@@ -509,6 +509,7 @@ function Shell() {
     openFonts: () => setFontsOpen(true),
     openAbout: () => requestOpenPopup('about'),
     setCleanScreen,
+    closeProperties: () => setPropertiesOpen(false),
     reportError: setError,
   });
 

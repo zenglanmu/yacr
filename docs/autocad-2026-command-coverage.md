@@ -21,10 +21,10 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **47** |
+| 完整实现 | **48** |
 | 部分实现（有写明的界） | **40** |
-| **已实现合计（完整 + 部分）** | **87** |
-| 未实现 | **894** |
+| **已实现合计（完整 + 部分）** | **88** |
+| 未实现 | **893** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -109,6 +109,7 @@
 | `POINT` | 已实现 | — |
 | `POLYGON` | 已实现 | — |
 | `PROPERTIES` | 已实现 | chrome 本地选择子：打开特性面板 |
+| `PROPERTIESCLOSE` | 已实现 | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
 | `QSAVE` | 部分实现 | SAVE 别名：有损 DXF 另存，无 DWG 回写 |
 | `RAY` | 部分实现 | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | `RECTANG` | 已实现 | — |
@@ -805,7 +806,7 @@
 | 669 | `PREVIEW` | 未实现 | Displays the drawing as it will be plotted. | — |
 | 670 | `PROJECTGEOMETRY` | 未实现 | Projects points, lines, or curves onto a 3D solid or surface from different directions. | — |
 | 671 | `PROPERTIES` | 已实现 | Controls properties of existing objects. | chrome 本地选择子：打开特性面板 |
-| 672 | `PROPERTIESCLOSE` | 未实现 | Closes the Properties palette. | — |
+| 672 | `PROPERTIESCLOSE` | 已实现 | Closes the Properties palette. | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
 | 673 | `PROPULATE` | 未实现 | Update, list, or clear Drawing Properties data. | — |
 | 674 | `PSBSCALE` | 未实现 | Specifies or updates the scale of block objects relative to paper space. | — |
 | 675 | `-PSETUPIN` | 未实现 | Imports a user-defined page setup into a new drawing layout using the command line. | — |

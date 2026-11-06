@@ -23,10 +23,13 @@ import { readCatalog, readModule } from './helpers.ts';
 
 test('the selector is the bare CLEANSCREENON word, case- and whitespace-insensitive', () => {
   assert.equal(CLEANSCREENON_COMMAND, 'CLEANSCREENON');
-  // Append-only table: ABOUT first, then the ON row, then the OFF row; the name
-  // list is derived.
-  assert.deepEqual([...CHROME_COMMAND_NAMES], ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF']);
-  assert.equal(CHROME_COMMANDS.length, 3);
+  // Append-only table: ABOUT first, then the ON row, then the OFF row, then the
+  // later PROPERTIESCLOSE row; the name list is derived.
+  assert.deepEqual(
+    [...CHROME_COMMAND_NAMES],
+    ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE'],
+  );
+  assert.equal(CHROME_COMMANDS.length, 4);
   for (const text of ['CLEANSCREENON', 'cleanscreenon', '  CleanScreenOn ', 'cLeAnScReEnOn']) {
     assert.equal(isCleanScreenOnCommand(text), true, text);
   }
@@ -72,9 +75,11 @@ test('the catalog exposes CLEANSCREENON exactly once, appended, with its own key
     { id: 'CLEANSCREENON', labelKey: 'status.clean_screen_on', icon: 'cleanScreen', group: 'view' },
   );
   // Append-only: the CLEANSCREENON row still keeps its place directly before the
-  // later-appended OFF row, so no shipped row moved.
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 2].id, 'CLEANSCREENON');
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 1].id, 'CLEANSCREENOFF');
+  // later-appended OFF row, and the later PROPERTIESCLOSE row stays after both,
+  // so no shipped row moved.
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 3].id, 'CLEANSCREENON');
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 2].id, 'CLEANSCREENOFF');
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 1].id, 'PROPERTIESCLOSE');
 });
 
 test('the File tab clean item offers a CLEANSCREENON variant and keeps its toggle action', () => {

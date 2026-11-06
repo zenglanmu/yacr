@@ -12,6 +12,9 @@
 // same dialog the File tab's About action opens, so it needs no layout either.
 // `CLEANSCREENON` sets the existing clean-screen state, so it needs no layout;
 // `CLEANSCREENOFF` clears that same state and needs no layout either.
+// `PROPERTIESCLOSE` closes the properties window, so it likewise needs no layout:
+// closing a window that is already closed is an idempotent success, not a
+// refusal (unlike `PROPERTIES`, which cannot open on the compact layout).
 import { useCallback } from 'react';
 import type { Translator } from '../i18n.ts';
 import type { LayoutMode } from '../layout/layout-mode.ts';
@@ -21,7 +24,12 @@ import { isOptionsCommand } from '../options/options.ts';
 import { isPropertiesCommand } from '../properties/properties.ts';
 import { isResourcesCommand } from '../references/references.ts';
 import { isFontsCommand } from '../fonts/fonts.ts';
-import { isAboutCommand, isCleanScreenOffCommand, isCleanScreenOnCommand } from './chrome-commands.ts';
+import {
+  isAboutCommand,
+  isCleanScreenOffCommand,
+  isCleanScreenOnCommand,
+  isPropertiesCloseCommand,
+} from './chrome-commands.ts';
 
 /** One selector's destination. `refused` names the panel the layout cannot show. */
 export type LocalSelectorResult =
@@ -33,6 +41,8 @@ export type LocalSelectorResult =
   | { readonly kind: 'about' }
   /** Set the chrome's clean-screen state to `value` (never a toggle). */
   | { readonly kind: 'cleanScreen'; readonly value: boolean }
+  /** Close the properties window; already closed is a success, not a refusal. */
+  | { readonly kind: 'propertiesClose' }
   | { readonly kind: 'refused'; readonly panelKey: string };
 
 /** The panel labels the layout refusal names. */
@@ -51,7 +61,9 @@ export const LOCAL_SELECTOR_PANEL_KEYS = Object.freeze({
  * refused by layout. `ABOUT` opens the existing host-owned dialog and is
  * likewise layout-independent. `CLEANSCREENON` only sets the chrome's own
  * clean-screen state, so it too needs no layout; `CLEANSCREENOFF` clears that
- * same state and is resolved directly after it.
+ * same state and is resolved directly after it. `PROPERTIESCLOSE` closes the
+ * properties window and is resolved last: it is layout-independent because
+ * closing an already-closed window is a valid no-op on every layout.
  */
 export function localSelectorFor(text: string, layout: LayoutMode): LocalSelectorResult | null {
   if (isOptionsCommand(text)) return { kind: 'options' };
@@ -70,6 +82,7 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
   if (isAboutCommand(text)) return { kind: 'about' };
   if (isCleanScreenOnCommand(text)) return { kind: 'cleanScreen', value: true };
   if (isCleanScreenOffCommand(text)) return { kind: 'cleanScreen', value: false };
+  if (isPropertiesCloseCommand(text)) return { kind: 'propertiesClose' };
   return null;
 }
 
@@ -89,6 +102,8 @@ export interface LocalSelectorHost {
   readonly openAbout: () => void;
   /** Set the chrome's clean-screen state (`CLEANSCREENON`/`CLEANSCREENOFF` set, never toggle). */
   readonly setCleanScreen: (value: boolean) => void;
+  /** Close the properties window (`PROPERTIESCLOSE`; a no-op when already closed). */
+  readonly closeProperties: () => void;
   /** Put a refusal sentence on the chrome's one error line. */
   readonly reportError: (message: string) => void;
 }
@@ -114,6 +129,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     openFonts,
     openAbout,
     setCleanScreen,
+    closeProperties,
     reportError,
   } = host;
   return useCallback((text: string, fromInput: boolean): boolean => {
@@ -133,6 +149,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
       case 'fonts': openFonts(); break;
       case 'about': openAbout(); break;
       case 'cleanScreen': setCleanScreen(result.value); break;
+      case 'propertiesClose': closeProperties(); break;
     }
     return true;
   }, [
@@ -147,6 +164,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     openFonts,
     openAbout,
     setCleanScreen,
+    closeProperties,
     reportError,
   ]);
 }

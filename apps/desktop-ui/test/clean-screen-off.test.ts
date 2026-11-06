@@ -21,10 +21,13 @@ import { readCatalog, readModule } from './helpers.ts';
 
 test('the selector is the bare CLEANSCREENOFF word, case- and whitespace-insensitive', () => {
   assert.equal(CLEANSCREENOFF_COMMAND, 'CLEANSCREENOFF');
-  // Append-only table: the OFF row is appended after ABOUT and CLEANSCREENON;
-  // the name list is derived from the one table.
-  assert.deepEqual([...CHROME_COMMAND_NAMES], ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF']);
-  assert.equal(CHROME_COMMANDS.length, 3);
+  // Append-only table: the OFF row is appended after ABOUT and CLEANSCREENON, and
+  // PROPERTIESCLOSE after it; the name list is derived from the one table.
+  assert.deepEqual(
+    [...CHROME_COMMAND_NAMES],
+    ['ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE'],
+  );
+  assert.equal(CHROME_COMMANDS.length, 4);
   for (const text of ['CLEANSCREENOFF', 'cleanscreenoff', '  CleanScreenOff ', 'cLeAnScReEnOfF']) {
     assert.equal(isCleanScreenOffCommand(text), true, text);
   }
@@ -74,10 +77,12 @@ test('the catalog exposes CLEANSCREENOFF exactly once, appended, with its own ke
     { ...rows[0] },
     { id: 'CLEANSCREENOFF', labelKey: 'status.clean_screen_off', icon: 'cleanScreen', group: 'view' },
   );
-  // Append-only: the new row is the last one, so no shipped row moved.
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 1].id, 'CLEANSCREENOFF');
+  // Append-only: the OFF row keeps its place directly before the later
+  // PROPERTIESCLOSE row, so no shipped row moved.
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 2].id, 'CLEANSCREENOFF');
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 1].id, 'PROPERTIESCLOSE');
   // The ON row keeps its own place directly before it.
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 2].id, 'CLEANSCREENON');
+  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 3].id, 'CLEANSCREENON');
 });
 
 test('the File tab clean item offers both typed-word variants in append order', () => {
