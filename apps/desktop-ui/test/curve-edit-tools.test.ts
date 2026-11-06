@@ -202,7 +202,8 @@ test('both modify panels carry the three as small router buttons with no popover
       // Directly after EXTEND, in the task's own order, so both panels match.
       assert.equal(ids.indexOf(entry.id), ids.indexOf('EXTEND') + 1 + [BREAK, DIVIDE, LENGTHEN].indexOf(entry), entry.id);
     }
-    assert.equal(ids.at(-1), 'JOIN', `${tabId}: JOIN keeps closing the panel`);
+    assert.equal(ids.at(-2), 'JOIN', `${tabId}: JOIN still closes the shipped run`);
+    assert.equal(ids.at(-1), 'SELECTSIMILAR', `${tabId}: SELECTSIMILAR is appended after JOIN`);
   }
 });
 

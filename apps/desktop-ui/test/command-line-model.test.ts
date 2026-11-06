@@ -54,11 +54,11 @@ test('the suggestion list opens only for a command draft, focused, without histo
 });
 
 test('the suggestion rows are the shared filter, and none in text mode', () => {
-  const rows = commandLineSuggestions({ textMode: false, command: 'L', history: [], aliases: [] });
+  const rows = commandLineSuggestions({ textMode: false, command: 'LIN', history: [], aliases: [] });
   assert.ok(rows.some(row => row.id === 'LINE'), 'a canonical prefix match is offered');
   assert.deepEqual(commandLineSuggestions({ textMode: true, command: 'L', history: [], aliases: [] }), []);
   // History floats used commands up, exactly as the filter already did.
-  const frequent = commandLineSuggestions({ textMode: false, command: 'L', history: ['LINE', 'LINE'], aliases: [] });
+  const frequent = commandLineSuggestions({ textMode: false, command: 'LIN', history: ['LINE', 'LINE'], aliases: [] });
   assert.equal(frequent[0].id, 'LINE');
 });
 

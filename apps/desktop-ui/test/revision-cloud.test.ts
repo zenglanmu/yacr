@@ -6,7 +6,7 @@
 // no `Arc length` option and no object picking in v1, so the surface is an
 // ordinary selection-gated router command — never a draw tool with a capture.
 //
-// What this suite pins: the catalogue row, the Draw tab's draw-panel button, the
+// What this suite pins: the catalogue row, both draw-panel buttons, the
 // one-object selection requirement and its hint key, admission from the loaded
 // host vocabulary plus a selection, and both i18n keys.
 import test from 'node:test';
@@ -48,11 +48,11 @@ const ID = 'REVCLOUD';
 const LABEL_KEY = 'draw.kind.revcloud';
 const HINT_KEY = 'draw.kind.revcloud.hint';
 
-function drawPanel() {
-  const tab = RIBBON_TABS.find(candidate => candidate.id === 'draw');
-  assert.ok(tab, 'the Draw tab must exist');
+function drawPanel(tabId) {
+  const tab = RIBBON_TABS.find(candidate => candidate.id === tabId);
+  assert.ok(tab, `the ${tabId} tab must exist`);
   const panel = tab.panels.find(candidate => candidate.id === 'draw');
-  assert.ok(panel, 'the Draw tab must keep its draw panel');
+  assert.ok(panel, `the ${tabId} tab must keep its draw panel`);
   return panel;
 }
 
@@ -69,10 +69,11 @@ test('REVCLOUD is catalogued as its own draw selector', () => {
   assert.equal(isSupportedCommand(ID.toLowerCase()), true);
 });
 
-test('the Draw tab draw panel carries the small REVCLOUD router button', () => {
-  const panel = drawPanel();
+test('both draw panels carry the small REVCLOUD router button', () => {
+  for (const tabId of ['home', 'draw']) {
+  const panel = drawPanel(tabId);
   const item = panel.items.find(candidate => candidate.id === ID);
-  assert.ok(item, 'draw/draw must carry REVCLOUD');
+  assert.ok(item, `${tabId}/draw must carry REVCLOUD`);
   assert.equal(item.command, ID);
   assert.equal(item.labelKey, LABEL_KEY);
   assert.equal(item.icon, 'polyline');
@@ -86,11 +87,12 @@ test('the Draw tab draw panel carries the small REVCLOUD router button', () => {
     [item.command, item.standardView, item.action].filter(token => token !== undefined),
     [ID],
   );
-  // It appears once in the whole ribbon (the Draw tab's draw panel); there is no
-  // second capture to confuse it with.
+  }
+  // It appears once on each draw panel (Home and Draw); there is no second
+  // capture to confuse it with.
   const carriers = RIBBON_TABS.flatMap(tab => tab.panels).flatMap(section => section.items)
     .filter(candidate => candidate.id === ID);
-  assert.equal(carriers.length, 1, 'exactly one ribbon carrier');
+  assert.equal(carriers.length, 2, 'one carrier per draw panel');
   const variantCarriers = RIBBON_TABS.flatMap(tab => tab.panels)
     .flatMap(section => section.items)
     .flatMap(entry => entry.variants ?? [])

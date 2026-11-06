@@ -168,7 +168,7 @@ test('alias rows match a typed prefix only, and the limit covers the merged list
 
 test('an empty alias table changes nothing but the extra rows', () => {
   setCommandAliases([]);
-  const rows = filterCommandSuggestions('l');
+  const rows = filterCommandSuggestions('lin');
   assert.equal(rows.some(row => row.target), false, 'no shorthand rows without the host answer');
   assert.ok(rows.some(row => row.id === 'LINE'), 'canonical suggestions still work');
   assert.equal(aliasTarget('L'), null);
