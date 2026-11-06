@@ -1,3 +1,40 @@
+## 2026-11-06 渲染能力推导 `caps_from` + 精度/上传契约（diff A/B）
+
+- **问题**：`Renderer::caps_for` 只按 backend **类别**（WebGl2 vs 其他）硬编码
+  `compute`/`storage_buffers`/`indirect_draw`，`_ =>` 兜底一律假定能力齐全。接 WebGPU 之前必须
+  先让能力快照从 `device.limits()` 推导，否则降级/低配的 native 或 WebGPU 适配器会被**报告**成
+  能力齐全。
+- **实现**：新增纯函数 `plan::caps_from(backend, wasm_target, &Limits) -> BackendCapabilities`
+  （`crates/cad-render-wgpu/src/plan/tier.rs`，无 `Device`）；backend 只决定**标签**
+  （`webgpu`/`webgl2`/`vulkan`/`metal`/`dx12`/`opengl`），`storage_buffers` 与 `compute` 由 limits
+  推导，`indirect_draw` 仍按后端（仅 WebGL2 为 `false`，`wgpu::Limits` 无对应字段）。
+  `Renderer::caps_for` 改为委托。`tier_for` **未改**（它本来就 AND 了 storage limits）。
+- **契约**：`caps_from_derives_storage_and_compute_from_limits`、
+  `caps_labels_are_unchanged_for_every_backend`、
+  `tier_selection_is_unchanged_for_webgl2_and_default_limits`（`downlevel_webgl2_defaults → Universal`、
+  `Limits::default() → Accelerated`、WebGPU defaults → Accelerated，双向防腐）；
+  `build_instance_chunks_keeps_a_kilometre_span_drawing_within_the_ulp_bound`（10 km / 100 batch：
+  ≥2 stream、所有存储坐标 ≤ `MAX_STREAM_RADIUS`、ulp ≤ 1 µm）；
+  `build_instance_chunks_does_not_split_a_single_oversized_batch_known_gap`（**钉住现状，不是可接受性
+  契约**：单个跨度 > 2×`MAX_STREAM_RADIUS` 的 batch 只按实例上限切分，仍会超出 ulp 下限）；
+  `render_perf::run_frames` 断言**计时帧之间** `uploaded_bytes` 不增长（该计数器是累计值，不是
+  每帧值——直接断言 `== 0` 是错的）。
+- **文档**：`docs/compatibility.md` 更正能力协商来源段（删掉“按 backend 类别报告”），新增
+  「投影精度 / RTE」表，把 **Perspective 标 `Partial`**（`f32` 原点窄化在 `translate_left` 之前，
+  Ortho 的 `f64` 相机相对减法不适用）；实机证据见 `docs/render-evidence-2026-11-06.md`。
+- **WebGPU 显式入口（C）**：`CanvasPresenter::create_with_preference` /
+  `create_offscreen_with_preference`；只有 `BackendPreference::WebGpu` 走
+  `wgpu::util::new_instance_with_webgpu_detection(BROWSER_WEBGPU | GL)`（浏览器在 **instance 创建**
+  时定后端，所以在 `request_adapter` 里选不了），`Auto` / `WebGl2` 仍是 `Backends::GL` 逐字不变。
+  适配器与强制偏好不符 ⇒ `CanvasError::AdapterUnavailable` + `yacr: unsupported-runtime: webgpu`
+  （`WEBGPU_MARKER`），**不降级**；limit floor 按**实际选中的后端**取（`required_limits_for`：
+  WebGL2 = `downlevel_webgl2_defaults().using_resolution`，WebGPU = `Limits::default().or_worse_values_from`）。
+- **边界**：`rstar`、pulled 的 64B 布局、`MAX_STREAM_RADIUS` 数值、`ActiveBackend` 枚举与上报
+  **均未改动**；WebGPU 的**默认开关**也未改（`Auto` 仍是 WebGL2），且**宿主的显式选择入口没有接线**
+  ——`apps/app-web` 仍以 `BackendPreference::WebGl2` 创建 presenter，且两个已测引擎都没有
+  `navigator.gpu`，因此 WebGPU 分支在任何已测运行时上**不可达**。NOT RUN：完整 workspace 门禁、
+  Windows/macOS/Android/Web、**真实浏览器 WebGPU/WebGL2 运行**、透视误差量化、长程连续拖动的帧间隔分布。
+
 ## 2026-11-06 状态事件节流：语义 status-changed + cursor-changed（Phase 3）
 
 - **问题**：`StatusFrame` 以前每 tick/每 flush 都发一次完整 `CadStatus`（含 `hostProfile`），

@@ -432,8 +432,14 @@ Windows/macOS/Android 真机运行、真实 GUI/浏览器、GPU/像素均 **NOT 
 
 ## GPU 设备能力协商（2026-10-17，政策见 `docs/adr/0013-device-capability-negotiation.md`）
 
-**本表由设备/适配器探测产出，不是按 backend 类别推断**：`Renderer::caps_for` 按 backend 类别
-（WebGl2 vs 其他）报告，**不得**作为本表来源。每格的"本机探测"为**实测**；未在本机跑过的平台一律
+**本表由设备/适配器探测产出，不是按 backend 类别推断**：`Renderer::caps_for` 自 2026-11-06 起
+委托纯函数 `plan::caps_from(backend, wasm_target, limits)`——backend 只决定**标签**
+（`webgpu`/`webgl2`/`vulkan`/`metal`/`dx12`/`opengl`），`compute` 与 `storage_buffers` 由
+`device.limits()` **推导**（`max_storage_buffers_per_shader_stage > 0 && max_storage_buffer_binding_size > 0`；
+`max_compute_workgroup_size_x > 0 && max_compute_invocations_per_workgroup > 0`），
+`indirect_draw` 仍按后端（仅 WebGL2 为 `false`，`wgpu::Limits` 无对应字段）。此前的
+“WebGl2 之外一律 `true`”兜底已删除，因此降级/低配的 native 或 WebGPU 适配器不会再被**报告**成
+能力齐全。每格的"本机探测"为**实测**；未在本机跑过的平台一律
 `未测`，不得据规范保证表填 `Native`。三态 `Native` / `Emulated` / `Unsupported` 描述**能力**，
 **不是**实现进度；feature 存在也**不是**性能结论（铁律 6），本机仍 `gpu_ms=None`。
 
@@ -455,6 +461,25 @@ Windows/macOS/Android 真机运行、真实 GUI/浏览器、GPU/像素均 **NOT 
 - **limits 行的三列（requested / granted / degraded reason）必须同时存在**：只写 granted
   会掩盖“这是请求限制而非硬件上限”（P620 的 adapter 上限是 4 GiB 量级）。
 - **未测**：Windows/macOS/Android、真实浏览器 WebGL2、其它 vendor/驱动、任何 GPU 时间结论。
+- **WebGPU 只有显式入口，默认仍是 WebGL2（2026-11-06）**：`CanvasPresenter::create_with_preference`
+  的 `BackendPreference::WebGpu` 是唯一请求 `Backends::BROWSER_WEBGPU`（经
+  `wgpu::util::new_instance_with_webgpu_detection`）的值；没有 `navigator.gpu` 时**拒绝**
+  （`yacr: unsupported-runtime: webgpu`）而不是回退。宿主侧（`apps/app-web`）**尚未**提供选择入口，
+  两个已测引擎也都没有 `navigator.gpu`，因此该分支**未在浏览器中运行过**（NOT VERIFIED）。
+
+### 投影精度 / RTE（2026-11-06 标注为 `Partial`）
+
+大坐标防抖在 CPU 侧按 batch 的 `f64` 局部原点先做减法、再窄化到 `f32`
+（`crates/cad-render-wgpu/src/plan/projection.rs`，`FrameProjection::batch_matrix_f64`）：
+
+| 投影 | 状态 | 事实 |
+|---|---|---|
+| Ortho | 实现 | 原点与相机中心保持 `f64` 直到减法完成后才窄化，这是 2D 主视图路径 |
+| Perspective | **`Partial`** | `FrameProjection::Perspective` 在 `translate_left` **之前**把原点窄化为 `f32`（`projection.rs:203-208`，源码注释已声明），因此 Ortho 那条 `f64` 相机相对减法在 3D 预览路径上**不适用**；km 级图纸的透视预览会出现可见偏移 |
+
+**为什么不修**：CAD 的权威视图是 Ortho，Perspective 只服务 3D 预览；修它要把 `f64` 原点以
+hi/lo 两个 `f32` 传进 shader，或每 batch 在 `f64` 里烘矩阵，属于另立提案（需自己的证据）。
+**未测**：透视路径的像素/几何误差量化 —— NOT RUN。
 
 ## 已明确的不支持项
 
