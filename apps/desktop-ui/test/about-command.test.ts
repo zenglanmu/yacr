@@ -19,10 +19,11 @@ import { readCatalog, readModule } from './helpers.ts';
 
 test('the selector is the bare ABOUT word, case- and whitespace-insensitive', () => {
   assert.equal(ABOUT_COMMAND, 'ABOUT');
-  // The append-only table starts with exactly this one row, and the name list is
-  // derived from it (never a second list).
-  assert.equal(CHROME_COMMANDS.length, 1);
-  assert.deepEqual([...CHROME_COMMAND_NAMES], ['ABOUT']);
+  // The append-only table opens with this row (later selectors append after it),
+  // and the name list is derived from it (never a second list).
+  assert.equal(CHROME_COMMANDS[0].name, 'ABOUT');
+  assert.equal(CHROME_COMMAND_NAMES[0], 'ABOUT');
+  assert.equal(CHROME_COMMAND_NAMES.length, CHROME_COMMANDS.length);
   for (const text of ['ABOUT', 'about', '  About ', 'AbOuT']) {
     assert.equal(isAboutCommand(text), true, text);
   }
@@ -62,8 +63,11 @@ test('the catalog exposes ABOUT exactly once, appended, with the existing key', 
     { ...rows[0] },
     { id: 'ABOUT', labelKey: 'file.about', icon: 'app', group: 'file' },
   );
-  // Append-only: the new row is the last one, so no shipped row moved.
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 1].id, 'ABOUT');
+  // Append-only: later rows (CLEANSCREENON today) may follow, and no shipped row
+  // may move across this one.
+  const catalogIds = COMMAND_CATALOG.map(command => command.id);
+  assert.ok(catalogIds.indexOf('ABOUT') > 0);
+  assert.equal(catalogIds[catalogIds.indexOf('ABOUT') - 1], 'PDSIZE');
 });
 
 test('the typed command and the File tab share requestOpenPopup(about)', async () => {

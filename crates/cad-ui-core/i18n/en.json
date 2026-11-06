@@ -733,6 +733,7 @@
   "status.coordinate_hint_world": "Cursor in world coordinates (drawing units, 2D view)",
   "status.coordinate_hint_none": "No reliable world coordinate outside a 2D view",
   "status.clean_screen": "Clean screen",
+  "status.clean_screen_on": "Clean screen on",
   "status.command_line": "Command line",
   "status.workspace": "Workspace",
   "status.settings": "Settings",

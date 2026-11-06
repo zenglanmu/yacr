@@ -10,6 +10,7 @@
 // `FONTS` is deliberately **not** refused on mobile: the compact layout renders
 // the same panel as a floating sheet, exactly like `RESOURCES`. `ABOUT` opens the
 // same dialog the File tab's About action opens, so it needs no layout either.
+// `CLEANSCREENON` sets the existing clean-screen state, so it needs no layout.
 import { useCallback } from 'react';
 import type { Translator } from '../i18n.ts';
 import type { LayoutMode } from '../layout/layout-mode.ts';
@@ -19,7 +20,7 @@ import { isOptionsCommand } from '../options/options.ts';
 import { isPropertiesCommand } from '../properties/properties.ts';
 import { isResourcesCommand } from '../references/references.ts';
 import { isFontsCommand } from '../fonts/fonts.ts';
-import { isAboutCommand } from './chrome-commands.ts';
+import { isAboutCommand, isCleanScreenOnCommand } from './chrome-commands.ts';
 
 /** One selector's destination. `refused` names the panel the layout cannot show. */
 export type LocalSelectorResult =
@@ -29,6 +30,8 @@ export type LocalSelectorResult =
   | { readonly kind: 'layers' }
   | { readonly kind: 'fonts' }
   | { readonly kind: 'about' }
+  /** Set the chrome's clean-screen state to `value` (never a toggle). */
+  | { readonly kind: 'cleanScreen'; readonly value: boolean }
   | { readonly kind: 'refused'; readonly panelKey: string };
 
 /** The panel labels the layout refusal names. */
@@ -45,7 +48,8 @@ export const LOCAL_SELECTOR_PANEL_KEYS = Object.freeze({
  * desktop palette windows. `PROPERTIES`/`LAYER` are refused where the palette
  * layer is not rendered; `FONTS`/`RESOURCES` have a compact sheet and are never
  * refused by layout. `ABOUT` opens the existing host-owned dialog and is
- * likewise layout-independent.
+ * likewise layout-independent. `CLEANSCREENON` only sets the chrome's own
+ * clean-screen state, so it too needs no layout.
  */
 export function localSelectorFor(text: string, layout: LayoutMode): LocalSelectorResult | null {
   if (isOptionsCommand(text)) return { kind: 'options' };
@@ -62,6 +66,7 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
       : { kind: 'refused', panelKey: LOCAL_SELECTOR_PANEL_KEYS.layers };
   }
   if (isAboutCommand(text)) return { kind: 'about' };
+  if (isCleanScreenOnCommand(text)) return { kind: 'cleanScreen', value: true };
   return null;
 }
 
@@ -79,6 +84,8 @@ export interface LocalSelectorHost {
   readonly openFonts: () => void;
   /** Open the existing host-owned About dialog (`requestOpenPopup('about')`). */
   readonly openAbout: () => void;
+  /** Set the chrome's clean-screen state (`CLEANSCREENON` sets, never toggles). */
+  readonly setCleanScreen: (value: boolean) => void;
   /** Put a refusal sentence on the chrome's one error line. */
   readonly reportError: (message: string) => void;
 }
@@ -103,6 +110,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     openLayers,
     openFonts,
     openAbout,
+    setCleanScreen,
     reportError,
   } = host;
   return useCallback((text: string, fromInput: boolean): boolean => {
@@ -121,6 +129,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
       case 'layers': openLayers(); break;
       case 'fonts': openFonts(); break;
       case 'about': openAbout(); break;
+      case 'cleanScreen': setCleanScreen(result.value); break;
     }
     return true;
   }, [
@@ -134,6 +143,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     openLayers,
     openFonts,
     openAbout,
+    setCleanScreen,
     reportError,
   ]);
 }

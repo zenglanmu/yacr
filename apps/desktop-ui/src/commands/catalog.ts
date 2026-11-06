@@ -319,4 +319,9 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // It is appended at the very end so no shipped row moves; the `app` glyph is
   // the ribbon entry's own mark for the same dialog.
   { id: 'ABOUT', labelKey: 'file.about', icon: 'app', group: 'file' },
+  // CLEANSCREENON (AutoCAD 2026) is a chrome-local selector too: typing it sets
+  // the same clean-screen state the File tab's toggle flips (it sets, never
+  // toggles), sending nothing to the router. Appended last so no shipped row
+  // moves; it reuses the `cleanScreen` glyph of the toggle it shares state with.
+  { id: 'CLEANSCREENON', labelKey: 'status.clean_screen_on', icon: 'cleanScreen', group: 'view' },
 ]);

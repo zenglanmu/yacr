@@ -280,7 +280,12 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         titleKey: 'ribbon.panel.utilities',
         items: [
           { id: 'diagnostics', labelKey: 'diagnostics.title', icon: 'diagnostics', action: 'diagnostics' },
-          { id: 'clean', labelKey: 'status.clean_screen', icon: 'cleanScreen', action: 'cleanScreen' },
+          { id: 'clean', labelKey: 'status.clean_screen', icon: 'cleanScreen', action: 'cleanScreen', variants: [
+            // The typed-word selectors live beside the toggle that shares their
+            // state: `clean-on` enters clean screen explicitly (`CLEANSCREENON`),
+            // never toggling it. `clean-off` follows with `CLEANSCREENOFF`.
+            { id: 'clean-on', labelKey: 'status.clean_screen_on', icon: 'cleanScreen', command: 'CLEANSCREENON' },
+          ] },
           { id: 'cmdline', labelKey: 'status.command_line', icon: 'terminal', action: 'commandLine' },
           // About opens a host-owned dialog window (ADR 0021 D1), so it is an
           // `action` token, not a router command: nothing about it goes through

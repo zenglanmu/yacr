@@ -14,9 +14,14 @@
 //
 // `ABOUT` opens the same dialog the File tab's About ribbon action opens (the
 // one host-owned About window); this module only recognises the typed word.
+// `CLEANSCREENON` turns on the same clean-screen state the File tab's toggle
+// flips — it sets it, never toggles it.
 
 /** The typed word that opens the existing About dialog. */
 export const ABOUT_COMMAND = 'ABOUT';
+
+/** The typed word that enters clean-screen mode (sets it, never toggles it). */
+export const CLEANSCREENON_COMMAND = 'CLEANSCREENON';
 
 /** One chrome-local selector: its canonical word and how typed text matches it. */
 export interface ChromeCommandSelector {
@@ -34,6 +39,11 @@ export function isAboutCommand(text: unknown): boolean {
   return normalized(text) === ABOUT_COMMAND;
 }
 
+/** Whether typed text is the bare `CLEANSCREENON` selector (`cleanscreenon` included). */
+export function isCleanScreenOnCommand(text: unknown): boolean {
+  return normalized(text) === CLEANSCREENON_COMMAND;
+}
+
 /**
  * Every chrome-local selector this module owns, in append order.
  *
@@ -44,6 +54,7 @@ export function isAboutCommand(text: unknown): boolean {
  */
 export const CHROME_COMMANDS: readonly ChromeCommandSelector[] = Object.freeze([
   { name: ABOUT_COMMAND, matches: isAboutCommand },
+  { name: CLEANSCREENON_COMMAND, matches: isCleanScreenOnCommand },
 ]);
 
 /** The bare names of [`CHROME_COMMANDS`], for exhaustive admission tests. */

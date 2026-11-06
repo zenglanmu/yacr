@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **47** |
-| 部分实现（有写明的界） | **38** |
-| **已实现合计（完整 + 部分）** | **85** |
-| 未实现 | **896** |
+| 部分实现（有写明的界） | **39** |
+| **已实现合计（完整 + 部分）** | **86** |
+| 未实现 | **895** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -52,6 +52,7 @@
 | `BREAK` | 部分实现 | 两点打断；无 F 第一点覆盖、无多段打断；LWPOLYLINE 按名拒绝 |
 | `CHAMFER` | 部分实现 | 两线形式 + 独立 CHAMFER POLYLINE 选择子；无 Angle/Multiple/Trim |
 | `CIRCLE` | 已实现 | — |
+| `CLEANSCREENON` | 部分实现 | chrome 本地选择子：显式进入 clean-screen；只隐藏 chrome，不记录各面板的独立开关 |
 | `COPY` | 已实现 | — |
 | `COPYBASE` | 部分实现 | 应用内剪贴板 + 基点；不是 OS 剪贴板，不跨应用 |
 | `COPYCLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
@@ -305,7 +306,7 @@
 | 171 | `CLASSICLAYER` | 未实现 | Opens the legacy Layer Properties Manager. | — |
 | 172 | `CLASSICXREF` | 未实现 | Manages referenced drawing files in the current drawing. | — |
 | 173 | `CLEANSCREENOFF` | 未实现 | Restores the state of the display before CLEANSCREENON was used. | 只有 cleanScreen 切换按钮；无 OFF 命令 |
-| 174 | `CLEANSCREENON` | 未实现 | Clears the screen of toolbars and dockable windows, excluding the command window. | 只有 cleanScreen 切换按钮；无 ON 命令 |
+| 174 | `CLEANSCREENON` | 部分实现 | Clears the screen of toolbars and dockable windows, excluding the command window. | chrome 本地选择子：显式进入 clean-screen；只隐藏 chrome，不记录各面板的独立开关 |
 | 175 | `CLIP` | 未实现 | Crops selected objects such as blocks, external references, images, viewports, and underlays to a specified boundary. | — |
 | 176 | `CLIPIT` | 未实现 | Clips xrefs or images with lines and curves. | — |
 | 177 | `CLOSE` | 未实现 | Closes the current drawing. | — |

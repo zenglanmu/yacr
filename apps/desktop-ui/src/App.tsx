@@ -501,14 +501,14 @@ function Shell() {
   const runLocalSelector = useLocalSelectors({
     layout,
     translate: t,
-    clearResult: () => setCommandResult(null),
-    clearDraft: () => setCommand(''),
+    clearResult: () => setCommandResult(null), clearDraft: () => setCommand(''),
     requestOptions: () => openOptionsDialog(requestOpenPopup),
     openResources: () => setReferencesOpen(true),
     openProperties,
     openLayers: () => { setLayersOpen(true); setLayersFocus(value => value + 1); },
     openFonts: () => setFontsOpen(true),
     openAbout: () => requestOpenPopup('about'),
+    setCleanScreen,
     reportError: setError,
   });
 
