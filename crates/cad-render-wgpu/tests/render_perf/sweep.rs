@@ -71,7 +71,6 @@ fn grid_scene(batches: usize) -> SceneDelta {
     SceneDelta {
         stamp: TaskStamp::new(DocumentId(1), 0),
         added,
-        removed_chunks: Vec::new(),
         images: Vec::new(),
         masks: Vec::new(),
     }

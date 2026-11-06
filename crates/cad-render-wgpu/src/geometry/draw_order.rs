@@ -19,6 +19,19 @@ pub struct OverBudget {
 // feeds them the same values it uploads, and the two draw passes follow the
 // resulting plan. The full policy, including the evidence boundary, is written
 // in `docs/render-order.md`.
+//
+// # Equal `draw_order` keeps upload order
+//
+// Every sort here is stable and the batch's input (upload) index is the final
+// comparator term, so batches with equal `draw_order` are drawn in the order they
+// were uploaded. That tie-break is part of the contract, not an accident of
+// `sort_by_key`: an incremental append may therefore only add geometry whose
+// `draw_order` is **strictly greater** than the resident maximum (the append gate
+// in `cad-app/src/render_scene/mod.rs` compares against `model_max_order`).
+// Inserting geometry in the middle of the resident sequence would move the tie
+// order of every later equal-order batch, so the controller rebuilds instead of
+// appending. Changing any sort to an unstable one (or dropping the index term)
+// would silently change drawn output.
 
 /// Alpha bucket a batch falls into after clamping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +114,13 @@ impl DrawOrderPlan {
 ///    `camera` (so the farthest batch is drawn first);
 /// 3. equal keys keep the input (upload) order, because every sort is stable and
 ///    the input index is the final comparator term.
+///
+/// Equal `draw_order` therefore means exactly "keep upload order" for the opaque
+/// pass (and, once distance is equal, for the transparent pass). This is the rule
+/// the incremental append gate relies on: an appended entity must have a
+/// `draw_order` strictly greater than the resident maximum, because an insertion
+/// in the middle would reorder every later equal-order batch and is answered with
+/// a full rebuild instead (`cad-app/src/render_scene/mod.rs`, `model_max_order`).
 ///
 /// `camera = None` means the caller has no camera position (for example a 2D
 /// frame without a depth axis): transparent batches then fall back to ascending

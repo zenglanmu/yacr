@@ -223,7 +223,6 @@ pub(super) fn build_scene_stats_with_vendor_indexed(
     let mut combined = SceneDelta {
         stamp: stamp.clone(),
         added: Vec::new(),
-        removed_chunks: Vec::new(),
         images: Vec::new(),
         masks: Vec::new(),
     };
@@ -332,7 +331,6 @@ pub(super) fn build_model_entity_scene(
         return Ok(SceneDelta {
             stamp,
             added: vec![],
-            removed_chunks: vec![],
             images: vec![],
             masks: vec![],
         });

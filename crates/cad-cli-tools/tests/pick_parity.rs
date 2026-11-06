@@ -256,7 +256,6 @@ fn run_fixture(
     let mut delta = SceneDelta {
         stamp: stamp.clone(),
         added: Vec::new(),
-        removed_chunks: Vec::new(),
         images: Vec::new(),
         masks: Vec::new(),
     };

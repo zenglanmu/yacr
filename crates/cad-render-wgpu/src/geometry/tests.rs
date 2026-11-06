@@ -257,6 +257,36 @@ fn opaque_batches_sort_by_draw_order_and_keep_upload_order_on_ties() {
     assert_eq!(plan.drawn(), 4);
 }
 
+/// The upload-order tie-break is what the incremental append gate relies on:
+/// an append may only add geometry strictly after the resident maximum
+/// `draw_order`, because an insertion in the middle would reorder every later
+/// equal-order batch. Assert both passes keep the input order on ties.
+#[test]
+fn equal_draw_order_keeps_upload_order() {
+    // Opaque: six batches at the same `draw_order`, uploaded in index order. A
+    // stable sort of equal keys is the identity, so the plan is the input order.
+    let opaque: Vec<_> = (0..6).map(|_| entry(7, 1.0, 0.0)).collect();
+    let plan = plan_draw_order(&opaque, None);
+    assert_eq!(plan.opaque, vec![0, 1, 2, 3, 4, 5]);
+    assert!(plan.transparent.is_empty());
+    assert!(plan.invisible.is_empty());
+
+    // Transparent with a camera: every centroid sits at the camera, so distance
+    // is equal too and the tie falls through to `draw_order`, then upload order.
+    let transparent: Vec<_> = (0..6).map(|_| entry(7, 0.5, 0.0)).collect();
+    let plan = plan_draw_order(&transparent, Some([0.0, 0.0, 0.0]));
+    assert_eq!(plan.transparent, vec![0, 1, 2, 3, 4, 5]);
+    assert!(plan.opaque.is_empty());
+    assert!(plan.invisible.is_empty());
+
+    // The camera-independent cache agrees: its initial order and the camera
+    // re-sort of an all-tie slice both stay in upload order.
+    let mut cache = DrawOrderCache::new(transparent);
+    assert_eq!(cache.transparent(), &[0, 1, 2, 3, 4, 5]);
+    cache.sort_transparent(Some([0.0, 0.0, 0.0]));
+    assert_eq!(cache.transparent(), &[0, 1, 2, 3, 4, 5]);
+}
+
 #[test]
 fn transparent_batches_are_back_to_front_by_camera_distance() {
     // Camera at x = 0; nearer batch at x = 1, farther at x = 10.

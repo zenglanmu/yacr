@@ -38,7 +38,6 @@ pub(crate) fn run_benchmark(
     let mut delta = cad_scene::SceneDelta {
         stamp: context.stamp.clone(),
         added: Vec::new(),
-        removed_chunks: Vec::new(),
         images: Vec::new(),
         masks: Vec::new(),
     };

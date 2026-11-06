@@ -478,7 +478,6 @@ impl CadSceneController {
                         SceneDelta {
                             stamp: stamp.clone(),
                             added: vec![],
-                            removed_chunks: vec![],
                             images: vec![],
                             masks: vec![],
                         },
@@ -728,7 +727,6 @@ impl CadSceneController {
                 let delta = Arc::new(SceneDelta {
                     stamp: stamp.clone(),
                     added: overlay.batches,
-                    removed_chunks: vec![],
                     images: vec![],
                     masks: vec![],
                 });
@@ -975,7 +973,6 @@ impl CadSceneController {
                 Arc::new(SceneDelta {
                     stamp: TaskStamp::new(DocumentId(0), 0),
                     added: Vec::new(),
-                    removed_chunks: Vec::new(),
                     images: Vec::new(),
                     masks: Vec::new(),
                 }),

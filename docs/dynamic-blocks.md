@@ -81,10 +81,12 @@ pub fn DrawingDatabase::set_block_visibility_state(
 - 否则：更新激活状态、`revision += 1`，`ChangeSet.changes` 只含**进入或离开可见集**
   的成员实体，`ChangeMask::GEOMETRY`；两状态共有实体不产生变更。
 
-`cad-scene::SceneCache::apply_changes` 按 `sources[].entity` 命中，因此仅该块受影响
-的成员批次失效；宿主重建该块显示表示，**不重新导入底图**（符合 §4.6 / 增量更新）。
-表示层从同一数据库重新求值：`ProviderRegistry::build_expanded` 经
-`block_entities` 只发出激活状态成员，切换后自动改变派生几何。
+`ChangeSet` 由宿主消费：受影响的成员实体从**同一数据库快照**重新求值，宿主按
+`cad-app` 的增量路径（append / update / retire）或整基重建发布新的 `SceneDelta`。
+`cad-scene` 本身没有按变更集失效或删除批次的通道（`SceneCache::publish` 只追加），
+所以这里不存在“只有该块的成员批次失效”的缓存机制。重建的仍然只是显示表示：
+`ProviderRegistry::build_expanded` 经 `block_entities` 只发出激活状态成员，切换后自动
+改变派生几何，**不重新导入底图**（符合 §4.6 / 增量更新）。
 
 ## 4. 导入器映射（cad-import-acadrust）
 

@@ -52,7 +52,7 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 | 几何 | cad-geometry：GeometryEngine；cad-kernel-adapter：SolidTessellator/SAT/SAB 隔离 |
 | 导入资源 | cad-import-acadrust：Importer/ImportReport；cad-proxy：ProxyRecordDecoder/ProxyPlayer；cad-resources：ResourceResolver |
 | 显示 | cad-representation：ProviderRegistry/DisplayRepresentation；cad-spatial：SpatialIndex/PickHit |
-| 场景/GPU | cad-scene：CacheKey/SceneDelta/SceneCache；cad-render-wgpu：Renderer/RenderTarget（唯一依赖 wgpu） |
+| 场景/GPU | cad-scene：SceneDelta/SceneCache（只追加；删除走宿主 retire）；cad-render-wgpu：Renderer/RenderTarget（唯一依赖 wgpu） |
 | 渲染会话 | cad-engine：UI 无关的 RenderSessionHandle、会话状态与 typed render/session protocol；直接依赖 cad-app/cad-db/cad-domain/cad-render-wgpu/cad-representation |
 | 工作能力 | cad-measure：MeasurementEngine/SnapCandidate |
 | 应用 | cad-app：Document/SessionState/Viewport/Workspace、CommandHandler/Tool |

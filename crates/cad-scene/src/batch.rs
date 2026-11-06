@@ -3,18 +3,6 @@
 use super::*;
 use std::sync::Arc;
 
-/// Identity of a cached chunk; any component change invalidates it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CacheKey {
-    pub identity: DocumentIdentity,
-    pub entity: EntityId,
-    pub revision: Revision,
-    pub style_version: u64,
-    pub font_version: u64,
-    pub lod: u32,
-    pub space: SpaceId,
-}
-
 /// Which topology a [`RenderBatch`]'s vertex stream carries.
 ///
 /// The renderer needs this because a mesh job is a triangle list *plus* an

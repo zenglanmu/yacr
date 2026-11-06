@@ -1,3 +1,54 @@
+## 2026-11-06 P5 清理：删除死通道 `removed_chunks` / `apply_changes` / `CacheKey`，平手序写入代码文档
+
+- **目标**：只清理，不改变任何绘制输出。两条“看起来存在、实际从不工作”的通道会误导读者：
+  `SceneDelta::removed_chunks` 从未被任何 builder 填充、也没有任何生产路径读取；`SceneCache::apply_changes`
+  的唯一调用者是 `cad-scene` 自己的测试，生产每次构建一次性 cache（`cad-app/src/render_scene/assembly.rs`）。
+- **删除 `SceneDelta::removed_chunks`**：`cad-scene`（`budget.rs` 字段与 `is_empty`、`cache.rs` 的
+  `build_internal`/`publish`）、`cad-app`（`assembly.rs`、`mod.rs`、`resident.rs`、`edit_tests.rs`、
+  `tests/scene_delta_clone_cost.rs`）、`cad-engine/tests`、`cad-render-wgpu` 的 9 个 test harness、
+  `cad-cli-tools`（`ops/render.rs`、`ops/benchmark.rs`、两个 test fixture）。**签名没有变化**
+  （只是少一个结构体字段）；`cad-app/src/render_scene/resident.rs::from_owned` 的 `SceneDelta`
+  解构同步少一个绑定。
+  - 结果：`SceneDelta` 只有 append 语义（`added` / `images` / `masks`）。`SceneCache::publish`
+    只追加；删除实体是宿主的 retire 路径（`FLAG_HIDDEN` 抑制 + 阈值触发的整基重建，见
+    `cad-app/src/render_scene/retire.rs`），CPU cache 边界由 `SceneCache::evict` 保证。
+- **删除 `SceneCache::apply_changes` 与 `CacheKey`**：两者都零生产使用者。`SceneCache::remove_chunk`
+  保留（`evict` 仍然调用），doc 注明它只服务 eviction，不存在 change-set/delta 删除通道。
+- **测试处置（逐一）**：
+  - `tests::cache::change_set_removes_affected_chunks`：删除（只测 `apply_changes`）。
+  - `tests::cache::visibility_switch_invalidates_only_the_delta_members`：删除；该行为在生产路径
+    由 `cad-app` 的 retire 覆盖（`crates/cad-app/src/render_scene/retire_tests.rs`：删除实体被
+    retire、其余 batch 保持驻留）。
+  - `tests::image::change_set_removes_affected_image_batches`：删除（只测 `apply_changes`）。
+  - `tests::fragments::mask_is_invalidated_by_its_entity_change`：**ported** →
+    `mask_batch_carries_inverted_clip_mode_through_publish`。保留仍为真的断言：`build` 的
+    `delta.masks[0].inverted` 与 `publish` 后 `mask_batches()[0].inverted`（clip mode Inside 到达
+    渲染器）；只去掉随 `apply_changes` 一起消失的失效尾部。
+  - 测试模块头注释同步改为“publish/eviction/task-queue”，并指向 retire 覆盖。
+- **修正“按 chunk 失效”的错误说法**：
+  - `crates/cad-scene/src/lib.rs` 模块文档：改为 build → `publish` 只按新 chunk key 追加，
+    无 per-chunk 失效/删除通道；删除走宿主 retire + 整基重建压缩，cache 自身只做预算淘汰。
+  - `docs/dynamic-blocks.md` §3：改为 `ChangeSet` 由宿主消费、场景按 append/update/retire 或整基
+    重建发布会话，明确 `cad-scene` 没有按变更集失效批次的机制；仍不重新导入底图。
+  - `docs/render-order.md`：在 tie-break 段落后补充“上传顺序是契约的一部分”，指向 append gate。
+- **平手序（equal `draw_order` = upload order）写进代码**：
+  - `crates/cad-render-wgpu/src/geometry/draw_order.rs` 模块文档与 `plan_draw_order` 文档都明确：
+    所有排序稳定、输入（上传）下标是最终比较项，因此同 `draw_order` 保持上传顺序；这正是增量
+    append 只能加**严格大于**常驻最大 `draw_order` 的几何的原因（`cad-app/src/render_scene/mod.rs`
+    的 `model_max_order` 门槛）——插到中间会改变平手序，控制器因此改走整基重建。
+  - 新测试 `equal_draw_order_keeps_upload_order`（`crates/cad-render-wgpu/src/geometry/tests.rs`）：
+    opaque（无相机）与 transparent（有相机、距离相等）两路都断言输入下标序，并校验
+    `DrawOrderCache` 的初始顺序与相机重排后仍为上传序。
+- **验证（本轮实际运行）**：`cargo test -p cad-scene/cad-app/cad-engine/cad-cli-tools --locked` 全绿
+  （cad-cli-tools 的 `pick_parity` 与 `realscene_render_perf` 需要真实 DWG/GPU，仍为 ignored，
+  **NOT RUN**）；`cargo test -p cad-render-wgpu --lib --locked -- --test-threads=1` 310 passed；
+  `cargo clippy`（5 个 crate，`--all-targets -D warnings`）通过；`cargo fmt --all -- --check`、
+  `check-file-size.py`、`check-architecture.py` 通过；`cargo check -p app-web --target
+  wasm32-unknown-unknown --locked` 通过（wasm 下既有 dead_code warning 仍在，非本轮引入）。
+- **NOT RUN / 边界**：没有 GPU/真机/像素证据（本阶段不改绘制路径，只有 CPU 计划与单测）；
+  `docs/handoff.md` 的历史条目保留当时的 `removed_chunks` 记述，不回写；ADR-0012 等历史 ADR
+  仍提到 `CacheKey`/`apply_changes`（决策记录，不追改）。
+
 ## 2026-11-06 变换-only 更新原地覆写（P4：overwrite，同槽位/同 pick key/不改绘制顺序）
 
 - **目标**：单个实体的 **transform-only** 更新必须是 GPU 原地覆写：同一个 batch 槽位、同一个

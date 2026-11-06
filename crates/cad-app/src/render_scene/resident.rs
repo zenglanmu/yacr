@@ -60,7 +60,7 @@ impl ResidentScene {
     ///
     /// The batches move into their per-batch `Arc`s (no deep copy), and the
     /// retained prefix `SceneDelta` keeps the whole-segment facts (`stamp`,
-    /// `removed_chunks`, `images`, `masks`) with `added` emptied: the batch
+    /// `images`, `masks`) with `added` emptied: the batch
     /// payload is the per-batch `Arc` list, so the scene never stores every batch
     /// twice. Read the batches through [`Self::batches`] /
     /// [`Self::materialized`], never through the prefix delta.
@@ -68,7 +68,6 @@ impl ResidentScene {
         let SceneDelta {
             stamp,
             added,
-            removed_chunks,
             images,
             masks,
         } = delta;
@@ -77,7 +76,6 @@ impl ResidentScene {
             prefix: Arc::new(SceneDelta {
                 stamp,
                 added: Vec::new(),
-                removed_chunks,
                 images,
                 masks,
             }),
@@ -277,7 +275,6 @@ impl ResidentScene {
         SceneDelta {
             stamp: self.stamp().clone(),
             added: self.batches().cloned().collect(),
-            removed_chunks: self.prefix.removed_chunks.clone(),
             images: self.prefix.images.clone(),
             masks: self.prefix.masks.clone(),
         }
@@ -297,7 +294,6 @@ mod tests {
         Arc::new(SceneDelta {
             stamp: TaskStamp::new(DocumentId(1), 0),
             added: Vec::new(),
-            removed_chunks: Vec::new(),
             images: Vec::new(),
             masks: Vec::new(),
         })
@@ -472,7 +468,6 @@ mod tests {
         SceneDelta {
             stamp: TaskStamp::new(document, 2),
             added: batches(count),
-            removed_chunks: Vec::new(),
             images: Vec::new(),
             masks: Vec::new(),
         }

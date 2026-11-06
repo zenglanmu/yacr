@@ -53,6 +53,11 @@
   升序；再相同则按上传下标升序。距离用平方值，单调等价且免开方；非有限距离退化为相等
   后仍由后两个键保证确定性。
 
+**上传顺序是契约的一部分**：`cad-app/src/render_scene/mod.rs` 的 append gate 只接受
+`draw_order` **严格大于**常驻最大值（`model_max_order`）的新实体；把几何插到中间会改变
+后续同序批次的上传顺序，因此控制器选择整基重建而不是追加。管线实现见
+`crates/cad-render-wgpu/src/geometry/draw_order.rs`（模块文档与 `plan_draw_order`）。
+
 排序键 `camera` 为 `Some(eye)` 时按深度排序；`None` 时透明批次退回到仅按 `draw_order`
 升序（确定性但**非深度正确**）。当前 `Renderer::render`（2D）传相机中心、`render_3d`
 传 `Camera3d::eye`，因此两条渲染入口总是有排序位置。

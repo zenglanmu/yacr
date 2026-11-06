@@ -65,7 +65,6 @@ fn scene(n: usize) -> SceneDelta {
     SceneDelta {
         stamp: TaskStamp::new(DocumentId(1), 0),
         added: (0..n).map(batch).collect(),
-        removed_chunks: Vec::new(),
         images: Vec::new(),
         masks: Vec::new(),
     }

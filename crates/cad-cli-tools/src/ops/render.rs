@@ -64,7 +64,6 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> Result<serde_json::Value
     let mut delta = cad_scene::SceneDelta {
         stamp: context.stamp.clone(),
         added: Vec::new(),
-        removed_chunks: Vec::new(),
         images: Vec::new(),
         masks: Vec::new(),
     };
@@ -418,7 +417,6 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> Result<serde_json::Val
     let mut delta = cad_scene::SceneDelta {
         stamp: context.stamp.clone(),
         added: Vec::new(),
-        removed_chunks: Vec::new(),
         images: Vec::new(),
         masks: Vec::new(),
     };

@@ -1010,21 +1010,22 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     精确阶段主导，均不单独隔离 broad phase（结构对比仍同口径）。「flat + coarse」行的**简报**数字
     （504.8/0.290/33.1 ms、115,812 kB）来自**上一轮**、**本轮未在该 SHA 重跑**；实现 lane 在**当前树内**
     重测 flat+coarse、编排者**独立复跑** rstar 腿（553.6/0.328/33.05 ms、138,984 kB），三组数字**不得**混算。
-- **现状/问题（更新于 2026-10-17）**：**拾取半已接线**（见上）。`SceneCache::apply_changes`
-  （`cad-scene/src/cache.rs:90`）**只在测试调用**，生产每次全量 rebuild；`CacheKey`
-  （`cad-scene/src/batch.rs:8`）**定义即废弃**。这两项仍待接入。
+- **现状/问题（更新于 2026-10-17；2026-11-06 P5 收敛）**：**拾取半已接线**（见上）。`SceneCache::apply_changes`
+  （`cad-scene/src/cache.rs:90`）**只在测试调用**、`CacheKey`（`cad-scene/src/batch.rs:8`）**定义即废弃**；
+  **P5 已把两者删除**（另有从未填充的 `SceneDelta::removed_chunks`），生产删除走
+  `cad-app` 的 retire 路径 + 整基重建压缩，见 `docs/handoff.md` 2026-11-06 P5 条目。此项不再排期。
 - **预期收益**：拾取/框选/查询成本与图纸总规模脱钩（**拾取半已实测**，见上；框选/查询仍**预期**）。
 - **前置条件/风险**：按 ADR-0012 §7 落两级结构（顶层网格 + local `rstar` 0.13 不可变快照）——顶层
   网格与超大图元策略**已落地**（拾取半），**每 chunk 的 `rstar` 亦已落地**（调优 `(256,1024)`，粗网格
   之上，见上「rstar 最终落地」）。版本取自 `Revision`，陈旧判定复用 `ChangeSet::follows()` / `TaskStamp`，
   **不**新增并行版本计数器。
 - **需要的决策**：`rstar` 引入的 `Cargo.lock` 更新与许可核查**已做并已引入**（0.13.0，crates.io，
-  `MIT OR Apache-2.0`，仅 `cad-spatial`；ADR-0012 未决项就此收敛）；以及
-  `SceneCache::apply_changes` / `CacheKey` 接入生产的排期。
-- **相关契约/栅栏**：索引接入前后 pick 结果一致 fence（**已落地**，见上）；`CacheKey` 版本键有效性测试；
+  `MIT OR Apache-2.0`，仅 `cad-spatial`；ADR-0012 未决项就此收敛）；原计划的
+  `SceneCache::apply_changes` / `CacheKey` 接入生产**作废**（两者已删除）。
+- **相关契约/栅栏**：索引接入前后 pick 结果一致 fence（**已落地**，见上）；
   超大图元不跨块复制的内存 fence（**已落地**：overflow 列表）。
-- **优先级**：S4（**拾取半已落地**（含每 chunk `rstar`）；`SceneCache`/`CacheKey` 半仍中；由 S2 实测驱动，
-  不得在无测量时先做）。
+- **优先级**：S4（**拾取半已落地**（含每 chunk `rstar`）；`SceneCache`/`CacheKey` 半已按 P5 删除，
+  不再实施；由 S2 实测驱动，不得在无测量时先做）。
 
 ### S5 — Window / Crossing 框选（串行）
 

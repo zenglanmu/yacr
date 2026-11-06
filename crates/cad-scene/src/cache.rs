@@ -93,52 +93,10 @@ impl SceneCache {
         self.image_evictions
     }
 
-    /// Remove batches that reference objects touched by `changes`.
-    pub fn apply_changes(&mut self, changes: &ChangeSet) -> CadResult<()> {
-        if changes.changes.is_empty() {
-            return Ok(());
-        }
-        let mut dirty: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
-        for change in &changes.changes {
-            match change {
-                ObjectChange::Insert(id)
-                | ObjectChange::Update(id, _)
-                | ObjectChange::Delete(id) => {
-                    // ObjectId and EntityId share the same numeric space during
-                    // import; a finer mapping is a documented follow-up.
-                    dirty.insert(EntityId(id.0));
-                }
-            }
-        }
-        let to_remove: Vec<u64> = self
-            .chunks
-            .iter()
-            .filter(|(_, batch)| batch.sources.iter().any(|s| dirty.contains(&s.entity)))
-            .map(|(k, _)| *k)
-            .collect();
-        for key in to_remove {
-            self.remove_chunk(key);
-        }
-        // Image draw items are invalidated by the same dirty set as chunks.
-        let mut image_bytes_removed = 0usize;
-        self.images.retain(|image| {
-            let keep = !image.sources.iter().any(|s| dirty.contains(&s.entity));
-            if !keep {
-                image_bytes_removed += image.approx_bytes();
-            }
-            keep
-        });
-        self.images_used_bytes = self.images_used_bytes.saturating_sub(image_bytes_removed);
-        // Mask draw items are invalidated by the same dirty set.
-        self.masks.retain(|mask| {
-            !mask
-                .sources
-                .iter()
-                .any(|source| dirty.contains(&source.entity))
-        });
-        Ok(())
-    }
-
+    /// Drop one cached chunk and its accounted bytes.
+    ///
+    /// Only [`SceneCache::evict`] calls this; there is no change-set or
+    /// scene-delta removal channel (a published delta only adds content).
     fn remove_chunk(&mut self, key: u64) {
         if let Some(batch) = self.chunks.remove(&key) {
             self.used_bytes = self.used_bytes.saturating_sub(batch.approx_bytes());
@@ -181,7 +139,6 @@ impl SceneCache {
         let mut delta = SceneDelta {
             stamp,
             added: Vec::new(),
-            removed_chunks: Vec::new(),
             images: Vec::new(),
             masks: Vec::new(),
         };
@@ -515,14 +472,16 @@ impl SceneCache {
     }
 
     /// Commit a delta if its stamp still matches the current task context.
+    ///
+    /// A committed delta only appends: batches get the next chunk key, images
+    /// and masks are pushed onto their own lists. Nothing is removed here —
+    /// removals are the host's retire path (suppress by flag, then compact on a
+    /// full rebuild) plus this cache's own budget eviction.
     pub fn publish(&mut self, delta: SceneDelta, current: &TaskStamp) -> CadResult<()> {
         delta
             .stamp
             .validate(current)
             .map_err(|_| CadError::StaleResult)?;
-        for key in delta.removed_chunks {
-            self.remove_chunk(key);
-        }
         for batch in delta.added {
             let key = self.next_chunk;
             self.next_chunk += 1;

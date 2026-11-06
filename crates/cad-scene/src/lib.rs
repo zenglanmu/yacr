@@ -1,11 +1,15 @@
 //! CPU scene cache, separate from authoritative data and device resources.
 //!
-//! Spec v2.0 §4.8, §8.1, §8.4: display representations become chunked render
-//! batches. Batches are keyed so a change invalidates only the affected chunks,
-//! and vertices are stored relative to a per-batch local origin so `f32` keeps
+//! Spec v2.0 §4.8, §8.1, §8.4: display representations become render batches.
+//! A build produces one [`SceneDelta`]; [`SceneCache::publish`] only **appends**
+//! its batches (plus images/masks) under a fresh chunk key. There is no per-chunk
+//! invalidation or removal channel: removing content is the host's job — the
+//! retire path suppresses a deleted entity's resident batches with `FLAG_HIDDEN`
+//! and a full rebuild compacts them (`cad-app/src/render_scene/retire.rs`), while
+//! this cache evicts oldest chunks to stay within `SceneBudget::cpu_bytes`.
+//! Vertices are stored relative to a per-batch local origin so `f32` keeps
 //! precision at large coordinates.
 
-use cad_db::{ChangeSet, ObjectChange};
 use cad_domain::*;
 use cad_representation::{DisplayPrimitive, DisplayRepresentation, ImageVertex};
 use cad_resources::ResourceKey;

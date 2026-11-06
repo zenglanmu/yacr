@@ -339,7 +339,6 @@ fn appendable_delta_requires_no_image_or_mask_draw_items() {
     let delta = SceneDelta {
         stamp: TaskStamp::new(DocumentId(1), 1),
         added: vec![],
-        removed_chunks: vec![],
         images: vec![],
         masks: vec![],
     };

@@ -3,11 +3,17 @@
 use super::*;
 
 /// A publishable update to the scene cache.
+///
+/// A delta only ever **adds** content: `added` batches, `images` and `masks` are
+/// appended by [`SceneCache::publish`] and retire/eviction happens elsewhere
+/// (`cad_app::render_scene::retire` suppresses retired batches and a full rebuild
+/// compacts them; [`SceneCache::evict`] bounds the CPU cache). There is no
+/// per-chunk removal channel: deleting a batch from a published scene is not
+/// expressible, so no field pretends it is.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneDelta {
     pub stamp: TaskStamp,
     pub added: Vec<RenderBatch>,
-    pub removed_chunks: Vec<u64>,
     /// Image draw items added by this delta; published into their own cache list
     /// with the same stale-stamp validation as `added`.
     pub images: Vec<ImageBatch>,
@@ -19,10 +25,7 @@ pub struct SceneDelta {
 
 impl SceneDelta {
     pub fn is_empty(&self) -> bool {
-        self.added.is_empty()
-            && self.removed_chunks.is_empty()
-            && self.images.is_empty()
-            && self.masks.is_empty()
+        self.added.is_empty() && self.images.is_empty() && self.masks.is_empty()
     }
 }
 

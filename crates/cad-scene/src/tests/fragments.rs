@@ -238,10 +238,15 @@ fn mask_without_three_vertices_is_an_explicit_error() {
     assert!(cache.build(&rep, stamp()).is_err());
 }
 
-/// A change to the mask's entity invalidates the cached mask, exactly like an
-/// image or a chunk.
+/// A mask's `inverted` (DXF clip mode Inside) reaches the renderer through the
+/// published `MaskBatch`.
+///
+/// Ported from `mask_is_invalidated_by_its_entity_change`: the invalidation tail
+/// went away with `SceneCache::apply_changes` (a published delta only adds; a
+/// delete is the host's retire path), but the still-true half — the clip mode
+/// survives `build` → `publish` into `mask_batches()` — is kept here.
 #[test]
-fn mask_is_invalidated_by_its_entity_change() {
+fn mask_batch_carries_inverted_clip_mode_through_publish() {
     let mut rep = line_representation(9, Vec::new());
     rep.fragments[0].primitive = DisplayPrimitive::Mask {
         boundary: vec![
@@ -273,19 +278,6 @@ fn mask_is_invalidated_by_its_entity_change() {
     cache.publish(delta, &stamp()).unwrap();
     assert_eq!(cache.mask_count(), 1);
     assert!(cache.mask_batches()[0].inverted);
-    let changes = ChangeSet {
-        database: DatabaseId(1),
-        before: Revision(0),
-        after: Revision(1),
-        transaction: TransactionId(1),
-        reason: "mask edit".into(),
-        changes: vec![ObjectChange::Update(
-            ObjectId(9),
-            cad_db::ChangeMask::GEOMETRY,
-        )],
-    };
-    cache.apply_changes(&changes).unwrap();
-    assert_eq!(cache.mask_count(), 0);
 }
 
 /// End-to-end contract for the threaded display order: entity geometry at

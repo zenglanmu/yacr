@@ -92,26 +92,3 @@ fn over_budget_image_batches_are_evicted_and_counted() {
         ResourceKey("img:2".into())
     );
 }
-
-#[test]
-fn change_set_removes_affected_image_batches() {
-    let mut cache = SceneCache::default();
-    let rep = image_representation(9, ResourceKey("img:9".into()), Transform3::identity());
-    let delta = cache.build(&rep, stamp()).unwrap();
-    cache.publish(delta, &stamp()).unwrap();
-    assert_eq!(cache.image_count(), 1);
-    let changes = ChangeSet {
-        database: DatabaseId(1),
-        before: Revision(0),
-        after: Revision(1),
-        transaction: TransactionId(1),
-        reason: "edit image".into(),
-        changes: vec![ObjectChange::Update(
-            ObjectId(9),
-            cad_db::ChangeMask::GEOMETRY,
-        )],
-    };
-    cache.apply_changes(&changes).unwrap();
-    assert_eq!(cache.image_count(), 0);
-    assert_eq!(cache.image_used_bytes(), 0);
-}

@@ -5,7 +5,6 @@ fn delta(revision: u64) -> SceneDelta {
     SceneDelta {
         stamp: TaskStamp::new(DocumentId(1), revision),
         added: Vec::new(),
-        removed_chunks: Vec::new(),
         images: Vec::new(),
         masks: Vec::new(),
     }
