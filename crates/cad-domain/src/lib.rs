@@ -59,13 +59,24 @@ pub struct Revision(pub u64);
 /// Two opens with the same `DatabaseId` but different content produce different
 /// identities, so derived render state is rebuilt instead of showing stale
 /// geometry (audit B04).
+///
+/// The "different drawing" signal is [`Self::construction_nonce`], assigned once
+/// when the database is constructed and preserved by `Clone`. It is deliberately
+/// **not** model-space bounds: bounds change on every geometry edit, so using
+/// them here turned every edit into an O(scene) bounds recompute (measured at
+/// 143.6 ms on a 725k-entity drawing) just to compare identities. A nonce only
+/// has to distinguish drawings — callers that need the extent still get it,
+/// exactly and lazily, from `DrawingDatabase::bounds()`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SceneIdentity {
     pub database: DatabaseId,
     pub revision: Revision,
     pub entities: u64,
     pub layers: u64,
-    pub bounds: [Point3; 2],
+    /// Process-unique construction identity of the database instance. A clone
+    /// keeps it (a clone is the same drawing); a fresh build of the same content
+    /// gets a new one.
+    pub construction_nonce: u64,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CadError {

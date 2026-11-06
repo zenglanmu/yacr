@@ -1,6 +1,7 @@
 //! The sanctioned construction path for a [`DrawingDatabase`].
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use cad_domain::*;
 
@@ -13,6 +14,17 @@ use crate::tables::{
     LayerAttributes, Layout, LineType, PlotSettingsRecord, Scale, Style,
 };
 use crate::xref::ExternalReference;
+
+/// Process-global source of [`DrawingDatabase::construction_nonce`].
+///
+/// Starts at 1 so `0` is never a real database identity. `Relaxed` is enough:
+/// only uniqueness within one process is required, not ordering between
+/// constructions. A `u64` wrap would require 2^64 constructions in one process.
+static NEXT_CONSTRUCTION_NONCE: AtomicU64 = AtomicU64::new(1);
+
+fn next_construction_nonce() -> u64 {
+    NEXT_CONSTRUCTION_NONCE.fetch_add(1, Ordering::Relaxed)
+}
 
 /// The only sanctioned way to construct a [`DrawingDatabase`].
 ///
@@ -29,6 +41,7 @@ impl DrawingDatabaseBuilder {
             database: DrawingDatabase {
                 id,
                 revision: Revision(0),
+                construction_nonce: next_construction_nonce(),
                 entities: BTreeMap::new(),
                 layers: BTreeMap::new(),
                 blocks: BTreeMap::new(),

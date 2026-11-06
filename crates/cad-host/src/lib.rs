@@ -592,7 +592,8 @@ impl HostCore {
         // that ran mid-capture (a typed `ERASE`/`UNDO`/`MOVE`) can remove the
         // entity the candidate/pick points at even though the mode and space are
         // unchanged. Keyed on the drawing's existing scene identity (id +
-        // revision + structural counts + bounds), never a new counter.
+        // revision + structural counts + construction nonce), never a new
+        // counter.
         let capture_context_before = {
             let c = self.controller.borrow();
             (

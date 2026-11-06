@@ -691,3 +691,49 @@ fn insert_does_not_repair_an_already_stale_bounds_memo() {
     assert_eq!(db.bounds(), Some((point(50.0, 0.0), point(201.0, 0.0))));
     assert_bounds_match_reference(&db);
 }
+
+// ---------------------------------------------------------------------------
+// Scene identity is independent of bounds (P4-pre)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn scene_identity_does_not_consult_or_repair_the_bounds_memo() {
+    let mut db = writable_db();
+    let mut tx = db
+        .begin_drawing_transaction("insert", TransactionId(1))
+        .unwrap();
+    tx.insert_entity(line_entity(1, point(0.0, 0.0), point(1.0, 0.0)))
+        .unwrap();
+    tx.commit().unwrap();
+    // Populate the memo once, so "valid at the current revision" is observable.
+    assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(1.0, 0.0))));
+    let populated = db.revision();
+    assert_eq!(db.valid_bounds_cache_revision_for_test(), Some(populated));
+
+    // An update cannot be folded into the memo, so it is left stale: still
+    // tagged with the pre-write revision.
+    let mut tx = db
+        .begin_drawing_transaction("update", TransactionId(2))
+        .unwrap();
+    tx.update_entity(line_entity(1, point(0.0, 0.0), point(10.0, 0.0)))
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(db.valid_bounds_cache_revision_for_test(), None);
+    assert_eq!(db.cached_bounds_revision_for_test(), Some(populated));
+
+    // Identity is O(1): if it consulted `bounds()` the memo would be repaired to
+    // the new revision. It must stay exactly as the write left it, while the
+    // identity still changes because the revision did.
+    let identity = db.scene_identity();
+    assert_eq!(db.valid_bounds_cache_revision_for_test(), None);
+    assert_eq!(db.cached_bounds_revision_for_test(), Some(populated));
+    assert_eq!(identity.revision, db.revision());
+
+    // `bounds()` itself is still exact and lazily recomputed on demand.
+    assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(10.0, 0.0))));
+    assert_eq!(
+        db.valid_bounds_cache_revision_for_test(),
+        Some(db.revision())
+    );
+    assert_bounds_match_reference(&db);
+}

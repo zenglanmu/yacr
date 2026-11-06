@@ -44,6 +44,20 @@ pub(crate) use bounds::BoundsCache;
 pub struct DrawingDatabase {
     pub(crate) id: DatabaseId,
     pub(crate) revision: Revision,
+    /// Process-global construction nonce, assigned once in
+    /// [`crate::DrawingDatabaseBuilder::new`] from a monotonic `AtomicU64`.
+    ///
+    /// It is the "is this the same drawing instance?" half of
+    /// [`Self::scene_identity`]: a host may reuse a [`DatabaseId`] for a
+    /// different drawing, and this nonce — unlike model-space bounds — changes
+    /// on construction, never on a geometry edit, so the identity stays O(1).
+    ///
+    /// Deliberately not named `generation`: that word already means the
+    /// xref/import generation (`cad-import-acadrust`), the session tool
+    /// generation and the render device generation.
+    ///
+    /// Preserved by `Clone`: a clone is the same drawing.
+    pub(crate) construction_nonce: u64,
     pub(crate) entities: BTreeMap<EntityId, DbEntity>,
     pub(crate) layers: BTreeMap<LayerId, Layer>,
     pub(crate) blocks: BTreeMap<BlockId, BlockDefinition>,

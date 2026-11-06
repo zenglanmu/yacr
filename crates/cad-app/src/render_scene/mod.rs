@@ -180,9 +180,10 @@ pub struct CadSceneController {
 }
 
 impl CadSceneController {
-    /// Immutable database adoption avoids an O(n) bounds/identity walk on camera
-    /// navigation. Retaining the Arc prevents pointer reuse from hiding a new
-    /// open, even when database id/revision/bounds happen to match.
+    /// Immutable database adoption lets a camera-only prepare reuse the resident
+    /// base without re-deriving scene state. Retaining the Arc prevents pointer
+    /// reuse from hiding a new open, even when the database's id/revision happen
+    /// to match.
     #[allow(clippy::too_many_arguments)]
     /// Install the derived vendor snapshot that the next base build must merge.
     ///

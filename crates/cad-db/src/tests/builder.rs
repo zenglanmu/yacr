@@ -118,8 +118,38 @@ fn scene_identity_distinguishes_same_id_different_content() {
     let a = make(10.0);
     let b = make(20.0);
     assert_eq!(a.id(), b.id(), "same DatabaseId");
+    assert_eq!(a.revision(), b.revision(), "same starting revision");
+    assert_eq!(a.entity_count(), b.entity_count(), "same structural count");
+    // The drawings differ only in their geometry, so the identity difference is
+    // exactly the construction nonce (not bounds, which are no longer part of it).
+    assert_ne!(
+        a.scene_identity().construction_nonce,
+        b.scene_identity().construction_nonce,
+        "a different construction is a different drawing"
+    );
     assert_ne!(a.scene_identity(), b.scene_identity());
     assert_eq!(a.scene_identity(), a.scene_identity());
+}
+
+#[test]
+fn construction_nonce_distinguishes_databases_and_survives_clone() {
+    // Same id and same content, two constructions: two drawings.
+    let first = DrawingDatabaseBuilder::new(DatabaseId(1)).finish().unwrap();
+    let second = DrawingDatabaseBuilder::new(DatabaseId(1)).finish().unwrap();
+    assert_ne!(
+        first.scene_identity().construction_nonce,
+        second.scene_identity().construction_nonce
+    );
+    assert_ne!(first.scene_identity(), second.scene_identity());
+
+    // A clone is the same drawing, so it must keep the nonce: adopting a cloned
+    // snapshot must not look like a different open to the scene controller.
+    let clone = first.clone();
+    assert_eq!(
+        clone.scene_identity().construction_nonce,
+        first.scene_identity().construction_nonce
+    );
+    assert_eq!(clone.scene_identity(), first.scene_identity());
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! P3 retire bookkeeping: keep the resident base for a delete-only commit.
 //!
-//! A delete necessarily changes the scene identity (revision, entity count,
-//! bounds), so the ordinary version comparison always asks for a full rebuild.
+//! A delete necessarily changes the scene identity (revision and entity count),
+//! so the ordinary version comparison always asks for a full rebuild.
 //! This module holds the narrow comparison that decides whether the resident
 //! base still describes the surviving drawing, the class filter for entities a
 //! whole-entity flag can actually suppress, and the retired-set flag plumbing.
@@ -28,14 +28,15 @@ pub(crate) const RETIRED_COMPACTION_THRESHOLD: usize = 4096;
 
 /// Whether the resident base can stay for a delete-only commit.
 ///
-/// A delete necessarily changes the scene identity's `revision`, `entities` and
-/// `bounds` (and, for a fresh snapshot `Arc`, `document_epoch`), so those are
+/// A delete necessarily changes the scene identity's `revision` and `entities`
+/// (and, for a fresh snapshot `Arc`, `document_epoch`), so those are
 /// deliberately ignored. Everything that decides how a surviving entity's
-/// batches were built — database id, font engine, layer overrides, space, image
-/// cache, vendor snapshot — must be identical, otherwise the resident base no
-/// longer describes the drawing.
+/// batches were built — the drawing's construction nonce and database id, font
+/// engine, layer overrides, space, image cache, vendor snapshot — must be
+/// identical, otherwise the resident base no longer describes the drawing.
 pub(super) fn retire_keeps_base(previous: &SceneVersion, current: &SceneVersion) -> bool {
-    previous.identity.database == current.identity.database
+    previous.identity.construction_nonce == current.identity.construction_nonce
+        && previous.identity.database == current.identity.database
         && previous.identity.layers == current.identity.layers
         && previous.document == current.document
         && previous.fonts == current.fonts

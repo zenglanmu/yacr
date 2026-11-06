@@ -1,3 +1,66 @@
+## 2026-11-06 场景身份改用构造 nonce，bounds 不再参与（P4-pre）
+
+- **问题**：`SceneIdentity`（`crates/cad-domain/src/lib.rs`）把 model-space `bounds` 当身份的一
+  部分。`bounds` 每次几何编辑都会变，于是每次编辑都要为“身份比较”全量重算 bounds：P2c 在
+  `fixtures/complex-test.dwg`（725k 实体）实测 `scene_identity` = 143.6 ms；P2c 的 insert-only
+  快路径只覆盖纯插入，update/delete 仍会落回这条 O(scene) 路径。
+- **改法（本次）**：`DrawingDatabase` 新增 `construction_nonce: u64`，由 builder 在构造时从
+  进程级 `static NEXT_CONSTRUCTION_NONCE: AtomicU64`（`Relaxed`，从 1 起）取号；`#[derive(Clone)]`
+  会原样复制该字段，所以 clone 仍是同一张图。命名**刻意不用 `generation`**：工作区里该词已分别
+  表示 xref/import generation（`cad-import-acadrust`）、session tool generation 与 render device
+  generation。
+  - 构造点只有 `crates/cad-db/src/builder.rs` 的 `DrawingDatabaseBuilder::new`（`finish` 只是
+    校验并返回同一个 database；本 crate **没有** `impl Default for DrawingDatabase`，也没有第二处
+    结构体字面量）。因此只需覆盖这一个入口，nonce 在 builder 创建时即固定。
+  - `SceneIdentity` 的 `bounds: [Point3; 2]` 替换为 `construction_nonce: u64`；`database`、
+    `revision`、`entities`、`layers` 保持不变。`DrawingDatabase::scene_identity()` 现在只读计数与
+    nonce，**O(1)**，不触碰 `bounds()`。doc 注释说明了为什么 nonce 优于 bounds（bounds 每次编辑
+    都变，作为身份会把每次编辑变成 O(scene) 重算；nonce 只负责区分“是不是另一张图”）。
+- **staleness 语义**：复用 `DatabaseId` 的**另一张图**现在由 nonce 区分（audit B04 仍成立）；
+  同一张图的编辑仍由 `revision`/计数区分。`retire_keeps_base` 改为比较
+  `identity.construction_nonce` + `identity.database` + `identity.layers`；仍有意忽略 delete 必然
+  改变的 `revision` / `entities` 与每轮新 `Arc` 的 `document_epoch`。身份里已经没有 bounds 形状的
+  字段，原先“跳过 bounds”的注释与代码已同步改写。
+- **bounds 语义未变**：`bounds()` 仍然**精确**，只是不再被身份读取；过期记忆要等到有人真正调用
+  `bounds()` 才重算（惰性）。P2c 的 insert-only 快路径原样保留（对 `bounds()` 的调用者仍有用）。
+- **测试**：
+  - `crates/cad-db/src/tests/builder.rs`
+    `construction_nonce_distinguishes_databases_and_survives_clone`：同内容、同 `DatabaseId` 的两次
+    构造 nonce 不同；`clone()` 共享 nonce 且整个 `SceneIdentity` 相等。
+    `scene_identity_distinguishes_same_id_different_content` 仍保留，并显式断言两者
+    `revision`/实体数相同、差异来自 nonce（不再依赖 bounds）。
+  - `crates/cad-db/src/tests/bounds.rs`
+    `scene_identity_does_not_consult_or_repair_the_bounds_memo`：先 `bounds()` 让记忆对当前
+    revision 有效；update-only 提交后记忆变 stale（`valid_bounds_cache_revision_for_test() == None`、
+    旧 tag 仍在）；随后调用 `scene_identity()`，记忆**未被修复**（仍 None / 旧 tag），证明身份不读
+    `bounds()`。最后再调 `bounds()` 得到精确新值并按 reference 校验。
+  - 既有 `drawing_scene_identity_changes_on_every_write` / `..._on_writes_only` /
+    `drawing_transaction_is_atomic_on_invalid_input` 未改语义，仍通过（它们靠 revision 而非 bounds）。
+- **本轮 verbatim**：`cargo test -p cad-domain --locked` →
+  `test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s`；
+  `cargo test -p cad-db --locked` →
+  `test result: ok. 191 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s`
+  （另有 invariants `13 passed`、transaction_membership `5 passed`）；
+  `cargo test -p cad-app --locked` →
+  `test result: ok. 1560 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 1.90s`；
+  `cargo test -p cad-engine --locked` →
+  `test result: ok. 112 passed; 0 failed; 15 ignored; 0 measured; 0 filtered out; finished in 0.50s`；
+  `cargo test -p cad-host --locked` →
+  `test result: ok. 266 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s`。
+  `cargo clippy -p cad-domain -p cad-db -p cad-app -p cad-engine -p cad-host --all-targets --locked
+  -- -D warnings` 通过；`cargo fmt --all -- --check` 通过；`check-file-size.py` OK；`check-architecture.py`
+  OK。
+- **真实样本（release，`commit_real_fixture --ignored --nocapture`）**：两次运行
+  `incremental_prepare_ms` = **0.556** / **0.527**（P2c 记录 0.539，属噪声范围内），
+  `full_reference_ms` = 5104.5 / 5057.2，`transaction_ms` = 0.009，`base_ms` ≈ 4.9–5.0 s，
+  `batches` 145776 → 145777，两次都断言增量结果与全量重建的 `added/images/masks` 相等。该 fixture
+  是 line **insert/append**，P2c 的 insert-only 记忆让旧身份本来也命中记忆，所以这里没有可见提升；
+  本轮的收益在 update/delete 等记忆为 stale 的编辑路径（不再有 O(scene) 身份重算），该路径本轮
+  **未单独计时**。
+- **未做 / NOT RUN**：未改绘制内容或 GPU 提交；未跑 workspace 全量门禁/全量测试；未跑
+  Windows/macOS/Android/Web 载体、真机、真实 GPU、像素或性能验收。`bounds()` 无近似值、无新依赖。
+
+
 ## 2026-11-06 删除保持驻留 base（P3：retire + 阈值压实）
 
 - **目标**：delete-only 提交不再强制全量重建。`complex-test.dwg` 上增量 prepare 0.54 ms、

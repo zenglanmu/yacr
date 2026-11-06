@@ -139,7 +139,7 @@ impl HostCore {
         let policy = self.tolerance_policy();
         // The identity a resolved hover depends on (ADR-0012 §5): the drawing's
         // scene identity (database id + content revision + structural counts +
-        // memoized model bounds) **and** the session layer-override fingerprint
+        // construction nonce) **and** the session layer-override fingerprint
         // (spec §4.8: a pure visibility change rebuilds the scene). An edit or
         // undo changes the first; a layer show/hide changes the second; a camera
         // move changes neither.

@@ -67,17 +67,19 @@ impl DrawingDatabase {
     /// A bare `DatabaseId` is not enough: hosts may reuse the same id for a
     /// different drawing, which would leave old GPU batches on screen (audit
     /// B04). The identity therefore mixes the id, revision, structural counts
-    /// and model-space bounds.
+    /// and the database's construction nonce.
+    ///
+    /// This is **O(1)**: it reads no geometry and, in particular, does not
+    /// consult [`Self::bounds`]. Bounds change on every edit, so including them
+    /// forced a full model-space rescan per edit just to compare identities; the
+    /// nonce distinguishes drawings without touching content.
     pub fn scene_identity(&self) -> SceneIdentity {
-        let (min, max) = self
-            .bounds()
-            .unwrap_or((Point3::default(), Point3::default()));
         SceneIdentity {
             database: self.id,
             revision: self.revision,
             entities: self.entities.len() as u64,
             layers: self.layers.len() as u64,
-            bounds: [min, max],
+            construction_nonce: self.construction_nonce,
         }
     }
 
