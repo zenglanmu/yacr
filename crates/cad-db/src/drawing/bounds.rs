@@ -18,6 +18,14 @@ use crate::entity::DbEntity;
 /// ([`DrawingDatabase::restore_entity_display_state`], crate-private) also clears
 /// it explicitly, so the cache can never serve a pre-write extent even inside a
 /// single batch.
+///
+/// An **insert-only** model-space write is the one exception to "invalidate":
+/// insertion is monotone, so the write path rewrites this memo at the new
+/// revision with the exact union of the old box and the inserted rows instead of
+/// leaving it stale. See
+/// [`DrawingDatabase::insert_only_bounds`] / `store_insert_only_bounds`. Every
+/// other write (update, delete, block/paper-space/display changes) leaves the
+/// memo stale and the next `bounds()` recomputes.
 #[derive(Debug, Default)]
 pub(crate) struct BoundsCache {
     /// Visible to the sibling `test_support` module, which reads the tag only.
@@ -52,7 +60,22 @@ struct LocalExpansion {
 #[derive(Default)]
 struct BoundsComputation {
     meta: BTreeMap<BlockId, BlockGraphMeta>,
+    /// Whether `meta` has been filled. The graph summary is only needed once a
+    /// block is actually expanded, so it is computed on first use: an
+    /// insert-only batch of plain geometry must not pay an O(#blocks) DFS.
+    meta_ready: bool,
     memo: BTreeMap<BlockId, LocalExpansion>,
+}
+
+impl BoundsComputation {
+    /// The block graph summary, computed at most once per computation.
+    fn block_meta(&mut self, db: &DrawingDatabase) -> &BTreeMap<BlockId, BlockGraphMeta> {
+        if !self.meta_ready {
+            self.meta = db.block_graph_meta();
+            self.meta_ready = true;
+        }
+        &self.meta
+    }
 }
 
 /// One block on [`DrawingDatabase::block_graph_meta`]'s explicit DFS stack.
@@ -144,29 +167,110 @@ impl DrawingDatabase {
         cache.bounds = None;
     }
 
+    /// The bounds an **insert-only** batch leaves behind, or `None` when that
+    /// batch cannot extend the extent monotonically.
+    ///
+    /// Insertion never shrinks a box, so for a batch that only *adds* model-space
+    /// rows the new extent is exactly `union(cached, bounds(inserted))`. This
+    /// returns `Some(bounds)` only when all of the following hold:
+    ///
+    /// * the memo is valid for the **pre-write** revision (`before`), so the
+    ///   cached box really describes the pre-write content;
+    /// * every entry in `changes` is an insert (`Some(entity)` for an id that
+    ///   does not exist yet), never an update or a delete;
+    /// * every inserted entity is model-space (paper space and block members do
+    ///   not contribute to [`Self::bounds`]).
+    ///
+    /// `Update`, `Delete`, block-row batches and display-state writes can all
+    /// shrink or otherwise rewrite the extent, so for those the caller gets
+    /// `None` and the memo stays invalid: the next [`Self::bounds`] recomputes
+    /// from scratch. That is deliberate — there is no exact decremental
+    /// structure yet, and a loose box would be a bug.
+    ///
+    /// The union itself is written by [`Self::store_insert_only_bounds`] after
+    /// the revision advances.
+    pub(super) fn insert_only_bounds(
+        &self,
+        before: Revision,
+        changes: &[(EntityId, Option<DbEntity>)],
+    ) -> Option<Option<(Point3, Point3)>> {
+        let cached = {
+            let cache = self
+                .bounds_cache
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if cache.revision != Some(before) {
+                return None;
+            }
+            cache.bounds
+        };
+        let mut inserted: Vec<&DbEntity> = Vec::with_capacity(changes.len());
+        for (id, change) in changes {
+            let entity = change.as_ref()?;
+            if self.entities.contains_key(id) {
+                return None;
+            }
+            if !matches!(entity.space, SpaceId::Model) {
+                return None;
+            }
+            inserted.push(entity);
+        }
+        Some(union_bounds(cached, self.bounds_of_entities(inserted)))
+    }
+
+    /// Publish bounds proven by [`Self::insert_only_bounds`] at `revision`.
+    ///
+    /// Kept beside the cache it writes: the fast path must not leave it stale or
+    /// write a tag the content does not match.
+    pub(super) fn store_insert_only_bounds(
+        &self,
+        revision: Revision,
+        bounds: Option<(Point3, Point3)>,
+    ) {
+        let mut cache = self
+            .bounds_cache
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.revision = Some(revision);
+        cache.bounds = bounds;
+    }
+
     /// Recompute bounds from scratch; the cacheable work behind [`Self::bounds`].
     ///
     /// Model-space entities are read directly rather than through
     /// [`Self::model_space`]: bounds accumulation is order-independent, so that
     /// accessor's allocate-and-sort would be wasted work on a hot path.
     fn compute_bounds(&self) -> Option<(Point3, Point3)> {
+        self.bounds_of_entities(
+            self.entities
+                .values()
+                .filter(|entity| matches!(entity.space, SpaceId::Model)),
+        )
+    }
+
+    /// Fold `entities` into one box exactly the way [`Self::compute_bounds`]
+    /// folds the resident model space.
+    ///
+    /// This is the single per-entity geometry-to-AABB routine: identity
+    /// transform, depth 0, block expansions resolved from the current block
+    /// table. The insert-only fast path calls it with just the inserted rows, so
+    /// it cannot drift from a from-scratch recompute.
+    fn bounds_of_entities<'a>(
+        &self,
+        entities: impl IntoIterator<Item = &'a DbEntity>,
+    ) -> Option<(Point3, Point3)> {
         let mut acc = BoundsAccumulator::new();
         let mut stack: Vec<BlockId> = Vec::new();
-        let mut context = BoundsComputation {
-            meta: self.block_graph_meta(),
-            memo: BTreeMap::new(),
-        };
-        for entity in self.entities.values() {
-            if matches!(entity.space, SpaceId::Model) {
-                self.accumulate_bounds(
-                    &mut acc,
-                    entity,
-                    &Transform3::identity(),
-                    0,
-                    &mut stack,
-                    &mut context,
-                );
-            }
+        let mut context = BoundsComputation::default();
+        for entity in entities {
+            self.accumulate_bounds(
+                &mut acc,
+                entity,
+                &Transform3::identity(),
+                0,
+                &mut stack,
+                &mut context,
+            );
         }
         acc.finish()
     }
@@ -289,7 +393,11 @@ impl DrawingDatabase {
         if let Some(expansion) = context.memo.get(&block) {
             return Some(*expansion);
         }
-        let meta = context.meta.get(&block).copied().unwrap_or_default();
+        let meta = context
+            .block_meta(self)
+            .get(&block)
+            .copied()
+            .unwrap_or_default();
         if meta.cyclic || meta.height >= MAX_INSTANCE_DEPTH {
             return None;
         }
@@ -406,5 +514,30 @@ impl DrawingDatabase {
             }
         }
         dependencies
+    }
+}
+
+/// The smallest box containing both inputs, or the non-empty one when the other
+/// is empty.
+///
+/// Both inputs come from [`BoundsAccumulator::finish`], i.e. their coordinates
+/// are finite and `min <= max` on every axis, so folding all four corners back
+/// through the accumulator is the exact union (and keeps the non-finite filter
+/// in one place).
+fn union_bounds(
+    left: Option<(Point3, Point3)>,
+    right: Option<(Point3, Point3)>,
+) -> Option<(Point3, Point3)> {
+    match (left, right) {
+        (Some((left_min, left_max)), Some((right_min, right_max))) => {
+            let mut acc = BoundsAccumulator::new();
+            acc.add_point(left_min);
+            acc.add_point(left_max);
+            acc.add_point(right_min);
+            acc.add_point(right_max);
+            acc.finish()
+        }
+        (Some(bounds), None) | (None, Some(bounds)) => Some(bounds),
+        (None, None) => None,
     }
 }

@@ -1,3 +1,54 @@
+## 2026-11-06 只插入写入保持 bounds 记忆精确（P2c）
+
+- **问题（已测量）**：`prepare_shared_with_overlays_and_images_and_edit` 在文档 `Arc` 变化时调用
+  `db.scene_identity()`，后者读 `bounds()`；`BoundsCache` 以 `Revision` 为键，一次编辑就换了
+  revision，记忆必然失效 → `compute_bounds()` 全量扫描 model 实体。`fixtures/complex-test.dwg`
+  （725k 实体 / 145,776 batches，release）实测：`scene_identity` = 143.6 ms，整个增量 prepare =
+  144.3 ms，而其中真正的 scene 组装只有约 526 µs。结论：每次编辑的 O(scene) 成本几乎全部是 bounds
+  重算。
+- **规则（本次实现）**：**只插入（insert-only）是单调的**，新范围恰为
+  `union(旧 bounds, 每个新增实体的 AABB)`，因此可以在 O(inserted) 内把记忆改写成精确值。
+  `crates/cad-db/src/drawing/block_edit.rs` 的 `apply_drawing_changes_with_blocks_and_display`
+  在验证之后、变更之前（Phase 1d）判定：
+  - `block_changes` 为空 **且** `display` 为空；
+  - `changes` 每一项都是 `Some(entity)`，且该 id **当前不存在**（存在即 Update，不算插入）；
+  - 每个新增实体的 `space == SpaceId::Model`；
+  - `bounds_cache` 的 tag 等于**写入前的 revision**（记忆对写前内容是精确的）。
+  四条同时成立才取 `union(cached, bounds_of(inserted))`；随后在 revision 前进后由
+  `BoundsCache` 的 `store_insert_only_bounds(after, union)` 写成 `{ revision: after, bounds }`。
+  其余情况（Update、Delete、block 行、display state、paper-space 插入、记忆本已过期）一律返回
+  `None`：记忆保持过期，下一次 `bounds()` 照旧全量重算。空批次仍在入口提前返回，行为未变。
+- **单实体 AABB 复用而非复制**：`bounds.rs` 新增私有 `bounds_of_entities(...)`，`compute_bounds`
+  改为用 `self.entities.values().filter(Model)` 调它；插入快路径用同一函数处理新增行。两者同为
+  恒等变换 / depth 0 / 当前 block 表展开，**没有第二套 geometry→AABB 例程**。
+  `BoundsComputation::block_meta` 改为惰性：只在真正展开 INSERT 时才做一次 `block_graph_meta()`
+  （纯几何插入不再付 O(#blocks) DFS），结果与原先完全一致。
+- **`allocate_entity_id` 不再清 bounds 缓存**：分配不改变内容、不推进 revision，以 revision 为键的
+  记忆对它仍然精确；清掉反而会让紧随的编辑重新全量扫描（所有 create 命令都在 clone 上先
+  `allocate_entity_id()` 再 commit，正是它使快路径此前永远命中不了）。图层/点样式写入仍显式
+  `invalidate_bounds_cache()`，display-state 写入仍清缓存。
+- **为什么 delete/update 不增量**：目前没有精确的“收缩”结构（逐实体 AABB 索引/层次包围盒尚未存在），
+  用旧值做并集会把已删除/缩短的几何留在盒子里——那是错值，不是近似。因此收缩统一推迟到下一次
+  `bounds()` 重算，删减增量留待后续 delete 阶段；这是有意的决定。
+- **契约测试**（`crates/cad-db/src/tests/bounds.rs`，新增 test-only
+  `valid_bounds_cache_revision_for_test()`：记忆对当前 revision 有效才返回 revision）：
+  `insert_only_batch_extends_bounds_memo_without_recomputing`（commit 后**未调用** `bounds()` 时 tag
+  已等于新 revision，且值与 reference 一致）、`update_only_batch_leaves_bounds_memo_invalid`、
+  `delete_only_batch_leaves_bounds_memo_invalid`、`insert_outside_current_bounds_extends_the_memo`、
+  `paper_space_insert_does_not_touch_bounds_memo`、
+  `insert_does_not_repair_an_already_stale_bounds_memo`（用 stale 盒子做并集会得到 `0..201`，正确值为
+  `50..201`）。
+- **实测（release，`crates/cad-app/tests/commit_real_fixture.rs --ignored --nocapture`）**：
+  `incremental_prepare_ms` = **0.539**（改动前 144.27），同轮 `full_reference_ms` = 4834.087、
+  `transaction_ms` = 0.010；append 的逐实体 delta 仍被断言等于全量重建（`added/images/masks`）。
+  `scene_identity` 现为命中记忆的 O(1) 读（同一轮 prepare 总耗时 ≈ 原 append 组装 526 µs），未单独
+  计时。
+- **未变 / NOT RUN**：`bounds()` 仍然精确（无 loose/近似值），非插入路径语义未变，无新依赖、未改
+  `cad-spatial` 或层序。**NOT RUN**：workspace 全量门禁与全量测试（只跑了
+  `cad-db`/`cad-app` 与其 clippy/fmt、file-size、architecture），Windows/macOS/Android/Web 载体、
+  真机/真实 GPU/像素/性能结论；本条目只是 CPU 计时，不是性能验收。
+
+
 ## 2026-11-06 场景控制器维护“实体 → 驻留 batch 区间”索引（P2a）
 
 - **问题**：控制器只会从 `ChangeSet` 知道“实体 X 变了”，但渲染侧的范围在压缩后的 base 流里；

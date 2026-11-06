@@ -509,3 +509,185 @@ fn model_bounds_match_reference_for_every_visibility_state() {
         assert_bounds_match_reference(&db);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Insert-only incremental bounds (P2c)
+//
+// Insertion is monotone, so an insert-only model-space batch may update the
+// revision-tagged memo in O(inserted) instead of re-scanning the scene. Every
+// other shape must leave the memo invalid. `valid_bounds_cache_revision_for_test`
+// is `None` when the memo is stale, so "the commit did/did not refresh it" is
+// observable without a `bounds()` call in between.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn insert_only_batch_extends_bounds_memo_without_recomputing() {
+    let mut db = writable_db();
+    // Populate the memo for the pre-write revision.
+    assert_eq!(db.bounds(), None);
+    let before = db.revision();
+    assert_eq!(db.valid_bounds_cache_revision_for_test(), Some(before));
+
+    let mut tx = db
+        .begin_drawing_transaction("insert", TransactionId(1))
+        .unwrap();
+    tx.insert_entity(line_entity(1, point(0.0, 0.0), point(3.0, 4.0)))
+        .unwrap();
+    tx.commit().unwrap();
+
+    // No `bounds()` call since the commit: the memo was written by the write path
+    // itself, at the new revision, and it is exact.
+    assert_ne!(db.revision(), before);
+    assert_eq!(
+        db.valid_bounds_cache_revision_for_test(),
+        Some(db.revision())
+    );
+    assert_eq!(db.cached_bounds_revision_for_test(), Some(db.revision()));
+    assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(3.0, 4.0))));
+    assert_bounds_match_reference(&db);
+}
+
+#[test]
+fn update_only_batch_leaves_bounds_memo_invalid() {
+    let mut db = writable_db();
+    let mut tx = db
+        .begin_drawing_transaction("insert", TransactionId(1))
+        .unwrap();
+    tx.insert_entity(line_entity(1, point(0.0, 0.0), point(1.0, 0.0)))
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(1.0, 0.0))));
+    let populated = db.revision();
+    assert_eq!(db.valid_bounds_cache_revision_for_test(), Some(populated));
+
+    // An update can shrink or otherwise rewrite the extent, so the memo must stay
+    // invalid: the old tag is left behind, never relabelled with a union.
+    let mut tx = db
+        .begin_drawing_transaction("update", TransactionId(2))
+        .unwrap();
+    tx.update_entity(line_entity(1, point(0.0, 0.0), point(10.0, 0.0)))
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(db.valid_bounds_cache_revision_for_test(), None);
+    assert_eq!(db.cached_bounds_revision_for_test(), Some(populated));
+    assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(10.0, 0.0))));
+    assert_bounds_match_reference(&db);
+}
+
+#[test]
+fn delete_only_batch_leaves_bounds_memo_invalid() {
+    let mut db = writable_db();
+    let mut tx = db
+        .begin_drawing_transaction("insert", TransactionId(1))
+        .unwrap();
+    tx.insert_entity(line_entity(1, point(0.0, 0.0), point(1.0, 0.0)))
+        .unwrap();
+    tx.insert_entity(line_entity(2, point(0.0, 0.0), point(0.0, 5.0)))
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(1.0, 5.0))));
+    let populated = db.revision();
+
+    let mut tx = db
+        .begin_drawing_transaction("delete", TransactionId(2))
+        .unwrap();
+    tx.delete_entity(EntityId(2)).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(db.valid_bounds_cache_revision_for_test(), None);
+    assert_eq!(db.cached_bounds_revision_for_test(), Some(populated));
+    assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(1.0, 0.0))));
+    assert_bounds_match_reference(&db);
+}
+
+#[test]
+fn insert_outside_current_bounds_extends_the_memo() {
+    let mut db = writable_db();
+    let mut tx = db
+        .begin_drawing_transaction("insert", TransactionId(1))
+        .unwrap();
+    tx.insert_entity(line_entity(1, point(0.0, 0.0), point(1.0, 0.0)))
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(1.0, 0.0))));
+    let populated = db.revision();
+
+    // The new row is far outside the cached box; the union must include it.
+    let mut tx = db
+        .begin_drawing_transaction("insert far", TransactionId(2))
+        .unwrap();
+    tx.insert_entity(line_entity(2, point(100.0, 100.0), point(101.0, 101.0)))
+        .unwrap();
+    tx.commit().unwrap();
+    assert_ne!(db.revision(), populated);
+    assert_eq!(
+        db.valid_bounds_cache_revision_for_test(),
+        Some(db.revision())
+    );
+    assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(101.0, 101.0))));
+    assert_bounds_match_reference(&db);
+}
+
+#[test]
+fn paper_space_insert_does_not_touch_bounds_memo() {
+    let mut db = writable_db();
+    let mut tx = db
+        .begin_drawing_transaction("insert", TransactionId(1))
+        .unwrap();
+    tx.insert_entity(line_entity(1, point(0.0, 0.0), point(1.0, 0.0)))
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(1.0, 0.0))));
+    let populated = db.revision();
+
+    let mut paper = line_entity(2, point(1000.0, 0.0), point(1001.0, 0.0));
+    paper.space = SpaceId::Paper(LayoutId(1));
+    let mut tx = db
+        .begin_drawing_transaction("insert paper", TransactionId(2))
+        .unwrap();
+    tx.insert_entity(paper).unwrap();
+    tx.commit().unwrap();
+
+    // Paper space does not contribute to `bounds()`, so this is not an
+    // insert-only extend: the memo stays stale and the next read recomputes.
+    assert_eq!(db.valid_bounds_cache_revision_for_test(), None);
+    assert_eq!(db.cached_bounds_revision_for_test(), Some(populated));
+    assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(1.0, 0.0))));
+    assert_bounds_match_reference(&db);
+}
+
+#[test]
+fn insert_does_not_repair_an_already_stale_bounds_memo() {
+    let mut db = writable_db();
+    let mut tx = db
+        .begin_drawing_transaction("insert", TransactionId(1))
+        .unwrap();
+    tx.insert_entity(line_entity(1, point(0.0, 0.0), point(100.0, 0.0)))
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(100.0, 0.0))));
+    let stale = db.revision();
+
+    // Shrink the extent without reading `bounds()`: the memo is now stale and
+    // still tagged with the *old* (larger) box.
+    let mut tx = db
+        .begin_drawing_transaction("shrink", TransactionId(2))
+        .unwrap();
+    tx.update_entity(line_entity(1, point(50.0, 0.0), point(100.0, 0.0)))
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(db.valid_bounds_cache_revision_for_test(), None);
+    assert_eq!(db.cached_bounds_revision_for_test(), Some(stale));
+
+    // An insert-only batch must not union onto that stale box (`0..100`): the
+    // exact answer is `50..201`, not `0..201`.
+    let mut tx = db
+        .begin_drawing_transaction("insert far", TransactionId(3))
+        .unwrap();
+    tx.insert_entity(line_entity(2, point(200.0, 0.0), point(201.0, 0.0)))
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(db.valid_bounds_cache_revision_for_test(), None);
+    assert_eq!(db.cached_bounds_revision_for_test(), Some(stale));
+    assert_eq!(db.bounds(), Some((point(50.0, 0.0), point(201.0, 0.0))));
+    assert_bounds_match_reference(&db);
+}

@@ -305,9 +305,10 @@ impl DrawingDatabase {
         let before = self.revision;
         let after = Revision(before.0 + 1);
         self.revision = after;
-        // A layer edit is not a geometry change, but every mutation clears the
-        // bounds cache so an invalidation can never be missed (same defensive
-        // rule as `allocate_entity_id`).
+        // A layer edit is not a geometry change, but it raises the revision, so
+        // the revision-keyed bounds cache is already stale; clearing it makes the
+        // invalidation explicit (the same defensive rule the point-style write
+        // uses).
         self.invalidate_bounds_cache();
         ChangeSet {
             database: self.id,

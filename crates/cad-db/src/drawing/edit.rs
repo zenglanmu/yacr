@@ -128,9 +128,13 @@ impl DrawingDatabase {
     pub fn allocate_entity_id(&mut self) -> EntityId {
         let id = EntityId(self.next_entity_id);
         self.next_entity_id = self.next_entity_id.saturating_add(1);
-        // Allocation does not change geometry, but every mutation clears the
-        // cache so an invalidation can never be missed.
-        self.invalidate_bounds_cache();
+        // Allocation changes no content and does not raise the revision, so the
+        // revision-tagged bounds memo is still exact. It is deliberately **not**
+        // cleared here: the memo is only served when its tag equals the current
+        // revision, and a later content write raises the revision (or invalidates
+        // explicitly), so no stale extent can escape. Clearing it would force a
+        // full bounds recompute after every edit and defeat the insert-only fast
+        // path in `apply_drawing_changes_with_blocks_and_display`.
         id
     }
 

@@ -16,6 +16,20 @@ impl DrawingDatabase {
             .revision
     }
 
+    /// Test-only hook: the revision the cached bounds are **valid** for.
+    ///
+    /// `None` when the memo is stale — either empty or tagged with an older
+    /// revision — so a test can prove a write left the memo invalid (and that the
+    /// next `bounds()` must recompute) without depending on whether the stale tag
+    /// was cleared or merely outdated.
+    pub(crate) fn valid_bounds_cache_revision_for_test(&self) -> Option<Revision> {
+        let cache = self
+            .bounds_cache
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        (cache.revision == Some(self.revision)).then_some(self.revision)
+    }
+
     /// Reference bounds computed with the original algorithm
     /// (`model_space` + `block_entities` + recursion).
     ///

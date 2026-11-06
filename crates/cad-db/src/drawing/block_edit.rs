@@ -165,6 +165,18 @@ impl DrawingDatabase {
     /// revision advances by one for a non-empty batch (block rows, entity rows or
     /// display states) and does not move for an empty one.
     ///
+    /// # Model-space bounds stay exact for insert-only batches
+    ///
+    /// The model-space bounds memo ([`Self::bounds`]) is keyed by [`Revision`].
+    /// For a batch that only **adds** model-space entities (no block rows, no
+    /// display states, no update or delete) and whose memo is valid for the
+    /// pre-write revision, the write path rewrites the memo at the new revision
+    /// with the exact union of the old extent and the inserted rows — insertion
+    /// is monotone, so this is O(inserted) and cannot drift from a full
+    /// recompute. Every other shape leaves the memo stale; the next
+    /// [`Self::bounds`] then recomputes from scratch (update/delete shrinking is
+    /// deliberately not incrementalised).
+    ///
     /// # ChangeSet is entity-scoped
     ///
     /// There is no block object-change kind, so the published [`ChangeSet`]
@@ -276,6 +288,21 @@ impl DrawingDatabase {
             }
         }
 
+        // Phase 1d: the insert-only bounds fast path.
+        //
+        // Insertion is monotone, so a batch that only adds model-space rows can
+        // extend the revision-tagged bounds memo exactly, without re-scanning the
+        // scene. `None` means "not this shape" (update, delete, block rows,
+        // display states, non-model space, or an already-stale memo): the memo
+        // then stays invalid and the next `bounds()` recomputes. Computed before
+        // the mutation because it needs the batch's rows; the block table it
+        // expands against is unchanged by this path.
+        let incremental_bounds = if block_changes.is_empty() && display.is_empty() {
+            self.insert_only_bounds(before, &changes)
+        } else {
+            None
+        };
+
         // Phase 2: mutate. The batch is known-valid; keep the caller's order.
         let mut ordered = Vec::with_capacity(changes.len());
 
@@ -344,8 +371,13 @@ impl DrawingDatabase {
             }
         }
 
+        // The revision bump keeps the model-space bounds memo exact for the
+        // insert-only shape (Phase 1d) instead of leaving it stale.
         let after = Revision(before.0 + 1);
         self.revision = after;
+        if let Some(bounds) = incremental_bounds {
+            self.store_insert_only_bounds(after, bounds);
+        }
         Ok(ChangeSet {
             database: self.id,
             before,
