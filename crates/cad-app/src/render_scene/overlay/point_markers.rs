@@ -716,8 +716,7 @@ mod tests {
         assert!(
             scene
                 .base
-                .added
-                .iter()
+                .batches()
                 .all(|batch| batch.vertices.len() != 2 || batch.vertices[0] != batch.vertices[1]),
             "the base scene must not carry a zero-length POINT segment"
         );
@@ -833,7 +832,7 @@ mod tests {
             )
             .unwrap();
         let scene = controller.ready.as_ref().unwrap();
-        assert!(Arc::ptr_eq(&base, &scene.base), "base must be reused");
+        assert!(base.same_as(&scene.base), "base must be reused");
         assert_eq!(scene.base_revision, base_revision);
         let extent_after = batch_extent(marker_batches(scene)[0]);
         assert!(

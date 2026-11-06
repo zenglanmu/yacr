@@ -456,7 +456,7 @@ impl Live {
         self.session
             .render_session()
             .current_prepared_scene()
-            .map(|scene| scene.base.added.len() as u64)
+            .map(|scene| scene.base.batch_len() as u64)
     }
 
     /// The import progress the host reports right now (`prepared`/`total` pages).

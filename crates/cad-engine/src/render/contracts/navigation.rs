@@ -304,7 +304,7 @@ fn camera_only_viewport_change_reprepares_grid_without_invalidating_scene() {
     };
     assert_eq!(refined_again.base_revision, refined.base_revision);
     assert!(
-        Arc::ptr_eq(&refined_again.base, &refined.base),
+        refined_again.base.same_as(&refined.base),
         "camera-only refinements must reuse the worker's resident base"
     );
     assert!(session.preparation_current());

@@ -241,7 +241,7 @@ mod tests {
             assert!(Instant::now() < deadline);
             std::thread::yield_now();
         };
-        assert!(Arc::ptr_eq(&base, &next.ready.as_ref().unwrap().base));
+        assert!(base.same_as(&next.ready.as_ref().unwrap().base));
         worker.stop();
         assert!(!worker.current(&Some(second)));
     }

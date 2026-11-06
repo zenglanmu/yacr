@@ -15,8 +15,8 @@ fn scene_controller_reuses_base_for_overlay_and_rebuilds_for_font_replacement() 
         )
         .unwrap();
     let first = controller.ready.as_ref().unwrap();
-    assert_eq!(first.base.stamp.document, DocumentId(42));
-    assert_eq!(first.base.stamp.object_revision, db.revision());
+    assert_eq!(first.base.stamp().document, DocumentId(42));
+    assert_eq!(first.base.stamp().object_revision, db.revision());
     let base = first.base.clone();
     let base_revision = first.base_revision;
     let revision = first.revision;
@@ -30,7 +30,7 @@ fn scene_controller_reuses_base_for_overlay_and_rebuilds_for_font_replacement() 
         )
         .unwrap();
     assert_eq!(controller.ready.as_ref().unwrap().revision, revision);
-    assert!(Arc::ptr_eq(&base, &controller.ready.as_ref().unwrap().base));
+    assert!(base.same_as(&controller.ready.as_ref().unwrap().base));
     assert_eq!(
         controller.ready.as_ref().unwrap().base_revision,
         base_revision
@@ -50,7 +50,7 @@ fn scene_controller_reuses_base_for_overlay_and_rebuilds_for_font_replacement() 
         .prepare(None, DocumentId(42), None, &layers, SpaceSelection::Model)
         .unwrap();
     let closed = controller.ready.as_ref().unwrap();
-    assert!(closed.base.added.is_empty() && closed.highlight.added.is_empty());
+    assert!(closed.base.batch_len() == 0 && closed.highlight.added.is_empty());
 }
 
 #[test]

@@ -153,8 +153,13 @@ fn appends_like_full_rebuild(geometry: &SemanticGeometry) -> bool {
 }
 
 /// GPU append proof: the exact prepared CPU base that must already be resident.
+///
+/// `predecessor` is a [`super::ResidentScene`] retained by identity: its prefix
+/// `Arc` **and** every appended segment must be the same allocations the GPU last
+/// committed (see `ResidentScene::same_as`). Retaining it also keeps those
+/// addresses alive, so a freed-and-reallocated scene cannot alias it.
 #[derive(Clone)]
 pub struct BaseAppend {
-    pub predecessor: Arc<super::SceneDelta>,
+    pub predecessor: super::ResidentScene,
     pub keep_batches: usize,
 }

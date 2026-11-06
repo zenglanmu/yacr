@@ -138,7 +138,7 @@ fn overlay_preparation_reuses_base_while_resource_replacement_invalidates_it() {
     assert!(session.set_overlays(overlays));
     session.prepare().unwrap();
     let overlay_scene = session.controller_ready().unwrap();
-    assert!(Arc::ptr_eq(&base, &overlay_scene.base));
+    assert!(base.same_as(&overlay_scene.base));
     assert_eq!(overlay_scene.base_revision, first.base_revision);
     let base_revision = overlay_scene.base_revision;
     assert!(session.set_images(Some(Arc::new(DecodedImageCache::new()))));

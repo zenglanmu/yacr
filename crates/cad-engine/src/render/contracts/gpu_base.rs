@@ -229,11 +229,10 @@ fn pending_overlay_progressive_page_restarts_on_camera_change() {
 
     // Force the base batch set to need more than one progressive page.
     let scene = session.current_prepared_scene().unwrap();
-    let total: usize = scene.base.added.iter().map(|b| b.vertices.len()).sum();
+    let total: usize = scene.base.batches().map(|b| b.vertices.len()).sum();
     let max_batch: usize = scene
         .base
-        .added
-        .iter()
+        .batches()
         .map(|b| b.vertices.len())
         .max()
         .unwrap_or(0);
@@ -484,7 +483,7 @@ fn pending_overlay_upload_never_labels_stale_suffix_current() {
         .current_prepared_scene()
         .expect("published scene")
         .base
-        .stamp
+        .stamp()
         .document;
     let committed_batches = renderer_batch_count(&session);
     let base_batches = session.0.borrow().runtime.base_batches_for_test();

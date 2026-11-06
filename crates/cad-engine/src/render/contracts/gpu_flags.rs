@@ -120,11 +120,10 @@ fn pending_overlay_window_keeps_the_retained_entity_flags_and_suffix() {
     let reference = {
         let state = session.0.borrow();
         let ready = state.controller.ready.as_ref().expect("ready scene");
-        let document = ready.base.stamp.document;
+        let document = ready.base.stamp().document;
         let entity = ready
             .base
-            .added
-            .iter()
+            .batches()
             .find_map(|batch| batch.sources.first().map(|source| source.entity))
             .expect("a resident base entity");
         SelectionRef {
@@ -225,8 +224,7 @@ fn hover_changes_push_only_flags_and_never_drop_the_current_scene() {
         .current_prepared_scene()
         .expect("published scene")
         .base
-        .added
-        .iter()
+        .batches()
         .flat_map(|batch| batch.sources.iter())
         .find(|reference| reference.sub_element.is_none())
         .cloned()

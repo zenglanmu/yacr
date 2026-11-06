@@ -17,16 +17,18 @@ pub use edit::{BaseAppend, DrawingEditReceipt};
 mod edit_tests;
 mod entity_index;
 mod overlay;
+mod resident;
 #[cfg(test)]
 mod vendor_tests;
 pub use overlay::*;
+pub use resident::ResidentScene;
 
 use entity_index::EntityBatchIndex;
 
 /// Decoded raster-image cache fed to the base scene build, re-exported so the UI
 /// bridge can name the type carried by [`PreparedScene::images`].
 pub use cad_resources::DecodedImageCache;
-/// The prepared-scene delta type carried by [`PreparedScene::base`] /
+/// The delta type a [`ResidentScene`] is built from and the type carried by
 /// [`PreparedScene::highlight`], re-exported so a consumer that must retain the
 /// overlay `Arc` by identity (for example the engine's flags-only fast path) can
 /// name it without a direct `cad-scene` dependency.
@@ -78,7 +80,10 @@ pub struct PreparedScene {
     /// intact. The engine overwrites this with its own publication revision on
     /// every publish, exactly as it owns `revision`/`base_revision`.
     pub flags_revision: u64,
-    pub base: Arc<SceneDelta>,
+    /// The resident CPU base: a shared prefix plus the segments appended since
+    /// it (see [`ResidentScene`]). An accepted append pushes one segment instead
+    /// of re-materialising the whole base, so the append cost is O(changed).
+    pub base: ResidentScene,
     pub base_append: Option<BaseAppend>,
     /// Transient sub-element-highlight and tool-preview batches.
     pub highlight: Arc<SceneDelta>,
@@ -107,7 +112,10 @@ pub struct CadSceneController {
     pub fonts_revision: u64,
     revision: u64,
     base_revision: u64,
-    base: Option<Arc<SceneDelta>>,
+    /// The resident CPU base. A full build replaces it wholesale; an accepted
+    /// append pushes one segment onto the retained predecessor (`ResidentScene`
+    /// keeps the prefix `Arc` shared, so the append never copies the scene).
+    base: Option<ResidentScene>,
     /// Exact shared snapshot which produced the successfully published base.
     /// Incoming/adopted documents are not evidence of successful preparation.
     published_drawing: Option<Arc<DrawingDatabase>>,
@@ -118,8 +126,8 @@ pub struct CadSceneController {
     base_append: Option<BaseAppend>,
     edit: Option<DrawingEditReceipt>,
     /// Resident batch ownership: for every visible model-space entity that
-    /// emitted at least one render batch, the range of `base.added` its own
-    /// compacted delta occupies. Bookkeeping only (module `entity_index`).
+    /// emitted at least one render batch, the range of the resident base stream
+    /// its own compacted delta occupies. Bookkeeping only (module `entity_index`).
     ///
     /// Invariants: replaced wholesale by a full base build, extended by an
     /// accepted append, empty off model space, and never left stale (an entity
@@ -393,7 +401,7 @@ impl CadSceneController {
         let next_append = if appended_entity.is_some() {
             self.base.as_ref().map(|base| BaseAppend {
                 predecessor: base.clone(),
-                keep_batches: base.added.len(),
+                keep_batches: base.batch_len(),
             })
         } else if base_changed {
             None
@@ -447,31 +455,27 @@ impl CadSceneController {
                 self.vendor.as_deref(),
             )?;
             if appendable_delta(&delta) {
-                let mut combined = self
-                    .base
-                    .as_ref()
-                    .expect("append predecessor")
-                    .as_ref()
-                    .clone();
-                combined.stamp = stamp.clone();
-                let inserted_start = combined.added.len();
-                combined.added.extend(delta.added);
-                combined.images.extend(delta.images);
-                combined.masks.extend(delta.masks);
-                // The inserted entity's batches are one contiguous suffix; an
-                // empty delta (hidden entity) records nothing and the append is
-                // declined downstream anyway.
+                // O(changed): keep the predecessor's prefix `Arc` and push the
+                // freshly built per-entity delta as one appended segment. The
+                // predecessor is retained (never re-built), so a large resident
+                // scene is not copied.
+                let mut resident = self.base.as_ref().expect("append predecessor").clone();
+                let inserted_start = resident.batch_len();
+                resident.push_appended(Arc::new(delta));
+                // The inserted entity's batches are one contiguous suffix (the
+                // appended segment); an empty delta (hidden entity) records
+                // nothing and the append is declined downstream anyway.
                 let mut index = self.entity_batches.clone();
-                index.record(entity.id, inserted_start..combined.added.len());
-                (Arc::new(combined), index)
+                index.record(entity.id, inserted_start..resident.batch_len());
+                (resident, index)
             } else {
                 append_declined = true;
                 let (delta, index) = full_base(doc)?;
-                (Arc::new(delta), index)
+                (ResidentScene::from_prefix(Arc::new(delta)), index)
             }
         } else if base_changed {
             let (delta, index) = full_base(doc)?;
-            (Arc::new(delta), index)
+            (ResidentScene::from_prefix(Arc::new(delta)), index)
         } else {
             (
                 self.base.as_ref().expect("base prepared").clone(),
@@ -793,8 +797,8 @@ impl CadSceneController {
         true
     }
 
-    /// The range of the resident model-space base (`ready.base.added`) owned by
-    /// `id`, if that entity contributed at least one render batch.
+    /// The range of the resident model-space base (`ready.base`) owned by `id`,
+    /// if that entity contributed at least one render batch.
     ///
     /// An entity that produces no batches — hidden layer, non-drawable geometry,
     /// a POINT (whose glyph is a drawing-wide overlay, not a base batch) — has

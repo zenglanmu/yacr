@@ -285,7 +285,7 @@ fn prepared_scene(revision: u64, base_revision: u64, flags_revision: u64) -> Pre
         revision,
         base_revision,
         flags_revision,
-        base: Arc::new(delta(revision)),
+        base: ResidentScene::from_prefix(Arc::new(delta(revision))),
         base_append: None,
         highlight: Arc::new(delta(revision)),
         entity_flags: Vec::new(),
@@ -297,9 +297,9 @@ fn prepared_scene(revision: u64, base_revision: u64, flags_revision: u64) -> Pre
 
 #[test]
 fn base_append_admission_requires_the_exact_resident_predecessor() {
-    let predecessor = Arc::new(delta(1));
-    let other = Arc::new(delta(1));
-    let append = |predecessor: &Arc<SceneDelta>, keep: usize| BaseAppend {
+    let predecessor = ResidentScene::from_prefix(Arc::new(delta(1)));
+    let other = ResidentScene::from_prefix(Arc::new(delta(1)));
+    let append = |predecessor: &ResidentScene, keep: usize| BaseAppend {
         predecessor: predecessor.clone(),
         keep_batches: keep,
     };
@@ -402,8 +402,7 @@ fn publication_recomputes_flags_from_the_latest_overlay_inputs() {
     let published = session.current_prepared_scene().expect("published scene");
     let mut whole_entities = published
         .base
-        .added
-        .iter()
+        .batches()
         .flat_map(|batch| batch.sources.iter())
         .filter(|reference| reference.sub_element.is_none())
         .cloned();

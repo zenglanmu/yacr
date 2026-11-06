@@ -38,14 +38,14 @@ fn fonts_change_rebuilds_the_base_and_a_repeat_is_a_no_op() {
     controller.fonts_changed();
     prepare(&mut controller, Some(&db), Some(first_fonts.clone())).unwrap();
     let first = controller.ready.as_ref().unwrap();
-    assert_eq!(first.base.stamp.document, DocumentId(73));
-    assert_eq!(first.base.stamp.object_revision, db.revision());
+    assert_eq!(first.base.stamp().document, DocumentId(73));
+    assert_eq!(first.base.stamp().object_revision, db.revision());
     let base = first.base.clone();
     let base_revision = first.base_revision;
     let revision = first.revision;
     prepare(&mut controller, Some(&db), Some(first_fonts)).unwrap();
     assert_eq!(controller.ready.as_ref().unwrap().revision, revision);
-    assert!(Arc::ptr_eq(&base, &controller.ready.as_ref().unwrap().base));
+    assert!(base.same_as(&controller.ready.as_ref().unwrap().base));
     controller.fonts_changed();
     prepare(
         &mut controller,
@@ -117,7 +117,7 @@ fn viewport_grid_change_rebuilds_overlay_without_rebuilding_base() {
         )
         .unwrap();
     let current = controller.ready.as_ref().unwrap();
-    assert!(Arc::ptr_eq(&base, &current.base));
+    assert!(base.same_as(&current.base));
     assert_eq!(current.base_revision, base_revision);
     assert!(current.revision > revision);
 }
@@ -160,7 +160,7 @@ fn image_cache_is_carried_into_the_prepared_scene_and_a_repeat_is_a_no_op() {
         )
         .unwrap();
     assert_eq!(controller.ready.as_ref().unwrap().revision, revision);
-    assert!(Arc::ptr_eq(&base, &controller.ready.as_ref().unwrap().base));
+    assert!(base.same_as(&controller.ready.as_ref().unwrap().base));
 
     // A new cache pointer rebuilds the base and carries the new cache.
     let replacement = Arc::new(DecodedImageCache::new());
@@ -213,7 +213,7 @@ fn failed_build_keeps_previous_version_and_close_publishes_empty_scene() {
     assert!(controller.diagnostic.is_some());
     prepare(&mut controller, None, None).unwrap();
     let closed = controller.ready.as_ref().unwrap();
-    assert!(closed.base.added.is_empty() && closed.highlight.added.is_empty());
+    assert!(closed.base.batch_len() == 0 && closed.highlight.added.is_empty());
     assert!(closed.revision > previous);
     assert!(controller.diagnostic.is_none());
 }
@@ -341,7 +341,7 @@ fn entity_selection_change_publishes_flags_without_rebuilding_the_overlay() {
         .unwrap();
     let after = controller.ready.as_ref().unwrap();
     assert!(
-        Arc::ptr_eq(&base, &after.base),
+        base.same_as(&after.base),
         "the base drawing must be reused across a selection change"
     );
     assert_eq!(after.base_revision, base_revision);
@@ -419,7 +419,7 @@ fn flags_only_refresh_republishes_flags_without_touching_the_scene() {
         "a flags-only refresh must not advance the scene revision"
     );
     assert_eq!(after.base_revision, before.base_revision);
-    assert!(Arc::ptr_eq(&after.base, &before.base));
+    assert!(after.base.same_as(&before.base));
     assert!(Arc::ptr_eq(&after.highlight, &before.highlight));
     assert!(
         after.flags_revision > before.flags_revision,
@@ -485,7 +485,7 @@ fn preview_change_rebuilds_only_the_highlight_overlay_and_cancel_clears_it() {
         )
         .unwrap();
     let with_preview = controller.ready.as_ref().unwrap();
-    assert!(Arc::ptr_eq(&base, &with_preview.base));
+    assert!(base.same_as(&with_preview.base));
     // One rubber-band chain (2 vertices) + one marker batch (4 vertices).
     assert_eq!(with_preview.highlight.added.len(), 2);
 
@@ -610,7 +610,7 @@ fn snap_hints_draw_only_when_enabled_and_keep_the_base() {
         .unwrap();
     let after = controller.ready.as_ref().unwrap();
     assert!(
-        Arc::ptr_eq(&base, &after.base),
+        base.same_as(&after.base),
         "snap hints must not rebuild the base drawing"
     );
     assert_eq!(
@@ -640,7 +640,7 @@ fn snap_hints_draw_only_when_enabled_and_keep_the_base() {
         .unwrap();
     let cleared = controller.ready.as_ref().unwrap();
     assert!(cleared.highlight.added.is_empty());
-    assert!(Arc::ptr_eq(&base, &cleared.base));
+    assert!(base.same_as(&cleared.base));
 }
 
 #[test]
@@ -724,7 +724,7 @@ fn axes_and_grid_appear_only_when_enabled_and_keep_the_base() {
         .unwrap();
     let after = controller.ready.as_ref().unwrap();
     assert!(
-        Arc::ptr_eq(&base, &after.base),
+        base.same_as(&after.base),
         "reference overlays must not rebuild the base drawing"
     );
     assert!(!after.highlight.added.is_empty());

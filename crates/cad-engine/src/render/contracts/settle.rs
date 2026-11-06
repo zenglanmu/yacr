@@ -300,7 +300,7 @@ fn box_selection_is_a_visual_overlay_change_not_bounds_or_flags_only() {
     // is the new highlight batch at its own draw order.
     session.prepare().unwrap();
     let after_prepare = session.controller_ready().expect("prepared scene");
-    assert!(Arc::ptr_eq(&base_before, &after_prepare.base));
+    assert!(base_before.same_as(&after_prepare.base));
     let box_batches: Vec<_> = after_prepare
         .highlight
         .added
@@ -322,8 +322,7 @@ fn hover_after_submission_is_not_regressed_by_the_published_scene() {
         .current_prepared_scene()
         .expect("published scene")
         .base
-        .added
-        .iter()
+        .batches()
         .flat_map(|batch| batch.sources.iter())
         .find(|reference| reference.sub_element.is_none())
         .cloned()

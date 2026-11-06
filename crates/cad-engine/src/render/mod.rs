@@ -448,7 +448,7 @@ fn publish_controller(state: &mut State, mut candidate: CadSceneController, toke
     // `scene_committed` false and re-enter the base-only/suppression path (F4).
     let flags_only_publish = previous.as_ref().is_some_and(|published| {
         published.base_revision == ready.base_revision
-            && Arc::ptr_eq(&published.base, &ready.base)
+            && published.base.same_as(&ready.base)
             && Arc::ptr_eq(&published.highlight, &ready.highlight)
             && same_arc_option(published.images.as_ref(), ready.images.as_ref())
     });

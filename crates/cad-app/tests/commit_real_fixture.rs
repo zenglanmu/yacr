@@ -202,21 +202,21 @@ fn incremental_line_commit_matches_full_fixture() {
         .unwrap();
     let ready = controller.ready.as_ref().unwrap();
     let append = ready.base_append.as_ref().expect("fixture uses append");
-    assert!(Arc::ptr_eq(&append.predecessor, &predecessor));
-    assert_eq!(ready.base.added.len() - append.keep_batches, 1);
+    assert!(append.predecessor.same_as(&predecessor));
+    assert_eq!(ready.base.batch_len() - append.keep_batches, 1);
     eprintln!(
         "append-fixture incremental_prepare_ms={:.3} kept={} staged={}",
         started.elapsed().as_secs_f64() * 1000.0,
         append.keep_batches,
-        ready.base.added.len() - append.keep_batches
+        ready.base.batch_len() - append.keep_batches
     );
     let started = Instant::now();
-    let full = build_scene(&after, ready.base.stamp.clone()).unwrap();
+    let full = build_scene(&after, ready.base.stamp().clone()).unwrap();
     eprintln!(
         "append-fixture full_reference_ms={:.3}",
         started.elapsed().as_secs_f64() * 1000.0
     );
-    assert_eq!(ready.base.added, full.added);
-    assert_eq!(ready.base.images, full.images);
-    assert_eq!(ready.base.masks, full.masks);
+    assert_eq!(ready.base.to_delta().added, full.added);
+    assert_eq!(ready.base.images(), full.images);
+    assert_eq!(ready.base.masks(), full.masks);
 }

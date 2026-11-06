@@ -207,7 +207,8 @@ mod tests {
         prepare(&mut controller, &db, &LayerOverrideSet::new());
         assert_eq!(controller.entity_batch_index_len(), 3);
 
-        let added = &controller.ready.as_ref().unwrap().base.added;
+        let base = &controller.ready.as_ref().unwrap().base;
+        let added: Vec<_> = base.batches().collect();
         let mut ranges = Vec::new();
         for id in [EntityId(1), EntityId(2), EntityId(3)] {
             let range = controller
@@ -244,7 +245,7 @@ mod tests {
         prepare_shared(&mut controller, before.clone(), None);
         let first = controller.entity_batch_range(EntityId(1)).unwrap();
         let second = controller.entity_batch_range(EntityId(2)).unwrap();
-        let old_added_len = controller.ready.as_ref().unwrap().base.added.len();
+        let old_added_len = controller.ready.as_ref().unwrap().base.batch_len();
 
         let (after, receipt, inserted) = append_line(&before, 20.0);
         prepare_shared(&mut controller, after, Some(&receipt));
@@ -258,8 +259,8 @@ mod tests {
             .entity_batch_range(inserted)
             .expect("the inserted entity owns the appended suffix");
         assert!(range.end > range.start, "the inserted line draws");
-        assert_eq!(range, old_added_len..ready.base.added.len());
-        for batch in &ready.base.added[range] {
+        assert_eq!(range, old_added_len..ready.base.batch_len());
+        for batch in ready.base.slices(range).flatten() {
             assert!(batch.sources.iter().any(|source| source.entity == inserted));
         }
     }
@@ -321,7 +322,14 @@ mod tests {
         assert_eq!(controller.entity_batch_index_len(), 1);
         assert!(controller.entity_batch_range(EntityId(2)).is_none());
         let range = controller.entity_batch_range(EntityId(1)).unwrap();
-        for batch in &controller.ready.as_ref().unwrap().base.added[range] {
+        for batch in controller
+            .ready
+            .as_ref()
+            .unwrap()
+            .base
+            .slices(range)
+            .flatten()
+        {
             assert!(batch
                 .sources
                 .iter()

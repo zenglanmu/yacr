@@ -5,6 +5,34 @@ use super::*;
 // is a no-op off wasm.
 use web_time::Instant;
 
+/// Stage one bounded batch slice and append it to the piece being built.
+///
+/// Group 0 (the persistent base) converts to the stream/chunk/arc classes; group
+/// 1 (the transient overlay) is staged **legacy**. A base range that spans
+/// resident segments is staged one segment intersection at a time; appending the
+/// pieces in order preserves the batch order, so the emitted scene, the pick-key
+/// sequence and the committed base are identical to staging one contiguous
+/// slice.
+fn stage_piece(
+    group: usize,
+    renderer: &mut Renderer,
+    batches: &[cad_scene::RenderBatch],
+    prepared: &mut Option<cad_render_wgpu::PreparedUpload>,
+) -> CadResult<()> {
+    let piece = if group == 0 {
+        renderer.prepare_upload_batches(batches)?
+    } else {
+        renderer.prepare_upload_batches_legacy(batches)?
+    };
+    match prepared {
+        Some(existing) => existing.append(piece),
+        None => {
+            *prepared = Some(piece);
+            Ok(())
+        }
+    }
+}
+
 impl CadRenderRuntime {
     /// Attach a host device and initialize the renderer.
     ///
@@ -202,7 +230,7 @@ impl CadRenderRuntime {
                     self.applied_base_scene.as_ref(),
                     ready.base_append.as_ref(),
                     self.base_batches,
-                    ready.base.added.len(),
+                    ready.base.batch_len(),
                 )
                 .unwrap_or(BaseUploadPlan::Full)
             } else {
@@ -229,24 +257,48 @@ impl CadRenderRuntime {
             if started.elapsed() >= std::time::Duration::from_millis(8) {
                 break;
             }
-            let batches = match pending.group {
-                0 => &pending.scene.base.added,
-                _ => &pending.scene.highlight.added,
+            let batches_len = match pending.group {
+                0 => pending.scene.base.batch_len(),
+                _ => pending.scene.highlight.added.len(),
             };
-            if pending.offset == batches.len() {
+            if pending.offset == batches_len {
                 pending.group += 1;
                 pending.offset = 0;
                 continue;
             }
-            let mut end = pending.offset;
+            // One bounded staging slice: at most 256 batches and (after the
+            // first batch) at most 262,144 vertices, counted over the **whole**
+            // range regardless of which resident segment holds each batch.
+            let start = pending.offset;
+            let mut end = start;
             let mut vertices = 0usize;
-            while end < batches.len() && end - pending.offset < 256 {
-                let next = vertices.saturating_add(batches[end].vertices.len());
-                if end > pending.offset && next > 262_144 {
-                    break;
+            let mut advance = |batch: &cad_scene::RenderBatch| -> bool {
+                if end - start >= 256 {
+                    return false;
+                }
+                let next = vertices.saturating_add(batch.vertices.len());
+                if end > start && next > 262_144 {
+                    return false;
                 }
                 vertices = next;
                 end += 1;
+                true
+            };
+            match pending.group {
+                0 => {
+                    for batch in pending.scene.base.batches().skip(start) {
+                        if !advance(batch) {
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    for batch in pending.scene.highlight.added.iter().skip(start) {
+                        if !advance(batch) {
+                            break;
+                        }
+                    }
+                }
             }
             let prepare_started = Instant::now();
             // Group 0 is the persistent base: the database scene (entities,
@@ -258,11 +310,27 @@ impl CadRenderRuntime {
             // Group 0 converts to the stream/chunk/arc classes; group 1 is staged
             // **legacy** so the overlay pass can draw it with per-batch uniforms
             // only, without base stream/chunk/arc slots.
-            let piece = if pending.group == 0 {
-                renderer.prepare_upload_batches(&batches[pending.offset..end])?
-            } else {
-                renderer.prepare_upload_batches_legacy(&batches[pending.offset..end])?
-            };
+            //
+            // The base is staged across its resident segments instead of one
+            // contiguous slice: a full build, and every accepted append (whose
+            // range is exactly the newly pushed segment), yields one slice; a
+            // range spanning segments yields one piece per intersection, appended
+            // in resident order.
+            let mut piece = None;
+            match pending.group {
+                0 => {
+                    for slice in pending.scene.base.slices(start..end) {
+                        stage_piece(0, renderer, slice, &mut piece)?;
+                    }
+                }
+                _ => stage_piece(
+                    1,
+                    renderer,
+                    &pending.scene.highlight.added[start..end],
+                    &mut piece,
+                )?,
+            }
+            let piece = piece.expect("a non-empty staging range yields a piece");
             prepare_us += prepare_started.elapsed().as_micros() as u64;
             let append_started = Instant::now();
             if let Some(prepared) = &mut pending.prepared {
@@ -328,9 +396,9 @@ impl CadRenderRuntime {
                 // Admitted append: keep the exact resident prefix and stage only
                 // the appended base suffix. `base_end` is the complete new base,
                 // so the renderer still classifies this as a base change.
-                (pending.base_offset, pending.scene.base.added.len())
+                (pending.base_offset, pending.scene.base.batch_len())
             } else {
-                (0, pending.scene.base.added.len())
+                (0, pending.scene.base.batch_len())
             }
         } else {
             (self.base_batches, self.base_batches)
@@ -360,7 +428,7 @@ impl CadRenderRuntime {
         if pending.base_changed && !pending.append {
             let empty = super::controller::DecodedImageCache::new();
             let cache = ready.images.as_deref().unwrap_or(&empty);
-            let report = renderer.upload_images(&ready.base.images, cache)?;
+            let report = renderer.upload_images(ready.base.images(), cache)?;
             if let Some(reason) = report.diagnostic() {
                 let keys = report
                     .unresolved
@@ -377,7 +445,7 @@ impl CadRenderRuntime {
         // could not fill is observable through `Renderer::mask_skips()`, never
         // silently dropped.
         if pending.base_changed && !pending.append {
-            renderer.upload_masks(&ready.base.masks)?;
+            renderer.upload_masks(ready.base.masks())?;
         }
         // Push the entity-level flags for the freshly committed scene, **after**
         // any base/image re-upload. A base change (re)allocates pick keys —
@@ -388,7 +456,7 @@ impl CadRenderRuntime {
         // surfaces the unmatched refs so the runtime can report them.
         let flag_report = renderer.set_entity_flags(&ready.entity_flags)?;
         // Publication follows successful GPU preparation/commit, never precedes it.
-        self.base_batches = ready.base.added.len();
+        self.base_batches = ready.base.batch_len();
         self.applied_base = Some(ready.base_revision);
         self.applied_base_scene = Some(ready.base.clone());
         self.applied_revision = Some(ready.revision);
@@ -415,7 +483,7 @@ impl CadRenderRuntime {
             base_changed: pending.base_changed,
             committed: true,
             group: 2,
-            batches: pending.scene.base.added.len() + pending.scene.highlight.added.len(),
+            batches: pending.scene.base.batch_len() + pending.scene.highlight.added.len(),
             prepare_us,
             append_us,
             commit_us,
