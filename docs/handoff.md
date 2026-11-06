@@ -1,3 +1,65 @@
+## 2026-11-06 增量显示追加闸门改为 ChangeSet 授权（P1）
+
+- **问题**：`DrawingEditReceipt::from_create_line_trace` 的准入证据是**命令形状**——恰好一条
+  `RawCommandTrace`、`trace.command == CommandId::CreateLine`、恰好一条 `[ObjectChange::Insert]`、
+  且几何必须是 `SemanticGeometry::Line`。提交真正发布的权威脏信息是 `ChangeSet`，命令身份不增加任何
+  信息；该闸门因此把除 LINE 以外的所有创建都挡在全量重建路径上。
+- **实现**：`cad_app::render_scene::edit` 改为
+  `DrawingEditReceipt::from_commit(before, after, changes: &ChangeSet) -> Option<Self>`（类型名、字段与
+  `after()` 不变，`cad-engine`/`cad-host` 仍只是透传）。新增可复用脏集原语
+  `dirty_entities(&ChangeSet) -> Vec<(EntityId, ChangeMask)>`：按 **id 首次出现顺序** 归并、掩码取并集，
+  容忍同 id 多条 entry（`Insert(id)` 后跟 `Update(id, STYLE)`）。
+  `cad-app/src/host/render_edit.rs` 两个调用点不再传 `&traced.commands`：从 trace 列表里取**最后一条非空**
+  changeset（`traced.commands[*].result` 的 `CommandOutcome.changes`；`TracedCommandOutcome` 本身不暴露
+  changes 字段），且必须先满足 `follows(before.id(), before.revision())`，否则不发 receipt（回退全量重建永远安全）。
+- **现在准许的追加**（全部条件同时成立）：`!Arc::ptr_eq(before, after)`；changeset `follows` 旧 revision；
+  `after.id() == before.id()` 且 `after.revision() == changes.after`；脏集**恰好一个** id；该 id 在
+  `changes.changes` 里出现过 `Insert`（同 id 后续 `Update(STYLE)` 仍准入）；`before` 里没有该实体且
+  `entity_count + 1 == after.entity_count()`；`after` 中存在、`space == Model`、`object.source_handle.is_none()`；
+  几何类别通过 `appends_like_full_rebuild` 白名单。覆盖 LINE、开/闭 LWPOLYLINE（含 RECTANG 闭合四段）、
+  CIRCLE、ARC、ELLIPSE、SPLINE、TEXT/MTEXT、SHAPE、MESH、INSERT、Compound/Dimension/Hatch/MultiLeader、
+  Opaque。
+- **明确按名限制**：`SemanticGeometry::Point` **拒绝追加**。POINT 的可见字形不在 base batches 里，而由
+  `overlay::visible_point_marker_positions` 的全图 `$PDMODE`/`$PDSIZE` 扫描派生；该扫描只在全量 base 重建时
+  重算，追加会让新点缺少标记批（与全量重建不等价）。`SemanticGeometry::Image` 与 `SemanticGeometry::Mask`
+  同样**拒绝追加**：它们的 per-entity 重建必然产生 `SceneDelta::images`/`masks`，而引擎的 append 路径
+  （`crates/cad-engine/src/render/runtime/session.rs`）在 append 时**不重传/不重挂**已驻留的纹理与 mask，
+  只扩展 CPU 数组会变成静默的部分成功。其余仍走全量重建：多实体插入（DIMCENTER/PASTEBLOCK 等）、
+  只有 `Update`/`Delete` 的 changeset、只有 revision 上升而 `changes` 为空的发布（图层/点样式形状）、
+  带 `source_handle` 的 vendor/TCH 实体、非模型空间；控制器既有闸门（`draw_order > model_max_order`，
+  `SceneVersion` 的 space/fonts/layers/images/vendor 相等）**位置与语义均未改动**。
+- **运行时兜底（块/复合展开）**：`SemanticGeometry::Insert`/`Compound` 自身类别无法说明块展开里是否含
+  raster/wipeout，所以控制器在 append 分支新增 `appendable_delta(&SceneDelta)`（`images`/`masks` 均为空才
+  真追加）。逐实体 delta 只要带 image/mask，就 **decline**：走与 `base_changed` 完全相同的全量构建
+  （`build_scene_with_space_and_images_and_vendor`，同一组参数，抽成局部 `full_base` 闭包），并把先前算出的
+  provisional `next_append` 覆盖为 `None`（不发 append 证明）。**顺序**：base 决策已上移到 POINT 标记
+  扫描之前，扫描闸门按**结果**而不是意图判定（`append_taken = appended_entity.is_some() &&
+  !append_declined`；`base_changed && !append_taken` 才扫描）。因此被 decline 的追加就是全量重建，
+  标记集与全量重建完全一致；只有**真正追加**才跳过全图扫描。`fail_after_point_staging` 测试钩子随之移入
+  扫描臂（原来是无条件 `take`，对“是否扫描”没有区分力），否则无法证明扫描有没有跑。
+- **契约**：`non_line_single_entity_inserts_take_the_append_path`（circle/开方向 LWPOLYLINE/RECTANG 闭合
+  LWPOLYLINE/TEXT，逐例断言 append 与 `build_scene_with_fonts` 的 added/images/masks 全等）、
+  `point_insert_is_restricted_to_the_full_rebuild`、
+  `receipt_requires_one_insert_and_the_published_revision_pair`（同 Arc、同内容不同 Arc、反向快照、错误
+  before revision、空 changes、两条 Insert、update-only、目标 id 已存在，以及 `Insert + Update(STYLE)` 同 id
+  必须**通过**，并用 `dirty_entities` 断言掩码并集）；`receipt_declines_an_image_insert`、
+  `receipt_declines_a_mask_insert`（用 sanctioned `begin_drawing_transaction` 在 demo 克隆上插入
+  `AcDbRasterImage`/`AcDbWipeout`，断言 changeset 单条 `Insert` 但 receipt 为 `None`）、
+  `appendable_delta_requires_no_image_or_mask_draw_items`（空 delta 通过，一个 `ImageBatch`/`MaskBatch`
+  即拒绝）；`declined_append_rescans_point_markers_like_a_full_rebuild`（块内 wipeout 成员的 `INSERT`
+  被 decline：设 `fail_after_point_staging` 时该 prepare **必须失败**，证明扫描跑了；无钩子时
+  `base_append` 为 `None` 且 added/images/masks 与 `build_scene` 全等）、
+  `taken_append_skips_the_point_marker_rescan`（LINE 追加在钩子置位时仍然成功 ⇒ 扫描未跑）；
+  `line_append_*`、`published_base_*`、
+  `sequential_appends_*`、`hidden_line_*` 等既有用例改到新签名，断言未放宽。`cad-db/src/change.rs` 的
+  `ObjectChange` 文档改为“消费者折叠多条 entry（`dirty_entities`）”，删掉“将来若加 insert-with-display
+  路径还需 `[Insert, Update(_, STYLE)]` 分支”的过时说法。
+- **未变**：一次 commit 一次 bump / 一个 changeset 的语义；`cad-db` 仍是唯一权威（未新增脏/观察通道）；
+  `draw_order`/`SceneVersion` 检查仍留在控制器里。**NOT RUN**：全量 workspace 门禁、全量测试、
+  Windows/macOS/Android/Web 载体、真机/真实 GPU/像素/性能证据；本轮只跑 `cad-app`/`cad-engine`/`cad-host`
+  三 crate 测试与 clippy/fmt。块内嵌 raster 的 `Insert` 只有谓词级 + 分支级覆盖，没有端到端 raster
+  fixture（不会把“已修好块展开”写成已验收）。
+
 ## 2026-11-06 显示状态恢复并入同一校验写入（P0）
 
 - **问题**：`DrawingDatabase::restore_entity_display_state` 直接改 `render_attributes` 与块/可见性成员表，

@@ -87,13 +87,12 @@ impl ChangeMask {
 /// batch already produced an `Update` for the id, its mask is unioned with
 /// `STYLE` instead, so that case still has a single entry.
 ///
-/// One consumer relies on the single-entry shape:
-/// `cad_app::render_scene::edit::DrawingEditReceipt::from_create_line_trace`
-/// matches `[ObjectChange::Insert(object)]`. That arm is gated on
-/// `CommandId::CreateLine`, which stages no display state today, so the
-/// two-entry shape is unreachable there; if an insert-with-display incremental
-/// path is ever added, that arm needs a
-/// `[Insert, Update(_, STYLE)]` arm before the receipt can accept it.
+/// One consumer folds this multi-entry shape instead of assuming one entry:
+/// `cad_app::render_scene::edit::DrawingEditReceipt::from_commit` runs the
+/// entries through `dirty_entities`, which unions the masks per id. An
+/// `[Insert(id), Update(id, STYLE)]` pair is therefore **one** dirty entity, and
+/// a single-entity insert that restores a captured display state is admitted on
+/// the incremental path exactly like a plain insert.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObjectChange {
     Insert(ObjectId),

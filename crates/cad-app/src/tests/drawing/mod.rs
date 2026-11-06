@@ -287,6 +287,7 @@ mod construction_line;
 mod create_draw_order;
 mod create_polyline;
 mod create_trim;
+mod create_trim_undo;
 mod dimension;
 mod dimension_angular_ordinate;
 mod dimension_chain;

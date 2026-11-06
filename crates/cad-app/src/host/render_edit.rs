@@ -1,5 +1,7 @@
 //! Snapshot-bound rendering receipts issued only by the command funnel.
 use super::*;
+use cad_db::ChangeSet;
+
 use crate::render_scene::DrawingEditReceipt;
 
 impl HostController {
@@ -11,7 +13,8 @@ impl HostController {
         let before = self.drawing();
         let traced = self.execute_traced(command)?;
         let receipt = before.zip(self.drawing()).and_then(|(before, after)| {
-            DrawingEditReceipt::from_create_line_trace(before, after, &traced.commands)
+            let changes = committed_changes(&traced, before.as_ref())?;
+            DrawingEditReceipt::from_commit(before, after, changes)
         });
         Ok((traced, receipt))
     }
@@ -23,8 +26,30 @@ impl HostController {
         let before = self.drawing();
         let traced = self.confirm_draw_traced()?;
         let receipt = before.zip(self.drawing()).and_then(|(before, after)| {
-            DrawingEditReceipt::from_create_line_trace(before, after, &traced.commands)
+            let changes = committed_changes(&traced, before.as_ref())?;
+            DrawingEditReceipt::from_commit(before, after, changes)
         });
         Ok((traced, receipt))
     }
+}
+
+/// The changeset the commit published, read from the trace list.
+///
+/// `TracedCommandOutcome` exposes no `changes` field of its own, so the changeset
+/// comes from the per-trace `result`: the last **non-empty** one is the applied
+/// commit. It must still `follows` the pre-command revision, otherwise no receipt
+/// is issued — declining to the full rebuild is always safe.
+fn committed_changes<'a>(
+    traced: &'a crate::TracedCommandOutcome,
+    before: &DrawingDatabase,
+) -> Option<&'a ChangeSet> {
+    let changes = traced
+        .commands
+        .iter()
+        .rev()
+        .filter_map(|trace| trace.result.as_ref().ok()?.changes.as_deref())
+        .find(|changes| !changes.is_empty())?;
+    changes
+        .follows(before.id(), before.revision())
+        .then_some(changes)
 }

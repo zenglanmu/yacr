@@ -28,6 +28,19 @@ pub use cad_resources::DecodedImageCache;
 /// name it without a direct `cad-scene` dependency.
 pub use cad_scene::SceneDelta;
 
+/// An appended delta may not grow the resident image/mask sets: the engine's
+/// append path does not re-upload them.
+///
+/// `crates/cad-engine/src/render/runtime/session.rs` keeps the resident
+/// textures/masks (and their earlier diagnostics) when a preparation is an
+/// append and uploads images/masks only for a non-append base change. An append
+/// whose per-entity delta carries raster draw items would therefore publish a
+/// CPU base that the GPU never received — a silent partial success. The
+/// controller falls back to the full rebuild instead.
+fn appendable_delta(delta: &SceneDelta) -> bool {
+    delta.images.is_empty() && delta.masks.is_empty()
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct SceneVersion {
     identity: SceneIdentity,
@@ -355,13 +368,95 @@ impl CadSceneController {
                     .is_none_or(|order| entity.draw_order > order))
             .then(|| entity.clone())
         });
+        // The base for this preparation is decided **before** the POINT staging
+        // below, because a declined append IS a full rebuild and must rescan the
+        // drawing-wide marker set exactly like one.
+        let mut stamp = TaskStamp::new(document, self.revision + 1);
+        stamp.configuration_version = self.fonts_revision;
+        if let Some(db) = doc {
+            stamp.object_revision = db.revision();
+        }
+        // Stage every CPU result before publishing any version. A visual-overlay
+        // edit keeps the base `Arc` (and its GPU revisions) unchanged.
+        let next_append = if appended_entity.is_some() {
+            self.base.as_ref().map(|base| BaseAppend {
+                predecessor: base.clone(),
+                keep_batches: base.added.len(),
+            })
+        } else if base_changed {
+            None
+        } else {
+            self.base_append.clone()
+        };
+        // The one full base build: the `base_changed` arm and the append-decline
+        // fallback must produce exactly the same CPU scene.
+        let full_base = |doc: Option<&DrawingDatabase>| -> CadResult<SceneDelta> {
+            match doc {
+                Some(db) => build_scene_with_space_and_images_and_vendor(
+                    db,
+                    stamp.clone(),
+                    fonts.clone(),
+                    self.images.clone(),
+                    layers,
+                    space,
+                    self.vendor.as_deref(),
+                ),
+                None => Ok(SceneDelta {
+                    stamp: stamp.clone(),
+                    added: vec![],
+                    removed_chunks: vec![],
+                    images: vec![],
+                    masks: vec![],
+                }),
+            }
+        };
+        // An append is provisional until the freshly built per-entity delta is
+        // known to be appendable; a declined append rebuilds the whole base and
+        // publishes no append proof.
+        let mut append_declined = false;
+        let base = if let Some(entity) = appended_entity.as_ref() {
+            let delta = assembly::build_model_entity_scene(
+                doc.expect("append drawing"),
+                entity,
+                stamp.clone(),
+                fonts.clone(),
+                self.images.clone(),
+                layers,
+                self.vendor.as_deref(),
+            )?;
+            if appendable_delta(&delta) {
+                let mut combined = self
+                    .base
+                    .as_ref()
+                    .expect("append predecessor")
+                    .as_ref()
+                    .clone();
+                combined.stamp = stamp.clone();
+                combined.added.extend(delta.added);
+                combined.images.extend(delta.images);
+                combined.masks.extend(delta.masks);
+                Arc::new(combined)
+            } else {
+                append_declined = true;
+                Arc::new(full_base(doc)?)
+            }
+        } else if base_changed {
+            Arc::new(full_base(doc)?)
+        } else {
+            self.base.as_ref().expect("base prepared").clone()
+        };
+        let next_append = if append_declined { None } else { next_append };
+        // A declined append is a full rebuild, so it must rescan the markers
+        // exactly like one; only an append that was actually taken may reuse the
+        // previous marker set (the inserted entity is never a POINT).
+        let append_taken = appended_entity.is_some() && !append_declined;
         // The visible POINT markers are drawing content: they can only change
         // when the base changes, so derive them once per base revision and reuse
         // the cache for every camera-only overlay rebuild (a full model-space
         // scan per navigation step would be wasted work). The derived positions
         // are injected into the effective inputs so they participate in the
         // overlay fingerprint below.
-        let staged_points = if base_changed && appended_entity.is_none() {
+        let staged_points = if base_changed && !append_taken {
             let positions = match doc {
                 Some(db) => visible_point_marker_positions(db, layers, space),
                 None => Vec::new(),
@@ -373,16 +468,18 @@ impl CadSceneController {
                 },
                 None => PointDisplayStyle::default(),
             };
+            // The test hook lives **inside** the staging arm so it fires exactly
+            // when the drawing-wide scan actually ran (a taken append skips it).
+            #[cfg(test)]
+            if std::mem::take(&mut self.fail_after_point_staging) {
+                return Err(cad_domain::CadError::Invariant(
+                    "test: failure after POINT staging".into(),
+                ));
+            }
             Some((positions, style))
         } else {
             None
         };
-        #[cfg(test)]
-        if std::mem::take(&mut self.fail_after_point_staging) {
-            return Err(cad_domain::CadError::Invariant(
-                "test: failure after POINT staging".into(),
-            ));
-        }
         let (point_markers, point_display_style) = staged_points
             .as_ref()
             .map(|(positions, style)| (positions, *style))
@@ -403,66 +500,6 @@ impl CadSceneController {
         if !base_changed && !visual_changed && !flags_changed {
             return Ok(());
         }
-        let mut stamp = TaskStamp::new(document, self.revision + 1);
-        stamp.configuration_version = self.fonts_revision;
-        if let Some(db) = doc {
-            stamp.object_revision = db.revision();
-        }
-        // Stage every CPU result before publishing any version. A visual-overlay
-        // edit keeps the base `Arc` (and its GPU revisions) unchanged.
-        let next_append = if appended_entity.is_some() {
-            self.base.as_ref().map(|base| BaseAppend {
-                predecessor: base.clone(),
-                keep_batches: base.added.len(),
-            })
-        } else if base_changed {
-            None
-        } else {
-            self.base_append.clone()
-        };
-        let base = if let Some(entity) = appended_entity.as_ref() {
-            let mut combined = self
-                .base
-                .as_ref()
-                .expect("append predecessor")
-                .as_ref()
-                .clone();
-            let delta = assembly::build_model_entity_scene(
-                doc.expect("append drawing"),
-                entity,
-                stamp.clone(),
-                fonts.clone(),
-                self.images.clone(),
-                layers,
-                self.vendor.as_deref(),
-            )?;
-            combined.stamp = stamp.clone();
-            combined.added.extend(delta.added);
-            combined.images.extend(delta.images);
-            combined.masks.extend(delta.masks);
-            Arc::new(combined)
-        } else if base_changed {
-            Arc::new(match doc {
-                Some(db) => build_scene_with_space_and_images_and_vendor(
-                    db,
-                    stamp.clone(),
-                    fonts.clone(),
-                    self.images.clone(),
-                    layers,
-                    space,
-                    self.vendor.as_deref(),
-                )?,
-                None => SceneDelta {
-                    stamp: stamp.clone(),
-                    added: vec![],
-                    removed_chunks: vec![],
-                    images: vec![],
-                    masks: vec![],
-                },
-            })
-        } else {
-            self.base.as_ref().expect("base prepared").clone()
-        };
 
         let (visual_delta, visual_diagnostics, visual_completeness) =
             if visual_changed || self.visual_overlay.is_none() {
