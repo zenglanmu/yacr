@@ -81,6 +81,13 @@ export const HOST_NAMES = [
   'OPEN', 'NEW', 'PLOT', 'SAVE', 'CANCEL', 'PAN', 'ZOOM', 'FIT', 'RESETVIEW', 'TOGGLELAYER',
   'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'MODEL', 'SELECT', 'SELECTALL', 'MEASURE', 'CONFIRM',
   'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
+  // PLAN (AutoCAD 2026): the payload-free "orthographic view of the XY plane"
+  // selector. v1 is the top/plan 2D view only (this build has no UCS model, so
+  // PLAN's UCS/World/Current options are NOT IMPLEMENTED and take no argument).
+  // The Rust lane adds the same name (`CommandId::PlanView`); this mirror stands
+  // in for the loaded `cad_commands` vocabulary and never proves the host
+  // advertises it.
+  'PLAN',
   'STANDARDVIEW', 'ORBIT', 'PROJECTION', 'MODE', 'LINE', 'CIRCLE', 'ARC', 'PLINE', 'RECTANG', 'ELLIPSE', 'POLYGON', 'POINT', 'SPLINE', 'DIMLINEAR', 'DIMALIGNED', 'DIMRADIUS', 'DIMDIAMETER', 'DIMCENTER', 'DIMANGULAR', 'DIMORDINATE', 'DIMBASELINE', 'DIMCONTINUE', 'MOVE', 'TRIM',
   'EXTEND', 'CHAMFER', 'FILLET', 'ARRAYRECT', 'ARRAYPOLAR', 'ALIGN', 'STRETCH', 'ERASE', 'EXPLODE', 'COPY', 'ROTATE', 'SCALE', 'MIRROR', 'COPYCLIP', 'CUTCLIP', 'PASTECLIP',
   // XLINE / RAY (2026-11-01): the two construction captures. Each is a canonical

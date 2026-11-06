@@ -231,6 +231,18 @@ impl Application {
                     ))
                 }
             }
+            CommandId::PlanView => {
+                // `PLAN` is AutoCAD 2026's "display an orthographic view of the
+                // XY plane". v1 is the **top/plan 2D view only**: this build has
+                // no UCS model, so AutoCAD's UCS/World/Current orientation
+                // choices are NOT IMPLEMENTED and `PLAN` takes no payload. A
+                // caller that supplies one is refused by name rather than having
+                // its value ignored or mapped onto the world plan.
+                if !matches!(command.payload, CommandPayload::None) {
+                    return Err(CadError::InvalidInput("PLAN needs no payload".into()));
+                }
+                self.plan_view(session, &command)
+            }
             CommandId::ResetView => {
                 let viewport = self.viewport_mut(&command)?;
                 let camera = Camera::top_view_2d();
@@ -764,7 +776,10 @@ impl Application {
     }
 
     /// Whether a viewport is currently showing the 2D plan observation.
-    fn view_state_is_2d(&self, viewport_id: &ViewportId) -> bool {
+    ///
+    /// `pub(crate)` because the `PLAN` view command (`app_zoom::plan_view`) makes
+    /// the same "already 2D is a no-op" decision the `STANDARDVIEW` arm makes.
+    pub(crate) fn view_state_is_2d(&self, viewport_id: &ViewportId) -> bool {
         self.workspace
             .viewports
             .get(viewport_id)

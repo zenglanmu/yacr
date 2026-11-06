@@ -158,6 +158,26 @@ pub enum CommandId {
     SwitchBackend,
     Switch2d3d,
     StandardView,
+    /// `PLAN`: display an orthographic view of the XY plane — AutoCAD 2026's
+    /// `PLAN` in its default form.
+    ///
+    /// Payload-free and exactly the **top/plan 2D view**
+    /// ([`crate::StandardView::Top`]): it returns the observation to the 2D plan
+    /// camera, recording one `ZOOM PREVIOUS` step when it leaves a 3D view and
+    /// doing nothing while the viewport is already 2D (the same documented no-op
+    /// as the top standard view). Both paths live in `Application::plan_view` /
+    /// `Application::apply_standard_view`, so `PLAN` is a second *name* for the
+    /// plan observation, never a second view authority.
+    ///
+    /// AutoCAD's `PLAN` also offers **UCS / World / Current** orientation
+    /// choices. This build has **no UCS model at all**, so those options are NOT
+    /// IMPLEMENTED and there is no payload field for them: a caller that supplies
+    /// any payload is refused explicitly (`InvalidInput`), never silently mapped
+    /// onto the world plan.
+    ///
+    /// View/session state only: no database write, no revision bump, no
+    /// `cad-history` entry and no `ChangeSet`, so Viewer mode allows it.
+    PlanView,
     Orbit,
     SwitchProjection,
     /// Switch the session between Viewer and Work mode (audit U02).

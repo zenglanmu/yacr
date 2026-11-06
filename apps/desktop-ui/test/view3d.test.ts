@@ -32,7 +32,7 @@ import { readCatalog, readModule } from './helpers.ts';
 // Only the names this suite exercises. `ORBIT` is here because the router does
 // know it — the chrome still refuses a click, which is the point of the gesture
 // list, not a missing vocabulary entry.
-setCommandCatalog(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'ORBIT', 'FIT', 'PAN', 'ZOOMIN', 'ZOOMOUT']);
+setCommandCatalog(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'ORBIT', 'FIT', 'PAN', 'ZOOMIN', 'ZOOMOUT']);
 
 const zh = await readCatalog('zh-CN');
 const en = await readCatalog('en');
@@ -67,11 +67,16 @@ test('the View tab exposes the 3D panel, the orbit hint and all seven standard v
 
   const standard = tab.panels.find(panel => panel.id === 'standard');
   assert.ok(standard, 'the View tab must carry the standard-view panel');
-  assert.deepEqual(standard.items.map(item => item.standardView), EXPECTED_VIEWS);
+  // The seven payload-carrying views come first and keep their order. `PLAN` is
+  // appended after them as a payload-free `cad_command` row (its own contract is
+  // `test/plan-command.test.ts`), so the standard-view assertions filter on the
+  // `standardView` token rather than assuming the panel holds only views.
+  const standardViewItems = standard.items.filter(item => item.standardView !== undefined);
+  assert.deepEqual(standardViewItems.map(item => item.standardView), EXPECTED_VIEWS);
   // The panel follows the shared data table, so a renamed host key cannot drift.
-  assert.deepEqual(standard.items, STANDARD_VIEWS.map(entry => ({ ...entry })));
+  assert.deepEqual(standardViewItems, STANDARD_VIEWS.map(entry => ({ ...entry })));
   const icons = await readModule('icons.tsx');
-  for (const item of standard.items) {
+  for (const item of standardViewItems) {
     // A payload-carrying view is never also a `cad_command` name: that funnel
     // refuses a payload variant, so offering it as one would be a broken button.
     assert.equal(item.command, undefined, `${item.id} must not carry a command`);
@@ -87,13 +92,16 @@ test('the View tab exposes the 3D panel, the orbit hint and all seven standard v
   }
   assert.equal(typeof zh[standard.titleKey], 'string', standard.titleKey);
   assert.equal(typeof en[standard.titleKey], 'string', standard.titleKey);
-  // The seven labels are distinct views, never one word repeated.
-  assert.equal(new Set(standard.items.map(item => item.labelKey)).size, 7);
+  // The seven view labels plus the appended PLAN label are distinct, never one
+  // word repeated.
+  assert.equal(new Set(standard.items.map(item => item.labelKey)).size, 8);
 });
 
 test('a standard-view click sends exactly one cad_standard_view with its own name', async () => {
   const standard = viewTab().panels.find(panel => panel.id === 'standard');
-  for (const item of standard.items) {
+  // `PLAN` rides `cad_command`, not this typed channel, so only the seven
+  // payload-carrying rows are exercised here.
+  for (const item of standard.items.filter(entry => entry.standardView !== undefined)) {
     const calls = [];
     const reported = [];
     const result = await submitStandardView({
@@ -178,9 +186,10 @@ test('standard views and the 3D toggles need an open drawing, with a real reason
   assert.equal(standardViewUnavailableReasonKey({ status: null, documentOpen: false }), 'command.unsupported');
   assert.equal(standardViewUnavailableReasonKey({ status: loaded, documentOpen: true }), 'command.unsupported');
 
-  // The two payload-free toggles are router commands, and they are gated on a
-  // document the same way (disabled, not "unsupported", on the start page).
-  assert.deepEqual([...DOCUMENT_SCOPED_COMMANDS], ['SWITCH2D3D', 'PROJECTION', 'MODEL']);
+  // The toggles that are payload-free router commands are gated on a document
+  // the same way (disabled, not "unsupported", on the start page). `PLAN` is the
+  // 2D-plan selector in the same group.
+  assert.deepEqual([...DOCUMENT_SCOPED_COMMANDS], ['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN']);
   for (const id of DOCUMENT_SCOPED_COMMANDS) {
     assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
     assert.equal(admitCommandText(id, { status: empty }).kind, 'unavailable', id);

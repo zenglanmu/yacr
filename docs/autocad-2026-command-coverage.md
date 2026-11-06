@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **40** |
-| **已实现合计（完整 + 部分）** | **90** |
-| 未实现 | **891** |
+| 部分实现（有写明的界） | **41** |
+| **已实现合计（完整 + 部分）** | **91** |
+| 未实现 | **890** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -106,6 +106,7 @@
 | `PASTEBLOCK` | 部分实现 | 应用内剪贴板 → 自动命名块；不是 OS 剪贴板 |
 | `PASTECLIP` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
 | `PASTEORIG` | 部分实现 | 应用内剪贴板；不是 OS 剪贴板，不跨应用 |
+| `PLAN` | 部分实现 | payload-free 选择子：Top/plan 2D 视图；无 UCS/World/Current 选项（本构建无 UCS 模型） |
 | `PLINE` | 已实现 | — |
 | `PLOT` | 部分实现 | 仅矢量 SVG/PDF；无 CTB/STB、无批量多布局 |
 | `POINT` | 已实现 | — |
@@ -777,7 +778,7 @@
 | 638 | `PERFANALYZER` | 未实现 | Opens the Performance Analyzer palette from which you can diagnose operations in AutoCAD that seem slow or unresponsive. | — |
 | 639 | `PERFANALYZERCLOSE` | 未实现 | Closes the Performance Analyzer palette. | — |
 | 640 | `PFACE` | 未实现 | Creates a 3D polyface mesh, vertex by vertex. | — |
-| 641 | `PLAN` | 未实现 | Displays an orthographic view of the XY plane of a specified user coordinate system. | — |
+| 641 | `PLAN` | 部分实现 | Displays an orthographic view of the XY plane of a specified user coordinate system. | payload-free 选择子：Top/plan 2D 视图；无 UCS/World/Current 选项（本构建无 UCS 模型） |
 | 642 | `PLANESURF` | 未实现 | Creates a planar surface. | — |
 | 643 | `PLINE` | 已实现 | Creates a 2D polyline, a single object that is composed of line and arc segments. | — |
 | 644 | `-PLOT` | 未实现 | Plots a drawing to a plotter, printer, or file in the command line. | — |

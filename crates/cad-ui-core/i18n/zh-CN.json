@@ -609,6 +609,7 @@
   "layout.scale_control_label": "设置视口比例",
   "layout.scale_control_unavailable": "无法修改视口比例：未接线比例命令",
   "view.standard_label": "标准视图",
+  "view.plan": "平面视图",
   "view.orbit_label": "环绕",
   "view.orbit.drag": "在画布上拖动以环绕",
   "view.orbit.needs_3d": "环绕仅三维可用，请先切换到三维",

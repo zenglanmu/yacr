@@ -192,6 +192,7 @@ mod layers_off;
 mod layers_previous;
 mod locked_layers;
 mod model_space;
+mod plan_view;
 mod point_display_style;
 mod view_camera;
 mod zoom_previous;

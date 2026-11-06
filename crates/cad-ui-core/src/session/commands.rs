@@ -58,6 +58,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("SWITCHBACKEND", CommandId::SwitchBackend),
     ("SWITCH2D3D", CommandId::Switch2d3d),
     ("STANDARDVIEW", CommandId::StandardView),
+    // `PLAN` (AutoCAD 2026) is the payload-free "orthographic view of the XY
+    // plane" selector: v1 is the top/plan 2D view only, the same observation as
+    // `STANDARDVIEW` → `Top`. This build has no UCS model, so PLAN's UCS/World/
+    // Current orientation options are NOT IMPLEMENTED and take no argument.
+    ("PLAN", CommandId::PlanView),
     ("ORBIT", CommandId::Orbit),
     ("PROJECTION", CommandId::SwitchProjection),
     ("MODE", CommandId::SetMode),

@@ -609,6 +609,7 @@
   "layout.scale_control_label": "Set viewport scale",
   "layout.scale_control_unavailable": "Viewport scale cannot be changed: no scale command is wired",
   "view.standard_label": "Standard view",
+  "view.plan": "Plan view",
   "view.orbit_label": "Orbit",
   "view.orbit.drag": "Drag on the canvas to orbit",
   "view.orbit.needs_3d": "Orbit is available in 3D only; switch to 3D first",

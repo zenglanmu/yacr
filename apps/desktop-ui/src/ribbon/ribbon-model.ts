@@ -832,7 +832,19 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         id: 'standard',
         titleKey: 'view.standard_label',
         rows: 2,
-        items: STANDARD_VIEWS.map(entry => ({ ...entry })),
+        items: [
+          ...STANDARD_VIEWS.map(entry => ({ ...entry })),
+          // `PLAN` (AutoCAD 2026) is the typed, **payload-free** "orthographic
+          // view of the XY plane": v1 is the top/plan 2D view only. This build
+          // has no UCS model, so AutoCAD's UCS/World/Current orientation options
+          // are NOT IMPLEMENTED and the command takes no argument. It is appended
+          // after the seven standard views (they are never reordered): the
+          // existing Top button keeps dispatching `cad_standard_view`
+          // (`standardView: 'top'`), while this row is the ordinary
+          // `cad_command` name `PLAN` — the same observation through the
+          // name-only funnel.
+          { id: 'PLAN', labelKey: 'view.plan', icon: 'view', command: 'PLAN' },
+        ],
       },
       {
         id: 'navigate',

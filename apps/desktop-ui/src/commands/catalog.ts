@@ -344,4 +344,12 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // is the catalog/command-line row only — no duplicate ribbon button. It is
   // appended last so no shipped row moves, and it reuses the `drawing` glyph.
   { id: 'MODEL', labelKey: 'layout.tab.model', icon: 'drawing', group: 'view' },
+  // PLAN (AutoCAD 2026) is the typed "orthographic view of the XY plane". v1 is
+  // the top/plan 2D view only: this build has no UCS model, so AutoCAD's
+  // UCS/World/Current orientation options are NOT IMPLEMENTED and the command
+  // takes no argument. It is the payload-free `CommandId::PlanView` router
+  // selector (`cad_command`), not the payload-carrying `STANDARDVIEW` lane, so
+  // it is a real name the command line admits. Appended last so no shipped row
+  // moves, and it reuses the `view` glyph the other view rows use.
+  { id: 'PLAN', labelKey: 'view.plan', icon: 'view', group: 'view' },
 ]);
