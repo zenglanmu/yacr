@@ -471,6 +471,7 @@ impl Application {
             | CommandId::FilletLines
             | CommandId::ChamferPolyline
             | CommandId::FilletPolyline
+            | CommandId::RevisionCloud
             | CommandId::ArrayRectangular
             | CommandId::ArrayPolar
             | CommandId::AlignEntities

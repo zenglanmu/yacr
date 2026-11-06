@@ -612,6 +612,8 @@ pub enum CommandId {
     /// polyline equivalent. AutoCAD's radius auto-reduction is **not**
     /// reproduced — a radius that does not fit is a refusal. Work-only.
     FilletPolyline,
+    /// `REVCLOUD` (Work-only): selection-based Object mode v1 (`app_drawing::revision_cloud`).
+    RevisionCloud,
     /// ARRAYRECT: insert **independent** copies of the current selection on a
     /// rectangular grid, growing up and to the right (ADR 0016 decision D).
     /// Payload is `ArrayRect { refs }`; the row/column counts and spacings are the
@@ -657,8 +659,7 @@ pub enum CommandId {
     /// Delete every entity in the current selection in one transaction. An
     /// empty selection is an explicit refusal. Work-only.
     EraseEntities,
-    /// `JOIN`: merge the current selection into **one** entity (this build's
-    /// honest subset of AutoCAD's `JOIN`).
+    /// `JOIN`: merge the current selection into **one** entity (this build's honest subset of AutoCAD's `JOIN`).
     ///
     /// Payload is [`crate::CommandPayload::None`]; the selection is the whole
     /// input. Two shapes are implemented, and nothing else:
@@ -686,9 +687,9 @@ pub enum CommandId {
     /// merge, closing a gap, joining across spaces/layers and joining
     /// non-concentric arcs are **NOT IMPLEMENTED**. Work-only.
     Join,
-    /// EXPLODE the current selection one level at a time (ADR 0016 decision G):    /// a LWPOLYLINE becomes straight segments plus ARCs (bulge segments through
-    /// `bulge_arc_geometry`), a uniformly scaled INSERT becomes its block members
-    /// with the placement baked in (nested inserts expanded under a cycle stack
+    /// EXPLODE the current selection one level at a time (ADR 0016 decision G): a LWPOLYLINE
+    /// becomes straight segments plus ARCs (bulge segments through `bulge_arc_geometry`), a
+    /// uniformly scaled INSERT becomes its block members with the placement baked in (nested inserts expanded under a cycle stack
     /// and a depth cap of 32), and a Compound becomes **all** of its children (a
     /// MINSERT yields its Insert instances). Members keep their own
     /// block-definition layers. Refusals (nothing written): a selection with
@@ -984,8 +985,7 @@ pub enum CommandId {
     /// [`crate::command_id::construction_line`].
     CreateXLine,
     /// `RAY` (Work-only): the positive half of an infinite construction line,
-    /// stored as a finite clipped segment; see
-    /// [`crate::command_id::construction_line`].
+    /// stored as a finite clipped segment; see [`crate::command_id::construction_line`].
     CreateRay,
 }
 

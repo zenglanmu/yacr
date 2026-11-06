@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **42** |
-| **已实现合计（完整 + 部分）** | **92** |
-| 未实现 | **889** |
+| 部分实现（有写明的界） | **43** |
+| **已实现合计（完整 + 部分）** | **93** |
+| 未实现 | **888** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -117,6 +117,7 @@
 | `RAY` | 部分实现 | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | `RECTANG` | 已实现 | — |
 | `REDO` | 已实现 | — |
+| `REVCLOUD` | 部分实现 | v1 对象模式：把一条选中的闭合直线段 LWPOLYLINE 的每条边换成一段向外弧；无矩形/多边形绘制、无 Arc length |
 | `ROTATE` | 已实现 | — |
 | `SAVE` | 部分实现 | 有损 DXF 另存；无 DWG 回写 |
 | `SAVEAS` | 部分实现 | SAVE 别名：有损 DXF 另存，无 DWG 回写 |
@@ -884,7 +885,7 @@
 | 743 | `REPURLS` | 未实现 | Finds and replaces a specified text string in a URL used in hyperlinks that are attached to all selected objects. | — |
 | 744 | `RESETBLOCK` | 未实现 | Resets one or more dynamic block references to the default values of the block definition. | — |
 | 745 | `RESUME` | 未实现 | Continues an interrupted script. | — |
-| 746 | `REVCLOUD` | 未实现 | Creates or modifies a revision cloud. | — |
+| 746 | `REVCLOUD` | 部分实现 | Creates or modifies a revision cloud. | v1 对象模式：把一条选中的闭合直线段 LWPOLYLINE 的每条边换成一段向外弧；无矩形/多边形绘制、无 Arc length |
 | 747 | `REVCLOUDPROPERTIES` | 未实现 | Controls the approximate chord length for the arcs in a selected revision cloud. | — |
 | 748 | `REVERSE` | 未实现 | Reverses the vertices of selected lines, polylines, splines, and helixes, which is useful for linetypes with included text, or wide polylines with differing beginning and ending widths. | — |
 | 749 | `REVERT` | 未实现 | Closes and then reopens the current drawing. | — |

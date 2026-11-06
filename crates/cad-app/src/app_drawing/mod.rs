@@ -67,6 +67,7 @@ mod paste_block;
 mod point_style;
 mod polyline_fillet;
 mod properties;
+mod revision_cloud;
 mod scale_text;
 mod stretch;
 mod text_edit;

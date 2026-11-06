@@ -254,6 +254,13 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // the row exists instead of leaving the host to answer at run time.
   'CHAMFER POLYLINE': Object.freeze({ count: 1, reasonKey: 'draw.kind.chamfer_polyline.hint' }),
   'FILLET POLYLINE': Object.freeze({ count: 1, reasonKey: 'draw.kind.fillet_polyline.hint' }),
+  // REVCLOUD (AutoCAD 2026) Object mode v1 rewrites **exactly one** preselected
+  // closed straight-segment polyline in place (`CommandPayload::None`, so nothing
+  // is picked interactively). The table states a minimum of one — the host is
+  // what refuses a selection of two or a non-polyline by name — and the sentence
+  // is the command's own hint, so the disabled button and the refusal describe
+  // the same rule once.
+  REVCLOUD: Object.freeze({ count: 1, reasonKey: 'draw.kind.revcloud.hint' }),
   LAYISO: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),
   LAYUNISO: Object.freeze({ count: 0, reasonKey: 'draw.error.selection_required' }),
   LAYOFF: Object.freeze({ count: 1, reasonKey: 'draw.error.selection_required' }),

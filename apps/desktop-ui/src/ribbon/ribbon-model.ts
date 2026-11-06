@@ -636,6 +636,12 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // the Home/draw comment for the one-pick shape, the shared fill
           // parameters and why it is a small button with no popover).
           { id: 'HATCHPOINT', labelKey: 'draw.kind.hatchpoint', icon: 'hatch', command: 'HATCHPOINT' },
+          // REVCLOUD (AutoCAD 2026) Object mode v1: selection-gated, no pick
+          // capture. It acts on the one preselected closed straight-segment
+          // polyline (`CommandPayload::None`), so it is an ordinary router button
+          // whose enablement comes from `SELECTION_REQUIREMENTS`; there is no
+          // rectangular/polygonal draw mode and no `Arc length` option to offer.
+          { id: 'REVCLOUD', labelKey: 'draw.kind.revcloud', icon: 'polyline', command: 'REVCLOUD' },
         ],
       },
       {

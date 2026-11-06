@@ -194,6 +194,7 @@ mod locked_layers;
 mod model_space;
 mod plan_view;
 mod point_display_style;
+mod revision_cloud;
 mod select_similar;
 mod view_camera;
 mod zoom_previous;

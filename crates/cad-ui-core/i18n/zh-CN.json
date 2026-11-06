@@ -429,6 +429,8 @@
   "draw.kind.dimcontinue": "连续标注",
   "draw.kind.hatch": "填充",
   "draw.kind.hatchpoint": "按点填充",
+  "draw.kind.revcloud": "修订云线",
+  "draw.kind.revcloud.hint": "请选择一条闭合的直线段多段线；REVCLOUD 会把每条边替换为一段向外弧（v1 对象模式）。",
   "draw.kind.text": "文字",
   "draw.kind.erase": "删除",
   "draw.kind.explode": "分解",

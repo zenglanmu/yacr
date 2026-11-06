@@ -155,6 +155,12 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // capture, and an alias would silently route a polyline edit into it.
     ("CHAMFER POLYLINE", CommandId::ChamferPolyline),
     ("FILLET POLYLINE", CommandId::FilletPolyline),
+    // REVCLOUD (AutoCAD 2026) is the selection-based **Object mode** v1: the one
+    // selected closed straight-segment polyline is the whole input, every edge
+    // becomes one outward arc bulge. It is a canonical selector of its own, not
+    // an alias: there is no interactive rectangular/polygonal draw mode in this
+    // build, so the name must not route into a draw capture.
+    ("REVCLOUD", CommandId::RevisionCloud),
     ("ARRAYRECT", CommandId::ArrayRectangular),
     ("ARRAYPOLAR", CommandId::ArrayPolar),
     ("ALIGN", CommandId::AlignEntities),

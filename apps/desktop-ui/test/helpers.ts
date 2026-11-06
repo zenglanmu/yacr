@@ -176,6 +176,13 @@ export const HOST_NAMES = [
   // them in the canonical run, exactly as `cad_ui_core::session::COMMAND_TABLE`
   // now does.
   'CHAMFER POLYLINE', 'FILLET POLYLINE',
+  // REVCLOUD (AutoCAD 2026) is the **selection-based Object mode**: the one
+  // preselected closed straight-segment polyline is the whole input
+  // (`CommandPayload::None`), so it is an ordinary canonical selector, not a
+  // draw capture. There is no interactive rectangular/polygonal draw mode and no
+  // `Arc length` option in v1. The Rust lane adds the same name
+  // (`CommandId::RevisionCloud`); this mirror never proves the host advertises it.
+  'REVCLOUD',
   // The three single-curve edits (2026-11-01). `BREAK` is a **two-pick** capture
   // (the first pick is the curve *and* the first break point); `DIVIDE` and
   // `LENGTHEN` take no pick at all and act on the current selection, which is why

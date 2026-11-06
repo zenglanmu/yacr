@@ -360,4 +360,13 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // no shipped row moves, and it reuses the `selectAll` glyph because it is the
   // same "grow the selection" gesture.
   { id: 'SELECTSIMILAR', labelKey: 'draw.kind.selectsimilar', icon: 'selectAll', group: 'modify' },
+  // REVCLOUD (AutoCAD 2026) is the **selection-based Object mode** v1: the one
+  // selected closed straight-segment polyline is the whole input, and every edge
+  // becomes one outward arc bulge. It is a router command (`CommandPayload::None`),
+  // so nothing is picked interactively; the one-object rule lives in
+  // `SELECTION_REQUIREMENTS`. There is no rectangular/polygonal draw mode and no
+  // `Arc length` option in v1, so nothing here may imply a capture. Appended last
+  // so no shipped row moves, and it reuses the `polyline` glyph: the output is a
+  // polyline.
+  { id: 'REVCLOUD', labelKey: 'draw.kind.revcloud', icon: 'polyline', group: 'draw' },
 ]);

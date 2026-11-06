@@ -429,6 +429,8 @@
   "draw.kind.dimcontinue": "Continue dimension",
   "draw.kind.hatch": "Hatch",
   "draw.kind.hatchpoint": "Hatch by point",
+  "draw.kind.revcloud": "Revision Cloud",
+  "draw.kind.revcloud.hint": "Select one closed straight-segment polyline; REVCLOUD replaces each edge with one outward arc (Object mode v1).",
   "draw.kind.text": "Text",
   "draw.kind.erase": "Erase",
   "draw.kind.explode": "Explode",
