@@ -9,8 +9,8 @@
 //! The batch payload is stored as **one `Arc<RenderBatch>` per batch** inside
 //! each segment, while the `Arc<SceneDelta>` is retained for the facts that are
 //! still whole-segment (the stamp) and for the prefix's raster draw items. The
-//! granularity is what makes a transform-only update possible: replacing one
-//! entity's batch ([`ResidentScene::replace_batch`]) swaps a single `Arc` and
+//! granularity is what makes a single-entity in-place update possible: replacing
+//! one entity's batch ([`ResidentScene::replace_batch`]) swaps a single `Arc` and
 //! never copies the other batches of the prefix or the segment.
 //!
 //! # Invariants

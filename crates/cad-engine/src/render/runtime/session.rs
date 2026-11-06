@@ -174,12 +174,12 @@ impl CadRenderRuntime {
             return Ok(());
         }
         let base_changed = self.applied_base != Some(ready.base_revision);
-        // P4: a transform-only update republishes the same base revision with one
-        // entity's rebuilt batches. The controller does not own the renderer, so
-        // it publishes the replacements as data; apply them here, in place, before
-        // the ordinary upload decision. Every batch is validated first, so a
-        // multi-batch entity update is all-or-nothing, and a refusal re-stages the
-        // whole base instead of keeping the old geometry.
+        // P4: a single-entity display update republishes the same base revision
+        // with one entity's rebuilt batches. The controller does not own the
+        // renderer, so it publishes the replacements as data; apply them here, in
+        // place, before the ordinary upload decision. Every batch is validated
+        // first, so a multi-batch entity update is all-or-nothing, and a refusal
+        // re-stages the whole base instead of keeping the old geometry.
         let mut applied_overwrites = 0usize;
         let mut restage = false;
         match overwrite_admission(

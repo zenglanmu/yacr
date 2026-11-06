@@ -45,24 +45,28 @@ pub(crate) fn dirty_entities(changes: &ChangeSet) -> Vec<(EntityId, ChangeMask)>
 pub(crate) enum CommitDelta {
     /// Exactly one inserted model-space entity, admitted for a tail append.
     Append(EntityId),
-    /// Exactly one entity whose only display-relevant change is a rigid
-    /// transform, admitted for an **in-place** overwrite of its resident batch
-    /// range (same slot, same pick key, no rebuild).
+    /// Exactly one entity whose only change is display state, admitted for an
+    /// **in-place** overwrite of its resident batch range (same slot, same pick
+    /// key, no rebuild).
     ///
-    /// The admission is narrow: one dirty id, no insert and no delete, the
-    /// transform bit set, and no style/reference/metadata bit (those can change
-    /// the display class, the placement or the source set). The controller still
-    /// proves the batch-count invariant by rebuilding the entity and requiring
-    /// exactly `range.len()` batches; a geometry change that alters the count
-    /// declines to the full rebuild.
+    /// The admission is narrow: one dirty id, no insert and no delete, at least
+    /// one display bit (`GEOMETRY`/`TRANSFORM`/`STYLE`) and no `REFERENCES`
+    /// (a `METADATA`-only commit draws nothing). `METADATA` beside a display bit
+    /// is tolerated because the database stamps it on every entity-row update.
+    /// The mask is **not** the proof, though: the controller rebuilds the entity
+    /// and requires the rebuilt delta to have exactly `range.len()` batches, so
+    /// a radius change keeps the footprint while a linetype change that
+    /// subdivides differently declines to the full rebuild.
     Update(EntityId),
     /// No inserts and no updates: every dirty entity is a delete. (A `ChangeSet`
     /// with an empty `changes` list and a revision bump — layer/point-style — is
     /// NOT this: the receipt is not issued and the prepare stays a full rebuild.)
     Retire(Vec<EntityId>),
     /// Anything else that the commit can still describe precisely (currently a
-    /// mixed insert/delete batch, a mixed insert/update batch, and a geometry
-    /// update that is not a transform). It always falls back to the full rebuild.
+    /// mixed insert/delete batch, a mixed insert/update batch, a display update
+    /// spread over several entities, and a single-entity update whose mask names
+    /// no display bit or names `REFERENCES`). It always falls back to the full
+    /// rebuild.
     Other,
 }
 
@@ -74,9 +78,9 @@ pub(crate) enum CommitDelta {
 /// no source handle, and a geometry class whose per-entity rebuild is the same
 /// work a full rebuild would do for it (see [`appends_like_full_rebuild`]); for a
 /// retire, a delete-only batch following the committed revision pair; for an
-/// update, exactly one model-space entity whose mask is a transform (see
-/// [`update_candidate`]). Everything else declines, and declining always falls
-/// back to the full rebuild.
+/// update, exactly one model-space entity whose mask names display state and no
+/// `REFERENCES` (see [`update_candidate`]). Everything else declines, and
+/// declining always falls back to the full rebuild.
 #[derive(Clone)]
 pub struct DrawingEditReceipt {
     pub(super) before: Arc<DrawingDatabase>,
@@ -116,8 +120,9 @@ impl DrawingEditReceipt {
 ///
 /// `None` is the historical "decline" answer for a shape the receipt cannot
 /// describe (an empty layer/point-style revision bump, a non-appendable single
-/// insert, a style-only update). The controller treats a missing receipt exactly
-/// like [`CommitDelta::Other`]: full rebuild.
+/// insert, an update whose entity or mask the commit cannot prove). The
+/// controller treats a missing receipt exactly like [`CommitDelta::Other`]:
+/// full rebuild.
 fn classify_commit(
     before: &DrawingDatabase,
     after: &DrawingDatabase,
@@ -151,18 +156,33 @@ fn classify_commit(
     if let Some(inserted) = append_candidate(before, after, changes) {
         return Some(CommitDelta::Append(inserted));
     }
-    // In-place transform update: exactly one dirty model-space entity whose only
-    // display-relevant change is the move.
+    // In-place display update: exactly one dirty model-space entity whose change
+    // is display state inside `GEOMETRY | TRANSFORM | STYLE`.
     if let Some(updated) = update_candidate(before, after, changes) {
         return Some(CommitDelta::Update(updated));
     }
-    // A geometry update that is **not** a transform is described precisely enough
-    // to name it: the geometry may change the batch counts, so it is the
-    // full-rebuild arm, never an in-place overwrite.
-    if let Some((_, mask)) = single_dirty(changes) {
-        if mask.contains(ChangeMask::GEOMETRY) {
-            return Some(CommitDelta::Other);
+    // A display update that is not single-entity/in-place is still described
+    // precisely enough to name the full-rebuild arm:
+    // - an update mask that names `REFERENCES` (a block/xref definition is
+    //   shared, so it can redraw other entities) or that names no display state
+    //   at all (`METADATA`-only, or a maskless entry);
+    // - a display update spread over several entities: the footprint proof is
+    //   per entity, so there is no single resident range to prove.
+    let display = ChangeMask::GEOMETRY.0 | ChangeMask::TRANSFORM.0 | ChangeMask::STYLE.0;
+    let dirty = dirty_entities(changes);
+    let inadmissible_update = changes.changes.iter().any(|change| match change {
+        ObjectChange::Update(_, mask) => {
+            mask.contains(ChangeMask::REFERENCES) || mask.0 & display == 0
         }
+        ObjectChange::Insert(_) | ObjectChange::Delete(_) => false,
+    });
+    let all_updates = !changes.changes.is_empty()
+        && changes
+            .changes
+            .iter()
+            .all(|change| matches!(change, ObjectChange::Update(..)));
+    if inadmissible_update || (all_updates && dirty.len() > 1) {
+        return Some(CommitDelta::Other);
     }
     // An update mixed with an insert (for a different id, since the
     // insert-with-display-state shape above was already admitted as an append)
@@ -230,31 +250,55 @@ fn append_candidate(
     Some(inserted)
 }
 
-/// The in-place transform admission, returning the updated entity id.
+/// The single-entity in-place display admission, returning the updated entity id.
 ///
-/// The database's only transform-producing path
-/// ([`cad_db::DrawingTransaction::transform_entity`]) rewrites the stored geometry,
-/// so it publishes [`ChangeMask::GEOMETRY`] **and** [`ChangeMask::TRANSFORM`]
-/// (`crates/cad-db/src/drawing/transaction.rs`). A bare `TRANSFORM` mask is also
-/// accepted. Any other bit — `STYLE` (layer/space/draw order), `REFERENCES`,
-/// `METADATA` (type key/source handle) — changes the display class, placement or
-/// source set, so it declines.
+/// The mask only says *what kind* of display state changed; it is not the proof
+/// that the change fits the resident slot:
 ///
-/// The mask cannot prove that the batch **count** is unchanged (a stretched
-/// spline can subdivide differently), so that proof lives in the controller: it
-/// rebuilds exactly this entity and requires the rebuilt delta to have exactly
-/// the resident range's length. A mismatch is a full rebuild.
+/// - it must name display state: at least one of `GEOMETRY`, `TRANSFORM` or
+///   `STYLE`. A `METADATA`-only commit (type key/source handle/object revision)
+///   or a maskless entry draws nothing, so there is nothing to overwrite.
+/// - it must not name `REFERENCES` **in any combination**: a block/xref
+///   definition is shared, so changing it can redraw entities other than this
+///   one and no single-entity footprint can prove that.
+/// - no bit outside the modelled set may appear at all.
+///
+/// `METADATA` is tolerated **beside** a display bit, and that is not a loophole:
+/// the database stamps it on every entity-row update. A display-state write
+/// stages the unchanged row, whose mask is the "never zero" `METADATA` fallback,
+/// and the write then unions `STYLE` (`crates/cad-db/src/change.rs`,
+/// `drawing/block_edit.rs`). Refusing `METADATA` here would refuse every
+/// property-panel colour/linetype edit, which is exactly the case this path
+/// exists for.
+///
+/// Every structural guard stays: exactly one dirty id, no insert and no delete
+/// anywhere in the commit, the entity count unchanged, the same entity present
+/// before and after, and both in [`SpaceId::Model`].
+///
+/// The real admission is the **footprint**: the controller rebuilds exactly this
+/// entity and requires the rebuilt delta to have exactly the resident range's
+/// length (`render_scene::update::stage_update`). A radius or colour change
+/// keeps that count; a linetype change that subdivides into more segments does
+/// not, and a mismatch is always a full rebuild — never a partial write.
 fn update_candidate(
     before: &DrawingDatabase,
     after: &DrawingDatabase,
     changes: &ChangeSet,
 ) -> Option<EntityId> {
     let (id, mask) = single_dirty(changes)?;
-    if !mask.contains(ChangeMask::TRANSFORM) {
+    // A definition change is not confined to this entity's footprint, so it is
+    // refused by name even if the display whitelist ever grows.
+    if mask.contains(ChangeMask::REFERENCES) {
         return None;
     }
-    let allowed = ChangeMask::GEOMETRY.0 | ChangeMask::TRANSFORM.0;
-    if mask.0 & !allowed != 0 {
+    // A display bit must be present: `METADATA` alone is not a display change.
+    let display = ChangeMask::GEOMETRY.0 | ChangeMask::TRANSFORM.0 | ChangeMask::STYLE.0;
+    if mask.0 & display == 0 {
+        return None;
+    }
+    // No unmodelled bit may sneak in (see `ChangeMask`: five bits today).
+    let modelled = display | ChangeMask::REFERENCES.0 | ChangeMask::METADATA.0;
+    if mask.0 & !modelled != 0 {
         return None;
     }
     // An insert or a delete anywhere in the commit means the resident stream

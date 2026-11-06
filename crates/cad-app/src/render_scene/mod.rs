@@ -94,7 +94,7 @@ pub struct CadSceneController {
     model_max_order: Option<i64>,
     #[cfg(test)]
     fail_after_point_staging: bool,
-    /// Test-only: treat the next transform-only update as not fitting, so the
+    /// Test-only: treat the next in-place display update as not fitting, so the
     /// controller's full-rebuild fallback is exercised without a renderer.
     #[cfg(test)]
     fail_next_update_fit: bool,
@@ -373,11 +373,12 @@ impl CadSceneController {
         if let Some(db) = doc {
             stamp.object_revision = db.revision();
         }
-        // P4: a transform-only update keeps the resident base and replaces the
-        // moved entity's own batches in place. The staging is provisional: the
-        // rebuilt delta must have exactly the entity's resident batch count (a
-        // GEOMETRY change can alter it), so a mismatch declines to the full
-        // rebuild below instead of publishing a partial range.
+        // P4: a single-entity display update keeps the resident base and
+        // replaces that entity's own batches in place. The staging is
+        // provisional: the rebuilt delta must have exactly the entity's resident
+        // batch count (a geometry or linetype change can alter it), so a
+        // mismatch declines to the full rebuild below instead of publishing a
+        // partial range.
         let update_candidate = update::update_candidate(
             self.edit.as_ref(),
             doc,
@@ -546,7 +547,7 @@ impl CadSceneController {
                 (ResidentScene::from_owned(delta), index, Vec::new())
             } else {
                 // Nothing structural changed, a delete-only commit kept the base, or
-                // a transform-only update replaced one entity's batches in place: the
+                // an in-place display update replaced one entity's batches: the
                 // resident scene and its per-entity index are otherwise untouched.
                 (
                     self.base.as_ref().expect("base prepared").clone(),
@@ -619,9 +620,9 @@ impl CadSceneController {
         let flags_version = flags_fingerprint(overlays, &next_retired);
         let visual_changed = base_changed || self.visual_version != Some(visual_version);
         let flags_changed = base_changed || self.flags_version != Some(flags_version);
-        // A transform-only update changes geometry without changing the base
-        // revision, the overlay fingerprint or the flags: it must still publish so
-        // the engine applies the in-place overwrites.
+        // An in-place display update may change geometry/style without changing the
+        // base revision, the overlay fingerprint or the flags: it must still publish
+        // so the engine applies the in-place overwrites.
         if !base_changed && !visual_changed && !flags_changed && !update_taken {
             return Ok(());
         }
@@ -933,7 +934,7 @@ impl CadSceneController {
         self.retired_compaction_threshold = Some(threshold);
     }
 
-    /// Force the next transform-only update to decline its in-place fit, so the
+    /// Force the next in-place display update to decline its footprint fit, so the
     /// full-rebuild fallback is exercised without a renderer. Test only.
     #[cfg(test)]
     pub(crate) fn set_fail_next_update_fit(&mut self, fail: bool) {

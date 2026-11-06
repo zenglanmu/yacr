@@ -70,8 +70,8 @@ pub struct PreparedScene {
     /// of re-materialising the whole base, so the append cost is O(changed).
     pub base: ResidentScene,
     pub base_append: Option<BaseAppend>,
-    /// In-place batch replacements for a transform-only update: one
-    /// `(resident batch index, rebuilt batch)` per slot of the moved entity's
+    /// In-place batch replacements for a single-entity display update: one
+    /// `(resident batch index, rebuilt batch)` per slot of the edited entity's
     /// range, in range order.
     ///
     /// The engine applies them with `Renderer::overwrite_batch` **after** the

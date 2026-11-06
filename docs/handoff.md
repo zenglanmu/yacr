@@ -1,3 +1,52 @@
+## 2026-11-06 原地更新准入改为「足迹」：GEOMETRY/STYLE 编辑不再整基重建
+
+- **旧规则（已推翻）**：`crates/cad-app/src/render_scene/edit.rs::update_candidate` 要求单个实体
+  union 后的 `ChangeMask` **包含 `TRANSFORM`**，且不得有 `GEOMETRY | TRANSFORM` 之外的位。于是
+  属性面板的半径/颜色/线型编辑（带 `GEOMETRY` 或 `STYLE`）被判 `Other`，白白整基重建。
+- **新规则**（结构守卫全部保留：唯一 dirty id、提交内任何位置都无 `Insert`/`Delete`、实体数不变、
+  update 前后同一实体存在、两者都在 `SpaceId::Model`）：
+  - 掩码必须**至少含一个显示位**（`GEOMETRY`/`TRANSFORM`/`STYLE`）；`METADATA`-only 与空掩码
+    不是显示变化，仍 `Other`；
+  - `REFERENCES`（**任何组合**）一律不进：块/xref 定义是共享的，改它可能重绘其它实体，单实体足迹
+    永远证明不了；
+  - 不得出现未建模位。
+  - **`METADATA` 与显示位并存时允许**：数据库对任何实体行 update 都会补 `METADATA`
+    （`ChangeMask::for_entity_update` 的“永不零掩码”回退是 `METADATA`；display-state 写入 stage 的是
+    未改动的行，随后再 union `STYLE`，见 `drawing/block_edit.rs`），所以真实属性编辑的掩码是
+    `STYLE | METADATA`。**若照字面拒绝 `METADATA`，恰恰会把本轮要放行的颜色/线型编辑全部拒绝**——
+    这是与任务字面描述的唯一偏离，已在代码注释里写明。
+- **真正的准入证明是足迹，不是掩码**：`render_scene/update.rs::stage_update` 只重建这一个实体，要求
+  重建 delta 的 batch 数**恰好等于**驻留 `range.len()`，且不带 image/mask draw item；不等即
+  `None`，控制器退回整基重建并且**不发布任何 overwrite**（绝不部分写入）。渲染器侧的
+  topology/alpha class/mirrored/draw order/vertex·index·line-quad 计数/run list/stream origin 校验
+  属于既有拒绝路径，本轮**没有改动渲染器**。
+- **负例（4 个，全部保持整基重建）**：
+  1. `REFERENCES`（单独或与 `GEOMETRY` 并存）→ `Other`；
+  2. `METADATA`-only（同一行原样 update）→ `Other`（另断言空掩码也绝不会被判 `Update`）；
+  3. 多实体 `GEOMETRY` → `Other`（足迹证明是逐实体的，没有单一驻留 range 可证）；
+  4. **线型 STYLE 改变 dash 细分 → batch 数变化** → 掩码判 `Update`，但足迹证明拒绝 → 整基重建。
+     这是“掩码不是准入门”的关键证据：测试用**半透明**线（`alpha=0.5` 走非 packed 路径，每个 dash
+     一个 fragment → 一个 batch），从连续（1 batch）改成 `DASHED [0.25, -0.125]`（>1 batches），
+     断言 `delta == Update`、base 身份与 prefix `Arc` 都换、`base_revision + 1`、`overwrites` 为空、
+     重建后该实体 range 变长且 batch 带 dash pattern。
+- **测试**（`cargo test -p cad-app --lib render_scene::update_tests`：11 passed）：
+  - `classification_admits_a_geometry_update_and_keeps_the_resident_base` —— **改写自旧的
+    `classification_keeps_a_geometry_update_on_the_full_rebuild`，旧期望 `Other` 现在是错的**；新用例
+    断言 `Update` 且驻留 base/range/revision 保持、单槽位覆写、batch 已是拉伸后的端点。
+  - `a_style_colour_update_keeps_the_resident_base_and_recolours_the_batch` —— 覆写真的把
+    `batch.color` 从 `[1,1,1]` 改为 `[1,0,0]`，其余 batch 逐字节不变。
+  - `classification_keeps_a_references_update_on_the_full_rebuild`、
+    `classification_keeps_a_metadata_only_update_on_the_full_rebuild`、
+    `classification_keeps_a_multi_entity_geometry_update_on_the_full_rebuild`、
+    `a_style_linetype_change_that_changes_the_footprint_falls_back_to_a_full_rebuild`。
+- **验证**：`cargo test -p cad-app --locked`（lib `1572 passed; 0 failed; 3 ignored`，其余 10 个
+  测试目标也全部 `0 failed`）、
+  `cargo test -p cad-engine --locked`、`cargo test -p cad-host --locked`、
+  `cargo clippy -p cad-app -p cad-engine -p cad-host --all-targets --locked -- -D warnings`、
+  `cargo fmt --all -- --check`、`scripts/check-file-size.py`、`scripts/check-architecture.py` 均通过。
+  **NOT RUN**：全工作区门禁/全量测试、任何 GUI/GPU/真机证据（本轮只改控制器准入与文档，未改
+  渲染器，也没有启动 GUI）。
+
 ## 2026-11-06 SDF conic 原地覆写（P4 补：圆弧/圆半径·圆心·角度变化走同槽位原地写）
 
 - **旧结论被推翻**：`ConicNotUpdatable` 原先写的两条理由都不成立——调用方给的**重建

@@ -1,10 +1,10 @@
-//! P4 transform-only update: replace one entity's resident batches in place.
+//! P4 single-entity display update: replace one entity's resident batches in place.
 //!
-//! A commit that only moves one entity should not rebuild the scene. The
-//! controller therefore rebuilds **just that entity**, proves the rebuilt delta
-//! occupies exactly the entity's resident batch range, and publishes one
-//! `(resident index, Arc<RenderBatch>)` pair per slot on
-//! [`PreparedScene::overwrites`]. The engine applies them to the renderer
+//! A commit that only changes one entity's display state (a move, a radius or a
+//! colour) should not rebuild the scene. The controller therefore rebuilds **just
+//! that entity**, proves the rebuilt delta occupies exactly the entity's resident
+//! batch range, and publishes one `(resident index, Arc<RenderBatch>)` pair per
+//! slot on [`PreparedScene::overwrites`]. The engine applies them to the renderer
 //! (`Renderer::overwrite_batch`), which rewrites the existing GPU buffers without
 //! moving the batch slot, the pick key, the batch order or the draw order — so a
 //! selection survives a move and the resident base is not re-staged.
@@ -12,16 +12,16 @@
 //! The controller does not own the renderer, so it never writes to the GPU
 //! itself. If the renderer refuses any overwrite, the engine falls back to a
 //! **full base re-stage** of the published base; the published CPU base already
-//! holds the moved geometry, so the fallback always draws the new scene.
+//! holds the new display state, so the fallback always draws the new scene.
 //!
 //! # Bounds
 //!
-//! A move changes the drawing's model-space extent, and the update path
-//! deliberately does **not** recompute it: `DrawingDatabase::bounds()` is a
+//! A display edit may change the drawing's model-space extent, and the update
+//! path deliberately does **not** recompute it: `DrawingDatabase::bounds()` is a
 //! revision-tagged lazy memo, so the commit leaves it stale and the next
 //! consumer recomputes it exactly on demand (that consumer may be the overlay's
 //! axes/grid built later in the same preparation, or the host). Recomputing it
-//! here would be an O(scene) scan on the move path, and substituting an
+//! here would be an O(scene) scan on the update path, and substituting an
 //! approximate extent is never acceptable.
 use std::ops::Range;
 use std::sync::Arc;
@@ -43,6 +43,11 @@ use std::collections::BTreeSet;
 
 /// The resident base can be kept for this receipt's in-place update, and this is
 /// the entity plus the resident batch range it owns.
+///
+/// This is only the *structural* half of the admission: the receipt was already
+/// classified [`CommitDelta::Update`] and every scene-wide input is pinned. The
+/// footprint proof (the rebuilt delta has exactly `range.len()` batches) lives in
+/// [`stage_update`].
 ///
 /// Every precondition is the same kind the retire path uses
 /// ([`retire_keeps_base`]): the document, space, fonts, layer overrides, image
@@ -90,12 +95,20 @@ pub(super) fn update_candidate(
 /// Rebuild one entity and return its reconciled batches, or `None` when the
 /// in-place path cannot be proven and the caller must full-rebuild.
 ///
-/// The proof is the batch-count invariant: the rebuilt delta must have exactly
-/// `range.len()` render batches and must not carry raster draw items (an image or
-/// wipeout mask would have to grow the resident texture/mask sets, which the
-/// overwrite path never re-uploads). A build error also declines: the fallback is
-/// the full rebuild, which runs the same provider path and surfaces the error
-/// honestly instead of hiding it here.
+/// This is the **footprint gate**, and it is the only admission proof that the
+/// change fits the resident slot:
+///
+/// - the rebuilt delta must have exactly `range.len()` render batches (a radius
+///   or colour change keeps that count, a linetype change that subdivides into a
+///   different number of dash segments does not);
+/// - it must not carry raster draw items (an image or wipeout mask would have to
+///   grow the resident texture/mask sets, which the overwrite path never
+///   re-uploads).
+///
+/// A build error also declines: the fallback is the full rebuild, which runs the
+/// same provider path and surfaces the error honestly instead of hiding it here.
+/// A decline is never a partial write — the caller publishes no overwrite and
+/// rebuilds the whole base.
 // Mirrors `assembly::build_model_entity_scene`'s arguments (the full-build inputs).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn stage_update(

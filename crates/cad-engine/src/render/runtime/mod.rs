@@ -206,7 +206,7 @@ pub struct RuntimeDiagnostics {
     /// Cumulative overlay-suffix commits.
     pub overlay_suffix_commits: u64,
     /// Cumulative in-place batch overwrites applied to the resident renderer
-    /// (transform-only entity updates that rewrote existing GPU buffers).
+    /// (single-entity display updates that rewrote existing GPU buffers).
     pub batch_overwrites: u64,
     /// Cumulative publications whose in-place overwrites could not be applied and
     /// therefore re-staged the whole base (a named refusal, an unavailable

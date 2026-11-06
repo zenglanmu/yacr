@@ -1,4 +1,4 @@
-//! P4 transform-only update (in-place batch overwrite).
+//! P4 single-entity display update (in-place batch overwrite).
 //!
 //! Deterministic and GPU-free: these tests inspect the commit classification, the
 //! resident CPU base and the per-entity index. The GPU write itself is contracted
@@ -8,7 +8,11 @@
 use super::*;
 use crate::layers::LayerOverrideSet;
 use crate::render_scene::edit::dirty_entities;
-use cad_db::{ChangeMask, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer};
+use cad_db::{
+    ChangeMask, ChangeSet, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder,
+    EntityColor, EntityLineType, EntityRenderAttributes, EntityTransparency, Layer,
+    LinetypePattern, ObjectChange,
+};
 use cad_domain::{
     DatabaseId, DocumentId, EntityId, LayerId, ObjectId, Point3, Revision, SemanticGeometry,
     SpaceId, TransactionId, Transform3,
@@ -23,7 +27,7 @@ fn p(x: f64, y: f64) -> Point3 {
 
 /// One layer and `count` model-space lines (`x = index * 10`), one per entity id
 /// `1..=count`.
-fn database_with(count: usize) -> Arc<DrawingDatabase> {
+fn database_builder(count: usize) -> DrawingDatabaseBuilder {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
     builder
         .insert_layer(Layer {
@@ -54,7 +58,11 @@ fn database_with(count: usize) -> Arc<DrawingDatabase> {
             })
             .unwrap();
     }
-    Arc::new(builder.finish().unwrap())
+    builder
+}
+
+fn database_with(count: usize) -> Arc<DrawingDatabase> {
+    Arc::new(database_builder(count).finish().unwrap())
 }
 
 fn prepare(
@@ -108,7 +116,7 @@ fn classification_admits_one_transform_update() {
 }
 
 #[test]
-fn classification_keeps_a_geometry_update_on_the_full_rebuild() {
+fn classification_admits_a_geometry_update_and_keeps_the_resident_base() {
     let before = database_with(2);
     let mut after = before.as_ref().clone();
     let mut entity = after.entity(EntityId(1)).unwrap().clone();
@@ -131,8 +139,372 @@ fn classification_keeps_a_geometry_update_on_the_full_rebuild() {
     );
     assert_eq!(
         receipt.delta,
+        CommitDelta::Update(EntityId(1)),
+        "a GEOMETRY-only update is a display change; the footprint is the admission proof"
+    );
+
+    let mut controller = CadSceneController::default();
+    prepare(&mut controller, before.clone(), None);
+    let (base, base_revision, batch_len, range) = {
+        let ready = controller.ready.as_ref().unwrap();
+        (
+            ready.base.clone(),
+            ready.base_revision,
+            ready.base.batch_len(),
+            controller
+                .entity_batch_range(EntityId(1))
+                .expect("entity 1 owns a resident batch"),
+        )
+    };
+    prepare(&mut controller, after.clone(), Some(&receipt));
+
+    let ready = controller.ready.as_ref().unwrap();
+    assert_eq!(
+        ready.base_revision, base_revision,
+        "a footprint-preserving geometry update does not advance the base revision"
+    );
+    assert!(
+        Arc::ptr_eq(ready.base.prefix_delta(), base.prefix_delta()),
+        "the prefix Arc is retained (no rebuild)"
+    );
+    assert_eq!(
+        ready.base.batch_len(),
+        batch_len,
+        "a stretch that keeps one batch per entity keeps the resident count"
+    );
+    assert_eq!(
+        controller.entity_batch_range(EntityId(1)),
+        Some(range.clone()),
+        "the stretched entity keeps the same resident batch range"
+    );
+    assert_eq!(
+        ready
+            .overwrites
+            .iter()
+            .map(|(index, _)| *index)
+            .collect::<Vec<_>>(),
+        vec![range.start],
+        "the stretch is published as one in-place overwrite at the resident slot"
+    );
+    let stretched = ready.base.materialized(range).remove(0);
+    assert_eq!(
+        f64::from(stretched.vertices[1][0]) + stretched.local_origin.x,
+        50.0,
+        "the resident CPU base already holds the stretched endpoint"
+    );
+}
+
+#[test]
+fn classification_keeps_a_metadata_only_update_on_the_full_rebuild() {
+    let before = database_with(2);
+    let mut after = before.as_ref().clone();
+    // A byte-identical row still publishes an update, but its mask is METADATA:
+    // nothing about the display changed, so there is nothing to overwrite.
+    let entity = after.entity(EntityId(1)).unwrap().clone();
+    let mut transaction = after
+        .begin_drawing_transaction("test: metadata", TransactionId(6))
+        .unwrap();
+    transaction.update_entity(entity).unwrap();
+    let changes = transaction.commit().unwrap();
+    let after = Arc::new(after);
+    assert_eq!(
+        dirty_entities(&changes),
+        vec![(EntityId(1), ChangeMask::METADATA)],
+        "an unchanged row is reported as METADATA"
+    );
+    let receipt = DrawingEditReceipt::from_commit(before.clone(), after.clone(), &changes)
+        .expect("a metadata update is described precisely");
+    assert_eq!(
+        receipt.delta,
         CommitDelta::Other,
-        "a GEOMETRY change can alter the batch count, so it is never in-place"
+        "a METADATA-only update is not a display change and is never in-place"
+    );
+
+    // The empty mask is refused for the same reason: it names no display bit.
+    let maskless = ChangeSet {
+        changes: vec![ObjectChange::Update(ObjectId(1), ChangeMask(0))],
+        ..changes.clone()
+    };
+    assert_ne!(
+        DrawingEditReceipt::from_commit(before, after, &maskless).map(|receipt| receipt.delta),
+        Some(CommitDelta::Update(EntityId(1))),
+        "a maskless update must never be admitted as an in-place overwrite"
+    );
+}
+
+#[test]
+fn classification_keeps_a_references_update_on_the_full_rebuild() {
+    let before = database_with(2);
+    let mut after = before.as_ref().clone();
+    let mut entity = after.entity(EntityId(1)).unwrap().clone();
+    entity.geometry = SemanticGeometry::Line {
+        start: p(0.0, 0.0),
+        end: p(40.0, 0.0),
+    };
+    let mut transaction = after
+        .begin_drawing_transaction("test: references", TransactionId(7))
+        .unwrap();
+    transaction.update_entity(entity).unwrap();
+    let changes = transaction.commit().unwrap();
+    let after = Arc::new(after);
+
+    // REFERENCES never comes from the entity row itself (it is a dependency
+    // invalidation bit), so the mask is what this classification contract reads.
+    // A block/xref definition is shared: the change can redraw other entities.
+    for mask in [
+        ChangeMask::REFERENCES,
+        ChangeMask::GEOMETRY.union(ChangeMask::REFERENCES),
+    ] {
+        let changes = ChangeSet {
+            changes: vec![ObjectChange::Update(ObjectId(1), mask)],
+            ..changes.clone()
+        };
+        let receipt = DrawingEditReceipt::from_commit(before.clone(), after.clone(), &changes)
+            .expect("a references update is still described precisely");
+        assert_eq!(
+            receipt.delta,
+            CommitDelta::Other,
+            "{mask:?}: REFERENCES is never admitted in place, alone or combined"
+        );
+    }
+}
+
+#[test]
+fn classification_keeps_a_multi_entity_geometry_update_on_the_full_rebuild() {
+    let before = database_with(3);
+    let mut after = before.as_ref().clone();
+    let mut first = after.entity(EntityId(1)).unwrap().clone();
+    let mut second = after.entity(EntityId(2)).unwrap().clone();
+    first.geometry = SemanticGeometry::Line {
+        start: p(0.0, 0.0),
+        end: p(40.0, 0.0),
+    };
+    second.geometry = SemanticGeometry::Line {
+        start: p(10.0, 0.0),
+        end: p(60.0, 0.0),
+    };
+    let mut transaction = after
+        .begin_drawing_transaction("test: two stretches", TransactionId(8))
+        .unwrap();
+    transaction.update_entity(first).unwrap();
+    transaction.update_entity(second).unwrap();
+    let changes = transaction.commit().unwrap();
+    let after = Arc::new(after);
+    assert_eq!(
+        dirty_entities(&changes),
+        vec![
+            (EntityId(1), ChangeMask::GEOMETRY),
+            (EntityId(2), ChangeMask::GEOMETRY)
+        ],
+        "two geometry updates in one commit"
+    );
+    let receipt = DrawingEditReceipt::from_commit(before, after, &changes)
+        .expect("a multi-entity update is described precisely");
+    assert_eq!(
+        receipt.delta,
+        CommitDelta::Other,
+        "the footprint proof is per entity, so a multi-entity update is never in-place"
+    );
+}
+
+#[test]
+fn a_style_colour_update_keeps_the_resident_base_and_recolours_the_batch() {
+    let before = database_with(3);
+    let mut after = before.as_ref().clone();
+    let mut transaction = after
+        .begin_drawing_transaction("test: colour", TransactionId(9))
+        .unwrap();
+    transaction
+        .update_entity_display(
+            EntityId(2),
+            EntityRenderAttributes {
+                color: EntityColor::Explicit([255, 0, 0]),
+                ..EntityRenderAttributes::default()
+            },
+        )
+        .unwrap();
+    let changes = transaction.commit().unwrap();
+    let after = Arc::new(after);
+    assert_eq!(
+        dirty_entities(&changes),
+        vec![(EntityId(2), ChangeMask::STYLE.union(ChangeMask::METADATA))],
+        "a display-state write stages the unchanged row, so the database stamps its \
+         `METADATA` never-zero fallback beside STYLE"
+    );
+    let receipt = DrawingEditReceipt::from_commit(before.clone(), after.clone(), &changes)
+        .expect("a style update is described precisely");
+    assert_eq!(
+        receipt.delta,
+        CommitDelta::Update(EntityId(2)),
+        "a STYLE(+METADATA) update is a display change and fits the resident footprint"
+    );
+
+    let mut controller = CadSceneController::default();
+    prepare(&mut controller, before.clone(), None);
+    let (base, base_revision, batch_len, range, before_batch) = {
+        let ready = controller.ready.as_ref().unwrap();
+        let range = controller
+            .entity_batch_range(EntityId(2))
+            .expect("entity 2 owns a resident batch");
+        let batch = ready.base.materialized(range.clone()).remove(0);
+        (
+            ready.base.clone(),
+            ready.base_revision,
+            ready.base.batch_len(),
+            range,
+            batch,
+        )
+    };
+    assert_eq!(
+        before_batch.color,
+        [1.0, 1.0, 1.0],
+        "the fixture line resolves the layer's ACI 7 white"
+    );
+
+    prepare(&mut controller, after.clone(), Some(&receipt));
+
+    let ready = controller.ready.as_ref().unwrap();
+    assert_eq!(
+        ready.base_revision, base_revision,
+        "an in-place recolour does not advance the base revision"
+    );
+    assert!(
+        Arc::ptr_eq(ready.base.prefix_delta(), base.prefix_delta()),
+        "the prefix Arc is retained (no rebuild)"
+    );
+    assert_eq!(
+        ready.base.batch_len(),
+        batch_len,
+        "a recolour never changes the resident batch count"
+    );
+    assert_eq!(
+        controller.entity_batch_range(EntityId(2)),
+        Some(range.clone()),
+        "the recoloured entity keeps the same resident batch range"
+    );
+    assert_eq!(
+        ready
+            .overwrites
+            .iter()
+            .map(|(index, _)| *index)
+            .collect::<Vec<_>>(),
+        vec![range.start],
+        "the recolour is published as one in-place overwrite"
+    );
+    let recoloured = ready.base.materialized(range.clone()).remove(0);
+    assert_eq!(
+        recoloured.color,
+        [1.0, 0.0, 0.0],
+        "the overwrite really re-colours the resident batch"
+    );
+    // Every other entity's batches are untouched.
+    for (index, batch) in ready.base.batches().enumerate() {
+        if index == range.start {
+            continue;
+        }
+        let before_batch = base.batches().nth(index).expect("same batch count");
+        assert_eq!(batch, before_batch, "batch {index} must be unchanged");
+    }
+}
+
+#[test]
+fn a_style_linetype_change_that_changes_the_footprint_falls_back_to_a_full_rebuild() {
+    // The line is translucent (`alpha != 1.0`), so the representation emits one
+    // fragment per dash instead of packing the dashes into one fragment. That
+    // makes the linetype change subdivide the entity into more batches — the
+    // negative case: STYLE is admissible by mask, the footprint is not.
+    let translucent = EntityRenderAttributes {
+        transparency: EntityTransparency::Explicit(0.5),
+        ..EntityRenderAttributes::default()
+    };
+    let mut builder = database_builder(2);
+    builder
+        .set_entity_render_attributes(EntityId(1), translucent)
+        .unwrap();
+    let before = Arc::new(builder.finish().unwrap());
+
+    let mut controller = CadSceneController::default();
+    prepare(&mut controller, before.clone(), None);
+    let (base, base_revision, range) = {
+        let ready = controller.ready.as_ref().unwrap();
+        (
+            ready.base.clone(),
+            ready.base_revision,
+            controller
+                .entity_batch_range(EntityId(1))
+                .expect("entity 1 owns a resident batch"),
+        )
+    };
+    assert_eq!(
+        range.len(),
+        1,
+        "a continuous translucent line is exactly one batch"
+    );
+
+    let mut after = before.as_ref().clone();
+    let mut transaction = after
+        .begin_drawing_transaction("test: dashed", TransactionId(10))
+        .unwrap();
+    transaction
+        .update_entity_display(
+            EntityId(1),
+            EntityRenderAttributes {
+                transparency: EntityTransparency::Explicit(0.5),
+                linetype: EntityLineType::Explicit {
+                    name: "DASHED".into(),
+                    pattern: LinetypePattern::from_elements([0.25, -0.125]),
+                    scale: 1.0,
+                },
+                ..EntityRenderAttributes::default()
+            },
+        )
+        .unwrap();
+    let changes = transaction.commit().unwrap();
+    let after = Arc::new(after);
+    assert_eq!(
+        dirty_entities(&changes),
+        vec![(EntityId(1), ChangeMask::STYLE.union(ChangeMask::METADATA))],
+        "a linetype edit is a display-state write: STYLE plus the database's METADATA stamp"
+    );
+    let receipt = DrawingEditReceipt::from_commit(before.clone(), after.clone(), &changes)
+        .expect("a style update is described precisely");
+    assert_eq!(
+        receipt.delta,
+        CommitDelta::Update(EntityId(1)),
+        "the mask alone would admit it: STYLE is display state"
+    );
+
+    prepare(&mut controller, after.clone(), Some(&receipt));
+
+    let ready = controller.ready.as_ref().unwrap();
+    assert!(
+        !ready.base.same_as(&base),
+        "the linetype change does not keep the resident base"
+    );
+    assert!(
+        !Arc::ptr_eq(ready.base.prefix_delta(), base.prefix_delta()),
+        "a declined footprint proof must not reuse the resident prefix Arc"
+    );
+    assert_eq!(
+        ready.base_revision,
+        base_revision + 1,
+        "the full rebuild advances the base revision"
+    );
+    assert!(
+        ready.overwrites.is_empty(),
+        "a refused footprint is never a partial write"
+    );
+    let dashed_range = controller
+        .entity_batch_range(EntityId(1))
+        .expect("the rebuilt index records the entity again");
+    assert!(
+        dashed_range.len() > range.len(),
+        "the dashes are separate resident batches ({dashed_range:?} vs {range:?})"
+    );
+    let dashed = ready.base.materialized(dashed_range).remove(0);
+    assert!(
+        !dashed.linetype.elements.is_empty(),
+        "the rebuilt base really carries the dash pattern"
     );
 }
 
