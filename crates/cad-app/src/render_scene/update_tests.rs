@@ -14,6 +14,7 @@ use cad_domain::{
     SpaceId, TransactionId, Transform3,
 };
 use cad_representation::SpaceSelection;
+use cad_scene::RenderTopology;
 use std::sync::Arc;
 
 fn p(x: f64, y: f64) -> Point3 {
@@ -322,5 +323,127 @@ fn an_update_that_does_not_fit_falls_back_to_a_full_rebuild() {
         batch.local_origin.x + f64::from(batch.vertices[0][0]),
         50.0,
         "the rebuilt base contains the moved geometry"
+    );
+}
+
+/// One layer and one circle entity (`EntityId(1)`) at the origin, radius 5.
+fn database_with_circle() -> Arc<DrawingDatabase> {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "AcDbCircle".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Circle {
+                center: p(0.0, 0.0),
+                normal: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
+                radius: 5.0,
+            },
+            draw_order: 0,
+        })
+        .unwrap();
+    Arc::new(builder.finish().unwrap())
+}
+
+/// A conic batch is not a special case for the controller: a transform-only move
+/// of a circle is published as the same single in-place overwrite, so the
+/// renderer's conic fit gate (not a full rebuild) decides the GPU write.
+#[test]
+fn a_circle_transform_update_keeps_the_resident_conic_base() {
+    let before = database_with_circle();
+    let mut controller = CadSceneController::default();
+    prepare(&mut controller, before.clone(), None);
+
+    let (base, base_revision, batch_len, range) = {
+        let ready = controller.ready.as_ref().unwrap();
+        (
+            ready.base.clone(),
+            ready.base_revision,
+            ready.base.batch_len(),
+            controller
+                .entity_batch_range(EntityId(1))
+                .expect("the circle owns a resident batch"),
+        )
+    };
+    let before_batch = controller
+        .ready
+        .as_ref()
+        .unwrap()
+        .base
+        .materialized(range.clone())
+        .remove(0);
+    assert_eq!(
+        before_batch.topology,
+        RenderTopology::Conics,
+        "a circle is one SDF conic batch"
+    );
+    assert_eq!(before_batch.conics.len(), 1);
+    let start_x = before_batch.conics[0].center.x;
+    let radius = before_batch.conics[0].major.x;
+
+    let (after, receipt) = move_entity(&before, EntityId(1), 100.0);
+    assert_eq!(
+        receipt.delta,
+        CommitDelta::Update(EntityId(1)),
+        "a circle translation is the in-place arm"
+    );
+    prepare(&mut controller, after.clone(), Some(&receipt));
+
+    let ready = controller.ready.as_ref().unwrap();
+    assert_eq!(
+        ready.base_revision, base_revision,
+        "the conic move does not advance the base revision"
+    );
+    assert!(
+        Arc::ptr_eq(ready.base.prefix_delta(), base.prefix_delta()),
+        "the prefix Arc is retained (no rebuild)"
+    );
+    assert_eq!(
+        ready.base.batch_len(),
+        batch_len,
+        "an in-place conic update never changes the batch count"
+    );
+    assert_eq!(
+        controller.entity_batch_range(EntityId(1)),
+        Some(range.clone()),
+        "the moved circle keeps the same resident batch range"
+    );
+    assert_eq!(
+        ready
+            .overwrites
+            .iter()
+            .map(|(index, _)| *index)
+            .collect::<Vec<_>>(),
+        vec![range.start],
+        "the circle move is published as one in-place overwrite"
+    );
+    let moved = ready.base.materialized(range).remove(0);
+    assert_eq!(moved.topology, before_batch.topology);
+    assert_eq!(moved.conics.len(), 1, "the conic count is unchanged");
+    assert_eq!(
+        moved.conics[0].center.x,
+        start_x + 100.0,
+        "the resident CPU base already holds the moved centre"
+    );
+    assert_eq!(
+        moved.conics[0].major.x, radius,
+        "a translation does not change the radius"
     );
 }

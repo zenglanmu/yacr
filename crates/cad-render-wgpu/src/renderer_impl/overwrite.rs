@@ -21,14 +21,36 @@
 //! organisation (stream/segment counts and identities are gated equal) and the
 //! per-batch GPU buffers' allocations (the writes target the existing buffers).
 //!
+//! # SDF conics
+//!
+//! A conic batch moves/resizes in place too ([`Renderer::plan_conic_overwrite`]).
+//! No CPU mirror is needed: the caller's rebuilt [`cad_scene::RenderBatch`] **is**
+//! the mirror — its `conics` are exactly the records the packer consumed at
+//! upload. The run list carries the split as well: a batch contributes its
+//! conics to its runs in order, so `run.count` is the conic-index range and the
+//! batch's conic order is the order. Every run re-packs its slice against the
+//! **stream's stored `f64` origin** with the upload path's own packing routine
+//! ([`push_arc_instance`]), and the 72-byte `ArcInstance` payload is written at
+//! the run's instance offset of the existing stream buffer. The stream's world
+//! AABB is widened by union (never shrunk) exactly like the line path, so the
+//! frame cull cannot drop the moved/resized conic.
+//!
+//! Conics are **universal-tier only** and are not part of the accelerated pulled
+//! line storage (`PulledLines` only concatenates `InstanceStream`s), so the
+//! accelerated tier has no second copy of conic data to keep in sync; the class
+//! draws per-run after the pulled classes (ADR-0008 tie exception).
+//!
 //! # Classes that cannot be proven equivalent are refused by name
 //!
 //! * merged mesh ([`BatchOverwriteRefusal::MeshNotSupported`]): a `MeshRun`
 //!   records its triangle/index range but not the member's vertex offset inside
 //!   the chunk's interleaved vertex buffer, so no exact in-place rewrite exists
 //!   today.
-//! * SDF conics ([`BatchOverwriteRefusal::ConicNotUpdatable`]): an `ArcStream`
-//!   keeps no CPU mirror and an `ArcRun` records no conic-index range.
+//! * SDF conics when the rebuilt conics no longer fit the resident run split
+//!   ([`BatchOverwriteRefusal::ConicNotUpdatable`]): a changed conic count, a
+//!   changed/incoherent run list, a conic that became degenerate, or a re-packed
+//!   local coordinate beyond `MAX_STREAM_RADIUS` of the (never rewritten) stream
+//!   origin.
 //! * the accelerated pulled line storage when its record mapping cannot be
 //!   resolved exactly ([`BatchOverwriteRefusal::PulledNotUpdatable`]).
 use super::upload::batch_world_z_range;
@@ -46,11 +68,15 @@ struct OverwritePlan {
     /// instances)`. Kept in lockstep with the pulled records written above so the
     /// two never disagree.
     mirrors: Vec<(u32, u32, Vec<LineInstance>)>,
-    /// Streams whose world AABB must be widened to cover the rebuilt geometry.
-    /// Widening only (never shrinking) keeps the frame's chunk cull conservative:
-    /// a moved run is never culled away, and other batches sharing the stream are
-    /// never exposed to a too-small box.
+    /// Instanced line streams whose world AABB must be widened to cover the
+    /// rebuilt geometry. Widening only (never shrinking) keeps the frame's chunk
+    /// cull conservative: a moved run is never culled away, and other batches
+    /// sharing the stream are never exposed to a too-small box.
     aabbs: Vec<(u32, WorldAabb)>,
+    /// SDF conic streams whose world AABB must be widened, for the same reason.
+    /// Kept separate from [`OverwritePlan::aabbs`] because the two classes index
+    /// different arrays.
+    arc_aabbs: Vec<(u32, WorldAabb)>,
 }
 
 impl Renderer {
@@ -101,6 +127,12 @@ impl Renderer {
         }
         for (stream, aabb) in plan.aabbs {
             if let Some(target) = self.instance_streams.get_mut(stream as usize) {
+                target.aabb = widen_aabb(target.aabb, aabb);
+            }
+        }
+        // The SDF conic streams the plan proved in range before any byte moved.
+        for (stream, aabb) in plan.arc_aabbs {
+            if let Some(target) = self.arc_streams.get_mut(stream as usize) {
                 target.aabb = widen_aabb(target.aabb, aabb);
             }
         }
@@ -187,9 +219,16 @@ impl Renderer {
         if !existing.mesh_runs.is_empty() {
             return Err(BatchOverwriteRefusal::MeshNotSupported);
         }
-        // A conic stream keeps no CPU mirror and the run has no conic-index
-        // range, so it is refused by name rather than special-cased.
+        // SDF conics: the rebuilt batch's `conics` are the CPU mirror, and the
+        // run list is the conic split. See `plan_conic_overwrite`.
         if !existing.arc_runs.is_empty() {
+            return self.plan_conic_overwrite(existing, batch);
+        }
+        // The rebuilt batch would convert to the conic path but the resident
+        // batch owns no conic run (it was uploaded with no conics), so there is
+        // no resident stream slice to rewrite. Refuse instead of reporting a
+        // successful overwrite that cannot draw the new conic.
+        if arc_batch_is_instanced(batch) {
             return Err(BatchOverwriteRefusal::ConicNotUpdatable);
         }
         if existing.instanced.is_empty() {
@@ -276,6 +315,7 @@ impl Renderer {
             writes,
             mirrors: Vec::new(),
             aabbs: Vec::new(),
+            arc_aabbs: Vec::new(),
         })
     }
 
@@ -438,6 +478,119 @@ impl Renderer {
             writes,
             mirrors,
             aabbs,
+            arc_aabbs: Vec::new(),
+        })
+    }
+
+    /// The SDF conic path: re-pack this batch's conics against each run's
+    /// **stream's stored `f64` origin** and write the packed 72-byte
+    /// [`ArcInstance`]s at the run's instance offset in the existing stream
+    /// buffer.
+    ///
+    /// The rebuilt batch is the CPU mirror the old refusal claimed was missing:
+    /// the caller supplies exactly the [`cad_scene::RenderBatch`] a rebuild would
+    /// have staged, so its `conics` are the records the packer consumed. The run
+    /// list carries the missing conic-index range too — a batch contributes its
+    /// conics to its runs **in order**, so `run.count` is each run's slice length
+    /// and the batch's conic order is the order. Packing is the upload path's own
+    /// routine ([`push_arc_instance`]) against the stream's stored origin, so the
+    /// written bytes are what a fresh upload would have produced.
+    ///
+    /// The batch-level gates (topology, alpha class, `mirrored`, `draw_order`)
+    /// ran before this dispatch, so the conic path cannot bypass them.
+    fn plan_conic_overwrite(
+        &self,
+        existing: &GpuBatch,
+        batch: &cad_scene::RenderBatch,
+    ) -> Result<OverwritePlan, BatchOverwriteRefusal> {
+        // The conic draw path is opaque-only (`arc_batch_is_instanced`), so a
+        // rebuilt batch that would no longer convert (transparent, invisible or
+        // empty) is not interchangeable with a resident conic stream.
+        if !arc_batch_is_instanced(batch) {
+            return Err(BatchOverwriteRefusal::ConicNotUpdatable);
+        }
+        // One packed instance per conic in batch order, so the run coverage *is*
+        // the conic count. A different count is a different conic list.
+        let coverage: u64 = existing
+            .arc_runs
+            .iter()
+            .map(|run| u64::from(run.count))
+            .sum();
+        if coverage != batch.conics.len() as u64 {
+            return Err(BatchOverwriteRefusal::ConicNotUpdatable);
+        }
+        // The rebuilt conics' full extents, for the stream AABB widening. Computed
+        // once: the same box is unioned into every stream the batch touches.
+        let widened = batch_world_conic_aabb(batch);
+        let mut writes = Vec::new();
+        let mut arc_aabbs = Vec::new();
+        let mut next_conic = 0usize;
+        for run in &existing.arc_runs {
+            let stream = self
+                .arc_streams
+                .get(run.stream as usize)
+                .ok_or(BatchOverwriteRefusal::ConicNotUpdatable)?;
+            let end = run
+                .offset
+                .checked_add(run.count)
+                .ok_or(BatchOverwriteRefusal::ConicNotUpdatable)?;
+            if end > stream.instance_count {
+                return Err(BatchOverwriteRefusal::ConicNotUpdatable);
+            }
+            let last = next_conic + run.count as usize;
+            let mut packed = Vec::with_capacity(run.count as usize);
+            for conic_index in next_conic..last {
+                // The packer skips a degenerate conic (`sweep == 0` without
+                // `full`, or a zero-length major axis), so a rebuild that produced
+                // one would shrink the run. Refuse instead of writing a short run
+                // that leaves a stale instance behind.
+                if !push_arc_instance(
+                    &mut packed,
+                    batch,
+                    conic_index,
+                    stream.origin,
+                    existing.pick_key,
+                ) {
+                    return Err(BatchOverwriteRefusal::ConicNotUpdatable);
+                }
+            }
+            next_conic = last;
+            if packed.len() != run.count as usize {
+                return Err(BatchOverwriteRefusal::ConicNotUpdatable);
+            }
+            if !arc_instances_finite(&packed) {
+                return Err(BatchOverwriteRefusal::InvalidGeometry);
+            }
+            // Fixed-point gate, identical to the line path: the stream's stored
+            // origin is never rewritten (that would move every other batch sharing
+            // the stream), so a stored coordinate beyond `MAX_STREAM_RADIUS` means
+            // a rebuild would have chosen a different origin and possibly a
+            // different split.
+            if !arc_instances_within_stream_radius(&packed) {
+                return Err(BatchOverwriteRefusal::ConicNotUpdatable);
+            }
+            let first = stream
+                .base
+                .checked_add(run.offset)
+                .ok_or(BatchOverwriteRefusal::ConicNotUpdatable)?;
+            let offset = u64::from(first) * u64::from(ARC_INSTANCE_STRIDE);
+            let payload = arc_instance_bytes(&packed);
+            let needed = offset
+                .checked_add(payload.len() as u64)
+                .ok_or(BatchOverwriteRefusal::ConicNotUpdatable)?;
+            if stream.buffer.size() < needed {
+                return Err(BatchOverwriteRefusal::ConicNotUpdatable);
+            }
+            writes.push((stream.buffer.clone(), offset, payload));
+            if let Some(aabb) = widened {
+                arc_aabbs.push((run.stream, aabb));
+            }
+        }
+        Ok(OverwritePlan {
+            writes,
+            mirrors: Vec::new(),
+            aabbs: Vec::new(),
+            arc_aabbs,
         })
     }
 
@@ -553,6 +706,52 @@ fn batch_world_line_aabb(batch: &cad_scene::RenderBatch) -> Option<WorldAabb> {
     (0..3)
         .all(|axis| min[axis] <= max[axis])
         .then_some(WorldAabb { min, max })
+}
+
+/// Whether every packed conic field is finite. [`push_arc_instance`] narrows the
+/// `f64` center/axes to `f32`; a non-finite source would become a NaN/inf
+/// instance the SDF shader silently discards (after writing depth). Refused like
+/// the legacy and line paths refuse non-finite geometry.
+fn arc_instances_finite(instances: &[ArcInstance]) -> bool {
+    instances.iter().all(|instance| {
+        instance.center_r.iter().all(|value| value.is_finite())
+            && instance.uvec.iter().all(|value| value.is_finite())
+            && instance.vvec.iter().all(|value| value.is_finite())
+    })
+}
+
+/// Whether every packed conic local coordinate stays inside `MAX_STREAM_RADIUS` of
+/// its stream origin: the stored center offset, the major radius and the minor
+/// semi-axis vector. These **are** the already-reduced `world - origin` values, or
+/// magnitudes in the same units.
+fn arc_instances_within_stream_radius(instances: &[ArcInstance]) -> bool {
+    instances.iter().all(|instance| {
+        instance.center_r[..3]
+            .iter()
+            .chain(&instance.center_r[3..4])
+            .chain(&instance.vvec[..3])
+            .all(|value| f64::from(*value).abs() <= MAX_STREAM_RADIUS)
+    })
+}
+
+/// World-space AABB of a conic batch's full conic extents: the union of each
+/// `RenderConic::world_aabb`, i.e. exactly the extent [`build_arc_chunks`] splits
+/// on. `None` when no conic has a finite extent.
+fn batch_world_conic_aabb(batch: &cad_scene::RenderBatch) -> Option<WorldAabb> {
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    let mut any = false;
+    for conic in &batch.conics {
+        let Some((low, high)) = conic.world_aabb() else {
+            continue;
+        };
+        any = true;
+        for axis in 0..3 {
+            min[axis] = min[axis].min(low[axis]);
+            max[axis] = max[axis].max(high[axis]);
+        }
+    }
+    any.then_some(WorldAabb { min, max })
 }
 
 /// Union of two world AABBs; non-finite boxes are ignored, and the result is

@@ -293,9 +293,14 @@ pub(crate) struct InstanceStream {
 /// Uploaded once (upload/commit) and never rewritten on pan/zoom: a camera move
 /// is a small uniform write only. Each stream covers a spatially bounded chunk of
 /// the converted conics (see `build_arc_chunks`), so a stored center is within
-/// `MAX_STREAM_RADIUS` of `origin` and the f32 ulp stays under ~1 µm. The conic
-/// path is **universal-tier only** (no pulled variant this round); `base` is kept
-/// for symmetry with [`InstanceStream`] and is always `0`.
+/// `MAX_STREAM_RADIUS` of `origin` and the f32 ulp stays under ~1 µm. A **conic
+/// overwrite** (`Renderer::overwrite_batch`) rewrites the instances of the runs
+/// it is given in place, re-packing them against this stored `origin` and
+/// widening [`ArcStream::aabb`] by union; the origin itself is never rewritten
+/// (it is shared by every batch in the stream). The conic path is
+/// **universal-tier only** (no pulled variant this round), so there is no pulled
+/// copy of these instances to keep in sync; `base` is kept for symmetry with
+/// [`InstanceStream`] and is always `0`.
 pub(crate) struct ArcStream {
     buffer: wgpu::Buffer,
     instance_count: u32,
@@ -955,6 +960,10 @@ pub(crate) use plan::*;
 // Private accelerated-tier GPU contracts for the pulled-prefix fast path. Test
 // only (it reads private renderer state and needs a real device); native only,
 // like `headless`.
+/// Native GPU contracts for the in-place **SDF conic** overwrite (P4 follow-up).
+/// Test only: shares `overwrite_gpu_tests`' device/commit/pixel helpers.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod conic_overwrite_gpu_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod cursor_transient_gpu_tests;
 /// Native GPU contracts for the in-place resident-batch overwrite (P4). Test

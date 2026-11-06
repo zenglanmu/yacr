@@ -104,12 +104,31 @@ pub enum BatchOverwriteRefusal {
     ///
     /// [`MeshRun`]: crate
     MeshNotSupported,
-    /// The batch's conics live in an SDF conic stream (`ArcStream`) that keeps no
-    /// CPU mirror, and an [`ArcRun`] records no conic-index range, so the exact
-    /// instance range cannot be re-packed. Refused by name rather than
-    /// special-cased.
+    /// The SDF conic path: the rebuilt batch no longer fits the resident conic
+    /// run split, so re-packing it in place is not provable. A conic overwrite
+    /// **is** possible — the caller's rebuilt [`cad_scene::RenderBatch`] is the
+    /// CPU mirror (its `conics` are exactly what the packer consumed), and a
+    /// run's `count` plus the batch's conic order is its conic-index range — this
+    /// variant is narrowed to the cases where that proof fails:
     ///
-    /// [`ArcRun`]: crate
+    /// * the rebuilt batch would not convert to the conic path at all (not an
+    ///   opaque, non-empty `Conics` batch), or the resident batch owns no conic
+    ///   run while the rebuilt one would;
+    /// * the rebuilt conic count differs from the resident run coverage
+    ///   (`sum(run.count)`), i.e. the batch's conic list changed shape;
+    /// * a run is incoherent: its stream index is out of range, `offset + count`
+    ///   exceeds the stream's instance count, or the stream buffer is shorter
+    ///   than the write;
+    /// * a conic is degenerate as the packer defines it (`sweep == 0` without
+    ///   `full`, or a zero-length major axis), so the run would shrink;
+    /// * a re-packed local coordinate (center offset, major radius or minor
+    ///   semi-axis) would exceed `MAX_STREAM_RADIUS` against the stream's stored
+    ///   origin. The origin is never rewritten (that would move every other batch
+    ///   sharing the stream), so a rebuild would have chosen another origin and
+    ///   possibly another stream split.
+    ///
+    /// A non-finite conic coordinate is [`BatchOverwriteRefusal::InvalidGeometry`]
+    /// instead; it is checked first.
     ConicNotUpdatable,
     /// The accelerated tier's whole-scene pulled line storage could not be mapped
     /// exactly to the run's records (the resident segment/stream arithmetic does
@@ -218,8 +237,9 @@ impl fmt::Display for BatchOverwriteRefusal {
             ),
             Self::ConicNotUpdatable => write!(
                 f,
-                "batch overwrite refused: the conic stream has no CPU mirror and the run records \
-                 no conic-index range (full rebuild required)"
+                "batch overwrite refused: the rebuilt conics no longer fit the resident conic \
+                 run split (count, run range, degeneracy, or a local coordinate beyond the \
+                 stream radius)"
             ),
             Self::PulledNotUpdatable => write!(
                 f,

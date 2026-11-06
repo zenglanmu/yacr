@@ -16,9 +16,14 @@
 //!    geometry is read back from the rendered pixels; the tier keeps no CPU
 //!    mirror), and for the accelerated tier (mirror + pulled records kept in
 //!    lockstep, segment count unchanged).
-//! 3. Every refusal gate refuses **by name**: topology, count, run list, stream
-//!    origin, merged mesh, conic, unresolvable pulled mapping, out of range, and a
-//!    renderer without a device.
+//! 3. The same for an **SDF conic** batch: a larger radius and a shifted centre
+//!    are re-packed against the stream's stored `f64` origin into the existing
+//!    instance buffer (same slot, pick key, batch count, conic draw count, no
+//!    stream upload), the stream AABB is widened by union, and a multi-run split
+//!    is written per run in batch order — see `conic_overwrite_gpu_tests`.
+//! 4. Every refusal gate refuses **by name**: topology, count, run list, stream
+//!    origin, merged mesh, conic fit gate (count/run/degeneracy/radius),
+//!    unresolvable pulled mapping, out of range, and a renderer without a device.
 //!
 //! Run serially (these bind a real device):
 //!
@@ -145,7 +150,28 @@ fn circle_batch(entity: u128) -> RenderBatch {
     batch
 }
 
-fn gpu_or_skip(what: &str) -> Option<HeadlessGpu> {
+/// An opaque full circle of `radius` at `(cx, cy)` (SDF conic class).
+pub(crate) fn circle_at(entity: u128, cx: f64, cy: f64, radius: f64) -> RenderBatch {
+    let mut batch = circle_batch(entity);
+    batch.conics[0].center = Point3 {
+        x: cx,
+        y: cy,
+        z: 0.0,
+    };
+    batch.conics[0].major = Point3 {
+        x: radius,
+        y: 0.0,
+        z: 0.0,
+    };
+    batch.conics[0].minor = Point3 {
+        x: 0.0,
+        y: radius,
+        z: 0.0,
+    };
+    batch
+}
+
+pub(crate) fn gpu_or_skip(what: &str) -> Option<HeadlessGpu> {
     match create_headless_gpu(BackendPreference::Auto) {
         Ok(gpu) => {
             eprintln!(
@@ -161,7 +187,7 @@ fn gpu_or_skip(what: &str) -> Option<HeadlessGpu> {
     }
 }
 
-fn init(gpu: &HeadlessGpu, accelerated: bool, what: &str) -> Renderer {
+pub(crate) fn init(gpu: &HeadlessGpu, accelerated: bool, what: &str) -> Renderer {
     let mut renderer = Renderer::new(BackendPreference::Auto);
     if accelerated {
         renderer.set_storage_buffer_support_override(Some(true));
@@ -180,7 +206,7 @@ fn init(gpu: &HeadlessGpu, accelerated: bool, what: &str) -> Renderer {
     renderer
 }
 
-fn commit(renderer: &mut Renderer, batches: &[RenderBatch]) {
+pub(crate) fn commit(renderer: &mut Renderer, batches: &[RenderBatch]) {
     let staged = renderer
         .prepare_upload_batches(batches)
         .expect("stage upload");
@@ -194,7 +220,7 @@ fn render(renderer: &mut Renderer) {
 
 /// Brightest pixel value in a 3x3 neighbourhood: the anti-aliased line core is
 /// one pixel wide, so a single sample could land on the ramp.
-fn max_channel(renderer: &Renderer, x: i32, y: i32) -> u8 {
+pub(crate) fn max_channel(renderer: &Renderer, x: i32, y: i32) -> u8 {
     let image = renderer
         .read_target_rgba()
         .expect("read the presented frame");
@@ -215,8 +241,35 @@ fn max_channel(renderer: &Renderer, x: i32, y: i32) -> u8 {
 }
 
 /// The pixel row of a world `y` (the canvas maps world `-1..1` to 64 px).
-fn row_of(world_y: f64) -> i32 {
+pub(crate) fn row_of(world_y: f64) -> i32 {
     (SIZE as f64 * 0.5 - world_y / WORLD_PER_PX) as i32
+}
+
+/// The pixel column of a world `x`.
+pub(crate) fn col_of(world_x: f64) -> i32 {
+    (SIZE as f64 * 0.5 + world_x / WORLD_PER_PX) as i32
+}
+
+/// Render one frame and return its stats.
+pub(crate) fn render_frame(renderer: &mut Renderer) -> crate::FrameStats {
+    let target = RenderTarget::new(SIZE, SIZE);
+    renderer.render(camera(), &target).expect("render")
+}
+
+/// The pick key resolved anywhere in a 3x3 neighbourhood of `(x, y)`: the
+/// anti-aliased circle core is ~1 px wide, so a single texel could land on the
+/// ramp and fall under the id pass's 0.5-coverage threshold.
+pub(crate) fn pick_key_near(renderer: &mut Renderer, x: u32, y: u32) -> Option<u32> {
+    for dy in -1..=1i32 {
+        for dx in -1..=1i32 {
+            let px = (x as i32 + dx).clamp(0, SIZE as i32 - 1) as u32;
+            let py = (y as i32 + dy).clamp(0, SIZE as i32 - 1) as u32;
+            if let Some(hit) = renderer.pick_at(px, py).expect("run the id pass") {
+                return Some(hit.entity_key);
+            }
+        }
+    }
+    None
 }
 
 #[test]
@@ -575,17 +628,73 @@ fn every_refusal_gate_names_its_reason_and_writes_nothing() {
         Err(crate::BatchOverwriteRefusal::MeshNotSupported)
     );
 
-    // SDF conic stream.
+    // SDF conic stream: the gate only refuses a conic list that no longer fits
+    // the resident run split.
     let mut conic = init(&gpu, false, "overwrite refusals");
     commit(&mut conic, &[circle_batch(1)]);
     assert!(
         !conic.batches[0].arc_runs.is_empty(),
         "the circle converted to the conic stream"
     );
+    let mut two_conics = circle_batch(1);
+    two_conics.conics.push(RenderConic {
+        center: Point3 {
+            x: 0.5,
+            y: 0.0,
+            z: 0.0,
+        },
+        major: Point3 {
+            x: 0.1,
+            y: 0.0,
+            z: 0.0,
+        },
+        minor: Point3 {
+            x: 0.0,
+            y: 0.1,
+            z: 0.0,
+        },
+        start: 0.0,
+        sweep: std::f64::consts::TAU,
+        full: true,
+    });
     assert_eq!(
-        conic.overwrite_batch(0, &circle_batch(1)),
-        Err(crate::BatchOverwriteRefusal::ConicNotUpdatable)
+        conic.overwrite_batch(0, &two_conics),
+        Err(crate::BatchOverwriteRefusal::ConicNotUpdatable),
+        "a changed conic count is a different split"
     );
+    let mut degenerate = circle_batch(1);
+    degenerate.conics[0].full = false;
+    degenerate.conics[0].sweep = 0.0;
+    assert_eq!(
+        conic.overwrite_batch(0, &degenerate),
+        Err(crate::BatchOverwriteRefusal::ConicNotUpdatable),
+        "a conic the packer would skip cannot shrink the run"
+    );
+    assert_eq!(
+        conic.batch_overwrites(),
+        0,
+        "no conic refusal may count as an overwrite"
+    );
+
+    // A conic run whose instance range does not fit its stream (an offset past
+    // the stream's instance count, or a stream index out of range) is the same
+    // named refusal and writes nothing.
+    let mut incoherent = init(&gpu, false, "overwrite refusals");
+    commit(&mut incoherent, &[circle_batch(1)]);
+    incoherent.batches[0].arc_runs[0].offset = 5;
+    assert_eq!(
+        incoherent.overwrite_batch(0, &circle_batch(1)),
+        Err(crate::BatchOverwriteRefusal::ConicNotUpdatable),
+        "a run past the stream's instance count is refused"
+    );
+    incoherent.batches[0].arc_runs[0].offset = 0;
+    incoherent.batches[0].arc_runs[0].stream = 9;
+    assert_eq!(
+        incoherent.overwrite_batch(0, &circle_batch(1)),
+        Err(crate::BatchOverwriteRefusal::ConicNotUpdatable),
+        "a run naming a missing stream is refused"
+    );
+    assert_eq!(incoherent.batch_overwrites(), 0);
 }
 
 #[test]

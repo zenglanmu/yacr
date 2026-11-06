@@ -1,3 +1,37 @@
+## 2026-11-06 SDF conic 原地覆写（P4 补：圆弧/圆半径·圆心·角度变化走同槽位原地写）
+
+- **旧结论被推翻**：`ConicNotUpdatable` 原先写的两条理由都不成立——调用方给的**重建
+  `RenderBatch.conics` 就是 CPU mirror**（正是 packer 消费过的记录）；`ArcRun.count` + batch 内
+  conic 顺序**就是 conic-index 范围**（一个 batch 按顺序把 conic 贡献给它的各个 run）。
+- **新写路径**（`crates/cad-render-wgpu/src/renderer_impl/overwrite.rs::plan_conic_overwrite`）：
+  - fit gate：重建 batch 仍须是 opaque、非空 `Conics`（`arc_batch_is_instanced`）；conic 数必须等于
+    `sum(run.count)` 覆盖；每个 run 的 `stream` 在 `arc_streams` 范围内且
+    `offset + count <= stream.instance_count`、buffer 装得下；每个 conic 用
+    `plan/pack_arc.rs::push_arc_instance`（**复用上传路径同一 packing 例程**，不写第二份）按
+    `run.count` 切片、对 **stream 现存 `f64` origin** 重打包；打包结果长度必须等于 run.count
+    （degenerate conic 会让 run 变短 → 拒绝）；局部坐标（center 偏移 / major 半径 / minor
+    半轴）必须 `<= MAX_STREAM_RADIUS`（origin 永不改写）。
+  - 写入：`write_buffer` 把 72 字节 `ArcInstance` 写到 `(stream.base + run.offset) *
+    ARC_INSTANCE_STRIDE`；`pick_key`、batch 顺序、draw order、draw plan 全部不动。
+  - AABB：`ArcStream.aabb` 按 union **只扩不缩**（`OverwritePlan` 新增 `arc_aabbs`，与
+    `InstanceStream` 的 `aabbs` 分开——旧实现只有一个 `aabbs`，误用在 conic 上会静默丢失）。
+  - batch 级 gate（topology / alpha class / `mirrored` / `draw_order`）在 dispatch 之前执行，
+    conic 路径无法绕过。
+  - 加速 tier：conic 不在 pulled line 存储里（`rebuild_pulled` 只拼
+    `InstanceStream::pulled_instances`，`ArcStream` 没有 CPU 镜像字段），因此**没有第二份 conic
+    副本需要同步**；conic 仍按 run 在 pulled 类之后绘制（ADR-0008 平手序例外）。
+- **`ConicNotUpdatable` 语义收窄**：只表示上面这些 fit 条件不成立；非有限 conic 坐标仍走
+  `InvalidGeometry`。另补：驻留 batch 无 conic run 而重建 batch 会转换到 conic 路径（例如上传时
+  conics 为空）→ `ConicNotUpdatable`，不再“成功但什么都没画”。
+- **测试（真实 headless GPU：Vulkan Quadro P620，逐个 `ok`）**：
+  `conic_overwrite_moves_and_resizes_an_arc_without_reuploading_a_stream`、
+  `conic_overwrite_refuses_a_changed_conic_count`、
+  `conic_overwrite_refuses_an_origin_that_no_longer_bounds_the_geometry`、
+  `conic_overwrite_writes_a_multi_run_split_in_batch_order`（`set_max_instances_per_stream(2)`
+  → 3 个 conic 切成 2+1 两个 run）；`cad-app`
+  `render_scene::update_tests::a_circle_transform_update_keeps_the_resident_conic_base`（控制器层：
+  圆的平移仍保持驻留 base、发布单槽位覆写）。
+
 ## 2026-11-06 P5 清理：删除死通道 `removed_chunks` / `apply_changes` / `CacheKey`，平手序写入代码文档
 
 - **目标**：只清理，不改变任何绘制输出。两条“看起来存在、实际从不工作”的通道会误导读者：
@@ -94,8 +128,9 @@
     stream 上的其它 batch）。
   - `MeshNotSupported`：合并 mesh。`MeshRun` 只记录 triangle/index 范围，**不记录成员在 chunk
     交错顶点 buffer 里的 vertex offset**，无法证明精确原地写 → 全量重建。
-  - `ConicNotUpdatable`：SDF conic stream（`ArcStream` 无 CPU mirror，`ArcRun` 不记录 conic index
-    范围）；按名字拒绝，不做特例。
+  - `ConicNotUpdatable`：SDF conic 的**原地 fit gate 失败**（不再是“一律不可原地更新”——
+    重建 batch 的 `conics` 就是 CPU mirror，`run.count` + batch 内 conic 顺序就是 conic index
+    范围）。详见下面“SDF conic 原地覆写”一节。
   - `PulledNotUpdatable`：加速 tier 的整场景 pulled line 记录无法精确映射到本次 run。
 - **写路径（fit 之后）**：
   - legacy：`queue.write_buffer` 写回 batch 既有 buffers（positions/normals/colors/line_quads/
