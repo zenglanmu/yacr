@@ -21,10 +21,10 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **49** |
+| 完整实现 | **50** |
 | 部分实现（有写明的界） | **40** |
-| **已实现合计（完整 + 部分）** | **89** |
-| 未实现 | **892** |
+| **已实现合计（完整 + 部分）** | **90** |
+| 未实现 | **891** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -93,6 +93,7 @@
 | `MATCHPROP` | 部分实现 | 只转移 layer/color/linetype/lineweight/transparency |
 | `MIRROR` | 部分实现 | 保留原件；拒绝 Text/MultiLeader |
 | `MLEADER` | 部分实现 | 单簇/2 顶点/仅直线；无 Options |
+| `MODEL` | 已实现 | payload-free 选择子，复用 SPACE MODEL 的校验 + 自动取景；Model 标签页走同一命令 |
 | `MOVE` | 已实现 | — |
 | `MTEXT` | 部分实现 | 两角宽度模型；无行距/分栏/背景填充 |
 | `NEW` | 已实现 | — |
@@ -700,7 +701,7 @@
 | 562 | `MLINE` | 未实现 | Creates multiple parallel lines. | — |
 | 563 | `MLSTYLE` | 未实现 | Creates, modifies, and manages multiline styles. | — |
 | 564 | `MOCORO` | 未实现 | Moves, copies, rotates, and scales selected objects with a single command. | — |
-| 565 | `MODEL` | 未实现 | Switches from a named layout tab to the Model tab. | — |
+| 565 | `MODEL` | 已实现 | Switches from a named layout tab to the Model tab. | payload-free 选择子，复用 SPACE MODEL 的校验 + 自动取景；Model 标签页走同一命令 |
 | 566 | `MOVE` | 已实现 | Moves objects a specified distance in a specified direction. | — |
 | 567 | `MOVEBAK` | 未实现 | Changes the destination folder for drawing backup (BAK) files. | — |
 | 568 | `MPEDIT` | 未实现 | Edits multiple polylines; also converts multiple line and arc objects to polyline objects. | — |

@@ -84,10 +84,13 @@ test('the catalog exposes PROPERTIESCLOSE exactly once, appended, with propertie
     { ...rows[0] },
     { id: 'PROPERTIESCLOSE', labelKey: 'properties.close', icon: 'close', group: 'annotate' },
   );
-  // Append-only: the new row is still the last one, so no shipped row moved.
-  // (`LAYERCLOSE`, added after it, is the only newer row.)
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 2].id, 'PROPERTIESCLOSE');
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 3].id, 'CLEANSCREENOFF');
+  // Append-only: PROPERTIESCLOSE keeps its place directly after CLEANSCREENOFF
+  // and directly before LAYERCLOSE; later router rows may follow the run.
+  const order = COMMAND_CATALOG.map(command => command.id);
+  const at = (id: string) => order.indexOf(id);
+  assert.ok(at('PDSIZE') < at('ABOUT'), 'the chrome run is appended after shipped rows');
+  assert.equal(at('CLEANSCREENOFF') + 1, at('PROPERTIESCLOSE'));
+  assert.equal(at('PROPERTIESCLOSE') + 1, at('LAYERCLOSE'));
 });
 
 test('both properties palette sources close through the one command', async () => {

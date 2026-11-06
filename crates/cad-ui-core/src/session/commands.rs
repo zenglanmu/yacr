@@ -36,6 +36,10 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // layer is never turned off), again as session visibility overrides only.
     ("LAYOFF", CommandId::LayOff),
     ("SPACE", CommandId::SwitchSpace),
+    // `MODEL` (AutoCAD 2026) is the payload-free "switch to the Model tab"
+    // selector. It is the same validated session-state switch as `SPACE MODEL`,
+    // never a second space path, and takes no argument.
+    ("MODEL", CommandId::ModelSpace),
     ("SELECT", CommandId::Select),
     ("SELECTALL", CommandId::SelectAll),
     ("SELECTINBOX", CommandId::SelectInBox),

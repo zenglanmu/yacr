@@ -339,4 +339,9 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // to the router. Appended last so no shipped row moves, and it reuses the
   // `close` glyph and the `layers.close` label that window already uses.
   { id: 'LAYERCLOSE', labelKey: 'layers.close', icon: 'close', group: 'annotate' },
+  // MODEL (AutoCAD 2026) is the payload-free "switch to the Model tab" selector.
+  // The real affordance is the drawing-space strip's existing Model tab, so this
+  // is the catalog/command-line row only — no duplicate ribbon button. It is
+  // appended last so no shipped row moves, and it reuses the `drawing` glyph.
+  { id: 'MODEL', labelKey: 'layout.tab.model', icon: 'drawing', group: 'view' },
 ]);

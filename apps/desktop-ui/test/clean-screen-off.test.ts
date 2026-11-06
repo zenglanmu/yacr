@@ -77,13 +77,15 @@ test('the catalog exposes CLEANSCREENOFF exactly once, appended, with its own ke
     { ...rows[0] },
     { id: 'CLEANSCREENOFF', labelKey: 'status.clean_screen_off', icon: 'cleanScreen', group: 'view' },
   );
-  // Append-only: the OFF row keeps its place directly before the later
-  // PROPERTIESCLOSE row, and LAYERCLOSE is appended after it.
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 3].id, 'CLEANSCREENOFF');
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 2].id, 'PROPERTIESCLOSE');
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 1].id, 'LAYERCLOSE');
-  // The ON row keeps its own place directly before it.
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 4].id, 'CLEANSCREENON');
+  // Append-only: the chrome run keeps its internal order, and every row sits
+  // after the last shipped pre-2026-11-07 row (`PDSIZE`). Later router rows
+  // (MODEL/PLAN) may follow the run; they never move it.
+  const order = COMMAND_CATALOG.map(command => command.id);
+  const at = (id: string) => order.indexOf(id);
+  assert.ok(at('PDSIZE') < at('ABOUT'), 'the chrome run is appended after shipped rows');
+  assert.equal(at('CLEANSCREENON') + 1, at('CLEANSCREENOFF'));
+  assert.equal(at('CLEANSCREENOFF') + 1, at('PROPERTIESCLOSE'));
+  assert.equal(at('PROPERTIESCLOSE') + 1, at('LAYERCLOSE'));
 });
 
 test('the File tab clean item offers both typed-word variants in append order', () => {

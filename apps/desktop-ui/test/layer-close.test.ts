@@ -85,9 +85,13 @@ test('the catalog exposes LAYERCLOSE exactly once, appended, with layers.close',
     { ...rows[0] },
     { id: 'LAYERCLOSE', labelKey: 'layers.close', icon: 'close', group: 'annotate' },
   );
-  // Append-only: the new row is the last one, so no shipped row moved.
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 1].id, 'LAYERCLOSE');
-  assert.equal(COMMAND_CATALOG[COMMAND_CATALOG.length - 2].id, 'PROPERTIESCLOSE');
+  // Append-only: LAYERCLOSE keeps its place directly after PROPERTIESCLOSE and
+  // after the last shipped pre-2026-11-07 row (`PDSIZE`); later router rows may
+  // follow the run.
+  const order = COMMAND_CATALOG.map(command => command.id);
+  const at = (id: string) => order.indexOf(id);
+  assert.ok(at('PDSIZE') < at('ABOUT'), 'the chrome run is appended after shipped rows');
+  assert.equal(at('PROPERTIESCLOSE') + 1, at('LAYERCLOSE'));
 });
 
 test('the layers palette closes through the one command', async () => {

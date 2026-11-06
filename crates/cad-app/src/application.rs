@@ -141,59 +141,21 @@ impl Application {
                 self.point_display_command(&command)
             }
             CommandId::SwitchSpace => {
-                if let CommandPayload::Space(space) = command.payload {
-                    // Validate against the *current* drawing before recording the
-                    // switch: an unknown or undrawable layout is an explicit
-                    // refusal, never an empty "success" that later renders a
-                    // blank sheet (audit F04/U03).
-                    let drawing = &self
-                        .workspace
-                        .documents
-                        .get(&command.document)
-                        .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
-                        .drawing;
-                    validate_space_id(drawing, &space)?;
-                    let previous = session.active_space.clone();
-                    session.active_space = space;
-                    // A space switch is session state only: no database write,
-                    // no `cad-history` entry and no `ChangeSet`. The camera is
-                    // moved to the target space so a sheet is not shown at the
-                    // model's off-sheet coordinates. The automatic fit records
-                    // no `ZOOM PREVIOUS` step: switching tabs is the user
-                    // action, not a discrete zoom.
-                    let fit = match self.fit_active_space(session, &command.viewport, false) {
-                        Ok(fit) => fit,
-                        Err(error) => {
-                            // A fit that cannot even reach the viewport leaves
-                            // the switch failed: keep the space the user was in.
-                            session.active_space = previous;
-                            return Err(error);
-                        }
-                    };
-                    let diagnostics = match fit {
-                        FitResult::EmptyLayout(layout) => vec![Diagnostic {
-                            object: None,
-                            code: "layout.fit_empty".into(),
-                            message: format!(
-                                "layout {} has no drawable paper geometry and no usable paper \
-                                 size; the camera is unchanged",
-                                layout.0
-                            ),
-                        }],
-                        FitResult::Framed | FitResult::EmptyModel => Vec::new(),
-                    };
-                    Ok(CommandOutcome {
-                        objects: Vec::new(),
-                        changes: None,
-                        diagnostics,
-                        measurement: None,
-                        point_report: None,
-                    })
+                if let CommandPayload::Space(space) = &command.payload {
+                    self.switch_space_command(session, &command, space.clone())
                 } else {
                     Err(CadError::InvalidInput(
                         "SwitchSpace needs a space payload".into(),
                     ))
                 }
+            }
+            // `MODEL` (AutoCAD 2026) is the payload-free spelling of
+            // `SPACE MODEL`: one session-state switch, never a second space path.
+            CommandId::ModelSpace => {
+                if !matches!(command.payload, CommandPayload::None) {
+                    return Err(CadError::InvalidInput("MODEL needs no payload".into()));
+                }
+                self.switch_space_command(session, &command, SpaceId::Model)
             }
             CommandId::Measure => self.measure(session, &command),
             // `AREA OBJECT`: the exact area of one **selected** closed entity,

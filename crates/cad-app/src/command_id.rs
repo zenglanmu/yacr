@@ -121,6 +121,15 @@ pub enum CommandId {
     /// ([`CommandId::LayerPrevious`]), never an alias of this restore.
     LayOff,
     SwitchSpace,
+    /// `MODEL`: switch the active drawing space to model space.
+    ///
+    /// Payload-free and equivalent to the typed `SPACE MODEL` line: both reach
+    /// the same session-state switch, which validates the target against the
+    /// open drawing and then auto-fits the camera. A caller that supplies a
+    /// payload is refused explicitly. No database write, no `cad-history` entry,
+    /// no revision bump and no `ChangeSet`, so Viewer mode allows it. The real UI
+    /// affordance is the drawing-space strip's Model tab.
+    ModelSpace,
     Select,
     /// Select visible model-space pick items without editing the drawing.
     /// Requires `CommandPayload::None`; incomplete picking is explicitly refused.

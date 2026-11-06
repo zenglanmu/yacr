@@ -32,7 +32,7 @@ import { readCatalog, readModule } from './helpers.ts';
 // Only the names this suite exercises. `ORBIT` is here because the router does
 // know it — the chrome still refuses a click, which is the point of the gesture
 // list, not a missing vocabulary entry.
-setCommandCatalog(['SWITCH2D3D', 'PROJECTION', 'ORBIT', 'FIT', 'PAN', 'ZOOMIN', 'ZOOMOUT']);
+setCommandCatalog(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'ORBIT', 'FIT', 'PAN', 'ZOOMIN', 'ZOOMOUT']);
 
 const zh = await readCatalog('zh-CN');
 const en = await readCatalog('en');
@@ -180,7 +180,7 @@ test('standard views and the 3D toggles need an open drawing, with a real reason
 
   // The two payload-free toggles are router commands, and they are gated on a
   // document the same way (disabled, not "unsupported", on the start page).
-  assert.deepEqual([...DOCUMENT_SCOPED_COMMANDS], ['SWITCH2D3D', 'PROJECTION']);
+  assert.deepEqual([...DOCUMENT_SCOPED_COMMANDS], ['SWITCH2D3D', 'PROJECTION', 'MODEL']);
   for (const id of DOCUMENT_SCOPED_COMMANDS) {
     assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
     assert.equal(admitCommandText(id, { status: empty }).kind, 'unavailable', id);

@@ -4,8 +4,8 @@
 // an older host). This module only projects those rows into what the desktop
 // strip and the compact drawer render, so both layouts read the same tab list
 // and the same command strings. It never invents a layout and never claims a
-// switch succeeded: `SPACE #<id>` is queue admission, and the host's next
-// `cad_status` is the only evidence of the space change.
+// switch succeeded: `MODEL` / `SPACE #<id>` is queue admission, and the host's
+// next `cad_status` is the only evidence of the space change.
 import { activeSpaceOf, layoutTabsOf } from '../cad/cad-status.ts';
 import type { CadStatus } from '../cad/cad-status.ts';
 import type { Translator } from '../i18n.ts';
@@ -20,10 +20,12 @@ export function layoutSpaceCommand(id: number): string {
 }
 
 /**
- * The command back to model space. Model space has no `LayoutId`, so the host's
- * `SPACE` grammar carries the `MODEL` token (`crates/cad-ui-core/src/session/space.rs`).
+ * The command back to model space. AutoCAD 2026's `MODEL` selector is the
+ * official payload-free switch ("switches from a named layout tab to the Model
+ * tab"), so the Model tab dispatches it directly; paper tabs keep the
+ * `SPACE #<id>` grammar.
  */
-export const MODEL_SPACE_COMMAND = 'SPACE MODEL';
+export const MODEL_SPACE_COMMAND = 'MODEL';
 
 /** One rendered tab: `id === null` is model space. */
 export interface LayoutTabView {
