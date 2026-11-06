@@ -69,6 +69,31 @@ impl ChangeMask {
     }
 }
 
+/// The ordered changes one commit publishes for drawing objects.
+///
+/// # Entries are not one-per-id
+///
+/// A [`ChangeSet`] may publish **more than one entry for the same object**, so a
+/// consumer must match on `(id, kind)` and tolerate the id appearing again —
+/// never assume "one entry per id" (or "the only entry for this id is its final
+/// state").
+///
+/// The shape that exists today is a display-state restore for an entity the same
+/// batch inserts. [`Self::Insert`] carries no mask, so the batch publishes
+/// [`Self::Insert`]`(id)` **followed by**
+/// [`Self::Update`]`(id, ChangeMask::STYLE)` for that id (see
+/// `DrawingTransaction::update_entity_display_state` staged together with
+/// `insert_entity`). Entries stay in staging order, the insert first. When the
+/// batch already produced an `Update` for the id, its mask is unioned with
+/// `STYLE` instead, so that case still has a single entry.
+///
+/// One consumer relies on the single-entry shape:
+/// `cad_app::render_scene::edit::DrawingEditReceipt::from_create_line_trace`
+/// matches `[ObjectChange::Insert(object)]`. That arm is gated on
+/// `CommandId::CreateLine`, which stages no display state today, so the
+/// two-entry shape is unreachable there; if an insert-with-display incremental
+/// path is ever added, that arm needs a
+/// `[Insert, Update(_, STYLE)]` arm before the receipt can accept it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObjectChange {
     Insert(ObjectId),
@@ -76,6 +101,11 @@ pub enum ObjectChange {
     Delete(ObjectId),
 }
 
+/// The ordered changes published by one commit.
+///
+/// `changes` preserves staging order and, as [`ObjectChange`] documents, may
+/// contain several entries for one object (an insert plus a display-state
+/// `STYLE` update); match on `(id, kind)`, not on "the" entry for an id.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChangeSet {
     pub database: DatabaseId,

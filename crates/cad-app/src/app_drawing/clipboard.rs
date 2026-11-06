@@ -327,21 +327,20 @@ impl Application {
 
         // The transaction validates every insert before mutating anything, so a
         // bad clipboard entry refuses the whole paste (never a partial insert).
+        // Each copy's captured display state is staged with it: the shared write
+        // path applies it after the inserts, in the same revision, so a paste
+        // preserves exactly what a cut's undo restores (render attributes and
+        // dynamic-visibility membership).
         let transaction = next_transaction_id();
         let change_set = {
             let mut staged = drawing.begin_drawing_transaction("paste clipboard", transaction)?;
-            for (_, copy) in &copies {
+            for (index, (id, copy)) in copies.iter().enumerate() {
                 staged.insert_entity(copy.clone())?;
+                staged.update_entity_display_state(*id, &session.clipboard[index].display)?;
             }
             staged.commit()?
         };
-        // Restore the captured display state for every pasted copy, so a paste
-        // preserves exactly what a cut's undo restores (render attributes and
-        // dynamic-visibility membership); record it on the patch so a redo
-        // re-applies it too.
-        for (index, (id, _)) in copies.iter().enumerate() {
-            drawing.restore_entity_display_state(*id, &session.clipboard[index].display);
-        }
+        // Record the captured display on each patch so a redo re-applies it too.
         let patches: Vec<DrawingPatch> = copies
             .iter()
             .enumerate()

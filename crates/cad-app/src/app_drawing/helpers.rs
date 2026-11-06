@@ -571,13 +571,14 @@ pub(super) fn offset_arc(
 /// `forward` selects the `after` side (redo); otherwise the `before` side is
 /// applied (undo). Both the entity batch and the block batch are selected the
 /// same way and committed through the database's single validated combined write
-/// path ([`DrawingDatabase::apply_drawing_changes_with_blocks`]), so a patch
-/// that no longer matches the store is refused, never silently force-written.
-/// That path owns the phase order (block creates before member moves, block
-/// deletes after the members leave), so undo and redo never reorder manually.
-/// A re-inserted side also restores its captured display state (render
-/// attributes + dynamic-visibility membership), which the delete path prunes and
-/// the entity alone does not carry.
+/// path ([`DrawingDatabase::apply_drawing_changes_with_blocks_and_display`]),
+/// together with each re-applied side's captured display state, so a patch that
+/// no longer matches the store is refused, never silently force-written. That
+/// path owns the phase order (block creates before member moves, display states
+/// after the entity rows, block deletes after the members leave), so undo and
+/// redo never reorder manually, and the display restore lands in the **same**
+/// revision and `ChangeSet` (carrying `ChangeMask::STYLE` for every restored
+/// entity) instead of being a second, unreported mutation.
 pub(crate) fn apply_drawing_patches(
     drawing: &mut DrawingDatabase,
     reason: &str,
@@ -612,33 +613,27 @@ pub(crate) fn apply_drawing_patches(
             )
         })
         .collect();
-    let mut change_set =
-        drawing.apply_drawing_changes_with_blocks(reason, transaction, &block_changes, changes)?;
-    let mut restored: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
-    for patch in patches {
-        let (entity, state) = if forward {
-            (&patch.after, &patch.after_state)
-        } else {
-            (&patch.before, &patch.before_state)
-        };
-        if entity.is_some() {
-            if let Some(state) = state {
-                drawing.restore_entity_display_state(patch.id, state);
-                restored.insert(patch.id);
-            }
-        }
-    }
-    // Restoring display attributes is a style change: without this the
-    // ChangeSet would describe only the entity row and a consumer would not
-    // rebuild the representation (colour/linetype/lineweight/opacity).
-    for change in &mut change_set.changes {
-        if let cad_db::ObjectChange::Update(object, mask) = change {
-            if restored.contains(&EntityId(object.0)) {
-                *mask = mask.union(cad_db::ChangeMask::STYLE);
-            }
-        }
-    }
-    Ok(change_set)
+    // Only a side that exists can carry a display state; the shared write path
+    // applies it after the entity rows, so an inserted side works too.
+    let display: Vec<(EntityId, cad_db::EntityDisplayState)> = patches
+        .iter()
+        .filter_map(|patch| {
+            let (entity, state) = if forward {
+                (&patch.after, &patch.after_state)
+            } else {
+                (&patch.before, &patch.before_state)
+            };
+            entity.as_ref()?;
+            state.clone().map(|state| (patch.id, state))
+        })
+        .collect();
+    drawing.apply_drawing_changes_with_blocks_and_display(
+        reason,
+        transaction,
+        &block_changes,
+        changes,
+        &display,
+    )
 }
 
 #[cfg(test)]

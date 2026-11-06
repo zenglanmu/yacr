@@ -244,26 +244,27 @@ impl Application {
             }),
         };
 
-        // 4. One transaction for the definition row, the member inserts and the
-        //    reference insert.
+        // 4. One transaction for the definition row, the member inserts (each
+        //    with its captured display state) and the reference insert. The
+        //    shared write path applies display after the entity rows, so a member
+        //    that does not exist until this commit can still carry it.
         let transaction = next_transaction_id();
         let change_set = {
             let mut staged = candidate.begin_drawing_transaction("paste block", transaction)?;
-            for (_, member, _) in &members {
+            for (id, member, display) in &members {
                 staged.insert_entity(member.clone())?;
+                staged.update_entity_display_state(*id, display)?;
             }
             staged.stage_create_block(block_row.clone())?;
             staged.insert_entity(reference.clone())?;
             staged.commit()?
         };
 
-        // 5. The transaction cannot stage display state for a row that did not
-        //    exist yet, so restore each member's captured display after the commit
-        //    (the BREAK/PASTECLIP precedent) and record it on the patch so redo
-        //    re-applies it too.
+        // 5. Record each member's captured display on the patch so undo/redo
+        //    re-applies it through the same write path, and read the committed
+        //    rows back for the reference patch.
         let mut patches: Vec<DrawingPatch> = Vec::with_capacity(members.len() + 1);
         for (id, _, display) in &members {
-            candidate.restore_entity_display_state(*id, display);
             let after = candidate
                 .entity(*id)
                 .cloned()

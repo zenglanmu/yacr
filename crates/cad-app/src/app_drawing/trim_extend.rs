@@ -709,13 +709,13 @@ impl Application {
             for entity in &entities {
                 staged.insert_entity(entity.clone())?;
             }
+            // OFFSET copies the source's display state; it is applied after the
+            // insert in the same revision (a batch records none).
+            if let (Some(display), Some(entity)) = (&display, entities.first()) {
+                staged.update_entity_display_state(entity.id, display)?;
+            }
             staged.commit()?
         };
-        if let Some(display) = &display {
-            if let Some(entity) = entities.first() {
-                drawing.restore_entity_display_state(entity.id, display);
-            }
-        }
         let patches: Vec<DrawingPatch> = entities
             .iter()
             .enumerate()

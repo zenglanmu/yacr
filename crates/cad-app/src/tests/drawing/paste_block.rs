@@ -594,10 +594,37 @@ fn pasteblock_restores_member_display_and_reference_draw_order() {
     let (mut app, mut session) = finish(b, AppMode::Work);
     copyclip(&mut app, &mut session, &[1, 2]);
 
-    paste_block(&mut app, &mut session, point(5.0, 5.0)).unwrap();
+    let outcome = paste_block(&mut app, &mut session, point(5.0, 5.0)).unwrap();
 
     let new_block = drawing(&app).block_by_name("PasteBlock1").unwrap().id;
     let member_ids = drawing(&app).block(new_block).unwrap().entities.clone();
+    // The captured member display state is committed with the paste, not restored
+    // afterwards: one revision, and one STYLE-bearing `Update` per member.
+    let changes = outcome
+        .changes
+        .as_ref()
+        .expect("paste publishes a change set");
+    assert_eq!(
+        changes.after.0,
+        changes.before.0 + 1,
+        "one paste is exactly one revision bump"
+    );
+    for id in &member_ids {
+        let masks: Vec<cad_db::ChangeMask> = changes
+            .changes
+            .iter()
+            .filter_map(|change| match change {
+                cad_db::ObjectChange::Update(object, mask) if object.0 == id.0 => Some(*mask),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(masks.len(), 1, "one update for member {id:?}");
+        assert!(
+            masks[0].contains(cad_db::ChangeMask::STYLE),
+            "member {id:?} display restore must carry STYLE, got {:?}",
+            masks[0]
+        );
+    }
     // The stored member order is ascending draw order.
     let orders: Vec<i64> = member_ids
         .iter()

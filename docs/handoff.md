@@ -1,3 +1,34 @@
+## 2026-11-06 显示状态恢复并入同一校验写入（P0）
+
+- **问题**：`DrawingDatabase::restore_entity_display_state` 直接改 `render_attributes` 与块/可见性成员表，
+  既不升 revision 也不产生 `ChangeSet`；5 个 app 调用点都在 commit 之后调用，`helpers.rs` 只能手工把
+  `ChangeMask::STYLE` 并进变更集，属于“状态变了但没人报告”的漏洞。
+- **实现**：`cad-db` 新增唯一显示写入器 `apply_entity_display_state`（`drawing/access.rs`，私有），
+  `restore_entity_display_state` 降为 `pub(crate)` 且只由
+  `DrawingDatabase::apply_drawing_changes_with_blocks_and_display` 调用；
+  `apply_drawing_changes_with_blocks` 以 `&[]` 委托。`DrawingTransaction` 暂存完整 `EntityDisplayState`
+  （新增 `update_entity_display_state`，`update_entity_display` 仍是属性-only 包装），commit 一次写入，
+  同一事务插入的实体也能带显示状态；union-`STYLE` / push-`Update` 逻辑只在新写入路径里存在一份。
+- **迁移**：undo/redo patch、PASTEBLOCK、OFFSET 插入、BREAK 新段、PASTECLIP 全部改为事务内暂存；
+  删除 `helpers.rs` 的手工 STYLE 合并与 PASTEBLOCK “事务无法暂存”的旧注释。
+- **契约**：`drawing_display_state_for_an_inserted_entity_is_one_bump_and_a_style_update`、
+  `drawing_display_state_for_an_updated_entity_merges_into_one_update`、
+  `drawing_display_state_naming_a_missing_block_is_refused_unchanged`、
+  `drawing_display_state_naming_a_missing_visibility_state_is_refused_unchanged`、
+  `drawing_display_state_with_resolvable_references_is_fully_applied`（`cad-db`）；
+  重写 `model_bounds_cache_invalidates_on_display_state_restore`（现在断言恰好 1 次 revision 上升）；
+  `erase_selection_deletes_exactly_those_entities_in_one_undo_step`（undo 一次 1 bump + STYLE）；
+  `pasteblock_restores_member_display_and_reference_draw_order`（一次粘贴 1 bump + 每成员 1 条 STYLE `Update`）。
+- **显示状态引用校验（复核补强）**：Phase 1a' 用 **post-batch 块视图**（当前块 − 本批删除 + 新建/更新）校验
+  `state.visibility.blocks`、`placement.block`、`dynamic_visibility` 是否存在、以及每个 `placement.states`
+  名字是否解析；任何一条解析不了都在**变更前**以 `CadError::Invariant` 拒绝（点名 entity/block/state name），
+  不再让 `apply_entity_display_state` 静默跳过。正例覆盖 attributes + 两半 membership。
+- **ChangeSet 形状**：`ObjectChange`/`ChangeSet` 文档明确“同 id 可有多条 entry”——插入+同批显示状态会发
+  `Insert(id)` 后跟 `Update(id, STYLE)`，消费者按 `(id, kind)` 匹配；并记录
+  `render_scene/edit.rs` 的 `[Insert]` 单条匹配仅在 `CreateLine`（不暂存显示状态）下可达。
+- **未变**：空事务仍不升 revision；显示状态写入仍只做**可加**的成员补写；无跨载体/GPU 行为变化。
+  校验后 `cad-app` lib 全量（1540 passed）无回归，全量 `cargo test -p cad-app` 未作为门禁要求运行。
+
 ## 2026-11-06 渲染能力推导 `caps_from` + 精度/上传契约（diff A/B）
 
 - **问题**：`Renderer::caps_for` 只按 backend **类别**（WebGl2 vs 其他）硬编码

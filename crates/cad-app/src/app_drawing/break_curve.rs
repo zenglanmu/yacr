@@ -209,15 +209,14 @@ impl Application {
                     draw_order: before.draw_order,
                 };
                 staged.insert_entity(entity)?;
+                // Display attributes live beside the entity row; the shared write
+                // path applies them after the insert, in this same revision.
+                if let Some(display) = &new_display {
+                    staged.update_entity_display_state(new_id, display)?;
+                }
             }
             staged.commit()?
         };
-        // Display attributes live beside the entity row, so they are restored on
-        // the candidate **after** the insert committed (the transaction cannot
-        // stage display attributes for a row that does not exist yet).
-        if let (Some(id), Some(display)) = (new_id, &new_display) {
-            drawing.restore_entity_display_state(id, display);
-        }
 
         // Read the committed rows back: the patches are the exact stored values.
         let stored_first = drawing

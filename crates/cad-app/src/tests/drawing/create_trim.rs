@@ -775,7 +775,7 @@ fn erase_selection_deletes_exactly_those_entities_in_one_undo_step() {
     assert_eq!(app.history[&DocumentId(1)].undo_depth(), 1);
 
     // One undo restores both erased entities.
-    execute(
+    let undo = execute(
         &mut app,
         &mut session,
         CommandId::Undo,
@@ -785,6 +785,32 @@ fn erase_selection_deletes_exactly_those_entities_in_one_undo_step() {
     let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
     assert!(drawing.entity(EntityId(1)).is_some());
     assert!(drawing.entity(EntityId(2)).is_some());
+
+    // The undo restores each entity's captured display state (render attributes
+    // + visibility membership) **inside** the same commit: exactly one revision
+    // bump, and the ChangeSet names every restored entity with STYLE so its
+    // representation is rebuilt.
+    let undo_changes = undo.changes.as_ref().expect("undo publishes a change set");
+    assert_eq!(
+        undo_changes.after.0,
+        undo_changes.before.0 + 1,
+        "one undo is exactly one revision bump"
+    );
+    assert_eq!(undo_changes.after, revision(&app));
+    for id in [1u128, 2] {
+        let mask = undo_changes
+            .changes
+            .iter()
+            .find_map(|change| match change {
+                cad_db::ObjectChange::Update(object, mask) if object.0 == id => Some(*mask),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("undo must report entity {id}: {:?}", undo_changes.changes));
+        assert!(
+            mask.contains(cad_db::ChangeMask::STYLE),
+            "entity {id} display restore must carry STYLE, got {mask:?}"
+        );
+    }
 }
 
 #[test]

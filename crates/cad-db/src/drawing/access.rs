@@ -135,12 +135,38 @@ impl DrawingDatabase {
 
     /// Restore a display state captured by [`Self::entity_display_state`].
     ///
+    /// `pub(crate)`: display state belongs to the drawing, so it may only be
+    /// written by the crate's validated write path
+    /// ([`Self::apply_drawing_changes_with_blocks_and_display`]) in the **same**
+    /// revision and [`ChangeSet`](crate::ChangeSet) as the entity row. An app
+    /// crate can no longer apply it after a commit, which used to change the
+    /// drawing while publishing nothing.
+    ///
     /// Infallible: it writes the same map/vector entries the delete removed, so
     /// a re-inserted entity again carries its resolved colour/linetype/lineweight
     /// and its dynamic-visibility membership.
-    pub fn restore_entity_display_state(&mut self, id: EntityId, state: &EntityDisplayState) {
-        // This path changes block membership (and therefore bounds) without
-        // raising the revision, so it must clear the revision-keyed cache.
+    pub(crate) fn restore_entity_display_state(
+        &mut self,
+        id: EntityId,
+        state: &EntityDisplayState,
+    ) {
+        self.apply_entity_display_state(id, state);
+    }
+
+    /// The single place that writes both halves of an [`EntityDisplayState`]:
+    /// the per-entity render attributes **and** its block/visibility membership
+    /// (including the governed `member_entities` list and every named state's
+    /// `entities` list).
+    ///
+    /// Only additive: an entry is pushed when it is missing, so applying a state
+    /// whose membership was already present is a no-op for the lists. The
+    /// revision-keyed bounds cache is cleared here because membership changes the
+    /// model-space extent; the write path raises the revision in the same batch.
+    ///
+    /// Private: [`Self::restore_entity_display_state`] is the only caller, and
+    /// that wrapper is `pub(crate)`, so nothing in an app crate can reach the
+    /// write at all.
+    fn apply_entity_display_state(&mut self, id: EntityId, state: &EntityDisplayState) {
         self.invalidate_bounds_cache();
         self.render_attributes.insert(id, state.attributes.clone());
         for block in &state.visibility.blocks {

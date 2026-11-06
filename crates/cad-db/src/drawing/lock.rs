@@ -15,9 +15,10 @@
 //! in `cad-db` at exactly two places, and **no command anywhere carries its own
 //! lock check**:
 //!
-//! * `DrawingTransaction::stage` — all five entity stagers
-//!   (`insert_entity`, `update_entity`, `update_entity_display`, `delete_entity`,
-//!   `transform_entity`) funnel through it, so a refused write stages
+//! * `DrawingTransaction::stage` — all entity stagers
+//!   (`insert_entity`, `update_entity`, `update_entity_display`,
+//!   `update_entity_display_state`, `delete_entity`, `transform_entity`) funnel
+//!   through it, so a refused write stages
 //!   **nothing**: the transaction stays empty, the revision and the history
 //!   depth are untouched, and the caller sees the error at the call that asked
 //!   for the write. (`stage_create_block` stages a block table row, which has no
@@ -38,15 +39,17 @@
 //!
 //! # Display writes stay allowed (deliberate)
 //!
-//! `DrawingTransaction::update_entity_display` stages the stored entity row
-//! **unchanged** and replays the per-entity display attributes beside it — it
-//! is a display-representation rebuild, not a drawing edit, and AutoCAD
-//! regenerates a locked layer rather than refusing to draw it. The unchanged row
-//! passes the "effective change" test above, so display writes keep working on a
-//! locked layer (colour/linetype/lineweight/opacity still update and the
-//! ChangeSet still carries `STYLE`). The same applies to
+//! `DrawingTransaction::update_entity_display` (and its full-state variant
+//! `update_entity_display_state`) stages the stored entity row **unchanged** and
+//! replays the per-entity display state beside it — it is a
+//! display-representation rebuild, not a drawing edit, and AutoCAD regenerates a
+//! locked layer rather than refusing to draw it. The unchanged row passes the
+//! "effective change" test above, so display writes keep working on a locked
+//! layer (colour/linetype/lineweight/opacity still update and the ChangeSet still
+//! carries `STYLE`). The same applies to
 //! [`DrawingDatabase::restore_entity_display_state`], which only re-inserts the
-//! render attributes/visibility membership a delete pruned.
+//! render attributes/visibility membership a delete pruned; it is crate-private
+//! and is called by the validated write path, never by a command after a commit.
 //!
 //! A command that also changes the entity row itself (geometry, layer, …) is
 //! refused by its own `update_entity` / `transform_entity` / `delete_entity`

@@ -343,19 +343,32 @@ fn model_bounds_cache_invalidates_on_display_state_restore() {
     let revision = db.revision();
     assert_eq!(db.cached_bounds_revision_for_test(), Some(revision));
 
-    // `restore_entity_display_state` adds the entity to block 0 without raising
-    // the revision: the cache must still be cleared or `bounds()` goes stale.
-    db.restore_entity_display_state(
-        EntityId(10),
-        &EntityDisplayState {
-            attributes: EntityRenderAttributes::default(),
-            visibility: VisibilityMembership {
-                blocks: vec![BlockId(0)],
-                visibility: Vec::new(),
-            },
+    // Restoring display state is a real write now: it goes through the
+    // validated transaction path, so it raises the revision exactly once and the
+    // revision-keyed cache can never serve the pre-restore extent.
+    let state = EntityDisplayState {
+        attributes: EntityRenderAttributes::default(),
+        visibility: VisibilityMembership {
+            blocks: vec![BlockId(0)],
+            visibility: Vec::new(),
         },
+    };
+    let mut tx = db
+        .begin_drawing_transaction("restore display", TransactionId(1))
+        .unwrap();
+    tx.update_entity_display_state(EntityId(10), &state)
+        .unwrap();
+    let changes = tx.commit().unwrap();
+    assert_eq!(db.revision(), Revision(revision.0 + 1), "one revision bump");
+    assert_eq!(changes.before, revision);
+    assert_eq!(changes.after, Revision(revision.0 + 1));
+    assert!(
+        db.block(BlockId(0))
+            .unwrap()
+            .entities
+            .contains(&EntityId(10)),
+        "the membership the state carries is restored"
     );
-    assert_eq!(db.revision(), revision);
     assert_eq!(db.cached_bounds_revision_for_test(), None);
     assert_bounds_match_reference(&db);
     assert_eq!(db.bounds(), Some((point(0.0, 0.0), point(1001.0, 0.0))));

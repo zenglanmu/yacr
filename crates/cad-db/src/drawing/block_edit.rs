@@ -10,7 +10,8 @@
 //! row without its geometry if the second write failed.
 //!
 //! [`DrawingDatabase::apply_drawing_changes_with_blocks`] is the single
-//! all-or-nothing path for such a combined write:
+//! all-or-nothing path for such a combined write (and its `_and_display` variant
+//! additionally commits staged display states in the same revision):
 //!
 //! 1. validate the block batch (ids, names, member lists, delete safety) with a
 //!    **post-batch** entity view, so a member created/moved by the same batch is
@@ -19,7 +20,8 @@
 //!    [`validate_entity_in`] chokepoint, with the batch's block ids staged as
 //!    valid references;
 //! 3. mutate block creates/updates first, then the entity batch (the existing
-//!    membership attach/detach), then block deletes last;
+//!    membership attach/detach), then the display states, then block deletes
+//!    last;
 //! 4. raise the revision **exactly once** and publish the entity-scoped
 //!    [`ChangeSet`] in the caller's order.
 //!
@@ -50,7 +52,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cad_domain::*;
 
-use super::DrawingDatabase;
+use super::{DrawingDatabase, EntityDisplayState};
 use crate::change::{ChangeMask, ChangeSet, ObjectChange};
 use crate::entity::DbEntity;
 use crate::tables::{BlockDefinition, BlockMetadata};
@@ -102,15 +104,48 @@ impl DrawingDatabase {
 
     /// The single validated write path for a **combined** block + entity batch.
     ///
-    /// `block_changes` maps a block id to its new row (`None` = delete) and
-    /// `changes` is the ordinary entity batch accepted by
-    /// [`Self::apply_drawing_changes`]; the two are committed as one revision.
+    /// Convenience wrapper over
+    /// [`Self::apply_drawing_changes_with_blocks_and_display`] with no staged
+    /// display states; see that method for the validation/mutation contract.
+    pub fn apply_drawing_changes_with_blocks(
+        &mut self,
+        reason: &str,
+        transaction: TransactionId,
+        block_changes: &[(BlockId, Option<BlockRow>)],
+        changes: Vec<(EntityId, Option<DbEntity>)>,
+    ) -> CadResult<ChangeSet> {
+        self.apply_drawing_changes_with_blocks_and_display(
+            reason,
+            transaction,
+            block_changes,
+            changes,
+            &[],
+        )
+    }
+
+    /// [`Self::apply_drawing_changes_with_blocks`] plus per-entity display
+    /// states, committed as **one** revision and **one** [`ChangeSet`].
+    ///
+    /// `block_changes` maps a block id to its new row (`None` = delete), `changes`
+    /// is the ordinary entity batch accepted by [`Self::apply_drawing_changes`],
+    /// and `display` lists the [`EntityDisplayState`] to restore for an entity
+    /// (render attributes plus block/visibility membership). A display state is
+    /// applied **after** the entity rows exist, so staging one for an entity the
+    /// same batch inserts is supported.
     ///
     /// Validation happens before any mutation, so every refusal listed below
-    /// leaves the tables, the entity rows, the allocators and the revision
-    /// exactly as they were:
+    /// leaves the tables, the entity rows, the display maps, the allocators and
+    /// the revision exactly as they were:
     ///
-    /// * duplicate ids inside either batch;
+    /// * duplicate ids inside either batch, or a display id staged twice;
+    /// * a display state for an id the batch deletes, or for an entity that
+    ///   neither exists nor is inserted by the batch;
+    /// * a display state that references a block missing from the **post-batch**
+    ///   block table (absent, or deleted by this batch), a block with no
+    ///   dynamic-visibility descriptor when the placement asks for membership,
+    ///   or a visibility state name that block does not have — the display write
+    ///   is additive, so an unresolvable part would otherwise be skipped
+    ///   silently;
     /// * a block create whose id already exists, whose name is empty or spans
     ///   several lines, whose base point is non-finite, whose name already
     ///   resolves ([`Self::block_by_name`] semantics), that carries a
@@ -122,11 +157,13 @@ impl DrawingDatabase {
     /// * any entity failure the plain path reports, including the layer-lock
     ///   rule (checked before the block batch is even inspected).
     ///
-    /// Block creates/updates are applied before the entity batch and block
-    /// deletes after it, so no intermediate state is observable: a created
-    /// definition exists before its members arrive, and a deleted definition
-    /// disappears after its last reference leaves. The revision advances by one
-    /// for a non-empty combined batch and does not move for an empty one.
+    /// Block creates/updates are applied before the entity batch, the display
+    /// states after it, and block deletes last, so no intermediate state is
+    /// observable: a created definition exists before its members arrive, a
+    /// re-inserted entity exists before its display state is written, and a
+    /// deleted definition disappears after its last reference leaves. The
+    /// revision advances by one for a non-empty batch (block rows, entity rows or
+    /// display states) and does not move for an empty one.
     ///
     /// # ChangeSet is entity-scoped
     ///
@@ -136,15 +173,22 @@ impl DrawingDatabase {
     /// A block create that moves members and inserts a reference produces the
     /// member `Update`s and the reference `Insert`, which is what drives
     /// representation invalidation.
-    pub fn apply_drawing_changes_with_blocks(
+    ///
+    /// Every display state is a style change: the id's `Update` is unioned with
+    /// [`ChangeMask::STYLE`] so its representation is rebuilt, and an id without
+    /// an `Update` (an `Insert` of a new entity) gets one added. A display state
+    /// whose lists already contained the entity is still announced, because the
+    /// caller staged it deliberately.
+    pub fn apply_drawing_changes_with_blocks_and_display(
         &mut self,
         reason: &str,
         transaction: TransactionId,
         block_changes: &[(BlockId, Option<BlockRow>)],
         changes: Vec<(EntityId, Option<DbEntity>)>,
+        display: &[(EntityId, EntityDisplayState)],
     ) -> CadResult<ChangeSet> {
         let before = self.revision;
-        if block_changes.is_empty() && changes.is_empty() {
+        if block_changes.is_empty() && changes.is_empty() && display.is_empty() {
             // Nothing staged: no revision bump, no fabricated change.
             return Ok(ChangeSet {
                 database: self.id,
@@ -167,6 +211,36 @@ impl DrawingDatabase {
                 )));
             }
             self.ensure_change_allowed_on_locked_layer(*id, change.as_ref())?;
+        }
+
+        // Phase 1a': display-state targets and their block/visibility references.
+        // A state may only be applied to an entity the batch inserts or that
+        // already exists, and never to one the same batch deletes — the display
+        // write would outlive the row it belongs to. Every block/state reference
+        // the state names must also resolve in the **post-batch** block table
+        // (the same view delete-safety uses), so a hand-made or history-replayed
+        // state is refused instead of being partially applied.
+        let mut seen_display = BTreeSet::new();
+        for (id, state) in display {
+            if !seen_display.insert(*id) {
+                return Err(CadError::Invariant(format!(
+                    "transaction {transaction:?} modifies entity {id:?} display state twice"
+                )));
+            }
+            match changes.iter().find(|(changed, _)| changed == id) {
+                Some((_, None)) => {
+                    return Err(CadError::Invariant(format!(
+                        "entity {id:?} cannot be deleted and have its display state replaced in \
+                         one transaction"
+                    )));
+                }
+                Some((_, Some(_))) => {}
+                None if self.entities.contains_key(id) => {}
+                None => {
+                    return Err(CadError::Invariant(format!("entity {id:?} does not exist")));
+                }
+            }
+            validate_display_state_blocks(self, block_changes, *id, state)?;
         }
 
         // Phase 1b: the whole block batch (shape, names, membership, deletes).
@@ -247,7 +321,20 @@ impl DrawingDatabase {
             }
         }
 
-        // 2c: block deletes last, once nothing references them any more.
+        // 2c: display states, once the entity rows they belong to exist. Applied
+        // through the crate's single display writer, which also clears the
+        // revision-keyed bounds cache (membership changes the extent).
+        for (id, state) in display {
+            self.restore_entity_display_state(*id, state);
+            match ordered.iter_mut().find(
+                |change| matches!(change, ObjectChange::Update(object, _) if object.0 == id.0),
+            ) {
+                Some(ObjectChange::Update(_, mask)) => *mask = mask.union(ChangeMask::STYLE),
+                _ => ordered.push(ObjectChange::Update(ObjectId(id.0), ChangeMask::STYLE)),
+            }
+        }
+
+        // 2d: block deletes last, once nothing references them any more.
         for (id, change) in block_changes {
             if change.is_none() {
                 self.blocks.remove(id);
@@ -448,6 +535,74 @@ fn expected_members(post_batch: &[&DbEntity], block: BlockId) -> Vec<EntityId> {
         .filter(|entity| entity.space == SpaceId::Block(block))
         .map(|entity| entity.id)
         .collect()
+}
+
+/// The block row `id` has **after** `block_changes` are applied: the staged row
+/// when the batch names the id, the stored row otherwise (`None` when the batch
+/// deletes it or it never existed).
+fn post_batch_block<'a>(
+    db: &'a DrawingDatabase,
+    block_changes: &'a [(BlockId, Option<BlockRow>)],
+    id: BlockId,
+) -> Option<&'a BlockDefinition> {
+    match block_changes.iter().find(|(changed, _)| *changed == id) {
+        Some((_, Some(row))) => Some(&row.definition),
+        Some((_, None)) => None,
+        None => db.blocks.get(&id),
+    }
+}
+
+/// Validate that every block / dynamic-visibility reference a display state
+/// names resolves in the post-batch block table.
+///
+/// [`EntityDisplayState`] also arrives from hand-built patches and history
+/// replay. The apply step is additive, so an unresolvable reference would
+/// otherwise be skipped silently and a partially written state would be
+/// published as a success. Every refusal therefore runs before any mutation and
+/// names the entity, the block and (for names) the visibility state.
+fn validate_display_state_blocks(
+    db: &DrawingDatabase,
+    block_changes: &[(BlockId, Option<BlockRow>)],
+    id: EntityId,
+    state: &EntityDisplayState,
+) -> CadResult<()> {
+    for block in &state.visibility.blocks {
+        if post_batch_block(db, block_changes, *block).is_none() {
+            return Err(CadError::Invariant(format!(
+                "entity {id:?} display state names block {block:?}, which does not exist after \
+                 this transaction"
+            )));
+        }
+    }
+    for placement in &state.visibility.visibility {
+        let block = placement.block;
+        let Some(definition) = post_batch_block(db, block_changes, block) else {
+            return Err(CadError::Invariant(format!(
+                "entity {id:?} display state names block {block:?} for its visibility \
+                 membership, but that block does not exist after this transaction"
+            )));
+        };
+        // A placement that asks for nothing (not a governed member and no named
+        // states) is satisfied by an existing plain block: nothing is written.
+        if !placement.member && placement.states.is_empty() {
+            continue;
+        }
+        let Some(visibility) = definition.dynamic_visibility.as_ref() else {
+            return Err(CadError::Invariant(format!(
+                "entity {id:?} display state claims visibility membership in block {block:?}, \
+                 which has no dynamic-visibility descriptor"
+            )));
+        };
+        for name in &placement.states {
+            if !visibility.states.iter().any(|entry| &entry.name == name) {
+                return Err(CadError::Invariant(format!(
+                    "entity {id:?} display state names visibility state '{name}' of block \
+                     {block:?}, which that block does not have"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The stored rows overlaid with the batch, sorted by `draw_order`.

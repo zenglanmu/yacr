@@ -14,8 +14,10 @@ use crate::entity::DbEntity;
 /// every pan/zoom step; recomputing it from scratch is O(#entities) and was
 /// ~99% of the per-step CPU cost on large drawings. Keying the cache on the
 /// revision means every sanctioned write path (which raises the revision)
-/// invalidates it. The one content mutation that preserves the revision,
-/// [`DrawingDatabase::restore_entity_display_state`], clears it explicitly.
+/// invalidates it. The display-state writer
+/// ([`DrawingDatabase::restore_entity_display_state`], crate-private) also clears
+/// it explicitly, so the cache can never serve a pre-write extent even inside a
+/// single batch.
 #[derive(Debug, Default)]
 pub(crate) struct BoundsCache {
     /// Visible to the sibling `test_support` module, which reads the tag only.
@@ -125,9 +127,11 @@ impl DrawingDatabase {
 
     /// Clear the cached bounds.
     ///
-    /// Only needed for content mutations that keep the revision (currently
-    /// [`Self::restore_entity_display_state`]); a revision bump invalidates the
-    /// revision-keyed cache on its own.
+    /// Needed by the crate-private display-state writer
+    /// ([`Self::restore_entity_display_state`]) because it changes block
+    /// membership in the middle of a batch, before the revision advances; the
+    /// batch's own revision bump then invalidates the revision-keyed cache again
+    /// on its own.
     ///
     /// `pub(super)`: called from the sibling `access`/`edit` impl blocks, which
     /// are separate files of this same module.
