@@ -21,10 +21,10 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **46** |
+| 完整实现 | **47** |
 | 部分实现（有写明的界） | **38** |
-| **已实现合计（完整 + 部分）** | **84** |
-| 未实现 | **897** |
+| **已实现合计（完整 + 部分）** | **85** |
+| 未实现 | **896** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -42,6 +42,7 @@
 
 | Command | 状态 | 说明 |
 | --- | --- | --- |
+| `ABOUT` | 已实现 | chrome 本地选择子：打开 About 对话框（与 File > About 同一路径） |
 | `ALIGN` | 部分实现 | 仅两对点（平移 + 旋转 + 可选均匀缩放）；无 3 对点 3D、无非均匀缩放 |
 | `ARC` | 已实现 | — |
 | `AREA` | 已实现 | — |
@@ -157,7 +158,7 @@
 | 24 | `3DSWIVEL` | 未实现 | Changes the target of the view in the direction that you drag. | — |
 | 25 | `3DWALK` | 未实现 | Changes the 3D view in a drawing interactively to create the appearance of walking through the model. | — |
 | 26 | `3DZOOM` | 未实现 | Zooms in and out in a perspective view. | — |
-| 27 | `ABOUT` | 未实现 | Displays information about your product. | ribbon 有 About 对话框；命令行尚未准入 |
+| 27 | `ABOUT` | 已实现 | Displays information about your product. | chrome 本地选择子：打开 About 对话框（与 File > About 同一路径） |
 | 28 | `ACADINFO` | 未实现 | Creates a file that stores information about your AutoCAD installation and current setup. | — |
 | 29 | `ACISIN` | 未实现 | Imports an ACIS (SAT) file and creates 3D solid, body, or region objects. | — |
 | 30 | `ACISOUT` | 未实现 | Exports 3D solid, region, or body objects to an ACIS file. | — |

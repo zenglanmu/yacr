@@ -8,6 +8,7 @@
 // gates, the gesture-only and document-scoped sets, the selection preconditions
 // and the selectors the chrome answers without the router. Empty or wrong data
 // here can only ever refuse, never silently admit.
+import { ABOUT_COMMAND } from './chrome-commands.ts';
 
 /** The `cad_status` slice the admission rules read (all fields are the host's). */
 export interface CommandStatusView {
@@ -261,8 +262,9 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
  * Selectors the **chrome** answers itself, before the router. They have a real
  * command-line entry (typing the word works) but no reason to reach a router
  * selector: `PROPERTIES` opens the properties window, `LAYER` opens the layers
- * palette, `FONTS` opens the read-only Font Manager and `RESOURCES` opens
- * the References panel.
+ * palette, `FONTS` opens the read-only Font Manager, `RESOURCES` opens
+ * the References panel and `ABOUT` opens the existing About dialog (the same
+ * `requestOpenPopup('about')` path as the File tab's action).
  *
  * They are deliberately admitted regardless of the loaded host vocabulary (and
  * of whether a drawing is open): they touch no CAD state, exactly like the
@@ -274,6 +276,9 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
  * panel reads the references the status already carries, so the UI selector
  * opens that panel and sends nothing: no second source and no fabricated load.
  * `FONTS` owns its own report command (`cad_fonts`), which the panel reads
- * directly; the selector only opens the panel.
+ * directly; the selector only opens the panel. `ABOUT` sends nothing at all: the
+ * host-owned dialog already exists, and the selector only opens it.
  */
-export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze(['PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES']);
+export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze([
+  'PROPERTIES', 'LAYER', 'FONTS', 'RESOURCES', ABOUT_COMMAND,
+]);

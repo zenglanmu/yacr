@@ -508,6 +508,7 @@ function Shell() {
     openProperties,
     openLayers: () => { setLayersOpen(true); setLayersFocus(value => value + 1); },
     openFonts: () => setFontsOpen(true),
+    openAbout: () => requestOpenPopup('about'),
     reportError: setError,
   });
 
@@ -911,9 +912,7 @@ function Shell() {
       // Dialogs are in-DOM overlays (ADR 0021 D1/D2). The host still owns the
       // modal gate and admission; `existing: true` means the same dialog is
       // already open, so there is nothing to do here and it is never a failure.
-      else if (action === 'about') {
-        requestOpenPopup('about');
-      }
+      else if (action === 'about') requestOpenPopup('about');
       // File > Plugins is the same dialog with one page selected.
       else if (action === 'options') openOptionsDialog(requestOpenPopup);
       else if (action === 'plugins') openOptionsDialog(requestOpenPopup, 'plugins');

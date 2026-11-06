@@ -8,7 +8,8 @@
 // paints nothing).
 //
 // `FONTS` is deliberately **not** refused on mobile: the compact layout renders
-// the same panel as a floating sheet, exactly like `RESOURCES`.
+// the same panel as a floating sheet, exactly like `RESOURCES`. `ABOUT` opens the
+// same dialog the File tab's About action opens, so it needs no layout either.
 import { useCallback } from 'react';
 import type { Translator } from '../i18n.ts';
 import type { LayoutMode } from '../layout/layout-mode.ts';
@@ -18,6 +19,7 @@ import { isOptionsCommand } from '../options/options.ts';
 import { isPropertiesCommand } from '../properties/properties.ts';
 import { isResourcesCommand } from '../references/references.ts';
 import { isFontsCommand } from '../fonts/fonts.ts';
+import { isAboutCommand } from './chrome-commands.ts';
 
 /** One selector's destination. `refused` names the panel the layout cannot show. */
 export type LocalSelectorResult =
@@ -26,6 +28,7 @@ export type LocalSelectorResult =
   | { readonly kind: 'properties' }
   | { readonly kind: 'layers' }
   | { readonly kind: 'fonts' }
+  | { readonly kind: 'about' }
   | { readonly kind: 'refused'; readonly panelKey: string };
 
 /** The panel labels the layout refusal names. */
@@ -41,7 +44,8 @@ export const LOCAL_SELECTOR_PANEL_KEYS = Object.freeze({
  * The order mirrors the old inline branch: dialog selectors first, then the
  * desktop palette windows. `PROPERTIES`/`LAYER` are refused where the palette
  * layer is not rendered; `FONTS`/`RESOURCES` have a compact sheet and are never
- * refused by layout.
+ * refused by layout. `ABOUT` opens the existing host-owned dialog and is
+ * likewise layout-independent.
  */
 export function localSelectorFor(text: string, layout: LayoutMode): LocalSelectorResult | null {
   if (isOptionsCommand(text)) return { kind: 'options' };
@@ -57,6 +61,7 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
       ? { kind: 'layers' }
       : { kind: 'refused', panelKey: LOCAL_SELECTOR_PANEL_KEYS.layers };
   }
+  if (isAboutCommand(text)) return { kind: 'about' };
   return null;
 }
 
@@ -72,6 +77,8 @@ export interface LocalSelectorHost {
   /** Open the layers palette and take the keyboard (a repeat `LAYER` re-reads). */
   readonly openLayers: () => void;
   readonly openFonts: () => void;
+  /** Open the existing host-owned About dialog (`requestOpenPopup('about')`). */
+  readonly openAbout: () => void;
   /** Put a refusal sentence on the chrome's one error line. */
   readonly reportError: (message: string) => void;
 }
@@ -95,6 +102,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     openProperties,
     openLayers,
     openFonts,
+    openAbout,
     reportError,
   } = host;
   return useCallback((text: string, fromInput: boolean): boolean => {
@@ -112,6 +120,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
       case 'properties': openProperties(); break;
       case 'layers': openLayers(); break;
       case 'fonts': openFonts(); break;
+      case 'about': openAbout(); break;
     }
     return true;
   }, [
@@ -124,6 +133,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     openProperties,
     openLayers,
     openFonts,
+    openAbout,
     reportError,
   ]);
 }

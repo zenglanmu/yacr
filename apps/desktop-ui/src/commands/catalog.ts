@@ -314,4 +314,9 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // may imply undo or that the exporter writes the values.
   { id: 'PDMODE', labelKey: 'point.display.mode', icon: 'point', group: 'view' },
   { id: 'PDSIZE', labelKey: 'point.display.size', icon: 'point', group: 'view' },
+  // ABOUT (AutoCAD 2026) is a chrome-local selector, not a router command: typing
+  // it opens the same host-owned About dialog the File tab's About action opens.
+  // It is appended at the very end so no shipped row moves; the `app` glyph is
+  // the ribbon entry's own mark for the same dialog.
+  { id: 'ABOUT', labelKey: 'file.about', icon: 'app', group: 'file' },
 ]);
