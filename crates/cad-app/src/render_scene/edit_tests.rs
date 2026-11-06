@@ -708,7 +708,11 @@ fn sequential_appends_bind_each_immediate_predecessor() {
 fn hidden_line_appends_zero_batches_and_resource_changes_fall_back() {
     let (before, after, changes) = transition();
     let receipt = DrawingEditReceipt::from_commit(before.clone(), after.clone(), &changes).unwrap();
-    let layer = after.entity(receipt.inserted).unwrap().layer;
+    let inserted = match &receipt.delta {
+        super::edit::CommitDelta::Append(inserted) => *inserted,
+        other => panic!("expected an append receipt, got {other:?}"),
+    };
+    let layer = after.entity(inserted).unwrap().layer;
     let mut hidden = LayerOverrideSet::new();
     hidden.set(layer, false);
     let mut controller = CadSceneController::default();

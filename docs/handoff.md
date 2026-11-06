@@ -1,3 +1,66 @@
+## 2026-11-06 删除保持驻留 base（P3：retire + 阈值压实）
+
+- **目标**：delete-only 提交不再强制全量重建。`complex-test.dwg` 上增量 prepare 0.54 ms、
+  全量约 4.8 s，所以保留 base 的收益是数量级的。
+- **分类（`crates/cad-app/src/render_scene/edit.rs`）**：`DrawingEditReceipt` 增加
+  `delta: CommitDelta`，`from_commit` 仍做 revision 对（`changes.follows(before)`、同 database id、
+  `after.revision() == changes.after`）与 P1 的 append 准入检查（逐条不变，改为
+  `append_candidate`）。分类：
+  - `Retire(ids)`：`changes.changes` **非空**且**每一项都是 `ObjectChange::Delete`**（因此无
+    `Insert`/`Update`，至少一个 Delete）；`ids` 为这些 Delete 的 `EntityId`。
+  - `Append(id)`：P1 原检查通过（一个 dirty id、有 `Insert`、model space、无 source handle、
+    几何类可 append）。
+  - `Other`：带 Delete 但混合了 Insert/Update 的批次。空 `changes` 的 layer/point 式 revision
+    只是不签发 receipt（控制器按 `Other` 处理 → 全量重建）；单 insert 但不可 append（POINT/
+    IMAGE/MASK）也保持不签发，现有测试语义未变。
+- **控制器保留 base 的条件（`render_scene/mod.rs` + `retire.rs`）**：receipt 为 `Retire`、`base`
+  存在、`edit.after` 就是本次 doc、且 `retire_keeps_base(previous_version, current_version)`：
+  逐项比较 `identity.database`、`identity.layers`、`document`、`fonts`、`font_identity`、`layers`、
+  `space`、`images`、`vendor`、`vendor_identity`；**有意忽略** delete 必然改变的
+  `identity.revision` / `identity.entities` / `identity.bounds`，以及每轮新 `Arc` 必然变化的
+  `document_epoch`。另加类过滤 `retire_is_hideable`：POINT（glyph 在 drawing-wide marker
+  overlay，不在 base）、INSERT（展开 batch 的 source 是子实体 + 非空 instance，root 的
+  whole-entity ref 解析不到 key）、MASK（不进 pick table）一律退回全量重建；`Compound` 递归检查。
+  条件不满足 → 今天的全量重建并清空 retired。
+- **不重建时**：`ResidentScene` 与 `EntityBatchIndex` 原样保留，`base_revision` 不前进；
+  ids 并入 `retired: BTreeSet<EntityId>`（已有的忽略）；只发布 flags-only 更新。`published_drawing`
+  仍推进到新 `Arc`（否则下一条 receipt 绑定失败）；`model_max_order` 保持旧值（旧 batch 仍在 base）。
+- **flags**：`merge_retired_flags` 为每个 retired id 构造
+  `SelectionRef { document, entity, instance: InstancePath::default(), sub_element: None }`，绕过
+  `selection_entity_flags` 的 resolver（实体已不在库中，否则会报 `highlight.unresolved`），按
+  `(document, entity, instance)` OR 入 `FLAG_HIDDEN`。`flags_fingerprint(overlays, retired)` 把
+  retired 集合也哈希进去，所以 delete 一定改变 `flags_version` 并触发重新发布；否则引擎的
+  flags-delta 门会看到“没有变化”。
+- **undo 陷阱（已强制）**：若 append receipt 的 inserted id 已在 `retired` 中，`appended_entity`
+  直接返回 `None` → 全量重建并清空 retired。原因：该 id 的旧 batch 仍在 base 中且被隐藏，追加新
+  batch 要么在取消隐藏后双绘，要么继续不可见。测试
+  `reinserting_a_retired_id_forces_a_full_rebuild` 用一个“插入顺序仍可 append”的同 id 重插来证明
+  是 retire guard（而不是尾部顺序检查）拒绝了 append。
+- **压实**：`RETIRED_COMPACTION_THRESHOLD = 4096`（`pub(crate)`，测试用
+  `set_retired_compaction_threshold` 降低）。`retired` 合并后 `len() > threshold` 时下一次 prepare
+  走现有全量重建并清空 retired；全量重建本来就 retire 所有 pick key 并重新分配，作为本阶段接受的
+  “epoch reset”。删除不在 `entity_batches` 中的 id（隐藏图层当时没有 batch）是无害的：base 不变，
+  id 仍进入 retired flags。
+- **bounds 是故意延迟收缩**：delete 不重算 `DrawingDatabase::bounds()`（P2c 的 insert-only 快路径
+  也不覆盖 delete），所以 compaction 之前 `bounds()` 可能大于存活几何。这是有意的决定，**不是**
+  近似值；下一次全量重建/`bounds()` 重算才收缩。
+- **测试**（`crates/cad-app/src/render_scene/retire_tests.rs`，确定性、无 GPU）：
+  `delete_only_commit_keeps_the_resident_base`、`retired_flags_accumulate_across_prepares`、
+  `reinserting_a_retired_id_forces_a_full_rebuild`、
+  `retired_compaction_threshold_rebuilds_and_clears`、`delete_of_a_non_resident_id_is_harmless`、
+  `mixed_insert_and_delete_commit_classifies_as_other_and_rebuilds`。
+  本轮 verbatim：`test result: ok. 1560 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out;
+  finished in 1.34s`（`cargo test -p cad-app --locked`）。`cad-engine`：
+  `test result: ok. 112 passed; 0 failed; 15 ignored; 0 measured; 0 filtered out`；`cad-host`：
+  `test result: ok. 266 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`。
+  `cargo clippy -p cad-app -p cad-engine -p cad-host --all-targets --locked -- -D warnings` 通过；
+  `cargo fmt --all -- --check` 通过；`check-file-size.py` OK；`check-architecture.py` OK。
+- **未做 / NOT RUN**：没有新增 GPU/数据库机制（无 `removed_chunks`、无新 renderer API、无新
+  `ChangeSet` 形状）；全量重建产物未改。未跑 `complex-test.dwg` 的 delete 计时，故本轮没有
+  “delete 后 prepare 耗时”的真实数据；未跑 workspace 全量门禁/全量测试，未跑 Windows/macOS/
+  Android/Web 载体、真机、真实 GPU、像素或性能验收。
+
+
 ## 2026-11-06 只插入写入保持 bounds 记忆精确（P2c）
 
 - **问题（已测量）**：`prepare_shared_with_overlays_and_images_and_edit` 在文档 `Arc` 变化时调用

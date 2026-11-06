@@ -7,17 +7,26 @@ use crate::vendor::VendorRepresentationStore;
 use cad_db::DrawingDatabase;
 use cad_domain::{CadResult, DocumentId, EntityId, Point3, SceneIdentity, SelectionRef, TaskStamp};
 use cad_representation::{FontEngine, SpaceSelection};
+use std::collections::BTreeSet;
 use std::ops::Range;
 use std::sync::Arc;
 mod assembly;
 pub use assembly::*;
 mod edit;
+pub(crate) use edit::CommitDelta;
 pub use edit::{BaseAppend, DrawingEditReceipt};
 #[cfg(test)]
 mod edit_tests;
 mod entity_index;
 mod overlay;
 mod resident;
+mod retire;
+#[cfg(test)]
+mod retire_tests;
+use retire::{
+    flags_fingerprint, merge_retired_flags, retire_is_hideable, retire_keeps_base,
+    RETIRED_COMPACTION_THRESHOLD,
+};
 #[cfg(test)]
 mod vendor_tests;
 pub use overlay::*;
@@ -133,9 +142,17 @@ pub struct CadSceneController {
     /// accepted append, empty off model space, and never left stale (an entity
     /// that produces no batches has no entry).
     entity_batches: EntityBatchIndex,
+    /// Ids whose resident batches were deleted but are still physically present
+    /// in the base, suppressed by `FLAG_HIDDEN` until a full rebuild compacts
+    /// them. Reset by every full base build.
+    retired: BTreeSet<EntityId>,
     model_max_order: Option<i64>,
     #[cfg(test)]
     fail_after_point_staging: bool,
+    /// Test override for [`RETIRED_COMPACTION_THRESHOLD`]; `None` uses the
+    /// documented default.
+    #[cfg(test)]
+    retired_compaction_threshold: Option<usize>,
     visual_overlay: Option<Arc<SceneDelta>>,
     visual_diagnostics: Option<Vec<cad_domain::Diagnostic>>,
     visual_completeness: Option<cad_domain::Completeness>,
@@ -364,14 +381,62 @@ impl CadSceneController {
         if let Some(db) = doc {
             crate::validate_space(db, space)?;
         }
-        let base_changed = self.base.is_none() || self.version != version;
+        let version_changed = self.base.is_none() || self.version != version;
+        // A delete-only commit keeps the resident base: the deleted ids are
+        // accumulated as retired and hidden through the flags path. All the
+        // preconditions (document/space/fonts/layers/images/vendor unchanged,
+        // every deleted class hideable by a whole-entity flag) must hold, and the
+        // accumulation must not have crossed the compaction threshold, otherwise
+        // this is today's full rebuild and the retired set is cleared.
+        let retire_candidate = self.edit.as_ref().and_then(|edit| {
+            let CommitDelta::Retire(ids) = &edit.delta else {
+                return None;
+            };
+            if self.base.is_none() || !std::ptr::eq(doc?, edit.after.as_ref()) {
+                return None;
+            }
+            let old = self.version.as_ref()?;
+            let new = version.as_ref()?;
+            (retire_keeps_base(old, new)
+                && ids.iter().all(|id| {
+                    edit.before
+                        .entity(*id)
+                        .is_none_or(|entity| retire_is_hideable(&entity.geometry))
+                }))
+            .then(|| ids.clone())
+        });
+        let mut next_retired = match retire_candidate.as_ref() {
+            Some(ids) => {
+                let mut merged = self.retired.clone();
+                merged.extend(ids.iter().copied());
+                merged
+            }
+            None => self.retired.clone(),
+        };
+        let retire_taken =
+            retire_candidate.is_some() && next_retired.len() <= self.retired_compaction_limit();
+        if !retire_taken {
+            next_retired = self.retired.clone();
+        }
+        let base_changed = version_changed && !retire_taken;
         let appended_entity = self.edit.as_ref().and_then(|edit| {
+            let inserted = match &edit.delta {
+                CommitDelta::Append(inserted) => *inserted,
+                _ => return None,
+            };
+            // Undo trap: re-inserting a retired id must never append. The old
+            // resident batches for that id are still in the base (hidden), so the
+            // new ones would either double-draw once un-hidden or stay invisible;
+            // the only correct answer is the full rebuild that compacts them.
+            if self.retired.contains(&inserted) {
+                return None;
+            }
             if !std::ptr::eq(doc?, edit.after.as_ref()) {
                 return None;
             }
             let old = self.version.as_ref()?;
             let new = version.as_ref()?;
-            let entity = edit.after.entity(edit.inserted)?;
+            let entity = edit.after.entity(inserted)?;
             (base_changed
                 && space == SpaceSelection::Model
                 && self.base.is_some()
@@ -403,7 +468,7 @@ impl CadSceneController {
                 predecessor: base.clone(),
                 keep_batches: base.batch_len(),
             })
-        } else if base_changed {
+        } else if base_changed || retire_taken {
             None
         } else {
             self.base_append.clone()
@@ -444,6 +509,7 @@ impl CadSceneController {
         // known to be appendable; a declined append rebuilds the whole base and
         // publishes no append proof.
         let mut append_declined = false;
+        let mut rebuilt = false;
         let (base, next_entity_batches) = if let Some(entity) = appended_entity.as_ref() {
             let delta = assembly::build_model_entity_scene(
                 doc.expect("append drawing"),
@@ -470,18 +536,30 @@ impl CadSceneController {
                 (resident, index)
             } else {
                 append_declined = true;
+                rebuilt = true;
                 let (delta, index) = full_base(doc)?;
                 (ResidentScene::from_prefix(Arc::new(delta)), index)
             }
         } else if base_changed {
+            // This also covers the undo trap (a re-inserted retired id declines
+            // the append) and a retire that crossed the compaction threshold.
+            rebuilt = true;
             let (delta, index) = full_base(doc)?;
             (ResidentScene::from_prefix(Arc::new(delta)), index)
         } else {
+            // Nothing structural changed, or a delete-only commit kept the base:
+            // the resident scene and its per-entity index are untouched.
             (
                 self.base.as_ref().expect("base prepared").clone(),
                 self.entity_batches.clone(),
             )
         };
+        if rebuilt {
+            // A full rebuild is the accepted epoch reset: it retires every pick
+            // key and allocates fresh ones, so no retired id can still name a
+            // resident batch.
+            next_retired.clear();
+        }
         // The index is model-space only: paper-space batches are not owned by a
         // single entity, so the previous (model) entries must not survive a
         // switch to a layout.
@@ -538,7 +616,7 @@ impl CadSceneController {
         let overlays = injected.as_ref().unwrap_or(overlays);
         let next_base = self.base_revision + u64::from(base_changed);
         let visual_version = (next_base, overlay_fingerprint(overlays));
-        let flags_version = entity_flags_fingerprint(overlays);
+        let flags_version = flags_fingerprint(overlays, &next_retired);
         let visual_changed = base_changed || self.visual_version != Some(visual_version);
         let flags_changed = base_changed || self.flags_version != Some(flags_version);
         if !base_changed && !visual_changed && !flags_changed {
@@ -664,7 +742,7 @@ impl CadSceneController {
         // because a new base can change what a ref resolves to (for example a
         // hidden layer).
         if flags_changed || self.entity_flags.is_none() {
-            self.refresh_flags(doc, document, overlays, flags_changed);
+            self.refresh_flags(doc, document, overlays, &next_retired, flags_changed);
         }
         let entity_flags = self.entity_flags.clone().unwrap_or_default();
         let flags_diagnostics = self.flags_diagnostics.clone().unwrap_or_default();
@@ -682,11 +760,6 @@ impl CadSceneController {
         if base_changed {
             self.base_fonts = fonts.clone();
             self.base_vendor = self.vendor.clone();
-            self.published_drawing = self
-                .shared_document
-                .as_ref()
-                .filter(|(shared, _)| doc.is_some_and(|db| std::ptr::eq(shared.as_ref(), db)))
-                .map(|(shared, _)| shared.clone());
             self.model_max_order = match appended_entity.as_ref() {
                 Some(entity) => Some(entity.draw_order),
                 None => doc.and_then(|db| {
@@ -697,7 +770,17 @@ impl CadSceneController {
                 }),
             };
         }
+        if base_changed || retire_taken {
+            // A retire does not rebuild the base, but the published snapshot must
+            // still advance: the next receipt is bound to this new `Arc`.
+            self.published_drawing = self
+                .shared_document
+                .as_ref()
+                .filter(|(shared, _)| doc.is_some_and(|db| std::ptr::eq(shared.as_ref(), db)))
+                .map(|(shared, _)| shared.clone());
+        }
         self.base_append = next_append.clone();
+        self.retired = next_retired;
         self.version = version;
         self.visual_version = Some(visual_version);
         self.flags_version = Some(flags_version);
@@ -746,7 +829,8 @@ impl CadSceneController {
         document: DocumentId,
         overlays: &OverlayInputs,
     ) -> bool {
-        self.refresh_flags(doc, document, overlays, false)
+        let retired = self.retired.clone();
+        self.refresh_flags(doc, document, overlays, &retired, false)
     }
 
     /// [`Self::refresh_flags_only`] with an explicit re-resolution override.
@@ -754,24 +838,33 @@ impl CadSceneController {
     /// `force` re-resolves even when the fingerprint is unchanged; the full
     /// preparation passes its `flags_changed` (which includes `base_changed`)
     /// because a new base can change what an unchanged ref resolves to.
+    ///
+    /// `retired` is the id set this resolution must suppress with `FLAG_HIDDEN`;
+    /// the caller passes the **staged** set during a preparation and the
+    /// controller's current set on the engine's sync path.
     fn refresh_flags(
         &mut self,
         doc: Option<&DrawingDatabase>,
         document: DocumentId,
         overlays: &OverlayInputs,
+        retired: &BTreeSet<EntityId>,
         force: bool,
     ) -> bool {
-        let flags_version = entity_flags_fingerprint(overlays);
+        let flags_version = flags_fingerprint(overlays, retired);
         if !force && self.flags_version == Some(flags_version) && self.entity_flags.is_some() {
             return false;
         }
-        let (flags, diagnostics, completeness) = match doc {
+        let (mut flags, diagnostics, completeness) = match doc {
             Some(db) => {
                 let scene = selection_entity_flags(db, overlays, document);
                 (scene.flags, scene.diagnostics, scene.completeness)
             }
             None => (Vec::new(), Vec::new(), cad_domain::Completeness::Complete),
         };
+        // A retired entity is no longer in the database, so it cannot go through
+        // the resolver (which would report it as `highlight.unresolved`). Merge
+        // its whole-entity hidden bit directly into the resolved set.
+        merge_retired_flags(&mut flags, document, retired);
         self.flags_version = Some(flags_version);
         self.flags_revision = self
             .flags_revision
@@ -818,6 +911,30 @@ impl CadSceneController {
     #[cfg(test)]
     pub(crate) fn entity_batch_index_len(&self) -> usize {
         self.entity_batches.len()
+    }
+
+    /// Number of retired ids still physically present in the resident base.
+    /// Diagnostics and tests only; not part of the published scene status.
+    #[cfg(test)]
+    pub(crate) fn retired_count(&self) -> usize {
+        self.retired.len()
+    }
+
+    /// Lower the retire-compaction threshold for a test.
+    ///
+    /// A production controller never calls this and keeps
+    /// [`RETIRED_COMPACTION_THRESHOLD`].
+    #[cfg(test)]
+    pub(crate) fn set_retired_compaction_threshold(&mut self, threshold: usize) {
+        self.retired_compaction_threshold = Some(threshold);
+    }
+
+    fn retired_compaction_limit(&self) -> usize {
+        #[cfg(test)]
+        if let Some(threshold) = self.retired_compaction_threshold {
+            return threshold;
+        }
+        RETIRED_COMPACTION_THRESHOLD
     }
 
     /// The cached transient overlay batches plus their diagnostics/completeness.

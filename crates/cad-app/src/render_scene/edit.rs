@@ -37,19 +37,38 @@ pub(crate) fn dirty_entities(changes: &ChangeSet) -> Vec<(EntityId, ChangeMask)>
     dirty
 }
 
-/// A successful single-entity insert transition admitted from the commit's
+/// What kind of incremental display transition a commit authorizes.
+///
+/// This is the controller's match key: only the two named arms keep resident
+/// state; every other shape goes through the full rebuild.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CommitDelta {
+    /// Exactly one inserted model-space entity, admitted for a tail append.
+    Append(EntityId),
+    /// No inserts and no updates: every dirty entity is a delete. (A `ChangeSet`
+    /// with an empty `changes` list and a revision bump — layer/point-style — is
+    /// NOT this: the receipt is not issued and the prepare stays a full rebuild.)
+    Retire(Vec<EntityId>),
+    /// Anything else that the commit can still describe precisely (currently a
+    /// mixed insert/update+delete batch). It always falls back to the full
+    /// rebuild.
+    Other,
+}
+
+/// A successful incremental display transition admitted from the commit's
 /// authoritative [`ChangeSet`].
 ///
 /// Block/table writes are not fully described by `ChangeSet`, so the gate stays
-/// narrow: exactly one dirty entity, inserted in model space, with no source
-/// handle, and a geometry class whose per-entity rebuild is the same work a full
-/// rebuild would do for it (see [`appends_like_full_rebuild`]). Everything else
-/// declines, and declining always falls back to the full rebuild.
+/// narrow: for an append, exactly one dirty entity, inserted in model space, with
+/// no source handle, and a geometry class whose per-entity rebuild is the same
+/// work a full rebuild would do for it (see [`appends_like_full_rebuild`]); for a
+/// retire, a delete-only batch following the committed revision pair. Everything
+/// else declines, and declining always falls back to the full rebuild.
 #[derive(Clone)]
 pub struct DrawingEditReceipt {
     pub(super) before: Arc<DrawingDatabase>,
     pub(super) after: Arc<DrawingDatabase>,
-    pub(super) inserted: EntityId,
+    pub(super) delta: CommitDelta,
 }
 
 impl DrawingEditReceipt {
@@ -67,42 +86,98 @@ impl DrawingEditReceipt {
         {
             return None;
         }
-        let dirty = dirty_entities(changes);
-        let [(inserted, _)] = dirty.as_slice() else {
-            return None;
-        };
-        let inserted = *inserted;
-        // A later `Update` for the same id is fine (an insert that restores a
-        // captured display state), but the entry itself must be an insert.
-        if !changes
-            .changes
-            .iter()
-            .any(|change| matches!(change, ObjectChange::Insert(object) if EntityId(object.0) == inserted))
-        {
-            return None;
-        }
-        if before.entity(inserted).is_some()
-            || before.entity_count().checked_add(1)? != after.entity_count()
-        {
-            return None;
-        }
-        let entity = after.entity(inserted)?;
-        if entity.space != SpaceId::Model
-            || entity.object.source_handle.is_some()
-            || !appends_like_full_rebuild(&entity.geometry)
-        {
-            return None;
-        }
+        let delta = classify_commit(&before, &after, changes)?;
         Some(Self {
             before,
             after,
-            inserted,
+            delta,
         })
     }
 
     pub fn after(&self) -> &Arc<DrawingDatabase> {
         &self.after
     }
+}
+
+/// Classify a committed revision transition.
+///
+/// `None` is the historical "decline" answer for a shape the receipt cannot
+/// describe (an empty layer/point-style revision bump, a non-appendable single
+/// insert, an update-only batch). The controller treats a missing receipt exactly
+/// like [`CommitDelta::Other`]: full rebuild.
+fn classify_commit(
+    before: &DrawingDatabase,
+    after: &DrawingDatabase,
+    changes: &ChangeSet,
+) -> Option<CommitDelta> {
+    // Retire: every published entry is a delete, and there is at least one. A
+    // mixed insert/update+delete batch is deliberately NOT a retire (the insert
+    // would have to be appended and the delete hidden in the same base), and an
+    // empty entry list is a non-entity signal (layer/point-style), never a
+    // delete-only commit.
+    if !changes.changes.is_empty()
+        && changes
+            .changes
+            .iter()
+            .all(|change| matches!(change, ObjectChange::Delete(_)))
+    {
+        let ids = changes
+            .changes
+            .iter()
+            .filter_map(|change| match change {
+                ObjectChange::Delete(object) => Some(EntityId(object.0)),
+                _ => None,
+            })
+            .collect();
+        return Some(CommitDelta::Retire(ids));
+    }
+
+    // Append: exactly one dirty entity, inserted in model space, with no source
+    // handle, and appending its own batches is the same work a full rebuild
+    // would do for it.
+    if let Some(inserted) = append_candidate(before, after, changes) {
+        return Some(CommitDelta::Append(inserted));
+    }
+    // A delete mixed with anything else is still described precisely enough to
+    // say "not a retire" — it is the controller's full-rebuild arm.
+    changes
+        .changes
+        .iter()
+        .any(|change| matches!(change, ObjectChange::Delete(_)))
+        .then_some(CommitDelta::Other)
+}
+
+/// The append admission checks (unchanged from P1), returning the inserted id.
+fn append_candidate(
+    before: &DrawingDatabase,
+    after: &DrawingDatabase,
+    changes: &ChangeSet,
+) -> Option<EntityId> {
+    let dirty = dirty_entities(changes);
+    let [(inserted, _)] = dirty.as_slice() else {
+        return None;
+    };
+    let inserted = *inserted;
+    // A later `Update` for the same id is fine (an insert that restores a
+    // captured display state), but the entry itself must be an insert.
+    if !changes.changes.iter().any(
+        |change| matches!(change, ObjectChange::Insert(object) if EntityId(object.0) == inserted),
+    ) {
+        return None;
+    }
+    if before.entity(inserted).is_some()
+        || before.entity_count().checked_add(1)? != after.entity_count()
+    {
+        return None;
+    }
+    let entity = after.entity(inserted)?;
+    if entity.space != SpaceId::Model
+        || entity.object.source_handle.is_some()
+        || !appends_like_full_rebuild(&entity.geometry)
+    {
+        return None;
+    }
+    Some(inserted)
 }
 
 /// Whether appending one entity's own batches reproduces exactly the batches a
