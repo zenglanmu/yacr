@@ -257,19 +257,6 @@ fn large_drawing_evidence_enabled(value: Option<&str>) -> bool {
     value == Some("1")
 }
 
-#[cfg(test)]
-mod perf_tests {
-    use super::large_drawing_evidence_enabled;
-
-    #[test]
-    fn large_drawing_driver_requires_explicit_opt_in() {
-        for value in [None, Some(""), Some("0"), Some("false")] {
-            assert!(!large_drawing_evidence_enabled(value));
-        }
-        assert!(large_drawing_evidence_enabled(Some("1")));
-    }
-}
-
 /// Decode the JSON-quoted eval-callback payload into the raw report string.
 fn decode_tool_report(payload: &str) -> String {
     let trimmed = payload.trim();
@@ -569,3 +556,16 @@ const TOOL_HOVER_TEMPLATE: &str = r#"
   }
 })()
 "#;
+
+#[cfg(test)]
+mod perf_tests {
+    use super::large_drawing_evidence_enabled;
+
+    #[test]
+    fn large_drawing_driver_requires_explicit_opt_in() {
+        for value in [None, Some(""), Some("0"), Some("false")] {
+            assert!(!large_drawing_evidence_enabled(value));
+        }
+        assert!(large_drawing_evidence_enabled(Some("1")));
+    }
+}
