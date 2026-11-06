@@ -171,6 +171,7 @@ fn application_with_layouts() -> (Application, SessionState) {
 }
 
 mod area_object;
+mod audit;
 mod cjk_baseline;
 mod commands;
 mod drawing;

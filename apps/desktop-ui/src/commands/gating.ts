@@ -172,6 +172,8 @@ export const GESTURE_ONLY_COMMANDS: readonly string[] = Object.freeze(['ORBIT'])
  * projection of that same camera, so on the start page there is nothing to
  * frame. `MODEL` returns to the Model tab of the open drawing, and `PLAN` returns
  * the open drawing's view to the 2D plan (there is nothing to view without one).
+ * `AUDIT` validates the open drawing's stored entities; with no drawing there is
+ * nothing to check.
  * They are disabled there with the catalog's own "no drawing is open" sentence
  * instead of a misleading "not supported yet".
  *
@@ -180,7 +182,7 @@ export const GESTURE_ONLY_COMMANDS: readonly string[] = Object.freeze(['ORBIT'])
  * "a drawing is the whole requirement" (see `SELECTION_REQUIREMENTS`, which
  * answers the no-document case for selection-gated commands itself).
  */
-export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN']);
+export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze(['SWITCH2D3D', 'PROJECTION', 'MODEL', 'PLAN', 'AUDIT']);
 
 /** One command's precondition on the **current selection**. */
 export interface SelectionRequirement {

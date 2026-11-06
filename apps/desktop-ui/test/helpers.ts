@@ -80,7 +80,13 @@ export async function readCatalog(locale) {
 export const HOST_NAMES = [
   'OPEN', 'NEW', 'PLOT', 'SAVE', 'CANCEL', 'PAN', 'ZOOM', 'FIT', 'RESETVIEW', 'TOGGLELAYER',
   'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'MODEL', 'SELECT', 'SELECTALL', 'SELECTSIMILAR', 'MEASURE', 'CONFIRM',
-  'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
+  'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS',
+  // AUDIT (AutoCAD 2026): detect-only drawing audit, a payload-free canonical
+  // selector of its own. The Rust lane adds `CommandId::AuditDrawing` to
+  // `COMMAND_TABLE`; this mirror stands in for the loaded `cad_commands`
+  // vocabulary and never proves the host advertises the name.
+  'AUDIT',
+  'SWITCHBACKEND', 'SWITCH2D3D',
   // PLAN (AutoCAD 2026): the payload-free "orthographic view of the XY plane"
   // selector. v1 is the top/plan 2D view only (this build has no UCS model, so
   // PLAN's UCS/World/Current options are NOT IMPLEMENTED and take no argument).

@@ -330,6 +330,7 @@
   "properties.row.style": "Hatch style",
   "properties.row.fill": "Fill",
   "diagnostics.title": "Diagnostics",
+  "audit.title": "Audit",
   "diagnostics.close": "Close",
   "diagnostics.open": "Diagnostics",
   "diagnostics.empty": "No diagnostics data (not pushed by the host)",

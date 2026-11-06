@@ -39,6 +39,7 @@ pub mod vendor;
 pub mod viewer_config;
 pub mod zoom_history;
 
+mod app_audit;
 mod app_zoom;
 mod layer_history;
 mod space;

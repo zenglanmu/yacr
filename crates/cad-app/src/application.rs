@@ -278,6 +278,9 @@ impl Application {
             }
             CommandId::Resources => self.resources_report(&command),
             CommandId::Diagnostics => self.diagnostics_report(&command),
+            // AUDIT is the detect-only drawing audit: it reads every stored entity
+            // through `cad_db::validate_entity` and repairs nothing.
+            CommandId::AuditDrawing => self.audit_drawing(session, &command),
             CommandId::SwitchBackend => {
                 if let CommandPayload::Backend(choice) = command.payload {
                     session.backend = choice;

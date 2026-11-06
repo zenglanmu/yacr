@@ -59,6 +59,11 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("REDO", CommandId::Redo),
     ("RESOURCES", CommandId::Resources),
     ("DIAGNOSTICS", CommandId::Diagnostics),
+    // AUDIT (AutoCAD 2026) is the **detect-only** drawing audit: it reports every
+    // stored entity that fails `cad_db::validate_entity` and repairs nothing
+    // (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). Read-only, so
+    // Viewer mode admits it.
+    ("AUDIT", CommandId::AuditDrawing),
     ("SWITCHBACKEND", CommandId::SwitchBackend),
     ("SWITCH2D3D", CommandId::Switch2d3d),
     ("STANDARDVIEW", CommandId::StandardView),

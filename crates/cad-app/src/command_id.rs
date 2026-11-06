@@ -41,8 +41,7 @@ pub enum CommandId {
     /// Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,
     RestoreLayers,
-    /// `LAYERP`: restore the **previous layer state** — AutoCAD's "previous layer
-    /// state" stack.
+    /// `LAYERP`: restore the **previous layer state** — AutoCAD's "previous layer state" stack.
     ///
     /// Payload is [`crate::CommandPayload::None`]; a caller that supplies one is
     /// refused (`layers.previous.invalid_payload`), never silently ignored. The
@@ -169,6 +168,8 @@ pub enum CommandId {
     Redo,
     Resources,
     Diagnostics,
+    /// `AUDIT`: detect-only drawing audit (no repair, read-only; see `app_audit`).
+    AuditDrawing,
     SwitchBackend,
     Switch2d3d,
     StandardView,
@@ -350,8 +351,7 @@ pub enum CommandId {
     /// that tool**; a dispatch that carries no payload is still refused by name.
     /// The interactive capture fills the rotation from
     /// [`crate::draw_tool::ToolParameter::TextRotation`] (degrees → radians) and
-    /// the attachment from
-    /// [`crate::draw_tool::ToolParameter::MTextAttachment`] (AutoCAD's `1..=9`
+    /// the attachment from [`crate::draw_tool::ToolParameter::MTextAttachment`] (AutoCAD's `1..=9`
     /// codes), whose defaults reproduce the previously fixed `0.0` / top-left.
     /// Line spacing, columns, background fill, drawing direction and an
     /// in-command editing dialog remain NOT IMPLEMENTED.

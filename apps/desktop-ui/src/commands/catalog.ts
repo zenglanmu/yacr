@@ -369,4 +369,11 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // so no shipped row moves, and it reuses the `polyline` glyph: the output is a
   // polyline.
   { id: 'REVCLOUD', labelKey: 'draw.kind.revcloud', icon: 'polyline', group: 'draw' },
+  // AUDIT (AutoCAD 2026) is the detect-only drawing audit: it reports every
+  // stored entity that fails the database's own validity check and repairs
+  // nothing (AutoCAD's "corrects some errors" half is NOT IMPLEMENTED). It is a
+  // payload-free router command that needs an open drawing, so it is appended
+  // last — no shipped row moves — and reuses the `diagnostics` glyph, the same
+  // report the File tab's Diagnostics entry opens.
+  { id: 'AUDIT', labelKey: 'audit.title', icon: 'diagnostics', group: 'file' },
 ]);

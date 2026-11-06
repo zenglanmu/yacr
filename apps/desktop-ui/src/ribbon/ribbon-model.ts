@@ -280,6 +280,11 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         titleKey: 'ribbon.panel.utilities',
         items: [
           { id: 'diagnostics', labelKey: 'diagnostics.title', icon: 'diagnostics', action: 'diagnostics' },
+          // AUDIT (AutoCAD 2026) is the detect-only drawing audit, directly after
+          // the Diagnostics panel entry it reads: it reports invalid stored
+          // entities and repairs nothing, so its own label says "Audit" and the
+          // report text (from Rust) states that no repair was performed.
+          { id: 'audit', labelKey: 'audit.title', icon: 'diagnostics', command: 'AUDIT' },
           { id: 'clean', labelKey: 'status.clean_screen', icon: 'cleanScreen', action: 'cleanScreen', variants: [
             // The typed-word selectors live beside the toggle that shares their
             // state: `clean-on` enters clean screen explicitly (`CLEANSCREENON`),

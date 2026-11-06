@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **43** |
-| **已实现合计（完整 + 部分）** | **93** |
-| 未实现 | **888** |
+| 部分实现（有写明的界） | **44** |
+| **已实现合计（完整 + 部分）** | **94** |
+| 未实现 | **887** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -48,6 +48,7 @@
 | `AREA` | 已实现 | — |
 | `ARRAYPOLAR` | 部分实现 | 独立副本、非关联；角度步长为我们的规则 |
 | `ARRAYRECT` | 部分实现 | 独立副本、非关联；无 Path/Levels/关联编辑 |
+| `AUDIT` | 部分实现 | v1 只检测：逐实体跑 cad-db 校验并报告诊断；不修复（AutoCAD 的 corrects errors 未实现） |
 | `BLOCK` | 已实现 | — |
 | `BREAK` | 部分实现 | 两点打断；无 F 第一点覆盖、无多段打断；LWPOLYLINE 按名拒绝 |
 | `CHAMFER` | 部分实现 | 两线形式 + 独立 CHAMFER POLYLINE 选择子；无 Angle/Multiple/Trim |
@@ -231,7 +232,7 @@
 | 89 | `ATTOUT` | 未实现 | Exports block attribute values to an external file in tab-delimited ASCII format. | — |
 | 90 | `ATTREDEF` | 未实现 | Redefines a block and updates associated attributes. | — |
 | 91 | `ATTSYNC` | 未实现 | Applies attribute changes in a block definition to all block references. | — |
-| 92 | `AUDIT` | 未实现 | Evaluates the integrity of a drawing and corrects some errors. | — |
+| 92 | `AUDIT` | 部分实现 | Evaluates the integrity of a drawing and corrects some errors. | v1 只检测：逐实体跑 cad-db 校验并报告诊断；不修复（AutoCAD 的 corrects errors 未实现） |
 | 93 | `AUTOCONSTRAIN` | 未实现 | Applies geometric constraints to a selection set of objects based on orientation of the objects relative to one another. | — |
 | 94 | `AUTOPUBLISH` | 未实现 | Publishes drawings to DWF, DWFx, or PDF files automatically to a specified location. | — |
 | 95 | `BACTION` | 未实现 | Adds an action to a dynamic block definition. | — |
