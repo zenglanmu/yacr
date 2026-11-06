@@ -145,6 +145,12 @@ struct FrameSamples {
     encode: Vec<f64>,
     submit: Vec<f64>,
     wait: Vec<f64>,
+    /// `FrameStats::uploaded_bytes` per timed frame.
+    ///
+    /// The counter is **cumulative** (it is incremented on upload and never
+    /// reset per frame), so "panning does not re-upload geometry" is the
+    /// contract that these values do not move across timed frames.
+    uploads: Vec<u64>,
     last: Option<cad_render_wgpu::FrameStats>,
 }
 
@@ -159,6 +165,7 @@ impl FrameSamples {
             encode: Vec::with_capacity(frames),
             submit: Vec::with_capacity(frames),
             wait: Vec::with_capacity(frames),
+            uploads: Vec::with_capacity(frames),
             last: None,
         }
     }
@@ -198,7 +205,22 @@ fn run_frames(
             samples.encode.push(stats.encode_ms);
             samples.submit.push(stats.submit_ms);
             samples.wait.push(stats.wait_ms);
+            samples.uploads.push(stats.uploaded_bytes);
             samples.last = Some(stats);
+        }
+    }
+    // Steady-state panning must not touch instance data. `uploaded_bytes` is
+    // cumulative, so the observable contract is that it is constant across every
+    // timed frame (the one-shot scene upload and any warmup-time pulled rebuild
+    // happen before the first timed frame).
+    if let Some(first) = samples.uploads.first().copied() {
+        for (index, uploaded) in samples.uploads.iter().enumerate() {
+            assert_eq!(
+                *uploaded, first,
+                "timed frame {index} re-uploaded geometry: uploaded_bytes {uploaded} != {first}; \
+                 a pan/zoom frame must not re-upload instance data \
+                 (instanced={instanced}, world_per_px={world_per_px})"
+            );
         }
     }
     samples

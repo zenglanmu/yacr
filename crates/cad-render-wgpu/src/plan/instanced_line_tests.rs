@@ -356,6 +356,76 @@ fn build_instance_chunks_splits_distant_origins_into_separate_streams() {
 }
 
 #[test]
+fn build_instance_chunks_keeps_a_kilometre_span_drawing_within_the_ulp_bound() {
+    // A ~10 km drawing: 100 batches 100 m apart. Chunking must keep every
+    // stored coordinate inside the documented stream radius, so the f32 ulp of
+    // a stored coordinate stays below the ~1 µm precision floor.
+    let batches: Vec<_> = (0..100)
+        .map(|i| multi_segment_batch(2, origin(i as f64 * 100_000.0, 0.0, 0.0)))
+        .collect();
+    let (chunks, _) = build_instance_chunks(
+        &batches,
+        &converted(&batches),
+        &keys(&batches),
+        MAX_INSTANCES_PER_STREAM,
+        MAX_STREAM_RADIUS,
+    );
+    assert!(
+        chunks.len() >= 2,
+        "a 10 km drawing must not become one stream"
+    );
+    for chunk in &chunks {
+        for instance in &chunk.instances {
+            for field in [&instance.p0_width, &instance.p1_pad] {
+                for &value in field.iter().take(3) {
+                    assert!(
+                        value.abs() <= MAX_STREAM_RADIUS as f32,
+                        "stored position {value} exceeds the stream radius"
+                    );
+                    // `f32::EPSILON * v` is the ulp at magnitude `v`; the
+                    // documented absolute precision floor is 1 µm (0.001 mm).
+                    let v = value.abs().max(1.0);
+                    assert!(
+                        v * f32::EPSILON <= 0.001,
+                        "stored position {value} has an ulp above 1 µm"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn build_instance_chunks_does_not_split_a_single_oversized_batch_known_gap() {
+    // ONE batch whose vertices span 20 000 mm along x (half-span 10 000 mm,
+    // beyond the stream radius).
+    //
+    // This test **pins current behaviour, it is not a contract that the
+    // behaviour is acceptable**: a lone batch is only split by the instance
+    // cap, so a single segment spanning more than `2 * MAX_STREAM_RADIUS`
+    // exceeds the documented f32 ulp floor. Production code is deliberately not
+    // changed to make this pass.
+    let mut oversized = multi_segment_batch(1, origin(0.0, 0.0, 0.0));
+    oversized.vertices = vec![[-10_000.0, 0.0, 0.0], [10_000.0, 0.0, 0.0]];
+    let batches = vec![oversized];
+    let (chunks, _) = build_instance_chunks(
+        &batches,
+        &converted(&batches),
+        &keys(&batches),
+        MAX_INSTANCES_PER_STREAM,
+        MAX_STREAM_RADIUS,
+    );
+    assert_eq!(chunks.len(), 1, "a lone batch is not split by radius");
+    assert!(
+        chunks[0]
+            .instances
+            .iter()
+            .any(|instance| instance.p0_width[0].abs() > MAX_STREAM_RADIUS as f32),
+        "the known gap: a 20 m segment stores a coordinate beyond the radius"
+    );
+}
+
+#[test]
 fn build_instance_chunks_merges_nearby_mixed_origins_at_the_midpoint() {
     // Near origins still coalesce into one stream, with a midpoint origin
     // and positions bounded by the chunk radius.

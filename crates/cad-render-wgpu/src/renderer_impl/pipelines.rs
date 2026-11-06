@@ -208,38 +208,11 @@ impl Renderer {
 
     /// Capability snapshot derived from the actual shared device, not the request.
     pub(super) fn caps_for(device: &wgpu::Device) -> BackendCapabilities {
-        let limits = device.limits();
-        let (actual, api) = match device.adapter_info().backend {
-            wgpu::Backend::BrowserWebGpu => (ActiveBackend::WebGpu, "webgpu"),
-            wgpu::Backend::Gl if cfg!(target_arch = "wasm32") => (ActiveBackend::WebGl2, "webgl2"),
-            wgpu::Backend::Vulkan => (ActiveBackend::Native, "vulkan"),
-            wgpu::Backend::Metal => (ActiveBackend::Native, "metal"),
-            wgpu::Backend::Dx12 => (ActiveBackend::Native, "dx12"),
-            wgpu::Backend::Gl => (ActiveBackend::Native, "opengl"),
-            _ => (ActiveBackend::Native, "unknown"),
-        };
-        match actual {
-            ActiveBackend::WebGl2 => BackendCapabilities {
-                actual,
-                api,
-                compute: false,
-                storage_buffers: false,
-                indirect_draw: false,
-                max_texture_dimension: limits
-                    .max_texture_dimension_2d
-                    .max(MIN_GUARANTEED_TEXTURE_DIMENSION),
-            },
-            _ => BackendCapabilities {
-                actual,
-                api,
-                compute: true,
-                storage_buffers: true,
-                indirect_draw: true,
-                max_texture_dimension: limits
-                    .max_texture_dimension_2d
-                    .max(MIN_GUARANTEED_TEXTURE_DIMENSION),
-            },
-        }
+        plan::caps_from(
+            device.adapter_info().backend,
+            cfg!(target_arch = "wasm32"),
+            &device.limits(),
+        )
     }
 
     /// Activated backend, or `None` before a device has been initialized.

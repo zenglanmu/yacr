@@ -250,3 +250,113 @@ fn pulled_camera_bytes_are_five_columns_little_endian() {
         );
     }
 }
+
+#[test]
+fn caps_from_derives_storage_and_compute_from_limits() {
+    // WebGL2: the browser GL backend reports no storage buffers and no compute
+    // workgroup, so the snapshot must not claim them.
+    let gl2 = caps_from(
+        wgpu::Backend::Gl,
+        true,
+        &wgpu::Limits::downlevel_webgl2_defaults(),
+    );
+    assert_eq!(gl2.actual, ActiveBackend::WebGl2);
+    assert_eq!(gl2.api, "webgl2");
+    assert!(!gl2.storage_buffers, "WebGL2 has no storage buffers");
+    assert!(!gl2.compute, "WebGL2 has no compute workgroups");
+    assert!(!gl2.indirect_draw, "WebGL2 has no indirect draws");
+    assert_eq!(gl2.max_texture_dimension, 2048);
+
+    // A default-capability Vulkan device reports both, so the snapshot does.
+    let vulkan = caps_from(wgpu::Backend::Vulkan, false, &wgpu::Limits::default());
+    assert_eq!(vulkan.actual, ActiveBackend::Native);
+    assert_eq!(vulkan.api, "vulkan");
+    assert!(vulkan.storage_buffers);
+    assert!(vulkan.compute);
+    assert!(vulkan.indirect_draw);
+    assert_eq!(vulkan.max_texture_dimension, 8192);
+
+    // A downlevel *native* adapter: the label follows the device (still
+    // native), the capability follows the limits (no storage buffers).
+    let downlevel = caps_from(
+        wgpu::Backend::Vulkan,
+        false,
+        &wgpu::Limits {
+            max_storage_buffers_per_shader_stage: 0,
+            ..wgpu::Limits::downlevel_defaults()
+        },
+    );
+    assert_eq!(downlevel.actual, ActiveBackend::Native);
+    assert!(
+        !downlevel.storage_buffers,
+        "a device reporting zero storage buffers must not claim them"
+    );
+}
+
+#[test]
+fn caps_labels_are_unchanged_for_every_backend() {
+    // The (backend, wasm target) → (label, API name) mapping is pinned so the
+    // derivation refactor cannot silently relabel a device. Labels only: the
+    // capabilities are covered by `caps_from_derives_storage_and_compute_from_limits`.
+    let cases: [(wgpu::Backend, bool, ActiveBackend, &str); 6] = [
+        (
+            wgpu::Backend::Vulkan,
+            false,
+            ActiveBackend::Native,
+            "vulkan",
+        ),
+        (wgpu::Backend::Metal, false, ActiveBackend::Native, "metal"),
+        (wgpu::Backend::Dx12, false, ActiveBackend::Native, "dx12"),
+        (wgpu::Backend::Gl, false, ActiveBackend::Native, "opengl"),
+        (wgpu::Backend::Gl, true, ActiveBackend::WebGl2, "webgl2"),
+        (
+            wgpu::Backend::BrowserWebGpu,
+            false,
+            ActiveBackend::WebGpu,
+            "webgpu",
+        ),
+    ];
+    for (backend, wasm_target, actual, api) in cases {
+        let caps = caps_from(backend, wasm_target, &wgpu::Limits::default());
+        assert_eq!(
+            caps.actual, actual,
+            "{backend:?} (wasm={wasm_target}) must label {actual:?}"
+        );
+        assert_eq!(
+            caps.api, api,
+            "{backend:?} (wasm={wasm_target}) must keep the API name {api}"
+        );
+    }
+}
+
+#[test]
+fn tier_selection_is_unchanged_for_webgl2_and_default_limits() {
+    // Anti-corrosion fence, both directions: the limits-derived snapshot must
+    // produce the same tier the hard-coded WebGL2 branch used to imply.
+    let gl2 = caps_from(
+        wgpu::Backend::Gl,
+        true,
+        &wgpu::Limits::downlevel_webgl2_defaults(),
+    );
+    assert_eq!(
+        tier_for(
+            gl2.storage_buffers,
+            &wgpu::Limits::downlevel_webgl2_defaults(),
+            None
+        ),
+        RenderTier::Universal
+    );
+
+    let desktop = caps_from(wgpu::Backend::Vulkan, false, &wgpu::Limits::default());
+    assert_eq!(
+        tier_for(desktop.storage_buffers, &wgpu::Limits::default(), None),
+        RenderTier::Accelerated
+    );
+
+    // WebGPU, once wired, must land on the accelerated tier with WebGPU limits.
+    let webgpu = caps_from(wgpu::Backend::BrowserWebGpu, true, &wgpu::Limits::default());
+    assert_eq!(
+        tier_for(webgpu.storage_buffers, &wgpu::Limits::default(), None),
+        RenderTier::Accelerated
+    );
+}

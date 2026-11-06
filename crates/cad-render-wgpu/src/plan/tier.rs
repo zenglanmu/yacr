@@ -47,6 +47,48 @@ pub(crate) fn tier_for(
     RenderTier::Accelerated
 }
 
+/// Capability snapshot derived from what the device actually reports.
+///
+/// Pure (it takes no `Device`), so the derivation is unit-testable with
+/// fabricated limits. `wasm_target` only distinguishes the browser GL backend
+/// (WebGL2) from a native GL / ANGLE context, which share `wgpu::Backend::Gl`.
+pub(crate) fn caps_from(
+    backend: wgpu::Backend,
+    wasm_target: bool,
+    limits: &wgpu::Limits,
+) -> BackendCapabilities {
+    let (actual, api) = match backend {
+        wgpu::Backend::BrowserWebGpu => (ActiveBackend::WebGpu, "webgpu"),
+        wgpu::Backend::Gl if wasm_target => (ActiveBackend::WebGl2, "webgl2"),
+        wgpu::Backend::Vulkan => (ActiveBackend::Native, "vulkan"),
+        wgpu::Backend::Metal => (ActiveBackend::Native, "metal"),
+        wgpu::Backend::Dx12 => (ActiveBackend::Native, "dx12"),
+        wgpu::Backend::Gl => (ActiveBackend::Native, "opengl"),
+        _ => (ActiveBackend::Native, "unknown"),
+    };
+    // Derived, never assumed: a device that reports no storage buffers or no
+    // compute workgroup cannot be treated as if it had them. `tier_for` already
+    // gates on the storage limits; this keeps the *reported* snapshot honest for
+    // a downlevel native/WebGPU adapter as well.
+    let storage_buffers = limits.max_storage_buffers_per_shader_stage > 0
+        && limits.max_storage_buffer_binding_size > 0;
+    let compute =
+        limits.max_compute_workgroup_size_x > 0 && limits.max_compute_invocations_per_workgroup > 0;
+    // Indirect draws are absent from WebGL2 only; WebGPU and every native
+    // backend expose them. `wgpu::Limits` has no field for this.
+    let indirect_draw = actual != ActiveBackend::WebGl2;
+    BackendCapabilities {
+        actual,
+        api,
+        compute,
+        storage_buffers,
+        indirect_draw,
+        max_texture_dimension: limits
+            .max_texture_dimension_2d
+            .max(MIN_GUARANTEED_TEXTURE_DIMENSION),
+    }
+}
+
 /// Smallest `max_storage_buffer_binding_size` a device must report for the
 /// accelerated tier to be selected. Below this a pulled buffer could not hold
 /// even a tiny scene, so the universal per-run path is the honest choice.
