@@ -1,5 +1,7 @@
 //! Database-derived scene assembly, independent of the UI/GPU lifecycle.
 
+use std::collections::BTreeMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use crate::layers::LayerOverrideSet;
@@ -128,8 +130,32 @@ pub fn build_scene_with_space_and_images_and_vendor(
     space: SpaceSelection,
     vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<SceneDelta> {
-    build_scene_stats_with_vendor(database, stamp, fonts, images, overrides, space, vendor)
-        .map(|(delta, _stats)| delta)
+    build_scene_with_space_and_images_and_vendor_indexed(
+        database, stamp, fonts, images, overrides, space, vendor,
+    )
+    .map(|(delta, _ranges)| delta)
+}
+
+/// [`build_scene_with_space_and_images_and_vendor`] plus the resident-batch
+/// ownership of every visible **model-space** entity.
+///
+/// The returned map records, for each entity whose own compacted delta was
+/// non-empty, the range of `delta.added` its batches occupy. The iteration,
+/// compaction and extend order are exactly the ones the delta-only entry point
+/// runs (it delegates here), so the [`SceneDelta`] is byte-for-byte unchanged.
+/// Paper space contributes no ranges: its batches are not owned by one entity.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_scene_with_space_and_images_and_vendor_indexed(
+    database: &DrawingDatabase,
+    stamp: TaskStamp,
+    fonts: Option<Arc<FontEngine>>,
+    images: Option<Arc<DecodedImageCache>>,
+    overrides: &LayerOverrideSet,
+    space: SpaceSelection,
+    vendor: Option<&VendorRepresentationStore>,
+) -> CadResult<(SceneDelta, BTreeMap<EntityId, Range<usize>>)> {
+    build_scene_stats_with_vendor_indexed(database, stamp, fonts, images, overrides, space, vendor)
+        .map(|(delta, _stats, ranges)| (delta, ranges))
 }
 
 /// Like [`build_scene_with_space_and_images`] but also returns read-only
@@ -162,6 +188,27 @@ pub fn build_scene_stats_with_vendor(
     space: SpaceSelection,
     vendor: Option<&VendorRepresentationStore>,
 ) -> CadResult<(SceneDelta, SceneAssemblyStats)> {
+    build_scene_stats_with_vendor_indexed(database, stamp, fonts, images, overrides, space, vendor)
+        .map(|(delta, stats, _ranges)| (delta, stats))
+}
+
+/// [`build_scene_stats_with_vendor`] plus per-entity ownership of the emitted
+/// model-space batches (the index the controller maintains as
+/// `entity_batches`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_scene_stats_with_vendor_indexed(
+    database: &DrawingDatabase,
+    stamp: TaskStamp,
+    fonts: Option<Arc<FontEngine>>,
+    images: Option<Arc<DecodedImageCache>>,
+    overrides: &LayerOverrideSet,
+    space: SpaceSelection,
+    vendor: Option<&VendorRepresentationStore>,
+) -> CadResult<(
+    SceneDelta,
+    SceneAssemblyStats,
+    BTreeMap<EntityId, Range<usize>>,
+)> {
     let registry = ProviderRegistry::with_default_provider();
     let mut context =
         RepresentationContext::new(stamp.document, TolerancePolicy::default(), stamp.clone())
@@ -181,6 +228,7 @@ pub fn build_scene_stats_with_vendor(
         masks: Vec::new(),
     };
     let mut stats = SceneAssemblyStats::default();
+    let mut entity_batches: BTreeMap<EntityId, Range<usize>> = BTreeMap::new();
     match space {
         SpaceSelection::Model => {
             for entity in crate::layers::visible_model_entities(database, overrides) {
@@ -196,9 +244,15 @@ pub fn build_scene_stats_with_vendor(
                 stats.fragments_in += representation.fragments.len();
                 let delta = cache.build_compact(&representation, stamp.clone())?;
                 stats.batches_out += delta.added.len() + delta.images.len() + delta.masks.len();
+                let start = combined.added.len();
                 combined.added.extend(delta.added);
                 combined.images.extend(delta.images);
                 combined.masks.extend(delta.masks);
+                // An entity that emits no render batches (a POINT, text without
+                // a font engine, empty geometry) owns no resident range.
+                if combined.added.len() > start {
+                    entity_batches.insert(entity.id, start..combined.added.len());
+                }
             }
         }
         SpaceSelection::Paper(layout) => {
@@ -214,7 +268,7 @@ pub fn build_scene_stats_with_vendor(
         }
     }
     tally_adjacent_merge_candidates(&combined.added, &mut stats);
-    Ok((combined, stats))
+    Ok((combined, stats, entity_batches))
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -1,3 +1,44 @@
+## 2026-11-06 场景控制器维护“实体 → 驻留 batch 区间”索引（P2a）
+
+- **问题**：控制器只会从 `ChangeSet` 知道“实体 X 变了”，但渲染侧的范围在压缩后的 base 流里；
+  后续 update/delete 没有把实体 id 翻译成 GPU 区间（`added[start..end]`）的依据。
+- **实现**：新增 crate 私有 `crates/cad-app/src/render_scene/entity_index.rs`：
+  `EntityBatchIndex { ranges: BTreeMap<EntityId, Range<usize>> }`，只做簿记（`from_ranges`/`clear`/
+  `record`/`get`/`len`），**不进** `SceneDelta`、不改 `cad-scene`/`cad-render-gpu` 任何类型、不上线协议。
+  `CadSceneController` 新字段 `entity_batches: EntityBatchIndex`，并提供 crate 内可见的
+  `entity_batch_range(id) -> Option<Range<usize>>`（后续阶段使用，`cfg_attr(not(test), allow(dead_code))`）
+  与 `entity_batch_index_len()`（仅测试）；两者都**不**写进 `PreparedScene` / `cad_status`。
+- **数据来源（不改绘制字节）**：`assembly` 新增
+  `build_scene_with_space_and_images_and_vendor_indexed(...) -> (SceneDelta, BTreeMap<EntityId, Range<usize>>)`
+  与内部 `build_scene_stats_with_vendor_indexed`；原有
+  `build_scene_with_space_and_images_and_vendor` / `build_scene_stats_with_vendor` 改为委托、只丢弃返回的
+  区间（`map(|(delta, _)| ...)`）。逐实体循环、`SceneCache::build_compact`、`combined.added.extend(...)`
+  的顺序与参数完全未动，因此 `delta` 与改动前逐字节一致；索引只是记录 `start = added.len()` 与
+  `end = added.len()`（`end > start` 才登记）。paper space 分支不产生任何区间。
+- **逐路径不变量**：
+  - **全量 base 构建**（首次、`SceneVersion` 变化、空间切换、append decline、`doc == None`）：整表**替换**为
+    本次构建返回的 map（空场景得到空表），不修补旧表，因此不会留下已删除/已隐藏实体的陈旧 entry；
+  - **被接受的 append**：在旧索引副本上 `record(inserted, old_added_len..new_added_len)`（新增实体是唯一的
+    连续后缀）；若逐实体 delta 为空（隐藏实体）则不登记，且该 append 本来就会被下游拒绝；
+  - **无 base 变化的 prepare / flags-only 刷新**：索引保持不变（base `Arc` 未变，索引仍然描述它）；
+  - **非模型空间**（`space != SpaceSelection::Model`）：显式 `clear()`，paper 的 batch 不归单个实体所有；
+  - 不产生任何 batch 的实体（隐藏图层、不可绘制几何、POINT——其字形是整图 overlay 而非 base batch）
+    **没有 entry**，绝不出现空/零区间。
+  - `CadSceneController::default()`（新文档/设备重置）天然是空索引，因为字段随结构体一起重建。
+- **契约**（`crates/cad-app/src/render_scene/entity_index.rs` 的 `tests`）：
+  `full_build_records_each_entity_batch_range`（3 条可见模型实体：逐个区间非空、`added[range]` 的
+  `sources` 全属该实体，且各区间按起点首尾相接覆盖整个 `added`）、
+  `accepted_append_records_the_inserted_suffix`（旧实体区间不变，新增实体恰为
+  `old_added_len..new_added_len`，且该区间的 `sources` 指向新增实体）、
+  `full_rebuild_replaces_the_index_instead_of_patching_it`（build→append→删除实体后走全量重建：被删 id
+  无 entry、`len == 2`，且逐 id 区间与一个“只见新图”的新控制器完全一致）、
+  `hidden_layer_entity_has_no_batch_range`（隐藏图层实体无 entry，`len == 1`）。既有 append/full-rebuild
+  字节一致性用例（`edit_tests`、`tests`）未改动并全部通过。
+- **未变**：绘制内容、`SceneDelta`/`RenderBatch`/`cad-scene`/`cad-render-wgpu`、append 准入闸门、
+  `cad-db` 权威。**NOT RUN**：全量 workspace 门禁与全量测试、Windows/macOS/Android/Web 载体、
+  真机/真实 GPU/像素/性能证据；paper-space 清空只有实现层保证（未新增 layout fixture 测试），
+  未新增针对 `space != Model` 的契约用例。
+
 ## 2026-11-06 增量显示追加闸门改为 ChangeSet 授权（P1）
 
 - **问题**：`DrawingEditReceipt::from_create_line_trace` 的准入证据是**命令形状**——恰好一条

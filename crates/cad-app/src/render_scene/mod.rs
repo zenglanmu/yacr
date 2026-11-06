@@ -5,8 +5,9 @@
 use crate::layers::LayerOverrideSet;
 use crate::vendor::VendorRepresentationStore;
 use cad_db::DrawingDatabase;
-use cad_domain::{CadResult, DocumentId, Point3, SceneIdentity, SelectionRef, TaskStamp};
+use cad_domain::{CadResult, DocumentId, EntityId, Point3, SceneIdentity, SelectionRef, TaskStamp};
 use cad_representation::{FontEngine, SpaceSelection};
+use std::ops::Range;
 use std::sync::Arc;
 mod assembly;
 pub use assembly::*;
@@ -14,10 +15,13 @@ mod edit;
 pub use edit::{BaseAppend, DrawingEditReceipt};
 #[cfg(test)]
 mod edit_tests;
+mod entity_index;
 mod overlay;
 #[cfg(test)]
 mod vendor_tests;
 pub use overlay::*;
+
+use entity_index::EntityBatchIndex;
 
 /// Decoded raster-image cache fed to the base scene build, re-exported so the UI
 /// bridge can name the type carried by [`PreparedScene::images`].
@@ -113,6 +117,14 @@ pub struct CadSceneController {
     base_vendor: Option<Arc<VendorRepresentationStore>>,
     base_append: Option<BaseAppend>,
     edit: Option<DrawingEditReceipt>,
+    /// Resident batch ownership: for every visible model-space entity that
+    /// emitted at least one render batch, the range of `base.added` its own
+    /// compacted delta occupies. Bookkeeping only (module `entity_index`).
+    ///
+    /// Invariants: replaced wholesale by a full base build, extended by an
+    /// accepted append, empty off model space, and never left stale (an entity
+    /// that produces no batches has no entry).
+    entity_batches: EntityBatchIndex,
     model_max_order: Option<i64>,
     #[cfg(test)]
     fail_after_point_staging: bool,
@@ -389,32 +401,42 @@ impl CadSceneController {
             self.base_append.clone()
         };
         // The one full base build: the `base_changed` arm and the append-decline
-        // fallback must produce exactly the same CPU scene.
-        let full_base = |doc: Option<&DrawingDatabase>| -> CadResult<SceneDelta> {
-            match doc {
-                Some(db) => build_scene_with_space_and_images_and_vendor(
-                    db,
-                    stamp.clone(),
-                    fonts.clone(),
-                    self.images.clone(),
-                    layers,
-                    space,
-                    self.vendor.as_deref(),
-                ),
-                None => Ok(SceneDelta {
-                    stamp: stamp.clone(),
-                    added: vec![],
-                    removed_chunks: vec![],
-                    images: vec![],
-                    masks: vec![],
-                }),
-            }
-        };
+        // fallback must produce exactly the same CPU scene. It also reports the
+        // per-entity ownership of `added`, which becomes the new index wholesale
+        // (a rebuild never patches the previous one).
+        let full_base =
+            |doc: Option<&DrawingDatabase>| -> CadResult<(SceneDelta, EntityBatchIndex)> {
+                match doc {
+                    Some(db) => {
+                        let (delta, ranges) =
+                            assembly::build_scene_with_space_and_images_and_vendor_indexed(
+                                db,
+                                stamp.clone(),
+                                fonts.clone(),
+                                self.images.clone(),
+                                layers,
+                                space,
+                                self.vendor.as_deref(),
+                            )?;
+                        Ok((delta, EntityBatchIndex::from_ranges(ranges)))
+                    }
+                    None => Ok((
+                        SceneDelta {
+                            stamp: stamp.clone(),
+                            added: vec![],
+                            removed_chunks: vec![],
+                            images: vec![],
+                            masks: vec![],
+                        },
+                        EntityBatchIndex::default(),
+                    )),
+                }
+            };
         // An append is provisional until the freshly built per-entity delta is
         // known to be appendable; a declined append rebuilds the whole base and
         // publishes no append proof.
         let mut append_declined = false;
-        let base = if let Some(entity) = appended_entity.as_ref() {
+        let (base, next_entity_batches) = if let Some(entity) = appended_entity.as_ref() {
             let delta = assembly::build_model_entity_scene(
                 doc.expect("append drawing"),
                 entity,
@@ -432,19 +454,37 @@ impl CadSceneController {
                     .as_ref()
                     .clone();
                 combined.stamp = stamp.clone();
+                let inserted_start = combined.added.len();
                 combined.added.extend(delta.added);
                 combined.images.extend(delta.images);
                 combined.masks.extend(delta.masks);
-                Arc::new(combined)
+                // The inserted entity's batches are one contiguous suffix; an
+                // empty delta (hidden entity) records nothing and the append is
+                // declined downstream anyway.
+                let mut index = self.entity_batches.clone();
+                index.record(entity.id, inserted_start..combined.added.len());
+                (Arc::new(combined), index)
             } else {
                 append_declined = true;
-                Arc::new(full_base(doc)?)
+                let (delta, index) = full_base(doc)?;
+                (Arc::new(delta), index)
             }
         } else if base_changed {
-            Arc::new(full_base(doc)?)
+            let (delta, index) = full_base(doc)?;
+            (Arc::new(delta), index)
         } else {
-            self.base.as_ref().expect("base prepared").clone()
+            (
+                self.base.as_ref().expect("base prepared").clone(),
+                self.entity_batches.clone(),
+            )
         };
+        // The index is model-space only: paper-space batches are not owned by a
+        // single entity, so the previous (model) entries must not survive a
+        // switch to a layout.
+        let mut next_entity_batches = next_entity_batches;
+        if space != SpaceSelection::Model {
+            next_entity_batches.clear();
+        }
         let next_append = if append_declined { None } else { next_append };
         // A declined append is a full rebuild, so it must rescan the markers
         // exactly like one; only an append that was actually taken may reuse the
@@ -658,6 +698,7 @@ impl CadSceneController {
         self.visual_version = Some(visual_version);
         self.flags_version = Some(flags_version);
         self.base = Some(base.clone());
+        self.entity_batches = next_entity_batches;
         self.visual_overlay = Some(visual_delta.clone());
         self.visual_diagnostics = Some(visual_diagnostics.clone());
         self.visual_completeness = Some(visual_completeness.clone());
@@ -750,6 +791,29 @@ impl CadSceneController {
             ready.flags_revision = self.flags_revision;
         }
         true
+    }
+
+    /// The range of the resident model-space base (`ready.base.added`) owned by
+    /// `id`, if that entity contributed at least one render batch.
+    ///
+    /// An entity that produces no batches — hidden layer, non-drawable geometry,
+    /// a POINT (whose glyph is a drawing-wide overlay, not a base batch) — has
+    /// **no** entry, as does every entity of a paper-space base. Crate-internal
+    /// bookkeeping for incremental update/delete; deliberately not published on
+    /// the wire or in the scene status.
+    // Consumed by the upcoming incremental update/delete phases; the index is
+    // maintained (and tested) now, so this getter is intentionally unused by
+    // production code until then.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn entity_batch_range(&self, id: EntityId) -> Option<Range<usize>> {
+        self.entity_batches.get(id)
+    }
+
+    /// Number of entities tracked by [`Self::entity_batch_range`]. Diagnostics
+    /// and tests only; not part of the published scene status.
+    #[cfg(test)]
+    pub(crate) fn entity_batch_index_len(&self) -> usize {
+        self.entity_batches.len()
     }
 
     /// The cached transient overlay batches plus their diagnostics/completeness.
