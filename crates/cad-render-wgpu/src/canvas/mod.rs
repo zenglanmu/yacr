@@ -3,9 +3,20 @@
 //!
 //! The `dom-canvas` runtime path (`surfaceMode: dom-canvas`, ADR 0024) draws the
 //! CAD frame with wgpu into an offscreen texture and blits it onto a **web
-//! canvas**. Neither target runtime exposes WebGPU (`navigator.gpu` is absent in
-//! WebKitGTK 2.52.6 and Chromium 141), so the only possible wasm backend is
-//! **WebGL2** — `wgpu/webgl` — and the instance requests `Backends::GL` only.
+//! canvas**. Neither **measured** target runtime exposes WebGPU (`navigator.gpu`
+//! is absent in WebKitGTK 2.52.6 and in the Chromium 141 harness), so the default
+//! and `Auto` paths request **WebGL2** only — `wgpu/webgl`, `Backends::GL`.
+//!
+//! A host may still ask for WebGPU **explicitly**
+//! ([`CanvasPresenter::create_with_preference`] with
+//! [`crate::BackendPreference::WebGpu`]). That is the only value that requests
+//! `Backends::BROWSER_WEBGPU` (through `wgpu::util::new_instance_with_webgpu_detection`,
+//! because the browser fixes the instance's backend at creation). If the engine
+//! cannot provide it, creation **fails** with [`CanvasError::AdapterUnavailable`]
+//! carrying [`WEBGPU_MARKER`] — a forced backend is reported, never silently
+//! degraded to WebGL2. `Auto` deliberately keeps the WebGL2 behaviour: switching
+//! the default is gated on real-browser evidence that the accelerated tier draws
+//! the same picture.
 //!
 //! # Two carriers, one presenter
 //!
@@ -67,7 +78,8 @@ mod policy;
 
 pub use policy::{
     check_physical_size, check_present_format, check_present_size, check_present_usage,
-    preferred_present_format, CanvasError, CanvasTargetKind, SurfaceStatus,
+    preference_satisfied, preferred_present_format, required_limits_for, CanvasError,
+    CanvasTargetKind, SurfaceStatus, WEBGPU_MARKER,
 };
 
 #[cfg(target_arch = "wasm32")]

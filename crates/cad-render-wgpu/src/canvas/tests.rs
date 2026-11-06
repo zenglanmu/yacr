@@ -5,9 +5,11 @@
 
 use super::policy::{
     check_physical_size, check_present_format, check_present_size, check_present_usage,
-    preferred_present_format, CanvasError, CanvasTargetKind, SurfaceStatus,
+    preference_satisfied, preferred_present_format, required_limits_for, CanvasError,
+    CanvasTargetKind, SurfaceStatus, WEBGPU_MARKER,
 };
 use crate::wgpu;
+use crate::BackendPreference;
 
 const ALL_STATUSES: [SurfaceStatus; 7] = [
     SurfaceStatus::Success,
@@ -312,4 +314,79 @@ fn only_the_offscreen_target_reports_a_worker_isolation() {
     }
     assert!(!CanvasTargetKind::HtmlCanvas.is_worker());
     assert!(CanvasTargetKind::OffscreenCanvas.is_worker());
+}
+
+#[test]
+fn a_forced_browser_backend_must_be_the_backend_that_was_requested() {
+    // `Auto` accepts whatever the platform gives; the two named preferences are
+    // *forced* and must refuse a different adapter instead of degrading quietly.
+    assert!(preference_satisfied(
+        BackendPreference::Auto,
+        wgpu::Backend::Gl
+    ));
+    assert!(preference_satisfied(
+        BackendPreference::Auto,
+        wgpu::Backend::BrowserWebGpu
+    ));
+
+    assert!(preference_satisfied(
+        BackendPreference::WebGl2,
+        wgpu::Backend::Gl
+    ));
+    assert!(
+        !preference_satisfied(BackendPreference::WebGl2, wgpu::Backend::BrowserWebGpu),
+        "a forced WebGL2 request must not be satisfied by a WebGPU adapter"
+    );
+
+    assert!(preference_satisfied(
+        BackendPreference::WebGpu,
+        wgpu::Backend::BrowserWebGpu
+    ));
+    assert!(
+        !preference_satisfied(BackendPreference::WebGpu, wgpu::Backend::Gl),
+        "a forced WebGPU request must not be satisfied by the WebGL2 fallback"
+    );
+}
+
+#[test]
+fn the_webgpu_refusal_marker_matches_the_webgl2_vocabulary() {
+    // Evidence greps for `yacr: unsupported-runtime: <name>`; a marker with a
+    // different shape would be invisible to the hosts that classify refusals.
+    assert_eq!(WEBGPU_MARKER, "yacr: unsupported-runtime: webgpu");
+    assert!(WEBGPU_MARKER.starts_with("yacr: unsupported-runtime: "));
+    assert_eq!(
+        WEBGPU_MARKER.trim_start_matches("yacr: unsupported-runtime: "),
+        "webgpu"
+    );
+}
+
+#[test]
+fn the_limit_floor_follows_the_selected_backend_not_the_preference() {
+    // WebGL2: the downlevel floor, so `request_device` cannot fail on a storage
+    // buffer the backend does not have.
+    let gl = required_limits_for(
+        wgpu::Backend::Gl,
+        &wgpu::Limits::downlevel_webgl2_defaults(),
+    );
+    assert_eq!(gl.max_storage_buffers_per_shader_stage, 0);
+    assert_eq!(gl.max_storage_buffer_binding_size, 0);
+    assert_eq!(gl.max_uniform_buffer_binding_size, 16 * 1024);
+
+    // WebGPU: the WebGPU defaults resolved against the adapter.
+    let gpu = required_limits_for(wgpu::Backend::BrowserWebGpu, &wgpu::Limits::default());
+    assert_eq!(gpu.max_storage_buffers_per_shader_stage, 8);
+    assert_eq!(gpu.max_storage_buffer_binding_size, 128 << 20);
+
+    // A weaker WebGPU adapter must pull the request down, never leave it above
+    // what the adapter reported.
+    let weaker = wgpu::Limits {
+        max_storage_buffers_per_shader_stage: 2,
+        ..wgpu::Limits::downlevel_defaults()
+    };
+    let resolved = required_limits_for(wgpu::Backend::BrowserWebGpu, &weaker);
+    assert_eq!(resolved.max_storage_buffers_per_shader_stage, 2);
+    assert_eq!(
+        resolved.max_storage_buffer_binding_size,
+        weaker.max_storage_buffer_binding_size
+    );
 }

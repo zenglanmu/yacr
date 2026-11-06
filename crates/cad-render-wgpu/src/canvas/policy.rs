@@ -7,6 +7,7 @@
 //! touch a GPU.
 
 use crate::wgpu;
+use crate::BackendPreference;
 
 /// Everything the wasm canvas path can fail with.
 ///
@@ -356,4 +357,43 @@ pub fn check_present_usage(usage: wgpu::TextureUsages) -> Result<(), CanvasError
         "present_texture: source frame usage {usage:?} does not include TEXTURE_BINDING; the blit \
          cannot sample it"
     )))
+}
+
+/// Stable refusal marker for a browser run that cannot provide the **requested**
+/// WebGPU backend.
+///
+/// Mirrors `yacr: unsupported-runtime: webgl2` (`apps/app-web`, exit code 6): a
+/// host turns the line into its own step/marker policy and evidence greps for it.
+/// A forced WebGPU preference that landed on another backend is reported with this
+/// line, never silently accepted.
+pub const WEBGPU_MARKER: &str = "yacr: unsupported-runtime: webgpu";
+
+/// Whether the adapter that was actually obtained satisfies the browser backend
+/// preference.
+///
+/// `Auto` is satisfied by whatever the platform hands back — on wasm that is the
+/// measured WebGL2 path, and this crate does not treat "Auto" as a WebGPU request.
+/// `WebGl2` and `WebGpu` are **forced**: a mismatch must become an explicit
+/// failure, because a forced backend that silently degraded is exactly what the
+/// capability policy forbids.
+pub fn preference_satisfied(preference: BackendPreference, backend: wgpu::Backend) -> bool {
+    match preference {
+        BackendPreference::Auto => true,
+        BackendPreference::WebGl2 => backend == wgpu::Backend::Gl,
+        BackendPreference::WebGpu => backend == wgpu::Backend::BrowserWebGpu,
+    }
+}
+
+/// Device limits to request for the backend that was **actually** selected.
+///
+/// The preference decides what is asked for; the adapter decides which floor is
+/// legal. WebGL2 has no storage buffers and a reduced limit set, so requesting the
+/// WebGPU defaults there fails `request_device` outright; a WebGPU adapter gets the
+/// WebGPU defaults resolved down to what it reports.
+pub fn required_limits_for(backend: wgpu::Backend, adapter: &wgpu::Limits) -> wgpu::Limits {
+    if backend == wgpu::Backend::BrowserWebGpu {
+        wgpu::Limits::default().or_worse_values_from(adapter)
+    } else {
+        wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.clone())
+    }
 }

@@ -5,10 +5,12 @@
 
 use super::policy::{
     check_physical_size, check_present_format, check_present_size, check_present_usage,
-    preferred_present_format, CanvasError, CanvasTargetKind, SurfaceStatus,
+    preference_satisfied, preferred_present_format, required_limits_for, CanvasError,
+    CanvasTargetKind, SurfaceStatus, WEBGPU_MARKER,
 };
 use crate::blit::FullscreenBlitter;
 use crate::wgpu;
+use crate::BackendPreference;
 
 /// The web canvas a presenter owns, before it is turned into a wgpu surface.
 ///
@@ -124,18 +126,36 @@ pub struct CanvasPresenter {
 }
 
 impl CanvasPresenter {
-    /// Create the WebGL2 device/queue for the page's `canvas` element and
-    /// configure it at `physical` pixels.
+    /// Create the device/queue for the page's `canvas` element and configure it
+    /// at `physical` pixels, forcing **WebGL2**.
     ///
     /// `physical` is `CSS px × devicePixelRatio`; see the type-level sizing
-    /// contract. The instance requests only `Backends::GL`: WebGL2 is the only
-    /// backend both target runtimes have (`navigator.gpu` is absent), so asking
-    /// for anything else would be dead configuration.
+    /// contract. This is the measured-honest default: both target runtimes report
+    /// no `navigator.gpu`, so `Backends::GL` is the only backend known to exist
+    /// there. A host that wants to try WebGPU calls
+    /// [`CanvasPresenter::create_with_preference`] explicitly — this function
+    /// never upgrades on its own.
     pub async fn create(
         canvas: web_sys::HtmlCanvasElement,
         physical: (u32, u32),
     ) -> Result<Self, CanvasError> {
-        Self::create_for(CanvasTarget::Html(canvas), physical).await
+        Self::create_with_preference(canvas, physical, BackendPreference::WebGl2).await
+    }
+
+    /// Create the page-canvas presenter with an explicit backend preference.
+    ///
+    /// Only [`BackendPreference::WebGpu`] asks for `Backends::BROWSER_WEBGPU`
+    /// (selection happens at instance creation, so it goes through wgpu's
+    /// detection helper). When the engine has no `navigator.gpu`, creation fails
+    /// with [`CanvasError::AdapterUnavailable`] carrying [`WEBGPU_MARKER`] rather
+    /// than quietly handing back a WebGL2 adapter — a *forced* backend must be
+    /// reported, not silently degraded.
+    pub async fn create_with_preference(
+        canvas: web_sys::HtmlCanvasElement,
+        physical: (u32, u32),
+        preference: BackendPreference,
+    ) -> Result<Self, CanvasError> {
+        Self::create_for(CanvasTarget::Html(canvas), physical, preference).await
     }
 
     /// Create the WebGL2 device/queue for an `OffscreenCanvas` (a canvas already
@@ -156,18 +176,43 @@ impl CanvasPresenter {
         canvas: web_sys::OffscreenCanvas,
         physical: (u32, u32),
     ) -> Result<Self, CanvasError> {
-        Self::create_for(CanvasTarget::Offscreen(canvas), physical).await
+        Self::create_offscreen_with_preference(canvas, physical, BackendPreference::WebGl2).await
     }
 
-    /// The one setup path both public constructors share.
-    async fn create_for(target: CanvasTarget, physical: (u32, u32)) -> Result<Self, CanvasError> {
+    /// Offscreen sibling of [`CanvasPresenter::create_with_preference`]: same
+    /// preference semantics, same refusal contract.
+    pub async fn create_offscreen_with_preference(
+        canvas: web_sys::OffscreenCanvas,
+        physical: (u32, u32),
+        preference: BackendPreference,
+    ) -> Result<Self, CanvasError> {
+        Self::create_for(CanvasTarget::Offscreen(canvas), physical, preference).await
+    }
+
+    /// The one setup path every public constructor shares.
+    async fn create_for(
+        target: CanvasTarget,
+        physical: (u32, u32),
+        preference: BackendPreference,
+    ) -> Result<Self, CanvasError> {
         let kind = target.kind();
         // Reject an impossible size before any GPU object exists.
         check_physical_size(physical, u32::MAX)?;
 
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        descriptor.backends = wgpu::Backends::GL;
-        let instance = wgpu::Instance::new(descriptor);
+        // The browser decides WebGPU-vs-WebGL2 **at instance creation**, so a
+        // forced WebGPU request has to go through the detection helper; `Auto` and
+        // `WebGl2` keep the measured WebGL2-only descriptor byte for byte.
+        let instance = match preference {
+            BackendPreference::WebGpu => {
+                descriptor.backends = wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL;
+                wgpu::util::new_instance_with_webgpu_detection(descriptor).await
+            }
+            BackendPreference::Auto | BackendPreference::WebGl2 => {
+                descriptor.backends = wgpu::Backends::GL;
+                wgpu::Instance::new(descriptor)
+            }
+        };
         let surface = instance
             .create_surface(target.into_surface_target())
             .map_err(|error| {
@@ -189,19 +234,29 @@ impl CanvasPresenter {
                 CanvasError::AdapterUnavailable(format!("request_adapter({kind}): {error}"))
             })?;
         let limits = adapter.limits();
+        let adapter_info = adapter.get_info();
+        // A forced backend that landed elsewhere is a refusal, never a quiet
+        // downgrade (see `preference_satisfied`).
+        if !preference_satisfied(preference, adapter_info.backend) {
+            return Err(CanvasError::AdapterUnavailable(format!(
+                "{WEBGPU_MARKER}: request_adapter({kind}) landed on backend '{}' with preference \
+                 {preference:?}; refusing to run on a backend that was not requested",
+                adapter_info.backend.to_str()
+            )));
+        }
         // The adapter limit is known only now, so the upper bound is checked here.
-        // (Retained separately: `using_resolution` consumes `limits`.)
+        // (Retained separately: `required_limits_for` resolves against `limits`.)
         let max_texture_dimension_2d = limits.max_texture_dimension_2d;
         let physical = check_physical_size(physical, max_texture_dimension_2d)?;
 
-        // WebGL2 has no storage buffers and a reduced limit set: ask for exactly
-        // the WebGL2 floor (resolved up to what the adapter reports) and no
-        // features, so request_device cannot fail on an optional capability.
+        // The floor follows the backend that was **actually** selected: WebGL2 has
+        // no storage buffers and a reduced limit set, so asking for the WebGPU
+        // defaults there fails `request_device` outright.
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("cad-canvas-device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(limits),
+                required_limits: required_limits_for(adapter_info.backend, &limits),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 memory_hints: wgpu::MemoryHints::default(),
                 trace: wgpu::Trace::Off,
@@ -232,7 +287,6 @@ impl CanvasPresenter {
         surface.configure(&device, &config);
 
         let blitter = FullscreenBlitter::new(&device, config.format);
-        let adapter_info = adapter.get_info();
         let info = CanvasAdapterInfo {
             name: adapter_info.name,
             backend: adapter_info.backend.to_str(),
