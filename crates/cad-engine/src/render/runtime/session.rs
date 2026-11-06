@@ -8,11 +8,12 @@ use web_time::Instant;
 /// Stage one bounded batch slice and append it to the piece being built.
 ///
 /// Group 0 (the persistent base) converts to the stream/chunk/arc classes; group
-/// 1 (the transient overlay) is staged **legacy**. A base range that spans
-/// resident segments is staged one segment intersection at a time; appending the
-/// pieces in order preserves the batch order, so the emitted scene, the pick-key
-/// sequence and the committed base are identical to staging one contiguous
-/// slice.
+/// 1 (the transient overlay) is staged **legacy**. The base range is
+/// materialised from [`cad_app::render_scene::ResidentScene::materialized`],
+/// which clones the contents of exactly this bounded piece (at most 256 batches /
+/// 262,144 vertices). That copy is O(piece), never O(scene): appending a piece is
+/// one entity and this path never runs per frame, while a full re-stage (device
+/// loss, declined append, refused overwrite) is already the slow path.
 fn stage_piece(
     group: usize,
     renderer: &mut Renderer,
@@ -97,6 +98,7 @@ impl CadRenderRuntime {
         self.applied_highlight = None;
         self.image_diagnostic = None;
         self.flags_diagnostic = None;
+        self.overwrite_diagnostic = None;
         self.uploads_started = 0;
         self.upload_revision_resets = 0;
         self.ready_none_clears = 0;
@@ -172,6 +174,72 @@ impl CadRenderRuntime {
             return Ok(());
         }
         let base_changed = self.applied_base != Some(ready.base_revision);
+        // P4: a transform-only update republishes the same base revision with one
+        // entity's rebuilt batches. The controller does not own the renderer, so
+        // it publishes the replacements as data; apply them here, in place, before
+        // the ordinary upload decision. Every batch is validated first, so a
+        // multi-batch entity update is all-or-nothing, and a refusal re-stages the
+        // whole base instead of keeping the old geometry.
+        let mut applied_overwrites = 0usize;
+        let mut restage = false;
+        match overwrite_admission(
+            !ready.overwrites.is_empty(),
+            base_changed,
+            self.pending_upload.is_some(),
+            self.applied_revision,
+        ) {
+            OverwriteAdmission::NotApplicable => {}
+            OverwriteAdmission::FullRestage => {
+                self.batch_overwrite_fallbacks += 1;
+                self.overwrite_diagnostic = Some(
+                    "render.batch_overwrite_refused: no resident base to overwrite in place \
+                     (base change, in-flight upload or no applied scene); re-staging the base"
+                        .into(),
+                );
+                restage = true;
+            }
+            OverwriteAdmission::Apply => {
+                let renderer = self.renderer.as_mut().expect("ready renderer");
+                let refusal = ready.overwrites.iter().find_map(|(index, batch)| {
+                    renderer
+                        .check_overwrite_batch(*index, batch)
+                        .err()
+                        .map(|refusal| (*index, refusal))
+                });
+                match refusal {
+                    Some((index, refusal)) => {
+                        self.batch_overwrite_fallbacks += 1;
+                        self.overwrite_diagnostic = Some(format!(
+                            "{} ({}): batch {index}: {refusal}",
+                            refusal.diagnostic_code(),
+                            refusal.reason()
+                        ));
+                        restage = true;
+                    }
+                    None => {
+                        for (index, batch) in &ready.overwrites {
+                            renderer.overwrite_batch(*index, batch).expect(
+                                "the overwrite gate was validated immediately above and no state \
+                                 changed in between",
+                            );
+                        }
+                        applied_overwrites = ready.overwrites.len();
+                        self.batch_overwrites += applied_overwrites as u64;
+                        self.overwrite_diagnostic = None;
+                    }
+                }
+            }
+        }
+        let base_changed = base_changed || restage;
+        if restage {
+            // A re-stage must not be satisfied by an in-flight revision that is
+            // still the *same* publication (it may be a suffix-only commit that
+            // would keep the base). Reset it so a full base upload starts.
+            if self.pending_upload.take().is_some() {
+                self.upload_revision_resets += 1;
+                self.last_upload_reset = Some("overwrite_restage");
+            }
+        }
         // An entity-only selection/hover/hidden change republishes the scene with
         // the **same** overlay `Arc` (the controller reuses it) and no base
         // change, so there is no geometry to upload — only flags to push. This is
@@ -186,6 +254,12 @@ impl CadRenderRuntime {
                 .expect("ready renderer")
                 .set_entity_flags(&ready.entity_flags)?;
             self.flags_diagnostic = flags_diagnostic(&report.unmatched);
+            if applied_overwrites > 0 {
+                // The in-place overwrite replaced one per-batch `Arc` in the exact
+                // resident base; refresh the retained identity so a later append's
+                // predecessor proof compares against the scene the GPU now holds.
+                self.applied_base_scene = Some(ready.base.clone());
+            }
             self.applied_revision = Some(ready.revision);
             self.applied_flags_revision = Some(ready.flags_revision);
             self.applied_highlight = Some(ready.highlight.clone());
@@ -195,6 +269,7 @@ impl CadRenderRuntime {
                 self.image_diagnostic.as_deref(),
                 self.flags_diagnostic.as_deref(),
             );
+            self.merge_overwrite_diagnostic();
             self.dirty.invalidate();
             return Ok(());
         }
@@ -311,17 +386,15 @@ impl CadRenderRuntime {
             // **legacy** so the overlay pass can draw it with per-batch uniforms
             // only, without base stream/chunk/arc slots.
             //
-            // The base is staged across its resident segments instead of one
-            // contiguous slice: a full build, and every accepted append (whose
-            // range is exactly the newly pushed segment), yields one slice; a
-            // range spanning segments yields one piece per intersection, appended
-            // in resident order.
+            // The base is staged one bounded materialised piece at a time. The
+            // piece is bounded (256 batches / 262,144 vertices), so cloning its
+            // batches out of the resident per-batch `Arc`s is O(piece); a full
+            // build and every accepted append yield one piece per staging slice.
             let mut piece = None;
             match pending.group {
                 0 => {
-                    for slice in pending.scene.base.slices(start..end) {
-                        stage_piece(0, renderer, slice, &mut piece)?;
-                    }
+                    let batches = pending.scene.base.materialized(start..end);
+                    stage_piece(0, renderer, &batches, &mut piece)?;
                 }
                 _ => stage_piece(
                     1,
@@ -469,6 +542,7 @@ impl CadRenderRuntime {
             self.image_diagnostic.as_deref(),
             self.flags_diagnostic.as_deref(),
         );
+        self.merge_overwrite_diagnostic();
         // The per-pass budget is native-only (`started` is cfg-gated), so this
         // reports an unmeasured 0 on wasm rather than a fabricated duration.
         #[cfg(not(target_arch = "wasm32"))]
@@ -491,6 +565,20 @@ impl CadRenderRuntime {
             commit: commit_timing,
         });
         Ok(())
+    }
+
+    /// Merge the last overwrite refusal / fallback reason into the published
+    /// diagnostic, so a fallback is never silent: the host sees the stable code
+    /// and the named reason even though the fallback itself drew the new
+    /// geometry.
+    fn merge_overwrite_diagnostic(&mut self) {
+        let Some(overwrite) = self.overwrite_diagnostic.clone() else {
+            return;
+        };
+        self.diagnostic = Some(match self.diagnostic.take() {
+            Some(existing) => format!("{existing}; {overwrite}"),
+            None => overwrite,
+        });
     }
 
     pub fn uploading(&self) -> bool {
@@ -682,6 +770,8 @@ impl CadRenderRuntime {
                     base_changed: pending.base_changed,
                 }),
             overlay_suffix_commits: self.overlay_suffix_commits,
+            batch_overwrites: self.batch_overwrites,
+            batch_overwrite_fallbacks: self.batch_overwrite_fallbacks,
             pulled_prefix_reuses: self
                 .renderer
                 .as_ref()

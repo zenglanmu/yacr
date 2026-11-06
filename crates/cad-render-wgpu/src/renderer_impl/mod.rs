@@ -22,6 +22,7 @@ mod init;
 mod masks;
 mod memory;
 mod overlay;
+mod overwrite;
 mod pipelines;
 mod progressive;
 mod pulled_plan;

@@ -203,6 +203,24 @@ impl DrawOrderCache {
         self.entries.is_empty()
     }
 
+    /// Replace one entry's world-space centroid after an in-place batch
+    /// overwrite.
+    ///
+    /// An overwrite never changes the paint order or the alpha class, so the
+    /// partition (`opaque`/`transparent`/`invisible`) and both sort keys stay
+    /// valid; only the transparent back-to-front distance reads the centroid, and
+    /// [`DrawOrderCache::sort_transparent`] re-reads it on the next frame. Returns
+    /// `false` when `index` is not in the cached set.
+    pub fn set_centroid(&mut self, index: usize, centroid: [f32; 3]) -> bool {
+        match self.entries.get_mut(index) {
+            Some(entry) => {
+                entry.centroid = centroid;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Opaque batches in final order (ascending `draw_order`).
     pub fn opaque(&self) -> &[usize] {
         &self.opaque

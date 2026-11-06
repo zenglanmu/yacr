@@ -46,6 +46,10 @@ pub mod codes {
     pub const RENDER_DEVICE_LOST: &str = "render.device_lost";
     /// A submitted batch carries a lineweight the renderer does not draw.
     pub const RENDER_LINEWEIGHT_NOT_DRAWN: &str = "render.lineweight_not_drawn";
+    /// An in-place resident-batch overwrite was refused; the caller must fall
+    /// back to a full base re-stage. The specific fit-gate reason is carried by
+    /// [`BatchOverwriteRefusal::reason`](crate::BatchOverwriteRefusal::reason).
+    pub const RENDER_BATCH_OVERWRITE_REFUSED: &str = "render.batch_overwrite_refused";
 }
 
 /// How severe a single reason is.

@@ -19,6 +19,9 @@ pub use edit::{BaseAppend, DrawingEditReceipt};
 mod edit_tests;
 mod entity_index;
 mod overlay;
+mod prepared;
+pub use prepared::PreparedScene;
+use prepared::{appendable_delta, SceneVersion};
 mod resident;
 mod retire;
 #[cfg(test)]
@@ -27,6 +30,9 @@ use retire::{
     flags_fingerprint, merge_retired_flags, retire_is_hideable, retire_keeps_base,
     RETIRED_COMPACTION_THRESHOLD,
 };
+mod update;
+#[cfg(test)]
+mod update_tests;
 #[cfg(test)]
 mod vendor_tests;
 pub use overlay::*;
@@ -37,75 +43,14 @@ use entity_index::EntityBatchIndex;
 /// Decoded raster-image cache fed to the base scene build, re-exported so the UI
 /// bridge can name the type carried by [`PreparedScene::images`].
 pub use cad_resources::DecodedImageCache;
+/// The batch type carried by [`PreparedScene::overwrites`], re-exported so the
+/// engine can name an in-place overwrite without a direct `cad-scene` dependency.
+pub use cad_scene::RenderBatch;
 /// The delta type a [`ResidentScene`] is built from and the type carried by
 /// [`PreparedScene::highlight`], re-exported so a consumer that must retain the
 /// overlay `Arc` by identity (for example the engine's flags-only fast path) can
 /// name it without a direct `cad-scene` dependency.
 pub use cad_scene::SceneDelta;
-
-/// An appended delta may not grow the resident image/mask sets: the engine's
-/// append path does not re-upload them.
-///
-/// `crates/cad-engine/src/render/runtime/session.rs` keeps the resident
-/// textures/masks (and their earlier diagnostics) when a preparation is an
-/// append and uploads images/masks only for a non-append base change. An append
-/// whose per-entity delta carries raster draw items would therefore publish a
-/// CPU base that the GPU never received — a silent partial success. The
-/// controller falls back to the full rebuild instead.
-fn appendable_delta(delta: &SceneDelta) -> bool {
-    delta.images.is_empty() && delta.masks.is_empty()
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct SceneVersion {
-    identity: SceneIdentity,
-    document: DocumentId,
-    fonts: u64,
-    font_identity: usize,
-    layers: u64,
-    space: SpaceSelection,
-    document_epoch: u64,
-    /// Identity of the decoded-image cache fed to the base build. A change is a
-    /// new pointer, so an image cache installed after the base was built still
-    /// rebuilds the image batches.
-    images: usize,
-    /// Revision of the vendor derived-representation snapshot. A new plugin pass
-    /// rebuilds the base so its primitives become visible without touching
-    /// `cad-db`.
-    vendor: Option<u64>,
-    vendor_identity: usize,
-}
-
-#[derive(Clone)]
-pub struct PreparedScene {
-    pub revision: u64,
-    pub base_revision: u64,
-    /// Monotonic revision of the **entity-flag set** carried by this scene.
-    ///
-    /// Selection/hover/hidden are a separate publication axis: a flags-only
-    /// change republishes `entity_flags` without advancing `revision` (the
-    /// scene identity) or `base_revision`. The renderer uses it to apply the
-    /// delta in place while keeping the committed scene and its overlay suffix
-    /// intact. The engine overwrites this with its own publication revision on
-    /// every publish, exactly as it owns `revision`/`base_revision`.
-    pub flags_revision: u64,
-    /// The resident CPU base: a shared prefix plus the segments appended since
-    /// it (see [`ResidentScene`]). An accepted append pushes one segment instead
-    /// of re-materialising the whole base, so the append cost is O(changed).
-    pub base: ResidentScene,
-    pub base_append: Option<BaseAppend>,
-    /// Transient sub-element-highlight and tool-preview batches.
-    pub highlight: Arc<SceneDelta>,
-    /// Entity-level selection/hover/hidden flags for the renderer's in-stream
-    /// flags path (see `cad_scene::FLAG_*` and `Renderer::set_entity_flags`).
-    /// Empty when nothing is selected/hovered/hidden.
-    pub entity_flags: Vec<(SelectionRef, u32)>,
-    pub highlight_diagnostics: Vec<cad_domain::Diagnostic>,
-    pub highlight_completeness: cad_domain::Completeness,
-    /// Decoded-image cache the base was built with, carried to the renderer so
-    /// its image quads can be resolved. `None` is the previous behaviour.
-    pub images: Option<Arc<DecodedImageCache>>,
-}
 
 #[derive(Clone, Default)]
 pub struct CadSceneController {
@@ -149,6 +94,10 @@ pub struct CadSceneController {
     model_max_order: Option<i64>,
     #[cfg(test)]
     fail_after_point_staging: bool,
+    /// Test-only: treat the next transform-only update as not fitting, so the
+    /// controller's full-rebuild fallback is exercised without a renderer.
+    #[cfg(test)]
+    fail_next_update_fit: bool,
     /// Test override for [`RETIRED_COMPACTION_THRESHOLD`]; `None` uses the
     /// documented default.
     #[cfg(test)]
@@ -419,7 +368,46 @@ impl CadSceneController {
         if !retire_taken {
             next_retired = self.retired.clone();
         }
-        let base_changed = version_changed && !retire_taken;
+        let mut stamp = TaskStamp::new(document, self.revision + 1);
+        stamp.configuration_version = self.fonts_revision;
+        if let Some(db) = doc {
+            stamp.object_revision = db.revision();
+        }
+        // P4: a transform-only update keeps the resident base and replaces the
+        // moved entity's own batches in place. The staging is provisional: the
+        // rebuilt delta must have exactly the entity's resident batch count (a
+        // GEOMETRY change can alter it), so a mismatch declines to the full
+        // rebuild below instead of publishing a partial range.
+        let update_candidate = update::update_candidate(
+            self.edit.as_ref(),
+            doc,
+            space,
+            self.base.as_ref(),
+            &self.entity_batches,
+            &self.retired,
+            self.version.as_ref(),
+            version.as_ref(),
+        );
+        let update_rebuild = update_candidate.and_then(|(id, range)| {
+            #[cfg(test)]
+            if std::mem::take(&mut self.fail_next_update_fit) {
+                return None;
+            }
+            let doc = doc.expect("an update candidate has a shared snapshot");
+            update::stage_update(
+                doc,
+                id,
+                &range,
+                stamp.clone(),
+                fonts.clone(),
+                self.images.clone(),
+                layers,
+                self.vendor.as_deref(),
+            )
+            .map(|batches| (id, range, batches))
+        });
+        let update_taken = update_rebuild.is_some();
+        let base_changed = version_changed && !retire_taken && !update_taken;
         let appended_entity = self.edit.as_ref().and_then(|edit| {
             let inserted = match &edit.delta {
                 CommitDelta::Append(inserted) => *inserted,
@@ -454,14 +442,6 @@ impl CadSceneController {
                     .is_none_or(|order| entity.draw_order > order))
             .then(|| entity.clone())
         });
-        // The base for this preparation is decided **before** the POINT staging
-        // below, because a declined append IS a full rebuild and must rescan the
-        // drawing-wide marker set exactly like one.
-        let mut stamp = TaskStamp::new(document, self.revision + 1);
-        stamp.configuration_version = self.fonts_revision;
-        if let Some(db) = doc {
-            stamp.object_revision = db.revision();
-        }
         // Stage every CPU result before publishing any version. A visual-overlay
         // edit keeps the base `Arc` (and its GPU revisions) unchanged.
         let next_append = if appended_entity.is_some() {
@@ -511,50 +491,70 @@ impl CadSceneController {
         // publishes no append proof.
         let mut append_declined = false;
         let mut rebuilt = false;
-        let (base, next_entity_batches) = if let Some(entity) = appended_entity.as_ref() {
-            let delta = assembly::build_model_entity_scene(
-                doc.expect("append drawing"),
-                entity,
-                stamp.clone(),
-                fonts.clone(),
-                self.images.clone(),
-                layers,
-                self.vendor.as_deref(),
-            )?;
-            if appendable_delta(&delta) {
-                // O(changed): keep the predecessor's prefix `Arc` and push the
-                // freshly built per-entity delta as one appended segment. The
-                // predecessor is retained (never re-built), so a large resident
-                // scene is not copied.
-                let mut resident = self.base.as_ref().expect("append predecessor").clone();
-                let inserted_start = resident.batch_len();
-                resident.push_appended(Arc::new(delta));
-                // The inserted entity's batches are one contiguous suffix (the
-                // appended segment); an empty delta (hidden entity) records
-                // nothing and the append is declined downstream anyway.
-                let mut index = self.entity_batches.clone();
-                index.record(entity.id, inserted_start..resident.batch_len());
-                (resident, index)
-            } else {
-                append_declined = true;
+        let (base, next_entity_batches, overwrites) =
+            if let Some((_id, range, batches)) = update_rebuild {
+                // O(changed): swap one per-batch `Arc` per resident slot of the moved
+                // entity. The range was validated against the resident base, so a
+                // refused replacement is an invariant violation, never a silent
+                // partial update.
+                let mut resident = self.base.as_ref().expect("update base").clone();
+                let mut overwrites = Vec::with_capacity(batches.len());
+                for (offset, batch) in batches.into_iter().enumerate() {
+                    let index = range.start + offset;
+                    assert!(
+                        resident.replace_batch(index, batch.clone()),
+                        "the staged update range was validated against the resident base"
+                    );
+                    overwrites.push((index, batch));
+                }
+                // The per-entity index is unchanged: the range and its length are.
+                (resident, self.entity_batches.clone(), overwrites)
+            } else if let Some(entity) = appended_entity.as_ref() {
+                let delta = assembly::build_model_entity_scene(
+                    doc.expect("append drawing"),
+                    entity,
+                    stamp.clone(),
+                    fonts.clone(),
+                    self.images.clone(),
+                    layers,
+                    self.vendor.as_deref(),
+                )?;
+                if appendable_delta(&delta) {
+                    // O(changed): keep the predecessor's prefix `Arc` and push the
+                    // freshly built per-entity delta as one appended segment. The
+                    // predecessor is retained (never re-built), so a large resident
+                    // scene is not copied.
+                    let mut resident = self.base.as_ref().expect("append predecessor").clone();
+                    let inserted_start = resident.batch_len();
+                    resident.push_appended(Arc::new(delta));
+                    // The inserted entity's batches are one contiguous suffix (the
+                    // appended segment); an empty delta (hidden entity) records
+                    // nothing and the append is declined downstream anyway.
+                    let mut index = self.entity_batches.clone();
+                    index.record(entity.id, inserted_start..resident.batch_len());
+                    (resident, index, Vec::new())
+                } else {
+                    append_declined = true;
+                    rebuilt = true;
+                    let (delta, index) = full_base(doc)?;
+                    (ResidentScene::from_owned(delta), index, Vec::new())
+                }
+            } else if base_changed {
+                // This also covers the undo trap (a re-inserted retired id declines
+                // the append) and a retire that crossed the compaction threshold.
                 rebuilt = true;
                 let (delta, index) = full_base(doc)?;
-                (ResidentScene::from_prefix(Arc::new(delta)), index)
-            }
-        } else if base_changed {
-            // This also covers the undo trap (a re-inserted retired id declines
-            // the append) and a retire that crossed the compaction threshold.
-            rebuilt = true;
-            let (delta, index) = full_base(doc)?;
-            (ResidentScene::from_prefix(Arc::new(delta)), index)
-        } else {
-            // Nothing structural changed, or a delete-only commit kept the base:
-            // the resident scene and its per-entity index are untouched.
-            (
-                self.base.as_ref().expect("base prepared").clone(),
-                self.entity_batches.clone(),
-            )
-        };
+                (ResidentScene::from_owned(delta), index, Vec::new())
+            } else {
+                // Nothing structural changed, a delete-only commit kept the base, or
+                // a transform-only update replaced one entity's batches in place: the
+                // resident scene and its per-entity index are otherwise untouched.
+                (
+                    self.base.as_ref().expect("base prepared").clone(),
+                    self.entity_batches.clone(),
+                    Vec::new(),
+                )
+            };
         if rebuilt {
             // A full rebuild is the accepted epoch reset: it retires every pick
             // key and allocates fresh ones, so no retired id can still name a
@@ -620,7 +620,10 @@ impl CadSceneController {
         let flags_version = flags_fingerprint(overlays, &next_retired);
         let visual_changed = base_changed || self.visual_version != Some(visual_version);
         let flags_changed = base_changed || self.flags_version != Some(flags_version);
-        if !base_changed && !visual_changed && !flags_changed {
+        // A transform-only update changes geometry without changing the base
+        // revision, the overlay fingerprint or the flags: it must still publish so
+        // the engine applies the in-place overwrites.
+        if !base_changed && !visual_changed && !flags_changed && !update_taken {
             return Ok(());
         }
 
@@ -771,9 +774,10 @@ impl CadSceneController {
                 }),
             };
         }
-        if base_changed || retire_taken {
-            // A retire does not rebuild the base, but the published snapshot must
-            // still advance: the next receipt is bound to this new `Arc`.
+        if base_changed || retire_taken || update_taken {
+            // A retire or an in-place update does not rebuild the base, but the
+            // published snapshot must still advance: the next receipt is bound to
+            // this new `Arc`.
             self.published_drawing = self
                 .shared_document
                 .as_ref()
@@ -801,6 +805,7 @@ impl CadSceneController {
             flags_revision: self.flags_revision,
             base,
             base_append: next_append,
+            overwrites,
             highlight: visual_delta,
             entity_flags,
             highlight_diagnostics,
@@ -928,6 +933,13 @@ impl CadSceneController {
     #[cfg(test)]
     pub(crate) fn set_retired_compaction_threshold(&mut self, threshold: usize) {
         self.retired_compaction_threshold = Some(threshold);
+    }
+
+    /// Force the next transform-only update to decline its in-place fit, so the
+    /// full-rebuild fallback is exercised without a renderer. Test only.
+    #[cfg(test)]
+    pub(crate) fn set_fail_next_update_fit(&mut self, fail: bool) {
+        self.fail_next_update_fit = fail;
     }
 
     fn retired_compaction_limit(&self) -> usize {

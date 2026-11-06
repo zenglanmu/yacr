@@ -1,3 +1,156 @@
+## 2026-11-06 变换-only 更新原地覆写（P4：overwrite，同槽位/同 pick key/不改绘制顺序）
+
+- **目标**：单个实体的 **transform-only** 更新必须是 GPU 原地覆写：同一个 batch 槽位、同一个
+  pick key、选择不丢、不重建、不重新上传 base。测得基线仍是增量 prepare 0.54 ms / 全量约 4.8 s。
+- **`ResidentScene` 改成 per-batch `Arc`（`crates/cad-app/src/render_scene/resident.rs`）**：
+  - 形态：`prefix: Arc<SceneDelta>`（只保留整段事实：`stamp`、`removed_chunks`、`images`、`masks`，
+    `added` **刻意清空**，避免同一场景存两份 batch）+ `prefix_batches: Vec<Arc<RenderBatch>>` +
+    `appended: Vec<Segment>`，`Segment { delta: Arc<SceneDelta>, batches: Vec<Arc<RenderBatch>> }`。
+  - `from_owned(SceneDelta)` 消费 delta：`added` 直接 move 进 `Arc::new`（无深拷贝）；全量构建
+    改用它。`from_prefix(Arc<SceneDelta>)` 是便捷入口，克隆一次（Arc 无法消费），测试/引擎用；
+    `prefix()` 更名 `prefix_delta()`，doc 说明 `added` 为空、batch 只能经 `batches()`/
+    `materialized()` 读取。
+  - `batches()` 仍给 `&RenderBatch`（解引用 Arc）。`slices()` 删除，改为
+    `materialized(range) -> Vec<RenderBatch>`：只克隆该**有界**片段的内容。可接受的理由写进了
+    doc 与 `session.rs`：引擎每片最多 256 batch / 262,144 顶点，append 片段就是一个实体，而全量
+    restage（设备丢失、append 被拒、overwrite 被拒）本来就是慢路径，且不在逐帧路径上。
+  - `replace_batch(index, Arc<RenderBatch>) -> bool`：O(1)（加 O(#segments) 定位），只换一个 Arc，
+    不 clone 其它 batch；越界返回 false 且不改动任何东西。
+  - `same_as` 仍是**指针身份**：prefix Arc + 每个 segment 的 `Arc<SceneDelta>` + 每个 batch 的
+    `Arc`。因此一次覆写会让 resident scene 变成“新的身份”，这正是引擎 append 准入必须观察到的。
+  - 注意：`to_delta()` 仍是 O(scene)（测试/导出用），不在 append 路径上。
+- **渲染器 API（`crates/cad-render-wgpu`）**：`Renderer::overwrite_batch(index, &RenderBatch) ->
+  Result<(), BatchOverwriteRefusal>`；另有 `check_overwrite_batch`（同一 fit gate，只校验不写），
+  引擎用它先校验整组再写，保证**一个实体的多 batch 更新是原子的**。任何拒绝都在写第一个字节之前。
+  `BatchOverwriteRefusal`（`src/overwrite.rs`）每个变体都是独立、有 doc 的原因，并给出稳定
+  `reason()`（snake_case）与统一诊断码 `render.batch_overwrite_refused`
+  （`cad-diagnostics` 新增 `codes::RENDER_BATCH_OVERWRITE_REFUSED`）：
+  - `NotInitialized`：无 device/queue 或设备已丢失。
+  - `OutOfRange{index,batches}`：index 不是驻留 batch。
+  - `TopologyChanged`：`RenderTopology` 不同。
+  - `AlphaClassChanged`：opaque/transparent/invisible 类不同（决定绘制 pass、缓存 draw plan、flags 路径）。
+  - `MirroredChanged`：`mirrored` 绕组不同（管线 cull 状态已按旧值选好）。
+  - `DrawOrderChanged`：`draw_order` 不同（缓存 draw plan 不重建）。
+  - `VertexCountChanged{existing,rebuilt}` / `IndexCountChanged{...}` / `LineQuadCountChanged{...}`：
+    legacy 路径的 count 不同。
+  - `AttributeShapeChanged{attribute,existing,rebuilt}`：legacy 的 positions/normals/colors/
+    line_quads/indices 有一侧缺失或驻留 buffer 装不下。
+  - `InvalidGeometry`：重建几何含非有限坐标（staging 会拒绝，覆写同样拒绝，绝不写垃圾）。
+  - `RunListChanged`：instanced 路径的 run 列表不再恰好覆盖该 batch（`(stream,offset,count)` 形状
+    变化或驻留 run 不自洽）。
+  - `StreamOriginChanged`：stream 的 `f64` origin 已不是新局部坐标的合法定点参考（某个存储坐标
+    会超过 `MAX_STREAM_RADIUS`，重建会另选 origin/切分）。**origin 本身永不改写**（会移动同一
+    stream 上的其它 batch）。
+  - `MeshNotSupported`：合并 mesh。`MeshRun` 只记录 triangle/index 范围，**不记录成员在 chunk
+    交错顶点 buffer 里的 vertex offset**，无法证明精确原地写 → 全量重建。
+  - `ConicNotUpdatable`：SDF conic stream（`ArcStream` 无 CPU mirror，`ArcRun` 不记录 conic index
+    范围）；按名字拒绝，不做特例。
+  - `PulledNotUpdatable`：加速 tier 的整场景 pulled line 记录无法精确映射到本次 run。
+- **写路径（fit 之后）**：
+  - legacy：`queue.write_buffer` 写回 batch 既有 buffers（positions/normals/colors/line_quads/
+    indices），不重新分配；mesh 的 normals/colors 用与 staging 相同的 `repaired_normals`/
+    `repaired_colors`，edge overlay 用 `mesh_edge_indices` + `expand_line_quads`。
+  - instanced：用 stream 的**现存 origin** 重新 `push_line_instances`，universal tier 按
+    `(stream.base + run.offset) * 56` 写 `LineInstance`；加速 tier 按 64 字节 `PulledLine` 记录
+    写，并同步 `stream.pulled_instances` 镜像切片。
+  - **pulled 记录索引的解析**：加速 tier 上 stream 的 buffer **就是**它所属 pulled segment 的
+    geometry buffer（同一个 handle，`InstanceStream::base` 是段内首实例偏移），所以写偏移是段内
+    记录号 `stream.base + run.offset`。整场景映射仍然必须精确解析，用来证明“该 stream 属于哪个段、
+    段的记录数确实等于它覆盖的 stream 计数之和、写入范围不越段”：pulled payload 是 resident
+    stream 按 index 顺序的拼接、在**整 stream 边界**切成 binding 大小的段（`rebuild_pulled`），
+    每段记录自己的 `instance_count`，于是段边界就是这些计数的前缀和；
+    `pulled_stream_record_base` 逐段把 stream 的 `instance_count` 累加，任何一步不符（段计数
+    不等于覆盖计数之和、目标 stream 不在任何段内、走不到目标、写入越段）→
+    `PulledNotUpdatable`，绝不写“镜像与 pulled 不一致”的半状态。pulled 类回退到 per-stream
+    存储时（`pulled_lines == None`）按 `build_line_fallback` 的 chunk_base=0 语义写同一 buffer。
+  - 只更新会变、且不移动几何的字段：`origin`、`centroid`、`z_range`、`color`、`alpha`、
+    `lineweight`、`sources`；**保留 `pick_key`**。`topology`/`mirrored`/各类 count/run 列表/
+    `upload_bytes` 已被 gate 证明不变，因此不重写（`upload_bytes` 的公式输入恰好全被 gate 固定，
+    数值不变——与规格里“更新 upload_bytes”的差别见下）。
+  - **不动**：flags table、draw plan 的排序/分段、pick table、batch 顺序。唯一的派生修正：draw plan
+    缓存的透明排序 `centroid` 用 `DrawOrderCache::set_centroid` 刷新（paint order/alpha 类已 gate
+    相等，只换排序距离），否则移动后的透明 batch 会按旧深度排序。加速 tier 的 stream `aabb` 做
+    **只扩不缩**的 union，保证帧级 chunk cull 不会把移动后的 run 裁掉。
+  - 覆写后 progressive 页走查重置到 cursor 0 且 `preserve_color_on_restart = false`（几何变了，
+    必须清色重画，不能像 flags/tint 那样保留颜色）。
+  - 诊断计数：`Renderer::batch_overwrites()`；引擎侧 `RuntimeDiagnostics::batch_overwrites` /
+    `batch_overwrite_fallbacks`，拒绝原因并入 `diagnostic`（绝不静默）。
+- **控制器（`CommitDelta::Update` + `PreparedScene::overwrites`）**：
+  - `edit.rs`：新增 `Update(EntityId)`，准入 = 恰好一个 dirty id、**没有** `Insert`/`Delete`、
+    mask 含 `TRANSFORM` 且除 `GEOMETRY` 外无其它位（`STYLE`/`REFERENCES`/`METADATA` 会改 display
+    类/摆放/source，一律拒）、前后实体都存在且都在 model space、实体数不变。
+  - 新增 `Other` 命名臂：单个 **GEOMETRY**（无 TRANSFORM）更新、以及“update + 另一个 id 的 insert”
+    显式归为 `Other`（全量重建）。单 STYLE 更新仍走历史的“不签发 receipt”（等价于全量）。
+  - 控制器不拥有 renderer：它只把 `(resident_index, Arc<RenderBatch>)` 放进
+    `PreparedScene::overwrites`。准入条件（`render_scene/update.rs`）：`edit.after` 就是本次 doc、
+    model space、非 retired、`entity_batches` 有该 id 的 range 且 `range.end <= base.batch_len()`、
+    `retire_keeps_base(previous, current)`。然后只 rebuild 该实体
+    （`assembly::build_model_entity_scene`），要求 `delta.added.len() == range.len()` 且无
+    images/masks；不符（或构建报错）→ 落回全量重建（错误由全量路径诚实暴露）。成功后对
+    `self.base` 逐槽 `replace_batch`，`entity_batches` 不变，`base_revision` **不前进**，
+    `revision` 前进并发布。
+  - **bounds 语义**：更新路径**不重算 bounds**。`DrawingDatabase::bounds()` 是 revision-tagged 惰性
+    记忆，提交后保持 stale，下一个消费者（可能是同一次准备里 overlay 的 axes/grid，或宿主）按需
+    精确重算；不做近似、不伪造。
+- **引擎（`cad-engine`）**：`apply_ready_updates` 在常规 upload 决策**之前**处理 overwrites。
+  纯函数 `overwrite_admission(has, base_changed, pending_upload, applied_revision)`：
+  `NotApplicable` / `Apply` / `FullRestage`。`Apply` 时先对全部 `(index,batch)` 调
+  `check_overwrite_batch`（全部通过才写），再逐个 `overwrite_batch`；成功后刷新
+  `applied_base_scene = ready.base.clone()`（覆盖了 one per-batch Arc，必须让 append 的
+  predecessor 证明对齐 GPU 现状）。任一拒绝 / 无驻留 base / 有在途 upload → `FullRestage`：
+  清掉在途 upload（`last_upload_reset = "overwrite_restage"`），把 `base_changed` 强制为真；
+  `admit_base_append` 因 base revision 未变返回 None，于是 `BaseUploadPlan::Full`
+  （`keep_prefix=0`）→ 从已含新几何的 `ready.base` 全量 restage。**绝不保留旧几何**；代价是这次
+  回退会重排 pick key（既有的 epoch reset 语义）。
+- **测试（本轮 verbatim）**：
+  - `cargo test -p cad-render-wgpu --lib --locked -- --test-threads=1` →
+    `test result: ok. 309 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 1.84s`
+    （其中新 GPU 合约 6 个，真实 headless adapter，非 `#[ignore]`，无 adapter 时打印 SKIP 并返回：
+    `overwrite_gpu_tests::{legacy_line_overwrite_moves_ink_and_keeps_every_identity,
+    instanced_line_overwrite_moves_ink_without_reuploading_a_stream,
+    accelerated_overwrite_updates_the_mirror_and_the_pulled_records_together,
+    accelerated_overwrite_resolves_the_record_range_in_a_later_pulled_segment,
+    every_refusal_gate_names_its_reason_and_writes_nothing,
+    an_unresolvable_pulled_mapping_is_refused_rather_than_written}`）。
+  - `cargo test -p cad-app --locked` →
+    `test result: ok. 1566 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 1.30s`
+    （新 `render_scene::update_tests` 5 个：三个分类 + 原地更新保持 base 身份/range/bounds +
+    不 fit 时全量回退）。bounds 的“stale”本身在 `cad-app` 里无法观测（`cad-db` 的
+    `valid_bounds_cache_revision_for_test` 是 crate-private）；该契约由 cad-db 既有测试
+    `update_only_batch_leaves_bounds_memo_invalid` 覆盖，cad-app 侧只断言“按需精确”
+    （移动后 `bounds()` 的 max.x 为 115）。
+  - `cargo test -p cad-engine --locked` →
+    `test result: ok. 114 passed; 0 failed; 15 ignored; 0 measured; 0 filtered out; finished in 0.50s`
+    （新纯函数 2 个：`overwrite_admission_only_applies_to_a_resident_unchanged_base`、
+    `a_forced_restage_plan_is_a_full_replacement_never_an_append`）。
+  - `cargo test -p cad-host --locked` →
+    `test result: ok. 266 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s`。
+  - `cargo clippy -p cad-render-wgpu -p cad-app -p cad-engine -p cad-host --all-targets --locked
+    -- -D warnings` 通过；`cargo fmt --all -- --check` 通过；`python3 scripts/check-file-size.py` →
+    `file-size OK: 1343 code file(s), limit 1000 lines`；`python3 scripts/check-architecture.py` →
+    `Architecture OK: 28 packages, acyclic and core boundaries intact`；
+    `cargo check -p app-web --target wasm32-unknown-unknown --locked` 通过（`app-web` 既有的
+    `settle_base64` dead_code warning 与本轮无关）。
+- **规格与代码不一致处（已按代码实现，并在此记录）**：
+  1) 规格写“unioned `ChangeMask` **exactly** `TRANSFORM`”。但数据库里唯一产生 TRANSFORM 的路径
+     `DrawingTransaction::transform_entity`（`crates/cad-db/src/drawing/transaction.rs`）一定发布
+     `GEOMETRY | TRANSFORM`（几何确实被重写；`crates/cad-db/tests/invariants.rs` 也这样断言），
+     裸 TRANSFORM 在真实提交里不会出现。实现接受“含 TRANSFORM 且除 GEOMETRY 外无其它位”，并用
+     “重建后 batch 数必须等于 range 长度”来补上规格括号里担心的 count 变化；否则这条路径永远是
+     死代码。
+  2) 规格要求更新 `GpuBatch::upload_bytes`。该值是 counts/run 形状/tier 的函数，而这三者全部被
+     gate 固定，所以覆写后数值必然不变；实现选择**校验而不是重写**（并写进 doc），避免复制一份
+     staging 公式。
+  3) 规格要求“不动 draw plan”。实现不重建、不重排，但会刷新缓存条目里的透明排序 `centroid`
+     （`DrawOrderCache::set_centroid`）；不刷新会让移动后的透明 batch 按旧深度排序，属于必要的
+     派生字段同步。
+  4) 规格没提 stream `aabb`。实现把被覆写 run 所在 stream 的 AABB 做只扩不缩的 union：否则移动后
+     的几何可能被帧级 chunk cull 裁掉（静默消失）。
+- **未做 / NOT RUN**：未跑 workspace 全量测试/全量门禁；未跑 Windows/macOS/Android/Web 载体、
+  真机、真实 GPU 像素验收（本轮的 GPU 像素检查只在 Linux headless adapter 上有界通过，不是产品
+  验收）；未做性能测量（原地覆写的 prepare/提交耗时本轮未计时，只有功能/像素证据）；未处理合并
+  mesh 与 conic 的原地覆写（按名字拒绝）；未实现“pulled 记录部分重写”的增量重建。
+
 ## 2026-11-06 场景身份改用构造 nonce，bounds 不再参与（P4-pre）
 
 - **问题**：`SceneIdentity`（`crates/cad-domain/src/lib.rs`）把 model-space `bounds` 当身份的一

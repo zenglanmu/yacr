@@ -205,6 +205,13 @@ pub struct RuntimeDiagnostics {
     pub upload: Option<UploadDiagnostics>,
     /// Cumulative overlay-suffix commits.
     pub overlay_suffix_commits: u64,
+    /// Cumulative in-place batch overwrites applied to the resident renderer
+    /// (transform-only entity updates that rewrote existing GPU buffers).
+    pub batch_overwrites: u64,
+    /// Cumulative publications whose in-place overwrites could not be applied and
+    /// therefore re-staged the whole base (a named refusal, an unavailable
+    /// resident scene, or an in-flight upload).
+    pub batch_overwrite_fallbacks: u64,
     /// Cumulative pulled-prefix **reuses** (the accelerator retained the base
     /// pulled segments for a suffix commit), `0` when no renderer is attached.
     pub pulled_prefix_reuses: u64,
@@ -309,6 +316,41 @@ fn admit_base_append(
     Some(BaseUploadPlan::Append {
         keep_prefix: append.keep_batches,
     })
+}
+
+/// How a publication's in-place batch overwrites are handled.
+///
+/// Pure so every branch is contract-tested without a GPU. The in-place path is
+/// only available when the renderer already holds this exact base revision, no
+/// upload is in flight, and the publication itself does not change the base —
+/// otherwise the published CPU base must be re-staged in full (always correct;
+/// it only costs the rebuild and renumbers pick keys).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OverwriteAdmission {
+    /// The publication carries no overwrites.
+    NotApplicable,
+    /// Apply them to the resident renderer, then continue the normal path.
+    Apply,
+    /// Re-stage the whole base from the published CPU base. The CPU base already
+    /// holds the moved geometry, so the new scene is drawn; the old geometry is
+    /// never silently kept.
+    FullRestage,
+}
+
+fn overwrite_admission(
+    has_overwrites: bool,
+    base_changed: bool,
+    pending_upload: bool,
+    applied_revision: Option<u64>,
+) -> OverwriteAdmission {
+    if !has_overwrites {
+        return OverwriteAdmission::NotApplicable;
+    }
+    if base_changed || pending_upload || applied_revision.is_none() {
+        OverwriteAdmission::FullRestage
+    } else {
+        OverwriteAdmission::Apply
+    }
 }
 
 fn upload_decision(
@@ -427,6 +469,15 @@ pub struct CadRenderRuntime {
     /// Cumulative overlay-suffix commits (suffix-only uploads). A camera-only
     /// navigation must leave this flat.
     overlay_suffix_commits: u64,
+    /// Cumulative in-place batch overwrites applied (see
+    /// [`PreparedScene::overwrites`]). Diagnostics only.
+    batch_overwrites: u64,
+    /// Cumulative publications that had to re-stage the whole base because an
+    /// in-place overwrite could not be applied. Diagnostics only.
+    batch_overwrite_fallbacks: u64,
+    /// The last overwrite refusal / fallback reason, merged into the published
+    /// diagnostic. `None` after a successful apply.
+    overwrite_diagnostic: Option<String>,
     /// The renderer-owned transient cursor (ADR 0028). This is **not** scene
     /// content: it never enters `OverlayInputs`, preparation/publication or a
     /// commit. A move only stores it and invalidates the frame, so the next
@@ -490,6 +541,9 @@ impl Default for CadRenderRuntime {
             pending_upload: None,
             presented_revision: None,
             overlay_suffix_commits: 0,
+            batch_overwrites: 0,
+            batch_overwrite_fallbacks: 0,
+            overwrite_diagnostic: None,
             cursor_transient: None,
             applied_highlight: None,
             image_diagnostic: None,

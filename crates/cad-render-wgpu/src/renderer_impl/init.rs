@@ -112,6 +112,7 @@ impl Renderer {
             pulled_suffix_skips: 0,
             gc_skipped_commits: 0,
             draw_plan_rebuilds: 0,
+            batch_overwrites: 0,
             draw_calls: 0,
             progressive: false,
             progressive_frame: None,

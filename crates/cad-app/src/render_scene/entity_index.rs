@@ -260,7 +260,7 @@ mod tests {
             .expect("the inserted entity owns the appended suffix");
         assert!(range.end > range.start, "the inserted line draws");
         assert_eq!(range, old_added_len..ready.base.batch_len());
-        for batch in ready.base.slices(range).flatten() {
+        for batch in ready.base.batches().skip(range.start).take(range.len()) {
             assert!(batch.sources.iter().any(|source| source.entity == inserted));
         }
     }
@@ -327,8 +327,9 @@ mod tests {
             .as_ref()
             .unwrap()
             .base
-            .slices(range)
-            .flatten()
+            .batches()
+            .skip(range.start)
+            .take(range.len())
         {
             assert!(batch
                 .sources

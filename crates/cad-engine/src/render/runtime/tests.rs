@@ -287,6 +287,7 @@ fn prepared_scene(revision: u64, base_revision: u64, flags_revision: u64) -> Pre
         flags_revision,
         base: ResidentScene::from_prefix(Arc::new(delta(revision))),
         base_append: None,
+        overwrites: Vec::new(),
         highlight: Arc::new(delta(revision)),
         entity_flags: Vec::new(),
         highlight_diagnostics: Vec::new(),
@@ -356,6 +357,53 @@ fn base_append_plan_drives_prefix_and_classification() {
     let append = BaseUploadPlan::Append { keep_prefix: 7 };
     assert_eq!(append.keep_prefix(), 7);
     assert!(append.is_append());
+}
+
+#[test]
+fn overwrite_admission_only_applies_to_a_resident_unchanged_base() {
+    // No overwrites: the ordinary path is untouched.
+    assert_eq!(
+        overwrite_admission(false, false, false, Some(4)),
+        OverwriteAdmission::NotApplicable
+    );
+    // The one admitted shape: resident scene, no base change, no in-flight upload.
+    assert_eq!(
+        overwrite_admission(true, false, false, Some(4)),
+        OverwriteAdmission::Apply
+    );
+    // Every unavailable case forces a full base re-stage instead of keeping the
+    // old geometry.
+    assert_eq!(
+        overwrite_admission(true, true, false, Some(4)),
+        OverwriteAdmission::FullRestage,
+        "a base change must re-stage (there is no resident slot to overwrite)"
+    );
+    assert_eq!(
+        overwrite_admission(true, false, true, Some(4)),
+        OverwriteAdmission::FullRestage,
+        "an in-flight upload makes the resident batch set ambiguous"
+    );
+    assert_eq!(
+        overwrite_admission(true, false, false, None),
+        OverwriteAdmission::FullRestage,
+        "nothing committed means nothing to overwrite"
+    );
+}
+
+#[test]
+fn a_forced_restage_plan_is_a_full_replacement_never_an_append() {
+    // A restage keeps the published base revision, so the append admission sees
+    // `applied_base == ready_base` and refuses: the plan is `Full` (keep_prefix 0).
+    let predecessor = ResidentScene::from_prefix(Arc::new(delta(1)));
+    let append = BaseAppend {
+        predecessor: predecessor.clone(),
+        keep_batches: 2,
+    };
+    assert_eq!(
+        admit_base_append(true, Some(9), 9, Some(&predecessor), Some(&append), 2, 5),
+        None,
+        "an unchanged base revision can never be an append: the forced restage is full"
+    );
 }
 
 #[test]

@@ -1,10 +1,19 @@
 //! The resident CPU base: one shared prefix plus the segments appended since it.
 //!
 //! A full build produces a prefix and no segments. An accepted incremental
-//! append pushes one segment; the prefix `Arc` is never re-materialised, which is
+//! append pushes one segment; the prefix is never re-materialised, which is
 //! what makes the append O(changed) instead of O(scene).
 //!
-//! Invariants:
+//! # Per-batch `Arc` payload
+//!
+//! The batch payload is stored as **one `Arc<RenderBatch>` per batch** inside
+//! each segment, while the `Arc<SceneDelta>` is retained for the facts that are
+//! still whole-segment (the stamp) and for the prefix's raster draw items. The
+//! granularity is what makes a transform-only update possible: replacing one
+//! entity's batch ([`ResidentScene::replace_batch`]) swaps a single `Arc` and
+//! never copies the other batches of the prefix or the segment.
+//!
+//! # Invariants
 //!
 //! * `appended` segments never carry `images`/`masks`. The append gate
 //!   (`super::appendable_delta`) refuses such deltas, because the engine's append
@@ -13,33 +22,77 @@
 //!   [`ResidentScene::masks`] therefore always come from the prefix.
 //! * a segment is only ever appended; a full build replaces the whole resident
 //!   scene (`from_prefix`), so a stale segment can never survive a rebuild.
-//! * identity is pointer identity of the prefix plus pointer identity of every
-//!   segment ([`ResidentScene::same_as`]), never content equality.
+//! * identity is pointer identity of the prefix, of every segment's
+//!   `Arc<SceneDelta>`, and of every per-batch `Arc`
+//!   ([`ResidentScene::same_as`]), never content equality. A replaced batch is
+//!   therefore a different resident scene, which is exactly what the engine's
+//!   append admission must observe.
 use std::ops::Range;
 use std::sync::Arc;
 
 use cad_domain::TaskStamp;
 use cad_scene::{ImageBatch, MaskBatch, RenderBatch, SceneDelta};
 
+/// One segment appended after the prefix: the committed delta it came from
+/// (retained for its stamp) plus its batches, one `Arc` per batch.
+#[derive(Clone)]
+struct Segment {
+    delta: Arc<SceneDelta>,
+    batches: Vec<Arc<RenderBatch>>,
+}
+
 /// The committed base: one shared prefix plus the segments appended since it.
 ///
 /// A full build produces a prefix and no segments. An accepted incremental
-/// append pushes one segment; the prefix `Arc` is never re-materialised, which is
+/// append pushes one segment; the prefix is never re-materialised, which is
 /// what makes the append O(changed) instead of O(scene).
 #[derive(Clone)]
 pub struct ResidentScene {
     prefix: Arc<SceneDelta>,
-    appended: Vec<Arc<SceneDelta>>,
+    /// The prefix's batches, one `Arc` per batch, in resident order.
+    prefix_batches: Vec<Arc<RenderBatch>>,
+    appended: Vec<Segment>,
 }
 
 impl ResidentScene {
     /// A resident scene made of one prefix and no appended segments (a full
-    /// build).
-    pub fn from_prefix(prefix: Arc<SceneDelta>) -> Self {
+    /// build), **consuming** the delta.
+    ///
+    /// The batches move into their per-batch `Arc`s (no deep copy), and the
+    /// retained prefix `SceneDelta` keeps the whole-segment facts (`stamp`,
+    /// `removed_chunks`, `images`, `masks`) with `added` emptied: the batch
+    /// payload is the per-batch `Arc` list, so the scene never stores every batch
+    /// twice. Read the batches through [`Self::batches`] /
+    /// [`Self::materialized`], never through the prefix delta.
+    pub fn from_owned(delta: SceneDelta) -> Self {
+        let SceneDelta {
+            stamp,
+            added,
+            removed_chunks,
+            images,
+            masks,
+        } = delta;
+        let prefix_batches = added.into_iter().map(Arc::new).collect();
         Self {
-            prefix,
+            prefix: Arc::new(SceneDelta {
+                stamp,
+                added: Vec::new(),
+                removed_chunks,
+                images,
+                masks,
+            }),
+            prefix_batches,
             appended: Vec::new(),
         }
+    }
+
+    /// [`Self::from_owned`] for callers that hold the delta behind an `Arc`.
+    ///
+    /// The batches are cloned once (the `Arc` cannot be consumed), so the
+    /// controller's full build uses [`Self::from_owned`] instead. The retained
+    /// prefix delta still has `added` emptied — see [`Self::from_owned`].
+    pub fn from_prefix(prefix: Arc<SceneDelta>) -> Self {
+        Self::from_owned((*prefix).clone())
     }
 
     /// Append one committed segment without touching the prefix.
@@ -47,69 +100,121 @@ impl ResidentScene {
     /// The segment must not grow the resident raster sets: the engine does not
     /// re-upload images/masks on an append, so an appended `ImageBatch`/
     /// `MaskBatch` would be a silent partial success.
+    ///
+    /// The per-entity delta is converted to one `Arc` per batch. That copy is
+    /// O(appended), i.e. O(one entity), never O(scene): the whole point of the
+    /// segment payload.
     pub fn push_appended(&mut self, segment: Arc<SceneDelta>) {
         debug_assert!(
             segment.images.is_empty() && segment.masks.is_empty(),
             "an appended segment must not carry images/masks (the append path never \
              re-uploads them)"
         );
-        self.appended.push(segment);
+        let batches = segment.added.iter().cloned().map(Arc::new).collect();
+        self.appended.push(Segment {
+            delta: segment,
+            batches,
+        });
     }
 
-    /// The shared prefix. The engine retains this exact `Arc` as its applied base
-    /// identity, and the renderer reads `images`/`masks` from it.
-    pub fn prefix(&self) -> &Arc<SceneDelta> {
+    /// The shared prefix's whole-segment facts. The engine retains this exact
+    /// `Arc` as its applied base identity, and the renderer reads `images`/
+    /// `masks` from it.
+    ///
+    /// Its `added` list is **empty by construction**: the batch payload is the
+    /// per-batch `Arc` list (see [`Self::from_owned`]). Use [`Self::batches`] or
+    /// [`Self::materialized`] for the batches.
+    pub fn prefix_delta(&self) -> &Arc<SceneDelta> {
         &self.prefix
     }
 
-    /// The segments appended since the prefix, in append order.
-    pub fn appended(&self) -> &[Arc<SceneDelta>] {
-        &self.appended
+    /// Number of segments appended after the prefix.
+    pub fn appended_len(&self) -> usize {
+        self.appended.len()
     }
 
     /// Total number of resident base batches across the prefix and every segment.
     pub fn batch_len(&self) -> usize {
-        self.prefix.added.len()
+        self.prefix_batches.len()
             + self
                 .appended
                 .iter()
-                .map(|segment| segment.added.len())
+                .map(|segment| segment.batches.len())
                 .sum::<usize>()
-    }
-
-    /// The resident batches as the segments that hold them, in resident order.
-    ///
-    /// The prefix is always yielded first (even when empty), so a full build is
-    /// exactly one slice.
-    pub fn segments(&self) -> impl Iterator<Item = &[RenderBatch]> {
-        std::iter::once(self.prefix.added.as_slice())
-            .chain(self.appended.iter().map(|segment| segment.added.as_slice()))
     }
 
     /// Every resident batch, in resident order, flattened across segments.
     pub fn batches(&self) -> impl Iterator<Item = &RenderBatch> {
-        self.segments().flatten()
+        self.prefix_batches.iter().map(Arc::as_ref).chain(
+            self.appended
+                .iter()
+                .flat_map(|segment| segment.batches.iter().map(Arc::as_ref)),
+        )
     }
 
-    /// The sub-slices that cover `range`, in resident order (segment-aware
-    /// slicing).
+    /// Materialise a bounded batch range as owned [`RenderBatch`] values.
     ///
-    /// A range inside one segment yields exactly one slice — which is every
-    /// accepted append (`keep_batches..batch_len()` is exactly the newly pushed
-    /// segment) and every full build. A range spanning segments yields one slice
-    /// per segment intersection, so the caller can stage them in order.
+    /// The engine stages at most 256 batches / 262,144 vertices per piece, so
+    /// cloning the contents of one bounded piece costs O(piece) and is accepted:
+    /// an append piece is exactly one entity, and a full re-stage (device loss,
+    /// a declined append, a refused overwrite) is already the slow path. Nothing
+    /// here is on the per-frame path.
     ///
     /// `range.end` must not exceed [`Self::batch_len`]; anything beyond the end
     /// is clipped (never fabricated).
-    pub fn slices(&self, range: Range<usize>) -> impl Iterator<Item = &[RenderBatch]> {
-        let mut cursor = 0usize;
-        self.segments().filter_map(move |segment| {
-            let segment_start = cursor;
-            cursor += segment.len();
-            let start = range.start.max(segment_start);
-            let end = range.end.min(cursor);
-            (start < end).then(|| &segment[start - segment_start..end - segment_start])
-        })
+    pub fn materialized(&self, range: Range<usize>) -> Vec<RenderBatch> {
+        let len = self.batch_len();
+        let start = range.start.min(len);
+        let end = range.end.min(len);
+        if start >= end {
+            return Vec::new();
+        }
+        (start..end)
+            .filter_map(|index| self.batch_at(index))
+            .cloned()
+            .collect()
+    }
+
+    /// The resident batch at `index`, in resident order.
+    fn batch_at(&self, index: usize) -> Option<&RenderBatch> {
+        if let Some(batch) = self.prefix_batches.get(index) {
+            return Some(batch);
+        }
+        let mut cursor = self.prefix_batches.len();
+        for segment in &self.appended {
+            if index < cursor + segment.batches.len() {
+                return segment.batches.get(index - cursor).map(Arc::as_ref);
+            }
+            cursor += segment.batches.len();
+        }
+        None
+    }
+
+    /// Replace the resident batch at `index` with `batch`, in O(1) (plus the
+    /// O(#segments) segment lookup): no other batch is cloned or moved.
+    ///
+    /// Returns `false` when `index` is out of range, in which case nothing is
+    /// modified. The caller must have validated the whole replacement first: a
+    /// batch swap is not reversible from here.
+    ///
+    /// A replacement changes the resident scene's identity ([`Self::same_as`])
+    /// because the per-batch `Arc` differs. That is deliberate: the engine's
+    /// exact-predecessor append admission must not treat a scene whose geometry
+    /// was overwritten as the allocation it last committed.
+    pub fn replace_batch(&mut self, index: usize, batch: Arc<RenderBatch>) -> bool {
+        if let Some(slot) = self.prefix_batches.get_mut(index) {
+            *slot = batch;
+            return true;
+        }
+        let mut cursor = self.prefix_batches.len();
+        for segment in &mut self.appended {
+            if index < cursor + segment.batches.len() {
+                segment.batches[index - cursor] = batch;
+                return true;
+            }
+            cursor += segment.batches.len();
+        }
+        false
     }
 
     /// The resident image draw items. Always the prefix's: an appended segment
@@ -129,24 +234,39 @@ impl ResidentScene {
     pub fn stamp(&self) -> &TaskStamp {
         self.appended
             .last()
-            .map_or(&self.prefix.stamp, |segment| &segment.stamp)
+            .map_or(&self.prefix.stamp, |segment| &segment.delta.stamp)
     }
 
-    /// Whether `other` is the **same** resident scene: the same prefix allocation
-    /// and the same segment allocations in the same order.
+    /// Whether `other` is the **same** resident scene: the same prefix allocation,
+    /// the same segment allocations in the same order, and the same per-batch
+    /// `Arc` allocations.
     ///
     /// Identity is pointers, not contents: a re-published prefix with identical
     /// batches is a different base (its GPU-committed range is a different
-    /// allocation), while an accepted append keeps the predecessor's prefix and
-    /// adds one segment.
+    /// allocation), an accepted append keeps the predecessor's prefix and adds
+    /// one segment, and an in-place batch overwrite replaces one per-batch `Arc`.
     pub fn same_as(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.prefix, &other.prefix)
+            && self.prefix_batches.len() == other.prefix_batches.len()
+            && self
+                .prefix_batches
+                .iter()
+                .zip(&other.prefix_batches)
+                .all(|(left, right)| Arc::ptr_eq(left, right))
             && self.appended.len() == other.appended.len()
             && self
                 .appended
                 .iter()
                 .zip(&other.appended)
-                .all(|(left, right)| Arc::ptr_eq(left, right))
+                .all(|(left, right)| {
+                    Arc::ptr_eq(&left.delta, &right.delta)
+                        && left.batches.len() == right.batches.len()
+                        && left
+                            .batches
+                            .iter()
+                            .zip(&right.batches)
+                            .all(|(a, b)| Arc::ptr_eq(a, b))
+                })
     }
 
     /// Materialise the whole resident scene as one [`SceneDelta`].
@@ -219,10 +339,56 @@ mod tests {
             !appended.same_as(&other_segment),
             "equal-length segment lists with distinct allocations are different"
         );
+
+        // Replacing one batch swaps one `Arc`: every other batch is shared, but
+        // the scene is a different one.
+        let mut with_batches = ResidentScene::from_prefix(Arc::new(SceneDelta {
+            added: batches(2),
+            ..(*prefix).clone()
+        }));
+        let before = with_batches.clone();
+        assert!(
+            with_batches.replace_batch(1, Arc::new(batch(9))),
+            "index 1 is in range"
+        );
+        assert!(
+            !with_batches.same_as(&before),
+            "a replaced per-batch Arc makes it a different resident scene"
+        );
+        assert!(
+            Arc::ptr_eq(&with_batches.prefix_batches[0], &before.prefix_batches[0]),
+            "replace_batch must not clone or replace the other batches"
+        );
     }
 
     #[test]
-    fn slices_cover_the_range_across_segments() {
+    fn replace_batch_is_bounded_and_never_creates_a_gap() {
+        let mut prefix = (*empty_prefix()).clone();
+        prefix.added = batches(2);
+        let mut resident = ResidentScene::from_prefix(Arc::new(prefix));
+        resident.push_appended(Arc::new(segment(1, DocumentId(2))));
+        assert_eq!(resident.batch_len(), 3);
+
+        assert!(
+            !resident.replace_batch(3, Arc::new(batch(3))),
+            "out of range is a refusal, never a silent append"
+        );
+        assert_eq!(resident.batch_len(), 3, "a refused replace changes nothing");
+        assert!(resident.replace_batch(2, Arc::new(batch(7))));
+        assert_eq!(
+            resident.batch_len(),
+            3,
+            "a replace never changes the length"
+        );
+        assert_eq!(
+            resident.batch_at(2).map(|batch| batch.draw_order),
+            Some(7),
+            "the replaced batch is the one at that resident index"
+        );
+    }
+
+    #[test]
+    fn materialized_covers_the_range_across_segments() {
         let mut prefix = (*empty_prefix()).clone();
         prefix.added = batches(2);
         let mut resident = ResidentScene::from_prefix(Arc::new(prefix));
@@ -230,22 +396,31 @@ mod tests {
         resident.push_appended(Arc::new(segment(2, DocumentId(2))));
         assert_eq!(resident.batch_len(), 5);
 
-        let lengths = |range: Range<usize>| -> Vec<usize> {
+        let draws = |range: Range<usize>| -> Vec<i64> {
             resident
-                .slices(range)
-                .map(|slice| slice.len())
-                .collect::<Vec<_>>()
+                .materialized(range)
+                .iter()
+                .map(|batch| batch.draw_order)
+                .collect()
         };
-        assert_eq!(lengths(0..5), vec![2, 1, 2], "prefix, then each segment");
         assert_eq!(
-            lengths(3..5),
-            vec![2],
-            "an append range is exactly one slice inside one segment"
+            draws(0..5),
+            vec![0, 1, 0, 0, 1],
+            "prefix, then each segment"
         );
-        assert_eq!(lengths(1..4), vec![1, 1, 1], "a spanning range is split");
-        assert_eq!(lengths(2..2), Vec::<usize>::new());
         assert_eq!(
-            lengths(4..99),
+            draws(3..5),
+            vec![0, 1],
+            "an append range is exactly the appended segment"
+        );
+        assert_eq!(
+            draws(1..4),
+            vec![1, 0, 0],
+            "a spanning range is concatenated"
+        );
+        assert_eq!(draws(2..2), Vec::<i64>::new());
+        assert_eq!(
+            draws(4..99),
             vec![1],
             "a range past the end is clipped, never fabricated"
         );
@@ -333,8 +508,14 @@ mod tests {
         let mut controller = CadSceneController::default();
         prepare(&mut controller, drawing.clone(), None);
 
-        let prefix = controller.ready.as_ref().unwrap().base.prefix().clone();
-        let prefix_batches = prefix.added.len();
+        let prefix = controller
+            .ready
+            .as_ref()
+            .unwrap()
+            .base
+            .prefix_delta()
+            .clone();
+        let prefix_batches = controller.ready.as_ref().unwrap().base.batch_len();
         let mut expected_batches = prefix_batches;
         let mut appended = 0;
 
@@ -373,12 +554,12 @@ mod tests {
                 "step {step}: the prefix is exactly the previous total"
             );
             assert!(
-                Arc::ptr_eq(ready.base.prefix(), &prefix),
+                Arc::ptr_eq(ready.base.prefix_delta(), &prefix),
                 "step {step}: the append must not re-wrap the prefix Arc"
             );
             appended += 1;
             assert_eq!(
-                ready.base.appended().len(),
+                ready.base.appended_len(),
                 appended,
                 "step {step}: exactly one segment per accepted append"
             );
@@ -388,6 +569,9 @@ mod tests {
         }
 
         assert_eq!(expected_batches, prefix_batches + appended);
-        assert_eq!(prefix.added.len(), prefix_batches);
+        assert!(
+            prefix.added.is_empty(),
+            "the prefix delta carries no duplicate batch payload"
+        );
     }
 }

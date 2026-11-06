@@ -14,6 +14,11 @@ pub use wgpu;
 
 pub mod geometry;
 
+/// Named refusals for an in-place resident-batch overwrite (phase P4). See
+/// [`Renderer::overwrite_batch`] and [`BatchOverwriteRefusal`].
+mod overwrite;
+pub use overwrite::BatchOverwriteRefusal;
+
 /// Time-driven adaptive page-budget controller (pure; no wgpu types). See
 /// [`pacing`] for the adaptation policy and the disabled-signal boundary.
 pub mod pacing;
@@ -760,6 +765,9 @@ pub struct Renderer {
     /// the frame path. A suffix-only commit keeps them; a base change rebuilds
     /// exactly once on the next render.
     draw_plan_rebuilds: u64,
+    /// Diagnostics: successful in-place resident-batch overwrites (a
+    /// transform-only entity update that rewrote its existing GPU buffers).
+    batch_overwrites: u64,
     draw_calls: u64,
     progressive: bool,
     progressive_frame: Option<ProgressiveFrame>,
@@ -949,6 +957,10 @@ pub(crate) use plan::*;
 // like `headless`.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod cursor_transient_gpu_tests;
+/// Native GPU contracts for the in-place resident-batch overwrite (P4). Test
+/// only: it reads private renderer state and needs a real device.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod overwrite_gpu_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod pulled_budget_gpu_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
