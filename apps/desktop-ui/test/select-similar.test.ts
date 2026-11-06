@@ -61,7 +61,7 @@ function menuItem(input) {
   return menuItems(buildContextMenu(input)).find(item => item.command === ID);
 }
 
-test('SELECTSIMILAR is a modify-group catalogue row appended last', () => {
+test('SELECTSIMILAR is a modify-group catalogue row appended after the shipped rows', () => {
   const entry = COMMAND_CATALOG.find(command => command.id === ID);
   assert.ok(entry, 'SELECTSIMILAR must be in the command catalog');
   assert.deepEqual({ ...entry }, {
@@ -72,8 +72,13 @@ test('SELECTSIMILAR is a modify-group catalogue row appended last', () => {
   });
   assert.equal(COMMAND_CATALOG.filter(command => command.id === ID).length, 1);
   const order = COMMAND_CATALOG.map(command => command.id);
-  assert.equal(order.indexOf(ID), order.length - 1, 'appended so no shipped row moves');
-  assert.ok(order.indexOf(ID) > order.indexOf('JOIN'));
+  const at = order.indexOf(ID);
+  // Append-only: the row sits after the last shipped pre-2026-11-07 row
+  // (`PDSIZE`) and after JOIN; later rows (REVCLOUD/AUDIT) may follow it.
+  assert.ok(at > order.indexOf('PDSIZE'), 'appended after shipped rows');
+  assert.ok(at > order.indexOf('JOIN'));
+  assert.ok(at < order.indexOf('REVCLOUD'));
+  assert.ok(at < order.indexOf('AUDIT'));
 });
 
 test('both modify panels carry SELECTSIMILAR as one small selection-gated button', () => {
