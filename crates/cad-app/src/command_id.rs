@@ -134,6 +134,20 @@ pub enum CommandId {
     /// Select visible model-space pick items without editing the drawing.
     /// Requires `CommandPayload::None`; incomplete picking is explicitly refused.
     SelectAll,
+    /// `SELECTSIMILAR`: add every visible model-space pick item whose **geometry
+    /// kind** matches a currently selected item to the existing selection.
+    ///
+    /// Payload is [`crate::CommandPayload::None`]; a non-empty current selection
+    /// is required (`selectsimilar.selection_required`) and paper/block active
+    /// space is an explicit `Unsupported` refusal. v1 is **type-based only**: the
+    /// match is the `SemanticGeometry` discriminant, and attribute similarity
+    /// (layer/colour/linetype/lineweight/transparency) is NOT IMPLEMENTED. The
+    /// command is a union, never a replacement, and writes nothing: no database
+    /// write, revision bump, `cad-history` entry or `ChangeSet`, so Viewer and
+    /// Work both allow it. Enumeration reuses the SELECTALL preflight and
+    /// visibility filter (cycles/depth/dynamic visibility/opaque geometry are
+    /// explicit refusals, never silent truncation).
+    SelectSimilar,
     /// Select model-space items in a window/crossing rectangle without editing
     /// the drawing (ADR 0014 B). Allowed in Viewer and Work; requires
     /// `CommandPayload::BoxSelect`.

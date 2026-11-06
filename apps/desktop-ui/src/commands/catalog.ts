@@ -352,4 +352,12 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // it is a real name the command line admits. Appended last so no shipped row
   // moves, and it reuses the `view` glyph the other view rows use.
   { id: 'PLAN', labelKey: 'view.plan', icon: 'view', group: 'view' },
+  // SELECTSIMILAR (AutoCAD 2026) is the **type-based** sibling of SELECTALL: it
+  // takes no payload, needs a non-empty current selection, and adds every
+  // visible model-space object of the same geometry kind to that selection.
+  // v1 does NOT match attributes (layer/colour/linetype/lineweight/
+  // transparency), so nothing here may imply a property filter. Appended last so
+  // no shipped row moves, and it reuses the `selectAll` glyph because it is the
+  // same "grow the selection" gesture.
+  { id: 'SELECTSIMILAR', labelKey: 'draw.kind.selectsimilar', icon: 'selectAll', group: 'modify' },
 ]);

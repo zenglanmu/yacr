@@ -30,6 +30,7 @@ pub mod recovery;
 pub mod render_scene;
 mod select_all;
 mod select_box;
+mod select_similar;
 pub mod selection;
 pub mod snap;
 pub mod tasks;

@@ -44,7 +44,7 @@ test('five sections in a fixed order, stable ids and i18n keys', () => {
   assert.deepEqual(menu.sections.map(section => section.items.map(item => item.id)), [
     ['repeat.last'],
     ['clipboard.cut', 'clipboard.cutbase', 'clipboard.copy', 'clipboard.copybase', 'clipboard.paste', 'clipboard.pasteorig', 'clipboard.pasteblock'],
-    ['selection.all', 'selection.erase', 'selection.properties'],
+    ['selection.all', 'selection.similar', 'selection.erase', 'selection.properties'],
     ['view.fit', 'view.pan'],
     ['edit.undo', 'edit.redo'],
   ]);
@@ -52,11 +52,11 @@ test('five sections in a fixed order, stable ids and i18n keys', () => {
     'menu.repeat',
     'menu.clipboard.cut', 'menu.clipboard.cutbase', 'menu.clipboard.copy', 'menu.clipboard.copybase',
     'menu.clipboard.paste', 'menu.clipboard.pasteorig', 'menu.clipboard.pasteblock',
-    'menu.selection.all', 'menu.selection.erase', 'menu.selection.properties',
+    'menu.selection.all', 'menu.selection.similar', 'menu.selection.erase', 'menu.selection.properties',
     'menu.view.fit', 'menu.view.pan',
     'menu.edit.undo', 'menu.edit.redo',
   ]);
-  assert.equal(menuItems(menu).length, 15);
+  assert.equal(menuItems(menu).length, 16);
 });
 
 test('every item carries the command the shared funnel would run', () => {
@@ -71,6 +71,7 @@ test('every item carries the command the shared funnel would run', () => {
     'clipboard.pasteorig': 'PASTEORIG',
     'clipboard.pasteblock': 'PASTEBLOCK',
     'selection.all': 'SELECTALL',
+    'selection.similar': 'SELECTSIMILAR',
     'selection.erase': 'ERASE',
     // The chrome-local selector: the app's run path intercepts it exactly like a
     // typed PROPERTIES and opens the docked palette; no router command is sent.
@@ -101,10 +102,12 @@ test('nothing is hidden: each unavailable item is present and disabled', () => {
   // No selection (absent and count 0 are the same fact). Every copy/cut variant
   // needs one, including the base-point pair.
   assert.deepEqual(disabledIn({ selection: null }), [
-    'clipboard.cut', 'clipboard.cutbase', 'clipboard.copy', 'clipboard.copybase', 'selection.erase',
+    'clipboard.cut', 'clipboard.cutbase', 'clipboard.copy', 'clipboard.copybase',
+    'selection.similar', 'selection.erase',
   ]);
   assert.deepEqual(disabledIn({ selection: { count: 0 } }), [
-    'clipboard.cut', 'clipboard.cutbase', 'clipboard.copy', 'clipboard.copybase', 'selection.erase',
+    'clipboard.cut', 'clipboard.cutbase', 'clipboard.copy', 'clipboard.copybase',
+    'selection.similar', 'selection.erase',
   ]);
   // No document, and the host reporting it cannot fit.
   assert.deepEqual(disabledIn({ hasDocument: false }), ['view.fit']);
@@ -117,7 +120,8 @@ test('nothing is hidden: each unavailable item is present and disabled', () => {
     disabledIn({ tool: { key: 'LINE', step: 1 } }),
     [
       'clipboard.cut', 'clipboard.cutbase', 'clipboard.copy', 'clipboard.copybase',
-      'clipboard.paste', 'clipboard.pasteorig', 'clipboard.pasteblock', 'selection.erase',
+      'clipboard.paste', 'clipboard.pasteorig', 'clipboard.pasteblock',
+      'selection.similar', 'selection.erase',
     ],
   );
 });

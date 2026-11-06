@@ -79,7 +79,7 @@ export async function readCatalog(locale) {
 // (`OSNAP`), which stays the F3 toggle.
 export const HOST_NAMES = [
   'OPEN', 'NEW', 'PLOT', 'SAVE', 'CANCEL', 'PAN', 'ZOOM', 'FIT', 'RESETVIEW', 'TOGGLELAYER',
-  'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'MODEL', 'SELECT', 'SELECTALL', 'MEASURE', 'CONFIRM',
+  'SETLAYERS', 'RESTORELAYERS', 'SPACE', 'MODEL', 'SELECT', 'SELECTALL', 'SELECTSIMILAR', 'MEASURE', 'CONFIRM',
   'CANCELMEASURE', 'UNDO', 'REDO', 'RESOURCES', 'DIAGNOSTICS', 'SWITCHBACKEND', 'SWITCH2D3D',
   // PLAN (AutoCAD 2026): the payload-free "orthographic view of the XY plane"
   // selector. v1 is the top/plan 2D view only (this build has no UCS model, so

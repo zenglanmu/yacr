@@ -42,6 +42,10 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MODEL", CommandId::ModelSpace),
     ("SELECT", CommandId::Select),
     ("SELECTALL", CommandId::SelectAll),
+    // SELECTSIMILAR (AutoCAD 2026) is the type-based sibling of SELECTALL: it
+    // takes no payload and no argument, requires a non-empty current selection,
+    // and does not edit the drawing.
+    ("SELECTSIMILAR", CommandId::SelectSimilar),
     ("SELECTINBOX", CommandId::SelectInBox),
     ("MEASURE", CommandId::Measure),
     // `AREA OBJECT` is our **selection-based** exact area of one closed object

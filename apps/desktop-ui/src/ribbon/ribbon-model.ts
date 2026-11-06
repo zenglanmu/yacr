@@ -492,6 +492,13 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // shared admission **plus** its own two-object selection requirement, so
           // with fewer objects it reads disabled with the rule's sentence.
           { id: 'JOIN', labelKey: 'draw.kind.join', icon: 'polyline', command: 'JOIN' },
+          // SELECTSIMILAR (AutoCAD 2026) closes the Modify panel after JOIN: a
+          // type-only v1 that grows the current selection by geometry kind. It is
+          // a small button with no variant popover (there is no attribute match
+          // to configure in v1), and it is selection-gated by
+          // `SELECTION_REQUIREMENTS` — with nothing selected it reads disabled
+          // with its own hint.
+          { id: 'SELECTSIMILAR', labelKey: 'draw.kind.selectsimilar', icon: 'selectAll', command: 'SELECTSIMILAR' },
         ],
       },
       {
@@ -671,6 +678,9 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           // Same slot as on the Home tab: JOIN closes the Modify panel (AutoCAD's
           // own order puts Join last), small, no popover, selection-gated.
           { id: 'JOIN', labelKey: 'draw.kind.join', icon: 'polyline', command: 'JOIN' },
+          // SELECTSIMILAR (AutoCAD 2026) is the type-only v1 selection grower; it
+          // sits in the same tail slot on both tabs and stays selection-gated.
+          { id: 'SELECTSIMILAR', labelKey: 'draw.kind.selectsimilar', icon: 'selectAll', command: 'SELECTSIMILAR' },
         ],
       },
     ],

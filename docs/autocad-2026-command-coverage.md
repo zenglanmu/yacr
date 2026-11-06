@@ -22,9 +22,9 @@
 | --- | ---: |
 | 官方命令总数 | **981** |
 | 完整实现 | **50** |
-| 部分实现（有写明的界） | **41** |
-| **已实现合计（完整 + 部分）** | **91** |
-| 未实现 | **890** |
+| 部分实现（有写明的界） | **42** |
+| **已实现合计（完整 + 部分）** | **92** |
+| 未实现 | **889** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
@@ -123,6 +123,7 @@
 | `SCALE` | 已实现 | — |
 | `SCALETEXT` | 已实现 | — |
 | `SELECT` | 部分实现 | 以选择载荷设置会话选择；不是 AutoCAD 的交互式 SELECT |
+| `SELECTSIMILAR` | 部分实现 | v1 仅按几何类型匹配并并入当前选择；无 layer/颜色/线型等属性匹配；仅模型空间 |
 | `SNAP` | 已实现 | — |
 | `SPLINE` | 已实现 | — |
 | `STRETCH` | 部分实现 | 恒交叉窗口；TEXT/MultiLeader 整命令拒绝 |
@@ -920,7 +921,7 @@
 | 780 | `SECURITYOPTIONS` | 未实现 | Controls the security restrictions for running executable files in the product. | — |
 | 781 | `SELECT` | 部分实现 | Places selected objects in the Previous selection set. | 以选择载荷设置会话选择；不是 AutoCAD 的交互式 SELECT |
 | 782 | `SELECTCOUNT` | 未实现 | Finds all objects within the current count that match the properties of the selected objects, and then adds them to the selection set. | — |
-| 783 | `SELECTSIMILAR` | 未实现 | Finds all objects within the current drawing that match the properties of selected objects, and then adds them to the selection set. | — |
+| 783 | `SELECTSIMILAR` | 部分实现 | Finds all objects within the current drawing that match the properties of selected objects, and then adds them to the selection set. | v1 仅按几何类型匹配并并入当前选择；无 layer/颜色/线型等属性匹配；仅模型空间 |
 | 784 | `SETBYLAYER` | 未实现 | Changes the property overrides of selected objects to ByLayer. | — |
 | 785 | `SETVAR` | 未实现 | Lists or changes the values of system variables. | — |
 | 786 | `-SHADEMODE` | 未实现 | Provides simple shading for 3D solids and surfaces. | — |

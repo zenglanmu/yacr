@@ -237,6 +237,13 @@ export interface SelectionRequirement {
 export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequirement>> = Object.freeze({
   MATCHPROP: Object.freeze({ count: 2, reasonKey: 'draw.kind.matchprop.hint' }),
   JOIN: Object.freeze({ count: 2, reasonKey: 'draw.kind.join.hint' }),
+  // SELECTSIMILAR (AutoCAD 2026) grows the selection from its **geometry kind**,
+  // so there must already be one object to call the source. The host refuses an
+  // empty selection by name (`selectsimilar.selection_required`); this row makes
+  // the disabled button and the command line say the same thing, and it is also
+  // the "no drawing is open" answer. Attribute matching is NOT implemented in
+  // v1, so the hint must not promise one.
+  SELECTSIMILAR: Object.freeze({ count: 1, reasonKey: 'draw.kind.selectsimilar.hint' }),
   // CHAMFER POLYLINE / FILLET POLYLINE (2026-10-27) are the Polyline modes of the
   // two corner commands: each rewrites **exactly one** preselected open polyline
   // in place (`CommandPayload::None`, so nothing is picked interactively). The

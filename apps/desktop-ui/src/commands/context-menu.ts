@@ -176,6 +176,10 @@ export function buildContextMenu({
         id: 'selection',
         items: [
           { id: 'selection.all', key: 'menu.selection.all', command: 'SELECTALL', enabled: true },
+          // SELECTSIMILAR (AutoCAD 2026) grows the current selection by geometry
+          // type. It needs at least one selected object to be the source, and a
+          // capturing tool must never be overridden (`editable` covers both).
+          { id: 'selection.similar', key: 'menu.selection.similar', command: 'SELECTSIMILAR', enabled: editable },
           { id: 'selection.erase', key: 'menu.selection.erase', command: 'ERASE', enabled: editable },
           // A chrome-local selector, like the command line's own intercept: the
           // run path resolves it to the floating palette, never to the router.
